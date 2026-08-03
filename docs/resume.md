@@ -27,14 +27,22 @@ legacy-marker collection 52개는 `curated_features` 투영본 3,044건만 담�
 UI에 설명 없이 등장" 문제도 collection이 생성되지 않아 소멸한다.
 
 **종결 여부는 사용자 결정으로 남겼다** — 축소가 아니라 대상 소멸이라 임의로 닫지 않았다.
-대신 전제를 배포 게이트에 박았다: H35 verify가 `quarantine_collections`·`quarantine_items`를
-0으로 검사하고, 0이 아니면 거부하며 **원인을 이름으로 지목**한다. 격리가 생기면 item이
-public→admin_only로 빠져 `public_items_verify`가 어차피 깨지지만 그때는 "3,265가 아니라
-3,043"이라는 원인 불명 숫자 차이다. 이 검사가 H22를 여는 유일한 신호다.
+대신 전제를 배포 게이트에 박았다: H35 **preflight**가 `quarantine_candidates_before`를 0으로
+검사한다. 경계 뒤에는 관측치만 남기고 거부하지 않는다.
+
+**첫 설계는 틀렸고 적대 리뷰가 반증했다.** 나는 이 검사를 verify에 hard check로 두면서
+"격리가 생기면 어차피 `public_items_verify`가 깨지니 원인만 이름으로 바꾸는 것"이라고 적었다.
+실측하면 **격리 1건이 생겨도 공개 수는 3,043 그대로**다 — 격리 조건은 `status`·
+`source_present`·accepted link 어느 것도 요구하지 않아 공개 집합과 독립이다. 즉 그것은
+경계 **뒤**의 새 거부 경로였고, 거기서 거부되면 출구가 없다(csv5는 accepted prior receipt
+요구 / migrate 재실행은 `schema_before=0063` 요구인데 DB는 이미 `0078` / `0065` downgrade는
+durable state에 fail-close). **#925에서 내가 잡아냈던 index signature 함정과 같은 계열을
+내가 다시 만든 것이었다.**
 
 회귀는 "0이다"를 확인하지 않는다 — 시드에 legacy-marker collection이 없어 공회전이 된다.
-대신 legacy collection 안에 네이티브 item을 **실제로 만들어** `0065`가 격리하게 한 뒤 검사가
-거부하는지 본다(픽스처가 격리를 못 만들면 `quarantine_items >= 1`에서 먼저 깨진다).
+대신 legacy collection 안에 네이티브 item을 **실제로 만들어** ① `0063`에서 후보로 잡히고
+② head까지 밀면 `0065`가 실제로 격리하며 ③ 그런데도 verify의 check는 늘지 않는지를 함께
+고정한다. ③은 변이로 확인했다 — verify에 hard check를 되돌려 넣으면 깨진다.
 
 부수로 내 informational 쿼리의 3값 논리 버그를 잡았다 — `NOT (… OR …)`에서 `migrated_from`
 키가 없는 collection은 `NULL OR false = NULL` → `NOT NULL = NULL`로 걸러진다. 격리 건수는

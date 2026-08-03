@@ -32,14 +32,25 @@
   = '…' OR key LIKE 'legacy:%')`는 키가 없는 collection에서 `NULL OR false = NULL` →
   `NOT NULL = NULL`로 걸러져 "legacy 밖 486건"을 0으로 보고했다. 격리 건수는 `0065`와
   같은 **긍정형** 술어를 써서 영향 없었지만, 합이 3,044 ≠ 3,530으로 안 맞아 잡았다.
-- **전제를 배포 게이트에 박았다.** H35 verify가 `quarantine_collections`·
-  `quarantine_items`를 0으로 검사한다. 격리가 생기면 item이 public→admin_only로 빠져
-  `public_items_verify`가 어차피 깨지지만 그때는 "3,265가 아니라 3,043"이라는 원인 불명
-  숫자 차이다. 이 검사는 **원인을 이름으로 지목**하고, 그것이 H22를 여는 유일한 신호다.
+- **전제를 배포 게이트에 박았다 — 단, 경계 앞에.** H35 **preflight**가
+  `quarantine_candidates_before`를 0으로 검사한다. `0065`의 격리 술어
+  `legacy_projection_id IS NULL`은 그 컬럼의 유일한 backfill 때문에 `0063`에서
+  "`curated_features`에 대응 행 없음"과 동치라, 컬럼 없이도 같은 집합을 고를 수 있다.
+- **첫 설계는 틀렸고 적대 리뷰가 반증했다.** 나는 검사를 verify에 hard check로 두면서
+  "격리가 생기면 어차피 `public_items_verify`가 깨지니 원인만 이름으로 바꾸는 것"이라고
+  적었다. 실측 결과 **격리 1건이 생겨도 공개 수는 3,043 그대로**였다 — 격리 조건은
+  `status`·`source_present`·accepted link 어느 것도 요구하지 않아 공개 집합과 독립이다.
+  즉 그것은 원인 라벨링이 아니라 **경계 뒤의 새 거부 경로**였고, 거기서 거부되면 출구가
+  없다(csv5는 accepted prior receipt 요구 / migrate 재실행은 `schema_before=0063` 요구인데
+  DB는 이미 `0078` / `0065` downgrade는 durable state에 fail-close). **#925에서 내가
+  잡아냈던 index signature 함정과 같은 계열을 내가 다시 만들었다.** 경계 뒤에는
+  `quarantine_collections`·`quarantine_items`를 관측치로만 남긴다.
 - 회귀는 "0이다"를 확인하지 않는다 — 시드에 legacy-marker collection이 아예 없어 공회전이
-  된다. 대신 **legacy collection 안에 네이티브 item을 실제로 만들어** `0065`가 격리하게 한
-  뒤 검사가 거부하는지 본다. 픽스처가 격리를 못 만들면 `quarantine_items >= 1`에서 먼저
-  깨지도록 공회전 방지 단언을 넣었다.
+  된다. 대신 **legacy collection 안에 네이티브 item을 실제로 만들어** ① `0063`에서 후보로
+  잡히고 ② head까지 밀면 `0065`가 실제로 격리하며(두 술어가 같은 것을 고른다는 증거)
+  ③ 그런데도 verify의 check는 늘지 않는지를 함께 고정한다. preflight receipt가 실제로
+  거부하는지는 별도 회귀로 본다. ③은 변이로 확인했다 — verify에 hard check를 되돌려
+  넣으면 깨진다.
 - **H22A/B/C 종결 여부는 사용자 결정으로 남겼다** — 축소가 아니라 대상 소멸이라 임의로
   닫지 않는다. 착수하게 될 경우 먼저 풀어야 할 모호함 3건은 `docs/tasks.md`에 적었다
   (특히 "후보 theme/source"는 대응 스키마가 없고, 추천으로 읽으면 같은 항목의

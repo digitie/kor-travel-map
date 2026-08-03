@@ -1431,11 +1431,20 @@ read/decision/write/UI를 한 PR에 몰지 않는다.
 경고도 collection이 생성되지 않으므로 함께 소멸한다.
 
 - **판정 보류 — 사용자 결정 대기.** 축소가 아니라 **보류/종결** 여부라 임의로 닫지 않는다.
-- **대신 배포 게이트가 이 전제를 스스로 재게 했다**(#929): H35 verify가
-  `quarantine_collections`·`quarantine_items`를 0으로 검사한다. 0이 아니면 verify가
-  거부하고 **원인을 이름으로 지목**한다 — 이 조건이 H22를 여는 유일한 신호다.
-  (검사가 없으면 격리 발생 시 item이 public→admin_only로 빠져 `public_items_verify`가
-  "3,265가 아니라 3,043"이라는 원인 불명 숫자 차이로만 깨진다.)
+- **대신 배포 게이트가 이 전제를 스스로 재게 했다**(#929): H35 **preflight**가
+  `quarantine_candidates_before`를 0으로 검사한다. 경계 뒤(`migrate`/`verify`)에는
+  `quarantine_collections`·`quarantine_items`를 **관측치로만** 남기고 거부하지 않는다.
+  이 값이 0이 아니면 H22를 착수해야 한다는 신호다.
+
+  게이트를 preflight에 둔 이유는 적대 리뷰가 내 첫 설계를 반증했기 때문이다. 나는
+  "격리가 생기면 어차피 `public_items_verify`가 깨진다"고 적었는데 **틀렸다** — 격리
+  조건(`legacy_projection_id IS NULL`)은 `status`·`source_present`·accepted link 어느 것도
+  요구하지 않아 공개 집합과 독립이고, 실제 픽스처에서 격리 1건이 생겨도 공개 수는 3,043
+  그대로였다. 즉 경계 뒤 hard check는 **기존 게이트가 통과시키던 상태를 새로 거부**하는
+  것이고, 그 지점에는 출구가 없다(csv5는 accepted prior receipt 요구 / migrate 재실행은
+  `schema_before=0063` 요구인데 DB는 이미 `0078` / `0065` downgrade는 durable state에
+  fail-close → PITR 없는 prod에서 dump 복원만 남는다). `#925`에서 index signature로 겪은
+  것과 같은 계열의 함정을 내가 다시 만든 것이었다.
 
 미해결로 남은 계획상 모호함 — 착수하게 되면 먼저 정해야 한다:
 

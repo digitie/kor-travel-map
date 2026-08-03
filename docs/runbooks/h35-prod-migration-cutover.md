@@ -121,7 +121,7 @@ request는 stdin의 단일 JSON이고 receipt는 stdout의 단일 JSON line이�
 | `prior_receipt_digest` | 직전 phase receipt SHA-256; 첫 phase만 `null` |
 | `schema_before`, `schema_after` | exact Alembic revision |
 | `forward_boundary` | 관측값. 경계 결정·영속은 manager만 수행 |
-| `row_counts` | phase별 exact 수치 map |
+| `row_counts` | phase별 exact 수치 map. key 집합은 phase마다 다르고 **추가될 수 있다** — 소비 측은 필요한 key만 읽고 exact key-set으로 검증하지 않는다(`gc` receipt는 예외로 exact). preflight는 `quarantine_candidates`, migrate/verify는 `quarantine_collections`·`quarantine_items`를 포함한다 |
 | `checks` | 이름·기대·관측·통과 여부를 가진 typed check 목록 |
 | `runtime_mutation_count` | 항상 `0`이어야 함 |
 | `external_event_count` | 항상 `0`이어야 함 |
@@ -166,10 +166,33 @@ vector가 다르면 실행 전에 실패해야 한다. receipt에는 요청값�
   - 길이 상한 위반 0
   - 예정 CHECK 위반 0
   - 예정 FK orphan 0
+- **`0065` 격리 후보(`quarantine_candidates_before`): 0** — 아래 §5.1.1.
 - Map API/Dagster 및 Pin writer fence receipt가 모두 같은 transaction UUID와 DB identity에
   결속됐는지 manager가 먼저 확인한다. helper는 fence를 만들지 않고 입력 증거만 검증한다.
 
 하나라도 다르면 mutation 0으로 종료한다.
+
+#### 5.1.1 `quarantine_candidates_before`가 0이 아니면
+
+`0065`는 legacy-marker collection 안의 **canonical-only item**(= `curated_features` 투영본이
+아닌 item)을 `[0065 격리] …` admin-only collection으로 옮긴다. 2026-08-03 라이브 prod 실측에서
+그 교집합은 **0건**이다 — legacy collection 52개는 투영본 3,044건만, CSV collection은 네이티브
+486건만 담는다. 그래서 기대값이 0이다.
+
+0이 아니면 **cutover를 시작하지 말고** 해당 item을 먼저 정리한다. preflight 거부는
+`forward_boundary="not_crossed"`이므로 정리 후 같은 request를 그대로 재실행하면 된다.
+
+이 판정을 `migrate`/`verify`에 두지 않는 이유는 명시적이다. 격리 발생은 **공개 카운트로
+드러나지 않는다** — 격리 조건은 `status`·`source_present`·accepted link 어느 것도 요구하지
+않아 공개 집합과 독립이고, 실측에서 격리 1건이 생겨도 공개 수는 3,043 그대로였다. 따라서
+경계 뒤 hard check는 기존 게이트가 통과시키던 상태를 **새로 거부**하게 되는데 그 지점에는
+출구가 없다(§8 참조: csv5는 accepted prior receipt를 요구하고, migrate 재실행은
+`schema_before=0063`을 요구하는데 DB는 이미 `0078`이며, `0065` downgrade는 durable state에
+fail-close한다 → dump 복원만 남는다).
+
+경계 뒤에서는 `quarantine_collections`·`quarantine_items`를 **관측치로만** receipt
+`row_counts`에 남긴다. check가 아니므로 거부하지 않는다. 이 값이 0이 아니면 사후에
+`T-VN-H22`(격리 재분류 read model·command·UI)를 착수해야 한다는 신호다.
 
 ### 5.2 `migrate`
 

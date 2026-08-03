@@ -1699,21 +1699,76 @@ async def test_public_count_detects_source_absent_item(pg_container: Any) -> Non
         await _drop_database(admin_dsn, database)
 
 
-async def test_verify_rejects_when_0065_quarantines_an_item(pg_container: Any) -> None:
-    """`0065` quarantine이 발생하면 verify가 그 사실을 이름으로 밝히며 거부해야 한다.
+async def _plant_quarantine_candidate(engine: Any) -> str:
+    """`0065`가 격리할 item을 하나 심는다 — legacy-marker collection 안의 네이티브 item.
 
-    quarantine은 legacy-marker collection 안에 있는 **canonical-only item**(=
-    `curated_features` 투영본이 아닌 item)이 있을 때만 생긴다. 2026-08-03 라이브 prod
-    실측에서 그 교집합은 비어 있어(legacy collection엔 투영본만, CSV collection엔
-    네이티브만) 정상 경로로는 0건이다 — 그래서 **실제로 그 교집합을 만들어** 검사가
-    작동하는지 본다. 만들지 않으면 이 테스트는 `0 == 0`을 확인하는 공회전이 된다.
-
-    quarantine이 생기면 item이 public collection에서 admin-only로 빠져나가므로
-    `public_items_verify`도 함께 깨진다. 그 신호만으로는 "3,265가 아니라 3,043"이라는
-    숫자 차이라 원인을 알 수 없다. 이 검사의 값어치는 원인을 이름으로 지목하는 것이고,
-    그것이 T-VN-H22(quarantine 재분류)를 열어야 하는 유일한 조건이다.
+    시드는 legacy-marker collection을 만들지 않으므로 하나를 marker로 지정한 뒤 그 안에
+    `curated_features` 투영본이 **아닌** item을 넣어야 격리 조건이 성립한다.
     """
-    from kortravelmap.cli._h35_schema import verify_0075_0078
+    async with engine.begin() as connection:
+        # `ORDER BY`가 없으면 어느 collection이 뽑히는지에 따라 격리 건수가 달라져 무엇을
+        # 검증했는지 재현되지 않는다. 결정론을 위해 최소 key를 고른다.
+        collection_id = (
+            await connection.execute(
+                text(
+                    "UPDATE feature.curation_collections SET metadata = "
+                    "coalesce(metadata, '{}'::jsonb) || "
+                    '\'{"migrated_from": "feature.curated_features"}\'::jsonb '
+                    "WHERE collection_id = (SELECT collection_id "
+                    "FROM feature.curation_items ORDER BY curation_item_id LIMIT 1) "
+                    "RETURNING collection_id"
+                )
+            )
+        ).scalar_one()
+
+        # 형제 행을 복사해 NOT NULL 컬럼을 빠짐없이 채운다. 바꾸는 것은 세 가지뿐:
+        # 새 `curation_item_id`(어떤 `curated_feature_id`와도 안 겹쳐 투영본이 아니게 됨),
+        # 고유 `external_item_id`(tombstone 병합 회피), `feature_id=NULL`
+        # (`0066`의 active-source-feature 유일성 회피).
+        await connection.execute(
+            text(
+                """
+                INSERT INTO feature.curation_items
+                SELECT (jsonb_populate_record(
+                    NULL::feature.curation_items,
+                    to_jsonb(source) || jsonb_build_object(
+                        'curation_item_id', x_extension.gen_random_uuid(),
+                        'external_item_id', 'h22a-native-probe',
+                        'feature_id', NULL
+                    )
+                )).*
+                FROM feature.curation_items AS source
+                WHERE source.collection_id = :collection_id
+                ORDER BY source.curation_item_id
+                LIMIT 1
+                """
+            ),
+            {"collection_id": collection_id},
+        )
+    return str(collection_id)
+
+
+async def test_quarantine_gate_fires_before_the_forward_boundary(pg_container: Any) -> None:
+    """격리 후보는 `0063`에서, 즉 **되돌릴 수 있는 동안** 걸려야 한다.
+
+    이 검사를 migrate/verify에 hard check로 두면 안 된다. 격리 발생은 공개 카운트로
+    드러나지 않으므로(격리 조건은 `status`·`source_present`·accepted link 어느 것도
+    요구하지 않아 공개 집합과 독립) **기존 게이트가 통과시키던 상태를 경계 뒤에서 새로
+    거부**하게 되는데, 그 지점에는 출구가 없다 — csv5는 accepted prior receipt를 요구하고,
+    migrate 재실행은 `schema_before=0063`을 요구하는데 DB는 이미 0078이며, `0065`
+    downgrade는 durable state에 fail-close한다. PITR 없는 prod에서 dump 복원만 남는다.
+
+    그래서 이 테스트는 세 가지를 함께 고정한다.
+      1. `0063`에서 후보가 잡힌다 (경계 앞 탐지).
+      2. 같은 상태를 head까지 밀면 `0065`가 실제로 격리한다 — 즉 `0063` 술어가 공회전이
+         아니라 진짜 격리 조건과 같은 것을 고른다.
+      3. 그런데도 verify의 **check**는 늘어나지 않는다 (경계 뒤 거부 없음).
+    """
+    from kortravelmap.cli._h35_schema import (
+        _quarantine_candidate_count,
+        _quarantine_counts,
+        verify_0075_0078,
+    )
 
     admin_dsn = normalize_async_dsn(pg_container.get_connection_url())
     database, dsn = await _create_database(admin_dsn)
@@ -1723,64 +1778,105 @@ async def test_verify_rejects_when_0065_quarantines_an_item(pg_container: Any) -
 
         engine = make_async_engine(dsn)
         try:
-            async with engine.begin() as connection:
-                # 시드는 legacy-marker collection을 만들지 않는다. 하나를 marker로 지정하고
-                # 그 안에 네이티브 item을 넣어야 0065의 격리 조건이 성립한다.
-                collection_id = (
-                    await connection.execute(
-                        text(
-                            "UPDATE feature.curation_collections SET metadata = "
-                            "coalesce(metadata, '{}'::jsonb) || "
-                            '\'{"migrated_from": "feature.curated_features"}\'::jsonb '
-                            "WHERE collection_id = (SELECT collection_id "
-                            "FROM feature.curation_items LIMIT 1) "
-                            "RETURNING collection_id"
-                        )
-                    )
-                ).scalar_one()
+            async with engine.connect() as connection:
+                clean = await _quarantine_candidate_count(connection)
+            assert clean == 0, (
+                f"시드 표면에 이미 격리 후보가 {clean}건 있다 — 실제 prod 실측(0건)과 "
+                "다르므로 이 테스트가 무엇을 검증하는지 알 수 없다."
+            )
 
-                # 형제 행을 복사해 NOT NULL 컬럼을 빠짐없이 채운다. 바꾸는 것은 세 가지뿐:
-                # 새 `curation_item_id`(어떤 `curated_feature_id`와도 안 겹쳐 투영본이
-                # 아니게 됨), 고유 `external_item_id`(중복 병합 회피), `feature_id=NULL`
-                # (0066의 active-source-feature 유일성과 충돌 회피 — 공개 집계에서도 빠진다).
-                await connection.execute(
-                    text(
-                        """
-                        INSERT INTO feature.curation_items
-                        SELECT (jsonb_populate_record(
-                            NULL::feature.curation_items,
-                            to_jsonb(source) || jsonb_build_object(
-                                'curation_item_id', x_extension.gen_random_uuid(),
-                                'external_item_id', 'h22a-native-probe',
-                                'feature_id', NULL
-                            )
-                        )).*
-                        FROM feature.curation_items AS source
-                        WHERE source.collection_id = :collection_id
-                        LIMIT 1
-                        """
-                    ),
-                    {"collection_id": collection_id},
-                )
+            await _plant_quarantine_candidate(engine)
+
+            # ① 경계 앞에서 잡힌다.
+            async with engine.connect() as connection:
+                planted = await _quarantine_candidate_count(connection)
+            assert planted == 1, (
+                f"`0063` 술어가 심어 둔 격리 후보를 못 잡았다 (={planted}). 이 술어가 "
+                "0을 내면 preflight 게이트는 아무것도 막지 못한다."
+            )
 
             await asyncio.to_thread(_run_alembic, dsn, "head")
 
+            # ② `0063` 술어가 고른 것이 진짜 `0065`의 격리 대상과 같다.
             async with engine.connect() as connection:
+                quarantine_collections, quarantine_items = await _quarantine_counts(connection)
                 checks, counts = await verify_0075_0078(connection)
+            assert quarantine_items == 1, (
+                "`0063`에서 후보로 잡았는데 `0065`가 격리하지 않았다 — 두 술어가 다른 "
+                f"것을 고르고 있다. items={quarantine_items}"
+            )
+            assert quarantine_collections == 1, (
+                "격리 item은 생겼는데 quarantine collection 수가 다르다 "
+                f"(={quarantine_collections})."
+            )
 
-            assert counts["quarantine_items"] >= 1, (
-                "0065가 네이티브 item을 격리하지 않았다 — 픽스처가 격리 조건을 만들지 "
-                f"못해 테스트가 공회전한다. counts={counts['quarantine_items']}"
-            )
-            by_name = {str(entry["name"]): entry for entry in checks}
-            assert by_name["quarantine_items"]["passed"] is False, (
-                "격리가 실제로 발생했는데 quarantine_items 검사가 통과했다 — "
-                "게이트가 격리를 못 잡는다."
-            )
-            assert by_name["quarantine_collections"]["passed"] is False, (
-                "격리 collection이 생겼는데 quarantine_collections 검사가 통과했다."
+            # ③ 그래도 경계 뒤에서는 거부하지 않는다. 관측치로만 남는다.
+            assert counts["quarantine_items"] == 1, "verify가 격리 관측치를 안 남겼다."
+            assert counts["quarantine_collections"] == 1, "verify가 격리 관측치를 안 남겼다."
+            failed = [str(entry["name"]) for entry in checks if entry.get("passed") is not True]
+            assert not failed, (
+                "격리가 발생했다고 경계 **뒤** 게이트가 거부했다 — 그 지점에는 출구가 없다. "
+                f"실패한 check={failed}. 이 판정은 preflight의 "
+                "`quarantine_candidates_before`가 해야 한다."
             )
         finally:
             await engine.dispose()
+    finally:
+        await _drop_database(admin_dsn, database)
+
+
+async def test_preflight_rejects_quarantine_candidate(pg_container: Any, monkeypatch: Any) -> None:
+    """preflight receipt가 격리 후보를 이름 붙은 check로 거부해야 한다.
+
+    앞 테스트는 술어가 후보를 **센다**는 것까지만 고정한다. `run_preflight`가 그 수를
+    실제로 check로 만들지 않으면 게이트는 없는 것과 같으므로, receipt를 직접 본다.
+    """
+    from kortravelmap.cli._h35_contract import H35Request
+    from kortravelmap.cli._h35_schema import run_preflight
+
+    admin_dsn = normalize_async_dsn(pg_container.get_connection_url())
+    database, dsn = await _create_database(admin_dsn)
+    try:
+        await asyncio.to_thread(_run_alembic, dsn, _PRE_REVISION)
+        await _seed_exact_pre_cutover_surface(dsn)
+        monkeypatch.setenv("KOR_TRAVEL_MAP_PG_DSN", dsn)
+        monkeypatch.setenv("KOR_TRAVEL_MAP_IMAGE_REVISION", "h22a-test-revision")
+        request = H35Request(
+            operation="preflight",
+            transaction_id="0f9d3c6e-5a41-4b2e-9c77-2b8a1d4e6f30",
+            source_revision="h22a-test-revision",
+            database_identity="",
+            prior_receipt=None,
+            prior_receipt_digest=None,
+            request_digest="h22a-test-digest",
+        )
+
+        clean_receipt = await run_preflight(request)
+        clean = {str(entry["name"]): entry for entry in clean_receipt["checks"]}
+        assert "quarantine_candidates_before" in clean, (
+            "preflight receipt에 quarantine_candidates_before check가 없다 — "
+            "게이트가 배선되지 않았다."
+        )
+        assert clean["quarantine_candidates_before"]["passed"] is True, (
+            "격리 후보가 없는 표면인데 preflight가 거부했다 — 정상 cutover를 막는다."
+        )
+
+        engine = make_async_engine(dsn)
+        try:
+            await _plant_quarantine_candidate(engine)
+        finally:
+            await engine.dispose()
+
+        planted_receipt = await run_preflight(request)
+        planted = {str(entry["name"]): entry for entry in planted_receipt["checks"]}
+        assert planted["quarantine_candidates_before"]["passed"] is False, (
+            "격리 후보를 심었는데 preflight가 통과시켰다."
+        )
+        assert planted_receipt["status"] == "rejected", (
+            "격리 후보가 있는데 preflight receipt가 accepted다 — cutover가 그대로 진행된다."
+        )
+        assert planted_receipt["forward_boundary"] == "not_crossed", (
+            "preflight 거부는 경계 앞이어야 재실행할 수 있다."
+        )
     finally:
         await _drop_database(admin_dsn, database)

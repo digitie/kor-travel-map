@@ -46,11 +46,18 @@ EXPECTED_POST_PUBLIC: Final = 3_265
 # 투영본 3,044건만, CSV collection은 네이티브 486건만 담아 2×2가 대각선만 채운다. 격리
 # clone에 `0065`를 실제로 적용해도 0이었다.
 #
-# 0이 아니면 item이 public collection에서 admin-only로 빠져나간 것이라 어차피
-# `public_items_verify`가 깨진다. 이 검사는 그 실패를 "3,265가 아니라 3,043"이라는 모호한
-# 신호 대신 정확한 원인으로 바꾸고, 동시에 T-VN-H22(quarantine 재분류 UI)를 열어야 하는
-# 유일한 조건을 배포 시점에 스스로 재게 한다.
-EXPECTED_POST_QUARANTINE: Final = 0
+# **이 검사는 preflight에만 hard gate로 둔다.** 격리 발생은 공개 카운트로 드러나지 않는다 —
+# 격리 조건(`legacy_projection_id IS NULL`)은 `status`·`source_present`·accepted link
+# 어느 것도 요구하지 않아 공개 집합과 독립이다. 실제로 회귀 픽스처에서 격리 1건이 생겨도
+# 공개 수는 3,043 그대로였다. 그러니 migrate/verify에 hard check로 두면 **기존 게이트가
+# 통과시키던 상태를 경계 뒤에서 새로 거부**하게 되고, 그 지점에는 출구가 없다:
+# csv5는 accepted prior receipt를 요구하고, migrate 재실행은 `schema_before=0063`을 요구하는데
+# DB는 이미 0078이며, `0065` downgrade는 durable state에 fail-close한다 → PITR 없는 prod에서
+# dump 복원만 남는다. `#925`에서 index signature로 겪은 것과 같은 계열의 함정이다.
+#
+# preflight는 `forward_boundary="not_crossed"`에서 거부하므로 재실행 가능하고, 운영자가
+# 격리 후보를 정리한 뒤 그대로 다시 돌릴 수 있다. 경계 뒤에는 관측치만 남긴다.
+EXPECTED_QUARANTINE_CANDIDATES: Final = 0
 _ALEMBIC_CONFIG_PATH: Final = Path("alembic.ini")
 
 _CANONICAL_WHITESPACE: Final = "".join(
@@ -307,9 +314,47 @@ _QUARANTINE_COUNT_SQL: Final = """
 
 
 async def _quarantine_counts(connection: AsyncConnection) -> tuple[int, int]:
-    """`0065` quarantine의 collection 수와 item 수."""
+    """`0065` quarantine의 collection 수와 item 수. **관측용** — 경계 뒤에서만 쓴다."""
     row = (await connection.execute(text(_QUARANTINE_COUNT_SQL))).one()
     return int(row.collections or 0), int(row.items or 0)
+
+
+# 같은 조건을 `0063`에서, 즉 **되돌릴 수 있는 동안** 잰다. `0065`의 격리 술어는
+# `legacy_projection_id IS NULL`인데(1437·1494행) 그 컬럼을 채우는 backfill은
+#
+#     UPDATE curation_items SET legacy_projection_id = legacy.curated_feature_id
+#     FROM curated_features AS legacy WHERE curation_item_id = legacy.curated_feature_id
+#
+# 하나뿐이다(1158~1164행). 따라서 `0063`에서는 `curated_features`에 대응 행이 없다는 조건과
+# 동치다 — 컬럼 없이도 같은 집합을 고를 수 있다.
+#
+# 근사인 지점: `0065`는 격리 블록 **앞에서** rekey와 tombstone 병합을 돌린다. 그것들은
+# legacy collection 안에 네이티브 item을 **새로 만들지 않으므로** 후보를 늘리지는 않지만,
+# 병합으로 줄일 수는 있다. 즉 이 카운트는 보수적인 상계다 — 0이면 격리도 0이고, 0이 아닌데
+# 실제 격리가 0일 수는 있다. 게이트 기대값이 0이라 이 방향의 오차는 **안전한 쪽**이다
+# (경계 앞 거짓 거부이며, 재실행 가능하다).
+_QUARANTINE_CANDIDATE_SQL: Final = """
+    SELECT count(*)::bigint
+    FROM feature.curation_items AS item
+    JOIN feature.curation_collections AS collection
+      ON collection.collection_id = item.collection_id
+    WHERE (
+        COALESCE(
+            collection.metadata ->> 'migrated_from' = 'feature.curated_features',
+            false
+        )
+        OR collection.collection_key LIKE 'legacy:%'
+      )
+      AND NOT EXISTS (
+          SELECT 1 FROM feature.curated_features AS legacy
+          WHERE legacy.curated_feature_id = item.curation_item_id
+      )
+"""
+
+
+async def _quarantine_candidate_count(connection: AsyncConnection) -> int:
+    """`0065`가 격리할 item 수를 `0063`에서 미리 잰다 (보수적 상계)."""
+    return int((await connection.scalar(text(_QUARANTINE_CANDIDATE_SQL))) or 0)
 
 
 def _canonical_identity_issues(value: object, *, maximum: int) -> set[str]:
@@ -409,6 +454,7 @@ async def run_preflight(request: H35Request) -> Receipt:
             schema = await _current_schema(connection)
             counts = await _preflight_counts(connection)
             public = await _public_count(connection, migrated=False)
+            quarantine_candidates = await _quarantine_candidate_count(connection)
     finally:
         await engine.dispose()
     checks = [
@@ -417,6 +463,11 @@ async def run_preflight(request: H35Request) -> Receipt:
         check("repository_alembic_head", expected=TARGET_SCHEMA, observed=_repository_head()),
         check("schema_before", expected=PRE_SCHEMA, observed=schema),
         check("public_items_before", expected=EXPECTED_PRE_PUBLIC, observed=public),
+        check(
+            "quarantine_candidates_before",
+            expected=EXPECTED_QUARANTINE_CANDIDATES,
+            observed=quarantine_candidates,
+        ),
         *(
             check(f"0075_existing_{name}", expected=0, observed=value)
             for name, value in sorted(counts.items())
@@ -428,7 +479,11 @@ async def run_preflight(request: H35Request) -> Receipt:
         schema_before=schema,
         schema_after=schema,
         forward_boundary="not_crossed",
-        row_counts={"public_items": public, **counts},
+        row_counts={
+            "public_items": public,
+            "quarantine_candidates": quarantine_candidates,
+            **counts,
+        },
         checks=checks,
     )
 
@@ -770,17 +825,11 @@ async def verify_0075_0078(
             for category, expected in sorted(EXPECTED_CATALOG_FINGERPRINTS.items())
         ),
         check("invalid_app_indexes", expected=0, observed=invalid_indexes),
-        check(
-            "quarantine_collections",
-            expected=EXPECTED_POST_QUARANTINE,
-            observed=quarantine_collections,
-        ),
-        check(
-            "quarantine_items",
-            expected=EXPECTED_POST_QUARANTINE,
-            observed=quarantine_items,
-        ),
     ]
+    # quarantine은 **check가 아니라 관측치로만** 남긴다. 경계를 넘은 뒤 거부하면 출구가
+    # 없다(상단 `EXPECTED_QUARANTINE_CANDIDATES` 주석 참조). 게이트는 preflight의
+    # `quarantine_candidates_before`가 이미 걸었고, 여기서는 실제로 몇 건이 격리됐는지를
+    # receipt에 남겨 사후 판정과 T-VN-H22 착수 여부의 근거로 쓴다.
     return checks, {
         "invalid_indexes": invalid_indexes,
         "quarantine_collections": quarantine_collections,
@@ -817,7 +866,7 @@ async def collect_verify_state(
 
 __all__ = [
     "EXPECTED_POST_PUBLIC",
-    "EXPECTED_POST_QUARANTINE",
+    "EXPECTED_QUARANTINE_CANDIDATES",
     "PRE_SCHEMA",
     "TARGET_SCHEMA",
     "collect_verify_state",
