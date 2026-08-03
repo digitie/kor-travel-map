@@ -27,7 +27,8 @@ barrier로 직렬화한다.
     [~] `T-VN-H25B`(CSV 역반영 5건·매칭 재실행 — 3건 오링크 배제, 미충족 AC는 H34) →
     [x] `T-VN-H33`(오링크 3건 해제 — 공개 오노출 해소, H36으로 durable) →
     [x] `T-VN-H36`(import 이름 단독 자동링크 금지 — H35 이미지에 포함 필수) →
-    [ ] `T-VN-H40`(concierge provenance 복구 — **H35 배포 선행 blocker**) →
+    [~] `T-VN-H40`(concierge provenance 복구 — `0073`+`0074` 구현·검증 완료,
+        H35 배포 시 실행만 남음) →
     [ ] `T-VN-H35`(prod 마이그레이션 지연 **0064~0078** + generation 7 cutover — #673 blocker;
         과거 runbook·현재 helper `NO_GO`, 보정 설계 본문 상단 참조) →
     [ ] `T-VN-H30B`(같은 snapshot 실적재·인증 API 재검증) →
@@ -534,7 +535,8 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 > 이슈는 "concierge provider에 한해" 완화를 요구했고 두 task는 그 파생 개선이다.
 > 저장소 열린 이슈는 #673·#819 두 건뿐이고 #673은 epic이 아니다.
 
-- [ ] T-VN-H40 — **concierge curation provenance 복구 (H35 배포 선행 blocker)**
+- [~] T-VN-H40 — **concierge curation provenance 복구 (H35 배포 선행 blocker)**
+      — **구현·검증 완료(`0073`+`0074`, PR #919/#925). 남은 것은 H35 배포 시 실행뿐이다.**
 
   `0072_curation_provenance`가 기존 link를 전부 `accepted + legacy_unattributed`로 이관하고,
   `_trusted_link_sql()`이 `match_basis <> 'legacy_unattributed'`를 요구한다. 이 술어는 public
@@ -849,19 +851,27 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   곁가지로 `test_alembic_upgrade.py`가 head revision을 리터럴로 박고 있어 마이그레이션을
   추가할 때마다 깨졌다. ScriptDirectory에서 계산하도록 바꿨다.
 
-  남은 할 일:
-  - **before/after exact count 확정** — `0063` restore clone에 `0064`→head와 새 이미지를 적용해
-  - **before/after exact count 확정** — `0063` restore clone에 `0064`→head와 새 이미지를 적용해
-    collection/item/Feature-group별로 잰다. 현재 `3,265→264`는 **0063 실측에서 산출한 예상치**이지
-    배포 인수값이 아니다 — `0065`의 collection/item 재정규화, `source_present`/`status`/`archived_at`,
-    public Feature 상태 필터가 pre 값 자체를 바꾼다.
-  - **one-shot 복구 경로 설계** — `legacy_unattributed`를 이름만 바꾸거나 public 술어를 완화하지
-    **않는다**. concierge source entity/record/rule/Feature identity를 재검증한 immutable evidence로
-    새 import row 또는 좁은 `forward_recovery` decision을 **append**한다.
-  - **ongoing writer 연결** — 신규/갱신 concierge projection도 **같은 transaction에서** trusted
-    decision을 만들게 한다. 안 하면 배포 후 새로 생기는 링크가 같은 문제를 반복한다.
-  - H35에서 **writer reopen 전에** one-shot 복구를 실행하고, 기존 공개 3,044 표면과 #673의
-    미적재 457 회복을 **각각 별도 기준으로** 검증한다.
+  할 일 (2026-08-03 기준 — 4항목 중 3 완료, 1은 H35 실행 대기):
+
+  - [x] **before/after exact count 확정** — 격리 restore clone에서 `0063→0078`을 적용해
+        **공개 목록 술어 그대로** 셌다. 예상치 `3,265→264`는 폐기한다.
+        `preflight 3,265 → migrate 3,043 → csv5 3,265`. 세부는 runbook §10.1.
+  - [x] **one-shot 복구 경로** — `0073_curation_source_rule`. `legacy_unattributed`를 이름만
+        바꾸거나 public 술어를 완화하지 **않았다**. `match_basis`에 `source_rule`을 더하고
+        **검증 4조건**(`selection_origin='source_rule'` · projection↔item `feature_id` 일치 ·
+        `source_record_key` 일치 · 그 key가 `provider_sync.source_records`에 도달)을 통과한
+        3,043건만 append했다. `forward_recovery` 재사용은 의미 왜곡이라 하지 않았다.
+  - [x] **ongoing writer 연결** — `trg_curation_items_source_rule_decision`을 `curation_items`에
+        달았다. `sync_curated_feature_collection()`은 link 생성 지점이 둘이고 merge/detach
+        불변식이 얽힌 800줄이라, 불변식이 실제로 사는 자리에 걸어 두 지점과 미래 writer를
+        함께 덮는다.
+  - [ ] **H35 실행 시**: writer reopen 전에 CSV 재import(3.5 단계)를 돌리고, 공개 표면
+        3,265 복원과 #673의 미적재 457 회복을 **각각 별도 기준으로** 검증한다.
+        → 재import가 222건을 전량 복원하는 것은 실 prod 데이터로 확인했다(runbook §10.1).
+
+  **파생 발견**: `0072`의 `fk_curation_link_decisions_item`이 `ON UPDATE NO ACTION`이라
+  merge의 legacy-conflict detach(`curation_item_id` 재작성)가 FK 위반으로 abort한다.
+  `0074_curation_item_rekey_cascade`로 해소했다(`T-VN-H41`).
 
 - [ ] T-VN-H35 — **prod 마이그레이션 지연 해소 (0064~0078)**
 
