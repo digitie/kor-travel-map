@@ -10,6 +10,22 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-08-04 — prod 0072 사고 → 폐기·재생성. H35 재정의
+
+prod가 pin과 다른 7/31 이미지(`0bdecb1f`, head `0072`)로 배포되며 entrypoint 자동
+migration이 `0063 → 0072`를 적용, 공개 큐레이션 표면이 **0건**이 됐다(데이터는 무손상).
+**사용자 결정: 복구하지 않고 폐기 후 재생성** — H35 cutover·typed helper·결합 barrier
+사문화(tasks.md 재정의 블록), tvn41은 무영향(자체 DB, 실측).
+
+사고 시점 dump는 아카이브·복원검증 완료(`~/backups/krtour_map_0072_*.dump`, 오류 0줄).
+재발 방지: PR #931(entrypoint EXPECTED_HEAD/MODE 게이트) + Docker-manager 이슈 #109
+(image↔pin 일치 게이트). npm audit 전면 실패는 PR #932로 해소.
+
+**다음 한 작업**: #932·#931 머지 → n150에서 main 기준 api 이미지 재빌드·배포 → 빈
+`krtour_map` 재생성(`0078` 직행, EXPECTED_HEAD 지정) → 재적재(provider ETL +
+`curated_features_refresh_job` + CSV 5종) → 확인 후 **T-VN-H22 단일 PR**(사용자 지시)
+→ Lane A 다음 항목 순차 진행.
+
 ## 2026-08-03 — H22 착수 전 실측: 격리 대상이 0건이고 구조상 0건이다 (PR #929)
 
 Lane A 다음 항목 T-VN-H22A(quarantine read model)를 시작하기 전에 규모부터 쟀다. 계획이

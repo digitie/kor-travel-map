@@ -28,9 +28,11 @@ barrier로 직렬화한다.
     [x] `T-VN-H33`(오링크 3건 해제 — 공개 오노출 해소, H36으로 durable) →
     [x] `T-VN-H36`(import 이름 단독 자동링크 금지 — H35 이미지에 포함 필수) →
     [~] `T-VN-H40`(concierge provenance 복구 — `0073`+`0074` 구현·검증 완료,
-        H35 배포 시 실행만 남음) →
-    [ ] `T-VN-H35`(prod 마이그레이션 지연 **0064~0078** + generation 7 cutover — #673 blocker;
-        과거 runbook·현재 helper `NO_GO`, 보정 설계 본문 상단 참조) →
+        H35 재정의로 "복구 실행"은 소멸: 재생성 후 `0073` 트리거가 재적재분에 적용,
+        재적재 후 basis 분포 확인만 남음) →
+    [ ] `T-VN-H35`(**2026-08-04 재정의** — 0072 배포 사고로 cutover 소멸, prod 폐기 후
+        빈 DB `0078` 재생성 + 재적재로 대체. typed helper 사문화·결합 barrier 취소.
+        본문 상단 재정의 블록 참조) →
     [ ] `T-VN-H30B`(같은 snapshot 실적재·인증 API 재검증) →
     [x] `T-VN-H30C`(타 provider evidence — krforest arboretums 무장, visitkorea/MOIS는
         dual 불가 판정·문서 고정) →
@@ -913,7 +915,49 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 
 - [ ] T-VN-H35 — **prod 마이그레이션 지연 해소 (0064~0078)**
 
-  ### H35×T-VN41 cutover 보정 subtask (2026-08-02)
+  ## ⛔ 재정의 (2026-08-04) — cutover는 사건으로 소멸했다. 폐기·재생성으로 대체한다
+
+  **이 항목 아래의 cutover 설계(0063 전제)는 전부 이력이다. 실행하지 마라.**
+
+  2026-08-03, pin(`map_release_revision=4a764a4f`)과 달리 **7/31 빌드(`0bdecb1f`,
+  alembic head `0072`) 이미지가 배포**됐고, `docker/api-entrypoint.sh`의 무조건
+  `alembic upgrade head`가 prod를 `0063 → 0072`로 올린 뒤 오류 없이 끝났다. `0073`
+  (링크 3,043건 복구)이 이미지에 없어 **공개 큐레이션 표면이 3,265 → 0건**이 됐다.
+  이 문서가 경고했던 "공개 curation 표면이 배포 직후 전멸한다(실증)"가 정규 cutover
+  절차 **밖에서** 그대로 실현된 것이다. 상세: kor-travel-docker-manager#109.
+
+  **사용자 결정: 데이터를 복구하지 않는다. 폐기 후 재생성한다** (서비스 전이므로 데이터를
+  살릴 필요 없음). 빈 DB에 `alembic upgrade head`를 걸면 곧장 `0078`로 생성되고, `0063 →
+  0078` 데이터 마이그레이션 위험 구간(0072 전멸 창 포함)이 통째로 사라진다. 이 경로는 CI
+  integration(PostGIS) job이 매번 검증한다.
+
+  따라서:
+  - **typed cutover helper(`_h35_schema.py`·`_h35_contract.py`·`scripts/h35/`)는 사문화됐다** —
+    `PRE_SCHEMA=0063`·`EXPECTED_PRE_PUBLIC=3265`·`EXPECTED_MIGRATED_PUBLIC=3043`이 소스
+    상수라 재생성 후 preflight부터 영구 거부된다. (prod가 `0072`가 된 시점에 이미 거부
+    상태였다.) 제거/축소는 후속 정리 task로 잡는다.
+  - **"결합 barrier" 항목은 취소한다** — cutover 자체가 없어졌다.
+  - tvn41(T-VN-41)은 **무영향** — 스택 3개 전부 자체 map-db(`kor_travel_map`)를 쓰고 prod
+    무참조, live spec 기대값은 env 주입(2026-08-04 실측). 오히려 재생성 후 prod가 `0078`이
+    되면 41C "PinVi consumer enable"의 schema 선행조건이 충족된다.
+
+  ### 남은 실행 (= 현 H35)
+
+  1. [x] 사고 시점 dump 아카이브 — `n150:~/backups/krtour_map_0072_20260803T203706Z.dump`
+     1.2G, sha256 `bbba5216…379f`. **복원 검증 완료**(격리 clone, pg_restore 오류 0줄,
+     1,817초; postgis 이미지는 init 완료 후 **새 DB를 만들어** 복원해야 한다 — `POSTGRES_DB`
+     에는 확장이 미리 심어져 충돌). H22C 파괴적 live e2e의 실데이터 픽스처 후보로도 쓴다.
+  2. [x] 재발 방지 게이트 — PR #931(`KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD` /
+     `MODE=none`), Docker-manager 쪽 image↔pin 일치 검사는 이슈 #109로 요청.
+  3. [ ] `main`(#931 포함)으로 api 이미지 재빌드·배포 → 빈 `krtour_map` 재생성 →
+     entrypoint가 `0078` 직행 (EXPECTED_HEAD=`0078_cache_target_gc_observe` 지정).
+  4. [ ] 데이터 재적재 — provider ETL dagster job들 + `curated_features_refresh_job`
+     (concierge 3,044) + CSV 큐레이션 5종 재import (features 적재 후).
+  5. [ ] `0078`에서 공개 표면·quarantine 0건 확인 후 H30B·H34 잔여·H40 실행 해제.
+
+  ---
+
+  ### (이하 이력) H35×T-VN41 cutover 보정 subtask (2026-08-02)
 
   과거 2,841줄 H35 runbook은 적대 감사 두 번에서 `NO_GO`였고 현재 `scripts/h35/`도
   `0072`/`0078` 일부를 잘못 검증한다. 그대로 실행하지 않는다. 새 정본은

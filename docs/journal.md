@@ -17,6 +17,41 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-08-04 — prod 0072 배포 사고: 공개 표면 0건 → 복구 대신 폐기·재생성 결정
+
+- **사고.** T-049 완료 확인차 prod를 읽었더니 alembic head가 `0072_curation_provenance`,
+  공개 큐레이션 item **0건**(정상 3,265), link decision 3,266건 전부 `legacy_unattributed`.
+  데이터 자체는 무손상(items 3,530 · collections 71 · themes 68) — 링크 신뢰도 판정에서
+  전부 탈락한 상태.
+- **원인.** pin(`map_release_revision=4a764a4f`)과 달리 **7/31 빌드(`0bdecb1f`, alembic
+  head `0072`) 이미지가 배포**됐다. `docker/api-entrypoint.sh`가 기동마다 무조건
+  `alembic upgrade head`를 돌려 `0063 → 0072`로 올린 뒤 **오류 없이** 끝났다 — 그 이미지
+  기준으론 head까지 간 게 맞으니까. `0073`(링크 3,043건 복구)이 이미지에 없어 복구가
+  안 일어났다. H35 문서가 경고한 "0072에서 공개 표면 전멸"이 정규 cutover **밖에서**
+  실현된 것. UI는 롤백본(`c8ed6164`), api는 `0bdecb1f`, pin은 `4a764a4f` — 3자 제각각.
+- **결정 (사용자).** 복구하지 않는다. **폐기 후 재생성** — 서비스 전이라 살릴 필요 없음.
+  빈 DB `upgrade head` → `0078` 직행, `0063→0078` 데이터 마이그레이션 위험 구간 통째
+  소멸. **H35 cutover·typed helper·결합 barrier가 사문화**됐다(tasks.md 재정의 블록).
+- **폐기 전 아카이브.** `n150:~/backups/krtour_map_0072_20260803T203706Z.dump` 1.2G,
+  sha256 기록. 격리 clone **복원 검증 완료**(pg_restore 오류 0줄, 1,817초). 요령: postgis
+  이미지는 init 완료(`ready` 로그 2회) 후 **새 DB를 만들어** 복원 — `POSTGRES_DB`에는
+  확장이 미리 심어져 dump의 `x_extension` 배치와 충돌한다. 1차 시도는 init 재시작 창에서
+  복원을 시작해 446개 오류로 죽었다. 이 덤프는 H22C 파괴적 live e2e 픽스처 후보.
+- **재발 방지.** PR #931 — entrypoint에 `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`(이미지
+  head가 다르면 **DB 연결 전에** 죽음 — 이번 사고는 이 값만 있었으면 잡혔다) +
+  `MODE=none`(orchestrator가 migration 소유 시). 회귀 4건은 종료 코드가 아니라 **upgrade
+  실행 여부**를 stub 흔적 파일로 판정. Docker-manager 쪽 image↔pin 일치 게이트는 이슈
+  #109로 요청(이미지에 revision 라벨이 정확히 박혀 있었으므로 대조만 했으면 잡혔다).
+- **tvn41 영향도 (서브에이전트 실측).** T-VN-41 무영향 — 스택 3개 전부 자체
+  map-db(`kor_travel_map`) + 자체 네트워크, prod(`krtour_map`) 무참조, live spec 기대값
+  env 주입, `0079+` 브랜치 없음. 사문화되는 건 codex #924의 H35 helper뿐. 오히려 재생성
+  후 41C consumer enable의 schema 선행조건이 충족된다. codex는 8/2 #924 머지 후 활동
+  정지로 보임.
+- **부수 사고 2건.** ① 주 작업 트리에 **파일 100개 삭제 staged**(migration `0069~0078`
+  10개, ADR-080/081 포함) — 조사 에이전트가 발견, 전부 복원. 그대로 커밋됐으면 T-VN-41
+  migration이 main에서 사라질 뻔했다. ② 신규 npm high 권고 2건(brace-expansion·fast-uri)
+  으로 audit gate가 전 PR에서 실패 시작 — PR #932(lockfile patch bump)로 해소.
+
 ## 2026-08-03 — H22 착수 전 실측: 격리 대상 0건, 구조상 0건 (PR #929)
 
 - Lane A 다음 항목 T-VN-H22A(quarantine read model)를 시작하기 전에 **규모부터 쟀다.**
