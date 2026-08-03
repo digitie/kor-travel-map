@@ -224,17 +224,40 @@ fi
 #                  넣었으면 잡혔다.
 #   MODE=none      orchestrator(H35 typed helper 등)가 마이그레이션을 소유할 때 끈다.
 #                  기동이 schema를 바꾸지 않아야 receipt 계약이 의미를 갖는다.
-migration_mode="${KOR_TRAVEL_MAP_MIGRATION_MODE:-auto}"
-expected_head="${KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD:-}"
+# set-but-empty를 조용히 기본값으로 접지 않는다 — 위 profile 검사와 같은 규약이다.
+# orchestrator가 MODE=none을 의도했는데 env 전달이 깨져 빈 값이 오면, 기동이 몰래
+# schema를 바꾸는 바로 그 부수효과가 되살아난다. 빈 값은 명시적으로 거부한다.
+if [ "${KOR_TRAVEL_MAP_MIGRATION_MODE+x}" = "x" ]; then
+  migration_mode="$KOR_TRAVEL_MAP_MIGRATION_MODE"
+else
+  migration_mode="auto"
+fi
+if [ "${KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD+x}" = "x" ]; then
+  expected_head="$KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD"
+  if [ -z "$expected_head" ]; then
+    echo "KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD is set but empty; refusing to silently disable the head gate" >&2
+    exit 1
+  fi
+else
+  expected_head=""
+fi
 
 if [ -n "$expected_head" ]; then
   # `alembic heads`는 script 디렉터리만 읽는다 — DB 연결 전에 판정할 수 있다.
-  image_heads="$(alembic heads 2>/dev/null | awk 'NF {print $1}')"
-  head_count="$(printf '%s' "$image_heads" | grep -c '^' 2>/dev/null || echo 0)"
-  if [ -z "$image_heads" ]; then
-    echo "alembic heads를 읽지 못했습니다 (KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD 검사 불가)" >&2
+  # 주의: alembic은 CommandError를 **stdout**에 쓰고 비정상 종료한다(stderr 아님).
+  # 출력 내용이 아니라 exit code로 실행 실패를 먼저 판정해야 "revision이 다르다"는
+  # 오진 메시지가 나가지 않는다.
+  if ! heads_raw="$(alembic heads 2>/dev/null)"; then
+    echo "alembic heads 실행이 실패했습니다 — 이미지의 alembic 구성이 깨졌습니다" >&2
+    echo "(KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD 검사 불가; DB는 건드리지 않았습니다)" >&2
     exit 1
   fi
+  image_heads="$(printf '%s\n' "$heads_raw" | awk 'NF {print $1}')"
+  if [ -z "$image_heads" ]; then
+    echo "alembic heads 출력이 비어 있습니다 (KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD 검사 불가)" >&2
+    exit 1
+  fi
+  head_count="$(printf '%s\n' "$image_heads" | grep -c '^')"
   if [ "$head_count" != "1" ]; then
     echo "이미지의 alembic head가 하나가 아닙니다: $(printf '%s' "$image_heads" | tr '\n' ' ')" >&2
     exit 1

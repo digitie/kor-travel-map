@@ -1004,19 +1004,23 @@ _MIGRATION_BASE_ENV: Final = {
 }
 
 
-def _migration_stub_path(tmp_path: Path, *, image_head: str) -> tuple[str, Path]:
+def _migration_stub_path(
+    tmp_path: Path, *, image_head: str, heads_script: str | None = None
+) -> tuple[str, Path]:
     """`alembic heads`가 ``image_head``를 내고, `upgrade`는 흔적을 남기는 stub.
 
     흔적 파일이 있으면 **DB를 건드렸다**는 뜻이다. 게이트가 막았는지 여부를 이걸로 판정한다.
+    ``heads_script``를 주면 heads 분기를 통째로 바꾼다 (multi-head·실행 실패 재현용).
     """
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
     marker = tmp_path / "upgrade-ran"
+    heads_body = heads_script if heads_script is not None else f"echo '{image_head} (head)'"
     alembic = bin_dir / "alembic"
     alembic.write_text(
         "#!/bin/sh\n"
         'case "$1" in\n'
-        f"  heads) echo '{image_head} (head)' ;;\n"
+        f"  heads) {heads_body} ;;\n"
         f"  upgrade) echo ran > '{marker}' ;;\n"
         "esac\n"
         "exit 0\n",
@@ -1109,6 +1113,79 @@ def test_api_container_rejects_unknown_migration_mode(tmp_path: Path) -> None:
     assert result.returncode != 0, result.stdout
     assert not marker.exists()
     assert "auto 또는 none" in result.stderr
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "env_name",
+    ["KOR_TRAVEL_MAP_MIGRATION_MODE", "KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD"],
+)
+def test_api_container_rejects_set_but_empty_migration_env(
+    tmp_path: Path, env_name: str
+) -> None:
+    """set-but-empty가 조용히 게이트를 끄면 안 된다 (적대 리뷰 결함 2).
+
+    compose의 `${HOST_VAR:-}` 패턴에서 host env가 누락되면 빈 값이 들어온다. 그때
+    MODE는 auto로 접혀 orchestrator가 끄려던 migration이 돌고, EXPECTED_HEAD는 검사가
+    무음으로 사라진다 — pin 전달 실패가 곧 게이트 해제가 된다. 같은 스크립트의 profile
+    검사가 세운 set-vs-unset 규약과도 어긋난다. 빈 값은 명시적으로 거부한다.
+    """
+    path, marker = _migration_stub_path(
+        tmp_path, image_head="0078_cache_target_gc_observe"
+    )
+    result = _run_entrypoint(path, {env_name: ""})
+
+    assert result.returncode != 0, result.stdout
+    assert not marker.exists(), f"{env_name}가 빈 값인데 migration이 실행됐다."
+
+
+@pytest.mark.unit
+def test_api_container_refuses_multi_head_image(tmp_path: Path) -> None:
+    """이미지에 alembic head가 둘이면 (분기 병합 누락) 배포를 막는다."""
+    path, marker = _migration_stub_path(
+        tmp_path,
+        image_head="unused",
+        heads_script=(
+            "printf '%s\\n%s\\n' '0078_cache_target_gc_observe (head)' "
+            "'0078_rogue_branch (head)'"
+        ),
+    )
+    result = _run_entrypoint(
+        path,
+        {"KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD": "0078_cache_target_gc_observe"},
+    )
+
+    assert result.returncode != 0, result.stdout
+    assert not marker.exists(), "head가 둘인데 migration이 실행됐다."
+    assert "하나가 아닙니다" in result.stderr
+
+
+@pytest.mark.unit
+def test_api_container_reports_broken_alembic_as_such_not_as_mismatch(
+    tmp_path: Path,
+) -> None:
+    """alembic 실행 실패를 'revision 불일치'로 오진하면 안 된다 (적대 리뷰 결함 1).
+
+    alembic은 CommandError를 **stdout**에 쓰고 비정상 종료한다 — stderr만 버리고 출력을
+    파싱하면 `FAILED:`가 head 값처럼 흘러들어 "revision이 다르게 빌드됐다"는 오진이
+    나간다. exit code로 먼저 판정해야 사고 대응이 엉뚱한 곳을 파지 않는다.
+    """
+    path, marker = _migration_stub_path(
+        tmp_path,
+        image_head="unused",
+        heads_script="echo 'FAILED: No script_location key found'; exit 255",
+    )
+    result = _run_entrypoint(
+        path,
+        {"KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD": "0078_cache_target_gc_observe"},
+    )
+
+    assert result.returncode != 0, result.stdout
+    assert not marker.exists()
+    assert "실행이 실패했습니다" in result.stderr, result.stderr
+    assert "기대값과 다릅니다" not in result.stderr, (
+        "alembic 실행 실패가 revision 불일치로 오진됐다."
+    )
 
 
 @pytest.mark.unit
