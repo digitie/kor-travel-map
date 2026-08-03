@@ -10,6 +10,28 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-08-03 — H35 §5 gate를 실 prod 데이터로 실측 (0063→0078 전 구간 일치)
+
+runbook §5가 선언한 phase gate 값을 **실제 prod 백업 clone**에서 확인했다(prod 무접촉,
+포트 노출 없음). 이전 실측은 `0074` head 기준이었는데 그 뒤 `0075~0078`이 추가돼
+재검증이 필요했다.
+
+```
+preflight  0063_pipeline_root_id / 공개 item 3,265          → 일치
+migrate    0078_cache_target_gc_observe / 3,043 / invalid 0 → 일치
+csv5       파일 5 / accepted 222 / rejected 0 / 3,265        → 일치
+```
+
+**`0075~0078`(cache_target 계열)이 curation 공개 표면을 바꾸지 않는다**는 것이 추론에서
+실측으로 확정됐다. 세부와 주의사항은 runbook §10.1에 적었다 — 특히 이 실측은 helper를
+우회한 것이라 §11의 "network-free 리허설"(helper 경유) 항목을 **대체하지 않는다**.
+
+T-VN-41(#917/#923/#924)은 codex가 머지 완료했고 n150 부하도 load 0.76으로 정상화됐다.
+
+**다음 한 작업**: §11 실행 승인 조건 중 남은 것 — 최종 exact HEAD 적대 리뷰(진행 중),
+보안 감사·CI green, 그리고 **사용자의 명시적 n150 실행 승인**. 배포는 비가역이고
+PITR이 없으므로 승인 없이 실행하지 않는다.
+
 ## 2026-08-02 (codex) — H35 scope validator delegate-chain fingerprint 보완
 
 재리뷰에서 top-level `ops.is_valid_feature_update_scope(text,jsonb)`가 의존하는

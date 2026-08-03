@@ -17,6 +17,22 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-08-03 — H35 §5 gate 실 prod 데이터 실측 (0063→0078)
+
+- runbook §5 선언값을 실제 prod 백업 clone에서 확인했다(prod 무접촉, 포트 노출 없음):
+  preflight `0063` / 3,265 · migrate `0078_cache_target_gc_observe` / 3,043 / invalid index 0 ·
+  csv5 파일 5 / accepted 222 / rejected 0 / 3,265 — **전 항목 일치**.
+- 재검증이 필요했던 이유: 내 이전 실측은 `0074` head 기준인데 그 뒤 `0075~0078`이 추가됐다.
+  **`0075~0078`이 curation 공개 표면을 바꾸지 않는다**가 추론에서 실측으로 확정됐다.
+- 파일별 accepted: arboretum 44 / heritage 67 / kt100-2023 51 / kt100-2025 58 / lighthouse 2.
+- **이 실측의 한계를 runbook §10.1에 명시했다** — helper를 우회해 마이그레이션과
+  `import_curation_rows`를 직접 호출한 것이라 §11의 "network-free 리허설"(helper 경유)을
+  대체하지 않는다. transaction UUID 체인을 안 태웠으므로 §5.3 멱등 계약도 검증하지 않는다
+  (helper 우회 시 CSV 재호출로 decision 222건 증가, 공개 item은 3,265 불변 — append-only
+  성질상 예상되는 동작이지만 멱등 판정은 helper 경유로만 한다).
+- 소요 70.9초는 dagster 없는 개발 환경 수치라 배포 시간 근거로 쓰지 않는다(기존 폐기 방침 유지).
+- T-VN-41(#917/#923/#924) codex 머지 완료 확인, n150 load 11.6 → **0.76** 정상화.
+
 ## 2026-08-02 (codex) — H35 scope validator legacy delegate P1 해소
 
 - function catalog 대상을 proname allowlist에서 exact schema-qualified regprocedure inventory로 바꿨다.
