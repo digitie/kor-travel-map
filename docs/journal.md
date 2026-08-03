@@ -17,6 +17,45 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-08-03 — H22 착수 전 실측: 격리 대상 0건, 구조상 0건 (PR #929)
+
+- Lane A 다음 항목 T-VN-H22A(quarantine read model)를 시작하기 전에 **규모부터 쟀다.**
+  계획이 전제한 "격리된 canonical-only item"이 이 DB에는 **하나도 없다.**
+- 라이브 prod 읽기 전용 실측 — `curation_items` 3,530건이 **2×2의 대각선만** 채운다:
+  legacy-marker collection 52개는 `curated_features` 투영본 3,044건만, CSV collection은
+  네이티브 486건만 담는다. 격리는 **비대각 칸**(legacy 안의 네이티브)을 요구하는데 비어
+  있다. dangling collection 참조 0. 격리 clone에 `0065`를 실제로 적용해도 0개/0건.
+- `legacy:quarantine`·`migration_quarantine` marker 생성자는 `0065` **하나뿐**이고
+  1회성이라 **배포 후에도 영구 0건**이다. 조사가 함께 경고한 "배포 직후 `[0065 격리]`
+  collection이 admin UI에 설명 없이 등장" 문제도 collection 자체가 안 생겨 소멸한다.
+- **내 informational 쿼리에 3값 논리 버그가 있었다** — `NOT (metadata->>'migrated_from'
+  = '…' OR key LIKE 'legacy:%')`는 키가 없는 collection에서 `NULL OR false = NULL` →
+  `NOT NULL = NULL`로 걸러져 "legacy 밖 486건"을 0으로 보고했다. 격리 건수는 `0065`와
+  같은 **긍정형** 술어를 써서 영향 없었지만, 합이 3,044 ≠ 3,530으로 안 맞아 잡았다.
+- **전제를 배포 게이트에 박았다 — 단, 경계 앞에.** H35 **preflight**가
+  `quarantine_candidates_before`를 0으로 검사한다. `0065`의 격리 술어
+  `legacy_projection_id IS NULL`은 그 컬럼의 유일한 backfill 때문에 `0063`에서
+  "`curated_features`에 대응 행 없음"과 동치라, 컬럼 없이도 같은 집합을 고를 수 있다.
+- **첫 설계는 틀렸고 적대 리뷰가 반증했다.** 나는 검사를 verify에 hard check로 두면서
+  "격리가 생기면 어차피 `public_items_verify`가 깨지니 원인만 이름으로 바꾸는 것"이라고
+  적었다. 실측 결과 **격리 1건이 생겨도 공개 수는 3,043 그대로**였다 — 격리 조건은
+  `status`·`source_present`·accepted link 어느 것도 요구하지 않아 공개 집합과 독립이다.
+  즉 그것은 원인 라벨링이 아니라 **경계 뒤의 새 거부 경로**였고, 거기서 거부되면 출구가
+  없다(csv5는 accepted prior receipt 요구 / migrate 재실행은 `schema_before=0063` 요구인데
+  DB는 이미 `0078` / `0065` downgrade는 durable state에 fail-close). **#925에서 내가
+  잡아냈던 index signature 함정과 같은 계열을 내가 다시 만들었다.** 경계 뒤에는
+  `quarantine_collections`·`quarantine_items`를 관측치로만 남긴다.
+- 회귀는 "0이다"를 확인하지 않는다 — 시드에 legacy-marker collection이 아예 없어 공회전이
+  된다. 대신 **legacy collection 안에 네이티브 item을 실제로 만들어** ① `0063`에서 후보로
+  잡히고 ② head까지 밀면 `0065`가 실제로 격리하며(두 술어가 같은 것을 고른다는 증거)
+  ③ 그런데도 verify의 check는 늘지 않는지를 함께 고정한다. preflight receipt가 실제로
+  거부하는지는 별도 회귀로 본다. ③은 변이로 확인했다 — verify에 hard check를 되돌려
+  넣으면 깨진다.
+- **H22A/B/C 종결 여부는 사용자 결정으로 남겼다** — 축소가 아니라 대상 소멸이라 임의로
+  닫지 않는다. 착수하게 될 경우 먼저 풀어야 할 모호함 3건은 `docs/tasks.md`에 적었다
+  (특히 "후보 theme/source"는 대응 스키마가 없고, 추천으로 읽으면 같은 항목의
+  "자동 target 추정 금지"와 충돌한다).
+
 ## 2026-08-03 — H35 적대 리뷰에서 helper 결함 2건 (PR #925)
 
 - 최종 exact HEAD `d50bb2c5`에 적대 리뷰어 2명 + refute/reproduce 검증(15 에이전트).

@@ -10,6 +10,47 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-08-03 — H22 착수 전 실측: 격리 대상이 0건이고 구조상 0건이다 (PR #929)
+
+Lane A 다음 항목 T-VN-H22A(quarantine read model)를 시작하기 전에 규모부터 쟀다. 계획이
+전제한 "격리된 canonical-only item"이 **이 DB에는 하나도 없다.**
+
+라이브 prod 읽기 전용 실측에서 `curation_items` 3,530건이 **2×2의 대각선만** 채운다 —
+legacy-marker collection 52개는 `curated_features` 투영본 3,044건만 담고, CSV collection은
+네이티브 486건(`korean-tourism-100`·`arboretum`·`lighthouse`·`heritage`)만 담는다. 격리는
+**비대각 칸**(legacy collection 안의 네이티브 item)을 요구하는데 그 칸이 비어 있다.
+격리 clone에 `0065`를 실제로 적용해도 quarantine 0개/0건이었다. marker 생성자는 `0065`
+하나뿐이고 1회성이라 **배포 후에도 영구 0건**이다.
+
+그래서 **H22A/B/C 셋 다 대상이 없다.** 셋의 유일한 목적이 "격리된 item의 운영자 재분류"인데
+재분류할 것이 영구히 없다. 조사가 함께 경고한 "배포 직후 `[0065 격리]` collection이 admin
+UI에 설명 없이 등장" 문제도 collection이 생성되지 않아 소멸한다.
+
+**종결 여부는 사용자 결정으로 남겼다** — 축소가 아니라 대상 소멸이라 임의로 닫지 않았다.
+대신 전제를 배포 게이트에 박았다: H35 **preflight**가 `quarantine_candidates_before`를 0으로
+검사한다. 경계 뒤에는 관측치만 남기고 거부하지 않는다.
+
+**첫 설계는 틀렸고 적대 리뷰가 반증했다.** 나는 이 검사를 verify에 hard check로 두면서
+"격리가 생기면 어차피 `public_items_verify`가 깨지니 원인만 이름으로 바꾸는 것"이라고 적었다.
+실측하면 **격리 1건이 생겨도 공개 수는 3,043 그대로**다 — 격리 조건은 `status`·
+`source_present`·accepted link 어느 것도 요구하지 않아 공개 집합과 독립이다. 즉 그것은
+경계 **뒤**의 새 거부 경로였고, 거기서 거부되면 출구가 없다(csv5는 accepted prior receipt
+요구 / migrate 재실행은 `schema_before=0063` 요구인데 DB는 이미 `0078` / `0065` downgrade는
+durable state에 fail-close). **#925에서 내가 잡아냈던 index signature 함정과 같은 계열을
+내가 다시 만든 것이었다.**
+
+회귀는 "0이다"를 확인하지 않는다 — 시드에 legacy-marker collection이 없어 공회전이 된다.
+대신 legacy collection 안에 네이티브 item을 **실제로 만들어** ① `0063`에서 후보로 잡히고
+② head까지 밀면 `0065`가 실제로 격리하며 ③ 그런데도 verify의 check는 늘지 않는지를 함께
+고정한다. ③은 변이로 확인했다 — verify에 hard check를 되돌려 넣으면 깨진다.
+
+부수로 내 informational 쿼리의 3값 논리 버그를 잡았다 — `NOT (… OR …)`에서 `migrated_from`
+키가 없는 collection은 `NULL OR false = NULL` → `NOT NULL = NULL`로 걸러진다. 격리 건수는
+`0065`와 같은 긍정형 술어라 영향 없었고, 합이 3,044 ≠ 3,530으로 안 맞아 발견했다.
+
+**다음 한 작업**: 사용자가 H22 종결을 결정하면 반영하고, 아니면 Lane A의 그다음 항목으로
+넘어간다. H35는 여전히 Docker-manager 이슈 #99(pin이 결함 있는 `d50bb2c5`에 묶여 있음) 대기.
+
 ## 2026-08-03 — H35 적대 리뷰: 실행 전 잡아야 했던 helper 결함 2건 (PR #925)
 
 최종 exact HEAD `d50bb2c5`에 적대 리뷰어 2명 + refute/reproduce 검증(15 에이전트)을 붙였다.
