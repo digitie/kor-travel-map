@@ -209,19 +209,69 @@ if [ -n "$cursor_signing_secret" ]; then
   fi
 fi
 
-retries="${KOR_TRAVEL_MAP_MIGRATION_RETRIES:-30}"
-sleep_seconds="${KOR_TRAVEL_MAP_MIGRATION_RETRY_SLEEP_SECONDS:-2}"
-attempt=1
+# schema 변경이 **컨테이너 기동의 부수효과**로 일어나는 것을 막는다.
+#
+# 2026-08-03 prod 사고: pin(`map_release_revision`)은 목표 revision을 가리키는데 실제로는
+# alembic chain이 `0072`까지만 담긴 옛 이미지가 배포됐다. 이 스크립트가 조건 없이
+# `alembic upgrade head`를 돌려 prod schema를 `0063` -> `0072`로 올린 뒤 **오류 없이**
+# 끝냈다. 그 이미지 기준으로는 head까지 간 것이 맞기 때문이다. 그런데 `0072`는 공개
+# 큐레이션 링크를 신뢰 불가 상태로 두고 `0073`이 그것을 복구하는 구조라, 공개 표면이
+# 0건이 됐다.
+#
+# 두 가지 통제를 둔다.
+#   EXPECTED_HEAD  이미지가 담은 head가 기대값과 다르면 **마이그레이션 전에** 죽는다.
+#                  DB를 건드리지 않으므로 중간 상태가 생기지 않는다. 위 사고는 이 값만
+#                  넣었으면 잡혔다.
+#   MODE=none      orchestrator(H35 typed helper 등)가 마이그레이션을 소유할 때 끈다.
+#                  기동이 schema를 바꾸지 않아야 receipt 계약이 의미를 갖는다.
+migration_mode="${KOR_TRAVEL_MAP_MIGRATION_MODE:-auto}"
+expected_head="${KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD:-}"
 
-while ! alembic upgrade head; do
-  if [ "$attempt" -ge "$retries" ]; then
-    echo "alembic upgrade head failed after $attempt attempts" >&2
+if [ -n "$expected_head" ]; then
+  # `alembic heads`는 script 디렉터리만 읽는다 — DB 연결 전에 판정할 수 있다.
+  image_heads="$(alembic heads 2>/dev/null | awk 'NF {print $1}')"
+  head_count="$(printf '%s' "$image_heads" | grep -c '^' 2>/dev/null || echo 0)"
+  if [ -z "$image_heads" ]; then
+    echo "alembic heads를 읽지 못했습니다 (KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD 검사 불가)" >&2
     exit 1
   fi
-  echo "alembic upgrade head failed; retrying ($attempt/$retries)" >&2
-  attempt=$((attempt + 1))
-  sleep "$sleep_seconds"
-done
+  if [ "$head_count" != "1" ]; then
+    echo "이미지의 alembic head가 하나가 아닙니다: $(printf '%s' "$image_heads" | tr '\n' ' ')" >&2
+    exit 1
+  fi
+  if [ "$image_heads" != "$expected_head" ]; then
+    echo "이미지의 alembic head가 기대값과 다릅니다." >&2
+    echo "  기대: ${expected_head}" >&2
+    echo "  이미지: ${image_heads}" >&2
+    echo "배포된 이미지가 의도한 revision으로 빌드되지 않았습니다. DB는 건드리지 않았습니다." >&2
+    exit 1
+  fi
+fi
+
+case "$migration_mode" in
+  none)
+    echo "KOR_TRAVEL_MAP_MIGRATION_MODE=none — alembic upgrade를 건너뜁니다" >&2
+    ;;
+  auto)
+    retries="${KOR_TRAVEL_MAP_MIGRATION_RETRIES:-30}"
+    sleep_seconds="${KOR_TRAVEL_MAP_MIGRATION_RETRY_SLEEP_SECONDS:-2}"
+    attempt=1
+
+    while ! alembic upgrade head; do
+      if [ "$attempt" -ge "$retries" ]; then
+        echo "alembic upgrade head failed after $attempt attempts" >&2
+        exit 1
+      fi
+      echo "alembic upgrade head failed; retrying ($attempt/$retries)" >&2
+      attempt=$((attempt + 1))
+      sleep "$sleep_seconds"
+    done
+    ;;
+  *)
+    echo "KOR_TRAVEL_MAP_MIGRATION_MODE는 auto 또는 none이어야 합니다: ${migration_mode}" >&2
+    exit 1
+    ;;
+esac
 
 exec python -m uvicorn kortravelmap.api.app:app \
   --host 0.0.0.0 \

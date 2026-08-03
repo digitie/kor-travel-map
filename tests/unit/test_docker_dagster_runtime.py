@@ -7,7 +7,7 @@ import os
 import subprocess
 import tomllib
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import pytest
 import yaml
@@ -993,6 +993,122 @@ def _entrypoint_stub_path(tmp_path: Path) -> str:
         command.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
         command.chmod(0o755)
     return f"{bin_dir}:{os.environ['PATH']}"
+
+
+_MIGRATION_BASE_ENV: Final = {
+    "KOR_TRAVEL_MAP_API_PROFILE": "local-dev",
+    "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET": "shared-secret-at-least-32-characters",
+    "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN": "",
+    "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN": "",
+    "KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED": "false",
+}
+
+
+def _migration_stub_path(tmp_path: Path, *, image_head: str) -> tuple[str, Path]:
+    """`alembic heads`가 ``image_head``를 내고, `upgrade`는 흔적을 남기는 stub.
+
+    흔적 파일이 있으면 **DB를 건드렸다**는 뜻이다. 게이트가 막았는지 여부를 이걸로 판정한다.
+    """
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    marker = tmp_path / "upgrade-ran"
+    alembic = bin_dir / "alembic"
+    alembic.write_text(
+        "#!/bin/sh\n"
+        'case "$1" in\n'
+        f"  heads) echo '{image_head} (head)' ;;\n"
+        f"  upgrade) echo ran > '{marker}' ;;\n"
+        "esac\n"
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    alembic.chmod(0o755)
+    python = bin_dir / "python"
+    python.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    python.chmod(0o755)
+    return f"{bin_dir}:{os.environ['PATH']}", marker
+
+
+def _run_entrypoint(path: str, extra: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["sh", "docker/api-entrypoint.sh"],
+        cwd=ROOT,
+        env={"PATH": path, **_MIGRATION_BASE_ENV, **extra},
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+
+@pytest.mark.unit
+def test_api_container_refuses_image_whose_alembic_head_differs(tmp_path: Path) -> None:
+    """이미지의 alembic head가 기대값과 다르면 **DB를 건드리기 전에** 죽어야 한다.
+
+    2026-08-03 prod 사고 재현이다. pin은 목표 revision을 가리켰는데 실제로는 chain이
+    `0072`까지만 담긴 옛 이미지가 배포됐고, entrypoint가 조건 없이 `alembic upgrade head`를
+    돌려 prod를 `0063` -> `0072`로 올린 뒤 **오류 없이** 끝냈다(그 이미지 기준으로는
+    head가 맞으니까). `0072`는 공개 큐레이션 링크를 신뢰 불가로 두고 `0073`이 복구하는
+    구조라 공개 표면이 0건이 됐다.
+
+    핵심은 종료 코드가 아니라 **upgrade가 실행되지 않았다는 것**이다. 실행됐다면 이미
+    중간 상태가 만들어졌고, 그 지점에는 되돌릴 길이 없다.
+    """
+    path, marker = _migration_stub_path(tmp_path, image_head="0072_curation_provenance")
+    result = _run_entrypoint(
+        path,
+        {"KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD": "0078_cache_target_gc_observe"},
+    )
+
+    assert result.returncode != 0, result.stdout
+    assert not marker.exists(), (
+        "head가 어긋나는데 alembic upgrade가 실행됐다 — DB가 이미 중간 상태로 갔다."
+    )
+    assert "0072_curation_provenance" in result.stderr
+    assert "0078_cache_target_gc_observe" in result.stderr
+
+
+@pytest.mark.unit
+def test_api_container_migrates_when_alembic_head_matches(tmp_path: Path) -> None:
+    """기대값과 같으면 평소대로 migration을 돌린다 — 게이트가 정상 배포를 막으면 안 된다."""
+    path, marker = _migration_stub_path(
+        tmp_path, image_head="0078_cache_target_gc_observe"
+    )
+    result = _run_entrypoint(
+        path,
+        {"KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD": "0078_cache_target_gc_observe"},
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert marker.exists(), "head가 일치하는데 migration이 실행되지 않았다."
+
+
+@pytest.mark.unit
+def test_api_container_skips_migration_when_mode_is_none(tmp_path: Path) -> None:
+    """`MODE=none`이면 기동이 schema를 바꾸지 않는다.
+
+    H35 typed helper처럼 orchestrator가 migration을 소유할 때 필요하다. 기동이 몰래
+    schema를 올리면 preflight/migrate/verify receipt 계약이 의미를 잃는다.
+    """
+    path, marker = _migration_stub_path(
+        tmp_path, image_head="0078_cache_target_gc_observe"
+    )
+    result = _run_entrypoint(path, {"KOR_TRAVEL_MAP_MIGRATION_MODE": "none"})
+
+    assert result.returncode == 0, result.stderr
+    assert not marker.exists(), "MODE=none인데 alembic upgrade가 실행됐다."
+
+
+@pytest.mark.unit
+def test_api_container_rejects_unknown_migration_mode(tmp_path: Path) -> None:
+    """오타가 조용히 `auto`로 떨어지면 안 된다 — 끄려던 사람이 켠 채로 배포하게 된다."""
+    path, marker = _migration_stub_path(
+        tmp_path, image_head="0078_cache_target_gc_observe"
+    )
+    result = _run_entrypoint(path, {"KOR_TRAVEL_MAP_MIGRATION_MODE": "off"})
+
+    assert result.returncode != 0, result.stdout
+    assert not marker.exists()
+    assert "auto 또는 none" in result.stderr
 
 
 @pytest.mark.unit
