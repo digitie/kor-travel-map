@@ -95,8 +95,18 @@
   guard가 DooD(docker-socket-in-container) 환경에서 testcontainers DB host가
   loopback이 아니라서 발화한 것(같은 run의 나머지 h35 계열은 전부 green,
   본 branch 무접촉 파일 — CI ubuntu 직결 docker에서는 loopback이라 무해).
-  나머지 전체 통합 sweep은 `ktm-ci-final` 컨테이너에서 계속 실행 중이며
-  로그가 컨테이너에 남는다(`docker logs ktm-ci-final`).
+  **전체 통합 sweep 완주**: 1차 run 12 failed/881 passed에서 32B 원판
+  identity boundary 2건이 0081 fence의 의도 동작과 충돌함을 발견해 재정의
+  (별도 커밋 — UPDATE drift는 fence 선행 거부 + 파생 CHECK 관측은 INSERT
+  drift 경로로 이전, alias 결측 관측은 fence 트리거 일시 해제 시뮬레이션)
+  → 최종 run **10 failed / 883 passed (0:21:28)**. 잔여 10건 전부 env 분류:
+  ⑴ `test_dedup_with_kraddr_geo_live` 5건 — 32B가 base 재현으로 명시한
+  live kor-travel-geo 인증 미결선 env 그대로, ⑵ `test_domain_command_ledger`
+  2건 — 검증 컨테이너에 docker CLI 부재(detached docker effect), ⑶ h35
+  network-free 1건 — DooD loopback guard(상기), ⑷ pipeline
+  cancellation/projection 2건 — 32B가 base 재현으로 명시한 lock-poll env·
+  부하 flake 계열(두 run에서 같은 모듈의 다른 테스트가 번갈아 실패 —
+  단독/저부하 green 계열). 32C 관련 실패 0.
 
 ## 2026-08-04 (7) — T-VN-32B Map consumer-first dual read/write
 
