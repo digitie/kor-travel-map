@@ -49,6 +49,10 @@ from kortravelmap.core.exceptions import (
     FeatureSearchCursorTamperedError,
     FeatureSearchCursorVersionUnsupportedError,
 )
+from kortravelmap.infra.feature_identity import (
+    expected_feature_uuid,
+    verify_feature_uuid,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Iterable, Mapping, Sequence
@@ -90,7 +94,7 @@ __all__ = [
     "get_public_feature_rows_by_ids",
     "get_service_feature_batch_items",
     "public_active_notice_filter_sql",
-    "public_active_notice_feature_ids",
+    "public_active_notice_feature_identities",
     "list_active_place_coords",
     "list_primary_place_locator",
     "get_primary_source_detail",
@@ -130,9 +134,13 @@ env ``KOR_TRAVEL_MAP_PRICE_STALE_HIDE_DAYS`` (기본 4 = OpiNet 로테이션 1�
 # ─── SQL 상수 (EXPLAIN 검증 대상, test-strategy §4.2) ────────────────────────
 
 # coord_5179는 STORED generated (ADR-012) — INSERT 컬럼에서 제외.
+# feature_uuid는 T-VN-32B writer 원자 생성 — dual 기간 정본 generator(uuid5 파생,
+# ``feature_identity.expected_feature_uuid``)를 명시 INSERT하고, 0079 트리거는
+# raw SQL 경로용 안전망으로 유지한다. ON CONFLICT 갱신 대상이 아니다(불변 키).
+# RETURNING의 feature_uuid는 legacy-only 신규 행 fail-close 검증에 쓰인다.
 _UPSERT_FEATURE_SQL: Final[str] = """
 INSERT INTO feature.features (
-    feature_id, kind, name, category,
+    feature_id, feature_uuid, kind, name, category,
     coord, coord_precision_digits, geom,
     address, legal_dong_code, road_name_code, road_address_management_no,
     admin_dong_code, sido_code, sigungu_code,
@@ -143,7 +151,7 @@ INSERT INTO feature.features (
     user_change_request_id, user_deleted_at, user_deleted_by, user_change_reason,
     created_at, updated_at, deleted_at
 ) VALUES (
-    :feature_id, :kind, :name, :category,
+    :feature_id, CAST(:feature_uuid AS uuid), :kind, :name, :category,
     CASE WHEN CAST(:lon AS double precision) IS NULL THEN NULL
          ELSE x_extension.ST_SetSRID(
              x_extension.ST_MakePoint(CAST(:lon AS double precision),
@@ -276,7 +284,7 @@ ON CONFLICT (feature_id) DO UPDATE SET
         THEN features.deleted_at
         ELSE EXCLUDED.deleted_at
     END
-RETURNING (xmax = 0) AS inserted
+RETURNING (xmax = 0) AS inserted, CAST(feature_uuid AS text) AS feature_uuid
 """
 
 _UPSERT_PROVIDER_VERSION_SQL: Final[str] = """
@@ -395,8 +403,10 @@ RETURNING (xmax = 0) AS inserted
 
 # feature 상세 row projection — raw read(``feature.features``)와 공개
 # read(``feature.public_features``, ADR-067)가 같은 컬럼 목록을 공유한다.
+# ``feature_uuid``는 T-VN-32B dual read의 UUID 정본 병행 노출(additive) —
+# 공개 view는 alembic 0080이 재고정해 같은 컬럼을 가진다.
 _FEATURE_ROW_COLUMNS_SQL: Final[str] = """
-    feature_id, kind, name, category,
+    feature_id, CAST(feature_uuid AS text) AS feature_uuid, kind, name, category,
     x_extension.ST_X(coord) AS lon, x_extension.ST_Y(coord) AS lat,
     coord_precision_digits,
     CASE
@@ -718,6 +728,7 @@ WITH requested AS (
 )
 SELECT
     requested.feature_id,
+    CAST(base.feature_uuid AS text) AS feature_uuid,
     CASE
       WHEN base.feature_id IS NULL THEN 'missing'
       WHEN base.deleted_at IS NOT NULL OR base.status = 'deleted' THEN 'retired'
@@ -827,8 +838,10 @@ def _bbox_attribute_filter_sql(feature_alias: str) -> str:
 """
 
 
-_PUBLIC_ACTIVE_NOTICE_IDS_SQL: Final[str] = f"""
-SELECT f.feature_id
+# notice lineage 가시성 read — T-VN-32B dual: feature 참조를 legacy id와 UUID
+# 정본 쌍으로 병행 반환한다(0080이 view에 feature_uuid를 노출).
+_PUBLIC_ACTIVE_NOTICE_IDENTITIES_SQL: Final[str] = f"""
+SELECT f.feature_id, CAST(f.feature_uuid AS text) AS feature_uuid
 FROM feature.public_features AS f
 WHERE f.feature_id = ANY(CAST(:feature_ids AS text[]))
   AND f.kind = 'notice'
@@ -881,7 +894,8 @@ LIMIT 1
 # kinds 필터는 NULL이면 전체 (asyncpg ARRAY 바인딩). 경량 표현(좌표 + 표시 메타).
 _FEATURES_IN_BBOX_SQL: Final[str] = f"""
 SELECT
-    f.feature_id, f.kind, f.name, f.category,
+    f.feature_id, CAST(f.feature_uuid AS text) AS feature_uuid,
+    f.kind, f.name, f.category,
     x_extension.ST_X(f.coord) AS lon, x_extension.ST_Y(f.coord) AS lat,
     f.marker_icon, f.marker_color, f.status,
     ps.price_summary,
@@ -1002,7 +1016,8 @@ LIMIT :limit
 
 _FEATURES_IN_BBOX_WITH_GEOMETRY_SQL: Final[str] = f"""
 SELECT
-    f.feature_id, f.kind, f.name, f.category,
+    f.feature_id, CAST(f.feature_uuid AS text) AS feature_uuid,
+    f.kind, f.name, f.category,
     x_extension.ST_X(f.coord) AS lon,
     x_extension.ST_Y(f.coord) AS lat,
     f.marker_icon, f.marker_color, f.status,
@@ -1251,6 +1266,7 @@ _FEATURE_SEARCH_CTE_SQL: Final[str] = f"""
 WITH candidates AS (
     SELECT
         f.feature_id,
+        CAST(f.feature_uuid AS text) AS feature_uuid,
         f.kind,
         f.name,
         f.category,
@@ -1294,6 +1310,7 @@ _FEATURE_SEARCH_SCORE_CTE_SQL: Final[str] = f"""
 WITH name_candidates AS MATERIALIZED (
     SELECT
         f.feature_id,
+        CAST(f.feature_uuid AS text) AS feature_uuid,
         f.kind,
         f.name,
         f.category,
@@ -1309,6 +1326,7 @@ WITH name_candidates AS MATERIALIZED (
 candidates AS (
     SELECT
         feature_id,
+        feature_uuid,
         kind,
         name,
         category,
@@ -1404,6 +1422,7 @@ WITH target AS (
 candidates AS (
     SELECT
         f.feature_id,
+        CAST(f.feature_uuid AS text) AS feature_uuid,
         f.kind,
         f.name,
         f.category,
@@ -1521,6 +1540,7 @@ WITH origin AS (
 candidates AS (
     SELECT
         f.feature_id,
+        CAST(f.feature_uuid AS text) AS feature_uuid,
         f.kind,
         f.name,
         f.category,
@@ -1738,12 +1758,17 @@ FeatureBatchItemState = Literal[
 
 @dataclass(frozen=True)
 class FeatureBatchItemRow:
-    """service batch의 상태 판정과 공개 ``trip_card`` projection."""
+    """service batch의 상태 판정과 공개 ``trip_card`` projection.
+
+    ``feature_uuid``는 T-VN-32B UUID 정본 병행 노출(additive) — base row가 있는
+    상태(found/retired/suppressed/unchanged)에서 채워지고 missing이면 ``None``.
+    """
 
     feature_id: str
     state: FeatureBatchItemState
     row_revision: int | None
     trip_card: dict[str, Any] | None
+    feature_uuid: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1816,7 +1841,10 @@ async def load_source_record_links(
 
 @dataclass(frozen=True)
 class NearbyFeatureRow:
-    """외부 POI/cache target 주변 feature summary row."""
+    """외부 POI/cache target 주변 feature summary row.
+
+    ``feature_uuid``는 T-VN-32B UUID 정본 병행 노출(additive).
+    """
 
     feature_id: str
     kind: str
@@ -1829,11 +1857,15 @@ class NearbyFeatureRow:
     primary_provider: str | None
     primary_dataset_key: str | None
     last_updated_at: datetime
+    feature_uuid: str | None = None
 
 
 @dataclass(frozen=True)
 class FeatureSearchRow:
-    """사용자 feature 검색 결과 summary row."""
+    """사용자 feature 검색 결과 summary row.
+
+    ``feature_uuid``는 T-VN-32B UUID 정본 병행 노출(additive).
+    """
 
     feature_id: str
     kind: str
@@ -1846,6 +1878,7 @@ class FeatureSearchRow:
     status: str
     score: float | None = None
     score_cursor: str | None = None
+    feature_uuid: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1871,6 +1904,8 @@ def _feature_params(feature: Feature) -> dict[str, Any]:
     addr = feature.address
     return {
         "feature_id": feature.feature_id,
+        # T-VN-32B writer 원자 생성 — dual 기간 정본 generator(uuid5 파생).
+        "feature_uuid": expected_feature_uuid(feature.feature_id),
         "kind": feature.kind.value,
         "name": feature.name,
         "category": feature.category,
@@ -1971,9 +2006,16 @@ async def upsert_feature(session: AsyncSession, feature: Feature) -> bool:
     """``feature.features`` upsert. 신규 INSERT면 ``True``, 갱신이면 ``False``.
 
     ``coord_5179``는 STORED generated이라 INSERT/UPDATE 대상에서 제외 (ADR-012).
+
+    T-VN-32B: ``feature_uuid``는 writer가 dual 기간 정본 generator(uuid5 파생)로
+    명시 INSERT하고(0079 트리거는 안전망), RETURNING 관측값이 파생 규칙과 다르면
+    legacy-only/식별자 drift 행이 생기기 전에 fail-close한다
+    (``FeatureIdentityInvariantError``).
     """
     result = await session.execute(text(_UPSERT_FEATURE_SQL), _feature_params(feature))
-    inserted = bool(result.scalar_one())
+    row = result.mappings().one()
+    verify_feature_uuid(feature.feature_id, row["feature_uuid"])
+    inserted = bool(row["inserted"])
     await session.execute(
         text(_UPSERT_PROVIDER_VERSION_SQL),
         {"feature_id": feature.feature_id, "payload": _feature_snapshot(feature)},
@@ -3525,35 +3567,39 @@ async def get_service_feature_batch_items(
                 "marker_icon": row["marker_icon"],
                 "marker_color": row["marker_color"],
             }
+        feature_uuid = row.get("feature_uuid")
         batch.append(
             FeatureBatchItemRow(
                 feature_id=str(row["feature_id"]),
                 state=cast(FeatureBatchItemState, state),
                 row_revision=revision,
                 trip_card=trip_card,
+                feature_uuid=str(feature_uuid) if feature_uuid is not None else None,
             )
         )
     return tuple(batch)
 
 
-async def public_active_notice_feature_ids(
+async def public_active_notice_feature_identities(
     session: AsyncSession,
     feature_ids: Sequence[str],
-) -> set[str]:
-    """public 단건/batch에서 노출 가능한 active/latest notice ID만 반환한다.
+) -> dict[str, str]:
+    """public에서 노출 가능한 active/latest notice의 ``{feature_id: feature_uuid}``.
 
-    목록·검색·nearby와 같은 ``_PUBLIC_ACTIVE_NOTICE_FILTER_SQL``을 공유해 종료된
-    notice와 같은 계보의 구버전 feature가 ID 직접 조회로 다시 노출되지 않게 한다.
-    일반 ``get_feature_row(s)``는 admin/감사용 raw read 계약을 유지한다.
+    notice lineage read의 T-VN-32B dual 표면 — 같은 감산 술어를 쓰되 feature
+    참조를 legacy id와 UUID 정본 쌍으로 병행 반환한다. 목록·검색·nearby와 같은
+    ``_PUBLIC_ACTIVE_NOTICE_FILTER_SQL``을 공유해 종료된 notice와 같은 계보의
+    구버전 feature가 ID 직접 조회로 다시 노출되지 않게 한다. 일반
+    ``get_feature_row(s)``는 admin/감사용 raw read 계약을 유지한다.
     """
     normalized = _normalized_filter(feature_ids)
     if normalized is None:
-        return set()
+        return {}
     result = await session.execute(
-        text(_PUBLIC_ACTIVE_NOTICE_IDS_SQL),
+        text(_PUBLIC_ACTIVE_NOTICE_IDENTITIES_SQL),
         {"feature_ids": normalized},
     )
-    return {str(row.feature_id) for row in result}
+    return {str(row.feature_id): str(row.feature_uuid) for row in result}
 
 
 _LIST_ACTIVE_PLACE_COORDS_SQL: Final[str] = """
@@ -3819,6 +3865,7 @@ WITH area_feature AS (
 )
 SELECT
     f.feature_id,
+    CAST(f.feature_uuid AS text) AS feature_uuid,
     f.kind,
     f.name,
     f.category,
@@ -4179,6 +4226,7 @@ def _search_row(row: Any) -> FeatureSearchRow:
     lat = row["lat"]
     score = row["score"]
     score_cursor = row.get("score_cursor")
+    feature_uuid = row.get("feature_uuid")
     return FeatureSearchRow(
         feature_id=str(row["feature_id"]),
         kind=str(row["kind"]),
@@ -4191,6 +4239,7 @@ def _search_row(row: Any) -> FeatureSearchRow:
         status=str(row["status"]),
         score=float(score) if score is not None else None,
         score_cursor=str(score_cursor) if score_cursor is not None else None,
+        feature_uuid=str(feature_uuid) if feature_uuid is not None else None,
     )
 
 
@@ -4371,6 +4420,7 @@ def _encode_nearby_cursor(item: NearbyFeatureRow, *, sort: str) -> str:
 
 
 def _nearby_row(row: Any) -> NearbyFeatureRow:
+    feature_uuid = row.get("feature_uuid")
     return NearbyFeatureRow(
         feature_id=str(row["feature_id"]),
         kind=str(row["kind"]),
@@ -4383,6 +4433,7 @@ def _nearby_row(row: Any) -> NearbyFeatureRow:
         primary_provider=row["primary_provider"],
         primary_dataset_key=row["primary_dataset_key"],
         last_updated_at=row["last_updated_at"],
+        feature_uuid=str(feature_uuid) if feature_uuid is not None else None,
     )
 
 

@@ -64,7 +64,8 @@ barrier로 직렬화한다.
     [/] `T-VN-41D`(durable writer-drain)
 - **Wave 2 barrier 이후**
   - freeze(Lane A): [x] `T-VN-31A` → [x] `T-VN-31B` → [x] `T-VN-31C`
-  - Lane A: [ ] `T-VN-32A` → [ ] `T-VN-32B` → [ ] `T-VN-32C` →
+  - Lane A: [x] `T-VN-32A` → [x] `T-VN-32B` → [~] `T-VN-32C`(전반부 착지 —
+    잔여는 쌍 PR 머지 후 checksum 게이트) →
     [ ] `T-VN-35A` → [ ] `T-VN-35B` → [ ] `T-VN-35C` → [ ] `T-VN-35D` →
     [ ] `T-VN-37A` → [ ] `T-VN-37B` → [ ] `T-VN-37C`
   - Lane B shadow: [ ] `T-VN-33A` → [ ] `T-VN-33B` → [ ] `T-VN-33C` →
@@ -1793,20 +1794,147 @@ ADR은 존재하지만 목표 DDL/OpenAPI diff/실행 제약 artifact는 없다.
 
 ### T-VN-32 — UUID identity shadow 전환 (Lane A)
 
-- [ ] T-VN-32A — **UUID schema·deterministic backfill**
+- [x] T-VN-32A — **UUID schema·deterministic backfill** (2026-08-04 완료)
 
   UUID identity와 legacy alias table을 추가하고 같은 snapshot에서 deterministic backfill·UNIQUE/FK
   불변식을 고정한다. 기존 문자열 ID는 아직 제거하지 않는다.
 
-- [ ] T-VN-32B — **Map consumer-first dual read/write**
+  완료 기록: alembic `0080_feature_uuid_shadow` — `feature.features.feature_uuid`
+  (backfill 후 NOT NULL + `uq_features_feature_uuid`) + `feature.feature_aliases`
+  (alias PK · legacy `feature_id` text FK · `feature_uuid` · `alias_kind`, freeze
+  §4 대응 제약명 정합) + INSERT 트리거 2종(BEFORE fill / AFTER legacy alias 원자
+  생성 — repo 2곳 + 테스트 직접 seed 37개 파일 등 전 write 경로를 경로별 SQL 수정
+  없이 보장). **freeze 미정 3건 결정**(0079 docstring 근거): ① 생성기 =
+  `uuid5(uuid5(NAMESPACE_URL, 'kor-travel-map:feature-uuid:v1'), legacy_id)` —
+  DB server default 없음(정본 신규 행 generator·UUIDv7 여부는 32B 소관), ②
+  alias_kind = 닫힌 CHECK `('legacy_feature_id')`, ③ alias FK ON DELETE =
+  CASCADE(alias/uuid는 파생값·재계산 가능). Python 정본
+  `core/ids.feature_uuid_from_legacy` + pgcrypto SHA-1 SQL mirror
+  `feature.feature_uuid_from_legacy`(고정 벡터 상호 대조).
+  `tests/integration/test_feature_uuid_shadow_migration.py` 8건 — backfill
+  완전성·UNIQUE/NOT NULL·alias 1:1·freeze INV-068-01~04 그대로 실행(05는
+  provider_dataset_id가 33A 소관이라 제외 명시)·별도 DB 재실행 결정론·downgrade
+  무손실 왕복·신규 upsert 원자 생성·명시 uuid 존중 + unit 고정 벡터 2개. 읽기
+  경로·기존 문자열 ID 무변경(32A 계약).
+
+- [x] T-VN-32B — **Map consumer-first dual read/write** (2026-08-04 완료)
 
   repository/API/notice lineage를 UUID 정본으로 읽고 alias를 경계에서만 해석한다. 신규 write는 UUID와
   alias를 원자 생성하고 legacy-only 신규 행을 차단한다.
 
-- [ ] T-VN-32C — **PinVi alias-map cutover·legacy write fence**
+  완료 기록: ① 경계 alias 해석 단일 메커니즘 — `infra/feature_identity.py`
+  `resolve_feature_identity(session, ref)`가 legacy `f_*` alias·canonical UUID
+  양쪽을 정본 키 쌍 `FeatureIdentity(feature_id, feature_uuid)`로 해석
+  (형식 오류 422 · 미해석 404, UUID-정본 우선/alias fallback 결정적 순서) +
+  `kortravelmap.api.feature_ref.resolve_feature_ref_or_error` 공용 경계 헬퍼.
+  **removal-슬레이트 표면을 제외한 전 feature `{feature_id}` 경로에 적용** —
+  user detail·sources·observations history·weather·price·contained-features·
+  **weather/forecast(적대 리뷰 F2로 뒤늦게 편입 — 종전엔 이 경로만 해석을
+  건너뛰어 형식 오류에도 200+빈 timeline)** / admin detail·revision·weather·
+  price·PATCH·DELETE·deactivate. **의도적 제외 3표면**(적대 리뷰 F3 명시):
+  `GET /v1/curations/features/{id}`·`GET /v1/public/{beaches,festivals}/{id}` —
+  freeze openapi-diff에서 ADR-073 배타 열거로 removed 슬레이트(T-VN-40B/39
+  소관)라 변환하지 않으며, 형식 오류가 422가 아닌 404로 떨어지는 비일관을
+  포함한 채 제거 시점까지 동결. 내부 전달·조회는 해석된 정본 키로만
+  (ADR-068 결정 3). operator lineage의 별도 존재 확인 쿼리
+  (`_operator_feature_or_404`)는 해석 성공이 행 존재를 함의하므로 제거.
+  ② dual read — alembic `0081_uuid_dual_read`가 `public_features` view에
+  `feature_uuid`를 재고정(SELECT * 컬럼 목록, 공개 술어 무변경), repo 단건
+  (`_FEATURE_ROW_COLUMNS_SQL`)·bbox/in-bounds·search·nearby(coord/by-target)·
+  contained·service batch(`base.feature_uuid`)·admin 목록/상세가
+  `feature_uuid`를 select 목록에만 추가(join/술어 무변경 — EXPLAIN 회귀 없음).
+  응답 additive 노출: user detail/search/in-bounds/nearby item, service
+  `POST /features/batch` item(found/retired/suppressed/unchanged) ·
+  `POST /features/weather/batch` item(거대 조회 SQL 무변경 —
+  `get_feature_uuid_map` 병행 해석), admin 목록/상세. **응답 `feature_id` 값은
+  legacy 유지** — 값 전환은 32C(rollout "checksum 일치 후 Map 응답 UUID 전환",
+  consumer-first cutover 규율). ③ notice lineage —
+  `public_active_notice_feature_identities`가 `{feature_id: feature_uuid}` 쌍을
+  반환하는 단일 표면(기존 `public_active_notice_feature_ids`는 **제거** —
+  잔여 호출자 전부 identities로 이행). ④ 신규 write — **dual 기간 정본
+  generator 결정: uuid5 파생(`expected_feature_uuid`), UUIDv7은 legacy id
+  소멸(32C 이후) 전 미채택**(결정론 = 양 저장소 checksum 전제). 이 규칙을
+  app 검사에만 두지 않고 `0080`이 CHECK 2종
+  (`ck_features_feature_uuid_dual_derivation` ·
+  `ck_feature_aliases_uuid_dual_derivation`)으로 **DB 층에서 강제**(fail-close
+  by construction — 32A의 "임의 명시 uuid 존중" 열린 계약을 의도적으로 닫음,
+  해당 32A 테스트 재정의). provider upsert·admin add SQL은 `feature_uuid`를
+  writer 명시 INSERT + RETURNING 대조(`verify_feature_uuid` →
+  `FeatureIdentityInvariantError`) — 관측 계층. 0079 트리거 2종은 raw SQL
+  seed 경로 편의 fill로 유지(파생 강제는 CHECK가 담당, 트리거 제거는 32C
+  write fence 시점 재평가 — 0079 docstring 갱신). CHECK 2종은 dual 기간 한정
+  fence로 32C에서 비파생 generator 채택과 함께 제거한다. ⑤ OpenAPI 3 spec
+  재생성 + `openapi-diff-v1.json` baseline sha 재고정·`revisions` 개정 기록
+  (diff 항목/counts 무변경 — ADR-068 값 전환 항목은 32C 목표 상태로 존치).
+  **32C/39 이월 명시**: 내부 FK 체인(source_links/curation/price/weather 등)의
+  UUID 조인 재작성과 referencing table shadow uuid 컬럼(rollout이 legacy FK
+  체인 fence를 32C, 제거를 39로 고정), 응답 `feature_id` 값 UUID 전환,
+  legacy write fence·트리거/CHECK 제거, PinVi vendored snapshot 재추출(32C 쌍
+  PR), service/weather **batch body**의 feature 참조 UUID 해석(경로 참조와의
+  비대칭 — 적대 리뷰 F4, 값 전환과 같은 시점), legacy ID 물리 제거(T-VN-39 removal manifest). 검증: unit 1,981(identity
+  순수 계약 11 신규) · api 1,069(경계 dual/422/additive/404 재정의) · 신규 통합
+  9(`test_feature_identity_boundary.py` — 양형식 해석·미존재·형식 오류·
+  view/단건/bbox/batch/notice 병행 노출·upsert/admin-add 원자성·CHECK drift
+  거부·alias 결측 invariant 관측) · 32A migration 8(명시 uuid fail-close
+  재정의) + feature_repo 26 + freeze 3 + alembic 일관성/공개 view/notice/
+  nearby/in-bounds 회귀 73 + perf gate tier1 shape 재고정(feature_uuid 의도적
+  계약 변경) + H35 rehearsal(h35 도구의 head 등호 고정을 campaign target 앵커로
+  수정 — 32A가 head를 전진시켜 생긴 본 branch 잠복 회귀, h35 81건 green) ·
+  전체 통합 suite에서 32B 무관 잔여 실패는 live kor-travel-geo 인증 미결선
+  env 5건(base 재현)과 pipeline cancellation lock-poll env 1건(base 재현)·
+  suite 부하 flake 1건(단독 green)뿐 · export --check drift 0 · ruff/mypy
+  --strict(main+api)/lint-imports clean.
+
+- [~] T-VN-32C — **PinVi alias-map cutover·legacy write fence**
 
   PinVi consumer를 UUID+alias contract로 전환하고 양 저장소 checksum을 맞춘다. legacy write를
   fence하되 legacy ID 제거는 T-VN-39 soak 뒤로 남긴다.
+
+  **전반부 착지(본 branch + PinVi 쌍 branch `feat/tvn32c-uuid-alias`)**:
+  ① 이관 표면 — ADR-068 결정 4의 "DB-to-DB 이관"을 service read 2종으로 판단
+  (`GET /v1/service/feature-alias-maps`(keyset 페이지)+`/checksum`(merkle
+  root) — PinVi 소비는 HTTP-only·cache-target snapshot/merkle 선례,
+  `require_service_token`·route_policy SERVICE, read-only라 registry 미등록).
+  ② `feature-alias-map-v1` checksum 계약(`core/feature_alias_map.py` 순수:
+  NFC-거부 alias·canonical uuid·닫힌 kind, 길이 prefix + domain separation
+  leaf(`KTMFAMLEAF\0`)·byte-order 정렬·odd-promotion merkle(`KTMFAMNODE\0`/
+  `KTMFAMEMPTY\0`), 파생 검증 분리) + 양 저장소 공용 golden
+  `contracts/feature-alias-map-v1-golden.json` — PinVi 독립 구현
+  (`app/core/feature_alias_contract.py` — namespace를 basis 문자열에서 재파생)
+  이 vendored 사본으로 재계산 대조. ③ legacy write fence — alembic
+  `0082_legacy_write_fence`: alias map 불변(UPDATE 전면 거부·직접 DELETE
+  거부·feature purge CASCADE만 허용 — removal manifest "alias 유지" fence) +
+  identity 불변(feature_id/feature_uuid UPDATE 거부) DB 트리거 fail-close,
+  0079 트리거 2종은 재평가 후 **유지**(fill은 0080 CHECK가 요구하는 유일값만
+  쓸 수 있는 강제 메커니즘의 일부, AFTER alias는 INV-068-01 원자 보장 —
+  0079/0081 docstring), `COLLATE "C"` keyset index(+모델 metadata 정합).
+  f_* 신규 발급 fence는 비파생 generator 채택과 불가분이라 **의도적으로
+  checksum 게이트 뒤 잔여로 순서 고정**(발급 전환은 신규 행 응답에 UUID 값을
+  조기 누출 — rollout "checksum 일치 후 응답 전환" 위반 + upsert idempotency
+  재결선 필요). ④ PinVi 이관 준비 — UUID shadow 컬럼 migration
+  (`20260804_0049`: trip_day_pois/curated_plan_pois.feature_uuid,
+  feature_suggestions.target_feature_uuid) + alias-map client
+  (`clients/kor_travel_map_alias_map.py` — keyset 전진·계약 위반 fail-close) +
+  검증된 이관 실행기(`services/feature_uuid_cutover.py`,
+  `pinvi-feature-uuid-cutover` CLI: pull→독립 root/count·파생 검증→매칭 3열
+  rewrite·미매칭은 NULL 유지+보고, dry-run 지원). ⑤ artifact — OpenAPI
+  admin/service 재생성(user sha 무변경)·`openapi-diff-v1.json` baseline
+  재고정+revisions(이관 표면은 목표 diff 항목 아님 — 존치·폐기는 39 소관)·
+  unit sha 상수 재고정.
+
+  **잔여(쌍 PR 머지 후, rollout 순서)**: ⓪ cutover 전 사전 스캔 1회 —
+  legacy `feature_id` 중 canonical UUID 형태(36자 hyphenated) 값이 실재하는지
+  스캔(경계 해석이 UUID-정본 우선이라 shadowing 실재 확인, 32C 리뷰 L7) →
+  PinVi 배포+`pinvi-feature-uuid-cutover`
+  실행 → 양 저장소 checksum 일치 → Map 응답 `feature_id` 값 UUID 전환·비파생
+  generator 채택·0080 CHECK/0079 트리거 제거 재평가 → PinVi vendored snapshot
+  3종(user/service/admin-detail) 재추출+핀(merge SHA) 갱신 + 새 alias-map
+  golden 핀(`_UPSTREAM_MAP_COMMIT`)·contract-pin-consistency diff 단계 추가.
+  legacy ID·FK 체인 물리 제거는 T-VN-39 removal manifest.
+  **운영 점검(상시)**: 0079/0081 트리거 보장은 trigger-respecting 세션
+  한정이다 — `session_replication_role=replica`(superuser)는 우회 가능하므로
+  `count_features_missing_identity` 정기 관측(0,0 확인)이 alias 결측 방어선
+  (32C 리뷰 M4).
 
 ### T-VN-33 — provider dataset 정본 전환 (Lane B)
 

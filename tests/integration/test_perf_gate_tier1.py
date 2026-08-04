@@ -100,6 +100,8 @@ _FROZEN_SHAPES: dict[str, tuple[str, ...]] = {
         "deleted_at",
         "detail",
         "feature_id",
+        # T-VN-32B — UUID 정본 병행 노출(additive, 의도적 계약 변경).
+        "feature_uuid",
         "kind",
         "lat",
         "legal_dong_code",
@@ -121,6 +123,8 @@ _FROZEN_SHAPES: dict[str, tuple[str, ...]] = {
         "address",
         "category",
         "feature_id",
+        # T-VN-32B — UUID 정본 병행 노출(additive, 의도적 계약 변경).
+        "feature_uuid",
         "kind",
         "lat",
         "lon",

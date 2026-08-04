@@ -487,12 +487,34 @@ def test_list_admin_features_passes_filters(
     }
 
 
+def _patch_admin_resolved_identity(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    feature_id: str | None = None,
+) -> None:
+    """T-VN-32B 경계 alias 해석 mock — 형식 계약(422)은 실제 검증을 태운다."""
+    from kortravelmap.core.ids import feature_uuid_from_legacy
+    from kortravelmap.infra import feature_identity
+
+    async def _resolve(_session: Any, ref: str) -> feature_identity.FeatureIdentity:
+        feature_identity.validate_feature_ref(ref)
+        resolved = feature_id if feature_id is not None else ref
+        return feature_identity.FeatureIdentity(
+            feature_id=resolved,
+            feature_uuid=str(feature_uuid_from_legacy(resolved)),
+        )
+
+    monkeypatch.setattr(feature_identity, "resolve_feature_identity", _resolve)
+
+
 @pytest.mark.unit
 def test_get_admin_feature_detail_returns_linked_operational_data(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from kortravelmap.api.routers import admin_features as router_mod
+
+    _patch_admin_resolved_identity(monkeypatch)
 
     async def _detail(_session: Any, feature_id: str) -> AdminFeatureDetail:
         assert feature_id == "feature-1"
@@ -539,6 +561,8 @@ def test_get_admin_feature_detail_returns_404(
 ) -> None:
     from kortravelmap.api.routers import admin_features as router_mod
 
+    _patch_admin_resolved_identity(monkeypatch)
+
     async def _detail(_session: Any, feature_id: str) -> None:
         assert feature_id == "missing"
 
@@ -548,6 +572,43 @@ def test_get_admin_feature_detail_returns_404(
 
     assert response.status_code == 404
     assert response.json()["code"] == "NOT_FOUND"
+
+
+@pytest.mark.unit
+def test_get_admin_feature_detail_accepts_uuid_ref(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """T-VN-32B — admin 상세 경로도 UUID 참조를 경계에서 해석한다(내부는 legacy 키)."""
+    from kortravelmap.core.ids import feature_uuid_from_legacy
+
+    from kortravelmap.api.routers import admin_features as router_mod
+
+    _patch_admin_resolved_identity(monkeypatch, feature_id="feature-1")
+    requested_ids: list[str] = []
+
+    async def _detail(_session: Any, feature_id: str) -> AdminFeatureDetail:
+        requested_ids.append(feature_id)
+        return _feature_detail()
+
+    async def _curations(
+        _session: Any, **_kwargs: Any
+    ) -> dict[str, tuple[Any, ...]]:
+        return {}
+
+    monkeypatch.setattr(router_mod, "get_admin_feature_detail", _detail)
+    monkeypatch.setattr(
+        router_mod.curation_repo,
+        "list_curation_items_by_feature_ids",
+        _curations,
+    )
+
+    uuid_ref = str(feature_uuid_from_legacy("feature-1"))
+    response = client.get(f"/v1/admin/features/{uuid_ref}")
+
+    assert response.status_code == 200
+    assert requested_ids == ["feature-1"]
+    assert response.json()["data"]["feature"]["feature_id"] == "feature-1"
 
 
 @pytest.mark.unit
@@ -896,6 +957,8 @@ def test_get_feature_detail_does_not_use_row_revision_as_aggregate_validator(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from kortravelmap.api.routers import admin_features as router_mod
+
+    _patch_admin_resolved_identity(monkeypatch)
 
     async def _detail(_session: Any, feature_id: str) -> AdminFeatureDetail:
         return _feature_detail()

@@ -226,10 +226,23 @@ def image_revision_check(request: H35Request) -> dict[str, JsonValue]:
     )
 
 
-def _repository_head() -> str:
+def _repository_campaign_revision() -> str:
+    """저장소 migration lineage에서 H35 캠페인 target(0078)의 위치를 판정한다.
+
+    반환값이 ``TARGET_SCHEMA``면 target revision script가 존재하고 단일 head의
+    조상(head 자신 포함)이라는 뜻이다. 과거에는 repository head와
+    ``TARGET_SCHEMA``의 **등호**를 검사했는데, 그 고정은 Wave 2 migration
+    (0079+)이 head를 전진시키는 순간 이 캠페인 도구를 영구 거부 상태로
+    만들었다(T-VN-32B에서 실측·수정). 캠페인 도구는 자신의 target에만
+    앵커한다 — 실행도 head가 아니라 ``TARGET_SCHEMA``까지만 upgrade한다.
+    """
     config = Config(str(_ALEMBIC_CONFIG_PATH))
-    heads = ScriptDirectory.from_config(config).get_heads()
-    return heads[0] if len(heads) == 1 else ",".join(sorted(heads))
+    script = ScriptDirectory.from_config(config)
+    heads = script.get_heads()
+    if len(heads) != 1:
+        return "multiple_heads:" + ",".join(sorted(heads))
+    lineage = {revision.revision for revision in script.iterate_revisions(heads[0], "base")}
+    return TARGET_SCHEMA if TARGET_SCHEMA in lineage else "target_not_in_lineage"
 
 
 async def _current_schema(connection: AsyncConnection) -> str:
@@ -460,7 +473,11 @@ async def run_preflight(request: H35Request) -> Receipt:
     checks = [
         identity_check,
         image_revision_check(request),
-        check("repository_alembic_head", expected=TARGET_SCHEMA, observed=_repository_head()),
+        check(
+            "repository_alembic_head",
+            expected=TARGET_SCHEMA,
+            observed=_repository_campaign_revision(),
+        ),
         check("schema_before", expected=PRE_SCHEMA, observed=schema),
         check("public_items_before", expected=EXPECTED_PRE_PUBLIC, observed=public),
         check(
@@ -734,15 +751,21 @@ class _BoundedSink(io.TextIOBase):
 
 
 def _run_alembic_upgrade() -> None:
+    # 캠페인 target까지만 upgrade한다 — "head"는 Wave 2 migration(0079+)이
+    # 추가될 때마다 캠페인 결과가 달라지는 이동 표적이다(T-VN-32B 수정).
     sink = _BoundedSink()
     with redirect_stdout(sink), redirect_stderr(sink):
-        command.upgrade(Config(str(_ALEMBIC_CONFIG_PATH)), "head")
+        command.upgrade(Config(str(_ALEMBIC_CONFIG_PATH)), TARGET_SCHEMA)
 
 
 async def run_migrate(request: H35Request) -> Receipt:
     checks = [
         image_revision_check(request),
-        check("repository_alembic_head", expected=TARGET_SCHEMA, observed=_repository_head()),
+        check(
+            "repository_alembic_head",
+            expected=TARGET_SCHEMA,
+            observed=_repository_campaign_revision(),
+        ),
     ]
     engine = _engine()
     try:

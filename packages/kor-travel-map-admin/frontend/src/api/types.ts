@@ -776,7 +776,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Feature Detail Route */
+        /**
+         * Get Feature Detail Route
+         * @description feature 참조는 legacy `f_*` id와 UUID 정본(canonical hyphenated) 양쪽을 수용한다 (ADR-068 경계 alias 해석, T-VN-32B dual — admin `{feature_id}` 경로 공통).
+         */
         get: operations["get_feature_detail_route_v1_admin_features__feature_id__get"];
         put?: never;
         post?: never;
@@ -1605,7 +1608,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** feature 단건 상세 */
+        /**
+         * feature 단건 상세
+         * @description feature 참조는 legacy `f_*` id와 UUID 정본(canonical hyphenated) 양쪽을 수용한다 (ADR-068 경계 alias 해석, T-VN-32B dual). 응답의 `feature_id`는 legacy 값을 유지하고 `feature_uuid`가 병행 노출된다 — 값 자체의 UUID 전환은 T-VN-32C.
+         */
         get: operations["get_feature_v1_features__feature_id__get"];
         put?: never;
         post?: never;
@@ -1678,8 +1684,8 @@ export interface paths {
          * @description operator 전용 — feature에 연결된 모든 제공기관 entity의 현재 raw 관측값.
          *
          *     T-VN-05: raw lineage(raw_data/raw_payload_hash/source_record_key)는 공개 detail에서
-         *     제거하고 이 operator 표면으로 이동했다. 비공개/종료 feature도 감사 대상이라
-         *     공개 가시성 gate 없이 raw row 존재만 확인한다.
+         *     제거하고 이 operator 표면으로 이동했다. 비공개/종료 feature도 감사 대상이다 —
+         *     경계 해석(T-VN-32B) 성공이 raw row 존재를 함의하므로 별도 존재 확인이 없다.
          */
         get: operations["get_feature_sources_v1_features__feature_id__sources_get"];
         put?: never;
@@ -2680,6 +2686,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/service/feature-alias-maps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** alias-map canonical keyset 페이지 (이관 전용 service read) */
+        get: operations["get_feature_alias_map_page_v1_service_feature_alias_maps_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/service/feature-alias-maps/checksum": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** alias-map 전체 merkle root (양 저장소 checksum 대조) */
+        get: operations["get_feature_alias_map_checksum_v1_service_feature_alias_maps_checksum_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/service/refresh-requests": {
         parameters: {
             query?: never;
@@ -3464,6 +3504,11 @@ export interface components {
             };
             /** Feature Id */
             feature_id: string;
+            /**
+             * Feature Uuid
+             * @description UUID 정본 identity 병행 노출 (ADR-068, T-VN-32B additive). feature_id 값 자체의 UUID 전환은 T-VN-32C.
+             */
+            feature_uuid?: string | null;
             /** Kind */
             kind: string;
             /** Lat */
@@ -3888,6 +3933,11 @@ export interface components {
             created_at: string;
             /** Feature Id */
             feature_id: string;
+            /**
+             * Feature Uuid
+             * @description UUID 정본 identity 병행 노출 (ADR-068, T-VN-32B additive). feature_id 값 자체의 UUID 전환은 T-VN-32C.
+             */
+            feature_uuid?: string | null;
             /** Issue Count */
             issue_count: number;
             /** Issues */
@@ -7577,6 +7627,72 @@ export interface components {
             target_start_date?: string | null;
         };
         /**
+         * FeatureAliasMapChecksumData
+         * @description 저장소 전체 alias-map checksum.
+         */
+        FeatureAliasMapChecksumData: {
+            /** Alias Count */
+            alias_count: number;
+            /** Merkle Root */
+            merkle_root: string;
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: "feature-alias-map-v1";
+        };
+        /**
+         * FeatureAliasMapChecksumResponse
+         * @description ``GET /service/feature-alias-maps/checksum`` 응답.
+         */
+        FeatureAliasMapChecksumResponse: {
+            data: components["schemas"]["FeatureAliasMapChecksumData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * FeatureAliasMapPageData
+         * @description canonical 순서 keyset 페이지.
+         */
+        FeatureAliasMapPageData: {
+            /** Has More */
+            has_more: boolean;
+            /**
+             * Next After Alias
+             * @description has_more일 때 다음 요청의 after_alias (마지막 row의 alias).
+             */
+            next_after_alias?: string | null;
+            /** Rows */
+            rows: components["schemas"]["FeatureAliasMapRowOut"][];
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: "feature-alias-map-v1";
+        };
+        /**
+         * FeatureAliasMapPageResponse
+         * @description ``GET /service/feature-alias-maps`` 응답.
+         */
+        FeatureAliasMapPageResponse: {
+            data: components["schemas"]["FeatureAliasMapPageData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * FeatureAliasMapRowOut
+         * @description alias-map row — ``feature-alias-map-v1`` leaf의 exact 3필드.
+         */
+        FeatureAliasMapRowOut: {
+            /** Alias */
+            alias: string;
+            /**
+             * Alias Kind
+             * @constant
+             */
+            alias_kind: "legacy_feature_id";
+            /** Feature Uuid */
+            feature_uuid: string;
+        };
+        /**
          * FeatureBatchData
          * @description feature batch 5-state data payload.
          */
@@ -7591,6 +7707,11 @@ export interface components {
         FeatureBatchFoundItem: {
             /** Feature Id */
             feature_id: string;
+            /**
+             * Feature Uuid
+             * @description UUID 정본 identity 병행 노출 (ADR-068, T-VN-32B additive).
+             */
+            feature_uuid?: string | null;
             /**
              * Row Revision
              * Format: int64
@@ -7660,6 +7781,11 @@ export interface components {
             /** Feature Id */
             feature_id: string;
             /**
+             * Feature Uuid
+             * @description UUID 정본 identity 병행 노출 (ADR-068, T-VN-32B additive).
+             */
+            feature_uuid?: string | null;
+            /**
              * Row Revision
              * Format: int64
              */
@@ -7678,6 +7804,11 @@ export interface components {
             /** Feature Id */
             feature_id: string;
             /**
+             * Feature Uuid
+             * @description UUID 정본 identity 병행 노출 (ADR-068, T-VN-32B additive).
+             */
+            feature_uuid?: string | null;
+            /**
              * Row Revision
              * Format: int64
              */
@@ -7695,6 +7826,11 @@ export interface components {
         FeatureBatchUnchangedItem: {
             /** Feature Id */
             feature_id: string;
+            /**
+             * Feature Uuid
+             * @description UUID 정본 identity 병행 노출 (ADR-068, T-VN-32B additive).
+             */
+            feature_uuid?: string | null;
             /**
              * Row Revision
              * Format: int64
@@ -7764,6 +7900,11 @@ export interface components {
             };
             /** Feature Id */
             feature_id: string;
+            /**
+             * Feature Uuid
+             * @description UUID 정본 identity 병행 노출 (ADR-068, T-VN-32B additive). feature_id 값 자체의 UUID 전환은 T-VN-32C.
+             */
+            feature_uuid?: string | null;
             /** Kind */
             kind: string;
             /** Lat */
@@ -8005,6 +8146,11 @@ export interface components {
             category: string;
             /** Feature Id */
             feature_id: string;
+            /**
+             * Feature Uuid
+             * @description UUID 정본 identity 병행 노출 (ADR-068, T-VN-32B additive). feature_id 값 자체의 UUID 전환은 T-VN-32C.
+             */
+            feature_uuid?: string | null;
             /**
              * Geometry
              * @description include_geometry=true일 때 route/area용 GeoJSON geometry.
@@ -8765,6 +8911,11 @@ export interface components {
             distance_m: number;
             /** Feature Id */
             feature_id: string;
+            /**
+             * Feature Uuid
+             * @description UUID 정본 identity 병행 노출 (ADR-068, T-VN-32B additive).
+             */
+            feature_uuid?: string | null;
             /** Kind */
             kind: string;
             /** Lat */
@@ -12428,6 +12579,8 @@ export interface components {
             radius_m: number;
             /** Target Feature Id */
             target_feature_id?: string | null;
+            /** Target Feature Uuid */
+            target_feature_uuid?: string | null;
             /** Target Lat */
             target_lat?: number | null;
             /** Target Lon */
@@ -12854,6 +13007,11 @@ export interface components {
             /** Feature Id */
             feature_id: string;
             /**
+             * Feature Uuid
+             * @description UUID 정본 identity 병행 노출 (ADR-068, T-VN-32B additive).
+             */
+            feature_uuid?: string | null;
+            /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
              */
@@ -12866,6 +13024,11 @@ export interface components {
         WeatherBatchNoDataItem: {
             /** Feature Id */
             feature_id: string;
+            /**
+             * Feature Uuid
+             * @description UUID 정본 identity 병행 노출 (ADR-068, T-VN-32B additive).
+             */
+            feature_uuid?: string | null;
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -12900,10 +13063,17 @@ export interface components {
         /**
          * WeatherBatchRetiredItem
          * @description 현재 공개 parent가 아니어서 weather를 제공할 수 없는 item.
+         *
+         *     parent가 저장소에 아예 없으면 ``feature_uuid``도 ``None``이다.
          */
         WeatherBatchRetiredItem: {
             /** Feature Id */
             feature_id: string;
+            /**
+             * Feature Uuid
+             * @description UUID 정본 identity 병행 노출 (ADR-068, T-VN-32B additive).
+             */
+            feature_uuid?: string | null;
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -15727,7 +15897,7 @@ export interface operations {
                     "application/json": components["schemas"]["AdminFeatureDetailResponse"];
                 };
             };
-            /** @description feature 없음 */
+            /** @description feature 참조 해석 불가 또는 없음 */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -15736,7 +15906,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Validation Error */
+            /** @description feature 참조 형식 오류(빈 문자열/공백 패딩/길이 초과) */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -18529,7 +18699,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description feature_id 없음 */
+            /** @description feature 참조 해석 불가 또는 비공개 */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -18538,7 +18708,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description If-None-Match가 canonical strong ETag가 아님 */
+            /** @description feature 참조 형식 오류(빈 문자열/공백 패딩/길이 초과) 또는 If-None-Match가 canonical strong ETag가 아님 */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -22233,6 +22403,95 @@ export interface operations {
             };
             /** @description missing If-Match */
             428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_feature_alias_map_page_v1_service_feature_alias_maps_get: {
+        parameters: {
+            query?: {
+                /** @description keyset 시작점(exclusive) — 직전 페이지 next_after_alias. */
+                after_alias?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureAliasMapPageResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description FEATURE_ALIAS_MAP_INTEGRITY — 저장 행이 canonical/파생 계약 위반 (DB 층 보장 붕괴, 이관 중단) */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_feature_alias_map_checksum_v1_service_feature_alias_maps_checksum_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureAliasMapChecksumResponse"];
+                };
+            };
+            /** @description FEATURE_ALIAS_MAP_INTEGRITY — 저장 행이 canonical/파생 계약 위반 (DB 층 보장 붕괴, 이관 중단) */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };

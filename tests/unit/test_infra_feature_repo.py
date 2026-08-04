@@ -198,7 +198,10 @@ def test_every_composed_public_read_sql_embeds_notice_cast_guard() -> None:
     """
     guard = _guard("f")
     scalar_sql = {
-        "_PUBLIC_ACTIVE_NOTICE_IDS_SQL": feature_repo._PUBLIC_ACTIVE_NOTICE_IDS_SQL,
+        # T-VN-32B: identities SQL이 ids SQL을 대체(legacy id·UUID 쌍 반환).
+        "_PUBLIC_ACTIVE_NOTICE_IDENTITIES_SQL": (
+            feature_repo._PUBLIC_ACTIVE_NOTICE_IDENTITIES_SQL
+        ),
         "_FEATURES_IN_BBOX_SQL": feature_repo._FEATURES_IN_BBOX_SQL,
         "_FEATURES_IN_BBOX_WITH_GEOMETRY_SQL": (
             feature_repo._FEATURES_IN_BBOX_WITH_GEOMETRY_SQL

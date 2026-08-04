@@ -179,8 +179,11 @@ async def test_notice_ids_and_detail_visibility_fail_closed(
     ids = await _seed_notice_matrix(migrated_session)
     notice_ids = [fid for suffix, fid in ids.items() if suffix != "place"]
 
-    visible = await feature_repo.public_active_notice_feature_ids(
-        migrated_session, notice_ids
+    # T-VN-32B: 가시성 판정 표면은 identities(id→uuid 쌍) 하나다.
+    visible = set(
+        await feature_repo.public_active_notice_feature_identities(
+            migrated_session, notice_ids
+        )
     )
     assert visible == {ids[s] for s in _EXPECTED_VISIBLE_NOTICES}
 
@@ -190,10 +193,10 @@ async def test_notice_ids_and_detail_visibility_fail_closed(
     for i in range(len(_CORRUPTED_END_TIMES)):
         corrupted_id = ids[f"corrupt-{i}"]
         assert (
-            await feature_repo.public_active_notice_feature_ids(
+            await feature_repo.public_active_notice_feature_identities(
                 migrated_session, [corrupted_id]
             )
-            == set()
+            == {}
         )
         row = await feature_repo.get_public_feature_row(migrated_session, corrupted_id)
         assert row is not None  # 예외 없이 조회되고, 가시성 판정만 제외한다.

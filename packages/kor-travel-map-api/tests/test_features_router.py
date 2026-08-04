@@ -33,6 +33,35 @@ def client() -> TestClient:
     return TestClient(create_app(ApiSettings(public_api_key_required=False, vworld_api_key=None)))
 
 
+def _expected_uuid(feature_id: str) -> str:
+    from kortravelmap.core.ids import feature_uuid_from_legacy
+
+    return str(feature_uuid_from_legacy(feature_id))
+
+
+def _patch_resolved_identity(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    feature_id: str | None = None,
+) -> None:
+    """T-VN-32B 경계 alias 해석을 mock — 형식 계약(422)은 실제 검증을 태운다.
+
+    ``feature_id``가 주어지면 어떤 참조든 그 legacy id로 해석(UUID 참조 시나리오),
+    없으면 참조 문자열 자신을 legacy id로 해석한다.
+    """
+    from kortravelmap.infra import feature_identity
+
+    async def _resolve(_session: Any, ref: str) -> feature_identity.FeatureIdentity:
+        feature_identity.validate_feature_ref(ref)
+        resolved = feature_id if feature_id is not None else ref
+        return feature_identity.FeatureIdentity(
+            feature_id=resolved,
+            feature_uuid=_expected_uuid(resolved),
+        )
+
+    monkeypatch.setattr(feature_identity, "resolve_feature_identity", _resolve)
+
+
 @pytest.mark.unit
 def test_features_routes_mounted_in_openapi(client: TestClient) -> None:
     spec = client.get("/openapi.json").json()
@@ -162,6 +191,7 @@ def test_get_feature_404_when_missing(client: TestClient, monkeypatch: pytest.Mo
     async def _none_get_row(_session: Any, _fid: str) -> None:
         return None
 
+    _patch_resolved_identity(monkeypatch)
     monkeypatch.setattr(features_mod.feature_repo, "get_public_feature_row", _none_get_row)
 
     async def _fake_session() -> AsyncIterator[Any]:
@@ -194,15 +224,18 @@ def test_get_feature_404_when_notice_is_ended_or_non_latest(
     async def _get_row(_session: Any, _fid: str) -> dict[str, Any]:
         return row
 
-    async def _public_ids(_session: Any, feature_ids: list[str]) -> set[str]:
+    async def _public_identities(
+        _session: Any, feature_ids: list[str]
+    ) -> dict[str, str]:
         assert feature_ids == ["notice-old"]
-        return set()
+        return {}
 
+    _patch_resolved_identity(monkeypatch)
     monkeypatch.setattr(features_mod.feature_repo, "get_public_feature_row", _get_row)
     monkeypatch.setattr(
         features_mod.feature_repo,
-        "public_active_notice_feature_ids",
-        _public_ids,
+        "public_active_notice_feature_identities",
+        _public_identities,
     )
 
     async def _fake_session() -> AsyncIterator[Any]:
@@ -224,6 +257,7 @@ def test_list_features_maps_bbox_rows(client: TestClient, monkeypatch: pytest.Mo
     rows = [
         {
             "feature_id": "f1",
+            "feature_uuid": _expected_uuid("f1"),
             "kind": "place",
             "name": "장소",
             "category": "01010100",
@@ -262,6 +296,8 @@ def test_list_features_maps_bbox_rows(client: TestClient, monkeypatch: pytest.Mo
         assert r.status_code == 200
         body = r.json()
         assert body["data"]["items"][0]["feature_id"] == "f1"
+        # T-VN-32B additive — repo row의 UUID 정본이 응답에 병행 노출된다.
+        assert body["data"]["items"][0]["feature_uuid"] == _expected_uuid("f1")
         assert body["data"]["items"][0]["lon"] == 126.97
         assert body["data"]["items"][0]["price_summary"] is None
         assert body["meta"]["page"] == {
@@ -557,6 +593,7 @@ def test_get_feature_detail_maps_row(client: TestClient, monkeypatch: pytest.Mon
         assert public_only is True
         return {}
 
+    _patch_resolved_identity(monkeypatch)
     monkeypatch.setattr(features_mod.feature_repo, "get_public_feature_row", _get_row)
     monkeypatch.setattr(
         features_mod.curation_repo,
@@ -573,6 +610,9 @@ def test_get_feature_detail_maps_row(client: TestClient, monkeypatch: pytest.Mon
         assert r.status_code == 200
         body = r.json()
         assert body["data"]["kind"] == "event"
+        # T-VN-32B additive — UUID 정본 병행 노출 (feature_id는 legacy 유지).
+        assert body["data"]["feature_id"] == "f1"
+        assert body["data"]["feature_uuid"] == _expected_uuid("f1")
         # T-VN-05: provider raw passthrough(``payload``)는 공개 detail에서 벗겨진다.
         assert body["data"]["detail"] == {"event_kind": "festival"}
         assert "payload" not in body["data"]["detail"]
@@ -609,6 +649,98 @@ def test_get_feature_detail_maps_row(client: TestClient, monkeypatch: pytest.Mon
             headers={"If-None-Match": 'W/"7"'},
         )
         assert malformed.status_code == 422
+    finally:
+        client.app.dependency_overrides.clear()
+
+
+@pytest.mark.unit
+def test_get_feature_accepts_uuid_ref_via_boundary_resolution(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T-VN-32B 경계 alias 해석 — canonical UUID 참조도 같은 detail로 해석된다.
+
+    경계에서 UUID → legacy 정본 키로 해석한 뒤 내부 조회는 legacy 키로만 한다.
+    응답 ``feature_id``는 legacy 유지(값 전환은 T-VN-32C), ``feature_uuid`` 병행.
+    """
+    from kortravelmap.api.db import get_session
+    from kortravelmap.api.routers import features as features_mod
+
+    row = {
+        "feature_id": "f1",
+        "kind": "place",
+        "name": "장소",
+        "category": "01010100",
+        "lon": 126.97,
+        "lat": 37.56,
+        "address": {},
+        "detail": {},
+        "urls": {},
+        "legal_dong_code": None,
+        "sido_code": None,
+        "sigungu_code": None,
+        "marker_icon": None,
+        "marker_color": None,
+        "status": "active",
+        "row_revision": 3,
+        "updated_at": "2026-08-04T00:00:00+09:00",
+        "deleted_at": None,
+    }
+    requested_ids: list[str] = []
+
+    async def _get_row(_session: Any, feature_id: str) -> dict[str, Any]:
+        requested_ids.append(feature_id)
+        return row
+
+    async def _curations(
+        _session: Any, *, feature_ids: list[str], public_only: bool
+    ) -> dict[str, tuple[Any, ...]]:
+        assert feature_ids == ["f1"]
+        return {}
+
+    _patch_resolved_identity(monkeypatch, feature_id="f1")
+    monkeypatch.setattr(features_mod.feature_repo, "get_public_feature_row", _get_row)
+    monkeypatch.setattr(
+        features_mod.curation_repo,
+        "list_curation_items_by_feature_ids",
+        _curations,
+    )
+
+    async def _fake_session() -> AsyncIterator[Any]:
+        yield object()
+
+    client.app.dependency_overrides[get_session] = _fake_session
+    try:
+        r = client.get(f"/v1/features/{_expected_uuid('f1')}")
+        assert r.status_code == 200
+        # 내부 전달은 해석된 legacy 정본 키.
+        assert requested_ids == ["f1"]
+        body = r.json()
+        assert body["data"]["feature_id"] == "f1"
+        assert body["data"]["feature_uuid"] == _expected_uuid("f1")
+        assert r.headers["ETag"] == '"3"'
+    finally:
+        client.app.dependency_overrides.clear()
+
+
+@pytest.mark.unit
+def test_get_feature_ref_format_error_maps_to_422(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """형식 오류 참조(공백 패딩·길이 초과)는 DB 해석 전에 422다 (T-VN-32B)."""
+    from kortravelmap.api.db import get_session
+
+    _patch_resolved_identity(monkeypatch)
+
+    async def _fake_session() -> AsyncIterator[Any]:
+        yield object()
+
+    client.app.dependency_overrides[get_session] = _fake_session
+    try:
+        padded = client.get("/v1/features/%20f1")
+        assert padded.status_code == 422
+
+        overlong = client.get("/v1/features/" + "x" * 257)
+        assert overlong.status_code == 422
     finally:
         client.app.dependency_overrides.clear()
 
@@ -671,6 +803,7 @@ def test_mois_place_detail_strips_raw_provider_payload(
     ) -> dict[str, tuple[Any, ...]]:
         return {}
 
+    _patch_resolved_identity(monkeypatch)
     monkeypatch.setattr(features_mod.feature_repo, "get_public_feature_row", _get_row)
     monkeypatch.setattr(
         features_mod.curation_repo,
@@ -839,18 +972,21 @@ def test_features_batch_returns_exhaustive_typed_items(
                     "marker_icon": "star",
                     "marker_color": "P-11",
                 },
+                feature_uuid=_expected_uuid("found"),
             ),
             FeatureBatchItemRow(
                 feature_id="retired",
                 state="retired",
                 row_revision=10,
                 trip_card=None,
+                feature_uuid=_expected_uuid("retired"),
             ),
             FeatureBatchItemRow(
                 feature_id="suppressed",
                 state="suppressed",
                 row_revision=11,
                 trip_card=None,
+                feature_uuid=_expected_uuid("suppressed"),
             ),
             FeatureBatchItemRow(
                 feature_id="missing",
@@ -863,6 +999,7 @@ def test_features_batch_returns_exhaustive_typed_items(
                 state="unchanged",
                 row_revision=17,
                 trip_card=None,
+                feature_uuid=_expected_uuid("unchanged"),
             ),
         )
 
@@ -894,9 +1031,11 @@ def test_features_batch_returns_exhaustive_typed_items(
             "missing",
             "unchanged",
         ]
+        # T-VN-32B additive — 상태별 item에 feature_uuid 병행 노출(missing 제외).
         assert items[0] == {
             "state": "found",
             "feature_id": "found",
+            "feature_uuid": _expected_uuid("found"),
             "row_revision": 9,
             "trip_card": {
                 "feature_id": "found",
@@ -913,17 +1052,20 @@ def test_features_batch_returns_exhaustive_typed_items(
         assert items[1] == {
             "state": "retired",
             "feature_id": "retired",
+            "feature_uuid": _expected_uuid("retired"),
             "row_revision": 10,
         }
         assert items[2] == {
             "state": "suppressed",
             "feature_id": "suppressed",
+            "feature_uuid": _expected_uuid("suppressed"),
             "row_revision": 11,
         }
         assert items[3] == {"state": "missing", "feature_id": "missing"}
         assert items[4] == {
             "state": "unchanged",
             "feature_id": "unchanged",
+            "feature_uuid": _expected_uuid("unchanged"),
             "row_revision": 17,
         }
     finally:

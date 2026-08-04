@@ -95,6 +95,7 @@ __all__ = [
     "metadata",
     "Base",
     "FeatureRow",
+    "FeatureAliasRow",
     "WeatherMetricSeriesRow",
     "FeatureVersionRow",
     "SourceEntityRow",
@@ -321,10 +322,23 @@ class FeatureRow(Base):
             "user_deleted_at",
             postgresql_where=text("user_deleted_at IS NOT NULL"),
         ),
+        UniqueConstraint("feature_uuid", name=conv("uq_features_feature_uuid")),
+        # T-VN-32B dual 기간 파생 규칙 fence (alembic 0080) — legacy id가 존재하는
+        # 동안 합법 UUID는 uuid5 파생값 하나뿐이다. 32C cutover에서 제거.
+        CheckConstraint(
+            "feature_uuid = feature.feature_uuid_from_legacy(feature_id)",
+            name=conv("ck_features_feature_uuid_dual_derivation"),
+        ),
         {"schema": "feature"},
     )
 
     feature_id: Mapped[str] = mapped_column(String, primary_key=True)
+    # T-VN-32A(ADR-068) UUID identity shadow — legacy id의 결정적 파생값
+    # uuid5(FEATURE_UUID_NAMESPACE, feature_id) (core/ids.feature_uuid_from_legacy).
+    # DB server default 없음(freeze 미정 존중 — 신규 행 정본 generator는 T-VN-32B
+    # 소관). 신규 INSERT는 0079의 BEFORE INSERT 트리거
+    # trg_features_feature_uuid_fill이 NULL일 때 파생값으로 채운다.
+    feature_uuid: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
     kind: Mapped[str] = mapped_column(String, nullable=False)
     name: Mapped[str] = mapped_column(String, nullable=False)
     category: Mapped[str] = mapped_column(String, nullable=False)
@@ -427,6 +441,83 @@ class FeatureRow(Base):
         server_default=text("now()"),
     )
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class FeatureAliasRow(Base):
+    """``feature.feature_aliases`` — legacy ``f_*`` alias 보존 (T-VN-32A, ADR-068 결정 3).
+
+    shadow 단계 구조: 실질 결합축은 legacy ``feature_id``(text FK)이고,
+    ``feature_uuid``는 target 전환(T-VN-32C alias-map 이관) 때 재작성 없이
+    그대로 쓰는 파생 사본이다. 컬럼·제약 이름은 freeze
+    ``contracts/vnext/target-schema-v1.sql`` §4의 대응물과 정합한다
+    (``pk_feature_aliases`` / ``fk_feature_aliases_feature`` /
+    ``ck_feature_aliases_alias_canonical`` / ``ck_feature_aliases_kind_canonical`` /
+    ``idx_feature_aliases_feature``).
+
+    freeze가 미정으로 남긴 3건은 T-VN-32A가 결정했다 (alembic 0079 docstring):
+
+    - alias_kind 값 집합 — 닫힌 CHECK ``('legacy_feature_id')``
+    - FK ON DELETE — ``CASCADE`` (alias는 파생값·재계산 가능)
+    - backfill generator — ``uuid5(FEATURE_UUID_NAMESPACE, feature_id)``
+
+    행 생성은 0079 AFTER INSERT 트리거(``trg_features_legacy_alias``)가 feature
+    INSERT와 같은 transaction에서 수행한다(원자 생성).
+    """
+
+    __tablename__ = "feature_aliases"
+    __table_args__ = (
+        CheckConstraint(
+            "alias <> '' AND alias = btrim(alias)",
+            name=conv("ck_feature_aliases_alias_canonical"),
+        ),
+        CheckConstraint(
+            "alias_kind <> '' AND alias_kind = btrim(alias_kind)",
+            name=conv("ck_feature_aliases_kind_canonical"),
+        ),
+        CheckConstraint(
+            "alias_kind IN ('legacy_feature_id')",
+            name=conv("ck_feature_aliases_alias_kind"),
+        ),
+        # T-VN-32B dual 기간 파생 규칙 fence (alembic 0080) — 32C alias-map
+        # DB-to-DB 이관의 무결성 전제. 32C cutover에서 제거. 파생 축은
+        # **alias**(checksum 계약과 동일 축 — 32C 적대 리뷰 H1 재축).
+        CheckConstraint(
+            "feature_uuid = feature.feature_uuid_from_legacy(alias)",
+            name=conv("ck_feature_aliases_uuid_dual_derivation"),
+        ),
+        # 닫힌 kind 기간의 실질 불변식 — legacy alias는 자기 자신 (H1).
+        CheckConstraint(
+            "alias_kind <> 'legacy_feature_id' OR alias = feature_id",
+            name=conv("ck_feature_aliases_legacy_identity"),
+        ),
+        Index("idx_feature_aliases_feature", "feature_id"),
+        Index("idx_feature_aliases_feature_uuid", "feature_uuid"),
+        # T-VN-32C alias-map 이관 표면의 keyset scan index (alembic 0081).
+        # 실제 DDL은 `(alias COLLATE "C")`지만 PG 반영(reflection)은 index
+        # collation을 노출하지 않아 metadata에 COLLATE 식을 쓰면 alembic
+        # check가 영구 drift를 보고한다 — 컬럼 index로 선언해 반영과 정합
+        # 시키고 COLLATE 정본은 0081 migration이 소유한다.
+        Index("idx_feature_aliases_alias_c", "alias"),
+        {"schema": "feature"},
+    )
+
+    alias: Mapped[str] = mapped_column(Text, primary_key=True)
+    feature_id: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey(
+            "feature.features.feature_id",
+            ondelete="CASCADE",
+            name=conv("fk_feature_aliases_feature"),
+        ),
+        nullable=False,
+    )
+    feature_uuid: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    alias_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
 
 
 class WeatherMetricSeriesRow(Base):

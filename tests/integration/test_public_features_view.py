@@ -345,8 +345,10 @@ async def test_contained_in_area_uses_projection(migrated_session: AsyncSession)
 
 async def test_notice_public_ids_use_projection(migrated_session: AsyncSession) -> None:
     ids = await _seed_matrix(migrated_session, "pfv:notice", name_token="공지", kind="notice")
-    visible = await feature_repo.public_active_notice_feature_ids(
-        migrated_session, [ids[suffix] for suffix, *_ in _STATE_MATRIX]
+    visible = set(
+        await feature_repo.public_active_notice_feature_identities(
+            migrated_session, [ids[suffix] for suffix, *_ in _STATE_MATRIX]
+        )
     )
     assert visible == _expected_public(ids)
 

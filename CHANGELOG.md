@@ -5,6 +5,64 @@
 
 ## [Unreleased]
 
+### PinVi alias-map 이관 표면·legacy write fence (2026-08-04, T-VN-32C 전반부)
+
+- **API(service)**: `GET /v1/service/feature-alias-maps`(canonical keyset
+  페이지, limit≤1000) + `GET /v1/service/feature-alias-maps/checksum`(저장소
+  전체 merkle root·count)이 추가됐다 — PinVi alias-map DB-to-DB 이관 전용
+  read(ADR-068 결정 3의 전환·복구 경계, `X-Kor-Travel-Map-Service-Token`
+  게이트). 계약 정본은 `contracts/feature-alias-map-v1-golden.json`
+  (`feature-alias-map-v1`) — Map(`core/feature_alias_map.py`)과 PinVi가 독립
+  구현으로 같은 golden vector를 재계산해 대조한다. 저장 행이 canonical/파생
+  계약을 위반하면 500 `FEATURE_ALIAS_MAP_INTEGRITY`로 fail-close.
+- **DATABASE**: `0082_legacy_write_fence` — ① `feature.feature_aliases` 불변
+  fence(UPDATE 전면 거부, 직접 DELETE 거부 — feature 행 purge의 FK CASCADE
+  경유만 허용), ② `feature.features` identity 불변 fence(`feature_id`/
+  `feature_uuid` UPDATE 거부 — 재키잉은 soft-delete + 신규 행), ③ alias-map
+  keyset 조회용 `COLLATE "C"` index. 0079 트리거 2종(fill/alias)은 재평가 후
+  유지(0080 파생 CHECK와 함께 legacy-only 행 저장을 구조적으로 불가능하게
+  하는 강제 메커니즘 — 0081 docstring). legacy ID·CHECK·트리거 제거는 양
+  저장소 checksum 일치 뒤(32C 잔여)와 T-VN-39 removal manifest 소관.
+
+### UUID identity dual read/write — Map consumer-first (2026-08-04, T-VN-32B)
+
+- **API**: feature 응답에 `feature_uuid`가 additive로 병행 노출된다(ADR-068 UUID
+  정본 identity) — user `GET /v1/features/{id}` detail·search·in-bounds·nearby
+  item, service `POST /v1/features/batch` item(found/retired/suppressed/
+  unchanged)·`POST /v1/features/weather/batch` item, admin `GET /v1/admin/
+  features` 목록·상세. 응답 `feature_id` 값은 legacy `f_*` 유지 — UUID 전환은
+  T-VN-32C cutover.
+- **API**: 모든 feature `{feature_id}` 경로의 참조가 legacy id와 canonical
+  UUID 양쪽을 수용한다(경계 alias 해석 — user detail·sources·observations·
+  weather·price·contained-features, admin detail·revision·weather·price·
+  PATCH·DELETE·deactivate). 형식 오류(빈 문자열/공백 패딩/256자 초과)는 422,
+  미해석 참조는 404.
+- **DATABASE**: `0081_uuid_dual_read` — ① `feature.public_features` view 컬럼
+  목록을 재고정해 `feature_uuid`를 노출한다(공개 술어 무변경, 무손실
+  downgrade). ② dual 기간 파생 규칙 CHECK 2종
+  (`ck_features_feature_uuid_dual_derivation`,
+  `ck_feature_aliases_uuid_dual_derivation`)을 연결한다 — uuid5 파생값과 다른
+  `feature_uuid` write는 DB가 거부한다(T-VN-32C cutover에서 제거되는 한정
+  fence).
+- **INTERNAL**: 신규 feature write는 writer가 dual 기간 정본 generator(uuid5
+  legacy 파생, UUIDv7 미채택 결정)로 `feature_uuid`를 명시 생성하고, 관측값이
+  파생 규칙과 다르면 `FeatureIdentityInvariantError`로 fail-close한다
+  (legacy-only 신규 행 차단). notice lineage 가시성 판정 표면은
+  `public_active_notice_feature_identities`(id→uuid 쌍) 하나로 교체됐다.
+
+### UUID identity shadow — schema·deterministic backfill (2026-08-04, T-VN-32A)
+
+- **DATABASE**: `0080_feature_uuid_shadow` — `feature.features`에 `feature_uuid`
+  shadow 컬럼을 추가하고 `uuid5(uuid5(NAMESPACE_URL, 'kor-travel-map:feature-uuid:v1'),
+  legacy_feature_id)`로 결정적 backfill 후 NOT NULL + `uq_features_feature_uuid`를
+  연결한다. `feature.feature_aliases`(feature당 `alias = feature_id` legacy alias 1행,
+  `alias_kind = 'legacy_feature_id'` 닫힌 CHECK, legacy FK `ON DELETE CASCADE`)를
+  신설하고, INSERT 트리거 2종이 신규 행의 uuid·alias를 같은 transaction에서 생성한다
+  (호출자가 명시한 uuid는 존중). 기존 문자열 `f_*` PK·FK·읽기 경로는 무변경(shadow
+  단계, ADR-068)이며 downgrade는 파생 구조물만 제거해 무손실이다. Python 정본은
+  `kortravelmap.core.feature_uuid_from_legacy`, SQL mirror는 pgcrypto 기반
+  `feature.feature_uuid_from_legacy`(고정 벡터 상호 대조).
+
 ### H35 typed cutover GC·최종 cache-target 증적 (2026-08-02, T-VN-H35/T-VN-41)
 
 - **OPERATIONS**: Map cutover helper 순서를 `preflight→migrate→csv5→gc→verify`로 확장했다. `gc`는 기존

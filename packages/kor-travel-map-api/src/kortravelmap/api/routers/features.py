@@ -22,6 +22,7 @@ ADR 참조
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from time import perf_counter
 from typing import Annotated, Any, Literal, assert_never
@@ -37,6 +38,7 @@ from kortravelmap.core.exceptions import (
 from kortravelmap.core.sync_scope import MAX_EXTERNAL_SYSTEM_NAME_LENGTH
 from kortravelmap.infra import (
     curation_repo,
+    feature_identity,
     feature_repo,
     observation_repo,
     price_repo,
@@ -60,6 +62,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api.auth import require_admin_frontend, require_service_token
 from kortravelmap.api.db import get_session
+from kortravelmap.api.feature_ref import resolve_feature_ref_or_error
 from kortravelmap.api.http_revision import parse_revision_header, revision_etag
 from kortravelmap.api.response import ClusterUnit, Meta, ProblemDetail, make_meta
 from kortravelmap.api.routers.curations import PublicCurationItemView
@@ -167,6 +170,13 @@ class FeatureSummary(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     feature_id: str
+    feature_uuid: str | None = Field(
+        default=None,
+        description=(
+            "UUID 정본 identity 병행 노출 (ADR-068, T-VN-32B additive). "
+            "feature_id 값 자체의 UUID 전환은 T-VN-32C."
+        ),
+    )
     kind: str
     name: str
     category: str
@@ -249,6 +259,13 @@ class FeatureDetailResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     feature_id: str
+    feature_uuid: str | None = Field(
+        default=None,
+        description=(
+            "UUID 정본 identity 병행 노출 (ADR-068, T-VN-32B additive). "
+            "feature_id 값 자체의 UUID 전환은 T-VN-32C."
+        ),
+    )
     kind: str
     name: str
     category: str
@@ -483,6 +500,12 @@ class FeatureTripCard(BaseModel):
     marker_color: str | None
 
 
+_FeatureUuidField = Field(
+    default=None,
+    description="UUID 정본 identity 병행 노출 (ADR-068, T-VN-32B additive).",
+)
+
+
 class FeatureBatchFoundItem(BaseModel):
     """공개 feature의 최신 trip_card."""
 
@@ -490,6 +513,7 @@ class FeatureBatchFoundItem(BaseModel):
 
     state: Literal["found"]
     feature_id: str
+    feature_uuid: str | None = _FeatureUuidField
     row_revision: _PostgresBigintRevision
     trip_card: FeatureTripCard
 
@@ -501,6 +525,7 @@ class FeatureBatchRetiredItem(BaseModel):
 
     state: Literal["retired"]
     feature_id: str
+    feature_uuid: str | None = _FeatureUuidField
     row_revision: _PostgresBigintRevision
 
 
@@ -511,6 +536,7 @@ class FeatureBatchSuppressedItem(BaseModel):
 
     state: Literal["suppressed"]
     feature_id: str
+    feature_uuid: str | None = _FeatureUuidField
     row_revision: _PostgresBigintRevision
 
 
@@ -530,6 +556,7 @@ class FeatureBatchUnchangedItem(BaseModel):
 
     state: Literal["unchanged"]
     feature_id: str
+    feature_uuid: str | None = _FeatureUuidField
     row_revision: _PostgresBigintRevision
 
 
@@ -628,6 +655,10 @@ class NearbyFeatureSummary(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     feature_id: str
+    feature_uuid: str | None = Field(
+        default=None,
+        description="UUID 정본 identity 병행 노출 (ADR-068, T-VN-32B additive).",
+    )
     kind: str
     name: str
     category: str
@@ -723,6 +754,7 @@ def _public_detail(detail: dict[str, Any]) -> dict[str, Any]:
 def _detail_from_row(row: dict[str, Any]) -> FeatureDetailResponse:
     return FeatureDetailResponse(
         feature_id=row["feature_id"],
+        feature_uuid=row.get("feature_uuid"),
         kind=row["kind"],
         name=row["name"],
         category=row["category"],
@@ -754,6 +786,7 @@ def _batch_item_from_row(row: feature_repo.FeatureBatchItemRow) -> FeatureBatchI
         return FeatureBatchFoundItem(
             state="found",
             feature_id=row.feature_id,
+            feature_uuid=row.feature_uuid,
             row_revision=row.row_revision,
             trip_card=FeatureTripCard.model_validate(row.trip_card),
         )
@@ -761,18 +794,21 @@ def _batch_item_from_row(row: feature_repo.FeatureBatchItemRow) -> FeatureBatchI
         return FeatureBatchRetiredItem(
             state="retired",
             feature_id=row.feature_id,
+            feature_uuid=row.feature_uuid,
             row_revision=row.row_revision,
         )
     if row.state == "suppressed":
         return FeatureBatchSuppressedItem(
             state="suppressed",
             feature_id=row.feature_id,
+            feature_uuid=row.feature_uuid,
             row_revision=row.row_revision,
         )
     if row.state == "unchanged":
         return FeatureBatchUnchangedItem(
             state="unchanged",
             feature_id=row.feature_id,
+            feature_uuid=row.feature_uuid,
             row_revision=row.row_revision,
         )
     assert_never(row.state)
@@ -786,19 +822,20 @@ async def _public_feature_row(
 
     공개 여부 술어는 ``feature.public_features`` VIEW(alembic 0059) 한 곳에만
     있고 본 라우터는 재구현하지 않는다(F-1 재발 방지). notice는 추가로
-    active/latest 계보 조건(``public_active_notice_feature_ids``)을 통과해야 한다.
-    비공개면 ``None``.
+    active/latest 계보 조건(``public_active_notice_feature_identities`` —
+    T-VN-32B dual: legacy id·UUID 정본 쌍 반환)을 통과해야 한다. 비공개면
+    ``None``.
     """
     row = await feature_repo.get_public_feature_row(session, feature_id)
     if row is None:
         return None
     if row.get("kind") != "notice":
         return row
-    visible_ids = await feature_repo.public_active_notice_feature_ids(
+    visible_identities = await feature_repo.public_active_notice_feature_identities(
         session,
         [str(row["feature_id"])],
     )
-    if str(row["feature_id"]) not in visible_ids:
+    if str(row["feature_id"]) not in visible_identities:
         return None
     return row
 
@@ -806,31 +843,24 @@ async def _public_feature_row(
 async def _public_feature_row_or_404(
     session: AsyncSession,
     feature_id: str,
+    *,
+    display_ref: str | None = None,
 ) -> dict[str, Any]:
+    """공개 row 조회 또는 404. ``display_ref``는 404 메시지에 노출할 원본 참조.
+
+    T-VN-32B 경계 해석 뒤 내부 전달은 정본 키(``feature_id``)로 하되, 오류
+    메시지는 소비자가 보낸 참조 문자열을 그대로 되돌려준다.
+    """
     row = await _public_feature_row(session, feature_id)
     if row is None:
+        shown = display_ref if display_ref is not None else feature_id
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"feature 없음: {feature_id!r}",
+            detail=f"feature 없음: {shown!r}",
         )
     return row
 
 
-async def _operator_feature_or_404(
-    session: AsyncSession,
-    feature_id: str,
-) -> None:
-    """operator raw lineage 표면용 존재 확인 — 공개 가시성 gate를 적용하지 않는다.
-
-    T-VN-05: raw lineage는 operator 전용이므로 비공개/종료 feature도 감사 대상이다.
-    공개 projection이 아니라 raw row 존재만으로 404를 판정한다(없으면 404).
-    """
-    row = await feature_repo.get_feature_row(session, feature_id)
-    if row is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"feature 없음: {feature_id!r}",
-        )
 
 
 def _curation_item_view(row: curation_repo.CurationItem) -> PublicCurationItemView:
@@ -1117,6 +1147,7 @@ async def search_public_features(
     items = [
         FeatureSummary(
             feature_id=item.feature_id,
+            feature_uuid=item.feature_uuid,
             kind=item.kind,
             name=item.name,
             category=item.category,
@@ -1201,6 +1232,7 @@ async def list_features_nearby(
     items = [
         NearbyFeatureSummary(
             feature_id=item.feature_id,
+            feature_uuid=item.feature_uuid,
             kind=item.kind,
             name=item.name,
             category=item.category,
@@ -1303,6 +1335,7 @@ async def list_features_nearby_by_target(
     items = [
         NearbyFeatureSummary(
             feature_id=item.feature_id,
+            feature_uuid=item.feature_uuid,
             kind=item.kind,
             name=item.name,
             category=item.category,
@@ -1331,10 +1364,21 @@ async def list_features_nearby_by_target(
     "/{feature_id}",
     response_model=FeatureDetailEnvelopeResponse,
     summary="feature 단건 상세",
+    description=(
+        "feature 참조는 legacy `f_*` id와 UUID 정본(canonical hyphenated) "
+        "양쪽을 수용한다 (ADR-068 경계 alias 해석, T-VN-32B dual). 응답의 "
+        "`feature_id`는 legacy 값을 유지하고 `feature_uuid`가 병행 노출된다 — "
+        "값 자체의 UUID 전환은 T-VN-32C."
+    ),
     responses={
-        404: {"description": "feature_id 없음"},
+        404: {"description": "feature 참조 해석 불가 또는 비공개"},
         304: {"description": "If-None-Match row_revision 일치 (본문 없음)"},
-        422: {"description": "If-None-Match가 canonical strong ETag가 아님"},
+        422: {
+            "description": (
+                "feature 참조 형식 오류(빈 문자열/공백 패딩/길이 초과) 또는 "
+                "If-None-Match가 canonical strong ETag가 아님"
+            )
+        },
         200: {
             "headers": {
                 "ETag": {
@@ -1352,7 +1396,13 @@ async def get_feature(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> FeatureDetailEnvelopeResponse | Response:
     started_at = perf_counter()
-    row = await _public_feature_row_or_404(session, feature_id)
+    # T-VN-32B 경계 alias 해석 — legacy/UUID 참조를 정본 키 쌍으로 해석하고,
+    # 이후 내부 조회·조인은 해석된 키로만 한다 (ADR-068 결정 3).
+    identity = await resolve_feature_ref_or_error(session, feature_id)
+    canonical_id = identity.feature_id
+    row = await _public_feature_row_or_404(
+        session, canonical_id, display_ref=feature_id
+    )
     revision = int(row["row_revision"])
     expected = parse_revision_header(
         request,
@@ -1363,11 +1413,14 @@ async def get_feature(
     if expected == revision:
         return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": etag})
     curations = await curation_repo.list_curation_items_by_feature_ids(
-        session, feature_ids=[feature_id], public_only=True
+        session, feature_ids=[canonical_id], public_only=True
     )
     detail = _detail_from_row(row).model_copy(
         update={
-            "curations": [_curation_item_view(item) for item in curations.get(feature_id, ())],
+            "feature_uuid": identity.feature_uuid,
+            "curations": [
+                _curation_item_view(item) for item in curations.get(canonical_id, ())
+            ],
         }
     )
     response.headers["ETag"] = etag
@@ -1392,15 +1445,16 @@ async def get_feature_sources(
     """operator 전용 — feature에 연결된 모든 제공기관 entity의 현재 raw 관측값.
 
     T-VN-05: raw lineage(raw_data/raw_payload_hash/source_record_key)는 공개 detail에서
-    제거하고 이 operator 표면으로 이동했다. 비공개/종료 feature도 감사 대상이라
-    공개 가시성 gate 없이 raw row 존재만 확인한다.
+    제거하고 이 operator 표면으로 이동했다. 비공개/종료 feature도 감사 대상이다 —
+    경계 해석(T-VN-32B) 성공이 raw row 존재를 함의하므로 별도 존재 확인이 없다.
     """
     started_at = perf_counter()
-    await _operator_feature_or_404(session, feature_id)
-    observations = await observation_repo.get_current_observations(session, feature_id)
+    identity = await resolve_feature_ref_or_error(session, feature_id)
+    canonical_id = identity.feature_id
+    observations = await observation_repo.get_current_observations(session, canonical_id)
     return FeatureSourcesResponse(
         data=FeatureSourcesData(
-            feature_id=feature_id,
+            feature_id=canonical_id,
             observations=[_observation_view(item) for item in observations],
         ),
         meta=make_meta(request, started_at=started_at),
@@ -1426,11 +1480,11 @@ async def get_feature_observation_history(
     cursor: Annotated[str | None, Query()] = None,
 ) -> FeatureObservationHistoryResponse:
     started_at = perf_counter()
-    await _operator_feature_or_404(session, feature_id)
+    identity = await resolve_feature_ref_or_error(session, feature_id)
     try:
         page = await observation_repo.get_observation_history(
             session,
-            feature_id=feature_id,
+            feature_id=identity.feature_id,
             source_entity_key=source_entity_key,
             cursor=cursor,
             limit=page_size,
@@ -1620,6 +1674,7 @@ class WeatherBatchFoundItem(BaseModel):
 
     state: Literal["found"]
     feature_id: str
+    feature_uuid: str | None = _FeatureUuidField
     card_key: str
 
 
@@ -1643,15 +1698,20 @@ class WeatherBatchNoDataItem(BaseModel):
 
     state: Literal["no_data"]
     feature_id: str
+    feature_uuid: str | None = _FeatureUuidField
 
 
 class WeatherBatchRetiredItem(BaseModel):
-    """현재 공개 parent가 아니어서 weather를 제공할 수 없는 item."""
+    """현재 공개 parent가 아니어서 weather를 제공할 수 없는 item.
+
+    parent가 저장소에 아예 없으면 ``feature_uuid``도 ``None``이다.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     state: Literal["retired"]
     feature_id: str
+    feature_uuid: str | None = _FeatureUuidField
 
 
 WeatherBatchItemOut = Annotated[
@@ -1691,19 +1751,30 @@ class WeatherBatchResponse(BaseModel):
 
 def _weather_batch_item_out(
     item: weather_repo.WeatherBatchItem,
+    feature_uuid_map: Mapping[str, str],
 ) -> WeatherBatchItemOut:
+    feature_uuid = feature_uuid_map.get(item.feature_id)
     if item.state == "found":
         if item.card_key is None:
             raise RuntimeError("found weather batch item has no card key")
         return WeatherBatchFoundItem(
             state="found",
             feature_id=item.feature_id,
+            feature_uuid=feature_uuid,
             card_key=item.card_key,
         )
     if item.state == "no_data":
-        return WeatherBatchNoDataItem(state="no_data", feature_id=item.feature_id)
+        return WeatherBatchNoDataItem(
+            state="no_data",
+            feature_id=item.feature_id,
+            feature_uuid=feature_uuid,
+        )
     if item.state == "retired":
-        return WeatherBatchRetiredItem(state="retired", feature_id=item.feature_id)
+        return WeatherBatchRetiredItem(
+            state="retired",
+            feature_id=item.feature_id,
+            feature_uuid=feature_uuid,
+        )
     assert_never(item.state)
 
 
@@ -1836,6 +1907,14 @@ async def get_feature_weather_batch(
         )
     except _WEATHER_BATCH_READ_EXCEPTIONS as exc:
         raise _weather_batch_http_exception(exc) from exc
+    # T-VN-32B additive — weather batch 조회 SQL을 재작성하지 않고 item feature
+    # 참조에 UUID 정본을 병행 노출한다(존재하지 않는 parent는 map에서 빠져 None).
+    item_feature_ids = sorted(
+        {item.feature_id for snapshot in snapshots for item in snapshot.items}
+    )
+    feature_uuid_map = await feature_identity.get_feature_uuid_map(
+        session, item_feature_ids
+    )
     return WeatherBatchResponse(
         data=WeatherBatchData(
             known_at=body.known_at,
@@ -1844,7 +1923,10 @@ async def get_feature_weather_batch(
                     target_at=snapshot.target_at,
                     timeline_until=snapshot.target_at
                     + timedelta(days=weather_repo.WEATHER_BATCH_TIMELINE_DAYS),
-                    items=[_weather_batch_item_out(item) for item in snapshot.items],
+                    items=[
+                        _weather_batch_item_out(item, feature_uuid_map)
+                        for item in snapshot.items
+                    ],
                     cards=[_weather_batch_card_out(card) for card in snapshot.cards],
                 )
                 for snapshot in snapshots
@@ -1889,6 +1971,9 @@ async def get_feature_weather(
     ] = None,
 ) -> FeatureWeatherResponse:
     started_at = perf_counter()
+    # T-VN-32B 경계 alias 해석 — 해석 실패는 404, 이후 판정은 정본 키로.
+    identity = await resolve_feature_ref_or_error(session, feature_id)
+    canonical_id = identity.feature_id
     known_at = datetime.now(UTC)
     target_at = asof or known_at
     # 단건도 batch의 parent/no-data 판정과 bitemporal cutoff를 그대로 재사용한다.
@@ -1898,7 +1983,7 @@ async def get_feature_weather(
             targets=(
                 weather_repo.WeatherBatchTarget(
                     target_at=target_at,
-                    feature_ids=(feature_id,),
+                    feature_ids=(canonical_id,),
                 ),
             ),
             known_at=known_at,
@@ -1958,7 +2043,11 @@ async def get_area_contained_features(
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> AreaContainedFeaturesResponse:
     started_at = perf_counter()
-    area_row = await _public_feature_row_or_404(session, feature_id)
+    identity = await resolve_feature_ref_or_error(session, feature_id)
+    canonical_id = identity.feature_id
+    area_row = await _public_feature_row_or_404(
+        session, canonical_id, display_ref=feature_id
+    )
     if area_row["kind"] != "area":
         raise HTTPException(
             status_code=422,
@@ -1966,13 +2055,13 @@ async def get_area_contained_features(
         )
     rows = await feature_repo.features_contained_in_area(
         session,
-        feature_id=feature_id,
+        feature_id=canonical_id,
         kinds=kind,
         limit=page_size,
     )
     return AreaContainedFeaturesResponse(
         data=AreaContainedFeaturesData(
-            area_feature_id=feature_id,
+            area_feature_id=canonical_id,
             area_square_meters=area_row.get("area_square_meters"),
             items=[FeatureSummary(**row) for row in rows],
         ),
@@ -2000,12 +2089,14 @@ async def get_feature_price(
     ] = 100,
 ) -> FeaturePriceResponse:
     started_at = perf_counter()
+    identity = await resolve_feature_ref_or_error(session, feature_id)
+    canonical_id = identity.feature_id
     # parent feature 공개 검사 (ADR-067) — 비공개/미존재 feature의 price payload
     # 노출 금지. detail 단건과 동일한 404 계약.
-    await _public_feature_row_or_404(session, feature_id)
+    await _public_feature_row_or_404(session, canonical_id, display_ref=feature_id)
     card = await price_repo.build_price_card(
         session,
-        feature_id=feature_id,
+        feature_id=canonical_id,
         asof=asof,
         history_limit=history_limit,
     )

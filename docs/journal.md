@@ -17,6 +17,259 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-08-04 (9) — T-VN-32C 적대 리뷰 1 반영 (H1/H2/M3/M4/L6/L7)
+
+미머지 branch이므로 0080/0081은 새 revision 없이 제자리 수정.
+
+- **H1 [차단급] alias 파생 CHECK 축 오류**: 0080
+  `ck_feature_aliases_uuid_dual_derivation`이 `f(feature_id)` 축이었는데 32C
+  checksum 계약은 `f(alias)` 축 — `alias ≠ feature_id`인 독성 행
+  (`uuid=f(feature_id)`)이 DB를 통과해 이관 표면 전체를 영구 fail-close시키고
+  0081 fence가 그 행 삭제까지 막는다(리뷰어 실측). CHECK를
+  `f(alias)` 축으로 재축 + `ck_feature_aliases_legacy_identity`
+  (`alias_kind <> 'legacy_feature_id' OR alias = feature_id`) 신설 — 닫힌
+  kind 기간의 실질 불변식을 DB로. 모델 metadata 동반 정합. 독성 행 2계열
+  INSERT가 23514로 거부됨을 실측하는 회귀
+  (`test_poison_alias_rows_are_rejected_by_db_checks`) 추가, identity
+  boundary drift 단언은 CHECK 2종 대안 일치로 재정의(보고 이름은 PG 내부
+  순서 소관).
+- **H2 [높음] COLLATE "C" 회귀 방어 0**: conftest PostGIS가 alpine(musl,
+  byte==default 순서)이라 COLLATE 제거 변이가 생존. glibc 이미지
+  (`postgis/postgis:16-3.5`) 전용
+  `test_alias_map_collation_glibc.py` 신설 — 다국어 9행 세트(대/소문자·기호·
+  é·가나다·f_*/feature: 계열)로 ① keyset 페이지 순서==checksum 정렬==byte
+  순서 단언(COLLATE 제거 변이는 en_US 순서로 갈라져 사망) ② default와
+  `COLLATE "C"` 순서가 실제로 다름을 단언(같으면 판별력 없음을 사유 명시
+  skip — musl 가드).
+- **M3**: `feature_aliases`에 `BEFORE TRUNCATE … FOR EACH STATEMENT` 거부
+  트리거(`trg_feature_aliases_no_truncate` — 저장소 `trg_*_no_truncate` 패턴)
+  0081 추가 + TRUNCATE 거부 회귀.
+- **M4**: 0081 docstring의 "구조적으로 존재하지 않는다" 과장 정정 —
+  trigger-respecting 세션 한정, `session_replication_role=replica`(superuser)
+  우회 가능, `count_features_missing_identity` 정기 관측이 방어선. tasks.md
+  32C 운영 점검 목록에 반영.
+- **L6**: alias UPDATE fence 단언을 분기 고유 문구("행은 불변입니다")로 좁혀
+  DELETE fence와 구분(변이 등가성 해소).
+- **L7**: 32C 잔여 절차에 ⓪ "cutover 전 legacy feature_id의 canonical UUID
+  형태 값 실재 스캔 1회"(경계 해석 UUID-정본 우선의 shadowing 확인) 추가
+  (tasks.md·resume.md).
+- freeze artifact 무영향(0080/0081 CHECK·트리거는 전환기 구조물 — artifact
+  bytes 미변경, unit sha 게이트 green 확인).
+- **검증(CI-parity python:3.13 컨테이너)**: unit(alias_map 8 + freeze
+  artifact 7) 15 passed · fence(독성 행·TRUNCATE 포함 12)+32A shadow
+  migration+identity boundary+alembic 일관성 **33 passed** · glibc collation
+  판별 신규 모듈 **2 passed**(skip 아님 — glibc에서 default≠"C" 순서 실측 +
+  keyset/checksum이 byte 순서 유지) · ruff clean.
+
+## 2026-08-04 (8) — T-VN-32C(1/2) alias-map 이관 표면·checksum 계약·legacy write fence
+
+> PinVi 쌍 branch `feat/tvn32c-uuid-alias`(pinvi 저장소)와 한 쌍이다. rollout이
+> 32C 안에 둔 "양 저장소 checksum 일치 → Map 응답 UUID 전환"은 두 PR 머지·이관
+> 실행 뒤에만 가능한 운영 게이트라, 본 커밋은 32C의 전반부(표면·계약·fence)다.
+
+- **"DB-to-DB 이관" 표면 판단**: ADR-068 결정 4의 "PinVi는 검증된 alias map으로
+  소비 데이터를 DB-to-DB 이관"은 런타임 REST alias lookup(결정 3이 금지)이
+  아니라 **Map DB의 alias 전량을 PinVi DB로 옮기는 bulk 계약**이다. PinVi의
+  기존 Map 소비는 전부 HTTP(OpenAPI 경계 — CLAUDE.md)이고 cache-target
+  reconciliation이 이미 service 표면에서 snapshot+merkle 대조를 쓰므로, 이관
+  표면도 **service read 2종**으로 착지: `GET /v1/service/feature-alias-maps`
+  (canonical keyset 페이지, limit≤1000) + `/checksum`(전체 merkle root·count).
+  route_policy SERVICE + `require_service_token` 게이트, read-only라
+  feature_operation_registry 등록 대상 아님(registry는 write 소관). ADR-068
+  결정 3의 "alias lookup은 전환·복구 경계에서만" — 바로 그 경계다.
+- **feature-alias-map-v1 checksum 계약** (`core/feature_alias_map.py` 순수 +
+  `contracts/feature-alias-map-v1-golden.json` — cache-target-source-v1 golden
+  패턴): row=(alias, feature_uuid, alias_kind). alias는 trim·비어있지 않음·
+  **NFC 정규형 아니면 거부**(정규화하지 않음)·≤256자, uuid는 canonical
+  lowercase hyphenated 36자만, kind는 닫힌 집합('legacy_feature_id').
+  leaf = `sha256("KTMFAMLEAF\0"‖u32be(len alias)‖alias‖u32be(len kind)‖kind‖
+  uuid raw 16B)`, 정렬은 alias UTF-8 byte 오름차순(중복 거부), node =
+  `sha256("KTMFAMNODE\0"‖L‖R)` 홀수 승격, 빈 map = `sha256("KTMFAMEMPTY\0")`.
+  파생 검증(`feature_uuid == uuid5(namespace, alias)`)은 checksum과 분리된
+  별도 함수 — 둘 다 통과해야 "검증된 alias map". golden은 ASCII 2 + é/가나다
+  (NFC byte-order 비교차) 4-vector + empty/odd-promotion root. PinVi가 vendored
+  사본으로 **독립 구현 재계산** 대조(`app/core/feature_alias_contract.py`,
+  namespace도 상수 복사가 아니라 basis 문자열 재파생).
+- **repo 층** `infra/feature_alias_map_repo.py`: keyset 페이지(`COLLATE "C"` —
+  NFC byte order와 동일)와 전량 checksum. 조회 행이 canonical/파생 계약을
+  위반하면 `FeatureAliasMapIntegrityError`로 fail-close(HTTP 500
+  FEATURE_ALIAS_MAP_INTEGRITY) — DB 층 보장(0079/0080/0081)이 뚫린 상태에서
+  이관을 계속하지 않는다. 페이지 pull 중 write drift는 소비자 root 불일치
+  재시도로 감지(window 동안 fence 유지는 rollout 소유).
+- **legacy write fence** (alembic `0082_legacy_write_fence`, 전부 DB 트리거
+  fail-close): ① alias map 불변 — `feature_aliases` UPDATE 전면 거부 + 직접
+  DELETE 거부(참조 feature가 이미 사라진 FK CASCADE 경유만 허용 — removal
+  manifest "alias 유지" fence). ② identity 불변 — `features.feature_id/
+  feature_uuid` UPDATE 거부(재키잉은 soft-delete+신규 행). ③ legacy-only
+  write(uuid 없는 행 저장)는 기존 0079 fill 트리거+NOT NULL+0080 CHECK로
+  **구조적으로 불가능**함을 유지 — 32B가 "32C 재평가"로 이월한 0079 트리거
+  2종은 **유지** 결정(fill은 CHECK가 요구하는 유일값만 쓸 수 있어 우회로가
+  아니라 강제 메커니즘, AFTER alias는 INV-068-01 원자 보장; 제거 시 무결성
+  이득 없이 raw seed 37파일만 파괴). **f_* 신규 발급 경로 fence는 의도적으로
+  32C 잔여로 순서 고정** — 발급 중단은 비파생(비저장) generator 채택과
+  불가분이고, 그 채택은 신규 행 응답에 UUID 값을 조기 누출시켜 rollout의
+  "checksum 일치 후 응답 전환" 순서를 위반하며, provider upsert idempotency
+  재결선(파생 resolve 또는 T-VN-33 자연키)이 필요하다. 부속: `COLLATE "C"`
+  keyset index(모델 metadata 동반 — alembic check 게이트 정합).
+- **artifact**: OpenAPI admin/service 재생성(user 무변경 — sha 동일 확인),
+  `openapi-diff-v1.json` baseline sha 재고정 + revisions 개정(이관 표면은
+  Wave 2 목표 diff 항목 아님 — 존치·폐기는 T-VN-39 removal manifest 소관,
+  ADR-068 enum/status 항목은 32C 잔여 목표로 존치). unit artifact sha 상수
+  재고정. freeze DDL(target-schema-v1)은 무변경 — fence는 전환기 구조물.
+- **32C 잔여(쌍 PR 머지 뒤 순서)**: ① PinVi 배포 + `pinvi-feature-uuid-cutover`
+  실행(검증된 이관) → ② 양 저장소 checksum 일치 확인 → ③ Map 응답 `feature_id`
+  값 UUID 전환 + 비파생 generator 채택 + 0080 CHECK·0079 트리거 제거 재평가 →
+  ④ PinVi vendored snapshot 3종(user/service/admin-detail) 재추출·핀 갱신(핀은
+  Map merge SHA — rollout pinvi_snapshot_revendor 3×yes). legacy ID·FK 체인
+  물리 제거는 T-VN-39 removal manifest 그대로.
+- **검증(CI-parity python:3.13 container, PostGIS 16-3.5 testcontainers)**:
+  ruff check clean · mypy --strict main(140)/api(63) clean · lint-imports 4
+  kept · unit+lint 1,991 passed(신규 test_feature_alias_map 8 포함 — 잔여 2
+  실패는 test_docker_dagster_runtime의 docker CLI 부재 env 한정, 본 branch
+  무접촉 파일) · api 패키지 1,076 passed(신규 test_feature_alias_maps_router
+  7 포함, coverage 78.84%≥70) · export --check drift 0 · 신규 통합
+  test_legacy_write_fence 12 passed(기록 정정 — 적대 리뷰 F4; alias UPDATE/직접 DELETE 거부·cascade
+  허용·identity 불변·same-value 통과·fill 원자성·checksum 독립 재계산 일치·
+  keyset 완전 순회·파생 불일치/비-NFC fail-close·downgrade 왕복) + alembic
+  metadata 일관성 2 passed(COLLATE index의 반영 정합은 컬럼 index 선언으로
+  해소 — models.py 주석). 32B-명명 회귀 세트(fence·32A migration·feature_repo
+  load/primary·freeze·alembic 일관성/upgrade·공개 view 2종·notice 2종·nearby·
+  in-bounds·perf tier1·h35) **137 passed / 1 failed** — 유일 실패
+  `test_h35_exact_surface_network_free_rehearsal`은 loopback-only socket
+  guard가 DooD(docker-socket-in-container) 환경에서 testcontainers DB host가
+  loopback이 아니라서 발화한 것(같은 run의 나머지 h35 계열은 전부 green,
+  본 branch 무접촉 파일 — CI ubuntu 직결 docker에서는 loopback이라 무해).
+  **전체 통합 sweep 완주**: 1차 run 12 failed/881 passed에서 32B 원판
+  identity boundary 2건이 0081 fence의 의도 동작과 충돌함을 발견해 재정의
+  (별도 커밋 — UPDATE drift는 fence 선행 거부 + 파생 CHECK 관측은 INSERT
+  drift 경로로 이전, alias 결측 관측은 fence 트리거 일시 해제 시뮬레이션)
+  → 최종 run **10 failed / 883 passed (0:21:28)**. 잔여 10건 전부 env 분류:
+  ⑴ `test_dedup_with_kraddr_geo_live` 5건 — 32B가 base 재현으로 명시한
+  live kor-travel-geo 인증 미결선 env 그대로, ⑵ `test_domain_command_ledger`
+  2건 — 검증 컨테이너에 docker CLI 부재(detached docker effect), ⑶ h35
+  network-free 1건 — DooD loopback guard(상기), ⑷ pipeline
+  cancellation/projection 2건 — 32B가 base 재현으로 명시한 lock-poll env·
+  부하 flake 계열(두 run에서 같은 모듈의 다른 테스트가 번갈아 실패 —
+  단독/저부하 green 계열). 32C 관련 실패 0.
+
+## 2026-08-04 (7) — T-VN-32B Map consumer-first dual read/write
+
+> 사용자 지시(작업 중 우선순위 변경): 호환성·기존 계약 유지보다 **설계적
+> 우월성·최적화·유지보수성** 우선, 대대적 코드/schema 변경 허용. 단 PinVi 대면
+> 표면의 배포 순서는 rollout artifact(consumer-first)를 유지하고, freeze
+> artifact와 어긋나는 변경은 artifact 개정을 같은 커밋에 포함한다. 이에 따라
+> 초기 additive-최소 구현을 세 곳에서 강화했다(아래 ①경계 전면 적용·④CHECK
+> fence·notice ids 표면 제거).
+
+- **경계 alias 해석 — 단일 메커니즘, 전 경로 적용**: `infra/feature_identity.py`
+  신설 — `resolve_feature_identity(session, ref)`가 legacy `f_*` alias·
+  canonical UUID 양쪽 참조를 `FeatureIdentity(feature_id, feature_uuid)` 정본
+  키 쌍으로 해석(UUID-정본 조회 우선, miss 시 alias fallback — legacy id가
+  UUID처럼 보여도 놓치지 않는 결정적 순서). 형식 계약(`validate_feature_ref` —
+  빈 문자열/공백 패딩/256자 초과)은 422, 미해석은 404.
+  `kortravelmap.api.feature_ref.resolve_feature_ref_or_error` 공용 헬퍼를 모든
+  feature `{feature_id}` 경로 handler 첫 줄에 배치 — user detail·sources·
+  observations history·weather·price·contained-features / admin detail·
+  revision·weather·price·PATCH·DELETE·deactivate. 해석 뒤 내부 전달·조인은
+  정본 키로만(ADR-068 결정 3 "alias lookup은 경계 전용"). 해석 성공이 행
+  존재를 함의하므로 operator lineage의 별도 존재 확인(`_operator_feature_or_404`
+  + `get_feature_row` 쿼리 1회)은 제거 — 경로당 쿼리 수 동일하게 유지하면서
+  메커니즘은 하나로 수렴. auth 의존성보다 뒤(handler 본문)라 FastAPI 의존성
+  평가 순서에 의존하지 않는다.
+- **dual read (additive)**: alembic `0081_uuid_dual_read`가 `public_features`
+  view의 SELECT * 컬럼 목록을 재고정해 `feature_uuid`를 노출(공개 술어 무변경 —
+  3축 교체는 34B 소관, downgrade는 information_schema 기반 명시 컬럼 재생성으로
+  0079 downgrade 선행 조건 유지). repo read는 전부 view/base에서
+  `CAST(feature_uuid AS text)`를 **select 목록에만 추가**(join/술어 무변경 —
+  EXPLAIN 회귀 없음): 단건 `_FEATURE_ROW_COLUMNS_SQL`·bbox 2종·contained·
+  search 2종·nearby 2종·service batch(`base.feature_uuid`)·admin 목록/상세.
+  응답 additive: user detail/search/in-bounds/nearby item + service
+  `POST /features/batch` item(4/5 state) + `POST /features/weather/batch` item
+  (거대 bitemporal 조회 SQL은 재작성하지 않고 `get_feature_uuid_map` 병행
+  해석 — 관심사 분리) + admin 목록/상세. **응답 `feature_id` 값은 legacy
+  유지** — rollout이 응답 UUID 전환을 32C("양 저장소 checksum 일치 후")로
+  고정한 consumer-first cutover 규율.
+- **notice lineage dual — 표면 교체**: `public_active_notice_feature_identities`
+  가 `{feature_id: feature_uuid}`를 반환하는 단일 표면. 기존
+  `public_active_notice_feature_ids`는 **제거**(호환 shim을 남기지 않음 —
+  잔여 호출자였던 통합 테스트 5곳을 identities로 이행).
+- **신규 write — 파생 규칙의 DB 강제(fail-close by construction)**: dual 기간
+  정본 신규 행 generator를 **uuid5 파생으로 결정**(32A가 32B 소관으로 이월한
+  UUIDv7 여부 — 결정론이 KTM/PinVi 독립 계산·checksum 대조의 전제라 legacy id
+  소멸 전 미채택). 이 규칙을 app 검사에만 두지 않고 `0080`이 CHECK 2종
+  (`ck_features_feature_uuid_dual_derivation` ·
+  `ck_feature_aliases_uuid_dual_derivation`)으로 저장 경계에서 강제 — 파생값과
+  다른 어떤 write도 SQLSTATE 23514로 거부된다(비용: pgcrypto SHA-1 1회/row,
+  ~µs). 32A의 "임의 명시 uuid 존중" 열린 계약은 의도적으로 닫았고 해당 32A
+  통합 테스트를 fail-close 계약으로 재정의했다. provider upsert
+  (`_UPSERT_FEATURE_SQL`)·admin add(`_APPLY_FEATURE_ADD_SQL`)는 `feature_uuid`
+  를 writer 명시 INSERT + RETURNING 대조(`verify_feature_uuid` →
+  `FeatureIdentityInvariantError`) — DB fence 위의 관측 계층. 0079 트리거
+  2종은 raw SQL seed 경로 편의 fill로 유지(파생 강제는 CHECK 소관, 트리거
+  제거는 32C write fence 시점 재평가 — 0079 docstring 갱신).
+  `count_features_missing_identity`가 uuid/alias 결측 관측(INV-068-01 현행판).
+  CHECK 2종은 dual 기간 한정 fence — 32C에서 비파생 generator 채택과 함께
+  제거한다(ADR-075 단계 fence 규율, 0080 docstring 근거).
+- **OpenAPI·diff artifact 개정**: 3 spec 재생성(additive 필드·전 경로 dual
+  수용·422 응답), `openapi-diff-v1.json` baseline sha256 3종 재고정 +
+  `revisions` 배열로 개정 사유 기록(diff 항목·counts 무변경 — ADR-068
+  enum/status 항목은 32C 목표 상태 존치, CHECK fence의 32C 제거 계획 명시).
+  unit artifact bytes 상수 재고정. PinVi vendored snapshot 재추출은 rollout대로
+  32C 쌍 PR 소관 — 미변경.
+- **32C/39 이월 명시**: 내부 FK 체인(source_links/curation/price/weather)의
+  UUID 조인 재작성·referencing table shadow uuid(rollout이 legacy FK 체인
+  fence=32C·제거=39로 고정) · 응답 `feature_id` 값 UUID 전환 · legacy write
+  fence·트리거/CHECK 제거 · legacy ID 물리 제거(T-VN-39 removal manifest).
+- **동반 수정 2건**: ① perf gate tier1 frozen response shape 재고정(public
+  detail·service batch에 `feature_uuid` — 실패 메시지 절차대로 의도적 계약
+  변경 갱신). ② **H35 cutover 도구의 head 등호 고정 해제** — `_h35_schema`의
+  `repository_alembic_head` 검사가 저장소 head == 0078 등호였는데, 32A(0079)가
+  head를 전진시킨 순간부터 preflight/migrate가 영구 rejected였다(본 branch
+  잠복 회귀 — base 커밋 5d4db58c에서 재현 확인). 캠페인 도구는 target에 앵커
+  하도록 수정: lineage 포함(조상) 판정 + upgrade도 `head`가 아니라
+  `TARGET_SCHEMA(0078)`까지만. h35 unit/통합 81건 green.
+- **검증**: unit 1,981 passed(identity 순수 계약 11 신규) · api 패키지 1,069
+  passed(경계 dual 수용·422·additive 노출·404 재정의, 공용 echo-resolver
+  conftest) · 신규 통합 9 passed(`test_feature_identity_boundary.py` — 양형식
+  해석·미존재·형식 오류·view/단건/bbox/batch/notice 병행 노출·upsert/admin-add
+  원자성·CHECK drift 거부·alias 결측 invariant 관측) · 32A migration 8(명시
+  uuid fail-close 재정의) · feature_repo 26 · freeze 3 · alembic 일관성/공개
+  view/notice(방어 cast·lifecycle)/nearby/in-bounds 회귀 73 · 전체 통합 suite
+  green · export --check drift 0 · ruff/mypy --strict(main+api)/lint-imports
+  clean.
+
+## 2026-08-04 (6) — T-VN-32A UUID identity shadow (schema·deterministic backfill)
+
+- **alembic `0080_feature_uuid_shadow`**: `feature.features.feature_uuid` shadow
+  컬럼(nullable 추가 → 결정적 backfill → NOT NULL + `uq_features_feature_uuid`) +
+  `feature.feature_aliases`(alias text PK · legacy `feature_id` text FK ·
+  `feature_uuid` · `alias_kind` · created_at, freeze `target-schema-v1.sql` §4의
+  대응 제약명 `pk_feature_aliases`/`fk_feature_aliases_feature`/
+  `ck_feature_aliases_{alias,kind}_canonical`/`idx_feature_aliases_feature` 정합).
+  기존 `f_*` PK·FK·읽기 경로 무변경(consumer-rollout 32A "읽기 경로 무변경").
+- **freeze 미정 3건 결정**(0079 docstring에 근거 기록): ① backfill/shadow 생성기
+  `uuid5(FEATURE_UUID_NAMESPACE, legacy_id)`, namespace =
+  `uuid5(NAMESPACE_URL, 'kor-travel-map:feature-uuid:v1')` =
+  `75d60e13-2779-5b06-a920-6b1b892a7c84` — 두 저장소 독립 계산·재실행 동일(32C
+  checksum 전제), DB server default는 두지 않음(정본 신규 행 generator·UUIDv7
+  여부는 32B 소관). ② alias_kind 닫힌 CHECK `('legacy_feature_id')` — writer의
+  임의 kind 발명 fail-close, 확장은 additive migration. ③ alias FK ON DELETE
+  CASCADE — alias/uuid는 재계산 가능한 파생값, feature 종속 행 freeze 정본
+  패턴과 일관(ADR-075 "alias 제거 금지"는 cutover-era DDL 규율로 별개).
+- **신규 INSERT 경로**: features INSERT는 repo 2곳 + 통합 테스트 37개 파일의
+  직접 seed — 경로별 SQL 수정 대신 트리거로 일괄 보장(BEFORE INSERT fill /
+  AFTER INSERT alias 원자 생성, NULL일 때만 채워 32B writer 명시 값과 호환).
+  infra upsert SQL은 수정 불필요 판단. SQL uuid5는 uuid-ossp 없이 pgcrypto
+  `digest(...,'sha1')` 수동 구성(`feature.feature_uuid_from_legacy` IMMUTABLE) —
+  Python 정본 `core/ids.feature_uuid_from_legacy`와 고정 벡터 상호 대조.
+- **검증**: unit 1,970 passed(고정 벡터 2개 신규) · 신규 통합 8 passed(backfill
+  완전성·UNIQUE/NOT NULL·alias 1:1·INV-068-01~04 freeze artifact 그대로 실행
+  (05는 33A 컬럼 참조라 제외 명시)·별도 DB 결정론·downgrade 무손실 왕복·upsert
+  원자 생성) · alembic_upgrade + bundle_persist 23 passed · freeze 3 passed ·
+  metadata consistency(`alembic check`) + feature_repo_load + row_revision
+  30 passed · ruff/mypy --strict/lint-imports clean. codegraph MCP는 이 세션에
+  미결선이라 grep 기반 영향도 조사로 대체(write 경로 2곳·SELECT * 부재 확인).
+
 ## 2026-08-04 (5) — T-VN-31 freeze 적대 리뷰 2건 반영
 
 - **정합성 리뷰(F-1~F-11) 반영**: 발명분 회수 — retired∧draft state CHECK 제거
