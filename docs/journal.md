@@ -17,6 +17,26 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-08-04 (2) — CSV5 재적재 완료 + T-VN-H30B 재정의판 실증 완료
+
+- **CSV5 전량 적재** (#934 이후): 486행/batches 5 — tourism-100 224 · heritage 85 ·
+  arboretum 72 · lighthouse 105(provenance sidecar 결박, 필드명 `provenance_file`).
+  공개 표면(trusted) **4,620** = source_rule 4,424 + csv_explicit_feature_id 196.
+  **결정론적 feature_id 재현 실증** — explicit id가 재생성 feature와 그대로 해석.
+  미해석 290행은 대상 provider 미적재분(스케줄 후 재import로 수렴). import 기본이
+  dry_run=true(query param)인 것 실측. H35 실행 4단계 종료.
+- **T-VN-H30B(재정의판) 완료.** 새 snapshot(`krtour_map_0078_20260804T023104Z.dump`,
+  sha256 `b5ab83dd…`) → scratch 복원 → concierge changes artifact 8p/1,481행 채취
+  (chain 검증·sha256) → 결손 1,481 주입(inactive) → network-free replay로 **완전 회복
+  (교집합 1,481/신규 0/미복구 0), 2회차 멱등(변화 0)** → finding 수치
+  (observed=unique=upserted=105)·violation 분포(admin_code_stale 60 linked = dual 축
+  실작동) → scratch 실 API 인증 `/admin/issues` 실호출 FK·last_seen 정합.
+  종전 하네스 부재가 조사에서 확정돼("2000→2458" 명령 기록은 저장소에 없음 — 철회문만
+  잔존) build_asset_context 패턴으로 신규 조립.
+- 프로브 교훈: geo-postgres 컨테이너 재시작 후 컨테이너 로컬 소켓이 앱 TCP 인스턴스와
+  다른 것을 가리켜 "krtour_map 없음" 허위 경보 — **DB 프로브는 앱과 같은 TCP 경로로
+  통일**한다. 컨테이너 내 이중 postgres 현상은 이상 신호로 기록.
+
 ## 2026-08-04 — prod 재생성 실행 + 재적재 concierge 축 복구 + T-VN-H22 단일 PR
 
 - **재생성 실행 완료.** `main@2b2dee95`(#931 entrypoint 게이트 포함)로 이미지 3종 재빌드
