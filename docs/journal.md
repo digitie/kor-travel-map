@@ -17,6 +17,49 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-08-05 (2) — T-VN-H45: KMA/airkorea 만성 실패 근본 원인 격리 + 강건화 구현
+
+- **원인 확정 절차**: KST 자정 쿼터 리셋 후에도 실패 지속 → dagster 컨테이너
+  내부에서 동일 key로 4개 upstream(초단기실황/단기예보/특보/에어코리아) 직접
+  프로브 전부 HTTP 200 정상(20격자 실측 p50 0.10s·max 0.27s·20/20) → 그런데
+  같은 시각 ultra job은 또 실패. 즉 key·쿼터·upstream 무결인데 job만 죽는다
+  = **구조 결함**. 실패 run(6d73bd70) 스택 실측: `raise_for_kma_network_error`
+  → `KmaRequestError(retryable=True, network)` — 지배 실패는 재시도 가능
+  분류가 맞다(리뷰 1 H-1 요구 증거). kma_weather는 격자 N(187+)건을
+  부분실행-금지로 순차 호출, 예외 1건이면 step 실패 → step 재시도 3회는
+  전량 재실행. 시도당 생존확률 p^N — 간헐 오류율에서 사실상 0. mid만
+  살아남는 이유(호출 수 소수)와 단건 프로브 정상도 이 모델이 설명.
+  (부수 실증: airkorea 프로브 중 504 `SERVICETIMEOUT_ERROR` 실물 관측 후
+  수분 내 회복 — 간헐성의 직접 증거.)
+  **정정(적대 리뷰 1·2 H)**: 초기 서술 "lib 재시도 없음"은 오류 — kma/airkorea
+  lib은 transport 재시도(기본 retries=3 → 4 시도)를 이미 소유한다. 결함은
+  "재시도 부재"가 아니라 **경계 재시도의 부재 + 레이어 산정 없는 timeout**.
+- **수정(H45, 리뷰 2건 반영판)**: 신규 `dagster/upstream_retry.py` — 단건
+  호출 경계 유한 재시도 **attempts 2**(지수 backoff 2→20s cap) + client 주입
+  `retries=1`로 **레이어 곱셈 정산**(경계당 HTTP 상한 2×2=4 — 도입 전 lib
+  단독 4와 동일). **quota/rate_limit 재시도 금지**(kma resultCode 22 계열 —
+  일일 한도 보호와 충돌 방지, airkorea `AirKoreaRateLimitError` 제외).
+  **run 재시도 예산 8**(상관 장애 early abort — 소진 후 즉시 전파). 재시도·
+  예산 소진 **warning 텔레메트리**(kma는 context.log, fetcher는 module
+  logger). 적용 4경계: kma 격자(async — backoff만 loop 양보), airkorea
+  stations(리뷰 1 M-3 — air_quality asset이 먼저 읽는 경계)·시도×페이지,
+  kma alerts 페이지(lazy는 경계 안 list 소진). timeout 주입은 4 생성 지점
+  전부(스케줄 resource 2 + admin 재적재 runner 2 — 리뷰 1 M-4)·기본 20s
+  (병적 상한 187격자 ≈ 4.4h < run 한도 6h — 산식은 settings·etl 문서).
+  airkorea 분류 degrade는 warning으로 가시화 + 실 lib 이름 계약 테스트.
+  **부분 실행 금지·원예외 identity·cursor 비전진 경로 불변**.
+- 검증: unit 18종(분류·쿼터 거부·backoff cap·예산·원예외 identity·
+  cancellation 1회 호출/무sleep — 리뷰 1 M-6 변이 보강·상수 핀) + asset
+  배선 회귀 2종 + fetcher 회귀(재시도 수렴·비재시도 즉시 전파·kwargs 도달
+  단언 — 리뷰 2 M-5) + 실 lib 이름 계약. `.env.example`·
+  `docs/etl/kma-weather-etl.md` §8.1 정산 문서화(리뷰 2 M-7).
+- 잔여(의도적): 동일 결함군 khoa 등 잔여 다건 루프 fetcher 확대는 배포 후
+  실측 보고 결정. **provider lib 정본 수정 백로그**(리뷰 2 M-8 권고):
+  python-kma-api의 resultCode 22 `retryable=True` 오분류 + 200-body XML
+  envelope 경로는 lib PR로 — tasks.md H45 절 기록.
+- prod 효과는 다음 이미지 배포 게이트(dm#128 타이밍) — 배포 후 스케줄
+  SUCCESS 전환이 판정 기준. H42의 KMA axis는 H45로 분리.
+
 ## 2026-08-05 (1) — H42 중간 실측: MOIS 수렴 완전·opinet 완료·공개 API key 소실→재발급
 
 - **MOIS bulk 수렴 완전**: source_entities 702,955 = linked 702,955 = distinct

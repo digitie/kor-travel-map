@@ -10,6 +10,18 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-08-05 (2) — T-VN-H45: KMA/airkorea 만성 실패 근본 원인 격리·강건화 착지
+
+쿼터 리셋 후 지속 실패 + 컨테이너 내부 4종 upstream 직접 프로브 전부 200 정상의 모순으로
+구조 결함 확정: timeout 10s 고정 × 격자 N(187+) all-or-nothing 순차 호출 × step 전량 재시도
+= 시도당 생존확률 p^N 붕괴. 단건 호출 경계 유한 재시도(`upstream_retry.py`) + client 3종
+timeout 주입(기본 30s)으로 수정 — 부분 실행 금지·원예외·cursor 비전진 불변. dagster 542
+passed·mypy strict·적대 리뷰 2명. prod 효과는 다음 배포(dm#128 타이밍) 뒤 스케줄 SUCCESS
+전환으로 판정.
+
+**다음 한 작업**: H45 PR 머지 → (배포 대기 중) H43 백업 체계 선행 준비 가능분 →
+배포 후 H45/32C tail/H42 KMA axis 일괄 판정.
+
 ## 2026-08-05 (1) — H42 중간: MOIS/opinet 수렴 완료, 공개 key 재발급, KMA 스케줄 감시
 
 MOIS 702,955 3중 일치(6h run 한도로 FAILURE 마감이나 데이터 완주)·opinet 934건 공개 smoke까지

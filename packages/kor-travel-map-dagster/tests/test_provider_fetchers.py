@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+import time
 from collections.abc import AsyncIterator, Callable, Iterable, Iterator
 from datetime import date
 from types import ModuleType, SimpleNamespace
@@ -1673,8 +1674,9 @@ class _FakeAirKoreaClient:
     stations_total: int = 0
     per_sido: list[object] = []
 
-    def __init__(self, *, service_key: str | None = None, **_kwargs: Any) -> None:
+    def __init__(self, *, service_key: str | None = None, **kwargs: Any) -> None:
         self.service_key = service_key
+        self.kwargs = dict(kwargs)  # H45: timeout/retries 도달 검증용(리뷰 2 M-5)
         self.closed = False
         self.station_calls: list[int] = []
         self.sido_calls: list[str] = []
@@ -1761,7 +1763,111 @@ def test_airkorea_air_quality_iterates_all_sido_and_closes(
     client = fake.instances[0]
     assert len(client.sido_calls) == 17
     assert client.sido_calls[0] == "서울"
+    # H45: settings 기본 timeout(20s)·내부 retries 정산값이 client에 도달.
+    assert client.kwargs == {"timeout": 20.0, "retries": 1}
     assert client.closed is True
+
+
+def test_airkorea_retryable_names_exist_in_real_lib() -> None:
+    """H45(리뷰 M) — 분류가 이름 문자열 기반이라, 실 lib과의 계약을 여기서 고정.
+
+    upstream이 예외를 rename하면 재시도가 무음으로 꺼진다 — fake 기반 테스트는
+    그걸 못 잡으므로 실 lib 존재 시 이름·타입을 직접 단언한다.
+    """
+
+    airkorea = pytest.importorskip("airkorea")
+    for name in provider_fetchers.AIRKOREA_RETRYABLE_EXCEPTION_NAMES:
+        candidate = getattr(airkorea, name, None)
+        assert isinstance(candidate, type), (
+            f"airkorea.{name} 부재 — H45 재시도 분류가 무음 degrade된다"
+        )
+        assert issubclass(candidate, BaseException), f"airkorea.{name} 비예외 타입"
+
+
+def test_airkorea_rate_limit_is_deliberately_not_retryable() -> None:
+    """쿼터 소진(AirKoreaRateLimitError)은 재시도 목록에서 의도적 제외(리뷰 H)."""
+
+    assert "AirKoreaRateLimitError" not in provider_fetchers.AIRKOREA_RETRYABLE_EXCEPTION_NAMES
+
+
+class _FakeAirKoreaNetworkError(Exception):
+    """실 lib ``AirKoreaNetworkError`` 대역 — top-level re-export로 노출."""
+
+
+class _FakeAirKoreaAuthError(Exception):
+    """재시도 비대상 대역."""
+
+
+class _FlakyAirKoreaClient(_FakeAirKoreaClient):
+    """첫 sido 첫 호출만 network 오류를 던지고 이후 정상 — H45 재시도 회귀."""
+
+    fail_first: bool = True
+
+    def sido_measurements(
+        self, sido_name: str, *, page_no: int = 1, num_of_rows: int = 100, **_kw: Any
+    ) -> list[object]:
+        if type(self).fail_first:
+            type(self).fail_first = False
+            self.sido_calls.append(sido_name)
+            raise _FakeAirKoreaNetworkError("transient")
+        return super().sido_measurements(
+            sido_name, page_no=page_no, num_of_rows=num_of_rows, **_kw
+        )
+
+
+def test_airkorea_air_quality_retries_transient_network_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """H45 — 시도×페이지 단건 호출의 retryable 예외는 backoff 후 재시도되고,
+    전체 순회 결과는 무결이다."""
+
+    _FakeAirKoreaClient.instances = []
+    _FakeAirKoreaClient.stations_total = 0
+    _FakeAirKoreaClient.per_sido = [object(), object()]
+    _FlakyAirKoreaClient.fail_first = True
+    module = ModuleType("airkorea")
+    module.__dict__["AirKoreaClient"] = _FlakyAirKoreaClient
+    module.__dict__["AirKoreaNetworkError"] = _FakeAirKoreaNetworkError
+    module.__dict__["AirKoreaServerError"] = type("S", (Exception,), {})
+    module.__dict__["AirKoreaRateLimitError"] = type("R", (Exception,), {})
+    monkeypatch.setitem(sys.modules, "airkorea", module)
+    delays: list[float] = []
+    monkeypatch.setattr(time, "sleep", delays.append)
+    settings = KorTravelMapSettings(data_go_kr_service_key=SecretStr("svc"))
+
+    records = list(fetch_airkorea_air_quality(settings))
+
+    assert len(records) == 34  # 17 시도 × 2 — 실패분 손실 없음
+    client = _FakeAirKoreaClient.instances[0]
+    assert client.sido_calls[:2] == ["서울", "서울"]  # 재시도 실측
+    assert delays == [2.0]
+    assert client.closed is True
+
+
+def test_airkorea_air_quality_nonretryable_propagates_immediately(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """auth 오류는 재시도 없이 즉시 전파 — fail-close 유지."""
+
+    class _AuthFailClient(_FakeAirKoreaClient):
+        def sido_measurements(self, *_a: Any, **_kw: Any) -> list[object]:
+            raise _FakeAirKoreaAuthError("bad key")
+
+    _FakeAirKoreaClient.instances = []
+    module = ModuleType("airkorea")
+    module.__dict__["AirKoreaClient"] = _AuthFailClient
+    module.__dict__["AirKoreaNetworkError"] = _FakeAirKoreaNetworkError
+    module.__dict__["AirKoreaServerError"] = type("S2", (Exception,), {})
+    module.__dict__["AirKoreaRateLimitError"] = type("R2", (Exception,), {})
+    monkeypatch.setitem(sys.modules, "airkorea", module)
+    delays: list[float] = []
+    monkeypatch.setattr(time, "sleep", delays.append)
+    settings = KorTravelMapSettings(data_go_kr_service_key=SecretStr("svc"))
+
+    with pytest.raises(_FakeAirKoreaAuthError):
+        list(fetch_airkorea_air_quality(settings))
+
+    assert delays == []
 
 
 class _FakeStation:

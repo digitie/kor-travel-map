@@ -32,6 +32,7 @@ from kortravelmap.settings import KorTravelMapSettings
 from dagster import Field as DagsterField
 from dagster import InitResourceContext, ResourceDefinition, resource
 
+from . import upstream_retry
 from .feature_operation_tracking import (
     ensure_feature_operation_guard_for_provider,
     feature_operation_guard_resource,
@@ -1060,7 +1061,14 @@ def kma_weather_client_factory_resource(
         # provider public client는 ADR-044 로컬 체크아웃이며 hard dependency가
         # 아니므로 실제 grid 호출 직전에만 import한다.
         kma = cast(Any, importlib.import_module("kma"))
-        return kma.KmaClient(service_key=secret.get_secret_value())
+        return kma.KmaClient(
+            service_key=secret.get_secret_value(),
+            # H45: lib 기본 10s는 data.go.kr 지연 스파이크에서 대량 격자 순회를
+            # 만성 실패시킨다. retries는 외부 upstream_retry(attempts 2)와 곱해
+            # 경계당 HTTP 4 시도가 되도록 1로 정산한다(리뷰 H — 레이어 곱셈 통제).
+            timeout=settings.provider_http_timeout_seconds,
+            retries=upstream_retry.PROVIDER_CLIENT_INNER_RETRIES,
+        )
 
     return _new_client
 
@@ -1096,7 +1104,11 @@ def kma_datagokr_client_resource(context: InitResourceContext) -> Iterator[Any]:
             "source env: DATA_GO_KR_SERVICE_KEY."
         )
     kma = cast(Any, importlib.import_module("kma"))
-    client = kma.DataGoKrClient(service_key=secret.get_secret_value())
+    client = kma.DataGoKrClient(
+        service_key=secret.get_secret_value(),
+        timeout=settings.provider_http_timeout_seconds,
+        retries=upstream_retry.PROVIDER_CLIENT_INNER_RETRIES,
+    )
     try:
         yield client
     finally:

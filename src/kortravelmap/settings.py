@@ -317,6 +317,20 @@ class KorTravelMapSettings(BaseSettings):
             "포함 N일. env ``KOR_TRAVEL_MAP_KMA_WEATHER_ALERT_LOOKBACK_DAYS``."
         ),
     )
+    provider_http_timeout_seconds: float = Field(
+        default=20.0,
+        gt=0.0,
+        le=60.0,
+        description=(
+            "KMA/DataGoKr/AirKorea client 생성 시 주입하는 HTTP timeout seconds "
+            "(T-VN-H45 — 이 3계열 외 client는 아직 lib 기본값). lib 기본 10s는 "
+            "data.go.kr 지연 스파이크에서 대량 순차 호출 asset을 만성 실패시켰다. "
+            "상한 60s: 경계당 최악 wall ≈ upstream_retry attempts 2 × (내부 "
+            "retries 1+1) × timeout + backoff — 격자 187개 병적 상한이 dagster "
+            "run 한도 6h를 넘지 않도록 묶는다(기본 20s ≈ 4.4h). "
+            "env ``KOR_TRAVEL_MAP_PROVIDER_HTTP_TIMEOUT_SECONDS``."
+        ),
+    )
     dagster_address_validation: Literal["strict", "drop", "off"] = Field(
         default="strict",
         description=(

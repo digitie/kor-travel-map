@@ -29,6 +29,7 @@ import json
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from functools import partial
 from typing import TYPE_CHECKING, Any, Final, NoReturn, cast
 
 from kortravelmap.core.sync_scope import (
@@ -74,6 +75,7 @@ from .assets import (
 )
 from .etl import DagsterFeatureLoadResult, _add_output_metadata
 from .feature_operation_tracking import run_tracked_feature_asset
+from .upstream_retry import RetryBudget, retry_upstream_async
 
 if TYPE_CHECKING:
     from kortravelmap.client import AsyncKorTravelMapClient
@@ -556,8 +558,20 @@ async def _run_kma_weather_asset(
         kma_client = owned_kma_client
         reverse_geocoder = _reverse_geocoder(context)
         fetched_at = kst_now()
+        # H45: run당 재시도 예산 — 상관 장애(전 격자 동시 열화)에서 N×backoff
+        # 전액을 지불하지 않고 조기 실패한다(리뷰 반영 early abort).
+        retry_budget = RetryBudget()
         for nx, ny in targets.grids:
-            rows = fetch_rows(kma_client, nx, ny)
+            # H45: 단건 격자 호출만 유한 재시도(retryable 분류 예외 한정 — kma
+            # ``retryable`` 규약, quota/rate_limit 제외). N건 순차 호출에서 step
+            # 전량 재시도의 시도당 전멸 확률(1-p^N)을 제거한다. attempts 소진
+            # 시 원 예외 그대로 전파 — 부분 실행 금지·기존 실패 분류 경로 불변.
+            rows = await retry_upstream_async(
+                partial(fetch_rows, kma_client, nx, ny),
+                label=f"{dataset_key} grid {nx},{ny}",
+                budget=retry_budget,
+                on_retry=context.log.warning,
+            )
             grids_fetched += 1
             if not rows:
                 continue
