@@ -17,6 +17,32 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-08-04 (10) — T-VN-32 쌍 PR 착지 (Map #940 + PinVi #428) + ⓪ L7 스캔 0건
+
+- **Map #940 머지** `e12494bd`(8/8 green). 막판 CI 2건 해소: ① codex #935의
+  `0079_cache_target_writer_drain`과 두-head 충돌 → 본 체인을
+  `0080_feature_uuid_shadow`→`0081_uuid_dual_read`→`0082_legacy_write_fence`로
+  재번호·재부모화(내용 무변경, 참조 11파일 일괄, 단일 head 실측 + 31 passed).
+  ② frontend `gen:types` 미재생성(`target_feature_uuid` additive) 재생성.
+- **PinVi #428 머지** `3ff54b8b`(squash — merge commit 금지 저장소). 유예
+  마무리 실행: alias golden 핀 `_UPSTREAM_MAP_COMMIT`=merge SHA +
+  contract-pin-consistency에 alias 핀 checkout·byte-diff 단계, service
+  snapshot 재추출(sha `144b4335…` — merge SHA 원본과 sha256 동일 실측,
+  cache-target operation diff **무변경** → codex n150 paired live proof 유효),
+  `_ARTIFACT_COMMIT`·`_FUNCTIONAL_OWNER_COMMIT`(ancestor 게이트: 직전 owner
+  `9b945ce8…`는 merge SHA의 ancestor)·config·`.env.example` 회전. 검증: 계약
+  3본 15 passed + 필터 155 passed + ruff clean.
+- **⓪ L7 사전 스캔**(TCP read-only): prod `feature.features` 467,697행 중
+  canonical UUID 형태(36자 hyphenated) legacy `feature_id` **0건** — dual-read
+  UUID-정본 우선 해석의 shadowing 여지 없음. cutover 전제 클리어.
+- **배포 결선 예고**: docker-manager#128 — 다음 Map 배포 시
+  `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`를 `0078…`→`0082_legacy_write_fence`
+  로, PinVi sync enable 시 `…EXPECTED_OPENAPI_SHA256`/`…EXPECTED_SOURCE_
+  REVISION` 회전(Map 먼저 순서 제약 — 역순은 fail-close). 기존 #109/#111/#114
+  는 CLOSED 확인.
+- 병행: H42 MOIS licenses feature job 적재 중(총 467,697 증가 중), opinet
+  chain은 MOIS 종료 marker 게이트 대기.
+
 ## 2026-08-04 (9) — T-VN-32C 적대 리뷰 1 반영 (H1/H2/M3/M4/L6/L7)
 
 미머지 branch이므로 0080/0081은 새 revision 없이 제자리 수정.

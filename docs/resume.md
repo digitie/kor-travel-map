@@ -10,6 +10,18 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-08-04 (9) — T-VN-32 쌍 PR 착지 + ⓪ L7 스캔 0건
+
+Map #940(`e12494bd`, 0080~0082 재부모화 포함)·PinVi #428(`3ff54b8b`, 핀·snapshot
+회전 포함) 머지로 32A/B/C 구현·계약 표면이 양 저장소 정본에 착지했다. ⓪ L7
+사전 스캔은 prod 467,697행 중 UUID-형태 legacy id 0건으로 클리어. 배포 결선
+예고는 docker-manager#128(EXPECTED_HEAD=`0082` + PinVi env 2종, Map 먼저).
+
+**다음 한 작업**: 32C 잔여는 배포 게이트 — Map 이미지 배포(0080~0082 적용) 후
+PinVi 배포+`pinvi-feature-uuid-cutover`(dry-run 선행) → checksum 일치 → UUID 값
+전환 tail. 그 전까지 Lane A 진행 순서는 H42 수렴 판정(MOIS/opinet 적재 완료
+후) → H43(백업 체계) → H44(복원 드릴).
+
 ## 2026-08-04 (8) — T-VN-32C 전반부(이관 표면·checksum 계약·write fence) 완료
 
 PinVi alias-map DB-to-DB 이관의 Map 측 표면을 착지했다: service read 2종
