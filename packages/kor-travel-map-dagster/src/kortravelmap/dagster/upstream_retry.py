@@ -37,6 +37,7 @@ retries=3 → 4 HTTP 시도). 본 모듈은 그 위의 **두 번째** 레이어�
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -63,6 +64,12 @@ DEFAULT_UPSTREAM_MAX_DELAY_SECONDS: Final[float] = 20.0
 DEFAULT_UPSTREAM_RUN_RETRY_BUDGET: Final[int] = 8
 PROVIDER_CLIENT_INNER_RETRIES: Final[int] = 1
 """client 주입용 내부 재시도 — 외부 attempts 2와 곱해 경계당 HTTP 4 시도 유지."""
+
+PROVIDER_BOUNDARY_BASE_DELAY_SECONDS: Final[float] = 15.0
+"""provider 호출 경계용 backoff(재리뷰 2 N-2) — lib 내부 재시도가 ~2s 안에
+소진되므로, 외부 재시도가 "같은 4회를 0.2s 넓게"가 아니라 **수 초~수 분
+장애에 대한 독립 시행**이 되도록 간격을 벌린다. 비용은 예산이 묶는다
+(8 × 15s = 120s/run 상한)."""
 
 NONRETRYABLE_FAILURE_KINDS: Final[frozenset[str]] = frozenset({"quota", "rate_limit"})
 """``retryable=True``여도 재시도하지 않는 failure_kind — 일일 쿼터 보호."""
@@ -119,18 +126,29 @@ def _should_retry(
     if attempt >= attempts or not is_retryable(exc):
         return False
     if budget is not None and not budget.try_consume():
-        if on_retry is not None:
-            on_retry(
-                f"upstream retry budget exhausted ({budget.limit}) — "
-                f"{label}: {type(exc).__name__} 즉시 전파"
-            )
-        return False
-    if on_retry is not None:
-        on_retry(
-            f"upstream retry {label}: attempt {attempt}/{attempts} 실패 "
-            f"({type(exc).__name__}: {exc}) — 재시도"
+        _notify(
+            on_retry,
+            f"upstream retry budget exhausted ({budget.limit}) — "
+            f"{label}: {type(exc).__name__} 즉시 전파",
         )
+        return False
+    _notify(
+        on_retry,
+        f"upstream retry {label}: attempt {attempt}/{attempts} 실패 "
+        f"({type(exc).__name__}: {exc}) — 재시도",
+    )
     return True
+
+
+def _notify(on_retry: Callable[[str], None] | None, message: str) -> None:
+    """텔레메트리는 fallible — logger 실패가 upstream 원 예외를 덮으면 실패
+    분류가 오진된다(리뷰 1 N-3). 삼키고 진행한다."""
+
+    if on_retry is None:
+        return
+    # 진단 부수 경로 — logger 실패가 원 예외를 덮으면 실패 분류가 오진된다.
+    with contextlib.suppress(Exception):
+        on_retry(message)
 
 
 def retry_upstream(

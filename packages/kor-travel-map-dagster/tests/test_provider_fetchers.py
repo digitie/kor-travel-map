@@ -1840,7 +1840,7 @@ def test_airkorea_air_quality_retries_transient_network_error(
     assert len(records) == 34  # 17 시도 × 2 — 실패분 손실 없음
     client = _FakeAirKoreaClient.instances[0]
     assert client.sido_calls[:2] == ["서울", "서울"]  # 재시도 실측
-    assert delays == [2.0]
+    assert delays == [15.0]  # provider 경계 backoff (재리뷰 2 N-2)
     assert client.closed is True
 
 

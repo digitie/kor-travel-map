@@ -41,7 +41,10 @@ if TYPE_CHECKING:
     from kortravelmap.settings import KorTravelMapSettings
 
 _LOGGER = logging.getLogger(__name__)
-"""H45 재시도 텔레메트리 — dagster가 root logger를 capture하므로 run 로그에 남는다."""
+"""H45 재시도 텔레메트리. 주의: `docker/dagster.yaml`에 `python_logs` 관리 절이
+없어 이 logger는 구조화 event log가 아니라 stderr→compute log로 남는다(재리뷰
+N — 가시성 등급은 kma 경로의 `context.log`보다 낮다). event stream 라우팅
+필요 시 `python_logs.managed_python_loggers` 결선은 배포 후 튜닝 백로그."""
 
 __all__ = [
     "KrexTrafficNoticeSnapshotUnstable",
@@ -1025,6 +1028,7 @@ def fetch_kma_weather_alerts(
                     num_of_rows=num_of_rows,
                 ),
                 label=f"kma weather_warning_list p{page_no}",
+                base_delay=upstream_retry.PROVIDER_BOUNDARY_BASE_DELAY_SECONDS,
                 budget=budget,
                 on_retry=_LOGGER.warning,
             )
@@ -1185,6 +1189,7 @@ def fetch_airkorea_stations(
             items = retry_upstream(
                 partial(_airkorea_stations_page, client, page_no, num_of_rows),
                 label=f"airkorea stations p{page_no}",
+                base_delay=upstream_retry.PROVIDER_BOUNDARY_BASE_DELAY_SECONDS,
                 is_retryable=lambda exc: isinstance(exc, retryable_types),
                 budget=budget,
                 on_retry=_LOGGER.warning,
@@ -1233,6 +1238,7 @@ def fetch_airkorea_air_quality(
                         num_of_rows=num_of_rows,
                     ),
                     label=f"airkorea sido_measurements {sido} p{page_no}",
+                base_delay=upstream_retry.PROVIDER_BOUNDARY_BASE_DELAY_SECONDS,
                     is_retryable=lambda exc: isinstance(exc, retryable_types),
                     budget=budget,
                     on_retry=_LOGGER.warning,

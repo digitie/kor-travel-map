@@ -75,7 +75,11 @@ from .assets import (
 )
 from .etl import DagsterFeatureLoadResult, _add_output_metadata
 from .feature_operation_tracking import run_tracked_feature_asset
-from .upstream_retry import RetryBudget, retry_upstream_async
+from .upstream_retry import (
+    PROVIDER_BOUNDARY_BASE_DELAY_SECONDS,
+    RetryBudget,
+    retry_upstream_async,
+)
 
 if TYPE_CHECKING:
     from kortravelmap.client import AsyncKorTravelMapClient
@@ -569,6 +573,7 @@ async def _run_kma_weather_asset(
             rows = await retry_upstream_async(
                 partial(fetch_rows, kma_client, nx, ny),
                 label=f"{dataset_key} grid {nx},{ny}",
+                base_delay=PROVIDER_BOUNDARY_BASE_DELAY_SECONDS,
                 budget=retry_budget,
                 on_retry=context.log.warning,
             )
@@ -977,14 +982,36 @@ async def run_feature_weather_kma_mid_forecast(
     values_loaded = 0
     matched_features: set[str] = set()
     try:
+        # H45(재리뷰 2 N-1): client retries=1 정산은 mid에도 적용되므로, 경계
+        # 재시도 없이는 mid만 HTTP 4→2 시도로 약화된다 — 격자 루프와 동일하게
+        # 경계당 4 시도로 균일화.
+        retry_budget = RetryBudget()
         for spec in specs:
             # 변환 함수 Protocol 인자: frozen dataclass attr은 mypy에서 read-only라
             # 직접 만족 판정이 안 됨 → ``Sequence[Any]`` 우회 (기존 패턴).
             land_rows: Sequence[Any] = mid_land_rows_from_items(
-                cast(Any, datagokr_client).mid_land_forecast(reg_id=spec.land_reg_id)
+                await retry_upstream_async(
+                    partial(
+                        cast(Any, datagokr_client).mid_land_forecast,
+                        reg_id=spec.land_reg_id,
+                    ),
+                    label=f"kma mid land {spec.land_reg_id}",
+                    base_delay=PROVIDER_BOUNDARY_BASE_DELAY_SECONDS,
+                    budget=retry_budget,
+                    on_retry=context.log.warning,
+                )
             )
             temp_rows: Sequence[Any] = mid_temp_rows_from_items(
-                cast(Any, datagokr_client).mid_temperature_forecast(reg_id=spec.ta_reg_id)
+                await retry_upstream_async(
+                    partial(
+                        cast(Any, datagokr_client).mid_temperature_forecast,
+                        reg_id=spec.ta_reg_id,
+                    ),
+                    label=f"kma mid temp {spec.ta_reg_id}",
+                    base_delay=PROVIDER_BOUNDARY_BASE_DELAY_SECONDS,
+                    budget=retry_budget,
+                    on_retry=context.log.warning,
+                )
             )
             regions_fetched += 1
             # 복제 제거(메인 격자 루프와 동일 원칙): region 응답을 대표 feature

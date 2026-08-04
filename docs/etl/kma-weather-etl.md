@@ -249,12 +249,21 @@ data.go.kr는 간헐 지연·5xx·게이트웨이 timeout이 일상이라, 격�
   → 4 시도)를 소유하므로, client 주입 시 `retries=1`로 낮춰 경계당 HTTP
   시도 상한을 외부 2 × 내부 2 = 4로 유지한다(레이어 도입 전과 동일).
 - **timeout**: `KOR_TRAVEL_MAP_PROVIDER_HTTP_TIMEOUT_SECONDS`(기본 20s,
-  ≤60s) — KMA/DataGoKr/AirKorea client 4개 생성 지점(스케줄 resource·admin
-  재적재 runner) 전부에 주입. 경계당 최악 wall ≈ 2×(2×20s+jitter)+backoff
-  ≈ 84s, 187격자 병적 상한 ≈ 4.4h < dagster run 한도 6h.
+  ≤60s) — KMA/DataGoKr/AirKorea client **6개 생성 지점**(스케줄 resource 2 ·
+  admin 재적재 runner 2 · fetcher 2) 전부에 주입. 경계당 최악 wall ≈
+  2×(2×20s)+backoff 15s ≈ 95s, 187격자 병적 상한 ≈ 4.4h < dagster run 한도
+  6h(예산 반영 실효 상한은 ≈ 2.2h).
+- **경계 backoff 15s**(재리뷰 반영): lib 내부 재시도가 ~2s 안에 소진되므로
+  외부 재시도는 간격을 벌려 수 초~수 분 장애에 대한 독립 시행으로 만든다 —
+  비용은 예산이 묶는다(8×15s = 120s/run 상한).
 - **run 재시도 예산**(기본 8): 상관 장애(전 격자 동시 열화)에서는 건별
   재시도가 무력하므로 예산 소진 후 retryable 실패도 즉시 전파해 run을 빨리
-  실패시킨다. 재시도·예산 소진은 run 로그에 warning으로 남는다.
+  실패시킨다. 재시도·예산 소진은 run 로그에 warning으로 남는다(kma는
+  `context.log`, fetcher는 module logger → compute log).
+- **배포 후 판정이 음성일 때의 다음 수 순서**(재리뷰 2 기대치): 경계
+  backoff 추가 상향 → 격자 배치 축소(N 감소) → python-kma-api 정본 수정
+  (resultCode 22 분류·200-body XML envelope). 경계 재시도 접근 자체의 기각으로
+  오독하지 말 것.
 
 ## 9. 데이터 양과 인덱스
 

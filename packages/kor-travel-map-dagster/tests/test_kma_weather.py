@@ -510,9 +510,10 @@ async def test_nowcast_asset_retries_transient_grid_failure(
     assert result.skipped is False
     assert result.grids_fetched == 1
     assert result.values_loaded == 2
-    # 실패 1회 + 재시도 성공 1회 — 동일 격자.
+    # 실패 1회 + 재시도 성공 1회 — 동일 격자. backoff는 provider 경계값 15s
+    # (재리뷰 2 N-2 — lib 내부 재시도와 독립 시행이 되도록 간격 상향).
     assert forecast.calls == [("now-fail", 126, 37), ("now", 126, 37)]
-    assert delays == [2.0]
+    assert delays == [15.0]
     assert kor_travel_map_client.failure_calls == []
 
 

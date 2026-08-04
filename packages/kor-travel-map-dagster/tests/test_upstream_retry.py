@@ -12,6 +12,7 @@ from kortravelmap.dagster.upstream_retry import (
     DEFAULT_UPSTREAM_BASE_DELAY_SECONDS,
     DEFAULT_UPSTREAM_MAX_DELAY_SECONDS,
     DEFAULT_UPSTREAM_RUN_RETRY_BUDGET,
+    PROVIDER_BOUNDARY_BASE_DELAY_SECONDS,
     PROVIDER_CLIENT_INNER_RETRIES,
     RetryBudget,
     default_upstream_retryable,
@@ -71,6 +72,8 @@ def test_layer_reconciliation_constants_are_pinned() -> None:
     assert DEFAULT_UPSTREAM_BASE_DELAY_SECONDS == 2.0
     assert DEFAULT_UPSTREAM_MAX_DELAY_SECONDS == 20.0
     assert DEFAULT_UPSTREAM_RUN_RETRY_BUDGET == 8
+    # provider 경계 backoff — 예산과 곱해 run당 재시도 대기 상한 120s.
+    assert PROVIDER_BOUNDARY_BASE_DELAY_SECONDS == 15.0
 
 
 def test_default_predicate_follows_retryable_attribute() -> None:
@@ -225,6 +228,58 @@ def test_budget_not_consumed_by_nonretryable_failures() -> None:
     with pytest.raises(_NonRetryableError):
         retry_upstream(call, label="t", budget=budget, sleep=lambda _s: None)
     assert budget.used == 0
+
+
+def test_real_kma_lib_contract_pins_predicate_attribute_names() -> None:
+    """리뷰 1 N-1 — predicate가 의존하는 실 lib 속성명·값 계약 고정.
+
+    lib이 ``retryable``/``failure_kind``/``"quota"``/``"rate_limit"``를 rename
+    하면 쿼터 재시도 금지가 무음으로 풀린다 — airkorea 이름 계약 테스트와
+    동형으로 실 lib 존재 시 직접 단언한다.
+    """
+
+    kma_exceptions = pytest.importorskip("kma.exceptions")
+    network = kma_exceptions.KmaRequestError(
+        "t", failure_kind="network", retryable=True
+    )
+    quota = kma_exceptions.KmaRequestError("t", failure_kind="quota", retryable=True)
+    rate_limited = kma_exceptions.KmaRequestError(
+        "t", failure_kind="rate_limit", retryable=True
+    )
+    auth = kma_exceptions.KmaAuthError("t", retryable=False)
+
+    assert default_upstream_retryable(network) is True
+    assert default_upstream_retryable(quota) is False
+    assert default_upstream_retryable(rate_limited) is False
+    assert default_upstream_retryable(auth) is False
+
+
+def test_on_retry_failure_never_masks_original_exception() -> None:
+    """리뷰 1 N-3 — 텔레메트리 콜백이 던져도 재시도 흐름·원예외가 보존된다."""
+
+    def _exploding_log(_message: str) -> None:
+        raise RuntimeError("logger down")
+
+    recovered = _Flaky(1, _RetryableError())
+    assert (
+        retry_upstream(
+            recovered, label="t", sleep=lambda _s: None, on_retry=_exploding_log
+        )
+        == "ok"
+    )
+    assert recovered.calls == 2
+
+    exc = _RetryableError()
+    exhausted = _Flaky(9, exc)
+    with pytest.raises(_RetryableError) as info:
+        retry_upstream(
+            exhausted,
+            label="t",
+            attempts=2,
+            sleep=lambda _s: None,
+            on_retry=_exploding_log,
+        )
+    assert info.value is exc
 
 
 def test_on_retry_reports_label_attempt_and_exception() -> None:
