@@ -313,7 +313,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** feature 단건 상세 */
+        /**
+         * feature 단건 상세
+         * @description feature 참조는 legacy `f_*` id와 UUID 정본(canonical hyphenated) 양쪽을 수용한다 (ADR-068 경계 alias 해석, T-VN-32B dual). 응답의 `feature_id`는 legacy 값을 유지하고 `feature_uuid`가 병행 노출된다 — 값 자체의 UUID 전환은 T-VN-32C.
+         */
         get: operations["get_feature_v1_features__feature_id__get"];
         put?: never;
         post?: never;
@@ -950,6 +953,11 @@ export interface components {
             };
             /** Feature Id */
             feature_id: string;
+            /**
+             * Feature Uuid
+             * @description UUID 정본 identity 병행 노출 (ADR-068, T-VN-32B additive). feature_id 값 자체의 UUID 전환은 T-VN-32C.
+             */
+            feature_uuid?: string | null;
             /** Kind */
             kind: string;
             /** Lat */
@@ -1066,6 +1074,11 @@ export interface components {
             category: string;
             /** Feature Id */
             feature_id: string;
+            /**
+             * Feature Uuid
+             * @description UUID 정본 identity 병행 노출 (ADR-068, T-VN-32B additive). feature_id 값 자체의 UUID 전환은 T-VN-32C.
+             */
+            feature_uuid?: string | null;
             /**
              * Geometry
              * @description include_geometry=true일 때 route/area용 GeoJSON geometry.
@@ -1280,6 +1293,11 @@ export interface components {
             distance_m: number;
             /** Feature Id */
             feature_id: string;
+            /**
+             * Feature Uuid
+             * @description UUID 정본 identity 병행 노출 (ADR-068, T-VN-32B additive).
+             */
+            feature_uuid?: string | null;
             /** Kind */
             kind: string;
             /** Lat */
@@ -2547,6 +2565,8 @@ export interface components {
             radius_m: number;
             /** Target Feature Id */
             target_feature_id?: string | null;
+            /** Target Feature Uuid */
+            target_feature_uuid?: string | null;
             /** Target Lat */
             target_lat?: number | null;
             /** Target Lon */
@@ -3599,7 +3619,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description feature_id 없음 */
+            /** @description feature 참조 해석 불가 또는 비공개 */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -3608,7 +3628,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description If-None-Match가 canonical strong ETag가 아님 */
+            /** @description feature 참조 형식 오류(빈 문자열/공백 패딩/길이 초과) 또는 If-None-Match가 canonical strong ETag가 아님 */
             422: {
                 headers: {
                     [name: string]: unknown;
