@@ -54,8 +54,12 @@
   형태 값 실재 스캔 1회"(경계 해석 UUID-정본 우선의 shadowing 확인) 추가
   (tasks.md·resume.md).
 - freeze artifact 무영향(0080/0081 CHECK·트리거는 전환기 구조물 — artifact
-  bytes 미변경, unit sha 게이트 green 확인). 검증 수치는 아래 완료 기록에
-  이어 적음.
+  bytes 미변경, unit sha 게이트 green 확인).
+- **검증(CI-parity python:3.13 컨테이너)**: unit(alias_map 8 + freeze
+  artifact 7) 15 passed · fence(독성 행·TRUNCATE 포함 12)+32A shadow
+  migration+identity boundary+alembic 일관성 **33 passed** · glibc collation
+  판별 신규 모듈 **2 passed**(skip 아님 — glibc에서 default≠"C" 순서 실측 +
+  keyset/checksum이 byte 순서 유지) · ruff clean.
 
 ## 2026-08-04 (8) — T-VN-32C(1/2) alias-map 이관 표면·checksum 계약·legacy write fence
 
