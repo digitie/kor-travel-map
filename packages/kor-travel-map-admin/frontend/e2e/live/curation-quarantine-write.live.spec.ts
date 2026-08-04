@@ -54,14 +54,6 @@ async function fetchBffJson<T>(
 test.describe("curation quarantine 재분류 (격리 clone 전용)", () => {
   test.skip(COLLECTION_ID === "", "E2E_QUARANTINE_COLLECTION_ID 미설정 — 합성 격리 필요");
 
-  test.beforeEach(({}, testInfo) => {
-    // 파괴적 실행 조건을 spec이 스스로 단언한다.
-    if (EXECUTE_WRITE) {
-      expect(testInfo.config.workers).toBe(1);
-      expect(testInfo.project.retries).toBe(0);
-    }
-  });
-
   test("격리 목록이 marker·원본 병렬 정보를 내려준다 (ADR-048 봉투)", async ({ page }) => {
     test.setTimeout(FLOW_TIMEOUT);
     const body = await fetchBffJson<Envelope<{ items: QuarantineCollection[] }>>(
@@ -103,11 +95,15 @@ test.describe("curation quarantine 재분류 (격리 clone 전용)", () => {
     }
   });
 
-  test("move 재분류가 원자적으로 적용되고 빈 격리 collection이 정리된다", async ({
-    page,
-  }) => {
+  test("move 재분류가 원자적으로 적용되고 빈 격리 collection이 정리된다", async (
+    { page },
+    testInfo,
+  ) => {
     test.skip(!EXECUTE_WRITE, "E2E_QUARANTINE_WRITE=1 없음 — 파괴 스텝 생략");
     test.setTimeout(FLOW_TIMEOUT);
+    // 파괴적 스텝은 직렬 + 무재시도에서만 (cache-target-streams-isolated 관용).
+    expect(testInfo.config.workers).toBe(1);
+    expect(testInfo.project.retries).toBe(0);
 
     const preview = await fetchBffJson<Envelope<{ items: QuarantineItem[] }>>(
       page,
