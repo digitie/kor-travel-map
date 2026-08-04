@@ -17,6 +17,41 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-08-05 (4) — prod 배포(Map c0afaa4e·PinVi 3ff54b8b) + 32C cutover checksum 일치
+
+사용자 지시("진행")로 배포 게이트를 직접 열었다. 전 과정 실측 기록:
+
+- **Map 배포**: `~/regen-build/c0afaa4e/` export 빌드(4 이미지, 리비전 라벨 실측) →
+  write path 정지 → **write-fence rollback 기준점** `2026-08-05-prefence-0082.dump`
+  (sha `d367fbd1…`, features 731,600 — H43 잔여 이행, ADR-075 정합) → 태그 회전
+  (`prev-2b2dee95` 롤백 보존) → api 재기동. entrypoint가 `0079→0082` 자동 적용:
+  **UUID backfill 731,600/731,600(100%)·중복 0·aliases 731,600(1:1)**, EXPECTED_HEAD
+  게이트 통과(durable override `~/map-deploy-override.yml`=`0082` + geo/opinet env
+  보존 — compose 정본 갱신은 dm#128 요청). 검증: 공개 표면 `feature_uuid` 병행
+  노출 실측, alias-map checksum 표면 가동(root `8bd9534a…`), admin/quarantine/ops
+  smoke green. 주의 실측: 0080 backfill(수 분)이 healthcheck 유예보다 길어
+  일시 unhealthy 표기 — 컨테이너는 정상, migration 완료 후 healthy 복귀.
+- **PinVi 배포**: 함정 실측 — `.env` `PINVI_REPO_DIR`가 frozen release export
+  (`pinvi-release-4943282`)를 가리켜 git 체크아웃 갱신만으로는 **구코드가
+  빌드**됨(1차 배포에서 신규 모듈 부재로 발각). 새 export `pinvi-release-3ff54b8`
+  + `.env` `PINVI_REPO_DIR`/`PINVI_SOURCE_REVISION` 갱신으로 수리, 리비전
+  `3ff54b8b` 실측·`20260804_0049` 적용. sync enable은 `false` 유지(41C 게이트).
+- **32C cutover(dry→real)**: `pinvi-feature-uuid-cutover` — **양 저장소 독립
+  checksum 일치**(PinVi 재계산 root `8bd9534a…` = Map 서버 root, alias_count
+  731,600). trip_day_pois **26행 UUID shadow 채움**(매칭 4 ref), unmatched 10건은
+  전부 e2e 합성·재생성 전 구세대 참조(NULL 유지+보고 — 설계 검증 그대로).
+  발견: checksum 호출 ~21s(731k merkle) vs PinVi 기본 timeout 10s →
+  `PINVI_KOR_TRAVEL_MAP_TIMEOUT_SECONDS=90` 주입으로 해소(정본화 백로그).
+- **H42 잔여 소화**: CSV5 재import(authoritative replace) 486행 전량 재통과 —
+  미해석 290→**270**. 잔여 구성: lighthouse 103(H31 취소로 구조적 확정),
+  tourism 120(visitkorea 미적재), arboretum 29·heritage 18(스케줄 수렴 대기).
+  quarantine/admin/공개 smoke green(위). **H45 판정 개시**: 신규 이미지에서
+  재시도 텔레메트리 실작동 실측(`upstream retry … grid 60,127: attempt 1/2`),
+  첫 주기 alerts·airkorea는 upstream 열화 창과 겹쳐 FAILURE — 수 주기 관찰 계속.
+- **32C 다음(값 전환 tail)**: checksum 게이트 통과로 Map 응답 `feature_id` 값
+  UUID 전환·비파생 generator 채택·0080 CHECK/0079 트리거 재평가 +
+  user/admin-detail 스냅샷 재추출이 열렸다 — 별도 PR(적대 리뷰 2).
+
 ## 2026-08-05 (3) — H45 착지(#943)·user-client 수리(#944)·H43 기준선 dump
 
 - **T-VN-H45 머지**: #943 `8c74d911`(8/8 green). 재리뷰 판정 — 리뷰 1 GO
