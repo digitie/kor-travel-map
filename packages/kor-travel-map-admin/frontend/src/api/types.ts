@@ -370,6 +370,73 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/curations/quarantine": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Admin Curation Quarantines
+         * @description `0065` 정본 marker 술어로 격리 collection 목록을 조회한다 (T-VN-H22A).
+         *
+         *     격리 collection이 보관한 theme/source와 원본 collection의 현재 theme/source를
+         *     병렬로 내려준다 — target 추정·추천은 하지 않는다. 빈 목록이 정상 경로다.
+         */
+        get: operations["list_admin_curation_quarantines_v1_admin_curations_quarantine_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/curations/quarantine/{collection_id}/items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Admin Curation Quarantine Items
+         * @description 격리 item 목록 + target 대비 conflict preview (순수 SELECT, T-VN-H22A).
+         */
+        get: operations["list_admin_curation_quarantine_items_v1_admin_curations_quarantine__collection_id__items_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/curations/quarantine/{collection_id}/reclassify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reclassify Admin Curation Quarantine
+         * @description 격리 collection을 move 또는 standalone 확정으로 명시 재분류한다 (T-VN-H22B).
+         *
+         *     move는 lock 하 (A)/(B) 재검사 뒤 전체 원자 적용이며 충돌 시 409로 전체를
+         *     거부한다(부분 적용 금지). confirm_standalone은 `0065` marker를 제거하고
+         *     collection_key/title을 확정한다.
+         */
+        post: operations["reclassify_admin_curation_quarantine_v1_admin_curations_quarantine__collection_id__reclassify_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/curations/{collection_id}": {
         parameters: {
             query?: never;
@@ -2972,6 +3039,134 @@ export interface components {
             updated_at: string;
             /** Updated By */
             updated_by: string | null;
+        };
+        /** AdminCurationQuarantineCollectionView */
+        AdminCurationQuarantineCollectionView: {
+            /**
+             * Collection Id
+             * Format: uuid
+             */
+            collection_id: string;
+            /** Collection Key */
+            collection_key: string;
+            /** Created By */
+            created_by: string | null;
+            /** Edition Key */
+            edition_key: string;
+            /** Item Count */
+            item_count: number;
+            /** Marker Intact */
+            marker_intact: boolean;
+            original_collection: components["schemas"]["CurationQuarantineOriginalCollectionView"] | null;
+            quarantine_source: components["schemas"]["CurationQuarantineSourceView"] | null;
+            quarantine_theme: components["schemas"]["CurationQuarantineThemeView"] | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "draft" | "published" | "archived";
+            /** Title */
+            title: string;
+            /**
+             * Visibility
+             * @enum {string}
+             */
+            visibility: "admin_only" | "public";
+        };
+        /** AdminCurationQuarantineCollectionsData */
+        AdminCurationQuarantineCollectionsData: {
+            /** Items */
+            items: components["schemas"]["AdminCurationQuarantineCollectionView"][];
+        };
+        /** AdminCurationQuarantineCollectionsResponse */
+        AdminCurationQuarantineCollectionsResponse: {
+            data: components["schemas"]["AdminCurationQuarantineCollectionsData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /** AdminCurationQuarantineItemView */
+        AdminCurationQuarantineItemView: {
+            /** Archived At */
+            archived_at: string | null;
+            /** Conflict Item Id */
+            conflict_item_id: string | null;
+            /**
+             * Conflict Kind
+             * @enum {string}
+             */
+            conflict_kind: "movable" | "component_identity_conflict" | "active_source_feature_conflict" | "no_target" | "target_missing";
+            /**
+             * Curation Item Id
+             * Format: uuid
+             */
+            curation_item_id: string;
+            /** External Component Id */
+            external_component_id: string;
+            /** External Item Id */
+            external_item_id: string;
+            /** Feature Id */
+            feature_id: string | null;
+            /** Place Name */
+            place_name: string;
+            /** Source Present */
+            source_present: boolean;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "candidate" | "included" | "rejected" | "archived";
+        };
+        /** AdminCurationQuarantineItemsData */
+        AdminCurationQuarantineItemsData: {
+            /** Items */
+            items: components["schemas"]["AdminCurationQuarantineItemView"][];
+            /** Target Archived */
+            target_archived: boolean;
+            /** Target Collection Id */
+            target_collection_id: string | null;
+            /** Target Missing */
+            target_missing: boolean;
+        };
+        /** AdminCurationQuarantineItemsResponse */
+        AdminCurationQuarantineItemsResponse: {
+            data: components["schemas"]["AdminCurationQuarantineItemsData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /** AdminCurationQuarantineReclassifyData */
+        AdminCurationQuarantineReclassifyData: {
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "move" | "confirm_standalone";
+            /** Collection Id */
+            collection_id?: string | null;
+            /** Collection Key */
+            collection_key?: string | null;
+            /** Moved Item Ids */
+            moved_item_ids?: string[] | null;
+            /** Quarantine Collection Deleted */
+            quarantine_collection_deleted?: boolean | null;
+        };
+        /** AdminCurationQuarantineReclassifyRequest */
+        AdminCurationQuarantineReclassifyRequest: {
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "move" | "confirm_standalone";
+            /** Collection Key */
+            collection_key?: string | null;
+            /** Item Ids */
+            item_ids?: string[] | null;
+            /** Target Collection Id */
+            target_collection_id?: string | null;
+            /** Title */
+            title?: string | null;
+        };
+        /** AdminCurationQuarantineReclassifyResponse */
+        AdminCurationQuarantineReclassifyResponse: {
+            data: components["schemas"]["AdminCurationQuarantineReclassifyData"];
+            meta: components["schemas"]["Meta"];
         };
         /**
          * AdminFeatureChangeData
@@ -6712,6 +6907,60 @@ export interface components {
             place_name: string;
             /** Resolver Version */
             resolver_version: string | null;
+        };
+        /**
+         * CurationQuarantineOriginalCollectionView
+         * @description `0065` marker가 기록한 원본 collection의 현재 상태 (병렬 표시 전용).
+         */
+        CurationQuarantineOriginalCollectionView: {
+            /**
+             * Collection Id
+             * Format: uuid
+             */
+            collection_id: string;
+            /** Exists */
+            exists: boolean;
+            source: components["schemas"]["CurationQuarantineSourceView"] | null;
+            /** Status */
+            status: ("draft" | "published" | "archived") | null;
+            theme: components["schemas"]["CurationQuarantineThemeView"] | null;
+            /** Title */
+            title: string | null;
+            /** Visibility */
+            visibility: ("admin_only" | "public") | null;
+        };
+        /** CurationQuarantineSourceView */
+        CurationQuarantineSourceView: {
+            /** Dataset Key */
+            dataset_key: string | null;
+            /** Provider */
+            provider: string | null;
+            /**
+             * Source Id
+             * Format: uuid
+             */
+            source_id: string;
+            /** Source Name */
+            source_name: string | null;
+        };
+        /** CurationQuarantineThemeView */
+        CurationQuarantineThemeView: {
+            /** Theme Group */
+            theme_group: string;
+            /**
+             * Theme Id
+             * Format: uuid
+             */
+            theme_id: string;
+            /** Theme Name */
+            theme_name: string;
+            /** Theme Slug */
+            theme_slug: string;
+            /**
+             * Visibility
+             * @enum {string}
+             */
+            visibility: "admin_only" | "public";
         };
         /**
          * DagsterGraphqlError
@@ -13915,6 +14164,138 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CurationLinkAuditResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    list_admin_curation_quarantines_v1_admin_curations_quarantine_get: {
+        parameters: {
+            query?: {
+                page_size?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminCurationQuarantineCollectionsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    list_admin_curation_quarantine_items_v1_admin_curations_quarantine__collection_id__items_get: {
+        parameters: {
+            query?: {
+                target_collection_id?: string | null;
+                page_size?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path: {
+                collection_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminCurationQuarantineItemsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    reclassify_admin_curation_quarantine_v1_admin_curations_quarantine__collection_id__reclassify_post: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
+                "Idempotency-Key": string;
+            };
+            path: {
+                collection_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminCurationQuarantineReclassifyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminCurationQuarantineReclassifyResponse"];
                 };
             };
             /** @description Validation Error */

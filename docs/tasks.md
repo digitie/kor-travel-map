@@ -27,9 +27,8 @@ barrier로 직렬화한다.
     [~] `T-VN-H25B`(CSV 역반영 5건·매칭 재실행 — 3건 오링크 배제, 미충족 AC는 H34) →
     [x] `T-VN-H33`(오링크 3건 해제 — 공개 오노출 해소, H36으로 durable) →
     [x] `T-VN-H36`(import 이름 단독 자동링크 금지 — H35 이미지에 포함 필수) →
-    [~] `T-VN-H40`(concierge provenance 복구 — `0073`+`0074` 구현·검증 완료,
-        H35 재정의로 "복구 실행"은 소멸: 재생성 후 `0073` 트리거가 재적재분에 적용,
-        재적재 후 basis 분포 확인만 남음) →
+    [x] `T-VN-H40`(concierge provenance — 재생성 후 재적재분 4,424건 전부
+        `match_basis=source_rule` 실측(2026-08-04), `0073` 트리거 prod 실증 완결) →
     [ ] `T-VN-H35`(**2026-08-04 재정의** — 0072 배포 사고로 cutover 소멸, prod 폐기 후
         빈 DB `0078` 재생성 + 재적재로 대체. typed helper 사문화·결합 barrier 취소.
         본문 상단 재정의 블록 참조) →
@@ -43,9 +42,9 @@ barrier로 직렬화한다.
     [x] `T-VN-H32R`(#911~#913 — authoritative observation receipt·동시 run fence·
         retention job 등록) →
     [x] `T-VN-H34R`(#914 — linked name exact evidence·공개 repeatable-read snapshot) →
-    [ ] `T-VN-H22A`(quarantine read/preview) →
-    [ ] `T-VN-H22B`(원자적 재분류 command) →
-    [ ] `T-VN-H22C`(Admin UI·파괴적 live)
+    [x] `T-VN-H22A`(quarantine read/preview — 사용자 지시로 보류 해제, 단일 PR) →
+    [x] `T-VN-H22B`(원자적 재분류 command — domain ledger·충돌 fail-close·빈 격리 정리) →
+    [x] `T-VN-H22C`(Admin UI 패널·mocked 6건·격리 스택 파괴 검증 9흐름·live spec 저술)
 - **Lane B — frontend hardening·PinVi 소비 API**
   - b0: [x] `T-VN-48D`(final exact Mocked/Live) →
     [x] `T-VN-49A/B/C/D`(React 구조 debt, 단일 PR)
@@ -954,13 +953,17 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
      호스트 export만으로는 이 env가 컨테이너에 **전달되지 않는다** — 게이트를 켜려면
      manager compose에 명시 값 결선이 필요하다(별도 이슈로 요청). 그 전까지 게이트는
      표준 compose·local-dev에서 꺼져 있는 것이 정상이다.
-  3. [ ] `main`(#931 포함)으로 api 이미지 재빌드·배포 → 빈 `krtour_map` 재생성 →
-     entrypoint가 `0078` 직행. 재생성 배포의 head 검증은 **빌드 단계 수동 게이트**로
-     한다(`docker run --rm <image> alembic heads` = `0078` 아니면 배포 금지) — env 결선이
-     manager에 없는 동안의 대체 통제.
-  4. [ ] 데이터 재적재 — provider ETL dagster job들 + `curated_features_refresh_job`
-     (concierge 3,044) + CSV 큐레이션 5종 재import (features 적재 후).
-  5. [ ] `0078`에서 공개 표면·quarantine 0건 확인 후 H30B·H34 잔여·H40 실행 해제.
+  3. [x] **완료(2026-08-04)** — `main@2b2dee95`로 3 이미지 재빌드(head=`0078` 수동 게이트
+     통과) → `krtour_map` DROP/CREATE → compose recreate(→`0078` 10초) → 3컨테이너 healthy.
+     실측 함정 2건: manager `.env`가 root 소유(sudo compose), **신규 DB 확장은 superuser
+     사전 생성 필요**(`CREATE EXTENSION`은 superuser 전용, CI는 testcontainers superuser라
+     못 잡음 — postgis·pg_trgm·pgcrypto·pg_prewarm + `GRANT USAGE`; #109에 절차 기록).
+  4. [~] 데이터 재적재 — **concierge 축 완료**: provider job + `curated_features_refresh`
+     성공, features 1,481 · curated 4,424 · **공개 표면 4,424건 복구**(전부 `source_rule`).
+     geo API key 결선 공백은 `/tmp` override로 해소(영구 결선은 manager #114).
+     잔여: 나머지 provider ETL(일일 스케줄) + CSV 5종(대상 feature 적재 후).
+  5. [ ] 재적재 안정화 후 H30B·H34 잔여 실행 해제. **codex 41C "prod consumer enable"도
+     재pin(#109) + CSV5 완료 후가 경계** (그 전 격리 스택 작업은 병행 무방).
 
   ---
 
@@ -1481,7 +1484,10 @@ read/decision/write/UI를 한 PR에 몰지 않는다.
 조사가 함께 지적한 "배포 직후 `[0065 격리]` collection이 admin UI에 설명 없이 등장한다"는
 경고도 collection이 생성되지 않으므로 함께 소멸한다.
 
-- **판정 보류 — 사용자 결정 대기.** 축소가 아니라 **보류/종결** 여부라 임의로 닫지 않는다.
+- ~~**판정 보류 — 사용자 결정 대기.**~~ → **해제(2026-08-04)**: 사용자 지시 "h22까지
+  순차적으로 진행", "h22는 하나의 pr로". 대상이 현재 0건이어도 도구를 갖춘다 — preflight
+  게이트(`quarantine_candidates_before`)가 0이 아니게 되는 순간 이 UI가 소비처다.
+  세 항목 모두 단일 PR로 구현 완료(아래 각 항목 완료 기록).
 - **대신 배포 게이트가 이 전제를 스스로 재게 했다**(#929): H35 **preflight**가
   `quarantine_candidates_before`를 0으로 검사한다. 경계 뒤(`migrate`/`verify`)에는
   `quarantine_collections`·`quarantine_items`를 **관측치로만** 남기고 거부하지 않는다.
@@ -1497,37 +1503,52 @@ read/decision/write/UI를 한 PR에 몰지 않는다.
   fail-close → PITR 없는 prod에서 dump 복원만 남는다). `#925`에서 index signature로 겪은
   것과 같은 계열의 함정을 내가 다시 만든 것이었다.
 
-미해결로 남은 계획상 모호함 — 착수하게 되면 먼저 정해야 한다:
+계획상 모호함 3건은 구현에서 이렇게 확정했다:
 
-- **"후보 theme/source"에 대응하는 스키마가 없다.** 존재하는 것은 quarantine collection이
-  복사 보관한 theme/source와 원본 collection의 현재값 **두 벌**뿐이다. 이 둘을 나란히
-  보여주는 것으로 읽으면 구현 가능하지만, "추천 후보"를 의도한 것이라면 같은 항목의
-  "자동 target 추정은 하지 않는다"와 정면으로 충돌한다.
-- item 행에는 격리 표시 컬럼이 **없다**. `0065`는 `collection_id`만 바꿔 옮기므로 "격리
-  근거"는 collection marker(`created_by='migration:0065'` +
-  `metadata.migration_quarantine`) + `metadata.original_collection_id` 역참조로
-  **재구성**해야 하고, 이동된 item과 이후 수동 추가된 item은 구분할 수 없다.
-- 페이지네이션은 ADR-048 `meta.page.next_cursor` 봉투를 쓴다. `/admin/link-audit`의
-  `data.{count,has_more,next_cursor}`는 ADR-048 **위반 잔재**라 선례로 삼지 않는다.
+- **"후보 theme/source"** = 추천이 아니라 **병렬 표시**로 확정. 격리 collection이 0065 때
+  복사 보관한 theme/source와 원본 collection의 **현재** theme/source를 나란히 내려준다
+  ("자동 target 추정 금지"와 정합). 추천으로 읽는 해석은 폐기.
+- 격리 근거는 collection marker 정본 술어(`created_by='migration:0065'` AND
+  `metadata @> migration_quarantine`) + `original_collection_id` 역참조로 재구성. 이동된
+  item과 수동 추가 item의 구분 불가는 그대로 수용(전체가 재분류 대상이므로 실해 없음).
+- 페이지네이션은 ADR-048 `meta.page.next_cursor` 봉투. `/admin/link-audit` shape는 위반
+  잔재라 따르지 않았다.
 
-- [ ] T-VN-H22A — **quarantine read model·conflict preview**
+- [x] T-VN-H22A — **quarantine read model·conflict preview** *(2026-08-04, H22 단일 PR)*
 
-  원본 collection·후보 theme/source·격리 근거와 exact identity conflict를 side effect 없이
-  조회하는 repository/API projection을 만든다. 자동 target 추정은 하지 않는다.
+  `GET /v1/admin/curations/quarantine`(+`/{id}/items`) — marker 정본 술어 기반 목록 +
+  원본/격리 theme·source 병렬 + item별 conflict preview. 충돌 판정은 이동이
+  `collection_id`만 바꾸는 UPDATE라는 사실에서 도출 — 위반 가능 제약은 정확히 2개:
+  (A) `uq_curation_items_component_identity`(비-partial — archived 상대도 충돌),
+  (B) `uq_curation_items_active_source_feature`(양쪽 다 partial 술어 충족 시만). 순수
+  SELECT, keyset cursor(`{"v":1,...}` 정확 키 검사), 자동 target 추정 없음.
 
-- [ ] T-VN-H22B — **원자적 reclassification command**
+- [x] T-VN-H22B — **원자적 reclassification command** *(2026-08-04, 같은 PR)*
 
-  운영자가 target collection 이동 또는 별도 collection 확정을 선택하는 command를 구현한다.
-  parent collection→item lock, revision/actor 감사, conflict fail-close, 빈 quarantine 정리를
-  한 transaction에서 보장한다. actor-scoped `Idempotency-Key`, body fingerprint와 terminal
-  result replay를 처음부터 포함하고 PR #906의 완료된 정적 inventory에 등록한다.
+  `POST .../quarantine/{id}/reclassify` — `move`(target 지정 또는 원본, item subset 지원) /
+  `confirm_standalone`(marker 2키만 제거, 나머지 metadata 보존). lock 순서: 전역 advisory →
+  collection들 id 오름차순 FOR UPDATE → **lock 후 marker 재검증**(TOCTOU) → items 오름차순
+  FOR UPDATE → (A)/(B) 재검사 → 충돌 시 409 fail-close(충돌 목록 detail, 무변경) →
+  UPDATE/DELETE(빈 격리 정리). `admin.curation-quarantine.reclassify`를 #906 정적
+  inventory(registry 68→69)와 route_policy에 등록 — 사전 심어진 quarantine barrier 충족.
+  actor 감사는 `updated_by` + domain ledger.
 
-- [ ] T-VN-H22C — **Admin UI·실데이터 파괴적 수용**
+- [x] T-VN-H22C — **Admin UI·실데이터 파괴적 수용** *(2026-08-04, 같은 PR)*
 
-  H22A/B 계약만 소비하는 검토 UI를 만들고 격리 clone에서 충돌 preview·이동·별도 확정·빈
-  collection 정리를 파괴적으로 검증한다. 같은 `curation-collections-client.tsx`와 mocked spec의
-  선행 작업 T-VN-48B·49B는 모두 완료됐으므로 H22A/B 뒤 최신 구조 위에서 시작한다. 49B 코드와
-  이 선행 조건 해제는 같은 merge commit으로 `main`에 반영한다.
+  H22A/B 계약만 소비하는 `curation-quarantine-panel.tsx`(49B controller/view 관용, 기존
+  client 파일 수정은 2줄) — 빈 상태 1급(실데이터 0건이 정상), 격리/원본 병렬 표시,
+  conflict 배지, item subset 이동 + AlertDialog, 409 충돌 목록 렌더, 별도 확정. mocked
+  spec 6건(BFF 강제·`Idempotency-Key` 헤더 단언, manifest 276→284 재고정 — main의 기존
+  drift 278 + 기존 실패 7건은 tvn41 잔여로 별도) + live spec 저술
+  (`curation-quarantine-write.live.spec.ts`, 격리 clone 전용·env opt-in — 실데이터
+  quarantine이 0건이라 러너가 합성 필요).
+
+  **파괴적 수용은 격리 스택(로컬 postgis + 실 API 서버, HTTP 전 경로)에서 9흐름 실증**:
+  목록 병렬·preview 진리표·충돌 포함 move 409 fail-close(무변경 검증)·부분 move·terminal
+  replay(`Idempotency-Replayed: true`)·fingerprint 409·전량 move 후 빈 격리 DELETE·
+  confirm_standalone(marker 2키만 제거, 기타 metadata 보존)·확정 후 재확정 404.
+  참고: 사고 시점 dump(`krtour_map_0072_*.dump`, 복원 검증됨)는 향후 실데이터 픽스처로
+  쓸 수 있으나 quarantine 행이 없어 이번 검증은 합성 시드를 썼다.
 
 ## 이슈 종결 추적
 

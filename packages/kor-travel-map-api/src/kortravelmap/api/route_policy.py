@@ -244,6 +244,11 @@ ROUTE_POLICIES: dict[str, RoutePolicy] = {
         RoutePolicy.OPERATOR
     ),
     "/v1/admin/curations/link-audit": RoutePolicy.OPERATOR,
+    "/v1/admin/curations/quarantine": RoutePolicy.OPERATOR,
+    "/v1/admin/curations/quarantine/{collection_id}/items": RoutePolicy.OPERATOR,
+    "/v1/admin/curations/quarantine/{collection_id}/reclassify": (
+        RoutePolicy.OPERATOR
+    ),
     "/v1/admin/curations/{collection_id}": RoutePolicy.OPERATOR,
     "/v1/admin/curations/{collection_id}/items": RoutePolicy.OPERATOR,
     "/v1/admin/curations/{collection_id}/items/{curation_item_id}": (

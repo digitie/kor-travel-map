@@ -39,6 +39,15 @@ __all__ = [
     "CurationImportRowReceipt",
     "CurationLinkAudit",
     "CurationItem",
+    "CurationQuarantineCollection",
+    "CurationQuarantineItem",
+    "CurationQuarantineItemsPreview",
+    "CurationQuarantineMoveConflict",
+    "CurationQuarantineMoveConflictError",
+    "CurationQuarantineOriginalCollection",
+    "CurationQuarantineSourceRef",
+    "CurationQuarantineTargetArchivedError",
+    "CurationQuarantineThemeRef",
     "FeatureCurationGroup",
     "FeatureMatch",
     "FeatureMatchRequest",
@@ -47,6 +56,7 @@ __all__ = [
     "add_curation_item",
     "archive_curation_item",
     "archive_curation_collection",
+    "confirm_curation_quarantine_standalone",
     "create_curation_collection",
     "get_curation_collection",
     "get_curation_import_batch",
@@ -56,9 +66,12 @@ __all__ = [
     "import_curation_rows",
     "list_curation_collections",
     "list_curation_items_by_feature_ids",
+    "list_curation_quarantine_collections",
+    "list_curation_quarantine_items",
     "list_unattributed_curation_links",
     "list_unattributed_curation_links_page",
     "list_feature_curation_groups",
+    "move_curation_quarantine_items",
     "preview_curation_import",
     "resolve_feature_match",
     "resolve_feature_matches",
@@ -91,6 +104,15 @@ _RELATIONS: Final = frozenset(
 _REUSE_POLICIES: Final = frozenset({"allowed", "blocked", "manual_review"})
 _POSTGRES_INTEGER_MAX: Final = 2_147_483_647
 _FEATURE_MATCH_NAME_CANDIDATE_LIMIT: Final = 100
+
+# T-VN-H22 격리 conflict preview 분류. 이동은 ``collection_id``만 바꾸는 UPDATE라
+# 위반 가능한 제약은 정확히 두 개다 — (A) ``uq_curation_items_component_identity``,
+# (B) ``uq_curation_items_active_source_feature`` (partial). (A)가 우선한다.
+QUARANTINE_CONFLICT_MOVABLE: Final = "movable"
+QUARANTINE_CONFLICT_COMPONENT: Final = "component_identity_conflict"
+QUARANTINE_CONFLICT_ACTIVE_FEATURE: Final = "active_source_feature_conflict"
+QUARANTINE_CONFLICT_NO_TARGET: Final = "no_target"
+QUARANTINE_CONFLICT_TARGET_MISSING: Final = "target_missing"
 
 
 @dataclass(frozen=True)
@@ -213,6 +235,110 @@ class CurationLinkAudit:
     match_basis: str | None
     resolver_version: str | None
     decided_at: datetime | None
+
+
+@dataclass(frozen=True)
+class CurationQuarantineThemeRef:
+    """격리/원본 collection이 가리키는 theme의 병렬 표시용 참조 (T-VN-H22A)."""
+
+    theme_id: str
+    theme_slug: str
+    theme_name: str
+    theme_group: str
+    visibility: str
+
+
+@dataclass(frozen=True)
+class CurationQuarantineSourceRef:
+    """격리/원본 collection이 가리키는 source의 병렬 표시용 참조 (T-VN-H22A)."""
+
+    source_id: str
+    provider: str | None
+    dataset_key: str | None
+    source_name: str | None
+
+
+@dataclass(frozen=True)
+class CurationQuarantineOriginalCollection:
+    """`0065` marker가 기록한 원본 collection의 **현재** 상태.
+
+    ``collection_id``는 marker(``metadata->>'original_collection_id'``) 기록값이고
+    나머지는 그 uuid로 되짚은 현재 행이다 — 행이 사라졌으면 ``exists=False``에
+    상태 필드는 전부 ``None``이다. target 추정·추천이 아니라 병렬 표시 전용이다.
+    """
+
+    collection_id: str
+    title: str | None
+    status: str | None
+    visibility: str | None
+    exists: bool
+    theme: CurationQuarantineThemeRef | None
+    source: CurationQuarantineSourceRef | None
+
+
+@dataclass(frozen=True)
+class CurationQuarantineCollection:
+    """`0065` 격리 collection 목록 read model 한 건 (T-VN-H22A)."""
+
+    collection_id: str
+    collection_key: str
+    title: str
+    edition_key: str
+    status: str
+    visibility: str
+    created_by: str | None
+    item_count: int
+    marker_intact: bool
+    quarantine_theme: CurationQuarantineThemeRef | None
+    quarantine_source: CurationQuarantineSourceRef | None
+    original_collection: CurationQuarantineOriginalCollection | None
+
+
+@dataclass(frozen=True)
+class CurationQuarantineItem:
+    """격리 item 한 건 + target 대비 conflict preview (T-VN-H22A)."""
+
+    curation_item_id: str
+    external_item_id: str
+    external_component_id: str
+    feature_id: str | None
+    place_name: str
+    status: str
+    source_present: bool
+    archived_at: datetime | None
+    conflict_kind: str
+    conflict_item_id: str | None
+
+
+@dataclass(frozen=True)
+class CurationQuarantineItemsPreview:
+    """격리 item page와 적용된 target 해석 결과."""
+
+    target_collection_id: str | None
+    target_missing: bool
+    target_archived: bool
+    items: tuple[CurationQuarantineItem, ...]
+
+
+@dataclass(frozen=True)
+class CurationQuarantineMoveConflict:
+    """move가 위반할 unique 제약 충돌 한 건 (T-VN-H22B)."""
+
+    curation_item_id: str
+    conflict_kind: str
+    conflict_item_id: str
+
+
+class CurationQuarantineTargetArchivedError(Exception):
+    """이동 target collection이 archive 상태라 move를 거부한다 (HTTP 409)."""
+
+
+class CurationQuarantineMoveConflictError(Exception):
+    """lock 하 재검사에서 충돌이 하나라도 있으면 전체를 원자적으로 거부한다 (409)."""
+
+    def __init__(self, conflicts: tuple[CurationQuarantineMoveConflict, ...]) -> None:
+        super().__init__("curation quarantine move가 unique 제약과 충돌합니다.")
+        self.conflicts = conflicts
 
 
 @dataclass(frozen=True)
@@ -1285,6 +1411,176 @@ ORDER BY collection.collection_id, item.curation_item_id
 LIMIT :limit
 """
 
+# `0065`가 quarantine collection에 박는 정본 marker 술어 그대로 읽는다
+# (`src/kortravelmap/cli/_h35_schema.py`의 `_QUARANTINE_COUNT_SQL`과 동일).
+# `created_by`만 보면 `0065`가 만든 다른 행과 섞이므로 metadata marker를 함께 요구한다.
+_QUARANTINE_MARKER_JSONB: Final[str] = """'{"migration_quarantine": "0065"}'::jsonb"""
+
+
+def _quarantine_marker_sql(alias: str) -> str:
+    return (
+        f"{alias}.created_by = 'migration:0065' AND {alias}.metadata @> " + _QUARANTINE_MARKER_JSONB
+    )
+
+
+# item_count는 archived/source-absent를 포함한 물리 행 수다 — move는 행 전체를
+# 옮기므로 격리가 실제로 붙들고 있는 수량이 운영자에게 맞는 값이다.
+# marker_intact는 정본 술어로 잡힌 행에서 항상 true지만(운영자가 PATCH로 지운 행은
+# 아예 안 잡힌다), original_collection 존재 여부와 함께 신뢰도 표시용으로 유지한다.
+# original은 marker가 기록한 uuid 텍스트로 되짚은 **현재** 행이다 — 추천이 아니라
+# 병렬 표시 전용이며 잘못된 기록값에도 cast 오류 없이 미존재로 떨어지도록 text 비교한다.
+_LIST_QUARANTINE_COLLECTIONS_SQL: Final[str] = f"""
+SELECT
+    quarantine.collection_id::text AS collection_id,
+    quarantine.collection_key,
+    quarantine.title,
+    quarantine.edition_key,
+    quarantine.status,
+    quarantine.visibility,
+    quarantine.created_by,
+    quarantine.metadata,
+    (
+        SELECT count(*)::integer
+        FROM feature.curation_items AS quarantined_item
+        WHERE quarantined_item.collection_id = quarantine.collection_id
+    ) AS item_count,
+    ({_quarantine_marker_sql("quarantine")}) AS marker_intact,
+    quarantine_theme.theme_id::text AS quarantine_theme_id,
+    quarantine_theme.theme_slug AS quarantine_theme_slug,
+    quarantine_theme.theme_name AS quarantine_theme_name,
+    quarantine_theme.theme_group AS quarantine_theme_group,
+    quarantine_theme.visibility AS quarantine_theme_visibility,
+    quarantine_source.source_id::text AS quarantine_source_id,
+    quarantine_source.provider AS quarantine_provider,
+    quarantine_source.dataset_key AS quarantine_dataset_key,
+    quarantine_source.source_name AS quarantine_source_name,
+    original.collection_id::text AS original_collection_id,
+    original.title AS original_title,
+    original.status AS original_status,
+    original.visibility AS original_visibility,
+    original_theme.theme_id::text AS original_theme_id,
+    original_theme.theme_slug AS original_theme_slug,
+    original_theme.theme_name AS original_theme_name,
+    original_theme.theme_group AS original_theme_group,
+    original_theme.visibility AS original_theme_visibility,
+    original_source.source_id::text AS original_source_id,
+    original_source.provider AS original_provider,
+    original_source.dataset_key AS original_dataset_key,
+    original_source.source_name AS original_source_name
+FROM feature.curation_collections AS quarantine
+JOIN feature.curated_themes AS quarantine_theme
+  ON quarantine_theme.theme_id = quarantine.theme_id
+LEFT JOIN feature.curated_sources AS quarantine_source
+  ON quarantine_source.source_id = quarantine.source_id
+LEFT JOIN feature.curation_collections AS original
+  ON original.collection_id::text = quarantine.metadata ->> 'original_collection_id'
+LEFT JOIN feature.curated_themes AS original_theme
+  ON original_theme.theme_id = original.theme_id
+LEFT JOIN feature.curated_sources AS original_source
+  ON original_source.source_id = original.source_id
+WHERE {_quarantine_marker_sql("quarantine")}
+  AND (
+      CAST(:cursor_collection_id AS uuid) IS NULL
+      OR quarantine.collection_id > CAST(:cursor_collection_id AS uuid)
+  )
+ORDER BY quarantine.collection_id
+LIMIT :limit
+"""
+
+_GET_QUARANTINE_COLLECTION_SQL: Final[str] = f"""
+SELECT
+    quarantine.collection_id::text AS collection_id,
+    quarantine.metadata
+FROM feature.curation_collections AS quarantine
+WHERE quarantine.collection_id = CAST(:collection_id AS uuid)
+  AND {_quarantine_marker_sql("quarantine")}
+"""
+
+
+def _quarantine_conflict_lateral_sql(item_alias: str) -> str:
+    """(A)/(B) 두 unique 제약을 target collection에 대해 선검사하는 LATERAL 2개.
+
+    - (A) ``uq_curation_items_component_identity``는 **partial이 아니다** — 상대의
+      archived/source_present와 무관하게 걸리므로 어떤 필터도 붙이면 안 된다.
+    - (B) ``uq_curation_items_active_source_feature``는 partial unique — **양쪽 다**
+      ``source_present AND archived_at IS NULL AND feature_id IS NOT NULL``일 때만
+      걸린다 (``occupant.feature_id = item.feature_id`` 등호가 NOT NULL을 함의).
+    """
+
+    return f"""
+LEFT JOIN LATERAL (
+    SELECT occupant.curation_item_id
+    FROM feature.curation_items AS occupant
+    WHERE occupant.collection_id = CAST(:target_collection_id AS uuid)
+      AND occupant.external_item_id = {item_alias}.external_item_id
+      AND occupant.external_component_id = {item_alias}.external_component_id
+    LIMIT 1
+) AS component_conflict ON true
+LEFT JOIN LATERAL (
+    SELECT occupant.curation_item_id
+    FROM feature.curation_items AS occupant
+    WHERE {item_alias}.source_present
+      AND {item_alias}.archived_at IS NULL
+      AND occupant.collection_id = CAST(:target_collection_id AS uuid)
+      AND occupant.external_item_id = {item_alias}.external_item_id
+      AND occupant.feature_id = {item_alias}.feature_id
+      AND occupant.source_present
+      AND occupant.archived_at IS NULL
+    LIMIT 1
+) AS active_feature_conflict ON true
+"""
+
+
+_LIST_QUARANTINE_ITEMS_SQL: Final[str] = f"""
+SELECT
+    quarantined.curation_item_id::text AS curation_item_id,
+    quarantined.external_item_id,
+    quarantined.external_component_id,
+    quarantined.feature_id,
+    quarantined.place_name,
+    quarantined.status,
+    quarantined.source_present,
+    quarantined.archived_at,
+    component_conflict.curation_item_id::text AS component_conflict_item_id,
+    active_feature_conflict.curation_item_id::text AS active_feature_conflict_item_id
+FROM feature.curation_items AS quarantined
+{_quarantine_conflict_lateral_sql("quarantined")}
+WHERE quarantined.collection_id = CAST(:collection_id AS uuid)
+  AND (
+      CAST(:cursor_curation_item_id AS uuid) IS NULL
+      OR quarantined.curation_item_id > CAST(:cursor_curation_item_id AS uuid)
+  )
+ORDER BY quarantined.curation_item_id
+LIMIT :limit
+"""
+
+_QUARANTINE_MOVE_CONFLICTS_SQL: Final[str] = f"""
+SELECT
+    quarantined.curation_item_id::text AS curation_item_id,
+    component_conflict.curation_item_id::text AS component_conflict_item_id,
+    active_feature_conflict.curation_item_id::text AS active_feature_conflict_item_id
+FROM feature.curation_items AS quarantined
+{_quarantine_conflict_lateral_sql("quarantined")}
+WHERE quarantined.curation_item_id = ANY(CAST(:item_ids AS uuid[]))
+  AND (
+      component_conflict.curation_item_id IS NOT NULL
+      OR active_feature_conflict.curation_item_id IS NOT NULL
+  )
+ORDER BY quarantined.curation_item_id
+"""
+
+_LOCK_QUARANTINE_AND_TARGET_SQL: Final[str] = """
+SELECT
+    locked.collection_id::text AS collection_id,
+    locked.created_by,
+    locked.metadata,
+    locked.archived_at
+FROM feature.curation_collections AS locked
+WHERE locked.collection_id = ANY(CAST(:collection_ids AS uuid[]))
+ORDER BY locked.collection_id
+FOR UPDATE OF locked
+"""
+
 _GET_IMPORT_BATCH_SQL: Final[str] = """
 SELECT
     import_batch_id::text AS import_batch_id,
@@ -1820,6 +2116,114 @@ def _link_audit(row: RowMapping | Mapping[str, Any]) -> CurationLinkAudit:
     )
 
 
+def _quarantine_original_collection_id(metadata: Mapping[str, Any]) -> str | None:
+    """marker가 기록한 원본 collection uuid — 없거나 uuid가 아니면 ``None``."""
+
+    value = metadata.get("original_collection_id")
+    if not isinstance(value, str):
+        return None
+    try:
+        return str(UUID(value))
+    except ValueError:
+        return None
+
+
+def _quarantine_theme(
+    row: RowMapping | Mapping[str, Any], prefix: str
+) -> CurationQuarantineThemeRef | None:
+    theme_id = row[f"{prefix}_theme_id"]
+    if not theme_id:
+        return None
+    return CurationQuarantineThemeRef(
+        theme_id=str(theme_id),
+        theme_slug=str(row[f"{prefix}_theme_slug"]),
+        theme_name=str(row[f"{prefix}_theme_name"]),
+        theme_group=str(row[f"{prefix}_theme_group"]),
+        visibility=str(row[f"{prefix}_theme_visibility"]),
+    )
+
+
+def _quarantine_source(
+    row: RowMapping | Mapping[str, Any], prefix: str
+) -> CurationQuarantineSourceRef | None:
+    source_id = row[f"{prefix}_source_id"]
+    if not source_id:
+        return None
+    return CurationQuarantineSourceRef(
+        source_id=str(source_id),
+        provider=row[f"{prefix}_provider"],
+        dataset_key=row[f"{prefix}_dataset_key"],
+        source_name=row[f"{prefix}_source_name"],
+    )
+
+
+def _quarantine_collection(
+    row: RowMapping | Mapping[str, Any],
+) -> CurationQuarantineCollection:
+    metadata = _object(row["metadata"])
+    recorded_original_id = _quarantine_original_collection_id(metadata)
+    original: CurationQuarantineOriginalCollection | None = None
+    if recorded_original_id is not None:
+        exists = row["original_collection_id"] is not None
+        original = CurationQuarantineOriginalCollection(
+            collection_id=recorded_original_id,
+            title=row["original_title"] if exists else None,
+            status=row["original_status"] if exists else None,
+            visibility=row["original_visibility"] if exists else None,
+            exists=exists,
+            theme=_quarantine_theme(row, "original") if exists else None,
+            source=_quarantine_source(row, "original") if exists else None,
+        )
+    return CurationQuarantineCollection(
+        collection_id=str(row["collection_id"]),
+        collection_key=str(row["collection_key"]),
+        title=str(row["title"]),
+        edition_key=str(row["edition_key"]),
+        status=str(row["status"]),
+        visibility=str(row["visibility"]),
+        created_by=row["created_by"],
+        item_count=int(row["item_count"]),
+        marker_intact=bool(row["marker_intact"]),
+        quarantine_theme=_quarantine_theme(row, "quarantine"),
+        quarantine_source=_quarantine_source(row, "quarantine"),
+        original_collection=original,
+    )
+
+
+def _quarantine_item(
+    row: RowMapping | Mapping[str, Any],
+    *,
+    unresolved_kind: str | None,
+) -> CurationQuarantineItem:
+    component_conflict_id = row["component_conflict_item_id"]
+    active_conflict_id = row["active_feature_conflict_item_id"]
+    conflict_item_id: str | None
+    if unresolved_kind is not None:
+        conflict_kind = unresolved_kind
+        conflict_item_id = None
+    elif component_conflict_id:
+        conflict_kind = QUARANTINE_CONFLICT_COMPONENT
+        conflict_item_id = str(component_conflict_id)
+    elif active_conflict_id:
+        conflict_kind = QUARANTINE_CONFLICT_ACTIVE_FEATURE
+        conflict_item_id = str(active_conflict_id)
+    else:
+        conflict_kind = QUARANTINE_CONFLICT_MOVABLE
+        conflict_item_id = None
+    return CurationQuarantineItem(
+        curation_item_id=str(row["curation_item_id"]),
+        external_item_id=str(row["external_item_id"]),
+        external_component_id=str(row["external_component_id"]),
+        feature_id=str(row["feature_id"]) if row["feature_id"] else None,
+        place_name=str(row["place_name"]),
+        status=str(row["status"]),
+        source_present=bool(row["source_present"]),
+        archived_at=row["archived_at"],
+        conflict_kind=conflict_kind,
+        conflict_item_id=conflict_item_id,
+    )
+
+
 def encode_collection_cursor(updated_at: datetime, collection_id: str) -> str:
     raw = json.dumps(
         {"updated_at": updated_at.isoformat(), "collection_id": collection_id},
@@ -1906,6 +2310,68 @@ def decode_link_audit_cursor(cursor: str | None) -> tuple[str, str] | None:
     except (TypeError, ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError("invalid curation link audit cursor") from exc
     return collection_id, curation_item_id
+
+
+def encode_quarantine_collection_cursor(collection_id: str) -> str:
+    """격리 collection keyset(collection_id 오름차순)을 versioned cursor로 직렬화한다."""
+
+    payload = json.dumps(
+        {"v": 1, "collection_id": str(UUID(collection_id))},
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    return base64.urlsafe_b64encode(payload).decode().rstrip("=")
+
+
+def decode_quarantine_collection_cursor(cursor: str | None) -> str | None:
+    if cursor is None:
+        return None
+    try:
+        raw = base64.b64decode(
+            cursor + "=" * (-len(cursor) % 4),
+            altchars=b"-_",
+            validate=True,
+        )
+        value = json.loads(raw)
+        if not isinstance(value, dict) or set(value) != {"v", "collection_id"} or value["v"] != 1:
+            raise ValueError
+        collection_id = str(UUID(value["collection_id"]))
+    except (TypeError, ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("invalid curation quarantine cursor") from exc
+    return collection_id
+
+
+def encode_quarantine_item_cursor(curation_item_id: str) -> str:
+    """격리 item keyset(curation_item_id 오름차순)을 versioned cursor로 직렬화한다."""
+
+    payload = json.dumps(
+        {"v": 1, "curation_item_id": str(UUID(curation_item_id))},
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    return base64.urlsafe_b64encode(payload).decode().rstrip("=")
+
+
+def decode_quarantine_item_cursor(cursor: str | None) -> str | None:
+    if cursor is None:
+        return None
+    try:
+        raw = base64.b64decode(
+            cursor + "=" * (-len(cursor) % 4),
+            altchars=b"-_",
+            validate=True,
+        )
+        value = json.loads(raw)
+        if (
+            not isinstance(value, dict)
+            or set(value) != {"v", "curation_item_id"}
+            or value["v"] != 1
+        ):
+            raise ValueError
+        curation_item_id = str(UUID(value["curation_item_id"]))
+    except (TypeError, ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("invalid curation quarantine item cursor") from exc
+    return curation_item_id
 
 
 async def list_curation_collections(
@@ -2922,6 +3388,374 @@ async def list_unattributed_curation_links_page(
             str(last["curation_item_id"]),
         )
     return tuple(_link_audit(row) for row in page_rows), next_cursor
+
+
+async def list_curation_quarantine_collections(
+    session: AsyncSession,
+    *,
+    limit: int = 50,
+    cursor: str | None = None,
+) -> tuple[tuple[CurationQuarantineCollection, ...], str | None]:
+    """`0065` 정본 marker 술어로 격리 collection page를 keyset 조회한다 (T-VN-H22A).
+
+    실데이터 격리는 현재 0건이 정상이므로 빈 목록이 정상 경로다.
+    """
+
+    effective_limit = max(1, min(limit, 200))
+    cursor_collection_id = decode_quarantine_collection_cursor(cursor)
+    rows = (
+        (
+            await session.execute(
+                text(_LIST_QUARANTINE_COLLECTIONS_SQL),
+                {
+                    "cursor_collection_id": cursor_collection_id,
+                    "limit": effective_limit + 1,
+                },
+            )
+        )
+        .mappings()
+        .all()
+    )
+    page = tuple(_quarantine_collection(row) for row in rows[:effective_limit])
+    next_cursor = (
+        encode_quarantine_collection_cursor(page[-1].collection_id)
+        if len(rows) > effective_limit and page
+        else None
+    )
+    return page, next_cursor
+
+
+async def _get_quarantine_collection_metadata(
+    session: AsyncSession,
+    *,
+    collection_id: str,
+) -> dict[str, Any] | None:
+    """정본 marker 술어에 걸리는 격리 collection의 metadata — 아니면 ``None``."""
+
+    row = (
+        (
+            await session.execute(
+                text(_GET_QUARANTINE_COLLECTION_SQL),
+                {"collection_id": collection_id},
+            )
+        )
+        .mappings()
+        .first()
+    )
+    return _object(row["metadata"]) if row is not None else None
+
+
+async def list_curation_quarantine_items(
+    session: AsyncSession,
+    *,
+    collection_id: str,
+    target_collection_id: str | None = None,
+    limit: int = 50,
+    cursor: str | None = None,
+) -> tuple[CurationQuarantineItemsPreview, str | None] | None:
+    """격리 item page + target 대비 (A)/(B) conflict preview (순수 SELECT, T-VN-H22A).
+
+    target은 명시값이 없으면 marker가 기록한 원본 collection이다. 격리 collection이
+    정본 술어에 안 걸리면 ``None``을 반환한다 (router 404).
+    """
+
+    normalized_collection_id = str(UUID(collection_id))
+    metadata = await _get_quarantine_collection_metadata(
+        session, collection_id=normalized_collection_id
+    )
+    if metadata is None:
+        return None
+    resolved_target = (
+        str(UUID(target_collection_id))
+        if target_collection_id is not None
+        else _quarantine_original_collection_id(metadata)
+    )
+    # preview와 command의 판정을 일치시킨다 (적대 리뷰 F2/F3). command가 422로 거부하는
+    # 입력을 preview가 "전 item 자기 충돌"이나 정상 preview로 보여주면 운영자를 오도한다.
+    if resolved_target == normalized_collection_id:
+        raise ValueError("target collection이 격리 collection 자신일 수 없습니다.")
+    target_missing = True
+    target_archived = False
+    if resolved_target is not None:
+        target_row = (
+            (
+                await session.execute(
+                    text(
+                        "SELECT archived_at, created_by, metadata "
+                        "FROM feature.curation_collections "
+                        "WHERE collection_id = CAST(:collection_id AS uuid)"
+                    ),
+                    {"collection_id": resolved_target},
+                )
+            )
+            .mappings()
+            .first()
+        )
+        if target_row is not None:
+            if _is_quarantine_marker_row(target_row):
+                raise ValueError(
+                    "target이 또 다른 격리 collection입니다 — 격리 간 이동은 "
+                    "0065 모집단을 조용히 섞으므로 허용하지 않습니다."
+                )
+            target_missing = False
+            target_archived = target_row["archived_at"] is not None
+    unresolved_kind: str | None = None
+    if resolved_target is None:
+        unresolved_kind = QUARANTINE_CONFLICT_NO_TARGET
+    elif target_missing:
+        unresolved_kind = QUARANTINE_CONFLICT_TARGET_MISSING
+    effective_limit = max(1, min(limit, 200))
+    cursor_item_id = decode_quarantine_item_cursor(cursor)
+    rows = (
+        (
+            await session.execute(
+                text(_LIST_QUARANTINE_ITEMS_SQL),
+                {
+                    "collection_id": normalized_collection_id,
+                    "target_collection_id": (resolved_target if unresolved_kind is None else None),
+                    "cursor_curation_item_id": cursor_item_id,
+                    "limit": effective_limit + 1,
+                },
+            )
+        )
+        .mappings()
+        .all()
+    )
+    items = tuple(
+        _quarantine_item(row, unresolved_kind=unresolved_kind) for row in rows[:effective_limit]
+    )
+    next_cursor = (
+        encode_quarantine_item_cursor(items[-1].curation_item_id)
+        if len(rows) > effective_limit and items
+        else None
+    )
+    preview = CurationQuarantineItemsPreview(
+        target_collection_id=resolved_target,
+        target_missing=target_missing,
+        target_archived=target_archived,
+        items=items,
+    )
+    return preview, next_cursor
+
+
+def _is_quarantine_marker_row(row: RowMapping | Mapping[str, Any]) -> bool:
+    """FOR UPDATE로 잠근 collection 행에서 정본 marker를 재검증한다."""
+
+    metadata = _object(row["metadata"])
+    return row["created_by"] == "migration:0065" and metadata.get("migration_quarantine") == "0065"
+
+
+async def move_curation_quarantine_items(
+    session: AsyncSession,
+    *,
+    collection_id: str,
+    target_collection_id: str | None = None,
+    item_ids: Sequence[str] | None = None,
+    actor: str | None = None,
+) -> tuple[tuple[str, ...], bool]:
+    """격리 item들의 collection membership을 target으로 원자 이동한다 (T-VN-H22B).
+
+    lock 순서(§4.2): 전역 advisory → 관련 collection들 collection_id 오름차순
+    FOR UPDATE → item curation_item_id 오름차순 FOR UPDATE → (A)/(B) 재검사 →
+    UPDATE/DELETE. 충돌이 하나라도 있으면
+    :class:`CurationQuarantineMoveConflictError`로 전체를 거부한다(부분 적용 금지).
+    이동 후 격리 collection에 item이 0이면 collection 행을 DELETE한다.
+    """
+
+    normalized_collection_id = str(UUID(collection_id))
+    await _lock_curation_write_boundary(session)
+    metadata = await _get_quarantine_collection_metadata(
+        session, collection_id=normalized_collection_id
+    )
+    if metadata is None:
+        raise LookupError("curation quarantine collection 없음")
+    resolved_target = (
+        str(UUID(target_collection_id))
+        if target_collection_id is not None
+        else _quarantine_original_collection_id(metadata)
+    )
+    if resolved_target is None:
+        raise LookupError("이동 target collection 없음 — 원본 collection 기록이 없습니다.")
+    if resolved_target == normalized_collection_id:
+        raise ValueError("target collection이 격리 collection 자신일 수 없습니다.")
+    locked_rows = (
+        (
+            await session.execute(
+                text(_LOCK_QUARANTINE_AND_TARGET_SQL),
+                {"collection_ids": sorted({normalized_collection_id, resolved_target})},
+            )
+        )
+        .mappings()
+        .all()
+    )
+    locked_by_id = {str(row["collection_id"]): row for row in locked_rows}
+    quarantine_row = locked_by_id.get(normalized_collection_id)
+    if quarantine_row is None or not _is_quarantine_marker_row(quarantine_row):
+        raise LookupError("curation quarantine collection 없음")
+    target_row = locked_by_id.get(resolved_target)
+    if target_row is None:
+        raise LookupError("이동 target collection 없음")
+    if _is_quarantine_marker_row(target_row):
+        # 격리 간 이동은 0065 모집단을 조용히 섞고, target의 original_collection_id
+        # 병렬 표시를 오도한다 (적대 리뷰 F3). preview와 같은 판정으로 fail-close.
+        raise ValueError(
+            "target이 또 다른 격리 collection입니다 — 격리 간 이동은 "
+            "0065 모집단을 조용히 섞으므로 허용하지 않습니다."
+        )
+    if target_row["archived_at"] is not None:
+        raise CurationQuarantineTargetArchivedError("이동 target collection이 archive 상태입니다.")
+    locked_item_ids = [
+        str(value)
+        for value in (
+            await session.execute(
+                text(
+                    "SELECT curation_item_id::text FROM feature.curation_items "
+                    "WHERE collection_id = CAST(:collection_id AS uuid) "
+                    "ORDER BY curation_item_id FOR UPDATE"
+                ),
+                {"collection_id": normalized_collection_id},
+            )
+        ).scalars()
+    ]
+    if item_ids is None:
+        moving_item_ids = locked_item_ids
+    else:
+        requested = [str(UUID(item_id)) for item_id in item_ids]
+        if len(set(requested)) != len(requested):
+            raise ValueError("item_ids에 중복이 있습니다.")
+        missing = sorted(set(requested) - set(locked_item_ids))
+        if missing:
+            raise LookupError("격리 collection에 없는 curation item: " + ", ".join(missing))
+        moving_item_ids = requested
+    if moving_item_ids:
+        conflict_rows = (
+            (
+                await session.execute(
+                    text(_QUARANTINE_MOVE_CONFLICTS_SQL),
+                    {
+                        "item_ids": moving_item_ids,
+                        "target_collection_id": resolved_target,
+                    },
+                )
+            )
+            .mappings()
+            .all()
+        )
+        if conflict_rows:
+            raise CurationQuarantineMoveConflictError(
+                tuple(
+                    CurationQuarantineMoveConflict(
+                        curation_item_id=str(row["curation_item_id"]),
+                        conflict_kind=(
+                            QUARANTINE_CONFLICT_COMPONENT
+                            if row["component_conflict_item_id"]
+                            else QUARANTINE_CONFLICT_ACTIVE_FEATURE
+                        ),
+                        conflict_item_id=str(
+                            row["component_conflict_item_id"]
+                            or row["active_feature_conflict_item_id"]
+                        ),
+                    )
+                    for row in conflict_rows
+                )
+            )
+        moved_ids = {
+            str(value)
+            for value in (
+                await session.execute(
+                    text(
+                        "UPDATE feature.curation_items "
+                        "SET collection_id = CAST(:target_collection_id AS uuid), "
+                        "    updated_by = :actor, updated_at = now() "
+                        "WHERE curation_item_id = ANY(CAST(:item_ids AS uuid[])) "
+                        "RETURNING curation_item_id::text"
+                    ),
+                    {
+                        "target_collection_id": resolved_target,
+                        "actor": actor,
+                        "item_ids": moving_item_ids,
+                    },
+                )
+            ).scalars()
+        }
+        if moved_ids != set(moving_item_ids):  # pragma: no cover — 잠근 행은 못 사라진다
+            raise RuntimeError("locked quarantine items disappeared during move")
+    quarantine_deleted = (
+        await session.execute(
+            text(
+                "DELETE FROM feature.curation_collections "
+                "WHERE collection_id = CAST(:collection_id AS uuid) "
+                "  AND NOT EXISTS ("
+                "      SELECT 1 FROM feature.curation_items AS remaining "
+                "      WHERE remaining.collection_id = CAST(:collection_id AS uuid)"
+                "  ) "
+                "RETURNING collection_id"
+            ),
+            {"collection_id": normalized_collection_id},
+        )
+    ).first() is not None
+    await _touch_collection(session, collection_id=resolved_target, actor=actor)
+    if not quarantine_deleted:
+        await _touch_collection(session, collection_id=normalized_collection_id, actor=actor)
+    return tuple(moving_item_ids), quarantine_deleted
+
+
+async def confirm_curation_quarantine_standalone(
+    session: AsyncSession,
+    *,
+    collection_id: str,
+    collection_key: str,
+    title: str,
+    actor: str | None = None,
+) -> tuple[str, str]:
+    """격리 collection을 정규 collection으로 확정하고 `0065` marker를 제거한다.
+
+    status/visibility는 draft/admin_only 그대로 둔다 — 이후 조정은 기존 PATCH 경로
+    소관이다. collection_key 중복은 unique 제약 IntegrityError로 fail-close한다
+    (router 409).
+    """
+
+    normalized_collection_id = str(UUID(collection_id))
+    normalized_key = collection_key.strip()
+    normalized_title = title.strip()
+    if not normalized_key or not normalized_title:
+        raise ValueError("collection_key and title are required")
+    await _lock_curation_write_boundary(session)
+    await _lock_collection_keys(session, (normalized_key,))
+    locked = (
+        await session.execute(
+            text(_GET_QUARANTINE_COLLECTION_SQL + "FOR UPDATE OF quarantine"),
+            {"collection_id": normalized_collection_id},
+        )
+    ).first()
+    if locked is None:
+        raise LookupError("curation quarantine collection 없음")
+    updated = (
+        (
+            await session.execute(
+                text(
+                    "UPDATE feature.curation_collections "
+                    "SET collection_key = :collection_key, "
+                    "    title = :title, "
+                    "    metadata = metadata - 'migration_quarantine' "
+                    "        - 'original_collection_id', "
+                    "    updated_by = :actor, "
+                    "    updated_at = now() "
+                    "WHERE collection_id = CAST(:collection_id AS uuid) "
+                    "RETURNING collection_id::text, collection_key"
+                ),
+                {
+                    "collection_id": normalized_collection_id,
+                    "collection_key": normalized_key,
+                    "title": normalized_title,
+                    "actor": actor,
+                },
+            )
+        )
+        .mappings()
+        .one()
+    )
+    return str(updated["collection_id"]), str(updated["collection_key"])
 
 
 async def list_feature_curation_groups(

@@ -555,6 +555,155 @@ class CurationImportRowReceiptResponse(BaseModel):
     meta: Meta
 
 
+QuarantineConflictKind = Literal[
+    "movable",
+    "component_identity_conflict",
+    "active_source_feature_conflict",
+    "no_target",
+    "target_missing",
+]
+QuarantineReclassifyAction = Literal["move", "confirm_standalone"]
+
+
+class CurationQuarantineThemeView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    theme_id: UUID
+    theme_slug: str
+    theme_name: str
+    theme_group: str
+    visibility: CollectionVisibility
+
+
+class CurationQuarantineSourceView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_id: UUID
+    provider: str | None
+    dataset_key: str | None
+    source_name: str | None
+
+
+class CurationQuarantineOriginalCollectionView(BaseModel):
+    """`0065` marker가 기록한 원본 collection의 현재 상태 (병렬 표시 전용)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    collection_id: UUID
+    title: str | None
+    status: CollectionStatus | None
+    visibility: CollectionVisibility | None
+    exists: bool
+    theme: CurationQuarantineThemeView | None
+    source: CurationQuarantineSourceView | None
+
+
+class AdminCurationQuarantineCollectionView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    collection_id: UUID
+    collection_key: str
+    title: str
+    edition_key: str
+    status: CollectionStatus
+    visibility: CollectionVisibility
+    created_by: str | None
+    item_count: int
+    marker_intact: bool
+    quarantine_theme: CurationQuarantineThemeView | None
+    quarantine_source: CurationQuarantineSourceView | None
+    original_collection: CurationQuarantineOriginalCollectionView | None
+
+
+class AdminCurationQuarantineItemView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    curation_item_id: UUID
+    external_item_id: str
+    external_component_id: str
+    feature_id: str | None
+    place_name: str
+    status: ItemStatus
+    source_present: bool
+    archived_at: datetime | None
+    conflict_kind: QuarantineConflictKind
+    conflict_item_id: UUID | None
+
+
+class AdminCurationQuarantineCollectionsData(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[AdminCurationQuarantineCollectionView]
+
+
+class AdminCurationQuarantineCollectionsResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    data: AdminCurationQuarantineCollectionsData
+    meta: Meta
+
+
+class AdminCurationQuarantineItemsData(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    target_collection_id: UUID | None
+    target_missing: bool
+    target_archived: bool
+    items: list[AdminCurationQuarantineItemView]
+
+
+class AdminCurationQuarantineItemsResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    data: AdminCurationQuarantineItemsData
+    meta: Meta
+
+
+class AdminCurationQuarantineReclassifyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    action: QuarantineReclassifyAction
+    # move 전용 — null target은 원본 collection, null item_ids는 전체.
+    target_collection_id: UUID | None = None
+    item_ids: list[UUID] | None = Field(default=None, min_length=1)
+    # confirm_standalone 전용.
+    collection_key: str | None = Field(default=None, min_length=1, max_length=240)
+    title: str | None = Field(default=None, min_length=1, max_length=300)
+
+    @model_validator(mode="after")
+    def _fields_match_action(self) -> AdminCurationQuarantineReclassifyRequest:
+        if self.action == "move":
+            if self.collection_key is not None or self.title is not None:
+                raise ValueError("move에는 collection_key/title을 쓸 수 없습니다.")
+            return self
+        if self.target_collection_id is not None or self.item_ids is not None:
+            raise ValueError(
+                "confirm_standalone에는 target_collection_id/item_ids를 쓸 수 없습니다."
+            )
+        if self.collection_key is None or self.title is None:
+            raise ValueError("confirm_standalone에는 collection_key와 title이 필요합니다.")
+        return self
+
+
+class AdminCurationQuarantineReclassifyData(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    action: QuarantineReclassifyAction
+    # move 결과.
+    moved_item_ids: list[UUID] | None = None
+    quarantine_collection_deleted: bool | None = None
+    # confirm_standalone 결과.
+    collection_id: UUID | None = None
+    collection_key: str | None = None
+
+
+class AdminCurationQuarantineReclassifyResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    data: AdminCurationQuarantineReclassifyData
+    meta: Meta
+
+
 def _public_collection_view(
     row: curation_repo.CurationCollection,
 ) -> PublicCurationCollectionView:
@@ -580,6 +729,65 @@ def _import_row_receipt_view(
     row: curation_repo.CurationImportRowReceipt,
 ) -> CurationImportRowReceiptView:
     return CurationImportRowReceiptView.model_validate(row, from_attributes=True)
+
+
+def _quarantine_theme_view(
+    ref: curation_repo.CurationQuarantineThemeRef | None,
+) -> CurationQuarantineThemeView | None:
+    if ref is None:
+        return None
+    return CurationQuarantineThemeView.model_validate(ref, from_attributes=True)
+
+
+def _quarantine_source_view(
+    ref: curation_repo.CurationQuarantineSourceRef | None,
+) -> CurationQuarantineSourceView | None:
+    if ref is None:
+        return None
+    return CurationQuarantineSourceView.model_validate(ref, from_attributes=True)
+
+
+def _quarantine_collection_view(
+    row: curation_repo.CurationQuarantineCollection,
+) -> AdminCurationQuarantineCollectionView:
+    original = row.original_collection
+    original_view = (
+        CurationQuarantineOriginalCollectionView.model_validate(
+            {
+                "collection_id": original.collection_id,
+                "title": original.title,
+                "status": original.status,
+                "visibility": original.visibility,
+                "exists": original.exists,
+                "theme": _quarantine_theme_view(original.theme),
+                "source": _quarantine_source_view(original.source),
+            }
+        )
+        if original is not None
+        else None
+    )
+    return AdminCurationQuarantineCollectionView.model_validate(
+        {
+            "collection_id": row.collection_id,
+            "collection_key": row.collection_key,
+            "title": row.title,
+            "edition_key": row.edition_key,
+            "status": row.status,
+            "visibility": row.visibility,
+            "created_by": row.created_by,
+            "item_count": row.item_count,
+            "marker_intact": row.marker_intact,
+            "quarantine_theme": _quarantine_theme_view(row.quarantine_theme),
+            "quarantine_source": _quarantine_source_view(row.quarantine_source),
+            "original_collection": original_view,
+        }
+    )
+
+
+def _quarantine_item_view(
+    row: curation_repo.CurationQuarantineItem,
+) -> AdminCurationQuarantineItemView:
+    return AdminCurationQuarantineItemView.model_validate(row, from_attributes=True)
 
 
 def _group_view(
@@ -743,6 +951,196 @@ async def audit_unattributed_curation_links(
             has_more=next_cursor is not None,
             next_cursor=next_cursor,
         ),
+        meta=make_meta(request, started_at=started_at),
+    )
+
+
+# `/quarantine...` 리터럴 경로는 `/{collection_id}` 계열보다 **먼저** 선언해야 한다
+# (Starlette는 등록 순서로 매칭한다 — `/link-audit` 등 기존 리터럴 경로와 같은 위치 관용).
+
+
+@admin_router.get(
+    "/quarantine",
+    response_model=AdminCurationQuarantineCollectionsResponse,
+)
+async def list_admin_curation_quarantines(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    _context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
+    page_size: Annotated[int, Query(ge=1, le=200)] = 50,
+    cursor: Annotated[str | None, Query()] = None,
+) -> AdminCurationQuarantineCollectionsResponse:
+    """`0065` 정본 marker 술어로 격리 collection 목록을 조회한다 (T-VN-H22A).
+
+    격리 collection이 보관한 theme/source와 원본 collection의 현재 theme/source를
+    병렬로 내려준다 — target 추정·추천은 하지 않는다. 빈 목록이 정상 경로다.
+    """
+
+    started_at = perf_counter()
+    try:
+        rows, next_cursor = await curation_repo.list_curation_quarantine_collections(
+            session,
+            limit=page_size,
+            cursor=cursor,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return AdminCurationQuarantineCollectionsResponse(
+        data=AdminCurationQuarantineCollectionsData(
+            items=[_quarantine_collection_view(row) for row in rows]
+        ),
+        meta=make_meta(
+            request,
+            started_at=started_at,
+            page_size=page_size,
+            next_cursor=next_cursor,
+        ),
+    )
+
+
+@admin_router.get(
+    "/quarantine/{collection_id}/items",
+    response_model=AdminCurationQuarantineItemsResponse,
+)
+async def list_admin_curation_quarantine_items(
+    request: Request,
+    collection_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    _context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
+    target_collection_id: Annotated[UUID | None, Query()] = None,
+    page_size: Annotated[int, Query(ge=1, le=200)] = 50,
+    cursor: Annotated[str | None, Query()] = None,
+) -> AdminCurationQuarantineItemsResponse:
+    """격리 item 목록 + target 대비 conflict preview (순수 SELECT, T-VN-H22A)."""
+
+    started_at = perf_counter()
+    try:
+        result = await curation_repo.list_curation_quarantine_items(
+            session,
+            collection_id=str(collection_id),
+            target_collection_id=(
+                str(target_collection_id) if target_collection_id is not None else None
+            ),
+            limit=page_size,
+            cursor=cursor,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if result is None:
+        raise HTTPException(status_code=404, detail="curation quarantine collection 없음")
+    preview, next_cursor = result
+    return AdminCurationQuarantineItemsResponse(
+        data=AdminCurationQuarantineItemsData(
+            target_collection_id=(
+                UUID(preview.target_collection_id)
+                if preview.target_collection_id is not None
+                else None
+            ),
+            target_missing=preview.target_missing,
+            target_archived=preview.target_archived,
+            items=[_quarantine_item_view(item) for item in preview.items],
+        ),
+        meta=make_meta(
+            request,
+            started_at=started_at,
+            page_size=page_size,
+            next_cursor=next_cursor,
+        ),
+    )
+
+
+@admin_router.post(
+    "/quarantine/{collection_id}/reclassify",
+    response_model=AdminCurationQuarantineReclassifyResponse,
+    status_code=200,
+)
+@idempotent_domain_command("admin.curation-quarantine.reclassify")
+async def reclassify_admin_curation_quarantine(
+    request: Request,
+    collection_id: UUID,
+    body: AdminCurationQuarantineReclassifyRequest,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
+) -> AdminCurationQuarantineReclassifyResponse:
+    """격리 collection을 move 또는 standalone 확정으로 명시 재분류한다 (T-VN-H22B).
+
+    move는 lock 하 (A)/(B) 재검사 뒤 전체 원자 적용이며 충돌 시 409로 전체를
+    거부한다(부분 적용 금지). confirm_standalone은 `0065` marker를 제거하고
+    collection_key/title을 확정한다.
+    """
+
+    started_at = perf_counter()
+    data: AdminCurationQuarantineReclassifyData
+    try:
+        async with domain_command_transaction(session):
+            if body.action == "move":
+                (
+                    moved_item_ids,
+                    quarantine_deleted,
+                ) = await curation_repo.move_curation_quarantine_items(
+                    session,
+                    collection_id=str(collection_id),
+                    target_collection_id=(
+                        str(body.target_collection_id)
+                        if body.target_collection_id is not None
+                        else None
+                    ),
+                    item_ids=(
+                        [str(item_id) for item_id in body.item_ids]
+                        if body.item_ids is not None
+                        else None
+                    ),
+                    actor=context.actor,
+                )
+                data = AdminCurationQuarantineReclassifyData(
+                    action="move",
+                    moved_item_ids=[UUID(value) for value in moved_item_ids],
+                    quarantine_collection_deleted=quarantine_deleted,
+                )
+            else:
+                (
+                    confirmed_id,
+                    confirmed_key,
+                ) = await curation_repo.confirm_curation_quarantine_standalone(
+                    session,
+                    collection_id=str(collection_id),
+                    collection_key=body.collection_key or "",
+                    title=body.title or "",
+                    actor=context.actor,
+                )
+                data = AdminCurationQuarantineReclassifyData(
+                    action="confirm_standalone",
+                    collection_id=UUID(confirmed_id),
+                    collection_key=confirmed_key,
+                )
+    except curation_repo.CurationQuarantineMoveConflictError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "CURATION_QUARANTINE_MOVE_CONFLICT",
+                "message": str(exc),
+                "details": {
+                    "conflicts": [
+                        {
+                            "curation_item_id": conflict.curation_item_id,
+                            "conflict_kind": conflict.conflict_kind,
+                            "conflict_item_id": conflict.conflict_item_id,
+                        }
+                        for conflict in exc.conflicts
+                    ]
+                },
+            },
+        ) from exc
+    except curation_repo.CurationQuarantineTargetArchivedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except IntegrityError as exc:
+        raise _conflict(exc) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return AdminCurationQuarantineReclassifyResponse(
+        data=data,
         meta=make_meta(request, started_at=started_at),
     )
 

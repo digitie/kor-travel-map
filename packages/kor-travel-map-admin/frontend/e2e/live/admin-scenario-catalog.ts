@@ -246,6 +246,8 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
       "/v1/admin/curated-source-rules",
       "/v1/admin/curated-sources",
       "/v1/admin/curated-themes",
+      "/v1/admin/curations/quarantine",
+      "/v1/admin/curations/quarantine/{collection_id}/items",
     ],
     writeApis: [
       writeApi("POST", "/v1/admin/features/curated"),
@@ -257,6 +259,10 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
       ),
       writeApi("PATCH", "/v1/admin/curated-source-rules/{rule_id}"),
       writeApi("POST", "/v1/curated-features/{curated_feature_id}/pinvi-copy"),
+      writeApi(
+        "POST",
+        "/v1/admin/curations/quarantine/{collection_id}/reclassify",
+      ),
     ],
     reflectedSurfaces: [
       "/admin/features/curated/{curated_feature_id}",

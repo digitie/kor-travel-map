@@ -10,6 +10,18 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-08-04 (2) — 재생성 실행·공개 표면 4,424 복구·H40 완결·H22 단일 PR
+
+재생성 실행 완료(`0078` 직행, rev `2b2dee95`, 함정 2건 실측 — superuser 확장 사전 생성
+필요·`sudo compose`). concierge 축 재적재로 **공개 표면 4,424건 복구**, 전부
+`source_rule`(= **H40 완결**). H22A/B/C를 사용자 지시로 보류 해제하고 단일 PR로 구현 —
+read model 2 + reclassify command + admin 패널 + mocked 6건 + live spec 저술 + 격리 스택
+HTTP 파괴 검증 9흐름 통과.
+
+**다음 한 작업**: H22 PR에 적대 리뷰어 2명(렌즈 분리) → CI green → 머지 → Lane A 다음
+항목(H30B — 재적재 안정화 대기 중이면 Wave 2 barrier의 T-VN-31A). 잔여 재적재: provider
+일일 스케줄 + CSV 5종(feature 적재 후). codex 41C prod enable은 재pin(#109)+CSV5 후.
+
 ## 2026-08-04 — prod 0072 사고 → 폐기·재생성. H35 재정의
 
 prod가 pin과 다른 7/31 이미지(`0bdecb1f`, head `0072`)로 배포되며 entrypoint 자동

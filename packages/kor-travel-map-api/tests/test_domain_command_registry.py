@@ -42,7 +42,7 @@ def test_every_openapi_write_operation_has_exact_static_policy() -> None:
     writes = _openapi_writes()
 
     assert set(COMMAND_REGISTRY) == set(writes)
-    assert len(writes) == 68
+    assert len(writes) == 69
 
 
 def test_registered_domain_and_specialized_ledgers_have_stable_operation_names() -> None:

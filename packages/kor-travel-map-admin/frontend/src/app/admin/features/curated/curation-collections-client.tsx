@@ -28,6 +28,7 @@ import {
   type CurationImportResponse,
   type CurationImportRowStatus,
 } from "@/api/curations";
+import { CurationQuarantinePanel } from "@/app/admin/features/curated/curation-quarantine-panel";
 import { AdminShell } from "@/components/admin-shell";
 import { CopyButton } from "@/components/copy-button";
 import { EmptyState } from "@/components/empty-state";
@@ -1302,6 +1303,8 @@ function CurationCollectionsClientView({
         <CurationCollectionCommands collectionForm={collectionForm} commitCsv={commitCsv} createCollection={createCollection} csvFile={csvFile} importCsv={importCsv} importReport={importReport} localError={localError} message={message} mutationError={mutationError} previewCsv={previewCsv} setCollectionForm={setCollectionForm} setCsvFile={setCsvFile} setImportReport={setImportReport} setLocalError={setLocalError} setMessage={setMessage} sourcesQuery={sourcesQuery} submitCollection={submitCollection} themesQuery={themesQuery} />
 
         <CurationCollectionCatalog activeCollectionId={activeCollectionId} addItem={addItem} archiveItem={archiveItem} collectionQuery={collectionQuery} collections={collections} collectionsQuery={collectionsQuery} detail={detail} itemForm={itemForm} patchItem={patchItem} removeItem={removeItem} resolveFeatureIds={resolveFeatureIds} resolveItem={resolveItem} setItemForm={setItemForm} setResolveFeatureIds={setResolveFeatureIds} setSelectedCollectionId={setSelectedCollectionId} submitItem={submitItem} />
+
+        <CurationQuarantinePanel />
       </div>
     </AdminShell>
   );

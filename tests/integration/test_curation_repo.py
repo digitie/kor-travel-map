@@ -13,7 +13,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import text
-from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 
 from kortravelmap.infra import curated_repo
 from kortravelmap.infra.curation_repo import (
@@ -24,23 +24,35 @@ from kortravelmap.infra.curation_repo import (
     _UPSERT_COLLECTION_SQL,  # noqa: PLC2701 - concurrency regression
     _UPSERT_SOURCE_SQL,  # noqa: PLC2701 - concurrency regression
     CurationImportResult,
+    CurationQuarantineMoveConflictError,
+    CurationQuarantineTargetArchivedError,
     FeatureMatchRequest,
     ResolvedCurationImportRow,
     _upsert_id_with_fallback,  # noqa: PLC2701 - concurrency regression
     add_curation_item,
+    archive_curation_collection,
     archive_curation_item,
+    confirm_curation_quarantine_standalone,
     create_curation_collection,
     decode_collection_cursor,
+    decode_quarantine_collection_cursor,
+    decode_quarantine_item_cursor,
+    encode_quarantine_collection_cursor,
+    encode_quarantine_item_cursor,
     get_curation_collection,
     get_curation_item,
     get_feature_curation_group,
     import_curation_rows,
     list_curation_collections,
     list_curation_items_by_feature_ids,
+    list_curation_quarantine_collections,
+    list_curation_quarantine_items,
     list_feature_curation_groups,
     list_unattributed_curation_links,
+    move_curation_quarantine_items,
     preview_curation_import,
     resolve_feature_matches,
+    update_curation_collection,
     update_curation_item,
     upsert_curation_theme,
 )
@@ -4294,3 +4306,742 @@ async def test_address_candidate_reimport_is_idempotent_and_never_publicly_links
         )
     ).scalar_one()
     assert stored_feature_id is None
+
+
+# ---------------------------------------------------------------------------
+# T-VN-H22 — `0065` quarantine 재분류 backend
+#
+# 실데이터 격리는 0건이 정상이라 테스트가 head 스키마 위에 marker collection을
+# 직접 합성한다 (`0065`를 실제로 돌리지 않는다).
+# ---------------------------------------------------------------------------
+
+
+async def _plant_quarantine_collection(
+    session: AsyncSession,
+    *,
+    theme_id: str,
+    source_id: str | None,
+    original_collection_id: str | None,
+    title: str = "[0065 격리] 원제",
+    extra_metadata: dict[str, str] | None = None,
+) -> str:
+    """`0065`가 만드는 정본 marker 그대로 격리 collection을 합성한다."""
+
+    quarantine_id = str(uuid4())
+    metadata: dict[str, str] = {"migration_quarantine": "0065"}
+    if original_collection_id is not None:
+        metadata["original_collection_id"] = original_collection_id
+    metadata.update(extra_metadata or {})
+    await session.execute(
+        text(
+            """
+            INSERT INTO feature.curation_collections (
+                collection_id, collection_key, theme_id, source_id, title,
+                edition_key, description, status, visibility, metadata,
+                created_by, updated_by
+            ) VALUES (
+                CAST(:collection_id AS uuid),
+                'legacy:quarantine:' || :collection_id,
+                CAST(:theme_id AS uuid), CAST(:source_id AS uuid), :title,
+                '', '0065 owner 이력 불충분', 'draft', 'admin_only',
+                CAST(:metadata AS jsonb), 'migration:0065', 'migration:0065'
+            )
+            """
+        ),
+        {
+            "collection_id": quarantine_id,
+            "theme_id": theme_id,
+            "source_id": source_id,
+            "title": title,
+            "metadata": json.dumps(metadata),
+        },
+    )
+    return quarantine_id
+
+
+async def _seed_second_theme_and_source(session: AsyncSession) -> tuple[str, str]:
+    theme_id = str(
+        (
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO feature.curated_themes (
+                        theme_slug, theme_name, theme_description, theme_group,
+                        default_curated, visibility, metadata
+                    ) VALUES (
+                        'tourism-100-test-v2', '한국관광 100선 v2', '', 'official',
+                        false, 'admin_only', '{}'::jsonb
+                    )
+                    RETURNING theme_id::text
+                    """
+                )
+            )
+        ).scalar_one()
+    )
+    source_id = str(
+        (
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO feature.curated_sources (
+                        provider, dataset_key, source_name, source_kind,
+                        update_cycle, provider_status, metadata
+                    ) VALUES (
+                        'python-kto-api', 'tourism-100-test-v2', '한국관광공사',
+                        'manual', 'unknown', 'manual_only', '{}'::jsonb
+                    )
+                    RETURNING source_id::text
+                    """
+                )
+            )
+        ).scalar_one()
+    )
+    return theme_id, source_id
+
+
+def test_quarantine_cursor_roundtrip_rejects_key_drift_and_tampering() -> None:
+    collection_id = str(uuid4())
+    item_id = str(uuid4())
+    collection_cursor = encode_quarantine_collection_cursor(collection_id)
+    item_cursor = encode_quarantine_item_cursor(item_id)
+
+    assert decode_quarantine_collection_cursor(None) is None
+    assert decode_quarantine_item_cursor(None) is None
+    assert decode_quarantine_collection_cursor(collection_cursor) == collection_id
+    assert decode_quarantine_item_cursor(item_cursor) == item_id
+
+    # 정확 키 집합 검사 — 다른 cursor 종을 서로 넣으면 거절돼야 한다.
+    with pytest.raises(ValueError, match="invalid curation quarantine cursor"):
+        decode_quarantine_collection_cursor(item_cursor)
+    with pytest.raises(ValueError, match="invalid curation quarantine item cursor"):
+        decode_quarantine_item_cursor(collection_cursor)
+
+    def _forge(payload: dict[str, object]) -> str:
+        return (
+            base64.urlsafe_b64encode(json.dumps(payload).encode())
+            .decode()
+            .rstrip("=")
+        )
+
+    with pytest.raises(ValueError, match="invalid curation quarantine cursor"):
+        decode_quarantine_collection_cursor(
+            _forge({"v": 2, "collection_id": collection_id})
+        )
+    with pytest.raises(ValueError, match="invalid curation quarantine cursor"):
+        decode_quarantine_collection_cursor(_forge({"v": 1, "collection_id": "x"}))
+    with pytest.raises(ValueError, match="invalid curation quarantine cursor"):
+        decode_quarantine_collection_cursor(
+            _forge({"v": 1, "collection_id": collection_id, "extra": "smuggled"})
+        )
+    with pytest.raises(ValueError, match="invalid curation quarantine cursor"):
+        decode_quarantine_collection_cursor(collection_cursor + "?!")
+
+
+async def test_quarantine_read_model_returns_parallel_theme_source(
+    migrated_session: AsyncSession,
+) -> None:
+    """① 목록 read model — 격리 보관본과 원본의 **현재** theme/source 병렬 반환."""
+
+    theme_id, source_id = await _seed_foundations(migrated_session)
+    theme2_id, source2_id = await _seed_second_theme_and_source(migrated_session)
+    original = await create_curation_collection(
+        migrated_session,
+        collection_key="h22:original",
+        theme_id=theme_id,
+        source_id=source_id,
+        title="원본 collection",
+        status="published",
+        visibility="public",
+    )
+    quarantine_id = await _plant_quarantine_collection(
+        migrated_session,
+        theme_id=theme_id,
+        source_id=source_id,
+        original_collection_id=original.collection_id,
+    )
+    # 원본은 0065 이후 운영자가 theme/source를 바꿨다 — 병렬 표시가 "현재"를
+    # 되짚는지 반증 가능하게 만든다.
+    await update_curation_collection(
+        migrated_session,
+        collection_id=original.collection_id,
+        updates={"theme_id": theme2_id, "source_id": source2_id},
+    )
+    await add_curation_item(
+        migrated_session,
+        collection_id=quarantine_id,
+        feature_id=None,
+        external_item_id="q-item-1",
+        place_name="격리 항목 1",
+        actor="seeder",
+    )
+    archived_item, _ = await add_curation_item(
+        migrated_session,
+        collection_id=quarantine_id,
+        feature_id=None,
+        external_item_id="q-item-2",
+        place_name="격리 항목 2",
+        actor="seeder",
+    )
+    await archive_curation_item(
+        migrated_session,
+        collection_id=quarantine_id,
+        curation_item_id=archived_item.curation_item_id,
+        actor="seeder",
+    )
+    # 원본 행이 사라진 기록도 표시된다 (exists=false).
+    dangling_original_id = str(uuid4())
+    dangling_quarantine_id = await _plant_quarantine_collection(
+        migrated_session,
+        theme_id=theme_id,
+        source_id=None,
+        original_collection_id=dangling_original_id,
+    )
+
+    rows, next_cursor = await list_curation_quarantine_collections(migrated_session)
+
+    assert next_cursor is None
+    assert len(rows) == 2
+    by_id = {row.collection_id: row for row in rows}
+    row = by_id[quarantine_id]
+    assert row.collection_key == f"legacy:quarantine:{quarantine_id}"
+    assert row.title == "[0065 격리] 원제"
+    assert row.status == "draft"
+    assert row.visibility == "admin_only"
+    assert row.created_by == "migration:0065"
+    assert row.marker_intact is True
+    assert row.item_count == 2  # archived 포함 물리 행 수
+    assert row.quarantine_theme is not None
+    assert row.quarantine_theme.theme_slug == "tourism-100-test"
+    assert row.quarantine_source is not None
+    assert row.quarantine_source.provider == "python-mcst-api"
+    assert row.original_collection is not None
+    assert row.original_collection.collection_id == original.collection_id
+    assert row.original_collection.exists is True
+    assert row.original_collection.title == "원본 collection"
+    assert row.original_collection.status == "published"
+    assert row.original_collection.visibility == "public"
+    assert row.original_collection.theme is not None
+    assert row.original_collection.theme.theme_slug == "tourism-100-test-v2"
+    assert row.original_collection.source is not None
+    assert row.original_collection.source.provider == "python-kto-api"
+
+    dangling = by_id[dangling_quarantine_id]
+    assert dangling.quarantine_source is None
+    assert dangling.original_collection is not None
+    assert dangling.original_collection.collection_id == dangling_original_id
+    assert dangling.original_collection.exists is False
+    assert dangling.original_collection.title is None
+    assert dangling.original_collection.theme is None
+    assert dangling.original_collection.source is None
+
+    # keyset 페이지네이션 — collection_id 오름차순 + cursor roundtrip.
+    first_page, cursor = await list_curation_quarantine_collections(
+        migrated_session, limit=1
+    )
+    assert len(first_page) == 1
+    assert cursor is not None
+    second_page, final_cursor = await list_curation_quarantine_collections(
+        migrated_session, limit=1, cursor=cursor
+    )
+    assert len(second_page) == 1
+    assert final_cursor is None
+    assert first_page[0].collection_id < second_page[0].collection_id
+    assert {first_page[0].collection_id, second_page[0].collection_id} == {
+        quarantine_id,
+        dangling_quarantine_id,
+    }
+
+
+async def test_quarantine_conflict_preview_truth_table(
+    migrated_session: AsyncSession,
+) -> None:
+    """② conflict preview 진리표 — (A)만 / (B)만 / (A) 우선 / movable / 미해결 target."""
+
+    theme_id, source_id = await _seed_foundations(migrated_session)
+    target = await create_curation_collection(
+        migrated_session,
+        collection_key="h22:conflict-target",
+        theme_id=theme_id,
+        source_id=source_id,
+        title="이동 target",
+    )
+    quarantine_id = await _plant_quarantine_collection(
+        migrated_session,
+        theme_id=theme_id,
+        source_id=source_id,
+        original_collection_id=target.collection_id,
+    )
+
+    async def _target_item(
+        external_item_id: str,
+        component: str,
+        feature_id: str | None,
+        *,
+        archived: bool = False,
+    ) -> str:
+        item, _ = await add_curation_item(
+            migrated_session,
+            collection_id=target.collection_id,
+            feature_id=feature_id,
+            external_item_id=external_item_id,
+            external_component_id=component,
+            place_name="target 항목",
+            actor="seeder",
+        )
+        if archived:
+            await archive_curation_item(
+                migrated_session,
+                collection_id=target.collection_id,
+                curation_item_id=item.curation_item_id,
+                actor="seeder",
+            )
+        return item.curation_item_id
+
+    async def _quarantine_item(
+        external_item_id: str, component: str, feature_id: str | None
+    ) -> str:
+        item, _ = await add_curation_item(
+            migrated_session,
+            collection_id=quarantine_id,
+            feature_id=feature_id,
+            external_item_id=external_item_id,
+            external_component_id=component,
+            place_name="격리 항목",
+            actor="seeder",
+        )
+        return item.curation_item_id
+
+    # (A)만 — target 상대가 archived여도 (A)는 partial이 아니라 걸린다.
+    dup_target_id = await _target_item("dup-ext", "primary", None, archived=True)
+    await _quarantine_item("dup-ext", "primary", None)
+    # (B)만 — (A) 회피: 같은 external_item_id + 다른 component + 같은 feature + 양쪽 active.
+    shared_target_id = await _target_item("shared-ext", "t-comp", _FEATURE_ID)
+    await _quarantine_item("shared-ext", "q-comp", _FEATURE_ID)
+    # (A)+(B) 동시 — (A)가 우선해야 한다.
+    both_target_id = await _target_item("both-ext", "primary", _FEATURE_ID)
+    await _quarantine_item("both-ext", "primary", _FEATURE_ID)
+    # movable — target에 상대 없음.
+    await _quarantine_item("free-ext", "primary", None)
+    # movable — (B) 후보가 있으나 target 쪽이 archived라 partial 술어 불충족.
+    await _target_item("shared2-ext", "t2-comp", _FEATURE_ID, archived=True)
+    await _quarantine_item("shared2-ext", "q2-comp", _FEATURE_ID)
+    # movable — **양쪽 feature_id NULL** + 다른 component + 양쪽 active (적대 리뷰 F1).
+    # (B) 비교가 `=`가 아니라 `IS NOT DISTINCT FROM`으로 퇴행하면 NULL끼리 매칭돼
+    # 이 행이 가짜 active_source_feature_conflict가 된다 — 그 변이를 이 행이 죽인다.
+    await _target_item("nullpair-ext", "t3-comp", None)
+    await _quarantine_item("nullpair-ext", "q3-comp", None)
+
+    result = await list_curation_quarantine_items(
+        migrated_session, collection_id=quarantine_id
+    )
+    assert result is not None
+    preview, next_cursor = result
+    assert next_cursor is None
+    assert preview.target_collection_id == target.collection_id
+    assert preview.target_missing is False
+    assert preview.target_archived is False
+    assert len(preview.items) == 6
+    verdicts = {
+        (item.external_item_id, item.external_component_id): (
+            item.conflict_kind,
+            item.conflict_item_id,
+        )
+        for item in preview.items
+    }
+    assert verdicts == {
+        ("dup-ext", "primary"): ("component_identity_conflict", dup_target_id),
+        ("shared-ext", "q-comp"): ("active_source_feature_conflict", shared_target_id),
+        ("both-ext", "primary"): ("component_identity_conflict", both_target_id),
+        ("free-ext", "primary"): ("movable", None),
+        ("shared2-ext", "q2-comp"): ("movable", None),
+        ("nullpair-ext", "q3-comp"): ("movable", None),
+    }
+
+    # item keyset 페이지네이션 — curation_item_id 오름차순, 중복/누락 없음.
+    seen: list[str] = []
+    cursor: str | None = None
+    for _ in range(4):
+        page_result = await list_curation_quarantine_items(
+            migrated_session, collection_id=quarantine_id, limit=2, cursor=cursor
+        )
+        assert page_result is not None
+        page, cursor = page_result
+        seen.extend(item.curation_item_id for item in page.items)
+        if cursor is None:
+            break
+    assert len(seen) == 6
+    assert seen == sorted(seen)
+    assert set(seen) == {item.curation_item_id for item in preview.items}
+
+    # 명시 target이 없는 uuid면 target_missing으로 전 item이 표시된다.
+    missing_result = await list_curation_quarantine_items(
+        migrated_session,
+        collection_id=quarantine_id,
+        target_collection_id=str(uuid4()),
+    )
+    assert missing_result is not None
+    missing_preview, _ = missing_result
+    assert missing_preview.target_missing is True
+    assert missing_preview.target_archived is False
+    assert {item.conflict_kind for item in missing_preview.items} == {"target_missing"}
+    assert {item.conflict_item_id for item in missing_preview.items} == {None}
+
+    # 원본 기록이 아예 없으면 no_target.
+    orphan_quarantine_id = await _plant_quarantine_collection(
+        migrated_session,
+        theme_id=theme_id,
+        source_id=None,
+        original_collection_id=None,
+    )
+    await add_curation_item(
+        migrated_session,
+        collection_id=orphan_quarantine_id,
+        feature_id=None,
+        external_item_id="orphan-1",
+        place_name="고아 항목",
+        actor="seeder",
+    )
+    orphan_result = await list_curation_quarantine_items(
+        migrated_session, collection_id=orphan_quarantine_id
+    )
+    assert orphan_result is not None
+    orphan_preview, _ = orphan_result
+    assert orphan_preview.target_collection_id is None
+    assert orphan_preview.target_missing is True
+    assert [item.conflict_kind for item in orphan_preview.items] == ["no_target"]
+
+    # 정본 술어에 안 걸리는 collection은 preview 대상이 아니다.
+    assert (
+        await list_curation_quarantine_items(
+            migrated_session, collection_id=target.collection_id
+        )
+        is None
+    )
+
+    # preview/command 판정 일치 (적대 리뷰 F2/F3) — command가 422로 거부하는 입력을
+    # preview가 "전 item 자기 충돌"이나 정상 preview로 보여주면 안 된다.
+    with pytest.raises(ValueError, match="자신"):
+        await list_curation_quarantine_items(
+            migrated_session,
+            collection_id=quarantine_id,
+            target_collection_id=quarantine_id,
+        )
+    with pytest.raises(ValueError, match="격리 간 이동"):
+        await list_curation_quarantine_items(
+            migrated_session,
+            collection_id=quarantine_id,
+            target_collection_id=orphan_quarantine_id,
+        )
+    with pytest.raises(ValueError, match="격리 간 이동"):
+        await move_curation_quarantine_items(
+            migrated_session,
+            collection_id=quarantine_id,
+            target_collection_id=orphan_quarantine_id,
+            item_ids=None,
+            actor="mover",
+        )
+
+
+async def test_quarantine_move_is_atomic_and_deletes_empty_collection(
+    migrated_session: AsyncSession,
+) -> None:
+    """③ move 성공 + 빈 격리 DELETE ④ 충돌 fail-close(무변경) ⑥ actor 기록."""
+
+    theme_id, source_id = await _seed_foundations(migrated_session)
+    target = await create_curation_collection(
+        migrated_session,
+        collection_key="h22:move-target",
+        theme_id=theme_id,
+        source_id=source_id,
+        title="이동 target",
+    )
+    quarantine_id = await _plant_quarantine_collection(
+        migrated_session,
+        theme_id=theme_id,
+        source_id=source_id,
+        original_collection_id=target.collection_id,
+    )
+    conflict_target_item, _ = await add_curation_item(
+        migrated_session,
+        collection_id=target.collection_id,
+        feature_id=None,
+        external_item_id="dup-ext",
+        place_name="선점 항목",
+        actor="seeder",
+    )
+    movable_1, _ = await add_curation_item(
+        migrated_session,
+        collection_id=quarantine_id,
+        feature_id=None,
+        external_item_id="move-1",
+        place_name="이동 1",
+        actor="seeder",
+    )
+    movable_2, _ = await add_curation_item(
+        migrated_session,
+        collection_id=quarantine_id,
+        feature_id=None,
+        external_item_id="move-2",
+        place_name="이동 2",
+        actor="seeder",
+    )
+    conflicted, _ = await add_curation_item(
+        migrated_session,
+        collection_id=quarantine_id,
+        feature_id=None,
+        external_item_id="dup-ext",
+        place_name="충돌 항목",
+        actor="seeder",
+    )
+
+    async def _item_states() -> dict[str, tuple[str, str]]:
+        rows = (
+            (
+                await migrated_session.execute(
+                    text(
+                        "SELECT curation_item_id::text AS curation_item_id, "
+                        "       collection_id::text AS collection_id, updated_by "
+                        "FROM feature.curation_items "
+                        "WHERE curation_item_id = ANY(CAST(:ids AS uuid[]))"
+                    ),
+                    {
+                        "ids": [
+                            movable_1.curation_item_id,
+                            movable_2.curation_item_id,
+                            conflicted.curation_item_id,
+                        ]
+                    },
+                )
+            )
+            .mappings()
+            .all()
+        )
+        return {
+            row["curation_item_id"]: (row["collection_id"], row["updated_by"])
+            for row in rows
+        }
+
+    # ④ 전체 이동은 충돌 1건 때문에 원자적으로 거부되고 아무 행도 안 바뀐다.
+    before = await _item_states()
+    with pytest.raises(CurationQuarantineMoveConflictError) as conflict_info:
+        await move_curation_quarantine_items(
+            migrated_session,
+            collection_id=quarantine_id,
+            actor="ops:h22-reviewer",
+        )
+    assert [
+        (c.curation_item_id, c.conflict_kind, c.conflict_item_id)
+        for c in conflict_info.value.conflicts
+    ] == [
+        (
+            conflicted.curation_item_id,
+            "component_identity_conflict",
+            conflict_target_item.curation_item_id,
+        )
+    ]
+    assert await _item_states() == before
+    assert before[movable_1.curation_item_id] == (quarantine_id, "seeder")
+
+    # 중복 item_ids는 422 계약(ValueError)이다.
+    with pytest.raises(ValueError, match="중복"):
+        await move_curation_quarantine_items(
+            migrated_session,
+            collection_id=quarantine_id,
+            item_ids=[movable_1.curation_item_id, movable_1.curation_item_id],
+            actor="ops:h22-reviewer",
+        )
+
+    # marker 없는 collection은 move 대상이 아니다 (⑦의 move 측).
+    with pytest.raises(LookupError, match="quarantine collection 없음"):
+        await move_curation_quarantine_items(
+            migrated_session,
+            collection_id=target.collection_id,
+            actor="ops:h22-reviewer",
+        )
+
+    # 부분 이동(충돌 없는 subset)은 성공하고 actor가 updated_by에 박힌다 (⑥).
+    moved_ids, deleted = await move_curation_quarantine_items(
+        migrated_session,
+        collection_id=quarantine_id,
+        item_ids=[movable_1.curation_item_id, movable_2.curation_item_id],
+        actor="ops:h22-reviewer",
+    )
+    assert set(moved_ids) == {movable_1.curation_item_id, movable_2.curation_item_id}
+    assert deleted is False
+    after_partial = await _item_states()
+    assert after_partial[movable_1.curation_item_id] == (
+        target.collection_id,
+        "ops:h22-reviewer",
+    )
+    assert after_partial[movable_2.curation_item_id] == (
+        target.collection_id,
+        "ops:h22-reviewer",
+    )
+    assert after_partial[conflicted.curation_item_id] == (quarantine_id, "seeder")
+
+    # archived target은 409 계약의 전용 예외로 거부된다.
+    archived_target = await create_curation_collection(
+        migrated_session,
+        collection_key="h22:archived-target",
+        theme_id=theme_id,
+        source_id=None,
+        title="archive된 target",
+    )
+    await archive_curation_collection(
+        migrated_session,
+        collection_id=archived_target.collection_id,
+        actor="seeder",
+    )
+    with pytest.raises(CurationQuarantineTargetArchivedError):
+        await move_curation_quarantine_items(
+            migrated_session,
+            collection_id=quarantine_id,
+            target_collection_id=archived_target.collection_id,
+            actor="ops:h22-reviewer",
+        )
+
+    # 존재하지 않는 target은 404 계약(LookupError)이다.
+    with pytest.raises(LookupError, match="target collection 없음"):
+        await move_curation_quarantine_items(
+            migrated_session,
+            collection_id=quarantine_id,
+            target_collection_id=str(uuid4()),
+            actor="ops:h22-reviewer",
+        )
+
+    # ③ 남은 item을 빈 target으로 옮기면 격리 collection 행이 DELETE된다.
+    fresh_target = await create_curation_collection(
+        migrated_session,
+        collection_key="h22:fresh-target",
+        theme_id=theme_id,
+        source_id=None,
+        title="새 target",
+    )
+    moved_ids, deleted = await move_curation_quarantine_items(
+        migrated_session,
+        collection_id=quarantine_id,
+        target_collection_id=fresh_target.collection_id,
+        actor="ops:h22-reviewer",
+    )
+    assert moved_ids == (conflicted.curation_item_id,)
+    assert deleted is True
+    remaining = (
+        await migrated_session.execute(
+            text(
+                "SELECT count(*) FROM feature.curation_collections "
+                "WHERE collection_id = CAST(:collection_id AS uuid)"
+            ),
+            {"collection_id": quarantine_id},
+        )
+    ).scalar_one()
+    assert remaining == 0
+    final_states = await _item_states()
+    assert final_states[conflicted.curation_item_id] == (
+        fresh_target.collection_id,
+        "ops:h22-reviewer",
+    )
+
+
+async def test_quarantine_confirm_standalone_removes_marker_only(
+    migrated_session: AsyncSession,
+) -> None:
+    """⑤ marker 키 제거 + key/title 갱신 ⑥ actor 기록 ⑦ marker 없으면 LookupError."""
+
+    theme_id, source_id = await _seed_foundations(migrated_session)
+    original = await create_curation_collection(
+        migrated_session,
+        collection_key="h22:standalone-original",
+        theme_id=theme_id,
+        source_id=source_id,
+        title="원본",
+    )
+    quarantine_id = await _plant_quarantine_collection(
+        migrated_session,
+        theme_id=theme_id,
+        source_id=source_id,
+        original_collection_id=original.collection_id,
+        extra_metadata={"note": "keep-me"},
+    )
+    await add_curation_item(
+        migrated_session,
+        collection_id=quarantine_id,
+        feature_id=None,
+        external_item_id="standalone-1",
+        place_name="독립 항목",
+        actor="seeder",
+    )
+
+    confirmed_id, confirmed_key = await confirm_curation_quarantine_standalone(
+        migrated_session,
+        collection_id=quarantine_id,
+        collection_key="  h22:standalone-confirmed  ",
+        title="  독립 확정  ",
+        actor="ops:h22-reviewer",
+    )
+
+    assert confirmed_id == quarantine_id
+    assert confirmed_key == "h22:standalone-confirmed"
+    row = (
+        (
+            await migrated_session.execute(
+                text(
+                    "SELECT collection_key, title, status, visibility, metadata, "
+                    "       created_by, updated_by "
+                    "FROM feature.curation_collections "
+                    "WHERE collection_id = CAST(:collection_id AS uuid)"
+                ),
+                {"collection_id": quarantine_id},
+            )
+        )
+        .mappings()
+        .one()
+    )
+    assert row["collection_key"] == "h22:standalone-confirmed"
+    assert row["title"] == "독립 확정"
+    assert row["status"] == "draft"
+    assert row["visibility"] == "admin_only"
+    assert row["created_by"] == "migration:0065"
+    assert row["updated_by"] == "ops:h22-reviewer"
+    metadata = row["metadata"]
+    if isinstance(metadata, str):
+        metadata = json.loads(metadata)
+    assert metadata == {"note": "keep-me"}
+
+    # 확정된 collection은 더 이상 격리 정본 술어에 안 걸린다.
+    rows, _ = await list_curation_quarantine_collections(migrated_session)
+    assert [r.collection_id for r in rows] == []
+    with pytest.raises(LookupError, match="quarantine collection 없음"):
+        await confirm_curation_quarantine_standalone(
+            migrated_session,
+            collection_id=quarantine_id,
+            collection_key="h22:standalone-again",
+            title="재확정",
+            actor="ops:h22-reviewer",
+        )
+
+    # 빈 key/title은 422 계약(ValueError)이다.
+    with pytest.raises(ValueError, match="required"):
+        await confirm_curation_quarantine_standalone(
+            migrated_session,
+            collection_id=quarantine_id,
+            collection_key="   ",
+            title="제목",
+            actor="ops:h22-reviewer",
+        )
+
+    # 중복 collection_key는 unique 제약 IntegrityError로 fail-close한다 (마지막
+    # 단언 — 이 시점 이후 transaction은 abort 상태라 teardown rollback에 맡긴다).
+    second_quarantine_id = await _plant_quarantine_collection(
+        migrated_session,
+        theme_id=theme_id,
+        source_id=None,
+        original_collection_id=None,
+    )
+    with pytest.raises(IntegrityError):
+        await confirm_curation_quarantine_standalone(
+            migrated_session,
+            collection_id=second_quarantine_id,
+            collection_key="h22:standalone-confirmed",
+            title="중복 확정",
+            actor="ops:h22-reviewer",
+        )
