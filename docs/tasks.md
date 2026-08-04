@@ -1799,7 +1799,7 @@ ADR은 존재하지만 목표 DDL/OpenAPI diff/실행 제약 artifact는 없다.
   UUID identity와 legacy alias table을 추가하고 같은 snapshot에서 deterministic backfill·UNIQUE/FK
   불변식을 고정한다. 기존 문자열 ID는 아직 제거하지 않는다.
 
-  완료 기록: alembic `0079_feature_uuid_shadow` — `feature.features.feature_uuid`
+  완료 기록: alembic `0080_feature_uuid_shadow` — `feature.features.feature_uuid`
   (backfill 후 NOT NULL + `uq_features_feature_uuid`) + `feature.feature_aliases`
   (alias PK · legacy `feature_id` text FK · `feature_uuid` · `alias_kind`, freeze
   §4 대응 제약명 정합) + INSERT 트리거 2종(BEFORE fill / AFTER legacy alias 원자
@@ -1838,7 +1838,7 @@ ADR은 존재하지만 목표 DDL/OpenAPI diff/실행 제약 artifact는 없다.
   포함한 채 제거 시점까지 동결. 내부 전달·조회는 해석된 정본 키로만
   (ADR-068 결정 3). operator lineage의 별도 존재 확인 쿼리
   (`_operator_feature_or_404`)는 해석 성공이 행 존재를 함의하므로 제거.
-  ② dual read — alembic `0080_uuid_dual_read`가 `public_features` view에
+  ② dual read — alembic `0081_uuid_dual_read`가 `public_features` view에
   `feature_uuid`를 재고정(SELECT * 컬럼 목록, 공개 술어 무변경), repo 단건
   (`_FEATURE_ROW_COLUMNS_SQL`)·bbox/in-bounds·search·nearby(coord/by-target)·
   contained·service batch(`base.feature_uuid`)·admin 목록/상세가
@@ -1902,7 +1902,7 @@ ADR은 존재하지만 목표 DDL/OpenAPI diff/실행 제약 artifact는 없다.
   `contracts/feature-alias-map-v1-golden.json` — PinVi 독립 구현
   (`app/core/feature_alias_contract.py` — namespace를 basis 문자열에서 재파생)
   이 vendored 사본으로 재계산 대조. ③ legacy write fence — alembic
-  `0081_legacy_write_fence`: alias map 불변(UPDATE 전면 거부·직접 DELETE
+  `0082_legacy_write_fence`: alias map 불변(UPDATE 전면 거부·직접 DELETE
   거부·feature purge CASCADE만 허용 — removal manifest "alias 유지" fence) +
   identity 불변(feature_id/feature_uuid UPDATE 거부) DB 트리거 fail-close,
   0079 트리거 2종은 재평가 후 **유지**(fill은 0080 CHECK가 요구하는 유일값만

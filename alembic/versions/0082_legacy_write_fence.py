@@ -38,8 +38,8 @@ canonical 순서(alias NFC UTF-8 byte 오름차순)로 index scan하도록
 
 downgrade는 fence 트리거/함수/index만 제거한다 — 데이터 무변경, 무손실.
 
-Revision ID: 0081_legacy_write_fence
-Revises: 0080_uuid_dual_read
+Revision ID: 0082_legacy_write_fence
+Revises: 0081_uuid_dual_read
 Create Date: 2026-08-04
 """
 
@@ -49,8 +49,8 @@ from collections.abc import Sequence
 
 from alembic import op
 
-revision: str = "0081_legacy_write_fence"
-down_revision: str | Sequence[str] | None = "0080_uuid_dual_read"
+revision: str = "0082_legacy_write_fence"
+down_revision: str | Sequence[str] | None = "0081_uuid_dual_read"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

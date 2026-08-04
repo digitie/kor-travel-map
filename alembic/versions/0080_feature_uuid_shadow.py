@@ -79,7 +79,7 @@ ADR-075 규율:
 downgrade: shadow 제거 — 트리거/함수/alias table/UNIQUE/컬럼 모두 파생
 구조물이라 무손실이다. 재-upgrade하면 같은 값이 재계산된다(결정성).
 
-Revision ID: 0079_feature_uuid_shadow
+Revision ID: 0080_feature_uuid_shadow
 Revises: 0078_cache_target_gc_observe
 Create Date: 2026-08-04
 """
@@ -93,8 +93,8 @@ from sqlalchemy.dialects.postgresql import UUID
 
 from alembic import op
 
-revision: str = "0079_feature_uuid_shadow"
-down_revision: str | Sequence[str] | None = "0078_cache_target_gc_observe"
+revision: str = "0080_feature_uuid_shadow"
+down_revision: str | Sequence[str] | None = "0079_cache_target_writer_drain"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

@@ -15,7 +15,7 @@
   (`feature-alias-map-v1`) — Map(`core/feature_alias_map.py`)과 PinVi가 독립
   구현으로 같은 golden vector를 재계산해 대조한다. 저장 행이 canonical/파생
   계약을 위반하면 500 `FEATURE_ALIAS_MAP_INTEGRITY`로 fail-close.
-- **DATABASE**: `0081_legacy_write_fence` — ① `feature.feature_aliases` 불변
+- **DATABASE**: `0082_legacy_write_fence` — ① `feature.feature_aliases` 불변
   fence(UPDATE 전면 거부, 직접 DELETE 거부 — feature 행 purge의 FK CASCADE
   경유만 허용), ② `feature.features` identity 불변 fence(`feature_id`/
   `feature_uuid` UPDATE 거부 — 재키잉은 soft-delete + 신규 행), ③ alias-map
@@ -37,7 +37,7 @@
   weather·price·contained-features, admin detail·revision·weather·price·
   PATCH·DELETE·deactivate). 형식 오류(빈 문자열/공백 패딩/256자 초과)는 422,
   미해석 참조는 404.
-- **DATABASE**: `0080_uuid_dual_read` — ① `feature.public_features` view 컬럼
+- **DATABASE**: `0081_uuid_dual_read` — ① `feature.public_features` view 컬럼
   목록을 재고정해 `feature_uuid`를 노출한다(공개 술어 무변경, 무손실
   downgrade). ② dual 기간 파생 규칙 CHECK 2종
   (`ck_features_feature_uuid_dual_derivation`,
@@ -52,7 +52,7 @@
 
 ### UUID identity shadow — schema·deterministic backfill (2026-08-04, T-VN-32A)
 
-- **DATABASE**: `0079_feature_uuid_shadow` — `feature.features`에 `feature_uuid`
+- **DATABASE**: `0080_feature_uuid_shadow` — `feature.features`에 `feature_uuid`
   shadow 컬럼을 추가하고 `uuid5(uuid5(NAMESPACE_URL, 'kor-travel-map:feature-uuid:v1'),
   legacy_feature_id)`로 결정적 backfill 후 NOT NULL + `uq_features_feature_uuid`를
   연결한다. `feature.feature_aliases`(feature당 `alias = feature_id` legacy alias 1행,

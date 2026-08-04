@@ -96,7 +96,7 @@
   FEATURE_ALIAS_MAP_INTEGRITY) — DB 층 보장(0079/0080/0081)이 뚫린 상태에서
   이관을 계속하지 않는다. 페이지 pull 중 write drift는 소비자 root 불일치
   재시도로 감지(window 동안 fence 유지는 rollout 소유).
-- **legacy write fence** (alembic `0081_legacy_write_fence`, 전부 DB 트리거
+- **legacy write fence** (alembic `0082_legacy_write_fence`, 전부 DB 트리거
   fail-close): ① alias map 불변 — `feature_aliases` UPDATE 전면 거부 + 직접
   DELETE 거부(참조 feature가 이미 사라진 FK CASCADE 경유만 허용 — removal
   manifest "alias 유지" fence). ② identity 불변 — `features.feature_id/
@@ -176,7 +176,7 @@
   + `get_feature_row` 쿼리 1회)은 제거 — 경로당 쿼리 수 동일하게 유지하면서
   메커니즘은 하나로 수렴. auth 의존성보다 뒤(handler 본문)라 FastAPI 의존성
   평가 순서에 의존하지 않는다.
-- **dual read (additive)**: alembic `0080_uuid_dual_read`가 `public_features`
+- **dual read (additive)**: alembic `0081_uuid_dual_read`가 `public_features`
   view의 SELECT * 컬럼 목록을 재고정해 `feature_uuid`를 노출(공개 술어 무변경 —
   3축 교체는 34B 소관, downgrade는 information_schema 기반 명시 컬럼 재생성으로
   0079 downgrade 선행 조건 유지). repo read는 전부 view/base에서
@@ -240,7 +240,7 @@
 
 ## 2026-08-04 (6) — T-VN-32A UUID identity shadow (schema·deterministic backfill)
 
-- **alembic `0079_feature_uuid_shadow`**: `feature.features.feature_uuid` shadow
+- **alembic `0080_feature_uuid_shadow`**: `feature.features.feature_uuid` shadow
   컬럼(nullable 추가 → 결정적 backfill → NOT NULL + `uq_features_feature_uuid`) +
   `feature.feature_aliases`(alias text PK · legacy `feature_id` text FK ·
   `feature_uuid` · `alias_kind` · created_at, freeze `target-schema-v1.sql` §4의

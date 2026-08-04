@@ -52,8 +52,8 @@ downgrade는 CHECK 2종을 떼고 view를 0080 이전 shape(``feature_uuid`` 제
 의존성 오류 없이 이어지도록, information_schema에서 현재 컬럼 목록을 읽어
 ``feature_uuid``만 제외한 명시 목록으로 만든다(컬럼 하드코딩 drift 회피).
 
-Revision ID: 0080_uuid_dual_read
-Revises: 0079_feature_uuid_shadow
+Revision ID: 0081_uuid_dual_read
+Revises: 0080_feature_uuid_shadow
 Create Date: 2026-08-04
 """
 
@@ -63,8 +63,8 @@ from collections.abc import Sequence
 
 from alembic import op
 
-revision: str = "0080_uuid_dual_read"
-down_revision: str | Sequence[str] | None = "0079_feature_uuid_shadow"
+revision: str = "0081_uuid_dual_read"
+down_revision: str | Sequence[str] | None = "0080_feature_uuid_shadow"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

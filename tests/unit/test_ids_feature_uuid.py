@@ -1,6 +1,6 @@
 """``test_ids_feature_uuid`` — legacy id → shadow UUID 파생 회귀 고정 (T-VN-32A).
 
-``feature_uuid_from_legacy``는 alembic ``0079_feature_uuid_shadow`` backfill과
+``feature_uuid_from_legacy``는 alembic ``0080_feature_uuid_shadow`` backfill과
 DB 트리거의 Python 정본이다. namespace·고정 벡터가 바뀌면 backfill된 전 UUID가
 갈라지므로 (영구 약속) 값 자체를 리터럴로 고정한다. DB SQL mirror와의 대조는
 ``tests/integration/test_feature_uuid_shadow_migration.py`` 소관.

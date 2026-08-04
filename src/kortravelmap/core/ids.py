@@ -184,7 +184,7 @@ FEATURE_UUID_NAMESPACE: Final[uuid.UUID] = uuid.uuid5(
 = ``75d60e13-2779-5b06-a920-6b1b892a7c84``. RFC 4122 표준 namespace에서
 저장소 식별 문자열로 한 번 더 파생해 다른 시스템의 uuid5 공간과 충돌하지
 않는다. **변경 금지** — 값이 바뀌면 backfill된 전 UUID가 갈라진다 (영구 약속,
-alembic ``0079_feature_uuid_shadow``의 SQL mirror
+alembic ``0080_feature_uuid_shadow``의 SQL mirror
 ``feature.feature_uuid_from_legacy``와 반드시 일치해야 한다).
 
 버전 suffix ``:v1``은 파생 규칙 자체를 재정의해야 할 때(그럴 일이 없어야

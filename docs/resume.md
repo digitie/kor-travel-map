@@ -21,7 +21,7 @@ checksum 순수 계약(`core/feature_alias_map.py`) + 양 저장소 공용 golde
 같은 vector를 재계산·대조하고, 검증된 이관 실행기
 (`pinvi-feature-uuid-cutover` — pull→독립 checksum·파생 검증→3열 rewrite)와
 UUID shadow 컬럼 migration을 준비했다. legacy write fence는 alembic
-`0081_legacy_write_fence`가 alias map 불변(UPDATE/직접 DELETE 거부, CASCADE만
+`0082_legacy_write_fence`가 alias map 불변(UPDATE/직접 DELETE 거부, CASCADE만
 허용)·identity 불변(feature_id/feature_uuid UPDATE 거부)을 DB 트리거로
 fail-close — 0079 트리거 2종은 재평가 후 유지(근거는 0081 docstring·journal).
 OpenAPI admin/service 재생성 + diff artifact 재고정.
@@ -44,7 +44,7 @@ contained / admin detail·revision·weather·price·PATCH·DELETE·deactivate)�
 연결했다 — 내부 전달은 정본 키로만, 중복 존재 확인 쿼리는 제거. repo 읽기
 경로(단건/bbox/search/nearby/service batch/admin 목록·상세)와 notice lineage
 (`public_active_notice_feature_identities` — 기존 ids 표면은 제거)가
-`feature_uuid`를 additive 병행 노출한다(alembic `0080_uuid_dual_read`로 공개
+`feature_uuid`를 additive 병행 노출한다(alembic `0081_uuid_dual_read`로 공개
 view 재고정). **dual 기간 정본 generator = uuid5 파생(UUIDv7 미채택) 결정**을
 `0080` CHECK 2종으로 DB 층에서 강제(파생 불일치 write는 SQLSTATE 23514
 fail-close, 32C에서 제거하는 한정 fence) + writer 명시 INSERT·RETURNING 대조
@@ -65,7 +65,7 @@ snapshot 3종(user/service/admin-detail) 재추출은 32C 쌍 PR에서.
 
 ## 2026-08-04 (6) — T-VN-32A UUID identity shadow 완료
 
-Wave 2 Lane A 첫 구현 task. alembic `0079_feature_uuid_shadow`로
+Wave 2 Lane A 첫 구현 task. alembic `0080_feature_uuid_shadow`로
 `feature.features.feature_uuid`(결정적 backfill → NOT NULL + UNIQUE)와
 `feature.feature_aliases`(legacy alias 1:1, freeze §4 제약명 정합)를 추가했다.
 freeze 미정 3건을 결정(생성기 uuid5 파생·DB default 없음 / alias_kind 닫힌

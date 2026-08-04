@@ -1,4 +1,4 @@
-"""``0079_feature_uuid_shadow`` migration 검증 (T-VN-32A, ADR-068).
+"""``0080_feature_uuid_shadow`` migration 검증 (T-VN-32A, ADR-068).
 
 기존 행이 있는 DB(0078까지 적용 + seed)에 0079를 적용해 검증한다:
 

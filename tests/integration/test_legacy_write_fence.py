@@ -1,4 +1,4 @@
-"""``0081_legacy_write_fence`` + alias-map 이관 표면 검증 (T-VN-32C, ADR-068).
+"""``0082_legacy_write_fence`` + alias-map 이관 표면 검증 (T-VN-32C, ADR-068).
 
 consumer-rollout-v1 T-VN-32 write_fence의 DB 층 착지를 회귀 고정한다:
 
@@ -428,7 +428,7 @@ async def test_downgrade_removes_fences_and_upgrade_restores(
     try:
         await _seed_features(engine, (_SEED_IDS[0],))
         await engine.dispose()
-        await _downgrade(dsn, "0080_uuid_dual_read")
+        await _downgrade(dsn, "0081_uuid_dual_read")
         engine = make_async_engine(dsn)
         async with engine.begin() as connection:
             # fence 제거 후에는 alias touch가 허용된다 (0080 CHECK는 created_at 무관심).
