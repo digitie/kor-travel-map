@@ -4625,6 +4625,11 @@ async def test_quarantine_conflict_preview_truth_table(
     # movable — (B) 후보가 있으나 target 쪽이 archived라 partial 술어 불충족.
     await _target_item("shared2-ext", "t2-comp", _FEATURE_ID, archived=True)
     await _quarantine_item("shared2-ext", "q2-comp", _FEATURE_ID)
+    # movable — **양쪽 feature_id NULL** + 다른 component + 양쪽 active (적대 리뷰 F1).
+    # (B) 비교가 `=`가 아니라 `IS NOT DISTINCT FROM`으로 퇴행하면 NULL끼리 매칭돼
+    # 이 행이 가짜 active_source_feature_conflict가 된다 — 그 변이를 이 행이 죽인다.
+    await _target_item("nullpair-ext", "t3-comp", None)
+    await _quarantine_item("nullpair-ext", "q3-comp", None)
 
     result = await list_curation_quarantine_items(
         migrated_session, collection_id=quarantine_id
@@ -4635,7 +4640,7 @@ async def test_quarantine_conflict_preview_truth_table(
     assert preview.target_collection_id == target.collection_id
     assert preview.target_missing is False
     assert preview.target_archived is False
-    assert len(preview.items) == 5
+    assert len(preview.items) == 6
     verdicts = {
         (item.external_item_id, item.external_component_id): (
             item.conflict_kind,
@@ -4649,12 +4654,13 @@ async def test_quarantine_conflict_preview_truth_table(
         ("both-ext", "primary"): ("component_identity_conflict", both_target_id),
         ("free-ext", "primary"): ("movable", None),
         ("shared2-ext", "q2-comp"): ("movable", None),
+        ("nullpair-ext", "q3-comp"): ("movable", None),
     }
 
     # item keyset 페이지네이션 — curation_item_id 오름차순, 중복/누락 없음.
     seen: list[str] = []
     cursor: str | None = None
-    for _ in range(3):
+    for _ in range(4):
         page_result = await list_curation_quarantine_items(
             migrated_session, collection_id=quarantine_id, limit=2, cursor=cursor
         )
@@ -4663,7 +4669,7 @@ async def test_quarantine_conflict_preview_truth_table(
         seen.extend(item.curation_item_id for item in page.items)
         if cursor is None:
             break
-    assert len(seen) == 5
+    assert len(seen) == 6
     assert seen == sorted(seen)
     assert set(seen) == {item.curation_item_id for item in preview.items}
 
@@ -4711,6 +4717,29 @@ async def test_quarantine_conflict_preview_truth_table(
         )
         is None
     )
+
+    # preview/command 판정 일치 (적대 리뷰 F2/F3) — command가 422로 거부하는 입력을
+    # preview가 "전 item 자기 충돌"이나 정상 preview로 보여주면 안 된다.
+    with pytest.raises(ValueError, match="자신"):
+        await list_curation_quarantine_items(
+            migrated_session,
+            collection_id=quarantine_id,
+            target_collection_id=quarantine_id,
+        )
+    with pytest.raises(ValueError, match="격리 간 이동"):
+        await list_curation_quarantine_items(
+            migrated_session,
+            collection_id=quarantine_id,
+            target_collection_id=orphan_quarantine_id,
+        )
+    with pytest.raises(ValueError, match="격리 간 이동"):
+        await move_curation_quarantine_items(
+            migrated_session,
+            collection_id=quarantine_id,
+            target_collection_id=orphan_quarantine_id,
+            item_ids=None,
+            actor="mover",
+        )
 
 
 async def test_quarantine_move_is_atomic_and_deletes_empty_collection(

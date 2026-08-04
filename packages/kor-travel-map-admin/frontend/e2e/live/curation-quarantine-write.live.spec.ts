@@ -12,6 +12,8 @@
  * 필요 env (하나라도 없으면 skip — 파괴적 스텝은 write flag 없으면 조회만 한다):
  *   E2E_QUARANTINE_COLLECTION_ID   합성된 격리 collection uuid
  *   E2E_QUARANTINE_WRITE=1         move/confirm 파괴 스텝 opt-in
+ *   E2E_LIVE_WORKERS=1             write 스텝은 직렬 실행을 단언한다 — live config
+ *                                  기본(workers=4)으로 돌리면 파괴 실행 대신 단언 실패
  *   E2E_QUARANTINE_EXPECT_CONFLICT_ITEM_ID  (선택) 충돌이 나도록 합성된 item uuid
  */
 import { expect, test } from "@playwright/test";

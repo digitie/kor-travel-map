@@ -3470,6 +3470,10 @@ async def list_curation_quarantine_items(
         if target_collection_id is not None
         else _quarantine_original_collection_id(metadata)
     )
+    # preview와 command의 판정을 일치시킨다 (적대 리뷰 F2/F3). command가 422로 거부하는
+    # 입력을 preview가 "전 item 자기 충돌"이나 정상 preview로 보여주면 운영자를 오도한다.
+    if resolved_target == normalized_collection_id:
+        raise ValueError("target collection이 격리 collection 자신일 수 없습니다.")
     target_missing = True
     target_archived = False
     if resolved_target is not None:
@@ -3477,7 +3481,8 @@ async def list_curation_quarantine_items(
             (
                 await session.execute(
                     text(
-                        "SELECT archived_at FROM feature.curation_collections "
+                        "SELECT archived_at, created_by, metadata "
+                        "FROM feature.curation_collections "
                         "WHERE collection_id = CAST(:collection_id AS uuid)"
                     ),
                     {"collection_id": resolved_target},
@@ -3487,6 +3492,11 @@ async def list_curation_quarantine_items(
             .first()
         )
         if target_row is not None:
+            if _is_quarantine_marker_row(target_row):
+                raise ValueError(
+                    "target이 또 다른 격리 collection입니다 — 격리 간 이동은 "
+                    "0065 모집단을 조용히 섞으므로 허용하지 않습니다."
+                )
             target_missing = False
             target_archived = target_row["archived_at"] is not None
     unresolved_kind: str | None = None
@@ -3585,6 +3595,13 @@ async def move_curation_quarantine_items(
     target_row = locked_by_id.get(resolved_target)
     if target_row is None:
         raise LookupError("이동 target collection 없음")
+    if _is_quarantine_marker_row(target_row):
+        # 격리 간 이동은 0065 모집단을 조용히 섞고, target의 original_collection_id
+        # 병렬 표시를 오도한다 (적대 리뷰 F3). preview와 같은 판정으로 fail-close.
+        raise ValueError(
+            "target이 또 다른 격리 collection입니다 — 격리 간 이동은 "
+            "0065 모집단을 조용히 섞으므로 허용하지 않습니다."
+        )
     if target_row["archived_at"] is not None:
         raise CurationQuarantineTargetArchivedError("이동 target collection이 archive 상태입니다.")
     locked_item_ids = [
