@@ -26,12 +26,14 @@ UUID shadow 컬럼 migration을 준비했다. legacy write fence는 alembic
 fail-close — 0079 트리거 2종은 재평가 후 유지(근거는 0081 docstring·journal).
 OpenAPI admin/service 재생성 + diff artifact 재고정.
 
-**다음 한 작업**: T-VN-32C 잔여 — 두 PR 머지 후 ① PinVi 배포 +
+**다음 한 작업**: T-VN-32C 잔여 — 두 PR 머지 후 ⓪ legacy `feature_id`의
+canonical UUID 형태 값 실재 스캔 1회(shadowing 확인, 리뷰 L7) → ① PinVi 배포 +
 `pinvi-feature-uuid-cutover`(검증된 이관) → ② 양 저장소 checksum 일치 → ③ Map
 응답 `feature_id` 값 UUID 전환·비파생 generator 채택·0080 CHECK/0079 트리거
 제거 재평가 → ④ PinVi vendored snapshot 3종 재추출·핀(merge SHA) 갱신
 (+ 새 alias-map golden 핀 `_UPSTREAM_MAP_COMMIT` 고정, contract-pin-consistency
-diff 단계 추가). legacy 물리 제거는 T-VN-39.
+diff 단계 추가). legacy 물리 제거는 T-VN-39. 운영 상시:
+`count_features_missing_identity` 정기 관측(리뷰 M4).
 
 ## 2026-08-04 (7) — T-VN-32B Map consumer-first dual read/write 완료
 

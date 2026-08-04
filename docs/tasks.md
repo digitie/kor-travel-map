@@ -1915,12 +1915,19 @@ ADR은 존재하지만 목표 DDL/OpenAPI diff/실행 제약 artifact는 없다.
   재고정+revisions(이관 표면은 목표 diff 항목 아님 — 존치·폐기는 39 소관)·
   unit sha 상수 재고정.
 
-  **잔여(쌍 PR 머지 후, rollout 순서)**: PinVi 배포+`pinvi-feature-uuid-cutover`
+  **잔여(쌍 PR 머지 후, rollout 순서)**: ⓪ cutover 전 사전 스캔 1회 —
+  legacy `feature_id` 중 canonical UUID 형태(36자 hyphenated) 값이 실재하는지
+  스캔(경계 해석이 UUID-정본 우선이라 shadowing 실재 확인, 32C 리뷰 L7) →
+  PinVi 배포+`pinvi-feature-uuid-cutover`
   실행 → 양 저장소 checksum 일치 → Map 응답 `feature_id` 값 UUID 전환·비파생
   generator 채택·0080 CHECK/0079 트리거 제거 재평가 → PinVi vendored snapshot
   3종(user/service/admin-detail) 재추출+핀(merge SHA) 갱신 + 새 alias-map
   golden 핀(`_UPSTREAM_MAP_COMMIT`)·contract-pin-consistency diff 단계 추가.
   legacy ID·FK 체인 물리 제거는 T-VN-39 removal manifest.
+  **운영 점검(상시)**: 0079/0081 트리거 보장은 trigger-respecting 세션
+  한정이다 — `session_replication_role=replica`(superuser)는 우회 가능하므로
+  `count_features_missing_identity` 정기 관측(0,0 확인)이 alias 결측 방어선
+  (32C 리뷰 M4).
 
 ### T-VN-33 — provider dataset 정본 전환 (Lane B)
 

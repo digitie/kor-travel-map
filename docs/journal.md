@@ -17,6 +17,46 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-08-04 (9) — T-VN-32C 적대 리뷰 1 반영 (H1/H2/M3/M4/L6/L7)
+
+미머지 branch이므로 0080/0081은 새 revision 없이 제자리 수정.
+
+- **H1 [차단급] alias 파생 CHECK 축 오류**: 0080
+  `ck_feature_aliases_uuid_dual_derivation`이 `f(feature_id)` 축이었는데 32C
+  checksum 계약은 `f(alias)` 축 — `alias ≠ feature_id`인 독성 행
+  (`uuid=f(feature_id)`)이 DB를 통과해 이관 표면 전체를 영구 fail-close시키고
+  0081 fence가 그 행 삭제까지 막는다(리뷰어 실측). CHECK를
+  `f(alias)` 축으로 재축 + `ck_feature_aliases_legacy_identity`
+  (`alias_kind <> 'legacy_feature_id' OR alias = feature_id`) 신설 — 닫힌
+  kind 기간의 실질 불변식을 DB로. 모델 metadata 동반 정합. 독성 행 2계열
+  INSERT가 23514로 거부됨을 실측하는 회귀
+  (`test_poison_alias_rows_are_rejected_by_db_checks`) 추가, identity
+  boundary drift 단언은 CHECK 2종 대안 일치로 재정의(보고 이름은 PG 내부
+  순서 소관).
+- **H2 [높음] COLLATE "C" 회귀 방어 0**: conftest PostGIS가 alpine(musl,
+  byte==default 순서)이라 COLLATE 제거 변이가 생존. glibc 이미지
+  (`postgis/postgis:16-3.5`) 전용
+  `test_alias_map_collation_glibc.py` 신설 — 다국어 9행 세트(대/소문자·기호·
+  é·가나다·f_*/feature: 계열)로 ① keyset 페이지 순서==checksum 정렬==byte
+  순서 단언(COLLATE 제거 변이는 en_US 순서로 갈라져 사망) ② default와
+  `COLLATE "C"` 순서가 실제로 다름을 단언(같으면 판별력 없음을 사유 명시
+  skip — musl 가드).
+- **M3**: `feature_aliases`에 `BEFORE TRUNCATE … FOR EACH STATEMENT` 거부
+  트리거(`trg_feature_aliases_no_truncate` — 저장소 `trg_*_no_truncate` 패턴)
+  0081 추가 + TRUNCATE 거부 회귀.
+- **M4**: 0081 docstring의 "구조적으로 존재하지 않는다" 과장 정정 —
+  trigger-respecting 세션 한정, `session_replication_role=replica`(superuser)
+  우회 가능, `count_features_missing_identity` 정기 관측이 방어선. tasks.md
+  32C 운영 점검 목록에 반영.
+- **L6**: alias UPDATE fence 단언을 분기 고유 문구("행은 불변입니다")로 좁혀
+  DELETE fence와 구분(변이 등가성 해소).
+- **L7**: 32C 잔여 절차에 ⓪ "cutover 전 legacy feature_id의 canonical UUID
+  형태 값 실재 스캔 1회"(경계 해석 UUID-정본 우선의 shadowing 확인) 추가
+  (tasks.md·resume.md).
+- freeze artifact 무영향(0080/0081 CHECK·트리거는 전환기 구조물 — artifact
+  bytes 미변경, unit sha 게이트 green 확인). 검증 수치는 아래 완료 기록에
+  이어 적음.
+
 ## 2026-08-04 (8) — T-VN-32C(1/2) alias-map 이관 표면·checksum 계약·legacy write fence
 
 > PinVi 쌍 branch `feat/tvn32c-uuid-alias`(pinvi 저장소)와 한 쌍이다. rollout이
