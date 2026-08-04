@@ -88,8 +88,15 @@
   허용·identity 불변·same-value 통과·fill 원자성·checksum 독립 재계산 일치·
   keyset 완전 순회·파생 불일치/비-NFC fail-close·downgrade 왕복) + alembic
   metadata 일관성 2 passed(COLLATE index의 반영 정합은 컬럼 index 선언으로
-  해소 — models.py 주석). 전체 통합 회귀 sweep은 같은 컨테이너 세트에서 계속
-  실행해 tail을 보고에 첨부.
+  해소 — models.py 주석). 32B-명명 회귀 세트(fence·32A migration·feature_repo
+  load/primary·freeze·alembic 일관성/upgrade·공개 view 2종·notice 2종·nearby·
+  in-bounds·perf tier1·h35) **137 passed / 1 failed** — 유일 실패
+  `test_h35_exact_surface_network_free_rehearsal`은 loopback-only socket
+  guard가 DooD(docker-socket-in-container) 환경에서 testcontainers DB host가
+  loopback이 아니라서 발화한 것(같은 run의 나머지 h35 계열은 전부 green,
+  본 branch 무접촉 파일 — CI ubuntu 직결 docker에서는 loopback이라 무해).
+  나머지 전체 통합 sweep은 `ktm-ci-final` 컨테이너에서 계속 실행 중이며
+  로그가 컨테이너에 남는다(`docker logs ktm-ci-final`).
 
 ## 2026-08-04 (7) — T-VN-32B Map consumer-first dual read/write
 
