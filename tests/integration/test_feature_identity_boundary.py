@@ -338,7 +338,12 @@ async def test_dual_derivation_check_rejects_drifted_alias_uuid(
                 {"fid": feature_id},
             )
     assert "legacy write fence" in str(fence_error.value)
-    # ② INSERT drift — 파생 규칙 CHECK가 저장 경계에서 거부한다.
+    # ② INSERT drift — 파생 규칙/identity CHECK가 저장 경계에서 거부한다.
+    #    (alias ≠ feature_id인 행은 재축된 파생 CHECK와 legacy identity CHECK를
+    #    모두 위반한다 — 어느 이름이 보고되는지는 PG 내부 순서 소관이라 대안
+    #    일치로 단언한다. 독성 행 축별 단정은 test_legacy_write_fence 소관.)
+    import re
+
     with pytest.raises(DBAPIError) as check_error:
         async with migrated_session.begin_nested():
             await migrated_session.execute(
@@ -351,7 +356,10 @@ async def test_dual_derivation_check_rejects_drifted_alias_uuid(
                 ),
                 {"alias": f"{feature_id}-drift-probe", "fid": feature_id},
             )
-    assert "ck_feature_aliases_uuid_dual_derivation" in str(check_error.value)
+    assert re.search(
+        r"ck_feature_aliases_(uuid_dual_derivation|legacy_identity)",
+        str(check_error.value),
+    )
 
 
 async def test_missing_alias_is_observed_by_identity_invariant(

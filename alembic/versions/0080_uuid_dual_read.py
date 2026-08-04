@@ -23,8 +23,18 @@
 
    - ``ck_features_feature_uuid_dual_derivation`` —
      ``feature_uuid = feature.feature_uuid_from_legacy(feature_id)``
-   - ``ck_feature_aliases_uuid_dual_derivation`` — alias 행의 파생 사본도 동일
-     규칙(32C DB-to-DB alias map 이관 무결성).
+   - ``ck_feature_aliases_uuid_dual_derivation`` —
+     ``feature_uuid = feature.feature_uuid_from_legacy(alias)``. **파생 축은
+     alias다** — 32C checksum 계약(``core/feature_alias_map.py``)이 alias에서
+     파생을 검증하므로, FK 컬럼(feature_id) 축으로 걸면 ``alias ≠ feature_id``
+     인 독성 행(``feature_uuid = f(feature_id)``)이 DB를 통과한 뒤 이관
+     표면 전체를 영구 fail-close시킨다(T-VN-32C 적대 리뷰 H1 실측 — 초판의
+     feature_id 축을 재축).
+   - ``ck_feature_aliases_legacy_identity`` —
+     ``alias_kind <> 'legacy_feature_id' OR alias = feature_id``. 닫힌 kind
+     기간의 실질 불변식(legacy alias는 자기 자신)을 DB로 고정해 위 독성 행
+     계열을 원천 차단한다(같은 리뷰 H1). 새 kind가 정본 결정되면 kind 확장과
+     함께 재검토한다.
 
    기존 행은 전부 0079 결정적 backfill 산출이라 즉시 유효하다. 이 CHECK는
    **dual 기간 한정 fence**다 — legacy id가 소멸하는 cutover(T-VN-32C write
@@ -78,16 +88,28 @@ def upgrade() -> None:
         CHECK (feature_uuid = feature.feature_uuid_from_legacy(feature_id))
         """
     )
+    # 파생 축은 alias (checksum 계약과 동일 축 — docstring H1 재축 근거).
     op.execute(
         """
         ALTER TABLE feature.feature_aliases
         ADD CONSTRAINT ck_feature_aliases_uuid_dual_derivation
-        CHECK (feature_uuid = feature.feature_uuid_from_legacy(feature_id))
+        CHECK (feature_uuid = feature.feature_uuid_from_legacy(alias))
+        """
+    )
+    op.execute(
+        """
+        ALTER TABLE feature.feature_aliases
+        ADD CONSTRAINT ck_feature_aliases_legacy_identity
+        CHECK (alias_kind <> 'legacy_feature_id' OR alias = feature_id)
         """
     )
 
 
 def downgrade() -> None:
+    op.execute(
+        "ALTER TABLE feature.feature_aliases "
+        "DROP CONSTRAINT ck_feature_aliases_legacy_identity"
+    )
     op.execute(
         "ALTER TABLE feature.feature_aliases "
         "DROP CONSTRAINT ck_feature_aliases_uuid_dual_derivation"

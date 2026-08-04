@@ -479,10 +479,16 @@ class FeatureAliasRow(Base):
             name=conv("ck_feature_aliases_alias_kind"),
         ),
         # T-VN-32B dual 기간 파생 규칙 fence (alembic 0080) — 32C alias-map
-        # DB-to-DB 이관의 무결성 전제. 32C cutover에서 제거.
+        # DB-to-DB 이관의 무결성 전제. 32C cutover에서 제거. 파생 축은
+        # **alias**(checksum 계약과 동일 축 — 32C 적대 리뷰 H1 재축).
         CheckConstraint(
-            "feature_uuid = feature.feature_uuid_from_legacy(feature_id)",
+            "feature_uuid = feature.feature_uuid_from_legacy(alias)",
             name=conv("ck_feature_aliases_uuid_dual_derivation"),
+        ),
+        # 닫힌 kind 기간의 실질 불변식 — legacy alias는 자기 자신 (H1).
+        CheckConstraint(
+            "alias_kind <> 'legacy_feature_id' OR alias = feature_id",
+            name=conv("ck_feature_aliases_legacy_identity"),
         ),
         Index("idx_feature_aliases_feature", "feature_id"),
         Index("idx_feature_aliases_feature_uuid", "feature_uuid"),
