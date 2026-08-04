@@ -64,8 +64,8 @@ barrier로 직렬화한다.
     [/] `T-VN-41D`(durable writer-drain)
 - **Wave 2 barrier 이후**
   - freeze(Lane A): [x] `T-VN-31A` → [x] `T-VN-31B` → [x] `T-VN-31C`
-  - Lane A: [x] `T-VN-32A` → [x] `T-VN-32B` → [~] `T-VN-32C`(전반부 착지 —
-    잔여는 쌍 PR 머지 후 checksum 게이트) →
+  - Lane A: [x] `T-VN-32A` → [x] `T-VN-32B` → [~] `T-VN-32C`(쌍 PR 착지 —
+    Map #940·PinVi #428, 잔여는 배포+cutover→checksum 게이트) →
     [ ] `T-VN-35A` → [ ] `T-VN-35B` → [ ] `T-VN-35C` → [ ] `T-VN-35D` →
     [ ] `T-VN-37A` → [ ] `T-VN-37B` → [ ] `T-VN-37C`
   - Lane B shadow: [ ] `T-VN-33A` → [ ] `T-VN-33B` → [ ] `T-VN-33C` →
@@ -1922,14 +1922,21 @@ ADR은 존재하지만 목표 DDL/OpenAPI diff/실행 제약 artifact는 없다.
   재고정+revisions(이관 표면은 목표 diff 항목 아님 — 존치·폐기는 39 소관)·
   unit sha 상수 재고정.
 
-  **잔여(쌍 PR 머지 후, rollout 순서)**: ⓪ cutover 전 사전 스캔 1회 —
-  legacy `feature_id` 중 canonical UUID 형태(36자 hyphenated) 값이 실재하는지
-  스캔(경계 해석이 UUID-정본 우선이라 shadowing 실재 확인, 32C 리뷰 L7) →
-  PinVi 배포+`pinvi-feature-uuid-cutover`
-  실행 → 양 저장소 checksum 일치 → Map 응답 `feature_id` 값 UUID 전환·비파생
-  generator 채택·0080 CHECK/0079 트리거 제거 재평가 → PinVi vendored snapshot
-  3종(user/service/admin-detail) 재추출+핀(merge SHA) 갱신 + 새 alias-map
-  golden 핀(`_UPSTREAM_MAP_COMMIT`)·contract-pin-consistency diff 단계 추가.
+  **쌍 PR 착지(2026-08-04)**: Map #940 merge `e12494bd` + PinVi #428 merge
+  `3ff54b8b`(squash). 유예분 완료 — alias golden 핀 `_UPSTREAM_MAP_COMMIT` =
+  merge SHA + contract-pin-consistency byte-diff 단계, service snapshot 재추출
+  (`144b4335…` — cache-target operation diff 무변경 실측 → codex n150 paired
+  live proof 유효), `_ARTIFACT_COMMIT`/`_FUNCTIONAL_OWNER_COMMIT`/config/
+  `.env.example` 회전. ⓪ 사전 스캔 완료 — prod 467,697행 중 canonical UUID
+  형태 legacy `feature_id` **0건**(L7 shadowing 클리어, TCP read-only 실측).
+  배포 결선 예고는 docker-manager#128(EXPECTED_HEAD=`0082_legacy_write_fence`
+  + PinVi 계약 env 2종 — sync enable 시 fail-close 주의, Map 먼저 순서 제약).
+
+  **잔여(rollout 순서)**: PinVi 배포+`pinvi-feature-uuid-cutover`(dry-run
+  선행) 실행 → 양 저장소 checksum 일치 → Map 응답 `feature_id` 값 UUID 전환·
+  비파생 generator 채택·0080 CHECK/0079 트리거 제거 재평가 → PinVi vendored
+  snapshot user/admin-detail 재추출+핀 갱신(service는 #428에서 완료 — UUID 값
+  전환 tail에서 3종 재검토).
   legacy ID·FK 체인 물리 제거는 T-VN-39 removal manifest.
   **운영 점검(상시)**: 0079/0081 트리거 보장은 trigger-respecting 세션
   한정이다 — `session_replication_role=replica`(superuser)는 우회 가능하므로
