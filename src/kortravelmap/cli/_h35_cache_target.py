@@ -22,6 +22,7 @@ from kortravelmap.cli._h35_contract import (
     receipt,
     validate_cache_target_evidence,
 )
+from kortravelmap.cli._h35_schema_version import FORWARD_BOUNDARY, TARGET_SCHEMA
 from kortravelmap.client import AsyncKorTravelMapClient
 from kortravelmap.core.cache_target_stream import SnapshotMerkleRowV1, snapshot_merkle_root
 from kortravelmap.infra.cache_target_outbox_repo import cache_target_event_cursor
@@ -31,7 +32,6 @@ from kortravelmap.infra.cache_target_reconciliation_repo import (
 from kortravelmap.infra.cache_target_stream_repo import cache_target_stream_entity_tag
 from kortravelmap.infra.db import make_async_engine
 
-TARGET_SCHEMA: Final = "0078_cache_target_gc_observe"
 EVIDENCE_CONTRACT_VERSION: Final = "ktm-cache-target-final-evidence/v1"
 EVIDENCE_EXTERNAL_SYSTEM: Final = "pinvi"
 _OBSERVATION_RETENTION_DAYS: Final = 90
@@ -119,7 +119,7 @@ async def run_gc(request: H35Request) -> Receipt:
                 status="rejected",
                 schema_before=schema,
                 schema_after=schema,
-                forward_boundary=("schema_0078" if schema == TARGET_SCHEMA else "not_crossed"),
+                forward_boundary=(FORWARD_BOUNDARY if schema == TARGET_SCHEMA else "not_crossed"),
                 row_counts={
                     "remaining_headers": before.remaining_headers,
                     "remaining_items": before.remaining_items,
@@ -178,7 +178,7 @@ async def run_gc(request: H35Request) -> Receipt:
         status="accepted" if all_pass(checks) else "rejected",
         schema_before=schema,
         schema_after=schema,
-        forward_boundary="schema_0078",
+        forward_boundary=FORWARD_BOUNDARY,
         row_counts={
             "batches": result.batches,
             "deleted_headers": result.deleted_headers,

@@ -8,6 +8,7 @@ from kortravelmap.cli._h35_schema import (
     partial_index_state_allowed,
     partial_invalid_indexes_allowed,
 )
+from kortravelmap.cli._h35_schema_version import TARGET_SCHEMA
 
 pytestmark = pytest.mark.unit
 
@@ -51,8 +52,8 @@ def _states(*canonical: str, residue: str | None = None) -> dict[str, tuple[bool
         ("0067_integrity_dedupe_key", [_INTEGRITY_NEW[0], _INTEGRITY_NEW[1]], False),
         ("0068_integrity_last_seen", [_WEATHER[0]], True),
         ("0068_integrity_last_seen", [_PRICE_NEW], False),
-        ("0078_cache_target_gc_observe", [], True),
-        ("0078_cache_target_gc_observe", [_WEATHER[0]], False),
+        (TARGET_SCHEMA, [], True),
+        (TARGET_SCHEMA, [_WEATHER[0]], False),
     ],
 )
 def test_invalid_index_allowlist_is_revision_exact(
@@ -130,21 +131,21 @@ def test_0068_accepts_only_canonical_weather_statement_prefixes() -> None:
 def test_post_0069_requires_final_index_shape_without_old_peers() -> None:
     final = (_PRICE_NEW, *_INTEGRITY_NEW, *_WEATHER)
     assert partial_index_state_allowed(
-        "0078_cache_target_gc_observe",
+        TARGET_SCHEMA,
         _states(*final),
     ) is True
     for missing in final:
         remaining = tuple(name for name in final if name != missing)
         assert partial_index_state_allowed(
-            "0078_cache_target_gc_observe",
+            TARGET_SCHEMA,
             _states(*remaining),
         ) is False
     assert partial_index_state_allowed(
-        "0078_cache_target_gc_observe",
+        TARGET_SCHEMA,
         _states(*final, _PRICE_OLD),
     ) is False
     assert partial_index_state_allowed(
-        "0078_cache_target_gc_observe",
+        TARGET_SCHEMA,
         _states(*final, _INTEGRITY_OLD[0]),
     ) is False
 

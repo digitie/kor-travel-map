@@ -27,6 +27,7 @@ from kortravelmap.cli._h35_contract import (
     receipt,
     receipt_digest,
 )
+from kortravelmap.cli._h35_schema_version import FORWARD_BOUNDARY
 
 
 async def _run_verify(request: H35Request) -> Receipt:
@@ -96,7 +97,7 @@ async def _run_verify(request: H35Request) -> Receipt:
         status="accepted" if accepted else "rejected",
         schema_before=TARGET_SCHEMA,
         schema_after=schema,
-        forward_boundary="schema_0078" if schema == TARGET_SCHEMA else "not_crossed",
+        forward_boundary=FORWARD_BOUNDARY if schema == TARGET_SCHEMA else "not_crossed",
         row_counts={
             "accepted": csv_state["accepted"],
             "batches": csv_state["batches"],

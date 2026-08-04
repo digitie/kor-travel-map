@@ -95,6 +95,19 @@
 - 프로브 교훈: geo-postgres 컨테이너 재시작 후 컨테이너 로컬 소켓이 앱 TCP 인스턴스와
   다른 것을 가리켜 "krtour_map 없음" 허위 경보 — **DB 프로브는 앱과 같은 TCP 경로로
   통일**한다. 컨테이너 내 이중 postgres 현상은 이상 신호로 기록.
+## 2026-08-04 (codex) — 0079 추가에 따른 H35 synthetic regression 계약 정렬
+
+- PR #935의 GitHub PostGIS gate는 858 passed/5 skipped 뒤 H35 preflight가
+  `repository_alembic_head=0078`을 요구해 하나만 실패했다. writer-drain `0079`가 실행되기
+  전의 fail-close라 H35의 오래된 목표 schema 상수 drift로 판정했다.
+- H35 prod cutover는 사용자 결정에 따라 계속 폐기 상태다. 다만 CI regression harness가
+  latest Alembic head를 구성하지 못하는 결함은 남길 수 없으므로, 목표 revision과 forward
+  boundary를 `_h35_schema_version.py`의 `0079`/`schema_0079`로 단일화했다.
+- semantic catalog fingerprint를 실제 isolated PostGIS head migration에서 다시 계산하고
+  writer-drain lease·instigation·run의 relation/column/constraint/FK/index를 포함했다.
+  H35 unit 64건과 `0063→0079→CSV5→GC→verify`, head partial probe, quarantine boundary
+  rehearsal 3건이 통과했다. n150/prod 연결·변경은 없었다.
+
 ## 2026-08-04 (codex) — T-VN-41D isolated durable writer-drain 완료
 
 - Map migration `0079`가 lease·instigation snapshot·run cancellation CAS를 `ops` schema에

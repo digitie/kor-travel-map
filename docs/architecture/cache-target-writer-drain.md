@@ -115,3 +115,17 @@ re-attest한다. 개발 중간 데이터는 recovery 대상이 아니며 file so
    orchestration phase 회귀에서 따로 검증한다.
 
 production/n150 검증은 위 세 단계와 별도 명시 승인을 모두 통과한 뒤의 다음 단계다.
+
+## 6. schema regression 경계
+
+writer-drain migration은 `0079_cache_target_writer_drain`가 단일 Alembic head가 된 시점부터
+H35 helper의 synthetic regression target에도 포함된다. `PRE_SCHEMA`, `TARGET_SCHEMA`,
+`FORWARD_BOUNDARY`는 `_h35_schema_version.py`가 한 번만 정의하며, preflight·migrate·CSV5·GC·verify
+receipt가 같은 `schema_0079` 경계를 요구한다. H35의 과거 prod cutover 자체는 폐기됐으므로
+이는 CI의 isolated `0063→0079` schema-chain 검증일 뿐 production/n150 실행 권한을 뜻하지
+않는다.
+
+H35 catalog fingerprint는 `ops.cache_target_writer_drain_leases`,
+`ops.cache_target_writer_drain_instigations`, `ops.cache_target_writer_drain_runs`의 relation,
+column, PK/UK/FK/CHECK와 active-lease partial unique index까지 고정한다. 따라서 migration이
+존재만 하고 fence의 durable 불변식이 사라진 경우도 verify가 fail-close한다.

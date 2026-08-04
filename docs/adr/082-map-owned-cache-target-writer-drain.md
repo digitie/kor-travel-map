@@ -45,6 +45,14 @@ diagnostic과 cutover가 같은 primitive를 재사용한다. intermediate devel
 Manager journal/Compose orchestration 변경이 모두 필요하다. final schema backup/restore
 rehearsal은 여전히 별도 필수 gate다.
 
+`0079`가 추가되면서 기존 H35 helper가 `repository_alembic_head=0078`을 요구해 CI
+preflight를 거부한 사실을 확인했다. H35의 prod cutover는 폐기됐지만 regression harness는
+현행 schema를 정확히 구성해야 하므로, H35 receipt의 목표 revision·forward boundary를
+`0079_cache_target_writer_drain`/`schema_0079`로 올렸다. 이 상수는
+`_h35_schema_version.py` 한 곳이 정본이며, H35 catalog fingerprint에는 세 writer-drain
+relation의 column·constraint·FK·index 정의가 포함된다. 이 변경은 prod cutover를 재승인하지
+않으며 isolated PostGIS regression test의 유효성만 보존한다.
+
 ## 후속
 
 - T-VN-41D/Manager T-049F에서 schema, command, journal, isolated rehearsal을 함께 구현한다.

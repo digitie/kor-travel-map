@@ -1,4 +1,4 @@
-"""격리 PostGIS에서 수행하는 H35 0063→0078 전체 리허설."""
+"""격리 PostGIS에서 수행하는 H35 0063→0079 전체 리허설."""
 
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ from kortravelmap.cli._h35_contract import (
     parse_request,
     receipt_digest,
 )
-from kortravelmap.cli._h35_schema import partial_probe
+from kortravelmap.cli._h35_schema import TARGET_SCHEMA, partial_probe
 from kortravelmap.cli.h35_cutover import _execute
 from kortravelmap.core.cache_target_stream import SnapshotMerkleRowV1, snapshot_merkle_root
 from kortravelmap.infra.curation_link_basis import trusted_basis_sql
@@ -36,7 +36,7 @@ pytestmark = pytest.mark.integration
 
 _ROOT = Path(__file__).resolve().parents[2]
 _PRE_REVISION = "0063_pipeline_root_id"
-_TARGET_REVISION = "0078_cache_target_gc_observe"
+_TARGET_REVISION = TARGET_SCHEMA
 _SOURCE_REVISION = "1" * 40
 _TRANSACTION_ID = "00000000-0000-0000-0000-000000000001"
 _SOURCE_RULE_PUBLIC = 3_043
@@ -914,7 +914,7 @@ async def _assert_scope_delegate_drift_matrix(
             dsn,
             identity=identity,
             gc_receipt=gc_receipt,
-            failed_check_prefix="0075_0078_functions_semantic",
+            failed_check_prefix="0075_0079_functions_semantic",
         )
         await _execute_sql(dsn, function_definition)
 
@@ -932,7 +932,7 @@ async def _assert_scope_delegate_drift_matrix(
             dsn,
             identity=identity,
             gc_receipt=gc_receipt,
-            failed_check_prefix="0075_0078_functions_semantic",
+            failed_check_prefix="0075_0079_functions_semantic",
         )
         await _execute_sql(
             dsn,
@@ -962,7 +962,7 @@ async def _assert_structural_negative_matrix(
         dsn,
         identity=identity,
         gc_receipt=gc_receipt,
-        failed_check_prefix="0075_0078_constraints_semantic",
+        failed_check_prefix="0075_0079_constraints_semantic",
     )
     await _execute_sql(
         dsn,
@@ -973,7 +973,7 @@ async def _assert_structural_negative_matrix(
         dsn,
         identity=identity,
         gc_receipt=gc_receipt,
-        failed_check_prefix="0075_0078_constraints_semantic",
+        failed_check_prefix="0075_0079_constraints_semantic",
     )
     await _execute_sql(
         dsn,
@@ -996,7 +996,7 @@ async def _assert_structural_negative_matrix(
         dsn,
         identity=identity,
         gc_receipt=gc_receipt,
-        failed_check_prefix="0075_0078_indexes_semantic",
+        failed_check_prefix="0075_0079_indexes_semantic",
     )
     await _execute_sql(
         dsn,
@@ -1013,7 +1013,7 @@ async def _assert_structural_negative_matrix(
         dsn,
         identity=identity,
         gc_receipt=gc_receipt,
-        failed_check_prefix="0075_0078_indexes_semantic",
+        failed_check_prefix="0075_0079_indexes_semantic",
     )
     await _execute_sql(
         dsn,
@@ -1030,7 +1030,7 @@ async def _assert_structural_negative_matrix(
         dsn,
         identity=identity,
         gc_receipt=gc_receipt,
-        failed_check_prefix="0075_0078_triggers_semantic",
+        failed_check_prefix="0075_0079_triggers_semantic",
     )
     await _execute_sql(
         dsn,
@@ -1056,7 +1056,7 @@ async def _assert_structural_negative_matrix(
         dsn,
         identity=identity,
         gc_receipt=gc_receipt,
-        failed_check_prefix="0075_0078_triggers_semantic",
+        failed_check_prefix="0075_0079_triggers_semantic",
     )
     await _execute_sql(
         dsn,
@@ -1087,7 +1087,7 @@ async def _assert_structural_negative_matrix(
         dsn,
         identity=identity,
         gc_receipt=gc_receipt,
-        failed_check_prefix="0075_0078_functions_semantic",
+        failed_check_prefix="0075_0079_functions_semantic",
     )
     await _execute_sql(dsn, function_definition)
     await _assert_scope_delegate_drift_matrix(
@@ -1767,7 +1767,7 @@ async def test_quarantine_gate_fires_before_the_forward_boundary(pg_container: A
     from kortravelmap.cli._h35_schema import (
         _quarantine_candidate_count,
         _quarantine_counts,
-        verify_0075_0078,
+        verify_0075_0079,
     )
 
     admin_dsn = normalize_async_dsn(pg_container.get_connection_url())
@@ -1800,7 +1800,7 @@ async def test_quarantine_gate_fires_before_the_forward_boundary(pg_container: A
             # ② `0063` 술어가 고른 것이 진짜 `0065`의 격리 대상과 같다.
             async with engine.connect() as connection:
                 quarantine_collections, quarantine_items = await _quarantine_counts(connection)
-                checks, counts = await verify_0075_0078(connection)
+                checks, counts = await verify_0075_0079(connection)
             assert quarantine_items == 1, (
                 "`0063`에서 후보로 잡았는데 `0065`가 격리하지 않았다 — 두 술어가 다른 "
                 f"것을 고르고 있다. items={quarantine_items}"

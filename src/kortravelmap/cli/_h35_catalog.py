@@ -1,4 +1,4 @@
-"""H35 0075~0078 PostgreSQL catalog semantic contract."""
+"""H35 0075~0079 PostgreSQL catalog semantic contract."""
 
 from __future__ import annotations
 
@@ -25,6 +25,9 @@ _TABLES: Final = (
     "poi_cache_target_snapshots",
     "poi_cache_target_snapshot_items",
     "poi_cache_target_snapshot_gc_observations",
+    "cache_target_writer_drain_leases",
+    "cache_target_writer_drain_instigations",
+    "cache_target_writer_drain_runs",
 )
 _EXTRA_CONSTRAINTS: Final = (
     "ck_feature_update_requests_scope_shape",
@@ -39,15 +42,15 @@ _FUNCTION_SIGNATURES: Final = (
     "ops.reject_cache_target_history_mutation()",
 )
 
-# PostgreSQL 16/PostGIS 3.5에서 0075→0078 migration이 만든 structured catalog의
+# PostgreSQL 16/PostGIS 3.5에서 0075→0079 migration이 만든 structured catalog의
 # canonical SHA-256. 값은 tests/integration/test_h35_cutover_rehearsal.py가 실제
 # migration 직후 다시 계산해 drift를 고정한다.
 EXPECTED_CATALOG_FINGERPRINTS: Final[dict[str, str]] = {
-    "columns": "8604ad59e72300f206103d73108e98a451de3e4c06c45190ac8c249c2919c0f5",
-    "constraints": "f87104501ca458143d4f1858aac2948fd9f95307ec724aa76c55e2f3658d8401",
+    "columns": "5ff9b1aeb7ee518cd08d356760e4b247f8e785ccc7bf7438c2b852510d8282f2",
+    "constraints": "b3420b87f3cfb4aa03af5f33af321b600955c852eff78a3bd074f1e47da6879c",
     "functions": "652c068ef0fe961d54d18e6cac7b407b76c41b5e55decc6cbd23c86d8ef14dc5",
-    "indexes": "3c58c7b00f2f2ad43665077daa4600e0a6fc3cf84f3ffba1746bb3caf2000d80",
-    "relations": "7cf9f623113c6de15bcc98c6c26c2263f423b583449155a9f715a86bc7e756cf",
+    "indexes": "3ad23643130925a30dbf0063ebceaf79ab886feda3e7fba3c893c6f00133e8db",
+    "relations": "6a585822942e20ab16097d9d7083319ec39cc18d1c10b4aefab97854bbf2b1a3",
     "sequence": "c5afb8ec28f1183f74023fc907459e6b8fc751e197943064a238ee0a34632230",
     "triggers": "fe315c2f4912e9f312101b73bba9279b98755f86a4229a501f9708b3273c7eb9",
 }

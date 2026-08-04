@@ -26,6 +26,7 @@ from kortravelmap.cli._h35_contract import (
     receipt,
     strict_hex,
 )
+from kortravelmap.cli._h35_schema_version import FORWARD_BOUNDARY, TARGET_SCHEMA
 from kortravelmap.curation_import import CurationImportRow, parse_curation_csv
 from kortravelmap.curation_provenance import (
     parse_curation_provenance,
@@ -36,7 +37,6 @@ from kortravelmap.infra import curation_repo
 from kortravelmap.infra.curation_link_basis import trusted_basis_sql
 from kortravelmap.infra.db import make_async_engine
 
-TARGET_SCHEMA: Final = "0078_cache_target_gc_observe"
 EXPECTED_POST_PUBLIC: Final = 3_265
 EXPECTED_CSV_FILES: Final = 5
 EXPECTED_CSV_ROWS: Final = 486
@@ -361,7 +361,7 @@ async def run_csv5(request: H35Request) -> Receipt:
                     status="rejected",
                     schema_before=schema,
                     schema_after=schema,
-                    forward_boundary="schema_0078" if schema == TARGET_SCHEMA else "not_crossed",
+                    forward_boundary=FORWARD_BOUNDARY if schema == TARGET_SCHEMA else "not_crossed",
                     row_counts={**before, "accepted": 0, "rejected": 0},
                     checks=checks,
                 )
@@ -430,7 +430,7 @@ async def run_csv5(request: H35Request) -> Receipt:
         status=status,
         schema_before=schema,
         schema_after=schema,
-        forward_boundary="schema_0078" if schema == TARGET_SCHEMA else "not_crossed",
+        forward_boundary=FORWARD_BOUNDARY if schema == TARGET_SCHEMA else "not_crossed",
         row_counts={
             "accepted": accepted,
             "batches": final_state["batches"],

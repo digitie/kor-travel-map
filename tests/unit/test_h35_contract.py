@@ -16,6 +16,7 @@ from kortravelmap.cli._h35_contract import (
     parse_request,
     receipt_digest,
 )
+from kortravelmap.cli._h35_schema_version import FORWARD_BOUNDARY, PRE_SCHEMA, TARGET_SCHEMA
 
 pytestmark = pytest.mark.unit
 
@@ -61,7 +62,7 @@ def _receipt(
         "schema_before": schema_before,
         "schema_after": schema_after,
         "forward_boundary": (
-            "not_crossed" if schema_after == "0063_pipeline_root_id" else "schema_0078"
+            "not_crossed" if schema_after == PRE_SCHEMA else FORWARD_BOUNDARY
         ),
         "row_counts": {},
         "checks": [],
@@ -193,7 +194,7 @@ def test_phase_chain_accepts_exact_receipts() -> None:
     migrate = _receipt(
         "migrate",
         schema_before="0063_pipeline_root_id",
-        schema_after="0078_cache_target_gc_observe",
+        schema_after=TARGET_SCHEMA,
         prior_receipt_digest=migrate_request.prior_receipt_digest,
     )
     csv5_request = parse_request(
@@ -202,8 +203,8 @@ def test_phase_chain_accepts_exact_receipts() -> None:
     )
     csv5 = _receipt(
         "csv5",
-        schema_before="0078_cache_target_gc_observe",
-        schema_after="0078_cache_target_gc_observe",
+        schema_before=TARGET_SCHEMA,
+        schema_after=TARGET_SCHEMA,
         prior_receipt_digest=csv5_request.prior_receipt_digest,
     )
     gc_request = parse_request(
@@ -212,8 +213,8 @@ def test_phase_chain_accepts_exact_receipts() -> None:
     )
     gc = _receipt(
         "gc",
-        schema_before="0078_cache_target_gc_observe",
-        schema_after="0078_cache_target_gc_observe",
+        schema_before=TARGET_SCHEMA,
+        schema_after=TARGET_SCHEMA,
         prior_receipt_digest=gc_request.prior_receipt_digest,
     )
 
@@ -229,8 +230,8 @@ def test_phase_chain_accepts_exact_receipts() -> None:
 def test_verify_rejects_csv5_to_verify_chain_skip() -> None:
     csv5 = _receipt(
         "csv5",
-        schema_before="0078_cache_target_gc_observe",
-        schema_after="0078_cache_target_gc_observe",
+        schema_before=TARGET_SCHEMA,
+        schema_after=TARGET_SCHEMA,
         prior_receipt_digest="3" * 64,
     )
 
@@ -285,7 +286,7 @@ def test_migrate_rejects_prior_receipt_digest_mismatch() -> None:
 @pytest.mark.parametrize(
     ("field", "value"),
     [
-        ("forward_boundary", "schema_0078"),
+        ("forward_boundary", FORWARD_BOUNDARY),
         ("row_counts", None),
         ("row_counts", {"public_items": -1}),
         ("checks", None),
