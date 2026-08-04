@@ -50,8 +50,10 @@ revision 및 terminal status를 검증한 뒤에만 다음 phase로 진행한다
    lease가 있으면 fail-close한다.
 2. 모든 Map schedule/sensor의 identity와 이전 running/stopped 상태를 durable하게 기록한다.
 3. running instigation을 pause한 뒤, Map-owned run만 bounded grace window에서 기다린다.
-   남은 run은 한 번의 typed terminal-cancel로만 수렴시킨다. dispatch 결과가 불명확하면
-   재전송하지 않고 `attest`로 실제 terminal 상태를 판정한다.
+   grace 뒤 처음 관측되는 각 run은 run별 CAS reservation 뒤 한 번의 typed terminal-cancel로
+   수렴시킨다. pause와 이미 enqueue된 late run은 원자적이지 않으므로 terminal poll마다 새로
+   보인 run도 같은 CAS 경로로 넣되, dispatch 결과가 불명확한 run은 재전송하지 않고 `attest`로
+   실제 terminal 상태를 판정한다.
 4. active lease, paused instigation, Map Dagster nonterminal run 0을 같은 receipt로
    attest한 경우에만 `drained`를 반환한다.
 
@@ -91,7 +93,10 @@ compatible pair attestation이 맞은 뒤에만 daemon을 포함한 writer를 �
 cutover에서 backup bundle이 commit되기 전 drain 실패는 DB restore나 full runtime coupled
 rollback으로 처리하지 않는다. Map lease exact restore와 pair re-attestation만 하는
 pre-backup recovery다. backup bundle 이후 실패만 기존 DB backup/restore coupled rollback을
-사용한다. 개발 중간 데이터는 recovery 대상이 아니며 file source 또는 ETL 재실행으로
+사용한다. 이 rollback이 Map application/Dagster DB를 `drained` lease와 paused instigation으로
+복원한 경우에도, Manager는 Map Dagster webserver만 먼저 세운 뒤 같은 lease의 `restore` receipt를
+durable journal에 기록한다. 그 뒤에만 daemon을 포함한 old runtime을 열고 prior pair를
+re-attest한다. 개발 중간 데이터는 recovery 대상이 아니며 file source 또는 ETL 재실행으로
 재생성한다. 단, 최종 schema의 backup/restore rehearsal은 계속 필수다.
 
 ## 5. 격리 검증
@@ -103,8 +108,10 @@ pre-backup recovery다. backup bundle 이후 실패만 기존 DB backup/restore 
    run, timeout/cancel, receipt-loss, crash resume, exact restore를 검증한다.
 2. Manager model/orchestration은 frozen runner receipt를 fake로 주입해 phase, attempt budget,
    pre-backup recovery, journal tamper와 no-generic-compose-bypass를 검증한다.
-3. 별도 ephemeral Compose project와 전용 Postgres/Map/Dagster fake fixture에서 begin → drain
-   → writer stop → control-webserver-only restore → pair restart를 rehearsal한다. 이 fixture는
-   canonical production `.env`, host network, production database/bucket을 참조하지 않는다.
+3. 별도 ephemeral Compose project의 fake Map private command로 실제 frozen runner의
+   `begin → attest → restore` stdin/argv/receipt 경계를 rehearsal한다. fixture는 전용 network와
+   temporary bind mount만 쓰며 canonical production `.env`, host network, production
+   database/bucket을 참조하지 않는다. webserver-only restore와 pair 재기동 순서는 Manager
+   orchestration phase 회귀에서 따로 검증한다.
 
 production/n150 검증은 위 세 단계와 별도 명시 승인을 모두 통과한 뒤의 다음 단계다.

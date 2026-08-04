@@ -3,6 +3,19 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-08-04 — T-VN-41D Map durable writer-drain control plane
+
+- [x] **T-VN-41D — Map durable writer-drain control plane** (Manager T-049F / issue #115)
+
+  migration `0079`이 Map application DB에 lease·instigation snapshot·owned run CAS를
+  정규화했다. frozen Compose one-shot API image의 private `begin|attest|restore` command만
+  schedule/sensor pause·late run terminal cancel·exact restore를 수행하며 Manager에는 opaque
+  lease와 receipt SHA-256만 전달한다. begin 응답 유실·new owner recovery·backup rollback은
+  daemon을 열기 전에 restore receipt와 prior pair attestation을 요구한다. public REST/OpenAPI,
+  existing cache-target token, admin/ops command, production/n150은 사용하지 않았다. strict
+  command 5건, isolated PostgreSQL 3건, Manager regression 143건, ephemeral Docker Compose
+  rehearsal 1건을 통과했다.
+
 ## 2026-07-31 — T-VN-CI-PG 임의 ref PostGIS 수동 gate
 
 - [x] **T-VN-CI-PG — workflow_dispatch 전용 PostGIS integration 경로**

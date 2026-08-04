@@ -60,6 +60,11 @@ HTTP 파괴 검증 9흐름 통과.
 항목(H30B — 재적재 안정화 대기 중이면 Wave 2 barrier의 T-VN-31A). 잔여 재적재: provider
 일일 스케줄 + CSV 5종(feature 적재 후). codex 41C prod enable은 재pin(#109)+CSV5 후.
 
+T-VN-41D는 migration `0079`, strict private command, lost-attest receipt replay, late-run CAS
+cancel, Manager lease/receipt state machine과 ephemeral Compose rehearsal까지 완료했다. command
+5건, isolated PostgreSQL 3건, Manager 143건, actual Docker rehearsal 1건을 통과했고 n150/prod
+접근은 없었다.
+
 ## 2026-08-04 — prod 0072 사고 → 폐기·재생성. H35 재정의
 
 prod가 pin과 다른 7/31 이미지(`0bdecb1f`, head `0072`)로 배포되며 entrypoint 자동
