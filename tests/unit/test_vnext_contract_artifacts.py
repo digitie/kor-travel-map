@@ -27,29 +27,30 @@ _CONTRACTS: Final = _ROOT / "contracts" / "vnext"
 # artifact bytes 고정 — 갱신 절차: artifact 수정 → 통합 테스트로 fingerprint 재고정
 # → 여기 sha256 갱신 (한 PR에서 함께).
 ARTIFACT_SHA256: Final[dict[str, str]] = {
-    "target-schema-v1.sql": ("a21d8d38ab8a379768a39d7e43afc94fad480c690999127797bbd6efe96e7257"),
+    "target-schema-v1.sql": ("787e2148179e92bd046c4942c7fc8ef6894ab88c4534d49c8fbe86cfa9df9584"),
     "target-invariants-v1.sql": (
-        "80c922cd02ff494a084d25129188f3f8c8cbd1d7eb7ba73cbe0a718825a5fe87"
+        "69141aa067bc882ef35bcc2cde7a5d7264cb2f58405c3a9ec84c233a12db595b"
     ),
     "target-schema-fingerprints-v1.json": (
-        "48e303f5dea98d6061b64dc3986e95541ea8e9fedcc053e8b8785b250d8b2580"
+        "8e14b96aa973f451012fd0ad22fc0eddbe4a2ff6fc812e79ac4efe6bd4630f52"
     ),
-    "openapi-diff-v1.json": ("1e4872e1dab86e4f5f9fb7c0bb0e58c4426edb3172b17f8f9fe37698baf0f874"),
+    "openapi-diff-v1.json": ("2cf14a363a7519b05fdadb449f1b662a1395b3c95b7ee1247f35e6f9fb8191ff"),
     "consumer-rollout-v1.json": (
-        "4f6af67e9eb7faaf3f8873d94ef53eebca76729a0f2f35218172c1d23a908a31"
+        "684ee2b903124ea506bc34e418f26b254cd5c7a18f0332eebfe99fe655e09e3c"
     ),
     "violation-fixtures-v1.sql": (
-        "0811317f77102194f9851f421a4e65ef4ef37b4e4cbdeb3b9e4074c436fb1bed"
+        "8ac1aa2f6a1f6717f55c016d95997bd9b5df4a094478826e3803e39dfc06158f"
     ),
     "expected-rejections-v1.json": (
-        "8ea17772f79df143d7a59203a47e17d0eef2debb72cacfbe9aa8ffb07aaef112"
+        "1d647acb4e14d753b2ead737ba7f066649c69fd8f493ba5a7e9ee5ac0e1dec33"
     ),
     "recovery-preflight-v1.json": (
         "0e7e1ea595d034aacda8b4c94b56de6c2a24059f150c8cbd6c0670aebce7dfdd"
     ),
 }
 
-_EXPECTED_INVARIANT_COUNT: Final = 44
+_EXPECTED_INVARIANT_COUNT: Final = 43
+_INVARIANT_PHASES: Final = frozenset({"pre-backfill", "post-backfill", "both"})
 _SURFACES: Final = ("user", "service", "admin")
 _CHANGE_KEYS: Final = (
     "added",
@@ -79,9 +80,19 @@ def _load_json(name: str) -> dict[str, Any]:
     return payload
 
 
-def _load_invariant_queries() -> list[str]:
+def _load_invariant_queries() -> list[tuple[str, str]]:
+    """(질의, phase) 쌍 파싱 — 통합 테스트 파서와 같은 문법·같은 fail-open 봉합(D1)."""
     content = (_CONTRACTS / "target-invariants-v1.sql").read_text(encoding="utf-8")
-    return re.findall(r"(?ms)^(SELECT .*?); -- expect: 0$", content)
+    parsed = re.findall(
+        r"(?ms)^(SELECT .*?); -- expect: 0 -- phase: (pre-backfill|post-backfill|both)$",
+        content,
+    )
+    marker_count = content.count("-- expect: 0")
+    assert marker_count == len(parsed), (
+        f"invariant trailer {marker_count}개 중 {len(parsed)}개만 파싱됨 — "
+        "phase 태그 누락 또는 trailer 문법 위반"
+    )
+    return [(query, phase) for query, phase in parsed]
 
 
 def _load_violation_case_names() -> set[str]:
@@ -121,6 +132,13 @@ def test_openapi_diff_referenced_operations_exist() -> None:
     for surface in _SURFACES:
         spec = json.loads((_ROOT / diff["baseline"][surface]["file"]).read_text(encoding="utf-8"))
         changes = diff["surfaces"][surface]
+        # 리뷰 D3 — counts 2차 방어: 선언된 개수와 실제 배열 길이 대조.
+        counts = changes["counts"]
+        assert set(counts) == {*_CHANGE_KEYS, "deferred"}, f"{surface} counts 축 불일치"
+        for key, declared in counts.items():
+            assert declared == len(changes.get(key, [])), (
+                f"{surface}/{key} counts {declared} != 실제 {len(changes.get(key, []))}"
+            )
         for key in _CHANGE_KEYS:
             assert key in changes, f"{surface}에 change 축 {key} 누락"
             for entry in changes[key]:
@@ -207,5 +225,6 @@ def test_expected_rejections_consistent_with_fixtures_and_ddl() -> None:
 def test_invariants_are_parseable_zero_assertions() -> None:
     queries = _load_invariant_queries()
     assert len(queries) == _EXPECTED_INVARIANT_COUNT
-    for query in queries:
+    for query, phase in queries:
+        assert phase in _INVARIANT_PHASES, phase
         assert query.lstrip().upper().startswith("SELECT COUNT(*)"), query[:80]

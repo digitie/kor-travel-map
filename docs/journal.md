@@ -17,6 +17,31 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-08-04 (5) — T-VN-31 freeze 적대 리뷰 2건 반영
+
+- **정합성 리뷰(F-1~F-11) 반영**: 발명분 회수 — retired∧draft state CHECK 제거
+  (0059는 교집합 술어만 정본화, 조합 집합은 T-VN-34A 미정), subtype 무술어 GiST
+  8개 제거(D-12 결정 3 "공개 술어 partial만" 정본 위반이므로 인덱스 0개 고정 +
+  설계 공백 미정 주석), weather summary identity에서 timeline_bucket 제외(0060
+  정본 "분류 결과라 identity 제외"), price summary known_at 제거(ADR-078에 price
+  bitemporal 결정 없음). 정본 명시분 반영 — user surface status→3축 enum diff
+  (현행 user spec의 status 노출 실측)+T-VN-34 user snapshot 재-vendor yes,
+  weather 유효기간 `valid_during tstzrange`(ADR-072 결정 2), soft-delete 흡수처
+  `feature.feature_state_transitions` 신설(ADR-067 결정 5), ADR-073 결정 1 배타
+  열거에 따라 features 목록·by-target·providers*·public/beaches*·festivals*·
+  contained-features를 removed로 이동, projection 역할 분리(ADR-069 결정 4)·
+  detail-snapshot PinVi 런타임 소비(H07D)·재-vendor 정본 귀속(user/admin은
+  ADR-079, service는 ADR-081) 명시.
+- **실행성 리뷰(D1~D4) 반영**: invariant 파서 fail-open 봉합(trailer 개수 대사),
+  machine-readable phase 태그(pre-backfill/post-backfill/both) + 파서 필수 검증,
+  openapi-diff surface별 counts + unit 대조(2차 방어), current_weather_summary
+  surrogate PK(bigint identity — replica identity·price 대칭).
+- 카운트 변경: invariant 44→43, violation fixture 9→8(3축 조합 case는 CHECK
+  미정이라 구현 PR로 이월, NULLS NOT DISTINCT case는 history tuple의 실 NULL
+  동치로 교체). fingerprint·bytes sha 전부 재고정.
+
+## 2026-08-04 (3) — T-VN-31A/B/C vNext target freeze
+
 ## 2026-08-04 (4) — T-VN-31A/B/C vNext target freeze
 
 - **Wave 2 barrier freeze 완료.** ADR-066~075·보고서 §3/§4/§8·tasks 정의를

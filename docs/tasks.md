@@ -1748,6 +1748,11 @@ ADR은 존재하지만 목표 DDL/OpenAPI diff/실행 제약 artifact는 없다.
 > **미정 표기 원칙(2026-08-04 freeze)**: ADR·보고서·task 정의가 침묵하는 세부는 artifact에서
 > 발명하지 않고 SQL `-- 미정(T-VN-XX 구현 소관)` / JSON `"decision":
 > "deferred-to-implementation"`으로 남긴다. freeze의 정직성이 완성도보다 우선한다.
+> 적대 리뷰 2건(정합성·실행성)을 같은 브랜치에서 반영했다 — 발명분 회수(state 조합
+> CHECK·subtype full GiST·summary bucket identity·price known_at), 정본 명시분 반영
+> (user status 3축 diff·weather valid_during range·state transition 흡수처·ADR-073
+> 배타 열거 removed), 실행성 보강(invariant phase 태그·파서 fail-open 봉합·diff
+> counts 2차 방어·summary surrogate PK).
 
 - [x] T-VN-31A — **목표 DDL·데이터 불변식 freeze** (2026-08-04 완료)
 
@@ -1756,7 +1761,8 @@ ADR은 존재하지만 목표 DDL/OpenAPI diff/실행 제약 artifact는 없다.
 
   완료 기록: `contracts/vnext/target-schema-v1.sql`(빈 PostGIS DB 자기완결 적용, ADR-075 규율
   주석) + `contracts/vnext/target-invariants-v1.sql`(H35 preflight 6종 패턴 + ADR별 불변식,
-  `-- expect: 0` assertion 44개) + `contracts/vnext/target-schema-fingerprints-v1.json`
+  `expect: 0` assertion 43개 — machine-readable phase 태그 pre-backfill/post-backfill/both)
+  + `contracts/vnext/target-schema-fingerprints-v1.json`
   (H35 7 카테고리 catalog canonical SHA-256, PG16/PostGIS 3.5).
 
 - [x] T-VN-31B — **목표 OpenAPI·consumer diff freeze** (2026-08-04 완료)
@@ -1775,9 +1781,10 @@ ADR은 존재하지만 목표 DDL/OpenAPI diff/실행 제약 artifact는 없다.
   executable contract로 만든다. 31A/B artifact drift를 CI에서 fail-close한다.
 
   완료 기록: `contracts/vnext/violation-fixtures-v1.sql` + `expected-rejections-v1.json`
-  (9 case — 3축 불가능 조합·alias 중복·provider 3-tuple 중복·geometry invalid/empty·override
-  active 중복·notice is_current 중복·summary NULLS NOT DISTINCT 중복·bitemporal 역전, 기대
-  SQLSTATE·제약명) + `contracts/vnext/recovery-preflight-v1.json`(H35 runbook §6 writer
+  (8 case — alias 중복·provider 3-tuple 중복·geometry invalid/empty·override active 중복·
+  notice is_current 중복·weather NULLS NOT DISTINCT 중복·bitemporal 역전, 기대
+  SQLSTATE·제약명. 3축 불가능 조합 case는 CHECK 정의 자체가 미정(T-VN-34A)이라 구현
+  PR로 이월) + `contracts/vnext/recovery-preflight-v1.json`(H35 runbook §6 writer
   registry·fence 증거 key·ADR-075 결정 3 forward recovery/PITR 판정·Merkle v1 정의) +
   `tests/integration/test_vnext_target_freeze.py`(빈 PostGIS 적용→불변식 0→fixture 거부→
   fingerprint 재계산 일치) + `tests/unit/test_vnext_contract_artifacts.py`(artifact bytes

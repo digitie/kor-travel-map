@@ -41,12 +41,14 @@ _FINGERPRINTS_JSON: Final = _CONTRACTS / "target-schema-fingerprints-v1.json"
 _VIOLATIONS_SQL: Final = _CONTRACTS / "violation-fixtures-v1.sql"
 _REJECTIONS_JSON: Final = _CONTRACTS / "expected-rejections-v1.json"
 
-_EXPECTED_INVARIANT_COUNT: Final = 44
+_EXPECTED_INVARIANT_COUNT: Final = 43
+_INVARIANT_PHASES: Final = frozenset({"pre-backfill", "post-backfill", "both"})
 
 # fingerprint 대상 — target-schema-v1.sql이 만드는 전체 relation.
 _TARGET_TABLES: Final = (
     "feature.categories",
     "feature.features",
+    "feature.feature_state_transitions",
     "feature.feature_aliases",
     "feature.feature_points",
     "feature.feature_events",
@@ -309,10 +311,24 @@ async def _connect(async_dsn: str, database: str | None = None) -> asyncpg.Conne
     return connection
 
 
-def load_invariant_queries() -> list[str]:
-    """`SELECT ...; -- expect: 0` assertion 질의를 파싱한다."""
+def load_invariant_queries() -> list[tuple[str, str]]:
+    """`SELECT ...; -- expect: 0 -- phase: <phase>` assertion을 (질의, phase)로 파싱한다.
+
+    fail-open 봉합(리뷰 D1): trailer 표식 개수와 파싱된 질의 수가 일치해야 하며,
+    phase 태그가 없는 assertion은 파싱 자체가 거부한다.
+    """
     content = _INVARIANTS_SQL.read_text(encoding="utf-8")
-    return re.findall(r"(?ms)^(SELECT .*?); -- expect: 0$", content)
+    parsed = re.findall(
+        r"(?ms)^(SELECT .*?); -- expect: 0 -- phase: (pre-backfill|post-backfill|both)$",
+        content,
+    )
+    marker_count = content.count("-- expect: 0")
+    if marker_count != len(parsed):
+        raise AssertionError(
+            f"invariant trailer {marker_count}개 중 {len(parsed)}개만 파싱됨 — "
+            "phase 태그 누락 또는 trailer 문법 위반"
+        )
+    return [(query, phase) for query, phase in parsed]
 
 
 def load_violation_cases() -> dict[str, str]:
@@ -371,9 +387,13 @@ async def freeze_db(pg_container: Any) -> AsyncIterator[asyncpg.Connection]:
 async def test_invariants_all_zero_on_empty_target(freeze_db: asyncpg.Connection) -> None:
     queries = load_invariant_queries()
     assert len(queries) == _EXPECTED_INVARIANT_COUNT
-    for query in queries:
+    # 빈 DB에서는 전 phase를 실행한다 — 전부 0이어야 한다.
+    for query, phase in queries:
+        assert phase in _INVARIANT_PHASES
         observed = await freeze_db.fetchval(query)
-        assert observed == 0, f"invariant 위반 (expect 0, got {observed}): {query[:120]}"
+        assert observed == 0, (
+            f"invariant 위반 (expect 0, got {observed}, phase {phase}): {query[:120]}"
+        )
 
 
 async def test_violation_fixtures_rejected_with_expected_sqlstate(

@@ -1,7 +1,7 @@
 {
   "artifact": "openapi-diff-v1",
   "owner": "T-VN-31B",
-  "description": "Wave 2(T-VN-32~40) 목표 REST 계약과 현행 3 spec의 machine-readable diff. 정본 근거는 ADR-073과 보고서 §4 목표 REST 표다. Wave 0/1에서 이미 착지한 계약(5-state batch·revision·trip_card·bitemporal weather batch·cluster/truncated/coverage·include_total·cursor HMAC·ETag/304·If-Match 412/428·raw 필드 제거·weather 부모 404)은 현행 spec에 존재하므로 diff 항목이 아니다. 각 항목의 `operation`은 현행 spec에 실존해야 하고(removed/renamed/enum_changes/status_changes), `target_operation`은 아직 존재하지 않아야 한다(added) — tests/unit/test_vnext_contract_artifacts.py가 검증한다.",
+  "description": "Wave 2(T-VN-32~40) 목표 REST 계약과 현행 3 spec의 machine-readable diff. 정본 근거는 ADR-073(결정 1은 public-keyed 표면의 배타 열거)과 보고서 §4 목표 REST 표다. Wave 0/1에서 이미 착지한 계약(5-state batch·revision·trip_card·bitemporal weather batch·cluster/truncated/coverage·include_total·cursor HMAC·ETag/304·If-Match 412/428·raw 필드 제거·weather 부모 404)은 현행 spec에 존재하므로 diff 항목이 아니다. 각 항목의 `operation`은 현행 spec에 실존해야 하고(removed/renamed/enum_changes/status_changes), `target_operation`은 아직 존재하지 않아야 하며(added), surface별 `counts`는 각 change 배열 길이와 일치해야 한다 — tests/unit/test_vnext_contract_artifacts.py가 검증한다.",
   "baseline": {
     "admin": {
       "file": "packages/kor-travel-map-api/openapi.json",
@@ -18,6 +18,15 @@
   },
   "surfaces": {
     "user": {
+      "counts": {
+        "added": 4,
+        "removed": 13,
+        "renamed": 2,
+        "enum_changes": 8,
+        "status_changes": 1,
+        "error_changes": 0,
+        "deferred": 3
+      },
       "added": [
         {
           "kind": "parameter",
@@ -36,6 +45,12 @@
           "operation": "GET /v1/features/weather/forecast",
           "detail": "target_at/known_at bitemporal 조회 파라미터",
           "basis": "ADR-072"
+        },
+        {
+          "kind": "parameter",
+          "operation": "GET /v1/features/weather/alerts",
+          "detail": "target_at/known_at bitemporal 조회 파라미터",
+          "basis": "ADR-072"
         }
       ],
       "removed": [
@@ -48,6 +63,61 @@
           "operation": "GET /v1/curated-features/{curated_feature_id}",
           "detail": "legacy curated_features overlay 공개 read",
           "basis": "T-VN-40C"
+        },
+        {
+          "operation": "GET /v1/features",
+          "detail": "ADR-073 결정 1의 배타 열거(typed detail/search/nearby/in-bounds·categories·collections만 제공)에 없는 전체 목록 read",
+          "basis": "ADR-073"
+        },
+        {
+          "operation": "GET /v1/features/nearby/by-target",
+          "detail": "ADR-073 결정 1 배타 열거에 없음",
+          "basis": "ADR-073"
+        },
+        {
+          "operation": "GET /v1/features/{feature_id}/contained-features",
+          "detail": "ADR-073 결정 1 배타 열거에 없음",
+          "basis": "ADR-073"
+        },
+        {
+          "operation": "GET /v1/providers",
+          "detail": "ADR-073 결정 1 배타 열거에 없음 — provider 표면은 operator 소관",
+          "basis": "ADR-073"
+        },
+        {
+          "operation": "GET /v1/providers/{provider}/last-sync",
+          "detail": "ADR-073 결정 1 배타 열거에 없음",
+          "basis": "ADR-073"
+        },
+        {
+          "operation": "GET /v1/public/beaches",
+          "detail": "ADR-073 결정 1 배타 열거에 없는 provider별 편의 route",
+          "basis": "ADR-073"
+        },
+        {
+          "operation": "GET /v1/public/beaches/map-markers",
+          "detail": "ADR-073 결정 1 배타 열거에 없음",
+          "basis": "ADR-073"
+        },
+        {
+          "operation": "GET /v1/public/beaches/{feature_id}",
+          "detail": "ADR-073 결정 1 배타 열거에 없음",
+          "basis": "ADR-073"
+        },
+        {
+          "operation": "GET /v1/public/festivals/map-markers",
+          "detail": "ADR-073 결정 1 배타 열거에 없음",
+          "basis": "ADR-073"
+        },
+        {
+          "operation": "GET /v1/public/festivals/monthly",
+          "detail": "ADR-073 결정 1 배타 열거에 없음",
+          "basis": "ADR-073"
+        },
+        {
+          "operation": "GET /v1/public/festivals/{feature_id}",
+          "detail": "ADR-073 결정 1 배타 열거에 없음",
+          "basis": "ADR-073"
         }
       ],
       "renamed": [
@@ -84,6 +154,26 @@
           "operation": "GET /v1/features/nearby",
           "detail": "결과 item의 feature_id 값 UUID 전환",
           "basis": "ADR-068"
+        },
+        {
+          "operation": "GET /v1/features/{feature_id}",
+          "detail": "FeatureDetailResponse의 status 단일 enum 노출 → 직교 3축 전환(공개 정본은 public_features라 공개 표면의 상태 표현 재정의는 T-VN-34C 소관)",
+          "basis": "ADR-067"
+        },
+        {
+          "operation": "GET /v1/features/search",
+          "detail": "FeatureSummary의 status enum → 직교 3축 전환",
+          "basis": "ADR-067"
+        },
+        {
+          "operation": "GET /v1/features/in-bounds",
+          "detail": "FeatureSummary의 status enum → 직교 3축 전환",
+          "basis": "ADR-067"
+        },
+        {
+          "operation": "GET /v1/features/nearby",
+          "detail": "NearbyFeatureSummary의 status enum → 직교 3축 전환",
+          "basis": "ADR-067"
         }
       ],
       "status_changes": [
@@ -96,15 +186,9 @@
       "error_changes": [],
       "deferred": [
         {
-          "topic": "GET /v1/features (전체 목록)·GET /v1/features/nearby/by-target·GET /v1/providers*·GET /v1/public/beaches*·GET /v1/public/festivals*",
-          "decision": "deferred-to-implementation",
-          "detail": "보고서 §4 목표 표·ADR-073이 존치/제거를 명시하지 않는다",
-          "owner": "T-VN-35D"
-        },
-        {
           "topic": "GET /v1/curated-sources·GET /v1/curated-themes·GET /v1/curations·GET /v1/curations/features/{feature_id}",
           "decision": "deferred-to-implementation",
-          "detail": "canonical curation 위 공개 read 존치 형태는 legacy route 폐기 범위(F-16)와 별개로 미명시",
+          "detail": "canonical curation 위 공개 read의 collections 표면 통합 형태는 legacy route 폐기 범위(F-16)와 별개로 미명시",
           "owner": "T-VN-40B"
         },
         {
@@ -122,6 +206,15 @@
       ]
     },
     "service": {
+      "counts": {
+        "added": 0,
+        "removed": 0,
+        "renamed": 0,
+        "enum_changes": 2,
+        "status_changes": 0,
+        "error_changes": 0,
+        "deferred": 1
+      },
       "added": [],
       "removed": [],
       "renamed": [],
@@ -149,6 +242,15 @@
       ]
     },
     "admin": {
+      "counts": {
+        "added": 1,
+        "removed": 9,
+        "renamed": 0,
+        "enum_changes": 4,
+        "status_changes": 0,
+        "error_changes": 0,
+        "deferred": 3
+      },
       "added": [
         {
           "kind": "operation",
@@ -185,7 +287,7 @@
         },
         {
           "operation": "GET /v1/admin/features/curated/{curated_feature_id}/detail-snapshot",
-          "detail": "legacy curated_features overlay 부속 read",
+          "detail": "legacy curated_features overlay 부속 read. 주의 — PinVi admin이 런타임 소비 중(tasks-done T-VN-H07D vendored admin subset). 대체 표면은 canonical /v1/admin/curations/* read이며 PinVi caller 선전환은 T-VN-40B 소관",
           "basis": "T-VN-40C"
         },
         {

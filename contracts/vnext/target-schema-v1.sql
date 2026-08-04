@@ -19,9 +19,12 @@
 --     **도착점(최종형)**만 기술하며 빈 PostGIS DB에 그대로 적용 가능하다.
 --   * `x_extension` schema와 postgis/pgcrypto/pg_trgm 확장은 사전 존재를 가정한다
 --     (ADR-008; tests/integration/test_vnext_target_freeze.py가 생성).
---   * Wave 2가 변경하지 않는 유지 기준선(ops.import_jobs 계열, cache-target 계열,
---     domain command ledger 계열 등)은 현행 alembic head가 정본이며 여기 반복하지
---     않는다. 현행과 겹치는 부모 테이블은 목표 형태의 최소 정의로만 포함한다.
+--   * 유지 기준선(ops.import_jobs 계열, cache-target 계열, domain command ledger
+--     계열 등)은 현행 alembic head가 정본이며 여기 반복하지 않는다. 단, 이들의
+--     provider/dataset 참조를 provider_datasets FK로 수렴시키는 목표형(ADR-069
+--     결정 5, 보고서 §3:385 "후속 정렬")은 미정(T-VN-33B 구현 소관)이다 —
+--     "무변경"이 아니라 "본 파일이 고정하지 않음"이다. 현행과 겹치는 부모
+--     테이블은 목표 형태의 최소 정의로만 포함한다.
 --   * legacy 산출물(feature.curated_features overlay, source_records denorm 열,
 --     features의 legacy status/user_change_* 열 등)은 목표 상태에 **존재하지
 --     않으므로** 이 파일에 없다. 물리 삭제 순서는 consumer-rollout-v1.json과
@@ -63,8 +66,12 @@ CREATE TABLE provider_sync.provider_datasets (
     dataset_key text NOT NULL,
     -- 활성 상태 (ADR-069 결정 1)
     is_active boolean NOT NULL DEFAULT true,
-    -- capability 정본 (ADR-069 결정 1·2 — provider_catalog는 이 값의 projection).
-    -- capability 표현 shape(키 집합·typed column 승격 여부): 미정(T-VN-33A 구현 소관)
+    -- capability 정본 (ADR-069 결정 1·2). 코드 projection 역할 분리(결정 4,
+    -- 보고서 §3:380): `provider_catalog`은 표시·preview·refresh capability
+    -- projection, `feature_operation_registry`는 실행 가능한 Dagster job/asset
+    -- projection — 둘 다 이 테이블의 identity를 참조·검증하며 독립 소유하지
+    -- 않는다. capability 표현 shape(키 집합·typed column 승격 여부):
+    -- 미정(T-VN-33A 구현 소관)
     capabilities jsonb NOT NULL DEFAULT '{}'::jsonb,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
@@ -118,14 +125,10 @@ CREATE TABLE feature.features (
         publication_state IN ('draft', 'published', 'suppressed')
     ),
     CONSTRAINT ck_features_quality_state CHECK (quality_state IN ('valid', 'quarantined')),
-    -- 불가능 조합 CHECK (ADR-067 결정 5). 최소 고정분: retired∧draft.
-    -- 근거 — 0059 view가 정본화한 legacy 무손실 매핑에서 draft의 lifecycle 상은
-    -- 항상 active이고(retire 경로는 published/suppressed를 거친 행에만 존재),
-    -- 어떤 legacy status도 (retired, draft, *)로 매핑되지 않는다.
-    -- 추가 불가능 조합(예: retired∧suppressed 허용 여부): 미정(T-VN-34A 구현 소관)
-    CONSTRAINT ck_features_state_combination CHECK (
-        NOT (lifecycle_state = 'retired' AND publication_state = 'draft')
-    ),
+    -- 불가능 조합 CHECK (ADR-067 결정 5 "불가능한 조합은 DB CHECK로 거부"):
+    -- 정본은 조합을 열거하지 않는다. 0059 view는 교집합 술어만 정본화했고 결합
+    -- 불변식은 스스로 "미보장"이라 명시하므로 여기서 특정 조합을 도출할 수 없다.
+    -- 불가능 조합의 집합과 CHECK 정의: 미정(T-VN-34A 무손실 매핑 구현 소관)
     CONSTRAINT ck_features_row_revision CHECK (row_revision >= 1),
     CONSTRAINT fk_features_category FOREIGN KEY (kind, category_code)
         REFERENCES feature.categories (kind, code)
@@ -155,6 +158,33 @@ $$;
 CREATE TRIGGER trg_features_row_revision
     BEFORE UPDATE ON feature.features
     FOR EACH ROW EXECUTE FUNCTION feature.force_features_row_revision();
+
+-- 3.1 lifecycle 전이 감사 이력 — soft-delete 시각의 흡수처 (ADR-067 결정 5
+-- "soft-delete 시각은 lifecycle 전이 감사 이력으로 흡수한다"). legacy
+-- deleted_at/user_deleted_at 계열은 이 이력으로 흡수된 뒤 제거된다
+-- (consumer-rollout removal manifest 참조). 최소형만 고정한다.
+CREATE TABLE feature.feature_state_transitions (
+    transition_id bigint GENERATED ALWAYS AS IDENTITY,
+    feature_id uuid NOT NULL,
+    -- 직교 3축 중 어느 축의 전이인가
+    state_axis text NOT NULL,
+    from_state text NOT NULL,
+    to_state text NOT NULL,
+    occurred_at timestamptz NOT NULL,
+    CONSTRAINT pk_feature_state_transitions PRIMARY KEY (transition_id),
+    CONSTRAINT fk_feature_state_transitions_feature FOREIGN KEY (feature_id)
+        REFERENCES feature.features (feature_id) ON DELETE CASCADE,
+    CONSTRAINT ck_feature_state_transitions_axis CHECK (
+        state_axis IN ('lifecycle', 'publication', 'quality')
+    ),
+    CONSTRAINT ck_feature_state_transitions_from CHECK (btrim(from_state) <> ''),
+    CONSTRAINT ck_feature_state_transitions_to CHECK (btrim(to_state) <> '')
+    -- 축별 상태값 결합 CHECK·actor principal·전이 사유 등 나머지 컬럼:
+    -- 미정(T-VN-34A 구현 소관)
+);
+
+CREATE INDEX idx_feature_state_transitions_feature
+    ON feature.feature_state_transitions (feature_id, occurred_at);
 
 -- =============================================================================
 -- 4. feature.feature_aliases — legacy `f_*` alias (ADR-068 결정 3)
@@ -187,10 +217,13 @@ CREATE INDEX idx_feature_aliases_feature ON feature.feature_aliases (feature_id)
 --   * geometry: canonical 4326 + generated 5179 (보고서 §3)
 --   * geometry CHECK 3종: GeometryType(typmod)·ST_IsValid·NOT ST_IsEmpty +
 --     anchor 일치 (ADR-070 결정 2)
---   * 공간 인덱스: §3의 "공개 술어 partial GiST만"은 상태 컬럼이 core로 분리된
---     목표 구조에서 subtype-local 술어로 표현할 수 없다(설계 공백). 여기서는
---     무술어 GiST 최소형만 고정하고 partial 표현 수단(denorm flag vs join 유지)과
---     4326/5179 축 채택은 실측 소관으로 남긴다: 미정(T-VN-35D·ADR-075 결정 7)
+--   * 공간 인덱스: 정본은 "공개 술어 partial GiST만"이다(보고서 §3:379, D-12
+--     결정 3 — full GiST는 write 1.6× 실측 근거로 금지). 그런데 상태 컬럼이
+--     core로 분리된 목표 구조에서는 공개 술어를 subtype-local partial index로
+--     표현할 수 없다(설계 공백). 따라서 본 freeze는 **어떤 공간 인덱스도 고정하지
+--     않는다** — 무술어 full GiST는 정본 위반이라 넣지 않고, partial 표현 수단
+--     (denorm flag vs join 유지)과 4326/5179 축 채택은
+--     미정(T-VN-35D·ADR-075 결정 7 실측 소관)
 
 -- 5.1 point subtype — place/price/weather (T-VN-35A)
 CREATE TABLE feature.feature_points (
@@ -208,11 +241,6 @@ CREATE TABLE feature.feature_points (
     CONSTRAINT ck_feature_points_geom_valid CHECK (x_extension.st_isvalid(geom)),
     CONSTRAINT ck_feature_points_geom_not_empty CHECK (NOT x_extension.st_isempty(geom))
 );
-
-CREATE INDEX idx_feature_points_geom_gist
-    ON feature.feature_points USING gist (geom);
-CREATE INDEX idx_feature_points_geom_5179_gist
-    ON feature.feature_points USING gist (geom_5179);
 
 -- 5.2 event subtype (T-VN-35B)
 CREATE TABLE feature.feature_events (
@@ -232,11 +260,6 @@ CREATE TABLE feature.feature_events (
     CONSTRAINT ck_feature_events_geom_not_empty CHECK (NOT x_extension.st_isempty(geom)),
     CONSTRAINT ck_feature_events_period_not_empty CHECK (NOT isempty(event_period))
 );
-
-CREATE INDEX idx_feature_events_geom_gist
-    ON feature.feature_events USING gist (geom);
-CREATE INDEX idx_feature_events_geom_5179_gist
-    ON feature.feature_events USING gist (geom_5179);
 
 -- 5.3 notice subtype (T-VN-35B)
 CREATE TABLE feature.feature_notices (
@@ -273,11 +296,6 @@ CREATE TABLE feature.feature_routes (
     )
 );
 
-CREATE INDEX idx_feature_routes_geom_gist
-    ON feature.feature_routes USING gist (geom);
-CREATE INDEX idx_feature_routes_geom_5179_gist
-    ON feature.feature_routes USING gist (geom_5179);
-
 -- 5.5 area subtype (T-VN-35C) — MultiPolygon (보고서 D-6-2)
 CREATE TABLE feature.feature_areas (
     feature_id uuid NOT NULL,
@@ -296,11 +314,6 @@ CREATE TABLE feature.feature_areas (
         x_extension.st_intersects(x_extension.st_envelope(geom), anchor)
     )
 );
-
-CREATE INDEX idx_feature_areas_geom_gist
-    ON feature.feature_areas USING gist (geom);
-CREATE INDEX idx_feature_areas_geom_5179_gist
-    ON feature.feature_areas USING gist (geom_5179);
 
 -- =============================================================================
 -- 6. 공개 정본 projection (ADR-067 결정 2·3)
@@ -548,8 +561,10 @@ CREATE TABLE feature.feature_weather_values (
     unit text,
     issued_at timestamptz,
     valid_at timestamptz,
-    valid_from timestamptz,
-    valid_until timestamptz,
+    -- 유효 기간 — range type 채택 (ADR-072 결정 2 "기간은 range type과 순서
+    -- 제약을 사용"). 현행 valid_from/valid_until 쌍의 목표형이며 event/notice의
+    -- range 표현과 일관된다. 순서 제약은 range type 자체가 강제한다.
+    valid_during tstzrange,
     observed_at timestamptz,
     -- bitemporal 축 (ADR-072 결정 1)
     target_at timestamptz NOT NULL,
@@ -569,8 +584,8 @@ CREATE TABLE feature.feature_weather_values (
     CONSTRAINT ck_weather_value_present CHECK (
         value_number IS NOT NULL OR value_text IS NOT NULL
     ),
-    CONSTRAINT ck_weather_value_range CHECK (
-        valid_from IS NULL OR valid_until IS NULL OR valid_from <= valid_until
+    CONSTRAINT ck_weather_value_valid_during_not_empty CHECK (
+        valid_during IS NULL OR NOT isempty(valid_during)
     ),
     CONSTRAINT ck_weather_value_payload_object CHECK (jsonb_typeof(payload) = 'object'),
     -- historical은 issued_at <= known_at (보고서 D-8-3 — 미래지식 누출 차단)
@@ -597,11 +612,17 @@ CREATE INDEX idx_weather_values_feature_target_known
 -- set JOIN으로 치환하는 검증 가능 projection. 원본 이력에서 재생성 가능하다.
 -- reconciliation 절차·summary 값 컬럼 확장: 미정(T-VN-38A 구현 소관)
 CREATE TABLE feature.current_weather_summary (
+    -- surrogate PK — price summary와 대칭·replica identity 확보 (리뷰 D4).
+    summary_id bigint GENERATED ALWAYS AS IDENTITY,
     feature_id uuid NOT NULL,
     provider_dataset_id bigint NOT NULL,
     weather_domain text NOT NULL,
     forecast_style text NOT NULL,
     metric_key text NOT NULL,
+    -- timeline_bucket은 identity가 아니다 — ADR-010 분류 결과(재계산 가능)라
+    -- 정본 identity에서 제외한다(0060 정본: "timeline_bucket은 ADR-010 분류
+    -- 결과(재계산 가능)라 제외한다", dto/weather.py identity() 동일). 표시용
+    -- 컬럼으로만 보존한다.
     timeline_bucket text,
     target_at timestamptz NOT NULL,
     known_at timestamptz NOT NULL,
@@ -609,6 +630,7 @@ CREATE TABLE feature.current_weather_summary (
     value_text text,
     unit text,
     updated_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT pk_current_weather_summary PRIMARY KEY (summary_id),
     CONSTRAINT fk_current_weather_summary_feature FOREIGN KEY (feature_id)
         REFERENCES feature.features (feature_id) ON DELETE CASCADE,
     CONSTRAINT fk_current_weather_summary_provider_dataset FOREIGN KEY (provider_dataset_id)
@@ -618,14 +640,13 @@ CREATE TABLE feature.current_weather_summary (
     )
 );
 
--- summary identity — nullable 구성원(timeline_bucket) 포함 NULLS NOT DISTINCT
--- (ADR-072 결정 3의 summary 적용).
+-- summary identity — history native tuple의 non-null 축(시간 instant 제외).
+-- 전 구성원이 NOT NULL이므로 평문 UNIQUE로 충분하다(NULLS NOT DISTINCT는
+-- history tuple의 nullable 시간축 소관 — uq_weather_value_identity).
 CREATE UNIQUE INDEX uq_current_weather_summary_identity
     ON feature.current_weather_summary (
-        feature_id, provider_dataset_id, weather_domain, forecast_style, metric_key,
-        timeline_bucket
-    )
-    NULLS NOT DISTINCT;
+        feature_id, provider_dataset_id, weather_domain, forecast_style, metric_key
+    );
 
 -- =============================================================================
 -- 11. price history + current summary (ADR-078, T-VN-38B)
@@ -667,7 +688,8 @@ CREATE INDEX idx_price_values_feature_observed_identity
     );
 
 -- current price summary (T-VN-38B) — series identity당 current 1건.
--- restore/backfill generation 구분의 표현(전용 컬럼 vs restore epoch 참조):
+-- restore/backfill generation 구분의 표현(전용 컬럼 vs restore epoch 참조)과
+-- price의 bitemporal known_at 채택 여부(ADR-078에 price bitemporal 결정 없음):
 -- 미정(T-VN-38B 구현 소관)
 CREATE TABLE feature.current_price_summary (
     feature_id uuid NOT NULL,
@@ -675,7 +697,6 @@ CREATE TABLE feature.current_price_summary (
     price_domain text NOT NULL,
     product_key text NOT NULL,
     observed_at timestamptz NOT NULL,
-    known_at timestamptz NOT NULL,
     value_number numeric(14, 4) NOT NULL,
     unit text NOT NULL DEFAULT 'KRW',
     updated_at timestamptz NOT NULL DEFAULT now(),

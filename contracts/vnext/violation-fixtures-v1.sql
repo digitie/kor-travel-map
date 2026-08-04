@@ -7,17 +7,11 @@
 -- (tests/integration/test_vnext_target_freeze.py가 case별로 실행·rollback한다.)
 --
 -- case 앞부분의 INSERT는 위반을 재현하기 위한 최소 부모 행이며 성공해야 한다.
+--
+-- (3축 불가능 조합 case는 없다 — 불가능 조합의 집합은 정본이 열거하지 않아
+-- CHECK 자체가 미정(T-VN-34A 구현 소관)이다. 구현이 CHECK를 확정하면 그
+-- PR에서 case를 추가한다.)
 -- =============================================================================
-
--- case: state_impossible_combination
-INSERT INTO feature.categories (kind, code) VALUES ('place', 'fixture');
-INSERT INTO feature.features (
-    feature_id, kind, name, category_code,
-    lifecycle_state, publication_state, quality_state
-) VALUES (
-    '00000000-0000-0000-0000-000000000001', 'place', 'retired draft 불가 조합', 'fixture',
-    'retired', 'draft', 'valid'
-);
 
 -- case: alias_duplicate
 INSERT INTO feature.categories (kind, code) VALUES ('place', 'fixture');
@@ -132,37 +126,41 @@ INSERT INTO provider_sync.notice_states (
     tstzrange('2026-02-01+00', '2026-03-01+00', '[)'), true
 );
 
--- case: weather_summary_nulls_not_distinct_duplicate
+-- case: weather_identity_nulls_not_distinct_duplicate
 INSERT INTO feature.categories (kind, code) VALUES ('weather', 'fixture');
 INSERT INTO feature.features (
     feature_id, kind, name, category_code,
     lifecycle_state, publication_state, quality_state
 ) VALUES (
-    '00000000-0000-0000-0000-000000000005', 'weather', 'summary 중복 부모', 'fixture',
+    '00000000-0000-0000-0000-000000000005', 'weather', 'NND 중복 부모', 'fixture',
     'active', 'published', 'valid'
 );
 INSERT INTO provider_sync.provider_datasets (provider, dataset_key)
 VALUES ('fixture', 'fixture');
--- timeline_bucket NULL 2건 — NULLS NOT DISTINCT UNIQUE가 같은 identity로 거부.
-INSERT INTO feature.current_weather_summary (
-    feature_id, provider_dataset_id, weather_domain, forecast_style, metric_key,
-    timeline_bucket, target_at, known_at, value_number
+-- nullable 시간축(issued_at/valid_at/observed_at) 전부 NULL 2건 — NULLS NOT
+-- DISTINCT UNIQUE(uq_weather_value_identity)가 "NULL끼리 같은 행"으로 묶어
+-- 거부한다 (ADR-072 결정 3, 0060 정본).
+INSERT INTO feature.feature_weather_values (
+    weather_value_key, feature_id, provider_dataset_id, weather_domain,
+    forecast_style, metric_key, value_number,
+    issued_at, valid_at, observed_at, target_at, known_at
 ) VALUES (
-    '00000000-0000-0000-0000-000000000005',
+    'weather-nnd-1', '00000000-0000-0000-0000-000000000005',
     (SELECT provider_dataset_id FROM provider_sync.provider_datasets
      WHERE provider = 'fixture' AND dataset_key = 'fixture'),
-    'forecast', 'short', 'TMP', NULL, '2026-01-01T00:00:00+00', '2026-01-01T00:00:00+00',
-    1.0
+    'forecast', 'short', 'TMP', 1.0,
+    NULL, NULL, NULL, '2026-01-01T00:00:00+00', '2026-01-01T00:00:00+00'
 );
-INSERT INTO feature.current_weather_summary (
-    feature_id, provider_dataset_id, weather_domain, forecast_style, metric_key,
-    timeline_bucket, target_at, known_at, value_number
+INSERT INTO feature.feature_weather_values (
+    weather_value_key, feature_id, provider_dataset_id, weather_domain,
+    forecast_style, metric_key, value_number,
+    issued_at, valid_at, observed_at, target_at, known_at
 ) VALUES (
-    '00000000-0000-0000-0000-000000000005',
+    'weather-nnd-2', '00000000-0000-0000-0000-000000000005',
     (SELECT provider_dataset_id FROM provider_sync.provider_datasets
      WHERE provider = 'fixture' AND dataset_key = 'fixture'),
-    'forecast', 'short', 'TMP', NULL, '2026-01-02T00:00:00+00', '2026-01-02T00:00:00+00',
-    2.0
+    'forecast', 'short', 'TMP', 2.0,
+    NULL, NULL, NULL, '2026-01-02T00:00:00+00', '2026-01-02T00:00:00+00'
 );
 
 -- case: weather_bitemporal_inversion
