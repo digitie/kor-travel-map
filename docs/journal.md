@@ -17,6 +17,34 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-08-04 — prod 재생성 실행 + 재적재 concierge 축 복구 + T-VN-H22 단일 PR
+
+- **재생성 실행 완료.** `main@2b2dee95`(#931 entrypoint 게이트 포함)로 이미지 3종 재빌드
+  → 빌드 단계 수동 게이트(`alembic heads`=`0078`) 통과 → `krtour_map` DROP/CREATE →
+  compose recreate → **빈 DB에서 `0078` 직행 10초**, 3컨테이너 healthy.
+- 실행 중 실측 함정 2건: ① manager `.env`가 root 소유 → `sudo docker compose`.
+  ② **신규 DB에서 `CREATE EXTENSION`은 superuser 전용** — 앱 계정 alembic이 `0001`에서
+  거부됨. CI(testcontainers)는 앱 유저가 superuser라 이 경로를 못 잡는다. superuser로
+  postgis·pg_trgm·pgcrypto·pg_prewarm + `GRANT USAGE` 사전 생성으로 해소, #109에
+  프로비저닝 절차로 기록. **정지된 구 컨테이너 start 금지** — 구 이미지가 빈 DB를 다시
+  `0072`로 올린다.
+- **재적재 concierge 축 완료.** geo API key 미결선(전 provider ETL blocker — manager
+  compose가 BASE_URL만 결선)을 발견, 사용자 확인 후 `/tmp` override로 주입(영구 결선
+  #114). concierge provider job + `curated_features_refresh` 성공 →
+  features 1,481 · curated 4,424 · **공개 표면 4,424건 복구**.
+- **T-VN-H40 완결.** 재적재분 link decision 4,424건 **전부 `match_basis=source_rule`** —
+  `0073` 트리거의 prod 실증. 잔여 provider는 일일 스케줄, CSV 5종은 feature 적재 후.
+- **T-VN-H22A/B/C 단일 PR 구현** (사용자 지시로 보류 해제). 계약 확정: "후보
+  theme/source"=병렬 표시(추천 아님), 격리 근거=marker 정본 술어+역참조 재구성,
+  ADR-048 봉투. 백엔드: read 2 + reclassify command(§906 inventory 68→69, 사전 심어진
+  quarantine barrier 충족, lock 후 marker 재검증). 프론트: 49B 관용 패널 + mocked 6건
+  (manifest 276→284 — main의 기존 drift 278·기존 실패 7건은 tvn41 잔여로 불간섭) +
+  live spec 저술. **격리 스택 HTTP 파괴 검증 9흐름 전부 통과**(409 fail-close 무변경·
+  terminal replay·빈 격리 DELETE·marker 2키만 제거 등).
+- codex tvn41 병행 판정(사용자 질의): 격리 스택 작업은 지금 병행 무방(파일 충돌은 의도된
+  핀 2개뿐 — registry write 수·mocked manifest). **41C prod consumer enable만** 재pin
+  (#109)+CSV5 후가 경계.
+
 ## 2026-08-04 — prod 0072 배포 사고: 공개 표면 0건 → 복구 대신 폐기·재생성 결정
 
 - **사고.** T-049 완료 확인차 prod를 읽었더니 alembic head가 `0072_curation_provenance`,
