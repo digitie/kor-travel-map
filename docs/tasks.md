@@ -60,7 +60,8 @@ barrier로 직렬화한다.
     [x] `T-VN-16B`(weather batch 소비) →
     [x] `T-VN-16C`(sparse 다중 날짜 weather batch) →
     [ ] `T-VN-41A` → [ ] `T-VN-41B` → [ ] `T-VN-41C`(generation/outbox — prod enable은
-    재pin #109 완료 + `T-VN-H42` 뒤, Lane B 상세 절 경계 주석 참조)
+    재pin #109 완료 + `T-VN-H42` 뒤, Lane B 상세 절 경계 주석 참조) ∥
+    [/] `T-VN-41D`(durable writer-drain)
 - **Wave 2 barrier 이후**
   - freeze(Lane A): [x] `T-VN-31A` → [x] `T-VN-31B` → [x] `T-VN-31C`
   - Lane A: [ ] `T-VN-32A` → [ ] `T-VN-32B` → [ ] `T-VN-32C` →
@@ -1729,6 +1730,18 @@ read/decision/write/UI를 한 PR에 몰지 않는다.
   - [ ] Map/PinVi exact head로 n150 isolated live UI recovery와 최종 prod gate를 통과한다.
     PinVi system별 snapshot concurrency 1, `429/503 Retry-After` backoff, `413` non-retry,
     credential별 gateway limit 또는 동등한 외부 rate-limit과 실제 호출 cadence를 증명한다.
+
+- [/] T-VN-41D — **Map durable writer-drain control plane** (Manager T-049F / issue #115)
+
+  Map application DB의 normalized lease·instigation snapshot·owned run result를 추가하고,
+  frozen Compose one-shot Map API image가 `begin|attest|restore` typed command로만 이를
+  조작한다. `writers_draining` fsync 뒤 schedule/sensor pause, bounded grace, one-shot terminal
+  cancel, final zero attest를 수행하며 Manager에는 opaque lease ID와 receipt SHA-256만
+  준다. existing cache-target 4-role token, public REST/OpenAPI, admin/ops schedule/cancel,
+  외부 GraphQL은 재사용하지 않는다. crash/new owner recovery는 daemon 재기동 전 exact
+  state restore·attest가 필수다. isolated Postgres+fake Dagster와 ephemeral Compose rehearsal을
+  통과할 때까지 n150/prod를 사용하지 않는다. intermediate data는 file source/ETL로
+  재생성하며 final schema backup/restore rehearsal은 계속 요구한다.
 
 - [ ] T-VN-41S — **snapshot materialization streaming·audit compaction 확장 (#922, C enable 비차단)**
 

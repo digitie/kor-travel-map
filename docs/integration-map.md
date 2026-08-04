@@ -272,6 +272,21 @@ select/unselect `actor`, enrichment review `reviewed_by`, offline upload
 `created_by`·validate `operator`)는 body 필드를 **schema에서 제거**했다 — 옛 caller가
 보내면 `422`다(admin frontend는 이미 전송 중단, BFF actor header만 사용).
 
+### 3.4 cache-target Map writer-drain (T-VN-41D, ADR-082)
+
+cache-target diagnostic/cutover의 Map Dagster producer quiescence는 공개 HTTP 계약이
+아니다. Docker Manager가 frozen Compose로 candidate Map API image의 private typed runner를
+실행하고, Map은 own application DB의 durable lease로 schedule/sensor의 기존 상태와 owned
+Dagster run의 terminal-cancel 결과를 보관한다. Manager journal에는 opaque lease UUID와
+secret-free receipt SHA-256만 남긴다.
+
+이 runner는 `begin|attest|restore`만 허용하며, cache-target command/consumer/restore/recovery
+4-role token, 일반 admin/ops schedule·cancel endpoint, 외부 GraphQL을 재사용하지 않는다.
+`restore`는 Map Dagster daemon을 재기동하기 전에 원래 running instigation만 복원·attest한다.
+정본 상태/입출력/schema/recovery와 isolated rehearsal은
+[`architecture/cache-target-writer-drain.md`](architecture/cache-target-writer-drain.md), 결정은
+ADR-082다.
+
 ## 4. 계약 정본 위치
 
 | 계약 | 정본(공급자 repo) | 소비측 view |
@@ -283,6 +298,7 @@ select/unselect `actor`, enrichment review `reviewed_by`, offline upload
 | kor-travel-concierge feature export | kor-travel-concierge `docs/feature-export-api.md`(로컬 경로는 `F:\dev\kor-travel-concierge`, 프로젝트명은 `kor-travel-concierge`) | 본 repo: `docs/etl/concierge-feature-etl.md` + `providers/kor_travel_concierge.py` docstring |
 | PinVi 사용자 제안 연동(합의 5건) | 본 repo `docs/architecture/rest-api.md` (구 ADR-051) | PinVi `docs/integrations/kor-travel-map-rest-api.md` §7 |
 | YouTube 후보 detail 소비(TM-08) | 본 repo `docs/architecture/rest-api.md` (T-217f) | PinVi UX 기획 |
+| cache-target Map writer-drain | `docs/architecture/cache-target-writer-drain.md` + Map API image private typed runner (public OpenAPI 미노출) | Docker Manager T-049F frozen Compose receipt parser |
 | **curation collection 표면** | 본 repo `packages/kor-travel-map-api/src/kortravelmap/api/routers/curations.py` + `openapi{,.user}.json`. CSV 정본은 `resources/curations/*.csv` + `manifest.json` | runtime identity lookup 소비자는 없음. PinVi pinned OpenAPI snapshot의 schema field hit는 호출 소비가 아님(2026-07-30) |
 | geocoding | kor-travel-geo REST v2 (`POST /v2/{reverse,geocode}`) + public API key header 인증 | ADR-046 + geo ADR-064 |
 | 인프라(PostGIS·RustFS) 구동/포트 | **kor-travel-docker-manager** `docker-compose.yml`+README (ADR-052 amendment) | 각 repo는 사용자 — 포트 값은 ADR-047과 정합 |
