@@ -32,7 +32,7 @@ dependencies = [
   "psycopg[binary,pool]>=3.2",
   "shapely>=2.0",
   "pyproj>=3.6",  # ADR-012 좌표 변환 / ADR-030 narrow cache singleton
-  "alembic>=1.13",  # ADR-007 schema migration
+  "alembic>=1.13,<1.19",  # ADR-007 schema migration — 1.19.0(2026-08-04)이 CheckConstraint naming-convention 비교를 바꿔 autogen check가 이중 접두 diff를 보고(실측 2/2 재현). 적응 전까지 천장 핀
   "jellyfish>=1.0",  # ADR-016 Record Linkage (jaro_winkler_similarity)
   "boto3>=1.34",  # ADR-015 S3 호환 객체 저장소(RustFS/MinIO/R2)
 ]
@@ -96,8 +96,8 @@ providers = [
   # rolling window 빈 구간 대응). 2592b740: 중기예보 응답이 tmFc를 에코하지
   # 않아 MidForecastItem.tm_fc가 항상 None → 해석된 요청 tmFc 폴백 주입
   # (provider #20/PR#21, T-212e mid forecast run f044b091 실측).
-  "python-kma-api @ git+https://github.com/digitie/python-kma-api.git@2592b740c1f7ab255dadcc313f1f6422deb63cc4",
-  "python-airkorea-api @ git+https://github.com/digitie/python-airkorea-api.git@22996a457fa2c845101b0bbbf8167e655e8d562d",
+  "python-kma-api @ git+https://github.com/digitie/python-kma-api.git@63e9bcdaf2fc3533de8c3bb93ad146bb4f2f8eab",
+  "python-airkorea-api @ git+https://github.com/digitie/python-airkorea-api.git@a206282c4aff574dcb5689f97cca301072c09095",
   # khoa: snake_case live row 파싱 (khoa#5/PR#6).
   "python-khoa-api @ git+https://github.com/digitie/python-khoa-api.git@0ccb5ed90da5886a2d346b33f1019efd2719e0bc",
   # python-krforest-api는 산악기상 + Sprint 3 trails 양쪽 사용 (아래 §2.5와 동일 lib).
