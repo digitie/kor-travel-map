@@ -32,7 +32,7 @@ barrier로 직렬화한다.
     [ ] `T-VN-H35`(**2026-08-04 재정의** — 0072 배포 사고로 cutover 소멸, prod 폐기 후
         빈 DB `0078` 재생성 + 재적재로 대체. typed helper 사문화·결합 barrier 취소.
         본문 상단 재정의 블록 참조) →
-    [ ] `T-VN-H30B`(같은 snapshot 실적재·인증 API 재검증) →
+    [ ] `T-VN-H30B`(실적재·인증 API 재검증 — 2026-08-04 재생성 prod 기준으로 재정의, 서명 bundle 항목 삭제) →
     [x] `T-VN-H30C`(타 provider evidence — krforest arboretums 무장, visitkorea/MOIS는
         dual 불가 판정·문서 고정) →
     [~] `T-VN-H34`(H25A/H25B 미충족 AC — 4항목 중 3 완료·1은 H35 배포 대기,
@@ -204,25 +204,32 @@ barrier로 직렬화한다.
 
 - [x] T-VN-H30A — 검증 finding을 `ops.data_integrity_violations`에 durable 기록 (#888, dedupe 부분 유니크 인덱스 0067 — **prod 미적용, H35 참조**) → [`tasks-done.md`](tasks-done.md)
 
-- [ ] T-VN-H30B — **회복을 같은 격리 snapshot의 실제 적재·인증 API로 재검증**
+- [ ] T-VN-H30B — **회복을 격리 snapshot의 실제 적재·인증 API로 재검증** *(2026-08-04 재정의)*
 
-  종전 실증은 bundles 1,477와 `source_records` 2000→2458(+458), 2회차 insert 0만 남겼다.
-  acceptance가 요구한 같은 snapshot의 `feature.features` before/after를 보고하지 않았고,
-  `/admin/issues`도 코드 경로만 확인했을 뿐 인증된 실호출을 하지 않았다.
+  ## 재정의 (2026-08-04, 사용자 결정 "b")
 
-  재검증 acceptance:
-  - 같은 격리 snapshot identity와 migration head를 기록한다.
-  - 적재 직전/직후 `feature.features`의 동일 scope 수와 복구된 feature id 집합을 기록한다.
+  종전 acceptance는 **H35가 서명한 post-migration bundle** 복원을 전제했는데, 그 전제가
+  두 겹으로 소멸했다 — H35 재정의로 서명 bundle이 존재하지 않게 됐고, 검증 대상이던
+  7/30 격리 snapshot(`0063` 시대)의 데이터 시대가 폐기·재생성으로 끝났다. 회복 실증의
+  목적(#673의 남은 절반 — 데이터 유실 후 finding 파이프라인이 실제로 복원되는가)은
+  재생성과 무관하게 유효하므로 **현 재생성 prod(`0078`) 기준으로 재정의**한다.
+
+  재검증 acceptance (재정의판):
+  - **재생성 prod에서 새 격리 snapshot을 뜬다** — writer-quiesced 필요 없음(스케줄 사이
+    창이면 충분), dump identity(sha256)·시각·migration head(`0078_cache_target_gc_observe`)
+    를 기록한다. 폐기 전 아카이브(`krtour_map_0072_*.dump`)는 **이 task의 대상이 아니다**
+    (구 시대 데이터 — H22C 픽스처 용도로만).
+  - 격리 scratch DB에 복원 후(신규 DB는 superuser 확장 4종 사전 생성 — H35 실행 기록
+    참조) 같은 scope의 `feature.features` 적재 직전/직후 수와 복구된 feature id 집합을
+    기록한다.
   - 같은 run의 finding `observed/unique/upserted`, linked/unlinked 수를 함께 기록한다.
-  - 인증된 `GET /v1/admin/issues?issue_type=…` 실호출로 최신 `last_seen_at`·최신 FK target을
-    확인한다.
-  - H35가 서명한 post-migration app·Dagster DB bundle을 격리 scratch DB pair에 복원해
-    검증한다. H35 daemon preflight 뒤에도 두 DB의 서명 identity가 그대로면 같은 scratch
-    pair를 재사용하고, 다르면 새 clone을 만들지 말고 그 pair를 같은 bundle로 reset한다.
-    prod DB·schedule/sensor·ingress는 이 task에서 변경하지 않는다.
-  - 같은 bundle의 concierge `changes` export artifact를 SHA-256·page/cursor chain·행 수까지
-    검증하고, live endpoint credential/network 없이 resource override로 ordered item을
-    재생한다. 이 artifact 외 입력을 섞거나 H30B 시점의 live export를 다시 조회하지 않는다.
+  - 인증된 `GET /v1/admin/issues?issue_type=…` 실호출(격리 스택의 실 API 서버)로 최신
+    `last_seen_at`·최신 FK target을 확인한다.
+  - concierge `changes` export는 **재생성 시대의 실 export artifact**를 쓴다 —
+    SHA-256·page/cursor chain·행 수 검증 후 live credential/network 없이 resource
+    override로 ordered item을 재생한다. artifact 외 입력 금지, prod 무변경 원칙 유지.
+  - Dagster DB pair 복원·서명 identity 검사 항목은 **삭제** — 서명 주체(H35 helper)가
+    사문화됐고, run 이력 DB는 회복 실증의 대상이 아니다.
 
 - [x] T-VN-H30C — **타 provider `AdminEvidence` 무장** (2026-08-03 완료)
 
