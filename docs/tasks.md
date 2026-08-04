@@ -32,7 +32,7 @@ barrier로 직렬화한다.
     [ ] `T-VN-H35`(**2026-08-04 재정의** — 0072 배포 사고로 cutover 소멸, prod 폐기 후
         빈 DB `0078` 재생성 + 재적재로 대체. typed helper 사문화·결합 barrier 취소.
         본문 상단 재정의 블록 참조) →
-    [ ] `T-VN-H30B`(실적재·인증 API 재검증 — 2026-08-04 재생성 prod 기준으로 재정의, 서명 bundle 항목 삭제) →
+    [x] `T-VN-H30B`(실적재·인증 API 재검증 — 재정의판 완료: 결손 1,481 → 완전 회복, 2회차 멱등) →
     [x] `T-VN-H30C`(타 provider evidence — krforest arboretums 무장, visitkorea/MOIS는
         dual 불가 판정·문서 고정) →
     [~] `T-VN-H34`(H25A/H25B 미충족 AC — 4항목 중 3 완료·1은 H35 배포 대기,
@@ -204,7 +204,38 @@ barrier로 직렬화한다.
 
 - [x] T-VN-H30A — 검증 finding을 `ops.data_integrity_violations`에 durable 기록 (#888, dedupe 부분 유니크 인덱스 0067 — **prod 미적용, H35 참조**) → [`tasks-done.md`](tasks-done.md)
 
-- [ ] T-VN-H30B — **회복을 격리 snapshot의 실제 적재·인증 API로 재검증** *(2026-08-04 재정의)*
+- [x] T-VN-H30B — **회복을 격리 snapshot의 실제 적재·인증 API로 재검증** *(2026-08-04 재정의·완료)*
+
+  ## 완료 기록 (2026-08-04, 재정의판 전 acceptance 충족)
+
+  - **snapshot**: `n150:~/backups/krtour_map_0078_20260804T023104Z.dump` 6.9M,
+    sha256 `b5ab83dd…f18ffe`, 2026-08-04T02:31:05Z, head `0078_cache_target_gc_observe`,
+    features 7,056 · curation_items 4,910 · source_records 7,097. dev box scratch에 복원
+    (pg_restore 오류 0줄, superuser 확장 4종 사전 생성).
+  - **artifact**: concierge `/api/v1/features/changes` 전량 8 page / 1,481 rows / 3.37MB,
+    cursor chain 검증(내장 has_more/next_cursor 룰) 통과, JSONL sha256 기록. 이후 replay는
+    이 파일만 입력(**live concierge 무접촉**).
+  - **회복 실증**: scratch에서 concierge scope 1,481건을 `status='inactive'`로 결손 주입
+    (active 7,056→5,575) → `build_asset_context` resource override로
+    `run_feature_place_kor_travel_concierge_youtube` 직접 호출(network-free replay,
+    `strict_address='drop'`, geo reverse만 결선) → **active 1,481 완전 복원, id 집합
+    교집합 1,481 / 신규 0 / 미복구 0**. **2회차 replay 변화 0(멱등)**.
+  - **finding**: run3 sync 수치 `observed=105 unique=105 upserted=105 unrecorded=0`.
+    violation 분포(scratch 전체): reverse_geocode_failed 272(unlinked) /
+    reverse_geocode_unavailable 105(linked) / provider_address_region_disagreement 52(linked) /
+    admin_code_stale_{sido 51·emd 7·sigungu 2}(전부 linked) — **dual grade 축 실작동 증거**.
+    linked = feature_id non-null로 실측.
+  - **인증 실호출**: scratch 실 API 서버(local-dev)에서
+    `GET /v1/admin/issues?status=open&issue_type=admin_code_stale_sido` — FK target
+    (`f_5183032036_p_…` 등) 정상 해석, `last_seen_at` 반환 정합.
+  - 정직 각주: replay 세션 중 geo 호출 105건이 간헐 unavailable로 기록됨(1,376건 성공) —
+    그 세션의 finding은 unavailable 계열로 관측됐고 stale 계열 `last_seen`은 snapshot
+    시대 값이 최신. 판정 왜곡 없음(회복 실증은 feature 축, finding 축은 분포·수치 기록).
+  - 하네스: 전용 replay CLI가 저장소에 없어 조사 후 신규 조립
+    (`test_concierge_assets.py`의 `build_asset_context` 패턴 + 순수 변환 모듈). 스크립트는
+    dev box `~/h30b/`(h30b_replay.py·h30b_final.py)와 세션 scratchpad에 보존.
+
+  ### (이하 재정의 원문)
 
   ## 재정의 (2026-08-04, 사용자 결정 "b")
 
