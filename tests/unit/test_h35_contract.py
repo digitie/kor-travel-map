@@ -227,6 +227,21 @@ def test_phase_chain_accepts_exact_receipts() -> None:
     assert parsed.prior_receipt_digest == receipt_digest(gc)
 
 
+def test_csv5_rejects_migrate_receipt_from_an_intermediate_schema() -> None:
+    intermediate_migrate = _receipt(
+        "migrate",
+        schema_before="0078_cache_target_gc_observe",
+        schema_after=TARGET_SCHEMA,
+        prior_receipt_digest="3" * 64,
+    )
+
+    with pytest.raises(H35ContractError):
+        parse_request(
+            json.dumps(_request("csv5", prior_receipt=intermediate_migrate)),
+            operation="csv5",
+        )
+
+
 def test_verify_rejects_csv5_to_verify_chain_skip() -> None:
     csv5 = _receipt(
         "csv5",

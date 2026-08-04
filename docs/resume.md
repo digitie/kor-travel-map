@@ -55,9 +55,12 @@ migration을 머지할 수 없는 실제 계약 drift였다. prod H35 cutover를
 **isolated regression target만** `0079_cache_target_writer_drain`·`schema_0079`로 승격했다.
 
 목표 schema/boundary를 `_h35_schema_version.py`로 단일화하고 receipt chain 전체가 그 값을
-공유하게 했다. H35 semantic catalog에는 lease·instigation·run의 relation/column/constraint/
-FK/index를 포함했다. unit 64건과 isolated PostGIS `0063→0079→CSV5→GC→verify`, head partial
-probe, quarantine boundary 3건이 통과했으며 production/n150에는 접근하지 않았다.
+공유하게 했다. 적대 리뷰의 P1에 따라 CSV5가 받는 migrate receipt의 시작 schema도 정확히
+`0063`으로 고정해 0078→0079 intermediate receipt를 fail-close한다. H35 semantic catalog에는
+lease·instigation·run의 relation/column/constraint/FK/index를 포함했고, marker fixture는 전용
+collection 한 개만 변이하도록 고쳤다. unit 65건과 isolated PostGIS `0063→0079→CSV5→GC→verify`,
+head partial probe, quarantine boundary·preflight 4건(총 69건)이 통과했으며 production/n150에는
+접근하지 않았다.
 
 **다음 한 작업**: PR #935의 수정 commit을 적대 리뷰 1건으로 확인하고 CI를 다시 통과시킨다.
 

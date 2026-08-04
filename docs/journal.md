@@ -105,8 +105,11 @@
   boundary를 `_h35_schema_version.py`의 `0079`/`schema_0079`로 단일화했다.
 - semantic catalog fingerprint를 실제 isolated PostGIS head migration에서 다시 계산하고
   writer-drain lease·instigation·run의 relation/column/constraint/FK/index를 포함했다.
-  H35 unit 64건과 `0063→0079→CSV5→GC→verify`, head partial probe, quarantine boundary
-  rehearsal 3건이 통과했다. n150/prod 연결·변경은 없었다.
+  적대 리뷰 P1은 CSV5의 migrate receipt가 `schema_after=0079`뿐 아니라
+  `schema_before=0063`도 exact해야 한다고 지적했고, 0078→0079 intermediate receipt 거부
+  회귀로 반영했다. marker fixture도 전용 collection 한 개만 변이하도록 고쳤다. H35 unit
+  65건과 `0063→0079→CSV5→GC→verify`, head partial probe, quarantine boundary·preflight
+  rehearsal 4건(총 69건)이 통과했다. n150/prod 연결·변경은 없었다.
 
 ## 2026-08-04 (codex) — T-VN-41D isolated durable writer-drain 완료
 

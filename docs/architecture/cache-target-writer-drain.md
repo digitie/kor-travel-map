@@ -125,6 +125,10 @@ receipt가 같은 `schema_0079` 경계를 요구한다. H35의 과거 prod cutov
 이는 CI의 isolated `0063→0079` schema-chain 검증일 뿐 production/n150 실행 권한을 뜻하지
 않는다.
 
+특히 CSV5가 받는 accepted `migrate` receipt는 `schema_after=0079`만으로 충분하지 않으며,
+`schema_before=0063`도 정확히 일치해야 한다. 따라서 0078에서 0079로만 움직인 중간 receipt는
+정식 chain으로 승격될 수 없고 fail-close한다.
+
 H35 catalog fingerprint는 `ops.cache_target_writer_drain_leases`,
 `ops.cache_target_writer_drain_instigations`, `ops.cache_target_writer_drain_runs`의 relation,
 column, PK/UK/FK/CHECK와 active-lease partial unique index까지 고정한다. 따라서 migration이

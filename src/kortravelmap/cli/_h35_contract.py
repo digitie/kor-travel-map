@@ -240,8 +240,8 @@ def _validate_receipt_payload(raw: Mapping[str, object], *, previous: Operation)
         or re.fullmatch(r"[0-9]{4}_[a-z0-9_]+", schema_after) is None
     ):
         raise H35ContractError("prior_receipt schema revision이 잘못되었습니다.")
-    if previous == "preflight" and schema_before != PRE_SCHEMA:
-        raise H35ContractError("preflight schema_before가 잘못되었습니다.")
+    if previous in {"preflight", "migrate"} and schema_before != PRE_SCHEMA:
+        raise H35ContractError(f"{previous} schema_before가 잘못되었습니다.")
     if previous in {"csv5", "gc"} and schema_before != TARGET_SCHEMA:
         raise H35ContractError(f"{previous} schema_before가 잘못되었습니다.")
     row_counts = raw.get("row_counts")

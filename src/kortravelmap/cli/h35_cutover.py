@@ -1,8 +1,9 @@
-"""H35 ``0063→0078`` cutover의 Map-owned typed helper entrypoint.
+"""폐기된 H35 ``0063→0079`` cutover의 isolated regression helper entrypoint.
 
 Docker-manager가 writer fence, 전역 lock/journal, backup/restore와 runtime lifecycle을
 소유한다. 이 모듈은 stdin request를 한 phase로 dispatch하고 stdout에 receipt 한 줄만
-출력한다.
+출력한다. production cutover 실행 경로는 사용자 결정으로 폐기됐으며, 이 helper는 CI의
+network-free schema-chain regression 검증만 소유한다.
 """
 
 from __future__ import annotations

@@ -1702,27 +1702,48 @@ async def test_public_count_detects_source_absent_item(pg_container: Any) -> Non
 async def _plant_quarantine_candidate(engine: Any) -> str:
     """`0065`가 격리할 item을 하나 심는다 — legacy-marker collection 안의 네이티브 item.
 
-    시드는 legacy-marker collection을 만들지 않으므로 하나를 marker로 지정한 뒤 그 안에
-    `curated_features` 투영본이 **아닌** item을 넣어야 격리 조건이 성립한다.
+    시드는 legacy-marker collection을 만들지 않으므로 전용 marker collection을 하나 만든 뒤
+    그 안에 `curated_features` 투영본이 **아닌** item을 넣어야 격리 조건이 성립한다.
     """
     async with engine.begin() as connection:
-        # `ORDER BY`가 없으면 어느 collection이 뽑히는지에 따라 격리 건수가 달라져 무엇을
-        # 검증했는지 재현되지 않는다. 결정론을 위해 최소 key를 고른다.
+        source_collection_id = (
+            await connection.execute(
+                text(
+                    "SELECT item.collection_id FROM feature.curation_items AS item "
+                    "JOIN feature.curation_collections AS collection "
+                    "ON collection.collection_id=item.collection_id "
+                    "WHERE collection.source_id IS NOT NULL "
+                    "ORDER BY item.curation_item_id LIMIT 1"
+                )
+            )
+        ).scalar_one()
         collection_id = (
             await connection.execute(
                 text(
-                    "UPDATE feature.curation_collections SET metadata = "
-                    "coalesce(metadata, '{}'::jsonb) || "
-                    '\'{"migrated_from": "feature.curated_features"}\'::jsonb '
-                    "WHERE collection_id = (SELECT collection_id "
-                    "FROM feature.curation_items ORDER BY curation_item_id LIMIT 1) "
-                    "RETURNING collection_id"
-                )
+                    """
+                    INSERT INTO feature.curation_collections (
+                        collection_key, theme_id, source_id, title, edition_key,
+                        description, status, visibility, metadata, created_by,
+                        updated_by, created_at, updated_at, archived_at
+                    )
+                    SELECT
+                        'legacy:probe:' || replace(x_extension.gen_random_uuid()::text, '-', ''),
+                        theme_id, source_id, 'H35 quarantine probe', edition_key,
+                        description, status, visibility,
+                        '{"migrated_from":"feature.curated_features"}'::jsonb,
+                        'test:h35', 'test:h35', created_at, updated_at, NULL
+                    FROM feature.curation_collections
+                    WHERE collection_id=:source_collection_id
+                    RETURNING collection_id
+                    """
+                ),
+                {"source_collection_id": source_collection_id},
             )
         ).scalar_one()
 
         # 형제 행을 복사해 NOT NULL 컬럼을 빠짐없이 채운다. 바꾸는 것은 세 가지뿐:
-        # 새 `curation_item_id`(어떤 `curated_feature_id`와도 안 겹쳐 투영본이 아니게 됨),
+        # collection 및 새 `curation_item_id`(어떤 `curated_feature_id`와도 안 겹쳐
+        # 투영본이 아니게 됨),
         # 고유 `external_item_id`(tombstone 병합 회피), `feature_id=NULL`
         # (`0066`의 active-source-feature 유일성 회피).
         await connection.execute(
@@ -1732,18 +1753,22 @@ async def _plant_quarantine_candidate(engine: Any) -> str:
                 SELECT (jsonb_populate_record(
                     NULL::feature.curation_items,
                     to_jsonb(source) || jsonb_build_object(
+                        'collection_id', CAST(:collection_id AS uuid),
                         'curation_item_id', x_extension.gen_random_uuid(),
                         'external_item_id', 'h22a-native-probe',
                         'feature_id', NULL
                     )
                 )).*
                 FROM feature.curation_items AS source
-                WHERE source.collection_id = :collection_id
+                WHERE source.collection_id = :source_collection_id
                 ORDER BY source.curation_item_id
                 LIMIT 1
                 """
             ),
-            {"collection_id": collection_id},
+            {
+                "collection_id": collection_id,
+                "source_collection_id": source_collection_id,
+            },
         )
     return str(collection_id)
 
