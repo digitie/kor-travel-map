@@ -10,6 +10,18 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-08-05 (4) — prod 배포 완료 + 32C checksum 게이트 통과
+
+Map `c0afaa4e`(0082·UUID backfill 100%·fence dump 선행)·PinVi `3ff54b8b`(0049,
+release-export 함정 수리) 배포, cutover dry→real로 **양 저장소 checksum 일치**(root
+`8bd9534a…`, 731,600) + trip_day_pois 26행 shadow 채움. CSV5 재import로 미해석
+290→270(잔여는 H31 확정 103 + provider 수렴 대기). H45 판정 진행 중(재시도
+텔레메트리 실작동 확인, 첫 주기는 upstream 열화 창 — 감시 지속).
+
+**다음 한 작업**: ① H45 판정(스케줄 SUCCESS 전환 관찰) → H42/H45 docs closure,
+② **32C 값 전환 tail PR**(Map 응답 feature_id UUID 전환·비파생 generator·0080
+CHECK/0079 트리거 재평가·user/admin 스냅샷 재추출 — 적대 리뷰 2), ③ H44 복원 드릴.
+
 ## 2026-08-05 (3) — H45 머지·main 수리·H43 기준선 완료
 
 H45 #943 머지(`8c74d911`, 재리뷰 2건 GO) + #940 잠복 결함(user-client types 재생성 누락 —
