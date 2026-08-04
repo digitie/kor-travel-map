@@ -51,6 +51,7 @@ from kortravelmap.api.domain_command_service import (
     domain_command_transaction,
     idempotent_domain_command,
 )
+from kortravelmap.api.feature_ref import resolve_feature_ref_or_error
 from kortravelmap.api.http_revision import parse_revision_header, revision_etag
 from kortravelmap.api.response import ClusterUnit, Meta, make_meta
 from kortravelmap.api.routers.curations import AdminCurationItemView
@@ -113,6 +114,13 @@ class AdminFeatureRecord(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     feature_id: str
+    feature_uuid: str | None = Field(
+        default=None,
+        description=(
+            "UUID 정본 identity 병행 노출 (ADR-068, T-VN-32B additive). "
+            "feature_id 값 자체의 UUID 전환은 T-VN-32C."
+        ),
+    )
     kind: str
     name: str
     category: str
@@ -478,6 +486,13 @@ class AdminFeatureDetailFeatureRecord(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     feature_id: str
+    feature_uuid: str | None = Field(
+        default=None,
+        description=(
+            "UUID 정본 identity 병행 노출 (ADR-068, T-VN-32B additive). "
+            "feature_id 값 자체의 UUID 전환은 T-VN-32C."
+        ),
+    )
     kind: str
     name: str
     category: str
@@ -699,6 +714,7 @@ def _issue_record(issue: dict[str, Any]) -> AdminFeatureIssueRecord:
 def _record(row: AdminFeatureRow) -> AdminFeatureRecord:
     return AdminFeatureRecord(
         feature_id=row.feature_id,
+        feature_uuid=row.feature_uuid,
         kind=row.kind,
         name=row.name,
         category=row.category,
@@ -1070,10 +1086,12 @@ async def get_admin_feature_weather(
     asof: Annotated[datetime | None, Query()] = None,
 ) -> FeatureWeatherResponse:
     started_at = perf_counter()
-    await _admin_feature_exists_or_404(session, feature_id)
+    identity = await resolve_feature_ref_or_error(session, feature_id)
+    canonical_id = identity.feature_id
+    await _admin_feature_exists_or_404(session, canonical_id)
     card = await weather_repo.build_admin_weather_card(
         session,
-        feature_id=feature_id,
+        feature_id=canonical_id,
         asof=asof,
     )
     return FeatureWeatherResponse(
@@ -1106,10 +1124,12 @@ async def get_admin_feature_price(
     history_limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> FeaturePriceResponse:
     started_at = perf_counter()
-    await _admin_feature_exists_or_404(session, feature_id)
+    identity = await resolve_feature_ref_or_error(session, feature_id)
+    canonical_id = identity.feature_id
+    await _admin_feature_exists_or_404(session, canonical_id)
     card = await price_repo.build_price_card(
         session,
-        feature_id=feature_id,
+        feature_id=canonical_id,
         asof=asof,
         history_limit=history_limit,
     )
@@ -1256,7 +1276,9 @@ async def get_feature_revision_route(
     response: Response,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> AdminFeatureRevisionResponse:
-    revision = await get_feature_row_revision(session, feature_id)
+    identity = await resolve_feature_ref_or_error(session, feature_id)
+    canonical_id = identity.feature_id
+    revision = await get_feature_row_revision(session, canonical_id)
     if revision is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -1265,7 +1287,7 @@ async def get_feature_revision_route(
     _set_feature_etag(response, revision)
     return AdminFeatureRevisionResponse(
         data=AdminFeatureRevisionData(
-            feature_id=feature_id,
+            feature_id=canonical_id,
             row_revision=revision,
         )
     )
@@ -1274,26 +1296,37 @@ async def get_feature_revision_route(
 @router.get(
     "/{feature_id}",
     response_model=AdminFeatureDetailResponse,
-    responses={404: {"description": "feature 없음"}},
+    description=(
+        "feature 참조는 legacy `f_*` id와 UUID 정본(canonical hyphenated) 양쪽을 "
+        "수용한다 (ADR-068 경계 alias 해석, T-VN-32B dual — admin `{feature_id}` "
+        "경로 공통)."
+    ),
+    responses={
+        404: {"description": "feature 참조 해석 불가 또는 없음"},
+        422: {"description": "feature 참조 형식 오류(빈 문자열/공백 패딩/길이 초과)"},
+    },
 )
 async def get_feature_detail_route(
     feature_id: str,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> AdminFeatureDetailResponse:
     started_at = perf_counter()
-    row = await get_admin_feature_detail(session, feature_id)
+    # T-VN-32B 경계 alias 해석 — 이후 내부 조회는 해석된 정본 키로만 한다.
+    identity = await resolve_feature_ref_or_error(session, feature_id)
+    canonical_id = identity.feature_id
+    row = await get_admin_feature_detail(session, canonical_id)
     if row is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"feature 없음: {feature_id!r}",
         )
     curations = await curation_repo.list_curation_items_by_feature_ids(
-        session, feature_ids=[feature_id], public_only=False
+        session, feature_ids=[canonical_id], public_only=False
     )
     return _detail_response(
         row,
         started_at=started_at,
-        curations=curations.get(feature_id, ()),
+        curations=curations.get(canonical_id, ()),
     )
 
 
@@ -1349,13 +1382,15 @@ async def patch_feature_route(
     settings: Annotated[ApiSettings, Depends(_settings)],
 ) -> AdminFeatureChangeResponse:
     started_at = perf_counter()
+    identity = await resolve_feature_ref_or_error(session, feature_id)
+    canonical_id = identity.feature_id
     expected_revision = _require_if_match_revision(request)
     async with domain_command_transaction(session):
         try:
             result = await submit_feature_change_request(
                 session,
                 action="update",
-                feature_id=feature_id,
+                feature_id=canonical_id,
                 payload=_payload(body),
                 review_mode=_review_mode(settings),
                 reason=body.reason,
@@ -1366,7 +1401,7 @@ async def patch_feature_route(
             raise _precondition_failed(exc) from exc
         except FeatureChangeConflict as exc:
             raise _change_error(exc) from exc
-        new_revision = await get_feature_row_revision(session, feature_id)
+        new_revision = await get_feature_row_revision(session, canonical_id)
     if new_revision is not None:
         _set_feature_etag(response, new_revision)
     return _change_response(result, started_at=started_at)
@@ -1396,13 +1431,15 @@ async def delete_feature_route(
     settings: Annotated[ApiSettings, Depends(_settings)],
 ) -> AdminFeatureChangeResponse:
     started_at = perf_counter()
+    identity = await resolve_feature_ref_or_error(session, feature_id)
+    canonical_id = identity.feature_id
     expected_revision = _require_if_match_revision(request)
     async with domain_command_transaction(session):
         try:
             result = await submit_feature_change_request(
                 session,
                 action="delete",
-                feature_id=feature_id,
+                feature_id=canonical_id,
                 payload={},
                 review_mode=_review_mode(settings),
                 reason=body.reason,
@@ -1413,7 +1450,7 @@ async def delete_feature_route(
             raise _precondition_failed(exc) from exc
         except FeatureChangeConflict as exc:
             raise _change_error(exc) from exc
-        new_revision = await get_feature_row_revision(session, feature_id)
+        new_revision = await get_feature_row_revision(session, canonical_id)
     if new_revision is not None:
         _set_feature_etag(response, new_revision)
     return _change_response(result, started_at=started_at)
@@ -1506,11 +1543,13 @@ async def deactivate_feature_route(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> AdminFeatureDeactivateResponse:
     started_at = perf_counter()
+    identity = await resolve_feature_ref_or_error(session, feature_id)
+    canonical_id = identity.feature_id
     async with domain_command_transaction(session):
         try:
             result = await deactivate_feature(
                 session,
-                feature_id,
+                canonical_id,
                 reason=body.reason,
                 operator=context.actor,
                 prevent_provider_reactivation=body.prevent_provider_reactivation,

@@ -46,7 +46,11 @@ SQL 수정 대신 DB 트리거로 일괄 보장한다(가장 단순·안전 — 
   alias 행을 원자 생성한다(INV-068-01 post-backfill 유지). 재생성 시 같은
   파생값이므로 ``ON CONFLICT (alias) DO NOTHING``이 안전하다.
 
-두 트리거는 T-VN-32B가 writer 원자 생성으로 대체할 때 제거한다.
+T-VN-32B 결정: 두 트리거는 writer 명시 생성이 착지한 뒤에도 raw SQL 경로의
+안전망으로 **유지**한다(제거는 T-VN-32C write fence 시점 재평가). 파생 규칙
+자체는 0080의 CHECK(``ck_features_feature_uuid_dual_derivation``)가 dual 기간
+동안 DB 층에서 강제한다 — 트리거 fill 값·writer 명시 값 모두 그 CHECK를
+통과해야 한다.
 
 ADR-075 규율:
 

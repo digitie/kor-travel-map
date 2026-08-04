@@ -154,6 +154,14 @@ from kortravelmap.infra.dedup_repo import (
     enqueue_dedup_candidates,
     pending_dedup_reviews,
 )
+from kortravelmap.infra.feature_identity import (
+    FeatureIdentity,
+    FeatureIdentityInvariantError,
+    FeatureIdentityRefError,
+    count_features_missing_identity,
+    get_feature_uuid_map,
+    resolve_feature_identity,
+)
 from kortravelmap.infra.feature_operation_repo import (
     append_dagster_feature_attempt_event,
     ensure_dagster_feature_operation,
@@ -481,6 +489,13 @@ __all__ = [
     # file_store (ADR-015 S3 호환 객체 저장소)
     "S3ObjectStore",
     "StoredObject",
+    # feature_identity (ADR-068 T-VN-32B 경계 alias 해석)
+    "FeatureIdentity",
+    "FeatureIdentityInvariantError",
+    "FeatureIdentityRefError",
+    "count_features_missing_identity",
+    "get_feature_uuid_map",
+    "resolve_feature_identity",
     # feature_repo (ADR-004 raw SQL load 경로)
     "FeatureLoadResult",
     "FeatureSearchPage",

@@ -64,7 +64,7 @@ barrier로 직렬화한다.
     [/] `T-VN-41D`(durable writer-drain)
 - **Wave 2 barrier 이후**
   - freeze(Lane A): [x] `T-VN-31A` → [x] `T-VN-31B` → [x] `T-VN-31C`
-  - Lane A: [x] `T-VN-32A` → [ ] `T-VN-32B` → [ ] `T-VN-32C` →
+  - Lane A: [x] `T-VN-32A` → [x] `T-VN-32B` → [ ] `T-VN-32C` →
     [ ] `T-VN-35A` → [ ] `T-VN-35B` → [ ] `T-VN-35C` → [ ] `T-VN-35D` →
     [ ] `T-VN-37A` → [ ] `T-VN-37B` → [ ] `T-VN-37C`
   - Lane B shadow: [ ] `T-VN-33A` → [ ] `T-VN-33B` → [ ] `T-VN-33C` →
@@ -1816,10 +1816,66 @@ ADR은 존재하지만 목표 DDL/OpenAPI diff/실행 제약 artifact는 없다.
   무손실 왕복·신규 upsert 원자 생성·명시 uuid 존중 + unit 고정 벡터 2개. 읽기
   경로·기존 문자열 ID 무변경(32A 계약).
 
-- [ ] T-VN-32B — **Map consumer-first dual read/write**
+- [x] T-VN-32B — **Map consumer-first dual read/write** (2026-08-04 완료)
 
   repository/API/notice lineage를 UUID 정본으로 읽고 alias를 경계에서만 해석한다. 신규 write는 UUID와
   alias를 원자 생성하고 legacy-only 신규 행을 차단한다.
+
+  완료 기록: ① 경계 alias 해석 단일 메커니즘 — `infra/feature_identity.py`
+  `resolve_feature_identity(session, ref)`가 legacy `f_*` alias·canonical UUID
+  양쪽을 정본 키 쌍 `FeatureIdentity(feature_id, feature_uuid)`로 해석
+  (형식 오류 422 · 미해석 404, UUID-정본 우선/alias fallback 결정적 순서) +
+  `kortravelmap.api.feature_ref.resolve_feature_ref_or_error` 공용 경계 헬퍼.
+  **모든 feature `{feature_id}` 경로에 적용** — user detail·sources·
+  observations history·weather·price·contained-features / admin detail·
+  revision·weather·price·PATCH·DELETE·deactivate. 내부 전달·조회는 해석된
+  정본 키로만(ADR-068 결정 3). operator lineage의 별도 존재 확인 쿼리
+  (`_operator_feature_or_404`)는 해석 성공이 행 존재를 함의하므로 제거.
+  ② dual read — alembic `0080_uuid_dual_read`가 `public_features` view에
+  `feature_uuid`를 재고정(SELECT * 컬럼 목록, 공개 술어 무변경), repo 단건
+  (`_FEATURE_ROW_COLUMNS_SQL`)·bbox/in-bounds·search·nearby(coord/by-target)·
+  contained·service batch(`base.feature_uuid`)·admin 목록/상세가
+  `feature_uuid`를 select 목록에만 추가(join/술어 무변경 — EXPLAIN 회귀 없음).
+  응답 additive 노출: user detail/search/in-bounds/nearby item, service
+  `POST /features/batch` item(found/retired/suppressed/unchanged) ·
+  `POST /features/weather/batch` item(거대 조회 SQL 무변경 —
+  `get_feature_uuid_map` 병행 해석), admin 목록/상세. **응답 `feature_id` 값은
+  legacy 유지** — 값 전환은 32C(rollout "checksum 일치 후 Map 응답 UUID 전환",
+  consumer-first cutover 규율). ③ notice lineage —
+  `public_active_notice_feature_identities`가 `{feature_id: feature_uuid}` 쌍을
+  반환하는 단일 표면(기존 `public_active_notice_feature_ids`는 **제거** —
+  잔여 호출자 전부 identities로 이행). ④ 신규 write — **dual 기간 정본
+  generator 결정: uuid5 파생(`expected_feature_uuid`), UUIDv7은 legacy id
+  소멸(32C 이후) 전 미채택**(결정론 = 양 저장소 checksum 전제). 이 규칙을
+  app 검사에만 두지 않고 `0080`이 CHECK 2종
+  (`ck_features_feature_uuid_dual_derivation` ·
+  `ck_feature_aliases_uuid_dual_derivation`)으로 **DB 층에서 강제**(fail-close
+  by construction — 32A의 "임의 명시 uuid 존중" 열린 계약을 의도적으로 닫음,
+  해당 32A 테스트 재정의). provider upsert·admin add SQL은 `feature_uuid`를
+  writer 명시 INSERT + RETURNING 대조(`verify_feature_uuid` →
+  `FeatureIdentityInvariantError`) — 관측 계층. 0079 트리거 2종은 raw SQL
+  seed 경로 편의 fill로 유지(파생 강제는 CHECK가 담당, 트리거 제거는 32C
+  write fence 시점 재평가 — 0079 docstring 갱신). CHECK 2종은 dual 기간 한정
+  fence로 32C에서 비파생 generator 채택과 함께 제거한다. ⑤ OpenAPI 3 spec
+  재생성 + `openapi-diff-v1.json` baseline sha 재고정·`revisions` 개정 기록
+  (diff 항목/counts 무변경 — ADR-068 값 전환 항목은 32C 목표 상태로 존치).
+  **32C/39 이월 명시**: 내부 FK 체인(source_links/curation/price/weather 등)의
+  UUID 조인 재작성과 referencing table shadow uuid 컬럼(rollout이 legacy FK
+  체인 fence를 32C, 제거를 39로 고정), 응답 `feature_id` 값 UUID 전환,
+  legacy write fence·트리거/CHECK 제거, PinVi vendored snapshot 재추출(32C 쌍
+  PR), legacy ID 물리 제거(T-VN-39 removal manifest). 검증: unit 1,981(identity
+  순수 계약 11 신규) · api 1,069(경계 dual/422/additive/404 재정의) · 신규 통합
+  9(`test_feature_identity_boundary.py` — 양형식 해석·미존재·형식 오류·
+  view/단건/bbox/batch/notice 병행 노출·upsert/admin-add 원자성·CHECK drift
+  거부·alias 결측 invariant 관측) · 32A migration 8(명시 uuid fail-close
+  재정의) + feature_repo 26 + freeze 3 + alembic 일관성/공개 view/notice/
+  nearby/in-bounds 회귀 73 + perf gate tier1 shape 재고정(feature_uuid 의도적
+  계약 변경) + H35 rehearsal(h35 도구의 head 등호 고정을 campaign target 앵커로
+  수정 — 32A가 head를 전진시켜 생긴 본 branch 잠복 회귀, h35 81건 green) ·
+  전체 통합 suite에서 32B 무관 잔여 실패는 live kor-travel-geo 인증 미결선
+  env 5건(base 재현)과 pipeline cancellation lock-poll env 1건(base 재현)·
+  suite 부하 flake 1건(단독 green)뿐 · export --check drift 0 · ruff/mypy
+  --strict(main+api)/lint-imports clean.
 
 - [ ] T-VN-32C — **PinVi alias-map cutover·legacy write fence**
 

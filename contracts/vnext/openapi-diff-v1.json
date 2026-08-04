@@ -5,17 +5,24 @@
   "baseline": {
     "admin": {
       "file": "packages/kor-travel-map-api/openapi.json",
-      "sha256": "60433abfcdaee9a8db754400f70f93c699ad1eced4ddb6ad61ac09b64b550975"
+      "sha256": "ad1cd88baea8b9c77238f059ee965bcffbd9adb65d76b6a80ee27e9ec694b918"
     },
     "user": {
       "file": "packages/kor-travel-map-api/openapi.user.json",
-      "sha256": "efa40c6b2afcd934081bc2ab3bc1a0d23c6f997a4dc61f28dee828eadad3c212"
+      "sha256": "e31bc75639bb0d26ee4d676bd283477f487e3600a4dbc94af0890692401b1b3a"
     },
     "service": {
       "file": "packages/kor-travel-map-api/openapi.service.json",
-      "sha256": "622ea54c98e9b0c09592cf84aced36227992c6bdf256742a3532b892f0efccf2"
+      "sha256": "c3d25615b3fc706658b9409827ccfc3f0232b0426ce4cc7a29b8c5870bde2d43"
     }
   },
+  "revisions": [
+    {
+      "date": "2026-08-04",
+      "task": "T-VN-32B",
+      "change": "baseline sha256 3종 재고정 — Map consumer-first dual 착지분이 현행 spec에 additive로 들어감: ① 응답 feature_uuid 병행 노출(user detail/search/in-bounds/nearby·service features/weather batch item·admin features 목록/상세), ② 모든 feature `{feature_id}` 경로(user detail·sources·observations·weather·price·contained / admin detail·revision·weather·price·PATCH·DELETE·deactivate)가 legacy·canonical UUID 참조를 경계에서 dual 수용(형식 오류 422 — 단일 경계 메커니즘 kortravelmap.api.feature_ref). 응답 feature_id 값은 legacy 유지 — ADR-068 enum_changes(값 UUID 전환)·status_changes(legacy 경로 404)는 T-VN-32C cutover의 목표 상태 그대로 남아 diff 항목·counts 무변경. DB 층은 alembic 0080이 dual 기간 파생 규칙 CHECK(ck_features_feature_uuid_dual_derivation·ck_feature_aliases_uuid_dual_derivation)를 강제하며 이 fence는 32C에서 비파생 generator 채택과 함께 제거된다."
+    }
+  ],
   "surfaces": {
     "user": {
       "counts": {

@@ -20,6 +20,10 @@ from typing import TYPE_CHECKING, Any, Final, Literal
 
 from sqlalchemy import text
 
+from kortravelmap.infra.feature_identity import (
+    expected_feature_uuid,
+    verify_feature_uuid,
+)
 from kortravelmap.infra.merge_repo import (
     MergeConflictError,
     MergeNotFoundError,
@@ -95,7 +99,10 @@ FeatureChangeReviewMode = Literal["require_review", "immediate"]
 
 @dataclass(frozen=True)
 class AdminFeatureRow:
-    """``GET /admin/features`` item."""
+    """``GET /admin/features`` item.
+
+    ``feature_uuid``는 T-VN-32B UUID 정본 병행 노출(additive).
+    """
 
     feature_id: str
     kind: str
@@ -111,6 +118,7 @@ class AdminFeatureRow:
     issues: tuple[dict[str, Any], ...]
     created_at: datetime
     updated_at: datetime
+    feature_uuid: str | None = None
 
 
 @dataclass(frozen=True)
@@ -123,7 +131,10 @@ class AdminFeaturePage:
 
 @dataclass(frozen=True)
 class AdminFeatureDetailFeature:
-    """Admin feature 상세의 feature core snapshot."""
+    """Admin feature 상세의 feature core snapshot.
+
+    ``feature_uuid``는 T-VN-32B UUID 정본 병행 노출(additive).
+    """
 
     feature_id: str
     kind: str
@@ -160,6 +171,7 @@ class AdminFeatureDetailFeature:
     updated_at: datetime
     deleted_at: datetime | None
     area_square_meters: float | None = None
+    feature_uuid: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1122,6 +1134,7 @@ def _admin_features_sql(*, sort: str, order: str, exact_id: bool = False) -> str
 WITH base AS (
     SELECT
         f.feature_id,
+        CAST(f.feature_uuid AS text) AS feature_uuid,
         f.kind,
         f.name,
         lower(f.name) AS sort_name,
@@ -1238,8 +1251,10 @@ LIMIT :limit_plus_one
 
 
 def _admin_feature_row(row: Any) -> AdminFeatureRow:
+    feature_uuid = row.get("feature_uuid")
     return AdminFeatureRow(
         feature_id=str(row["feature_id"]),
+        feature_uuid=str(feature_uuid) if feature_uuid is not None else None,
         kind=str(row["kind"]),
         name=str(row["name"]),
         category=str(row["category"]),
@@ -1259,6 +1274,7 @@ def _admin_feature_row(row: Any) -> AdminFeatureRow:
 _ADMIN_FEATURE_DETAIL_SQL: Final[str] = """
 SELECT
     feature_id,
+    CAST(feature_uuid AS text) AS feature_uuid,
     kind,
     name,
     category,
@@ -1445,8 +1461,10 @@ LIMIT 100
 
 
 def _admin_feature_detail_feature(row: Any) -> AdminFeatureDetailFeature:
+    feature_uuid = row.get("feature_uuid")
     return AdminFeatureDetailFeature(
         feature_id=str(row["feature_id"]),
+        feature_uuid=str(feature_uuid) if feature_uuid is not None else None,
         kind=str(row["kind"]),
         name=str(row["name"]),
         category=str(row["category"]),
@@ -2073,9 +2091,12 @@ WHERE feature_id = :feature_id
 FOR UPDATE
 """
 
+# feature_uuid는 T-VN-32B writer 원자 생성 — dual 기간 정본 generator(uuid5 파생)를
+# 명시 INSERT하고 0079 트리거는 안전망으로 유지한다. RETURNING 관측값은
+# legacy-only 신규 행 fail-close 검증에 쓰인다.
 _APPLY_FEATURE_ADD_SQL: Final[str] = """
 INSERT INTO feature.features (
-    feature_id, kind, name, category,
+    feature_id, feature_uuid, kind, name, category,
     coord, coord_precision_digits, geom,
     address, legal_dong_code, road_name_code, road_address_management_no,
     admin_dong_code, sido_code, sigungu_code,
@@ -2086,7 +2107,7 @@ INSERT INTO feature.features (
     user_change_request_id, user_deleted_at, user_deleted_by, user_change_reason,
     created_at, updated_at, deleted_at
 ) VALUES (
-    :feature_id, :kind, :name, :category,
+    :feature_id, CAST(:feature_uuid AS uuid), :kind, :name, :category,
     CASE WHEN CAST(:lon AS double precision) IS NULL THEN NULL
          ELSE x_extension.ST_SetSRID(
              x_extension.ST_MakePoint(
@@ -2110,7 +2131,8 @@ INSERT INTO feature.features (
     now(), now(), NULL
 )
 ON CONFLICT (feature_id) DO NOTHING
-RETURNING feature_id, status, user_deleted_at
+RETURNING feature_id, CAST(feature_uuid AS text) AS feature_uuid,
+          status, user_deleted_at
 """
 
 _APPLY_FEATURE_UPDATE_SQL: Final[str] = """
@@ -2382,6 +2404,8 @@ def _add_params(
     return {
         "request_id": request_id,
         "feature_id": feature_id,
+        # T-VN-32B writer 원자 생성 — dual 기간 정본 generator(uuid5 파생).
+        "feature_uuid": expected_feature_uuid(feature_id),
         "kind": payload["kind"],
         "name": payload["name"],
         "category": payload["category"],
@@ -2493,6 +2517,9 @@ async def _apply_change(
                 ),
             )
         ).mappings().first()
+        if row is not None:
+            # T-VN-32B fail-close — legacy-only(uuid 결측/파생 불일치) 신규 행 차단.
+            verify_feature_uuid(request.feature_id, row["feature_uuid"])
     elif request.action == "update":
         row = (
             await session.execute(

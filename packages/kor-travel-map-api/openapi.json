@@ -2243,6 +2243,18 @@
             "title": "Feature Id",
             "type": "string"
           },
+          "feature_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "UUID 정본 identity 병행 노출 (ADR-068, T-VN-32B additive). feature_id 값 자체의 UUID 전환은 T-VN-32C.",
+            "title": "Feature Uuid"
+          },
           "kind": {
             "title": "Kind",
             "type": "string"
@@ -3606,6 +3618,18 @@
           "feature_id": {
             "title": "Feature Id",
             "type": "string"
+          },
+          "feature_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "UUID 정본 identity 병행 노출 (ADR-068, T-VN-32B additive). feature_id 값 자체의 UUID 전환은 T-VN-32C.",
+            "title": "Feature Uuid"
           },
           "issue_count": {
             "title": "Issue Count",
@@ -13901,6 +13925,18 @@
             "title": "Feature Id",
             "type": "string"
           },
+          "feature_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "UUID 정본 identity 병행 노출 (ADR-068, T-VN-32B additive).",
+            "title": "Feature Uuid"
+          },
           "row_revision": {
             "format": "int64",
             "minimum": 1.0,
@@ -14029,6 +14065,18 @@
             "title": "Feature Id",
             "type": "string"
           },
+          "feature_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "UUID 정본 identity 병행 노출 (ADR-068, T-VN-32B additive).",
+            "title": "Feature Uuid"
+          },
           "row_revision": {
             "format": "int64",
             "minimum": 1.0,
@@ -14057,6 +14105,18 @@
             "title": "Feature Id",
             "type": "string"
           },
+          "feature_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "UUID 정본 identity 병행 노출 (ADR-068, T-VN-32B additive).",
+            "title": "Feature Uuid"
+          },
           "row_revision": {
             "format": "int64",
             "minimum": 1.0,
@@ -14084,6 +14144,18 @@
           "feature_id": {
             "title": "Feature Id",
             "type": "string"
+          },
+          "feature_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "UUID 정본 identity 병행 노출 (ADR-068, T-VN-32B additive).",
+            "title": "Feature Uuid"
           },
           "row_revision": {
             "format": "int64",
@@ -14241,6 +14313,18 @@
           "feature_id": {
             "title": "Feature Id",
             "type": "string"
+          },
+          "feature_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "UUID 정본 identity 병행 노출 (ADR-068, T-VN-32B additive). feature_id 값 자체의 UUID 전환은 T-VN-32C.",
+            "title": "Feature Uuid"
           },
           "kind": {
             "title": "Kind",
@@ -14795,6 +14879,18 @@
           "feature_id": {
             "title": "Feature Id",
             "type": "string"
+          },
+          "feature_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "UUID 정본 identity 병행 노출 (ADR-068, T-VN-32B additive). feature_id 값 자체의 UUID 전환은 T-VN-32C.",
+            "title": "Feature Uuid"
           },
           "geometry": {
             "anyOf": [
@@ -17045,6 +17141,18 @@
           "feature_id": {
             "title": "Feature Id",
             "type": "string"
+          },
+          "feature_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "UUID 정본 identity 병행 노출 (ADR-068, T-VN-32B additive).",
+            "title": "Feature Uuid"
           },
           "kind": {
             "title": "Kind",
@@ -28735,6 +28843,18 @@
             "title": "Feature Id",
             "type": "string"
           },
+          "feature_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "UUID 정본 identity 병행 노출 (ADR-068, T-VN-32B additive).",
+            "title": "Feature Uuid"
+          },
           "state": {
             "const": "found",
             "title": "State",
@@ -28756,6 +28876,18 @@
           "feature_id": {
             "title": "Feature Id",
             "type": "string"
+          },
+          "feature_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "UUID 정본 identity 병행 노출 (ADR-068, T-VN-32B additive).",
+            "title": "Feature Uuid"
           },
           "state": {
             "const": "no_data",
@@ -28818,11 +28950,23 @@
       },
       "WeatherBatchRetiredItem": {
         "additionalProperties": false,
-        "description": "현재 공개 parent가 아니어서 weather를 제공할 수 없는 item.",
+        "description": "현재 공개 parent가 아니어서 weather를 제공할 수 없는 item.\n\nparent가 저장소에 아예 없으면 ``feature_uuid``도 ``None``이다.",
         "properties": {
           "feature_id": {
             "title": "Feature Id",
             "type": "string"
+          },
+          "feature_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "UUID 정본 identity 병행 노출 (ADR-068, T-VN-32B additive).",
+            "title": "Feature Uuid"
           },
           "state": {
             "const": "retired",
@@ -35103,6 +35247,7 @@
         ]
       },
       "get": {
+        "description": "feature 참조는 legacy `f_*` id와 UUID 정본(canonical hyphenated) 양쪽을 수용한다 (ADR-068 경계 alias 해석, T-VN-32B dual — admin `{feature_id}` 경로 공통).",
         "operationId": "get_feature_detail_route_v1_admin_features__feature_id__get",
         "parameters": [
           {
@@ -35134,7 +35279,7 @@
                 }
               }
             },
-            "description": "feature 없음"
+            "description": "feature 참조 해석 불가 또는 없음"
           },
           "422": {
             "content": {
@@ -35144,7 +35289,7 @@
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "feature 참조 형식 오류(빈 문자열/공백 패딩/길이 초과)"
           },
           "default": {
             "content": {
@@ -41014,6 +41159,7 @@
     },
     "/v1/features/{feature_id}": {
       "get": {
+        "description": "feature 참조는 legacy `f_*` id와 UUID 정본(canonical hyphenated) 양쪽을 수용한다 (ADR-068 경계 alias 해석, T-VN-32B dual). 응답의 `feature_id`는 legacy 값을 유지하고 `feature_uuid`가 병행 노출된다 — 값 자체의 UUID 전환은 T-VN-32C.",
         "operationId": "get_feature_v1_features__feature_id__get",
         "parameters": [
           {
@@ -41056,7 +41202,7 @@
                 }
               }
             },
-            "description": "feature_id 없음"
+            "description": "feature 참조 해석 불가 또는 비공개"
           },
           "422": {
             "content": {
@@ -41066,7 +41212,7 @@
                 }
               }
             },
-            "description": "If-None-Match가 canonical strong ETag가 아님"
+            "description": "feature 참조 형식 오류(빈 문자열/공백 패딩/길이 초과) 또는 If-None-Match가 canonical strong ETag가 아님"
           },
           "default": {
             "content": {
@@ -41405,7 +41551,7 @@
     },
     "/v1/features/{feature_id}/sources": {
       "get": {
-        "description": "operator 전용 — feature에 연결된 모든 제공기관 entity의 현재 raw 관측값.\n\nT-VN-05: raw lineage(raw_data/raw_payload_hash/source_record_key)는 공개 detail에서\n제거하고 이 operator 표면으로 이동했다. 비공개/종료 feature도 감사 대상이라\n공개 가시성 gate 없이 raw row 존재만 확인한다.",
+        "description": "operator 전용 — feature에 연결된 모든 제공기관 entity의 현재 raw 관측값.\n\nT-VN-05: raw lineage(raw_data/raw_payload_hash/source_record_key)는 공개 detail에서\n제거하고 이 operator 표면으로 이동했다. 비공개/종료 feature도 감사 대상이다 —\n경계 해석(T-VN-32B) 성공이 raw row 존재를 함의하므로 별도 존재 확인이 없다.",
         "operationId": "get_feature_sources_v1_features__feature_id__sources_get",
         "parameters": [
           {

@@ -1,0 +1,300 @@
+"""``kortravelmap.infra.feature_identity`` — feature identity 경계 해석 (T-VN-32B, ADR-068).
+
+dual read/write 단계의 identity 규약을 한 곳에 고정한다:
+
+- **정본 키는 ``feature.features.feature_uuid``** (T-VN-32A shadow → 32B dual).
+  현행 문자열 ``f_*`` id는 ``feature.feature_aliases``의 legacy alias다.
+- **alias 해석은 경계 전용** (ADR-068 결정 3): API path/query가 받은 외부 참조
+  문자열은 :func:`resolve_feature_identity` 한 곳에서만 UUID/alias 양쪽으로
+  해석하고, 내부 전달·조인은 해석된 정본 키로만 한다. repository 내부에
+  alias lookup을 흩뿌리지 않는다.
+- **dual 기간 정본 신규 행 generator** — 32A freeze가 "T-VN-32B 소관"으로 남긴
+  결정: legacy id가 항상 존재하는 dual 기간에는
+  ``uuid5(FEATURE_UUID_NAMESPACE, legacy_feature_id)``
+  (:func:`kortravelmap.core.ids.feature_uuid_from_legacy`) 파생이 **유일한
+  정본 generator**다. 결정론이 KTM/PinVi 양 저장소 독립 계산·checksum 대조
+  (T-VN-32C)의 전제이므로 UUIDv7 같은 비결정 generator는 legacy id가 소멸하는
+  cutover(32C 이후 신규 표면) 전에는 채택하지 않는다.
+- **legacy-only 신규 행 차단의 계약화**: DB 층은 0079 트리거 2종이 이미 원자
+  보장한다. 그 위에 repo writer가 ``feature_uuid``를 명시 계산해 INSERT하고,
+  RETURNING으로 관측한 값이 파생 규칙과 다르거나 비어 있으면
+  :class:`FeatureIdentityInvariantError`로 fail-close한다
+  (:func:`expected_feature_uuid` / :func:`verify_feature_uuid`).
+
+32B가 긋는 범위 경계 (이월 명시):
+
+- 응답의 ``feature_id`` 값 자체는 legacy 유지, ``feature_uuid``는 additive 병행
+  노출 — 응답 UUID 전환은 T-VN-32C(양 저장소 checksum 일치 후).
+- 내부 FK 체인(source_links/curation/price/weather 등)의 UUID 조인 재작성은
+  T-VN-32C/T-VN-39 소관.
+- 0079 트리거 제거(writer 원자 생성으로 완전 대체)는 raw SQL seed 경로가
+  남아 있는 동안 하지 않는다 — 32C write fence 시점에 재평가.
+"""
+
+from __future__ import annotations
+
+import uuid
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Final
+
+from sqlalchemy import text
+
+from kortravelmap.core.ids import feature_uuid_from_legacy
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+__all__ = [
+    "FeatureIdentity",
+    "FeatureIdentityRefError",
+    "FeatureIdentityInvariantError",
+    "MAX_FEATURE_REF_LENGTH",
+    "expected_feature_uuid",
+    "validate_feature_ref",
+    "verify_feature_uuid",
+    "resolve_feature_identity",
+    "get_feature_uuid_map",
+    "count_features_missing_identity",
+]
+
+
+MAX_FEATURE_REF_LENGTH: Final[int] = 256
+"""경계가 수용하는 feature 참조 문자열 최대 길이.
+
+기존 경계 상한(``weather_repo.WEATHER_BATCH_MAX_FEATURE_ID_LENGTH`` = 256)과
+정합 — legacy id는 실측 최대 수십 자, canonical UUID는 36자다.
+"""
+
+_CANONICAL_UUID_LENGTH: Final[int] = 36
+_UUID_HYPHEN_POSITIONS: Final[tuple[int, ...]] = (8, 13, 18, 23)
+
+
+class FeatureIdentityRefError(ValueError):
+    """경계가 받은 feature 참조 문자열이 형식 계약을 위반했다 (HTTP 422 대응)."""
+
+
+class FeatureIdentityInvariantError(RuntimeError):
+    """uuid 없는(또는 파생 규칙과 다른) 신규 feature 행 관측 — fail-close.
+
+    DB 층(0079 트리거 + NOT NULL)이 뚫린 상태로 write가 계속되면 T-VN-32C
+    alias-map checksum 대조가 조용히 갈라지므로, writer는 갱신을 계속하는 대신
+    즉시 실패한다.
+    """
+
+
+@dataclass(frozen=True)
+class FeatureIdentity:
+    """경계 해석 결과 — legacy 키와 UUID 정본 키 쌍."""
+
+    feature_id: str
+    feature_uuid: str
+
+
+def expected_feature_uuid(feature_id: str) -> str:
+    """dual 기간 정본 generator가 이 legacy id에 요구하는 ``feature_uuid``.
+
+    ``uuid5(FEATURE_UUID_NAMESPACE, feature_id)`` (모듈 docstring의 32B 결정).
+    """
+    return str(feature_uuid_from_legacy(feature_id))
+
+
+def verify_feature_uuid(feature_id: str, observed_feature_uuid: object) -> str:
+    """write 경로가 관측한 ``feature_uuid``를 파생 규칙과 대조한다 (fail-close).
+
+    Parameters
+    ----------
+    feature_id
+        legacy feature id (write 대상 행의 PK).
+    observed_feature_uuid
+        INSERT/UPSERT ``RETURNING``으로 관측한 값 (driver에 따라 str/UUID).
+
+    Returns
+    -------
+    str
+        canonical 소문자 UUID 문자열.
+
+    Raises
+    ------
+    FeatureIdentityInvariantError
+        값이 비어 있거나 파생 규칙(uuid5) 결과와 다른 경우.
+    """
+    expected = expected_feature_uuid(feature_id)
+    observed = str(observed_feature_uuid).lower() if observed_feature_uuid else None
+    if observed != expected:
+        raise FeatureIdentityInvariantError(
+            "feature identity invariant 위반 — legacy-only(또는 파생 불일치) 행 "
+            f"관측: feature_id={feature_id!r}, observed={observed!r}, "
+            f"expected={expected!r} (ADR-068 / T-VN-32B fail-close)."
+        )
+    return expected
+
+
+def _parse_canonical_uuid(ref: str) -> str | None:
+    """canonical hyphenated UUID 문자열이면 소문자 정규형, 아니면 ``None``.
+
+    ``uuid.UUID``는 hex-only/braced/URN 형태도 수용하지만, 경계는 응답이
+    내보내는 canonical 형태(36자, hyphen 위치 고정)만 UUID로 취급한다 — 그 외
+    문자열은 전부 opaque alias 후보다 (ADR-068 "opaque string" 계약).
+    """
+    if len(ref) != _CANONICAL_UUID_LENGTH:
+        return None
+    if any(ref[pos] != "-" for pos in _UUID_HYPHEN_POSITIONS):
+        return None
+    try:
+        parsed = uuid.UUID(ref)
+    except ValueError:
+        return None
+    return str(parsed)
+
+
+def validate_feature_ref(ref: str) -> str:
+    """경계 참조 문자열의 형식 계약 검증 — 위반 시 :class:`FeatureIdentityRefError`.
+
+    alias canonical CHECK(``alias <> '' AND alias = btrim(alias)``)와 같은
+    규칙에 길이 상한을 더한다. 통과한 문자열을 그대로 반환한다.
+    """
+    if not ref:
+        raise FeatureIdentityRefError("feature 참조는 비어 있을 수 없습니다.")
+    if ref != ref.strip():
+        raise FeatureIdentityRefError(
+            "feature 참조는 앞뒤 공백 없이 전달해야 합니다 (canonical alias 계약)."
+        )
+    if len(ref) > MAX_FEATURE_REF_LENGTH:
+        raise FeatureIdentityRefError(
+            f"feature 참조는 {MAX_FEATURE_REF_LENGTH}자 이하여야 합니다."
+        )
+    return ref
+
+
+# UUID 정본 조회 — features가 정본이고 alias table은 경계 해석 입구다.
+# alias 행의 feature_uuid 사본이 아니라 features의 정본 값을 읽는다.
+_RESOLVE_BY_UUID_SQL: Final[str] = """
+SELECT feature_id, CAST(feature_uuid AS text) AS feature_uuid
+FROM feature.features
+WHERE feature_uuid = CAST(:feature_uuid AS uuid)
+"""
+
+_RESOLVE_BY_ALIAS_SQL: Final[str] = """
+SELECT f.feature_id, CAST(f.feature_uuid AS text) AS feature_uuid
+FROM feature.feature_aliases AS a
+JOIN feature.features AS f
+  ON f.feature_id = a.feature_id
+WHERE a.alias = :alias
+"""
+
+_FEATURE_UUID_MAP_SQL: Final[str] = """
+SELECT feature_id, CAST(feature_uuid AS text) AS feature_uuid
+FROM feature.features
+WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
+"""
+
+# INV-068-01(모든 feature는 alias ≥ 1)과 uuid 결측을 현행 스키마에서 관측한다.
+# feature_uuid는 NOT NULL이라 정상 세계에서 둘 다 0이다 — 0이 아니면 DB 층
+# 보장이 뚫린 것이므로 호출자는 fail-close한다.
+_MISSING_IDENTITY_SQL: Final[str] = """
+SELECT
+    count(*) FILTER (WHERE f.feature_uuid IS NULL) AS missing_uuid,
+    count(*) FILTER (WHERE a.alias IS NULL) AS missing_alias
+FROM feature.features AS f
+LEFT JOIN feature.feature_aliases AS a
+  ON a.feature_id = f.feature_id
+ AND a.alias_kind = 'legacy_feature_id'
+"""
+
+
+async def resolve_feature_identity(
+    session: AsyncSession, ref: str
+) -> FeatureIdentity | None:
+    """경계가 받은 참조(legacy alias 또는 canonical UUID)를 정본 키 쌍으로 해석.
+
+    해석 규칙 (결정적 우선순위):
+
+    1. canonical UUID 형태(36자 hyphenated)면 ``features.feature_uuid`` 정본
+       조회를 먼저 시도한다.
+    2. 그 외(또는 1이 miss면) ``feature_aliases`` alias 조회로 해석한다 —
+       legacy id는 임의 문자열일 수 있으므로 UUID처럼 보이는 alias도 놓치지
+       않는다.
+
+    Parameters
+    ----------
+    session
+        AsyncSession.
+    ref
+        API path/query에서 받은 외부 참조 문자열.
+
+    Returns
+    -------
+    FeatureIdentity | None
+        해석 성공 시 정본 키 쌍, 어느 쪽으로도 해석 불가면 ``None`` (HTTP 404).
+
+    Raises
+    ------
+    FeatureIdentityRefError
+        형식 계약 위반 (빈 문자열/공백 패딩/길이 초과 — HTTP 422).
+    """
+    validate_feature_ref(ref)
+    canonical_uuid = _parse_canonical_uuid(ref)
+    if canonical_uuid is not None:
+        row = (
+            (
+                await session.execute(
+                    text(_RESOLVE_BY_UUID_SQL), {"feature_uuid": canonical_uuid}
+                )
+            )
+            .mappings()
+            .first()
+        )
+        if row is not None:
+            return FeatureIdentity(
+                feature_id=str(row["feature_id"]),
+                feature_uuid=str(row["feature_uuid"]),
+            )
+    row = (
+        (await session.execute(text(_RESOLVE_BY_ALIAS_SQL), {"alias": ref}))
+        .mappings()
+        .first()
+    )
+    if row is None:
+        return None
+    return FeatureIdentity(
+        feature_id=str(row["feature_id"]),
+        feature_uuid=str(row["feature_uuid"]),
+    )
+
+
+async def get_feature_uuid_map(
+    session: AsyncSession, feature_ids: Sequence[str]
+) -> dict[str, str]:
+    """legacy id 목록 → ``feature_uuid`` 정본 map (additive 병행 노출용).
+
+    복잡한 조회 SQL(예: weather batch)을 재작성하지 않고 응답에 ``feature_uuid``
+    를 병행 노출할 때 사용한다. 존재하지 않는 id는 결과에서 빠진다.
+    """
+    normalized = [feature_id for feature_id in feature_ids if feature_id]
+    if not normalized:
+        return {}
+    rows = (
+        (
+            await session.execute(
+                text(_FEATURE_UUID_MAP_SQL), {"feature_ids": normalized}
+            )
+        )
+        .mappings()
+        .all()
+    )
+    return {str(row["feature_id"]): str(row["feature_uuid"]) for row in rows}
+
+
+async def count_features_missing_identity(
+    session: AsyncSession,
+) -> tuple[int, int]:
+    """(uuid 결측 행 수, legacy alias 결측 행 수) — 정상 세계에서 ``(0, 0)``.
+
+    freeze INV-068-01의 현행 스키마 판(post-backfill)이다. 회귀 테스트와
+    운영 점검이 사용하고, 0이 아니면 write 경로를 계속 신뢰하지 말고
+    fail-close해야 한다 (:class:`FeatureIdentityInvariantError`의 사전 관측판).
+    """
+    row = (await session.execute(text(_MISSING_IDENTITY_SQL))).mappings().one()
+    return int(row["missing_uuid"]), int(row["missing_alias"])

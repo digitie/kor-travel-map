@@ -323,6 +323,12 @@ class FeatureRow(Base):
             postgresql_where=text("user_deleted_at IS NOT NULL"),
         ),
         UniqueConstraint("feature_uuid", name=conv("uq_features_feature_uuid")),
+        # T-VN-32B dual 기간 파생 규칙 fence (alembic 0080) — legacy id가 존재하는
+        # 동안 합법 UUID는 uuid5 파생값 하나뿐이다. 32C cutover에서 제거.
+        CheckConstraint(
+            "feature_uuid = feature.feature_uuid_from_legacy(feature_id)",
+            name=conv("ck_features_feature_uuid_dual_derivation"),
+        ),
         {"schema": "feature"},
     )
 
@@ -471,6 +477,12 @@ class FeatureAliasRow(Base):
         CheckConstraint(
             "alias_kind IN ('legacy_feature_id')",
             name=conv("ck_feature_aliases_alias_kind"),
+        ),
+        # T-VN-32B dual 기간 파생 규칙 fence (alembic 0080) — 32C alias-map
+        # DB-to-DB 이관의 무결성 전제. 32C cutover에서 제거.
+        CheckConstraint(
+            "feature_uuid = feature.feature_uuid_from_legacy(feature_id)",
+            name=conv("ck_feature_aliases_uuid_dual_derivation"),
         ),
         Index("idx_feature_aliases_feature", "feature_id"),
         Index("idx_feature_aliases_feature_uuid", "feature_uuid"),

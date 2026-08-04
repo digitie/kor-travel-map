@@ -486,18 +486,26 @@ async def test_provider_upsert_creates_uuid_and_alias_and_is_idempotent(
     assert alias_count_after == 1
 
 
-async def test_explicitly_provided_feature_uuid_is_respected(
+async def test_explicit_feature_uuid_must_match_dual_derivation(
     migrated_session: AsyncSession,
 ) -> None:
-    """트리거는 NULL일 때만 채운다 — 32B writer의 명시 값 전달과 호환."""
+    """T-VN-32B 강화 계약 — 명시 값은 존중하되 파생 규칙과 다르면 DB가 거부한다.
+
+    트리거는 여전히 NULL일 때만 채우지만(32A), dual 기간 합법 UUID는 uuid5
+    파생값 하나뿐이다 — 0080 CHECK ``ck_features_feature_uuid_dual_derivation``이
+    비파생 명시 값을 fail-close한다(32A의 열린 "명시 값 존중" 계약을 32B가
+    닫음 — 결정론이 32C 양 저장소 checksum 대조의 전제).
+    """
+    from sqlalchemy.exc import DBAPIError
+
     feature_id = "f_global_p_shadow_explicit_01"
-    explicit = "00000000-0000-4000-8000-000000000001"
+    derived = str(feature_uuid_from_legacy(feature_id))
     await migrated_session.execute(
         text(
             "INSERT INTO feature.features (feature_id, feature_uuid, kind, name, category) "
             "VALUES (:fid, CAST(:uuid AS uuid), 'place', 'explicit uuid', '01070100')"
         ),
-        {"fid": feature_id, "uuid": explicit},
+        {"fid": feature_id, "uuid": derived},
     )
     row = (
         await migrated_session.execute(
@@ -510,5 +518,19 @@ async def test_explicitly_provided_feature_uuid_is_respected(
             {"fid": feature_id},
         )
     ).one()
-    assert str(row.feature_uuid) == explicit
-    assert str(row.alias_uuid) == explicit
+    assert str(row.feature_uuid) == derived
+    assert str(row.alias_uuid) == derived
+
+    # 파생 규칙과 다른 명시 값은 CHECK 위반(SQLSTATE 23514)으로 거부된다.
+    with pytest.raises(DBAPIError) as excinfo:
+        await migrated_session.execute(
+            text(
+                "INSERT INTO feature.features (feature_id, feature_uuid, kind, name, category) "
+                "VALUES (:fid, CAST(:uuid AS uuid), 'place', 'drifted uuid', '01070100')"
+            ),
+            {
+                "fid": "f_global_p_shadow_explicit_02",
+                "uuid": "00000000-0000-4000-8000-000000000001",
+            },
+        )
+    assert "ck_features_feature_uuid_dual_derivation" in str(excinfo.value)

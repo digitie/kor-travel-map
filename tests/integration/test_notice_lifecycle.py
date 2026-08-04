@@ -2224,9 +2224,11 @@ async def test_public_active_reads_share_latest_and_ended_notice_filter(
     counts = await feature_repo.category_feature_counts(migrated_session)
     assert counts.get("99000000", 0) == 1
 
-    direct_public_ids = await feature_repo.public_active_notice_feature_ids(
-        migrated_session,
-        list(all_ids),
+    direct_public_ids = set(
+        await feature_repo.public_active_notice_feature_identities(
+            migrated_session,
+            list(all_ids),
+        )
     )
     assert direct_public_ids == expected_ids
 
@@ -2323,9 +2325,11 @@ async def test_read_paths_exclude_ended_notice_by_default(
     assert row is not None
     assert row["feature_id"] == ended_id
     # public 단건/batch가 사용하는 필터는 ID 직접 조회 우회를 허용하지 않는다.
-    assert await feature_repo.public_active_notice_feature_ids(
-        migrated_session,
-        [active_id, ended_id],
+    assert set(
+        await feature_repo.public_active_notice_feature_identities(
+            migrated_session,
+            [active_id, ended_id],
+        )
     ) == {active_id}
 
 

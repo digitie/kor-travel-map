@@ -433,6 +433,27 @@ def test_weather_batch_maps_found_no_data_retired_and_bitemporal_fields(
         )
 
     monkeypatch.setattr(mod.weather_repo, "get_weather_batch_snapshots", _batch)
+
+    # T-VN-32B additive — item feature 참조의 UUID 병행 노출. retired parent는
+    # 저장소에 없다고 가정해 map에서 빠진다(None 노출).
+    uuid_map = {
+        "earlier-no-data": "00000000-0000-5000-8000-000000000001",
+        "found": "00000000-0000-5000-8000-000000000002",
+        "found-peer": "00000000-0000-5000-8000-000000000003",
+        "no-data": "00000000-0000-5000-8000-000000000004",
+    }
+
+    async def _uuid_map(_session: Any, feature_ids: Any) -> dict[str, str]:
+        assert sorted(feature_ids) == [
+            "earlier-no-data",
+            "found",
+            "found-peer",
+            "no-data",
+            "retired",
+        ]
+        return uuid_map
+
+    monkeypatch.setattr(mod.feature_identity, "get_feature_uuid_map", _uuid_map)
     _fake_session(client)
     try:
         response = client.post(
@@ -460,7 +481,11 @@ def test_weather_batch_maps_found_no_data_retired_and_bitemporal_fields(
         ]
         assert data["targets"][0]["timeline_until"] == "2026-07-30T00:00:00Z"
         assert data["targets"][0]["items"] == [
-            {"state": "no_data", "feature_id": "earlier-no-data"}
+            {
+                "state": "no_data",
+                "feature_id": "earlier-no-data",
+                "feature_uuid": uuid_map["earlier-no-data"],
+            }
         ]
         later = data["targets"][1]
         assert later["timeline_until"] == "2026-07-31T00:00:00Z"
@@ -471,10 +496,16 @@ def test_weather_batch_maps_found_no_data_retired_and_bitemporal_fields(
             "retired",
         ]
         found = later["items"][0]
-        assert found == {"state": "found", "feature_id": "found", "card_key": "c2"}
+        assert found == {
+            "state": "found",
+            "feature_id": "found",
+            "feature_uuid": uuid_map["found"],
+            "card_key": "c2",
+        }
         assert later["items"][1] == {
             "state": "found",
             "feature_id": "found-peer",
+            "feature_uuid": uuid_map["found-peer"],
             "card_key": "c2",
         }
         assert len(later["cards"]) == 1
@@ -485,8 +516,17 @@ def test_weather_batch_maps_found_no_data_retired_and_bitemporal_fields(
             later["cards"][0]["timeline"][0]["effective_at"]
             == "2026-07-31T00:00:00Z"
         )
-        assert later["items"][2] == {"state": "no_data", "feature_id": "no-data"}
-        assert later["items"][3] == {"state": "retired", "feature_id": "retired"}
+        assert later["items"][2] == {
+            "state": "no_data",
+            "feature_id": "no-data",
+            "feature_uuid": uuid_map["no-data"],
+        }
+        # 저장소에 없는 retired parent — UUID 병행 노출도 None.
+        assert later["items"][3] == {
+            "state": "retired",
+            "feature_id": "retired",
+            "feature_uuid": None,
+        }
     finally:
         client.app.dependency_overrides.clear()
 

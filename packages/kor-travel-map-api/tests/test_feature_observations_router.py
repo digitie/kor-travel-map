@@ -211,13 +211,17 @@ def test_raw_lineage_404_when_feature_absent(
     monkeypatch: pytest.MonkeyPatch,
     path: str,
 ) -> None:
-    """operator lineage는 raw row 존재로 판정한다 — 없는 feature는 404."""
-    from kortravelmap.api.routers import features as module
+    """operator lineage 404 판정 — T-VN-32B 경계 해석 실패(참조 미해석)가 곧 404다.
 
-    async def _row(_session: object, _feature_id: str) -> None:
+    해석 성공은 ``feature.features`` 행 존재를 함의하므로 별도 존재 확인 쿼리는
+    없다(`kortravelmap.api.feature_ref` 참조).
+    """
+    from kortravelmap.infra import feature_identity
+
+    async def _resolve(_session: object, _ref: str) -> None:
         return None
 
-    monkeypatch.setattr(module.feature_repo, "get_feature_row", _row)
+    monkeypatch.setattr(feature_identity, "resolve_feature_identity", _resolve)
 
     response = client.get(path)
 

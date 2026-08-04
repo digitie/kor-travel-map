@@ -2430,6 +2430,18 @@
             "title": "Feature Id",
             "type": "string"
           },
+          "feature_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "UUID 정본 identity 병행 노출 (ADR-068, T-VN-32B additive).",
+            "title": "Feature Uuid"
+          },
           "row_revision": {
             "format": "int64",
             "minimum": 1.0,
@@ -2558,6 +2570,18 @@
             "title": "Feature Id",
             "type": "string"
           },
+          "feature_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "UUID 정본 identity 병행 노출 (ADR-068, T-VN-32B additive).",
+            "title": "Feature Uuid"
+          },
           "row_revision": {
             "format": "int64",
             "minimum": 1.0,
@@ -2586,6 +2610,18 @@
             "title": "Feature Id",
             "type": "string"
           },
+          "feature_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "UUID 정본 identity 병행 노출 (ADR-068, T-VN-32B additive).",
+            "title": "Feature Uuid"
+          },
           "row_revision": {
             "format": "int64",
             "minimum": 1.0,
@@ -2613,6 +2649,18 @@
           "feature_id": {
             "title": "Feature Id",
             "type": "string"
+          },
+          "feature_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "UUID 정본 identity 병행 노출 (ADR-068, T-VN-32B additive).",
+            "title": "Feature Uuid"
           },
           "row_revision": {
             "format": "int64",
@@ -2976,6 +3024,18 @@
             "title": "Feature Id",
             "type": "string"
           },
+          "feature_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "UUID 정본 identity 병행 노출 (ADR-068, T-VN-32B additive).",
+            "title": "Feature Uuid"
+          },
           "state": {
             "const": "found",
             "title": "State",
@@ -2997,6 +3057,18 @@
           "feature_id": {
             "title": "Feature Id",
             "type": "string"
+          },
+          "feature_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "UUID 정본 identity 병행 노출 (ADR-068, T-VN-32B additive).",
+            "title": "Feature Uuid"
           },
           "state": {
             "const": "no_data",
@@ -3059,11 +3131,23 @@
       },
       "WeatherBatchRetiredItem": {
         "additionalProperties": false,
-        "description": "현재 공개 parent가 아니어서 weather를 제공할 수 없는 item.",
+        "description": "현재 공개 parent가 아니어서 weather를 제공할 수 없는 item.\n\nparent가 저장소에 아예 없으면 ``feature_uuid``도 ``None``이다.",
         "properties": {
           "feature_id": {
             "title": "Feature Id",
             "type": "string"
+          },
+          "feature_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "UUID 정본 identity 병행 노출 (ADR-068, T-VN-32B additive).",
+            "title": "Feature Uuid"
           },
           "state": {
             "const": "retired",

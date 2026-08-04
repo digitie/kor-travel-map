@@ -5,6 +5,32 @@
 
 ## [Unreleased]
 
+### UUID identity dual read/write — Map consumer-first (2026-08-04, T-VN-32B)
+
+- **API**: feature 응답에 `feature_uuid`가 additive로 병행 노출된다(ADR-068 UUID
+  정본 identity) — user `GET /v1/features/{id}` detail·search·in-bounds·nearby
+  item, service `POST /v1/features/batch` item(found/retired/suppressed/
+  unchanged)·`POST /v1/features/weather/batch` item, admin `GET /v1/admin/
+  features` 목록·상세. 응답 `feature_id` 값은 legacy `f_*` 유지 — UUID 전환은
+  T-VN-32C cutover.
+- **API**: 모든 feature `{feature_id}` 경로의 참조가 legacy id와 canonical
+  UUID 양쪽을 수용한다(경계 alias 해석 — user detail·sources·observations·
+  weather·price·contained-features, admin detail·revision·weather·price·
+  PATCH·DELETE·deactivate). 형식 오류(빈 문자열/공백 패딩/256자 초과)는 422,
+  미해석 참조는 404.
+- **DATABASE**: `0080_uuid_dual_read` — ① `feature.public_features` view 컬럼
+  목록을 재고정해 `feature_uuid`를 노출한다(공개 술어 무변경, 무손실
+  downgrade). ② dual 기간 파생 규칙 CHECK 2종
+  (`ck_features_feature_uuid_dual_derivation`,
+  `ck_feature_aliases_uuid_dual_derivation`)을 연결한다 — uuid5 파생값과 다른
+  `feature_uuid` write는 DB가 거부한다(T-VN-32C cutover에서 제거되는 한정
+  fence).
+- **INTERNAL**: 신규 feature write는 writer가 dual 기간 정본 generator(uuid5
+  legacy 파생, UUIDv7 미채택 결정)로 `feature_uuid`를 명시 생성하고, 관측값이
+  파생 규칙과 다르면 `FeatureIdentityInvariantError`로 fail-close한다
+  (legacy-only 신규 행 차단). notice lineage 가시성 판정 표면은
+  `public_active_notice_feature_identities`(id→uuid 쌍) 하나로 교체됐다.
+
 ### UUID identity shadow — schema·deterministic backfill (2026-08-04, T-VN-32A)
 
 - **DATABASE**: `0079_feature_uuid_shadow` — `feature.features`에 `feature_uuid`

@@ -10,6 +10,34 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-08-04 (7) — T-VN-32B Map consumer-first dual read/write 완료
+
+경계 alias 해석(`infra/feature_identity.resolve_feature_identity` — legacy/UUID
+양형식, 형식 오류 422·미해석 404)을 공용 헬퍼(`api.feature_ref`)로 **모든
+feature `{feature_id}` 경로**(user detail·sources·observations·weather·price·
+contained / admin detail·revision·weather·price·PATCH·DELETE·deactivate)에
+연결했다 — 내부 전달은 정본 키로만, 중복 존재 확인 쿼리는 제거. repo 읽기
+경로(단건/bbox/search/nearby/service batch/admin 목록·상세)와 notice lineage
+(`public_active_notice_feature_identities` — 기존 ids 표면은 제거)가
+`feature_uuid`를 additive 병행 노출한다(alembic `0080_uuid_dual_read`로 공개
+view 재고정). **dual 기간 정본 generator = uuid5 파생(UUIDv7 미채택) 결정**을
+`0080` CHECK 2종으로 DB 층에서 강제(파생 불일치 write는 SQLSTATE 23514
+fail-close, 32C에서 제거하는 한정 fence) + writer 명시 INSERT·RETURNING 대조
+(`FeatureIdentityInvariantError`), 0079 트리거는 편의 fill로 유지. 응답
+`feature_id` 값은 legacy 유지(전환은 32C — consumer-first 규율). OpenAPI 3
+spec 재생성 + diff artifact baseline 재고정(`revisions` 기록). 동반 수정:
+perf gate tier1 frozen shape 재고정 + H35 cutover 도구 head 등호 고정 →
+campaign target(0078) 앵커 수정(32A가 만든 본 branch 잠복 회귀). 검증: unit
+1,981 · api 1,069 · 신규 통합 9 · 회귀 통합 green(잔여 실패는 live geo 인증
+미결선·lock-poll env·부하 flake — base 재현/단독 green으로 32B 무관 판정) ·
+export --check · ruff/mypy --strict/lint-imports clean. 상세는 tasks.md 완료
+기록·journal (7).
+
+**다음 한 작업**: `T-VN-32C`(PinVi alias-map cutover·legacy write fence) —
+PinVi를 UUID+alias contract로 선전환(검증된 alias map DB-to-DB 이관), 양 저장소
+checksum 일치 후 Map 응답 UUID 전환 + legacy write fence. PinVi vendored
+snapshot 3종(user/service/admin-detail) 재추출은 32C 쌍 PR에서.
+
 ## 2026-08-04 (6) — T-VN-32A UUID identity shadow 완료
 
 Wave 2 Lane A 첫 구현 task. alembic `0079_feature_uuid_shadow`로

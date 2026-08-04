@@ -17,6 +17,92 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-08-04 (7) — T-VN-32B Map consumer-first dual read/write
+
+> 사용자 지시(작업 중 우선순위 변경): 호환성·기존 계약 유지보다 **설계적
+> 우월성·최적화·유지보수성** 우선, 대대적 코드/schema 변경 허용. 단 PinVi 대면
+> 표면의 배포 순서는 rollout artifact(consumer-first)를 유지하고, freeze
+> artifact와 어긋나는 변경은 artifact 개정을 같은 커밋에 포함한다. 이에 따라
+> 초기 additive-최소 구현을 세 곳에서 강화했다(아래 ①경계 전면 적용·④CHECK
+> fence·notice ids 표면 제거).
+
+- **경계 alias 해석 — 단일 메커니즘, 전 경로 적용**: `infra/feature_identity.py`
+  신설 — `resolve_feature_identity(session, ref)`가 legacy `f_*` alias·
+  canonical UUID 양쪽 참조를 `FeatureIdentity(feature_id, feature_uuid)` 정본
+  키 쌍으로 해석(UUID-정본 조회 우선, miss 시 alias fallback — legacy id가
+  UUID처럼 보여도 놓치지 않는 결정적 순서). 형식 계약(`validate_feature_ref` —
+  빈 문자열/공백 패딩/256자 초과)은 422, 미해석은 404.
+  `kortravelmap.api.feature_ref.resolve_feature_ref_or_error` 공용 헬퍼를 모든
+  feature `{feature_id}` 경로 handler 첫 줄에 배치 — user detail·sources·
+  observations history·weather·price·contained-features / admin detail·
+  revision·weather·price·PATCH·DELETE·deactivate. 해석 뒤 내부 전달·조인은
+  정본 키로만(ADR-068 결정 3 "alias lookup은 경계 전용"). 해석 성공이 행
+  존재를 함의하므로 operator lineage의 별도 존재 확인(`_operator_feature_or_404`
+  + `get_feature_row` 쿼리 1회)은 제거 — 경로당 쿼리 수 동일하게 유지하면서
+  메커니즘은 하나로 수렴. auth 의존성보다 뒤(handler 본문)라 FastAPI 의존성
+  평가 순서에 의존하지 않는다.
+- **dual read (additive)**: alembic `0080_uuid_dual_read`가 `public_features`
+  view의 SELECT * 컬럼 목록을 재고정해 `feature_uuid`를 노출(공개 술어 무변경 —
+  3축 교체는 34B 소관, downgrade는 information_schema 기반 명시 컬럼 재생성으로
+  0079 downgrade 선행 조건 유지). repo read는 전부 view/base에서
+  `CAST(feature_uuid AS text)`를 **select 목록에만 추가**(join/술어 무변경 —
+  EXPLAIN 회귀 없음): 단건 `_FEATURE_ROW_COLUMNS_SQL`·bbox 2종·contained·
+  search 2종·nearby 2종·service batch(`base.feature_uuid`)·admin 목록/상세.
+  응답 additive: user detail/search/in-bounds/nearby item + service
+  `POST /features/batch` item(4/5 state) + `POST /features/weather/batch` item
+  (거대 bitemporal 조회 SQL은 재작성하지 않고 `get_feature_uuid_map` 병행
+  해석 — 관심사 분리) + admin 목록/상세. **응답 `feature_id` 값은 legacy
+  유지** — rollout이 응답 UUID 전환을 32C("양 저장소 checksum 일치 후")로
+  고정한 consumer-first cutover 규율.
+- **notice lineage dual — 표면 교체**: `public_active_notice_feature_identities`
+  가 `{feature_id: feature_uuid}`를 반환하는 단일 표면. 기존
+  `public_active_notice_feature_ids`는 **제거**(호환 shim을 남기지 않음 —
+  잔여 호출자였던 통합 테스트 5곳을 identities로 이행).
+- **신규 write — 파생 규칙의 DB 강제(fail-close by construction)**: dual 기간
+  정본 신규 행 generator를 **uuid5 파생으로 결정**(32A가 32B 소관으로 이월한
+  UUIDv7 여부 — 결정론이 KTM/PinVi 독립 계산·checksum 대조의 전제라 legacy id
+  소멸 전 미채택). 이 규칙을 app 검사에만 두지 않고 `0080`이 CHECK 2종
+  (`ck_features_feature_uuid_dual_derivation` ·
+  `ck_feature_aliases_uuid_dual_derivation`)으로 저장 경계에서 강제 — 파생값과
+  다른 어떤 write도 SQLSTATE 23514로 거부된다(비용: pgcrypto SHA-1 1회/row,
+  ~µs). 32A의 "임의 명시 uuid 존중" 열린 계약은 의도적으로 닫았고 해당 32A
+  통합 테스트를 fail-close 계약으로 재정의했다. provider upsert
+  (`_UPSERT_FEATURE_SQL`)·admin add(`_APPLY_FEATURE_ADD_SQL`)는 `feature_uuid`
+  를 writer 명시 INSERT + RETURNING 대조(`verify_feature_uuid` →
+  `FeatureIdentityInvariantError`) — DB fence 위의 관측 계층. 0079 트리거
+  2종은 raw SQL seed 경로 편의 fill로 유지(파생 강제는 CHECK 소관, 트리거
+  제거는 32C write fence 시점 재평가 — 0079 docstring 갱신).
+  `count_features_missing_identity`가 uuid/alias 결측 관측(INV-068-01 현행판).
+  CHECK 2종은 dual 기간 한정 fence — 32C에서 비파생 generator 채택과 함께
+  제거한다(ADR-075 단계 fence 규율, 0080 docstring 근거).
+- **OpenAPI·diff artifact 개정**: 3 spec 재생성(additive 필드·전 경로 dual
+  수용·422 응답), `openapi-diff-v1.json` baseline sha256 3종 재고정 +
+  `revisions` 배열로 개정 사유 기록(diff 항목·counts 무변경 — ADR-068
+  enum/status 항목은 32C 목표 상태 존치, CHECK fence의 32C 제거 계획 명시).
+  unit artifact bytes 상수 재고정. PinVi vendored snapshot 재추출은 rollout대로
+  32C 쌍 PR 소관 — 미변경.
+- **32C/39 이월 명시**: 내부 FK 체인(source_links/curation/price/weather)의
+  UUID 조인 재작성·referencing table shadow uuid(rollout이 legacy FK 체인
+  fence=32C·제거=39로 고정) · 응답 `feature_id` 값 UUID 전환 · legacy write
+  fence·트리거/CHECK 제거 · legacy ID 물리 제거(T-VN-39 removal manifest).
+- **동반 수정 2건**: ① perf gate tier1 frozen response shape 재고정(public
+  detail·service batch에 `feature_uuid` — 실패 메시지 절차대로 의도적 계약
+  변경 갱신). ② **H35 cutover 도구의 head 등호 고정 해제** — `_h35_schema`의
+  `repository_alembic_head` 검사가 저장소 head == 0078 등호였는데, 32A(0079)가
+  head를 전진시킨 순간부터 preflight/migrate가 영구 rejected였다(본 branch
+  잠복 회귀 — base 커밋 5d4db58c에서 재현 확인). 캠페인 도구는 target에 앵커
+  하도록 수정: lineage 포함(조상) 판정 + upgrade도 `head`가 아니라
+  `TARGET_SCHEMA(0078)`까지만. h35 unit/통합 81건 green.
+- **검증**: unit 1,981 passed(identity 순수 계약 11 신규) · api 패키지 1,069
+  passed(경계 dual 수용·422·additive 노출·404 재정의, 공용 echo-resolver
+  conftest) · 신규 통합 9 passed(`test_feature_identity_boundary.py` — 양형식
+  해석·미존재·형식 오류·view/단건/bbox/batch/notice 병행 노출·upsert/admin-add
+  원자성·CHECK drift 거부·alias 결측 invariant 관측) · 32A migration 8(명시
+  uuid fail-close 재정의) · feature_repo 26 · freeze 3 · alembic 일관성/공개
+  view/notice(방어 cast·lifecycle)/nearby/in-bounds 회귀 73 · 전체 통합 suite
+  green · export --check drift 0 · ruff/mypy --strict(main+api)/lint-imports
+  clean.
+
 ## 2026-08-04 (6) — T-VN-32A UUID identity shadow (schema·deterministic backfill)
 
 - **alembic `0079_feature_uuid_shadow`**: `feature.features.feature_uuid` shadow
