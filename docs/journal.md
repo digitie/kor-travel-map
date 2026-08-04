@@ -17,6 +17,38 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-08-04 (6) — T-VN-32A UUID identity shadow (schema·deterministic backfill)
+
+- **alembic `0079_feature_uuid_shadow`**: `feature.features.feature_uuid` shadow
+  컬럼(nullable 추가 → 결정적 backfill → NOT NULL + `uq_features_feature_uuid`) +
+  `feature.feature_aliases`(alias text PK · legacy `feature_id` text FK ·
+  `feature_uuid` · `alias_kind` · created_at, freeze `target-schema-v1.sql` §4의
+  대응 제약명 `pk_feature_aliases`/`fk_feature_aliases_feature`/
+  `ck_feature_aliases_{alias,kind}_canonical`/`idx_feature_aliases_feature` 정합).
+  기존 `f_*` PK·FK·읽기 경로 무변경(consumer-rollout 32A "읽기 경로 무변경").
+- **freeze 미정 3건 결정**(0079 docstring에 근거 기록): ① backfill/shadow 생성기
+  `uuid5(FEATURE_UUID_NAMESPACE, legacy_id)`, namespace =
+  `uuid5(NAMESPACE_URL, 'kor-travel-map:feature-uuid:v1')` =
+  `75d60e13-2779-5b06-a920-6b1b892a7c84` — 두 저장소 독립 계산·재실행 동일(32C
+  checksum 전제), DB server default는 두지 않음(정본 신규 행 generator·UUIDv7
+  여부는 32B 소관). ② alias_kind 닫힌 CHECK `('legacy_feature_id')` — writer의
+  임의 kind 발명 fail-close, 확장은 additive migration. ③ alias FK ON DELETE
+  CASCADE — alias/uuid는 재계산 가능한 파생값, feature 종속 행 freeze 정본
+  패턴과 일관(ADR-075 "alias 제거 금지"는 cutover-era DDL 규율로 별개).
+- **신규 INSERT 경로**: features INSERT는 repo 2곳 + 통합 테스트 37개 파일의
+  직접 seed — 경로별 SQL 수정 대신 트리거로 일괄 보장(BEFORE INSERT fill /
+  AFTER INSERT alias 원자 생성, NULL일 때만 채워 32B writer 명시 값과 호환).
+  infra upsert SQL은 수정 불필요 판단. SQL uuid5는 uuid-ossp 없이 pgcrypto
+  `digest(...,'sha1')` 수동 구성(`feature.feature_uuid_from_legacy` IMMUTABLE) —
+  Python 정본 `core/ids.feature_uuid_from_legacy`와 고정 벡터 상호 대조.
+- **검증**: unit 1,970 passed(고정 벡터 2개 신규) · 신규 통합 8 passed(backfill
+  완전성·UNIQUE/NOT NULL·alias 1:1·INV-068-01~04 freeze artifact 그대로 실행
+  (05는 33A 컬럼 참조라 제외 명시)·별도 DB 결정론·downgrade 무손실 왕복·upsert
+  원자 생성) · alembic_upgrade + bundle_persist 23 passed · freeze 3 passed ·
+  metadata consistency(`alembic check`) + feature_repo_load + row_revision
+  30 passed · ruff/mypy --strict/lint-imports clean. codegraph MCP는 이 세션에
+  미결선이라 grep 기반 영향도 조사로 대체(write 경로 2곳·SELECT * 부재 확인).
+
 ## 2026-08-04 (5) — T-VN-31 freeze 적대 리뷰 2건 반영
 
 - **정합성 리뷰(F-1~F-11) 반영**: 발명분 회수 — retired∧draft state CHECK 제거

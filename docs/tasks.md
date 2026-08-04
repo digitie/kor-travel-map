@@ -64,7 +64,7 @@ barrier로 직렬화한다.
     [/] `T-VN-41D`(durable writer-drain)
 - **Wave 2 barrier 이후**
   - freeze(Lane A): [x] `T-VN-31A` → [x] `T-VN-31B` → [x] `T-VN-31C`
-  - Lane A: [ ] `T-VN-32A` → [ ] `T-VN-32B` → [ ] `T-VN-32C` →
+  - Lane A: [x] `T-VN-32A` → [ ] `T-VN-32B` → [ ] `T-VN-32C` →
     [ ] `T-VN-35A` → [ ] `T-VN-35B` → [ ] `T-VN-35C` → [ ] `T-VN-35D` →
     [ ] `T-VN-37A` → [ ] `T-VN-37B` → [ ] `T-VN-37C`
   - Lane B shadow: [ ] `T-VN-33A` → [ ] `T-VN-33B` → [ ] `T-VN-33C` →
@@ -1793,10 +1793,28 @@ ADR은 존재하지만 목표 DDL/OpenAPI diff/실행 제약 artifact는 없다.
 
 ### T-VN-32 — UUID identity shadow 전환 (Lane A)
 
-- [ ] T-VN-32A — **UUID schema·deterministic backfill**
+- [x] T-VN-32A — **UUID schema·deterministic backfill** (2026-08-04 완료)
 
   UUID identity와 legacy alias table을 추가하고 같은 snapshot에서 deterministic backfill·UNIQUE/FK
   불변식을 고정한다. 기존 문자열 ID는 아직 제거하지 않는다.
+
+  완료 기록: alembic `0079_feature_uuid_shadow` — `feature.features.feature_uuid`
+  (backfill 후 NOT NULL + `uq_features_feature_uuid`) + `feature.feature_aliases`
+  (alias PK · legacy `feature_id` text FK · `feature_uuid` · `alias_kind`, freeze
+  §4 대응 제약명 정합) + INSERT 트리거 2종(BEFORE fill / AFTER legacy alias 원자
+  생성 — repo 2곳 + 테스트 직접 seed 37개 파일 등 전 write 경로를 경로별 SQL 수정
+  없이 보장). **freeze 미정 3건 결정**(0079 docstring 근거): ① 생성기 =
+  `uuid5(uuid5(NAMESPACE_URL, 'kor-travel-map:feature-uuid:v1'), legacy_id)` —
+  DB server default 없음(정본 신규 행 generator·UUIDv7 여부는 32B 소관), ②
+  alias_kind = 닫힌 CHECK `('legacy_feature_id')`, ③ alias FK ON DELETE =
+  CASCADE(alias/uuid는 파생값·재계산 가능). Python 정본
+  `core/ids.feature_uuid_from_legacy` + pgcrypto SHA-1 SQL mirror
+  `feature.feature_uuid_from_legacy`(고정 벡터 상호 대조).
+  `tests/integration/test_feature_uuid_shadow_migration.py` 8건 — backfill
+  완전성·UNIQUE/NOT NULL·alias 1:1·freeze INV-068-01~04 그대로 실행(05는
+  provider_dataset_id가 33A 소관이라 제외 명시)·별도 DB 재실행 결정론·downgrade
+  무손실 왕복·신규 upsert 원자 생성·명시 uuid 존중 + unit 고정 벡터 2개. 읽기
+  경로·기존 문자열 ID 무변경(32A 계약).
 
 - [ ] T-VN-32B — **Map consumer-first dual read/write**
 

@@ -5,6 +5,19 @@
 
 ## [Unreleased]
 
+### UUID identity shadow — schema·deterministic backfill (2026-08-04, T-VN-32A)
+
+- **DATABASE**: `0079_feature_uuid_shadow` — `feature.features`에 `feature_uuid`
+  shadow 컬럼을 추가하고 `uuid5(uuid5(NAMESPACE_URL, 'kor-travel-map:feature-uuid:v1'),
+  legacy_feature_id)`로 결정적 backfill 후 NOT NULL + `uq_features_feature_uuid`를
+  연결한다. `feature.feature_aliases`(feature당 `alias = feature_id` legacy alias 1행,
+  `alias_kind = 'legacy_feature_id'` 닫힌 CHECK, legacy FK `ON DELETE CASCADE`)를
+  신설하고, INSERT 트리거 2종이 신규 행의 uuid·alias를 같은 transaction에서 생성한다
+  (호출자가 명시한 uuid는 존중). 기존 문자열 `f_*` PK·FK·읽기 경로는 무변경(shadow
+  단계, ADR-068)이며 downgrade는 파생 구조물만 제거해 무손실이다. Python 정본은
+  `kortravelmap.core.feature_uuid_from_legacy`, SQL mirror는 pgcrypto 기반
+  `feature.feature_uuid_from_legacy`(고정 벡터 상호 대조).
+
 ### H35 typed cutover GC·최종 cache-target 증적 (2026-08-02, T-VN-H35/T-VN-41)
 
 - **OPERATIONS**: Map cutover helper 순서를 `preflight→migrate→csv5→gc→verify`로 확장했다. `gc`는 기존

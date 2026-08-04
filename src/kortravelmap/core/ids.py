@@ -49,6 +49,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import uuid
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Final
@@ -60,7 +61,9 @@ __all__ = [
     "make_payload_hash",
     "make_weather_value_key",
     "make_price_value_key",
+    "feature_uuid_from_legacy",
     "FEATURE_ID_HASH_LENGTH",
+    "FEATURE_UUID_NAMESPACE",
     "SOURCE_RECORD_KEY_HASH_LENGTH",
     "INTEGRITY_FINDING_KEY_HASH_LENGTH",
     "PAYLOAD_HASH_DEFAULT_LENGTH",
@@ -167,6 +170,69 @@ def _validate_component(name: str, value: str) -> None:
             f"{name!r}에 '|' 문자가 포함됨 — 구분자 충돌로 결정성 깨짐 (ADR-009). "
             f"value={value!r}"
         )
+
+
+# ── feature_uuid_from_legacy (T-VN-32A, ADR-068) ───────────────────────────
+
+
+FEATURE_UUID_NAMESPACE: Final[uuid.UUID] = uuid.uuid5(
+    uuid.NAMESPACE_URL, "kor-travel-map:feature-uuid:v1"
+)
+"""legacy ``f_*`` feature_id → shadow ``feature_uuid`` 파생용 고정 namespace.
+
+파생 근거: ``uuid5(NAMESPACE_URL, 'kor-travel-map:feature-uuid:v1')``
+= ``75d60e13-2779-5b06-a920-6b1b892a7c84``. RFC 4122 표준 namespace에서
+저장소 식별 문자열로 한 번 더 파생해 다른 시스템의 uuid5 공간과 충돌하지
+않는다. **변경 금지** — 값이 바뀌면 backfill된 전 UUID가 갈라진다 (영구 약속,
+alembic ``0079_feature_uuid_shadow``의 SQL mirror
+``feature.feature_uuid_from_legacy``와 반드시 일치해야 한다).
+
+버전 suffix ``:v1``은 파생 규칙 자체를 재정의해야 할 때(그럴 일이 없어야
+한다) 새 namespace임을 명시적으로 드러내기 위한 것이다.
+"""
+
+
+def feature_uuid_from_legacy(feature_id: str) -> uuid.UUID:
+    """legacy 문자열 ``feature_id`` → 결정적 shadow ``feature_uuid`` (ADR-068).
+
+    같은 legacy id는 언제 어디서 계산해도 같은 UUID다 — 같은 snapshot에서
+    재실행해도, 두 저장소(KTM/PinVi)가 독립 계산해도 동일하다 (T-VN-32C
+    checksum 대조의 전제). 입력은 legacy id 문자열 **하나뿐**이며 bjd/category
+    등 수정 가능한 속성은 어떤 것도 입력이 아니다 (ADR-068 결정 2의 정신).
+
+    Parameters
+    ----------
+    feature_id
+        legacy feature id (``make_feature_id`` 결과 또는 과거 임의 문자열 id).
+
+    Returns
+    -------
+    uuid.UUID
+        ``uuid5(FEATURE_UUID_NAMESPACE, feature_id)`` — RFC 4122 version 5.
+
+    Raises
+    ------
+    ValueError
+        ``feature_id``가 빈 문자열인 경우.
+
+    Examples
+    --------
+    >>> str(feature_uuid_from_legacy("f_1168010100_p_3c0c2820e96d28d3"))
+    '4232803d-a8a7-57c2-b80b-e13ca8fa1a2a'
+    >>> feature_uuid_from_legacy("f_global_e_x") == feature_uuid_from_legacy("f_global_e_x")
+    True
+
+    Notes
+    -----
+    - DB mirror: alembic ``0079``가 만드는 IMMUTABLE SQL 함수
+      ``feature.feature_uuid_from_legacy(text)`` (pgcrypto SHA-1 기반 수동
+      uuid5 구성)와 결과가 동일하다. 통합 테스트가 고정 벡터로 양쪽을 대조한다.
+    - 신규 행(post-cutover, legacy id가 없는 세계)의 UUID generator(UUIDv7
+      채택 여부)는 본 함수의 소관이 아니다 — T-VN-32B가 결정한다.
+    """
+    if not feature_id:
+        raise ValueError("feature_id는 비어 있을 수 없음 (ADR-068 alias 파생).")
+    return uuid.uuid5(FEATURE_UUID_NAMESPACE, feature_id)
 
 
 SOURCE_RECORD_KEY_HASH_LENGTH: Final[int] = 20

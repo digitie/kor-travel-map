@@ -95,6 +95,7 @@ __all__ = [
     "metadata",
     "Base",
     "FeatureRow",
+    "FeatureAliasRow",
     "WeatherMetricSeriesRow",
     "FeatureVersionRow",
     "SourceEntityRow",
@@ -321,10 +322,17 @@ class FeatureRow(Base):
             "user_deleted_at",
             postgresql_where=text("user_deleted_at IS NOT NULL"),
         ),
+        UniqueConstraint("feature_uuid", name=conv("uq_features_feature_uuid")),
         {"schema": "feature"},
     )
 
     feature_id: Mapped[str] = mapped_column(String, primary_key=True)
+    # T-VN-32A(ADR-068) UUID identity shadow — legacy id의 결정적 파생값
+    # uuid5(FEATURE_UUID_NAMESPACE, feature_id) (core/ids.feature_uuid_from_legacy).
+    # DB server default 없음(freeze 미정 존중 — 신규 행 정본 generator는 T-VN-32B
+    # 소관). 신규 INSERT는 0079의 BEFORE INSERT 트리거
+    # trg_features_feature_uuid_fill이 NULL일 때 파생값으로 채운다.
+    feature_uuid: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
     kind: Mapped[str] = mapped_column(String, nullable=False)
     name: Mapped[str] = mapped_column(String, nullable=False)
     category: Mapped[str] = mapped_column(String, nullable=False)
@@ -427,6 +435,65 @@ class FeatureRow(Base):
         server_default=text("now()"),
     )
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class FeatureAliasRow(Base):
+    """``feature.feature_aliases`` — legacy ``f_*`` alias 보존 (T-VN-32A, ADR-068 결정 3).
+
+    shadow 단계 구조: 실질 결합축은 legacy ``feature_id``(text FK)이고,
+    ``feature_uuid``는 target 전환(T-VN-32C alias-map 이관) 때 재작성 없이
+    그대로 쓰는 파생 사본이다. 컬럼·제약 이름은 freeze
+    ``contracts/vnext/target-schema-v1.sql`` §4의 대응물과 정합한다
+    (``pk_feature_aliases`` / ``fk_feature_aliases_feature`` /
+    ``ck_feature_aliases_alias_canonical`` / ``ck_feature_aliases_kind_canonical`` /
+    ``idx_feature_aliases_feature``).
+
+    freeze가 미정으로 남긴 3건은 T-VN-32A가 결정했다 (alembic 0079 docstring):
+
+    - alias_kind 값 집합 — 닫힌 CHECK ``('legacy_feature_id')``
+    - FK ON DELETE — ``CASCADE`` (alias는 파생값·재계산 가능)
+    - backfill generator — ``uuid5(FEATURE_UUID_NAMESPACE, feature_id)``
+
+    행 생성은 0079 AFTER INSERT 트리거(``trg_features_legacy_alias``)가 feature
+    INSERT와 같은 transaction에서 수행한다(원자 생성).
+    """
+
+    __tablename__ = "feature_aliases"
+    __table_args__ = (
+        CheckConstraint(
+            "alias <> '' AND alias = btrim(alias)",
+            name=conv("ck_feature_aliases_alias_canonical"),
+        ),
+        CheckConstraint(
+            "alias_kind <> '' AND alias_kind = btrim(alias_kind)",
+            name=conv("ck_feature_aliases_kind_canonical"),
+        ),
+        CheckConstraint(
+            "alias_kind IN ('legacy_feature_id')",
+            name=conv("ck_feature_aliases_alias_kind"),
+        ),
+        Index("idx_feature_aliases_feature", "feature_id"),
+        Index("idx_feature_aliases_feature_uuid", "feature_uuid"),
+        {"schema": "feature"},
+    )
+
+    alias: Mapped[str] = mapped_column(Text, primary_key=True)
+    feature_id: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey(
+            "feature.features.feature_id",
+            ondelete="CASCADE",
+            name=conv("fk_feature_aliases_feature"),
+        ),
+        nullable=False,
+    )
+    feature_uuid: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    alias_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
 
 
 class WeatherMetricSeriesRow(Base):

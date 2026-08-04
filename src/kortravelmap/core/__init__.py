@@ -65,11 +65,13 @@ from kortravelmap.core.geometry import (
 )
 from kortravelmap.core.ids import (
     FEATURE_ID_HASH_LENGTH,
+    FEATURE_UUID_NAMESPACE,
     INTEGRITY_FINDING_KEY_HASH_LENGTH,
     PAYLOAD_HASH_DEFAULT_LENGTH,
     PRICE_VALUE_KEY_HASH_LENGTH,
     SOURCE_RECORD_KEY_HASH_LENGTH,
     WEATHER_VALUE_KEY_HASH_LENGTH,
+    feature_uuid_from_legacy,
     make_feature_id,
     make_integrity_finding_key,
     make_payload_hash,
@@ -146,6 +148,9 @@ __all__ = [
     "make_payload_hash",
     "make_weather_value_key",
     "make_price_value_key",
+    # ids — UUID identity shadow (T-VN-32A, ADR-068)
+    "feature_uuid_from_legacy",
+    "FEATURE_UUID_NAMESPACE",
     "FEATURE_ID_HASH_LENGTH",
     "INTEGRITY_FINDING_KEY_HASH_LENGTH",
     "SOURCE_RECORD_KEY_HASH_LENGTH",

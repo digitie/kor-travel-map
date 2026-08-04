@@ -10,6 +10,21 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-08-04 (6) — T-VN-32A UUID identity shadow 완료
+
+Wave 2 Lane A 첫 구현 task. alembic `0079_feature_uuid_shadow`로
+`feature.features.feature_uuid`(결정적 backfill → NOT NULL + UNIQUE)와
+`feature.feature_aliases`(legacy alias 1:1, freeze §4 제약명 정합)를 추가했다.
+freeze 미정 3건을 결정(생성기 uuid5 파생·DB default 없음 / alias_kind 닫힌
+CHECK / FK ON DELETE CASCADE — 근거는 0079 docstring·journal). 신규 INSERT는
+트리거 2종이 uuid+alias를 원자 생성(32B writer 명시 값 존중). 검증: unit
+1,970 · 신규 통합 8 · 회귀 트리오 23 · freeze 3 · alembic check 30 · ruff/
+mypy/lint-imports clean.
+
+**다음 한 작업**: `T-VN-32B`(Map consumer-first dual read/write) — UUID 정본
+읽기·alias 경계 해석·신규 write의 writer 측 원자 생성(트리거 대체)·정본 신규
+행 generator(UUIDv7 여부) 결정.
+
 ## 2026-08-04 (5) — T-VN-31A/B/C vNext target freeze 완료
 
 Wave 2 barrier의 freeze 3종을 완료했다. `contracts/vnext/` artifact 8개(목표 DDL·
