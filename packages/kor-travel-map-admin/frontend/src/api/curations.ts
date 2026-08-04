@@ -14,6 +14,24 @@ import {
   withDomainIdempotencyFingerprint,
   withDomainIdempotencySubmission,
 } from "./client";
+import type { components } from "./types";
+
+type QuarantineSchemas = components["schemas"];
+
+export type CurationQuarantineTheme =
+  QuarantineSchemas["CurationQuarantineThemeView"];
+export type CurationQuarantineSource =
+  QuarantineSchemas["CurationQuarantineSourceView"];
+export type CurationQuarantineOriginalCollection =
+  QuarantineSchemas["CurationQuarantineOriginalCollectionView"];
+export type CurationQuarantineCollection =
+  QuarantineSchemas["AdminCurationQuarantineCollectionView"];
+export type CurationQuarantineItem =
+  QuarantineSchemas["AdminCurationQuarantineItemView"];
+export type CurationQuarantineConflictKind =
+  CurationQuarantineItem["conflict_kind"];
+export type CurationQuarantineReclassifyRequest =
+  QuarantineSchemas["AdminCurationQuarantineReclassifyRequest"];
 
 export type CurationCollectionStatus = "draft" | "published" | "archived";
 export type ActiveCurationCollectionStatus = "draft" | "published";
@@ -239,11 +257,32 @@ export interface AdminCurationCollectionsParams {
   cursor?: string;
 }
 
+export interface CurationQuarantineCollectionsResponse {
+  data: { items: CurationQuarantineCollection[] };
+  meta: ApiMeta;
+}
+
+export interface CurationQuarantineItemsResponse {
+  data: QuarantineSchemas["AdminCurationQuarantineItemsData"];
+  meta: ApiMeta;
+}
+
+export interface CurationQuarantineReclassifyResponse {
+  data: QuarantineSchemas["AdminCurationQuarantineReclassifyData"];
+  meta: ApiMeta;
+}
+
 const COLLECTIONS_QUERY_KEY = ["curation-collections"] as const;
+const QUARANTINE_COLLECTIONS_QUERY_KEY = ["curation-quarantine"] as const;
+const QUARANTINE_ITEMS_QUERY_KEY = ["curation-quarantine-items"] as const;
 
 function invalidateCurations(queryClient: ReturnType<typeof useQueryClient>) {
   void queryClient.invalidateQueries({ queryKey: COLLECTIONS_QUERY_KEY });
   void queryClient.invalidateQueries({ queryKey: ["curation-collection"] });
+  void queryClient.invalidateQueries({
+    queryKey: QUARANTINE_COLLECTIONS_QUERY_KEY,
+  });
+  void queryClient.invalidateQueries({ queryKey: QUARANTINE_ITEMS_QUERY_KEY });
 }
 
 export function useAdminCurationCollections(
@@ -299,6 +338,144 @@ async function fetchAllAdminCurationCollections(
         : lastResponse?.meta.page,
     },
   };
+}
+
+export function useAdminCurationQuarantineCollections() {
+  return useQuery<CurationQuarantineCollectionsResponse, Error>({
+    queryKey: QUARANTINE_COLLECTIONS_QUERY_KEY,
+    queryFn: ({ signal }) => fetchAllAdminCurationQuarantineCollections(signal),
+    staleTime: 30_000,
+  });
+}
+
+async function fetchAllAdminCurationQuarantineCollections(
+  signal?: AbortSignal,
+): Promise<CurationQuarantineCollectionsResponse> {
+  const items: CurationQuarantineCollection[] = [];
+  const seenCursors = new Set<string>();
+  let cursor: string | null = null;
+  let lastResponse: CurationQuarantineCollectionsResponse | null = null;
+  for (;;) {
+    const response: CurationQuarantineCollectionsResponse =
+      await getJson<CurationQuarantineCollectionsResponse>(
+        pathWithQuery("/v1/admin/curations/quarantine", {
+          page_size: 200,
+          cursor,
+        }),
+        { signal },
+      );
+    items.push(...response.data.items);
+    lastResponse = response;
+    const nextCursor = response.meta.page?.next_cursor ?? null;
+    if (nextCursor === null) break;
+    if (seenCursors.has(nextCursor)) {
+      throw new Error("격리 큐레이션 collection API가 같은 cursor를 반복했습니다.");
+    }
+    seenCursors.add(nextCursor);
+    cursor = nextCursor;
+  }
+  return {
+    data: { items },
+    meta: {
+      ...(lastResponse?.meta ?? {}),
+      page: lastResponse?.meta.page
+        ? { ...lastResponse.meta.page, next_cursor: null }
+        : lastResponse?.meta.page,
+    },
+  };
+}
+
+export function useAdminCurationQuarantineItems(
+  collectionId: string | null,
+  targetCollectionId: string | null,
+) {
+  return useQuery<CurationQuarantineItemsResponse, Error>({
+    queryKey: [
+      ...QUARANTINE_ITEMS_QUERY_KEY,
+      collectionId,
+      targetCollectionId,
+    ] as const,
+    queryFn: ({ signal }) =>
+      fetchAllAdminCurationQuarantineItems(
+        collectionId as string,
+        targetCollectionId,
+        signal,
+      ),
+    enabled: collectionId !== null && collectionId.length > 0,
+    staleTime: 30_000,
+  });
+}
+
+async function fetchAllAdminCurationQuarantineItems(
+  collectionId: string,
+  targetCollectionId: string | null,
+  signal?: AbortSignal,
+): Promise<CurationQuarantineItemsResponse> {
+  const items: CurationQuarantineItem[] = [];
+  const seenCursors = new Set<string>();
+  let cursor: string | null = null;
+  let lastResponse: CurationQuarantineItemsResponse | null = null;
+  for (;;) {
+    const response: CurationQuarantineItemsResponse =
+      await getJson<CurationQuarantineItemsResponse>(
+        pathWithQuery(
+          `/v1/admin/curations/quarantine/${encodeURIComponent(
+            collectionId,
+          )}/items`,
+          {
+            target_collection_id: targetCollectionId,
+            page_size: 200,
+            cursor,
+          },
+        ),
+        { signal },
+      );
+    items.push(...response.data.items);
+    lastResponse = response;
+    const nextCursor = response.meta.page?.next_cursor ?? null;
+    if (nextCursor === null) break;
+    if (seenCursors.has(nextCursor)) {
+      throw new Error("격리 큐레이션 item API가 같은 cursor를 반복했습니다.");
+    }
+    seenCursors.add(nextCursor);
+    cursor = nextCursor;
+  }
+  if (lastResponse === null) {
+    throw new Error("격리 큐레이션 item API 응답이 없습니다.");
+  }
+  return {
+    data: { ...lastResponse.data, items },
+    meta: {
+      ...lastResponse.meta,
+      page: lastResponse.meta.page
+        ? { ...lastResponse.meta.page, next_cursor: null }
+        : lastResponse.meta.page,
+    },
+  };
+}
+
+export function useReclassifyCurationQuarantineMutation() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    CurationQuarantineReclassifyResponse,
+    Error,
+    { collectionId: string; body: CurationQuarantineReclassifyRequest }
+  >({
+    mutationFn: ({ collectionId, body }) =>
+      withDomainIdempotencySubmission(
+        domainCommandSlot("admin.curation-quarantine.reclassify", collectionId),
+        { collectionId, body },
+        (submission, idempotencyKey) =>
+          postJson<CurationQuarantineReclassifyResponse>(
+            `/v1/admin/curations/quarantine/${encodeURIComponent(
+              submission.collectionId,
+            )}/reclassify`,
+            submission.body,
+            { headers: { "Idempotency-Key": idempotencyKey } },
+          ),
+      ),
+    onSuccess: () => invalidateCurations(queryClient),
+  });
 }
 
 export function useAdminCurationCollection(collectionId: string | null) {
