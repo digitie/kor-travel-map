@@ -15,11 +15,13 @@ lazy import**한다 — 본 모듈 import만으로 provider 패키지를 hard-re
 from __future__ import annotations
 
 import importlib
+import logging
 import math
 import pathlib
 import time
 from collections.abc import AsyncIterator, Iterable, Iterator
 from datetime import date, datetime, timedelta, timezone
+from functools import partial
 from typing import TYPE_CHECKING, Any, Final, cast
 
 import httpx
@@ -32,8 +34,17 @@ from kortravelmap.providers.opinet import (
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
+from . import upstream_retry
+from .upstream_retry import retry_upstream
+
 if TYPE_CHECKING:
     from kortravelmap.settings import KorTravelMapSettings
+
+_LOGGER = logging.getLogger(__name__)
+"""H45 재시도 텔레메트리. 주의: `docker/dagster.yaml`에 `python_logs` 관리 절이
+없어 이 logger는 구조화 event log가 아니라 stderr→compute log로 남는다(재리뷰
+N — 가시성 등급은 kma 경로의 `context.log`보다 낮다). event stream 라우팅
+필요 시 `python_logs.managed_python_loggers` 결선은 배포 후 튜닝 백로그."""
 
 __all__ = [
     "KrexTrafficNoticeSnapshotUnstable",
@@ -992,22 +1003,34 @@ def fetch_kma_weather_alerts(
     api_key = secret.get_secret_value()
 
     kma = cast(Any, importlib.import_module("kma"))
-    client = kma.DataGoKrClient(service_key=api_key)
+    client = kma.DataGoKrClient(
+        service_key=api_key,
+        timeout=settings.provider_http_timeout_seconds,
+        retries=upstream_retry.PROVIDER_CLIENT_INNER_RETRIES,
+    )
     kst = timezone(timedelta(hours=9))
     today = datetime.now(kst).date()
     window_start = today - timedelta(days=settings.kma_weather_alert_lookback_days - 1)
+    budget = upstream_retry.RetryBudget()
     num_of_rows = 100
     try:
         page_no = 1
         while True:
-            items = list(
-                client.weather_warning_list(
-                    stn_id=KMA_WEATHER_ALERT_STN_ID,
+            # H45: 페이지 단건 호출만 유한 재시도 (kma ``retryable`` 규약 분류 —
+            # quota/rate_limit 제외는 default predicate 소관).
+            items = retry_upstream(
+                partial(
+                    _weather_warning_page,
+                    client,
                     from_tm_fc=window_start,
                     to_tm_fc=today,
                     page_no=page_no,
                     num_of_rows=num_of_rows,
-                )
+                ),
+                label=f"kma weather_warning_list p{page_no}",
+                base_delay=upstream_retry.PROVIDER_BOUNDARY_BASE_DELAY_SECONDS,
+                budget=budget,
+                on_retry=_LOGGER.warning,
             )
             if not items:
                 break
@@ -1017,6 +1040,27 @@ def fetch_kma_weather_alerts(
             page_no += 1
     finally:
         client.close()
+
+
+def _weather_warning_page(
+    client: Any,
+    *,
+    from_tm_fc: date,
+    to_tm_fc: date,
+    page_no: int,
+    num_of_rows: int,
+) -> list[Any]:
+    """특보 목록 1페이지를 재시도 경계 안에서 소진한다(H45 — lazy 우회 방지)."""
+
+    return list(
+        client.weather_warning_list(
+            stn_id=KMA_WEATHER_ALERT_STN_ID,
+            from_tm_fc=from_tm_fc,
+            to_tm_fc=to_tm_fc,
+            page_no=page_no,
+            num_of_rows=num_of_rows,
+        )
+    )
 
 
 def fetch_khoa_beaches(
@@ -1075,7 +1119,46 @@ def _airkorea_client(settings: KorTravelMapSettings, *, label: str) -> Any:
             "필요하다."
         )
     airkorea = cast(Any, importlib.import_module("airkorea"))
-    return airkorea.AirKoreaClient(service_key=secret.get_secret_value())
+    return airkorea.AirKoreaClient(
+        service_key=secret.get_secret_value(),
+        timeout=settings.provider_http_timeout_seconds,
+        retries=upstream_retry.PROVIDER_CLIENT_INNER_RETRIES,
+    )
+
+
+AIRKOREA_RETRYABLE_EXCEPTION_NAMES: Final[tuple[str, ...]] = (
+    "AirKoreaNetworkError",
+    "AirKoreaServerError",
+)
+"""airkorea 재시도 대상 예외 top-level 이름 — 실 lib과의 계약은 contract 테스트가
+고정한다. ``AirKoreaRateLimitError``(코드 22 — 일일 쿼터 소진)는 transient가
+아니므로 **의도적으로 제외**(리뷰 H — 쿼터 보호와 충돌)."""
+
+
+def _airkorea_retryable_types() -> tuple[type[BaseException], ...]:
+    """airkorea 예외 중 재시도 대상 — 네트워크/서버(H45).
+
+    인증·파싱·NO_DATA·쿼터는 재시도 무의미라 제외한다. airkorea lib은 kma의
+    ``retryable`` 속성 규약이 없어 타입으로 분류한다. 패키지 top-level
+    re-export에서 읽되, 부재 시(예: 테스트 fake 모듈) 빈 tuple로 degrade하고
+    경고를 남긴다 — 재시도 없이 종전 즉시-전파 동작(무음 금지, 리뷰 M).
+    """
+
+    airkorea = cast(Any, importlib.import_module("airkorea"))
+    resolved = tuple(
+        candidate
+        for name in AIRKOREA_RETRYABLE_EXCEPTION_NAMES
+        if isinstance(candidate := getattr(airkorea, name, None), type)
+        and issubclass(candidate, BaseException)
+    )
+    if len(resolved) != len(AIRKOREA_RETRYABLE_EXCEPTION_NAMES):
+        _LOGGER.warning(
+            "airkorea 재시도 예외 분류 불완전 — %d/%d 이름만 해석됨: 재시도가 "
+            "부분/전체 비활성 상태로 degrade한다 (H45)",
+            len(resolved),
+            len(AIRKOREA_RETRYABLE_EXCEPTION_NAMES),
+        )
+    return resolved
 
 
 def _airkorea_close(client: Any) -> None:
@@ -1095,11 +1178,22 @@ def fetch_airkorea_stations(
     측정소는 weather-kind feature가 되고 측정값은 별도 fetcher가 가져온다.
     """
     client = _airkorea_client(settings, label="stations")
+    retryable_types = _airkorea_retryable_types()
+    budget = upstream_retry.RetryBudget()
     num_of_rows = 100
     page_no = 1
     try:
         while True:
-            items = list(client.stations(page_no=page_no, num_of_rows=num_of_rows))
+            # H45(리뷰 1 M-3): air_quality asset이 stations를 먼저 읽으므로 이
+            # 경계도 동일 재시도 — 절반만 고치면 증상이 그대로 남는다.
+            items = retry_upstream(
+                partial(_airkorea_stations_page, client, page_no, num_of_rows),
+                label=f"airkorea stations p{page_no}",
+                base_delay=upstream_retry.PROVIDER_BOUNDARY_BASE_DELAY_SECONDS,
+                is_retryable=lambda exc: isinstance(exc, retryable_types),
+                budget=budget,
+                on_retry=_LOGGER.warning,
+            )
             if not items:
                 break
             yield from items
@@ -1108,6 +1202,12 @@ def fetch_airkorea_stations(
             page_no += 1
     finally:
         _airkorea_close(client)
+
+
+def _airkorea_stations_page(client: Any, page_no: int, num_of_rows: int) -> list[Any]:
+    """측정소 1페이지를 재시도 경계 안에서 소진한다(H45 — lazy 우회 방지)."""
+
+    return list(client.stations(page_no=page_no, num_of_rows=num_of_rows))
 
 
 def fetch_airkorea_air_quality(
@@ -1120,15 +1220,28 @@ def fetch_airkorea_air_quality(
     Protocol 충족)를 yield한다. 측정소명으로 station feature에 조인된다.
     """
     client = _airkorea_client(settings, label="air_quality")
+    retryable_types = _airkorea_retryable_types()
+    budget = upstream_retry.RetryBudget()
     num_of_rows = 100
     try:
         for sido in _AIRKOREA_SIDO_NAMES:
             page_no = 1
             while True:
-                items = list(
-                    client.sido_measurements(
-                        sido, page_no=page_no, num_of_rows=num_of_rows
-                    )
+                # H45: 시도×페이지 단건 호출만 유한 재시도 — 17개 시도 순회가
+                # upstream 간헐 504(실측 SERVICETIMEOUT_ERROR)에 전멸하지 않게.
+                items = retry_upstream(
+                    partial(
+                        _airkorea_sido_page,
+                        client,
+                        sido,
+                        page_no=page_no,
+                        num_of_rows=num_of_rows,
+                    ),
+                    label=f"airkorea sido_measurements {sido} p{page_no}",
+                base_delay=upstream_retry.PROVIDER_BOUNDARY_BASE_DELAY_SECONDS,
+                    is_retryable=lambda exc: isinstance(exc, retryable_types),
+                    budget=budget,
+                    on_retry=_LOGGER.warning,
                 )
                 if not items:
                     break
@@ -1138,6 +1251,15 @@ def fetch_airkorea_air_quality(
                 page_no += 1
     finally:
         _airkorea_close(client)
+
+
+def _airkorea_sido_page(
+    client: Any, sido: str, *, page_no: int, num_of_rows: int
+) -> list[Any]:
+    """시도별 측정값 1페이지를 **재시도 경계 안에서** 소진한다 — lazy iterator를
+    경계 밖으로 내보내면 소비 중 network 예외가 재시도를 우회한다(H45)."""
+
+    return list(client.sido_measurements(sido, page_no=page_no, num_of_rows=num_of_rows))
 
 
 def _parse_opinet_bbox(raw: str) -> tuple[float, float, float, float]:

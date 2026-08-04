@@ -88,6 +88,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from dagster import InitResourceContext, resource
 
+from . import upstream_retry
 from .assets import (
     DATAGOKR_STANDARD_PROVIDER_NAME,
     run_feature_event_datagokr_cultural_festivals,
@@ -652,7 +653,13 @@ def _new_kma_weather_client(
         dataset=scope.dataset_key,
     )
     kma = cast(Any, importlib.import_module("kma"))
-    return kma.KmaClient(service_key=service_key)
+    # H45: 스케줄 경로(resources.py)와 동일 정산 — timeout·retries가 갈리면
+    # 수동 재적재 판정이 스케줄과 다르게 나와 진단을 흐린다(리뷰 1 M-4).
+    return kma.KmaClient(
+        service_key=service_key,
+        timeout=settings.provider_http_timeout_seconds,
+        retries=upstream_retry.PROVIDER_CLIENT_INNER_RETRIES,
+    )
 
 
 def _kma_weather_resources(
@@ -681,7 +688,9 @@ def _kma_mid_resources(
             settings,
             resource_key="kma_datagokr_client",
             dataset=scope.dataset_key,
-        )
+        ),
+        timeout=settings.provider_http_timeout_seconds,
+        retries=upstream_retry.PROVIDER_CLIENT_INNER_RETRIES,
     )
     return RunnerResources(
         {

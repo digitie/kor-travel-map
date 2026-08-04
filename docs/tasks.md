@@ -47,8 +47,33 @@ barrier로 직렬화한다.
     [x] `T-VN-H22C`(Admin UI 패널·mocked 6건·격리 스택 파괴 검증 9흐름·live spec 저술)
   - a2 (운영 연속성 — 0072 사고·재생성 후속):
     [ ] `T-VN-H42`(provider 재적재 완주·수렴 검증 + **H35 prod live 검증 잔여** —
-        지금부터 스케줄 수렴 감시로 진행, **41C prod enable의 선행 조건**) →
-    [ ] `T-VN-H43`(prod 백업 체계 수립 — H42 완주 직후 rollback 기준선 dump) →
+        지금부터 스케줄 수렴 감시로 진행, **41C prod enable의 선행 조건**.
+        2026-08-05 실측: MOIS 702,955 3중 일치·opinet 934 완주, 공개 key
+        재발급, KMA 4종+airkorea 만성 실패는 구조 결함으로 H45 분리) →
+    [~] `T-VN-H45`(**KMA/airkorea 대량 순차 upstream 호출 강건화** — 만성 실패
+        근본 원인: upstream 간헐 오류율 × N건(격자 187+) all-or-nothing ×
+        step 전량 재시도 = 시도당 생존확률 p^N 붕괴. 단건 호출 경계 유한
+        재시도(`upstream_retry.py` — attempts 2, retryable 분류 한정·
+        **quota/rate_limit 거부**, run 예산 8 early abort, warning 텔레메트리,
+        원예외 보존)를 kma 격자·airkorea stations·시도×페이지·alerts 페이지에
+        적용 + client 4 생성 지점에 `provider_http_timeout_seconds`(기본 20s)
+        ·`retries=1` 주입(**lib 내부 재시도와 곱셈 정산** — 경계당 HTTP 4
+        시도 유지, 병적 상한 4.4h < run 한도 6h). 부분 실행 금지 불변식 유지.
+        적대 리뷰 2건 NO-GO findings 전면 반영(산식은 etl 문서 §8.1).
+        **prod 효과는 다음 이미지 배포 게이트**(dm#128과 동일 타이밍) — 배포
+        후 스케줄 SUCCESS 전환으로 판정. 잔여 백로그: ① khoa 등 다건 루프
+        fetcher 확대는 배포 후 실측 보고 결정, ② **python-kma-api 정본 수정
+        PR**(resultCode 22 quota의 `retryable=True` 오분류 + HTTP 200-body
+        XML 오류 envelope의 parse-error 경로 — 리뷰 지적, lib 소관), ③ 배포
+        후 튜닝(재리뷰 비차단): RetryBudget 8 고정의 경계수 비례화/settings
+        노출(p_boundary 3~5% 중간대 실측 시) + provider_fetchers `_LOGGER`의
+        dagster 구조화 로그 라우팅(`python_logs` 결선 — 현재는 stderr
+        compute-log 경유 가시), ④ KMA 4종+airkorea 시간당 schedule에
+        `coalesce_active_runs=True`(재리뷰 2 N-5 — 열화 구간 run 중첩·동일 key
+        동시 타격 방지, krex notice 선례 있음). 배포 후 판정 음성 시 다음 수
+        순서는 etl 문서 §8.1 참조(backoff 상향 → 격자 배치 축소 → lib 정본)) →
+    [ ] `T-VN-H43`(prod 백업 체계 수립 — H42 완주 직후 rollback 기준선 dump,
+        **`ops.public_api_keys` 스코프 필수** — 2026-08-05 소실 실측) →
     [ ] `T-VN-H44`(복원 리허설 드릴 정기화 — H30B 하네스 재사용, 이후 정기)
 - **Lane B — frontend hardening·PinVi 소비 API**
   - b0: [x] `T-VN-48D`(final exact Mocked/Live) →

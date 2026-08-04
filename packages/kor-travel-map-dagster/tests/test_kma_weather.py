@@ -21,7 +21,7 @@ from kortravelmap.infra.feature_update_executor import ProviderDatasetRefreshFai
 from kortravelmap.settings import KorTravelMapSettings
 from pydantic import SecretStr
 
-from kortravelmap.dagster import kma_weather, provider_fetchers, resources
+from kortravelmap.dagster import kma_weather, provider_fetchers, resources, upstream_retry
 from kortravelmap.dagster.feature_operation_tracking import (
     FeatureOperationExecutionGuard,
 )
@@ -456,6 +456,95 @@ async def test_nowcast_asset_loads_values_per_feature_and_advances_cursor(
         }
     ]
     assert kor_travel_map_client.failure_calls == []
+
+
+class _RetryableKmaError(Exception):
+    """kma 계열 ``retryable`` 규약 대역 — network 오류 상당."""
+
+    retryable = True
+
+
+class _FlakyForecastService(_FakeForecastService):
+    """첫 ``now`` 호출만 retryable 오류 — H45 격자 단건 재시도 회귀."""
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.failures_left = 1
+
+    def now(self, *, nx: int, ny: int) -> Any:
+        if self.failures_left > 0:
+            self.failures_left -= 1
+            self.calls.append(("now-fail", nx, ny))
+            raise _RetryableKmaError("transient")
+        return super().now(nx=nx, ny=ny)
+
+
+async def test_nowcast_asset_retries_transient_grid_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """H45 — 격자 단건의 retryable 실패는 step을 죽이지 않고 재시도로 수렴한다.
+
+    backoff는 ``upstream_retry`` 모듈 전역의 asyncio를 module-scope로 대체해
+    실제 대기 없이 결정적으로 기록한다(late-binding 규약 — 모듈 docstring).
+    """
+
+    _patch_grid_and_bases(monkeypatch)
+    delays: list[float] = []
+
+    async def _instant_sleep(seconds: float) -> None:
+        delays.append(seconds)
+
+    monkeypatch.setattr(
+        upstream_retry, "asyncio", SimpleNamespace(sleep=_instant_sleep)
+    )
+    kor_travel_map_client = _FakeKrtourClient(
+        target_coords=[(126.978, 37.5665)],
+        place_coords=[("f1", 126.978, 37.5665)],
+    )
+    forecast = _FlakyForecastService(snapshot=_NOWCAST_SNAPSHOT)
+
+    result = await run_feature_weather_kma_ultra_short_nowcast(
+        _context(kor_travel_map_client, forecast)
+    )
+
+    assert result.skipped is False
+    assert result.grids_fetched == 1
+    assert result.values_loaded == 2
+    # 실패 1회 + 재시도 성공 1회 — 동일 격자. backoff는 provider 경계값 15s
+    # (재리뷰 2 N-2 — lib 내부 재시도와 독립 시행이 되도록 간격 상향).
+    assert forecast.calls == [("now-fail", 126, 37), ("now", 126, 37)]
+    assert delays == [15.0]
+    assert kor_travel_map_client.failure_calls == []
+
+
+async def test_nowcast_asset_nonretryable_grid_failure_fails_step(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """미분류/비재시도 예외는 종전대로 즉시 step 실패 경로 — fail-close 불변."""
+
+    _patch_grid_and_bases(monkeypatch)
+
+    class _FatalError(Exception):
+        retryable = False
+
+    class _FatalForecastService(_FakeForecastService):
+        def now(self, *, nx: int, ny: int) -> Any:
+            self.calls.append(("now-fatal", nx, ny))
+            raise _FatalError("bad key")
+
+    kor_travel_map_client = _FakeKrtourClient(
+        target_coords=[(126.978, 37.5665)],
+        place_coords=[("f1", 126.978, 37.5665)],
+    )
+    forecast = _FatalForecastService(snapshot=_NOWCAST_SNAPSHOT)
+
+    with pytest.raises(ProviderDatasetRefreshFailure):
+        await run_feature_weather_kma_ultra_short_nowcast(
+            _context(kor_travel_map_client, forecast)
+        )
+
+    # 재시도 없이 1회 — 비재시도 예외는 즉시 실패로 분류된다.
+    assert forecast.calls == [("now-fatal", 126, 37)]
 
 
 async def test_asset_skips_when_cursor_matches_base(
@@ -955,8 +1044,9 @@ def test_lazy_kma_helpers_use_provider_modules(
 class _FakeKmaClient:
     instances: list[_FakeKmaClient] = []
 
-    def __init__(self, *, service_key: str) -> None:
+    def __init__(self, *, service_key: str, **kwargs: Any) -> None:
         self.service_key = service_key
+        self.kwargs = dict(kwargs)  # H45: timeout/retries 도달 검증용(리뷰 2 M-5)
         self.closed = False
         _FakeKmaClient.instances.append(self)
 
@@ -984,7 +1074,10 @@ def test_kma_weather_client_factory_resource_defers_credential_import_and_client
     monkeypatch.setattr(
         resources,
         "KorTravelMapSettings",
-        lambda: SimpleNamespace(data_go_kr_service_key=SecretStr("kma-key")),
+        lambda: SimpleNamespace(
+            data_go_kr_service_key=SecretStr("kma-key"),
+            provider_http_timeout_seconds=30.0,
+        ),
     )
 
     resource_fn = cast(
@@ -998,6 +1091,9 @@ def test_kma_weather_client_factory_resource_defers_credential_import_and_client
 
     client = factory()
     assert client.service_key == "kma-key"
+    # H45(리뷰 2 M-5): 주입이 실제 client 생성자에 도달하는지 kwarg 단위로 고정
+    # — kwarg 이름 오타는 CI green인 채 prod TypeError가 되기 때문.
+    assert client.kwargs == {"timeout": 30.0, "retries": 1}
     assert client.closed is False
     assert import_calls == ["kma"]
 
@@ -1490,8 +1586,9 @@ class _FakeWarningDataGoKrClient:
     instances: list[_FakeWarningDataGoKrClient] = []
     pages: list[list[Any]] = []
 
-    def __init__(self, *, service_key: str) -> None:
+    def __init__(self, *, service_key: str, **kwargs: Any) -> None:
         self.service_key = service_key
+        self.kwargs = dict(kwargs)  # H45: timeout/retries 도달 검증용(리뷰 2 M-5)
         self.closed = False
         self.calls: list[dict[str, Any]] = []
         _FakeWarningDataGoKrClient.instances.append(self)
@@ -1532,6 +1629,8 @@ def test_fetch_kma_weather_alerts_paginates_and_closes(
     assert len(records) == 101
     [client] = _FakeWarningDataGoKrClient.instances
     assert client.service_key == "data-key"
+    # H45: settings 기본 timeout(20s)·내부 retries 정산값 도달 검증.
+    assert client.kwargs == {"timeout": 20.0, "retries": 1}
     assert client.closed is True
     assert client.calls[0]["stn_id"] == provider_fetchers.KMA_WEATHER_ALERT_STN_ID
     assert client.calls[0]["page_no"] == 1
@@ -1556,7 +1655,10 @@ def test_kma_datagokr_client_resource_yields_client_and_closes(
     monkeypatch.setattr(
         resources,
         "KorTravelMapSettings",
-        lambda: SimpleNamespace(data_go_kr_service_key=SecretStr("data-key")),
+        lambda: SimpleNamespace(
+            data_go_kr_service_key=SecretStr("data-key"),
+            provider_http_timeout_seconds=20.0,
+        ),
     )
 
     resource_fn = cast("Any", resources.kma_datagokr_client_resource.resource_fn)
@@ -1564,6 +1666,8 @@ def test_kma_datagokr_client_resource_yields_client_and_closes(
     client = next(resource_iter)
 
     assert client.service_key == "data-key"
+    # H45: timeout·내부 retries 정산값 도달 검증(리뷰 2 M-6 — mid 경로 누락분).
+    assert client.kwargs == {"timeout": 20.0, "retries": 1}
 
     with pytest.raises(StopIteration):
         next(resource_iter)
