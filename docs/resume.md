@@ -47,6 +47,22 @@ csv_explicit 196), H35 실행 종료(잔여는 provider 일일 스케줄 수렴�
 **다음 한 작업**: Lane A a1 소진 — H34 잔여 1항목(H35 대기였던 것) 해제 검토 후,
 Wave 2 barrier freeze(T-VN-31A)로 진입. codex 41C prod enable 경계는 재pin(#109) 대기
 유지.
+## 2026-08-04 (codex) — T-VN-41D의 0079 schema regression 정렬
+
+Map PR #935의 PostGIS CI는 858 passed/5 skipped 뒤, obsolete H35 helper가 저장소 head를
+`0078`로 고정한 탓에 preflight를 거부했다. `0079`가 DB에 적용되기 전의 거부였지만 새
+migration을 머지할 수 없는 실제 계약 drift였다. prod H35 cutover를 되살리지 않고, helper의
+**isolated regression target만** `0079_cache_target_writer_drain`·`schema_0079`로 승격했다.
+
+목표 schema/boundary를 `_h35_schema_version.py`로 단일화하고 receipt chain 전체가 그 값을
+공유하게 했다. 적대 리뷰의 P1에 따라 CSV5가 받는 migrate receipt의 시작 schema도 정확히
+`0063`으로 고정해 0078→0079 intermediate receipt를 fail-close한다. H35 semantic catalog에는
+lease·instigation·run의 relation/column/constraint/FK/index를 포함했고, marker fixture는 전용
+collection 한 개만 변이하도록 고쳤다. unit 65건과 isolated PostGIS `0063→0079→CSV5→GC→verify`,
+head partial probe, quarantine boundary·preflight 4건(총 69건)이 통과했으며 production/n150에는
+접근하지 않았다.
+
+**다음 한 작업**: PR #935의 수정 commit을 적대 리뷰 1건으로 확인하고 CI를 다시 통과시킨다.
 
 ## 2026-08-04 (2) — 재생성 실행·공개 표면 4,424 복구·H40 완결·H22 단일 PR
 
@@ -59,6 +75,11 @@ HTTP 파괴 검증 9흐름 통과.
 **다음 한 작업**: H22 PR에 적대 리뷰어 2명(렌즈 분리) → CI green → 머지 → Lane A 다음
 항목(H30B — 재적재 안정화 대기 중이면 Wave 2 barrier의 T-VN-31A). 잔여 재적재: provider
 일일 스케줄 + CSV 5종(feature 적재 후). codex 41C prod enable은 재pin(#109)+CSV5 후.
+
+T-VN-41D는 migration `0079`, strict private command, lost-attest receipt replay, late-run CAS
+cancel, Manager lease/receipt state machine과 ephemeral Compose rehearsal까지 완료했다. command
+5건, isolated PostgreSQL 3건, Manager 143건, actual Docker rehearsal 1건을 통과했고 n150/prod
+접근은 없었다.
 
 ## 2026-08-04 — prod 0072 사고 → 폐기·재생성. H35 재정의
 

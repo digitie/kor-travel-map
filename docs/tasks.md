@@ -60,7 +60,8 @@ barrier로 직렬화한다.
     [x] `T-VN-16B`(weather batch 소비) →
     [x] `T-VN-16C`(sparse 다중 날짜 weather batch) →
     [ ] `T-VN-41A` → [ ] `T-VN-41B` → [ ] `T-VN-41C`(generation/outbox — prod enable은
-    재pin #109 완료 + `T-VN-H42` 뒤, Lane B 상세 절 경계 주석 참조)
+    재pin #109 완료 + `T-VN-H42` 뒤, Lane B 상세 절 경계 주석 참조) ∥
+    [/] `T-VN-41D`(durable writer-drain)
 - **Wave 2 barrier 이후**
   - freeze(Lane A): [x] `T-VN-31A` → [x] `T-VN-31B` → [x] `T-VN-31C`
   - Lane A: [ ] `T-VN-32A` → [ ] `T-VN-32B` → [ ] `T-VN-32C` →
@@ -112,7 +113,7 @@ barrier로 직렬화한다.
   (AGENTS.md), 그 아래 설계적 우수성 > 확장성 > 성능 > 불필요한 코드 반복(래퍼류) 금지.
   **prod 환경 보전·호환성·기존 문서 계약·최소 수정은 비제약** — 필요 시 DB 스키마·문서
   계약 수정 가능. AGENTS.md vNext 우선순위 단락에 동일 취지의 dated note를 둔다.
-- migration 정본: 단일 head 유지(현재 head `0078_cache_target_gc_observe`). 후속 migration 소유자는
+- migration 정본: 단일 head 유지(현재 head `0079_cache_target_writer_drain`). 후속 migration 소유자는
   PR 직전 단일 head를 재확인한 뒤 번호를 배정한다. 두 lane의 migration-bearing PR은 번호 예약부터
   머지까지 직렬화한다. forward migration 뒤에는 수용 조건이나 실패 복구가 명시적으로 요구하지 않는
   한 downgrade/rollback하지 않고 fresh clone·새 transaction으로 다음 검증을 이어간다.

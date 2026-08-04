@@ -95,6 +95,35 @@
 - 프로브 교훈: geo-postgres 컨테이너 재시작 후 컨테이너 로컬 소켓이 앱 TCP 인스턴스와
   다른 것을 가리켜 "krtour_map 없음" 허위 경보 — **DB 프로브는 앱과 같은 TCP 경로로
   통일**한다. 컨테이너 내 이중 postgres 현상은 이상 신호로 기록.
+## 2026-08-04 (codex) — 0079 추가에 따른 H35 synthetic regression 계약 정렬
+
+- PR #935의 GitHub PostGIS gate는 858 passed/5 skipped 뒤 H35 preflight가
+  `repository_alembic_head=0078`을 요구해 하나만 실패했다. writer-drain `0079`가 실행되기
+  전의 fail-close라 H35의 오래된 목표 schema 상수 drift로 판정했다.
+- H35 prod cutover는 사용자 결정에 따라 계속 폐기 상태다. 다만 CI regression harness가
+  latest Alembic head를 구성하지 못하는 결함은 남길 수 없으므로, 목표 revision과 forward
+  boundary를 `_h35_schema_version.py`의 `0079`/`schema_0079`로 단일화했다.
+- semantic catalog fingerprint를 실제 isolated PostGIS head migration에서 다시 계산하고
+  writer-drain lease·instigation·run의 relation/column/constraint/FK/index를 포함했다.
+  적대 리뷰 P1은 CSV5의 migrate receipt가 `schema_after=0079`뿐 아니라
+  `schema_before=0063`도 exact해야 한다고 지적했고, 0078→0079 intermediate receipt 거부
+  회귀로 반영했다. marker fixture도 전용 collection 한 개만 변이하도록 고쳤다. H35 unit
+  65건과 `0063→0079→CSV5→GC→verify`, head partial probe, quarantine boundary·preflight
+  rehearsal 4건(총 69건)이 통과했다. n150/prod 연결·변경은 없었다.
+
+## 2026-08-04 (codex) — T-VN-41D isolated durable writer-drain 완료
+
+- Map migration `0079`가 lease·instigation snapshot·run cancellation CAS를 `ops` schema에
+  정규화했고 private API-image command는 exact stdin JSON과 single receipt stdout만 허용한다.
+  begin/attest 응답 유실 뒤 begin 재호출도 durable receipt operation을 CAS로 되돌려 같은 owner의
+  recovery chain을 계속할 수 있게 했다.
+- 단일 적대 리뷰의 P0 2건(begin null key·금지된 positional argv)과 P1 3건(rollback daemon
+  선기동, recovery pair re-attestation 누락, late run 미cancel)을 모두 반영했다. backup rollback은
+  webserver-only Map restore receipt를 fsync한 뒤 daemon을 열며, diagnostic/cutover recovery는
+  exact prior pair attestation 전에는 archive/재기동하지 않는다.
+- strict command 5건, isolated PostgreSQL migration/CAS 3건, Manager phase/recovery 143건과
+  actual ephemeral Docker Compose frozen-runner rehearsal 1건을 통과했다. rehearsal은 production
+  Compose·host network·production DB를 사용하지 않았다.
 
 ## 2026-08-04 — prod 재생성 실행 + 재적재 concierge 축 복구 + T-VN-H22 단일 PR
 

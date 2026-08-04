@@ -1,4 +1,4 @@
-"""격리 PostGIS에서 수행하는 H35 0063→0078 전체 리허설."""
+"""격리 PostGIS에서 수행하는 H35 0063→0079 전체 리허설."""
 
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ from kortravelmap.cli._h35_contract import (
     parse_request,
     receipt_digest,
 )
-from kortravelmap.cli._h35_schema import partial_probe
+from kortravelmap.cli._h35_schema import TARGET_SCHEMA, partial_probe
 from kortravelmap.cli.h35_cutover import _execute
 from kortravelmap.core.cache_target_stream import SnapshotMerkleRowV1, snapshot_merkle_root
 from kortravelmap.infra.curation_link_basis import trusted_basis_sql
@@ -36,7 +36,7 @@ pytestmark = pytest.mark.integration
 
 _ROOT = Path(__file__).resolve().parents[2]
 _PRE_REVISION = "0063_pipeline_root_id"
-_TARGET_REVISION = "0078_cache_target_gc_observe"
+_TARGET_REVISION = TARGET_SCHEMA
 _SOURCE_REVISION = "1" * 40
 _TRANSACTION_ID = "00000000-0000-0000-0000-000000000001"
 _SOURCE_RULE_PUBLIC = 3_043
@@ -914,7 +914,7 @@ async def _assert_scope_delegate_drift_matrix(
             dsn,
             identity=identity,
             gc_receipt=gc_receipt,
-            failed_check_prefix="0075_0078_functions_semantic",
+            failed_check_prefix="0075_0079_functions_semantic",
         )
         await _execute_sql(dsn, function_definition)
 
@@ -932,7 +932,7 @@ async def _assert_scope_delegate_drift_matrix(
             dsn,
             identity=identity,
             gc_receipt=gc_receipt,
-            failed_check_prefix="0075_0078_functions_semantic",
+            failed_check_prefix="0075_0079_functions_semantic",
         )
         await _execute_sql(
             dsn,
@@ -962,7 +962,7 @@ async def _assert_structural_negative_matrix(
         dsn,
         identity=identity,
         gc_receipt=gc_receipt,
-        failed_check_prefix="0075_0078_constraints_semantic",
+        failed_check_prefix="0075_0079_constraints_semantic",
     )
     await _execute_sql(
         dsn,
@@ -973,7 +973,7 @@ async def _assert_structural_negative_matrix(
         dsn,
         identity=identity,
         gc_receipt=gc_receipt,
-        failed_check_prefix="0075_0078_constraints_semantic",
+        failed_check_prefix="0075_0079_constraints_semantic",
     )
     await _execute_sql(
         dsn,
@@ -996,7 +996,7 @@ async def _assert_structural_negative_matrix(
         dsn,
         identity=identity,
         gc_receipt=gc_receipt,
-        failed_check_prefix="0075_0078_indexes_semantic",
+        failed_check_prefix="0075_0079_indexes_semantic",
     )
     await _execute_sql(
         dsn,
@@ -1013,7 +1013,7 @@ async def _assert_structural_negative_matrix(
         dsn,
         identity=identity,
         gc_receipt=gc_receipt,
-        failed_check_prefix="0075_0078_indexes_semantic",
+        failed_check_prefix="0075_0079_indexes_semantic",
     )
     await _execute_sql(
         dsn,
@@ -1030,7 +1030,7 @@ async def _assert_structural_negative_matrix(
         dsn,
         identity=identity,
         gc_receipt=gc_receipt,
-        failed_check_prefix="0075_0078_triggers_semantic",
+        failed_check_prefix="0075_0079_triggers_semantic",
     )
     await _execute_sql(
         dsn,
@@ -1056,7 +1056,7 @@ async def _assert_structural_negative_matrix(
         dsn,
         identity=identity,
         gc_receipt=gc_receipt,
-        failed_check_prefix="0075_0078_triggers_semantic",
+        failed_check_prefix="0075_0079_triggers_semantic",
     )
     await _execute_sql(
         dsn,
@@ -1087,7 +1087,7 @@ async def _assert_structural_negative_matrix(
         dsn,
         identity=identity,
         gc_receipt=gc_receipt,
-        failed_check_prefix="0075_0078_functions_semantic",
+        failed_check_prefix="0075_0079_functions_semantic",
     )
     await _execute_sql(dsn, function_definition)
     await _assert_scope_delegate_drift_matrix(
@@ -1702,27 +1702,48 @@ async def test_public_count_detects_source_absent_item(pg_container: Any) -> Non
 async def _plant_quarantine_candidate(engine: Any) -> str:
     """`0065`가 격리할 item을 하나 심는다 — legacy-marker collection 안의 네이티브 item.
 
-    시드는 legacy-marker collection을 만들지 않으므로 하나를 marker로 지정한 뒤 그 안에
-    `curated_features` 투영본이 **아닌** item을 넣어야 격리 조건이 성립한다.
+    시드는 legacy-marker collection을 만들지 않으므로 전용 marker collection을 하나 만든 뒤
+    그 안에 `curated_features` 투영본이 **아닌** item을 넣어야 격리 조건이 성립한다.
     """
     async with engine.begin() as connection:
-        # `ORDER BY`가 없으면 어느 collection이 뽑히는지에 따라 격리 건수가 달라져 무엇을
-        # 검증했는지 재현되지 않는다. 결정론을 위해 최소 key를 고른다.
+        source_collection_id = (
+            await connection.execute(
+                text(
+                    "SELECT item.collection_id FROM feature.curation_items AS item "
+                    "JOIN feature.curation_collections AS collection "
+                    "ON collection.collection_id=item.collection_id "
+                    "WHERE collection.source_id IS NOT NULL "
+                    "ORDER BY item.curation_item_id LIMIT 1"
+                )
+            )
+        ).scalar_one()
         collection_id = (
             await connection.execute(
                 text(
-                    "UPDATE feature.curation_collections SET metadata = "
-                    "coalesce(metadata, '{}'::jsonb) || "
-                    '\'{"migrated_from": "feature.curated_features"}\'::jsonb '
-                    "WHERE collection_id = (SELECT collection_id "
-                    "FROM feature.curation_items ORDER BY curation_item_id LIMIT 1) "
-                    "RETURNING collection_id"
-                )
+                    """
+                    INSERT INTO feature.curation_collections (
+                        collection_key, theme_id, source_id, title, edition_key,
+                        description, status, visibility, metadata, created_by,
+                        updated_by, created_at, updated_at, archived_at
+                    )
+                    SELECT
+                        'legacy:probe:' || replace(x_extension.gen_random_uuid()::text, '-', ''),
+                        theme_id, source_id, 'H35 quarantine probe', edition_key,
+                        description, status, visibility,
+                        '{"migrated_from":"feature.curated_features"}'::jsonb,
+                        'test:h35', 'test:h35', created_at, updated_at, NULL
+                    FROM feature.curation_collections
+                    WHERE collection_id=:source_collection_id
+                    RETURNING collection_id
+                    """
+                ),
+                {"source_collection_id": source_collection_id},
             )
         ).scalar_one()
 
         # 형제 행을 복사해 NOT NULL 컬럼을 빠짐없이 채운다. 바꾸는 것은 세 가지뿐:
-        # 새 `curation_item_id`(어떤 `curated_feature_id`와도 안 겹쳐 투영본이 아니게 됨),
+        # collection 및 새 `curation_item_id`(어떤 `curated_feature_id`와도 안 겹쳐
+        # 투영본이 아니게 됨),
         # 고유 `external_item_id`(tombstone 병합 회피), `feature_id=NULL`
         # (`0066`의 active-source-feature 유일성 회피).
         await connection.execute(
@@ -1732,18 +1753,22 @@ async def _plant_quarantine_candidate(engine: Any) -> str:
                 SELECT (jsonb_populate_record(
                     NULL::feature.curation_items,
                     to_jsonb(source) || jsonb_build_object(
+                        'collection_id', CAST(:collection_id AS uuid),
                         'curation_item_id', x_extension.gen_random_uuid(),
                         'external_item_id', 'h22a-native-probe',
                         'feature_id', NULL
                     )
                 )).*
                 FROM feature.curation_items AS source
-                WHERE source.collection_id = :collection_id
+                WHERE source.collection_id = :source_collection_id
                 ORDER BY source.curation_item_id
                 LIMIT 1
                 """
             ),
-            {"collection_id": collection_id},
+            {
+                "collection_id": collection_id,
+                "source_collection_id": source_collection_id,
+            },
         )
     return str(collection_id)
 
@@ -1767,7 +1792,7 @@ async def test_quarantine_gate_fires_before_the_forward_boundary(pg_container: A
     from kortravelmap.cli._h35_schema import (
         _quarantine_candidate_count,
         _quarantine_counts,
-        verify_0075_0078,
+        verify_0075_0079,
     )
 
     admin_dsn = normalize_async_dsn(pg_container.get_connection_url())
@@ -1800,7 +1825,7 @@ async def test_quarantine_gate_fires_before_the_forward_boundary(pg_container: A
             # ② `0063` 술어가 고른 것이 진짜 `0065`의 격리 대상과 같다.
             async with engine.connect() as connection:
                 quarantine_collections, quarantine_items = await _quarantine_counts(connection)
-                checks, counts = await verify_0075_0078(connection)
+                checks, counts = await verify_0075_0079(connection)
             assert quarantine_items == 1, (
                 "`0063`에서 후보로 잡았는데 `0065`가 격리하지 않았다 — 두 술어가 다른 "
                 f"것을 고르고 있다. items={quarantine_items}"

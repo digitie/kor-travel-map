@@ -10,6 +10,8 @@ from dataclasses import dataclass, replace
 from typing import Final, Literal, cast
 from uuid import UUID
 
+from kortravelmap.cli._h35_schema_version import FORWARD_BOUNDARY, PRE_SCHEMA, TARGET_SCHEMA
+
 CONTRACT_VERSION: Final = "h35-map/v1"
 DATABASE_IDENTITY_ROLE: Final = "map_application"
 DATABASE_IDENTITY_PREFIX: Final = b"h35-db-identity-v1\0"
@@ -36,17 +38,17 @@ _PREVIOUS_OPERATION: Final[dict[Operation, Operation | None]] = {
 }
 _EXPECTED_PRIOR_SCHEMA: Final[dict[Operation, str | None]] = {
     "preflight": None,
-    "migrate": "0063_pipeline_root_id",
-    "csv5": "0078_cache_target_gc_observe",
-    "gc": "0078_cache_target_gc_observe",
-    "verify": "0078_cache_target_gc_observe",
+    "migrate": PRE_SCHEMA,
+    "csv5": TARGET_SCHEMA,
+    "gc": TARGET_SCHEMA,
+    "verify": TARGET_SCHEMA,
 }
 _EXPECTED_RECEIPT_BOUNDARY: Final[dict[Operation, str]] = {
     "preflight": "not_crossed",
-    "migrate": "schema_0078",
-    "csv5": "schema_0078",
-    "gc": "schema_0078",
-    "verify": "schema_0078",
+    "migrate": FORWARD_BOUNDARY,
+    "csv5": FORWARD_BOUNDARY,
+    "gc": FORWARD_BOUNDARY,
+    "verify": FORWARD_BOUNDARY,
 }
 _REQUEST_KEYS: Final = frozenset(
     {
@@ -238,9 +240,9 @@ def _validate_receipt_payload(raw: Mapping[str, object], *, previous: Operation)
         or re.fullmatch(r"[0-9]{4}_[a-z0-9_]+", schema_after) is None
     ):
         raise H35ContractError("prior_receipt schema revision이 잘못되었습니다.")
-    if previous == "preflight" and schema_before != "0063_pipeline_root_id":
-        raise H35ContractError("preflight schema_before가 잘못되었습니다.")
-    if previous in {"csv5", "gc"} and schema_before != "0078_cache_target_gc_observe":
+    if previous in {"preflight", "migrate"} and schema_before != PRE_SCHEMA:
+        raise H35ContractError(f"{previous} schema_before가 잘못되었습니다.")
+    if previous in {"csv5", "gc"} and schema_before != TARGET_SCHEMA:
         raise H35ContractError(f"{previous} schema_before가 잘못되었습니다.")
     row_counts = raw.get("row_counts")
     if not isinstance(row_counts, dict) or any(

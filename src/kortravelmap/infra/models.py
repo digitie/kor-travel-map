@@ -71,6 +71,15 @@ from kortravelmap.core.pipeline_cancellation_states import (
     PIPELINE_CANCELLATION_ROOT_KIND_VALUES,
     PIPELINE_CANCELLATION_STATUS_VALUES,
 )
+from kortravelmap.core.writer_drain_states import (
+    WRITER_DRAIN_CANCEL_RESULTS,
+    WRITER_DRAIN_INSTIGATION_KINDS,
+    WRITER_DRAIN_LEASE_STATES,
+    WRITER_DRAIN_OWNER_KINDS,
+    WRITER_DRAIN_PAUSE_RESULTS,
+    WRITER_DRAIN_RECEIPT_OPERATIONS,
+    WRITER_DRAIN_RESTORE_RESULTS,
+)
 from kortravelmap.infra.curation_link_basis import ALL_LINK_BASES
 
 _CANONICAL_WHITESPACE_SQL = (
@@ -117,6 +126,9 @@ __all__ = [
     "PipelineCancellationRow",
     "PipelineCancellationRunRow",
     "PipelineCancellationMemberRow",
+    "CacheTargetWriterDrainLeaseRow",
+    "CacheTargetWriterDrainInstigationRow",
+    "CacheTargetWriterDrainRunRow",
     "IntegrityObservationScopeRow",
     "IntegrityObservationRunRow",
     "IntegrityFindingObservationRow",
@@ -3042,6 +3054,220 @@ class OfflineUploadCommandExecutionRow(Base):
     )
     effect_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     effect_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+# =============================================================================
+# ops.cache_target_writer_drain_*  (T-VN-41D private control plane)
+# =============================================================================
+
+
+class CacheTargetWriterDrainLeaseRow(Base):
+    """Map writer drain의 durable owner lease (공개 REST 미노출)."""
+
+    __tablename__ = "cache_target_writer_drain_leases"
+    __table_args__ = (
+        UniqueConstraint(
+            "owner_kind",
+            "owner_id",
+            name=conv("uq_cache_target_writer_drain_leases_owner"),
+        ),
+        CheckConstraint(
+            f"owner_kind IN ({_sql_text_literals(WRITER_DRAIN_OWNER_KINDS)})",
+            name=conv("ck_cache_target_writer_drain_leases_owner_kind"),
+        ),
+        CheckConstraint(
+            f"state IN ({_sql_text_literals(WRITER_DRAIN_LEASE_STATES)})",
+            name=conv("ck_cache_target_writer_drain_leases_state"),
+        ),
+        CheckConstraint(
+            "snapshot_sha256 ~ '^[0-9a-f]{64}$'",
+            name=conv("ck_cache_target_writer_drain_leases_snapshot_sha256"),
+        ),
+        CheckConstraint(
+            "receipt_sha256 IS NULL OR receipt_sha256 ~ '^[0-9a-f]{64}$'",
+            name=conv("ck_cache_target_writer_drain_leases_receipt_sha256"),
+        ),
+        CheckConstraint(
+            "receipt_prior_sha256 IS NULL OR receipt_prior_sha256 ~ '^[0-9a-f]{64}$'",
+            name=conv("ck_cache_target_writer_drain_leases_receipt_prior_sha256"),
+        ),
+        CheckConstraint(
+            "failure_code IS NULL OR failure_code ~ '^[A-Z][A-Z0-9_]{0,63}$'",
+            name=conv("ck_cache_target_writer_drain_leases_failure_code"),
+        ),
+        CheckConstraint(
+            "(state <> 'draining') = (receipt_sha256 IS NOT NULL "
+            "AND receipt_operation IS NOT NULL) AND "
+            "(receipt_operation IS NULL OR receipt_operation IN "
+            f"({_sql_text_literals(WRITER_DRAIN_RECEIPT_OPERATIONS)}))",
+            name=conv("ck_cache_target_writer_drain_leases_receipt"),
+        ),
+        CheckConstraint(
+            "(state = 'restored') = (restored_at IS NOT NULL)",
+            name=conv("ck_cache_target_writer_drain_leases_restored_at"),
+        ),
+        Index(
+            "uq_cache_target_writer_drain_leases_active",
+            text("(1)"),
+            unique=True,
+            postgresql_where=text("state IN ('draining','drained','restoring')"),
+        ),
+        Index(
+            "idx_cache_target_writer_drain_leases_owner_history",
+            "owner_kind",
+            "owner_id",
+            text("created_at DESC"),
+        ),
+        {"schema": "ops"},
+    )
+
+    lease_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        server_default=text("x_extension.gen_random_uuid()"),
+    )
+    owner_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    owner_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    state: Mapped[str] = mapped_column(Text, nullable=False)
+    snapshot_sha256: Mapped[str] = mapped_column(Text, nullable=False)
+    receipt_sha256: Mapped[str | None] = mapped_column(Text)
+    receipt_operation: Mapped[str | None] = mapped_column(Text)
+    receipt_prior_sha256: Mapped[str | None] = mapped_column(Text)
+    failure_code: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("clock_timestamp()"),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("clock_timestamp()"),
+    )
+    restored_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class CacheTargetWriterDrainInstigationRow(Base):
+    """lease 시작 당시 schedule/sensor의 exact identity와 원래 상태."""
+
+    __tablename__ = "cache_target_writer_drain_instigations"
+    __table_args__ = (
+        CheckConstraint(
+            f"kind IN ({_sql_text_literals(WRITER_DRAIN_INSTIGATION_KINDS)})",
+            name=conv("ck_cache_target_writer_drain_instigations_kind"),
+        ),
+        CheckConstraint(
+            "selector_id = btrim(selector_id) AND selector_id <> '' AND "
+            "state_id = btrim(state_id) AND state_id <> '' AND "
+            "origin_id = btrim(origin_id) AND origin_id <> '' AND "
+            "instigation_name = btrim(instigation_name) AND instigation_name <> '' AND "
+            "repository_name = btrim(repository_name) AND repository_name <> '' AND "
+            "repository_location_name = btrim(repository_location_name) "
+            "AND repository_location_name <> ''",
+            name=conv("ck_cache_target_writer_drain_instigations_identity"),
+        ),
+        CheckConstraint(
+            f"pause_result IN ({_sql_text_literals(WRITER_DRAIN_PAUSE_RESULTS)}) AND "
+            f"restore_result IN ({_sql_text_literals(WRITER_DRAIN_RESTORE_RESULTS)})",
+            name=conv("ck_cache_target_writer_drain_instigations_results"),
+        ),
+        CheckConstraint(
+            "(was_running AND pause_result <> 'not_required') OR "
+            "(NOT was_running AND pause_result = 'not_required' "
+            "AND restore_result = 'not_requested')",
+            name=conv("ck_cache_target_writer_drain_instigations_original_state"),
+        ),
+        ForeignKeyConstraint(
+            ["lease_id"],
+            ["ops.cache_target_writer_drain_leases.lease_id"],
+            ondelete="RESTRICT",
+            name=conv("fk_cache_target_writer_drain_instigations_lease"),
+        ),
+        Index(
+            "idx_cache_target_writer_drain_instigations_lease",
+            "lease_id",
+        ),
+        {"schema": "ops"},
+    )
+
+    lease_id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+    kind: Mapped[str] = mapped_column(Text, primary_key=True)
+    selector_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    state_id: Mapped[str] = mapped_column(Text, nullable=False)
+    origin_id: Mapped[str] = mapped_column(Text, nullable=False)
+    instigation_name: Mapped[str] = mapped_column(Text, nullable=False)
+    repository_name: Mapped[str] = mapped_column(Text, nullable=False)
+    repository_location_name: Mapped[str] = mapped_column(Text, nullable=False)
+    was_running: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    pause_result: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        server_default=text("'pending'"),
+    )
+    paused_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    restore_result: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        server_default=text("'not_requested'"),
+    )
+    restored_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class CacheTargetWriterDrainRunRow(Base):
+    """lease가 발견한 Dagster run과 terminal cancel의 one-shot reservation."""
+
+    __tablename__ = "cache_target_writer_drain_runs"
+    __table_args__ = (
+        CheckConstraint(
+            "dagster_run_id = btrim(dagster_run_id) AND dagster_run_id <> '' AND "
+            "initial_status = btrim(initial_status) AND initial_status <> ''",
+            name=conv("ck_cache_target_writer_drain_runs_identity"),
+        ),
+        CheckConstraint(
+            f"cancel_result IN ({_sql_text_literals(WRITER_DRAIN_CANCEL_RESULTS)})",
+            name=conv("ck_cache_target_writer_drain_runs_cancel_result"),
+        ),
+        CheckConstraint(
+            "terminal_status IS NULL OR terminal_status ~ '^[A-Z_]+$'",
+            name=conv("ck_cache_target_writer_drain_runs_terminal_status"),
+        ),
+        CheckConstraint(
+            "(cancel_result = 'pending' AND cancel_reserved_at IS NULL "
+            "AND cancel_dispatched_at IS NULL AND terminal_status IS NULL) OR "
+            "(cancel_result IN ('reserved','outcome_uncertain') "
+            "AND cancel_reserved_at IS NOT NULL AND cancel_dispatched_at IS NULL "
+            "AND terminal_status IS NULL) OR "
+            "(cancel_result = 'dispatched' AND cancel_reserved_at IS NOT NULL "
+            "AND cancel_dispatched_at IS NOT NULL AND terminal_status IS NULL) OR "
+            "(cancel_result = 'terminal' AND terminal_status IS NOT NULL)",
+            name=conv("ck_cache_target_writer_drain_runs_cancel_evidence"),
+        ),
+        ForeignKeyConstraint(
+            ["lease_id"],
+            ["ops.cache_target_writer_drain_leases.lease_id"],
+            ondelete="RESTRICT",
+            name=conv("fk_cache_target_writer_drain_runs_lease"),
+        ),
+        Index("idx_cache_target_writer_drain_runs_lease", "lease_id"),
+        {"schema": "ops"},
+    )
+
+    lease_id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+    dagster_run_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    initial_status: Mapped[str] = mapped_column(Text, nullable=False)
+    cancel_result: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        server_default=text("'pending'"),
+    )
+    cancel_reserved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancel_dispatched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    terminal_status: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("clock_timestamp()"),
+    )
 
 
 # =============================================================================

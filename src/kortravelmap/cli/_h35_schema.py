@@ -1,4 +1,4 @@
-"""H35 Map helper의 0063→0078 schema preflight, migration, verification."""
+"""H35 Map helper의 0063→0079 schema preflight, migration, verification."""
 
 from __future__ import annotations
 
@@ -32,11 +32,10 @@ from kortravelmap.cli._h35_contract import (
     check,
     receipt,
 )
+from kortravelmap.cli._h35_schema_version import FORWARD_BOUNDARY, PRE_SCHEMA, TARGET_SCHEMA
 from kortravelmap.infra.curation_link_basis import trusted_basis_sql
 from kortravelmap.infra.db import make_async_engine
 
-PRE_SCHEMA: Final = "0063_pipeline_root_id"
-TARGET_SCHEMA: Final = "0078_cache_target_gc_observe"
 EXPECTED_PRE_PUBLIC: Final = 3_265
 EXPECTED_MIGRATED_PUBLIC: Final = 3_043
 EXPECTED_POST_PUBLIC: Final = 3_265
@@ -110,6 +109,7 @@ _REVISION_CHAIN: Final = (
     "0075_cache_target_outbox",
     "0076_cache_target_receipt",
     "0077_cache_target_snapshot_gc",
+    "0078_cache_target_gc_observe",
     TARGET_SCHEMA,
 )
 _REVISION_ORDER: Final = {revision: index for index, revision in enumerate(_REVISION_CHAIN)}
@@ -773,7 +773,7 @@ async def run_migrate(request: H35Request) -> Receipt:
             )
             schema_after = await _current_schema(connection)
             public = await _public_count(connection, migrated=True)
-            structural, counts = await verify_0075_0078(connection)
+            structural, counts = await verify_0075_0079(connection)
     finally:
         await engine.dispose()
     checks.extend(
@@ -789,13 +789,13 @@ async def run_migrate(request: H35Request) -> Receipt:
         status="accepted" if all_pass(checks) else "rejected",
         schema_before=schema_before,
         schema_after=schema_after,
-        forward_boundary="schema_0078" if schema_after == TARGET_SCHEMA else "not_crossed",
+        forward_boundary=FORWARD_BOUNDARY if schema_after == TARGET_SCHEMA else "not_crossed",
         row_counts={"public_items": public, **counts},
         checks=checks,
     )
 
 
-async def verify_0075_0078(
+async def verify_0075_0079(
     connection: AsyncConnection,
 ) -> tuple[list[dict[str, JsonValue]], dict[str, int]]:
     catalog = await collect_catalog_objects(connection)
@@ -818,7 +818,7 @@ async def verify_0075_0078(
     checks = [
         *(
             check(
-                f"0075_0078_{category}_semantic",
+                f"0075_0079_{category}_semantic",
                 expected=expected,
                 observed=fingerprints.get(category, "missing"),
             )
@@ -858,7 +858,7 @@ async def collect_verify_state(
                 identity_check,
                 await _current_schema(connection),
                 await _public_count(connection, migrated=True),
-                *(await verify_0075_0078(connection)),
+                *(await verify_0075_0079(connection)),
             )
     finally:
         await engine.dispose()
@@ -876,5 +876,5 @@ __all__ = [
     "partial_probe",
     "run_migrate",
     "run_preflight",
-    "verify_0075_0078",
+    "verify_0075_0079",
 ]

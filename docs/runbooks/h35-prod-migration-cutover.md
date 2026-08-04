@@ -1,8 +1,13 @@
 # H35 prod 마이그레이션 cutover 보정 runbook
 
-> 상태: **구현 검증·최종 승인 전 실행 금지**
+> 상태: **prod 절차로는 폐기됨 — 실행 금지**
 >
-> 대상: `0063_pipeline_root_id`에서 `0078_cache_target_gc_observe`로 가는 H35 cutover
+> 과거 대상: `0063_pipeline_root_id`에서 `0078_cache_target_gc_observe`로 가는 H35 cutover
+>
+> 2026-08-04 재정의: 서비스 전 DB를 폐기·재생성하기로 했으므로 아래 prod cutover 절차는
+> 이력이다. 다만 helper regression harness는 새 Map migration이 추가돼도 CI가 무의미하게
+> 깨지지 않도록 현재 schema head `0079_cache_target_writer_drain`까지 synthetic하게 검증한다.
+> 이는 cutover의 복구·승인·prod 실행을 부활시키지 않는다.
 >
 > 관계: `T-VN-H35`, `T-VN-41`, Docker-manager generation 7
 
