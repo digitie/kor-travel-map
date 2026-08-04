@@ -45,6 +45,11 @@ barrier로 직렬화한다.
     [x] `T-VN-H22A`(quarantine read/preview — 사용자 지시로 보류 해제, 단일 PR) →
     [x] `T-VN-H22B`(원자적 재분류 command — domain ledger·충돌 fail-close·빈 격리 정리) →
     [x] `T-VN-H22C`(Admin UI 패널·mocked 6건·격리 스택 파괴 검증 9흐름·live spec 저술)
+  - a2 (운영 연속성 — 0072 사고·재생성 후속):
+    [ ] `T-VN-H42`(provider 재적재 완주·수렴 검증 + **H35 prod live 검증 잔여** —
+        지금부터 스케줄 수렴 감시로 진행, **41C prod enable의 선행 조건**) →
+    [ ] `T-VN-H43`(prod 백업 체계 수립 — H42 완주 직후 rollback 기준선 dump) →
+    [ ] `T-VN-H44`(복원 리허설 드릴 정기화 — H30B 하네스 재사용, 이후 정기)
 - **Lane B — frontend hardening·PinVi 소비 API**
   - b0: [x] `T-VN-48D`(final exact Mocked/Live) →
     [x] `T-VN-49A/B/C/D`(React 구조 debt, 단일 PR)
@@ -54,7 +59,8 @@ barrier로 직렬화한다.
     [x] `T-VN-H39`(schedule command pending barrier) →
     [x] `T-VN-16B`(weather batch 소비) →
     [x] `T-VN-16C`(sparse 다중 날짜 weather batch) →
-    [ ] `T-VN-41A` → [ ] `T-VN-41B` → [ ] `T-VN-41C`(generation/outbox)
+    [ ] `T-VN-41A` → [ ] `T-VN-41B` → [ ] `T-VN-41C`(generation/outbox — prod enable은
+    재pin #109 완료 + `T-VN-H42` 뒤, Lane B 상세 절 경계 주석 참조)
 - **Wave 2 barrier 이후**
   - freeze(Lane A): [ ] `T-VN-31A` → [ ] `T-VN-31B` → [ ] `T-VN-31C`
   - Lane A: [ ] `T-VN-32A` → [ ] `T-VN-32B` → [ ] `T-VN-32C` →
@@ -999,9 +1005,15 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   4. [~] 데이터 재적재 — **concierge 축 완료**: provider job + `curated_features_refresh`
      성공, features 1,481 · curated 4,424 · **공개 표면 4,424건 복구**(전부 `source_rule`).
      geo API key 결선 공백은 `/tmp` override로 해소(영구 결선은 manager #114).
-     잔여: 나머지 provider ETL(일일 스케줄) + CSV 5종(대상 feature 적재 후).
-  5. [ ] 재적재 안정화 후 H30B·H34 잔여 실행 해제. **codex 41C "prod consumer enable"도
-     재pin(#109) + CSV5 완료 후가 경계** (그 전 격리 스택 작업은 병행 무방).
+     **CSV5 486행 적재 완료(2026-08-04)** — 공개 표면 trusted **4,620**(source_rule 4,424 +
+     csv_explicit 196), 미해석 290행은 대상 feature 적재 후 재import 필요.
+     잔여(나머지 provider ETL 일일 스케줄 수렴 + 290행 재import)의 완주·수렴 검증은
+     **`T-VN-H42`가 소유**한다.
+  5. [ ] 재적재 안정화 후 H34 잔여 실행 해제(H30B는 재정의판으로 완료).
+     **prod live 검증(공개 API·admin UI live 스모크·quarantine 0·공개 표면 최종 수치
+     고정)은 이번 사이클에 수행하지 못했다 — `T-VN-H42` AC로 이월(2026-08-04).**
+     codex 41C "prod consumer enable"은 재pin(#109 — `2b2dee95` 완료) + `T-VN-H42` 완료
+     후가 경계(그 전 격리 스택 작업은 병행 무방).
 
   ---
 
@@ -1588,6 +1600,68 @@ read/decision/write/UI를 한 PR에 몰지 않는다.
   참고: 사고 시점 dump(`krtour_map_0072_*.dump`, 복원 검증됨)는 향후 실데이터 픽스처로
   쓸 수 있으나 quarantine 행이 없어 이번 검증은 합성 시드를 썼다.
 
+### T-VN-H42~H44 — 운영 연속성 (0072 사고 후속: 재적재 완주 → 백업 체계 → 복원 드릴)
+
+> 2026-08-04 prod 폐기·재생성(head `0078`, rev `2b2dee95`) 후속. 재적재는 concierge 축
+> (curated 4,424 전부 `source_rule`)과 CSV5 486행(공개 표면 trusted **4,620** =
+> source_rule 4,424 + csv_explicit 196)까지 왔고, **잔여 provider는 일일 스케줄 수렴
+> 대기**다(features ~7천 — MOIS 100만 계열·opinet·visitkorea·khoa·knps 등 미완, CSV
+> 미해석 290행은 대상 feature 적재 후 재import 필요). 백업은 **ad-hoc dump 2개뿐**
+> (0072 아카이브 1.2G · 재생성 직후 0078 6.9M — 둘 다 sha256 기록·복원 검증 완료)이고
+> prod는 `archive_mode=off`라 **PITR이 없다 — dump가 유일 복구점**이다.
+>
+> **이월 기록(2026-08-04)** — 이번 사이클에 수행하지 못하고 넘어간 것 2건을 명시한다.
+> ① **H35 prod live 검증** — 재생성 후 공개 표면 DB 실측(4,620)까지만 했고, prod live
+> 검증(공개 API·admin UI live 스모크, quarantine 0 확인, 재적재 수렴 후 최종 판정)은
+> 하지 않았다 → **H42 AC로 이월**. ② **T-VN-41 prod live 검증** — codex 소관 41C
+> "prod consumer enable + live 증명"은 경계 조건(docker-manager 재pin #109 =
+> `2b2dee95` 완료 + CSV5/재적재 안정화) 뒤로 미뤄졌다 → Lane B T-VN-41 절 경계 주석.
+
+- [ ] T-VN-H42 — **provider 재적재 완주·수렴 검증 (+ H35 prod live 검증 잔여)**
+
+  잔여 provider 적재를 일일 스케줄 감시로 완주시키고 재생성 prod의 공개 표면을 최종
+  판정한다. **타이밍: 지금부터 스케줄 수렴 감시로 진행**하며, **41C prod consumer
+  enable의 선행 조건**이다.
+
+  - [ ] 잔여 provider 로드 완료 — **ADR-034 9단계 순서 존중**: MOIS bulk는 **dedup 룰
+    검증 후**에만, opinet은 **scope 제한 bbox로 무료 키 일일 quota 준수**(전국 단위
+    bbox 1회가 quota를 소진하고도 sparse partial만 남긴다 — 재발 금지).
+  - [ ] CSV 미해석 290행 재import(**authoritative replace**)로 링크 수렴 — 대상 feature
+    적재 후에만 해석되므로 provider 완주 뒤 실행한다. `curated_features_refresh`
+    재확인 포함.
+  - [ ] **H35 prod live 검증 잔여(이월)**: 공개 API·admin UI **live 스모크** +
+    **quarantine 0 확인** + 재적재 수렴 후 **공개 표면 최종 수치 고정**
+    (중간 기준선: CSV5 직후 trusted 4,620).
+
+- [ ] T-VN-H43 — **prod 백업 체계 수립 (정기 dump·sha256·보존·rollback 기준선)**
+
+  ad-hoc dump 2개(위 참조)를 정기 절차로 바꾼다. **타이밍: H42 완주 직후** —
+  **재적재 완주 직후 rollback 기준선 dump**를 절차의 첫 실행으로 삼는다(ADR-075의
+  기준점 생성 규칙 — fence 뒤 생성 — 과 정합해야 한다).
+
+  - [ ] 정기 prod dump 절차 정본화 — **앱과 같은 TCP 경로**로 뜬다(**컨테이너 로컬 소켓
+    금지** — 재시작 후 로컬 소켓이 앱 TCP 인스턴스와 다른 postgres를 가리켜 "DB 없음"
+    허위 경보를 낸 함정, journal 2026-08-04 (2)). sha256 기록과 보존 정책(개수·기간)을
+    함께 고정한다.
+  - [ ] **소유 경계**: orchestration(스케줄 실행·저장 위치)은 docker-manager,
+    **절차 정본은 Map runbook**. 필요한 manager 변경은 manager 이슈로 요청한다.
+  - [ ] 신규 DB 프로비저닝 함정 참조 링크 — **superuser 확장 4종 사전 생성**(postgis·
+    pg_trgm·pgcrypto·pg_prewarm + `GRANT USAGE`, manager #109에 절차 기록)을 restore
+    문서에서 링크한다.
+
+- [ ] T-VN-H44 — **복원 리허설 드릴 정기화 (H30B 하네스 재사용)**
+
+  백업본이 실제로 복원되는지를 반복 가능한 드릴로 정착시킨다. **타이밍: H43 뒤,
+  이후 정기.**
+
+  - [ ] H30B 하네스(dev box `~/h30b/` — artifact replay·결손 주입·완전 회복 검증)를
+    재사용한다.
+  - [ ] restore 요령 고정 — postgis 이미지는 **init 완료 대기 후 새 DB를 만들어** 복원
+    (`POSTGRES_DB`에 미리 심어진 확장과 dump의 확장 배치가 충돌 — 0072 아카이브 복원
+    검증에서 실측).
+  - [ ] 드릴 1회 = dump 선택 → 격리 복원 → head·row count 대조 → (가능 시) 결손 주입·
+    회복 replay → 결과 기록. 절차를 runbook으로 고정해 반복 실행 가능하게 한다.
+
 ## 이슈 종결 추적
 
 > landing task와 완료 조건이 동일한 열린 이슈만 함께 닫는다. LIVE-01 후속 OPEN 7건은 Lane A
@@ -1605,6 +1679,12 @@ read/decision/write/UI를 한 PR에 몰지 않는다.
 ## Lane B 상세 — b1 PinVi 결합·후속
 
 ### T-VN-41 — cache-target generation·outbox 전파
+
+> **41C prod enable 경계(2026-08-04 갱신)** — 41C의 "prod consumer enable + live 증명"은
+> docker-manager **재pin(#109 — `2b2dee95`) 완료** + Lane A **`T-VN-H42`**(provider 재적재
+> 완주·수렴 + H35 prod live 검증 잔여) **완료 후**에만 진행한다. 그 전 격리 스택 작업은
+> 병행 무방(파일 충돌은 의도된 핀 2개뿐 — registry write 수·mocked manifest,
+> journal 2026-08-04).
 
 - [ ] T-VN-41A — **source generation·restore epoch**
 

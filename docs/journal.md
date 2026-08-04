@@ -17,6 +17,20 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-08-04 (3) — 이월 기록: H35·T-VN-41 prod live 검증 미수행 → H42~H44 신설 (docs-only)
+
+- **이월 기록** — 이번 사이클에 수행하지 못하고 넘어간 것 2건을 명시한다.
+  ① **H35 prod live 검증**: 재생성 후 공개 표면 DB 실측(4,620)까지만 했고, prod live
+  검증(공개 API·admin UI live 스모크, quarantine 0 확인, 재적재 수렴 후 최종 판정)은
+  하지 않았다. ② **T-VN-41 prod live 검증**: codex 소관 41C "prod consumer enable +
+  live 증명"은 경계 조건(docker-manager 재pin #109 = `2b2dee95` 완료 + CSV5/재적재
+  안정화) 뒤로 미뤄졌다. 배치: tasks.md Lane A **a2(운영 연속성)** 신설 —
+  `T-VN-H42`(provider 재적재 완주·수렴 검증, **H35 live 검증 잔여를 AC로 흡수**,
+  41C prod enable 선행 조건·지금부터 스케줄 수렴 감시) → `T-VN-H43`(prod 백업 체계 —
+  TCP 경로 정기 dump·sha256·보존, H42 완주 직후 rollback 기준선) → `T-VN-H44`(복원
+  리허설 드릴 정기화 — H30B `~/h30b/` 하네스 재사용). Lane B T-VN-41 절의 41C 경계
+  주석도 갱신했다.
+
 ## 2026-08-04 (2) — CSV5 재적재 완료 + T-VN-H30B 재정의판 실증 완료
 
 - **CSV5 전량 적재** (#934 이후): 486행/batches 5 — tourism-100 224 · heritage 85 ·
