@@ -1,0 +1,47 @@
+{
+  "artifact": "expected-rejections-v1",
+  "owner": "T-VN-31C",
+  "description": "violation-fixtures-v1.sql 각 case의 기대 SQLSTATE와 제약명. target-schema-v1.sql 제약이 위반 fixture를 DB에서 거부함을 executable contract로 고정한다 (보고서 §8.1). 3축 불가능 조합 case는 CHECK 정의 자체가 미정(T-VN-34A 소관)이라 없다 — 구현이 CHECK를 확정하는 PR에서 fixture와 함께 추가한다.",
+  "cases": {
+    "alias_duplicate": {
+      "sqlstate": "23505",
+      "constraint": "pk_feature_aliases",
+      "basis": "ADR-068"
+    },
+    "provider_identity_tuple_duplicate": {
+      "sqlstate": "23505",
+      "constraint": "uq_source_entities_provider_identity",
+      "basis": "ADR-068"
+    },
+    "geometry_invalid": {
+      "sqlstate": "23514",
+      "constraint": "ck_feature_areas_geom_valid",
+      "basis": "ADR-070"
+    },
+    "geometry_empty": {
+      "sqlstate": "23514",
+      "constraint": "ck_feature_points_geom_not_empty",
+      "basis": "ADR-070"
+    },
+    "override_active_duplicate": {
+      "sqlstate": "23505",
+      "constraint": "uq_feature_overrides_active",
+      "basis": "ADR-071"
+    },
+    "notice_is_current_duplicate": {
+      "sqlstate": "23505",
+      "constraint": "uq_notice_states_current",
+      "basis": "T-VN-37"
+    },
+    "weather_identity_nulls_not_distinct_duplicate": {
+      "sqlstate": "23505",
+      "constraint": "uq_weather_value_identity",
+      "basis": "ADR-072"
+    },
+    "weather_bitemporal_inversion": {
+      "sqlstate": "23514",
+      "constraint": "ck_weather_value_bitemporal_order",
+      "basis": "ADR-072"
+    }
+  }
+}

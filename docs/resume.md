@@ -10,6 +10,20 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-08-04 (5) — T-VN-31A/B/C vNext target freeze 완료
+
+Wave 2 barrier의 freeze 3종을 완료했다. `contracts/vnext/` artifact 8개(목표 DDL·
+불변식·fingerprint·OpenAPI diff·consumer rollout·위반 fixture·기대 rejection·복구
+preflight)와 fail-close 테스트 2본(`tests/integration/test_vnext_target_freeze.py`,
+`tests/unit/test_vnext_contract_artifacts.py` — unit job이 매 PR artifact bytes를
+고정). ADR 침묵 세부는 전부 `미정(T-VN-XX 구현 소관)`/`deferred-to-implementation`
+표기(발명 금지 원칙, tasks.md T-VN-31 블록 참조). 검증: unit 1,963 passed ·
+freeze 통합 3 passed · mypy --strict clean.
+
+**다음 한 작업**: Wave 2 진입 — Lane A `T-VN-32A`(UUID schema·deterministic
+backfill). freeze artifact가 머지된 뒤에만 시작한다(barrier 규율). freeze의
+`미정` 목록이 각 구현 task의 첫 결정 대상이다.
+
 ## 2026-08-04 (4) — 이월 기록: H35·41C prod live 검증 미수행 → H42~H44 배치 (docs-only)
 
 이번 사이클에 수행하지 못한 것 2건을 명시 이월 — **H35 prod live 검증**(공개 표면 DB

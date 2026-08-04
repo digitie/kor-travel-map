@@ -17,6 +17,51 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-08-04 (5) — T-VN-31 freeze 적대 리뷰 2건 반영
+
+- **정합성 리뷰(F-1~F-11) 반영**: 발명분 회수 — retired∧draft state CHECK 제거
+  (0059는 교집합 술어만 정본화, 조합 집합은 T-VN-34A 미정), subtype 무술어 GiST
+  8개 제거(D-12 결정 3 "공개 술어 partial만" 정본 위반이므로 인덱스 0개 고정 +
+  설계 공백 미정 주석), weather summary identity에서 timeline_bucket 제외(0060
+  정본 "분류 결과라 identity 제외"), price summary known_at 제거(ADR-078에 price
+  bitemporal 결정 없음). 정본 명시분 반영 — user surface status→3축 enum diff
+  (현행 user spec의 status 노출 실측)+T-VN-34 user snapshot 재-vendor yes,
+  weather 유효기간 `valid_during tstzrange`(ADR-072 결정 2), soft-delete 흡수처
+  `feature.feature_state_transitions` 신설(ADR-067 결정 5), ADR-073 결정 1 배타
+  열거에 따라 features 목록·by-target·providers*·public/beaches*·festivals*·
+  contained-features를 removed로 이동, projection 역할 분리(ADR-069 결정 4)·
+  detail-snapshot PinVi 런타임 소비(H07D)·재-vendor 정본 귀속(user/admin은
+  ADR-079, service는 ADR-081) 명시.
+- **실행성 리뷰(D1~D4) 반영**: invariant 파서 fail-open 봉합(trailer 개수 대사),
+  machine-readable phase 태그(pre-backfill/post-backfill/both) + 파서 필수 검증,
+  openapi-diff surface별 counts + unit 대조(2차 방어), current_weather_summary
+  surrogate PK(bigint identity — replica identity·price 대칭).
+- 카운트 변경: invariant 44→43, violation fixture 9→8(3축 조합 case는 CHECK
+  미정이라 구현 PR로 이월, NULLS NOT DISTINCT case는 history tuple의 실 NULL
+  동치로 교체). fingerprint·bytes sha 전부 재고정.
+
+## 2026-08-04 (3) — T-VN-31A/B/C vNext target freeze
+
+## 2026-08-04 (4) — T-VN-31A/B/C vNext target freeze
+
+- **Wave 2 barrier freeze 완료.** ADR-066~075·보고서 §3/§4/§8·tasks 정의를
+  실행 가능한 artifact 8개(`contracts/vnext/`)로 고정 — 목표 DDL(빈 PostGIS
+  자기완결), 불변식 44 assertion(H35 preflight 6종 패턴), catalog fingerprint
+  (H35 7 카테고리), OpenAPI diff(surface×change, baseline sha256 핀), consumer
+  rollout(write-fence·호환 폐기·PinVi 3 snapshot 재-vendor), 위반 fixture 9 case
+  + 기대 SQLSTATE/제약명, recovery preflight(writer registry·fence 증거·PITR
+  판정·Merkle v1).
+- **정직성 원칙**: ADR이 침묵하는 세부(UUID 생성기 버전, alias_kind 값 집합,
+  subtype 공간 인덱스의 partial 표현, anchor 정밀 술어, capability shape,
+  summary reconciliation 등)는 발명하지 않고 `-- 미정(T-VN-XX 구현 소관)` /
+  `"deferred-to-implementation"`으로 표기.
+- **drift fail-close**: 통합 테스트(빈 PostGIS 새 DB에서 DDL 적용→불변식 0→
+  fixture별 기대 SQLSTATE 거부→fingerprint 재계산 일치) + unit 테스트(artifact
+  bytes sha256 상수 고정, 현행 spec baseline sha256, diff 참조 operation 실존,
+  rollout/preflight JSON shape) — unit job이 매 PR 실행되어 31A/B drift를 막는다.
+- 검증: ruff clean, unit 전체 1,963 passed, freeze 통합 3 passed,
+  `mypy --strict` clean.
+
 ## 2026-08-04 (3) — 이월 기록: H35·T-VN-41 prod live 검증 미수행 → H42~H44 신설 (docs-only)
 
 - **이월 기록** — 이번 사이클에 수행하지 못하고 넘어간 것 2건을 명시한다.
