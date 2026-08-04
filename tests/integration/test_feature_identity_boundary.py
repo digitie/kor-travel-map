@@ -313,35 +313,73 @@ async def test_admin_add_sql_writes_uuid_and_alias(
 async def test_dual_derivation_check_rejects_drifted_alias_uuid(
     migrated_session: AsyncSession,
 ) -> None:
-    """0080 CHECK — alias 행의 파생 사본도 uuid5 규칙과 다르면 DB가 거부한다.
+    """alias 파생 drift는 계층별로 거부된다 (T-VN-32C 0081로 재정의).
 
-    32C alias-map DB-to-DB 이관의 무결성 전제(fail-close by construction).
+    32B 원판은 UPDATE drift가 0080 CHECK에 걸리는 것을 관측했지만, 0081 legacy
+    write fence가 alias UPDATE 자체를 전면 거부하므로(더 강한 fail-close) 이제
+    UPDATE 경로는 fence가 먼저 선다. 파생 CHECK
+    (``ck_feature_aliases_uuid_dual_derivation``)의 관측은 fence가 막지 않는
+    INSERT 경로(신규 alias 행의 drifted 파생 사본)로 유지한다 — 32C alias-map
+    DB-to-DB 이관의 무결성 전제(fail-close by construction).
     """
     from sqlalchemy.exc import DBAPIError
 
     feature_id = "f_1100000000_p_idboundary0007"
     await feature_repo.load_bundle(migrated_session, _place_bundle(feature_id))
-    with pytest.raises(DBAPIError) as excinfo:
-        await migrated_session.execute(
-            text(
-                "UPDATE feature.feature_aliases "
-                "SET feature_uuid = CAST('00000000-0000-4000-8000-0000000000ff' AS uuid) "
-                "WHERE alias = :fid"
-            ),
-            {"fid": feature_id},
-        )
-    assert "ck_feature_aliases_uuid_dual_derivation" in str(excinfo.value)
+    # ① UPDATE drift — 0081 fence가 불변 계약으로 먼저 거부한다.
+    with pytest.raises(DBAPIError) as fence_error:
+        async with migrated_session.begin_nested():
+            await migrated_session.execute(
+                text(
+                    "UPDATE feature.feature_aliases "
+                    "SET feature_uuid = CAST('00000000-0000-4000-8000-0000000000ff' AS uuid) "
+                    "WHERE alias = :fid"
+                ),
+                {"fid": feature_id},
+            )
+    assert "legacy write fence" in str(fence_error.value)
+    # ② INSERT drift — 파생 규칙 CHECK가 저장 경계에서 거부한다.
+    with pytest.raises(DBAPIError) as check_error:
+        async with migrated_session.begin_nested():
+            await migrated_session.execute(
+                text(
+                    "INSERT INTO feature.feature_aliases "
+                    "(alias, feature_id, feature_uuid, alias_kind) VALUES "
+                    "(:alias, :fid, "
+                    "CAST('00000000-0000-4000-8000-0000000000ff' AS uuid), "
+                    "'legacy_feature_id')"
+                ),
+                {"alias": f"{feature_id}-drift-probe", "fid": feature_id},
+            )
+    assert "ck_feature_aliases_uuid_dual_derivation" in str(check_error.value)
 
 
 async def test_missing_alias_is_observed_by_identity_invariant(
     migrated_session: AsyncSession,
 ) -> None:
-    """alias 결측(INV-068-01 위반)은 invariant 관측 함수가 0이 아닌 값으로 보고한다."""
+    """alias 결측(INV-068-01 위반)은 invariant 관측 함수가 0이 아닌 값으로 보고한다.
+
+    T-VN-32C 0081이 alias 직접 DELETE를 fence하므로(거부 자체는
+    ``test_legacy_write_fence``가 고정), 결측 상태는 보장 붕괴 시뮬레이션
+    (fence 트리거 일시 해제 — transaction rollback으로 원복)으로 만든다.
+    """
     feature_id = "f_1100000000_p_idboundary0006"
     await feature_repo.load_bundle(migrated_session, _place_bundle(feature_id))
     await migrated_session.execute(
+        text(
+            "ALTER TABLE feature.feature_aliases "
+            "DISABLE TRIGGER trg_feature_aliases_delete_fence"
+        )
+    )
+    await migrated_session.execute(
         text("DELETE FROM feature.feature_aliases WHERE alias = :fid"),
         {"fid": feature_id},
+    )
+    await migrated_session.execute(
+        text(
+            "ALTER TABLE feature.feature_aliases "
+            "ENABLE TRIGGER trg_feature_aliases_delete_fence"
+        )
     )
     missing_uuid, missing_alias = await feature_identity.count_features_missing_identity(
         migrated_session
