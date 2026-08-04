@@ -1827,10 +1827,16 @@ ADR은 존재하지만 목표 DDL/OpenAPI diff/실행 제약 artifact는 없다.
   양쪽을 정본 키 쌍 `FeatureIdentity(feature_id, feature_uuid)`로 해석
   (형식 오류 422 · 미해석 404, UUID-정본 우선/alias fallback 결정적 순서) +
   `kortravelmap.api.feature_ref.resolve_feature_ref_or_error` 공용 경계 헬퍼.
-  **모든 feature `{feature_id}` 경로에 적용** — user detail·sources·
-  observations history·weather·price·contained-features / admin detail·
-  revision·weather·price·PATCH·DELETE·deactivate. 내부 전달·조회는 해석된
-  정본 키로만(ADR-068 결정 3). operator lineage의 별도 존재 확인 쿼리
+  **removal-슬레이트 표면을 제외한 전 feature `{feature_id}` 경로에 적용** —
+  user detail·sources·observations history·weather·price·contained-features·
+  **weather/forecast(적대 리뷰 F2로 뒤늦게 편입 — 종전엔 이 경로만 해석을
+  건너뛰어 형식 오류에도 200+빈 timeline)** / admin detail·revision·weather·
+  price·PATCH·DELETE·deactivate. **의도적 제외 3표면**(적대 리뷰 F3 명시):
+  `GET /v1/curations/features/{id}`·`GET /v1/public/{beaches,festivals}/{id}` —
+  freeze openapi-diff에서 ADR-073 배타 열거로 removed 슬레이트(T-VN-40B/39
+  소관)라 변환하지 않으며, 형식 오류가 422가 아닌 404로 떨어지는 비일관을
+  포함한 채 제거 시점까지 동결. 내부 전달·조회는 해석된 정본 키로만
+  (ADR-068 결정 3). operator lineage의 별도 존재 확인 쿼리
   (`_operator_feature_or_404`)는 해석 성공이 행 존재를 함의하므로 제거.
   ② dual read — alembic `0080_uuid_dual_read`가 `public_features` view에
   `feature_uuid`를 재고정(SELECT * 컬럼 목록, 공개 술어 무변경), repo 단건
@@ -1864,7 +1870,8 @@ ADR은 존재하지만 목표 DDL/OpenAPI diff/실행 제약 artifact는 없다.
   UUID 조인 재작성과 referencing table shadow uuid 컬럼(rollout이 legacy FK
   체인 fence를 32C, 제거를 39로 고정), 응답 `feature_id` 값 UUID 전환,
   legacy write fence·트리거/CHECK 제거, PinVi vendored snapshot 재추출(32C 쌍
-  PR), legacy ID 물리 제거(T-VN-39 removal manifest). 검증: unit 1,981(identity
+  PR), service/weather **batch body**의 feature 참조 UUID 해석(경로 참조와의
+  비대칭 — 적대 리뷰 F4, 값 전환과 같은 시점), legacy ID 물리 제거(T-VN-39 removal manifest). 검증: unit 1,981(identity
   순수 계약 11 신규) · api 1,069(경계 dual/422/additive/404 재정의) · 신규 통합
   9(`test_feature_identity_boundary.py` — 양형식 해석·미존재·형식 오류·
   view/단건/bbox/batch/notice 병행 노출·upsert/admin-add 원자성·CHECK drift

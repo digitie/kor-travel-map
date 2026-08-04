@@ -27764,6 +27764,17 @@
             ],
             "title": "Target Feature Id"
           },
+          "target_feature_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Feature Uuid"
+          },
           "target_lat": {
             "anyOf": [
               {

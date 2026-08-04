@@ -128,7 +128,7 @@
   실패는 test_docker_dagster_runtime의 docker CLI 부재 env 한정, 본 branch
   무접촉 파일) · api 패키지 1,076 passed(신규 test_feature_alias_maps_router
   7 포함, coverage 78.84%≥70) · export --check drift 0 · 신규 통합
-  test_legacy_write_fence 10 passed(alias UPDATE/직접 DELETE 거부·cascade
+  test_legacy_write_fence 12 passed(기록 정정 — 적대 리뷰 F4; alias UPDATE/직접 DELETE 거부·cascade
   허용·identity 불변·same-value 통과·fill 원자성·checksum 독립 재계산 일치·
   keyset 완전 순회·파생 불일치/비-NFC fail-close·downgrade 왕복) + alembic
   metadata 일관성 2 passed(COLLATE index의 반영 정합은 컬럼 index 선언으로

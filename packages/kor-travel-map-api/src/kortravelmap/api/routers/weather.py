@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api.db import get_session
+from kortravelmap.api.feature_ref import resolve_feature_ref_or_error
 from kortravelmap.api.response import Meta, make_meta
 
 __all__ = [
@@ -70,6 +71,9 @@ class PublicWeatherForecastData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     target_feature_id: str | None = None
+    # T-VN-32C 리뷰 F2 — 경계 해석 결과의 UUID 정본 병행 노출 (additive,
+    # feature 참조 variant에서만 채워진다).
+    target_feature_uuid: str | None = None
     target_lon: float | None = None
     target_lat: float | None = None
     radius_m: float
@@ -259,6 +263,7 @@ async def _forecast_response(
     session: AsyncSession,
     *,
     target_feature_id: str | None,
+    target_feature_uuid: str | None,
     target_lon: float | None,
     target_lat: float | None,
     anchor: weather_repo.WeatherAnchor | None,
@@ -293,6 +298,7 @@ async def _forecast_response(
     return PublicWeatherForecastResponse(
         data=PublicWeatherForecastData(
             target_feature_id=target_feature_id,
+            target_feature_uuid=target_feature_uuid,
             target_lon=target_lon,
             target_lat=target_lat,
             radius_m=radius_m,
@@ -352,6 +358,7 @@ async def get_weather_forecast_by_coordinate(
         request,
         session,
         target_feature_id=None,
+        target_feature_uuid=None,
         target_lon=lon,
         target_lat=lat,
         anchor=anchor,
@@ -405,16 +412,20 @@ async def get_weather_forecast_by_feature(
     limit: Annotated[int, Query(ge=1, le=5000)] = 500,
 ) -> PublicWeatherForecastResponse:
     started_at = perf_counter()
+    # T-VN-32C 리뷰 F2 — 같은 `/features/{feature_id}` 계열의 경계 해석 규칙 통일:
+    # legacy·UUID 양형식 수용, 형식 오류 422, 미존재 404. 내부 전달은 정본 legacy 키.
+    identity = await resolve_feature_ref_or_error(session, feature_id)
     history_from = weather_repo.weather_history_floor(retention_days=history_days)
     anchor = await weather_repo.nearest_weather_feature_for_feature(
         session,
-        feature_id=feature_id,
+        feature_id=identity.feature_id,
         radius_m=radius_m,
     )
     return await _forecast_response(
         request,
         session,
-        target_feature_id=feature_id,
+        target_feature_id=identity.feature_id,
+        target_feature_uuid=str(identity.feature_uuid),
         target_lon=None,
         target_lat=None,
         anchor=anchor,

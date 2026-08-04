@@ -152,7 +152,8 @@ async def get_feature_alias_map_page(
         FeatureAliasMapRowOut(
             alias=row.alias,
             feature_uuid=row.feature_uuid,
-            alias_kind="legacy_feature_id",
+            # 하드코딩 금지 (적대 리뷰 F4-①) — kind가 추가되면 표면이 거짓말하게 된다.
+            alias_kind=row.alias_kind,
         )
         for row in page.rows
     ]

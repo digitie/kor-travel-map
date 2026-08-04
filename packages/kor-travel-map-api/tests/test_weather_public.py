@@ -134,8 +134,58 @@ def test_weather_forecast_feature_response(
         assert response.status_code == 200
         data = response.json()["data"]
         assert data["target_feature_id"] == "f_target"
+        # T-VN-32C 리뷰 F2 — 경계 해석 결과의 UUID 정본 병행 노출 (additive).
+        from kortravelmap.core.ids import feature_uuid_from_legacy
+
+        assert data["target_feature_uuid"] == str(feature_uuid_from_legacy("f_target"))
         assert data["anchor"]["feature_id"] == "f_w"
         assert data["items"] == []
+    finally:
+        client.app.dependency_overrides.clear()
+
+
+@pytest.mark.unit
+def test_weather_forecast_feature_ref_boundary(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """F2 회귀 — `/features/{feature_id}/weather/forecast`도 경계 해석 규칙을 탄다.
+
+    종전에는 이 경로만 해석을 건너뛰어 형식 오류·미존재 UUID에도 200 + 빈 timeline을
+    돌려줬다(적대 리뷰 실측). 형제 `/features/{id}` 경로들과 같은 규칙이어야 한다:
+    형식 오류 422, 미해석 404. (echo-resolver가 형식 검증은 실제로 태운다 —
+    conftest 참조. 404는 resolver를 미해석으로 덮어써 검증.)
+    """
+    import kortravelmap.api.routers.weather as mod
+
+    _fake_session(client)
+    try:
+        # 형식 오류 → 422 (실제 validate_feature_ref 경로)
+        padded = client.get("/v1/features/%20f_pad%20/weather/forecast?limit=1")
+        assert padded.status_code == 422
+        oversized = client.get(f"/v1/features/{'x' * 257}/weather/forecast?limit=1")
+        assert oversized.status_code == 422
+
+        # 미해석 참조 → 404 (resolver 덮어쓰기 — conftest 규약)
+        from kortravelmap.infra import feature_identity
+
+        async def _miss(_s: Any, ref: str) -> None:
+            feature_identity.validate_feature_ref(ref)
+
+        monkeypatch.setattr(feature_identity, "resolve_feature_identity", _miss)
+        missing = client.get(
+            "/v1/features/0f9d3c6e-5a41-4b2e-9c77-2b8a1d4e6f30/weather/forecast?limit=1"
+        )
+        assert missing.status_code == 404
+
+        # anchor repo까지 도달하지 않았음을 함께 고정 — 해석이 첫 관문이다.
+        async def _explode(_s: Any, **_kw: Any) -> Any:
+            raise AssertionError("미해석 참조가 repo까지 내려왔다")
+
+        monkeypatch.setattr(
+            mod.weather_repo, "nearest_weather_feature_for_feature", _explode
+        )
+        still_missing = client.get("/v1/features/f_gone/weather/forecast?limit=1")
+        assert still_missing.status_code == 404
     finally:
         client.app.dependency_overrides.clear()
 
