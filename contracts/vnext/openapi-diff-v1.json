@@ -5,7 +5,7 @@
   "baseline": {
     "admin": {
       "file": "packages/kor-travel-map-api/openapi.json",
-      "sha256": "ad1cd88baea8b9c77238f059ee965bcffbd9adb65d76b6a80ee27e9ec694b918"
+      "sha256": "72c28ef566229dc08f02aea9f4eeffc10cbd224faba2a373ffcbe0287416d4ed"
     },
     "user": {
       "file": "packages/kor-travel-map-api/openapi.user.json",
@@ -13,10 +13,15 @@
     },
     "service": {
       "file": "packages/kor-travel-map-api/openapi.service.json",
-      "sha256": "c3d25615b3fc706658b9409827ccfc3f0232b0426ce4cc7a29b8c5870bde2d43"
+      "sha256": "144b4335d98fc021368b3297f5b8ed7b1c560e9850ebbdd8af71e45623ba7b3d"
     }
   },
   "revisions": [
+    {
+      "date": "2026-08-04",
+      "task": "T-VN-32C",
+      "change": "baseline sha256 재고정(admin/service — user 무변경): alias-map DB-to-DB 이관 표면 GET /v1/service/feature-alias-maps(+/checksum)가 service 표면에 additive로 추가됨. ADR-068 결정 3의 '전환·복구 경계 alias lookup' 표면이며 계약은 contracts/feature-alias-map-v1-golden.json(feature-alias-map-v1)이 정본. 이 표면은 Wave 2 목표 diff의 대상 항목이 아니고(이관·복구 전용, 존치·폐기는 T-VN-39 removal manifest 소관) diff 항목·counts 무변경. ADR-068 enum_changes(응답 feature_id 값 UUID 전환)·status_changes(legacy 경로 404)는 양 저장소 checksum 일치 뒤 32C 잔여 단계로 존치."
+    },
     {
       "date": "2026-08-04",
       "task": "T-VN-32B",

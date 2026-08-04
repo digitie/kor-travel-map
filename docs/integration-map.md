@@ -122,7 +122,7 @@
 | 표면 | 현재 인증 경계 | 성공 envelope | 에러 |
 |---|---|---|---|
 | kor-travel-map 공용 read (`RoutePolicy.PUBLIC_KEYED`) | production에서 `X-Kor-Travel-Map-Api-Key` 또는 `X-Kor-Travel-Map-Service-Token`. URL `key` query는 폐기했고 full/user OpenAPI는 route policy에서 같은 OR 계약을 생성한다 | `{data, meta}` — `meta.page.next_cursor` | RFC7807 `problem+json`(top-level `code`) |
-| kor-travel-map service resource (`/v1/features/{batch,weather/batch}`, `/v1/service/cache-target*`, `/v1/service/refresh-requests*`) | production 필수 `X-Kor-Travel-Map-Service-Token`; cache-target은 command=`{command}`, consumer=`{read,claim,ack,nack,snapshot}`, restore=`{restore-fence}`, recovery=`{recovery,recovery-replay}` exact 역할 principal과 canonical consumer/system binding을 추가 결박 | 〃 | 〃 |
+| kor-travel-map service resource (`/v1/features/{batch,weather/batch}`, `/v1/service/cache-target*`, `/v1/service/refresh-requests*`, `/v1/service/feature-alias-maps*`) | production 필수 `X-Kor-Travel-Map-Service-Token`; cache-target은 command=`{command}`, consumer=`{read,claim,ack,nack,snapshot}`, restore=`{restore-fence}`, recovery=`{recovery,recovery-replay}` exact 역할 principal과 canonical consumer/system binding을 추가 결박 | 〃 | 〃 |
 | kor-travel-map admin + canonical ops (`/v1/admin/*`·`/v1/ops/{datasets,pipeline}*`) | same-origin Next.js BFF의 proxy secret + actor + trusted peer CIDR. Docker는 secret 필수·frontend 단일 `/32` | 〃 | 〃 |
 | kor-travel-map ops live WebSocket | BFF가 발급한 짧은 수명 HMAC subprotocol ticket + DB nonce 단일 소비 + bounded lease | WebSocket event frame | 인증/만료는 data frame 없이 close 4401/4408 |
 | kor-travel-map Prometheus `/metrics` | production 필수 `KOR_TRAVEL_MAP_API_METRICS_TOKEN`의 `Authorization: Bearer` scrape identity(ADR-066 결정 4, T-VN-02) | Prometheus exposition | 비-Bearer/불일치 401 |
@@ -300,6 +300,7 @@ ADR-082다.
 | YouTube 후보 detail 소비(TM-08) | 본 repo `docs/architecture/rest-api.md` (T-217f) | PinVi UX 기획 |
 | cache-target Map writer-drain | `docs/architecture/cache-target-writer-drain.md` + Map API image private typed runner (public OpenAPI 미노출) | Docker Manager T-049F frozen Compose receipt parser |
 | **curation collection 표면** | 본 repo `packages/kor-travel-map-api/src/kortravelmap/api/routers/curations.py` + `openapi{,.user}.json`. CSV 정본은 `resources/curations/*.csv` + `manifest.json` | runtime identity lookup 소비자는 없음. PinVi pinned OpenAPI snapshot의 schema field hit는 호출 소비가 아님(2026-07-30) |
+| **feature alias-map 이관 (T-VN-32C)** | 본 repo `contracts/feature-alias-map-v1-golden.json`(`feature-alias-map-v1` — Map/PinVi 독립 재계산 golden) + `GET /v1/service/feature-alias-maps{,/checksum}`(`openapi.service.json`). 이관·복구 경계 전용 bulk read(ADR-068 결정 3) — 런타임 alias lookup 표면이 아니다 | PinVi vendored `apps/api/tests/contract/feature-alias-map-v1-golden.json` + 독립 구현 `app/core/feature_alias_contract.py` + 이관 실행기 `pinvi-feature-uuid-cutover` |
 | geocoding | kor-travel-geo REST v2 (`POST /v2/{reverse,geocode}`) + public API key header 인증 | ADR-046 + geo ADR-064 |
 | 인프라(PostGIS·RustFS) 구동/포트 | **kor-travel-docker-manager** `docker-compose.yml`+README (ADR-052 amendment) | 각 repo는 사용자 — 포트 값은 ADR-047과 정합 |
 

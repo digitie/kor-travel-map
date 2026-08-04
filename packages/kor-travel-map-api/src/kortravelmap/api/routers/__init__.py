@@ -43,6 +43,9 @@ from kortravelmap.api.routers.enrichment_review import (
 from kortravelmap.api.routers.enrichment_review import (
     router as enrichment_review_router,
 )
+from kortravelmap.api.routers.feature_alias_maps import (
+    service_router as service_feature_alias_maps_router,
+)
 from kortravelmap.api.routers.features import (
     router as features_router,
 )
@@ -92,6 +95,7 @@ __all__ = [
     "public_providers_router",
     "public_views_router",
     "service_cache_target_streams_router",
+    "service_feature_alias_maps_router",
     "weather_router",
     "curated_router",
     "curations_router",

@@ -437,6 +437,9 @@ def test_service_openapi_spec_contains_service_routes_and_prunes_user_routes() -
         "/v1/service/cache-target-streams/{external_system}",
         "/v1/service/cache-target-streams/{external_system}/restore-fences",
         "/v1/service/cache-targets/{external_system}/{target_key}",
+        # T-VN-32C alias-map DB-to-DB 이관 표면 (ADR-068 전환·복구 경계 read).
+        "/v1/service/feature-alias-maps",
+        "/v1/service/feature-alias-maps/checksum",
         "/v1/service/refresh-requests",
         "/v1/service/refresh-requests/{request_id}",
     }

@@ -1,0 +1,47 @@
+{
+  "schema": "feature-alias-map-v1",
+  "description": "T-VN-32C alias-map DB-to-DB 이관의 양 저장소(Map/PinVi) 독립 재계산 golden. row=(alias, feature_uuid, alias_kind), leaf=sha256('KTMFAMLEAF\\x00'||u32be(len(alias_utf8))||alias_utf8||u32be(len(kind_utf8))||kind_utf8||uuid_raw_16bytes), 정렬은 alias NFC UTF-8 byte 오름차순, node=sha256('KTMFAMNODE\\x00'||L||R) 홀수 leaf 승격, 빈 map=sha256('KTMFAMEMPTY\\x00'). alias는 trim된 비어 있지 않은 NFC 정규형(비-NFC 거부, 정규화하지 않음) 256자 이하, feature_uuid는 canonical lowercase hyphenated 36자만 수용.",
+  "derivation": {
+    "namespace_basis": "uuid5(NAMESPACE_URL, 'kor-travel-map:feature-uuid:v1')",
+    "feature_uuid_namespace": "75d60e13-2779-5b06-a920-6b1b892a7c84",
+    "rule": "alias_kind='legacy_feature_id' 행은 feature_uuid == uuid5(feature_uuid_namespace, alias) 파생 검증을 통과해야 '검증된 alias map'이다 (ADR-068, alembic 0080 CHECK 대응)"
+  },
+  "alias_kinds": ["legacy_feature_id"],
+  "merkle_v1": {
+    "empty_root": "ef4363aa60f6af1b1100f8d7d866470cddc86ced1d8dc83fa2c238eefea22ad8",
+    "expected_nfc_utf8_order": [
+      "f_1168010100_p_3c0c2820e96d28d3",
+      "f_global_e_9f2c51a7d3e8b401",
+      "é",
+      "가나다"
+    ],
+    "rows": [
+      {
+        "alias": "f_1168010100_p_3c0c2820e96d28d3",
+        "feature_uuid": "4232803d-a8a7-57c2-b80b-e13ca8fa1a2a",
+        "alias_kind": "legacy_feature_id",
+        "leaf_sha256": "f00231b072d645a500f61442df3d95ff473a2ae46f8af765627fccbd7aa27fba"
+      },
+      {
+        "alias": "f_global_e_9f2c51a7d3e8b401",
+        "feature_uuid": "b48e9501-15a2-5be2-bbae-b8db1bcc0085",
+        "alias_kind": "legacy_feature_id",
+        "leaf_sha256": "c6490bdb97a58f1d70c878cda2c7225371bc3bf702890119f4a78d2b968a0fa4"
+      },
+      {
+        "alias": "é",
+        "feature_uuid": "cc89af20-ba44-5863-9d5b-e0bb52fb29c6",
+        "alias_kind": "legacy_feature_id",
+        "leaf_sha256": "34d7bf3832d4683e0e392ca1d9f55229b80c2c9025051a1d8db6b36d78b26b2c"
+      },
+      {
+        "alias": "가나다",
+        "feature_uuid": "879e70e3-d3b0-509b-8832-d75579261b92",
+        "alias_kind": "legacy_feature_id",
+        "leaf_sha256": "3e5dff6bfce236590518fd9b3fa357bf972fe52254c7eae5c1cb1f4015a420b5"
+      }
+    ],
+    "root": "8606b07962a6b51c64a209452f5101515566d0bc9e1ab898ed1e4ebf634494e6",
+    "odd_promotion_root_first3": "76ad082fa342702bdf7a9b36678f5afd467dcabd863e15c2b107644545d69885"
+  }
+}

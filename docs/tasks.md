@@ -64,7 +64,8 @@ barrier로 직렬화한다.
     [/] `T-VN-41D`(durable writer-drain)
 - **Wave 2 barrier 이후**
   - freeze(Lane A): [x] `T-VN-31A` → [x] `T-VN-31B` → [x] `T-VN-31C`
-  - Lane A: [x] `T-VN-32A` → [x] `T-VN-32B` → [ ] `T-VN-32C` →
+  - Lane A: [x] `T-VN-32A` → [x] `T-VN-32B` → [~] `T-VN-32C`(전반부 착지 —
+    잔여는 쌍 PR 머지 후 checksum 게이트) →
     [ ] `T-VN-35A` → [ ] `T-VN-35B` → [ ] `T-VN-35C` → [ ] `T-VN-35D` →
     [ ] `T-VN-37A` → [ ] `T-VN-37B` → [ ] `T-VN-37C`
   - Lane B shadow: [ ] `T-VN-33A` → [ ] `T-VN-33B` → [ ] `T-VN-33C` →
@@ -1877,10 +1878,49 @@ ADR은 존재하지만 목표 DDL/OpenAPI diff/실행 제약 artifact는 없다.
   suite 부하 flake 1건(단독 green)뿐 · export --check drift 0 · ruff/mypy
   --strict(main+api)/lint-imports clean.
 
-- [ ] T-VN-32C — **PinVi alias-map cutover·legacy write fence**
+- [~] T-VN-32C — **PinVi alias-map cutover·legacy write fence**
 
   PinVi consumer를 UUID+alias contract로 전환하고 양 저장소 checksum을 맞춘다. legacy write를
   fence하되 legacy ID 제거는 T-VN-39 soak 뒤로 남긴다.
+
+  **전반부 착지(본 branch + PinVi 쌍 branch `feat/tvn32c-uuid-alias`)**:
+  ① 이관 표면 — ADR-068 결정 4의 "DB-to-DB 이관"을 service read 2종으로 판단
+  (`GET /v1/service/feature-alias-maps`(keyset 페이지)+`/checksum`(merkle
+  root) — PinVi 소비는 HTTP-only·cache-target snapshot/merkle 선례,
+  `require_service_token`·route_policy SERVICE, read-only라 registry 미등록).
+  ② `feature-alias-map-v1` checksum 계약(`core/feature_alias_map.py` 순수:
+  NFC-거부 alias·canonical uuid·닫힌 kind, 길이 prefix + domain separation
+  leaf(`KTMFAMLEAF\0`)·byte-order 정렬·odd-promotion merkle(`KTMFAMNODE\0`/
+  `KTMFAMEMPTY\0`), 파생 검증 분리) + 양 저장소 공용 golden
+  `contracts/feature-alias-map-v1-golden.json` — PinVi 독립 구현
+  (`app/core/feature_alias_contract.py` — namespace를 basis 문자열에서 재파생)
+  이 vendored 사본으로 재계산 대조. ③ legacy write fence — alembic
+  `0081_legacy_write_fence`: alias map 불변(UPDATE 전면 거부·직접 DELETE
+  거부·feature purge CASCADE만 허용 — removal manifest "alias 유지" fence) +
+  identity 불변(feature_id/feature_uuid UPDATE 거부) DB 트리거 fail-close,
+  0079 트리거 2종은 재평가 후 **유지**(fill은 0080 CHECK가 요구하는 유일값만
+  쓸 수 있는 강제 메커니즘의 일부, AFTER alias는 INV-068-01 원자 보장 —
+  0079/0081 docstring), `COLLATE "C"` keyset index(+모델 metadata 정합).
+  f_* 신규 발급 fence는 비파생 generator 채택과 불가분이라 **의도적으로
+  checksum 게이트 뒤 잔여로 순서 고정**(발급 전환은 신규 행 응답에 UUID 값을
+  조기 누출 — rollout "checksum 일치 후 응답 전환" 위반 + upsert idempotency
+  재결선 필요). ④ PinVi 이관 준비 — UUID shadow 컬럼 migration
+  (`20260804_0049`: trip_day_pois/curated_plan_pois.feature_uuid,
+  feature_suggestions.target_feature_uuid) + alias-map client
+  (`clients/kor_travel_map_alias_map.py` — keyset 전진·계약 위반 fail-close) +
+  검증된 이관 실행기(`services/feature_uuid_cutover.py`,
+  `pinvi-feature-uuid-cutover` CLI: pull→독립 root/count·파생 검증→매칭 3열
+  rewrite·미매칭은 NULL 유지+보고, dry-run 지원). ⑤ artifact — OpenAPI
+  admin/service 재생성(user sha 무변경)·`openapi-diff-v1.json` baseline
+  재고정+revisions(이관 표면은 목표 diff 항목 아님 — 존치·폐기는 39 소관)·
+  unit sha 상수 재고정.
+
+  **잔여(쌍 PR 머지 후, rollout 순서)**: PinVi 배포+`pinvi-feature-uuid-cutover`
+  실행 → 양 저장소 checksum 일치 → Map 응답 `feature_id` 값 UUID 전환·비파생
+  generator 채택·0080 CHECK/0079 트리거 제거 재평가 → PinVi vendored snapshot
+  3종(user/service/admin-detail) 재추출+핀(merge SHA) 갱신 + 새 alias-map
+  golden 핀(`_UPSTREAM_MAP_COMMIT`)·contract-pin-consistency diff 단계 추가.
+  legacy ID·FK 체인 물리 제거는 T-VN-39 removal manifest.
 
 ### T-VN-33 — provider dataset 정본 전환 (Lane B)
 

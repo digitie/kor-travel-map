@@ -97,6 +97,7 @@ from kortravelmap.api.routers import (
     public_status_router,
     public_views_router,
     service_cache_target_streams_router,
+    service_feature_alias_maps_router,
     weather_router,
 )
 from kortravelmap.api.settings import ApiSettings
@@ -913,6 +914,12 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
         )
         application.include_router(
             service_cache_target_streams_router,
+            prefix="/v1",
+        )
+        # T-VN-32C alias-map DB-to-DB 이관 표면 — route-level service token gate
+        # (라우터 자체 dependency), 이관·복구 경계 전용 read (ADR-068 결정 3).
+        application.include_router(
+            service_feature_alias_maps_router,
             prefix="/v1",
         )
         # Step D on-demand 상세는 DB(적재된 raw_data) 필요 → features와 동일 gate.

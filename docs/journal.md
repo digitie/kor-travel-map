@@ -17,6 +17,80 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-08-04 (8) — T-VN-32C(1/2) alias-map 이관 표면·checksum 계약·legacy write fence
+
+> PinVi 쌍 branch `feat/tvn32c-uuid-alias`(pinvi 저장소)와 한 쌍이다. rollout이
+> 32C 안에 둔 "양 저장소 checksum 일치 → Map 응답 UUID 전환"은 두 PR 머지·이관
+> 실행 뒤에만 가능한 운영 게이트라, 본 커밋은 32C의 전반부(표면·계약·fence)다.
+
+- **"DB-to-DB 이관" 표면 판단**: ADR-068 결정 4의 "PinVi는 검증된 alias map으로
+  소비 데이터를 DB-to-DB 이관"은 런타임 REST alias lookup(결정 3이 금지)이
+  아니라 **Map DB의 alias 전량을 PinVi DB로 옮기는 bulk 계약**이다. PinVi의
+  기존 Map 소비는 전부 HTTP(OpenAPI 경계 — CLAUDE.md)이고 cache-target
+  reconciliation이 이미 service 표면에서 snapshot+merkle 대조를 쓰므로, 이관
+  표면도 **service read 2종**으로 착지: `GET /v1/service/feature-alias-maps`
+  (canonical keyset 페이지, limit≤1000) + `/checksum`(전체 merkle root·count).
+  route_policy SERVICE + `require_service_token` 게이트, read-only라
+  feature_operation_registry 등록 대상 아님(registry는 write 소관). ADR-068
+  결정 3의 "alias lookup은 전환·복구 경계에서만" — 바로 그 경계다.
+- **feature-alias-map-v1 checksum 계약** (`core/feature_alias_map.py` 순수 +
+  `contracts/feature-alias-map-v1-golden.json` — cache-target-source-v1 golden
+  패턴): row=(alias, feature_uuid, alias_kind). alias는 trim·비어있지 않음·
+  **NFC 정규형 아니면 거부**(정규화하지 않음)·≤256자, uuid는 canonical
+  lowercase hyphenated 36자만, kind는 닫힌 집합('legacy_feature_id').
+  leaf = `sha256("KTMFAMLEAF\0"‖u32be(len alias)‖alias‖u32be(len kind)‖kind‖
+  uuid raw 16B)`, 정렬은 alias UTF-8 byte 오름차순(중복 거부), node =
+  `sha256("KTMFAMNODE\0"‖L‖R)` 홀수 승격, 빈 map = `sha256("KTMFAMEMPTY\0")`.
+  파생 검증(`feature_uuid == uuid5(namespace, alias)`)은 checksum과 분리된
+  별도 함수 — 둘 다 통과해야 "검증된 alias map". golden은 ASCII 2 + é/가나다
+  (NFC byte-order 비교차) 4-vector + empty/odd-promotion root. PinVi가 vendored
+  사본으로 **독립 구현 재계산** 대조(`app/core/feature_alias_contract.py`,
+  namespace도 상수 복사가 아니라 basis 문자열 재파생).
+- **repo 층** `infra/feature_alias_map_repo.py`: keyset 페이지(`COLLATE "C"` —
+  NFC byte order와 동일)와 전량 checksum. 조회 행이 canonical/파생 계약을
+  위반하면 `FeatureAliasMapIntegrityError`로 fail-close(HTTP 500
+  FEATURE_ALIAS_MAP_INTEGRITY) — DB 층 보장(0079/0080/0081)이 뚫린 상태에서
+  이관을 계속하지 않는다. 페이지 pull 중 write drift는 소비자 root 불일치
+  재시도로 감지(window 동안 fence 유지는 rollout 소유).
+- **legacy write fence** (alembic `0081_legacy_write_fence`, 전부 DB 트리거
+  fail-close): ① alias map 불변 — `feature_aliases` UPDATE 전면 거부 + 직접
+  DELETE 거부(참조 feature가 이미 사라진 FK CASCADE 경유만 허용 — removal
+  manifest "alias 유지" fence). ② identity 불변 — `features.feature_id/
+  feature_uuid` UPDATE 거부(재키잉은 soft-delete+신규 행). ③ legacy-only
+  write(uuid 없는 행 저장)는 기존 0079 fill 트리거+NOT NULL+0080 CHECK로
+  **구조적으로 불가능**함을 유지 — 32B가 "32C 재평가"로 이월한 0079 트리거
+  2종은 **유지** 결정(fill은 CHECK가 요구하는 유일값만 쓸 수 있어 우회로가
+  아니라 강제 메커니즘, AFTER alias는 INV-068-01 원자 보장; 제거 시 무결성
+  이득 없이 raw seed 37파일만 파괴). **f_* 신규 발급 경로 fence는 의도적으로
+  32C 잔여로 순서 고정** — 발급 중단은 비파생(비저장) generator 채택과
+  불가분이고, 그 채택은 신규 행 응답에 UUID 값을 조기 누출시켜 rollout의
+  "checksum 일치 후 응답 전환" 순서를 위반하며, provider upsert idempotency
+  재결선(파생 resolve 또는 T-VN-33 자연키)이 필요하다. 부속: `COLLATE "C"`
+  keyset index(모델 metadata 동반 — alembic check 게이트 정합).
+- **artifact**: OpenAPI admin/service 재생성(user 무변경 — sha 동일 확인),
+  `openapi-diff-v1.json` baseline sha 재고정 + revisions 개정(이관 표면은
+  Wave 2 목표 diff 항목 아님 — 존치·폐기는 T-VN-39 removal manifest 소관,
+  ADR-068 enum/status 항목은 32C 잔여 목표로 존치). unit artifact sha 상수
+  재고정. freeze DDL(target-schema-v1)은 무변경 — fence는 전환기 구조물.
+- **32C 잔여(쌍 PR 머지 뒤 순서)**: ① PinVi 배포 + `pinvi-feature-uuid-cutover`
+  실행(검증된 이관) → ② 양 저장소 checksum 일치 확인 → ③ Map 응답 `feature_id`
+  값 UUID 전환 + 비파생 generator 채택 + 0080 CHECK·0079 트리거 제거 재평가 →
+  ④ PinVi vendored snapshot 3종(user/service/admin-detail) 재추출·핀 갱신(핀은
+  Map merge SHA — rollout pinvi_snapshot_revendor 3×yes). legacy ID·FK 체인
+  물리 제거는 T-VN-39 removal manifest 그대로.
+- **검증(CI-parity python:3.13 container, PostGIS 16-3.5 testcontainers)**:
+  ruff check clean · mypy --strict main(140)/api(63) clean · lint-imports 4
+  kept · unit+lint 1,991 passed(신규 test_feature_alias_map 8 포함 — 잔여 2
+  실패는 test_docker_dagster_runtime의 docker CLI 부재 env 한정, 본 branch
+  무접촉 파일) · api 패키지 1,076 passed(신규 test_feature_alias_maps_router
+  7 포함, coverage 78.84%≥70) · export --check drift 0 · 신규 통합
+  test_legacy_write_fence 10 passed(alias UPDATE/직접 DELETE 거부·cascade
+  허용·identity 불변·same-value 통과·fill 원자성·checksum 독립 재계산 일치·
+  keyset 완전 순회·파생 불일치/비-NFC fail-close·downgrade 왕복) + alembic
+  metadata 일관성 2 passed(COLLATE index의 반영 정합은 컬럼 index 선언으로
+  해소 — models.py 주석). 전체 통합 회귀 sweep은 같은 컨테이너 세트에서 계속
+  실행해 tail을 보고에 첨부.
+
 ## 2026-08-04 (7) — T-VN-32B Map consumer-first dual read/write
 
 > 사용자 지시(작업 중 우선순위 변경): 호환성·기존 계약 유지보다 **설계적

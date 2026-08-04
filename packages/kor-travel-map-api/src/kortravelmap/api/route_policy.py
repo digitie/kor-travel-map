@@ -205,6 +205,9 @@ ROUTE_POLICIES: dict[str, RoutePolicy] = {
         RoutePolicy.SERVICE
     ),
     "/v1/service/cache-target-snapshots/{external_system}": RoutePolicy.SERVICE,
+    # T-VN-32C alias-map DB-to-DB 이관 표면 (ADR-068 전환·복구 경계 read).
+    "/v1/service/feature-alias-maps": RoutePolicy.SERVICE,
+    "/v1/service/feature-alias-maps/checksum": RoutePolicy.SERVICE,
     "/v1/service/refresh-requests": RoutePolicy.SERVICE,
     "/v1/service/refresh-requests/{request_id}": RoutePolicy.SERVICE,
     # -- operator/debug — raw provider payload은 local-dev debug mount에서만

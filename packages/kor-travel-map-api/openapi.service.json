@@ -2378,6 +2378,135 @@
         "title": "ClusterMeta",
         "type": "object"
       },
+      "FeatureAliasMapChecksumData": {
+        "additionalProperties": false,
+        "description": "저장소 전체 alias-map checksum.",
+        "properties": {
+          "alias_count": {
+            "title": "Alias Count",
+            "type": "integer"
+          },
+          "merkle_root": {
+            "title": "Merkle Root",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": "feature-alias-map-v1",
+            "title": "Schema Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_version",
+          "alias_count",
+          "merkle_root"
+        ],
+        "title": "FeatureAliasMapChecksumData",
+        "type": "object"
+      },
+      "FeatureAliasMapChecksumResponse": {
+        "additionalProperties": false,
+        "description": "``GET /service/feature-alias-maps/checksum`` 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/FeatureAliasMapChecksumData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "FeatureAliasMapChecksumResponse",
+        "type": "object"
+      },
+      "FeatureAliasMapPageData": {
+        "additionalProperties": false,
+        "description": "canonical 순서 keyset 페이지.",
+        "properties": {
+          "has_more": {
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "next_after_alias": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "has_more일 때 다음 요청의 after_alias (마지막 row의 alias).",
+            "title": "Next After Alias"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/FeatureAliasMapRowOut"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "schema_version": {
+            "const": "feature-alias-map-v1",
+            "title": "Schema Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_version",
+          "rows",
+          "has_more"
+        ],
+        "title": "FeatureAliasMapPageData",
+        "type": "object"
+      },
+      "FeatureAliasMapPageResponse": {
+        "additionalProperties": false,
+        "description": "``GET /service/feature-alias-maps`` 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/FeatureAliasMapPageData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "FeatureAliasMapPageResponse",
+        "type": "object"
+      },
+      "FeatureAliasMapRowOut": {
+        "additionalProperties": false,
+        "description": "alias-map row — ``feature-alias-map-v1`` leaf의 exact 3필드.",
+        "properties": {
+          "alias": {
+            "title": "Alias",
+            "type": "string"
+          },
+          "alias_kind": {
+            "const": "legacy_feature_id",
+            "title": "Alias Kind",
+            "type": "string"
+          },
+          "feature_uuid": {
+            "title": "Feature Uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "alias",
+          "feature_uuid",
+          "alias_kind"
+        ],
+        "title": "FeatureAliasMapRowOut",
+        "type": "object"
+      },
       "FeatureBatchData": {
         "additionalProperties": false,
         "description": "feature batch 5-state data payload.",
@@ -5403,6 +5532,142 @@
           "service-cache-target-streams"
         ],
         "x-required-service-scope": "cache-target:command"
+      }
+    },
+    "/v1/service/feature-alias-maps": {
+      "get": {
+        "operationId": "get_feature_alias_map_page_v1_service_feature_alias_maps_get",
+        "parameters": [
+          {
+            "description": "keyset 시작점(exclusive) — 직전 페이지 next_after_alias.",
+            "in": "query",
+            "name": "after_alias",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 256,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "keyset 시작점(exclusive) — 직전 페이지 next_after_alias.",
+              "title": "After Alias"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 1000,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureAliasMapPageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "FEATURE_ALIAS_MAP_INTEGRITY — 저장 행이 canonical/파생 계약 위반 (DB 층 보장 붕괴, 이관 중단)"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ],
+        "summary": "alias-map canonical keyset 페이지 (이관 전용 service read)",
+        "tags": [
+          "service-feature-alias-maps"
+        ]
+      }
+    },
+    "/v1/service/feature-alias-maps/checksum": {
+      "get": {
+        "operationId": "get_feature_alias_map_checksum_v1_service_feature_alias_maps_checksum_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureAliasMapChecksumResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "FEATURE_ALIAS_MAP_INTEGRITY — 저장 행이 canonical/파생 계약 위반 (DB 층 보장 붕괴, 이관 중단)"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ],
+        "summary": "alias-map 전체 merkle root (양 저장소 checksum 대조)",
+        "tags": [
+          "service-feature-alias-maps"
+        ]
       }
     },
     "/v1/service/refresh-requests": {

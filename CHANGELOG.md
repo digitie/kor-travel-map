@@ -5,6 +5,25 @@
 
 ## [Unreleased]
 
+### PinVi alias-map 이관 표면·legacy write fence (2026-08-04, T-VN-32C 전반부)
+
+- **API(service)**: `GET /v1/service/feature-alias-maps`(canonical keyset
+  페이지, limit≤1000) + `GET /v1/service/feature-alias-maps/checksum`(저장소
+  전체 merkle root·count)이 추가됐다 — PinVi alias-map DB-to-DB 이관 전용
+  read(ADR-068 결정 3의 전환·복구 경계, `X-Kor-Travel-Map-Service-Token`
+  게이트). 계약 정본은 `contracts/feature-alias-map-v1-golden.json`
+  (`feature-alias-map-v1`) — Map(`core/feature_alias_map.py`)과 PinVi가 독립
+  구현으로 같은 golden vector를 재계산해 대조한다. 저장 행이 canonical/파생
+  계약을 위반하면 500 `FEATURE_ALIAS_MAP_INTEGRITY`로 fail-close.
+- **DATABASE**: `0081_legacy_write_fence` — ① `feature.feature_aliases` 불변
+  fence(UPDATE 전면 거부, 직접 DELETE 거부 — feature 행 purge의 FK CASCADE
+  경유만 허용), ② `feature.features` identity 불변 fence(`feature_id`/
+  `feature_uuid` UPDATE 거부 — 재키잉은 soft-delete + 신규 행), ③ alias-map
+  keyset 조회용 `COLLATE "C"` index. 0079 트리거 2종(fill/alias)은 재평가 후
+  유지(0080 파생 CHECK와 함께 legacy-only 행 저장을 구조적으로 불가능하게
+  하는 강제 메커니즘 — 0081 docstring). legacy ID·CHECK·트리거 제거는 양
+  저장소 checksum 일치 뒤(32C 잔여)와 T-VN-39 removal manifest 소관.
+
 ### UUID identity dual read/write — Map consumer-first (2026-08-04, T-VN-32B)
 
 - **API**: feature 응답에 `feature_uuid`가 additive로 병행 노출된다(ADR-068 UUID

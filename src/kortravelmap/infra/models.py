@@ -486,6 +486,12 @@ class FeatureAliasRow(Base):
         ),
         Index("idx_feature_aliases_feature", "feature_id"),
         Index("idx_feature_aliases_feature_uuid", "feature_uuid"),
+        # T-VN-32C alias-map 이관 표면의 keyset scan index (alembic 0081).
+        # 실제 DDL은 `(alias COLLATE "C")`지만 PG 반영(reflection)은 index
+        # collation을 노출하지 않아 metadata에 COLLATE 식을 쓰면 alembic
+        # check가 영구 drift를 보고한다 — 컬럼 index로 선언해 반영과 정합
+        # 시키고 COLLATE 정본은 0081 migration이 소유한다.
+        Index("idx_feature_aliases_alias_c", "alias"),
         {"schema": "feature"},
     )
 

@@ -52,6 +52,14 @@ T-VN-32B 결정: 두 트리거는 writer 명시 생성이 착지한 뒤에도 ra
 동안 DB 층에서 강제한다 — 트리거 fill 값·writer 명시 값 모두 그 CHECK를
 통과해야 한다.
 
+T-VN-32C 재평가 결론(0081): 두 트리거 **유지**. fill 트리거는 0080 CHECK가
+요구하는 유일값만 쓸 수 있으므로 legacy-only write의 우회로가 아니라 강제
+메커니즘의 일부이고, AFTER alias 트리거는 INV-068-01의 원자 보장이다. 32C
+write fence는 0081이 alias map 불변(UPDATE 거부·직접 DELETE 거부)과 identity
+불변(feature_id/feature_uuid UPDATE 거부)으로 착지했다. 트리거·CHECK 제거는
+비파생 generator 채택(32C 잔여 — 양 저장소 checksum 일치 뒤)과 함께
+재평가한다.
+
 ADR-075 규율:
 
 - 단일 transaction·``autocommit_block`` 미사용(0062와 같은 근거 — 실패 시
