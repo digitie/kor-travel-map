@@ -267,6 +267,36 @@ request는 409다. create는 완전한 artifact checksum을 다시 검증해 cra
 수 있다. delete는 새 command의 대상이 처음부터 없으면 claim을 rollback하고 404를 반환하며,
 이미 시작된 command만 DB에 동결한 삭제 전 snapshot과 artifact 부재 proof로 완료한다.
 
+## 9. n150 prod 수동 기준선 (T-VN-H43)
+
+§1~§8의 자동화는 standalone Docker app(`docker compose` 스택 + admin API 결선)
+기준이다. **n150 prod는 kor-travel-docker-manager 배포라 admin API backup
+command가 결선돼 있지 않다** — 그 결선 전까지의 수동 기준선 절차가 이 절이다.
+
+- **경로/명명**: n150 `~/backups/kor-travel-map/<YYYY-MM-DD>-<label>.dump`
+  (+`.sha256`, `.manifest`). manifest에는 alembic head와 핵심 카운트
+  (features/source_records/source_links/weather_values/**public_api_keys**)를
+  선기록한다 — `ops.public_api_keys`는 2026-08-05 재생성 소실 실측(공개 표면
+  전체 401) 이후 **백업 스코프 필수 확인 항목**이다.
+- **실행**: api 컨테이너 env의 TCP DSN으로 `postgis/postgis:16-3.5-alpine`
+  컨테이너에서 `pg_dump -Fc --no-owner`. pg_dump는 스냅샷 트랜잭션이라 DB
+  단독으로는 **내부 일관**이다. 단 write path를 멈추지 않은 live dump는 3종
+  묶음(DB/dagster metadata/RustFS) 간 정합을 보장하지 않으므로 §2의 원칙대로
+  **vNext cutover rollback 기준점으로는 배포 직전 write fence 뒤 dump를 따로
+  만든다** — 이 절의 기준선은 "재생성 수렴 상태의 복구 출발점" 용도다.
+- **1차 검증**: `pg_restore -l`로 목차 판독 + `public_api_keys` TOC 존재 확인.
+  실복원 드릴은 T-VN-H44(H30B 하네스 재사용 — 별도 DB로 restore → 카운트
+  대조 → 공개 표면 smoke) 소관.
+- **기준선 실적**: `2026-08-05-h43-baseline.dump` — H42 수렴 완료 직후
+  (MOIS 702,955 3중 일치·opinet 934, unlinked 0) 상태. 435MB/54.7s, sha256
+  `717790c0…8a04e286`, manifest 실측: alembic head `0078_cache_target_gc_observe`
+  · features 731,599 · source_records 732,279 · source_links 731,599 ·
+  weather_values 555 · public_api_keys 1. `pg_restore -l` 목차 690항목 판독
+  + public_api_keys TOC 존재 확인.
+- **잔여**: 2차 외부 사본(S3/R2)과 주기화(cron)·retention은 docker-manager
+  결선과 함께 후속 — 지금은 단일 host 사본이므로 디스크 장애에 취약하다는
+  한계를 명시해 둔다.
+
 ## 이관된 결정 (구 ADR)
 
 - 백업 단위(Postgres `feature`/`provider_sync`/`ops` schema + RustFS bucket), 1차 NTFS

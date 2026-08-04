@@ -17,6 +17,34 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-08-05 (3) — H45 착지(#943)·user-client 수리(#944)·H43 기준선 dump
+
+- **T-VN-H45 머지**: #943 `8c74d911`(8/8 green). 재리뷰 판정 — 리뷰 1 GO
+  ("요구보다 나은 반영": retries=1 산술 정산·predicate 쿼터 거부·예산 방어),
+  리뷰 2 조건부 GO → 필수 N-1(mid 비대칭 회귀: retries=1만 받고 경계 재시도
+  부재로 유일 성공 경로가 4→2 시도 약화) 반영: mid land/temp 2 호출 래핑으로
+  전 경로 경계당 4 시도 균일화. 권고 반영: 경계 backoff 2→15s(예산이 비용
+  120s/run으로 상한 — lib 내부 ~2s 소진과 독립 시행화), kma 실 lib 계약
+  테스트(retryable/failure_kind 값 고정 — 무음 해제 방지), on_retry 예외 격리
+  (logger 실패가 원 예외를 못 덮게), runner 2곳 kwargs 단언, coalesce 후속
+  백로그. 판정 음성 시 다음 수 순서를 etl §8.1에 명문화(backoff 상향 → 격자
+  축소 → lib 정본). 최종 553 passed·mypy strict 144·ruff·lint-imports clean.
+- **[main 잠복 결함 발견→수리] user-client types 재생성 누락**: #940이 user
+  표면(feature_uuid 병행 노출 additive)을 바꾸며 admin frontend types만
+  재생성 — `packages/kor-travel-map-user-client/src/types.ts`가 stale로 main에
+  들어가 **모든 코드 PR의 type-check가 실패**하는 상태였다(#943에서 실측,
+  로컬 재현으로 툴 버전 요인 배제). #944로 재생성만 분리 머지. 교훈: OpenAPI
+  user 표면 변경 시 admin frontend와 user-client **두 곳** types 재생성.
+- **T-VN-H43 기준선 dump**: n150 `~/backups/kor-travel-map/
+  2026-08-05-h43-baseline.dump` — 435MB/54.7s, sha256 `717790c0…8a04e286`.
+  manifest 실측: head `0078` · features 731,599 · source_records 732,279 ·
+  source_links 731,599 · weather_values 555 · **public_api_keys 1**(소실 재발
+  방지 스코프 확인). `pg_restore -l` 690항목 판독. live dump라 3종 묶음 정합은
+  비보장 — vNext cutover rollback 기준점은 배포 직전 write fence 뒤 별도
+  생성(runbook §9 신설, n150 수동 절차 정본화). 실복원 드릴은 H44.
+- dm#128 갱신 코멘트: 다음 배포 이미지는 `8c74d911` 이후 권장(H45 포함,
+  head 변동 없음 `0082`).
+
 ## 2026-08-05 (2) — T-VN-H45: KMA/airkorea 만성 실패 근본 원인 격리 + 강건화 구현
 
 - **원인 확정 절차**: KST 자정 쿼터 리셋 후에도 실패 지속 → dagster 컨테이너
