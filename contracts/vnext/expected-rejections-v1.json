@@ -1,0 +1,52 @@
+{
+  "artifact": "expected-rejections-v1",
+  "owner": "T-VN-31C",
+  "description": "violation-fixtures-v1.sql 각 case의 기대 SQLSTATE와 제약명. target-schema-v1.sql 제약이 위반 fixture를 DB에서 거부함을 executable contract로 고정한다 (보고서 §8.1).",
+  "cases": {
+    "state_impossible_combination": {
+      "sqlstate": "23514",
+      "constraint": "ck_features_state_combination",
+      "basis": "ADR-067"
+    },
+    "alias_duplicate": {
+      "sqlstate": "23505",
+      "constraint": "pk_feature_aliases",
+      "basis": "ADR-068"
+    },
+    "provider_identity_tuple_duplicate": {
+      "sqlstate": "23505",
+      "constraint": "uq_source_entities_provider_identity",
+      "basis": "ADR-068"
+    },
+    "geometry_invalid": {
+      "sqlstate": "23514",
+      "constraint": "ck_feature_areas_geom_valid",
+      "basis": "ADR-070"
+    },
+    "geometry_empty": {
+      "sqlstate": "23514",
+      "constraint": "ck_feature_points_geom_not_empty",
+      "basis": "ADR-070"
+    },
+    "override_active_duplicate": {
+      "sqlstate": "23505",
+      "constraint": "uq_feature_overrides_active",
+      "basis": "ADR-071"
+    },
+    "notice_is_current_duplicate": {
+      "sqlstate": "23505",
+      "constraint": "uq_notice_states_current",
+      "basis": "T-VN-37"
+    },
+    "weather_summary_nulls_not_distinct_duplicate": {
+      "sqlstate": "23505",
+      "constraint": "uq_current_weather_summary_identity",
+      "basis": "ADR-072"
+    },
+    "weather_bitemporal_inversion": {
+      "sqlstate": "23514",
+      "constraint": "ck_weather_value_bitemporal_order",
+      "basis": "ADR-072"
+    }
+  }
+}

@@ -1,0 +1,202 @@
+{
+  "artifact": "consumer-rollout-v1",
+  "owner": "T-VN-31B",
+  "description": "Wave 2 task별 consumer-first 배포 순서·write-fence 시점·호환 폐기 시점 freeze. 절차 정본은 ADR-075(보존 우선 cutover)·보고서 D-11이다. PinVi snapshot 항목은 ADR-079 규율을 따른다 — 파생 digest manifest는 만들지 않으며, 재-vendor는 PinVi가 핀한 Map commit에서 vendored 스냅샷(user spec bytes·admin subset·service 소비 계약)을 다시 추출해 contract-pin-consistency를 통과시키는 것이다.",
+  "pinvi_snapshots": ["user", "service", "admin-detail"],
+  "rollout_principles": [
+    "consumer(PinVi)를 먼저 배포한 뒤 KTM과 PinVi를 순차 전환한다 (ADR-075 결정 2)",
+    "rollback window에는 write fence를 유지하거나 forward journal replay를 준비한다 — 없으면 rollback 가능하다고 선언하지 않는다 (ADR-075 결정 3)",
+    "soak·reconciliation 전에는 legacy column/table/alias를 제거하지 않는다 (ADR-075 결정 4)",
+    "호환 alias/shim은 만들지 않는다 (ADR-073 전환, T-VN-40C)"
+  ],
+  "tasks": {
+    "T-VN-32": {
+      "title": "UUID identity shadow 전환",
+      "consumer_first_order": [
+        "32A: UUID/alias shadow schema + deterministic backfill (읽기 경로 무변경)",
+        "32B: Map consumer-first dual read/write — UUID 정본 읽기, alias는 경계 해석, 신규 write는 UUID+alias 원자 생성",
+        "32C: PinVi를 UUID+alias contract로 선전환(검증된 alias map DB-to-DB 이관) → 양 저장소 checksum 일치 후 Map 응답 UUID 전환"
+      ],
+      "write_fence": "32C에서 legacy-only write를 fence한다. alias map 이관·checksum 검증 window 동안 fence 유지",
+      "compat_drop": "legacy f_* ID 제거는 T-VN-39 soak 뒤 removal manifest로만 수행 (ADR-068 전환/rollback)",
+      "pinvi_snapshot_revendor": {
+        "user": "yes",
+        "service": "yes",
+        "admin-detail": "yes"
+      }
+    },
+    "T-VN-33": {
+      "title": "provider dataset 정본 전환",
+      "consumer_first_order": [
+        "33A: provider_datasets row·composite identity 생성 + 참조 backfill (중복·orphan 0)",
+        "33B: writer·reader를 canonical FK로 전환, 전환 중 entity-record 불일치는 composite FK로 차단",
+        "33C: canonical query 전환 + 중복 column read-only fence + EXPLAIN/checksum 고정, /v1/provider-datasets operator 표면 공개"
+      ],
+      "write_fence": "33C에서 denorm 중복 column의 신규 write를 read-only로 fence",
+      "compat_drop": "denorm column/index 물리 삭제는 T-VN-39 removal manifest",
+      "pinvi_snapshot_revendor": {
+        "user": "no",
+        "service": "no",
+        "admin-detail": "yes"
+      }
+    },
+    "T-VN-34": {
+      "title": "직교 상태 모델 전환",
+      "consumer_first_order": [
+        "34A: 3축 typed column 추가 + legacy status 무손실 매핑 backfill + 결합 CHECK",
+        "34B: public_features view를 3축 정본으로 교체 + 동일 술어 partial index",
+        "34C: provider/admin writer와 admin/user DTO/UI 3축 전환 — PinVi admin 소비 화면 선전환 후 Map 응답 교체"
+      ],
+      "write_fence": "34C에서 legacy status 신규 write 차단",
+      "compat_drop": "legacy status column/index는 held-component rollback용으로 유지, 삭제는 T-VN-39 removal manifest",
+      "pinvi_snapshot_revendor": {
+        "user": "no",
+        "service": "no",
+        "admin-detail": "yes"
+      }
+    },
+    "T-VN-35": {
+      "title": "typed subtype 분해",
+      "consumer_first_order": [
+        "35A: core 축소 + point subtype shadow backfill",
+        "35B: event·notice subtype",
+        "35C: route·area subtype",
+        "35D: repository/API projection을 subtype join으로 전환 — subtype별 독립 검증·독립 rollback (ADR-070 전환)"
+      ],
+      "write_fence": "subtype별 projection 전환 시점에 해당 kind의 legacy mega-row 경로 write를 차단",
+      "compat_drop": "legacy detail/geometry column 삭제는 T-VN-39 removal manifest",
+      "pinvi_snapshot_revendor": {
+        "user": "yes",
+        "service": "no",
+        "admin-detail": "yes"
+      }
+    },
+    "T-VN-36": {
+      "title": "field override 단일화",
+      "consumer_first_order": [
+        "36A: override 정본 schema + whole-row freeze의 동일 effective projection backfill·대조",
+        "36B: provider/admin writer가 같은 transaction에서 override 갱신",
+        "36C: effective projection 단일화 + repository CASE 분기 비활성화"
+      ],
+      "write_fence": "36C에서 whole-row freeze 신규 write 차단 (column/trigger는 rollback shadow로 유지)",
+      "compat_drop": "freeze column/trigger 삭제는 T-VN-39 removal manifest. rollback 시에도 생성된 override 행은 삭제하지 않는다 (ADR-071)",
+      "pinvi_snapshot_revendor": {
+        "user": "no",
+        "service": "no",
+        "admin-detail": "yes"
+      }
+    },
+    "T-VN-37": {
+      "title": "typed notice state",
+      "consumer_first_order": [
+        "37A: notice range schema + backfill + 오염 timestamp 격리",
+        "37B: notice writer·public/admin query를 range/index 기반으로 전환",
+        "37C: T-VN-06 방어 cast·hot path anti-join 제거 — 동등 결과·EXPLAIN·오염 입력 거부 검증"
+      ],
+      "write_fence": "37B cutover 중 notice lineage 신규 write는 typed 경로로만",
+      "compat_drop": "legacy notice_lineage_states 제거는 T-VN-39 removal manifest",
+      "pinvi_snapshot_revendor": {
+        "user": "deferred-to-implementation",
+        "service": "no",
+        "admin-detail": "deferred-to-implementation"
+      }
+    },
+    "T-VN-38": {
+      "title": "weather·price current summary",
+      "consumer_first_order": [
+        "38A: weather current summary + reconciliation (원본 이력 보존)",
+        "38B: price current summary + reconciliation + restore/backfill generation 구분",
+        "38C: bbox/detail per-row LATERAL → summary set join 전환, old query 비활성화"
+      ],
+      "write_fence": "38C에서 old query 경로를 normal path에서 비활성화 (summary는 원본에서 재생성 가능 — ADR-072 전환)",
+      "compat_drop": "rollback shadow index 삭제는 T-VN-39 removal manifest",
+      "pinvi_snapshot_revendor": {
+        "user": "no",
+        "service": "no",
+        "admin-detail": "no"
+      }
+    },
+    "T-VN-40": {
+      "title": "curation write model 단일화",
+      "consumer_first_order": [
+        "40A: legacy writer inventory 고정 + 신규 legacy write 차단 + canonical/effective checksum",
+        "40B: theme_feature_candidates lifecycle 분리 + admin/public/PinVi consumer가 curation_collections/items 정본만 읽도록 선전환",
+        "40C: overlay 신규 write·normal routing 차단 (checksum·consumer cutover 뒤)"
+      ],
+      "write_fence": "40A부터 overlay 신규 write 차단, 40C에서 normal routing 차단",
+      "compat_drop": "curated_features overlay table/trigger/repository와 legacy route 물리 삭제는 T-VN-39 removal manifest. 신규 호환 shim 금지",
+      "pinvi_snapshot_revendor": {
+        "user": "yes",
+        "service": "no",
+        "admin-detail": "yes"
+      }
+    },
+    "T-VN-39": {
+      "title": "KTM·PinVi write-fence cutover + removal manifest 물리 삭제",
+      "consumer_first_order": [
+        "보존 등급 분류(정본·감사·파생) + restore/PITR 또는 forward journal 검증 (recovery-preflight-v1.json)",
+        "shadow checksum 양측 일치 확인",
+        "consumer(PinVi) 선배포 → write fence → 마지막 delta 반영 → KTM·PinVi 순차 전환",
+        "rollback window 동안 fence 유지 또는 forward journal replay 준비",
+        "soak·reconciliation 통과 후에만 removal manifest 물리 삭제"
+      ],
+      "write_fence": "cutover maintenance window 전체 + rollback window",
+      "compat_drop": "removal manifest는 이 task에서만 물리 삭제한다",
+      "pinvi_snapshot_revendor": {
+        "user": "no",
+        "service": "no",
+        "admin-detail": "no"
+      }
+    }
+  },
+  "removal_manifest": {
+    "description": "T-VN-39가 물리 삭제하는 legacy 객체의 freeze 시점 목록. 각 fence task(33C/34C/36C/38C/40C)가 구현 시 exact 목록(컬럼·인덱스·트리거 명 세부)을 갱신·인계한다.",
+    "entries": [
+      {
+        "object": "feature.features legacy 열 — status, data_origin, data_version, user_change_kind, user_change_status, user_change_request_id, user_deleted_at, user_deleted_by, user_change_reason, deleted_at",
+        "fenced_by": "T-VN-34C",
+        "removed_by": "T-VN-39"
+      },
+      {
+        "object": "feature.features legacy 문자열 feature_id PK 및 f_* 참조 FK 체인 (alias 유지, PK 열 제거)",
+        "fenced_by": "T-VN-32C",
+        "removed_by": "T-VN-39"
+      },
+      {
+        "object": "provider_sync.source_records denorm 열 — provider, dataset_key, source_entity_type, source_entity_id, raw_name, raw_address, raw_longitude, raw_latitude",
+        "fenced_by": "T-VN-33C",
+        "removed_by": "T-VN-39"
+      },
+      {
+        "object": "provider_sync.source_links.is_primary_source 열과 idx_source_links_primary(boolean 술어판)",
+        "fenced_by": "T-VN-33C",
+        "removed_by": "T-VN-39"
+      },
+      {
+        "object": "provider_sync.source_entities.current_source_record_key(순환 FK) — source_entity_heads로 대체",
+        "fenced_by": "T-VN-33B",
+        "removed_by": "T-VN-39"
+      },
+      {
+        "object": "whole-row freeze 판정 열·trigger(data_origin='user_request' CASE 계열)",
+        "fenced_by": "T-VN-36C",
+        "removed_by": "T-VN-39"
+      },
+      {
+        "object": "provider_sync.notice_lineage_states·notice_lifecycle_scopes(문자열 시각 판정) — notice_states로 대체",
+        "fenced_by": "T-VN-37B",
+        "removed_by": "T-VN-39"
+      },
+      {
+        "object": "T-VN-38C rollback shadow index (weather/price old query 경로)",
+        "fenced_by": "T-VN-38C",
+        "removed_by": "T-VN-39"
+      },
+      {
+        "object": "feature.curated_features overlay table·단방향 trigger·repository와 legacy route(/v1/curated-features*, /v1/admin/features/curated*)",
+        "fenced_by": "T-VN-40C",
+        "removed_by": "T-VN-39"
+      }
+    ]
+  }
+}

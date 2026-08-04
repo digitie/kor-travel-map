@@ -1,0 +1,80 @@
+{
+  "artifact": "recovery-preflight-v1",
+  "owner": "T-VN-31C",
+  "description": "T-VN-39 write-fence cutover의 복구 preflight freeze. writer 전수 registry·fence 증거·forward recovery 판정 규칙·Map↔PinVi shadow checksum 정의를 고정한다.",
+  "writer_registry": {
+    "source": "docs/runbooks/h35-prod-migration-cutover.md §6 — 구현 전에 registry를 한 곳에서 생성하고 테스트가 전수성을 강제한다. 이름을 예시 service 목록으로 하드코딩하지 않는다.",
+    "classes": [
+      "Map API의 admin/public/ops write route와 background write task",
+      "Map Dagster daemon, schedule, sensor, queued/running run, 직접 실행 가능한 materialization",
+      "Map migration/API entrypoint처럼 DB를 변경할 수 있는 one-shot process",
+      "Pin API/Dagster/worker와 Map 또는 Pin DB에 쓰는 cache-target command 경로",
+      "manager가 실행할 backup/migrate/CSV/bootstrap/initial/enable/canary/GC operation"
+    ],
+    "completeness_rule": "fence는 writer capability registry와 실제 process/container/transaction을 대조한다. 알려지지 않은 writer나 registry 밖 새 write route가 있으면 cutover를 시작하지 않는다."
+  },
+  "fence_evidence_keys": {
+    "source": "h35-map/v1 receipt 계약 (src/kortravelmap/cli/_h35_contract.py) — cutover fence 증거는 아래 key로 증명한다.",
+    "keys": {
+      "database_identity": "live 재계산 identity — sha256(h35-db-identity-v1 NUL-framed transaction_id/role/database/system_identifier). request echo가 아닌 재계산 값만 신뢰",
+      "runtime_mutation_count": "fence window 동안 0이어야 한다",
+      "external_event_count": "fence window 동안 0이어야 한다",
+      "forward_boundary": "단조 forward 경계 marker — 경계를 넘은 뒤 옛 snapshot rollback 입력을 거부",
+      "transaction_id": "결합 백업·리허설·복원을 하나로 결속하는 UUID",
+      "prior_receipt_digest": "canonical JSON sha256 chain — stale receipt 재사용 차단"
+    }
+  },
+  "forward_recovery_rules": {
+    "source": "ADR-075 결정 3·전환/rollback, docs/backup-restore.md:43-46",
+    "rules": [
+      "snapshot restore는 fence 이후 write가 없을 때만 rollback 수단으로 허용한다",
+      "fence 이후 write가 있으면 검증된 PITR 또는 forward journal replay로만 복구한다",
+      "write fence 유지도 forward journal replay도 없으면 rollback 가능하다고 선언하지 않는다",
+      "allow_running=true opt-in 산출물은 진단용 best-effort snapshot이며 vNext cutover rollback 기준점으로 사용할 수 없다 — rollback 기준점은 write fence 뒤 생성한다",
+      "upstream 재수집은 정본·감사·3년 weather 이력의 복구 수단이 아니다 (DB-to-DB 이관이 정본, 검증된 파생만 재계산)",
+      "부분 rollback 금지 — Map app DB·Map Dagster DB·Pin DB·manager state를 하나의 복원 transaction으로 되돌린다 (runbook §8)"
+    ]
+  },
+  "shadow_checksum": {
+    "description": "Map↔PinVi 양 저장소 shadow checksum 대상 relation과 checksum 정의. Wave 2 각 fence task가 cutover gate에서 양측 일치를 증명한다.",
+    "relations": [
+      {
+        "name": "feature identity alias map",
+        "map_side": "feature.features(feature_id) + feature.feature_aliases(alias, feature_id, alias_kind)",
+        "pinvi_side": "PinVi가 저장한 명시 feature ID 필드의 alias-map 이관 결과 (feature_snapshot은 by-value 보존, unmatched 0건 게이트 — 보고서 D-4)",
+        "owner": "T-VN-32C"
+      },
+      {
+        "name": "cache target snapshot",
+        "map_side": "ops.poi_cache_target_snapshots/snapshot_items",
+        "pinvi_side": "PinVi cache-target 소비 상태 (consumer_id·restore_epoch·high_watermark_cursor)",
+        "owner": "T-VN-39",
+        "checksum": "snapshot_merkle_root (아래 merkle_definition)"
+      },
+      {
+        "name": "curation effective projection",
+        "map_side": "feature.curation_collections/curation_items 정본 vs legacy curated_features overlay projection",
+        "pinvi_side": "PinVi가 소비하는 공개 curation 표면",
+        "owner": "T-VN-40A"
+      }
+    ],
+    "merkle_definition": {
+      "source": "src/kortravelmap/core/cache_target_stream.py (ADR-081 snapshot Merkle v1)",
+      "leaf_fields": [
+        "external_system",
+        "target_key",
+        "state",
+        "source_generation",
+        "source_payload_fingerprint"
+      ],
+      "leaf": "sha256(KTMCTLEAF\\x00 || u32be(len(nfc_utf8(external_system))) || nfc_utf8(external_system) || u32be(len(nfc_utf8(target_key))) || nfc_utf8(target_key) || state_byte(active=0x01, deleted=0x02) || u64be(source_generation) || raw32(source_payload_fingerprint))",
+      "ordering": "NFC UTF-8 (external_system, target_key) byte-order 정렬, identity 중복 금지",
+      "node": "sha256(KTMCTNODE\\x00 || left || right), 홀수 노드는 promotion",
+      "empty_root": "sha256(KTMCTEMPTY\\x00)"
+    }
+  },
+  "restore_epoch_rule": {
+    "source": "ADR-074 결정 3, ADR-065",
+    "rule": "cache target은 (external_system, target_key) identity와 source_generation·restore epoch을 가지며 낮은 generation은 적용하지 않는다. restore 뒤에는 restore epoch을 전진시켜 pre-restore generation의 재적용을 차단한다."
+  }
+}

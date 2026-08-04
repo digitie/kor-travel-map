@@ -62,7 +62,7 @@ barrier로 직렬화한다.
     [ ] `T-VN-41A` → [ ] `T-VN-41B` → [ ] `T-VN-41C`(generation/outbox — prod enable은
     재pin #109 완료 + `T-VN-H42` 뒤, Lane B 상세 절 경계 주석 참조)
 - **Wave 2 barrier 이후**
-  - freeze(Lane A): [ ] `T-VN-31A` → [ ] `T-VN-31B` → [ ] `T-VN-31C`
+  - freeze(Lane A): [x] `T-VN-31A` → [x] `T-VN-31B` → [x] `T-VN-31C`
   - Lane A: [ ] `T-VN-32A` → [ ] `T-VN-32B` → [ ] `T-VN-32C` →
     [ ] `T-VN-35A` → [ ] `T-VN-35B` → [ ] `T-VN-35C` → [ ] `T-VN-35D` →
     [ ] `T-VN-37A` → [ ] `T-VN-37B` → [ ] `T-VN-37C`
@@ -1745,20 +1745,43 @@ read/decision/write/UI를 한 PR에 몰지 않는다.
 
 ADR은 존재하지만 목표 DDL/OpenAPI diff/실행 제약 artifact는 없다. 구현과 freeze를 분리한다.
 
-- [ ] T-VN-31A — **목표 DDL·데이터 불변식 freeze**
+> **미정 표기 원칙(2026-08-04 freeze)**: ADR·보고서·task 정의가 침묵하는 세부는 artifact에서
+> 발명하지 않고 SQL `-- 미정(T-VN-XX 구현 소관)` / JSON `"decision":
+> "deferred-to-implementation"`으로 남긴다. freeze의 정직성이 완성도보다 우선한다.
+
+- [x] T-VN-31A — **목표 DDL·데이터 불변식 freeze** (2026-08-04 완료)
 
   schema/table/column/type/FK/CHECK/index/view/trigger와 backfill 전후 불변식을 실행 가능한 SQL
   artifact로 고정한다. migration 번호와 구현 SQL은 아직 넣지 않는다.
 
-- [ ] T-VN-31B — **목표 OpenAPI·consumer diff freeze**
+  완료 기록: `contracts/vnext/target-schema-v1.sql`(빈 PostGIS DB 자기완결 적용, ADR-075 규율
+  주석) + `contracts/vnext/target-invariants-v1.sql`(H35 preflight 6종 패턴 + ADR별 불변식,
+  `-- expect: 0` assertion 44개) + `contracts/vnext/target-schema-fingerprints-v1.json`
+  (H35 7 카테고리 catalog canonical SHA-256, PG16/PostGIS 3.5).
+
+- [x] T-VN-31B — **목표 OpenAPI·consumer diff freeze** (2026-08-04 완료)
 
   admin/user/PinVi surface별 추가·삭제·rename·enum/status/error 변화를 machine-readable diff로
   고정하고 consumer-first 배포 순서와 호환을 버릴 시점을 명시한다.
 
-- [ ] T-VN-31C — **제약 test·복구 preflight freeze**
+  완료 기록: `contracts/vnext/openapi-diff-v1.json`(surface×change, 현행 3 spec baseline
+  sha256 핀, 항목별 basis 필수, Wave 0/1 기착지분 제외) +
+  `contracts/vnext/consumer-rollout-v1.json`(task별 consumer-first 순서·write-fence·호환
+  폐기 시점·PinVi 3 snapshot 재-vendor 여부(ADR-079 규율)·T-VN-39 removal manifest).
+
+- [x] T-VN-31C — **제약 test·복구 preflight freeze** (2026-08-04 완료)
 
   목표 DDL/OpenAPI를 위반하는 fixture와 shadow checksum, forward recovery, write-fence preflight를
   executable contract로 만든다. 31A/B artifact drift를 CI에서 fail-close한다.
+
+  완료 기록: `contracts/vnext/violation-fixtures-v1.sql` + `expected-rejections-v1.json`
+  (9 case — 3축 불가능 조합·alias 중복·provider 3-tuple 중복·geometry invalid/empty·override
+  active 중복·notice is_current 중복·summary NULLS NOT DISTINCT 중복·bitemporal 역전, 기대
+  SQLSTATE·제약명) + `contracts/vnext/recovery-preflight-v1.json`(H35 runbook §6 writer
+  registry·fence 증거 key·ADR-075 결정 3 forward recovery/PITR 판정·Merkle v1 정의) +
+  `tests/integration/test_vnext_target_freeze.py`(빈 PostGIS 적용→불변식 0→fixture 거부→
+  fingerprint 재계산 일치) + `tests/unit/test_vnext_contract_artifacts.py`(artifact bytes
+  sha256 고정 + spec baseline·operation 실존 검증 + JSON shape — 매 PR unit job fail-close).
 
 ### T-VN-32 — UUID identity shadow 전환 (Lane A)
 

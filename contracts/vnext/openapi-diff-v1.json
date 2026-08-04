@@ -1,0 +1,254 @@
+{
+  "artifact": "openapi-diff-v1",
+  "owner": "T-VN-31B",
+  "description": "Wave 2(T-VN-32~40) 목표 REST 계약과 현행 3 spec의 machine-readable diff. 정본 근거는 ADR-073과 보고서 §4 목표 REST 표다. Wave 0/1에서 이미 착지한 계약(5-state batch·revision·trip_card·bitemporal weather batch·cluster/truncated/coverage·include_total·cursor HMAC·ETag/304·If-Match 412/428·raw 필드 제거·weather 부모 404)은 현행 spec에 존재하므로 diff 항목이 아니다. 각 항목의 `operation`은 현행 spec에 실존해야 하고(removed/renamed/enum_changes/status_changes), `target_operation`은 아직 존재하지 않아야 한다(added) — tests/unit/test_vnext_contract_artifacts.py가 검증한다.",
+  "baseline": {
+    "admin": {
+      "file": "packages/kor-travel-map-api/openapi.json",
+      "sha256": "60433abfcdaee9a8db754400f70f93c699ad1eced4ddb6ad61ac09b64b550975"
+    },
+    "user": {
+      "file": "packages/kor-travel-map-api/openapi.user.json",
+      "sha256": "efa40c6b2afcd934081bc2ab3bc1a0d23c6f997a4dc61f28dee828eadad3c212"
+    },
+    "service": {
+      "file": "packages/kor-travel-map-api/openapi.service.json",
+      "sha256": "622ea54c98e9b0c09592cf84aced36227992c6bdf256742a3532b892f0efccf2"
+    }
+  },
+  "surfaces": {
+    "user": {
+      "added": [
+        {
+          "kind": "parameter",
+          "operation": "GET /v1/features/{feature_id}/weather",
+          "detail": "target_at/known_at bitemporal 조회 파라미터 — 공개 API가 두 시각을 수용한다",
+          "basis": "ADR-072"
+        },
+        {
+          "kind": "parameter",
+          "operation": "GET /v1/features/{feature_id}/weather/forecast",
+          "detail": "target_at/known_at bitemporal 조회 파라미터",
+          "basis": "ADR-072"
+        },
+        {
+          "kind": "parameter",
+          "operation": "GET /v1/features/weather/forecast",
+          "detail": "target_at/known_at bitemporal 조회 파라미터",
+          "basis": "ADR-072"
+        }
+      ],
+      "removed": [
+        {
+          "operation": "GET /v1/curated-features",
+          "detail": "legacy curated_features overlay 공개 read — 정본은 curation_collections/items",
+          "basis": "T-VN-40C"
+        },
+        {
+          "operation": "GET /v1/curated-features/{curated_feature_id}",
+          "detail": "legacy curated_features overlay 공개 read",
+          "basis": "T-VN-40C"
+        }
+      ],
+      "renamed": [
+        {
+          "operation": "GET /v1/curations/collections",
+          "target_operation": "GET /v1/collections",
+          "detail": "보고서 §4 목표 표의 공개 collections 경로",
+          "basis": "ADR-073"
+        },
+        {
+          "operation": "GET /v1/curations/collections/{collection_id}",
+          "target_operation": "GET /v1/collections/{collection_id}",
+          "detail": "보고서 §4 목표 표의 공개 collections 경로",
+          "basis": "ADR-073"
+        }
+      ],
+      "enum_changes": [
+        {
+          "operation": "GET /v1/features/{feature_id}",
+          "detail": "feature_id 값이 UUID surrogate opaque string으로 전환 — legacy f_* 값은 응답에 더 이상 등장하지 않는다. 소비자는 byte-for-byte 보존만 한다",
+          "basis": "ADR-068"
+        },
+        {
+          "operation": "GET /v1/features/search",
+          "detail": "결과 item의 feature_id 값 UUID 전환",
+          "basis": "ADR-068"
+        },
+        {
+          "operation": "GET /v1/features/in-bounds",
+          "detail": "결과 item의 feature_id 값 UUID 전환",
+          "basis": "ADR-068"
+        },
+        {
+          "operation": "GET /v1/features/nearby",
+          "detail": "결과 item의 feature_id 값 UUID 전환",
+          "basis": "ADR-068"
+        }
+      ],
+      "status_changes": [
+        {
+          "operation": "GET /v1/features/{feature_id}",
+          "detail": "legacy f_* ID 경로 파라미터는 cutover 후 404 — alias lookup은 전환·복구 경계에서만 제공하며 공개 표면은 해석하지 않는다",
+          "basis": "ADR-068"
+        }
+      ],
+      "error_changes": [],
+      "deferred": [
+        {
+          "topic": "GET /v1/features (전체 목록)·GET /v1/features/nearby/by-target·GET /v1/providers*·GET /v1/public/beaches*·GET /v1/public/festivals*",
+          "decision": "deferred-to-implementation",
+          "detail": "보고서 §4 목표 표·ADR-073이 존치/제거를 명시하지 않는다",
+          "owner": "T-VN-35D"
+        },
+        {
+          "topic": "GET /v1/curated-sources·GET /v1/curated-themes·GET /v1/curations·GET /v1/curations/features/{feature_id}",
+          "decision": "deferred-to-implementation",
+          "detail": "canonical curation 위 공개 read 존치 형태는 legacy route 폐기 범위(F-16)와 별개로 미명시",
+          "owner": "T-VN-40B"
+        },
+        {
+          "topic": "kind-discriminated typed detail의 subtype 분해 반영(응답 필드 재배치)",
+          "decision": "deferred-to-implementation",
+          "detail": "typed detail 골격은 Wave 0/1에 착지 — subtype 전환에 따른 필드 세부는 구현 소관",
+          "owner": "T-VN-35D"
+        },
+        {
+          "topic": "notice 공개 payload의 typed notice_states 반영",
+          "decision": "deferred-to-implementation",
+          "detail": "동등 결과가 완료 조건(T-VN-37C) — 응답 계약 변화 여부 자체가 구현 검증 대상",
+          "owner": "T-VN-37B"
+        }
+      ]
+    },
+    "service": {
+      "added": [],
+      "removed": [],
+      "renamed": [],
+      "enum_changes": [
+        {
+          "operation": "POST /v1/features/batch",
+          "detail": "요청/응답 item의 feature_id 값 UUID 전환 — PinVi는 검증된 alias map으로 DB-to-DB 이관 후 UUID를 소비한다",
+          "basis": "ADR-068"
+        },
+        {
+          "operation": "POST /v1/features/weather/batch",
+          "detail": "요청/응답 item의 feature_id 값 UUID 전환",
+          "basis": "ADR-068"
+        }
+      ],
+      "status_changes": [],
+      "error_changes": [],
+      "deferred": [
+        {
+          "topic": "cache-target/refresh-request 계약",
+          "decision": "deferred-to-implementation",
+          "detail": "generation/outbox 계약은 T-VN-41(Wave 2 밖, ADR-081)이 소유 — 본 freeze 범위 아님",
+          "owner": "T-VN-41"
+        }
+      ]
+    },
+    "admin": {
+      "added": [
+        {
+          "kind": "operation",
+          "target_operation": "GET /v1/provider-datasets",
+          "detail": "provider dataset 정본 관리 표면 (보고서 §4 operator-api). 쓰기 method 구성(등록·활성 전환)은 구현 소관",
+          "basis": "ADR-069"
+        }
+      ],
+      "removed": [
+        {
+          "operation": "GET /v1/admin/features/curated",
+          "detail": "legacy curated_features overlay CRUD",
+          "basis": "T-VN-40C"
+        },
+        {
+          "operation": "POST /v1/admin/features/curated",
+          "detail": "legacy curated_features overlay CRUD",
+          "basis": "T-VN-40C"
+        },
+        {
+          "operation": "GET /v1/admin/features/curated/{curated_feature_id}",
+          "detail": "legacy curated_features overlay CRUD",
+          "basis": "T-VN-40C"
+        },
+        {
+          "operation": "PATCH /v1/admin/features/curated/{curated_feature_id}",
+          "detail": "legacy curated_features overlay CRUD",
+          "basis": "T-VN-40C"
+        },
+        {
+          "operation": "DELETE /v1/admin/features/curated/{curated_feature_id}",
+          "detail": "legacy curated_features overlay CRUD",
+          "basis": "T-VN-40C"
+        },
+        {
+          "operation": "GET /v1/admin/features/curated/{curated_feature_id}/detail-snapshot",
+          "detail": "legacy curated_features overlay 부속 read",
+          "basis": "T-VN-40C"
+        },
+        {
+          "operation": "GET /v1/admin/features/curated/{curated_feature_id}/place-search",
+          "detail": "legacy curated_features overlay 부속 read",
+          "basis": "T-VN-40C"
+        },
+        {
+          "operation": "POST /v1/admin/features/curated/{curated_feature_id}/select",
+          "detail": "legacy curated_features overlay 부속 command",
+          "basis": "T-VN-40C"
+        },
+        {
+          "operation": "POST /v1/admin/features/curated/{curated_feature_id}/unselect",
+          "detail": "legacy curated_features overlay 부속 command",
+          "basis": "T-VN-40C"
+        }
+      ],
+      "renamed": [],
+      "enum_changes": [
+        {
+          "operation": "GET /v1/admin/features",
+          "detail": "status 단일 enum(draft/active/inactive/hidden/broken/deleted) → 직교 3축 lifecycle_state(active|retired)·publication_state(draft|published|suppressed)·quality_state(valid|quarantined)",
+          "basis": "ADR-067"
+        },
+        {
+          "operation": "GET /v1/admin/features/{feature_id}",
+          "detail": "status 단일 enum → 직교 3축",
+          "basis": "ADR-067"
+        },
+        {
+          "operation": "PATCH /v1/admin/features/{feature_id}",
+          "detail": "status 쓰기 → 직교 3축 전이 계약. legacy status 신규 write 차단(T-VN-34C)",
+          "basis": "ADR-067"
+        },
+        {
+          "operation": "GET /v1/admin/features/{feature_id}",
+          "detail": "feature_id 값 UUID 전환(전 admin feature 경로 공통)",
+          "basis": "ADR-068"
+        }
+      ],
+      "status_changes": [],
+      "error_changes": [],
+      "deferred": [
+        {
+          "topic": "field-level override 쓰기 표면(전용 endpoint vs PATCH 내 표현)",
+          "decision": "deferred-to-implementation",
+          "detail": "ADR-071은 저장 모델을 고정하고 REST 표면 세부는 명시하지 않는다",
+          "owner": "T-VN-36B"
+        },
+        {
+          "topic": "POST /v1/admin/features/{feature_id}/deactivate의 3축 전이 재표현",
+          "decision": "deferred-to-implementation",
+          "detail": "suppress/retire 구분 command로의 재편 여부 미명시",
+          "owner": "T-VN-34C"
+        },
+        {
+          "topic": "/v1/features/{id}/sources·observations의 provider_datasets FK 반영(응답 identity 필드)",
+          "decision": "deferred-to-implementation",
+          "detail": "operator lineage 표면 자체는 유지 — denorm identity 제거 반영 세부는 구현 소관",
+          "owner": "T-VN-33C"
+        }
+      ]
+    }
+  }
+}

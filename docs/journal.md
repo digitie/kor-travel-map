@@ -17,6 +17,26 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-08-04 (4) — T-VN-31A/B/C vNext target freeze
+
+- **Wave 2 barrier freeze 완료.** ADR-066~075·보고서 §3/§4/§8·tasks 정의를
+  실행 가능한 artifact 8개(`contracts/vnext/`)로 고정 — 목표 DDL(빈 PostGIS
+  자기완결), 불변식 44 assertion(H35 preflight 6종 패턴), catalog fingerprint
+  (H35 7 카테고리), OpenAPI diff(surface×change, baseline sha256 핀), consumer
+  rollout(write-fence·호환 폐기·PinVi 3 snapshot 재-vendor), 위반 fixture 9 case
+  + 기대 SQLSTATE/제약명, recovery preflight(writer registry·fence 증거·PITR
+  판정·Merkle v1).
+- **정직성 원칙**: ADR이 침묵하는 세부(UUID 생성기 버전, alias_kind 값 집합,
+  subtype 공간 인덱스의 partial 표현, anchor 정밀 술어, capability shape,
+  summary reconciliation 등)는 발명하지 않고 `-- 미정(T-VN-XX 구현 소관)` /
+  `"deferred-to-implementation"`으로 표기.
+- **drift fail-close**: 통합 테스트(빈 PostGIS 새 DB에서 DDL 적용→불변식 0→
+  fixture별 기대 SQLSTATE 거부→fingerprint 재계산 일치) + unit 테스트(artifact
+  bytes sha256 상수 고정, 현행 spec baseline sha256, diff 참조 operation 실존,
+  rollout/preflight JSON shape) — unit job이 매 PR 실행되어 31A/B drift를 막는다.
+- 검증: ruff clean, unit 전체 1,963 passed, freeze 통합 3 passed,
+  `mypy --strict` clean.
+
 ## 2026-08-04 (3) — 이월 기록: H35·T-VN-41 prod live 검증 미수행 → H42~H44 신설 (docs-only)
 
 - **이월 기록** — 이번 사이클에 수행하지 못하고 넘어간 것 2건을 명시한다.
