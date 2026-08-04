@@ -72,8 +72,12 @@ barrier로 직렬화한다.
         `coalesce_active_runs=True`(재리뷰 2 N-5 — 열화 구간 run 중첩·동일 key
         동시 타격 방지, krex notice 선례 있음). 배포 후 판정 음성 시 다음 수
         순서는 etl 문서 §8.1 참조(backoff 상향 → 격자 배치 축소 → lib 정본)) →
-    [ ] `T-VN-H43`(prod 백업 체계 수립 — H42 완주 직후 rollback 기준선 dump,
-        **`ops.public_api_keys` 스코프 필수** — 2026-08-05 소실 실측) →
+    [~] `T-VN-H43`(prod 백업 체계 수립 — **기준선 완료**(2026-08-05):
+        `2026-08-05-h43-baseline.dump` 435MB·sha `717790c0…`, manifest에
+        `ops.public_api_keys`=1 확인(소실 재발 방지 스코프), runbook §9 신설
+        (n150 수동 절차 정본). 잔여: 배포 직전 write-fence rollback 기준점
+        생성(§2 원칙) + 2차 외부 사본·주기화·retention은 docker-manager 결선과
+        후속) →
     [ ] `T-VN-H44`(복원 리허설 드릴 정기화 — H30B 하네스 재사용, 이후 정기)
 - **Lane B — frontend hardening·PinVi 소비 API**
   - b0: [x] `T-VN-48D`(final exact Mocked/Live) →

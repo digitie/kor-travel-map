@@ -10,6 +10,17 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-08-05 (3) — H45 머지·main 수리·H43 기준선 완료
+
+H45 #943 머지(`8c74d911`, 재리뷰 2건 GO) + #940 잠복 결함(user-client types 재생성 누락 —
+전 코드 PR type-check 파손) #944 수리. H43 기준선 dump 완료(n150 435MB, sha `717790c0…`,
+manifest에 public_api_keys=1 확인, runbook §9 신설). Lane A 배포-비의존 작업은 소진 —
+32C tail·H42 KMA axis·H45 판정·41C enable 모두 **다음 이미지 배포(dm#128) 게이트**.
+
+**다음 한 작업**: (사용자/docker-manager) Map 이미지 `8c74d911`+ 배포 → 0080~0082 자동
+적용 → H45 스케줄 SUCCESS 판정 + PinVi 배포·cutover(32C tail) → H42 docs closure →
+H44 복원 드릴(H43 dump 실복원).
+
 ## 2026-08-05 (2) — T-VN-H45: KMA/airkorea 만성 실패 근본 원인 격리·강건화 착지
 
 쿼터 리셋 후 지속 실패 + 컨테이너 내부 4종 upstream 직접 프로브 전부 200 정상의 모순으로
