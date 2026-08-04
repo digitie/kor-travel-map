@@ -10,6 +10,16 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-08-05 (1) — H42 중간: MOIS/opinet 수렴 완료, 공개 key 재발급, KMA 스케줄 감시
+
+MOIS 702,955 3중 일치(6h run 한도로 FAILURE 마감이나 데이터 완주)·opinet 934건 공개 smoke까지
+실측. 재생성 때 소실된 공개 API key(`ops.public_api_keys` 0행 — 전 표면 401)를 재발급하고 n150
+`~/.secrets/kor-travel-map-public-api-key`에 보관. KMA 4종+airkorea는 upstream transport 실패
+반복 — KST 자정 쿼터 리셋 후 스케줄 수렴 감시 중.
+
+**다음 한 작업**: KMA/airkorea 스케줄 수렴 판정(리셋 후에도 실패 지속 시 key/계약 재조사) →
+H42 docs closure → H43(백업 체계 — `ops.public_api_keys` 스코프 필수 반영).
+
 ## 2026-08-04 (9) — T-VN-32 쌍 PR 착지 + ⓪ L7 스캔 0건
 
 Map #940(`e12494bd`, 0080~0082 재부모화 포함)·PinVi #428(`3ff54b8b`, 핀·snapshot

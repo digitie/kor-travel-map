@@ -17,6 +17,40 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-08-05 (1) — H42 중간 실측: MOIS 수렴 완전·opinet 완료·공개 API key 소실→재발급
+
+- **MOIS bulk 수렴 완전**: source_entities 702,955 = linked 702,955 = distinct
+  features 702,955 (3중 일치 실측). run 자체는 `Exceeded maximum runtime of
+  21600 seconds`(dagster 6h run 한도)로 FAILURE 마감이지만 데이터는 완주 —
+  향후 동급 bulk는 run tag `dagster/max_runtime` 상향 또는 한도 재검토 필요.
+  chain 로그의 licenses "비정상 종료"는 이 한도 마감의 표식.
+- **opinet 완료**: 용인·수원 bbox(126.92,37.05,127.45,37.38) 934건, job
+  SUCCESS. 주유소는 kind='place'/category 06020000으로 적재되어 공개 표면
+  bbox+category 조회 실측(3건 반환). opinet chain은 1차 8h 대기 한도 초과
+  자멸 후 24h로 상향 재기동해 완주.
+- **[결손 발견→복구] 공개 API key 전면 소실**: `ops.public_api_keys` 0행 —
+  재생성 때 소실된 뒤 재발급 없이 방치되어 **공개 사용자 표면 전체가 401**
+  상태였다. admin proxy secret 경로(`POST /v1/admin/public-api-keys`,
+  actor=claude-h42-restore)로 재발급(label `h42-regen-restore`, id `7e8224d0…`,
+  hint `fOda8M`). **원문 key는 n150
+  `~/.secrets/kor-travel-map-public-api-key`(600)에만 저장** — 채팅/로그
+  무노출. H43 백업 스코프에 `ops.public_api_keys` 포함 필수(이번 소실의
+  재발 방지) + key 소비자 결선은 사용자 결정 대기.
+- **공개 표면 smoke**: 발급 key로 features bbox(수원 MOIS 음식점 3건)·opinet
+  주유소 3건 반환. `feature.public_features` = 731,599 전행 공개(trusted-link
+  게이트 통과) — unlinked source_entities **0건**(전 provider).
+- **weather 축 실태**: feature_weather_values 555행 전부
+  `python-krex-api/rest_area_weather` — **KMA forecast 값 0**. forecast 앵커
+  NONE은 KMA-술어상 정상 동작. 원인은 KMA 4종(short/ultra×2/alerts)+airkorea
+  의 매주기 upstream transport 실패(`KmaRequestError: KMA request failed`,
+  `data.go.kr request failed`, `AirKoreaNetworkError: timed out` — env key
+  결선은 존재). KST 자정 쿼터 리셋 후 스케줄 수렴을 감시 중 — 리셋 후에도
+  지속 실패면 key/계약 축으로 재조사.
+- 부수 관측: `feature_operation_reconciliation_sensor`가 KNPS registry
+  conflict(`KNPS fetcher/asset resource dataset snapshot 불일치`,
+  `feature_place_knps_points_job`) 관측 오류 1건을 반복 보고 — H42 판정 시
+  재확인 대상.
+
 ## 2026-08-04 (10) — T-VN-32 쌍 PR 착지 (Map #940 + PinVi #428) + ⓪ L7 스캔 0건
 
 - **Map #940 머지** `e12494bd`(8/8 green). 막판 CI 2건 해소: ① codex #935의
