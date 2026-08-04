@@ -19,8 +19,12 @@ fenced_by T-VN-32C"를 DB 층에서 착지한다. **제거는 전부 T-VN-39 소
    36/39 사이 CHECK가 제거된 세계에서도 identity 재키잉이 불가능하도록 계약을
    트리거로 명시한다 (ADR-068: 수정 가능한 속성은 identity 입력이 아니다).
 3. **legacy-only write** — uuid 없는 INSERT는 0079 BEFORE 트리거가 파생값으로
-   채우고 0080 CHECK가 파생 일치를 강제하므로, **legacy-only 행이 저장되는
-   경로는 구조적으로 존재하지 않는다**. 32B가 "32C 재평가"로 이월한 0079 트리거
+   채우고 0080 CHECK가 파생 일치를 강제한다. 이 보장은 **trigger-respecting
+   세션 한정**이다 — ``session_replication_role = replica``(superuser)는
+   트리거를 우회할 수 있으므로(CHECK/NOT NULL은 여전히 유효),
+   ``count_features_missing_identity``의 정기 관측이 alias 결측에 대한
+   방어선이다(32C 적대 리뷰 M4 — 초판의 "구조적으로 존재하지 않는다"는
+   과장 정정). 32B가 "32C 재평가"로 이월한 0079 트리거
    2종(fill/alias)은 **유지**로 결정한다: fill 트리거는 0080 CHECK가 요구하는
    유일값만 쓸 수 있어 우회로가 아니라 강제 메커니즘의 일부이고, AFTER alias
    트리거는 INV-068-01(모든 feature에 legacy alias ≥ 1)의 원자 보장이다.
@@ -58,6 +62,11 @@ LANGUAGE plpgsql
 SET search_path = pg_catalog
 AS $$
 BEGIN
+    IF TG_OP = 'TRUNCATE' THEN
+        RAISE EXCEPTION
+            'T-VN-32C legacy write fence: feature_aliases TRUNCATE 금지 — '
+            'alias map은 T-VN-39 removal manifest 전까지 유지한다 (ADR-068).';
+    END IF;
     IF TG_OP = 'UPDATE' THEN
         RAISE EXCEPTION
             'T-VN-32C legacy write fence: feature_aliases 행은 불변입니다 '
@@ -108,6 +117,13 @@ def upgrade() -> None:
         "BEFORE DELETE ON feature.feature_aliases "
         "FOR EACH ROW EXECUTE FUNCTION feature.fence_feature_aliases_write()"
     )
+    # 저장소 기존 패턴(trg_*_no_truncate) — row 트리거는 TRUNCATE에 발화하지
+    # 않으므로 statement 트리거로 별도 거부한다 (32C 적대 리뷰 M3).
+    op.execute(
+        "CREATE TRIGGER trg_feature_aliases_no_truncate "
+        "BEFORE TRUNCATE ON feature.feature_aliases "
+        "FOR EACH STATEMENT EXECUTE FUNCTION feature.fence_feature_aliases_write()"
+    )
     op.execute(_CREATE_IDENTITY_FENCE_FUNCTION_SQL)
     op.execute(
         "CREATE TRIGGER trg_features_identity_fence "
@@ -128,6 +144,10 @@ def downgrade() -> None:
         "DROP TRIGGER IF EXISTS trg_features_identity_fence ON feature.features"
     )
     op.execute("DROP FUNCTION IF EXISTS feature.fence_features_identity_update()")
+    op.execute(
+        "DROP TRIGGER IF EXISTS trg_feature_aliases_no_truncate "
+        "ON feature.feature_aliases"
+    )
     op.execute(
         "DROP TRIGGER IF EXISTS trg_feature_aliases_delete_fence "
         "ON feature.feature_aliases"

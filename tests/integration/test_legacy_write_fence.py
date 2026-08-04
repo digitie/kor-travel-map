@@ -143,8 +143,9 @@ def _expected_rows(feature_ids: tuple[str, ...]) -> list[FeatureAliasMapRowV1]:
 
 
 async def test_alias_update_is_rejected(fence_engine: AsyncEngine) -> None:
+    # UPDATE 분기 고유 문구로 단언 — DELETE fence와 구분 (32C 적대 리뷰 L6).
     async with fence_engine.connect() as connection:
-        with pytest.raises(DBAPIError, match="legacy write fence"):
+        with pytest.raises(DBAPIError, match="행은 불변입니다"):
             await connection.execute(
                 text(
                     "UPDATE feature.feature_aliases SET created_at = now() "
@@ -152,6 +153,69 @@ async def test_alias_update_is_rejected(fence_engine: AsyncEngine) -> None:
                 ),
                 {"alias": _SEED_IDS[0]},
             )
+
+
+async def test_alias_truncate_is_rejected(fence_engine: AsyncEngine) -> None:
+    """row 트리거는 TRUNCATE에 발화하지 않는다 — statement 트리거 fence (M3)."""
+    async with fence_engine.connect() as connection:
+        with pytest.raises(DBAPIError, match="TRUNCATE 금지"):
+            await connection.execute(text("TRUNCATE feature.feature_aliases"))
+
+
+async def test_poison_alias_rows_are_rejected_by_db_checks(
+    fence_engine: AsyncEngine,
+) -> None:
+    """H1 독성 행 회귀 — ``alias ≠ feature_id`` 계열 INSERT는 23514로 거부된다.
+
+    초판 0080은 파생 CHECK를 FK 컬럼(feature_id) 축으로 걸어
+    ``(alias='x', feature_id='y', uuid=f(y))`` 독성 행이 DB를 통과했고, 통과한
+    순간 checksum/페이지 전체가 영구 fail-close되며 0081 fence가 그 행 삭제까지
+    막았다(적대 리뷰 H1 실측). 재축(f(alias)) + legacy identity CHECK
+    (``alias = feature_id``)가 두 축 모두에서 원천 차단함을 실측 단언한다.
+    """
+    host_id = _SEED_IDS[0]
+
+    async def _insert(alias: str, feature_uuid: str) -> None:
+        async with fence_engine.connect() as connection:
+            await connection.execute(
+                text(
+                    "INSERT INTO feature.feature_aliases "
+                    "(alias, feature_id, feature_uuid, alias_kind) VALUES "
+                    "(:alias, :fid, CAST(:feature_uuid AS uuid), "
+                    "'legacy_feature_id')"
+                ),
+                {"alias": alias, "fid": host_id, "feature_uuid": feature_uuid},
+            )
+            await connection.commit()
+
+    # ① H1 원판 독성 행: uuid는 f(feature_id) — 구 축에서는 합법이었다.
+    #    재축된 파생 CHECK(f(alias))가 거부한다 (identity CHECK도 위반 —
+    #    보고 이름은 PG 내부 순서 소관이라 대안 일치로 단언).
+    with pytest.raises(
+        DBAPIError,
+        match=r"ck_feature_aliases_(uuid_dual_derivation|legacy_identity)",
+    ):
+        await _insert(
+            "f_global_p_poison_old_axis", str(feature_uuid_from_legacy(host_id))
+        )
+    # ② 파생은 새 축(f(alias))으로 옳지만 alias ≠ feature_id인 행:
+    #    legacy identity CHECK가 단독으로 거부한다 (결정적 이름 단언).
+    with pytest.raises(DBAPIError, match="ck_feature_aliases_legacy_identity"):
+        await _insert(
+            "f_global_p_poison_identity",
+            str(feature_uuid_from_legacy("f_global_p_poison_identity")),
+        )
+    # 어느 독성 행도 저장되지 않았다.
+    async with fence_engine.connect() as connection:
+        poison_count = (
+            await connection.execute(
+                text(
+                    "SELECT count(*) FROM feature.feature_aliases "
+                    "WHERE alias LIKE 'f_global_p_poison_%'"
+                )
+            )
+        ).scalar_one()
+    assert poison_count == 0
 
 
 async def test_alias_direct_delete_is_rejected(fence_engine: AsyncEngine) -> None:
@@ -375,7 +439,7 @@ async def test_downgrade_removes_fences_and_upgrade_restores(
         await _upgrade(dsn, "head")
         engine = make_async_engine(dsn)
         async with engine.connect() as connection:
-            with pytest.raises(DBAPIError, match="legacy write fence"):
+            with pytest.raises(DBAPIError, match="행은 불변입니다"):
                 await connection.execute(
                     text("UPDATE feature.feature_aliases SET created_at = now()")
                 )
