@@ -842,6 +842,10 @@ GET  /v1/ops/pipeline/executions/{kind}/{execution_id}
 POST /v1/ops/pipeline/executions/import_job/{execution_id}/cancel
 POST /v1/ops/pipeline/executions/update_request/{execution_id}/cancel
                                                       # root 계층 취소(kind=import_job|update_request)
+PUT  /v1/ops/contract-fixtures/c6c-cancel-probe/{transaction_id}
+GET  /v1/ops/contract-fixtures/c6c-cancel-probe/{transaction_id}
+POST /v1/ops/contract-fixtures/c6c-cancel-probe/{transaction_id}/finalize
+                                                      # Docker Manager `ops:fixture` 전용, service OpenAPI만
 POST /v1/ops/pipeline/requests                        # 필수 UUID Idempotency-Key; 생성(201)/재생·활성 재사용(200)
 POST /v1/ops/pipeline/requests/preview                # 비영속 실행 계획 미리보기(200)
 POST /v1/ops/pipeline/requests/{request_id}/run-now   # 동일 canonical job 우선 dispatch(200)
@@ -860,6 +864,15 @@ OpenAPI full profile은 각 GET에 `AdminBFF OR (OpsToken AND OpsScope)`를 선�
 profile에서는 ops 전체를 제외한다. PinVi 관측 consumer는 issue #392에서 같은 read
 principal을 선전환하며, Map/PinVi exact heads는 C6c manifest v4의 동일 source pair로만
 활성화한다.
+
+T-VN-41F1J의 `contract-fixtures/c6c-cancel-probe` 3 route는 normal canonical ops나
+AdminBFF가 아닌 Docker Manager의 exact `ops:fixture` principal만 받는다. full/admin/user
+OpenAPI에는 노출하지 않고 `openapi.service.json`에만 포함한다. `PUT`은 Map-generated job ID와
+capability generation을 멱등 반환하고, `GET`은 durable state를 읽으며, `finalize`는 canonical
+cancellation history를 지우지 않고 fixture만 terminal로 닫는다. PinVi는 기존 import-job
+cancel route로 한 번만 호출한다. Manager 성공 판정은 `409 PIPELINE_CANCELLATION_UNSAFE` 하나이며
+다른 status/code는 fail-closed한다. schema/state/재개 규칙은
+[`c6c-cancel-probe-fixture.md`](c6c-cancel-probe-fixture.md)를 따른다.
 
 `POST /v1/ops/pipeline/requests`의 응답에는 서로 다른 두 멱등성 결과를 항상 함께 둔다.
 `idempotent_replay`는 동일 `Idempotency-Key` 요청 재생 여부이고,
