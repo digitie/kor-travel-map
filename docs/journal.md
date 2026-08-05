@@ -36,6 +36,10 @@ application writer 거부와 직접 SQL 제약을 함께 검증해 audit no-Sort
 적대적 리뷰 1인은 새 trigger의 INSERT 책임과 기존 identity trigger의 job ID 불변 책임 분리,
 두 SQL 경계 통합 검증, no-Sort planner gate를 재검토해 GO로 판정했다.
 
+PR CI가 검출한 `contracts/vnext/openapi-diff-v1.json`의 admin/service baseline SHA drift도
+현재 generated artifact와 immutable outcome route를 대조해 재고정했다. Wave 2 대상 diff의
+counts는 바꾸지 않았고 artifact fingerprint test 7건으로 freeze 갱신을 검증했다.
+
 ## 2026-08-06 (2) — T-VN-41F1J-A: Map durable fixture 구현·검증
 
 - **수명주기/DB**: migration `0084_c6c_cancel_probe_fixtures`로 transaction ID를

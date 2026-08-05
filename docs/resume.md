@@ -23,7 +23,7 @@ Manager response-loss 재개는 POST 재발송 없이 evidence를 durable write�
 attestation도 fixture token의 cursor secret 재사용을 명시적으로 거부한다.
 
 **검증**: fixture integration 2건, API auth 103건, event-audit no-Sort planner target,
-OpenAPI export/types drift, strict mypy·ruff가 통과했다. 적대적 코드 리뷰 1인이 발견한
+OpenAPI export/types drift와 Wave 2 OpenAPI freeze artifact 7건, strict mypy·ruff가 통과했다. 적대적 코드 리뷰 1인이 발견한
 event-audit Sort 회귀/직접 event 삽입 누출은 읽기 join이 아니라 DB trigger로 차단해 ordered
 partial-index gate를 보존했고, 재리뷰 GO를 받았다. PR CI gate가 남았다.
 
