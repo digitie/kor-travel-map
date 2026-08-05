@@ -50,9 +50,11 @@ barrier로 직렬화한다.
     [x] `T-VN-H45`(upstream 강건화 — #943 재시도 + 근본 원인 2 `https` 정본
         전환(#948)으로 **KMA 4종 전부 SUCCESS 전환**, 값 55,755 유입.
         airkorea는 upstream 자체 504로 관찰만. 백로그는 상세 절) →
-    [~] `T-VN-H43`(백업 체계 — 기준선+write-fence 기준점 dump 완료·runbook §9.
-        잔여: 외부 사본·주기화·retention) →
-    [ ] `T-VN-H44`(복원 리허설 드릴 정기화 — H30B 하네스 재사용, 이후 정기)
+    [~] `T-VN-H43`(백업 체계 — 기준선·write-fence 기준점 dump + PK manifest
+        확보·runbook §9. 잔여: 외부 사본 반출·주기화·retention(dm 결선)·배포
+        직전 기준점 관례 — 병렬 착수 2026-08-05) →
+    [ ] `T-VN-H44`(복원 리허설 드릴 정기화 — H30B 하네스 재사용. 드릴 1회차
+        병렬 착수 2026-08-05)
 - **Lane B — frontend hardening·PinVi 소비 API**
   - b0: [x] `T-VN-48D`(final exact Mocked/Live) →
     [x] `T-VN-49A/B/C/D`(React 구조 debt, 단일 PR)
@@ -67,9 +69,9 @@ barrier로 직렬화한다.
     [/] `T-VN-41D`(durable writer-drain)
 - **Wave 2 barrier 이후**
   - freeze(Lane A): [x] `T-VN-31A` → [x] `T-VN-31B` → [x] `T-VN-31C`
-  - Lane A: [x] `T-VN-32A` → [x] `T-VN-32B` → [~] `T-VN-32C`(0083 배포 완주 —
-    Map #950·PinVi #430, 잔여는 PR-2 응답 값 전환) →
-    [ ] `T-VN-35A` → [ ] `T-VN-35B` → [ ] `T-VN-35C` → [ ] `T-VN-35D` →
+  - Lane A: [x] `T-VN-32A` → [x] `T-VN-32B` → [x] `T-VN-32C`(prod 배포·값 전환
+    라이브 — Map #950/#952/#955/#956·PinVi #430/#432) →
+    [/] `T-VN-35A-D`(진행 중 — 설계 착수 2026-08-05, A-D 단일 PR 방침) →
     [ ] `T-VN-37A` → [ ] `T-VN-37B` → [ ] `T-VN-37C`
   - Lane B shadow: [ ] `T-VN-33A` → [ ] `T-VN-33B` → [ ] `T-VN-33C` →
     [ ] `T-VN-38A` → [ ] `T-VN-38B` → [ ] `T-VN-38C` →
@@ -458,8 +460,15 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
     manifest·`pg_restore -l` 검증) + 배포 직전 **write-fence rollback 기준점**
     `2026-08-05-prefence-0082.dump`(sha `d367fbd1…`, write path 정지 후 생성 —
     ADR-075 기준점 규칙 정합).
-  - [ ] 정기화 — 보존 정책(개수·기간)·2차 외부 사본(S3/R2). **소유 경계**:
-    orchestration은 docker-manager(이슈로 요청), 절차 정본은 Map runbook.
+  - [x] 배포 후 기준점 — `2026-08-05-h43-postdeploy-0083.dump`(489MB, 0083
+    적용·값 전환 배포 후, manifest: features/aliases/public 731,765 동수 ·
+    pair_mismatch 0 · orphan_alias 0)와 **dev box 외부 사본 1회 반출**
+    (`~/ktm-h43-external/`, sha256 대조 OK) — 오프박스 사본의 첫 실물.
+  - [~] 정기화 — 보존 정책(개수·기간)·주기 실행·2차 외부 사본 자동화.
+    **소유 경계**: orchestration은 docker-manager — 결선 요청 기안 완료
+    (manager **#148**: 일 1회 dump+sha256+manifest, retention 7일/4주,
+    오프박스 자동 반출, 배포 직전 fence dump 관례 명문화). 절차 정본은 Map
+    runbook.
   - [ ] 신규 DB 프로비저닝 함정 참조 링크 — superuser 확장 4종 사전 생성
     (manager #109 절차)을 restore 문서에서 링크한다.
 
@@ -563,88 +572,11 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 
 - [x] T-VN-32B — **Map consumer-first dual read/write** (2026-08-04 완료, #940 — prod `0081` 적용·공개 표면 feature_uuid 병행 노출 실측 2026-08-05) → [`tasks-done.md`](tasks-done.md)
 
-- [~] T-VN-32C — **PinVi alias-map cutover·legacy write fence**
+- [x] T-VN-32C — **PinVi alias-map cutover·legacy write fence·응답 값 전환** (2026-08-05 완료 — Map #940/#950/#952/#955/#956 · PinVi #428/#430/#432, prod 배포·값 전환 라이브) → [`tasks-done.md`](tasks-done.md)
 
-  PinVi consumer를 UUID+alias contract로 전환하고 양 저장소 checksum을 맞춘다. legacy write를
-  fence하되 legacy ID 제거는 T-VN-39 soak 뒤로 남긴다.
+  **관측(상시)**: ① `count_features_missing_identity` 4축 0 정기 확인(replica-mode 우회 보상 — 0083 선언적 제약의 방어선) ② 32B 기간 저장된 UUID 표기 scope 레코드는 재실행에서 조용한 no-op(적대 리뷰 L4) ③ curations 격리(quarantine) 재-link 표면은 감사 예외로 legacy 표기 유지 — 프론트 identity 대조 확인 권고(F6).
 
-  **전반부 착지(본 branch + PinVi 쌍 branch `feat/tvn32c-uuid-alias`)**:
-  ① 이관 표면 — ADR-068 결정 4의 "DB-to-DB 이관"을 service read 2종으로 판단
-  (`GET /v1/service/feature-alias-maps`(keyset 페이지)+`/checksum`(merkle
-  root) — PinVi 소비는 HTTP-only·cache-target snapshot/merkle 선례,
-  `require_service_token`·route_policy SERVICE, read-only라 registry 미등록).
-  ② `feature-alias-map-v1` checksum 계약(`core/feature_alias_map.py` 순수:
-  NFC-거부 alias·canonical uuid·닫힌 kind, 길이 prefix + domain separation
-  leaf(`KTMFAMLEAF\0`)·byte-order 정렬·odd-promotion merkle(`KTMFAMNODE\0`/
-  `KTMFAMEMPTY\0`), 파생 검증 분리) + 양 저장소 공용 golden
-  `contracts/feature-alias-map-v1-golden.json` — PinVi 독립 구현
-  (`app/core/feature_alias_contract.py` — namespace를 basis 문자열에서 재파생)
-  이 vendored 사본으로 재계산 대조. ③ legacy write fence — alembic
-  `0082_legacy_write_fence`: alias map 불변(UPDATE 전면 거부·직접 DELETE
-  거부·feature purge CASCADE만 허용 — removal manifest "alias 유지" fence) +
-  identity 불변(feature_id/feature_uuid UPDATE 거부) DB 트리거 fail-close,
-  0079 트리거 2종은 재평가 후 **유지**(fill은 0080 CHECK가 요구하는 유일값만
-  쓸 수 있는 강제 메커니즘의 일부, AFTER alias는 INV-068-01 원자 보장 —
-  0079/0081 docstring), `COLLATE "C"` keyset index(+모델 metadata 정합).
-  f_* 신규 발급 fence는 비파생 generator 채택과 불가분이라 **의도적으로
-  checksum 게이트 뒤 잔여로 순서 고정**(발급 전환은 신규 행 응답에 UUID 값을
-  조기 누출 — rollout "checksum 일치 후 응답 전환" 위반 + upsert idempotency
-  재결선 필요). ④ PinVi 이관 준비 — UUID shadow 컬럼 migration
-  (`20260804_0049`: trip_day_pois/curated_plan_pois.feature_uuid,
-  feature_suggestions.target_feature_uuid) + alias-map client
-  (`clients/kor_travel_map_alias_map.py` — keyset 전진·계약 위반 fail-close) +
-  검증된 이관 실행기(`services/feature_uuid_cutover.py`,
-  `pinvi-feature-uuid-cutover` CLI: pull→독립 root/count·파생 검증→매칭 3열
-  rewrite·미매칭은 NULL 유지+보고, dry-run 지원). ⑤ artifact — OpenAPI
-  admin/service 재생성(user sha 무변경)·`openapi-diff-v1.json` baseline
-  재고정+revisions(이관 표면은 목표 diff 항목 아님 — 존치·폐기는 39 소관)·
-  unit sha 상수 재고정.
-
-  **쌍 PR 착지(2026-08-04)**: Map #940 merge `e12494bd` + PinVi #428 merge
-  `3ff54b8b`(squash). 유예분 완료 — alias golden 핀 `_UPSTREAM_MAP_COMMIT` =
-  merge SHA + contract-pin-consistency byte-diff 단계, service snapshot 재추출
-  (`144b4335…` — cache-target operation diff 무변경 실측 → codex n150 paired
-  live proof 유효), `_ARTIFACT_COMMIT`/`_FUNCTIONAL_OWNER_COMMIT`/config/
-  `.env.example` 회전. ⓪ 사전 스캔 완료 — prod 467,697행 중 canonical UUID
-  형태 legacy `feature_id` **0건**(L7 shadowing 클리어, TCP read-only 실측).
-  배포 결선 예고는 docker-manager#128(EXPECTED_HEAD=`0082_legacy_write_fence`
-  + PinVi 계약 env 2종 — sync enable 시 fail-close 주의, Map 먼저 순서 제약).
-
-  **checksum 게이트 통과(2026-08-05)**: PinVi 배포 + cutover dry→real —
-  양 저장소 root 일치(`8bd9534a…`, 731,600) + trip_day_pois 26행 shadow 채움.
-
-  **PR-1 + 쌍 PR + 0083 배포 완주(2026-08-05)**: Map #950 merge `2a8642bd`
-  (0083 — 파생 CHECK 해제·선언적 사본 일치 CASCADE FK+UNIQUE·비파생 UUIDv7
-  generator app `make_feature_uuid`/SQL `feature.uuid_generate_v7()` 동일
-  레이아웃·verify 이원화 fail-close·golden nonderived_v1 개정, 적대 리뷰
-  2인 GO) + PinVi #430 merge `6325d814`(파생 등식 폐기 수용·cutover 리터럴
-  자기-정본화 opt-in·golden 재vendor `dc0a6595…`+merge SHA 핀·staleness
-  golden 감시). prod 배포 게이트 순서 완주(PinVi 선배포 → 사전 점검 0/0 →
-  Map api 0083 적용 → dagster·daemon), 사후 검증 정상(`derivation_enforced:
-  false`, 731,733) — journal 2026-08-05 (7)·dm#128.
-
-  **PR-2 머지(2026-08-05, #952 `8c5bdcf8`)**: 응답 `feature_id` 값 UUID 전환
-  코드 완결 — 전 read 표면 치환(cursor legacy 축·echo 예외 보존, ADR-083
-  §5-6), write/scope 경계 해석 전수(W1-W8·S1-S13 + bulk 해석기), admin UUID
-  fast-path, curated snapshot 빌더 UUID화, h35 CLI pre-uuid 스키마 변형
-  (역사 표면 보존). 적대 리뷰 2인 GO(trip_card echo 등식·scope 해석
-  트랜잭션 배치 등 H 2건 반영), CI 8/8.
-
-  **배포 완료(2026-08-05, dm#128)**: ①H30B 게이트 기완료 충족 ②`8c5bdcf8`
-  4-이미지 배포(사후 검증: 상세 UUID·batch echo·trip_card 등식 정상)
-  ③curated snapshot 활성 500 전량 재물질화(멱등 확인, 비활성 334 동결 보존).
-
-  **잔여**: ④ live e2e fixture 재생성(새 표면 기준, n150 per-file 저부하) →
-  ⑤ PinVi user 스냅샷 재고정 PR + 유예 동봉(PinVi CLI
-  `--accept-uuid-literals`+runner 출력, `derivation_enforced` cutover 사전
-  검사 배선) → ⑥ dagster entrypoint EXPECTED_HEAD 기계 인터록(NEW-5, dm base
-  compose 기본값 갱신 동타이밍). 관측: 32B 기간 저장 UUID 표기 scope 레코드
-  잔존(재실행 조용한 no-op — 리뷰 L4)·quarantine 재-link 프론트 대조(F6).
-  legacy ID·FK 체인 물리 제거는 T-VN-39 removal manifest.
-  **운영 점검(상시)**: 0079/0081 트리거 보장은 trigger-respecting 세션
-  한정이다 — `session_replication_role=replica`(superuser)는 우회 가능하므로
-  `count_features_missing_identity` 정기 관측(0,0 확인)이 alias 결측 방어선
-  (32C 리뷰 M4).
+  **범위 밖 잔여**: legacy ID·FK 물리 제거는 T-VN-39(removal manifest), PinVi service 스냅샷 재핀은 codex `T-VN-41-F` 합류(PinVi resume 상단 인수 패키지), live e2e 라이브 검증은 n150 per-file 저부하 관례.
 
 ### T-VN-33 — provider dataset 정본 전환 (Lane B)
 
