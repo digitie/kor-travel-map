@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 
 from kortravelmap.core.feature_operation import (
+    C6C_CANCEL_PROBE_JOB_KIND,
     FEATURE_OPERATION_MEMBER_KIND,
     FEATURE_OPERATION_ROOT_KIND,
     FEATURE_UPDATE_REQUEST_JOB_KIND,
@@ -22,6 +23,7 @@ from kortravelmap.infra.pipeline_cancellation_types import (
 )
 
 _RESERVED_JOB_KINDS = (
+    C6C_CANCEL_PROBE_JOB_KIND,
     FEATURE_OPERATION_ROOT_KIND,
     FEATURE_OPERATION_MEMBER_KIND,
     FEATURE_UPDATE_REQUEST_JOB_KIND,

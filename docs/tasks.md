@@ -583,8 +583,9 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   Docker Manager와 Map API에만 결박하며, Map/PinVi compatible pair capability generation을
   fail-closed로 검증한다. 세부 계약은
   [`architecture/c6c-cancel-probe-fixture.md`](architecture/c6c-cancel-probe-fixture.md)이다.
-  구현·DB/API 검증과 적대적 코드 리뷰 1인(차단/주요 이슈 없음)은 완료했고, PR #960
-  CI gate와 merge만 남았다.
+  구현·DB/API 검증과 적대적 코드 리뷰 1인(차단/주요 이슈 없음)은 완료했다. 첫 CI에서
+  드러난 reserved-kind/ops event/lineage CTE/OpenAPI baseline의 정적 기대 4건도 새 격리
+  계약으로 보강했고, PR #960 재실행 CI gate와 merge만 남았다.
 
 - [ ] **T-VN-41F1J-B — Manager dynamic fixture orchestration** *(docker-manager 소유)*
 

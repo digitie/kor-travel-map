@@ -5,7 +5,7 @@
   "baseline": {
     "admin": {
       "file": "packages/kor-travel-map-api/openapi.json",
-      "sha256": "8c4aa33cf5d1cf15b248ec95367e169adc275515f1d277a6a707cf64dbe1681f"
+      "sha256": "52e60f9ce1ac159a32fbb95dce95e44789365a082f1dbe51ff8ae4722912c894"
     },
     "user": {
       "file": "packages/kor-travel-map-api/openapi.user.json",
@@ -13,10 +13,15 @@
     },
     "service": {
       "file": "packages/kor-travel-map-api/openapi.service.json",
-      "sha256": "c7838b20bd70bf333590cb440a705dd7e893f9e366078d6c11200d701d40bdcd"
+      "sha256": "d278323a97f7c435fd4bebb27bfa0b227489173cc1e44f1993baf8136f8e66d9"
     }
   },
   "revisions": [
+    {
+      "date": "2026-08-06",
+      "task": "T-VN-41F1J-A",
+      "change": "admin/service baseline sha256 재고정 — Map 전용 c6c_cancel_probe fixture의 exact route와 ops:fixture 권한 표면이 추가됐다. user 표면에는 노출되지 않으며, 이 표면은 Wave 2 목표 REST diff의 대상이 아니므로 diff 항목·counts는 무변경이다."
+    },
     {
       "date": "2026-08-04",
       "task": "T-VN-32C",

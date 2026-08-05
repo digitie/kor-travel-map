@@ -42,7 +42,10 @@
 - **검증**: Postgres migration을 포함한 fixture integration 2 passed, `alembic check`
   clean, API auth 88 passed, settings/route/OpenAPI target과 export `--check`, strict
   mypy·ruff·import-linter 통과. 적대적 코드 리뷰 1인은 차단/주요 이슈 없음으로
-  최종 판정했다.
+  최종 판정했다. 첫 GitHub CI에서 확인된 정적 기대 4건(reserved kind, ops event
+  projection, cancellation lineage CTE, admin/service OpenAPI baseline)은 설계를
+  우회하지 않고 fixture 격리 계약을 직접 단언하도록 보강했으며 대상 회귀 5건이
+  통과했다.
 
 ## 2026-08-06 (1) — T-VN-41F1J: Map-owned cancel-probe fixture 결정
 

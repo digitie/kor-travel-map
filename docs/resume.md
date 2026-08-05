@@ -23,7 +23,8 @@ cursor secret 재사용을 명시적으로 거부한다.
 **검증**: fixture integration 2건, API auth 88건, API 설정·route policy·OpenAPI
 target, OpenAPI export drift, `alembic check` clean, strict mypy·ruff·import-linter가
 통과했다. 적대적 코드 리뷰 1인은 차단/주요 이슈 없음으로 최종 판정했고, 현재 PR
-게이트 중이다.
+게이트 중이다. 첫 CI가 찾은 정적 기대 4건은 새 fixture 격리 계약을 직접 검증하도록
+보강했고 대상 회귀 5건이 통과했다.
 
 **다음 한 작업**: Map F1J-A PR #960의 CI gate를 통과·머지한다. 이어
 Docker Manager F1J-B의 dynamic ensure→PinVi exact-409→finalize receipt 및 F1J-C
