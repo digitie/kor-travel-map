@@ -10,6 +10,18 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-08-05 (5) — H42·H45 판정 완료 (KMA 전 job 전환·값 유입 개시)
+
+근본 원인 2(data.go.kr 평문 HTTP 사멸) 실측 → lib 정본 https 전환(kma#23·airkorea#6)
+→ Map 핀 #948(`70c58576`, alembic <1.19 천장 동봉) → dagster 재배포. **KMA 4종 전부
+SUCCESS 전환**, weather 값 55,755 유입·grid feature 305 생성 개시. airkorea만 upstream
+자체 504(코드 무관, 스케줄 자체 수렴 관찰). **H42 최종 수치 고정: features 731,724 =
+public = aliases, 41C 선행 조건 충족.** H42·H45 종결.
+
+**다음 한 작업**: ① **32C 값 전환 tail PR**(feature_id UUID 전환·비파생 generator·
+0080 CHECK/0079 트리거 재평가·PinVi user/admin 스냅샷 재추출 — 적대 리뷰 2),
+② H44 복원 드릴, ③ 백로그(alembic 1.19 적응·khoa 확대·coalesce·RetryBudget 튜닝).
+
 ## 2026-08-05 (4) — prod 배포 완료 + 32C checksum 게이트 통과
 
 Map `c0afaa4e`(0082·UUID backfill 100%·fence dump 선행)·PinVi `3ff54b8b`(0049,

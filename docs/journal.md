@@ -17,6 +17,41 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-08-05 (5) — H45 판정 완료: KMA 전 job SUCCESS 전환 + 근본 원인 2(평문 HTTP 사멸)
+
+- **근본 원인 2 발견 절차**: #943 배포 후에도 실패 지속 → 같은 컨테이너·같은 키
+  단건 프로브 20/20 정상과의 모순 → **scheme 대조 실측: `http://apis.data.go.kr`
+  = ReadTimeout 25s hang, `https://` = 200/0.16s** — provider lib 3계열의 기본
+  base URL이 전부 평문 http였고 data.go.kr 평문 경로가 사멸. mid만 생존(호출
+  수 소수·간헐 통과), 단건 https 프로브 정상, job 첫 격자 즉사가 전부 설명됨.
+- **정본 수정(ADR-044 경로)**: python-kma-api#23(`63e9bcda` — KmaClient/
+  DataGoKrClient https) + python-airkorea-api#6(`a206282c` — 기본 URL 5종
+  https), 각 142/122 passed. Map #948(`70c58576`) 핀 bump + **alembic <1.19
+  천장 핀 동봉**(1.19.0이 2026-08-04 당일 릴리스로 CheckConstraint naming-
+  convention 비교를 바꿔 `alembic check`가 이중 접두 diff 보고 — 1.18.5 통과/
+  1.19.0 2회 재현 실측, floating dep의 두 번째 당일 파손. 1.19 적응은 백로그).
+  dagster 2종만 재빌드·재배포(`h45b-70c58576`), 컨테이너 내
+  `kma base: https://` 실측.
+- **판정(재배포 후 첫 주기들)**: kma_weather_alerts **SUCCESS 23:15→00:15
+  연속** · kma_short_forecast **SUCCESS 23:20→00:20 연속** · ultra_short_
+  nowcast **SUCCESS 23:45** · ultra_short_forecast **SUCCESS 23:50** — **만성
+  실패 KMA 4종 전부 전환**. 실적재 실측: feature_weather_values 555 →
+  **56,310**(python-kma-api **55,755** 유입 개시), weather features 187 →
+  **305**(KMA 자체 grid feature 생성 — own-grid Phase 1 prod 실작동 개시).
+  #943의 경계 재시도는 전환 이전 구간에서 텔레메트리 실작동을 실증했고
+  간헐 장애 방어층으로 유지된다.
+- **airkorea 잔여**: https에서도 FAILURE — 단 원인이 hang이 아니라 **실응답
+  HTTP 504 `SERVICETIMEOUT_ERROR`(코드 05)** = AirKorea 백엔드 자체가
+  게이트웨이 뒤에서 죽어 있는 상태(수동 프로브에서 504→수분 후 200 회복도
+  실측 — 간헐). 재시도 분류·소진·전파가 설계대로 동작. **코드 소관 아님 —
+  upstream 회복 시 스케줄이 자체 수렴**. 관찰 항목으로만 유지.
+- **H42 최종 수치 고정(2026-08-05 00:30Z)**: features **731,724** = public
+  731,724 = aliases 731,724(1:1 불변 유지) · weather_values 56,310 ·
+  curation_items 4,910(링크 4,640) · CSV 미해석 270(구성: H31 구조 확정 103 +
+  visitkorea/khoa 스케줄 수렴 대기 — 대기분은 상시 운영 수렴). **H42 판정
+  완료 — 41C prod enable 선행 조건 충족**. H45도 판정 완료로 종결(백로그
+  ①③④는 tasks 유지, ② lib 정본 https는 이번에 완료).
+
 ## 2026-08-05 (4) — prod 배포(Map c0afaa4e·PinVi 3ff54b8b) + 32C cutover checksum 일치
 
 사용자 지시("진행")로 배포 게이트를 직접 열었다. 전 과정 실측 기록:

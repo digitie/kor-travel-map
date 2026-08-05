@@ -45,10 +45,11 @@ barrier로 직렬화한다.
     [x] `T-VN-H22B`(원자적 재분류 command — domain ledger·충돌 fail-close·빈 격리 정리) →
     [x] `T-VN-H22C`(Admin UI 패널·mocked 6건·격리 스택 파괴 검증 9흐름·live spec 저술)
   - a2 (운영 연속성 — 0072 사고·재생성 후속, 상세는 `T-VN-H42~H45` 절):
-    [~] `T-VN-H42`(재적재 수렴·live 검증 — MOIS/opinet 완주·smoke 완료.
-        잔여: CSV 미해석 290행 재import·최종 수치 고정·H45 판정 연동) →
-    [~] `T-VN-H45`(KMA/airkorea upstream 강건화 — #943 구현·리뷰 2건 GO,
-        2026-08-05 prod `c0afaa4e` 배포. 스케줄 SUCCESS 전환 판정 대기) →
+    [x] `T-VN-H42`(재적재 수렴·live 검증 — 2026-08-05 판정 완료: 최종 수치
+        features 731,724 = public = aliases, **41C 선행 조건 충족**) →
+    [x] `T-VN-H45`(upstream 강건화 — #943 재시도 + 근본 원인 2 `https` 정본
+        전환(#948)으로 **KMA 4종 전부 SUCCESS 전환**, 값 55,755 유입.
+        airkorea는 upstream 자체 504로 관찰만. 백로그는 상세 절) →
     [~] `T-VN-H43`(백업 체계 — 기준선+write-fence 기준점 dump 완료·runbook §9.
         잔여: 외부 사본·주기화·retention) →
     [ ] `T-VN-H44`(복원 리허설 드릴 정기화 — H30B 하네스 재사용, 이후 정기)
@@ -411,7 +412,8 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 > dump가 유일 복구점**이다. codex 소관 41C prod enable은 H42 판정 + docker-manager
 > 재pin 뒤(Lane B T-VN-41 절 경계 주석).
 
-- [~] T-VN-H42 — **provider 재적재 완주·수렴 검증 (+ H35 prod live 검증 잔여)**
+- [x] T-VN-H42 — **provider 재적재 완주·수렴 검증 (+ H35 prod live 검증 잔여)**
+      — **2026-08-05 판정 완료** (journal (5) — 최종 수치 고정·41C 선행 조건 충족)
 
   **41C prod consumer enable의 선행 조건**. 완료 실측(2026-08-05): MOIS 702,955
   3중 일치(source=links=features)·opinet 934(용인·수원 bbox — 전국 bbox quota 소진
@@ -421,26 +423,31 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   - [x] 잔여 provider 로드 — MOIS bulk(dedup 룰 검증 후)·opinet bbox 완주.
     KMA/airkorea 축은 H45 판정으로 연동, khoa 등 잔여 transport 실패군은 스케줄
     수렴 감시 지속.
-  - [ ] CSV 미해석 290행 재import(**authoritative replace**)로 링크 수렴 — 대상
-    feature 적재 후에만 해석되므로 MOIS 완주된 지금 실행 가능.
-    `curated_features_refresh` 재확인 포함.
-  - [~] 공개 표면 **최종 수치 고정** — live smoke는 완료(2026-08-05), 수치 고정은
-    CSV 재import·H45 판정 뒤 docs closure와 함께.
+  - [x] CSV 재import(authoritative replace) — 486행 재통과, 미해석 290→270
+    (구성: H31 구조 확정 103 + visitkorea/khoa 스케줄 수렴 대기 — 상시 운영).
+  - [x] 공개 표면 **최종 수치 고정**(2026-08-05 00:30Z): features 731,724 =
+    public = aliases · weather_values 56,310 · curation 4,910/링크 4,640.
 
-- [~] T-VN-H45 — **KMA/airkorea 대량 순차 upstream 호출 강건화 (#943)**
+- [x] T-VN-H45 — **KMA/airkorea 대량 순차 upstream 호출 강건화 (#943 + #948)**
+      — **2026-08-05 판정 완료**: 근본 원인 2(data.go.kr 평문 HTTP 사멸) 실측 후
+      lib 정본 https 전환(kma#23·airkorea#6)+핀 bump(#948)로 KMA 4종 전부
+      SUCCESS 전환·값 55,755 유입. airkorea는 upstream 자체 504(관찰만).
 
   만성 실패 근본 원인(간헐 오류율 × N격자 all-or-nothing × step 전량 재시도 =
   시도당 생존확률 p^N 붕괴)을 단건 호출 경계 유한 재시도로 수정. 산식·정산·판정
   기준 정본은 `docs/etl/kma-weather-etl.md` §8.1. 적대 리뷰 2건 GO(반영 내역은
   journal 2026-08-05 (2)(3)). 2026-08-05 prod `c0afaa4e` 배포 완료.
 
-  - [ ] **판정**: 배포 후 KMA 4종+airkorea 스케줄 SUCCESS 전환(재시도 warning
-    로그로 "재시도가 살렸다/upstream 회복" 구분). 음성 시 다음 수 순서는 §8.1.
-  - [ ] 백로그: ① khoa 등 다건 루프 fetcher 확대(배포 후 실측 보고 결정),
-    ② python-kma-api 정본 수정 PR(resultCode 22 quota `retryable=True` 오분류 +
-    200-body XML envelope parse 경로), ③ RetryBudget 비례화/settings 노출 +
-    `_LOGGER`의 `python_logs` 결선, ④ KMA 4종+airkorea schedule
-    `coalesce_active_runs=True`(krex notice 선례).
+  - [x] **판정**(2026-08-05): KMA 4종 SUCCESS 전환(23:15~00:25 연속 실측) —
+    journal (5). airkorea는 실응답 504 `SERVICETIMEOUT_ERROR`(upstream 백엔드
+    자체 열화 — 재시도 분류·소진·전파 설계대로 동작, 코드 무관·관찰만).
+  - [ ] 백로그: ① khoa 등 다건 루프 fetcher 확대(실측 보고 결정 — khoa도
+    http 기본 여부 우선 확인), ② python-kma-api resultCode 22 quota
+    `retryable=True` 오분류 + 200-body XML envelope parse 경로(https 전환은
+    #23으로 완료), ③ RetryBudget 비례화/settings 노출 + `_LOGGER` `python_logs`
+    결선, ④ KMA 4종+airkorea schedule `coalesce_active_runs=True`,
+    ⑤ **alembic 1.19 적응**(CheckConstraint naming-convention 비교 변경 —
+    천장 핀 `<1.19` 해제 조건, #948 동봉 커밋 참조).
 
 - [~] T-VN-H43 — **prod 백업 체계 수립 (정기 dump·sha256·보존·rollback 기준선)**
 
