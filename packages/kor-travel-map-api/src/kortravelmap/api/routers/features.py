@@ -22,7 +22,7 @@ ADR 참조
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from time import perf_counter
 from typing import Annotated, Any, Literal, assert_never
@@ -788,9 +788,17 @@ def _detail_from_row(row: dict[str, Any]) -> FeatureDetailResponse:
     )
 
 
-def _batch_item_from_row(row: feature_repo.FeatureBatchItemRow) -> FeatureBatchItem:
+def _batch_item_from_row(
+    row: feature_repo.FeatureBatchItemRow,
+    *,
+    echo_feature_id: str | None = None,
+) -> FeatureBatchItem:
+    # T-VN-32C — batch item feature_id는 **요청 표기 echo**다. 조회는 경계
+    # 해석된 legacy 키로 하되, 응답 키는 소비자(PinVi)가 보낸 문자열을
+    # 그대로 되돌린다(identity_projection 모듈 docstring의 echo 예외).
+    feature_id = echo_feature_id if echo_feature_id is not None else row.feature_id
     if row.state == "missing":
-        return FeatureBatchMissingItem(state="missing", feature_id=row.feature_id)
+        return FeatureBatchMissingItem(state="missing", feature_id=feature_id)
     if row.row_revision is None:
         raise RuntimeError(f"{row.state} batch item has no row_revision")
     if row.state == "found":
@@ -798,7 +806,7 @@ def _batch_item_from_row(row: feature_repo.FeatureBatchItemRow) -> FeatureBatchI
             raise RuntimeError("found batch item has no trip_card")
         return FeatureBatchFoundItem(
             state="found",
-            feature_id=row.feature_id,
+            feature_id=feature_id,
             feature_uuid=row.feature_uuid,
             row_revision=row.row_revision,
             trip_card=FeatureTripCard.model_validate(row.trip_card),
@@ -806,21 +814,21 @@ def _batch_item_from_row(row: feature_repo.FeatureBatchItemRow) -> FeatureBatchI
     if row.state == "retired":
         return FeatureBatchRetiredItem(
             state="retired",
-            feature_id=row.feature_id,
+            feature_id=feature_id,
             feature_uuid=row.feature_uuid,
             row_revision=row.row_revision,
         )
     if row.state == "suppressed":
         return FeatureBatchSuppressedItem(
             state="suppressed",
-            feature_id=row.feature_id,
+            feature_id=feature_id,
             feature_uuid=row.feature_uuid,
             row_revision=row.row_revision,
         )
     if row.state == "unchanged":
         return FeatureBatchUnchangedItem(
             state="unchanged",
-            feature_id=row.feature_id,
+            feature_id=feature_id,
             feature_uuid=row.feature_uuid,
             row_revision=row.row_revision,
         )
@@ -1767,27 +1775,31 @@ class WeatherBatchResponse(BaseModel):
 def _weather_batch_item_out(
     item: weather_repo.WeatherBatchItem,
     feature_uuid_map: Mapping[str, str],
+    *,
+    echo_feature_id: str | None = None,
 ) -> WeatherBatchItemOut:
+    # T-VN-32C — item feature_id는 요청 표기 echo (조회는 해석된 legacy 키).
+    feature_id = echo_feature_id if echo_feature_id is not None else item.feature_id
     feature_uuid = feature_uuid_map.get(item.feature_id)
     if item.state == "found":
         if item.card_key is None:
             raise RuntimeError("found weather batch item has no card key")
         return WeatherBatchFoundItem(
             state="found",
-            feature_id=item.feature_id,
+            feature_id=feature_id,
             feature_uuid=feature_uuid,
             card_key=item.card_key,
         )
     if item.state == "no_data":
         return WeatherBatchNoDataItem(
             state="no_data",
-            feature_id=item.feature_id,
+            feature_id=feature_id,
             feature_uuid=feature_uuid,
         )
     if item.state == "retired":
         return WeatherBatchRetiredItem(
             state="retired",
-            feature_id=item.feature_id,
+            feature_id=feature_id,
             feature_uuid=feature_uuid,
         )
     assert_never(item.state)
@@ -1908,13 +1920,31 @@ async def get_feature_weather_batch(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> WeatherBatchResponse:
     started_at = perf_counter()
+    # T-VN-32C PR-2 — target feature 참조를 경계 해석해 legacy 키로 조회하되
+    # (미해석 참조는 정당한 no_data/retired 계열), 응답 item feature_id는
+    # 요청 표기 echo를 유지한다. 같은 target 안에서 서로 다른 표기가 같은
+    # feature로 해석되면 조회는 1회, echo는 표기별로 낸다.
+    all_refs = [ref for target in body.targets for ref in target.feature_ids]
+    try:
+        resolved_refs = await feature_identity.resolve_feature_identities_bulk(
+            session, all_refs
+        )
+    except feature_identity.FeatureIdentityRefError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    def _lookup_id(ref: str) -> str:
+        identity = resolved_refs.get(ref)
+        return identity.feature_id if identity is not None else ref
+
     try:
         snapshots = await weather_repo.get_weather_batch_snapshots(
             session,
             targets=tuple(
                 weather_repo.WeatherBatchTarget(
                     target_at=target.target_at,
-                    feature_ids=tuple(target.feature_ids),
+                    feature_ids=tuple(
+                        dict.fromkeys(_lookup_id(ref) for ref in target.feature_ids)
+                    ),
                 )
                 for target in body.targets
             ),
@@ -1930,6 +1960,22 @@ async def get_feature_weather_batch(
     feature_uuid_map = await feature_identity.get_feature_uuid_map(
         session, item_feature_ids
     )
+
+    def _target_items_out(
+        snapshot: weather_repo.WeatherBatchSnapshot,
+        requested: Sequence[str],
+    ) -> list[WeatherBatchItemOut]:
+        by_id = {item.feature_id: item for item in snapshot.items}
+        items_out: list[WeatherBatchItemOut] = []
+        for ref in requested:
+            item = by_id.get(_lookup_id(ref))
+            if item is None:
+                raise RuntimeError("weather batch snapshot이 요청 target을 누락했습니다")
+            items_out.append(
+                _weather_batch_item_out(item, feature_uuid_map, echo_feature_id=ref)
+            )
+        return items_out
+
     return WeatherBatchResponse(
         data=WeatherBatchData(
             known_at=body.known_at,
@@ -1938,13 +1984,10 @@ async def get_feature_weather_batch(
                     target_at=snapshot.target_at,
                     timeline_until=snapshot.target_at
                     + timedelta(days=weather_repo.WEATHER_BATCH_TIMELINE_DAYS),
-                    items=[
-                        _weather_batch_item_out(item, feature_uuid_map)
-                        for item in snapshot.items
-                    ],
+                    items=_target_items_out(snapshot, target.feature_ids),
                     cards=[_weather_batch_card_out(card) for card in snapshot.cards],
                 )
-                for snapshot in snapshots
+                for snapshot, target in zip(snapshots, body.targets, strict=True)
             ],
         ),
         meta=make_meta(request, started_at=started_at),
@@ -2149,10 +2192,26 @@ async def get_features_batch(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> FeatureBatchResponse:
     started_at = perf_counter()
+    # T-VN-32C PR-2 — 값 전환 후 소비자(PinVi)가 UUID 참조를 보낸다. 경계
+    # 해석으로 legacy 키 조회를 보장하되(미해석 참조는 정당한 missing),
+    # 응답 item feature_id는 요청 표기 echo를 유지한다.
+    refs = [item.feature_id for item in body.items]
+    try:
+        resolved = await feature_identity.resolve_feature_identities_bulk(session, refs)
+    except feature_identity.FeatureIdentityRefError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     try:
         rows = await feature_repo.get_service_feature_batch_items(
             session,
-            tuple((item.feature_id, item.known_row_revision) for item in body.items),
+            tuple(
+                (
+                    resolved[item.feature_id].feature_id
+                    if item.feature_id in resolved
+                    else item.feature_id,
+                    item.known_row_revision,
+                )
+                for item in body.items
+            ),
         )
     except SQLAlchemyError as exc:
         raise HTTPException(
@@ -2164,6 +2223,11 @@ async def get_features_batch(
             },
         ) from exc
     return FeatureBatchResponse(
-        data=FeatureBatchData(items=[_batch_item_from_row(row) for row in rows]),
+        data=FeatureBatchData(
+            items=[
+                _batch_item_from_row(row, echo_feature_id=ref)
+                for row, ref in zip(rows, refs, strict=True)
+            ]
+        ),
         meta=make_meta(request, started_at=started_at),
     )

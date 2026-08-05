@@ -60,6 +60,7 @@ __all__ = [
     "verify_feature_uuid",
     "resolve_feature_identity",
     "resolve_feature_identities_bulk",
+    "legacy_id_for_filter",
     "get_feature_uuid_map",
     "count_features_missing_identity",
 ]
@@ -433,6 +434,24 @@ async def resolve_feature_identities_bulk(
                 feature_uuid=str(row["feature_uuid"]),
             )
     return resolved
+
+
+async def legacy_id_for_filter(session: AsyncSession, ref: str | None) -> str | None:
+    """조회 필터 값의 UUID 표기를 legacy 정본 키로 정규화한다 (T-VN-32C PR-2).
+
+    운영자가 응답에서 복사한 UUID를 필터/검색어로 붙여넣는 경로용. canonical
+    UUID 형태가 아니면 원문 그대로(추가 왕복 없음), UUID 형태인데 해석
+    miss거나 형식 계약 위반이면 역시 원문 유지 — 필터의 "결과 없음" 계약은
+    존재하지 않는 legacy id와 동일하게 동작해야 한다(fail-open이 아니라
+    동등 semantics).
+    """
+    if ref is None or _parse_canonical_uuid(ref) is None:
+        return ref
+    try:
+        identity = await resolve_feature_identity(session, ref)
+    except FeatureIdentityRefError:
+        return ref
+    return identity.feature_id if identity is not None else ref
 
 
 async def count_features_missing_identity(

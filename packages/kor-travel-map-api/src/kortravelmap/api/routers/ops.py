@@ -7,6 +7,7 @@ from time import perf_counter
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from kortravelmap.infra import feature_identity
 from kortravelmap.infra.ops_repo import (
     OpsConsistencyReport,
     OpsIntegrityIssue,
@@ -415,7 +416,8 @@ async def list_integrity_issues(
             violation_type=violation_type,
             provider=provider,
             dataset_key=dataset_key,
-            feature_id=feature_id,
+            # T-VN-32C PR-2 — UUID 표기 필터를 legacy 정본 키로 정규화 (S7).
+            feature_id=await feature_identity.legacy_id_for_filter(session, feature_id),
             limit=page_size,
             cursor=cursor,
         )
