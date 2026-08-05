@@ -1858,6 +1858,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/ops/contract-fixtures/c6c-cancel-probe/{transaction_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** C6c cancel-probe fixture durable receipt 조회 */
+        get: operations["get_c6c_cancel_probe_v1_ops_contract_fixtures_c6c_cancel_probe__transaction_id__get"];
+        /** C6c cancel-probe fixture 멱등 ensure */
+        put: operations["ensure_c6c_cancel_probe_v1_ops_contract_fixtures_c6c_cancel_probe__transaction_id__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ops/contract-fixtures/c6c-cancel-probe/{transaction_id}/finalize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** C6c cancel-probe fixture finalization */
+        post: operations["finalize_c6c_cancel_probe_v1_ops_contract_fixtures_c6c_cancel_probe__transaction_id__finalize_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/ops/datasets": {
         parameters: {
             query?: never;
@@ -4599,6 +4634,61 @@ export interface components {
              * @description 행별 source provenance JSON sidecar
              */
             provenance_file?: string | null;
+        };
+        /** C6cCancelProbeFixtureData */
+        C6cCancelProbeFixtureData: {
+            fixture: components["schemas"]["C6cCancelProbeFixtureRecord"];
+        };
+        /** C6cCancelProbeFixtureFinalizeRequest */
+        C6cCancelProbeFixtureFinalizeRequest: {
+            /**
+             * Cancellation Id
+             * Format: uuid
+             */
+            cancellation_id: string;
+        };
+        /**
+         * C6cCancelProbeFixtureRecord
+         * @description Manager가 crash 재개에 사용하는 secret-free durable fixture receipt.
+         */
+        C6cCancelProbeFixtureRecord: {
+            /** Cancellation Id */
+            cancellation_id: string | null;
+            /**
+             * Capability Generation
+             * @default 1
+             * @constant
+             */
+            capability_generation: 1;
+            /** Consumed At */
+            consumed_at: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Finalized At */
+            finalized_at: string | null;
+            /**
+             * Job Id
+             * Format: uuid
+             */
+            job_id: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "armed" | "consumed" | "finalized";
+            /**
+             * Transaction Id
+             * Format: uuid
+             */
+            transaction_id: string;
+        };
+        /** C6cCancelProbeFixtureResponse */
+        C6cCancelProbeFixtureResponse: {
+            data: components["schemas"]["C6cCancelProbeFixtureData"];
+            meta: components["schemas"]["Meta"];
         };
         /**
          * CacheTargetAckRecord
@@ -19397,6 +19487,220 @@ export interface operations {
                 };
             };
             /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_c6c_cancel_probe_v1_ops_contract_fixtures_c6c_cancel_probe__transaction_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description C6c contract fixture service principal은 exact fixture route에서 `ops:fixture`가 필수다. scope 문자열만으로는 권한이 되지 않는다. */
+                "X-Kor-Travel-Map-Ops-Scope"?: string | null;
+            };
+            path: {
+                transaction_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["C6cCancelProbeFixtureResponse"];
+                };
+            };
+            /** @description X-Kor-Travel-Map-Ops-Token 누락 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description token 불일치 또는 token에 결박되지 않은 scope/method/exact path 요청 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description fixture does not exist */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description X-Kor-Travel-Map-Ops-Scope 누락 또는 알 수 없는 scope */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    ensure_c6c_cancel_probe_v1_ops_contract_fixtures_c6c_cancel_probe__transaction_id__put: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description C6c contract fixture service principal은 exact fixture route에서 `ops:fixture`가 필수다. scope 문자열만으로는 권한이 되지 않는다. */
+                "X-Kor-Travel-Map-Ops-Scope"?: string | null;
+            };
+            path: {
+                transaction_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["C6cCancelProbeFixtureResponse"];
+                };
+            };
+            /** @description X-Kor-Travel-Map-Ops-Token 누락 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description token 불일치 또는 token에 결박되지 않은 scope/method/exact path 요청 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description fixture lifecycle conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description X-Kor-Travel-Map-Ops-Scope 누락 또는 알 수 없는 scope */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    finalize_c6c_cancel_probe_v1_ops_contract_fixtures_c6c_cancel_probe__transaction_id__finalize_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description C6c contract fixture service principal은 exact fixture route에서 `ops:fixture`가 필수다. scope 문자열만으로는 권한이 되지 않는다. */
+                "X-Kor-Travel-Map-Ops-Scope"?: string | null;
+            };
+            path: {
+                transaction_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["C6cCancelProbeFixtureFinalizeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["C6cCancelProbeFixtureResponse"];
+                };
+            };
+            /** @description X-Kor-Travel-Map-Ops-Token 누락 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description token 불일치 또는 token에 결박되지 않은 scope/method/exact path 요청 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description fixture state/cancellation conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description X-Kor-Travel-Map-Ops-Scope 누락 또는 알 수 없는 scope */
             422: {
                 headers: {
                     [name: string]: unknown;

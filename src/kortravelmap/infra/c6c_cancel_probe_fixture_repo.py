@@ -29,7 +29,7 @@ __all__ = [
     "mark_c6c_cancel_probe_consumed",
 ]
 
-C6C_CANCEL_PROBE_CAPABILITY_GENERATION: Final[int] = 1
+C6C_CANCEL_PROBE_CAPABILITY_GENERATION: Final[Literal[1]] = 1
 C6cCancelProbeFixtureState = Literal["armed", "consumed", "finalized"]
 
 
