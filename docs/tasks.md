@@ -623,12 +623,20 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   Map api 0083 적용 → dagster·daemon), 사후 검증 정상(`derivation_enforced:
   false`, 731,733) — journal 2026-08-05 (7)·dm#128.
 
-  **잔여(rollout 순서)**: **PR-2 — Map 응답 `feature_id` 값 UUID 전환**(read
-  표면 단일 원자 릴리스: projection dual-select·깔때기 치환·write 수신 UUID
-  해석·admin fast-path·curated 재물질화·e2e fixture 재생성) + PinVi vendored
-  snapshot user/admin-detail/service 재추출+핀 갱신 + 유예 동봉분(PinVi CLI
+  **PR-2 머지(2026-08-05, #952 `8c5bdcf8`)**: 응답 `feature_id` 값 UUID 전환
+  코드 완결 — 전 read 표면 치환(cursor legacy 축·echo 예외 보존, ADR-083
+  §5-6), write/scope 경계 해석 전수(W1-W8·S1-S13 + bulk 해석기), admin UUID
+  fast-path, curated snapshot 빌더 UUID화, h35 CLI pre-uuid 스키마 변형
+  (역사 표면 보존). 적대 리뷰 2인 GO(trip_card echo 등식·scope 해석
+  트랜잭션 배치 등 H 2건 반영), CI 8/8.
+
+  **잔여(rollout 순서)**: ① **H30B 재검증(배포 게이트)** → ② PR-2 배포
+  (api→dagster→ui 원자, ui는 types 재빌드 필수) → ③ curated snapshot asset
+  1런(etag churn 1회 계획 비용) → ④ live e2e fixture 재생성(새 표면 기준) →
+  ⑤ PinVi user 스냅샷 재고정 PR + 유예 동봉(PinVi CLI
   `--accept-uuid-literals`+runner 출력, `derivation_enforced` cutover 사전
-  검사 배선, dagster entrypoint 기계 인터록, alias golden staleness는 완료).
+  검사 배선, dagster entrypoint 기계 인터록). 관측: 32B 기간 저장 UUID 표기
+  scope 레코드 잔존(재실행 조용한 no-op — 리뷰 L4).
   legacy ID·FK 체인 물리 제거는 T-VN-39 removal manifest.
   **운영 점검(상시)**: 0079/0081 트리거 보장은 trigger-respecting 세션
   한정이다 — `session_replication_role=replica`(superuser)는 우회 가능하므로

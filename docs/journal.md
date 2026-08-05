@@ -17,6 +17,29 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-08-05 (9) — T-VN-32C PR-2 머지 (#952) — 값 전환 코드 완결
+
+- **머지** `8c5bdcf8` (CI 8/8, 적대 리뷰 2인 GO). 리뷰 라운드 요약:
+  R1(응답 계약) F1(H) trip_card.feature_id ↔ item echo 등식 정렬(PinVi 런타임
+  강제 등식 — 자체 테스트가 파열 조합을 정답으로 고정했던 사각), F2 대문자
+  UUID fast-path, F3 dedup refresh cursor 정규화, F4-F7 문서/주석. R2(write·
+  운영) H1(블로커) scope 해석의 라우터 선실행이 autobegin으로
+  `session.begin()` 충돌 → 전건 500(실세션 라우트 테스트 부재로 은폐) —
+  해석을 서비스 트랜잭션 안(lock 직후·fingerprint 전)으로 이동 + 실세션
+  회귀 테스트, M1 batch 형식 위반의 per-item 격리 복원, M2 해석-후-
+  fingerprint 명시 결정.
+- **CI 실결함 2건**(로컬 배터리가 은폐): h35 rehearsal의 0063 고정 스키마에서
+  PR-2 추가 `f.feature_uuid` UndefinedColumnError — 로컬은 network-free
+  가드가 sibling-DB 연결을 먼저 차단해 "환경 산물"로 오판됐던 진짜 결함.
+  matcher·mark-removals SQL을 pre-uuid 변형으로 분리(`pre_uuid_schema`
+  파라미터, h35 CLI만 True — ADR-075 역사 표면 보존) + 변형 핀 unit 테스트.
+  교훈: **가드가 먼저 끊는 실패는 그 뒤의 실결함을 은폐한다** — CI 토폴로지
+  실행이 정본.
+- **배포는 아직**: 게이트 = H30B 재검증 선행 → api → dagster → ui(types
+  재빌드 필수) → curated snapshot asset 1런(etag churn 1회) → live e2e
+  fixture 재생성 → PinVi user 스냅샷 재고정 PR(+유예 ②·NEW-3·NEW-5).
+  관측 항목: 32B 기간 저장된 UUID 표기 scope 레코드 잔존(R2 L4).
+
 ## 2026-08-05 (8) — T-VN-32C PR-2: 응답 feature_id 값 UUID 전환 구현 (read 단일 원자 릴리스)
 
 - **치환 코어**: `api/identity_projection.py`(response_feature_id/
