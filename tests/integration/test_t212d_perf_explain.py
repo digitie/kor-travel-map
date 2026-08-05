@@ -792,6 +792,37 @@ async def test_t212d_ops_and_review_lists_use_expected_indexes(
     )
     _assert_uses_index(admin_features_by_id, *_FEATURES_PK_ACCESS)
 
+    # T-VN-32C (R5) — canonical UUID 검색어는 ``uq_features_feature_uuid`` 인덱스
+    # 등가 fast-path를 탄다. 값 전환 후 운영자가 응답 feature_id(UUID)를 그대로
+    # 검색하므로, 이 분기가 빠지면 #639가 고친 ILIKE 풀스캔(14~60s)이 회귀한다.
+    admin_features_by_uuid = await _explain_json(
+        migrated_session,
+        admin_feature_repo._admin_features_sql(
+            sort="updated_at", order="desc", exact_uuid=True
+        ),
+        {
+            "kinds": None,
+            "categories": None,
+            "statuses": None,
+            "providers": None,
+            "dataset_keys": None,
+            "issue_types": None,
+            "has_coord": None,
+            "updated_from": None,
+            "updated_to": None,
+            "q_like": None,
+            "q_exact_uuid": "00000000-0000-7000-8000-000000000001",
+            "has_issue": None,
+            "include_ended": True,
+            "cursor_feature_id": None,
+            "cursor_text": None,
+            "cursor_dt": None,
+            "cursor_int": None,
+            "limit_plus_one": 51,
+        },
+    )
+    _assert_uses_index(admin_features_by_uuid, "uq_features_feature_uuid")
+
     jobs = await _explain_json(
         migrated_session,
         ops_repo._LIST_IMPORT_JOBS_SQL,

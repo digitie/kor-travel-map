@@ -97,12 +97,16 @@ def test_mois_detail_404_when_missing(
 def test_mois_detail_returns_and_caches(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from kortravelmap.core.ids import feature_uuid_from_legacy
+
     from kortravelmap.api.db import get_session
     from kortravelmap.api.routers import mois_detail as mod
 
     calls: list[str] = []
+    f_x_uuid = str(feature_uuid_from_legacy("f_x"))
     detail = {
         "feature_id": "f_x",
+        "feature_uuid": f_x_uuid,
         "name": "한식당 가나다",
         "category": "02010100",
         "status": "active",
@@ -128,8 +132,10 @@ def test_mois_detail_returns_and_caches(
         r1 = client.get(f"/v1/debug/mois-license/{lid}")
         assert r1.status_code == 200
         body = r1.json()
+        # T-VN-32C — license_id는 path 참조 echo(요청 표기 보존), feature_id는
+        # 응답 feature 참조라 UUID 정본.
         assert body["data"]["license_id"] == lid
-        assert body["data"]["feature_id"] == "f_x"
+        assert body["data"]["feature_id"] == f_x_uuid
         assert body["data"]["raw"]["BPLC_NM"] == "한식당 가나다"
         assert body["data"]["cached"] is False
 
@@ -146,12 +152,16 @@ def test_mois_detail_returns_and_caches(
 def test_mois_detail_falls_back_to_bulk_source_record(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from kortravelmap.core.ids import feature_uuid_from_legacy
+
     from kortravelmap.api.db import get_session
     from kortravelmap.api.routers import mois_detail as mod
 
     calls: list[str] = []
+    f_x_uuid = str(feature_uuid_from_legacy("f_x"))
     detail = {
         "feature_id": "f_x",
+        "feature_uuid": f_x_uuid,
         "name": "한식당 가나다",
         "category": "02010100",
         "status": "active",
@@ -177,7 +187,8 @@ def test_mois_detail_falls_back_to_bulk_source_record(
     try:
         r = client.get("/v1/debug/mois-license/general_restaurants::A1")
         assert r.status_code == 200
-        assert r.json()["data"]["feature_id"] == "f_x"
+        # T-VN-32C 값 전환 — 응답 feature_id 값은 UUID 정본.
+        assert r.json()["data"]["feature_id"] == f_x_uuid
         assert calls == [
             "mois_license_detail",
             "mois_license_features_bulk",

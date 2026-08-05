@@ -98,10 +98,18 @@ def client(
     )
 
 
+def _expected_uuid(feature_id: str) -> str:
+    """결정적 mock uuid — 테스트 편의 규약이지 저장 계약(0083 비파생 v7)이 아니다."""
+    from kortravelmap.core.ids import feature_uuid_from_legacy
+
+    return str(feature_uuid_from_legacy(feature_id))
+
+
 def _feature_row() -> AdminFeatureRow:
     now = datetime(2026, 6, 3, tzinfo=UTC)
     return AdminFeatureRow(
         feature_id="feature-1",
+        feature_uuid=_expected_uuid("feature-1"),
         kind="place",
         name="광화문",
         category="01070300",
@@ -130,6 +138,7 @@ def _feature_detail() -> AdminFeatureDetail:
     now = datetime(2026, 6, 3, tzinfo=UTC)
     feature = AdminFeatureDetailFeature(
         feature_id="feature-1",
+        feature_uuid=_expected_uuid("feature-1"),
         kind="place",
         name="광화문",
         category="01070300",
@@ -334,6 +343,7 @@ def test_admin_in_bounds_passes_nonpublic_status_to_items_and_clusters(
         return [
             {
                 "feature_id": "inactive-1",
+                "feature_uuid": _expected_uuid("inactive-1"),
                 "kind": "place",
                 "name": "비공개 운영 대상",
                 "category": "01070300",
@@ -373,6 +383,11 @@ def test_admin_in_bounds_passes_nonpublic_status_to_items_and_clusters(
         },
     )
     assert item_response.status_code == 200
+    # T-VN-32C 값 전환 — 지도 item의 feature_id 값은 stub row의 UUID 정본.
+    assert (
+        item_response.json()["data"]["items"][0]["feature_id"]
+        == _expected_uuid("inactive-1")
+    )
     assert item_response.json()["data"]["items"][0]["status"] == "inactive"
     assert item_response.json()["data"]["clusters"] == []
 
@@ -438,9 +453,11 @@ def test_admin_weather_and_price_cards_accept_nonpublic_feature(
     deleted_price = client.get("/v1/admin/features/deleted-1/price")
 
     assert weather.status_code == 200
-    assert weather.json()["data"]["feature_id"] == "hidden-1"
+    # T-VN-32C 값 전환 — 단건 card 응답의 feature_id는 UUID 정본
+    # (repo 조회는 위 kwargs assert대로 legacy 축).
+    assert weather.json()["data"]["feature_id"] == _expected_uuid("hidden-1")
     assert price.status_code == 200
-    assert price.json()["data"]["feature_id"] == "hidden-1"
+    assert price.json()["data"]["feature_id"] == _expected_uuid("hidden-1")
     assert deleted_weather.status_code == 404
     assert deleted_price.status_code == 404
 
@@ -478,7 +495,10 @@ def test_list_admin_features_passes_filters(
 
     assert response.status_code == 200
     body = response.json()
-    assert body["data"]["items"][0]["feature_id"] == "feature-1"
+    # T-VN-32C 값 전환 — 응답 feature_id 값은 stub row의 UUID 정본이고,
+    # next_cursor는 repo가 치환 전 legacy 축으로 encode한 값 그대로다.
+    assert body["data"]["items"][0]["feature_id"] == _expected_uuid("feature-1")
+    assert body["data"]["items"][0]["feature_uuid"] == _expected_uuid("feature-1")
     assert body["data"]["items"][0]["issues"][0]["issue_id"] == "issue-1"
     assert body["meta"]["page"] == {
         "page_size": 25,
@@ -545,7 +565,9 @@ def test_get_admin_feature_detail_returns_linked_operational_data(
     assert response.status_code == 200
     assert "ETag" not in response.headers
     body = response.json()
-    assert body["data"]["feature"]["feature_id"] == "feature-1"
+    # T-VN-32C 값 전환 — feature record의 feature_id 값은 UUID 정본.
+    assert body["data"]["feature"]["feature_id"] == _expected_uuid("feature-1")
+    assert body["data"]["feature"]["feature_uuid"] == _expected_uuid("feature-1")
     assert body["data"]["feature"]["row_revision"] == 7
     assert body["data"]["feature"]["raw_refs"] == [{"source": "fixture"}]
     assert body["data"]["sources"][0]["source_entity_key"] == "se-feature-1"
@@ -612,7 +634,8 @@ def test_get_admin_feature_detail_accepts_uuid_ref(
 
     assert response.status_code == 200
     assert requested_ids == ["feature-1"]
-    assert response.json()["data"]["feature"]["feature_id"] == "feature-1"
+    # T-VN-32C 값 전환 — 응답 feature_id 값은 UUID 정본.
+    assert response.json()["data"]["feature"]["feature_id"] == uuid_ref
 
 
 @pytest.mark.unit
@@ -726,6 +749,24 @@ def test_create_feature_request_uses_review_required_by_default(
     assert body["data"]["request"]["status"] == "pending"
     assert body["data"]["request"]["review_mode"] == "require_review"
     assert session.begin_count == 1
+
+    # T-VN-32C 회귀 (W1) — 응답에서 복사한 UUID 형식 feature_id를 신규 legacy
+    # id로 지정하는 요청은 422 fail-close다 (유령 행 각인 차단, DB 도달 전).
+    uuid_body = client.post(
+        "/v1/admin/features",
+        json={
+            "feature_id": _expected_uuid("ghost"),
+            "kind": "place",
+            "name": "사용자 장소",
+            "category": "01070300",
+            "coord": {"lon": 126.98, "lat": 37.57},
+            "marker_icon": "map-pin",
+            "marker_color": "P-01",
+            "reason": "사용자 제보",
+        },
+    )
+    assert uuid_body.status_code == 422
+    assert "UUID" in uuid_body.json()["detail"]
 
 
 @pytest.mark.unit

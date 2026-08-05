@@ -272,14 +272,27 @@ def test_list_features_maps_bbox_rows(client: TestClient, monkeypatch: pytest.Mo
             "marker_color": "P-03",
             "status": "active",
             "price_summary": None,
-        }
+        },
+        {
+            "feature_id": "f2",
+            "feature_uuid": _expected_uuid("f2"),
+            "kind": "place",
+            "name": "장소2",
+            "category": "01010100",
+            "lon": 126.98,
+            "lat": 37.57,
+            "marker_icon": "star",
+            "marker_color": "P-03",
+            "status": "active",
+            "price_summary": None,
+        },
     ]
 
     async def _bbox(_session: Any, **_kw: Any) -> list[dict[str, Any]]:
-        assert _kw["limit"] == 101
+        assert _kw["limit"] in (101, 2)
         assert _kw["cursor"] is None
         assert _kw["price_stale_hide_days"] is None
-        return rows
+        return rows[:1] if _kw["limit"] == 101 else rows
 
     monkeypatch.setattr(features_mod.feature_repo, "features_in_bbox", _bbox)
 
@@ -300,8 +313,9 @@ def test_list_features_maps_bbox_rows(client: TestClient, monkeypatch: pytest.Mo
         )
         assert r.status_code == 200
         body = r.json()
-        assert body["data"]["items"][0]["feature_id"] == "f1"
-        # T-VN-32B additive — repo row의 UUID 정본이 응답에 병행 노출된다.
+        # T-VN-32C 값 전환 — 응답 feature_id 값은 stub row의 UUID 정본이다.
+        assert body["data"]["items"][0]["feature_id"] == _expected_uuid("f1")
+        # feature_uuid는 같은 값의 명시 필드로 병행 노출된다.
         assert body["data"]["items"][0]["feature_uuid"] == _expected_uuid("f1")
         assert body["data"]["items"][0]["lon"] == 126.97
         assert body["data"]["items"][0]["price_summary"] is None
@@ -310,6 +324,26 @@ def test_list_features_maps_bbox_rows(client: TestClient, monkeypatch: pytest.Mo
             "next_cursor": None,
             "total": None,
         }
+
+        # T-VN-32C 회귀 — 같은 응답에서 feature_id는 UUID 정본으로 치환되지만
+        # next_cursor는 치환 **전** row의 legacy 축(keyset 술어와 동일)이다.
+        paged = client.get(
+            "/v1/features",
+            params={
+                "min_lon": 126,
+                "min_lat": 37,
+                "max_lon": 127,
+                "max_lat": 38,
+                "kind": ["place"],
+                "page_size": 1,
+            },
+        )
+        assert paged.status_code == 200
+        paged_body = paged.json()
+        assert paged_body["data"]["items"][0]["feature_id"] == _expected_uuid("f1")
+        assert paged_body["meta"]["page"]["next_cursor"] == (
+            features_mod.feature_repo.encode_bbox_cursor("f1")
+        )
     finally:
         client.app.dependency_overrides.clear()
 
@@ -324,6 +358,7 @@ def test_list_features_include_geometry_maps_route_area_rows(
     rows = [
         {
             "feature_id": "route1",
+            "feature_uuid": _expected_uuid("route1"),
             "kind": "route",
             "name": "탐방로",
             "category": "02000000",
@@ -340,6 +375,7 @@ def test_list_features_include_geometry_maps_route_area_rows(
         },
         {
             "feature_id": "area1",
+            "feature_uuid": _expected_uuid("area1"),
             "kind": "area",
             "name": "국립공원",
             "category": "03000000",
@@ -408,6 +444,7 @@ def test_list_features_default_omits_geometry(
     rows = [
         {
             "feature_id": "f1",
+            "feature_uuid": _expected_uuid("f1"),
             "kind": "place",
             "name": "장소",
             "category": "01010100",
@@ -459,6 +496,7 @@ def test_list_public_features_in_bounds_include_geometry(
     rows = [
         {
             "feature_id": "route1",
+            "feature_uuid": _expected_uuid("route1"),
             "kind": "route",
             "name": "탐방로",
             "category": "02000000",
@@ -516,6 +554,7 @@ def test_list_public_features_in_bounds_uses_envelope(
     rows = [
         {
             "feature_id": "f1",
+            "feature_uuid": _expected_uuid("f1"),
             "kind": "place",
             "name": "장소",
             "category": "01010100",
@@ -550,7 +589,8 @@ def test_list_public_features_in_bounds_uses_envelope(
         )
         assert r.status_code == 200
         body = r.json()
-        assert body["data"]["items"][0]["feature_id"] == "f1"
+        # T-VN-32C 값 전환 — 응답 feature_id 값은 stub row의 UUID 정본이다.
+        assert body["data"]["items"][0]["feature_id"] == _expected_uuid("f1")
         assert body["meta"]["cluster"] is None
         assert "duration_ms" in body["meta"]
     finally:
@@ -564,6 +604,7 @@ def test_get_feature_detail_maps_row(client: TestClient, monkeypatch: pytest.Mon
 
     row = {
         "feature_id": "f1",
+        "feature_uuid": _expected_uuid("f1"),
         "kind": "event",
         "name": "축제",
         "category": "01000000",
@@ -615,8 +656,8 @@ def test_get_feature_detail_maps_row(client: TestClient, monkeypatch: pytest.Mon
         assert r.status_code == 200
         body = r.json()
         assert body["data"]["kind"] == "event"
-        # T-VN-32B additive — UUID 정본 병행 노출 (feature_id는 legacy 유지).
-        assert body["data"]["feature_id"] == "f1"
+        # T-VN-32C 값 전환 — 응답 feature_id 값은 UUID 정본, feature_uuid 병행.
+        assert body["data"]["feature_id"] == _expected_uuid("f1")
         assert body["data"]["feature_uuid"] == _expected_uuid("f1")
         # T-VN-05: provider raw passthrough(``payload``)는 공개 detail에서 벗겨진다.
         assert body["data"]["detail"] == {"event_kind": "festival"}
@@ -665,13 +706,14 @@ def test_get_feature_accepts_uuid_ref_via_boundary_resolution(
     """T-VN-32B 경계 alias 해석 — canonical UUID 참조도 같은 detail로 해석된다.
 
     경계에서 UUID → legacy 정본 키로 해석한 뒤 내부 조회는 legacy 키로만 한다.
-    응답 ``feature_id``는 legacy 유지(값 전환은 T-VN-32C), ``feature_uuid`` 병행.
+    응답 ``feature_id`` 값은 UUID 정본(T-VN-32C 값 전환), ``feature_uuid`` 병행.
     """
     from kortravelmap.api.db import get_session
     from kortravelmap.api.routers import features as features_mod
 
     row = {
         "feature_id": "f1",
+        "feature_uuid": _expected_uuid("f1"),
         "kind": "place",
         "name": "장소",
         "category": "01010100",
@@ -720,7 +762,8 @@ def test_get_feature_accepts_uuid_ref_via_boundary_resolution(
         # 내부 전달은 해석된 legacy 정본 키.
         assert requested_ids == ["f1"]
         body = r.json()
-        assert body["data"]["feature_id"] == "f1"
+        # T-VN-32C 값 전환 — 응답 feature_id 값은 UUID 정본.
+        assert body["data"]["feature_id"] == _expected_uuid("f1")
         assert body["data"]["feature_uuid"] == _expected_uuid("f1")
         assert r.headers["ETag"] == '"3"'
     finally:
@@ -765,6 +808,7 @@ def test_mois_place_detail_strips_raw_provider_payload(
 
     row = {
         "feature_id": "mois:1",
+        "feature_uuid": _expected_uuid("mois:1"),
         "kind": "place",
         "name": "관광식당",
         "category": "07010100",
@@ -874,6 +918,7 @@ def test_get_area_contained_features_maps_rows(
     contained_rows = [
         {
             "feature_id": "place1",
+            "feature_uuid": _expected_uuid("place1"),
             "kind": "place",
             "name": "포함 장소",
             "category": "01000000",
@@ -912,7 +957,9 @@ def test_get_area_contained_features_maps_rows(
         assert r.status_code == 200
         body = r.json()
         assert body["data"]["area_square_meters"] == 12345.0
-        assert body["data"]["items"][0]["feature_id"] == "place1"
+        # T-VN-32C 값 전환 — area/포함 item 참조 모두 UUID 정본.
+        assert body["data"]["area_feature_id"] == _expected_uuid("area1")
+        assert body["data"]["items"][0]["feature_id"] == _expected_uuid("place1")
     finally:
         client.app.dependency_overrides.clear()
 
@@ -945,15 +992,39 @@ def test_get_area_contained_features_rejects_non_area(
 def test_features_batch_returns_exhaustive_typed_items(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from kortravelmap.infra import feature_identity
     from kortravelmap.infra.feature_repo import FeatureBatchItemRow
 
     from kortravelmap.api.db import get_session
     from kortravelmap.api.routers import features as features_mod
 
+    # T-VN-32C 회귀 (echo 계약) — "found"는 UUID **대문자 표기**로 요청한다.
+    # 경계 해석은 legacy 정본 키("found")로 조회하되, 응답 item feature_id는
+    # 요청 표기 그대로(대문자 유지, canonicalize 금지) echo여야 한다.
+    found_uuid_ref = _expected_uuid("found").upper()
+
+    async def _resolve_bulk(
+        _session: Any, refs: Any
+    ) -> dict[str, feature_identity.FeatureIdentity]:
+        resolved: dict[str, feature_identity.FeatureIdentity] = {}
+        for ref in refs:
+            feature_identity.validate_feature_ref(ref)
+            legacy = "found" if ref == found_uuid_ref else ref
+            resolved[ref] = feature_identity.FeatureIdentity(
+                feature_id=legacy,
+                feature_uuid=_expected_uuid(legacy),
+            )
+        return resolved
+
+    monkeypatch.setattr(
+        feature_identity, "resolve_feature_identities_bulk", _resolve_bulk
+    )
+
     async def _get_items(
         _session: Any,
         items: tuple[tuple[str, int | None], ...],
     ) -> tuple[FeatureBatchItemRow, ...]:
+        # UUID 참조도 경계 해석된 **legacy 정본 키**로 조회된다 (T-VN-32C).
         assert items == (
             ("found", None),
             ("retired", None),
@@ -1019,7 +1090,7 @@ def test_features_batch_returns_exhaustive_typed_items(
             "/v1/features/batch",
             json={
                 "items": [
-                    {"feature_id": "found"},
+                    {"feature_id": found_uuid_ref},
                     {"feature_id": "retired"},
                     {"feature_id": "suppressed"},
                     {"feature_id": "missing"},
@@ -1036,10 +1107,12 @@ def test_features_batch_returns_exhaustive_typed_items(
             "missing",
             "unchanged",
         ]
-        # T-VN-32B additive — 상태별 item에 feature_uuid 병행 노출(missing 제외).
+        # T-VN-32C echo 예외 — UUID로 요청한 item의 feature_id는 요청 표기
+        # **그대로**(대문자 UUID) 되돌아온다. legacy로 요청한 item은 legacy echo.
+        # feature_uuid는 정본 병행 노출(missing 제외).
         assert items[0] == {
             "state": "found",
-            "feature_id": "found",
+            "feature_id": found_uuid_ref,
             "feature_uuid": _expected_uuid("found"),
             "row_revision": 9,
             "trip_card": {
@@ -1212,6 +1285,7 @@ def test_search_features_maps_page_and_requires_scope(
                     marker_color="P-01",
                     status="active",
                     score=1.0,
+                    feature_uuid=_expected_uuid("f1"),
                 ),
             ),
             total_count=1,
@@ -1231,7 +1305,9 @@ def test_search_features_maps_page_and_requires_scope(
         )
         assert r.status_code == 200
         body = r.json()
-        assert body["data"]["items"][0]["feature_id"] == "f1"
+        # T-VN-32C 값 전환 — 검색 item feature_id 값은 UUID 정본.
+        assert body["data"]["items"][0]["feature_id"] == _expected_uuid("f1")
+        assert body["data"]["items"][0]["feature_uuid"] == _expected_uuid("f1")
         assert body["meta"]["page"] == {
             "page_size": 50,
             "next_cursor": None,

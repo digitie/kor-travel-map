@@ -3606,6 +3606,55 @@ def test_feature_update_contract_rejects_invalid_runtime_payloads(
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    "path",
+    ["/v1/ops/pipeline/requests", "/v1/ops/pipeline/requests/preview"],
+)
+def test_feature_ids_scope_rejects_unresolved_uuid_ref(
+    client: TestClient,
+    session: _FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+    path: str,
+) -> None:
+    """T-VN-32C 회귀 (S1) — scope.feature_ids의 미해석 UUID 참조는 422 fail-close.
+
+    해석 없이 통과하면 matched_feature_count=0 요청이 영속 생성되고 job이 빈
+    scope로 성공 종료한다(조용한 no-op). 미해석 참조는 등록/미리보기 양쪽에서
+    FEATURE_REF_UNRESOLVED로 거부돼야 한다.
+    """
+    from kortravelmap.infra import feature_identity
+
+    async def _resolve_none(
+        _session: Any, refs: Any
+    ) -> dict[str, feature_identity.FeatureIdentity]:
+        for ref in refs:
+            feature_identity.validate_feature_ref(ref)
+        return {}
+
+    monkeypatch.setattr(
+        feature_identity, "resolve_feature_identities_bulk", _resolve_none
+    )
+
+    response = client.post(
+        path,
+        json={
+            "scope": {
+                "type": "feature_ids",
+                "feature_ids": ["0f9d3c6e-5a41-4b2e-9c77-2b8a1d4e6f30"],
+            }
+        },
+    )
+
+    assert response.status_code == 422
+    problem = response.json()
+    assert problem["code"] == "FEATURE_REF_UNRESOLVED"
+    assert problem["details"]["unresolved"] == [
+        "0f9d3c6e-5a41-4b2e-9c77-2b8a1d4e6f30"
+    ]
+    assert session.begin_count == 0
+
+
+@pytest.mark.unit
 def test_create_request_persists_with_new_status_url(
     client: TestClient,
     session: _FakeSession,

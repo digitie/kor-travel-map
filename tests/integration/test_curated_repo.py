@@ -194,6 +194,18 @@ async def test_seed_rule_apply_creates_candidate_and_detail_snapshot(
     assert snapshot.theme["theme_slug"] == "bookstores"
     assert snapshot.content["title"] == "python-datagokr-api"
     assert snapshot.items[0].feature_snapshot["name"] == "통합테스트 헌책방"
+    # T-VN-32C PR-2 (R6) — snapshot 빌더의 feature 참조는 UUID 정본이다.
+    stored_uuid = (
+        await migrated_session.execute(
+            text(
+                "SELECT CAST(feature_uuid AS text) FROM feature.features "
+                "WHERE feature_id = :fid"
+            ),
+            {"fid": feature_id},
+        )
+    ).scalar_one()
+    assert snapshot.items[0].feature_id == stored_uuid
+    assert snapshot.items[0].feature_snapshot["feature_id"] == stored_uuid
 
     refreshed = await curated_repo.refresh_curated_source_metadata(
         migrated_session,
@@ -225,6 +237,11 @@ async def test_seed_rule_apply_creates_candidate_and_detail_snapshot(
     assert cached["content_version"] == selected.content_version
     assert cached["etag"] == snapshot.etag
     assert cached["snapshot"]["content"]["title"] == "python-datagokr-api"
+    # T-VN-32C PR-2 (R6) — 물질화된 snapshot JSON의 items[].feature_id와
+    # feature_snapshot.feature_id도 UUID 정본이다 (legacy 잔존 = 혼합 포맷 회귀).
+    stored_items = cached["snapshot"]["items"]
+    assert [item["feature_id"] for item in stored_items] == [stored_uuid]
+    assert stored_items[0]["feature_snapshot"]["feature_id"] == stored_uuid
 
 
 async def test_concierge_seed_rule_creates_curated_with_source_title(
