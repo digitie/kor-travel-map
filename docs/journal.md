@@ -17,6 +17,37 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-08-05 (8) — T-VN-32C PR-2: 응답 feature_id 값 UUID 전환 구현 (read 단일 원자 릴리스)
+
+- **치환 코어**: `api/identity_projection.py`(response_feature_id/
+  uuid_substituted_row — 결측 fail-close) + 전 read 표면 치환: features
+  (bbox/in-bounds/search/nearby/by-target/상세/단건 weather·price card/area
+  contained/상세 curations[]), weather(forecast target·변환기 4종 — timeline
+  행은 anchor UUID 주입), public_views(beach/festival/marker + 상세 path
+  해석 S12/S13), curations(공개·admin item/group/candidate·import preview +
+  S11), curated(공개 detail 5종 + admin 뷰), admin_features(목록/지도/상세
+  feature record/단건 card), mois_detail·dedup·enrichment(+repo projection
+  additive). **불변**: cursor keyset 전부 legacy 축, batch/weather-batch
+  echo·path echo·requested_feature_id·감사 레코드·2차 참조(parent/sibling)·
+  operator raw lineage 보존 — 명문은 ADR-083 §결정 6 + integration-map §3.2.
+- **write/scope 경계 해석 전수 배선**(조사 에이전트 전수 인벤토리 기반):
+  P0 — S1 pipeline scope(fingerprint 전 bulk 해석·미해석 422
+  FEATURE_REF_UNRESOLVED), S2/S3 service batch 2종(해석 조회 + 요청 표기
+  echo — PinVi state=missing 오답 차단), W1 admin create의 UUID feature_id
+  422(유령 PK 차단), W3 sibling_group_id feature-UUID 충돌 가드. P1/P2 —
+  W2 parent 해석(+미해석 422), W4 dedup merge master 해석, W5-W8 curated/
+  curation/CSV 정규화, S4-S10 검색·필터 정규화(admin q UUID fast-path =
+  `uq_features_feature_uuid` 등가 — #639 회귀 방지), S11-S13 공개 path 해석.
+  infra: `resolve_feature_identities_bulk`(고정 왕복 2회)·
+  `legacy_id_for_filter`·`feature_uuid_in_use`·`is_canonical_uuid_ref`.
+- **snapshot·계약**: curated snapshot 빌더 UUID화(재물질화는 기존 dagster
+  asset 1런 — 158행<limit 500, etag churn 1회 계획 비용). OpenAPI admin/user
+  재생성(description-only, **service 무변경** — PinVi config 회전 불요),
+  types 2종 재생성+TSC green, openapi-diff baseline/핀 회전, ADR-083 작성.
+- **테스트**: API 라우터 53건 정합+회귀 단언 4계열(로컬 1076 passed), 통합
+  신규 13건(4계열 cursor gapless+UUID·값==저장 uuid·echo 등식·W1/W2/scope
+  422·fast-path) + curated R6·EXPLAIN fast-path 등가.
+
 ## 2026-08-05 (7) — T-VN-32C PR-1 머지 + 쌍 PR 머지 + 0083 prod 배포 완주
 
 - **Map PR-1 #950 머지** `2a8642bde10ef0cd384001fb72b1a3fc9fb5ae81` (CI 8/8,

@@ -10,6 +10,17 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-08-05 (8) — 32C PR-2 구현 완료 (응답 값 UUID 전환, 리뷰 대기)
+
+`feat/tvn32c-value-cutover-pr2` — 전 read 표면 치환(cursor legacy 축·echo
+보존), write/scope 경계 해석 전수(W1-W8·S1-S13, P0 = 유령 PK·빈 scope·PinVi
+missing 오답·sibling 오염 차단), curated snapshot 빌더 UUID화, OpenAPI/types
+재생성(service 무변경), ADR-083, 테스트(API 1076 passed·통합 13 신규).
+
+**다음 한 작업**: CI-parity 배터리 → 적대 리뷰 2인 → PR 생성·CI·머지 →
+배포(H30B 재검증 게이트 선행, api→dagster→ui, curated asset 1런, live
+fixture 재생성, PinVi user 스냅샷 재고정 PR + 유예 ②·NEW-3·NEW-5 동봉).
+
 ## 2026-08-05 (7) — 32C PR-1·쌍 PR 머지 + 0083 prod 배포 완주
 
 Map #950(`2a8642bd`)·PinVi #430(`6325d814`) 머지, 0083 게이트 순서대로 prod
