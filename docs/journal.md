@@ -17,6 +17,23 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-08-05 (13) — H43 배포 후 기준점·외부 사본 + H44 복원 드릴 1회차 완주
+
+- **H43**: 값 전환 배포 후 기준점 `2026-08-05-h43-postdeploy-0083.dump`
+  (489MB, manifest: head 0083 · features/aliases/public 각 731,765 ·
+  pair_mismatch 0 · orphan 0) 채취 + **dev box 외부 사본 첫 반출**
+  (`~/ktm-h43-external/`, sha256 대조 OK — 단일 host 사본 한계 첫 해소).
+  정기화·retention·자동 반출은 manager **#148** 기안(배포 직전 fence dump
+  관례 명문화 포함).
+- **H44 드릴 1회차 완주**: 격리 PostGIS(WSL)에서 확장 4종 선생성 →
+  `pg_restore`(확장 스키마 충돌 1건만 — 정상) → **manifest 완전 일치** →
+  `session_replication_role=replica`로 alias 5건 결손 주입 →
+  `missing_alias=5` 관측 검출 → 정본 재생성 replay → 4축 0·행수 원복.
+  절차·함정(확장 충돌 정상 오류, 컨테이너 `/dev/shm` 64MB 병렬 집계 실패)을
+  `docs/backup-restore.md` §10으로 고정, 주기 규약("migration 릴리스 뒤 +
+  월 1회") 명문화 — 실행 트리거만 잔여.
+- 부수: #956(live fixture 재표집)·#957(tasks 정리) 머지.
+
 ## 2026-08-05 (12) — live e2e fixture 재표집 (구표본 전멸 발견)
 
 - ④ 착수 중 발견: `_fixtures.ts`의 FEATURE_IDS 150건(전부 구세대 `_w_`)이

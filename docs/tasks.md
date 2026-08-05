@@ -53,8 +53,9 @@ barrier로 직렬화한다.
     [~] `T-VN-H43`(백업 체계 — 기준선·write-fence 기준점 dump + PK manifest
         확보·runbook §9. 잔여: 외부 사본 반출·주기화·retention(dm 결선)·배포
         직전 기준점 관례 — 병렬 착수 2026-08-05) →
-    [ ] `T-VN-H44`(복원 리허설 드릴 정기화 — H30B 하네스 재사용. 드릴 1회차
-        병렬 착수 2026-08-05)
+    [~] `T-VN-H44`(복원 리허설 드릴 — **1회차 완주 2026-08-05**: 복원·manifest
+        일치·결손 주입/회복 replay 전 단계 통과, 절차 runbook §10 고정.
+        잔여: 주기 실행 트리거)
 - **Lane B — frontend hardening·PinVi 소비 API**
   - b0: [x] `T-VN-48D`(final exact Mocked/Live) →
     [x] `T-VN-49A/B/C/D`(React 구조 debt, 단일 PR)
@@ -472,18 +473,24 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   - [ ] 신규 DB 프로비저닝 함정 참조 링크 — superuser 확장 4종 사전 생성
     (manager #109 절차)을 restore 문서에서 링크한다.
 
-- [ ] T-VN-H44 — **복원 리허설 드릴 정기화 (H30B 하네스 재사용)**
+- [~] T-VN-H44 — **복원 리허설 드릴 정기화 (H30B 하네스 재사용)**
 
   백업본이 실제로 복원되는지를 반복 가능한 드릴로 정착시킨다. **타이밍: H43 뒤,
   이후 정기.**
 
-  - [ ] H30B 하네스(dev box `~/h30b/` — artifact replay·결손 주입·완전 회복 검증)를
-    재사용한다.
-  - [ ] restore 요령 고정 — postgis 이미지는 **init 완료 대기 후 새 DB를 만들어** 복원
-    (`POSTGRES_DB`에 미리 심어진 확장과 dump의 확장 배치가 충돌 — 0072 아카이브 복원
-    검증에서 실측).
-  - [ ] 드릴 1회 = dump 선택 → 격리 복원 → head·row count 대조 → (가능 시) 결손 주입·
-    회복 replay → 결과 기록. 절차를 runbook으로 고정해 반복 실행 가능하게 한다.
+  - [x] 드릴 1회차 완주(2026-08-05) — `2026-08-05-h43-postdeploy-0083.dump`
+    (489MB) 대상, dev box WSL 격리 PostGIS에서 5단계 전부 통과: 확장 4종
+    선생성 → `pg_restore`(예상 오류 1건만) → **manifest 완전 일치**(head
+    0083 · features/aliases/public 각 731,765 · pair_mismatch 0 · orphan
+    0) → replica 세션 우회로 alias 5건 결손 주입 → `missing_alias=5` 관측
+    검출 → 정본 재생성 replay → 4축 0·행수 원복.
+  - [x] restore 요령 고정 — `docs/backup-restore.md` **§10**(절차 5단계 +
+    함정: 확장 선생성 충돌 오류 1건이 정상, 컨테이너 `/dev/shm` 64MB로
+    73만행 병렬 집계 실패 → `max_parallel_workers_per_gather=0` 또는
+    `--shm-size`).
+  - [ ] 주기화 — "migration 동반 릴리스 뒤 + 최소 월 1회" 규약을 §10에
+    명문화했으나 실행 트리거(캘린더/자동화)는 미결선. H43 정기화
+    (manager #148)와 함께 묶는다.
 
 ## 이슈 종결 추적
 
