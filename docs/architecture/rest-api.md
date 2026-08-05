@@ -870,9 +870,11 @@ AdminBFF가 아닌 Docker Manager의 exact `ops:fixture` principal만 받는다.
 이 route의 소비자 권한을 만들지 않는다. runtime full `openapi.json`과
 `openapi.service.json`에는 포함하고 user profile에는 제외한다. `PUT`은 Map-generated job ID와
 capability generation을 멱등 반환하고, `GET`은 durable state를 읽으며, `finalize`는 canonical
-cancellation history를 지우지 않고 fixture만 terminal로 닫는다. PinVi는 기존 import-job
-cancel route로 한 번만 호출한다. Manager 성공 판정은 `409 PIPELINE_CANCELLATION_UNSAFE` 하나이며
-다른 status/code는 fail-closed한다. schema/state/재개 규칙은
+cancellation history를 지우지 않고 fixture만 terminal로 닫는다. consumed/finalized receipt는
+Map이 검증한 immutable `canonical_unsafe_outcome`(exact `409`, code, root job, cancellation ID)을
+반환하므로 Manager는 response loss 뒤 이를 durable evidence로 기록하고 cancel POST를 반복하지 않는다.
+PinVi는 기존 import-job cancel route로 한 번만 호출한다. Manager 성공 판정은
+`409 PIPELINE_CANCELLATION_UNSAFE` 하나이며 다른 status/code는 fail-closed한다. schema/state/재개 규칙은
 [`c6c-cancel-probe-fixture.md`](c6c-cancel-probe-fixture.md)를 따른다.
 
 `POST /v1/ops/pipeline/requests`의 응답에는 서로 다른 두 멱등성 결과를 항상 함께 둔다.

@@ -10,6 +10,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from kortravelmap.infra.c6c_cancel_probe_fixture_repo import (
     C6C_CANCEL_PROBE_CAPABILITY_GENERATION,
+    C6cCancelProbeCanonicalUnsafeOutcome,
     C6cCancelProbeFixture,
     C6cCancelProbeFixtureConflict,
     ensure_c6c_cancel_probe_fixture,
@@ -34,6 +35,17 @@ router = APIRouter(
 )
 
 
+class C6cCancelProbeCanonicalUnsafeOutcomeRecord(BaseModel):
+    """response-loss retry도 다시 POST하지 않게 하는 Map canonical 증빙."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    http_status: Literal[409]
+    code: Literal["PIPELINE_CANCELLATION_UNSAFE"]
+    root_job_id: UUID
+    cancellation_id: UUID
+
+
 class C6cCancelProbeFixtureRecord(BaseModel):
     """Manager가 crash 재개에 사용하는 secret-free durable fixture receipt."""
 
@@ -46,7 +58,8 @@ class C6cCancelProbeFixtureRecord(BaseModel):
     created_at: datetime
     consumed_at: datetime | None
     finalized_at: datetime | None
-    capability_generation: Literal[1] = C6C_CANCEL_PROBE_CAPABILITY_GENERATION
+    canonical_unsafe_outcome: C6cCancelProbeCanonicalUnsafeOutcomeRecord | None
+    capability_generation: Literal[2] = C6C_CANCEL_PROBE_CAPABILITY_GENERATION
 
 
 class C6cCancelProbeFixtureData(BaseModel):
@@ -79,6 +92,20 @@ def _record(value: C6cCancelProbeFixture) -> C6cCancelProbeFixtureRecord:
         created_at=value.created_at,
         consumed_at=value.consumed_at,
         finalized_at=value.finalized_at,
+        canonical_unsafe_outcome=_outcome_record(value.canonical_unsafe_outcome),
+    )
+
+
+def _outcome_record(
+    value: C6cCancelProbeCanonicalUnsafeOutcome | None,
+) -> C6cCancelProbeCanonicalUnsafeOutcomeRecord | None:
+    if value is None:
+        return None
+    return C6cCancelProbeCanonicalUnsafeOutcomeRecord(
+        http_status=value.http_status,
+        code=value.code,
+        root_job_id=UUID(value.root_job_id),
+        cancellation_id=UUID(value.cancellation_id),
     )
 
 

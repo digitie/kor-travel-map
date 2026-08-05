@@ -17,6 +17,25 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-08-06 (3) — T-VN-41F1J-A: response-loss 재개 증빙 보강
+
+Manager 적대적 리뷰가 PinVi cancel HTTP 응답이 유실된 뒤 Map `consumed` state를 읽어도 journal에
+기록하지 못해 재시도가 영구 정지하는 경계를 발견했다. Map lifecycle receipt의 capability generation을
+`2`로 올리고, `consumed`/`finalized`에서만 immutable `canonical_unsafe_outcome`(exact `409`, code,
+root job ID, cancellation ID)을 반환하도록 보강했다. 이 값은 fixture consume SQL이 canonical unsafe
+cancellation root/member/error를 확인한 뒤에만 존재하므로 Manager는 DB 접근이나 cancel POST 재발송 없이
+durable receipt를 확정하고 finalize를 재개할 수 있다.
+
+fixture integration 2건과 API auth/OpenAPI target 8건이 새 DTO 포함으로 통과했다. generated full/service
+OpenAPI와 admin TypeScript client type도 함께 재생성했다.
+
+후속 재리뷰에서 event audit의 fixture kind join이 ordered partial index를 포기하게 만들고, join을
+제거하면 raw SQL fixture event가 노출될 수 있음을 확인했다. 이를 읽기 예외나 bounded-sort 허용으로
+우회하지 않고 migration `0084`의 DB trigger로 fixture job event의 INSERT/job ID 변경을 거부했다.
+application writer 거부와 직접 SQL 제약을 함께 검증해 audit no-Sort gate를 유지한다.
+적대적 리뷰 1인은 새 trigger의 INSERT 책임과 기존 identity trigger의 job ID 불변 책임 분리,
+두 SQL 경계 통합 검증, no-Sort planner gate를 재검토해 GO로 판정했다.
+
 ## 2026-08-06 (2) — T-VN-41F1J-A: Map durable fixture 구현·검증
 
 - **수명주기/DB**: migration `0084_c6c_cancel_probe_fixtures`로 transaction ID를
@@ -33,7 +52,7 @@
 - **service 경계**: `ops:fixture` token과 `service:docker-manager` actor는
   ensure·receipt·finalize exact path/method에만 결박했다. PinVi `ops:cancel`과
   BFF/service token은 사용할 수 없다. full/service OpenAPI에는 audit 가능한 route를,
-  user artifact에는 제외하며 capability generation은 1이다.
+  user artifact에는 제외하며 capability generation은 2다.
 - **리뷰 보강**: 적대적 리뷰 1인이 찾아낸 normal pipeline/ops/live event projection
   누출과 Alembic metadata 드리프트를 수정했다. fixture event를 강제로 만든 회귀에서
   generic event stream·live 최신 event·job별 live snapshot 모두 비노출이고, generic

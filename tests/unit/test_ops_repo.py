@@ -141,9 +141,8 @@ def test_import_job_reads_exclude_quarantined_rows() -> None:
     assert "event.quarantined_at IS NULL" in events_sql
     assert "event.sync_scope" in events_sql
     assert "JOIN LATERAL" not in events_sql
-    assert "EXISTS (" in events_sql
-    assert "ops.import_jobs AS job" in events_sql
-    assert "job.kind <> 'c6c_cancel_probe'" in events_sql
+    assert "JOIN ops.import_jobs AS job" not in events_sql
+    assert "c6c_cancel_probe" not in events_sql
     assert "ops.feature_update_requests" not in events_sql
 
 
@@ -296,6 +295,7 @@ async def test_import_job_events_scope_filter_uses_typed_event_identity() -> Non
     assert len(page.items) == 1
     sql = session.statements[0]
     assert "JOIN ops.import_jobs AS job" not in sql
+    assert "c6c_cancel_probe" not in sql
     assert "ops.feature_update_requests" not in sql
     assert "event.sync_scope = CAST(:sync_scope AS text)" in sql
     assert (

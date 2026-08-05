@@ -70,8 +70,46 @@ def upgrade() -> None:
         sa.UniqueConstraint("cancellation_id", name="uq_c6c_cancel_probe_fixtures_cancellation"),
         schema="ops",
     )
+    # event audit은 ordered partial index만으로 읽는다. fixture job은 어떤 쓰기
+    # 경로에서도 event를 가질 수 없다는 경계를 DB에서 강제해, 읽기 때 import job을
+    # join하여 그 index 경로를 훼손하지 않는다. 기존 identity trigger가 job_id 변경을
+    # 이미 불변으로 고정하므로 이 trigger는 새 event INSERT만 담당한다.
+    op.execute(
+        """
+        CREATE FUNCTION ops.reject_c6c_cancel_probe_event()
+        RETURNS trigger
+        LANGUAGE plpgsql
+        AS $$
+        BEGIN
+          IF EXISTS (
+            SELECT 1
+            FROM ops.import_jobs AS job
+            WHERE job.job_id = NEW.job_id
+              AND job.kind = 'c6c_cancel_probe'
+          ) THEN
+            RAISE EXCEPTION
+              'c6c cancel-probe job cannot own import job events: %', NEW.job_id
+              USING ERRCODE = 'check_violation';
+          END IF;
+          RETURN NEW;
+        END;
+        $$
+        """
+    )
+    op.execute(
+        """
+        CREATE TRIGGER trg_import_job_events_reject_c6c_cancel_probe
+        BEFORE INSERT ON ops.import_job_events
+        FOR EACH ROW EXECUTE FUNCTION ops.reject_c6c_cancel_probe_event()
+        """
+    )
 
 
 def downgrade() -> None:
     # 서비스 전 단계에서는 중간 fixture 이력 보전보다 schema 재구성이 우선이다.
+    op.execute(
+        "DROP TRIGGER trg_import_job_events_reject_c6c_cancel_probe "
+        "ON ops.import_job_events"
+    )
+    op.execute("DROP FUNCTION ops.reject_c6c_cancel_probe_event()")
     op.drop_table("c6c_cancel_probe_fixtures", schema="ops")

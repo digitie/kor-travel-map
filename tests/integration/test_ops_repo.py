@@ -626,9 +626,6 @@ async def test_event_audit_filters_use_bounded_natural_plans(
             _assert_bounded_event_audit_plan(
                 plan,
                 expected_index=expected_index,
-                allow_bounded_sort=(
-                    expected_index == "idx_import_job_events_job_time"
-                ),
             )
 
     live_cases = (

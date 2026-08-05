@@ -343,11 +343,6 @@ def _list_import_job_events_sql(
     """고정 clause만 조합해 각 감사 filter의 B-tree 경로를 보존한다."""
     clauses: list[str] = [
         "event.quarantined_at IS NULL",
-        "EXISTS ("
-        "SELECT 1 FROM ops.import_jobs AS job "
-        "WHERE job.job_id = event.job_id "
-        "AND job.kind <> 'c6c_cancel_probe'"
-        ")",
     ]
     if job_id is not None:
         clauses.append("event.job_id = CAST(:job_id AS uuid)")

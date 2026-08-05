@@ -17,14 +17,15 @@
 `ops:fixture` exact principal으로 ensure/receipt/finalize만 열고, generic
 worker·stale recovery·일반 pipeline/ops/live event projection은 fixture kind를
 제외한다. 다만 일반 PinVi cancel lineage는 유지하여 canonical unsafe 취소 결과가
-같은 transaction에서 fixture receipt로 소비된다. runtime attestation도 fixture token의
-cursor secret 재사용을 명시적으로 거부한다.
+같은 transaction에서 fixture receipt로 소비된다. capability generation `2`의
+`canonical_unsafe_outcome`은 consumed/finalized canonical result를 immutable receipt로 돌려주므로,
+Manager response-loss 재개는 POST 재발송 없이 evidence를 durable write한 뒤 finalize한다. runtime
+attestation도 fixture token의 cursor secret 재사용을 명시적으로 거부한다.
 
-**검증**: fixture integration 2건, API auth 88건, API 설정·route policy·OpenAPI
-target, OpenAPI export drift, `alembic check` clean, strict mypy·ruff·import-linter가
-통과했다. 적대적 코드 리뷰 1인은 차단/주요 이슈 없음으로 최종 판정했고, 현재 PR
-게이트 중이다. 첫 CI가 찾은 정적 기대 4건은 새 fixture 격리 계약을 직접 검증하도록
-보강했고 대상 회귀 5건이 통과했다.
+**검증**: fixture integration 2건, API auth 103건, event-audit no-Sort planner target,
+OpenAPI export/types drift, strict mypy·ruff가 통과했다. 적대적 코드 리뷰 1인이 발견한
+event-audit Sort 회귀/직접 event 삽입 누출은 읽기 join이 아니라 DB trigger로 차단해 ordered
+partial-index gate를 보존했고, 재리뷰 GO를 받았다. PR CI gate가 남았다.
 
 **다음 한 작업**: Map F1J-A PR #960의 CI gate를 통과·머지한다. 이어
 Docker Manager F1J-B의 dynamic ensure→PinVi exact-409→finalize receipt 및 F1J-C

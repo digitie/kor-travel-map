@@ -578,12 +578,15 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 
   `ops.c6c_cancel_probe_fixtures`와 fixture 전용 repository/서비스 API를 추가한다. Map이
   transaction ID마다 running/no-Dagster-run import job을 멱등 생성하고, 일반 PinVi 취소가
-  만든 canonical cancellation 뒤 consume/finalize를 원자적으로 기록한다. fixture kind는
-  worker·stale recovery·일반 ops read projection에서 제외한다. `ops:fixture` token은
+  만든 canonical cancellation 뒤 consume/finalize를 원자적으로 기록한다. consumed/finalized
+  receipt에는 canonical unsafe outcome을 포함해 Manager response-loss 재개가 POST 재발송 없이
+  durable 증빙을 확정하게 한다. fixture kind는
+  worker·stale recovery·일반 ops read projection에서 제외하며, DB trigger로 fixture event
+  직접 삽입도 차단한다. `ops:fixture` token은
   Docker Manager와 Map API에만 결박하며, Map/PinVi compatible pair capability generation을
   fail-closed로 검증한다. 세부 계약은
   [`architecture/c6c-cancel-probe-fixture.md`](architecture/c6c-cancel-probe-fixture.md)이다.
-  구현·DB/API 검증과 적대적 코드 리뷰 1인(차단/주요 이슈 없음)은 완료했다. 첫 CI에서
+  구현·DB/API 검증과 적대적 코드 리뷰 1인 재검토(GO)를 완료했다. 첫 CI에서
   드러난 reserved-kind/ops event/lineage CTE/OpenAPI baseline의 정적 기대 4건도 새 격리
   계약으로 보강했고, PR #960 재실행 CI gate와 merge만 남았다.
 

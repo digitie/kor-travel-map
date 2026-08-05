@@ -12,6 +12,7 @@ from kortravelmap.api.routers.ops_live import (
     _IMPORT_JOBS_LIVE_SQL,
 )
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.infra.c6c_cancel_probe_fixture_repo import (
@@ -20,7 +21,7 @@ from kortravelmap.infra.c6c_cancel_probe_fixture_repo import (
     finalize_c6c_cancel_probe_fixture,
     mark_c6c_cancel_probe_consumed,
 )
-from kortravelmap.infra.jobs_repo import record_import_job_event
+from kortravelmap.infra.jobs_repo import record_import_job_event, start_unpaired_import_job
 from kortravelmap.infra.ops_repo import (
     get_ops_import_job,
     list_ops_import_job_events,
@@ -105,15 +106,19 @@ async def test_fixture_is_idempotent_consumes_only_canonical_unsafe_and_finalize
             message="generic writer must reject fixture",
         )
     ) is None
-    await migrated_session.execute(
-        text(
-            """
-            INSERT INTO ops.import_job_events (job_id, level, message, payload)
-            VALUES (CAST(:job_id AS uuid), 'error', 'fixture must stay private', '{}'::jsonb)
-            """
-        ),
-        {"job_id": fixture.job_id},
-    )
+    with pytest.raises(IntegrityError, match="c6c cancel-probe job cannot own"):
+        async with migrated_session.begin_nested():
+            await migrated_session.execute(
+                text(
+                    """
+                    INSERT INTO ops.import_job_events (job_id, level, message, payload)
+                    VALUES (
+                      CAST(:job_id AS uuid), 'error', 'fixture must stay private', '{}'::jsonb
+                    )
+                    """
+                ),
+                {"job_id": fixture.job_id},
+            )
     assert fixture.job_id not in {
         item.job_id for item in (await list_ops_import_job_events(migrated_session)).items
     }
@@ -128,6 +133,26 @@ async def test_fixture_is_idempotent_consumes_only_canonical_unsafe_and_finalize
         )
     ).one()
     assert fixture_events_live.recent_events == []
+
+    ordinary_job = await start_unpaired_import_job(
+        migrated_session,
+        kind="c6c_event_reassignment_fixture",
+    )
+    with pytest.raises(IntegrityError, match="import job event identity is immutable"):
+        async with migrated_session.begin_nested():
+            await migrated_session.execute(
+                text(
+                    """
+                    UPDATE ops.import_job_events
+                    SET job_id = CAST(:fixture_job_id AS uuid)
+                    WHERE job_id = CAST(:ordinary_job_id AS uuid)
+                    """
+                ),
+                {
+                    "fixture_job_id": fixture.job_id,
+                    "ordinary_job_id": ordinary_job.job_id,
+                },
+            )
 
     # cancel resolver만 전용 lineage CTE로 fixture root를 읽는다.
     scope = await resolve_pipeline_cancellation_scope(

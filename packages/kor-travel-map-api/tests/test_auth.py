@@ -718,6 +718,7 @@ def test_c6c_fixture_route_accepts_only_fixture_principal(
         created_at=datetime(2026, 8, 6, tzinfo=UTC),
         consumed_at=None,
         finalized_at=None,
+        canonical_unsafe_outcome=None,
     )
 
     async def _get(*_args: object, **_kwargs: object) -> C6cCancelProbeFixture:
@@ -758,7 +759,8 @@ def test_c6c_fixture_route_accepts_only_fixture_principal(
         "created_at": "2026-08-06T00:00:00Z",
         "consumed_at": None,
         "finalized_at": None,
-        "capability_generation": 1,
+        "canonical_unsafe_outcome": None,
+        "capability_generation": 2,
     }
     assert (bff_response.status_code, bff_response.json()["code"]) == (
         401,
@@ -768,6 +770,42 @@ def test_c6c_fixture_route_accepts_only_fixture_principal(
         403,
         "OPS_TOKEN_INVALID",
     )
+
+
+@pytest.mark.unit
+def test_c6c_fixture_receipt_exposes_only_canonical_unsafe_outcome() -> None:
+    from kortravelmap.infra.c6c_cancel_probe_fixture_repo import (
+        C6cCancelProbeCanonicalUnsafeOutcome,
+        C6cCancelProbeFixture,
+    )
+
+    from kortravelmap.api.routers import ops_contract_fixtures as router_module
+
+    fixture = C6cCancelProbeFixture(
+        transaction_id="11111111-1111-1111-1111-111111111111",
+        job_id="22222222-2222-2222-2222-222222222222",
+        state="consumed",
+        cancellation_id="33333333-3333-3333-3333-333333333333",
+        created_at=datetime(2026, 8, 6, tzinfo=UTC),
+        consumed_at=datetime(2026, 8, 6, 0, 1, tzinfo=UTC),
+        finalized_at=None,
+        canonical_unsafe_outcome=C6cCancelProbeCanonicalUnsafeOutcome(
+            http_status=409,
+            code="PIPELINE_CANCELLATION_UNSAFE",
+            root_job_id="22222222-2222-2222-2222-222222222222",
+            cancellation_id="33333333-3333-3333-3333-333333333333",
+        ),
+    )
+
+    record = router_module._record(fixture)
+
+    assert record.canonical_unsafe_outcome is not None
+    assert record.canonical_unsafe_outcome.model_dump(mode="json") == {
+        "http_status": 409,
+        "code": "PIPELINE_CANCELLATION_UNSAFE",
+        "root_job_id": fixture.job_id,
+        "cancellation_id": fixture.cancellation_id,
+    }
 
 
 @pytest.mark.unit

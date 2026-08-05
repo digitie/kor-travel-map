@@ -4635,6 +4635,32 @@ export interface components {
              */
             provenance_file?: string | null;
         };
+        /**
+         * C6cCancelProbeCanonicalUnsafeOutcomeRecord
+         * @description response-loss retry도 다시 POST하지 않게 하는 Map canonical 증빙.
+         */
+        C6cCancelProbeCanonicalUnsafeOutcomeRecord: {
+            /**
+             * Cancellation Id
+             * Format: uuid
+             */
+            cancellation_id: string;
+            /**
+             * Code
+             * @constant
+             */
+            code: "PIPELINE_CANCELLATION_UNSAFE";
+            /**
+             * Http Status
+             * @constant
+             */
+            http_status: 409;
+            /**
+             * Root Job Id
+             * Format: uuid
+             */
+            root_job_id: string;
+        };
         /** C6cCancelProbeFixtureData */
         C6cCancelProbeFixtureData: {
             fixture: components["schemas"]["C6cCancelProbeFixtureRecord"];
@@ -4654,12 +4680,13 @@ export interface components {
         C6cCancelProbeFixtureRecord: {
             /** Cancellation Id */
             cancellation_id: string | null;
+            canonical_unsafe_outcome: components["schemas"]["C6cCancelProbeCanonicalUnsafeOutcomeRecord"] | null;
             /**
              * Capability Generation
-             * @default 1
+             * @default 2
              * @constant
              */
-            capability_generation: 1;
+            capability_generation: 2;
             /** Consumed At */
             consumed_at: string | null;
             /**

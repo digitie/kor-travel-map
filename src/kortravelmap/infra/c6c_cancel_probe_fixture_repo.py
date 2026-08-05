@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 __all__ = [
     "C6C_CANCEL_PROBE_CAPABILITY_GENERATION",
     "C6C_CANCEL_PROBE_JOB_KIND",
+    "C6cCancelProbeCanonicalUnsafeOutcome",
     "C6cCancelProbeFixture",
     "C6cCancelProbeFixtureConflict",
     "ensure_c6c_cancel_probe_fixture",
@@ -29,12 +30,22 @@ __all__ = [
     "mark_c6c_cancel_probe_consumed",
 ]
 
-C6C_CANCEL_PROBE_CAPABILITY_GENERATION: Final[Literal[1]] = 1
+C6C_CANCEL_PROBE_CAPABILITY_GENERATION: Final[Literal[2]] = 2
 C6cCancelProbeFixtureState = Literal["armed", "consumed", "finalized"]
 
 
 class C6cCancelProbeFixtureConflict(RuntimeError):
     """요청한 fixture 전이가 현재 durable state와 맞지 않는다."""
+
+
+@dataclass(frozen=True, slots=True)
+class C6cCancelProbeCanonicalUnsafeOutcome:
+    """Map이 직접 확인한 fixture cancellation의 immutable canonical 결과."""
+
+    http_status: Literal[409]
+    code: Literal["PIPELINE_CANCELLATION_UNSAFE"]
+    root_job_id: str
+    cancellation_id: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +57,7 @@ class C6cCancelProbeFixture:
     created_at: datetime
     consumed_at: datetime | None
     finalized_at: datetime | None
+    canonical_unsafe_outcome: C6cCancelProbeCanonicalUnsafeOutcome | None
 
 
 _SELECT_FIXTURE_SQL: Final[str] = """
@@ -134,14 +146,32 @@ RETURNING
 
 
 def _fixture_from_row(row: Any) -> C6cCancelProbeFixture:
+    cancellation_id = (
+        str(row.cancellation_id) if row.cancellation_id is not None else None
+    )
+    outcome: C6cCancelProbeCanonicalUnsafeOutcome | None = None
+    if row.state in {"consumed", "finalized"}:
+        if cancellation_id is None:
+            raise C6cCancelProbeFixtureConflict(
+                "consumed fixture has no canonical cancellation identity"
+            )
+        outcome = C6cCancelProbeCanonicalUnsafeOutcome(
+            http_status=409,
+            code="PIPELINE_CANCELLATION_UNSAFE",
+            root_job_id=str(row.job_id),
+            cancellation_id=cancellation_id,
+        )
+    elif row.state != "armed" or cancellation_id is not None:
+        raise C6cCancelProbeFixtureConflict("cancel-probe fixture state is invalid")
     return C6cCancelProbeFixture(
         transaction_id=str(row.transaction_id),
         job_id=str(row.job_id),
         state=row.state,
-        cancellation_id=(str(row.cancellation_id) if row.cancellation_id is not None else None),
+        cancellation_id=cancellation_id,
         created_at=row.created_at,
         consumed_at=row.consumed_at,
         finalized_at=row.finalized_at,
+        canonical_unsafe_outcome=outcome,
     )
 
 

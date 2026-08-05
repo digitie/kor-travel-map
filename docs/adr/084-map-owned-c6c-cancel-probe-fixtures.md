@@ -21,15 +21,20 @@ cancellation 상태와 별도 진실을 갖고 crash/retry에서 중복 POST, fa
 1. Map은 `ops.c6c_cancel_probe_fixtures`에 transaction ID, job, canonical cancellation,
    `armed|consumed|finalized` 상태를 영속한다. job/cancellation FK와 상태 CHECK로 전이의
    정합성을 DB에서 보장한다.
-2. Map service OpenAPI에 fixture 전용 ensure/read/finalize route를 둔다. Manager는 transaction
-   ID만 전달하고 Map이 생성한 job UUID를 사용한다. 정적 job ID와 직접 DB/docker 우회는
-   제거한다.
+2. Map service OpenAPI에 fixture 전용 ensure/read/finalize route를 둔다. receipt의
+   `canonical_unsafe_outcome`은 consumed/finalized fixture가 canonical `409` unsafe cancellation을
+   실제로 기록했다는 immutable 증빙이며, response loss recovery는 이를 receipt로 저장한 뒤 POST를
+   재발송하지 않고 finalize를 재개한다. Manager는 transaction ID만 전달하고 Map이 생성한 job UUID를
+   사용한다. 정적 job ID와 직접 DB/docker 우회는 제거한다.
 3. `ops:fixture` principal은 Map↔Docker Manager만 가진다. PinVi는 기존 exact
    `ops:cancel`로 정상 cancellation만 호출하며 fixture 권한을 얻지 않는다.
-4. fixture kind는 generic worker, stale recovery, normal mutation, `ops:read` execution
+4. fixture job에는 import-job event가 존재할 수 없다. application writer 거부와 새 DB insert
+   trigger, 기존 event identity trigger가 direct SQL 삽입·job 재지정을 각각 차단하므로 event
+   audit은 cross-table filter 없이 ordered partial index를 유지한다.
+5. fixture kind는 generic worker, stale recovery, normal mutation, `ops:read` execution
    projection에서 제외한다. finalize는 canonical cancellation history를 보존한 채 terminal
    job 상태만 fixture 전용 transaction으로 닫는다.
-5. F1D success는 exact `409 PIPELINE_CANCELLATION_UNSAFE`이며, response의 fixture capability
+6. F1D success는 exact `409 PIPELINE_CANCELLATION_UNSAFE`이며, response의 fixture capability
    generation과 service OpenAPI artifact를 compatible pair에 re-pin한다. route/capability 없는
    old image는 fallback 없이 fail-closed한다.
 

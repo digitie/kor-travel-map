@@ -5475,6 +5475,40 @@
         "title": "Body_import_admin_curations_v1_admin_curations_import_post",
         "type": "object"
       },
+      "C6cCancelProbeCanonicalUnsafeOutcomeRecord": {
+        "additionalProperties": false,
+        "description": "response-loss retry도 다시 POST하지 않게 하는 Map canonical 증빙.",
+        "properties": {
+          "cancellation_id": {
+            "format": "uuid",
+            "title": "Cancellation Id",
+            "type": "string"
+          },
+          "code": {
+            "const": "PIPELINE_CANCELLATION_UNSAFE",
+            "title": "Code",
+            "type": "string"
+          },
+          "http_status": {
+            "const": 409,
+            "title": "Http Status",
+            "type": "integer"
+          },
+          "root_job_id": {
+            "format": "uuid",
+            "title": "Root Job Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "http_status",
+          "code",
+          "root_job_id",
+          "cancellation_id"
+        ],
+        "title": "C6cCancelProbeCanonicalUnsafeOutcomeRecord",
+        "type": "object"
+      },
       "C6cCancelProbeFixtureData": {
         "additionalProperties": false,
         "properties": {
@@ -5519,9 +5553,19 @@
             ],
             "title": "Cancellation Id"
           },
+          "canonical_unsafe_outcome": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/C6cCancelProbeCanonicalUnsafeOutcomeRecord"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "capability_generation": {
-            "const": 1,
-            "default": 1,
+            "const": 2,
+            "default": 2,
             "title": "Capability Generation",
             "type": "integer"
           },
@@ -5581,7 +5625,8 @@
           "cancellation_id",
           "created_at",
           "consumed_at",
-          "finalized_at"
+          "finalized_at",
+          "canonical_unsafe_outcome"
         ],
         "title": "C6cCancelProbeFixtureRecord",
         "type": "object"
