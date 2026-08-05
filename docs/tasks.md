@@ -67,7 +67,7 @@ barrier로 직렬화한다.
     [x] `T-VN-16C`(sparse 다중 날짜 weather batch) →
     [ ] `T-VN-41A` → [ ] `T-VN-41B` → [ ] `T-VN-41C`(generation/outbox — prod enable은
     재pin #109 완료 + `T-VN-H42` 뒤, Lane B 상세 절 경계 주석 참조) ∥
-    [/] `T-VN-41D`(durable writer-drain)
+    [/] `T-VN-41D`(durable writer-drain) → [/] `T-VN-41F1J-A`(Map-owned cancel-probe fixture)
 - **Wave 2 barrier 이후**
   - freeze(Lane A): [x] `T-VN-31A` → [x] `T-VN-31B` → [x] `T-VN-31C`
   - Lane A: [x] `T-VN-32A` → [x] `T-VN-32B` → [x] `T-VN-32C`(prod 배포·값 전환
@@ -566,6 +566,39 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 
   DB-side/bounded streaming Merkle materialization, receipt/material 공유, terminal audit item compaction,
   item/byte admission과 relation bytes/dead-tuple/vacuum metric을 1M+ synthetic/n150 soak로 검증한다.
+
+### T-VN-41F1J — C6c cancel-probe fixture 수명주기 복구
+
+> 2026-08-06 F1D의 `cancel=404`는 Manager/PinVi read·cancel relay 문제가 아니라, 정적
+> `KTDM_C6C_CANCEL_PROBE_JOB_ID`에 대응하는 Map import job이 없다는 실측으로 판정했다.
+> fixture 생성·소비·종결과 durable 상태는 Map이 소유하고, Manager는 service OpenAPI로
+> transaction ID만 전달한다. PinVi에는 기존 `ops:cancel` 외 권한을 주지 않는다(ADR-084).
+
+- [ ] **T-VN-41F1J-A — Map fixture schema·service API·격리**
+
+  `ops.c6c_cancel_probe_fixtures`와 fixture 전용 repository/서비스 API를 추가한다. Map이
+  transaction ID마다 running/no-Dagster-run import job을 멱등 생성하고, 일반 PinVi 취소가
+  만든 canonical cancellation 뒤 consume/finalize를 원자적으로 기록한다. fixture kind는
+  worker·stale recovery·일반 ops read projection에서 제외한다. `ops:fixture` token은
+  Docker Manager와 Map API에만 결박하며, Map/PinVi compatible pair capability generation을
+  fail-closed로 검증한다. 세부 계약은
+  [`architecture/c6c-cancel-probe-fixture.md`](architecture/c6c-cancel-probe-fixture.md)이다.
+
+- [ ] **T-VN-41F1J-B — Manager dynamic fixture orchestration** *(docker-manager 소유)*
+
+  candidate Map readiness 뒤 fixture ensure→PinVi cancel→정확한
+  `409 PIPELINE_CANCELLATION_UNSAFE` 검증→finalize를 F1D durable transaction receipt로
+  기록한다. 404/502/503/timeout은 성공으로 넓게 수용하지 않는다.
+
+- [ ] **T-VN-41F1J-C — compatible-pair 재결박** *(PinVi·docker-manager 소유)*
+
+  fixture service OpenAPI artifact와 capability generation을 Map/PinVi exact head/pinset에
+  재고정하고, 구 Map image나 route 미지원은 cutover 전에 fail-closed한다.
+
+- [ ] **T-VN-41F1J-D — n150 격리 리허설·prod live UI E2E** *(공동)*
+
+  새 pair에서 F1D를 한 번만 재개해 canonical `409` receipt, finalize, UI 상태를 확인하고
+  prod 최종 live UI E2E까지 통과한다. frozen 후보의 재시도는 이 선행 조건 전에는 금지한다.
 
 ## Wave 2 상세 — 구조 전환
 

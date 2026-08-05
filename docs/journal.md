@@ -17,6 +17,21 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-08-06 (1) — T-VN-41F1J: Map-owned cancel-probe fixture 결정
+
+- **관측/판정**: 신뢰된 F1D 한 회차는 `login=200 → etl_summary=200 → provider_sync=200 →
+  cancel=404`까지 도달했다. 따라서 Manager runtime, PinVi 세션, read surface는 원인이
+  아니며, 설정된 정적 probe job UUID에 Map import job이 없었다. 후보를 다시 실행하지
+  않고 fixture lifecycle을 고친 뒤 새 pair에서 재개한다.
+- **결정**: fixture의 생성·상태·소비·종결은 Map 소유 DB와 전용 service OpenAPI가 소유한다.
+  Manager는 transaction ID만 보내고 동적 job ID를 받는다. PinVi는 보유한 `ops:cancel`로
+  보통 취소를 수행할 뿐 fixture 생성 권한을 얻지 않는다. `ops:fixture` token은
+  Map↔Manager 전용이며, generic worker/recovery/read projection은 fixture kind를 보지 않는다.
+- **검증 계약**: 취소 뒤 성공은 넓은 4xx/5xx가 아니라 정확한
+  `409 PIPELINE_CANCELLATION_UNSAFE` 하나다. 이 응답과 canonical cancellation history를
+  보존한 finalize까지 durable receipt로 남긴다. 상세는 ADR-084와
+  `architecture/c6c-cancel-probe-fixture.md`가 정본이다.
+
 ## 2026-08-05 (13) — H43 배포 후 기준점·외부 사본 + H44 복원 드릴 1회차 완주
 
 - **H43**: 값 전환 배포 후 기준점 `2026-08-05-h43-postdeploy-0083.dump`

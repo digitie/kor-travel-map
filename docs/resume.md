@@ -10,6 +10,18 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-08-06 — T-VN-41F1J cancel-probe fixture 설계 착수
+
+F1D의 최초 probe는 `login=200 → etl_summary=200 → provider_sync=200 → cancel=404`로
+실패했다. 따라서 PinVi 세션/read route와 Manager runtime은 통과했고, 정적 job UUID에
+실행 row가 없다는 Map fixture 수명주기 결손만 남았다. 재시도는 같은 후보의 failure count만
+늘리므로 멈춘다.
+
+**다음 한 작업**: T-VN-41F1J-A — Map이 transaction ID별 cancel-probe fixture를 own
+DB에 멱등 생성·consume·finalize하고, `ops:fixture` exact service API와 capability
+generation을 제공한다. Manager는 이후 dynamic ID와 **정확한** `409
+PIPELINE_CANCELLATION_UNSAFE`만 F1D 통과로 수용한다.
+
 ## 2026-08-05 (13) — H43 외부 사본·H44 드릴 1회차 (병렬 트랙)
 
 H43 배포 후 기준점 + dev box 외부 사본 반출(sha256 OK), 정기화는 manager
