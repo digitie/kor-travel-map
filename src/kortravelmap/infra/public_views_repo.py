@@ -163,9 +163,19 @@ LEFT JOIN LATERAL (
 
 # 공개 여부는 ADR-067 ``feature.public_features`` projection이 정본이다 — 아래
 # SQL은 그 projection만 FROM 하고 술어를 재구현하지 않는다(T-VN-04, F-1).
+#
+# T-VN-35(ADR-084): kind별 값의 정본은 subtype 테이블이다. 공개 판별 술어를
+# free-form JSONB 탐침(``detail ->> 'place_kind'``)에서 **typed 컬럼**으로
+# 옮긴다. kind 판정이 술어가 아니라 구조(어느 subtype에 행이 있는가)로 바뀌므로
+# ``f.kind = 'place'`` 중복 술어는 사라진다 — subtype의 kind 상수 CHECK +
+# ``(feature_id, kind)`` 복합 FK가 같은 것을 DB에서 강제한다. 응답 ``detail``은
+# 종전대로 ``public_features``(0086 ``features_detailed`` 기반)가 조립한다.
+_PUBLIC_BEACH_JOIN_SQL: Final[str] = """
+JOIN feature.feature_places AS fp ON fp.feature_id = f.feature_id
+"""
+
 _PUBLIC_BEACH_BASE_WHERE_SQL: Final[str] = """
-f.kind = 'place'
-  AND f.detail ->> 'place_kind' = 'beach'
+fp.place_kind = 'beach'
   AND (CAST(:sido_code AS text) IS NULL OR f.sido_code = CAST(:sido_code AS text))
   AND (
     CAST(:sigungu_code AS text) IS NULL
@@ -192,6 +202,7 @@ SELECT
     sp.source_providers,
     f.updated_at
 FROM feature.public_features AS f
+{_PUBLIC_BEACH_JOIN_SQL}
 {_SOURCE_PROVIDERS_LATERAL_SQL}
 {_PRIMARY_SOURCE_LATERAL_SQL}
 WHERE {_PUBLIC_BEACH_BASE_WHERE_SQL}
@@ -235,6 +246,7 @@ SELECT
     sp.source_providers,
     f.updated_at
 FROM feature.public_features AS f
+{_PUBLIC_BEACH_JOIN_SQL}
 {_SOURCE_PROVIDERS_LATERAL_SQL}
 {_PRIMARY_SOURCE_LATERAL_SQL}
 WHERE {_PUBLIC_BEACH_BASE_WHERE_SQL}
@@ -250,6 +262,7 @@ SELECT
     x_extension.ST_Y(f.coord) AS lat,
     f.sigungu_code
 FROM feature.public_features AS f
+{_PUBLIC_BEACH_JOIN_SQL}
 WHERE {_PUBLIC_BEACH_BASE_WHERE_SQL}
   AND f.coord IS NOT NULL
   AND (
@@ -266,19 +279,35 @@ ORDER BY f.name, f.feature_id
 LIMIT :limit
 """
 
-_PUBLIC_FESTIVAL_BASE_WHERE_SQL: Final[str] = """
-f.kind = 'event'
-  AND COALESCE(f.detail ->> 'event_kind', 'festival') IN ('festival', 'cultural_festival')
+_PUBLIC_FESTIVAL_JOIN_SQL: Final[str] = """
+JOIN feature.feature_events AS fe ON fe.feature_id = f.feature_id
+"""
+
+# ``event_kind``는 subtype에서 NOT NULL이고 backfill/writer가 값이 없을 때
+# ``'unknown'`` 기본값을 넣는다(``feature_subtype.subtype_params``). 종전 공개
+# 술어는 "event_kind가 없으면 축제로 본다"였으므로 그 계약을 그대로 옮기려면
+# 결측 표식인 ``'unknown'``을 되돌려야 한다. 실측(bench 1,246 event)에서는
+# 전 행이 event_kind를 갖고 있어 이 fallback은 발동하지 않는다 — 계약 보존용
+# 이다. (근본 해법은 subtype 컬럼을 nullable로 두어 "결측"과 "unknown이라는
+# 값"을 구분하는 것이며 ADR-084 후속으로 남긴다.)
+_PUBLIC_FESTIVAL_KIND_WHERE_SQL: Final[str] = """
+COALESCE(NULLIF(fe.event_kind, 'unknown'), 'festival')
+    IN ('festival', 'cultural_festival')
+"""
+
+# 날짜 비교가 ``text -> date`` 왕복 없이 typed 컬럼끼리 이뤄진다 — 종전
+# ``NULLIF(f.detail ->> 'starts_on', '')::date``는 오염된 한 행이 22007로 공개
+# API를 통째로 500 시킬 수 있는 형태였고(admin 쪽 pg_input_is_valid 가드와 같은
+# 문제), subtype이 date 타입을 강제하면서 그 실패 모드가 사라진다.
+_PUBLIC_FESTIVAL_BASE_WHERE_SQL: Final[str] = f"""
+{_PUBLIC_FESTIVAL_KIND_WHERE_SQL}
   AND (CAST(:sido_code AS text) IS NULL OR f.sido_code = CAST(:sido_code AS text))
   AND (
     CAST(:sigungu_code AS text) IS NULL
     OR f.sigungu_code = CAST(:sigungu_code AS text)
   )
-  AND NULLIF(f.detail ->> 'starts_on', '')::date <= CAST(:month_end AS date)
-  AND (
-    NULLIF(f.detail ->> 'ends_on', '') IS NULL
-    OR NULLIF(f.detail ->> 'ends_on', '')::date >= CAST(:month_start AS date)
-  )
+  AND fe.starts_on <= CAST(:month_end AS date)
+  AND (fe.ends_on IS NULL OR fe.ends_on >= CAST(:month_start AS date))
 """
 
 _PUBLIC_FESTIVAL_LIST_SQL: Final[str] = f"""
@@ -300,13 +329,14 @@ SELECT
     sp.source_providers,
     f.updated_at
 FROM feature.public_features AS f
+{_PUBLIC_FESTIVAL_JOIN_SQL}
 {_SOURCE_PROVIDERS_LATERAL_SQL}
 {_PRIMARY_SOURCE_LATERAL_SQL}
 WHERE {_PUBLIC_FESTIVAL_BASE_WHERE_SQL}
   AND (
     CAST(:cursor_start_date AS date) IS NULL
     OR (
-      NULLIF(f.detail ->> 'starts_on', '')::date,
+      fe.starts_on,
       f.updated_at,
       f.feature_id
     ) > (
@@ -315,7 +345,7 @@ WHERE {_PUBLIC_FESTIVAL_BASE_WHERE_SQL}
       CAST(:cursor_feature_id AS text)
     )
   )
-ORDER BY NULLIF(f.detail ->> 'starts_on', '')::date ASC, f.updated_at ASC, f.feature_id ASC
+ORDER BY fe.starts_on ASC, f.updated_at ASC, f.feature_id ASC
 LIMIT :limit
 """
 
@@ -338,10 +368,10 @@ SELECT
     sp.source_providers,
     f.updated_at
 FROM feature.public_features AS f
+{_PUBLIC_FESTIVAL_JOIN_SQL}
 {_SOURCE_PROVIDERS_LATERAL_SQL}
 {_PRIMARY_SOURCE_LATERAL_SQL}
-WHERE f.kind = 'event'
-  AND COALESCE(f.detail ->> 'event_kind', 'festival') IN ('festival', 'cultural_festival')
+WHERE {_PUBLIC_FESTIVAL_KIND_WHERE_SQL}
   AND f.feature_id = CAST(:feature_id AS text)
 """
 
@@ -354,6 +384,7 @@ SELECT
     x_extension.ST_Y(f.coord) AS lat,
     f.sigungu_code
 FROM feature.public_features AS f
+{_PUBLIC_FESTIVAL_JOIN_SQL}
 WHERE {_PUBLIC_FESTIVAL_BASE_WHERE_SQL}
   AND f.coord IS NOT NULL
   AND (
@@ -366,11 +397,11 @@ WHERE {_PUBLIC_FESTIVAL_BASE_WHERE_SQL}
         4326
     )
   )
-ORDER BY NULLIF(f.detail ->> 'starts_on', '')::date ASC, f.name, f.feature_id
+ORDER BY fe.starts_on ASC, f.name, f.feature_id
 LIMIT :limit
 """
 
-_PUBLIC_FESTIVAL_MONTH_SUMMARY_SQL: Final[str] = """
+_PUBLIC_FESTIVAL_MONTH_SUMMARY_SQL: Final[str] = f"""
 WITH months AS (
     SELECT generate_series(
         date_trunc('month', CAST(:month_start AS date)) - interval '1 month',
@@ -383,20 +414,17 @@ SELECT
     EXTRACT(MONTH FROM m.month_start)::int AS month,
     count(f.feature_id)::int AS count
 FROM months AS m
-LEFT JOIN feature.public_features AS f
-  ON f.kind = 'event'
- AND COALESCE(f.detail ->> 'event_kind', 'festival') IN ('festival', 'cultural_festival')
+LEFT JOIN (
+    feature.public_features AS f
+    {_PUBLIC_FESTIVAL_JOIN_SQL}
+  ) ON {_PUBLIC_FESTIVAL_KIND_WHERE_SQL}
  AND (CAST(:sido_code AS text) IS NULL OR f.sido_code = CAST(:sido_code AS text))
  AND (
    CAST(:sigungu_code AS text) IS NULL
    OR f.sigungu_code = CAST(:sigungu_code AS text)
  )
- AND NULLIF(f.detail ->> 'starts_on', '')::date
-       <= (m.month_start + interval '1 month' - interval '1 day')::date
- AND (
-   NULLIF(f.detail ->> 'ends_on', '') IS NULL
-   OR NULLIF(f.detail ->> 'ends_on', '')::date >= m.month_start
- )
+ AND fe.starts_on <= (m.month_start + interval '1 month' - interval '1 day')::date
+ AND (fe.ends_on IS NULL OR fe.ends_on >= m.month_start)
 GROUP BY m.month_start
 ORDER BY m.month_start
 """

@@ -67,9 +67,11 @@ notice 145 · price 97 · **route·area 0행**. `detail` 키는 kind별로 완�
 5. **geometry 정본은 route/area subtype으로 이동**하고 core `geom`을 제거한다.
    subtype에서 타입이 정확해진다(route=`MULTILINESTRING`, area=`MULTIPOLYGON`,
    둘 다 NOT NULL) — "geometry가 필수인 kind"와 "없어야 하는 kind"가 술어가
-   아니라 테이블 구조로 갈린다. 조회 표면이 subtype 2개를 각각 조인하지
-   않도록 단일 조인 뷰 `feature.feature_geometries`(routes UNION ALL areas)를
-   둔다. prod route/area가 0행이라 이관 비용과 회귀 위험이 모두 0이다.
+   아니라 테이블 구조로 갈린다. 조회는 `features_detailed` 뷰가 제공하는
+   `geom` 컬럼을 쓰고, bbox 후보 술어처럼 **플랜이 중요한 hot path**만
+   subtype을 직접 UNION ALL한다(뷰 컬럼을 술어에 쓰면 Hash Left Join 2단으로
+   퇴화함을 EXPLAIN으로 실측 — 술어는 subtype GiST를 타야 한다).
+   prod route/area가 0행이라 이관 비용과 회귀 위험이 모두 0이다.
 6. **point subtype은 만들지 않는다** — `coord` 3컬럼은 core에 남긴다.
    coord는 4개 kind가 공유해 kind 상수 CHECK를 걸 수 없고(배타 arc 파괴),
    place의 96.6%·event의 82%가 non-null이라 거의 모든 read가 조인을 강제당하며,
@@ -89,8 +91,10 @@ notice 145 · price 97 · **route·area 0행**. `detail` 키는 kind별로 완�
   값비싼 불변식을 **부수적으로 공짜로** 얻는다. 트리거로 같은 것을 하려면
   `session_replication_role=replica` 우회 창구가 남는다(0083에서 같은 이유로
   절차적 보장을 선언적 제약으로 바꾼 선례).
-- shadow 유지는 롤백 대칭성을 준다 — 문제가 생기면 reader만 되돌리면 되고
-  데이터 소실이 없다. PR-2(값 전환)와 같은 논리다.
+- 단일 정본은 롤백 가능성을 잃지 않는다 — downgrade가 뷰와 같은 식으로 core
+  컬럼을 역조립하므로 무손실 복귀가 되고, 그 등가성은 md5 전수 대조로 이미
+  증명됐다. shadow가 주는 이점(reader만 되돌리기)보다 이중 쓰기·drift 관측이
+  항구적으로 지우는 비용이 크다.
 - 73만행 backfill이 **11.1초**로 실측돼(prod 복원본, FK 2.9s·인덱스 0.3s 별도)
   api-entrypoint healthcheck 창(220s)에 여유가 크다 — 단계 분할이나 수동
   선실행 같은 복잡도를 살 이유가 없다.

@@ -134,8 +134,11 @@ DELETE FROM provider_sync.source_links WHERE feature_id = :loser
 RETURNING source_entity_key
 """
 
+# master/loser를 잠그면서 **kind까지 같이 읽는다** — cross-kind 병합 fail-close의
+# 입력이다(T-VN-35). 잠금과 같은 문에서 읽으므로 판정과 실행 사이에 kind가
+# 바뀔 수 없다.
 _LOCK_FEATURES_SQL: Final[str] = """
-SELECT feature_id
+SELECT feature_id, kind
 FROM feature.features
 WHERE feature_id IN (:master, :loser)
 ORDER BY feature_id
@@ -851,6 +854,13 @@ RETURNING curated_feature_id
 """
 
 # loser feature soft-delete (ADR-017).
+#
+# T-VN-35(ADR-084): core-only다 — **loser의 subtype 행은 남는다**. subtype FK는
+# ``ON DELETE CASCADE``지만 여기서 지우는 것은 행이 아니라 ``status``뿐이므로
+# CASCADE가 발동하지 않는다. 이는 의도된 상태다: ADR-017의 무기한 보관(place는
+# 하드 삭제 안 함)이 kind별 typed 값에도 그대로 적용돼야 병합 취소·감사가
+# 가능하다. 위 ``_reject_cross_kind_merge``가 master/loser kind 동일성을
+# 보장하므로 남은 subtype 행이 master의 subtype과 다른 계약을 가리킬 일도 없다.
 _SOFT_DELETE_LOSER_SQL: Final[str] = """
 WITH locked AS (
     SELECT feature_id, status AS previous_status
@@ -925,6 +935,33 @@ async def _master_candidate(session: AsyncSession, feature_id: str) -> MasterCan
     )
 
 
+def _reject_cross_kind_merge(
+    locked_kinds: dict[str, str], *, master_id: str, loser_id: str
+) -> None:
+    """kind가 다른 두 feature의 병합을 차단한다 (T-VN-35, ADR-084).
+
+    kind는 **어떤 subtype 테이블에 값이 사는지**를 결정한다(``feature_places``
+    /``feature_events``/…). 따라서 cross-kind 병합은 "place의 source_link를
+    event로 옮기고 place를 지우는" 형태가 되어, 옮겨간 provider 정체성과 남은
+    typed 값이 서로 다른 계약을 가리키게 된다 — 데이터 무결성을 직접 깬다.
+    dedup 후보 생성기는 같은 kind만 짝지어 주지만 그 보장은 repo 밖에 있었고,
+    ``apply_feature_merge``는 명시 id를 받는 공개 진입점이므로 여기서 닫는다.
+
+    두 행을 모두 잠근 뒤(같은 SELECT … FOR UPDATE) 판정하므로 TOCTOU가 없다.
+    한쪽 행이 없으면(=병합 대상 부재) kind 비교 자체가 성립하지 않고, 그
+    경우의 처리는 종전과 같이 후속 단계가 맡는다.
+    """
+
+    master_kind = locked_kinds.get(master_id)
+    loser_kind = locked_kinds.get(loser_id)
+    if master_kind is None or loser_kind is None or master_kind == loser_kind:
+        return
+    raise MergeConflictError(
+        "kind가 다른 feature는 병합할 수 없음 — "
+        f"master {master_id!r}={master_kind!r}, loser {loser_id!r}={loser_kind!r}"
+    )
+
+
 async def apply_feature_merge(
     session: AsyncSession,
     *,
@@ -942,12 +979,16 @@ async def apply_feature_merge(
     if master_id == loser_id:
         raise MergeConflictError(f"master와 loser가 같음 — {master_id!r}")
 
-    (
-        await session.execute(
-            text(_LOCK_FEATURES_SQL),
-            {"master": master_id, "loser": loser_id},
-        )
-    ).fetchall()
+    locked_kinds = {
+        str(row.feature_id): str(row.kind)
+        for row in (
+            await session.execute(
+                text(_LOCK_FEATURES_SQL),
+                {"master": master_id, "loser": loser_id},
+            )
+        ).fetchall()
+    }
+    _reject_cross_kind_merge(locked_kinds, master_id=master_id, loser_id=loser_id)
     (
         await session.execute(
             text(_LOCK_CURATION_LEGACY_PROJECTIONS_SQL),

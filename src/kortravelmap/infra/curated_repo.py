@@ -397,11 +397,14 @@ _FEATURE_COLUMNS: Final[str] = """
 # 비공개(draft/broken/hidden/inactive/soft-deleted) feature의 큐레이션 노출을 막는다
 # (T-VN-04, F-1). admin read는 기존대로 base table을 조인해 전 상태를 본다 —
 # 상태 sweep(``sweep_curated_feature_status``) 사이 창에서도 공개 read가 새지 않는다.
+# T-VN-35(0086): 응답이 ``f.detail``을 담으므로 base table이 아니라 subtype을
+# 조립하는 ``features_detailed``를 조인한다(public 쪽 ``public_features``는
+# 이미 같은 뷰 위에 서 있어 두 경로의 detail 조립 규칙이 하나로 유지된다).
 _FEATURE_FROM_SQL: Final[str] = """
 FROM feature.curated_features AS cf
 JOIN feature.curated_themes AS t ON t.theme_id = cf.theme_id
 JOIN feature.curated_sources AS s ON s.source_id = cf.source_id
-JOIN feature.features AS f ON f.feature_id = cf.feature_id
+JOIN feature.features_detailed AS f ON f.feature_id = cf.feature_id
 """
 
 _PUBLIC_FEATURE_FROM_SQL: Final[str] = """
@@ -679,7 +682,11 @@ candidates AS MATERIALIZED (
      AND sr.source_record_key = se.current_source_record_key
     JOIN provider_sync.source_links AS sl
       ON sl.source_entity_key = se.source_entity_key
-    JOIN feature.features AS f ON f.feature_id = sl.feature_id
+    -- curation source rule은 임의 JSON 경로(``rule.detail_selector``)와
+    -- ``payload``/``facility_info`` 하위를 탐침한다 — typed 컬럼으로 내릴 수
+    -- 없는 본질적 JSONB이므로 조립 뷰를 읽는다(T-VN-35). 잠금은 아래
+    -- ``locked_candidates``가 base table에 그대로 건다(뷰는 FOR KEY SHARE 불가).
+    JOIN feature.features_detailed AS f ON f.feature_id = sl.feature_id
     WHERE f.deleted_at IS NULL
       AND f.status = 'active'
       AND (
@@ -1989,7 +1996,8 @@ async def sync_concierge_themes(
                         f.detail #>> CAST(:id_path AS text[]) AS gid,
                         max(f.detail #>> CAST(:title_path AS text[])) AS gtitle,
                         count(*) AS cnt
-                    FROM feature.features AS f
+                    -- concierge youtube 그룹핑도 payload 하위 임의 경로다.
+                    FROM feature.features_detailed AS f
                     JOIN provider_sync.source_links AS sl
                       ON sl.feature_id = f.feature_id
                     JOIN provider_sync.source_entities AS se

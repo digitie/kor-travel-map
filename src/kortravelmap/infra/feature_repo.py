@@ -4,6 +4,22 @@
 source_records`` / ``provider_sync.source_links`` 3 테이블에 한 transaction으로
 upsert하는 **첫 DB write 경로** (ADR-004 raw SQL, ORM은 매핑만).
 
+T-VN-35 / ADR-084 — kind별 typed subtype
+----------------------------------------
+
+kind별 상세와 geometry의 **정본은 subtype 5종**(``feature_places``/
+``feature_events``/``feature_notices``/``feature_routes``/``feature_areas``)이다.
+core ``feature.features``에는 ``detail`` JSONB도 ``geom``도 없다(alembic 0084~0086).
+
+- **write**: ``upsert_feature``가 core upsert 직후 같은 트랜잭션에서
+  ``feature_subtype.subtype_upsert_sql``을 실행한다. 파생 detail 쓰기는 없다.
+- **read**: ``detail``/``geom``이 필요한 조회는 조립 view를 본다 —
+  전체는 ``feature.features_detailed``, 공개면 ``feature.public_features``
+  (같은 조립 위에 ADR-067 공개 술어를 얹은 view). 응답 shape은 종전과 같다.
+- **공간 술어만 예외**: view의 ``geom``은 조인 산출 컬럼이라 인덱스가 없으므로
+  bbox 후보 판정은 GiST가 있는 subtype 테이블을 직접 참조한다
+  (``_bbox_candidate_predicate_sql``).
+
 설계 원칙
 ---------
 - **raw SQL ``text()``만** (ADR-004) — `_SQL` 상수로 모아 EXPLAIN 검증 친화.
@@ -25,7 +41,8 @@ ADR 참조
 - ADR-004 — ORM 매핑만, 쿼리는 raw SQL ``text()``
 - ADR-012 — ``coord``(4326)만 저장, ``coord_5179``는 generated, ``ST_Transform`` 술어 금지
 - ADR-017 — source_record 이력 보존 (DO NOTHING)
-- ADR-018 — ``Feature.detail``은 kind에 맞는 모델 (JSONB 직렬화)
+- ADR-018 — ``Feature.detail``은 kind에 맞는 모델
+- ADR-084 — kind별 typed subtype이 상세·geometry 정본, core는 공통 축만
 """
 
 from __future__ import annotations
@@ -53,6 +70,7 @@ from kortravelmap.infra.feature_identity import (
     candidate_feature_uuid,
     verify_feature_uuid,
 )
+from kortravelmap.infra.feature_subtype import subtype_params, subtype_upsert_sql
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Iterable, Mapping, Sequence
@@ -138,16 +156,28 @@ env ``KOR_TRAVEL_MAP_PRICE_STALE_HIDE_DAYS`` (기본 4 = OpiNet 로테이션 1�
 # (``feature_identity.candidate_feature_uuid``)를 명시 INSERT하고, fill 트리거는
 # raw SQL 경로용 안전망으로 유지한다. ON CONFLICT 갱신 대상이 아니다(불변 키 —
 # conflict-update면 후보는 버려지고 기존 저장값이 정본).
-# RETURNING의 (xmax=0, feature_uuid)는 legacy-only·generator 이원화 fail-close에 쓰인다.
+#
+# T-VN-35(ADR-084) — ``geom``/``detail``은 **core 컬럼이 아니다**. geometry 정본은
+# ``feature_routes``/``feature_areas``, kind별 상세 정본은 subtype 5종이고 core는
+# kind 공통 축만 갖는다. writer는 core upsert 직후 같은 트랜잭션에서
+# ``feature_subtype.subtype_upsert_sql``을 실행한다(``upsert_feature``).
+#
+# RETURNING:
+# - ``(xmax = 0, feature_uuid)`` — legacy-only·generator 이원화 fail-close(0083).
+# - ``user_fenced`` — user_request fence가 이 문장에서 core 갱신을 막았는지. fence가
+#   걸리면 ``data_origin``/``data_version``이 그대로 보존되므로 **문장 실행 후의**
+#   이 술어가 곧 fence 판정이다(insert 경로는 항상 'provider'/0 → false). subtype도
+#   같은 fence를 따라야 하므로 호출자는 이 값으로 subtype 쓰기를 건너뛴다 —
+#   fence를 파생 계산하지 않고 DB가 실제로 남긴 상태에서 읽는다.
 _UPSERT_FEATURE_SQL: Final[str] = """
 INSERT INTO feature.features (
     feature_id, feature_uuid, kind, name, category,
-    coord, coord_precision_digits, geom,
+    coord, coord_precision_digits,
     address, legal_dong_code, road_name_code, road_address_management_no,
     admin_dong_code, sido_code, sigungu_code,
     urls, marker_icon, marker_color,
     parent_feature_id, sibling_group_id,
-    detail, raw_refs, status,
+    raw_refs, status,
     data_origin, data_version, user_change_kind, user_change_status,
     user_change_request_id, user_deleted_at, user_deleted_by, user_change_reason,
     created_at, updated_at, deleted_at
@@ -158,14 +188,11 @@ INSERT INTO feature.features (
              x_extension.ST_MakePoint(CAST(:lon AS double precision),
                           CAST(:lat AS double precision)), 4326) END,
     :coord_precision_digits,
-    CASE WHEN CAST(:geom_wkt AS text) IS NULL THEN NULL
-         ELSE x_extension.ST_SetSRID(
-             x_extension.ST_GeomFromText(CAST(:geom_wkt AS text)), 4326) END,
     CAST(:address AS jsonb), :legal_dong_code, :road_name_code,
     :road_address_management_no, :admin_dong_code, :sido_code, :sigungu_code,
     CAST(:urls AS jsonb), :marker_icon, :marker_color,
     :parent_feature_id, :sibling_group_id,
-    CAST(:detail AS jsonb), CAST(:raw_refs AS jsonb), :status,
+    CAST(:raw_refs AS jsonb), :status,
     'provider', 0, NULL, NULL, NULL, NULL, NULL, NULL,
     :created_at, :updated_at, :deleted_at
 )
@@ -185,9 +212,6 @@ ON CONFLICT (feature_id) DO UPDATE SET
     coord_precision_digits = CASE
         WHEN features.data_origin = 'user_request' AND features.data_version > 0
         THEN features.coord_precision_digits ELSE EXCLUDED.coord_precision_digits END,
-    geom = CASE
-        WHEN features.data_origin = 'user_request' AND features.data_version > 0
-        THEN features.geom ELSE EXCLUDED.geom END,
     address = CASE
         WHEN features.data_origin = 'user_request' AND features.data_version > 0
         THEN features.address ELSE EXCLUDED.address END,
@@ -224,21 +248,6 @@ ON CONFLICT (feature_id) DO UPDATE SET
     sibling_group_id = CASE
         WHEN features.data_origin = 'user_request' AND features.data_version > 0
         THEN features.sibling_group_id ELSE EXCLUDED.sibling_group_id END,
-    detail = CASE
-        WHEN features.data_origin = 'user_request' AND features.data_version > 0
-        THEN features.detail
-        WHEN features.kind = 'notice'
-          AND EXCLUDED.kind = 'notice'
-          AND EXCLUDED.detail #>> '{payload,valid_start_origin}' = 'first_probe'
-          AND features.detail ? 'valid_start_time'
-          AND features.detail -> 'valid_start_time' <> 'null'::jsonb
-        THEN jsonb_set(
-            EXCLUDED.detail,
-            '{valid_start_time}',
-            features.detail -> 'valid_start_time',
-            true
-        )
-        ELSE EXCLUDED.detail END,
     raw_refs = CASE
         WHEN features.data_origin = 'user_request' AND features.data_version > 0
         THEN features.raw_refs ELSE EXCLUDED.raw_refs END,
@@ -285,7 +294,29 @@ ON CONFLICT (feature_id) DO UPDATE SET
         THEN features.deleted_at
         ELSE EXCLUDED.deleted_at
     END
-RETURNING (xmax = 0) AS inserted, CAST(feature_uuid AS text) AS feature_uuid
+RETURNING
+    (xmax = 0) AS inserted,
+    CAST(feature_uuid AS text) AS feature_uuid,
+    (data_origin = 'user_request' AND data_version > 0) AS user_fenced
+"""
+
+
+# notice ``valid_start_time`` 최초 관측 보존 (종전 core ``detail`` upsert의
+# ``valid_start_origin='first_probe'`` 분기). provider가 "처음 관측한 시각"을
+# 발효 시각으로 추정해 보내는 계보는 재적재마다 시작 시각이 앞뒤로 흔들리므로,
+# 이미 저장된 값이 있으면 그것을 정본으로 유지한다.
+#
+# 종전에는 core upsert 한 문장 안의 ``ON CONFLICT`` CASE였다. detail이 사라지고
+# 판정 대상이 subtype typed 컬럼으로 옮겨진 뒤에는 subtype upsert가 공용 헬퍼
+# (``feature_subtype.subtype_upsert_sql``)에서 생성되므로 kind 전용 분기를 그 안에
+# 넣지 않고, **같은 트랜잭션에서 행 잠금을 잡고 직전 값을 읽어** 파라미터로 넘긴다.
+# ``FOR UPDATE``가 동시 writer를 직렬화하므로 read-then-write 경합이 없다(행이
+# 없으면 잠글 것도 없고 뒤이은 INSERT의 유니크 인덱스가 직렬화한다).
+_LOCK_NOTICE_VALID_START_SQL: Final[str] = """
+SELECT valid_start_time
+FROM feature.feature_notices
+WHERE feature_id = :feature_id
+FOR UPDATE
 """
 
 _UPSERT_PROVIDER_VERSION_SQL: Final[str] = """
@@ -402,10 +433,15 @@ ON CONFLICT (feature_id, source_entity_key) DO UPDATE SET
 RETURNING (xmax = 0) AS inserted
 """
 
-# feature 상세 row projection — raw read(``feature.features``)와 공개
+# feature 상세 row projection — raw read(``feature.features_detailed``)와 공개
 # read(``feature.public_features``, ADR-067)가 같은 컬럼 목록을 공유한다.
 # ``feature_uuid``는 T-VN-32B dual read의 UUID 정본 병행 노출(additive) —
 # 공개 view는 alembic 0080이 재고정해 같은 컬럼을 가진다.
+#
+# T-VN-35D(ADR-084) — ``detail``/``geom``은 core 컬럼이 아니라 **view가 subtype
+# 5종에서 조립한 결과**다. 따라서 이 projection을 쓰는 read는 base table이 아니라
+# ``features_detailed``(전체) / ``public_features``(공개 gate = 같은 조립 위에
+# status·deleted_at 술어)를 조회한다. 응답 shape은 종전과 동일하다.
 _FEATURE_ROW_COLUMNS_SQL: Final[str] = """
     feature_id, CAST(feature_uuid AS text) AS feature_uuid, kind, name, category,
     x_extension.ST_X(coord) AS lon, x_extension.ST_Y(coord) AS lat,
@@ -426,13 +462,13 @@ _FEATURE_ROW_COLUMNS_SQL: Final[str] = """
 
 _GET_FEATURE_SQL: Final[str] = f"""
 SELECT {_FEATURE_ROW_COLUMNS_SQL}
-FROM feature.features
+FROM feature.features_detailed
 WHERE feature_id = :feature_id
 """
 
 _GET_FEATURES_BY_IDS_SQL: Final[str] = f"""
 SELECT {_FEATURE_ROW_COLUMNS_SQL}
-FROM feature.features
+FROM feature.features_detailed
 WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
 """
 
@@ -564,28 +600,32 @@ def _canonical_notice_feature_sql(feature_alias: str, source_alias: str) -> str:
 # (§9 "활성 notice만 표시", #632). KREX feed 소멸 reconcile·KMA 해제가 채운
 # valid_end_time이 이 필터로 즉시 반영된다.
 #
-# 방어적 cast (report §2 D-9-7 (+ T-VN-06 row)): detail->>'valid_end_time'은
-# free-form jsonb라 오염된 한 행(빈 문자열·garbage·잘못된 timezone)이 직접
-# CAST에서 예외를 던지면 이 함수를 공유하는 **모든** 공개 read가 500이 된다.
-# #745가 이 함수를 curated/curation/collection 표면의 notice 감산 정본으로
-# 만들었으므로, 여기 한 곳의 가드가 그 표면들까지 동시에 보호한다.
-# pg_input_is_valid(PG16+, 배포/테스트 이미지 모두 16 고정)로 가드하고,
-# 파싱 불가면 fail-closed로 그 notice를 제외한다(ELSE false — 노출 아님).
-# JSON null/키 부재는 기존 의미 유지(종료시각 없음 = 활성). CASE는 THEN이
-# WHEN 참일 때만 평가되는 것을 보장한다(AND/OR는 평가 순서 미보장).
-# typed notice 재설계·관측(카운터)은 T-VN-37 소유.
+# T-VN-35D(ADR-084) — **typed timestamptz 비교**. 종전에는 free-form jsonb
+# ``detail->>'valid_end_time'``을 문자열로 읽어 CAST했고, 오염된 한 행(빈 문자열·
+# garbage·잘못된 timezone)이 이 함수를 공유하는 **모든** 공개 read를 500으로
+# 만들 수 있어 ``pg_input_is_valid`` 가드를 덧대야 했다(report §2 D-9-7 / T-VN-06).
+# ``feature_notices.valid_end_time``은 timestamptz 컬럼이라 파싱 불가 값이 애초에
+# 존재할 수 없다 — 가드도, 문자열 파싱도 사라진다. 이것이 35D의 최대 실익이다.
+#
+# 필터 shape은 유지한다: 이 fragment는 alias 하나만 받아 WHERE/ON에 그대로 덧붙는
+# **자립형**이어야 한다(#745 이후 curated/curation/collection이 임의 alias로 공유 —
+# ``curated_repo``/``curation_repo``). 따라서 LEFT JOIN이 아니라 상관 서브쿼리로
+# subtype을 참조한다. 호출자의 FROM 절을 바꾸지 않으므로 감산 정본이 한 곳에 남는다.
+# subtype 행이 없거나 ``valid_end_time``이 NULL이면 "종료시각 없음 = 활성"으로
+# 종전 의미를 유지한다. 인덱스는 ``idx_feature_notices_validity``(0085).
 def _ended_notice_hidden_sql(feature_alias: str) -> str:
     """종료된 notice를 숨기는 SQL fragment를 feature alias에 맞춰 만든다."""
 
     return f"""
   AND (
     {feature_alias}.kind <> 'notice'
-    OR ({feature_alias}.detail ->> 'valid_end_time') IS NULL
-    OR CASE
-         WHEN pg_input_is_valid({feature_alias}.detail ->> 'valid_end_time', 'timestamptz')
-         THEN CAST({feature_alias}.detail ->> 'valid_end_time' AS timestamptz) > now()
-         ELSE false
-       END
+    OR NOT EXISTS (
+      SELECT 1
+      FROM feature.feature_notices AS ended_notice
+      WHERE ended_notice.feature_id = {feature_alias}.feature_id
+        AND ended_notice.valid_end_time IS NOT NULL
+        AND ended_notice.valid_end_time <= now()
+    )
   )
 """
 
@@ -782,11 +822,25 @@ def _bbox_candidate_predicate_sql(feature_alias: str) -> str:
       정확하다(점의 MBR = 점 자신). route/area에 geometry가 있으면 이 arm을 타지 않고
       아래 exact geometry arm만 사용하며, geometry가 없는 legacy route/area만 coord로
       fallback한다.
-    - **route/area ``geom``**: ``&&`` MBR prefilter만으로는 false positive가 실재하므로
-      (F-8) partial GiST(``idx_features_geom_gist``)를 ``&&``로 구동한 뒤 exact
-      ``ST_Intersects``를 덧대 실제 envelope 교차만 남긴다. ``ST_Transform``을 술어에
-      넣지 않는다(ADR-012). 두 arm은 각각 index 가능해 planner가 BitmapOr로 결합한다
-      (features base-table seq scan 없음 — T-VN-21 tier-1 gate).
+    - **route/area geometry**: ``&&`` MBR prefilter만으로는 false positive가 실재하므로
+      (F-8) subtype GiST(``idx_feature_routes_geom_gist``/``idx_feature_areas_geom_gist``)를
+      ``&&``로 구동한 뒤 exact ``ST_Intersects``를 덧대 실제 envelope 교차만 남긴다.
+      ``ST_Transform``을 술어에 넣지 않는다(ADR-012).
+
+    T-VN-35D(ADR-084) 재작성 — geometry 정본이 subtype으로 옮겨졌다. **공간 술어만은
+    조립 view(``features_detailed``/``public_features``)를 쓸 수 없다**: view의
+    ``geom``은 ``COALESCE(routes.geom, areas.geom)`` 산출 컬럼이라 인덱스가 없고,
+    그대로 술어에 넣으면 features 730k행 seq scan이 된다(T-VN-21 tier-1 gate 위반).
+    그래서 GiST가 붙어 있는 subtype 테이블을 직접 참조하되, 두 arm이 모두
+    ``{feature_alias}`` 한 테이블에 대한 indexable 술어로 남는 형태를 고른다:
+
+    - geometry 교차 후보는 **비상관 ``ARRAY(SELECT ...)``**(InitPlan — 쿼리당 1회
+      평가, bbox로 이미 좁혀진 작은 집합)로 뽑아 ``feature_id = ANY(...)``로 건다.
+      PK 인덱스를 타므로 planner가 coord GiST arm과 **BitmapOr**로 결합할 수 있다
+      (상관 서브쿼리를 OR 아래 두면 semi-join으로 승격되지 않아 seq scan이 된다).
+    - coord arm의 "geometry를 가진 route/area 제외"는 arm 내부 AND라 bitmap이 고른
+      행에만 걸리는 recheck 필터이고, ``kind`` 검사가 먼저라 place/event/price/
+      weather는 subtype 조회 없이 단락된다.
     """
     if not feature_alias.isidentifier():
         raise ValueError("feature alias must be a SQL identifier")
@@ -794,17 +848,35 @@ def _bbox_candidate_predicate_sql(feature_alias: str) -> str:
     return f"""(
     (
       {feature_alias}.coord IS NOT NULL
+      AND {feature_alias}.coord OPERATOR(x_extension.&&) {env}
       AND (
         {feature_alias}.kind NOT IN ('route', 'area')
-        OR {feature_alias}.geom IS NULL
+        OR (
+          NOT EXISTS (
+            SELECT 1
+            FROM feature.feature_routes AS owned_route
+            WHERE owned_route.feature_id = {feature_alias}.feature_id
+          )
+          AND NOT EXISTS (
+            SELECT 1
+            FROM feature.feature_areas AS owned_area
+            WHERE owned_area.feature_id = {feature_alias}.feature_id
+          )
+        )
       )
-      AND {feature_alias}.coord OPERATOR(x_extension.&&) {env}
     )
-    OR (
-      {feature_alias}.kind IN ('route', 'area')
-      AND {feature_alias}.geom IS NOT NULL
-      AND {feature_alias}.geom OPERATOR(x_extension.&&) {env}
-      AND x_extension.ST_Intersects({feature_alias}.geom, {env})
+    OR {feature_alias}.feature_id = ANY (
+      ARRAY(
+        SELECT bbox_hit_route.feature_id
+        FROM feature.feature_routes AS bbox_hit_route
+        WHERE bbox_hit_route.geom OPERATOR(x_extension.&&) {env}
+          AND x_extension.ST_Intersects(bbox_hit_route.geom, {env})
+        UNION ALL
+        SELECT bbox_hit_area.feature_id
+        FROM feature.feature_areas AS bbox_hit_area
+        WHERE bbox_hit_area.geom OPERATOR(x_extension.&&) {env}
+          AND x_extension.ST_Intersects(bbox_hit_area.geom, {env})
+      )
     )
   )"""
 
@@ -1698,13 +1770,20 @@ RETURNING f.feature_id
 
 # 과거 보정 — kind='area'인데 경계 geometry가 없는 provider feature만 inactive 전환.
 # 새 place row와 같은 source_entity_id를 공유할 수 있으므로 entity-id 기반 폐업 메서드를
-# 재사용하지 않고 feature kind/geom 조건을 직접 건다.
+# 재사용하지 않고 feature kind/geometry 조건을 직접 건다.
+#
+# **0086 이후 write가 선차단한다** — geometry 없는 area/route bundle은
+# ``upsert_feature``가 ``ValueError``로 거부하므로 이 상태는 새로 생기지 않는다.
+# 남은 역할은 0086 이전에 적재된 잔재를 한 번 정리하는 것뿐이며, "geometry 없음"은
+# 이제 ``features.geom IS NULL``이 아니라 **``feature_areas`` 행 부재**로 판정한다.
 _INACTIVATE_GEOMETRYLESS_AREA_BY_SOURCE_SQL: Final[str] = """
 UPDATE feature.features AS f
 SET status = 'inactive', deleted_at = now(), updated_at = now()
 WHERE f.deleted_at IS NULL
   AND f.kind = 'area'
-  AND f.geom IS NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM feature.feature_areas AS a WHERE a.feature_id = f.feature_id
+  )
   AND COALESCE(f.data_origin, 'provider') <> 'user_request'
   AND f.feature_id IN (
     SELECT sl.feature_id
@@ -1900,8 +1979,17 @@ class NearbyFeaturePage:
     next_cursor: str | None
 
 
+#: geometry가 필수인 kind — subtype ``geom``이 NOT NULL이라 WKT 없이는 행을
+#: 만들 수 없다(0086). ``feature_subtype._GEOM_EXPR``와 같은 집합이다.
+_GEOMETRY_SUBTYPE_KINDS: Final[frozenset[str]] = frozenset({"route", "area"})
+
+
 def _feature_params(feature: Feature) -> dict[str, Any]:
-    """``Feature`` DTO → ``_UPSERT_FEATURE_SQL`` bind params."""
+    """``Feature`` DTO → ``_UPSERT_FEATURE_SQL`` bind params.
+
+    ``geom_wkt``은 core 컬럼이 아니라 route/area **subtype** upsert의 바인딩이다
+    (``feature_subtype.subtype_upsert_sql``이 같은 이름의 파라미터를 쓴다).
+    """
     coord = feature.coord
     addr = feature.address
     return {
@@ -1928,7 +2016,6 @@ def _feature_params(feature: Feature) -> dict[str, Any]:
         "marker_color": feature.marker_color,
         "parent_feature_id": feature.parent_feature_id,
         "sibling_group_id": feature.sibling_group_id,
-        "detail": (feature.detail.model_dump_json() if feature.detail is not None else "{}"),
         "raw_refs": _dump_raw_refs(feature),
         "status": feature.status.value,
         "created_at": feature.created_at,
@@ -2005,8 +2092,83 @@ def _source_link_params(link: SourceLink) -> dict[str, Any]:
     }
 
 
+def _feature_detail_payload(feature: Feature) -> dict[str, Any] | None:
+    """``Feature.detail`` → subtype 매핑 입력 (JSON mode dict).
+
+    ``mode="json"``으로 덤프해 date/datetime이 ISO 문자열이 되게 한다 —
+    ``feature_subtype``의 파싱 규칙(및 0084~0086 backfill의 SQL 판정)이 문자열
+    기준이므로 writer와 backfill이 **같은 판정**을 하도록 맞춘다.
+    """
+    if feature.detail is None:
+        return None
+    return feature.detail.model_dump(mode="json")
+
+
+async def _upsert_feature_subtype(
+    session: AsyncSession,
+    feature: Feature,
+    *,
+    stored_feature_uuid: str,
+    geom_wkt: str | None,
+) -> None:
+    """kind별 typed subtype upsert (core upsert와 **같은 트랜잭션**).
+
+    - ``feature_uuid``는 core upsert의 RETURNING 값을 그대로 쓴다. conflict-update
+      경로에서 정본은 이미 저장돼 있던 UUID이므로 후보를 재계산하면 identity 사본
+      FK(``fk_*_identity_pair``)가 깨진다 — 파생 계산 금지.
+    - price/weather는 subtype이 없어 ``subtype_upsert_sql``이 ``None``을 준다.
+    """
+    kind = feature.kind.value
+    sql = subtype_upsert_sql(kind)
+    if sql is None:
+        return
+    detail = _feature_detail_payload(feature)
+    params = subtype_params(
+        feature_id=feature.feature_id,
+        feature_uuid=stored_feature_uuid,
+        kind=kind,
+        detail=detail,
+    )
+    if params is None:  # pragma: no cover - SUBTYPE_TABLES와 동시에만 어긋난다
+        return
+    if kind in _GEOMETRY_SUBTYPE_KINDS:
+        params["geom_wkt"] = geom_wkt
+    if kind == "notice" and _is_first_probe_notice(detail):
+        params["valid_start_time"] = await _preserved_notice_valid_start(
+            session, feature.feature_id, params["valid_start_time"]
+        )
+    await session.execute(text(sql), params)
+
+
+def _is_first_probe_notice(detail: Mapping[str, Any] | None) -> bool:
+    """``detail.payload.valid_start_origin``이 ``'first_probe'``인가.
+
+    판정은 **DTO 쪽 dict**에서 한다 — ``subtype_params``는 jsonb 컬럼을 JSON
+    문자열로 직렬화해 돌려주므로 그 결과를 다시 파싱하면 규칙이 두 벌이 된다.
+    """
+    if detail is None:
+        return False
+    payload = detail.get("payload")
+    return isinstance(payload, dict) and payload.get("valid_start_origin") == "first_probe"
+
+
+async def _preserved_notice_valid_start(
+    session: AsyncSession, feature_id: str, incoming: Any
+) -> Any:
+    """``valid_start_origin='first_probe'`` 계보의 최초 관측 시각을 보존한다.
+
+    provider가 "지금 처음 봤다"를 발효 시각으로 추정해 보내는 계보(KREX 돌발 등)는
+    재적재마다 시작 시각이 흔들린다. 이미 저장된 값이 있으면 그것이 정본이고,
+    없으면(신규) 들어온 값을 그대로 쓴다.
+    """
+    stored = (
+        await session.execute(text(_LOCK_NOTICE_VALID_START_SQL), {"feature_id": feature_id})
+    ).scalar_one_or_none()
+    return stored if stored is not None else incoming
+
+
 async def upsert_feature(session: AsyncSession, feature: Feature) -> bool:
-    """``feature.features`` upsert. 신규 INSERT면 ``True``, 갱신이면 ``False``.
+    """``feature.features`` + kind별 subtype upsert. 신규 INSERT면 ``True``.
 
     ``coord_5179``는 STORED generated이라 INSERT/UPDATE 대상에서 제외 (ADR-012).
 
@@ -2015,17 +2177,48 @@ async def upsert_feature(session: AsyncSession, feature: Feature) -> bool:
     fail-close 검증한다 — 신규 insert면 보낸 후보와 동일해야 하고(generator
     이원화 차단), conflict-update면 기존 저장값이 정본이다
     (``FeatureIdentityInvariantError``).
+
+    T-VN-35(ADR-084): core는 kind 공통 축만 쓰고 kind별 상세·geometry는 subtype이
+    정본이다. 두 write는 **한 트랜잭션**이며 순서가 강제된다 — subtype의
+    ``(feature_id, kind)``/``(feature_id, feature_uuid)`` FK가 core 행을 먼저
+    요구하기 때문이다(commit 경계는 종전처럼 호출자 책임).
+
+    **user_request fence**: provider 재적재가 사용자 편집을 덮지 않는 규칙은 core
+    ``ON CONFLICT`` CASE가 강제한다. core가 fence로 갱신되지 않았으면 subtype도
+    갱신하지 않아야 상세/geometry가 core와 어긋나지 않으므로, core RETURNING이
+    남긴 ``user_fenced``를 기준으로 subtype 쓰기를 통째로 건너뛴다.
+
+    **geometry 없는 route/area는 거부한다**(``ValueError``). subtype ``geom``이
+    NOT NULL이라 WKT 없이는 행을 만들 수 없다 — 종전에는
+    ``inactivate_geometryless_area_features_by_source``가 적재 후에 보정하던
+    상태이며, 0086 이후에는 write 시점에 선차단한다(fail-close).
     """
     params = _feature_params(feature)
+    kind = feature.kind.value
+    geom_wkt = cast("str | None", params.pop("geom_wkt"))
+    if kind in _GEOMETRY_SUBTYPE_KINDS and geom_wkt is None:
+        raise ValueError(
+            f"feature {feature.feature_id!r}: kind={kind!r} requires geometry — "
+            "feature.geom is None but feature_routes/feature_areas.geom is NOT NULL "
+            "(ADR-084 / alembic 0086). 좌표만 있는 record는 place로 적재해야 한다."
+        )
     result = await session.execute(text(_UPSERT_FEATURE_SQL), params)
     row = result.mappings().one()
     inserted = bool(row["inserted"])
+    stored_feature_uuid = str(row["feature_uuid"])
     verify_feature_uuid(
         feature.feature_id,
-        row["feature_uuid"],
+        stored_feature_uuid,
         sent_feature_uuid=params["feature_uuid"],
         inserted=inserted,
     )
+    if not bool(row["user_fenced"]):
+        await _upsert_feature_subtype(
+            session,
+            feature,
+            stored_feature_uuid=stored_feature_uuid,
+            geom_wkt=geom_wkt,
+        )
     await session.execute(
         text(_UPSERT_PROVIDER_VERSION_SQL),
         {"feature_id": feature.feature_id, "payload": _feature_snapshot(feature)},
@@ -2930,7 +3123,7 @@ global_feature_wins AS (
         f.feature_id,
         f.status AS old_status,
         f.deleted_at AS old_deleted_at,
-        CAST(f.detail ->> 'valid_end_time' AS timestamptz) AS old_valid_end_time,
+        n.valid_end_time AS old_valid_end_time,
         lifecycle.has_present_winning_lineage,
         lifecycle.has_unknown_winning_lineage,
         CASE
@@ -2944,21 +3137,20 @@ global_feature_wins AS (
               WHEN f.status = 'active'
                AND f.deleted_at IS NULL
                AND (
-                   (f.detail ->> 'valid_end_time') IS NULL
-                   OR CAST(f.detail ->> 'valid_end_time' AS timestamptz)
-                      > CAST(:evaluated_at AS timestamptz)
+                   n.valid_end_time IS NULL
+                   OR n.valid_end_time > CAST(:evaluated_at AS timestamptz)
                )
               THEN CASE
-                WHEN (f.detail ->> 'valid_end_time') IS NULL
+                WHEN n.valid_end_time IS NULL
                 THEN NULL
                 ELSE GREATEST(
                     lifecycle.max_present_valid_until,
-                    CAST(f.detail ->> 'valid_end_time' AS timestamptz)
+                    n.valid_end_time
                 )
               END
               ELSE lifecycle.max_present_valid_until
             END
-            ELSE CAST(f.detail ->> 'valid_end_time' AS timestamptz)
+            ELSE n.valid_end_time
           END
           WHEN lifecycle.has_present_winning_lineage
           THEN lifecycle.max_present_valid_until
@@ -2975,6 +3167,8 @@ global_feature_wins AS (
     FROM feature.features AS f
     JOIN feature_lifecycle AS lifecycle
       ON lifecycle.feature_id = f.feature_id
+    LEFT JOIN feature.feature_notices AS n
+      ON n.feature_id = f.feature_id
 ), lifecycle_targets AS (
     SELECT
         desired.*,
@@ -3016,47 +3210,59 @@ global_feature_wins AS (
         ) AS will_be_visible
     FROM lifecycle_targets AS target
 )
-UPDATE feature.features AS f
-SET detail = jsonb_set(
-        f.detail,
-        '{valid_end_time}',
-        CASE
-          WHEN target.desired_valid_end_time IS NULL
-          THEN 'null'::jsonb
-          ELSE to_jsonb(
-              CAST(target.desired_valid_end_time AS text)
-          )
+-- T-VN-35(ADR-084): 효력 종료 시각의 정본은 ``feature_notices.valid_end_time``
+-- (timestamptz)이다. core는 status/deleted_at/updated_at만 옮기고, 시각 갱신은
+-- 같은 문장의 두 번째 data-modifying CTE가 typed 컬럼에 직접 쓴다 — 종전
+-- ``jsonb_set(detail, '{valid_end_time}', to_jsonb(text))`` 왕복(문자열화 →
+-- 재파싱)이 사라진다. CTE 두 개는 **한 statement·한 snapshot**이므로 core 상태와
+-- 시각이 갈라질 창이 없다. 마지막 SELECT는 core CTE만 읽지만 data-modifying CTE는
+-- 참조 여부와 무관하게 항상 완주하므로(PostgreSQL 계약) notice 갱신이 누락되지
+-- 않고, subtype 행이 없는 feature도 RETURNING 집계에서 빠지지 않는다.
+--
+-- ``ck_feature_notices_validity``(valid_start_time <= valid_end_time)를 어기는
+-- 값이 나오면 트랜잭션이 실패한다 — 0085가 고른 fail-close다(발효 전에 끝나는
+-- 효력 기간은 데이터 결함이지 표현할 상태가 아니다).
+, core_update AS (
+    UPDATE feature.features AS f
+    SET status = CASE
+          WHEN target.should_activate
+          THEN 'active'
+          ELSE f.status
         END,
-        true
-    ),
-    status = CASE
-      WHEN target.should_activate
-      THEN 'active'
-      ELSE f.status
-    END,
-    deleted_at = CASE
-      WHEN target.should_activate
-      THEN NULL
-      ELSE f.deleted_at
-    END,
-    updated_at = now()
-FROM lifecycle_changes AS target
-WHERE f.feature_id = target.feature_id
-  AND (
-      target.old_valid_end_time
-        IS DISTINCT FROM target.desired_valid_end_time
-      OR (
-          target.should_activate
-          AND (
-              target.old_deleted_at IS NOT NULL
-              OR target.old_status <> 'active'
+        deleted_at = CASE
+          WHEN target.should_activate
+          THEN NULL
+          ELSE f.deleted_at
+        END,
+        updated_at = now()
+    FROM lifecycle_changes AS target
+    WHERE f.feature_id = target.feature_id
+      AND (
+          target.old_valid_end_time
+            IS DISTINCT FROM target.desired_valid_end_time
+          OR (
+              target.should_activate
+              AND (
+                  target.old_deleted_at IS NOT NULL
+                  OR target.old_status <> 'active'
+              )
           )
       )
-  )
-RETURNING
-    f.feature_id,
-    (NOT target.was_visible AND target.will_be_visible) AS reopened,
-    (target.was_visible AND NOT target.will_be_visible) AS closed
+    RETURNING
+        f.feature_id,
+        target.desired_valid_end_time AS desired_valid_end_time,
+        (NOT target.was_visible AND target.will_be_visible) AS reopened,
+        (target.was_visible AND NOT target.will_be_visible) AS closed
+), notice_update AS (
+    UPDATE feature.feature_notices AS n
+    SET valid_end_time = core_update.desired_valid_end_time
+    FROM core_update
+    WHERE n.feature_id = core_update.feature_id
+      AND n.valid_end_time IS DISTINCT FROM core_update.desired_valid_end_time
+    RETURNING n.feature_id
+)
+SELECT feature_id, reopened, closed
+FROM core_update
 """
         )
     return (
@@ -3416,16 +3622,20 @@ async def _reconcile_persisted_notice_scope(
 
 # 만료 notice purge (docs/etl/notice-feature-etl.md §9) — 종료일(없으면 발표일)
 # +1년 지난 notice를 soft-delete. maintenance job에서 주기 실행(#632).
+#
+# T-VN-35D(ADR-084): 효력 기간을 typed 컬럼에서 읽는다. ``kind = 'notice'`` 술어도
+# 따로 걸지 않는다 — ``feature_notices`` 조인 자체가 kind 필터다(kind 상수 CHECK +
+# ``(feature_id, kind)`` FK). 종전에는 free-form ``detail`` 문자열을 무방비로
+# CAST해서, 파싱 불가 값 한 행이면 purge job 전체가 실패했다.
 _PURGE_EXPIRED_NOTICES_SQL: Final[str] = """
 UPDATE feature.features AS f
 SET status = 'inactive', deleted_at = now(), updated_at = now()
-WHERE f.kind = 'notice'
+FROM feature.feature_notices AS n
+WHERE n.feature_id = f.feature_id
   AND f.deleted_at IS NULL
   AND COALESCE(f.data_origin, 'provider') <> 'user_request'
-  AND COALESCE(
-        CAST(f.detail ->> 'valid_end_time' AS timestamptz),
-        CAST(f.detail ->> 'valid_start_time' AS timestamptz)
-      ) < now() - CAST(CAST(:retention AS text) AS interval)
+  AND COALESCE(n.valid_end_time, n.valid_start_time)
+      < now() - CAST(CAST(:retention AS text) AS interval)
 RETURNING f.feature_id
 """
 
@@ -3731,29 +3941,45 @@ async def get_primary_source_detail(
     return data
 
 
+# T-VN-35(ADR-084): 전화번호 정본은 ``feature_places.phones``(text[])다.
+# ``feature_places`` 조인이 곧 ``kind = 'place'`` 필터이며, "번호 없음"은
+# jsonb 배열 길이가 아니라 배열 기수로 판정한다.
 _FIND_PLACE_NO_PHONE_SQL: Final[str] = """
 SELECT f.feature_id, f.name, f.address, sr.source_entity_id
 FROM feature.features f
+JOIN feature.feature_places p
+  ON p.feature_id = f.feature_id
 JOIN provider_sync.source_links sl
   ON sl.feature_id = f.feature_id AND sl.is_primary_source
 JOIN provider_sync.source_entities sr
   ON sr.source_entity_key = sl.source_entity_key
 WHERE f.deleted_at IS NULL
-  AND f.kind = 'place'
   AND sr.provider = :provider
   AND sr.dataset_key = :dataset_key
   AND sr.source_entity_type = :source_entity_type
-  AND jsonb_array_length(COALESCE(f.detail -> 'phones', '[]'::jsonb)) = 0
+  AND cardinality(p.phones) = 0
 ORDER BY f.feature_id
 LIMIT :limit
 """
 
+# phones 쓰기는 subtype 한 곳이고, core는 표시 캐시 무효화용 ``updated_at``만
+# 따라 움직인다(한 statement — 두 CTE는 같은 snapshot). place subtype 행이 없으면
+# 아무것도 쓰지 않고 ``False``를 돌려준다(종전에는 kind와 무관하게 detail에
+# ``phones``를 밀어넣을 수 있었다).
 _SET_FEATURE_PHONES_SQL: Final[str] = """
-UPDATE feature.features
-SET detail = jsonb_set(detail, '{phones}', CAST(:phones AS jsonb)),
-    updated_at = now()
-WHERE feature_id = :feature_id
-RETURNING feature_id
+WITH place AS (
+    UPDATE feature.feature_places AS p
+    SET phones = ARRAY(SELECT jsonb_array_elements_text(CAST(:phones AS jsonb)))
+    WHERE p.feature_id = :feature_id
+    RETURNING p.feature_id
+), core AS (
+    UPDATE feature.features AS f
+    SET updated_at = now()
+    FROM place
+    WHERE f.feature_id = place.feature_id
+    RETURNING f.feature_id
+)
+SELECT feature_id FROM place
 """
 
 
@@ -3768,8 +3994,9 @@ async def find_place_features_without_phone(
     """전화번호 없는 place feature 후보 list (phone enrichment 대상, 읽기 전용).
 
     primary source가 ``(provider, dataset_key, source_entity_type)``인 place 중
-    ``detail.phones``가 빈 배열인 feature를 반환한다(`feature_id`/`name`/`address`/
-    `source_entity_id`). 외부 phone lookup(kakao/naver/google)은 호출자 책임(ADR-006).
+    ``feature_places.phones``가 빈 배열인 feature를 반환한다(`feature_id`/`name`/
+    `address`/`source_entity_id`). 외부 phone lookup(kakao/naver/google)은 호출자
+    책임(ADR-006).
     """
     import json
 
@@ -3799,10 +4026,11 @@ async def find_place_features_without_phone(
 
 
 async def set_feature_phones(session: AsyncSession, feature_id: str, phones: list[str]) -> bool:
-    """feature의 ``detail.phones`` 배열을 통째로 교체. 갱신되면 ``True``.
+    """place feature의 ``feature_places.phones`` 배열을 통째로 교체. 갱신되면 ``True``.
 
-    phone enrichment가 정규화·dedup·max3을 적용한 최종 배열을 넘긴다. commit은
-    호출자 책임.
+    phone enrichment가 정규화·dedup·max3을 적용한 최종 배열을 넘긴다. place가 아닌
+    feature(또는 subtype 행이 없는 feature)는 아무것도 쓰지 않고 ``False``.
+    commit은 호출자 책임.
     """
     import json
 

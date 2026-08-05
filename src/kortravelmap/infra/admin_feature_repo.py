@@ -24,6 +24,7 @@ from kortravelmap.infra.feature_identity import (
     candidate_feature_uuid,
     verify_feature_uuid,
 )
+from kortravelmap.infra.feature_subtype import subtype_params, subtype_upsert_sql
 from kortravelmap.infra.merge_repo import (
     MergeConflictError,
     MergeNotFoundError,
@@ -542,28 +543,48 @@ def _admin_bbox_envelope_sql() -> str:
     )
 
 
-def _admin_bbox_candidate_sql(alias: str) -> str:
-    """Admin item/cluster가 공유하는 exact 공간 후보 술어."""
+def _admin_geometry_hits_sql() -> str:
+    """bbox와 실제로 교차한 route/area subtype geometry (T-VN-35, ADR-084).
+
+    geometry 정본이 ``feature_routes``/``feature_areas``로 옮겨졌으므로(0086)
+    bbox 술어를 **subtype 쪽에서 먼저** 평가한다 — 각 subtype의 GiST 인덱스
+    (``idx_feature_routes_geom_gist``/``idx_feature_areas_geom_gist``)에
+    ``&&``가 그대로 내려간다. core를 LEFT JOIN한 뒤 ``COALESCE(geom)``에
+    술어를 걸면 인덱스를 못 쓰므로 이 형태가 정본이다.
+
+    두 subtype은 상호 배타(``(feature_id, kind)`` 복합 FK + kind 상수 CHECK)
+    이므로 ``UNION ALL``이 ``feature_id`` 유일성을 유지한다 — LEFT JOIN이
+    행을 증식시키지 않는다.
+    """
+
+    envelope = _admin_bbox_envelope_sql()
+    return f"""
+  SELECT feature_id, geom
+  FROM feature.feature_routes
+  WHERE geom OPERATOR(x_extension.&&) {envelope}
+    AND x_extension.ST_Intersects(geom, {envelope})
+  UNION ALL
+  SELECT feature_id, geom
+  FROM feature.feature_areas
+  WHERE geom OPERATOR(x_extension.&&) {envelope}
+    AND x_extension.ST_Intersects(geom, {envelope})
+"""
+
+
+def _admin_bbox_coord_where_sql(alias: str) -> str:
+    """route/area가 **아닌** kind의 coord bbox 후보 술어.
+
+    T-VN-35 이후 route/area는 geometry NOT NULL인 subtype 행으로만 존재하므로
+    (0086) 종전의 "geometry 없는 route/area는 coord로 잡는다"(``geom IS NULL``
+    분기)는 표현 불가능한 상태를 위한 우회였고 여기서 사라진다.
+    """
 
     if not alias.isidentifier():
         raise ValueError("feature alias must be a SQL identifier")
-    envelope = _admin_bbox_envelope_sql()
-    return f"""(
-      (
-        {alias}.coord IS NOT NULL
-        AND (
-          {alias}.kind NOT IN ('route', 'area')
-          OR {alias}.geom IS NULL
-        )
-        AND {alias}.coord OPERATOR(x_extension.&&) {envelope}
-      )
-      OR (
-        {alias}.kind IN ('route', 'area')
-        AND {alias}.geom IS NOT NULL
-        AND {alias}.geom OPERATOR(x_extension.&&) {envelope}
-        AND x_extension.ST_Intersects({alias}.geom, {envelope})
-      )
-    )"""
+    return f"""
+  {alias}.coord IS NOT NULL
+  AND {alias}.kind NOT IN ('route', 'area')
+  AND {alias}.coord OPERATOR(x_extension.&&) {_admin_bbox_envelope_sql()}"""
 
 
 def _admin_bbox_filters_sql(alias: str) -> str:
@@ -604,56 +625,84 @@ def _admin_bbox_filters_sql(alias: str) -> str:
 """
 
 
+# 후보 두 갈래를 **OR가 아니라 UNION ALL**로 합친다 (T-VN-35 성능 정본).
+#
+# geometry가 core 컬럼이던 시절에는 두 갈래가 같은 relation이라 planner가
+# bbox 밀도에 따라 계획을 골랐다 — 조밀 bbox는 PK walk + early exit, 희소
+# bbox는 GiST bitmap. subtype 분리 후 이 술어를 그대로 OR로 옮기면 조건이
+# **두 relation에 걸쳐** 있어 그 선택지가 통째로 사라지고 항상 전건 PK walk가
+# 된다(실측 희소 bbox 1.78s). 반대로 후보를 id 집합으로 미리 모아도 조밀
+# bbox에서 early exit을 잃는다(실측 1.46s).
+#
+# 갈래마다 자기 ``ORDER BY … LIMIT``을 주면 각 갈래에서 planner가 다시
+# 고르고, 두 갈래가 kind로 배타라 UNION ALL이 중복을 만들지 않는다. 각
+# 갈래의 선두 :limit만 모아 다시 :limit을 취하는 것은 전역 선두 :limit과
+# 같다(양쪽 모두 feature_id 오름차순).
+#
+# 부수 효과로 "route/area냐"를 묻던 CASE들이 사라진다 — coord 갈래는
+# geometry가 없고 geo 갈래는 항상 있다(subtype NOT NULL).
 _ADMIN_FEATURES_IN_BBOX_SQL: Final[str] = f"""
-WITH candidates AS (
-  SELECT
-      f.feature_id,
-      CAST(f.feature_uuid AS text) AS feature_uuid,
-      f.kind,
-      f.name,
-      f.category,
-      f.marker_icon,
-      f.marker_color,
-      f.status,
-      CASE
-        WHEN f.kind IN ('route', 'area')
-          AND f.geom IS NOT NULL
-          AND f.geom OPERATOR(x_extension.&&) {_admin_bbox_envelope_sql()}
-          AND x_extension.ST_Intersects(f.geom, {_admin_bbox_envelope_sql()})
-        THEN x_extension.ST_PointOnSurface(
-          x_extension.ST_Intersection(f.geom, {_admin_bbox_envelope_sql()})
-        )
-        ELSE f.coord
-      END AS marker_coord,
-      CASE
-        WHEN CAST(:include_geometry AS boolean)
-          AND f.kind = 'route'
-          AND f.geom IS NOT NULL
-        THEN CAST(
-          x_extension.ST_AsGeoJSON(x_extension.ST_Simplify(f.geom, 0.0001), 6)
-          AS jsonb
-        )
-        WHEN CAST(:include_geometry AS boolean)
-          AND f.kind = 'area'
-          AND f.geom IS NOT NULL
-        THEN CAST(
-          x_extension.ST_AsGeoJSON(
-            x_extension.ST_SimplifyPreserveTopology(f.geom, 0.0001), 6
-          ) AS jsonb
-        )
-        ELSE NULL
-      END AS geometry,
-      CASE
-        WHEN CAST(:include_geometry AS boolean)
-          AND f.kind = 'area'
-          AND f.geom IS NOT NULL
-        THEN x_extension.ST_Area(CAST(f.geom AS x_extension.geography))
-        ELSE NULL
-      END AS area_square_meters
-  FROM feature.features AS f
-  WHERE {_admin_bbox_candidate_sql("f")}
+WITH geo_hits AS ({_admin_geometry_hits_sql()}),
+candidates AS (
+  (
+    SELECT
+        f.feature_id,
+        CAST(f.feature_uuid AS text) AS feature_uuid,
+        f.kind,
+        f.name,
+        f.category,
+        f.marker_icon,
+        f.marker_color,
+        f.status,
+        f.coord AS marker_coord,
+        CAST(NULL AS jsonb) AS geometry,
+        CAST(NULL AS double precision) AS area_square_meters
+    FROM feature.features AS f
+    WHERE {_admin_bbox_coord_where_sql("f")}
 {_admin_bbox_filters_sql("f")}
-  ORDER BY f.feature_id
+    ORDER BY f.feature_id
+    LIMIT :limit
+  )
+  UNION ALL
+  (
+    SELECT
+        f.feature_id,
+        CAST(f.feature_uuid AS text) AS feature_uuid,
+        f.kind,
+        f.name,
+        f.category,
+        f.marker_icon,
+        f.marker_color,
+        f.status,
+        x_extension.ST_PointOnSurface(
+          x_extension.ST_Intersection(fg.geom, {_admin_bbox_envelope_sql()})
+        ) AS marker_coord,
+        CASE
+          WHEN NOT CAST(:include_geometry AS boolean) THEN NULL
+          WHEN f.kind = 'route'
+          THEN CAST(
+            x_extension.ST_AsGeoJSON(x_extension.ST_Simplify(fg.geom, 0.0001), 6)
+            AS jsonb
+          )
+          ELSE CAST(
+            x_extension.ST_AsGeoJSON(
+              x_extension.ST_SimplifyPreserveTopology(fg.geom, 0.0001), 6
+            ) AS jsonb
+          )
+        END AS geometry,
+        CASE
+          WHEN CAST(:include_geometry AS boolean) AND f.kind = 'area'
+          THEN x_extension.ST_Area(CAST(fg.geom AS x_extension.geography))
+          ELSE NULL
+        END AS area_square_meters
+    FROM geo_hits AS fg
+    JOIN feature.features AS f ON f.feature_id = fg.feature_id
+    WHERE TRUE
+{_admin_bbox_filters_sql("f")}
+    ORDER BY f.feature_id
+    LIMIT :limit
+  )
+  ORDER BY feature_id
   LIMIT :limit
 )
 SELECT
@@ -788,22 +837,24 @@ _ADMIN_CLUSTER_CODE_COLUMNS: Final[dict[str, str]] = {
 def _admin_cluster_bbox_sql(code_column: str) -> str:
     envelope = _admin_bbox_envelope_sql()
     return f"""
-WITH candidates AS (
+WITH geo_hits AS ({_admin_geometry_hits_sql()}),
+candidates AS (
   SELECT
       f.{code_column} AS cluster_key,
-      CASE
-        WHEN f.kind IN ('route', 'area')
-          AND f.geom IS NOT NULL
-          AND f.geom OPERATOR(x_extension.&&) {envelope}
-          AND x_extension.ST_Intersects(f.geom, {envelope})
-        THEN x_extension.ST_PointOnSurface(
-          x_extension.ST_Intersection(f.geom, {envelope})
-        )
-        ELSE f.coord
-      END AS marker_coord
+      f.coord AS marker_coord
   FROM feature.features AS f
   WHERE f.{code_column} IS NOT NULL
-    AND {_admin_bbox_candidate_sql("f")}
+    AND {_admin_bbox_coord_where_sql("f")}
+{_admin_bbox_filters_sql("f")}
+  UNION ALL
+  SELECT
+      f.{code_column} AS cluster_key,
+      x_extension.ST_PointOnSurface(
+        x_extension.ST_Intersection(fg.geom, {envelope})
+      ) AS marker_coord
+  FROM geo_hits AS fg
+  JOIN feature.features AS f ON f.feature_id = fg.feature_id
+  WHERE f.{code_column} IS NOT NULL
 {_admin_bbox_filters_sql("f")}
 )
 SELECT
@@ -1232,19 +1283,19 @@ WITH base AS (
     ) AS issue ON TRUE
     WHERE (CAST(:kinds AS text[]) IS NULL OR f.kind = ANY(CAST(:kinds AS text[])))
       AND (
-        -- 방어적 cast (report §2 D-9-7 + T-VN-06): free-form jsonb인
-        -- valid_end_time이 오염된 한 행이 직접 CAST에서 예외를 던지면
-        -- include_ended=false admin notice 목록(운영자가 바로 그 오염 row를
-        -- 찾아야 하는 화면)이 500이 된다. 공개 read와 같은 pg_input_is_valid
-        -- 가드 + fail-closed 적용. CASE로 cast 평가를 봉인(AND/OR 순서 미보장).
+        -- T-VN-35(0086): valid_end_time은 free-form jsonb가 아니라
+        -- ``feature_notices.valid_end_time timestamptz``다. 오염 문자열이
+        -- 표현 불가능해졌으므로 종전의 pg_input_is_valid 방어 cast
+        -- (report §2 D-9-7 + T-VN-06)가 통째로 사라진다. keyset/fast-path
+        -- 계획 축을 건드리지 않도록 join이 아니라 semi-join으로 둔다.
         CAST(:include_ended AS boolean)
-        OR f.kind <> 'notice'
-        OR (f.detail ->> 'valid_end_time') IS NULL
-        OR CASE
-             WHEN pg_input_is_valid(f.detail ->> 'valid_end_time', 'timestamptz')
-             THEN CAST(f.detail ->> 'valid_end_time' AS timestamptz) > now()
-             ELSE false
-           END
+        OR NOT EXISTS (
+          SELECT 1
+          FROM feature.feature_notices AS fn
+          WHERE fn.feature_id = f.feature_id
+            AND fn.valid_end_time IS NOT NULL
+            AND fn.valid_end_time <= now()
+        )
       )
       AND (
         CAST(:categories AS text[]) IS NULL
@@ -1311,6 +1362,9 @@ def _admin_feature_row(row: Any) -> AdminFeatureRow:
     )
 
 
+# T-VN-35(0086): ``detail``/``geom``은 core에 없다 — subtype 5종을 조립하는
+# ``feature.features_detailed`` 뷰가 유일한 조립 정본이다. 단건 PK 조회라
+# 뷰 조인 비용이 무시할 수준이고, 조립 규칙을 repo가 복제하지 않는다.
 _ADMIN_FEATURE_DETAIL_SQL: Final[str] = """
 SELECT
     feature_id,
@@ -1353,7 +1407,7 @@ SELECT
     created_at,
     updated_at,
     deleted_at
-FROM feature.features
+FROM feature.features_detailed
 WHERE feature_id = :feature_id
 """
 
@@ -2145,15 +2199,21 @@ FOR UPDATE
 # INSERT하고 fill 트리거는 raw SQL 안전망으로 유지한다. ON CONFLICT DO NOTHING
 # 이므로 RETURNING 행 존재 = 신규 insert — 관측값은 보낸 후보와 같아야 한다
 # (generator 이원화 fail-close, 적대 리뷰 1 M1).
+# T-VN-35(0086): core에 ``detail``/``geom`` 컬럼이 없다. kind별 값은
+# subtype(``feature_places``/``feature_events``)이 **유일한 정본**이며 core
+# INSERT 직후 같은 트랜잭션에서 ``_write_subtype``이 쓴다. admin mutation은
+# ``kind IN ('place','event')``(API Literal)이라 geometry는 애초에 대상이
+# 아니다 — geometry가 필수인 kind는 route/area뿐이고 그 값은 subtype 컬럼에
+# NOT NULL로 산다.
 _APPLY_FEATURE_ADD_SQL: Final[str] = """
 INSERT INTO feature.features (
     feature_id, feature_uuid, kind, name, category,
-    coord, coord_precision_digits, geom,
+    coord, coord_precision_digits,
     address, legal_dong_code, road_name_code, road_address_management_no,
     admin_dong_code, sido_code, sigungu_code,
     urls, marker_icon, marker_color,
     parent_feature_id, sibling_group_id,
-    detail, raw_refs, status,
+    raw_refs, status,
     data_origin, data_version, user_change_kind, user_change_status,
     user_change_request_id, user_deleted_at, user_deleted_by, user_change_reason,
     created_at, updated_at, deleted_at
@@ -2168,24 +2228,26 @@ INSERT INTO feature.features (
              4326
          ) END,
     :coord_precision_digits,
-    CASE WHEN CAST(:geom_wkt AS text) IS NULL THEN NULL
-         ELSE x_extension.ST_SetSRID(
-             x_extension.ST_GeomFromText(CAST(:geom_wkt AS text)), 4326
-         ) END,
     CAST(:address AS jsonb), :legal_dong_code, :road_name_code,
     :road_address_management_no, :admin_dong_code, :sido_code, :sigungu_code,
     CAST(:urls AS jsonb), :marker_icon, :marker_color,
     :parent_feature_id, :sibling_group_id,
-    CAST(:detail AS jsonb), '[]'::jsonb, :status,
+    '[]'::jsonb, :status,
     'user_request', 1, 'add', 'applied',
     CAST(:request_id AS uuid), NULL, NULL, :reason,
     now(), now(), NULL
 )
 ON CONFLICT (feature_id) DO NOTHING
 RETURNING feature_id, CAST(feature_uuid AS text) AS feature_uuid,
-          status, user_deleted_at
+          kind, status, user_deleted_at
 """
 
+# T-VN-35(0086): ``detail``/``geom``은 core SET 목록에서 사라졌다. 종전의
+# ``detail = CAST(:detail AS jsonb)`` 통교체는 **shape 미검증 구멍**이었다 —
+# 운영자가 보낸 임의 JSONB가 그대로 정본이 됐다. 이제 kind별 값은 subtype
+# 컬럼(typed)으로 들어가므로 컬럼·타입이 DB에서 강제된다.
+# ``kind``/``feature_uuid``를 RETURNING에 실어 subtype UPSERT가 별도 조회 없이
+# 같은 트랜잭션에서 이어진다.
 _APPLY_FEATURE_UPDATE_SQL: Final[str] = """
 UPDATE feature.features AS f
 SET
@@ -2207,14 +2269,6 @@ SET
     coord_precision_digits = CASE
         WHEN CAST(:coord_set AS boolean) THEN CAST(:coord_precision_digits AS smallint)
         ELSE f.coord_precision_digits
-    END,
-    geom = CASE
-        WHEN CAST(:geom_set AS boolean) THEN
-            CASE WHEN CAST(:geom_wkt AS text) IS NULL THEN NULL
-                 ELSE x_extension.ST_SetSRID(
-                     x_extension.ST_GeomFromText(CAST(:geom_wkt AS text)), 4326
-                 ) END
-        ELSE f.geom
     END,
     address = CASE
         WHEN CAST(:address_set AS boolean) THEN CAST(:address AS jsonb)
@@ -2254,10 +2308,6 @@ SET
         WHEN CAST(:marker_color_set AS boolean) THEN CAST(:marker_color AS text)
         ELSE f.marker_color
     END,
-    detail = CASE
-        WHEN CAST(:detail_set AS boolean) THEN CAST(:detail AS jsonb)
-        ELSE f.detail
-    END,
     parent_feature_id = CASE
         WHEN CAST(:parent_feature_id_set AS boolean) THEN CAST(:parent_feature_id AS text)
         ELSE f.parent_feature_id
@@ -2277,9 +2327,13 @@ WHERE f.feature_id = :feature_id
   AND f.kind IN ('place','event')
   AND f.status <> 'deleted'
   AND f.user_deleted_at IS NULL
-RETURNING f.feature_id, f.status, f.user_deleted_at
+RETURNING f.feature_id, CAST(f.feature_uuid AS text) AS feature_uuid,
+          f.kind, f.status, f.user_deleted_at
 """
 
+# soft-delete는 core-only다 — subtype 행은 남는다. ``status='deleted'``는
+# 행을 지우지 않으므로 CASCADE 대상이 아니고, 되살릴 때 kind별 값이 그대로
+# 있어야 한다(ADR-017 무기한 보관과 같은 규약).
 _APPLY_FEATURE_DELETE_SQL: Final[str] = """
 UPDATE feature.features AS f
 SET
@@ -2379,7 +2433,9 @@ SELECT
     ),
     CAST(:request_id AS uuid),
     :operator
-FROM feature.features AS f
+-- T-VN-35(0086): version snapshot의 ``detail``은 subtype 조립 결과다.
+-- ``features_detailed``를 쓰면 snapshot이 응답 shape과 같은 정본을 남긴다.
+FROM feature.features_detailed AS f
 WHERE f.feature_id = :feature_id
 """
 
@@ -2465,7 +2521,8 @@ def _add_params(
         "coord_precision_digits": payload.get("coord_precision_digits") or (
             6 if coord else None
         ),
-        "geom_wkt": payload.get("geom"),
+        # ``geom``/``detail``은 core 컬럼이 아니다(T-VN-35) — geometry는
+        # route/area subtype 전용이고 kind별 값은 ``_write_subtype``가 쓴다.
         "address": _json_param(payload.get("address")),
         "legal_dong_code": payload.get("legal_dong_code"),
         "road_name_code": payload.get("road_name_code"),
@@ -2478,7 +2535,6 @@ def _add_params(
         "marker_color": payload["marker_color"],
         "parent_feature_id": payload.get("parent_feature_id"),
         "sibling_group_id": payload.get("sibling_group_id"),
-        "detail": _json_param(payload.get("detail")),
         "status": payload.get("status") or "active",
         "reason": reason,
     }
@@ -2505,8 +2561,8 @@ def _update_params(
         "coord_precision_digits": payload.get("coord_precision_digits") or (
             6 if coord is not None else None
         ),
-        "geom_set": "geom" in payload,
-        "geom_wkt": payload.get("geom"),
+        # ``geom``/``detail``은 core SET 대상이 아니다(T-VN-35) — subtype 갱신은
+        # ``_apply_change``가 ``"detail" in payload``일 때만 수행한다.
         "address_set": "address" in payload,
         "address": _json_param(payload.get("address")),
         "legal_dong_code_set": "legal_dong_code" in payload,
@@ -2527,8 +2583,6 @@ def _update_params(
         "marker_icon": payload.get("marker_icon"),
         "marker_color_set": "marker_color" in payload,
         "marker_color": payload.get("marker_color"),
-        "detail_set": "detail" in payload,
-        "detail": _json_param(payload.get("detail")),
         "parent_feature_id_set": "parent_feature_id" in payload,
         "parent_feature_id": payload.get("parent_feature_id"),
         "sibling_group_id_set": "sibling_group_id" in payload,
@@ -2547,6 +2601,34 @@ async def _state_for_conflict(
         )
     ).mappings().first()
     return dict(row) if row is not None else None
+
+
+async def _write_subtype(
+    session: AsyncSession,
+    *,
+    feature_id: str,
+    feature_uuid: str,
+    kind: str,
+    detail: Mapping[str, Any] | None,
+) -> None:
+    """kind별 subtype UPSERT — core 적용과 **같은 트랜잭션** (T-VN-35, ADR-084).
+
+    subtype이 kind별 값의 유일한 정본이므로 core 적용이 실제로 일어난
+    경우(RETURNING 행 존재)에만 호출한다. ``subtype_upsert_sql``/
+    ``subtype_params``가 컬럼 매핑의 단일 정본이라 repo는 파싱 규칙을
+    복제하지 않는다. subtype이 없는 kind(price/weather)는 no-op.
+    """
+
+    sql = subtype_upsert_sql(kind)
+    params = subtype_params(
+        feature_id=feature_id,
+        feature_uuid=feature_uuid,
+        kind=kind,
+        detail=detail,
+    )
+    if sql is None or params is None:
+        return
+    await session.execute(text(sql), params)
 
 
 async def _apply_change(
@@ -2578,6 +2660,14 @@ async def _apply_change(
                 sent_feature_uuid=add_params["feature_uuid"],
                 inserted=True,
             )
+            # core insert가 실제로 일어난 경우에만 subtype을 만든다.
+            await _write_subtype(
+                session,
+                feature_id=str(row["feature_id"]),
+                feature_uuid=str(row["feature_uuid"]),
+                kind=str(row["kind"]),
+                detail=payload.get("detail"),
+            )
     elif request.action == "update":
         row = (
             await session.execute(
@@ -2590,6 +2680,17 @@ async def _apply_change(
                 ),
             )
         ).mappings().first()
+        if row is not None and "detail" in payload:
+            # admin update의 detail은 **통교체** 계약이다(부분 병합 아님).
+            # subtype UPSERT가 전 컬럼을 EXCLUDED로 덮으므로 계약이 그대로
+            # 보존되고, 이제 컬럼·타입은 DB가 검증한다.
+            await _write_subtype(
+                session,
+                feature_id=str(row["feature_id"]),
+                feature_uuid=str(row["feature_uuid"]),
+                kind=str(row["kind"]),
+                detail=payload.get("detail"),
+            )
     else:
         row = (
             await session.execute(
@@ -3537,7 +3638,10 @@ SELECT
         )::double precision
     END AS spatial_score
 FROM reviews AS q
-LEFT JOIN feature.features AS f ON f.feature_id = q.target_feature_id
+-- T-VN-35(0086): target_start_date/target_end_date는 event subtype
+-- (``feature_events.starts_on``/``ends_on``)에서 나온다. 조립 규칙을 여기서
+-- 복제하지 않도록 ``features_detailed`` 뷰의 ``detail``을 그대로 읽는다.
+LEFT JOIN feature.features_detailed AS f ON f.feature_id = q.target_feature_id
 LEFT JOIN LATERAL (
     SELECT
         CASE
@@ -3706,7 +3810,10 @@ SELECT
         )::double precision
     END AS spatial_score
 FROM ops.enrichment_review_queue AS q
-LEFT JOIN feature.features AS f ON f.feature_id = q.target_feature_id
+-- T-VN-35(0086): target_start_date/target_end_date는 event subtype
+-- (``feature_events.starts_on``/``ends_on``)에서 나온다. 조립 규칙을 여기서
+-- 복제하지 않도록 ``features_detailed`` 뷰의 ``detail``을 그대로 읽는다.
+LEFT JOIN feature.features_detailed AS f ON f.feature_id = q.target_feature_id
 LEFT JOIN LATERAL (
     SELECT
         CASE
