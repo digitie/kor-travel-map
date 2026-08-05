@@ -93,11 +93,11 @@ from kortravelmap.api.dagster_schema import (
     DagsterSensor,
 )
 from kortravelmap.api.db import get_engine, get_session
+from kortravelmap.api.feature_ref import resolve_write_feature_refs_or_error
 from kortravelmap.api.feature_update_http import (
     FEATURE_UPDATE_CONFLICT_RESPONSES,
     to_http_exception,
 )
-from kortravelmap.api.feature_ref import resolve_write_feature_refs_or_error
 from kortravelmap.api.feature_update_schema import (
     FeatureIdsScope,
     FeatureUpdateRequestCreateRequest,

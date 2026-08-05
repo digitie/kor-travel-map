@@ -23,6 +23,8 @@ from fastapi import HTTPException, status
 from kortravelmap.infra import feature_identity
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from sqlalchemy.ext.asyncio import AsyncSession
 
 __all__ = ["resolve_feature_ref_or_error", "resolve_write_feature_refs_or_error"]

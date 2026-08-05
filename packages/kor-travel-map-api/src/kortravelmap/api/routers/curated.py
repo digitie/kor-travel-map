@@ -587,7 +587,17 @@ def _rule_view(row: curated_repo.CuratedSourceRule) -> CuratedSourceRuleView:
 
 
 def _feature_view(row: curated_repo.CuratedFeature) -> CuratedFeatureView:
-    return CuratedFeatureView(**row.__dict__)
+    # T-VN-32C PR-2 — admin curated 뷰도 feature 참조를 UUID 정본으로 통일한다
+    # (admin features 목록과 같은 규약 — 프론트 왕복은 write-측 경계 해석이
+    # 수용). splat 원본 row의 legacy 값은 내부 키로만 쓴다.
+    payload = dict(row.__dict__)
+    uuid_text = payload.pop("feature_uuid", None)
+    if not uuid_text:
+        raise ValueError(
+            "CuratedFeature.feature_uuid 결측 — read projection 누락 (T-VN-32C)"
+        )
+    payload["feature_id"] = uuid_text
+    return CuratedFeatureView(**payload)
 
 
 def _public_feature_view(

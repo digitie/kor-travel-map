@@ -66,7 +66,10 @@ from kortravelmap.api.feature_ref import resolve_feature_ref_or_error
 from kortravelmap.api.http_revision import parse_revision_header, revision_etag
 from kortravelmap.api.identity_projection import response_feature_id, uuid_substituted_row
 from kortravelmap.api.response import ClusterUnit, Meta, ProblemDetail, make_meta
-from kortravelmap.api.routers.curations import PublicCurationItemView
+from kortravelmap.api.routers.curations import (
+    PublicCurationItemView,
+    curation_item_response_feature_id,
+)
 from kortravelmap.api.settings import ApiSettings
 
 __all__ = [
@@ -885,7 +888,10 @@ async def _public_feature_row_or_404(
 
 
 def _curation_item_view(row: curation_repo.CurationItem) -> PublicCurationItemView:
-    return PublicCurationItemView.model_validate(row, from_attributes=True)
+    # T-VN-32C PR-2 — curations.py 공개 표면과 같은 뷰 모델: feature 참조를
+    # UUID 정본으로 통일해 상세/목록 혼합 포맷을 막는다 (원자 릴리스 게이트).
+    view = PublicCurationItemView.model_validate(row, from_attributes=True)
+    return view.model_copy(update={"feature_id": curation_item_response_feature_id(row)})
 
 
 def _observation_view(

@@ -9,7 +9,7 @@ from typing import Annotated, Any, Literal, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from kortravelmap.core import make_feature_id
-from kortravelmap.infra import curation_repo, price_repo, weather_repo
+from kortravelmap.infra import curation_repo, feature_identity, price_repo, weather_repo
 from kortravelmap.infra.admin_feature_repo import (
     AdminFeatureDetail,
     AdminFeatureDetailFeature,
@@ -53,8 +53,12 @@ from kortravelmap.api.domain_command_service import (
 )
 from kortravelmap.api.feature_ref import resolve_feature_ref_or_error
 from kortravelmap.api.http_revision import parse_revision_header, revision_etag
+from kortravelmap.api.identity_projection import response_feature_id, uuid_substituted_row
 from kortravelmap.api.response import ClusterUnit, Meta, make_meta
-from kortravelmap.api.routers.curations import AdminCurationItemView
+from kortravelmap.api.routers.curations import (
+    AdminCurationItemView,
+    curation_item_response_feature_id,
+)
 from kortravelmap.api.routers.features import (
     FeaturePriceResponse,
     FeatureWeatherResponse,
@@ -113,12 +117,17 @@ class AdminFeatureRecord(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    feature_id: str
+    feature_id: str = Field(
+        description=(
+            "feature 참조 (opaque string). T-VN-32C 값 전환 이후 UUID 정본 "
+            "문자열을 담는다 — 형식(legacy f_*/UUID)에 의존하지 말 것."
+        ),
+    )
     feature_uuid: str | None = Field(
         default=None,
         description=(
-            "UUID 정본 identity 병행 노출 (ADR-068, T-VN-32B additive). "
-            "feature_id 값 자체의 UUID 전환은 T-VN-32C."
+            "UUID 정본 identity 명시 필드 (ADR-068). T-VN-32C 이후 "
+            "feature_id와 같은 값이다."
         ),
     )
     kind: str
@@ -485,12 +494,17 @@ class AdminFeatureDetailFeatureRecord(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    feature_id: str
+    feature_id: str = Field(
+        description=(
+            "feature 참조 (opaque string). T-VN-32C 값 전환 이후 UUID 정본 "
+            "문자열을 담는다 — 형식(legacy f_*/UUID)에 의존하지 말 것."
+        ),
+    )
     feature_uuid: str | None = Field(
         default=None,
         description=(
-            "UUID 정본 identity 병행 노출 (ADR-068, T-VN-32B additive). "
-            "feature_id 값 자체의 UUID 전환은 T-VN-32C."
+            "UUID 정본 identity 명시 필드 (ADR-068). T-VN-32C 이후 "
+            "feature_id와 같은 값이다."
         ),
     )
     kind: str
@@ -712,8 +726,10 @@ def _issue_record(issue: dict[str, Any]) -> AdminFeatureIssueRecord:
 
 
 def _record(row: AdminFeatureRow) -> AdminFeatureRecord:
+    # T-VN-32C PR-2 — 응답 feature_id 값은 UUID 정본. 목록 cursor는 repo가 치환
+    # 전 legacy 축으로 encode한다 (sort keyset 무변경).
     return AdminFeatureRecord(
-        feature_id=row.feature_id,
+        feature_id=response_feature_id(row),
         feature_uuid=row.feature_uuid,
         kind=row.kind,
         name=row.name,
@@ -731,9 +747,21 @@ def _record(row: AdminFeatureRow) -> AdminFeatureRecord:
     )
 
 
+def _map_item(row: dict[str, Any]) -> AdminFeatureMapItem:
+    """지도 item 조립 — 응답 feature_id를 UUID 정본으로 치환한다 (T-VN-32C PR-2).
+
+    ``AdminFeatureMapItem``은 경량 표현이라 ``feature_uuid`` 병행 필드를 두지
+    않는다(feature_id와 같은 값) — projection 보조 컬럼은 splat 전에 뺀다.
+    """
+    substituted = uuid_substituted_row(row)
+    substituted.pop("feature_uuid", None)
+    return AdminFeatureMapItem(**substituted)
+
+
 def _override(row: FeatureOverride | None) -> AdminFeatureOverrideRecord | None:
     if row is None:
         return None
+    # T-VN-32C 치환 제외 — override는 감사 레코드라 내부 DB 참조(legacy) 유지.
     return AdminFeatureOverrideRecord(
         override_id=row.override_id,
         feature_id=row.feature_id,
@@ -753,6 +781,7 @@ def _deactivate_response(
 ) -> AdminFeatureDeactivateResponse:
     return AdminFeatureDeactivateResponse(
         data=AdminFeatureDeactivateData(
+            # T-VN-32C 치환 제외 — write 결과 레코드의 대상 참조(legacy 정본 키) 유지.
             feature_id=row.feature_id,
             previous_status=row.previous_status,
             status=row.status,
@@ -764,6 +793,8 @@ def _deactivate_response(
 
 
 def _change_record(row: FeatureChangeRequest) -> AdminFeatureChangeRequestRecord:
+    # T-VN-32C 치환 제외 — change request의 feature_id는 요청·감사 레코드에 기록된
+    # 내부 DB 참조(legacy 정본 키)를 그대로 보여준다.
     return AdminFeatureChangeRequestRecord(
         request_id=row.request_id,
         feature_id=row.feature_id,
@@ -784,7 +815,10 @@ def _change_record(row: FeatureChangeRequest) -> AdminFeatureChangeRequestRecord
 def _detail_feature(
     row: AdminFeatureDetailFeature,
 ) -> AdminFeatureDetailFeatureRecord:
-    return AdminFeatureDetailFeatureRecord.model_validate(row, from_attributes=True)
+    # T-VN-32C PR-2 — feature record의 응답 feature_id만 UUID 정본으로 치환.
+    # parent_feature_id/sibling_group_id는 2차 참조라 legacy 유지 (PR-2 범위 밖).
+    record = AdminFeatureDetailFeatureRecord.model_validate(row, from_attributes=True)
+    return record.model_copy(update={"feature_id": response_feature_id(row)})
 
 
 def _detail_source(row: AdminFeatureDetailSource) -> AdminFeatureDetailSourceRecord:
@@ -817,6 +851,9 @@ def _detail_response(
     started_at: float,
     curations: tuple[curation_repo.CurationItem, ...] = (),
 ) -> AdminFeatureDetailResponse:
+    # T-VN-32C — feature record·curation item의 응답 feature 참조만 UUID 치환.
+    # sources/issues/overrides/versions/files/change_requests 레코드의 feature_id는
+    # 내부 DB 참조(감사·lineage 레코드)라 legacy 유지.
     return AdminFeatureDetailResponse(
         data=AdminFeatureDetailData(
             feature=_detail_feature(row.feature),
@@ -827,7 +864,11 @@ def _detail_response(
             change_requests=[_change_record(item) for item in row.change_requests],
             files=[_detail_file(item) for item in row.files],
             curations=[
-                AdminCurationItemView.model_validate(item, from_attributes=True)
+                AdminCurationItemView.model_validate(
+                    item, from_attributes=True
+                ).model_copy(
+                    update={"feature_id": curation_item_response_feature_id(item)}
+                )
                 for item in curations
             ],
         ),
@@ -861,8 +902,54 @@ def _payload(body: AdminFeatureBaseMutation) -> dict[str, Any]:
     return raw
 
 
+async def _resolve_mutation_identity_refs(
+    session: AsyncSession, payload: dict[str, Any]
+) -> None:
+    """mutation payload의 feature 참조를 legacy 정본 키로 해석한다 (T-VN-32C PR-2).
+
+    값 전환 후 admin 프론트가 응답에서 복사한 UUID를 body로 되돌린다 — 해석
+    없이는 legacy FK 컬럼이 조용히 오염되거나(W2: IntegrityError 500 지연
+    폭발), UUID 타입 컬럼은 형식 검증을 통과해 버린다(W3). payload를 제자리
+    수정한다.
+    """
+    parent = payload.get("parent_feature_id")
+    if parent is not None:
+        try:
+            identity = await feature_identity.resolve_feature_identity(session, parent)
+        except feature_identity.FeatureIdentityRefError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        if identity is None:
+            raise HTTPException(
+                status_code=422,
+                detail=f"parent_feature_id를 해석할 수 없습니다: {parent!r}",
+            )
+        payload["parent_feature_id"] = identity.feature_id
+    sibling = payload.get("sibling_group_id")
+    if sibling is not None and await feature_identity.feature_uuid_in_use(
+        session, sibling
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "sibling_group_id가 feature UUID 정본과 충돌합니다 — feature "
+                "참조가 아니라 sibling group 식별자를 전달해야 합니다."
+            ),
+        )
+
+
 def _create_feature_id(body: AdminFeatureCreateRequest) -> str:
     if body.feature_id:
+        # T-VN-32C PR-2 (W1) — 값 전환 후 응답에서 복사한 UUID가 신규 legacy
+        # PK로 조용히 각인되는 유령 행 생성을 차단한다. 신규 feature_id는
+        # legacy 표기만 허용한다(UUID는 시스템이 발급).
+        if feature_identity.is_canonical_uuid_ref(body.feature_id):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "feature_id에 UUID를 지정할 수 없습니다 — 신규 feature의 "
+                    "legacy id는 f_* 표기여야 하며 UUID는 시스템이 발급합니다."
+                ),
+            )
         return body.feature_id
     coord_key = "global"
     if body.coord is not None:
@@ -1023,6 +1110,7 @@ async def list_admin_features_in_bounds(
                 limit=max_items + 1,
             )
             truncated = len(raw_clusters) > max_items
+            # cluster row에는 feature_id가 없어 T-VN-32C 치환 대상이 아니다.
             clusters = [
                 AdminFeatureCluster(**row) for row in raw_clusters[:max_items]
             ]
@@ -1060,7 +1148,7 @@ async def list_admin_features_in_bounds(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     truncated = len(raw_items) > max_items
-    items = [AdminFeatureMapItem(**row) for row in raw_items[:max_items]]
+    items = [_map_item(row) for row in raw_items[:max_items]]
     return AdminFeaturesInBoundsResponse(
         data=AdminFeaturesInBoundsData(
             mode="items",
@@ -1096,7 +1184,9 @@ async def get_admin_feature_weather(
     )
     return FeatureWeatherResponse(
         data=WeatherCardData(
-            feature_id=card.feature_id,
+            # T-VN-32C PR-2 — 단건 card 응답의 feature_id는 UUID 정본
+            # (features.py 단건 card와 동일 규약; repo 내부 조회는 legacy 축).
+            feature_id=identity.feature_uuid,
             asof=card.asof,
             source_styles=card.source_styles,
             metrics=[
@@ -1135,7 +1225,9 @@ async def get_admin_feature_price(
     )
     return FeaturePriceResponse(
         data=PriceCardData(
-            feature_id=card.feature_id,
+            # T-VN-32C PR-2 — 단건 card 응답의 feature_id는 UUID 정본
+            # (features.py 단건 card와 동일 규약; repo 내부 조회는 legacy 축).
+            feature_id=identity.feature_uuid,
             asof=card.asof,
             current=[
                 PricePointOut.model_validate(point, from_attributes=True)
@@ -1247,7 +1339,8 @@ async def list_feature_change_request_route(
         session,
         states=status_filter,
         actions=action,
-        q=q,
+        # T-VN-32C PR-2 (S8) — UUID 표기 검색어를 legacy 정본 키로 정규화.
+        q=await feature_identity.legacy_id_for_filter(session, q),
         limit=page_size,
     )
     return AdminFeatureChangeListResponse(
@@ -1285,6 +1378,8 @@ async def get_feature_revision_route(
             detail=f"feature 없음: {feature_id!r}",
         )
     _set_feature_etag(response, revision)
+    # T-VN-32C 치환 제외 — correction If-Match 흐름의 path 참조 echo(해석된
+    # legacy 정본 키)를 그대로 되돌린다 (echo 예외).
     return AdminFeatureRevisionResponse(
         data=AdminFeatureRevisionData(
             feature_id=canonical_id,
@@ -1342,6 +1437,7 @@ async def create_feature_route(
     feature_id = _create_feature_id(body)
     payload = _payload(body)
     payload["feature_id"] = feature_id
+    await _resolve_mutation_identity_refs(session, payload)
     async with domain_command_transaction(session):
         try:
             result = await submit_feature_change_request(
@@ -1385,13 +1481,15 @@ async def patch_feature_route(
     identity = await resolve_feature_ref_or_error(session, feature_id)
     canonical_id = identity.feature_id
     expected_revision = _require_if_match_revision(request)
+    patch_payload = _payload(body)
+    await _resolve_mutation_identity_refs(session, patch_payload)
     async with domain_command_transaction(session):
         try:
             result = await submit_feature_change_request(
                 session,
                 action="update",
                 feature_id=canonical_id,
-                payload=_payload(body),
+                payload=patch_payload,
                 review_mode=_review_mode(settings),
                 reason=body.reason,
                 requested_by=context.actor,

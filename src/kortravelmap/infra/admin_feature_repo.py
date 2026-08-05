@@ -403,7 +403,10 @@ class FeatureChangeRequest:
 
 @dataclass(frozen=True)
 class DedupFeatureSummary:
-    """Dedup 후보의 feature 한쪽 summary."""
+    """Dedup 후보의 feature 한쪽 summary.
+
+    ``feature_uuid``는 T-VN-32C UUID 정본 병행 노출(additive).
+    """
 
     feature_id: str
     name: str
@@ -413,6 +416,7 @@ class DedupFeatureSummary:
     lat: float | None
     provider: str | None
     dataset_key: str | None
+    feature_uuid: str | None = None
 
 
 @dataclass(frozen=True)
@@ -471,7 +475,10 @@ class ReviewSourceDetail:
 
 @dataclass(frozen=True)
 class ReviewFeatureDetail:
-    """Review 상세 비교에 표시할 feature core + source 목록."""
+    """Review 상세 비교에 표시할 feature core + source 목록.
+
+    ``feature_uuid``는 T-VN-32C UUID 정본 병행 노출(additive).
+    """
 
     feature_id: str
     kind: str
@@ -491,6 +498,7 @@ class ReviewFeatureDetail:
     created_at: datetime
     updated_at: datetime
     sources: tuple[ReviewSourceDetail, ...]
+    feature_uuid: str | None = None
 
 
 @dataclass(frozen=True)
@@ -600,6 +608,7 @@ _ADMIN_FEATURES_IN_BBOX_SQL: Final[str] = f"""
 WITH candidates AS (
   SELECT
       f.feature_id,
+      CAST(f.feature_uuid AS text) AS feature_uuid,
       f.kind,
       f.name,
       f.category,
@@ -649,6 +658,7 @@ WITH candidates AS (
 )
 SELECT
     c.feature_id,
+    c.feature_uuid,
     c.kind,
     c.name,
     c.category,
@@ -1750,6 +1760,7 @@ def _review_feature_detail(row: AdminFeatureDetail) -> ReviewFeatureDetail:
     feature = row.feature
     return ReviewFeatureDetail(
         feature_id=feature.feature_id,
+        feature_uuid=feature.feature_uuid,
         kind=feature.kind,
         name=feature.name,
         category=feature.category,
@@ -2857,6 +2868,7 @@ WITH reviews AS MATERIALIZED (
 expanded AS (
     SELECT
         r.*,
+        CAST(fa.feature_uuid AS text) AS feature_uuid_a,
         fa.name AS name_a,
         fa.kind AS kind_a,
         fa.category AS category_a,
@@ -2864,6 +2876,7 @@ expanded AS (
         x_extension.ST_Y(fa.coord) AS lat_a,
         psa.provider AS provider_a,
         psa.dataset_key AS dataset_key_a,
+        CAST(fb.feature_uuid AS text) AS feature_uuid_b,
         fb.name AS name_b,
         fb.kind AS kind_b,
         fb.category AS category_b,
@@ -3087,8 +3100,10 @@ def _score(value: Any) -> float:
 
 
 def _dedup_feature(row: Any, suffix: str) -> DedupFeatureSummary:
+    feature_uuid = row[f"feature_uuid_{suffix}"]
     return DedupFeatureSummary(
         feature_id=str(row[f"feature_id_{suffix}"]),
+        feature_uuid=str(feature_uuid) if feature_uuid is not None else None,
         name=str(row[f"name_{suffix}"]),
         kind=str(row[f"kind_{suffix}"]),
         category=str(row[f"category_{suffix}"]),
@@ -3365,6 +3380,8 @@ class EnrichmentReviewRow:
     reviewed_by: str | None
     reviewed_at: datetime | None
     created_at: datetime
+    # T-VN-32C UUID 정본 병행 노출(additive) — target join(f) 산출.
+    target_feature_uuid: str | None = None
 
 
 @dataclass(frozen=True)
@@ -3403,6 +3420,8 @@ class EnrichmentReviewDetail:
     source: ReviewSourceDetail
     target_detail_available: bool
     default_detail_source: str
+    # T-VN-32C UUID 정본 병행 노출(additive) — target join(f) 산출.
+    target_feature_uuid: str | None = None
 
 
 _ENRICHMENT_REVIEW_OPTIONAL_STATUS_FILTER: Final[str] = """
@@ -3482,6 +3501,7 @@ SELECT
     q.status,
     q.name_score,
     q.target_feature_id,
+    CAST(f.feature_uuid AS text) AS target_feature_uuid,
     q.target_name,
     q.source_provider,
     q.source_dataset_key,
@@ -3655,6 +3675,7 @@ SELECT
     q.status,
     q.name_score,
     q.target_feature_id,
+    CAST(f.feature_uuid AS text) AS target_feature_uuid,
     q.target_name,
     q.source_provider,
     q.source_dataset_key,
@@ -3752,11 +3773,15 @@ def _has_review_detail(value: dict[str, Any]) -> bool:
 
 
 def _enrichment_review_row(row: Any) -> EnrichmentReviewRow:
+    target_feature_uuid = row["target_feature_uuid"]
     return EnrichmentReviewRow(
         review_id=str(row["review_id"]),
         status=str(row["status"]),
         name_score=_score(row["name_score"]),
         target_feature_id=str(row["target_feature_id"]),
+        target_feature_uuid=(
+            str(target_feature_uuid) if target_feature_uuid is not None else None
+        ),
         target_name=str(row["target_name"]),
         target_kind=row["target_kind"],
         target_category=row["target_category"],
@@ -3916,11 +3941,15 @@ async def get_enrichment_review_detail(
 
     source = _review_source_from_record(row["source_record"])
     target_detail_available = _has_review_detail(target.detail)
+    target_feature_uuid = row["target_feature_uuid"]
     return EnrichmentReviewDetail(
         review_id=str(row["review_id"]),
         status=str(row["status"]),
         name_score=_score(row["name_score"]),
         target_feature_id=str(row["target_feature_id"]),
+        target_feature_uuid=(
+            str(target_feature_uuid) if target_feature_uuid is not None else None
+        ),
         target_name=str(row["target_name"]),
         source_provider=str(row["source_provider"]),
         source_dataset_key=str(row["source_dataset_key"]),

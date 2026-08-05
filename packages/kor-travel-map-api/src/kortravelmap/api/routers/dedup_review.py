@@ -7,6 +7,7 @@ from time import perf_counter
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from kortravelmap.infra import feature_identity
 from kortravelmap.infra.admin_feature_repo import (
     DedupFeatureSummary,
     DedupReviewDetail,
@@ -35,6 +36,7 @@ from kortravelmap.api.domain_command_service import (
     domain_command_transaction,
     idempotent_domain_command,
 )
+from kortravelmap.api.identity_projection import response_feature_id
 from kortravelmap.api.response import Meta, make_meta
 
 __all__ = [
@@ -239,8 +241,10 @@ class DedupReviewDecisionResponse(BaseModel):
 
 
 def _feature(item: DedupFeatureSummary) -> DedupFeatureRecord:
+    # T-VN-32C PR-2 — 응답 feature 참조 표시는 UUID 정본. review 페어 키
+    # (queue의 feature_id_a/b)·merge 내부 매칭은 legacy 축 그대로다.
     return DedupFeatureRecord(
-        feature_id=item.feature_id,
+        feature_id=response_feature_id(item),
         name=item.name,
         kind=item.kind,
         category=item.category,
@@ -274,8 +278,9 @@ def _source_detail(row: ReviewSourceDetail) -> ReviewSourceDetailRecord:
 
 
 def _feature_detail(row: ReviewFeatureDetail) -> ReviewFeatureDetailRecord:
+    # T-VN-32C PR-2 — 상세 비교 feature snapshot의 응답 feature_id는 UUID 정본.
     return ReviewFeatureDetailRecord(
-        feature_id=row.feature_id,
+        feature_id=response_feature_id(row),
         kind=row.kind,
         name=row.name,
         category=row.category,
@@ -328,6 +333,8 @@ def _decision_response(
             review_id=review_id,
             decision=decision,
             changed=changed,
+            # T-VN-32C 치환 제외 — merge outcome은 write 결과 감사 레코드라 내부
+            # DB 참조(legacy 정본 키)를 그대로 보여준다 (merge_repo 미확장).
             master_feature_id=outcome.master_feature_id if outcome else None,
             loser_feature_id=outcome.loser_feature_id if outcome else None,
             merge_id=outcome.merge_id if outcome else None,
@@ -368,7 +375,8 @@ async def list_reviews(
             categories=category,
             min_score=min_score,
             max_score=max_score,
-            q=q,
+            # T-VN-32C PR-2 (S9) — UUID 표기 검색어를 legacy 정본 키로 정규화.
+            q=await feature_identity.legacy_id_for_filter(session, q),
             page_size=page_size,
             cursor=cursor,
         )
@@ -436,6 +444,13 @@ async def decide_review(
 ) -> DedupReviewDecisionResponse:
     started_at = perf_counter()
     if body.decision == "merged":
+        # T-VN-32C PR-2 (W4) — 값 전환 후 프론트가 응답에서 복사한 UUID를
+        # master_feature_id로 되돌린다. legacy 정본 키로 해석해야 review 후보
+        # 쌍(legacy 축) 등가 비교가 성립한다. 해석 miss는 원문 유지 — 기존
+        # 409(후보 쌍에 없음) 계약이 그대로 판정한다.
+        master_ref = body.master_feature_id
+        if master_ref is not None:
+            master_ref = await feature_identity.legacy_id_for_filter(session, master_ref)
         try:
             async with (
                 domain_command_transaction(session),
@@ -444,7 +459,7 @@ async def decide_review(
                 outcome = await merge_dedup_review(
                     session,
                     review_id,
-                    master_feature_id=body.master_feature_id,
+                    master_feature_id=master_ref,
                     merged_by=context.actor,
                     reason=body.decision_reason,
                 )

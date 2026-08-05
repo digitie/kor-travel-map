@@ -61,6 +61,8 @@ __all__ = [
     "resolve_feature_identity",
     "resolve_feature_identities_bulk",
     "legacy_id_for_filter",
+    "is_canonical_uuid_ref",
+    "feature_uuid_in_use",
     "get_feature_uuid_map",
     "count_features_missing_identity",
 ]
@@ -434,6 +436,33 @@ async def resolve_feature_identities_bulk(
                 feature_uuid=str(row["feature_uuid"]),
             )
     return resolved
+
+
+def is_canonical_uuid_ref(ref: str) -> bool:
+    """참조 문자열이 canonical UUID(lowercase hyphenated 36자) 형태인지 판별."""
+    return _parse_canonical_uuid(ref) is not None
+
+
+_FEATURE_UUID_EXISTS_SQL: Final[str] = """
+SELECT EXISTS (
+    SELECT 1 FROM feature.features WHERE feature_uuid = CAST(:feature_uuid AS uuid)
+) AS in_use
+"""
+
+
+async def feature_uuid_in_use(session: AsyncSession, value: str) -> bool:
+    """값이 어떤 feature의 ``feature_uuid``와 충돌하는지 검사 (T-VN-32C W3 가드).
+
+    UUID 타입 입력 컬럼(예: sibling_group_id)에 응답에서 복사한 feature UUID를
+    붙여넣는 오염을 형식 검증이 못 막으므로, 정본 UUID와의 충돌을 명시
+    거부하는 데 쓴다. canonical UUID 형태가 아니면 항상 ``False``.
+    """
+    if _parse_canonical_uuid(value) is None:
+        return False
+    row = (
+        await session.execute(text(_FEATURE_UUID_EXISTS_SQL), {"feature_uuid": value})
+    ).mappings().one()
+    return bool(row["in_use"])
 
 
 async def legacy_id_for_filter(session: AsyncSession, ref: str | None) -> str | None:
