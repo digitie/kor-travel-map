@@ -44,6 +44,131 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
+# ``feature.features_detailed`` — core + subtype 조립의 **단일 정본**.
+#
+# core에서 ``detail``/``geom``을 제거한 뒤, 응답이 요구하는 그 두 값을 여기서
+# subtype으로부터 재구성한다. read 경로는 ``FROM feature.features``를 이 뷰로
+# 바꾸는 것만으로 종전과 같은 모양을 얻는다 — 조립 규칙이 흩어지지 않는다.
+#
+# 조립은 **원본 바이트와 동등**해야 한다(전수 md5 대조로 고정). 실측 결과
+# 종전 detail은 NULL 키를 **보존**하므로(``"biz_number": null``) strip 하지
+# 않는다 — 특히 ``jsonb_strip_nulls``는 재귀적이라 ``payload``/``facility_info``
+# 내부의 정당한 null까지 지워 provider 원본을 훼손한다. ``feature_id``는 DTO
+# detail이 항상 갖던 키라 조립에도 포함한다. price/weather는 CASE 미매치 →
+# NULL → ``COALESCE``로 ``{}``가 되어 종전과 같다.
+_FEATURES_DETAILED_SQL = """
+SELECT
+    f.feature_id,
+    f.feature_uuid,
+    f.kind,
+    f.name,
+    f.category,
+    f.coord,
+    f.coord_5179,
+    f.coord_precision_digits,
+    f.address,
+    f.legal_dong_code,
+    f.road_name_code,
+    f.road_address_management_no,
+    f.admin_dong_code,
+    f.sido_code,
+    f.sigungu_code,
+    f.urls,
+    f.marker_icon,
+    f.marker_color,
+    f.parent_feature_id,
+    f.sibling_group_id,
+    f.raw_refs,
+    f.status,
+    f.created_at,
+    f.updated_at,
+    f.deleted_at,
+    f.data_origin,
+    f.data_version,
+    f.user_change_kind,
+    f.user_change_status,
+    f.user_change_request_id,
+    f.user_deleted_at,
+    f.user_deleted_by,
+    f.user_change_reason,
+    f.row_revision,
+    COALESCE(r.geom, a.geom) AS geom,
+    COALESCE(
+        (
+            CASE f.kind
+                WHEN 'place' THEN jsonb_build_object(
+                    'feature_id', f.feature_id,
+                    'place_kind', p.place_kind,
+                    'phones', to_jsonb(p.phones),
+                    'biz_number', p.biz_number,
+                    'license_date', to_jsonb(p.license_date),
+                    'business_hours', p.business_hours,
+                    'facility_info', p.facility_info,
+                    'reviews_link', p.reviews_link,
+                    'payload', p.payload
+                )
+                WHEN 'event' THEN jsonb_build_object(
+                    'feature_id', f.feature_id,
+                    'event_kind', e.event_kind,
+                    'starts_on', to_jsonb(e.starts_on),
+                    'ends_on', to_jsonb(e.ends_on),
+                    'timezone', e.timezone,
+                    'opening_hours', e.opening_hours,
+                    'venue_name', e.venue_name,
+                    'tel', e.tel,
+                    'content_id', e.content_id,
+                    'content_type_id', e.content_type_id,
+                    'area_code', e.area_code,
+                    'sigungu_code', e.sigungu_code,
+                    'payload', e.payload
+                )
+                WHEN 'notice' THEN jsonb_build_object(
+                    'feature_id', f.feature_id,
+                    'notice_type', n.notice_type,
+                    'severity', n.severity,
+                    'valid_start_time', to_jsonb(n.valid_start_time),
+                    'valid_end_time', to_jsonb(n.valid_end_time),
+                    'source_agency', n.source_agency,
+                    'officer_name', n.officer_name,
+                    'payload', n.payload
+                )
+                WHEN 'route' THEN jsonb_build_object(
+                    'feature_id', f.feature_id,
+                    'route_type', r.route_type,
+                    'geometry_source', r.geometry_source,
+                    'geometry_status', r.geometry_status,
+                    'total_distance_meters', r.total_distance_meters,
+                    'expected_duration_minutes', r.expected_duration_minutes,
+                    'difficulty', r.difficulty,
+                    'begin_name', r.begin_name,
+                    'begin_address', r.begin_address,
+                    'end_name', r.end_name,
+                    'end_address', r.end_address,
+                    'payload', r.payload
+                )
+                WHEN 'area' THEN jsonb_build_object(
+                    'feature_id', f.feature_id,
+                    'area_kind', a.area_kind,
+                    'boundary_source', a.boundary_source,
+                    'area_square_meters', a.area_square_meters,
+                    'regulation_scope', a.regulation_scope,
+                    'administrative_office', a.administrative_office,
+                    'description', a.description,
+                    'payload', a.payload
+                )
+            END
+        ),
+        '{}'::jsonb
+    ) AS detail
+FROM feature.features AS f
+LEFT JOIN feature.feature_places AS p ON p.feature_id = f.feature_id
+LEFT JOIN feature.feature_events AS e ON e.feature_id = f.feature_id
+LEFT JOIN feature.feature_notices AS n ON n.feature_id = f.feature_id
+LEFT JOIN feature.feature_routes AS r ON r.feature_id = f.feature_id
+LEFT JOIN feature.feature_areas AS a ON a.feature_id = f.feature_id
+"""
+
+
 def upgrade() -> None:
     op.execute(
         """
@@ -174,45 +299,54 @@ def upgrade() -> None:
             ON feature.feature_areas USING gist (geom)
         """
     )
-    # geometry 정본이 옮겨졌으므로 core에서 제거한다. 공개 뷰가 컬럼을 명시
-    # 열거하므로 뷰를 먼저 드롭하고 새 정의로 재생성한다.
+    # ── 단일 정본 전환: core detail·geom 제거 ────────────────────────────
+    #
+    # subtype이 kind별 값의 **유일한 정본**이 된다(shadow 병행 폐기 — ADR-084
+    # 결정 4 개정). 이중 쓰기·drift 관측이라는 우회 복잡도가 통째로 사라지고,
+    # "DB가 kind 계약을 모른다"는 문제의 뿌리(자유 JSONB)가 제거된다.
+    #
+    # 응답의 ``detail``/``geom``은 아래 ``features_detailed`` 뷰가 subtype에서
+    # 조립한다 — read 경로는 ``FROM feature.features``를 이 뷰로 바꾸면 종전과
+    # 같은 모양을 얻는다(조립 규칙의 단일 정본).
     op.execute("DROP VIEW IF EXISTS feature.public_features")
     op.execute("DROP INDEX IF EXISTS feature.idx_features_geom_gist")
+    op.execute("DROP INDEX IF EXISTS feature.idx_features_opening_hours_keyset")
+    op.execute("DROP INDEX IF EXISTS feature.idx_features_yt_channel_id")
+    op.execute("DROP INDEX IF EXISTS feature.idx_features_yt_playlist_id")
     op.execute("ALTER TABLE feature.features DROP COLUMN geom")
+    op.execute("ALTER TABLE feature.features DROP COLUMN detail")
+
+    op.execute(f"CREATE VIEW feature.features_detailed AS {_FEATURES_DETAILED_SQL}")
     op.execute(
         """
         CREATE VIEW feature.public_features AS
-        SELECT
-            feature_id, kind, name, category, coord, coord_5179,
-            address, legal_dong_code, road_name_code, road_address_management_no,
-            admin_dong_code, sido_code, sigungu_code, urls, marker_icon,
-            marker_color, parent_feature_id, sibling_group_id, detail, raw_refs,
-            status, created_at, updated_at, deleted_at, coord_precision_digits,
-            data_origin, data_version, user_change_kind, user_change_status,
-            user_change_request_id, user_deleted_at, user_deleted_by,
-            user_change_reason, row_revision, feature_uuid
-        FROM feature.features
+        SELECT *
+        FROM feature.features_detailed
         WHERE status = 'active' AND deleted_at IS NULL
         """
     )
 
 
 def downgrade() -> None:
+    """core detail/geom 복원 — subtype 값을 되돌려 담는다.
+
+    subtype이 정본이 된 뒤이므로 downgrade는 **역조립**이다: 뷰가 만들던
+    detail JSONB를 그대로 core 컬럼에 물질화하고 geom을 되돌린다. 무손실이다
+    (뷰의 조립 규칙과 같은 식을 쓴다).
+    """
     op.execute("DROP VIEW IF EXISTS feature.public_features")
+    op.execute("DROP VIEW IF EXISTS feature.features_detailed")
     op.execute(
         "ALTER TABLE feature.features "
+        "ADD COLUMN detail jsonb NOT NULL DEFAULT '{}'::jsonb, "
         "ADD COLUMN geom x_extension.geometry(Geometry, 4326)"
     )
     op.execute(
-        """
+        f"""
         UPDATE feature.features AS f
-           SET geom = s.geom
-          FROM (
-            SELECT feature_id, geom FROM feature.feature_routes
-            UNION ALL
-            SELECT feature_id, geom FROM feature.feature_areas
-          ) AS s
-         WHERE s.feature_id = f.feature_id
+           SET detail = d.detail, geom = d.geom
+          FROM ({_FEATURES_DETAILED_SQL}) AS d
+         WHERE d.feature_id = f.feature_id
         """
     )
     op.execute(
@@ -224,17 +358,18 @@ def downgrade() -> None:
     )
     op.execute(
         """
+        CREATE INDEX idx_features_opening_hours_keyset
+            ON feature.features (feature_id)
+            WHERE deleted_at IS NULL
+              AND detail IS NOT NULL
+              AND detail <> '{}'::jsonb
+              AND detail ?| ARRAY['business_hours','opening_hours']
+        """
+    )
+    op.execute(
+        """
         CREATE VIEW feature.public_features AS
-        SELECT
-            feature_id, kind, name, category, coord, coord_5179, geom,
-            address, legal_dong_code, road_name_code, road_address_management_no,
-            admin_dong_code, sido_code, sigungu_code, urls, marker_icon,
-            marker_color, parent_feature_id, sibling_group_id, detail, raw_refs,
-            status, created_at, updated_at, deleted_at, coord_precision_digits,
-            data_origin, data_version, user_change_kind, user_change_status,
-            user_change_request_id, user_deleted_at, user_deleted_by,
-            user_change_reason, row_revision, feature_uuid
-        FROM feature.features
+        SELECT * FROM feature.features
         WHERE status = 'active' AND deleted_at IS NULL
         """
     )

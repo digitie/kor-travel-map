@@ -1,6 +1,6 @@
 # ADR — Architecture Decision Records
 
-`kor-travel-map`의 누적 ADR. 파일당 1개(`NNN-<slug>.md`)로 둔다. **다음 후보 = ADR-084.**
+`kor-travel-map`의 누적 ADR. 파일당 1개(`NNN-<slug>.md`)로 둔다. **다음 후보 = ADR-085.**
 
 - ADR은 **프로그램 핵심 구조**(의존 계층·데이터/식별 모델·패키지/서비스 구조·REST 계약·
   운영 모델) 결정만 둔다. provider/ETL·도메인 taxonomy·알고리즘·process·운영 결정은 해당 topic
@@ -97,6 +97,7 @@
 | ADR-081 | cache target generation과 pull outbox 전파 | [081-cache-target-generation-outbox-protocol.md](081-cache-target-generation-outbox-protocol.md) |
 | ADR-082 | cache-target writer-drain은 Map durable control plane이 소유 | [082-map-owned-cache-target-writer-drain.md](082-map-owned-cache-target-writer-drain.md) |
 | ADR-083 | 비파생 UUIDv7 정본 generator와 응답 feature_id 값 전환 | [083-nonderived-uuid-generator-and-value-cutover.md](083-nonderived-uuid-generator-and-value-cutover.md) |
+| ADR-084 | kind별 typed subtype 분해와 배타 arc | [084-typed-feature-subtypes.md](084-typed-feature-subtypes.md) |
 
 ## 새 ADR 작성 규약
 

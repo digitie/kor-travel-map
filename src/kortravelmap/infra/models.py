@@ -572,6 +572,7 @@ class FeatureEventRow(_FeatureSubtypeBase):
     content_id: Mapped[str | None] = mapped_column(String)
     content_type_id: Mapped[str | None] = mapped_column(String)
     area_code: Mapped[str | None] = mapped_column(String)
+    sigungu_code: Mapped[str | None] = mapped_column(String)
     payload: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )

@@ -47,6 +47,7 @@ def upgrade() -> None:
             content_id varchar,
             content_type_id varchar,
             area_code varchar,
+            sigungu_code varchar,
             payload jsonb NOT NULL DEFAULT '{}'::jsonb,
             CONSTRAINT pk_feature_events PRIMARY KEY (feature_id),
             CONSTRAINT ck_feature_events_kind CHECK (kind = 'event'),
@@ -67,7 +68,7 @@ def upgrade() -> None:
         INSERT INTO feature.feature_events (
             feature_id, feature_uuid, kind, event_kind, starts_on, ends_on,
             timezone, opening_hours, venue_name, tel, content_id,
-            content_type_id, area_code, payload
+            content_type_id, area_code, sigungu_code, payload
         )
         SELECT
             f.feature_id,
@@ -92,6 +93,7 @@ def upgrade() -> None:
             f.detail->>'content_id',
             f.detail->>'content_type_id',
             f.detail->>'area_code',
+            f.detail->>'sigungu_code',
             COALESCE(f.detail->'payload', '{}'::jsonb)
         FROM feature.features AS f
         WHERE f.kind = 'event'
