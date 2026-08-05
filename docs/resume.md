@@ -15,9 +15,12 @@
 `8c5bdcf8` 4-이미지 배포(ui 포함)·사후 검증 정상(상세 UUID·batch echo·
 trip_card 등식)·curated snapshot 활성 500 전량 재물질화(멱등 확인). dm#128.
 
-**다음 한 작업**: ⑤ PinVi user 스냅샷 재고정 PR(+NEW-2·NEW-3 동봉 — 진행 중)
-→ ④ live e2e fixture 재생성(새 표면 기준) → NEW-5 dagster entrypoint 인터록.
-T-VN-32C는 이로써 배포까지 완결 — 다음 Lane A 항목은 T-VN-35A.
+⑤ PinVi 재고정 완결(#432 + F1 양성 증명 게이트) · service 재핀은 codex
+T-VN-41-F 합류(resume 상단 패키지) · NEW-5 인터록 구현·리뷰 반영(브랜치
+feat/t32c-new5-dagster-interlock).
+
+**다음 한 작업**: NEW-5 PR 머지 → ④ live e2e fixture 재생성(새 표면 기준,
+생성기 부재 — 축 설계 필요) → T-VN-32C 완전 종결 — 다음 Lane A는 T-VN-35A.
 
 ## 2026-08-05 (9) — 32C PR-2 머지 (#952, `8c5bdcf8`)
 

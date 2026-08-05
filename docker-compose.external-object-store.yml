@@ -21,9 +21,14 @@ services:
         condition: service_completed_successfully
       postgres:
         condition: service_healthy
+      # NEW-5 인터록 — external 모드에서도 api 선기동 보증 유지 (리뷰 F1).
+      api:
+        condition: service_healthy
   dagster-daemon:
     depends_on: !override
       dagster-db-init:
         condition: service_completed_successfully
       postgres:
+        condition: service_healthy
+      api:
         condition: service_healthy

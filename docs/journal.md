@@ -17,6 +17,27 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-08-05 (11) — NEW-5: dagster entrypoint DB 세대 기계 인터록
+
+- dagster-entrypoint에 **읽기 전용** 게이트: DB alembic revision == 이미지
+  head일 때만 기동(0083 배포 때 사람이 지키던 "api 먼저" 순서의 기계화 —
+  ADR-083 유예 해소). DB가 뒤면 "deploy the api container first", chain
+  밖이면 stale 즉시 실패, 연결 오류만 retry. EXPECTED_HEAD는 설정 시 추가
+  대조(set-but-empty 거부), MIGRATION_MODE 거부 — api-entrypoint 규약
+  lockstep. dagster.Dockerfile에 alembic.ini/alembic COPY(패키지는 기존
+  runtime 의존, `.dockerignore` `**/__pycache__/` 동봉).
+- **적대 리뷰 2인 반영**: F1(H, 양측 공통) — external overlay 3종의
+  `depends_on: !override`가 base의 api(service_healthy) 의존을 지워 fresh
+  up 3모드에서 게이트 경주 → overlay에 명시 재기입 + 실제 Compose resolver
+  merged-config 테스트(3모드, `!reset` env_file overlay로 clean checkout
+  해석). F2 heads 실패 증거 재실행 표출, F3 성공 경로 실 python 검증 복원,
+  F4 branched alembic_version 전용 문구, F6 MODE 거부.
+- 런북: dagster 게이트 실패 문구 4종·**"migration 배포 = dagster 이미지
+  재빌드 의무" 불변식**(구세대 러닝 컨테이너는 다음 재시작에서 stale 영구
+  크래시루프 — 지연 기폭)·장기 migration healthcheck 창(~220s) 한계·
+  `--entrypoint sh` 디버깅 우회 기재. dm 권장 3건(base EXPECTED_HEAD
+  기본값·dagster EXPECTED_HEAD 주입·runbook)은 dm#128 후속.
+
 ## 2026-08-05 (10) — T-VN-32C PR-2 prod 배포 — 값 전환 라이브
 
 - **배포**(`8c5bdcf8`, dm#128 기록): 4-이미지(api·dagster·daemon·**ui** —

@@ -32,14 +32,20 @@ services:
       KOR_TRAVEL_MAP_OBJECT_STORE_ENDPOINT_URL: ${KOR_TRAVEL_MAP_EXTERNAL_DOCKER_OBJECT_STORE_ENDPOINT_URL:-http://host.docker.internal:${KOR_TRAVEL_MAP_RUSTFS_API_PORT:-12101}}
 
   dagster:
-    depends_on: !override {}
+    # NEW-5 인터록 — fresh up에서 api(migration 소유)보다 먼저 떠서 게이트에
+    # 걸리지 않게 한다 (base와 동일 보증, external 모드에서도 유지 — 리뷰 F1).
+    depends_on: !override
+      api:
+        condition: service_healthy
     environment:
       KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_EXTERNAL_DOCKER_DAGSTER_PG_URL:-postgresql://${KOR_TRAVEL_MAP_POSTGRES_USER:-kor_travel_map}:${KOR_TRAVEL_MAP_POSTGRES_PASSWORD:-kor_travel_map}@host.docker.internal:${KOR_TRAVEL_MAP_EXTERNAL_POSTGRES_HOST_PORT:-5432}/${KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB:-kor_travel_map_dagster}}
       KOR_TRAVEL_MAP_PG_DSN: ${KOR_TRAVEL_MAP_EXTERNAL_DOCKER_PG_DSN:-postgresql+asyncpg://${KOR_TRAVEL_MAP_POSTGRES_USER:-kor_travel_map}:${KOR_TRAVEL_MAP_POSTGRES_PASSWORD:-kor_travel_map}@host.docker.internal:${KOR_TRAVEL_MAP_EXTERNAL_POSTGRES_HOST_PORT:-5432}/${KOR_TRAVEL_MAP_POSTGRES_DB:-kor_travel_map}}
       KOR_TRAVEL_MAP_OBJECT_STORE_ENDPOINT_URL: ${KOR_TRAVEL_MAP_EXTERNAL_DOCKER_OBJECT_STORE_ENDPOINT_URL:-http://host.docker.internal:${KOR_TRAVEL_MAP_RUSTFS_API_PORT:-12101}}
 
   dagster-daemon:
-    depends_on: !override {}
+    depends_on: !override
+      api:
+        condition: service_healthy
     environment:
       KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_EXTERNAL_DOCKER_DAGSTER_PG_URL:-postgresql://${KOR_TRAVEL_MAP_POSTGRES_USER:-kor_travel_map}:${KOR_TRAVEL_MAP_POSTGRES_PASSWORD:-kor_travel_map}@host.docker.internal:${KOR_TRAVEL_MAP_EXTERNAL_POSTGRES_HOST_PORT:-5432}/${KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB:-kor_travel_map_dagster}}
       KOR_TRAVEL_MAP_PG_DSN: ${KOR_TRAVEL_MAP_EXTERNAL_DOCKER_PG_DSN:-postgresql+asyncpg://${KOR_TRAVEL_MAP_POSTGRES_USER:-kor_travel_map}:${KOR_TRAVEL_MAP_POSTGRES_PASSWORD:-kor_travel_map}@host.docker.internal:${KOR_TRAVEL_MAP_EXTERNAL_POSTGRES_HOST_PORT:-5432}/${KOR_TRAVEL_MAP_POSTGRES_DB:-kor_travel_map}}
