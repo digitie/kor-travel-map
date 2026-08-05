@@ -10,6 +10,18 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-08-05 (7) — 32C PR-1·쌍 PR 머지 + 0083 prod 배포 완주
+
+Map #950(`2a8642bd`)·PinVi #430(`6325d814`) 머지, 0083 게이트 순서대로 prod
+배포 완료: PinVi 선배포 → 사전 점검 0/0 → Map api(0083 적용·healthy) →
+dagster·daemon → 사후 검증 전부 정상(`derivation_enforced: false`, 731,733).
+EXPECTED_HEAD=0083 재핀은 dm#128 기록. 잔여 유예(CLI 플래그·derivation_enforced
+배선·service 스냅샷 재추출)는 PR-2 동봉.
+
+**다음 한 작업**: **PR-2(응답 값 전환 — read 표면 단일 원자 릴리스, 설계 §4
++ NEW-2/3/5·F5 체크리스트)**. 부수: 신규 ingest 행 v7 확인(배포 직후 행은 구
+dagster 마지막 쓰기라 ver=5 — 다음 ingest부터 v7 기대).
+
 ## 2026-08-05 (6) — 32C PR-1(비파생 UUIDv7 generator) 구현·리뷰 반영 완료
 
 0083(파생 CHECK 해제+선언적 사본 일치 CASCADE FK+v7 generator)·app 전환·PinVi

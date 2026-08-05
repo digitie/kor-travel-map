@@ -17,6 +17,33 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-08-05 (7) — T-VN-32C PR-1 머지 + 쌍 PR 머지 + 0083 prod 배포 완주
+
+- **Map PR-1 #950 머지** `2a8642bde10ef0cd384001fb72b1a3fc9fb5ae81` (CI 8/8,
+  적대 리뷰 2인 최종 GO). **PinVi 쌍 PR pinvi#430 머지** `6325d814`(squash):
+  golden 재vendor(merge SHA 원본, bytes `dc0a6595…` — nonderived_v1 포함) +
+  `_UPSTREAM_MAP_COMMIT` 재핀 + nonderived_v1 독립 재계산 테스트(leaf·합산
+  root·정렬) + contract-staleness에 shared golden 2종 drift 감시(유예 ③) +
+  F4 모순 docstring 정정. 잔여 유예 ②(CLI `--accept-uuid-literals`)·NEW-3
+  (`derivation_enforced` 배선)은 PR-2 동봉 — PinVi journal 2026-08-05 참조.
+- **0083 배포 게이트 완주** (docstring 순서 준수): PinVi 배포(`6325d814`, 3
+  컨테이너 healthy) → 사전 점검 쿼리 0/0(alias 731,731) → Map `2a8642bd`
+  빌드(`t32c-2a8642bd`) → override `EXPECTED_HEAD=0083` 회전 → **api 먼저**
+  (0082→0083 단일 트랜잭션 적용, healthy) → 사후 검증(head·CASCADE FK·UNIQUE·
+  파생 CHECK 제거·`uuid_generate_v7()` v7 레이아웃 실측·mismatch/orphan 0) →
+  dagster·daemon → checksum `derivation_enforced: false` 실측(731,733 — 라이브
+  insert 흐름 정상). ui 이미지는 재빌드 안 함(#950 frontend는 type-only).
+- **사고 1건(즉시 복구·DB 무접촉)**: `compose up -d pinvi-*`가 override 없이
+  의존성 map-api를 base 설정(낡은 EXPECTED_HEAD=0078)으로 재생성 → entrypoint
+  인터록이 기동 거부(설계 의도대로 fail-closed). override 포함 재기동으로
+  복구. 재발 방지 메모는 dm#128 코멘트에 기록(override 상시 포함 + base
+  기본값 갱신 후보).
+
+**다음 한 작업**: **PR-2(응답 값 전환 — read 표면 단일 원자 릴리스, 설계 §4)**
+— projection dual-select·깔때기 치환·write 수신 UUID 해석·admin fast-path·
+curated 재물질화·e2e fixture·PinVi user/admin 스냅샷 재추출 + 유예 ②·NEW-3·
+dagster entrypoint 기계 인터록(NEW-5) 동봉.
+
 ## 2026-08-05 (6) — T-VN-32C PR-1: 비파생 UUIDv7 정본 generator (0083) 구현·리뷰 반영
 
 - **설계**: 4축 병렬 조사 워크플로(응답 표면 62곳 인벤토리/0080~0082 제약/

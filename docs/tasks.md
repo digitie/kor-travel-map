@@ -67,8 +67,8 @@ barrier로 직렬화한다.
     [/] `T-VN-41D`(durable writer-drain)
 - **Wave 2 barrier 이후**
   - freeze(Lane A): [x] `T-VN-31A` → [x] `T-VN-31B` → [x] `T-VN-31C`
-  - Lane A: [x] `T-VN-32A` → [x] `T-VN-32B` → [~] `T-VN-32C`(쌍 PR 착지 —
-    Map #940·PinVi #428, 잔여는 배포+cutover→checksum 게이트) →
+  - Lane A: [x] `T-VN-32A` → [x] `T-VN-32B` → [~] `T-VN-32C`(0083 배포 완주 —
+    Map #950·PinVi #430, 잔여는 PR-2 응답 값 전환) →
     [ ] `T-VN-35A` → [ ] `T-VN-35B` → [ ] `T-VN-35C` → [ ] `T-VN-35D` →
     [ ] `T-VN-37A` → [ ] `T-VN-37B` → [ ] `T-VN-37C`
   - Lane B shadow: [ ] `T-VN-33A` → [ ] `T-VN-33B` → [ ] `T-VN-33C` →
@@ -610,11 +610,25 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   배포 결선 예고는 docker-manager#128(EXPECTED_HEAD=`0082_legacy_write_fence`
   + PinVi 계약 env 2종 — sync enable 시 fail-close 주의, Map 먼저 순서 제약).
 
-  **잔여(rollout 순서)**: PinVi 배포+`pinvi-feature-uuid-cutover`(dry-run
-  선행) 실행 → 양 저장소 checksum 일치 → Map 응답 `feature_id` 값 UUID 전환·
-  비파생 generator 채택·0080 CHECK/0079 트리거 제거 재평가 → PinVi vendored
-  snapshot user/admin-detail 재추출+핀 갱신(service는 #428에서 완료 — UUID 값
-  전환 tail에서 3종 재검토).
+  **checksum 게이트 통과(2026-08-05)**: PinVi 배포 + cutover dry→real —
+  양 저장소 root 일치(`8bd9534a…`, 731,600) + trip_day_pois 26행 shadow 채움.
+
+  **PR-1 + 쌍 PR + 0083 배포 완주(2026-08-05)**: Map #950 merge `2a8642bd`
+  (0083 — 파생 CHECK 해제·선언적 사본 일치 CASCADE FK+UNIQUE·비파생 UUIDv7
+  generator app `make_feature_uuid`/SQL `feature.uuid_generate_v7()` 동일
+  레이아웃·verify 이원화 fail-close·golden nonderived_v1 개정, 적대 리뷰
+  2인 GO) + PinVi #430 merge `6325d814`(파생 등식 폐기 수용·cutover 리터럴
+  자기-정본화 opt-in·golden 재vendor `dc0a6595…`+merge SHA 핀·staleness
+  golden 감시). prod 배포 게이트 순서 완주(PinVi 선배포 → 사전 점검 0/0 →
+  Map api 0083 적용 → dagster·daemon), 사후 검증 정상(`derivation_enforced:
+  false`, 731,733) — journal 2026-08-05 (7)·dm#128.
+
+  **잔여(rollout 순서)**: **PR-2 — Map 응답 `feature_id` 값 UUID 전환**(read
+  표면 단일 원자 릴리스: projection dual-select·깔때기 치환·write 수신 UUID
+  해석·admin fast-path·curated 재물질화·e2e fixture 재생성) + PinVi vendored
+  snapshot user/admin-detail/service 재추출+핀 갱신 + 유예 동봉분(PinVi CLI
+  `--accept-uuid-literals`+runner 출력, `derivation_enforced` cutover 사전
+  검사 배선, dagster entrypoint 기계 인터록, alias golden staleness는 완료).
   legacy ID·FK 체인 물리 제거는 T-VN-39 removal manifest.
   **운영 점검(상시)**: 0079/0081 트리거 보장은 trigger-respecting 세션
   한정이다 — `session_replication_role=replica`(superuser)는 우회 가능하므로
