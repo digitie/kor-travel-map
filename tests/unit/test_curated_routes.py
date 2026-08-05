@@ -31,6 +31,8 @@ from kortravelmap.settings import KorTravelMapSettings
 
 pytestmark = pytest.mark.unit
 
+_FEATURE_UUID = "99999999-9999-4999-8999-999999999999"
+
 
 def _raw_curated_feature() -> CuratedFeature:
     now = datetime(2026, 7, 19, tzinfo=UTC)
@@ -41,6 +43,7 @@ def _raw_curated_feature() -> CuratedFeature:
         theme_name="공개 raw 경계",
         theme_group="test",
         feature_id="feature:public-curated",
+        feature_uuid=_FEATURE_UUID,
         feature_name="공개 큐레이션 장소",
         feature_category="01070100",
         feature_kind="place",
@@ -264,6 +267,8 @@ def test_public_curated_list_and_detail_strip_raw_lineage(
     detail_item = detailed.json()["data"]
     assert list_item == detail_item
     assert detail_item["feature_kind"] == "place"
+    # T-VN-32C PR-2 — 공개 응답의 feature 참조 값은 UUID 정본이다.
+    assert detail_item["feature_id"] == _FEATURE_UUID
     assert detail_item["address"] == {
         "road": "서울특별시 공개로 1",
         "legal": "서울특별시 공개동 1",
@@ -271,7 +276,7 @@ def test_public_curated_list_and_detail_strip_raw_lineage(
         "sido_name": "서울특별시",
     }
     assert detail_item["detail"] == {
-        "feature_id": "feature:public-curated",
+        "feature_id": _FEATURE_UUID,
         "place_kind": "museum",
         "phones": ["02-0000-0000"],
         "reviews_link": {"naver": "https://map.naver.com/example"},
@@ -372,6 +377,7 @@ def test_public_curated_projection_uses_feature_kind_discriminator(
     assert view is not None
     assert isinstance(view.root, view_type)
     assert view.root.feature_kind == feature_kind
+    assert view.root.feature_id == _FEATURE_UUID
 
 
 def test_public_curated_projection_rejects_unknown_kind() -> None:
