@@ -73,15 +73,5 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.execute(
-        """
-        DO $$
-        BEGIN
-          IF EXISTS (SELECT 1 FROM ops.c6c_cancel_probe_fixtures) THEN
-            RAISE EXCEPTION
-              '0084 downgrade refused: C6c cancel-probe fixture history exists';
-          END IF;
-        END $$
-        """
-    )
+    # 서비스 전 단계에서는 중간 fixture 이력 보전보다 schema 재구성이 우선이다.
     op.drop_table("c6c_cancel_probe_fixtures", schema="ops")

@@ -117,6 +117,7 @@ __all__ = [
     "DedupReviewQueueRow",
     "EnrichmentReviewQueueRow",
     "ImportJobRow",
+    "C6cCancelProbeFixtureRow",
     "ImportJobEventRow",
     "ImportJobEventClockRow",
     "OfflineUploadRow",
@@ -2474,6 +2475,66 @@ class ImportJobRow(Base):
         nullable=False,
         server_default=text("now()"),
     )
+
+
+# =============================================================================
+# ops.c6c_cancel_probe_fixtures  (ADR-084 / T-VN-41F1J)
+# =============================================================================
+
+
+class C6cCancelProbeFixtureRow(Base):
+    """Map이 소유하는 runless cancel-probe fixture의 durable receipt."""
+
+    __tablename__ = "c6c_cancel_probe_fixtures"
+    __table_args__ = (
+        CheckConstraint(
+            "state IN ('armed','consumed','finalized')",
+            name="ck_c6c_cancel_probe_fixtures_state",
+        ),
+        CheckConstraint(
+            "(state = 'armed' AND cancellation_id IS NULL "
+            " AND consumed_at IS NULL AND finalized_at IS NULL) OR "
+            "(state = 'consumed' AND cancellation_id IS NOT NULL "
+            " AND consumed_at IS NOT NULL AND finalized_at IS NULL) OR "
+            "(state = 'finalized' AND cancellation_id IS NOT NULL "
+            " AND consumed_at IS NOT NULL AND finalized_at IS NOT NULL "
+            " AND finalized_at >= consumed_at)",
+            name="ck_c6c_cancel_probe_fixtures_transition",
+        ),
+        ForeignKeyConstraint(
+            ["job_id"],
+            ["ops.import_jobs.job_id"],
+            name="fk_c6c_cancel_probe_fixtures_job",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["cancellation_id"],
+            ["ops.pipeline_cancellations.cancellation_id"],
+            name="fk_c6c_cancel_probe_fixtures_cancellation",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("job_id", name="uq_c6c_cancel_probe_fixtures_job"),
+        UniqueConstraint(
+            "cancellation_id",
+            name="uq_c6c_cancel_probe_fixtures_cancellation",
+        ),
+        {"schema": "ops"},
+    )
+
+    transaction_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        primary_key=True,
+    )
+    job_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    state: Mapped[str] = mapped_column(Text, nullable=False)
+    cancellation_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("clock_timestamp()"),
+    )
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finalized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 # =============================================================================

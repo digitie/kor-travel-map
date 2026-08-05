@@ -236,7 +236,8 @@ if [[ -n "$cursor_signing_secret" ]]; then
   fi
   if [[ "$ops_read_is_set" == "1" \
     && ( "$cursor_signing_secret" == "${API_SCOPED_VALUES[$ops_read_key]}" \
-      || "$cursor_signing_secret" == "${API_SCOPED_VALUES[$ops_cancel_key]}" ) ]]; then
+      || "$cursor_signing_secret" == "${API_SCOPED_VALUES[$ops_cancel_key]}" \
+      || "$cursor_signing_secret" == "${API_SCOPED_VALUES[$ops_fixture_key]}" ) ]]; then
     echo "$cursor_signing_key must be distinct from ops credentials" >&2
     exit 1
   fi

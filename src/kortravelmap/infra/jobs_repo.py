@@ -288,6 +288,7 @@ SELECT
 FROM ops.import_jobs
 WHERE job_id = CAST(:job_id AS uuid)
   AND quarantined_at IS NULL
+  AND kind <> 'c6c_cancel_probe'
   AND (
     (CAST(:provider AS text) IS NULL AND CAST(:dataset_key AS text) IS NULL)
     OR (
@@ -836,6 +837,8 @@ async def record_import_job_event(
         raise ValueError(f"level must be one of {sorted(_EVENT_LEVELS)}, got {level!r}.")
     job = await get_import_job(session, job_id)
     if job is None:
+        return None
+    if job.kind == C6C_CANCEL_PROBE_JOB_KIND:
         return None
     explicit_pair = None
     if provider is not None or dataset_key is not None:

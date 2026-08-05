@@ -1,8 +1,8 @@
 """Pipeline cancellation repository의 PostgreSQL query 정본."""
 
-from kortravelmap.infra.pipeline_lineage import PIPELINE_LINEAGE_CTES_SQL
+from kortravelmap.infra.pipeline_lineage import PIPELINE_CANCELLATION_LINEAGE_CTES_SQL
 
-_RESOLVE_SCOPE_SQL = "WITH RECURSIVE\n" + PIPELINE_LINEAGE_CTES_SQL + """,
+_RESOLVE_SCOPE_SQL = "WITH RECURSIVE\n" + PIPELINE_CANCELLATION_LINEAGE_CTES_SQL + """,
 input_request AS (
     SELECT request.request_id
     FROM ops.feature_update_requests AS request

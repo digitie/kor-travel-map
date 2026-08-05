@@ -597,6 +597,15 @@ def test_local_admin_stack_env_validation_rejects_ambiguous_secrets(tmp_path: Pa
             f"KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET={_CURSOR_SIGNING_SECRET}\n",
             "must be distinct from the public API key",
         ),
+        (
+            "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN="
+            "read-token-00000000000000000000000000000000\n"
+            "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN="
+            "cancel-token-000000000000000000000000000000\n"
+            f"KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN={_CURSOR_SIGNING_SECRET}\n"
+            f"KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET={_CURSOR_SIGNING_SECRET}\n",
+            "must be distinct from ops credentials",
+        ),
     ],
 )
 def test_local_admin_stack_validates_cursor_signing_secret(

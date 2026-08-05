@@ -7,6 +7,10 @@ from uuid import uuid4
 
 import httpx
 import pytest
+from kortravelmap.api.routers.ops_live import (
+    _IMPORT_JOB_EVENTS_LIVE_SQL,
+    _IMPORT_JOBS_LIVE_SQL,
+)
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,12 +20,20 @@ from kortravelmap.infra.c6c_cancel_probe_fixture_repo import (
     finalize_c6c_cancel_probe_fixture,
     mark_c6c_cancel_probe_consumed,
 )
+from kortravelmap.infra.jobs_repo import record_import_job_event
+from kortravelmap.infra.ops_repo import (
+    get_ops_import_job,
+    list_ops_import_job_events,
+    list_ops_import_jobs,
+)
 from kortravelmap.infra.pipeline_cancellation_repo import (
     create_pipeline_cancellation_attempt,
     finish_pipeline_cancellation_attempt,
     resolve_pipeline_cancellation_scope,
     set_pipeline_cancellation_member_result,
 )
+from kortravelmap.infra.pipeline_repo import list_pipeline_executions
+from kortravelmap.infra.status_repo import gather_status_counts
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
@@ -40,6 +52,8 @@ async def test_fixture_is_idempotent_consumes_only_canonical_unsafe_and_finalize
     migrated_session: AsyncSession,
 ) -> None:
     transaction_id = str(uuid4())
+    status_before = await gather_status_counts(migrated_session)
+    live_before = (await migrated_session.execute(text(_IMPORT_JOBS_LIVE_SQL))).one()
     fixture = await ensure_c6c_cancel_probe_fixture(
         migrated_session,
         transaction_id=transaction_id,
@@ -69,6 +83,53 @@ async def test_fixture_is_idempotent_consumes_only_canonical_unsafe_and_finalize
         None,
     )
 
+    # generic `/ops/pipeline/executions` projection에는 fixture가 보이지 않아야 한다.
+    generic_page = await list_pipeline_executions(migrated_session)
+    assert fixture.job_id not in {item.id for item in generic_page.items}
+    assert await get_ops_import_job(migrated_session, fixture.job_id) is None
+    assert fixture.job_id not in {
+        item.job_id for item in (await list_ops_import_jobs(migrated_session)).items
+    }
+    assert (await gather_status_counts(migrated_session)).import_jobs_by_status == (
+        status_before.import_jobs_by_status
+    )
+    live_after = (await migrated_session.execute(text(_IMPORT_JOBS_LIVE_SQL))).one()
+    assert live_after.counts_by_status == live_before.counts_by_status
+    assert fixture.job_id not in {item["job_id"] for item in live_after.active_jobs}
+
+    event_stats_before = (await migrated_session.execute(text(_IMPORT_JOBS_LIVE_SQL))).one()
+    assert (
+        await record_import_job_event(
+            migrated_session,
+            fixture.job_id,
+            message="generic writer must reject fixture",
+        )
+    ) is None
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO ops.import_job_events (job_id, level, message, payload)
+            VALUES (CAST(:job_id AS uuid), 'error', 'fixture must stay private', '{}'::jsonb)
+            """
+        ),
+        {"job_id": fixture.job_id},
+    )
+    assert fixture.job_id not in {
+        item.job_id for item in (await list_ops_import_job_events(migrated_session)).items
+    }
+    event_stats_after = (await migrated_session.execute(text(_IMPORT_JOBS_LIVE_SQL))).one()
+    assert (event_stats_after.latest_event_id, event_stats_after.latest_event_at) == (
+        event_stats_before.latest_event_id,
+        event_stats_before.latest_event_at,
+    )
+    fixture_events_live = (
+        await migrated_session.execute(
+            text(_IMPORT_JOB_EVENTS_LIVE_SQL), {"job_id": fixture.job_id}
+        )
+    ).one()
+    assert fixture_events_live.recent_events == []
+
+    # cancel resolver만 전용 lineage CTE로 fixture root를 읽는다.
     scope = await resolve_pipeline_cancellation_scope(
         migrated_session,
         kind="import_job",

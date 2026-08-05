@@ -22,8 +22,8 @@
 - **수명주기/DB**: migration `0084_c6c_cancel_probe_fixtures`로 transaction ID를
   PK로 하고 fixture job/canonical cancellation을 각각 유일 FK로 결박했다. `armed →
   consumed → finalized` 전이와 시각은 CHECK로, 동시 ensure는 transaction advisory
-  lock으로 보장한다. 중간 개발 데이터 보전보다 최종 schema의 이력 보존을 우선해
-  fixture history가 있으면 downgrade를 거부한다.
+  lock으로 보장한다. 서비스 전 단계이므로 downgrade는 fixture 이력을 보전하지 않고
+  table을 제거하며, 백업·복원은 최종 schema에서만 검증한다.
 - **취소·격리**: 실제 PinVi cancel의 canonical
   `PIPELINE_CANCELLATION_UNSAFE` terminal 기록 transaction 안에서만 fixture를
   consume한다. fixture job은 일반 worker/claim/stale recovery/list projection에서
@@ -34,9 +34,15 @@
   ensure·receipt·finalize exact path/method에만 결박했다. PinVi `ops:cancel`과
   BFF/service token은 사용할 수 없다. full/service OpenAPI에는 audit 가능한 route를,
   user artifact에는 제외하며 capability generation은 1이다.
-- **검증**: Postgres migration을 포함한 integration 2 passed, API auth 88 passed,
-  settings/route/OpenAPI target과 export `--check`, strict mypy·ruff 통과. 적대적
-  코드 리뷰 1인을 진행 중이다.
+- **리뷰 보강**: 적대적 리뷰 1인이 찾아낸 normal pipeline/ops/live event projection
+  누출과 Alembic metadata 드리프트를 수정했다. fixture event를 강제로 만든 회귀에서
+  generic event stream·live 최신 event·job별 live snapshot 모두 비노출이고, generic
+  event writer도 거부한다. C7 attestation은 fixture token의 cursor-secret 재사용도
+  거부한다. root env/API README도 3-token 계약으로 정정했다.
+- **검증**: Postgres migration을 포함한 fixture integration 2 passed, `alembic check`
+  clean, API auth 88 passed, settings/route/OpenAPI target과 export `--check`, strict
+  mypy·ruff·import-linter 통과. 적대적 코드 리뷰 1인은 차단/주요 이슈 없음으로
+  최종 판정했다.
 
 ## 2026-08-06 (1) — T-VN-41F1J: Map-owned cancel-probe fixture 결정
 

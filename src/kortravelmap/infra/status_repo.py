@@ -112,6 +112,7 @@ _IMPORT_JOBS_SQL: Final[str] = """
 SELECT status, count(*) AS n
 FROM ops.import_jobs
 WHERE quarantined_at IS NULL
+  AND kind <> 'c6c_cancel_probe'
 GROUP BY status
 """
 
