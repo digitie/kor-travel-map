@@ -10,6 +10,15 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-08-05 (10) — 32C PR-2 prod 배포 완료 (값 전환 라이브)
+
+`8c5bdcf8` 4-이미지 배포(ui 포함)·사후 검증 정상(상세 UUID·batch echo·
+trip_card 등식)·curated snapshot 활성 500 전량 재물질화(멱등 확인). dm#128.
+
+**다음 한 작업**: ⑤ PinVi user 스냅샷 재고정 PR(+NEW-2·NEW-3 동봉 — 진행 중)
+→ ④ live e2e fixture 재생성(새 표면 기준) → NEW-5 dagster entrypoint 인터록.
+T-VN-32C는 이로써 배포까지 완결 — 다음 Lane A 항목은 T-VN-35A.
+
 ## 2026-08-05 (9) — 32C PR-2 머지 (#952, `8c5bdcf8`)
 
 값 전환 코드 완결 — 적대 리뷰 2인 GO(F1 trip_card echo·H1 scope 해석 500 등
