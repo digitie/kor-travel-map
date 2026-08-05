@@ -325,8 +325,9 @@ async def test_upsert_writes_uuid_and_alias_atomically(
         missing_uuid,
         missing_alias,
         pair_mismatch,
+        orphan_alias,
     ) = await feature_identity.count_features_missing_identity(migrated_session)
-    assert (missing_uuid, missing_alias, pair_mismatch) == (0, 0, 0)
+    assert (missing_uuid, missing_alias, pair_mismatch, orphan_alias) == (0, 0, 0, 0)
 
 
 async def test_upsert_wires_sent_and_inserted_into_verification(
@@ -502,7 +503,9 @@ async def test_missing_alias_is_observed_by_identity_invariant(
         missing_uuid,
         missing_alias,
         pair_mismatch,
+        orphan_alias,
     ) = await feature_identity.count_features_missing_identity(migrated_session)
     assert missing_uuid == 0
     assert missing_alias >= 1
     assert pair_mismatch == 0
+    assert orphan_alias == 0

@@ -280,18 +280,20 @@ async def test_0083_replaces_derivation_checks_with_declarative_copy_constraints
 ) -> None:
     """head(0083)에서 파생 CHECK 2종은 사라지고 복합 UNIQUE/FK가 대신 선다."""
     async with shadow_engine.connect() as connection:
-        names = {
-            row.conname
-            for row in await connection.execute(
+        rows = list(
+            await connection.execute(
                 text(
-                    "SELECT con.conname FROM pg_catalog.pg_constraint AS con "
+                    "SELECT con.conname, con.confdeltype "
+                    "FROM pg_catalog.pg_constraint AS con "
                     "JOIN pg_catalog.pg_class AS rel ON rel.oid = con.conrelid "
                     "JOIN pg_catalog.pg_namespace AS ns ON ns.oid = rel.relnamespace "
                     "WHERE ns.nspname = 'feature' "
                     "AND rel.relname IN ('features', 'feature_aliases')"
                 )
             )
-        }
+        )
+        names = {row.conname for row in rows}
+        deltype = {row.conname: row.confdeltype for row in rows}
         v7_function = (
             await connection.execute(
                 text("SELECT to_regprocedure('feature.uuid_generate_v7()')")
@@ -301,6 +303,13 @@ async def test_0083_replaces_derivation_checks_with_declarative_copy_constraints
     assert "ck_feature_aliases_uuid_dual_derivation" not in names
     assert "uq_features_identity_pair" in names
     assert "fk_feature_aliases_identity_pair" in names
+    # H1 회귀 방어(재판정 M6) — 복합 FK는 반드시 CASCADE여야 한다. NO ACTION
+    # 이면 기존 CASCADE FK와의 RI 트리거 이름순서 의존이 되살아나는데, CI의
+    # 신선한 DB는 항상 정순이라 삭제 경로 테스트로는 잡히지 않는다.
+    observed_deltype = deltype["fk_feature_aliases_identity_pair"]
+    if isinstance(observed_deltype, bytes):  # asyncpg는 "char"를 bytes로 준다
+        observed_deltype = observed_deltype.decode()
+    assert observed_deltype == "c"
     # 파생 함수는 역사/downgrade 참조로 존속, v7 generator가 새로 선다.
     assert "ck_feature_aliases_legacy_identity" in names
     assert v7_function is not None

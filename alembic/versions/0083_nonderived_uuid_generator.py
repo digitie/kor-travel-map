@@ -78,16 +78,31 @@ alias 트리거의 ``ON CONFLICT (alias) DO NOTHING``이 stale alias 행을 덮�
 - ``feature.feature_uuid_from_legacy(text)`` SQL 함수 — 기존 731,600행의
   파생값 역사·downgrade 경로가 참조하므로 제거하지 않는다.
 
-잠금·적용 비용 (적대 리뷰 1 M2 실측)
-------------------------------------
+잠금·적용 비용 (적대 리뷰 1 M2·H4 재판정 반영)
+----------------------------------------------
 
-731,600행 로컬 실측: UNIQUE 인덱스 빌드 ~0.6s(+60MB)·FK 검증 ~0.8s. plain
-``ADD CONSTRAINT``는 features에 ACCESS EXCLUSIVE를 잡으므로, 본 migration은
-0080 docstring의 규율대로 **CONCURRENTLY 인덱스 → USING INDEX 연결, FK는
-NOT VALID → VALIDATE**로 분해해 서비스 중 잠금 창을 최소화한다(CONCURRENTLY는
-트랜잭션 밖 실행이 필요해 autocommit block을 쓴다). 단 표준 배포 경로는
-api-entrypoint가 서빙 **전에** migration을 완료하므로 실제 경합 상대는 병행
-dagster write뿐이다 — 배포 runbook은 write path 정지를 선행한다.
+731,600행 로컬 실측: UNIQUE 인덱스 빌드 ~0.6s(+60MB)·FK 검증 ~0.8s — 총
+~1.4s의 ACCESS EXCLUSIVE(features)/ShareRowExclusive(aliases) 창. 초안은
+CONCURRENTLY+NOT VALID 분해를 시도했으나 **의도적으로 철회했다**(재판정 H4):
+autocommit_block은 선행 단계(파생 CHECK DROP·fill 교체)를 중간 커밋해 실패
+시 재시도 불가능한 반쯤 적용 상태(version=0082 + CHECK 부재)를 남기고, 실측상
+USING INDEX 연결·같은 트랜잭션 VALIDATE가 어차피 트랜잭션 끝까지 잠금을
+유지해 분해 이득이 인덱스 빌드 ~0.6s뿐이다. 표준 배포 경로는 api-entrypoint가
+서빙 **전에** migration을 완료하고 배포 runbook이 write path 정지를 선행하므로
+~1.4s 잠금 창은 수용하고, **단일 트랜잭션 all-or-nothing**(0080·0062와 같은
+근거 — 실패 시 전체 rollback으로 재시도 불능 상태를 남기지 않는다)을 지킨다.
+
+배포 사전 점검 쿼리 (0 이어야 함 — H3·M7)::
+
+    -- 사본 불일치 (0083 VALIDATE와 동일 축)
+    SELECT count(*) FROM feature.feature_aliases a
+    JOIN feature.features f USING (feature_id)
+    WHERE a.feature_uuid IS DISTINCT FROM f.feature_uuid;
+    -- 부모 없는 orphan alias (replica-mode DELETE 잔재 — FK 추가 자체가
+    -- 이 행에서 23503으로 실패한다)
+    SELECT count(*) FROM feature.feature_aliases a
+    LEFT JOIN feature.features f USING (feature_id)
+    WHERE f.feature_id IS NULL;
 
 배포·롤백 결합 (적대 리뷰 1 H2 / 리뷰 2 F8)
 -------------------------------------------
@@ -209,17 +224,11 @@ def upgrade() -> None:
     # 2) v7 generator + fill 트리거 함수 교체 (docstring §유지 — 이원화 차단).
     op.execute(_CREATE_UUID_V7_FUNCTION_SQL)
     op.execute(_REPLACE_FILL_FUNCTION_V7_SQL)
-    # 3) 선언적 사본 일치 — 잠금 최소화 분해 (docstring §잠금·적용 비용):
-    #    CONCURRENTLY는 트랜잭션 밖 실행이 필요하다.
-    with op.get_context().autocommit_block():
-        op.execute(
-            "CREATE UNIQUE INDEX CONCURRENTLY uq_features_identity_pair "
-            "ON feature.features (feature_id, feature_uuid)"
-        )
+    # 3) 선언적 사본 일치 — 단일 트랜잭션 plain 추가 (docstring §잠금·적용
+    #    비용: CONCURRENTLY 분해는 H4 재판정으로 철회 — all-or-nothing 우선).
     op.execute(
         "ALTER TABLE feature.features "
-        "ADD CONSTRAINT uq_features_identity_pair "
-        "UNIQUE USING INDEX uq_features_identity_pair"
+        "ADD CONSTRAINT uq_features_identity_pair UNIQUE (feature_id, feature_uuid)"
     )
     op.execute(
         """
@@ -228,12 +237,7 @@ def upgrade() -> None:
         FOREIGN KEY (feature_id, feature_uuid)
         REFERENCES feature.features (feature_id, feature_uuid)
         ON DELETE CASCADE
-        NOT VALID
         """
-    )
-    op.execute(
-        "ALTER TABLE feature.feature_aliases "
-        "VALIDATE CONSTRAINT fk_feature_aliases_identity_pair"
     )
 
 
