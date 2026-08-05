@@ -10,6 +10,16 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-08-05 (9) — 32C PR-2 머지 (#952, `8c5bdcf8`)
+
+값 전환 코드 완결 — 적대 리뷰 2인 GO(F1 trip_card echo·H1 scope 해석 500 등
+H 2건 포함 전량 반영), CI 8/8(h35 pre-uuid 호환 수정 포함). **배포 미실행.**
+
+**다음 한 작업**: **H30B 재검증(배포 게이트)** → PR-2 배포(api→dagster→ui,
+전 표면 원자) → curated snapshot asset 1런 → live fixture 재생성 → PinVi
+user 스냅샷 재고정 PR(+CLI --accept-uuid-literals·derivation_enforced 배선·
+dagster entrypoint 인터록 유예 동봉).
+
 ## 2026-08-05 (8) — 32C PR-2 구현 완료 (응답 값 UUID 전환, 리뷰 대기)
 
 `feat/tvn32c-value-cutover-pr2` — 전 read 표면 치환(cursor legacy 축·echo
