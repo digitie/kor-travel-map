@@ -4,9 +4,11 @@
   "derivation": {
     "namespace_basis": "uuid5(NAMESPACE_URL, 'kor-travel-map:feature-uuid:v1')",
     "feature_uuid_namespace": "75d60e13-2779-5b06-a920-6b1b892a7c84",
-    "rule": "alias_kind='legacy_feature_id' 행은 feature_uuid == uuid5(feature_uuid_namespace, alias) 파생 검증을 통과해야 '검증된 alias map'이다 (ADR-068, alembic 0080 CHECK 대응)"
+    "rule": "0083 이전 기존 행(731,600 backfill 세대)은 feature_uuid == uuid5(feature_uuid_namespace, alias) 파생 산출이며 영구 보존된다(0082 identity fence). **0083(T-VN-32C 값 전환) 이후 신규 행은 비파생 UUIDv7** — 소비자 검증은 파생 재계산이 아니라 shape(canonical lowercase hyphenated 36자)·closed alias_kind·merkle 재계산으로 한다. Map 내부의 alias↔features 사본 일치는 0083 복합 FK가 선언적으로 보장한다 (ADR-068)"
   },
-  "alias_kinds": ["legacy_feature_id"],
+  "alias_kinds": [
+    "legacy_feature_id"
+  ],
   "merkle_v1": {
     "empty_root": "ef4363aa60f6af1b1100f8d7d866470cddc86ced1d8dc83fa2c238eefea22ad8",
     "expected_nfc_utf8_order": [
@@ -43,5 +45,22 @@
     ],
     "root": "8606b07962a6b51c64a209452f5101515566d0bc9e1ab898ed1e4ebf634494e6",
     "odd_promotion_root_first3": "76ad082fa342702bdf7a9b36678f5afd467dcabd863e15c2b107644545d69885"
+  },
+  "nonderived_v1": {
+    "description": "0083 이후 비파생 UUIDv7 행 고정 벡터 — 파생 등식을 강제하지 않는 검증의 회귀 앵커.",
+    "row": {
+      "alias": "f_9999999999_p_00000000deadbeef",
+      "feature_uuid": "01890a5d-ac96-774b-bcce-b302099a8057",
+      "alias_kind": "legacy_feature_id"
+    },
+    "leaf_sha256": "64a847dbb7aa6c2574fcc2d73f8c51910dd7a94b27726cdf4604ed9059294651",
+    "root_with_merkle_v1_rows": "977ba48f9d66f7bb034a1bed499da8768ee3ec1f0820d7b01938d919b4b7d828",
+    "expected_nfc_utf8_order_with_merkle_v1_rows": [
+      "f_1168010100_p_3c0c2820e96d28d3",
+      "f_9999999999_p_00000000deadbeef",
+      "f_global_e_9f2c51a7d3e8b401",
+      "é",
+      "가나다"
+    ]
   }
 }

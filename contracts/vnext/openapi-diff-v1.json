@@ -5,7 +5,7 @@
   "baseline": {
     "admin": {
       "file": "packages/kor-travel-map-api/openapi.json",
-      "sha256": "af927c57c27892661da4b44938083fb767d28638d9121d2a65b9b784c414fa33"
+      "sha256": "cf3547cfa6de68218b64e754d8c008a108e04494232fe3147b3de6f4ff5068b4"
     },
     "user": {
       "file": "packages/kor-travel-map-api/openapi.user.json",
@@ -13,7 +13,7 @@
     },
     "service": {
       "file": "packages/kor-travel-map-api/openapi.service.json",
-      "sha256": "144b4335d98fc021368b3297f5b8ed7b1c560e9850ebbdd8af71e45623ba7b3d"
+      "sha256": "c7838b20bd70bf333590cb440a705dd7e893f9e366078d6c11200d701d40bdcd"
     }
   },
   "revisions": [
@@ -31,6 +31,11 @@
       "date": "2026-08-04",
       "reason": "T-VN-32C 적대 리뷰 F2 — /features/{feature_id}/weather/forecast 경계 해석 통일에 따른 additive target_feature_uuid 노출 (user/admin spec)",
       "basis": "review-2 F2"
+    },
+    {
+      "date": "2026-08-05",
+      "task": "T-VN-32C PR-1",
+      "change": "admin/service baseline 재고정 — alias-map checksum 응답에 additive derivation_enforced 세대 표식(리뷰 2 F6) + 500 설명의 파생 문구 정정(F7). user spec 무변경."
     }
   ],
   "surfaces": {

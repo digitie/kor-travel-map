@@ -10,6 +10,17 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-08-05 (6) — 32C PR-1(비파생 UUIDv7 generator) 구현·리뷰 반영 완료
+
+0083(파생 CHECK 해제+선언적 사본 일치 CASCADE FK+v7 generator)·app 전환·PinVi
+수용(파생 등식 폐기·cutover 리터럴 opt-in)·golden 개정까지 구현, 적대 리뷰
+2건(NO-GO) findings 전량 반영. 검증 전부 green(unit 2015·API 1082·통합 배터리).
+
+**다음 한 작업**: 리뷰어 재판정 → PR-1 머지 → PinVi 쌍 PR(golden 재vendor·핀
++검증 완화, branch `feat/tvn32c-nonderived-accept` 준비됨) 머지+배포 → 0083
+배포(api→dagster 순서 강제) → **PR-2(응답 값 전환 — read 표면 단일 원자
+릴리스, 설계 §4 참조)**.
+
 ## 2026-08-05 (5) — H42·H45 판정 완료 (KMA 전 job 전환·값 유입 개시)
 
 근본 원인 2(data.go.kr 평문 HTTP 사멸) 실측 → lib 정본 https 전환(kma#23·airkorea#6)

@@ -86,6 +86,10 @@ class FeatureAliasMapChecksumData(BaseModel):
     schema_version: Literal["feature-alias-map-v1"]
     alias_count: int
     merkle_root: str
+    # T-VN-32C 값 전환(0083) 세대 표식 — False면 행별 uuid5 파생 등식이 더는
+    # DB에서 강제되지 않는다(신규 행 비파생 UUIDv7·검증은 shape+merkle+복합 FK).
+    # 소비자(PinVi cutover)가 배포 순서를 기계 판정하는 관측 축이다(리뷰 2 F6).
+    derivation_enforced: bool
 
 
 class FeatureAliasMapChecksumResponse(BaseModel):
@@ -101,8 +105,8 @@ _INTEGRITY_RESPONSES: dict[int | str, dict[str, Any]] = {
     500: {
         "model": ProblemDetail,
         "description": (
-            "FEATURE_ALIAS_MAP_INTEGRITY — 저장 행이 canonical/파생 계약 위반 "
-            "(DB 층 보장 붕괴, 이관 중단)"
+            "FEATURE_ALIAS_MAP_INTEGRITY — 저장 행이 canonical 계약 위반 "
+            "(DB 층 보장 붕괴, 이관 중단 — 파생 등식은 0083부터 계약이 아님)"
         ),
     },
 }
@@ -188,6 +192,9 @@ async def get_feature_alias_map_checksum(
             schema_version=FEATURE_ALIAS_MAP_VERSION,
             alias_count=checksum.alias_count,
             merkle_root=checksum.merkle_root,
+            # 이 코드는 0083과 같은 이미지로만 배포된다(entrypoint가 서빙 전
+            # migration 완료) — 정적 False가 진실이다.
+            derivation_enforced=False,
         ),
         meta=make_meta(request, started_at=started_at),
     )

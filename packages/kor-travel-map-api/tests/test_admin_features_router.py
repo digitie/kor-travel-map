@@ -492,7 +492,11 @@ def _patch_admin_resolved_identity(
     *,
     feature_id: str | None = None,
 ) -> None:
-    """T-VN-32B 경계 alias 해석 mock — 형식 계약(422)은 실제 검증을 태운다."""
+    """T-VN-32B 경계 alias 해석 mock — 형식 계약(422)은 실제 검증을 태운다.
+
+    uuid는 참조에서 결정적으로 만들되(테스트 편의 규약) 저장 계약은 아니다 —
+    0083(T-VN-32C) 이후 실제 값은 비파생 UUIDv7이다.
+    """
     from kortravelmap.core.ids import feature_uuid_from_legacy
     from kortravelmap.infra import feature_identity
 

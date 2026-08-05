@@ -1,4 +1,4 @@
-"""``kortravelmap.infra.feature_identity`` — feature identity 경계 해석 (T-VN-32B, ADR-068).
+"""``kortravelmap.infra.feature_identity`` — feature identity 경계 해석 (T-VN-32C, ADR-068).
 
 dual read/write 단계의 identity 규약을 한 곳에 고정한다:
 
@@ -8,27 +8,30 @@ dual read/write 단계의 identity 규약을 한 곳에 고정한다:
   문자열은 :func:`resolve_feature_identity` 한 곳에서만 UUID/alias 양쪽으로
   해석하고, 내부 전달·조인은 해석된 정본 키로만 한다. repository 내부에
   alias lookup을 흩뿌리지 않는다.
-- **dual 기간 정본 신규 행 generator** — 32A freeze가 "T-VN-32B 소관"으로 남긴
-  결정: legacy id가 항상 존재하는 dual 기간에는
-  ``uuid5(FEATURE_UUID_NAMESPACE, legacy_feature_id)``
-  (:func:`kortravelmap.core.ids.feature_uuid_from_legacy`) 파생이 **유일한
-  정본 generator**다. 결정론이 KTM/PinVi 양 저장소 독립 계산·checksum 대조
-  (T-VN-32C)의 전제이므로 UUIDv7 같은 비결정 generator는 legacy id가 소멸하는
-  cutover(32C 이후 신규 표면) 전에는 채택하지 않는다.
-- **legacy-only 신규 행 차단의 계약화**: DB 층은 0079 트리거 2종이 이미 원자
-  보장한다. 그 위에 repo writer가 ``feature_uuid``를 명시 계산해 INSERT하고,
-  RETURNING으로 관측한 값이 파생 규칙과 다르거나 비어 있으면
-  :class:`FeatureIdentityInvariantError`로 fail-close한다
-  (:func:`expected_feature_uuid` / :func:`verify_feature_uuid`).
+- **정본 신규 행 generator (T-VN-32C·alembic 0083)** — 신규 행의
+  ``feature_uuid``는 **비파생 UUIDv7**이다
+  (:func:`candidate_feature_uuid` → :func:`kortravelmap.core.ids.make_feature_uuid`).
+  32A/32B의 dual 기간에는 uuid5 파생이 유일 generator였고 그 근거는 KTM/PinVi
+  양 저장소 독립 계산·checksum 대조였는데, 2026-08-05 실측으로 checksum이
+  일치해 그 전제가 소진됐다 — 이후 이관 검증은 파생 재계산이 아니라 저장값
+  기반 merkle 대조 + DB 복합 FK 사본 일치로 한다. 기존 backfill 세대의 파생값은
+  영구 보존되며(0082 identity fence) :func:`expected_feature_uuid`는 그 세대의
+  **참조 전용**으로 남는다.
+- **legacy-only 신규 행 차단의 계약화**: DB 층은 0080 트리거 2종이 이미 원자
+  보장한다. 그 위에 repo writer가 ``feature_uuid`` 후보를 명시 INSERT하고,
+  RETURNING 관측값이 canonical UUID가 아니거나(legacy-only) 신규 insert인데
+  보낸 후보와 다르면(generator 이원화) :class:`FeatureIdentityInvariantError`로
+  fail-close한다 (:func:`candidate_feature_uuid` / :func:`verify_feature_uuid`).
 
-32B가 긋는 범위 경계 (이월 명시):
+32C PR-1(값 전환)이 긋는 범위 경계 (이월 명시):
 
 - 응답의 ``feature_id`` 값 자체는 legacy 유지, ``feature_uuid``는 additive 병행
-  노출 — 응답 UUID 전환은 T-VN-32C(양 저장소 checksum 일치 후).
+  노출 — 응답 UUID 전환(PinVi cutover)은 후속 PR 소관이다.
 - 내부 FK 체인(source_links/curation/price/weather 등)의 UUID 조인 재작성은
-  T-VN-32C/T-VN-39 소관.
-- 0079 트리거 제거(writer 원자 생성으로 완전 대체)는 raw SQL seed 경로가
-  남아 있는 동안 하지 않는다 — 32C write fence 시점에 재평가.
+  T-VN-39 소관.
+- 0080 fill/alias 트리거 제거(writer 원자 생성으로 완전 대체)는 raw SQL seed
+  경로가 남아 있는 동안 하지 않는다 — 0083은 트리거를 유지하되 본문을 app과
+  같은 v7 레이아웃(``feature.uuid_generate_v7()``)으로 맞춰 이원화만 막았다.
 """
 
 from __future__ import annotations
@@ -39,7 +42,7 @@ from typing import TYPE_CHECKING, Final
 
 from sqlalchemy import text
 
-from kortravelmap.core.ids import feature_uuid_from_legacy
+from kortravelmap.core.ids import feature_uuid_from_legacy, make_feature_uuid
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -51,6 +54,7 @@ __all__ = [
     "FeatureIdentityRefError",
     "FeatureIdentityInvariantError",
     "MAX_FEATURE_REF_LENGTH",
+    "candidate_feature_uuid",
     "expected_feature_uuid",
     "validate_feature_ref",
     "verify_feature_uuid",
@@ -76,11 +80,11 @@ class FeatureIdentityRefError(ValueError):
 
 
 class FeatureIdentityInvariantError(RuntimeError):
-    """uuid 없는(또는 파생 규칙과 다른) 신규 feature 행 관측 — fail-close.
+    """uuid 없는(또는 비정규·후보와 다른) 신규 feature 행 관측 — fail-close.
 
-    DB 층(0079 트리거 + NOT NULL)이 뚫린 상태로 write가 계속되면 T-VN-32C
-    alias-map checksum 대조가 조용히 갈라지므로, writer는 갱신을 계속하는 대신
-    즉시 실패한다.
+    DB 층(0080 트리거 + NOT NULL)이 뚫린 상태로 write가 계속되면 alias-map
+    checksum 대조가 조용히 갈라지므로, writer는 갱신을 계속하는 대신 즉시
+    실패한다.
     """
 
 
@@ -93,42 +97,85 @@ class FeatureIdentity:
 
 
 def expected_feature_uuid(feature_id: str) -> str:
-    """dual 기간 정본 generator가 이 legacy id에 요구하는 ``feature_uuid``.
+    """이 legacy id의 **파생** ``feature_uuid`` (backfill/검증 참조 전용).
 
-    ``uuid5(FEATURE_UUID_NAMESPACE, feature_id)`` (모듈 docstring의 32B 결정).
+    ``uuid5(FEATURE_UUID_NAMESPACE, feature_id)`` — 0080 backfill이 기존 행에
+    영구 각인한 값이다. **T-VN-32C 값 전환(0083)부터 신규 행의 정본 generator가
+    아니다** — 신규 행은 :func:`candidate_feature_uuid`(비파생 UUIDv7)를 쓴다.
     """
     return str(feature_uuid_from_legacy(feature_id))
 
 
-def verify_feature_uuid(feature_id: str, observed_feature_uuid: object) -> str:
-    """write 경로가 관측한 ``feature_uuid``를 파생 규칙과 대조한다 (fail-close).
+def candidate_feature_uuid() -> str:
+    """신규 행 INSERT 후보 ``feature_uuid`` — 비파생 UUIDv7 (0083 정본 generator).
+
+    upsert의 ON CONFLICT 경로에서는 이 후보가 **버려지고** 기존 저장값이
+    정본으로 남는다(``feature_uuid``는 ON CONFLICT 갱신 대상이 아님 + 0082
+    identity fence). 관측 정합은 :func:`verify_feature_uuid`가 맡는다.
+    """
+    return str(make_feature_uuid())
+
+
+def verify_feature_uuid(
+    feature_id: str,
+    observed_feature_uuid: object,
+    *,
+    sent_feature_uuid: str | None = None,
+    inserted: bool | None = None,
+) -> str:
+    """write 경로가 ``RETURNING``으로 관측한 ``feature_uuid``를 검증한다 (fail-close).
+
+    0083(비파생 generator) 이후의 불변식:
+
+    - 관측값은 **비어 있지 않은 canonical UUID**여야 한다 — legacy-only 행
+      (트리거·명시 INSERT 모두 실패) 탐지는 유지된다.
+    - ``inserted=True``(``xmax = 0``)이면 관측값은 우리가 보낸 후보와 같아야
+      한다 — 트리거/타 경로가 후보를 바꿔치기하면 generator 이원화이므로
+      fail-close.
+    - ``inserted=False``(conflict-update)면 **기존 저장값이 정본**이다 — 후보와
+      달라도 정상(파생 대조는 폐기: 기존 행은 파생값, 신규 행은 비파생값이
+      공존하는 세계).
 
     Parameters
     ----------
     feature_id
-        legacy feature id (write 대상 행의 PK).
+        legacy feature id (write 대상 행의 PK — 진단용).
     observed_feature_uuid
         INSERT/UPSERT ``RETURNING``으로 관측한 값 (driver에 따라 str/UUID).
+    sent_feature_uuid
+        INSERT에 바인드한 후보 (canonical 소문자). ``inserted`` 판정이 가능한
+        호출부만 전달한다.
+    inserted
+        ``RETURNING (xmax = 0)`` 관측값. ``None``이면 insert/update 구분 없이
+        canonical 검증만 수행한다.
 
     Returns
     -------
     str
-        canonical 소문자 UUID 문자열.
+        canonical 소문자 UUID 문자열 (관측값).
 
     Raises
     ------
     FeatureIdentityInvariantError
-        값이 비어 있거나 파생 규칙(uuid5) 결과와 다른 경우.
+        관측값이 비어 있거나 canonical UUID가 아니거나, 신규 insert의 관측값이
+        보낸 후보와 다른 경우.
     """
-    expected = expected_feature_uuid(feature_id)
     observed = str(observed_feature_uuid).lower() if observed_feature_uuid else None
-    if observed != expected:
+    canonical = _parse_canonical_uuid(observed) if observed else None
+    if canonical is None:
         raise FeatureIdentityInvariantError(
-            "feature identity invariant 위반 — legacy-only(또는 파생 불일치) 행 "
-            f"관측: feature_id={feature_id!r}, observed={observed!r}, "
-            f"expected={expected!r} (ADR-068 / T-VN-32B fail-close)."
+            "feature identity invariant 위반 — legacy-only(또는 비정규 uuid) 행 "
+            f"관측: feature_id={feature_id!r}, observed={observed!r} "
+            "(ADR-068 / T-VN-32C fail-close)."
         )
-    return expected
+    if inserted is True and sent_feature_uuid is not None and canonical != sent_feature_uuid:
+        raise FeatureIdentityInvariantError(
+            "feature identity invariant 위반 — 신규 insert의 관측 uuid가 보낸 "
+            f"후보와 다름(generator 이원화): feature_id={feature_id!r}, "
+            f"sent={sent_feature_uuid!r}, observed={canonical!r} "
+            "(ADR-068 / T-VN-32C fail-close)."
+        )
+    return canonical
 
 
 def _parse_canonical_uuid(ref: str) -> str | None:
@@ -191,12 +238,25 @@ WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
 """
 
 # INV-068-01(모든 feature는 alias ≥ 1)과 uuid 결측을 현행 스키마에서 관측한다.
-# feature_uuid는 NOT NULL이라 정상 세계에서 둘 다 0이다 — 0이 아니면 DB 층
-# 보장이 뚫린 것이므로 호출자는 fail-close한다.
+# feature_uuid는 NOT NULL이라 정상 세계에서 셋 다 0이다 — 0이 아니면 DB 층
+# 보장이 뚫린 것이므로 호출자는 fail-close한다. alias_pair_mismatch는 0083의
+# 비파생 세계에서 새로 열리는 결함 계열(replica-mode orphan alias + 재-INSERT
+# → 사본 불일치 — FK는 child DML에서만 검사)의 보상 관측이다 (적대 리뷰 1 H3).
 _MISSING_IDENTITY_SQL: Final[str] = """
 SELECT
     count(*) FILTER (WHERE f.feature_uuid IS NULL) AS missing_uuid,
-    count(*) FILTER (WHERE a.alias IS NULL) AS missing_alias
+    count(*) FILTER (WHERE a.alias IS NULL) AS missing_alias,
+    count(*) FILTER (
+        WHERE a.alias IS NOT NULL
+          AND a.feature_uuid IS DISTINCT FROM f.feature_uuid
+    ) AS alias_pair_mismatch,
+    (
+        SELECT count(*)
+        FROM feature.feature_aliases AS orphan
+        LEFT JOIN feature.features AS parent
+          ON parent.feature_id = orphan.feature_id
+        WHERE parent.feature_id IS NULL
+    ) AS orphan_alias
 FROM feature.features AS f
 LEFT JOIN feature.feature_aliases AS a
   ON a.feature_id = f.feature_id
@@ -289,12 +349,20 @@ async def get_feature_uuid_map(
 
 async def count_features_missing_identity(
     session: AsyncSession,
-) -> tuple[int, int]:
-    """(uuid 결측 행 수, legacy alias 결측 행 수) — 정상 세계에서 ``(0, 0)``.
+) -> tuple[int, int, int, int]:
+    """(uuid 결측, alias 결측, alias 쌍 불일치, orphan alias) — 정상 ``(0,0,0,0)``.
 
     freeze INV-068-01의 현행 스키마 판(post-backfill)이다. 회귀 테스트와
     운영 점검이 사용하고, 0이 아니면 write 경로를 계속 신뢰하지 말고
     fail-close해야 한다 (:class:`FeatureIdentityInvariantError`의 사전 관측판).
+    셋째 축(사본 불일치)·넷째 축(부모 없는 orphan alias — replica-mode DELETE
+    잔재이자 0083 FK 추가가 실패하는 유일 시나리오, 재판정 M7)은 비파생
+    세계의 신규 결함 계열 보상 관측이다 — 0083 배포 사전 점검 쿼리와 동일 축.
     """
     row = (await session.execute(text(_MISSING_IDENTITY_SQL))).mappings().one()
-    return int(row["missing_uuid"]), int(row["missing_alias"])
+    return (
+        int(row["missing_uuid"]),
+        int(row["missing_alias"]),
+        int(row["alias_pair_mismatch"]),
+        int(row["orphan_alias"]),
+    )

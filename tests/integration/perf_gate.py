@@ -130,18 +130,33 @@ _CLUSTER_PARAMS: dict[str, Any] = {
 _COORD_SPATIAL = ("idx_features_coord_gist", "idx_features_coord")
 _COORD_5179_SPATIAL = ("idx_features_coord_5179_gist", "idx_features_coord_5179")
 
+# features의 ``feature_id`` 동등 조건이 탈 수 있는 **동치** 접근 경로.
+#
+# alembic 0083(T-VN-32C)이 복합 FK ``fk_feature_aliases_identity_pair``의 참조
+# 대상으로 ``uq_features_identity_pair UNIQUE (feature_id, feature_uuid)``를
+# 만들면서, PK와 선두 컬럼이 같은 btree가 하나 더 생겼다. planner는
+# ``feature_uuid``까지 투영하는 hot query(공개 detail — 0081 이후 응답에
+# ``feature_uuid``가 additive로 들어간다)에서 이 covering index를 골라
+# index-only scan을 한다.
+#
+# 성능 축은 **약화되지 않는다** — 선두 컬럼이 PK와 같아 selectivity가 동일하고,
+# heap 접근이 줄어드는 쪽이다. gate가 지키려는 것은 "Seq Scan 금지 + index
+# 접근"이므로 두 이름을 동치로 받는다. (PK 자체가 사라지는 회귀는
+# ``assert_no_seq_scan_on``이 계속 잡는다.)
+_FEATURES_PK_ACCESS = ("pk_features", "features_pkey", "uq_features_identity_pair")
+
 HOT_QUERIES: tuple[HotQuery, ...] = (
     HotQuery(
         "public detail (PK)",
         _GET_PUBLIC_FEATURE_SQL,
         {"feature_id": _SEED_FEATURE_ID},
-        expected_indexes=("pk_features",),
+        expected_indexes=_FEATURES_PK_ACCESS,
     ),
     HotQuery(
         "public batch (ANY ids)",
         _GET_PUBLIC_FEATURES_BY_IDS_SQL,
         {"feature_ids": [f"perf:f:{i:06d}" for i in range(1, 51)]},
-        expected_indexes=("pk_features",),
+        expected_indexes=_FEATURES_PK_ACCESS,
     ),
     HotQuery(
         "service feature batch 5-state (200)",
@@ -150,7 +165,7 @@ HOT_QUERIES: tuple[HotQuery, ...] = (
             "feature_ids": [f"perf:f:{i:06d}" for i in range(1, 201)],
             "known_row_revisions": [None] * 200,
         },
-        expected_indexes=("pk_features",),
+        expected_indexes=_FEATURES_PK_ACCESS,
         # 기존 public batch 50/3,200과 같은 1.56% selectivity를 유지한다.
         seed_n=12_800,
     ),

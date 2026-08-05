@@ -29,7 +29,6 @@ from kortravelmap.core.feature_alias_map import (
     FeatureAliasMapRowV1,
     feature_alias_map_merkle_root,
 )
-from kortravelmap.core.ids import feature_uuid_from_legacy
 from kortravelmap.infra.db import make_async_engine, normalize_async_dsn
 from kortravelmap.infra.feature_alias_map_repo import (
     compute_feature_alias_map_checksum,
@@ -174,13 +173,27 @@ async def test_keyset_pages_and_checksum_follow_byte_order_on_glibc(
         checksum = await compute_feature_alias_map_checksum(connection)  # type: ignore[arg-type]
 
     assert collected == expected_order
+    # 0083 이후 저장 uuid는 비파생 v7이라 파생 재계산으로 기대값을 만들 수 없다 —
+    # 정본(features) 저장값을 읽어 재계산한다(collation 검증 축은 무변경).
+    async with glibc_engine.connect() as connection:
+        stored = (
+            await connection.execute(
+                text(
+                    "SELECT a.alias AS alias, a.alias_kind AS alias_kind, "
+                    "       CAST(f.feature_uuid AS text) AS feature_uuid "
+                    "FROM feature.feature_aliases AS a "
+                    "JOIN feature.features AS f ON f.feature_id = a.feature_id"
+                )
+            )
+        ).mappings().all()
     expected_rows = [
         FeatureAliasMapRowV1(
-            alias=alias,
-            feature_uuid=str(feature_uuid_from_legacy(alias)),
-            alias_kind="legacy_feature_id",
+            alias=record["alias"],
+            feature_uuid=record["feature_uuid"],
+            alias_kind=record["alias_kind"],
         )
-        for alias in _SEED_IDS
+        for record in stored
     ]
+    assert {row.alias for row in expected_rows} == set(_SEED_IDS)
     assert checksum.alias_count == len(_SEED_IDS)
     assert checksum.merkle_root == feature_alias_map_merkle_root(expected_rows)

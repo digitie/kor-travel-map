@@ -50,7 +50,7 @@ from kortravelmap.core.exceptions import (
     FeatureSearchCursorVersionUnsupportedError,
 )
 from kortravelmap.infra.feature_identity import (
-    expected_feature_uuid,
+    candidate_feature_uuid,
     verify_feature_uuid,
 )
 
@@ -134,10 +134,11 @@ env ``KOR_TRAVEL_MAP_PRICE_STALE_HIDE_DAYS`` (기본 4 = OpiNet 로테이션 1�
 # ─── SQL 상수 (EXPLAIN 검증 대상, test-strategy §4.2) ────────────────────────
 
 # coord_5179는 STORED generated (ADR-012) — INSERT 컬럼에서 제외.
-# feature_uuid는 T-VN-32B writer 원자 생성 — dual 기간 정본 generator(uuid5 파생,
-# ``feature_identity.expected_feature_uuid``)를 명시 INSERT하고, 0079 트리거는
-# raw SQL 경로용 안전망으로 유지한다. ON CONFLICT 갱신 대상이 아니다(불변 키).
-# RETURNING의 feature_uuid는 legacy-only 신규 행 fail-close 검증에 쓰인다.
+# feature_uuid는 T-VN-32C(0083) 정본 generator — 비파생 UUIDv7 후보
+# (``feature_identity.candidate_feature_uuid``)를 명시 INSERT하고, fill 트리거는
+# raw SQL 경로용 안전망으로 유지한다. ON CONFLICT 갱신 대상이 아니다(불변 키 —
+# conflict-update면 후보는 버려지고 기존 저장값이 정본).
+# RETURNING의 (xmax=0, feature_uuid)는 legacy-only·generator 이원화 fail-close에 쓰인다.
 _UPSERT_FEATURE_SQL: Final[str] = """
 INSERT INTO feature.features (
     feature_id, feature_uuid, kind, name, category,
@@ -1904,8 +1905,9 @@ def _feature_params(feature: Feature) -> dict[str, Any]:
     addr = feature.address
     return {
         "feature_id": feature.feature_id,
-        # T-VN-32B writer 원자 생성 — dual 기간 정본 generator(uuid5 파생).
-        "feature_uuid": expected_feature_uuid(feature.feature_id),
+        # T-VN-32C 정본 generator — 비파생 UUIDv7 후보. ON CONFLICT 경로에서는
+        # 버려지고 기존 저장값이 정본(0083, feature_identity 모듈 docstring).
+        "feature_uuid": candidate_feature_uuid(),
         "kind": feature.kind.value,
         "name": feature.name,
         "category": feature.category,
@@ -2007,15 +2009,22 @@ async def upsert_feature(session: AsyncSession, feature: Feature) -> bool:
 
     ``coord_5179``는 STORED generated이라 INSERT/UPDATE 대상에서 제외 (ADR-012).
 
-    T-VN-32B: ``feature_uuid``는 writer가 dual 기간 정본 generator(uuid5 파생)로
-    명시 INSERT하고(0079 트리거는 안전망), RETURNING 관측값이 파생 규칙과 다르면
-    legacy-only/식별자 drift 행이 생기기 전에 fail-close한다
+    T-VN-32C(0083): ``feature_uuid``는 writer가 비파생 UUIDv7 후보를 명시
+    INSERT하고(fill 트리거는 raw SQL 경로 안전망), RETURNING 관측값을
+    fail-close 검증한다 — 신규 insert면 보낸 후보와 동일해야 하고(generator
+    이원화 차단), conflict-update면 기존 저장값이 정본이다
     (``FeatureIdentityInvariantError``).
     """
-    result = await session.execute(text(_UPSERT_FEATURE_SQL), _feature_params(feature))
+    params = _feature_params(feature)
+    result = await session.execute(text(_UPSERT_FEATURE_SQL), params)
     row = result.mappings().one()
-    verify_feature_uuid(feature.feature_id, row["feature_uuid"])
     inserted = bool(row["inserted"])
+    verify_feature_uuid(
+        feature.feature_id,
+        row["feature_uuid"],
+        sent_feature_uuid=params["feature_uuid"],
+        inserted=inserted,
+    )
     await session.execute(
         text(_UPSERT_PROVIDER_VERSION_SQL),
         {"feature_id": feature.feature_id, "payload": _feature_snapshot(feature)},

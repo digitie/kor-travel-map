@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any, Final, Literal
 from sqlalchemy import text
 
 from kortravelmap.infra.feature_identity import (
-    expected_feature_uuid,
+    candidate_feature_uuid,
     verify_feature_uuid,
 )
 from kortravelmap.infra.merge_repo import (
@@ -2091,9 +2091,10 @@ WHERE feature_id = :feature_id
 FOR UPDATE
 """
 
-# feature_uuid는 T-VN-32B writer 원자 생성 — dual 기간 정본 generator(uuid5 파생)를
-# 명시 INSERT하고 0079 트리거는 안전망으로 유지한다. RETURNING 관측값은
-# legacy-only 신규 행 fail-close 검증에 쓰인다.
+# feature_uuid는 T-VN-32C(0083) 정본 generator — 비파생 UUIDv7 후보를 명시
+# INSERT하고 fill 트리거는 raw SQL 안전망으로 유지한다. ON CONFLICT DO NOTHING
+# 이므로 RETURNING 행 존재 = 신규 insert — 관측값은 보낸 후보와 같아야 한다
+# (generator 이원화 fail-close, 적대 리뷰 1 M1).
 _APPLY_FEATURE_ADD_SQL: Final[str] = """
 INSERT INTO feature.features (
     feature_id, feature_uuid, kind, name, category,
@@ -2404,8 +2405,8 @@ def _add_params(
     return {
         "request_id": request_id,
         "feature_id": feature_id,
-        # T-VN-32B writer 원자 생성 — dual 기간 정본 generator(uuid5 파생).
-        "feature_uuid": expected_feature_uuid(feature_id),
+        # T-VN-32C 정본 generator — 비파생 UUIDv7 후보(conflict 시 기존값 정본).
+        "feature_uuid": candidate_feature_uuid(),
         "kind": payload["kind"],
         "name": payload["name"],
         "category": payload["category"],
@@ -2509,7 +2510,7 @@ async def _apply_change(
         row = (
             await session.execute(
                 text(_APPLY_FEATURE_ADD_SQL),
-                _add_params(
+                add_params := _add_params(
                     request_id=request.request_id,
                     feature_id=request.feature_id,
                     payload=payload,
@@ -2518,8 +2519,15 @@ async def _apply_change(
             )
         ).mappings().first()
         if row is not None:
-            # T-VN-32B fail-close — legacy-only(uuid 결측/파생 불일치) 신규 행 차단.
-            verify_feature_uuid(request.feature_id, row["feature_uuid"])
+            # T-VN-32C fail-close — ON CONFLICT DO NOTHING이라 RETURNING 행
+            # 존재 자체가 신규 insert 증거다: 관측값은 보낸 후보와 같아야
+            # 하며(generator 이원화 차단), 비정규/결측이면 legacy-only 차단.
+            verify_feature_uuid(
+                request.feature_id,
+                row["feature_uuid"],
+                sent_feature_uuid=add_params["feature_uuid"],
+                inserted=True,
+            )
     elif request.action == "update":
         row = (
             await session.execute(

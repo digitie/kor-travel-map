@@ -36,6 +36,12 @@ def client() -> TestClient:
 
 
 def _row(alias: str) -> FeatureAliasMapRowV1:
+    """고정 row fixture — uuid는 alias에서 **결정적으로** 만들되 계약은 아니다.
+
+    파생을 쓰는 이유는 테스트가 alias 하나로 기대 uuid를 재계산할 수 있어서지,
+    저장 계약이 파생이라서가 아니다. 0083(T-VN-32C)부터 실제 저장값은 비파생
+    UUIDv7이고 router는 저장값을 그대로 통과시킨다.
+    """
     return FeatureAliasMapRowV1(
         alias=alias,
         feature_uuid=str(feature_uuid_from_legacy(alias)),
@@ -75,11 +81,12 @@ def test_alias_map_page_exposes_canonical_rows_and_keyset(
         "f_global_p_aaaa",
         "f_global_p_bbbb",
     ]
-    assert all(
-        row["feature_uuid"] == str(feature_uuid_from_legacy(row["alias"]))
-        and row["alias_kind"] == "legacy_feature_id"
-        for row in data["rows"]
-    )
+    # router는 저장소가 준 값을 그대로 통과시킨다 — 기대값은 파생 재계산이
+    # 아니라 stub이 돌려준 행 자체다 (0083 이후 저장값은 비파생 v7).
+    assert [row["feature_uuid"] for row in data["rows"]] == [
+        row.feature_uuid for row in rows
+    ]
+    assert all(row["alias_kind"] == "legacy_feature_id" for row in data["rows"])
     assert data["has_more"] is True
     assert data["next_after_alias"] == "f_global_p_bbbb"
 
@@ -114,6 +121,8 @@ def test_alias_map_checksum_exposes_count_and_root(
         "schema_version": "feature-alias-map-v1",
         "alias_count": 4,
         "merkle_root": "ab" * 32,
+        # 0083 세대 표식 — 이 코드는 파생 미강제 세계에서만 배포된다(리뷰 2 F6).
+        "derivation_enforced": False,
     }
 
 

@@ -23,9 +23,8 @@ from kortravelmap.core.feature_alias_map import (
     feature_alias_map_merkle_root,
     validate_canonical_feature_uuid,
     validate_feature_alias,
-    verify_legacy_alias_derivation,
 )
-from kortravelmap.core.ids import FEATURE_UUID_NAMESPACE
+from kortravelmap.core.ids import FEATURE_UUID_NAMESPACE, feature_uuid_from_legacy
 
 _GOLDEN_PATH = (
     Path(__file__).resolve().parents[2] / "contracts" / "feature-alias-map-v1-golden.json"
@@ -45,6 +44,15 @@ def _golden_rows() -> list[FeatureAliasMapRowV1]:
         )
         for row in _golden()["merkle_v1"]["rows"]
     ]
+
+
+def _golden_nonderived_row() -> FeatureAliasMapRowV1:
+    row = _golden()["nonderived_v1"]["row"]
+    return FeatureAliasMapRowV1(
+        alias=row["alias"],
+        feature_uuid=row["feature_uuid"],
+        alias_kind=row["alias_kind"],
+    )
 
 
 def test_golden_schema_and_namespace_match_code_constants() -> None:
@@ -78,20 +86,55 @@ def test_golden_rows_match_leaf_digest_order_and_root() -> None:
     )
 
 
-def test_golden_rows_pass_legacy_derivation_verification() -> None:
-    for row in _golden_rows():
-        verify_legacy_alias_derivation(row)
+# ── 0083 비파생 UUIDv7 행 — 파생 등식 없이도 계약을 통과한다 ────────────────
 
 
-def test_derivation_mismatch_is_rejected() -> None:
-    row = FeatureAliasMapRowV1(
-        alias="f_1168010100_p_3c0c2820e96d28d3",
-        # 형태는 canonical이지만 파생 규칙과 다른 uuid.
-        feature_uuid="00000000-0000-4000-8000-000000000000",
-        alias_kind="legacy_feature_id",
+def test_nonderived_v7_row_is_accepted_and_matches_golden_leaf() -> None:
+    """비파생 UUIDv7 행은 shape 검증만으로 수용되고 leaf가 golden과 같다.
+
+    0083(T-VN-32C 값 전환) 이후 신규 행의 ``feature_uuid``는 legacy alias에서
+    파생되지 않는다 — 이 행은 ``uuid5(namespace, alias)``와 다르지만 계약상
+    적법하다(파생 등식은 더 이상 계약이 아님).
+    """
+    golden = _golden()["nonderived_v1"]
+    row = _golden_nonderived_row()
+
+    assert uuid.UUID(row.feature_uuid).version == 7
+    # 파생 세대와 명시적으로 다르다 — "파생을 강제하지 않음"의 실질 증거.
+    assert row.feature_uuid != str(feature_uuid_from_legacy(row.alias))
+    assert feature_alias_leaf_digest(row).hex() == golden["leaf_sha256"]
+
+
+def test_mixed_generation_map_root_and_order_match_golden() -> None:
+    """파생 4행 + 비파생 1행이 섞인 map의 root·정렬이 golden과 일치한다."""
+    golden = _golden()["nonderived_v1"]
+    rows = [*_golden_rows(), _golden_nonderived_row()]
+
+    assert feature_alias_map_merkle_root(rows) == golden["root_with_merkle_v1_rows"]
+    assert feature_alias_map_merkle_root(list(reversed(rows))) == (
+        golden["root_with_merkle_v1_rows"]
     )
-    with pytest.raises(ValueError, match="파생 불일치"):
-        verify_legacy_alias_derivation(row)
+    assert [
+        row.alias for row in sorted(rows, key=lambda row: row.alias.encode("utf-8"))
+    ] == golden["expected_nfc_utf8_order_with_merkle_v1_rows"]
+
+
+def test_merkle_v1_rows_remain_derived_generation_anchor() -> None:
+    """역사 앵커 — 기존(backfill) 세대 4행은 여전히 uuid5 파생 산출이다.
+
+    0082 identity fence가 기존 731,600행의 파생값을 영구 보존하므로, 파생
+    **검증**은 폐기해도 파생 **세대 벡터**는 고정해 둔다 (재backfill·
+    downgrade 경로가 같은 값을 재계산해야 한다).
+    """
+    for row in _golden_rows():
+        assert row.feature_uuid == str(feature_uuid_from_legacy(row.alias))
+
+
+def test_golden_derivation_rule_documents_nonderived_cutover() -> None:
+    """계약 문서 회귀 앵커 — rule 문구가 0083 전환을 명시해야 한다."""
+    rule = _golden()["derivation"]["rule"]
+    assert "UUIDv7" in rule
+    assert "파생 재계산이 아니라" in rule
 
 
 def test_alias_validation_rejects_non_nfc_padding_empty_and_overlong() -> None:

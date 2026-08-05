@@ -7633,6 +7633,8 @@ export interface components {
         FeatureAliasMapChecksumData: {
             /** Alias Count */
             alias_count: number;
+            /** Derivation Enforced */
+            derivation_enforced: boolean;
             /** Merkle Root */
             merkle_root: string;
             /**
@@ -22452,7 +22454,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description FEATURE_ALIAS_MAP_INTEGRITY — 저장 행이 canonical/파생 계약 위반 (DB 층 보장 붕괴, 이관 중단) */
+            /** @description FEATURE_ALIAS_MAP_INTEGRITY — 저장 행이 canonical 계약 위반 (DB 층 보장 붕괴, 이관 중단 — 파생 등식은 0083부터 계약이 아님) */
             500: {
                 headers: {
                     [name: string]: unknown;
@@ -22490,7 +22492,7 @@ export interface operations {
                     "application/json": components["schemas"]["FeatureAliasMapChecksumResponse"];
                 };
             };
-            /** @description FEATURE_ALIAS_MAP_INTEGRITY — 저장 행이 canonical/파생 계약 위반 (DB 층 보장 붕괴, 이관 중단) */
+            /** @description FEATURE_ALIAS_MAP_INTEGRITY — 저장 행이 canonical 계약 위반 (DB 층 보장 붕괴, 이관 중단 — 파생 등식은 0083부터 계약이 아님) */
             500: {
                 headers: {
                     [name: string]: unknown;

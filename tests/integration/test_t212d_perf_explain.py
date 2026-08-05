@@ -455,6 +455,16 @@ def _assert_uses_index(plan: dict[str, Any], *expected: str) -> None:
 
 _COORD_SPATIAL_INDEXES = ("idx_features_coord_gist", "idx_features_coord")
 
+# features의 ``feature_id`` 동등 조건이 탈 수 있는 **동치** 접근 경로.
+#
+# alembic 0083(T-VN-32C)이 복합 FK의 참조 대상으로
+# ``uq_features_identity_pair UNIQUE (feature_id, feature_uuid)``를 만들면서 PK와
+# 선두 컬럼이 같은 btree가 하나 더 생겼고, ``feature_uuid``를 함께 투영하는
+# 질의에서는 planner가 이 covering index를 골라 index-only scan을 한다.
+# 선두 컬럼이 같아 selectivity·성능 축은 동일하므로 gate는 둘을 동치로 받는다
+# (``tests/integration/perf_gate._FEATURES_PK_ACCESS``와 같은 근거).
+_FEATURES_PK_ACCESS = ("pk_features", "features_pkey", "uq_features_identity_pair")
+
 
 def _assert_no_seq_scan_on(plan: dict[str, Any], relation_name: str) -> None:
     seq_scans = [
@@ -780,7 +790,7 @@ async def test_t212d_ops_and_review_lists_use_expected_indexes(
             "limit_plus_one": 51,
         },
     )
-    _assert_uses_index(admin_features_by_id, "features_pkey", "pk_features")
+    _assert_uses_index(admin_features_by_id, *_FEATURES_PK_ACCESS)
 
     jobs = await _explain_json(
         migrated_session,
@@ -1043,7 +1053,7 @@ async def test_t212d_dedup_refresh_and_consistency_checks_are_index_compatible(
         migrated_session,
         consistency._F8_FEATURE_FILE_METADATA_ROWS_SQL,  # noqa: PLC2701
     )
-    _assert_uses_index(f8, "pk_features")
+    _assert_uses_index(f8, *_FEATURES_PK_ACCESS)
 
 
 async def test_t212d_page_queries_keep_uuid_tie_breakers(
