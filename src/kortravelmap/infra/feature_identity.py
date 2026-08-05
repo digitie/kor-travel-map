@@ -59,6 +59,7 @@ __all__ = [
     "validate_feature_ref",
     "verify_feature_uuid",
     "resolve_feature_identity",
+    "resolve_feature_identities_bulk",
     "get_feature_uuid_map",
     "count_features_missing_identity",
 ]
@@ -345,6 +346,93 @@ async def get_feature_uuid_map(
         .all()
     )
     return {str(row["feature_id"]): str(row["feature_uuid"]) for row in rows}
+
+
+_RESOLVE_BULK_BY_UUID_SQL: Final[str] = """
+SELECT feature_id, CAST(feature_uuid AS text) AS feature_uuid
+FROM feature.features
+WHERE feature_uuid = ANY(CAST(:feature_uuids AS uuid[]))
+"""
+
+_RESOLVE_BULK_BY_ALIAS_SQL: Final[str] = """
+SELECT a.alias, f.feature_id, CAST(f.feature_uuid AS text) AS feature_uuid
+FROM feature.feature_aliases AS a
+JOIN feature.features AS f
+  ON f.feature_id = a.feature_id
+WHERE a.alias = ANY(CAST(:aliases AS text[]))
+"""
+
+
+async def resolve_feature_identities_bulk(
+    session: AsyncSession, refs: Sequence[str]
+) -> dict[str, FeatureIdentity]:
+    """여러 외부 참조를 고정 왕복 2회로 정본 키 쌍에 해석한다 (T-VN-32C PR-2).
+
+    write/scope 입력이 목록으로 받은 참조(legacy alias·canonical UUID 혼재
+    가능)를 :func:`resolve_feature_identity`와 **같은 우선순위**(UUID 정본
+    조회 → alias 조회 fallback)로 일괄 해석한다. 해석 불가 참조는 결과 dict
+    에서 빠진다 — 호출자가 miss를 어떻게 처리할지(422/무시)는 표면 계약이다.
+
+    형식 계약 위반(빈 문자열/공백 패딩/길이 초과)은 단건과 동일하게
+    :class:`FeatureIdentityRefError`를 던진다.
+    """
+    resolved: dict[str, FeatureIdentity] = {}
+    unique_refs: list[str] = []
+    seen: set[str] = set()
+    for ref in refs:
+        validate_feature_ref(ref)
+        if ref not in seen:
+            seen.add(ref)
+            unique_refs.append(ref)
+    if not unique_refs:
+        return resolved
+    uuid_refs = {
+        ref: canonical
+        for ref in unique_refs
+        if (canonical := _parse_canonical_uuid(ref)) is not None
+    }
+    if uuid_refs:
+        rows = (
+            (
+                await session.execute(
+                    text(_RESOLVE_BULK_BY_UUID_SQL),
+                    {"feature_uuids": list(uuid_refs.values())},
+                )
+            )
+            .mappings()
+            .all()
+        )
+        by_uuid = {
+            str(row["feature_uuid"]): FeatureIdentity(
+                feature_id=str(row["feature_id"]),
+                feature_uuid=str(row["feature_uuid"]),
+            )
+            for row in rows
+        }
+        for ref, canonical in uuid_refs.items():
+            identity = by_uuid.get(canonical)
+            if identity is not None:
+                resolved[ref] = identity
+    # UUID 정본 조회가 miss한 UUID형 참조도 alias fallback에 포함한다 —
+    # legacy id는 임의 문자열이라 UUID처럼 보이는 alias가 있을 수 있다
+    # (단건 해석 규칙 2와 동일).
+    alias_refs = [ref for ref in unique_refs if ref not in resolved]
+    if alias_refs:
+        rows = (
+            (
+                await session.execute(
+                    text(_RESOLVE_BULK_BY_ALIAS_SQL), {"aliases": alias_refs}
+                )
+            )
+            .mappings()
+            .all()
+        )
+        for row in rows:
+            resolved[str(row["alias"])] = FeatureIdentity(
+                feature_id=str(row["feature_id"]),
+                feature_uuid=str(row["feature_uuid"]),
+            )
+    return resolved
 
 
 async def count_features_missing_identity(

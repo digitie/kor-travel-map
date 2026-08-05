@@ -64,6 +64,7 @@ from kortravelmap.api.auth import require_admin_frontend, require_service_token
 from kortravelmap.api.db import get_session
 from kortravelmap.api.feature_ref import resolve_feature_ref_or_error
 from kortravelmap.api.http_revision import parse_revision_header, revision_etag
+from kortravelmap.api.identity_projection import response_feature_id, uuid_substituted_row
 from kortravelmap.api.response import ClusterUnit, Meta, ProblemDetail, make_meta
 from kortravelmap.api.routers.curations import PublicCurationItemView
 from kortravelmap.api.settings import ApiSettings
@@ -169,12 +170,17 @@ class FeatureSummary(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    feature_id: str
+    feature_id: str = Field(
+        description=(
+            "feature 참조 (opaque string). T-VN-32C 값 전환 이후 UUID 정본 "
+            "문자열을 담는다 — 형식(legacy f_*/UUID)에 의존하지 말 것."
+        ),
+    )
     feature_uuid: str | None = Field(
         default=None,
         description=(
-            "UUID 정본 identity 병행 노출 (ADR-068, T-VN-32B additive). "
-            "feature_id 값 자체의 UUID 전환은 T-VN-32C."
+            "UUID 정본 identity 명시 필드 (ADR-068). T-VN-32C 이후 "
+            "feature_id와 같은 값이다."
         ),
     )
     kind: str
@@ -258,12 +264,17 @@ class FeatureDetailResponse(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    feature_id: str
+    feature_id: str = Field(
+        description=(
+            "feature 참조 (opaque string). T-VN-32C 값 전환 이후 UUID 정본 "
+            "문자열을 담는다 — 형식(legacy f_*/UUID)에 의존하지 말 것."
+        ),
+    )
     feature_uuid: str | None = Field(
         default=None,
         description=(
-            "UUID 정본 identity 병행 노출 (ADR-068, T-VN-32B additive). "
-            "feature_id 값 자체의 UUID 전환은 T-VN-32C."
+            "UUID 정본 identity 명시 필드 (ADR-068). T-VN-32C 이후 "
+            "feature_id와 같은 값이다."
         ),
     )
     kind: str
@@ -752,8 +763,10 @@ def _public_detail(detail: dict[str, Any]) -> dict[str, Any]:
 
 
 def _detail_from_row(row: dict[str, Any]) -> FeatureDetailResponse:
+    # T-VN-32C PR-2 — 응답 feature_id 값은 UUID 정본. 내부 키는 호출부가 치환
+    # 전 row의 legacy 값을 쓴다.
     return FeatureDetailResponse(
-        feature_id=row["feature_id"],
+        feature_id=response_feature_id(row),
         feature_uuid=row.get("feature_uuid"),
         kind=row["kind"],
         name=row["name"],
@@ -960,12 +973,13 @@ async def list_features_in_bbox(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     page_rows = rows[:page_size]
+    # cursor는 치환 전 legacy feature_id 축 — keyset 술어와 같은 축이어야 한다.
     next_cursor = (
         feature_repo.encode_bbox_cursor(page_rows[-1]["feature_id"])
         if len(rows) > page_size and page_rows
         else None
     )
-    items = [FeatureSummary(**row) for row in page_rows]
+    items = [FeatureSummary(**uuid_substituted_row(row)) for row in page_rows]
     return FeaturesInBboxResponse(
         data=FeaturesInBboxData(items=items),
         meta=make_meta(
@@ -1077,7 +1091,7 @@ async def list_public_features_in_bounds(
         price_stale_hide_days=None,
     )
     truncated = len(rows) > max_items
-    items = [FeatureSummary(**row) for row in rows[:max_items]]
+    items = [FeatureSummary(**uuid_substituted_row(row)) for row in rows[:max_items]]
     return FeaturesInBoundsResponse(
         data=PublicFeatureListData(
             mode="items",
@@ -1146,7 +1160,7 @@ async def search_public_features(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     items = [
         FeatureSummary(
-            feature_id=item.feature_id,
+            feature_id=response_feature_id(item),
             feature_uuid=item.feature_uuid,
             kind=item.kind,
             name=item.name,
@@ -1231,7 +1245,7 @@ async def list_features_nearby(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     items = [
         NearbyFeatureSummary(
-            feature_id=item.feature_id,
+            feature_id=response_feature_id(item),
             feature_uuid=item.feature_uuid,
             kind=item.kind,
             name=item.name,
@@ -1334,7 +1348,7 @@ async def list_features_nearby_by_target(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     items = [
         NearbyFeatureSummary(
-            feature_id=item.feature_id,
+            feature_id=response_feature_id(item),
             feature_uuid=item.feature_uuid,
             kind=item.kind,
             name=item.name,
@@ -1367,8 +1381,9 @@ async def list_features_nearby_by_target(
     description=(
         "feature 참조는 legacy `f_*` id와 UUID 정본(canonical hyphenated) "
         "양쪽을 수용한다 (ADR-068 경계 alias 해석, T-VN-32B dual). 응답의 "
-        "`feature_id`는 legacy 값을 유지하고 `feature_uuid`가 병행 노출된다 — "
-        "값 자체의 UUID 전환은 T-VN-32C."
+        "`feature_id` 값은 UUID 정본이다 (T-VN-32C 값 전환). `feature_uuid`는 "
+        "같은 값의 명시 필드로 병행 노출된다. feature_id는 opaque string이며 "
+        "형식(legacy/UUID)에 의존하지 말 것."
     ),
     responses={
         404: {"description": "feature 참조 해석 불가 또는 비공개"},
@@ -2008,7 +2023,8 @@ async def get_feature_weather(
     metrics = [] if card is None else [_weather_metric_out(metric) for metric in card.current]
     return FeatureWeatherResponse(
         data=WeatherCardData(
-            feature_id=item.feature_id,
+            # T-VN-32C PR-2 — 단건 card 응답의 feature_id는 UUID 정본 값.
+            feature_id=identity.feature_uuid,
             asof=asof,
             source_styles=(
                 []
@@ -2061,9 +2077,9 @@ async def get_area_contained_features(
     )
     return AreaContainedFeaturesResponse(
         data=AreaContainedFeaturesData(
-            area_feature_id=canonical_id,
+            area_feature_id=identity.feature_uuid,
             area_square_meters=area_row.get("area_square_meters"),
-            items=[FeatureSummary(**row) for row in rows],
+            items=[FeatureSummary(**uuid_substituted_row(row)) for row in rows],
         ),
         meta=make_meta(request, started_at=started_at, page_size=page_size),
     )
@@ -2102,7 +2118,8 @@ async def get_feature_price(
     )
     return FeaturePriceResponse(
         data=PriceCardData(
-            feature_id=card.feature_id,
+            # T-VN-32C PR-2 — 단건 card 응답의 feature_id는 UUID 정본 값.
+            feature_id=identity.feature_uuid,
             asof=card.asof,
             current=[_price_point_out(point) for point in card.current],
             history=[_price_point_out(point) for point in card.history],

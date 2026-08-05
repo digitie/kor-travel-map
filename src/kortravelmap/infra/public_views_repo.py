@@ -39,7 +39,10 @@ CursorKind = Literal["public_beaches", "public_festivals"]
 
 @dataclass(frozen=True)
 class PublicBeachRow:
-    """해수욕장 공개 projection row."""
+    """해수욕장 공개 projection row.
+
+    ``feature_uuid``는 T-VN-32C UUID 정본 병행 노출(additive).
+    """
 
     feature_id: str
     display_name: str
@@ -56,11 +59,15 @@ class PublicBeachRow:
     marker_color: str | None
     source_providers: tuple[str, ...]
     updated_at: datetime
+    feature_uuid: str | None = None
 
 
 @dataclass(frozen=True)
 class PublicFestivalRow:
-    """축제 공개 projection row."""
+    """축제 공개 projection row.
+
+    ``feature_uuid``는 T-VN-32C UUID 정본 병행 노출(additive).
+    """
 
     feature_id: str
     festival_name: str
@@ -77,17 +84,22 @@ class PublicFestivalRow:
     marker_color: str | None
     source_providers: tuple[str, ...]
     updated_at: datetime
+    feature_uuid: str | None = None
 
 
 @dataclass(frozen=True)
 class PublicMapMarkerRow:
-    """공개 지도 layer marker row."""
+    """공개 지도 layer marker row.
+
+    ``feature_uuid``는 T-VN-32C UUID 정본 병행 노출(additive).
+    """
 
     feature_id: str
     name: str
     lon: float
     lat: float
     sigungu_code: str | None
+    feature_uuid: str | None = None
 
 
 @dataclass(frozen=True)
@@ -164,6 +176,7 @@ f.kind = 'place'
 _PUBLIC_BEACH_LIST_SQL: Final[str] = f"""
 SELECT
     f.feature_id,
+    CAST(f.feature_uuid AS text) AS feature_uuid,
     f.name AS display_name,
     x_extension.ST_X(f.coord) AS lon,
     x_extension.ST_Y(f.coord) AS lat,
@@ -206,6 +219,7 @@ LIMIT :limit
 _PUBLIC_BEACH_DETAIL_SQL: Final[str] = f"""
 SELECT
     f.feature_id,
+    CAST(f.feature_uuid AS text) AS feature_uuid,
     f.name AS display_name,
     x_extension.ST_X(f.coord) AS lon,
     x_extension.ST_Y(f.coord) AS lat,
@@ -230,6 +244,7 @@ WHERE {_PUBLIC_BEACH_BASE_WHERE_SQL}
 _PUBLIC_BEACH_MARKERS_SQL: Final[str] = f"""
 SELECT
     f.feature_id,
+    CAST(f.feature_uuid AS text) AS feature_uuid,
     f.name,
     x_extension.ST_X(f.coord) AS lon,
     x_extension.ST_Y(f.coord) AS lat,
@@ -269,6 +284,7 @@ f.kind = 'event'
 _PUBLIC_FESTIVAL_LIST_SQL: Final[str] = f"""
 SELECT
     f.feature_id,
+    CAST(f.feature_uuid AS text) AS feature_uuid,
     f.name AS festival_name,
     x_extension.ST_X(f.coord) AS lon,
     x_extension.ST_Y(f.coord) AS lat,
@@ -306,6 +322,7 @@ LIMIT :limit
 _PUBLIC_FESTIVAL_DETAIL_SQL: Final[str] = f"""
 SELECT
     f.feature_id,
+    CAST(f.feature_uuid AS text) AS feature_uuid,
     f.name AS festival_name,
     x_extension.ST_X(f.coord) AS lon,
     x_extension.ST_Y(f.coord) AS lat,
@@ -331,6 +348,7 @@ WHERE f.kind = 'event'
 _PUBLIC_FESTIVAL_MARKERS_SQL: Final[str] = f"""
 SELECT
     f.feature_id,
+    CAST(f.feature_uuid AS text) AS feature_uuid,
     f.name,
     x_extension.ST_X(f.coord) AS lon,
     x_extension.ST_Y(f.coord) AS lat,
@@ -485,8 +503,10 @@ def _q_pattern(q: str | None) -> str | None:
 def _beach_row(row: Any) -> PublicBeachRow:
     lon = row["lon"]
     lat = row["lat"]
+    feature_uuid = row.get("feature_uuid")
     return PublicBeachRow(
         feature_id=str(row["feature_id"]),
+        feature_uuid=str(feature_uuid) if feature_uuid is not None else None,
         display_name=str(row["display_name"]),
         lon=float(lon) if lon is not None else None,
         lat=float(lat) if lat is not None else None,
@@ -507,8 +527,10 @@ def _beach_row(row: Any) -> PublicBeachRow:
 def _festival_row(row: Any) -> PublicFestivalRow:
     lon = row["lon"]
     lat = row["lat"]
+    feature_uuid = row.get("feature_uuid")
     return PublicFestivalRow(
         feature_id=str(row["feature_id"]),
+        feature_uuid=str(feature_uuid) if feature_uuid is not None else None,
         festival_name=str(row["festival_name"]),
         lon=float(lon) if lon is not None else None,
         lat=float(lat) if lat is not None else None,
@@ -527,8 +549,10 @@ def _festival_row(row: Any) -> PublicFestivalRow:
 
 
 def _marker_row(row: Any) -> PublicMapMarkerRow:
+    feature_uuid = row.get("feature_uuid")
     return PublicMapMarkerRow(
         feature_id=str(row["feature_id"]),
+        feature_uuid=str(feature_uuid) if feature_uuid is not None else None,
         name=str(row["name"]),
         lon=float(row["lon"]),
         lat=float(row["lat"]),

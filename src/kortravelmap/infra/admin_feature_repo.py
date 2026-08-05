@@ -834,12 +834,26 @@ def _normalize_query(q: str | None) -> str | None:
 # source_records 상관 서브쿼리(1M feature 대상 14~60s)를 건너뛴다.
 _FEATURE_ID_QUERY_RE: Final = re.compile(r"^f_[^_]+_[a-z]_[0-9a-f]{16}$")
 
+# canonical UUID(lowercase hyphenated 36자) 검색어 — T-VN-32C 값 전환 후 응답
+# feature_id가 UUID라 운영자가 그 값을 그대로 검색한다. ``uq_features_feature_uuid``
+# 인덱스 등가 fast-path로 처리하지 않으면 ILIKE 풀스캔(#639 회귀)이 된다.
+_FEATURE_UUID_QUERY_RE: Final = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+)
+
 
 def _feature_id_exact_query(normalized_q: str | None) -> str | None:
     """정규화된 검색어가 완전한 ``feature_id`` 형태면 그대로, 아니면 ``None``."""
     if normalized_q is None:
         return None
     return normalized_q if _FEATURE_ID_QUERY_RE.match(normalized_q) else None
+
+
+def _feature_uuid_exact_query(normalized_q: str | None) -> str | None:
+    """정규화된 검색어가 canonical UUID 형태면 그대로, 아니면 ``None``."""
+    if normalized_q is None:
+        return None
+    return normalized_q if _FEATURE_UUID_QUERY_RE.match(normalized_q) else None
 
 
 def _json_array(value: Any) -> tuple[dict[str, Any], ...]:
@@ -1099,6 +1113,11 @@ def _review_cursor_params(
 # 완전한 feature_id fast-path: PK 등가로 ILIKE 전체 스캔 + source_records EXISTS를 건너뛴다.
 _ADMIN_FEATURES_Q_EXACT_CLAUSE: Final = "AND f.feature_id = CAST(:q_exact AS text)"
 
+# canonical UUID fast-path: ``uq_features_feature_uuid`` 인덱스 등가 (T-VN-32C).
+_ADMIN_FEATURES_Q_EXACT_UUID_CLAUSE: Final = (
+    "AND f.feature_uuid = CAST(:q_exact_uuid AS uuid)"
+)
+
 # 부분 검색: feature_id/name/address + source_records 상관 서브쿼리 ILIKE.
 _ADMIN_FEATURES_Q_LIKE_CLAUSE: Final = """AND (
         CAST(:q_like AS text) IS NULL
@@ -1124,12 +1143,17 @@ _ADMIN_FEATURES_Q_LIKE_CLAUSE: Final = """AND (
       )"""
 
 
-def _admin_features_sql(*, sort: str, order: str, exact_id: bool = False) -> str:
+def _admin_features_sql(
+    *, sort: str, order: str, exact_id: bool = False, exact_uuid: bool = False
+) -> str:
     column = _ADMIN_FEATURE_SORT_COLUMNS[sort]
     order_sql = "ASC" if order == "asc" else "DESC"
-    q_clause = (
-        _ADMIN_FEATURES_Q_EXACT_CLAUSE if exact_id else _ADMIN_FEATURES_Q_LIKE_CLAUSE
-    )
+    if exact_id:
+        q_clause = _ADMIN_FEATURES_Q_EXACT_CLAUSE
+    elif exact_uuid:
+        q_clause = _ADMIN_FEATURES_Q_EXACT_UUID_CLAUSE
+    else:
+        q_clause = _ADMIN_FEATURES_Q_LIKE_CLAUSE
     return f"""
 WITH base AS (
     SELECT
@@ -1874,13 +1898,15 @@ async def list_admin_features(
     effective_limit = min(page_size, 500)
     normalized_q = _normalize_query(q)
     q_exact = _feature_id_exact_query(normalized_q)
+    q_exact_uuid = None if q_exact is not None else _feature_uuid_exact_query(normalized_q)
     params = {
         "q_like": (
             None
-            if q_exact is not None
+            if q_exact is not None or q_exact_uuid is not None
             else (f"%{normalized_q}%" if normalized_q is not None else None)
         ),
         "q_exact": q_exact,
+        "q_exact_uuid": q_exact_uuid,
         "kinds": _normalize_values(kinds),
         "categories": _normalize_values(categories),
         "statuses": _normalize_values(statuses),
@@ -1897,7 +1923,14 @@ async def list_admin_features(
     }
     rows = (
         await session.execute(
-            text(_admin_features_sql(sort=sort, order=order, exact_id=q_exact is not None)),
+            text(
+                _admin_features_sql(
+                    sort=sort,
+                    order=order,
+                    exact_id=q_exact is not None,
+                    exact_uuid=q_exact_uuid is not None,
+                )
+            ),
             params,
         )
     ).mappings().all()

@@ -189,6 +189,8 @@ class CurationItem:
     created_at: datetime
     updated_at: datetime
     archived_at: datetime | None
+    # T-VN-32C UUID 정본 병행 노출(additive) — feature 미연결/미해소면 None.
+    feature_uuid: str | None = None
 
 
 @dataclass(frozen=True)
@@ -202,6 +204,8 @@ class FeatureCurationGroup:
     address: dict[str, Any]
     status: str
     curations: tuple[CurationItem, ...]
+    # T-VN-32C UUID 정본 병행 노출(additive).
+    feature_uuid: str | None = None
 
 
 @dataclass(frozen=True)
@@ -211,6 +215,8 @@ class FeatureMatch:
     address: dict[str, Any]
     lon: float | None
     lat: float | None
+    # T-VN-32C UUID 정본 병행 노출(additive).
+    feature_uuid: str | None = None
 
 
 @dataclass(frozen=True)
@@ -531,6 +537,7 @@ _ITEM_SELECT_FIELDS: Final[str] = f"""
     s.source_name,
     s.source_url,
     i.feature_id,
+    CAST(f.feature_uuid AS text) AS feature_uuid,
     f.name AS feature_name,
     f.kind AS feature_kind,
     f.category AS feature_category,
@@ -815,6 +822,7 @@ LIMIT :limit
 _GET_FEATURE_SQL: Final[str] = f"""
 SELECT
     f.feature_id,
+    CAST(f.feature_uuid AS text) AS feature_uuid,
     f.name,
     f.kind,
     f.category,
@@ -830,6 +838,7 @@ WHERE f.feature_id = :feature_id
 _GET_FEATURES_BY_IDS_SQL: Final[str] = f"""
 SELECT
     f.feature_id,
+    CAST(f.feature_uuid AS text) AS feature_uuid,
     f.name,
     f.kind,
     f.category,
@@ -1914,6 +1923,7 @@ WITH requested AS (
 SELECT
     requested.row_number,
     matched.feature_id,
+    matched.feature_uuid,
     matched.name,
     matched.address,
     matched.lon,
@@ -1924,6 +1934,7 @@ CROSS JOIN LATERAL (
     (
         SELECT
             f.feature_id,
+            CAST(f.feature_uuid AS text) AS feature_uuid,
             f.name,
             f.address,
             x_extension.ST_X(f.coord) AS lon,
@@ -1939,6 +1950,7 @@ CROSS JOIN LATERAL (
     (
         SELECT
             f.feature_id,
+            CAST(f.feature_uuid AS text) AS feature_uuid,
             f.name,
             f.address,
             x_extension.ST_X(f.coord) AS lon,
@@ -2061,6 +2073,7 @@ def _item(row: RowMapping | Mapping[str, Any]) -> CurationItem:
         created_at=row["created_at"],
         updated_at=row["updated_at"],
         archived_at=row["archived_at"],
+        feature_uuid=(str(value) if (value := row.get("feature_uuid")) else None),
     )
 
 
@@ -2071,6 +2084,7 @@ def _feature_match(row: RowMapping | Mapping[str, Any]) -> FeatureMatch:
         address=_object(row["address"]),
         lon=float(row["lon"]) if row["lon"] is not None else None,
         lat=float(row["lat"]) if row["lat"] is not None else None,
+        feature_uuid=(str(value) if (value := row.get("feature_uuid")) else None),
     )
 
 
@@ -3309,6 +3323,7 @@ async def get_feature_curation_group(
         address=_object(feature["address"]),
         status=str(feature["status"]),
         curations=tuple(_item(row) for row in item_rows),
+        feature_uuid=(str(value) if (value := feature.get("feature_uuid")) else None),
     )
 
 
@@ -3830,6 +3845,7 @@ async def list_feature_curation_groups(
                 address=_object(feature["address"]),
                 status=str(feature["status"]),
                 curations=grouped_items.get(feature_id, ()),
+                feature_uuid=(str(value) if (value := feature.get("feature_uuid")) else None),
             )
         )
     next_cursor = (

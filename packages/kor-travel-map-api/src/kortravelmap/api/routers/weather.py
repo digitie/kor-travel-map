@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api.db import get_session
 from kortravelmap.api.feature_ref import resolve_feature_ref_or_error
+from kortravelmap.api.identity_projection import response_feature_id
 from kortravelmap.api.response import Meta, make_meta
 
 __all__ = [
@@ -179,8 +180,9 @@ def _float_decimal(value: Decimal | None) -> float | None:
 def _anchor_out(anchor: weather_repo.WeatherAnchor | None) -> WeatherAnchorOut | None:
     if anchor is None:
         return None
+    # T-VN-32C PR-2 — 응답 feature_id 값은 UUID 정본 (결측은 projection 버그).
     return WeatherAnchorOut(
-        feature_id=anchor.feature_id,
+        feature_id=response_feature_id(anchor),
         name=anchor.name,
         lon=anchor.lon,
         lat=anchor.lat,
@@ -190,10 +192,14 @@ def _anchor_out(anchor: weather_repo.WeatherAnchor | None) -> WeatherAnchorOut |
 
 def _public_value_out(
     value: weather_repo.WeatherValueTimelineRow,
+    *,
+    anchor_feature_uuid: str,
 ) -> PublicWeatherValueItem:
+    # timeline row SQL은 feature 테이블을 join하지 않는다 — 전 row가 anchor
+    # feature 소속이므로 anchor의 UUID 정본을 그대로 쓴다 (T-VN-32C PR-2).
     return PublicWeatherValueItem(
         weather_value_key=value.weather_value_key,
-        feature_id=value.feature_id,
+        feature_id=anchor_feature_uuid,
         provider=value.provider,
         weather_domain=value.weather_domain,
         forecast_style=value.forecast_style,
@@ -213,11 +219,25 @@ def _public_value_out(
     )
 
 
+def _alert_response_feature_id(value: weather_repo.WeatherAlertHistoryRow) -> str | None:
+    """alert row의 응답 feature 참조 — 연결 feature 없으면 None (LEFT JOIN).
+
+    feature_id가 있는데 feature_uuid가 없으면 projection 결함이므로 fail-close.
+    """
+    if value.feature_id is None:
+        return None
+    if not value.feature_uuid:
+        raise ValueError(
+            "weather alert row에 feature_uuid가 없습니다 — projection 누락 (T-VN-32C)"
+        )
+    return value.feature_uuid
+
+
 def _public_alert_out(
     value: weather_repo.WeatherAlertHistoryRow,
 ) -> PublicWeatherAlertHistoryItem:
     return PublicWeatherAlertHistoryItem(
-        feature_id=value.feature_id,
+        feature_id=_alert_response_feature_id(value),
         feature_name=value.feature_name,
         region_code=value.region_code,
         region_name=value.region_name,
@@ -238,7 +258,7 @@ def _admin_alert_out(
 ) -> AdminWeatherAlertHistoryItem:
     return AdminWeatherAlertHistoryItem(
         source_record_key=value.source_record_key,
-        feature_id=value.feature_id,
+        feature_id=_alert_response_feature_id(value),
         feature_name=value.feature_name,
         region_code=value.region_code,
         region_name=value.region_name,
@@ -294,7 +314,8 @@ async def _forecast_response(
             valid_to=valid_to,
             limit=limit,
         )
-        items = [_public_value_out(row) for row in rows]
+        anchor_uuid = response_feature_id(anchor)
+        items = [_public_value_out(row, anchor_feature_uuid=anchor_uuid) for row in rows]
     return PublicWeatherForecastResponse(
         data=PublicWeatherForecastData(
             target_feature_id=target_feature_id,
@@ -424,7 +445,8 @@ async def get_weather_forecast_by_feature(
     return await _forecast_response(
         request,
         session,
-        target_feature_id=identity.feature_id,
+        # T-VN-32C PR-2 — 응답의 feature 참조 값은 UUID 정본(echo 예외 아님).
+        target_feature_id=str(identity.feature_uuid),
         target_feature_uuid=str(identity.feature_uuid),
         target_lon=None,
         target_lat=None,
