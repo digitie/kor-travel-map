@@ -630,13 +630,16 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   (역사 표면 보존). 적대 리뷰 2인 GO(trip_card echo 등식·scope 해석
   트랜잭션 배치 등 H 2건 반영), CI 8/8.
 
-  **잔여(rollout 순서)**: ① **H30B 재검증(배포 게이트)** → ② PR-2 배포
-  (api→dagster→ui 원자, ui는 types 재빌드 필수) → ③ curated snapshot asset
-  1런(etag churn 1회 계획 비용) → ④ live e2e fixture 재생성(새 표면 기준) →
+  **배포 완료(2026-08-05, dm#128)**: ①H30B 게이트 기완료 충족 ②`8c5bdcf8`
+  4-이미지 배포(사후 검증: 상세 UUID·batch echo·trip_card 등식 정상)
+  ③curated snapshot 활성 500 전량 재물질화(멱등 확인, 비활성 334 동결 보존).
+
+  **잔여**: ④ live e2e fixture 재생성(새 표면 기준, n150 per-file 저부하) →
   ⑤ PinVi user 스냅샷 재고정 PR + 유예 동봉(PinVi CLI
   `--accept-uuid-literals`+runner 출력, `derivation_enforced` cutover 사전
-  검사 배선, dagster entrypoint 기계 인터록). 관측: 32B 기간 저장 UUID 표기
-  scope 레코드 잔존(재실행 조용한 no-op — 리뷰 L4).
+  검사 배선) → ⑥ dagster entrypoint EXPECTED_HEAD 기계 인터록(NEW-5, dm base
+  compose 기본값 갱신 동타이밍). 관측: 32B 기간 저장 UUID 표기 scope 레코드
+  잔존(재실행 조용한 no-op — 리뷰 L4)·quarantine 재-link 프론트 대조(F6).
   legacy ID·FK 체인 물리 제거는 T-VN-39 removal manifest.
   **운영 점검(상시)**: 0079/0081 트리거 보장은 trigger-respecting 세션
   한정이다 — `session_replication_role=replica`(superuser)는 우회 가능하므로

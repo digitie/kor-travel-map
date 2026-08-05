@@ -17,6 +17,22 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-08-05 (10) — T-VN-32C PR-2 prod 배포 — 값 전환 라이브
+
+- **배포**(`8c5bdcf8`, dm#128 기록): 4-이미지(api·dagster·daemon·**ui** —
+  admin types 반영) 빌드 → api 먼저 → 나머지, 4/4 healthy. migration 무추가
+  (EXPECTED_HEAD=0083 유지). H30B 게이트는 기완료 확인으로 충족.
+- **사후 검증(실측)**: 공개 상세 응답 feature_id = UUID 정본(v7)·legacy path
+  해석 유지 · service batch echo 표기 보존(legacy in→legacy out, UUID in→UUID
+  out) + `trip_card.feature_id == item echo` 등식(리뷰 F1 수정분) 정상.
+- **curated snapshot 재물질화**: 활성(curated) 500건 전량 UUID 전환, 2회차
+  멱등(0 rewrite). 비활성 334건 스냅샷은 materializer 커버리지 밖 동결
+  보존(감사 표면 — legacy 잔존 의도).
+- **잔여 후속**: ④ live e2e fixture 재생성(새 표면 기준, n150 per-file
+  저부하) ⑤ PinVi user 스냅샷 재고정 PR(+NEW-2 CLI 플래그·NEW-3
+  derivation_enforced 배선 동봉 — 진행 중) ⑥ dagster entrypoint
+  EXPECTED_HEAD 기계 인터록(NEW-5, dm base compose 기본값 갱신과 동타이밍).
+
 ## 2026-08-05 (9) — T-VN-32C PR-2 머지 (#952) — 값 전환 코드 완결
 
 - **머지** `8c5bdcf8` (CI 8/8, 적대 리뷰 2인 GO). 리뷰 라운드 요약:
