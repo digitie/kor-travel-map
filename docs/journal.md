@@ -17,6 +17,16 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-08-05 (12) — live e2e fixture 재표집 (구표본 전멸 발견)
+
+- ④ 착수 중 발견: `_fixtures.ts`의 FEATURE_IDS 150건(전부 구세대 `_w_`)이
+  **prod에 전무** — 8/4 전면 재생성 + KMA weather 재설계로 표본이 값 전환
+  이전부터 이미 사멸해 있었다(1:1 표기 전환 불가). 현행 prod에서 public
+  kind 층화 재표집(30×5: event/notice/place/price/weather), 값은 UUID
+  정본(새 표면 — dual-read가 URL/검색 수용). CURATED_IDS 40·IMPORT_JOB 3·
+  KINDS_PRESENT·PRESENCE(issues 1730 외 0) 동반 갱신, e2e tsc green.
+- 라이브 검증은 관례대로 저작-머지 후 n150 per-file 저부하 플로우에서 수행.
+
 ## 2026-08-05 (11) — NEW-5: dagster entrypoint DB 세대 기계 인터록
 
 - dagster-entrypoint에 **읽기 전용** 게이트: DB alembic revision == 이미지
