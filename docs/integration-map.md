@@ -247,6 +247,15 @@ live → soak를 모두 통과한 compatible pair에서만 enable한다.
 feature, `missing`은 저장소에 없는 identity다. 따라서 비공개와 미존재를 같은 상태로
 축약하지 않으며 PinVi는 같은 typed state를 Web·Map·Mobile 표시 resolver에서 사용한다.
 
+**echo 계약 (T-VN-32C 값 전환에서 명문화)**: batch item·found/missing 키의
+`feature_id`, weather batch(`POST /v1/features/weather/batch`)의 target
+`feature_id` echo는 **요청 표기를 그대로 보존**한다 — Map이 응답 read 표면의
+`feature_id` 값을 UUID 정본으로 전환(T-VN-32C PR-2)한 뒤에도, batch 계열
+echo는 canonicalize하지 않는다. 소비자(PinVi `kor_travel_map.py`의 echo 등식
+검증)는 legacy `f_*`로 보내면 legacy를, UUID로 보내면 UUID를 그대로 돌려받는다.
+조회 자체는 Map 경계에서 legacy/UUID 양형식을 해석한다(ADR-068 결정 3).
+코드 정본은 `kortravelmap.api.identity_projection` 모듈 docstring이다.
+
 ### 3.3 body actor 제거 (T-VN-20, ADR-066 D-2) — PinVi 전송 중단 필요
 
 T-VN-20이 모든 admin write의 감사 actor를 인증 principal(admin BFF의

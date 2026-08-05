@@ -5,11 +5,11 @@
   "baseline": {
     "admin": {
       "file": "packages/kor-travel-map-api/openapi.json",
-      "sha256": "cf3547cfa6de68218b64e754d8c008a108e04494232fe3147b3de6f4ff5068b4"
+      "sha256": "8c4aa33cf5d1cf15b248ec95367e169adc275515f1d277a6a707cf64dbe1681f"
     },
     "user": {
       "file": "packages/kor-travel-map-api/openapi.user.json",
-      "sha256": "27b14a0081a038f994d0058983e931772704d054b7ac75591064ab9ffd529e1e"
+      "sha256": "66fc83b3ae918b2f82ae9cf02bea162d8fa84967567e2a450493d93b1953e801"
     },
     "service": {
       "file": "packages/kor-travel-map-api/openapi.service.json",
@@ -36,6 +36,11 @@
       "date": "2026-08-05",
       "task": "T-VN-32C PR-1",
       "change": "admin/service baseline 재고정 — alias-map checksum 응답에 additive derivation_enforced 세대 표식(리뷰 2 F6) + 500 설명의 파생 문구 정정(F7). user spec 무변경."
+    },
+    {
+      "date": "2026-08-05",
+      "task": "T-VN-32C",
+      "change": "baseline sha256 재고정(admin/user — service 무변경): PR-2 값 전환으로 read 응답 feature_id 값이 UUID 정본이 됨(구조 무변경 — description 개정만). echo 예외(batch found/missing 키·item, weather batch target, path echo)는 요청 표기 보존 — kortravelmap.api.identity_projection docstring이 코드 정본."
     }
   ],
   "surfaces": {
