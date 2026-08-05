@@ -1,16 +1,21 @@
-"""``0080_feature_uuid_shadow`` migration 검증 (T-VN-32A, ADR-068).
+"""``0080_feature_uuid_shadow`` ~ ``0083_nonderived_uuid_generator`` 검증 (ADR-068).
 
-기존 행이 있는 DB(0078까지 적용 + seed)에 0079를 적용해 검증한다:
+기존 행이 있는 DB(0078까지 적용 + seed)에 head까지 적용해 검증한다:
 
 ① 전 행 ``feature_uuid`` 채움 + NOT NULL + UNIQUE(``uq_features_feature_uuid``)
+   — backfill 세대(0080)는 **파생값 그대로 영구 보존**된다(0082 identity fence).
 ② alias 1:1 — 모든 feature가 ``alias = feature_id`` legacy alias를 정확히
    1행 가진다 (freeze INV-068-01 post-backfill 판정과 동일 논리 + 쌍 일치)
 ③ 결정론 — 같은 legacy id를 **별도 DB**에서 재-backfill해도 같은 UUID이고,
    Python 정본(``core.ids.feature_uuid_from_legacy``)과도 일치한다
-④ 신규 feature upsert(provider 경로·raw INSERT 경로)가 같은 transaction에서
-   uuid + alias를 원자 생성한다
-⑤ downgrade 무손실 왕복 — shadow 구조물만 제거되고 기존 행은 그대로,
-   재-upgrade 시 같은 UUID가 재계산된다
+④ 신규 feature write(provider 경로·raw INSERT 경로·명시 uuid 경로)가 같은
+   transaction에서 uuid + alias를 원자 생성한다 — **0083부터 신규 값은 비파생
+   UUIDv7**이고 명시 비파생 값도 수용된다(파생 CHECK 2종 해제)
+⑤ 0083 복합 FK(``fk_feature_aliases_identity_pair``) — alias 사본이 정본 쌍과
+   다르면 DB가 선언적으로 거부한다
+⑥ downgrade 무손실 왕복 — shadow 구조물만 제거되고 기존 행은 그대로,
+   재-upgrade 시 같은 파생 UUID가 재계산된다. 0083 downgrade는 파생 CHECK를
+   ``NOT VALID``로 복원해 신규 INSERT부터 파생 강제를 재개한다.
 
 freeze 불변식 정합: ``contracts/vnext/target-invariants-v1.sql``의 INV-068-*를
 그대로 실행해 0을 확인한다. 단 **INV-068-05는 제외** — 질의가
@@ -22,6 +27,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import uuid as uuid_module
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -34,7 +40,7 @@ from sqlalchemy import text
 from sqlalchemy.engine import make_url
 
 from alembic import command
-from kortravelmap.core.ids import feature_uuid_from_legacy
+from kortravelmap.core.ids import feature_uuid_from_legacy, make_feature_uuid
 from kortravelmap.infra.db import make_async_engine, normalize_async_dsn
 
 if TYPE_CHECKING:
@@ -98,6 +104,35 @@ def _alembic_config(dsn: str) -> Config:
     config.set_main_option("script_location", str(_ROOT / "alembic"))
     config.set_main_option("sqlalchemy.url", dsn)
     return config
+
+
+def _sqlstate(error: BaseException) -> str | None:
+    """DBAPIError에서 PostgreSQL SQLSTATE를 꺼낸다 (driver 표기 차이 흡수).
+
+    문구 정규식 alternation으로 "아무거나 걸리면 통과"하는 느슨한 단언 대신
+    제약 이름 + SQLSTATE를 정확히 단언하기 위한 헬퍼다 (32C 적대 리뷰 축).
+    """
+    for candidate in (getattr(error, "orig", None), error):
+        for attribute in ("sqlstate", "pgcode"):
+            value = getattr(candidate, attribute, None)
+            if value:
+                return str(value)
+    return None
+
+
+def _assert_nonderived_uuid_v7(value: object, *, feature_id: str) -> str:
+    """0083 신규 행 정본 형태 단언 — canonical UUIDv7이고 파생값이 **아니다**."""
+    text_value = str(value)
+    parsed = uuid_module.UUID(text_value)
+    assert str(parsed) == text_value, f"canonical 표기가 아님: {text_value!r}"
+    assert parsed.version == 7, f"version 7이 아님: {text_value!r}"
+    assert parsed.variant == uuid_module.RFC_4122
+    assert (parsed.int >> 76) & 0xF == 0x7
+    assert (parsed.int >> 62) & 0b11 == 0b10
+    assert text_value != str(feature_uuid_from_legacy(feature_id)), (
+        "0083 이후 신규 행은 legacy id 파생값이면 안 된다 (generator 미전환)."
+    )
+    return text_value
 
 
 async def _upgrade(dsn: str, revision: str) -> None:
@@ -240,6 +275,37 @@ async def test_feature_uuid_is_not_null_and_unique_constraint_attached(
     assert raw_type == "u"
 
 
+async def test_0083_replaces_derivation_checks_with_declarative_copy_constraints(
+    shadow_engine: AsyncEngine,
+) -> None:
+    """head(0083)에서 파생 CHECK 2종은 사라지고 복합 UNIQUE/FK가 대신 선다."""
+    async with shadow_engine.connect() as connection:
+        names = {
+            row.conname
+            for row in await connection.execute(
+                text(
+                    "SELECT con.conname FROM pg_catalog.pg_constraint AS con "
+                    "JOIN pg_catalog.pg_class AS rel ON rel.oid = con.conrelid "
+                    "JOIN pg_catalog.pg_namespace AS ns ON ns.oid = rel.relnamespace "
+                    "WHERE ns.nspname = 'feature' "
+                    "AND rel.relname IN ('features', 'feature_aliases')"
+                )
+            )
+        }
+        v7_function = (
+            await connection.execute(
+                text("SELECT to_regprocedure('feature.uuid_generate_v7()')")
+            )
+        ).scalar_one()
+    assert "ck_features_feature_uuid_dual_derivation" not in names
+    assert "ck_feature_aliases_uuid_dual_derivation" not in names
+    assert "uq_features_identity_pair" in names
+    assert "fk_feature_aliases_identity_pair" in names
+    # 파생 함수는 역사/downgrade 참조로 존속, v7 generator가 새로 선다.
+    assert "ck_feature_aliases_legacy_identity" in names
+    assert v7_function is not None
+
+
 # ── ② alias 1:1 (INV-068-01 post-backfill 논리 + 쌍 일치) ──────────────────
 
 
@@ -354,7 +420,7 @@ async def test_determinism_across_databases_and_lossless_downgrade_roundtrip(
                         "JOIN pg_catalog.pg_namespace AS ns ON ns.oid = proc.pronamespace "
                         "WHERE ns.nspname = 'feature' AND proc.proname IN ("
                         "'feature_uuid_from_legacy', 'fill_features_feature_uuid', "
-                        "'ensure_features_legacy_alias')"
+                        "'ensure_features_legacy_alias', 'uuid_generate_v7')"
                     )
                 )
             ).scalar_one()
@@ -396,6 +462,8 @@ async def test_new_feature_raw_insert_gets_uuid_and_alias_atomically(
 ) -> None:
     """raw INSERT(admin add·테스트 seed와 동일 경로)에서 트리거가 쌍을 만든다.
 
+    0083 이후 fill 트리거의 산출은 파생값이 아니라 ``feature.uuid_generate_v7()``
+    이다 — raw SQL 경로가 파생값을 받으면 app(v7)과 generator가 이원화된다.
     ``migrated_session``은 commit하지 않으므로, 같은 transaction 안에서 보이는
     것 자체가 원자성(같은 tx) 증거다.
     """
@@ -419,11 +487,51 @@ async def test_new_feature_raw_insert_gets_uuid_and_alias_atomically(
             {"fid": feature_id},
         )
     ).one()
-    expected = str(feature_uuid_from_legacy(feature_id))
-    assert str(row.feature_uuid) == expected
-    assert str(row.alias_uuid) == expected
+    stored = _assert_nonderived_uuid_v7(row.feature_uuid, feature_id=feature_id)
+    # AFTER 트리거의 alias 사본은 정본과 같은 값이다 (INV-068-01).
+    assert str(row.alias_uuid) == stored
     assert row.alias == feature_id
     assert row.alias_kind == "legacy_feature_id"
+
+
+async def test_sql_v7_generator_matches_app_generator_layout(
+    migrated_session: AsyncSession,
+) -> None:
+    """``feature.uuid_generate_v7()``와 ``core.ids.make_feature_uuid()``의 레이아웃 동일성.
+
+    fill 트리거(raw SQL 경로 안전망)와 app writer가 서로 다른 세대를 만들면
+    generator 이원화이므로, version/variant 비트와 상위 48bit 타임스탬프의
+    현실성을 양쪽에서 같은 축으로 단언한다.
+    """
+    sql_values = [
+        str(
+            (
+                await migrated_session.execute(text("SELECT feature.uuid_generate_v7()"))
+            ).scalar_one()
+        )
+        for _ in range(8)
+    ]
+    app_values = [str(make_feature_uuid()) for _ in range(8)]
+
+    now_ms = int(
+        (
+            await migrated_session.execute(
+                text("SELECT (extract(epoch FROM clock_timestamp()) * 1000)::bigint")
+            )
+        ).scalar_one()
+    )
+    for value in (*sql_values, *app_values):
+        parsed = uuid_module.UUID(value)
+        assert str(parsed) == value
+        assert parsed.version == 7
+        assert parsed.variant == uuid_module.RFC_4122
+        assert (parsed.int >> 76) & 0xF == 0x7
+        assert (parsed.int >> 62) & 0b11 == 0b10
+        # 상위 48bit는 unix-ms — 같은 시각 축(하루 여유)에 놓인다.
+        assert abs((parsed.int >> 80) - now_ms) < 86_400_000
+    # 비파생·비결정 — 호출마다 다르다(양쪽 모두).
+    assert len(set(sql_values)) == len(sql_values)
+    assert len(set(app_values)) == len(app_values)
 
 
 async def test_provider_upsert_creates_uuid_and_alias_and_is_idempotent(
@@ -451,7 +559,6 @@ async def test_provider_upsert_creates_uuid_and_alias_and_is_idempotent(
     assert result.features_inserted == 1
 
     feature_id = bundle.feature.feature_id
-    expected = str(feature_uuid_from_legacy(feature_id))
 
     async def _pair() -> tuple[str, int]:
         feature_uuid = (
@@ -473,44 +580,48 @@ async def test_provider_upsert_creates_uuid_and_alias_and_is_idempotent(
         return str(feature_uuid), int(alias_count)
 
     feature_uuid, alias_count = await _pair()
-    assert feature_uuid == expected
+    # 0083 정본 generator — writer가 명시 바인드한 비파생 v7 후보가 저장된다.
+    stored = _assert_nonderived_uuid_v7(feature_uuid, feature_id=feature_id)
     assert alias_count == 1
 
     # 재적재(ON CONFLICT DO UPDATE 경로) — uuid 불변·alias 중복 없음. DTO를
     # 변형하지 않고 같은 feature를 다시 upsert해도 UPDATE 분기가 실행된다
-    # (upsert SQL은 feature_uuid를 SET 목록에 두지 않아 파생값이 유지된다).
+    # (upsert SQL은 feature_uuid를 SET 목록에 두지 않으므로 **버려진 새 후보**가
+    # 아니라 기존 저장값이 정본으로 남는다 — 32C verify의 inserted=False 축).
     inserted_again = await feature_repo.upsert_feature(migrated_session, bundle.feature)
     assert inserted_again is False
     feature_uuid_after, alias_count_after = await _pair()
-    assert feature_uuid_after == expected
+    assert feature_uuid_after == stored
     assert alias_count_after == 1
 
 
-async def test_explicit_feature_uuid_must_match_dual_derivation(
+async def test_explicit_nonderived_feature_uuid_is_accepted_and_mirrored(
     migrated_session: AsyncSession,
 ) -> None:
-    """T-VN-32B 강화 계약 — 명시 값은 존중하되 파생 규칙과 다르면 DB가 거부한다.
+    """0083 반전 계약 — 명시 **비파생** canonical uuid INSERT가 수용된다.
 
-    트리거는 여전히 NULL일 때만 채우지만(32A), dual 기간 합법 UUID는 uuid5
-    파생값 하나뿐이다 — 0080 CHECK ``ck_features_feature_uuid_dual_derivation``이
-    비파생 명시 값을 fail-close한다(32A의 열린 "명시 값 존중" 계약을 32B가
-    닫음 — 결정론이 32C 양 저장소 checksum 대조의 전제).
+    32B는 파생 CHECK(``ck_features_feature_uuid_dual_derivation``)로 비파생
+    명시 값을 23514로 거부했다. 0083이 그 CHECK를 세트로 해제했으므로 이제
+    writer가 만든 v7 후보가 그대로 저장되고, AFTER 트리거가 같은 값을 alias
+    행에 원자 복사한다(INV-068-01은 유지).
     """
-    from sqlalchemy.exc import DBAPIError
-
     feature_id = "f_global_p_shadow_explicit_01"
-    derived = str(feature_uuid_from_legacy(feature_id))
+    explicit = str(make_feature_uuid())
+    assert explicit != str(feature_uuid_from_legacy(feature_id))
+
     await migrated_session.execute(
         text(
             "INSERT INTO feature.features (feature_id, feature_uuid, kind, name, category) "
             "VALUES (:fid, CAST(:uuid AS uuid), 'place', 'explicit uuid', '01070100')"
         ),
-        {"fid": feature_id, "uuid": derived},
+        {"fid": feature_id, "uuid": explicit},
     )
     row = (
         await migrated_session.execute(
             text(
-                "SELECT f.feature_uuid AS feature_uuid, a.feature_uuid AS alias_uuid "
+                "SELECT CAST(f.feature_uuid AS text) AS feature_uuid, "
+                "       CAST(a.feature_uuid AS text) AS alias_uuid, "
+                "       a.alias AS alias, a.alias_kind AS alias_kind "
                 "FROM feature.features AS f "
                 "JOIN feature.feature_aliases AS a ON a.feature_id = f.feature_id "
                 "WHERE f.feature_id = :fid"
@@ -518,19 +629,213 @@ async def test_explicit_feature_uuid_must_match_dual_derivation(
             {"fid": feature_id},
         )
     ).one()
-    assert str(row.feature_uuid) == derived
-    assert str(row.alias_uuid) == derived
+    # 명시 값 존중 — 트리거는 NULL일 때만 채운다(0083도 이 분기는 유지).
+    assert row.feature_uuid == explicit
+    assert row.alias_uuid == explicit
+    assert row.alias == feature_id
+    assert row.alias_kind == "legacy_feature_id"
 
-    # 파생 규칙과 다른 명시 값은 CHECK 위반(SQLSTATE 23514)으로 거부된다.
-    with pytest.raises(DBAPIError) as excinfo:
+    # 파생값을 명시해도 여전히 합법이다 — 0083은 "파생 금지"가 아니라
+    # "파생 강제 해제"다(기존 731,600행 세대와의 공존 전제).
+    legacy_style = "f_global_p_shadow_explicit_02"
+    derived = str(feature_uuid_from_legacy(legacy_style))
+    await migrated_session.execute(
+        text(
+            "INSERT INTO feature.features (feature_id, feature_uuid, kind, name, category) "
+            "VALUES (:fid, CAST(:uuid AS uuid), 'place', 'derived uuid', '01070100')"
+        ),
+        {"fid": legacy_style, "uuid": derived},
+    )
+    stored = (
         await migrated_session.execute(
             text(
-                "INSERT INTO feature.features (feature_id, feature_uuid, kind, name, category) "
-                "VALUES (:fid, CAST(:uuid AS uuid), 'place', 'drifted uuid', '01070100')"
+                "SELECT CAST(feature_uuid AS text) FROM feature.features "
+                "WHERE feature_id = :fid"
             ),
-            {
-                "fid": "f_global_p_shadow_explicit_02",
-                "uuid": "00000000-0000-4000-8000-000000000001",
-            },
+            {"fid": legacy_style},
         )
-    assert "ck_features_feature_uuid_dual_derivation" in str(excinfo.value)
+    ).scalar_one()
+    assert stored == derived
+
+
+# ── ⑤ 복합 FK — alias 사본 불일치의 선언적 차단 ────────────────────────────
+
+
+async def test_alias_copy_mismatch_is_rejected_by_identity_pair_fk(
+    migrated_session: AsyncSession,
+) -> None:
+    """0083 복합 FK — alias 행의 uuid가 정본 쌍과 다르면 INSERT가 23503으로 죽는다.
+
+    0082 fence는 alias UPDATE/DELETE만 막고 **INSERT는 막지 않는다**. 파생
+    CHECK 2종이 사라진 뒤 이 축을 지키는 것은
+    ``fk_feature_aliases_identity_pair`` 하나이므로 직접 INSERT로 실측한다.
+    AFTER 트리거를 잠시 끄고 alias 없는 feature 행을 만들어(alias PK 충돌을
+    피해) FK 축만 남긴다 — transaction rollback으로 원복된다.
+    """
+    from sqlalchemy.exc import DBAPIError
+
+    feature_id = "f_global_p_shadow_fk_probe_1"
+    await migrated_session.execute(
+        text(
+            "ALTER TABLE feature.features DISABLE TRIGGER trg_features_legacy_alias"
+        )
+    )
+    await migrated_session.execute(
+        text(
+            "INSERT INTO feature.features (feature_id, kind, name, category) "
+            "VALUES (:fid, 'place', 'fk probe', '01070100')"
+        ),
+        {"fid": feature_id},
+    )
+    await migrated_session.execute(
+        text("ALTER TABLE feature.features ENABLE TRIGGER trg_features_legacy_alias")
+    )
+    canonical = (
+        await migrated_session.execute(
+            text(
+                "SELECT CAST(feature_uuid AS text) FROM feature.features "
+                "WHERE feature_id = :fid"
+            ),
+            {"fid": feature_id},
+        )
+    ).scalar_one()
+
+    # ① 정본과 **다른** canonical uuid 사본 — 복합 FK가 유일한 방어선이다.
+    with pytest.raises(DBAPIError) as excinfo:
+        async with migrated_session.begin_nested():
+            await migrated_session.execute(
+                text(
+                    "INSERT INTO feature.feature_aliases "
+                    "(alias, feature_id, feature_uuid, alias_kind) VALUES "
+                    "(:fid, :fid, CAST(:uuid AS uuid), 'legacy_feature_id')"
+                ),
+                {"fid": feature_id, "uuid": str(make_feature_uuid())},
+            )
+    assert "fk_feature_aliases_identity_pair" in str(excinfo.value)
+    assert _sqlstate(excinfo.value) == "23503"
+
+    # ② 정본과 같은 쌍이면 통과한다 (FK가 사본 일치만 강제한다는 증거).
+    async with migrated_session.begin_nested():
+        await migrated_session.execute(
+            text(
+                "INSERT INTO feature.feature_aliases "
+                "(alias, feature_id, feature_uuid, alias_kind) VALUES "
+                "(:fid, :fid, CAST(:uuid AS uuid), 'legacy_feature_id')"
+            ),
+            {"fid": feature_id, "uuid": canonical},
+        )
+
+
+# ── ⑥ 0083 downgrade — 파생 강제 재개(NOT VALID) ───────────────────────────
+
+
+async def test_0083_downgrade_restores_not_valid_derivation_checks_and_reupgrades(
+    pg_container: Any,
+) -> None:
+    """0083 downgrade는 파생 CHECK를 ``NOT VALID``로 복원하고 신규 INSERT를 다시 막는다."""
+    from sqlalchemy.exc import DBAPIError
+
+    admin_dsn, dsn, database = await _build_shadow_db(pg_container, "uuid_shadow_0083")
+    engine = None
+    try:
+        await _downgrade(dsn, "0082_legacy_write_fence")
+        engine = make_async_engine(dsn)
+        async with engine.connect() as connection:
+            constraints = {
+                row.conname: row.convalidated
+                for row in await connection.execute(
+                    text(
+                        "SELECT con.conname, con.convalidated "
+                        "FROM pg_catalog.pg_constraint AS con "
+                        "JOIN pg_catalog.pg_class AS rel ON rel.oid = con.conrelid "
+                        "JOIN pg_catalog.pg_namespace AS ns ON ns.oid = rel.relnamespace "
+                        "WHERE ns.nspname = 'feature' "
+                        "AND con.conname IN ("
+                        "'ck_features_feature_uuid_dual_derivation', "
+                        "'ck_feature_aliases_uuid_dual_derivation', "
+                        "'uq_features_identity_pair', "
+                        "'fk_feature_aliases_identity_pair')"
+                    )
+                )
+            }
+            v7_function = (
+                await connection.execute(
+                    text("SELECT to_regprocedure('feature.uuid_generate_v7()')")
+                )
+            ).scalar_one()
+        # 파생 CHECK 2종이 NOT VALID로 복원되고, 0083 대체물은 사라진다.
+        assert constraints["ck_features_feature_uuid_dual_derivation"] is False
+        assert constraints["ck_feature_aliases_uuid_dual_derivation"] is False
+        assert "uq_features_identity_pair" not in constraints
+        assert "fk_feature_aliases_identity_pair" not in constraints
+        assert v7_function is None
+
+        # NOT VALID여도 **신규 INSERT는 검사된다** — 파생 강제 재개.
+        async with engine.connect() as connection:
+            with pytest.raises(DBAPIError) as excinfo:
+                await connection.execute(
+                    text(
+                        "INSERT INTO feature.features "
+                        "(feature_id, feature_uuid, kind, name, category) VALUES "
+                        "(:fid, CAST(:uuid AS uuid), 'place', 'post-downgrade', "
+                        "'01070100')"
+                    ),
+                    {
+                        "fid": "f_global_p_shadow_dg_probe",
+                        "uuid": str(make_feature_uuid()),
+                    },
+                )
+            assert "ck_features_feature_uuid_dual_derivation" in str(excinfo.value)
+            assert _sqlstate(excinfo.value) == "23514"
+            await connection.rollback()
+
+        # 파생값 INSERT는 통과하고 fill 트리거도 파생판으로 되돌아왔다.
+        derived_id = "f_global_p_shadow_dg_derived"
+        async with engine.connect() as connection:
+            await connection.execute(
+                text(
+                    "INSERT INTO feature.features (feature_id, kind, name, category) "
+                    "VALUES (:fid, 'place', 'post-downgrade fill', '01070100')"
+                ),
+                {"fid": derived_id},
+            )
+            filled = (
+                await connection.execute(
+                    text(
+                        "SELECT CAST(feature_uuid AS text) FROM feature.features "
+                        "WHERE feature_id = :fid"
+                    ),
+                    {"fid": derived_id},
+                )
+            ).scalar_one()
+            assert filled == str(feature_uuid_from_legacy(derived_id))
+            await connection.rollback()
+        await engine.dispose()
+        engine = None
+
+        # 재-upgrade — 0083이 다시 적용되고 비파생 INSERT가 되살아난다.
+        await _upgrade(dsn, "head")
+        engine = make_async_engine(dsn)
+        async with engine.begin() as connection:
+            reupgraded = "f_global_p_shadow_reupgrade"
+            await connection.execute(
+                text(
+                    "INSERT INTO feature.features (feature_id, kind, name, category) "
+                    "VALUES (:fid, 'place', 're-upgrade', '01070100')"
+                ),
+                {"fid": reupgraded},
+            )
+            value = (
+                await connection.execute(
+                    text(
+                        "SELECT CAST(feature_uuid AS text) FROM feature.features "
+                        "WHERE feature_id = :fid"
+                    ),
+                    {"fid": reupgraded},
+                )
+            ).scalar_one()
+            _assert_nonderived_uuid_v7(value, feature_id=reupgraded)
+    finally:
+        if engine is not None:
+            await engine.dispose()
+        await _drop_database(admin_dsn, database)

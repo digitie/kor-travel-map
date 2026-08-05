@@ -34,6 +34,11 @@ def client() -> TestClient:
 
 
 def _expected_uuid(feature_id: str) -> str:
+    """mock resolver가 돌려줄 결정적 uuid — **테스트 편의 규약**이지 계약이 아니다.
+
+    0083(T-VN-32C)부터 저장 계약은 비파생 UUIDv7이다. 여기서 파생을 쓰는 건
+    DB 없는 unit에서 참조 문자열만으로 기대값을 재계산하기 위해서다.
+    """
     from kortravelmap.core.ids import feature_uuid_from_legacy
 
     return str(feature_uuid_from_legacy(feature_id))

@@ -30,11 +30,12 @@ canonical 계약 (feature-alias-map-v1)
   NFC 정규화 뒤 중복 alias는 거부한다.
 - **merkle root**: 정렬된 leaf를 이진 결합(``sha256("KTMFAMNODE\\x00"+L+R)``),
   홀수 leaf는 상위 레벨로 승격. 빈 map은 ``sha256("KTMFAMEMPTY\\x00")``.
-- **파생 검증**: ``alias_kind='legacy_feature_id'`` 행은
-  ``feature_uuid == uuid5(FEATURE_UUID_NAMESPACE, alias)``
-  (``core.ids.feature_uuid_from_legacy``)여야 한다. checksum은 저장된 값
-  위에서 계산하고, 파생 검증은 별도 함수로 분리한다 — 이관 소비자(PinVi)는
-  두 검증을 모두 통과한 map만 "검증된 alias map"으로 적용한다.
+- **검증(0083 개정)**: "검증된 alias map" = 행 shape(canonical alias/uuid/
+  closed kind — row 생성 시 강제) + merkle 재계산 일치. **행별 uuid5 파생
+  등식은 계약이 아니다** — 0083(T-VN-32C 값 전환)부터 신규 행의
+  ``feature_uuid``는 비파생 UUIDv7이고, 기존 backfill 세대의 파생값은 역사로
+  보존된다(0082 identity fence). Map 내부의 alias↔features 사본 일치는 0083
+  복합 FK가 선언적으로 보장한다. 정본 서술은 golden ``derivation.rule``.
 """
 
 from __future__ import annotations
@@ -44,8 +45,6 @@ import unicodedata
 import uuid
 from dataclasses import dataclass
 from typing import Final, Literal
-
-from kortravelmap.core.ids import feature_uuid_from_legacy
 
 __all__ = [
     "FEATURE_ALIAS_MAP_VERSION",
@@ -57,7 +56,6 @@ __all__ = [
     "validate_feature_alias",
     "validate_feature_alias_kind",
     "validate_canonical_feature_uuid",
-    "verify_legacy_alias_derivation",
 ]
 
 FEATURE_ALIAS_MAP_VERSION: Final[Literal["feature-alias-map-v1"]] = "feature-alias-map-v1"
@@ -197,17 +195,11 @@ def feature_alias_map_merkle_root(rows: list[FeatureAliasMapRowV1]) -> str:
     return level[0].hex()
 
 
-def verify_legacy_alias_derivation(row: FeatureAliasMapRowV1) -> None:
-    """``legacy_feature_id`` 행의 uuid5 파생 규칙 검증 (ADR-068·0080 CHECK 대응).
-
-    checksum은 저장된 값 위에서 계산하므로, "검증된 alias map"이 되려면 이
-    파생 검증을 **함께** 통과해야 한다. dual 기간 alias는 전부
-    ``uuid5(FEATURE_UUID_NAMESPACE, alias)`` 파생 산출이다.
-    """
-    expected = str(feature_uuid_from_legacy(row.alias))
-    if row.feature_uuid != expected:
-        raise ValueError(
-            "legacy alias 파생 불일치 — "
-            f"alias={row.alias!r}, feature_uuid={row.feature_uuid!r}, "
-            f"expected={expected!r} (ADR-068 uuid5 파생)."
-        )
+# NOTE(T-VN-32C 값 전환·0083): 종전의 행별 uuid5 파생 검증
+# (verify_legacy_alias_derivation)은 폐기됐다 — 0083부터 신규 행의
+# feature_uuid는 비파생 UUIDv7이라 파생 등식은 계약이 아니다. "검증된 alias
+# map"의 조건은 ① 행 shape(canonical alias/uuid/closed kind —
+# FeatureAliasMapRowV1 생성 시 강제), ② merkle 재계산 일치, ③ alias↔features
+# 사본 일치(0083 복합 FK가 DB 선언으로 보장)다. 기존 731,600행의 파생값은
+# 영구 보존되며(0082 identity fence) ``feature_uuid_from_legacy``는 backfill/
+# 역사 벡터 검증 참조로만 남는다 — golden ``derivation.rule`` 개정판이 정본.

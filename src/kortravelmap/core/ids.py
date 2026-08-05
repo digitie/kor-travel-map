@@ -49,6 +49,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import time
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
@@ -56,6 +58,7 @@ from typing import Any, Final
 
 __all__ = [
     "make_feature_id",
+    "make_feature_uuid",
     "make_source_record_key",
     "make_integrity_finding_key",
     "make_payload_hash",
@@ -227,12 +230,55 @@ def feature_uuid_from_legacy(feature_id: str) -> uuid.UUID:
     - DB mirror: alembic ``0079``가 만드는 IMMUTABLE SQL 함수
       ``feature.feature_uuid_from_legacy(text)`` (pgcrypto SHA-1 기반 수동
       uuid5 구성)와 결과가 동일하다. 통합 테스트가 고정 벡터로 양쪽을 대조한다.
-    - 신규 행(post-cutover, legacy id가 없는 세계)의 UUID generator(UUIDv7
-      채택 여부)는 본 함수의 소관이 아니다 — T-VN-32B가 결정한다.
+    - 신규 행의 UUID generator는 본 함수가 **아니다** — T-VN-32C(alembic
+      ``0083``)가 비파생 UUIDv7(:func:`make_feature_uuid`)로 결정했다. 본 함수는
+      0080 backfill 세대(기존 731,600행)의 값 재현·검증 참조로 존속한다.
     """
     if not feature_id:
         raise ValueError("feature_id는 비어 있을 수 없음 (ADR-068 alias 파생).")
     return uuid.uuid5(FEATURE_UUID_NAMESPACE, feature_id)
+
+
+def make_feature_uuid(*, _now_ms: int | None = None) -> uuid.UUID:
+    """신규 feature의 **비파생** 정본 UUID를 생성한다 (RFC 9562 UUIDv7).
+
+    T-VN-32C 값 전환(0083)부터 신규 행의 ``feature_uuid``는 legacy id 파생
+    (:func:`feature_uuid_from_legacy`)이 아니라 본 함수 산출이다 — ADR-068
+    결정 1("애플리케이션이 생성하는 UUID surrogate", UUIDv7 채택 시 생성기
+    고정)의 그 생성기다.
+
+    설계 고정:
+
+    - **버전 v7**: 상위 48bit = Unix epoch milliseconds, 이후 version(7)·
+      variant(0b10) 비트, 나머지 74bit 난수. 시간 정렬성은 **내부 인덱스
+      지역성 용도로만** 쓰며 API 계약으로 노출하지 않는다(UUID는 opaque
+      string — ADR-068 결정 3).
+    - DB mirror: alembic ``0083``의 ``feature.uuid_generate_v7()``(raw SQL
+      경로 fill 트리거용 안전망)과 같은 v7 레이아웃 — 통합 테스트가 version/
+      variant 비트 동일성을 대조한다.
+    - 기존 행의 파생 uuid는 영구 보존된다(0082 identity fence) — 본 함수는
+      신규 행 전용이고 :func:`feature_uuid_from_legacy`는 backfill/검증
+      참조용으로 존속한다.
+
+    Parameters
+    ----------
+    _now_ms
+        테스트 전용 밀리초 타임스탬프 주입 (기본: 현재 시각).
+    """
+    now_ms = int(time.time() * 1000) if _now_ms is None else _now_ms
+    if now_ms < 0 or now_ms >= 1 << 48:
+        raise ValueError("UUIDv7 timestamp가 48bit 범위를 벗어남")
+    rand = int.from_bytes(os.urandom(10), "big")  # 80bit 난수 확보
+    rand_a = (rand >> 68) & 0x0FFF  # 12bit
+    rand_b = rand & ((1 << 62) - 1)  # 62bit
+    value = (
+        (now_ms << 80)
+        | (0x7 << 76)  # version 7
+        | (rand_a << 64)
+        | (0b10 << 62)  # variant RFC 4122/9562
+        | rand_b
+    )
+    return uuid.UUID(int=value)
 
 
 SOURCE_RECORD_KEY_HASH_LENGTH: Final[int] = 20

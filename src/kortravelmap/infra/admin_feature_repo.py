@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any, Final, Literal
 from sqlalchemy import text
 
 from kortravelmap.infra.feature_identity import (
-    expected_feature_uuid,
+    candidate_feature_uuid,
     verify_feature_uuid,
 )
 from kortravelmap.infra.merge_repo import (
@@ -2404,8 +2404,8 @@ def _add_params(
     return {
         "request_id": request_id,
         "feature_id": feature_id,
-        # T-VN-32B writer 원자 생성 — dual 기간 정본 generator(uuid5 파생).
-        "feature_uuid": expected_feature_uuid(feature_id),
+        # T-VN-32C 정본 generator — 비파생 UUIDv7 후보(conflict 시 기존값 정본).
+        "feature_uuid": candidate_feature_uuid(),
         "kind": payload["kind"],
         "name": payload["name"],
         "category": payload["category"],
@@ -2518,7 +2518,8 @@ async def _apply_change(
             )
         ).mappings().first()
         if row is not None:
-            # T-VN-32B fail-close — legacy-only(uuid 결측/파생 불일치) 신규 행 차단.
+            # T-VN-32C fail-close — legacy-only(uuid 결측/비정규) 행 차단.
+            # 이 경로는 RETURNING에 xmax 관측이 없어 canonical 검증만 수행한다.
             verify_feature_uuid(request.feature_id, row["feature_uuid"])
     elif request.action == "update":
         row = (

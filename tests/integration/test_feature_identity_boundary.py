@@ -1,6 +1,6 @@
-"""``infra/feature_identity`` + dual read 경계 (T-VN-32B, ADR-068) 통합 검증.
+"""``infra/feature_identity`` + dual read 경계 (T-VN-32B/32C, ADR-068) 통합 검증.
 
-alembic head(0080 포함)가 적용된 실 PostGIS에서:
+alembic head(0083 포함)가 적용된 실 PostGIS에서:
 
 ① 경계 alias 해석 — legacy ``f_*`` alias·canonical UUID 양쪽 참조가 같은
    정본 키 쌍으로 해석되고, 미존재는 ``None``, 형식 오류는 fail-fast.
@@ -8,12 +8,15 @@ alembic head(0080 포함)가 적용된 실 PostGIS에서:
    ``feature_uuid``를 UUID 정본 병행(additive)으로 노출한다
    (0080이 ``public_features`` view에 컬럼을 재고정).
 ③ 신규 write 원자성 — provider upsert(writer 명시 생성)와 admin add SQL이
-   같은 transaction에서 uuid + legacy alias를 만들고, 파생 규칙과 다르면
-   fail-close한다. ``count_features_missing_identity``는 alias 결측을 관측한다.
+   같은 transaction에서 uuid + legacy alias를 만든다. **0083부터 신규 값은
+   비파생 UUIDv7**이므로 기대값은 파생 재계산이 아니라 **저장/관측값**이고,
+   writer는 ``verify_feature_uuid``로 canonical·generator 이원화를 fail-close
+   한다. ``count_features_missing_identity``는 alias 결측을 관측한다.
 """
 
 from __future__ import annotations
 
+import uuid as uuid_module
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
@@ -104,6 +107,45 @@ def _place_bundle(feature_id: str, *, name: str = "identity 검증 장소") -> F
     )
 
 
+async def _stored_feature_uuid(session: AsyncSession, feature_id: str) -> str:
+    """정본(features)에 저장된 ``feature_uuid``.
+
+    0083 이후 신규 행의 값은 비파생 v7이라 파생 재계산으로는 알 수 없다 —
+    read 표면의 기대값은 전부 이 저장값이 기준이다.
+    """
+    return str(
+        (
+            await session.execute(
+                text(
+                    "SELECT CAST(feature_uuid AS text) FROM feature.features "
+                    "WHERE feature_id = :fid"
+                ),
+                {"fid": feature_id},
+            )
+        ).scalar_one()
+    )
+
+
+def _sqlstate(error: BaseException) -> str | None:
+    """DBAPIError에서 PostgreSQL SQLSTATE를 꺼낸다 (driver 표기 차이 흡수)."""
+    for candidate in (getattr(error, "orig", None), error):
+        for attribute in ("sqlstate", "pgcode"):
+            value = getattr(candidate, attribute, None)
+            if value:
+                return str(value)
+    return None
+
+
+def _assert_nonderived_uuid_v7(value: str, *, feature_id: str) -> str:
+    """0083 신규 행 정본 형태 — canonical UUIDv7이고 legacy 파생값이 아니다."""
+    parsed = uuid_module.UUID(value)
+    assert str(parsed) == value
+    assert parsed.version == 7
+    assert parsed.variant == uuid_module.RFC_4122
+    assert value != str(feature_uuid_from_legacy(feature_id))
+    return value
+
+
 # ── ① 경계 alias 해석 ───────────────────────────────────────────────────────
 
 
@@ -112,7 +154,9 @@ async def test_resolve_feature_identity_accepts_legacy_and_uuid_refs(
 ) -> None:
     feature_id = "f_1100000000_p_idboundary0001"
     await feature_repo.load_bundle(migrated_session, _place_bundle(feature_id))
-    expected_uuid = str(feature_uuid_from_legacy(feature_id))
+    expected_uuid = _assert_nonderived_uuid_v7(
+        await _stored_feature_uuid(migrated_session, feature_id), feature_id=feature_id
+    )
 
     by_legacy = await feature_identity.resolve_feature_identity(
         migrated_session, feature_id
@@ -164,7 +208,9 @@ async def test_reads_expose_feature_uuid_additively(
 ) -> None:
     feature_id = "f_1100000000_p_idboundary0002"
     await feature_repo.load_bundle(migrated_session, _place_bundle(feature_id))
-    expected_uuid = str(feature_uuid_from_legacy(feature_id))
+    expected_uuid = _assert_nonderived_uuid_v7(
+        await _stored_feature_uuid(migrated_session, feature_id), feature_id=feature_id
+    )
 
     # 0080 — 공개 view가 feature_uuid 컬럼을 노출한다.
     view_uuid = (
@@ -231,7 +277,9 @@ async def test_notice_lineage_read_exposes_uuid_pairs(
             source_link=bundle.source_link,
         )
     )
-    expected_uuid = str(feature_uuid_from_legacy(feature_id))
+    expected_uuid = _assert_nonderived_uuid_v7(
+        await _stored_feature_uuid(migrated_session, feature_id), feature_id=feature_id
+    )
 
     identities = await feature_repo.public_active_notice_feature_identities(
         migrated_session, [feature_id, "f_global_n_missing000000000"]
@@ -247,7 +295,9 @@ async def test_upsert_writes_uuid_and_alias_atomically(
 ) -> None:
     feature_id = "f_1100000000_p_idboundary0004"
     await feature_repo.load_bundle(migrated_session, _place_bundle(feature_id))
-    expected_uuid = str(feature_uuid_from_legacy(feature_id))
+    expected_uuid = _assert_nonderived_uuid_v7(
+        await _stored_feature_uuid(migrated_session, feature_id), feature_id=feature_id
+    )
 
     pair = (
         await migrated_session.execute(
@@ -265,8 +315,11 @@ async def test_upsert_writes_uuid_and_alias_atomically(
     assert pair.alias == feature_id
     assert pair.alias_kind == "legacy_feature_id"
 
-    # 재적재(idempotent upsert)도 fail-close 검증을 통과한다(동일 파생값).
+    # 재적재(idempotent upsert)는 새 v7 후보를 바인드하지만 ON CONFLICT 경로에서
+    # 버려진다 — verify_feature_uuid(inserted=False)가 기존 저장값을 정본으로
+    # 받아들여야 fail-close하지 않는다(32C 값 전환의 핵심 회귀).
     await feature_repo.load_bundle(migrated_session, _place_bundle(feature_id))
+    assert await _stored_feature_uuid(migrated_session, feature_id) == expected_uuid
 
     missing_uuid, missing_alias = await feature_identity.count_features_missing_identity(
         migrated_session
@@ -278,24 +331,27 @@ async def test_admin_add_sql_writes_uuid_and_alias(
     migrated_session: AsyncSession,
 ) -> None:
     feature_id = "f_1100000000_p_idboundary0005"
+    # 후보는 호출마다 달라지므로 바인드한 params를 그대로 붙잡아 대조한다
+    # (0083 정본 generator = candidate_feature_uuid → 비파생 v7).
+    params = _add_params(
+        request_id="00000000-0000-4000-8000-000000000001",
+        feature_id=feature_id,
+        payload={
+            "kind": "place",
+            "name": "admin add 장소",
+            "category": "01070100",
+            "marker_icon": "star",
+            "marker_color": "P-03",
+        },
+        reason="T-VN-32C 검증",
+    )
+    sent = _assert_nonderived_uuid_v7(params["feature_uuid"], feature_id=feature_id)
     row = (
-        await migrated_session.execute(
-            text(_APPLY_FEATURE_ADD_SQL),
-            _add_params(
-                request_id="00000000-0000-4000-8000-000000000001",
-                feature_id=feature_id,
-                payload={
-                    "kind": "place",
-                    "name": "admin add 장소",
-                    "category": "01070100",
-                    "marker_icon": "star",
-                    "marker_color": "P-03",
-                },
-                reason="T-VN-32B 검증",
-            ),
-        )
+        await migrated_session.execute(text(_APPLY_FEATURE_ADD_SQL), params)
     ).mappings().one()
-    assert row["feature_uuid"] == str(feature_uuid_from_legacy(feature_id))
+    # RETURNING 관측값 == 보낸 후보 == 저장값 (트리거가 바꿔치기하지 않는다).
+    assert row["feature_uuid"] == sent
+    assert await _stored_feature_uuid(migrated_session, feature_id) == sent
 
     alias = (
         await migrated_session.execute(
@@ -307,43 +363,42 @@ async def test_admin_add_sql_writes_uuid_and_alias(
         )
     ).one()
     assert alias.alias_kind == "legacy_feature_id"
-    assert alias.feature_uuid == str(feature_uuid_from_legacy(feature_id))
+    assert alias.feature_uuid == sent
 
 
-async def test_dual_derivation_check_rejects_drifted_alias_uuid(
+async def test_alias_uuid_drift_is_rejected_layer_by_layer(
     migrated_session: AsyncSession,
 ) -> None:
-    """alias 파생 drift는 계층별로 거부된다 (T-VN-32C 0081로 재정의).
+    """alias uuid drift는 계층별로 거부된다 (0083 재정의).
 
-    32B 원판은 UPDATE drift가 0080 CHECK에 걸리는 것을 관측했지만, 0081 legacy
-    write fence가 alias UPDATE 자체를 전면 거부하므로(더 강한 fail-close) 이제
-    UPDATE 경로는 fence가 먼저 선다. 파생 CHECK
-    (``ck_feature_aliases_uuid_dual_derivation``)의 관측은 fence가 막지 않는
-    INSERT 경로(신규 alias 행의 drifted 파생 사본)로 유지한다 — 32C alias-map
-    DB-to-DB 이관의 무결성 전제(fail-close by construction).
+    32B 원판은 UPDATE drift가 파생 CHECK에 걸리는 것을 관측했지만, 0082 legacy
+    write fence가 alias UPDATE 자체를 전면 거부하므로(더 강한 fail-close) UPDATE
+    경로는 fence가 먼저 선다. 0083이 파생 CHECK 2종을 해제한 뒤 INSERT 경로의
+    축은 둘로 갈린다:
+
+    - ``alias ≠ feature_id`` → ``ck_feature_aliases_legacy_identity`` (23514).
+      파생 CHECK가 사라져 **이름이 결정적**이므로 alternation 없이 단언한다.
+    - ``alias = feature_id``지만 uuid 사본 불일치 → 복합 FK
+      ``fk_feature_aliases_identity_pair`` (23503) — 축별 실측은
+      ``test_legacy_write_fence``/``test_feature_uuid_shadow_migration`` 소관.
     """
     from sqlalchemy.exc import DBAPIError
 
     feature_id = "f_1100000000_p_idboundary0007"
     await feature_repo.load_bundle(migrated_session, _place_bundle(feature_id))
-    # ① UPDATE drift — 0081 fence가 불변 계약으로 먼저 거부한다.
+    # ① UPDATE drift — 0082 fence가 불변 계약으로 먼저 거부한다.
     with pytest.raises(DBAPIError) as fence_error:
         async with migrated_session.begin_nested():
             await migrated_session.execute(
                 text(
                     "UPDATE feature.feature_aliases "
-                    "SET feature_uuid = CAST('00000000-0000-4000-8000-0000000000ff' AS uuid) "
+                    "SET feature_uuid = CAST('00000000-0000-7000-8000-0000000000ff' AS uuid) "
                     "WHERE alias = :fid"
                 ),
                 {"fid": feature_id},
             )
     assert "legacy write fence" in str(fence_error.value)
-    # ② INSERT drift — 파생 규칙/identity CHECK가 저장 경계에서 거부한다.
-    #    (alias ≠ feature_id인 행은 재축된 파생 CHECK와 legacy identity CHECK를
-    #    모두 위반한다 — 어느 이름이 보고되는지는 PG 내부 순서 소관이라 대안
-    #    일치로 단언한다. 독성 행 축별 단정은 test_legacy_write_fence 소관.)
-    import re
-
+    # ② INSERT drift — legacy identity CHECK가 저장 경계에서 단독으로 거부한다.
     with pytest.raises(DBAPIError) as check_error:
         async with migrated_session.begin_nested():
             await migrated_session.execute(
@@ -351,15 +406,15 @@ async def test_dual_derivation_check_rejects_drifted_alias_uuid(
                     "INSERT INTO feature.feature_aliases "
                     "(alias, feature_id, feature_uuid, alias_kind) VALUES "
                     "(:alias, :fid, "
-                    "CAST('00000000-0000-4000-8000-0000000000ff' AS uuid), "
+                    "CAST('00000000-0000-7000-8000-0000000000ff' AS uuid), "
                     "'legacy_feature_id')"
                 ),
                 {"alias": f"{feature_id}-drift-probe", "fid": feature_id},
             )
-    assert re.search(
-        r"ck_feature_aliases_(uuid_dual_derivation|legacy_identity)",
-        str(check_error.value),
-    )
+    assert "ck_feature_aliases_legacy_identity" in str(check_error.value)
+    assert _sqlstate(check_error.value) == "23514"
+    # 파생 CHECK는 0083에서 해제됐다 — 이름이 다시 등장하면 회귀다.
+    assert "dual_derivation" not in str(check_error.value)
 
 
 async def test_missing_alias_is_observed_by_identity_invariant(

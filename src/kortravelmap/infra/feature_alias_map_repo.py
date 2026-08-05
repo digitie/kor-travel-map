@@ -28,7 +28,6 @@ from sqlalchemy import text
 from kortravelmap.core.feature_alias_map import (
     FeatureAliasMapRowV1,
     feature_alias_map_merkle_root,
-    verify_legacy_alias_derivation,
 )
 
 if TYPE_CHECKING:
@@ -92,11 +91,11 @@ def _canonical_row(alias: object, feature_uuid: object, alias_kind: object) -> F
             feature_uuid=str(feature_uuid),
             alias_kind=str(alias_kind),
         )
-        verify_legacy_alias_derivation(row)
     except ValueError as exc:
         raise FeatureAliasMapIntegrityError(
-            "alias-map 행이 canonical/파생 계약을 위반했습니다 — DB 층 보장 "
-            f"(0079/0080/0081)이 뚫린 상태이므로 이관을 중단합니다: {exc}"
+            "alias-map 행이 canonical 계약을 위반했습니다 — DB 층 보장"
+            "(0080~0083: canonical CHECK·복합 FK 사본 일치)이 뚫린 상태이므로 "
+            f"이관을 중단합니다: {exc}"
         ) from exc
     return row
 

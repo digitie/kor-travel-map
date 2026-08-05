@@ -323,21 +323,19 @@ class FeatureRow(Base):
             postgresql_where=text("user_deleted_at IS NOT NULL"),
         ),
         UniqueConstraint("feature_uuid", name=conv("uq_features_feature_uuid")),
-        # T-VN-32B dual 기간 파생 규칙 fence (alembic 0080) — legacy id가 존재하는
-        # 동안 합법 UUID는 uuid5 파생값 하나뿐이다. 32C cutover에서 제거.
-        CheckConstraint(
-            "feature_uuid = feature.feature_uuid_from_legacy(feature_id)",
-            name=conv("ck_features_feature_uuid_dual_derivation"),
+        # T-VN-32C(0083) — 파생 CHECK는 해제됐고(비파생 UUIDv7 generator),
+        # 복합 UNIQUE가 alias 사본 일치 FK의 참조 대상이 된다.
+        UniqueConstraint(
+            "feature_id", "feature_uuid", name=conv("uq_features_identity_pair")
         ),
         {"schema": "feature"},
     )
 
     feature_id: Mapped[str] = mapped_column(String, primary_key=True)
-    # T-VN-32A(ADR-068) UUID identity shadow — legacy id의 결정적 파생값
-    # uuid5(FEATURE_UUID_NAMESPACE, feature_id) (core/ids.feature_uuid_from_legacy).
-    # DB server default 없음(freeze 미정 존중 — 신규 행 정본 generator는 T-VN-32B
-    # 소관). 신규 INSERT는 0079의 BEFORE INSERT 트리거
-    # trg_features_feature_uuid_fill이 NULL일 때 파생값으로 채운다.
+    # ADR-068 UUID 정본 identity — 기존 행은 0080 backfill의 uuid5 파생값을
+    # 영구 보존하고, 신규 행은 0083부터 비파생 UUIDv7
+    # (app 정본 core/ids.make_feature_uuid, raw SQL 안전망은 fill 트리거의
+    # feature.uuid_generate_v7()). DB server default 없음.
     feature_uuid: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
     kind: Mapped[str] = mapped_column(String, nullable=False)
     name: Mapped[str] = mapped_column(String, nullable=False)
@@ -478,12 +476,12 @@ class FeatureAliasRow(Base):
             "alias_kind IN ('legacy_feature_id')",
             name=conv("ck_feature_aliases_alias_kind"),
         ),
-        # T-VN-32B dual 기간 파생 규칙 fence (alembic 0080) — 32C alias-map
-        # DB-to-DB 이관의 무결성 전제. 32C cutover에서 제거. 파생 축은
-        # **alias**(checksum 계약과 동일 축 — 32C 적대 리뷰 H1 재축).
-        CheckConstraint(
-            "feature_uuid = feature.feature_uuid_from_legacy(alias)",
-            name=conv("ck_feature_aliases_uuid_dual_derivation"),
+        # T-VN-32C(0083) — 파생 CHECK 해제 후의 선언적 사본 일치: alias 행의
+        # (feature_id, feature_uuid)는 정본 행의 쌍과 정확히 같아야 한다.
+        ForeignKeyConstraint(
+            ["feature_id", "feature_uuid"],
+            ["feature.features.feature_id", "feature.features.feature_uuid"],
+            name=conv("fk_feature_aliases_identity_pair"),
         ),
         # 닫힌 kind 기간의 실질 불변식 — legacy alias는 자기 자신 (H1).
         CheckConstraint(
