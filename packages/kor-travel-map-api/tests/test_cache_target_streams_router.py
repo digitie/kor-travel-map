@@ -1610,10 +1610,12 @@ def test_cache_target_principal_registry_rejects_duplicate_token_digest() -> Non
         {
             "ops_read_token": COMMAND_TOKEN,
             "ops_cancel_token": "distinct-ops-cancel-token-000000000000000000",
+            "ops_fixture_token": "distinct-ops-fixture-token-00000000000000000",
         },
         {
             "ops_read_token": "distinct-ops-read-token-00000000000000000000",
             "ops_cancel_token": COMMAND_TOKEN,
+            "ops_fixture_token": "distinct-ops-fixture-token-00000000000000000",
         },
     ],
 )
