@@ -574,7 +574,7 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 > fixture 생성·소비·종결과 durable 상태는 Map이 소유하고, Manager는 service OpenAPI로
 > transaction ID만 전달한다. PinVi에는 기존 `ops:cancel` 외 권한을 주지 않는다(ADR-084).
 
-- [ ] **T-VN-41F1J-A — Map fixture schema·service API·격리**
+- [/] **T-VN-41F1J-A — Map fixture schema·service API·격리**
 
   `ops.c6c_cancel_probe_fixtures`와 fixture 전용 repository/서비스 API를 추가한다. Map이
   transaction ID마다 running/no-Dagster-run import job을 멱등 생성하고, 일반 PinVi 취소가
@@ -583,6 +583,7 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   Docker Manager와 Map API에만 결박하며, Map/PinVi compatible pair capability generation을
   fail-closed로 검증한다. 세부 계약은
   [`architecture/c6c-cancel-probe-fixture.md`](architecture/c6c-cancel-probe-fixture.md)이다.
+  구현·DB/API 검증은 완료했고, 적대적 코드 리뷰 1인과 PR/머지만 남았다.
 
 - [ ] **T-VN-41F1J-B — Manager dynamic fixture orchestration** *(docker-manager 소유)*
 

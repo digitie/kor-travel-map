@@ -38,6 +38,7 @@ _CURSOR_SIGNING_PROTECTED_FIELDS = (
     ("service token", "service_token"),
     ("ops read token", "ops_read_token"),
     ("ops cancel token", "ops_cancel_token"),
+    ("ops fixture token", "ops_fixture_token"),
     ("metrics token", "metrics_token"),
     ("public API key", "vworld_api_key"),
 )
@@ -83,9 +84,7 @@ _CACHE_TARGET_SERVICE_ROLE_SCOPES: dict[
         }
     ),
     "restore": frozenset({"cache-target:restore-fence"}),
-    "recovery": frozenset(
-        {"cache-target:recovery", "cache-target:recovery-replay"}
-    ),
+    "recovery": frozenset({"cache-target:recovery", "cache-target:recovery-replay"}),
 }
 _CACHE_TARGET_SERVICE_SCOPES_ROLE: dict[
     frozenset[CacheTargetServiceScope],
@@ -112,8 +111,7 @@ class CacheTargetServicePrincipalSetting(BaseModel):
         min_length=64,
         max_length=64,
         description=(
-            "원문 service token의 lowercase SHA-256 hex. 원문 token은 설정에 저장하지 "
-            "않는다."
+            "원문 service token의 lowercase SHA-256 hex. 원문 token은 설정에 저장하지 않는다."
         ),
     )
     scopes: list[CacheTargetServiceScope] = Field(
@@ -139,9 +137,7 @@ class CacheTargetServicePrincipalSetting(BaseModel):
     @classmethod
     def _validate_token_sha256(cls, value: str) -> str:
         if _LOWER_SHA256_HEX_PATTERN.fullmatch(value) is None:
-            raise ValueError(
-                "cache target service token digest must be lowercase SHA-256 hex"
-            )
+            raise ValueError("cache target service token digest must be lowercase SHA-256 hex")
         return value
 
     @field_validator("scopes")
@@ -154,13 +150,9 @@ class CacheTargetServicePrincipalSetting(BaseModel):
             raise ValueError("cache target service scopes must be unique")
         unknown = set(value) - _CACHE_TARGET_SERVICE_SCOPES
         if unknown:
-            raise ValueError(
-                "unknown cache target service scopes: " + ", ".join(sorted(unknown))
-            )
+            raise ValueError("unknown cache target service scopes: " + ", ".join(sorted(unknown)))
         if frozenset(value) not in _CACHE_TARGET_SERVICE_SCOPES_ROLE:
-            raise ValueError(
-                "cache target service scopes must match one exact role profile"
-            )
+            raise ValueError("cache target service scopes must match one exact role profile")
         return value
 
     @field_validator("external_systems")
@@ -240,9 +232,7 @@ def _cursor_signing_secret_distinct_problems(
             problems.append(str(exc))
             continue
         if protected_raw is not None and cursor_secret == protected_raw:
-            problems.append(
-                f"cursor signing secret must be distinct from {protected_name}"
-            )
+            problems.append(f"cursor signing secret must be distinct from {protected_name}")
     return problems
 
 
@@ -281,10 +271,7 @@ class ApiSettings(BaseSettings):
     )
     port: int = Field(
         default=12701,
-        description=(
-            "FastAPI bind port. 기본 12701 "
-            "(kor-travel-docker-manager map API 포트)."
-        ),
+        description=("FastAPI bind port. 기본 12701 (kor-travel-docker-manager map API 포트)."),
     )
     log_level: str = Field(
         default="info",
@@ -340,8 +327,7 @@ class ApiSettings(BaseSettings):
     api_call_log_enabled: bool = Field(
         default=False,
         description=(
-            "True면 모든 API 호출을 ops.api_call_log에 best-effort 기록"
-            "(opt-in, 기본 off)."
+            "True면 모든 API 호출을 ops.api_call_log에 best-effort 기록(opt-in, 기본 off)."
         ),
     )
     prometheus_metrics_enabled: bool = Field(
@@ -463,11 +449,20 @@ class ApiSettings(BaseSettings):
             "policy, update-request 등 다른 mutation 권한을 부여하지 않는다."
         ),
     )
+    ops_fixture_token: SecretStr | None = Field(
+        default=None,
+        validation_alias="KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN",
+        description=(
+            "Docker Manager가 C6c cancel-probe fixture lifecycle endpoint만 호출할 "
+            "때 쓰는 API-only token. PinVi의 read/cancel token, admin BFF secret, "
+            "public service token과 모두 달라야 한다."
+        ),
+    )
     ops_principal_required: bool = Field(
         default=False,
         description=(
-            "True면 API startup에 read/cancel token 쌍을 필수로 요구한다. 로컬은 "
-            "False로 principal을 끌 수 있고 n150 production은 True를 주입한다."
+            "True면 API startup에 read/cancel/fixture token set을 필수로 요구한다. "
+            "로컬은 False로 principal을 끌 수 있고 n150 production은 True를 주입한다."
         ),
     )
     legacy_ops_actor: str | None = Field(
@@ -510,11 +505,19 @@ class ApiSettings(BaseSettings):
             "ops_cancel_token",
             "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN",
         )
-        if (read is missing) != (cancel is missing):
+        fixture = _input_value(
+            "ops_fixture_token",
+            "KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN",
+        )
+        tokens = (read, cancel, fixture)
+        if any(token is missing for token in tokens) and any(
+            token is not missing for token in tokens
+        ):
             # docker/api-entrypoint.sh와 동일 문구 (issue #742 lockstep).
             raise ValueError(
-                "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN and "
-                "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN must be configured together"
+                "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN, "
+                "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN, and "
+                "KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN must be configured together"
             )
         if read is missing:
             return data
@@ -529,13 +532,14 @@ class ApiSettings(BaseSettings):
 
         read_kind = _input_kind(read)
         cancel_kind = _input_kind(cancel)
-        if read_kind != cancel_kind:
+        fixture_kind = _input_kind(fixture)
+        if len({read_kind, cancel_kind, fixture_kind}) != 1:
             raise ValueError(
-                "ops read and cancel tokens must both be empty or both be non-empty"
+                "ops read, cancel, and fixture tokens must all be empty or all be non-empty"
             )
         return data
 
-    @field_validator("ops_read_token", "ops_cancel_token", mode="before")
+    @field_validator("ops_read_token", "ops_cancel_token", "ops_fixture_token", mode="before")
     @classmethod
     def _validate_ops_token_shape(cls, value: object) -> object:
         """빈 optional 값은 끄고, 활성 secret은 공백 없는 32자 이상으로 제한한다."""
@@ -549,8 +553,7 @@ class ApiSettings(BaseSettings):
             return None
         if any(character.isspace() for character in raw) or len(raw) < 32:
             raise ValueError(
-                "ops token must be non-empty, at least 32 characters, "
-                "and contain no whitespace"
+                "ops token must be non-empty, at least 32 characters, and contain no whitespace"
             )
         return value
 
@@ -591,38 +594,41 @@ class ApiSettings(BaseSettings):
         return value
 
     @model_validator(mode="after")
-    def _validate_ops_principal_pair(self) -> ApiSettings:
-        """C6c principal은 read/cancel secret을 한 쌍으로만 활성화한다."""
+    def _validate_ops_principal_set(self) -> ApiSettings:
+        """C6c principal은 read/cancel/fixture secret set으로만 활성화한다."""
 
         read = self.ops_read_token
         cancel = self.ops_cancel_token
+        fixture = self.ops_fixture_token
         if self.legacy_ops_actor is not None:
+            raise ValueError("KOR_TRAVEL_MAP_API_OPS_ACTOR was removed; the audit actor is fixed")
+        if len({read is None, cancel is None, fixture is None}) != 1:
             raise ValueError(
-                "KOR_TRAVEL_MAP_API_OPS_ACTOR was removed; the audit actor is fixed"
+                "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN, "
+                "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN, and "
+                "KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN must be configured together"
             )
-        if (read is None) != (cancel is None):
+        if self.ops_principal_required and (read is None or cancel is None or fixture is None):
             raise ValueError(
-                "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN and "
-                "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN must be configured together"
+                "ops principal is required but read/cancel/fixture tokens are not configured"
             )
-        if self.ops_principal_required and (read is None or cancel is None):
-            raise ValueError(
-                "ops principal is required but read/cancel tokens are not configured"
-            )
-        if (
-            read is not None
-            and cancel is not None
-            and read.get_secret_value() == cancel.get_secret_value()
-        ):
-            raise ValueError("ops read and cancel tokens must be distinct")
+        enabled_tokens = {
+            "ops read token": read,
+            "ops cancel token": cancel,
+            "ops fixture token": fixture,
+        }
+        raw_enabled_tokens = {
+            name: token.get_secret_value()
+            for name, token in enabled_tokens.items()
+            if token is not None
+        }
+        if len(raw_enabled_tokens) != len(set(raw_enabled_tokens.values())):
+            raise ValueError("ops read, cancel, and fixture tokens must be distinct")
         protected_secrets = {
             "admin proxy secret": self.admin_proxy_secret,
             "service token": self.service_token,
         }
-        for ops_name, ops_token in (
-            ("ops read token", read),
-            ("ops cancel token", cancel),
-        ):
+        for ops_name, ops_token in enabled_tokens.items():
             if ops_token is None:
                 continue
             raw_ops_token = ops_token.get_secret_value()
@@ -631,9 +637,7 @@ class ApiSettings(BaseSettings):
                     protected_secret is not None
                     and raw_ops_token == protected_secret.get_secret_value()
                 ):
-                    raise ValueError(
-                        f"{ops_name} must be distinct from {protected_name}"
-                    )
+                    raise ValueError(f"{ops_name} must be distinct from {protected_name}")
         return self
 
     @model_validator(mode="after")
@@ -648,23 +652,20 @@ class ApiSettings(BaseSettings):
             ("service token", self.service_token),
             ("ops read token", self.ops_read_token),
             ("ops cancel token", self.ops_cancel_token),
+            ("ops fixture token", self.ops_fixture_token),
         ):
             if (
                 protected_secret is not None
                 and raw_metrics_token == protected_secret.get_secret_value()
             ):
-                raise ValueError(
-                    f"metrics token must be distinct from {protected_name}"
-                )
+                raise ValueError(f"metrics token must be distinct from {protected_name}")
         return self
 
     @model_validator(mode="after")
     def _validate_cursor_signing_secret_distinct(self) -> ApiSettings:
         """Cursor HMAC key를 인증·scrape trust boundary secret과 분리한다."""
 
-        raw_cursor_secret = _validated_cursor_signing_secret(
-            self.cursor_signing_secret
-        )
+        raw_cursor_secret = _validated_cursor_signing_secret(self.cursor_signing_secret)
         problems = _cursor_signing_secret_distinct_problems(
             raw_cursor_secret,
             _cursor_signing_protected_secrets(self),
@@ -689,13 +690,9 @@ class ApiSettings(BaseSettings):
         external_system_owners: dict[str, tuple[str, tuple[str, ...]]] = {}
         for principal in self.cache_target_service_principals:
             if principal.token_sha256 in digests:
-                raise ValueError(
-                    "cache target service token digests must be unique"
-                )
+                raise ValueError("cache target service token digests must be unique")
             if principal.principal_id in principal_ids:
-                raise ValueError(
-                    "cache target service principal_id values must be unique"
-                )
+                raise ValueError("cache target service principal_id values must be unique")
             role = _CACHE_TARGET_SERVICE_SCOPES_ROLE[frozenset(principal.scopes)]
             external_systems = tuple(principal.external_systems)
             existing_consumer_binding = consumer_binding_owners.setdefault(
@@ -721,8 +718,7 @@ class ApiSettings(BaseSettings):
             binding_roles = roles_by_binding.setdefault(binding, set())
             if role in binding_roles:
                 raise ValueError(
-                    "cache target service binding role must have exactly one principal: "
-                    f"{role}"
+                    f"cache target service binding role must have exactly one principal: {role}"
                 )
             digests.add(principal.token_sha256)
             principal_ids.add(principal.principal_id)
@@ -741,6 +737,7 @@ class ApiSettings(BaseSettings):
             "service token": self.service_token,
             "ops read token": self.ops_read_token,
             "ops cancel token": self.ops_cancel_token,
+            "ops fixture token": self.ops_fixture_token,
             "metrics token": self.metrics_token,
             "cursor signing secret": self.cursor_signing_secret,
             "public API key": self.vworld_api_key,
@@ -752,13 +749,10 @@ class ApiSettings(BaseSettings):
             )
             if protected_raw is None:
                 continue
-            protected_digest = hashlib.sha256(
-                protected_raw.encode("utf-8")
-            ).hexdigest()
+            protected_digest = hashlib.sha256(protected_raw.encode("utf-8")).hexdigest()
             if protected_digest in digests:
                 raise ValueError(
-                    "cache target service token digest must be distinct from "
-                    f"{protected_name}"
+                    f"cache target service token digest must be distinct from {protected_name}"
                 )
         return self
 
@@ -766,9 +760,7 @@ class ApiSettings(BaseSettings):
     def cursor_signing_key(self) -> bytes:
         """설정된 cursor HMAC key 또는 local-dev process-local fallback."""
 
-        raw_cursor_secret = _validated_cursor_signing_secret(
-            self.cursor_signing_secret
-        )
+        raw_cursor_secret = _validated_cursor_signing_secret(self.cursor_signing_secret)
         if raw_cursor_secret is None:
             return _LOCAL_DEV_CURSOR_SIGNING_KEY
         return raw_cursor_secret.encode("utf-8")
@@ -820,8 +812,7 @@ class ApiSettings(BaseSettings):
     dagster_graphql_url: str | None = Field(
         default=None,
         description=(
-            "Dagster GraphQL endpoint override. 미설정이면 "
-            "``{dagster_url}/graphql``로 계산한다."
+            "Dagster GraphQL endpoint override. 미설정이면 ``{dagster_url}/graphql``로 계산한다."
         ),
     )
     dagster_allowed_hosts: list[str] = Field(
@@ -936,8 +927,7 @@ class ApiSettings(BaseSettings):
     backup_command_enabled: bool = Field(
         default=False,
         description=(
-            "True면 /admin/backups command execution을 허용한다. 기본 False는 "
-            "plan-only 모드."
+            "True면 /admin/backups command execution을 허용한다. 기본 False는 plan-only 모드."
         ),
     )
     backup_command_timeout_seconds: float = Field(
@@ -999,9 +989,7 @@ class ApiSettings(BaseSettings):
 
         cursor_secret_raw: str | None = None
         try:
-            cursor_secret_raw = _validated_cursor_signing_secret(
-                self.cursor_signing_secret
-            )
+            cursor_secret_raw = _validated_cursor_signing_secret(self.cursor_signing_secret)
         except ValueError as exc:
             problems.append(str(exc))
         else:
@@ -1014,9 +1002,7 @@ class ApiSettings(BaseSettings):
 
         if not self.is_production:
             if problems:
-                raise ValueError(
-                    "runtime settings are invalid: " + "; ".join(problems)
-                )
+                raise ValueError("runtime settings are invalid: " + "; ".join(problems))
             return
 
         admin_secret: str | None = None
@@ -1034,11 +1020,14 @@ class ApiSettings(BaseSettings):
             )
 
         if self.resolved_ops_routes_enabled and (
-            self.ops_read_token is None or self.ops_cancel_token is None
+            self.ops_read_token is None
+            or self.ops_cancel_token is None
+            or self.ops_fixture_token is None
         ):
             problems.append(
-                "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN and "
-                "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN must be configured while "
+                "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN, "
+                "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN, and "
+                "KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN must be configured while "
                 "the ops surface is enabled"
             )
 
@@ -1072,17 +1061,13 @@ class ApiSettings(BaseSettings):
         except ValueError as exc:
             problems.append(str(exc))
         if self.prometheus_metrics_enabled:
-            if metrics_token_raw is None or not _deployable_secret_shape(
-                metrics_token_raw
-            ):
+            if metrics_token_raw is None or not _deployable_secret_shape(metrics_token_raw):
                 problems.append(
                     "KOR_TRAVEL_MAP_API_METRICS_TOKEN must be set to at least 32 "
                     "characters without surrounding whitespace while the "
                     "Prometheus metrics endpoint is enabled"
                 )
-        elif metrics_token_raw is not None and not _deployable_secret_shape(
-            metrics_token_raw
-        ):
+        elif metrics_token_raw is not None and not _deployable_secret_shape(metrics_token_raw):
             problems.append(
                 "KOR_TRAVEL_MAP_API_METRICS_TOKEN must be at least 32 characters "
                 "without surrounding whitespace when set"
@@ -1110,18 +1095,14 @@ class ApiSettings(BaseSettings):
                     "characters without surrounding whitespace while the public "
                     "features surface is enabled"
                 )
-        elif service_token_raw is not None and not _deployable_secret_shape(
-            service_token_raw
-        ):
+        elif service_token_raw is not None and not _deployable_secret_shape(service_token_raw):
             problems.append(
                 "KOR_TRAVEL_MAP_API_SERVICE_TOKEN must be at least 32 characters "
                 "without surrounding whitespace when set"
             )
 
         if problems:
-            raise ValueError(
-                "production profile is fail-closed (ADR-066): " + "; ".join(problems)
-            )
+            raise ValueError("production profile is fail-closed (ADR-066): " + "; ".join(problems))
 
     @model_validator(mode="after")
     def _validate_production_fail_closed(self) -> ApiSettings:

@@ -6,9 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal, TypeAlias
 
-ExecutionState: TypeAlias = Literal[
-    "queued", "running", "done", "failed", "cancelled"
-]
+ExecutionState: TypeAlias = Literal["queued", "running", "done", "failed", "cancelled"]
 TriggerKind: TypeAlias = Literal[
     "schedule", "manual", "sensor", "update_request", "backfill", "system"
 ]
@@ -29,6 +27,7 @@ DagsterFeatureOperationBlockReason: TypeAlias = Literal["cancellation", "termina
 FEATURE_OPERATION_ROOT_KIND = "provider_feature_load_run"
 FEATURE_OPERATION_MEMBER_KIND = "provider_feature_load"
 FEATURE_UPDATE_REQUEST_JOB_KIND = "feature_update_request"
+C6C_CANCEL_PROBE_JOB_KIND = "c6c_cancel_probe"
 FEATURE_OPERATION_RESERVED_KINDS = frozenset(
     {
         FEATURE_OPERATION_ROOT_KIND,
@@ -57,9 +56,7 @@ DAGSTER_FEATURE_RUN_STATUS_VALUES: tuple[DagsterFeatureRunStatus, ...] = (
 DAGSTER_FEATURE_ACTIVE_STATUS_VALUES = frozenset(
     {"QUEUED", "NOT_STARTED", "MANAGED", "STARTING", "STARTED", "CANCELING"}
 )
-DAGSTER_FEATURE_TERMINAL_STATUS_VALUES = frozenset(
-    {"SUCCESS", "FAILURE", "CANCELED"}
-)
+DAGSTER_FEATURE_TERMINAL_STATUS_VALUES = frozenset({"SUCCESS", "FAILURE", "CANCELED"})
 
 
 @dataclass(frozen=True, order=True)
@@ -145,6 +142,7 @@ __all__ = [
     "DAGSTER_FEATURE_ACTIVE_STATUS_VALUES",
     "DAGSTER_FEATURE_RUN_STATUS_VALUES",
     "DAGSTER_FEATURE_TERMINAL_STATUS_VALUES",
+    "C6C_CANCEL_PROBE_JOB_KIND",
     "FEATURE_OPERATION_MEMBER_KIND",
     "FEATURE_OPERATION_RESERVED_KINDS",
     "FEATURE_OPERATION_ROOT_KIND",

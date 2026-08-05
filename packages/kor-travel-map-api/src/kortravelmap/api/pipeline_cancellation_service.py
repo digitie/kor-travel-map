@@ -18,6 +18,9 @@ from typing import TYPE_CHECKING, Any, Final
 import httpx
 from kortravelmap.core.feature_operation import FEATURE_OPERATION_RESERVED_KINDS
 from kortravelmap.infra.advisory_lock import advisory_lock_key
+from kortravelmap.infra.c6c_cancel_probe_fixture_repo import (
+    mark_c6c_cancel_probe_consumed,
+)
 from kortravelmap.infra.log_repo import record_system_log
 from kortravelmap.infra.pipeline_cancellation_repo import (
     PipelineCancellationConflict,
@@ -65,9 +68,7 @@ __all__ = [
 
 _LOG = logging.getLogger(__name__)
 
-_TERMINAL_DAGSTER_STATUSES: Final[frozenset[str]] = frozenset(
-    {"CANCELED", "SUCCESS", "FAILURE"}
-)
+_TERMINAL_DAGSTER_STATUSES: Final[frozenset[str]] = frozenset({"CANCELED", "SUCCESS", "FAILURE"})
 _COORDINATOR_LEASE_PREFIX = "pipeline-cancellation:coordinator"
 
 _RUN_STATUS_QUERY = """
@@ -225,9 +226,7 @@ def _failure(
 
 
 def _coordinator_lease_key(*, root_kind: str, root_id: str) -> int:
-    return advisory_lock_key(
-        f"{_COORDINATOR_LEASE_PREFIX}:{root_kind}:{root_id}"
-    )
+    return advisory_lock_key(f"{_COORDINATOR_LEASE_PREFIX}:{root_kind}:{root_id}")
 
 
 def _assert_no_transaction(session: AsyncSession) -> None:
@@ -403,9 +402,7 @@ async def _bounded_current_detail(
         if detail is not None:
             return detail
         if index + 1 < settings.pipeline_cancellation_lease_reload_attempts:
-            await asyncio.sleep(
-                settings.pipeline_cancellation_lease_reload_interval_seconds
-            )
+            await asyncio.sleep(settings.pipeline_cancellation_lease_reload_interval_seconds)
     return None
 
 
@@ -427,9 +424,7 @@ async def _prepare_attempt(
         execution_id=execution_id,
     )
     if scope is None:
-        raise PipelineExecutionNotFound(
-            f"pipeline execution not found: {kind}/{execution_id}"
-        )
+        raise PipelineExecutionNotFound(f"pipeline execution not found: {kind}/{execution_id}")
     if (scope.root_kind, scope.root_id) != (root_kind, root_id):
         return None
 
@@ -498,11 +493,7 @@ async def _post_graphql(
             message="Dagster GraphQL request timed out",
             details=failure.details,
         )
-        failure_type = (
-            _DagsterDispatchAmbiguous
-            if transport_is_ambiguous
-            else _DagsterFailure
-        )
+        failure_type = _DagsterDispatchAmbiguous if transport_is_ambiguous else _DagsterFailure
         raise failure_type(timeout_failure) from exc
     except httpx.RequestError as exc:
         unavailable = _Failure(
@@ -510,11 +501,7 @@ async def _post_graphql(
             message="Dagster GraphQL is unavailable",
             details=failure.details,
         )
-        failure_type = (
-            _DagsterDispatchAmbiguous
-            if transport_is_ambiguous
-            else _DagsterFailure
-        )
+        failure_type = _DagsterDispatchAmbiguous if transport_is_ambiguous else _DagsterFailure
         raise failure_type(unavailable) from exc
     except (httpx.HTTPStatusError, ValueError) as exc:
         raise _DagsterFailure(failure) from exc
@@ -804,9 +791,7 @@ async def _record_terminal_run(
     engine_started_at: datetime | None = None,
     engine_finished_at: datetime | None = None,
 ) -> tuple[PipelineCancellationDetail, _Failure | None]:
-    run_result, stored_terminal, target_status, error_message = _terminal_mapping(
-        terminal_status
-    )
+    run_result, stored_terminal, target_status, error_message = _terminal_mapping(terminal_status)
     definitive: _Failure | None = None
     existing_run = next(item for item in detail.runs if item.dagster_run_id == run_id)
     canonical_members = tuple(
@@ -836,9 +821,7 @@ async def _record_terminal_run(
             ),
             failure,
         )
-    stored_engine_started_at = (
-        engine_started_at if engine_finished_at is not None else None
-    )
+    stored_engine_started_at = engine_started_at if engine_finished_at is not None else None
     stored_engine_finished_at = engine_finished_at
     try:
         async with session.begin():
@@ -933,9 +916,7 @@ async def _record_terminal_run(
                     expected_status=member.initial_status,
                     target_status="failed",
                     result=run_result,
-                    error_message=(
-                        "provider feature operation tracking invariant failed"
-                    ),
+                    error_message=("provider feature operation tracking invariant failed"),
                     dagster_terminal_status=stored_terminal,
                     engine_started_at=effective_engine_started_at,
                     engine_finished_at=engine_finished_at,
@@ -1008,11 +989,7 @@ async def _record_terminal_run(
                     "cancellation attempt disappeared during member reconcile",
                 )
             current_member = next(
-                (
-                    item
-                    for item in current.members
-                    if item.job_id == member.job_id
-                ),
+                (item for item in current.members if item.job_id == member.job_id),
                 None,
             )
             if current_member is None:
@@ -1318,6 +1295,18 @@ async def _finish_attempt(
             status=status,
             error=failure.payload() if failure is not None else None,
         )
+        if (
+            finished is not None
+            and status == "failed"
+            and failure is not None
+            and failure.code == "PIPELINE_CANCELLATION_UNSAFE"
+            and detail.attempt.root_kind == "import_job"
+        ):
+            await mark_c6c_cancel_probe_consumed(
+                session,
+                job_id=detail.attempt.root_id,
+                cancellation_id=detail.attempt.cancellation_id,
+            )
     if finished is None:
         async with session.begin():
             finished = await _reload_attempt(session, detail.attempt.cancellation_id)
@@ -1547,9 +1536,7 @@ async def _coordinate_attempt(
         raise PipelineCancellationInvariantError(
             "coordinator left pending cancellation members after run processing"
         )
-    unresolved = [
-        member for member in detail.members if member.result == "cancel_failed"
-    ]
+    unresolved = [member for member in detail.members if member.result == "cancel_failed"]
     if not unresolved:
         finished = await _finish_attempt(
             session,
@@ -1642,9 +1629,7 @@ async def cancel_pipeline_execution(
                     "pipeline cancellation coordinator is already active",
                     root=last_root,
                     detail=_detail_record(current) if current is not None else None,
-                    retry_after_seconds=(
-                        settings.pipeline_cancellation_retry_after_seconds
-                    ),
+                    retry_after_seconds=(settings.pipeline_cancellation_retry_after_seconds),
                 )
 
             retry_root = False

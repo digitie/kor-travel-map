@@ -18,6 +18,7 @@ from kortravelmap.api.settings import ApiSettings
 ADMIN_PROXY_SECRET = "admin-proxy-secret-000000000000000000000000"
 OPS_READ_TOKEN = "read-token-00000000000000000000000000000000"
 OPS_CANCEL_TOKEN = "cancel-token-000000000000000000000000000000"
+OPS_FIXTURE_TOKEN = "fixture-token-00000000000000000000000000000"
 SERVICE_TOKEN = "service-token-0000000000000000000000000000"
 METRICS_TOKEN = "metrics-token-0000000000000000000000000000"
 CURSOR_SIGNING_SECRET = "cursor-signing-secret-000000000000000000000000"
@@ -36,6 +37,7 @@ _HERMETIC_ENV_VARS = (
     "KOR_TRAVEL_MAP_API_ADMIN_PROXY_SECRET",
     "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN",
     "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN",
+    "KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN",
     "KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED",
     "KOR_TRAVEL_MAP_API_OPS_ACTOR",
     "KOR_TRAVEL_MAP_API_SERVICE_TOKEN",
@@ -56,6 +58,7 @@ def _local_settings(**overrides: Any) -> ApiSettings:
     values: dict[str, Any] = {
         "admin_proxy_secret": None,
         "ops_cancel_token": None,
+        "ops_fixture_token": None,
         "ops_read_token": None,
         "public_api_key_required": False,
         "service_token": None,
@@ -63,6 +66,12 @@ def _local_settings(**overrides: Any) -> ApiSettings:
         "vworld_api_key": None,
     }
     values.update(overrides)
+    if (
+        values["ops_read_token"] is not None
+        and values["ops_cancel_token"] is not None
+        and "ops_fixture_token" not in overrides
+    ):
+        values["ops_fixture_token"] = OPS_FIXTURE_TOKEN
     return ApiSettings(_env_file=None, **values)
 
 
@@ -74,6 +83,7 @@ def _production_settings(**overrides: Any) -> ApiSettings:
         "admin_proxy_secret": ADMIN_PROXY_SECRET,
         "ops_read_token": OPS_READ_TOKEN,
         "ops_cancel_token": OPS_CANCEL_TOKEN,
+        "ops_fixture_token": OPS_FIXTURE_TOKEN,
         "ops_principal_required": True,
         "public_api_key_required": True,
         "debug_routes_enabled": False,
@@ -83,6 +93,12 @@ def _production_settings(**overrides: Any) -> ApiSettings:
         "vworld_api_key": None,
     }
     values.update(overrides)
+    if (
+        values["ops_read_token"] is None
+        and values["ops_cancel_token"] is None
+        and "ops_fixture_token" not in overrides
+    ):
+        values["ops_fixture_token"] = None
     return ApiSettings(_env_file=None, **values)
 
 
@@ -113,6 +129,7 @@ def test_profile_reads_env_name(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET", ADMIN_PROXY_SECRET)
     monkeypatch.setenv("KOR_TRAVEL_MAP_API_OPS_READ_TOKEN", OPS_READ_TOKEN)
     monkeypatch.setenv("KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN", OPS_CANCEL_TOKEN)
+    monkeypatch.setenv("KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN", OPS_FIXTURE_TOKEN)
     monkeypatch.setenv("KOR_TRAVEL_MAP_API_PUBLIC_API_KEY_REQUIRED", "true")
     monkeypatch.setenv("KOR_TRAVEL_MAP_API_DEBUG_ROUTES_ENABLED", "false")
     monkeypatch.setenv("KOR_TRAVEL_MAP_API_SERVICE_TOKEN", SERVICE_TOKEN)
@@ -155,6 +172,7 @@ def test_production_docker_compose_env_equivalent_boots(
     monkeypatch.setenv("KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED", "true")
     monkeypatch.setenv("KOR_TRAVEL_MAP_API_OPS_READ_TOKEN", OPS_READ_TOKEN)
     monkeypatch.setenv("KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN", OPS_CANCEL_TOKEN)
+    monkeypatch.setenv("KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN", OPS_FIXTURE_TOKEN)
     monkeypatch.setenv("KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED", "true")
     monkeypatch.setenv("KOR_TRAVEL_MAP_API_ADMIN_ROUTES_ENABLED", "true")
     monkeypatch.setenv("KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED", "true")
@@ -592,11 +610,7 @@ def test_create_app_boots_with_production_settings_and_omits_debug_routes() -> N
             "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET",
         ),
         (
-            {
-                "cursor_signing_secret": SecretStr(
-                    "cursor signing secret " + "c" * 32
-                )
-            },
+            {"cursor_signing_secret": SecretStr("cursor signing secret " + "c" * 32)},
             "contain no whitespace",
         ),
         (
@@ -644,10 +658,7 @@ def test_create_app_accepts_plain_valid_cursor_secret_from_model_copy() -> None:
         update={"cursor_signing_secret": CURSOR_SIGNING_SECRET}
     )
     application = create_app(settings=bypassed)
-    assert (
-        application.state.settings.cursor_signing_key
-        == CURSOR_SIGNING_SECRET.encode()
-    )
+    assert application.state.settings.cursor_signing_key == CURSOR_SIGNING_SECRET.encode()
 
 
 @pytest.mark.unit
@@ -659,11 +670,7 @@ def test_create_app_accepts_plain_valid_cursor_secret_from_model_copy() -> None:
             "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET",
         ),
         (
-            {
-                "cursor_signing_secret": SecretStr(
-                    "cursor signing secret " + "c" * 32
-                )
-            },
+            {"cursor_signing_secret": SecretStr("cursor signing secret " + "c" * 32)},
             "contain no whitespace",
         ),
         (

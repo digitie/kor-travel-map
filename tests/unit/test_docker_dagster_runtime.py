@@ -14,6 +14,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 _CURSOR_SIGNING_SECRET = "cursor-signing-secret-000000000000000000000000"
+_OPS_FIXTURE_TOKEN = "fixture-token-00000000000000000000000000000"
 
 
 def _compose() -> dict[str, Any]:
@@ -422,9 +423,10 @@ def test_local_admin_stack_uses_same_dagster_postgres_config_and_daemon() -> Non
     ) in script
     assert "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN" in script
     assert "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN" in script
+    assert "KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN" in script
     assert "KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED" in script
     assert "KOR_TRAVEL_MAP_API_OPS_ACTOR was removed" in script
-    assert "ops read and cancel tokens must be distinct" in script
+    assert "ops read, cancel, and fixture tokens must be distinct" in script
     assert "ops principal keys are allowed only in the API package env" in script
     assert "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET" in script
     assert 'cd "$ROOT_DIR/packages/kor-travel-map-api"' in script
@@ -474,7 +476,8 @@ def test_local_admin_stack_env_validation_rejects_ambiguous_secrets(tmp_path: Pa
         "KOR_TRAVEL_MAP_API_BACKUP_ROOT=data/backups\n"
         "KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED=false\n"
         "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN=\n"
-        "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN=\n",
+        "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN=\n"
+        "KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN=\n",
         encoding="utf-8",
     )
     valid = subprocess.run(
@@ -689,7 +692,7 @@ def test_local_admin_stack_accepts_production_cursor_signing_secret(
         (
             "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN=\n"
             "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN=cancel-token-000000000000000000000000000000\n",
-            "must both be empty or both be non-empty",
+                "must all be empty or all be non-empty",
         ),
         (
             "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN=short\n"
@@ -704,17 +707,17 @@ def test_local_admin_stack_accepts_production_cursor_signing_secret(
         (
             "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN=same-token-00000000000000000000000000000000\n"
             "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN=same-token-00000000000000000000000000000000\n",
-            "ops read and cancel tokens must be distinct",
+                "ops read, cancel, and fixture tokens must be distinct",
         ),
         (
             "KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED=true\n",
-            "required but read/cancel tokens are absent",
+            "required but read/cancel/fixture tokens are absent",
         ),
         (
             "KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED=true\n"
             "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN=\n"
             "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN=\n",
-            "required but read/cancel tokens are empty",
+            "required but read/cancel/fixture tokens are empty",
         ),
         (
             "KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED=TRUE\n",
@@ -748,6 +751,18 @@ def test_local_admin_stack_rejects_invalid_ops_principal_pair(
         "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET=shared-secret-at-least-32-characters\n",
         encoding="utf-8",
     )
+    if (
+        "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN=" in ops_lines
+        and "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN=" in ops_lines
+        and "KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN=" not in ops_lines
+    ):
+        fixture_token = _OPS_FIXTURE_TOKEN
+        if (
+            "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN=\n" in ops_lines
+            and "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN=\n" in ops_lines
+        ):
+            fixture_token = ""
+        ops_lines += f"KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN={fixture_token}\n"
     api_env.write_text(ops_lines, encoding="utf-8")
 
     result = subprocess.run(
@@ -874,7 +889,7 @@ def test_api_container_rejects_legacy_duplicate_proxy_secret() -> None:
                     "cancel-token-000000000000000000000000000000"
                 ),
             },
-            "must both be empty or both be non-empty",
+                "must all be empty or all be non-empty",
         ),
         (
             {
@@ -905,11 +920,11 @@ def test_api_container_rejects_legacy_duplicate_proxy_secret() -> None:
                     "same-token-00000000000000000000000000000000"
                 ),
             },
-            "ops read and cancel tokens must be distinct",
+            "ops read, cancel, and fixture tokens must be distinct",
         ),
         (
             {"KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED": "true"},
-            "required but read/cancel tokens are absent",
+            "required but read/cancel/fixture tokens are absent",
         ),
         (
             {
@@ -917,7 +932,7 @@ def test_api_container_rejects_legacy_duplicate_proxy_secret() -> None:
                 "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN": "",
                 "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN": "",
             },
-            "required but read/cancel tokens are empty",
+            "required but read/cancel/fixture tokens are empty",
         ),
         (
             {"KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED": ""},
@@ -966,6 +981,21 @@ def test_api_container_rejects_invalid_ops_principal_pair(
     ops_env: dict[str, str],
     expected_error: str,
 ) -> None:
+    if (
+        "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN" in ops_env
+        and "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN" in ops_env
+        and "KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN" not in ops_env
+    ):
+        fixture_token = _OPS_FIXTURE_TOKEN
+        if (
+            ops_env["KOR_TRAVEL_MAP_API_OPS_READ_TOKEN"] == ""
+            and ops_env["KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN"] == ""
+        ):
+            fixture_token = ""
+        ops_env = {
+            **ops_env,
+            "KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN": fixture_token,
+        }
     result = subprocess.run(
         ["sh", "docker/api-entrypoint.sh"],
         cwd=ROOT,
@@ -1000,6 +1030,7 @@ _MIGRATION_BASE_ENV: Final = {
     "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET": "shared-secret-at-least-32-characters",
     "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN": "",
     "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN": "",
+    "KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN": "",
     "KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED": "false",
 }
 
@@ -1234,7 +1265,7 @@ def test_api_container_reports_broken_alembic_as_such_not_as_mismatch(
 
 
 @pytest.mark.unit
-def test_api_container_allows_two_empty_ops_tokens_when_not_required(
+def test_api_container_allows_empty_ops_tokens_when_not_required(
     tmp_path: Path,
 ) -> None:
     # ADR-066 T-VN-02 (#742): 컨테이너 기본 profile은 production이므로 빈 ops
@@ -1251,6 +1282,7 @@ def test_api_container_allows_two_empty_ops_tokens_when_not_required(
             ),
             "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN": "",
             "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN": "",
+            "KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN": "",
             "KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED": "false",
         },
         check=False,
@@ -1269,6 +1301,7 @@ def test_api_container_allows_two_empty_ops_tokens_when_not_required(
         {
             "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN": "",
             "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN": "",
+            "KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN": "",
             "KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED": "false",
         },
         # pair 완전 미설정도 같은 사유로 거부된다.
@@ -1305,7 +1338,8 @@ def test_api_container_production_refuses_unconfigured_ops_pair_before_migration
     assert result.returncode != 0
     assert (
         "production profile is fail-closed (ADR-066): "
-        "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN and KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN "
+        "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN, KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN, "
+        "and KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN "
         "must be configured while the ops surface is enabled"
     ) in result.stderr
     assert "alembic" not in result.stderr
@@ -1326,6 +1360,7 @@ def test_api_container_production_allows_empty_ops_pair_when_ops_surface_off(
             "KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED": "false",
             "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN": "",
             "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN": "",
+            "KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN": "",
             "KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED": "false",
             "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET": _CURSOR_SIGNING_SECRET,
         },
@@ -1399,6 +1434,7 @@ def test_api_container_rejects_invalid_cursor_secret_before_migration(
                 "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN": (
                     "cancel-token-000000000000000000000000000000"
                 ),
+                "KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN": _OPS_FIXTURE_TOKEN,
             },
             "must be distinct from ops credentials",
         ),
@@ -1522,8 +1558,8 @@ def test_ops_pair_validation_messages_are_lockstep_across_layers() -> None:
 
     for shared_phrase in (
         "must be configured together",
-        "must both be empty or both be non-empty",
-        "ops read and cancel tokens must be distinct",
+        "must all be empty or all be non-empty",
+        "ops read, cancel, and fixture tokens must be distinct",
         "must be configured while ",
         "the ops surface is enabled",
         "production profile is fail-closed (ADR-066)",
@@ -1570,6 +1606,7 @@ def test_cursor_signing_secret_messages_are_lockstep_across_runtime_layers() -> 
         "KOR_TRAVEL_MAP_OPS_FUTURE_KEY",
         "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN",
         "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN",
+        "KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN",
         "KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED",
         "KOR_TRAVEL_MAP_API_OPS_ACTOR",
         "KOR_TRAVEL_MAP_API_OPS_FUTURE_KEY",
@@ -1593,7 +1630,7 @@ def test_dagster_entrypoint_rejects_any_root_or_api_ops_key_even_when_empty(
     )
 
 
-_DAGSTER_IMAGE_HEAD: Final = "0083_nonderived_uuid_generator"
+_DAGSTER_IMAGE_HEAD: Final = "0084_c6c_cancel_probe_fixtures"
 
 
 def _dagster_gate_stub_path(

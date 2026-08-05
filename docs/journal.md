@@ -17,6 +17,27 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-08-06 (2) — T-VN-41F1J-A: Map durable fixture 구현·검증
+
+- **수명주기/DB**: migration `0084_c6c_cancel_probe_fixtures`로 transaction ID를
+  PK로 하고 fixture job/canonical cancellation을 각각 유일 FK로 결박했다. `armed →
+  consumed → finalized` 전이와 시각은 CHECK로, 동시 ensure는 transaction advisory
+  lock으로 보장한다. 중간 개발 데이터 보전보다 최종 schema의 이력 보존을 우선해
+  fixture history가 있으면 downgrade를 거부한다.
+- **취소·격리**: 실제 PinVi cancel의 canonical
+  `PIPELINE_CANCELLATION_UNSAFE` terminal 기록 transaction 안에서만 fixture를
+  consume한다. fixture job은 일반 worker/claim/stale recovery/list projection에서
+  제외하되, cancellation resolver의 lineage에서는 보이도록 두어 정확한 409 검증을
+  방해하지 않는다. finalize는 cancellation history를 지우지 않고 job만 terminal로
+  닫는다.
+- **service 경계**: `ops:fixture` token과 `service:docker-manager` actor는
+  ensure·receipt·finalize exact path/method에만 결박했다. PinVi `ops:cancel`과
+  BFF/service token은 사용할 수 없다. full/service OpenAPI에는 audit 가능한 route를,
+  user artifact에는 제외하며 capability generation은 1이다.
+- **검증**: Postgres migration을 포함한 integration 2 passed, API auth 88 passed,
+  settings/route/OpenAPI target과 export `--check`, strict mypy·ruff 통과. 적대적
+  코드 리뷰 1인을 진행 중이다.
+
 ## 2026-08-06 (1) — T-VN-41F1J: Map-owned cancel-probe fixture 결정
 
 - **관측/판정**: 신뢰된 F1D 한 회차는 `login=200 → etl_summary=200 → provider_sync=200 →

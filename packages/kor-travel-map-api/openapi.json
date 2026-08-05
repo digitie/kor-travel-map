@@ -5475,6 +5475,134 @@
         "title": "Body_import_admin_curations_v1_admin_curations_import_post",
         "type": "object"
       },
+      "C6cCancelProbeFixtureData": {
+        "additionalProperties": false,
+        "properties": {
+          "fixture": {
+            "$ref": "#/components/schemas/C6cCancelProbeFixtureRecord"
+          }
+        },
+        "required": [
+          "fixture"
+        ],
+        "title": "C6cCancelProbeFixtureData",
+        "type": "object"
+      },
+      "C6cCancelProbeFixtureFinalizeRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "cancellation_id": {
+            "format": "uuid",
+            "title": "Cancellation Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "cancellation_id"
+        ],
+        "title": "C6cCancelProbeFixtureFinalizeRequest",
+        "type": "object"
+      },
+      "C6cCancelProbeFixtureRecord": {
+        "additionalProperties": false,
+        "description": "Manager가 crash 재개에 사용하는 secret-free durable fixture receipt.",
+        "properties": {
+          "cancellation_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancellation Id"
+          },
+          "capability_generation": {
+            "const": 1,
+            "default": 1,
+            "title": "Capability Generation",
+            "type": "integer"
+          },
+          "consumed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consumed At"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "finalized_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finalized At"
+          },
+          "job_id": {
+            "format": "uuid",
+            "title": "Job Id",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "armed",
+              "consumed",
+              "finalized"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "transaction_id": {
+            "format": "uuid",
+            "title": "Transaction Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "transaction_id",
+          "job_id",
+          "state",
+          "cancellation_id",
+          "created_at",
+          "consumed_at",
+          "finalized_at"
+        ],
+        "title": "C6cCancelProbeFixtureRecord",
+        "type": "object"
+      },
+      "C6cCancelProbeFixtureResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/C6cCancelProbeFixtureData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "C6cCancelProbeFixtureResponse",
+        "type": "object"
+      },
       "CacheTargetAckRecord": {
         "additionalProperties": false,
         "description": "ACK result.",
@@ -42969,6 +43097,335 @@
         "summary": "List Consistency Reports",
         "tags": [
           "ops"
+        ]
+      }
+    },
+    "/v1/ops/contract-fixtures/c6c-cancel-probe/{transaction_id}": {
+      "get": {
+        "operationId": "get_c6c_cancel_probe_v1_ops_contract_fixtures_c6c_cancel_probe__transaction_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "transaction_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Transaction Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "C6c contract fixture service principal은 exact fixture route에서 `ops:fixture`가 필수다. scope 문자열만으로는 권한이 되지 않는다.",
+            "in": "header",
+            "name": "X-Kor-Travel-Map-Ops-Scope",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "C6c contract fixture service principal은 exact fixture route에서 `ops:fixture`가 필수다. scope 문자열만으로는 권한이 되지 않는다.",
+              "title": "X-Kor-Travel-Map-Ops-Scope"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/C6cCancelProbeFixtureResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "X-Kor-Travel-Map-Ops-Token 누락"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "token 불일치 또는 token에 결박되지 않은 scope/method/exact path 요청"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "fixture does not exist"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "X-Kor-Travel-Map-Ops-Scope 누락 또는 알 수 없는 scope"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "OpsScope": [],
+            "OpsToken": []
+          }
+        ],
+        "summary": "C6c cancel-probe fixture durable receipt 조회",
+        "tags": [
+          "ops-contract-fixtures"
+        ]
+      },
+      "put": {
+        "operationId": "ensure_c6c_cancel_probe_v1_ops_contract_fixtures_c6c_cancel_probe__transaction_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "transaction_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Transaction Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "C6c contract fixture service principal은 exact fixture route에서 `ops:fixture`가 필수다. scope 문자열만으로는 권한이 되지 않는다.",
+            "in": "header",
+            "name": "X-Kor-Travel-Map-Ops-Scope",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "C6c contract fixture service principal은 exact fixture route에서 `ops:fixture`가 필수다. scope 문자열만으로는 권한이 되지 않는다.",
+              "title": "X-Kor-Travel-Map-Ops-Scope"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/C6cCancelProbeFixtureResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "X-Kor-Travel-Map-Ops-Token 누락"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "token 불일치 또는 token에 결박되지 않은 scope/method/exact path 요청"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "fixture lifecycle conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "X-Kor-Travel-Map-Ops-Scope 누락 또는 알 수 없는 scope"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "OpsScope": [],
+            "OpsToken": []
+          }
+        ],
+        "summary": "C6c cancel-probe fixture 멱등 ensure",
+        "tags": [
+          "ops-contract-fixtures"
+        ]
+      }
+    },
+    "/v1/ops/contract-fixtures/c6c-cancel-probe/{transaction_id}/finalize": {
+      "post": {
+        "operationId": "finalize_c6c_cancel_probe_v1_ops_contract_fixtures_c6c_cancel_probe__transaction_id__finalize_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "transaction_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Transaction Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "C6c contract fixture service principal은 exact fixture route에서 `ops:fixture`가 필수다. scope 문자열만으로는 권한이 되지 않는다.",
+            "in": "header",
+            "name": "X-Kor-Travel-Map-Ops-Scope",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "C6c contract fixture service principal은 exact fixture route에서 `ops:fixture`가 필수다. scope 문자열만으로는 권한이 되지 않는다.",
+              "title": "X-Kor-Travel-Map-Ops-Scope"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/C6cCancelProbeFixtureFinalizeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/C6cCancelProbeFixtureResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "X-Kor-Travel-Map-Ops-Token 누락"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "token 불일치 또는 token에 결박되지 않은 scope/method/exact path 요청"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "fixture state/cancellation conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "X-Kor-Travel-Map-Ops-Scope 누락 또는 알 수 없는 scope"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "OpsScope": [],
+            "OpsToken": []
+          }
+        ],
+        "summary": "C6c cancel-probe fixture finalization",
+        "tags": [
+          "ops-contract-fixtures"
         ]
       }
     },

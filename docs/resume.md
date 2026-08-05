@@ -10,6 +10,24 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-08-06 — T-VN-41F1J-A Map fixture 구현·검증 완료, 적대 리뷰 중
+
+`0084_c6c_cancel_probe_fixtures`가 transaction별 fixture/job, canonical cancellation
+참조와 `armed → consumed → finalized` 시각 불변식을 영속화한다. Map service API는
+`ops:fixture` exact principal으로 ensure/receipt/finalize만 열고, generic
+worker·stale recovery·일반 pipeline projection은 fixture kind를 제외한다. 다만 일반
+PinVi cancel lineage는 유지하여 canonical unsafe 취소 결과가 같은 transaction에서
+fixture receipt로 소비된다.
+
+**검증**: fixture integration 2건, API auth 88건, API 설정·route policy·OpenAPI
+target, OpenAPI export drift, strict mypy와 scoped ruff가 통과했다. 현재 적대적 코드
+리뷰 1인과 PR 게이트 중이다.
+
+**다음 한 작업**: 리뷰 finding을 반영해 Map F1J-A PR을 올리고 머지한다. 이어
+Docker Manager F1J-B의 dynamic ensure→PinVi exact-409→finalize receipt 및 F1J-C
+compatible-pair 재결박을 구현한 뒤 n150 격리 리허설과 prod live UI E2E(F1J-D)를
+수행한다.
+
 ## 2026-08-06 — T-VN-41F1J cancel-probe fixture 설계 착수
 
 F1D의 최초 probe는 `login=200 → etl_summary=200 → provider_sync=200 → cancel=404`로

@@ -22,7 +22,8 @@ admin UI의 pipeline 목록을 검증하는 기능이 아니다.
 | normal cancel semantics | Map pipeline cancellation service | fixture 전용 취소 경로나 marker/history 삭제 |
 
 Map만 `ops.import_jobs`와 `ops.pipeline_cancellations`를 함께 잠글 수 있으므로, fixture
-수명주기 API는 Map service OpenAPI에 둔다. admin BFF/public/user OpenAPI에는 넣지 않는다.
+수명주기 API는 Map service OpenAPI에 둔다. runtime full `openapi.json`은 route audit을 위해
+이 3개 route를 포함하지만, user profile은 제외하고 admin BFF에는 이 route를 통과할 권한이 없다.
 
 ## 영속 모델
 
@@ -37,7 +38,7 @@ CREATE TABLE ops.c6c_cancel_probe_fixtures (
   state TEXT NOT NULL CHECK (state IN ('armed', 'consumed', 'finalized')),
   cancellation_id UUID UNIQUE
       REFERENCES ops.pipeline_cancellations(cancellation_id) ON DELETE RESTRICT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
   consumed_at TIMESTAMPTZ,
   finalized_at TIMESTAMPTZ,
   CHECK (
@@ -98,9 +99,9 @@ PUT ensure                 PinVi normal cancel             POST finalize
 | `GET /v1/ops/contract-fixtures/c6c-cancel-probe/{transaction_id}` | hyphenated UUID path | 200, 같은 durable receipt | 없음 404 (Manager는 ensure 직후에만 허용) |
 | `POST /v1/ops/contract-fixtures/c6c-cancel-probe/{transaction_id}/finalize` | `cancellation_id` hyphenated UUID body | 200, final receipt | 아직 armed/불일치 cancellation 409 |
 
-service OpenAPI artifact에는 이 3 route와 DTO, security requirement를 포함한다. full/admin/user
-artifact에는 노출하지 않는다. response의 `capability_generation`은 compatible-pair pinset의
-동일 값과 정확히 일치해야 한다.
+service OpenAPI artifact에는 이 3 route와 DTO, security requirement를 포함한다. runtime full
+`openapi.json`도 조립된 route audit을 위해 포함하며, user artifact는 제외한다. response의
+`capability_generation`은 compatible-pair pinset의 동일 값과 정확히 일치해야 한다.
 
 ## C6c 실행 순서
 

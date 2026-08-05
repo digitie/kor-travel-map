@@ -321,7 +321,7 @@ ADR-084가 정본이다.
 
 | 계약 | 정본(공급자 repo) | 소비측 view |
 |---|---|---|
-| kor-travel-map 전 표면 REST | `docs/architecture/rest-api.md` + 기계 정본 `packages/kor-travel-map-api/openapi{,.user}.json` | PinVi `docs/integrations/kor-travel-map-rest-api.md` |
+| kor-travel-map 전 표면 REST | `docs/architecture/rest-api.md` + 기계 정본 `packages/kor-travel-map-api/openapi{,.user,.service}.json` | PinVi `docs/integrations/kor-travel-map-rest-api.md` |
 | PinVi canonical ops | 본 repo `docs/reports/system-structure-api-schema-review-2026-07-16.md` D-11/F-17 + 본 문서 §2 principal 계약 | PinVi admin client·provider-sync proxy·contract test와 `docs/integrations/kor-travel-map-rest-api.md` |
 | PinVi T-130 공개 해수욕장/축제 뷰 | 본 repo `docs/architecture/public-views-api.md` + `openapi.user.json`(T-222b 구현) | PinVi `docs/api/public.md` / `docs/kor-travel-map-requirements.md` §6 |
 | curated features → PinVi curated trip plans | 본 repo [`docs/curated-features.md`](curated-features.md) + admin `openapi.json` canonical detail-snapshot | PinVi `docs/kor-travel-map-requirements.md`의 curated trip plan import 절 / PinVi `docs/api/notice-plans.md`의 canonical 경로·AdminBFF 설명 |
