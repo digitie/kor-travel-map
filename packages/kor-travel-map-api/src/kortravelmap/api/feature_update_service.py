@@ -11,7 +11,7 @@ import json
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from time import perf_counter
-from typing import Any, NoReturn
+from typing import Any, NoReturn, TypeVar
 from uuid import UUID
 
 import httpx
@@ -45,7 +45,9 @@ from kortravelmap.settings import KorTravelMapSettings
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from kortravelmap.api.feature_ref import resolve_write_feature_refs_or_error
 from kortravelmap.api.feature_update_schema import (
+    FeatureIdsScope,
     FeatureUpdatePolicy,
     FeatureUpdateRequestCreatedRecord,
     FeatureUpdateRequestCreateRequest,
@@ -733,6 +735,45 @@ async def _find_reusable_provider_dataset_request(
     )
 
 
+_ScopePlanT = TypeVar(
+    "_ScopePlanT", FeatureUpdateRequestCreateRequest, FeatureUpdateRequestPreviewRequest
+)
+
+
+async def resolve_feature_ids_scope_refs(
+    body: _ScopePlanT, session: AsyncSession
+) -> _ScopePlanT:
+    """feature_ids scope의 참조를 legacy 정본 키로 경계 해석한다 (T-VN-32C PR-2).
+
+    값 전환 후 운영자가 응답에서 복사한 UUID를 scope에 넣으면, 해석 없이는
+    matched_feature_count=0인 요청이 영속 생성되고 job이 빈 scope로 성공
+    종료한다(조사 S1 — 조용한 no-op). 미해석 참조는 422 fail-close. 서로 다른
+    표기가 같은 feature로 해석되면 중복을 제거한다(순서 보존).
+
+    호출 위치 주의(리뷰 H1): create 경로는 반드시
+    :func:`create_feature_update_request`의 트랜잭션 **안**에서 호출된다 —
+    라우터에서 먼저 호출하면 SELECT autobegin이 ``session.begin()``과 충돌한다.
+    """
+    scope = body.scope
+    if not isinstance(scope, FeatureIdsScope):
+        return body
+    resolved = await resolve_write_feature_refs_or_error(
+        session, scope.feature_ids, field_name="scope.feature_ids"
+    )
+    legacy_ids: list[str] = []
+    seen: set[str] = set()
+    for ref in scope.feature_ids:
+        legacy = resolved[ref].feature_id
+        if legacy not in seen:
+            seen.add(legacy)
+            legacy_ids.append(legacy)
+    if legacy_ids == list(scope.feature_ids):
+        return body
+    return body.model_copy(
+        update={"scope": scope.model_copy(update={"feature_ids": legacy_ids})}
+    )
+
+
 async def create_feature_update_request(
     body: FeatureUpdateRequestCreateRequest,
     session: AsyncSession,
@@ -743,19 +784,23 @@ async def create_feature_update_request(
     settings: KorTravelMapSettings,
     resolved_plan_guard: ResolvedPlanGuard,
 ) -> FeatureUpdateRequestCreateResponse:
-    """Durable key로 생성 결과를 재생하거나 canonical 요청을 생성/reuse한다."""
+    """Durable key로 생성 결과를 재생하거나 canonical 요청을 생성/reuse한다.
+
+    T-VN-32C PR-2 — feature_ids scope의 참조 해석(UUID→legacy)은 **이
+    트랜잭션 안, idempotency lock 직후·fingerprint 계산 이전**에 수행한다:
+
+    - 라우터에서 먼저 해석하면 SELECT가 autobegin을 열어 아래
+      ``session.begin()``이 InvalidRequestError로 전건 500이 된다(리뷰 H1).
+    - fingerprint를 해석 **후** body로 계산하므로 legacy/UUID 표기가 같은
+      canonical 요청으로 dedup된다. 대가로 (a) 값 전환 배포 이전에 저장된
+      혼합 표기 요청의 바이트 동일 재전송은 fingerprint 불일치 409가 될 수
+      있고(전환기 1회성), (b) scope 참조가 이후 해석 불가가 되면 같은 key
+      재전송이 terminal 재생 대신 422로 fail-close한다 — 재생은 "여전히
+      유효한 동일 요청"에 한한다는 의도된 강화다(리뷰 M2 명시 결정).
+    """
 
     started_at = perf_counter()
-    canonical_body = _canonical_feature_update_request_body(body)
-    scope = dict(canonical_body["scope"])
-    providers = tuple(canonical_body["providers"])
-    dataset_keys = tuple(canonical_body["dataset_keys"])
-    update_policy = dict(canonical_body["update_policy"])
     normalized_key = str(idempotency_key)
-    request_fingerprint = _feature_update_request_fingerprint(
-        canonical_body,
-        operator=operator,
-    )
     result: FeatureUpdateRequest | None = None
     reused = False
     replayed = False
@@ -766,6 +811,16 @@ async def create_feature_update_request(
             session,
             normalized_key,
             actor=operator,
+        )
+        body = await resolve_feature_ids_scope_refs(body, session)
+        canonical_body = _canonical_feature_update_request_body(body)
+        scope = dict(canonical_body["scope"])
+        providers = tuple(canonical_body["providers"])
+        dataset_keys = tuple(canonical_body["dataset_keys"])
+        update_policy = dict(canonical_body["update_policy"])
+        request_fingerprint = _feature_update_request_fingerprint(
+            canonical_body,
+            operator=operator,
         )
         mapping = await get_feature_update_request_idempotency(
             session,
@@ -925,6 +980,7 @@ async def preview_feature_update_request(
     """갱신 scope를 비영속적으로 해석하고 200 응답을 만든다."""
 
     started_at = perf_counter()
+    body = await resolve_feature_ids_scope_refs(body, session)
     result = await preview_update_request(
         session,
         scope=_scope_payload(body.scope),

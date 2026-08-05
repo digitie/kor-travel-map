@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from time import perf_counter
-from typing import Annotated, Any, Literal, TypeVar
+from typing import Annotated, Any, Literal
 from urllib.parse import quote, urlencode
 from uuid import UUID
 
@@ -93,13 +93,11 @@ from kortravelmap.api.dagster_schema import (
     DagsterSensor,
 )
 from kortravelmap.api.db import get_engine, get_session
-from kortravelmap.api.feature_ref import resolve_write_feature_refs_or_error
 from kortravelmap.api.feature_update_http import (
     FEATURE_UPDATE_CONFLICT_RESPONSES,
     to_http_exception,
 )
 from kortravelmap.api.feature_update_schema import (
-    FeatureIdsScope,
     FeatureUpdateRequestCreateRequest,
     FeatureUpdateRequestCreateResponse,
     FeatureUpdateRequestMutationResponse,
@@ -1995,41 +1993,6 @@ async def resolve_pipeline_schedule_claim(
 # =============================================================================
 
 
-_PlanT = TypeVar(
-    "_PlanT", FeatureUpdateRequestCreateRequest, FeatureUpdateRequestPreviewRequest
-)
-
-
-async def _resolve_feature_ids_scope(body: _PlanT, session: AsyncSession) -> _PlanT:
-    """feature_ids scope의 참조를 legacy 정본 키로 경계 해석한다 (T-VN-32C PR-2).
-
-    값 전환 후 운영자가 응답에서 복사한 UUID를 scope에 넣으면, 해석 없이는
-    matched_feature_count=0인 요청이 영속 생성되고 job이 빈 scope로 성공
-    종료한다(조사 S1 — 조용한 no-op). 미해석 참조는 422 fail-close. 해석을
-    fingerprint 계산 전에 수행하므로 UUID/legacy 표기가 같은 canonical
-    요청으로 dedup된다. 서로 다른 표기가 같은 feature로 해석되면 중복을
-    제거한다(순서 보존).
-    """
-    scope = body.scope
-    if not isinstance(scope, FeatureIdsScope):
-        return body
-    resolved = await resolve_write_feature_refs_or_error(
-        session, scope.feature_ids, field_name="scope.feature_ids"
-    )
-    legacy_ids: list[str] = []
-    seen: set[str] = set()
-    for ref in scope.feature_ids:
-        legacy = resolved[ref].feature_id
-        if legacy not in seen:
-            seen.add(legacy)
-            legacy_ids.append(legacy)
-    if legacy_ids == list(scope.feature_ids):
-        return body
-    return body.model_copy(
-        update={"scope": scope.model_copy(update={"feature_ids": legacy_ids})}
-    )
-
-
 @router.post(
     "/requests",
     response_model=FeatureUpdateRequestCreateResponse,
@@ -2064,7 +2027,6 @@ async def create_pipeline_update_request(
 ) -> FeatureUpdateRequestCreateResponse:
     api_settings = _settings_from_request(request)
     dagster_client = _http_client_from_request(request, api_settings)
-    body = await _resolve_feature_ids_scope(body, session)
 
     async def _resolved_plan_guard(
         resolved_pairs: frozenset[tuple[str, str]],
@@ -2108,7 +2070,6 @@ async def preview_pipeline_update_request(
     body: FeatureUpdateRequestPreviewRequest,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> FeatureUpdateRequestPreviewResponse:
-    body = await _resolve_feature_ids_scope(body, session)
     try:
         return await feature_update_service.preview_feature_update_request(
             body,

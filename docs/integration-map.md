@@ -255,9 +255,10 @@ UUID 정본으로 전환(T-VN-32C PR-2)한 뒤에도, batch 계열 echo는 canon
 않는다. 소비자(PinVi `kor_travel_map.py`의 echo 등식 검증)는 legacy `f_*`로
 보내면 legacy를, UUID로 보내면 UUID를 그대로 돌려받는다. 조회 자체는 Map
 경계에서 legacy/UUID 양형식을 해석한다(ADR-068 결정 3). **형식 위반 참조**
-(빈 문자열/공백 패딩/256자 초과)는 값 전환 전 per-item missing이었으나 경계
-해석 도입으로 **요청 전체 422**로 강화됐다(정상 소비자는 무영향). 코드
-정본은 `kortravelmap.api.identity_projection` 모듈 docstring이다.
+(공백 패딩/256자 초과)는 경계 해석 대상에서 제외되어 종전과 동일하게 해당
+item만 missing/no_data가 된다 — batch의 per-item 상태 기계 격리는 값 전환
+후에도 유지된다(리뷰 M1로 422 격상안 철회). 코드 정본은
+`kortravelmap.api.identity_projection` 모듈 docstring이다.
 
 ### 3.3 body actor 제거 (T-VN-20, ADR-066 D-2) — PinVi 전송 중단 필요
 

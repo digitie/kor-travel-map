@@ -791,6 +791,22 @@ def _detail_from_row(row: dict[str, Any]) -> FeatureDetailResponse:
     )
 
 
+def _wellformed_refs(refs: Sequence[str]) -> list[str]:
+    """형식 계약을 통과하는 참조만 남긴다 — batch per-item 격리용 (리뷰 M1).
+
+    형식 위반(공백 패딩/길이 초과) 참조는 해석 대상에서 빠져 원문 그대로
+    조회에 흘러가고, 종전과 동일하게 해당 item만 missing/no_data가 된다.
+    """
+    valid: list[str] = []
+    for ref in refs:
+        try:
+            feature_identity.validate_feature_ref(ref)
+        except feature_identity.FeatureIdentityRefError:
+            continue
+        valid.append(ref)
+    return valid
+
+
 def _batch_item_from_row(
     row: feature_repo.FeatureBatchItemRow,
     *,
@@ -1935,14 +1951,12 @@ async def get_feature_weather_batch(
     # T-VN-32C PR-2 — target feature 참조를 경계 해석해 legacy 키로 조회하되
     # (미해석 참조는 정당한 no_data/retired 계열), 응답 item feature_id는
     # 요청 표기 echo를 유지한다. 같은 target 안에서 서로 다른 표기가 같은
-    # feature로 해석되면 조회는 1회, echo는 표기별로 낸다.
+    # feature로 해석되면 조회는 1회, echo는 표기별로 낸다. 형식 위반 참조는
+    # per-item 격리 유지(해당 item만 no_data — 리뷰 M1).
     all_refs = [ref for target in body.targets for ref in target.feature_ids]
-    try:
-        resolved_refs = await feature_identity.resolve_feature_identities_bulk(
-            session, all_refs
-        )
-    except feature_identity.FeatureIdentityRefError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    resolved_refs = await feature_identity.resolve_feature_identities_bulk(
+        session, _wellformed_refs(all_refs)
+    )
 
     def _lookup_id(ref: str) -> str:
         identity = resolved_refs.get(ref)
@@ -2206,12 +2220,13 @@ async def get_features_batch(
     started_at = perf_counter()
     # T-VN-32C PR-2 — 값 전환 후 소비자(PinVi)가 UUID 참조를 보낸다. 경계
     # 해석으로 legacy 키 조회를 보장하되(미해석 참조는 정당한 missing),
-    # 응답 item feature_id는 요청 표기 echo를 유지한다.
+    # 응답 item feature_id는 요청 표기 echo를 유지한다. 형식 위반 참조는
+    # per-item 상태 기계 격리를 지키기 위해 해석에서 제외하고 원문 그대로
+    # 조회에 흘린다(종전과 동일하게 해당 item만 missing — 리뷰 M1).
     refs = [item.feature_id for item in body.items]
-    try:
-        resolved = await feature_identity.resolve_feature_identities_bulk(session, refs)
-    except feature_identity.FeatureIdentityRefError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    resolved = await feature_identity.resolve_feature_identities_bulk(
+        session, _wellformed_refs(refs)
+    )
     try:
         rows = await feature_repo.get_service_feature_batch_items(
             session,

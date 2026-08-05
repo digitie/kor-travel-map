@@ -3651,7 +3651,10 @@ def test_feature_ids_scope_rejects_unresolved_uuid_ref(
     assert problem["details"]["unresolved"] == [
         "0f9d3c6e-5a41-4b2e-9c77-2b8a1d4e6f30"
     ]
-    assert session.begin_count == 0
+    # 리뷰 H1 — create 경로 해석은 서비스 트랜잭션 **안**(idempotency lock
+    # 직후)에서 수행된다: begin 1회 후 422로 rollback(영속 없음). preview는
+    # 트랜잭션 없이 해석만 한다.
+    assert session.begin_count == (1 if path.endswith("/requests") else 0)
 
 
 @pytest.mark.unit

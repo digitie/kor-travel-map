@@ -34,13 +34,14 @@ from typing import TYPE_CHECKING, Any
 import httpx
 import pytest
 from fastapi import HTTPException
+from kortravelmap.api import feature_update_service
 from kortravelmap.api.app import create_app
 from kortravelmap.api.db import get_session
 from kortravelmap.api.feature_update_schema import (
     FeatureIdsScope,
+    FeatureUpdateRequestCreateRequest,
     FeatureUpdateRequestPreviewRequest,
 )
-from kortravelmap.api.routers import ops_pipeline
 from kortravelmap.api.settings import ApiSettings
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, AsyncSession
@@ -58,6 +59,7 @@ from kortravelmap.dto import (
 )
 from kortravelmap.infra import admin_feature_repo, feature_repo
 from kortravelmap.providers.khoa import beaches_to_bundles
+from kortravelmap.settings import KorTravelMapSettings
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -575,7 +577,7 @@ async def test_update_request_scope_resolves_uuid_refs_to_legacy(
             feature_ids=[first.feature_uuid, second.feature_id],
         )
     )
-    resolved = await ops_pipeline._resolve_feature_ids_scope(  # noqa: SLF001
+    resolved = await feature_update_service.resolve_feature_ids_scope_refs(
         body, migrated_session
     )
     assert isinstance(resolved.scope, FeatureIdsScope)
@@ -588,11 +590,75 @@ async def test_update_request_scope_resolves_uuid_refs_to_legacy(
             feature_ids=[first.feature_uuid, first.feature_id],
         )
     )
-    deduplicated = await ops_pipeline._resolve_feature_ids_scope(  # noqa: SLF001
+    deduplicated = await feature_update_service.resolve_feature_ids_scope_refs(
         duplicated, migrated_session
     )
     assert isinstance(deduplicated.scope, FeatureIdsScope)
     assert deduplicated.scope.feature_ids == [first.feature_id]
+
+
+async def test_create_update_request_resolves_scope_inside_service_transaction(
+    cutover_env: _CutoverEnv,
+) -> None:
+    """리뷰 H1 회귀 — create 전 과정이 **실세션**으로 성공해야 한다.
+
+    라우터에서 scope를 먼저 해석하면 SELECT autobegin이 서비스의
+    ``session.begin()``과 충돌해 feature_ids scope 요청이 전건 500이 된다.
+    해석은 서비스 트랜잭션 안(idempotency lock 직후)에서 수행되고, 저장
+    레코드의 scope는 legacy 정본으로 canonical화된다.
+    """
+    first, second = cutover_env.places[0], cutover_env.places[1]
+    body = FeatureUpdateRequestCreateRequest(
+        scope=FeatureIdsScope(
+            type="feature_ids",
+            # UUID·legacy 혼합 + 같은 feature 이중 표기 → 해석·dedup 결과 고정.
+            feature_ids=[first.feature_uuid, first.feature_id, second.feature_id],
+        ),
+        reason="T32C H1 회귀 검증",
+    )
+
+    async def _noop_guard(_pairs: frozenset[tuple[str, str]]) -> None:
+        return None
+
+    key = uuid_module.UUID("00000000-0000-4000-8000-0000000032c1")
+    session = AsyncSession(
+        bind=cutover_env.connection, join_transaction_mode="create_savepoint"
+    )
+    try:
+        result = await feature_update_service.create_feature_update_request(
+            body,
+            session,
+            idempotency_key=key,
+            operator="t32c-h1-regression",
+            status_url_prefix="/v1/ops/pipeline/executions/update_request",
+            settings=KorTravelMapSettings(),
+            resolved_plan_guard=_noop_guard,
+        )
+        assert result.idempotent_replay is False
+        scope = result.data.scope
+        assert isinstance(scope, FeatureIdsScope)
+        assert scope.feature_ids == [first.feature_id, second.feature_id]
+
+        # 같은 key 재전송 — 해석 후 fingerprint가 동일하므로 terminal 재생.
+        replay_session = AsyncSession(
+            bind=cutover_env.connection, join_transaction_mode="create_savepoint"
+        )
+        try:
+            replay = await feature_update_service.create_feature_update_request(
+                body,
+                replay_session,
+                idempotency_key=key,
+                operator="t32c-h1-regression",
+                status_url_prefix="/v1/ops/pipeline/executions/update_request",
+                settings=KorTravelMapSettings(),
+                resolved_plan_guard=_noop_guard,
+            )
+        finally:
+            await replay_session.close()
+        assert replay.idempotent_replay is True
+        assert replay.data.request_id == result.data.request_id
+    finally:
+        await session.close()
 
 
 async def test_update_request_scope_rejects_unresolvable_uuid_ref(
@@ -605,7 +671,7 @@ async def test_update_request_scope_rejects_unresolvable_uuid_ref(
         )
     )
     with pytest.raises(HTTPException) as error:
-        await ops_pipeline._resolve_feature_ids_scope(  # noqa: SLF001
+        await feature_update_service.resolve_feature_ids_scope_refs(
             body, migrated_session
         )
     assert error.value.status_code == 422

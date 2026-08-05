@@ -77,7 +77,7 @@ async def resolve_write_feature_refs_or_error(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(exc),
         ) from exc
-    unresolved = [ref for ref in refs if ref not in resolved]
+    unresolved = list(dict.fromkeys(ref for ref in refs if ref not in resolved))
     if unresolved:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
