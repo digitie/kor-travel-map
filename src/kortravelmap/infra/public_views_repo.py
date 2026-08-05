@@ -283,16 +283,13 @@ _PUBLIC_FESTIVAL_JOIN_SQL: Final[str] = """
 JOIN feature.feature_events AS fe ON fe.feature_id = f.feature_id
 """
 
-# ``event_kind``는 subtype에서 NOT NULL이고 backfill/writer가 값이 없을 때
-# ``'unknown'`` 기본값을 넣는다(``feature_subtype.subtype_params``). 종전 공개
-# 술어는 "event_kind가 없으면 축제로 본다"였으므로 그 계약을 그대로 옮기려면
-# 결측 표식인 ``'unknown'``을 되돌려야 한다. 실측(bench 1,246 event)에서는
-# 전 행이 event_kind를 갖고 있어 이 fallback은 발동하지 않는다 — 계약 보존용
-# 이다. (근본 해법은 subtype 컬럼을 nullable로 두어 "결측"과 "unknown이라는
-# 값"을 구분하는 것이며 ADR-084 후속으로 남긴다.)
+# ``event_kind``는 subtype에서 NOT NULL이고, backfill·writer 모두 결측을
+# sentinel로 덮지 않고 거부한다(ADR-084 — ``'unknown'`` 가짜 값 폐기). 따라서
+# 종전 공개 술어의 "event_kind가 없으면 축제로 본다" 분기는 **존재할 수 없는
+# 상태를 위한 방어**가 됐고, typed 컬럼을 직접 비교한다. 실측: bench 1,246
+# event 전 행이 event_kind 보유(구·신 술어 동치 1,246 = 1,246).
 _PUBLIC_FESTIVAL_KIND_WHERE_SQL: Final[str] = """
-COALESCE(NULLIF(fe.event_kind, 'unknown'), 'festival')
-    IN ('festival', 'cultural_festival')
+fe.event_kind IN ('festival', 'cultural_festival')
 """
 
 # 날짜 비교가 ``text -> date`` 왕복 없이 typed 컬럼끼리 이뤄진다 — 종전

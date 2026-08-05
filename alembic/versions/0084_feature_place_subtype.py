@@ -22,14 +22,16 @@
 - ``(feature_id, feature_uuid)`` 복합 FK는 0083 ``feature_aliases``와 같은
   identity 사본 일치 계약이다(CASCADE — core 행이 지워지면 subtype도 소멸).
 
-shadow 단계 — ``detail``은 유지한다
------------------------------------
+subtype이 단일 정본이 된다
+--------------------------
 
-core ``detail`` JSONB를 이 단계에서 **제거하지 않는다**. 응답 계약이 그대로
-노출하고(FeatureDetailResponse.detail·PinVi 소비), 제거는 T-VN-39 removal
-manifest 소관이다(33C/34C/38C와 같은 규약). subtype은 typed 사본이며 writer가
-같은 트랜잭션에서 둘 다 갱신하고, drift는 관측(``count_subtype_drift``)이 0을
-고정한다. 롤백도 이 성질 덕에 안전하다 — reader만 되돌리면 된다.
+core ``detail`` JSONB는 이 체인의 마지막(0086)에서 **제거된다** — subtype이
+kind별 값의 유일한 정본이고, 응답이 요구하는 ``detail``은 0086이 만드는
+``feature.features_detailed`` 뷰가 subtype에서 조립한다. 이중 쓰기·drift
+관측이라는 우회 복잡도가 존재하지 않는다(ADR-084 결정 4).
+
+0084는 그 체인의 첫 단계라 이 시점에는 core ``detail``이 아직 살아 있고,
+backfill이 그것을 읽어 typed 컬럼을 채운다.
 
 backfill 실행 시간 (실측)
 -------------------------
@@ -87,9 +89,13 @@ def upgrade() -> None:
         )
         """
     )
-    # detail JSONB → typed 컬럼. 자유 문자열이 들어올 수 있는 필드는 방어적으로
-    # 판정한다(license_date의 비-ISO 값은 NULL — backfill이 통째로 실패하는 것보다
-    # drift 관측이 잡아내게 두는 편이 안전하다).
+    # detail JSONB → typed 컬럼.
+    #
+    # 자유 문자열이 들어올 수 있는 **선택** 필드는 방어적으로 판정한다
+    # (license_date의 비-ISO 값은 NULL). 반면 **필수** 필드(place_kind)는
+    # sentinel로 덮지 않고 그대로 넣는다 — NOT NULL 제약이 결측을 fail-close로
+    # 잡는 편이 'unknown'이라는 가짜 값으로 "없음"과 "unknown이라는 값"을
+    # 뭉개는 것보다 낫다. prod 실측: place_kind 729,972/729,972 존재.
     op.execute(
         """
         INSERT INTO feature.feature_places (
@@ -100,7 +106,7 @@ def upgrade() -> None:
             f.feature_id,
             f.feature_uuid,
             f.kind,
-            COALESCE(f.detail->>'place_kind', 'unknown'),
+            f.detail->>'place_kind',
             COALESCE(
                 (
                     SELECT array_agg(value #>> '{}')
@@ -125,7 +131,7 @@ def upgrade() -> None:
         """
     )
     # detail 표현식 인덱스 3종을 subtype 컬럼 인덱스로 이관한다(core 쪽 원본은
-    # detail을 유지하는 동안 함께 남긴다 — T-VN-39에서 detail과 같이 정리).
+    # detail 컬럼과 함께 0086에서 사라진다).
     op.execute(
         """
         CREATE INDEX idx_feature_places_opening_hours
@@ -152,8 +158,8 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # subtype은 shadow 사본이라 무손실 복귀다 — core detail이 정본을 계속 갖고
-    # 있으므로 테이블만 지우면 된다.
+    # 이 시점에는 core detail이 아직 정본이다(0086 downgrade가 이미 역조립해
+    # 되돌려 놓았다) — 따라서 테이블만 지우면 무손실 복귀다.
     op.execute("DROP TABLE IF EXISTS feature.feature_places")
     op.execute(
         "ALTER TABLE feature.features DROP CONSTRAINT IF EXISTS uq_features_identity_kind"

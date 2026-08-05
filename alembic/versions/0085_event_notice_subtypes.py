@@ -74,7 +74,7 @@ def upgrade() -> None:
             f.feature_id,
             f.feature_uuid,
             f.kind,
-            COALESCE(f.detail->>'event_kind', 'unknown'),
+            f.detail->>'event_kind',
             CASE
                 WHEN f.detail->>'starts_on' ~ '^\\d{4}-\\d{2}-\\d{2}$'
                 THEN (f.detail->>'starts_on')::date
@@ -153,7 +153,7 @@ def upgrade() -> None:
             f.feature_id,
             f.feature_uuid,
             f.kind,
-            COALESCE(f.detail->>'notice_type', 'unknown'),
+            f.detail->>'notice_type',
             CASE
                 WHEN f.detail->>'severity' ~ '^[0-5]$'
                 THEN (f.detail->>'severity')::smallint

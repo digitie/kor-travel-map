@@ -6,18 +6,19 @@
 만들고, backfill migration(0084~0086)은 같은 규칙을 SQL로 표현한다 — 두
 표현이 어긋나면 drift 관측이 잡는다.
 
-shadow 단계 계약 (ADR-084)
---------------------------
+단일 정본 계약 (ADR-084 결정 4)
+-------------------------------
 
-- core ``detail``은 **정본으로 남는다**. subtype은 typed 사본이며 writer가
-  같은 트랜잭션에서 둘 다 갱신한다. ``detail`` 제거는 T-VN-39 소관.
+- subtype이 kind별 값의 **유일한 정본**이다. core ``detail``은 0086에서
+  제거됐고, 응답용 ``detail``은 ``feature.features_detailed`` 뷰가 subtype에서
+  조립한다. writer는 subtype에만 쓴다 — 이중 쓰기도, drift도 없다.
 - 배타 arc(kind 상수 CHECK + ``(feature_id, kind)`` 복합 FK)가 "한 feature는
   최대 한 subtype" 과 "subtype이 있는 동안 core kind 불변"을 DB에서 강제한다.
 - price/weather는 subtype이 없다(detail이 비어 있고 값 정본은 별도 테이블).
 
 파싱 규칙은 migration backfill과 **글자 그대로 같은 판정**이어야 한다:
-날짜는 ISO 형식만, timestamptz는 파싱 가능한 값만, 나머지는 NULL로 남기고
-drift 관측이 드러낸다(부분 실패가 통째 실패보다 낫다).
+선택 필드는 날짜 ISO 형식만·timestamptz는 파싱 가능한 값만 받고 나머지는
+NULL로 남기며, 필수 필드는 결측을 거부한다(NOT NULL 제약과 같은 판정).
 """
 
 from __future__ import annotations
@@ -84,6 +85,20 @@ def _aware_datetime(value: Any) -> datetime | None:
 
 def _text(value: Any) -> str | None:
     return value if isinstance(value, str) and value else None
+
+
+def _required(value: Any, field: str) -> str:
+    """NOT NULL typed 컬럼의 필수 값 — 결측은 sentinel로 덮지 않고 거부한다.
+
+    ``'unknown'`` 같은 가짜 값은 "없음"과 "unknown이라는 값"을 뭉개고, 그
+    구분을 되살리려 소비 측이 ``NULLIF(x, 'unknown')`` 같은 우회를 짜게 만든다
+    (실제로 공개 festival 표면이 그랬다). DTO가 필수로 강제하는 필드이므로
+    결측은 상류 결함이고, 여기서 크게 실패하는 편이 옳다.
+    """
+    text_value = _text(value)
+    if text_value is None:
+        raise ValueError(f"subtype 필수 필드 결측: {field}")
+    return text_value
 
 
 def _object(value: Any) -> dict[str, Any]:
@@ -157,9 +172,10 @@ def subtype_params(
 ) -> dict[str, Any] | None:
     """kind별 subtype upsert 파라미터 (subtype이 없는 kind면 ``None``).
 
-    ``detail``이 비어 있어도 subtype 행은 만든다 — 배타 arc가 "kind가 있으면
-    subtype 행도 있다"를 전제하고, 필수 컬럼은 backfill과 같은 기본값
-    (``'unknown'``/``'route'``/``'area'``)으로 채운다.
+    필수 필드(place_kind/event_kind/notice_type)가 없으면 ``ValueError``로
+    거부한다 — sentinel로 덮지 않는다(``_required`` docstring). route/area의
+    ``route_type``/``area_kind``는 DTO 자체가 기본값을 갖는 필드라 그 기본을
+    그대로 쓴다.
     """
     if kind not in SUBTYPE_TABLES:
         return None
@@ -171,7 +187,7 @@ def subtype_params(
     }
     if kind == "place":
         return _bind_jsonb(common | {
-            "place_kind": _text(payload.get("place_kind")) or "unknown",
+            "place_kind": _required(payload.get("place_kind"), "place_kind"),
             "phones": _string_list(payload.get("phones")),
             "biz_number": _text(payload.get("biz_number")),
             "license_date": _iso_date(payload.get("license_date")),
@@ -182,7 +198,7 @@ def subtype_params(
         })
     if kind == "event":
         return _bind_jsonb(common | {
-            "event_kind": _text(payload.get("event_kind")) or "unknown",
+            "event_kind": _required(payload.get("event_kind"), "event_kind"),
             "starts_on": _iso_date(payload.get("starts_on")),
             "ends_on": _iso_date(payload.get("ends_on")),
             "timezone": _text(payload.get("timezone")) or "Asia/Seoul",
@@ -196,7 +212,7 @@ def subtype_params(
         })
     if kind == "notice":
         return _bind_jsonb(common | {
-            "notice_type": _text(payload.get("notice_type")) or "unknown",
+            "notice_type": _required(payload.get("notice_type"), "notice_type"),
             "severity": _int_in_range(payload.get("severity"), low=0, high=5),
             "valid_start_time": _aware_datetime(payload.get("valid_start_time")),
             "valid_end_time": _aware_datetime(payload.get("valid_end_time")),
