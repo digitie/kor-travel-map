@@ -7,6 +7,11 @@ H25B가 확인한 3건만 현재 ``feature_id``를 가드로 잠근 뒤 해제�
 재구성하고, 올바른 Feature로 재연결된 행은 신규 finding 없이 기존 finding만 정규화한다.
 
 기본은 **dry-run**이다. 실제 쓰기는 ``--apply``.
+
+[T-VN-32C 값 전환 주의 — legacy-표기 고정] 이 스크립트의 prod f_* 하드코딩과
+응답 feature_id 대조 로직은 값 전환(PR-2) 이전 표면 기준이다. 재실행 시 응답의
+feature_id는 UUID 정본이므로 대조 로직을 재작성해야 한다(일회성 스크립트 —
+기록 보존용으로만 유지).
 """
 
 from __future__ import annotations

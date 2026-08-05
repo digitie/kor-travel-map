@@ -445,6 +445,10 @@ async def test_feature_batch_echoes_request_notation(
     assert items[0]["feature_uuid"] == first.feature_uuid
     assert items[1]["feature_uuid"] == first.feature_uuid
     assert items[2]["feature_uuid"] == second.feature_uuid
+    # trip_card.feature_id는 item echo와 동일 값 — PinVi가
+    # `trip_card.feature_id == item.feature_id` 등식을 런타임 강제한다(리뷰 F1).
+    for item, ref in zip(items[:3], refs[:3], strict=False):
+        assert item["trip_card"]["feature_id"] == ref
 
 
 async def test_weather_batch_echoes_target_notation(
@@ -631,6 +635,13 @@ async def test_admin_search_uuid_fast_path_returns_single_feature(
     assert [item.feature_id for item in page.items] == [seeded.feature_id]
     assert page.items[0].feature_uuid == seeded.feature_uuid
     assert page.next_cursor is None
+
+    # 대문자 표기도 같은 fast-path에 태운다 — 경계 해석·batch echo와 표면 간
+    # 일관(소문자 전용이면 ILIKE 풀스캔 #639 회귀, 리뷰 F2).
+    upper = await admin_feature_repo.list_admin_features(
+        migrated_session, q=seeded.feature_uuid.upper()
+    )
+    assert [item.feature_id for item in upper.items] == [seeded.feature_id]
 
     # 존재하지 않는 UUID 검색어는 존재하지 않는 legacy id와 동일하게 빈 결과다.
     empty = await admin_feature_repo.list_admin_features(

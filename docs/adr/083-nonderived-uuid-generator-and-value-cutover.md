@@ -46,12 +46,18 @@ CHECK(0080/0081)와 소비자(PinVi) 검증 계약을 어떻게 개정할지, �
    `feature_uuid`를 병행 select하고 응답 조립 경계에서만 `feature_id` 값에
    UUID를 대입한다(`kortravelmap.api.identity_projection`, 결측 fail-close).
    내부 join·keyset cursor·FK는 legacy 축을 유지한다.
-6. **echo 예외(요청 표기 보존)**: batch found/missing 키·item `feature_id`,
-   weather batch target echo, path-param echo(404 메시지 등), CSV import의
-   `requested_feature_id`, 감사 레코드(merge outcome·override·change request),
-   operator raw lineage(sources/observations), 2차 참조(parent_feature_id·
-   sibling_group_id)는 치환하지 않는다. 명문은 integration-map.md §3.2와
-   `identity_projection` 모듈 docstring.
+6. **echo 예외(요청 표기 보존)**: batch found/missing 키·item `feature_id`
+   **와 그 안의 `trip_card.feature_id`(item echo와 동일 값 — PinVi가 등식을
+   런타임 강제)**, weather batch target echo, path-param echo(404 메시지 등),
+   CSV import의 `requested_feature_id`, 감사 레코드(merge outcome·override·
+   change request), operator raw lineage(sources/observations), 2차 참조
+   (parent_feature_id·sibling_group_id)는 치환하지 않는다. 명문은
+   integration-map.md §3.2와 `identity_projection` 모듈 docstring.
+   **명시 결정(설계 초안과의 차이)**: 단건
+   `GET /features/{id}/weather/forecast`의 `target_feature_id`는 echo가
+   아니라 **해석된 target 표현**이므로 UUID 정본으로 치환한다 — 설계 문서
+   §4 표의 "target echo 요청 보존"은 weather **batch** target에 한정한다
+   (PinVi는 forecast 표면을 소비하지 않음을 실측).
 7. **write/scope 입력은 경계 해석이 의무다**: 값 전환 후 클라이언트가 응답
    UUID를 body/scope로 되돌리므로, 모든 feature 참조 입력은 legacy 정본
    키로 해석(bulk 포함)하고, 신규 legacy id 발급 입력(admin create

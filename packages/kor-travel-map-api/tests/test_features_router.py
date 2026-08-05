@@ -1109,14 +1109,15 @@ def test_features_batch_returns_exhaustive_typed_items(
         ]
         # T-VN-32C echo 예외 — UUID로 요청한 item의 feature_id는 요청 표기
         # **그대로**(대문자 UUID) 되돌아온다. legacy로 요청한 item은 legacy echo.
-        # feature_uuid는 정본 병행 노출(missing 제외).
+        # feature_uuid는 정본 병행 노출(missing 제외). trip_card.feature_id는
+        # item echo와 동일 값이어야 한다 — PinVi가 등식을 런타임 강제(리뷰 F1).
         assert items[0] == {
             "state": "found",
             "feature_id": found_uuid_ref,
             "feature_uuid": _expected_uuid("found"),
             "row_revision": 9,
             "trip_card": {
-                "feature_id": "found",
+                "feature_id": found_uuid_ref,
                 "kind": "event",
                 "name": "축제",
                 "category": "01000000",

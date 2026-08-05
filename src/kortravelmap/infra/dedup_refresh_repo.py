@@ -16,6 +16,7 @@ from sqlalchemy import text
 
 from kortravelmap.core.scoring import MasterCandidate
 from kortravelmap.dto import Coordinate
+from kortravelmap.infra import feature_identity
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -161,6 +162,12 @@ async def list_dedup_refresh_features(
 ) -> list[DedupRefreshFeature]:
     """provider/dataset scope의 활성 feature를 dedup 입력으로 조회한다."""
     _validate_scope(scope)
+    # T-VN-32C PR-2 — 운영자가 응답 UUID를 run config cursor에 붙여넣는 경로:
+    # keyset은 legacy text 축이므로 UUID 표기는 legacy 키로 정규화한다
+    # (miss는 원문 유지 — 기존 "범위 밖 cursor" semantics, 적대 리뷰 F3).
+    cursor_feature_id = await feature_identity.legacy_id_for_filter(
+        session, scope.cursor_feature_id
+    )
     rows = (
         await session.execute(
             text(_LIST_DEDUP_FEATURES_SQL),
@@ -171,7 +178,7 @@ async def list_dedup_refresh_features(
                 "categories": _array_or_none(scope.categories),
                 "limit": scope.limit,
                 "cursor_updated_at": scope.cursor_updated_at,
-                "cursor_feature_id": scope.cursor_feature_id,
+                "cursor_feature_id": cursor_feature_id,
             },
         )
     ).mappings().all()

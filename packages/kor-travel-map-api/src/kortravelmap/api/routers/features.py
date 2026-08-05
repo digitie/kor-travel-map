@@ -807,12 +807,18 @@ def _batch_item_from_row(
     if row.state == "found":
         if row.trip_card is None:
             raise RuntimeError("found batch item has no trip_card")
+        # trip_card.feature_id도 item echo와 정렬한다 — PinVi가
+        # `trip_card.feature_id == item.feature_id` 등식을 런타임 강제하므로
+        # (kor_travel_map.py _decode_feature_trip_card) legacy 잔존 시 UUID
+        # 참조 요청이 계약 오류로 파손된다 (적대 리뷰 F1).
+        trip_card = dict(row.trip_card)
+        trip_card["feature_id"] = feature_id
         return FeatureBatchFoundItem(
             state="found",
             feature_id=feature_id,
             feature_uuid=row.feature_uuid,
             row_revision=row.row_revision,
-            trip_card=FeatureTripCard.model_validate(row.trip_card),
+            trip_card=FeatureTripCard.model_validate(trip_card),
         )
     if row.state == "retired":
         return FeatureBatchRetiredItem(

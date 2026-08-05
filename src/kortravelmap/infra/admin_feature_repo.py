@@ -860,10 +860,16 @@ def _feature_id_exact_query(normalized_q: str | None) -> str | None:
 
 
 def _feature_uuid_exact_query(normalized_q: str | None) -> str | None:
-    """정규화된 검색어가 canonical UUID 형태면 그대로, 아니면 ``None``."""
+    """검색어가 UUID 형태면 canonical lowercase로, 아니면 ``None``.
+
+    경계 해석(``_parse_canonical_uuid``)·batch echo가 대문자 표기를 수용하므로
+    검색어도 대소문자 무관하게 fast-path에 태운다 — 소문자 전용이면 대문자
+    UUID 검색이 ILIKE 풀스캔(#639 계열)으로 회귀한다 (적대 리뷰 F2).
+    """
     if normalized_q is None:
         return None
-    return normalized_q if _FEATURE_UUID_QUERY_RE.match(normalized_q) else None
+    lowered = normalized_q.lower()
+    return lowered if _FEATURE_UUID_QUERY_RE.match(lowered) else None
 
 
 def _json_array(value: Any) -> tuple[dict[str, Any], ...]:
