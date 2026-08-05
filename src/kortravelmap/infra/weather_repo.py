@@ -145,11 +145,16 @@ WeatherBatchItemState = Literal["found", "no_data", "retired"]
 
 @dataclass(frozen=True)
 class WeatherBatchItem:
-    """한 snapshot에서 판정한 공개 parent와 공유 weather card 참조."""
+    """한 snapshot에서 판정한 공개 parent와 공유 weather card 참조.
+
+    ``feature_uuid``는 T-VN-32C UUID 정본 병행 노출(additive) — 공개 parent가
+    있는 상태(found/no_data)에서 채워지고 retired면 ``None``.
+    """
 
     feature_id: str
     state: WeatherBatchItemState
     card_key: str | None
+    feature_uuid: str | None = None
 
 
 @dataclass(frozen=True)
@@ -214,13 +219,17 @@ class WeatherBatchWorkLimitExceededError(RuntimeError):
 
 @dataclass(frozen=True)
 class WeatherAnchor:
-    """좌표/feature 기준으로 선택된 weather anchor feature."""
+    """좌표/feature 기준으로 선택된 weather anchor feature.
+
+    ``feature_uuid``는 T-VN-32C UUID 정본 병행 노출(additive).
+    """
 
     feature_id: str
     name: str
     lon: float | None
     lat: float | None
     distance_m: float | None = None
+    feature_uuid: str | None = None
 
 
 @dataclass(frozen=True)
@@ -250,7 +259,11 @@ class WeatherValueTimelineRow:
 
 @dataclass(frozen=True)
 class WeatherAlertHistoryRow:
-    """KMA weather alert source history row."""
+    """KMA weather alert source history row.
+
+    ``feature_uuid``는 T-VN-32C UUID 정본 병행 노출(additive) — 공개 anchor가
+    없는 alert row는 ``feature_id``처럼 ``None``이다.
+    """
 
     source_record_key: str
     feature_id: str | None
@@ -270,6 +283,7 @@ class WeatherAlertHistoryRow:
     imported_at: datetime | None
     last_seen_at: datetime | None
     payload: dict[str, Any]
+    feature_uuid: str | None = None
 
 
 # weather semantic identity tuple — alembic 0060 ``uq_weather_value_identity``
@@ -459,6 +473,7 @@ parents AS (
         requested.target_at,
         requested.ordinality,
         visible.feature_id AS visible_feature_id,
+        visible.feature_uuid,
         visible.coord_5179
     FROM requested
     LEFT JOIN feature.public_features AS visible
@@ -1055,6 +1070,7 @@ batch_rows AS (
         'item'::text AS row_kind,
         parent.ordinality AS item_ordinality,
         parent.feature_id,
+        CAST(parent.feature_uuid AS text) AS feature_uuid,
         CASE
           WHEN parent.visible_feature_id IS NOT NULL AND card_state.has_weather
           THEN parent_card.card_ordinal
@@ -1093,6 +1109,7 @@ batch_rows AS (
         'metric'::text AS row_kind,
         NULL::bigint AS item_ordinality,
         NULL::text AS feature_id,
+        NULL::text AS feature_uuid,
         weather.ordinality AS card_ordinal,
         NULL::text AS state,
         weather.section,
@@ -1122,6 +1139,7 @@ SELECT
     batch.row_kind,
     batch.item_ordinality,
     batch.feature_id,
+    batch.feature_uuid,
     batch.card_ordinal,
     batch.state,
     batch.section,
@@ -1338,6 +1356,7 @@ WITH input AS (
 )
 SELECT
     f.feature_id,
+    CAST(f.feature_uuid AS text) AS feature_uuid,
     f.name,
     x_extension.ST_X(f.coord) AS lon,
     x_extension.ST_Y(f.coord) AS lat,
@@ -1367,6 +1386,7 @@ WITH target AS (
 )
 SELECT
     f.feature_id,
+    CAST(f.feature_uuid AS text) AS feature_uuid,
     f.name,
     x_extension.ST_X(f.coord) AS lon,
     x_extension.ST_Y(f.coord) AS lat,
@@ -1392,6 +1412,7 @@ WITH alert_records AS (
     SELECT
         sr.source_record_key,
         f.feature_id,
+        CAST(f.feature_uuid AS text) AS feature_uuid,
         f.name AS feature_name,
         sr.raw_data,
         sr.raw_data->>'region_code' AS region_code,
@@ -1608,8 +1629,10 @@ def _anchor_from_row(row: RowMapping | None) -> WeatherAnchor | None:
     lon = row["lon"]
     lat = row["lat"]
     distance_m = row["distance_m"]
+    feature_uuid = row.get("feature_uuid")
     return WeatherAnchor(
         feature_id=str(row["feature_id"]),
+        feature_uuid=str(feature_uuid) if feature_uuid is not None else None,
         name=str(row["name"]),
         lon=float(lon) if lon is not None else None,
         lat=float(lat) if lat is not None else None,
@@ -1669,9 +1692,11 @@ def _json_object(value: Any) -> dict[str, Any]:
 
 
 def _alert_history_row(row: RowMapping) -> WeatherAlertHistoryRow:
+    feature_uuid = row.get("feature_uuid")
     return WeatherAlertHistoryRow(
         source_record_key=str(row["source_record_key"]),
         feature_id=row["feature_id"],
+        feature_uuid=str(feature_uuid) if feature_uuid is not None else None,
         feature_name=row["feature_name"],
         region_code=row["region_code"],
         region_name=row["region_name"],
@@ -1881,6 +1906,7 @@ async def get_weather_batch_snapshots(
     state_by_ordinal: dict[int, WeatherBatchItemState] = {}
     card_by_ordinal: dict[int, int | None] = {}
     feature_by_ordinal: dict[int, str] = {}
+    feature_uuid_by_ordinal: dict[int, str | None] = {}
     valid_states: frozenset[str] = frozenset({"found", "no_data", "retired"})
     for row in rows:
         row_kind = str(row["row_kind"])
@@ -1900,6 +1926,10 @@ async def get_weather_batch_snapshots(
             state_by_ordinal[ordinal] = cast(WeatherBatchItemState, raw_state)
             card_by_ordinal[ordinal] = card_ordinal
             feature_by_ordinal[ordinal] = str(row["feature_id"])
+            raw_feature_uuid = row.get("feature_uuid")
+            feature_uuid_by_ordinal[ordinal] = (
+                str(raw_feature_uuid) if raw_feature_uuid is not None else None
+            )
             continue
         if row_kind != "metric":
             raise RuntimeError(f"unexpected weather batch row kind: {row_kind}")
@@ -1937,6 +1967,7 @@ async def get_weather_batch_snapshots(
                 feature_id=feature_id,
                 state=state,
                 card_key=card_key,
+                feature_uuid=feature_uuid_by_ordinal.get(ordinal),
             )
         )
         if card_ordinal is None or card_ordinal in cards:

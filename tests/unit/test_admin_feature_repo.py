@@ -97,6 +97,7 @@ def _dedup_row(review_id: str = _REVIEW_KEY_1) -> dict[str, Any]:
         "spatial_score": 85,
         "category_score": 100,
         "feature_id_a": "feature-a",
+        "feature_uuid_a": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
         "name_a": "장소 A",
         "kind_a": "place",
         "category_a": "01070300",
@@ -105,6 +106,7 @@ def _dedup_row(review_id: str = _REVIEW_KEY_1) -> dict[str, Any]:
         "provider_a": "python-mois-api",
         "dataset_key_a": "mois_license_features_bulk",
         "feature_id_b": "feature-b",
+        "feature_uuid_b": None,
         "name_b": "장소 B",
         "kind_b": "place",
         "category_b": "01070300",
@@ -458,6 +460,8 @@ def test_dedup_row_mapping() -> None:
     item = repo._dedup_review_row(_dedup_row())
 
     assert item.feature_a.feature_id == "feature-a"
+    assert item.feature_a.feature_uuid == "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    assert item.feature_b.feature_uuid is None
     assert item.feature_b.lon is None
     assert item.distance_m is None
 

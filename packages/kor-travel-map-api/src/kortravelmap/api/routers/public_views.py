@@ -18,6 +18,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api.db import get_session
+from kortravelmap.api.feature_ref import resolve_feature_ref_or_error
+from kortravelmap.api.identity_projection import response_feature_id
 from kortravelmap.api.response import Meta, make_meta
 
 __all__ = [
@@ -311,8 +313,10 @@ def _beach_view(
     phones = detail.get("phones")
     first_phone = phones[0] if isinstance(phones, list) and phones else None
     source_raw = row.source_raw_data
+    # T-VN-32C PR-2 — 응답 feature_id 값은 UUID 정본. 목록 cursor는 repo가 치환
+    # 전 legacy(updated_at+feature_id) 축으로 encode한다.
     return BeachPublicView(
-        feature_id=row.feature_id,
+        feature_id=response_feature_id(row),
         display_name=row.display_name,
         lon=row.lon,
         lat=row.lat,
@@ -366,8 +370,9 @@ def _festival_view(row: public_views_repo.PublicFestivalRow) -> FestivalPublicVi
     source_raw = row.source_raw_data
     starts_on = _date_value(detail.get("starts_on"))
     ends_on = _date_value(detail.get("ends_on"))
+    # T-VN-32C PR-2 — 응답 feature_id 값은 UUID 정본 (cursor는 repo legacy 축).
     return FestivalPublicView(
-        feature_id=row.feature_id,
+        feature_id=response_feature_id(row),
         festival_name=row.festival_name,
         venue_name=_text(detail.get("venue_name")),
         event_start_date=starts_on,
@@ -398,8 +403,9 @@ def _festival_view(row: public_views_repo.PublicFestivalRow) -> FestivalPublicVi
 
 
 def _marker_view(row: public_views_repo.PublicMapMarkerRow) -> PublicMapMarker:
+    # T-VN-32C PR-2 — marker 참조도 UUID 정본 (목록·상세와 동일 identity 축).
     return PublicMapMarker(
-        feature_id=row.feature_id,
+        feature_id=response_feature_id(row),
         name=row.name,
         lon=row.lon,
         lat=row.lat,
@@ -494,7 +500,12 @@ async def get_public_beach(
     """해수욕장 공개 상세 view."""
 
     started = perf_counter()
-    row = await public_views_repo.get_public_beach(session, feature_id=feature_id)
+    # T-VN-32C PR-2 (S12) — `/{feature_id}` 계열과 동일한 경계 해석(legacy·UUID
+    # 양형식 수용), 내부 조회는 정본 legacy 키.
+    identity = await resolve_feature_ref_or_error(session, feature_id)
+    row = await public_views_repo.get_public_beach(
+        session, feature_id=identity.feature_id
+    )
     if row is None:
         raise HTTPException(status_code=404, detail=f"beach not found: {feature_id}")
     return PublicBeachDetailResponse(
@@ -606,7 +617,11 @@ async def get_public_festival(
     """축제 공개 상세 view."""
 
     started = perf_counter()
-    row = await public_views_repo.get_public_festival(session, feature_id=feature_id)
+    # T-VN-32C PR-2 (S13) — S12와 동일한 경계 해석.
+    identity = await resolve_feature_ref_or_error(session, feature_id)
+    row = await public_views_repo.get_public_festival(
+        session, feature_id=identity.feature_id
+    )
     if row is None:
         raise HTTPException(status_code=404, detail=f"festival not found: {feature_id}")
     return PublicFestivalDetailResponse(

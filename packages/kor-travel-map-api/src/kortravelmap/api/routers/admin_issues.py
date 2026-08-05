@@ -25,6 +25,7 @@ from kortravelmap.geocoding import (
     geocode_response_to_coordinate,
     reverse_response_to_address,
 )
+from kortravelmap.infra import feature_identity
 from kortravelmap.infra.feature_address_repo import (
     FeatureAddressSnapshot,
     apply_feature_address_override,
@@ -391,6 +392,8 @@ async def list_admin_issues(
     started_at = perf_counter()
     try:
         bbox_tuple = _bbox_tuple(min_lon, min_lat, max_lon, max_lat)
+        # T-VN-32C PR-2 — UUID 표기 필터/검색어를 legacy 정본 키로 정규화
+        # (issue.feature_id 컬럼은 legacy 축, S5/S6).
         page = await list_ops_integrity_issues(
             session,
             status=issue_status,
@@ -398,8 +401,8 @@ async def list_admin_issues(
             violation_type=issue_type,
             provider=provider,
             dataset_key=dataset_key,
-            feature_id=feature_id,
-            q=q,
+            feature_id=await feature_identity.legacy_id_for_filter(session, feature_id),
+            q=await feature_identity.legacy_id_for_filter(session, q),
             bbox=bbox_tuple,
             limit=page_size,
             cursor=cursor,

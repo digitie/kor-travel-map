@@ -31,6 +31,7 @@ from kortravelmap.api.domain_command_service import (
     domain_command_transaction,
     idempotent_domain_command,
 )
+from kortravelmap.api.feature_ref import resolve_feature_ref_or_error
 from kortravelmap.api.response import Meta, make_meta
 
 __all__ = ["admin_router", "router"]
@@ -586,7 +587,17 @@ def _rule_view(row: curated_repo.CuratedSourceRule) -> CuratedSourceRuleView:
 
 
 def _feature_view(row: curated_repo.CuratedFeature) -> CuratedFeatureView:
-    return CuratedFeatureView(**row.__dict__)
+    # T-VN-32C PR-2 — admin curated 뷰도 feature 참조를 UUID 정본으로 통일한다
+    # (admin features 목록과 같은 규약 — 프론트 왕복은 write-측 경계 해석이
+    # 수용). splat 원본 row의 legacy 값은 내부 키로만 쓴다.
+    payload = dict(row.__dict__)
+    uuid_text = payload.pop("feature_uuid", None)
+    if not uuid_text:
+        raise ValueError(
+            "CuratedFeature.feature_uuid 결측 — read projection 누락 (T-VN-32C)"
+        )
+    payload["feature_id"] = uuid_text
+    return CuratedFeatureView(**payload)
 
 
 def _public_feature_view(
@@ -1163,6 +1174,10 @@ async def create_admin_curated_feature_route(
 ) -> CuratedFeatureResponse:
     started_at = perf_counter()
     payload = body.model_dump()
+    # T-VN-32C PR-2 — 값 전환 후 admin이 응답에서 복사한 UUID 참조를 legacy
+    # 정본 키로 경계 해석한다 (미존재는 404, 형식 오류 422 — W5).
+    identity = await resolve_feature_ref_or_error(session, payload["feature_id"])
+    payload["feature_id"] = identity.feature_id
     curation_status = payload["curation_status"]
     try:
         async with domain_command_transaction(session):

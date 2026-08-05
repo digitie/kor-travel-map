@@ -37,7 +37,7 @@ from kortravelmap.curation_provenance import (
     provenance_row_payload,
     requires_lighthouse_provenance,
 )
-from kortravelmap.infra import curation_repo
+from kortravelmap.infra import curation_repo, feature_identity
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -49,6 +49,8 @@ from kortravelmap.api.domain_command_service import (
     domain_command_transaction,
     idempotent_domain_command,
 )
+from kortravelmap.api.feature_ref import resolve_feature_ref_or_error
+from kortravelmap.api.identity_projection import response_feature_id
 from kortravelmap.api.response import Meta, make_meta
 
 __all__ = ["admin_router", "router"]
@@ -717,12 +719,29 @@ def _admin_collection_view(
     return AdminCurationCollectionView.model_validate(row, from_attributes=True)
 
 
+def curation_item_response_feature_id(row: curation_repo.CurationItem) -> str | None:
+    """curation item의 응답 feature 참조 — UUID 정본, 미연결이면 None (T-VN-32C PR-2).
+
+    feature_id가 있는데 feature_uuid가 없으면 projection 결함이므로 fail-close.
+    내부 join·dict lookup 키는 치환 전 legacy ``row.feature_id``를 그대로 쓴다.
+    """
+    if row.feature_id is None:
+        return None
+    if not row.feature_uuid:
+        raise ValueError(
+            "curation item row에 feature_uuid가 없습니다 — projection 누락 (T-VN-32C)"
+        )
+    return row.feature_uuid
+
+
 def _public_item_view(row: curation_repo.CurationItem) -> PublicCurationItemView:
-    return PublicCurationItemView.model_validate(row, from_attributes=True)
+    view = PublicCurationItemView.model_validate(row, from_attributes=True)
+    return view.model_copy(update={"feature_id": curation_item_response_feature_id(row)})
 
 
 def _admin_item_view(row: curation_repo.CurationItem) -> AdminCurationItemView:
-    return AdminCurationItemView.model_validate(row, from_attributes=True)
+    view = AdminCurationItemView.model_validate(row, from_attributes=True)
+    return view.model_copy(update={"feature_id": curation_item_response_feature_id(row)})
 
 
 def _import_row_receipt_view(
@@ -787,15 +806,19 @@ def _quarantine_collection_view(
 def _quarantine_item_view(
     row: curation_repo.CurationQuarantineItem,
 ) -> AdminCurationQuarantineItemView:
+    # T-VN-32C 치환 제외 — 격리 item의 feature_id는 저장된 링크 상태 그대로를
+    # 보여주는 정합 복구 표면이다 (repo projection도 legacy 단독, 미확장).
     return AdminCurationQuarantineItemView.model_validate(row, from_attributes=True)
 
 
 def _group_view(
     row: curation_repo.FeatureCurationGroup,
 ) -> FeatureCurationGroupView:
+    # T-VN-32C PR-2 — 응답 feature record의 feature_id는 UUID 정본. group 조립의
+    # 내부 키(repo grouped_items lookup)는 치환 전 legacy 축이다.
     return FeatureCurationGroupView(
         feature=CurationFeatureView(
-            feature_id=row.feature_id,
+            feature_id=response_feature_id(row),
             name=row.name,
             kind=row.kind,
             category=row.category,
@@ -820,7 +843,10 @@ def _issue_view(issue: CurationImportIssue) -> CurationImportIssueView:
 def _candidate_view(
     match: curation_repo.FeatureMatch,
 ) -> CurationImportFeatureCandidateView:
-    return CurationImportFeatureCandidateView.model_validate(match, from_attributes=True)
+    # T-VN-32C PR-2 — 후보 표시 feature_id는 UUID 정본. 자동 채택·DB 반영은
+    # 치환 전 match.feature_id(legacy)를 쓴다 (write 경로 legacy 축).
+    view = CurationImportFeatureCandidateView.model_validate(match, from_attributes=True)
+    return view.model_copy(update={"feature_id": response_feature_id(match)})
 
 
 def _adopted_match(
@@ -940,6 +966,8 @@ async def audit_unattributed_curation_links(
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    # T-VN-32C 치환 제외 — legacy/provenance-less link의 저장값 감사 증거 표면이라
+    # feature_id는 DB에 기록된 표기 그대로 보여준다 (repo projection legacy 단독).
     items = [
         CurationLinkAuditView.model_validate(row, from_attributes=True)
         for row in rows
@@ -1290,12 +1318,34 @@ async def import_admin_curations(
             "dry_run": dry_run,
         },
     )
+    # T-VN-32C PR-2 (W8) — CSV의 UUID 표기 feature 참조를 legacy 정본 키로
+    # 일괄 정규화해 매칭한다 (miss는 원문 유지 → 기존 unmatched 흐름,
+    # requested_feature_id echo는 CSV 원문 보존).
+    csv_refs: list[str] = []
+    for preview_row in preview.rows:
+        if preview_row.status != "valid" or not preview_row.feature_id:
+            continue
+        try:
+            feature_identity.validate_feature_ref(preview_row.feature_id)
+        except feature_identity.FeatureIdentityRefError:
+            continue  # 형식 위반 참조는 정규화 없이 기존 unmatched 흐름으로.
+        csv_refs.append(preview_row.feature_id)
+    resolved_csv_refs = await feature_identity.resolve_feature_identities_bulk(
+        session, csv_refs
+    )
+
+    def _match_feature_id(raw: str | None) -> str | None:
+        if not raw:
+            return None
+        identity = resolved_csv_refs.get(raw)
+        return identity.feature_id if identity is not None else raw
+
     matches_by_row = await curation_repo.resolve_feature_matches(
         session,
         requests=tuple(
             curation_repo.FeatureMatchRequest(
                 row_number=row.row_number,
-                feature_id=row.feature_id or None,
+                feature_id=_match_feature_id(row.feature_id),
                 place_name=row.place_name or None,
                 address_hint=row.address_hint or None,
             )
@@ -1318,6 +1368,7 @@ async def import_admin_curations(
                     edition_key=row.edition_key,
                     place_name=row.place_name,
                     address_hint=row.address_hint,
+                    # echo 예외 — CSV가 적은 표기를 그대로 되돌린다 (치환 금지).
                     requested_feature_id=row.feature_id,
                     resolved_feature_id=None,
                     source_item_key=row.source_item_key,
@@ -1358,6 +1409,7 @@ async def import_admin_curations(
                 source_url=row.source_url or None,
                 source_item_key=row.source_item_key,
                 source_component_key=row.source_component_key,
+                # 내부 write 경로 — DB FK는 legacy 축이므로 치환하지 않는다 (T-VN-32C).
                 feature_id=match.feature_id if match is not None else None,
                 place_name=(
                     row.place_name or (match.name if match is not None else row.feature_id)
@@ -1388,8 +1440,11 @@ async def import_admin_curations(
                 edition_key=row.edition_key,
                 place_name=row.place_name,
                 address_hint=row.address_hint,
+                # echo 예외 — CSV 표기 보존. resolved는 응답 표시 필드라 UUID 정본.
                 requested_feature_id=row.feature_id,
-                resolved_feature_id=match.feature_id if match is not None else None,
+                resolved_feature_id=(
+                    response_feature_id(match) if match is not None else None
+                ),
                 source_item_key=row.source_item_key,
                 source_component_key=row.source_component_key,
                 candidates=[_candidate_view(candidate) for candidate in matches],
@@ -1610,8 +1665,11 @@ async def get_public_feature_curations(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> FeatureCurationGroupResponse:
     started_at = perf_counter()
+    # T-VN-32C PR-2 (S11) — `/{feature_id}` 계열과 동일한 경계 해석: legacy·UUID
+    # 양형식 수용(형식 오류 422, 미존재 404), 내부 조회는 정본 legacy 키.
+    identity = await resolve_feature_ref_or_error(session, feature_id)
     row = await curation_repo.get_feature_curation_group(
-        session, feature_id=feature_id, public_only=True
+        session, feature_id=identity.feature_id, public_only=True
     )
     if row is None:
         raise HTTPException(status_code=404, detail="feature 없음")
@@ -1816,13 +1874,21 @@ async def add_admin_curation_item(
     context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
 ) -> AdminCurationItemResponse:
     started_at = perf_counter()
+    payload = body.model_dump()
+    # T-VN-32C PR-2 (W6) — 값 전환 후 admin이 복사한 UUID 참조를 legacy 정본
+    # 키로 정규화한다 (miss는 원문 유지 — 기존 "active Feature 아님" 422 계약
+    # 이 판정).
+    if payload.get("feature_id") is not None:
+        payload["feature_id"] = await feature_identity.legacy_id_for_filter(
+            session, payload["feature_id"]
+        )
     try:
         async with domain_command_transaction(session):
             item, inserted = await curation_repo.add_curation_item(
                 session,
                 collection_id=str(collection_id),
                 actor=context.actor,
-                **body.model_dump(),
+                **payload,
             )
             if not inserted:
                 raise HTTPException(
@@ -1855,13 +1921,19 @@ async def patch_admin_curation_item(
     context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
 ) -> AdminCurationItemResponse:
     started_at = perf_counter()
+    updates = body.model_dump(exclude_unset=True)
+    # T-VN-32C PR-2 (W7) — W6과 동일한 feature 참조 정규화.
+    if updates.get("feature_id") is not None:
+        updates["feature_id"] = await feature_identity.legacy_id_for_filter(
+            session, updates["feature_id"]
+        )
     try:
         async with domain_command_transaction(session):
             item = await curation_repo.update_curation_item(
                 session,
                 collection_id=str(collection_id),
                 curation_item_id=str(curation_item_id),
-                updates=body.model_dump(exclude_unset=True),
+                updates=updates,
                 actor=context.actor,
             )
     except IntegrityError as exc:

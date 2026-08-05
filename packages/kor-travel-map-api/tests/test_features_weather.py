@@ -162,7 +162,11 @@ def test_weather_card_response_maps_metrics(
         r = client.get("/v1/features/f1/weather")
         assert r.status_code == 200
         d = r.json()["data"]
-        assert d["feature_id"] == "f1"
+        # T-VN-32C 값 전환 — 단건 card 응답의 feature_id는 UUID 정본
+        # (경계 해석 identity의 uuid — repo 조회는 위 target assert대로 legacy 축).
+        from kortravelmap.core.ids import feature_uuid_from_legacy
+
+        assert d["feature_id"] == str(feature_uuid_from_legacy("f1"))
         assert d["source_styles"] == ["short"]
         assert len(d["metrics"]) == 1
         assert d["is_stale"] is False

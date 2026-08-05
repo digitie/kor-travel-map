@@ -18,6 +18,11 @@
 
 `/v1/curations/*`는 익명 공개가 아니라 `RoutePolicy.PUBLIC_KEYED`다 — public API key(또는
 service token) 보유자에게 열린 표면이라는 뜻이다. "공개 노출"은 그 한정 아래 읽어야 한다.
+
+[T-VN-32C 값 전환 주의 — legacy-표기 고정] 이 스크립트의 prod f_* 하드코딩과
+응답 feature_id 대조 로직은 값 전환(PR-2) 이전 표면 기준이다. 재실행 시 응답의
+feature_id는 UUID 정본이므로 대조 로직을 재작성해야 한다(일회성 스크립트 —
+기록 보존용으로만 유지).
 """
 
 from __future__ import annotations

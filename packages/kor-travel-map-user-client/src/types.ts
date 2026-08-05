@@ -315,7 +315,7 @@ export interface paths {
         };
         /**
          * feature 단건 상세
-         * @description feature 참조는 legacy `f_*` id와 UUID 정본(canonical hyphenated) 양쪽을 수용한다 (ADR-068 경계 alias 해석, T-VN-32B dual). 응답의 `feature_id`는 legacy 값을 유지하고 `feature_uuid`가 병행 노출된다 — 값 자체의 UUID 전환은 T-VN-32C.
+         * @description feature 참조는 legacy `f_*` id와 UUID 정본(canonical hyphenated) 양쪽을 수용한다 (ADR-068 경계 alias 해석, T-VN-32B dual). 응답의 `feature_id` 값은 UUID 정본이다 (T-VN-32C 값 전환). `feature_uuid`는 같은 값의 명시 필드로 병행 노출된다. feature_id는 opaque string이며 형식(legacy/UUID)에 의존하지 말 것.
          */
         get: operations["get_feature_v1_features__feature_id__get"];
         put?: never;
@@ -951,11 +951,14 @@ export interface components {
             detail: {
                 [key: string]: unknown;
             };
-            /** Feature Id */
+            /**
+             * Feature Id
+             * @description feature 참조 (opaque string). T-VN-32C 값 전환 이후 UUID 정본 문자열을 담는다 — 형식(legacy f_*\/UUID)에 의존하지 말 것.
+             */
             feature_id: string;
             /**
              * Feature Uuid
-             * @description UUID 정본 identity 병행 노출 (ADR-068, T-VN-32B additive). feature_id 값 자체의 UUID 전환은 T-VN-32C.
+             * @description UUID 정본 identity 명시 필드 (ADR-068). T-VN-32C 이후 feature_id와 같은 값이다.
              */
             feature_uuid?: string | null;
             /** Kind */
@@ -1072,11 +1075,14 @@ export interface components {
             area_square_meters?: number | null;
             /** Category */
             category: string;
-            /** Feature Id */
+            /**
+             * Feature Id
+             * @description feature 참조 (opaque string). T-VN-32C 값 전환 이후 UUID 정본 문자열을 담는다 — 형식(legacy f_*\/UUID)에 의존하지 말 것.
+             */
             feature_id: string;
             /**
              * Feature Uuid
-             * @description UUID 정본 identity 병행 노출 (ADR-068, T-VN-32B additive). feature_id 값 자체의 UUID 전환은 T-VN-32C.
+             * @description UUID 정본 identity 명시 필드 (ADR-068). T-VN-32C 이후 feature_id와 같은 값이다.
              */
             feature_uuid?: string | null;
             /**

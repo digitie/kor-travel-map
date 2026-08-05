@@ -189,6 +189,8 @@ class CurationItem:
     created_at: datetime
     updated_at: datetime
     archived_at: datetime | None
+    # T-VN-32C UUID 정본 병행 노출(additive) — feature 미연결/미해소면 None.
+    feature_uuid: str | None = None
 
 
 @dataclass(frozen=True)
@@ -202,6 +204,8 @@ class FeatureCurationGroup:
     address: dict[str, Any]
     status: str
     curations: tuple[CurationItem, ...]
+    # T-VN-32C UUID 정본 병행 노출(additive).
+    feature_uuid: str | None = None
 
 
 @dataclass(frozen=True)
@@ -211,6 +215,8 @@ class FeatureMatch:
     address: dict[str, Any]
     lon: float | None
     lat: float | None
+    # T-VN-32C UUID 정본 병행 노출(additive).
+    feature_uuid: str | None = None
 
 
 @dataclass(frozen=True)
@@ -531,6 +537,7 @@ _ITEM_SELECT_FIELDS: Final[str] = f"""
     s.source_name,
     s.source_url,
     i.feature_id,
+    CAST(f.feature_uuid AS text) AS feature_uuid,
     f.name AS feature_name,
     f.kind AS feature_kind,
     f.category AS feature_category,
@@ -815,6 +822,7 @@ LIMIT :limit
 _GET_FEATURE_SQL: Final[str] = f"""
 SELECT
     f.feature_id,
+    CAST(f.feature_uuid AS text) AS feature_uuid,
     f.name,
     f.kind,
     f.category,
@@ -830,6 +838,7 @@ WHERE f.feature_id = :feature_id
 _GET_FEATURES_BY_IDS_SQL: Final[str] = f"""
 SELECT
     f.feature_id,
+    CAST(f.feature_uuid AS text) AS feature_uuid,
     f.name,
     f.kind,
     f.category,
@@ -1724,6 +1733,14 @@ SELECT
 FROM classified
 """
 
+# h35 cutover CLI 전용 — 0063 고정(pre-0080, feature_uuid column 부재) 스키마
+# 세대에서 같은 import 경로를 돌린다 (역사 표면 보존, ADR-075).
+_MARK_IMPORT_REMOVALS_PRE_UUID_SQL: Final[str] = _MARK_IMPORT_REMOVALS_SQL.replace(
+    "CAST(f.feature_uuid AS text) AS feature_uuid",
+    "NULL::text AS feature_uuid",
+    1,
+)
+
 _PREVIEW_IMPORT_REMOVALS_SQL: Final[str] = (
     _ITEM_SELECT
     + """
@@ -1901,7 +1918,10 @@ FROM feature.curation_collections
 WHERE collection_key = :collection_key
 """
 
-_RESOLVE_FEATURES_BATCH_SQL: Final[str] = """
+# T-VN-32C PR-2 — 응답 후보 표시에 feature_uuid가 필요하지만, h35 cutover CLI는
+# 0063 고정(pre-feature_uuid) 스키마에서 같은 matcher를 돌린다(역사 표면 보존,
+# ADR-075). column 참조를 template slot으로 분리해 두 스키마 세대를 모두 지원한다.
+_RESOLVE_FEATURES_BATCH_SQL_TEMPLATE: Final[str] = """
 WITH requested AS (
     SELECT *
     FROM jsonb_to_recordset(CAST(:requests AS jsonb)) AS value(
@@ -1914,6 +1934,7 @@ WITH requested AS (
 SELECT
     requested.row_number,
     matched.feature_id,
+    matched.feature_uuid,
     matched.name,
     matched.address,
     matched.lon,
@@ -1924,6 +1945,7 @@ CROSS JOIN LATERAL (
     (
         SELECT
             f.feature_id,
+            {feature_uuid_select} AS feature_uuid,
             f.name,
             f.address,
             x_extension.ST_X(f.coord) AS lon,
@@ -1939,6 +1961,7 @@ CROSS JOIN LATERAL (
     (
         SELECT
             f.feature_id,
+            {feature_uuid_select} AS feature_uuid,
             f.name,
             f.address,
             x_extension.ST_X(f.coord) AS lon,
@@ -1956,6 +1979,15 @@ CROSS JOIN LATERAL (
 ) AS matched
 ORDER BY requested.row_number, matched.feature_id
 """
+
+_RESOLVE_FEATURES_BATCH_SQL: Final[str] = _RESOLVE_FEATURES_BATCH_SQL_TEMPLATE.format(
+    feature_uuid_select="CAST(f.feature_uuid AS text)"
+)
+
+# h35 CLI 전용 — feature_uuid column이 없는 pre-0080 스키마 세대.
+_RESOLVE_FEATURES_BATCH_PRE_UUID_SQL: Final[str] = (
+    _RESOLVE_FEATURES_BATCH_SQL_TEMPLATE.format(feature_uuid_select="NULL::text")
+)
 
 
 async def _upsert_id_with_fallback(
@@ -2061,6 +2093,7 @@ def _item(row: RowMapping | Mapping[str, Any]) -> CurationItem:
         created_at=row["created_at"],
         updated_at=row["updated_at"],
         archived_at=row["archived_at"],
+        feature_uuid=(str(value) if (value := row.get("feature_uuid")) else None),
     )
 
 
@@ -2071,6 +2104,7 @@ def _feature_match(row: RowMapping | Mapping[str, Any]) -> FeatureMatch:
         address=_object(row["address"]),
         lon=float(row["lon"]) if row["lon"] is not None else None,
         lat=float(row["lat"]) if row["lat"] is not None else None,
+        feature_uuid=(str(value) if (value := row.get("feature_uuid")) else None),
     )
 
 
@@ -3309,6 +3343,7 @@ async def get_feature_curation_group(
         address=_object(feature["address"]),
         status=str(feature["status"]),
         curations=tuple(_item(row) for row in item_rows),
+        feature_uuid=(str(value) if (value := feature.get("feature_uuid")) else None),
     )
 
 
@@ -3830,6 +3865,7 @@ async def list_feature_curation_groups(
                 address=_object(feature["address"]),
                 status=str(feature["status"]),
                 curations=grouped_items.get(feature_id, ()),
+                feature_uuid=(str(value) if (value := feature.get("feature_uuid")) else None),
             )
         )
     next_cursor = (
@@ -3863,11 +3899,16 @@ async def resolve_feature_matches(
     session: AsyncSession,
     *,
     requests: Sequence[FeatureMatchRequest],
+    pre_uuid_schema: bool = False,
 ) -> dict[int, tuple[FeatureMatch, ...]]:
     """CSV 전체의 exact Feature/name 후보를 한 번의 parameterized query로 찾는다.
 
     DB는 ``lower(name)`` index로 후보만 좁힌다. 주소는 JSON serialization/SQL pattern을
     전혀 사용하지 않고 Python의 구조화 literal matcher로 판정한다.
+
+    ``pre_uuid_schema``: h35 cutover CLI 전용 — 0063 고정(pre-0080,
+    ``feature_uuid`` column 부재) 스키마에서 matcher를 돌릴 때 True.
+    후보의 ``feature_uuid``는 None으로 채워진다.
     """
 
     if not requests:
@@ -3884,7 +3925,11 @@ async def resolve_feature_matches(
     rows = (
         (
             await session.execute(
-                text(_RESOLVE_FEATURES_BATCH_SQL),
+                text(
+                    _RESOLVE_FEATURES_BATCH_PRE_UUID_SQL
+                    if pre_uuid_schema
+                    else _RESOLVE_FEATURES_BATCH_SQL
+                ),
                 {"requests": json.dumps(payload, ensure_ascii=False)},
             )
         )
@@ -4355,8 +4400,13 @@ async def import_curation_rows(
     actor: str | None = None,
     source_content_sha256: str | None = None,
     batch_kind: str | None = None,
+    pre_uuid_schema: bool = False,
 ) -> CurationImportResult:
-    """검증·Feature 해소가 끝난 CSV 행을 한 transaction에서 멱등 upsert한다."""
+    """검증·Feature 해소가 끝난 CSV 행을 한 transaction에서 멱등 upsert한다.
+
+    ``pre_uuid_schema``: h35 cutover CLI 전용 — 0063 고정 스키마에서 removal
+    projection의 ``feature_uuid``를 NULL로 채운다.
+    """
     _ensure_resolved_curation_identities(rows)
     collections: dict[str, str] = {}
     item_values: list[dict[str, Any]] = []
@@ -4484,7 +4534,11 @@ async def import_curation_rows(
         removed_rows = (
             (
                 await session.execute(
-                    text(_MARK_IMPORT_REMOVALS_SQL),
+                    text(
+                        _MARK_IMPORT_REMOVALS_PRE_UUID_SQL
+                        if pre_uuid_schema
+                        else _MARK_IMPORT_REMOVALS_SQL
+                    ),
                     {"items": items_payload, "actor": actor},
                 )
             )

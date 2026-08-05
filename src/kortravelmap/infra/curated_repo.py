@@ -185,7 +185,11 @@ class CuratedSourceRule:
 
 @dataclass(frozen=True)
 class CuratedFeature:
-    """curated overlay + feature/source/theme projection."""
+    """curated overlay + feature/source/theme projection.
+
+    ``feature_uuid``는 T-VN-32C UUID 정본 병행 노출(additive) — read projection
+    전용이며 detail snapshot 물질화 payload에는 넣지 않는다(별도 단계).
+    """
 
     curated_feature_id: str
     theme_id: str
@@ -226,6 +230,7 @@ class CuratedFeature:
     created_at: datetime
     updated_at: datetime
     archived_at: datetime | None
+    feature_uuid: str | None = None
 
 
 @dataclass(frozen=True)
@@ -353,6 +358,7 @@ _FEATURE_COLUMNS: Final[str] = """
     t.theme_name,
     t.theme_group,
     cf.feature_id,
+    CAST(f.feature_uuid AS text) AS feature_uuid,
     f.name AS feature_name,
     f.category AS feature_category,
     f.kind AS feature_kind,
@@ -1113,7 +1119,9 @@ def _rule(row: Any) -> CuratedSourceRule:
 def _feature(row: Any) -> CuratedFeature:
     lon = row["lon"]
     lat = row["lat"]
+    feature_uuid = row.get("feature_uuid")
     return CuratedFeature(
+        feature_uuid=str(feature_uuid) if feature_uuid is not None else None,
         curated_feature_id=str(row["curated_feature_id"]),
         theme_id=str(row["theme_id"]),
         theme_slug=str(row["theme_slug"]),
@@ -1156,9 +1164,24 @@ def _feature(row: Any) -> CuratedFeature:
     )
 
 
+def _snapshot_feature_ref(feature: CuratedFeature) -> str:
+    """snapshot payload의 feature 참조 값 — UUID 정본 (T-VN-32C PR-2).
+
+    재물질화 전에 저장된 snapshot에는 legacy 값이 남아 있다 — 배포 후
+    ``materialize_curated_feature_detail_snapshots`` 일제 재실행(R6, etag churn
+    1회는 계획 비용)으로 전환한다. uuid 결측은 projection 누락이므로 legacy
+    값을 조용히 쓰지 않고 fail-close한다.
+    """
+    if not feature.feature_uuid:
+        raise ValueError(
+            "CuratedFeature.feature_uuid 결측 — read projection 누락 (T-VN-32C)"
+        )
+    return feature.feature_uuid
+
+
 def _feature_snapshot(feature: CuratedFeature) -> dict[str, Any]:
     return {
-        "feature_id": feature.feature_id,
+        "feature_id": _snapshot_feature_ref(feature),
         "name": feature.feature_name,
         "category": feature.feature_category,
         "kind": feature.feature_kind,
@@ -1190,7 +1213,7 @@ def _feature_detail_snapshot(feature: CuratedFeature) -> CuratedFeatureDetailSna
     }
     item = CuratedFeatureDetailItem(
         curated_feature_item_id=feature.curated_feature_id,
-        feature_id=feature.feature_id,
+        feature_id=_snapshot_feature_ref(feature),
         relation=feature.curation_relation,
         sort_order=1,
         day_index=None,

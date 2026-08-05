@@ -120,6 +120,8 @@ def _item(*, item_id: str, edition: str) -> CurationItem:
         source_name="문화체육관광부·한국관광공사",
         source_url="https://example.test/official",
         feature_id="feature:shared",
+        # T-VN-32C — 응답 feature 참조 치환용 UUID 정본 (연결된 item은 필수).
+        feature_uuid=_uuid("feature:shared"),
         feature_name="겹치는 관광지",
         feature_kind="place",
         feature_category="01070100",
@@ -691,6 +693,7 @@ def test_csv_accepts_mixed_component_resolution(
                     address={},
                     lon=129.36,
                     lat=35.36,
+                    feature_uuid=_uuid("feature:active"),
                 ),
             ),
             3: (),
@@ -812,6 +815,7 @@ def test_public_group_returns_all_editions(
                         _item(item_id="item-2025", edition="2025-2026"),
                         _item(item_id="item-2023", edition="2023-2024"),
                     ),
+                    feature_uuid=_uuid("feature:shared"),
                 ),
             ),
             None,
@@ -823,6 +827,8 @@ def test_public_group_returns_all_editions(
 
     assert response.status_code == 200
     group = response.json()["data"]["items"][0]
+    # T-VN-32C 값 전환 — group feature record·item feature 참조 값은 UUID 정본.
+    assert group["feature"]["feature_id"] == _uuid("feature:shared")
     assert group["curation_count"] == 2
     assert {item["edition_key"] for item in group["curations"]} == {
         "2023-2024",
@@ -1224,6 +1230,7 @@ def _namesake_match(feature_id: str, name: str, sido_name: str) -> FeatureMatch:
         address={"road": f"{sido_name} 어딘가 1", "sido_name": sido_name},
         lon=127.0,
         lat=37.5,
+        feature_uuid=_uuid(feature_id),
     )
 
 
@@ -1256,7 +1263,10 @@ def test_blank_feature_id_never_autolinks_on_single_name_match(
     codes = [issue["code"] for issue in row["issues"]]
     assert codes == ["name_only_match"]
     # 후보는 버리지 않는다 — 운영자가 preview에서 보고 직접 링크할 수 있어야 한다.
-    assert [c["feature_id"] for c in row["candidates"]] == ["f_seoul_namesake"]
+    # T-VN-32C 값 전환 — 후보 표시 feature_id는 UUID 정본.
+    assert [c["feature_id"] for c in row["candidates"]] == [
+        _uuid("f_seoul_namesake")
+    ]
 
 
 @pytest.mark.unit
@@ -1302,8 +1312,9 @@ def test_blank_feature_id_with_address_hint_requires_explicit_review(
     assert [issue["code"] for issue in row["issues"]] == [
         "address_candidate_requires_review"
     ]
+    # T-VN-32C 값 전환 — 후보 표시 feature_id는 UUID 정본.
     assert [candidate["feature_id"] for candidate in row["candidates"]] == [
-        "feature:ganjeolgot"
+        _uuid("feature:ganjeolgot")
     ]
 
 
@@ -1399,7 +1410,10 @@ def test_explicit_feature_id_still_links(
     )
 
     row = response.json()["data"]["items"][0]
-    assert row["resolved_feature_id"] == "feature:active"
+    # T-VN-32C — resolved는 응답 표시 필드라 UUID 정본, requested는 CSV 원문
+    # echo 보존(치환 금지).
+    assert row["resolved_feature_id"] == _uuid("feature:active")
+    assert row["requested_feature_id"] == "feature:active"
     assert row["status"] == "valid"
     assert row["issues"] == []
 

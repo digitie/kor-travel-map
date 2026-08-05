@@ -96,6 +96,13 @@ def client(
     )
 
 
+def _expected_uuid(feature_id: str) -> str:
+    """결정적 mock uuid — 테스트 편의 규약이지 저장 계약(0083 비파생 v7)이 아니다."""
+    from kortravelmap.core.ids import feature_uuid_from_legacy
+
+    return str(feature_uuid_from_legacy(feature_id))
+
+
 def _review_row() -> DedupReviewRow:
     now = datetime(2026, 6, 3, tzinfo=UTC)
     feature_a = DedupFeatureSummary(
@@ -107,6 +114,7 @@ def _review_row() -> DedupReviewRow:
         lat=37.5,
         provider="python-mois-api",
         dataset_key="mois_license_features_bulk",
+        feature_uuid=_expected_uuid("feature-a"),
     )
     feature_b = DedupFeatureSummary(
         feature_id="feature-b",
@@ -117,6 +125,7 @@ def _review_row() -> DedupReviewRow:
         lat=37.5001,
         provider="python-datagokr-api",
         dataset_key="cultural_festivals",
+        feature_uuid=_expected_uuid("feature-b"),
     )
     return DedupReviewRow(
         review_id="review-1",
@@ -165,6 +174,7 @@ def _feature_detail(feature_id: str, name: str) -> ReviewFeatureDetail:
     now = datetime(2026, 6, 3, tzinfo=UTC)
     return ReviewFeatureDetail(
         feature_id=feature_id,
+        feature_uuid=_expected_uuid(feature_id),
         kind="place",
         name=name,
         category="01070300",
@@ -253,6 +263,10 @@ def test_list_dedup_reviews_passes_filters(
     assert response.status_code == 200
     body = response.json()
     assert body["data"]["items"][0]["review_id"] == "review-1"
+    # T-VN-32C 값 전환 — 응답 feature 참조 표시는 UUID 정본.
+    assert body["data"]["items"][0]["feature_a"]["feature_id"] == (
+        _expected_uuid("feature-a")
+    )
     assert body["meta"]["page"] == {
         "page_size": 25,
         "next_cursor": "next-abc",
@@ -299,6 +313,9 @@ def test_get_dedup_review_detail_returns_two_feature_payloads(
     data = response.json()["data"]
     assert data["feature_a"]["name"] == "장소 A"
     assert data["feature_b"]["name"] == "장소 B"
+    # T-VN-32C 값 전환 — 상세 비교 feature snapshot의 feature_id는 UUID 정본.
+    assert data["feature_a"]["feature_id"] == _expected_uuid("feature-a")
+    assert data["feature_b"]["feature_id"] == _expected_uuid("feature-b")
     assert data["feature_a"]["detail"]["phone"] == "02-0000-0000"
     assert data["feature_a"]["sources"][0]["provider"] == "python-mois-api"
     assert data["distance_m"] == 12.5

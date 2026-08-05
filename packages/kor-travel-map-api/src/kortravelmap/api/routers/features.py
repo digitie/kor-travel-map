@@ -22,7 +22,7 @@ ADR 참조
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from time import perf_counter
 from typing import Annotated, Any, Literal, assert_never
@@ -64,8 +64,12 @@ from kortravelmap.api.auth import require_admin_frontend, require_service_token
 from kortravelmap.api.db import get_session
 from kortravelmap.api.feature_ref import resolve_feature_ref_or_error
 from kortravelmap.api.http_revision import parse_revision_header, revision_etag
+from kortravelmap.api.identity_projection import response_feature_id, uuid_substituted_row
 from kortravelmap.api.response import ClusterUnit, Meta, ProblemDetail, make_meta
-from kortravelmap.api.routers.curations import PublicCurationItemView
+from kortravelmap.api.routers.curations import (
+    PublicCurationItemView,
+    curation_item_response_feature_id,
+)
 from kortravelmap.api.settings import ApiSettings
 
 __all__ = [
@@ -169,12 +173,17 @@ class FeatureSummary(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    feature_id: str
+    feature_id: str = Field(
+        description=(
+            "feature 참조 (opaque string). T-VN-32C 값 전환 이후 UUID 정본 "
+            "문자열을 담는다 — 형식(legacy f_*/UUID)에 의존하지 말 것."
+        ),
+    )
     feature_uuid: str | None = Field(
         default=None,
         description=(
-            "UUID 정본 identity 병행 노출 (ADR-068, T-VN-32B additive). "
-            "feature_id 값 자체의 UUID 전환은 T-VN-32C."
+            "UUID 정본 identity 명시 필드 (ADR-068). T-VN-32C 이후 "
+            "feature_id와 같은 값이다."
         ),
     )
     kind: str
@@ -258,12 +267,17 @@ class FeatureDetailResponse(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    feature_id: str
+    feature_id: str = Field(
+        description=(
+            "feature 참조 (opaque string). T-VN-32C 값 전환 이후 UUID 정본 "
+            "문자열을 담는다 — 형식(legacy f_*/UUID)에 의존하지 말 것."
+        ),
+    )
     feature_uuid: str | None = Field(
         default=None,
         description=(
-            "UUID 정본 identity 병행 노출 (ADR-068, T-VN-32B additive). "
-            "feature_id 값 자체의 UUID 전환은 T-VN-32C."
+            "UUID 정본 identity 명시 필드 (ADR-068). T-VN-32C 이후 "
+            "feature_id와 같은 값이다."
         ),
     )
     kind: str
@@ -752,8 +766,10 @@ def _public_detail(detail: dict[str, Any]) -> dict[str, Any]:
 
 
 def _detail_from_row(row: dict[str, Any]) -> FeatureDetailResponse:
+    # T-VN-32C PR-2 — 응답 feature_id 값은 UUID 정본. 내부 키는 호출부가 치환
+    # 전 row의 legacy 값을 쓴다.
     return FeatureDetailResponse(
-        feature_id=row["feature_id"],
+        feature_id=response_feature_id(row),
         feature_uuid=row.get("feature_uuid"),
         kind=row["kind"],
         name=row["name"],
@@ -775,39 +791,69 @@ def _detail_from_row(row: dict[str, Any]) -> FeatureDetailResponse:
     )
 
 
-def _batch_item_from_row(row: feature_repo.FeatureBatchItemRow) -> FeatureBatchItem:
+def _wellformed_refs(refs: Sequence[str]) -> list[str]:
+    """형식 계약을 통과하는 참조만 남긴다 — batch per-item 격리용 (리뷰 M1).
+
+    형식 위반(공백 패딩/길이 초과) 참조는 해석 대상에서 빠져 원문 그대로
+    조회에 흘러가고, 종전과 동일하게 해당 item만 missing/no_data가 된다.
+    """
+    valid: list[str] = []
+    for ref in refs:
+        try:
+            feature_identity.validate_feature_ref(ref)
+        except feature_identity.FeatureIdentityRefError:
+            continue
+        valid.append(ref)
+    return valid
+
+
+def _batch_item_from_row(
+    row: feature_repo.FeatureBatchItemRow,
+    *,
+    echo_feature_id: str | None = None,
+) -> FeatureBatchItem:
+    # T-VN-32C — batch item feature_id는 **요청 표기 echo**다. 조회는 경계
+    # 해석된 legacy 키로 하되, 응답 키는 소비자(PinVi)가 보낸 문자열을
+    # 그대로 되돌린다(identity_projection 모듈 docstring의 echo 예외).
+    feature_id = echo_feature_id if echo_feature_id is not None else row.feature_id
     if row.state == "missing":
-        return FeatureBatchMissingItem(state="missing", feature_id=row.feature_id)
+        return FeatureBatchMissingItem(state="missing", feature_id=feature_id)
     if row.row_revision is None:
         raise RuntimeError(f"{row.state} batch item has no row_revision")
     if row.state == "found":
         if row.trip_card is None:
             raise RuntimeError("found batch item has no trip_card")
+        # trip_card.feature_id도 item echo와 정렬한다 — PinVi가
+        # `trip_card.feature_id == item.feature_id` 등식을 런타임 강제하므로
+        # (kor_travel_map.py _decode_feature_trip_card) legacy 잔존 시 UUID
+        # 참조 요청이 계약 오류로 파손된다 (적대 리뷰 F1).
+        trip_card = dict(row.trip_card)
+        trip_card["feature_id"] = feature_id
         return FeatureBatchFoundItem(
             state="found",
-            feature_id=row.feature_id,
+            feature_id=feature_id,
             feature_uuid=row.feature_uuid,
             row_revision=row.row_revision,
-            trip_card=FeatureTripCard.model_validate(row.trip_card),
+            trip_card=FeatureTripCard.model_validate(trip_card),
         )
     if row.state == "retired":
         return FeatureBatchRetiredItem(
             state="retired",
-            feature_id=row.feature_id,
+            feature_id=feature_id,
             feature_uuid=row.feature_uuid,
             row_revision=row.row_revision,
         )
     if row.state == "suppressed":
         return FeatureBatchSuppressedItem(
             state="suppressed",
-            feature_id=row.feature_id,
+            feature_id=feature_id,
             feature_uuid=row.feature_uuid,
             row_revision=row.row_revision,
         )
     if row.state == "unchanged":
         return FeatureBatchUnchangedItem(
             state="unchanged",
-            feature_id=row.feature_id,
+            feature_id=feature_id,
             feature_uuid=row.feature_uuid,
             row_revision=row.row_revision,
         )
@@ -864,7 +910,10 @@ async def _public_feature_row_or_404(
 
 
 def _curation_item_view(row: curation_repo.CurationItem) -> PublicCurationItemView:
-    return PublicCurationItemView.model_validate(row, from_attributes=True)
+    # T-VN-32C PR-2 — curations.py 공개 표면과 같은 뷰 모델: feature 참조를
+    # UUID 정본으로 통일해 상세/목록 혼합 포맷을 막는다 (원자 릴리스 게이트).
+    view = PublicCurationItemView.model_validate(row, from_attributes=True)
+    return view.model_copy(update={"feature_id": curation_item_response_feature_id(row)})
 
 
 def _observation_view(
@@ -960,12 +1009,13 @@ async def list_features_in_bbox(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     page_rows = rows[:page_size]
+    # cursor는 치환 전 legacy feature_id 축 — keyset 술어와 같은 축이어야 한다.
     next_cursor = (
         feature_repo.encode_bbox_cursor(page_rows[-1]["feature_id"])
         if len(rows) > page_size and page_rows
         else None
     )
-    items = [FeatureSummary(**row) for row in page_rows]
+    items = [FeatureSummary(**uuid_substituted_row(row)) for row in page_rows]
     return FeaturesInBboxResponse(
         data=FeaturesInBboxData(items=items),
         meta=make_meta(
@@ -1077,7 +1127,7 @@ async def list_public_features_in_bounds(
         price_stale_hide_days=None,
     )
     truncated = len(rows) > max_items
-    items = [FeatureSummary(**row) for row in rows[:max_items]]
+    items = [FeatureSummary(**uuid_substituted_row(row)) for row in rows[:max_items]]
     return FeaturesInBoundsResponse(
         data=PublicFeatureListData(
             mode="items",
@@ -1146,7 +1196,7 @@ async def search_public_features(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     items = [
         FeatureSummary(
-            feature_id=item.feature_id,
+            feature_id=response_feature_id(item),
             feature_uuid=item.feature_uuid,
             kind=item.kind,
             name=item.name,
@@ -1231,7 +1281,7 @@ async def list_features_nearby(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     items = [
         NearbyFeatureSummary(
-            feature_id=item.feature_id,
+            feature_id=response_feature_id(item),
             feature_uuid=item.feature_uuid,
             kind=item.kind,
             name=item.name,
@@ -1334,7 +1384,7 @@ async def list_features_nearby_by_target(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     items = [
         NearbyFeatureSummary(
-            feature_id=item.feature_id,
+            feature_id=response_feature_id(item),
             feature_uuid=item.feature_uuid,
             kind=item.kind,
             name=item.name,
@@ -1367,8 +1417,9 @@ async def list_features_nearby_by_target(
     description=(
         "feature 참조는 legacy `f_*` id와 UUID 정본(canonical hyphenated) "
         "양쪽을 수용한다 (ADR-068 경계 alias 해석, T-VN-32B dual). 응답의 "
-        "`feature_id`는 legacy 값을 유지하고 `feature_uuid`가 병행 노출된다 — "
-        "값 자체의 UUID 전환은 T-VN-32C."
+        "`feature_id` 값은 UUID 정본이다 (T-VN-32C 값 전환). `feature_uuid`는 "
+        "같은 값의 명시 필드로 병행 노출된다. feature_id는 opaque string이며 "
+        "형식(legacy/UUID)에 의존하지 말 것."
     ),
     responses={
         404: {"description": "feature 참조 해석 불가 또는 비공개"},
@@ -1752,27 +1803,31 @@ class WeatherBatchResponse(BaseModel):
 def _weather_batch_item_out(
     item: weather_repo.WeatherBatchItem,
     feature_uuid_map: Mapping[str, str],
+    *,
+    echo_feature_id: str | None = None,
 ) -> WeatherBatchItemOut:
+    # T-VN-32C — item feature_id는 요청 표기 echo (조회는 해석된 legacy 키).
+    feature_id = echo_feature_id if echo_feature_id is not None else item.feature_id
     feature_uuid = feature_uuid_map.get(item.feature_id)
     if item.state == "found":
         if item.card_key is None:
             raise RuntimeError("found weather batch item has no card key")
         return WeatherBatchFoundItem(
             state="found",
-            feature_id=item.feature_id,
+            feature_id=feature_id,
             feature_uuid=feature_uuid,
             card_key=item.card_key,
         )
     if item.state == "no_data":
         return WeatherBatchNoDataItem(
             state="no_data",
-            feature_id=item.feature_id,
+            feature_id=feature_id,
             feature_uuid=feature_uuid,
         )
     if item.state == "retired":
         return WeatherBatchRetiredItem(
             state="retired",
-            feature_id=item.feature_id,
+            feature_id=feature_id,
             feature_uuid=feature_uuid,
         )
     assert_never(item.state)
@@ -1893,13 +1948,29 @@ async def get_feature_weather_batch(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> WeatherBatchResponse:
     started_at = perf_counter()
+    # T-VN-32C PR-2 — target feature 참조를 경계 해석해 legacy 키로 조회하되
+    # (미해석 참조는 정당한 no_data/retired 계열), 응답 item feature_id는
+    # 요청 표기 echo를 유지한다. 같은 target 안에서 서로 다른 표기가 같은
+    # feature로 해석되면 조회는 1회, echo는 표기별로 낸다. 형식 위반 참조는
+    # per-item 격리 유지(해당 item만 no_data — 리뷰 M1).
+    all_refs = [ref for target in body.targets for ref in target.feature_ids]
+    resolved_refs = await feature_identity.resolve_feature_identities_bulk(
+        session, _wellformed_refs(all_refs)
+    )
+
+    def _lookup_id(ref: str) -> str:
+        identity = resolved_refs.get(ref)
+        return identity.feature_id if identity is not None else ref
+
     try:
         snapshots = await weather_repo.get_weather_batch_snapshots(
             session,
             targets=tuple(
                 weather_repo.WeatherBatchTarget(
                     target_at=target.target_at,
-                    feature_ids=tuple(target.feature_ids),
+                    feature_ids=tuple(
+                        dict.fromkeys(_lookup_id(ref) for ref in target.feature_ids)
+                    ),
                 )
                 for target in body.targets
             ),
@@ -1915,6 +1986,22 @@ async def get_feature_weather_batch(
     feature_uuid_map = await feature_identity.get_feature_uuid_map(
         session, item_feature_ids
     )
+
+    def _target_items_out(
+        snapshot: weather_repo.WeatherBatchSnapshot,
+        requested: Sequence[str],
+    ) -> list[WeatherBatchItemOut]:
+        by_id = {item.feature_id: item for item in snapshot.items}
+        items_out: list[WeatherBatchItemOut] = []
+        for ref in requested:
+            item = by_id.get(_lookup_id(ref))
+            if item is None:
+                raise RuntimeError("weather batch snapshot이 요청 target을 누락했습니다")
+            items_out.append(
+                _weather_batch_item_out(item, feature_uuid_map, echo_feature_id=ref)
+            )
+        return items_out
+
     return WeatherBatchResponse(
         data=WeatherBatchData(
             known_at=body.known_at,
@@ -1923,13 +2010,10 @@ async def get_feature_weather_batch(
                     target_at=snapshot.target_at,
                     timeline_until=snapshot.target_at
                     + timedelta(days=weather_repo.WEATHER_BATCH_TIMELINE_DAYS),
-                    items=[
-                        _weather_batch_item_out(item, feature_uuid_map)
-                        for item in snapshot.items
-                    ],
+                    items=_target_items_out(snapshot, target.feature_ids),
                     cards=[_weather_batch_card_out(card) for card in snapshot.cards],
                 )
-                for snapshot in snapshots
+                for snapshot, target in zip(snapshots, body.targets, strict=True)
             ],
         ),
         meta=make_meta(request, started_at=started_at),
@@ -2008,7 +2092,8 @@ async def get_feature_weather(
     metrics = [] if card is None else [_weather_metric_out(metric) for metric in card.current]
     return FeatureWeatherResponse(
         data=WeatherCardData(
-            feature_id=item.feature_id,
+            # T-VN-32C PR-2 — 단건 card 응답의 feature_id는 UUID 정본 값.
+            feature_id=identity.feature_uuid,
             asof=asof,
             source_styles=(
                 []
@@ -2061,9 +2146,9 @@ async def get_area_contained_features(
     )
     return AreaContainedFeaturesResponse(
         data=AreaContainedFeaturesData(
-            area_feature_id=canonical_id,
+            area_feature_id=identity.feature_uuid,
             area_square_meters=area_row.get("area_square_meters"),
-            items=[FeatureSummary(**row) for row in rows],
+            items=[FeatureSummary(**uuid_substituted_row(row)) for row in rows],
         ),
         meta=make_meta(request, started_at=started_at, page_size=page_size),
     )
@@ -2102,7 +2187,8 @@ async def get_feature_price(
     )
     return FeaturePriceResponse(
         data=PriceCardData(
-            feature_id=card.feature_id,
+            # T-VN-32C PR-2 — 단건 card 응답의 feature_id는 UUID 정본 값.
+            feature_id=identity.feature_uuid,
             asof=card.asof,
             current=[_price_point_out(point) for point in card.current],
             history=[_price_point_out(point) for point in card.history],
@@ -2132,10 +2218,27 @@ async def get_features_batch(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> FeatureBatchResponse:
     started_at = perf_counter()
+    # T-VN-32C PR-2 — 값 전환 후 소비자(PinVi)가 UUID 참조를 보낸다. 경계
+    # 해석으로 legacy 키 조회를 보장하되(미해석 참조는 정당한 missing),
+    # 응답 item feature_id는 요청 표기 echo를 유지한다. 형식 위반 참조는
+    # per-item 상태 기계 격리를 지키기 위해 해석에서 제외하고 원문 그대로
+    # 조회에 흘린다(종전과 동일하게 해당 item만 missing — 리뷰 M1).
+    refs = [item.feature_id for item in body.items]
+    resolved = await feature_identity.resolve_feature_identities_bulk(
+        session, _wellformed_refs(refs)
+    )
     try:
         rows = await feature_repo.get_service_feature_batch_items(
             session,
-            tuple((item.feature_id, item.known_row_revision) for item in body.items),
+            tuple(
+                (
+                    resolved[item.feature_id].feature_id
+                    if item.feature_id in resolved
+                    else item.feature_id,
+                    item.known_row_revision,
+                )
+                for item in body.items
+            ),
         )
     except SQLAlchemyError as exc:
         raise HTTPException(
@@ -2147,6 +2250,11 @@ async def get_features_batch(
             },
         ) from exc
     return FeatureBatchResponse(
-        data=FeatureBatchData(items=[_batch_item_from_row(row) for row in rows]),
+        data=FeatureBatchData(
+            items=[
+                _batch_item_from_row(row, echo_feature_id=ref)
+                for row, ref in zip(rows, refs, strict=True)
+            ]
+        ),
         meta=make_meta(request, started_at=started_at),
     )

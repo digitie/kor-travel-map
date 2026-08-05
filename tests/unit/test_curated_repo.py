@@ -23,6 +23,7 @@ _SOURCE_ID = "22222222-2222-2222-2222-222222222222"
 _RULE_ID = "33333333-3333-3333-3333-333333333333"
 _CURATED_ID = "44444444-4444-4444-4444-444444444444"
 _FEATURE_ID = "place::datagokr::bookstore::1"
+_FEATURE_UUID = "77777777-7777-4777-8777-777777777777"
 _NOW = datetime(2026, 6, 12, 18, 0, tzinfo=_KST)
 
 
@@ -127,6 +128,7 @@ def _feature_row(**overrides: Any) -> dict[str, Any]:
         "theme_name": "책방 여행",
         "theme_group": "books",
         "feature_id": _FEATURE_ID,
+        "feature_uuid": _FEATURE_UUID,
         "feature_name": "테스트 책방",
         "feature_category": "culture",
         "feature_kind": "place",
@@ -243,6 +245,9 @@ async def test_curated_repo_read_paths_with_fake_session() -> None:
     assert snapshot.content["summary"] == "책방 요약"
     assert snapshot.content["destination_name"] == "서울특별시 중구"
     assert snapshot.items[0].relation == "bookstore_stop"
+    # T-VN-32C PR-2 — snapshot의 feature 참조는 UUID 정본으로 물질화된다.
+    assert snapshot.items[0].feature_id == _FEATURE_UUID
+    assert snapshot.items[0].feature_snapshot["feature_id"] == _FEATURE_UUID
 
 
 @pytest.mark.asyncio

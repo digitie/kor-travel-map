@@ -865,7 +865,8 @@ WHERE f.feature_id = ANY(CAST(:feature_ids AS text[]))
 # 후 LIMIT 1로 deterministic하게 반환한다.
 _GET_PRIMARY_SOURCE_DETAIL_SQL: Final[str] = """
 SELECT
-    f.feature_id, f.kind, f.name, f.category, f.status,
+    f.feature_id, CAST(f.feature_uuid AS text) AS feature_uuid,
+    f.kind, f.name, f.category, f.status,
     x_extension.ST_X(f.coord) AS lon, x_extension.ST_Y(f.coord) AS lat,
     f.address, f.detail,
     sr.source_record_key, sr.provider, sr.dataset_key,

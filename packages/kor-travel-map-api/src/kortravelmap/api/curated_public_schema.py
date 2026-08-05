@@ -26,6 +26,7 @@ from pydantic import (
     ValidationError,
 )
 
+from kortravelmap.api.identity_projection import response_feature_id
 from kortravelmap.api.response import Meta
 
 _PHONE_PATTERN = r"^\+?[0-9][0-9() -]{2,30}$"
@@ -545,7 +546,7 @@ def _place_detail(row: CuratedFeature) -> PublicCuratedPlaceDetail:
         else []
     )
     return PublicCuratedPlaceDetail(
-        feature_id=row.feature_id,
+        feature_id=response_feature_id(row),
         place_kind=_text(raw.get("place_kind")) or "place",
         phones=phones,
         reviews_link=_review_links(raw.get("reviews_link")),
@@ -559,7 +560,7 @@ def _place_detail(row: CuratedFeature) -> PublicCuratedPlaceDetail:
 def _event_detail(row: CuratedFeature) -> PublicCuratedEventDetail:
     raw = _mapping(row.detail)
     return PublicCuratedEventDetail(
-        feature_id=row.feature_id,
+        feature_id=response_feature_id(row),
         event_kind=_text(raw.get("event_kind")) or "festival",
         starts_on=_date(raw.get("starts_on")),
         ends_on=_date(raw.get("ends_on")),
@@ -576,7 +577,7 @@ def _notice_detail(row: CuratedFeature) -> PublicCuratedNoticeDetail:
     raw = _mapping(row.detail)
     severity = _int(raw.get("severity"))
     return PublicCuratedNoticeDetail(
-        feature_id=row.feature_id,
+        feature_id=response_feature_id(row),
         notice_type=_text(raw.get("notice_type")) or "notice",
         severity=severity if severity is not None and 0 <= severity <= 5 else None,
         valid_start_time=_datetime(raw.get("valid_start_time")),
@@ -589,7 +590,7 @@ def _area_detail(row: CuratedFeature) -> PublicCuratedAreaDetail:
     raw = _mapping(row.detail)
     area = _number(raw.get("area_square_meters"))
     return PublicCuratedAreaDetail(
-        feature_id=row.feature_id,
+        feature_id=response_feature_id(row),
         area_kind=_text(raw.get("area_kind")) or "area",
         area_square_meters=area if area is not None and area >= 0 else None,
         **_optional_text_fields(
@@ -604,7 +605,7 @@ def _route_detail(row: CuratedFeature) -> PublicCuratedRouteDetail:
     distance = _number(raw.get("total_distance_meters"))
     duration = _int(raw.get("expected_duration_minutes"))
     return PublicCuratedRouteDetail(
-        feature_id=row.feature_id,
+        feature_id=response_feature_id(row),
         route_type=_text(raw.get("route_type")) or "route",
         total_distance_meters=distance if distance is not None and distance >= 0 else None,
         expected_duration_minutes=duration if duration is not None and duration >= 1 else None,
@@ -628,12 +629,16 @@ def public_curated_feature_view(
 ) -> PublicCuratedFeatureView | None:
     """admin row를 공개 union으로 투영한다. 알 수 없는 kind는 공개하지 않는다."""
 
+    # T-VN-32C PR-2 — 응답 feature_id 값은 UUID 정본(라이브 row 컬럼에서 치환).
+    # ``row.detail``은 feature 원본 detail payload라 identity 필드가 없고, DB에
+    # 물질화된 curated detail snapshot(legacy 잔존)은 이 경로를 거치지 않는다 —
+    # snapshot 재물질화는 별도 단계(R6).
     common: dict[str, Any] = {
         "curated_feature_id": row.curated_feature_id,
         "theme_slug": row.theme_slug,
         "theme_name": row.theme_name,
         "theme_group": row.theme_group,
-        "feature_id": row.feature_id,
+        "feature_id": response_feature_id(row),
         "feature_name": row.feature_name,
         "feature_category": row.feature_category,
         "lon": row.lon,

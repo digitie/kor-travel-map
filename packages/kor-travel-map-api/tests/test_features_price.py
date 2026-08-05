@@ -81,7 +81,11 @@ def test_price_card_response_maps_current_and_history(
         r = client.get("/v1/features/f1/price?history_limit=25")
         assert r.status_code == 200
         d = r.json()["data"]
-        assert d["feature_id"] == "f1"
+        # T-VN-32C 값 전환 — 단건 card 응답의 feature_id는 UUID 정본
+        # (경계 해석 identity의 uuid — repo 조회는 위 kw assert대로 legacy 축).
+        from kortravelmap.core.ids import feature_uuid_from_legacy
+
+        assert d["feature_id"] == str(feature_uuid_from_legacy("f1"))
         assert d["is_stale"] is False
         assert d["latest_at"] == "2026-06-26T06:18:00Z"
         assert d["current"][0]["product_key"] == "gasoline"

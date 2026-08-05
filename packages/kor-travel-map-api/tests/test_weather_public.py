@@ -55,6 +55,10 @@ def test_weather_forecast_coordinate_response(
     issued = datetime(2026, 7, 9, 6, tzinfo=UTC)
     valid = datetime(2026, 7, 12, 0, tzinfo=UTC)
 
+    from kortravelmap.core.ids import feature_uuid_from_legacy
+
+    anchor_uuid = str(feature_uuid_from_legacy("f_w"))
+
     async def _anchor(_s: Any, **_kw: Any) -> WeatherAnchor:
         return WeatherAnchor(
             feature_id="f_w",
@@ -62,6 +66,7 @@ def test_weather_forecast_coordinate_response(
             lon=126.98,
             lat=37.56,
             distance_m=1200.0,
+            feature_uuid=anchor_uuid,
         )
 
     async def _values(_s: Any, **_kw: Any) -> list[WeatherValueTimelineRow]:
@@ -100,7 +105,9 @@ def test_weather_forecast_coordinate_response(
         assert response.status_code == 200
         data = response.json()["data"]
         assert data["target_lon"] == 126.97
-        assert data["anchor"]["feature_id"] == "f_w"
+        # T-VN-32C 값 전환 — anchor·timeline item의 feature_id는 UUID 정본.
+        assert data["anchor"]["feature_id"] == anchor_uuid
+        assert data["items"][0]["feature_id"] == anchor_uuid
         assert data["items"][0]["weather_domain"] == "kma_mid_forecast"
         assert data["items"][0]["value_number"] == 31.5
         assert "source_record_key" not in data["items"][0]
@@ -112,7 +119,11 @@ def test_weather_forecast_coordinate_response(
 def test_weather_forecast_feature_response(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from kortravelmap.core.ids import feature_uuid_from_legacy
+
     import kortravelmap.api.routers.weather as mod
+
+    anchor_uuid = str(feature_uuid_from_legacy("f_w"))
 
     async def _anchor(_s: Any, **_kw: Any) -> WeatherAnchor:
         return WeatherAnchor(
@@ -121,6 +132,7 @@ def test_weather_forecast_feature_response(
             lon=126.98,
             lat=37.56,
             distance_m=2400.0,
+            feature_uuid=anchor_uuid,
         )
 
     async def _values(_s: Any, **_kw: Any) -> list[WeatherValueTimelineRow]:
@@ -133,12 +145,11 @@ def test_weather_forecast_feature_response(
         response = client.get("/v1/features/f_target/weather/forecast?limit=1")
         assert response.status_code == 200
         data = response.json()["data"]
-        assert data["target_feature_id"] == "f_target"
-        # T-VN-32C 리뷰 F2 — 경계 해석 결과의 UUID 정본 병행 노출 (additive).
-        from kortravelmap.core.ids import feature_uuid_from_legacy
-
+        # T-VN-32C 값 전환 — target/anchor feature 참조 값은 UUID 정본
+        # (echo 예외 아님 — weather.py 449 주석), feature_uuid 병행.
+        assert data["target_feature_id"] == str(feature_uuid_from_legacy("f_target"))
         assert data["target_feature_uuid"] == str(feature_uuid_from_legacy("f_target"))
-        assert data["anchor"]["feature_id"] == "f_w"
+        assert data["anchor"]["feature_id"] == anchor_uuid
         assert data["items"] == []
     finally:
         client.app.dependency_overrides.clear()
@@ -197,12 +208,16 @@ def test_weather_alert_history_response(
     import kortravelmap.api.routers.weather as mod
 
     issued = datetime(2026, 7, 9, 6, tzinfo=UTC)
+    from kortravelmap.core.ids import feature_uuid_from_legacy
+
+    notice_uuid = str(feature_uuid_from_legacy("f_notice"))
 
     async def _alerts(_s: Any, **_kw: Any) -> list[WeatherAlertHistoryRow]:
         return [
             WeatherAlertHistoryRow(
                 source_record_key="sr_alert",
                 feature_id="f_notice",
+                feature_uuid=notice_uuid,
                 feature_name="호우주의보",
                 region_code="11B10101",
                 region_name="서울특별시",
@@ -228,6 +243,8 @@ def test_weather_alert_history_response(
         response = client.get("/v1/features/weather/alerts?region_code=11B10101")
         assert response.status_code == 200
         item = response.json()["data"]["items"][0]
+        # T-VN-32C 값 전환 — 연결 feature 참조 값은 UUID 정본.
+        assert item["feature_id"] == notice_uuid
         assert item["region_code"] == "11B10101"
         assert item["phenomenon"] == "호우"
         assert {

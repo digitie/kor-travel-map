@@ -90,6 +90,13 @@ def client(
     )
 
 
+def _expected_uuid(feature_id: str) -> str:
+    """결정적 mock uuid — 테스트 편의 규약이지 저장 계약(0083 비파생 v7)이 아니다."""
+    from kortravelmap.core.ids import feature_uuid_from_legacy
+
+    return str(feature_uuid_from_legacy(feature_id))
+
+
 def _review_row() -> EnrichmentReviewRow:
     now = datetime(2026, 6, 8, tzinfo=UTC)
     return EnrichmentReviewRow(
@@ -97,6 +104,7 @@ def _review_row() -> EnrichmentReviewRow:
         status="pending",
         name_score=82.0,
         target_feature_id="f_festival",
+        target_feature_uuid=_expected_uuid("f_festival"),
         target_name="서울 봄꽃 축제",
         target_kind="event",
         target_category="01010100",
@@ -125,6 +133,7 @@ def _target_detail(detail: dict[str, Any] | None = None) -> ReviewFeatureDetail:
     now = datetime(2026, 6, 8, tzinfo=UTC)
     return ReviewFeatureDetail(
         feature_id="f_festival",
+        feature_uuid=_expected_uuid("f_festival"),
         kind="event",
         name="서울 봄꽃 축제",
         category="01010100",
@@ -174,6 +183,7 @@ def _review_detail(*, target_detail: dict[str, Any] | None = None) -> Enrichment
         status="pending",
         name_score=82.0,
         target_feature_id="f_festival",
+        target_feature_uuid=_expected_uuid("f_festival"),
         target_name="서울 봄꽃 축제",
         source_provider="python-visitkorea-api",
         source_dataset_key="visitkorea_festival_events",
@@ -257,6 +267,10 @@ def test_list_enrichment_reviews_passes_filters(
     assert response.status_code == 200
     body = response.json()
     assert body["data"]["items"][0]["review_id"] == "review-1"
+    # T-VN-32C 값 전환 — target feature 참조 표시는 UUID 정본.
+    assert body["data"]["items"][0]["target_feature_id"] == (
+        _expected_uuid("f_festival")
+    )
     assert body["data"]["items"][0]["source_name"] == "서울 봄꽃"
     assert body["data"]["items"][0]["distance_m"] == 12.5
     assert body["data"]["items"][0]["spatial_score"] == 77.88
@@ -287,6 +301,9 @@ def test_get_enrichment_review_detail_returns_compare_payload(
     assert response.status_code == 200
     data = response.json()["data"]
     assert data["target"]["name"] == "서울 봄꽃 축제"
+    # T-VN-32C 값 전환 — target/비교 snapshot의 feature 참조는 UUID 정본.
+    assert data["target_feature_id"] == _expected_uuid("f_festival")
+    assert data["target"]["feature_id"] == _expected_uuid("f_festival")
     assert data["source"]["raw_name"] == "서울 봄꽃"
     assert data["default_detail_source"] == "target"
     assert data["detail_source_effect"] == "audit_only"

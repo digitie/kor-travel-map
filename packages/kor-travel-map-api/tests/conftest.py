@@ -42,4 +42,31 @@ def _echo_feature_identity(monkeypatch: pytest.MonkeyPatch) -> None:
             feature_uuid=str(feature_uuid_from_legacy(ref)),
         )
 
+    async def _resolve_bulk(
+        _session: Any, refs: Any
+    ) -> dict[str, feature_identity.FeatureIdentity]:
+        # T-VN-32C PR-2 — write/scope·batch 경계의 일괄 해석도 echo-resolve.
+        # 모든 참조가 해석되는 세계이므로 "미해석 422/missing" 시나리오는 각
+        # 테스트가 자기 resolver로 덮어쓴다 (단건 patch와 같은 규약).
+        resolved: dict[str, feature_identity.FeatureIdentity] = {}
+        for ref in refs:
+            feature_identity.validate_feature_ref(ref)
+            resolved[ref] = feature_identity.FeatureIdentity(
+                feature_id=ref,
+                feature_uuid=str(feature_uuid_from_legacy(ref)),
+            )
+        return resolved
+
+    async def _uuid_map(_session: Any, feature_ids: Any) -> dict[str, str]:
+        # additive 병행 노출(weather batch 등)용 legacy id → uuid map echo.
+        return {
+            feature_id: str(feature_uuid_from_legacy(feature_id))
+            for feature_id in feature_ids
+            if feature_id
+        }
+
     monkeypatch.setattr(feature_identity, "resolve_feature_identity", _resolve)
+    monkeypatch.setattr(
+        feature_identity, "resolve_feature_identities_bulk", _resolve_bulk
+    )
+    monkeypatch.setattr(feature_identity, "get_feature_uuid_map", _uuid_map)

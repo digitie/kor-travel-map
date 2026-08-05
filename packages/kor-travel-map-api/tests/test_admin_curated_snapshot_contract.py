@@ -46,6 +46,15 @@ from kortravelmap.api.settings import ApiSettings
 
 pytestmark = pytest.mark.unit
 
+# T-VN-32C PR-2 — snapshot 생성부는 row의 feature_uuid 정본을 요구한다(fail-close).
+# 공유 fixture(`tests/unit/test_curated_repo._feature_row`)는 override로 주입한다.
+_FEATURE_UUID = "01890a5d-ac96-774b-bcce-b302099a8057"
+
+
+def _feature_row_with_uuid(**overrides: Any) -> dict[str, Any]:
+    overrides.setdefault("feature_uuid", _FEATURE_UUID)
+    return _feature_row(**overrides)
+
 _SNAPSHOT_PATH = "/v1/admin/features/curated/{curated_feature_id}/detail-snapshot"
 _REMOVED_ALIAS_PATH = "/v1/admin/curated-features/{curated_feature_id}/detail-snapshot"
 
@@ -302,7 +311,7 @@ async def test_snapshot_view_accepts_repository_payload(overrides: dict[str, Any
     from kortravelmap.infra import curated_repo
 
     snapshot = await curated_repo.get_curated_feature_detail_snapshot(
-        _FakeSession([_feature_row(**overrides)]),
+        _FakeSession([_feature_row_with_uuid(**overrides)]),
         curated_feature_id=_CURATED_ID,
     )
     assert snapshot is not None
@@ -336,7 +345,7 @@ def test_detail_snapshot_endpoint_serves_typed_payload(overrides: dict[str, Any]
     )
 
     async def _session() -> AsyncIterator[object]:
-        yield _FakeSession([_feature_row(**overrides)])
+        yield _FakeSession([_feature_row_with_uuid(**overrides)])
 
     app.dependency_overrides[get_session] = _session
     client = TestClient(app)
@@ -356,4 +365,8 @@ def test_detail_snapshot_endpoint_serves_typed_payload(overrides: dict[str, Any]
     assert set(data["items"][0]["feature_snapshot"]) == set(
         _SCHEMA_CONTRACTS["CuratedFeatureDetailFeatureSnapshotView"]
     )
+    # T-VN-32C 값 전환 — snapshot item·feature_snapshot의 feature 참조 값은
+    # row의 UUID 정본이다.
+    assert data["items"][0]["feature_id"] == _FEATURE_UUID
+    assert data["items"][0]["feature_snapshot"]["feature_id"] == _FEATURE_UUID
     assert "meta" in body

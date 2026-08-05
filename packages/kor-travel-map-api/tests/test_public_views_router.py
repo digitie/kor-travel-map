@@ -28,9 +28,17 @@ async def _fake_session() -> AsyncIterator[Any]:
     yield object()
 
 
+def _expected_uuid(feature_id: str) -> str:
+    """결정적 mock uuid — 테스트 편의 규약이지 저장 계약(0083 비파생 v7)이 아니다."""
+    from kortravelmap.core.ids import feature_uuid_from_legacy
+
+    return str(feature_uuid_from_legacy(feature_id))
+
+
 def _beach_row() -> public_views_repo.PublicBeachRow:
     return public_views_repo.PublicBeachRow(
         feature_id="f_beach_1",
+        feature_uuid=_expected_uuid("f_beach_1"),
         display_name="광안리 해수욕장",
         lon=129.118,
         lat=35.155,
@@ -61,6 +69,7 @@ def _beach_row() -> public_views_repo.PublicBeachRow:
 def _festival_row() -> public_views_repo.PublicFestivalRow:
     return public_views_repo.PublicFestivalRow(
         feature_id="f_festival_1",
+        feature_uuid=_expected_uuid("f_festival_1"),
         festival_name="미래 봄꽃 축제",
         lon=126.9239,
         lat=37.5263,
@@ -138,7 +147,9 @@ def test_list_public_beaches_maps_page(
         assert r.status_code == 200
         body = r.json()
         item = body["data"]["items"][0]
-        assert item["feature_id"] == "f_beach_1"
+        # T-VN-32C 값 전환 — 응답 feature_id 값은 stub row의 UUID 정본이고,
+        # next_cursor는 repo가 치환 전 legacy 축으로 encode한 값 그대로다.
+        assert item["feature_id"] == _expected_uuid("f_beach_1")
         assert item["road_address"] == "부산광역시 수영구 광안해변로"
         assert item["beach_width_m"] == 25.0
         assert item["beach_length_m"] == 1400.0
@@ -218,6 +229,8 @@ def test_public_festival_monthly_maps_items_and_months(
         assert r.status_code == 200
         body = r.json()
         item = body["data"]["items"][0]
+        # T-VN-32C 값 전환 — 응답 feature_id 값은 stub row의 UUID 정본.
+        assert item["feature_id"] == _expected_uuid("f_festival_1")
         assert item["festival_name"] == "미래 봄꽃 축제"
         assert item["event_status"] == "scheduled"
         assert item["festival_content"] == "축제 상세"

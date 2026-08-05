@@ -94,6 +94,13 @@ def _target(*, target_key: str = "poi-1", lock_version: int = 7) -> PoiCacheTarg
     )
 
 
+def _nearby_expected_uuid(feature_id: str) -> str:
+    """결정적 mock uuid — 테스트 편의 규약이지 저장 계약(0083 비파생 v7)이 아니다."""
+    from kortravelmap.core.ids import feature_uuid_from_legacy
+
+    return str(feature_uuid_from_legacy(feature_id))
+
+
 def _nearby_row() -> NearbyFeatureRow:
     now = datetime(2026, 6, 3, 12, 5, tzinfo=UTC)
     return NearbyFeatureRow(
@@ -108,6 +115,7 @@ def _nearby_row() -> NearbyFeatureRow:
         primary_provider="python-opinet-api",
         primary_dataset_key="opinet_stations",
         last_updated_at=now,
+        feature_uuid=_nearby_expected_uuid("feature-1"),
     )
 
 
@@ -645,6 +653,10 @@ def test_features_nearby_by_target_passes_filters(
         "lat",
     }
     assert body["data"]["items"][0]["distance_m"] == 320.5
+    # T-VN-32C 값 전환 — 응답 feature_id 값은 stub row의 UUID 정본.
+    assert body["data"]["items"][0]["feature_id"] == (
+        _nearby_expected_uuid("feature-1")
+    )
     assert "primary_provider" not in body["data"]["items"][0]
     assert "primary_dataset_key" not in body["data"]["items"][0]
     assert body["meta"]["page"] == {

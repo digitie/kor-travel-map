@@ -13,6 +13,7 @@ from time import perf_counter
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from kortravelmap.infra import feature_identity
 from kortravelmap.infra.admin_feature_repo import (
     EnrichmentReviewDetail,
     EnrichmentReviewPage,
@@ -32,6 +33,7 @@ from kortravelmap.api.domain_command_service import (
     domain_command_transaction,
     idempotent_domain_command,
 )
+from kortravelmap.api.identity_projection import response_feature_id
 from kortravelmap.api.response import Meta, make_meta
 from kortravelmap.api.routers.dedup_review import (
     ReviewFeatureDetailRecord,
@@ -197,12 +199,29 @@ class EnrichmentReviewDecisionResponse(BaseModel):
     meta: Meta
 
 
+def _target_response_feature_id(
+    row: EnrichmentReviewRow | EnrichmentReviewDetail,
+) -> str:
+    """review target의 응답 feature 참조 — UUID 정본 (T-VN-32C PR-2).
+
+    ``target_feature_id``는 FK CASCADE라 target feature가 항상 존재한다 —
+    uuid 결측은 projection 누락이므로 fail-close. queue의 내부 키·검색 술어는
+    치환 전 legacy ``target_feature_id`` 축 그대로다.
+    """
+    if not row.target_feature_uuid:
+        raise ValueError(
+            "enrichment review row에 target_feature_uuid가 없습니다 — "
+            "projection 누락 (T-VN-32C)"
+        )
+    return row.target_feature_uuid
+
+
 def _record(row: EnrichmentReviewRow) -> EnrichmentReviewRecord:
     return EnrichmentReviewRecord(
         review_id=row.review_id,
         status=row.status,
         name_score=row.name_score,
-        target_feature_id=row.target_feature_id,
+        target_feature_id=_target_response_feature_id(row),
         target_name=row.target_name,
         target_kind=row.target_kind,
         target_category=row.target_category,
@@ -232,8 +251,9 @@ def _source_detail(row: ReviewSourceDetail) -> ReviewSourceDetailRecord:
 
 
 def _feature_detail(row: ReviewFeatureDetail) -> ReviewFeatureDetailRecord:
+    # T-VN-32C PR-2 — 상세 비교 feature snapshot의 응답 feature_id는 UUID 정본.
     return ReviewFeatureDetailRecord(
-        feature_id=row.feature_id,
+        feature_id=response_feature_id(row),
         kind=row.kind,
         name=row.name,
         category=row.category,
@@ -259,7 +279,7 @@ def _detail(row: EnrichmentReviewDetail) -> EnrichmentReviewDetailData:
         review_id=row.review_id,
         status=row.status,
         name_score=row.name_score,
-        target_feature_id=row.target_feature_id,
+        target_feature_id=_target_response_feature_id(row),
         target_name=row.target_name,
         source_provider=row.source_provider,
         source_dataset_key=row.source_dataset_key,
@@ -316,7 +336,8 @@ async def list_reviews(
             providers=provider,
             min_score=min_score,
             max_score=max_score,
-            q=q,
+            # T-VN-32C PR-2 (S10) — UUID 표기 검색어를 legacy 정본 키로 정규화.
+            q=await feature_identity.legacy_id_for_filter(session, q),
             page_size=page_size,
             cursor=cursor,
         )

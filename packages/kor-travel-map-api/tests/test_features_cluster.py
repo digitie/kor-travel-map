@@ -162,13 +162,18 @@ def test_in_bounds_zoom_derives_cluster_unit(
 def test_in_bounds_high_zoom_returns_individual_features(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from kortravelmap.core.ids import feature_uuid_from_legacy
+
     from kortravelmap.api.routers import features as mod
+
+    f1_uuid = str(feature_uuid_from_legacy("f1"))
 
     async def _bbox(_s: Any, **_kw: Any) -> list[dict[str, Any]]:
         assert _kw["price_stale_hide_days"] is None
         return [
             {
                 "feature_id": "f1", "kind": "place", "name": "x", "category": "06020000",
+                "feature_uuid": f1_uuid,
                 "lon": 126.9, "lat": 37.5, "marker_icon": None, "marker_color": None,
                 "status": "active",
             }
@@ -183,7 +188,8 @@ def test_in_bounds_high_zoom_returns_individual_features(
         d = body["data"]
         assert body["meta"]["cluster"] is None  # zoom≥14 → 개별
         assert d["mode"] == "items"
-        assert d["items"][0]["feature_id"] == "f1"
+        # T-VN-32C 값 전환 — 응답 feature_id 값은 stub row의 UUID 정본.
+        assert d["items"][0]["feature_id"] == f1_uuid
         assert d["clusters"] == []
         # items 모드 완결성 계약: truncated/coverage 명시, cluster metadata 없음.
         assert d["truncated"] is False

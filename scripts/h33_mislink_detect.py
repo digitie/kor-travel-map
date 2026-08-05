@@ -17,6 +17,11 @@ NULL이면 건너뛰고, `features`와 inner join이라 **존재하지 않는 fe
 탐지 축은 curation item의 ``metadata_json.region``(시도 약칭)과 링크된 feature의
 ``sido_code``다. **시도 약칭↔정식명 정규화가 없으면 6개 시도에서 축이 통째로 깨진다**
 (``충북`` vs ``충청북도`` — H25B 리뷰 지적). 여기서는 코드로 비교해 그 문제를 없앤다.
+
+[T-VN-32C 값 전환 주의 — legacy-표기 고정] 이 스크립트의 prod f_* 하드코딩과
+응답 feature_id 대조 로직은 값 전환(PR-2) 이전 표면 기준이다. 재실행 시 응답의
+feature_id는 UUID 정본이므로 대조 로직을 재작성해야 한다(일회성 스크립트 —
+기록 보존용으로만 유지).
 """
 
 from __future__ import annotations

@@ -29,6 +29,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api.db import get_session
+from kortravelmap.api.identity_projection import response_feature_id
 from kortravelmap.api.response import Meta, make_meta
 
 __all__ = ["router", "MoisLicenseDetailResponse", "clear_detail_cache"]
@@ -117,8 +118,10 @@ async def get_mois_license_detail(
             detail=f"MOIS 인허가 미적재: {license_id!r}",
         )
     data = MoisLicenseDetailData(
+        # license_id는 path 참조 echo — 요청 표기 보존. feature_id는 응답 feature
+        # 참조라 UUID 정본으로 치환한다 (T-VN-32C PR-2).
         license_id=license_id,
-        feature_id=row["feature_id"],
+        feature_id=response_feature_id(row),
         name=row["name"],
         category=row["category"],
         status=row["status"],
