@@ -238,12 +238,18 @@ WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
 """
 
 # INV-068-01(모든 feature는 alias ≥ 1)과 uuid 결측을 현행 스키마에서 관측한다.
-# feature_uuid는 NOT NULL이라 정상 세계에서 둘 다 0이다 — 0이 아니면 DB 층
-# 보장이 뚫린 것이므로 호출자는 fail-close한다.
+# feature_uuid는 NOT NULL이라 정상 세계에서 셋 다 0이다 — 0이 아니면 DB 층
+# 보장이 뚫린 것이므로 호출자는 fail-close한다. alias_pair_mismatch는 0083의
+# 비파생 세계에서 새로 열리는 결함 계열(replica-mode orphan alias + 재-INSERT
+# → 사본 불일치 — FK는 child DML에서만 검사)의 보상 관측이다 (적대 리뷰 1 H3).
 _MISSING_IDENTITY_SQL: Final[str] = """
 SELECT
     count(*) FILTER (WHERE f.feature_uuid IS NULL) AS missing_uuid,
-    count(*) FILTER (WHERE a.alias IS NULL) AS missing_alias
+    count(*) FILTER (WHERE a.alias IS NULL) AS missing_alias,
+    count(*) FILTER (
+        WHERE a.alias IS NOT NULL
+          AND a.feature_uuid IS DISTINCT FROM f.feature_uuid
+    ) AS alias_pair_mismatch
 FROM feature.features AS f
 LEFT JOIN feature.feature_aliases AS a
   ON a.feature_id = f.feature_id
@@ -336,12 +342,18 @@ async def get_feature_uuid_map(
 
 async def count_features_missing_identity(
     session: AsyncSession,
-) -> tuple[int, int]:
-    """(uuid 결측 행 수, legacy alias 결측 행 수) — 정상 세계에서 ``(0, 0)``.
+) -> tuple[int, int, int]:
+    """(uuid 결측, legacy alias 결측, alias 쌍 불일치) — 정상 세계에서 ``(0, 0, 0)``.
 
     freeze INV-068-01의 현행 스키마 판(post-backfill)이다. 회귀 테스트와
     운영 점검이 사용하고, 0이 아니면 write 경로를 계속 신뢰하지 말고
     fail-close해야 한다 (:class:`FeatureIdentityInvariantError`의 사전 관측판).
+    셋째 축은 0083 비파생 세계의 사본 불일치 계열(replica-mode orphan) 전용
+    보상 관측이다 — 0083 배포 사전 점검 쿼리와 동일 축.
     """
     row = (await session.execute(text(_MISSING_IDENTITY_SQL))).mappings().one()
-    return int(row["missing_uuid"]), int(row["missing_alias"])
+    return (
+        int(row["missing_uuid"]),
+        int(row["missing_alias"]),
+        int(row["alias_pair_mismatch"]),
+    )

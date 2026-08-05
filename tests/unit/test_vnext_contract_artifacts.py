@@ -34,7 +34,7 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     "target-schema-fingerprints-v1.json": (
         "8e14b96aa973f451012fd0ad22fc0eddbe4a2ff6fc812e79ac4efe6bd4630f52"
     ),
-    "openapi-diff-v1.json": ("663dcb32eab166bfaa72de7943033331c5dc729d6965f651082dcc91e7a3beee"),
+    "openapi-diff-v1.json": ("ce41f661fb75a1747cf903ab68b58a9206cebdc31c562e04e0d29497e33a62b4"),
     "consumer-rollout-v1.json": (
         "684ee2b903124ea506bc34e418f26b254cd5c7a18f0332eebfe99fe655e09e3c"
     ),

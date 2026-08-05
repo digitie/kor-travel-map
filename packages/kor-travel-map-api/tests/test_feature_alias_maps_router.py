@@ -121,6 +121,8 @@ def test_alias_map_checksum_exposes_count_and_root(
         "schema_version": "feature-alias-map-v1",
         "alias_count": 4,
         "merkle_root": "ab" * 32,
+        # 0083 세대 표식 — 이 코드는 파생 미강제 세계에서만 배포된다(리뷰 2 F6).
+        "derivation_enforced": False,
     }
 
 

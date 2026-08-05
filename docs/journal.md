@@ -17,6 +17,49 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-08-05 (6) — T-VN-32C PR-1: 비파생 UUIDv7 정본 generator (0083) 구현·리뷰 반영
+
+- **설계**: 4축 병렬 조사 워크플로(응답 표면 62곳 인벤토리/0080~0082 제약/
+  PinVi 결합/내부 소비자) → 종합 설계. 값 전환은 PR-1(write측: generator)과
+  PR-2(read측: 응답 값 전환 — 단일 원자 릴리스)로 분해. 채택: projection
+  dual-select + 깔때기 치환(PR-2), 비파생 **UUIDv7**(app 정본
+  `make_feature_uuid` + SQL 안전망 `feature.uuid_generate_v7()` 동일 레이아웃),
+  0083은 파생 CHECK 2종 해제 + **선언적 사본 일치**(복합 UNIQUE + CASCADE
+  복합 FK), PinVi 파생 등식은 계약 개정(golden derivation.rule + nonderived_v1
+  벡터 — 기존 4벡터·root 무변경).
+- **적대 리뷰 2건 반영**(둘 다 조건부 NO-GO → 전량 반영):
+  - R1(정확성·DB): **H1** RI 트리거 이름순서 의존 실측(NO ACTION 복합 FK +
+    CASCADE 공존 시 OID 자릿수 역전에서 DELETE 23503 — CI는 구조적으로 못
+    잡음) → 복합 FK **ON DELETE CASCADE**. **H3** replica-mode orphan alias +
+    재-INSERT의 조용한 사본 불일치(비파생 세계 순수 신규 계열) →
+    `count_features_missing_identity`에 `alias_pair_mismatch` 축 신설 + 0083
+    사전 점검 쿼리 명문화. **M1** admin add 경로 DO NOTHING의 RETURNING 존재
+    = insert 증거 → sent/inserted 배선(죽은 검사 소생). **M2** 731,600행
+    잠금 실측(UNIQUE 0.6s+60MB·ACCESS EXCLUSIVE) → CONCURRENTLY 인덱스 →
+    USING INDEX·FK NOT VALID→VALIDATE 분해(0080 규율 준수). **M4** 배선 회귀
+    테스트(upsert가 kwargs를 실제 전달 — conflict-update는 이름 변경으로
+    short-circuit 회피). **M5** SQL v7를 set_byte 명시 관용구 +
+    `x_extension.gen_random_uuid()` 한정으로 재작성(난수 비트 의존 제거 —
+    초안의 이중 호출·byte8 zeroing 결함도 이 재작성에서 함께 소거).
+    M3/L 서술 정정 일체.
+  - R2(계약·rollout): nonderived 벡터 PinVi 독립 재계산 **일치 실측**(leaf·
+    root·순서). **F6** checksum 응답에 `derivation_enforced: false` 세대
+    표식(소비자 기계 판정 축). **F7** service 500 설명의 파생 문구 정정.
+    **F1** PinVi cutover UUID 리터럴 자기-정본화를 **opt-in**
+    (`accept_uuid_literals`, 기본 off) + `self_mapped_refs` 분리 집계·샘플로
+    재설계(무검증 UUID 조용한 정본화 차단). **F8** dagster 선행 배포 금지
+    (entrypoint에 migration 게이트 없음 — 코드 0083+DB 0082면 신규 write 전면
+    23514) — 0083 docstring·배포 절 명문화. F4 PinVi 문구 모순 정정.
+- OpenAPI admin/service 재생성(user 무변경 — user-client 무접촉), freeze
+  baseline·artifact sha 재고정, admin frontend types 재생성. perf gate에
+  0083 covering index 등가 집합 반영.
+- 검증: unit 2015 · API 1082 · 통합(경계/shadow/fence/perf/consistency) 56 ·
+  전체 통합 sweep 896/9(실패 9 전부 전대비 기존·환경 — 기록), ruff·mypy
+  --strict(143/65) clean.
+- **배포 게이트(불변)**: PR-1 머지 → PinVi 쌍 PR(golden 재vendor 포함)
+  머지+**배포** → Map 0083 배포(api 먼저 → dagster). 앱 단독 롤백 불가(0083
+  downgrade 동반 — NOT VALID CHECK는 UPDATE에도 강제).
+
 ## 2026-08-05 (5) — H45 판정 완료: KMA 전 job SUCCESS 전환 + 근본 원인 2(평문 HTTP 사멸)
 
 - **근본 원인 2 발견 절차**: #943 배포 후에도 실패 지속 → 같은 컨테이너·같은 키

@@ -13881,6 +13881,10 @@
             "title": "Alias Count",
             "type": "integer"
           },
+          "derivation_enforced": {
+            "title": "Derivation Enforced",
+            "type": "boolean"
+          },
           "merkle_root": {
             "title": "Merkle Root",
             "type": "string"
@@ -13894,7 +13898,8 @@
         "required": [
           "schema_version",
           "alias_count",
-          "merkle_root"
+          "merkle_root",
+          "derivation_enforced"
         ],
         "title": "FeatureAliasMapChecksumData",
         "type": "object"
@@ -48823,7 +48828,7 @@
                 }
               }
             },
-            "description": "FEATURE_ALIAS_MAP_INTEGRITY — 저장 행이 canonical/파생 계약 위반 (DB 층 보장 붕괴, 이관 중단)"
+            "description": "FEATURE_ALIAS_MAP_INTEGRITY — 저장 행이 canonical 계약 위반 (DB 층 보장 붕괴, 이관 중단 — 파생 등식은 0083부터 계약이 아님)"
           },
           "default": {
             "content": {
@@ -48869,7 +48874,7 @@
                 }
               }
             },
-            "description": "FEATURE_ALIAS_MAP_INTEGRITY — 저장 행이 canonical/파생 계약 위반 (DB 층 보장 붕괴, 이관 중단)"
+            "description": "FEATURE_ALIAS_MAP_INTEGRITY — 저장 행이 canonical 계약 위반 (DB 층 보장 붕괴, 이관 중단 — 파생 등식은 0083부터 계약이 아님)"
           },
           "default": {
             "content": {

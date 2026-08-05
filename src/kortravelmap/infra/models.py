@@ -482,6 +482,9 @@ class FeatureAliasRow(Base):
             ["feature_id", "feature_uuid"],
             ["feature.features.feature_id", "feature.features.feature_uuid"],
             name=conv("fk_feature_aliases_identity_pair"),
+            # CASCADE 필수 — 기존 CASCADE FK와 공존 시 RI 트리거 이름순서
+            # 의존을 제거한다(0083 docstring·적대 리뷰 1 H1 실측).
+            ondelete="CASCADE",
         ),
         # 닫힌 kind 기간의 실질 불변식 — legacy alias는 자기 자신 (H1).
         CheckConstraint(

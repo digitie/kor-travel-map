@@ -321,10 +321,64 @@ async def test_upsert_writes_uuid_and_alias_atomically(
     await feature_repo.load_bundle(migrated_session, _place_bundle(feature_id))
     assert await _stored_feature_uuid(migrated_session, feature_id) == expected_uuid
 
-    missing_uuid, missing_alias = await feature_identity.count_features_missing_identity(
-        migrated_session
+    (
+        missing_uuid,
+        missing_alias,
+        pair_mismatch,
+    ) = await feature_identity.count_features_missing_identity(migrated_session)
+    assert (missing_uuid, missing_alias, pair_mismatch) == (0, 0, 0)
+
+
+async def test_upsert_wires_sent_and_inserted_into_verification(
+    migrated_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """M4(적대 리뷰 1) — upsert_feature가 verify에 sent/inserted를 실제로 배선한다.
+
+    generator 이원화 차단은 verify 유닛만으로는 성립하지 않는다 — write 경로가
+    kwargs를 전달하지 않으면 죽은 검사다. 배선 자체를 회귀로 고정한다.
+    """
+    captured: list[dict[str, object]] = []
+    real_verify = feature_repo.verify_feature_uuid
+
+    def _spy(
+        feature_id: str,
+        observed: object,
+        *,
+        sent_feature_uuid: str | None = None,
+        inserted: bool | None = None,
+    ) -> str:
+        captured.append(
+            {
+                "feature_id": feature_id,
+                "sent": sent_feature_uuid,
+                "inserted": inserted,
+            }
+        )
+        return real_verify(
+            feature_id,
+            observed,
+            sent_feature_uuid=sent_feature_uuid,
+            inserted=inserted,
+        )
+
+    monkeypatch.setattr(feature_repo, "verify_feature_uuid", _spy)
+    feature_id = "f_global_p_wire00000000beef"
+    await feature_repo.load_bundle(migrated_session, _place_bundle(feature_id))
+    assert captured, "upsert 경로가 verify를 호출하지 않았다"
+    first = captured[0]
+    assert first["inserted"] is True
+    assert isinstance(first["sent"], str)
+    assert len(first["sent"]) == 36
+    # 같은 feature 재-upsert(conflict-update)는 inserted=False로 배선된다 —
+    # 무변경 payload는 load_bundle이 short-circuit하므로 이름을 바꿔 실제
+    # UPDATE 경로를 태운다.
+    captured.clear()
+    await feature_repo.load_bundle(
+        migrated_session, _place_bundle(feature_id, name="identity 검증 장소 개정")
     )
-    assert (missing_uuid, missing_alias) == (0, 0)
+    assert captured
+    assert captured[0]["inserted"] is False
 
 
 async def test_admin_add_sql_writes_uuid_and_alias(
@@ -444,8 +498,11 @@ async def test_missing_alias_is_observed_by_identity_invariant(
             "ENABLE TRIGGER trg_feature_aliases_delete_fence"
         )
     )
-    missing_uuid, missing_alias = await feature_identity.count_features_missing_identity(
-        migrated_session
-    )
+    (
+        missing_uuid,
+        missing_alias,
+        pair_mismatch,
+    ) = await feature_identity.count_features_missing_identity(migrated_session)
     assert missing_uuid == 0
     assert missing_alias >= 1
+    assert pair_mismatch == 0
