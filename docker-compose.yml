@@ -291,6 +291,13 @@ services:
         condition: service_healthy
       rustfs-init:
         condition: service_completed_successfully
+      # NEW-5 — dagster-entrypoint의 읽기 전용 DB 세대 게이트는 DB revision이
+      # 이미지 head보다 뒤면 즉시 죽는다(영구 실패, retry 없음). fresh up에서
+      # api-entrypoint의 `alembic upgrade head`가 끝나기 전에 dagster가 뜨면
+      # 그 게이트에 걸리므로, api healthy(= migration 완료 후 uvicorn 기동)를
+      # 기동 조건으로 건다.
+      api:
+        condition: service_healthy
     ports:
       - "${KOR_TRAVEL_MAP_DOCKER_BIND_HOST:-127.0.0.1}:${KOR_TRAVEL_MAP_DAGSTER_PORT:-12702}:${KOR_TRAVEL_MAP_DAGSTER_PORT:-12702}"
     volumes:
@@ -352,6 +359,13 @@ services:
         condition: service_healthy
       rustfs-init:
         condition: service_completed_successfully
+      # NEW-5 — dagster-entrypoint의 읽기 전용 DB 세대 게이트는 DB revision이
+      # 이미지 head보다 뒤면 즉시 죽는다(영구 실패, retry 없음). fresh up에서
+      # api-entrypoint의 `alembic upgrade head`가 끝나기 전에 dagster가 뜨면
+      # 그 게이트에 걸리므로, api healthy(= migration 완료 후 uvicorn 기동)를
+      # 기동 조건으로 건다.
+      api:
+        condition: service_healthy
     volumes:
       - kor-travel-map-mois-source:/app/data/mois
     command: ["dagster-daemon", "run", "-m", "kortravelmap.dagster.definitions"]

@@ -86,4 +86,10 @@ CHECK(0080/0081)와 소비자(PinVi) 검증 계약을 어떻게 개정할지, �
 - PinVi user 스냅샷 재추출·핀 회전은 값 전환 배포 후 PinVi 재고정 PR에서
   수행한다(service 표면 무변경 — config 상수 회전 불요).
 - 유예: PinVi CLI `--accept-uuid-literals`·`derivation_enforced` cutover 사전
-  검사 배선, dagster entrypoint 기계 인터록(EXPECTED_HEAD 게이트 부재 보완).
+  검사 배선.
+- dagster entrypoint 기계 인터록(NEW-5)은 구현됨: dagster-entrypoint가 읽기
+  전용 게이트(`alembic heads`/`alembic current`)로 DB revision이 이미지 head와
+  일치할 때만 기동한다 — DB가 뒤면 "api를 먼저 배포하라"로, DB가 chain 밖이면
+  stale 이미지로 즉시 실패하고, `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`가
+  설정되면 api-entrypoint와 같은 규약으로 추가 대조한다(set-but-empty 거부).
+  migration 실행은 여전히 api-entrypoint 단독 소유다.

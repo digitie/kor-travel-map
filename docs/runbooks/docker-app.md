@@ -304,6 +304,25 @@ Dagster webserver, `dagster-daemon`은 schedule/sensor daemon이다. `rustfs-ini
 `KOR_TRAVEL_MAP_DB_EXTERNAL=true` 또는 `KOR_TRAVEL_MAP_INFRA_EXTERNAL=true` 모드로
 local Postgres를 띄우지 않는다.
 
+**dagster/dagster-daemon DB 세대 게이트 (NEW-5, ADR-083)** — dagster-entrypoint는
+**읽기 전용** 인터록으로, DB의 alembic revision이 이 이미지의 head와 일치할 때만
+기동한다(마이그레이션 실행은 여전히 api-entrypoint 단독 소유):
+
+- 실패 문구 4종: "deploy the api container first"(DB가 뒤 — api 미배포/미완료),
+  "not part of this image's migration chain"(stale 이미지), "does not match the
+  expected head"(EXPECTED_HEAD 대조 — 설정된 경우만), "alembic current failed
+  after N attempts"(연결 오류 retry 소진). 앞 두 종은 retry 없이 즉시 실패다.
+- **불변식: migration이 포함된 배포는 dagster/dagster-daemon 이미지 재빌드·재배포가
+  의무다.** 게이트는 기동 시점 전용이라 이미 도는 구세대 dagster는 새 DB 위에서
+  계속 실행되고, 다음 재시작에서 stale 판정으로 영구 크래시루프에 들어간다.
+- 장기 마이그레이션 한계: fresh `compose up` 전체 기동 시 api healthcheck 창
+  (~220초)을 넘는 마이그레이션이면 compose가 dagster 생성을 포기한다
+  ("dependency failed to start") — 마이그레이션 완료 후 `docker compose up -d
+  dagster dagster-daemon` 수동 재기동이 필요하다(옛 백업 복원 뒤 forward
+  migration이 대표 사례).
+- 게이트가 ENTRYPOINT라 디버깅 셸도 DB 불일치 시 차단된다 —
+  `docker compose run --entrypoint sh dagster`로 우회한다.
+
 Compose healthcheck 기준은 다음과 같다.
 
 - `api`: 컨테이너 내부 `GET /health`
