@@ -1819,6 +1819,11 @@ def test_external_overlays_keep_candidate_storage_migration_ordering(
     migration = services["dagster-storage-migrate"]
     assert migration["command"] == ["ktm-dagster-storage", "migrate"]
     assert migration["environment"]["KOR_TRAVEL_MAP_DAGSTER_PG_URL"]
+    if overlay in {
+        "docker-compose.external-db.yml",
+        "docker-compose.external-infra.yml",
+    }:
+        assert "host.docker.internal=host-gateway" in migration["extra_hosts"]
     for name in ("dagster", "dagster-daemon"):
         depends = services[name].get("depends_on") or {}
         assert depends.get("dagster-storage-migrate", {}).get("condition") == (

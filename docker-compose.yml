@@ -381,6 +381,10 @@ services:
       DAGSTER_HOME: /opt/dagster/dagster_home
       DAGSTER_DISABLE_TELEMETRY: ${DAGSTER_DISABLE_TELEMETRY:-yes}
       KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL:-postgresql://kor_travel_map:kor_travel_map@postgres:5432/kor_travel_map_dagster}
+    # external DB/infra overlay가 host.docker.internal DSN을 주입하므로 one-shot도
+    # 장기 Dagster service와 같은 host gateway mapping을 가져야 한다.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       dagster-db-init:
         condition: service_completed_successfully
