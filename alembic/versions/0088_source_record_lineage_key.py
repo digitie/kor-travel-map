@@ -64,7 +64,10 @@ def upgrade() -> None:
           ADD COLUMN lineage_key varchar
         """
     )
-    # notice 계보를 쓰는 scope만 backfill한다 — 전체 record(73만)를 훑을 이유가 없다.
+    # notice scope만 backfill한다 — 전체 record(73만)를 훑을 이유가 없고,
+    # 그 밖의 record에 "notice 계보"를 남기는 것도 의미가 없다.
+    # 이 집합은 ``kortravelmap.core.notice_lineage_scopes``가 정본이고 writer가
+    # 같은 것을 쓴다(마이그레이션은 동결 artifact라 값을 여기 박는다).
     op.execute(
         """
         UPDATE provider_sync.source_records AS sr

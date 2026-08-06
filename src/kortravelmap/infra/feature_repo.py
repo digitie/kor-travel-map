@@ -373,7 +373,15 @@ INSERT INTO provider_sync.source_records (
     :expires_at,
     -- 계보 key를 INSERT에서 함께 계산한다. record는 불변이라 ON CONFLICT에서
     -- 갱신할 필요가 없고, 별도 UPDATE 왕복도 생기지 않는다(ADR-087).
-    (
+    --
+    -- notice scope **밖에서는 NULL**이다. 그러지 않으면 CASE의 ELSE 분기가
+    -- 모든 provider의 모든 record에 source_entity_id 사본을 남기고(73만+),
+    -- backfill이 notice scope만 채운 것과도 어긋난다.
+    CASE WHEN ((:provider, :dataset_key, :source_entity_type) IN (
+        ('python-krex-api', 'krex_traffic_notices', 'traffic_notice'),
+        ('python-kma-api', 'kma_weather_alerts', 'weather_alert')
+    ))
+    THEN (
     CASE
       WHEN :provider = 'python-krex-api'
        AND :dataset_key = 'krex_traffic_notices'
@@ -417,7 +425,7 @@ INSERT INTO provider_sync.source_records (
       )
       ELSE :source_entity_id
     END
-    )
+    ) END
 )
 ON CONFLICT (source_record_key) DO UPDATE SET
     last_seen_at = GREATEST(
