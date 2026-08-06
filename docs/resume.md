@@ -1,19 +1,68 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
-## 2026-08-07 — T-VN-37 notice 계보 key 물화 (ADR-087, PR 대기)
+## 2026-08-07 — T-VN-37 notice 계보 key 물화 (ADR-087, PR 미생성 · 머지 금지)
 
-`feat/tvn37-notice-lineage-materialization` — `source_records.lineage_key`(DB 트리거
-파생, notice scope만) + `(COALESCE(lineage_key, source_entity_id), provider,
-dataset_key, source_entity_type)` 인덱스. read 필터는 correlated 유지.
+브랜치 `feat/tvn37-notice-lineage-materialization` (origin에 push 완료).
+**PR은 아직 만들지 않았다. 사용자 지시 전까지 머지 금지.**
 
-**3,045 notice: 목록 20.4초 → 0.19초 · reconcile 118.4초 → 0.36초.** 현행 prod
-규모(145행)에서는 60.8ms → 5.2ms로 이득이 작다 — 이 변경이 사는 곳은 규모다
-(20,059 계보에서 종전 13분+ 미완 → 508ms). 결과 집합 양방향 차집합 0.
-마이그레이션 전체 3.1초, heap +1MB. 설계 4회 폐기 근거는 ADR-087.
+### 무엇을 했나
 
-**다음 한 작업**: 전체 배터리 재실행 green 확인 → 적대 리뷰 2인(scope 한정 +
-트리거로 또 바뀌었으므로 재검증) → PR 생성. **머지는 사용자 지시 대기.**
-배포 시 `EXPECTED_HEAD`를 `0088_source_record_lineage_key`로 선행 갱신.
+`provider_sync.source_records.lineage_key`(nullable, notice scope만 — DB 트리거
+`trg_source_record_lineage_key`가 `provider_sync.notice_lineage_key`로 파생,
+`ENABLE ALWAYS`) + 표현식 인덱스 `idx_source_records_lineage
+((COALESCE(lineage_key, source_entity_id)), provider, dataset_key,
+source_entity_type)`. read 필터는 correlated 유지, 계보 등식만 컬럼으로.
+reconcile CTE 2개에 `MATERIALIZED` 장벽. 마이그레이션 `0088`은 `ANALYZE`로 끝난다
+(표현식 인덱스는 통계 전까지 planner가 무시한다).
+
+실측(clean clone, jit=off, 교차 반복 최소값):
+
+| | 3,045 notice | 145행(현행 prod) |
+| --- | --- | --- |
+| notice 목록 | 20.2초 → 0.15초 | 91.8ms → 5.9ms |
+| 단건 조회 | 16.7ms → 4.2ms | 7.1ms → 4.5ms |
+| reconcile | 118.4초 → 0.36초 | 26.2ms → 23.5ms |
+
+**현행 prod 규모에서 이득은 작다.** 이 변경이 사는 곳은 규모다 — 적대 리뷰가
+만든 20,059 계보/26,811 notice(KMA 특보 Phase 2 형태)에서 종전은 13분 42초에도
+끝나지 않아 중단됐고 현재는 508ms다.
+
+### 검증 상태 (2026-08-07)
+
+- 전체 배터리: `GRAPH_OK` · mypy 145 clean · lint-imports 4 kept 0 broken ·
+  unit 2,049 passed / 5 failed · integration 954 passed / 3 failed.
+  **실패 8건 전부 환경 원인**이고 브랜치와 무관하다 — `docker` 바이너리 부재 7건
+  (`test_docker_dagster_runtime` 5, `test_domain_command_ledger` 2),
+  H35 socket guard 1건(`test_h35_exact_surface_network_free_rehearsal`,
+  `origin/main`에서도 같은 컨테이너에서 동일 실패 확인).
+- 결과 집합 동일성: 적대 리뷰가 prod restore·3,045 fixture·220 feature 랜덤
+  fixture·38 feature 수제 lab 4종에서 **양방향 차집합 0/0** 확인.
+- reconcile 종료 상태도 `close_missing` 양쪽에서 동일.
+- 적대 리뷰 4회(정확성 2 · 성능 2) 반영 완료. 마지막 성능 리뷰 1건이 **아직 진행
+  중**이다 — 그 결과는 아직 반영되지 않았다.
+
+### 다음 한 작업
+
+1. 진행 중인 성능 적대 리뷰 결과 반영.
+2. PR 생성(제목: `perf(notice): 계보 key 물화 + 인덱스 probe (T-VN-37, ADR-087)`).
+3. **머지는 사용자 지시 대기.**
+
+배포 시 `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`를
+`0088_source_record_lineage_key`로 **선행 갱신**(api 먼저, dagster/daemon 재빌드).
+`0087_route_area_subtypes`도 아직 미배포다(태스크 #38 게이트).
+
+### 남긴 가정 (ADR-087 §결과에 명시)
+
+- `source_records.(provider, dataset_key, source_entity_type)`가 자기
+  `source_entities` 행과 일치한다는 것을 제약이 강제하지 않는다. prod 0건,
+  코드로 도달 불가. entity쪽 비교 대상을 종전 그대로 `cur_sr`로 두어 차이는
+  "경쟁자를 덜 찾는" 한 방향으로만 남는다.
+- 계보 key에 시간 성분이 없어 계보당 인덱스 항목이 payload 이력만큼 증가한다
+  (50,011 record 계보에서 단건 3.3 → 12.5ms). `last_seen_at`이 NOT NULL이므로
+  정렬 2열을 인덱스에 덧붙이면 범위로 끊을 수 있으나 순서 규칙을 건드리므로 분리.
+- 인덱스 91MB의 99.9%는 `idx_source_records_provider_dataset_entity`와 중복이다
+  (out-of-scope 행에서 계보 식 = `source_entity_id`). 부분 인덱스로 8kB까지 줄이려면
+  read 술어를 두 갈래로 쪼개야 한다.
 
 ## 2026-08-06 — T-VN-41F1D-C0a·F1J-A 병합, v5 dynamic fixture 결선 대기
 

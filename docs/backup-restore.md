@@ -328,14 +328,21 @@ command가 결선돼 있지 않다** — 그 결선 전까지의 수동 기준�
 
 ### 함정 (1회차 실측)
 
-- **`session_replication_role = replica`에서도 계보 트리거는 돈다** —
-  `trg_source_record_lineage_key`를 `ENABLE ALWAYS`로 만들어 뒀기 때문이다
-  (ADR-087). 그래도 이 role로 `provider_sync.source_records`를 대량으로 손댔다면
-  아래로 정합성을 확인할 것(0행이면 전부 맞다):
+- **`pg_restore --disable-triggers`는 계보 트리거의 `ENABLE ALWAYS`를 조용히
+  벗긴다.** `trg_source_record_lineage_key`는 `session_replication_role = replica`
+  에서도 돌도록 `ENABLE ALWAYS`로 만들어 뒀는데(ADR-087), 그 옵션이 내보내는
+  `DISABLE TRIGGER ALL` → `ENABLE TRIGGER ALL` 쌍을 지나면 `tgenabled`가
+  `A` → `D` → **`O`(ORIGIN)**가 된다. 오류도 경고도 없다. 그 뒤로는 replica
+  세션의 쓰기에서 계보 파생이 통째로 빠진다.
+  복원 후 **반드시** 되돌릴 것:
+  `ALTER TABLE provider_sync.source_records
+     ENABLE ALWAYS TRIGGER trg_source_record_lineage_key;`
+  확인: `SELECT tgenabled FROM pg_trigger
+          WHERE tgname='trg_source_record_lineage_key';` → `A`여야 한다.
+- 값이 이미 어긋났다면 아래 한 문장이 점검과 복구를 겸한다(0행이면 전부 맞다):
   `UPDATE provider_sync.source_records sr
      SET lineage_key = provider_sync.notice_lineage_key(sr)
    WHERE lineage_key IS DISTINCT FROM provider_sync.notice_lineage_key(sr);`
-  (정상 role에서 실행. 같은 문장이 정합성 점검도 겸한다 — 0행이면 전부 맞다.)
 - 컨테이너 기본 `/dev/shm`(64MB)이 작아 73만 행 병렬 집계에서
   `could not resize shared memory segment` 가 난다 — 검증 쿼리는
   `SET max_parallel_workers_per_gather=0`으로 돌리거나 `--shm-size=1g`로 띄운다.

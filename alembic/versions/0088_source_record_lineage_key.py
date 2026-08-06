@@ -81,22 +81,27 @@ column은 못 쓰지만 트리거 본문에는 그 제약이 없다. 결과:
 UPDATE arm만 제한하므로 이 경로를 줄이지 못한다. 순수 ``UPDATE ... SET
 last_seen_at``은 정상적으로 트리거를 타지 않는다.
 
-비용 — 정직하게
----------------
+비용 (prod 732,678행 실측)
+--------------------------
 
-prod 규모(732,678행 / heap 1,696MB / 기존 인덱스 979MB) 실측:
+전체 **3.1초**다.
 
-- backfill UPDATE 74초. **전 행을 다시 쓴다** — 그동안 heap이 최대 2배로 부풀고
-  같은 양의 WAL이 나가며, 732k dead tuple이 남아 autovacuum이 나중에 회수한다.
-- SET NOT NULL 1.6초(전 행 스캔), CREATE INDEX 2.6초(신규 인덱스 91MB).
-- 이 전부가 alembic의 **한 트랜잭션** 안이고 ``ALTER TABLE``이 잡는 ACCESS
-  EXCLUSIVE lock이 그 시간 내내 유지된다. entrypoint의 ``alembic upgrade head``가
-  api 컨테이너 기동을 그만큼 막는다.
+- ``ADD COLUMN`` 8ms(metadata-only) · 파생 함수 13ms
+- backfill UPDATE **744행 0.42초** — heap 822 → 823MB
+- 트리거 함수·트리거·``ENABLE ALWAYS`` 각 10ms 미만
+- ``CREATE INDEX`` 1.90초(91MB) · ``ANALYZE`` 0.76초
 
-더 싼 등가물은 없다. 값이 다른 열에서 파생되므로 ``ADD COLUMN ... DEFAULT``의
-metadata-only 경로를 탈 수 없고(상수가 아니다), generated column도 불가하다
-(``concat_ws``가 STABLE). 배치 backfill은 트랜잭션을 쪼개야 하는데 그러면 중간
-상태에서 NOT NULL을 걸 수 없다.
+alembic 한 트랜잭션이라 ACCESS EXCLUSIVE lock이 이 3.1초 동안 ``source_records``
+접근을 막는다. entrypoint의 ``alembic upgrade head``가 api 기동을 그만큼 막는다.
+
+인덱스 91MB는 대부분 중복이다 — 전 행의 99.9%에서
+``COALESCE(lineage_key, source_entity_id)``가 곧 ``source_entity_id``라
+``idx_source_records_provider_dataset_entity``와 같은 값을 열 순서만 바꿔 담는다.
+744행을 위한 값이다. 부분 인덱스(``WHERE lineage_key IS NOT NULL``)로 8kB까지
+줄일 수 있지만, 그러려면 read 술어를 in-scope/out-of-scope 두 갈래로 쪼개야
+한다(planner가 부분 인덱스 술어를 증명할 수 있어야 한다). 계보 규칙 없는
+provider가 notice를 내보내는 순간 조용히 느려지는 구조라, 지금은 단일 술어를
+택했다.
 
 재검증·복구 경로
 ----------------

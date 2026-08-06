@@ -442,9 +442,8 @@ INSERT INTO provider_sync.source_records (
     raw_name, raw_address, raw_longitude, raw_latitude,
     raw_data, raw_payload_hash, fetched_at, imported_at, expires_at
 ) VALUES (
-    :source_record_key, :source_entity_key,
-    :provider, :dataset_key, :source_entity_type, :source_entity_id,
-    :source_version,
+    :source_record_key, :source_entity_key, :provider, :dataset_key,
+    :source_entity_type, :source_entity_id, :source_version,
     :raw_name, :raw_address, :raw_longitude, :raw_latitude,
     CAST(:raw_data AS jsonb), :raw_payload_hash, :fetched_at, :imported_at,
     :expires_at
@@ -724,9 +723,13 @@ def _latest_notice_only_sql(feature_alias: str) -> str:
           AND other_sr.dataset_key = cur_sr.dataset_key
           AND other_sr.source_entity_type = cur_sr.source_entity_type
           AND {_lineage_sql('other_sr')} = {_lineage_sql('cur_sr')}
-          AND other_se.provider = cur_se.provider
-          AND other_se.dataset_key = cur_se.dataset_key
-          AND other_se.source_entity_type = cur_se.source_entity_type
+          -- entity쪽 비교 대상은 종전 그대로 ``cur_sr``이다. ``cur_se``로 바꾸면
+          -- record/entity 사본이 어긋날 때 종전이 **보이던** 공지를 숨기는 방향의
+          -- 차이까지 생긴다 — 위 record쪽 등식은 인덱스를 묶기 위한 **추가**이므로
+          -- 차이는 "경쟁자를 덜 찾는" 한 방향으로만 남는다.
+          AND other_se.provider = cur_sr.provider
+          AND other_se.dataset_key = cur_sr.dataset_key
+          AND other_se.source_entity_type = cur_sr.source_entity_type
           AND other_f.feature_id <> {feature_alias}.feature_id
           AND other_f.kind = 'notice'
           AND other_f.deleted_at IS NULL

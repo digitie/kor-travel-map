@@ -71,7 +71,7 @@ read SQL에 `sr` alias가 이미 있어 **새 조인이 없다**.
 
 ### 3. 파생은 DB가 강제한다 — 트리거
 
-값이 **틀린** 경우는 값이 **틀린** 경우를 못 막는다. 잘못된 계보 key는 밀려난 공지를
+제약으로는 값이 **틀린** 경우를 못 막는다. 잘못된 계보 key는 밀려난 공지를
 공개 표면에 되살린다. 애플리케이션이 식을 들고 있는 한 그 위험은 사본 수만큼
 남는다(종전에 read·writer·migration 세 벌이었다).
 
@@ -85,7 +85,10 @@ column은 못 쓰지만 트리거 본문에는 그 제약이 없다. 결과:
   **자신**이 들어 있어 파생 컬럼만 직접 쓰는 문장도 되돌려진다 — 이게 빠지면
   트리거가 NOT NULL 이상의 일을 하지 못한다(적대 리뷰가 실증했다).
 - `ENABLE ALWAYS`라 `session_replication_role = replica`에서도 돈다(백업 복원
-  드릴이 fence 우회에 그 role을 쓴다). 그래도 값이 의심되면
+  드릴이 fence 우회에 그 role을 쓴다). **단 `pg_restore --disable-triggers`가
+  내보내는 `DISABLE TRIGGER ALL` → `ENABLE TRIGGER ALL` 쌍을 지나면 `ENABLE
+  ORIGIN`으로 조용히 강등된다** — 복원 절차가 되돌려야 한다
+  (`docs/backup-restore.md` §함정). 값이 의심되면
   `provider_sync.notice_lineage_key`로 **재계산·복구할 수 있다** — 같은 문장이
   정합성 점검도 겸한다. `docs/backup-restore.md` §함정에 적어 뒀다.
 - writer SQL에서 계보 식이 사라져, 같은 bind 파라미터를 두 타입으로 쓰다 나는
@@ -146,7 +149,7 @@ feature(KMA 특보 Phase 2의 현실적 형태)에서 **종전은 13분 42초에
 결과 집합은 두 규모 모두 양방향 차집합 0이고, reconcile 종료 상태
 (`features` status/deleted + `feature_notices`)도 `close_missing` 양쪽에서 동일하다.
 
-read 필터 SQL은 15,675자 → 6,001자로 줄었다 — 같은 CASE가 한 질의에 7번 전개되던
+read 필터 SQL은 15,675자 → 6,695자로 줄었다 — 같은 CASE가 한 질의에 7번 전개되던
 것이 컬럼 참조로 바뀌었기 때문이다.
 
 ## 폐기한 설계 4건
@@ -163,8 +166,8 @@ read 필터 SQL은 15,675자 → 6,001자로 줄었다 — 같은 CASE가 한 �
 
 ## 결과
 
-- alembic `0088`: `lineage_key` 컬럼 + 전 행 backfill + NOT NULL + 파생 함수·트리거
-  + `idx_source_records_lineage`.
+- alembic `0088`: `lineage_key` 컬럼(nullable) + notice scope 한정 backfill(744행) +
+  파생 함수·트리거(`ENABLE ALWAYS`) + 표현식 인덱스 + `ANALYZE`.
 - 배포 비용(prod 732,678행 실측): **전체 3.1초** — backfill 744행 0.42초 + 인덱스
   1.90초(91MB) + `ANALYZE` 0.76초. heap 822 → 823MB. alembic 한 트랜잭션이라
   ACCESS EXCLUSIVE lock이 그 3.1초 동안 `source_records` 접근을 막는다.
@@ -173,7 +176,13 @@ read 필터 SQL은 15,675자 → 6,001자로 줄었다 — 같은 CASE가 한 �
   필터가 인덱스 선행 컬럼을 묶으려고 record쪽 등식을 더했으므로 이 가정이
   load-bearing이 됐다(어긋나면 경쟁자를 **덜** 찾아 밀려난 공지가 남는다).
   prod 732,678행 중 0건이고 entity key가 record의 같은 tuple 해시라 코드로는
-  도달 불가다. 구조적으로 못박으려면 복합 FK가 필요하고, 그건 이 변경의 범위 밖이다.
+  도달 불가다. entity쪽 비교 대상은 종전 그대로 `cur_sr`로 두었으므로 차이는
+  "경쟁자를 덜 찾는" **한 방향**으로만 남는다. 구조적으로 못박으려면 복합 FK가
+  필요하고, 그건 이 변경의 범위 밖이다.
+- 알려진 잔여: 인덱스 91MB의 99.9%는 `idx_source_records_provider_dataset_entity`와
+  같은 값을 열 순서만 바꿔 담은 중복이다(out-of-scope 행에서 계보 식 =
+  `source_entity_id`). 744행을 위한 값이고, 부분 인덱스로 8kB까지 줄이려면 read
+  술어를 두 갈래로 쪼개야 해서 지금은 택하지 않았다 — 마이그레이션 docstring에 근거.
 - 알려진 잔여: 계보 key에 시간 성분이 없어 계보당 인덱스 항목이 payload 이력만큼
   단조 증가한다(현재 것은 하나뿐인데도). 50,011 record 계보에서 단건 조회가
   3.3 → 12.5ms였다. `last_seen_at`이 NOT NULL이라 정렬 2열을 인덱스에 덧붙이면

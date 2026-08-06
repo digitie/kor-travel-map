@@ -293,14 +293,17 @@ async def test_direct_write_to_lineage_key_is_corrected(
     assert stored == "2026-08-05::3"
 
 
-async def test_hot_upsert_path_does_not_fire_the_trigger(
+async def test_production_upsert_preserves_the_derived_value(
     migrated_session: AsyncSession,
 ) -> None:
-    """재관측(``last_seen_at``만 갱신)은 트리거를 타지 않고 값도 그대로다.
+    """재관측(같은 record key 재적재)이 계보를 망가뜨리지 않는다.
 
-    타면 provider 폴링마다 전 record가 재계산된다.
+    프로덕션 문장은 ``INSERT ... ON CONFLICT (source_record_key) DO UPDATE SET
+    last_seen_at``이다. ``UPDATE OF``는 BEFORE UPDATE arm만 제한하므로 이 문장은
+    **충돌해도 BEFORE INSERT arm이 돈다** — 그래서 "트리거를 안 탄다"가 아니라
+    "값이 그대로다"를 고정한다. 여기서 값이 흔들리면 폴링마다 계보가 바뀐다.
     """
-    await _insert_record(
+    first = await _insert_record(
         migrated_session,
         key="lin-hot",
         provider="python-krex-api",
@@ -308,35 +311,22 @@ async def test_hot_upsert_path_does_not_fire_the_trigger(
         source_entity_type="traffic_notice",
         raw_data='{"occurred_date": "2026-08-06", "route_no": "4"}',
     )
-    before = (
-        await migrated_session.execute(
-            text(
-                "SELECT xmin::text, lineage_key FROM provider_sync.source_records"
-                " WHERE source_record_key = :k"
-            ),
-            {"k": "lin-hot"},
-        )
-    ).one()
-    await migrated_session.execute(
-        text(
-            "UPDATE provider_sync.source_records"
-            " SET last_seen_at = last_seen_at + interval '1 second'"
-            " WHERE source_record_key = :k"
-        ),
-        {"k": "lin-hot"},
+    second = await _insert_record(
+        migrated_session,
+        key="lin-hot",
+        provider="python-krex-api",
+        dataset_key="krex_traffic_notices",
+        source_entity_type="traffic_notice",
+        raw_data='{"occurred_date": "2026-08-06", "route_no": "4"}',
     )
-    after = (
-        await migrated_session.execute(
-            text(
-                "SELECT lineage_key FROM provider_sync.source_records"
-                " WHERE source_record_key = :k"
-            ),
-            {"k": "lin-hot"},
-        )
-    ).scalar_one()
-    assert after == before.lineage_key == "2026-08-06::4"
+    assert first == second == "2026-08-06::4"
 
-    trigger_columns = (
+
+async def test_plain_last_seen_update_does_not_fire_the_trigger(
+    migrated_session: AsyncSession,
+) -> None:
+    """``last_seen_at``만 바꾸는 순수 UPDATE는 ``UPDATE OF`` 밖이라 트리거를 안 탄다."""
+    fires_on_last_seen = (
         await migrated_session.execute(
             text(
                 "SELECT count(*) FROM information_schema.triggered_update_columns"
@@ -346,7 +336,7 @@ async def test_hot_upsert_path_does_not_fire_the_trigger(
             )
         )
     ).scalar_one()
-    assert trigger_columns == 0
+    assert fires_on_last_seen == 0
 
 
 async def test_db_lineage_function_matches_frozen_replay_expression(

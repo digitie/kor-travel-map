@@ -697,12 +697,13 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 
 - [x] T-VN-37 — **계보 key 물화 + 인덱스 probe** (PR 대기, 머지 보류)
 
-  `provider_sync.source_records.lineage_key`(NOT NULL, DB 트리거 파생) +
-  `(lineage_key, provider, dataset_key, source_entity_type)` 인덱스. read 필터는
-  correlated를 유지하고 계보 등식만 컬럼으로 바꾼다. reconcile CTE에
-  `MATERIALIZED` 장벽. 3,045 notice에서 목록 21.2초 → 0.17초, 단건 15.6ms →
-  3.8ms, reconcile 124.8초 → 0.58초. 결과 집합·reconcile 종료 상태 동일.
-  alembic `0088`, ADR-087.
+  `provider_sync.source_records.lineage_key`(nullable, notice scope만 — DB 트리거
+  파생) + `(COALESCE(lineage_key, source_entity_id), provider, dataset_key,
+  source_entity_type)` 표현식 인덱스. read 필터는 correlated를 유지하고 계보
+  등식만 컬럼으로 바꾼다. reconcile CTE에 `MATERIALIZED` 장벽. 3,045 notice에서
+  목록 20.4초 → 0.19초, reconcile 118.4초 → 0.36초(현행 prod 145행에서는
+  60.8ms → 5.2ms로 이득이 작다 — 이 변경이 사는 곳은 규모다). 결과 집합·reconcile
+  종료 상태 동일. 마이그레이션 3.1초. alembic `0088`, ADR-087.
 
 - [ ] T-VN-37D — **empty range 표현 (보류)**
 
