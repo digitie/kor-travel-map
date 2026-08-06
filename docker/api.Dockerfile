@@ -42,10 +42,12 @@ COPY --from=builder /install /usr/local
 COPY alembic.ini ./
 COPY alembic ./alembic
 COPY docker/api-entrypoint.sh ./docker/api-entrypoint.sh
+COPY --chown=appuser:appuser docker/application-schema-head.py /usr/local/bin/ktm-application-schema
 COPY --chown=appuser:appuser scripts/h35/h35_cutover.py ./scripts/h35/h35_cutover.py
 COPY --chown=appuser:appuser resources/curations ./resources/curations
 
-RUN chmod +x ./docker/api-entrypoint.sh ./scripts/h35/h35_cutover.py \
+RUN chmod 0755 /usr/local/bin/ktm-application-schema \
+    && chmod +x ./docker/api-entrypoint.sh ./scripts/h35/h35_cutover.py \
     && chown -R appuser:appuser /app
 
 USER appuser
