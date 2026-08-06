@@ -54,11 +54,32 @@ NOT NULL + 트리거인 이유 — 파생을 DB가 강제한다
 hot path인 ``ON CONFLICT DO UPDATE SET last_seen_at``은 ``UPDATE OF`` 열 목록에
 없어 트리거를 타지 않는다.
 
-비용
-----
+비용 — 정직하게
+---------------
 
-prod 규모(732,678행) 실측: backfill UPDATE 74초, SET NOT NULL 1.6초, CREATE INDEX
-2.6초. entrypoint의 ``alembic upgrade head`` 안에서 한 번 지불한다.
+prod 규모(732,678행 / heap 1,696MB / 기존 인덱스 979MB) 실측:
+
+- backfill UPDATE 74초. **전 행을 다시 쓴다** — 그동안 heap이 최대 2배로 부풀고
+  같은 양의 WAL이 나가며, 732k dead tuple이 남아 autovacuum이 나중에 회수한다.
+- SET NOT NULL 1.6초(전 행 스캔), CREATE INDEX 2.6초(신규 인덱스 91MB).
+- 이 전부가 alembic의 **한 트랜잭션** 안이고 ``ALTER TABLE``이 잡는 ACCESS
+  EXCLUSIVE lock이 그 시간 내내 유지된다. entrypoint의 ``alembic upgrade head``가
+  api 컨테이너 기동을 그만큼 막는다.
+
+더 싼 등가물은 없다. 값이 다른 열에서 파생되므로 ``ADD COLUMN ... DEFAULT``의
+metadata-only 경로를 탈 수 없고(상수가 아니다), generated column도 불가하다
+(``concat_ws``가 STABLE). 배치 backfill은 트랜잭션을 쪼개야 하는데 그러면 중간
+상태에서 NOT NULL을 걸 수 없다.
+
+재검증·복구 경로
+----------------
+
+값이 낡거나 틀어졌다면(예: ``session_replication_role = replica``로 트리거를
+우회해 UPDATE한 경우) 아래 한 문장이 점검과 복구를 겸한다 — 0행이면 전부 맞다.
+
+    UPDATE provider_sync.source_records AS sr
+       SET lineage_key = provider_sync.source_record_lineage_key(sr)
+     WHERE lineage_key IS DISTINCT FROM provider_sync.source_record_lineage_key(sr);
 """
 
 from __future__ import annotations
@@ -162,13 +183,21 @@ def upgrade() -> None:
         $tg$
         """
     )
-    # ``UPDATE OF`` 목록은 계보 입력이 되는 열만이다. hot path인
-    # ``ON CONFLICT DO UPDATE SET last_seen_at``은 여기 없어 트리거를 타지 않는다.
+    # ``UPDATE OF`` 목록 = 계보 입력 5열 + **``lineage_key`` 자신**.
+    #
+    # 자신을 빼면 파생 컬럼만 직접 쓰는 문장이 트리거를 타지 않아 거짓 값이 그대로
+    # 남는다 — 밀려난 공지가 공개 표면에 되살아난다. NOT NULL은 "비어 있지 않다"만
+    # 보장하지 "맞다"를 보장하지 않으므로, 이 항목이 없으면 트리거가 NOT NULL 이상의
+    # 일을 하지 못한다. 적대 리뷰가 실증했다.
+    #
+    # hot path인 ``ON CONFLICT DO UPDATE SET last_seen_at``은 이 목록에 없는 열만
+    # 건드리므로 여전히 트리거를 타지 않는다.
     op.execute(
         """
         CREATE TRIGGER trg_source_record_lineage_key
           BEFORE INSERT OR UPDATE OF
-            raw_data, provider, dataset_key, source_entity_type, source_entity_id
+            raw_data, provider, dataset_key, source_entity_type, source_entity_id,
+            lineage_key
           ON provider_sync.source_records
           FOR EACH ROW
           EXECUTE FUNCTION provider_sync.set_source_record_lineage_key()

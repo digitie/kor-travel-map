@@ -17,9 +17,11 @@ timestamptz 비교다.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from typing import Final
 
 import pytest
 
@@ -220,6 +222,52 @@ def test_notice_reconcile_materializes_lineage_ctes(close_missing: bool) -> None
 
     assert "out_of_scope_feature_lineages AS MATERIALIZED (" in sql
     assert "global_feature_wins AS MATERIALIZED (" in sql
+
+
+#: ``public_active_notice_filter_sql(..., frozen_h35_schema=True)``의 고정값
+#: (2026-08-07 기준 = ``origin/main``의 필터와 byte-identical).
+#:
+#: H35 리허설의 존재 이유가 "0079 당시 표면을 그대로 재생한다"이므로, 이 SQL은
+#: 동등해 보이는 재작성조차 두지 않는다. 리허설 자체는 **컬럼 참조 오류만** 잡지
+#: 의미가 같은 재작성은 못 잡으므로(그 세대 스키마에서 실행만 되면 통과한다)
+#: 여기서 바이트로 못박는다. 값이 바뀌면 리허설이 재생하는 표면이 달라진 것이다.
+_FROZEN_H35_NOTICE_FILTER_SHA256: Final[str] = (
+    "e934cdb89f1e390bb054447d572ba103a1c74442138d1d8567a938c560db46a7"
+)
+
+
+def test_frozen_h35_notice_filter_is_byte_stable() -> None:
+    frozen = feature_repo.public_active_notice_filter_sql("f", frozen_h35_schema=True)
+
+    assert len(frozen) == 15672
+    assert (
+        hashlib.sha256(frozen.encode()).hexdigest()
+        == _FROZEN_H35_NOTICE_FILTER_SHA256
+    )
+
+
+def test_frozen_h35_notice_filter_does_not_touch_the_stored_column() -> None:
+    """0079 세대에는 ``lineage_key`` 컬럼도 파생 함수도 없다 (ADR-087)."""
+    frozen = feature_repo.public_active_notice_filter_sql("f", frozen_h35_schema=True)
+
+    assert "sr.lineage_key" not in frozen
+    assert "source_record_lineage_key" not in frozen
+    # 남는 두 토큰은 파생 테이블 alias뿐이다.
+    assert "AS lineage_key" in frozen
+    assert "current_notice.lineage_key" in frozen
+
+
+def test_current_notice_filter_reads_the_stored_lineage_column() -> None:
+    """현행 필터는 계보를 **재계산하지 않는다** (ADR-087).
+
+    재계산이 남으면 인덱스가 붙을 수 없고 경쟁자 탐색이 notice 전수 스캔으로
+    되돌아간다 — 3,045 notice에서 0.17초 대 21.2초다.
+    """
+    current = feature_repo.public_active_notice_filter_sql("f")
+
+    assert "other_sr.lineage_key = cur_sr.lineage_key" in current
+    assert "raw_data" not in current
+    assert "concat_ws" not in current
 
 
 def test_nearby_feature_sql_guards_required_lon_lat_contract() -> None:

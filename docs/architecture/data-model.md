@@ -667,6 +667,27 @@ CREATE INDEX idx_source_records_provider_dataset_entity
 -- 위 인덱스와 겹치지 않도록 선택도가 가장 높은 lineage_key를 앞에 둔다.
 CREATE INDEX idx_source_records_lineage
   ON provider_sync.source_records (lineage_key, provider, dataset_key, source_entity_type);
+
+-- lineage_key 파생의 **정본**은 DB다 (ADR-087). 애플리케이션은 이 컬럼을 읽기만
+-- 한다 — H35 고정 세대 replay만 예외로 당시 식을 재계산한다.
+-- concat_ws가 STABLE이라 generated column은 쓸 수 없고, 트리거 본문에는 그 제약이
+-- 없다. UPDATE OF 목록에 lineage_key 자신이 들어 있어야 파생 컬럼만 직접 쓰는
+-- 문장도 되돌려진다 — 없으면 트리거가 NOT NULL 이상의 일을 하지 못한다.
+CREATE FUNCTION provider_sync.source_record_lineage_key(sr provider_sync.source_records)
+  RETURNS text LANGUAGE sql STABLE AS $$ SELECT <notice 계보 CASE> $$;
+
+CREATE FUNCTION provider_sync.set_source_record_lineage_key() RETURNS trigger
+  LANGUAGE plpgsql AS $$
+  BEGIN
+    NEW.lineage_key := provider_sync.source_record_lineage_key(NEW);
+    RETURN NEW;
+  END $$;
+
+CREATE TRIGGER trg_source_record_lineage_key
+  BEFORE INSERT OR UPDATE OF
+    raw_data, provider, dataset_key, source_entity_type, source_entity_id, lineage_key
+  ON provider_sync.source_records
+  FOR EACH ROW EXECUTE FUNCTION provider_sync.set_source_record_lineage_key();
 CREATE INDEX idx_source_records_entity_history
   ON provider_sync.source_records (
     source_entity_key, last_seen_at DESC, fetched_at DESC,

@@ -51,8 +51,8 @@ read SQL에 `sr` alias가 이미 있어 **새 조인이 없다**.
 분기가 `source_entity_id`(NOT NULL)이므로 값이 없을 수 있는 행 자체가 없다.
 
 NOT NULL만으로는 값이 **틀린** 경우를 못 막는다. 잘못된 계보 key는 밀려난 공지를
-공개 표면에 되살리는데, 값은 write-once라 재검증 경로가 없다. 애플리케이션이 식을
-들고 있는 한 그 위험은 사본 수만큼 남는다(종전에 read·writer·migration 세 벌이었다).
+공개 표면에 되살린다. 애플리케이션이 식을 들고 있는 한 그 위험은 사본 수만큼
+남는다(종전에 read·writer·migration 세 벌이었다).
 
 그래서 파생을 DB로 옮겼다: `provider_sync.source_record_lineage_key` 함수를
 BEFORE INSERT/UPDATE 트리거가 호출한다. `concat_ws`가 STABLE이라 generated
@@ -60,7 +60,13 @@ column은 못 쓰지만 트리거 본문에는 그 제약이 없다. 결과:
 
 - 식의 정본이 **한 곳(DB)**뿐이다. 애플리케이션은 읽기만 한다.
 - 어떤 writer든 — 애플리케이션 SQL, 테스트 픽스처, 수동 SQL — 값이 자동으로 맞고,
-  컬럼을 빠뜨려 NOT NULL에 걸리지도 않는다.
+  컬럼을 빠뜨려 NOT NULL에 걸리지도 않는다. `UPDATE OF` 목록에 `lineage_key`
+  **자신**이 들어 있어 파생 컬럼만 직접 쓰는 문장도 되돌려진다 — 이게 빠지면
+  트리거가 NOT NULL 이상의 일을 하지 못한다(적대 리뷰가 실증했다).
+- 값이 낡을 수 있는 유일한 경로는 `session_replication_role = replica`로 트리거를
+  끄고 UPDATE하는 것이다(백업 복원 드릴이 fence 우회에 쓴다). 그 경우
+  `provider_sync.source_record_lineage_key`로 **재계산·복구할 수 있다** — 같은
+  문장이 정합성 점검도 겸한다. `docs/backup-restore.md` §함정에 적어 뒀다.
 - writer SQL에서 계보 식이 사라져, 같은 bind 파라미터를 두 타입으로 쓰다 나는
   `AmbiguousParameterError` 부류가 **생길 수 없다**(실제로 그렇게 나갔다가 적대
   리뷰가 잡은 적이 있다 — 그 오류는 모든 provider의 모든 record 쓰기를 죽인다).
@@ -125,8 +131,12 @@ read 필터 SQL은 15,675자 → 6,001자로 줄었다 — 같은 CASE가 한 �
 
 - alembic `0088`: `lineage_key` 컬럼 + 전 행 backfill + NOT NULL + 파생 함수·트리거
   + `idx_source_records_lineage`.
-- 배포 비용(prod 732,678행 실측): backfill 74초, NOT NULL 1.6초, 인덱스 2.6초.
-  entrypoint의 `alembic upgrade head` 안에서 한 번 지불한다.
+- 배포 비용(prod 732,678행 / heap 1,696MB 실측): backfill 74초 + NOT NULL 1.6초 +
+  인덱스 2.6초(신규 91MB). backfill이 **전 행을 다시 쓰므로** 그동안 heap이 최대
+  2배로 부풀고 같은 양의 WAL이 나가며 dead tuple 회수는 autovacuum에 남는다.
+  전부 alembic 한 트랜잭션 안이고 ACCESS EXCLUSIVE lock이 그 시간 내내 유지된다 —
+  entrypoint의 `alembic upgrade head`가 api 기동을 그만큼 막는다. 더 싼 등가물은
+  없다(파생값이라 `DEFAULT` metadata-only 경로 불가, generated column도 불가).
 - 응답 계약 무변경.
 - 배포: `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`를
   **`0088_source_record_lineage_key`**로 선행 갱신(api 먼저, dagster/daemon 재빌드).

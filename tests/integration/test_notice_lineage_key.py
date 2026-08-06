@@ -235,6 +235,98 @@ async def test_trigger_recomputes_lineage_key_when_payload_changes(
     assert updated == "2026-08-04::8"
 
 
+async def test_direct_write_to_lineage_key_is_corrected(
+    migrated_session: AsyncSession,
+) -> None:
+    """파생 컬럼을 **직접** 써도 트리거가 되돌린다.
+
+    트리거의 ``UPDATE OF`` 목록에 ``lineage_key`` 자신이 없으면 이 문장이 트리거를
+    타지 않아 거짓 값이 그대로 남고, 밀려난 공지가 공개 표면에 되살아난다.
+    NOT NULL은 "비어 있지 않다"만 보장하지 "맞다"를 보장하지 않는다.
+    """
+    await _insert_record(
+        migrated_session,
+        key="lin-tamper",
+        provider="python-krex-api",
+        dataset_key="krex_traffic_notices",
+        source_entity_type="traffic_notice",
+        raw_data='{"occurred_date": "2026-08-05", "route_no": "3"}',
+    )
+    await migrated_session.execute(
+        text(
+            "UPDATE provider_sync.source_records SET lineage_key = 'TAMPERED'"
+            " WHERE source_record_key = :k"
+        ),
+        {"k": "lin-tamper"},
+    )
+    stored = (
+        await migrated_session.execute(
+            text(
+                "SELECT lineage_key FROM provider_sync.source_records"
+                " WHERE source_record_key = :k"
+            ),
+            {"k": "lin-tamper"},
+        )
+    ).scalar_one()
+    assert stored == "2026-08-05::3"
+
+
+async def test_hot_upsert_path_does_not_fire_the_trigger(
+    migrated_session: AsyncSession,
+) -> None:
+    """재관측(``last_seen_at``만 갱신)은 트리거를 타지 않고 값도 그대로다.
+
+    타면 provider 폴링마다 전 record가 재계산된다.
+    """
+    await _insert_record(
+        migrated_session,
+        key="lin-hot",
+        provider="python-krex-api",
+        dataset_key="krex_traffic_notices",
+        source_entity_type="traffic_notice",
+        raw_data='{"occurred_date": "2026-08-06", "route_no": "4"}',
+    )
+    before = (
+        await migrated_session.execute(
+            text(
+                "SELECT xmin::text, lineage_key FROM provider_sync.source_records"
+                " WHERE source_record_key = :k"
+            ),
+            {"k": "lin-hot"},
+        )
+    ).one()
+    await migrated_session.execute(
+        text(
+            "UPDATE provider_sync.source_records"
+            " SET last_seen_at = last_seen_at + interval '1 second'"
+            " WHERE source_record_key = :k"
+        ),
+        {"k": "lin-hot"},
+    )
+    after = (
+        await migrated_session.execute(
+            text(
+                "SELECT lineage_key FROM provider_sync.source_records"
+                " WHERE source_record_key = :k"
+            ),
+            {"k": "lin-hot"},
+        )
+    ).scalar_one()
+    assert after == before.lineage_key == "2026-08-06::4"
+
+    trigger_columns = (
+        await migrated_session.execute(
+            text(
+                "SELECT count(*) FROM information_schema.triggered_update_columns"
+                " WHERE trigger_schema = 'provider_sync'"
+                "   AND trigger_name = 'trg_source_record_lineage_key'"
+                "   AND event_object_column = 'last_seen_at'"
+            )
+        )
+    ).scalar_one()
+    assert trigger_columns == 0
+
+
 async def test_db_lineage_function_matches_frozen_replay_expression(
     migrated_session: AsyncSession,
 ) -> None:
