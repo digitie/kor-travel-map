@@ -946,14 +946,14 @@ class SourceRecordRow(Base):
             text("imported_at DESC"),
             text("source_record_key DESC"),
         ),
-        # notice 계보 탐색(read 필터·reconcile)이 쓰는 등식 인덱스 — ADR-087.
-        # read와 **같은 식**이어야 쓰인다. 두 인자가 저장 컬럼이라 IMMUTABLE이다.
+        # notice 계보 탐색(read 필터·reconcile) — ADR-087. read와 **같은 식**이어야
+        # 쓰인다(두 인자가 저장 컬럼이라 IMMUTABLE). 뒤 두 열은 순서 규칙이라
+        # "나보다 나은 행" 판정이 범위로 끊긴다.
         Index(
             "idx_source_records_lineage",
             text("(COALESCE(lineage_key, source_entity_id))"),
-            "provider",
-            "dataset_key",
-            "source_entity_type",
+            "last_seen_at",
+            "source_record_key",
         ),
         {"schema": "provider_sync"},
     )

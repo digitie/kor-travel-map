@@ -19,6 +19,13 @@
   | reconcile | 118.4초 → 0.36초 | 26.2ms → 23.5ms |
 
   결과 집합 양방향 차집합 0, reconcile 종료 상태도 `close_missing` 양쪽 동일.
+- **순서 조건을 인덱스로 밀었다.** "나보다 나은 행이 있나"를 한 술어 안 `OR`로
+  두면 Postgres가 Index Cond로 밀지 못하고 Filter로 남겨 계보의 payload 이력
+  전체를 훑는다 — 50,001 record 계보에서 `Rows Removed by Filter: 50000`,
+  단건 조회가 main보다 8배 느렸다(적대 리뷰 실측). 두 `EXISTS`로 나누고
+  (`> 행 비교` / `= 동률`), 죽은 `COALESCE(last_seen_at, …)`를 평컬럼으로 바꾸고,
+  인덱스 꼬리에 `last_seen_at, source_record_key`를 붙였다. 같은 fixture에서
+  26.8 → **21.8ms로 main보다 빠르다**. 세 규모 전부 main 우위.
   **현행 prod 규모에서 이득은 작다** — 145행은 어느 형태로도 빠르다. 실제로 사는
   곳은 규모다: 적대 리뷰가 만든 20,059 계보 / 26,811 notice에서 종전은 13분 42초에도
   끝나지 않아 중단됐고 현재는 508ms다(96만 record로 늘려도 559ms, 선형).

@@ -253,16 +253,22 @@ def upgrade() -> None:
     # 인덱스는 read가 쓰는 식 그대로다. 두 인자가 모두 저장 컬럼이라
     # ``COALESCE``는 IMMUTABLE이고 표현식 인덱스가 성립한다.
     #
-    # 열 순서: 4열 전부 등식이라 자유롭고, 선택도가 가장 높은 계보를 앞에 둔다 —
-    # scope 3열을 앞세우면 ``idx_source_records_provider_dataset_entity``/
-    # ``uq_source_records``와 **선행 3열이 겹쳐** planner가 갈리고, 무관한 dedup
-    # 질의가 이 인덱스로 새는 것을 ``test_t212d_perf_explain``이 잡았다.
+    # 뒤의 두 열이 순서 규칙(``last_seen_at`` → ``source_record_key``)이다.
+    # read가 "나보다 나은 행이 있나"를 행 비교 하나로 묻기 때문에 계보 등식 +
+    # 이 두 열이 통째로 Index Cond가 되고, 스캔이 첫 항목에서 끊긴다. 없으면
+    # 계보의 payload **이력 전체**를 훑는다 — 50,001 record 계보에서
+    # ``Rows Removed by Filter: 50000``, 단건 조회가 종전 대비 느려진다.
+    #
+    # scope 3열은 넣지 않는다. read가 scope를 entity쪽에서 거르므로 인덱스가
+    # 그것을 묶지 못하고, 넣으면 ``idx_source_records_provider_dataset_entity``와
+    # 선행 열이 겹쳐 planner가 갈린다(무관한 dedup 질의가 새는 것을
+    # ``test_t212d_perf_explain``이 잡았다).
     op.execute(
         """
         CREATE INDEX idx_source_records_lineage
           ON provider_sync.source_records (
             (COALESCE(lineage_key, source_entity_id)),
-            provider, dataset_key, source_entity_type
+            last_seen_at, source_record_key
           )
         """
     )

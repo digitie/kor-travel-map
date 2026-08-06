@@ -665,11 +665,12 @@ CREATE INDEX idx_source_records_provider_dataset_entity
   ON provider_sync.source_records (provider, dataset_key, source_entity_type, source_entity_id);
 -- notice 계보 탐색 (ADR-087). 유효 계보는 COALESCE(lineage_key, source_entity_id)이고
 -- 인덱스도 read와 **같은 식**이어야 쓰인다 — 두 인자가 저장 컬럼이라 IMMUTABLE이다.
--- 4열 전부 등식이라 열 순서가 자유롭고, 선행 3열이 위 인덱스와 겹치지 않도록
--- 선택도가 가장 높은 계보 식을 앞에 둔다.
+-- 뒤 두 열은 순서 규칙이라 "나보다 나은 행" 판정이 Index Cond로 밀려 범위로 끊긴다;
+-- 없으면 계보의 payload 이력 전체를 훑는다. scope 3열은 read가 entity쪽에서 걸러
+-- 인덱스가 묶지 못하고, 넣으면 위 인덱스와 선행 열이 겹쳐 planner가 갈린다.
 CREATE INDEX idx_source_records_lineage
   ON provider_sync.source_records (
-    (COALESCE(lineage_key, source_entity_id)), provider, dataset_key, source_entity_type);
+    (COALESCE(lineage_key, source_entity_id)), last_seen_at, source_record_key);
 
 -- lineage_key 파생의 **정본**은 DB다 (ADR-087). 애플리케이션은 이 컬럼을 읽기만
 -- 한다 — H35 고정 세대 replay만 예외로 당시 식을 재계산한다.

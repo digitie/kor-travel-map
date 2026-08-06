@@ -117,12 +117,22 @@ BEFORE INSERT arm이 돈다** — 전부 충돌하는 100,000행 upsert에서 `c
 통계 없는 DB 두 개를 만들어 확인했다. autovacuum의 평범한 `ANALYZE`도 표현식
 통계를 만들므로 배포 후 열화 위험은 없다.)
 
-### 5. read 필터는 correlated를 유지한다
+### 5. read 필터는 correlated를 유지하되, 순서 조건을 인덱스로 민다
 
-바뀐 것은 계보 key를 재계산 대신 컬럼에서 읽는다는 점뿐이다. 순서 규칙
-(`seen_at` → `source_record_key` → 현재 identity → `feature_id`)도, 경쟁자 후보를
-`deleted_at IS NULL`로만 거르는 것도 종전과 같다. 그래서 결과 집합이 바뀔 수 있는
-표면이 없다.
+계보 key를 재계산 대신 컬럼에서 읽는다. 순서 규칙(`seen_at` → `source_record_key`
+→ 현재 identity → `feature_id`)도, 경쟁자 후보를 `deleted_at IS NULL`로만 거르는
+것도 종전과 같다.
+
+바꾼 것이 하나 더 있다. **"나보다 나은 행이 있나"를 두 `EXISTS`로 나눴다.** 한
+술어 안에 `OR`로 두면 Postgres가 순서 조건을 Index Cond로 밀지 못하고 Filter로
+남겨, 계보의 payload **이력 전체**를 훑는다. 나누면 앞쪽은 순수 행 비교
+`(last_seen_at, source_record_key) > (…)`라 인덱스 범위가 되고, 뒤쪽은 동률
+(= 같은 source record를 두 feature가 공유하는 identity 이행)일 때만 도는 등식이다.
+사전식 비교라 값은 종전 3분기와 **동일**하다.
+
+`last_seen_at`은 NOT NULL이므로 종전 `COALESCE(last_seen_at, imported_at,
+fetched_at)`는 **죽은 식**이었다. 평컬럼으로 바꿔야 인덱스 열과 맞고, 값은 증명
+가능하게 같다.
 
 reconcile도 같은 인덱스를 쓴다. 거기엔 원인이 하나 더 있었다 —
 `out_of_scope_feature_lineages` CTE가 갱신 대상 feature마다 재실행됐다
@@ -135,14 +145,15 @@ SQL을 바이트 그대로** 유지한다(`_frozen_h35_latest_notice_only_sql`).
 
 ## 근거 (실측 — jit=off, 교차 반복 최소값)
 
-| 형태 | 3,045 notice | 145행(현행 prod) |
-| --- | --- | --- |
-| notice 목록 | 20.4초 → **0.19초** | 60.8ms → **5.2ms** |
-| 전체 feature | 20.1초 → **0.67초** | 614ms → **520ms** |
-| 단건 조회(노출) | 15.6ms → **3.7ms** | 6.4ms → **3.4ms** |
-| reconcile | 118.4초 → **0.36초** | 26.2ms → **23.5ms** |
+| 형태 | 3,045 notice | 145행(현행 prod) | 50,001 record 한 계보 |
+| --- | --- | --- | --- |
+| notice 목록 | 18.8초 → **0.085초** | 97.8ms → **6.8ms** | 65.7ms → **6.3ms** |
+| 전체 feature | 22.2초 → **0.86초** | 763ms → **654ms** | — |
+| 단건 조회 | 16.2ms → **5.2ms** | 6.9ms → **6.1ms** | 26.8ms → **21.8ms** |
+| reconcile | 118.4초 → **0.36초** | 26.2ms → **23.5ms** | — |
 
-**현행 prod 규모에서 이득은 작다** — 145행은 어느 형태로도 빠르다. 이 변경이
+**세 규모 모두 `origin/main`보다 빠르다.** 현행 prod 규모에서 이득은 작다 —
+145행은 어느 형태로도 빠르다. 이 변경이
 실제로 사는 곳은 규모가 커질 때다. 적대 리뷰가 만든 20,059 계보 / 26,811 notice
 feature(KMA 특보 Phase 2의 현실적 형태)에서 **종전은 13분 42초에도 끝나지 않아
 중단**됐고 현재는 508ms다. payload 이력을 계보당 10벌로 늘려 96만 record를 만들어도
@@ -182,12 +193,14 @@ read 필터 SQL은 15,675자 → 6,695자로 줄었다 — 같은 CASE가 한 �
   계보 비교만 다르다.
 - 알려진 잔여: 인덱스 91MB의 99.9%는 `idx_source_records_provider_dataset_entity`와
   같은 값을 열 순서만 바꿔 담은 중복이다(out-of-scope 행에서 계보 식 =
-  `source_entity_id`). 744행을 위한 값이고, 부분 인덱스로 8kB까지 줄이려면 read
-  술어를 두 갈래로 쪼개야 해서 지금은 택하지 않았다 — 마이그레이션 docstring에 근거.
-- 알려진 잔여: 계보 key에 시간 성분이 없어 계보당 인덱스 항목이 payload 이력만큼
-  단조 증가한다(현재 것은 하나뿐인데도). 50,011 record 계보에서 단건 조회가
-  3.3 → 12.5ms였다. `last_seen_at`이 NOT NULL이라 정렬 2열을 인덱스에 덧붙이면
-  범위 스캔으로 끊을 수 있다 — 순서 규칙을 건드리므로 별도 변경으로 분리한다.
+  `source_entity_id`). 744행을 위한 값이고, 부분 인덱스로 줄이려면 read 술어를
+  in-scope/out-of-scope 두 갈래로 쪼개야 해서 지금은 택하지 않았다.
+- 계보 key에 **시간 성분이 없다** — KMA는 `(region_code, phenomenon)`이라 한 지역의
+  호우특보가 영원히 한 계보로 접힌다. 계보당 인덱스 항목이 payload 이력만큼 단조
+  증가하는데 현재인 것은 언제나 하나다. 처음에는 그 이력을 통째로 훑어 **50,001
+  record 계보에서 단건 조회가 `origin/main`보다 느렸다**(적대 리뷰 실측 8.1배).
+  순서 조건을 인덱스로 밀어 해결했다(결정 5) — 같은 fixture에서 26.8ms →
+  **21.8ms로 main보다 빠르고**, `Rows Removed by Filter: 50000`이 0이 됐다.
 - 응답 계약 무변경.
 - 배포: `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`를
   **`0088_source_record_lineage_key`**로 선행 갱신(api 먼저, dagster/daemon 재빌드).

@@ -239,7 +239,7 @@ membership을 batch로 붙여 fan-out이 page 경계를 바꾸지 않게 한다.
 |--------|------|------|
 | `idx_source_entities_current_record` | (current_source_record_key) | partial NOT NULL, 현재 immutable payload 포인터 |
 | `idx_source_records_provider_dataset_entity` | (provider, dataset_key, source_entity_type, source_entity_id) | |
-| `idx_source_records_lineage` | ((COALESCE(lineage_key, source_entity_id)), provider, dataset_key, source_entity_type) | notice 계보 probe (ADR-087). read와 같은 식이어야 쓰인다. 위 인덱스와 선행 열이 겹치지 않도록 계보 식이 앞 |
+| `idx_source_records_lineage` | ((COALESCE(lineage_key, source_entity_id)), last_seen_at, source_record_key) | notice 계보 probe (ADR-087). read와 같은 식이어야 쓰인다. 뒤 두 열이 순서 규칙이라 "나보다 나은 행" 판정이 범위로 끊긴다 |
 | `idx_source_records_entity_history` | (source_entity_key, last_seen_at DESC, fetched_at DESC, imported_at DESC, source_record_key DESC) | 재관측 시각 우선 entity payload 이력 cursor |
 | `idx_source_records_imported_at_brin` | BRIN(imported_at) | 시계열 |
 | `idx_source_records_fetched_at_brin` | BRIN(fetched_at) | |

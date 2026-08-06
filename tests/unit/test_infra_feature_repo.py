@@ -273,6 +273,27 @@ def test_current_notice_filter_reads_the_stored_lineage_column() -> None:
     assert "concat_ws" not in current
 
 
+def test_current_notice_filter_keeps_the_ordering_test_indexable() -> None:
+    """순서 조건이 **행 비교 하나**여야 Index Cond로 밀린다 (ADR-087).
+
+    한 술어 안에 ``OR``로 묶으면 Postgres가 Filter로 남겨 계보의 payload 이력
+    전체를 훑는다 — 50,001 record 계보에서 ``Rows Removed by Filter: 50000``.
+    그래서 "확실히 나은 행"과 "동률"을 **두 EXISTS로 나눈다**.
+    """
+    current = feature_repo.public_active_notice_filter_sql("f")
+
+    normalized = " ".join(current.split())
+
+    assert (
+        "(other_sr.last_seen_at, other_sr.source_record_key)"
+        " > (cur_sr.last_seen_at, cur_sr.source_record_key)"
+    ) in normalized
+    assert current.count("HAVING bool_and(") == 1
+    # 죽은 COALESCE가 남으면 인덱스 열과 맞지 않는다 — last_seen_at은 NOT NULL이다.
+    assert "COALESCE(cur_sr.last_seen_at" not in current
+    assert "COALESCE(other_sr.last_seen_at" not in current
+
+
 def test_nearby_feature_sql_guards_required_lon_lat_contract() -> None:
     sql = feature_repo._NEARBY_TARGET_CTE_SQL
 

@@ -17,11 +17,11 @@ reconcile CTE 2개에 `MATERIALIZED` 장벽. 마이그레이션 `0088`은 `ANALY
 
 실측(clean clone, jit=off, 교차 반복 최소값):
 
-| | 3,045 notice | 145행(현행 prod) |
-| --- | --- | --- |
-| notice 목록 | 20.2초 → 0.15초 | 91.8ms → 5.9ms |
-| 단건 조회 | 16.7ms → 4.2ms | 7.1ms → 4.5ms |
-| reconcile | 118.4초 → 0.36초 | 26.2ms → 23.5ms |
+| | 3,045 notice | 145행(현행 prod) | 50,001 record 한 계보 |
+| --- | --- | --- | --- |
+| notice 목록 | 18.8초 → 0.085초 | 97.8ms → 6.8ms | 65.7ms → 6.3ms |
+| 단건 조회 | 16.2ms → 5.2ms | 6.9ms → 6.1ms | 26.8ms → 21.8ms |
+| reconcile | 118.4초 → 0.36초 | 26.2ms → 23.5ms | — |
 
 **현행 prod 규모에서 이득은 작다.** 이 변경이 사는 곳은 규모다 — 적대 리뷰가
 만든 20,059 계보/26,811 notice(KMA 특보 Phase 2 형태)에서 종전은 13분 42초에도
@@ -52,14 +52,11 @@ reconcile CTE 2개에 `MATERIALIZED` 장벽. 마이그레이션 `0088`은 `ANALY
 
 ### 다음 한 작업
 
-2. 깊은 이력 회귀(위) 처리 여부 결정 — 고치려면 정렬 식을 평컬럼으로 바꾸고
-   인덱스 꼬리에 `last_seen_at DESC, source_record_key DESC`를 붙인 뒤 결과 동일성
-   재검증. 순서 규칙 정본을 건드리므로 별도 변경으로 분리해 뒀다.
-3. `tests/integration/test_t212d_perf_explain.py`의 `_assert_uses_index`로 계보
+2. `tests/integration/test_t212d_perf_explain.py`의 `_assert_uses_index`로 계보
    인덱스 사용을 EXPLAIN으로 고정(현재는 `pg_indexes.indexdef` 문자열 비교뿐이라
    planner가 인덱스를 안 고르게 되는 회귀를 CI가 못 잡는다).
-4. PR 생성(제목: `perf(notice): 계보 key 물화 + 인덱스 probe (T-VN-37, ADR-087)`).
-5. **머지는 사용자 지시 대기.**
+3. PR 생성(제목: `perf(notice): 계보 key 물화 + 인덱스 probe (T-VN-37, ADR-087)`).
+4. **머지는 사용자 지시 대기.**
 
 배포 시 `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`를
 `0088_source_record_lineage_key`로 **선행 갱신**(api 먼저, dagster/daemon 재빌드).
@@ -69,10 +66,9 @@ reconcile CTE 2개에 `MATERIALIZED` 장벽. 마이그레이션 `0088`은 `ANALY
 
 - (해소됨) record쪽 scope 등식을 지워 record/entity 사본 일치 가정이 더 이상
   정확성의 전제가 아니다. 이 필터는 `origin/main`의 술어 집합과 계보 비교만 다르다.
-- **깊은 이력 계보의 단건 조회가 `origin/main` 대비 8.1배 느리다**(50,001 record
-  한 계보에서 3.6 → 28.9ms). 잔여가 아니라 회귀다. 오늘 prod 깊이는 한 자릿수라
-  안 드러나지만 KMA 계보 key에 시간 성분이 없어 깊이가 영원히 증가한다.
-  고칠 방법과 왜 분리했는지는 ADR-087 §결과. **이 브랜치의 가장 큰 미해결 항목.**
+- (해소됨) 깊은 이력 계보 회귀는 순서 조건을 인덱스로 밀어 고쳤다 — 두 `EXISTS`
+  분리 + 죽은 `COALESCE` 제거 + 인덱스 꼬리 2열. 50,001 record 계보에서
+  26.8 → 21.8ms로 main보다 빠르다.
 - 인덱스가 `source_records` 쓰기에 상시 **WAL +17.5% / dirtied page +16.9%**를
   더한다(10만 행 bulk INSERT 실측). 트리거는 공짜다(WAL +2). 대안 2개는 실측으로
   배제 — 평컬럼 인덱스 파국(71.1 대 17.7초), 부분 인덱스는 planner가 증명 불가.

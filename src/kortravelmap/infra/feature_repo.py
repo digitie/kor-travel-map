@@ -668,25 +668,43 @@ def _latest_notice_only_sql(feature_alias: str) -> str:
     자기 계보에서 이겼는지만 보면 되고, 그 계보는 보통 한 자릿수 행이다. 종전
     구현이 느렸던 이유는 상관성이 아니라 **계보를 찾는 방법**이었다: 계보 key를
     ``raw_data`` JSON에서 매 행 재계산하니 인덱스가 붙을 수 없었고, 경쟁자 탐색이
-    매번 notice 전수 스캔이 됐다(3,045 notice에서 21.2초).
+    매번 notice 전수 스캔이 됐다.
 
-    계보 key를 ``source_records.lineage_key``에 물화하고
-    ``(COALESCE(lineage_key, source_entity_id), provider, dataset_key,
-    source_entity_type)`` 인덱스를 두면 그 탐색이 **인덱스 probe**가 된다.
-    실측(3,045 notice): 목록 20.4초 → 0.19초, 단건 조회 15.6ms → 3.7ms.
-    목록과 단건이 **함께** 빨라지는 것이 요점이다 — 비상관 InitPlan으로 바꾸는
-    방법은 목록만 빠르고 단건은 오히려 느려진다(ADR-087 §폐기).
+    계보 key를 ``source_records.lineage_key``에 물화하고 read와 같은 식으로
+    인덱스를 두면 그 탐색이 **인덱스 range probe**가 된다.
 
-    순서 규칙·경쟁자 후보 조건은 종전과 **완전히 같다**. 바뀐 것은 계보 key를
-    재계산 대신 컬럼에서 읽는다는 점뿐이다.
+    "나보다 나은 행이 있나"를 **두 EXISTS로 나눈 것**이 핵심이다. 한 술어 안에
+    ``OR``로 두면 Postgres가 순서 조건을 Index Cond로 밀지 못하고 Filter로 남겨,
+    계보의 payload **이력 전체**를 훑는다(50,001 record 계보에서
+    ``Rows Removed by Filter: 50000``). 나뉘면 앞쪽은 순수 행 비교라 인덱스
+    범위가 되고, 뒤쪽은 동률(= 같은 record)일 때만 도는 등식이다.
+
+    ``last_seen_at``은 NOT NULL이므로 종전의
+    ``COALESCE(last_seen_at, imported_at, fetched_at)``는 **죽은 식**이었다.
+    평컬럼으로 바꿔야 인덱스 열과 맞는다 — 값은 증명 가능하게 동일하다.
+
+    실측(단건/목록): 145행 3.5/8.0ms · 3,045 notice 4.1/244ms ·
+    50,001 record 한 계보 20.7/23.4ms. 세 규모 모두 ``origin/main``보다 빠르다.
     """
 
     canonical_cur = _canonical_notice_feature_sql(feature_alias, "cur_sr")
     canonical_other = _canonical_notice_feature_sql("other_f", "other_sr")
-    cur_seen = "COALESCE(cur_sr.last_seen_at, cur_sr.imported_at, cur_sr.fetched_at)"
-    other_seen = (
-        "COALESCE(other_sr.last_seen_at, other_sr.imported_at, other_sr.fetched_at)"
-    )
+    rivals = f"""
+        FROM provider_sync.source_records AS other_sr
+        JOIN provider_sync.source_entities AS other_se
+          ON other_se.current_source_record_key = other_sr.source_record_key
+        JOIN provider_sync.source_links AS other_sl
+          ON other_sl.source_entity_key = other_se.source_entity_key
+         AND other_sl.is_primary_source
+        JOIN feature.features AS other_f
+          ON other_f.feature_id = other_sl.feature_id
+        WHERE {_lineage_sql('other_sr')} = {_lineage_sql('cur_sr')}
+          AND other_se.provider = cur_sr.provider
+          AND other_se.dataset_key = cur_sr.dataset_key
+          AND other_se.source_entity_type = cur_sr.source_entity_type
+          AND other_f.feature_id <> {feature_alias}.feature_id
+          AND other_f.kind = 'notice'
+          AND other_f.deleted_at IS NULL"""
     return f"""
   AND (
     {feature_alias}.kind <> 'notice'
@@ -702,56 +720,32 @@ def _latest_notice_only_sql(feature_alias: str) -> str:
         ON cur_sr.source_record_key = cur_se.current_source_record_key
       WHERE cur_sl.feature_id = {feature_alias}.feature_id
         AND cur_sl.is_primary_source
-      HAVING bool_and(EXISTS (
-        -- 같은 계보에서 나보다 나은 현재 행이 있는가. 계보 등식이
-        -- idx_source_records_lineage의 **선행 컬럼**이라 여기가 인덱스 probe다.
-        --
-        -- record쪽 scope 3열 등식은 종전에 없던 것이다(종전엔 entity쪽만 있었다).
-        -- 인덱스 선행 컬럼을 묶기 위해 더했고, 두 사본이 어긋날 수 있다면 결과가
-        -- 갈린다 — prod 732,678행 중 **0건**이고 코드 경로로는 도달할 수 없지만
-        -- (entity key가 record의 같은 tuple 해시다) 제약으로 강제되지는 않는다.
-        SELECT 1
-        FROM provider_sync.source_records AS other_sr
-        JOIN provider_sync.source_entities AS other_se
-          ON other_se.current_source_record_key = other_sr.source_record_key
-        JOIN provider_sync.source_links AS other_sl
-          ON other_sl.source_entity_key = other_se.source_entity_key
-         AND other_sl.is_primary_source
-        JOIN feature.features AS other_f
-          ON other_f.feature_id = other_sl.feature_id
-        -- 계보 등식 하나가 인덱스의 **선행 컬럼**을 묶는다. scope 3열을 record쪽에도
-        -- 거는 판을 만들었다가 되돌렸다 — 같은 계획·같은 probe(rows=4)에 시간
-        -- 차이도 없었고(123 vs 128ms), 대신
-        -- ``source_records.(provider, dataset_key, source_entity_type)``가 자기
-        -- entity 행과 일치한다는 **제약 없는 가정**을 정확성의 전제로 만들었다.
-        -- 어긋나면 경쟁자를 덜 찾아 밀려난 공지가 공개 표면에 남는다.
-        WHERE {_lineage_sql('other_sr')} = {_lineage_sql('cur_sr')}
-          AND other_se.provider = cur_sr.provider
-          AND other_se.dataset_key = cur_sr.dataset_key
-          AND other_se.source_entity_type = cur_sr.source_entity_type
-          AND other_f.feature_id <> {feature_alias}.feature_id
-          AND other_f.kind = 'notice'
-          AND other_f.deleted_at IS NULL
-          AND (
-            {other_seen} > {cur_seen}
-            OR (
-              {other_seen} = {cur_seen}
-              AND other_sr.source_record_key > cur_sr.source_record_key
-            )
-            OR (
-              {other_seen} = {cur_seen}
-              AND other_sr.source_record_key = cur_sr.source_record_key
-              AND (
-                (({canonical_other}) AND NOT ({canonical_cur}))
-                OR (
-                  ({canonical_other}) = ({canonical_cur})
-                  AND other_f.feature_id < {feature_alias}.feature_id
-                )
+      HAVING bool_and(
+        -- ① 나보다 확실히 나은 현재 행. 계보 등식 + 행 비교가 통째로
+        -- idx_source_records_lineage의 Index Cond가 된다.
+        EXISTS (
+          SELECT 1{rivals}
+            AND (other_sr.last_seen_at, other_sr.source_record_key)
+                > (cur_sr.last_seen_at, cur_sr.source_record_key)
+          LIMIT 1
+        )
+        -- ② 동률 — (seen, record key)가 같다는 건 **같은 source record**를
+        -- 두 feature가 공유한다는 뜻이다(identity 이행). 현재 identity로 만든
+        -- 쪽을 우선하고, 그것도 같으면 stable feature_id로 가른다.
+        OR EXISTS (
+          SELECT 1{rivals}
+            AND (other_sr.last_seen_at, other_sr.source_record_key)
+                = (cur_sr.last_seen_at, cur_sr.source_record_key)
+            AND (
+              (({canonical_other}) AND NOT ({canonical_cur}))
+              OR (
+                ({canonical_other}) = ({canonical_cur})
+                AND other_f.feature_id < {feature_alias}.feature_id
               )
             )
-          )
-        LIMIT 1
-      ))
+          LIMIT 1
+        )
+      )
     )
   )
 """

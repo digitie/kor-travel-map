@@ -205,6 +205,10 @@ async def test_lineage_index_matches_the_read_expression(
     assert feature_repo._lineage_sql("sr") == (
         "COALESCE(sr.lineage_key, sr.source_entity_id)"
     )
+    # 순서 두 열이 없으면 "나보다 나은 행" 판정이 Index Cond로 밀리지 않고
+    # 계보의 payload 이력 전체를 훑는다.
+    assert "last_seen_at" in definition
+    assert "source_record_key" in definition
 
 
 async def test_lineage_trigger_is_enable_always(
