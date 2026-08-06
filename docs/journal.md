@@ -2,27 +2,38 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
-## 2026-08-06 (2) — T-VN-37: notice 계보 승자를 계보당 1회로 (ADR-087)
+## 2026-08-07 — T-VN-37: notice 계보 key 물화 + 인덱스 probe (ADR-087)
 
-- 공개 notice read의 `_latest_notice_only_sql`이 승자 판정을 **행마다** correlated
-  `NOT EXISTS`로 다시 했다(`DISTINCT ON` + `LATERAL`). 승자는 계보당 하나인데
-  notice 수에 제곱으로 커졌다. `ROW_NUMBER()` 1회 + 비상관 `ARRAY(SELECT ...)`
-  (InitPlan, 쿼리당 1회)로 바꿨다 — 이 저장소가 bbox에서 쓰던 패턴이다.
-  **3,045 notice 23.7초 → 0.35초, 145행(현행 prod) 448ms → 4.8ms.**
-  결과 집합은 두 규모 모두 145=145 양방향 차집합 0.
-- 계보 key는 `provider_sync.source_records`에 저장한다 — `raw_data`가 record별
-  불변이라 낡지 않고, 계보 축이 (feature, primary link)당이라 record가 유일하게
-  맞는 자리다. read에 `sr` alias가 이미 있어 새 조인이 없다.
-- **설계 3회 폐기**(전부 테스트·리뷰가 잡음): `validity tstzrange`(미래 발효 KMA
-  특보가 숨음) · 승자 물화 `superseded_at`(가변 입력이라 낡음) ·
-  `feature_notices.lineage_key`(축 불일치 + 조인 추가로 2배 느려짐).
-- **write 경로가 한 번도 실행된 적 없이 나갔다** — backfill만 검증했다. 같은 bind
-  파라미터를 INSERT 값(varchar)과 CASE(text)에 써서 `AmbiguousParameterError`로
-  **모든 provider의 모든 record 쓰기**가 죽는 상태였다. 양쪽 명시 CAST로 고치고
-  실제 드라이버로 실행해 증명했다. 계약 테스트를 신설했다.
-- InitPlan 재작성이 "한 계보라도 이기면 보존" 불변식을 깼던 것도 잡았다 —
-  `GROUP BY feature_id HAVING bool_and(rank > 1)`.
-- 배포 선행: `EXPECTED_HEAD`를 `0088_source_record_lineage_key`로.
+- 공개 notice read와 reconcile이 계보 key를 `raw_data` JSON에서 **매 행 재계산**해
+  인덱스가 붙을 수 없었고(`concat_ws`가 STABLE), 경쟁자 탐색이 매번 notice 전수
+  스캔이 됐다. 3,045 notice에서 목록 21.2초 / reconcile 124.8초.
+- `source_records.lineage_key`로 물화하고 `(lineage_key, provider, dataset_key,
+  source_entity_type)` 인덱스를 걸었다. correlated 형태는 **그대로 유지**한다 —
+  자기 계보만 보면 되고 그 계보는 보통 한 자릿수 행이다.
+  **목록 21.2초 → 0.17초 · 단건 15.6ms → 3.8ms · reconcile 124.8초 → 0.58초**
+  (145행 현행 prod: 127ms → 7.9ms · 9.0ms → 4.8ms · 251ms → 24ms).
+  결과 집합은 두 규모 모두 양방향 차집합 0, reconcile 종료 상태도 완전 동일.
+- **첫 진단이 틀렸다.** "correlated라서 제곱"이라고 보고 비상관 InitPlan
+  (`<> ALL(ARRAY(...))`)으로 갔었는데, 적대 리뷰 2인이 독립적으로 무너뜨렸다:
+  Param 배열은 해시되지 않아 복잡도가 그대로였고(10k에서 2.2초로 복귀), 단건
+  조회는 오히려 **36배 느려졌다**(상세 페이지·service batch가 흔한 경로다).
+  원인은 상관성이 아니라 계보를 찾는 방법이었다.
+- 파생은 **DB 트리거**가 한다. NOT NULL을 걸자 픽스처가 깨진 것이 신호였다 —
+  규칙을 애플리케이션이 들면 쓰는 쪽마다 사본이 필요하다. 트리거로 옮기니 식의
+  정본이 한 곳이 되고, 픽스처·수동 SQL·앞으로의 writer가 전부 자동으로 맞는다.
+  writer SQL에서 계보 식이 사라져 `AmbiguousParameterError` 부류도 소멸.
+  비용 없음(20k행 bulk insert 1,562ms vs 1,568ms).
+- 인덱스 열 순서는 `lineage_key`가 앞이다. scope 3열을 앞세우면 기존 두 인덱스와
+  선행 열이 겹쳐 무관한 dedup 질의가 새는 것을 `test_t212d_perf_explain`이 잡았다.
+- reconcile에는 원인이 하나 더 있었다 — `out_of_scope_feature_lineages` CTE가
+  갱신 행마다 재실행(loops=2,900). `MATERIALIZED` 장벽으로 잡았다.
+- H35 고정 세대 replay는 0079 SQL을 **바이트 그대로** 유지한다(생성해
+  `origin/main`과 byte-identical 확인). 그 세대엔 컬럼도 함수도 없다.
+- **설계 4회 폐기**: `validity tstzrange`(미래 발효 KMA 특보가 숨음) · 승자 물화
+  `superseded_at`(가변 입력이라 낡음) · `feature_notices.lineage_key`(축 불일치,
+  2배 느림) · 비상관 InitPlan(위).
+- 배포 선행: `EXPECTED_HEAD`를 `0088_source_record_lineage_key`로. backfill은
+  prod 규모 실측 74초(+NOT NULL 1.6초, 인덱스 2.6초).
 
 ## 2026-08-06 (codex) — T-VN-41F1D-C3 n150 파기형 rebuild 결선
 

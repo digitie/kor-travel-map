@@ -1,15 +1,19 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
-## 2026-08-06 (2) — T-VN-37 notice 계보 승자 판정 (ADR-087, PR 대기)
+## 2026-08-07 — T-VN-37 notice 계보 key 물화 (ADR-087, PR 대기)
 
-`feat/tvn37-notice-lineage-materialization` — 승자 판정을 행마다에서 계보당 1회로.
-**3,045 notice 23.7초 → 0.35초, 145행 448ms → 4.8ms**, 결과 집합 동일(145=145
-차집합 0). 계보 key는 `source_records`에 저장(불변·축 일치). 설계 3회 폐기 근거는
-ADR-087.
+`feat/tvn37-notice-lineage-materialization` — 계보 key를
+`source_records.lineage_key`로 물화(DB 트리거 파생, NOT NULL) + `(lineage_key,
+provider, dataset_key, source_entity_type)` 인덱스. read 필터는 correlated 유지.
+**3,045 notice: 목록 21.2초 → 0.17초 · 단건 15.6ms → 3.8ms · reconcile 124.8초 →
+0.58초** (145행 현행 prod: 127ms → 7.9ms · 9.0ms → 4.8ms · 251ms → 24ms).
+결과 집합 양방향 차집합 0, reconcile 종료 상태 동일. 설계 4회 폐기 근거는 ADR-087
+(비상관 InitPlan 안은 단건이 36배 느려져 적대 리뷰에서 폐기).
 
-**다음 한 작업**: 배터리 green 확인 → 적대 리뷰 2인(형태가 바뀌었으므로 승자
-의미론 재검증) → PR 생성. **머지는 사용자 지시 대기.** 배포 시 `EXPECTED_HEAD`를
-`0088_source_record_lineage_key`로 선행 갱신.
+**다음 한 작업**: 배터리 green 확인 → 적대 리뷰 2인(형태가 또 바뀌었으므로
+계보 판정 의미론과 트리거 파생을 처음부터 재검증) → PR 생성.
+**머지는 사용자 지시 대기.** 배포 시 `EXPECTED_HEAD`를
+`0088_source_record_lineage_key`로 선행 갱신(backfill 실측 74초).
 
 ## 2026-08-06 — T-VN-41F1D-C0a·F1J-A 병합, v5 dynamic fixture 결선 대기
 
