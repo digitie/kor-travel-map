@@ -265,7 +265,10 @@ def test_current_notice_filter_reads_the_stored_lineage_column() -> None:
     """
     current = feature_repo.public_active_notice_filter_sql("f")
 
-    assert "other_sr.lineage_key = cur_sr.lineage_key" in current
+    assert (
+        "COALESCE(other_sr.lineage_key, other_sr.source_entity_id)"
+        " = COALESCE(cur_sr.lineage_key, cur_sr.source_entity_id)"
+    ) in current
     assert "raw_data" not in current
     assert "concat_ws" not in current
 

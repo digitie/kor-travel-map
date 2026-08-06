@@ -44,17 +44,38 @@ notice 전수 스캔이 됐다. correlated 형태 자체는 옳다 — 자기 �
 
 read SQL에 `sr` alias가 이미 있어 **새 조인이 없다**.
 
-### 2. 파생은 DB가 강제한다 — NOT NULL + 트리거
+### 2. 물화 범위는 notice scope뿐이다
 
-읽는 쪽이 `COALESCE(lineage_key, <재계산>)`으로 물러날 수 있게 두면 인덱스를 걸어도
-쓰이지 않는다. 그래서 **모든 record**를 채우고 NOT NULL로 못박는다. CASE의 ELSE
-분기가 `source_entity_id`(NOT NULL)이므로 값이 없을 수 있는 행 자체가 없다.
+계보 규칙이 있는 scope는 krex 교통공지와 kma 특보 둘뿐이고, 그 밖의 record는
+`source_entity_id`가 그대로 계보다. 그래서 컬럼에는 **규칙이 적용된 값만** 넣고
+(그 밖은 NULL), 읽는 쪽은 `COALESCE(lineage_key, source_entity_id)`로 유효 계보를
+만든다. 인덱스는 **그 식 그대로** 건다.
 
-NOT NULL만으로는 값이 **틀린** 경우를 못 막는다. 잘못된 계보 key는 밀려난 공지를
+처음에는 전 행을 채우고 NOT NULL로 못박았다. 근거는 "`COALESCE`로 물러나게 두면
+인덱스가 안 쓰인다"였는데 **틀렸다**: 인덱스를 같은 `COALESCE` 식에 걸면 된다. 두
+인자가 모두 저장 컬럼이라 그 식은 IMMUTABLE이다. 인덱스를 막는 것은 `concat_ws`
+(STABLE)가 든 **재계산 CASE** 쪽이고, 그 둘을 한동안 혼동했다. 적대 리뷰가 실측으로
+잡았다.
+
+차이는 크다. prod 732,678행 중 규칙 적용 대상은 **744행(0.10%)**이다.
+
+| | 전 행 backfill | notice scope만 |
+| --- | --- | --- |
+| 마이그레이션 전체 | 124초 | **3.1초** |
+| heap | 822MB → **1,700MB 영구** | 822 → 823MB |
+| 기존 인덱스 | 432MB → **861MB** | 변화 없음 |
+| ACCESS EXCLUSIVE | ~124초(모든 `source_records` 접근 차단) | 3.1초 |
+
+부풀어난 heap은 `VACUUM`으로도 OS에 반환되지 않는다(FSM으로만 회수) — `pg_repack`
+창을 따로 잡아야 한다. 0.10%짜리 이득에 낼 비용이 아니다.
+
+### 3. 파생은 DB가 강제한다 — 트리거
+
+값이 **틀린** 경우는 값이 **틀린** 경우를 못 막는다. 잘못된 계보 key는 밀려난 공지를
 공개 표면에 되살린다. 애플리케이션이 식을 들고 있는 한 그 위험은 사본 수만큼
 남는다(종전에 read·writer·migration 세 벌이었다).
 
-그래서 파생을 DB로 옮겼다: `provider_sync.source_record_lineage_key` 함수를
+그래서 파생을 DB로 옮겼다: `provider_sync.notice_lineage_key` 함수를
 BEFORE INSERT/UPDATE 트리거가 호출한다. `concat_ws`가 STABLE이라 generated
 column은 못 쓰지만 트리거 본문에는 그 제약이 없다. 결과:
 
@@ -63,27 +84,34 @@ column은 못 쓰지만 트리거 본문에는 그 제약이 없다. 결과:
   컬럼을 빠뜨려 NOT NULL에 걸리지도 않는다. `UPDATE OF` 목록에 `lineage_key`
   **자신**이 들어 있어 파생 컬럼만 직접 쓰는 문장도 되돌려진다 — 이게 빠지면
   트리거가 NOT NULL 이상의 일을 하지 못한다(적대 리뷰가 실증했다).
-- 값이 낡을 수 있는 유일한 경로는 `session_replication_role = replica`로 트리거를
-  끄고 UPDATE하는 것이다(백업 복원 드릴이 fence 우회에 쓴다). 그 경우
-  `provider_sync.source_record_lineage_key`로 **재계산·복구할 수 있다** — 같은
-  문장이 정합성 점검도 겸한다. `docs/backup-restore.md` §함정에 적어 뒀다.
+- `ENABLE ALWAYS`라 `session_replication_role = replica`에서도 돈다(백업 복원
+  드릴이 fence 우회에 그 role을 쓴다). 그래도 값이 의심되면
+  `provider_sync.notice_lineage_key`로 **재계산·복구할 수 있다** — 같은 문장이
+  정합성 점검도 겸한다. `docs/backup-restore.md` §함정에 적어 뒀다.
 - writer SQL에서 계보 식이 사라져, 같은 bind 파라미터를 두 타입으로 쓰다 나는
   `AmbiguousParameterError` 부류가 **생길 수 없다**(실제로 그렇게 나갔다가 적대
   리뷰가 잡은 적이 있다 — 그 오류는 모든 provider의 모든 record 쓰기를 죽인다).
 
-비용은 없다: 20,000행 bulk insert 실측 inline 식 1,562ms vs 트리거 1,568ms. hot
-path인 `ON CONFLICT DO UPDATE SET last_seen_at`은 `UPDATE OF` 열 목록에 없어
-트리거를 타지 않는다.
+비용 실측: 순수 INSERT 100,000행에서 트리거 5,840ms vs 비활성 5,996ms(차이 없음).
+**다만 `INSERT ... ON CONFLICT DO UPDATE`는 충돌로 UPDATE가 되더라도 후보 행마다
+BEFORE INSERT arm이 돈다** — 전부 충돌하는 100,000행 upsert에서 `calls=100000`,
+281ms(행당 2.8µs, 문장 시간의 약 4%). `UPDATE OF`는 BEFORE UPDATE arm만 제한하므로
+이 경로를 줄이지 못한다. 순수 `UPDATE ... SET last_seen_at`은 트리거를 타지 않는다.
+(직전 판에는 "hot path는 트리거를 타지 않는다"고 적었는데 **틀렸다** — 적대 리뷰가
+`calls=100000`으로 실증했다.)
 
-### 3. 인덱스 열 순서는 `lineage_key`가 앞이다
+### 4. 인덱스 열 순서는 계보 식이 앞이다
 
 탐색은 4열 전부가 등식이라 btree 열 순서는 자유롭다. scope 3열을 앞세우면
 `idx_source_records_provider_dataset_entity`·`uq_source_records`와 **선행 3열이
 겹쳐** planner가 갈린다 — 무관한 dedup 질의가 이 인덱스로 새는 것을
-`test_t212d_perf_explain`이 잡았다. 그래서 선택도가 가장 높은 `lineage_key`를
-앞에 둔다.
+`test_t212d_perf_explain`이 잡았다. 그래서 선택도가 가장 높은 계보 식을 앞에 둔다.
 
-### 4. read 필터는 correlated를 유지한다
+표현식 인덱스의 통계는 `ANALYZE` 전까지 없고, 그 상태에서는 planner가 인덱스를
+무시하고 **종전 형태로 도는 계획**을 고르는 것이 실측됐다. 그래서 마이그레이션이
+`ANALYZE provider_sync.source_records`로 끝난다 — 배포 직후 그 창이 열리지 않게.
+
+### 5. read 필터는 correlated를 유지한다
 
 바뀐 것은 계보 key를 재계산 대신 컬럼에서 읽는다는 점뿐이다. 순서 규칙
 (`seen_at` → `source_record_key` → 현재 identity → `feature_id`)도, 경쟁자 후보를
@@ -103,10 +131,16 @@ SQL을 바이트 그대로** 유지한다(`_frozen_h35_latest_notice_only_sql`).
 
 | 형태 | 3,045 notice | 145행(현행 prod) |
 | --- | --- | --- |
-| notice 목록 | 21.2초 → **0.17초** | 127ms → **7.9ms** |
-| 전체 feature | 22.1초 → **0.74초** | 696ms → **540ms** |
-| 단건 조회(노출) | 15.6ms → **3.8ms** | 9.0ms → **4.8ms** |
-| reconcile | 124.8초 → **0.58초** | 251ms → **24ms** |
+| notice 목록 | 20.4초 → **0.19초** | 60.8ms → **5.2ms** |
+| 전체 feature | 20.1초 → **0.67초** | 614ms → **520ms** |
+| 단건 조회(노출) | 15.6ms → **3.7ms** | 6.4ms → **3.4ms** |
+| reconcile | 118.4초 → **0.36초** | 26.2ms → **23.5ms** |
+
+**현행 prod 규모에서 이득은 작다** — 145행은 어느 형태로도 빠르다. 이 변경이
+실제로 사는 곳은 규모가 커질 때다. 적대 리뷰가 만든 20,059 계보 / 26,811 notice
+feature(KMA 특보 Phase 2의 현실적 형태)에서 **종전은 13분 42초에도 끝나지 않아
+중단**됐고 현재는 508ms다. payload 이력을 계보당 10벌로 늘려 96만 record를 만들어도
+508 → 559ms로 선형을 유지한다.
 
 **모든 형태가 개선되고 회귀가 없다**는 것이 폐기한 InitPlan 안과의 차이다.
 결과 집합은 두 규모 모두 양방향 차집합 0이고, reconcile 종료 상태
@@ -131,12 +165,19 @@ read 필터 SQL은 15,675자 → 6,001자로 줄었다 — 같은 CASE가 한 �
 
 - alembic `0088`: `lineage_key` 컬럼 + 전 행 backfill + NOT NULL + 파생 함수·트리거
   + `idx_source_records_lineage`.
-- 배포 비용(prod 732,678행 / heap 1,696MB 실측): backfill 74초 + NOT NULL 1.6초 +
-  인덱스 2.6초(신규 91MB). backfill이 **전 행을 다시 쓰므로** 그동안 heap이 최대
-  2배로 부풀고 같은 양의 WAL이 나가며 dead tuple 회수는 autovacuum에 남는다.
-  전부 alembic 한 트랜잭션 안이고 ACCESS EXCLUSIVE lock이 그 시간 내내 유지된다 —
-  entrypoint의 `alembic upgrade head`가 api 기동을 그만큼 막는다. 더 싼 등가물은
-  없다(파생값이라 `DEFAULT` metadata-only 경로 불가, generated column도 불가).
+- 배포 비용(prod 732,678행 실측): **전체 3.1초** — backfill 744행 0.42초 + 인덱스
+  1.90초(91MB) + `ANALYZE` 0.76초. heap 822 → 823MB. alembic 한 트랜잭션이라
+  ACCESS EXCLUSIVE lock이 그 3.1초 동안 `source_records` 접근을 막는다.
+- 알려진 잔여: `source_records.(provider, dataset_key, source_entity_type)`가
+  자기 `source_entities` 행과 일치한다는 것을 **제약이 강제하지 않는다**. read
+  필터가 인덱스 선행 컬럼을 묶으려고 record쪽 등식을 더했으므로 이 가정이
+  load-bearing이 됐다(어긋나면 경쟁자를 **덜** 찾아 밀려난 공지가 남는다).
+  prod 732,678행 중 0건이고 entity key가 record의 같은 tuple 해시라 코드로는
+  도달 불가다. 구조적으로 못박으려면 복합 FK가 필요하고, 그건 이 변경의 범위 밖이다.
+- 알려진 잔여: 계보 key에 시간 성분이 없어 계보당 인덱스 항목이 payload 이력만큼
+  단조 증가한다(현재 것은 하나뿐인데도). 50,011 record 계보에서 단건 조회가
+  3.3 → 12.5ms였다. `last_seen_at`이 NOT NULL이라 정렬 2열을 인덱스에 덧붙이면
+  범위 스캔으로 끊을 수 있다 — 순서 규칙을 건드리므로 별도 변경으로 분리한다.
 - 응답 계약 무변경.
 - 배포: `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`를
   **`0088_source_record_lineage_key`**로 선행 갱신(api 먼저, dagster/daemon 재빌드).

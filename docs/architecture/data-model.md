@@ -641,7 +641,7 @@ CREATE TABLE provider_sync.source_records (
   raw_longitude          NUMERIC(12,8),
   raw_latitude           NUMERIC(12,8),
   raw_data               JSONB NOT NULL DEFAULT '{}'::jsonb,
-  lineage_key            VARCHAR NOT NULL,            -- 트리거 파생 (ADR-087)
+  lineage_key            VARCHAR,                     -- 트리거 파생, notice scope만 (ADR-087)
   raw_payload_hash       TEXT NOT NULL,
   fetched_at             TIMESTAMPTZ NOT NULL,
   imported_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -663,23 +663,28 @@ CREATE INDEX idx_source_entities_current_record
   WHERE current_source_record_key IS NOT NULL;
 CREATE INDEX idx_source_records_provider_dataset_entity
   ON provider_sync.source_records (provider, dataset_key, source_entity_type, source_entity_id);
--- notice 계보 탐색 (ADR-087). 4열 전부 등식이라 열 순서가 자유롭고, 선행 3열이
--- 위 인덱스와 겹치지 않도록 선택도가 가장 높은 lineage_key를 앞에 둔다.
+-- notice 계보 탐색 (ADR-087). 유효 계보는 COALESCE(lineage_key, source_entity_id)이고
+-- 인덱스도 read와 **같은 식**이어야 쓰인다 — 두 인자가 저장 컬럼이라 IMMUTABLE이다.
+-- 4열 전부 등식이라 열 순서가 자유롭고, 선행 3열이 위 인덱스와 겹치지 않도록
+-- 선택도가 가장 높은 계보 식을 앞에 둔다.
 CREATE INDEX idx_source_records_lineage
-  ON provider_sync.source_records (lineage_key, provider, dataset_key, source_entity_type);
+  ON provider_sync.source_records (
+    (COALESCE(lineage_key, source_entity_id)), provider, dataset_key, source_entity_type);
 
 -- lineage_key 파생의 **정본**은 DB다 (ADR-087). 애플리케이션은 이 컬럼을 읽기만
 -- 한다 — H35 고정 세대 replay만 예외로 당시 식을 재계산한다.
+-- notice 전용 규칙이 있는 scope(krex 교통공지·kma 특보)에만 값이 들어가고 그 밖은
+-- NULL이다 — 73만 행 중 744행(0.10%)이라 전 행에 사본을 물화할 이유가 없다.
 -- concat_ws가 STABLE이라 generated column은 쓸 수 없고, 트리거 본문에는 그 제약이
 -- 없다. UPDATE OF 목록에 lineage_key 자신이 들어 있어야 파생 컬럼만 직접 쓰는
--- 문장도 되돌려진다 — 없으면 트리거가 NOT NULL 이상의 일을 하지 못한다.
-CREATE FUNCTION provider_sync.source_record_lineage_key(sr provider_sync.source_records)
-  RETURNS text LANGUAGE sql STABLE AS $$ SELECT <notice 계보 CASE> $$;
+-- 문장도 되돌려진다. ENABLE ALWAYS라 session_replication_role=replica에서도 돈다.
+CREATE FUNCTION provider_sync.notice_lineage_key(sr provider_sync.source_records)
+  RETURNS text LANGUAGE sql STABLE AS $$ SELECT <notice 계보 CASE, 그 밖은 NULL> $$;
 
 CREATE FUNCTION provider_sync.set_source_record_lineage_key() RETURNS trigger
   LANGUAGE plpgsql AS $$
   BEGIN
-    NEW.lineage_key := provider_sync.source_record_lineage_key(NEW);
+    NEW.lineage_key := provider_sync.notice_lineage_key(NEW);
     RETURN NEW;
   END $$;
 
@@ -688,6 +693,8 @@ CREATE TRIGGER trg_source_record_lineage_key
     raw_data, provider, dataset_key, source_entity_type, source_entity_id, lineage_key
   ON provider_sync.source_records
   FOR EACH ROW EXECUTE FUNCTION provider_sync.set_source_record_lineage_key();
+ALTER TABLE provider_sync.source_records
+  ENABLE ALWAYS TRIGGER trg_source_record_lineage_key;
 CREATE INDEX idx_source_records_entity_history
   ON provider_sync.source_records (
     source_entity_key, last_seen_at DESC, fetched_at DESC,

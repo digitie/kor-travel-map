@@ -359,7 +359,7 @@ RETURNING current_source_record_key
 # notice 계보 key 재계산 식 — **H35 고정 세대(0063~0079) replay 전용**이다.
 #
 # 현행 스키마에서 이 값의 정본은 DB에 있다: 0088이 만든
-# ``provider_sync.source_record_lineage_key`` 함수와 그것을 호출하는 트리거가
+# ``provider_sync.notice_lineage_key`` 함수와 그것을 호출하는 트리거가
 # ``source_records.lineage_key``를 채우고, 애플리케이션은 그 컬럼을 읽기만 한다.
 # 고정 세대에는 컬럼도 함수도 없으므로 그 세대의 SQL을 여기서 재생한다.
 def _notice_lineage_sql(alias: str) -> str:
@@ -410,6 +410,24 @@ def _notice_lineage_sql(alias: str) -> str:
       ELSE {alias}.source_entity_id
     END
     """
+
+
+
+# 유효 계보 key — 현행 스키마에서 계보를 읽는 **유일한 방법**이다 (ADR-087).
+#
+# ``lineage_key``는 notice 전용 규칙이 있는 scope에만 채워지고(그 밖은 NULL),
+# 나머지는 ``source_entity_id``가 그대로 계보다. 전 행에 사본을 물화하지 않는
+# 이유는 실측이다: 73만 행 중 계보 규칙이 적용되는 것은 744행(0.10%)뿐인데,
+# 전 행 backfill은 heap을 826MB → 1,700MB로 **영구히** 부풀리고(VACUUM으로도
+# OS에 반환되지 않는다) 그 두 배의 WAL과 2분짜리 ACCESS EXCLUSIVE lock을 낸다.
+#
+# ``COALESCE``가 인덱스를 막지 않는다 — 두 인자가 모두 **저장 컬럼**이라 이 식은
+# IMMUTABLE이고, 같은 식으로 만든 표현식 인덱스가 그대로 받는다. (막히는 것은
+# ``concat_ws``가 든 재계산 CASE 쪽이다. 그 둘을 한동안 혼동했다.)
+def _lineage_sql(alias: str) -> str:
+    """``source_records`` alias의 유효 계보 key SQL."""
+
+    return f"COALESCE({alias}.lineage_key, {alias}.source_entity_id)"
 
 
 # source_records는 payload_hash가 UNIQUE 구성요소 → 이력 보존 (ADR-017).
@@ -576,7 +594,7 @@ def _canonical_notice_feature_sql(
     ``lineage``: 계보 key SQL 식. 기본값은 저장 컬럼이고, 컬럼이 없는 H35 고정
     세대 replay만 재계산 식을 넘긴다.
     """
-    lineage = f"{source_alias}.lineage_key" if lineage is None else lineage
+    lineage = _lineage_sql(source_alias) if lineage is None else lineage
     return f"""
     CASE
       WHEN (
@@ -653,12 +671,12 @@ def _latest_notice_only_sql(feature_alias: str) -> str:
     ``raw_data`` JSON에서 매 행 재계산하니 인덱스가 붙을 수 없었고, 경쟁자 탐색이
     매번 notice 전수 스캔이 됐다(3,045 notice에서 21.2초).
 
-    계보 key를 ``source_records.lineage_key``에 저장하고
-    ``(provider, dataset_key, source_entity_type, lineage_key)`` 인덱스를 두면 그
-    탐색이 **인덱스 probe**가 된다. 실측(3,045 notice): 목록 21.2초 → 0.15초,
-    단건 조회 17.2ms → 4.5ms. 목록과 단건이 **함께** 빨라지는 것이 요점이다 —
-    비상관 InitPlan으로 바꾸는 방법은 목록만 빠르고 단건은 오히려 느려진다
-    (73ms, ADR-087 §폐기).
+    계보 key를 ``source_records.lineage_key``에 물화하고
+    ``(COALESCE(lineage_key, source_entity_id), provider, dataset_key,
+    source_entity_type)`` 인덱스를 두면 그 탐색이 **인덱스 probe**가 된다.
+    실측(3,045 notice): 목록 20.4초 → 0.19초, 단건 조회 15.6ms → 3.7ms.
+    목록과 단건이 **함께** 빨라지는 것이 요점이다 — 비상관 InitPlan으로 바꾸는
+    방법은 목록만 빠르고 단건은 오히려 느려진다(ADR-087 §폐기).
 
     순서 규칙·경쟁자 후보 조건은 종전과 **완전히 같다**. 바뀐 것은 계보 key를
     재계산 대신 컬럼에서 읽는다는 점뿐이다.
@@ -687,7 +705,12 @@ def _latest_notice_only_sql(feature_alias: str) -> str:
         AND cur_sl.is_primary_source
       HAVING bool_and(EXISTS (
         -- 같은 계보에서 나보다 나은 현재 행이 있는가. 계보 등식이
-        -- idx_source_records_lineage의 마지막 컬럼이라 여기가 인덱스 probe다.
+        -- idx_source_records_lineage의 **선행 컬럼**이라 여기가 인덱스 probe다.
+        --
+        -- record쪽 scope 3열 등식은 종전에 없던 것이다(종전엔 entity쪽만 있었다).
+        -- 인덱스 선행 컬럼을 묶기 위해 더했고, 두 사본이 어긋날 수 있다면 결과가
+        -- 갈린다 — prod 732,678행 중 **0건**이고 코드 경로로는 도달할 수 없지만
+        -- (entity key가 record의 같은 tuple 해시다) 제약으로 강제되지는 않는다.
         SELECT 1
         FROM provider_sync.source_records AS other_sr
         JOIN provider_sync.source_entities AS other_se
@@ -700,7 +723,7 @@ def _latest_notice_only_sql(feature_alias: str) -> str:
         WHERE other_sr.provider = cur_sr.provider
           AND other_sr.dataset_key = cur_sr.dataset_key
           AND other_sr.source_entity_type = cur_sr.source_entity_type
-          AND other_sr.lineage_key = cur_sr.lineage_key
+          AND {_lineage_sql('other_sr')} = {_lineage_sql('cur_sr')}
           AND other_se.provider = cur_se.provider
           AND other_se.dataset_key = cur_se.dataset_key
           AND other_se.source_entity_type = cur_se.source_entity_type
@@ -2591,9 +2614,9 @@ DO UPDATE SET
 
 def _sync_notice_lineage_states_sql() -> str:
     """알려진 scope 계보의 present 전이만 changed_at과 함께 저장한다."""
-    return """
+    return f"""
 WITH known_lineages AS (
-    SELECT DISTINCT sr.lineage_key AS lineage_key
+    SELECT DISTINCT {_lineage_sql('sr')} AS lineage_key
     FROM provider_sync.source_entities AS se
     JOIN provider_sync.source_records AS sr
       ON sr.source_record_key = se.current_source_record_key
@@ -2906,7 +2929,7 @@ def _supersede_stale_notice_sql(close_missing: bool) -> str:
 WITH lineage_candidates AS (
     SELECT
         f.feature_id,
-        sr.lineage_key AS lineage_key,
+        {_lineage_sql('sr')} AS lineage_key,
         COALESCE(sr.last_seen_at, sr.imported_at, sr.fetched_at) AS seen_at,
         sr.source_record_key AS tiebreak,
         {_canonical_notice_feature_sql("f", "sr")} AS canonical_identity,
@@ -2925,7 +2948,7 @@ WITH lineage_candidates AS (
       ON lineage_state.provider = sr.provider
      AND lineage_state.dataset_key = sr.dataset_key
      AND lineage_state.source_entity_type = sr.source_entity_type
-     AND lineage_state.lineage_key = sr.lineage_key
+     AND lineage_state.lineage_key = {_lineage_sql('sr')}
     WHERE f.kind = 'notice'
       AND COALESCE(f.data_origin, 'provider') <> 'user_request'
       AND sr.provider = :provider
@@ -2977,13 +3000,13 @@ out_of_scope_feature_lineages AS MATERIALIZED (
         sr.provider,
         sr.dataset_key,
         sr.source_entity_type,
-        sr.lineage_key
+        {_lineage_sql('sr')}
     )
         f.feature_id,
         sr.provider,
         sr.dataset_key,
         sr.source_entity_type,
-        sr.lineage_key AS lineage_key,
+        {_lineage_sql('sr')} AS lineage_key,
         COALESCE(sr.last_seen_at, sr.imported_at, sr.fetched_at) AS seen_at,
         sr.source_record_key AS tiebreak,
         {_canonical_notice_feature_sql("f", "sr")} AS canonical_identity,
@@ -3004,7 +3027,7 @@ out_of_scope_feature_lineages AS MATERIALIZED (
       ON lineage_state.provider = sr.provider
      AND lineage_state.dataset_key = sr.dataset_key
      AND lineage_state.source_entity_type = sr.source_entity_type
-     AND lineage_state.lineage_key = sr.lineage_key
+     AND lineage_state.lineage_key = {_lineage_sql('sr')}
     WHERE f.kind = 'notice'
       AND (
         sr.provider <> :provider
@@ -3016,7 +3039,7 @@ out_of_scope_feature_lineages AS MATERIALIZED (
         sr.provider,
         sr.dataset_key,
         sr.source_entity_type,
-        sr.lineage_key,
+        {_lineage_sql('sr')},
         COALESCE(sr.last_seen_at, sr.imported_at, sr.fetched_at) DESC,
         sr.source_record_key DESC
 ),
@@ -3079,7 +3102,7 @@ global_feature_wins AS MATERIALIZED (
         FROM provider_sync.source_entities AS other_se
         JOIN provider_sync.source_records AS other_sr
           ON other_sr.source_record_key = other_se.current_source_record_key
-         AND other_sr.lineage_key = current_notice.lineage_key
+         AND {_lineage_sql('other_sr')} = current_notice.lineage_key
         JOIN provider_sync.source_links AS other_sl
           ON other_sl.source_entity_key = other_se.source_entity_key
         JOIN feature.features AS other_f

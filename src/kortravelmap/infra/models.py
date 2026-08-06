@@ -947,9 +947,10 @@ class SourceRecordRow(Base):
             text("source_record_key DESC"),
         ),
         # notice 계보 탐색(read 필터·reconcile)이 쓰는 등식 인덱스 — ADR-087.
+        # read와 **같은 식**이어야 쓰인다. 두 인자가 저장 컬럼이라 IMMUTABLE이다.
         Index(
             "idx_source_records_lineage",
-            "lineage_key",
+            text("(COALESCE(lineage_key, source_entity_id))"),
             "provider",
             "dataset_key",
             "source_entity_type",
@@ -977,11 +978,11 @@ class SourceRecordRow(Base):
     raw_latitude: Mapped[Any | None] = mapped_column(Numeric(12, 8))
 
     # notice 계보 key — ``raw_data``에서 파생되고 record별로 불변이라 저장해도
-    # 낡지 않는다(ADR-087). 모든 record가 값을 갖는다: notice scope 밖에서는
-    # ``source_entity_id``가 그대로 계보다. read는 이 컬럼을 그대로 읽고
-    # ``idx_source_records_lineage``가 그 등식을 받는다 — NULL 허용으로 두면
-    # 읽는 쪽이 재계산 fallback을 껴야 하고 인덱스가 쓰이지 않는다.
-    lineage_key: Mapped[str] = mapped_column(String, nullable=False)
+    # 낡지 않는다(ADR-087). 값을 넣는 것은 **DB 트리거**이고 애플리케이션은 읽기만
+    # 한다. notice 전용 규칙이 있는 scope에만 채워지고 그 밖은 NULL이며, 유효 계보는
+    # ``COALESCE(lineage_key, source_entity_id)``다 — 73만 행 중 규칙 대상이
+    # 744행(0.10%)뿐이라 전 행에 사본을 물화할 이유가 없다.
+    lineage_key: Mapped[str | None] = mapped_column(String)
     raw_data: Mapped[dict[str, Any]] = mapped_column(
         JSONB,
         nullable=False,

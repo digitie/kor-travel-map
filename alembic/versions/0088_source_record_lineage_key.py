@@ -28,31 +28,58 @@
 read SQL에는 ``sr``(source_records) alias가 **이미 스코프에 있으므로** 새 조인이
 필요 없다.
 
-NOT NULL + 트리거인 이유 — 파생을 DB가 강제한다
------------------------------------------------
+물화 범위 — notice scope만, 그리고 왜 NOT NULL이 아닌가
+--------------------------------------------------------
 
-읽는 쪽이 ``COALESCE(lineage_key, <재계산>)``으로 물러날 수 있게 두면 컬럼에
-인덱스를 걸어도 쓰이지 않는다. 그래서 **모든 record**를 채우고 NOT NULL로
-못박는다. CASE의 ELSE 분기가 ``source_entity_id``(NOT NULL)이므로 값이 없을 수
-있는 행 자체가 없다 — notice scope 밖 record도 자기 entity id를 계보로 갖는다.
+계보 규칙이 있는 scope는 krex 교통공지와 kma 특보 둘뿐이고, 그 밖의 record는
+``source_entity_id``가 그대로 계보다. 그래서 컬럼에는 **규칙이 적용된 값만**
+저장하고(그 밖은 NULL), 읽는 쪽은
+``COALESCE(lineage_key, source_entity_id)``로 유효 계보를 만든다.
 
-그런데 NOT NULL만으로는 값이 **틀린** 경우를 못 막는다. 계보 key가 잘못 저장되면
-밀려난 공지가 공개 표면에 되살아나는데, 값은 write-once라 재검증 경로가 없다.
-애플리케이션이 식을 들고 있는 한 그 위험은 사본 수만큼 남는다.
+처음에는 전 행을 채우고 NOT NULL로 못박았다. 근거는 "``COALESCE``로 물러나게
+두면 인덱스가 안 쓰인다"였는데 **틀렸다**: 인덱스를 **같은 ``COALESCE`` 식**에
+걸면 된다. 두 인자가 모두 저장 컬럼이라 그 식은 IMMUTABLE이다. 인덱스를 막는
+것은 ``concat_ws``(STABLE)가 든 재계산 CASE 쪽이고, 그 둘을 한동안 혼동했다.
+적대 리뷰가 실측으로 잡았다.
 
-그래서 파생을 **DB로 옮겼다**: BEFORE INSERT/UPDATE 트리거가 ``raw_data``에서
-값을 계산해 넣는다. ``concat_ws``가 STABLE이라 generated column은 쓸 수 없지만,
-트리거 본문에는 그 제약이 없다. 결과적으로
+차이는 크다. prod 732,678행 중 규칙 적용 대상은 **744행(0.10%)**이다.
 
-- 식의 정본이 **한 곳(DB 함수)**뿐이다. 애플리케이션은 읽기만 한다.
+| | 전 행 backfill | notice scope만 |
+| --- | --- | --- |
+| backfill | 118.8초 | 1초 미만 |
+| heap | 826MB → **1,700MB 영구** | 변화 없음 |
+| 기존 인덱스 | 432MB → **861MB** | 변화 없음 |
+| ACCESS EXCLUSIVE | ~124초(모든 source_records 접근 차단) | 인덱스 생성 시간만 |
+
+부풀어난 heap은 `VACUUM`으로도 OS에 반환되지 않는다(FSM으로만 회수).
+`pg_repack`/`VACUUM FULL` 창을 따로 잡아야 한다. 그 비용을 0.10%짜리 이득을
+위해 낼 이유가 없다.
+
+파생은 DB가 강제한다 — 트리거
+------------------------------
+
+값이 **틀린** 경우는 제약으로 못 막는다. 잘못된 계보 key는 밀려난 공지를 공개
+표면에 되살린다. 애플리케이션이 식을 들고 있는 한 그 위험은 사본 수만큼 남는다
+(종전에 read·writer·migration 세 벌이었다).
+
+그래서 파생을 DB로 옮겼다: ``provider_sync.notice_lineage_key`` 함수를
+BEFORE INSERT/UPDATE 트리거가 호출한다. ``concat_ws``가 STABLE이라 generated
+column은 못 쓰지만 트리거 본문에는 그 제약이 없다. 결과:
+
+- 식의 정본이 **한 곳(DB)**뿐이다. 애플리케이션은 읽기만 한다.
 - 어떤 writer든 — 애플리케이션 SQL, 테스트 픽스처, 수동 SQL — 값이 자동으로
-  맞는다. writer가 컬럼을 빠뜨려 NOT NULL에 걸리는 일도 없다.
+  맞는다. ``UPDATE OF`` 목록에 ``lineage_key`` **자신**이 들어 있어 파생 컬럼만
+  직접 쓰는 문장도 되돌려진다.
+- ``ENABLE ALWAYS``라 ``session_replication_role = replica``에서도 돈다.
 - writer SQL에서 계보 식이 사라져, 같은 bind 파라미터를 두 타입으로 쓰다 나는
   ``AmbiguousParameterError`` 부류가 아예 생길 수 없다.
 
-비용은 없다: 20,000행 bulk insert 실측 inline 식 1,562ms vs 트리거 1,568ms.
-hot path인 ``ON CONFLICT DO UPDATE SET last_seen_at``은 ``UPDATE OF`` 열 목록에
-없어 트리거를 타지 않는다.
+비용 실측: 순수 INSERT 100,000행에서 트리거 5,840ms vs 비활성 5,996ms(차이
+없음). **다만 ``INSERT ... ON CONFLICT DO UPDATE``는 충돌로 UPDATE가 되더라도
+후보 행마다 BEFORE INSERT arm이 돈다** — 100,000행 전부 충돌하는 upsert에서
+``calls=100000``, 281ms(행당 2.8µs, 문장 시간의 약 4%). ``UPDATE OF``는 BEFORE
+UPDATE arm만 제한하므로 이 경로를 줄이지 못한다. 순수 ``UPDATE ... SET
+last_seen_at``은 정상적으로 트리거를 타지 않는다.
 
 비용 — 정직하게
 ---------------
@@ -78,8 +105,8 @@ metadata-only 경로를 탈 수 없고(상수가 아니다), generated column도
 우회해 UPDATE한 경우) 아래 한 문장이 점검과 복구를 겸한다 — 0행이면 전부 맞다.
 
     UPDATE provider_sync.source_records AS sr
-       SET lineage_key = provider_sync.source_record_lineage_key(sr)
-     WHERE lineage_key IS DISTINCT FROM provider_sync.source_record_lineage_key(sr);
+       SET lineage_key = provider_sync.notice_lineage_key(sr)
+     WHERE lineage_key IS DISTINCT FROM provider_sync.notice_lineage_key(sr);
 """
 
 from __future__ import annotations
@@ -137,7 +164,7 @@ _LINEAGE_EXPR = """
         ),
         sr.source_entity_id
       )
-      ELSE sr.source_entity_id
+      ELSE NULL
     END
     """
 
@@ -153,23 +180,21 @@ def upgrade() -> None:
     # (그래서 표현식 인덱스는 불가능하고, 값을 컬럼에 물화하는 이 설계가 필요하다.)
     op.execute(
         f"""
-        CREATE FUNCTION provider_sync.source_record_lineage_key(
+        CREATE FUNCTION provider_sync.notice_lineage_key(
             sr provider_sync.source_records
         ) RETURNS text
         LANGUAGE sql STABLE
         AS $fn$ SELECT ({_LINEAGE_EXPR}) $fn$
         """
     )
+    # backfill은 **notice 규칙이 있는 scope만** 돈다. 실측 prod 732,678행 중
+    # 744행(0.10%)이다. 전 행을 채우면 heap이 826MB → 1,700MB로 영구히 부풀고
+    # (VACUUM도 OS에 반환하지 않는다) 2분짜리 ACCESS EXCLUSIVE lock이 걸린다.
     op.execute(
         """
         UPDATE provider_sync.source_records AS sr
-        SET lineage_key = provider_sync.source_record_lineage_key(sr)
-        """
-    )
-    op.execute(
-        """
-        ALTER TABLE provider_sync.source_records
-          ALTER COLUMN lineage_key SET NOT NULL
+        SET lineage_key = provider_sync.notice_lineage_key(sr)
+        WHERE provider_sync.notice_lineage_key(sr) IS NOT NULL
         """
     )
     op.execute(
@@ -177,7 +202,7 @@ def upgrade() -> None:
         CREATE FUNCTION provider_sync.set_source_record_lineage_key()
         RETURNS trigger LANGUAGE plpgsql AS $tg$
         BEGIN
-            NEW.lineage_key := provider_sync.source_record_lineage_key(NEW);
+            NEW.lineage_key := provider_sync.notice_lineage_key(NEW);
             RETURN NEW;
         END
         $tg$
@@ -203,19 +228,35 @@ def upgrade() -> None:
           EXECUTE FUNCTION provider_sync.set_source_record_lineage_key()
         """
     )
-    # 계보 탐색은 4열 전부가 등식이라 btree 열 순서는 자유롭다. 그래서 선택도가
-    # 가장 높은 ``lineage_key``를 앞에 둔다 — scope 3열을 앞세우면
-    # ``idx_source_records_provider_dataset_entity``/``uq_source_records``와
-    # **선행 3열이 겹쳐** planner가 둘 사이에서 갈리고, 실제로 무관한 dedup 질의가
-    # 이 인덱스로 새는 것을 ``test_t212d_perf_explain``이 잡았다.
+    # ``ENABLE ALWAYS`` — ``session_replication_role = replica``에서도 돈다.
+    # 백업 복원 드릴이 fence 우회에 그 role을 쓰는데(``docs/backup-restore.md``),
+    # 기본 ``ENABLE ORIGIN``이면 그 세션의 쓰기에서 파생이 통째로 빠진다.
+    op.execute(
+        """
+        ALTER TABLE provider_sync.source_records
+          ENABLE ALWAYS TRIGGER trg_source_record_lineage_key
+        """
+    )
+    # 인덱스는 read가 쓰는 식 그대로다. 두 인자가 모두 저장 컬럼이라
+    # ``COALESCE``는 IMMUTABLE이고 표현식 인덱스가 성립한다.
+    #
+    # 열 순서: 4열 전부 등식이라 자유롭고, 선택도가 가장 높은 계보를 앞에 둔다 —
+    # scope 3열을 앞세우면 ``idx_source_records_provider_dataset_entity``/
+    # ``uq_source_records``와 **선행 3열이 겹쳐** planner가 갈리고, 무관한 dedup
+    # 질의가 이 인덱스로 새는 것을 ``test_t212d_perf_explain``이 잡았다.
     op.execute(
         """
         CREATE INDEX idx_source_records_lineage
           ON provider_sync.source_records (
-            lineage_key, provider, dataset_key, source_entity_type
+            (COALESCE(lineage_key, source_entity_id)),
+            provider, dataset_key, source_entity_type
           )
         """
     )
+    # 표현식 인덱스의 통계는 ANALYZE 전까지 없다. 그 상태에서는 planner가 이
+    # 인덱스를 무시하고 종전 형태(경쟁자 전수 스캔)로 도는 계획을 고르는 것이
+    # 실측됐다 — 배포 직후 그 창이 열리지 않도록 여기서 만들어 둔다.
+    op.execute("ANALYZE provider_sync.source_records")
 
 
 def downgrade() -> None:
@@ -231,6 +272,6 @@ def downgrade() -> None:
         "ALTER TABLE provider_sync.source_records DROP COLUMN IF EXISTS lineage_key"
     )
     op.execute(
-        "DROP FUNCTION IF EXISTS provider_sync.source_record_lineage_key"
+        "DROP FUNCTION IF EXISTS provider_sync.notice_lineage_key"
         "(provider_sync.source_records)"
     )

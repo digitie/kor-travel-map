@@ -7,10 +7,10 @@ INSERT 값(varchar)과 CASE(text) 양쪽에 써서 생긴 ``AmbiguousParameterEr
 source record 쓰기**를 죽인다.
 
 계보 key의 정본은 이제 **DB**에 있다(0088):
-``provider_sync.source_record_lineage_key`` 함수를 BEFORE INSERT/UPDATE 트리거가
+``provider_sync.notice_lineage_key`` 함수를 BEFORE INSERT/UPDATE 트리거가
 호출해 컬럼을 채우고, 애플리케이션은 그 컬럼을 읽기만 한다. 고정하는 것:
 
-1. writer SQL이 ``lineage_key``를 **주지 않아도** 트리거가 채운다(NOT NULL).
+1. writer SQL이 ``lineage_key``를 **주지 않아도** 트리거가 채운다.
 2. KREX/KMA 전용 계보 규칙과 그 밖의 fallback이 각각 맞는 값을 만든다.
 3. DB 정본 == 애플리케이션이 H35 고정 세대 replay에 쓰는 재계산 식. 갈리면
    리허설이 재생하는 표면이 현행 표면과 다른 계보로 묶인다. 값이 *틀린* 경우는
@@ -44,7 +44,7 @@ async def _insert_record(
     dataset_key: str,
     source_entity_type: str,
     raw_data: str,
-) -> str:
+) -> str | None:
     """프로덕션 writer SQL을 **그대로** 실행하고 트리거가 넣은 계보 key를 읽는다."""
     await session.execute(
         text(
@@ -135,14 +135,15 @@ async def _insert_record(
             "L1010000::강풍",
         ),
         (
-            # notice scope 밖도 NULL이 아니다 — ELSE 분기가 source_entity_id다.
-            # NULL을 허용하면 read가 재계산 fallback을 껴야 하고 인덱스가 죽는다.
+            # notice 전용 규칙이 없는 scope는 NULL이다 — 유효 계보는 읽는 쪽에서
+            # COALESCE(lineage_key, source_entity_id)로 만든다. 73만 행 중 규칙
+            # 대상이 744행(0.10%)이라 전 행에 사본을 물화할 이유가 없다.
             "non-notice",
             "python-mois-api",
             "mois_licenses",
             "license_place",
             '{"a": 1}',
-            "ENT-lin-non-notice",
+            None,
         ),
         (
             # 계보 구성요소가 전부 비면 entity id로 물러난다.
@@ -162,7 +163,7 @@ async def test_writer_stores_lineage_key(
     dataset_key: str,
     source_entity_type: str,
     raw_data: str,
-    expected: str,
+    expected: str | None,
 ) -> None:
     """writer가 실제로 실행되고, 트리거가 모든 scope에 맞는 계보 key를 남긴다."""
     stored = await _insert_record(
@@ -187,21 +188,42 @@ async def test_writer_does_not_supply_lineage_key(
     assert "lineage_key" not in feature_repo._UPSERT_SOURCE_RECORD_SQL
 
 
-async def test_lineage_key_column_is_not_null(
+async def test_lineage_index_matches_the_read_expression(
     migrated_session: AsyncSession,
 ) -> None:
-    """NOT NULL이 살아 있어야 read가 컬럼 등식 하나만 쓰고 인덱스가 쓰인다."""
-    nullable = (
+    """인덱스 식이 read 식과 다르면 인덱스가 **쓰이지 않는다** (ADR-087)."""
+    definition = (
         await migrated_session.execute(
             text(
-                "SELECT is_nullable FROM information_schema.columns"
-                " WHERE table_schema = 'provider_sync'"
-                "   AND table_name = 'source_records'"
-                "   AND column_name = 'lineage_key'"
+                "SELECT indexdef FROM pg_indexes"
+                " WHERE schemaname = 'provider_sync'"
+                "   AND indexname = 'idx_source_records_lineage'"
             )
         )
     ).scalar_one()
-    assert nullable == "NO"
+    assert "COALESCE(lineage_key, source_entity_id)" in definition
+    assert feature_repo._lineage_sql("sr") == (
+        "COALESCE(sr.lineage_key, sr.source_entity_id)"
+    )
+
+
+async def test_lineage_trigger_is_enable_always(
+    migrated_session: AsyncSession,
+) -> None:
+    """``session_replication_role = replica``에서도 파생이 돌아야 한다.
+
+    백업 복원 드릴이 fence 우회에 그 role을 쓴다 — 기본 ``ENABLE ORIGIN``이면
+    그 세션의 쓰기에서 계보 파생이 통째로 빠진다.
+    """
+    enabled = (
+        await migrated_session.execute(
+            text(
+                "SELECT tgenabled::text FROM pg_trigger"
+                " WHERE tgname = 'trg_source_record_lineage_key'"
+            )
+        )
+    ).scalar_one()
+    assert enabled == "A"
 
 
 async def test_trigger_recomputes_lineage_key_when_payload_changes(
@@ -355,10 +377,10 @@ async def test_db_lineage_function_matches_frozen_replay_expression(
         await migrated_session.execute(
             text(
                 "SELECT count(*), count(*) FILTER (WHERE"
-                "   provider_sync.source_record_lineage_key(sr)"
+                "   COALESCE(provider_sync.notice_lineage_key(sr), sr.source_entity_id)"
                 f"     IS DISTINCT FROM ({recomputed_sql})"
                 "   OR sr.lineage_key"
-                "     IS DISTINCT FROM provider_sync.source_record_lineage_key(sr))"
+                "     IS DISTINCT FROM provider_sync.notice_lineage_key(sr))"
                 " FROM provider_sync.source_records AS sr"
             )
         )

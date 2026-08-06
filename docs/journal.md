@@ -6,34 +6,50 @@
 
 - 공개 notice read와 reconcile이 계보 key를 `raw_data` JSON에서 **매 행 재계산**해
   인덱스가 붙을 수 없었고(`concat_ws`가 STABLE), 경쟁자 탐색이 매번 notice 전수
-  스캔이 됐다. 3,045 notice에서 목록 21.2초 / reconcile 124.8초.
-- `source_records.lineage_key`로 물화하고 `(lineage_key, provider, dataset_key,
-  source_entity_type)` 인덱스를 걸었다. correlated 형태는 **그대로 유지**한다 —
-  자기 계보만 보면 되고 그 계보는 보통 한 자릿수 행이다.
-  **목록 21.2초 → 0.17초 · 단건 15.6ms → 3.8ms · reconcile 124.8초 → 0.58초**
-  (145행 현행 prod: 127ms → 7.9ms · 9.0ms → 4.8ms · 251ms → 24ms).
-  결과 집합은 두 규모 모두 양방향 차집합 0, reconcile 종료 상태도 완전 동일.
-- **첫 진단이 틀렸다.** "correlated라서 제곱"이라고 보고 비상관 InitPlan
-  (`<> ALL(ARRAY(...))`)으로 갔었는데, 적대 리뷰 2인이 독립적으로 무너뜨렸다:
-  Param 배열은 해시되지 않아 복잡도가 그대로였고(10k에서 2.2초로 복귀), 단건
-  조회는 오히려 **36배 느려졌다**(상세 페이지·service batch가 흔한 경로다).
-  원인은 상관성이 아니라 계보를 찾는 방법이었다.
-- 파생은 **DB 트리거**가 한다. NOT NULL을 걸자 픽스처가 깨진 것이 신호였다 —
-  규칙을 애플리케이션이 들면 쓰는 쪽마다 사본이 필요하다. 트리거로 옮기니 식의
-  정본이 한 곳이 되고, 픽스처·수동 SQL·앞으로의 writer가 전부 자동으로 맞는다.
-  writer SQL에서 계보 식이 사라져 `AmbiguousParameterError` 부류도 소멸.
-  비용 없음(20k행 bulk insert 1,562ms vs 1,568ms).
-- 인덱스 열 순서는 `lineage_key`가 앞이다. scope 3열을 앞세우면 기존 두 인덱스와
-  선행 열이 겹쳐 무관한 dedup 질의가 새는 것을 `test_t212d_perf_explain`이 잡았다.
-- reconcile에는 원인이 하나 더 있었다 — `out_of_scope_feature_lineages` CTE가
-  갱신 행마다 재실행(loops=2,900). `MATERIALIZED` 장벽으로 잡았다.
-- H35 고정 세대 replay는 0079 SQL을 **바이트 그대로** 유지한다(생성해
-  `origin/main`과 byte-identical 확인). 그 세대엔 컬럼도 함수도 없다.
-- **설계 4회 폐기**: `validity tstzrange`(미래 발효 KMA 특보가 숨음) · 승자 물화
-  `superseded_at`(가변 입력이라 낡음) · `feature_notices.lineage_key`(축 불일치,
-  2배 느림) · 비상관 InitPlan(위).
-- 배포 선행: `EXPECTED_HEAD`를 `0088_source_record_lineage_key`로. backfill은
-  prod 규모 실측 74초(+NOT NULL 1.6초, 인덱스 2.6초).
+  스캔이 됐다. `source_records.lineage_key`로 물화하고
+  `(COALESCE(lineage_key, source_entity_id), provider, dataset_key,
+  source_entity_type)` 인덱스를 걸었다. correlated 형태는 **그대로 유지**한다.
+- 실측(clean clone, jit=off, 교차 반복 최소값):
+
+  | | 3,045 notice | 145행(현행 prod) |
+  | --- | --- | --- |
+  | notice 목록 | 20.4초 → 0.19초 | 60.8ms → 5.2ms |
+  | 전체 feature | 20.1초 → 0.67초 | 614ms → 520ms |
+  | 단건 조회 | 15.6ms → 3.7ms | 6.4ms → 3.4ms |
+  | reconcile | 118.4초 → 0.36초 | 26.2ms → 23.5ms |
+
+  결과 집합 양방향 차집합 0, reconcile 종료 상태도 `close_missing` 양쪽 동일.
+  **현행 prod 규모에서 이득은 작다** — 145행은 어느 형태로도 빠르다. 실제로 사는
+  곳은 규모다: 적대 리뷰가 만든 20,059 계보 / 26,811 notice에서 종전은 13분 42초에도
+  끝나지 않아 중단됐고 현재는 508ms다(96만 record로 늘려도 559ms, 선형).
+- **설계를 세 번 갈아엎었고 두 번은 적대 리뷰가 무너뜨렸다.**
+  ① 비상관 InitPlan(`<> ALL(ARRAY(...))`) — Param 배열은 해시되지 않아 복잡도가
+  그대로였고 단건 조회가 36배 느려졌다. ② 전 행 backfill + NOT NULL — 근거였던
+  "`COALESCE`로 물러나면 인덱스가 안 쓰인다"가 **틀렸다**. 인덱스를 같은 COALESCE
+  식에 걸면 되고, 두 인자가 저장 컬럼이라 IMMUTABLE이다. 인덱스를 막는 건
+  `concat_ws`가 든 재계산 CASE 쪽인데 그 둘을 혼동했다. 73만 행 중 규칙 대상이
+  744행(0.10%)뿐이라 전 행을 채우면 **heap이 822→1,700MB로 영구히 부풀고**
+  (VACUUM도 OS에 반환 안 함) 124초 ACCESS EXCLUSIVE가 걸린다. scope 한정으로
+  바꿔 **마이그레이션 전체 3.1초, heap +1MB**.
+- 파생은 **DB 트리거**가 한다(`provider_sync.notice_lineage_key`). 식의 정본이 한
+  곳이 되고 픽스처·수동 SQL·앞으로의 writer가 전부 자동으로 맞는다. `UPDATE OF`에
+  `lineage_key` **자신**을 넣어야 파생 컬럼 직접 쓰기도 되돌려진다(리뷰어가
+  한 줄로 되살아나는 공지를 실증). `ENABLE ALWAYS`라 복원 드릴의
+  `session_replication_role=replica`에서도 돈다.
+- 트리거 비용: 순수 INSERT 10만행 5,840ms vs 비활성 5,996ms(차이 없음). 단
+  `INSERT ... ON CONFLICT DO UPDATE`는 **충돌해도 BEFORE INSERT arm이 돈다**
+  (`calls=100000`, 행당 2.8µs ≈ 문장의 4%) — "hot path는 안 탄다"고 적었던 건 틀렸다.
+- 표현식 인덱스는 `ANALYZE` 전까지 통계가 없어 planner가 무시한다(리뷰어가 그
+  상태를 측정해 "인덱스가 안 쓰인다"고 보고했다). 마이그레이션이 `ANALYZE`로 끝나
+  배포 직후 그 창이 열리지 않게 했다.
+- reconcile에는 원인이 하나 더 있었다 — `out_of_scope_feature_lineages` CTE가 갱신
+  행마다 재실행(loops=2,900). `MATERIALIZED` 장벽으로 잡았다.
+- H35 고정 세대 replay는 0079 SQL을 **바이트 그대로** 유지한다(sha256 핀 테스트
+  신설). 리뷰어가 `origin/main`과 byte-identical임을 독립 확인했다.
+- 남은 가정 2개를 ADR에 명시했다: record/entity의 scope 3열 일치가 제약으로
+  강제되지 않는다(prod 0건, 코드로 도달 불가) · 계보 key에 시간 성분이 없어 계보당
+  인덱스 항목이 이력만큼 증가한다(50,011 record 계보에서 단건 3.3→12.5ms).
+- 배포 선행: `EXPECTED_HEAD`를 `0088_source_record_lineage_key`로.
 
 ## 2026-08-06 (codex) — T-VN-41F1D-C3 n150 파기형 rebuild 결선
 

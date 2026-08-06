@@ -328,14 +328,13 @@ command가 결선돼 있지 않다** — 그 결선 전까지의 수동 기준�
 
 ### 함정 (1회차 실측)
 
-- **`session_replication_role = replica`는 트리거도 끈다.** 위 5단계처럼 fence를
-  우회할 때 `provider_sync.source_records`를 UPDATE하면
-  `trg_source_record_lineage_key`가 돌지 않아 `lineage_key`가 낡은 채 남는다
-  (ADR-087). INSERT는 NOT NULL이 fail-close로 막지만 UPDATE는 조용히 지나간다.
-  이 role로 source record를 건드렸다면 뒤에 반드시 재계산할 것:
+- **`session_replication_role = replica`에서도 계보 트리거는 돈다** —
+  `trg_source_record_lineage_key`를 `ENABLE ALWAYS`로 만들어 뒀기 때문이다
+  (ADR-087). 그래도 이 role로 `provider_sync.source_records`를 대량으로 손댔다면
+  아래로 정합성을 확인할 것(0행이면 전부 맞다):
   `UPDATE provider_sync.source_records sr
-     SET lineage_key = provider_sync.source_record_lineage_key(sr)
-   WHERE lineage_key IS DISTINCT FROM provider_sync.source_record_lineage_key(sr);`
+     SET lineage_key = provider_sync.notice_lineage_key(sr)
+   WHERE lineage_key IS DISTINCT FROM provider_sync.notice_lineage_key(sr);`
   (정상 role에서 실행. 같은 문장이 정합성 점검도 겸한다 — 0행이면 전부 맞다.)
 - 컨테이너 기본 `/dev/shm`(64MB)이 작아 73만 행 병렬 집계에서
   `could not resize shared memory segment` 가 난다 — 검증 쿼리는

@@ -2,18 +2,18 @@
 
 ## 2026-08-07 — T-VN-37 notice 계보 key 물화 (ADR-087, PR 대기)
 
-`feat/tvn37-notice-lineage-materialization` — 계보 key를
-`source_records.lineage_key`로 물화(DB 트리거 파생, NOT NULL) + `(lineage_key,
-provider, dataset_key, source_entity_type)` 인덱스. read 필터는 correlated 유지.
-**3,045 notice: 목록 21.2초 → 0.17초 · 단건 15.6ms → 3.8ms · reconcile 124.8초 →
-0.58초** (145행 현행 prod: 127ms → 7.9ms · 9.0ms → 4.8ms · 251ms → 24ms).
-결과 집합 양방향 차집합 0, reconcile 종료 상태 동일. 설계 4회 폐기 근거는 ADR-087
-(비상관 InitPlan 안은 단건이 36배 느려져 적대 리뷰에서 폐기).
+`feat/tvn37-notice-lineage-materialization` — `source_records.lineage_key`(DB 트리거
+파생, notice scope만) + `(COALESCE(lineage_key, source_entity_id), provider,
+dataset_key, source_entity_type)` 인덱스. read 필터는 correlated 유지.
 
-**다음 한 작업**: 배터리 green 확인 → 적대 리뷰 2인(형태가 또 바뀌었으므로
-계보 판정 의미론과 트리거 파생을 처음부터 재검증) → PR 생성.
-**머지는 사용자 지시 대기.** 배포 시 `EXPECTED_HEAD`를
-`0088_source_record_lineage_key`로 선행 갱신(backfill 실측 74초).
+**3,045 notice: 목록 20.4초 → 0.19초 · reconcile 118.4초 → 0.36초.** 현행 prod
+규모(145행)에서는 60.8ms → 5.2ms로 이득이 작다 — 이 변경이 사는 곳은 규모다
+(20,059 계보에서 종전 13분+ 미완 → 508ms). 결과 집합 양방향 차집합 0.
+마이그레이션 전체 3.1초, heap +1MB. 설계 4회 폐기 근거는 ADR-087.
+
+**다음 한 작업**: 전체 배터리 재실행 green 확인 → 적대 리뷰 2인(scope 한정 +
+트리거로 또 바뀌었으므로 재검증) → PR 생성. **머지는 사용자 지시 대기.**
+배포 시 `EXPECTED_HEAD`를 `0088_source_record_lineage_key`로 선행 갱신.
 
 ## 2026-08-06 — T-VN-41F1D-C0a·F1J-A 병합, v5 dynamic fixture 결선 대기
 
