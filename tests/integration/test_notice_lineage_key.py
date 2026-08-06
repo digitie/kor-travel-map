@@ -6,13 +6,15 @@ INSERT 값(varchar)과 CASE(text) 양쪽에 써서 생긴 ``AmbiguousParameterEr
 적대 리뷰가 잡을 때까지 몰랐다. 그 오류는 notice뿐 아니라 **모든 provider의 모든
 source record 쓰기**를 죽인다.
 
-그래서 여기서 고정하는 것은 세 가지다:
+계보 key의 정본은 이제 **DB**에 있다(0088):
+``provider_sync.source_record_lineage_key`` 함수를 BEFORE INSERT/UPDATE 트리거가
+호출해 컬럼을 채우고, 애플리케이션은 그 컬럼을 읽기만 한다. 고정하는 것:
 
-1. writer가 실제로 실행되고 notice scope에 값을 남긴다.
-2. notice scope **밖**은 NULL이다(그러지 않으면 CASE의 ELSE가 73만 행에
-   ``source_entity_id`` 사본을 남기고, backfill이 채운 집합과도 어긋난다).
-3. 저장값이 read가 재계산하는 값과 **같다** — 세 벌(read/writer/migration)로
-   흩어진 같은 CASE가 갈리면 공개 표면과 admin/reconcile이 다른 계보로 묶인다.
+1. writer SQL이 ``lineage_key``를 **주지 않아도** 트리거가 채운다(NOT NULL).
+2. KREX/KMA 전용 계보 규칙과 그 밖의 fallback이 각각 맞는 값을 만든다.
+3. DB 정본 == 애플리케이션이 H35 고정 세대 replay에 쓰는 재계산 식. 갈리면
+   리허설이 재생하는 표면이 현행 표면과 다른 계보로 묶인다. 값이 *틀린* 경우는
+   NULL과 달리 fallback으로 막을 수 없다(값은 write-once다).
 """
 
 from __future__ import annotations
@@ -42,8 +44,8 @@ async def _insert_record(
     dataset_key: str,
     source_entity_type: str,
     raw_data: str,
-) -> str | None:
-    """프로덕션 writer SQL을 **그대로** 실행하고 저장된 계보 key를 돌려준다."""
+) -> str:
+    """프로덕션 writer SQL을 **그대로** 실행하고 트리거가 넣은 계보 key를 읽는다."""
     await session.execute(
         text(
             "INSERT INTO provider_sync.source_entities ("
@@ -53,8 +55,12 @@ async def _insert_record(
             " ON CONFLICT (source_entity_key) DO NOTHING"
         ),
         {
-            "k": f"se-{key}", "p": provider, "d": dataset_key,
-            "t": source_entity_type, "i": f"ENT-{key}", "now": _NOW,
+            "k": f"se-{key}",
+            "p": provider,
+            "d": dataset_key,
+            "t": source_entity_type,
+            "i": f"ENT-{key}",
+            "now": _NOW,
         },
     )
     await session.execute(
@@ -89,60 +95,181 @@ async def _insert_record(
     ).scalar_one()
 
 
-async def test_writer_stores_lineage_key_for_notice_scope(
+@pytest.mark.parametrize(
+    ("label", "provider", "dataset_key", "source_entity_type", "raw_data", "expected"),
+    [
+        (
+            "krex",
+            "python-krex-api",
+            "krex_traffic_notices",
+            "traffic_notice",
+            '{"occurred_date": "2026-08-01", "route_no": "1", "point_name": "p"}',
+            "2026-08-01::1::p",
+        ),
+        (
+            # 대소문자·공백 정규화가 계보를 가른다 — 같은 사건이 두 계보가 되면
+            # 밀려난 공지가 되살아난다.
+            "krex-normalized",
+            "python-krex-api",
+            "krex_traffic_notices",
+            "traffic_notice",
+            '{"occurred_date": " 2026-08-01 ", "route_no": "AB", "point_name": "Foo Bar"}',
+            "2026-08-01::ab::foo bar",
+        ),
+        (
+            "kma-phenomenon",
+            "python-kma-api",
+            "kma_weather_alerts",
+            "weather_alert",
+            '{"region_code": "L1010000", "phenomenon": "호우"}',
+            "L1010000::호우",
+        ),
+        (
+            # phenomenon이 없으면 alert_type으로 물러난다. 이 분기는 prod 데이터에
+            # KMA 특보가 아직 0행이라 실데이터로는 한 번도 실행된 적이 없다.
+            "kma-alert-type-fallback",
+            "python-kma-api",
+            "kma_weather_alerts",
+            "weather_alert",
+            '{"region_code": "L1010000", "alert_type": "강풍"}',
+            "L1010000::강풍",
+        ),
+        (
+            # notice scope 밖도 NULL이 아니다 — ELSE 분기가 source_entity_id다.
+            # NULL을 허용하면 read가 재계산 fallback을 껴야 하고 인덱스가 죽는다.
+            "non-notice",
+            "python-mois-api",
+            "mois_licenses",
+            "license_place",
+            '{"a": 1}',
+            "ENT-lin-non-notice",
+        ),
+        (
+            # 계보 구성요소가 전부 비면 entity id로 물러난다.
+            "krex-empty",
+            "python-krex-api",
+            "krex_traffic_notices",
+            "traffic_notice",
+            '{"occurred_date": "  ", "route_no": ""}',
+            "ENT-lin-krex-empty",
+        ),
+    ],
+)
+async def test_writer_stores_lineage_key(
     migrated_session: AsyncSession,
+    label: str,
+    provider: str,
+    dataset_key: str,
+    source_entity_type: str,
+    raw_data: str,
+    expected: str,
 ) -> None:
-    """writer가 **실제로 실행되고** notice scope에 계보 key를 남긴다."""
+    """writer가 실제로 실행되고, 트리거가 모든 scope에 맞는 계보 key를 남긴다."""
     stored = await _insert_record(
         migrated_session,
-        key="lin-krex",
-        provider="python-krex-api",
-        dataset_key="krex_traffic_notices",
-        source_entity_type="traffic_notice",
-        raw_data='{"occurred_date": "2026-08-01", "route_no": "1", "point_name": "p"}',
+        key=f"lin-{label}",
+        provider=provider,
+        dataset_key=dataset_key,
+        source_entity_type=source_entity_type,
+        raw_data=raw_data,
     )
-    assert stored == "2026-08-01::1::p"
+    assert stored == expected
 
 
-async def test_writer_leaves_non_notice_scope_null(
+async def test_writer_does_not_supply_lineage_key(
     migrated_session: AsyncSession,
 ) -> None:
-    """notice scope 밖은 NULL — CASE의 ELSE가 전 record에 사본을 남기면 안 된다."""
-    stored = await _insert_record(
-        migrated_session,
-        key="lin-mois",
-        provider="python-mois-api",
-        dataset_key="mois_licenses",
-        source_entity_type="license_place",
-        raw_data='{"a": 1}',
-    )
-    assert stored is None
+    """writer SQL은 ``lineage_key``를 쓰지 않는다 — 파생의 정본은 DB다.
 
-
-async def test_stored_lineage_key_equals_read_time_recomputation(
-    migrated_session: AsyncSession,
-) -> None:
-    """저장값 == read가 재계산하는 값.
-
-    read/writer/migration에 같은 CASE가 세 벌 있다. 갈리면 공개 표면과
-    admin/reconcile이 서로 다른 계보로 묶이고, 아무도 알아채지 못한다.
+    애플리케이션이 값을 넣기 시작하면 DB 함수와 갈릴 수 있고, 그 불일치는 어떤
+    제약도 잡아주지 못한다.
     """
-    await _insert_record(
-        migrated_session,
-        key="lin-cmp",
-        provider="python-krex-api",
-        dataset_key="krex_traffic_notices",
-        source_entity_type="traffic_notice",
-        raw_data='{"occurred_date": "2026-08-02", "route_no": "9", "direction": "북"}',
-    )
-    recomputed_sql = feature_repo._notice_lineage_sql("sr")
-    mismatched = (
+    assert "lineage_key" not in feature_repo._UPSERT_SOURCE_RECORD_SQL
+
+
+async def test_lineage_key_column_is_not_null(
+    migrated_session: AsyncSession,
+) -> None:
+    """NOT NULL이 살아 있어야 read가 컬럼 등식 하나만 쓰고 인덱스가 쓰인다."""
+    nullable = (
         await migrated_session.execute(
             text(
-                "SELECT count(*) FROM provider_sync.source_records AS sr"
-                " WHERE sr.lineage_key IS NOT NULL"
-                f"   AND sr.lineage_key IS DISTINCT FROM ({recomputed_sql})"
+                "SELECT is_nullable FROM information_schema.columns"
+                " WHERE table_schema = 'provider_sync'"
+                "   AND table_name = 'source_records'"
+                "   AND column_name = 'lineage_key'"
             )
         )
     ).scalar_one()
+    assert nullable == "NO"
+
+
+async def test_trigger_recomputes_lineage_key_when_payload_changes(
+    migrated_session: AsyncSession,
+) -> None:
+    """``raw_data``가 바뀌면 계보도 따라간다 — 값이 낡은 채 남지 않는다."""
+    await _insert_record(
+        migrated_session,
+        key="lin-repay",
+        provider="python-krex-api",
+        dataset_key="krex_traffic_notices",
+        source_entity_type="traffic_notice",
+        raw_data='{"occurred_date": "2026-08-03", "route_no": "7"}',
+    )
+    await migrated_session.execute(
+        text(
+            "UPDATE provider_sync.source_records"
+            " SET raw_data = CAST(:d AS jsonb) WHERE source_record_key = :k"
+        ),
+        {"d": '{"occurred_date": "2026-08-04", "route_no": "8"}', "k": "lin-repay"},
+    )
+    updated = (
+        await migrated_session.execute(
+            text(
+                "SELECT lineage_key FROM provider_sync.source_records"
+                " WHERE source_record_key = :k"
+            ),
+            {"k": "lin-repay"},
+        )
+    ).scalar_one()
+    assert updated == "2026-08-04::8"
+
+
+async def test_db_lineage_function_matches_frozen_replay_expression(
+    migrated_session: AsyncSession,
+) -> None:
+    """DB 정본 == H35 고정 세대 replay가 쓰는 재계산 식 (전 행 대조).
+
+    replay는 컬럼이 없던 0079 세대를 재생하므로 애플리케이션 식을 쓴다. 두 벌이
+    갈리면 리허설이 재생하는 표면이 현행 표면과 다른 계보로 묶인다.
+    """
+    for label, provider, dataset_key, entity_type, raw in (
+        ("k", "python-krex-api", "krex_traffic_notices", "traffic_notice",
+         '{"occurred_date": "2026-08-02", "route_no": "9", "direction": "북"}'),
+        ("w", "python-kma-api", "kma_weather_alerts", "weather_alert",
+         '{"region_code": "L1010000", "alert_type": "강풍"}'),
+        ("o", "python-mois-api", "mois_licenses", "license_place", "{}"),
+    ):
+        await _insert_record(
+            migrated_session,
+            key=f"lin-fn-{label}",
+            provider=provider,
+            dataset_key=dataset_key,
+            source_entity_type=entity_type,
+            raw_data=raw,
+        )
+    recomputed_sql = feature_repo._notice_lineage_sql("sr")
+    total, mismatched = (
+        await migrated_session.execute(
+            text(
+                "SELECT count(*), count(*) FILTER (WHERE"
+                "   provider_sync.source_record_lineage_key(sr)"
+                f"     IS DISTINCT FROM ({recomputed_sql})"
+                "   OR sr.lineage_key"
+                "     IS DISTINCT FROM provider_sync.source_record_lineage_key(sr))"
+                " FROM provider_sync.source_records AS sr"
+            )
+        )
+    ).one()
+    assert total > 0, "대조할 record가 없으면 이 테스트는 공허하다"
     assert mismatched == 0

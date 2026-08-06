@@ -28,20 +28,31 @@
 read SQL에는 ``sr``(source_records) alias가 **이미 스코프에 있으므로** 새 조인이
 필요 없다.
 
-NOT NULL인 이유 — 저장값은 계약이다
------------------------------------
+NOT NULL + 트리거인 이유 — 파생을 DB가 강제한다
+-----------------------------------------------
 
 읽는 쪽이 ``COALESCE(lineage_key, <재계산>)``으로 물러날 수 있게 두면 컬럼에
-인덱스를 걸어도 쓰이지 않는다. 그래서 이 revision은 **모든 record**를 채우고
-NOT NULL로 못박는다. CASE의 ELSE 분기가 ``source_entity_id``(NOT NULL)이므로 값이
-없을 수 있는 행 자체가 없다 — notice scope 밖 record도 자기 entity id를 계보로
-갖는다. 그 덕에 read는 분기 없이 컬럼 등식 하나만 쓰고, 인덱스가 그것을 받는다.
+인덱스를 걸어도 쓰이지 않는다. 그래서 **모든 record**를 채우고 NOT NULL로
+못박는다. CASE의 ELSE 분기가 ``source_entity_id``(NOT NULL)이므로 값이 없을 수
+있는 행 자체가 없다 — notice scope 밖 record도 자기 entity id를 계보로 갖는다.
 
-값이 **틀린** 경우는 fallback으로 막을 수 없다는 점도 같이 봤다(``COALESCE``는
-NULL만 막는다). 그래서 갈릴 수 있는 사본을 줄이는 쪽을 택했다: 애플리케이션은
-``feature_repo._notice_lineage_expr`` 한 함수에서 read·writer SQL을 **모두**
-만들고, 마이그레이션만 동결 artifact로서 아래 사본을 갖는다. 두 벌이 같은지는
-``tests/integration/test_notice_lineage_key.py``가 고정한다.
+그런데 NOT NULL만으로는 값이 **틀린** 경우를 못 막는다. 계보 key가 잘못 저장되면
+밀려난 공지가 공개 표면에 되살아나는데, 값은 write-once라 재검증 경로가 없다.
+애플리케이션이 식을 들고 있는 한 그 위험은 사본 수만큼 남는다.
+
+그래서 파생을 **DB로 옮겼다**: BEFORE INSERT/UPDATE 트리거가 ``raw_data``에서
+값을 계산해 넣는다. ``concat_ws``가 STABLE이라 generated column은 쓸 수 없지만,
+트리거 본문에는 그 제약이 없다. 결과적으로
+
+- 식의 정본이 **한 곳(DB 함수)**뿐이다. 애플리케이션은 읽기만 한다.
+- 어떤 writer든 — 애플리케이션 SQL, 테스트 픽스처, 수동 SQL — 값이 자동으로
+  맞는다. writer가 컬럼을 빠뜨려 NOT NULL에 걸리는 일도 없다.
+- writer SQL에서 계보 식이 사라져, 같은 bind 파라미터를 두 타입으로 쓰다 나는
+  ``AmbiguousParameterError`` 부류가 아예 생길 수 없다.
+
+비용은 없다: 20,000행 bulk insert 실측 inline 식 1,562ms vs 트리거 1,568ms.
+hot path인 ``ON CONFLICT DO UPDATE SET last_seen_at``은 ``UPDATE OF`` 열 목록에
+없어 트리거를 타지 않는다.
 
 비용
 ----
@@ -61,9 +72,8 @@ down_revision: str | Sequence[str] | None = "0087_route_area_subtypes"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
-#: ``feature_repo._notice_lineage_expr(alias='sr')``과 **같은 식**이어야 한다.
-#: 마이그레이션은 동결 artifact라 import하지 않고 사본을 둔다 — 계약 테스트가
-#: 두 벌의 일치를 고정한다.
+#: 계보 key 파생의 **정본**. 애플리케이션은 이 식을 갖지 않고 컬럼을 읽기만 한다
+#: (H35 고정 세대 replay만 예외 — 그 세대엔 컬럼이 없어 재계산한다).
 _LINEAGE_EXPR = """
     CASE
       WHEN sr.provider = 'python-krex-api'
@@ -118,10 +128,21 @@ def upgrade() -> None:
           ADD COLUMN lineage_key varchar
         """
     )
+    # STABLE로 선언한다 — ``concat_ws``가 STABLE이라 IMMUTABLE은 거짓말이 된다.
+    # (그래서 표현식 인덱스는 불가능하고, 값을 컬럼에 물화하는 이 설계가 필요하다.)
     op.execute(
         f"""
+        CREATE FUNCTION provider_sync.source_record_lineage_key(
+            sr provider_sync.source_records
+        ) RETURNS text
+        LANGUAGE sql STABLE
+        AS $fn$ SELECT ({_LINEAGE_EXPR}) $fn$
+        """
+    )
+    op.execute(
+        """
         UPDATE provider_sync.source_records AS sr
-        SET lineage_key = ({_LINEAGE_EXPR})
+        SET lineage_key = provider_sync.source_record_lineage_key(sr)
         """
     )
     op.execute(
@@ -130,20 +151,57 @@ def upgrade() -> None:
           ALTER COLUMN lineage_key SET NOT NULL
         """
     )
-    # 계보 탐색은 (scope 3열 + 계보 key) 등식이다. 정렬·범위가 아니라 등식이므로
-    # 이 순서면 index-only probe가 된다.
+    op.execute(
+        """
+        CREATE FUNCTION provider_sync.set_source_record_lineage_key()
+        RETURNS trigger LANGUAGE plpgsql AS $tg$
+        BEGIN
+            NEW.lineage_key := provider_sync.source_record_lineage_key(NEW);
+            RETURN NEW;
+        END
+        $tg$
+        """
+    )
+    # ``UPDATE OF`` 목록은 계보 입력이 되는 열만이다. hot path인
+    # ``ON CONFLICT DO UPDATE SET last_seen_at``은 여기 없어 트리거를 타지 않는다.
+    op.execute(
+        """
+        CREATE TRIGGER trg_source_record_lineage_key
+          BEFORE INSERT OR UPDATE OF
+            raw_data, provider, dataset_key, source_entity_type, source_entity_id
+          ON provider_sync.source_records
+          FOR EACH ROW
+          EXECUTE FUNCTION provider_sync.set_source_record_lineage_key()
+        """
+    )
+    # 계보 탐색은 4열 전부가 등식이라 btree 열 순서는 자유롭다. 그래서 선택도가
+    # 가장 높은 ``lineage_key``를 앞에 둔다 — scope 3열을 앞세우면
+    # ``idx_source_records_provider_dataset_entity``/``uq_source_records``와
+    # **선행 3열이 겹쳐** planner가 둘 사이에서 갈리고, 실제로 무관한 dedup 질의가
+    # 이 인덱스로 새는 것을 ``test_t212d_perf_explain``이 잡았다.
     op.execute(
         """
         CREATE INDEX idx_source_records_lineage
           ON provider_sync.source_records (
-            provider, dataset_key, source_entity_type, lineage_key
+            lineage_key, provider, dataset_key, source_entity_type
           )
         """
     )
 
 
 def downgrade() -> None:
+    op.execute(
+        "DROP TRIGGER IF EXISTS trg_source_record_lineage_key"
+        " ON provider_sync.source_records"
+    )
+    op.execute(
+        "DROP FUNCTION IF EXISTS provider_sync.set_source_record_lineage_key()"
+    )
     op.execute("DROP INDEX IF EXISTS provider_sync.idx_source_records_lineage")
     op.execute(
         "ALTER TABLE provider_sync.source_records DROP COLUMN IF EXISTS lineage_key"
+    )
+    op.execute(
+        "DROP FUNCTION IF EXISTS provider_sync.source_record_lineage_key"
+        "(provider_sync.source_records)"
     )

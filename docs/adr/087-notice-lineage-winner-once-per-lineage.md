@@ -1,40 +1,37 @@
-# ADR-087: notice 계보 승자는 계보당 1회로 판정한다
+# ADR-087: notice 계보 key를 물화하고 인덱스로 찾는다
 
 - 상태: accepted
-- 날짜: 2026-08-06
+- 날짜: 2026-08-07
 - 결정자: human, AI agent
 
 ## 컨텍스트
 
-공개 notice read마다 `_latest_notice_only_sql`이 붙는다. 그것이 하는 일은 "같은
-계보에서 밀려난 notice를 숨긴다"이고, 승자는 **계보당 하나**다.
+공개 notice read마다 `_latest_notice_only_sql`이 붙는다. 하는 일은 "같은 계보에서
+밀려난 notice를 숨긴다"이고, 승자는 계보당 하나다.
 
-그런데 구현은 그 판정을 **feature 행마다** correlated `NOT EXISTS`로 다시 했다 —
-`DISTINCT ON`으로 자기 계보를 고르고 `LATERAL`로 "나보다 나은 게 있나"를 훑는
-형태다. notice 수에 대해 **제곱으로** 커진다. 게다가 계보 key를
-`source_records.raw_data` JSON에서 매 행 재계산했고(같은 CASE가 한 질의에 7번
-전개), 런타임 표현식이라 인덱스가 붙지 않았다.
+느렸다 — 3,045 notice 규모에서 목록 21.2초, 같은 판정을 쓰는
+reconcile(`_supersede_stale_notice_sql`)은 124.8초.
+
+**원인 진단을 한 번 틀렸다.** 처음에는 "판정이 feature 행마다 correlated로
+반복되니 제곱"이라고 보고 비상관 `ROW_NUMBER()` + `ARRAY(SELECT ...)` InitPlan으로
+바꿨다. 목록은 60배 빨라졌지만 적대 리뷰 2인이 독립적으로 무너뜨렸다:
+
+- `<> ALL(ARRAY(...))`는 **Param 배열이라 해시되지 않고** 행마다 선형 스캔이다.
+  복잡도는 그대로 O(notice × 패자)였고 상수만 줄었다(실측: 10k에서 2.2초,
+  30k에서 18.0초로 복귀).
+- InitPlan은 바깥 질의가 1행을 찾든 전수를 훑든 **notice 전체를 랭킹한다**.
+  단건 조회가 3,045 규모에서 1.76ms → 63.3ms로 **회귀**했다. 상세 페이지와
+  service batch가 프로덕션의 흔한 경로다.
+
+진짜 원인은 상관성이 아니라 **계보를 찾는 방법**이었다. 계보 key를
+`source_records.raw_data` JSON에서 매 행 재계산했고, 런타임 표현식이라 인덱스가
+붙을 수 없어(`concat_ws`가 STABLE이라 표현식 인덱스도 불가) 경쟁자 탐색이 매번
+notice 전수 스캔이 됐다. correlated 형태 자체는 옳다 — 자기 계보만 보면 되고 그
+계보는 보통 한 자릿수 행이다.
 
 ## 결정
 
-### 1. 승자 판정을 계보당 1회로 (핵심)
-
-같은 규칙을 `ROW_NUMBER()`로 한 번에 표현하고, 패자 집합을 **비상관**
-`ARRAY(SELECT ...)`로 뽑는다. 비상관이므로 쿼리당 1회 평가되는 InitPlan이 되고,
-본 질의는 `feature_id <> ALL(...)`이 된다. 이 저장소가 bbox geometry 후보에서
-이미 쓰는 패턴이다.
-
-순서 규칙은 종전과 같다 — `seen_at` → `source_record_key` → 현재 identity →
-`feature_id` 안정 tie-break. 경쟁자 후보를 `deleted_at IS NULL`로만 거르는 것도
-그대로다.
-
-**불변식 하나가 함정이다**: 한 feature는 primary link를 여럿 가질 수 있어 **여러
-계보 파티션에 나타난다**. 종전 `HAVING bool_and(...)`의 뜻이 "한 계보라도 이기면
-보존"이므로, 패자는 `GROUP BY feature_id HAVING bool_and(rank > 1)` — **모든
-계보에서 밀린** feature뿐이다. 처음에 이걸 빠뜨려 활성 공지가 사라졌고
-`test_notice_lifecycle` 3건이 잡았다.
-
-### 2. 계보 key는 `provider_sync.source_records`에 저장한다
+### 1. 계보 key를 `provider_sync.source_records`에 물화한다
 
 **계보는 record의 속성이다.** 두 성질이 여기서만 동시에 성립한다.
 
@@ -47,59 +44,89 @@
 
 read SQL에 `sr` alias가 이미 있어 **새 조인이 없다**.
 
-### 3. 인덱스는 만들지 않는다
+### 2. 파생은 DB가 강제한다 — NOT NULL + 트리거
 
-계보 값으로 **probe하는 질의가 없다**. 계보는 `ROW_NUMBER()`의 PARTITION 축이자
-정렬 키이고, `source_records`는 `current_source_record_key`를 통해 PK로 도달한다.
-인덱스를 만들어 실측해도 `idx_scan = 0`이었다.
+읽는 쪽이 `COALESCE(lineage_key, <재계산>)`으로 물러날 수 있게 두면 인덱스를 걸어도
+쓰이지 않는다. 그래서 **모든 record**를 채우고 NOT NULL로 못박는다. CASE의 ELSE
+분기가 `source_entity_id`(NOT NULL)이므로 값이 없을 수 있는 행 자체가 없다.
 
-(초기 판단 근거였던 "`COALESCE(col, expr)`라서 인덱스가 못 받는다"는 **틀렸다** —
-표현식 인덱스를 막는 것은 `concat_ws`가 STABLE이라는 것이고, 그건 종전 재계산
-식에도 똑같이 걸린다. 결론은 같지만 이유가 달랐다.)
+NOT NULL만으로는 값이 **틀린** 경우를 못 막는다. 잘못된 계보 key는 밀려난 공지를
+공개 표면에 되살리는데, 값은 write-once라 재검증 경로가 없다. 애플리케이션이 식을
+들고 있는 한 그 위험은 사본 수만큼 남는다(종전에 read·writer·migration 세 벌이었다).
 
-### 4. 저장값은 최적화이지 계약이 아니다
+그래서 파생을 DB로 옮겼다: `provider_sync.source_record_lineage_key` 함수를
+BEFORE INSERT/UPDATE 트리거가 호출한다. `concat_ws`가 STABLE이라 generated
+column은 못 쓰지만 트리거 본문에는 그 제약이 없다. 결과:
 
-NULL이면 read가 재계산으로 물러난다. 정확성이 "write 경로가 돌았는지"에
-의존해서는 안 된다. notice scope **밖은 저장하지 않는다** — CASE의 ELSE 분기가
-`source_entity_id`라 제한하지 않으면 73만+ record에 읽히지도 않는 사본이 남고,
-notice scope만 채우는 backfill과도 어긋난다. scope 집합은
-`core.notice_lineage_scopes`가 정본이고 writer가 런타임에 그것을 쓴다.
+- 식의 정본이 **한 곳(DB)**뿐이다. 애플리케이션은 읽기만 한다.
+- 어떤 writer든 — 애플리케이션 SQL, 테스트 픽스처, 수동 SQL — 값이 자동으로 맞고,
+  컬럼을 빠뜨려 NOT NULL에 걸리지도 않는다.
+- writer SQL에서 계보 식이 사라져, 같은 bind 파라미터를 두 타입으로 쓰다 나는
+  `AmbiguousParameterError` 부류가 **생길 수 없다**(실제로 그렇게 나갔다가 적대
+  리뷰가 잡은 적이 있다 — 그 오류는 모든 provider의 모든 record 쓰기를 죽인다).
 
-## 근거 (실측)
+비용은 없다: 20,000행 bulk insert 실측 inline 식 1,562ms vs 트리거 1,568ms. hot
+path인 `ON CONFLICT DO UPDATE SET last_seen_at`은 `UPDATE OF` 열 목록에 없어
+트리거를 타지 않는다.
 
-| 규모 | 종전 | 현재 |
+### 3. 인덱스 열 순서는 `lineage_key`가 앞이다
+
+탐색은 4열 전부가 등식이라 btree 열 순서는 자유롭다. scope 3열을 앞세우면
+`idx_source_records_provider_dataset_entity`·`uq_source_records`와 **선행 3열이
+겹쳐** planner가 갈린다 — 무관한 dedup 질의가 이 인덱스로 새는 것을
+`test_t212d_perf_explain`이 잡았다. 그래서 선택도가 가장 높은 `lineage_key`를
+앞에 둔다.
+
+### 4. read 필터는 correlated를 유지한다
+
+바뀐 것은 계보 key를 재계산 대신 컬럼에서 읽는다는 점뿐이다. 순서 규칙
+(`seen_at` → `source_record_key` → 현재 identity → `feature_id`)도, 경쟁자 후보를
+`deleted_at IS NULL`로만 거르는 것도 종전과 같다. 그래서 결과 집합이 바뀔 수 있는
+표면이 없다.
+
+reconcile도 같은 인덱스를 쓴다. 거기엔 원인이 하나 더 있었다 —
+`out_of_scope_feature_lineages` CTE가 갱신 대상 feature마다 재실행됐다
+(loops=2,900). 계보 승패는 질의당 한 번이면 되는 집합 연산이라 `MATERIALIZED`
+장벽을 세웠다.
+
+H35 고정 세대(0063~0079) replay는 그 세대에 컬럼도 함수도 없으므로 **0079 당시
+SQL을 바이트 그대로** 유지한다(`_frozen_h35_latest_notice_only_sql`). 생성해
+`origin/main`과 byte-identical임을 확인했다.
+
+## 근거 (실측 — jit=off, 교차 반복 최소값)
+
+| 형태 | 3,045 notice | 145행(현행 prod) |
 | --- | --- | --- |
-| 3,045 notice | 23.7초 | **0.35초** |
-| 145행 (현행 prod) | 448ms | **4.8ms** |
+| notice 목록 | 21.2초 → **0.17초** | 127ms → **7.9ms** |
+| 전체 feature | 22.1초 → **0.74초** | 696ms → **540ms** |
+| 단건 조회(노출) | 15.6ms → **3.8ms** | 9.0ms → **4.8ms** |
+| reconcile | 124.8초 → **0.58초** | 251ms → **24ms** |
 
-결과 집합은 두 규모 모두 **145 = 145, 양방향 차집합 0**.
+**모든 형태가 개선되고 회귀가 없다**는 것이 폐기한 InitPlan 안과의 차이다.
+결과 집합은 두 규모 모두 양방향 차집합 0이고, reconcile 종료 상태
+(`features` status/deleted + `feature_notices`)도 `close_missing` 양쪽에서 동일하다.
 
-계보 key 저장만으로는 3,045 notice에서 27.5→19.9초(약 25%)였고 **현행 규모에서는
-차이가 측정되지 않았다**. 병목이 JSON 추출이 아니라 **형태**였기 때문이다.
-인덱스를 붙여도 24.6→20.6초에 그쳤다. 형태를 바꾸자 두 자릿수 배가 나온다.
+read 필터 SQL은 15,675자 → 6,001자로 줄었다 — 같은 CASE가 한 질의에 7번 전개되던
+것이 컬럼 참조로 바뀌었기 때문이다.
 
-## 폐기한 설계 3건
+## 폐기한 설계 4건
 
 - **`validity tstzrange` 승격** — GiST가 구조적으로 안 쓰이고(단일행 PK + 부정
   술어), 시작 시각을 보는 술어로 바꾸면 미래 발효 KMA 특보가 발효 전까지 숨어
   사전 경고가 사라진다.
 - **승자 물화(`superseded_at`)** — 승자는 `seen_at` 등 가변 입력의 함수라 write
   경로 밖 변경에 낡는다. `test_notice_lifecycle` 5건이 잡았다.
-- **`feature_notices.lineage_key`** — 축 불일치(위 결정 2). 조인이 늘어 21배
+- **`feature_notices.lineage_key`** — 축 불일치(위 결정 1). 조인이 늘어 21배
   규모에서 오히려 2배 느렸다.
+- **비상관 InitPlan(`<> ALL(ARRAY(...))`)** — 위 컨텍스트. 목록만 빠르고 단건은
+  최대 36배 느려진다. 복잡도도 그대로다.
 
 ## 결과
 
-- alembic `0088`: `source_records.lineage_key` + notice scope 한정 backfill(실측
-  208ms). 인덱스 없음.
-- writer는 record INSERT에서 함께 계산한다. bind 파라미터가 INSERT 값(varchar)과
-  CASE(text) 양쪽에 쓰이므로 **양쪽 모두 명시 `CAST(... AS text)`**가 필요하다 —
-  없으면 Parse 단계에서 `AmbiguousParameterError`로 **모든 provider의 모든 record
-  쓰기**가 죽는다(실제로 그렇게 나갔다가 적대 리뷰가 잡았다).
-- H35 고정 세대(0063~0079) replay는 재계산을 쓴다 — 그 세대엔 컬럼이 없다.
-- 계약 테스트(`tests/integration/test_notice_lineage_key.py`)가 writer 실행·scope
-  경계·저장값과 재계산값의 일치를 고정한다. 같은 CASE가 read/writer/migration 세
-  벌로 흩어져 있으므로, 갈리면 공개 표면과 admin/reconcile이 다른 계보로 묶인다.
+- alembic `0088`: `lineage_key` 컬럼 + 전 행 backfill + NOT NULL + 파생 함수·트리거
+  + `idx_source_records_lineage`.
+- 배포 비용(prod 732,678행 실측): backfill 74초, NOT NULL 1.6초, 인덱스 2.6초.
+  entrypoint의 `alembic upgrade head` 안에서 한 번 지불한다.
 - 응답 계약 무변경.
 - 배포: `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`를
   **`0088_source_record_lineage_key`**로 선행 갱신(api 먼저, dagster/daemon 재빌드).

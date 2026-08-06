@@ -641,6 +641,7 @@ CREATE TABLE provider_sync.source_records (
   raw_longitude          NUMERIC(12,8),
   raw_latitude           NUMERIC(12,8),
   raw_data               JSONB NOT NULL DEFAULT '{}'::jsonb,
+  lineage_key            VARCHAR NOT NULL,            -- 트리거 파생 (ADR-087)
   raw_payload_hash       TEXT NOT NULL,
   fetched_at             TIMESTAMPTZ NOT NULL,
   imported_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -662,6 +663,10 @@ CREATE INDEX idx_source_entities_current_record
   WHERE current_source_record_key IS NOT NULL;
 CREATE INDEX idx_source_records_provider_dataset_entity
   ON provider_sync.source_records (provider, dataset_key, source_entity_type, source_entity_id);
+-- notice 계보 탐색 (ADR-087). 4열 전부 등식이라 열 순서가 자유롭고, 선행 3열이
+-- 위 인덱스와 겹치지 않도록 선택도가 가장 높은 lineage_key를 앞에 둔다.
+CREATE INDEX idx_source_records_lineage
+  ON provider_sync.source_records (lineage_key, provider, dataset_key, source_entity_type);
 CREATE INDEX idx_source_records_entity_history
   ON provider_sync.source_records (
     source_entity_key, last_seen_at DESC, fetched_at DESC,

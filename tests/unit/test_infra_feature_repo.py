@@ -196,9 +196,9 @@ def test_notice_reconcile_reranks_only_out_of_scope_feature_lineages(
 ) -> None:
     """동일 scope는 ``ranked``를 재사용해 lineage 수의 제곱 비용을 피한다."""
     sql = feature_repo._supersede_stale_notice_sql(close_missing)
-    out_of_scope = sql.split("out_of_scope_feature_lineages AS (", 1)[1].split(
-        "),\nglobal_feature_wins AS (", 1
-    )[0]
+    out_of_scope = sql.split("out_of_scope_feature_lineages AS MATERIALIZED (", 1)[
+        1
+    ].split("),\nglobal_feature_wins AS MATERIALIZED (", 1)[0]
     normalized = " ".join(out_of_scope.split())
 
     assert (
@@ -207,6 +207,19 @@ def test_notice_reconcile_reranks_only_out_of_scope_feature_lineages(
     ) in normalized
     assert "FROM out_of_scope_feature_lineages AS current_notice" in sql
     assert "FROM global_feature_lineages AS current_notice" not in sql
+
+
+@pytest.mark.parametrize("close_missing", [False, True])
+def test_notice_reconcile_materializes_lineage_ctes(close_missing: bool) -> None:
+    """계보 승패 CTE는 질의당 1회만 계산돼야 한다 (ADR-087).
+
+    ``MATERIALIZED``가 없으면 Postgres가 이 CTE를 갱신 대상 feature마다 다시
+    실행한다 — 3,045 notice 규모에서 124.8초 대 0.58초다.
+    """
+    sql = feature_repo._supersede_stale_notice_sql(close_missing)
+
+    assert "out_of_scope_feature_lineages AS MATERIALIZED (" in sql
+    assert "global_feature_wins AS MATERIALIZED (" in sql
 
 
 def test_nearby_feature_sql_guards_required_lon_lat_contract() -> None:

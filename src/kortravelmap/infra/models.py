@@ -949,10 +949,10 @@ class SourceRecordRow(Base):
         # notice 계보 탐색(read 필터·reconcile)이 쓰는 등식 인덱스 — ADR-087.
         Index(
             "idx_source_records_lineage",
+            "lineage_key",
             "provider",
             "dataset_key",
             "source_entity_type",
-            "lineage_key",
         ),
         {"schema": "provider_sync"},
     )

@@ -356,56 +356,48 @@ ON CONFLICT (source_entity_key) DO UPDATE SET
 RETURNING current_source_record_key
 """
 
-# notice 계보 key를 만드는 **유일한 식**이다 (ADR-087).
+# notice 계보 key 재계산 식 — **H35 고정 세대(0063~0079) replay 전용**이다.
 #
-# 종전에는 같은 CASE가 read 필터·reconcile·writer에 손으로 복사돼 흩어져 있었다.
-# 한 벌만 어긋나도 공개 표면과 admin/reconcile이 서로 다른 계보로 묶이는데, 그
-# 불일치는 어떤 제약도 잡아주지 못한다 — 값이 write-once라 재검증 경로가 없다.
-# 그래서 파이썬 한 곳에서 만들고, 인자로 "무엇을 읽을지"만 바꾼다: 컬럼 참조
-# (``sr.provider``)든 bind 파라미터 캐스트(``CAST(:provider AS text)``)든 같다.
-def _notice_lineage_expr(
-    *,
-    provider: str,
-    dataset_key: str,
-    source_entity_type: str,
-    raw_data: str,
-    source_entity_id: str,
-) -> str:
-    """계보 key SQL 식. 모든 인자는 신뢰된 정적 SQL 조각이다."""
+# 현행 스키마에서 이 값의 정본은 DB에 있다: 0088이 만든
+# ``provider_sync.source_record_lineage_key`` 함수와 그것을 호출하는 트리거가
+# ``source_records.lineage_key``를 채우고, 애플리케이션은 그 컬럼을 읽기만 한다.
+# 고정 세대에는 컬럼도 함수도 없으므로 그 세대의 SQL을 여기서 재생한다.
+def _notice_lineage_sql(alias: str) -> str:
+    """``source_records`` 행에서 계보 key를 **재계산**하는 SQL."""
 
     return f"""
     CASE
-      WHEN {provider} = 'python-krex-api'
-       AND {dataset_key} = 'krex_traffic_notices'
-       AND {source_entity_type} = 'traffic_notice'
+      WHEN {alias}.provider = 'python-krex-api'
+       AND {alias}.dataset_key = 'krex_traffic_notices'
+       AND {alias}.source_entity_type = 'traffic_notice'
       THEN COALESCE(
         NULLIF(
           concat_ws(
             '::',
-            NULLIF(lower(btrim({raw_data}->>'occurred_date')), ''),
-            NULLIF(lower(btrim({raw_data}->>'occurred_time')), ''),
-            NULLIF(lower(btrim({raw_data}->>'route_no')), ''),
-            NULLIF(lower(btrim({raw_data}->>'direction')), ''),
-            NULLIF(lower(btrim({raw_data}->>'point_name')), ''),
-            NULLIF(lower(btrim({raw_data}->>'incident_type_code')), '')
+            NULLIF(lower(btrim({alias}.raw_data->>'occurred_date')), ''),
+            NULLIF(lower(btrim({alias}.raw_data->>'occurred_time')), ''),
+            NULLIF(lower(btrim({alias}.raw_data->>'route_no')), ''),
+            NULLIF(lower(btrim({alias}.raw_data->>'direction')), ''),
+            NULLIF(lower(btrim({alias}.raw_data->>'point_name')), ''),
+            NULLIF(lower(btrim({alias}.raw_data->>'incident_type_code')), '')
           ),
           ''
         ),
-        {source_entity_id}
+        {alias}.source_entity_id
       )
-      WHEN {provider} = 'python-kma-api'
-       AND {dataset_key} = 'kma_weather_alerts'
-       AND {source_entity_type} = 'weather_alert'
+      WHEN {alias}.provider = 'python-kma-api'
+       AND {alias}.dataset_key = 'kma_weather_alerts'
+       AND {alias}.source_entity_type = 'weather_alert'
       THEN COALESCE(
         NULLIF(
           concat_ws(
             '::',
-            NULLIF(btrim({raw_data}->>'region_code'), ''),
+            NULLIF(btrim({alias}.raw_data->>'region_code'), ''),
             NULLIF(
               btrim(
                 COALESCE(
-                  {raw_data}->>'phenomenon',
-                  {raw_data}->>'alert_type'
+                  {alias}.raw_data->>'phenomenon',
+                  {alias}.raw_data->>'alert_type'
                 )
               ),
               ''
@@ -413,64 +405,31 @@ def _notice_lineage_expr(
           ),
           ''
         ),
-        {source_entity_id}
+        {alias}.source_entity_id
       )
-      ELSE {source_entity_id}
+      ELSE {alias}.source_entity_id
     END
     """
-
-
-def _notice_lineage_sql(alias: str) -> str:
-    """``source_records`` 행에서 계보 key를 **재계산**하는 SQL.
-
-    현행 표면은 저장 컬럼 ``{alias}.lineage_key``를 읽는다. 이 재계산이 필요한
-    곳은 컬럼이 존재하지 않는 H35 고정 세대(0063~0079) replay뿐이다.
-    """
-
-    return _notice_lineage_expr(
-        provider=f"{alias}.provider",
-        dataset_key=f"{alias}.dataset_key",
-        source_entity_type=f"{alias}.source_entity_type",
-        raw_data=f"{alias}.raw_data",
-        source_entity_id=f"{alias}.source_entity_id",
-    )
 
 
 # source_records는 payload_hash가 UNIQUE 구성요소 → 이력 보존 (ADR-017).
 # 같은 source_record_key 재적재는 원문을 건드리지 않고 마지막 확인 시각만 갱신한다.
 #
-# 계보 key는 INSERT에서 함께 계산한다. record는 불변이라(``ON CONFLICT``는
-# ``last_seen_at``만 갱신) 값이 낡지 않고, 별도 UPDATE 왕복도 생기지 않는다.
-# 같은 bind 파라미터가 INSERT 값(varchar 컬럼)과 이 식(text 연산) 양쪽에 쓰이므로
-# 명시 CAST가 없으면 Postgres가 한 파라미터에 두 타입을 추론해 Parse 단계에서
-# ``AmbiguousParameterError``로 죽는다 — **모든 provider의 모든 record 쓰기**가.
-_WRITER_NOTICE_LINEAGE_SQL: Final[str] = _notice_lineage_expr(
-    provider="CAST(:provider AS text)",
-    dataset_key="CAST(:dataset_key AS text)",
-    source_entity_type="CAST(:source_entity_type AS text)",
-    raw_data="CAST(:raw_data AS jsonb)",
-    source_entity_id="CAST(:source_entity_id AS text)",
-)
-
-_UPSERT_SOURCE_RECORD_SQL: Final[str] = f"""
+# ``lineage_key``는 여기 없다 — DB 트리거가 채운다(0088, ADR-087). 파생을 DB에
+# 두면 애플리케이션·테스트 픽스처·수동 SQL 어느 경로로 써도 값이 어긋날 수 없다.
+_UPSERT_SOURCE_RECORD_SQL: Final[str] = """
 INSERT INTO provider_sync.source_records (
     source_record_key, source_entity_key, provider, dataset_key,
     source_entity_type, source_entity_id, source_version,
     raw_name, raw_address, raw_longitude, raw_latitude,
-    raw_data, raw_payload_hash, fetched_at, imported_at, expires_at,
-    lineage_key
+    raw_data, raw_payload_hash, fetched_at, imported_at, expires_at
 ) VALUES (
     :source_record_key, :source_entity_key,
-    -- 아래 CASE에서도 같은 파라미터를 text로 쓰므로 여기서도 text로 못박는다.
-    -- 한쪽만 캐스트하면 Postgres가 한 파라미터에 varchar/text 두 타입을 추론해
-    -- Parse 단계에서 AmbiguousParameterError로 죽는다(모든 record 쓰기 정지).
-    CAST(:provider AS text), CAST(:dataset_key AS text),
-    CAST(:source_entity_type AS text), CAST(:source_entity_id AS text),
+    :provider, :dataset_key, :source_entity_type, :source_entity_id,
     :source_version,
     :raw_name, :raw_address, :raw_longitude, :raw_latitude,
     CAST(:raw_data AS jsonb), :raw_payload_hash, :fetched_at, :imported_at,
-    :expires_at,
-    {_WRITER_NOTICE_LINEAGE_SQL}
+    :expires_at
 )
 ON CONFLICT (source_record_key) DO UPDATE SET
     last_seen_at = GREATEST(
