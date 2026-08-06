@@ -534,6 +534,12 @@
         "0086_event_notice_subtypes"
       ],
       "revision": "0087_route_area_subtypes"
+    },
+    {
+      "down_revision": [
+        "0087_route_area_subtypes"
+      ],
+      "revision": "0088_source_record_lineage_key"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

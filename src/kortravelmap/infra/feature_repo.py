@@ -363,13 +363,61 @@ INSERT INTO provider_sync.source_records (
     source_record_key, source_entity_key, provider, dataset_key,
     source_entity_type, source_entity_id, source_version,
     raw_name, raw_address, raw_longitude, raw_latitude,
-    raw_data, raw_payload_hash, fetched_at, imported_at, expires_at
+    raw_data, raw_payload_hash, fetched_at, imported_at, expires_at,
+    lineage_key
 ) VALUES (
     :source_record_key, :source_entity_key, :provider, :dataset_key,
     :source_entity_type, :source_entity_id, :source_version,
     :raw_name, :raw_address, :raw_longitude, :raw_latitude,
     CAST(:raw_data AS jsonb), :raw_payload_hash, :fetched_at, :imported_at,
-    :expires_at
+    :expires_at,
+    -- 계보 key를 INSERT에서 함께 계산한다. record는 불변이라 ON CONFLICT에서
+    -- 갱신할 필요가 없고, 별도 UPDATE 왕복도 생기지 않는다(ADR-087).
+    (
+    CASE
+      WHEN :provider = 'python-krex-api'
+       AND :dataset_key = 'krex_traffic_notices'
+       AND :source_entity_type = 'traffic_notice'
+      THEN COALESCE(
+        NULLIF(
+          concat_ws(
+            '::',
+            NULLIF(lower(btrim(CAST(:raw_data AS jsonb)->>'occurred_date')), ''),
+            NULLIF(lower(btrim(CAST(:raw_data AS jsonb)->>'occurred_time')), ''),
+            NULLIF(lower(btrim(CAST(:raw_data AS jsonb)->>'route_no')), ''),
+            NULLIF(lower(btrim(CAST(:raw_data AS jsonb)->>'direction')), ''),
+            NULLIF(lower(btrim(CAST(:raw_data AS jsonb)->>'point_name')), ''),
+            NULLIF(lower(btrim(CAST(:raw_data AS jsonb)->>'incident_type_code')), '')
+          ),
+          ''
+        ),
+        :source_entity_id
+      )
+      WHEN :provider = 'python-kma-api'
+       AND :dataset_key = 'kma_weather_alerts'
+       AND :source_entity_type = 'weather_alert'
+      THEN COALESCE(
+        NULLIF(
+          concat_ws(
+            '::',
+            NULLIF(btrim(CAST(:raw_data AS jsonb)->>'region_code'), ''),
+            NULLIF(
+              btrim(
+                COALESCE(
+                  CAST(:raw_data AS jsonb)->>'phenomenon',
+                  CAST(:raw_data AS jsonb)->>'alert_type'
+                )
+              ),
+              ''
+            )
+          ),
+          ''
+        ),
+        :source_entity_id
+      )
+      ELSE :source_entity_id
+    END
+    )
 )
 ON CONFLICT (source_record_key) DO UPDATE SET
     last_seen_at = GREATEST(
@@ -550,6 +598,21 @@ def _notice_lineage_sql(alias: str) -> str:
     """
 
 
+def _notice_lineage_stored_sql(source_alias: str) -> str:
+    """저장된 계보 key를 쓰되, 없으면 재계산한다 (ADR-087).
+
+    ``source_records.lineage_key``는 ``raw_data``에서 파생되고 record별로
+    불변이라 낡지 않는다. 계보 축이 **(feature, primary link)당**이므로 record에
+    두는 것이 유일하게 맞는 자리다 — feature 단위 컬럼은 한 feature의 여러 계보를
+    뭉개 활성 공지를 숨기거나 밀려난 공지를 되살린다.
+
+    저장값은 최적화이지 계약이 아니다. NULL(마이그레이션 이전 record, notice
+    scope 밖)이면 재계산으로 물러나므로 정확성이 write 경로에 의존하지 않는다.
+    ``COALESCE``는 좌항이 NULL일 때만 우항을 평가한다.
+    """
+    return f"COALESCE({source_alias}.lineage_key, {_notice_lineage_sql(source_alias)})"
+
+
 def _canonical_notice_feature_sql(feature_alias: str, source_alias: str) -> str:
     """현재 사건 단위 identity로 만든 notice feature인지 판정하는 SQL.
 
@@ -639,12 +702,12 @@ def _latest_notice_only_sql(feature_alias: str) -> str:
             cur_sr.provider,
             cur_sr.dataset_key,
             cur_sr.source_entity_type,
-            {_notice_lineage_sql("cur_sr")}
+            {_notice_lineage_stored_sql("cur_sr")}
         )
             cur_sr.provider,
             cur_sr.dataset_key,
             cur_sr.source_entity_type,
-            {_notice_lineage_sql("cur_sr")} AS lineage_key,
+            {_notice_lineage_stored_sql("cur_sr")} AS lineage_key,
             COALESCE(
                 cur_sr.last_seen_at, cur_sr.imported_at, cur_sr.fetched_at
             ) AS seen_at,
@@ -661,7 +724,7 @@ def _latest_notice_only_sql(feature_alias: str) -> str:
             cur_sr.provider,
             cur_sr.dataset_key,
             cur_sr.source_entity_type,
-            {_notice_lineage_sql("cur_sr")},
+            {_notice_lineage_stored_sql("cur_sr")},
             COALESCE(
                 cur_sr.last_seen_at, cur_sr.imported_at, cur_sr.fetched_at
             ) DESC,
@@ -672,7 +735,7 @@ def _latest_notice_only_sql(feature_alias: str) -> str:
         FROM provider_sync.source_entities AS other_se
         JOIN provider_sync.source_records AS other_sr
           ON other_sr.source_record_key = other_se.current_source_record_key
-         AND {_notice_lineage_sql("other_sr")} = current_notice.lineage_key
+         AND {_notice_lineage_stored_sql("other_sr")} = current_notice.lineage_key
         JOIN provider_sync.source_links AS other_sl
           ON other_sl.source_entity_key = other_se.source_entity_key
         JOIN feature.features AS other_f
@@ -2954,7 +3017,7 @@ global_feature_wins AS (
         FROM provider_sync.source_entities AS other_se
         JOIN provider_sync.source_records AS other_sr
           ON other_sr.source_record_key = other_se.current_source_record_key
-         AND {_notice_lineage_sql("other_sr")} = current_notice.lineage_key
+         AND {_notice_lineage_stored_sql("other_sr")} = current_notice.lineage_key
         JOIN provider_sync.source_links AS other_sl
           ON other_sl.source_entity_key = other_se.source_entity_key
         JOIN feature.features AS other_f

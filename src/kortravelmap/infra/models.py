@@ -898,6 +898,14 @@ class SourceRecordRow(Base):
 
     __tablename__ = "source_records"
     __table_args__ = (
+        Index(
+            "idx_source_records_lineage",
+            "provider",
+            "dataset_key",
+            "source_entity_type",
+            "lineage_key",
+            postgresql_where=text("lineage_key IS NOT NULL"),
+        ),
         UniqueConstraint(
             "provider",
             "dataset_key",
@@ -967,6 +975,11 @@ class SourceRecordRow(Base):
     raw_address: Mapped[str | None] = mapped_column(String)
     raw_longitude: Mapped[Any | None] = mapped_column(Numeric(12, 8))
     raw_latitude: Mapped[Any | None] = mapped_column(Numeric(12, 8))
+
+    # notice 계보 key — ``raw_data``에서 파생되고 record별로 불변이라
+    # 저장해도 낡지 않는다(ADR-087). notice scope가 아닌 record는 NULL이고,
+    # read는 NULL이면 재계산으로 물러난다(저장값은 최적화이지 계약이 아니다).
+    lineage_key: Mapped[str | None] = mapped_column(String)
     raw_data: Mapped[dict[str, Any]] = mapped_column(
         JSONB,
         nullable=False,
