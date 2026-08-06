@@ -736,17 +736,46 @@ def _latest_notice_only_sql(feature_alias: str) -> str:
 # 판정(``_LATEST_NOTICE_ONLY_SQL``의 ``other_f.deleted_at IS NULL``)은 reconcile
 # 의미론(T-VN-06/37 소유)이라 T-VN-04에서 view로 바꾸지 않았다 — 비공개 신규
 # feature가 구 feature를 계속 밀어내는 현행 동작 유지.
-def public_active_notice_filter_sql(feature_alias: str) -> str:
+def public_active_notice_filter_sql(
+    feature_alias: str, *, frozen_h35_schema: bool = False
+) -> str:
     """모든 공개 read가 공유하는 active/latest notice 감산 SQL을 반환한다.
 
     호출자는 신뢰된 정적 SQL alias만 넘긴다. 공개 여부의 기본 집합은
     ``feature.public_features``이고, 이 fragment는 종료·구버전 notice만 추가로
     제외한다.
+
+    ``frozen_h35_schema``: H35 cutover 리허설 전용. 그 경로는 **0079로 고정된
+    과거 스키마**를 재생하므로 0085가 신설한 ``feature.feature_notices``가
+    존재하지 않는다 — 그 세대의 판정(``detail`` 문자열 + 방어 cast)을 그대로
+    쓴다. 현행 표면은 typed 비교만 쓴다(T-VN-35, ADR-084).
     """
 
     if not feature_alias.isidentifier():
         raise ValueError("feature alias must be a SQL identifier")
+    if frozen_h35_schema:
+        return _frozen_h35_ended_notice_hidden_sql(
+            feature_alias
+        ) + _latest_notice_only_sql(feature_alias)
     return _ended_notice_hidden_sql(feature_alias) + _latest_notice_only_sql(feature_alias)
+
+
+def _frozen_h35_ended_notice_hidden_sql(feature_alias: str) -> str:
+    """0079 고정 스키마 세대의 "종료 notice 숨김" 판정 (역사 표면 보존).
+
+    ``detail->>'valid_end_time'``를 방어 cast(``pg_input_is_valid``)와 함께
+    읽던 당시 규칙 그대로다. 현행 코드가 이 형태를 되살리는 것을 막기 위해
+    **이 함수 안에만** 존재한다.
+    """
+
+    return f"""
+          AND NOT (
+              {feature_alias}.kind = 'notice'
+              AND pg_input_is_valid(
+                  {feature_alias}.detail->>'valid_end_time', 'timestamptz'
+              )
+              AND ({feature_alias}.detail->>'valid_end_time')::timestamptz <= now()
+          )"""
 
 
 _PUBLIC_ACTIVE_NOTICE_FILTER_SQL: Final[str] = public_active_notice_filter_sql("f")

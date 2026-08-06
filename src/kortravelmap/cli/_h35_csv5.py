@@ -230,10 +230,10 @@ async def _resolved_rows(
         )
         for row in preview.rows
     )
-    # h35 cutover는 0063 고정(pre-feature_uuid) 스키마에서 돈다 — matcher의
-    # pre-uuid 변형을 사용한다 (T-VN-32C PR-2, 역사 표면 보존).
+    # h35 cutover는 0063~0079 고정 세대에서 돈다 — matcher의 frozen 변형을
+    # 사용한다 (T-VN-32C PR-2, 역사 표면 보존).
     matches = await curation_repo.resolve_feature_matches(
-        session, requests=requests, pre_uuid_schema=True
+        session, requests=requests, frozen_h35_schema=True
     )
     accepted = rejected = 0
     resolved: list[curation_repo.ResolvedCurationImportRow] = []
@@ -383,9 +383,9 @@ async def run_csv5(request: H35Request) -> Receipt:
                         actor=_CSV_ACTOR,
                         source_content_sha256=str(entry["sha256"]),
                         batch_kind="csv_upload",
-                        # 0063 고정 스키마 — removal projection의 feature_uuid는
+                        # 0063~0079 고정 세대 — removal projection의 feature_uuid는
                         # NULL (T-VN-32C PR-2, 역사 표면 보존).
-                        pre_uuid_schema=True,
+                        frozen_h35_schema=True,
                     )
                 if (accepted, rejected, imported_rows) != (
                     EXPECTED_CSV_ACCEPTED,

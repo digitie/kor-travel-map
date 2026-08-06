@@ -526,17 +526,6 @@ async def test_event_and_notice_bundles_round_trip_through_subtype(
     assert reread["valid_end_time"] is None
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "프로덕션 결함(T-VN-35): feature_subtype._SUBTYPE_COLUMNS['event']와 "
-        "subtype_params(event)에 sigungu_code가 빠져 있다. 0085 backfill과 "
-        "features_detailed 뷰는 그 컬럼을 다루므로, writer만 값을 흘린다 — "
-        "신규/갱신 event의 EventDetail.sigungu_code가 소실되고 admin update의 "
-        "'detail 통교체' 계약도 이 필드에서만 깨진다. 수정되면 strict xfail이 "
-        "XPASS로 실패하므로 이 마커를 지우면 된다."
-    ),
-)
 async def test_event_sigungu_code_survives_subtype_round_trip(
     migrated_session: AsyncSession,
 ) -> None:
