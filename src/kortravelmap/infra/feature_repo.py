@@ -719,14 +719,13 @@ def _latest_notice_only_sql(feature_alias: str) -> str:
          AND other_sl.is_primary_source
         JOIN feature.features AS other_f
           ON other_f.feature_id = other_sl.feature_id
-        WHERE other_sr.provider = cur_sr.provider
-          AND other_sr.dataset_key = cur_sr.dataset_key
-          AND other_sr.source_entity_type = cur_sr.source_entity_type
-          AND {_lineage_sql('other_sr')} = {_lineage_sql('cur_sr')}
-          -- entity쪽 비교 대상은 종전 그대로 ``cur_sr``이다. ``cur_se``로 바꾸면
-          -- record/entity 사본이 어긋날 때 종전이 **보이던** 공지를 숨기는 방향의
-          -- 차이까지 생긴다 — 위 record쪽 등식은 인덱스를 묶기 위한 **추가**이므로
-          -- 차이는 "경쟁자를 덜 찾는" 한 방향으로만 남는다.
+        -- 계보 등식 하나가 인덱스의 **선행 컬럼**을 묶는다. scope 3열을 record쪽에도
+        -- 거는 판을 만들었다가 되돌렸다 — 같은 계획·같은 probe(rows=4)에 시간
+        -- 차이도 없었고(123 vs 128ms), 대신
+        -- ``source_records.(provider, dataset_key, source_entity_type)``가 자기
+        -- entity 행과 일치한다는 **제약 없는 가정**을 정확성의 전제로 만들었다.
+        -- 어긋나면 경쟁자를 덜 찾아 밀려난 공지가 공개 표면에 남는다.
+        WHERE {_lineage_sql('other_sr')} = {_lineage_sql('cur_sr')}
           AND other_se.provider = cur_sr.provider
           AND other_se.dataset_key = cur_sr.dataset_key
           AND other_se.source_entity_type = cur_sr.source_entity_type

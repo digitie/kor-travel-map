@@ -339,7 +339,11 @@ command가 결선돼 있지 않다** — 그 결선 전까지의 수동 기준�
      ENABLE ALWAYS TRIGGER trg_source_record_lineage_key;`
   확인: `SELECT tgenabled FROM pg_trigger
           WHERE tgname='trg_source_record_lineage_key';` → `A`여야 한다.
-- 값이 이미 어긋났다면 아래 한 문장이 점검과 복구를 겸한다(0행이면 전부 맞다):
+- 값 점검과 복구는 **두 단계**다. 점검은 읽기 전용이어야 한다 — UPDATE를 점검용으로
+  돌리면 어긋난 행마다 row lock과 WAL이 나간다.
+  점검: `SELECT count(*) FROM provider_sync.source_records sr
+          WHERE lineage_key IS DISTINCT FROM provider_sync.notice_lineage_key(sr);`
+  → 0이면 전부 맞다. 0이 아닐 때만 복구:
   `UPDATE provider_sync.source_records sr
      SET lineage_key = provider_sync.notice_lineage_key(sr)
    WHERE lineage_key IS DISTINCT FROM provider_sync.notice_lineage_key(sr);`

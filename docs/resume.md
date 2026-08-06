@@ -38,8 +38,7 @@ reconcile CTE 2개에 `MATERIALIZED` 장벽. 마이그레이션 `0088`은 `ANALY
 - 결과 집합 동일성: 적대 리뷰가 prod restore·3,045 fixture·220 feature 랜덤
   fixture·38 feature 수제 lab 4종에서 **양방향 차집합 0/0** 확인.
 - reconcile 종료 상태도 `close_missing` 양쪽에서 동일.
-- 적대 리뷰 4회(정확성 2 · 성능 2) 반영 완료. 마지막 성능 리뷰 1건이 **아직 진행
-  중**이다 — 그 결과는 아직 반영되지 않았다.
+- 적대 리뷰 **6회**(정확성 3 · 성능 3) 전부 반영 완료.
 
 ### 번호 충돌 (머지 순서에 따라 재번호 필요)
 
@@ -53,9 +52,14 @@ reconcile CTE 2개에 `MATERIALIZED` 장벽. 마이그레이션 `0088`은 `ANALY
 
 ### 다음 한 작업
 
-1. 진행 중인 성능 적대 리뷰 결과 반영.
-2. PR 생성(제목: `perf(notice): 계보 key 물화 + 인덱스 probe (T-VN-37, ADR-087)`).
-3. **머지는 사용자 지시 대기.**
+2. 깊은 이력 회귀(위) 처리 여부 결정 — 고치려면 정렬 식을 평컬럼으로 바꾸고
+   인덱스 꼬리에 `last_seen_at DESC, source_record_key DESC`를 붙인 뒤 결과 동일성
+   재검증. 순서 규칙 정본을 건드리므로 별도 변경으로 분리해 뒀다.
+3. `tests/integration/test_t212d_perf_explain.py`의 `_assert_uses_index`로 계보
+   인덱스 사용을 EXPLAIN으로 고정(현재는 `pg_indexes.indexdef` 문자열 비교뿐이라
+   planner가 인덱스를 안 고르게 되는 회귀를 CI가 못 잡는다).
+4. PR 생성(제목: `perf(notice): 계보 key 물화 + 인덱스 probe (T-VN-37, ADR-087)`).
+5. **머지는 사용자 지시 대기.**
 
 배포 시 `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`를
 `0088_source_record_lineage_key`로 **선행 갱신**(api 먼저, dagster/daemon 재빌드).
@@ -63,16 +67,16 @@ reconcile CTE 2개에 `MATERIALIZED` 장벽. 마이그레이션 `0088`은 `ANALY
 
 ### 남긴 가정 (ADR-087 §결과에 명시)
 
-- `source_records.(provider, dataset_key, source_entity_type)`가 자기
-  `source_entities` 행과 일치한다는 것을 제약이 강제하지 않는다. prod 0건,
-  코드로 도달 불가. entity쪽 비교 대상을 종전 그대로 `cur_sr`로 두어 차이는
-  "경쟁자를 덜 찾는" 한 방향으로만 남는다.
-- 계보 key에 시간 성분이 없어 계보당 인덱스 항목이 payload 이력만큼 증가한다
-  (50,011 record 계보에서 단건 3.3 → 12.5ms). `last_seen_at`이 NOT NULL이므로
-  정렬 2열을 인덱스에 덧붙이면 범위로 끊을 수 있으나 순서 규칙을 건드리므로 분리.
-- 인덱스 91MB의 99.9%는 `idx_source_records_provider_dataset_entity`와 중복이다
-  (out-of-scope 행에서 계보 식 = `source_entity_id`). 부분 인덱스로 8kB까지 줄이려면
-  read 술어를 두 갈래로 쪼개야 한다.
+- (해소됨) record쪽 scope 등식을 지워 record/entity 사본 일치 가정이 더 이상
+  정확성의 전제가 아니다. 이 필터는 `origin/main`의 술어 집합과 계보 비교만 다르다.
+- **깊은 이력 계보의 단건 조회가 `origin/main` 대비 8.1배 느리다**(50,001 record
+  한 계보에서 3.6 → 28.9ms). 잔여가 아니라 회귀다. 오늘 prod 깊이는 한 자릿수라
+  안 드러나지만 KMA 계보 key에 시간 성분이 없어 깊이가 영원히 증가한다.
+  고칠 방법과 왜 분리했는지는 ADR-087 §결과. **이 브랜치의 가장 큰 미해결 항목.**
+- 인덱스가 `source_records` 쓰기에 상시 **WAL +17.5% / dirtied page +16.9%**를
+  더한다(10만 행 bulk INSERT 실측). 트리거는 공짜다(WAL +2). 대안 2개는 실측으로
+  배제 — 평컬럼 인덱스 파국(71.1 대 17.7초), 부분 인덱스는 planner가 증명 불가.
+- 인덱스 91MB의 99.9%는 `idx_source_records_provider_dataset_entity`와 중복이다.
 
 ## 2026-08-06 — T-VN-41F1D-C0a·F1J-A 병합, v5 dynamic fixture 결선 대기
 

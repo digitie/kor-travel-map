@@ -195,11 +195,19 @@ def upgrade() -> None:
     # backfill은 **notice 규칙이 있는 scope만** 돈다. 실측 prod 732,678행 중
     # 744행(0.10%)이다. 전 행을 채우면 heap이 826MB → 1,700MB로 영구히 부풀고
     # (VACUUM도 OS에 반환하지 않는다) 2분짜리 ACCESS EXCLUSIVE lock이 걸린다.
+    # WHERE 절은 scope 3열을 **직접** 건다. ``notice_lineage_key(sr) IS NOT NULL``로
+    # 쓰면 STABLE 함수라 planner가 안을 못 보고 73만 행 Seq Scan이 된다(실측
+    # 1,457ms / 105,181 buffers, 추정 728,979행 대 실제 744행). 같은 744행을
+    # ``uq_source_records`` + ``idx_source_records_kma_alert_history`` BitmapOr로
+    # 집으면 561 buffers다 — I/O 187배 차이.
     op.execute(
         """
         UPDATE provider_sync.source_records AS sr
         SET lineage_key = provider_sync.notice_lineage_key(sr)
-        WHERE provider_sync.notice_lineage_key(sr) IS NOT NULL
+        WHERE (sr.provider, sr.dataset_key, sr.source_entity_type) IN (
+            ('python-krex-api', 'krex_traffic_notices', 'traffic_notice'),
+            ('python-kma-api', 'kma_weather_alerts', 'weather_alert')
+        )
         """
     )
     op.execute(

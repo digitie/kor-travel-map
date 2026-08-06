@@ -110,9 +110,12 @@ BEFORE INSERT arm이 돈다** — 전부 충돌하는 100,000행 upsert에서 `c
 겹쳐** planner가 갈린다 — 무관한 dedup 질의가 이 인덱스로 새는 것을
 `test_t212d_perf_explain`이 잡았다. 그래서 선택도가 가장 높은 계보 식을 앞에 둔다.
 
-표현식 인덱스의 통계는 `ANALYZE` 전까지 없고, 그 상태에서는 planner가 인덱스를
-무시하고 **종전 형태로 도는 계획**을 고르는 것이 실측됐다. 그래서 마이그레이션이
-`ANALYZE provider_sync.source_records`로 끝난다 — 배포 직후 그 창이 열리지 않게.
+표현식 인덱스는 `ANALYZE` 전까지 자기 통계가 없다. 계획 **모양**은 그대로지만
+비용 추정이 나빠 3,045 규모에서 214.8ms 대 104.2ms(2.1배)였다. 그래서
+마이그레이션이 `ANALYZE provider_sync.source_records`로 끝난다. (직전 판에는
+"인덱스를 무시하고 종전 형태로 돈다"고 적었는데 **재현되지 않았다** — 적대 리뷰가
+통계 없는 DB 두 개를 만들어 확인했다. autovacuum의 평범한 `ANALYZE`도 표현식
+통계를 만들므로 배포 후 열화 위험은 없다.)
 
 ### 5. read 필터는 correlated를 유지한다
 
@@ -171,14 +174,12 @@ read 필터 SQL은 15,675자 → 6,695자로 줄었다 — 같은 CASE가 한 �
 - 배포 비용(prod 732,678행 실측): **전체 3.1초** — backfill 744행 0.42초 + 인덱스
   1.90초(91MB) + `ANALYZE` 0.76초. heap 822 → 823MB. alembic 한 트랜잭션이라
   ACCESS EXCLUSIVE lock이 그 3.1초 동안 `source_records` 접근을 막는다.
-- 알려진 잔여: `source_records.(provider, dataset_key, source_entity_type)`가
-  자기 `source_entities` 행과 일치한다는 것을 **제약이 강제하지 않는다**. read
-  필터가 인덱스 선행 컬럼을 묶으려고 record쪽 등식을 더했으므로 이 가정이
-  load-bearing이 됐다(어긋나면 경쟁자를 **덜** 찾아 밀려난 공지가 남는다).
-  prod 732,678행 중 0건이고 entity key가 record의 같은 tuple 해시라 코드로는
-  도달 불가다. entity쪽 비교 대상은 종전 그대로 `cur_sr`로 두었으므로 차이는
-  "경쟁자를 덜 찾는" **한 방향**으로만 남는다. 구조적으로 못박으려면 복합 FK가
-  필요하고, 그건 이 변경의 범위 밖이다.
+- record쪽 scope 3열 등식을 한때 더했다가 **되돌렸다**. 인덱스 선행 컬럼은 계보
+  식 하나이므로 그 3열은 probe에 기여하지 않는다(같은 계획·같은 rows=4, 123 대
+  128ms). 대신 `source_records.(provider, dataset_key, source_entity_type)`가 자기
+  `source_entities` 행과 일치한다는 **제약 없는 가정**을 정확성의 전제로 만들었다.
+  세 줄을 지워 그 위험을 없앴다 — 그 결과 이 필터는 `origin/main`의 술어 집합과
+  계보 비교만 다르다.
 - 알려진 잔여: 인덱스 91MB의 99.9%는 `idx_source_records_provider_dataset_entity`와
   같은 값을 열 순서만 바꿔 담은 중복이다(out-of-scope 행에서 계보 식 =
   `source_entity_id`). 744행을 위한 값이고, 부분 인덱스로 8kB까지 줄이려면 read
