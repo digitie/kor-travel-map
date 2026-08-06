@@ -41,6 +41,16 @@ reconcile CTE 2개에 `MATERIALIZED` 장벽. 마이그레이션 `0088`은 `ANALY
 - 적대 리뷰 4회(정확성 2 · 성능 2) 반영 완료. 마지막 성능 리뷰 1건이 **아직 진행
   중**이다 — 그 결과는 아직 반영되지 않았다.
 
+### 번호 충돌 (머지 순서에 따라 재번호 필요)
+
+- **ADR-087이 겹친다.** codex의 PR #966(`feat/tvn33-provider-datasets`, draft)이
+  `docs/adr/087-provider-dataset-operation-and-observation-model.md`를 들고 있고,
+  이 브랜치는 `087-notice-lineage-winner-once-per-lineage.md`다. **나중에 머지되는
+  쪽이 088로 밀고** `docs/adr/README.md`의 "다음 후보"도 함께 옮긴다.
+- **alembic은 아직 안 겹친다.** #966 브랜치에 revision 파일이 아직 없다(계획상 3개
+  예약). 이 브랜치의 `0088`이 먼저 머지되면 #966이 0089~0091을 쓰면 된다. 반대면
+  이쪽이 0091로 밀린다 — `_application_migration_graph.json`도 함께 재생성할 것.
+
 ### 다음 한 작업
 
 1. 진행 중인 성능 적대 리뷰 결과 반영.
