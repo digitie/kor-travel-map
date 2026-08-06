@@ -2505,6 +2505,20 @@ export async function exactDatasetUiPath(
   syncScope: string,
 ): Promise<string> {
   const identity = await resolveKmaDatasetIdentity(page);
+  return exactDatasetUiPathForProviderDatasetId(
+    identity.providerDatasetId,
+    syncScope,
+  );
+}
+
+export function exactDatasetUiPathForProviderDatasetId(
+  providerDatasetId: number,
+  syncScope: string,
+): string {
+  const identity = requireKmaDatasetIdentity();
+  if (providerDatasetId !== identity.providerDatasetId) {
+    throw new Error("C7 dataset UI path의 provider_dataset_id가 canonical identity와 다릅니다");
+  }
   const query = new URLSearchParams({
     provider_dataset_id: String(identity.providerDatasetId),
     sync_scope: syncScope,
@@ -2519,11 +2533,18 @@ export async function getExactDatasetDetail(
   syncScope: string,
 ): Promise<BrowserFetchResult<OpsDatasetDetailResponse>> {
   const identity = await resolveKmaDatasetIdentity(page);
-  return browserFetch<OpsDatasetDetailResponse>(
+  const result = await browserFetch<OpsDatasetDetailResponse>(
     page,
     `/v1/ops/datasets/${identity.providerDatasetId}?${exactScopeQuery(syncScope)}`,
     { timeoutMs: DATASET_DETAIL_FETCH_TIMEOUT_MS },
   );
+  if (
+    result.status === 200 &&
+    result.body?.data.provider_dataset_id !== identity.providerDatasetId
+  ) {
+    throw new Error("C7 exact dataset detail provider_dataset_id 불일치");
+  }
+  return result;
 }
 
 /**

@@ -1165,6 +1165,78 @@ PY
   return "$command_status"
 }
 
+prepare_exact_triple_preflight_runtime() {
+  RUNTIME_DIR="$(mktemp -d "$STATE_ROOT/runtime.XXXXXX")" || return 1
+  chown 0:0 -- "$RUNTIME_DIR" || return 1
+  chmod 700 -- "$RUNTIME_DIR" || return 1
+  runtime_is_private_direct_child || return 1
+  mkdir -- "$RUNTIME_DIR/playwright" "$RUNTIME_DIR/journals" || return 1
+  chown 0:0 -- "$RUNTIME_DIR/playwright" "$RUNTIME_DIR/journals" || return 1
+  chmod 700 -- "$RUNTIME_DIR/playwright" "$RUNTIME_DIR/journals" || return 1
+  export E2E_STORAGE_STATE="$RUNTIME_DIR/admin-state.json"
+  export E2E_C7_KMA_STATE_FILE="$RUNTIME_DIR/journals/kma-preflight.json"
+  ACTIVE_CID_FILE="$STATE_ROOT/container-$$.cid"
+  ACTIVE_CONTAINER_REF_FILE="$STATE_ROOT/container-$$.json"
+  ACTIVE_CREATE_OUTCOME_FILE="$STATE_ROOT/container-$$.outcome.json"
+  ACTIVE_CONTAINER_NAME="kor-travel-map-c7-e2e-$$"
+}
+
+discard_exact_triple_preflight_runtime() {
+  [[ -z "$ACTIVE_COMMAND_PID" ]] || return 1
+  [[
+    ! -e "$ACTIVE_CID_FILE" && ! -L "$ACTIVE_CID_FILE" &&
+    ! -e "$ACTIVE_CONTAINER_REF_FILE" && ! -L "$ACTIVE_CONTAINER_REF_FILE" &&
+    ! -e "$ACTIVE_CREATE_OUTCOME_FILE" && ! -L "$ACTIVE_CREATE_OUTCOME_FILE"
+  ]] || return 1
+  rm -f -- "$E2E_STORAGE_STATE" || return 1
+  runtime_is_private_direct_child || return 1
+  rm -rf -- "$RUNTIME_DIR" || return 1
+  [[ ! -e "$RUNTIME_DIR" && ! -L "$RUNTIME_DIR" ]] || return 1
+  unset E2E_STORAGE_STATE E2E_C7_KMA_STATE_FILE PLAYWRIGHT_ARTIFACT_ROOT
+  RUNTIME_DIR=""
+  ACTIVE_CID_FILE=""
+  ACTIVE_CONTAINER_REF_FILE=""
+  ACTIVE_CREATE_OUTCOME_FILE=""
+  ACTIVE_CONTAINER_NAME=""
+}
+
+run_exact_triple_api_preflight() {
+  prepare_exact_triple_preflight_runtime || return 1
+  export E2E_LIVE_ALLOW_PROD
+  export E2E_ADMIN_WRITE E2E_C7_READ_AUTH_WRITE E2E_KMA_SCOPE_WRITE
+  export E2E_C7_EXPECTED_UI_ORIGIN_SHA256
+  export E2E_C7_EXPECTED_API_WS_ORIGIN_SHA256
+  export E2E_LIVE_WORKERS=1
+
+  if ! docker_run_playwright npm run type-check:e2e; then
+    discard_exact_triple_preflight_runtime || return 1
+    return 1
+  fi
+
+  export PLAYWRIGHT_ARTIFACT_ROOT="$RUNTIME_DIR/playwright/exact-triple-contract"
+  mkdir -- "$PLAYWRIGHT_ARTIFACT_ROOT" || {
+    discard_exact_triple_preflight_runtime || return 1
+    return 1
+  }
+  chown 0:0 -- "$PLAYWRIGHT_ARTIFACT_ROOT" || {
+    discard_exact_triple_preflight_runtime || return 1
+    return 1
+  }
+  chmod 700 -- "$PLAYWRIGHT_ARTIFACT_ROOT" || {
+    discard_exact_triple_preflight_runtime || return 1
+    return 1
+  }
+  if ! docker_run_playwright npm run e2e:live -- \
+    "e2e/live/ops-c7-kma-contract-preflight.live.spec.ts" \
+    --workers=1 \
+    --retries=0; then
+    discard_exact_triple_preflight_runtime || return 1
+    return 1
+  fi
+
+  discard_exact_triple_preflight_runtime
+}
+
 # 여기까지는 수집/파이프라인 domain state를 바꾸지 않는 preflight다. UI login은
 # session/auth audit를 만들 수 있으나 provider/request/POI/schedule mutation은 하지 않는다.
 # 고정 C7 상태 root와 BLOCKED sentinel은 모든 실행 identity 검증 뒤에만 만든다.
@@ -1208,6 +1280,8 @@ start_orchestrator_lock_guard
 [[ ! -e "$BLOCKED_FILE" && ! -L "$BLOCKED_FILE" ]] ||
   die "prior BLOCKED state requires operator recovery"
 has_residual_state && die "prior C7 journal/runtime residue requires operator recovery"
+run_exact_triple_api_preflight ||
+  die "C7 exact-triple API/type preflight failed before destructive state creation"
 create_blocked_sentinel
 trap finish EXIT
 trap 'exit_for_signal 130' INT
