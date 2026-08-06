@@ -40,15 +40,21 @@ reconcile CTE 2개에 `MATERIALIZED` 장벽. 마이그레이션 `0088`은 `ANALY
 - reconcile 종료 상태도 `close_missing` 양쪽에서 동일.
 - 적대 리뷰 **6회**(정확성 3 · 성능 3) 전부 반영 완료.
 
-### 번호 충돌 (머지 순서에 따라 재번호 필요)
+### 번호 충돌 — **해결: 이 브랜치가 우선** (사용자 결정 2026-08-07)
 
-- **ADR-087이 겹친다.** codex의 PR #966(`feat/tvn33-provider-datasets`, draft)이
-  `docs/adr/087-provider-dataset-operation-and-observation-model.md`를 들고 있고,
-  이 브랜치는 `087-notice-lineage-winner-once-per-lineage.md`다. **나중에 머지되는
-  쪽이 088로 밀고** `docs/adr/README.md`의 "다음 후보"도 함께 옮긴다.
-- **alembic은 아직 안 겹친다.** #966 브랜치에 revision 파일이 아직 없다(계획상 3개
-  예약). 이 브랜치의 `0088`이 먼저 머지되면 #966이 0089~0091을 쓰면 된다. 반대면
-  이쪽이 0091로 밀린다 — `_application_migration_graph.json`도 함께 재생성할 것.
+#966(`feat/tvn33-provider-datasets`)이 WIP 커밋 `2e76b80c`에서 `0088`~`0090`을
+잡았고 ADR-087도 같이 쓴다. **alembic revision 우선권은 T-VN-37에 있다.**
+
+- 이 브랜치는 **그대로 둔다** — `0088_source_record_lineage_key`
+  (`down_revision = 0087_route_area_subtypes`), ADR-087.
+- **#966이 밀린다**: `0088_tvn33_expand_seed` → `0089`,
+  `0089_tvn33_constraints` → `0090`, `0090_tvn33_cutover_fence` → `0091`.
+  체인 시작을 `down_revision = "0088_source_record_lineage_key"`로 바꾸고
+  `_application_migration_graph.json`을 재생성한다. ADR도 087 → 088로 옮기고
+  `docs/adr/README.md`와 hold snapshot·plan 문서의 "ADR-087 §결정 2" 참조를
+  함께 고친다.
+- 순서상 **이 브랜치가 먼저 머지돼야** #966의 체인이 성립한다. 그 전에는 두
+  브랜치 모두 `down_revision = 0087`이라 alembic이 head 2개로 본다.
 
 ### 다음 한 작업
 
