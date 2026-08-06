@@ -3,6 +3,21 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-08-06 — T-VN-41F1D-C3 Manager dynamic fixture n150 결선
+
+- [x] **T-VN-41F1D-C3 — Map fixture lifecycle의 v5 durable transaction 결선**
+
+  Manager PR #167의 최신 Map typed-subtype pin으로 n150 파기형 `rebuild-pinned` generation을
+  committed했다. Map application `0087_route_area_subtypes`, Map Dagster `29b539ebc72a`, PinVi
+  `20260804_0049` schema head 및 일곱 runtime container health를 확인했다. Manager v7 journal은
+  Map fixture `armed → consumed → finalized`와 PinVi canonical cancel의 정확한
+  `409 PIPELINE_CANCELLATION_UNSAFE` outcome을 기록했다.
+
+  Map UI 로그인 POST는 `200`과 session cookie를 반환했고, n150 data-independent live UI E2E는 운영 홈·
+  파이프라인 catalog 6건, Feature 목록·지도 초기 surface 10건을 통과했다. 새 DB에 source/ETL data를
+  의도적으로 적재하지 않았으므로 고정 curated/feature ID를 요구한 suite 실패는 C3 runtime failure와
+  분리해 F1D-D에서 final-schema ETL 재적재 뒤 재실행한다.
+
 ## 2026-08-06 — T-VN-35 A-D kind별 typed subtype 분해 병합
 
 > 2026-08-06 A-D 단일 PR로 종결(ADR-086). 원안 대비 **재해석 2건**이 있고, 근거는
@@ -60,8 +75,8 @@
   만든 canonical cancellation 뒤 consume/finalize를 원자적으로 기록한다. `armed → consumed →
   finalized` receipt는 exact unsafe outcome을 포함하며, fixture kind는 worker·stale recovery·일반
   ops projection과 직접 event 삽입에서 격리된다. `ops:fixture` capability는 Map API와 Docker
-  Manager에만 결박한다. 새 v5 Manager transaction에서 이 lifecycle을 실제 실행하는 작업은 열린
-  `T-VN-41F1D-C3`이 소유한다.
+  Manager에만 결박한다. 새 v5 Manager transaction에서 이 lifecycle을 실제 실행한 F1D-C3의 n150
+  receipt는 상단 완료 이력에 기록한다.
 
 ## 2026-08-06 — T-VN-41F1D-C0a 후보 Map application schema head artifact 병합
 

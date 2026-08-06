@@ -574,19 +574,14 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 > fixture 생성·소비·종결과 durable 상태는 Map이 소유하고, Manager는 service OpenAPI로
 > transaction ID만 전달한다. PinVi에는 기존 `ops:cancel` 외 권한을 주지 않는다(ADR-084).
 
-- [ ] **T-VN-41F1D-C3 — Manager dynamic fixture 결선** *(docker-manager 소유)*
-
-  기존 Map-owned fixture lifecycle을 v5 `rebuild-pinned` durable transaction에 직접 연결한다.
-  candidate Map readiness 뒤 transaction ID로 fixture ensure→PinVi의 단 한 번의 canonical
-  cancel→정확한 `409 PIPELINE_CANCELLATION_UNSAFE` receipt 대조→finalize를 수행한다.
-  `armed → consumed → finalized`와 POST 전 attempted 상태를 Manager journal에 단조 기록하고,
-  response loss 재개는 Map immutable outcome을 읽은 뒤 cancel POST를 재발행하지 않는다.
-  retired compatible-pair는 이 결선 단위가 아니며, fixture credential은 Map API와 Manager에만 둔다.
-
-- [ ] **T-VN-41F1D-D — 최종 격리 리허설·live UI E2E** *(공동, docs-only)*
+- [/] **T-VN-41F1D-D — 최종 격리 리허설·live UI E2E** *(공동, docs-only)*
 
   C3가 결선된 새 generation에서 schema head, canonical `409` receipt, finalize와 관리자 live UI·PinVi
-  mutating E2E를 확인한다. 서비스 전 단계이므로 중간 DB 데이터 복구는 수행하지 않고 필요 시 source/ETL을
+  mutating E2E 결과를 기록한다. 2026-08-06 n150 rebuild는 committed했고 Map application
+  `0087_route_area_subtypes`, Map Dagster `29b539ebc72a`, PinVi `20260804_0049`와 fixture
+  `finalized`/정확한 `409 PIPELINE_CANCELLATION_UNSAFE`를 확인했다. 로그인과 데이터 비의존 UI smoke는
+  통과했으나, 비어 있는 새 DB에서 고정 curated/feature ID를 요구하는 기존 suite는 ETL 재적재 뒤 별도
+  acceptance로 재실행한다. 서비스 전 단계이므로 중간 DB 데이터 복구는 수행하지 않고 필요 시 source/ETL을
   새로 적재한다.
 
 ## Wave 2 상세 — 구조 전환
