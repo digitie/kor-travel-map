@@ -42,7 +42,6 @@ from kortravelmap.infra.feature_repo import (
     FeatureLoadResult,
     FeatureSearchRow,
     NearbyFeatureRow,
-    _feature_detail_payload,
     _feature_params,
     _source_link_params,
     _source_record_params,
@@ -109,7 +108,7 @@ def test_feature_detail_maps_to_typed_subtype_params() -> None:
         feature_id=feature.feature_id,
         feature_uuid="00000000-0000-4000-8000-000000000001",
         kind=feature.kind.value,
-        detail=_feature_detail_payload(feature),
+        detail=feature.detail,
     )
     assert params is not None
     assert params["place_kind"] == "cafe"
@@ -124,9 +123,17 @@ def test_feature_params_without_coord_is_none() -> None:
 
     assert params["lon"] is None
     assert params["lat"] is None
-    # detail None이면 subtype 매핑 입력도 None (core bind에는 애초에 없다).
+    # core bind에 detail은 애초에 없다 — 값 정본은 subtype이다.
     assert "detail" not in params
-    assert _feature_detail_payload(feature) is None
+    # detail 미지정이어도 subtype 파라미터는 kind DTO 기본값으로 채워진다.
+    subtype = subtype_params(
+        feature_id=feature.feature_id,
+        feature_uuid="00000000-0000-4000-8000-000000000001",
+        kind=feature.kind.value,
+        detail=feature.detail,
+    )
+    assert subtype is not None
+    assert subtype["place_kind"] == PlaceDetail(feature_id="x").place_kind
 
 
 def test_source_record_params_serializes_raw_data() -> None:

@@ -2201,7 +2201,7 @@ FOR UPDATE
 # (generator 이원화 fail-close, 적대 리뷰 1 M1).
 # T-VN-35(0086): core에 ``detail``/``geom`` 컬럼이 없다. kind별 값은
 # subtype(``feature_places``/``feature_events``)이 **유일한 정본**이며 core
-# INSERT 직후 같은 트랜잭션에서 ``_write_subtype``이 쓴다. admin mutation은
+# INSERT 직후 같은 트랜잭션에서 ``feature_subtype.write_subtype``이 쓴다. admin mutation은
 # ``kind IN ('place','event')``(API Literal)이라 geometry는 애초에 대상이
 # 아니다 — geometry가 필수인 kind는 route/area뿐이고 그 값은 subtype 컬럼에
 # NOT NULL로 산다.
@@ -2522,7 +2522,7 @@ def _add_params(
             6 if coord else None
         ),
         # ``geom``/``detail``은 core 컬럼이 아니다(T-VN-35) — geometry는
-        # route/area subtype 전용이고 kind별 값은 ``_write_subtype``가 쓴다.
+        # route/area subtype 전용이고 kind별 값은 ``feature_subtype.write_subtype``가 쓴다.
         "address": _json_param(payload.get("address")),
         "legal_dong_code": payload.get("legal_dong_code"),
         "road_name_code": payload.get("road_name_code"),

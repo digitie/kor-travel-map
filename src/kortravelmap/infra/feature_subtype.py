@@ -66,6 +66,7 @@ SUBTYPE_TABLES: Final[dict[str, str]] = {
     "area": "feature_areas",
 }
 
+
 def subtype_table_for_kind(kind: str) -> str | None:
     """kind의 subtype 테이블 이름 (없으면 ``None``)."""
     return SUBTYPE_TABLES.get(kind)
@@ -166,7 +167,7 @@ def subtype_params(
     if kind not in SUBTYPE_TABLES:
         return None
     obj = _validated_detail(kind, feature_id, detail)
-    as_json = cast("dict[str, Any]", obj.model_dump(mode="json"))
+    as_json = obj.model_dump(mode="json")
     common: dict[str, Any] = {
         "feature_id": feature_id,
         "feature_uuid": feature_uuid,
@@ -447,17 +448,22 @@ async def write_subtype(
     subtype이 없는 kind(price/weather)는 no-op다.
     """
     sql = subtype_upsert_sql(kind)
+    if sql is None:
+        return
+    # 한 번만 검증하고 그 **객체**로 이후 판정을 한다 — raw dict(admin)와
+    # DTO(provider)가 같은 경로를 지나게 하려면 판정 지점이 하나여야 한다.
+    validated = _validated_detail(kind, feature_id, detail)
     params = subtype_params(
         feature_id=feature_id,
         feature_uuid=feature_uuid,
         kind=kind,
-        detail=detail,
+        detail=validated,
     )
-    if sql is None or params is None:
+    if params is None:  # pragma: no cover - SUBTYPE_TABLES와 동시에만 어긋난다
         return
     if kind in GEOMETRY_SUBTYPE_KINDS:
         params["geom_wkt"] = geom_wkt
-    if kind == "notice" and _is_first_probe_notice(detail):
+    if _is_first_probe_notice(validated):
         params["valid_start_time"] = await _preserved_notice_valid_start(
             session, feature_id, params["valid_start_time"]
         )
