@@ -556,14 +556,25 @@ async def test_assembled_notice_times_do_not_depend_on_session_timezone(
     await migrated_session.flush()
 
     rendered: list[tuple[str, str]] = []
+    observed_zones: list[str] = []
     for zone in ("Asia/Seoul", "UTC", "America/New_York"):
         await migrated_session.execute(text(f"SET LOCAL TIME ZONE '{zone}'"))
+        observed_zones.append(
+            str(
+                (
+                    await migrated_session.execute(text("SELECT current_setting('TimeZone')"))
+                ).scalar_one()
+            )
+        )
         assembled = await _detail_from_view(migrated_session, feature_id)
         rendered.append(
             (assembled["valid_start_time"], assembled["valid_end_time"])
         )
     await migrated_session.execute(text("SET LOCAL TIME ZONE 'UTC'"))
 
+    # GUC가 실제로 바뀌었는지 먼저 고정한다 — 안 바뀌었다면 위 비교는 공허하다
+    # (``SET LOCAL``은 트랜잭션 밖에서 무시된다).
+    assert observed_zones == ["Asia/Seoul", "UTC", "America/New_York"], observed_zones
     assert len(set(rendered)) == 1, f"세션 TimeZone에 따라 달라졌다: {rendered}"
     assert rendered[0] == (
         "2026-08-05T17:35:24+09:00",
