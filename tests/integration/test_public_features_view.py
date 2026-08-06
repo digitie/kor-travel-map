@@ -31,6 +31,7 @@ from kortravelmap.infra import (
     weather_repo,
 )
 from kortravelmap.infra.poi_cache_target_repo import upsert_poi_cache_target
+from tests.integration._subtype_seed import seed_feature_subtype
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -65,7 +66,7 @@ async def _ins_feature(
         text(
             """
             INSERT INTO feature.features (
-                feature_id, kind, name, category, coord, status, detail,
+                feature_id, kind, name, category, coord, status,
                 sido_code, sigungu_code, legal_dong_code, updated_at, deleted_at
             )
             VALUES (
@@ -77,7 +78,7 @@ async def _ins_feature(
                     ),
                     4326
                 ),
-                :status, CAST(:detail AS jsonb),
+                :status,
                 :sido, :sigungu, :bjd, CAST(:updated_at AS timestamptz),
                 CASE
                     WHEN CAST(:soft_deleted AS boolean)
@@ -94,13 +95,17 @@ async def _ins_feature(
             "lon": lon,
             "lat": lat,
             "status": status,
-            "detail": detail,
             "sido": sido,
             "sigungu": sigungu,
             "bjd": bjd,
             "updated_at": _NOW,
             "soft_deleted": soft_deleted,
         },
+    )
+    # T-VN-35(ADR-084): kind별 값의 정본은 subtype이다 — core INSERT만으로는
+    # 조립 뷰가 돌려주는 detail이 비어 있다.
+    await seed_feature_subtype(
+        session, feature_id=feature_id, kind=kind, detail=json.loads(detail)
     )
     await session.flush()
 
@@ -314,20 +319,24 @@ async def test_contained_in_area_uses_projection(migrated_session: AsyncSession)
     ids = await _seed_matrix(migrated_session, "pfv:area", name_token="구역내장소")
     polygon = "POLYGON((126.9 37.5, 127.1 37.5, 127.1 37.7, 126.9 37.7, 126.9 37.5))"
     for area_id, area_status in (("pfv:area:zone", "active"), ("pfv:area:zone-off", "inactive")):
+        # T-VN-35(ADR-084): geometry 정본은 ``feature_areas``다(core에 geom 없음).
         await migrated_session.execute(
             text(
                 """
                 INSERT INTO feature.features (
-                    feature_id, kind, name, category, geom, status, updated_at
+                    feature_id, kind, name, category, status, updated_at
                 )
-                VALUES (
-                    :fid, 'area', '검증 구역', '03000000',
-                    x_extension.ST_SetSRID(x_extension.ST_GeomFromText(:wkt), 4326),
-                    :status, :ts
-                )
+                VALUES (:fid, 'area', '검증 구역', '03000000', :status, :ts)
                 """
             ),
-            {"fid": area_id, "wkt": polygon, "status": area_status, "ts": _NOW},
+            {"fid": area_id, "status": area_status, "ts": _NOW},
+        )
+        await seed_feature_subtype(
+            migrated_session,
+            feature_id=area_id,
+            kind="area",
+            detail={"area_kind": "area"},
+            geom_wkt=polygon,
         )
     await migrated_session.flush()
 

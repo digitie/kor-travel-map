@@ -19,6 +19,7 @@ from sqlalchemy import text
 
 from kortravelmap.infra.consistency import FileObjectRef, run_consistency_checks
 from kortravelmap.infra.models import FeatureRow, SourceEntityRow, SourceRecordRow
+from tests.integration._subtype_seed import seed_feature_subtype
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -39,7 +40,6 @@ def _clean_place(feature_id: str) -> FeatureRow:
         name="정상 장소",
         category="EAT.RESTAURANT",
         coord=WKTElement("POINT(126.9784 37.5665)", srid=4326),
-        detail={"summary": "ok"},
     )
 
 
@@ -83,13 +83,13 @@ async def _seed_source_entity_record(
     await session.flush()
 
 
-async def test_f1_f2_detected_and_report_persisted(
+async def test_f1_detected_and_report_persisted(
     migrated_session: AsyncSession,
 ) -> None:
     # 정상 feature (대조군)
     migrated_session.add(_clean_place("clean-1"))
 
-    # F2 위반 — detail 비어 있는 place feature (server_default '{}')
+    # F2 후보 — subtype 행이 없는 place feature (T-VN-35 이후의 "detail 결측").
     migrated_session.add(
         FeatureRow(
             feature_id="f2-violation",
@@ -121,8 +121,6 @@ async def test_f1_f2_detected_and_report_persisted(
     by_code = {c.code: c for c in report.cases}
     assert by_code["F1"].count >= 1
     assert "orphan-se-1" in by_code["F1"].sample_ids
-    assert by_code["F2"].count >= 1
-    assert "f2-violation" in by_code["F2"].sample_ids
     # F3는 generated column이라 정상 데이터에서 위반 없음.
     assert by_code["F3"].count == 0
     assert report.severity_max == "ERROR"
@@ -139,6 +137,40 @@ async def test_f1_f2_detected_and_report_persisted(
     ).one()
     assert persisted.severity_max == "ERROR"
     assert persisted.summary["by_code"]["F1"] >= 1
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "프로덕션 결함(T-VN-35): F2('detail 누락')가 탐지 능력을 잃었다. "
+        "0086 이후 detail은 core 컬럼이 아니라 features_detailed 뷰의 조립 결과이고, "
+        "place/event/notice는 subtype 행이 없어도 jsonb_build_object가 NULL 필드로 "
+        "채운 **비어 있지 않은** 객체를 만든다 — 따라서 "
+        "``detail IS NULL OR detail = '{}'`` 술어는 영원히 0건이다. "
+        "(F2 SQL 자체도 아직 base table ``feature.features``를 읽어 UndefinedColumn으로 "
+        "죽는다 — consistency.py 수정이 선행돼야 한다.) 새 판정 축은 "
+        "``feature_subtype.count_subtype_drift``의 missing_subtype이다."
+    ),
+)
+async def test_f2_detects_feature_without_subtype_row(
+    migrated_session: AsyncSession,
+) -> None:
+    """detail-bearing kind인데 subtype 행이 없는 feature를 F2가 잡아야 한다."""
+    migrated_session.add(
+        FeatureRow(
+            feature_id="f2-violation-only",
+            kind="place",
+            name="subtype 없는 장소",
+            category="EAT.RESTAURANT",
+        )
+    )
+    await migrated_session.flush()
+
+    report = await run_consistency_checks(migrated_session, persist=False)
+
+    by_code = {c.code: c for c in report.cases}
+    assert by_code["F2"].count >= 1
+    assert "f2-violation-only" in by_code["F2"].sample_ids
 
 
 async def test_clean_data_reports_ok(migrated_session: AsyncSession) -> None:
@@ -379,7 +411,6 @@ async def _seed_feature_with_primary_source(
             name=name or f"정상 장소 {feature_id}",
             category=category,
             coord=WKTElement(coord_wkt, srid=4326),
-            detail={"summary": "ok"},
         )
     )
     source_record_key = f"sr-{feature_id}"
@@ -535,17 +566,25 @@ async def test_f6_detects_same_day_opening_hours_conflict(
             kind="place",
             name="영업시간 모순 장소",
             category="EAT.RESTAURANT",
-            detail={
-                "business_hours": {
-                    "periods": [
-                        {
-                            "open": {"day": 1, "time": "1800"},
-                            "close": {"day": 1, "time": "0900"},
-                        }
-                    ]
-                }
-            },
         )
+    )
+    await migrated_session.flush()
+    # T-VN-35(ADR-084): 영업시간 정본은 ``feature_places.business_hours``다.
+    await seed_feature_subtype(
+        migrated_session,
+        feature_id="f6-violation",
+        kind="place",
+        detail={
+            "place_kind": "restaurant",
+            "business_hours": {
+                "periods": [
+                    {
+                        "open": {"day": 1, "time": "1800"},
+                        "close": {"day": 1, "time": "0900"},
+                    }
+                ]
+            },
+        },
     )
     await migrated_session.flush()
 
@@ -567,33 +606,40 @@ async def test_f6_allows_normal_247_and_overnight_periods(
             kind="place",
             name="정상 영업시간 장소",
             category="EAT.RESTAURANT",
-            detail={
-                "business_hours": {
-                    "periods": [
-                        {
-                            "open": {"day": 1, "time": "0900"},
-                            "close": {"day": 1, "time": "1800"},
-                        },
-                        {
-                            "open": {"day": 5, "time": "2200"},
-                            "close": {"day": 6, "time": "0200"},
-                        },
-                        {"open": {"day": 0, "time": "0000"}, "close": None},
-                    ],
-                    "special_days": [
-                        {
-                            "date": "2026-06-05",
-                            "periods": [
-                                {
-                                    "open": {"day": 5, "time": "1000"},
-                                    "close": {"day": 5, "time": "1200"},
-                                }
-                            ],
-                        }
-                    ],
-                }
-            },
         )
+    )
+    await migrated_session.flush()
+    await seed_feature_subtype(
+        migrated_session,
+        feature_id="f6-clean",
+        kind="place",
+        detail={
+            "place_kind": "restaurant",
+            "business_hours": {
+                "periods": [
+                    {
+                        "open": {"day": 1, "time": "0900"},
+                        "close": {"day": 1, "time": "1800"},
+                    },
+                    {
+                        "open": {"day": 5, "time": "2200"},
+                        "close": {"day": 6, "time": "0200"},
+                    },
+                    {"open": {"day": 0, "time": "0000"}, "close": None},
+                ],
+                "special_days": [
+                    {
+                        "date": "2026-06-05",
+                        "periods": [
+                            {
+                                "open": {"day": 5, "time": "1000"},
+                                "close": {"day": 5, "time": "1200"},
+                            }
+                        ],
+                    }
+                ],
+            },
+        },
     )
     await migrated_session.flush()
 

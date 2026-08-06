@@ -3,6 +3,16 @@
 DB 적재 경로는 ``tests/integration/test_feature_repo_load.py``(testcontainers).
 본 모듈은 ``Feature``/``SourceRecord``/``SourceLink`` DTO → bind params 변환과
 ``FeatureLoadResult`` 기본값만 단위 검증 (coord None / detail None 분기 포함).
+
+T-VN-35(ADR-084) 이후 계약
+--------------------------
+
+core ``feature.features``에는 ``detail`` JSONB도 ``geom``도 없다(alembic 0086).
+따라서 ``_feature_params``는 core 컬럼 바인딩만 만들고, kind별 값은
+``feature_subtype.subtype_params``가 typed subtype 컬럼으로 매핑한다. notice
+효력 종료 감산도 ``detail ->> 'valid_end_time'`` 문자열 파싱(+ 오염 방어용
+``pg_input_is_valid`` cast)이 아니라 ``feature_notices.valid_end_time``
+timestamptz 비교다.
 """
 
 from __future__ import annotations
@@ -32,10 +42,12 @@ from kortravelmap.infra.feature_repo import (
     FeatureLoadResult,
     FeatureSearchRow,
     NearbyFeatureRow,
+    _feature_detail_payload,
     _feature_params,
     _source_link_params,
     _source_record_params,
 )
+from kortravelmap.infra.feature_subtype import subtype_params
 
 _KST = timezone(timedelta(hours=9))
 _NOW = datetime(2026, 5, 29, 9, 0, tzinfo=_KST)
@@ -68,12 +80,42 @@ def test_feature_params_with_coord_and_detail() -> None:
     assert params["kind"] == "place"
     assert params["lon"] == 126.92
     assert params["lat"] == 37.55
-    # detail/address/urls/raw_refs는 JSON 문자열 (CAST AS jsonb)
-    assert isinstance(params["detail"], str)
-    assert json.loads(params["detail"])["place_kind"] == "cafe"
+    # address/urls/raw_refs는 JSON 문자열 (CAST AS jsonb)
     assert isinstance(params["address"], str)
     assert json.loads(params["raw_refs"]) == []
     assert params["status"] == "active"
+    # T-VN-35: core에 detail 컬럼이 없으므로 core bind에도 없다.
+    assert "detail" not in params
+
+
+def test_feature_params_carry_geom_wkt_for_subtype_only() -> None:
+    """``geom_wkt``은 core 컬럼이 아니라 route/area subtype 전용 바인딩이다.
+
+    ``upsert_feature``가 core 실행 전에 ``pop``하므로 core INSERT 파라미터에는
+    남지 않는다 — 여기서는 빌더가 그 키를 만든다는 것만 고정한다.
+    """
+    params = _feature_params(_place(None, None))
+    assert "geom_wkt" in params
+    assert params["geom_wkt"] is None
+
+
+def test_feature_detail_maps_to_typed_subtype_params() -> None:
+    """kind별 값의 정본은 subtype이다 — DTO detail이 typed 컬럼으로 간다."""
+    feature = _place(
+        Coordinate(lon=Decimal("126.92"), lat=Decimal("37.55")),
+        PlaceDetail(feature_id="place:abc123", place_kind="cafe", phones=["02-1234-5678"]),
+    )
+    params = subtype_params(
+        feature_id=feature.feature_id,
+        feature_uuid="00000000-0000-4000-8000-000000000001",
+        kind=feature.kind.value,
+        detail=_feature_detail_payload(feature),
+    )
+    assert params is not None
+    assert params["place_kind"] == "cafe"
+    assert params["phones"] == ["02-1234-5678"]
+    # jsonb 컬럼만 JSON 문자열로 직렬화된다(raw text() 경로 바인딩).
+    assert json.loads(params["payload"]) == {}
 
 
 def test_feature_params_without_coord_is_none() -> None:
@@ -82,8 +124,9 @@ def test_feature_params_without_coord_is_none() -> None:
 
     assert params["lon"] is None
     assert params["lat"] is None
-    # detail None이면 빈 JSONB 객체 문자열
-    assert params["detail"] == "{}"
+    # detail None이면 subtype 매핑 입력도 None (core bind에는 애초에 없다).
+    assert "detail" not in params
+    assert _feature_detail_payload(feature) is None
 
 
 def test_source_record_params_serializes_raw_data() -> None:
@@ -168,35 +211,70 @@ def test_nearby_feature_sql_guards_required_lon_lat_contract() -> None:
     assert "f.coord_5179 IS NOT NULL" in sql
 
 
-def _guard(alias: str) -> str:
-    return f"pg_input_is_valid({alias}.detail ->> 'valid_end_time', 'timestamptz')"
+#: T-VN-35(ADR-084) 이후의 종료 notice 감산 술어 — free-form jsonb 문자열
+#: 파싱이 아니라 ``feature_notices.valid_end_time`` typed 비교다.
+_TYPED_ENDED_NOTICE_FRAGMENTS: tuple[str, ...] = (
+    "FROM feature.feature_notices AS ended_notice",
+    "ended_notice.valid_end_time IS NOT NULL",
+    "ended_notice.valid_end_time <= now()",
+)
+
+#: 되살아나면 안 되는 종전 형태 — 오염된 한 행이 공개 read 전체를 500으로
+#: 만들 수 있던 문자열 파싱과 그 방어용 cast 가드(T-VN-06/F-9). typed 컬럼이
+#: 그 실패 모드를 구조적으로 없앴으므로 재도입은 회귀다.
+_STRING_PARSE_RELICS: tuple[str, ...] = (
+    "pg_input_is_valid",
+    "detail ->> 'valid_end_time'",
+    "detail->>'valid_end_time'",
+)
 
 
-def test_shared_notice_filter_function_carries_defensive_cast_guard() -> None:
-    """중앙화된 notice 종료 감산 함수가 pg_input_is_valid 가드를 담아야 한다.
+def _assert_typed_notice_filter(sql: str, alias: str, *, label: str) -> None:
+    assert f"{alias}.kind <> 'notice'" in sql, f"{label} lost the kind short-circuit"
+    for fragment in _TYPED_ENDED_NOTICE_FRAGMENTS:
+        assert fragment in sql, f"{label} dropped typed valid_end_time comparison"
+    assert f"ended_notice.feature_id = {alias}.feature_id" in sql, (
+        f"{label} does not correlate on the caller alias"
+    )
+    for relic in _STRING_PARSE_RELICS:
+        assert relic not in sql, f"{label} reintroduced free-form detail parsing"
+
+
+def test_shared_notice_filter_function_compares_typed_valid_end_time() -> None:
+    """중앙화된 notice 종료 감산 함수가 typed timestamptz 비교여야 한다.
 
     #745가 이 감산 SQL을 ``_ended_notice_hidden_sql(alias)`` /
     ``public_active_notice_filter_sql(alias)`` 함수로 중앙화하고 curation/curated
-    표면까지 정본으로 확산시켰다 — 그 단일 함수의 가드가 곧 전 표면의 방어다
-    (T-VN-06/F-9). alias를 그대로 반영하는지도 함께 고정한다.
+    표면까지 정본으로 확산시켰다 — 그 단일 함수가 곧 전 표면의 계약이다.
+    T-VN-35(ADR-084)가 ``detail`` 문자열 파싱과 ``pg_input_is_valid`` 방어 cast를
+    ``feature_notices.valid_end_time`` 비교로 대체했다(T-VN-06/F-9의 실패 모드
+    자체가 소멸). alias를 그대로 반영하는지도 함께 고정한다.
     """
     for alias in ("f", "pf", "public_count_pf"):
-        ended = feature_repo._ended_notice_hidden_sql(alias)
-        assert _guard(alias) in ended
-        # 오염 시 fail-closed (제외) — 노출 방향이 아님을 SQL 수준에서 고정.
-        assert "ELSE false" in ended
-        assert _guard(alias) in feature_repo.public_active_notice_filter_sql(alias)
-    # 기존 정적 상수(alias 'f')도 여전히 가드를 담는다.
-    assert _guard("f") in feature_repo._PUBLIC_ACTIVE_NOTICE_FILTER_SQL
+        _assert_typed_notice_filter(
+            feature_repo._ended_notice_hidden_sql(alias),
+            alias,
+            label=f"_ended_notice_hidden_sql({alias!r})",
+        )
+        _assert_typed_notice_filter(
+            feature_repo.public_active_notice_filter_sql(alias),
+            alias,
+            label=f"public_active_notice_filter_sql({alias!r})",
+        )
+    # 기존 정적 상수(alias 'f')도 같은 계약을 담는다.
+    _assert_typed_notice_filter(
+        feature_repo._PUBLIC_ACTIVE_NOTICE_FILTER_SQL,
+        "f",
+        label="_PUBLIC_ACTIVE_NOTICE_FILTER_SQL",
+    )
 
 
-def test_every_composed_public_read_sql_embeds_notice_cast_guard() -> None:
-    """_PUBLIC_ACTIVE_NOTICE_FILTER_SQL을 합성한 모든 공개 read 상수가 가드를 포함.
+def test_every_composed_public_read_sql_embeds_typed_notice_filter() -> None:
+    """_PUBLIC_ACTIVE_NOTICE_FILTER_SQL을 합성한 모든 공개 read 상수가 계약을 포함.
 
-    미래에 특정 표면이 이 필터를 fork하며 가드를 빠뜨리면(F-9 재발) fast-fail한다.
-    관측(카운터)·typed 재설계는 T-VN-37 소유 — 여기서는 정적 존재만 단언한다.
+    미래에 특정 표면이 이 필터를 fork하며 감산을 빠뜨리거나(F-9 재발) 문자열
+    파싱을 되살리면 fast-fail한다.
     """
-    guard = _guard("f")
     scalar_sql = {
         # T-VN-32B: identities SQL이 ids SQL을 대체(legacy id·UUID 쌍 반환).
         "_PUBLIC_ACTIVE_NOTICE_IDENTITIES_SQL": (
@@ -214,29 +292,42 @@ def test_every_composed_public_read_sql_embeds_notice_cast_guard() -> None:
         "_CATEGORY_FEATURE_COUNTS_SQL": feature_repo._CATEGORY_FEATURE_COUNTS_SQL,
     }
     for name, sql in scalar_sql.items():
-        assert guard in sql, f"{name} dropped the valid_end_time cast guard"
-    # cluster는 unit별 3종을 dict로 조립 — 각 변형이 가드를 담아야 한다.
+        _assert_typed_notice_filter(sql, "f", label=name)
+    # cluster는 unit별 3종을 dict로 조립 — 각 변형이 같은 계약을 담아야 한다.
     for unit, sql in feature_repo._CLUSTER_BBOX_SQL_BY_UNIT.items():
-        assert guard in sql, f"cluster SQL[{unit}] dropped the cast guard"
+        _assert_typed_notice_filter(sql, "f", label=f"cluster SQL[{unit}]")
 
 
 def test_curation_and_curated_route_through_shared_notice_filter() -> None:
-    """#745가 확산한 curation/curated 공개 표면이 중앙 함수를 경유해 가드를 상속.
+    """#745가 확산한 curation/curated 공개 표면이 중앙 함수를 경유해 계약을 상속.
 
-    각 repo의 합성 SQL 상수가 자신의 alias로 만든 가드를 담고 있어야 한다 —
-    naked cast를 다시 인라인하면(가드 우회) 여기서 fast-fail한다.
+    각 repo의 합성 SQL 상수가 자신의 alias로 만든 typed 감산을 담고 있어야 한다 —
+    naked cast를 다시 인라인하면 여기서 fast-fail한다.
     """
     from kortravelmap.infra import curated_repo, curation_repo
 
     # curation collection count(count_pf / public_count_pf)·item 필터(pf).
-    assert _guard("count_pf") in curation_repo._COLLECTION_COUNT_NOTICE_FILTER_SQL
-    assert (
-        _guard("public_count_pf")
-        in curation_repo._COLLECTION_PUBLIC_COUNT_NOTICE_FILTER_SQL
+    _assert_typed_notice_filter(
+        curation_repo._COLLECTION_COUNT_NOTICE_FILTER_SQL,
+        "count_pf",
+        label="_COLLECTION_COUNT_NOTICE_FILTER_SQL",
     )
-    assert _guard("pf") in curation_repo._ITEM_PUBLIC_NOTICE_FILTER_SQL
+    _assert_typed_notice_filter(
+        curation_repo._COLLECTION_PUBLIC_COUNT_NOTICE_FILTER_SQL,
+        "public_count_pf",
+        label="_COLLECTION_PUBLIC_COUNT_NOTICE_FILTER_SQL",
+    )
+    _assert_typed_notice_filter(
+        curation_repo._ITEM_PUBLIC_NOTICE_FILTER_SQL,
+        "pf",
+        label="_ITEM_PUBLIC_NOTICE_FILTER_SQL",
+    )
     # curated feature 목록 공개 필터(f 별칭).
-    assert _guard("f") in curated_repo._PUBLIC_FEATURE_FILTERS_SQL
+    _assert_typed_notice_filter(
+        curated_repo._PUBLIC_FEATURE_FILTERS_SQL,
+        "f",
+        label="_PUBLIC_FEATURE_FILTERS_SQL",
+    )
 
 
 def test_nearby_cursor_round_trips_distance_name_and_updated_at() -> None:

@@ -368,6 +368,24 @@ def downgrade() -> None:
     )
     op.execute(
         """
+        CREATE INDEX idx_features_yt_channel_id
+            ON feature.features
+               ((detail #>> '{payload,kor_travel_concierge,youtube,channel_id}'))
+            WHERE (detail #>> '{payload,kor_travel_concierge,youtube,channel_id}')
+                  IS NOT NULL
+        """
+    )
+    op.execute(
+        """
+        CREATE INDEX idx_features_yt_playlist_id
+            ON feature.features
+               ((detail #>> '{payload,kor_travel_concierge,youtube,playlist_id}'))
+            WHERE (detail #>> '{payload,kor_travel_concierge,youtube,playlist_id}')
+                  IS NOT NULL
+        """
+    )
+    op.execute(
+        """
         CREATE VIEW feature.public_features AS
         SELECT * FROM feature.features
         WHERE status = 'active' AND deleted_at IS NULL

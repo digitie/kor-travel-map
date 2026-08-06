@@ -208,6 +208,7 @@ def subtype_params(
             "content_id": _text(payload.get("content_id")),
             "content_type_id": _text(payload.get("content_type_id")),
             "area_code": _text(payload.get("area_code")),
+            "sigungu_code": _text(payload.get("sigungu_code")),
             "payload": _object(payload.get("payload")),
         })
     if kind == "notice":
@@ -372,6 +373,7 @@ _SUBTYPE_COLUMNS: Final[dict[str, Sequence[str]]] = {
         "content_id",
         "content_type_id",
         "area_code",
+        "sigungu_code",
         "payload",
     ),
     "notice": (

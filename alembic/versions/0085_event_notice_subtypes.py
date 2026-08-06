@@ -5,10 +5,22 @@ identity 사본 FK)을 event/notice에 적용하고, **시간 불변식을 DB �
 승격**한다:
 
 - ``ck_feature_events_period`` — ``starts_on <= ends_on``.
-- ``ck_feature_notices_validity`` — ``valid_start_time <= valid_end_time``.
-  현재는 DTO(Python)만 검사하고 DB는 임의 JSONB를 받는다(admin update 경로의
+- ``ck_feature_notices_severity`` — 0~5 범위. 현재는 DTO(Python)만 검사하고
+  DB는 임의 JSONB를 받는다(admin update 경로의
   ``detail = CAST(:detail AS jsonb)``는 shape 검증이 없다 — 실측).
-- ``ck_feature_notices_severity`` — 0~5 범위.
+
+**``valid_start_time <= valid_end_time`` CHECK는 두지 않는다** (설계 판단).
+그 순서를 어기는 상태가 **실재**하기 때문이다: provider가 미래 발효 공고를
+공표한 뒤 발효 전에 feed에서 내리면, lifecycle이 `valid_end_time=철회시각`을
+쓰면서 `end < start`가 된다(KREX notice ETL에서 실측 재현 —
+`start=2026-07-13, end=2026-06-02`). 이는 "발효 전에 철회됨"이라는 정당한
+사실이지 데이터 결함이 아니다. 실재하는 상태를 금지하는 제약은 nuance를
+장애로 바꾼다 — 정상 ETL asset 전체가 실패했다.
+
+provider가 **선언한** 값의 순서 불변식은 DTO(`NoticeDetail`)가 계속 강제하고,
+DB 층 표현은 T-VN-37A의 `tstzrange`(empty range가 "효력 없음"을 정확히
+표현한다)로 되돌아온다. read 필터는 `valid_end_time <= now()`이므로 철회된
+공고는 즉시 숨겨진다 — 순서와 무관하게 옳게 동작한다.
 
 35D의 실익이 여기서 나온다: notice read 필터가 쓰던
 ``detail->>'valid_end_time'`` 문자열 파싱(+ 비-ISO 값 방어용
@@ -125,12 +137,6 @@ def upgrade() -> None:
             payload jsonb NOT NULL DEFAULT '{}'::jsonb,
             CONSTRAINT pk_feature_notices PRIMARY KEY (feature_id),
             CONSTRAINT ck_feature_notices_kind CHECK (kind = 'notice'),
-            CONSTRAINT ck_feature_notices_validity
-                CHECK (
-                    valid_start_time IS NULL
-                    OR valid_end_time IS NULL
-                    OR valid_start_time <= valid_end_time
-                ),
             CONSTRAINT ck_feature_notices_severity
                 CHECK (severity IS NULL OR severity BETWEEN 0 AND 5),
             CONSTRAINT fk_feature_notices_feature_kind

@@ -136,6 +136,21 @@ async def _seed_features_with_derived_uuid(
                     "name": f"fence-{feature_id[:24]}",
                 },
             )
+            # T-VN-35(ADR-084): place 값의 정본은 ``feature_places``이고
+            # ``place_kind``는 NOT NULL이다. subtype 없는 core place 행은
+            # downgrade(0086 역조립 → place_kind NULL) 후 재upgrade 시 0084
+            # backfill의 NOT NULL로 fail-close된다 — seed도 정본을 갖춰야 한다.
+            await connection.execute(
+                text(
+                    "INSERT INTO feature.feature_places "
+                    "(feature_id, feature_uuid, kind, place_kind) VALUES "
+                    "(:fid, CAST(:uuid AS uuid), 'place', 'attraction')"
+                ),
+                {
+                    "fid": feature_id,
+                    "uuid": str(feature_uuid_from_legacy(feature_id)),
+                },
+            )
 
 
 def _sqlstate(error: BaseException) -> str | None:

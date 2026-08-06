@@ -26,6 +26,7 @@ from kortravelmap.infra.models import (
     SourceRecordRow,
 )
 from kortravelmap.providers.mois import DATASET_KEY_BULK, PROVIDER_NAME
+from tests.integration._subtype_seed import seed_feature_subtype
 
 if TYPE_CHECKING:
     pass
@@ -48,8 +49,15 @@ async def _seed_place(
             kind="place",
             name="한식당 가나다",
             category="02010100",
-            detail={"place_kind": "restaurant", "phones": phones},
         )
+    )
+    await session.flush()
+    # T-VN-35(ADR-084): 전화번호 정본은 ``feature_places.phones``(text[])다.
+    await seed_feature_subtype(
+        session,
+        feature_id=feature_id,
+        kind="place",
+        detail={"place_kind": "restaurant", "phones": phones},
     )
     session.add(
         SourceEntityRow(

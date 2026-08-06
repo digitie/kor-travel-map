@@ -45,7 +45,6 @@ def _temple(feature_id: str, name: str = "불국사") -> FeatureRow:
         name=name,
         category=_TEMPLE_CAT,
         coord=WKTElement("POINT(129.3320 35.7900)", srid=4326),
-        detail={"summary": "temple"},
     )
 
 

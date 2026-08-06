@@ -143,8 +143,16 @@ async def test_loader_persists_promoted_and_skips_others(
     assert restaurant.kind == "place"
     assert restaurant.category == "02010100"
     assert restaurant.marker_color == "P-01"
-    assert isinstance(restaurant.detail, dict)
-    assert restaurant.detail["place_kind"] == "restaurant"
+    # T-VN-35(ADR-084): place 값의 정본은 ``feature_places``다(core에 detail 없음).
+    assert (
+        await migrated_session.execute(
+            text(
+                "SELECT place_kind FROM feature.feature_places "
+                "WHERE feature_id = :fid"
+            ),
+            {"fid": restaurant.feature_id},
+        )
+    ).scalar_one() == "restaurant"
 
     # ③ source_link FK 정합 (PRIMARY).
     links = (

@@ -260,12 +260,6 @@ class FeatureRow(Base):
             ),
         ),
         Index(
-            "idx_features_geom_gist",
-            "geom",
-            postgresql_using="gist",
-            postgresql_where=text("deleted_at IS NULL AND geom IS NOT NULL"),
-        ),
-        Index(
             "idx_features_kind_category",
             "kind",
             "category",
@@ -283,16 +277,6 @@ class FeatureRow(Base):
             text("feature_id DESC"),
         ),
         Index("idx_features_lower_name_keyset", text("lower(name)"), "feature_id"),
-        Index(
-            "idx_features_opening_hours_keyset",
-            "feature_id",
-            postgresql_where=text(
-                "deleted_at IS NULL "
-                "AND detail IS NOT NULL "
-                "AND detail <> '{}'::jsonb "
-                "AND detail ?| ARRAY['business_hours','opening_hours']"
-            ),
-        ),
         Index("idx_features_legal_dong_code", "legal_dong_code"),
         Index(
             "idx_features_sigungu",
@@ -361,7 +345,6 @@ class FeatureRow(Base):
             persisted=True,
         ),
     )
-    geom: Mapped[Any | None] = mapped_column(Geometry("GEOMETRY", srid=4326, spatial_index=False))
 
     # 주소 (kortravelmap.dto.Address 직렬화, ADR-041 — kraddr-base 흡수).
     address: Mapped[dict[str, Any]] = mapped_column(
@@ -393,11 +376,6 @@ class FeatureRow(Base):
     sibling_group_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
 
     # 상세 (ADR-018 — Pydantic DETAIL_MODELS 직렬화).
-    detail: Mapped[dict[str, Any]] = mapped_column(
-        JSONB,
-        nullable=False,
-        server_default=text("'{}'::jsonb"),
-    )
     raw_refs: Mapped[list[dict[str, Any]]] = mapped_column(
         JSONB,
         nullable=False,
@@ -457,12 +435,10 @@ class FeatureRow(Base):
 # kind 변경이 FK 위반으로 막힌다. ``(feature_id, feature_uuid)`` 복합 FK는
 # 0083 ``feature_aliases`` 선례와 같은 identity 사본 일치 계약이다.
 #
-# shadow 단계: core ``detail`` JSONB는 **유지**한다(응답 계약이 그대로
-# 노출 — 제거는 T-VN-39 removal manifest 소관). subtype은 typed 사본이며
-# writer가 같은 트랜잭션에서 둘 다 갱신하고, drift는 관측으로 0을 고정한다.
-#
-# price/weather subtype은 만들지 않는다 — detail이 비어 있고 값 정본은
-# ``feature_price_values``/``feature_weather_values``가 이미 소유한다.
+# T-VN-35(ADR-084 결정 4): core ``detail``/``geom``은 0086에서 **제거됐다**.
+# kind별 값의 정본은 subtype 테이블이고, 응답용 ``detail``/``geom``은
+# ``feature.features_detailed`` 뷰가 조립한다 — 이 ORM 매핑은 core 컬럼만
+# 반영한다(뷰는 read 전용이라 매핑하지 않는다).
 
 
 def _subtype_table_args(kind: str, *extra: Any) -> tuple[Any, ...]:
@@ -589,11 +565,6 @@ class FeatureNoticeRow(_FeatureSubtypeBase):
     __tablename__ = "feature_notices"
     __table_args__ = _subtype_table_args(
         "notice",
-        CheckConstraint(
-            "valid_start_time IS NULL OR valid_end_time IS NULL "
-            "OR valid_start_time <= valid_end_time",
-            name="ck_feature_notices_validity",
-        ),
         CheckConstraint(
             "severity IS NULL OR severity BETWEEN 0 AND 5",
             name="ck_feature_notices_severity",

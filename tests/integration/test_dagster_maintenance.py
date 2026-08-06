@@ -130,7 +130,6 @@ async def _seed_feature_with_source(
                 name=name,
                 category=_TEMPLE_CAT,
                 coord=WKTElement("POINT(129.3320 35.7900)", srid=4326),
-                detail={"summary": "temple"},
                 status="active",
                 created_at=_NOW,
                 updated_at=_NOW,

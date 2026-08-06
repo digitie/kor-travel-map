@@ -38,6 +38,7 @@ from kortravelmap.providers.kor_travel_concierge import (
     kor_travel_concierge_items_to_bundles,
 )
 from kortravelmap.providers.standard_data import cultural_festivals_to_bundles
+from tests.integration._subtype_seed import seed_feature_subtype
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -167,6 +168,58 @@ def _first_probe_notice_bundle(
         feature=feature,
         source_record=source_record,
         source_link=source_link,
+    )
+
+
+async def _insert_geometry_feature(
+    session: AsyncSession,
+    *,
+    feature_id: str,
+    kind: str,
+    name: str,
+    category: str,
+    wkt: str,
+    lon: float | None,
+    lat: float | None,
+) -> None:
+    """route/area seed — T-VN-35(ADR-084) 이후 geometry 정본은 subtype이다.
+
+    core에는 ``geom`` 컬럼이 없고 ``feature_routes``/``feature_areas``의
+    ``geom``이 Multi* NOT NULL이다. 단일 LineString/Polygon WKT도 ``ST_Multi``로
+    승격돼 저장되므로 GeoJSON ``type`` 단언은 Multi 변형을 함께 받는다.
+    """
+    await session.execute(
+        text(
+            """
+            INSERT INTO feature.features (
+                feature_id, kind, name, category,
+                coord, coord_precision_digits,
+                marker_icon, marker_color, status
+            )
+            VALUES (
+                :feature_id, :kind, :name, :category,
+                CASE WHEN CAST(:lon AS double precision) IS NULL THEN NULL
+                     ELSE x_extension.ST_SetSRID(
+                         x_extension.ST_MakePoint(
+                             CAST(:lon AS double precision),
+                             CAST(:lat AS double precision)
+                         ), 4326) END,
+                CASE WHEN CAST(:lon AS double precision) IS NULL THEN NULL ELSE 6 END,
+                'park', 'P-06', 'active'
+            )
+            """
+        ),
+        {
+            "feature_id": feature_id,
+            "kind": kind,
+            "name": name,
+            "category": category,
+            "lon": lon,
+            "lat": lat,
+        },
+    )
+    await seed_feature_subtype(
+        session, feature_id=feature_id, kind=kind, geom_wkt=wkt
     )
 
 
@@ -582,7 +635,7 @@ async def test_kor_travel_concierge_revert_with_changed_payload_reactivates(
             text(
                 "SELECT status, deleted_at,"
                 " detail #>> '{facility_info,description}' AS description"
-                " FROM feature.features WHERE feature_id = :feature_id"
+                " FROM feature.features_detailed WHERE feature_id = :feature_id"
             ),
             {"feature_id": bundle.feature.feature_id},
         )
@@ -643,12 +696,15 @@ async def test_notice_first_probe_start_time_is_preserved_on_payload_update(
 
     detail = (
         await migrated_session.execute(
-            text("SELECT detail FROM feature.features WHERE feature_id = :fid"),
+            text("SELECT detail FROM feature.features_detailed WHERE feature_id = :fid"),
             {"fid": first.feature.feature_id},
         )
     ).scalar_one()
 
-    assert detail["valid_start_time"] == first_seen.isoformat()
+    # T-VN-35(ADR-084 결정 4 "의도적 정규화 1건"): valid_start_time이 typed
+    # timestamptz가 되면서 표기가 canonical UTC ISO로 통일된다(종전에는 writer마다
+    # "+09:00"/"+00" 표기가 혼재). 같은 **순간**인지를 비교한다.
+    assert datetime.fromisoformat(detail["valid_start_time"]) == first_seen
     assert detail["payload"]["description"] == "공사 내용 수정"
     assert detail["payload"]["valid_start_origin"] == "first_probe"
 
@@ -890,41 +946,25 @@ async def test_features_in_bbox_hides_stale_notice_revisions(
 async def test_features_in_bbox_include_geometry_returns_route_area_shape(
     migrated_session: AsyncSession,
 ) -> None:
-    await migrated_session.execute(
-        text(
-            """
-            INSERT INTO feature.features (
-                feature_id, kind, name, category,
-                coord, coord_precision_digits, geom,
-                marker_icon, marker_color, status
-            )
-            VALUES
-            (
-                'f_route_bbox_geometry', 'route', '탐방로', '02000000',
-                x_extension.ST_SetSRID(x_extension.ST_MakePoint(127.05, 37.55), 4326),
-                6,
-                x_extension.ST_SetSRID(
-                    x_extension.ST_GeomFromText(
-                        'LINESTRING(127.0 37.5,127.1 37.6)'
-                    ),
-                    4326
-                ),
-                'park', 'P-06', 'active'
-            ),
-            (
-                'f_area_bbox_geometry', 'area', '국립공원', '03000000',
-                x_extension.ST_SetSRID(x_extension.ST_MakePoint(127.05, 37.55), 4326),
-                6,
-                x_extension.ST_SetSRID(
-                    x_extension.ST_GeomFromText(
-                        'POLYGON((127.0 37.5,127.1 37.5,127.1 37.6,127.0 37.6,127.0 37.5))'
-                    ),
-                    4326
-                ),
-                'park', 'P-06', 'active'
-            )
-            """
-        )
+    await _insert_geometry_feature(
+        migrated_session,
+        feature_id="f_route_bbox_geometry",
+        kind="route",
+        name="탐방로",
+        category="02000000",
+        lon=127.05,
+        lat=37.55,
+        wkt="LINESTRING(127.0 37.5,127.1 37.6)",
+    )
+    await _insert_geometry_feature(
+        migrated_session,
+        feature_id="f_area_bbox_geometry",
+        kind="area",
+        name="국립공원",
+        category="03000000",
+        lon=127.05,
+        lat=37.55,
+        wkt="POLYGON((127.0 37.5,127.1 37.5,127.1 37.6,127.0 37.6,127.0 37.5))",
     )
     await migrated_session.flush()
 
@@ -939,51 +979,51 @@ async def test_features_in_bbox_include_geometry_returns_route_area_shape(
     by_id = {row["feature_id"]: row for row in rows}
 
     route = by_id["f_route_bbox_geometry"]
-    assert route["geometry"]["type"] == "LineString"
+    assert route["geometry"]["type"] in {"LineString", "MultiLineString"}
     assert route["area_square_meters"] is None
 
     area = by_id["f_area_bbox_geometry"]
-    assert area["geometry"]["type"] == "Polygon"
+    assert area["geometry"]["type"] in {"Polygon", "MultiPolygon"}
     assert float(area["area_square_meters"]) > 0
 
 
 async def test_features_contained_in_area_returns_points_inside_polygon(
     migrated_session: AsyncSession,
 ) -> None:
+    await _insert_geometry_feature(
+        migrated_session,
+        feature_id="f_area_contains_query",
+        kind="area",
+        name="포함 영역",
+        category="03000000",
+        lon=127.05,
+        lat=37.55,
+        wkt="POLYGON((127.0 37.5,127.1 37.5,127.1 37.6,127.0 37.6,127.0 37.5))",
+    )
     await migrated_session.execute(
         text(
             """
             INSERT INTO feature.features (
                 feature_id, kind, name, category,
-                coord, coord_precision_digits, geom,
+                coord, coord_precision_digits,
                 marker_icon, marker_color, status
             )
             VALUES
             (
-                'f_area_contains_query', 'area', '포함 영역', '03000000',
-                x_extension.ST_SetSRID(x_extension.ST_MakePoint(127.05, 37.55), 4326),
-                6,
-                x_extension.ST_SetSRID(
-                    x_extension.ST_GeomFromText(
-                        'POLYGON((127.0 37.5,127.1 37.5,127.1 37.6,127.0 37.6,127.0 37.5))'
-                    ),
-                    4326
-                ),
-                'park', 'P-06', 'active'
-            ),
-            (
                 'f_area_inside_point', 'place', '안쪽 장소', '01000000',
                 x_extension.ST_SetSRID(x_extension.ST_MakePoint(127.04, 37.54), 4326),
-                6, NULL, 'star', 'P-03', 'active'
+                6, 'star', 'P-03', 'active'
             ),
             (
                 'f_area_outside_point', 'place', '바깥 장소', '01000000',
                 x_extension.ST_SetSRID(x_extension.ST_MakePoint(127.5, 37.9), 4326),
-                6, NULL, 'star', 'P-03', 'active'
+                6, 'star', 'P-03', 'active'
             )
             """
         )
     )
+    for point_id in ("f_area_inside_point", "f_area_outside_point"):
+        await seed_feature_subtype(migrated_session, feature_id=point_id, kind="place")
     await migrated_session.flush()
 
     rows = await feature_repo.features_contained_in_area(
@@ -1011,40 +1051,25 @@ async def test_features_in_bbox_include_geometry_matches_geom_only_branch(
     ``ck_features_coord_precision`` 충족 위해 coord=NULL 행은
     coord_precision_digits=NULL로 둔다.
     """
-    await migrated_session.execute(
-        text(
-            """
-            INSERT INTO feature.features (
-                feature_id, kind, name, category,
-                coord, coord_precision_digits, geom,
-                marker_icon, marker_color, status
-            )
-            VALUES
-            (
-                'f_route_geom_only_null_coord', 'route', '좌표미상 탐방로', '02000000',
-                NULL, NULL,
-                x_extension.ST_SetSRID(
-                    x_extension.ST_GeomFromText(
-                        'LINESTRING(127.0 37.5,127.1 37.6)'
-                    ),
-                    4326
-                ),
-                'park', 'P-06', 'active'
-            ),
-            (
-                'f_route_geom_only_coord_outside', 'route', '밖 좌표 탐방로', '02000000',
-                x_extension.ST_SetSRID(x_extension.ST_MakePoint(129.5, 35.1), 4326),
-                6,
-                x_extension.ST_SetSRID(
-                    x_extension.ST_GeomFromText(
-                        'LINESTRING(127.0 37.5,127.1 37.6)'
-                    ),
-                    4326
-                ),
-                'park', 'P-06', 'active'
-            )
-            """
-        )
+    await _insert_geometry_feature(
+        migrated_session,
+        feature_id="f_route_geom_only_null_coord",
+        kind="route",
+        name="좌표미상 탐방로",
+        category="02000000",
+        lon=None,
+        lat=None,
+        wkt="LINESTRING(127.0 37.5,127.1 37.6)",
+    )
+    await _insert_geometry_feature(
+        migrated_session,
+        feature_id="f_route_geom_only_coord_outside",
+        kind="route",
+        name="밖 좌표 탐방로",
+        category="02000000",
+        lon=129.5,
+        lat=35.1,
+        wkt="LINESTRING(127.0 37.5,127.1 37.6)",
     )
     await migrated_session.flush()
 
@@ -1060,13 +1085,13 @@ async def test_features_in_bbox_include_geometry_matches_geom_only_branch(
 
     # coord=NULL이지만 geom이 bbox를 교차 → geom-only 분기로 반환.
     null_coord = by_id["f_route_geom_only_null_coord"]
-    assert null_coord["geometry"]["type"] == "LineString"
+    assert null_coord["geometry"]["type"] in {"LineString", "MultiLineString"}
     assert null_coord["lon"] is None
     assert null_coord["lat"] is None
 
     # coord는 bbox 밖(129.5, 35.1)이지만 geom은 bbox 교차 → geom-only 분기로 반환.
     coord_outside = by_id["f_route_geom_only_coord_outside"]
-    assert coord_outside["geometry"]["type"] == "LineString"
+    assert coord_outside["geometry"]["type"] in {"LineString", "MultiLineString"}
 
 
 async def test_features_in_bbox_returns_stable_feature_id_subset(
@@ -1229,31 +1254,34 @@ async def test_inactivate_geometryless_area_features_by_source(
     await feature_repo.load_bundles(migrated_session, [geometryless, with_geom, place])
     await migrated_session.flush()
 
+    # T-VN-35(ADR-084): kind 전이는 subtype 행이 있으면 배타 arc FK가 막는다.
+    # 0086 이전에 적재된 "geometry 없는 area" 잔재를 재현하려면 event subtype을
+    # 먼저 지우고 core kind를 옮긴 뒤 area subtype을 (있는 경우만) 만든다.
+    for bundle in (geometryless, with_geom):
+        await migrated_session.execute(
+            text("DELETE FROM feature.feature_events WHERE feature_id = :fid"),
+            {"fid": bundle.feature.feature_id},
+        )
     await migrated_session.execute(
-        text(
-            """
-            UPDATE feature.features
-            SET kind = 'area', geom = NULL
-            WHERE feature_id = :fid
-            """
-        ),
-        {"fid": geometryless.feature.feature_id},
+        text("UPDATE feature.features SET kind = 'area' WHERE feature_id = ANY(:fids)"),
+        {
+            "fids": [
+                geometryless.feature.feature_id,
+                with_geom.feature.feature_id,
+            ]
+        },
     )
-    await migrated_session.execute(
-        text(
-            """
-            UPDATE feature.features
-            SET kind = 'area',
-                geom = x_extension.ST_SetSRID(
-                    x_extension.ST_GeomFromText(
-                        'POLYGON((126.9 37.5, 126.91 37.5, 126.91 37.51, 126.9 37.51, 126.9 37.5))'
-                    ),
-                    4326
-                )
-            WHERE feature_id = :fid
-            """
+    await migrated_session.flush()
+    # geometry가 있는 쪽만 area subtype 행을 갖는다 — "geometry 없음"은 이제
+    # ``feature_areas`` 행 부재로 판정된다.
+    await seed_feature_subtype(
+        migrated_session,
+        feature_id=with_geom.feature.feature_id,
+        kind="area",
+        geom_wkt=(
+            "POLYGON((126.9 37.5, 126.91 37.5, 126.91 37.51, "
+            "126.9 37.51, 126.9 37.5))"
         ),
-        {"fid": with_geom.feature.feature_id},
     )
     await migrated_session.flush()
 
@@ -1305,19 +1333,30 @@ async def test_area_feature_geom_persists(migrated_session: AsyncSession) -> Non
     await feature_repo.load_bundle(migrated_session, bundle)
     await migrated_session.flush()
 
-    # geom이 4326 polygon으로 저장됐는지 직접 확인.
+    # T-VN-35(ADR-084): geometry 정본은 ``feature_areas.geom``(MultiPolygon 4326)이고
+    # 조립 뷰가 같은 값을 ``geom``으로 제공한다.
     row = (
         await migrated_session.execute(
             text(
                 "SELECT x_extension.ST_SRID(geom) AS srid, "
                 "x_extension.GeometryType(geom) AS gtype "
-                "FROM feature.features WHERE feature_id = :fid"
+                "FROM feature.feature_areas WHERE feature_id = :fid"
             ),
             {"fid": bundle.feature.feature_id},
         )
     ).one()
     assert row.srid == 4326
-    assert row.gtype == "POLYGON"
+    assert row.gtype == "MULTIPOLYGON"
+    view_row = (
+        await migrated_session.execute(
+            text(
+                "SELECT x_extension.GeometryType(geom) AS gtype "
+                "FROM feature.features_detailed WHERE feature_id = :fid"
+            ),
+            {"fid": bundle.feature.feature_id},
+        )
+    ).one()
+    assert view_row.gtype == "MULTIPOLYGON"
 
     # get_feature_row는 coord(centroid) 기반 lon/lat 반환.
     got = await feature_repo.get_feature_row(

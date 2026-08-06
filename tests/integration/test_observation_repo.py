@@ -13,6 +13,7 @@ from kortravelmap.dto import (
     Feature,
     FeatureBundle,
     FeatureKind,
+    PlaceDetail,
     SourceLink,
     SourceRecord,
     SourceRole,
@@ -56,6 +57,8 @@ def _bundle(
         address=Address(),
         marker_icon="place",
         marker_color="P-01",
+        # T-VN-35(ADR-084): place subtype ``place_kind``는 NOT NULL이다.
+        detail=PlaceDetail(feature_id=_FEATURE_ID, place_kind="attraction"),
         created_at=fetched_at,
         updated_at=fetched_at,
     )

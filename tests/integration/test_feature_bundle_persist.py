@@ -10,6 +10,7 @@ source_links)으로 적재한 뒤 재조회해 DB 계약을 검증한다 (사용
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import TYPE_CHECKING
@@ -25,6 +26,7 @@ from kortravelmap.infra.models import (
     SourceRecordRow,
 )
 from kortravelmap.providers.standard_data import cultural_festivals_to_bundles
+from tests.integration._subtype_seed import seed_feature_subtype
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -111,7 +113,6 @@ async def test_feature_bundle_persists_and_roundtrips(
             f"POINT({feature.coord.lon} {feature.coord.lat})", srid=4326
         ),
         address=feature.address.model_dump(mode="json"),
-        detail=feature.detail.model_dump(mode="json") if feature.detail else {},
         marker_icon=feature.marker_icon,
         marker_color=feature.marker_color,
     )
@@ -139,6 +140,13 @@ async def test_feature_bundle_persists_and_roundtrips(
     )
     migrated_session.add_all([feature_row, source_entity_row])
     await migrated_session.flush()
+    # T-VN-35(ADR-084): kind별 값의 정본은 subtype이다 — core에 detail 컬럼이 없다.
+    await seed_feature_subtype(
+        migrated_session,
+        feature_id=feature.feature_id,
+        kind=feature.kind.value,
+        detail=feature.detail.model_dump(mode="json") if feature.detail else None,
+    )
     migrated_session.add(source_record_row)
     await migrated_session.flush()  # features/source_records INSERT → coord_5179 계산
     source_entity_row.current_source_record_key = source_record.source_record_key
@@ -164,9 +172,20 @@ async def test_feature_bundle_persists_and_roundtrips(
     assert got.kind == "event"
     assert got.name == feature.name
     assert got.category == feature.category
-    assert isinstance(got.detail, dict)
-    assert got.detail  # detail JSONB 비어있지 않음
     assert isinstance(got.address, dict)
+
+    # detail은 core 컬럼이 아니라 ``features_detailed`` 뷰의 조립 결과다(ADR-084).
+    assembled = (
+        await migrated_session.execute(
+            text(
+                "SELECT detail FROM feature.features_detailed "
+                "WHERE feature_id = :fid"
+            ),
+            {"fid": feature.feature_id},
+        )
+    ).scalar_one()
+    detail = json.loads(assembled) if isinstance(assembled, str) else dict(assembled)
+    assert detail  # 조립된 detail은 비어있지 않다
 
     # ② coord_5179 STORED generated(ST_Transform) + coord 좌표 일치
     res = await migrated_session.execute(

@@ -14,16 +14,19 @@ from scripts.perf_tier2_release_harness import (
     _select_public_batch_feature_ids,
 )
 from tests.integration._db_cleanup import truncate_committed_test_rows
+from tests.integration._subtype_seed import seed_feature_subtypes_for_prefix
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
 
 pytestmark = [pytest.mark.integration, pytest.mark.perf_gate]
 
+# T-VN-35(ADR-084): core에 ``detail``이 없다 — place 값은 subtype이 정본이므로
+# seed도 core 다음에 ``feature_places``를 채운다.
 _CUSTOM_PUBLIC_FEATURES_SQL = """
 INSERT INTO feature.features (
     feature_id, kind, name, category, coord,
-    address, detail, urls, raw_refs,
+    address, urls, raw_refs,
     status, legal_dong_code, sido_code, sigungu_code,
     created_at, updated_at
 )
@@ -40,7 +43,6 @@ SELECT
         4326
     ),
     jsonb_build_object('road', '서울특별시 종로구 실측로 ' || g::text),
-    jsonb_build_object('place_kind', 'attraction'),
     '{}'::jsonb,
     '[]'::jsonb,
     'active',
@@ -77,6 +79,7 @@ async def _seed_custom_public_features(
             text(_CUSTOM_PUBLIC_FEATURES_SQL),
             {"prefix": "existing:f:", "rows": rows},
         )
+        await seed_feature_subtypes_for_prefix(session, "existing:f:")
         await session.execute(text("ANALYZE feature.features"))
 
 
@@ -182,10 +185,28 @@ async def test_batch_selector_excludes_notice_candidates(
     try:
         await _seed_custom_public_features(migrated_engine, rows=201)
         async with AsyncSession(migrated_engine) as session, session.begin():
+            # T-VN-35(ADR-084): subtype 행이 있는 동안 core kind 변경은 배타 arc
+            # FK가 막는다. kind 전환은 "옛 subtype 제거 → core kind → 새 subtype"
+            # 순서로만 가능하다(그 순서 강제 자체가 이 재설계의 요점).
+            await session.execute(
+                text(
+                    "DELETE FROM feature.feature_places "
+                    "WHERE feature_id = 'existing:f:000001'"
+                )
+            )
             await session.execute(
                 text(
                     "UPDATE feature.features SET kind = 'notice', category = '99000000' "
                     "WHERE feature_id = 'existing:f:000001'"
+                )
+            )
+            await session.execute(
+                text(
+                    "INSERT INTO feature.feature_notices "
+                    "(feature_id, feature_uuid, kind, notice_type) "
+                    "SELECT f.feature_id, f.feature_uuid, f.kind, 'safety' "
+                    "FROM feature.features AS f "
+                    "WHERE f.feature_id = 'existing:f:000001'"
                 )
             )
         async with AsyncSession(migrated_engine) as session:

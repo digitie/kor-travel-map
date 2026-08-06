@@ -1768,10 +1768,10 @@ async def test_manual_collection_keys_cannot_block_legacy_projection_creation(
         text(
             """
             INSERT INTO feature.features (
-                feature_id, kind, name, category, detail, status
+                feature_id, kind, name, category, status
             ) VALUES (
                 :feature_id, 'place', 'manual key collision second feature',
-                '01070100', '{}'::jsonb, 'active'
+                '01070100', 'active'
             )
             """
         ),
@@ -2635,12 +2635,10 @@ async def test_cross_title_legacy_moves_do_not_lock_source_collections_in_revers
                 text(
                     """
                     INSERT INTO feature.features (
-                        feature_id, kind, name, category, detail, status
+                        feature_id, kind, name, category, status
                     ) VALUES
-                        (:feature_a, 'place', '교차 이동 A',
-                         '01070100', '{}'::jsonb, 'active'),
-                        (:feature_b, 'place', '교차 이동 B',
-                         '01070100', '{}'::jsonb, 'active')
+                        (:feature_a, 'place', '교차 이동 A', '01070100', 'active'),
+                        (:feature_b, 'place', '교차 이동 B', '01070100', 'active')
                     """
                 ),
                 {"feature_a": feature_a, "feature_b": feature_b},

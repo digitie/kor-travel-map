@@ -41,6 +41,7 @@ from kortravelmap.providers.kma import (
     weather_alert_lift_closures,
     weather_alerts_to_notice_bundles,
 )
+from tests.integration._subtype_seed import seed_feature_subtype
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
@@ -174,6 +175,9 @@ _MULTI_CLUES_B = {
 }
 _MULTI_LINEAGE_A = "2026.07.03::10:00:00::0010::서울방향::다중계보-a::03"
 _MULTI_LINEAGE_B = "2026.07.03::10:05:00::0020::부산방향::다중계보-b::01"
+
+#: notice bbox/in-area 테스트가 공유하는 area geometry (T-VN-35 이후 subtype 정본).
+_AREA_WKT = "POLYGON((127.0 37.3,127.2 37.3,127.2 37.5,127.0 37.5,127.0 37.3))"
 
 
 async def _seed_dup_lineage(
@@ -415,8 +419,11 @@ async def _feature_state(
     row = (
         await session.execute(
             text(
-                "SELECT status, deleted_at, detail ->> 'valid_end_time' AS valid_end"
-                " FROM feature.features WHERE feature_id = :fid"
+                "SELECT f.status, f.deleted_at, n.valid_end_time AS valid_end"
+                " FROM feature.features AS f"
+                " LEFT JOIN feature.feature_notices AS n"
+                "   ON n.feature_id = f.feature_id"
+                " WHERE f.feature_id = :fid"
             ),
             {"fid": feature_id},
         )
@@ -504,18 +511,43 @@ async def test_reconcile_exact_tie_prefers_current_identity(
     await feature_repo.load_bundles(migrated_session, [current])
     legacy_feature_id = "f_global_n_0000000000000000"
     assert legacy_feature_id < current.feature.feature_id
+    # T-VN-35(ADR-084): core에 detail이 없다 — 구세대 사본은 core 축만 복제하고
+    # kind별 값은 notice subtype에 같은 규칙으로 복제한다.
     await migrated_session.execute(
         text(
             """
             INSERT INTO feature.features (
                 feature_id, kind, name, category, coord, coord_precision_digits,
-                marker_icon, marker_color, detail, status
+                marker_icon, marker_color, status
             )
             SELECT
                 :legacy_feature_id, kind, name, category, coord,
-                coord_precision_digits, marker_icon, marker_color, detail, status
+                coord_precision_digits, marker_icon, marker_color, status
             FROM feature.features
             WHERE feature_id = :current_feature_id
+            """
+        ),
+        {
+            "legacy_feature_id": legacy_feature_id,
+            "current_feature_id": current.feature.feature_id,
+        },
+    )
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO feature.feature_notices (
+                feature_id, feature_uuid, kind, notice_type, severity,
+                valid_start_time, valid_end_time, source_agency, officer_name, payload
+            )
+            SELECT
+                legacy.feature_id, legacy.feature_uuid, legacy.kind,
+                source.notice_type, source.severity, source.valid_start_time,
+                source.valid_end_time, source.source_agency, source.officer_name,
+                source.payload
+            FROM feature.features AS legacy
+            JOIN feature.feature_notices AS source
+              ON source.feature_id = :current_feature_id
+            WHERE legacy.feature_id = :legacy_feature_id
             """
         ),
         {
@@ -599,24 +631,24 @@ async def test_actual_lexicographic_notice_row_wins_across_reads_and_reconcile(
         text(
             """
             INSERT INTO feature.features (
-                feature_id, kind, name, category, coord, geom, status
+                feature_id, kind, name, category, coord, status
             ) VALUES (
                 'notice-split-max-area', 'area', '공지 lexicographic 테스트 영역',
                 '03000000',
                 x_extension.ST_SetSRID(
                     x_extension.ST_MakePoint(127.1, 37.4), 4326
                 ),
-                x_extension.ST_SetSRID(
-                    x_extension.ST_GeomFromText(
-                        'POLYGON((127.0 37.3,127.2 37.3,127.2 37.5,'
-                        '127.0 37.5,127.0 37.3))'
-                    ),
-                    4326
-                ),
                 'active'
             )
             """
         )
+    )
+    # T-VN-35(ADR-084): area geometry 정본은 ``feature_areas``(MultiPolygon NOT NULL).
+    await seed_feature_subtype(
+        migrated_session,
+        feature_id="notice-split-max-area",
+        kind="area",
+        geom_wkt=_AREA_WKT,
     )
     target = await upsert_poi_cache_target(
         migrated_session,
@@ -903,14 +935,21 @@ async def test_reconcile_preserves_cross_provider_dataset_winners(
     # loser지만 다른 scope의 explicit true winner이므로 다시 열어야 한다.
     await migrated_session.execute(
         text(
-            "UPDATE feature.features SET status = 'inactive', deleted_at = :ended_at, "
-            "detail = jsonb_set("
-            "detail, '{valid_end_time}', to_jsonb(CAST(:ended_at_iso AS text)), true) "
+            "UPDATE feature.features SET status = 'inactive', deleted_at = :ended_at "
             "WHERE feature_id = :feature_id"
         ),
         {
             "ended_at": _NOW + timedelta(minutes=6),
-            "ended_at_iso": (_NOW + timedelta(minutes=6)).isoformat(),
+            "feature_id": cross_scope_winner.feature.feature_id,
+        },
+    )
+    await migrated_session.execute(
+        text(
+            "UPDATE feature.feature_notices SET valid_end_time = :ended_at "
+            "WHERE feature_id = :feature_id"
+        ),
+        {
+            "ended_at": _NOW + timedelta(minutes=6),
             "feature_id": cross_scope_winner.feature.feature_id,
         },
     )
@@ -1228,7 +1267,7 @@ async def test_snapshot_uses_only_active_winning_lineage_per_feature(
     )
     assert shared_status == "active"
     assert shared_deleted_at is None
-    assert datetime.fromisoformat(shared_end) == closed_at
+    assert shared_end == closed_at
     assert (await _feature_state(migrated_session, older_a.feature.feature_id))[1] is not None
     _, newer_deleted_at, newer_end = await _feature_state(
         migrated_session, newer_b.feature.feature_id
@@ -1256,7 +1295,7 @@ async def test_snapshot_uses_only_active_winning_lineage_per_feature(
         migrated_session, newer_b.feature.feature_id
     )
     assert newer_deleted_at is None
-    assert datetime.fromisoformat(newer_end) == closed_at + timedelta(minutes=10)
+    assert newer_end == closed_at + timedelta(minutes=10)
     assert await _public_notice_ids(migrated_session) == {shared.feature.feature_id}
 
     # 모든 승리 계보가 absent면 열린 shared만 한 번 닫혀 metric도 row 변화와 같다.
@@ -1293,7 +1332,7 @@ async def test_supersede_closes_lineage_missing_from_feed(
     _, deleted_at, valid_end = await _feature_state(migrated_session, new_gen.feature.feature_id)
     assert deleted_at is None  # latest는 soft-delete가 아니라 '종료'.
     assert valid_end is not None
-    assert datetime.fromisoformat(valid_end) == closed_at
+    assert valid_end == closed_at
 
     # 종료됐던 계보가 feed에 다시 나타나면 active로 self-heal한다.
     reappeared = await feature_repo.supersede_stale_notice_features(
@@ -1597,9 +1636,11 @@ async def test_atomic_event_load_ignores_stale_announcement_after_lift(
     before_stale = (
         await migrated_session.execute(
             text(
-                "SELECT f.name, f.detail ->> 'severity' AS severity, "
+                "SELECT f.name, n.severity AS severity, "
                 "se.current_source_record_key "
                 "FROM feature.features AS f "
+                "LEFT JOIN feature.feature_notices AS n "
+                "ON n.feature_id = f.feature_id "
                 "JOIN provider_sync.source_links AS sl "
                 "ON sl.feature_id = f.feature_id AND sl.is_primary_source "
                 "JOIN provider_sync.source_entities AS se "
@@ -1636,9 +1677,11 @@ async def test_atomic_event_load_ignores_stale_announcement_after_lift(
     after_stale = (
         await migrated_session.execute(
             text(
-                "SELECT f.name, f.detail ->> 'severity' AS severity, "
+                "SELECT f.name, n.severity AS severity, "
                 "se.current_source_record_key "
                 "FROM feature.features AS f "
+                "LEFT JOIN feature.feature_notices AS n "
+                "ON n.feature_id = f.feature_id "
                 "JOIN provider_sync.source_links AS sl "
                 "ON sl.feature_id = f.feature_id AND sl.is_primary_source "
                 "JOIN provider_sync.source_entities AS se "
@@ -1717,11 +1760,17 @@ async def test_event_lifecycle_resolves_open_finite_unknown_and_reactivation(
     # 과거 soft-delete 잔존을 복구하고 unknown 때문에 막히지 않는다.
     await migrated_session.execute(
         text(
-            "UPDATE feature.features SET status = 'inactive', deleted_at = :at, "
-            "detail = jsonb_set(detail, '{valid_end_time}', "
-            "to_jsonb(CAST(:at_text AS text)), true) WHERE feature_id = :fid"
+            "UPDATE feature.features SET status = 'inactive', deleted_at = :at "
+            "WHERE feature_id = :fid"
         ),
-        {"at": wall_now, "at_text": wall_now.isoformat(), "fid": feature_id},
+        {"at": wall_now, "fid": feature_id},
+    )
+    await migrated_session.execute(
+        text(
+            "UPDATE feature.feature_notices SET valid_end_time = :at "
+            "WHERE feature_id = :fid"
+        ),
+        {"at": wall_now, "fid": feature_id},
     )
     replay = await feature_repo.load_notice_event_bundles(
         migrated_session,
@@ -1758,11 +1807,10 @@ async def test_event_lifecycle_resolves_open_finite_unknown_and_reactivation(
     old_longer_end = wall_now + timedelta(hours=12)
     await migrated_session.execute(
         text(
-            "UPDATE feature.features SET detail = jsonb_set("
-            "detail, '{valid_end_time}', to_jsonb(CAST(:end_at AS text)), true) "
+            "UPDATE feature.feature_notices SET valid_end_time = :end_at "
             "WHERE feature_id = :fid"
         ),
-        {"end_at": old_longer_end.isoformat(), "fid": feature_id},
+        {"end_at": old_longer_end, "fid": feature_id},
     )
     await feature_repo.load_notice_event_bundles(
         migrated_session,
@@ -1779,9 +1827,7 @@ async def test_event_lifecycle_resolves_open_finite_unknown_and_reactivation(
         },
         observed_at=first_at + timedelta(minutes=2),
     )
-    assert datetime.fromisoformat(
-        (await _feature_state(migrated_session, feature_id))[2]
-    ) == old_longer_end
+    assert (await _feature_state(migrated_session, feature_id))[2] == old_longer_end
 
     extended_end = wall_now + timedelta(hours=18)
     await feature_repo.load_notice_event_bundles(
@@ -1799,19 +1845,23 @@ async def test_event_lifecycle_resolves_open_finite_unknown_and_reactivation(
         },
         observed_at=first_at + timedelta(minutes=3),
     )
-    assert datetime.fromisoformat(
-        (await _feature_state(migrated_session, feature_id))[2]
-    ) == extended_end
+    assert (await _feature_state(migrated_session, feature_id))[2] == extended_end
 
     # deleted_at 없이 inactive인 잔존도 미래 finite present가 되살린다.
     past_end = wall_now - timedelta(hours=1)
     await migrated_session.execute(
         text(
-            "UPDATE feature.features SET status = 'inactive', deleted_at = NULL, "
-            "detail = jsonb_set(detail, '{valid_end_time}', "
-            "to_jsonb(CAST(:end_at AS text)), true) WHERE feature_id = :fid"
+            "UPDATE feature.features SET status = 'inactive', deleted_at = NULL "
+            "WHERE feature_id = :fid"
         ),
-        {"end_at": past_end.isoformat(), "fid": feature_id},
+        {"fid": feature_id},
+    )
+    await migrated_session.execute(
+        text(
+            "UPDATE feature.feature_notices SET valid_end_time = :end_at "
+            "WHERE feature_id = :fid"
+        ),
+        {"end_at": past_end, "fid": feature_id},
     )
     future_end = wall_now + timedelta(hours=2)
     future = await feature_repo.load_notice_event_bundles(
@@ -1835,7 +1885,7 @@ async def test_event_lifecycle_resolves_open_finite_unknown_and_reactivation(
     )
     assert status == "active"
     assert deleted_at is None
-    assert datetime.fromisoformat(valid_end) == future_end
+    assert valid_end == future_end
 
     # 운영자 비활성화 override는 open present 재활성화를 막는다. 같은 event의
     # exact replay는 override 해제 뒤 상태를 self-heal한다.
@@ -1951,7 +2001,7 @@ async def test_event_lifecycle_resolves_open_finite_unknown_and_reactivation(
     )
     assert status == "inactive"
     assert deleted_at is not None
-    assert datetime.fromisoformat(valid_end) == expired_at
+    assert valid_end == expired_at
 
 
 async def test_close_notice_features_kma_lift_roundtrip(
@@ -1996,9 +2046,7 @@ async def test_close_notice_features_kma_lift_roundtrip(
     assert announced.reconcile == feature_repo.NoticeReconcileResult()
     feature_id = kma_alert_notice_feature_id("stn:108", "폭염")
     assert bundles[0].feature.feature_id == feature_id
-    assert datetime.fromisoformat(
-        (await _feature_state(migrated_session, feature_id))[2]
-    ) == scheduled_end
+    assert (await _feature_state(migrated_session, feature_id))[2] == scheduled_end
     assert await _snapshot_state(
         migrated_session,
         provider="python-kma-api",
@@ -2025,7 +2073,7 @@ async def test_close_notice_features_kma_lift_roundtrip(
     assert deleted_at is None
     assert valid_end is not None
     # 미래 예정 종료보다 이른 explicit lift가 authoritative false 시각이다.
-    assert datetime.fromisoformat(valid_end) == announced_at + timedelta(hours=6)
+    assert valid_end == announced_at + timedelta(hours=6)
 
     # 같은 false 상태라도 더 최신 해제 event면 보존/purge 기준 종료 시각을 전진한다.
     assert (
@@ -2041,9 +2089,9 @@ async def test_close_notice_features_kma_lift_roundtrip(
         )
         == 0
     )
-    assert datetime.fromisoformat(
-        (await _feature_state(migrated_session, feature_id))[2]
-    ) == announced_at + timedelta(hours=6, minutes=30)
+    assert (
+        await _feature_state(migrated_session, feature_id)
+    )[2] == announced_at + timedelta(hours=6, minutes=30)
 
 
 async def test_close_ignores_older_lift_after_reannouncement(
@@ -2087,11 +2135,10 @@ async def test_bbox_read_hides_non_latest_and_ended(
     # 종료된 notice는 숨는다.
     await migrated_session.execute(
         text(
-            "UPDATE feature.features SET detail = jsonb_set("
-            " detail, '{valid_end_time}', to_jsonb(CAST(:t AS text)), true)"
+            "UPDATE feature.feature_notices SET valid_end_time = :t"
             " WHERE feature_id = :fid"
         ),
-        {"t": (_NOW - timedelta(hours=1)).isoformat(), "fid": new_gen.feature.feature_id},
+        {"t": _NOW + timedelta(hours=1), "fid": new_gen.feature.feature_id},
     )
     rows = await feature_repo.features_in_bbox(migrated_session, kinds=["notice"], **bbox)
     ids = {row["feature_id"] for row in rows}
@@ -2128,38 +2175,42 @@ async def test_public_active_reads_share_latest_and_ended_notice_filter(
     expected_ids = {new_gen.feature.feature_id}
     await migrated_session.execute(
         text(
-            "UPDATE feature.features SET sido_code = '11', detail = CASE"
-            " WHEN feature_id = :ended_id THEN jsonb_set("
-            " detail, '{valid_end_time}', to_jsonb(CAST(:ended_at AS text)), true)"
-            " ELSE detail END WHERE feature_id = ANY(CAST(:feature_ids AS text[]))"
+            "UPDATE feature.features SET sido_code = '11'"
+            " WHERE feature_id = ANY(CAST(:feature_ids AS text[]))"
+        ),
+        {"feature_ids": list(all_ids)},
+    )
+    # T-VN-35(ADR-084): 효력 종료 시각의 정본은 typed timestamptz 컬럼이다.
+    await migrated_session.execute(
+        text(
+            "UPDATE feature.feature_notices SET valid_end_time = :ended_at"
+            " WHERE feature_id = :ended_id"
         ),
         {
+            "ended_at": _NOW + timedelta(hours=1),
             "ended_id": ended.feature.feature_id,
-            "ended_at": (_NOW - timedelta(hours=1)).isoformat(),
-            "feature_ids": list(all_ids),
         },
     )
     await migrated_session.execute(
         text(
             """
             INSERT INTO feature.features (
-                feature_id, kind, name, category, coord, geom, status
+                feature_id, kind, name, category, coord, status
             ) VALUES (
                 'notice-public-read-area', 'area', '공지 조회 테스트 영역', '03000000',
                 x_extension.ST_SetSRID(
                     x_extension.ST_MakePoint(127.1, 37.4), 4326
                 ),
-                x_extension.ST_SetSRID(
-                    x_extension.ST_GeomFromText(
-                        'POLYGON((127.0 37.3,127.2 37.3,127.2 37.5,'
-                        '127.0 37.5,127.0 37.3))'
-                    ),
-                    4326
-                ),
                 'active'
             )
             """
         )
+    )
+    await seed_feature_subtype(
+        migrated_session,
+        feature_id="notice-public-read-area",
+        kind="area",
+        geom_wkt=_AREA_WKT,
     )
     await migrated_session.flush()
 
@@ -2291,11 +2342,10 @@ async def test_read_paths_exclude_ended_notice_by_default(
     counts_before = dict(await feature_repo.category_feature_counts(migrated_session))
     await migrated_session.execute(
         text(
-            "UPDATE feature.features SET detail = jsonb_set("
-            " detail, '{valid_end_time}', to_jsonb(CAST(:t AS text)), true)"
+            "UPDATE feature.feature_notices SET valid_end_time = :t"
             " WHERE feature_id = :fid"
         ),
-        {"t": (_NOW - timedelta(hours=1)).isoformat(), "fid": ended_id},
+        {"t": _NOW + timedelta(hours=1), "fid": ended_id},
     )
 
     # category_feature_counts: 종료 notice는 카운트에서 빠진다.

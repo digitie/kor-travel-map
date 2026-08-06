@@ -163,6 +163,17 @@ async def _drop_database(admin_dsn: str, database: str) -> None:
         await admin_engine.dispose()
 
 
+#: kind별 필수 detail — T-VN-35(ADR-084)의 0084/0085 backfill은
+#: ``place_kind``/``event_kind``/``notice_type`` 결측을 NOT NULL로 fail-close한다.
+#: 0078 시점 seed가 detail 없이 들어가면 head 재적용 자체가 막히므로, 이 시점의
+#: core ``detail``에 필수 값을 넣어 둔다(당시 스키마에는 detail 컬럼이 있다).
+_SEED_REQUIRED_DETAIL: Final[dict[str, str]] = {
+    "place": '{"place_kind": "attraction"}',
+    "event": '{"event_kind": "festival"}',
+    "notice": '{"notice_type": "advisory"}',
+}
+
+
 async def _seed_features(dsn: str) -> None:
     """0078 시점 스키마에 seed 행을 넣는다 (soft-deleted 1행 포함)."""
     engine = make_async_engine(dsn)
@@ -171,10 +182,16 @@ async def _seed_features(dsn: str) -> None:
             for feature_id, kind, name in _SEED_ROWS:
                 await connection.execute(
                     text(
-                        "INSERT INTO feature.features (feature_id, kind, name, category) "
-                        "VALUES (:fid, :kind, :name, '01070100')"
+                        "INSERT INTO feature.features "
+                        "(feature_id, kind, name, category, detail) "
+                        "VALUES (:fid, :kind, :name, '01070100', CAST(:detail AS jsonb))"
                     ),
-                    {"fid": feature_id, "kind": kind, "name": name},
+                    {
+                        "fid": feature_id,
+                        "kind": kind,
+                        "name": name,
+                        "detail": _SEED_REQUIRED_DETAIL.get(kind, "{}"),
+                    },
                 )
             await connection.execute(
                 text(

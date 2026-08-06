@@ -58,7 +58,6 @@ def _feature(feature_id: str, *, with_coord: bool) -> FeatureRow:
         name="불국사",
         category=_CAT,
         coord=WKTElement("POINT(129.3320 35.7900)", srid=4326) if with_coord else None,
-        detail={"summary": "temple"},
     )
 
 
@@ -1419,10 +1418,10 @@ async def test_theme_slug_reuse_cannot_take_legacy_collection(
             text(
                 """
                 INSERT INTO feature.features (
-                    feature_id, kind, name, category, detail, status
+                    feature_id, kind, name, category, status
                 ) VALUES (
                     'f_theme_reuse', 'place', 'slug 재사용 장소',
-                    '01070100', '{}'::jsonb, 'active'
+                    '01070100', 'active'
                 )
                 """
             )

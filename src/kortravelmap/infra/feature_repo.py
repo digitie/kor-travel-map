@@ -3219,9 +3219,10 @@ global_feature_wins AS (
 -- 참조 여부와 무관하게 항상 완주하므로(PostgreSQL 계약) notice 갱신이 누락되지
 -- 않고, subtype 행이 없는 feature도 RETURNING 집계에서 빠지지 않는다.
 --
--- ``ck_feature_notices_validity``(valid_start_time <= valid_end_time)를 어기는
--- 값이 나오면 트랜잭션이 실패한다 — 0085가 고른 fail-close다(발효 전에 끝나는
--- 효력 기간은 데이터 결함이지 표현할 상태가 아니다).
+-- 미래 발효 공고가 발효 전에 feed에서 사라지면 ``valid_end_time``(철회시각)이
+-- ``valid_start_time``보다 이르다 — "발효 전 철회"라는 정당한 상태이므로 0085는
+-- 순서 CHECK를 두지 않는다(KREX notice ETL에서 실측). read 필터는
+-- ``valid_end_time <= now()``라 이 공고는 즉시 숨겨진다.
 , core_update AS (
     UPDATE feature.features AS f
     SET status = CASE

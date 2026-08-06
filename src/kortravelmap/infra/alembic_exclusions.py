@@ -22,8 +22,8 @@ UNMAPPED_APP_TABLES = frozenset(
 UNCOMPARED_INDEXES = frozenset(
     {
         ("feature", "idx_features_dedup_refresh_keyset"),
-        ("feature", "idx_features_yt_channel_id"),
-        ("feature", "idx_features_yt_playlist_id"),
+        ("feature", "idx_feature_places_yt_channel"),
+        ("feature", "idx_feature_places_yt_playlist"),
         ("provider_sync", "idx_source_records_kma_alert_history"),
     }
 )

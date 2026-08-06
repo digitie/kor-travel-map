@@ -451,7 +451,7 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
     ⑤ **alembic 1.19 적응**(CheckConstraint naming-convention 비교 변경 —
     천장 핀 `<1.19` 해제 조건, #948 동봉 커밋 참조).
 
-- [~] T-VN-H43 — **prod 백업 체계 수립 (정기 dump·sha256·보존·rollback 기준선)**
+- [x] T-VN-H43 — **prod 백업 체계 수립 (정기 dump·sha256·보존·rollback 기준선)**
 
   절차 정본은 `docs/backup-restore.md` §9(2026-08-05 신설 — n150 수동 기준선,
   TCP 경로 강제·manifest 필수 항목 `ops.public_api_keys` 포함).
@@ -464,11 +464,11 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
     적용·값 전환 배포 후, manifest: features/aliases/public 731,765 동수 ·
     pair_mismatch 0 · orphan_alias 0)와 **dev box 외부 사본 1회 반출**
     (`~/ktm-h43-external/`, sha256 대조 OK) — 오프박스 사본의 첫 실물.
-  - [~] 정기화 — 보존 정책(개수·기간)·주기 실행·2차 외부 사본 자동화.
-    **소유 경계**: orchestration은 docker-manager — 결선 요청 기안 완료
-    (manager **#148**: 일 1회 dump+sha256+manifest, retention 7일/4주,
-    오프박스 자동 반출, 배포 직전 fence dump 관례 명문화). 절차 정본은 Map
-    runbook.
+  - [보류] 정기화 — 보존 정책·주기 실행·2차 외부 사본 자동화는 **현 환경에서
+    수행하지 않는다**. n150은 실 production이 아니며 손상 시 재적재가 정책이다
+    (사용자 지시 2026-08-06). 복원 가능성 자체는 H44가 실증했으므로 열린
+    리스크가 아니다. 실 prod 전환 시 manager **#148**(일 1회 dump+sha256+
+    manifest·retention·오프박스 반출·배포 직전 fence dump)로 재개한다.
   - [ ] 신규 DB 프로비저닝 함정 참조 링크 — superuser 확장 4종 사전 생성
     (manager #109 절차)을 restore 문서에서 링크한다.
 

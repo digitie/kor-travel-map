@@ -22,6 +22,7 @@ import pytest
 from sqlalchemy import text
 
 from kortravelmap.infra import feature_repo
+from tests.integration._subtype_seed import seed_feature_subtype
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -87,12 +88,17 @@ async def _ins_geom(
     sigungu_code: str | None = None,
     legal_dong_code: str | None = None,
 ) -> None:
-    """route/area feature — exact geom 후보와 coord 우회 방지 검증용."""
+    """route/area feature — exact geom 후보와 coord 우회 방지 검증용.
+
+    T-VN-35(ADR-084, alembic 0086): geometry 정본은 core가 아니라
+    ``feature_routes``/``feature_areas``다(둘 다 Multi* NOT NULL). 술어가 타야 할
+    GiST도 그쪽에 있으므로 seed도 subtype에 넣는다.
+    """
     await session.execute(
         text(
             """
             INSERT INTO feature.features (
-                feature_id, kind, name, category, coord, geom, status, updated_at,
+                feature_id, kind, name, category, coord, status, updated_at,
                 sido_code, sigungu_code, legal_dong_code
             )
             VALUES (
@@ -107,7 +113,6 @@ async def _ins_geom(
                     4326
                   )
                 END,
-                x_extension.ST_SetSRID(x_extension.ST_GeomFromText(:wkt), 4326),
                 'active', :ts, :sido_code, :sigungu_code, :legal_dong_code
             )
             """
@@ -115,7 +120,6 @@ async def _ins_geom(
         {
             "fid": feature_id,
             "kind": kind,
-            "wkt": wkt,
             "coord_lon": coord_lon,
             "coord_lat": coord_lat,
             "ts": _NOW,
@@ -123,6 +127,9 @@ async def _ins_geom(
             "sigungu_code": sigungu_code,
             "legal_dong_code": legal_dong_code,
         },
+    )
+    await seed_feature_subtype(
+        session, feature_id=feature_id, kind=kind, geom_wkt=wkt
     )
 
 
@@ -244,7 +251,11 @@ async def test_include_geometry_is_serialization_only(
     # (3) geometry 변형은 route/area에 GeoJSON을 직렬화한다.
     geom_by_id = {r["feature_id"]: r for r in geom}
     assert geom_by_id["ib:route-cross"]["geometry"] is not None
-    assert geom_by_id["ib:route-cross"]["geometry"]["type"] == "LineString"
+    # T-VN-35: subtype 컬럼 타입이 MultiLineString이라 단일 선분도 Multi로 승격된다.
+    assert geom_by_id["ib:route-cross"]["geometry"]["type"] in {
+        "LineString",
+        "MultiLineString",
+    }
     assert geom_by_id["ib:area-in"]["geometry"] is not None
     assert geom_by_id["ib:area-in"]["geometry"]["type"] in {"Polygon", "MultiPolygon"}
     # point feature는 geometry가 없다(coord만).

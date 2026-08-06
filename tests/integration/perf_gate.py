@@ -139,11 +139,20 @@ _COORD_5179_SPATIAL = ("idx_features_coord_5179_gist", "idx_features_coord_5179"
 # ``feature_uuid``가 additive로 들어간다)에서 이 covering index를 골라
 # index-only scan을 한다.
 #
+# T-VN-35(alembic 0084)이 배타 arc 참조 대상 ``uq_features_identity_kind
+# UNIQUE (feature_id, kind)``를 추가하며 같은 성격의 btree가 하나 더 늘었다 —
+# ``kind``까지 투영하는 hot query는 이쪽을 골라 index-only scan을 한다.
+#
 # 성능 축은 **약화되지 않는다** — 선두 컬럼이 PK와 같아 selectivity가 동일하고,
 # heap 접근이 줄어드는 쪽이다. gate가 지키려는 것은 "Seq Scan 금지 + index
-# 접근"이므로 두 이름을 동치로 받는다. (PK 자체가 사라지는 회귀는
+# 접근"이므로 이 이름들을 동치로 받는다. (PK 자체가 사라지는 회귀는
 # ``assert_no_seq_scan_on``이 계속 잡는다.)
-_FEATURES_PK_ACCESS = ("pk_features", "features_pkey", "uq_features_identity_pair")
+_FEATURES_PK_ACCESS = (
+    "pk_features",
+    "features_pkey",
+    "uq_features_identity_pair",
+    "uq_features_identity_kind",
+)
 
 HOT_QUERIES: tuple[HotQuery, ...] = (
     HotQuery(
@@ -387,10 +396,14 @@ async def measure_index_write_cost(
 # focused seed — public hot query만 겨냥한 features 분포 (self-contained)
 # ---------------------------------------------------------------------------
 
+# T-VN-35(ADR-084): core에 ``detail``이 없다. kind별 값은 subtype 5종이 정본이고
+# 응답 ``detail``은 ``features_detailed`` 뷰가 조립한다 — seed도 같은 구조를
+# 만들어야 planner가 운영과 같은 relation 분포를 본다(place/event subtype이
+# 비어 있으면 뷰 조인이 비현실적으로 싸진다).
 _SEED_FEATURES_SQL = """
 INSERT INTO feature.features (
     feature_id, kind, name, category, coord,
-    address, detail, urls, raw_refs,
+    address, urls, raw_refs,
     status, legal_dong_code, sido_code, sigungu_code,
     created_at, updated_at
 )
@@ -417,7 +430,6 @@ SELECT
         ), 4326) AS coord,
     jsonb_build_object('road', '서울특별시 종로구 세종대로 ' || (g % 200)::text,
                        'legal', '서울특별시 종로구 세종로') AS address,
-    jsonb_build_object('place_kind', 'attraction') AS detail,
     '{}'::jsonb AS urls,
     '[]'::jsonb AS raw_refs,
     CASE WHEN g % 29 = 0 THEN 'inactive' ELSE 'active' END AS status,
@@ -430,6 +442,26 @@ SELECT
     now() - (g::text || ' minutes')::interval AS created_at,
     now() - ((:n - g)::text || ' seconds')::interval AS updated_at
 FROM generate_series(1, :n) AS g
+"""
+
+#: place/event subtype seed — core seed와 같은 kind 분기를 따른다. weather는
+#: subtype이 없다(값 정본은 ``feature_weather_values``).
+_SEED_PLACE_SUBTYPE_SQL = """
+INSERT INTO feature.feature_places (feature_id, feature_uuid, kind, place_kind)
+SELECT f.feature_id, f.feature_uuid, f.kind, 'attraction'
+FROM feature.features AS f
+WHERE f.feature_id LIKE :feature_id_prefix || '%' AND f.kind = 'place'
+"""
+
+_SEED_EVENT_SUBTYPE_SQL = """
+INSERT INTO feature.feature_events (
+    feature_id, feature_uuid, kind, event_kind, starts_on, ends_on
+)
+SELECT
+    f.feature_id, f.feature_uuid, f.kind, 'festival',
+    CURRENT_DATE - 3, CURRENT_DATE + 3
+FROM feature.features AS f
+WHERE f.feature_id LIKE :feature_id_prefix || '%' AND f.kind = 'event'
 """
 
 # source_entities/records/links — 공개 read가 공유하는 notice 감산
@@ -513,6 +545,10 @@ async def seed_hot_query_features(
         text(_SEED_FEATURES_SQL),
         {"n": n, "feature_id_prefix": feature_id_prefix},
     )
+    for subtype_sql in (_SEED_PLACE_SUBTYPE_SQL, _SEED_EVENT_SUBTYPE_SQL):
+        await session.execute(
+            text(subtype_sql), {"feature_id_prefix": feature_id_prefix}
+        )
     await session.execute(text(_SEED_SOURCE_ENTITIES_SQL), {"n": n})
     await session.execute(text(_SEED_SOURCE_RECORDS_SQL), {"n": n})
     await session.execute(

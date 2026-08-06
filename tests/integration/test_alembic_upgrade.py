@@ -245,21 +245,23 @@ _UNCOMPARED_INDEX_CONTRACTS: dict[
         ),
         "deleted_at IS NULL AND status = 'active' AND coord IS NOT NULL",
     ),
-    ("feature", "idx_features_yt_channel_id"): (
+    # T-VN-35(alembic 0086): concierge youtube 표현식 인덱스는 core ``detail``과
+    # 함께 사라지고 place subtype의 ``payload`` 위로 이관됐다(0084).
+    ("feature", "idx_feature_places_yt_channel"): (
         False,
         (
-            "detail #>> '{payload,kor_travel_concierge,youtube,channel_id}' "
+            "payload #>> '{kor_travel_concierge,youtube,channel_id}' "
             "ASC NULLS LAST",
         ),
-        "detail #>> '{payload,kor_travel_concierge,youtube,channel_id}' IS NOT NULL",
+        "payload #>> '{kor_travel_concierge,youtube,channel_id}' IS NOT NULL",
     ),
-    ("feature", "idx_features_yt_playlist_id"): (
+    ("feature", "idx_feature_places_yt_playlist"): (
         False,
         (
-            "detail #>> '{payload,kor_travel_concierge,youtube,playlist_id}' "
+            "payload #>> '{kor_travel_concierge,youtube,playlist_id}' "
             "ASC NULLS LAST",
         ),
-        "detail #>> '{payload,kor_travel_concierge,youtube,playlist_id}' IS NOT NULL",
+        "payload #>> '{kor_travel_concierge,youtube,playlist_id}' IS NOT NULL",
     ),
     ("provider_sync", "idx_source_records_kma_alert_history"): (
         False,
@@ -385,7 +387,13 @@ async def test_alembic_creates_3_extensions_in_x_extension(
 async def test_alembic_creates_features_table(
     pg_engine_with_migrations: AsyncEngine,
 ) -> None:
-    """0002 revision이 ``feature.features`` 테이블 생성."""
+    """0002 revision이 ``feature.features`` 테이블 생성 (head 기준 core 축).
+
+    T-VN-35(ADR-084, alembic 0086): ``detail``/``geom``은 **core 컬럼이 아니다**.
+    kind별 값과 geometry의 정본은 subtype 5종이고 응답용 두 값은
+    ``feature.features_detailed`` 뷰가 조립한다. core에 그 컬럼이 되살아나면
+    "값이 두 곳에 있다"는 회귀이므로 부재도 함께 고정한다.
+    """
     async with pg_engine_with_migrations.connect() as conn:
         result = await conn.execute(
             text(
@@ -398,10 +406,47 @@ async def test_alembic_creates_features_table(
     # 핵심 컬럼 존재 확인.
     for required in (
         "feature_id", "kind", "name", "category", "coord", "coord_5179",
-        "coord_precision_digits", "geom", "address", "detail", "status",
+        "coord_precision_digits", "address", "status",
         "created_at", "updated_at",
     ):
         assert required in columns, f"missing column: {required}"
+    for removed in ("detail", "geom"):
+        assert removed not in columns, f"core column {removed!r} came back (ADR-084)"
+
+
+async def test_alembic_creates_typed_subtype_tables_and_assembly_view(
+    pg_engine_with_migrations: AsyncEngine,
+) -> None:
+    """0084~0086이 subtype 5종 + 조립 뷰 2종을 만든다 (T-VN-35, ADR-084)."""
+    async with pg_engine_with_migrations.connect() as conn:
+        tables = set(
+            (
+                await conn.execute(
+                    text(
+                        "SELECT table_name FROM information_schema.tables "
+                        "WHERE table_schema = 'feature' AND table_type = 'BASE TABLE'"
+                    )
+                )
+            ).scalars()
+        )
+        views = set(
+            (
+                await conn.execute(
+                    text(
+                        "SELECT table_name FROM information_schema.views "
+                        "WHERE table_schema = 'feature'"
+                    )
+                )
+            ).scalars()
+        )
+    assert {
+        "feature_places",
+        "feature_events",
+        "feature_notices",
+        "feature_routes",
+        "feature_areas",
+    } <= tables
+    assert {"features_detailed", "public_features"} <= views
 
 
 async def test_alembic_coord_5179_is_generated_stored(
@@ -490,24 +535,35 @@ async def test_alembic_creates_source_tables(
 async def test_alembic_features_indexes_exist(
     pg_engine_with_migrations: AsyncEngine,
 ) -> None:
-    """핵심 GIST/GIN/partial 인덱스 존재."""
+    """핵심 GIST/GIN/partial 인덱스 존재.
+
+    T-VN-35(alembic 0086): geometry GiST는 core가 아니라 route/area **subtype**에
+    있다 — 술어가 subtype 인덱스를 타야 bbox 후보 판정이 seq scan으로 퇴화하지
+    않는다(``_bbox_candidate_predicate_sql``).
+    """
     async with pg_engine_with_migrations.connect() as conn:
-        result = await conn.execute(
-            text(
-                "SELECT indexname FROM pg_indexes "
-                "WHERE schemaname='feature' AND tablename='features'"
+        idx = {
+            (row[0], row[1])
+            for row in (
+                await conn.execute(
+                    text(
+                        "SELECT tablename, indexname FROM pg_indexes "
+                        "WHERE schemaname='feature'"
+                    )
+                )
             )
-        )
-        idx = {row[0] for row in result}
+        }
     required = {
-        "idx_features_coord_gist",
-        "idx_features_coord_5179_gist",
-        "idx_features_geom_gist",
-        "idx_features_kind_category",
-        "idx_features_name_trgm",
+        ("features", "idx_features_coord_gist"),
+        ("features", "idx_features_coord_5179_gist"),
+        ("features", "idx_features_kind_category"),
+        ("features", "idx_features_name_trgm"),
+        ("feature_routes", "idx_feature_routes_geom_gist"),
+        ("feature_areas", "idx_feature_areas_geom_gist"),
     }
     missing = required - idx
     assert not missing, f"missing indexes: {missing}"
+    assert ("features", "idx_features_geom_gist") not in idx
 
 
 async def test_alembic_creates_feature_price_values_table(
@@ -600,14 +656,18 @@ async def test_curation_provenance_migration_fail_closes_legacy_links(
                     """
                     INSERT INTO feature.features (
                         feature_id, kind, name, category,
-                        marker_icon, marker_color
+                        marker_icon, marker_color, detail
                     ) VALUES (
                         'feature:legacy-curation-link',
                         'place',
                         '근거 없는 기존 연결',
                         '01070100',
                         'place',
-                        'P-01'
+                        'P-01',
+                        -- T-VN-35(ADR-084): 0084 backfill이 place_kind 결측을
+                        -- NOT NULL로 fail-close한다(sentinel 폐기). 0071 시점 seed도
+                        -- head까지 올라가려면 필수 값을 갖춰야 한다.
+                        '{"place_kind": "attraction"}'::jsonb
                     )
                     """
                 )

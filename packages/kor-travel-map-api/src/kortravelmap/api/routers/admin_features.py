@@ -9,6 +9,7 @@ from typing import Annotated, Any, Literal, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from kortravelmap.core import make_feature_id
+from kortravelmap.dto import EventDetail, PlaceDetail
 from kortravelmap.infra import curation_repo, feature_identity, price_repo, weather_repo
 from kortravelmap.infra.admin_feature_repo import (
     AdminFeatureDetail,
@@ -38,7 +39,14 @@ from kortravelmap.infra.admin_feature_repo import (
     reject_feature_change_request,
     submit_feature_change_request,
 )
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api.auth import (
@@ -86,6 +94,12 @@ router = APIRouter(prefix="/admin/features", tags=["admin-features"])
 
 _PHONE_RE = re.compile(r"^\+?[0-9][0-9()\-\s]{6,24}$")
 _HTTP_URL_RE = re.compile(r"^https?://[^\s/$.?#].[^\s]*$")
+
+#: kind별 detail 정본 모델 (T-VN-35 — subtype 컬럼 계약과 같은 원천).
+_DETAIL_MODEL_BY_KIND: dict[str, type[BaseModel]] = {
+    "place": PlaceDetail,
+    "event": EventDetail,
+}
 
 AdminFeatureSort = Literal[
     "name",
@@ -360,8 +374,44 @@ class AdminFeatureBaseMutation(BaseModel):
         return value
 
 
+_DETAIL_VALIDATION_PLACEHOLDER_ID = "f_validation_placeholder"
+
+
+def _normalized_detail_for_kind(
+    kind: str, detail: dict[str, Any] | None
+) -> dict[str, Any] | None:
+    """kind별 detail을 DTO 정본으로 **검증·정규화**한다 (T-VN-35, ADR-084).
+
+    subtype 컬럼은 필수 필드(place_kind/event_kind)를 NOT NULL로 요구한다.
+    DTO(`PlaceDetail`/`EventDetail`)가 그 shape의 정본이고 기본값도 갖고
+    있으므로, 경계에서 한 번 통과시켜 **완전한 detail**을 만든다 — 그러면
+    repo가 불완전한 shape을 볼 일이 없고(종전엔 `ValueError`→500), 잘못된
+    값은 여기서 422가 된다. 검증 규칙이 DTO 한 곳에만 존재한다는 성질도
+    유지된다.
+    """
+    model = _DETAIL_MODEL_BY_KIND.get(kind)
+    if model is None:
+        return detail
+    payload = dict(detail or {})
+    payload.setdefault("feature_id", _DETAIL_VALIDATION_PLACEHOLDER_ID)
+    try:
+        validated = model.model_validate(payload)
+    except ValidationError as exc:
+        raise ValueError(f"detail이 kind={kind} 계약과 맞지 않습니다: {exc}") from exc
+    normalized = validated.model_dump(mode="json")
+    normalized.pop("feature_id", None)
+    return normalized
+
+
 class AdminFeatureCreateRequest(AdminFeatureBaseMutation):
-    """``POST /admin/features`` body."""
+    """``POST /admin/features`` body.
+
+    T-VN-35(ADR-084) — ``detail``은 kind별 typed subtype으로 저장되므로 여기서
+    **DTO 정본으로 검증**한다(place→``PlaceDetail``, event→``EventDetail``).
+    종전에는 임의 JSONB가 그대로 정본이 됐고(shape 구멍), 지금은 필수 필드
+    결측이 repo에서 ``ValueError``→500이 될 수 있다. 경계에서 422로 돌려주는
+    것이 옳고, 검증 규칙은 DTO 한 곳에만 존재한다.
+    """
 
     feature_id: str | None = Field(
         default=None,
@@ -390,6 +440,15 @@ class AdminFeatureCreateRequest(AdminFeatureBaseMutation):
         default=None,
         description="feature_id 미지정 시 source_natural_key로 쓰는 caller-provided key.",
     )
+
+    @model_validator(mode="after")
+    def _normalize_detail(self) -> AdminFeatureCreateRequest:
+        # 생성은 detail 미전송도 허용한다 — DTO 기본값으로 완전한 shape을
+        # 만들어 subtype NOT NULL 계약을 경계에서 충족시킨다.
+        object.__setattr__(
+            self, "detail", _normalized_detail_for_kind(self.kind, self.detail)
+        )
+        return self
 
 
 class AdminFeaturePatchRequest(AdminFeatureBaseMutation):

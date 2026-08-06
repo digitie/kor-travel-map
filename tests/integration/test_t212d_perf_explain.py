@@ -45,7 +45,7 @@ async def _seed_live_like_perf_data(session: AsyncSession, *, n: int = 3200) -> 
             """
             INSERT INTO feature.features (
                 feature_id, kind, name, category, coord,
-                address, detail, urls, raw_refs,
+                address, urls, raw_refs,
                 status, legal_dong_code, sido_code, sigungu_code,
                 created_at, updated_at
             )
@@ -87,20 +87,6 @@ async def _seed_live_like_perf_data(session: AsyncSession, *, n: int = 3200) -> 
                     'road', '서울특별시 종로구 세종대로 ' || (g % 200)::text,
                     'legal', '서울특별시 종로구 세종로'
                 ) AS address,
-                CASE
-                  WHEN g % 17 = 0 THEN jsonb_build_object(
-                    'place_kind', 'attraction',
-                    'business_hours', jsonb_build_object(
-                      'periods', jsonb_build_array(
-                        jsonb_build_object(
-                          'open', jsonb_build_object('day', '1', 'time', '0900'),
-                          'close', jsonb_build_object('day', '1', 'time', '1800')
-                        )
-                      )
-                    )
-                  )
-                  ELSE jsonb_build_object('place_kind', 'attraction')
-                END AS detail,
                 '{}'::jsonb AS urls,
                 '[]'::jsonb AS raw_refs,
                 CASE WHEN g % 29 = 0 THEN 'inactive' ELSE 'active' END AS status,
@@ -119,6 +105,50 @@ async def _seed_live_like_perf_data(session: AsyncSession, *, n: int = 3200) -> 
             """
         ),
         {"n": n},
+    )
+    # T-VN-35(ADR-084): kind별 값의 정본은 subtype이다. 종전 seed가 core
+    # ``detail``에 넣던 place_kind/business_hours가 typed 컬럼으로 간다 —
+    # ``idx_feature_places_opening_hours``가 종전 ``idx_features_opening_hours_keyset``
+    # 자리를 대신하므로 같은 17행 주기로 business_hours를 채운다.
+    await session.execute(
+        text(
+            """
+            INSERT INTO feature.feature_places (
+                feature_id, feature_uuid, kind, place_kind, business_hours
+            )
+            SELECT
+                f.feature_id,
+                f.feature_uuid,
+                f.kind,
+                'attraction',
+                CASE
+                  WHEN right(f.feature_id, 6)::int % 17 = 0 THEN jsonb_build_object(
+                    'periods', jsonb_build_array(
+                      jsonb_build_object(
+                        'open', jsonb_build_object('day', '1', 'time', '0900'),
+                        'close', jsonb_build_object('day', '1', 'time', '1800')
+                      )
+                    )
+                  )
+                END
+            FROM feature.features AS f
+            WHERE f.feature_id LIKE 'perf:f:%' AND f.kind = 'place'
+            """
+        )
+    )
+    await session.execute(
+        text(
+            """
+            INSERT INTO feature.feature_events (
+                feature_id, feature_uuid, kind, event_kind, starts_on, ends_on
+            )
+            SELECT
+                f.feature_id, f.feature_uuid, f.kind, 'festival',
+                CURRENT_DATE - 3, CURRENT_DATE + 3
+            FROM feature.features AS f
+            WHERE f.feature_id LIKE 'perf:f:%' AND f.kind = 'event'
+            """
+        )
     )
     await session.execute(
         text(
@@ -355,12 +385,18 @@ async def _seed_geom_only_perf_data(
     *,
     n: int = 3200,
 ) -> None:
-    """coord 없이 geometry만 가진 route/area의 대표 planner 분포를 만든다."""
+    """coord 없이 geometry만 가진 route/area의 대표 planner 분포를 만든다.
+
+    T-VN-35(ADR-084): geometry 정본이 ``feature_routes``/``feature_areas``로
+    옮겨졌고 두 subtype의 ``geom``은 NOT NULL이다 — core는 좌표 없는 껍데기만
+    갖는다. 인덱스도 core 단일 partial GiST가 아니라 subtype별 GiST 2종이므로
+    seed 구조를 그대로 옮기고, 통계는 세 relation 모두에 만든다.
+    """
     await session.execute(
         text(
             """
             INSERT INTO feature.features (
-                feature_id, kind, name, category, coord, geom, status,
+                feature_id, kind, name, category, coord, status,
                 sido_code, sigungu_code, legal_dong_code, created_at, updated_at
             )
             SELECT
@@ -369,30 +405,6 @@ async def _seed_geom_only_perf_data(
                 'geometry-only feature ' || g::text,
                 '02000000',
                 NULL,
-                CASE
-                  WHEN g % 2 = 0 THEN x_extension.ST_SetSRID(
-                    x_extension.ST_MakeLine(
-                      x_extension.ST_MakePoint(
-                        126.0 + ((g % 1000)::float * 0.002),
-                        36.0 + ((g % 800)::float * 0.002)
-                      ),
-                      x_extension.ST_MakePoint(
-                        126.0004 + ((g % 1000)::float * 0.002),
-                        36.0004 + ((g % 800)::float * 0.002)
-                      )
-                    ),
-                    4326
-                  )
-                  ELSE x_extension.ST_SetSRID(
-                    x_extension.ST_MakeEnvelope(
-                      126.0 + ((g % 1000)::float * 0.002),
-                      36.0 + ((g % 800)::float * 0.002),
-                      126.0004 + ((g % 1000)::float * 0.002),
-                      36.0004 + ((g % 800)::float * 0.002)
-                    ),
-                    4326
-                  )
-                END,
                 'active',
                 '11',
                 '11110',
@@ -404,8 +416,70 @@ async def _seed_geom_only_perf_data(
         ),
         {"n": n},
     )
+    await session.execute(
+        text(
+            """
+            INSERT INTO feature.feature_routes (
+                feature_id, feature_uuid, kind, geom, route_type
+            )
+            SELECT
+                f.feature_id,
+                f.feature_uuid,
+                f.kind,
+                x_extension.ST_Multi(
+                    x_extension.ST_SetSRID(
+                        x_extension.ST_MakeLine(
+                            x_extension.ST_MakePoint(
+                                126.0 + ((g % 1000)::float * 0.002),
+                                36.0 + ((g % 800)::float * 0.002)
+                            ),
+                            x_extension.ST_MakePoint(
+                                126.0004 + ((g % 1000)::float * 0.002),
+                                36.0004 + ((g % 800)::float * 0.002)
+                            )
+                        ),
+                        4326
+                    )
+                )::x_extension.geometry(MultiLineString, 4326),
+                'route'
+            FROM feature.features AS f
+            JOIN LATERAL (SELECT right(f.feature_id, 6)::int AS g) AS s ON TRUE
+            WHERE f.feature_id LIKE 'perf:geom:%' AND f.kind = 'route'
+            """
+        )
+    )
+    await session.execute(
+        text(
+            """
+            INSERT INTO feature.feature_areas (
+                feature_id, feature_uuid, kind, geom, area_kind
+            )
+            SELECT
+                f.feature_id,
+                f.feature_uuid,
+                f.kind,
+                x_extension.ST_Multi(
+                    x_extension.ST_SetSRID(
+                        x_extension.ST_MakeEnvelope(
+                            126.0 + ((g % 1000)::float * 0.002),
+                            36.0 + ((g % 800)::float * 0.002),
+                            126.0004 + ((g % 1000)::float * 0.002),
+                            36.0004 + ((g % 800)::float * 0.002)
+                        ),
+                        4326
+                    )
+                )::x_extension.geometry(MultiPolygon, 4326),
+                'area'
+            FROM feature.features AS f
+            JOIN LATERAL (SELECT right(f.feature_id, 6)::int AS g) AS s ON TRUE
+            WHERE f.feature_id LIKE 'perf:geom:%' AND f.kind = 'area'
+            """
+        )
+    )
     await session.flush()
     await session.execute(text("ANALYZE feature.features"))
+    await session.execute(text("ANALYZE feature.feature_routes"))
+    await session.execute(text("ANALYZE feature.feature_areas"))
 
 
 async def _explain_json(
@@ -463,7 +537,16 @@ _COORD_SPATIAL_INDEXES = ("idx_features_coord_gist", "idx_features_coord")
 # 질의에서는 planner가 이 covering index를 골라 index-only scan을 한다.
 # 선두 컬럼이 같아 selectivity·성능 축은 동일하므로 gate는 둘을 동치로 받는다
 # (``tests/integration/perf_gate._FEATURES_PK_ACCESS``와 같은 근거).
-_FEATURES_PK_ACCESS = ("pk_features", "features_pkey", "uq_features_identity_pair")
+# T-VN-35(alembic 0084): 배타 arc 참조 대상 ``uq_features_identity_kind
+# UNIQUE (feature_id, kind)``가 생기면서 PK와 선두 컬럼이 같은 btree가 하나 더
+# 늘었다. planner는 ``kind``까지 투영하는 hot query에서 이 covering index를 골라
+# index-only scan을 한다 — selectivity가 동일하므로 성능 축은 약화되지 않는다.
+_FEATURES_PK_ACCESS = (
+    "pk_features",
+    "features_pkey",
+    "uq_features_identity_pair",
+    "uq_features_identity_kind",
+)
 
 
 def _assert_no_seq_scan_on(plan: dict[str, Any], relation_name: str) -> None:
@@ -611,10 +694,17 @@ async def test_t212d_cluster_hot_reads_use_spatial_index_without_mv(
     _assert_no_seq_scan_on(representative, "features")
 
 
-async def test_t212d_geom_only_cluster_uses_partial_gist_representatively(
+async def test_t212d_geom_only_cluster_uses_subtype_gist_representatively(
     migrated_session: AsyncSession,
 ) -> None:
-    """coord 없는 route/area cluster도 실제 planner에서 geom partial GiST를 쓴다."""
+    """coord 없는 route/area cluster가 실제 planner에서 **subtype** GiST를 쓴다.
+
+    T-VN-35(ADR-084): geometry 정본이 subtype으로 옮겨지면서 core partial GiST
+    (``idx_features_geom_gist``)가 사라지고 ``idx_feature_routes_geom_gist`` /
+    ``idx_feature_areas_geom_gist``가 그 자리를 대신한다. bbox 후보 술어가 조립
+    뷰의 ``COALESCE(geom)``(인덱스 없음)로 퇴화하면 여기서 잡힌다 — 그때는
+    subtype GiST가 plan에서 사라지고 features seq scan이 나타난다.
+    """
     await _seed_geom_only_perf_data(migrated_session)
 
     plan = await _explain_json(
@@ -633,7 +723,9 @@ async def test_t212d_geom_only_cluster_uses_partial_gist_representatively(
         force_index=False,
     )
 
-    _assert_uses_index(plan, "idx_features_geom_gist")
+    _assert_uses_index(
+        plan, "idx_feature_routes_geom_gist", "idx_feature_areas_geom_gist"
+    )
     _assert_no_seq_scan_on(plan, "features")
 
 
@@ -1040,7 +1132,14 @@ async def test_t212d_dedup_refresh_and_consistency_checks_are_index_compatible(
 
     f6_sql = next(case.sql for case in consistency.CONSISTENCY_CASES if case.code == "F6")
     f6 = await _explain_json(migrated_session, f6_sql)
-    _assert_uses_index(f6, "idx_features_opening_hours_keyset")
+    # T-VN-35(alembic 0084): 영업시간 후보 인덱스는 place subtype으로 이관됐다
+    # (``idx_features_opening_hours_keyset`` → ``idx_feature_places_opening_hours``).
+    # F6 SQL이 조립 뷰를 읽는 한 후보 술어가 subtype 컬럼에 직접 걸리지 않아 그
+    # partial index를 탈 수 없다 — 이 gate는 우선 features/subtype base-table
+    # Seq Scan 부재만 고정하고, index 구동 복원은 F6 SQL을 ``feature_places``
+    # 직접 참조로 재작성하는 후속 작업이 가져간다(T-VN-35 후속).
+    _assert_no_seq_scan_on(f6, "features")
+    _assert_no_seq_scan_on(f6, "feature_places")
 
     f7 = await _explain_json(
         migrated_session,
