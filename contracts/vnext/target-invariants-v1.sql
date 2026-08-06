@@ -106,6 +106,22 @@ LEFT JOIN provider_sync.provider_datasets AS dataset
   ON dataset.provider_dataset_id = operation.provider_dataset_id
 WHERE dataset.provider_dataset_id IS NULL; -- expect: 0 -- phase: both
 
+-- [INV-069-02c] operation의 scope·selector 결박은 capability와 모순되지 않는다.
+SELECT count(*)
+FROM provider_sync.provider_dataset_operations AS operation
+JOIN provider_sync.provider_datasets AS dataset
+  ON dataset.provider_dataset_id = operation.provider_dataset_id
+WHERE NOT provider_sync.is_valid_provider_dataset_operation_scopes(
+          operation.operation_kind, operation.allowed_sync_scopes
+      )
+   OR EXISTS (
+       SELECT 1
+       FROM unnest(operation.allowed_sync_scopes) AS scope(value)
+       WHERE scope.value LIKE 'external_system:%'
+         AND dataset.capabilities -> 'refresh' ->> 'target_selector'
+             <> 'poi_cache_targets'
+   ); -- expect: 0 -- phase: both
+
 -- [INV-069-03] source_entities → provider_datasets FK orphan 없음.
 SELECT count(*)
 FROM provider_sync.source_entities AS e
@@ -147,15 +163,15 @@ FROM (
     SELECT
         entity.source_entity_key,
         count(record.source_record_key) AS record_count,
-        count(head.source_entity_key) AS head_count
+        count(DISTINCT head.source_entity_key) AS head_count
     FROM provider_sync.source_entities AS entity
     LEFT JOIN provider_sync.source_records AS record
       ON record.source_entity_key = entity.source_entity_key
     LEFT JOIN provider_sync.source_entity_heads AS head
       ON head.source_entity_key = entity.source_entity_key
     GROUP BY entity.source_entity_key
-    HAVING (count(record.source_record_key) = 0 AND count(head.source_entity_key) <> 0)
-        OR (count(record.source_record_key) > 0 AND count(head.source_entity_key) <> 1)
+    HAVING (count(record.source_record_key) = 0 AND count(DISTINCT head.source_entity_key) <> 0)
+        OR (count(record.source_record_key) > 0 AND count(DISTINCT head.source_entity_key) <> 1)
 ) AS incomplete; -- expect: 0 -- phase: both
 
 -- [INV-069-07] source_links의 is_primary_source 잔재 없음 — primary 판정은

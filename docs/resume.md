@@ -1,12 +1,15 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
-## 2026-08-06 — T-VN-33 동결 계약 통과, 설계 재리뷰 진행 중
+## 2026-08-06 — T-VN-33 설계 재리뷰 P0 보완 계약 검증 완료
 
-T-VN-33의 target DDL·invariant·rejection fixture를 ADR-087에 맞춰 확장했다. 빈 PostGIS
-DB의 동결 통합 3건과 artifact unit 7건을 통과했으며, inactive dataset write의 공용 guard
-범위와 immutable raw/`observed_at` head ordering도 executable contract로 고정했다.
+T-VN-33의 target DDL·invariant·rejection fixture를 ADR-087에 맞춰 확장한 뒤 두 적대
+리뷰어의 2차 NO-GO를 받았다. 정상 history/head completeness 집계, inactive dataset의
+기존·indirect write 및 deactivate 경쟁, capability/operation 이중 정본, matrix 전체 target
+DDL, final removal manifest P0를 계약으로 보완했다. 전수 ownership DDL에는 event의
+cross-job membership 복합 FK와 integrity source-record/dataset 일치까지 포함했고, 빈
+PostGIS DB에서 모든 rejection fixture와 정상 history assertion을 실행했다.
 
-**다음 한 작업**: 두 적대 리뷰어의 설계 재리뷰에서 P0=0 GO를 받은 뒤, T-VN-33A의 actual
+**다음 한 작업**: 두 적대 리뷰어의 재리뷰 P0=0 GO를 받은 뒤, T-VN-33A의 actual
 migration/model/seed 구현을 같은 단일 PR에 누적한다.
 
 ## 2026-08-06 — T-VN-33 A/B/C 단일 PR 설계·적대 리뷰 완료, 구현 착수

@@ -27,29 +27,32 @@ _CONTRACTS: Final = _ROOT / "contracts" / "vnext"
 # artifact bytes 고정 — 갱신 절차: artifact 수정 → 통합 테스트로 fingerprint 재고정
 # → 여기 sha256 갱신 (한 PR에서 함께).
 ARTIFACT_SHA256: Final[dict[str, str]] = {
-    "target-schema-v1.sql": ("47f584076c2e4165e36b87b6d2cc6360e91e09fd309ab15dd46e37c3e46e4f7a"),
+    "target-schema-v1.sql": ("ed084a6e175598e74b5960f32be82c7afe84d717c3ecae1235ef9dde478b85d8"),
     "target-invariants-v1.sql": (
-        "c324ac589aeaa873e242d5568c542301c591b8cf7c72ec34d21d8596c902c85b"
+        "46b7fee21f3b135c2ad44f40170d7c5949734550f4cca776d07e99e78c53c18e"
     ),
     "target-schema-fingerprints-v1.json": (
-        "9a0a2b2a3f425ed94e862e1256f6b97d116b4e7d2c3d18dea54d7bc585aaacb5"
+        "217ffdedd4b3655c1c47c37fa99456e85d9a5eaaa8f19b8d5b1016dfcf883b92"
+    ),
+    "tvn33-reference-ownership-v1.sql": (
+        "5e52bdb35e703f4b5e1f59a0377506ff298a407356248fc56adbddc535abb831"
     ),
     "openapi-diff-v1.json": ("01ad3d690d599020843be4c1f2dad5df9ffaaebeb6d87785e333e8015e942d6a"),
     "consumer-rollout-v1.json": (
-        "684ee2b903124ea506bc34e418f26b254cd5c7a18f0332eebfe99fe655e09e3c"
+        "f02da0185feee929f1bc6189ad03f8a51f9b641af03ae3b3f4332dc80511bcfa"
     ),
     "violation-fixtures-v1.sql": (
-        "a12db9198948131aed1b2c93b985beda59483be65db8d931588629c950474952"
+        "29c5b0483cf8c16fbac3405640b29842377c0e05ea76f2d5b07bd253b56bbd89"
     ),
     "expected-rejections-v1.json": (
-        "382fa8a045081e3a0962b9dcb2ad3c12f3cfac74db6de9d70a1b66116701cf29"
+        "8ae072bcb19d15b06e655633168544f9bf0206aee0193fcf73a1eb1ff84b7f18"
     ),
     "recovery-preflight-v1.json": (
         "0e7e1ea595d034aacda8b4c94b56de6c2a24059f150c8cbd6c0670aebce7dfdd"
     ),
 }
 
-_EXPECTED_INVARIANT_COUNT: Final = 47
+_EXPECTED_INVARIANT_COUNT: Final = 48
 _INVARIANT_PHASES: Final = frozenset({"pre-backfill", "post-backfill", "both"})
 _SURFACES: Final = ("user", "service", "admin")
 _CHANGE_KEYS: Final = (
@@ -213,7 +216,11 @@ def test_recovery_preflight_shape() -> None:
 def test_expected_rejections_consistent_with_fixtures_and_ddl() -> None:
     rejections = _load_json("expected-rejections-v1.json")["cases"]
     assert set(rejections) == _load_violation_case_names()
-    schema_sql = (_CONTRACTS / "target-schema-v1.sql").read_text(encoding="utf-8")
+    schema_sql = (
+        (_CONTRACTS / "target-schema-v1.sql").read_text(encoding="utf-8")
+        + "\n"
+        + (_CONTRACTS / "tvn33-reference-ownership-v1.sql").read_text(encoding="utf-8")
+    )
     for name, case in rejections.items():
         assert re.fullmatch(r"23(503|505|514)", case["sqlstate"]), name
         assert case["constraint"] in schema_sql, (

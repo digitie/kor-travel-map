@@ -638,7 +638,12 @@ feature만** 세고 마커 위치는 그 부분집합의 `avg(coord)`다. MV 방
 "이 지역에 N개" 표시 의미에는 통상 허용되나 **현 동작과 다르다.** exact-viewport
 (현행) vs region-total(MV) 중 택일을 시범 PR에서 결정한다.
 
-#### 9.3.3 2순위 — primary-source LATERAL: MV보다 유지(denormalized) 컬럼 우선
+#### 9.3.3 2순위 — primary-source LATERAL (legacy, T-VN-33 이전)
+
+> 이 절의 `is_primary_source`와 `source_records` direct join은 T-VN-33 이후 정본이 아니다.
+> 최종 reader는 `source_links.source_role='primary' → source_entities →
+> source_entity_heads → source_records → provider_datasets`를 사용한다. denormalized
+> primary provider/dataset 유지 열은 새로 만들지 않는다.
 
 `/features/nearby`·`/admin/features`는 feature마다
 `source_links(is_primary_source) → source_records`를 LATERAL로 1건 조회해

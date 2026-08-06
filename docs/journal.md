@@ -2,6 +2,20 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-06 (codex) — T-VN-33 P0 계약 보완 및 재리뷰 제출 준비
+
+- 2차 적대 리뷰의 inactive write, operation/capability 이중 정본, history/head 집계,
+  incomplete ownership matrix, removal manifest P0를 target contract에 반영했다.
+  `tvn33-reference-ownership-v1.sql`이 sync/notice/curation/job/request/policy/upload/
+  integrity/POI/enrichment/file의 dataset ownership을 FK·membership·parent-lock guard로
+  실행 가능하게 고정한다.
+- event가 다른 import job의 dataset member를 참조하지 못하도록 복합 FK를 추가했고,
+  integrity violation의 source record/dataset 불일치와 direct·indirect inactive write를
+  SQLSTATE fixture로 검증한다. source record history 2건과 head 1건의 정상 case도
+  completeness invariant가 허용함을 빈 PostGIS DB에서 확인했다.
+- T-VN-33A/B/C는 초안 PR #966 하나에만 누적하며, 두 적대 리뷰어가 P0=0 GO를 내기 전에는
+  actual migration/model/API 구현을 시작하지 않는다.
+
 ## 2026-08-06 (codex) — T-VN-33 target contract 실행 검증
 
 - ADR-087의 versioned capability/operation, immutable source record, `observed_at` head,

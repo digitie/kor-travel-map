@@ -14,8 +14,10 @@ pair 정본으로 남고, 동일 raw payload 재관측이 immutable record를 UP
 ## 결정
 
 1. `provider_datasets`가 identity, active 상태, typed display/source metadata와 versioned
-   capability를 DB에서 소유한다. capability의 최소 schema는 DB CHECK 함수로 검사한다.
-   identity rename은 금지하며 deactivate + 새 row 생성만 허용한다.
+   capability를 DB에서 소유한다. capability의 최소 schema는 DB CHECK 함수로 검사하며,
+   `schema_version`은 JSON number로 고정한다. refresh enable/scope는 JSON에 중복하지 않고
+   operation table이 유일하게 소유한다. identity rename은 금지하며 deactivate + 새 row
+   생성만 허용한다.
 2. dataset의 실행 가능 operation은 `provider_dataset_operations`에 저장한다. 코드 registry는
    operation key의 handler binding일 뿐 dataset/pair/capability의 정본이 아니다. 빈 DB는
    versioned migration seed로 bootstrap하고 active DB operation과 handler의 exact set을 검증한다.
@@ -30,8 +32,13 @@ pair 정본으로 남고, 동일 raw payload 재관측이 immutable record를 UP
 5. legacy provider/dataset/raw-derived/primary-boolean columns은 T-VN-33C에서 normal read와
    write에서 fence하고, exact removal manifest를 T-VN-39에 넘긴다. compatibility shim과
    long-lived dual write는 만들지 않는다.
-6. inactive dataset을 참조한 새 canonical child/membership write는 공용 DB trigger가
-   SQLSTATE `23514`로 거부한다. 역사 read와 purge/final-schema rebuild 경계는 별도다.
+6. inactive dataset을 참조한 canonical child/membership의 insert와 기존 row update는 공용
+   DB trigger가 SQLSTATE `23514`로 거부한다. direct FK child는 parent row shared lock으로
+   deactivate와 직렬화하고, indirect lineage child는 entity→dataset join guard를 쓴다.
+   T-VN-33에는 generic bypass가 없고 purge 권한 경계는 T-VN-39에서 별도로 정한다.
+   import event는 job/member 복합 FK로 다른 job의 member를 참조할 수 없고, source record와
+   dataset을 함께 가진 integrity violation은 양자의 dataset 일치도 DB가 검증한다. enrichment
+   review는 dataset ID를 중복 저장하지 않고 source entity에서 소유권을 유도한다.
 
 ## 결과
 

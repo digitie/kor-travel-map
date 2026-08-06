@@ -36,12 +36,13 @@ pytestmark = pytest.mark.integration
 _ROOT: Final = Path(__file__).resolve().parents[2]
 _CONTRACTS: Final = _ROOT / "contracts" / "vnext"
 _SCHEMA_SQL: Final = _CONTRACTS / "target-schema-v1.sql"
+_REFERENCE_OWNERSHIP_SQL: Final = _CONTRACTS / "tvn33-reference-ownership-v1.sql"
 _INVARIANTS_SQL: Final = _CONTRACTS / "target-invariants-v1.sql"
 _FINGERPRINTS_JSON: Final = _CONTRACTS / "target-schema-fingerprints-v1.json"
 _VIOLATIONS_SQL: Final = _CONTRACTS / "violation-fixtures-v1.sql"
 _REJECTIONS_JSON: Final = _CONTRACTS / "expected-rejections-v1.json"
 
-_EXPECTED_INVARIANT_COUNT: Final = 47
+_EXPECTED_INVARIANT_COUNT: Final = 48
 _INVARIANT_PHASES: Final = frozenset({"pre-backfill", "post-backfill", "both"})
 
 # fingerprint 대상 — target-schema-v1.sql이 만드는 전체 relation.
@@ -70,19 +71,48 @@ _TARGET_TABLES: Final = (
     "provider_sync.source_entity_heads",
     "provider_sync.source_links",
     "provider_sync.notice_states",
+    "provider_sync.notice_lifecycle_scopes",
+    "provider_sync.notice_lineage_states",
     "ops.feature_override_field_paths",
     "ops.feature_overrides",
+    "provider_sync.provider_sync_state",
+    "feature.curated_sources",
+    "feature.curated_source_rules",
+    "ops.import_jobs",
+    "ops.import_job_datasets",
+    "ops.import_job_events",
+    "ops.feature_update_requests",
+    "ops.feature_update_request_datasets",
+    "ops.provider_refresh_policies",
+    "ops.offline_uploads",
+    "ops.integrity_observation_scopes",
+    "ops.integrity_observation_runs",
+    "ops.data_integrity_violations",
+    "ops.poi_cache_targets",
+    "ops.poi_cache_target_feature_links",
+    "ops.enrichment_review_queue",
+    "ops.managed_files",
 )
 _TARGET_RELATIONS: Final = (*_TARGET_TABLES, "feature.public_features")
 _TARGET_FUNCTIONS: Final = (
     "feature.force_features_row_revision()",
     "provider_sync.is_valid_provider_dataset_capabilities(jsonb)",
+    "provider_sync.is_valid_provider_dataset_operation_scopes(text,text[])",
     "provider_sync.reject_provider_dataset_identity_update()",
     "provider_sync.touch_provider_dataset()",
     "provider_sync.reject_inactive_provider_dataset()",
+    "provider_sync.reject_inactive_source_entity_dataset()",
+    "provider_sync.validate_provider_dataset_operation()",
+    "provider_sync.touch_provider_dataset_operation()",
     "provider_sync.reject_source_record_update()",
     "provider_sync.enforce_source_entity_head_freshness()",
+    "provider_sync.enforce_source_entity_identity_and_seen_at()",
     "provider_sync.assert_source_entity_head_completeness()",
+    "provider_sync.reject_inactive_notice_lifecycle_scope()",
+    "provider_sync.reject_inactive_curated_source_dataset()",
+    "provider_sync.reject_inactive_import_job_dataset()",
+    "provider_sync.reject_inactive_integrity_observation_scope()",
+    "provider_sync.validate_data_integrity_violation_dataset()",
 )
 
 # =============================================================================
@@ -379,6 +409,7 @@ async def freeze_db(pg_container: Any) -> AsyncIterator[asyncpg.Connection]:
             )
         await connection.execute("SET search_path = public, x_extension")
         await connection.execute(_SCHEMA_SQL.read_text(encoding="utf-8"))
+        await connection.execute(_REFERENCE_OWNERSHIP_SQL.read_text(encoding="utf-8"))
         yield connection
     finally:
         await connection.close()
@@ -430,6 +461,57 @@ async def test_violation_fixtures_rejected_with_expected_sqlstate(
             assert expected["constraint"] in str(error), f"case {name}: {error}"
 
 
+async def test_multiple_records_with_one_head_satisfy_completeness_invariant(
+    freeze_db: asyncpg.Connection,
+) -> None:
+    """정상 history 2건 + head 1건은 INV-069-06a를 위반하지 않는다."""
+    transaction = freeze_db.transaction()
+    await transaction.start()
+    try:
+        dataset_id = await freeze_db.fetchval(
+            """
+            INSERT INTO provider_sync.provider_datasets (
+                provider, dataset_key, display_name, source_kind
+            ) VALUES ('positive-fixture', 'head-history', 'head history', 'manual')
+            RETURNING provider_dataset_id
+            """
+        )
+        await freeze_db.execute(
+            """
+            INSERT INTO provider_sync.source_entities (
+                source_entity_key, provider_dataset_id, source_entity_type,
+                source_entity_id, first_seen_at, last_seen_at
+            ) VALUES ('positive-head-entity', $1, 'place', 'positive-1', now(), now())
+            """,
+            dataset_id,
+        )
+        await freeze_db.execute(
+            """
+            INSERT INTO provider_sync.source_records (
+                source_record_key, source_entity_key, raw_data, raw_payload_hash, fetched_at
+            ) VALUES
+                ('positive-head-record-a', 'positive-head-entity', '{}'::jsonb, 'b1', now()),
+                ('positive-head-record-b', 'positive-head-entity', '{}'::jsonb, 'b2', now())
+            """
+        )
+        await freeze_db.execute(
+            """
+            INSERT INTO provider_sync.source_entity_heads (
+                source_entity_key, current_source_record_key, observed_at
+            ) VALUES ('positive-head-entity', 'positive-head-record-b', now())
+            """
+        )
+        await freeze_db.execute("SET CONSTRAINTS ALL IMMEDIATE")
+        completeness_query = next(
+            query
+            for query, _phase in load_invariant_queries()
+            if "count(DISTINCT head.source_entity_key)" in query
+        )
+        assert await freeze_db.fetchval(completeness_query) == 0
+    finally:
+        await transaction.rollback()
+
+
 async def test_catalog_fingerprints_match_frozen_artifact(
     freeze_db: asyncpg.Connection,
 ) -> None:
@@ -455,4 +537,8 @@ async def test_catalog_fingerprints_match_frozen_artifact(
     schema_sha = hashlib.sha256(_SCHEMA_SQL.read_bytes()).hexdigest()
     assert schema_sha == frozen["target_schema_sql_sha256"], (
         f"target-schema-v1.sql bytes drift — 재계산 {schema_sha}"
+    )
+    reference_sha = hashlib.sha256(_REFERENCE_OWNERSHIP_SQL.read_bytes()).hexdigest()
+    assert reference_sha == frozen["tvn33_reference_ownership_sql_sha256"], (
+        "tvn33-reference-ownership-v1.sql bytes drift — 재계산 " + reference_sha
     )
