@@ -14,7 +14,8 @@
 
 > **2026-07-27 전환 완료**: 2026-07-18에 발견한 legacy admin ops 삭제와 PinVi caller
 > 불일치는 `T-ADM-C6c`에서 해소했다. PinVi는 canonical datasets/pipeline과 제한된
-> `ops:read`/`ops:cancel` principal을 사용하고, production compatible-pair 활성화와 C7
+> `ops:read`/`ops:cancel` principal을 사용하고, Docker Manager는 T-VN-41F1J의 별도
+> `ops:fixture` principal으로 Map-owned cancel-probe 수명주기만 호출한다. production compatible-pair 활성화와 C7
 > destructive live 인수를 통과했다. 삭제된 ops 경로와 URL query Map API key는 호환
 > 경로로 부활시키지 않는다.
 
@@ -69,26 +70,30 @@
   trusted frontend BFF만 실행한다. token 누락은 `401`, token 또는 결박 불일치는 `403`, token이
   있는데 scope가 없거나 알 수 없는 값이면 `422` RFC7807이다. 감사 actor는 설정값이 아닌
   코드 상수 `service:pinvi`이며 요청 `X-Kor-Travel-Map-Actor`를 신뢰하지 않는다. 제거된
-  `KOR_TRAVEL_MAP_API_OPS_ACTOR`가 존재하면 API 시작을 거부한다.
+  `KOR_TRAVEL_MAP_API_OPS_ACTOR`가 존재하면 API 시작을 거부한다. T-VN-41F1J의 fixture
+  secret은 `PUT|GET /v1/ops/contract-fixtures/c6c-cancel-probe/{transaction_id}`와
+  `POST .../{transaction_id}/finalize` + `ops:fixture`에만 결박하고, actor는 코드 상수
+  `service:docker-manager`다. fixture token은 read/cancel token이나 PinVi 권한을 넓히지 않는다.
 - 이 principal은 canonical datasets/pipeline router에만 적용한다. 기존 trusted frontend BFF는
   그대로 통과하고 `/v1/admin/*`, legacy unguarded ops, frontend BFF 인증 권한은 얻지 않는다.
-- map API는 `KOR_TRAVEL_MAP_API_OPS_READ_TOKEN`과
-  `KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN`, production 필수 게이트
+- map API는 `KOR_TRAVEL_MAP_API_OPS_READ_TOKEN`,
+  `KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN`, `KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN`, production 필수 게이트
   `KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED`, PinVi API는
   `PINVI_KOR_TRAVEL_MAP_OPS_READ_TOKEN`과
   `PINVI_KOR_TRAVEL_MAP_OPS_CANCEL_TOKEN`을 사용한다. 양쪽 token은 각각 모든 공백을 금지한
-  32자 이상이며 read/cancel끼리뿐 아니라 admin BFF secret·public service token과도 달라야
-  한다. map local은 required=`false`일 때 두 token이 모두 없거나 모두 명시적 빈 문자열인
-  경우만 principal을 끌 수 있다. missing+empty, 한쪽 empty/non-empty, partial pair는 direct
-  uvicorn과 launcher에서 모두 거부한다. n150 production은 required=`true`와 non-empty pair를
+  32자 이상이며 세 token은 서로와 admin BFF secret·public service token과 모두 달라야
+  한다. fixture token은 Docker Manager에만 주입한다. map local은 required=`false`일 때 세 token이
+  모두 없거나 모두 명시적 빈 문자열인 경우만 principal을 끌 수 있다. missing+empty, 한쪽 empty/non-empty, partial set은 direct
+  uvicorn과 launcher에서 모두 거부한다. n150 production은 required=`true`와 non-empty 세 token을
   함께 주입한다. map token/required는 API package env에만 두고 root `.env`, frontend,
   Dagster webserver/daemon에는 주입하지 않는다. Dagster image entrypoint도
   `KOR_TRAVEL_MAP_API_OPS_*`가 하나라도 존재하면 값이 비어 있어도 시작을 거부한다.
-- n150에서는 `kor-travel-docker-manager` 배포 lane이 map API의 required=`true`와 두 token,
-  PinVi API의 대응 token을 각 컨테이너에만 주입한다. 2026-07-27 canonical
+- n150에서는 `kor-travel-docker-manager` 배포 lane이 map API의 required=`true`와 세 token,
+  PinVi API의 read/cancel 대응 token, Manager의 fixture 대응 token을 각 컨테이너에만 주입한다.
+  fixture token은 PinVi container에 절대 주입하지 않는다. 2026-07-27 canonical
   read/cancel principal smoke와 C7을 통과해 활성화했다. 이후 배포도 secret 선주입 → map API →
   signed read/cancel smoke → PinVi API 순서를 유지하고, rollback은 검증된 Map/PinVi image
-  pair를 함께 복원한다. 한쪽 token이 없거나 짧거나 공백을 포함하거나 두 token이 같으면
+  pair를 함께 복원한다. 한 token이라도 없거나 짧거나 공백을 포함하거나 세 token 중 둘이 같으면
   새 pair를 활성화하지 않는다.
 - `/v1/features/search` cursor 서명에는 API 전용
   `KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET`을 사용한다. 이 값은 public API key나
@@ -127,6 +132,7 @@
 | kor-travel-map ops live WebSocket | BFF가 발급한 짧은 수명 HMAC subprotocol ticket + DB nonce 단일 소비 + bounded lease | WebSocket event frame | 인증/만료는 data frame 없이 close 4401/4408 |
 | kor-travel-map Prometheus `/metrics` | production 필수 `KOR_TRAVEL_MAP_API_METRICS_TOKEN`의 `Authorization: Bearer` scrape identity(ADR-066 결정 4, T-VN-02) | Prometheus exposition | 비-Bearer/불일치 401 |
 | kor-travel-map 관측 ops (`/v1/ops/{metrics,system-logs,api-call-logs,consistency/*,health-deep}`) | AdminBFF 또는 `X-Kor-Travel-Map-Ops-Token` + `X-Kor-Travel-Map-Ops-Scope: ops:read` | 표면별 기존 envelope | RFC7807 `problem+json` |
+| kor-travel-map C6c contract fixture (`/v1/ops/contract-fixtures/c6c-cancel-probe/*`) | Docker Manager만 `X-Kor-Travel-Map-Ops-Token` + `X-Kor-Travel-Map-Ops-Scope: ops:fixture`; AdminBFF·PinVi·read/cancel token은 불허 | `{data, meta}` durable fixture receipt | RFC7807 `problem+json` |
 | kor-travel-map raw debug (`/v1/debug/mois-license/*`) | production에서는 route 자체를 mount하지 않는다. local-dev에서만 mount하며 AdminBFF 인증을 요구한다 | 표면별 기존 envelope | RFC7807 `problem+json` |
 | kor-travel-concierge export (`/api/v1/features/*`) | DB `read` scope `X-API-Key` | **무-envelope** `{items, next_cursor, has_more}` (내부 export 단순 계약) | HTTP status |
 | PinVi 자체 API (`:9021`) | 쿠키 세션/OAuth | PinVi 자체 `Envelope` | PinVi 자체 |
@@ -300,11 +306,22 @@ secret-free receipt SHA-256만 남긴다.
 [`architecture/cache-target-writer-drain.md`](architecture/cache-target-writer-drain.md), 결정은
 ADR-082다.
 
+### 3.5 C6c cancel-probe Map fixture (T-VN-41F1J, ADR-084)
+
+Docker Manager는 candidate Map이 ready인 뒤 F1D transaction ID로 fixture ensure/read/finalize
+service API만 호출한다. Map은 해당 ID의 running/no-Dagster-run job과 canonical cancellation
+연결을 durable하게 소유하고, PinVi는 기존 `ops:cancel`로 보통 cancel request 한 번만 보낸다.
+Manager는 exact `409 PIPELINE_CANCELLATION_UNSAFE`와 cancellation ID를 확인한 뒤 finalize한다.
+`404`, `502`, `503`, timeout, 다른 409는 모두 실패이고, transaction state가 `consumed`이면
+cancel을 다시 보내지 않는다. 세부 상태 전이와 API는
+[`architecture/c6c-cancel-probe-fixture.md`](architecture/c6c-cancel-probe-fixture.md) 및
+ADR-084가 정본이다.
+
 ## 4. 계약 정본 위치
 
 | 계약 | 정본(공급자 repo) | 소비측 view |
 |---|---|---|
-| kor-travel-map 전 표면 REST | `docs/architecture/rest-api.md` + 기계 정본 `packages/kor-travel-map-api/openapi{,.user}.json` | PinVi `docs/integrations/kor-travel-map-rest-api.md` |
+| kor-travel-map 전 표면 REST | `docs/architecture/rest-api.md` + 기계 정본 `packages/kor-travel-map-api/openapi{,.user,.service}.json` | PinVi `docs/integrations/kor-travel-map-rest-api.md` |
 | PinVi canonical ops | 본 repo `docs/reports/system-structure-api-schema-review-2026-07-16.md` D-11/F-17 + 본 문서 §2 principal 계약 | PinVi admin client·provider-sync proxy·contract test와 `docs/integrations/kor-travel-map-rest-api.md` |
 | PinVi T-130 공개 해수욕장/축제 뷰 | 본 repo `docs/architecture/public-views-api.md` + `openapi.user.json`(T-222b 구현) | PinVi `docs/api/public.md` / `docs/kor-travel-map-requirements.md` §6 |
 | curated features → PinVi curated trip plans | 본 repo [`docs/curated-features.md`](curated-features.md) + admin `openapi.json` canonical detail-snapshot | PinVi `docs/kor-travel-map-requirements.md`의 curated trip plan import 절 / PinVi `docs/api/notice-plans.md`의 canonical 경로·AdminBFF 설명 |
@@ -312,6 +329,7 @@ ADR-082다.
 | PinVi 사용자 제안 연동(합의 5건) | 본 repo `docs/architecture/rest-api.md` (구 ADR-051) | PinVi `docs/integrations/kor-travel-map-rest-api.md` §7 |
 | YouTube 후보 detail 소비(TM-08) | 본 repo `docs/architecture/rest-api.md` (T-217f) | PinVi UX 기획 |
 | cache-target Map writer-drain | `docs/architecture/cache-target-writer-drain.md` + Map API image private typed runner (public OpenAPI 미노출) | Docker Manager T-049F frozen Compose receipt parser |
+| **C6c cancel-probe fixture** | `docs/architecture/c6c-cancel-probe-fixture.md` + `openapi.service.json`의 `ops:fixture` 3 route + ADR-084 | Docker Manager F1D orchestrator; PinVi는 기존 cancel relay만 소비 |
 | **curation collection 표면** | 본 repo `packages/kor-travel-map-api/src/kortravelmap/api/routers/curations.py` + `openapi{,.user}.json`. CSV 정본은 `resources/curations/*.csv` + `manifest.json` | runtime identity lookup 소비자는 없음. PinVi pinned OpenAPI snapshot의 schema field hit는 호출 소비가 아님(2026-07-30) |
 | **feature alias-map 이관 (T-VN-32C)** | 본 repo `contracts/feature-alias-map-v1-golden.json`(`feature-alias-map-v1` — Map/PinVi 독립 재계산 golden) + `GET /v1/service/feature-alias-maps{,/checksum}`(`openapi.service.json`). 이관·복구 경계 전용 bulk read(ADR-068 결정 3) — 런타임 alias lookup 표면이 아니다 | PinVi vendored `apps/api/tests/contract/feature-alias-map-v1-golden.json` + 독립 구현 `app/core/feature_alias_contract.py` + 이관 실행기 `pinvi-feature-uuid-cutover` |
 | geocoding | kor-travel-geo REST v2 (`POST /v2/{reverse,geocode}`) + public API key header 인증 | ADR-046 + geo ADR-064 |

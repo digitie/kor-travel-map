@@ -123,13 +123,16 @@ fi
 
 ops_read_key=KOR_TRAVEL_MAP_API_OPS_READ_TOKEN
 ops_cancel_key=KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN
+ops_fixture_key=KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN
 ops_required_key=KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED
 ops_read_is_set=0
 ops_cancel_is_set=0
+ops_fixture_is_set=0
 [[ -v "API_SCOPED_VALUES[$ops_read_key]" ]] && ops_read_is_set=1
 [[ -v "API_SCOPED_VALUES[$ops_cancel_key]" ]] && ops_cancel_is_set=1
-if [[ "$ops_read_is_set" != "$ops_cancel_is_set" ]]; then
-  echo "$ops_read_key and $ops_cancel_key must be configured together" >&2
+[[ -v "API_SCOPED_VALUES[$ops_fixture_key]" ]] && ops_fixture_is_set=1
+if [[ "$ops_read_is_set" != "$ops_cancel_is_set" || "$ops_read_is_set" != "$ops_fixture_is_set" ]]; then
+  echo "$ops_read_key, $ops_cancel_key, and $ops_fixture_key must be configured together" >&2
   exit 1
 fi
 ops_principal_required=false
@@ -142,19 +145,20 @@ if [[ -v "API_SCOPED_VALUES[$ops_required_key]" ]]; then
 fi
 if [[ "$ops_read_is_set" == "0" ]]; then
   if [[ "$ops_principal_required" == "true" ]]; then
-    echo "ops principal is required but read/cancel tokens are absent" >&2
+    echo "ops principal is required but read/cancel/fixture tokens are absent" >&2
     exit 1
   fi
 else
   ops_read_token="${API_SCOPED_VALUES[$ops_read_key]}"
   ops_cancel_token="${API_SCOPED_VALUES[$ops_cancel_key]}"
-  if [[ -z "$ops_read_token" && -z "$ops_cancel_token" ]]; then
+  ops_fixture_token="${API_SCOPED_VALUES[$ops_fixture_key]}"
+  if [[ -z "$ops_read_token" && -z "$ops_cancel_token" && -z "$ops_fixture_token" ]]; then
     if [[ "$ops_principal_required" == "true" ]]; then
-      echo "ops principal is required but read/cancel tokens are empty" >&2
+      echo "ops principal is required but read/cancel/fixture tokens are empty" >&2
       exit 1
     fi
-  elif [[ -z "$ops_read_token" || -z "$ops_cancel_token" ]]; then
-    echo "ops read and cancel tokens must both be empty or both be non-empty" >&2
+  elif [[ -z "$ops_read_token" || -z "$ops_cancel_token" || -z "$ops_fixture_token" ]]; then
+    echo "ops read, cancel, and fixture tokens must all be empty or all be non-empty" >&2
     exit 1
   else
     if [[ "$ops_read_token" =~ [[:space:]] ]]; then
@@ -165,6 +169,10 @@ else
       echo "$ops_cancel_key must contain no whitespace" >&2
       exit 1
     fi
+    if [[ "$ops_fixture_token" =~ [[:space:]] ]]; then
+      echo "$ops_fixture_key must contain no whitespace" >&2
+      exit 1
+    fi
     if [[ ${#ops_read_token} -lt 32 ]]; then
       echo "$ops_read_key must be at least 32 characters" >&2
       exit 1
@@ -173,17 +181,21 @@ else
       echo "$ops_cancel_key must be at least 32 characters" >&2
       exit 1
     fi
-    if [[ "$ops_read_token" == "$ops_cancel_token" ]]; then
-      echo "ops read and cancel tokens must be distinct" >&2
+    if [[ ${#ops_fixture_token} -lt 32 ]]; then
+      echo "$ops_fixture_key must be at least 32 characters" >&2
       exit 1
     fi
-    if [[ "$ops_read_token" == "$frontend_proxy_secret" || "$ops_cancel_token" == "$frontend_proxy_secret" ]]; then
-      echo "ops read/cancel tokens must be distinct from the admin proxy secret" >&2
+    if [[ "$ops_read_token" == "$ops_cancel_token" || "$ops_read_token" == "$ops_fixture_token" || "$ops_cancel_token" == "$ops_fixture_token" ]]; then
+      echo "ops read, cancel, and fixture tokens must be distinct" >&2
+      exit 1
+    fi
+    if [[ "$ops_read_token" == "$frontend_proxy_secret" || "$ops_cancel_token" == "$frontend_proxy_secret" || "$ops_fixture_token" == "$frontend_proxy_secret" ]]; then
+      echo "ops read/cancel/fixture tokens must be distinct from the admin proxy secret" >&2
       exit 1
     fi
     api_service_token="${API_SCOPED_VALUES[KOR_TRAVEL_MAP_API_SERVICE_TOKEN]:-}"
-    if [[ -n "$api_service_token" && ( "$ops_read_token" == "$api_service_token" || "$ops_cancel_token" == "$api_service_token" ) ]]; then
-      echo "ops read/cancel tokens must be distinct from the service token" >&2
+    if [[ -n "$api_service_token" && ( "$ops_read_token" == "$api_service_token" || "$ops_cancel_token" == "$api_service_token" || "$ops_fixture_token" == "$api_service_token" ) ]]; then
+      echo "ops read/cancel/fixture tokens must be distinct from the service token" >&2
       exit 1
     fi
   fi
@@ -224,7 +236,8 @@ if [[ -n "$cursor_signing_secret" ]]; then
   fi
   if [[ "$ops_read_is_set" == "1" \
     && ( "$cursor_signing_secret" == "${API_SCOPED_VALUES[$ops_read_key]}" \
-      || "$cursor_signing_secret" == "${API_SCOPED_VALUES[$ops_cancel_key]}" ) ]]; then
+      || "$cursor_signing_secret" == "${API_SCOPED_VALUES[$ops_cancel_key]}" \
+      || "$cursor_signing_secret" == "${API_SCOPED_VALUES[$ops_fixture_key]}" ) ]]; then
     echo "$cursor_signing_key must be distinct from ops credentials" >&2
     exit 1
   fi

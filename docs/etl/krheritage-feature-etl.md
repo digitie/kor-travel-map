@@ -98,7 +98,7 @@ def _classify_heritage_kind(item) -> FeatureKind:
 - `regulation_scope`: 보호/규제 범위
 - `administrative_office`: 관리기관
 - `feature.feature_areas.geom`: GIS `GeoFeature.geometry`를 PostGIS MultiPolygon으로
-  (`MULTIPOLYGON(4326)` NOT NULL, ADR-084)
+  (`MULTIPOLYGON(4326)` NOT NULL, ADR-085)
 
 ### 5.3 event (`EventDetail`)
 

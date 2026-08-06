@@ -52,7 +52,7 @@ async def _seed_place(
         )
     )
     await session.flush()
-    # T-VN-35(ADR-084): 전화번호 정본은 ``feature_places.phones``(text[])다.
+    # T-VN-35(ADR-085): 전화번호 정본은 ``feature_places.phones``(text[])다.
     await seed_feature_subtype(
         session,
         feature_id=feature_id,

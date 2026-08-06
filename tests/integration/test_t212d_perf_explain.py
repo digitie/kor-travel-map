@@ -106,7 +106,7 @@ async def _seed_live_like_perf_data(session: AsyncSession, *, n: int = 3200) -> 
         ),
         {"n": n},
     )
-    # T-VN-35(ADR-084): kind별 값의 정본은 subtype이다. 종전 seed가 core
+    # T-VN-35(ADR-085): kind별 값의 정본은 subtype이다. 종전 seed가 core
     # ``detail``에 넣던 place_kind/business_hours가 typed 컬럼으로 간다 —
     # ``idx_feature_places_opening_hours``가 종전 ``idx_features_opening_hours_keyset``
     # 자리를 대신하므로 같은 17행 주기로 business_hours를 채운다.
@@ -387,7 +387,7 @@ async def _seed_geom_only_perf_data(
 ) -> None:
     """coord 없이 geometry만 가진 route/area의 대표 planner 분포를 만든다.
 
-    T-VN-35(ADR-084): geometry 정본이 ``feature_routes``/``feature_areas``로
+    T-VN-35(ADR-085): geometry 정본이 ``feature_routes``/``feature_areas``로
     옮겨졌고 두 subtype의 ``geom``은 NOT NULL이다 — core는 좌표 없는 껍데기만
     갖는다. 인덱스도 core 단일 partial GiST가 아니라 subtype별 GiST 2종이므로
     seed 구조를 그대로 옮기고, 통계는 세 relation 모두에 만든다.
@@ -699,7 +699,7 @@ async def test_t212d_geom_only_cluster_uses_subtype_gist_representatively(
 ) -> None:
     """coord 없는 route/area cluster가 실제 planner에서 **subtype** GiST를 쓴다.
 
-    T-VN-35(ADR-084): geometry 정본이 subtype으로 옮겨지면서 core partial GiST
+    T-VN-35(ADR-085): geometry 정본이 subtype으로 옮겨지면서 core partial GiST
     (``idx_features_geom_gist``)가 사라지고 ``idx_feature_routes_geom_gist`` /
     ``idx_feature_areas_geom_gist``가 그 자리를 대신한다. bbox 후보 술어가 조립
     뷰의 ``COALESCE(geom)``(인덱스 없음)로 퇴화하면 여기서 잡힌다 — 그때는

@@ -53,8 +53,9 @@ barrier로 직렬화한다.
     [~] `T-VN-H43`(백업 체계 — 기준선·write-fence 기준점 dump + PK manifest
         확보·runbook §9. 잔여: 외부 사본 반출·주기화·retention(dm 결선)·배포
         직전 기준점 관례 — 병렬 착수 2026-08-05) →
-    [ ] `T-VN-H44`(복원 리허설 드릴 정기화 — H30B 하네스 재사용. 드릴 1회차
-        병렬 착수 2026-08-05)
+    [~] `T-VN-H44`(복원 리허설 드릴 — **1회차 완주 2026-08-05**: 복원·manifest
+        일치·결손 주입/회복 replay 전 단계 통과, 절차 runbook §10 고정.
+        잔여: 주기 실행 트리거)
 - **Lane B — frontend hardening·PinVi 소비 API**
   - b0: [x] `T-VN-48D`(final exact Mocked/Live) →
     [x] `T-VN-49A/B/C/D`(React 구조 debt, 단일 PR)
@@ -66,12 +67,12 @@ barrier로 직렬화한다.
     [x] `T-VN-16C`(sparse 다중 날짜 weather batch) →
     [ ] `T-VN-41A` → [ ] `T-VN-41B` → [ ] `T-VN-41C`(generation/outbox — prod enable은
     재pin #109 완료 + `T-VN-H42` 뒤, Lane B 상세 절 경계 주석 참조) ∥
-    [/] `T-VN-41D`(durable writer-drain)
+    [/] `T-VN-41D`(durable writer-drain) → [/] `T-VN-41F1J-A`(Map-owned cancel-probe fixture)
 - **Wave 2 barrier 이후**
   - freeze(Lane A): [x] `T-VN-31A` → [x] `T-VN-31B` → [x] `T-VN-31C`
   - Lane A: [x] `T-VN-32A` → [x] `T-VN-32B` → [x] `T-VN-32C`(prod 배포·값 전환
     라이브 — Map #950/#952/#955/#956·PinVi #430/#432) →
-    [x] `T-VN-35A-D`(typed subtype 분해 — ADR-084, A-D 단일 PR) →
+    [x] `T-VN-35A-D`(typed subtype 분해 — ADR-085, A-D 단일 PR) →
     [ ] `T-VN-37A` → [ ] `T-VN-37B` → [ ] `T-VN-37C`
   - Lane B shadow: [ ] `T-VN-33A` → [ ] `T-VN-33B` → [ ] `T-VN-33C` →
     [ ] `T-VN-38A` → [ ] `T-VN-38B` → [ ] `T-VN-38C` →
@@ -472,18 +473,24 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   - [ ] 신규 DB 프로비저닝 함정 참조 링크 — superuser 확장 4종 사전 생성
     (manager #109 절차)을 restore 문서에서 링크한다.
 
-- [ ] T-VN-H44 — **복원 리허설 드릴 정기화 (H30B 하네스 재사용)**
+- [~] T-VN-H44 — **복원 리허설 드릴 정기화 (H30B 하네스 재사용)**
 
   백업본이 실제로 복원되는지를 반복 가능한 드릴로 정착시킨다. **타이밍: H43 뒤,
   이후 정기.**
 
-  - [ ] H30B 하네스(dev box `~/h30b/` — artifact replay·결손 주입·완전 회복 검증)를
-    재사용한다.
-  - [ ] restore 요령 고정 — postgis 이미지는 **init 완료 대기 후 새 DB를 만들어** 복원
-    (`POSTGRES_DB`에 미리 심어진 확장과 dump의 확장 배치가 충돌 — 0072 아카이브 복원
-    검증에서 실측).
-  - [ ] 드릴 1회 = dump 선택 → 격리 복원 → head·row count 대조 → (가능 시) 결손 주입·
-    회복 replay → 결과 기록. 절차를 runbook으로 고정해 반복 실행 가능하게 한다.
+  - [x] 드릴 1회차 완주(2026-08-05) — `2026-08-05-h43-postdeploy-0083.dump`
+    (489MB) 대상, dev box WSL 격리 PostGIS에서 5단계 전부 통과: 확장 4종
+    선생성 → `pg_restore`(예상 오류 1건만) → **manifest 완전 일치**(head
+    0083 · features/aliases/public 각 731,765 · pair_mismatch 0 · orphan
+    0) → replica 세션 우회로 alias 5건 결손 주입 → `missing_alias=5` 관측
+    검출 → 정본 재생성 replay → 4축 0·행수 원복.
+  - [x] restore 요령 고정 — `docs/backup-restore.md` **§10**(절차 5단계 +
+    함정: 확장 선생성 충돌 오류 1건이 정상, 컨테이너 `/dev/shm` 64MB로
+    73만행 병렬 집계 실패 → `max_parallel_workers_per_gather=0` 또는
+    `--shm-size`).
+  - [ ] 주기화 — "migration 동반 릴리스 뒤 + 최소 월 1회" 규약을 §10에
+    명문화했으나 실행 트리거(캘린더/자동화)는 미결선. H43 정기화
+    (manager #148)와 함께 묶는다.
 
 ## 이슈 종결 추적
 
@@ -560,6 +567,45 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   DB-side/bounded streaming Merkle materialization, receipt/material 공유, terminal audit item compaction,
   item/byte admission과 relation bytes/dead-tuple/vacuum metric을 1M+ synthetic/n150 soak로 검증한다.
 
+### T-VN-41F1J — C6c cancel-probe fixture 수명주기 복구
+
+> 2026-08-06 F1D의 `cancel=404`는 Manager/PinVi read·cancel relay 문제가 아니라, 정적
+> `KTDM_C6C_CANCEL_PROBE_JOB_ID`에 대응하는 Map import job이 없다는 실측으로 판정했다.
+> fixture 생성·소비·종결과 durable 상태는 Map이 소유하고, Manager는 service OpenAPI로
+> transaction ID만 전달한다. PinVi에는 기존 `ops:cancel` 외 권한을 주지 않는다(ADR-084).
+
+- [/] **T-VN-41F1J-A — Map fixture schema·service API·격리**
+
+  `ops.c6c_cancel_probe_fixtures`와 fixture 전용 repository/서비스 API를 추가한다. Map이
+  transaction ID마다 running/no-Dagster-run import job을 멱등 생성하고, 일반 PinVi 취소가
+  만든 canonical cancellation 뒤 consume/finalize를 원자적으로 기록한다. consumed/finalized
+  receipt에는 canonical unsafe outcome을 포함해 Manager response-loss 재개가 POST 재발송 없이
+  durable 증빙을 확정하게 한다. fixture kind는
+  worker·stale recovery·일반 ops read projection에서 제외하며, DB trigger로 fixture event
+  직접 삽입도 차단한다. `ops:fixture` token은
+  Docker Manager와 Map API에만 결박하며, Map/PinVi compatible pair capability generation을
+  fail-closed로 검증한다. 세부 계약은
+  [`architecture/c6c-cancel-probe-fixture.md`](architecture/c6c-cancel-probe-fixture.md)이다.
+  구현·DB/API 검증과 적대적 코드 리뷰 1인 재검토(GO)를 완료했다. 첫 CI에서
+  드러난 reserved-kind/ops event/lineage CTE/OpenAPI baseline의 정적 기대 4건도 새 격리
+  계약으로 보강했고, PR #960 재실행 CI gate와 merge만 남았다.
+
+- [ ] **T-VN-41F1J-B — Manager dynamic fixture orchestration** *(docker-manager 소유)*
+
+  candidate Map readiness 뒤 fixture ensure→PinVi cancel→정확한
+  `409 PIPELINE_CANCELLATION_UNSAFE` 검증→finalize를 F1D durable transaction receipt로
+  기록한다. 404/502/503/timeout은 성공으로 넓게 수용하지 않는다.
+
+- [ ] **T-VN-41F1J-C — compatible-pair 재결박** *(PinVi·docker-manager 소유)*
+
+  fixture service OpenAPI artifact와 capability generation을 Map/PinVi exact head/pinset에
+  재고정하고, 구 Map image나 route 미지원은 cutover 전에 fail-closed한다.
+
+- [ ] **T-VN-41F1J-D — n150 격리 리허설·prod live UI E2E** *(공동)*
+
+  새 pair에서 F1D를 한 번만 재개해 canonical `409` receipt, finalize, UI 상태를 확인하고
+  prod 최종 live UI E2E까지 통과한다. frozen 후보의 재시도는 이 선행 조건 전에는 금지한다.
+
 ## Wave 2 상세 — 구조 전환
 
 > 실행 순서는 31A~C(freeze) → 32~38(shadow, 두 lane 병렬) → 40 → 39(cutover 마지막)다.
@@ -615,8 +661,8 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 
 ### T-VN-35 — typed subtype 분해 (Lane A)
 
-> 2026-08-06 A-D 단일 PR로 종결(ADR-084). 원안 대비 **재해석 2건**이 있고, 근거는
-> 실측이다 — 아래 각 항에 적었다. 정본 설계는 `docs/adr/084-typed-feature-subtypes.md`.
+> 2026-08-06 A-D 단일 PR로 종결(ADR-085). 원안 대비 **재해석 2건**이 있고, 근거는
+> 실측이다 — 아래 각 항에 적었다. 정본 설계는 `docs/adr/085-typed-feature-subtypes.md`.
 
 - [x] T-VN-35A — **feature core·point subtype** → *배타 arc + place subtype*
 

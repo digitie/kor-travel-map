@@ -28,6 +28,7 @@ from kortravelmap.api.settings import ApiSettings
 ADMIN_PROXY_SECRET = "admin-proxy-secret-000000000000000000000000"
 OPS_READ_TOKEN = "read-token-00000000000000000000000000000000"
 OPS_CANCEL_TOKEN = "cancel-token-000000000000000000000000000000"
+OPS_FIXTURE_TOKEN = "fixture-token-00000000000000000000000000000"
 SERVICE_TOKEN = "service-token-0000000000000000000000000000"
 METRICS_TOKEN = "metrics-token-0000000000000000000000000000"
 CURSOR_SIGNING_SECRET = "cursor-signing-secret-000000000000000000000000"
@@ -45,6 +46,7 @@ _HERMETIC_ENV_VARS = (
     "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET",
     "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN",
     "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN",
+    "KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN",
     "KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED",
     "KOR_TRAVEL_MAP_API_SERVICE_TOKEN",
     "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET",
@@ -72,6 +74,7 @@ def _representative_settings(**overrides: object) -> ApiSettings:
         "admin_proxy_secret": ADMIN_PROXY_SECRET,
         "ops_read_token": OPS_READ_TOKEN,
         "ops_cancel_token": OPS_CANCEL_TOKEN,
+        "ops_fixture_token": OPS_FIXTURE_TOKEN,
         "service_token": SERVICE_TOKEN,
         "cursor_signing_secret": CURSOR_SIGNING_SECRET,
         "metrics_token": METRICS_TOKEN,
@@ -106,9 +109,7 @@ def test_all_routes_classified_and_registry_has_no_dead_entries() -> None:
     matrix = build_route_policy_matrix(app)
 
     mounted_paths = {row.path for row in matrix}
-    registry_paths = set(ROUTE_POLICIES) | {
-        app.state.settings.prometheus_metrics_path
-    }
+    registry_paths = set(ROUTE_POLICIES) | {app.state.settings.prometheus_metrics_path}
     # 미분류 route 0건은 build_route_policy_matrix가 이미 강제한다. 역방향:
     # registry에 있으나 전 surface 활성 구성에서도 mount되지 않는 dead entry는
     # route 삭제 시 registry 정리를 강제한다.
@@ -324,6 +325,8 @@ def test_service_policy_covers_feature_and_weather_batches() -> None:
     assert {row.path for row in service_rows} == {
         "/v1/features/batch",
         "/v1/features/weather/batch",
+        "/v1/ops/contract-fixtures/c6c-cancel-probe/{transaction_id}",
+        "/v1/ops/contract-fixtures/c6c-cancel-probe/{transaction_id}/finalize",
         "/v1/service/cache-target-event-acks",
         "/v1/service/cache-target-event-claims",
         "/v1/service/cache-target-event-dead-letters/{event_id}",
@@ -344,10 +347,13 @@ def test_service_policy_covers_feature_and_weather_batches() -> None:
         "/v1/service/refresh-requests/{request_id}",
     }
     for row in service_rows:
-        assert {
+        expected_enforcement = {
             "require_cache_target_service_principal",
             "require_service_token",
-        } & set(row.observed_enforcement)
+        }
+        if row.path.startswith("/v1/ops/contract-fixtures/"):
+            expected_enforcement = {"require_ops_fixture_principal"}
+        assert expected_enforcement & set(row.observed_enforcement)
 
 
 @pytest.mark.unit
@@ -367,23 +373,15 @@ def test_debug_policy_covers_interactive_docs_only() -> None:
 @pytest.mark.unit
 def test_mois_debug_route_is_operator_gated_and_disappears_with_debug_flag() -> None:
     matrix = build_route_policy_matrix(_representative_app())
-    mois = next(
-        row
-        for row in matrix
-        if row.path == "/v1/debug/mois-license/{license_id}"
-    )
+    mois = next(row for row in matrix if row.path == "/v1/debug/mois-license/{license_id}")
     assert mois.policy is RoutePolicy.OPERATOR
     assert mois.observed_enforcement == ("require_admin_frontend",)
 
     # ``debug_routes_enabled=False``는 ``/v1/debug/*``만 내린다. interactive docs
     # UI는 별도로 ``is_production``으로 gate되므로 local-dev에서는 그대로 남는다.
-    disabled_matrix = build_route_policy_matrix(
-        _representative_app(debug_routes_enabled=False)
-    )
+    disabled_matrix = build_route_policy_matrix(_representative_app(debug_routes_enabled=False))
     mounted_paths = {row.path for row in disabled_matrix}
-    debug_paths = {
-        row.path for row in disabled_matrix if row.policy is RoutePolicy.DEBUG
-    }
+    debug_paths = {row.path for row in disabled_matrix if row.policy is RoutePolicy.DEBUG}
     assert "/v1/debug/mois-license/{license_id}" not in mounted_paths
     assert {"/docs", "/redoc", "/docs/oauth2-redirect"} <= debug_paths
 
@@ -430,11 +428,7 @@ def test_docs_uis_absent_in_production_openapi_contract_kept() -> None:
 @pytest.mark.unit
 def test_public_unauthenticated_is_liveness_version_and_openapi_contract() -> None:
     matrix = build_route_policy_matrix(_representative_app())
-    paths = {
-        row.path
-        for row in matrix
-        if row.policy is RoutePolicy.PUBLIC_UNAUTHENTICATED
-    }
+    paths = {row.path for row in matrix if row.policy is RoutePolicy.PUBLIC_UNAUTHENTICATED}
     # D-1: interactive docs UI는 여기 없다(→ debug). 기계 판독 계약만 유지.
     assert paths == {"/health", "/version", "/openapi.json"}
     for row in matrix:

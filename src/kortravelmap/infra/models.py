@@ -6,7 +6,7 @@ ORM 인스턴스 read mapping 용도로도 사용 가능.
 
 구성:
 - ``features`` — kind 공통 core (ADR-012 ``coord_5179`` STORED generated column).
-  kind별 값과 선·면 geometry는 여기 없다 — subtype이 정본이다(ADR-084).
+  kind별 값과 선·면 geometry는 여기 없다 — subtype이 정본이다(ADR-085).
 - kind별 typed subtype 5종 — ``feature_places`` / ``feature_events`` /
   ``feature_notices`` / ``feature_routes`` / ``feature_areas``. core의
   ``UNIQUE (feature_id, kind)``를 kind 상수 CHECK + 복합 FK로 참조하는
@@ -30,7 +30,7 @@ ADR 참조
 - ADR-008 — extension은 ``x_extension`` schema 격리
 - ADR-012 — ``coord_5179`` STORED generated column (반경 검색 인덱스)
 - ADR-018 — Feature.detail은 kind별 Pydantic 모델 (자유 dict 금지)
-- ADR-084 — kind별 typed subtype 분해와 배타 arc
+- ADR-085 — kind별 typed subtype 분해와 배타 arc
 - ADR-019 — 모든 datetime ``TIMESTAMPTZ`` (KST aware)
 """
 
@@ -124,6 +124,7 @@ __all__ = [
     "DedupReviewQueueRow",
     "EnrichmentReviewQueueRow",
     "ImportJobRow",
+    "C6cCancelProbeFixtureRow",
     "ImportJobEventRow",
     "ImportJobEventClockRow",
     "OfflineUploadRow",
@@ -442,7 +443,7 @@ class FeatureRow(Base):
 # kind 변경이 FK 위반으로 막힌다. ``(feature_id, feature_uuid)`` 복합 FK는
 # 0083 ``feature_aliases`` 선례와 같은 identity 사본 일치 계약이다.
 #
-# T-VN-35(ADR-084 결정 4): core ``detail``/``geom``은 0086에서 **제거됐다**.
+# T-VN-35(ADR-085 결정 4): core ``detail``/``geom``은 0086에서 **제거됐다**.
 # kind별 값의 정본은 subtype 테이블이고, 응답용 ``detail``/``geom``은
 # ``feature.features_detailed`` 뷰가 조립한다 — 이 ORM 매핑은 core 컬럼만
 # 반영한다(뷰는 read 전용이라 매핑하지 않는다).
@@ -2677,6 +2678,66 @@ class ImportJobRow(Base):
         nullable=False,
         server_default=text("now()"),
     )
+
+
+# =============================================================================
+# ops.c6c_cancel_probe_fixtures  (ADR-085 / T-VN-41F1J)
+# =============================================================================
+
+
+class C6cCancelProbeFixtureRow(Base):
+    """Map이 소유하는 runless cancel-probe fixture의 durable receipt."""
+
+    __tablename__ = "c6c_cancel_probe_fixtures"
+    __table_args__ = (
+        CheckConstraint(
+            "state IN ('armed','consumed','finalized')",
+            name="ck_c6c_cancel_probe_fixtures_state",
+        ),
+        CheckConstraint(
+            "(state = 'armed' AND cancellation_id IS NULL "
+            " AND consumed_at IS NULL AND finalized_at IS NULL) OR "
+            "(state = 'consumed' AND cancellation_id IS NOT NULL "
+            " AND consumed_at IS NOT NULL AND finalized_at IS NULL) OR "
+            "(state = 'finalized' AND cancellation_id IS NOT NULL "
+            " AND consumed_at IS NOT NULL AND finalized_at IS NOT NULL "
+            " AND finalized_at >= consumed_at)",
+            name="ck_c6c_cancel_probe_fixtures_transition",
+        ),
+        ForeignKeyConstraint(
+            ["job_id"],
+            ["ops.import_jobs.job_id"],
+            name="fk_c6c_cancel_probe_fixtures_job",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["cancellation_id"],
+            ["ops.pipeline_cancellations.cancellation_id"],
+            name="fk_c6c_cancel_probe_fixtures_cancellation",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("job_id", name="uq_c6c_cancel_probe_fixtures_job"),
+        UniqueConstraint(
+            "cancellation_id",
+            name="uq_c6c_cancel_probe_fixtures_cancellation",
+        ),
+        {"schema": "ops"},
+    )
+
+    transaction_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        primary_key=True,
+    )
+    job_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    state: Mapped[str] = mapped_column(Text, nullable=False)
+    cancellation_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("clock_timestamp()"),
+    )
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finalized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 # =============================================================================

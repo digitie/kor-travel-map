@@ -143,7 +143,7 @@ async def test_loader_persists_promoted_and_skips_others(
     assert restaurant.kind == "place"
     assert restaurant.category == "02010100"
     assert restaurant.marker_color == "P-01"
-    # T-VN-35(ADR-084): place 값의 정본은 ``feature_places``다(core에 detail 없음).
+    # T-VN-35(ADR-085): place 값의 정본은 ``feature_places``다(core에 detail 없음).
     assert (
         await migrated_session.execute(
             text(

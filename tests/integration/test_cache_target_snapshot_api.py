@@ -113,6 +113,7 @@ async def test_snapshot_first_page_commits_for_next_request_session(
         _env_file=None,
         admin_proxy_secret=None,
         ops_cancel_token=None,
+        ops_fixture_token=None,
         ops_read_token=None,
         public_api_key_required=False,
         service_token=None,

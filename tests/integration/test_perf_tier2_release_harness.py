@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
 pytestmark = [pytest.mark.integration, pytest.mark.perf_gate]
 
-# T-VN-35(ADR-084): core에 ``detail``이 없다 — place 값은 subtype이 정본이므로
+# T-VN-35(ADR-085): core에 ``detail``이 없다 — place 값은 subtype이 정본이므로
 # seed도 core 다음에 ``feature_places``를 채운다.
 _CUSTOM_PUBLIC_FEATURES_SQL = """
 INSERT INTO feature.features (
@@ -185,7 +185,7 @@ async def test_batch_selector_excludes_notice_candidates(
     try:
         await _seed_custom_public_features(migrated_engine, rows=201)
         async with AsyncSession(migrated_engine) as session, session.begin():
-            # T-VN-35(ADR-084): subtype 행이 있는 동안 core kind 변경은 배타 arc
+            # T-VN-35(ADR-085): subtype 행이 있는 동안 core kind 변경은 배타 arc
             # FK가 막는다. kind 전환은 "옛 subtype 제거 → core kind → 새 subtype"
             # 순서로만 가능하다(그 순서 강제 자체가 이 재설계의 요점).
             await session.execute(

@@ -211,6 +211,7 @@ WITH status_counts AS (
     SELECT status, COUNT(*)::int AS count
     FROM ops.import_jobs
     WHERE quarantined_at IS NULL
+      AND kind <> 'c6c_cancel_probe'
     GROUP BY status
   ) s
 ),
@@ -234,6 +235,7 @@ active_jobs AS (
     FROM ops.import_jobs
     WHERE status IN ('queued', 'running')
       AND quarantined_at IS NULL
+      AND kind <> 'c6c_cancel_probe'
     ORDER BY created_at DESC, job_id DESC
     LIMIT 20
   ) j
@@ -251,6 +253,12 @@ event_stats AS (
     SELECT event_id, occurred_at
     FROM ops.import_job_events AS event
     WHERE event.quarantined_at IS NULL
+      AND EXISTS (
+        SELECT 1
+        FROM ops.import_jobs AS job
+        WHERE job.job_id = event.job_id
+          AND job.kind <> 'c6c_cancel_probe'
+      )
     ORDER BY occurred_at DESC, event_id DESC
     LIMIT 1
   ) AS latest
@@ -262,6 +270,7 @@ job_stats AS (
     MAX(finished_at) AS latest_job_finished_at
   FROM ops.import_jobs
   WHERE quarantined_at IS NULL
+    AND kind <> 'c6c_cancel_probe'
 )
 SELECT
   status_counts.counts_by_status,
@@ -296,6 +305,12 @@ recent AS (
   FROM ops.import_job_events AS event
   WHERE event.job_id = CAST(:job_id AS uuid)
     AND event.quarantined_at IS NULL
+    AND EXISTS (
+      SELECT 1
+      FROM ops.import_jobs AS job
+      WHERE job.job_id = event.job_id
+        AND job.kind <> 'c6c_cancel_probe'
+    )
   ORDER BY event.occurred_at DESC, event.event_id DESC
   LIMIT 5
 )

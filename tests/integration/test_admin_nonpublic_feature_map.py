@@ -78,7 +78,7 @@ async def _insert_feature(
             "user_deleted_at": user_deleted_at,
         },
     )
-    # T-VN-35(ADR-084): kind별 값·geometry의 정본은 subtype이다.
+    # T-VN-35(ADR-085): kind별 값·geometry의 정본은 subtype이다.
     await seed_feature_subtype(
         session, feature_id=feature_id, kind=kind, geom_wkt=geom_wkt
     )

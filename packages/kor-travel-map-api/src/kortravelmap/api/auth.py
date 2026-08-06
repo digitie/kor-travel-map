@@ -46,6 +46,7 @@ __all__ = [
     "CACHE_TARGET_CONSUMER_HEADER",
     "METRICS_AUTHORIZATION_SCHEME",
     "OPS_ACTOR",
+    "OPS_FIXTURE_ACTOR",
     "OPS_SCOPE_HEADER",
     "OPS_TOKEN_HEADER",
     "OPS_AUTH_ERROR_RESPONSES",
@@ -54,11 +55,13 @@ __all__ = [
     "AdminProxyContext",
     "CacheTargetServicePrincipalContext",
     "OpsOperatorContext",
+    "OpsFixtureContext",
     "require_cache_target_service_principal",
     "require_cache_target_service_scope",
     "require_admin_frontend",
     "require_metrics_token",
     "require_ops_operator",
+    "require_ops_fixture_principal",
     "require_service_token",
     "require_public_api_key",
     "require_admin_destructive_enabled",
@@ -71,6 +74,7 @@ ADMIN_PROXY_SECRET_HEADER = "X-Kor-Travel-Map-Admin-Proxy-Secret"
 CACHE_TARGET_CONSUMER_HEADER = "X-Kor-Travel-Map-Cache-Target-Consumer"
 METRICS_AUTHORIZATION_SCHEME = "Bearer"
 OPS_ACTOR = "service:pinvi"
+OPS_FIXTURE_ACTOR = "service:docker-manager"
 OPS_SCOPE_HEADER = "X-Kor-Travel-Map-Ops-Scope"
 OPS_TOKEN_HEADER = "X-Kor-Travel-Map-Ops-Token"
 PUBLIC_API_KEY_HEADER = "X-Kor-Travel-Map-Api-Key"
@@ -83,9 +87,7 @@ OPS_AUTH_ERROR_RESPONSES: dict[int | str, dict[str, object]] = {
     },
     403: {
         "model": ProblemDetail,
-        "description": (
-            "token 불일치 또는 token에 결박되지 않은 scope/method/exact path 요청"
-        ),
+        "description": ("token 불일치 또는 token에 결박되지 않은 scope/method/exact path 요청"),
     },
     422: {
         "model": ProblemDetail,
@@ -97,6 +99,12 @@ _OPS_CANCEL_PATH_PATTERN = re.compile(
     r"\A/v1/ops/pipeline/executions/import_job/"
     r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
     r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/cancel\Z"
+)
+_OPS_FIXTURE_PATH_PATTERN = re.compile(
+    r"\A/v1/ops/contract-fixtures/c6c-cancel-probe/"
+    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+    r"(?:/finalize)?\Z"
 )
 
 # auto_error=False — 토큰 미설정(opt-out) 환경에서 헤더가 없어도 통과시키기 위해
@@ -139,6 +147,13 @@ class AdminProxyContext:
 @dataclass(frozen=True, slots=True)
 class OpsOperatorContext:
     """ops route가 신뢰한 audit actor 컨텍스트."""
+
+    actor: str
+
+
+@dataclass(frozen=True, slots=True)
+class OpsFixtureContext:
+    """Docker Manager만 받는 C6c fixture service principal."""
 
     actor: str
 
@@ -265,14 +280,24 @@ def _ops_principal_is_enabled(settings: ApiSettings) -> bool:
     return (
         settings.ops_read_token is not None
         or settings.ops_cancel_token is not None
+        or settings.ops_fixture_token is not None
     )
 
 
 def _is_exact_import_job_cancel(request: Request) -> bool:
     return (
         request.method == "POST"
-        and _OPS_CANCEL_PATH_PATTERN.fullmatch(request.scope.get("path", ""))
-        is not None
+        and _OPS_CANCEL_PATH_PATTERN.fullmatch(request.scope.get("path", "")) is not None
+    )
+
+
+def _is_exact_c6c_fixture_path(request: Request) -> bool:
+    path = request.scope.get("path", "")
+    if _OPS_FIXTURE_PATH_PATTERN.fullmatch(path) is None:
+        return False
+    base_path = path.removesuffix("/finalize")
+    return (request.method in {"GET", "PUT"} and path == base_path) or (
+        request.method == "POST" and path.endswith("/finalize")
     )
 
 
@@ -301,10 +326,7 @@ def require_ops_operator(
     settings = _settings(request)
     # admin secret이 없는 개발 환경은 ops principal도 완전히 꺼졌을 때만
     # local-dev 호환을 유지한다. principal을 켠 순간 headerless BFF 우회는 닫힌다.
-    if (
-        settings.admin_proxy_secret is not None
-        or not _ops_principal_is_enabled(settings)
-    ):
+    if settings.admin_proxy_secret is not None or not _ops_principal_is_enabled(settings):
         frontend = resolve_admin_proxy_context(
             request,
             settings,
@@ -348,15 +370,9 @@ def require_ops_operator(
             f"{OPS_SCOPE_HEADER} 헤더가 유효하지 않습니다.",
         )
 
-    read_allowed = (
-        scope == "ops:read"
-        and read_matches
-        and request.method == "GET"
-    )
+    read_allowed = scope == "ops:read" and read_matches and request.method == "GET"
     cancel_allowed = (
-        scope == "ops:cancel"
-        and cancel_matches
-        and _is_exact_import_job_cancel(request)
+        scope == "ops:cancel" and cancel_matches and _is_exact_import_job_cancel(request)
     )
     if not read_allowed and not cancel_allowed:
         raise _ops_auth_error(
@@ -365,6 +381,57 @@ def require_ops_operator(
             "token에 결박된 scope, method와 exact path가 일치하지 않습니다.",
         )
     return OpsOperatorContext(actor=OPS_ACTOR)
+
+
+def require_ops_fixture_principal(
+    request: Request,
+    token: Annotated[str | None, Security(_ops_token_scheme)] = None,
+    scope: Annotated[
+        str | None,
+        Header(
+            alias=OPS_SCOPE_HEADER,
+            description=(
+                "C6c contract fixture service principal은 exact fixture route에서 "
+                "`ops:fixture`가 필수다. scope 문자열만으로는 권한이 되지 않는다."
+            ),
+        ),
+    ] = None,
+) -> OpsFixtureContext:
+    """Docker Manager fixture token의 scope/method/exact-path 결박을 검증한다."""
+
+    settings = _settings(request)
+    if token is None or token == "":
+        raise _ops_auth_error(
+            status.HTTP_401_UNAUTHORIZED,
+            "OPS_TOKEN_REQUIRED",
+            f"{OPS_TOKEN_HEADER} 헤더가 필요합니다.",
+        )
+    expected = settings.ops_fixture_token
+    if expected is None or not hmac.compare_digest(token, expected.get_secret_value()):
+        raise _ops_auth_error(
+            status.HTTP_403_FORBIDDEN,
+            "OPS_TOKEN_INVALID",
+            f"{OPS_TOKEN_HEADER} 헤더가 유효하지 않습니다.",
+        )
+    if scope is None or scope.strip() == "":
+        raise _ops_auth_error(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "OPS_SCOPE_REQUIRED",
+            f"{OPS_SCOPE_HEADER} 헤더가 필요합니다.",
+        )
+    if scope != "ops:fixture":
+        raise _ops_auth_error(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "OPS_SCOPE_INVALID",
+            f"{OPS_SCOPE_HEADER} 헤더가 유효하지 않습니다.",
+        )
+    if not _is_exact_c6c_fixture_path(request):
+        raise _ops_auth_error(
+            status.HTTP_403_FORBIDDEN,
+            "OPS_SCOPE_FORBIDDEN",
+            "token에 결박된 scope, method와 exact path가 일치하지 않습니다.",
+        )
+    return OpsFixtureContext(actor=OPS_FIXTURE_ACTOR)
 
 
 def service_token_matches(request: Request, token: str | None = None) -> bool:
@@ -450,10 +517,7 @@ async def require_cache_target_service_principal(
             "CACHE_TARGET_SERVICE_TOKEN_INVALID",
             f"{SERVICE_TOKEN_HEADER} 헤더가 유효하지 않습니다.",
         )
-    if (
-        asserted_consumer_id is not None
-        and asserted_consumer_id != principal.consumer_id
-    ):
+    if asserted_consumer_id is not None and asserted_consumer_id != principal.consumer_id:
         raise _cache_target_auth_error(
             status.HTTP_403_FORBIDDEN,
             "CACHE_TARGET_CONSUMER_FORBIDDEN",
@@ -557,8 +621,7 @@ def require_metrics_token(request: Request) -> None:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=(
-                    "production profile에서는 metrics token 없이 /metrics를 "
-                    "사용할 수 없습니다."
+                    "production profile에서는 metrics token 없이 /metrics를 사용할 수 없습니다."
                 ),
             )
         return
@@ -576,8 +639,7 @@ def require_metrics_token(request: Request) -> None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=(
-                f"유효한 Authorization: {METRICS_AUTHORIZATION_SCHEME} metrics "
-                "token이 필요합니다."
+                f"유효한 Authorization: {METRICS_AUTHORIZATION_SCHEME} metrics token이 필요합니다."
             ),
         )
 
@@ -588,8 +650,5 @@ def require_admin_destructive_enabled(request: Request) -> None:
     if not settings.admin_destructive_enabled:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=(
-                "파괴적 admin 작업이 비활성화되어 있습니다 "
-                "(admin_destructive_enabled=False)."
-            ),
+            detail=("파괴적 admin 작업이 비활성화되어 있습니다 (admin_destructive_enabled=False)."),
         )

@@ -75,7 +75,7 @@ class Feature(BaseModel):
 - `geom`: route/area feature의 선·면 geometry (WKT, EPSG:4326). **route/area 전용이자
   필수**이며, 그 외 kind는 `None`이어야 한다(좌표는 `coord`) — 어기면 ValidationError.
   저장 위치는 `feature.feature_routes.geom` / `feature.feature_areas.geom`
-  (ADR-084; core에는 geometry 컬럼이 없다). 좌표계 규약은 ADR-012.
+  (ADR-085; core에는 geometry 컬럼이 없다). 좌표계 규약은 ADR-012.
 - 모든 datetime: timezone aware (Asia/Seoul). naive datetime 입력은
   ValidationError (ADR-019).
 - `detail`: kind에 맞는 모델만 허용. dict 입력은 ValidationError (ADR-018).
@@ -515,7 +515,7 @@ DETAIL_MODELS: Final[dict[FeatureKind, type[BaseModel]]] = {
 DB 저장은 kind별 typed subtype 테이블
 (`feature.feature_places`/`feature_events`/`feature_notices`/`feature_routes`/
 `feature_areas`)이 맡고, 응답이 요구하는 `detail`은 뷰
-`feature.features_detailed`가 그 subtype에서 조립한다 (ADR-084).
+`feature.features_detailed`가 그 subtype에서 조립한다 (ADR-085).
 
 ## 20. 단위 테스트 매트릭스 (요약, 상세는 test-strategy)
 

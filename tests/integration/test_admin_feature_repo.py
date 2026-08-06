@@ -250,7 +250,7 @@ async def test_user_update_version_overrides_provider_reload(
             "road_name_code": "111104100001",
             "admin_dong_code": "1111051500",
             "urls": {"homepage": "https://example.test/user-feature"},
-            # T-VN-35(ADR-084): admin detail도 kind별 typed 컬럼으로 들어가므로
+            # T-VN-35(ADR-085): admin detail도 kind별 typed 컬럼으로 들어가므로
             # 필수 필드(place_kind)를 갖춘 shape이어야 한다. 자유 키는 payload로.
             "detail": {"place_kind": "attraction", "payload": {"note": "사용자 수정"}},
         },

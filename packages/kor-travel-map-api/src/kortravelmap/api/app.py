@@ -88,6 +88,7 @@ from kortravelmap.api.routers import (
     mois_detail_router,
     offline_uploads_router,
     ops_cache_target_streams_router,
+    ops_contract_fixtures_router,
     ops_datasets_router,
     ops_live_router,
     ops_logs_router,
@@ -185,12 +186,16 @@ _OPS_OBSERVABILITY_PATHS = frozenset(
 )
 _MOIS_DEBUG_PATH = "/v1/debug/mois-license/{license_id}"
 _OPS_CANCEL_PATH = "/v1/ops/pipeline/executions/import_job/{execution_id}/cancel"
+_OPS_FIXTURE_PATH_PREFIX = "/v1/ops/contract-fixtures/c6c-cancel-probe/"
 _ADMIN_BFF_SECURITY: list[dict[str, list[str]]] = [{"AdminBFF": []}]
 # service principal 대안은 OpsToken과 OpsScope를 AND로 함께 요구한다 — 런타임
 # 판정(require_ops_operator)이 token만으로는 통과시키지 않고 scope 헤더 누락을
 # 422로 거부하는 계약과 일치시킨다.
 _ADMIN_OR_OPS_SECURITY: list[dict[str, list[str]]] = [
     {"AdminBFF": []},
+    {"OpsToken": [], "OpsScope": []},
+]
+_OPS_FIXTURE_SECURITY: list[dict[str, list[str]]] = [
     {"OpsToken": [], "OpsScope": []},
 ]
 _PUBLIC_READ_SECURITY: list[dict[str, list[str]]] = [
@@ -241,9 +246,7 @@ def _build_problem_components() -> dict[str, Any]:
 
 
 _PROBLEM_COMPONENTS: dict[str, Any] = _build_problem_components()
-_PROBLEM_REQUIRED_FIELDS = frozenset(
-    {"type", "title", "status", "detail", "code", "request_id"}
-)
+_PROBLEM_REQUIRED_FIELDS = frozenset({"type", "title", "status", "detail", "code", "request_id"})
 
 
 def _declares_problem_schema(
@@ -298,9 +301,7 @@ def _augment_problem_responses(schema: dict[str, Any]) -> None:
     (``HTTPValidationError``)는 problem+json으로 대체하고, orphan이 되는 검증 schema는
     제거한다. 기존 응답의 ``description``은 보존한다.
     """
-    components: dict[str, Any] = schema.setdefault("components", {}).setdefault(
-        "schemas", {}
-    )
+    components: dict[str, Any] = schema.setdefault("components", {}).setdefault("schemas", {})
     components.update(_PROBLEM_COMPONENTS)
 
     paths = schema.get("paths", {})
@@ -370,7 +371,11 @@ def _apply_route_security_contract(
         RoutePolicy.SERVICE: [{"ServiceToken": []}],
     }
     for row in route_matrix:
-        security = public_security_by_policy.get(row.policy)
+        security = (
+            _OPS_FIXTURE_SECURITY
+            if row.schema_path.startswith(_OPS_FIXTURE_PATH_PREFIX)
+            else public_security_by_policy.get(row.policy)
+        )
         if security is None or row.is_websocket or not row.include_in_schema:
             continue
         path_item = paths.get(row.schema_path)
@@ -381,9 +386,7 @@ def _apply_route_security_contract(
             if not isinstance(operation, dict):
                 continue
             if security:
-                operation["security"] = [
-                    dict(requirement) for requirement in security
-                ]
+                operation["security"] = [dict(requirement) for requirement in security]
             else:
                 operation.pop("security", None)
 
@@ -404,9 +407,7 @@ def _apply_route_security_contract(
         for method, operation in path_item.items():
             if method not in _OPENAPI_HTTP_METHODS or not isinstance(operation, dict):
                 continue
-            service_capable = method == "get" or (
-                method == "post" and path == _OPS_CANCEL_PATH
-            )
+            service_capable = method == "get" or (method == "post" and path == _OPS_CANCEL_PATH)
             operation["security"] = (
                 _ADMIN_OR_OPS_SECURITY if service_capable else _ADMIN_BFF_SECURITY
             )
@@ -546,9 +547,7 @@ def _error_response(
         "detail": message,
         "code": code,
         "request_id": request_id,
-        "errors": details.get("errors", [])
-        if isinstance(details, Mapping)
-        else [],
+        "errors": details.get("errors", []) if isinstance(details, Mapping) else [],
     }
     if details not in ({}, None) and not (
         isinstance(details, Mapping) and set(details) == {"errors"}
@@ -698,8 +697,7 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
         meta = body.get("meta")
         original_request_id = (
             meta.get("request_id")
-            if isinstance(meta, Mapping)
-            and isinstance(meta.get("request_id"), str)
+            if isinstance(meta, Mapping) and isinstance(meta.get("request_id"), str)
             else None
         )
         headers = {
@@ -797,7 +795,7 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
     ) -> JSONResponse:
         """kind 계약과 맞지 않는 ``detail``은 서버 결함이 아니라 요청 결함이다.
 
-        typed subtype(T-VN-35, ADR-084) 도입 뒤 필수 필드 결측은 write 경계에서
+        typed subtype(T-VN-35, ADR-085) 도입 뒤 필수 필드 결측은 write 경계에서
         거부된다. 그 거부가 500으로 새면 **이미 접수된 change request**가 승인
         시점마다 500을 내며 영구히 적용 불가가 된다 — 무엇을 고쳐야 하는지도
         알려주지 않는다.
@@ -1059,6 +1057,10 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
             ops_cache_target_streams_router,
             prefix="/v1",
             dependencies=observability_dependencies,
+        )
+        application.include_router(
+            ops_contract_fixtures_router,
+            prefix="/v1",
         )
 
     # ADR-064 (T-ADM-C2/C6c) — canonical `/ops/datasets`는 기존 admin frontend와

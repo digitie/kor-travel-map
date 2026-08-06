@@ -572,7 +572,7 @@ async def test_f6_detects_same_day_opening_hours_conflict(
         )
     )
     await migrated_session.flush()
-    # T-VN-35(ADR-084): 영업시간 정본은 ``feature_places.business_hours``다.
+    # T-VN-35(ADR-085): 영업시간 정본은 ``feature_places.business_hours``다.
     await seed_feature_subtype(
         migrated_session,
         feature_id="f6-violation",

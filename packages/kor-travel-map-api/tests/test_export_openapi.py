@@ -424,6 +424,8 @@ def test_service_openapi_spec_contains_service_routes_and_prunes_user_routes() -
     assert set(service["paths"]) == {
         "/v1/features/batch",
         "/v1/features/weather/batch",
+        "/v1/ops/contract-fixtures/c6c-cancel-probe/{transaction_id}",
+        "/v1/ops/contract-fixtures/c6c-cancel-probe/{transaction_id}/finalize",
         "/v1/service/cache-target-event-acks",
         "/v1/service/cache-target-event-claims",
         "/v1/service/cache-target-event-dead-letters/{event_id}",
@@ -443,8 +445,14 @@ def test_service_openapi_spec_contains_service_routes_and_prunes_user_routes() -
         "/v1/service/refresh-requests",
         "/v1/service/refresh-requests/{request_id}",
     }
-    assert set(service["components"]["securitySchemes"]) == {"ServiceToken"}
+    assert set(service["components"]["securitySchemes"]) == {
+        "OpsScope",
+        "OpsToken",
+        "ServiceToken",
+    }
     service_only_paths = {
+        "/v1/ops/contract-fixtures/c6c-cancel-probe/{transaction_id}",
+        "/v1/ops/contract-fixtures/c6c-cancel-probe/{transaction_id}/finalize",
         "/v1/service/cache-target-reconciliations",
         "/v1/service/cache-target-reconciliations/{request_id}/completions",
         "/v1/service/cache-target-reconciliations/{request_id}/seals",
@@ -455,7 +463,10 @@ def test_service_openapi_spec_contains_service_routes_and_prunes_user_routes() -
         assert path not in module.user_openapi_spec(app.openapi(), app=app)["paths"]
         assert path in service["paths"]
     for path, method in module._openapi_operations(service):
-        assert service["paths"][path][method]["security"] == [{"ServiceToken": []}]
+        expected_security = [{"ServiceToken": []}]
+        if path.startswith("/v1/ops/contract-fixtures/"):
+            expected_security = [{"OpsToken": [], "OpsScope": []}]
+        assert service["paths"][path][method]["security"] == expected_security
 
     schemas = service["components"]["schemas"]
     assert "FeatureBatchResponse" in schemas
@@ -469,14 +480,12 @@ def test_service_openapi_spec_contains_service_routes_and_prunes_user_routes() -
     assert "서버 handoff 직전 최소 75분" in expires_description
     assert "client 수신 후 최소 60분" in expires_description
     assert "running" in expires_description
-    high_watermark_description = snapshot_data["properties"][
-        "high_watermark_cursor"
-    ]["description"]
+    high_watermark_description = snapshot_data["properties"]["high_watermark_cursor"]["description"]
     assert "replay lower-bound" in high_watermark_description
     assert "중복 허용" in high_watermark_description
-    snapshot_responses = service["paths"][
-        "/v1/service/cache-target-snapshots/{external_system}"
-    ]["get"]["responses"]
+    snapshot_responses = service["paths"]["/v1/service/cache-target-snapshots/{external_system}"][
+        "get"
+    ]["responses"]
     capacity_response = snapshot_responses["429"]
     retry_after_schema = capacity_response["headers"]["Retry-After"]["schema"]
     assert retry_after_schema == {"type": "integer", "minimum": 1, "maximum": 7_200}
@@ -503,18 +512,10 @@ def test_service_openapi_spec_contains_service_routes_and_prunes_user_routes() -
     assert {"type": "null"} in read_record["properties"]["target_id"]["anyOf"]
     assert {"type": "null"} in read_record["properties"]["entity_tag"]["anyOf"]
     assert {"type": "null"} in read_record["properties"]["target_sequence"]["anyOf"]
-    target_path = service["paths"][
-        "/v1/service/cache-targets/{external_system}/{target_key}"
-    ]
-    assert _refs(target_path["put"]["responses"]["200"]) == {
-        "CacheTargetSourceMutationResponse"
-    }
-    assert _refs(target_path["delete"]["responses"]["200"]) == {
-        "CacheTargetSourceMutationResponse"
-    }
-    assert _refs(target_path["get"]["responses"]["200"]) == {
-        "CacheTargetSourceReadResponse"
-    }
+    target_path = service["paths"]["/v1/service/cache-targets/{external_system}/{target_key}"]
+    assert _refs(target_path["put"]["responses"]["200"]) == {"CacheTargetSourceMutationResponse"}
+    assert _refs(target_path["delete"]["responses"]["200"]) == {"CacheTargetSourceMutationResponse"}
+    assert _refs(target_path["get"]["responses"]["200"]) == {"CacheTargetSourceReadResponse"}
     assert _refs(schemas["CacheTargetSourceMutationResponse"]["properties"]["data"]) == {
         "CacheTargetSourceMutationRecord"
     }
@@ -612,8 +613,11 @@ def test_public_security_matches_route_policy_in_full_and_user_specs() -> None:
         for path, method in module._openapi_operations(spec):
             policy = policies[path]
             operation = spec["paths"][path][method]
-            if policy in expected_security:
-                assert operation.get("security", []) == expected_security[policy], (
+            security = expected_security.get(policy)
+            if path.startswith("/v1/ops/contract-fixtures/"):
+                security = [{"OpsToken": [], "OpsScope": []}]
+            if security is not None:
+                assert operation.get("security", []) == security, (
                     path,
                     method,
                     policy,

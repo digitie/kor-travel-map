@@ -17,7 +17,7 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
-## 2026-08-06 (1) — T-VN-35 A-D: kind별 typed subtype 분해 (ADR-084)
+## 2026-08-06 (1) — T-VN-35 A-D: kind별 typed subtype 분해 (ADR-085)
 
 - `feature.features`의 `detail` JSONB·`geom`을 **제거**하고 kind별 typed
   subtype 5종(`feature_places`/`_events`/`_notices`/`_routes`/`_areas`)으로
@@ -62,7 +62,7 @@
 - 응답 스키마는 user·service **바이트 동일**. admin은 `AdminFeature*Request`의
   `geom` 제거(받아서 payload에 넣고 적용하지 않던 필드) + create description.
 - 배포 선행: orchestrator `.env`의 `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`를
-  `0086_route_area_subtypes`로 올려야 한다(안 올리면 api가 DB를 건드리기 전에
+  `0087_route_area_subtypes`로 올려야 한다(안 올리면 api가 DB를 건드리기 전에
   exit 1이고 dagster/daemon도 뜨지 않는다).
 - 문서에만 존재하던 테이블 5종(`feature_place_details` 등, 참조 0건)을 제거했다.
   `feature_places`가 실제로 생기면서 이름이 겹쳐 purge·복구 런북 SQL이 위험해졌다.
@@ -73,6 +73,91 @@
   `test_h35_exact_surface_network_free_rehearsal`도 main에서 같이 실패한다 —
   "외부 접속 없음" socket guard가 컨테이너 안 testcontainers의 bridge IP를
   외부로 판정한다(CI는 localhost라 무관).
+## 2026-08-06 (3) — T-VN-41F1J-A: response-loss 재개 증빙 보강
+
+Manager 적대적 리뷰가 PinVi cancel HTTP 응답이 유실된 뒤 Map `consumed` state를 읽어도 journal에
+기록하지 못해 재시도가 영구 정지하는 경계를 발견했다. Map lifecycle receipt의 capability generation을
+`2`로 올리고, `consumed`/`finalized`에서만 immutable `canonical_unsafe_outcome`(exact `409`, code,
+root job ID, cancellation ID)을 반환하도록 보강했다. 이 값은 fixture consume SQL이 canonical unsafe
+cancellation root/member/error를 확인한 뒤에만 존재하므로 Manager는 DB 접근이나 cancel POST 재발송 없이
+durable receipt를 확정하고 finalize를 재개할 수 있다.
+
+fixture integration 2건과 API auth/OpenAPI target 8건이 새 DTO 포함으로 통과했다. generated full/service
+OpenAPI와 admin TypeScript client type도 함께 재생성했다.
+
+후속 재리뷰에서 event audit의 fixture kind join이 ordered partial index를 포기하게 만들고, join을
+제거하면 raw SQL fixture event가 노출될 수 있음을 확인했다. 이를 읽기 예외로 우회하지 않고 migration
+`0084`의 DB trigger로 fixture job event의 INSERT/job ID 변경을 거부했다. application writer 거부와
+직접 SQL 제약을 함께 검증해 audit ordered partial-index 경로를 유지한다. `job_id` 단일 filter의
+PostgreSQL 비용 계획은 기존처럼 최대 64행 bounded sort를 허용하며, join 도입이나 무제한 sort는 허용하지 않는다.
+적대적 리뷰 1인은 새 trigger의 INSERT 책임과 기존 identity trigger의 job ID 불변 책임 분리,
+두 SQL 경계 통합 검증과 planner 상한을 재검토해 GO로 판정했다.
+
+PR CI가 검출한 `contracts/vnext/openapi-diff-v1.json`의 admin/service baseline SHA drift도
+현재 generated artifact와 immutable outcome route를 대조해 재고정했다. Wave 2 대상 diff의
+counts는 바꾸지 않았고 artifact fingerprint test 7건으로 freeze 갱신을 검증했다.
+
+## 2026-08-06 (2) — T-VN-41F1J-A: Map durable fixture 구현·검증
+
+- **수명주기/DB**: migration `0084_c6c_cancel_probe_fixtures`로 transaction ID를
+  PK로 하고 fixture job/canonical cancellation을 각각 유일 FK로 결박했다. `armed →
+  consumed → finalized` 전이와 시각은 CHECK로, 동시 ensure는 transaction advisory
+  lock으로 보장한다. 서비스 전 단계이므로 downgrade는 fixture 이력을 보전하지 않고
+  table을 제거하며, 백업·복원은 최종 schema에서만 검증한다.
+- **취소·격리**: 실제 PinVi cancel의 canonical
+  `PIPELINE_CANCELLATION_UNSAFE` terminal 기록 transaction 안에서만 fixture를
+  consume한다. fixture job은 일반 worker/claim/stale recovery/list projection에서
+  제외하되, cancellation resolver의 lineage에서는 보이도록 두어 정확한 409 검증을
+  방해하지 않는다. finalize는 cancellation history를 지우지 않고 job만 terminal로
+  닫는다.
+- **service 경계**: `ops:fixture` token과 `service:docker-manager` actor는
+  ensure·receipt·finalize exact path/method에만 결박했다. PinVi `ops:cancel`과
+  BFF/service token은 사용할 수 없다. full/service OpenAPI에는 audit 가능한 route를,
+  user artifact에는 제외하며 capability generation은 2다.
+- **리뷰 보강**: 적대적 리뷰 1인이 찾아낸 normal pipeline/ops/live event projection
+  누출과 Alembic metadata 드리프트를 수정했다. fixture event를 강제로 만든 회귀에서
+  generic event stream·live 최신 event·job별 live snapshot 모두 비노출이고, generic
+  event writer도 거부한다. C7 attestation은 fixture token의 cursor-secret 재사용도
+  거부한다. root env/API README도 3-token 계약으로 정정했다.
+- **검증**: Postgres migration을 포함한 fixture integration 2 passed, `alembic check`
+  clean, API auth 88 passed, settings/route/OpenAPI target과 export `--check`, strict
+  mypy·ruff·import-linter 통과. 적대적 코드 리뷰 1인은 차단/주요 이슈 없음으로
+  최종 판정했다. 첫 GitHub CI에서 확인된 정적 기대 4건(reserved kind, ops event
+  projection, cancellation lineage CTE, admin/service OpenAPI baseline)은 설계를
+  우회하지 않고 fixture 격리 계약을 직접 단언하도록 보강했으며 대상 회귀 5건이
+  통과했다.
+
+## 2026-08-06 (1) — T-VN-41F1J: Map-owned cancel-probe fixture 결정
+
+- **관측/판정**: 신뢰된 F1D 한 회차는 `login=200 → etl_summary=200 → provider_sync=200 →
+  cancel=404`까지 도달했다. 따라서 Manager runtime, PinVi 세션, read surface는 원인이
+  아니며, 설정된 정적 probe job UUID에 Map import job이 없었다. 후보를 다시 실행하지
+  않고 fixture lifecycle을 고친 뒤 새 pair에서 재개한다.
+- **결정**: fixture의 생성·상태·소비·종결은 Map 소유 DB와 전용 service OpenAPI가 소유한다.
+  Manager는 transaction ID만 보내고 동적 job ID를 받는다. PinVi는 보유한 `ops:cancel`로
+  보통 취소를 수행할 뿐 fixture 생성 권한을 얻지 않는다. `ops:fixture` token은
+  Map↔Manager 전용이며, generic worker/recovery/read projection은 fixture kind를 보지 않는다.
+- **검증 계약**: 취소 뒤 성공은 넓은 4xx/5xx가 아니라 정확한
+  `409 PIPELINE_CANCELLATION_UNSAFE` 하나다. 이 응답과 canonical cancellation history를
+  보존한 finalize까지 durable receipt로 남긴다. 상세는 ADR-084와
+  `architecture/c6c-cancel-probe-fixture.md`가 정본이다.
+
+## 2026-08-05 (13) — H43 배포 후 기준점·외부 사본 + H44 복원 드릴 1회차 완주
+
+- **H43**: 값 전환 배포 후 기준점 `2026-08-05-h43-postdeploy-0083.dump`
+  (489MB, manifest: head 0083 · features/aliases/public 각 731,765 ·
+  pair_mismatch 0 · orphan 0) 채취 + **dev box 외부 사본 첫 반출**
+  (`~/ktm-h43-external/`, sha256 대조 OK — 단일 host 사본 한계 첫 해소).
+  정기화·retention·자동 반출은 manager **#148** 기안(배포 직전 fence dump
+  관례 명문화 포함).
+- **H44 드릴 1회차 완주**: 격리 PostGIS(WSL)에서 확장 4종 선생성 →
+  `pg_restore`(확장 스키마 충돌 1건만 — 정상) → **manifest 완전 일치** →
+  `session_replication_role=replica`로 alias 5건 결손 주입 →
+  `missing_alias=5` 관측 검출 → 정본 재생성 replay → 4축 0·행수 원복.
+  절차·함정(확장 충돌 정상 오류, 컨테이너 `/dev/shm` 64MB 병렬 집계 실패)을
+  `docs/backup-restore.md` §10으로 고정, 주기 규약("migration 릴리스 뒤 +
+  월 1회") 명문화 — 실행 트리거만 잔여.
+- 부수: #956(live fixture 재표집)·#957(tasks 정리) 머지.
 
 ## 2026-08-05 (12) — live e2e fixture 재표집 (구표본 전멸 발견)
 

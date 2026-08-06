@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
@@ -17,12 +18,14 @@ from kortravelmap.api.auth import (
     ADMIN_ACTOR_HEADER,
     ADMIN_PROXY_SECRET_HEADER,
     OPS_ACTOR,
+    OPS_FIXTURE_ACTOR,
     OPS_SCOPE_HEADER,
     OPS_TOKEN_HEADER,
     PUBLIC_API_KEY_HEADER,
     SERVICE_TOKEN_HEADER,
     require_admin_destructive_enabled,
     require_admin_frontend,
+    require_ops_fixture_principal,
     require_ops_operator,
     require_service_token,
     resolve_admin_proxy_context,
@@ -32,18 +35,26 @@ from kortravelmap.api.settings import ApiSettings
 
 OPS_READ_TOKEN = "read-token-00000000000000000000000000000000"
 OPS_CANCEL_TOKEN = "cancel-token-000000000000000000000000000000"
+OPS_FIXTURE_TOKEN = "fixture-token-00000000000000000000000000000"
 
 
 def _api_settings(**overrides: Any) -> ApiSettings:
     values: dict[str, Any] = {
         "admin_proxy_secret": None,
         "ops_cancel_token": None,
+        "ops_fixture_token": None,
         "ops_read_token": None,
         "public_api_key_required": False,
         "service_token": None,
         "vworld_api_key": None,
     }
     values.update(overrides)
+    if (
+        values["ops_read_token"] is not None
+        and values["ops_cancel_token"] is not None
+        and "ops_fixture_token" not in overrides
+    ):
+        values["ops_fixture_token"] = OPS_FIXTURE_TOKEN
     return ApiSettings(**values)
 
 
@@ -150,11 +161,14 @@ def test_settings_reads_server_only_ops_principal_names(
 ) -> None:
     monkeypatch.setenv("KOR_TRAVEL_MAP_API_OPS_READ_TOKEN", OPS_READ_TOKEN)
     monkeypatch.setenv("KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN", OPS_CANCEL_TOKEN)
+    monkeypatch.setenv("KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN", OPS_FIXTURE_TOKEN)
     settings = ApiSettings(_env_file=None)
     assert settings.ops_read_token is not None
     assert settings.ops_cancel_token is not None
+    assert settings.ops_fixture_token is not None
     assert settings.ops_read_token.get_secret_value() == OPS_READ_TOKEN
     assert settings.ops_cancel_token.get_secret_value() == OPS_CANCEL_TOKEN
+    assert settings.ops_fixture_token.get_secret_value() == OPS_FIXTURE_TOKEN
 
 
 @pytest.mark.unit
@@ -169,14 +183,16 @@ def test_settings_rejects_removed_ops_actor_env(
 
 
 @pytest.mark.unit
-def test_settings_treats_two_empty_ops_tokens_as_disabled(
+def test_settings_treats_empty_ops_tokens_as_disabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("KOR_TRAVEL_MAP_API_OPS_READ_TOKEN", "")
     monkeypatch.setenv("KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN", "")
+    monkeypatch.setenv("KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN", "")
     settings = ApiSettings(_env_file=None)
     assert settings.ops_read_token is None
     assert settings.ops_cancel_token is None
+    assert settings.ops_fixture_token is None
 
 
 @pytest.mark.unit
@@ -270,12 +286,8 @@ def test_settings_rejects_ops_token_reuse_across_trust_boundaries(
         _api_settings(
             ops_read_token=read_token,
             ops_cancel_token=cancel_token,
-            admin_proxy_secret=(
-                SecretStr(admin_secret) if admin_secret is not None else None
-            ),
-            service_token=(
-                SecretStr(service_token) if service_token is not None else None
-            ),
+            admin_proxy_secret=(SecretStr(admin_secret) if admin_secret is not None else None),
+            service_token=(SecretStr(service_token) if service_token is not None else None),
         )
 
 
@@ -355,13 +367,9 @@ async def test_service_token_set_requires_match() -> None:
 
 @pytest.mark.unit
 def test_admin_destructive_kill_switch() -> None:
-    require_admin_destructive_enabled(
-        _request(_api_settings(admin_destructive_enabled=True))
-    )
+    require_admin_destructive_enabled(_request(_api_settings(admin_destructive_enabled=True)))
     with pytest.raises(HTTPException) as exc:
-        require_admin_destructive_enabled(
-            _request(_api_settings(admin_destructive_enabled=False))
-        )
+        require_admin_destructive_enabled(_request(_api_settings(admin_destructive_enabled=False)))
     assert exc.value.status_code == 403
 
 
@@ -495,8 +503,7 @@ def test_ops_cancel_token_is_bound_to_exact_import_job_cancel_route() -> None:
         # 여부가 달라도 실제 ASGI path에 결박된 권한 판정은 같아야 한다.
         route_path="/executions/import_job/{execution_id}/cancel",
         request_path=(
-            "/v1/ops/pipeline/executions/import_job/"
-            "11111111-1111-1111-1111-111111111111/cancel"
+            "/v1/ops/pipeline/executions/import_job/11111111-1111-1111-1111-111111111111/cancel"
         ),
         kind="import_job",
     )
@@ -512,8 +519,7 @@ def test_ops_cancel_token_is_bound_to_exact_import_job_cancel_route() -> None:
         method="POST",
         route_path="/executions/update_request/{execution_id}/cancel",
         request_path=(
-            "/v1/ops/pipeline/executions/update_request/"
-            "11111111-1111-1111-1111-111111111111/cancel"
+            "/v1/ops/pipeline/executions/update_request/11111111-1111-1111-1111-111111111111/cancel"
         ),
         kind="update_request",
     )
@@ -525,6 +531,51 @@ def test_ops_cancel_token_is_bound_to_exact_import_job_cancel_route() -> None:
         )
     assert exc.value.status_code == 403
     assert exc.value.detail["code"] == "OPS_SCOPE_FORBIDDEN"
+
+
+@pytest.mark.unit
+def test_ops_fixture_token_is_bound_to_exact_fixture_routes() -> None:
+    settings = _api_settings(
+        admin_proxy_secret=SecretStr("proxy-secret"),
+        ops_cancel_token=SecretStr(OPS_CANCEL_TOKEN),
+        ops_fixture_token=SecretStr(OPS_FIXTURE_TOKEN),
+        ops_read_token=SecretStr(OPS_READ_TOKEN),
+    )
+    fixture_path = "/v1/ops/contract-fixtures/c6c-cancel-probe/11111111-1111-1111-1111-111111111111"
+    for method, path in (
+        ("GET", fixture_path),
+        ("PUT", fixture_path),
+        ("POST", f"{fixture_path}/finalize"),
+    ):
+        context = require_ops_fixture_principal(
+            _ops_request(settings, method=method, request_path=path),
+            token=OPS_FIXTURE_TOKEN,
+            scope="ops:fixture",
+        )
+        assert context.actor == OPS_FIXTURE_ACTOR
+
+    for method, token, scope, path, expected_status, expected_code in (
+        ("GET", OPS_READ_TOKEN, "ops:fixture", fixture_path, 403, "OPS_TOKEN_INVALID"),
+        ("GET", OPS_FIXTURE_TOKEN, "ops:read", fixture_path, 422, "OPS_SCOPE_INVALID"),
+        ("DELETE", OPS_FIXTURE_TOKEN, "ops:fixture", fixture_path, 403, "OPS_SCOPE_FORBIDDEN"),
+        ("POST", OPS_FIXTURE_TOKEN, "ops:fixture", fixture_path, 403, "OPS_SCOPE_FORBIDDEN"),
+        (
+            "POST",
+            OPS_FIXTURE_TOKEN,
+            "ops:fixture",
+            "/v1/ops/pipeline/executions/import_job/11111111-1111-1111-1111-111111111111/cancel",
+            403,
+            "OPS_SCOPE_FORBIDDEN",
+        ),
+    ):
+        with pytest.raises(HTTPException) as exc:
+            require_ops_fixture_principal(
+                _ops_request(settings, method=method, request_path=path),
+                token=token,
+                scope=scope,
+            )
+        assert exc.value.status_code == expected_status
+        assert exc.value.detail["code"] == expected_code
 
 
 @pytest.mark.unit
@@ -647,6 +698,114 @@ def test_canonical_ops_read_accepts_bff_and_service_principal(
     )
     assert bff.status_code == 200
     assert service.status_code == 200
+
+
+@pytest.mark.unit
+def test_c6c_fixture_route_accepts_only_fixture_principal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.infra.c6c_cancel_probe_fixture_repo import (
+        C6cCancelProbeFixture,
+    )
+
+    from kortravelmap.api.routers import ops_contract_fixtures as router_module
+
+    fixture = C6cCancelProbeFixture(
+        transaction_id="11111111-1111-1111-1111-111111111111",
+        job_id="22222222-2222-2222-2222-222222222222",
+        state="armed",
+        cancellation_id=None,
+        created_at=datetime(2026, 8, 6, tzinfo=UTC),
+        consumed_at=None,
+        finalized_at=None,
+        canonical_unsafe_outcome=None,
+    )
+
+    async def _get(*_args: object, **_kwargs: object) -> C6cCancelProbeFixture:
+        return fixture
+
+    monkeypatch.setattr(router_module, "get_c6c_cancel_probe_fixture", _get)
+    client = _ops_client()
+    path = "/v1/ops/contract-fixtures/c6c-cancel-probe/" + fixture.transaction_id
+
+    fixture_response = client.get(
+        path,
+        headers={
+            OPS_SCOPE_HEADER: "ops:fixture",
+            OPS_TOKEN_HEADER: OPS_FIXTURE_TOKEN,
+        },
+    )
+    bff_response = client.get(
+        path,
+        headers={
+            ADMIN_ACTOR_HEADER: "frontend-admin",
+            ADMIN_PROXY_SECRET_HEADER: "proxy-secret",
+        },
+    )
+    read_response = client.get(
+        path,
+        headers={
+            OPS_SCOPE_HEADER: "ops:fixture",
+            OPS_TOKEN_HEADER: OPS_READ_TOKEN,
+        },
+    )
+
+    assert fixture_response.status_code == 200
+    assert fixture_response.json()["data"]["fixture"] == {
+        "transaction_id": fixture.transaction_id,
+        "job_id": fixture.job_id,
+        "state": "armed",
+        "cancellation_id": None,
+        "created_at": "2026-08-06T00:00:00Z",
+        "consumed_at": None,
+        "finalized_at": None,
+        "canonical_unsafe_outcome": None,
+        "capability_generation": 2,
+    }
+    assert (bff_response.status_code, bff_response.json()["code"]) == (
+        401,
+        "OPS_TOKEN_REQUIRED",
+    )
+    assert (read_response.status_code, read_response.json()["code"]) == (
+        403,
+        "OPS_TOKEN_INVALID",
+    )
+
+
+@pytest.mark.unit
+def test_c6c_fixture_receipt_exposes_only_canonical_unsafe_outcome() -> None:
+    from kortravelmap.infra.c6c_cancel_probe_fixture_repo import (
+        C6cCancelProbeCanonicalUnsafeOutcome,
+        C6cCancelProbeFixture,
+    )
+
+    from kortravelmap.api.routers import ops_contract_fixtures as router_module
+
+    fixture = C6cCancelProbeFixture(
+        transaction_id="11111111-1111-1111-1111-111111111111",
+        job_id="22222222-2222-2222-2222-222222222222",
+        state="consumed",
+        cancellation_id="33333333-3333-3333-3333-333333333333",
+        created_at=datetime(2026, 8, 6, tzinfo=UTC),
+        consumed_at=datetime(2026, 8, 6, 0, 1, tzinfo=UTC),
+        finalized_at=None,
+        canonical_unsafe_outcome=C6cCancelProbeCanonicalUnsafeOutcome(
+            http_status=409,
+            code="PIPELINE_CANCELLATION_UNSAFE",
+            root_job_id="22222222-2222-2222-2222-222222222222",
+            cancellation_id="33333333-3333-3333-3333-333333333333",
+        ),
+    )
+
+    record = router_module._record(fixture)
+
+    assert record.canonical_unsafe_outcome is not None
+    assert record.canonical_unsafe_outcome.model_dump(mode="json") == {
+        "http_status": 409,
+        "code": "PIPELINE_CANCELLATION_UNSAFE",
+        "root_job_id": fixture.job_id,
+        "cancellation_id": fixture.cancellation_id,
+    }
 
 
 @pytest.mark.unit
@@ -795,9 +954,7 @@ def test_openapi_declares_exact_canonical_ops_security_contract() -> None:
             if method not in {"get", "put", "post", "delete", "patch"}:
                 continue
             canonical_operations += 1
-            service_capable = method == "get" or (
-                method == "post" and path == cancel_path
-            )
+            service_capable = method == "get" or (method == "post" and path == cancel_path)
             # service 대안은 OpsToken+OpsScope AND 결합 — 런타임의 scope 헤더 필수
             # 판정(누락 422)과 선언이 일치해야 한다.
             assert operation["security"] == (
@@ -1189,15 +1346,10 @@ def test_auth_event_rejects_removed_body_actor_field() -> None:
 def test_destructive_admin_blocked_when_disabled() -> None:
     client = _client(_api_settings(admin_destructive_enabled=False))
     assert (
-        client.post(
-            "/v1/admin/features/f_x/deactivate", json={"reason": "test"}
-        ).status_code
-        == 403
+        client.post("/v1/admin/features/f_x/deactivate", json={"reason": "test"}).status_code == 403
     )
     assert (
-        client.request(
-            "DELETE", "/v1/admin/poi-cache-targets/external-app/key-1"
-        ).status_code
+        client.request("DELETE", "/v1/admin/poi-cache-targets/external-app/key-1").status_code
         == 403
     )
 
@@ -1212,10 +1364,7 @@ def test_destructive_disabled_by_default_returns_403(
     assert settings.admin_destructive_enabled is False
     client = _client(settings)
     assert (
-        client.post(
-            "/v1/admin/features/f_x/deactivate", json={"reason": "test"}
-        ).status_code
-        == 403
+        client.post("/v1/admin/features/f_x/deactivate", json={"reason": "test"}).status_code == 403
     )
 
 

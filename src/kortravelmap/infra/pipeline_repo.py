@@ -610,6 +610,7 @@ scoped_root_ids AS MATERIALIZED (
         FROM ops.import_jobs AS job
         WHERE job.job_id = seed.job_id
           AND job.quarantined_at IS NULL
+          AND job.kind <> 'c6c_cancel_probe'
         OFFSET 0
     ) AS root
     UNION
@@ -663,6 +664,7 @@ pipeline_jobs AS MATERIALIZED (
         FROM ops.import_jobs AS selected
         WHERE selected.root_id = sr.root_id
           AND selected.quarantined_at IS NULL
+          AND selected.kind <> 'c6c_cancel_probe'
         OFFSET 0
     ) AS job
 ),
@@ -1403,9 +1405,7 @@ async def list_pipeline_executions(
             if scope is not None
         )
     )
-    include_unscoped_scope = bool(
-        dataset_sync_scopes is not None and None in dataset_sync_scopes
-    )
+    include_unscoped_scope = bool(dataset_sync_scopes is not None and None in dataset_sync_scopes)
     filter_sync_scopes = dataset_sync_scopes is not None
     page_size = _limit(limit)
     filter_fingerprint = _filter_fingerprint(
@@ -1489,9 +1489,7 @@ def _row_to_dataset_execution(row: Any) -> PipelineDatasetLatestExecution:
     return PipelineDatasetLatestExecution(
         provider=str(row.selected_provider),
         dataset_key=str(row.selected_dataset_key),
-        sync_scope=(
-            str(row.selected_sync_scope) if row.selected_sync_scope is not None else None
-        ),
+        sync_scope=(str(row.selected_sync_scope) if row.selected_sync_scope is not None else None),
         execution=_row_to_execution(row),
         operation_member_id=str(row.selected_operation_member_id),
         pair_status=str(row.selected_pair_status),

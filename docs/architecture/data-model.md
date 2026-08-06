@@ -75,7 +75,7 @@ CREATE TABLE feature.features (
            ELSE ST_Transform(coord, 5179)
       END
     ) STORED,
-  -- 선·면 geometry는 core에 없다 — route/area subtype이 정본 (§6, ADR-084)
+  -- 선·면 geometry는 core에 없다 — route/area subtype이 정본 (§6, ADR-085)
 
   -- 주소 (kortravelmap.dto.Address 직렬화)
   address                      JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -97,7 +97,7 @@ CREATE TABLE feature.features (
 
   -- 상세
   -- kind별 detail도 core에 없다 — typed subtype이 정본이고, 응답이 요구하는
-  -- detail/geom은 feature.features_detailed 뷰가 조립한다 (§6, ADR-084)
+  -- detail/geom은 feature.features_detailed 뷰가 조립한다 (§6, ADR-085)
   raw_refs                     JSONB NOT NULL DEFAULT '[]'::jsonb,
   status                       TEXT NOT NULL DEFAULT 'active',      -- FeatureStatus enum
 
@@ -115,7 +115,7 @@ CREATE TABLE feature.features (
   updated_at                   TIMESTAMPTZ NOT NULL DEFAULT now(),
   deleted_at                   TIMESTAMPTZ,
 
-  CONSTRAINT uq_features_identity_kind UNIQUE (feature_id, kind),  -- subtype 배타 arc의 참조 대상 (ADR-084)
+  CONSTRAINT uq_features_identity_kind UNIQUE (feature_id, kind),  -- subtype 배타 arc의 참조 대상 (ADR-085)
   CONSTRAINT ck_features_kind   CHECK (kind IN ('place','event','notice','price','weather','route','area')),
   CONSTRAINT ck_features_status CHECK (status IN ('draft','active','inactive','hidden','broken','deleted')),
   CONSTRAINT ck_features_data_origin CHECK (data_origin IN ('provider','user_request')),
@@ -857,7 +857,7 @@ CREATE INDEX idx_feature_files_provider       ON feature.feature_files (provider
 
 ## 6. kind별 typed subtype 테이블
 
-kind별 값의 정본은 core가 아니라 typed subtype 테이블이다(ADR-084). core가
+kind별 값의 정본은 core가 아니라 typed subtype 테이블이다(ADR-085). core가
 `UNIQUE (feature_id, kind)`를 갖고 각 subtype이 kind 상수 CHECK + `(feature_id, kind)`
 복합 FK로 core를 참조하는 **배타 arc**이며, 여기서 두 성질이 구조적으로 따라온다 —
 ① 한 feature는 최대 한 subtype에만 존재한다(core kind가 단일 값이므로) ② subtype 행이
@@ -1031,7 +1031,7 @@ geometry 정본은 route/area subtype뿐이고 두 컬럼 모두 **NOT NULL**이
 
 응답이 요구하는 `detail`/`geom`은 뷰 `feature.features_detailed`가 core + subtype 5종에서
 조립한다. 조립 규칙이 한 곳에만 존재하고 writer는 subtype에만 쓴다. 아래는 구조 요약이고,
-kind별 `jsonb_build_object` 전문은 alembic `0086_route_area_subtypes`가 정본이다.
+kind별 `jsonb_build_object` 전문은 alembic `0087_route_area_subtypes`가 정본이다.
 
 ```sql
 CREATE VIEW feature.features_detailed AS
@@ -2176,6 +2176,50 @@ downgrade는 queued/running base row의 marker 또는 `in_progress`/`retryable` 
 있으면 실패해야 한다. terminal base row와 `completed`/`failed` 시도만 남았을 때 명시적
 운영 확인 후 테이블/컬럼을 제거하며, active marker를 조용히 drop해 worker를 재개시키는
 downgrade는 금지한다.
+
+#### 9.8.2a C6c cancel-probe fixture 수명주기 (T-VN-41F1J, ADR-085)
+
+C6c/F1D가 검증할 `running` + `dagster_run_id IS NULL` member는 provider workload에서
+우연히 얻지 않는다. Map이 fixture transaction ID마다 job을 만들고 canonical cancellation과
+연결한다. fixture lifecycle을 Manager 환경변수나 PinVi DB에 저장하면 Map cancellation marker와
+별개의 정본이 생기므로 금지한다.
+
+```sql
+CREATE TABLE ops.c6c_cancel_probe_fixtures (
+  transaction_id UUID PRIMARY KEY,
+  job_id UUID NOT NULL UNIQUE
+      REFERENCES ops.import_jobs(job_id) ON DELETE RESTRICT,
+  state TEXT NOT NULL CHECK (state IN ('armed', 'consumed', 'finalized')),
+  cancellation_id UUID UNIQUE
+      REFERENCES ops.pipeline_cancellations(cancellation_id) ON DELETE RESTRICT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  consumed_at TIMESTAMPTZ,
+  finalized_at TIMESTAMPTZ,
+  CHECK (
+    (state = 'armed' AND cancellation_id IS NULL
+      AND consumed_at IS NULL AND finalized_at IS NULL)
+    OR (state = 'consumed' AND cancellation_id IS NOT NULL
+      AND consumed_at IS NOT NULL AND finalized_at IS NULL)
+    OR (state = 'finalized' AND cancellation_id IS NOT NULL
+      AND consumed_at IS NOT NULL AND finalized_at IS NOT NULL
+      AND finalized_at >= consumed_at)
+  )
+);
+```
+
+`job_id`와 `cancellation_id`의 UNIQUE 제약이 두 FK의 lookup index를 겸한다. transaction
+ID PK 외에는 이 테이블을 scan하지 않으므로 추가 index를 만들지 않는다. `armed` 생성은
+`kind='c6c_cancel_probe'`, `status='running'`, `dagster_run_id=NULL`인 `ops.import_jobs` row와
+같은 transaction에서 일어난다. 기존 pipeline cancel은 marker/attempt/member/run을 만든 뒤
+fixture row를 `consumed`로 원자 전이한다. `finalized`는 이 canonical history를 보존하면서
+job만 fixture 전용 guarded write로 terminal `failed`로 닫는다.
+
+이 kind는 generic worker dispatch/claim, stale recovery, normal lifecycle mutation과
+canonical `ops:read` execution projection에서 제외한다. fixture API의 `PUT`은 transaction
+ID 멱등 키이고, `GET`과 `POST finalize`는 durable state만 보고 crash 뒤 다음 호출을
+결정한다. `consumed` state에서 cancel을 재발행하거나 `finalized` fixture를 re-arm하는 것은
+금지한다. API/auth/capability generation은
+[`c6c-cancel-probe-fixture.md`](c6c-cancel-probe-fixture.md)가 정본이다.
 
 ### 9.8.3 Canonical provider operation 계층 (T-ADM-C3e, 이슈 #679, alembic 0051)
 

@@ -1,4 +1,4 @@
-"""typed subtype 분해 ② — event·notice subtype (T-VN-35B, ADR-084).
+"""typed subtype 분해 ② — event·notice subtype (T-VN-35B, ADR-085).
 
 0084와 같은 배타 arc 패턴(kind 상수 CHECK + ``(feature_id, kind)`` 복합 FK +
 identity 사본 FK)을 event/notice에 적용하고, **시간 불변식을 DB 계약으로
@@ -44,8 +44,8 @@ from collections.abc import Sequence
 
 from alembic import op
 
-revision: str = "0085_event_notice_subtypes"
-down_revision: str | Sequence[str] | None = "0084_feature_place_subtype"
+revision: str = "0086_event_notice_subtypes"
+down_revision: str | Sequence[str] | None = "0085_feature_place_subtype"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

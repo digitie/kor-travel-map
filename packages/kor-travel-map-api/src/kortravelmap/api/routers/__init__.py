@@ -52,6 +52,9 @@ from kortravelmap.api.routers.features import (
 from kortravelmap.api.routers.mois_detail import router as mois_detail_router
 from kortravelmap.api.routers.offline_uploads import router as offline_uploads_router
 from kortravelmap.api.routers.ops import router as ops_router
+from kortravelmap.api.routers.ops_contract_fixtures import (
+    router as ops_contract_fixtures_router,
+)
 from kortravelmap.api.routers.ops_datasets import router as ops_datasets_router
 from kortravelmap.api.routers.ops_live import router as ops_live_router
 from kortravelmap.api.routers.ops_logs import router as ops_logs_router
@@ -86,6 +89,7 @@ __all__ = [
     "mois_detail_router",
     "offline_uploads_router",
     "ops_router",
+    "ops_contract_fixtures_router",
     "ops_cache_target_streams_router",
     "ops_datasets_router",
     "ops_live_router",

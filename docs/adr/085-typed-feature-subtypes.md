@@ -1,4 +1,4 @@
-# ADR-084: kind별 typed subtype 분해와 배타 arc
+# ADR-085: kind별 typed subtype 분해와 배타 arc
 
 - 상태: accepted
 - 날짜: 2026-08-06
@@ -137,7 +137,7 @@ notice 145 · price 97 · **route·area 0행**. `detail` 키는 kind별로 완�
 - 배포는 migration 동반이므로 NEW-5 규약을 따른다: api 먼저, **dagster/daemon
   이미지 재빌드 의무**(구세대 러닝 컨테이너는 다음 재시작에서 stale 판정).
   **선행 조건**: 배포 orchestrator의 `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`를
-  `0086_route_area_subtypes`로 올려야 한다. 이 값은 저장소 compose가 아니라
+  `0087_route_area_subtypes`로 올려야 한다. 이 값은 저장소 compose가 아니라
   orchestrator `.env`가 갖고(`docs/runbooks/docker-app.md`), api-entrypoint는
   이미지 head와 다르면 **DB를 건드리기 전에** 기동을 거부한다 — 안 올리면 api가
   exit 1이고 `depends_on: api service_healthy`인 dagster/daemon도 뜨지 않는다.

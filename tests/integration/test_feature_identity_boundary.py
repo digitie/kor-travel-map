@@ -78,7 +78,7 @@ def _place_bundle(feature_id: str, *, name: str = "identity 검증 장소") -> F
         coord=Coordinate(lon=126.9239, lat=37.5263),
         marker_icon="star",
         marker_color="P-03",
-        # T-VN-35(ADR-084): place subtype의 ``place_kind``는 NOT NULL이고 writer도
+        # T-VN-35(ADR-085): place subtype의 ``place_kind``는 NOT NULL이고 writer도
         # 결측을 거부한다(sentinel 폐기) — detail 없는 place는 더 이상 유효하지 않다.
         detail=PlaceDetail(feature_id=feature_id, place_kind="attraction"),
         created_at=_FETCHED,

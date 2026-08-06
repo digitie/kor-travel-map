@@ -1,4 +1,4 @@
-"""typed subtype 분해 ③ — route·area subtype + geometry 정본 이동 (T-VN-35C, ADR-084).
+"""typed subtype 분해 ③ — route·area subtype + geometry 정본 이동 (T-VN-35C, ADR-085).
 
 무엇이 달라지나
 ---------------
@@ -26,7 +26,7 @@ LEFT JOIN이 없는 행을 만들지 않는다. geometry를 쓰는 read(bbox
 
 ``parent_feature_id``/``sibling_group_id``는 **core에 남긴다** — prod 사용
 0행이고(실측), place도 장래 부모를 가질 수 있어 route/area 전용으로 내릴 근거가
-없다. 35C 원문의 "parent/sibling 관계"는 이 판단으로 종결한다(ADR-084 §결정).
+없다. 35C 원문의 "parent/sibling 관계"는 이 판단으로 종결한다(ADR-085 §결정).
 
 ``idx_features_geom_gist``는 core geom과 함께 사라지고, subtype 각각이 자기
 GiST 인덱스를 갖는다.
@@ -38,8 +38,8 @@ from collections.abc import Sequence
 
 from alembic import op
 
-revision: str = "0086_route_area_subtypes"
-down_revision: str | Sequence[str] | None = "0085_event_notice_subtypes"
+revision: str = "0087_route_area_subtypes"
+down_revision: str | Sequence[str] | None = "0086_event_notice_subtypes"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -409,7 +409,7 @@ def upgrade() -> None:
     )
     # ── 단일 정본 전환: core detail·geom 제거 ────────────────────────────
     #
-    # subtype이 kind별 값의 **유일한 정본**이 된다(shadow 병행 폐기 — ADR-084
+    # subtype이 kind별 값의 **유일한 정본**이 된다(shadow 병행 폐기 — ADR-085
     # 결정 4 개정). 이중 쓰기·drift 관측이라는 우회 복잡도가 통째로 사라지고,
     # "DB가 kind 계약을 모른다"는 문제의 뿌리(자유 JSONB)가 제거된다.
     #

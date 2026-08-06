@@ -396,7 +396,7 @@ async def measure_index_write_cost(
 # focused seed — public hot query만 겨냥한 features 분포 (self-contained)
 # ---------------------------------------------------------------------------
 
-# T-VN-35(ADR-084): core에 ``detail``이 없다. kind별 값은 subtype 5종이 정본이고
+# T-VN-35(ADR-085): core에 ``detail``이 없다. kind별 값은 subtype 5종이 정본이고
 # 응답 ``detail``은 ``features_detailed`` 뷰가 조립한다 — seed도 같은 구조를
 # 만들어야 planner가 운영과 같은 relation 분포를 본다(place/event subtype이
 # 비어 있으면 뷰 조인이 비현실적으로 싸진다).

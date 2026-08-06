@@ -5,7 +5,7 @@
   "baseline": {
     "admin": {
       "file": "packages/kor-travel-map-api/openapi.json",
-      "sha256": "5928fa39c915062703870780ab3484632ffa418f310c4260318d8c01b6713f9f"
+      "sha256": "9e09ad81c2f2a5a4131266597030bf97ed2ad8772241d9004492b8c8a5c10aaa"
     },
     "user": {
       "file": "packages/kor-travel-map-api/openapi.user.json",
@@ -13,14 +13,19 @@
     },
     "service": {
       "file": "packages/kor-travel-map-api/openapi.service.json",
-      "sha256": "c7838b20bd70bf333590cb440a705dd7e893f9e366078d6c11200d701d40bdcd"
+      "sha256": "6ad8c1c9c1d391c54e7592b64ed9f0225164b613a5c2824d8eafd3da9bd36f1e"
     }
   },
   "revisions": [
     {
       "date": "2026-08-06",
       "task": "T-VN-35",
-      "change": "baseline sha256 재고정(admin만 — user/service는 바이트 동일). typed subtype 분해(ADR-084)로 admin 요청 모델 두 곳이 바뀐다: ① AdminFeatureCreateRequest/AdminFeaturePatchRequest에서 `geom` 필드 제거 — admin mutation은 place/event만 다루고 geometry 정본은 route/area subtype뿐이라, 종전엔 값을 받아 change request payload에 넣기까지 하고 적용 단계에서 쓰지 않았다(계약이 아니라 거짓말인 필드). ② create의 description에 detail 계약 1줄(kind 계약 불일치·미상 키는 422, 생략 시 kind 기본값). 응답 shape·필드·필수성·enum 무변경이고 Wave 2 목표 diff 항목·counts도 무변경 — removed 대상은 응답 표면이지 요청 본문의 미적용 필드가 아니다."
+      "change": "baseline sha256 재고정(admin만 — user/service는 바이트 동일). typed subtype 분해(ADR-085)로 admin 요청 모델 두 곳이 바뀐다: ① AdminFeatureCreateRequest/AdminFeaturePatchRequest에서 `geom` 필드 제거 — admin mutation은 place/event만 다루고 geometry 정본은 route/area subtype뿐이라, 종전엔 값을 받아 change request payload에 넣기까지 하고 적용 단계에서 쓰지 않았다(계약이 아니라 거짓말인 필드). ② create의 description에 detail 계약 1줄(kind 계약 불일치·미상 키는 422, 생략 시 kind 기본값). 응답 shape·필드·필수성·enum 무변경이고 Wave 2 목표 diff 항목·counts도 무변경 — removed 대상은 응답 표면이지 요청 본문의 미적용 필드가 아니다."
+    },
+    {
+      "date": "2026-08-06",
+      "task": "T-VN-41F1J-A",
+      "change": "admin/service baseline sha256 재고정 — Map 전용 c6c_cancel_probe fixture의 exact route와 ops:fixture 권한, consumed/finalized의 immutable canonical unsafe outcome 표면이 추가됐다. user 표면에는 노출되지 않으며, 이 표면은 Wave 2 목표 REST diff의 대상이 아니므로 diff 항목·counts는 무변경이다."
     },
     {
       "date": "2026-08-04",

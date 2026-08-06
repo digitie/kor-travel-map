@@ -43,6 +43,7 @@ _CURSOR_PROTECTED_ENVS = {
     "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET",
     "KOR_TRAVEL_MAP_API_METRICS_TOKEN",
     "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN",
+    "KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN",
     "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN",
     "KOR_TRAVEL_MAP_API_SERVICE_TOKEN",
     "KOR_TRAVEL_MAP_API_VWORLD_API_KEY",
@@ -205,9 +206,8 @@ def verify_root_owned_orchestrator_snapshot(
     if not isinstance(attestation, dict):
         raise AttestationError("attestation shape")
     orchestrator_files = attestation.get("orchestrator_files")
-    if (
-        attestation.get("repository_commit") != expected_commit
-        or not _exact_dict(orchestrator_files, set(expected_files))
+    if attestation.get("repository_commit") != expected_commit or not _exact_dict(
+        orchestrator_files, set(expected_files)
     ):
         raise AttestationError("orchestrator file attestation shape")
     assert isinstance(orchestrator_files, dict)
@@ -221,9 +221,7 @@ def verify_root_owned_orchestrator_snapshot(
             raise AttestationError("orchestrator file attestation mismatch")
 
 
-def _public_origin(
-    raw: str, *, websocket: bool = False, require_root_path: bool = True
-) -> str:
+def _public_origin(raw: str, *, websocket: bool = False, require_root_path: bool = True) -> str:
     parsed = urlsplit(raw)
     if (
         parsed.scheme != "https"
@@ -253,14 +251,8 @@ def _public_origin(
     # IPv6 리터럴 host는 netloc 재구성 시 bracket으로 감싸야 `:port`와 모호하지 않다
     # (예: `2001:db8::1` + `:443` → `[2001:db8::1]:443`). 압축 canonical 형으로 정규화해
     # 동등한 IPv6 표기가 같은 origin으로 해시되게 한다. domain/IPv4는 무변경.
-    netloc_host = (
-        f"[{address.compressed}]"
-        if isinstance(address, ipaddress.IPv6Address)
-        else host
-    )
-    return urlunsplit(
-        ("wss" if websocket else "https", f"{netloc_host}{port}", "", "", "")
-    )
+    netloc_host = f"[{address.compressed}]" if isinstance(address, ipaddress.IPv6Address) else host
+    return urlunsplit(("wss" if websocket else "https", f"{netloc_host}{port}", "", "", ""))
 
 
 def _canonical_graphql(raw: str) -> str:
@@ -328,13 +320,15 @@ def _validate_pair(value: object) -> None:
         image_id = value[field]
         if not isinstance(image_id, str) or IMAGE_PATTERN.fullmatch(image_id) is None:
             raise AttestationError("pair image")
-    if not isinstance(value["map_source_revision"], str) or COMMIT_PATTERN.fullmatch(
-        value["map_source_revision"]
-    ) is None:
+    if (
+        not isinstance(value["map_source_revision"], str)
+        or COMMIT_PATTERN.fullmatch(value["map_source_revision"]) is None
+    ):
         raise AttestationError("Map source revision")
-    if not isinstance(value["pinvi_source_revision"], str) or COMMIT_PATTERN.fullmatch(
-        value["pinvi_source_revision"]
-    ) is None:
+    if (
+        not isinstance(value["pinvi_source_revision"], str)
+        or COMMIT_PATTERN.fullmatch(value["pinvi_source_revision"]) is None
+    ):
         raise AttestationError("PinVi source revision")
     generation = value["contract_generation"]
     if not isinstance(generation, str) or GENERATION_PATTERN.fullmatch(generation) is None:
@@ -386,12 +380,9 @@ def verify_runtime_attestation_payloads(
         raise AttestationError("attestation shape")
     assert isinstance(attestation, dict)
     orchestrator_files = attestation["orchestrator_files"]
-    if (
-        not _exact_dict(orchestrator_files, set(ORCHESTRATOR_PATHS))
-        or not all(
-            isinstance(value, str) and SHA256_PATTERN.fullmatch(value)
-            for value in orchestrator_files.values()
-        )
+    if not _exact_dict(orchestrator_files, set(ORCHESTRATOR_PATHS)) or not all(
+        isinstance(value, str) and SHA256_PATTERN.fullmatch(value)
+        for value in orchestrator_files.values()
     ):
         raise AttestationError("orchestrator file attestation")
 
@@ -414,9 +405,10 @@ def verify_runtime_attestation_payloads(
         "machine_id_sha256",
         "ui_origin_sha256",
     }:
-        if not isinstance(attestation[key], str) or SHA256_PATTERN.fullmatch(
-            attestation[key]
-        ) is None:
+        if (
+            not isinstance(attestation[key], str)
+            or SHA256_PATTERN.fullmatch(attestation[key]) is None
+        ):
             raise AttestationError("attestation hash")
     if (
         not isinstance(attestation["repository_commit"], str)
@@ -452,9 +444,7 @@ def verify_runtime_attestation_payloads(
         "api_ws_origin_sha256": _sha256_text(
             _public_origin(environ["NEXT_PUBLIC_KOR_TRAVEL_MAP_API"], websocket=True)
         ),
-        "dagster_graphql_url_sha256": _sha256_text(
-            _canonical_graphql(environ["E2E_DAGSTER_URL"])
-        ),
+        "dagster_graphql_url_sha256": _sha256_text(_canonical_graphql(environ["E2E_DAGSTER_URL"])),
         "hostname_sha256": _sha256_text(hostname.rstrip(".").lower()),
         "machine_id_sha256": _sha256_text(machine_id),
         "ui_origin_sha256": _sha256_text(_public_origin(environ["E2E_BASE_URL"])),
@@ -603,9 +593,7 @@ def verify_runtime_attestation_payloads(
         raise AttestationError("executor inspect")
     executor = executor_records[0]
     executor_config = executor.get("Config")
-    executor_labels = (
-        executor_config.get("Labels") if isinstance(executor_config, dict) else None
-    )
+    executor_labels = executor_config.get("Labels") if isinstance(executor_config, dict) else None
     if (
         executor.get("Id") != environ["E2E_C7_PLAYWRIGHT_IMAGE"]
         or not isinstance(executor_labels, dict)

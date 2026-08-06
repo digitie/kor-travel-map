@@ -141,7 +141,7 @@ CONSISTENCY_CASES: Final[tuple[CaseSpec, ...]] = (
         severity="ERROR",
         description=(
             "subtype 행 결측 (subtype-bearing kind인데 typed subtype 행이 없음, "
-            "ADR-084)"
+            "ADR-085)"
         ),
         # T-VN-35: 종전 축("detail JSONB가 비어 있음")은 core detail이 사라져
         # 성립하지 않는다. 조립 뷰는 subtype 행이 없어도 NULL 필드로 채운

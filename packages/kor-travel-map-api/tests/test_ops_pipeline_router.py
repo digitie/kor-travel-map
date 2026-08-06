@@ -78,6 +78,7 @@ from kortravelmap.api.settings import ApiSettings
 _NOW = datetime(2026, 7, 14, 9, 0, tzinfo=UTC)
 _OPS_READ_TOKEN = "read-token-00000000000000000000000000000000"
 _OPS_CANCEL_TOKEN = "cancel-token-000000000000000000000000000000"
+_OPS_FIXTURE_TOKEN = "fixture-token-00000000000000000000000000000"
 
 _PIPELINE_PATHS = [
     "/v1/ops/pipeline/overview",
@@ -993,6 +994,7 @@ def test_exact_import_job_cancel_uses_server_actor_and_cancel_token(
             admin_proxy_secret=None,
             ops_read_token=_OPS_READ_TOKEN,
             ops_cancel_token=_OPS_CANCEL_TOKEN,
+            ops_fixture_token=_OPS_FIXTURE_TOKEN,
             dagster_url="http://dagster.example:12302",
             dagster_allowed_hosts=["dagster.example"],
         )
@@ -1085,6 +1087,7 @@ def test_service_principal_rejects_non_bound_mutations(
             admin_proxy_secret=None,
             ops_read_token=_OPS_READ_TOKEN,
             ops_cancel_token=_OPS_CANCEL_TOKEN,
+            ops_fixture_token=_OPS_FIXTURE_TOKEN,
         )
     )
     service_client = TestClient(app, client=("198.51.100.10", 50000))

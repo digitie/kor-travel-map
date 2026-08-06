@@ -130,7 +130,7 @@ def _place_bundle(
         coord=Coordinate(lon=lon, lat=lat),
         marker_icon="star",
         marker_color="P-03",
-        # T-VN-35(ADR-084): place subtype ``place_kind``는 NOT NULL이다.
+        # T-VN-35(ADR-085): place subtype ``place_kind``는 NOT NULL이다.
         detail=PlaceDetail(feature_id=feature_id, place_kind="attraction"),
         created_at=_FETCHED,
         updated_at=_FETCHED,
@@ -244,6 +244,7 @@ def _api_settings() -> ApiSettings:
         _env_file=None,
         admin_proxy_secret=None,
         ops_cancel_token=None,
+        ops_fixture_token=None,
         ops_read_token=None,
         public_api_key_required=False,
         service_token=None,

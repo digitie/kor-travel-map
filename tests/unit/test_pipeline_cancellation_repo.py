@@ -15,6 +15,7 @@ from kortravelmap.infra.pipeline_cancellation_repo import (
     PipelineCancellationAttempt,
 )
 from kortravelmap.infra.pipeline_lineage import (
+    PIPELINE_CANCELLATION_LINEAGE_CTES_SQL,
     PIPELINE_LINEAGE_BODY_SQL,
     PIPELINE_LINEAGE_CTES_SQL,
 )
@@ -67,7 +68,11 @@ def test_pipeline_projection_and_cancellation_share_lineage_body() -> None:
     assert PIPELINE_LINEAGE_BODY_SQL in pipeline_repo._LIST_EXECUTIONS_SQL
     assert PIPELINE_LINEAGE_BODY_SQL in pipeline_repo._GET_EXECUTION_SQL
     assert PIPELINE_LINEAGE_CTES_SQL in pipeline_repo._LIST_ALL_EXECUTIONS_SQL
-    assert PIPELINE_LINEAGE_CTES_SQL in pipeline_cancellation_repo._RESOLVE_SCOPE_SQL
+    assert (
+        PIPELINE_CANCELLATION_LINEAGE_CTES_SQL
+        in pipeline_cancellation_repo._RESOLVE_SCOPE_SQL
+    )
+    assert PIPELINE_LINEAGE_CTES_SQL not in pipeline_cancellation_repo._RESOLVE_SCOPE_SQL
     assert "payload" not in PIPELINE_LINEAGE_CTES_SQL
     # ADR-077: scoped source는 재귀 scoped_jobs 대신 root_id로 좁힌 scoped_root_ids를 쓴다.
     assert "scoped_root_ids" in pipeline_repo._LIST_EXECUTIONS_SQL

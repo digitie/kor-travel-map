@@ -244,7 +244,7 @@ commit/rollback은 caller.
 
 `features_in_bounds(kinds=[event])` 쿼리가 `idx_features_kind_category` 사용 확인.
 행사 기간 필터는 subtype 인덱스 `idx_feature_events_period`
-(`feature.feature_events (starts_on, ends_on)`, ADR-084)를 탄다.
+(`feature.feature_events (starts_on, ends_on)`, ADR-085)를 탄다.
 
 ## 10. 후속
 

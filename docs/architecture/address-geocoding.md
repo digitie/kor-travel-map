@@ -315,7 +315,7 @@ await load_feature_rows(
 2. 각 `Feature`의 `coord`가 있고 `address.legal_dong_code` 없으면 reverse 호출
 3. 결과를 `features.address`, `features.legal_dong_code` 등에 반영
 4. `AddressMatchReport`는 kind subtype의 `payload.address_enrichment`에 저장
-   (조회는 `feature.features_detailed`가 조립한 `detail`, ADR-084)
+   (조회는 `feature.features_detailed`가 조립한 `detail`, ADR-085)
 5. **`feature_id`는 재계산하지 않는다** — provider normalize 단계에서 정해진
    값을 따른다 (ADR-009 결정성 보장)
 

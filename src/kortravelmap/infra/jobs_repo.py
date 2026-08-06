@@ -37,6 +37,7 @@ from typing import TYPE_CHECKING, Any, Final, cast
 from sqlalchemy import text
 
 from kortravelmap.core.feature_operation import (
+    C6C_CANCEL_PROBE_JOB_KIND,
     FEATURE_OPERATION_RESERVED_KINDS,
     FEATURE_UPDATE_REQUEST_JOB_KIND,
     TRIGGER_KIND_VALUES,
@@ -87,12 +88,11 @@ IMPORT_QUEUE_ADVISORY_KEY: Final[str] = "kortravelmap:import_jobs:claim"
 DEFAULT_STALE_AFTER: Final[timedelta] = timedelta(minutes=5)
 
 _FINISHED_STATES: Final[frozenset[str]] = frozenset({"done", "failed", "cancelled"})
-_EVENT_LEVELS: Final[frozenset[str]] = frozenset(
-    {"debug", "info", "warning", "error", "critical"}
-)
-_GENERIC_IMPORT_RESERVED_KINDS: Final[frozenset[str]] = (
-    FEATURE_OPERATION_RESERVED_KINDS | {FEATURE_UPDATE_REQUEST_JOB_KIND}
-)
+_EVENT_LEVELS: Final[frozenset[str]] = frozenset({"debug", "info", "warning", "error", "critical"})
+_GENERIC_IMPORT_RESERVED_KINDS: Final[frozenset[str]] = FEATURE_OPERATION_RESERVED_KINDS | {
+    FEATURE_UPDATE_REQUEST_JOB_KIND,
+    C6C_CANCEL_PROBE_JOB_KIND,
+}
 
 _RETURN_COLUMNS: Final[str] = (
     "job_id, kind, load_batch_id, parent_job_id, payload, status, progress, "
@@ -182,9 +182,7 @@ def _row_to_job(row: Any) -> ImportJob:
         dataset_key=row.dataset_key,
         sync_scope=row.sync_scope,
         trigger_kind=(
-            cast(TriggerKind, row.trigger_kind)
-            if row.trigger_kind is not None
-            else None
+            cast(TriggerKind, row.trigger_kind) if row.trigger_kind is not None else None
         ),
         operation_registry_version=row.operation_registry_version,
         dagster_run_status=row.dagster_run_status,
@@ -192,9 +190,7 @@ def _row_to_job(row: Any) -> ImportJob:
         finished_at=row.finished_at,
         heartbeat_at=row.heartbeat_at,
         created_at=row.created_at,
-        cancellation_id=(
-            str(row.cancellation_id) if row.cancellation_id is not None else None
-        ),
+        cancellation_id=(str(row.cancellation_id) if row.cancellation_id is not None else None),
         cancellation_requested_at=row.cancellation_requested_at,
         cancellation_requested_by=row.cancellation_requested_by,
         cancellation_reason=row.cancellation_reason,
@@ -292,6 +288,7 @@ SELECT
 FROM ops.import_jobs
 WHERE job_id = CAST(:job_id AS uuid)
   AND quarantined_at IS NULL
+  AND kind <> 'c6c_cancel_probe'
   AND (
     (CAST(:provider AS text) IS NULL AND CAST(:dataset_key AS text) IS NULL)
     OR (
@@ -320,7 +317,8 @@ WHERE job_id = CAST(:job_id AS uuid)
   AND cancellation_id IS NULL
   AND quarantined_at IS NULL
   AND kind NOT IN (
-    'provider_feature_load_run','provider_feature_load','feature_update_request'
+    'provider_feature_load_run','provider_feature_load','feature_update_request',
+    'c6c_cancel_probe'
   )
 RETURNING {_RETURN_COLUMNS}
 """
@@ -332,7 +330,8 @@ WHERE job_id = CAST(:job_id AS uuid)
   AND cancellation_id IS NULL
   AND quarantined_at IS NULL
   AND kind NOT IN (
-    'provider_feature_load_run','provider_feature_load','feature_update_request'
+    'provider_feature_load_run','provider_feature_load','feature_update_request',
+    'c6c_cancel_probe'
   )
   AND status IN ('queued','running')
   AND (dagster_run_id IS NULL OR dagster_run_id = :dagster_run_id)
@@ -365,7 +364,8 @@ eligible AS (
         FROM ops.import_jobs
         WHERE job_id IN (SELECT job_id FROM ids)
           AND kind IN (
-            'provider_feature_load_run','provider_feature_load','feature_update_request'
+            'provider_feature_load_run','provider_feature_load','feature_update_request',
+            'c6c_cancel_probe'
           )
       )
       AND EXISTS (
@@ -375,7 +375,8 @@ eligible AS (
           AND parent.cancellation_id IS NULL
           AND parent.quarantined_at IS NULL
           AND parent.kind NOT IN (
-            'provider_feature_load_run','provider_feature_load','feature_update_request'
+            'provider_feature_load_run','provider_feature_load','feature_update_request',
+            'c6c_cancel_probe'
           )
       ) AS allowed
 )
@@ -397,7 +398,8 @@ WHERE job_id = (
       AND cancellation_id IS NULL
       AND quarantined_at IS NULL
       AND kind NOT IN (
-        'provider_feature_load_run','provider_feature_load','feature_update_request'
+        'provider_feature_load_run','provider_feature_load','feature_update_request',
+        'c6c_cancel_probe'
       )
     ORDER BY created_at, queue_sequence
     FOR UPDATE SKIP LOCKED
@@ -416,7 +418,8 @@ WHERE job_id = :job_id
   AND cancellation_id IS NULL
   AND quarantined_at IS NULL
   AND kind NOT IN (
-    'provider_feature_load_run','provider_feature_load','feature_update_request'
+    'provider_feature_load_run','provider_feature_load','feature_update_request',
+    'c6c_cancel_probe'
   )
 RETURNING {_RETURN_COLUMNS}
 """
@@ -433,7 +436,8 @@ WHERE job_id = :job_id
   AND cancellation_id IS NULL
   AND quarantined_at IS NULL
   AND kind NOT IN (
-    'provider_feature_load_run','provider_feature_load','feature_update_request'
+    'provider_feature_load_run','provider_feature_load','feature_update_request',
+    'c6c_cancel_probe'
   )
 RETURNING {_RETURN_COLUMNS}
 """
@@ -448,7 +452,8 @@ WHERE job_id = CAST(:job_id AS uuid)
   AND cancellation_id IS NULL
   AND quarantined_at IS NULL
   AND kind NOT IN (
-    'provider_feature_load_run','provider_feature_load','feature_update_request'
+    'provider_feature_load_run','provider_feature_load','feature_update_request',
+    'c6c_cancel_probe'
   )
 RETURNING {_RETURN_COLUMNS}
 """
@@ -465,7 +470,8 @@ WHERE status = 'running'
   AND cancellation_id IS NULL
   AND quarantined_at IS NULL
   AND kind NOT IN (
-    'provider_feature_load_run','provider_feature_load','feature_update_request'
+    'provider_feature_load_run','provider_feature_load','feature_update_request',
+    'c6c_cancel_probe'
   )
   AND (
     CAST(:stale_seconds AS double precision) IS NULL
@@ -486,7 +492,8 @@ FROM ops.import_jobs
 WHERE job_id IN (SELECT job_id FROM ids)
   AND (
     kind IN (
-      'provider_feature_load_run','provider_feature_load','feature_update_request'
+      'provider_feature_load_run','provider_feature_load','feature_update_request',
+      'c6c_cancel_probe'
     )
     OR quarantined_at IS NOT NULL
   )
@@ -527,9 +534,7 @@ def _optional_dagster_run_id(value: str | None) -> str | None:
     return value
 
 
-async def assert_generic_import_job_targets(
-    session: AsyncSession, job_ids: Sequence[str]
-) -> None:
+async def assert_generic_import_job_targets(session: AsyncSession, job_ids: Sequence[str]) -> None:
     if not job_ids:
         return
     row = (
@@ -833,6 +838,8 @@ async def record_import_job_event(
     job = await get_import_job(session, job_id)
     if job is None:
         return None
+    if job.kind == C6C_CANCEL_PROBE_JOB_KIND:
+        return None
     explicit_pair = None
     if provider is not None or dataset_key is not None:
         if provider is None or dataset_key is None:
@@ -955,9 +962,7 @@ async def attach_import_jobs_to_batch(
     if not job_ids:
         return ()
     normalized_job_ids = tuple(dict.fromkeys(job_ids))
-    await assert_generic_import_job_targets(
-        session, (*normalized_job_ids, parent_job_id)
-    )
+    await assert_generic_import_job_targets(session, (*normalized_job_ids, parent_job_id))
     await lock_pipeline_hierarchy_for_jobs(
         session,
         (*normalized_job_ids, parent_job_id),
@@ -1081,9 +1086,7 @@ async def finish_import_job(
     ``None``을 반환한다(idempotent-safe).
     """
     if status not in _FINISHED_STATES:
-        raise ValueError(
-            f"status must be one of {sorted(_FINISHED_STATES)}, got {status!r}."
-        )
+        raise ValueError(f"status must be one of {sorted(_FINISHED_STATES)}, got {status!r}.")
     await assert_generic_import_job_targets(session, (job_id,))
     result = await session.execute(
         text(_FINISH_SQL),
@@ -1123,7 +1126,5 @@ async def recover_stale_running_jobs(
         복구(failed 전환)된 작업 수.
     """
     stale_seconds = None if stale_after is None else stale_after.total_seconds()
-    result = await session.execute(
-        text(_RECOVER_STALE_SQL), {"stale_seconds": stale_seconds}
-    )
+    result = await session.execute(text(_RECOVER_STALE_SQL), {"stale_seconds": stale_seconds})
     return len(result.fetchall())

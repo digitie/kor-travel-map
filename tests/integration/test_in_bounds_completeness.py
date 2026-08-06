@@ -90,7 +90,7 @@ async def _ins_geom(
 ) -> None:
     """route/area feature — exact geom 후보와 coord 우회 방지 검증용.
 
-    T-VN-35(ADR-084, alembic 0086): geometry 정본은 core가 아니라
+    T-VN-35(ADR-085, alembic 0086): geometry 정본은 core가 아니라
     ``feature_routes``/``feature_areas``다(둘 다 Multi* NOT NULL). 술어가 타야 할
     GiST도 그쪽에 있으므로 seed도 subtype에 넣는다.
     """

@@ -10,7 +10,7 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
-## 2026-08-06 (1) — T-VN-35 A-D 구현·리뷰 반영 완료 (ADR-084)
+## 2026-08-06 (1) — T-VN-35 A-D 구현·리뷰 반영 완료 (ADR-085)
 
 `feat/tvn35-typed-subtypes` — kind별 typed subtype 5종 + 배타 arc, core
 `detail`·`geom` 제거 + `features_detailed` 조립 뷰(단일 정본). prod 복원본
@@ -20,8 +20,51 @@
 선점검 fail-close, 세션 TimeZone 의존 → KST 고정 렌더).
 
 **다음 한 작업**: CI-parity 배터리 green 확인 → PR 생성·CI·머지 → 배포
-(EXPECTED_HEAD를 `0086_route_area_subtypes`로 선행 갱신, api→dagster/daemon
+(EXPECTED_HEAD를 `0087_route_area_subtypes`로 선행 갱신, api→dagster/daemon
 재빌드) → Lane A 잔여 `T-VN-37A`(notice `tstzrange` — 35B가 남긴 자리).
+## 2026-08-06 — T-VN-41F1J-A Map fixture 구현·검증·적대 리뷰 완료, PR 게이트 중
+
+`0084_c6c_cancel_probe_fixtures`가 transaction별 fixture/job, canonical cancellation
+참조와 `armed → consumed → finalized` 시각 불변식을 영속화한다. Map service API는
+`ops:fixture` exact principal으로 ensure/receipt/finalize만 열고, generic
+worker·stale recovery·일반 pipeline/ops/live event projection은 fixture kind를
+제외한다. 다만 일반 PinVi cancel lineage는 유지하여 canonical unsafe 취소 결과가
+같은 transaction에서 fixture receipt로 소비된다. capability generation `2`의
+`canonical_unsafe_outcome`은 consumed/finalized canonical result를 immutable receipt로 돌려주므로,
+Manager response-loss 재개는 POST 재발송 없이 evidence를 durable write한 뒤 finalize한다. runtime
+attestation도 fixture token의 cursor secret 재사용을 명시적으로 거부한다.
+
+**검증**: fixture integration 2건, API auth 103건, event-audit bounded planner target,
+OpenAPI export/types drift와 Wave 2 OpenAPI freeze artifact 7건, strict mypy·ruff가 통과했다. 적대적 코드 리뷰 1인이 발견한
+event-audit join/직접 event 삽입 누출은 읽기 join이 아니라 DB trigger로 차단해 ordered
+partial-index gate를 보존했고, `job_id` filter의 기존 64행 bounded-sort 상한도 회귀로 고정했다.
+재리뷰 GO를 받았다. PR CI gate가 남았다.
+
+**다음 한 작업**: Map F1J-A PR #960의 CI gate를 통과·머지한다. 이어
+Docker Manager F1J-B의 dynamic ensure→PinVi exact-409→finalize receipt 및 F1J-C
+compatible-pair 재결박을 구현한 뒤 n150 격리 리허설과 prod live UI E2E(F1J-D)를
+수행한다.
+
+## 2026-08-06 — T-VN-41F1J cancel-probe fixture 설계 착수
+
+F1D의 최초 probe는 `login=200 → etl_summary=200 → provider_sync=200 → cancel=404`로
+실패했다. 따라서 PinVi 세션/read route와 Manager runtime은 통과했고, 정적 job UUID에
+실행 row가 없다는 Map fixture 수명주기 결손만 남았다. 재시도는 같은 후보의 failure count만
+늘리므로 멈춘다.
+
+**다음 한 작업**: T-VN-41F1J-A — Map이 transaction ID별 cancel-probe fixture를 own
+DB에 멱등 생성·consume·finalize하고, `ops:fixture` exact service API와 capability
+generation을 제공한다. Manager는 이후 dynamic ID와 **정확한** `409
+PIPELINE_CANCELLATION_UNSAFE`만 F1D 통과로 수용한다.
+
+## 2026-08-05 (13) — H43 외부 사본·H44 드릴 1회차 (병렬 트랙)
+
+H43 배포 후 기준점 + dev box 외부 사본 반출(sha256 OK), 정기화는 manager
+#148. H44 드릴 1회차 완주(복원·manifest 일치·결손 주입/회복 전 단계) —
+절차는 backup-restore §10, 주기 실행 트리거만 잔여.
+
+**다음 한 작업**: T-VN-35 A-D 설계·구현(단일 PR) — 4축 조사 중 2축 완료,
+서브에이전트 한도로 중단된 상태에서 재개.
 
 ## 2026-08-05 (10) — 32C PR-2 prod 배포 완료 (값 전환 라이브)
 

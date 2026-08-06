@@ -1,4 +1,4 @@
-"""typed subtype 매핑·관측 (T-VN-35, ADR-084).
+"""typed subtype 매핑·관측 (T-VN-35, ADR-085).
 
 ``feature.features``의 kind별 ``detail`` JSONB와 subtype 테이블
 (``feature_places``/``feature_events``/``feature_notices``/``feature_routes``/
@@ -6,7 +6,7 @@
 만들고, backfill migration(0084~0086)은 같은 규칙을 SQL로 표현한다 — 두
 표현이 어긋나면 drift 관측이 잡는다.
 
-단일 정본 계약 (ADR-084 결정 4)
+단일 정본 계약 (ADR-085 결정 4)
 -------------------------------
 
 - subtype이 kind별 값의 **유일한 정본**이다. core ``detail``은 0086에서

@@ -297,6 +297,48 @@ command가 결선돼 있지 않다** — 그 결선 전까지의 수동 기준�
   결선과 함께 후속 — 지금은 단일 host 사본이므로 디스크 장애에 취약하다는
   한계를 명시해 둔다.
 
+## 10. 복원 리허설 드릴 (T-VN-H44)
+
+백업본이 **실제로 복원되는지**를 반복 가능한 드릴로 고정한다. 1회차 실적:
+2026-08-05, `2026-08-05-h43-postdeploy-0083.dump`(489MB, 0083·값 전환 배포 후)
+대상, dev box(WSL) 격리 컨테이너에서 전 단계 통과.
+
+### 절차 (1회 드릴 = 5단계)
+
+1. **격리 DB 기동** — `docker run -d --name h44-drill-pg -e POSTGRES_USER=drill
+   -e POSTGRES_PASSWORD=drill -p 15444:5432 postgis/postgis:16-3.5-alpine`.
+   prod와 같은 이미지 계열을 쓰고 포트는 겹치지 않게 띄운다.
+2. **새 DB + 확장 선생성** — `CREATE DATABASE ktm_drill` 뒤
+   `CREATE SCHEMA x_extension` + `postgis`/`pg_trgm`/`pgcrypto`/`btree_gist`를
+   그 스키마에 생성(ADR-008). **`POSTGRES_DB`에 그대로 복원하지 않는다** —
+   init이 심어둔 확장과 dump의 확장 배치가 충돌한다(0072 아카이브 복원 실측).
+3. **복원** — `pg_restore -U drill -d ktm_drill --no-owner --no-privileges -j 2`.
+   확장 스키마 선생성 때문에 `schema "x_extension" already exists` 오류 1건이
+   나고 `errors ignored on restore: 1`로 끝나는 것이 **정상**이다(그 1건 외
+   오류가 있으면 실패로 판정).
+4. **manifest 대조** — dump와 함께 받은 `.manifest`의 alembic head·row count와
+   복원본을 대조한다. 1회차 실측: head `0083_nonderived_uuid_generator` ·
+   features/aliases/public 각 731,765 · pair_mismatch 0 · orphan_alias 0 —
+   **전 항목 일치**.
+5. **결손 주입 → 회복 replay** — 재해로 생긴 손상이 관측에 잡히고 복구되는지
+   본다. `SET session_replication_role = replica`로 fence를 우회해 alias 5건을
+   DELETE(우회 경로로 생긴 손상 모사) → `missing_alias`가 5로 관측되는지 확인 →
+   features 정본에서 alias를 재생성(INSERT는 fence가 막지 않는다) → 4축
+   (missing_uuid/missing_alias/pair_mismatch/orphan_alias) 전부 0·행수 원복 확인.
+
+### 함정 (1회차 실측)
+
+- 컨테이너 기본 `/dev/shm`(64MB)이 작아 73만 행 병렬 집계에서
+  `could not resize shared memory segment` 가 난다 — 검증 쿼리는
+  `SET max_parallel_workers_per_gather=0`으로 돌리거나 `--shm-size=1g`로 띄운다.
+- 드릴 종료 후 컨테이너를 반드시 제거한다(`docker rm -f h44-drill-pg`) —
+  dev box 디스크 여유가 크지 않다.
+
+### 주기
+
+배포 동반 migration이 있는 릴리스 뒤, 그리고 최소 월 1회. 결과는 journal에
+1줄(대상 dump·5단계 통과 여부·이상 항목)로 남긴다.
+
 ## 이관된 결정 (구 ADR)
 
 - 백업 단위(Postgres `feature`/`provider_sync`/`ops` schema + RustFS bucket), 1차 NTFS

@@ -19,7 +19,7 @@
    등 자주 쓰는 필터를 인덱스에 박는다.
 8. **JSONB 인덱스는 generated column으로** — 자주 조회하는 JSONB key는 표현식
    인덱스 `((payload->>'key')::type)` 또는 generated column. kind별 필드는
-   subtype의 typed 컬럼이라 애초에 이 패턴이 필요 없다 (ADR-084).
+   subtype의 typed 컬럼이라 애초에 이 패턴이 필요 없다 (ADR-085).
 
 ## 2. 공간 쿼리 표준 패턴
 
@@ -146,7 +146,7 @@ LIMIT :limit;
 `idx_feature_routes_geom_gist`가 잡힌다. area는 `feature.feature_areas`로 같은
 모양이다. subtype 테이블 자체가 kind로 갈리므로 `kind='route'` 술어는 필요 없다.
 
-**공간 술어는 조립 뷰를 쓰지 않는다** (ADR-084). `feature.features_detailed`의
+**공간 술어는 조립 뷰를 쓰지 않는다** (ADR-085). `feature.features_detailed`의
 `geom`은 `COALESCE(routes.geom, areas.geom)` 산출 컬럼이라 인덱스가 없고, 그대로
 술어에 넣으면 features 73만 행 seq scan이 된다. 뷰는 응답 조립용이고, 술어는 GiST가
 붙어 있는 subtype을 직접 참조한다.
@@ -383,7 +383,7 @@ CREATE INDEX idx_features_bjd_cached ON feature.features (bjd_code_cached);
 
 이미 `legal_dong_code` 컬럼이 별도로 있으므로 위는 예시. kind별 필드
 (`place_kind` 등)는 subtype의 typed 컬럼이라 이 패턴 자체가 필요 없고, 남은 JSONB는
-subtype의 `payload`뿐이다 (ADR-084).
+subtype의 `payload`뿐이다 (ADR-085).
 
 ### 7.2 GIN on JSONB
 
@@ -554,7 +554,7 @@ tier-2 100만+ harness **수 분~수십 분(CI 아님)** 을 실측·재확인�
 
 원래 §9.3은 "`feature + place_detail + opening_hours` 또는 7개 detail kind union을
 MV로 flatten"을 전제했다. **이 전제는 성립하지 않는다.** kind별 값의 정본은
-ADR-084의 typed subtype 5종이고, 응답의 `detail`/`geom`은 뷰
+ADR-085의 typed subtype 5종이고, 응답의 `detail`/`geom`은 뷰
 `feature.features_detailed`가 조립한다. 조립은 core PK ↔ subtype PK LEFT JOIN
 5개이며 배타 arc 때문에 한 feature는 그중 최대 하나에만 행을 갖는다. 따라서:
 
@@ -828,7 +828,7 @@ PostGIS/testcontainers baseline으로 고정했다. 로컬 live DB 확인 결과
   - `idx_features_updated_keyset(updated_at DESC, feature_id DESC)`
   - `idx_features_status_updated(status, updated_at DESC, feature_id DESC)`
   - `idx_features_lower_name_keyset(lower(name), feature_id)`
-  - 운영시간 보유 feature keyset partial은 subtype이 갖는다 (ADR-084) —
+  - 운영시간 보유 feature keyset partial은 subtype이 갖는다 (ADR-085) —
     `idx_feature_places_opening_hours(feature_id)` partial `business_hours IS NOT NULL`,
     `idx_feature_events_opening_hours(feature_id)` partial `opening_hours IS NOT NULL`
 - `ops.import_jobs`

@@ -511,7 +511,7 @@ async def test_reconcile_exact_tie_prefers_current_identity(
     await feature_repo.load_bundles(migrated_session, [current])
     legacy_feature_id = "f_global_n_0000000000000000"
     assert legacy_feature_id < current.feature.feature_id
-    # T-VN-35(ADR-084): core에 detail이 없다 — 구세대 사본은 core 축만 복제하고
+    # T-VN-35(ADR-085): core에 detail이 없다 — 구세대 사본은 core 축만 복제하고
     # kind별 값은 notice subtype에 같은 규칙으로 복제한다.
     await migrated_session.execute(
         text(
@@ -643,7 +643,7 @@ async def test_actual_lexicographic_notice_row_wins_across_reads_and_reconcile(
             """
         )
     )
-    # T-VN-35(ADR-084): area geometry 정본은 ``feature_areas``(MultiPolygon NOT NULL).
+    # T-VN-35(ADR-085): area geometry 정본은 ``feature_areas``(MultiPolygon NOT NULL).
     await seed_feature_subtype(
         migrated_session,
         feature_id="notice-split-max-area",
@@ -2180,7 +2180,7 @@ async def test_public_active_reads_share_latest_and_ended_notice_filter(
         ),
         {"feature_ids": list(all_ids)},
     )
-    # T-VN-35(ADR-084): 효력 종료 시각의 정본은 typed timestamptz 컬럼이다.
+    # T-VN-35(ADR-085): 효력 종료 시각의 정본은 typed timestamptz 컬럼이다.
     await migrated_session.execute(
         text(
             "UPDATE feature.feature_notices SET valid_end_time = :ended_at"
