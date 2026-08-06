@@ -754,21 +754,27 @@ def public_active_notice_filter_sql(
 
 
 def _frozen_h35_ended_notice_hidden_sql(feature_alias: str) -> str:
-    """0079 고정 스키마 세대의 "종료 notice 숨김" 판정 (역사 표면 보존).
+    """0079 고정 스키마 세대의 "종료 notice 숨김" 판정 (역사 표면 **바이트** 보존).
 
-    ``detail->>'valid_end_time'``를 방어 cast(``pg_input_is_valid``)와 함께
-    읽던 당시 규칙 그대로다. 현행 코드가 이 형태를 되살리는 것을 막기 위해
-    **이 함수 안에만** 존재한다.
+    ``detail->>'valid_end_time'``를 방어 cast(``pg_input_is_valid``)와 함께 읽던
+    당시 규칙을 **글자 그대로** 옮긴 것이다. 리허설의 존재 이유가 "그때 그 표면을
+    그대로 재생한다"이므로 동등해 보이는 재작성도 두지 않는다 — 실제로 안 같다:
+    NULL end_time과 cast 불가 문자열에서 판정이 갈린다(원본은 전자를 보이게,
+    후자를 숨기게 한다). 현행 코드가 이 형태를 되살리는 것을 막기 위해 이 함수
+    안에만 존재한다.
     """
 
     return f"""
-          AND NOT (
-              {feature_alias}.kind = 'notice'
-              AND pg_input_is_valid(
-                  {feature_alias}.detail->>'valid_end_time', 'timestamptz'
-              )
-              AND ({feature_alias}.detail->>'valid_end_time')::timestamptz <= now()
-          )"""
+  AND (
+    {feature_alias}.kind <> 'notice'
+    OR ({feature_alias}.detail ->> 'valid_end_time') IS NULL
+    OR CASE
+         WHEN pg_input_is_valid({feature_alias}.detail ->> 'valid_end_time', 'timestamptz')
+         THEN CAST({feature_alias}.detail ->> 'valid_end_time' AS timestamptz) > now()
+         ELSE false
+       END
+  )
+"""
 
 
 _PUBLIC_ACTIVE_NOTICE_FILTER_SQL: Final[str] = public_active_notice_filter_sql("f")
