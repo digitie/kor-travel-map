@@ -50,6 +50,7 @@ fi
 
 ops_read_is_set="${KOR_TRAVEL_MAP_API_OPS_READ_TOKEN+x}"
 ops_cancel_is_set="${KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN+x}"
+ops_fixture_is_set="${KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN+x}"
 ops_required_is_set="${KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED+x}"
 ops_principal_required=false
 if [ "$ops_required_is_set" = "x" ]; then
@@ -62,25 +63,27 @@ if [ "$ops_required_is_set" = "x" ]; then
       ;;
   esac
 fi
-if [ "$ops_read_is_set" != "$ops_cancel_is_set" ]; then
-  echo "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN and KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN must be configured together" >&2
+if [ "$ops_read_is_set" != "$ops_cancel_is_set" ] \
+  || [ "$ops_read_is_set" != "$ops_fixture_is_set" ]; then
+  echo "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN, KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN, and KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN must be configured together" >&2
   exit 1
 fi
 if [ "$ops_read_is_set" != "x" ]; then
   if [ "$ops_principal_required" = "true" ]; then
-    echo "ops principal is required but read/cancel tokens are absent" >&2
+    echo "ops principal is required but read/cancel/fixture tokens are absent" >&2
     exit 1
   fi
 else
   ops_read_token="$KOR_TRAVEL_MAP_API_OPS_READ_TOKEN"
   ops_cancel_token="$KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN"
-  if [ -z "$ops_read_token" ] && [ -z "$ops_cancel_token" ]; then
+  ops_fixture_token="$KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN"
+  if [ -z "$ops_read_token" ] && [ -z "$ops_cancel_token" ] && [ -z "$ops_fixture_token" ]; then
     if [ "$ops_principal_required" = "true" ]; then
-      echo "ops principal is required but read/cancel tokens are empty" >&2
+      echo "ops principal is required but read/cancel/fixture tokens are empty" >&2
       exit 1
     fi
-  elif [ -z "$ops_read_token" ] || [ -z "$ops_cancel_token" ]; then
-    echo "ops read and cancel tokens must both be empty or both be non-empty" >&2
+  elif [ -z "$ops_read_token" ] || [ -z "$ops_cancel_token" ] || [ -z "$ops_fixture_token" ]; then
+    echo "ops read, cancel, and fixture tokens must all be empty or all be non-empty" >&2
     exit 1
   else
     case "$ops_read_token" in
@@ -95,6 +98,12 @@ else
         exit 1
         ;;
     esac
+    case "$ops_fixture_token" in
+      *[[:space:]]*)
+        echo "KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN must contain no whitespace" >&2
+        exit 1
+        ;;
+    esac
     if [ "${#ops_read_token}" -lt 32 ]; then
       echo "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN must be at least 32 characters" >&2
       exit 1
@@ -103,17 +112,25 @@ else
       echo "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN must be at least 32 characters" >&2
       exit 1
     fi
-    if [ "$ops_read_token" = "$ops_cancel_token" ]; then
-      echo "ops read and cancel tokens must be distinct" >&2
+    if [ "${#ops_fixture_token}" -lt 32 ]; then
+      echo "KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN must be at least 32 characters" >&2
       exit 1
     fi
-    if [ "$ops_read_token" = "$api_proxy_secret" ] || [ "$ops_cancel_token" = "$api_proxy_secret" ]; then
-      echo "ops read/cancel tokens must be distinct from the admin proxy secret" >&2
+    if [ "$ops_read_token" = "$ops_cancel_token" ] \
+      || [ "$ops_read_token" = "$ops_fixture_token" ] \
+      || [ "$ops_cancel_token" = "$ops_fixture_token" ]; then
+      echo "ops read, cancel, and fixture tokens must be distinct" >&2
+      exit 1
+    fi
+    if [ "$ops_read_token" = "$api_proxy_secret" ] || [ "$ops_cancel_token" = "$api_proxy_secret" ] \
+      || [ "$ops_fixture_token" = "$api_proxy_secret" ]; then
+      echo "ops read/cancel/fixture tokens must be distinct from the admin proxy secret" >&2
       exit 1
     fi
     if [ -n "$api_service_token" ]; then
-      if [ "$ops_read_token" = "$api_service_token" ] || [ "$ops_cancel_token" = "$api_service_token" ]; then
-        echo "ops read/cancel tokens must be distinct from the service token" >&2
+      if [ "$ops_read_token" = "$api_service_token" ] || [ "$ops_cancel_token" = "$api_service_token" ] \
+        || [ "$ops_fixture_token" = "$api_service_token" ]; then
+        echo "ops read/cancel/fixture tokens must be distinct from the service token" >&2
         exit 1
       fi
     fi
@@ -157,12 +174,13 @@ done
 features_routes_enabled="${KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED:-true}"
 ops_routes_enabled="${KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED:-$features_routes_enabled}"
 ops_pair_configured=false
-if [ "$ops_read_is_set" = "x" ] && [ -n "${KOR_TRAVEL_MAP_API_OPS_READ_TOKEN}" ]; then
+if [ "$ops_read_is_set" = "x" ] && [ -n "${KOR_TRAVEL_MAP_API_OPS_READ_TOKEN}" ] \
+  && [ -n "${KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN}" ]; then
   ops_pair_configured=true
 fi
 if [ "$api_profile" = "production" ] && [ "$ops_routes_enabled" = "true" ] \
   && [ "$ops_pair_configured" = "false" ]; then
-  echo "production profile is fail-closed (ADR-066): KOR_TRAVEL_MAP_API_OPS_READ_TOKEN and KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN must be configured while the ops surface is enabled" >&2
+  echo "production profile is fail-closed (ADR-066): KOR_TRAVEL_MAP_API_OPS_READ_TOKEN, KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN, and KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN must be configured while the ops surface is enabled" >&2
   exit 1
 fi
 
@@ -193,7 +211,8 @@ if [ -n "$cursor_signing_secret" ]; then
   fi
   if [ "$ops_pair_configured" = "true" ] \
     && { [ "$cursor_signing_secret" = "$KOR_TRAVEL_MAP_API_OPS_READ_TOKEN" ] \
-      || [ "$cursor_signing_secret" = "$KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN" ]; }; then
+      || [ "$cursor_signing_secret" = "$KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN" ] \
+      || [ "$cursor_signing_secret" = "$KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN" ]; }; then
     echo "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET must be distinct from ops credentials" >&2
     exit 1
   fi

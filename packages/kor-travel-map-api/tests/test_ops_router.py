@@ -1387,7 +1387,8 @@ def test_ops_live_sql_excludes_quarantined_import_jobs() -> None:
     assert "event.quarantined_at IS NULL" in live_mod._IMPORT_JOB_EVENTS_LIVE_SQL
     assert "ops.import_job_event_clock" in live_mod._IMPORT_JOBS_LIVE_SQL
     assert "ops.import_job_event_clock" in live_mod._IMPORT_JOB_EVENTS_LIVE_SQL
-    assert "ops.import_jobs" not in live_mod._IMPORT_JOB_EVENTS_LIVE_SQL
+    assert "FROM ops.import_jobs AS job" in live_mod._IMPORT_JOB_EVENTS_LIVE_SQL
+    assert "job.kind <> 'c6c_cancel_probe'" in live_mod._IMPORT_JOB_EVENTS_LIVE_SQL
     assert "COUNT(" not in live_mod._IMPORT_JOB_EVENTS_LIVE_SQL
     assert "WHERE quarantined_at IS NULL" in live_mod._DAGSTER_RUNS_LIVE_SQL
     assert "WHERE quarantined_at IS NULL" in live_mod._DAGSTER_RUN_LIVE_SQL

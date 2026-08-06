@@ -41,6 +41,7 @@ from kortravelmap.api.auth import (
     require_admin_frontend,
     require_cache_target_service_principal,
     require_metrics_token,
+    require_ops_fixture_principal,
     require_ops_operator,
     require_public_api_key,
     require_service_token,
@@ -85,6 +86,7 @@ _ENFORCEMENT_BY_CALLABLE: dict[Callable[..., Any], str] = {
     require_service_token: "require_service_token",
     require_admin_frontend: "require_admin_frontend",
     require_ops_operator: "require_ops_operator",
+    require_ops_fixture_principal: "require_ops_fixture_principal",
     require_metrics_token: "require_metrics_token",
     # #725 ops-live HMAC ticket — WebSocket의 enforcing dependency (재사용).
     authenticate_ops_live_websocket: "authenticate_ops_live_websocket",
@@ -184,32 +186,26 @@ ROUTE_POLICIES: dict[str, RoutePolicy] = {
     "/v1/features/weather/batch": RoutePolicy.SERVICE,
     "/v1/service/cache-targets/{external_system}/{target_key}": RoutePolicy.SERVICE,
     "/v1/service/cache-target-streams/{external_system}": RoutePolicy.SERVICE,
-    "/v1/service/cache-target-streams/{external_system}/restore-fences": (
-        RoutePolicy.SERVICE
-    ),
+    "/v1/service/cache-target-streams/{external_system}/restore-fences": (RoutePolicy.SERVICE),
     "/v1/service/cache-target-event-claims": RoutePolicy.SERVICE,
     "/v1/service/cache-target-event-acks": RoutePolicy.SERVICE,
     "/v1/service/cache-target-event-nacks": RoutePolicy.SERVICE,
     "/v1/service/cache-target-event-dead-letters/{event_id}": RoutePolicy.SERVICE,
-    "/v1/service/cache-target-event-dead-letters/{event_id}/replays": (
-        RoutePolicy.SERVICE
-    ),
+    "/v1/service/cache-target-event-dead-letters/{event_id}/replays": (RoutePolicy.SERVICE),
     "/v1/service/cache-target-reconciliations": RoutePolicy.SERVICE,
-    "/v1/service/cache-target-reconciliations/{request_id}/seals": (
-        RoutePolicy.SERVICE
-    ),
-    "/v1/service/cache-target-reconciliations/{request_id}/completions": (
-        RoutePolicy.SERVICE
-    ),
-    "/v1/service/cache-target-reconciliations/{request_id}/snapshot": (
-        RoutePolicy.SERVICE
-    ),
+    "/v1/service/cache-target-reconciliations/{request_id}/seals": (RoutePolicy.SERVICE),
+    "/v1/service/cache-target-reconciliations/{request_id}/completions": (RoutePolicy.SERVICE),
+    "/v1/service/cache-target-reconciliations/{request_id}/snapshot": (RoutePolicy.SERVICE),
     "/v1/service/cache-target-snapshots/{external_system}": RoutePolicy.SERVICE,
     # T-VN-32C alias-map DB-to-DB 이관 표면 (ADR-068 전환·복구 경계 read).
     "/v1/service/feature-alias-maps": RoutePolicy.SERVICE,
     "/v1/service/feature-alias-maps/checksum": RoutePolicy.SERVICE,
     "/v1/service/refresh-requests": RoutePolicy.SERVICE,
     "/v1/service/refresh-requests/{request_id}": RoutePolicy.SERVICE,
+    # C6c Map-owned cancel-probe service API — generic ServiceToken이 아닌 exact
+    # Docker Manager ops:fixture principal을 요구하지만 service artifact에만 노출한다.
+    "/v1/ops/contract-fixtures/c6c-cancel-probe/{transaction_id}": RoutePolicy.SERVICE,
+    "/v1/ops/contract-fixtures/c6c-cancel-probe/{transaction_id}/finalize": (RoutePolicy.SERVICE),
     # -- operator/debug — raw provider payload은 local-dev debug mount에서만
     #    노출하되 mount된 route도 trusted admin BFF를 요구한다. production은
     #    debug_routes_enabled=false로 route 자체를 내린다.
@@ -218,18 +214,14 @@ ROUTE_POLICIES: dict[str, RoutePolicy] = {
     #    raw_data/raw_payload_hash/source_record_key는 공개 detail에서 제거하고
     #    admin BFF 인증 표면으로 이동했다.
     "/v1/features/{feature_id}/sources": RoutePolicy.OPERATOR,
-    "/v1/features/{feature_id}/observations/{source_entity_key}/history": (
-        RoutePolicy.OPERATOR
-    ),
+    "/v1/features/{feature_id}/observations/{source_entity_key}/history": (RoutePolicy.OPERATOR),
     # -- operator — admin BFF(trusted proxy secret+actor) 표면.
     "/v1/admin/auth-events": RoutePolicy.OPERATOR,
     "/v1/admin/backups": RoutePolicy.OPERATOR,
     "/v1/admin/backups/{backup_id}": RoutePolicy.OPERATOR,
     "/v1/admin/curated-features": RoutePolicy.OPERATOR,
     "/v1/admin/curated-features/{curated_feature_id}": RoutePolicy.OPERATOR,
-    "/v1/admin/curated-features/{curated_feature_id}/place-search": (
-        RoutePolicy.OPERATOR
-    ),
+    "/v1/admin/curated-features/{curated_feature_id}/place-search": (RoutePolicy.OPERATOR),
     "/v1/admin/curated-features/{curated_feature_id}/select": RoutePolicy.OPERATOR,
     "/v1/admin/curated-features/{curated_feature_id}/unselect": RoutePolicy.OPERATOR,
     "/v1/admin/curated-source-rules": RoutePolicy.OPERATOR,
@@ -243,23 +235,15 @@ ROUTE_POLICIES: dict[str, RoutePolicy] = {
     "/v1/admin/curations/import": RoutePolicy.OPERATOR,
     "/v1/admin/curations/import-batches/{import_batch_id}": RoutePolicy.OPERATOR,
     "/v1/admin/curations/import-template.csv": RoutePolicy.OPERATOR,
-    "/v1/admin/curations/items/{curation_item_id}/current-import-row": (
-        RoutePolicy.OPERATOR
-    ),
+    "/v1/admin/curations/items/{curation_item_id}/current-import-row": (RoutePolicy.OPERATOR),
     "/v1/admin/curations/link-audit": RoutePolicy.OPERATOR,
     "/v1/admin/curations/quarantine": RoutePolicy.OPERATOR,
     "/v1/admin/curations/quarantine/{collection_id}/items": RoutePolicy.OPERATOR,
-    "/v1/admin/curations/quarantine/{collection_id}/reclassify": (
-        RoutePolicy.OPERATOR
-    ),
+    "/v1/admin/curations/quarantine/{collection_id}/reclassify": (RoutePolicy.OPERATOR),
     "/v1/admin/curations/{collection_id}": RoutePolicy.OPERATOR,
     "/v1/admin/curations/{collection_id}/items": RoutePolicy.OPERATOR,
-    "/v1/admin/curations/{collection_id}/items/{curation_item_id}": (
-        RoutePolicy.OPERATOR
-    ),
-    "/v1/admin/cache-target-event-dead-letters/{event_id}/replays": (
-        RoutePolicy.OPERATOR
-    ),
+    "/v1/admin/curations/{collection_id}/items/{curation_item_id}": (RoutePolicy.OPERATOR),
+    "/v1/admin/cache-target-event-dead-letters/{event_id}/replays": (RoutePolicy.OPERATOR),
     "/v1/admin/cache-target-reconciliations": RoutePolicy.OPERATOR,
     "/v1/admin/dedup-reviews": RoutePolicy.OPERATOR,
     "/v1/admin/dedup-reviews/{review_id}": RoutePolicy.OPERATOR,
@@ -273,12 +257,8 @@ ROUTE_POLICIES: dict[str, RoutePolicy] = {
     "/v1/admin/features/change-requests/{request_id}/reject": RoutePolicy.OPERATOR,
     "/v1/admin/features/curated": RoutePolicy.OPERATOR,
     "/v1/admin/features/curated/{curated_feature_id}": RoutePolicy.OPERATOR,
-    "/v1/admin/features/curated/{curated_feature_id}/detail-snapshot": (
-        RoutePolicy.OPERATOR
-    ),
-    "/v1/admin/features/curated/{curated_feature_id}/place-search": (
-        RoutePolicy.OPERATOR
-    ),
+    "/v1/admin/features/curated/{curated_feature_id}/detail-snapshot": (RoutePolicy.OPERATOR),
+    "/v1/admin/features/curated/{curated_feature_id}/place-search": (RoutePolicy.OPERATOR),
     "/v1/admin/features/curated/{curated_feature_id}/select": RoutePolicy.OPERATOR,
     "/v1/admin/features/curated/{curated_feature_id}/unselect": RoutePolicy.OPERATOR,
     "/v1/admin/features/dedup-reviews": RoutePolicy.OPERATOR,
@@ -305,9 +285,7 @@ ROUTE_POLICIES: dict[str, RoutePolicy] = {
     "/v1/admin/offline-uploads/{upload_id}/validate": RoutePolicy.OPERATOR,
     "/v1/admin/offline-uploads/{upload_id}/validation": RoutePolicy.OPERATOR,
     "/v1/admin/poi-cache-targets": RoutePolicy.OPERATOR,
-    "/v1/admin/poi-cache-targets/{external_system}/{target_key}": (
-        RoutePolicy.OPERATOR
-    ),
+    "/v1/admin/poi-cache-targets/{external_system}/{target_key}": (RoutePolicy.OPERATOR),
     "/v1/admin/public-api-keys": RoutePolicy.OPERATOR,
     "/v1/admin/public-api-keys/{public_api_key_id}/revoke": RoutePolicy.OPERATOR,
     "/v1/admin/restore/{backup_id}": RoutePolicy.OPERATOR,
@@ -321,12 +299,8 @@ ROUTE_POLICIES: dict[str, RoutePolicy] = {
     "/v1/ops/pipeline/dagster-runs/{run_id:path}": RoutePolicy.OPERATOR,
     "/v1/ops/pipeline/events": RoutePolicy.OPERATOR,
     "/v1/ops/pipeline/executions": RoutePolicy.OPERATOR,
-    "/v1/ops/pipeline/executions/import_job/{execution_id}/cancel": (
-        RoutePolicy.OPERATOR
-    ),
-    "/v1/ops/pipeline/executions/update_request/{execution_id}/cancel": (
-        RoutePolicy.OPERATOR
-    ),
+    "/v1/ops/pipeline/executions/import_job/{execution_id}/cancel": (RoutePolicy.OPERATOR),
+    "/v1/ops/pipeline/executions/update_request/{execution_id}/cancel": (RoutePolicy.OPERATOR),
     "/v1/ops/pipeline/executions/{kind}/{execution_id}": RoutePolicy.OPERATOR,
     "/v1/ops/pipeline/overview": RoutePolicy.OPERATOR,
     "/v1/ops/pipeline/prechecks/mois-source-sync": RoutePolicy.OPERATOR,
@@ -496,7 +470,8 @@ def _wiring_satisfied(row: RoutePolicyMatrixRow) -> bool:
       (debug의 enforcing 경계는 ``debug_routes_enabled`` flag + T-VN-01
       production 거부 — dependency가 아니라 mount 여부로 검증한다.)
     - ``public-keyed``: ``require_public_api_key``.
-    - ``service``: ``require_service_token``.
+    - ``service``: ``require_service_token`` 또는 fixture 전용
+      ``require_ops_fixture_principal``.
     - ``operator``: admin BFF·ops principal·ops-live ticket 중 하나 이상.
     - ``metrics``: ``require_metrics_token``.
     """
@@ -512,6 +487,7 @@ def _wiring_satisfied(row: RoutePolicyMatrixRow) -> bool:
             & {
                 "require_service_token",
                 "require_cache_target_service_principal",
+                "require_ops_fixture_principal",
             }
         )
     if row.policy is RoutePolicy.OPERATOR:
@@ -561,7 +537,5 @@ def assert_route_policy_wiring(app: FastAPI) -> tuple[RoutePolicyMatrixRow, ...]
                 "entry with the owning task"
             )
     if problems:
-        raise RoutePolicyError(
-            "route policy wiring mismatch (ADR-066 D-1): " + "; ".join(problems)
-        )
+        raise RoutePolicyError("route policy wiring mismatch (ADR-066 D-1): " + "; ".join(problems))
     return matrix

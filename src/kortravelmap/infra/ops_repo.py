@@ -294,6 +294,7 @@ FROM ops.import_jobs AS job
 LEFT JOIN ops.feature_update_requests AS request ON request.job_id = job.job_id
 WHERE (CAST(:status AS text) IS NULL OR job.status = CAST(:status AS text))
   AND job.quarantined_at IS NULL
+  AND job.kind <> 'c6c_cancel_probe'
   AND (CAST(:kind AS text) IS NULL OR job.kind = CAST(:kind AS text))
   AND (
     CAST(:load_batch_id AS uuid) IS NULL
@@ -320,6 +321,7 @@ FROM ops.import_jobs AS job
 LEFT JOIN ops.feature_update_requests AS request ON request.job_id = job.job_id
 WHERE job.job_id = CAST(:job_id AS uuid)
   AND job.quarantined_at IS NULL
+  AND job.kind <> 'c6c_cancel_probe'
 """
 
 _IMPORT_JOB_EVENT_COLUMNS: Final[str] = (
@@ -339,7 +341,9 @@ def _list_import_job_events_sql(
     cursor_occurred_at: datetime | None,
 ) -> str:
     """고정 clause만 조합해 각 감사 filter의 B-tree 경로를 보존한다."""
-    clauses: list[str] = ["event.quarantined_at IS NULL"]
+    clauses: list[str] = [
+        "event.quarantined_at IS NULL",
+    ]
     if job_id is not None:
         clauses.append("event.job_id = CAST(:job_id AS uuid)")
     if level is not None:

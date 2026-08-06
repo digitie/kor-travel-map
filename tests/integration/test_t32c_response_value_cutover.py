@@ -241,6 +241,7 @@ def _api_settings() -> ApiSettings:
         _env_file=None,
         admin_proxy_secret=None,
         ops_cancel_token=None,
+        ops_fixture_token=None,
         ops_read_token=None,
         public_api_key_required=False,
         service_token=None,

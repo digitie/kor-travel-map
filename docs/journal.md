@@ -17,6 +17,60 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-08-06 (3) — T-VN-41F1J-A: response-loss 재개 증빙 보강
+
+Manager 적대적 리뷰가 PinVi cancel HTTP 응답이 유실된 뒤 Map `consumed` state를 읽어도 journal에
+기록하지 못해 재시도가 영구 정지하는 경계를 발견했다. Map lifecycle receipt의 capability generation을
+`2`로 올리고, `consumed`/`finalized`에서만 immutable `canonical_unsafe_outcome`(exact `409`, code,
+root job ID, cancellation ID)을 반환하도록 보강했다. 이 값은 fixture consume SQL이 canonical unsafe
+cancellation root/member/error를 확인한 뒤에만 존재하므로 Manager는 DB 접근이나 cancel POST 재발송 없이
+durable receipt를 확정하고 finalize를 재개할 수 있다.
+
+fixture integration 2건과 API auth/OpenAPI target 8건이 새 DTO 포함으로 통과했다. generated full/service
+OpenAPI와 admin TypeScript client type도 함께 재생성했다.
+
+후속 재리뷰에서 event audit의 fixture kind join이 ordered partial index를 포기하게 만들고, join을
+제거하면 raw SQL fixture event가 노출될 수 있음을 확인했다. 이를 읽기 예외로 우회하지 않고 migration
+`0084`의 DB trigger로 fixture job event의 INSERT/job ID 변경을 거부했다. application writer 거부와
+직접 SQL 제약을 함께 검증해 audit ordered partial-index 경로를 유지한다. `job_id` 단일 filter의
+PostgreSQL 비용 계획은 기존처럼 최대 64행 bounded sort를 허용하며, join 도입이나 무제한 sort는 허용하지 않는다.
+적대적 리뷰 1인은 새 trigger의 INSERT 책임과 기존 identity trigger의 job ID 불변 책임 분리,
+두 SQL 경계 통합 검증과 planner 상한을 재검토해 GO로 판정했다.
+
+PR CI가 검출한 `contracts/vnext/openapi-diff-v1.json`의 admin/service baseline SHA drift도
+현재 generated artifact와 immutable outcome route를 대조해 재고정했다. Wave 2 대상 diff의
+counts는 바꾸지 않았고 artifact fingerprint test 7건으로 freeze 갱신을 검증했다.
+
+## 2026-08-06 (2) — T-VN-41F1J-A: Map durable fixture 구현·검증
+
+- **수명주기/DB**: migration `0084_c6c_cancel_probe_fixtures`로 transaction ID를
+  PK로 하고 fixture job/canonical cancellation을 각각 유일 FK로 결박했다. `armed →
+  consumed → finalized` 전이와 시각은 CHECK로, 동시 ensure는 transaction advisory
+  lock으로 보장한다. 서비스 전 단계이므로 downgrade는 fixture 이력을 보전하지 않고
+  table을 제거하며, 백업·복원은 최종 schema에서만 검증한다.
+- **취소·격리**: 실제 PinVi cancel의 canonical
+  `PIPELINE_CANCELLATION_UNSAFE` terminal 기록 transaction 안에서만 fixture를
+  consume한다. fixture job은 일반 worker/claim/stale recovery/list projection에서
+  제외하되, cancellation resolver의 lineage에서는 보이도록 두어 정확한 409 검증을
+  방해하지 않는다. finalize는 cancellation history를 지우지 않고 job만 terminal로
+  닫는다.
+- **service 경계**: `ops:fixture` token과 `service:docker-manager` actor는
+  ensure·receipt·finalize exact path/method에만 결박했다. PinVi `ops:cancel`과
+  BFF/service token은 사용할 수 없다. full/service OpenAPI에는 audit 가능한 route를,
+  user artifact에는 제외하며 capability generation은 2다.
+- **리뷰 보강**: 적대적 리뷰 1인이 찾아낸 normal pipeline/ops/live event projection
+  누출과 Alembic metadata 드리프트를 수정했다. fixture event를 강제로 만든 회귀에서
+  generic event stream·live 최신 event·job별 live snapshot 모두 비노출이고, generic
+  event writer도 거부한다. C7 attestation은 fixture token의 cursor-secret 재사용도
+  거부한다. root env/API README도 3-token 계약으로 정정했다.
+- **검증**: Postgres migration을 포함한 fixture integration 2 passed, `alembic check`
+  clean, API auth 88 passed, settings/route/OpenAPI target과 export `--check`, strict
+  mypy·ruff·import-linter 통과. 적대적 코드 리뷰 1인은 차단/주요 이슈 없음으로
+  최종 판정했다. 첫 GitHub CI에서 확인된 정적 기대 4건(reserved kind, ops event
+  projection, cancellation lineage CTE, admin/service OpenAPI baseline)은 설계를
+  우회하지 않고 fixture 격리 계약을 직접 단언하도록 보강했으며 대상 회귀 5건이
+  통과했다.
+
 ## 2026-08-06 (1) — T-VN-41F1J: Map-owned cancel-probe fixture 결정
 
 - **관측/판정**: 신뢰된 F1D 한 회차는 `login=200 → etl_summary=200 → provider_sync=200 →

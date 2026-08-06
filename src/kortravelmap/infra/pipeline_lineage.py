@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import Final
 
-PIPELINE_LINEAGE_SOURCE_SQL: Final[str] = """
+_PIPELINE_LINEAGE_SOURCE_TEMPLATE: Final[str] = """
 pipeline_jobs AS MATERIALIZED (
     SELECT
         job_id,
@@ -41,6 +41,7 @@ pipeline_jobs AS MATERIALIZED (
         created_at
     FROM ops.import_jobs
     WHERE quarantined_at IS NULL
+      {fixture_kind_clause}
 ),
 pipeline_requests AS MATERIALIZED (
     SELECT
@@ -66,6 +67,16 @@ pipeline_requests AS MATERIALIZED (
      AND identity_job.quarantined_at IS NULL
 )
 """
+
+# 일반 pipeline/ops projection은 C6c probe 내부 job을 절대 보이지 않는다. 반면
+# cancellation scope resolver는 정확한 unsafe terminal을 만들기 위해 해당 job을 읽어야
+# 하므로 별도 CTE bundle을 사용한다.
+PIPELINE_LINEAGE_SOURCE_SQL: Final[str] = _PIPELINE_LINEAGE_SOURCE_TEMPLATE.format(
+    fixture_kind_clause="AND kind <> 'c6c_cancel_probe'"
+)
+PIPELINE_CANCELLATION_LINEAGE_SOURCE_SQL: Final[str] = _PIPELINE_LINEAGE_SOURCE_TEMPLATE.format(
+    fixture_kind_clause=""
+)
 
 # root_id가 저장돼 있으므로 lineage는 재귀 없이 직접 조회다. depth는 ≤2단계라
 # root면 0, 자식이면 1(``job_id = root_id`` 여부). 출력 컬럼/의미는 과거 재귀 버전과
@@ -130,9 +141,13 @@ standalone_jobs AS (
 PIPELINE_LINEAGE_CTES_SQL: Final[str] = (
     PIPELINE_LINEAGE_SOURCE_SQL + ",\n" + PIPELINE_LINEAGE_BODY_SQL
 )
+PIPELINE_CANCELLATION_LINEAGE_CTES_SQL: Final[str] = (
+    PIPELINE_CANCELLATION_LINEAGE_SOURCE_SQL + ",\n" + PIPELINE_LINEAGE_BODY_SQL
+)
 
 __all__ = [
     "PIPELINE_LINEAGE_BODY_SQL",
+    "PIPELINE_CANCELLATION_LINEAGE_CTES_SQL",
     "PIPELINE_LINEAGE_CTES_SQL",
     "PIPELINE_LINEAGE_SOURCE_SQL",
 ]

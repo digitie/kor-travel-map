@@ -346,6 +346,18 @@ _COMMAND_REGISTRY: Final[dict[OperationKey, CommandPolicy]] = {
         "pipeline-cancellation.update-request",
         "pipeline cancellation attempt/member/run journal이 terminal 상태를 소유",
     ),
+    (
+        "PUT",
+        "/v1/ops/contract-fixtures/c6c-cancel-probe/{transaction_id}",
+    ): _resource(
+        "transaction_id가 Map 소유 cancel-probe fixture resource와 멱등 ensure를 식별"
+    ),
+    (
+        "POST",
+        "/v1/ops/contract-fixtures/c6c-cancel-probe/{transaction_id}/finalize",
+    ): _resource(
+        "consumed fixture와 canonical cancellation_id의 단조 finalization 전이가 재시도 경계"
+    ),
     ("POST", "/v1/ops/pipeline/requests"): _specialized(
         "feature-update.request",
         "ops.feature_update_request_idempotency가 actor/key/body/result를 소유",

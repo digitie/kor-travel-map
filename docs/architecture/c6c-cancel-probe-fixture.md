@@ -22,7 +22,8 @@ admin UI의 pipeline 목록을 검증하는 기능이 아니다.
 | normal cancel semantics | Map pipeline cancellation service | fixture 전용 취소 경로나 marker/history 삭제 |
 
 Map만 `ops.import_jobs`와 `ops.pipeline_cancellations`를 함께 잠글 수 있으므로, fixture
-수명주기 API는 Map service OpenAPI에 둔다. admin BFF/public/user OpenAPI에는 넣지 않는다.
+수명주기 API는 Map service OpenAPI에 둔다. runtime full `openapi.json`은 route audit을 위해
+이 3개 route를 포함하지만, user profile은 제외하고 admin BFF에는 이 route를 통과할 권한이 없다.
 
 ## 영속 모델
 
@@ -37,7 +38,7 @@ CREATE TABLE ops.c6c_cancel_probe_fixtures (
   state TEXT NOT NULL CHECK (state IN ('armed', 'consumed', 'finalized')),
   cancellation_id UUID UNIQUE
       REFERENCES ops.pipeline_cancellations(cancellation_id) ON DELETE RESTRICT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
   consumed_at TIMESTAMPTZ,
   finalized_at TIMESTAMPTZ,
   CHECK (
@@ -62,7 +63,11 @@ row와 함께 commit한다. 같은 transaction ID의 재요청은 **동일 job I
 `c6c_cancel_probe`는 reserved internal kind다. generic dispatch, worker claim, stale
 recovery, normal lifecycle mutation, canonical pipeline execution list/detail 및 `ops:read`
 projection이 이 kind를 선택하면 실패하도록 명시적으로 제외한다. fixture 전용 repository
-외에 generic `start`/`finish` helper를 export하지 않는다.
+외에 generic `start`/`finish` helper를 export하지 않는다. event write의 두 정본 경계
+(`record_import_job_event`와 그 SQL)는 이 kind를 먼저 거부하며, 새 DB trigger는 direct SQL
+`INSERT`를, 기존 event identity trigger는 job ID 변경을 거부한다. 따라서 fixture event가
+존재할 수 없고 event audit은 import-job join이라는 정렬 경로 훼손 우회 없이 기존 partial time
+index만 사용한다.
 
 ## 상태 전이와 crash 규칙
 
@@ -79,8 +84,11 @@ PUT ensure                 PinVi normal cancel             POST finalize
   닫고 final timestamp를 기록한다. unsafe cancellation의 marker, attempt, member, run,
   system log는 지우거나 바꾸지 않는다.
 - `PUT`과 `finalize` 모두 재시도 안전하다. process crash 뒤 Manager는 `GET`으로 현재
-  row를 읽고 다음에 필요한 요청만 보낸다. state가 `consumed`인 경우에는 cancel POST를
-  다시 보내지 않는다. `finalized` fixture는 재무장하지 않는다.
+  row와 `canonical_unsafe_outcome`을 읽고 다음에 필요한 요청만 보낸다. outcome은
+  `consumed`/`finalized` row의 canonical cancellation FK와 SQL consume 조건에서만 만들어지는
+  `{http_status:409, code:"PIPELINE_CANCELLATION_UNSAFE", root_job_id, cancellation_id}`
+  immutable 증빙이다. state가 `consumed`인 경우 Manager는 이 증빙을 durable receipt에 쓴 뒤
+  cancel POST를 다시 보내지 않고 finalize를 재개한다. `finalized` fixture는 재무장하지 않는다.
 - 과거 candidate image가 fixture endpoint/capability를 제공하지 않으면 Manager pair
   preflight가 fail-closed한다. old image에서 정적 UUID로 fallback하지 않는다.
 
@@ -94,13 +102,13 @@ PUT ensure                 PinVi normal cancel             POST finalize
 
 | method/path | 입력 | 성공 | 실패 의미 |
 |---|---|---|---|
-| `PUT /v1/ops/contract-fixtures/c6c-cancel-probe/{transaction_id}` | hyphenated UUID path | 200, `{transaction_id, job_id, state, capability_generation}` | malformed/다른 scope 403, 미인증 401, lifecycle 모순 409 |
-| `GET /v1/ops/contract-fixtures/c6c-cancel-probe/{transaction_id}` | hyphenated UUID path | 200, 같은 durable receipt | 없음 404 (Manager는 ensure 직후에만 허용) |
-| `POST /v1/ops/contract-fixtures/c6c-cancel-probe/{transaction_id}/finalize` | `cancellation_id` hyphenated UUID body | 200, final receipt | 아직 armed/불일치 cancellation 409 |
+| `PUT /v1/ops/contract-fixtures/c6c-cancel-probe/{transaction_id}` | hyphenated UUID path | 200, `{transaction_id, job_id, state, canonical_unsafe_outcome, capability_generation}` | malformed/다른 scope 403, 미인증 401, lifecycle 모순 409 |
+| `GET /v1/ops/contract-fixtures/c6c-cancel-probe/{transaction_id}` | hyphenated UUID path | 200, 같은 durable receipt와 outcome | 없음 404 (Manager는 ensure 직후에만 허용) |
+| `POST /v1/ops/contract-fixtures/c6c-cancel-probe/{transaction_id}/finalize` | `cancellation_id` hyphenated UUID body | 200, final receipt와 immutable outcome | 아직 armed/불일치 cancellation 409 |
 
-service OpenAPI artifact에는 이 3 route와 DTO, security requirement를 포함한다. full/admin/user
-artifact에는 노출하지 않는다. response의 `capability_generation`은 compatible-pair pinset의
-동일 값과 정확히 일치해야 한다.
+service OpenAPI artifact에는 이 3 route와 DTO, security requirement를 포함한다. runtime full
+`openapi.json`도 조립된 route audit을 위해 포함하며, user artifact는 제외한다. response의
+`capability_generation`은 compatible-pair pinset의 동일 값과 정확히 일치해야 한다.
 
 ## C6c 실행 순서
 
@@ -109,10 +117,11 @@ artifact에는 노출하지 않는다. response의 `capability_generation`은 co
    secret 없이 기록한다.
 3. PinVi가 기존 `ops:cancel` credential로 canonical import-job cancel을 한 번 호출한다.
 4. Manager가 **정확한** `409 PIPELINE_CANCELLATION_UNSAFE`와 canonical cancellation ID를
-   확인한다.
-5. Manager가 fixture credential로 `POST finalize`를 호출하고 durable receipt를 닫는다.
+   확인하고 `GET` outcome과 job/cancellation identity가 일치할 때만 receipt를 확정한다.
+5. response loss 뒤에는 `GET`의 immutable outcome을 같은 receipt로 기록한 뒤, cancel POST 없이
+   fixture credential로 `POST finalize`를 재개한다.
 
-cancel 직전/직후 crash도 `GET` state + existing canonical cancellation history로 재개한다.
+cancel 직전/직후 crash도 `GET` state + immutable outcome으로 재개한다.
 Manager가 Map DB 또는 container 상태를 읽어 추론하지 않는다.
 
 ## 검증 범위

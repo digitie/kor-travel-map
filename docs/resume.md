@@ -10,6 +10,29 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-08-06 — T-VN-41F1J-A Map fixture 구현·검증·적대 리뷰 완료, PR 게이트 중
+
+`0084_c6c_cancel_probe_fixtures`가 transaction별 fixture/job, canonical cancellation
+참조와 `armed → consumed → finalized` 시각 불변식을 영속화한다. Map service API는
+`ops:fixture` exact principal으로 ensure/receipt/finalize만 열고, generic
+worker·stale recovery·일반 pipeline/ops/live event projection은 fixture kind를
+제외한다. 다만 일반 PinVi cancel lineage는 유지하여 canonical unsafe 취소 결과가
+같은 transaction에서 fixture receipt로 소비된다. capability generation `2`의
+`canonical_unsafe_outcome`은 consumed/finalized canonical result를 immutable receipt로 돌려주므로,
+Manager response-loss 재개는 POST 재발송 없이 evidence를 durable write한 뒤 finalize한다. runtime
+attestation도 fixture token의 cursor secret 재사용을 명시적으로 거부한다.
+
+**검증**: fixture integration 2건, API auth 103건, event-audit bounded planner target,
+OpenAPI export/types drift와 Wave 2 OpenAPI freeze artifact 7건, strict mypy·ruff가 통과했다. 적대적 코드 리뷰 1인이 발견한
+event-audit join/직접 event 삽입 누출은 읽기 join이 아니라 DB trigger로 차단해 ordered
+partial-index gate를 보존했고, `job_id` filter의 기존 64행 bounded-sort 상한도 회귀로 고정했다.
+재리뷰 GO를 받았다. PR CI gate가 남았다.
+
+**다음 한 작업**: Map F1J-A PR #960의 CI gate를 통과·머지한다. 이어
+Docker Manager F1J-B의 dynamic ensure→PinVi exact-409→finalize receipt 및 F1J-C
+compatible-pair 재결박을 구현한 뒤 n150 격리 리허설과 prod live UI E2E(F1J-D)를
+수행한다.
+
 ## 2026-08-06 — T-VN-41F1J cancel-probe fixture 설계 착수
 
 F1D의 최초 probe는 `login=200 → etl_summary=200 → provider_sync=200 → cancel=404`로
