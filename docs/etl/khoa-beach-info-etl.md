@@ -10,7 +10,7 @@
 | dataset_key | `khoa_beaches` (`providers/khoa.py:64` `DATASET_KEY_BEACHES`) — feature_id / source_record_key에 박힘 |
 | Feature.kind | `place` |
 | source_entity_type | `beach` |
-| 상세 테이블 | `feature_place_details` |
+| 상세 테이블 | `feature_places` |
 | 코드 entrypoint | `kortravelmap.providers.khoa`, `kortravelmap.beaches` |
 | 갱신 주기 | 1일 1회 |
 | data.go.kr | `15058519` |
@@ -49,7 +49,7 @@
 | `gugunNm` | feature 이름 + natural key 부분 |
 | `staNm` | feature 이름 본체 + natural key 부분 |
 | `lat`, `lon` | `Feature.coord` (WGS84) |
-| `beachWid` (해변 폭) | `feature_place_details.facility_info["beach_width_m"]` |
+| `beachWid` (해변 폭) | `feature_places.facility_info["beach_width_m"]` |
 | `beachLen` (해변 길이) | `facility_info["beach_length_m"]` |
 | `beachKnd` (해변 종류) | `facility_info["beach_type"]` |
 | `linkAddr` (관련 URL) | `features.urls.homepage` |

@@ -497,5 +497,6 @@ README + 본 저장소 NOTICE에 출처 표기 의무.
   `providers/knps`에서 수행한다.
 - 한국어 필드 CP949 인코딩 가능 — `shapefile.Reader(encoding='cp949')` 또는
   `pyogrio.read_dataframe(..., encoding='cp949')`.
-- `features.geom` PostGIS 컬럼은 4326. `coord_5179` generated column으로 반경
-  검색 호환 (ADR-012).
+- 선·면 geometry는 `feature.feature_routes.geom`/`feature_areas.geom`이 정본이고
+  둘 다 4326이다 (ADR-084). point 좌표는 core `coord`이고 `coord_5179` generated
+  column으로 반경 검색과 호환된다 (ADR-012).

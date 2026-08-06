@@ -14,7 +14,7 @@ feature로 적재하는 ETL이다. 공항 메타데이터 목록(`client.airport
 | dataset_key | `krairport_airports` (`DATASET_KEY_AIRPORTS`) |
 | Feature.kind | `place` |
 | source_entity_type | `airport` |
-| 상세 테이블 | `feature_place_details` |
+| 상세 테이블 | `feature_places` |
 | category | **`06050000`** `TRANSPORT_AIRPORT` (`AIRPORT_CATEGORY`, `docs/architecture/category.md` §4) — Tier path: 교통 > 공항 |
 | place_kind | `airport` (`AIRPORT_PLACE_KIND`) |
 | marker_icon | `airport` (maki — `mapbox_maki_icon_or_none("06050000")`; `_DEFAULT_AIRPORT_ICON` fallback도 `airport`) |

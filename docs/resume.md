@@ -10,6 +10,19 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-08-06 (1) — T-VN-35 A-D 구현·리뷰 반영 완료 (ADR-084)
+
+`feat/tvn35-typed-subtypes` — kind별 typed subtype 5종 + 배타 arc, core
+`detail`·`geom` 제거 + `features_detailed` 조립 뷰(단일 정본). prod 복원본
+왕복에서 place·event·price·weather 731,620행 md5 동일 · notice
+`valid_start_time` 145/145 동일. 적대 리뷰 2인 P0×2·P1×6·P2×6 전량 반영
+(경계 정규화 무효 → write 경계 단일화·422, 이관 불가 행 조용한 소실 →
+선점검 fail-close, 세션 TimeZone 의존 → KST 고정 렌더).
+
+**다음 한 작업**: CI-parity 배터리 green 확인 → PR 생성·CI·머지 → 배포
+(EXPECTED_HEAD를 `0086_route_area_subtypes`로 선행 갱신, api→dagster/daemon
+재빌드) → Lane A 잔여 `T-VN-37A`(notice `tstzrange` — 35B가 남긴 자리).
+
 ## 2026-08-05 (10) — 32C PR-2 prod 배포 완료 (값 전환 라이브)
 
 `8c5bdcf8` 4-이미지 배포(ui 포함)·사후 검증 정상(상세 UUID·batch echo·

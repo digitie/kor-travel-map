@@ -11,7 +11,7 @@
 | dataset_key | `opinet_fuel_station_details` |
 | Feature.kind | `place` + `price` + `PriceValue` |
 | source_entity_type | `fuel_station` |
-| 상세 테이블 | `feature_place_details`, `feature_price_values` |
+| 상세 테이블 | `feature_places`, `feature_price_values` |
 | 코드 entrypoint | `kortravelmap.providers.opinet` |
 | category | **`06020000`** `TRANSPORT_FUEL` (`docs/architecture/category.md` §4) — Tier path: 교통 > 주유소 |
 | place_kind | `fuel_station` |

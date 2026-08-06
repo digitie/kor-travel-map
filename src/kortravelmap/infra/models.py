@@ -4,18 +4,24 @@
 raw SQL ``text()`` (ADR-004). 본 모듈은 Alembic ``target_metadata``의 원천이며
 ORM 인스턴스 read mapping 용도로도 사용 가능.
 
-PR#28 (Sprint 2 prep) scope:
-- ``features`` — 기준 테이블 (ADR-012 ``coord_5179`` STORED generated column)
+구성:
+- ``features`` — kind 공통 core (ADR-012 ``coord_5179`` STORED generated column).
+  kind별 값과 선·면 geometry는 여기 없다 — subtype이 정본이다(ADR-084).
+- kind별 typed subtype 5종 — ``feature_places`` / ``feature_events`` /
+  ``feature_notices`` / ``feature_routes`` / ``feature_areas``. core의
+  ``UNIQUE (feature_id, kind)``를 kind 상수 CHECK + 복합 FK로 참조하는
+  **배타 arc**다(한 feature는 최대 한 subtype, subtype이 있는 동안 kind 불변).
+- ``feature_weather_values`` / ``feature_price_values`` — weather/price는
+  subtype이 없고 값 정본이 이 둘이다.
 - ``source_records`` / ``source_links`` / ``provider_sync_state`` —
-  provider 적재 추적
+  provider 적재 추적. ``feature_files``, ``ops.*``도 여기 매핑돼 있다.
 - 4 schemas (feature / provider_sync / ops / x_extension)
 
-후속 PR에서 추가될 테이블:
-- detail 5종 (place/event/notice/area/route)
-- ``feature_opening_periods`` / ``feature_special_days``
-- ``feature_weather_values`` / ``feature_price_values``
-- ``feature_files``
-- ``ops.*`` (import_jobs / dedup_review_queue / ...)
+아직 없는 테이블: ``feature_opening_periods`` / ``feature_special_days``
+(0002의 후속 PR 항목 — 영업시간은 현재 subtype JSONB가 갖는다).
+
+뷰는 매핑하지 않는다 — ``feature.features_detailed``(조립)와
+``feature.public_features``는 alembic이 소유하고 repo가 raw SQL로 읽는다.
 
 ADR 참조
 --------
@@ -23,7 +29,8 @@ ADR 참조
 - ADR-007 — PostgreSQL 16 + PostGIS 3.5 + pg_trgm + pgcrypto
 - ADR-008 — extension은 ``x_extension`` schema 격리
 - ADR-012 — ``coord_5179`` STORED generated column (반경 검색 인덱스)
-- ADR-018 — Feature.detail JSONB (Pydantic 직렬화)
+- ADR-018 — Feature.detail은 kind별 Pydantic 모델 (자유 dict 금지)
+- ADR-084 — kind별 typed subtype 분해와 배타 arc
 - ADR-019 — 모든 datetime ``TIMESTAMPTZ`` (KST aware)
 """
 

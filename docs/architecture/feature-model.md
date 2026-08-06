@@ -72,8 +72,10 @@ class Feature(BaseModel):
 - `coord_precision_digits`: `coord`가 None이면 None이어야 한다(아니면
   ValidationError). `coord`가 있고 값이 None이면 model validator가 기본 6으로
   채운다. 명시 값은 3~8 범위(`ge=3, le=8`).
-- `geom`: route/area feature의 선·면 geometry (WKT, EPSG:4326). place/event 등
-  Point feature는 `None`(좌표는 `coord`). `features.geom` 컬럼에 저장(ADR-012).
+- `geom`: route/area feature의 선·면 geometry (WKT, EPSG:4326). **route/area 전용이자
+  필수**이며, 그 외 kind는 `None`이어야 한다(좌표는 `coord`) — 어기면 ValidationError.
+  저장 위치는 `feature.feature_routes.geom` / `feature.feature_areas.geom`
+  (ADR-084; core에는 geometry 컬럼이 없다). 좌표계 규약은 ADR-012.
 - 모든 datetime: timezone aware (Asia/Seoul). naive datetime 입력은
   ValidationError (ADR-019).
 - `detail`: kind에 맞는 모델만 허용. dict 입력은 ValidationError (ADR-018).
@@ -226,8 +228,8 @@ ROUTE_TYPE_DRIVE_COURSE     = "drive_course"
 `normalize_route_type(value)`가 한국어 alias("등산로", "무장애산책길", "트레킹",
 ...) 처리.
 
-geometry 자체는 `features.geom` 컬럼에 저장 (LINESTRING/MULTILINESTRING).
-RouteDetail에는 메타만.
+geometry 자체는 `feature.feature_routes.geom`에 저장
+(`MULTILINESTRING(4326)` NOT NULL). RouteDetail에는 메타만.
 
 ## 9. `AreaDetail`
 
@@ -245,7 +247,7 @@ class AreaDetail(BaseModel):
     # protected_area일 때 payload 예: {"protection_type": "special" | "restricted_use" | ...}
 ```
 
-geometry는 `features.geom` (MULTIPOLYGON).
+geometry는 `feature.feature_areas.geom` (`MULTIPOLYGON(4326)` NOT NULL).
 
 ## 10. 영업시간
 
@@ -509,6 +511,11 @@ DETAIL_MODELS: Final[dict[FeatureKind, type[BaseModel]]] = {
 ```
 
 직렬화/역직렬화는 이 dict로만. 자유 dict 우회 금지.
+
+DB 저장은 kind별 typed subtype 테이블
+(`feature.feature_places`/`feature_events`/`feature_notices`/`feature_routes`/
+`feature_areas`)이 맡고, 응답이 요구하는 `detail`은 뷰
+`feature.features_detailed`가 그 subtype에서 조립한다 (ADR-084).
 
 ## 20. 단위 테스트 매트릭스 (요약, 상세는 test-strategy)
 

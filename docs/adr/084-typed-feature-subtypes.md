@@ -111,7 +111,14 @@ notice 145 · price 97 · **route·area 0행**. `detail` 키는 kind별로 완�
   항구적으로 지우는 비용이 크다.
 - 73만행 backfill이 **11.1초**로 실측돼(prod 복원본, FK 2.9s·인덱스 0.3s 별도)
   api-entrypoint healthcheck 창(220s)에 여유가 크다 — 단계 분할이나 수동
-  선실행 같은 복잡도를 살 이유가 없다.
+  선실행 같은 복잡도를 살 이유가 없다. 마이그레이션 전체는 전진 54s · 역행
+  4m55s · 재전진 1m10s(prod 복원본 실측).
+- 뷰로 바꾼 대가가 hot path에 없다 — `detail`/`geom`을 **투영하지 않는** 조회는
+  planner가 subtype LEFT JOIN 5개를 전부 제거해 base table 조회와 같은 플랜이
+  된다(EXPLAIN 실측: `Limit → Seq Scan on features f`). `detail`을 투영하는
+  조회만 PK↔PK nested loop 5단을 타고, 그건 이미 좁혀진 행에만 붙는다.
+  반대로 **술어**에 뷰 컬럼을 쓰면 조인 제거가 불가능해지므로 bbox 같은
+  hot path는 subtype을 직접 참조한다(결정 5).
 
 ## 결과
 
@@ -140,7 +147,10 @@ notice 145 · price 97 · **route·area 0행**. `detail` 키는 kind별로 완�
   타입으로 cast 불가한 값, `starts_on > ends_on`. 근거: 건너뛴 행은 곧 오는
   `DROP COLUMN detail`로 **복구 불가능하게** 사라진다(downgrade도 subtype에서
   역조립하므로 되살릴 수 없다). 실패는 되돌릴 수 있고 소실은 되돌릴 수 없으며,
-  NOT NULL이 대신 내는 진단은 어느 행인지 말해주지 않는다.
+  NOT NULL이 대신 내는 진단은 어느 행인지 말해주지 않는다. 실측 확인: prod
+  복원본에서 8개 선점검 전부 무위반 통과, 위반 행을 심으면
+  `T-VN-35 preflight: place rows without detail->>'place_kind' … (1 row(s));
+  sample: probe:noplacekind` + 조치 HINT로 멈춘다.
 - **죽은 인덱스 2종은 이관하지 않는다.** `idx_features_yt_channel_id`/
   `_playlist_id`(ADR-061)는 식이 `detail #>> '{kor_travel_concierge,…}'`인데 그
   경로에 값이 있는 행이 prod에 **0건**이다(실제 위치는 `detail.payload.…`,
@@ -157,4 +167,7 @@ notice 145 · price 97 · **route·area 0행**. `detail` 키는 kind별로 완�
   않는다 — 종전 구현은 정규화 결과를 `object.__setattr__`로 되꽂아
   `model_dump(exclude_unset=True)`에서 통째로 빠뜨렸다(즉 한 번도 반영되지 않았다).
   계약 위반은 `SubtypeDetailError` → **422**다; 500으로 새면 이미 접수된 change
-  request가 승인 시점마다 터져 영구히 적용 불가가 된다.
+  request가 승인 시점마다 터져 영구히 적용 불가가 된다. 접수 상태 payload를
+  손보는 마이그레이션은 두지 않는다 — prod `ops.feature_change_requests`가
+  **0행**이다(실측). 값이 생긴 뒤라면 422가 "무엇이 틀렸는지"를 알려주므로
+  재접수로 해소된다.

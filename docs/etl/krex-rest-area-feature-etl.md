@@ -11,7 +11,7 @@
 | dataset_key | `krex_rest_areas`, `krex_rest_area_prices`, `krex_rest_area_weather`, `krex_traffic_notices` |
 | Feature.kind | `place` (휴게소) + `PriceValue` (유가) + `WeatherValue` (기상) + `notice` (교통) |
 | source_entity_type | `rest_area` |
-| 상세 테이블 | `feature_place_details`, `price_*`, `feature_weather_values`, `feature_notice_details` |
+| 상세 테이블 | `feature_places`, `feature_price_values`, `feature_weather_values`, `feature_notices` |
 | 코드 entrypoint | `kortravelmap.providers.krex`, `kortravelmap.highways`, `kortravelmap.notices` |
 
 ## 2. 4가지 sub-ETL

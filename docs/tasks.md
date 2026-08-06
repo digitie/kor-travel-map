@@ -71,7 +71,7 @@ barrier로 직렬화한다.
   - freeze(Lane A): [x] `T-VN-31A` → [x] `T-VN-31B` → [x] `T-VN-31C`
   - Lane A: [x] `T-VN-32A` → [x] `T-VN-32B` → [x] `T-VN-32C`(prod 배포·값 전환
     라이브 — Map #950/#952/#955/#956·PinVi #430/#432) →
-    [/] `T-VN-35A-D`(진행 중 — 설계 착수 2026-08-05, A-D 단일 PR 방침) →
+    [x] `T-VN-35A-D`(typed subtype 분해 — ADR-084, A-D 단일 PR) →
     [ ] `T-VN-37A` → [ ] `T-VN-37B` → [ ] `T-VN-37C`
   - Lane B shadow: [ ] `T-VN-33A` → [ ] `T-VN-33B` → [ ] `T-VN-33C` →
     [ ] `T-VN-38A` → [ ] `T-VN-38B` → [ ] `T-VN-38C` →
@@ -681,18 +681,29 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 
 ### T-VN-37 — typed notice state (Lane A)
 
+> **범위 축소(2026-08-06)**: T-VN-35B가 이미 `feature_notices.valid_start_time`/
+> `valid_end_time`을 typed `timestamptz`로 올렸고, read 필터의 문자열 파싱과
+> 비-ISO 방어 cast(`pg_input_is_valid`)는 그때 사라졌다. 37에 남은 것은 **range
+> 표현**과 lineage/current state다.
+
 - [ ] T-VN-37A — **notice range schema·backfill**
 
-  유효 기간과 lineage/current state를 typed range/FK/CHECK로 표현하고 오염 timestamp를 격리한다.
+  두 timestamptz를 `tstzrange`로 승격한다. 핵심은 **empty range**다 — provider가
+  미래 시행 공지를 철회하면 `end < start`가 실재하는데(실측
+  `start=2026-07-13/end=2026-06-02`), 그건 결함이 아니라 "발효 전에 철회됨"이다.
+  35B가 CHECK를 두지 않은 이유가 이것이고, empty range는 그 사실을 **금지하지 않고
+  정확히 표현**한다. lineage/current state도 같이 typed FK/CHECK로 올린다.
 
 - [ ] T-VN-37B — **notice writer/read query cutover**
 
-  notice provider writer와 public/admin history/current query를 range/index 기반으로 전환한다.
+  notice provider writer와 public/admin history/current query를 range 연산자
+  (`@>`/`&&`)와 GiST index 기반으로 전환한다.
 
-- [ ] T-VN-37C — **방어 cast·lineage anti-join 제거**
+- [ ] T-VN-37C — **lineage anti-join 제거**
 
-  T-VN-06의 잠정 cast와 공개 hot path anti-join을 제거하고 동등 결과·EXPLAIN·오염 입력 거부를
-  검증한다.
+  공개 hot path의 lineage anti-join을 range/index 기반 판정으로 대체하고 동등
+  결과·EXPLAIN·오염 입력 거부를 검증한다. (T-VN-06 잠정 cast는 35B에서 이미
+  제거됐다.)
 
 ### T-VN-38 — weather·price current summary (Lane B)
 
