@@ -5,7 +5,7 @@
   "baseline": {
     "admin": {
       "file": "packages/kor-travel-map-api/openapi.json",
-      "sha256": "8c4aa33cf5d1cf15b248ec95367e169adc275515f1d277a6a707cf64dbe1681f"
+      "sha256": "5928fa39c915062703870780ab3484632ffa418f310c4260318d8c01b6713f9f"
     },
     "user": {
       "file": "packages/kor-travel-map-api/openapi.user.json",
@@ -17,6 +17,11 @@
     }
   },
   "revisions": [
+    {
+      "date": "2026-08-06",
+      "task": "T-VN-35",
+      "change": "baseline sha256 재고정(admin만 — user/service는 바이트 동일). typed subtype 분해(ADR-084)로 admin 요청 모델 두 곳이 바뀐다: ① AdminFeatureCreateRequest/AdminFeaturePatchRequest에서 `geom` 필드 제거 — admin mutation은 place/event만 다루고 geometry 정본은 route/area subtype뿐이라, 종전엔 값을 받아 change request payload에 넣기까지 하고 적용 단계에서 쓰지 않았다(계약이 아니라 거짓말인 필드). ② create의 description에 detail 계약 1줄(kind 계약 불일치·미상 키는 422, 생략 시 kind 기본값). 응답 shape·필드·필수성·enum 무변경이고 Wave 2 목표 diff 항목·counts도 무변경 — removed 대상은 응답 표면이지 요청 본문의 미적용 필드가 아니다."
+    },
     {
       "date": "2026-08-04",
       "task": "T-VN-32C",

@@ -64,6 +64,12 @@
 - 배포 선행: orchestrator `.env`의 `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`를
   `0086_route_area_subtypes`로 올려야 한다(안 올리면 api가 DB를 건드리기 전에
   exit 1이고 dagster/daemon도 뜨지 않는다).
+- 문서에만 존재하던 테이블 5종(`feature_place_details` 등, 참조 0건)을 제거했다.
+  `feature_places`가 실제로 생기면서 이름이 겹쳐 purge·복구 런북 SQL이 위험해졌다.
+- 배터리 판정 주의: `test_domain_command_ledger`의 docker fence 2건은
+  **origin/main도 같이 실패**한다(같은 조건 baseline 2 failed / 23 passed 동일 —
+  이 박스의 docker-in-docker 문제). `test_batch_dag.py`는 격리 실행에서 전량
+  통과하고 전체 스위트 동시 실행에서만 흔들린다(docker.sock 경합).
 
 ## 2026-08-05 (12) — live e2e fixture 재표집 (구표본 전멸 발견)
 

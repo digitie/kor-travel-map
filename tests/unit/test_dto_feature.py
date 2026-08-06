@@ -198,6 +198,8 @@ def test_feature_area_hazard_zone() -> None:
         category="00000000",  # area는 카테고리 트리 외
         marker_icon="barrier",
         marker_color="P-13",
+        # ADR-084 — area는 geometry가 필수다(subtype geom이 NOT NULL).
+        geom="MULTIPOLYGON(((128.4 38.1, 128.5 38.1, 128.5 38.2, 128.4 38.2, 128.4 38.1)))",
         detail=area,
     )
     assert isinstance(f.detail, AreaDetail)
