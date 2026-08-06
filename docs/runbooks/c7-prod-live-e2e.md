@@ -265,6 +265,15 @@ runner를 실행하기 전 Map exact commit은 C7 v5 reader와 해당 generation
 producer/consumer 변경이 main에 함께 병합된 최종 commit이어야 한다. producer 또는
 consumer 한쪽만 main에 병합된 중간 commit은 배포·capture·live 실행 대상이 아니다.
 
+### T-VN-33 선행 계약
+
+F1D-E의 v5 journal/receipt verifier 자체는 main에서 독립적으로 fail-closed 검증할 수 있다.
+다만 파괴적 KMA spec의 `provider_dataset_id + sync_scope + operation_key` exact identity와
+그 deep-link/query·active/detail/membership projection은 T-VN-33 최종 merge(PR #966)가
+선행 조건이다. 그 merge 전 main의 dataset API는 pair 계약만 제공하므로 F1D-E는 pair/natural-key
+호환 경로나 version 변환을 만들지 않으며, KMA live/recovery 실행을 허용하지 않는다. final
+T-VN-33 commit을 pin·rebuild한 뒤에만 이 runbook의 v5 journal을 생성·소비한다.
+
 `/usr/local/lib/kor-travel-map/c7-runner/<exact-commit>/scripts/run-c7-prod-live-e2e.sh`의
 root-owned snapshot만 root로 실행한다. 모든 URL·credential·service 이름·
 origin hash·Git commit·manifest/rebuild journal/final-schema reload receipt path(`E2E_C7_FINAL_SCHEMA_RELOAD_RECEIPT`)·executor image ID와 destructive opt-in은 명시 env로
