@@ -175,7 +175,9 @@ def test_exact_triple_api_preflight_blocks_before_destructive_state() -> None:
     _assert_in_order(
         script,
         "has_residual_state &&",
+        "trap finish_exact_triple_api_preflight EXIT",
         "run_exact_triple_api_preflight ||",
+        "trap - EXIT INT TERM",
         "create_blocked_sentinel",
     )
     preflight = _section(
@@ -187,8 +189,14 @@ def test_exact_triple_api_preflight_blocks_before_destructive_state() -> None:
     assert "ops-c7-kma-contract-preflight.live.spec.ts" in preflight
     assert "discard_exact_triple_preflight_runtime" in preflight
     assert preflight.count("discard_exact_triple_preflight_runtime") >= 4
+    assert "finish_exact_triple_api_preflight()" in script
+    assert "remove_pre_sentinel_creating_container()" in script
+    assert "docker container inspect --format" in script
     assert 'operation_key: operationKey' in contract_preflight
     assert 'expect([404, 422]).toContain(foreign.status)' in contract_preflight
+    assert 'canonical.data.operation_key).toBe(KMA_NOWCAST_OPERATION_KEY)' in contract_preflight
+    assert 'canonical.data.scopes[0]?.sync_scope).toBe(syncScope)' in contract_preflight
+    assert 'expect([404, 422]).toContain(wrongScope.status)' in contract_preflight
 
 
 def test_dataset_ui_wait_and_direct_helper_bind_the_same_provider_dataset_id() -> None:

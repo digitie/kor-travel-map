@@ -27,6 +27,10 @@ function exactDetailPath(
   return `/v1/ops/datasets/${providerDatasetId}?${query.toString()}`;
 }
 
+function foreignSyncScope(): string {
+  return `external_system:c7-contract-foreign-${Date.now()}`;
+}
+
 async function canonicalKmaScope(
   page: Page,
   providerDatasetId: number,
@@ -79,11 +83,24 @@ test.describe("C7 KMA exact-triple API preflight (read-only, live)", () => {
       200,
     );
     expect(canonical.data.provider_dataset_id).toBe(providerDatasetId);
+    expect(canonical.data.operation_key).toBe(KMA_NOWCAST_OPERATION_KEY);
+    expect(canonical.data.scopes).toHaveLength(1);
+    expect(canonical.data.scopes[0]?.sync_scope).toBe(syncScope);
 
     const foreign = await browserFetch<unknown>(
       page,
       exactDetailPath(providerDatasetId, syncScope, FOREIGN_OPERATION_KEY),
     );
     expect([404, 422]).toContain(foreign.status);
+
+    const wrongScope = await browserFetch<unknown>(
+      page,
+      exactDetailPath(
+        providerDatasetId,
+        foreignSyncScope(),
+        KMA_NOWCAST_OPERATION_KEY,
+      ),
+    );
+    expect([404, 422]).toContain(wrongScope.status);
   });
 });

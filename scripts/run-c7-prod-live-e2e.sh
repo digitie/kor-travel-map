@@ -1165,6 +1165,87 @@ PY
   return "$command_status"
 }
 
+remove_pre_sentinel_creating_container() {
+  local active_container_name inspect_id observed_identity
+  [[ ! -e "$ACTIVE_CID_FILE" && ! -L "$ACTIVE_CID_FILE" ]] || return 1
+  [[
+    -f "$ACTIVE_CONTAINER_REF_FILE" &&
+    ! -L "$ACTIVE_CONTAINER_REF_FILE" &&
+    "$(stat -c '%u:%g:%a' -- "$ACTIVE_CONTAINER_REF_FILE" 2>/dev/null)" == "0:0:600"
+  ]] || return 1
+  if [[ -e "$ACTIVE_CREATE_OUTCOME_FILE" || -L "$ACTIVE_CREATE_OUTCOME_FILE" ]]; then
+    [[
+      -f "$ACTIVE_CREATE_OUTCOME_FILE" &&
+      ! -L "$ACTIVE_CREATE_OUTCOME_FILE" &&
+      "$(stat -c '%u:%g:%a' -- "$ACTIVE_CREATE_OUTCOME_FILE" 2>/dev/null)" == "0:0:600"
+    ]] || return 1
+  fi
+  active_container_name="$(python3 - "$ACTIVE_CONTAINER_REF_FILE" "$RUNTIME_DIR" "$ACTIVE_CONTAINER_NAME" <<'PY'
+import json
+import os
+import stat
+import sys
+
+path, runtime, expected_name = sys.argv[1:]
+fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+try:
+    observed = os.fstat(fd)
+    value = json.loads(os.read(fd, 4097))
+finally:
+    os.close(fd)
+if (
+    not stat.S_ISREG(observed.st_mode)
+    or observed.st_uid != 0
+    or observed.st_gid != 0
+    or stat.S_IMODE(observed.st_mode) != 0o600
+    or not isinstance(value, dict)
+    or value.get("phase") != "creating"
+    or value.get("runtime") != runtime
+    or value.get("container_name") != expected_name
+    or value.get("version") != 1
+):
+    raise SystemExit(1)
+print(expected_name)
+PY
+  )" || return 1
+  inspect_id="$(
+    timeout --signal=KILL 10s docker container ls --all --quiet --no-trunc \
+      --filter "name=^/${active_container_name}$" 2>/dev/null
+  )" || return 1
+  if [[ -n "$inspect_id" ]]; then
+    [[ "$inspect_id" =~ ^[0-9a-f]{64}$ ]] || return 1
+    observed_identity="$(docker container inspect --format \
+      '{{.Name}}|{{index .Config.Labels "io.kortravelmap.c7.runner"}}|{{range .Mounts}}{{if and (eq .Type "bind") .RW (eq .Source .Destination)}}{{.Source}}{{end}}{{end}}' \
+      -- "$inspect_id")" || return 1
+    [[ "$observed_identity" == "/${active_container_name}|prod-live-e2e|${RUNTIME_DIR}" ]] || return 1
+    docker container rm --force -- "$inspect_id" >/dev/null || return 1
+  fi
+  rm -f -- "$ACTIVE_CONTAINER_REF_FILE" "$ACTIVE_CREATE_OUTCOME_FILE" || return 1
+}
+
+finish_exact_triple_api_preflight() {
+  local status=$?
+  trap - EXIT INT TERM
+  set +e
+  if [[ -n "$ACTIVE_COMMAND_PID" ]]; then
+    terminate_active_command || status=1
+    status=1
+  fi
+  if ! remove_active_container; then
+    remove_pre_sentinel_creating_container || status=1
+  fi
+  if [[ -n "$RUNTIME_DIR" ]]; then
+    discard_exact_triple_preflight_runtime || status=1
+  fi
+  if [[ -n "$LOCK_GUARD_INPUT_FD" ]]; then
+    exec {LOCK_GUARD_INPUT_FD}>&- || status=1
+  fi
+  if [[ -n "$LOCK_GUARD_PID" ]]; then
+    wait "$LOCK_GUARD_PID" || status=1
+  fi
+  exit "$status"
+}
+
 prepare_exact_triple_preflight_runtime() {
   RUNTIME_DIR="$(mktemp -d "$STATE_ROOT/runtime.XXXXXX")" || return 1
   chown 0:0 -- "$RUNTIME_DIR" || return 1
@@ -1280,8 +1361,12 @@ start_orchestrator_lock_guard
 [[ ! -e "$BLOCKED_FILE" && ! -L "$BLOCKED_FILE" ]] ||
   die "prior BLOCKED state requires operator recovery"
 has_residual_state && die "prior C7 journal/runtime residue requires operator recovery"
+trap finish_exact_triple_api_preflight EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 run_exact_triple_api_preflight ||
   die "C7 exact-triple API/type preflight failed before destructive state creation"
+trap - EXIT INT TERM
 create_blocked_sentinel
 trap finish EXIT
 trap 'exit_for_signal 130' INT
