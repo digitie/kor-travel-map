@@ -192,6 +192,8 @@ def test_exact_triple_api_preflight_blocks_before_destructive_state() -> None:
     assert "finish_exact_triple_api_preflight()" in script
     assert "remove_pre_sentinel_creating_container()" in script
     assert "docker container inspect --format" in script
+    assert '"$(stat -c \'%u:%g:%a\' -- "$ACTIVE_CID_FILE" 2>/dev/null)" == "0:0:600"' in script
+    assert '"$ACTIVE_CID_FILE" \\' in script
     assert 'operation_key: operationKey' in contract_preflight
     assert 'expect([404, 422]).toContain(foreign.status)' in contract_preflight
     assert 'canonical.data.operation_key).toBe(KMA_NOWCAST_OPERATION_KEY)' in contract_preflight
