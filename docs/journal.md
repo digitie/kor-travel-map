@@ -2,6 +2,18 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-06 (codex) — T-VN-41F1D-C3 n150 파기형 rebuild 결선
+
+- Manager PR #167의 최신 Map typed-subtype pin으로 n150 `rebuild-pinned` generation을 committed했다.
+  Map application `0087_route_area_subtypes`, Map Dagster `29b539ebc72a`, PinVi `20260804_0049` schema
+  head와 일곱 runtime container health를 확인했다.
+- Manager v7 journal은 Map fixture `armed → consumed → finalized`, PinVi canonical cancel의 정확한
+  `409 PIPELINE_CANCELLATION_UNSAFE`, final `committed` phase를 보존했다. 로그인 POST는 `200`과
+  session cookie를 반환했고, data-independent n150 live UI E2E는 운영 홈·파이프라인 6건, Feature
+  목록·지도 초기 surface 10건을 통과했다.
+- 의도적으로 비어 있는 새 DB에서 고정 curated/feature ID를 요구한 기존 suite 실패는 C3 runtime failure와
+  분리한다. final-schema ETL 재적재 뒤 F1D-D acceptance에서 다시 실행한다.
+
 ## 2026-08-06 (codex) — F1D-C0a·F1J-A 완료 이관과 남은 C3 정렬
 
 - Map application schema head artifact(PR #963)와 Map-owned cancel-probe fixture lifecycle(PR #960)의
