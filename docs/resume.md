@@ -19,9 +19,13 @@ reconcile CTE 2개에 `MATERIALIZED` 장벽. 마이그레이션 `0088`은 `ANALY
 
 | | 3,045 notice | 145행(현행 prod) | 50,001 record 한 계보 |
 | --- | --- | --- | --- |
-| notice 목록 | 18.8초 → 0.085초 | 97.8ms → 6.8ms | 65.7ms → 6.3ms |
-| 단건 조회 | 16.2ms → 5.2ms | 6.9ms → 6.1ms | 26.8ms → 21.8ms |
+| notice 목록 | 17.6초 → 0.18초 | 82.6ms → 20.9ms | 87.3ms → 22.4ms |
+| 단건(승자) | 33.1ms → 19.7ms | 26.3ms → 19.2ms | 24.5ms → 20.2ms |
+| 단건(패자) | 22.4ms → 20.0ms | 20.7ms → 19.0ms | 25.4ms → 20.2ms |
 | reconcile | 118.4초 → 0.36초 | 26.2ms → 23.5ms | — |
+
+(마지막 열은 50,002 record 한 계보. 절대값은 리뷰어 2명이 같은 서버를 쓰던
+중이라 전체적으로 높다 — 교차 반복이라 비교는 유효하다.)
 
 **현행 prod 규모에서 이득은 작다.** 이 변경이 사는 곳은 규모다 — 적대 리뷰가
 만든 20,059 계보/26,811 notice(KMA 특보 Phase 2 형태)에서 종전은 13분 42초에도
@@ -72,9 +76,11 @@ reconcile CTE 2개에 `MATERIALIZED` 장벽. 마이그레이션 `0088`은 `ANALY
 
 - (해소됨) record쪽 scope 등식을 지워 record/entity 사본 일치 가정이 더 이상
   정확성의 전제가 아니다. 이 필터는 `origin/main`의 술어 집합과 계보 비교만 다르다.
-- (해소됨) 깊은 이력 계보 회귀는 순서 조건을 인덱스로 밀어 고쳤다 — 두 `EXISTS`
-  분리 + 죽은 `COALESCE` 제거 + 인덱스 꼬리 2열. 50,001 record 계보에서
-  26.8 → 21.8ms로 main보다 빠르다.
+- (해소됨) 깊은 이력 계보 회귀 — 두 `EXISTS` 분리 + 죽은 `COALESCE` 제거 +
+  인덱스 꼬리 `last_seen_at DESC, source_record_key DESC`. **DESC가 핵심**이다
+  (ASC면 패자가 158.7ms). 승자·패자·목록 세 축 전부 main 우위.
+- 후속 후보: `source_entity_heads`(T-VN-33 신설)에 현재 계보 요약을 얹으면 계보
+  깊이에 무관해진다. 프로토타입 수치는 ADR-087 §결과.
 - 인덱스가 `source_records` 쓰기에 상시 **WAL +17.5% / dirtied page +16.9%**를
   더한다(10만 행 bulk INSERT 실측). 트리거는 공짜다(WAL +2). 대안 2개는 실측으로
   배제 — 평컬럼 인덱스 파국(71.1 대 17.7초), 부분 인덱스는 planner가 증명 불가.

@@ -292,6 +292,9 @@ def test_current_notice_filter_keeps_the_ordering_test_indexable() -> None:
     # 죽은 COALESCE가 남으면 인덱스 열과 맞지 않는다 — last_seen_at은 NOT NULL이다.
     assert "COALESCE(cur_sr.last_seen_at" not in current
     assert "COALESCE(other_sr.last_seen_at" not in current
+    # 동률 분기는 별도 EXISTS여야 한다. 하나로 합치면 OR가 생겨 순서 조건이
+    # Index Cond에서 Filter로 떨어진다.
+    assert normalized.count("LIMIT 1 )") >= 2 or current.count("LIMIT 1") >= 2
 
 
 def test_nearby_feature_sql_guards_required_lon_lat_contract() -> None:

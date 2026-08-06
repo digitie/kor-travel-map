@@ -946,14 +946,15 @@ class SourceRecordRow(Base):
             text("imported_at DESC"),
             text("source_record_key DESC"),
         ),
-        # notice 계보 탐색(read 필터·reconcile) — ADR-087. read와 **같은 식**이어야
-        # 쓰인다(두 인자가 저장 컬럼이라 IMMUTABLE). 뒤 두 열은 순서 규칙이라
-        # "나보다 나은 행" 판정이 범위로 끊긴다.
+        # notice 계보 탐색(read 필터) — ADR-087. read와 **같은 식**이어야 쓰인다
+        # (두 인자가 저장 컬럼이라 IMMUTABLE). 뒤 두 열은 순서 규칙이고 **DESC**다 —
+        # 계보에서 실제로 조인되는 행(현재 record)은 그 계보의 최댓값이라, ASC면
+        # 패자의 스캔 범위 맨 끝에 놓여 이력을 전부 훑는다.
         Index(
             "idx_source_records_lineage",
             text("(COALESCE(lineage_key, source_entity_id))"),
-            "last_seen_at",
-            "source_record_key",
+            text("last_seen_at DESC"),
+            text("source_record_key DESC"),
         ),
         {"schema": "provider_sync"},
     )

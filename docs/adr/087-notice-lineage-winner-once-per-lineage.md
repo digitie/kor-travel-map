@@ -103,19 +103,36 @@ BEFORE INSERT arm이 돈다** — 전부 충돌하는 100,000행 upsert에서 `c
 (직전 판에는 "hot path는 트리거를 타지 않는다"고 적었는데 **틀렸다** — 적대 리뷰가
 `calls=100000`으로 실증했다.)
 
-### 4. 인덱스 열 순서는 계보 식이 앞이다
+### 4. 인덱스 꼬리는 순서 규칙이고 **DESC**다
 
-탐색은 4열 전부가 등식이라 btree 열 순서는 자유롭다. scope 3열을 앞세우면
-`idx_source_records_provider_dataset_entity`·`uq_source_records`와 **선행 3열이
-겹쳐** planner가 갈린다 — 무관한 dedup 질의가 이 인덱스로 새는 것을
-`test_t212d_perf_explain`이 잡았다. 그래서 선택도가 가장 높은 계보 식을 앞에 둔다.
+인덱스는 `((COALESCE(lineage_key, source_entity_id)), last_seen_at DESC,
+source_record_key DESC)`다.
 
-표현식 인덱스는 `ANALYZE` 전까지 자기 통계가 없다. 계획 **모양**은 그대로지만
-비용 추정이 나빠 3,045 규모에서 214.8ms 대 104.2ms(2.1배)였다. 그래서
-마이그레이션이 `ANALYZE provider_sync.source_records`로 끝난다. (직전 판에는
-"인덱스를 무시하고 종전 형태로 돈다"고 적었는데 **재현되지 않았다** — 적대 리뷰가
-통계 없는 DB 두 개를 만들어 확인했다. autovacuum의 평범한 `ANALYZE`도 표현식
-통계를 만들므로 배포 후 열화 위험은 없다.)
+선행은 계보 식이다. scope 3열을 앞세우면
+`idx_source_records_provider_dataset_entity`·`uq_source_records`와 선행 열이 겹쳐
+planner가 갈린다(무관한 dedup 질의가 새는 것을 `test_t212d_perf_explain`이 잡았다).
+scope 3열은 인덱스에 두지 않는다 — read 필터가 scope를 entity쪽에서 걸러 record쪽
+인덱스가 그것을 묶지 못한다. (reconcile은 record쪽에서도 걸지만 그쪽은
+`source_entities`에서 구동하므로 이 인덱스를 쓰지 않는다.)
+
+**DESC여야 하는 이유가 이 결정의 핵심이다.** 한 계보에서 실제로 조인되는 행은
+**현재 record 하나뿐**이고 그것은 그 계보의 `last_seen_at` **최댓값**이다. ASC로
+두면 패자의 스캔 범위(`> 나`)에서 그 행이 **맨 끝**에 놓여 `EXISTS`가 이력을 전부
+소비한다. DESC면 첫 항목에서 끊긴다.
+
+| 50,002 record 계보, 패자 단건 | 시간 |
+| --- | --- |
+| `origin/main` | 29.1ms |
+| 이 인덱스 ASC | **158.7ms** |
+| 이 인덱스 DESC | **25.0ms** |
+
+**패자가 다수라는 점이 중요하다** — 이 필터의 존재 이유가 패자를 거르는 것이다
+(prod 145건 중 98건). 승자만 재면 ASC도 빨라 보인다. 실제로 처음에 승자 하나뿐인
+fixture로 재고 "해결됐다"고 적었다가 적대 리뷰가 잡았다. 성능 주장은 **필터가
+숨기려는 쪽**에서 재야 한다.
+
+표현식 인덱스는 `ANALYZE` 전까지 자기 통계가 없다. 계획 모양은 그대로지만 비용
+추정이 나빠 3,045 규모에서 2.1배였다. 그래서 마이그레이션이 `ANALYZE`로 끝난다.
 
 ### 5. read 필터는 correlated를 유지하되, 순서 조건을 인덱스로 민다
 
@@ -195,12 +212,23 @@ read 필터 SQL은 15,675자 → 6,695자로 줄었다 — 같은 CASE가 한 �
   같은 값을 열 순서만 바꿔 담은 중복이다(out-of-scope 행에서 계보 식 =
   `source_entity_id`). 744행을 위한 값이고, 부분 인덱스로 줄이려면 read 술어를
   in-scope/out-of-scope 두 갈래로 쪼개야 해서 지금은 택하지 않았다.
+- **후속 후보 — `source_entity_heads`에 현재 계보 요약을 얹는다 (T-VN-33 소관).**
+  경쟁자 탐색이 `source_records`를 훑는 근본 원인은 그 테이블이 **이력 전체**를
+  담기 때문이다. 현재 head 요약(`current_lineage_key`, `current_seen_at`,
+  `current_record_key`)을 entity쪽에 두면 탐색이 record를 아예 안 건드리고
+  계보 깊이에 **완전히 무관**해진다. 프로토타입 실측(50,002 record 계보):
+  패자 19.2ms · 승자 20.5ms · 목록 20.4ms로 DESC 인덱스판(21.4/19.5/23.7ms)보다
+  근소하게 낫고 결과는 동일(47건)하다.
+  **지금 넣지 않는다**: 이득이 수 ms인데 인덱스 72MB와 가변 컬럼 3개 + 유지
+  트리거를 더 낸다. 그리고 T-VN-33이 `source_entity_heads`를 신설해
+  `current_source_record_key`를 대체하는 중이라, 이 요약은 그 테이블에 얹는 것이
+  맞다 — 지금 `source_entities`에 넣으면 곧 옮겨야 한다.
 - 계보 key에 **시간 성분이 없다** — KMA는 `(region_code, phenomenon)`이라 한 지역의
   호우특보가 영원히 한 계보로 접힌다. 계보당 인덱스 항목이 payload 이력만큼 단조
   증가하는데 현재인 것은 언제나 하나다. 처음에는 그 이력을 통째로 훑어 **50,001
-  record 계보에서 단건 조회가 `origin/main`보다 느렸다**(적대 리뷰 실측 8.1배).
-  순서 조건을 인덱스로 밀어 해결했다(결정 5) — 같은 fixture에서 26.8ms →
-  **21.8ms로 main보다 빠르고**, `Rows Removed by Filter: 50000`이 0이 됐다.
+  record 계보에서 단건 조회가 `origin/main`보다 느렸다**. 순서 조건을 인덱스로
+  밀고(결정 5) 그 인덱스를 DESC로 두어(결정 4) 해결했다 — 50,002 record 계보에서
+  패자 25.0ms · 승자 20.5ms로 `origin/main`(29.1 / 28.5ms)보다 빠르다.
 - 응답 계약 무변경.
 - 배포: `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`를
   **`0088_source_record_lineage_key`**로 선행 갱신(api 먼저, dagster/daemon 재빌드).

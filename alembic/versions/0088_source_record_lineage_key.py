@@ -253,11 +253,18 @@ def upgrade() -> None:
     # 인덱스는 read가 쓰는 식 그대로다. 두 인자가 모두 저장 컬럼이라
     # ``COALESCE``는 IMMUTABLE이고 표현식 인덱스가 성립한다.
     #
-    # 뒤의 두 열이 순서 규칙(``last_seen_at`` → ``source_record_key``)이다.
-    # read가 "나보다 나은 행이 있나"를 행 비교 하나로 묻기 때문에 계보 등식 +
-    # 이 두 열이 통째로 Index Cond가 되고, 스캔이 첫 항목에서 끊긴다. 없으면
-    # 계보의 payload **이력 전체**를 훑는다 — 50,001 record 계보에서
-    # ``Rows Removed by Filter: 50000``, 단건 조회가 종전 대비 느려진다.
+    # 뒤의 두 열이 순서 규칙(``last_seen_at`` → ``source_record_key``)이고
+    # **DESC**다. read가 "나보다 나은 행이 있나"를 행 비교 하나로 묻기 때문에
+    # 계보 등식 + 이 두 열이 통째로 Index Cond가 된다.
+    #
+    # DESC여야 하는 이유가 핵심이다. 한 계보에서 실제로 조인되는 행은 **현재
+    # record 뿐**이고 그것은 그 계보의 ``last_seen_at`` **최댓값**이다. ASC로 두면
+    # 패자의 스캔 범위(``> 나``)에서 그 행이 **맨 끝**에 놓여 ``EXISTS``가 이력을
+    # 전부 소비한다 — 50,002 record 계보에서 패자 단건 조회 158.7ms(같은 조건
+    # DESC 25.0ms, ``origin/main`` 29.1ms). DESC면 첫 항목에서 끊긴다.
+    #
+    # 패자가 다수라는 점이 중요하다 — 이 필터의 존재 이유가 패자를 거르는 것이다
+    # (prod 145건 중 98건). 승자만 재면 ASC도 빨라 보인다(적대 리뷰가 잡았다).
     #
     # scope 3열은 넣지 않는다. read가 scope를 entity쪽에서 거르므로 인덱스가
     # 그것을 묶지 못하고, 넣으면 ``idx_source_records_provider_dataset_entity``와
@@ -268,7 +275,7 @@ def upgrade() -> None:
         CREATE INDEX idx_source_records_lineage
           ON provider_sync.source_records (
             (COALESCE(lineage_key, source_entity_id)),
-            last_seen_at, source_record_key
+            last_seen_at DESC, source_record_key DESC
           )
         """
     )

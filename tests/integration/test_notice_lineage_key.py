@@ -205,10 +205,14 @@ async def test_lineage_index_matches_the_read_expression(
     assert feature_repo._lineage_sql("sr") == (
         "COALESCE(sr.lineage_key, sr.source_entity_id)"
     )
-    # 순서 두 열이 없으면 "나보다 나은 행" 판정이 Index Cond로 밀리지 않고
-    # 계보의 payload 이력 전체를 훑는다.
-    assert "last_seen_at" in definition
-    assert "source_record_key" in definition
+    # 순서 두 열이 **이 순서로, DESC**여야 한다. 계보에서 실제로 조인되는 행은
+    # 현재 record 하나뿐이고 그것이 그 계보의 last_seen_at 최댓값이라, ASC면
+    # 패자의 스캔 범위 맨 끝에 놓여 EXISTS가 이력을 전부 소비한다 —
+    # 50,002 record 계보에서 158.7ms 대 25.0ms. 부분 문자열 검사로는 순서도
+    # 방향도 못 잡는다.
+    tail = definition[definition.index("source_entity_id)") :]
+    assert "last_seen_at DESC" in tail
+    assert tail.index("last_seen_at DESC") < tail.index("source_record_key DESC")
 
 
 async def test_lineage_trigger_is_enable_always(
