@@ -67,22 +67,12 @@ DECLARE
     produced text;
 BEGIN
     IF jsonb_typeof(value) <> 'object'
-       OR NOT (value ?& ARRAY[
-           'schema_version', 'produces', 'refresh', 'preview', 'extensions'
-       ])
-       OR (value - ARRAY[
-           'schema_version', 'produces', 'refresh', 'preview', 'extensions'
-       ]) <> '{}'::jsonb
+       OR NOT (value ?& ARRAY['schema_version', 'produces', 'extensions'])
+       OR (value - ARRAY['schema_version', 'produces', 'extensions']) <> '{}'::jsonb
        OR jsonb_typeof(value -> 'schema_version') IS DISTINCT FROM 'number'
        OR value -> 'schema_version' <> '1'::jsonb
        OR jsonb_typeof(value -> 'produces') IS DISTINCT FROM 'array'
-       OR jsonb_typeof(value -> 'refresh') IS DISTINCT FROM 'object'
-       OR jsonb_typeof(value -> 'preview') IS DISTINCT FROM 'object'
        OR jsonb_typeof(value -> 'extensions') IS DISTINCT FROM 'object'
-       OR ((value -> 'refresh') - ARRAY['target_selector']) <> '{}'::jsonb
-       OR ((value -> 'preview') - ARRAY['kind']) <> '{}'::jsonb
-       OR COALESCE(value -> 'refresh' ->> 'target_selector', '') NOT IN ('none', 'poi_cache_targets')
-       OR COALESCE(value -> 'preview' ->> 'kind', '') NOT IN ('fixture', 'none')
     THEN
         RETURN false;
     END IF;
@@ -106,31 +96,16 @@ BEGIN
 END;
 $$;
 
-CREATE FUNCTION provider_sync.is_valid_provider_dataset_operation_scopes(
-    operation_kind text,
-    allowed_sync_scopes text[]
+CREATE FUNCTION provider_sync.is_valid_provider_dataset_sync_scope(
+    value text
 )
 RETURNS boolean
-LANGUAGE plpgsql
+LANGUAGE sql
 IMMUTABLE
 SET search_path = pg_catalog
 AS $$
-BEGIN
-    IF array_position(allowed_sync_scopes, NULL) IS NOT NULL
-       OR (
-           (operation_kind = 'refresh' AND cardinality(allowed_sync_scopes) = 0)
-           OR (operation_kind <> 'refresh' AND cardinality(allowed_sync_scopes) <> 0)
-       )
-       OR EXISTS (
-           SELECT 1
-           FROM unnest(allowed_sync_scopes) AS item(value)
-           GROUP BY item.value HAVING count(*) > 1
-       )
-    THEN
-        RETURN false;
-    END IF;
-    RETURN true;
-END;
+    SELECT value IN ('dataset_wide', 'target_grids')
+        OR value ~ '^external_system:[^[:space:]][^[:space:]]{0,111}$'
 $$;
 
 CREATE TABLE provider_sync.provider_datasets (
@@ -142,11 +117,10 @@ CREATE TABLE provider_sync.provider_datasets (
     source_kind text NOT NULL,
     -- 활성 상태 (ADR-069 결정 1)
     is_active boolean NOT NULL DEFAULT true,
-    -- capability 정본. code catalog는 DB projection이고 handler registry는
-    -- operation_key binding만 소유한다(ADR-087). refresh의 enabled/scope는
-    -- 중복하지 않고 provider_dataset_operations가 유일하게 소유한다.
+    -- capability는 dataset의 산출 metadata만 소유한다. 실행 가능 operation과 scope는
+    -- provider_dataset_operations 및 그 정규 scope child가 유일하게 소유한다(ADR-087).
     capabilities jsonb NOT NULL DEFAULT
-        '{"schema_version":1,"produces":[],"refresh":{"target_selector":"none"},"preview":{"kind":"none"},"extensions":{}}'::jsonb,
+        '{"schema_version":1,"produces":[],"extensions":{}}'::jsonb,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT pk_provider_datasets PRIMARY KEY (provider_dataset_id),
@@ -210,8 +184,8 @@ CREATE TABLE provider_sync.provider_dataset_operations (
     provider_dataset_id bigint NOT NULL,
     operation_key text NOT NULL,
     operation_kind text NOT NULL,
-    allowed_sync_scopes text[] NOT NULL DEFAULT '{}'::text[],
     is_enabled boolean NOT NULL DEFAULT true,
+    config jsonb NOT NULL DEFAULT '{}'::jsonb,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT pk_provider_dataset_operations PRIMARY KEY (provider_dataset_id, operation_key),
@@ -224,16 +198,36 @@ CREATE TABLE provider_sync.provider_dataset_operations (
     CONSTRAINT ck_provider_dataset_operations_kind CHECK (
         operation_kind IN ('feature_load', 'refresh', 'preview')
     ),
-    CONSTRAINT ck_provider_dataset_operations_scopes CHECK (
-        provider_sync.is_valid_provider_dataset_operation_scopes(
-            operation_kind, allowed_sync_scopes
-        )
-    )
+    CONSTRAINT uq_provider_dataset_operations_kind UNIQUE (
+        provider_dataset_id, operation_key, operation_kind
+    ),
+    CONSTRAINT ck_provider_dataset_operations_config CHECK (jsonb_typeof(config) = 'object')
 );
 
 CREATE INDEX idx_provider_dataset_operations_enabled
     ON provider_sync.provider_dataset_operations (provider_dataset_id, operation_key)
     WHERE is_enabled;
+
+CREATE FUNCTION provider_sync.assert_active_provider_dataset(dataset_id bigint)
+RETURNS void
+LANGUAGE plpgsql
+SET search_path = pg_catalog
+AS $$
+BEGIN
+    IF dataset_id IS NULL THEN
+        RETURN;
+    END IF;
+    PERFORM 1
+    FROM provider_sync.provider_datasets AS dataset
+    WHERE dataset.provider_dataset_id = dataset_id
+      AND dataset.is_active
+    FOR SHARE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'inactive provider dataset cannot receive normal writes'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_provider_dataset_active_write';
+    END IF;
+END;
+$$;
 
 CREATE FUNCTION provider_sync.reject_inactive_provider_dataset()
 RETURNS trigger
@@ -241,16 +235,42 @@ LANGUAGE plpgsql
 SET search_path = pg_catalog
 AS $$
 BEGIN
-    PERFORM 1
-    FROM provider_sync.provider_datasets AS dataset
-    WHERE dataset.provider_dataset_id = NEW.provider_dataset_id
-      AND dataset.is_active
-    FOR SHARE;
-    IF NOT FOUND THEN
-        RAISE EXCEPTION 'inactive provider dataset cannot receive new writes'
-            USING ERRCODE = '23514', CONSTRAINT = 'ck_provider_dataset_active_write';
+    IF TG_OP = 'UPDATE'
+       AND OLD.provider_dataset_id IS DISTINCT FROM NEW.provider_dataset_id
+    THEN
+        RAISE EXCEPTION 'provider dataset ownership is immutable'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_provider_dataset_ownership_immutable';
+    END IF;
+    IF TG_OP <> 'INSERT' THEN
+        PERFORM provider_sync.assert_active_provider_dataset(OLD.provider_dataset_id);
+    END IF;
+    IF TG_OP <> 'DELETE' THEN
+        PERFORM provider_sync.assert_active_provider_dataset(NEW.provider_dataset_id);
+    END IF;
+    IF TG_OP = 'DELETE' THEN
+        RETURN OLD;
     END IF;
     RETURN NEW;
+END;
+$$;
+
+CREATE FUNCTION provider_sync.assert_active_source_entity_dataset(entity_key text)
+RETURNS void
+LANGUAGE plpgsql
+SET search_path = pg_catalog
+AS $$
+BEGIN
+    PERFORM 1
+    FROM provider_sync.source_entities AS entity
+    JOIN provider_sync.provider_datasets AS dataset
+      ON dataset.provider_dataset_id = entity.provider_dataset_id
+    WHERE entity.source_entity_key = entity_key
+      AND dataset.is_active
+    FOR SHARE OF dataset;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'inactive provider dataset cannot receive lineage writes'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_provider_dataset_active_write';
+    END IF;
 END;
 $$;
 
@@ -260,48 +280,21 @@ LANGUAGE plpgsql
 SET search_path = pg_catalog
 AS $$
 BEGIN
-    PERFORM 1
-    FROM provider_sync.source_entities AS entity
-    JOIN provider_sync.provider_datasets AS dataset
-      ON dataset.provider_dataset_id = entity.provider_dataset_id
-    WHERE entity.source_entity_key = NEW.source_entity_key
-      AND dataset.is_active
-    FOR SHARE OF dataset;
-    IF NOT FOUND THEN
-        RAISE EXCEPTION 'inactive provider dataset cannot receive lineage writes'
-            USING ERRCODE = '23514', CONSTRAINT = 'ck_provider_dataset_active_write';
+    IF TG_OP = 'UPDATE'
+       AND OLD.source_entity_key IS DISTINCT FROM NEW.source_entity_key
+    THEN
+        RAISE EXCEPTION 'source entity ownership is immutable'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_source_entity_ownership_immutable';
     END IF;
-    RETURN NEW;
-END;
-$$;
-
-CREATE FUNCTION provider_sync.validate_provider_dataset_operation()
-RETURNS trigger
-LANGUAGE plpgsql
-SET search_path = pg_catalog
-AS $$
-DECLARE
-    selector text;
-    scope text;
-BEGIN
-    SELECT capabilities -> 'refresh' ->> 'target_selector'
-    INTO selector
-    FROM provider_sync.provider_datasets
-    WHERE provider_dataset_id = NEW.provider_dataset_id;
-
-    FOREACH scope IN ARRAY NEW.allowed_sync_scopes LOOP
-        IF scope <> 'dataset_wide'
-           AND scope <> 'target_grids'
-           AND scope !~ '^external_system:[^[:space:]][^[:space:]]{0,111}$'
-        THEN
-            RAISE EXCEPTION 'provider dataset operation has invalid sync scope'
-                USING ERRCODE = '23514', CONSTRAINT = 'ck_provider_dataset_operation_scope';
-        END IF;
-        IF scope LIKE 'external_system:%' AND selector <> 'poi_cache_targets' THEN
-            RAISE EXCEPTION 'external-system scope requires poi_cache_targets selector'
-                USING ERRCODE = '23514', CONSTRAINT = 'ck_provider_dataset_operation_capability_alignment';
-        END IF;
-    END LOOP;
+    IF TG_OP <> 'INSERT' THEN
+        PERFORM provider_sync.assert_active_source_entity_dataset(OLD.source_entity_key);
+    END IF;
+    IF TG_OP <> 'DELETE' THEN
+        PERFORM provider_sync.assert_active_source_entity_dataset(NEW.source_entity_key);
+    END IF;
+    IF TG_OP = 'DELETE' THEN
+        RETURN OLD;
+    END IF;
     RETURN NEW;
 END;
 $$;
@@ -318,12 +311,8 @@ END;
 $$;
 
 CREATE TRIGGER trg_provider_dataset_operations_active_write
-    BEFORE INSERT OR UPDATE ON provider_sync.provider_dataset_operations
+    BEFORE INSERT OR UPDATE OR DELETE ON provider_sync.provider_dataset_operations
     FOR EACH ROW EXECUTE FUNCTION provider_sync.reject_inactive_provider_dataset();
-
-CREATE TRIGGER trg_provider_dataset_operations_validate
-    BEFORE INSERT OR UPDATE ON provider_sync.provider_dataset_operations
-    FOR EACH ROW EXECUTE FUNCTION provider_sync.validate_provider_dataset_operation();
 
 CREATE TRIGGER trg_provider_dataset_operations_touch
     BEFORE UPDATE ON provider_sync.provider_dataset_operations
@@ -614,7 +603,7 @@ CREATE INDEX idx_source_entities_provider_dataset
     ON provider_sync.source_entities (provider_dataset_id);
 
 CREATE TRIGGER trg_source_entities_active_dataset_write
-    BEFORE INSERT OR UPDATE ON provider_sync.source_entities
+    BEFORE INSERT OR UPDATE OR DELETE ON provider_sync.source_entities
     FOR EACH ROW EXECUTE FUNCTION provider_sync.reject_inactive_provider_dataset();
 
 CREATE FUNCTION provider_sync.enforce_source_entity_identity_and_seen_at()
@@ -670,7 +659,7 @@ CREATE TABLE provider_sync.source_records (
 );
 
 -- immutable 보장(ADR-069 결정 2 "immutable raw payload") — UPDATE 거부 트리거.
--- DELETE는 보관 정책(ADR-017) purge 소관이라 막지 않는다.
+-- inactive dataset lineage의 DELETE도 normal 경로에서는 active guard가 거부한다.
 CREATE FUNCTION provider_sync.reject_source_record_update()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -687,7 +676,7 @@ CREATE TRIGGER trg_source_records_immutable
     FOR EACH ROW EXECUTE FUNCTION provider_sync.reject_source_record_update();
 
 CREATE TRIGGER trg_source_records_active_dataset_write
-    BEFORE INSERT ON provider_sync.source_records
+    BEFORE INSERT OR DELETE ON provider_sync.source_records
     FOR EACH ROW EXECUTE FUNCTION provider_sync.reject_inactive_source_entity_dataset();
 
 CREATE INDEX idx_source_records_entity_history
@@ -782,7 +771,7 @@ CREATE CONSTRAINT TRIGGER trg_source_entity_heads_completeness
     FOR EACH ROW EXECUTE FUNCTION provider_sync.assert_source_entity_head_completeness();
 
 CREATE TRIGGER trg_source_entity_heads_active_dataset_write
-    BEFORE INSERT OR UPDATE ON provider_sync.source_entity_heads
+    BEFORE INSERT OR UPDATE OR DELETE ON provider_sync.source_entity_heads
     FOR EACH ROW EXECUTE FUNCTION provider_sync.reject_inactive_source_entity_dataset();
 
 -- 7.4 source_links — Feature ↔ SourceEntity membership (ADR-069 결정 2 D-5-4)
@@ -816,7 +805,7 @@ CREATE INDEX idx_source_links_primary
     WHERE source_role = 'primary';
 
 CREATE TRIGGER trg_source_links_active_dataset_write
-    BEFORE INSERT OR UPDATE ON provider_sync.source_links
+    BEFORE INSERT OR UPDATE OR DELETE ON provider_sync.source_links
     FOR EACH ROW EXECUTE FUNCTION provider_sync.reject_inactive_source_entity_dataset();
 
 -- =============================================================================
@@ -907,7 +896,7 @@ CREATE INDEX idx_notice_states_valid_during
     ON provider_sync.notice_states USING gist (valid_during);
 
 CREATE TRIGGER trg_notice_states_active_dataset_write
-    BEFORE INSERT OR UPDATE ON provider_sync.notice_states
+    BEFORE INSERT OR UPDATE OR DELETE ON provider_sync.notice_states
     FOR EACH ROW EXECUTE FUNCTION provider_sync.reject_inactive_provider_dataset();
 
 -- =============================================================================
@@ -979,7 +968,7 @@ CREATE INDEX idx_weather_values_feature_target_known
     ON feature.feature_weather_values (feature_id, target_at DESC, known_at DESC);
 
 CREATE TRIGGER trg_feature_weather_values_active_dataset_write
-    BEFORE INSERT OR UPDATE ON feature.feature_weather_values
+    BEFORE INSERT OR UPDATE OR DELETE ON feature.feature_weather_values
     FOR EACH ROW EXECUTE FUNCTION provider_sync.reject_inactive_provider_dataset();
 
 -- current weather summary (ADR-072 결정 4, T-VN-38A) — bbox 매행 LATERAL을
@@ -1023,7 +1012,7 @@ CREATE UNIQUE INDEX uq_current_weather_summary_identity
     );
 
 CREATE TRIGGER trg_current_weather_summary_active_dataset_write
-    BEFORE INSERT OR UPDATE ON feature.current_weather_summary
+    BEFORE INSERT OR UPDATE OR DELETE ON feature.current_weather_summary
     FOR EACH ROW EXECUTE FUNCTION provider_sync.reject_inactive_provider_dataset();
 
 -- =============================================================================

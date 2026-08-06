@@ -39,25 +39,23 @@ weather/price 사실·summary 재모델링은 T-VN-38에서 한다. 이 둘은 p
   {
     "schema_version": 1,
     "produces": ["place"],
-    "refresh": {
-      "target_selector": "none"
-    },
-    "preview": {"kind": "fixture"},
     "extensions": {}
   }
   ```
 
   `schema_version`은 JSON number `1`, `produces`는 feature/값/enrichment 산출 종류의
-  중복 없는 문자열 배열, `target_selector`는 `none|poi_cache_targets`, `preview.kind`는
-  `fixture|none`으로 DB에서 검사한다. refresh의 enable 여부와 허용 scope는 JSON에
-  중복하지 않고 operation table만 소유한다. capability·active 상태 변경은 `updated_at`
-  trigger가 갱신한다.
+  중복 없는 문자열 배열이며 `extensions` 밖의 미정 control-plane 키는 허용하지 않는다.
+  capability는 **산출 metadata만** 소유한다. preview/refresh의 enable, handler, scope는
+  capability에 중복 저장하지 않고 operation과 그 정규 child만 소유한다. capability·active
+  상태 변경은 `updated_at` trigger가 갱신한다.
 
 `provider_sync.provider_dataset_operations`는
 `(provider_dataset_id, operation_key)`를 PK로 하여 enabled operation, operation kind,
-허용 scope를 저장한다. refresh operation만 중복 없는 canonical scope 배열을 가지며,
-external-system scope는 capability의 `target_selector='poi_cache_targets'`와 DB trigger로
-결박한다. Dagster/Python registry는 `operation_key → handler`만 binding한다.
+operation-local `config`를 저장한다. refresh scope는 배열/JSON이 아니라
+`provider_dataset_operation_scopes(provider_dataset_id, sync_scope)` 정규 child가 유일하게
+소유하고 refresh operation에 복합 FK로 결박한다. sync state, job/request membership,
+offline upload은 모두 이 scope에 복합 FK를 두며, normal write는 dataset과 operation이 모두
+active일 때만 허용한다. Dagster/Python registry는 `operation_key → handler`만 binding한다.
 빈 DB는 versioned Alembic seed가 dataset·capability·operation을 같이 넣는다. 새 provider
 dataset은 새 seed migration과 handler를 같은 PR에 넣어야 하며, runtime의 자동 `INSERT`는
 오타를 새 정본으로 승격하므로 금지한다. API catalog는 이 두 테이블의 DB projection으로
@@ -107,13 +105,14 @@ column/constraint/index/trigger/repository/query 목록은 cutover 전에
 [`t-vn-33-source-lineage.md`](../removal-manifests/t-vn-33-source-lineage.md)에 고정하고
 T-VN-39에서만 물리 삭제한다.
 
-`is_active=false` dataset은 역사 row를 읽을 수는 있으나 기존 row 갱신을 포함해 entity,
-operation, policy, sync state, membership, upload, curation/integrity/POI/enrichment write를
-전혀 받을 수 없다. direct FK child는 `BEFORE INSERT OR UPDATE` 공용 guard로, indirect
-lineage child는 entity→dataset join 공용 guard로 SQLSTATE `23514`를 낸다. parent row는
-`FOR SHARE`로 잠가 deactivate와 child write를 직렬화한다. T-VN-33에는 generic bypass를
-두지 않으며, purge는 T-VN-39의 별도 권한 경계에서만 설계한다. final-schema rebuild는
-새 DB를 만드는 경로라 guard 우회가 아니다.
+`is_active=false` dataset은 역사 row를 읽을 수는 있으나 entity, operation, policy, sync
+state, membership, upload, curation/integrity/POI/enrichment의 INSERT/UPDATE/DELETE를 전혀
+받을 수 없다. direct FK child는 old/new ownership을 모두 검사하는 공용 guard로, indirect
+lineage child는 parent→dataset join guard로 SQLSTATE `23514`를 낸다. ownership의 active
+dataset A→B 재귀속도 허용하지 않으며 새 row/member를 만들어야 한다. parent row와 refresh
+operation은 `FOR SHARE`로 잠가 deactivate/disable과 child write를 직렬화한다. T-VN-33에는
+generic bypass를 두지 않고, purge 권한 경계는 T-VN-39에서만 별도로 설계한다. final-schema
+rebuild는 새 DB를 만드는 경로라 guard 우회가 아니다.
 
 target freeze에서 이미 직접 guard를 검증하는 물리 경계는
 `provider_dataset_operations`, `source_entities`, `notice_states`,
@@ -121,7 +120,7 @@ target freeze에서 이미 직접 guard를 검증하는 물리 경계는
 각 table/membership도 같은 trigger를 붙이며, indirect 소유자인 `source_records`와
 `source_links`는 `source_entities`의 guard를 통해서만 새 dataset에 귀속될 수 있다.
 `contracts/vnext/tvn33-reference-ownership-v1.sql`은 이번 PR matrix의 모든 새 relation,
-FK, parent-lock guard를 executable DDL로 고정한다. import event는 `(job_id,
+FK, parent-lock/ownership-immutability guard를 executable DDL로 고정한다. import event는 `(job_id,
 import_job_dataset_id)` 복합 FK로 동일 job의 member만 참조한다. integrity violation이
 dataset과 source record를 모두 가지면 source entity를 통해 같은 dataset이어야 하며,
 enrichment review는 dataset ID를 중복 저장하지 않고 source entity ownership에서 dataset을
@@ -140,7 +139,7 @@ enrichment review는 dataset ID를 중복 저장하지 않고 source entity owne
 | notice lifecycle/lineage | 이번 PR | scope가 dataset FK를 소유, lineage는 scope FK |
 | `feature.curated_sources`/rules | 이번 PR | source가 dataset FK, rule의 중복 `dataset_key` 제거 |
 | refresh policy·offline upload | 이번 PR | dataset FK + scope/checksum identity |
-| import job·feature update request | 이번 PR | `ops.import_job_datasets`/`feature_update_request_datasets` membership; root는 member 없음, child 또는 direct request는 1개 이상 |
+| import job·feature update request | 이번 PR | job의 `root|single|multiple`, request의 `single|multiple` mode + deferred membership completeness; root job은 member 0, single은 정확히 1, multiple은 1개 이상 |
 | import job event | 이번 PR | pair 문자열 제거, job/member join에서 파생 |
 | integrity observation scope/run·violation | 이번 PR | scope/run은 dataset FK, violation은 nullable dataset FK 또는 source record에서 파생 |
 | POI cache-target feature link | 이번 PR | nullable dataset FK; pair가 없는 generic relation은 NULL |
@@ -149,21 +148,24 @@ enrichment review는 dataset ID를 중복 저장하지 않고 source entity owne
 | weather/price history·summary | T-VN-38 | 각 fact identity/summary 전환과 함께 dataset FK |
 
 `import_jobs` root와 multi-dataset request에 단일 FK를 억지로 두지 않는다. member table이
-exact pair·scope·member lifecycle을 소유한다. `import_job_events`는 event payload의 pair를
-identity로 쓰지 않으며 job/member로 파생한다. provider-only 감사는 dataset FK의 예외임을
-명시하고 fake dataset row를 만들지 않는다.
+exact pair·scope·member lifecycle을 소유하며 mode와 deferred trigger가 cardinality를 DB에서
+강제한다. `import_job_events`는 event payload의 pair를 identity로 쓰지 않으며 job/member로
+파생한다. root job event만 member가 NULL일 수 있고, non-root job event는 같은 job의 member를
+가져야 한다. provider-only 감사는 dataset FK의 예외임을 명시하고 fake dataset row를 만들지
+않는다.
 
 ### 5. backfill과 membership의 결정 경계
 
 - seed는 code catalog가 아니라 migration의 versioned data다. 모든 현행 pair의 union을
   dataset row로 만들며, 실제 operation handler가 없는 historical-only pair는
   `is_active=false`·operation 없음으로 seed한다. runtime pair 자동 등록은 없다.
-- import job root는 pair를 갖지 않는다. `ops.import_job_datasets` member가 exact dataset과
-  scope를 소유하고, pair-specific event는 반드시 그 member FK를 갖는다. root-level event는
-  member가 NULL일 수 있으나 provider/dataset 문자열을 쓰지 않는다.
-- feature update request도 생성 시점에 resolver가 active dataset member snapshot을 만들고,
-  geographic request의 다중 실행은 그 member 집합만 사용한다. direct request는 정확히 하나의
-  member를 갖고, 새 pair가 dispatch 중 자동으로 늘어나지 않는다.
+- import job root는 pair/member를 갖지 않는다. single/multiple job의 member가 exact dataset과
+  scope를 소유하고, pair-specific event는 반드시 같은 job의 member FK를 갖는다. root-level
+  event만 member가 NULL일 수 있으며 provider/dataset 문자열을 쓰지 않는다.
+- feature update request는 생성 시점에 resolver가 active dataset member snapshot을 만들고,
+  geographic request의 다중 실행은 그 member 집합만 사용한다. direct request는 정확히 하나,
+  geographic request는 하나 이상 member를 갖도록 deferred DB trigger가 강제하며, 새 pair가
+  dispatch 중 자동으로 늘어나지 않는다.
 - expand 이전에 API/Dagster writer를 drain하고 A/B/C 전체를 하나의 maintenance boundary로
   적용한다. long-lived dual write는 만들지 않는다. source record/head backfill이 끝난 뒤에만
   immutable/head completeness trigger를 설치한다.
@@ -197,8 +199,9 @@ transaction 또는 rerun-safe cleanup으로 복구하고, C 뒤에는 final-sche
   exactness, curation/job/request membership 보존.
 - half pair·NFC collision·record/entity mismatch·cross-entity head·role/boolean mismatch가
   controlled migration failure가 되는 fixture.
-- immutable record update/legacy write/inactive dataset write를 SQLSTATE로 거부하고, 같은
-  raw payload의 재관측이 raw UPDATE 없이 entity/head freshness만 전진하는 concurrency test.
+- immutable record update/legacy write/inactive dataset write/delete·ownership clear를 SQLSTATE로
+  거부하고, 같은 raw payload의 재관측이 raw UPDATE 없이 entity/head freshness만 전진하는
+  concurrency test.
 - direct guard, notice/curation/import/integrity의 indirect guard, event의 cross-job member,
   integrity violation의 cross-dataset 조합을 각각 executable rejection fixture로 고정한다.
 - operation root/multi-dataset member projection, policy/sync/upload/curation/integrity read-write
@@ -211,10 +214,11 @@ transaction 또는 rerun-safe cleanup으로 복구하고, C 뒤에는 final-sche
 
 | 리뷰 구분 | 판정 | 반영 |
 |---|---|---|
-| 스키마 리뷰 | 2차 NO-GO → 재리뷰 대기 | inactive guard가 기존 row/indirect lineage를 빠뜨리고 capability와 operation이 refresh 상태를 이중 소유한 P0를 발견. direct/indirect all-write guard, parent shared lock, JSON number type, operation-only enable/scope 및 per-guard rejection fixture로 보완했다 |
-| 마이그레이션 리뷰 | 2차 NO-GO → 재리뷰 대기 | head completeness 집계 오류, 이번 PR matrix의 target DDL 부재, final removal manifest 부재 P0를 발견. positive history invariant, exact manifest, 전수 ownership DDL·복합 FK·fixture를 추가했다 |
+| 스키마 리뷰 | 3차 NO-GO → 재리뷰 대기 | 역방향 capability 변경, scope authorization, nullable/OLD ownership clear, parent lifecycle guard, inactive DELETE, ownership 재귀속 P0를 발견. capability를 metadata로 축소하고 normalized scope, old/new all-mutation guard, parent/member lock, immutable ownership fixture로 보완 중 |
+| 마이그레이션 리뷰 | 3차 NO-GO → 재리뷰 대기 | head completeness 집계 오류, 이번 PR matrix의 target DDL 부재, final removal manifest 부재를 해소했으나 import/request membership cardinality P0를 발견. mode와 deferred completeness trigger, 정상/위반 fixture를 추가해 재리뷰한다 |
 
-2차 P0가 0이 되기 전에는 implementation을 시작하지 않는다. 이 문서와 ADR-087, target
-contract를 함께 갱신했고 빈 PostGIS DB에서 invariant·fixture·정상 history assertion을
-실행했다. 동일 두 관점의 적대 재리뷰에서 P0=0 GO를 받은 뒤에만 implementation을 시작하며,
-actual migration/model/API cutover 뒤에는 전체 누적 delta를 다시 리뷰한다.
+3차 P0가 0이 되기 전에는 implementation을 시작하지 않는다. 이 문서와 ADR-087, target
+contract를 함께 갱신했고 빈 PostGIS DB에서 invariant·rejection fixture·정상 history 및
+membership assertion을 실행했다. 동일 두 관점의 적대 재리뷰에서 P0=0 GO를 받은 뒤에만
+implementation을 시작하며, actual migration/model/API cutover 뒤에는 전체 누적 delta를 다시
+리뷰한다.

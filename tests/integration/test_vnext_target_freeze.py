@@ -66,6 +66,7 @@ _TARGET_TABLES: Final = (
     "feature.theme_feature_candidates",
     "provider_sync.provider_datasets",
     "provider_sync.provider_dataset_operations",
+    "provider_sync.provider_dataset_operation_scopes",
     "provider_sync.source_entities",
     "provider_sync.source_records",
     "provider_sync.source_entity_heads",
@@ -97,21 +98,35 @@ _TARGET_RELATIONS: Final = (*_TARGET_TABLES, "feature.public_features")
 _TARGET_FUNCTIONS: Final = (
     "feature.force_features_row_revision()",
     "provider_sync.is_valid_provider_dataset_capabilities(jsonb)",
-    "provider_sync.is_valid_provider_dataset_operation_scopes(text,text[])",
+    "provider_sync.is_valid_provider_dataset_sync_scope(text)",
     "provider_sync.reject_provider_dataset_identity_update()",
     "provider_sync.touch_provider_dataset()",
+    "provider_sync.assert_active_provider_dataset(bigint)",
     "provider_sync.reject_inactive_provider_dataset()",
+    "provider_sync.assert_active_source_entity_dataset(text)",
     "provider_sync.reject_inactive_source_entity_dataset()",
-    "provider_sync.validate_provider_dataset_operation()",
     "provider_sync.touch_provider_dataset_operation()",
     "provider_sync.reject_source_record_update()",
     "provider_sync.enforce_source_entity_head_freshness()",
     "provider_sync.enforce_source_entity_identity_and_seen_at()",
     "provider_sync.assert_source_entity_head_completeness()",
+    "provider_sync.assert_active_provider_dataset_scope(bigint,text)",
+    "provider_sync.reject_inactive_provider_dataset_scope()",
+    "provider_sync.assert_active_notice_lifecycle_scope(bigint)",
     "provider_sync.reject_inactive_notice_lifecycle_scope()",
+    "provider_sync.assert_active_curated_source_dataset(uuid)",
     "provider_sync.reject_inactive_curated_source_dataset()",
+    "provider_sync.assert_import_job_members_active(uuid)",
+    "provider_sync.reject_inactive_import_job_members()",
+    "provider_sync.assert_import_job_membership_complete()",
+    "provider_sync.assert_import_job_event_member(uuid,uuid)",
     "provider_sync.reject_inactive_import_job_dataset()",
+    "provider_sync.assert_feature_update_request_members_active(uuid)",
+    "provider_sync.reject_inactive_feature_update_request_members()",
+    "provider_sync.assert_feature_update_request_membership_complete()",
+    "provider_sync.assert_active_integrity_observation_scope(bigint)",
     "provider_sync.reject_inactive_integrity_observation_scope()",
+    "provider_sync.assert_active_source_record_dataset(text)",
     "provider_sync.validate_data_integrity_violation_dataset()",
 )
 
@@ -444,12 +459,17 @@ async def test_violation_fixtures_rejected_with_expected_sqlstate(
         expected = expectations[name]
         transaction = freeze_db.transaction()
         await transaction.start()
+        error: asyncpg.PostgresError | None = None
         try:
-            with pytest.raises(asyncpg.PostgresError) as excinfo:
+            try:
                 await freeze_db.execute(case_sql)
+            except asyncpg.PostgresError as caught:
+                error = caught
+            else:
+                raise AssertionError(f"case {name}: expected DB rejection was not raised")
         finally:
             await transaction.rollback()
-        error = excinfo.value
+        assert error is not None
         assert getattr(error, "sqlstate", None) == expected["sqlstate"], (
             f"case {name}: SQLSTATE {getattr(error, 'sqlstate', None)!r} != "
             f"{expected['sqlstate']!r} ({error})"
@@ -508,6 +528,76 @@ async def test_multiple_records_with_one_head_satisfy_completeness_invariant(
             if "count(DISTINCT head.source_entity_key)" in query
         )
         assert await freeze_db.fetchval(completeness_query) == 0
+    finally:
+        await transaction.rollback()
+
+
+async def test_membership_modes_accept_only_a_complete_canonical_shape(
+    freeze_db: asyncpg.Connection,
+) -> None:
+    """root job은 member 0개, single job/request는 member 1개일 때만 정상이다."""
+    transaction = freeze_db.transaction()
+    await transaction.start()
+    try:
+        dataset_id = await freeze_db.fetchval(
+            """
+            INSERT INTO provider_sync.provider_datasets (
+                provider, dataset_key, display_name, source_kind
+            ) VALUES ('positive-fixture', 'membership', 'membership', 'manual')
+            RETURNING provider_dataset_id
+            """
+        )
+        await freeze_db.execute(
+            """
+            INSERT INTO provider_sync.provider_dataset_operations (
+                provider_dataset_id, operation_key, operation_kind
+            ) VALUES ($1, 'refresh', 'refresh')
+            """,
+            dataset_id,
+        )
+        await freeze_db.execute(
+            """
+            INSERT INTO provider_sync.provider_dataset_operation_scopes (
+                provider_dataset_id, sync_scope, operation_key
+            ) VALUES ($1, 'dataset_wide', 'refresh')
+            """,
+            dataset_id,
+        )
+        single_job_id = await freeze_db.fetchval(
+            """
+            INSERT INTO ops.import_jobs (kind, dataset_membership_mode)
+            VALUES ('positive-single-job', 'single')
+            RETURNING job_id
+            """
+        )
+        await freeze_db.execute(
+            """
+            INSERT INTO ops.import_job_datasets (job_id, provider_dataset_id, sync_scope)
+            VALUES ($1, $2, 'dataset_wide')
+            """,
+            single_job_id,
+            dataset_id,
+        )
+        await freeze_db.execute(
+            "INSERT INTO ops.import_jobs (kind, dataset_membership_mode) VALUES ('root', 'root')"
+        )
+        request_id = await freeze_db.fetchval(
+            """
+            INSERT INTO ops.feature_update_requests (dataset_membership_mode)
+            VALUES ('single')
+            RETURNING request_id
+            """
+        )
+        await freeze_db.execute(
+            """
+            INSERT INTO ops.feature_update_request_datasets (
+                request_id, provider_dataset_id, sync_scope
+            ) VALUES ($1, $2, 'dataset_wide')
+            """,
+            request_id,
+            dataset_id,
+        )
+        await freeze_db.execute("SET CONSTRAINTS ALL IMMEDIATE")
     finally:
         await transaction.rollback()
 

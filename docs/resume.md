@@ -1,27 +1,17 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
-## 2026-08-06 — T-VN-33 설계 재리뷰 P0 보완 계약 검증 완료
+## 2026-08-06 — T-VN-33 3차 P0 보완 계약 검증 완료
 
 T-VN-33의 target DDL·invariant·rejection fixture를 ADR-087에 맞춰 확장한 뒤 두 적대
-리뷰어의 2차 NO-GO를 받았다. 정상 history/head completeness 집계, inactive dataset의
-기존·indirect write 및 deactivate 경쟁, capability/operation 이중 정본, matrix 전체 target
-DDL, final removal manifest P0를 계약으로 보완했다. 전수 ownership DDL에는 event의
-cross-job membership 복합 FK와 integrity source-record/dataset 일치까지 포함했고, 빈
-PostGIS DB에서 모든 rejection fixture와 정상 history assertion을 실행했다.
+리뷰어의 3차 NO-GO를 받았다. 이전 history/head completeness, full ownership DDL, removal
+manifest P0에 더해 capability/operation 이중 정본, unauthorized scope, inactive 기존/간접/
+nullable child의 update/delete/ownership clear, job/request parent lifecycle, membership
+cardinality P0를 보완했다. capability는 산출 metadata로 축소하고 operation scope는 정규
+child로 분리했으며, 전수 ownership DDL은 old/new guard·parent lock·deferred cardinality를
+실행한다. 빈 PostGIS DB에서 rejection fixture, 정상 history, 정상 membership을 검증했다.
 
 **다음 한 작업**: 두 적대 리뷰어의 재리뷰 P0=0 GO를 받은 뒤, T-VN-33A의 actual
 migration/model/seed 구현을 같은 단일 PR에 누적한다.
-
-## 2026-08-06 — T-VN-33 A/B/C 단일 PR 설계·적대 리뷰 완료, 구현 착수
-
-T-VN-33A/B/C를 세 PR로 나누지 않고 하나의 DB 정본 PR로 합쳤다. 초기 계획은 적대적
-스키마·마이그레이션 리뷰에서 NO-GO였고, dataset capability/operation DB 정본, versioned empty-DB
-seed, immutable raw record와 mutable entity/head, multi-dataset membership, legacy write fence,
-3-revision forward-only migration을 문서·ADR-087에 고정해 P0를 해소했다.
-
-**다음 한 작업**: T-VN-33의 target contract/모델/migration A를 구현하고, canonical writer/reader와
-fence까지 같은 PR에서 완결한다. T-VN-41 재적재는 별도 background로 진행 중이며 완료 후 F1D-D의
-data-dependent n150 live UI E2E를 실행한다.
 
 ## 2026-08-06 — T-VN-41F1D-C0a·F1J-A 병합, v5 dynamic fixture 결선 대기
 

@@ -2,6 +2,20 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-06 (codex) — T-VN-33 3차 P0 contract 재설계
+
+- 3차 적대 리뷰가 확인한 reverse capability/control-plane, scope authorization, nullable
+  owner clear, inactive delete, parent lifecycle, exact membership cardinality를 한 checkpoint로
+  재설계했다. capability JSON은 산출 metadata만 남기고 refresh scope는
+  `provider_dataset_operation_scopes` 정규 child로 이동했다.
+- 모든 scope 의존 row는 `(provider_dataset_id, sync_scope)` FK와 enabled operation/dataset
+  parent-lock guard를 사용한다. inactive dataset의 old/new direct·indirect ownership mutation,
+  source-record-derived integrity violation, parent status mutation, delete, active A→B 재귀속도
+  DB가 거부한다.
+- import job은 `root|single|multiple`, feature update request는 `single|multiple` mode와
+  deferred completeness trigger로 member 수를 강제한다. 빈 PostGIS contract suite는 artifact
+  7건과 target freeze 5건이 통과했으며, 다음 단계는 두 리뷰어의 4차 P0=0 재판정이다.
+
 ## 2026-08-06 (codex) — T-VN-33 P0 계약 보완 및 재리뷰 제출 준비
 
 - 2차 적대 리뷰의 inactive write, operation/capability 이중 정본, history/head 집계,

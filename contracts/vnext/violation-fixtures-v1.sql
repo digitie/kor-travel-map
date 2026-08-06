@@ -205,19 +205,26 @@ INSERT INTO provider_sync.provider_datasets (
     provider, dataset_key, display_name, source_kind, capabilities
 ) VALUES (
     'fixture', 'invalid-capability-version', 'invalid capability version', 'manual',
-    '{"schema_version":"1","produces":[],"refresh":{"target_selector":"none"},"preview":{"kind":"none"},"extensions":{}}'::jsonb
+    '{"schema_version":"1","produces":[],"extensions":{}}'::jsonb
 );
 
--- case: provider_dataset_operation_capability_mismatch
+-- case: provider_dataset_operation_scope_invalid
 INSERT INTO provider_sync.provider_datasets (
     provider, dataset_key, display_name, source_kind
-) VALUES ('fixture', 'operation-mismatch', 'operation mismatch dataset', 'manual');
+) VALUES ('fixture', 'operation-scope-invalid', 'operation scope invalid dataset', 'manual');
 INSERT INTO provider_sync.provider_dataset_operations (
-    provider_dataset_id, operation_key, operation_kind, allowed_sync_scopes
+    provider_dataset_id, operation_key, operation_kind
 ) VALUES (
     (SELECT provider_dataset_id FROM provider_sync.provider_datasets
-     WHERE provider = 'fixture' AND dataset_key = 'operation-mismatch'),
-    'refresh', 'refresh', ARRAY['external_system:fixture']
+     WHERE provider = 'fixture' AND dataset_key = 'operation-scope-invalid'),
+    'refresh', 'refresh'
+);
+INSERT INTO provider_sync.provider_dataset_operation_scopes (
+    provider_dataset_id, sync_scope, operation_key
+) VALUES (
+    (SELECT provider_dataset_id FROM provider_sync.provider_datasets
+     WHERE provider = 'fixture' AND dataset_key = 'operation-scope-invalid'),
+    'not a canonical scope', 'refresh'
 );
 
 -- case: inactive_dataset_source_entity_write
@@ -239,11 +246,11 @@ INSERT INTO provider_sync.provider_datasets (
     provider, dataset_key, display_name, source_kind
 ) VALUES ('fixture', 'inactive-operation', 'inactive operation dataset', 'manual');
 INSERT INTO provider_sync.provider_dataset_operations (
-    provider_dataset_id, operation_key, operation_kind, allowed_sync_scopes
+    provider_dataset_id, operation_key, operation_kind
 ) VALUES (
     (SELECT provider_dataset_id FROM provider_sync.provider_datasets
      WHERE provider = 'fixture' AND dataset_key = 'inactive-operation'),
-    'refresh', 'refresh', ARRAY['dataset_wide']
+    'refresh', 'refresh'
 );
 UPDATE provider_sync.provider_datasets
 SET is_active = false
@@ -333,6 +340,20 @@ INSERT INTO provider_sync.source_links (
 INSERT INTO provider_sync.provider_datasets (
     provider, dataset_key, display_name, source_kind
 ) VALUES ('fixture', 'inactive-sync-state', 'inactive sync state dataset', 'manual');
+INSERT INTO provider_sync.provider_dataset_operations (
+    provider_dataset_id, operation_key, operation_kind
+) VALUES (
+    (SELECT provider_dataset_id FROM provider_sync.provider_datasets
+     WHERE provider = 'fixture' AND dataset_key = 'inactive-sync-state'),
+    'refresh', 'refresh'
+);
+INSERT INTO provider_sync.provider_dataset_operation_scopes (
+    provider_dataset_id, sync_scope, operation_key
+) VALUES (
+    (SELECT provider_dataset_id FROM provider_sync.provider_datasets
+     WHERE provider = 'fixture' AND dataset_key = 'inactive-sync-state'),
+    'dataset_wide', 'refresh'
+);
 INSERT INTO provider_sync.provider_sync_state (
     provider_dataset_id, sync_scope
 ) VALUES (
@@ -346,6 +367,18 @@ WHERE provider = 'fixture' AND dataset_key = 'inactive-sync-state';
 UPDATE provider_sync.provider_sync_state
 SET status = 'paused'
 WHERE sync_scope = 'dataset_wide';
+
+-- case: dataset_scope_unregistered_write
+INSERT INTO provider_sync.provider_datasets (
+    provider, dataset_key, display_name, source_kind
+) VALUES ('fixture', 'unregistered-scope', 'unregistered scope dataset', 'manual');
+INSERT INTO provider_sync.provider_sync_state (
+    provider_dataset_id, sync_scope
+) VALUES (
+    (SELECT provider_dataset_id FROM provider_sync.provider_datasets
+     WHERE provider = 'fixture' AND dataset_key = 'unregistered-scope'),
+    'dataset_wide'
+);
 
 -- case: inactive_dataset_notice_lineage_write
 INSERT INTO provider_sync.provider_datasets (
@@ -397,7 +430,21 @@ VALUES (
 INSERT INTO provider_sync.provider_datasets (
     provider, dataset_key, display_name, source_kind
 ) VALUES ('fixture', 'inactive-import-event', 'inactive import event dataset', 'manual');
-INSERT INTO ops.import_jobs (kind) VALUES ('fixture');
+INSERT INTO provider_sync.provider_dataset_operations (
+    provider_dataset_id, operation_key, operation_kind
+) VALUES (
+    (SELECT provider_dataset_id FROM provider_sync.provider_datasets
+     WHERE provider = 'fixture' AND dataset_key = 'inactive-import-event'),
+    'refresh', 'refresh'
+);
+INSERT INTO provider_sync.provider_dataset_operation_scopes (
+    provider_dataset_id, sync_scope, operation_key
+) VALUES (
+    (SELECT provider_dataset_id FROM provider_sync.provider_datasets
+     WHERE provider = 'fixture' AND dataset_key = 'inactive-import-event'),
+    'dataset_wide', 'refresh'
+);
+INSERT INTO ops.import_jobs (kind, dataset_membership_mode) VALUES ('fixture', 'single');
 INSERT INTO ops.import_job_datasets (job_id, provider_dataset_id, sync_scope)
 VALUES (
     (SELECT job_id FROM ops.import_jobs WHERE kind = 'fixture'),
@@ -414,6 +461,40 @@ VALUES (
     (SELECT import_job_dataset_id FROM ops.import_job_datasets),
     'fixture'
 );
+
+-- case: inactive_dataset_import_job_parent_update
+INSERT INTO provider_sync.provider_datasets (
+    provider, dataset_key, display_name, source_kind
+) VALUES ('fixture', 'inactive-import-parent', 'inactive import parent dataset', 'manual');
+INSERT INTO provider_sync.provider_dataset_operations (
+    provider_dataset_id, operation_key, operation_kind
+) VALUES (
+    (SELECT provider_dataset_id FROM provider_sync.provider_datasets
+     WHERE provider = 'fixture' AND dataset_key = 'inactive-import-parent'),
+    'refresh', 'refresh'
+);
+INSERT INTO provider_sync.provider_dataset_operation_scopes (
+    provider_dataset_id, sync_scope, operation_key
+) VALUES (
+    (SELECT provider_dataset_id FROM provider_sync.provider_datasets
+     WHERE provider = 'fixture' AND dataset_key = 'inactive-import-parent'),
+    'dataset_wide', 'refresh'
+);
+INSERT INTO ops.import_jobs (kind, dataset_membership_mode)
+VALUES ('fixture-inactive-import-parent', 'single');
+INSERT INTO ops.import_job_datasets (job_id, provider_dataset_id, sync_scope)
+VALUES (
+    (SELECT job_id FROM ops.import_jobs WHERE kind = 'fixture-inactive-import-parent'),
+    (SELECT provider_dataset_id FROM provider_sync.provider_datasets
+     WHERE provider = 'fixture' AND dataset_key = 'inactive-import-parent'),
+    'dataset_wide'
+);
+UPDATE provider_sync.provider_datasets
+SET is_active = false
+WHERE provider = 'fixture' AND dataset_key = 'inactive-import-parent';
+UPDATE ops.import_jobs
+SET status = 'running'
+WHERE kind = 'fixture-inactive-import-parent';
 
 -- case: inactive_dataset_integrity_run_write
 INSERT INTO provider_sync.provider_datasets (
@@ -434,11 +515,103 @@ INSERT INTO ops.integrity_observation_runs (
     1, 'fixture'
 );
 
+-- case: inactive_dataset_source_record_derived_violation
+INSERT INTO provider_sync.provider_datasets (
+    provider, dataset_key, display_name, source_kind
+) VALUES ('fixture', 'inactive-derived-violation', 'inactive derived violation dataset', 'manual');
+INSERT INTO provider_sync.source_entities (
+    source_entity_key, provider_dataset_id, source_entity_type, source_entity_id,
+    first_seen_at, last_seen_at
+) VALUES (
+    'inactive-derived-violation-entity',
+    (SELECT provider_dataset_id FROM provider_sync.provider_datasets
+     WHERE provider = 'fixture' AND dataset_key = 'inactive-derived-violation'),
+    'place', 'inactive-derived-violation', now(), now()
+);
+INSERT INTO provider_sync.source_records (
+    source_record_key, source_entity_key, raw_data, raw_payload_hash, fetched_at
+) VALUES (
+    'inactive-derived-violation-record', 'inactive-derived-violation-entity',
+    '{}'::jsonb, 'c2', now()
+);
+UPDATE provider_sync.provider_datasets
+SET is_active = false
+WHERE provider = 'fixture' AND dataset_key = 'inactive-derived-violation';
+INSERT INTO ops.data_integrity_violations (source_record_key, violation_type)
+VALUES ('inactive-derived-violation-record', 'fixture');
+
+-- case: inactive_dataset_managed_file_owner_clear
+INSERT INTO provider_sync.provider_datasets (
+    provider, dataset_key, display_name, source_kind
+) VALUES ('fixture', 'inactive-managed-file', 'inactive managed file dataset', 'manual');
+INSERT INTO ops.managed_files (
+    provider_dataset_id, storage_backend, location, path
+) VALUES (
+    (SELECT provider_dataset_id FROM provider_sync.provider_datasets
+     WHERE provider = 'fixture' AND dataset_key = 'inactive-managed-file'),
+    'fixture', 'fixture', '/fixture'
+);
+UPDATE provider_sync.provider_datasets
+SET is_active = false
+WHERE provider = 'fixture' AND dataset_key = 'inactive-managed-file';
+UPDATE ops.managed_files
+SET provider_dataset_id = NULL, provider_name = 'fixture'
+WHERE location = 'fixture';
+
+-- case: import_job_single_member_missing
+INSERT INTO ops.import_jobs (kind, dataset_membership_mode)
+VALUES ('fixture-single-member-missing', 'single');
+SET CONSTRAINTS ALL IMMEDIATE;
+
+-- case: feature_update_request_single_member_missing
+INSERT INTO ops.feature_update_requests (dataset_membership_mode)
+VALUES ('single');
+SET CONSTRAINTS ALL IMMEDIATE;
+
+-- case: inactive_dataset_source_record_delete
+INSERT INTO provider_sync.provider_datasets (
+    provider, dataset_key, display_name, source_kind
+) VALUES ('fixture', 'inactive-record-delete', 'inactive record delete dataset', 'manual');
+INSERT INTO provider_sync.source_entities (
+    source_entity_key, provider_dataset_id, source_entity_type, source_entity_id,
+    first_seen_at, last_seen_at
+) VALUES (
+    'inactive-record-delete-entity',
+    (SELECT provider_dataset_id FROM provider_sync.provider_datasets
+     WHERE provider = 'fixture' AND dataset_key = 'inactive-record-delete'),
+    'place', 'inactive-record-delete', now(), now()
+);
+INSERT INTO provider_sync.source_records (
+    source_record_key, source_entity_key, raw_data, raw_payload_hash, fetched_at
+) VALUES (
+    'inactive-record-delete-record', 'inactive-record-delete-entity', '{}'::jsonb, 'c3', now()
+);
+UPDATE provider_sync.provider_datasets
+SET is_active = false
+WHERE provider = 'fixture' AND dataset_key = 'inactive-record-delete';
+DELETE FROM provider_sync.source_records
+WHERE source_record_key = 'inactive-record-delete-record';
+
 -- case: import_event_cross_job_member
 INSERT INTO provider_sync.provider_datasets (
     provider, dataset_key, display_name, source_kind
 ) VALUES ('fixture', 'cross-job-member', 'cross job member dataset', 'manual');
-INSERT INTO ops.import_jobs (kind) VALUES ('fixture-cross-job-a'), ('fixture-cross-job-b');
+INSERT INTO provider_sync.provider_dataset_operations (
+    provider_dataset_id, operation_key, operation_kind
+) VALUES (
+    (SELECT provider_dataset_id FROM provider_sync.provider_datasets
+     WHERE provider = 'fixture' AND dataset_key = 'cross-job-member'),
+    'refresh', 'refresh'
+);
+INSERT INTO provider_sync.provider_dataset_operation_scopes (
+    provider_dataset_id, sync_scope, operation_key
+) VALUES (
+    (SELECT provider_dataset_id FROM provider_sync.provider_datasets
+     WHERE provider = 'fixture' AND dataset_key = 'cross-job-member'),
+    'dataset_wide', 'refresh'
+);
+INSERT INTO ops.import_jobs (kind, dataset_membership_mode)
+VALUES ('fixture-cross-job-a', 'single'), ('fixture-cross-job-b', 'single');
 INSERT INTO ops.import_job_datasets (job_id, provider_dataset_id, sync_scope)
 VALUES (
     (SELECT job_id FROM ops.import_jobs WHERE kind = 'fixture-cross-job-a'),

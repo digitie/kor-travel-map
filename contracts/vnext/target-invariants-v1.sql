@@ -106,21 +106,17 @@ LEFT JOIN provider_sync.provider_datasets AS dataset
   ON dataset.provider_dataset_id = operation.provider_dataset_id
 WHERE dataset.provider_dataset_id IS NULL; -- expect: 0 -- phase: both
 
--- [INV-069-02c] operation의 scope·selector 결박은 capability와 모순되지 않는다.
+-- [INV-069-02c] 실행 scope는 refresh operation의 정규 child이며 문법·operation kind가
+-- 일치한다. capability JSON은 산출 metadata만 소유하므로 control-plane 이중 정본이 없다.
 SELECT count(*)
-FROM provider_sync.provider_dataset_operations AS operation
-JOIN provider_sync.provider_datasets AS dataset
-  ON dataset.provider_dataset_id = operation.provider_dataset_id
-WHERE NOT provider_sync.is_valid_provider_dataset_operation_scopes(
-          operation.operation_kind, operation.allowed_sync_scopes
-      )
-   OR EXISTS (
-       SELECT 1
-       FROM unnest(operation.allowed_sync_scopes) AS scope(value)
-       WHERE scope.value LIKE 'external_system:%'
-         AND dataset.capabilities -> 'refresh' ->> 'target_selector'
-             <> 'poi_cache_targets'
-   ); -- expect: 0 -- phase: both
+FROM provider_sync.provider_dataset_operation_scopes AS scope
+LEFT JOIN provider_sync.provider_dataset_operations AS operation
+  ON operation.provider_dataset_id = scope.provider_dataset_id
+ AND operation.operation_key = scope.operation_key
+ AND operation.operation_kind = scope.operation_kind
+WHERE operation.provider_dataset_id IS NULL
+   OR scope.operation_kind <> 'refresh'
+   OR NOT provider_sync.is_valid_provider_dataset_sync_scope(scope.sync_scope); -- expect: 0 -- phase: both
 
 -- [INV-069-03] source_entities → provider_datasets FK orphan 없음.
 SELECT count(*)
