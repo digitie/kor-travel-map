@@ -70,6 +70,9 @@
   **origin/main도 같이 실패**한다(같은 조건 baseline 2 failed / 23 passed 동일 —
   이 박스의 docker-in-docker 문제). `test_batch_dag.py`는 격리 실행에서 전량
   통과하고 전체 스위트 동시 실행에서만 흔들린다(docker.sock 경합).
+  `test_h35_exact_surface_network_free_rehearsal`도 main에서 같이 실패한다 —
+  "외부 접속 없음" socket guard가 컨테이너 안 testcontainers의 bridge IP를
+  외부로 판정한다(CI는 localhost라 무관).
 
 ## 2026-08-05 (12) — live e2e fixture 재표집 (구표본 전멸 발견)
 
