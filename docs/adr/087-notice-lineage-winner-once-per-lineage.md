@@ -132,7 +132,10 @@ fixture로 재고 "해결됐다"고 적었다가 적대 리뷰가 잡았다. 성
 숨기려는 쪽**에서 재야 한다.
 
 표현식 인덱스는 `ANALYZE` 전까지 자기 통계가 없다. 계획 모양은 그대로지만 비용
-추정이 나빠 3,045 규모에서 2.1배였다. 그래서 마이그레이션이 `ANALYZE`로 끝난다.
+추정이 나빠 prod 규모 notice 목록이 221.9ms 대 2.0ms(**110배**)였다.
+그래서 마이그레이션이 `ANALYZE`로 끝난다. 복원·REINDEX 뒤에도 같으므로
+`docs/backup-restore.md` §함정에 절차를 적었다 — `pg_restore`는 planner 통계를
+복원하지 않는다.
 
 ### 5. read 필터는 correlated를 유지하되, 순서 조건을 인덱스로 민다
 
@@ -151,7 +154,13 @@ fixture로 재고 "해결됐다"고 적었다가 적대 리뷰가 잡았다. 성
 fetched_at)`는 **죽은 식**이었다. 평컬럼으로 바꿔야 인덱스 열과 맞고, 값은 증명
 가능하게 같다.
 
-reconcile도 같은 인덱스를 쓴다. 거기엔 원인이 하나 더 있었다 —
+reconcile도 **같은 형태로 고쳤다** — 두 EXISTS 분리 + 평컬럼 `last_seen_at` +
+record쪽 scope 3열 제거. 그전에는 순서 조건이 Filter로 남아 계보 이력 전체를
+훑었다(적대 리뷰가 잡았다). 3,045 규모에서 87.9초 → 0.35초이고 이제
+`Index Cond`에 `last_seen_at`이 들어간다. 종료 상태는 세 DB · `close_missing`
+양쪽에서 `origin/main`과 동일하다.
+
+거기엔 원인이 하나 더 있었다 —
 `out_of_scope_feature_lineages` CTE가 갱신 대상 feature마다 재실행됐다
 (loops=2,900). 계보 승패는 질의당 한 번이면 되는 집합 연산이라 `MATERIALIZED`
 장벽을 세웠다.
@@ -180,7 +189,7 @@ feature(KMA 특보 Phase 2의 현실적 형태)에서 **종전은 13분 42초에
 결과 집합은 두 규모 모두 양방향 차집합 0이고, reconcile 종료 상태
 (`features` status/deleted + `feature_notices`)도 `close_missing` 양쪽에서 동일하다.
 
-read 필터 SQL은 15,675자 → 6,695자로 줄었다 — 같은 CASE가 한 질의에 7번 전개되던
+read 필터 SQL은 15,675자 → 6,721자로 줄었다 — 같은 CASE가 한 질의에 7번 전개되던
 것이 컬럼 참조로 바뀌었기 때문이다.
 
 ## 폐기한 설계 4건
@@ -200,7 +209,7 @@ read 필터 SQL은 15,675자 → 6,695자로 줄었다 — 같은 CASE가 한 �
 - alembic `0088`: `lineage_key` 컬럼(nullable) + notice scope 한정 backfill(744행) +
   파생 함수·트리거(`ENABLE ALWAYS`) + 표현식 인덱스 + `ANALYZE`.
 - 배포 비용(prod 732,678행 실측): **전체 3.1초** — backfill 744행 0.42초 + 인덱스
-  1.90초(91MB) + `ANALYZE` 0.76초. heap 822 → 823MB. alembic 한 트랜잭션이라
+  1.90초(72MB) + `ANALYZE` 0.76초. heap 822 → 823MB. alembic 한 트랜잭션이라
   ACCESS EXCLUSIVE lock이 그 3.1초 동안 `source_records` 접근을 막는다.
 - record쪽 scope 3열 등식을 한때 더했다가 **되돌렸다**. 인덱스 선행 컬럼은 계보
   식 하나이므로 그 3열은 probe에 기여하지 않는다(같은 계획·같은 rows=4, 123 대
@@ -208,10 +217,15 @@ read 필터 SQL은 15,675자 → 6,695자로 줄었다 — 같은 CASE가 한 �
   `source_entities` 행과 일치한다는 **제약 없는 가정**을 정확성의 전제로 만들었다.
   세 줄을 지워 그 위험을 없앴다 — 그 결과 이 필터는 `origin/main`의 술어 집합과
   계보 비교만 다르다.
-- 알려진 잔여: 인덱스 91MB의 99.9%는 `idx_source_records_provider_dataset_entity`와
-  같은 값을 열 순서만 바꿔 담은 중복이다(out-of-scope 행에서 계보 식 =
-  `source_entity_id`). 744행을 위한 값이고, 부분 인덱스로 줄이려면 read 술어를
-  in-scope/out-of-scope 두 갈래로 쪼개야 해서 지금은 택하지 않았다.
+- **알려진 상시 비용 — 인덱스 72MB와 쓰기 증폭.** `source_records` 인덱스 총량이
+  436 → 508MB(+16.5%)다. 10만 행 bulk INSERT에서 WAL record +17.0%.
+  **`last_seen_at`이 이 인덱스의 두 번째 열이라 폴링 경로가 더 낸다** — 그 컬럼만
+  갱신하는 UPDATE 10만 행에서 WAL record +24%, hot upsert(`ON CONFLICT DO UPDATE
+  SET last_seen_at`)에서 record +10~13% · bytes +14~27%. 종전에 그 컬럼은
+  `idx_source_records_entity_history`에만 있었다. 744행의 이득을 위해 모든
+  provider의 모든 record 쓰기가 내는 값이다.
+  부분 인덱스로 줄이려면 read 술어를 in-scope/out-of-scope 두 갈래로 쪼개야 해서
+  택하지 않았다.
 - **후속 후보 — `source_entity_heads`에 현재 계보 요약을 얹는다 (T-VN-33 소관).**
   경쟁자 탐색이 `source_records`를 훑는 근본 원인은 그 테이블이 **이력 전체**를
   담기 때문이다. 현재 head 요약(`current_lineage_key`, `current_seen_at`,

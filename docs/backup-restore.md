@@ -339,6 +339,11 @@ command가 결선돼 있지 않다** — 그 결선 전까지의 수동 기준�
      ENABLE ALWAYS TRIGGER trg_source_record_lineage_key;`
   확인: `SELECT tgenabled FROM pg_trigger
           WHERE tgname='trg_source_record_lineage_key';` → `A`여야 한다.
+- **복원 뒤 `ANALYZE`를 반드시 돌린다.** `pg_restore`는 planner 통계를 복원하지
+  않는데, `idx_source_records_lineage`는 표현식 인덱스라 자기 통계가 없으면 비용
+  추정이 무너진다 — prod 규모 notice 목록이 **221.9ms 대 2.0ms(110배)**다.
+  오류도 경고도 없이 느려진다. `ANALYZE provider_sync.source_records;`
+  (`REINDEX` 뒤에도 같다.)
 - 값 점검과 복구는 **두 단계**다. 점검은 읽기 전용이어야 한다 — UPDATE를 점검용으로
   돌리면 어긋난 행마다 row lock과 WAL이 나간다.
   점검: `SELECT count(*) FROM provider_sync.source_records sr

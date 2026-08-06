@@ -2921,12 +2921,32 @@ def _supersede_stale_notice_sql(close_missing: bool) -> str:
         if close_missing
         else "      AND f.deleted_at IS NULL\n"
     )
+    # 경쟁자 후보 — 두 EXISTS가 공유한다. record쪽 scope 3열은 걸지 않는다:
+    # 인덱스 선행은 계보 식 하나이고, 그 3열이 자기 entity 행과 일치한다는
+    # **제약 없는 가정**을 정확성의 전제로 만들 뿐이다(read 필터에서도 같은 이유로
+    # 제거했다 — ADR-087 §결과).
+    rival_joins = f"""
+        FROM provider_sync.source_entities AS other_se
+        JOIN provider_sync.source_records AS other_sr
+          ON other_sr.source_record_key = other_se.current_source_record_key
+        JOIN provider_sync.source_links AS other_sl
+          ON other_sl.source_entity_key = other_se.source_entity_key
+         AND other_sl.is_primary_source
+        JOIN feature.features AS other_f
+          ON other_f.feature_id = other_sl.feature_id
+        WHERE {_lineage_sql('other_sr')} = current_notice.lineage_key
+          AND other_se.provider = current_notice.provider
+          AND other_se.dataset_key = current_notice.dataset_key
+          AND other_se.source_entity_type = current_notice.source_entity_type
+          AND other_f.feature_id <> current_notice.feature_id
+          AND other_f.kind = 'notice'
+          AND other_f.deleted_at IS NULL"""
     lineage_cte = f"""
 WITH lineage_candidates AS (
     SELECT
         f.feature_id,
         {_lineage_sql('sr')} AS lineage_key,
-        COALESCE(sr.last_seen_at, sr.imported_at, sr.fetched_at) AS seen_at,
+        sr.last_seen_at AS seen_at,
         sr.source_record_key AS tiebreak,
         {_canonical_notice_feature_sql("f", "sr")} AS canonical_identity,
         lineage_state.present AS snapshot_present,
@@ -3003,7 +3023,7 @@ out_of_scope_feature_lineages AS MATERIALIZED (
         sr.dataset_key,
         sr.source_entity_type,
         {_lineage_sql('sr')} AS lineage_key,
-        COALESCE(sr.last_seen_at, sr.imported_at, sr.fetched_at) AS seen_at,
+        sr.last_seen_at AS seen_at,
         sr.source_record_key AS tiebreak,
         {_canonical_notice_feature_sql("f", "sr")} AS canonical_identity,
         lineage_state.present AS snapshot_present,
@@ -3036,7 +3056,7 @@ out_of_scope_feature_lineages AS MATERIALIZED (
         sr.dataset_key,
         sr.source_entity_type,
         {_lineage_sql('sr')},
-        COALESCE(sr.last_seen_at, sr.imported_at, sr.fetched_at) DESC,
+        sr.last_seen_at DESC,
         sr.source_record_key DESC
 ),
 global_feature_wins AS MATERIALIZED (
@@ -3094,40 +3114,24 @@ global_feature_wins AS MATERIALIZED (
         ) AS last_inactive_winner_changed_at
     FROM out_of_scope_feature_lineages AS current_notice
     LEFT JOIN LATERAL (
+        -- read 필터와 **같은 형태**다(ADR-087 결정 4·5). 순서 조건을 한 술어 안
+        -- ``OR``로 두면 Postgres가 Index Cond로 밀지 못하고 Filter로 남겨 계보의
+        -- payload 이력 전체를 훑는다. 두 EXISTS로 나누면 앞은 행 비교라
+        -- ``idx_source_records_lineage``의 범위가 되고 뒤는 동률일 때만 돈다.
+        --
+        -- ``last_seen_at``은 NOT NULL이라 종전 ``COALESCE(..., imported_at,
+        -- fetched_at)``는 죽은 식이었다 — 평컬럼이어야 인덱스 열과 맞는다.
         SELECT 1 AS better_exists
-        FROM provider_sync.source_entities AS other_se
-        JOIN provider_sync.source_records AS other_sr
-          ON other_sr.source_record_key = other_se.current_source_record_key
-         AND {_lineage_sql('other_sr')} = current_notice.lineage_key
-        JOIN provider_sync.source_links AS other_sl
-          ON other_sl.source_entity_key = other_se.source_entity_key
-        JOIN feature.features AS other_f
-          ON other_f.feature_id = other_sl.feature_id
-        WHERE other_sr.provider = current_notice.provider
-          AND other_sr.dataset_key = current_notice.dataset_key
-          AND other_sr.source_entity_type = current_notice.source_entity_type
-          AND other_se.provider = current_notice.provider
-          AND other_se.dataset_key = current_notice.dataset_key
-          AND other_se.source_entity_type = current_notice.source_entity_type
-          AND other_sl.is_primary_source
-          AND other_f.feature_id <> current_notice.feature_id
-          AND other_f.kind = 'notice'
-          AND other_f.deleted_at IS NULL
-          AND (
-            COALESCE(
-                other_sr.last_seen_at, other_sr.imported_at, other_sr.fetched_at
-            ) > current_notice.seen_at
-            OR (
-              COALESCE(
-                  other_sr.last_seen_at, other_sr.imported_at, other_sr.fetched_at
-              ) = current_notice.seen_at
-              AND other_sr.source_record_key > current_notice.tiebreak
-            )
-            OR (
-              COALESCE(
-                  other_sr.last_seen_at, other_sr.imported_at, other_sr.fetched_at
-              ) = current_notice.seen_at
-              AND other_sr.source_record_key = current_notice.tiebreak
+        WHERE EXISTS (
+            SELECT 1{rival_joins}
+              AND (other_sr.last_seen_at, other_sr.source_record_key)
+                  > (current_notice.seen_at, current_notice.tiebreak)
+            LIMIT 1
+        )
+        OR EXISTS (
+            SELECT 1{rival_joins}
+              AND (other_sr.last_seen_at, other_sr.source_record_key)
+                  = (current_notice.seen_at, current_notice.tiebreak)
               AND (
                 (
                   {_canonical_notice_feature_sql("other_f", "other_sr")}
@@ -3139,9 +3143,8 @@ global_feature_wins AS MATERIALIZED (
                   AND other_f.feature_id < current_notice.feature_id
                 )
               )
-            )
-          )
-        LIMIT 1
+            LIMIT 1
+        )
     ) AS better ON true
     GROUP BY current_notice.feature_id
 )

@@ -46,8 +46,8 @@ read SQL에는 ``sr``(source_records) alias가 **이미 스코프에 있으므�
 
 | | 전 행 backfill | notice scope만 |
 | --- | --- | --- |
-| backfill | 118.8초 | 1초 미만 |
-| heap | 826MB → **1,700MB 영구** | 변화 없음 |
+| backfill | 124초 | 0.42초 |
+| heap | 822MB → **1,700MB 영구** | 822 → 823MB |
 | 기존 인덱스 | 432MB → **861MB** | 변화 없음 |
 | ACCESS EXCLUSIVE | ~124초(모든 source_records 접근 차단) | 인덱스 생성 시간만 |
 
@@ -89,19 +89,17 @@ last_seen_at``은 정상적으로 트리거를 타지 않는다.
 - ``ADD COLUMN`` 8ms(metadata-only) · 파생 함수 13ms
 - backfill UPDATE **744행 0.42초** — heap 822 → 823MB
 - 트리거 함수·트리거·``ENABLE ALWAYS`` 각 10ms 미만
-- ``CREATE INDEX`` 1.90초(91MB) · ``ANALYZE`` 0.76초
+- ``CREATE INDEX`` 1.90초(72MB) · ``ANALYZE`` 0.76초
 
 alembic 한 트랜잭션이라 ACCESS EXCLUSIVE lock이 이 3.1초 동안 ``source_records``
 접근을 막는다. entrypoint의 ``alembic upgrade head``가 api 기동을 그만큼 막는다.
 
-인덱스 91MB는 대부분 중복이다 — 전 행의 99.9%에서
-``COALESCE(lineage_key, source_entity_id)``가 곧 ``source_entity_id``라
-``idx_source_records_provider_dataset_entity``와 같은 값을 열 순서만 바꿔 담는다.
-744행을 위한 값이다. 부분 인덱스(``WHERE lineage_key IS NOT NULL``)로 8kB까지
-줄일 수 있지만, 그러려면 read 술어를 in-scope/out-of-scope 두 갈래로 쪼개야
-한다(planner가 부분 인덱스 술어를 증명할 수 있어야 한다). 계보 규칙 없는
-provider가 notice를 내보내는 순간 조용히 느려지는 구조라, 지금은 단일 술어를
-택했다.
+인덱스 72MB는 상시 비용이다 — ``source_records`` 인덱스 총량 436 → 508MB.
+**``last_seen_at``이 두 번째 열이라 폴링 경로가 특히 더 낸다**(그 컬럼만 갱신하는
+UPDATE 10만 행에서 WAL record +24%). 부분 인덱스(``WHERE lineage_key IS NOT
+NULL``)로 줄이려면 read 술어를 in-scope/out-of-scope 두 갈래로 쪼개야 한다
+(planner가 부분 인덱스 술어를 증명할 수 있어야 한다). 계보 규칙 없는 provider가
+notice를 내보내는 순간 조용히 느려지는 구조라, 지금은 단일 술어를 택했다.
 
 재검증·복구 경로
 ----------------
@@ -193,7 +191,7 @@ def upgrade() -> None:
         """
     )
     # backfill은 **notice 규칙이 있는 scope만** 돈다. 실측 prod 732,678행 중
-    # 744행(0.10%)이다. 전 행을 채우면 heap이 826MB → 1,700MB로 영구히 부풀고
+    # 744행(0.10%)이다. 전 행을 채우면 heap이 822MB → 1,700MB로 영구히 부풀고
     # (VACUUM도 OS에 반환하지 않는다) 2분짜리 ACCESS EXCLUSIVE lock이 걸린다.
     # WHERE 절은 scope 3열을 **직접** 건다. ``notice_lineage_key(sr) IS NOT NULL``로
     # 쓰면 STABLE 함수라 planner가 안을 못 보고 73만 행 Seq Scan이 된다(실측
@@ -228,8 +226,9 @@ def upgrade() -> None:
     # 보장하지 "맞다"를 보장하지 않으므로, 이 항목이 없으면 트리거가 NOT NULL 이상의
     # 일을 하지 못한다. 적대 리뷰가 실증했다.
     #
-    # hot path인 ``ON CONFLICT DO UPDATE SET last_seen_at``은 이 목록에 없는 열만
-    # 건드리므로 여전히 트리거를 타지 않는다.
+    # 순수 ``UPDATE ... SET last_seen_at``은 이 목록 밖이라 트리거를 타지 않는다.
+    # 단 ``INSERT ... ON CONFLICT DO UPDATE``는 충돌해도 BEFORE INSERT arm이
+    # 후보 행마다 돈다(위 docstring 참조) — ``UPDATE OF``로는 줄일 수 없다.
     op.execute(
         """
         CREATE TRIGGER trg_source_record_lineage_key
@@ -279,9 +278,10 @@ def upgrade() -> None:
           )
         """
     )
-    # 표현식 인덱스의 통계는 ANALYZE 전까지 없다. 그 상태에서는 planner가 이
-    # 인덱스를 무시하고 종전 형태(경쟁자 전수 스캔)로 도는 계획을 고르는 것이
-    # 실측됐다 — 배포 직후 그 창이 열리지 않도록 여기서 만들어 둔다.
+    # 표현식 인덱스는 ANALYZE 전까지 자기 통계가 없다. 계획 모양은 같지만 비용
+    # 추정이 나빠 prod 규모 notice 목록이 221.9ms 대 2.0ms(110배)다. 배포 직후
+    # 그 창이 열리지 않도록 여기서 만들어 둔다. 복원·REINDEX 뒤에도 같다 —
+    # pg_restore는 planner 통계를 복원하지 않는다(docs/backup-restore.md §함정).
     op.execute("ANALYZE provider_sync.source_records")
 
 
