@@ -3,6 +3,27 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-08-06 — T-VN-41F1J-A Map-owned cancel-probe fixture 병합
+
+- [x] **T-VN-41F1J-A — Map fixture schema·service API·격리**
+
+  PR #960에서 `ops.c6c_cancel_probe_fixtures`와 fixture 전용 repository/service API를 병합했다.
+  Map은 transaction ID마다 running/no-Dagster-run import job을 멱등 생성하고, 일반 PinVi 취소가
+  만든 canonical cancellation 뒤 consume/finalize를 원자적으로 기록한다. `armed → consumed →
+  finalized` receipt는 exact unsafe outcome을 포함하며, fixture kind는 worker·stale recovery·일반
+  ops projection과 직접 event 삽입에서 격리된다. `ops:fixture` capability는 Map API와 Docker
+  Manager에만 결박한다. 새 v5 Manager transaction에서 이 lifecycle을 실제 실행하는 작업은 열린
+  `T-VN-41F1D-C3`이 소유한다.
+
+## 2026-08-06 — T-VN-41F1D-C0a 후보 Map application schema head artifact 병합
+
+- [x] **T-VN-41F1D-C0a — 설치 package 기반 정적 application head 계약**
+
+  PR #963에서 후보 API image의 `ktm-application-schema head`가 installed package의 immutable graph
+  artifact만 읽어 단일 Alembic head를 JSON으로 attest하게 했다. cwd/source mount/Alembic 실행/DB/application
+  import는 경계 밖이며, AST generator equality·cycle·side-effect·ambiguous head 회귀를 고정했다.
+  Docker Manager는 이 application head를 Dagster storage/PinVi head와 함께 reset 전에 attest한다.
+
 ## 2026-08-06 — T-VN-41F1D-C0 후보 Dagster storage migration artifact 완료
 
 - [x] **T-VN-41F1D-C0 — 후보 Dagster storage migration artifact**

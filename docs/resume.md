@@ -1,15 +1,14 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
-## 2026-08-06 — T-VN-41F1D-C0a 후보 Map application schema head artifact 구현 완료, PR 게이트 중
+## 2026-08-06 — T-VN-41F1D-C0a·F1J-A 병합, v5 dynamic fixture 결선 대기
 
-후보 API image의 `ktm-application-schema head`는 installed package의 immutable application
-migration graph만 읽어 단일 Alembic head를 JSON으로 attest한다. cwd/source mount/DB/환경변수와
-application·migration module import를 모두 경계 밖으로 두고, source AST literal graph와
-artifact equality를 회귀로 고정했다. 적대 리뷰 반영으로 generator/image command 양쪽이
-root-connected cycle을 거부하며 Manager와 같은 revision 문법을 사용한다.
+Map application schema head artifact(PR #963)와 Map-owned cancel-probe fixture lifecycle(PR #960)가
+각각 병합됐다. 후보 image는 application/Dagster storage head를 독립적으로 attest하며, fixture는
+Map DB에서 transaction별 `armed → consumed → finalized`와 immutable unsafe outcome을 소유한다.
 
-**다음 한 작업**: C0a의 적대 리뷰·CI·merge 뒤 Docker Manager F1D-C2가 Map application,
-Dagster storage, PinVi 후보 head를 모두 attest하고 destructive rebuild를 진행한다.
+**다음 한 작업**: Docker Manager `T-VN-41F1D-C3`가 이 fixture lifecycle을 새 v5
+`rebuild-pinned` journal에 직접 결선한다. response loss 재개는 immutable Map receipt를 읽고
+canonical cancel POST를 재발행하지 않아야 한다.
 
 ## 2026-08-06 — T-VN-41F1D-C0 후보 Dagster storage migration artifact 완료
 
