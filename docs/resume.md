@@ -1,5 +1,16 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-06 — T-VN-33 A/B/C 단일 PR 설계·적대 리뷰 완료, 구현 착수
+
+T-VN-33A/B/C를 세 PR로 나누지 않고 하나의 DB 정본 PR로 합쳤다. 초기 계획은 적대적
+스키마·마이그레이션 리뷰에서 NO-GO였고, dataset capability/operation DB 정본, versioned empty-DB
+seed, immutable raw record와 mutable entity/head, multi-dataset membership, legacy write fence,
+3-revision forward-only migration을 문서·ADR-087에 고정해 P0를 해소했다.
+
+**다음 한 작업**: T-VN-33의 target contract/모델/migration A를 구현하고, canonical writer/reader와
+fence까지 같은 PR에서 완결한다. T-VN-41 재적재는 별도 background로 진행 중이며 완료 후 F1D-D의
+data-dependent n150 live UI E2E를 실행한다.
+
 ## 2026-08-06 — T-VN-41F1D-C0a·F1J-A 병합, v5 dynamic fixture 결선 대기
 
 Map application schema head artifact(PR #963)와 Map-owned cancel-probe fixture lifecycle(PR #960)가

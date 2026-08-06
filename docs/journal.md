@@ -2,6 +2,20 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-06 (codex) — T-VN-33 A/B/C 단일 PR 설계와 적대 검토 결선
+
+- 사용자 지시에 따라 provider dataset A/B/C를 각각의 PR로 나누지 않고, schema/backfill·전
+  writer/reader cutover·legacy fence/removal manifest를 **하나의 PR**로 처리하도록 tasks를
+  재편했다.
+- 적대 스키마·마이그레이션 리뷰는 초기안에 공통 P0를 냈다. DB capability/operation 정본 부재,
+  immutable record와 재관측 UPDATE의 충돌, 빈 DB seed 부재, 9개라는 불완전한 FK roster와
+  multi-dataset job/request의 scalar FK 오용이다.
+- ADR-087과 T-VN-33 단일 PR 계획이 이를 해소했다. versioned seed와 DB catalog/handler
+  exact-set gate, entity/head가 소유하는 observation freshness, full reference matrix와
+  membership table, canonical CHECK/FK·legacy fence·3 revision forward-only migration을
+  구현 계약으로 고정했다. weather/price와 typed notice fact는 순서대로 T-VN-38/T-VN-37에서
+  원자 전환한다.
+
 ## 2026-08-06 (codex) — T-VN-41F1D-C3 n150 파기형 rebuild 결선
 
 - Manager PR #167의 최신 Map typed-subtype pin으로 n150 `rebuild-pinned` generation을 committed했다.

@@ -74,7 +74,7 @@ barrier로 직렬화한다.
     라이브 — Map #950/#952/#955/#956·PinVi #430/#432) →
     [x] `T-VN-35A-D`(typed subtype 분해 — ADR-086, A-D 단일 PR) →
     [ ] `T-VN-37A` → [ ] `T-VN-37B` → [ ] `T-VN-37C`
-  - Lane B shadow: [ ] `T-VN-33A` → [ ] `T-VN-33B` → [ ] `T-VN-33C` →
+  - Lane B shadow: [~] `T-VN-33`(A/B/C 단일 PR — DB 정본·writer/reader cutover·legacy fence) →
     [ ] `T-VN-38A` → [ ] `T-VN-38B` → [ ] `T-VN-38C` →
     [ ] `T-VN-34A` → [ ] `T-VN-34B` → [ ] `T-VN-34C` →
     [ ] `T-VN-36A` → [ ] `T-VN-36B` → [ ] `T-VN-36C`
@@ -602,23 +602,25 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 
   **범위 밖 잔여**: legacy ID·FK 물리 제거는 T-VN-39(removal manifest), PinVi service 스냅샷 재핀은 codex `T-VN-41-F` 합류(PinVi resume 상단 인수 패키지), live e2e 라이브 검증은 n150 per-file 저부하 관례.
 
-### T-VN-33 — provider dataset 정본 전환 (Lane B)
+### T-VN-33 — provider dataset 정본 전환 (Lane B, A/B/C 단일 PR)
 
-- [ ] T-VN-33A — **provider_datasets schema·backfill**
+- [~] T-VN-33 — **DB 소유 dataset·operation 정본, immutable observation/head, 전 참조
+  cutover와 legacy fence**
 
-  provider/dataset 정본 row와 composite identity를 만들고 현재 policy/source/operation 참조를
-  중복·orphan 없이 backfill한다.
+  A/B/C는 분리 PR이 아니다. 하나의 PR이 다음을 모두 완료한다.
 
-- [ ] T-VN-33B — **writer·reader FK cutover**
+  1. versioned dataset/operation seed, `provider_datasets` capability schema, canonical
+     identity 제약과 full reference preflight/backfill,
+  2. source entity → immutable record → validated head 및 dataset FK/membership 기반 writer·reader
+     전환,
+  3. legacy string/boolean/raw-derived write fence, query/EXPLAIN/checksum gate와 T-VN-39
+     physical-removal manifest.
 
-  참조 table과 writer를 canonical dataset FK로 전환하고 전환 중 entity-record identity 불일치를
-  composite FK로 차단한다.
-
-- [ ] T-VN-33C — **canonical query cutover·legacy 제거 manifest**
-
-  read/query를 canonical dataset FK로 전환하고 중복 column을 read-only로 fence한다. EXPLAIN과
-  checksum을 고정하되 column/index의 물리 삭제는 soak 뒤 T-VN-39가 수행하도록 removal manifest에
-  남긴다.
+  설계·P0 해소·검증 matrix 정본은
+  [`reports/t-vn-33-provider-datasets-single-pr-plan-2026-08-06.md`](reports/t-vn-33-provider-datasets-single-pr-plan-2026-08-06.md),
+  구조 결정은 ADR-087이다. typed `notice_states`/weather/price fact는 각각 T-VN-37/T-VN-38의
+  원자 모델 전환에서 처리한다. final-schema 데이터는 ETL로 재생성하므로 intermediate backup·호환
+  shim을 만들지 않는다.
 
 ### T-VN-34 — 직교 상태 모델 전환 (Lane B)
 
