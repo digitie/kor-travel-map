@@ -30,11 +30,12 @@ fixture integration 2건과 API auth/OpenAPI target 8건이 새 DTO 포함으로
 OpenAPI와 admin TypeScript client type도 함께 재생성했다.
 
 후속 재리뷰에서 event audit의 fixture kind join이 ordered partial index를 포기하게 만들고, join을
-제거하면 raw SQL fixture event가 노출될 수 있음을 확인했다. 이를 읽기 예외나 bounded-sort 허용으로
-우회하지 않고 migration `0084`의 DB trigger로 fixture job event의 INSERT/job ID 변경을 거부했다.
-application writer 거부와 직접 SQL 제약을 함께 검증해 audit no-Sort gate를 유지한다.
+제거하면 raw SQL fixture event가 노출될 수 있음을 확인했다. 이를 읽기 예외로 우회하지 않고 migration
+`0084`의 DB trigger로 fixture job event의 INSERT/job ID 변경을 거부했다. application writer 거부와
+직접 SQL 제약을 함께 검증해 audit ordered partial-index 경로를 유지한다. `job_id` 단일 filter의
+PostgreSQL 비용 계획은 기존처럼 최대 64행 bounded sort를 허용하며, join 도입이나 무제한 sort는 허용하지 않는다.
 적대적 리뷰 1인은 새 trigger의 INSERT 책임과 기존 identity trigger의 job ID 불변 책임 분리,
-두 SQL 경계 통합 검증, no-Sort planner gate를 재검토해 GO로 판정했다.
+두 SQL 경계 통합 검증과 planner 상한을 재검토해 GO로 판정했다.
 
 PR CI가 검출한 `contracts/vnext/openapi-diff-v1.json`의 admin/service baseline SHA drift도
 현재 generated artifact와 immutable outcome route를 대조해 재고정했다. Wave 2 대상 diff의
