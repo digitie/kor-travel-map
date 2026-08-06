@@ -360,11 +360,16 @@ RETURNING current_source_record_key
 # source_records는 payload_hash가 UNIQUE 구성요소 → 이력 보존 (ADR-017).
 # 같은 source_record_key 재적재는 원문을 건드리지 않고 마지막 확인 시각만 갱신한다.
 #: notice scope 판정 — writer와 alembic 0088 backfill이 **같은 정본**을 쓴다.
+# 같은 bind 파라미터가 INSERT 값(varchar 컬럼)과 이 술어(text 비교) 양쪽에 쓰인다.
+# 명시 CAST가 없으면 Postgres가 한 파라미터에 두 타입을 추론해 Parse 단계에서
+# ``AmbiguousParameterError``로 죽는다 — **모든 provider의 모든 record 쓰기**가.
 _NOTICE_SCOPE_PREDICATE: Final[str] = notice_lineage_scope_sql(
-    ":provider", ":dataset_key", ":source_entity_type"
+    "CAST(:provider AS text)",
+    "CAST(:dataset_key AS text)",
+    "CAST(:source_entity_type AS text)",
 )
 
-_UPSERT_SOURCE_RECORD_SQL: Final[str] = """
+_UPSERT_SOURCE_RECORD_SQL: Final[str] = f"""
 INSERT INTO provider_sync.source_records (
     source_record_key, source_entity_key, provider, dataset_key,
     source_entity_type, source_entity_id, source_version,
@@ -372,8 +377,13 @@ INSERT INTO provider_sync.source_records (
     raw_data, raw_payload_hash, fetched_at, imported_at, expires_at,
     lineage_key
 ) VALUES (
-    :source_record_key, :source_entity_key, :provider, :dataset_key,
-    :source_entity_type, :source_entity_id, :source_version,
+    :source_record_key, :source_entity_key,
+    -- 아래 CASE에서도 같은 파라미터를 text로 쓰므로 여기서도 text로 못박는다.
+    -- 한쪽만 캐스트하면 Postgres가 한 파라미터에 varchar/text 두 타입을 추론해
+    -- Parse 단계에서 AmbiguousParameterError로 죽는다(모든 record 쓰기 정지).
+    CAST(:provider AS text), CAST(:dataset_key AS text),
+    CAST(:source_entity_type AS text), CAST(:source_entity_id AS text),
+    :source_version,
     :raw_name, :raw_address, :raw_longitude, :raw_latitude,
     CAST(:raw_data AS jsonb), :raw_payload_hash, :fetched_at, :imported_at,
     :expires_at,
@@ -386,9 +396,9 @@ INSERT INTO provider_sync.source_records (
     CASE WHEN {_NOTICE_SCOPE_PREDICATE}
     THEN (
     CASE
-      WHEN :provider = 'python-krex-api'
-       AND :dataset_key = 'krex_traffic_notices'
-       AND :source_entity_type = 'traffic_notice'
+      WHEN CAST(:provider AS text) = 'python-krex-api'
+       AND CAST(:dataset_key AS text) = 'krex_traffic_notices'
+       AND CAST(:source_entity_type AS text) = 'traffic_notice'
       THEN COALESCE(
         NULLIF(
           concat_ws(
@@ -402,11 +412,11 @@ INSERT INTO provider_sync.source_records (
           ),
           ''
         ),
-        :source_entity_id
+        CAST(:source_entity_id AS text)
       )
-      WHEN :provider = 'python-kma-api'
-       AND :dataset_key = 'kma_weather_alerts'
-       AND :source_entity_type = 'weather_alert'
+      WHEN CAST(:provider AS text) = 'python-kma-api'
+       AND CAST(:dataset_key AS text) = 'kma_weather_alerts'
+       AND CAST(:source_entity_type AS text) = 'weather_alert'
       THEN COALESCE(
         NULLIF(
           concat_ws(
@@ -424,9 +434,9 @@ INSERT INTO provider_sync.source_records (
           ),
           ''
         ),
-        :source_entity_id
+        CAST(:source_entity_id AS text)
       )
-      ELSE :source_entity_id
+      ELSE CAST(:source_entity_id AS text)
     END
     ) END
 )
@@ -757,7 +767,11 @@ def _latest_notice_only_sql(
         WHERE f2.kind = 'notice'
           AND f2.deleted_at IS NULL
       ) AS ranked
-      WHERE ranked.rank_in_lineage > 1
+      -- 한 feature는 primary link를 여럿 가질 수 있어 **여러 계보 파티션에**
+      -- 나타난다. 종전 ``HAVING bool_and(...)``의 뜻이 "한 계보라도 이기면
+      -- 보존"이므로, 패자는 **모든 계보에서 밀린** feature뿐이다.
+      GROUP BY ranked.feature_id
+      HAVING bool_and(ranked.rank_in_lineage > 1)
     ))
   )
 """
