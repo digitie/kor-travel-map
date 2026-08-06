@@ -1,5 +1,17 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-06 — T-VN-41F1D-C0 후보 Dagster storage migration artifact 완료
+
+후보 image의 `ktm-dagster-storage head|migrate`가 Dagster 자체 storage graph의 단일
+head를 attest하고, 같은 image의 instance config로 migration 뒤
+`public.alembic_version` 한 행을 strict 대조한다. Map application Alembic/source SHA로
+storage 세대를 추정하던 경로를 제거했고, Compose의 one-shot 성공 후에만 Dagster
+webserver/daemon이 기동한다. 빈 격리 PostgreSQL 실측에서 세 값이 모두
+`29b539ebc72a`로 일치했다.
+
+**다음 한 작업**: Docker Manager T-VN-41F1D-C2가 후보 image의 이 command를 호출해
+storage head를 attest하고 reset 뒤 migration을 증명한다.
+
 ## 과거 기록 아카이브
 
 > 2026-07-26 **전면 감사**(현행 백로그 구조 성립) 이전 기록은 아래로 분리했다.

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 import tomllib
 from pathlib import Path
 from typing import Any, Final
@@ -1627,7 +1628,7 @@ def test_dagster_entrypoint_rejects_any_root_or_api_ops_key_even_when_empty(
     result = subprocess.run(
         ["sh", "docker/dagster-entrypoint.sh", "sh", "-c", "exit 0"],
         cwd=ROOT,
-        env={"PATH": os.environ["PATH"], key: ""},
+        env={"PATH": f"{Path(sys.executable).parent}:{os.environ['PATH']}", key: ""},
         check=False,
         capture_output=True,
         text=True,
@@ -1639,338 +1640,57 @@ def test_dagster_entrypoint_rejects_any_root_or_api_ops_key_even_when_empty(
     )
 
 
-_DAGSTER_IMAGE_HEAD: Final = "0084_c6c_cancel_probe_fixtures"
-
-
-def _dagster_gate_stub_path(
-    tmp_path: Path,
-    *,
-    image_head: str = _DAGSTER_IMAGE_HEAD,
-    heads_script: str | None = None,
-    current_script: str | None = None,
-    stub_python: bool = True,
-) -> tuple[str, Path]:
-    """dagster 게이트용 alembic stub — `heads`/`current`만 응답하는 읽기 전용 세대.
-
-    ``upgrade``가 호출되면 흔적 파일을 남긴다. dagster-entrypoint는 migration을
-    **절대** 실행하면 안 되므로(소유는 api-entrypoint) 모든 게이트 테스트가
-    흔적 부재를 함께 고정한다. ``heads_script``/``current_script``를 주면 해당
-    분기를 통째로 바꾼다(불일치·stale·일시 오류 재현용).
-    """
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir(exist_ok=True)
-    marker = tmp_path / "upgrade-ran"
-    heads_body = heads_script if heads_script is not None else f"echo '{image_head} (head)'"
-    current_body = (
-        current_script if current_script is not None else f"echo '{image_head} (head)'"
-    )
-    alembic = bin_dir / "alembic"
-    alembic.write_text(
-        "#!/bin/sh\n"
-        'case "$1" in\n'
-        f"  heads) {heads_body} ;;\n"
-        f"  current) {current_body} ;;\n"
-        f"  upgrade) echo ran > '{marker}' ;;\n"
-        "esac\n"
-        "exit 0\n",
-        encoding="utf-8",
-    )
-    alembic.chmod(0o755)
-    if stub_python:
-        # 게이트 분기 테스트는 ops-key python guard를 통과 고정한다. 성공 경로
-        # 1개는 stub_python=False로 **실 python**을 태워 inline snippet 회귀를
-        # 잡는다 (리뷰 F3).
-        python = bin_dir / "python"
-        python.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-        python.chmod(0o755)
-    return f"{bin_dir}:{os.environ['PATH']}", marker
-
-
-def _run_dagster_entrypoint(
-    path: str,
-    extra: dict[str, str],
-) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["sh", "docker/dagster-entrypoint.sh", "sh", "-c", "echo interlock-passed"],
+@pytest.mark.unit
+def test_dagster_entrypoint_executes_command_without_api_ops_keys() -> None:
+    result = subprocess.run(
+        ["sh", "docker/dagster-entrypoint.sh", "sh", "-c", "echo dagster-started"],
         cwd=ROOT,
-        env={"PATH": path, **extra},
+        env={"PATH": f"{Path(sys.executable).parent}:{os.environ['PATH']}"},
         check=False,
         capture_output=True,
         text=True,
-        # entrypoint 메시지는 UTF-8이다 — Windows 로컬(cp949 기본)에서도 CI(Linux,
-        # UTF-8)와 같은 디코딩으로 판정한다.
-        encoding="utf-8",
-    )
-
-
-@pytest.mark.unit
-def test_dagster_entrypoint_executes_command_without_api_ops_keys(
-    tmp_path: Path,
-) -> None:
-    # 실 python으로 ops-key guard 성공 경로를 검증한다 (리뷰 F3 — stub이면
-    # inline snippet 회귀가 전 컨테이너 기동 거부인데 스위트는 green이 된다).
-    path, marker = _dagster_gate_stub_path(tmp_path, stub_python=False)
-    result = _run_dagster_entrypoint(path, {})
-
-    assert result.returncode == 0, result.stderr
-    assert "interlock-passed" in result.stdout
-    assert not marker.exists(), "dagster entrypoint가 migration을 실행했다."
-
-
-@pytest.mark.unit
-def test_dagster_container_execs_when_db_matches_image_head(tmp_path: Path) -> None:
-    """DB revision == 이미지 head == EXPECTED_HEAD면 게이트를 통과해 명령을 exec한다."""
-    path, marker = _dagster_gate_stub_path(tmp_path)
-    result = _run_dagster_entrypoint(
-        path,
-        {"KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD": _DAGSTER_IMAGE_HEAD},
     )
 
     assert result.returncode == 0, result.stderr
-    assert "interlock-passed" in result.stdout
-    assert not marker.exists(), "dagster entrypoint가 migration을 실행했다."
+    assert "dagster-started" in result.stdout
 
 
 @pytest.mark.unit
-def test_dagster_container_refuses_image_head_mismatch_before_db(tmp_path: Path) -> None:
-    """EXPECTED_HEAD와 이미지 head가 다르면 **DB 연결 전에** 죽는다 (api와 같은 규약)."""
-    db_probe = tmp_path / "current-probed"
-    path, marker = _dagster_gate_stub_path(
-        tmp_path,
-        image_head="0082_derivation_identity_fence",
-        current_script=f"echo probed > '{db_probe}'; echo '0082_derivation_identity_fence (head)'",
-    )
-    result = _run_dagster_entrypoint(
-        path,
-        {"KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD": _DAGSTER_IMAGE_HEAD},
-    )
-
-    assert result.returncode != 0, result.stdout
-    assert not marker.exists()
-    assert "0082_derivation_identity_fence" in result.stderr
-    assert _DAGSTER_IMAGE_HEAD in result.stderr
-    assert not db_probe.exists(), "head 불일치인데 DB(alembic current)에 연결했다."
-
-
-@pytest.mark.unit
-def test_dagster_container_rejects_set_but_empty_expected_head(tmp_path: Path) -> None:
-    """set-but-empty가 조용히 EXPECTED_HEAD 대조를 끄면 안 된다 — api와 같은 규약."""
-    path, marker = _dagster_gate_stub_path(tmp_path)
-    result = _run_dagster_entrypoint(
-        path, {"KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD": ""}
-    )
-
-    assert result.returncode != 0, result.stdout
-    assert not marker.exists()
-    assert "set but empty" in result.stderr
-
-
-@pytest.mark.unit
-@pytest.mark.parametrize(
-    "current_script",
-    [
-        # api가 아직 migration을 돌리지 않아 DB가 한 세대 뒤.
-        "echo '0082_derivation_identity_fence'",
-        # 빈 DB(alembic_version 부재/비어 있음) — `alembic current`는 아무것도 안 낸다.
-        "true",
-    ],
-)
-def test_dagster_container_refuses_when_db_is_behind_image(
-    tmp_path: Path,
-    current_script: str,
-) -> None:
-    """DB가 이미지보다 뒤면 즉시(retry 없이) "api를 먼저 배포하라"로 죽는다.
-
-    dagster 이미지를 api보다 먼저 재배포하면 코드(신세대)와 DB(구세대)가 어긋난 채
-    조용히 기동하던 공백 — 0083 배포 때 "api 먼저" 순서를 사람이 지켜야 했던 이유 —
-    를 기계 인터록으로 만든 것이 이 게이트의 존재 이유다 (ADR-083 유예 NEW-5).
-    """
-    path, marker = _dagster_gate_stub_path(tmp_path, current_script=current_script)
-    result = _run_dagster_entrypoint(path, {})
-
-    assert result.returncode != 0, result.stdout
-    assert not marker.exists(), "DB가 뒤인데 dagster entrypoint가 migration을 실행했다."
-    assert "deploy the api container first" in result.stderr
-    assert "retrying" not in result.stderr, "세대 불일치(영구 오류)를 retry로 두드렸다."
-
-
-@pytest.mark.unit
-def test_dagster_container_fails_fast_on_stale_image_when_db_is_ahead(
-    tmp_path: Path,
-) -> None:
-    """DB revision이 이미지 chain 밖(stale 이미지 재배포)이면 retry 없이 즉시 죽는다."""
-    path, marker = _dagster_gate_stub_path(
-        tmp_path,
-        image_head="0082_derivation_identity_fence",
-        current_script=(
-            "echo \"FAILED: Can't locate revision identified by "
-            f"'{_DAGSTER_IMAGE_HEAD}'\"; exit 255"
-        ),
-    )
-    result = _run_dagster_entrypoint(path, {})
-
-    assert result.returncode != 0, result.stdout
-    assert not marker.exists()
-    assert "stale image" in result.stderr
-    assert "Can't locate revision" in result.stderr, (
-        "실제 alembic 오류 원문이 로그에 없다 — 운영자가 원인을 추적할 수 없다."
-    )
-    assert "retrying" not in result.stderr, "영구 오류를 retry 루프로 두드렸다."
-
-
-@pytest.mark.unit
-def test_dagster_container_gates_db_generation_even_without_expected_head(
-    tmp_path: Path,
-) -> None:
-    """EXPECTED_HEAD 미결선이어도 DB↔이미지 head 대조는 그대로 수행한다.
-
-    EXPECTED_HEAD는 배포측(orchestrator)이 결선하는 추가 대조일 뿐이고, DB 세대
-    게이트가 인터록의 존재 이유다 — env 부재가 게이트 해제가 되면 안 된다.
-    """
-    path, marker = _dagster_gate_stub_path(
-        tmp_path,
-        current_script="echo '0082_derivation_identity_fence'",
-    )
-    result = _run_dagster_entrypoint(path, {})
-
-    assert result.returncode != 0, result.stdout
-    assert not marker.exists()
-    assert "deploy the api container first" in result.stderr
-
-
-@pytest.mark.unit
-def test_dagster_container_retries_transient_db_errors_then_execs(
-    tmp_path: Path,
-) -> None:
-    """연결 일시 오류는 retry로 기다린다 — api-entrypoint와 같은 env를 재사용한다."""
-    state = tmp_path / "first-attempt-done"
-    path, marker = _dagster_gate_stub_path(
-        tmp_path,
-        current_script=(
-            f"if [ ! -f '{state}' ]; then : > '{state}'; "
-            "echo 'connection refused' >&2; exit 1; fi; "
-            f"echo '{_DAGSTER_IMAGE_HEAD} (head)'"
-        ),
-    )
-    result = _run_dagster_entrypoint(
-        path,
-        {
-            "KOR_TRAVEL_MAP_MIGRATION_RETRIES": "3",
-            "KOR_TRAVEL_MAP_MIGRATION_RETRY_SLEEP_SECONDS": "0",
-        },
-    )
-
-    assert result.returncode == 0, result.stderr
-    assert "interlock-passed" in result.stdout
-    assert "retrying (1/3)" in result.stderr
-    assert not marker.exists()
-
-
-@pytest.mark.unit
-def test_dagster_container_reports_exhausted_retries_as_gate_failure(
-    tmp_path: Path,
-) -> None:
-    path, marker = _dagster_gate_stub_path(
-        tmp_path,
-        current_script="echo 'connection refused' >&2; exit 1",
-    )
-    result = _run_dagster_entrypoint(
-        path,
-        {
-            "KOR_TRAVEL_MAP_MIGRATION_RETRIES": "2",
-            "KOR_TRAVEL_MAP_MIGRATION_RETRY_SLEEP_SECONDS": "0",
-        },
-    )
-
-    assert result.returncode != 0, result.stdout
-    assert not marker.exists()
-    assert "alembic current failed after 2 attempts" in result.stderr
-
-
-@pytest.mark.unit
-def test_dagster_container_refuses_multi_head_image(tmp_path: Path) -> None:
-    path, marker = _dagster_gate_stub_path(
-        tmp_path,
-        heads_script=(
-            f"printf '%s\\n%s\\n' '{_DAGSTER_IMAGE_HEAD} (head)' '0083_rogue_branch (head)'"
-        ),
-    )
-    result = _run_dagster_entrypoint(path, {})
-
-    assert result.returncode != 0, result.stdout
-    assert not marker.exists()
-    assert "more than one alembic head" in result.stderr
-
-
-@pytest.mark.unit
-def test_dagster_container_reports_broken_alembic_as_such_not_as_mismatch(
-    tmp_path: Path,
-) -> None:
-    """alembic 실행 실패를 'head 불일치'로 오진하면 안 된다 — api와 같은 규약."""
-    path, marker = _dagster_gate_stub_path(
-        tmp_path,
-        heads_script="echo 'FAILED: No script_location key found'; exit 255",
-    )
-    result = _run_dagster_entrypoint(
-        path,
-        {"KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD": _DAGSTER_IMAGE_HEAD},
-    )
-
-    assert result.returncode != 0, result.stdout
-    assert not marker.exists()
-    assert "alembic heads failed" in result.stderr
-    assert "does not match" not in result.stderr
-
-
-@pytest.mark.unit
-def test_dagster_entrypoint_gate_is_read_only() -> None:
-    """dagster-entrypoint는 어떤 경로로도 migration을 실행하지 않는다 (소유는 api)."""
+def test_dagster_entrypoint_does_not_read_map_application_alembic() -> None:
     entrypoint = _script("docker/dagster-entrypoint.sh")
 
-    assert "alembic upgrade" not in entrypoint
-    assert "alembic heads" in entrypoint
-    assert "alembic current" in entrypoint
-    # api-entrypoint와 lockstep인 규약 문구 — 같은 실패를 두 계층이 다른 문구로
-    # 설명하면 운영자가 두 번 헤맨다.
-    api_entrypoint = _script("docker/api-entrypoint.sh")
-    for shared_phrase in (
-        "is set but empty; refusing to silently disable the head gate",
-        "the image has more than one alembic head",
-        "the image alembic head does not match the expected head",
-        "alembic heads failed; the image alembic configuration is broken",
-        "the DB alembic revision is not part of this image's migration chain",
-        "a stale image was deployed",
-    ):
-        assert shared_phrase in entrypoint, shared_phrase
-        assert shared_phrase in api_entrypoint, shared_phrase
+    assert "alembic" not in entrypoint
+    assert "KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD" not in entrypoint
+    assert "KOR_TRAVEL_MAP_MIGRATION_MODE" not in entrypoint
 
 
 @pytest.mark.unit
-def test_dagster_image_ships_alembic_chain_for_generation_gate() -> None:
-    """게이트 전제: dagster 이미지에 alembic 실행 환경이 있어야 한다.
-
-    alembic 패키지는 kortravelmap **runtime** 의존이라 `.[providers]` 설치에
-    이미 포함된다 — dev extra로 옮기면 게이트가 이미지에서 침묵 파손되므로
-    여기서 고정한다. chain 정의(alembic.ini + alembic/)는 Dockerfile COPY가
-    담는다.
-    """
+def test_dagster_image_ships_storage_command_without_map_alembic_chain() -> None:
     dagster = _dockerfile("dagster.Dockerfile")
-    assert "COPY --chown=appuser:appuser alembic.ini ./" in dagster
-    assert "COPY --chown=appuser:appuser alembic ./alembic" in dagster
 
-    root_pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    dependencies = root_pyproject["project"]["dependencies"]
-    assert any(dep.startswith("alembic") for dep in dependencies)
+    assert "docker/dagster-storage-migrate.py /usr/local/bin/ktm-dagster-storage" in dagster
+    assert "COPY --chown=appuser:appuser alembic.ini ./" not in dagster
+    assert "COPY --chown=appuser:appuser alembic ./alembic" not in dagster
 
 
 @pytest.mark.unit
-def test_docker_compose_starts_dagster_only_after_api_is_healthy() -> None:
-    """fresh up에서 api migration 완료 전에 dagster 게이트가 걸리지 않도록
-    compose가 api healthy(= `alembic upgrade head` 이후 기동)를 기동 조건으로 건다."""
+def test_docker_compose_runs_storage_migration_before_dagster_services() -> None:
     services = _compose()["services"]
+    migration = services["dagster-storage-migrate"]
+
+    assert migration["build"]["dockerfile"] == "docker/dagster.Dockerfile"
+    assert migration["command"] == ["ktm-dagster-storage", "migrate"]
+    assert migration["environment"]["DAGSTER_HOME"] == "/opt/dagster/dagster_home"
+    assert migration["environment"]["KOR_TRAVEL_MAP_DAGSTER_PG_URL"]
+    assert migration["depends_on"]["dagster-db-init"]["condition"] == (
+        "service_completed_successfully"
+    )
 
     for service_name in ("dagster", "dagster-daemon"):
         depends_on = services[service_name]["depends_on"]
+        assert depends_on["dagster-storage-migrate"]["condition"] == (
+            "service_completed_successfully"
+        )
         assert depends_on["api"]["condition"] == "service_healthy", service_name
 
 
@@ -2051,13 +1771,10 @@ def test_frontend_docker_image_uses_next_standalone_server() -> None:
         "docker-compose.external-object-store.yml",
     ],
 )
-def test_external_overlays_keep_dagster_api_ordering_guard(
+def test_external_overlays_keep_candidate_storage_migration_ordering(
     overlay: str, tmp_path: Path
 ) -> None:
-    """NEW-5 리뷰 F1 — external overlay의 ``depends_on: !override``가 base의
-    api(service_healthy) 의존을 지우면 fresh up에서 dagster가 migration과
-    경주해 게이트에 걸린다. 실제 Compose resolver의 merged config로 세 모드
-    전부에서 보증이 유지됨을 고정한다."""
+    """외부 infra에서도 같은 후보 image가 storage migration을 완료한 뒤 기동한다."""
 
     # api의 env_file(required, gitignored)은 병합 해석과 무관 — clean checkout
     # (CI)에서도 resolve되도록 테스트 전용 overlay로 비운다.
@@ -2099,45 +1816,16 @@ def test_external_overlays_keep_dagster_api_ordering_guard(
         cwd=ROOT,
     )
     services = json.loads(resolved.stdout)["services"]
+    migration = services["dagster-storage-migrate"]
+    assert migration["command"] == ["ktm-dagster-storage", "migrate"]
+    assert migration["environment"]["KOR_TRAVEL_MAP_DAGSTER_PG_URL"]
     for name in ("dagster", "dagster-daemon"):
         depends = services[name].get("depends_on") or {}
+        assert depends.get("dagster-storage-migrate", {}).get("condition") == (
+            "service_completed_successfully"
+        ), (overlay, name, depends)
         assert depends.get("api", {}).get("condition") == "service_healthy", (
             overlay,
             name,
             depends,
         )
-
-
-@pytest.mark.unit
-def test_dagster_container_rejects_removed_migration_mode_env(tmp_path: Path) -> None:
-    """api-entrypoint 규약 lockstep (리뷰 F6) — 제거된 스위치는 조용히 무시하지
-    않고 거부한다."""
-    path, marker = _dagster_gate_stub_path(tmp_path)
-    result = _run_dagster_entrypoint(
-        path, {"KOR_TRAVEL_MAP_MIGRATION_MODE": "none"}
-    )
-
-    assert result.returncode == 1
-    assert "KOR_TRAVEL_MAP_MIGRATION_MODE was removed" in result.stderr
-    assert "interlock-passed" not in result.stdout
-    assert not marker.exists()
-
-
-@pytest.mark.unit
-def test_dagster_container_rejects_branched_alembic_version_rows(
-    tmp_path: Path,
-) -> None:
-    """DB alembic_version이 다행(branched)이면 behind로 오진하지 않고 전용
-    문구로 fail-close한다 (리뷰 F4)."""
-    path, marker = _dagster_gate_stub_path(
-        tmp_path,
-        current_script=(
-            f"echo '{_DAGSTER_IMAGE_HEAD} (head)'; echo 'aaaa1111bbbb (head)'"
-        ),
-    )
-    result = _run_dagster_entrypoint(path, {})
-
-    assert result.returncode == 1
-    assert "multiple alembic revisions" in result.stderr
-    assert "deploy the api container first" not in result.stderr
-    assert not marker.exists()

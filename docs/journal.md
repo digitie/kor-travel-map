@@ -2,6 +2,19 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-06 (codex) — T-VN-41F1D-C0 Dagster storage migration artifact 완료
+
+- 후보 image에 `ktm-dagster-storage head|migrate`를 추가했다. `head`는 이미지에 실제
+  설치된 Dagster package graph만 읽어 JSON으로 attest하고, `migrate`는 같은
+  `DAGSTER_HOME`/`dagster.yaml`/metadata DSN으로 `dagster instance migrate` 뒤
+  `public.alembic_version` 정확히 한 행을 대조한다. Map application Alembic·source SHA는
+  storage head 정본이 아니다.
+- Compose one-shot을 webserver/daemon의 선행 조건으로 연결하고 모든 외부 overlay의
+  순서를 고정했다. 실제 후보 image와 빈 격리 PostgreSQL에서 head, migration JSON,
+  `public.alembic_version`이 모두 `29b539ebc72a`로 일치했다. Dagster package와 Docker
+  runtime 회귀 pytest 666건(선택 provider 의존성 누락 3건 skip), ruff, Python 3.13 strict
+  mypy, import-linter를 통과했다.
+
 ## 과거 기록 아카이브
 
 > 2026-07-26 **전면 감사**(현행 백로그 구조 성립) 이전 기록은 아래로 분리했다.
