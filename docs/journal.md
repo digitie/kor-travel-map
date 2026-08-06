@@ -2,6 +2,14 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-06 (codex) — F1D-C0a·F1J-A 완료 이관과 남은 C3 정렬
+
+- Map application schema head artifact(PR #963)와 Map-owned cancel-probe fixture lifecycle(PR #960)의
+  병합을 완료 이력으로 이관했다. 두 PR의 구현·검증 결과는 유지하고, 진행 중 task에서는 제거했다.
+- 구 compatible-pair를 남은 delivery 단위로 두지 않는다. F1J-B/C는 Docker Manager
+  `T-VN-41F1D-C3` 하나로 재정렬했으며, v5 durable transaction이 Map fixture
+  ensure→한 번의 canonical cancel→immutable receipt→finalize를 실제 호출할 때만 완료된다.
+
 ## 2026-08-06 (codex) — T-VN-41F1D-C0a 후보 Map application schema head artifact 구현
 
 - 후보 API image에 `ktm-application-schema head`를 추가했다. command는 Python installation
