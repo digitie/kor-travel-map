@@ -1,5 +1,16 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-06 (2) — T-VN-37 notice 계보 승자 판정 (ADR-087, PR 대기)
+
+`feat/tvn37-notice-lineage-materialization` — 승자 판정을 행마다에서 계보당 1회로.
+**3,045 notice 23.7초 → 0.35초, 145행 448ms → 4.8ms**, 결과 집합 동일(145=145
+차집합 0). 계보 key는 `source_records`에 저장(불변·축 일치). 설계 3회 폐기 근거는
+ADR-087.
+
+**다음 한 작업**: 배터리 green 확인 → 적대 리뷰 2인(형태가 바뀌었으므로 승자
+의미론 재검증) → PR 생성. **머지는 사용자 지시 대기.** 배포 시 `EXPECTED_HEAD`를
+`0088_source_record_lineage_key`로 선행 갱신.
+
 ## 2026-08-06 — T-VN-41F1D-C0a·F1J-A 병합, v5 dynamic fixture 결선 대기
 
 Map application schema head artifact(PR #963)와 Map-owned cancel-probe fixture lifecycle(PR #960)가

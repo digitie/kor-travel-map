@@ -100,7 +100,7 @@
 | ADR-084 | Map-owned C6c cancel-probe fixture | [084-map-owned-c6c-cancel-probe-fixtures.md](084-map-owned-c6c-cancel-probe-fixtures.md) |
 | ADR-085 | 후보 API image의 설치 application schema head artifact | [085-installed-application-schema-head-artifact.md](085-installed-application-schema-head-artifact.md) |
 | ADR-086 | kind별 typed subtype 분해와 배타 arc | [086-typed-feature-subtypes.md](086-typed-feature-subtypes.md) |
-| ADR-087 | notice 계보 key를 source record에 저장 | [087-notice-lineage-key-materialization.md](087-notice-lineage-key-materialization.md) |
+| ADR-087 | notice 계보 승자를 계보당 1회로 판정 | [087-notice-lineage-winner-once-per-lineage.md](087-notice-lineage-winner-once-per-lineage.md) |
 
 ## 새 ADR 작성 규약
 

@@ -2,6 +2,28 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-06 (2) — T-VN-37: notice 계보 승자를 계보당 1회로 (ADR-087)
+
+- 공개 notice read의 `_latest_notice_only_sql`이 승자 판정을 **행마다** correlated
+  `NOT EXISTS`로 다시 했다(`DISTINCT ON` + `LATERAL`). 승자는 계보당 하나인데
+  notice 수에 제곱으로 커졌다. `ROW_NUMBER()` 1회 + 비상관 `ARRAY(SELECT ...)`
+  (InitPlan, 쿼리당 1회)로 바꿨다 — 이 저장소가 bbox에서 쓰던 패턴이다.
+  **3,045 notice 23.7초 → 0.35초, 145행(현행 prod) 448ms → 4.8ms.**
+  결과 집합은 두 규모 모두 145=145 양방향 차집합 0.
+- 계보 key는 `provider_sync.source_records`에 저장한다 — `raw_data`가 record별
+  불변이라 낡지 않고, 계보 축이 (feature, primary link)당이라 record가 유일하게
+  맞는 자리다. read에 `sr` alias가 이미 있어 새 조인이 없다.
+- **설계 3회 폐기**(전부 테스트·리뷰가 잡음): `validity tstzrange`(미래 발효 KMA
+  특보가 숨음) · 승자 물화 `superseded_at`(가변 입력이라 낡음) ·
+  `feature_notices.lineage_key`(축 불일치 + 조인 추가로 2배 느려짐).
+- **write 경로가 한 번도 실행된 적 없이 나갔다** — backfill만 검증했다. 같은 bind
+  파라미터를 INSERT 값(varchar)과 CASE(text)에 써서 `AmbiguousParameterError`로
+  **모든 provider의 모든 record 쓰기**가 죽는 상태였다. 양쪽 명시 CAST로 고치고
+  실제 드라이버로 실행해 증명했다. 계약 테스트를 신설했다.
+- InitPlan 재작성이 "한 계보라도 이기면 보존" 불변식을 깼던 것도 잡았다 —
+  `GROUP BY feature_id HAVING bool_and(rank > 1)`.
+- 배포 선행: `EXPECTED_HEAD`를 `0088_source_record_lineage_key`로.
+
 ## 2026-08-06 (codex) — T-VN-41F1D-C3 n150 파기형 rebuild 결선
 
 - Manager PR #167의 최신 Map typed-subtype pin으로 n150 `rebuild-pinned` generation을 committed했다.
