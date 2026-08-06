@@ -413,6 +413,9 @@ async def _seed_feature_with_primary_source(
             coord=WKTElement(coord_wkt, srid=4326),
         )
     )
+    await session.flush()
+    # T-VN-35: place는 subtype 행이 정본이다 — 없으면 F2가 이 대조군을 잡는다.
+    await seed_feature_subtype(session, feature_id=feature_id, kind="place")
     source_record_key = f"sr-{feature_id}"
     source_entity_key = f"se-{feature_id}"
     await _seed_source_entity_record(

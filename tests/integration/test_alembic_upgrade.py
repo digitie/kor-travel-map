@@ -245,24 +245,6 @@ _UNCOMPARED_INDEX_CONTRACTS: dict[
         ),
         "deleted_at IS NULL AND status = 'active' AND coord IS NOT NULL",
     ),
-    # T-VN-35(alembic 0086): concierge youtube 표현식 인덱스는 core ``detail``과
-    # 함께 사라지고 place subtype의 ``payload`` 위로 이관됐다(0084).
-    ("feature", "idx_feature_places_yt_channel"): (
-        False,
-        (
-            "payload #>> '{kor_travel_concierge,youtube,channel_id}' "
-            "ASC NULLS LAST",
-        ),
-        "payload #>> '{kor_travel_concierge,youtube,channel_id}' IS NOT NULL",
-    ),
-    ("feature", "idx_feature_places_yt_playlist"): (
-        False,
-        (
-            "payload #>> '{kor_travel_concierge,youtube,playlist_id}' "
-            "ASC NULLS LAST",
-        ),
-        "payload #>> '{kor_travel_concierge,youtube,playlist_id}' IS NOT NULL",
-    ),
     ("provider_sync", "idx_source_records_kma_alert_history"): (
         False,
         (

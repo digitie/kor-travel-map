@@ -1236,8 +1236,9 @@ async def _seed_legacy_detail_at_pre_revision(dsn: str) -> None:
                         " detail, geom) VALUES ("
                         " :feature_id, :kind, :name, :category, 'active', now(),"
                         " CAST(:detail AS jsonb),"
-                        " CASE WHEN :wkt IS NULL THEN NULL"
-                        "      ELSE x_extension.ST_GeomFromText(:wkt, 4326) END)"
+                        " CASE WHEN CAST(:wkt AS text) IS NULL THEN NULL"
+                        "      ELSE x_extension.ST_GeomFromText(CAST(:wkt AS text), 4326)"
+                        " END)"
                     ),
                     {
                         "feature_id": feature_id,
