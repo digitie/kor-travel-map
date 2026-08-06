@@ -786,8 +786,7 @@ function datasetRows(payload: unknown): LiveDatasetRow[] {
       typeof item.consecutive_failures !== "number" ||
       !isRecord(item.dataset_issues) ||
       typeof item.dataset_issues.open_count !== "number" ||
-      !isRecord(item.provider_issues) ||
-      typeof item.provider_issues.open_count !== "number" ||
+      typeof item.provider_dataset_id !== "number" ||
       typeof item.status !== "string" ||
       !isRecord(item.freshness) ||
       typeof item.freshness.state !== "string" ||
@@ -873,33 +872,22 @@ async function expectDatasetSummary(
   }
 }
 
-/** UI의 dataset-issues.ts와 같은 provider+dataset/provider max dedupe 계약. */
+/** UI의 dataset-issues.ts와 같은 provider_dataset_id max dedupe 계약. */
 function datasetGridOpenIssueCount(rows: readonly LiveDatasetRow[]): number {
-  const datasetCountsByProvider = new Map<string, Map<string, number>>();
-  const providerCounts = new Map<string, number>();
+  const countsByProviderDatasetId = new Map<number, number>();
   for (const row of rows) {
-    const datasetCounts =
-      datasetCountsByProvider.get(row.provider) ?? new Map<string, number>();
-    datasetCounts.set(
-      row.datasetKey,
-      Math.max(datasetCounts.get(row.datasetKey) ?? 0, row.datasetOpenIssues),
-    );
-    datasetCountsByProvider.set(row.provider, datasetCounts);
-    providerCounts.set(
-      row.provider,
-      Math.max(providerCounts.get(row.provider) ?? 0, row.providerOpenIssues),
+    countsByProviderDatasetId.set(
+      row.providerDatasetId,
+      Math.max(
+        countsByProviderDatasetId.get(row.providerDatasetId) ?? 0,
+        row.datasetOpenIssues,
+      ),
     );
   }
-  const datasetTotal = [...datasetCountsByProvider.values()].reduce(
-    (total, counts) =>
-      total + [...counts.values()].reduce((sum, count) => sum + count, 0),
-    0,
-  );
-  const providerTotal = [...providerCounts.values()].reduce(
+  return [...countsByProviderDatasetId.values()].reduce(
     (sum, count) => sum + count,
     0,
   );
-  return datasetTotal + providerTotal;
 }
 
 function sameDatasetRows(
@@ -914,7 +902,7 @@ function sameDatasetRows(
       row.catalogState,
       row.consecutiveFailures,
       row.datasetOpenIssues,
-      row.providerOpenIssues,
+      row.providerDatasetId,
       row.freshnessState,
       row.status,
     ]);

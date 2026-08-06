@@ -15,8 +15,9 @@
 > **2026-07-27 전환 완료**: 2026-07-18에 발견한 legacy admin ops 삭제와 PinVi caller
 > 불일치는 `T-ADM-C6c`에서 해소했다. PinVi는 canonical datasets/pipeline과 제한된
 > `ops:read`/`ops:cancel` principal을 사용하고, Docker Manager는 T-VN-41F1J의 별도
-> `ops:fixture` principal으로 Map-owned cancel-probe 수명주기만 호출한다. production compatible-pair 활성화와 C7
-> destructive live 인수를 통과했다. 삭제된 ops 경로와 URL query Map API key는 호환
+> `ops:fixture` principal으로 Map-owned cancel-probe 수명주기만 호출한다. 현재 n150은 서비스 전
+> rehearsal 환경이며, v5 pinned-runtime generation 뒤 final-schema source/ETL 재적재와 F1D-D
+> data-dependent live 인수는 아직 완료되지 않았다. 삭제된 ops 경로와 URL query Map API key는 호환
 > 경로로 부활시키지 않는다.
 
 ## 1. 시스템·포트
@@ -143,19 +144,18 @@
 ### 3.1 vNext PinVi 단계적 cutover
 
 ADR-073의 공개 조회·검색, canonical ops principal, 5-state feature batch는 현재 OpenAPI와
-production compatible pair에 반영됐다. sparse weather batch처럼 생산자만 먼저 반영되거나
-cache target처럼 미완인 항목은 각 T-VN task와 PinVi consumer가 함께 준비된 compatible
-pair에서만 활성화한다. 현재 계약은 배포 source에 결박된 OpenAPI snapshot으로 판정한다.
+v5 pinned-runtime generation에 반영됐다. sparse weather batch처럼 생산자만 먼저 반영되거나
+cache target처럼 미완인 항목은 각 T-VN task와 PinVi consumer가 함께 준비된 generation에서만
+활성화한다. 현재 계약은 배포 source에 결박된 OpenAPI snapshot으로 판정한다.
 
-Production C6c compatible-pair manifest의 정본은 docker-manager의 version 4다.
-active/rollback 각 pair는 Map API·UI·Dagster web·Dagster daemon image ID 네 개,
-공통 Map source revision, PinVi API image ID/source revision, contract generation, recorded time의
-exact 9-field를 갖는다. Map C7 attestation은 이 네 Map image ID와 실제 compose runtime을
-각각 비교하며 v3 manifest나 확장 필드를 허용하지 않는다(ADR-076).
-C7P 코드 병합만으로 production 활성화가 되지는 않는다. initial C6c/C7 cutover는
-producer/consumer blocker를 닫고 main의 exact commit으로 image를 빌드한 뒤 v4 capture와
-C7 live를 통과해 2026-07-27 완료했다. 후속 pair도 같은 capture → attestation → live
-인수 순서를 반복한다.
+Docker Manager의 runtime 정본은 version 5 `active_generation` 하나다. Map API·UI·Dagster
+web·daemon과 PinVi API·web·Dagster의 일곱 immutable image, 양쪽 source revision, Map application·
+Dagster 및 PinVi head, pinset hash를 exact field로 가진다. version 7 rebuild journal의 committed
+candidate는 generation과 같아야 하며 finalized cancel-probe receipt를 포함한다. Map C7 attestation
+v5는 일곱 role의 compose service/container binding과 UI/API/Dagster endpoint role을 함께 서명하고,
+caller env가 이를 바꾸면 fail-close한다. final-schema source/ETL reload receipt가 같은 manifest/journal,
+세 head와 canonical dataset availability에 결박되기 전에는 data-dependent C7/Admin live E2E를 시작할 수 없다.
+F1D-D의 재적재 및 data-dependent live 인수는 아직 미완료다.
 
 | 변경 | PinVi 선행 조건 | KTM 전환 조건 |
 |---|---|---|
@@ -167,18 +167,19 @@ C7 live를 통과해 2026-07-27 완료했다. 후속 pair도 같은 capture → 
 | cache target/refresh | **paired PR 전 미완** — generation·conditional ETag·Idempotency-Key·strict pull consumer | **producer foundation 진행** — service resource, restore fence, same-tx outbox, pull lease/replay/snapshot |
 | public/operator 분리 | 공개 DTO의 raw lineage 의존 0건, operator principal 사용 | route matrix·read-only DB role·표면별 OpenAPI SHA |
 
-Cutover는 consumer 배포 → contract/OpenAPI SHA 확인 → production clone 복구·shadow 검증 → KTM
-write fence → KTM API/DB 전환 → PinVi 활성화 → 양방향 smoke → soak 순서다. rollback window에는
-write fence를 유지하거나 검증된 forward journal/PITR로 fence 이후 delta를 되살릴 수 있어야 한다.
-단순 old snapshot 복원과 upstream 재수집은 rollback이 아니다. 어느 gate든 실패하면 consumer와 KTM을
-이전 pinned compatible pair로 유지하고 새 writer를 열지 않는다(ADR-075).
+Cutover는 consumer 배포 → contract/OpenAPI SHA 확인 → shadow 검증 → KTM write fence → KTM API/DB
+전환 → PinVi 활성화 → 양방향 smoke → soak 순서다. 실패 시 write fence를 유지하고 immutable image를
+전 세대로 되돌린 뒤 forward-fix 또는 최종 schema source/ETL 재적재를 새 receipt로 증명한다. 중간 DB
+preimage·PITR·old snapshot을 복원 근거로 사용하지 않는다. 어느 gate든 실패하면 consumer와 KTM을
+이전 세대의 immutable generation으로 되돌려 writer를 열지 않는다. 현재 개발 단계에서 data 보전보다
+최종 schema source/ETL 재적재가 정본이며, stale receipt·중간 DB snapshot은 복원 근거가 아니다.
 
 `/v1/features/search` 전환에는 `include_total=false`의 COUNT 0회, `true`의 COUNT 1회,
 동일 정규화 query에서만 이어지는 signed cursor, 알 수 없는 version·변조·query mismatch의
 typed 422를 포함한다. production API의 cursor signing secret은 다른 runtime과 frontend로
 전파하지 않으며 실제 값은 배포 전용 env에만 둔다.
 
-현재 compatible pair에 포함된 공개 read·feature batch는 활성 계약이다. sparse weather
+현재 pinned generation에 포함된 공개 read·feature batch는 활성 계약이다. sparse weather
 batch와 후속 service resource는 각 T-VN task와 PinVi mirror task가 활성화 시점을 소유한다.
 어느 경우에도 구 계약용 호환 alias는 두지 않는다.
 
