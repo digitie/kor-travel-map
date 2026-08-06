@@ -19,9 +19,29 @@
 (경계 정규화 무효 → write 경계 단일화·422, 이관 불가 행 조용한 소실 →
 선점검 fail-close, 세션 TimeZone 의존 → KST 고정 렌더).
 
-**다음 한 작업**: CI-parity 배터리 green 확인 → PR 생성·CI·머지 → 배포
-(EXPECTED_HEAD를 `0087_route_area_subtypes`로 선행 갱신, api→dagster/daemon
-재빌드) → Lane A 잔여 `T-VN-37A`(notice `tstzrange` — 35B가 남긴 자리).
+**보류 중(사용자 지시 2026-08-06)**: codex의 T-VN-41F가 우선이므로 PR #961
+머지와 이후 작업을 정지한다. PR은 열어 둔 채 손대지 않는다.
+
+상태: 구현·적대 리뷰 2인 반영·회귀 수정 완료. 로컬 전체 통합은 main과 **동일
+수준**(3 failed / 941 passed vs main 3 failed / 914 passed — 실패 3건은 양쪽
+동일한 이 박스의 docker-in-docker 아티팩트). CI는 lint·openapi-drift·fixture
+replay·frontend·unit 3종 pass.
+
+**재개 절차**(41F가 main에 먼저 착지한 뒤):
+
+1. `git merge origin/main` — 충돌은 `docs/{journal,resume,tasks}.md`,
+   `docs/adr/README.md`, `contracts/vnext/openapi-diff-v1.json`에서 나고
+   전부 "양쪽 다 남기기"다.
+2. **alembic 재번호**. 41F가 새 revision을 넣으면 내 체인의 머리가 그 뒤로
+   가야 한다(안 하면 head 2개). 3파일 rename + 참조 ~50곳이라 스크립트로
+   한 번에 민다 — 절차와 사후 확인 목록은 그 스크립트 docstring에 있다
+   (`scratchpad/renumber-tvn35.py`, `--base <새 head> --adr <새 번호>`).
+   ADR도 같은 이유로 밀릴 수 있다(이미 084→085로 한 번 밀었다).
+3. 재번호 뒤 필수 확인 4가지: `alembic heads` 단일 head · openapi 3종 재생성 ·
+   `contracts/vnext/openapi-diff-v1.json` baseline + freeze 상수 ·
+   EXPECTED_HEAD 문구(ADR/journal/resume/PR body).
+4. CI green → 머지 → 배포(EXPECTED_HEAD 선행 갱신, api→dagster/daemon 재빌드)
+   → Lane A 잔여 `T-VN-37A`(notice `tstzrange` — 35B가 남긴 자리).
 ## 2026-08-06 — T-VN-41F1J-A Map fixture 구현·검증·적대 리뷰 완료, PR 게이트 중
 
 `0084_c6c_cancel_probe_fixtures`가 transaction별 fixture/job, canonical cancellation
