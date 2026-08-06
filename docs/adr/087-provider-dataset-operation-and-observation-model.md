@@ -38,6 +38,9 @@ pair 정본으로 남고, 동일 raw payload 재관측이 immutable record를 UP
    child는 parent row shared lock으로 deactivate와 직렬화하고, indirect lineage child는
    entity→dataset join guard를 쓴다. job/request parent lifecycle도 member 전체를 검사한다.
    T-VN-33에는 generic bypass가 없고 purge 권한 경계는 T-VN-39에서 별도로 정한다.
+   단, non-deferrable `ON DELETE CASCADE`로 삭제되는 indirect child는 parent row가 이미
+   사라진 경우에만 referential action으로 판별해 허용한다. parent가 남은 standalone child
+   DELETE는 기존 active guard를 반드시 통과한다.
    import event는 job/member 복합 FK로 다른 job의 member를 참조할 수 없고, source record와
    dataset을 함께 가진 integrity violation은 양자의 dataset 일치도 DB가 검증한다. enrichment
    review는 dataset ID를 중복 저장하지 않고 source entity에서 소유권을 유도한다.

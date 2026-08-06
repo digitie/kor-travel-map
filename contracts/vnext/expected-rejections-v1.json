@@ -113,6 +113,11 @@
       "constraint": "ck_provider_dataset_active_write",
       "basis": "ADR-087"
     },
+    "inactive_dataset_feature_update_request_parent_update": {
+      "sqlstate": "23514",
+      "constraint": "ck_provider_dataset_active_write",
+      "basis": "ADR-087"
+    },
     "inactive_dataset_integrity_run_write": {
       "sqlstate": "23514",
       "constraint": "ck_provider_dataset_active_write",

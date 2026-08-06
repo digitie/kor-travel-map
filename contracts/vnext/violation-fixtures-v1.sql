@@ -496,6 +496,41 @@ UPDATE ops.import_jobs
 SET status = 'running'
 WHERE kind = 'fixture-inactive-import-parent';
 
+-- case: inactive_dataset_feature_update_request_parent_update
+INSERT INTO provider_sync.provider_datasets (
+    provider, dataset_key, display_name, source_kind
+) VALUES ('fixture', 'inactive-update-parent', 'inactive update parent dataset', 'manual');
+INSERT INTO provider_sync.provider_dataset_operations (
+    provider_dataset_id, operation_key, operation_kind
+) VALUES (
+    (SELECT provider_dataset_id FROM provider_sync.provider_datasets
+     WHERE provider = 'fixture' AND dataset_key = 'inactive-update-parent'),
+    'refresh', 'refresh'
+);
+INSERT INTO provider_sync.provider_dataset_operation_scopes (
+    provider_dataset_id, sync_scope, operation_key
+) VALUES (
+    (SELECT provider_dataset_id FROM provider_sync.provider_datasets
+     WHERE provider = 'fixture' AND dataset_key = 'inactive-update-parent'),
+    'dataset_wide', 'refresh'
+);
+INSERT INTO ops.feature_update_requests (dataset_membership_mode)
+VALUES ('single');
+INSERT INTO ops.feature_update_request_datasets (
+    request_id, provider_dataset_id, sync_scope
+) VALUES (
+    (SELECT request_id FROM ops.feature_update_requests),
+    (SELECT provider_dataset_id FROM provider_sync.provider_datasets
+     WHERE provider = 'fixture' AND dataset_key = 'inactive-update-parent'),
+    'dataset_wide'
+);
+UPDATE provider_sync.provider_datasets
+SET is_active = false
+WHERE provider = 'fixture' AND dataset_key = 'inactive-update-parent';
+UPDATE ops.feature_update_requests
+SET status = 'running'
+WHERE request_id = (SELECT request_id FROM ops.feature_update_request_datasets);
+
 -- case: inactive_dataset_integrity_run_write
 INSERT INTO provider_sync.provider_datasets (
     provider, dataset_key, display_name, source_kind

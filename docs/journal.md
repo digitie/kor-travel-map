@@ -2,6 +2,18 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-06 (codex) — T-VN-33 contract gate P0=0 통과
+
+- 스키마 5차와 마이그레이션 4차 적대 리뷰가 모두 P0 GO를 냈다. 마지막 P0였던
+  `ON DELETE CASCADE` indirect owner guard의 parent-부재 오판은 non-deferrable FK에서
+  referential action으로만 가능한 DELETE로 한정해 처리했다. notice lineage, integrity run,
+  curated rule 3경로의 활성 parent cascade 양성 회귀를 빈 PostGIS target에서 실행한다.
+- inactive dataset을 가진 feature update request parent 상태 변경도 `23514`로 거부하는
+  독립 fixture를 추가했다. artifact unit과 target freeze는 13건 통과했으며, migration
+  리뷰는 import job의 member/event cascade도 실제 PostGIS probe로 확인했다.
+- T-VN-33A/B/C는 draft PR #966 하나에 계속 누적한다. 다음 단계는 actual migration/model/
+  writer/reader/API cutover이며, 테스트 전 누적 구현 delta를 다시 적대 리뷰한다.
+
 ## 2026-08-06 (codex) — T-VN-33 3차 P0 contract 재설계
 
 - 3차 적대 리뷰가 확인한 reverse capability/control-plane, scope authorization, nullable

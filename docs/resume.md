@@ -1,5 +1,17 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-06 — T-VN-33 contract gate P0=0 통과, 단일 PR actual 구현 착수
+
+스키마 적대 리뷰 5차와 마이그레이션 적대 리뷰 4차가 모두 P0 GO를 냈다. 마지막 P0였던
+활성 parent cascade의 indirect owner guard 오판은 non-deferrable FK에서 parent 부재가
+referential action일 때만 허용하도록 고쳤고, notice·curation·integrity 3경로 양성 회귀를
+추가했다. inactive dataset을 가진 feature update request parent 상태 변경도 독립 음성
+fixture로 고정했다. 빈 PostGIS target contract suite와 artifact unit은 13건 통과했다.
+
+**다음 한 작업**: draft PR #966 하나에 T-VN-33A/B/C actual Alembic migration·DB seed·model과
+writer/reader/API cutover·legacy fence를 병행 구현한다. 모든 누적 delta는 테스트 전 적대
+리뷰를 다시 받는다.
+
 ## 2026-08-06 — T-VN-33 3차 P0 보완 계약 검증 완료
 
 T-VN-33의 target DDL·invariant·rejection fixture를 ADR-087에 맞춰 확장한 뒤 두 적대

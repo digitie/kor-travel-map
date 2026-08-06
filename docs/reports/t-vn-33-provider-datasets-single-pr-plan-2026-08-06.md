@@ -1,6 +1,6 @@
 # T-VN-33 — DB 소유 provider dataset 단일 PR 실행 설계
 
-- 상태: P0 보완 계약 검증 완료, 적대 재리뷰 대기
+- 상태: 설계 gate 통과, actual implementation 착수
 - 날짜: 2026-08-06
 - 범위: `T-VN-33A`·`T-VN-33B`·`T-VN-33C`를 **하나의 PR**로 완료한다.
 - 선행 검토: 적대적 설계 리뷰 2인(스키마·마이그레이션). 초기안은 공통 P0 네 건으로
@@ -111,8 +111,11 @@ state, membership, upload, curation/integrity/POI/enrichment의 INSERT/UPDATE/DE
 lineage child는 parent→dataset join guard로 SQLSTATE `23514`를 낸다. ownership의 active
 dataset A→B 재귀속도 허용하지 않으며 새 row/member를 만들어야 한다. parent row와 refresh
 operation은 `FOR SHARE`로 잠가 deactivate/disable과 child write를 직렬화한다. T-VN-33에는
-generic bypass를 두지 않고, purge 권한 경계는 T-VN-39에서만 별도로 설계한다. final-schema
-rebuild는 새 DB를 만드는 경로라 guard 우회가 아니다.
+generic bypass를 두지 않고, purge 권한 경계는 T-VN-39에서만 별도로 설계한다. 다만
+non-deferrable `ON DELETE CASCADE`의 indirect child는 parent가 이미 사라진 경우에만
+referential action으로 판별해 허용한다. standalone child DELETE에서는 FK상 parent가 반드시
+존재하므로 기존 active guard를 통과해야 한다. final-schema rebuild는 새 DB를 만드는 경로라
+guard 우회가 아니다.
 
 target freeze에서 이미 직접 guard를 검증하는 물리 경계는
 `provider_dataset_operations`, `source_entities`, `notice_states`,
@@ -204,6 +207,7 @@ transaction 또는 rerun-safe cleanup으로 복구하고, C 뒤에는 final-sche
   concurrency test.
 - direct guard, notice/curation/import/integrity의 indirect guard, event의 cross-job member,
   integrity violation의 cross-dataset 조합을 각각 executable rejection fixture로 고정한다.
+  활성 parent의 notice·curation·integrity `ON DELETE CASCADE` 3경로도 양성 회귀로 고정한다.
 - operation root/multi-dataset member projection, policy/sync/upload/curation/integrity read-write
   integration, static SQL legacy-reader 금지 gate, provider/dataset filter·scheduler·history
   EXPLAIN gate.
@@ -214,11 +218,9 @@ transaction 또는 rerun-safe cleanup으로 복구하고, C 뒤에는 final-sche
 
 | 리뷰 구분 | 판정 | 반영 |
 |---|---|---|
-| 스키마 리뷰 | 3차 NO-GO → 재리뷰 대기 | 역방향 capability 변경, scope authorization, nullable/OLD ownership clear, parent lifecycle guard, inactive DELETE, ownership 재귀속 P0를 발견. capability를 metadata로 축소하고 normalized scope, old/new all-mutation guard, parent/member lock, immutable ownership fixture로 보완 중 |
-| 마이그레이션 리뷰 | 3차 NO-GO → 재리뷰 대기 | head completeness 집계 오류, 이번 PR matrix의 target DDL 부재, final removal manifest 부재를 해소했으나 import/request membership cardinality P0를 발견. mode와 deferred completeness trigger, 정상/위반 fixture를 추가해 재리뷰한다 |
+| 스키마 리뷰 | 5차 GO | capability metadata/정규 scope, old/new ownership, inactive DELETE, parent/member lock과 deferred cardinality를 검토했다. 4차에 발견된 indirect cascade 오판은 parent 부재를 non-deferrable FK cascade로 한정한 예외와 3경로 양성 회귀로 보완했다. |
+| 마이그레이션 리뷰 | 4차 GO | full ownership DDL, removal manifest, job/request cardinality·event membership을 검토했다. active parent cascade와 import job member/event cascade를 실제 PostGIS probe로 확인했고 feature-update parent inactive 상태 변경 음성 fixture도 추가했다. |
 
-3차 P0가 0이 되기 전에는 implementation을 시작하지 않는다. 이 문서와 ADR-087, target
-contract를 함께 갱신했고 빈 PostGIS DB에서 invariant·rejection fixture·정상 history 및
-membership assertion을 실행했다. 동일 두 관점의 적대 재리뷰에서 P0=0 GO를 받은 뒤에만
-implementation을 시작하며, actual migration/model/API cutover 뒤에는 전체 누적 delta를 다시
-리뷰한다.
+두 관점의 최종 적대 재리뷰에서 P0=0 GO를 받았다. target contract의 artifact unit과 빈
+PostGIS freeze suite는 13건이 통과했다. 이제 같은 단일 PR에서 actual migration/model/API
+cutover를 구현하며, 누적 delta는 테스트 전에 다시 적대 리뷰한다.

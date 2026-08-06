@@ -168,6 +168,20 @@ BEGIN
         RAISE EXCEPTION 'notice lineage ownership is immutable'
             USING ERRCODE = '23514', CONSTRAINT = 'ck_notice_lineage_ownership_immutable';
     END IF;
+    -- The scope row has already been removed when this DELETE comes from the
+    -- declared FK action.  A standalone child DELETE cannot observe that
+    -- state: its non-deferrable FK requires the parent to exist.  Therefore a
+    -- missing parent is precisely the active parent cascade path; checking it
+    -- through the normal indirect lookup would misclassify it as inactive.
+    IF TG_OP = 'DELETE'
+       AND NOT EXISTS (
+           SELECT 1
+           FROM provider_sync.notice_lifecycle_scopes
+           WHERE notice_lifecycle_scope_id = OLD.notice_lifecycle_scope_id
+       )
+    THEN
+        RETURN OLD;
+    END IF;
     IF TG_OP <> 'INSERT' THEN
         PERFORM provider_sync.assert_active_notice_lifecycle_scope(
             OLD.notice_lifecycle_scope_id
@@ -249,6 +263,15 @@ BEGIN
     IF TG_OP = 'UPDATE' AND OLD.source_id IS DISTINCT FROM NEW.source_id THEN
         RAISE EXCEPTION 'curated source ownership is immutable'
             USING ERRCODE = '23514', CONSTRAINT = 'ck_curated_source_rule_ownership_immutable';
+    END IF;
+    -- `source_id` has a non-deferrable ON DELETE CASCADE FK.  Once the source
+    -- row disappeared, this is the FK cascade, not a standalone child write.
+    IF TG_OP = 'DELETE'
+       AND NOT EXISTS (
+           SELECT 1 FROM feature.curated_sources WHERE source_id = OLD.source_id
+       )
+    THEN
+        RETURN OLD;
     END IF;
     IF TG_OP <> 'INSERT' THEN
         PERFORM provider_sync.assert_active_curated_source_dataset(OLD.source_id);
@@ -706,6 +729,17 @@ BEGIN
     THEN
         RAISE EXCEPTION 'integrity observation ownership is immutable'
             USING ERRCODE = '23514', CONSTRAINT = 'ck_integrity_observation_ownership_immutable';
+    END IF;
+    -- See the notice lineage equivalent: the non-deferrable ON DELETE CASCADE
+    -- FK makes an absent parent an unambiguous referential-action DELETE.
+    IF TG_OP = 'DELETE'
+       AND NOT EXISTS (
+           SELECT 1
+           FROM ops.integrity_observation_scopes
+           WHERE integrity_observation_scope_id = OLD.integrity_observation_scope_id
+       )
+    THEN
+        RETURN OLD;
     END IF;
     IF TG_OP <> 'INSERT' THEN
         PERFORM provider_sync.assert_active_integrity_observation_scope(

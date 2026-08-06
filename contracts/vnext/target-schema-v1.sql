@@ -20,9 +20,9 @@
 --     **도착점(최종형)**만 기술하며 빈 PostGIS DB에 그대로 적용 가능하다.
 --   * `x_extension` schema와 postgis/pgcrypto/pg_trgm 확장은 사전 존재를 가정한다
 --     (ADR-008; tests/integration/test_vnext_target_freeze.py가 생성).
---   * `ops.import_jobs` 등 유지 기준선의 전수 FK/membership DDL은 현행 head와
---     T-VN-33 migration이 소유한다. 이 파일은 그 writer가 공통으로 쓰는 active
---     dataset guard와 lineage/operation 최종형을 고정한다.
+--   * `ops.import_jobs` 등 T-VN-33 전수 FK/membership 도착점은 이 파일 다음에 적용하는
+--     `tvn33-reference-ownership-v1.sql`이 고정한다. 이 파일은 양쪽이 공통으로 쓰는
+--     dataset/operation/lineage 최종형을 고정한다.
 --   * legacy 산출물(feature.curated_features overlay, source_records denorm 열,
 --     features의 legacy status/user_change_* 열 등)은 목표 상태에 **존재하지
 --     않으므로** 이 파일에 없다. 물리 삭제 순서는 consumer-rollout-v1.json과

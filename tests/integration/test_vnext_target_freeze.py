@@ -45,7 +45,7 @@ _REJECTIONS_JSON: Final = _CONTRACTS / "expected-rejections-v1.json"
 _EXPECTED_INVARIANT_COUNT: Final = 48
 _INVARIANT_PHASES: Final = frozenset({"pre-backfill", "post-backfill", "both"})
 
-# fingerprint 대상 — target-schema-v1.sql이 만드는 전체 relation.
+# fingerprint 대상 — target-schema-v1.sql과 T-VN-33 reference ownership DDL의 전체 relation.
 _TARGET_TABLES: Final = (
     "feature.categories",
     "feature.features",
@@ -598,6 +598,112 @@ async def test_membership_modes_accept_only_a_complete_canonical_shape(
             dataset_id,
         )
         await freeze_db.execute("SET CONSTRAINTS ALL IMMEDIATE")
+    finally:
+        await transaction.rollback()
+
+
+async def test_active_parent_cascades_preserve_indirect_owner_guards(
+    freeze_db: asyncpg.Connection,
+) -> None:
+    """활성 parent의 FK cascade는 indirect active guard에 의해 막히지 않는다."""
+    transaction = freeze_db.transaction()
+    await transaction.start()
+    try:
+        dataset_id = await freeze_db.fetchval(
+            """
+            INSERT INTO provider_sync.provider_datasets (
+                provider, dataset_key, display_name, source_kind
+            ) VALUES ('positive-fixture', 'cascade-guard', 'cascade guard', 'manual')
+            RETURNING provider_dataset_id
+            """
+        )
+        notice_scope_id = await freeze_db.fetchval(
+            """
+            INSERT INTO provider_sync.notice_lifecycle_scopes (
+                provider_dataset_id, source_entity_type, mode, applied_at, state_fingerprint
+            ) VALUES ($1, 'notice', 'snapshot', now(), 'cascade-notice')
+            RETURNING notice_lifecycle_scope_id
+            """,
+            dataset_id,
+        )
+        await freeze_db.execute(
+            """
+            INSERT INTO provider_sync.notice_lineage_states (
+                notice_lifecycle_scope_id, lineage_key, present, changed_at
+            ) VALUES ($1, 'cascade-lineage', true, now())
+            """,
+            notice_scope_id,
+        )
+        integrity_scope_id = await freeze_db.fetchval(
+            """
+            INSERT INTO ops.integrity_observation_scopes (provider_dataset_id)
+            VALUES ($1)
+            RETURNING integrity_observation_scope_id
+            """,
+            dataset_id,
+        )
+        await freeze_db.execute(
+            """
+            INSERT INTO ops.integrity_observation_runs (
+                integrity_observation_scope_id, generation, external_run_id
+            ) VALUES ($1, 1, 'cascade-run')
+            """,
+            integrity_scope_id,
+        )
+        theme_id = await freeze_db.fetchval(
+            """
+            INSERT INTO feature.curated_themes (theme_key, title)
+            VALUES ('cascade-guard', 'cascade guard')
+            RETURNING theme_id
+            """
+        )
+        source_id = await freeze_db.fetchval(
+            """
+            INSERT INTO feature.curated_sources (
+                provider_dataset_id, source_name, source_kind
+            ) VALUES ($1, 'cascade source', 'fixture')
+            RETURNING source_id
+            """,
+            dataset_id,
+        )
+        await freeze_db.execute(
+            """
+            INSERT INTO feature.curated_source_rules (theme_id, source_id)
+            VALUES ($1, $2)
+            """,
+            theme_id,
+            source_id,
+        )
+
+        await freeze_db.execute(
+            "DELETE FROM provider_sync.notice_lifecycle_scopes "
+            "WHERE notice_lifecycle_scope_id = $1",
+            notice_scope_id,
+        )
+        await freeze_db.execute(
+            "DELETE FROM ops.integrity_observation_scopes "
+            "WHERE integrity_observation_scope_id = $1",
+            integrity_scope_id,
+        )
+        await freeze_db.execute(
+            "DELETE FROM feature.curated_sources WHERE source_id = $1",
+            source_id,
+        )
+
+        assert (
+            await freeze_db.fetchval(
+                "SELECT count(*) FROM provider_sync.notice_lineage_states"
+            )
+            == 0
+        )
+        assert (
+            await freeze_db.fetchval("SELECT count(*) FROM ops.integrity_observation_runs")
+            == 0
+        )
+        assert (
+            await freeze_db.fetchval("SELECT count(*) FROM feature.curated_source_rules")
+            == 0
+        )
     finally:
         await transaction.rollback()
 
