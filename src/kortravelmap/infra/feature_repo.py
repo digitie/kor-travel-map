@@ -70,7 +70,7 @@ from kortravelmap.infra.feature_identity import (
     candidate_feature_uuid,
     verify_feature_uuid,
 )
-from kortravelmap.infra.feature_subtype import subtype_params, subtype_upsert_sql
+from kortravelmap.infra.feature_subtype import write_subtype
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Iterable, Mapping, Sequence
@@ -312,13 +312,6 @@ RETURNING
 # 넣지 않고, **같은 트랜잭션에서 행 잠금을 잡고 직전 값을 읽어** 파라미터로 넘긴다.
 # ``FOR UPDATE``가 동시 writer를 직렬화하므로 read-then-write 경합이 없다(행이
 # 없으면 잠글 것도 없고 뒤이은 INSERT의 유니크 인덱스가 직렬화한다).
-_LOCK_NOTICE_VALID_START_SQL: Final[str] = """
-SELECT valid_start_time
-FROM feature.feature_notices
-WHERE feature_id = :feature_id
-FOR UPDATE
-"""
-
 _UPSERT_PROVIDER_VERSION_SQL: Final[str] = """
 INSERT INTO feature.feature_versions (
     feature_id, version, origin, change_kind, payload, request_id, created_by
@@ -867,9 +860,11 @@ def _bbox_candidate_predicate_sql(feature_alias: str) -> str:
       평가, bbox로 이미 좁혀진 작은 집합)로 뽑아 ``feature_id = ANY(...)``로 건다.
       PK 인덱스를 타므로 planner가 coord GiST arm과 **BitmapOr**로 결합할 수 있다
       (상관 서브쿼리를 OR 아래 두면 semi-join으로 승격되지 않아 seq scan이 된다).
-    - coord arm의 "geometry를 가진 route/area 제외"는 arm 내부 AND라 bitmap이 고른
-      행에만 걸리는 recheck 필터이고, ``kind`` 검사가 먼저라 place/event/price/
-      weather는 subtype 조회 없이 단락된다.
+    - coord arm은 route/area를 **kind로** 배제한다. 0086 이후 geometry 없는
+      route/area는 표현 불가능하고(subtype geom이 NOT NULL, 마이그레이션 preflight가
+      기존 행을 fail-close로 거른다) DTO도 구성 시점에 막으므로, 종전의
+      "subtype 행이 없으면 coord로 잡는다" 분기는 존재할 수 없는 상태를 위한
+      행별 EXISTS 두 번이었다. admin 쪽 같은 술어와도 이제 모양이 같다.
     """
     if not feature_alias.isidentifier():
         raise ValueError("feature alias must be a SQL identifier")
@@ -878,21 +873,7 @@ def _bbox_candidate_predicate_sql(feature_alias: str) -> str:
     (
       {feature_alias}.coord IS NOT NULL
       AND {feature_alias}.coord OPERATOR(x_extension.&&) {env}
-      AND (
-        {feature_alias}.kind NOT IN ('route', 'area')
-        OR (
-          NOT EXISTS (
-            SELECT 1
-            FROM feature.feature_routes AS owned_route
-            WHERE owned_route.feature_id = {feature_alias}.feature_id
-          )
-          AND NOT EXISTS (
-            SELECT 1
-            FROM feature.feature_areas AS owned_area
-            WHERE owned_area.feature_id = {feature_alias}.feature_id
-          )
-        )
-      )
+      AND {feature_alias}.kind NOT IN ('route', 'area')
     )
     OR {feature_alias}.feature_id = ANY (
       ARRAY(
@@ -2010,9 +1991,6 @@ class NearbyFeaturePage:
 
 #: geometry가 필수인 kind — subtype ``geom``이 NOT NULL이라 WKT 없이는 행을
 #: 만들 수 없다(0086). ``feature_subtype._GEOM_EXPR``와 같은 집합이다.
-_GEOMETRY_SUBTYPE_KINDS: Final[frozenset[str]] = frozenset({"route", "area"})
-
-
 def _feature_params(feature: Feature) -> dict[str, Any]:
     """``Feature`` DTO → ``_UPSERT_FEATURE_SQL`` bind params.
 
@@ -2121,18 +2099,6 @@ def _source_link_params(link: SourceLink) -> dict[str, Any]:
     }
 
 
-def _feature_detail_payload(feature: Feature) -> dict[str, Any] | None:
-    """``Feature.detail`` → subtype 매핑 입력 (JSON mode dict).
-
-    ``mode="json"``으로 덤프해 date/datetime이 ISO 문자열이 되게 한다 —
-    ``feature_subtype``의 파싱 규칙(및 0084~0086 backfill의 SQL 판정)이 문자열
-    기준이므로 writer와 backfill이 **같은 판정**을 하도록 맞춘다.
-    """
-    if feature.detail is None:
-        return None
-    return feature.detail.model_dump(mode="json")
-
-
 async def _upsert_feature_subtype(
     session: AsyncSession,
     feature: Feature,
@@ -2142,58 +2108,18 @@ async def _upsert_feature_subtype(
 ) -> None:
     """kind별 typed subtype upsert (core upsert와 **같은 트랜잭션**).
 
-    - ``feature_uuid``는 core upsert의 RETURNING 값을 그대로 쓴다. conflict-update
-      경로에서 정본은 이미 저장돼 있던 UUID이므로 후보를 재계산하면 identity 사본
-      FK(``fk_*_identity_pair``)가 깨진다 — 파생 계산 금지.
-    - price/weather는 subtype이 없어 ``subtype_upsert_sql``이 ``None``을 준다.
+    ``feature_uuid``는 core upsert의 RETURNING 값을 그대로 쓴다. conflict-update
+    경로에서 정본은 이미 저장돼 있던 UUID이므로 후보를 재계산하면 identity 사본
+    FK(``fk_*_identity_pair``)가 깨진다 — 파생 계산 금지.
     """
-    kind = feature.kind.value
-    sql = subtype_upsert_sql(kind)
-    if sql is None:
-        return
-    detail = _feature_detail_payload(feature)
-    params = subtype_params(
+    await write_subtype(
+        session,
         feature_id=feature.feature_id,
         feature_uuid=stored_feature_uuid,
-        kind=kind,
-        detail=detail,
+        kind=feature.kind.value,
+        detail=feature.detail,
+        geom_wkt=geom_wkt,
     )
-    if params is None:  # pragma: no cover - SUBTYPE_TABLES와 동시에만 어긋난다
-        return
-    if kind in _GEOMETRY_SUBTYPE_KINDS:
-        params["geom_wkt"] = geom_wkt
-    if kind == "notice" and _is_first_probe_notice(detail):
-        params["valid_start_time"] = await _preserved_notice_valid_start(
-            session, feature.feature_id, params["valid_start_time"]
-        )
-    await session.execute(text(sql), params)
-
-
-def _is_first_probe_notice(detail: Mapping[str, Any] | None) -> bool:
-    """``detail.payload.valid_start_origin``이 ``'first_probe'``인가.
-
-    판정은 **DTO 쪽 dict**에서 한다 — ``subtype_params``는 jsonb 컬럼을 JSON
-    문자열로 직렬화해 돌려주므로 그 결과를 다시 파싱하면 규칙이 두 벌이 된다.
-    """
-    if detail is None:
-        return False
-    payload = detail.get("payload")
-    return isinstance(payload, dict) and payload.get("valid_start_origin") == "first_probe"
-
-
-async def _preserved_notice_valid_start(
-    session: AsyncSession, feature_id: str, incoming: Any
-) -> Any:
-    """``valid_start_origin='first_probe'`` 계보의 최초 관측 시각을 보존한다.
-
-    provider가 "지금 처음 봤다"를 발효 시각으로 추정해 보내는 계보(KREX 돌발 등)는
-    재적재마다 시작 시각이 흔들린다. 이미 저장된 값이 있으면 그것이 정본이고,
-    없으면(신규) 들어온 값을 그대로 쓴다.
-    """
-    stored = (
-        await session.execute(text(_LOCK_NOTICE_VALID_START_SQL), {"feature_id": feature_id})
-    ).scalar_one_or_none()
-    return stored if stored is not None else incoming
 
 
 async def upsert_feature(session: AsyncSession, feature: Feature) -> bool:
@@ -2217,20 +2143,13 @@ async def upsert_feature(session: AsyncSession, feature: Feature) -> bool:
     갱신하지 않아야 상세/geometry가 core와 어긋나지 않으므로, core RETURNING이
     남긴 ``user_fenced``를 기준으로 subtype 쓰기를 통째로 건너뛴다.
 
-    **geometry 없는 route/area는 거부한다**(``ValueError``). subtype ``geom``이
-    NOT NULL이라 WKT 없이는 행을 만들 수 없다 — 종전에는
-    ``inactivate_geometryless_area_features_by_source``가 적재 후에 보정하던
-    상태이며, 0086 이후에는 write 시점에 선차단한다(fail-close).
+    **geometry 없는 route/area는 여기 오지 않는다** — ``Feature`` DTO가 구성
+    시점에 거부한다(ADR-084). 종전에는
+    ``inactivate_geometryless_area_features_by_source``가 적재 뒤에 보정하던
+    상태다.
     """
     params = _feature_params(feature)
-    kind = feature.kind.value
     geom_wkt = cast("str | None", params.pop("geom_wkt"))
-    if kind in _GEOMETRY_SUBTYPE_KINDS and geom_wkt is None:
-        raise ValueError(
-            f"feature {feature.feature_id!r}: kind={kind!r} requires geometry — "
-            "feature.geom is None but feature_routes/feature_areas.geom is NOT NULL "
-            "(ADR-084 / alembic 0086). 좌표만 있는 record는 place로 적재해야 한다."
-        )
     result = await session.execute(text(_UPSERT_FEATURE_SQL), params)
     row = result.mappings().one()
     inserted = bool(row["inserted"])

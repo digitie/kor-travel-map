@@ -32,6 +32,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from kortravelmap.core.exceptions import GeoAuthNotConfiguredError, GeoRequestError
 from kortravelmap.infra import CacheTargetStreamConflict
+from kortravelmap.infra.feature_subtype import SubtypeDetailError
 from kortravelmap.infra.log_repo import record_api_call
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import JSONResponse, Response
@@ -787,6 +788,26 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
             details=exc.current,
             request_id=_request_id(request),
             headers={"Retry-After": retry_after} if retry_after is not None else None,
+        )
+
+    @application.exception_handler(SubtypeDetailError)
+    async def subtype_detail_error_handler(
+        request: Request,
+        exc: SubtypeDetailError,
+    ) -> JSONResponse:
+        """kind 계약과 맞지 않는 ``detail``은 서버 결함이 아니라 요청 결함이다.
+
+        typed subtype(T-VN-35, ADR-084) 도입 뒤 필수 필드 결측은 write 경계에서
+        거부된다. 그 거부가 500으로 새면 **이미 접수된 change request**가 승인
+        시점마다 500을 내며 영구히 적용 불가가 된다 — 무엇을 고쳐야 하는지도
+        알려주지 않는다.
+        """
+        return _error_response(
+            status_code=422,
+            code="DETAIL_KIND_MISMATCH",
+            message=str(exc),
+            details={"kind": exc.kind, "feature_id": exc.feature_id},
+            request_id=_request_id(request),
         )
 
     @application.exception_handler(Exception)

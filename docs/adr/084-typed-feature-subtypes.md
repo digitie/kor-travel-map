@@ -54,15 +54,29 @@ notice 145 · price 97 · **route·area 0행**. `detail` 키는 kind별로 완�
    얻는다.
 
    **무손실 실증**(prod 복원본 731,765행): 조립된 `detail`이 원본과
-   place+event **731,218행 md5 바이트 동일**, notice 145행은 시각 외 필드
-   바이트 동일. 이 대조가 실제로 결함 2건을 잡았다 — `jsonb_strip_nulls`가
-   중첩 payload의 정당한 null을 지우던 것과 `EventDetail.sigungu_code` 컬럼
-   누락. 조립 규칙은 "원본 바이트 동등"을 회귀 테스트로 고정한다.
+   place 729,972 · event 1,246 · price 97 · weather 305 = **731,620행 md5
+   바이트 동일**(kind별 전수 집계 해시). notice 145행도
+   `valid_start_time` **145/145 바이트 동일**이고, 아래 정규화가 걸린
+   `valid_end_time` 98행만 표기가 바뀐다. 이 대조가 실제로 결함 3건을
+   잡았다 — `jsonb_strip_nulls`가 중첩 payload의 정당한 null을 지우던 것,
+   `EventDetail.sigungu_code` 컬럼 누락, 그리고 아래 세션 의존성.
+   조립 규칙은 "원본 바이트 동등"을 회귀 테스트로 고정한다.
 
-   **의도적 정규화 1건**: notice의 `valid_start_time`/`valid_end_time`은
-   종전에 `"2026-08-05 10:00:10+00"`(Postgres 스타일)과
-   `"...+09:00"`(KST ISO)가 **혼재**했다 — 같은 필드가 writer에 따라 다른
-   표기를 갖던 결함이다. typed `timestamptz` 승격으로 canonical ISO로
+   **세션 TimeZone 의존성 제거**: `to_jsonb(timestamptz)`의 문자열은 세션
+   `TimeZone` GUC에 의존한다 — 실측으로 같은 notice 행이 `Asia/Seoul`
+   세션에서 `...T17:35:24+09:00`, `UTC` 세션에서 `...T08:35:24+00:00`,
+   `America/New_York`에서 `...T04:35:24-04:00`으로 나왔다. 서버 설정이 다른
+   인스턴스가 같은 공지에 다른 문자열을 돌려주는 셈이다. 뷰가 KST 고정
+   렌더(`to_char … AT TIME ZONE 'Asia/Seoul'`, 마이크로초 0이면 생략)를
+   쓰게 해 세션 비의존으로 만들고, SKILL.md 규칙 17(모든 datetime은 KST
+   aware)과도 일치시킨다.
+
+   **의도적 정규화 1건**: notice의 `valid_end_time`은 종전에
+   `"2026-08-05 10:00:10.823154+00"`(Postgres 스타일 — DB lifecycle CTE가
+   쓴 값)과 `"...+09:00"`(KST ISO — Python writer가 쓴 값)가 **혼재**했다.
+   실측 분포: `valid_start_time` 145/145 KST ISO, `valid_end_time` 98/98
+   Postgres 스타일(나머지 47은 NULL). 같은 필드가 writer에 따라 다른 표기를
+   갖던 결함이며, typed `timestamptz` 승격 + 위 KST 고정 렌더로 한 표기로
    통일된다(같은 순간, 표기만 정규화).
 5. **geometry 정본은 route/area subtype으로 이동**하고 core `geom`을 제거한다.
    subtype에서 타입이 정확해진다(route=`MULTILINESTRING`, area=`MULTIPOLYGON`,
@@ -115,3 +129,32 @@ notice 145 · price 97 · **route·area 0행**. `detail` 키는 kind별로 완�
   바이트 동일이 CI에서 자동 판정한다.
 - 배포는 migration 동반이므로 NEW-5 규약을 따른다: api 먼저, **dagster/daemon
   이미지 재빌드 의무**(구세대 러닝 컨테이너는 다음 재시작에서 stale 판정).
+  **선행 조건**: 배포 orchestrator의 `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`를
+  `0086_route_area_subtypes`로 올려야 한다. 이 값은 저장소 compose가 아니라
+  orchestrator `.env`가 갖고(`docs/runbooks/docker-app.md`), api-entrypoint는
+  이미지 head와 다르면 **DB를 건드리기 전에** 기동을 거부한다 — 안 올리면 api가
+  exit 1이고 `depends_on: api service_healthy`인 dagster/daemon도 뜨지 않는다.
+- **이관 불가 행은 조용히 건너뛰지 않고 fail-close한다.** 0084~0086은 각각
+  선점검을 돌려 위반 행의 `feature_id`와 함께 멈춘다 — 필수 detail 키 결측,
+  geometry 없는 route/area, route/area 아닌 kind의 geometry, subtype geometry
+  타입으로 cast 불가한 값, `starts_on > ends_on`. 근거: 건너뛴 행은 곧 오는
+  `DROP COLUMN detail`로 **복구 불가능하게** 사라진다(downgrade도 subtype에서
+  역조립하므로 되살릴 수 없다). 실패는 되돌릴 수 있고 소실은 되돌릴 수 없으며,
+  NOT NULL이 대신 내는 진단은 어느 행인지 말해주지 않는다.
+- **죽은 인덱스 2종은 이관하지 않는다.** `idx_features_yt_channel_id`/
+  `_playlist_id`(ADR-061)는 식이 `detail #>> '{kor_travel_concierge,…}'`인데 그
+  경로에 값이 있는 행이 prod에 **0건**이다(실제 위치는 `detail.payload.…`,
+  1,481행). 경로를 고쳐도 쓰이지 않는다 — 이 값을 술어로 읽는 유일한 질의인
+  curation `detail_selector`는 경로가 런타임 값이라 어떤 고정 식 인덱스도 매칭될
+  수 없다. 73만 행에 쓰기 비용만 남는다.
+- **geometry는 route/area 전용이자 필수**임을 `Feature` DTO에도 넣는다. 종전엔
+  산문으로만 그랬고 DTO는 아무 kind에나 `geom`을 받았다 — 이제 담을 곳이 없으므로
+  구성 시점에 거부한다. admin 요청 모델의 `geom` 필드는 **제거**한다(받아서
+  payload에 넣기까지 했지만 적용 단계에서 쓰이지 않던 필드다).
+- **detail 계약 판정은 write 경계 한 곳(`feature_subtype.subtype_params`)이
+  갖는다.** kind DTO로 검증·정규화하므로 필수 필드 기본값도 거기서 채워진다.
+  HTTP 경계는 접수 시점 422를 위해 같은 판정을 미리 한 번 더 돌리되 값을 고치지
+  않는다 — 종전 구현은 정규화 결과를 `object.__setattr__`로 되꽂아
+  `model_dump(exclude_unset=True)`에서 통째로 빠뜨렸다(즉 한 번도 반영되지 않았다).
+  계약 위반은 `SubtypeDetailError` → **422**다; 500으로 새면 이미 접수된 change
+  request가 승인 시점마다 터져 영구히 적용 불가가 된다.

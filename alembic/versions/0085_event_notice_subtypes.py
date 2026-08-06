@@ -17,10 +17,18 @@ identity 사본 FK)을 event/notice에 적용하고, **시간 불변식을 DB �
 사실이지 데이터 결함이 아니다. 실재하는 상태를 금지하는 제약은 nuance를
 장애로 바꾼다 — 정상 ETL asset 전체가 실패했다.
 
-provider가 **선언한** 값의 순서 불변식은 DTO(`NoticeDetail`)가 계속 강제하고,
-DB 층 표현은 T-VN-37A의 `tstzrange`(empty range가 "효력 없음"을 정확히
-표현한다)로 되돌아온다. read 필터는 `valid_end_time <= now()`이므로 철회된
-공고는 즉시 숨겨진다 — 순서와 무관하게 옳게 동작한다.
+`NoticeDetail`에도 순서 검증은 **없다**(실측 확인 — `_check_aware`만 있다).
+없는 것이 맞다. `valid_end_time`은 "선언된 종료 예정"이 아니라 **"효력이
+끝난 시각"**이고, 철회는 그 시각을 발효 전으로 앉힌다. 두 필드가 같은 축의
+시작/끝이 아니므로 순서를 강제할 근거 자체가 없다. DB 층 표현은 T-VN-37A의
+`tstzrange`가 맡는다 — 철회된 공고는 empty range가 되어 "효력 구간이 없다"를
+정확히 표현한다. read 필터는 `valid_end_time <= now()`이므로 순서와 무관하게
+옳게 동작한다(철회 즉시 숨김).
+
+대비되는 것이 `ck_feature_events_period`다 — `EventDetail`이
+`ends_on >= starts_on`을 **실제로** 강제하므로(`model_validator`, 실측 확인)
+CHECK는 모든 write 경로가 이미 만족하는 불변식의 DB 표현일 뿐이다. 즉 CHECK는
+"DTO 불변식이 있는 곳에만" 둔다.
 
 35D의 실익이 여기서 나온다: notice read 필터가 쓰던
 ``detail->>'valid_end_time'`` 문자열 파싱(+ 비-ISO 값 방어용
@@ -42,7 +50,69 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
+def preflight_or_raise(label: str, probe_sql: str, remedy: str) -> None:
+    """이관 불가 행을 feature_id와 함께 알리고 멈춘다 (근거는 0084의 같은 함수).
+
+    revision 파일은 서로를 import하지 않는다 — 동결 artifact라 자기 완결이
+    낫다(공유 helper가 나중에 바뀌면 과거 revision의 의미가 바뀐다).
+    """
+    quoted_label = label.replace("'", "''")
+    quoted_remedy = remedy.replace("'", "''")
+    op.execute(
+        f"""
+        DO $preflight$
+        DECLARE
+            offenders text;
+            total bigint;
+        BEGIN
+            SELECT count(*) INTO total FROM ({probe_sql}) AS probe;
+            IF total = 0 THEN
+                RETURN;
+            END IF;
+            SELECT string_agg(feature_id, ', ' ORDER BY feature_id)
+              INTO offenders
+              FROM (
+                  SELECT feature_id FROM ({probe_sql}) AS probe
+                  ORDER BY feature_id LIMIT 20
+              ) AS sample;
+            RAISE EXCEPTION
+                'T-VN-35 preflight: % (% row(s)); sample: %',
+                '{quoted_label}', total, offenders
+              USING HINT = '{quoted_remedy}';
+        END
+        $preflight$;
+        """
+    )
+
+
 def upgrade() -> None:
+    preflight_or_raise(
+        "event rows without detail->>'event_kind' cannot become feature_events rows",
+        "SELECT feature_id FROM feature.features "
+        "WHERE kind = 'event' AND detail->>'event_kind' IS NULL",
+        "Set an event_kind on these rows (EventDetail.event_kind is required), "
+        "then re-run the upgrade.",
+    )
+    preflight_or_raise(
+        "notice rows without detail->>'notice_type' cannot become feature_notices rows",
+        "SELECT feature_id FROM feature.features "
+        "WHERE kind = 'notice' AND detail->>'notice_type' IS NULL",
+        "Set a notice_type on these rows (NoticeDetail.notice_type is required), "
+        "then re-run the upgrade.",
+    )
+    # ck_feature_events_period가 걸릴 행도 같은 이유로 미리 짚는다 — EventDetail이
+    # ends_on >= starts_on을 강제하므로 정상 세계엔 없지만, 검증 없는 admin
+    # detail 경로가 남긴 행이 있으면 여기서 행 단위로 드러난다.
+    preflight_or_raise(
+        "event rows with starts_on > ends_on violate ck_feature_events_period",
+        "SELECT feature_id FROM feature.features "
+        "WHERE kind = 'event' "
+        "AND detail->>'starts_on' ~ '^\\d{4}-\\d{2}-\\d{2}$' "
+        "AND detail->>'ends_on' ~ '^\\d{4}-\\d{2}-\\d{2}$' "
+        "AND (detail->>'starts_on')::date > (detail->>'ends_on')::date",
+        "Fix the period on these rows (EventDetail enforces ends_on >= starts_on), "
+        "then re-run the upgrade.",
+    )
     op.execute(
         """
         CREATE TABLE feature.feature_events (
@@ -111,14 +181,22 @@ def upgrade() -> None:
         WHERE f.kind = 'event'
         """
     )
-    # starts_on > ends_on인 기존 행이 있으면 CHECK 추가가 실패한다 — 그런 행은
-    # DTO 검증을 통과한 적이 없으므로 정상 세계에서 0건이다. 실패하면 데이터
-    # 결함이 드러난 것이므로 마이그레이션이 멈추는 편이 옳다(fail-close).
+    # 공개 festival 경로는 ``starts_on``으로 범위·keyset·ORDER BY를 건다
+    # (public_views_repo). 선두 컬럼이 ``ends_on``이면 그 어느 것도 못 탄다.
+    # 부분 조건(``ends_on IS NOT NULL``)도 두지 않는다 — 질의가 명시적으로
+    # ``ends_on IS NULL``을 포함하므로, 그 행을 빼는 인덱스는 쓸 수 없다.
     op.execute(
         """
         CREATE INDEX idx_feature_events_period
-            ON feature.feature_events (ends_on, starts_on)
-            WHERE ends_on IS NOT NULL
+            ON feature.feature_events (starts_on, ends_on)
+        """
+    )
+
+    op.execute(
+        """
+        CREATE INDEX idx_feature_events_opening_hours
+            ON feature.feature_events (feature_id)
+            WHERE opening_hours IS NOT NULL
         """
     )
 

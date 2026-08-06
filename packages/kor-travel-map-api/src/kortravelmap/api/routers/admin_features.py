@@ -318,7 +318,10 @@ class AdminFeatureBaseMutation(BaseModel):
     category: str | None = Field(default=None, pattern=r"^\d{8}$")
     coord: AdminFeatureCoordInput | None = None
     coord_precision_digits: int | None = Field(default=None, ge=3, le=8)
-    geom: str | None = None
+    # ``geom``은 받지 않는다 — admin mutation은 place/event만 다루고, geometry
+    # 정본은 route/area subtype뿐이다(ADR-084). 종전엔 필드를 받아 change
+    # request payload에 넣기까지 했지만 적용 단계에서 **아무 데도 쓰지 않았다** —
+    # 받아 놓고 버리는 필드는 계약이 아니라 거짓말이다.
     address: dict[str, Any] | None = None
     legal_dong_code: str | None = Field(default=None, pattern=r"^\d{10}$")
     road_name_code: str | None = Field(default=None, pattern=r"^\d{7,12}$")
@@ -377,30 +380,28 @@ class AdminFeatureBaseMutation(BaseModel):
 _DETAIL_VALIDATION_PLACEHOLDER_ID = "f_validation_placeholder"
 
 
-def _normalized_detail_for_kind(
-    kind: str, detail: dict[str, Any] | None
-) -> dict[str, Any] | None:
-    """kind별 detail을 DTO 정본으로 **검증·정규화**한다 (T-VN-35, ADR-084).
+def _reject_detail_not_matching_kind(kind: str, detail: dict[str, Any] | None) -> None:
+    """detail이 kind 계약에 맞는지 **경계에서 미리** 확인한다 (T-VN-35, ADR-084).
 
-    subtype 컬럼은 필수 필드(place_kind/event_kind)를 NOT NULL로 요구한다.
-    DTO(`PlaceDetail`/`EventDetail`)가 그 shape의 정본이고 기본값도 갖고
-    있으므로, 경계에서 한 번 통과시켜 **완전한 detail**을 만든다 — 그러면
-    repo가 불완전한 shape을 볼 일이 없고(종전엔 `ValueError`→500), 잘못된
-    값은 여기서 422가 된다. 검증 규칙이 DTO 한 곳에만 존재한다는 성질도
-    유지된다.
+    정본 판정은 write 경계(``feature_subtype.subtype_params``)가 갖는다 — 여기서
+    값을 고쳐 넣지 않는 이유가 그것이다. 종전 구현은 정규화한 detail을
+    ``object.__setattr__``로 되꽂았는데, 그건 pydantic의 ``__pydantic_fields_set__``
+    을 건드리지 않아 뒤이은 ``model_dump(exclude_unset=True)``에서 **통째로
+    빠졌다** — 즉 정규화가 실제로는 한 번도 payload에 반영되지 않았다.
+
+    이 함수의 값어치는 다른 데 있다: 검토(review) 모드에서 잘못된 detail이
+    **접수될 때** 422로 막힌다는 것. 그러지 않으면 승인 시점에야 터져서 그
+    change request는 영구히 승인 불가가 된다.
     """
     model = _DETAIL_MODEL_BY_KIND.get(kind)
     if model is None:
-        return detail
+        return
     payload = dict(detail or {})
     payload.setdefault("feature_id", _DETAIL_VALIDATION_PLACEHOLDER_ID)
     try:
-        validated = model.model_validate(payload)
+        model.model_validate(payload)
     except ValidationError as exc:
         raise ValueError(f"detail이 kind={kind} 계약과 맞지 않습니다: {exc}") from exc
-    normalized = validated.model_dump(mode="json")
-    normalized.pop("feature_id", None)
-    return normalized
 
 
 # ``detail``은 kind별 typed subtype으로 저장되므로(T-VN-35, ADR-084) 생성
@@ -409,8 +410,9 @@ def _normalized_detail_for_kind(
 class AdminFeatureCreateRequest(AdminFeatureBaseMutation):
     """``POST /admin/features`` body.
 
-    ``detail``은 kind 계약(place/event)에 맞아야 하며, 생략하면 기본값으로
-    채운다. 맞지 않으면 422다.
+    ``detail``은 kind 계약(place/event)에 맞아야 한다 — DTO에 없는 키는
+    거부되므로 provider 원문은 ``detail.payload`` 아래 둔다. 생략하면 kind
+    기본값으로 채운다. 맞지 않으면 422다.
     """
 
     feature_id: str | None = Field(
@@ -442,12 +444,9 @@ class AdminFeatureCreateRequest(AdminFeatureBaseMutation):
     )
 
     @model_validator(mode="after")
-    def _normalize_detail(self) -> AdminFeatureCreateRequest:
-        # 생성은 detail 미전송도 허용한다 — DTO 기본값으로 완전한 shape을
-        # 만들어 subtype NOT NULL 계약을 경계에서 충족시킨다.
-        object.__setattr__(
-            self, "detail", _normalized_detail_for_kind(self.kind, self.detail)
-        )
+    def _detail_matches_kind(self) -> AdminFeatureCreateRequest:
+        # detail 미전송도 허용한다 — write 경계가 DTO 기본값으로 채운다.
+        _reject_detail_not_matching_kind(self.kind, self.detail)
         return self
 
 

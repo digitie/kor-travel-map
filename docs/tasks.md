@@ -615,23 +615,51 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 
 ### T-VN-35 — typed subtype 분해 (Lane A)
 
-- [ ] T-VN-35A — **feature core·point subtype**
+> 2026-08-06 A-D 단일 PR로 종결(ADR-084). 원안 대비 **재해석 2건**이 있고, 근거는
+> 실측이다 — 아래 각 항에 적었다. 정본 설계는 `docs/adr/084-typed-feature-subtypes.md`.
 
-  공통 core와 point geometry/category 제약을 분리하고 기존 place/price/weather point row를
-  shadow backfill한다.
+- [x] T-VN-35A — **feature core·point subtype** → *배타 arc + place subtype*
 
-- [ ] T-VN-35B — **event·notice subtype**
+  `UNIQUE(feature_id, kind)` + subtype의 `kind` 상수 CHECK + `(feature_id, kind)` 복합 FK로
+  배타 arc를 만들고 `feature_places`를 분리했다(alembic 0084). shadow 병행은 하지 않는다 —
+  subtype이 단일 정본이다.
 
-  event/notice 전용 column과 시간/lineage 불변식을 typed table로 옮기고 혼합 kind row를 거부한다.
+  **재해석**: point subtype은 만들지 않고 `coord` 3컬럼을 core에 남겼다. coord는 4개 kind가
+  공유해 kind 상수 CHECK를 걸 수 없어 배타 arc가 깨지고, place 96.6%·event 82%가 non-null이라
+  거의 모든 read가 조인을 강제당하며, bbox/nearby 술어가 `idx_features_coord_gist` 너머로
+  밀린다. 대신 geometry 계약 강화(35C)로 목적을 달성했다.
 
-- [ ] T-VN-35C — **route·area subtype**
+- [x] T-VN-35B — **event·notice subtype**
 
-  route/area geometry type·SRID·category 제약과 parent/sibling 관계를 typed table로 옮긴다.
+  `feature_events`/`feature_notices`(alembic 0085). notice 유효기간이 typed `timestamptz`가
+  되어 read 필터의 문자열 파싱 + `pg_input_is_valid` 방어 cast가 사라졌다. "혼합 kind row
+  거부"는 배타 arc가 선언적으로 구현한다 — subtype 행이 있는 동안 core `kind` 변경이 FK
+  위반으로 막힌다.
 
-- [ ] T-VN-35D — **repository/API projection cutover**
+  **주의**: DB CHECK로 `valid_end_time >= valid_start_time`을 걸지 않았다. provider가 미래
+  시행 공지를 철회하면 end < start인 **실재 상태**가 나오고(실측: start 2026-07-13 /
+  end 2026-06-02), CHECK를 걸면 KREX notice ETL asset이 죽는다. 불변식은 DTO가 선언값에
+  대해 유지하고, DB 표현은 T-VN-37A의 `tstzrange`(empty range 허용)가 맡는다.
 
-  kind별 repository/read model을 subtype join으로 전환하고 nullable mega-row 분기를 제거한다.
-  subtype별 checksum·query plan을 독립 검증한다.
+- [x] T-VN-35C — **route·area subtype**
+
+  `feature_routes`(MULTILINESTRING NOT NULL)/`feature_areas`(MULTIPOLYGON NOT NULL),
+  core `geom` 제거(alembic 0086). "geometry가 필수인 kind"와 "없어야 하는 kind"가 술어가
+  아니라 테이블 구조로 갈린다. prod route/area 0행이라 이관 비용·회귀 위험 모두 0.
+
+  **재해석**: `parent_feature_id`·`sibling_group_id`는 core에 남겼다 — prod 사용 0행이고
+  place도 장래 부모를 가질 수 있어 route/area 전용으로 내릴 근거가 없다.
+
+- [x] T-VN-35D — **repository/API projection cutover**
+
+  core `detail` JSONB 제거 + `feature.features_detailed` 조립 뷰 신설. writer는 subtype에만
+  쓰고 reader는 뷰를 읽는다 — 값이 두 곳에 있지 않으므로 drift라는 개념이 사라진다.
+  merge 경로에 cross-kind 거부를 신설했다(종전 부재).
+
+  검증: 조립 detail이 원본과 place+event **731,218행 md5 바이트 동일**(이 대조가
+  `jsonb_strip_nulls` null 소실과 `EventDetail.sigungu_code` 누락 2건을 잡았다).
+  플랜은 술어가 subtype GiST를 타도록 hot path만 UNION ALL로 직접 참조한다(뷰 컬럼을
+  술어에 쓰면 Hash Left Join 2단 퇴화 — admin bbox 4158ms → 411ms 실측).
 
 ### T-VN-36 — field override 단일화 (Lane B)
 

@@ -24,23 +24,38 @@ NULL로 남기며, 필수 필드는 결측을 거부한다(NOT NULL 제약과 �
 from __future__ import annotations
 
 import json
-import re
-from datetime import date, datetime
-from typing import TYPE_CHECKING, Any, Final
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any, Final, cast
 
+from pydantic import BaseModel, ValidationError
 from sqlalchemy import text
 
+from kortravelmap.dto import (
+    AreaDetail,
+    EventDetail,
+    NoticeDetail,
+    PlaceDetail,
+    RouteDetail,
+)
+
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Sequence
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
 __all__ = [
+    "DETAIL_MODEL_BY_KIND",
+    "GEOMETRY_SUBTYPE_KINDS",
     "SUBTYPE_TABLES",
+    "SubtypeDetailError",
     "count_subtype_drift",
     "subtype_params",
     "subtype_table_for_kind",
+    "write_subtype",
 ]
+
+#: geometry가 NOT NULL인 subtype — upsert가 ``:geom_wkt`` 바인딩을 요구한다.
+GEOMETRY_SUBTYPE_KINDS: Final[frozenset[str]] = frozenset({"route", "area"})
 
 #: kind → subtype 테이블. 여기 없는 kind(price/weather)는 subtype이 없다.
 SUBTYPE_TABLES: Final[dict[str, str]] = {
@@ -51,62 +66,61 @@ SUBTYPE_TABLES: Final[dict[str, str]] = {
     "area": "feature_areas",
 }
 
-_ISO_DATE_RE: Final[re.Pattern[str]] = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-
-
 def subtype_table_for_kind(kind: str) -> str | None:
     """kind의 subtype 테이블 이름 (없으면 ``None``)."""
     return SUBTYPE_TABLES.get(kind)
 
 
-def _iso_date(value: Any) -> date | None:
-    """ISO ``YYYY-MM-DD``만 date로. 그 외(자유 문자열·부분 날짜)는 None."""
-    if isinstance(value, date) and not isinstance(value, datetime):
-        return value
-    if not isinstance(value, str) or not _ISO_DATE_RE.match(value):
-        return None
-    try:
-        return date.fromisoformat(value)
-    except ValueError:
-        return None
+#: kind → detail DTO. subtype 컬럼은 이 모델의 DB 대응물이므로, "detail이 kind
+#: 계약에 맞는가"의 판정은 **모델 하나**가 갖는다. 종전에는 같은 판정이 세 벌로
+#: 흩어져 있었다 — provider 경로의 DTO, admin 라우터의 boundary validator,
+#: 그리고 이 모듈의 손수 만든 ``_text``/``_required`` 파서. 손수 만든 파서는
+#: DTO가 이미 보장한 것을 다시 (다르게) 판정하는 사본이었다.
+DETAIL_MODEL_BY_KIND: Final[dict[str, type[BaseModel]]] = {
+    "place": PlaceDetail,
+    "event": EventDetail,
+    "notice": NoticeDetail,
+    "route": RouteDetail,
+    "area": AreaDetail,
+}
 
 
-def _aware_datetime(value: Any) -> datetime | None:
-    """파싱 가능한 시각만 datetime으로 (migration의 ``pg_input_is_valid`` 대응)."""
-    if isinstance(value, datetime):
-        return value
-    if not isinstance(value, str) or not value:
-        return None
-    try:
-        return datetime.fromisoformat(value)
-    except ValueError:
-        return None
+class SubtypeDetailError(ValueError):
+    """``detail``이 kind 계약에 맞지 않는다 — 상류(요청/provider) 결함이다.
 
-
-def _text(value: Any) -> str | None:
-    return value if isinstance(value, str) and value else None
-
-
-def _required(value: Any, field: str) -> str:
-    """NOT NULL typed 컬럼의 필수 값 — 결측은 sentinel로 덮지 않고 거부한다.
-
-    ``'unknown'`` 같은 가짜 값은 "없음"과 "unknown이라는 값"을 뭉개고, 그
-    구분을 되살리려 소비 측이 ``NULLIF(x, 'unknown')`` 같은 우회를 짜게 만든다
-    (실제로 공개 festival 표면이 그랬다). DTO가 필수로 강제하는 필드이므로
-    결측은 상류 결함이고, 여기서 크게 실패하는 편이 옳다.
+    admin HTTP 경계는 이걸 422로 옮긴다. 종전에는 결측 필수 필드가 raw
+    ``ValueError``로 새어 500이 됐고, 그 500은 **이미 접수된 change request**를
+    영구히 승인 불가로 만들었다(적용 시점에 터지므로).
     """
-    text_value = _text(value)
-    if text_value is None:
-        raise ValueError(f"subtype 필수 필드 결측: {field}")
-    return text_value
+
+    def __init__(self, kind: str, feature_id: str, cause: ValidationError) -> None:
+        self.kind = kind
+        self.feature_id = feature_id
+        self.cause = cause
+        super().__init__(
+            f"feature {feature_id!r}: detail does not satisfy the {kind} contract: "
+            f"{cause.errors(include_url=False)}"
+        )
 
 
-def _object(value: Any) -> dict[str, Any]:
-    return dict(value) if isinstance(value, dict) else {}
+def _validated_detail(kind: str, feature_id: str, detail: Any) -> BaseModel:
+    """raw dict든 DTO든 kind의 detail 모델 인스턴스로 정규화한다.
 
+    이미 맞는 모델이면 그대로 쓴다 — provider 경로는 DTO를 들고 오므로 재검증
+    비용이 0이고, admin 경로(raw JSON dict)만 실제 validate를 탄다.
 
-def _optional_object(value: Any) -> dict[str, Any] | None:
-    return dict(value) if isinstance(value, dict) else None
+    ``feature_id``는 detail 모델의 필수 키이고 항상 소유 feature와 같아야 하므로
+    호출자 값으로 채운다(요청 본문이 생략해도, 다른 값을 보내도 소유자가 이긴다).
+    """
+    model = DETAIL_MODEL_BY_KIND[kind]
+    if isinstance(detail, model):
+        return detail
+    raw = dict(detail) if isinstance(detail, Mapping) else {}
+    raw["feature_id"] = feature_id
+    try:
+        return model.model_validate(raw)
+    except ValidationError as exc:
+        raise SubtypeDetailError(kind, feature_id, exc) from exc
 
 
 def _bind_jsonb(params: dict[str, Any]) -> dict[str, Any]:
@@ -130,122 +144,93 @@ def _bind_jsonb(params: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _int_in_range(value: Any, *, low: int, high: int) -> int | None:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int) and low <= value <= high:
-        return value
-    if isinstance(value, str) and value.isdigit() and low <= int(value) <= high:
-        return int(value)
-    return None
-
-
-def _number(value: Any) -> float | None:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int | float):
-        return float(value)
-    if isinstance(value, str):
-        try:
-            return float(value)
-        except ValueError:
-            return None
-    return None
-
-
-def _positive_int(value: Any) -> int | None:
-    return _int_in_range(value, low=1, high=2**31 - 1)
-
-
-def _string_list(value: Any, *, limit: int = 3) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    return [item for item in value if isinstance(item, str)][:limit]
-
-
 def subtype_params(
     *,
     feature_id: str,
     feature_uuid: str,
     kind: str,
-    detail: Mapping[str, Any] | None,
+    detail: Any,
 ) -> dict[str, Any] | None:
     """kind별 subtype upsert 파라미터 (subtype이 없는 kind면 ``None``).
 
-    필수 필드(place_kind/event_kind/notice_type)가 없으면 ``ValueError``로
-    거부한다 — sentinel로 덮지 않는다(``_required`` docstring). route/area의
-    ``route_type``/``area_kind``는 DTO 자체가 기본값을 갖는 필드라 그 기본을
-    그대로 쓴다.
+    ``detail``은 kind의 detail DTO로 검증·정규화된다 — 맞지 않으면
+    ``SubtypeDetailError``다. 즉 "필수 필드 결측을 sentinel로 덮지 않는다"는
+    규칙이 여기 손수 쓰인 게 아니라 DTO의 필수 선언에서 그대로 따라온다.
+
+    jsonb로 갈 값만 ``model_dump(mode="json")``을 거친다 —
+    ``reviews_link``(``AnyUrl``)·``business_hours``(중첩 모델)처럼 파이썬 객체를
+    담은 필드가 있기 때문이다. 반대로 typed 컬럼(date/timestamptz/numeric)은
+    모델 속성을 **그대로** 바인딩한다: 문자열로 낮췄다가 DB가 다시 파싱하게 하면
+    표현이 한 번 더 갈라진다.
     """
     if kind not in SUBTYPE_TABLES:
         return None
-    payload = _object(detail)
+    obj = _validated_detail(kind, feature_id, detail)
+    as_json = cast("dict[str, Any]", obj.model_dump(mode="json"))
     common: dict[str, Any] = {
         "feature_id": feature_id,
         "feature_uuid": feature_uuid,
         "kind": kind,
     }
-    if kind == "place":
+    if isinstance(obj, PlaceDetail):
         return _bind_jsonb(common | {
-            "place_kind": _required(payload.get("place_kind"), "place_kind"),
-            "phones": _string_list(payload.get("phones")),
-            "biz_number": _text(payload.get("biz_number")),
-            "license_date": _iso_date(payload.get("license_date")),
-            "business_hours": _optional_object(payload.get("business_hours")),
-            "facility_info": _object(payload.get("facility_info")),
-            "reviews_link": _object(payload.get("reviews_link")),
-            "payload": _object(payload.get("payload")),
+            "place_kind": obj.place_kind,
+            "phones": list(obj.phones),
+            "biz_number": obj.biz_number,
+            "license_date": obj.license_date,
+            "business_hours": as_json["business_hours"],
+            "facility_info": as_json["facility_info"],
+            "reviews_link": as_json["reviews_link"],
+            "payload": as_json["payload"],
         })
-    if kind == "event":
+    if isinstance(obj, EventDetail):
         return _bind_jsonb(common | {
-            "event_kind": _required(payload.get("event_kind"), "event_kind"),
-            "starts_on": _iso_date(payload.get("starts_on")),
-            "ends_on": _iso_date(payload.get("ends_on")),
-            "timezone": _text(payload.get("timezone")) or "Asia/Seoul",
-            "opening_hours": _optional_object(payload.get("opening_hours")),
-            "venue_name": _text(payload.get("venue_name")),
-            "tel": _text(payload.get("tel")),
-            "content_id": _text(payload.get("content_id")),
-            "content_type_id": _text(payload.get("content_type_id")),
-            "area_code": _text(payload.get("area_code")),
-            "sigungu_code": _text(payload.get("sigungu_code")),
-            "payload": _object(payload.get("payload")),
+            "event_kind": obj.event_kind,
+            "starts_on": obj.starts_on,
+            "ends_on": obj.ends_on,
+            "timezone": obj.timezone,
+            "opening_hours": as_json["opening_hours"],
+            "venue_name": obj.venue_name,
+            "tel": obj.tel,
+            "content_id": obj.content_id,
+            "content_type_id": obj.content_type_id,
+            "area_code": obj.area_code,
+            "sigungu_code": obj.sigungu_code,
+            "payload": as_json["payload"],
         })
-    if kind == "notice":
+    if isinstance(obj, NoticeDetail):
         return _bind_jsonb(common | {
-            "notice_type": _required(payload.get("notice_type"), "notice_type"),
-            "severity": _int_in_range(payload.get("severity"), low=0, high=5),
-            "valid_start_time": _aware_datetime(payload.get("valid_start_time")),
-            "valid_end_time": _aware_datetime(payload.get("valid_end_time")),
-            "source_agency": _text(payload.get("source_agency")),
-            "officer_name": _text(payload.get("officer_name")),
-            "payload": _object(payload.get("payload")),
+            "notice_type": obj.notice_type,
+            "severity": obj.severity,
+            "valid_start_time": obj.valid_start_time,
+            "valid_end_time": obj.valid_end_time,
+            "source_agency": obj.source_agency,
+            "officer_name": obj.officer_name,
+            "payload": as_json["payload"],
         })
-    if kind == "route":
+    if isinstance(obj, RouteDetail):
         return _bind_jsonb(common | {
-            "route_type": _text(payload.get("route_type")) or "route",
-            "geometry_source": _text(payload.get("geometry_source")),
-            "geometry_status": _text(payload.get("geometry_status")),
-            "total_distance_meters": _number(payload.get("total_distance_meters")),
-            "expected_duration_minutes": _positive_int(
-                payload.get("expected_duration_minutes")
-            ),
-            "difficulty": _text(payload.get("difficulty")),
-            "begin_name": _text(payload.get("begin_name")),
-            "begin_address": _text(payload.get("begin_address")),
-            "end_name": _text(payload.get("end_name")),
-            "end_address": _text(payload.get("end_address")),
-            "payload": _object(payload.get("payload")),
+            "route_type": obj.route_type,
+            "geometry_source": obj.geometry_source,
+            "geometry_status": obj.geometry_status,
+            "total_distance_meters": obj.total_distance_meters,
+            "expected_duration_minutes": obj.expected_duration_minutes,
+            "difficulty": obj.difficulty,
+            "begin_name": obj.begin_name,
+            "begin_address": obj.begin_address,
+            "end_name": obj.end_name,
+            "end_address": obj.end_address,
+            "payload": as_json["payload"],
         })
-    # area
+    area = cast("AreaDetail", obj)
     return _bind_jsonb(common | {
-        "area_kind": _text(payload.get("area_kind")) or "area",
-        "boundary_source": _text(payload.get("boundary_source")),
-        "area_square_meters": _number(payload.get("area_square_meters")),
-        "regulation_scope": _text(payload.get("regulation_scope")),
-        "administrative_office": _text(payload.get("administrative_office")),
-        "description": _text(payload.get("description")),
-        "payload": _object(payload.get("payload")),
+        "area_kind": area.area_kind,
+        "boundary_source": area.boundary_source,
+        "area_square_meters": area.area_square_meters,
+        "regulation_scope": area.regulation_scope,
+        "administrative_office": area.administrative_office,
+        "description": area.description,
+        "payload": as_json["payload"],
     })
 
 
@@ -408,3 +393,72 @@ _SUBTYPE_COLUMNS: Final[dict[str, Sequence[str]]] = {
         "payload",
     ),
 }
+
+
+_LOCK_NOTICE_VALID_START_SQL: Final[str] = """
+SELECT valid_start_time
+FROM feature.feature_notices
+WHERE feature_id = :feature_id
+FOR UPDATE
+"""
+
+
+def _is_first_probe_notice(detail: object) -> bool:
+    """``detail.payload.valid_start_origin``이 ``'first_probe'``인가."""
+    return (
+        isinstance(detail, NoticeDetail)
+        and detail.payload.get("valid_start_origin") == "first_probe"
+    )
+
+
+async def _preserved_notice_valid_start(
+    session: AsyncSession, feature_id: str, incoming: Any
+) -> Any:
+    """``valid_start_origin='first_probe'`` 계보의 최초 관측 시각을 보존한다.
+
+    provider가 "지금 처음 봤다"를 발효 시각으로 추정해 보내는 계보(KREX 돌발 등)는
+    재적재마다 시작 시각이 흔들린다. 이미 저장된 값이 있으면 그것이 정본이고,
+    없으면(신규) 들어온 값을 그대로 쓴다.
+    """
+    stored = (
+        await session.execute(
+            text(_LOCK_NOTICE_VALID_START_SQL), {"feature_id": feature_id}
+        )
+    ).scalar_one_or_none()
+    return stored if stored is not None else incoming
+
+
+async def write_subtype(
+    session: AsyncSession,
+    *,
+    feature_id: str,
+    feature_uuid: str,
+    kind: str,
+    detail: Any,
+    geom_wkt: str | None = None,
+) -> None:
+    """kind별 subtype UPSERT — 호출자의 core 쓰기와 **같은 트랜잭션**.
+
+    provider writer와 admin apply가 **이 함수 하나**를 쓴다. 종전에는 두 곳이
+    각자 ``subtype_upsert_sql``/``subtype_params``를 조립했고, geometry
+    바인딩과 first_probe 보존은 provider 쪽에만 있었다 — admin이 route/area로
+    넓어지는 순간 ``bind parameter 'geom_wkt'`` 오류가 나는 구조였다.
+
+    subtype이 없는 kind(price/weather)는 no-op다.
+    """
+    sql = subtype_upsert_sql(kind)
+    params = subtype_params(
+        feature_id=feature_id,
+        feature_uuid=feature_uuid,
+        kind=kind,
+        detail=detail,
+    )
+    if sql is None or params is None:
+        return
+    if kind in GEOMETRY_SUBTYPE_KINDS:
+        params["geom_wkt"] = geom_wkt
+    if kind == "notice" and _is_first_probe_notice(detail):
+        params["valid_start_time"] = await _preserved_notice_valid_start(
+            session, feature_id, params["valid_start_time"]
+        )
+    await session.execute(text(sql), params)

@@ -687,12 +687,16 @@ candidates AS MATERIALIZED (
     -- 없는 본질적 JSONB이므로 조립 뷰를 읽는다(T-VN-35). 잠금은 아래
     -- ``locked_candidates``가 base table에 그대로 건다(뷰는 FOR KEY SHARE 불가).
     JOIN feature.features_detailed AS f ON f.feature_id = sl.feature_id
+    LEFT JOIN feature.feature_places AS fp ON fp.feature_id = f.feature_id
+    LEFT JOIN feature.feature_events AS fe ON fe.feature_id = f.feature_id
     WHERE f.deleted_at IS NULL
       AND f.status = 'active'
       AND (
         rule.place_kind IS NULL
-        OR f.detail ->> 'place_kind' = rule.place_kind
-        OR f.detail ->> 'event_kind' = rule.place_kind
+        -- kind 판정은 typed 컬럼에서 한다 — 조립 detail을 술어로 읽으면
+        -- planner가 뷰의 subtype LEFT JOIN을 제거하지 못한다(T-VN-35).
+        OR fp.place_kind = rule.place_kind
+        OR fe.event_kind = rule.place_kind
       )
       AND (rule.category IS NULL OR f.category = rule.category)
       AND (

@@ -96,7 +96,7 @@ SELECT
     COALESCE(
         (
             CASE f.kind
-                WHEN 'place' THEN jsonb_build_object(
+                WHEN 'place' THEN CASE WHEN p.feature_id IS NULL THEN NULL ELSE jsonb_build_object(
                     'feature_id', f.feature_id,
                     'place_kind', p.place_kind,
                     'phones', to_jsonb(p.phones),
@@ -106,8 +106,8 @@ SELECT
                     'facility_info', p.facility_info,
                     'reviews_link', p.reviews_link,
                     'payload', p.payload
-                )
-                WHEN 'event' THEN jsonb_build_object(
+                ) END
+                WHEN 'event' THEN CASE WHEN e.feature_id IS NULL THEN NULL ELSE jsonb_build_object(
                     'feature_id', f.feature_id,
                     'event_kind', e.event_kind,
                     'starts_on', to_jsonb(e.starts_on),
@@ -121,23 +121,51 @@ SELECT
                     'area_code', e.area_code,
                     'sigungu_code', e.sigungu_code,
                     'payload', e.payload
-                )
-                WHEN 'notice' THEN jsonb_build_object(
+                ) END
+                WHEN 'notice' THEN CASE WHEN n.feature_id IS NULL THEN NULL ELSE jsonb_build_object(
                     'feature_id', f.feature_id,
                     'notice_type', n.notice_type,
                     'severity', n.severity,
-                    'valid_start_time', to_jsonb(n.valid_start_time),
-                    'valid_end_time', to_jsonb(n.valid_end_time),
+                    -- timestamptz를 그냥 to_jsonb 하면 문자열이 **세션 TimeZone
+                    -- GUC에 의존**한다(실측: 같은 행이 Asia/Seoul 세션에서
+                    -- '...+09:00', UTC 세션에서 '...+00:00'). 서버 설정이 다른
+                    -- 인스턴스가 같은 공지에 다른 문자열을 돌려주게 된다.
+                    -- KST 고정 렌더로 세션 비의존을 만든다(SKILL.md 규칙 17 —
+                    -- 모든 datetime은 KST aware). 마이크로초가 0이면 생략해
+                    -- Python ``datetime.isoformat()``과 바이트까지 같다(prod
+                    -- valid_start_time 145/145 무변경).
+                    'valid_start_time', to_jsonb(
+                        to_char(
+                            n.valid_start_time AT TIME ZONE 'Asia/Seoul',
+                            CASE
+                                WHEN EXTRACT(microsecond FROM n.valid_start_time)::bigint
+                                     % 1000000 = 0
+                                THEN 'YYYY-MM-DD"T"HH24:MI:SS"+09:00"'
+                                ELSE 'YYYY-MM-DD"T"HH24:MI:SS.US"+09:00"'
+                            END
+                        )
+                    ),
+                    'valid_end_time', to_jsonb(
+                        to_char(
+                            n.valid_end_time AT TIME ZONE 'Asia/Seoul',
+                            CASE
+                                WHEN EXTRACT(microsecond FROM n.valid_end_time)::bigint
+                                     % 1000000 = 0
+                                THEN 'YYYY-MM-DD"T"HH24:MI:SS"+09:00"'
+                                ELSE 'YYYY-MM-DD"T"HH24:MI:SS.US"+09:00"'
+                            END
+                        )
+                    ),
                     'source_agency', n.source_agency,
                     'officer_name', n.officer_name,
                     'payload', n.payload
-                )
-                WHEN 'route' THEN jsonb_build_object(
+                ) END
+                WHEN 'route' THEN CASE WHEN r.feature_id IS NULL THEN NULL ELSE jsonb_build_object(
                     'feature_id', f.feature_id,
                     'route_type', r.route_type,
                     'geometry_source', r.geometry_source,
                     'geometry_status', r.geometry_status,
-                    'total_distance_meters', r.total_distance_meters,
+                    'total_distance_meters', to_jsonb(r.total_distance_meters::text),
                     'expected_duration_minutes', r.expected_duration_minutes,
                     'difficulty', r.difficulty,
                     'begin_name', r.begin_name,
@@ -145,17 +173,17 @@ SELECT
                     'end_name', r.end_name,
                     'end_address', r.end_address,
                     'payload', r.payload
-                )
-                WHEN 'area' THEN jsonb_build_object(
+                ) END
+                WHEN 'area' THEN CASE WHEN a.feature_id IS NULL THEN NULL ELSE jsonb_build_object(
                     'feature_id', f.feature_id,
                     'area_kind', a.area_kind,
                     'boundary_source', a.boundary_source,
-                    'area_square_meters', a.area_square_meters,
+                    'area_square_meters', to_jsonb(a.area_square_meters::text),
                     'regulation_scope', a.regulation_scope,
                     'administrative_office', a.administrative_office,
                     'description', a.description,
                     'payload', a.payload
-                )
+                ) END
             END
         ),
         '{}'::jsonb
@@ -169,7 +197,86 @@ LEFT JOIN feature.feature_areas AS a ON a.feature_id = f.feature_id
 """
 
 
+def preflight_or_raise(label: str, probe_sql: str, remedy: str) -> None:
+    """이관 불가 행을 feature_id와 함께 알리고 멈춘다 (근거는 0084의 같은 함수).
+
+    0086에서 특히 중요하다 — 여기서 건너뛴 행은 곧바로 오는
+    ``DROP COLUMN detail``/``geom``으로 **복구 불가능하게** 사라진다.
+    downgrade도 subtype에서 역조립하므로 되살릴 수 없다.
+    """
+    quoted_label = label.replace("'", "''")
+    quoted_remedy = remedy.replace("'", "''")
+    op.execute(
+        f"""
+        DO $preflight$
+        DECLARE
+            offenders text;
+            total bigint;
+        BEGIN
+            SELECT count(*) INTO total FROM ({probe_sql}) AS probe;
+            IF total = 0 THEN
+                RETURN;
+            END IF;
+            SELECT string_agg(feature_id, ', ' ORDER BY feature_id)
+              INTO offenders
+              FROM (
+                  SELECT feature_id FROM ({probe_sql}) AS probe
+                  ORDER BY feature_id LIMIT 20
+              ) AS sample;
+            RAISE EXCEPTION
+                'T-VN-35 preflight: % (% row(s)); sample: %',
+                '{quoted_label}', total, offenders
+              USING HINT = '{quoted_remedy}';
+        END
+        $preflight$;
+        """
+    )
+
+
 def upgrade() -> None:
+    # geometry가 subtype의 NOT NULL 컬럼이 되므로, geometry 없는 route/area는
+    # 새 모델에서 **표현 불가능**하다(결정 5의 요점 — "geometry가 필수인 kind"가
+    # 술어가 아니라 구조로 갈린다). 그런 행을 조용히 건너뛰면 detail이 통째로
+    # 소실되므로 fail-close한다. 이 상태는 과거에 실재했다 —
+    # ``inactivate_geometryless_area_features_by_source``가 그것 때문에 있고,
+    # 그 정리 경로는 area·특정 source_link·non-user_request만 훑어 전부를 지우지
+    # 못한다. prod 실측 0건.
+    preflight_or_raise(
+        "route/area rows without geometry cannot be represented after 0086",
+        "SELECT feature_id FROM feature.features "
+        "WHERE kind IN ('route', 'area') AND geom IS NULL",
+        "Delete them, or supply geometry, then re-run. "
+        "kortravelmap.client.inactivate_geometryless_area_features_by_source "
+        "handles the provider-sourced area subset.",
+    )
+    # 반대 방향 — geometry 정본이 route/area subtype으로 옮겨가므로 다른 kind의
+    # geom은 담을 곳이 없다. DTO도 이 PR에서 같은 계약으로 좁힌다.
+    preflight_or_raise(
+        "geometry on kinds other than route/area has no destination after 0086",
+        "SELECT feature_id FROM feature.features "
+        "WHERE kind NOT IN ('route', 'area') AND geom IS NOT NULL",
+        "Clear geom on these rows (geometry belongs to route/area only), "
+        "then re-run the upgrade.",
+    )
+    # subtype의 typed geometry(MULTILINESTRING/MULTIPOLYGON)로 cast되지 않는
+    # geometry는 ``ST_Multi(...)::geometry(...)``가 통째로 abort시킨다 — 실측:
+    # ``ST_Multi('POINT(127 37)')::geometry(MultiLineString,4326)`` → type mismatch.
+    # core는 GENERIC이라 kind별 타입을 강제한 적이 없다.
+    preflight_or_raise(
+        "route geometry must be (MULTI)LINESTRING to become feature_routes.geom",
+        "SELECT feature_id FROM feature.features "
+        "WHERE kind = 'route' AND geom IS NOT NULL "
+        "AND x_extension.GeometryType(geom) "
+        "NOT IN ('LINESTRING', 'MULTILINESTRING')",
+        "Fix or remove the geometry on these rows, then re-run the upgrade.",
+    )
+    preflight_or_raise(
+        "area geometry must be (MULTI)POLYGON to become feature_areas.geom",
+        "SELECT feature_id FROM feature.features "
+        "WHERE kind = 'area' AND geom IS NOT NULL "
+        "AND x_extension.GeometryType(geom) NOT IN ('POLYGON', 'MULTIPOLYGON')",
+        "Fix or remove the geometry on these rows, then re-run the upgrade.",
+    )
     op.execute(
         """
         CREATE TABLE feature.feature_routes (
@@ -180,7 +287,7 @@ def upgrade() -> None:
             route_type varchar NOT NULL,
             geometry_source varchar,
             geometry_status varchar,
-            total_distance_meters numeric(12, 2),
+            total_distance_meters numeric,
             expected_duration_minutes integer,
             difficulty varchar,
             begin_name varchar,
@@ -209,7 +316,7 @@ def upgrade() -> None:
             geom x_extension.geometry(MultiPolygon, 4326) NOT NULL,
             area_kind varchar NOT NULL,
             boundary_source varchar,
-            area_square_meters numeric(16, 2),
+            area_square_meters numeric,
             regulation_scope varchar,
             administrative_office varchar,
             description text,
@@ -227,7 +334,8 @@ def upgrade() -> None:
         """
     )
     # 데이터 이관 — prod에서는 0행이지만 다른 환경(테스트 시드·복원본)에 route/area
-    # 행이 있을 수 있으므로 조건 없이 옮긴다. ST_Multi로 단일 geometry도 수용한다.
+    # 행이 있을 수 있으므로 조건 없이 옮긴다. ST_Multi로 단일 geometry도 수용하고,
+    # 이관 불가 행은 위 preflight가 이미 걸러냈다(조용한 skip 없음).
     op.execute(
         """
         INSERT INTO feature.feature_routes (
@@ -258,7 +366,7 @@ def upgrade() -> None:
             f.detail->>'end_address',
             COALESCE(f.detail->'payload', '{}'::jsonb)
         FROM feature.features AS f
-        WHERE f.kind = 'route' AND f.geom IS NOT NULL
+        WHERE f.kind = 'route'
         """
     )
     op.execute(
@@ -284,7 +392,7 @@ def upgrade() -> None:
             f.detail->>'description',
             COALESCE(f.detail->'payload', '{}'::jsonb)
         FROM feature.features AS f
-        WHERE f.kind = 'area' AND f.geom IS NOT NULL
+        WHERE f.kind = 'area'
         """
     )
     op.execute(

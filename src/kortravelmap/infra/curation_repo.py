@@ -1742,6 +1742,10 @@ _MARK_IMPORT_REMOVALS_PRE_UUID_SQL: Final[str] = _MARK_IMPORT_REMOVALS_SQL.repla
 ).replace(
     # 0085가 신설한 ``feature.feature_notices``도 그 세대엔 없다 — 당시의
     # detail 문자열 판정으로 되돌린다(T-VN-35).
+    #
+    # ``_PREVIEW_IMPORT_REMOVALS_SQL``에는 같은 변형을 두지 않는다. preview는
+    # h35 replay 경로(``run_csv5``)에서 호출되지 않고 현행 스키마에서만 도므로,
+    # 고정-세대 변형을 만들면 아무도 실행하지 않는 두 번째 SQL이 생긴다.
     _ITEM_PUBLIC_NOTICE_FILTER_SQL,
     public_active_notice_filter_sql("pf", frozen_h35_schema=True),
 )

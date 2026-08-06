@@ -31,7 +31,7 @@ _FETCHED = datetime(2026, 5, 29, 12, 0, tzinfo=_KST)
 
 
 def _clean_place(feature_id: str) -> FeatureRow:
-    """detail 채워진 + 좌표 있는 정상 place feature (어떤 케이스에도 안 걸림)."""
+    """좌표 있는 정상 place **core** 행 (subtype은 ``_add_clean_place``가 채운다)."""
     from geoalchemy2 import WKTElement
 
     return FeatureRow(
@@ -41,6 +41,19 @@ def _clean_place(feature_id: str) -> FeatureRow:
         category="EAT.RESTAURANT",
         coord=WKTElement("POINT(126.9784 37.5665)", srid=4326),
     )
+
+
+async def _add_clean_place(session: AsyncSession, feature_id: str) -> FeatureRow:
+    """어떤 케이스에도 걸리지 않는 정상 place — core + subtype 둘 다 (T-VN-35).
+
+    subtype 행이 없으면 F2("subtype 결측")가 잡는다. 대조군은 그 축에서도
+    깨끗해야 한다.
+    """
+    row = _clean_place(feature_id)
+    session.add(row)
+    await session.flush()
+    await seed_feature_subtype(session, feature_id=feature_id, kind="place")
+    return row
 
 
 async def _seed_source_entity_record(
@@ -87,7 +100,7 @@ async def test_f1_detected_and_report_persisted(
     migrated_session: AsyncSession,
 ) -> None:
     # 정상 feature (대조군)
-    migrated_session.add(_clean_place("clean-1"))
+    await _add_clean_place(migrated_session, "clean-1")
 
     # F2 후보 — subtype 행이 없는 place feature (T-VN-35 이후의 "detail 결측").
     migrated_session.add(
@@ -139,19 +152,6 @@ async def test_f1_detected_and_report_persisted(
     assert persisted.summary["by_code"]["F1"] >= 1
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "프로덕션 결함(T-VN-35): F2('detail 누락')가 탐지 능력을 잃었다. "
-        "0086 이후 detail은 core 컬럼이 아니라 features_detailed 뷰의 조립 결과이고, "
-        "place/event/notice는 subtype 행이 없어도 jsonb_build_object가 NULL 필드로 "
-        "채운 **비어 있지 않은** 객체를 만든다 — 따라서 "
-        "``detail IS NULL OR detail = '{}'`` 술어는 영원히 0건이다. "
-        "(F2 SQL 자체도 아직 base table ``feature.features``를 읽어 UndefinedColumn으로 "
-        "죽는다 — consistency.py 수정이 선행돼야 한다.) 새 판정 축은 "
-        "``feature_subtype.count_subtype_drift``의 missing_subtype이다."
-    ),
-)
 async def test_f2_detects_feature_without_subtype_row(
     migrated_session: AsyncSession,
 ) -> None:
@@ -175,7 +175,7 @@ async def test_f2_detects_feature_without_subtype_row(
 
 async def test_clean_data_reports_ok(migrated_session: AsyncSession) -> None:
     # 정상 feature + 그에 연결된 source_record (orphan 아님)
-    migrated_session.add(_clean_place("clean-2"))
+    await _add_clean_place(migrated_session, "clean-2")
     await _seed_source_entity_record(
         migrated_session,
         entity_key="linked-se-1",
@@ -215,10 +215,10 @@ async def test_clean_data_reports_ok(migrated_session: AsyncSession) -> None:
 
 async def _seed_pending_dedup(session: AsyncSession, n: int) -> None:
     """정상 feature 2건 + pending dedup_review_queue n쌍 적재(서로 다른 pair)."""
-    session.add(_clean_place("f4-a"))
-    session.add(_clean_place("f4-b"))
+    await _add_clean_place(session, "f4-a")
+    await _add_clean_place(session, "f4-b")
     for i in range(n):
-        session.add(_clean_place(f"f4-x{i}"))
+        await _add_clean_place(session, f"f4-x{i}")
     await session.flush()
     for i in range(n):
         await session.execute(
@@ -656,8 +656,8 @@ async def test_f6_allows_normal_247_and_overnight_periods(
 async def test_f8_warns_for_feature_file_metadata_and_object_snapshot_mismatch(
     migrated_session: AsyncSession,
 ) -> None:
-    active_feature = _clean_place("f8-active")
-    deleted_feature = _clean_place("f8-deleted")
+    active_feature = await _add_clean_place(migrated_session, "f8-active")
+    deleted_feature = await _add_clean_place(migrated_session, "f8-deleted")
     deleted_feature.deleted_at = datetime.now(UTC)
     migrated_session.add(active_feature)
     migrated_session.add(deleted_feature)

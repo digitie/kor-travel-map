@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import json
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
@@ -409,7 +410,12 @@ def _event_feature(feature_id: str, *, ends_on: date) -> Feature:
     )
 
 
-def _notice_feature(feature_id: str, *, valid_end_time: datetime | None) -> Feature:
+def _notice_feature(
+    feature_id: str,
+    *,
+    valid_end_time: datetime | None,
+    valid_start_time: datetime | None = None,
+) -> Feature:
     return Feature(
         feature_id=feature_id,
         kind=FeatureKind.NOTICE,
@@ -423,7 +429,7 @@ def _notice_feature(feature_id: str, *, valid_end_time: datetime | None) -> Feat
             feature_id=feature_id,
             notice_type="traffic",
             severity=2,
-            valid_start_time=_NOW - timedelta(days=1),
+            valid_start_time=valid_start_time or _NOW - timedelta(days=1),
             valid_end_time=valid_end_time,
             source_agency="한국도로공사",
             payload={"domain": "highway"},
@@ -526,6 +532,49 @@ async def test_event_and_notice_bundles_round_trip_through_subtype(
     assert reread["valid_end_time"] is None
 
 
+async def test_assembled_notice_times_do_not_depend_on_session_timezone(
+    migrated_session: AsyncSession,
+) -> None:
+    """조립된 시각 문자열이 세션 ``TimeZone`` GUC에 의존하면 안 된다.
+
+    ``to_jsonb(timestamptz)``는 세션 TimeZone으로 렌더한다 — 그대로 두면 서버
+    설정이 다른 인스턴스가 **같은 공지에 다른 문자열**을 돌려준다(실측: 같은
+    행이 Asia/Seoul에서 ``+09:00``, UTC에서 ``+00:00``, America/New_York에서
+    ``-04:00``). 뷰가 KST 고정 렌더를 쓰므로 세 세션에서 모두 같아야 한다.
+
+    덧붙여 마이크로초가 0이면 생략해 Python ``datetime.isoformat()``과 표기가
+    같다 — 기존 prod ``valid_start_time`` 145행이 그대로 유지되는 근거다.
+    """
+    feature_id = "tvn35:tz:notice"
+    # 마이크로초 0(생략 분기)과 non-zero(``.US`` 분기)를 함께 태운다.
+    start = datetime(2026, 8, 5, 17, 35, 24, tzinfo=_KST)
+    end = datetime(2026, 8, 6, 1, 2, 3, 823154, tzinfo=_KST)
+    notice = _notice_feature(feature_id, valid_start_time=start, valid_end_time=end)
+    await feature_repo.load_bundle(
+        migrated_session, _bundle(notice, source_entity_id="N-TZ")
+    )
+    await migrated_session.flush()
+
+    rendered: list[tuple[str, str]] = []
+    for zone in ("Asia/Seoul", "UTC", "America/New_York"):
+        await migrated_session.execute(text(f"SET LOCAL TIME ZONE '{zone}'"))
+        assembled = await _detail_from_view(migrated_session, feature_id)
+        rendered.append(
+            (assembled["valid_start_time"], assembled["valid_end_time"])
+        )
+    await migrated_session.execute(text("SET LOCAL TIME ZONE 'UTC'"))
+
+    assert len(set(rendered)) == 1, f"세션 TimeZone에 따라 달라졌다: {rendered}"
+    assert rendered[0] == (
+        "2026-08-05T17:35:24+09:00",
+        "2026-08-06T01:02:03.823154+09:00",
+    )
+    # 같은 순간을 가리키는지도 확인한다(표기만 고정한 것이지 값이 아니다).
+    assembled = await _detail_from_view(migrated_session, feature_id)
+    assert NoticeDetail.model_validate(assembled).valid_start_time == start
+    assert NoticeDetail.model_validate(assembled).valid_end_time == end
+
+
 async def test_event_sigungu_code_survives_subtype_round_trip(
     migrated_session: AsyncSession,
 ) -> None:
@@ -604,35 +653,35 @@ async def test_user_request_fence_skips_subtype_write(
         (FeatureKind.AREA, lambda fid: AreaDetail(feature_id=fid, area_kind="area")),
     ],
 )
-async def test_geometryless_route_and_area_are_rejected_before_core_write(
+async def test_geometryless_route_and_area_are_rejected_at_construction(
     migrated_session: AsyncSession,
     kind: FeatureKind,
     detail_factory: Any,
 ) -> None:
-    """geometry 없는 route/area는 ``ValueError``로 거부되고 core도 쓰이지 않는다.
+    """geometry 없는 route/area는 ``Feature`` 구성 시점에 거부된다.
 
     종전에는 적재 후 ``inactivate_geometryless_area_features_by_source``가 보정하던
-    상태다. subtype ``geom``이 NOT NULL이 되면서 그 보정이 write 시점 선차단으로
-    앞당겨졌다(ADR-084 결정 5).
+    상태다. subtype ``geom``이 NOT NULL이 되면서 그 보정이 DTO 계약으로 앞당겨졌다
+    (ADR-084 결정 5) — write까지 갈 것도 없다. 반대 방향(route/area가 아닌 kind의
+    geometry)도 같은 validator가 막는다: 담을 곳이 없으므로 조용히 버려지느니
+    거부한다.
     """
     feature_id = f"tvn35:geom:{kind.value}"
-    feature = Feature(
-        feature_id=feature_id,
-        kind=kind,
-        name="지오메트리 없는 경로/구역",
-        category="03000000",
-        marker_icon="park",
-        marker_color="P-06",
-        coord=Coordinate(lon=127.0, lat=37.5),
-        address=Address(),
-        geom=None,
-        detail=detail_factory(feature_id),
-        created_at=_NOW,
-        updated_at=_NOW,
-    )
-
-    with pytest.raises(ValueError, match="requires geometry"):
-        await feature_repo.upsert_feature(migrated_session, feature)
+    with pytest.raises(ValueError, match="geom이 필수"):
+        Feature(
+            feature_id=feature_id,
+            kind=kind,
+            name="지오메트리 없는 경로/구역",
+            category="03000000",
+            marker_icon="park",
+            marker_color="P-06",
+            coord=Coordinate(lon=127.0, lat=37.5),
+            address=Address(),
+            geom=None,
+            detail=detail_factory(feature_id),
+            created_at=_NOW,
+            updated_at=_NOW,
+        )
 
     assert (
         await migrated_session.execute(
@@ -640,6 +689,25 @@ async def test_geometryless_route_and_area_are_rejected_before_core_write(
             {"feature_id": feature_id},
         )
     ).scalar_one() == 0
+
+
+async def test_geometry_on_non_route_area_kind_is_rejected() -> None:
+    """place/event에 geometry를 실으면 담을 곳이 없다 — 구성 시점에 거부한다."""
+    with pytest.raises(ValueError, match="geom을 가질 수 없다"):
+        Feature(
+            feature_id="tvn35:geom:place",
+            kind=FeatureKind.PLACE,
+            name="선을 가진 장소",
+            category="01070100",
+            marker_icon="place",
+            marker_color="P-01",
+            coord=Coordinate(lon=127.0, lat=37.5),
+            address=Address(),
+            geom=_ROUTE_WKT,
+            detail=PlaceDetail(feature_id="tvn35:geom:place", place_kind="cafe"),
+            created_at=_NOW,
+            updated_at=_NOW,
+        )
 
 
 @pytest.mark.parametrize(
@@ -1076,6 +1144,159 @@ async def test_subtype_migration_round_trip_is_lossless(pg_container: Any) -> No
     # 다시 head로 — backfill이 같은 값을 typed 컬럼으로 되돌린다.
     await asyncio.to_thread(_run_alembic, dsn, "head")
     assert await _detail_digests(dsn, "feature.features_detailed") == at_head
+
+
+#: 0084 이전 세대가 실제로 저장하던 detail — ``Feature.detail.model_dump(mode="json")``
+#: 그대로다. 값은 DTO에서 만들어 "옛 writer가 쓴 바이트"와 어긋날 수 없게 한다.
+def _legacy_detail_seeds() -> dict[str, tuple[str, dict[str, Any], str | None]]:
+    return {
+        "tvn35:legacy:place": (
+            "place",
+            PlaceDetail(
+                feature_id="tvn35:legacy:place",
+                place_kind="cafe",
+                phones=["02-1234-5678", "02-2222-3333"],
+                biz_number="123-45-67890",
+                license_date=date(2024, 3, 1),
+                # 중첩 null은 provider 원문의 일부다 — 조립이 지우면 안 된다
+                # (``jsonb_strip_nulls`` 결함이 여기서 잡혔다).
+                facility_info={"seats": 40, "wifi": None, "nested": {"a": None}},
+                reviews_link={"naver": "https://map.naver.com/v5/entry/place/1"},
+                payload={"origin": "legacy", "raw": {"memo": None}},
+            ).model_dump(mode="json"),
+            None,
+        ),
+        "tvn35:legacy:event": (
+            "event",
+            EventDetail(
+                feature_id="tvn35:legacy:event",
+                event_kind="cultural_festival",
+                starts_on=date(2026, 8, 1),
+                ends_on=date(2026, 8, 10),
+                venue_name="여의도공원",
+                area_code="1",
+                # 이 필드가 subtype 컬럼에서 빠져 있던 것이 전수 대조로 드러났다.
+                sigungu_code="11140",
+                payload={"origin": "legacy"},
+            ).model_dump(mode="json"),
+            None,
+        ),
+        "tvn35:legacy:notice": (
+            "notice",
+            NoticeDetail(
+                feature_id="tvn35:legacy:notice",
+                notice_type="traffic",
+                severity=3,
+                valid_start_time=datetime(2026, 8, 5, 17, 35, 24, tzinfo=_KST),
+                valid_end_time=datetime(2026, 8, 9, 10, 0, tzinfo=_KST),
+                source_agency="한국도로공사",
+                payload={"domain": "highway", "krex_grade": None},
+            ).model_dump(mode="json"),
+            None,
+        ),
+        "tvn35:legacy:route": (
+            "route",
+            RouteDetail(
+                feature_id="tvn35:legacy:route",
+                route_type="trail",
+                geometry_source="knps",
+                total_distance_meters=Decimal("1234.567"),
+                expected_duration_minutes=90,
+                payload={"origin": "legacy"},
+            ).model_dump(mode="json"),
+            _ROUTE_WKT,
+        ),
+        "tvn35:legacy:area": (
+            "area",
+            AreaDetail(
+                feature_id="tvn35:legacy:area",
+                area_kind="protected_area",
+                area_square_meters=Decimal("98765.43"),
+                administrative_office="국립공원공단",
+                payload={"origin": "legacy"},
+            ).model_dump(mode="json"),
+            _AREA_WKT,
+        ),
+    }
+
+
+async def _seed_legacy_detail_at_pre_revision(dsn: str) -> None:
+    """0083 세대의 core ``detail``/``geom``에 옛 writer가 쓰던 그대로 심는다."""
+    engine = make_async_engine(dsn)
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(text("SET search_path = public, x_extension"))
+            for index, (feature_id, (kind, detail, wkt)) in enumerate(
+                sorted(_legacy_detail_seeds().items())
+            ):
+                await conn.execute(
+                    text(
+                        "INSERT INTO feature.features ("
+                        " feature_id, kind, name, category, status, updated_at,"
+                        " detail, geom) VALUES ("
+                        " :feature_id, :kind, :name, :category, 'active', now(),"
+                        " CAST(:detail AS jsonb),"
+                        " CASE WHEN :wkt IS NULL THEN NULL"
+                        "      ELSE x_extension.ST_GeomFromText(:wkt, 4326) END)"
+                    ),
+                    {
+                        "feature_id": feature_id,
+                        "kind": kind,
+                        "name": f"legacy fixture {index}",
+                        "category": "01070100" if kind != "notice" else "99000000",
+                        "detail": json.dumps(detail, ensure_ascii=False),
+                        "wkt": wkt,
+                    },
+                )
+    finally:
+        await engine.dispose()
+
+
+async def test_legacy_detail_survives_forward_migration_byte_for_byte(
+    pg_container: Any,
+) -> None:
+    """0083의 실제 ``detail`` JSONB가 조립 결과와 **바이트까지** 같아야 한다.
+
+    ``test_subtype_migration_round_trip_is_lossless``는 head에서 심어 head로
+    돌아오는 닫힌 고리라, "옛 detail엔 있는데 subtype 컬럼과 뷰 **양쪽에** 없는
+    필드"를 원리상 볼 수 없다 — ``EventDetail.sigungu_code`` 결함이 정확히 그
+    모양이었다. 이 테스트는 반대 방향, 즉 마이그레이션이 실제로 통과시켜야 하는
+    입력에서 출발한다.
+
+    notice 시각만 예외다: 종전 저장 표기가 writer마다 갈렸고(ADR-084 결정 4)
+    KST 고정 렌더로 통일했다. 그래도 Python ``isoformat()`` 표기와는 같으므로
+    DTO가 만든 위 시드는 바이트까지 보존된다.
+    """
+    dsn = await _fresh_database(pg_container)
+    await asyncio.to_thread(_run_alembic, dsn, _ROUNDTRIP_PRE_REVISION)
+    await _seed_legacy_detail_at_pre_revision(dsn)
+
+    before = await _detail_json(dsn, "feature.features", "tvn35:legacy:%")
+    await asyncio.to_thread(_run_alembic, dsn, "head")
+    after = await _detail_json(dsn, "feature.features_detailed", "tvn35:legacy:%")
+
+    assert set(after) == set(_legacy_detail_seeds())
+    for feature_id, expected in sorted(before.items()):
+        assert after[feature_id] == expected, feature_id
+
+
+async def _detail_json(dsn: str, relation: str, pattern: str) -> dict[str, Any]:
+    engine = make_async_engine(dsn)
+    try:
+        async with engine.connect() as conn:
+            await conn.execute(text("SET search_path = public, x_extension"))
+            rows = (
+                await conn.execute(
+                    text(
+                        f"SELECT feature_id, detail::text FROM {relation} "
+                        "WHERE feature_id LIKE :pattern ORDER BY feature_id"
+                    ),
+                    {"pattern": pattern},
+                )
+            ).all()
+    finally:
+        await engine.dispose()
+    return {str(feature_id): json.loads(detail) for feature_id, detail in rows}
 
 
 async def _geometry_types_on_core(dsn: str) -> dict[str, str]:

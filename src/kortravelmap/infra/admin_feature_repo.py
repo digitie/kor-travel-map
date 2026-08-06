@@ -24,7 +24,7 @@ from kortravelmap.infra.feature_identity import (
     candidate_feature_uuid,
     verify_feature_uuid,
 )
-from kortravelmap.infra.feature_subtype import subtype_params, subtype_upsert_sql
+from kortravelmap.infra.feature_subtype import write_subtype
 from kortravelmap.infra.merge_repo import (
     MergeConflictError,
     MergeNotFoundError,
@@ -2603,34 +2603,6 @@ async def _state_for_conflict(
     return dict(row) if row is not None else None
 
 
-async def _write_subtype(
-    session: AsyncSession,
-    *,
-    feature_id: str,
-    feature_uuid: str,
-    kind: str,
-    detail: Mapping[str, Any] | None,
-) -> None:
-    """kind별 subtype UPSERT — core 적용과 **같은 트랜잭션** (T-VN-35, ADR-084).
-
-    subtype이 kind별 값의 유일한 정본이므로 core 적용이 실제로 일어난
-    경우(RETURNING 행 존재)에만 호출한다. ``subtype_upsert_sql``/
-    ``subtype_params``가 컬럼 매핑의 단일 정본이라 repo는 파싱 규칙을
-    복제하지 않는다. subtype이 없는 kind(price/weather)는 no-op.
-    """
-
-    sql = subtype_upsert_sql(kind)
-    params = subtype_params(
-        feature_id=feature_id,
-        feature_uuid=feature_uuid,
-        kind=kind,
-        detail=detail,
-    )
-    if sql is None or params is None:
-        return
-    await session.execute(text(sql), params)
-
-
 async def _apply_change(
     session: AsyncSession,
     request: FeatureChangeRequest,
@@ -2661,7 +2633,7 @@ async def _apply_change(
                 inserted=True,
             )
             # core insert가 실제로 일어난 경우에만 subtype을 만든다.
-            await _write_subtype(
+            await write_subtype(
                 session,
                 feature_id=str(row["feature_id"]),
                 feature_uuid=str(row["feature_uuid"]),
@@ -2684,7 +2656,7 @@ async def _apply_change(
             # admin update의 detail은 **통교체** 계약이다(부분 병합 아님).
             # subtype UPSERT가 전 컬럼을 EXCLUDED로 덮으므로 계약이 그대로
             # 보존되고, 이제 컬럼·타입은 DB가 검증한다.
-            await _write_subtype(
+            await write_subtype(
                 session,
                 feature_id=str(row["feature_id"]),
                 feature_uuid=str(row["feature_uuid"]),

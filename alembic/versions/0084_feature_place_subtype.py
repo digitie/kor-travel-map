@@ -56,7 +56,56 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
+def preflight_or_raise(label: str, probe_sql: str, remedy: str) -> None:
+    """이관 불가 행을 **feature_id와 함께** 알리고 멈춘다.
+
+    ``NOT NULL``/CHECK가 알아서 막아주긴 하지만, 그때 나오는 진단은
+    ``null value in column "place_kind" violates not-null constraint``처럼
+    **어느 행인지 말해주지 않는다**. api-entrypoint가 기동 때 upgrade를 돌리는
+    구조(NEW-5)에서 그 실패는 곧 컨테이너 crash-loop이고, 운영자는 어디를
+    고쳐야 하는지 알 수 없다. 선점검은 공짜고 진단을 행 단위로 만든다.
+
+    조용히 건너뛰지 않는 이유: 건너뛴 행은 뒤이은 ``DROP COLUMN detail``로
+    **복구 불가능하게** 사라진다(downgrade도 subtype에서 역조립하므로 되살릴
+    수 없다). 실패는 되돌릴 수 있고 소실은 되돌릴 수 없다.
+    """
+    quoted_label = label.replace("'", "''")
+    quoted_remedy = remedy.replace("'", "''")
+    op.execute(
+        f"""
+        DO $preflight$
+        DECLARE
+            offenders text;
+            total bigint;
+        BEGIN
+            SELECT count(*) INTO total FROM ({probe_sql}) AS probe;
+            IF total = 0 THEN
+                RETURN;
+            END IF;
+            SELECT string_agg(feature_id, ', ' ORDER BY feature_id)
+              INTO offenders
+              FROM (
+                  SELECT feature_id FROM ({probe_sql}) AS probe
+                  ORDER BY feature_id LIMIT 20
+              ) AS sample;
+            RAISE EXCEPTION
+                'T-VN-35 preflight: % (% row(s)); sample: %',
+                '{quoted_label}', total, offenders
+              USING HINT = '{quoted_remedy}';
+        END
+        $preflight$;
+        """
+    )
+
+
 def upgrade() -> None:
+    preflight_or_raise(
+        "place rows without detail->>'place_kind' cannot become feature_places rows",
+        "SELECT feature_id FROM feature.features "
+        "WHERE kind = 'place' AND detail->>'place_kind' IS NULL",
+        "Set a place_kind on these rows (PlaceDetail.place_kind is required), "
+        "then re-run the upgrade.",
+    )
     op.execute(
         """
         ALTER TABLE feature.features
@@ -109,8 +158,18 @@ def upgrade() -> None:
             f.detail->>'place_kind',
             COALESCE(
                 (
+                    -- ``PlaceDetail.phones``는 max_length=3이고 writer도 3개로
+                    -- 자른다 — backfill이 더 담으면 DTO가 말하는 것과 다른 행이
+                    -- 다음 upsert까지 남는다.
                     SELECT array_agg(value #>> '{}')
-                    FROM jsonb_array_elements(f.detail->'phones')
+                    FROM (
+                        SELECT value
+                        FROM jsonb_array_elements(f.detail->'phones') WITH ORDINALITY
+                             AS t(value, ord)
+                        WHERE jsonb_typeof(value) = 'string'
+                        ORDER BY ord
+                        LIMIT 3
+                    ) AS capped
                 ),
                 '{}'::text[]
             ),
@@ -130,29 +189,26 @@ def upgrade() -> None:
         WHERE f.kind = 'place'
         """
     )
-    # detail 표현식 인덱스 3종을 subtype 컬럼 인덱스로 이관한다(core 쪽 원본은
-    # detail 컬럼과 함께 0086에서 사라진다).
+    # ``idx_features_opening_hours_keyset``만 subtype 컬럼 인덱스로 이관한다.
+    #
+    # ``idx_features_yt_channel_id``/``_playlist_id``(ADR-061)는 **이관하지
+    # 않는다** — 둘 다 죽은 인덱스였음이 실측으로 드러났다:
+    #
+    # 1. 인덱스 식은 ``detail #>> '{kor_travel_concierge,youtube,channel_id}'``
+    #    였는데 그 경로에 값이 있는 행은 prod에 **0건**이다. concierge가 쓰는
+    #    실제 위치는 ``detail.payload.kor_travel_concierge…``(1,481행)다.
+    # 2. 경로를 고쳐도 쓰이지 않는다. 이 값을 술어로 읽는 유일한 질의는
+    #    curation source rule의 ``detail_selector``인데, 경로가 **런타임 값**
+    #    (``ARRAY(SELECT jsonb_array_elements_text(...))``)이라 어떤 고정 식
+    #    인덱스도 매칭될 수 없다. 나머지 참조는 전부 SELECT 목록의 추출이다.
+    #
+    # 죽은 인덱스를 경로만 바꿔 되살리면 73만 행에 쓰기 비용만 남는다. 상수
+    # 경로로 조회하는 질의가 실제로 생기면 그때 만든다.
     op.execute(
         """
         CREATE INDEX idx_feature_places_opening_hours
             ON feature.feature_places (feature_id)
             WHERE business_hours IS NOT NULL
-        """
-    )
-    op.execute(
-        """
-        CREATE INDEX idx_feature_places_yt_channel
-            ON feature.feature_places
-               ((payload #>> '{kor_travel_concierge,youtube,channel_id}'))
-            WHERE (payload #>> '{kor_travel_concierge,youtube,channel_id}') IS NOT NULL
-        """
-    )
-    op.execute(
-        """
-        CREATE INDEX idx_feature_places_yt_playlist
-            ON feature.feature_places
-               ((payload #>> '{kor_travel_concierge,youtube,playlist_id}'))
-            WHERE (payload #>> '{kor_travel_concierge,youtube,playlist_id}') IS NOT NULL
         """
     )
 

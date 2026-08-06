@@ -484,20 +484,6 @@ class FeaturePlaceRow(_FeatureSubtypeBase):
             "feature_id",
             postgresql_where=text("business_hours IS NOT NULL"),
         ),
-        Index(
-            "idx_feature_places_yt_channel",
-            text("(payload #>> '{kor_travel_concierge,youtube,channel_id}')"),
-            postgresql_where=text(
-                "(payload #>> '{kor_travel_concierge,youtube,channel_id}') IS NOT NULL"
-            ),
-        ),
-        Index(
-            "idx_feature_places_yt_playlist",
-            text("(payload #>> '{kor_travel_concierge,youtube,playlist_id}')"),
-            postgresql_where=text(
-                "(payload #>> '{kor_travel_concierge,youtube,playlist_id}') IS NOT NULL"
-            ),
-        ),
     )
 
     place_kind: Mapped[str] = mapped_column(String, nullable=False)
@@ -530,9 +516,13 @@ class FeatureEventRow(_FeatureSubtypeBase):
         ),
         Index(
             "idx_feature_events_period",
-            "ends_on",
             "starts_on",
-            postgresql_where=text("ends_on IS NOT NULL"),
+            "ends_on",
+        ),
+        Index(
+            "idx_feature_events_opening_hours",
+            "feature_id",
+            postgresql_where=text("opening_hours IS NOT NULL"),
         ),
     )
 
@@ -608,7 +598,7 @@ class FeatureRouteRow(_FeatureSubtypeBase):
     route_type: Mapped[str] = mapped_column(String, nullable=False)
     geometry_source: Mapped[str | None] = mapped_column(String)
     geometry_status: Mapped[str | None] = mapped_column(String)
-    total_distance_meters: Mapped[Any | None] = mapped_column(Numeric(12, 2))
+    total_distance_meters: Mapped[Any | None] = mapped_column(Numeric)
     expected_duration_minutes: Mapped[int | None] = mapped_column(Integer)
     difficulty: Mapped[str | None] = mapped_column(String)
     begin_name: Mapped[str | None] = mapped_column(String)
@@ -638,7 +628,7 @@ class FeatureAreaRow(_FeatureSubtypeBase):
     )
     area_kind: Mapped[str] = mapped_column(String, nullable=False)
     boundary_source: Mapped[str | None] = mapped_column(String)
-    area_square_meters: Mapped[Any | None] = mapped_column(Numeric(16, 2))
+    area_square_meters: Mapped[Any | None] = mapped_column(Numeric)
     regulation_scope: Mapped[str | None] = mapped_column(String)
     administrative_office: Mapped[str | None] = mapped_column(String)
     description: Mapped[str | None] = mapped_column(Text)
