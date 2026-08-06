@@ -36,6 +36,8 @@ from kortravelmap.infra.models import (
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
 
+from tests.integration._subtype_seed import seed_feature_subtype
+
 pytestmark = pytest.mark.integration
 
 _NOW = datetime(2026, 6, 3, 10, 0, tzinfo=UTC)
@@ -522,6 +524,11 @@ async def test_merge_dedup_review_explicit_master_locks_review_row(
         session.add(_feature_row("feature-admin-lock-a", name="잠금 A"))
         session.add(_feature_row("feature-admin-lock-b", name="잠금 B"))
         await session.flush()
+        # 이 블록은 rollback이 아니라 **커밋**된다(세션 공유 DB). subtype 없는
+        # core 행을 남기면 뒤따르는 테스트의 consistency 게이트(F2 — subtype 결측)가
+        # 막힌다. 프로덕션 writer는 두 쓰기를 한 트랜잭션에서 하므로, 시드도 그렇게 한다.
+        for locked_id in ("feature-admin-lock-a", "feature-admin-lock-b"):
+            await seed_feature_subtype(session, feature_id=locked_id, kind="place")
         review = DedupReviewQueueRow(
             feature_id_a="feature-admin-lock-a",
             feature_id_b="feature-admin-lock-b",
