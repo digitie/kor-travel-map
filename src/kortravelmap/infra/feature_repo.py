@@ -66,6 +66,7 @@ from kortravelmap.core.exceptions import (
     FeatureSearchCursorTamperedError,
     FeatureSearchCursorVersionUnsupportedError,
 )
+from kortravelmap.core.notice_lineage_scopes import notice_lineage_scope_sql
 from kortravelmap.infra.feature_identity import (
     candidate_feature_uuid,
     verify_feature_uuid,
@@ -358,6 +359,11 @@ RETURNING current_source_record_key
 
 # source_records는 payload_hash가 UNIQUE 구성요소 → 이력 보존 (ADR-017).
 # 같은 source_record_key 재적재는 원문을 건드리지 않고 마지막 확인 시각만 갱신한다.
+#: notice scope 판정 — writer와 alembic 0088 backfill이 **같은 정본**을 쓴다.
+_NOTICE_SCOPE_PREDICATE: Final[str] = notice_lineage_scope_sql(
+    ":provider", ":dataset_key", ":source_entity_type"
+)
+
 _UPSERT_SOURCE_RECORD_SQL: Final[str] = """
 INSERT INTO provider_sync.source_records (
     source_record_key, source_entity_key, provider, dataset_key,
@@ -377,10 +383,7 @@ INSERT INTO provider_sync.source_records (
     -- notice scope **밖에서는 NULL**이다. 그러지 않으면 CASE의 ELSE 분기가
     -- 모든 provider의 모든 record에 source_entity_id 사본을 남기고(73만+),
     -- backfill이 notice scope만 채운 것과도 어긋난다.
-    CASE WHEN ((:provider, :dataset_key, :source_entity_type) IN (
-        ('python-krex-api', 'krex_traffic_notices', 'traffic_notice'),
-        ('python-kma-api', 'kma_weather_alerts', 'weather_alert')
-    ))
+    CASE WHEN {_NOTICE_SCOPE_PREDICATE}
     THEN (
     CASE
       WHEN :provider = 'python-krex-api'
@@ -700,100 +703,62 @@ def _ended_notice_hidden_sql(feature_alias: str) -> str:
 def _latest_notice_only_sql(
     feature_alias: str, *, frozen_h35_schema: bool = False
 ) -> str:
-    """구버전 notice를 숨기는 SQL fragment를 feature alias에 맞춰 만든다."""
+    """같은 계보에서 밀려난 notice를 숨긴다 (ADR-087).
 
-    # 0063~0079 고정 세대에는 ``source_records.lineage_key``(0088)가 없다.
-    # 그 replay는 당시 표면을 그대로 재생하는 것이 존재 이유이므로 재계산을 쓴다.
-    _lineage = _notice_lineage_sql if frozen_h35_schema else _notice_lineage_stored_sql
+    승자는 **계보당 하나**다. 그런데 종전 구현은 그 판정을 feature 행마다
+    correlated ``NOT EXISTS``로 다시 했다 — ``DISTINCT ON``으로 자기 계보를 고르고
+    ``LATERAL``로 "나보다 나은 게 있나"를 훑는 형태라, notice 수에 대해
+    **제곱으로** 커진다. 실측: 3,045 notice에서 21.5초.
 
+    같은 규칙을 ``ROW_NUMBER()``로 **한 번에** 표현하고 그 결과(패자 집합)를
+    비상관 ``ARRAY(SELECT ...)``로 뽑으면 쿼리당 1회 평가되는 InitPlan이 되고,
+    본 질의는 ``feature_id <> ALL(...)``이 된다. 실측: **21.5초 → 0.41초(52배)**,
+    결과 집합은 145=145 양방향 차집합 0으로 동일하다.
 
+    순서 규칙은 종전과 같다 — ``seen_at`` → ``source_record_key`` → 현재 identity
+    → ``feature_id`` 안정 tie-break. 경쟁자 후보를 ``deleted_at IS NULL``로만
+    거르는 것(비공개 신규 feature도 구 feature를 밀어낸다)도 그대로다.
+
+    계보 축은 ``source_records.lineage_key``(0088)를 쓰되, 고정 세대 replay
+    (0063~0079)에는 그 컬럼이 없으므로 재계산한다.
+    """
+
+    lineage = (
+        _notice_lineage_sql("sr2")
+        if frozen_h35_schema
+        else _notice_lineage_stored_sql("sr2")
+    )
     return f"""
   AND (
     {feature_alias}.kind <> 'notice'
-    OR NOT EXISTS (
-      SELECT 1
+    OR {feature_alias}.feature_id <> ALL (ARRAY(
+      SELECT ranked.feature_id
       FROM (
-        SELECT DISTINCT ON (
-            cur_sr.provider,
-            cur_sr.dataset_key,
-            cur_sr.source_entity_type,
-            {_lineage("cur_sr")}
-        )
-            cur_sr.provider,
-            cur_sr.dataset_key,
-            cur_sr.source_entity_type,
-            {_lineage("cur_sr")} AS lineage_key,
-            COALESCE(
-                cur_sr.last_seen_at, cur_sr.imported_at, cur_sr.fetched_at
-            ) AS seen_at,
-            cur_sr.source_record_key,
-            {_canonical_notice_feature_sql(feature_alias, "cur_sr")} AS canonical_identity
-        FROM provider_sync.source_links AS cur_sl
-        JOIN provider_sync.source_entities AS cur_se
-          ON cur_se.source_entity_key = cur_sl.source_entity_key
-        JOIN provider_sync.source_records AS cur_sr
-          ON cur_sr.source_record_key = cur_se.current_source_record_key
-        WHERE cur_sl.feature_id = {feature_alias}.feature_id
-          AND cur_sl.is_primary_source
-        ORDER BY
-            cur_sr.provider,
-            cur_sr.dataset_key,
-            cur_sr.source_entity_type,
-            {_lineage("cur_sr")},
-            COALESCE(
-                cur_sr.last_seen_at, cur_sr.imported_at, cur_sr.fetched_at
-            ) DESC,
-            cur_sr.source_record_key DESC
-      ) AS current_notice
-      LEFT JOIN LATERAL (
-        SELECT 1 AS better_exists
-        FROM provider_sync.source_entities AS other_se
-        JOIN provider_sync.source_records AS other_sr
-          ON other_sr.source_record_key = other_se.current_source_record_key
-         AND {_lineage("other_sr")} = current_notice.lineage_key
-        JOIN provider_sync.source_links AS other_sl
-          ON other_sl.source_entity_key = other_se.source_entity_key
-        JOIN feature.features AS other_f
-          ON other_f.feature_id = other_sl.feature_id
-        WHERE other_se.provider = current_notice.provider
-          AND other_se.dataset_key = current_notice.dataset_key
-          AND other_se.source_entity_type = current_notice.source_entity_type
-          AND other_sl.is_primary_source
-          AND other_f.feature_id <> {feature_alias}.feature_id
-          AND other_f.kind = 'notice'
-          AND other_f.deleted_at IS NULL
-          AND (
-            COALESCE(
-                other_sr.last_seen_at, other_sr.imported_at, other_sr.fetched_at
-            ) > current_notice.seen_at
-            OR (
-              COALESCE(
-                  other_sr.last_seen_at, other_sr.imported_at, other_sr.fetched_at
-              ) = current_notice.seen_at
-              AND other_sr.source_record_key > current_notice.source_record_key
-            )
-            OR (
-              COALESCE(
-                  other_sr.last_seen_at, other_sr.imported_at, other_sr.fetched_at
-              ) = current_notice.seen_at
-              AND other_sr.source_record_key = current_notice.source_record_key
-              AND (
-                (
-                  {_canonical_notice_feature_sql("other_f", "other_sr")}
-                  AND NOT current_notice.canonical_identity
-                )
-                OR (
-                  {_canonical_notice_feature_sql("other_f", "other_sr")}
-                    = current_notice.canonical_identity
-                  AND other_f.feature_id < {feature_alias}.feature_id
-                )
-              )
-            )
-          )
-        LIMIT 1
-      ) AS better ON true
-      HAVING bool_and(better.better_exists IS NOT NULL)
-    )
+        SELECT
+          f2.feature_id,
+          ROW_NUMBER() OVER (
+            PARTITION BY
+              se2.provider, se2.dataset_key, se2.source_entity_type,
+              {lineage}
+            ORDER BY
+              COALESCE(sr2.last_seen_at, sr2.imported_at, sr2.fetched_at) DESC,
+              sr2.source_record_key DESC,
+              ({_canonical_notice_feature_sql("f2", "sr2")}) DESC,
+              f2.feature_id ASC
+          ) AS rank_in_lineage
+        FROM feature.features AS f2
+        JOIN provider_sync.source_links AS sl2
+          ON sl2.feature_id = f2.feature_id
+         AND sl2.is_primary_source
+        JOIN provider_sync.source_entities AS se2
+          ON se2.source_entity_key = sl2.source_entity_key
+        JOIN provider_sync.source_records AS sr2
+          ON sr2.source_record_key = se2.current_source_record_key
+        WHERE f2.kind = 'notice'
+          AND f2.deleted_at IS NULL
+      ) AS ranked
+      WHERE ranked.rank_in_lineage > 1
+    ))
   )
 """
 
