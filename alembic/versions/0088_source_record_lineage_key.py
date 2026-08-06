@@ -26,6 +26,18 @@ read SQL에는 ``sr``(source_records) alias가 **이미 스코프에 있으므�
 필요 없다. 조인을 더하면 subtype 행 결측 같은 이상 상태에서 결과가 조용히
 바뀌는데, 그 위험도 함께 피한다.
 
+인덱스는 만들지 않는다
+----------------------
+
+read는 ``COALESCE(sr.lineage_key, <CASE>)`` 형태로 읽는데, ``COALESCE(col, expr)``
+는 **인덱스가 받을 수 없는 식**이다(실측: 200k행 probe에서 `col = x`는 Bitmap
+Index Scan 0.15ms, `COALESCE(col, y) = x`는 Seq Scan 9.97ms). 실제로 인덱스를
+만들어 21배 규모로 돌려도 ``idx_scan = 0``이었다. 쓰이지 않을 인덱스는 쓰기
+비용만 남기므로 만들지 않는다(ADR-086 선례).
+
+이 revision의 이득은 인덱스가 아니라 **per-row JSON 추출 제거**다 — 3,045 notice
+규모에서 21.7초 → 17.2초(약 21%).
+
 fallback
 --------
 
@@ -107,18 +119,9 @@ def upgrade() -> None:
         )
         """
     )
-    op.execute(
-        """
-        CREATE INDEX idx_source_records_lineage
-            ON provider_sync.source_records
-               (provider, dataset_key, source_entity_type, lineage_key)
-            WHERE lineage_key IS NOT NULL
-        """
-    )
 
 
 def downgrade() -> None:
-    op.execute("DROP INDEX IF EXISTS provider_sync.idx_source_records_lineage")
     op.execute(
         "ALTER TABLE provider_sync.source_records DROP COLUMN IF EXISTS lineage_key"
     )

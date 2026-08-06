@@ -898,14 +898,7 @@ class SourceRecordRow(Base):
 
     __tablename__ = "source_records"
     __table_args__ = (
-        Index(
-            "idx_source_records_lineage",
-            "provider",
-            "dataset_key",
-            "source_entity_type",
-            "lineage_key",
-            postgresql_where=text("lineage_key IS NOT NULL"),
-        ),
+
         UniqueConstraint(
             "provider",
             "dataset_key",

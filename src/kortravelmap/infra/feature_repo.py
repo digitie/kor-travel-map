@@ -689,8 +689,15 @@ def _ended_notice_hidden_sql(feature_alias: str) -> str:
 # 한 feature에 여러 계보의 primary entity가 연결될 수 있다. 각 계보의 실제 최신 row를
 # 고른 뒤 **모든 계보에서 밀린 feature만** 숨긴다. 한 계보라도 winner면 feature 전체를
 # 보존하며, current primary source가 없는 notice도 기존처럼 표시한다.
-def _latest_notice_only_sql(feature_alias: str) -> str:
+def _latest_notice_only_sql(
+    feature_alias: str, *, frozen_h35_schema: bool = False
+) -> str:
     """구버전 notice를 숨기는 SQL fragment를 feature alias에 맞춰 만든다."""
+
+    # 0063~0079 고정 세대에는 ``source_records.lineage_key``(0088)가 없다.
+    # 그 replay는 당시 표면을 그대로 재생하는 것이 존재 이유이므로 재계산을 쓴다.
+    _lineage = _notice_lineage_sql if frozen_h35_schema else _notice_lineage_stored_sql
+
 
     return f"""
   AND (
@@ -702,12 +709,12 @@ def _latest_notice_only_sql(feature_alias: str) -> str:
             cur_sr.provider,
             cur_sr.dataset_key,
             cur_sr.source_entity_type,
-            {_notice_lineage_stored_sql("cur_sr")}
+            {_lineage("cur_sr")}
         )
             cur_sr.provider,
             cur_sr.dataset_key,
             cur_sr.source_entity_type,
-            {_notice_lineage_stored_sql("cur_sr")} AS lineage_key,
+            {_lineage("cur_sr")} AS lineage_key,
             COALESCE(
                 cur_sr.last_seen_at, cur_sr.imported_at, cur_sr.fetched_at
             ) AS seen_at,
@@ -724,7 +731,7 @@ def _latest_notice_only_sql(feature_alias: str) -> str:
             cur_sr.provider,
             cur_sr.dataset_key,
             cur_sr.source_entity_type,
-            {_notice_lineage_stored_sql("cur_sr")},
+            {_lineage("cur_sr")},
             COALESCE(
                 cur_sr.last_seen_at, cur_sr.imported_at, cur_sr.fetched_at
             ) DESC,
@@ -735,7 +742,7 @@ def _latest_notice_only_sql(feature_alias: str) -> str:
         FROM provider_sync.source_entities AS other_se
         JOIN provider_sync.source_records AS other_sr
           ON other_sr.source_record_key = other_se.current_source_record_key
-         AND {_notice_lineage_stored_sql("other_sr")} = current_notice.lineage_key
+         AND {_lineage("other_sr")} = current_notice.lineage_key
         JOIN provider_sync.source_links AS other_sl
           ON other_sl.source_entity_key = other_se.source_entity_key
         JOIN feature.features AS other_f
@@ -812,7 +819,7 @@ def public_active_notice_filter_sql(
     if frozen_h35_schema:
         return _frozen_h35_ended_notice_hidden_sql(
             feature_alias
-        ) + _latest_notice_only_sql(feature_alias)
+        ) + _latest_notice_only_sql(feature_alias, frozen_h35_schema=True)
     return _ended_notice_hidden_sql(feature_alias) + _latest_notice_only_sql(feature_alias)
 
 
@@ -3017,7 +3024,7 @@ global_feature_wins AS (
         FROM provider_sync.source_entities AS other_se
         JOIN provider_sync.source_records AS other_sr
           ON other_sr.source_record_key = other_se.current_source_record_key
-         AND {_notice_lineage_stored_sql("other_sr")} = current_notice.lineage_key
+         AND {_notice_lineage_sql("other_sr")} = current_notice.lineage_key
         JOIN provider_sync.source_links AS other_sl
           ON other_sl.source_entity_key = other_se.source_entity_key
         JOIN feature.features AS other_f
