@@ -32,38 +32,25 @@ storage head를 attest하고 reset 뒤 migration을 증명한다.
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
-## 2026-08-06 (1) — T-VN-35 A-D 구현·리뷰 반영 완료 (ADR-086)
+## 2026-08-06 (1) — T-VN-35 A-D 병합 (kind별 typed subtype 분해, ADR-086)
 
-`feat/tvn35-typed-subtypes` — kind별 typed subtype 5종 + 배타 arc, core
-`detail`·`geom` 제거 + `features_detailed` 조립 뷰(단일 정본). prod 복원본
-왕복에서 place·event·price·weather 731,620행 md5 동일 · notice
-`valid_start_time` 145/145 동일. 적대 리뷰 2인 P0×2·P1×6·P2×6 전량 반영
-(경계 정규화 무효 → write 경계 단일화·422, 이관 불가 행 조용한 소실 →
-선점검 fail-close, 세션 TimeZone 의존 → KST 고정 렌더).
+`feature.features`의 `detail` JSONB·`geom`을 제거하고 kind별 typed subtype 5종으로
+분해했다. 배타 arc(core `UNIQUE(feature_id, kind)` + subtype `kind` 상수 CHECK +
+복합 FK)가 "한 feature는 최대 한 subtype"과 "subtype이 있는 동안 core kind 불변"을
+구조적으로 강제한다. 응답용 `detail`/`geom`은 `feature.features_detailed` 뷰가
+조립한다 — 값이 두 곳에 없으므로 drift라는 개념이 사라진다.
 
-**보류 중(사용자 지시 2026-08-06)**: codex의 T-VN-41F가 우선이므로 PR #961
-머지와 이후 작업을 정지한다. PR은 열어 둔 채 손대지 않는다.
+무손실 실증(prod 복원본 731,765행, head→0083→head 왕복): place·event·price·weather
+**731,620행 md5 바이트 동일**, notice `valid_start_time` 145/145 동일. 적대 리뷰 2인
+P0×2·P1×6·P2×6 전량 반영. alembic `0085`→`0086`→`0087`(main의 `0084_c6c_cancel_probe_
+fixtures` 뒤), ADR은 codex와 두 번 겹쳐 084→085→**086**으로 밀렸다.
 
-상태: 구현·적대 리뷰 2인 반영·회귀 수정 완료. 로컬 전체 통합은 main과 **동일
-수준**(3 failed / 941 passed vs main 3 failed / 914 passed — 실패 3건은 양쪽
-동일한 이 박스의 docker-in-docker 아티팩트). CI는 lint·openapi-drift·fixture
-replay·frontend·unit 3종 pass.
+**다음 한 작업**: 배포 — orchestrator `.env`의
+`KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`를 **`0087_route_area_subtypes`**로 선행
+갱신(안 하면 api가 DB를 건드리기 전에 exit 1이고 dagster/daemon도 뜨지 않는다) →
+api → dagster/daemon 재빌드. 그 뒤 Lane A 잔여 `T-VN-37A`(notice `tstzrange` —
+35B가 남긴 자리, empty range가 "발효 전 철회"를 정확히 표현한다).
 
-**재개 절차**(41F가 main에 먼저 착지한 뒤):
-
-1. `git merge origin/main` — 충돌은 `docs/{journal,resume,tasks}.md`,
-   `docs/adr/README.md`, `contracts/vnext/openapi-diff-v1.json`에서 나고
-   전부 "양쪽 다 남기기"다.
-2. **alembic 재번호**. 41F가 새 revision을 넣으면 내 체인의 머리가 그 뒤로
-   가야 한다(안 하면 head 2개). 3파일 rename + 참조 ~50곳이라 스크립트로
-   한 번에 민다 — 절차와 사후 확인 목록은 그 스크립트 docstring에 있다
-   (`scratchpad/renumber-tvn35.py`, `--base <새 head> --adr <새 번호>`).
-   ADR도 같은 이유로 밀릴 수 있다(이미 084→085로 한 번 밀었다).
-3. 재번호 뒤 필수 확인 4가지: `alembic heads` 단일 head · openapi 3종 재생성 ·
-   `contracts/vnext/openapi-diff-v1.json` baseline + freeze 상수 ·
-   EXPECTED_HEAD 문구(ADR/journal/resume/PR body).
-4. CI green → 머지 → 배포(EXPECTED_HEAD 선행 갱신, api→dagster/daemon 재빌드)
-   → Lane A 잔여 `T-VN-37A`(notice `tstzrange` — 35B가 남긴 자리).
 ## 2026-08-06 — T-VN-41F1J-A Map fixture 구현·검증·적대 리뷰 완료, PR 게이트 중
 
 `0084_c6c_cancel_probe_fixtures`가 transaction별 fixture/job, canonical cancellation
