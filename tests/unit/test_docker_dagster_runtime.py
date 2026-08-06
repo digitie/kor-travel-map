@@ -1674,6 +1674,21 @@ def test_dagster_image_ships_storage_command_without_map_alembic_chain() -> None
 
 
 @pytest.mark.unit
+def test_api_image_ships_static_application_schema_head_command() -> None:
+    """Manager candidate attestation은 API image의 설치 graph command만 호출한다."""
+    api = _dockerfile("api.Dockerfile")
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+
+    assert (
+        "docker/application-schema-head.py /usr/local/bin/ktm-application-schema" in api
+    )
+    assert "/usr/local/bin/ktm-application-schema" in api
+    assert "_application_migration_graph.json" in pyproject["tool"]["setuptools"][
+        "package-data"
+    ]["kortravelmap"]
+
+
+@pytest.mark.unit
 def test_docker_compose_runs_storage_migration_before_dagster_services() -> None:
     services = _compose()["services"]
     migration = services["dagster-storage-migrate"]

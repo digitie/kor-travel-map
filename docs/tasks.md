@@ -606,6 +606,16 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   새 pair에서 F1D를 한 번만 재개해 canonical `409` receipt, finalize, UI 상태를 확인하고
   prod 최종 live UI E2E까지 통과한다. frozen 후보의 재시도는 이 선행 조건 전에는 금지한다.
 
+### T-VN-41F1D-C0a — 후보 Map application schema head artifact
+
+- [/] **T-VN-41F1D-C0a — 설치 package 기반 정적 application head 계약**
+
+  후보 API image가 `ktm-application-schema head`로 installed package의 immutable graph
+  artifact에서만 단일 Alembic head를 반환한다. cwd/source mount/Alembic 실행/DB/application
+  import는 금지하고, AST generator equality와 side-effect/ambiguous head 회귀를 포함한다.
+  Docker Manager F1D-C2가 이 head와 Dagster storage/PinVi head를 reset 전에 receipt로
+  결박한다. 구현 PR의 적대 리뷰·CI·merge가 남았다.
+
 ## Wave 2 상세 — 구조 전환
 
 > 실행 순서는 31A~C(freeze) → 32~38(shadow, 두 lane 병렬) → 40 → 39(cutover 마지막)다.

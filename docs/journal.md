@@ -2,6 +2,18 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-06 (codex) — T-VN-41F1D-C0a 후보 Map application schema head artifact 구현
+
+- 후보 API image에 `ktm-application-schema head`를 추가했다. command는 Python installation
+  prefix의 package data graph만 읽고 application/Alembic migration module, DB, credential,
+  cwd/source mount를 전혀 사용하지 않는다. 성공은
+  `kor-travel-map.application-head.v1` 한 줄 JSON, invalid/ambiguous graph는 sanitized error
+  JSON으로 fail-close한다.
+- graph artifact는 source `alembic/versions`의 top-level `revision`/`down_revision` literal을
+  AST로 읽어 생성하며 generator `--check`가 checked-in equality를 고정한다. top-level side
+  effect 미실행, cwd decoy 무시, zero/multiple/unknown head 거부와 API image command/package-data
+  결선을 unit regression으로 추가했다.
+
 ## 2026-08-06 (codex) — T-VN-41F1D-C0 Dagster storage migration artifact 완료
 
 - 후보 image에 `ktm-dagster-storage head|migrate`를 추가했다. `head`는 이미지에 실제
