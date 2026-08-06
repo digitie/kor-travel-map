@@ -403,14 +403,14 @@ def _normalized_detail_for_kind(
     return normalized
 
 
+# ``detail``은 kind별 typed subtype으로 저장되므로(T-VN-35, ADR-084) 생성
+# 요청은 DTO 정본으로 검증·정규화한다 — 계약 문서에 내부 근거를 싣지 않도록
+# docstring이 아니라 여기 주석으로 남긴다.
 class AdminFeatureCreateRequest(AdminFeatureBaseMutation):
     """``POST /admin/features`` body.
 
-    T-VN-35(ADR-084) — ``detail``은 kind별 typed subtype으로 저장되므로 여기서
-    **DTO 정본으로 검증**한다(place→``PlaceDetail``, event→``EventDetail``).
-    종전에는 임의 JSONB가 그대로 정본이 됐고(shape 구멍), 지금은 필수 필드
-    결측이 repo에서 ``ValueError``→500이 될 수 있다. 경계에서 422로 돌려주는
-    것이 옳고, 검증 규칙은 DTO 한 곳에만 존재한다.
+    ``detail``은 kind 계약(place/event)에 맞아야 하며, 생략하면 기본값으로
+    채운다. 맞지 않으면 422다.
     """
 
     feature_id: str | None = Field(

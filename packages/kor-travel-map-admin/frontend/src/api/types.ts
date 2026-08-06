@@ -3320,6 +3320,9 @@ export interface components {
         /**
          * AdminFeatureCreateRequest
          * @description ``POST /admin/features`` body.
+         *
+         *     ``detail``은 kind 계약(place/event)에 맞아야 하며, 생략하면 기본값으로
+         *     채운다. 맞지 않으면 422다.
          */
         AdminFeatureCreateRequest: {
             /** Address */
