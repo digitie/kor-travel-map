@@ -1167,7 +1167,13 @@ PY
 
 remove_pre_sentinel_creating_container() {
   local active_container_name inspect_id observed_identity
-  [[ ! -e "$ACTIVE_CID_FILE" && ! -L "$ACTIVE_CID_FILE" ]] || return 1
+  if [[ -e "$ACTIVE_CID_FILE" || -L "$ACTIVE_CID_FILE" ]]; then
+    [[
+      -f "$ACTIVE_CID_FILE" &&
+      ! -L "$ACTIVE_CID_FILE" &&
+      "$(stat -c '%u:%g:%a' -- "$ACTIVE_CID_FILE" 2>/dev/null)" == "0:0:600"
+    ]] || return 1
+  fi
   [[
     -f "$ACTIVE_CONTAINER_REF_FILE" &&
     ! -L "$ACTIVE_CONTAINER_REF_FILE" &&
@@ -1220,7 +1226,10 @@ PY
     [[ "$observed_identity" == "/${active_container_name}|prod-live-e2e|${RUNTIME_DIR}" ]] || return 1
     docker container rm --force -- "$inspect_id" >/dev/null || return 1
   fi
-  rm -f -- "$ACTIVE_CONTAINER_REF_FILE" "$ACTIVE_CREATE_OUTCOME_FILE" || return 1
+  rm -f -- \
+    "$ACTIVE_CID_FILE" \
+    "$ACTIVE_CONTAINER_REF_FILE" \
+    "$ACTIVE_CREATE_OUTCOME_FILE" || return 1
 }
 
 finish_exact_triple_api_preflight() {
