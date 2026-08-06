@@ -164,6 +164,43 @@ def test_final_runner_anchors_host_login_and_causal_poi_spec() -> None:
     assert "--pass-with-no-tests" not in script
 
 
+def test_exact_triple_api_preflight_blocks_before_destructive_state() -> None:
+    script = _read(RUNNER)
+    dockerfile = _read(ROOT / "docker" / "c7-playwright.Dockerfile")
+    contract_preflight = _read(
+        LIVE_DIR / "ops-c7-kma-contract-preflight.live.spec.ts"
+    )
+
+    assert "RUN npm run type-check:e2e" in dockerfile
+    _assert_in_order(
+        script,
+        "has_residual_state &&",
+        "run_exact_triple_api_preflight ||",
+        "create_blocked_sentinel",
+    )
+    preflight = _section(
+        script,
+        "run_exact_triple_api_preflight() {",
+        "# 여기까지는 수집/파이프라인 domain state를 바꾸지 않는 preflight다.",
+    )
+    assert "npm run type-check:e2e" in preflight
+    assert "ops-c7-kma-contract-preflight.live.spec.ts" in preflight
+    assert "discard_exact_triple_preflight_runtime" in preflight
+    assert preflight.count("discard_exact_triple_preflight_runtime") >= 4
+    assert 'operation_key: operationKey' in contract_preflight
+    assert 'expect([404, 422]).toContain(foreign.status)' in contract_preflight
+
+
+def test_dataset_ui_wait_and_direct_helper_bind_the_same_provider_dataset_id() -> None:
+    helper = _read(LIVE_DIR / "_ops-c7-admin-api.ts")
+    active = _read(LIVE_DIR / "ops-c7-kma-active-write.live.spec.ts")
+
+    assert "exactDatasetUiPathForProviderDatasetId" in helper
+    assert "result.body?.data.provider_dataset_id !== providerDatasetId" in helper
+    assert "url.pathname === `/api/proxy/v1/ops/datasets/${providerDatasetId}`" in active
+    assert "data?.provider_dataset_id).toBe(providerDatasetId)" in active
+
+
 def test_final_restore_probe_parses_problem_json_and_requires_exact_404() -> None:
     script = _read(RUNNER)
 

@@ -2420,6 +2420,13 @@ export async function exactDatasetUiPath(
   syncScope: string,
 ): Promise<string> {
   const providerDatasetId = await resolveKmaProviderDatasetId(page);
+  return exactDatasetUiPathForProviderDatasetId(providerDatasetId, syncScope);
+}
+
+export function exactDatasetUiPathForProviderDatasetId(
+  providerDatasetId: number,
+  syncScope: string,
+): string {
   const query = new URLSearchParams({
     operation_key: KMA_NOWCAST_OPERATION_KEY,
     provider_dataset_id: String(providerDatasetId),
@@ -2434,11 +2441,18 @@ export async function getExactDatasetDetail(
   syncScope: string,
 ): Promise<BrowserFetchResult<OpsDatasetDetailResponse>> {
   const providerDatasetId = await resolveKmaProviderDatasetId(page);
-  return browserFetch<OpsDatasetDetailResponse>(
+  const result = await browserFetch<OpsDatasetDetailResponse>(
     page,
     `/v1/ops/datasets/${providerDatasetId}?${exactScopeQuery(syncScope)}`,
     { timeoutMs: DATASET_DETAIL_FETCH_TIMEOUT_MS },
   );
+  if (
+    result.status === 200 &&
+    result.body?.data.provider_dataset_id !== providerDatasetId
+  ) {
+    throw new Error("C7 exact dataset detail provider_dataset_id 불일치");
+  }
+  return result;
 }
 
 /**

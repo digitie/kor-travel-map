@@ -1,5 +1,15 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-06 — T-VN-41F1D-E exact-triple preflight 보강, T-VN-33 선행 P0 대기
+
+main 기준 draft PR #967은 executor image의 `type-check:e2e`와 `BLOCKED.json` 이전 읽기 전용
+exact-triple preflight를 추가했다. canonical KMA detail의 `provider_dataset_id` 및 다른
+`operation_key`의 `404|422` 거부가 모두 성립할 때만 destructive live scenario를 시작한다.
+
+**다음 한 작업**: T-VN-33(PR #966)가 detail/grid/history projection을 server-side
+`provider_dataset_id + sync_scope + operation_key`로 필터링하고 OpenAPI를 재생성한 final commit을
+merge한다. 그 SHA를 pin·rebuild한 뒤에만 F1D-E n150 final-schema reload와 live UI E2E를 재개한다.
+
 ## 2026-08-06 — T-VN-41F1D-C0a·F1J-A 병합, v5 dynamic fixture 결선 대기
 
 Map application schema head artifact(PR #963)와 Map-owned cancel-probe fixture lifecycle(PR #960)가

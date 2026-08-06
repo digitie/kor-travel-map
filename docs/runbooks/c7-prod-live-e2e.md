@@ -274,6 +274,13 @@ F1D-E의 v5 journal/receipt verifier 자체는 main에서 독립적으로 fail-c
 호환 경로나 version 변환을 만들지 않으며, KMA live/recovery 실행을 허용하지 않는다. final
 T-VN-33 commit을 pin·rebuild한 뒤에만 이 runbook의 v5 journal을 생성·소비한다.
 
+runner는 `BLOCKED.json`을 만들기 전, attested C7 executor image에서 `npm run type-check:e2e`와
+읽기 전용 `ops-c7-kma-contract-preflight.live.spec.ts`를 차례로 실행한다. 후자는 canonical
+KMA detail의 `provider_dataset_id`를 대조하고, 같은 dataset/scope에 다른 `operation_key`를 붙인
+detail query가 반드시 `404` 또는 `422`인지 확인한다. 따라서 API가 여분 query를 무시하거나
+OpenAPI가 triple field를 아직 생성하지 않으면 destructive journal·request·target을 전혀 만들지
+못한다. preflight의 로그인 state·container·artifact는 성공과 실패 모두 직후 폐기한다.
+
 `/usr/local/lib/kor-travel-map/c7-runner/<exact-commit>/scripts/run-c7-prod-live-e2e.sh`의
 root-owned snapshot만 root로 실행한다. 모든 URL·credential·service 이름·
 origin hash·Git commit·manifest/rebuild journal/final-schema reload receipt path(`E2E_C7_FINAL_SCHEMA_RELOAD_RECEIPT`)·executor image ID와 destructive opt-in은 명시 env로

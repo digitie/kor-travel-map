@@ -29,3 +29,7 @@ LABEL io.kortravelmap.c7.repository-commit="$C7_REPOSITORY_COMMIT" \
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 WORKDIR /work/packages/kor-travel-map-admin/frontend
+
+# C7 runner는 generated OpenAPI의 exact-triple 계약을 우회할 수 없다. executor
+# image 자체가 e2e type gate를 통과해야만 n150에서 live preflight를 시작할 수 있다.
+RUN npm run type-check:e2e

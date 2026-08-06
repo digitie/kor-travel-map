@@ -25,6 +25,7 @@ import {
   DATASET_DETAIL_FETCH_TIMEOUT_MS,
   destructiveGateBlocker,
   exactDatasetUiPath,
+  exactDatasetUiPathForProviderDatasetId,
   getExactDatasetDetail,
   getRequestDetail,
   journalExactUiKmaCreateRequest,
@@ -457,6 +458,7 @@ async function assertDatasetTerminalHistoryUi(
 function isExactDatasetDetailResponse(
   response: import("@playwright/test").Response,
   syncScope: string,
+  providerDatasetId: number,
 ): boolean {
   // The per-run external_system sync_scope is unique to this test + dataset, so a
   // 200 GET on the detail endpoint carrying it is unambiguously the UI's own detail
@@ -465,11 +467,20 @@ function isExactDatasetDetailResponse(
   const url = new URL(response.url());
   return (
     response.request().method() === "GET" &&
-    /^\/api\/proxy\/v1\/ops\/datasets\/\d+$/.test(url.pathname) &&
+    url.pathname === `/api/proxy/v1/ops/datasets/${providerDatasetId}` &&
     url.searchParams.get("sync_scope") === syncScope &&
     url.searchParams.get("operation_key") === KMA_NOWCAST_OPERATION_KEY &&
     response.status() === 200
   );
+}
+
+async function assertExactDatasetDetailResponseIdentity(
+  response: import("@playwright/test").Response,
+  providerDatasetId: number,
+): Promise<void> {
+  const payload = asRecord(await response.json());
+  const data = asRecord(payload?.data);
+  expect(data?.provider_dataset_id).toBe(providerDatasetId);
 }
 
 // The dataset-detail drawer renders in two phases: the `상세` region appears as soon
@@ -484,12 +495,19 @@ async function gotoExactDatasetUiSettled(
   page: Page,
   syncScope: string,
 ): Promise<void> {
+  const providerDatasetId = await resolveKmaProviderDatasetId(page);
   const detailSettled = page.waitForResponse(
-    (response) => isExactDatasetDetailResponse(response, syncScope),
+    (response) =>
+      isExactDatasetDetailResponse(response, syncScope, providerDatasetId),
     { timeout: DATASET_DETAIL_FETCH_TIMEOUT_MS },
   );
-  await page.goto(await exactDatasetUiPath(page, syncScope));
-  await detailSettled;
+  await page.goto(
+    exactDatasetUiPathForProviderDatasetId(providerDatasetId, syncScope),
+  );
+  await assertExactDatasetDetailResponseIdentity(
+    await detailSettled,
+    providerDatasetId,
+  );
 }
 
 function cursorMembershipFingerprint(
