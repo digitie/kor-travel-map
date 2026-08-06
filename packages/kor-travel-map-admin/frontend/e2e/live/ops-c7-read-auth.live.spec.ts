@@ -55,6 +55,7 @@ const COUNT_FORMATTER = new Intl.NumberFormat("ko-KR");
 type CanonicalDatasetRow = {
   datasetKey: string;
   provider: string;
+  providerDatasetId: number;
   syncScope: string;
 };
 
@@ -66,7 +67,7 @@ type LiveDatasetRow = {
   datasetOpenIssues: number;
   freshnessState: string;
   provider: string;
-  providerOpenIssues: number;
+  providerDatasetId: number;
   status: string;
   syncScope: string;
 };
@@ -143,15 +144,17 @@ test.describe("C7 datasets read + ops live auth (actual browser, live)", () => {
     await expectDatasetSummary(page, rows);
     const canonical = canonicalRepresentative(rows);
 
-    const staleProviderOnlyScope = `external_system:c7-stale-${Date.now()}`;
     await page.goto(
-      `/ops/datasets?provider=${encodeURIComponent(canonical.provider)}` +
-        `&sync_scope=${encodeURIComponent(staleProviderOnlyScope)}`,
+      `/ops/datasets?provider_dataset_id=${canonical.providerDatasetId}` +
+        `&sync_scope=${encodeURIComponent(canonical.syncScope)}`,
     );
 
     await expect
       .poll(() => selectedTupleFromUrl(page), READY)
-      .toEqual(canonical);
+      .toEqual({
+        providerDatasetId: canonical.providerDatasetId,
+        syncScope: canonical.syncScope,
+      });
     await expect(
       page.getByText("데이터셋 상세", { exact: true }),
     ).toBeVisible(READY);
@@ -166,8 +169,7 @@ test.describe("C7 datasets read + ops live auth (actual browser, live)", () => {
     const invalidScope = `external_system:c7-missing-${Date.now()}`;
     expect(rows.some((row) => row.syncScope === invalidScope)).toBe(false);
     await page.goto(
-      `/ops/datasets?provider=${encodeURIComponent(canonical.provider)}` +
-        `&dataset=${encodeURIComponent(canonical.datasetKey)}` +
+      `/ops/datasets?provider_dataset_id=${canonical.providerDatasetId}` +
         `&sync_scope=${encodeURIComponent(invalidScope)}`,
     );
 
@@ -763,8 +765,7 @@ function datasetRows(payload: unknown): LiveDatasetRow[] {
       typeof item.consecutive_failures !== "number" ||
       !isRecord(item.dataset_issues) ||
       typeof item.dataset_issues.open_count !== "number" ||
-      !isRecord(item.provider_issues) ||
-      typeof item.provider_issues.open_count !== "number" ||
+      typeof item.provider_dataset_id !== "number" ||
       typeof item.status !== "string" ||
       !isRecord(item.freshness) ||
       typeof item.freshness.state !== "string" ||
@@ -780,7 +781,7 @@ function datasetRows(payload: unknown): LiveDatasetRow[] {
       datasetOpenIssues: item.dataset_issues.open_count,
       freshnessState: item.freshness.state,
       provider: item.provider,
-      providerOpenIssues: item.provider_issues.open_count,
+      providerDatasetId: item.provider_dataset_id,
       status: item.status,
       syncScope: item.sync_scope,
     };
@@ -807,6 +808,7 @@ function canonicalRepresentative(
     representatives.push({
       datasetKey: item.datasetKey,
       provider: item.provider,
+      providerDatasetId: item.providerDatasetId,
       syncScope: item.syncScope,
     });
   }
@@ -845,33 +847,22 @@ async function expectDatasetSummary(
   }
 }
 
-/** UI의 dataset-issues.ts와 같은 provider+dataset/provider max dedupe 계약. */
+/** UI의 dataset-issues.ts와 같은 provider_dataset_id max dedupe 계약. */
 function datasetGridOpenIssueCount(rows: readonly LiveDatasetRow[]): number {
-  const datasetCountsByProvider = new Map<string, Map<string, number>>();
-  const providerCounts = new Map<string, number>();
+  const countsByProviderDatasetId = new Map<number, number>();
   for (const row of rows) {
-    const datasetCounts =
-      datasetCountsByProvider.get(row.provider) ?? new Map<string, number>();
-    datasetCounts.set(
-      row.datasetKey,
-      Math.max(datasetCounts.get(row.datasetKey) ?? 0, row.datasetOpenIssues),
-    );
-    datasetCountsByProvider.set(row.provider, datasetCounts);
-    providerCounts.set(
-      row.provider,
-      Math.max(providerCounts.get(row.provider) ?? 0, row.providerOpenIssues),
+    countsByProviderDatasetId.set(
+      row.providerDatasetId,
+      Math.max(
+        countsByProviderDatasetId.get(row.providerDatasetId) ?? 0,
+        row.datasetOpenIssues,
+      ),
     );
   }
-  const datasetTotal = [...datasetCountsByProvider.values()].reduce(
-    (total, counts) =>
-      total + [...counts.values()].reduce((sum, count) => sum + count, 0),
-    0,
-  );
-  const providerTotal = [...providerCounts.values()].reduce(
+  return [...countsByProviderDatasetId.values()].reduce(
     (sum, count) => sum + count,
     0,
   );
-  return datasetTotal + providerTotal;
 }
 
 function sameDatasetRows(
@@ -886,7 +877,7 @@ function sameDatasetRows(
       row.catalogState,
       row.consecutiveFailures,
       row.datasetOpenIssues,
-      row.providerOpenIssues,
+      row.providerDatasetId,
       row.freshnessState,
       row.status,
     ]);
@@ -1172,11 +1163,12 @@ function formatCount(value: number): string {
   return COUNT_FORMATTER.format(value);
 }
 
-function selectedTupleFromUrl(page: Page): CanonicalDatasetRow {
+function selectedTupleFromUrl(
+  page: Page,
+): Pick<CanonicalDatasetRow, "providerDatasetId" | "syncScope"> {
   const url = new URL(page.url());
   return {
-    datasetKey: url.searchParams.get("dataset") ?? "",
-    provider: url.searchParams.get("provider") ?? "",
+    providerDatasetId: Number(url.searchParams.get("provider_dataset_id")),
     syncScope: url.searchParams.get("sync_scope") ?? "",
   };
 }

@@ -52,11 +52,12 @@ test.describe("live/offline-uploads (read-only)", () => {
     await expect(page.getByLabel("offline upload status")).toBeVisible({ timeout: 15000 });
   });
 
-  test("uploads provider + dataset filter inputs present", async ({ page }) => {
+  test("uploads canonical provider dataset ID filter input present", async ({ page }) => {
     await page.goto("/admin/offline-uploads");
     await expectHeading(page, HEADINGS.uploads);
-    await expect(page.getByLabel("provider filter")).toBeVisible({ timeout: 15000 });
-    await expect(page.getByLabel("dataset filter")).toBeVisible({ timeout: 15000 });
+    await expect(page.getByLabel("provider dataset ID filter")).toBeVisible({
+      timeout: 15000,
+    });
   });
 
   test("uploads detail placeholder visible when nothing selected", async ({ page }) => {
@@ -130,244 +131,244 @@ test.describe("live/offline-uploads (read-only)", () => {
     await expectHeading(page, HEADINGS.uploads);
   });
 
-  test("uploads provider filter typing term[0]=공원", async ({ page }) => {
+  test("uploads provider dataset ID filter accepts a positive ID[0]", async ({ page }) => {
     await page.goto("/admin/offline-uploads");
     await expectHeading(page, HEADINGS.uploads);
-    const term = F.SEARCH_TERMS[0];
-    await page.getByLabel("provider filter").fill(term);
-    await expect(page.getByLabel("provider filter")).toHaveValue(term, { timeout: 15000 });
+    const providerDatasetId = "1";
+    await page.getByLabel("provider dataset ID filter").fill(providerDatasetId);
+    await expect(page.getByLabel("provider dataset ID filter")).toHaveValue(providerDatasetId, { timeout: 15000 });
     await expectHeading(page, HEADINGS.uploads);
   });
 
-  test("uploads provider filter typing term[1]=공항", async ({ page }) => {
+  test("uploads provider dataset ID filter accepts a positive ID[1]", async ({ page }) => {
     await page.goto("/admin/offline-uploads");
     await expectHeading(page, HEADINGS.uploads);
-    const term = F.SEARCH_TERMS[1];
-    await page.getByLabel("provider filter").fill(term);
-    await expect(page.getByLabel("provider filter")).toHaveValue(term, { timeout: 15000 });
+    const providerDatasetId = "2";
+    await page.getByLabel("provider dataset ID filter").fill(providerDatasetId);
+    await expect(page.getByLabel("provider dataset ID filter")).toHaveValue(providerDatasetId, { timeout: 15000 });
     await expectHeading(page, HEADINGS.uploads);
   });
 
-  test("uploads provider filter typing term[2]=도서관", async ({ page }) => {
+  test("uploads provider dataset ID filter accepts a positive ID[2]", async ({ page }) => {
     await page.goto("/admin/offline-uploads");
     await expectHeading(page, HEADINGS.uploads);
-    const term = F.SEARCH_TERMS[2];
-    await page.getByLabel("provider filter").fill(term);
-    await expect(page.getByLabel("provider filter")).toHaveValue(term, { timeout: 15000 });
+    const providerDatasetId = "3";
+    await page.getByLabel("provider dataset ID filter").fill(providerDatasetId);
+    await expect(page.getByLabel("provider dataset ID filter")).toHaveValue(providerDatasetId, { timeout: 15000 });
     await expectHeading(page, HEADINGS.uploads);
   });
 
-  test("uploads provider filter typing term[3]=마트", async ({ page }) => {
+  test("uploads provider dataset ID filter accepts a positive ID[3]", async ({ page }) => {
     await page.goto("/admin/offline-uploads");
     await expectHeading(page, HEADINGS.uploads);
-    const term = F.SEARCH_TERMS[3];
-    await page.getByLabel("provider filter").fill(term);
-    await expect(page.getByLabel("provider filter")).toHaveValue(term, { timeout: 15000 });
+    const providerDatasetId = "4";
+    await page.getByLabel("provider dataset ID filter").fill(providerDatasetId);
+    await expect(page.getByLabel("provider dataset ID filter")).toHaveValue(providerDatasetId, { timeout: 15000 });
     await expectHeading(page, HEADINGS.uploads);
   });
 
-  test("uploads provider filter typing term[4]=문화재", async ({ page }) => {
+  test("uploads provider dataset ID filter accepts a positive ID[4]", async ({ page }) => {
     await page.goto("/admin/offline-uploads");
     await expectHeading(page, HEADINGS.uploads);
-    const term = F.SEARCH_TERMS[4];
-    await page.getByLabel("provider filter").fill(term);
-    await expect(page.getByLabel("provider filter")).toHaveValue(term, { timeout: 15000 });
+    const providerDatasetId = "5";
+    await page.getByLabel("provider dataset ID filter").fill(providerDatasetId);
+    await expect(page.getByLabel("provider dataset ID filter")).toHaveValue(providerDatasetId, { timeout: 15000 });
     await expectHeading(page, HEADINGS.uploads);
   });
 
-  test("uploads provider filter typing term[5]=미술관", async ({ page }) => {
+  test("uploads provider dataset ID filter accepts a positive ID[5]", async ({ page }) => {
     await page.goto("/admin/offline-uploads");
     await expectHeading(page, HEADINGS.uploads);
-    const term = F.SEARCH_TERMS[5];
-    await page.getByLabel("provider filter").fill(term);
-    await expect(page.getByLabel("provider filter")).toHaveValue(term, { timeout: 15000 });
+    const providerDatasetId = "6";
+    await page.getByLabel("provider dataset ID filter").fill(providerDatasetId);
+    await expect(page.getByLabel("provider dataset ID filter")).toHaveValue(providerDatasetId, { timeout: 15000 });
     await expectHeading(page, HEADINGS.uploads);
   });
 
-  test("uploads provider filter typing term[6]=박물관", async ({ page }) => {
+  test("uploads provider dataset ID filter accepts a positive ID[6]", async ({ page }) => {
     await page.goto("/admin/offline-uploads");
     await expectHeading(page, HEADINGS.uploads);
-    const term = F.SEARCH_TERMS[6];
-    await page.getByLabel("provider filter").fill(term);
-    await expect(page.getByLabel("provider filter")).toHaveValue(term, { timeout: 15000 });
+    const providerDatasetId = "7";
+    await page.getByLabel("provider dataset ID filter").fill(providerDatasetId);
+    await expect(page.getByLabel("provider dataset ID filter")).toHaveValue(providerDatasetId, { timeout: 15000 });
     await expectHeading(page, HEADINGS.uploads);
   });
 
-  test("uploads provider filter typing term[7]=서점", async ({ page }) => {
+  test("uploads provider dataset ID filter accepts a positive ID[7]", async ({ page }) => {
     await page.goto("/admin/offline-uploads");
     await expectHeading(page, HEADINGS.uploads);
-    const term = F.SEARCH_TERMS[7];
-    await page.getByLabel("provider filter").fill(term);
-    await expect(page.getByLabel("provider filter")).toHaveValue(term, { timeout: 15000 });
+    const providerDatasetId = "8";
+    await page.getByLabel("provider dataset ID filter").fill(providerDatasetId);
+    await expect(page.getByLabel("provider dataset ID filter")).toHaveValue(providerDatasetId, { timeout: 15000 });
     await expectHeading(page, HEADINGS.uploads);
   });
 
-  test("uploads provider filter typing term[8]=수목원", async ({ page }) => {
+  test("uploads provider dataset ID filter accepts a positive ID[8]", async ({ page }) => {
     await page.goto("/admin/offline-uploads");
     await expectHeading(page, HEADINGS.uploads);
-    const term = F.SEARCH_TERMS[8];
-    await page.getByLabel("provider filter").fill(term);
-    await expect(page.getByLabel("provider filter")).toHaveValue(term, { timeout: 15000 });
+    const providerDatasetId = "9";
+    await page.getByLabel("provider dataset ID filter").fill(providerDatasetId);
+    await expect(page.getByLabel("provider dataset ID filter")).toHaveValue(providerDatasetId, { timeout: 15000 });
     await expectHeading(page, HEADINGS.uploads);
   });
 
-  test("uploads provider filter typing term[9]=주유소", async ({ page }) => {
+  test("uploads provider dataset ID filter accepts a positive ID[9]", async ({ page }) => {
     await page.goto("/admin/offline-uploads");
     await expectHeading(page, HEADINGS.uploads);
-    const term = F.SEARCH_TERMS[9];
-    await page.getByLabel("provider filter").fill(term);
-    await expect(page.getByLabel("provider filter")).toHaveValue(term, { timeout: 15000 });
+    const providerDatasetId = "10";
+    await page.getByLabel("provider dataset ID filter").fill(providerDatasetId);
+    await expect(page.getByLabel("provider dataset ID filter")).toHaveValue(providerDatasetId, { timeout: 15000 });
     await expectHeading(page, HEADINGS.uploads);
   });
 
-  test("uploads provider filter typing term[10]=주차장", async ({ page }) => {
+  test("uploads provider dataset ID filter accepts a positive ID[10]", async ({ page }) => {
     await page.goto("/admin/offline-uploads");
     await expectHeading(page, HEADINGS.uploads);
-    const term = F.SEARCH_TERMS[10];
-    await page.getByLabel("provider filter").fill(term);
-    await expect(page.getByLabel("provider filter")).toHaveValue(term, { timeout: 15000 });
+    const providerDatasetId = "11";
+    await page.getByLabel("provider dataset ID filter").fill(providerDatasetId);
+    await expect(page.getByLabel("provider dataset ID filter")).toHaveValue(providerDatasetId, { timeout: 15000 });
     await expectHeading(page, HEADINGS.uploads);
   });
 
-  test("uploads provider filter typing term[11]=축제", async ({ page }) => {
+  test("uploads provider dataset ID filter accepts a positive ID[11]", async ({ page }) => {
     await page.goto("/admin/offline-uploads");
     await expectHeading(page, HEADINGS.uploads);
-    const term = F.SEARCH_TERMS[11];
-    await page.getByLabel("provider filter").fill(term);
-    await expect(page.getByLabel("provider filter")).toHaveValue(term, { timeout: 15000 });
+    const providerDatasetId = "12";
+    await page.getByLabel("provider dataset ID filter").fill(providerDatasetId);
+    await expect(page.getByLabel("provider dataset ID filter")).toHaveValue(providerDatasetId, { timeout: 15000 });
     await expectHeading(page, HEADINGS.uploads);
   });
 
-  test("uploads provider filter typing term[12]=카페", async ({ page }) => {
+  test("uploads provider dataset ID filter accepts a positive ID[12]", async ({ page }) => {
     await page.goto("/admin/offline-uploads");
     await expectHeading(page, HEADINGS.uploads);
-    const term = F.SEARCH_TERMS[12];
-    await page.getByLabel("provider filter").fill(term);
-    await expect(page.getByLabel("provider filter")).toHaveValue(term, { timeout: 15000 });
+    const providerDatasetId = "13";
+    await page.getByLabel("provider dataset ID filter").fill(providerDatasetId);
+    await expect(page.getByLabel("provider dataset ID filter")).toHaveValue(providerDatasetId, { timeout: 15000 });
     await expectHeading(page, HEADINGS.uploads);
   });
 
-  test("uploads provider filter typing term[13]=해수욕장", async ({ page }) => {
+  test("uploads provider dataset ID filter accepts a positive ID[13]", async ({ page }) => {
     await page.goto("/admin/offline-uploads");
     await expectHeading(page, HEADINGS.uploads);
-    const term = F.SEARCH_TERMS[13];
-    await page.getByLabel("provider filter").fill(term);
-    await expect(page.getByLabel("provider filter")).toHaveValue(term, { timeout: 15000 });
+    const providerDatasetId = "14";
+    await page.getByLabel("provider dataset ID filter").fill(providerDatasetId);
+    await expect(page.getByLabel("provider dataset ID filter")).toHaveValue(providerDatasetId, { timeout: 15000 });
     await expectHeading(page, HEADINGS.uploads);
   });
 
-  test("uploads provider filter typing term[14]=휴게소", async ({ page }) => {
+  test("uploads provider dataset ID filter accepts a positive ID[14]", async ({ page }) => {
     await page.goto("/admin/offline-uploads");
     await expectHeading(page, HEADINGS.uploads);
-    const term = F.SEARCH_TERMS[14];
-    await page.getByLabel("provider filter").fill(term);
-    await expect(page.getByLabel("provider filter")).toHaveValue(term, { timeout: 15000 });
+    const providerDatasetId = "15";
+    await page.getByLabel("provider dataset ID filter").fill(providerDatasetId);
+    await expect(page.getByLabel("provider dataset ID filter")).toHaveValue(providerDatasetId, { timeout: 15000 });
     await expectHeading(page, HEADINGS.uploads);
   });
 
-  test("uploads provider filter typing term[15]=휴양림", async ({ page }) => {
+  test("uploads provider dataset ID filter accepts a positive ID[15]", async ({ page }) => {
     await page.goto("/admin/offline-uploads");
     await expectHeading(page, HEADINGS.uploads);
-    const term = F.SEARCH_TERMS[15];
-    await page.getByLabel("provider filter").fill(term);
-    await expect(page.getByLabel("provider filter")).toHaveValue(term, { timeout: 15000 });
+    const providerDatasetId = "16";
+    await page.getByLabel("provider dataset ID filter").fill(providerDatasetId);
+    await expect(page.getByLabel("provider dataset ID filter")).toHaveValue(providerDatasetId, { timeout: 15000 });
     await expectHeading(page, HEADINGS.uploads);
   });
 
-  test("uploads dataset filter typing code[0]=01000000", async ({ page }) => {
+  test("uploads provider dataset ID filter accepts a positive ID[16]", async ({ page }) => {
     await page.goto("/admin/offline-uploads");
     await expectHeading(page, HEADINGS.uploads);
-    const code = F.CATEGORY_CODES[0];
-    await page.getByLabel("dataset filter").fill(code);
-    await expect(page.getByLabel("dataset filter")).toHaveValue(code, { timeout: 15000 });
+    const providerDatasetId = "101";
+    await page.getByLabel("provider dataset ID filter").fill(providerDatasetId);
+    await expect(page.getByLabel("provider dataset ID filter")).toHaveValue(providerDatasetId, { timeout: 15000 });
   });
 
-  test("uploads dataset filter typing code[1]=01010000", async ({ page }) => {
+  test("uploads provider dataset ID filter accepts a positive ID[17]", async ({ page }) => {
     await page.goto("/admin/offline-uploads");
     await expectHeading(page, HEADINGS.uploads);
-    const code = F.CATEGORY_CODES[1];
-    await page.getByLabel("dataset filter").fill(code);
-    await expect(page.getByLabel("dataset filter")).toHaveValue(code, { timeout: 15000 });
+    const providerDatasetId = "102";
+    await page.getByLabel("provider dataset ID filter").fill(providerDatasetId);
+    await expect(page.getByLabel("provider dataset ID filter")).toHaveValue(providerDatasetId, { timeout: 15000 });
   });
 
-  test("uploads dataset filter typing code[2]=01010100", async ({ page }) => {
+  test("uploads provider dataset ID filter accepts a positive ID[18]", async ({ page }) => {
     await page.goto("/admin/offline-uploads");
     await expectHeading(page, HEADINGS.uploads);
-    const code = F.CATEGORY_CODES[2];
-    await page.getByLabel("dataset filter").fill(code);
-    await expect(page.getByLabel("dataset filter")).toHaveValue(code, { timeout: 15000 });
+    const providerDatasetId = "103";
+    await page.getByLabel("provider dataset ID filter").fill(providerDatasetId);
+    await expect(page.getByLabel("provider dataset ID filter")).toHaveValue(providerDatasetId, { timeout: 15000 });
   });
 
-  test("uploads dataset filter typing code[3]=01010200", async ({ page }) => {
+  test("uploads provider dataset ID filter accepts a positive ID[19]", async ({ page }) => {
     await page.goto("/admin/offline-uploads");
     await expectHeading(page, HEADINGS.uploads);
-    const code = F.CATEGORY_CODES[3];
-    await page.getByLabel("dataset filter").fill(code);
-    await expect(page.getByLabel("dataset filter")).toHaveValue(code, { timeout: 15000 });
+    const providerDatasetId = "104";
+    await page.getByLabel("provider dataset ID filter").fill(providerDatasetId);
+    await expect(page.getByLabel("provider dataset ID filter")).toHaveValue(providerDatasetId, { timeout: 15000 });
   });
 
-  test("uploads dataset filter typing code[4]=01010300", async ({ page }) => {
+  test("uploads provider dataset ID filter accepts a positive ID[20]", async ({ page }) => {
     await page.goto("/admin/offline-uploads");
     await expectHeading(page, HEADINGS.uploads);
-    const code = F.CATEGORY_CODES[4];
-    await page.getByLabel("dataset filter").fill(code);
-    await expect(page.getByLabel("dataset filter")).toHaveValue(code, { timeout: 15000 });
+    const providerDatasetId = "105";
+    await page.getByLabel("provider dataset ID filter").fill(providerDatasetId);
+    await expect(page.getByLabel("provider dataset ID filter")).toHaveValue(providerDatasetId, { timeout: 15000 });
   });
 
-  test("uploads dataset filter typing code[5]=01010400", async ({ page }) => {
+  test("uploads provider dataset ID filter accepts a positive ID[21]", async ({ page }) => {
     await page.goto("/admin/offline-uploads");
     await expectHeading(page, HEADINGS.uploads);
-    const code = F.CATEGORY_CODES[5];
-    await page.getByLabel("dataset filter").fill(code);
-    await expect(page.getByLabel("dataset filter")).toHaveValue(code, { timeout: 15000 });
+    const providerDatasetId = "106";
+    await page.getByLabel("provider dataset ID filter").fill(providerDatasetId);
+    await expect(page.getByLabel("provider dataset ID filter")).toHaveValue(providerDatasetId, { timeout: 15000 });
   });
 
-  test("uploads dataset filter typing code[6]=01020000", async ({ page }) => {
+  test("uploads provider dataset ID filter accepts a positive ID[22]", async ({ page }) => {
     await page.goto("/admin/offline-uploads");
     await expectHeading(page, HEADINGS.uploads);
-    const code = F.CATEGORY_CODES[6];
-    await page.getByLabel("dataset filter").fill(code);
-    await expect(page.getByLabel("dataset filter")).toHaveValue(code, { timeout: 15000 });
+    const providerDatasetId = "107";
+    await page.getByLabel("provider dataset ID filter").fill(providerDatasetId);
+    await expect(page.getByLabel("provider dataset ID filter")).toHaveValue(providerDatasetId, { timeout: 15000 });
   });
 
-  test("uploads dataset filter typing code[7]=01020100", async ({ page }) => {
+  test("uploads provider dataset ID filter accepts a positive ID[23]", async ({ page }) => {
     await page.goto("/admin/offline-uploads");
     await expectHeading(page, HEADINGS.uploads);
-    const code = F.CATEGORY_CODES[7];
-    await page.getByLabel("dataset filter").fill(code);
-    await expect(page.getByLabel("dataset filter")).toHaveValue(code, { timeout: 15000 });
+    const providerDatasetId = "108";
+    await page.getByLabel("provider dataset ID filter").fill(providerDatasetId);
+    await expect(page.getByLabel("provider dataset ID filter")).toHaveValue(providerDatasetId, { timeout: 15000 });
   });
 
-  test("uploads dataset filter typing code[8]=01020200", async ({ page }) => {
+  test("uploads provider dataset ID filter accepts a positive ID[24]", async ({ page }) => {
     await page.goto("/admin/offline-uploads");
     await expectHeading(page, HEADINGS.uploads);
-    const code = F.CATEGORY_CODES[8];
-    await page.getByLabel("dataset filter").fill(code);
-    await expect(page.getByLabel("dataset filter")).toHaveValue(code, { timeout: 15000 });
+    const providerDatasetId = "109";
+    await page.getByLabel("provider dataset ID filter").fill(providerDatasetId);
+    await expect(page.getByLabel("provider dataset ID filter")).toHaveValue(providerDatasetId, { timeout: 15000 });
   });
 
-  test("uploads dataset filter typing code[9]=01020300", async ({ page }) => {
+  test("uploads provider dataset ID filter accepts a positive ID[25]", async ({ page }) => {
     await page.goto("/admin/offline-uploads");
     await expectHeading(page, HEADINGS.uploads);
-    const code = F.CATEGORY_CODES[9];
-    await page.getByLabel("dataset filter").fill(code);
-    await expect(page.getByLabel("dataset filter")).toHaveValue(code, { timeout: 15000 });
+    const providerDatasetId = "110";
+    await page.getByLabel("provider dataset ID filter").fill(providerDatasetId);
+    await expect(page.getByLabel("provider dataset ID filter")).toHaveValue(providerDatasetId, { timeout: 15000 });
   });
 
-  test("uploads dataset filter typing code[10]=01020400", async ({ page }) => {
+  test("uploads provider dataset ID filter accepts a positive ID[26]", async ({ page }) => {
     await page.goto("/admin/offline-uploads");
     await expectHeading(page, HEADINGS.uploads);
-    const code = F.CATEGORY_CODES[10];
-    await page.getByLabel("dataset filter").fill(code);
-    await expect(page.getByLabel("dataset filter")).toHaveValue(code, { timeout: 15000 });
+    const providerDatasetId = "111";
+    await page.getByLabel("provider dataset ID filter").fill(providerDatasetId);
+    await expect(page.getByLabel("provider dataset ID filter")).toHaveValue(providerDatasetId, { timeout: 15000 });
   });
 
-  test("uploads dataset filter typing code[11]=01030000", async ({ page }) => {
+  test("uploads provider dataset ID filter accepts a positive ID[27]", async ({ page }) => {
     await page.goto("/admin/offline-uploads");
     await expectHeading(page, HEADINGS.uploads);
-    const code = F.CATEGORY_CODES[11];
-    await page.getByLabel("dataset filter").fill(code);
-    await expect(page.getByLabel("dataset filter")).toHaveValue(code, { timeout: 15000 });
+    const providerDatasetId = "112";
+    await page.getByLabel("provider dataset ID filter").fill(providerDatasetId);
+    await expect(page.getByLabel("provider dataset ID filter")).toHaveValue(providerDatasetId, { timeout: 15000 });
   });
 
   test("uploads renders at desktop 1280x800", async ({ page }) => {

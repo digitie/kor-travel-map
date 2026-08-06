@@ -214,14 +214,30 @@ def test_evidence_manifest_hashes_are_recomputed(
     attestation_file = run / "runtime-attestation.json"
     attestation_file.write_text("{}\n", encoding="utf-8")
     attestation_file.chmod(0o600)
-    compatible_pair_file = run / "compatible-pair.json"
-    compatible_pair_file.write_text("{}\n", encoding="utf-8")
-    compatible_pair_file.chmod(0o600)
+    pinned_runtime_manifest_file = run / "pinned-runtime-manifest.json"
+    pinned_runtime_manifest_file.write_text("{}\n", encoding="utf-8")
+    pinned_runtime_manifest_file.chmod(0o600)
+    pinned_runtime_rebuild_journal_file = run / "pinned-runtime-rebuild-journal.json"
+    pinned_runtime_rebuild_journal_file.write_text("{}\n", encoding="utf-8")
+    pinned_runtime_rebuild_journal_file.chmod(0o600)
+    final_schema_reload_receipt_file = run / "final-schema-reload-receipt.json"
+    final_schema_reload_receipt_file.write_text("{}\n", encoding="utf-8")
+    final_schema_reload_receipt_file.chmod(0o600)
     attestation_hash = hashlib.sha256(attestation_file.read_bytes()).hexdigest()
-    compatible_pair_hash = hashlib.sha256(compatible_pair_file.read_bytes()).hexdigest()
+    pinned_runtime_manifest_hash = hashlib.sha256(
+        pinned_runtime_manifest_file.read_bytes()
+    ).hexdigest()
+    pinned_runtime_rebuild_journal_hash = hashlib.sha256(
+        pinned_runtime_rebuild_journal_file.read_bytes()
+    ).hexdigest()
+    final_schema_reload_receipt_hash = hashlib.sha256(
+        final_schema_reload_receipt_file.read_bytes()
+    ).hexdigest()
     manifest = {
-        "alembic_head": "0058_example",
-        "compatible_pair_manifest_sha256": compatible_pair_hash,
+        "map_application_head": "0058_example",
+        "pinned_runtime_manifest_sha256": pinned_runtime_manifest_hash,
+        "pinned_runtime_rebuild_journal_sha256": pinned_runtime_rebuild_journal_hash,
+        "final_schema_reload_receipt_sha256": final_schema_reload_receipt_hash,
         "files": [
             {
                 "path": "journals/sensor.json",
@@ -234,9 +250,19 @@ def test_evidence_manifest_hashes_are_recomputed(
                 "size": attestation_file.stat().st_size,
             },
             {
-                "path": "compatible-pair.json",
-                "sha256": compatible_pair_hash,
-                "size": compatible_pair_file.stat().st_size,
+                "path": "pinned-runtime-manifest.json",
+                "sha256": pinned_runtime_manifest_hash,
+                "size": pinned_runtime_manifest_file.stat().st_size,
+            },
+            {
+                "path": "pinned-runtime-rebuild-journal.json",
+                "sha256": pinned_runtime_rebuild_journal_hash,
+                "size": pinned_runtime_rebuild_journal_file.stat().st_size,
+            },
+            {
+                "path": "final-schema-reload-receipt.json",
+                "sha256": final_schema_reload_receipt_hash,
+                "size": final_schema_reload_receipt_file.stat().st_size,
             },
         ],
         "finished_at": "2026-07-19T01:01:01+00:00",
@@ -245,11 +271,16 @@ def test_evidence_manifest_hashes_are_recomputed(
         "playwright_image_id": f"sha256:{'c' * 64}",
         "repository_commit": "d" * 40,
         "status": 0,
-        "version": 1,
+        "version": 4,
     }
     _write_json(run / "manifest.json", manifest)
 
     assert auditor._valid_evidence_manifest(run) is True
+    manifest["version"] = 2
+    _write_json(run / "manifest.json", manifest)
+    assert auditor._valid_evidence_manifest(run) is False
+    manifest["version"] = 4
+    _write_json(run / "manifest.json", manifest)
     result_file.write_text("tampered\n", encoding="utf-8")
     result_file.chmod(0o600)
     assert auditor._valid_evidence_manifest(run) is False

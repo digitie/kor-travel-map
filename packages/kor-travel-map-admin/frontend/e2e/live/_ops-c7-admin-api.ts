@@ -44,6 +44,8 @@ export type PipelineExecutionsListResponse =
   components["schemas"]["PipelineExecutionsListResponse"];
 export type OpsDatasetDetailResponse =
   components["schemas"]["OpsDatasetDetailResponse"];
+export type OpsDatasetsGridResponse =
+  components["schemas"]["OpsDatasetsGridResponse"];
 export type PipelineCancellationResponse =
   components["schemas"]["PipelineCancellationResponse"];
 
@@ -60,6 +62,14 @@ export type CleanupResult = {
   restored: boolean;
 };
 export type CleanupScenario = "active" | "empty" | "cap" | "invalidation";
+export type KmaScopeExpectation = {
+  operationKey: string;
+  providerDatasetId: number;
+  syncScope: string;
+};
+export type KmaRequestOwnership = KmaScopeExpectation & {
+  idempotencyKey: string;
+};
 type TrackedIdempotencyEntries = Map<
   string,
   {
@@ -71,6 +81,7 @@ type TrackedIdempotencyEntries = Map<
 export type CleanupState = {
   allIdempotencyEntries: TrackedIdempotencyEntries;
   allRequestIds: Set<string>;
+  allRequestOwnership: Map<string, KmaRequestOwnership>;
   allRequestTerminalStatuses: Map<string, string>;
   cleanupResult: CleanupResult | null;
   completedScenarios: Set<CleanupScenario>;
@@ -79,6 +90,7 @@ export type CleanupState = {
   idempotencyEntries: TrackedIdempotencyEntries;
   journalWrite: Promise<void>;
   requestIds: Set<string>;
+  requestOwnership: Map<string, KmaRequestOwnership>;
   requestTerminalStatuses: Map<string, string>;
   runId: string;
   scenario: CleanupScenario;
@@ -103,6 +115,7 @@ type CleanupIssue = {
   kind:
     | "request_detail"
     | "request_cancel"
+    | "request_ownership"
     | "request_terminal_timeout"
     | "target_delete"
     | "target_intent_recovery"
@@ -121,6 +134,8 @@ export const KMA_PROVIDER = "python-kma-api" as const;
 export const KMA_DATASET_KEY = "kma_ultra_short_nowcast" as const;
 export const KMA_SAFE_DAGSTER_JOB =
   "feature_update_request_worker" as const;
+export const KMA_NOWCAST_OPERATION_KEY =
+  "feature_weather_kma_ultra_short_nowcast_job" as const;
 export const QUEUE_SENSOR_NAME = "feature_update_request_queue_sensor" as const;
 
 export const REQUEST_TERMINAL_TIMEOUT = 8 * 60 * 1000;
@@ -199,6 +214,13 @@ type DurableCleanupJournal = {
   }>;
   phase: string;
   request_ids: string[];
+  request_ownership: Array<{
+    idempotency_key: string;
+    operation_key: string;
+    provider_dataset_id: number;
+    request_id: string;
+    sync_scope: string;
+  }>;
   request_terminal_statuses: Record<string, string>;
   run_id: string;
   scenario: CleanupScenario;
@@ -206,7 +228,7 @@ type DurableCleanupJournal = {
   target_refs: TargetJournalRef[];
   target_history: TargetJournalRef[];
   updated_at: string;
-  version: 3;
+  version: 5;
 };
 
 const UUID_PATTERN =
@@ -352,6 +374,10 @@ function durableJournal(
     ...state.allRequestIds,
     ...state.requestIds,
   ]);
+  const allRequestOwnership = new Map(state.allRequestOwnership);
+  for (const [requestId, ownership] of state.requestOwnership) {
+    allRequestOwnership.set(requestId, ownership);
+  }
   const allRequestTerminalStatuses = new Map(
     state.allRequestTerminalStatuses,
   );
@@ -372,6 +398,15 @@ function durableJournal(
       })),
     phase,
     request_ids: [...allRequestIds].sort(),
+    request_ownership: [...allRequestOwnership.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([requestId, ownership]) => ({
+        idempotency_key: ownership.idempotencyKey,
+        operation_key: ownership.operationKey,
+        provider_dataset_id: ownership.providerDatasetId,
+        request_id: requestId,
+        sync_scope: ownership.syncScope,
+      })),
     request_terminal_statuses: Object.fromEntries(
       [...allRequestTerminalStatuses.entries()].sort(
         ([left], [right]) => left.localeCompare(right),
@@ -391,12 +426,154 @@ function durableJournal(
       return (left.targetId ?? "").localeCompare(right.targetId ?? "");
     }),
     updated_at: new Date().toISOString(),
-    version: 3,
+    version: 5,
   };
 }
 
 function isCleanupScenario(value: unknown): value is CleanupScenario {
   return ["active", "empty", "cap", "invalidation"].includes(String(value));
+}
+
+/**
+ * v3는 C7 runner가 첫 durable write 전에 넣는 빈 bootstrap marker만 허용한다.
+ * 실제 mutation/cleanup journal을 v3로 해석하면 request 소유권 사중 결박이 없으므로,
+ * v5 final journal과 절대로 호환 변환하지 않는다.
+ */
+export function isC7OrchestratorBootstrapPlaceholder(value: unknown): boolean {
+  return exactJson(value, {
+    cleanup_result: null,
+    completed_scenarios: [],
+    external_systems: [],
+    idempotency_entries: [],
+    phase: "restored",
+    request_ids: [],
+    request_terminal_statuses: {},
+    run_id: "__orchestrator_pending__",
+    target_history: [],
+    target_refs: [],
+    version: 3,
+  });
+}
+
+function equalStringSets(left: Set<string>, right: Set<string>): boolean {
+  return left.size === right.size && [...left].every((value) => right.has(value));
+}
+
+/**
+ * cleanup이 취소 가능한 request는 durable v5의 request id ↔ idempotency entry ↔
+ * provider dataset/sync scope/operation 일대일 결박을 모두 가져야 한다. 어느 한 방향이라도
+ * 빠지거나 중복되면 foreign request일 수 있으므로 final cleanup은 fail-closed한다.
+ */
+export function hasExactC7RequestOwnershipBinding(value: unknown): boolean {
+  const journal = asRecord(value);
+  if (
+    journal === null ||
+    journal.version !== 5 ||
+    !Array.isArray(journal.request_ids) ||
+    !Array.isArray(journal.idempotency_entries) ||
+    !Array.isArray(journal.request_ownership)
+  ) {
+    return false;
+  }
+
+  const requestIds = new Set<string>();
+  for (const requestId of journal.request_ids) {
+    if (typeof requestId !== "string" || !UUID_PATTERN.test(requestId)) {
+      return false;
+    }
+    if (requestIds.has(requestId)) return false;
+    requestIds.add(requestId);
+  }
+
+  const entriesByIdempotency = new Map<
+    string,
+    { body: unknown; requestId: string | null }
+  >();
+  const entryRequestIds = new Set<string>();
+  for (const value of journal.idempotency_entries) {
+    const entry = asRecord(value);
+    if (
+      entry === null ||
+      typeof entry.idempotency_key !== "string" ||
+      !UUID_PATTERN.test(entry.idempotency_key) ||
+      asRecord(entry.body) === null ||
+      (entry.request_id !== null &&
+        (typeof entry.request_id !== "string" ||
+          !UUID_PATTERN.test(entry.request_id))) ||
+      typeof entry.status !== "string" ||
+      entry.status.length === 0 ||
+      entriesByIdempotency.has(entry.idempotency_key)
+    ) {
+      return false;
+    }
+    const requestId = entry.request_id;
+    if (requestId !== null) {
+      if (entryRequestIds.has(requestId)) return false;
+      entryRequestIds.add(requestId);
+    }
+    entriesByIdempotency.set(entry.idempotency_key, {
+      body: entry.body,
+      requestId,
+    });
+  }
+
+  const ownershipRequestIds = new Set<string>();
+  const ownershipIdempotencyKeys = new Set<string>();
+  for (const value of journal.request_ownership) {
+    const ownership = asRecord(value);
+    if (
+      ownership === null ||
+      !hasExactObjectKeys(ownership, [
+        "idempotency_key",
+        "operation_key",
+        "provider_dataset_id",
+        "request_id",
+        "sync_scope",
+      ]) ||
+      typeof ownership.request_id !== "string" ||
+      !UUID_PATTERN.test(ownership.request_id) ||
+      typeof ownership.idempotency_key !== "string" ||
+      !UUID_PATTERN.test(ownership.idempotency_key) ||
+      ownership.operation_key !== KMA_NOWCAST_OPERATION_KEY ||
+      typeof ownership.provider_dataset_id !== "number" ||
+      !Number.isSafeInteger(ownership.provider_dataset_id) ||
+      ownership.provider_dataset_id <= 0 ||
+      typeof ownership.sync_scope !== "string" ||
+      !ownership.sync_scope.startsWith("external_system:") ||
+      ownership.sync_scope === "external_system:" ||
+      ownershipRequestIds.has(ownership.request_id) ||
+      ownershipIdempotencyKeys.has(ownership.idempotency_key)
+    ) {
+      return false;
+    }
+    const entry = entriesByIdempotency.get(ownership.idempotency_key);
+    if (
+      entry === undefined ||
+      entry.requestId !== ownership.request_id ||
+      !journalBodyMatchesKmaScope(entry.body, {
+        operationKey: ownership.operation_key,
+        providerDatasetId: ownership.provider_dataset_id,
+        syncScope: ownership.sync_scope,
+      })
+    ) {
+      return false;
+    }
+    ownershipRequestIds.add(ownership.request_id);
+    ownershipIdempotencyKeys.add(ownership.idempotency_key);
+  }
+
+  return (
+    equalStringSets(requestIds, entryRequestIds) &&
+    equalStringSets(requestIds, ownershipRequestIds) &&
+    equalStringSets(
+      ownershipIdempotencyKeys,
+      new Set(
+        [...entriesByIdempotency.entries()]
+          .filter(([, entry]) => entry.requestId !== null)
+          .map(([idempotencyKey]) => idempotencyKey),
+      ),
+    )
+  );
 }
 
 async function mergePreviousJournal(state: CleanupState): Promise<void> {
@@ -408,6 +585,7 @@ async function mergePreviousJournal(state: CleanupState): Promise<void> {
       idempotency_entries?: unknown;
       phase?: unknown;
       request_ids?: unknown;
+      request_ownership?: unknown;
       request_terminal_statuses?: unknown;
       run_id?: unknown;
       scenario?: unknown;
@@ -416,14 +594,14 @@ async function mergePreviousJournal(state: CleanupState): Promise<void> {
       version?: unknown;
     };
     const isOrchestratorPlaceholder =
-      previous.phase === "restored" &&
-      previous.run_id === "__orchestrator_pending__" &&
-      previous.version === 3;
+      isC7OrchestratorBootstrapPlaceholder(previous);
     const isCurrentScenario =
-      previous.run_id === state.runId && previous.scenario === state.scenario;
+      previous.version === 5 &&
+      previous.run_id === state.runId &&
+      previous.scenario === state.scenario;
     if (
       !isOrchestratorPlaceholder &&
-      (previous.version !== 3 ||
+      (previous.version !== 5 ||
         typeof previous.run_id !== "string" ||
         previous.run_id.length === 0 ||
         !isCleanupScenario(previous.scenario) ||
@@ -431,11 +609,15 @@ async function mergePreviousJournal(state: CleanupState): Promise<void> {
         !Array.isArray(previous.external_systems) ||
         !Array.isArray(previous.idempotency_entries) ||
         !Array.isArray(previous.request_ids) ||
+        !Array.isArray(previous.request_ownership) ||
         asRecord(previous.request_terminal_statuses) === null ||
         !Array.isArray(previous.target_refs) ||
         !Array.isArray(previous.target_history))
     ) {
       throw new Error("invalid target history");
+    }
+    if (!isOrchestratorPlaceholder && !hasExactC7RequestOwnershipBinding(previous)) {
+      throw new Error("invalid request ownership");
     }
     if (
       !isOrchestratorPlaceholder &&
@@ -629,6 +811,60 @@ async function mergePreviousJournal(state: CleanupState): Promise<void> {
       }
     }
 
+    const requestOwnership = previous.request_ownership;
+    if (
+      requestOwnership !== undefined &&
+      (!Array.isArray(requestOwnership) ||
+        !requestOwnership.every((value) => {
+          const item = asRecord(value);
+          return (
+            item !== null &&
+            typeof item.idempotency_key === "string" &&
+            UUID_PATTERN.test(item.idempotency_key) &&
+            item.operation_key === KMA_NOWCAST_OPERATION_KEY &&
+            typeof item.provider_dataset_id === "number" &&
+            Number.isSafeInteger(item.provider_dataset_id) &&
+            item.provider_dataset_id > 0 &&
+            typeof item.request_id === "string" &&
+            UUID_PATTERN.test(item.request_id) &&
+            typeof item.sync_scope === "string" &&
+            item.sync_scope.startsWith("external_system:")
+          );
+        }))
+    ) {
+      throw new Error("invalid request ownership");
+    }
+    if (Array.isArray(requestOwnership)) {
+      const seenRequestIds = new Set<string>();
+      const seenIdempotencyKeys = new Set<string>();
+      const entriesByIdempotencyKey = new Map(
+        (idempotencyEntries as DurableCleanupJournal["idempotency_entries"])
+          .map((value) => [value.idempotency_key, value]),
+      );
+      for (const value of requestOwnership) {
+        const item = value as DurableCleanupJournal["request_ownership"][number];
+        const idempotencyEntry = entriesByIdempotencyKey.get(
+          item.idempotency_key,
+        );
+        if (
+          seenRequestIds.has(item.request_id) ||
+          seenIdempotencyKeys.has(item.idempotency_key) ||
+          !(requestIds as string[]).includes(item.request_id) ||
+          idempotencyEntry === undefined ||
+          idempotencyEntry.request_id !== item.request_id ||
+          !journalBodyMatchesKmaScope(idempotencyEntry.body, {
+            operationKey: item.operation_key,
+            providerDatasetId: item.provider_dataset_id,
+            syncScope: item.sync_scope,
+          })
+        ) {
+          throw new Error("invalid request ownership");
+        }
+        seenRequestIds.add(item.request_id);
+        seenIdempotencyKeys.add(item.idempotency_key);
+      }
+    }
+
     if (!isOrchestratorPlaceholder && !isCurrentScenario) {
       const cleanupResult = asRecord(previous.cleanup_result);
       const scenario = previous.scenario as CleanupScenario;
@@ -670,6 +906,7 @@ async function mergePreviousJournal(state: CleanupState): Promise<void> {
     for (const externalSystem of
       (externalSystems as string[] | undefined) ?? []) {
       state.allExternalSystems.add(externalSystem);
+      if (isCurrentScenario) state.externalSystems.add(externalSystem);
     }
     for (const item of (targetRefs as TargetJournalRef[] | undefined) ?? []) {
       const key = targetJournalKey(item);
@@ -705,6 +942,7 @@ async function mergePreviousJournal(state: CleanupState): Promise<void> {
     }
     for (const requestId of (requestIds as string[] | undefined) ?? []) {
       state.allRequestIds.add(requestId);
+      if (isCurrentScenario) state.requestIds.add(requestId);
     }
     for (const [requestId, status] of Object.entries(terminalStatuses ?? {})) {
       const current = state.requestTerminalStatuses.get(requestId);
@@ -713,8 +951,14 @@ async function mergePreviousJournal(state: CleanupState): Promise<void> {
         !state.allRequestTerminalStatuses.has(requestId)
       ) {
         state.allRequestTerminalStatuses.set(requestId, String(status));
+        if (isCurrentScenario) {
+          state.requestTerminalStatuses.set(requestId, String(status));
+        }
       }
     }
+    const idempotencyDestination = isCurrentScenario
+      ? state.idempotencyEntries
+      : state.allIdempotencyEntries;
     for (const value of (idempotencyEntries as
       | DurableCleanupJournal["idempotency_entries"]
       | undefined) ?? []) {
@@ -730,15 +974,34 @@ async function mergePreviousJournal(state: CleanupState): Promise<void> {
       ) {
         throw new Error("invalid request history");
       }
-      if (
-        !state.idempotencyEntries.has(value.idempotency_key) &&
-        !state.allIdempotencyEntries.has(value.idempotency_key)
-      ) {
-        state.allIdempotencyEntries.set(value.idempotency_key, {
+      if (!idempotencyDestination.has(value.idempotency_key)) {
+        idempotencyDestination.set(value.idempotency_key, {
           body: value.body,
           requestId: value.request_id,
           status: value.status,
         });
+      }
+    }
+    const ownershipDestination = isCurrentScenario
+      ? state.requestOwnership
+      : state.allRequestOwnership;
+    for (const value of (requestOwnership as
+      | DurableCleanupJournal["request_ownership"]
+      | undefined) ?? []) {
+      const ownership: KmaRequestOwnership = {
+        idempotencyKey: value.idempotency_key,
+        operationKey: value.operation_key,
+        providerDatasetId: value.provider_dataset_id,
+        syncScope: value.sync_scope,
+      };
+      const existing =
+        state.requestOwnership.get(value.request_id) ??
+        state.allRequestOwnership.get(value.request_id);
+      if (existing !== undefined && !sameKmaRequestOwnership(existing, ownership)) {
+        throw new Error("invalid request ownership");
+      }
+      if (!ownershipDestination.has(value.request_id)) {
+        ownershipDestination.set(value.request_id, ownership);
       }
     }
   } catch (error) {
@@ -762,6 +1025,9 @@ async function mergePreviousJournal(state: CleanupState): Promise<void> {
     if (error instanceof Error && error.message === "invalid request history") {
       throw new Error("C7 durable cleanup journal의 request history가 손상되었습니다");
     }
+    if (error instanceof Error && error.message === "invalid request ownership") {
+      throw new Error("C7 durable cleanup journal의 request ownership이 손상되었습니다");
+    }
     throw error;
   }
 }
@@ -775,10 +1041,14 @@ async function writeDurableJournal(
     const temporary = `${state.stateFile}.${process.pid}.${randomUUID()}.tmp`;
     try {
       await mergePreviousJournal(state);
+      const journal = durableJournal(state, phase);
+      if (!hasExactC7RequestOwnershipBinding(journal)) {
+        throw new Error("C7 durable cleanup journal request ownership is invalid");
+      }
       await mkdir(directory, { mode: 0o700, recursive: true });
       await writeFile(
         temporary,
-        `${JSON.stringify(durableJournal(state, phase))}\n`,
+        `${JSON.stringify(journal)}\n`,
         { encoding: "utf8", flag: "wx", mode: 0o600 },
       );
       await chmod(temporary, 0o600);
@@ -880,6 +1150,18 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
+}
+
+function hasExactObjectKeys(
+  value: Record<string, unknown>,
+  expected: readonly string[],
+): boolean {
+  const actual = Object.keys(value).sort();
+  const sortedExpected = [...expected].sort();
+  return (
+    actual.length === sortedExpected.length &&
+    actual.every((key, index) => key === sortedExpected[index])
+  );
 }
 
 function asArray(value: unknown): unknown[] {
@@ -1018,8 +1300,14 @@ async function assertTerminalDagsterRunIdentity(
     !Number.isSafeInteger(updateRequest.generation) ||
     updateRequest.generation <= 0 ||
     updateRequest.scope.type !== "provider_dataset" ||
-    updateRequest.scope.provider !== KMA_PROVIDER ||
-    updateRequest.scope.dataset_key !== KMA_DATASET_KEY
+    updateRequest.scope.operation_key !== KMA_NOWCAST_OPERATION_KEY ||
+    updateRequest.dataset_memberships.length !== 1 ||
+    updateRequest.dataset_memberships[0]?.provider_dataset_id !==
+      updateRequest.scope.provider_dataset_id ||
+    updateRequest.dataset_memberships[0]?.sync_scope !==
+      updateRequest.scope.sync_scope ||
+    updateRequest.dataset_memberships[0]?.operation_key !==
+      KMA_NOWCAST_OPERATION_KEY
   ) {
     throw new Error(
       "C7 terminal request/Dagster owner identity 계약이 실패했습니다 (values redacted)",
@@ -1260,6 +1548,7 @@ async function listAllActivePoiTargets(
 }
 
 export function buildKmaRequest(
+  providerDatasetId: number,
   externalSystem: string,
   reason: string,
   runMode: "queued" | "now" = "queued",
@@ -1267,12 +1556,10 @@ export function buildKmaRequest(
   const body: FeatureUpdateRequestCreateRequest = {
     scope: {
       type: "provider_dataset",
-      provider: KMA_PROVIDER,
-      dataset_key: KMA_DATASET_KEY,
+      provider_dataset_id: providerDatasetId,
       sync_scope: `external_system:${externalSystem}`,
+      operation_key: KMA_NOWCAST_OPERATION_KEY,
     },
-    providers: [],
-    dataset_keys: [],
     run_mode: runMode,
     priority: 50,
     reason,
@@ -1286,8 +1573,6 @@ export function previewBody(
 ): FeatureUpdateRequestPreviewRequest {
   const preview: FeatureUpdateRequestPreviewRequest = {
     scope: body.scope,
-    providers: body.providers,
-    dataset_keys: body.dataset_keys,
     update_policy: body.update_policy,
     run_mode: body.run_mode,
     priority: body.priority,
@@ -1306,16 +1591,14 @@ function assertKmaOnlyPlan(
   const scope = body.scope;
   if (
     scope.type !== "provider_dataset" ||
-    scope.provider !== KMA_PROVIDER ||
-    scope.dataset_key !== KMA_DATASET_KEY ||
-    !scope.sync_scope?.startsWith("external_system:")
+    !Number.isSafeInteger(scope.provider_dataset_id) ||
+    scope.provider_dataset_id <= 0 ||
+    !scope.sync_scope?.startsWith("external_system:") ||
+    scope.operation_key !== KMA_NOWCAST_OPERATION_KEY
   ) {
     throw new Error(
       "C7 live E2E mutation은 canonical KMA external_system scope만 허용합니다.",
     );
-  }
-  if ((body.providers?.length ?? 0) > 0 || (body.dataset_keys?.length ?? 0) > 0) {
-    throw new Error("provider_dataset scope에 providers/dataset_keys 필터를 중복할 수 없습니다.");
   }
 }
 
@@ -1335,6 +1618,164 @@ function kmaExternalSystem(
   return externalSystem;
 }
 
+function kmaScopeExpectationFromRequestBody(
+  body: FeatureUpdateRequestCreateRequest,
+): KmaScopeExpectation {
+  assertKmaOnlyPlan(body);
+  if (body.scope.type !== "provider_dataset") {
+    throw new Error("KMA request scope discriminator 계약 불일치");
+  }
+  return {
+    operationKey: KMA_NOWCAST_OPERATION_KEY,
+    providerDatasetId: body.scope.provider_dataset_id,
+    syncScope: body.scope.sync_scope,
+  };
+}
+
+function sameKmaScope(
+  left: KmaScopeExpectation,
+  right: KmaScopeExpectation,
+): boolean {
+  return (
+    left.operationKey === right.operationKey &&
+    left.providerDatasetId === right.providerDatasetId &&
+    left.syncScope === right.syncScope
+  );
+}
+
+function sameKmaRequestOwnership(
+  left: KmaRequestOwnership,
+  right: KmaRequestOwnership,
+): boolean {
+  return left.idempotencyKey === right.idempotencyKey && sameKmaScope(left, right);
+}
+
+function journalBodyMatchesKmaScope(
+  body: unknown,
+  expected: KmaScopeExpectation,
+): boolean {
+  const scope = asRecord(asRecord(body)?.scope);
+  return (
+    scope !== null &&
+    scope.type === "provider_dataset" &&
+    expected.operationKey === KMA_NOWCAST_OPERATION_KEY &&
+    scope.provider_dataset_id === expected.providerDatasetId &&
+    scope.sync_scope === expected.syncScope &&
+    scope.operation_key === expected.operationKey
+  );
+}
+
+/**
+ * Dataset-detail의 active 실행은 cleanup 소유권을 뜻하지 않는다. 이 함수는 scenario가
+ * durable하게 기록한 idempotency/request/scope 삼중 결박까지 모두 맞을 때만 true다.
+ */
+export function isExactScenarioOwnedActiveRequest(
+  datasetDetail: OpsDatasetDetailResponse,
+  requestDetail: PipelineExecutionDetailResponse,
+  ownership: KmaRequestOwnership | undefined,
+  idempotencyEntry:
+    | {
+        body: FeatureUpdateRequestCreateRequest;
+        requestId: string | null;
+      }
+    | undefined,
+): boolean {
+  if (ownership === undefined || idempotencyEntry === undefined) return false;
+  let bodyScope: KmaScopeExpectation;
+  try {
+    bodyScope = kmaScopeExpectationFromRequestBody(idempotencyEntry.body);
+  } catch {
+    return false;
+  }
+  const active = datasetDetail.data.active_execution;
+  const updateRequest = requestDetail.data.update_request;
+  if (
+    !sameKmaScope(ownership, bodyScope) ||
+    idempotencyEntry.requestId === null ||
+    active === null ||
+    active.kind !== "update_request" ||
+    active.id !== idempotencyEntry.requestId ||
+    active.sync_scope !== ownership.syncScope ||
+    active.operation_key !== ownership.operationKey ||
+    datasetDetail.data.provider !== KMA_PROVIDER ||
+    datasetDetail.data.dataset_key !== KMA_DATASET_KEY ||
+    datasetDetail.data.scopes.filter(
+      (scope) => scope.sync_scope === ownership.syncScope,
+    ).length !== 1 ||
+    active.provider_datasets.length !== 1 ||
+    active.provider_datasets[0]?.provider !== KMA_PROVIDER ||
+    active.provider_datasets[0]?.dataset_key !== KMA_DATASET_KEY ||
+    active.provider_datasets[0]?.provider_dataset_id !==
+      ownership.providerDatasetId ||
+    active.provider_datasets[0]?.sync_scope !== ownership.syncScope ||
+    requestDetail.data.execution.kind !== "update_request" ||
+    requestDetail.data.execution.id !== active.id ||
+    updateRequest === null ||
+    updateRequest.request_id !== active.id ||
+    updateRequest.scope.type !== "provider_dataset" ||
+    updateRequest.scope.provider_dataset_id !== ownership.providerDatasetId ||
+    updateRequest.scope.sync_scope !== ownership.syncScope ||
+    updateRequest.scope.operation_key !== ownership.operationKey ||
+    updateRequest.dataset_memberships.length !== 1 ||
+    updateRequest.dataset_memberships[0]?.provider_dataset_id !==
+      ownership.providerDatasetId ||
+    updateRequest.dataset_memberships[0]?.sync_scope !== ownership.syncScope
+    || updateRequest.dataset_memberships[0]?.operation_key !== ownership.operationKey
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * cleanup이 cancel endpoint로 전달할 수 있는 유일한 active request를 고른다. 외부
+ * request는 같은 sync scope여도 null로 남겨, 호출자가 취소 요청을 만들 수 없게 한다.
+ */
+export function cancellationCandidateForScenarioOwnedActiveRequest(
+  datasetDetail: OpsDatasetDetailResponse,
+  requestDetail: PipelineExecutionDetailResponse,
+  ownership: KmaRequestOwnership | undefined,
+  idempotencyEntry:
+    | {
+        body: FeatureUpdateRequestCreateRequest;
+        requestId: string | null;
+      }
+    | undefined,
+): string | null {
+  const active = datasetDetail.data.active_execution;
+  return active !== null &&
+    active.kind === "update_request" &&
+    isExactScenarioOwnedActiveRequest(
+      datasetDetail,
+      requestDetail,
+      ownership,
+      idempotencyEntry,
+    )
+    ? active.id
+    : null;
+}
+
+function isCurrentScenarioOwnedActiveRequest(
+  state: CleanupState,
+  datasetDetail: OpsDatasetDetailResponse,
+  requestDetail: PipelineExecutionDetailResponse,
+): boolean {
+  const active = datasetDetail.data.active_execution;
+  if (active === null || active.kind !== "update_request") return false;
+  const ownership = state.requestOwnership.get(active.id);
+  return (
+    state.requestIds.has(active.id) &&
+    cancellationCandidateForScenarioOwnedActiveRequest(
+      datasetDetail,
+      requestDetail,
+      ownership,
+      ownership === undefined
+        ? undefined
+        : state.idempotencyEntries.get(ownership.idempotencyKey),
+    ) === active.id
+  );
+}
+
 export async function previewKmaRequest(
   page: Page,
   body: FeatureUpdateRequestPreviewRequest,
@@ -1350,22 +1791,52 @@ export async function previewKmaRequest(
   return result;
 }
 
-function assertOnlyKmaProviderObjects(value: unknown, context: string): void {
+function assertExactKmaScopeArtifact(
+  value: unknown,
+  expected: KmaScopeExpectation,
+  context: string,
+): void {
+  const record = asRecord(value);
+  if (
+    record === null ||
+    record.operation_key !== expected.operationKey ||
+    record.provider_dataset_id !== expected.providerDatasetId ||
+    record.sync_scope !== expected.syncScope
+  ) {
+    throw new Error(`${context}의 provider dataset membership이 exact scope와 다릅니다`);
+  }
+}
+
+function assertOnlyExpectedKmaProviderObjects(
+  value: unknown,
+  expected: KmaScopeExpectation,
+  context: string,
+): void {
   if (Array.isArray(value)) {
-    for (const item of value) assertOnlyKmaProviderObjects(item, context);
+    for (const item of value) {
+      assertOnlyExpectedKmaProviderObjects(item, expected, context);
+    }
     return;
   }
   const record = asRecord(value);
   if (record === null) return;
   if (
     "provider" in record &&
-    (record.provider !== KMA_PROVIDER ||
+      (record.provider !== KMA_PROVIDER ||
       ("dataset_key" in record && record.dataset_key !== KMA_DATASET_KEY))
   ) {
     throw new Error(`${context}에 KMA 외 provider/dataset이 포함되었습니다`);
   }
+  if ("provider_dataset_id" in record) {
+    assertExactKmaScopeArtifact(record, expected, context);
+  } else if (
+    ("sync_scope" in record && record.sync_scope !== expected.syncScope) ||
+    ("operation_key" in record && record.operation_key !== expected.operationKey)
+  ) {
+    throw new Error(`${context}의 sync scope가 exact scope와 다릅니다`);
+  }
   for (const item of Object.values(record)) {
-    assertOnlyKmaProviderObjects(item, context);
+    assertOnlyExpectedKmaProviderObjects(item, expected, context);
   }
 }
 
@@ -1375,23 +1846,33 @@ function assertExactKmaPreviewBody(
 ): void {
   const data = response.data;
   assertKmaOnlyPlan(expected);
+  if (expected.scope.type !== "provider_dataset") {
+    throw new Error("KMA preview scope discriminator 계약 불일치");
+  }
   const expectedEffectiveSyncScope =
-    expected.scope.type === "provider_dataset"
-      ? expected.scope.sync_scope
-      : undefined;
+    expected.scope.sync_scope;
   const responseScope = data.scope;
   const matchedScope = asRecord(data.matched_scope);
+  const expectedMembership = [{
+    operation_key: expected.scope.operation_key,
+    provider_dataset_id: expected.scope.provider_dataset_id,
+    sync_scope: expected.scope.sync_scope,
+  }];
+  const expectedScope = {
+    operationKey: KMA_NOWCAST_OPERATION_KEY,
+    providerDatasetId: expected.scope.provider_dataset_id,
+    syncScope: expected.scope.sync_scope,
+  };
   if (
     data.result_kind !== "preview" ||
     data.scope_type !== "provider_dataset" ||
     !exactJson(data.scope, expected.scope) ||
     responseScope.type !== "provider_dataset" ||
-    responseScope.provider !== KMA_PROVIDER ||
-    responseScope.dataset_key !== KMA_DATASET_KEY ||
+    responseScope.operation_key !== KMA_NOWCAST_OPERATION_KEY ||
+    responseScope.provider_dataset_id !== expected.scope.provider_dataset_id ||
     responseScope.sync_scope !== expectedEffectiveSyncScope ||
     !expectedEffectiveSyncScope?.startsWith("external_system:") ||
-    !exactJson(data.providers, expected.providers ?? []) ||
-    !exactJson(data.dataset_keys, expected.dataset_keys ?? []) ||
+    !exactJson(data.dataset_memberships, expectedMembership) ||
     data.run_mode !== expected.run_mode ||
     data.priority !== expected.priority ||
     !exactJson(data.update_policy, expected.update_policy ?? {}) ||
@@ -1399,31 +1880,14 @@ function assertExactKmaPreviewBody(
   ) {
     throw new Error("KMA preview response plan/resolved scope 계약 불일치");
   }
-  const providerDatasets = matchedScope.provider_datasets;
-  if (
-    !Array.isArray(providerDatasets) ||
-    providerDatasets.length !== 1
-  ) {
-    throw new Error("KMA preview matched_scope exact provider pair가 없습니다");
-  }
-  const pair = asRecord(providerDatasets[0]);
-  if (
-    pair === null ||
-    pair.provider !== KMA_PROVIDER ||
-    pair.dataset_key !== KMA_DATASET_KEY ||
-    typeof pair.feature_count !== "number" ||
-    !Number.isSafeInteger(pair.feature_count) ||
-    pair.feature_count < 0 ||
-    ("sync_scope" in pair && pair.sync_scope !== expectedEffectiveSyncScope) ||
-    ("effective_sync_scope" in matchedScope &&
-      matchedScope.effective_sync_scope !== expectedEffectiveSyncScope)
-  ) {
-    throw new Error("KMA preview matched_scope provider/effective scope identity 불일치");
-  }
   if (FORBIDDEN_PROVIDER_PATTERN.test(JSON.stringify(data))) {
     throw new Error("KMA preview response에 금지 provider가 포함되었습니다");
   }
-  assertOnlyKmaProviderObjects(data.matched_scope, "KMA preview matched_scope");
+  assertOnlyExpectedKmaProviderObjects(
+    data.matched_scope,
+    expectedScope,
+    "KMA preview matched_scope",
+  );
 }
 
 export async function assertExactKmaPreviewResponse(
@@ -1446,17 +1910,23 @@ export async function assertExactKmaPreviewResponse(
 
 export function assertKmaOnlyTerminalProviderScopes(
   detail: PipelineExecutionDetailResponse,
+  expected: KmaScopeExpectation,
   options: { executed: "empty" | "nonempty" },
 ): void {
   const updateRequest = detail.data.update_request;
   if (
     updateRequest === null ||
     updateRequest.scope.type !== "provider_dataset" ||
-    updateRequest.scope.provider !== KMA_PROVIDER ||
-    updateRequest.scope.dataset_key !== KMA_DATASET_KEY ||
-    !updateRequest.effective_sync_scope?.startsWith("external_system:") ||
-    updateRequest.providers.length !== 0 ||
-    updateRequest.dataset_keys.length !== 0
+    updateRequest.scope.operation_key !== expected.operationKey ||
+    updateRequest.scope.provider_dataset_id !== expected.providerDatasetId ||
+    updateRequest.scope.sync_scope !== expected.syncScope ||
+    !updateRequest.scope.sync_scope.startsWith("external_system:") ||
+    updateRequest.dataset_memberships.length !== 1 ||
+    updateRequest.dataset_memberships[0]?.provider_dataset_id !==
+      expected.providerDatasetId ||
+    updateRequest.dataset_memberships[0]?.sync_scope !==
+      expected.syncScope ||
+    updateRequest.dataset_memberships[0]?.operation_key !== expected.operationKey
   ) {
     throw new Error("terminal update request KMA-only plan 계약 불일치");
   }
@@ -1475,7 +1945,6 @@ export function assertKmaOnlyTerminalProviderScopes(
   ) {
     throw new Error("terminal provider scope 전체 집합 계약 불일치");
   }
-  const providerIdentities = new Set<string>();
   for (const key of keys) {
     const raw = matched[key];
     if (raw === undefined) continue;
@@ -1483,14 +1952,7 @@ export function assertKmaOnlyTerminalProviderScopes(
       throw new Error(`terminal ${key} 배열 계약 불일치`);
     }
     for (const value of raw) {
-      const item = asRecord(value);
-      if (
-        item?.provider !== KMA_PROVIDER ||
-        item.dataset_key !== KMA_DATASET_KEY
-      ) {
-        throw new Error(`terminal ${key} KMA-only 집합 불일치`);
-      }
-      providerIdentities.add(`${item.provider}\u0000${item.dataset_key}`);
+      assertExactKmaScopeArtifact(value, expected, `terminal ${key}`);
     }
   }
   const executed = matched.executed_provider_scopes;
@@ -1500,13 +1962,15 @@ export function assertKmaOnlyTerminalProviderScopes(
       (!Array.isArray(executed) || executed.length !== 0)) ||
     (options.executed === "nonempty" &&
       (!Array.isArray(executed) || executed.length !== 1)) ||
-    providerIdentities.size !== 1 ||
-    !providerIdentities.has(`${KMA_PROVIDER}\u0000${KMA_DATASET_KEY}`) ||
     FORBIDDEN_PROVIDER_PATTERN.test(JSON.stringify(matched))
   ) {
     throw new Error("terminal 전체 provider scope 집합이 exact KMA-only가 아닙니다");
   }
-  assertOnlyKmaProviderObjects(matched, "terminal matched_scope");
+  assertOnlyExpectedKmaProviderObjects(
+    matched,
+    expected,
+    "terminal matched_scope",
+  );
 }
 
 export async function createKmaRequest(
@@ -1777,10 +2241,14 @@ export async function runTrackedRequestNowFromUi(
         updateRequest.request_id !== requestId ||
         updateRequest.job_id !== jobId ||
         updateRequest.status !== "running" ||
-        updateRequest.effective_sync_scope !== syncScope ||
         scope?.type !== "provider_dataset" ||
-        scope.provider !== KMA_PROVIDER ||
-        scope.dataset_key !== KMA_DATASET_KEY ||
+        scope.operation_key !== KMA_NOWCAST_OPERATION_KEY ||
+        updateRequest.dataset_memberships.length !== 1 ||
+        updateRequest.dataset_memberships[0]?.provider_dataset_id !==
+          scope.provider_dataset_id ||
+        updateRequest.dataset_memberships[0]?.sync_scope !== syncScope ||
+        updateRequest.dataset_memberships[0]?.operation_key !==
+          KMA_NOWCAST_OPERATION_KEY ||
         scope.sync_scope !== syncScope ||
         detail.data.cancellation !== null ||
         detail.data.root.cancellation !== null
@@ -1886,8 +2354,13 @@ export async function runRequestNow(
     updateRequest === null ||
     updateRequest.request_id !== requestId ||
     scope?.type !== "provider_dataset" ||
-    scope.provider !== KMA_PROVIDER ||
-    scope.dataset_key !== KMA_DATASET_KEY ||
+    scope.operation_key !== KMA_NOWCAST_OPERATION_KEY ||
+    updateRequest.dataset_memberships.length !== 1 ||
+    updateRequest.dataset_memberships[0]?.provider_dataset_id !==
+      scope.provider_dataset_id ||
+    updateRequest.dataset_memberships[0]?.sync_scope !== scope.sync_scope ||
+    updateRequest.dataset_memberships[0]?.operation_key !==
+      KMA_NOWCAST_OPERATION_KEY ||
     !scope.sync_scope?.startsWith("external_system:")
   ) {
     throw new Error("run-now direct KMA request identity barrier 실패");
@@ -1937,16 +2410,26 @@ export async function getRequestDetail(
 
 function exactScopeQuery(syncScope: string): string {
   return new URLSearchParams({
-    provider: KMA_PROVIDER,
-    dataset_key: KMA_DATASET_KEY,
+    operation_key: KMA_NOWCAST_OPERATION_KEY,
     sync_scope: syncScope,
   }).toString();
 }
 
-export function exactDatasetUiPath(syncScope: string): string {
+export async function exactDatasetUiPath(
+  page: Page,
+  syncScope: string,
+): Promise<string> {
+  const providerDatasetId = await resolveKmaProviderDatasetId(page);
+  return exactDatasetUiPathForProviderDatasetId(providerDatasetId, syncScope);
+}
+
+export function exactDatasetUiPathForProviderDatasetId(
+  providerDatasetId: number,
+  syncScope: string,
+): string {
   const query = new URLSearchParams({
-    provider: KMA_PROVIDER,
-    dataset: KMA_DATASET_KEY,
+    operation_key: KMA_NOWCAST_OPERATION_KEY,
+    provider_dataset_id: String(providerDatasetId),
     sync_scope: syncScope,
     panel: "history",
   });
@@ -1957,11 +2440,43 @@ export async function getExactDatasetDetail(
   page: Page,
   syncScope: string,
 ): Promise<BrowserFetchResult<OpsDatasetDetailResponse>> {
-  return browserFetch<OpsDatasetDetailResponse>(
+  const providerDatasetId = await resolveKmaProviderDatasetId(page);
+  const result = await browserFetch<OpsDatasetDetailResponse>(
     page,
-    `/v1/ops/datasets/detail?${exactScopeQuery(syncScope)}`,
+    `/v1/ops/datasets/${providerDatasetId}?${exactScopeQuery(syncScope)}`,
     { timeoutMs: DATASET_DETAIL_FETCH_TIMEOUT_MS },
   );
+  if (
+    result.status === 200 &&
+    result.body?.data.provider_dataset_id !== providerDatasetId
+  ) {
+    throw new Error("C7 exact dataset detail provider_dataset_id 불일치");
+  }
+  return result;
+}
+
+/**
+ * Live E2E도 요청 경계의 immutable dataset ID를 서버 projection에서 얻는다.
+ * seed 순서나 DB sequence를 fixture 상수로 가정하지 않는다.
+ */
+export async function resolveKmaProviderDatasetId(page: Page): Promise<number> {
+  const result = await browserFetch<OpsDatasetsGridResponse>(
+    page,
+    "/v1/ops/datasets",
+  );
+  const matches = result.body?.data.items.filter(
+    (row) =>
+      row.catalog_state === "canonical" &&
+      row.provider === KMA_PROVIDER &&
+      row.dataset_key === KMA_DATASET_KEY &&
+      Number.isSafeInteger(row.provider_dataset_id) &&
+      row.provider_dataset_id > 0,
+  );
+  const ids = [...new Set(matches?.map((row) => row.provider_dataset_id) ?? [])];
+  if (result.status !== 200 || ids.length !== 1 || ids[0] === undefined) {
+    throw new Error("C7 KMA canonical provider_dataset_id projection이 없습니다");
+  }
+  return ids[0];
 }
 
 export async function getPipelineOverview(
@@ -2059,6 +2574,7 @@ export function createCleanupState(
     allExternalSystems: new Set(),
     allIdempotencyEntries: new Map(),
     allRequestIds: new Set(),
+    allRequestOwnership: new Map(),
     allRequestTerminalStatuses: new Map(),
     allTargetRefs: new Map(),
     cleanupResult: null,
@@ -2067,6 +2583,7 @@ export function createCleanupState(
     idempotencyEntries: new Map(),
     journalWrite: Promise.resolve(),
     requestIds: new Set(),
+    requestOwnership: new Map(),
     requestTerminalStatuses: new Map(),
     runId,
     scenario,
@@ -2474,13 +2991,31 @@ export async function trackRequestResult(
   const data = asRecord(asRecord(result.body)?.data);
   const requestId =
     typeof data?.request_id === "string" ? data.request_id : undefined;
-  if (requestId) state.requestIds.add(requestId);
   if (idempotencyKey) {
     const entry = state.idempotencyEntries.get(idempotencyKey);
     if (entry) {
       entry.requestId = requestId ?? null;
       entry.status = requestId ? `response_${result.status}` : `http_${result.status}`;
     }
+  }
+  if (requestId) {
+    if (!idempotencyKey) {
+      throw new Error("C7 request response에 Idempotency-Key ownership이 없습니다");
+    }
+    const entry = state.idempotencyEntries.get(idempotencyKey);
+    if (!entry) {
+      throw new Error("C7 request response의 durable idempotency journal이 없습니다");
+    }
+    const ownership: KmaRequestOwnership = {
+      idempotencyKey,
+      ...kmaScopeExpectationFromRequestBody(entry.body),
+    };
+    const previous = state.requestOwnership.get(requestId);
+    if (previous !== undefined && !sameKmaRequestOwnership(previous, ownership)) {
+      throw new Error("C7 request ID가 서로 다른 KMA scope에 재사용되었습니다");
+    }
+    state.requestIds.add(requestId);
+    state.requestOwnership.set(requestId, previous ?? ownership);
   }
   await writeDurableJournal(state, "request_observed");
 }
@@ -2715,7 +3250,8 @@ export async function rediscoverExactActiveRequest(
   if (
     active === null ||
     active.kind !== "update_request" ||
-    active.sync_scope !== syncScope
+    active.sync_scope !== syncScope ||
+    active.operation_key !== KMA_NOWCAST_OPERATION_KEY
   ) {
     throw new Error(`exact scope active request 재탐색 실패: ${syncScope}`);
   }
@@ -2738,6 +3274,7 @@ export async function rediscoverExactActiveOrSettledRequest(
     if (
       active.kind !== "update_request" ||
       active.sync_scope !== syncScope ||
+      active.operation_key !== KMA_NOWCAST_OPERATION_KEY ||
       active.id !== expectedRequestId
     ) {
       throw new Error(
@@ -2855,7 +3392,10 @@ async function cleanupResources(
   terminalTimeout: number,
 ): Promise<CleanupExecution> {
   const issues: CleanupIssue[] = [];
+  let cleanupOwnershipIntact = true;
+  let everyRequestTerminal = true;
   let exactScopeDiscoveryComplete = true;
+  const verifiedActiveRequestIds = new Set<string>();
   const targetRecovery = await recoverUnresolvedTargetIntents(page, state);
   issues.push(...targetRecovery.issues);
   const exactTargetDiscoveryComplete = targetRecovery.complete;
@@ -2892,11 +3432,44 @@ async function cleanupResources(
     }
     const active = result.body.data.active_execution;
     if (active?.kind === "update_request") {
-      state.requestIds.add(active.id);
+      try {
+        const requestDetailResult = await getRequestDetail(page, active.id);
+        if (
+          requestDetailResult.status !== 200 ||
+          requestDetailResult.body === null ||
+          active.sync_scope !== `external_system:${externalSystem}` ||
+          !isCurrentScenarioOwnedActiveRequest(
+            state,
+            result.body,
+            requestDetailResult.body,
+          )
+        ) {
+          cleanupOwnershipIntact = false;
+          everyRequestTerminal = false;
+          exactScopeDiscoveryComplete = false;
+          issues.push({
+            http_status: requestDetailResult.status,
+            kind: "request_ownership",
+            resource: `external_system:${externalSystem}`,
+          });
+          continue;
+        }
+        verifiedActiveRequestIds.add(active.id);
+      } catch {
+        cleanupOwnershipIntact = false;
+        everyRequestTerminal = false;
+        exactScopeDiscoveryComplete = false;
+        issues.push({
+          kind: "request_ownership",
+          resource: `external_system:${externalSystem}`,
+        });
+      }
     } else if (active !== null) {
+      cleanupOwnershipIntact = false;
+      everyRequestTerminal = false;
       exactScopeDiscoveryComplete = false;
       issues.push({
-        kind: "request_detail",
+        kind: "request_ownership",
         resource: `external_system:${externalSystem}`,
       });
     }
@@ -2913,11 +3486,13 @@ async function cleanupResources(
   const cancelIds: string[] = [];
   for (const settled of initialDetails) {
     if (settled.status === "rejected") {
+      everyRequestTerminal = false;
       issues.push({ kind: "unexpected_exception", resource: "request_detail" });
       continue;
     }
     const { requestId, result } = settled.value;
     if (result.status !== 200 || result.body === null) {
+      everyRequestTerminal = false;
       issues.push({
         http_status: result.status,
         kind: "request_detail",
@@ -2926,14 +3501,35 @@ async function cleanupResources(
       continue;
     }
     const status = result.body.data.execution.status;
-    if (!TERMINAL_STATUSES.has(status)) cancelIds.push(requestId);
+    if (!TERMINAL_STATUSES.has(status)) {
+      const ownership = state.requestOwnership.get(requestId);
+      const idempotencyEntry =
+        ownership === undefined
+          ? undefined
+          : state.idempotencyEntries.get(ownership.idempotencyKey);
+      if (
+        !cleanupOwnershipIntact ||
+        ownership === undefined ||
+        idempotencyEntry === undefined ||
+        idempotencyEntry.requestId !== requestId ||
+        !verifiedActiveRequestIds.has(requestId)
+      ) {
+        cleanupOwnershipIntact = false;
+        everyRequestTerminal = false;
+        exactScopeDiscoveryComplete = false;
+        issues.push({ kind: "request_ownership", resource: requestId });
+        continue;
+      }
+      cancelIds.push(requestId);
+    }
   }
 
-  if (cancelIds.length > 0) {
+  const cancellationCandidates = cleanupOwnershipIntact ? cancelIds : [];
+  if (cancellationCandidates.length > 0) {
     await writeDurableJournal(state, "cleanup_cancel_pending");
   }
   const cancellations = await Promise.allSettled(
-    cancelIds.map(async (requestId) => ({
+    cancellationCandidates.map(async (requestId) => ({
       requestId,
       result: await cancelRequest(
         page,
@@ -2964,7 +3560,6 @@ async function cleanupResources(
       status: await pollTerminal(page, requestId, terminalTimeout),
     })),
   );
-  let everyRequestTerminal = true;
   for (const settled of terminalResults) {
     if (settled.status === "rejected") {
       everyRequestTerminal = false;

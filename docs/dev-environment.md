@@ -365,7 +365,7 @@ base는
 build도 ignored/untracked file이 들어갈 수 없는 exact Git archive script로만 수행한다.
 runbook 절차로 설치한 `/usr/local/lib/kor-travel-map/c7-runner/<exact-commit>/scripts/`
 [`run-c7-prod-live-e2e.sh`](../scripts/run-c7-prod-live-e2e.sh)의 root-owned snapshot만 호출한다. runner는
-attested orchestrator file hash, compatible pair, 5개 service runtime hash, Alembic head/check와 UI login을
+attested orchestrator file hash, pinned-runtime manifest·rebuild journal·final-schema reload receipt, signed 7개 service/container binding, ADR-085 installed schema artifact·DB Alembic current/check와 UI login을
 read-only로 검증한 뒤에만 상태 journal과 파괴적 spec을 시작한다. 실제 env와 attestation 생성은
 gitignore된 local runbook에만 두며 셸이나 로그에 값을 출력하지 않는다.
 

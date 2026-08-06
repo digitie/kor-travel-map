@@ -1,5 +1,8 @@
-"""C7 prod live runner의 fail-closed 정적 계약 회귀 테스트."""
+"""C7 prod live runner의 fail-closed 계약 회귀 테스트."""
 
+import copy
+import json
+import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -25,6 +28,91 @@ def _assert_in_order(source: str, *markers: str) -> None:
         cursor = source.index(marker, cursor) + len(marker)
 
 
+def _final_kma_journal() -> dict[str, object]:
+    request_id = "11111111-1111-4111-8111-111111111111"
+    idempotency_key = "22222222-2222-4222-8222-222222222222"
+    target_id = "33333333-3333-4333-8333-333333333333"
+    historical_target_id = "44444444-4444-4444-8444-444444444444"
+    external_system = "e2e-c7-final"
+    target_key = "c7-final-target"
+    target = {
+        "body": {},
+        "entityTag": f'"{target_id}:1"',
+        "externalSystem": external_system,
+        "lockVersion": 1,
+        "status": "deleted",
+        "targetId": target_id,
+        "targetKey": target_key,
+    }
+    history = {
+        **target,
+        "entityTag": f'"{historical_target_id}:2"',
+        "lockVersion": 2,
+        "targetId": historical_target_id,
+    }
+    scope = {
+        "operation_key": "feature_weather_kma_ultra_short_nowcast_job",
+        "provider_dataset_id": 17,
+        "sync_scope": f"external_system:{external_system}",
+        "type": "provider_dataset",
+    }
+    return {
+        "cleanup_result": {
+            "allRequestsTerminal": True,
+            "preservedForManualCleanup": False,
+            "restored": True,
+        },
+        "completed_scenarios": ["active", "cap", "empty", "invalidation"],
+        "external_systems": [external_system],
+        "idempotency_entries": [
+            {
+                "body": {"scope": scope},
+                "idempotency_key": idempotency_key,
+                "request_id": request_id,
+                "status": "response_201",
+            }
+        ],
+        "phase": "restored",
+        "request_ids": [request_id],
+        "request_ownership": [
+            {
+                "idempotency_key": idempotency_key,
+                "operation_key": "feature_weather_kma_ultra_short_nowcast_job",
+                "provider_dataset_id": 17,
+                "request_id": request_id,
+                "sync_scope": f"external_system:{external_system}",
+            }
+        ],
+        "request_terminal_statuses": {request_id: "done"},
+        "run_id": "c7-final-run",
+        "scenario": "invalidation",
+        "scope_state_count": 0,
+        "target_history": [history],
+        "target_refs": [target],
+        "updated_at": "2026-08-07T00:00:00+00:00",
+        "version": 5,
+    }
+
+
+def _run_final_kma_state_gate(tmp_path: Path, state: dict[str, object]) -> int:
+    runner = _read(RUNNER)
+    function = _section(
+        runner,
+        "state_is_exact_restored() {",
+        "remote_state_is_exact_restored() {",
+    )
+    parser = function.split("<<'PY'\n", maxsplit=1)[1].rsplit("\nPY\n", maxsplit=1)[0]
+    state_path = tmp_path / "kma.json"
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+    result = subprocess.run(
+        ["python3", "-c", parser, "kma", str(state_path), "0" * 64],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode
+
+
 def test_final_runner_anchors_host_login_and_causal_poi_spec() -> None:
     script = _read(RUNNER)
     attestation = _read(ATTESTATION)
@@ -40,7 +128,6 @@ def test_final_runner_anchors_host_login_and_causal_poi_spec() -> None:
         "require_command python3\n",
         "verify_root_owned_orchestrator_snapshot ||",
         "verify_trusted_runtime_attestation",
-        "verify_alembic_state",
         "verify_ui_auth_preflight ||",
         "initialize_state_paths\n",
         "verify_clean_state_audit\n",
@@ -55,11 +142,13 @@ def test_final_runner_anchors_host_login_and_causal_poi_spec() -> None:
     assert '/etc/kor-travel-map/c7-prod-live-e2e-attestation.json' in script
     assert 'machine_id_sha256' in attestation
     assert 'hostname_sha256' in attestation
-    assert 'compatible_pair_manifest_sha256' in attestation
+    assert 'pinned_runtime_manifest_sha256' in attestation
+    assert 'pinned_runtime_rebuild_journal_sha256' in attestation
+    assert 'final_schema_reload_receipt_sha256' in attestation
     assert 'compose_project_sha256' in attestation
     assert 'service_runtime' in attestation
     assert '"orchestrator_files"' in script
-    assert 'attestation["version"] != 3' in attestation
+    assert 'attestation["version"] != 5' in attestation
     assert 'expected_base: Path = Path("/usr/local/lib/kor-travel-map/c7-runner")' in attestation
     assert 'scripts/lib/c7_prod_attestation.py' in script
     assert 'scripts/audit-c7-prod-live-state.py' in script
@@ -73,6 +162,53 @@ def test_final_runner_anchors_host_login_and_causal_poi_spec() -> None:
     assert '"@c7-causal"' in script
     assert "API PUT로 target을" not in script
     assert "--pass-with-no-tests" not in script
+
+
+def test_exact_triple_api_preflight_blocks_before_destructive_state() -> None:
+    script = _read(RUNNER)
+    dockerfile = _read(ROOT / "docker" / "c7-playwright.Dockerfile")
+    contract_preflight = _read(
+        LIVE_DIR / "ops-c7-kma-contract-preflight.live.spec.ts"
+    )
+
+    assert "RUN npm run type-check:e2e" in dockerfile
+    _assert_in_order(
+        script,
+        "has_residual_state &&",
+        "trap finish_exact_triple_api_preflight EXIT",
+        "run_exact_triple_api_preflight ||",
+        "trap - EXIT INT TERM",
+        "create_blocked_sentinel",
+    )
+    preflight = _section(
+        script,
+        "run_exact_triple_api_preflight() {",
+        "# 여기까지는 수집/파이프라인 domain state를 바꾸지 않는 preflight다.",
+    )
+    assert "npm run type-check:e2e" in preflight
+    assert "ops-c7-kma-contract-preflight.live.spec.ts" in preflight
+    assert "discard_exact_triple_preflight_runtime" in preflight
+    assert preflight.count("discard_exact_triple_preflight_runtime") >= 4
+    assert "finish_exact_triple_api_preflight()" in script
+    assert "remove_pre_sentinel_creating_container()" in script
+    assert "docker container inspect --format" in script
+    assert '"$(stat -c \'%u:%g:%a\' -- "$ACTIVE_CID_FILE" 2>/dev/null)" == "0:0:600"' in script
+    assert '"$ACTIVE_CID_FILE" \\' in script
+    assert 'operation_key: operationKey' in contract_preflight
+    assert 'expect([404, 422]).toContain(foreign.status)' in contract_preflight
+    assert 'canonical.data.operation_key).toBe(KMA_NOWCAST_OPERATION_KEY)' in contract_preflight
+    assert 'canonical.data.scopes[0]?.sync_scope).toBe(syncScope)' in contract_preflight
+    assert 'expect([404, 422]).toContain(wrongScope.status)' in contract_preflight
+
+
+def test_dataset_ui_wait_and_direct_helper_bind_the_same_provider_dataset_id() -> None:
+    helper = _read(LIVE_DIR / "_ops-c7-admin-api.ts")
+    active = _read(LIVE_DIR / "ops-c7-kma-active-write.live.spec.ts")
+
+    assert "exactDatasetUiPathForProviderDatasetId" in helper
+    assert "result.body?.data.provider_dataset_id !== providerDatasetId" in helper
+    assert "url.pathname === `/api/proxy/v1/ops/datasets/${providerDatasetId}`" in active
+    assert "data?.provider_dataset_id).toBe(providerDatasetId)" in active
 
 
 def test_final_restore_probe_parses_problem_json_and_requires_exact_404() -> None:
@@ -120,6 +256,66 @@ def test_kma_target_recreation_and_response_loss_are_durable() -> None:
     assert 'item.status === "deleted"' in helper
 
 
+def test_kma_cleanup_cancels_only_durably_owned_exact_active_request() -> None:
+    helper = _read(LIVE_DIR / "_ops-c7-admin-api.ts")
+    cleanup = _section(
+        helper,
+        "async function cleanupResources(",
+        "export async function withC7Cleanup(",
+    )
+
+    assert "request_ownership" in helper
+    assert "version: 5" in helper
+    assert "cancellationCandidateForScenarioOwnedActiveRequest" in helper
+    assert "state.requestOwnership.get(active.id)" in helper
+    assert "state.requestIds.add(active.id)" not in cleanup
+    assert "verifiedActiveRequestIds.add(active.id)" in cleanup
+    assert "const cancellationCandidates = cleanupOwnershipIntact ? cancelIds : [];" in cleanup
+    assert "cleanupOwnershipIntact = false" in cleanup
+    assert "kind: \"request_ownership\"" in cleanup
+    assert cleanup.index("isCurrentScenarioOwnedActiveRequest(") < cleanup.index(
+        "cancelRequest(",
+    )
+
+
+def test_final_kma_state_gate_accepts_only_exact_v5_ownership_journal(
+    tmp_path: Path,
+) -> None:
+    assert _run_final_kma_state_gate(tmp_path, _final_kma_journal()) == 0
+
+
+def test_final_kma_state_gate_rejects_legacy_and_broken_v5_ownership(
+    tmp_path: Path,
+) -> None:
+    for mutate in (
+        lambda state: state.update({"version": 3}),
+        lambda state: state.update({"version": 4}),
+        lambda state: state.pop("request_ownership"),
+        lambda state: state["request_ownership"].append(
+            copy.deepcopy(state["request_ownership"][0])
+        ),
+        lambda state: state["request_ownership"][0].update(
+            {"request_id": "55555555-5555-4555-8555-555555555555"}
+        ),
+        lambda state: state["request_ownership"][0].update(
+            {"provider_dataset_id": 18}
+        ),
+        lambda state: state["request_ownership"][0].pop("operation_key"),
+        lambda state: state["request_ownership"][0].update(
+            {"operation_key": "feature_weather_kma_short_forecast_job"}
+        ),
+        lambda state: state["idempotency_entries"][0]["body"]["scope"].pop(
+            "operation_key"
+        ),
+        lambda state: state["idempotency_entries"][0]["body"]["scope"].update(
+            {"operation_key": "feature_weather_kma_short_forecast_job"}
+        ),
+    ):
+        state = _final_kma_journal()
+        mutate(state)
+        assert _run_final_kma_state_gate(tmp_path, state) != 0
+
+
 def test_previous_journal_is_validated_before_non_overwriting_merge() -> None:
     helper = _read(LIVE_DIR / "_ops-c7-admin-api.ts")
     merge = _section(
@@ -135,7 +331,8 @@ def test_previous_journal_is_validated_before_non_overwriting_merge() -> None:
         merge_comment,
     )
     assert residue < merge_comment < target_merge
-    assert "state.idempotencyEntries.has(value.idempotency_key)" in merge
+    assert "const idempotencyDestination = isCurrentScenario" in merge
+    assert "state.idempotencyEntries.get(value.idempotency_key)" in merge
     assert "state.requestTerminalStatuses.get(requestId)" in merge
     assert "state.allTargetRefs.set(key, item);" not in merge[:target_merge]
 
@@ -208,13 +405,16 @@ def test_kma_preview_terminal_and_metadata_are_exact_kma_only() -> None:
     assert '"eligible_provider_scopes"' in helper
     assert '"skipped_provider_scopes"' in helper
     assert '"executed_provider_scopes"' in helper
-    assert "assertOnlyKmaProviderObjects(matched" in helper
+    assert "assertOnlyExpectedKmaProviderObjects(\n    matched" in helper
     assert "FORBIDDEN_PROVIDER_PATTERN" in helper
-    assert "providerDatasets.length !== 1" in helper
-    assert "pair.provider !== KMA_PROVIDER" in helper
-    assert "pair.dataset_key !== KMA_DATASET_KEY" in helper
-    assert "pair.feature_count < 0" in helper
-    assert "matchedScope.effective_sync_scope !== expectedEffectiveSyncScope" in helper
+    assert "assertOnlyExpectedKmaProviderObjects(" in helper
+    assert "provider_dataset_id: expected.scope.provider_dataset_id" in helper
+    assert "!exactJson(data.dataset_memberships, expectedMembership)" in helper
+    assert "updateRequest.dataset_memberships.length !== 1" in helper
+    assert "updateRequest.dataset_memberships[0]?.provider_dataset_id" in helper
+    assert "updateRequest.dataset_memberships[0]?.sync_scope" in helper
+    assert "providerDatasetId: number" in helper
+    assert "assertExactKmaScopeArtifact(value, expected" in helper
     for spec in (active, empty, cap):
         assert "assertExactKmaPreviewResponse(" in spec
         assert "assertKmaOnlyTerminalProviderScopes(" in spec
@@ -389,10 +589,9 @@ def test_runner_uses_fixed_root_owned_atomic_state() -> None:
     ]
     _assert_in_order(
         invocation,
-        "verify_root_owned_orchestrator_snapshot",
-        "verify_trusted_runtime_attestation",
-        "verify_alembic_state",
-        "verify_ui_auth_preflight",
+            "verify_root_owned_orchestrator_snapshot",
+            "verify_trusted_runtime_attestation",
+            "verify_ui_auth_preflight",
         "initialize_state_paths",
         "verify_clean_state_audit",
         "start_orchestrator_lock_guard",
@@ -455,17 +654,36 @@ def test_runner_uses_attested_immutable_playwright_executor_and_redacted_evidenc
     assert 'executor.get("Id") != environ["E2E_C7_PLAYWRIGHT_IMAGE"]' in attestation
     assert 'image_labels.get("org.opencontainers.image.revision")' in attestation
     assert '"source_commits"' in attestation
-    assert 'manifest["version"] != 4' in attestation
+    assert 'manifest["version"] != 5' in attestation
+    assert 'value["version"] != 7' in attestation
+    assert 'value["phase"] != "committed"' in attestation
+    assert 'value["stage"] != "finalized"' in attestation
+    assert 'final_schema_reload_receipt_sha256' in attestation
+    assert '_verify_map_application_schema_head(' in attestation
+    assert 'expected_head=active["map_application_head"]' in attestation
+    assert '"ktm-application-schema", "head"' in attestation
+    assert '_parse_installed_application_schema_head(' in attestation
+    assert '[*command_prefix, "alembic", "current"]' in attestation
+    assert 'SCHEMA_HEAD_PATTERN.fullmatch(matched.group(1))' in attestation
+    assert 'expected["compose_service"] != service' in attestation
+    assert 'container_id != expected["container_id"]' in attestation
     for field in (
-        "map_image_id",
+        "map_api_image_id",
         "map_ui_image_id",
         "map_dagster_image_id",
         "map_dagster_daemon_image_id",
-        "pinvi_image_id",
+        "pinvi_api_image_id",
+        "pinvi_web_image_id",
+        "pinvi_dagster_image_id",
     ):
         assert field in attestation
     assert 'active["map_source_revision"] != source_commits["map"]' in attestation
     assert 'active["pinvi_source_revision"] != source_commits["pinvi"]' in attestation
+    assert "E2E_C7_PINNED_RUNTIME_MANIFEST" in script
+    assert "E2E_C7_PINNED_RUNTIME_REBUILD_JOURNAL" in script
+    assert "E2E_C7_FINAL_SCHEMA_RELOAD_RECEIPT" in script
+    assert "E2E_C7_COMPATIBLE_PAIR_MANIFEST" not in script
+    assert "E2E_C7_COMPATIBLE_PAIR_MANIFEST" not in attestation
     assert "len(set(role_services.values())) != len(role_services)" in attestation
     assert "len(observed_containers) != len(role_services)" in attestation
     assert 'docker create --pull=never' in script

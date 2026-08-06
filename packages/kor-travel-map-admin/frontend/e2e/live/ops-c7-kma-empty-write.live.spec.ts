@@ -17,6 +17,7 @@ import {
 import {
   DATASET_DETAIL_FETCH_TIMEOUT_MS,
   KMA_DATASET_KEY,
+  KMA_NOWCAST_OPERATION_KEY,
   KMA_PROVIDER,
   assertKmaDagsterWorkerJobDefinition,
   assertExactKmaPreviewResponse,
@@ -35,6 +36,7 @@ import {
   listActivePoiTargets,
   previewBody,
   putTrackedTarget,
+  resolveKmaProviderDatasetId,
   requireBody,
   waitForTerminal,
   withC7Cleanup,
@@ -66,6 +68,7 @@ test.describe.configure({ mode: "serial", retries: 0 });
 
 async function previewEmptyRequestFromUi(
   page: Page,
+  providerDatasetId: number,
   syncScope: string,
   reason: string,
 ): Promise<void> {
@@ -87,9 +90,10 @@ async function previewEmptyRequestFromUi(
   // (active-write는 가벼운 페이지 + 60s one-shot이라 회피). 앱 fix로 dry-run은 강제 refetch를
   // skip(캐시로 사전검증)해 POST가 즉시 발사되므로, active-write처럼 fill 1회 + click 1회로
   // 단순화한다. 폼 입력은 부모 re-render로 리셋되지 않는다(controlled input, 무 key remount).
-  await dialog.getByLabel("provider").fill(KMA_PROVIDER);
-  await dialog.getByLabel("dataset_key").fill(KMA_DATASET_KEY);
-  await dialog.getByLabel("sync_scope (선택)").fill(syncScope);
+  await dialog
+    .getByLabel("대상 데이터셋")
+    .selectOption(String(providerDatasetId));
+  await dialog.getByLabel("sync_scope").selectOption(syncScope);
   const responsePromise = page.waitForResponse(
     (response) =>
       response.request().method() === "POST" &&
@@ -101,7 +105,11 @@ async function previewEmptyRequestFromUi(
   await assertExactKmaPreviewResponse(
     await responsePromise,
     previewBody(
-      buildKmaRequest(syncScope.slice("external_system:".length), reason),
+      buildKmaRequest(
+        providerDatasetId,
+        syncScope.slice("external_system:".length),
+        reason,
+      ),
     ),
   );
   await expect(dialog.getByTestId("request-preview-result")).toContainText(
@@ -114,13 +122,18 @@ async function previewEmptyRequestFromUi(
 
 async function createEmptyRequestWhileSensorStopped(
   page: Page,
+  providerDatasetId: number,
   externalSystem: string,
   state: ReturnType<typeof createCleanupState>,
 ): Promise<FeatureUpdateRequestCreateResponse> {
   const created = requireBody(
     await createKmaRequest(
       page,
-      buildKmaRequest(externalSystem, `C7 ${RUN_ID} empty scope`),
+      buildKmaRequest(
+        providerDatasetId,
+        externalSystem,
+        `C7 ${RUN_ID} empty scope`,
+      ),
       randomUUID(),
       state,
     ),
@@ -179,7 +192,7 @@ async function assertEmptyFailureFromUi(
   syncScope: string,
   requestId: string,
 ): Promise<void> {
-  await page.goto(exactDatasetUiPath(syncScope));
+  await page.goto(await exactDatasetUiPath(page, syncScope));
   const region = page.getByRole("region", {
     name: `${KMA_PROVIDER}/${KMA_DATASET_KEY} 상세`,
     exact: true,
@@ -251,6 +264,7 @@ test.describe("C7 KMA empty exact scope destructive live E2E", () => {
     const state = createCleanupState("empty", RUN_ID);
     await bootstrapC7SameOriginPage(page, "/ops/pipeline");
     await assertKmaDagsterWorkerJobDefinition();
+    const providerDatasetId = await resolveKmaProviderDatasetId(page);
     const controller = await createQueueSensorController();
     const sensorSnapshot = await snapshotQueueSensor(controller);
     if (sensorSnapshot.status !== "RUNNING") {
@@ -273,7 +287,12 @@ test.describe("C7 KMA empty exact scope destructive live E2E", () => {
         // 자동 회수)를 유지한 채 두 사전조건을 만족시킨다. bare target은 request가
         // 없으므로 RUNNING queue sensor가 dispatch하지 않는다(sensors.py peek→skip).
         await putTrackedTarget(page, state, target, targetBody);
-        await previewEmptyRequestFromUi(page, syncScope, reason);
+        await previewEmptyRequestFromUi(
+          page,
+          providerDatasetId,
+          syncScope,
+          reason,
+        );
         await stopQueueSensorAndWaitForQuiescence(controller, sensorSnapshot);
         await assertExactNonTerminalFeatureUpdateRequests(
           page,
@@ -288,6 +307,7 @@ test.describe("C7 KMA empty exact scope destructive live E2E", () => {
 
         const created = await createEmptyRequestWhileSensorStopped(
           page,
+          providerDatasetId,
           externalSystem,
           state,
         );
@@ -337,14 +357,22 @@ test.describe("C7 KMA empty exact scope destructive live E2E", () => {
           state,
         );
         expect(terminal.data.execution.status).toBe("failed");
-        assertKmaOnlyTerminalProviderScopes(terminal, { executed: "empty" });
+        assertKmaOnlyTerminalProviderScopes(
+          terminal,
+          {
+            operationKey: KMA_NOWCAST_OPERATION_KEY,
+            providerDatasetId,
+            syncScope,
+          },
+          { executed: "empty" },
+        );
         expect(terminal.data.execution.error_message).toContain(
           "KmaWeatherTargetScopeEmptyError",
         );
         const emptyEvents = terminal.data.events.filter(
           (event) =>
             event.code === "kma.target_scope_empty" &&
-            event.sync_scope === syncScope &&
+            event.provider_dataset_id === providerDatasetId &&
             event.job_id === created.data.job_id,
         );
         expect(emptyEvents).toHaveLength(1);

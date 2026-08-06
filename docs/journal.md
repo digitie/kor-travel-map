@@ -2,6 +2,16 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-06 (codex) — T-VN-41F1D-E exact-triple 실행 전 차단 보강
+
+- main 기준 draft PR #967에서 C7 executor image의 `type-check:e2e`를 build gate로 승격하고,
+  `BLOCKED.json` 이전의 read-only contract preflight를 추가했다. preflight는 KMA canonical detail의
+  `provider_dataset_id`를 대조하고 다른 `operation_key`가 `404|422`로 거부돼야만 이후 파괴적
+  scenario를 허용한다. 성공·실패 모두 임시 login state·container·artifact를 즉시 제거한다.
+- 이 차단은 pair/natural-key fallback이 아니다. 적대 리뷰가 찾은 #966 server-side detail
+  filtering/OpenAPI P0는 T-VN-33에서 고쳐야 하며, 그 PR이 final merge·pin되기 전 F1D-E n150
+  final acceptance는 시작하지 않는다.
+
 ## 2026-08-06 (codex) — T-VN-41F1D-C3 n150 파기형 rebuild 결선
 
 - Manager PR #167의 최신 Map typed-subtype pin으로 n150 `rebuild-pinned` generation을 committed했다.

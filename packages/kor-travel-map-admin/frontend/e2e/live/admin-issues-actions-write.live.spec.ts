@@ -231,17 +231,9 @@ test.describe("/admin/issues live read + reversible status write", () => {
       expect((await wait).status()).toBe(200);
     });
 
-    await test.step("provider 입력 → ?provider=python-kma-api", async () => {
-      const wait = waitForIssuesQuery(page, { provider: "python-kma-api" });
-      await page.getByLabel("issue provider").fill("python-kma-api");
-      expect((await wait).status()).toBe(200);
-    });
-
-    await test.step("dataset_key 입력 → ?dataset_key=kma_weather_values", async () => {
-      const wait = waitForIssuesQuery(page, {
-        dataset_key: "kma_weather_values",
-      });
-      await page.getByLabel("issue dataset").fill("kma_weather_values");
+    await test.step("provider dataset ID 입력 → ?provider_dataset_id=1", async () => {
+      const wait = waitForIssuesQuery(page, { provider_dataset_id: "1" });
+      await page.getByLabel("issue provider dataset ID").fill("1");
       expect((await wait).status()).toBe(200);
     });
 

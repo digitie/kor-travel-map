@@ -212,7 +212,14 @@ def test_secure_reader_rejects_wrong_mode_and_writable_ancestor(tmp_path: Path) 
         )
 
 
-def _runtime_fixture() -> tuple[dict[str, object], dict[str, object], dict[str, str], Callable]:
+def _runtime_fixture() -> tuple[
+    dict[str, object],
+    dict[str, object],
+    dict[str, object],
+    dict[str, object],
+    dict[str, str],
+    Callable,
+]:
     map_commit = "a" * 40
     pinvi_commit = "b" * 40
     map_images = {
@@ -221,17 +228,22 @@ def _runtime_fixture() -> tuple[dict[str, object], dict[str, object], dict[str, 
         "map_dagster_web": "sha256:" + "5" * 64,
         "map_dagster_daemon": "sha256:" + "6" * 64,
     }
-    pinvi_image = "sha256:" + "2" * 64
+    pinvi_images = {
+        "pinvi_api": "sha256:" + "2" * 64,
+        "pinvi_web": "sha256:" + "7" * 64,
+        "pinvi_dagster": "sha256:" + "8" * 64,
+    }
     executor_image = "sha256:" + "3" * 64
     project_name = "kor-travel-map-prod"
     playwright_base = "playwright@example"
-    generation = "c6c-v4"
     services = {
         "map_api": "map-api",
         "map_dagster_daemon": "map-daemon",
         "map_dagster_web": "map-web",
         "map_ui": "map-ui",
         "pinvi_api": "pinvi-api",
+        "pinvi_web": "pinvi-web",
+        "pinvi_dagster": "pinvi-dagster",
     }
     environments = {role: ["A=1"] for role in services}
     environments["map_api"] = [
@@ -256,25 +268,26 @@ def _runtime_fixture() -> tuple[dict[str, object], dict[str, object], dict[str, 
     }
     image_records.update(
         {
-            pinvi_image: {
+            image_id: {
                 "Config": {"Labels": {"org.opencontainers.image.revision": pinvi_commit}}
-            },
-            executor_image: {
-                "Config": {
-                    "Labels": {
-                        "io.kortravelmap.c7.playwright-base": playwright_base,
-                        "io.kortravelmap.c7.repository-commit": map_commit,
-                    }
-                },
-                "Id": executor_image,
-            },
+            }
+            for image_id in pinvi_images.values()
         }
     )
+    image_records[executor_image] = {
+        "Config": {
+            "Labels": {
+                "io.kortravelmap.c7.playwright-base": playwright_base,
+                "io.kortravelmap.c7.repository-commit": map_commit,
+            }
+        },
+        "Id": executor_image,
+    }
     runtime: dict[str, object] = {}
     service_ids: dict[str, str] = {}
-    for index, (role, service) in enumerate(services.items(), start=4):
-        container_id = str(index) * 64
-        image_id = pinvi_image if role == "pinvi_api" else map_images[role]
+    for index, (role, service) in enumerate(services.items()):
+        container_id = "456789a"[index] * 64
+        image_id = pinvi_images[role] if role.startswith("pinvi_") else map_images[role]
         config = {
             "Cmd": ["serve"],
             "Entrypoint": ["/entrypoint"],
@@ -308,21 +321,101 @@ def _runtime_fixture() -> tuple[dict[str, object], dict[str, object], dict[str, 
             "environment_sha256": _sha256_bytes(
                 _canonical_json(sorted(environments[role]))
             ),
+            "compose_service": service,
+            "container_id": container_id,
             "image_id": image_id,
         }
-    pair = {
-        "contract_generation": generation,
-        "map_image_id": map_images["map_api"],
+    active_generation = {
+        "map_api_image_id": map_images["map_api"],
         "map_ui_image_id": map_images["map_ui"],
         "map_dagster_image_id": map_images["map_dagster_web"],
         "map_dagster_daemon_image_id": map_images["map_dagster_daemon"],
         "map_source_revision": map_commit,
-        "pinvi_image_id": pinvi_image,
+        "pinvi_api_image_id": pinvi_images["pinvi_api"],
+        "pinvi_web_image_id": pinvi_images["pinvi_web"],
+        "pinvi_dagster_image_id": pinvi_images["pinvi_dagster"],
         "pinvi_source_revision": pinvi_commit,
+        "map_application_head": "0090_tvn33_cutover_fence",
+        "map_dagster_head": "29b539ebc72a",
+        "pinvi_head": "20260804_0049",
+        "pinset_sha256": "9" * 64,
         "recorded_at": "2026-07-19T00:00:00+00:00",
     }
-    manifest = {"active": pair, "rollback": copy.deepcopy(pair), "version": 4}
+    manifest = {"active_generation": active_generation, "version": 5}
     manifest_bytes = _canonical_json(manifest)
+    rebuild_journal = {
+        "version": 7,
+        "transaction_id": "11111111-1111-1111-1111-111111111111",
+        "phase": "committed",
+        "candidate": copy.deepcopy(active_generation),
+        "environment_sha256": "c" * 64,
+        "compose_sha256": "d" * 64,
+        "resolved_compose_sha256": "e" * 64,
+        "created_at": "2026-07-19T00:00:01+00:00",
+        "cancel_probe": {
+            "stage": "finalized",
+            "job_id": "22222222-2222-2222-2222-222222222222",
+            "cancellation_id": "33333333-3333-3333-3333-333333333333",
+            "outcome": {
+                "name": "pinvi_cancel_error",
+                "status": 409,
+                "code": "PIPELINE_CANCELLATION_UNSAFE",
+            },
+            "fixture_created_at": "2026-07-19T00:00:02+00:00",
+            "fixture_consumed_at": "2026-07-19T00:00:03+00:00",
+            "fixture_finalized_at": "2026-07-19T00:00:04+00:00",
+        },
+    }
+    rebuild_journal_bytes = _canonical_json(rebuild_journal)
+    final_schema_reload_receipt = {
+        "version": 1,
+        "pinned_runtime_manifest_sha256": _sha256_bytes(manifest_bytes),
+        "pinned_runtime_rebuild_journal_sha256": _sha256_bytes(rebuild_journal_bytes),
+        "schema_heads": {
+            "map_application": active_generation["map_application_head"],
+            "map_dagster": active_generation["map_dagster_head"],
+            "pinvi": active_generation["pinvi_head"],
+        },
+        "source_reload": {
+            "status": "succeeded",
+            "source_snapshot_sha256": "c" * 64,
+            "observed_generation_sha256": _sha256_bytes(
+                _canonical_json(active_generation)
+            ),
+            "observed_map_api_image_id": active_generation["map_api_image_id"],
+            "observed_schema_heads": {
+                "map_application": active_generation["map_application_head"],
+                "map_dagster": active_generation["map_dagster_head"],
+                "pinvi": active_generation["pinvi_head"],
+            },
+            "completed_at": "2026-07-19T00:00:05+00:00",
+        },
+        "etl_reload": {
+            "status": "succeeded",
+            "run_id": "44444444-4444-4444-4444-444444444444",
+            "result_sha256": "e" * 64,
+            "consumed_source_snapshot_sha256": "c" * 64,
+            "rebuild_transaction_id": rebuild_journal["transaction_id"],
+            "observed_generation_sha256": _sha256_bytes(
+                _canonical_json(active_generation)
+            ),
+            "observed_map_api_image_id": active_generation["map_api_image_id"],
+            "observed_schema_heads": {
+                "map_application": active_generation["map_application_head"],
+                "map_dagster": active_generation["map_dagster_head"],
+                "pinvi": active_generation["pinvi_head"],
+            },
+            "completed_at": "2026-07-19T00:00:06+00:00",
+        },
+        "canonical_dataset_availability": {
+            "status": "available",
+            "dataset_count": 1,
+            "feature_count": 1,
+            "availability_sha256": "d" * 64,
+        },
+        "recorded_at": "2026-07-19T00:00:07+00:00",
+    }
+    final_schema_reload_receipt_bytes = _canonical_json(final_schema_reload_receipt)
     environ = {
         "E2E_BASE_URL": "https://map.example.test",
         "E2E_C7_DAGSTER_DAEMON_SERVICE": services["map_dagster_daemon"],
@@ -330,6 +423,8 @@ def _runtime_fixture() -> tuple[dict[str, object], dict[str, object], dict[str, 
         "E2E_C7_EXPECTED_GIT_COMMIT": map_commit,
         "E2E_C7_MAP_API_SERVICE": services["map_api"],
         "E2E_C7_PINVI_API_SERVICE": services["pinvi_api"],
+        "E2E_C7_PINVI_DAGSTER_SERVICE": services["pinvi_dagster"],
+        "E2E_C7_PINVI_WEB_SERVICE": services["pinvi_web"],
         "E2E_C7_PLAYWRIGHT_IMAGE": executor_image,
         "E2E_C7_UI_SERVICE": services["map_ui"],
         "E2E_DAGSTER_URL": "https://dagster.example.test/graphql",
@@ -355,21 +450,54 @@ def _runtime_fixture() -> tuple[dict[str, object], dict[str, object], dict[str, 
     )
     attestation = {
         **observed,
-        "c6c_contract_generation": generation,
-        "compatible_pair_manifest_sha256": _sha256_bytes(manifest_bytes),
         "compose_project_sha256": _sha256_bytes(project_name.encode()),
+        "endpoint_roles": {
+            "api_websocket": "map_api",
+            "dagster_graphql": "map_dagster_web",
+            "ui": "map_ui",
+        },
+        "final_schema_reload_receipt_sha256": _sha256_bytes(
+            final_schema_reload_receipt_bytes
+        ),
         "orchestrator_files": {
             relative: "0" * 64 for relative in ATTESTATION.ORCHESTRATOR_PATHS
         },
         "playwright_base": playwright_base,
         "playwright_image_id": executor_image,
+        "pinned_runtime_manifest_sha256": _sha256_bytes(manifest_bytes),
+        "pinned_runtime_rebuild_journal_sha256": _sha256_bytes(rebuild_journal_bytes),
+        "pinset_sha256": active_generation["pinset_sha256"],
         "repository_commit": map_commit,
+        "schema_heads": {
+            "map_application": active_generation["map_application_head"],
+            "map_dagster": active_generation["map_dagster_head"],
+            "pinvi": active_generation["pinvi_head"],
+        },
         "service_runtime": runtime,
         "source_commits": {"map": map_commit, "pinvi": pinvi_commit},
-        "version": 3,
+        "version": 5,
     }
 
     def run_command(command: list[str], _project_directory: str) -> str:
+        if command[:6] == [
+            "docker",
+            "compose",
+            "--project-directory",
+            "/srv/kor-travel-map",
+            "exec",
+            "-T",
+        ]:
+            assert command[6] == services["map_api"]
+            if command[7:] == ["ktm-application-schema", "head"]:
+                return (
+                    '{"schema":"kor-travel-map.application-head.v1","head":"'
+                    f"{active_generation['map_application_head']}\"}}\n"
+                )
+            assert command[7] == "alembic"
+            if command[8] == "current":
+                return f"{active_generation['map_application_head']} (head)\n"
+            if command[8] == "check":
+                return ""
         if command[:2] == ["docker", "compose"]:
             return service_ids[command[-1]] + "\n"
         if command[:3] == ["docker", "inspect", "--"]:
@@ -378,24 +506,73 @@ def _runtime_fixture() -> tuple[dict[str, object], dict[str, object], dict[str, 
             return json.dumps([image_records[command[4]]])
         raise AssertionError("unexpected command")
 
-    return attestation, manifest, environ, run_command
+    return (
+        attestation,
+        manifest,
+        rebuild_journal,
+        final_schema_reload_receipt,
+        environ,
+        run_command,
+    )
 
 
 def _verify_runtime(
     attestation: dict[str, object],
     manifest: dict[str, object],
+    rebuild_journal: dict[str, object],
+    final_schema_reload_receipt: dict[str, object],
     environ: dict[str, str],
     run_command: Callable,
-) -> tuple[str, str]:
+) -> tuple[str, str, str, str, str]:
     return ATTESTATION.verify_runtime_attestation_payloads(
         _canonical_json(attestation),
         _canonical_json(manifest),
+        _canonical_json(rebuild_journal),
+        _canonical_json(final_schema_reload_receipt),
         project_directory="/srv/kor-travel-map",
         playwright_base="playwright@example",
         environ=environ,
         machine_id="machine-id",
         hostname="n150.example.test",
         run_json=run_command,
+    )
+
+
+def _refresh_reload_receipt_authority(
+    attestation: dict[str, object],
+    manifest: dict[str, object],
+    rebuild_journal: dict[str, object],
+    receipt: dict[str, object],
+) -> None:
+    active = manifest["active_generation"]
+    assert isinstance(active, dict)
+    receipt["pinned_runtime_manifest_sha256"] = _sha256_bytes(_canonical_json(manifest))
+    receipt["pinned_runtime_rebuild_journal_sha256"] = _sha256_bytes(
+        _canonical_json(rebuild_journal)
+    )
+    receipt["schema_heads"] = {
+        "map_application": active["map_application_head"],
+        "map_dagster": active["map_dagster_head"],
+        "pinvi": active["pinvi_head"],
+    }
+    observed_heads = receipt["schema_heads"]
+    assert isinstance(observed_heads, dict)
+    for reload_name in ("source_reload", "etl_reload"):
+        reload = receipt[reload_name]
+        assert isinstance(reload, dict)
+        reload["observed_generation_sha256"] = _sha256_bytes(
+            _canonical_json(active)
+        )
+        reload["observed_map_api_image_id"] = active["map_api_image_id"]
+        reload["observed_schema_heads"] = observed_heads.copy()
+    attestation["pinned_runtime_manifest_sha256"] = receipt[
+        "pinned_runtime_manifest_sha256"
+    ]
+    attestation["pinned_runtime_rebuild_journal_sha256"] = receipt[
+        "pinned_runtime_rebuild_journal_sha256"
+    ]
+    attestation["final_schema_reload_receipt_sha256"] = _sha256_bytes(
+        _canonical_json(receipt)
     )
 
 
@@ -412,6 +589,8 @@ def _mutate_runtime_environment(
         "map_dagster_web": "E2E_C7_DAGSTER_WEB_SERVICE",
         "map_ui": "E2E_C7_UI_SERVICE",
         "pinvi_api": "E2E_C7_PINVI_API_SERVICE",
+        "pinvi_web": "E2E_C7_PINVI_WEB_SERVICE",
+        "pinvi_dagster": "E2E_C7_PINVI_DAGSTER_SERVICE",
     }
     service = environ[service_env[role]]
     container_id = original_run_command(
@@ -446,14 +625,37 @@ def _mutate_runtime_environment(
 
 
 def test_runtime_attestation_fixture_accepts_exact_metadata() -> None:
-    attestation, manifest, environ, run_command = _runtime_fixture()
+    (
+        attestation,
+        manifest,
+        rebuild_journal,
+        final_schema_reload_receipt,
+        environ,
+        run_command,
+    ) = _runtime_fixture()
 
-    manifest_sha256, attestation_sha256 = _verify_runtime(
-        attestation, manifest, environ, run_command
+    (
+        manifest_sha256,
+        rebuild_journal_sha256,
+        reload_receipt_sha256,
+        attestation_sha256,
+        map_application_head,
+    ) = _verify_runtime(
+        attestation,
+        manifest,
+        rebuild_journal,
+        final_schema_reload_receipt,
+        environ,
+        run_command,
     )
 
     assert manifest_sha256 == _sha256_bytes(_canonical_json(manifest))
+    assert rebuild_journal_sha256 == _sha256_bytes(_canonical_json(rebuild_journal))
+    assert reload_receipt_sha256 == _sha256_bytes(
+        _canonical_json(final_schema_reload_receipt)
+    )
     assert attestation_sha256 == _sha256_bytes(_canonical_json(attestation))
+    assert map_application_head == "0090_tvn33_cutover_fence"
 
 
 @pytest.mark.parametrize(
@@ -472,69 +674,350 @@ def test_runtime_attestation_fixture_accepts_exact_metadata() -> None:
 def test_runtime_attestation_rejects_wrong_shape_or_image_metadata(
     mutation: Callable[[dict[str, object]], object],
 ) -> None:
-    attestation, manifest, environ, run_command = _runtime_fixture()
+    attestation, manifest, rebuild_journal, receipt, environ, run_command = _runtime_fixture()
     mutation(attestation)
 
     with pytest.raises(ATTESTATION.AttestationError):
-        _verify_runtime(attestation, manifest, environ, run_command)
+        _verify_runtime(attestation, manifest, rebuild_journal, receipt, environ, run_command)
 
 
-def test_runtime_attestation_rejects_compatible_pair_hash_mismatch() -> None:
-    attestation, manifest, environ, run_command = _runtime_fixture()
-    attestation["compatible_pair_manifest_sha256"] = "f" * 64
+def test_runtime_attestation_rejects_pinned_runtime_manifest_hash_mismatch() -> None:
+    attestation, manifest, rebuild_journal, receipt, environ, run_command = _runtime_fixture()
+    attestation["pinned_runtime_manifest_sha256"] = "f" * 64
 
-    with pytest.raises(ATTESTATION.AttestationError, match="compatible pair mismatch"):
-        _verify_runtime(attestation, manifest, environ, run_command)
+    with pytest.raises(ATTESTATION.AttestationError, match="pinned runtime authority mismatch"):
+        _verify_runtime(attestation, manifest, rebuild_journal, receipt, environ, run_command)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected"),
+    [
+        (
+            lambda value: value["source_reload"].update({"status": "failed"}),
+            "final schema reload receipt",
+        ),
+        (
+            lambda value: value["etl_reload"].update({"status": "running"}),
+            "final schema reload receipt",
+        ),
+        (
+            lambda value: value["canonical_dataset_availability"].update(
+                {"dataset_count": 0}
+            ),
+            "final schema reload receipt",
+        ),
+        (
+            lambda value: value["schema_heads"].update({"map_application": "old_head"}),
+            "final schema reload receipt binding",
+        ),
+        (
+            lambda value: value.update({"pinned_runtime_manifest_sha256": "f" * 64}),
+            "final schema reload receipt binding",
+        ),
+        (
+            lambda value: value["source_reload"].update(
+                {"observed_generation_sha256": "f" * 64}
+            ),
+            "final schema reload receipt",
+        ),
+        (
+            lambda value: value["etl_reload"].update(
+                {"observed_map_api_image_id": "sha256:" + "f" * 64}
+            ),
+            "final schema reload receipt",
+        ),
+        (
+            lambda value: value["etl_reload"]["observed_schema_heads"].update(
+                {"map_application": "old_head"}
+            ),
+            "final schema reload receipt",
+        ),
+        (
+            lambda value: value["source_reload"].update(
+                {"completed_at": "2026-07-18T23:59:59+00:00"}
+            ),
+            "final schema reload receipt",
+        ),
+        (
+            # active_generation.recorded_at과는 같아 기존 검증을 통과하지만,
+            # committed rebuild(00:00:01) 이전 source output은 final reload가 아니다.
+            lambda value: value["source_reload"].update(
+                {"completed_at": "2026-07-19T00:00:00+00:00"}
+            ),
+            "final schema reload receipt",
+        ),
+        (
+            # rebuild commit과 같은 시각은 source reload가 그 뒤에 끝났음을 증명하지 못한다.
+            lambda value: value["source_reload"].update(
+                {"completed_at": "2026-07-19T00:00:01+00:00"}
+            ),
+            "final schema reload receipt",
+        ),
+        (
+            lambda value: value["etl_reload"].update(
+                {"completed_at": "2026-07-19T00:00:05+00:00"}
+            ),
+            "final schema reload receipt",
+        ),
+        (
+            lambda value: value.update({"recorded_at": "2026-07-19T00:00:06+00:00"}),
+            "final schema reload receipt",
+        ),
+        (
+            lambda value: value["etl_reload"].update(
+                {"consumed_source_snapshot_sha256": "f" * 64}
+            ),
+            "final schema reload receipt",
+        ),
+        (
+            lambda value: value["etl_reload"].update(
+                {"rebuild_transaction_id": "99999999-9999-4999-8999-999999999999"}
+            ),
+            "final schema reload receipt",
+        ),
+        (
+            lambda value: value.clear(),
+            "final schema reload receipt shape",
+        ),
+    ],
+)
+def test_runtime_attestation_rejects_stale_or_incomplete_final_schema_reload_receipt(
+    mutation: Callable[[dict[str, object]], object], expected: str
+) -> None:
+    attestation, manifest, rebuild_journal, receipt, environ, run_command = _runtime_fixture()
+    mutation(receipt)
+    attestation["final_schema_reload_receipt_sha256"] = _sha256_bytes(
+        _canonical_json(receipt)
+    )
+
+    with pytest.raises(ATTESTATION.AttestationError, match=expected):
+        _verify_runtime(attestation, manifest, rebuild_journal, receipt, environ, run_command)
+
+
+@pytest.mark.parametrize(
+    ("role", "service_env"),
+    [
+        ("map_api", "E2E_C7_MAP_API_SERVICE"),
+        ("map_dagster_daemon", "E2E_C7_DAGSTER_DAEMON_SERVICE"),
+        ("map_dagster_web", "E2E_C7_DAGSTER_WEB_SERVICE"),
+        ("map_ui", "E2E_C7_UI_SERVICE"),
+        ("pinvi_api", "E2E_C7_PINVI_API_SERVICE"),
+        ("pinvi_web", "E2E_C7_PINVI_WEB_SERVICE"),
+        ("pinvi_dagster", "E2E_C7_PINVI_DAGSTER_SERVICE"),
+    ],
+)
+def test_runtime_attestation_rejects_shadow_compose_service_env(
+    role: str, service_env: str
+) -> None:
+    attestation, manifest, rebuild_journal, receipt, environ, run_command = _runtime_fixture()
+    environ[service_env] = f"shadow-{role}"
+
+    with pytest.raises(ATTESTATION.AttestationError, match="runtime attestation value"):
+        _verify_runtime(attestation, manifest, rebuild_journal, receipt, environ, run_command)
+
+
+@pytest.mark.parametrize(
+    "role",
+    [
+        "map_api",
+        "map_dagster_daemon",
+        "map_dagster_web",
+        "map_ui",
+        "pinvi_api",
+        "pinvi_web",
+        "pinvi_dagster",
+    ],
+)
+def test_runtime_attestation_rejects_each_runtime_container_binding_drift(
+    role: str,
+) -> None:
+    attestation, manifest, rebuild_journal, receipt, environ, run_command = _runtime_fixture()
+    service_runtime = attestation["service_runtime"]
+    assert isinstance(service_runtime, dict)
+    role_runtime = service_runtime[role]
+    assert isinstance(role_runtime, dict)
+    role_runtime["container_id"] = "f" * 64
+
+    with pytest.raises(ATTESTATION.AttestationError, match="runtime container binding"):
+        _verify_runtime(attestation, manifest, rebuild_journal, receipt, environ, run_command)
+
+
+def test_runtime_attestation_rejects_endpoint_role_binding_drift() -> None:
+    attestation, manifest, rebuild_journal, receipt, environ, run_command = _runtime_fixture()
+    attestation["endpoint_roles"] = {
+        "api_websocket": "map_ui",
+        "dagster_graphql": "map_dagster_web",
+        "ui": "map_api",
+    }
+    with pytest.raises(ATTESTATION.AttestationError, match="endpoint role binding"):
+        _verify_runtime(attestation, manifest, rebuild_journal, receipt, environ, run_command)
+
+
+@pytest.mark.parametrize(
+    ("command_tail", "expected_error"),
+    [
+        (
+            ["ktm-application-schema", "head"],
+            "Map application installed artifact head mismatch",
+        ),
+        (["alembic", "current"], "Map application database head mismatch"),
+    ],
+)
+def test_runtime_attestation_rejects_installed_artifact_or_database_head_drift(
+    command_tail: list[str],
+    expected_error: str,
+) -> None:
+    (
+        attestation,
+        manifest,
+        rebuild_journal,
+        receipt,
+        environ,
+        original_run_command,
+    ) = _runtime_fixture()
+
+    def wrong_head(command: list[str], project_directory: str) -> str:
+        if command[-len(command_tail) :] == command_tail:
+            if command_tail[0] == "ktm-application-schema":
+                return (
+                    '{"schema":"kor-travel-map.application-head.v1",'
+                    '"head":"0089_tvn33_constraints"}\n'
+                )
+            return "0089_tvn33_constraints (head)\n"
+        return original_run_command(command, project_directory)
+
+    with pytest.raises(ATTESTATION.AttestationError, match=expected_error):
+        _verify_runtime(attestation, manifest, rebuild_journal, receipt, environ, wrong_head)
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        '{"schema":"kor-travel-map.application-head.v1","head":"UPPER"}\n',
+        '{"head":"0090_tvn33_cutover_fence","schema":"kor-travel-map.application-head.v1"}\n',
+        '{"schema":"kor-travel-map.application-head.v1","head":"0090_tvn33_cutover_fence"}\nextra\n',
+    ],
+)
+def test_runtime_attestation_rejects_noncanonical_installed_schema_artifact_output(
+    output: str,
+) -> None:
+    attestation, manifest, rebuild_journal, receipt, environ, original_run_command = (
+        _runtime_fixture()
+    )
+
+    def malformed_artifact(command: list[str], project_directory: str) -> str:
+        if command[-2:] == ["ktm-application-schema", "head"]:
+            return output
+        return original_run_command(command, project_directory)
+
+    with pytest.raises(ATTESTATION.AttestationError, match="schema artifact output"):
+        _verify_runtime(
+            attestation,
+            manifest,
+            rebuild_journal,
+            receipt,
+            environ,
+            malformed_artifact,
+        )
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected"),
+    [
+        (
+            lambda value: value.update({"phase": "prepared"}),
+            "pinned runtime rebuild journal",
+        ),
+        (
+            lambda value: value["candidate"].update({"pinset_sha256": "f" * 64}),
+            "pinned runtime journal candidate drift",
+        ),
+        (
+            lambda value: value["cancel_probe"].update({"stage": "consumed"}),
+            "pinned runtime cancel probe",
+        ),
+        (
+            lambda value: value["cancel_probe"].update(
+                {
+                    "fixture_consumed_at": "2026-07-19T00:00:01+00:00",
+                    "fixture_finalized_at": "2026-07-19T00:00:00+00:00",
+                }
+            ),
+            "pinned runtime cancel probe ordering",
+        ),
+    ],
+)
+def test_runtime_attestation_rejects_uncommitted_or_inexact_rebuild_journal(
+    mutation: Callable[[dict[str, object]], object], expected: str
+) -> None:
+    attestation, manifest, rebuild_journal, receipt, environ, run_command = _runtime_fixture()
+    mutation(rebuild_journal)
+    attestation["pinned_runtime_rebuild_journal_sha256"] = _sha256_bytes(
+        _canonical_json(rebuild_journal)
+    )
+
+    with pytest.raises(ATTESTATION.AttestationError, match=expected):
+        _verify_runtime(attestation, manifest, rebuild_journal, receipt, environ, run_command)
 
 
 @pytest.mark.parametrize(
     "mutation",
     [
-        lambda value: value.update({"version": 3}),
-        lambda value: value["active"].pop("map_ui_image_id"),
-        lambda value: value["rollback"].update({"unexpected": True}),
+        lambda value: value.update({"version": 4}),
+        lambda value: value["active_generation"].pop("map_ui_image_id"),
+        lambda value: value.update({"unexpected": True}),
     ],
 )
-def test_runtime_attestation_rejects_non_v4_or_inexact_pair_shape(
+def test_runtime_attestation_rejects_non_v5_or_inexact_generation_shape(
     mutation: Callable[[dict[str, object]], object],
 ) -> None:
-    attestation, manifest, environ, run_command = _runtime_fixture()
+    attestation, manifest, rebuild_journal, receipt, environ, run_command = _runtime_fixture()
     mutation(manifest)
-    attestation["compatible_pair_manifest_sha256"] = _sha256_bytes(
+    attestation["pinned_runtime_manifest_sha256"] = _sha256_bytes(
         _canonical_json(manifest)
     )
 
     with pytest.raises(ATTESTATION.AttestationError):
-        _verify_runtime(attestation, manifest, environ, run_command)
+        _verify_runtime(attestation, manifest, rebuild_journal, receipt, environ, run_command)
 
 
 @pytest.mark.parametrize(
     "field",
     [
-        "map_image_id",
+        "map_api_image_id",
         "map_ui_image_id",
         "map_dagster_image_id",
         "map_dagster_daemon_image_id",
-        "pinvi_image_id",
+        "pinvi_api_image_id",
+        "pinvi_web_image_id",
+        "pinvi_dagster_image_id",
     ],
 )
 def test_runtime_attestation_rejects_each_active_runtime_image_mismatch(
     field: str,
 ) -> None:
-    attestation, manifest, environ, run_command = _runtime_fixture()
-    active = manifest["active"]
+    attestation, manifest, rebuild_journal, receipt, environ, run_command = _runtime_fixture()
+    active = manifest["active_generation"]
     assert isinstance(active, dict)
     active[field] = "sha256:" + "f" * 64
-    attestation["compatible_pair_manifest_sha256"] = _sha256_bytes(
-        _canonical_json(manifest)
-    )
+    candidate = rebuild_journal["candidate"]
+    assert isinstance(candidate, dict)
+    candidate[field] = active[field]
+    _refresh_reload_receipt_authority(attestation, manifest, rebuild_journal, receipt)
 
-    with pytest.raises(ATTESTATION.AttestationError, match="active pair is not deployed"):
-        _verify_runtime(attestation, manifest, environ, run_command)
+    with pytest.raises(ATTESTATION.AttestationError, match="active generation is not deployed"):
+        _verify_runtime(attestation, manifest, rebuild_journal, receipt, environ, run_command)
 
 
 def test_runtime_attestation_rejects_wrong_oci_revision() -> None:
-    attestation, manifest, environ, original_run_command = _runtime_fixture()
+    (
+        attestation,
+        manifest,
+        rebuild_journal,
+        receipt,
+        environ,
+        original_run_command,
+    ) = _runtime_fixture()
 
     def tampered_run_command(command: list[str], project_directory: str) -> str:
         output = original_run_command(command, project_directory)
@@ -547,7 +1030,14 @@ def test_runtime_attestation_rejects_wrong_oci_revision() -> None:
         return json.dumps(records)
 
     with pytest.raises(ATTESTATION.AttestationError, match="source provenance"):
-        _verify_runtime(attestation, manifest, environ, tampered_run_command)
+        _verify_runtime(
+            attestation,
+            manifest,
+            rebuild_journal,
+            receipt,
+            environ,
+            tampered_run_command,
+        )
 
 
 @pytest.mark.parametrize(
@@ -598,7 +1088,14 @@ def test_runtime_attestation_rejects_wrong_oci_revision() -> None:
 def test_runtime_attestation_rejects_invalid_api_cursor_secret_shape(
     mutation: Callable[[list[str]], None],
 ) -> None:
-    attestation, manifest, environ, original_run_command = _runtime_fixture()
+    (
+        attestation,
+        manifest,
+        rebuild_journal,
+        receipt,
+        environ,
+        original_run_command,
+    ) = _runtime_fixture()
     run_command = _mutate_runtime_environment(
         attestation,
         environ,
@@ -608,7 +1105,7 @@ def test_runtime_attestation_rejects_invalid_api_cursor_secret_shape(
     )
 
     with pytest.raises(ATTESTATION.AttestationError, match="cursor secret runtime shape"):
-        _verify_runtime(attestation, manifest, environ, run_command)
+        _verify_runtime(attestation, manifest, rebuild_journal, receipt, environ, run_command)
 
 
 @pytest.mark.parametrize(
@@ -626,7 +1123,14 @@ def test_runtime_attestation_rejects_invalid_api_cursor_secret_shape(
 def test_runtime_attestation_rejects_api_cursor_secret_reuse(
     protected_name: str,
 ) -> None:
-    attestation, manifest, environ, original_run_command = _runtime_fixture()
+    (
+        attestation,
+        manifest,
+        rebuild_journal,
+        receipt,
+        environ,
+        original_run_command,
+    ) = _runtime_fixture()
 
     def reuse_protected_value(values: list[str]) -> None:
         cursor = next(
@@ -650,11 +1154,18 @@ def test_runtime_attestation_rejects_api_cursor_secret_reuse(
     )
 
     with pytest.raises(ATTESTATION.AttestationError, match="cursor secret runtime reuse"):
-        _verify_runtime(attestation, manifest, environ, run_command)
+        _verify_runtime(attestation, manifest, rebuild_journal, receipt, environ, run_command)
 
 
 def test_runtime_attestation_rejects_duplicate_cursor_secret_name() -> None:
-    attestation, manifest, environ, original_run_command = _runtime_fixture()
+    (
+        attestation,
+        manifest,
+        rebuild_journal,
+        receipt,
+        environ,
+        original_run_command,
+    ) = _runtime_fixture()
     run_command = _mutate_runtime_environment(
         attestation,
         environ,
@@ -666,15 +1177,29 @@ def test_runtime_attestation_rejects_duplicate_cursor_secret_name() -> None:
     )
 
     with pytest.raises(ATTESTATION.AttestationError, match="runtime environment shape"):
-        _verify_runtime(attestation, manifest, environ, run_command)
+        _verify_runtime(attestation, manifest, rebuild_journal, receipt, environ, run_command)
 
 
 @pytest.mark.parametrize(
     "role",
-    ["map_dagster_daemon", "map_dagster_web", "map_ui", "pinvi_api"],
+    [
+        "map_dagster_daemon",
+        "map_dagster_web",
+        "map_ui",
+        "pinvi_api",
+        "pinvi_web",
+        "pinvi_dagster",
+    ],
 )
 def test_runtime_attestation_rejects_cursor_secret_outside_api(role: str) -> None:
-    attestation, manifest, environ, original_run_command = _runtime_fixture()
+    (
+        attestation,
+        manifest,
+        rebuild_journal,
+        receipt,
+        environ,
+        original_run_command,
+    ) = _runtime_fixture()
     run_command = _mutate_runtime_environment(
         attestation,
         environ,
@@ -686,4 +1211,4 @@ def test_runtime_attestation_rejects_cursor_secret_outside_api(role: str) -> Non
     )
 
     with pytest.raises(ATTESTATION.AttestationError, match="escaped API runtime"):
-        _verify_runtime(attestation, manifest, environ, run_command)
+        _verify_runtime(attestation, manifest, rebuild_journal, receipt, environ, run_command)
