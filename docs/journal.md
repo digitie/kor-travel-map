@@ -73,6 +73,18 @@
   `test_h35_exact_surface_network_free_rehearsal`도 main에서 같이 실패한다 —
   "외부 접속 없음" socket guard가 컨테이너 안 testcontainers의 bridge IP를
   외부로 판정한다(CI는 localhost라 무관).
+- **진짜 회귀 1건**(CI 통합 job에서도 동일 재현): `test_batch_dag` 5건이
+  consistency 게이트에 막혔다. 뿌리는 `test_admin_feature_repo`의 잠금
+  테스트가 rollback이 아니라 **커밋**한다는 것 — `migrated_engine`은 session
+  scope 공유 DB다. 종전엔 core 행에 `detail`이 딸려 남았지만 subtype 전환 뒤엔
+  core만 남아 세션 내내 F2("subtype 결측") 위반으로 떠 있었고, 뒤따르는 batch
+  DAG의 게이트가 mv_refresh를 막았다. 모듈 쌍 bisect로 확정(그 조합만 5건
+  재현, 나머지 3조합 전부 통과). 프로덕션 writer가 core+subtype을 한
+  트랜잭션에서 쓰므로 시드도 그렇게 맞췄다 — **F2 축 자체는 옳으므로 완화하지
+  않았다**.
+- 겸사겸사 게이트 실패 메시지가 막은 축의 코드·건수·표본 id를 남기게 했다.
+  `severity_max=ERROR`만으로는 운영자가 무엇을 고쳐야 할지 알 수 없고 그동안
+  배치가 멈춰 있게 된다.
 ## 2026-08-06 (3) — T-VN-41F1J-A: response-loss 재개 증빙 보강
 
 Manager 적대적 리뷰가 PinVi cancel HTTP 응답이 유실된 뒤 Map `consumed` state를 읽어도 journal에
