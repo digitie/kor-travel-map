@@ -42,6 +42,31 @@
       "sqlstate": "23514",
       "constraint": "ck_weather_value_bitemporal_order",
       "basis": "ADR-072"
+    },
+    "provider_dataset_capability_invalid": {
+      "sqlstate": "23514",
+      "constraint": "ck_provider_datasets_capabilities",
+      "basis": "ADR-087"
+    },
+    "inactive_dataset_source_entity_write": {
+      "sqlstate": "23514",
+      "constraint": "ck_provider_dataset_active_write",
+      "basis": "ADR-087"
+    },
+    "source_record_immutable_update": {
+      "sqlstate": "23514",
+      "constraint": "ck_source_records_immutable",
+      "basis": "ADR-069"
+    },
+    "source_head_cross_entity": {
+      "sqlstate": "23503",
+      "constraint": "fk_source_entity_heads_record",
+      "basis": "ADR-069"
+    },
+    "source_head_missing": {
+      "sqlstate": "23514",
+      "constraint": "ck_source_entity_heads_complete",
+      "basis": "ADR-087"
     }
   }
 }

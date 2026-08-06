@@ -1,5 +1,14 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-06 — T-VN-33 동결 계약 통과, 설계 재리뷰 진행 중
+
+T-VN-33의 target DDL·invariant·rejection fixture를 ADR-087에 맞춰 확장했다. 빈 PostGIS
+DB의 동결 통합 3건과 artifact unit 7건을 통과했으며, inactive dataset write의 공용 guard
+범위와 immutable raw/`observed_at` head ordering도 executable contract로 고정했다.
+
+**다음 한 작업**: 두 적대 리뷰어의 설계 재리뷰에서 P0=0 GO를 받은 뒤, T-VN-33A의 actual
+migration/model/seed 구현을 같은 단일 PR에 누적한다.
+
 ## 2026-08-06 — T-VN-33 A/B/C 단일 PR 설계·적대 리뷰 완료, 구현 착수
 
 T-VN-33A/B/C를 세 PR로 나누지 않고 하나의 DB 정본 PR로 합쳤다. 초기 계획은 적대적

@@ -41,7 +41,7 @@ _FINGERPRINTS_JSON: Final = _CONTRACTS / "target-schema-fingerprints-v1.json"
 _VIOLATIONS_SQL: Final = _CONTRACTS / "violation-fixtures-v1.sql"
 _REJECTIONS_JSON: Final = _CONTRACTS / "expected-rejections-v1.json"
 
-_EXPECTED_INVARIANT_COUNT: Final = 43
+_EXPECTED_INVARIANT_COUNT: Final = 47
 _INVARIANT_PHASES: Final = frozenset({"pre-backfill", "post-backfill", "both"})
 
 # fingerprint 대상 — target-schema-v1.sql이 만드는 전체 relation.
@@ -64,6 +64,7 @@ _TARGET_TABLES: Final = (
     "feature.curation_items",
     "feature.theme_feature_candidates",
     "provider_sync.provider_datasets",
+    "provider_sync.provider_dataset_operations",
     "provider_sync.source_entities",
     "provider_sync.source_records",
     "provider_sync.source_entity_heads",
@@ -75,7 +76,13 @@ _TARGET_TABLES: Final = (
 _TARGET_RELATIONS: Final = (*_TARGET_TABLES, "feature.public_features")
 _TARGET_FUNCTIONS: Final = (
     "feature.force_features_row_revision()",
+    "provider_sync.is_valid_provider_dataset_capabilities(jsonb)",
+    "provider_sync.reject_provider_dataset_identity_update()",
+    "provider_sync.touch_provider_dataset()",
+    "provider_sync.reject_inactive_provider_dataset()",
     "provider_sync.reject_source_record_update()",
+    "provider_sync.enforce_source_entity_head_freshness()",
+    "provider_sync.assert_source_entity_head_completeness()",
 )
 
 # =============================================================================

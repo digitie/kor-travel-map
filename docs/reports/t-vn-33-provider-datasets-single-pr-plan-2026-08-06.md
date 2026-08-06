@@ -75,9 +75,12 @@ payload hash는 lowercase hex 1~64자, entity type/id는 trim·NFC·길이 512�
   `expires_at`를 가진다. head의 `(source_entity_key, current_source_record_key)` composite
   FK가 다른 entity record를 가리키는 것을 막는다.
 - writer는 entity upsert/lock → record `ON CONFLICT DO NOTHING` → deterministic head
-  upsert 순서의 한 transaction이다. head 승격 순서는
-  `(fetched_at, imported_at, source_record_key)`이고, 같은 payload 재관측은 head의
-  observation freshness만 전진시킨다.
+  upsert 순서의 한 transaction이다. **incoming `observed_at`**(이번 적재가 실제로
+  관측을 완료한 시각)가 head 승격의 권위 축이며 동률은 `source_record_key`로만
+  결정한다. 따라서 과거 raw snapshot을 오늘 다시 관측해도 immutable record 시각을
+  바꾸지 않고 current head로 승격할 수 있다. `expires_at`은 더 새 `(observed_at,
+  source_record_key)` 전이에서만 바뀌며, 더 이른 만료로의 수정도 새 관측 사실이면
+  허용한다. stale 관측은 head·만료를 전혀 바꾸지 못한다.
 - deferred constraint trigger가 “record가 하나 이상인 entity에는 head가 정확히 하나”를
   commit 시 검사한다. purge는 head를 먼저 유효한 다음 record로 옮기거나 entity와 함께
   제거하는 전용 경로만 사용한다.
@@ -100,6 +103,18 @@ denormalized identity와 파생 raw 열은 기존 row의 forensic snapshot으로
 `source_entities → provider_datasets`와 `source_entity_heads`만 조인한다. 정확한
 column/constraint/index/trigger/repository/query 목록은 구현 결과로
 `docs/removal-manifests/t-vn-33-source-lineage.sql`에 고정하고 T-VN-39에서만 물리 삭제한다.
+
+`is_active=false` dataset은 역사 row를 읽을 수는 있으나 새로운 entity, operation,
+policy, sync state, membership, upload, curation/integrity/POI/enrichment write를 받을 수
+없다. 모든 canonical child/membership에 붙이는 하나의 `BEFORE INSERT OR UPDATE OF
+provider_dataset_id` trigger가 이를 SQLSTATE `23514`로 막는다. purge와 final-schema
+rebuild만 명시적으로 이 guard 밖의 전용 경로다.
+
+target freeze에서 이미 직접 guard를 검증하는 물리 경계는
+`provider_dataset_operations`, `source_entities`, `notice_states`,
+`feature_weather_values`, `current_weather_summary`다. 이번 PR에서 새로 정규화하는
+각 table/membership도 같은 trigger를 붙이며, indirect 소유자인 `source_records`와
+`source_links`는 `source_entities`의 guard를 통해서만 새 dataset에 귀속될 수 있다.
 
 ### 4. FK 수렴 matrix
 

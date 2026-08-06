@@ -27,29 +27,29 @@ _CONTRACTS: Final = _ROOT / "contracts" / "vnext"
 # artifact bytes 고정 — 갱신 절차: artifact 수정 → 통합 테스트로 fingerprint 재고정
 # → 여기 sha256 갱신 (한 PR에서 함께).
 ARTIFACT_SHA256: Final[dict[str, str]] = {
-    "target-schema-v1.sql": ("787e2148179e92bd046c4942c7fc8ef6894ab88c4534d49c8fbe86cfa9df9584"),
+    "target-schema-v1.sql": ("47f584076c2e4165e36b87b6d2cc6360e91e09fd309ab15dd46e37c3e46e4f7a"),
     "target-invariants-v1.sql": (
-        "69141aa067bc882ef35bcc2cde7a5d7264cb2f58405c3a9ec84c233a12db595b"
+        "c324ac589aeaa873e242d5568c542301c591b8cf7c72ec34d21d8596c902c85b"
     ),
     "target-schema-fingerprints-v1.json": (
-        "8e14b96aa973f451012fd0ad22fc0eddbe4a2ff6fc812e79ac4efe6bd4630f52"
+        "9a0a2b2a3f425ed94e862e1256f6b97d116b4e7d2c3d18dea54d7bc585aaacb5"
     ),
     "openapi-diff-v1.json": ("01ad3d690d599020843be4c1f2dad5df9ffaaebeb6d87785e333e8015e942d6a"),
     "consumer-rollout-v1.json": (
         "684ee2b903124ea506bc34e418f26b254cd5c7a18f0332eebfe99fe655e09e3c"
     ),
     "violation-fixtures-v1.sql": (
-        "8ac1aa2f6a1f6717f55c016d95997bd9b5df4a094478826e3803e39dfc06158f"
+        "a12db9198948131aed1b2c93b985beda59483be65db8d931588629c950474952"
     ),
     "expected-rejections-v1.json": (
-        "1d647acb4e14d753b2ead737ba7f066649c69fd8f493ba5a7e9ee5ac0e1dec33"
+        "382fa8a045081e3a0962b9dcb2ad3c12f3cfac74db6de9d70a1b66116701cf29"
     ),
     "recovery-preflight-v1.json": (
         "0e7e1ea595d034aacda8b4c94b56de6c2a24059f150c8cbd6c0670aebce7dfdd"
     ),
 }
 
-_EXPECTED_INVARIANT_COUNT: Final = 43
+_EXPECTED_INVARIANT_COUNT: Final = 47
 _INVARIANT_PHASES: Final = frozenset({"pre-backfill", "post-backfill", "both"})
 _SURFACES: Final = ("user", "service", "admin")
 _CHANGE_KEYS: Final = (
@@ -215,7 +215,7 @@ def test_expected_rejections_consistent_with_fixtures_and_ddl() -> None:
     assert set(rejections) == _load_violation_case_names()
     schema_sql = (_CONTRACTS / "target-schema-v1.sql").read_text(encoding="utf-8")
     for name, case in rejections.items():
-        assert re.fullmatch(r"23(505|514)", case["sqlstate"]), name
+        assert re.fullmatch(r"23(503|505|514)", case["sqlstate"]), name
         assert case["constraint"] in schema_sql, (
             f"case {name}의 제약명 {case['constraint']}이 target DDL에 없다"
         )

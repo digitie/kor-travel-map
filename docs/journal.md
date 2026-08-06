@@ -2,6 +2,15 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-06 (codex) — T-VN-33 target contract 실행 검증
+
+- ADR-087의 versioned capability/operation, immutable source record, `observed_at` head,
+  inactive dataset 공용 write guard를 target DDL·invariant·rejection fixture에 고정했다.
+  direct dataset FK guard는 operation, entity, notice state, weather history/summary까지
+  동일 SQLSTATE `23514`로 검증한다.
+- 빈 PostGIS DB에서 target freeze 통합 3건과 artifact unit 7건이 통과했다. 이 동결 계약은
+  T-VN-33 구현 시작 전 적대 스키마·마이그레이션 재리뷰에 제출했다.
+
 ## 2026-08-06 (codex) — T-VN-33 A/B/C 단일 PR 설계와 적대 검토 결선
 
 - 사용자 지시에 따라 provider dataset A/B/C를 각각의 PR로 나누지 않고, schema/backfill·전

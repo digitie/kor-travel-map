@@ -21,13 +21,17 @@ pair 정본으로 남고, 동일 raw payload 재관측이 immutable record를 UP
    versioned migration seed로 bootstrap하고 active DB operation과 handler의 exact set을 검증한다.
 3. raw snapshot은 `source_records`에 append-only로 저장한다. 재관측 시각·현재 만료는
    `source_entities`와 `source_entity_heads`가 소유한다. head는 same-entity composite FK와
-   deferred completeness trigger로 정확히 하나의 current record를 보장한다.
+   deferred completeness trigger로 정확히 하나의 current record를 보장한다. incoming
+   `observed_at`이 head 승격의 권위 시간이라 기존 raw snapshot을 재관측해도 raw UPDATE 없이
+   head를 전진시킬 수 있으며, stale 관측은 expiry를 포함해 head를 바꾸지 못한다.
 4. multi-dataset operation은 scalar dataset FK가 아니라 membership table로 표현한다. event의
    pair는 job/member에서 파생한다. provider-only audit/file은 fake dataset을 만들지 않는
    명시적 예외다.
 5. legacy provider/dataset/raw-derived/primary-boolean columns은 T-VN-33C에서 normal read와
    write에서 fence하고, exact removal manifest를 T-VN-39에 넘긴다. compatibility shim과
    long-lived dual write는 만들지 않는다.
+6. inactive dataset을 참조한 새 canonical child/membership write는 공용 DB trigger가
+   SQLSTATE `23514`로 거부한다. 역사 read와 purge/final-schema rebuild 경계는 별도다.
 
 ## 결과
 

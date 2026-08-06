@@ -94,6 +94,18 @@ FROM (
     HAVING count(*) > 1
 ) AS duplicated; -- expect: 0 -- phase: both
 
+-- [INV-069-02a] capability는 versioned 최소 shape를 따른다.
+SELECT count(*)
+FROM provider_sync.provider_datasets
+WHERE NOT provider_sync.is_valid_provider_dataset_capabilities(capabilities); -- expect: 0 -- phase: both
+
+-- [INV-069-02b] operation은 실제 dataset에만 속하며 handler binding 전 검증 대상이다.
+SELECT count(*)
+FROM provider_sync.provider_dataset_operations AS operation
+LEFT JOIN provider_sync.provider_datasets AS dataset
+  ON dataset.provider_dataset_id = operation.provider_dataset_id
+WHERE dataset.provider_dataset_id IS NULL; -- expect: 0 -- phase: both
+
 -- [INV-069-03] source_entities → provider_datasets FK orphan 없음.
 SELECT count(*)
 FROM provider_sync.source_entities AS e
@@ -129,6 +141,23 @@ LEFT JOIN provider_sync.source_records AS r
    AND r.source_record_key = h.current_source_record_key
 WHERE r.source_record_key IS NULL; -- expect: 0 -- phase: both
 
+-- [INV-069-06a] record가 있으면 head는 정확히 하나, record가 없으면 head도 없다.
+SELECT count(*)
+FROM (
+    SELECT
+        entity.source_entity_key,
+        count(record.source_record_key) AS record_count,
+        count(head.source_entity_key) AS head_count
+    FROM provider_sync.source_entities AS entity
+    LEFT JOIN provider_sync.source_records AS record
+      ON record.source_entity_key = entity.source_entity_key
+    LEFT JOIN provider_sync.source_entity_heads AS head
+      ON head.source_entity_key = entity.source_entity_key
+    GROUP BY entity.source_entity_key
+    HAVING (count(record.source_record_key) = 0 AND count(head.source_entity_key) <> 0)
+        OR (count(record.source_record_key) > 0 AND count(head.source_entity_key) <> 1)
+) AS incomplete; -- expect: 0 -- phase: both
+
 -- [INV-069-07] source_links의 is_primary_source 잔재 없음 — primary 판정은
 -- source_role 단일 필드(D-5-4). CHECK 위반(허용 role 밖) 카운트.
 SELECT count(*)
@@ -142,6 +171,11 @@ WHERE source_role NOT IN (
 SELECT count(*)
 FROM provider_sync.source_records
 WHERE jsonb_typeof(raw_data) IS DISTINCT FROM 'object'; -- expect: 0 -- phase: both
+
+-- [INV-069-09] raw payload hash는 canonical lowercase hex prefix다.
+SELECT count(*)
+FROM provider_sync.source_records
+WHERE raw_payload_hash !~ '^[0-9a-f]{1,64}$'; -- expect: 0 -- phase: both
 
 -- -----------------------------------------------------------------------------
 -- ADR-067 — 직교 3축 상태 + 단일 공개 정본 (T-VN-34)
