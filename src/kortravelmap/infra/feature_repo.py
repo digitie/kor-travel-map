@@ -66,7 +66,6 @@ from kortravelmap.core.exceptions import (
     FeatureSearchCursorTamperedError,
     FeatureSearchCursorVersionUnsupportedError,
 )
-from kortravelmap.core.notice_lineage_scopes import notice_lineage_scope_sql
 from kortravelmap.infra.feature_identity import (
     candidate_feature_uuid,
     verify_feature_uuid,
@@ -357,16 +356,100 @@ ON CONFLICT (source_entity_key) DO UPDATE SET
 RETURNING current_source_record_key
 """
 
+# notice 계보 key를 만드는 **유일한 식**이다 (ADR-087).
+#
+# 종전에는 같은 CASE가 read 필터·reconcile·writer에 손으로 복사돼 흩어져 있었다.
+# 한 벌만 어긋나도 공개 표면과 admin/reconcile이 서로 다른 계보로 묶이는데, 그
+# 불일치는 어떤 제약도 잡아주지 못한다 — 값이 write-once라 재검증 경로가 없다.
+# 그래서 파이썬 한 곳에서 만들고, 인자로 "무엇을 읽을지"만 바꾼다: 컬럼 참조
+# (``sr.provider``)든 bind 파라미터 캐스트(``CAST(:provider AS text)``)든 같다.
+def _notice_lineage_expr(
+    *,
+    provider: str,
+    dataset_key: str,
+    source_entity_type: str,
+    raw_data: str,
+    source_entity_id: str,
+) -> str:
+    """계보 key SQL 식. 모든 인자는 신뢰된 정적 SQL 조각이다."""
+
+    return f"""
+    CASE
+      WHEN {provider} = 'python-krex-api'
+       AND {dataset_key} = 'krex_traffic_notices'
+       AND {source_entity_type} = 'traffic_notice'
+      THEN COALESCE(
+        NULLIF(
+          concat_ws(
+            '::',
+            NULLIF(lower(btrim({raw_data}->>'occurred_date')), ''),
+            NULLIF(lower(btrim({raw_data}->>'occurred_time')), ''),
+            NULLIF(lower(btrim({raw_data}->>'route_no')), ''),
+            NULLIF(lower(btrim({raw_data}->>'direction')), ''),
+            NULLIF(lower(btrim({raw_data}->>'point_name')), ''),
+            NULLIF(lower(btrim({raw_data}->>'incident_type_code')), '')
+          ),
+          ''
+        ),
+        {source_entity_id}
+      )
+      WHEN {provider} = 'python-kma-api'
+       AND {dataset_key} = 'kma_weather_alerts'
+       AND {source_entity_type} = 'weather_alert'
+      THEN COALESCE(
+        NULLIF(
+          concat_ws(
+            '::',
+            NULLIF(btrim({raw_data}->>'region_code'), ''),
+            NULLIF(
+              btrim(
+                COALESCE(
+                  {raw_data}->>'phenomenon',
+                  {raw_data}->>'alert_type'
+                )
+              ),
+              ''
+            )
+          ),
+          ''
+        ),
+        {source_entity_id}
+      )
+      ELSE {source_entity_id}
+    END
+    """
+
+
+def _notice_lineage_sql(alias: str) -> str:
+    """``source_records`` 행에서 계보 key를 **재계산**하는 SQL.
+
+    현행 표면은 저장 컬럼 ``{alias}.lineage_key``를 읽는다. 이 재계산이 필요한
+    곳은 컬럼이 존재하지 않는 H35 고정 세대(0063~0079) replay뿐이다.
+    """
+
+    return _notice_lineage_expr(
+        provider=f"{alias}.provider",
+        dataset_key=f"{alias}.dataset_key",
+        source_entity_type=f"{alias}.source_entity_type",
+        raw_data=f"{alias}.raw_data",
+        source_entity_id=f"{alias}.source_entity_id",
+    )
+
+
 # source_records는 payload_hash가 UNIQUE 구성요소 → 이력 보존 (ADR-017).
 # 같은 source_record_key 재적재는 원문을 건드리지 않고 마지막 확인 시각만 갱신한다.
-#: notice scope 판정 — writer와 alembic 0088 backfill이 **같은 정본**을 쓴다.
-# 같은 bind 파라미터가 INSERT 값(varchar 컬럼)과 이 술어(text 비교) 양쪽에 쓰인다.
+#
+# 계보 key는 INSERT에서 함께 계산한다. record는 불변이라(``ON CONFLICT``는
+# ``last_seen_at``만 갱신) 값이 낡지 않고, 별도 UPDATE 왕복도 생기지 않는다.
+# 같은 bind 파라미터가 INSERT 값(varchar 컬럼)과 이 식(text 연산) 양쪽에 쓰이므로
 # 명시 CAST가 없으면 Postgres가 한 파라미터에 두 타입을 추론해 Parse 단계에서
 # ``AmbiguousParameterError``로 죽는다 — **모든 provider의 모든 record 쓰기**가.
-_NOTICE_SCOPE_PREDICATE: Final[str] = notice_lineage_scope_sql(
-    "CAST(:provider AS text)",
-    "CAST(:dataset_key AS text)",
-    "CAST(:source_entity_type AS text)",
+_WRITER_NOTICE_LINEAGE_SQL: Final[str] = _notice_lineage_expr(
+    provider="CAST(:provider AS text)",
+    dataset_key="CAST(:dataset_key AS text)",
+    source_entity_type="CAST(:source_entity_type AS text)",
+    raw_data="CAST(:raw_data AS jsonb)",
+    source_entity_id="CAST(:source_entity_id AS text)",
 )
 
 _UPSERT_SOURCE_RECORD_SQL: Final[str] = f"""
@@ -387,58 +470,7 @@ INSERT INTO provider_sync.source_records (
     :raw_name, :raw_address, :raw_longitude, :raw_latitude,
     CAST(:raw_data AS jsonb), :raw_payload_hash, :fetched_at, :imported_at,
     :expires_at,
-    -- 계보 key를 INSERT에서 함께 계산한다. record는 불변이라 ON CONFLICT에서
-    -- 갱신할 필요가 없고, 별도 UPDATE 왕복도 생기지 않는다(ADR-087).
-    --
-    -- notice scope **밖에서는 NULL**이다. 그러지 않으면 CASE의 ELSE 분기가
-    -- 모든 provider의 모든 record에 source_entity_id 사본을 남기고(73만+),
-    -- backfill이 notice scope만 채운 것과도 어긋난다.
-    CASE WHEN {_NOTICE_SCOPE_PREDICATE}
-    THEN (
-    CASE
-      WHEN CAST(:provider AS text) = 'python-krex-api'
-       AND CAST(:dataset_key AS text) = 'krex_traffic_notices'
-       AND CAST(:source_entity_type AS text) = 'traffic_notice'
-      THEN COALESCE(
-        NULLIF(
-          concat_ws(
-            '::',
-            NULLIF(lower(btrim(CAST(:raw_data AS jsonb)->>'occurred_date')), ''),
-            NULLIF(lower(btrim(CAST(:raw_data AS jsonb)->>'occurred_time')), ''),
-            NULLIF(lower(btrim(CAST(:raw_data AS jsonb)->>'route_no')), ''),
-            NULLIF(lower(btrim(CAST(:raw_data AS jsonb)->>'direction')), ''),
-            NULLIF(lower(btrim(CAST(:raw_data AS jsonb)->>'point_name')), ''),
-            NULLIF(lower(btrim(CAST(:raw_data AS jsonb)->>'incident_type_code')), '')
-          ),
-          ''
-        ),
-        CAST(:source_entity_id AS text)
-      )
-      WHEN CAST(:provider AS text) = 'python-kma-api'
-       AND CAST(:dataset_key AS text) = 'kma_weather_alerts'
-       AND CAST(:source_entity_type AS text) = 'weather_alert'
-      THEN COALESCE(
-        NULLIF(
-          concat_ws(
-            '::',
-            NULLIF(btrim(CAST(:raw_data AS jsonb)->>'region_code'), ''),
-            NULLIF(
-              btrim(
-                COALESCE(
-                  CAST(:raw_data AS jsonb)->>'phenomenon',
-                  CAST(:raw_data AS jsonb)->>'alert_type'
-                )
-              ),
-              ''
-            )
-          ),
-          ''
-        ),
-        CAST(:source_entity_id AS text)
-      )
-      ELSE CAST(:source_entity_id AS text)
-    END
-    ) END
+    {_WRITER_NOTICE_LINEAGE_SQL}
 )
 ON CONFLICT (source_record_key) DO UPDATE SET
     last_seen_at = GREATEST(
@@ -571,78 +603,21 @@ LEFT JOIN feature.features AS f
 """
 
 
-def _notice_lineage_sql(alias: str) -> str:
-    return f"""
-    CASE
-      WHEN {alias}.provider = 'python-krex-api'
-       AND {alias}.dataset_key = 'krex_traffic_notices'
-       AND {alias}.source_entity_type = 'traffic_notice'
-      THEN COALESCE(
-        NULLIF(
-          concat_ws(
-            '::',
-            NULLIF(lower(btrim({alias}.raw_data->>'occurred_date')), ''),
-            NULLIF(lower(btrim({alias}.raw_data->>'occurred_time')), ''),
-            NULLIF(lower(btrim({alias}.raw_data->>'route_no')), ''),
-            NULLIF(lower(btrim({alias}.raw_data->>'direction')), ''),
-            NULLIF(lower(btrim({alias}.raw_data->>'point_name')), ''),
-            NULLIF(lower(btrim({alias}.raw_data->>'incident_type_code')), '')
-          ),
-          ''
-        ),
-        {alias}.source_entity_id
-      )
-      WHEN {alias}.provider = 'python-kma-api'
-       AND {alias}.dataset_key = 'kma_weather_alerts'
-       AND {alias}.source_entity_type = 'weather_alert'
-      THEN COALESCE(
-        NULLIF(
-          concat_ws(
-            '::',
-            NULLIF(btrim({alias}.raw_data->>'region_code'), ''),
-            NULLIF(
-              btrim(
-                COALESCE(
-                  {alias}.raw_data->>'phenomenon',
-                  {alias}.raw_data->>'alert_type'
-                )
-              ),
-              ''
-            )
-          ),
-          ''
-        ),
-        {alias}.source_entity_id
-      )
-      ELSE {alias}.source_entity_id
-    END
-    """
-
-
-def _notice_lineage_stored_sql(source_alias: str) -> str:
-    """저장된 계보 key를 쓰되, 없으면 재계산한다 (ADR-087).
-
-    ``source_records.lineage_key``는 ``raw_data``에서 파생되고 record별로
-    불변이라 낡지 않는다. 계보 축이 **(feature, primary link)당**이므로 record에
-    두는 것이 유일하게 맞는 자리다 — feature 단위 컬럼은 한 feature의 여러 계보를
-    뭉개 활성 공지를 숨기거나 밀려난 공지를 되살린다.
-
-    저장값은 최적화이지 계약이 아니다. NULL(마이그레이션 이전 record, notice
-    scope 밖)이면 재계산으로 물러나므로 정확성이 write 경로에 의존하지 않는다.
-    ``COALESCE``는 좌항이 NULL일 때만 우항을 평가한다.
-    """
-    return f"COALESCE({source_alias}.lineage_key, {_notice_lineage_sql(source_alias)})"
-
-
-def _canonical_notice_feature_sql(feature_alias: str, source_alias: str) -> str:
+def _canonical_notice_feature_sql(
+    feature_alias: str, source_alias: str, *, lineage: str | None = None
+) -> str:
     """현재 사건 단위 identity로 만든 notice feature인지 판정하는 SQL.
 
     KREX/KMA의 현 identity는 모두 ``bjd_code=None``과 고정 category를 사용하고,
-    ``source_natural_key``는 ``_notice_lineage_sql`` 결과와 같다. 따라서 같은
-    source record가 구/신 feature 양쪽에 연결된 identity 이행 동률에서도 현재
-    ``make_feature_id`` 결과를 정확히 알아낼 수 있다. 그 외 provider는 근거가
-    없으므로 ``false``로 두고 stable ``feature_id`` tie-break에 맡긴다.
+    ``source_natural_key``는 계보 key와 같다. 따라서 같은 source record가 구/신
+    feature 양쪽에 연결된 identity 이행 동률에서도 현재 ``make_feature_id`` 결과를
+    정확히 알아낼 수 있다. 그 외 provider는 근거가 없으므로 ``false``로 두고
+    stable ``feature_id`` tie-break에 맡긴다.
+
+    ``lineage``: 계보 key SQL 식. 기본값은 저장 컬럼이고, 컬럼이 없는 H35 고정
+    세대 replay만 재계산 식을 넘긴다.
     """
+    lineage = f"{source_alias}.lineage_key" if lineage is None else lineage
     return f"""
     CASE
       WHEN (
@@ -660,7 +635,7 @@ def _canonical_notice_feature_sql(feature_alias: str, source_alias: str) -> str:
             x_extension.digest(
               'global|notice|99000000|'
               || {source_alias}.provider || ':' || {source_alias}.dataset_key || '|'
-              || {_notice_lineage_sql(source_alias)} || '|',
+              || {lineage} || '|',
               'sha1'
             ),
             'hex'
@@ -710,71 +685,200 @@ def _ended_notice_hidden_sql(feature_alias: str) -> str:
 # 한 feature에 여러 계보의 primary entity가 연결될 수 있다. 각 계보의 실제 최신 row를
 # 고른 뒤 **모든 계보에서 밀린 feature만** 숨긴다. 한 계보라도 winner면 feature 전체를
 # 보존하며, current primary source가 없는 notice도 기존처럼 표시한다.
-def _latest_notice_only_sql(
-    feature_alias: str, *, frozen_h35_schema: bool = False
-) -> str:
+def _latest_notice_only_sql(feature_alias: str) -> str:
     """같은 계보에서 밀려난 notice를 숨긴다 (ADR-087).
 
-    승자는 **계보당 하나**다. 그런데 종전 구현은 그 판정을 feature 행마다
-    correlated ``NOT EXISTS``로 다시 했다 — ``DISTINCT ON``으로 자기 계보를 고르고
-    ``LATERAL``로 "나보다 나은 게 있나"를 훑는 형태라, notice 수에 대해
-    **제곱으로** 커진다. 실측: 3,045 notice에서 21.5초.
+    승자는 계보당 하나다. 판정 자체는 correlated 하나로 충분하다 — feature 하나가
+    자기 계보에서 이겼는지만 보면 되고, 그 계보는 보통 한 자릿수 행이다. 종전
+    구현이 느렸던 이유는 상관성이 아니라 **계보를 찾는 방법**이었다: 계보 key를
+    ``raw_data`` JSON에서 매 행 재계산하니 인덱스가 붙을 수 없었고, 경쟁자 탐색이
+    매번 notice 전수 스캔이 됐다(3,045 notice에서 21.2초).
 
-    같은 규칙을 ``ROW_NUMBER()``로 **한 번에** 표현하고 그 결과(패자 집합)를
-    비상관 ``ARRAY(SELECT ...)``로 뽑으면 쿼리당 1회 평가되는 InitPlan이 되고,
-    본 질의는 ``feature_id <> ALL(...)``이 된다. 실측: **21.5초 → 0.41초(52배)**,
-    결과 집합은 145=145 양방향 차집합 0으로 동일하다.
+    계보 key를 ``source_records.lineage_key``에 저장하고
+    ``(provider, dataset_key, source_entity_type, lineage_key)`` 인덱스를 두면 그
+    탐색이 **인덱스 probe**가 된다. 실측(3,045 notice): 목록 21.2초 → 0.15초,
+    단건 조회 17.2ms → 4.5ms. 목록과 단건이 **함께** 빨라지는 것이 요점이다 —
+    비상관 InitPlan으로 바꾸는 방법은 목록만 빠르고 단건은 오히려 느려진다
+    (73ms, ADR-087 §폐기).
 
-    순서 규칙은 종전과 같다 — ``seen_at`` → ``source_record_key`` → 현재 identity
-    → ``feature_id`` 안정 tie-break. 경쟁자 후보를 ``deleted_at IS NULL``로만
-    거르는 것(비공개 신규 feature도 구 feature를 밀어낸다)도 그대로다.
-
-    계보 축은 ``source_records.lineage_key``(0088)를 쓰되, 고정 세대 replay
-    (0063~0079)에는 그 컬럼이 없으므로 재계산한다.
+    순서 규칙·경쟁자 후보 조건은 종전과 **완전히 같다**. 바뀐 것은 계보 key를
+    재계산 대신 컬럼에서 읽는다는 점뿐이다.
     """
 
-    lineage = (
-        _notice_lineage_sql("sr2")
-        if frozen_h35_schema
-        else _notice_lineage_stored_sql("sr2")
+    canonical_cur = _canonical_notice_feature_sql(feature_alias, "cur_sr")
+    canonical_other = _canonical_notice_feature_sql("other_f", "other_sr")
+    cur_seen = "COALESCE(cur_sr.last_seen_at, cur_sr.imported_at, cur_sr.fetched_at)"
+    other_seen = (
+        "COALESCE(other_sr.last_seen_at, other_sr.imported_at, other_sr.fetched_at)"
     )
     return f"""
   AND (
     {feature_alias}.kind <> 'notice'
-    OR {feature_alias}.feature_id <> ALL (ARRAY(
-      SELECT ranked.feature_id
-      FROM (
-        SELECT
-          f2.feature_id,
-          ROW_NUMBER() OVER (
-            PARTITION BY
-              se2.provider, se2.dataset_key, se2.source_entity_type,
-              {lineage}
-            ORDER BY
-              COALESCE(sr2.last_seen_at, sr2.imported_at, sr2.fetched_at) DESC,
-              sr2.source_record_key DESC,
-              ({_canonical_notice_feature_sql("f2", "sr2")}) DESC,
-              f2.feature_id ASC
-          ) AS rank_in_lineage
-        FROM feature.features AS f2
-        JOIN provider_sync.source_links AS sl2
-          ON sl2.feature_id = f2.feature_id
-         AND sl2.is_primary_source
-        JOIN provider_sync.source_entities AS se2
-          ON se2.source_entity_key = sl2.source_entity_key
-        JOIN provider_sync.source_records AS sr2
-          ON sr2.source_record_key = se2.current_source_record_key
-        WHERE f2.kind = 'notice'
-          AND f2.deleted_at IS NULL
-      ) AS ranked
-      -- 한 feature는 primary link를 여럿 가질 수 있어 **여러 계보 파티션에**
-      -- 나타난다. 종전 ``HAVING bool_and(...)``의 뜻이 "한 계보라도 이기면
-      -- 보존"이므로, 패자는 **모든 계보에서 밀린** feature뿐이다.
-      GROUP BY ranked.feature_id
-      HAVING bool_and(ranked.rank_in_lineage > 1)
-    ))
+    OR NOT EXISTS (
+      -- 이 feature의 primary 계보들. 한 계보라도 이기면 feature를 보존하므로
+      -- 패자 조건은 bool_and — 행이 하나도 없으면 NULL이 되어 HAVING이 실패하고,
+      -- current primary source가 없는 notice는 종전처럼 표시된다.
+      SELECT 1
+      FROM provider_sync.source_links AS cur_sl
+      JOIN provider_sync.source_entities AS cur_se
+        ON cur_se.source_entity_key = cur_sl.source_entity_key
+      JOIN provider_sync.source_records AS cur_sr
+        ON cur_sr.source_record_key = cur_se.current_source_record_key
+      WHERE cur_sl.feature_id = {feature_alias}.feature_id
+        AND cur_sl.is_primary_source
+      HAVING bool_and(EXISTS (
+        -- 같은 계보에서 나보다 나은 현재 행이 있는가. 계보 등식이
+        -- idx_source_records_lineage의 마지막 컬럼이라 여기가 인덱스 probe다.
+        SELECT 1
+        FROM provider_sync.source_records AS other_sr
+        JOIN provider_sync.source_entities AS other_se
+          ON other_se.current_source_record_key = other_sr.source_record_key
+        JOIN provider_sync.source_links AS other_sl
+          ON other_sl.source_entity_key = other_se.source_entity_key
+         AND other_sl.is_primary_source
+        JOIN feature.features AS other_f
+          ON other_f.feature_id = other_sl.feature_id
+        WHERE other_sr.provider = cur_sr.provider
+          AND other_sr.dataset_key = cur_sr.dataset_key
+          AND other_sr.source_entity_type = cur_sr.source_entity_type
+          AND other_sr.lineage_key = cur_sr.lineage_key
+          AND other_se.provider = cur_se.provider
+          AND other_se.dataset_key = cur_se.dataset_key
+          AND other_se.source_entity_type = cur_se.source_entity_type
+          AND other_f.feature_id <> {feature_alias}.feature_id
+          AND other_f.kind = 'notice'
+          AND other_f.deleted_at IS NULL
+          AND (
+            {other_seen} > {cur_seen}
+            OR (
+              {other_seen} = {cur_seen}
+              AND other_sr.source_record_key > cur_sr.source_record_key
+            )
+            OR (
+              {other_seen} = {cur_seen}
+              AND other_sr.source_record_key = cur_sr.source_record_key
+              AND (
+                (({canonical_other}) AND NOT ({canonical_cur}))
+                OR (
+                  ({canonical_other}) = ({canonical_cur})
+                  AND other_f.feature_id < {feature_alias}.feature_id
+                )
+              )
+            )
+          )
+        LIMIT 1
+      ))
+    )
   )
 """
+
+
+def _frozen_h35_latest_notice_only_sql(feature_alias: str) -> str:
+    """0079 고정 스키마 세대의 "구버전 notice 숨김" 판정 (역사 표면 **바이트** 보존).
+
+    그 세대에는 ``source_records.lineage_key``가 없다. 리허설의 존재 이유가 "그때
+    그 표면을 그대로 재생한다"이므로, 동등해 보이는 재작성도 두지 않고 당시 SQL을
+    글자 그대로 남긴다 — ``_frozen_h35_ended_notice_hidden_sql``과 같은 규약이다.
+    현행 코드가 이 형태를 되살리는 것을 막기 위해 이 함수 안에만 존재한다.
+    """
+
+    lineage_cur = _notice_lineage_sql("cur_sr")
+    canonical_cur = _canonical_notice_feature_sql(
+        feature_alias, "cur_sr", lineage=lineage_cur
+    )
+    canonical_other = _canonical_notice_feature_sql(
+        "other_f", "other_sr", lineage=_notice_lineage_sql("other_sr")
+    )
+    return f"""
+  AND (
+    {feature_alias}.kind <> 'notice'
+    OR NOT EXISTS (
+      SELECT 1
+      FROM (
+        SELECT DISTINCT ON (
+            cur_sr.provider,
+            cur_sr.dataset_key,
+            cur_sr.source_entity_type,
+            {lineage_cur}
+        )
+            cur_sr.provider,
+            cur_sr.dataset_key,
+            cur_sr.source_entity_type,
+            {lineage_cur} AS lineage_key,
+            COALESCE(
+                cur_sr.last_seen_at, cur_sr.imported_at, cur_sr.fetched_at
+            ) AS seen_at,
+            cur_sr.source_record_key,
+            {canonical_cur} AS canonical_identity
+        FROM provider_sync.source_links AS cur_sl
+        JOIN provider_sync.source_entities AS cur_se
+          ON cur_se.source_entity_key = cur_sl.source_entity_key
+        JOIN provider_sync.source_records AS cur_sr
+          ON cur_sr.source_record_key = cur_se.current_source_record_key
+        WHERE cur_sl.feature_id = {feature_alias}.feature_id
+          AND cur_sl.is_primary_source
+        ORDER BY
+            cur_sr.provider,
+            cur_sr.dataset_key,
+            cur_sr.source_entity_type,
+            {lineage_cur},
+            COALESCE(
+                cur_sr.last_seen_at, cur_sr.imported_at, cur_sr.fetched_at
+            ) DESC,
+            cur_sr.source_record_key DESC
+      ) AS current_notice
+      LEFT JOIN LATERAL (
+        SELECT 1 AS better_exists
+        FROM provider_sync.source_entities AS other_se
+        JOIN provider_sync.source_records AS other_sr
+          ON other_sr.source_record_key = other_se.current_source_record_key
+         AND {_notice_lineage_sql("other_sr")} = current_notice.lineage_key
+        JOIN provider_sync.source_links AS other_sl
+          ON other_sl.source_entity_key = other_se.source_entity_key
+        JOIN feature.features AS other_f
+          ON other_f.feature_id = other_sl.feature_id
+        WHERE other_se.provider = current_notice.provider
+          AND other_se.dataset_key = current_notice.dataset_key
+          AND other_se.source_entity_type = current_notice.source_entity_type
+          AND other_sl.is_primary_source
+          AND other_f.feature_id <> {feature_alias}.feature_id
+          AND other_f.kind = 'notice'
+          AND other_f.deleted_at IS NULL
+          AND (
+            COALESCE(
+                other_sr.last_seen_at, other_sr.imported_at, other_sr.fetched_at
+            ) > current_notice.seen_at
+            OR (
+              COALESCE(
+                  other_sr.last_seen_at, other_sr.imported_at, other_sr.fetched_at
+              ) = current_notice.seen_at
+              AND other_sr.source_record_key > current_notice.source_record_key
+            )
+            OR (
+              COALESCE(
+                  other_sr.last_seen_at, other_sr.imported_at, other_sr.fetched_at
+              ) = current_notice.seen_at
+              AND other_sr.source_record_key = current_notice.source_record_key
+              AND (
+                (
+                  {canonical_other}
+                  AND NOT current_notice.canonical_identity
+                )
+                OR (
+                  {canonical_other}
+                    = current_notice.canonical_identity
+                  AND other_f.feature_id < {feature_alias}.feature_id
+                )
+              )
+            )
+          )
+        LIMIT 1
+      ) AS better ON true
+      HAVING bool_and(better.better_exists IS NOT NULL)
+    )
+  )
+"""
+
 
 # 사용자 활성 조회용 결합 필터 — 계보별 latest만 + 종료 notice 숨김(#632).
 # 지도 bbox뿐 아니라 cluster/search/nearby/area/count에도 같은 술어를 적용해야
@@ -796,9 +900,10 @@ def public_active_notice_filter_sql(
     제외한다.
 
     ``frozen_h35_schema``: H35 cutover 리허설 전용. 그 경로는 **0079로 고정된
-    과거 스키마**를 재생하므로 0085가 신설한 ``feature.feature_notices``가
-    존재하지 않는다 — 그 세대의 판정(``detail`` 문자열 + 방어 cast)을 그대로
-    쓴다. 현행 표면은 typed 비교만 쓴다(T-VN-35, ADR-086).
+    과거 스키마**를 재생하므로 0085가 신설한 ``feature.feature_notices``도,
+    0088이 신설한 ``source_records.lineage_key``도 존재하지 않는다 — 두 판정 모두
+    그 세대의 SQL을 그대로 쓴다. 현행 표면은 typed 비교와 저장 계보 key만 쓴다
+    (T-VN-35/37, ADR-086/087).
     """
 
     if not feature_alias.isidentifier():
@@ -806,7 +911,7 @@ def public_active_notice_filter_sql(
     if frozen_h35_schema:
         return _frozen_h35_ended_notice_hidden_sql(
             feature_alias
-        ) + _latest_notice_only_sql(feature_alias, frozen_h35_schema=True)
+        ) + _frozen_h35_latest_notice_only_sql(feature_alias)
     return _ended_notice_hidden_sql(feature_alias) + _latest_notice_only_sql(feature_alias)
 
 
@@ -2527,9 +2632,9 @@ DO UPDATE SET
 
 def _sync_notice_lineage_states_sql() -> str:
     """알려진 scope 계보의 present 전이만 changed_at과 함께 저장한다."""
-    return f"""
+    return """
 WITH known_lineages AS (
-    SELECT DISTINCT {_notice_lineage_sql("sr")} AS lineage_key
+    SELECT DISTINCT sr.lineage_key AS lineage_key
     FROM provider_sync.source_entities AS se
     JOIN provider_sync.source_records AS sr
       ON sr.source_record_key = se.current_source_record_key
@@ -2842,7 +2947,7 @@ def _supersede_stale_notice_sql(close_missing: bool) -> str:
 WITH lineage_candidates AS (
     SELECT
         f.feature_id,
-        {_notice_lineage_sql("sr")} AS lineage_key,
+        sr.lineage_key AS lineage_key,
         COALESCE(sr.last_seen_at, sr.imported_at, sr.fetched_at) AS seen_at,
         sr.source_record_key AS tiebreak,
         {_canonical_notice_feature_sql("f", "sr")} AS canonical_identity,
@@ -2861,7 +2966,7 @@ WITH lineage_candidates AS (
       ON lineage_state.provider = sr.provider
      AND lineage_state.dataset_key = sr.dataset_key
      AND lineage_state.source_entity_type = sr.source_entity_type
-     AND lineage_state.lineage_key = {_notice_lineage_sql("sr")}
+     AND lineage_state.lineage_key = sr.lineage_key
     WHERE f.kind = 'notice'
       AND COALESCE(f.data_origin, 'provider') <> 'user_request'
       AND sr.provider = :provider
@@ -2903,19 +3008,23 @@ scoped_feature_ids AS (
     SELECT DISTINCT feature_id
     FROM ranked
 ),
-out_of_scope_feature_lineages AS (
+out_of_scope_feature_lineages AS MATERIALIZED (
+    -- MATERIALIZED가 없으면 Postgres가 이 CTE를 갱신 대상 feature마다 다시
+    -- 실행한다(실측 3,045 notice에서 loops=2,900 → 124.8초). 계보 승패는 질의당
+    -- 한 번만 계산하면 되는 집합 연산이라 여기서 최적화 장벽을 세운다 — 같은
+    -- 규모에서 0.58초, 갱신 행 수는 동일하다.
     SELECT DISTINCT ON (
         f.feature_id,
         sr.provider,
         sr.dataset_key,
         sr.source_entity_type,
-        {_notice_lineage_sql("sr")}
+        sr.lineage_key
     )
         f.feature_id,
         sr.provider,
         sr.dataset_key,
         sr.source_entity_type,
-        {_notice_lineage_sql("sr")} AS lineage_key,
+        sr.lineage_key AS lineage_key,
         COALESCE(sr.last_seen_at, sr.imported_at, sr.fetched_at) AS seen_at,
         sr.source_record_key AS tiebreak,
         {_canonical_notice_feature_sql("f", "sr")} AS canonical_identity,
@@ -2936,7 +3045,7 @@ out_of_scope_feature_lineages AS (
       ON lineage_state.provider = sr.provider
      AND lineage_state.dataset_key = sr.dataset_key
      AND lineage_state.source_entity_type = sr.source_entity_type
-     AND lineage_state.lineage_key = {_notice_lineage_sql("sr")}
+     AND lineage_state.lineage_key = sr.lineage_key
     WHERE f.kind = 'notice'
       AND (
         sr.provider <> :provider
@@ -2948,11 +3057,11 @@ out_of_scope_feature_lineages AS (
         sr.provider,
         sr.dataset_key,
         sr.source_entity_type,
-        {_notice_lineage_sql("sr")},
+        sr.lineage_key,
         COALESCE(sr.last_seen_at, sr.imported_at, sr.fetched_at) DESC,
         sr.source_record_key DESC
 ),
-global_feature_wins AS (
+global_feature_wins AS MATERIALIZED (
     SELECT
         current_notice.feature_id,
         bool_or(better.better_exists IS NULL) AS wins_any_lineage,
@@ -3011,12 +3120,15 @@ global_feature_wins AS (
         FROM provider_sync.source_entities AS other_se
         JOIN provider_sync.source_records AS other_sr
           ON other_sr.source_record_key = other_se.current_source_record_key
-         AND {_notice_lineage_sql("other_sr")} = current_notice.lineage_key
+         AND other_sr.lineage_key = current_notice.lineage_key
         JOIN provider_sync.source_links AS other_sl
           ON other_sl.source_entity_key = other_se.source_entity_key
         JOIN feature.features AS other_f
           ON other_f.feature_id = other_sl.feature_id
-        WHERE other_se.provider = current_notice.provider
+        WHERE other_sr.provider = current_notice.provider
+          AND other_sr.dataset_key = current_notice.dataset_key
+          AND other_sr.source_entity_type = current_notice.source_entity_type
+          AND other_se.provider = current_notice.provider
           AND other_se.dataset_key = current_notice.dataset_key
           AND other_se.source_entity_type = current_notice.source_entity_type
           AND other_sl.is_primary_source
@@ -3534,7 +3646,7 @@ async def supersede_stale_notice_features(
 ) -> NoticeReconcileResult:
     """notice 중복/소멸 정리 — 적재 직후 호출하는 write-시점 reconciliation(#632).
 
-    1. **중복 정리**: 같은 계보(``_notice_lineage_sql``)에 feature가 2개 이상이면
+    1. **중복 정리**: 같은 계보(``source_records.lineage_key``)에 feature가 2개 이상이면
        latest(최근 확인 시각) 1개만 남기고 나머지를 soft-delete
        (``status='inactive'`` + ``deleted_at``, ADR-017). identity 스킴 변경으로
        재키잉된 구세대 feature가 신세대에 밀려나는 경로다.

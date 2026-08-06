@@ -898,7 +898,6 @@ class SourceRecordRow(Base):
 
     __tablename__ = "source_records"
     __table_args__ = (
-
         UniqueConstraint(
             "provider",
             "dataset_key",
@@ -947,6 +946,14 @@ class SourceRecordRow(Base):
             text("imported_at DESC"),
             text("source_record_key DESC"),
         ),
+        # notice 계보 탐색(read 필터·reconcile)이 쓰는 등식 인덱스 — ADR-087.
+        Index(
+            "idx_source_records_lineage",
+            "provider",
+            "dataset_key",
+            "source_entity_type",
+            "lineage_key",
+        ),
         {"schema": "provider_sync"},
     )
 
@@ -969,10 +976,12 @@ class SourceRecordRow(Base):
     raw_longitude: Mapped[Any | None] = mapped_column(Numeric(12, 8))
     raw_latitude: Mapped[Any | None] = mapped_column(Numeric(12, 8))
 
-    # notice 계보 key — ``raw_data``에서 파생되고 record별로 불변이라
-    # 저장해도 낡지 않는다(ADR-087). notice scope가 아닌 record는 NULL이고,
-    # read는 NULL이면 재계산으로 물러난다(저장값은 최적화이지 계약이 아니다).
-    lineage_key: Mapped[str | None] = mapped_column(String)
+    # notice 계보 key — ``raw_data``에서 파생되고 record별로 불변이라 저장해도
+    # 낡지 않는다(ADR-087). 모든 record가 값을 갖는다: notice scope 밖에서는
+    # ``source_entity_id``가 그대로 계보다. read는 이 컬럼을 그대로 읽고
+    # ``idx_source_records_lineage``가 그 등식을 받는다 — NULL 허용으로 두면
+    # 읽는 쪽이 재계산 fallback을 껴야 하고 인덱스가 쓰이지 않는다.
+    lineage_key: Mapped[str] = mapped_column(String, nullable=False)
     raw_data: Mapped[dict[str, Any]] = mapped_column(
         JSONB,
         nullable=False,
