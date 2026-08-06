@@ -20,20 +20,20 @@ external_db="${KOR_TRAVEL_MAP_DB_EXTERNAL:-false}"
 external_object_store="${KOR_TRAVEL_MAP_OBJECT_STORE_EXTERNAL:-false}"
 
 compose_files=(-f docker-compose.yml)
-services=(postgres dagster-db-init api frontend dagster dagster-daemon)
+services=(postgres dagster-db-init dagster-storage-migrate api frontend dagster dagster-daemon)
 ports=("$KOR_TRAVEL_MAP_API_PORT" "$KOR_TRAVEL_MAP_ADMIN_WEB_PORT" "$KOR_TRAVEL_MAP_DAGSTER_PORT")
 
 if [[ "$external_infra" == "true" ]]; then
   compose_files+=(-f docker-compose.external-infra.yml)
-  services=(api frontend dagster dagster-daemon)
+  services=(dagster-storage-migrate api frontend dagster dagster-daemon)
 elif [[ "$external_db" == "true" ]]; then
   compose_files+=(-f docker-compose.external-db.yml)
-  services=(rustfs rustfs-init api frontend dagster dagster-daemon)
+  services=(rustfs rustfs-init dagster-storage-migrate api frontend dagster dagster-daemon)
   ports+=("$KOR_TRAVEL_MAP_RUSTFS_API_PORT" "$KOR_TRAVEL_MAP_RUSTFS_CONSOLE_PORT")
 elif [[ "$external_object_store" == "true" ]]; then
   compose_files+=(-f docker-compose.external-object-store.yml)
 else
-  services=(postgres dagster-db-init rustfs rustfs-init api frontend dagster dagster-daemon)
+  services=(postgres dagster-db-init rustfs rustfs-init dagster-storage-migrate api frontend dagster dagster-daemon)
   ports+=("$KOR_TRAVEL_MAP_RUSTFS_API_PORT" "$KOR_TRAVEL_MAP_RUSTFS_CONSOLE_PORT")
 fi
 

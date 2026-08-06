@@ -291,11 +291,10 @@ services:
         condition: service_healthy
       rustfs-init:
         condition: service_completed_successfully
-      # NEW-5 — dagster-entrypoint의 읽기 전용 DB 세대 게이트는 DB revision이
-      # 이미지 head보다 뒤면 즉시 죽는다(영구 실패, retry 없음). fresh up에서
-      # api-entrypoint의 `alembic upgrade head`가 끝나기 전에 dagster가 뜨면
-      # 그 게이트에 걸리므로, api healthy(= migration 완료 후 uvicorn 기동)를
-      # 기동 조건으로 건다.
+      # Map application schema readiness는 API가, Dagster metadata storage
+      # readiness는 candidate image의 one-shot service가 각각 정본으로 보장한다.
+      dagster-storage-migrate:
+        condition: service_completed_successfully
       api:
         condition: service_healthy
     ports:
@@ -359,16 +358,38 @@ services:
         condition: service_healthy
       rustfs-init:
         condition: service_completed_successfully
-      # NEW-5 — dagster-entrypoint의 읽기 전용 DB 세대 게이트는 DB revision이
-      # 이미지 head보다 뒤면 즉시 죽는다(영구 실패, retry 없음). fresh up에서
-      # api-entrypoint의 `alembic upgrade head`가 끝나기 전에 dagster가 뜨면
-      # 그 게이트에 걸리므로, api healthy(= migration 완료 후 uvicorn 기동)를
-      # 기동 조건으로 건다.
+      dagster-storage-migrate:
+        condition: service_completed_successfully
       api:
         condition: service_healthy
     volumes:
       - kor-travel-map-mois-source:/app/data/mois
     command: ["dagster-daemon", "run", "-m", "kortravelmap.dagster.definitions"]
+
+  # 후보 image 안의 Dagster package migration graph를 그대로 실행·검증하는 유일한
+  # metadata storage writer다. application Alembic과 source SHA는 전혀 읽지 않는다.
+  dagster-storage-migrate:
+    build:
+      context: .
+      dockerfile: docker/dagster.Dockerfile
+      args:
+        KOR_TRAVEL_MAP_GIT_COMMIT: ${KOR_TRAVEL_MAP_GIT_COMMIT:-development}
+      secrets:
+        - github_token
+    command: ["ktm-dagster-storage", "migrate"]
+    environment:
+      DAGSTER_HOME: /opt/dagster/dagster_home
+      DAGSTER_DISABLE_TELEMETRY: ${DAGSTER_DISABLE_TELEMETRY:-yes}
+      KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL:-postgresql://kor_travel_map:kor_travel_map@postgres:5432/kor_travel_map_dagster}
+    # external DB/infra overlay가 host.docker.internal DSN을 주입하므로 one-shot도
+    # 장기 Dagster service와 같은 host gateway mapping을 가져야 한다.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      dagster-db-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
 
 volumes:
   kor-travel-map-postgres:

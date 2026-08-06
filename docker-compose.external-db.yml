@@ -24,11 +24,17 @@ services:
     environment:
       KOR_TRAVEL_MAP_PG_DSN: ${KOR_TRAVEL_MAP_EXTERNAL_DOCKER_PG_DSN:-postgresql+asyncpg://${KOR_TRAVEL_MAP_POSTGRES_USER:-kor_travel_map}:${KOR_TRAVEL_MAP_POSTGRES_PASSWORD:-kor_travel_map}@host.docker.internal:${KOR_TRAVEL_MAP_EXTERNAL_POSTGRES_HOST_PORT:-5432}/${KOR_TRAVEL_MAP_POSTGRES_DB:-kor_travel_map}}
 
+  dagster-storage-migrate:
+    depends_on: !override {}
+    environment:
+      KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_EXTERNAL_DOCKER_DAGSTER_PG_URL:-postgresql://${KOR_TRAVEL_MAP_POSTGRES_USER:-kor_travel_map}:${KOR_TRAVEL_MAP_POSTGRES_PASSWORD:-kor_travel_map}@host.docker.internal:${KOR_TRAVEL_MAP_EXTERNAL_POSTGRES_HOST_PORT:-5432}/${KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB:-kor_travel_map_dagster}}
+
   dagster:
     depends_on: !override
       rustfs-init:
         condition: service_completed_successfully
-      # NEW-5 인터록 — external 모드에서도 api 선기동 보증 유지 (리뷰 F1).
+      dagster-storage-migrate:
+        condition: service_completed_successfully
       api:
         condition: service_healthy
     environment:
@@ -38,6 +44,8 @@ services:
   dagster-daemon:
     depends_on: !override
       rustfs-init:
+        condition: service_completed_successfully
+      dagster-storage-migrate:
         condition: service_completed_successfully
       api:
         condition: service_healthy

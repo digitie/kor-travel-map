@@ -102,6 +102,11 @@ services:
       retries: 20
       start_period: 30s
 
+  dagster-storage-migrate:
+    network_mode: host
+    environment:
+      KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_HOST_DAGSTER_PG_URL:-${KOR_TRAVEL_MAP_EXTERNAL_DOCKER_DAGSTER_PG_URL:-postgresql://${KOR_TRAVEL_MAP_POSTGRES_USER:-kor_travel_map}:${KOR_TRAVEL_MAP_POSTGRES_PASSWORD:-kor_travel_map}@127.0.0.1:${KOR_TRAVEL_MAP_EXTERNAL_POSTGRES_HOST_PORT:-5432}/${KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB:-kor_travel_map_dagster}}}
+
   dagster:
     network_mode: host
     ports: !reset null

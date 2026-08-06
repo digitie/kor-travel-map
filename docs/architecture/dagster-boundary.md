@@ -40,6 +40,43 @@
 | 외부 사용자/여행계획/POI 도메인 | 외부 서비스 |
 | 외부 서비스에서 feature update 요청 | kor-travel-map OpenAPI 호출 |
 
+## 1.1 Dagster metadata storage 마이그레이션
+
+Map 애플리케이션 스키마와 Dagster metadata storage 스키마는 서로 다른 정본이다.
+애플리케이션의 `alembic/` chain/head는 `kor_travel_map`만 나타내며,
+`kor_travel_map_dagster`의 `public.alembic_version`에는 사용하지 않는다. 반대로
+Dagster storage migration은 후보 Dagster 이미지에 설치된 `dagster` 패키지의 migration
+graph가 유일한 정본이다. source SHA·패키지 잠금 파일·Map 애플리케이션 Alembic revision으로
+head를 추정하는 경로는 없다.
+
+후보 이미지에는 다음 안정 명령이 포함된다.
+
+```text
+ktm-dagster-storage head
+ktm-dagster-storage migrate
+```
+
+- `head`는 DB나 `DAGSTER_HOME`에 연결하지 않고, 후보 이미지가 실제로 설치한 Dagster
+  package의 단일 Postgres storage migration head를 한 줄 JSON으로 stdout에 낸다.
+  head가 없거나 여러 개면 실패한다.
+- `migrate`는 `DAGSTER_HOME`과 그 아래 `dagster.yaml`,
+  `KOR_TRAVEL_MAP_DAGSTER_PG_URL`을 명시적으로 요구한다. 이 입력 그대로
+  `dagster instance migrate`를 실행한 뒤, 같은 DSN으로
+  `public.alembic_version`을 직접 읽는다. 행은 정확히 하나여야 하고
+  `version_num`은 후보 이미지의 head와 같아야 성공한다.
+- 명령의 stdout은 성공 JSON만 내며, Dagster CLI·DB 드라이버가 DSN을 포함할 수 있는
+  진단 출력은 전달하지 않는다. 실패는 DSN·비밀번호·token을 반사하지 않는 유형화된
+  오류로 종료한다.
+- Dagster webserver/daemon entrypoint는 migration을 실행하거나 Map 애플리케이션
+  Alembic revision을 storage readiness로 검사하지 않는다. Compose의
+  `dagster-storage-migrate` one-shot service가 성공한 뒤에만 두 장기 실행 service를
+  시작한다.
+
+이 경계는 v5 pinned runtime candidate를 attest할 때 Manager가 이미지 내부에서 head를
+읽고, reset 뒤 같은 후보 이미지로 정확한 Dagster storage migration을 수행하도록 만든다.
+따라서 stale storage schema의 web/daemon 자동 초기화·stamp를 정상 migration으로
+오인할 수 없다.
+
 요약:
 - **본 라이브러리**: 변환 + 저장 + 검증 (Dagster 없이도 호출 가능한 함수)
 - **kor-travel-map API**: OpenAPI, admin UI, queue 생성, 진행 상태 조회/취소
@@ -47,7 +84,7 @@
   consistency/dedup jobs 실행
 - **외부 서비스**: OpenAPI client 소비자
 
-## 1.1 현재 구현된 Feature 적재 asset
+## 1.2 현재 구현된 Feature 적재 asset
 
 `packages/kor-travel-map-dagster`는 1차로 이미 구현·검증된 provider 변환 함수만
 Dagster asset으로 연결한다. provider API 호출은 resource가 record iterable을
