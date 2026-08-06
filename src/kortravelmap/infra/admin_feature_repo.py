@@ -544,7 +544,7 @@ def _admin_bbox_envelope_sql() -> str:
 
 
 def _admin_geometry_hits_sql() -> str:
-    """bbox와 실제로 교차한 route/area subtype geometry (T-VN-35, ADR-085).
+    """bbox와 실제로 교차한 route/area subtype geometry (T-VN-35, ADR-086).
 
     geometry 정본이 ``feature_routes``/``feature_areas``로 옮겨졌으므로(0086)
     bbox 술어를 **subtype 쪽에서 먼저** 평가한다 — 각 subtype의 GiST 인덱스

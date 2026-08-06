@@ -68,7 +68,7 @@ rollback 조건은 ADR-075와 [`../deploy.md`](../deploy.md)를 따른다.
 
 | 테이블 | PK | 핵심 컬럼 / 비고 |
 |--------|----|---------------|
-| `features` | `feature_id` | kind/name/category/coord/coord_precision_digits/coord_5179(generated)/address/legal_dong_code/marker_*/parent/sibling_group_id/raw_refs/status/data_origin/data_version/user_change_*; `UNIQUE (feature_id, kind)`는 아래 subtype 배타 arc의 참조 대상. kind별 detail과 선·면 geometry는 core에 없고 typed subtype이 정본이다 (ADR-085) |
+| `features` | `feature_id` | kind/name/category/coord/coord_precision_digits/coord_5179(generated)/address/legal_dong_code/marker_*/parent/sibling_group_id/raw_refs/status/data_origin/data_version/user_change_*; `UNIQUE (feature_id, kind)`는 아래 subtype 배타 arc의 참조 대상. kind별 detail과 선·면 geometry는 core에 없고 typed subtype이 정본이다 (ADR-086) |
 | `feature_places` | `feature_id` | place_kind (NOT NULL), phones `text[]` (≤3), biz_number, license_date, business_hours, facility_info, reviews_link, payload |
 | `feature_events` | `feature_id` | event_kind (NOT NULL), starts_on/ends_on (CHECK), timezone, opening_hours, venue_name, tel, content_id, content_type_id, area_code, sigungu_code, payload |
 | `feature_notices` | `feature_id` | notice_type (NOT NULL), severity (0-5 CHECK), valid_start/end_time `timestamptz`, source_agency, officer_name, payload |
@@ -162,7 +162,7 @@ rollback 조건은 ADR-075와 [`../deploy.md`](../deploy.md)를 따른다.
 | `import_jobs` | `job_id UUID` | kind, `load_batch_id`, `parent_job_id` self-FK, payload, status/progress, heartbeat, `dagster_run_id`; 0051은 provider/dataset exact pair·trigger·registry/raw status, 0052는 격리 표식, 0053은 direct update job의 effective `sync_scope`와 `dispatch_requested_at`을 추가한다 |
 | `pipeline_cancellation_members` | `(cancellation_id, job_id)` | frozen import job 결과; `job_id → ops.import_jobs(job_id) ON DELETE RESTRICT`, `operation_kind`, `requires_run_termination`으로 run-backed queued와 generic queued를 구분 |
 | `pipeline_cancellation_runs` | `(cancellation_id, dagster_run_id)` | run terminate reservation/result 정본; 0051은 authoritative nullable `engine_started_at`/`engine_finished_at`을 terminal observation과 함께 영속 |
-| `c6c_cancel_probe_fixtures` | `transaction_id UUID` | **T-VN-41F1J 목표(ADR-085)** — Map-owned C6c fixture; unique job/cancellation FK와 `armed|consumed|finalized` CHECK로 cancellation history를 보존한 lifecycle을 강제 |
+| `c6c_cancel_probe_fixtures` | `transaction_id UUID` | **T-VN-41F1J 목표(ADR-086)** — Map-owned C6c fixture; unique job/cancellation FK와 `armed|consumed|finalized` CHECK로 cancellation history를 보존한 lifecycle을 강제 |
 | `dedup_review_queue` | `review_id UUID` | feature_id_a < feature_id_b canonical pair UNIQUE, total_score/name/spatial/category (0-100), status, decision_reason |
 | `feature_overrides` | `override_id UUID` | **구현됨(alembic 0010, ADR-045 T-207c)** — feature_id FK, field_path, source_value/override_value JSONB, prevent_provider_reactivation, status |
 | `feature_merge_history` | `merge_id UUID` | master_feature_id FK, loser_feature_id FK (둘 다 CASCADE), score, review_id FK (SET NULL), merged_by, reason, merged_at (alembic 0007, ADR-016) |

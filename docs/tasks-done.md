@@ -3,6 +3,20 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-08-06 — T-VN-41F1D-C0 후보 Dagster storage migration artifact 완료
+
+- [x] **T-VN-41F1D-C0 — 후보 Dagster storage migration artifact**
+
+  `ktm-dagster-storage head`가 후보 이미지에 실제 설치된 Dagster package의 storage
+  graph 단일 head를 JSON으로 attest하고, `migrate`가 동일 image의
+  `DAGSTER_HOME`/`dagster.yaml`/metadata DSN으로 `dagster instance migrate`를 실행한
+  뒤 `public.alembic_version`의 정확히 한 `version_num`을 strict 대조한다. Map
+  application Alembic·source SHA·lock pin은 어느 경로에서도 storage head가 아니다.
+  Compose one-shot 성공을 webserver/daemon의 선행 조건으로 연결했고, 외부 DB·infra·host
+  overlay도 같은 순서를 유지한다. 실제 후보 image의 빈 격리 PostgreSQL 검증에서 head,
+  migration 결과, `public.alembic_version`이 모두 `29b539ebc72a`로 일치했다. Docker
+  Manager F1D-C2는 이 image command만 호출해 candidate를 attest·migrate한다.
+
 ## 2026-08-05 — 재생성 수렴·Wave 2 UUID 착지 일괄 아카이브 (배포 c0afaa4e)
 
 > prod 재생성 수렴(H42)·`0082` 배포 완료 시점의 일괄 정리. H30/H32/H22/T-VN-31 절 전체와

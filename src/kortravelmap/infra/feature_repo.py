@@ -4,7 +4,7 @@
 source_records`` / ``provider_sync.source_links`` 3 테이블에 한 transaction으로
 upsert하는 **첫 DB write 경로** (ADR-004 raw SQL, ORM은 매핑만).
 
-T-VN-35 / ADR-085 — kind별 typed subtype
+T-VN-35 / ADR-086 — kind별 typed subtype
 ----------------------------------------
 
 kind별 상세와 geometry의 **정본은 subtype 5종**(``feature_places``/
@@ -42,7 +42,7 @@ ADR 참조
 - ADR-012 — ``coord``(4326)만 저장, ``coord_5179``는 generated, ``ST_Transform`` 술어 금지
 - ADR-017 — source_record 이력 보존 (DO NOTHING)
 - ADR-018 — ``Feature.detail``은 kind에 맞는 모델
-- ADR-085 — kind별 typed subtype이 상세·geometry 정본, core는 공통 축만
+- ADR-086 — kind별 typed subtype이 상세·geometry 정본, core는 공통 축만
 """
 
 from __future__ import annotations
@@ -157,7 +157,7 @@ env ``KOR_TRAVEL_MAP_PRICE_STALE_HIDE_DAYS`` (기본 4 = OpiNet 로테이션 1�
 # raw SQL 경로용 안전망으로 유지한다. ON CONFLICT 갱신 대상이 아니다(불변 키 —
 # conflict-update면 후보는 버려지고 기존 저장값이 정본).
 #
-# T-VN-35(ADR-085) — ``geom``/``detail``은 **core 컬럼이 아니다**. geometry 정본은
+# T-VN-35(ADR-086) — ``geom``/``detail``은 **core 컬럼이 아니다**. geometry 정본은
 # ``feature_routes``/``feature_areas``, kind별 상세 정본은 subtype 5종이고 core는
 # kind 공통 축만 갖는다. writer는 core upsert 직후 같은 트랜잭션에서
 # ``feature_subtype.subtype_upsert_sql``을 실행한다(``upsert_feature``).
@@ -431,7 +431,7 @@ RETURNING (xmax = 0) AS inserted
 # ``feature_uuid``는 T-VN-32B dual read의 UUID 정본 병행 노출(additive) —
 # 공개 view는 alembic 0080이 재고정해 같은 컬럼을 가진다.
 #
-# T-VN-35D(ADR-085) — ``detail``/``geom``은 core 컬럼이 아니라 **view가 subtype
+# T-VN-35D(ADR-086) — ``detail``/``geom``은 core 컬럼이 아니라 **view가 subtype
 # 5종에서 조립한 결과**다. 따라서 이 projection을 쓰는 read는 base table이 아니라
 # ``features_detailed``(전체) / ``public_features``(공개 gate = 같은 조립 위에
 # status·deleted_at 술어)를 조회한다. 응답 shape은 종전과 동일하다.
@@ -593,7 +593,7 @@ def _canonical_notice_feature_sql(feature_alias: str, source_alias: str) -> str:
 # (§9 "활성 notice만 표시", #632). KREX feed 소멸 reconcile·KMA 해제가 채운
 # valid_end_time이 이 필터로 즉시 반영된다.
 #
-# T-VN-35D(ADR-085) — **typed timestamptz 비교**. 종전에는 free-form jsonb
+# T-VN-35D(ADR-086) — **typed timestamptz 비교**. 종전에는 free-form jsonb
 # ``detail->>'valid_end_time'``을 문자열로 읽어 CAST했고, 오염된 한 행(빈 문자열·
 # garbage·잘못된 timezone)이 이 함수를 공유하는 **모든** 공개 read를 500으로
 # 만들 수 있어 ``pg_input_is_valid`` 가드를 덧대야 했다(report §2 D-9-7 / T-VN-06).
@@ -741,7 +741,7 @@ def public_active_notice_filter_sql(
     ``frozen_h35_schema``: H35 cutover 리허설 전용. 그 경로는 **0079로 고정된
     과거 스키마**를 재생하므로 0085가 신설한 ``feature.feature_notices``가
     존재하지 않는다 — 그 세대의 판정(``detail`` 문자열 + 방어 cast)을 그대로
-    쓴다. 현행 표면은 typed 비교만 쓴다(T-VN-35, ADR-085).
+    쓴다. 현행 표면은 typed 비교만 쓴다(T-VN-35, ADR-086).
     """
 
     if not feature_alias.isidentifier():
@@ -855,7 +855,7 @@ def _bbox_candidate_predicate_sql(feature_alias: str) -> str:
       ``&&``로 구동한 뒤 exact ``ST_Intersects``를 덧대 실제 envelope 교차만 남긴다.
       ``ST_Transform``을 술어에 넣지 않는다(ADR-012).
 
-    T-VN-35D(ADR-085) 재작성 — geometry 정본이 subtype으로 옮겨졌다. **공간 술어만은
+    T-VN-35D(ADR-086) 재작성 — geometry 정본이 subtype으로 옮겨졌다. **공간 술어만은
     조립 view(``features_detailed``/``public_features``)를 쓸 수 없다**: view의
     ``geom``은 ``COALESCE(routes.geom, areas.geom)`` 산출 컬럼이라 인덱스가 없고,
     그대로 술어에 넣으면 features 730k행 seq scan이 된다(T-VN-21 tier-1 gate 위반).
@@ -2139,7 +2139,7 @@ async def upsert_feature(session: AsyncSession, feature: Feature) -> bool:
     이원화 차단), conflict-update면 기존 저장값이 정본이다
     (``FeatureIdentityInvariantError``).
 
-    T-VN-35(ADR-085): core는 kind 공통 축만 쓰고 kind별 상세·geometry는 subtype이
+    T-VN-35(ADR-086): core는 kind 공통 축만 쓰고 kind별 상세·geometry는 subtype이
     정본이다. 두 write는 **한 트랜잭션**이며 순서가 강제된다 — subtype의
     ``(feature_id, kind)``/``(feature_id, feature_uuid)`` FK가 core 행을 먼저
     요구하기 때문이다(commit 경계는 종전처럼 호출자 책임).
@@ -2150,7 +2150,7 @@ async def upsert_feature(session: AsyncSession, feature: Feature) -> bool:
     남긴 ``user_fenced``를 기준으로 subtype 쓰기를 통째로 건너뛴다.
 
     **geometry 없는 route/area는 여기 오지 않는다** — ``Feature`` DTO가 구성
-    시점에 거부한다(ADR-085). 종전에는
+    시점에 거부한다(ADR-086). 종전에는
     ``inactivate_geometryless_area_features_by_source``가 적재 뒤에 보정하던
     상태다.
     """
@@ -3164,7 +3164,7 @@ global_feature_wins AS (
         ) AS will_be_visible
     FROM lifecycle_targets AS target
 )
--- T-VN-35(ADR-085): 효력 종료 시각의 정본은 ``feature_notices.valid_end_time``
+-- T-VN-35(ADR-086): 효력 종료 시각의 정본은 ``feature_notices.valid_end_time``
 -- (timestamptz)이다. core는 status/deleted_at/updated_at만 옮기고, 시각 갱신은
 -- 같은 문장의 두 번째 data-modifying CTE가 typed 컬럼에 직접 쓴다 — 종전
 -- ``jsonb_set(detail, '{valid_end_time}', to_jsonb(text))`` 왕복(문자열화 →
@@ -3578,7 +3578,7 @@ async def _reconcile_persisted_notice_scope(
 # 만료 notice purge (docs/etl/notice-feature-etl.md §9) — 종료일(없으면 발표일)
 # +1년 지난 notice를 soft-delete. maintenance job에서 주기 실행(#632).
 #
-# T-VN-35D(ADR-085): 효력 기간을 typed 컬럼에서 읽는다. ``kind = 'notice'`` 술어도
+# T-VN-35D(ADR-086): 효력 기간을 typed 컬럼에서 읽는다. ``kind = 'notice'`` 술어도
 # 따로 걸지 않는다 — ``feature_notices`` 조인 자체가 kind 필터다(kind 상수 CHECK +
 # ``(feature_id, kind)`` FK). 종전에는 free-form ``detail`` 문자열을 무방비로
 # CAST해서, 파싱 불가 값 한 행이면 purge job 전체가 실패했다.
@@ -3896,7 +3896,7 @@ async def get_primary_source_detail(
     return data
 
 
-# T-VN-35(ADR-085): 전화번호 정본은 ``feature_places.phones``(text[])다.
+# T-VN-35(ADR-086): 전화번호 정본은 ``feature_places.phones``(text[])다.
 # ``feature_places`` 조인이 곧 ``kind = 'place'`` 필터이며, "번호 없음"은
 # jsonb 배열 길이가 아니라 배열 기수로 판정한다.
 _FIND_PLACE_NO_PHONE_SQL: Final[str] = """

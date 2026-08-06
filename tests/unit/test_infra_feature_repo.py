@@ -4,7 +4,7 @@ DB 적재 경로는 ``tests/integration/test_feature_repo_load.py``(testcontaine
 본 모듈은 ``Feature``/``SourceRecord``/``SourceLink`` DTO → bind params 변환과
 ``FeatureLoadResult`` 기본값만 단위 검증 (coord None / detail None 분기 포함).
 
-T-VN-35(ADR-085) 이후 계약
+T-VN-35(ADR-086) 이후 계약
 --------------------------
 
 core ``feature.features``에는 ``detail`` JSONB도 ``geom``도 없다(alembic 0086).
@@ -218,7 +218,7 @@ def test_nearby_feature_sql_guards_required_lon_lat_contract() -> None:
     assert "f.coord_5179 IS NOT NULL" in sql
 
 
-#: T-VN-35(ADR-085) 이후의 종료 notice 감산 술어 — free-form jsonb 문자열
+#: T-VN-35(ADR-086) 이후의 종료 notice 감산 술어 — free-form jsonb 문자열
 #: 파싱이 아니라 ``feature_notices.valid_end_time`` typed 비교다.
 _TYPED_ENDED_NOTICE_FRAGMENTS: tuple[str, ...] = (
     "FROM feature.feature_notices AS ended_notice",
@@ -253,7 +253,7 @@ def test_shared_notice_filter_function_compares_typed_valid_end_time() -> None:
     #745가 이 감산 SQL을 ``_ended_notice_hidden_sql(alias)`` /
     ``public_active_notice_filter_sql(alias)`` 함수로 중앙화하고 curation/curated
     표면까지 정본으로 확산시켰다 — 그 단일 함수가 곧 전 표면의 계약이다.
-    T-VN-35(ADR-085)가 ``detail`` 문자열 파싱과 ``pg_input_is_valid`` 방어 cast를
+    T-VN-35(ADR-086)가 ``detail`` 문자열 파싱과 ``pg_input_is_valid`` 방어 cast를
     ``feature_notices.valid_end_time`` 비교로 대체했다(T-VN-06/F-9의 실패 모드
     자체가 소멸). alias를 그대로 반영하는지도 함께 고정한다.
     """

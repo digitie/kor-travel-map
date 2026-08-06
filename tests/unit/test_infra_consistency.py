@@ -79,7 +79,7 @@ def test_f3_postgis_functions_are_schema_qualified() -> None:
 
 
 def test_f6_narrows_candidates_by_subtype_columns_before_lateral_expansion() -> None:
-    """T-VN-35(ADR-085) — opening_hours 보유 kind는 place/event 둘뿐이고, 그
+    """T-VN-35(ADR-086) — opening_hours 보유 kind는 place/event 둘뿐이고, 그
     값은 subtype 컬럼이 정본이다. 후보를 subtype에서 좁혀야
     ``idx_feature_places_opening_hours`` partial index가 구동된다(core detail
     표현식 인덱스의 대체). core ``features``는 lifecycle 확인용으로만 조인한다.

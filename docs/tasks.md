@@ -72,7 +72,7 @@ barrier로 직렬화한다.
   - freeze(Lane A): [x] `T-VN-31A` → [x] `T-VN-31B` → [x] `T-VN-31C`
   - Lane A: [x] `T-VN-32A` → [x] `T-VN-32B` → [x] `T-VN-32C`(prod 배포·값 전환
     라이브 — Map #950/#952/#955/#956·PinVi #430/#432) →
-    [x] `T-VN-35A-D`(typed subtype 분해 — ADR-085, A-D 단일 PR) →
+    [x] `T-VN-35A-D`(typed subtype 분해 — ADR-086, A-D 단일 PR) →
     [ ] `T-VN-37A` → [ ] `T-VN-37B` → [ ] `T-VN-37C`
   - Lane B shadow: [ ] `T-VN-33A` → [ ] `T-VN-33B` → [ ] `T-VN-33C` →
     [ ] `T-VN-38A` → [ ] `T-VN-38B` → [ ] `T-VN-38C` →
@@ -606,6 +606,16 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   새 pair에서 F1D를 한 번만 재개해 canonical `409` receipt, finalize, UI 상태를 확인하고
   prod 최종 live UI E2E까지 통과한다. frozen 후보의 재시도는 이 선행 조건 전에는 금지한다.
 
+### T-VN-41F1D-C0a — 후보 Map application schema head artifact
+
+- [/] **T-VN-41F1D-C0a — 설치 package 기반 정적 application head 계약**
+
+  후보 API image가 `ktm-application-schema head`로 installed package의 immutable graph
+  artifact에서만 단일 Alembic head를 반환한다. cwd/source mount/Alembic 실행/DB/application
+  import는 금지하고, AST generator equality와 side-effect/ambiguous head 회귀를 포함한다.
+  Docker Manager F1D-C2가 이 head와 Dagster storage/PinVi head를 reset 전에 receipt로
+  결박한다. 구현 PR의 적대 리뷰·CI·merge가 남았다.
+
 ## Wave 2 상세 — 구조 전환
 
 > 실행 순서는 31A~C(freeze) → 32~38(shadow, 두 lane 병렬) → 40 → 39(cutover 마지막)다.
@@ -661,8 +671,8 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 
 ### T-VN-35 — typed subtype 분해 (Lane A)
 
-> 2026-08-06 A-D 단일 PR로 종결(ADR-085). 원안 대비 **재해석 2건**이 있고, 근거는
-> 실측이다 — 아래 각 항에 적었다. 정본 설계는 `docs/adr/085-typed-feature-subtypes.md`.
+> 2026-08-06 A-D 단일 PR로 종결(ADR-086). 원안 대비 **재해석 2건**이 있고, 근거는
+> 실측이다 — 아래 각 항에 적었다. 정본 설계는 `docs/adr/086-typed-feature-subtypes.md`.
 
 - [x] T-VN-35A — **feature core·point subtype** → *배타 arc + place subtype*
 

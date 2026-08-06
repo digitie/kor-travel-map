@@ -319,7 +319,7 @@ class AdminFeatureBaseMutation(BaseModel):
     coord: AdminFeatureCoordInput | None = None
     coord_precision_digits: int | None = Field(default=None, ge=3, le=8)
     # ``geom``은 받지 않는다 — admin mutation은 place/event만 다루고, geometry
-    # 정본은 route/area subtype뿐이다(ADR-085). 종전엔 필드를 받아 change
+    # 정본은 route/area subtype뿐이다(ADR-086). 종전엔 필드를 받아 change
     # request payload에 넣기까지 했지만 적용 단계에서 **아무 데도 쓰지 않았다** —
     # 받아 놓고 버리는 필드는 계약이 아니라 거짓말이다.
     address: dict[str, Any] | None = None
@@ -381,7 +381,7 @@ _DETAIL_VALIDATION_PLACEHOLDER_ID = "f_validation_placeholder"
 
 
 def _reject_detail_not_matching_kind(kind: str, detail: dict[str, Any] | None) -> None:
-    """detail이 kind 계약에 맞는지 **경계에서 미리** 확인한다 (T-VN-35, ADR-085).
+    """detail이 kind 계약에 맞는지 **경계에서 미리** 확인한다 (T-VN-35, ADR-086).
 
     정본 판정은 write 경계(``feature_subtype.subtype_params``)가 갖는다 — 여기서
     값을 고쳐 넣지 않는 이유가 그것이다. 종전 구현은 정규화한 detail을
@@ -404,7 +404,7 @@ def _reject_detail_not_matching_kind(kind: str, detail: dict[str, Any] | None) -
         raise ValueError(f"detail이 kind={kind} 계약과 맞지 않습니다: {exc}") from exc
 
 
-# ``detail``은 kind별 typed subtype으로 저장되므로(T-VN-35, ADR-085) 생성
+# ``detail``은 kind별 typed subtype으로 저장되므로(T-VN-35, ADR-086) 생성
 # 요청은 DTO 정본으로 검증·정규화한다 — 계약 문서에 내부 근거를 싣지 않도록
 # docstring이 아니라 여기 주석으로 남긴다.
 class AdminFeatureCreateRequest(AdminFeatureBaseMutation):

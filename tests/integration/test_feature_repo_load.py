@@ -182,7 +182,7 @@ async def _insert_geometry_feature(
     lon: float | None,
     lat: float | None,
 ) -> None:
-    """route/area seed — T-VN-35(ADR-085) 이후 geometry 정본은 subtype이다.
+    """route/area seed — T-VN-35(ADR-086) 이후 geometry 정본은 subtype이다.
 
     core에는 ``geom`` 컬럼이 없고 ``feature_routes``/``feature_areas``의
     ``geom``이 Multi* NOT NULL이다. 단일 LineString/Polygon WKT도 ``ST_Multi``로
@@ -701,7 +701,7 @@ async def test_notice_first_probe_start_time_is_preserved_on_payload_update(
         )
     ).scalar_one()
 
-    # T-VN-35(ADR-085 결정 4 "의도적 정규화 1건"): valid_start_time이 typed
+    # T-VN-35(ADR-086 결정 4 "의도적 정규화 1건"): valid_start_time이 typed
     # timestamptz가 되면서 표기가 canonical UTC ISO로 통일된다(종전에는 writer마다
     # "+09:00"/"+00" 표기가 혼재). 같은 **순간**인지를 비교한다.
     assert datetime.fromisoformat(detail["valid_start_time"]) == first_seen
@@ -1254,7 +1254,7 @@ async def test_inactivate_geometryless_area_features_by_source(
     await feature_repo.load_bundles(migrated_session, [geometryless, with_geom, place])
     await migrated_session.flush()
 
-    # T-VN-35(ADR-085): kind 전이는 subtype 행이 있으면 배타 arc FK가 막는다.
+    # T-VN-35(ADR-086): kind 전이는 subtype 행이 있으면 배타 arc FK가 막는다.
     # 0086 이전에 적재된 "geometry 없는 area" 잔재를 재현하려면 event subtype을
     # 먼저 지우고 core kind를 옮긴 뒤 area subtype을 (있는 경우만) 만든다.
     for bundle in (geometryless, with_geom):
@@ -1333,7 +1333,7 @@ async def test_area_feature_geom_persists(migrated_session: AsyncSession) -> Non
     await feature_repo.load_bundle(migrated_session, bundle)
     await migrated_session.flush()
 
-    # T-VN-35(ADR-085): geometry 정본은 ``feature_areas.geom``(MultiPolygon 4326)이고
+    # T-VN-35(ADR-086): geometry 정본은 ``feature_areas.geom``(MultiPolygon 4326)이고
     # 조립 뷰가 같은 값을 ``geom``으로 제공한다.
     row = (
         await migrated_session.execute(

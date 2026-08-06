@@ -1,4 +1,4 @@
-"""typed subtype 분해 ① — 배타 arc + place subtype (T-VN-35A, ADR-085).
+"""typed subtype 분해 ① — 배타 arc + place subtype (T-VN-35A, ADR-086).
 
 무엇을 만드나
 -------------
@@ -28,7 +28,7 @@ subtype이 단일 정본이 된다
 core ``detail`` JSONB는 이 체인의 마지막(0086)에서 **제거된다** — subtype이
 kind별 값의 유일한 정본이고, 응답이 요구하는 ``detail``은 0086이 만드는
 ``feature.features_detailed`` 뷰가 subtype에서 조립한다. 이중 쓰기·drift
-관측이라는 우회 복잡도가 존재하지 않는다(ADR-085 결정 4).
+관측이라는 우회 복잡도가 존재하지 않는다(ADR-086 결정 4).
 
 0084는 그 체인의 첫 단계라 이 시점에는 core ``detail``이 아직 살아 있고,
 backfill이 그것을 읽어 typed 컬럼을 채운다.

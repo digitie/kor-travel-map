@@ -1,4 +1,4 @@
-"""T-VN-35 / ADR-085 — kind별 typed subtype 계약 통합 테스트 (testcontainers).
+"""T-VN-35 / ADR-086 — kind별 typed subtype 계약 통합 테스트 (testcontainers).
 
 alembic 0084~0086이 만든 배타 arc와 "subtype이 kind별 값의 유일한 정본"이라는
 계약을 **DB 수준에서** 고정한다. 여기서 검증하는 축은 다섯이다:
@@ -17,7 +17,7 @@ alembic 0084~0086이 만든 배타 arc와 "subtype이 kind별 값의 유일한 �
    무결성을 직접 깬다(``MergeConflictError``).
 
 추가로 0086 ``downgrade``/``upgrade`` 왕복이 ``detail`` 역조립을 무손실로
-수행하는지 소량 시드 md5 대조로 고정한다(ADR-085 근거절의 731k행 전수 대조를
+수행하는지 소량 시드 md5 대조로 고정한다(ADR-086 근거절의 731k행 전수 대조를
 회귀 가드 크기로 축소한 것).
 """
 
@@ -250,7 +250,7 @@ async def test_core_kind_change_is_blocked_while_subtype_row_exists(
 ) -> None:
     """subtype 행이 있는 동안 core ``kind`` 변경이 **FK 위반**으로 막힌다.
 
-    ADR-085 컨텍스트 1의 구멍(provider upsert의 ``kind = EXCLUDED.kind``가 kind를
+    ADR-086 컨텍스트 1의 구멍(provider upsert의 ``kind = EXCLUDED.kind``가 kind를
     조용히 교체할 수 있던 것)을 코드 규율이 아니라 DB 계약으로 닫은 것이 이
     단언의 대상이다. 참조 대상은 0084의 ``uq_features_identity_kind``.
     """
@@ -673,7 +673,7 @@ async def test_geometryless_route_and_area_are_rejected_at_construction(
 
     종전에는 적재 후 ``inactivate_geometryless_area_features_by_source``가 보정하던
     상태다. subtype ``geom``이 NOT NULL이 되면서 그 보정이 DTO 계약으로 앞당겨졌다
-    (ADR-085 결정 5) — write까지 갈 것도 없다. 반대 방향(route/area가 아닌 kind의
+    (ADR-086 결정 5) — write까지 갈 것도 없다. 반대 방향(route/area가 아닌 kind의
     geometry)도 같은 validator가 막는다: 담을 곳이 없으므로 조용히 버려지느니
     거부한다.
     """
@@ -917,7 +917,7 @@ async def test_cross_kind_merge_is_rejected(migrated_session: AsyncSession) -> N
     """kind가 다른 두 feature 병합은 ``MergeConflictError``로 fail-close한다.
 
     kind가 어느 subtype에 값이 사는지를 결정하므로 이종 병합은 "provider 정체성만
-    옮기고 typed 값은 남기는" 상태가 되어 무결성을 직접 깬다(ADR-085 결과절).
+    옮기고 typed 값은 남기는" 상태가 되어 무결성을 직접 깬다(ADR-086 결과절).
     """
     await _seed_place(migrated_session, "tvn35:merge:place")
     event_uuid = await _insert_core(
@@ -1125,7 +1125,7 @@ async def test_subtype_migration_round_trip_is_lossless(pg_container: Any) -> No
     """``head`` → ``0083`` → ``head`` 왕복에서 조립 detail이 md5까지 동일하다.
 
     0086 downgrade는 뷰와 **같은 식**으로 core ``detail``/``geom``을 역조립한다.
-    무손실이 아니면 롤백 가능성이 사라지므로, ADR-085 근거절의 731k행 전수 대조를
+    무손실이 아니면 롤백 가능성이 사라지므로, ADR-086 근거절의 731k행 전수 대조를
     회귀 가드 크기로 축소해 상시 고정한다.
     """
     dsn = await _fresh_database(pg_container)
@@ -1275,7 +1275,7 @@ async def test_legacy_detail_survives_forward_migration_byte_for_byte(
     모양이었다. 이 테스트는 반대 방향, 즉 마이그레이션이 실제로 통과시켜야 하는
     입력에서 출발한다.
 
-    notice 시각만 예외다: 종전 저장 표기가 writer마다 갈렸고(ADR-085 결정 4)
+    notice 시각만 예외다: 종전 저장 표기가 writer마다 갈렸고(ADR-086 결정 4)
     KST 고정 렌더로 통일했다. 그래도 Python ``isoformat()`` 표기와는 같으므로
     DTO가 만든 위 시드는 바이트까지 보존된다.
     """

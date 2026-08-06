@@ -1,4 +1,4 @@
-"""typed subtype 분해 ② — event·notice subtype (T-VN-35B, ADR-085).
+"""typed subtype 분해 ② — event·notice subtype (T-VN-35B, ADR-086).
 
 0084와 같은 배타 arc 패턴(kind 상수 CHECK + ``(feature_id, kind)`` 복합 FK +
 identity 사본 FK)을 event/notice에 적용하고, **시간 불변식을 DB 계약으로

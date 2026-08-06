@@ -75,7 +75,7 @@ CREATE TABLE feature.features (
            ELSE ST_Transform(coord, 5179)
       END
     ) STORED,
-  -- 선·면 geometry는 core에 없다 — route/area subtype이 정본 (§6, ADR-085)
+  -- 선·면 geometry는 core에 없다 — route/area subtype이 정본 (§6, ADR-086)
 
   -- 주소 (kortravelmap.dto.Address 직렬화)
   address                      JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -97,7 +97,7 @@ CREATE TABLE feature.features (
 
   -- 상세
   -- kind별 detail도 core에 없다 — typed subtype이 정본이고, 응답이 요구하는
-  -- detail/geom은 feature.features_detailed 뷰가 조립한다 (§6, ADR-085)
+  -- detail/geom은 feature.features_detailed 뷰가 조립한다 (§6, ADR-086)
   raw_refs                     JSONB NOT NULL DEFAULT '[]'::jsonb,
   status                       TEXT NOT NULL DEFAULT 'active',      -- FeatureStatus enum
 
@@ -115,7 +115,7 @@ CREATE TABLE feature.features (
   updated_at                   TIMESTAMPTZ NOT NULL DEFAULT now(),
   deleted_at                   TIMESTAMPTZ,
 
-  CONSTRAINT uq_features_identity_kind UNIQUE (feature_id, kind),  -- subtype 배타 arc의 참조 대상 (ADR-085)
+  CONSTRAINT uq_features_identity_kind UNIQUE (feature_id, kind),  -- subtype 배타 arc의 참조 대상 (ADR-086)
   CONSTRAINT ck_features_kind   CHECK (kind IN ('place','event','notice','price','weather','route','area')),
   CONSTRAINT ck_features_status CHECK (status IN ('draft','active','inactive','hidden','broken','deleted')),
   CONSTRAINT ck_features_data_origin CHECK (data_origin IN ('provider','user_request')),
@@ -857,7 +857,7 @@ CREATE INDEX idx_feature_files_provider       ON feature.feature_files (provider
 
 ## 6. kind별 typed subtype 테이블
 
-kind별 값의 정본은 core가 아니라 typed subtype 테이블이다(ADR-085). core가
+kind별 값의 정본은 core가 아니라 typed subtype 테이블이다(ADR-086). core가
 `UNIQUE (feature_id, kind)`를 갖고 각 subtype이 kind 상수 CHECK + `(feature_id, kind)`
 복합 FK로 core를 참조하는 **배타 arc**이며, 여기서 두 성질이 구조적으로 따라온다 —
 ① 한 feature는 최대 한 subtype에만 존재한다(core kind가 단일 값이므로) ② subtype 행이
@@ -2177,7 +2177,7 @@ downgrade는 queued/running base row의 marker 또는 `in_progress`/`retryable` 
 운영 확인 후 테이블/컬럼을 제거하며, active marker를 조용히 drop해 worker를 재개시키는
 downgrade는 금지한다.
 
-#### 9.8.2a C6c cancel-probe fixture 수명주기 (T-VN-41F1J, ADR-085)
+#### 9.8.2a C6c cancel-probe fixture 수명주기 (T-VN-41F1J, ADR-086)
 
 C6c/F1D가 검증할 `running` + `dagster_run_id IS NULL` member는 provider workload에서
 우연히 얻지 않는다. Map이 fixture transaction ID마다 job을 만들고 canonical cancellation과

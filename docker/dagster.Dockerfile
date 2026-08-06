@@ -59,17 +59,13 @@ RUN apt-get update \
     && chown -R appuser:appuser /app /opt/dagster
 
 COPY --from=builder /install /usr/local
-# NEW-5 (ADR-083 유예 해소) — dagster-entrypoint의 읽기 전용 DB 세대 게이트가
-# `alembic heads`/`alembic current`를 실행한다. alembic 패키지 자체는 kortravelmap
-# runtime 의존(pyproject `alembic>=1.13`)이라 /install에 이미 있고, 여기서는
-# migration chain 정의(alembic.ini + alembic/, 순수 텍스트 수백 KB)만 담는다.
-# migration 실행(`alembic upgrade`)은 여전히 api-entrypoint 소유다 — 이 이미지는
-# 어떤 경로로도 upgrade를 돌리지 않는다.
-COPY --chown=appuser:appuser alembic.ini ./
-COPY --chown=appuser:appuser alembic ./alembic
+# Map application Alembic은 API image만 소유한다. Dagster metadata storage는 이
+# image에 설치된 Dagster package의 migration graph가 정본이며, one-shot command가
+# `dagster instance migrate` 뒤 strict version 검증을 수행한다.
 COPY --chown=appuser:appuser docker/dagster.yaml /opt/dagster/dagster_home/dagster.yaml
 COPY --chown=appuser:appuser docker/dagster-entrypoint.sh /usr/local/bin/dagster-entrypoint.sh
-RUN chmod 0755 /usr/local/bin/dagster-entrypoint.sh
+COPY --chown=appuser:appuser docker/dagster-storage-migrate.py /usr/local/bin/ktm-dagster-storage
+RUN chmod 0755 /usr/local/bin/dagster-entrypoint.sh /usr/local/bin/ktm-dagster-storage
 
 USER appuser
 

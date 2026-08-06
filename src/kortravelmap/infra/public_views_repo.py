@@ -164,7 +164,7 @@ LEFT JOIN LATERAL (
 # 공개 여부는 ADR-067 ``feature.public_features`` projection이 정본이다 — 아래
 # SQL은 그 projection만 FROM 하고 술어를 재구현하지 않는다(T-VN-04, F-1).
 #
-# T-VN-35(ADR-085): kind별 값의 정본은 subtype 테이블이다. 공개 판별 술어를
+# T-VN-35(ADR-086): kind별 값의 정본은 subtype 테이블이다. 공개 판별 술어를
 # free-form JSONB 탐침(``detail ->> 'place_kind'``)에서 **typed 컬럼**으로
 # 옮긴다. kind 판정이 술어가 아니라 구조(어느 subtype에 행이 있는가)로 바뀌므로
 # ``f.kind = 'place'`` 중복 술어는 사라진다 — subtype의 kind 상수 CHECK +
@@ -284,7 +284,7 @@ JOIN feature.feature_events AS fe ON fe.feature_id = f.feature_id
 """
 
 # ``event_kind``는 subtype에서 NOT NULL이고, backfill·writer 모두 결측을
-# sentinel로 덮지 않고 거부한다(ADR-085 — ``'unknown'`` 가짜 값 폐기). 따라서
+# sentinel로 덮지 않고 거부한다(ADR-086 — ``'unknown'`` 가짜 값 폐기). 따라서
 # 종전 공개 술어의 "event_kind가 없으면 축제로 본다" 분기는 **존재할 수 없는
 # 상태를 위한 방어**가 됐고, typed 컬럼을 직접 비교한다. 실측: bench 1,246
 # event 전 행이 event_kind 보유(구·신 술어 동치 1,246 = 1,246).

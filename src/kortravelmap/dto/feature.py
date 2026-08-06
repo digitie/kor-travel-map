@@ -47,7 +47,7 @@ _DETAIL_MODELS: Final[dict[FeatureKind, type[BaseModel]]] = {
     # FeatureKind.PRICE / WEATHER는 detail=None (별도 WeatherValue/PriceValue 테이블).
 }
 
-# ADR-085 — geometry(선·면)를 갖는 kind. 이 둘만 갖고, 이 둘은 반드시 갖는다.
+# ADR-086 — geometry(선·면)를 갖는 kind. 이 둘만 갖고, 이 둘은 반드시 갖는다.
 _GEOMETRY_KINDS: Final[frozenset[FeatureKind]] = frozenset(
     {FeatureKind.ROUTE, FeatureKind.AREA}
 )
@@ -104,7 +104,7 @@ class Feature(BaseModel):
             "route/area feature의 선·면 geometry (WKT, EPSG:4326). **route/area "
             "전용이며 그 두 kind에는 필수**다. place/event 등 Point feature는 "
             "``None`` — 좌표는 ``coord``. 저장 위치는 route/area subtype의 "
-            "``geom`` 컬럼 (ADR-085; 종전 core ``features.geom``은 제거됐다). "
+            "``geom`` 컬럼 (ADR-086; 종전 core ``features.geom``은 제거됐다). "
             "생성/검증은 ``kortravelmap.core.geometry``."
         ),
     )
@@ -194,7 +194,7 @@ class Feature(BaseModel):
         self._check_geometry_matches_kind()
         if self.detail is None:
             # price/weather는 detail=None 허용. 나머지도 필수는 아니다 —
-            # subtype writer가 kind DTO의 기본값으로 채운다(ADR-085).
+            # subtype writer가 kind DTO의 기본값으로 채운다(ADR-086).
             return self
         expected = _DETAIL_MODELS.get(self.kind)
         if expected is None:
@@ -211,7 +211,7 @@ class Feature(BaseModel):
         return self
 
     def _check_geometry_matches_kind(self) -> None:
-        """geometry는 route/area **전용이자 필수**다 (ADR-085).
+        """geometry는 route/area **전용이자 필수**다 (ADR-086).
 
         종전에는 산문으로만 그랬고 DTO는 아무 kind에나 ``geom``을 받았다. 이제
         저장 위치가 route/area subtype의 NOT NULL 컬럼이라 다른 kind의 geometry는
@@ -221,10 +221,10 @@ class Feature(BaseModel):
         if wants_geometry and self.geom is None:
             raise ValueError(
                 f"kind={self.kind.value!r}는 geom이 필수다 — subtype geometry가 "
-                "NOT NULL이다 (ADR-085). 좌표만 있는 record는 place로 적재한다."
+                "NOT NULL이다 (ADR-086). 좌표만 있는 record는 place로 적재한다."
             )
         if not wants_geometry and self.geom is not None:
             raise ValueError(
                 f"kind={self.kind.value!r}는 geom을 가질 수 없다 — geometry 정본은 "
-                "route/area subtype뿐이다 (ADR-085). 점 좌표는 coord를 쓴다."
+                "route/area subtype뿐이다 (ADR-086). 점 좌표는 coord를 쓴다."
             )

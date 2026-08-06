@@ -855,7 +855,7 @@ RETURNING curated_feature_id
 
 # loser feature soft-delete (ADR-017).
 #
-# T-VN-35(ADR-085): core-only다 — **loser의 subtype 행은 남는다**. subtype FK는
+# T-VN-35(ADR-086): core-only다 — **loser의 subtype 행은 남는다**. subtype FK는
 # ``ON DELETE CASCADE``지만 여기서 지우는 것은 행이 아니라 ``status``뿐이므로
 # CASCADE가 발동하지 않는다. 이는 의도된 상태다: ADR-017의 무기한 보관(place는
 # 하드 삭제 안 함)이 kind별 typed 값에도 그대로 적용돼야 병합 취소·감사가
@@ -938,7 +938,7 @@ async def _master_candidate(session: AsyncSession, feature_id: str) -> MasterCan
 def _reject_cross_kind_merge(
     locked_kinds: dict[str, str], *, master_id: str, loser_id: str
 ) -> None:
-    """kind가 다른 두 feature의 병합을 차단한다 (T-VN-35, ADR-085).
+    """kind가 다른 두 feature의 병합을 차단한다 (T-VN-35, ADR-086).
 
     kind는 **어떤 subtype 테이블에 값이 사는지**를 결정한다(``feature_places``
     /``feature_events``/…). 따라서 cross-kind 병합은 "place의 source_link를

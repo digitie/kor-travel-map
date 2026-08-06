@@ -1,4 +1,4 @@
-"""통합 테스트용 kind별 subtype seed 헬퍼 (T-VN-35, ADR-085).
+"""통합 테스트용 kind별 subtype seed 헬퍼 (T-VN-35, ADR-086).
 
 alembic 0086 이후 core ``feature.features``에는 ``detail`` JSONB도 ``geom``도
 없다. kind별 값의 정본은 subtype 5종(``feature_places``/``feature_events``/

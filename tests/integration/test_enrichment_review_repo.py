@@ -68,7 +68,7 @@ def _festival_feature(feature_id: str = _TARGET_ID, name: str = "서울 봄꽃 �
     )
 
 
-#: T-VN-35(ADR-085): 축제 기간의 정본은 ``feature_events.starts_on/ends_on``이다.
+#: T-VN-35(ADR-086): 축제 기간의 정본은 ``feature_events.starts_on/ends_on``이다.
 _FESTIVAL_DETAIL = {
     "event_kind": "festival",
     "starts_on": "2026-04-05",

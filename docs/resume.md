@@ -1,5 +1,28 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-06 — T-VN-41F1D-C0a 후보 Map application schema head artifact 구현 완료, PR 게이트 중
+
+후보 API image의 `ktm-application-schema head`는 installed package의 immutable application
+migration graph만 읽어 단일 Alembic head를 JSON으로 attest한다. cwd/source mount/DB/환경변수와
+application·migration module import를 모두 경계 밖으로 두고, source AST literal graph와
+artifact equality를 회귀로 고정했다. 적대 리뷰 반영으로 generator/image command 양쪽이
+root-connected cycle을 거부하며 Manager와 같은 revision 문법을 사용한다.
+
+**다음 한 작업**: C0a의 적대 리뷰·CI·merge 뒤 Docker Manager F1D-C2가 Map application,
+Dagster storage, PinVi 후보 head를 모두 attest하고 destructive rebuild를 진행한다.
+
+## 2026-08-06 — T-VN-41F1D-C0 후보 Dagster storage migration artifact 완료
+
+후보 image의 `ktm-dagster-storage head|migrate`가 Dagster 자체 storage graph의 단일
+head를 attest하고, 같은 image의 instance config로 migration 뒤
+`public.alembic_version` 한 행을 strict 대조한다. Map application Alembic/source SHA로
+storage 세대를 추정하던 경로를 제거했고, Compose의 one-shot 성공 후에만 Dagster
+webserver/daemon이 기동한다. 빈 격리 PostgreSQL 실측에서 세 값이 모두
+`29b539ebc72a`로 일치했다.
+
+**다음 한 작업**: Docker Manager T-VN-41F1D-C2가 후보 image의 이 command를 호출해
+storage head를 attest하고 reset 뒤 migration을 증명한다.
+
 ## 과거 기록 아카이브
 
 > 2026-07-26 **전면 감사**(현행 백로그 구조 성립) 이전 기록은 아래로 분리했다.
@@ -10,7 +33,7 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
-## 2026-08-06 (1) — T-VN-35 A-D 구현·리뷰 반영 완료 (ADR-085)
+## 2026-08-06 (1) — T-VN-35 A-D 구현·리뷰 반영 완료 (ADR-086)
 
 `feat/tvn35-typed-subtypes` — kind별 typed subtype 5종 + 배타 arc, core
 `detail`·`geom` 제거 + `features_detailed` 조립 뷰(단일 정본). prod 복원본

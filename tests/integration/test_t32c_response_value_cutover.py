@@ -130,7 +130,7 @@ def _place_bundle(
         coord=Coordinate(lon=lon, lat=lat),
         marker_icon="star",
         marker_color="P-03",
-        # T-VN-35(ADR-085): place subtype ``place_kind``는 NOT NULL이다.
+        # T-VN-35(ADR-086): place subtype ``place_kind``는 NOT NULL이다.
         detail=PlaceDetail(feature_id=feature_id, place_kind="attraction"),
         created_at=_FETCHED,
         updated_at=_FETCHED,

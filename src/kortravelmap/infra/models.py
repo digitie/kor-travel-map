@@ -6,7 +6,7 @@ ORM 인스턴스 read mapping 용도로도 사용 가능.
 
 구성:
 - ``features`` — kind 공통 core (ADR-012 ``coord_5179`` STORED generated column).
-  kind별 값과 선·면 geometry는 여기 없다 — subtype이 정본이다(ADR-085).
+  kind별 값과 선·면 geometry는 여기 없다 — subtype이 정본이다(ADR-086).
 - kind별 typed subtype 5종 — ``feature_places`` / ``feature_events`` /
   ``feature_notices`` / ``feature_routes`` / ``feature_areas``. core의
   ``UNIQUE (feature_id, kind)``를 kind 상수 CHECK + 복합 FK로 참조하는
@@ -30,7 +30,7 @@ ADR 참조
 - ADR-008 — extension은 ``x_extension`` schema 격리
 - ADR-012 — ``coord_5179`` STORED generated column (반경 검색 인덱스)
 - ADR-018 — Feature.detail은 kind별 Pydantic 모델 (자유 dict 금지)
-- ADR-085 — kind별 typed subtype 분해와 배타 arc
+- ADR-086 — kind별 typed subtype 분해와 배타 arc
 - ADR-019 — 모든 datetime ``TIMESTAMPTZ`` (KST aware)
 """
 
@@ -443,7 +443,7 @@ class FeatureRow(Base):
 # kind 변경이 FK 위반으로 막힌다. ``(feature_id, feature_uuid)`` 복합 FK는
 # 0083 ``feature_aliases`` 선례와 같은 identity 사본 일치 계약이다.
 #
-# T-VN-35(ADR-085 결정 4): core ``detail``/``geom``은 0086에서 **제거됐다**.
+# T-VN-35(ADR-086 결정 4): core ``detail``/``geom``은 0086에서 **제거됐다**.
 # kind별 값의 정본은 subtype 테이블이고, 응답용 ``detail``/``geom``은
 # ``feature.features_detailed`` 뷰가 조립한다 — 이 ORM 매핑은 core 컬럼만
 # 반영한다(뷰는 read 전용이라 매핑하지 않는다).
@@ -2681,7 +2681,7 @@ class ImportJobRow(Base):
 
 
 # =============================================================================
-# ops.c6c_cancel_probe_fixtures  (ADR-085 / T-VN-41F1J)
+# ops.c6c_cancel_probe_fixtures  (ADR-086 / T-VN-41F1J)
 # =============================================================================
 
 

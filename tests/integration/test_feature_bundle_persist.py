@@ -140,7 +140,7 @@ async def test_feature_bundle_persists_and_roundtrips(
     )
     migrated_session.add_all([feature_row, source_entity_row])
     await migrated_session.flush()
-    # T-VN-35(ADR-085): kind별 값의 정본은 subtype이다 — core에 detail 컬럼이 없다.
+    # T-VN-35(ADR-086): kind별 값의 정본은 subtype이다 — core에 detail 컬럼이 없다.
     await seed_feature_subtype(
         migrated_session,
         feature_id=feature.feature_id,
@@ -174,7 +174,7 @@ async def test_feature_bundle_persists_and_roundtrips(
     assert got.category == feature.category
     assert isinstance(got.address, dict)
 
-    # detail은 core 컬럼이 아니라 ``features_detailed`` 뷰의 조립 결과다(ADR-085).
+    # detail은 core 컬럼이 아니라 ``features_detailed`` 뷰의 조립 결과다(ADR-086).
     assembled = (
         await migrated_session.execute(
             text(

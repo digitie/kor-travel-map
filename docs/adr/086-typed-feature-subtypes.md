@@ -1,4 +1,4 @@
-# ADR-085: kind별 typed subtype 분해와 배타 arc
+# ADR-086: kind별 typed subtype 분해와 배타 arc
 
 - 상태: accepted
 - 날짜: 2026-08-06

@@ -102,7 +102,7 @@ async def _ins_feature(
             "soft_deleted": soft_deleted,
         },
     )
-    # T-VN-35(ADR-085): kind별 값의 정본은 subtype이다 — core INSERT만으로는
+    # T-VN-35(ADR-086): kind별 값의 정본은 subtype이다 — core INSERT만으로는
     # 조립 뷰가 돌려주는 detail이 비어 있다.
     await seed_feature_subtype(
         session, feature_id=feature_id, kind=kind, detail=json.loads(detail)
@@ -319,7 +319,7 @@ async def test_contained_in_area_uses_projection(migrated_session: AsyncSession)
     ids = await _seed_matrix(migrated_session, "pfv:area", name_token="구역내장소")
     polygon = "POLYGON((126.9 37.5, 127.1 37.5, 127.1 37.7, 126.9 37.7, 126.9 37.5))"
     for area_id, area_status in (("pfv:area:zone", "active"), ("pfv:area:zone-off", "inactive")):
-        # T-VN-35(ADR-085): geometry 정본은 ``feature_areas``다(core에 geom 없음).
+        # T-VN-35(ADR-086): geometry 정본은 ``feature_areas``다(core에 geom 없음).
         await migrated_session.execute(
             text(
                 """

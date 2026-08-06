@@ -371,7 +371,7 @@ async def test_alembic_creates_features_table(
 ) -> None:
     """0002 revision이 ``feature.features`` 테이블 생성 (head 기준 core 축).
 
-    T-VN-35(ADR-085, alembic 0086): ``detail``/``geom``은 **core 컬럼이 아니다**.
+    T-VN-35(ADR-086, alembic 0086): ``detail``/``geom``은 **core 컬럼이 아니다**.
     kind별 값과 geometry의 정본은 subtype 5종이고 응답용 두 값은
     ``feature.features_detailed`` 뷰가 조립한다. core에 그 컬럼이 되살아나면
     "값이 두 곳에 있다"는 회귀이므로 부재도 함께 고정한다.
@@ -393,13 +393,13 @@ async def test_alembic_creates_features_table(
     ):
         assert required in columns, f"missing column: {required}"
     for removed in ("detail", "geom"):
-        assert removed not in columns, f"core column {removed!r} came back (ADR-085)"
+        assert removed not in columns, f"core column {removed!r} came back (ADR-086)"
 
 
 async def test_alembic_creates_typed_subtype_tables_and_assembly_view(
     pg_engine_with_migrations: AsyncEngine,
 ) -> None:
-    """0084~0086이 subtype 5종 + 조립 뷰 2종을 만든다 (T-VN-35, ADR-085)."""
+    """0084~0086이 subtype 5종 + 조립 뷰 2종을 만든다 (T-VN-35, ADR-086)."""
     async with pg_engine_with_migrations.connect() as conn:
         tables = set(
             (
@@ -646,7 +646,7 @@ async def test_curation_provenance_migration_fail_closes_legacy_links(
                         '01070100',
                         'place',
                         'P-01',
-                        -- T-VN-35(ADR-085): 0084 backfill이 place_kind 결측을
+                        -- T-VN-35(ADR-086): 0084 backfill이 place_kind 결측을
                         -- NOT NULL로 fail-close한다(sentinel 폐기). 0071 시점 seed도
                         -- head까지 올라가려면 필수 값을 갖춰야 한다.
                         '{"place_kind": "attraction"}'::jsonb

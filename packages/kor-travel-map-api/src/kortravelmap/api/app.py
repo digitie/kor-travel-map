@@ -795,7 +795,7 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
     ) -> JSONResponse:
         """kind 계약과 맞지 않는 ``detail``은 서버 결함이 아니라 요청 결함이다.
 
-        typed subtype(T-VN-35, ADR-085) 도입 뒤 필수 필드 결측은 write 경계에서
+        typed subtype(T-VN-35, ADR-086) 도입 뒤 필수 필드 결측은 write 경계에서
         거부된다. 그 거부가 500으로 새면 **이미 접수된 change request**가 승인
         시점마다 500을 내며 영구히 적용 불가가 된다 — 무엇을 고쳐야 하는지도
         알려주지 않는다.

@@ -7,7 +7,7 @@
 그리고 curated/curation 표면)가 500이 됐고, ``pg_input_is_valid`` 가드 +
 fail-closed로 완화했다.
 
-T-VN-35(ADR-085, alembic 0085)가 그 실패 모드를 **구조적으로 제거**했다 —
+T-VN-35(ADR-086, alembic 0085)가 그 실패 모드를 **구조적으로 제거**했다 —
 효력 기간의 정본이 ``feature.feature_notices.valid_start_time/valid_end_time``
 ``timestamptz`` 컬럼이라 "파싱 불가 값"이 애초에 저장될 수 없다. 그래서 가드도,
 문자열 파싱도 코드에서 사라졌다.
@@ -116,7 +116,7 @@ async def _seed_notice_matrix(session: AsyncSession) -> dict[str, str]:
 
     종전 matrix의 ``null-end``/``no-end-key``는 free-form jsonb 시절 "키가 있고
     값이 null"과 "키 자체가 없음"을 구분하던 것이다. typed 컬럼에서는 둘 다
-    ``NULL``이라 상태 자체가 하나로 합쳐졌다(정규화 — ADR-085 결정 4).
+    ``NULL``이라 상태 자체가 하나로 합쳐졌다(정규화 — ADR-086 결정 4).
     """
     ids: dict[str, str] = {}
     rows: tuple[tuple[str, str | None], ...] = (

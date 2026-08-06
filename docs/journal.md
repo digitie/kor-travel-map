@@ -2,6 +2,34 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-06 (codex) — T-VN-41F1D-C0a 후보 Map application schema head artifact 구현
+
+- 후보 API image에 `ktm-application-schema head`를 추가했다. command는 Python installation
+  prefix의 package data graph만 읽고 application/Alembic migration module, DB, credential,
+  cwd/source mount를 전혀 사용하지 않는다. 성공은
+  `kor-travel-map.application-head.v1` 한 줄 JSON, invalid/ambiguous graph는 sanitized error
+  JSON으로 fail-close한다.
+- graph artifact는 source `alembic/versions`의 top-level `revision`/`down_revision` literal을
+  AST로 읽어 생성하며 generator `--check`가 checked-in equality를 고정한다. top-level side
+  effect 미실행, cwd decoy 무시, zero/multiple/unknown head 거부와 API image command/package-data
+  결선을 unit regression으로 추가했다.
+- 적대 리뷰 P1/P2를 반영해 generator와 image command 모두 root 도달성뿐 아니라 DFS cycle
+  부재와 단일 terminal head를 검증하게 했고, Docker Manager와 같은
+  `^[0-9a-z][0-9a-z_.-]{0,127}$` revision 문법의 경계·거부 회귀를 고정했다.
+
+## 2026-08-06 (codex) — T-VN-41F1D-C0 Dagster storage migration artifact 완료
+
+- 후보 image에 `ktm-dagster-storage head|migrate`를 추가했다. `head`는 이미지에 실제
+  설치된 Dagster package graph만 읽어 JSON으로 attest하고, `migrate`는 같은
+  `DAGSTER_HOME`/`dagster.yaml`/metadata DSN으로 `dagster instance migrate` 뒤
+  `public.alembic_version` 정확히 한 행을 대조한다. Map application Alembic·source SHA는
+  storage head 정본이 아니다.
+- Compose one-shot을 webserver/daemon의 선행 조건으로 연결하고 모든 외부 overlay의
+  순서를 고정했다. 실제 후보 image와 빈 격리 PostgreSQL에서 head, migration JSON,
+  `public.alembic_version`이 모두 `29b539ebc72a`로 일치했다. Dagster package와 Docker
+  runtime 회귀 pytest 666건(선택 provider 의존성 누락 3건 skip), ruff, Python 3.13 strict
+  mypy, import-linter를 통과했다.
+
 ## 과거 기록 아카이브
 
 > 2026-07-26 **전면 감사**(현행 백로그 구조 성립) 이전 기록은 아래로 분리했다.
@@ -17,7 +45,7 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
-## 2026-08-06 (1) — T-VN-35 A-D: kind별 typed subtype 분해 (ADR-085)
+## 2026-08-06 (1) — T-VN-35 A-D: kind별 typed subtype 분해 (ADR-086)
 
 - `feature.features`의 `detail` JSONB·`geom`을 **제거**하고 kind별 typed
   subtype 5종(`feature_places`/`_events`/`_notices`/`_routes`/`_areas`)으로
