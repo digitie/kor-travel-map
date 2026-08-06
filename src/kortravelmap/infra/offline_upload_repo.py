@@ -21,7 +21,6 @@ from typing import TYPE_CHECKING, Any, Final
 
 from sqlalchemy import text
 
-from kortravelmap.core.feature_operation import ProviderDatasetOperationKey
 from kortravelmap.core.offline_upload_states import (
     OFFLINE_UPLOAD_DELETABLE_STATES,
     OFFLINE_UPLOAD_LOAD_FINISH_SOURCE_STATES,
@@ -31,7 +30,10 @@ from kortravelmap.core.offline_upload_states import (
     OFFLINE_UPLOAD_VALIDATION_FINISH_SOURCE_STATES,
     OFFLINE_UPLOAD_VALIDATION_FINISH_STATES,
 )
-from kortravelmap.infra.jobs_repo import start_provider_dataset_import_job
+from kortravelmap.infra.jobs_repo import (
+    ImportJobDatasetTarget,
+    start_provider_dataset_import_job,
+)
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -57,7 +59,7 @@ __all__ = [
 ]
 
 _RETURN_COLUMNS: Final[str] = (
-    "upload_id, provider, dataset_key, sync_scope, original_filename, "
+    "upload_id, provider_dataset_id, sync_scope, original_filename, "
     "storage_backend, storage_key, byte_size, checksum_sha256, detected_format, "
     "detected_encoding, status, validation_job_id, load_job_id, created_by, "
     "delete_command_id, created_at, updated_at"
@@ -71,8 +73,7 @@ class OfflineUpload:
     """``ops.offline_uploads`` 행 표현."""
 
     upload_id: str
-    provider: str
-    dataset_key: str
+    provider_dataset_id: int
     sync_scope: str
     original_filename: str
     storage_backend: str
@@ -93,8 +94,7 @@ class OfflineUpload:
         """Dagster/OpenAPI metadata로 쓰기 쉬운 축약 표현."""
         return {
             "upload_id": self.upload_id,
-            "provider": self.provider,
-            "dataset_key": self.dataset_key,
+            "provider_dataset_id": self.provider_dataset_id,
             "sync_scope": self.sync_scope,
             "original_filename": self.original_filename,
             "storage_backend": self.storage_backend,
@@ -143,8 +143,7 @@ def _row_to_upload(row: Any) -> OfflineUpload:
     data = row._mapping
     return OfflineUpload(
         upload_id=str(data["upload_id"]),
-        provider=str(data["provider"]),
-        dataset_key=str(data["dataset_key"]),
+        provider_dataset_id=int(data["provider_dataset_id"]),
         sync_scope=str(data["sync_scope"]),
         original_filename=str(data["original_filename"]),
         storage_backend=str(data["storage_backend"]),
@@ -193,12 +192,12 @@ def _decode_cursor(cursor: str | None) -> tuple[datetime | None, str | None]:
 
 _INSERT_SQL: Final[str] = f"""
 INSERT INTO ops.offline_uploads (
-    upload_id, provider, dataset_key, sync_scope, original_filename,
+    upload_id, provider_dataset_id, sync_scope, original_filename,
     storage_backend, storage_key, byte_size, checksum_sha256,
     detected_format, detected_encoding, created_by
 ) VALUES (
     COALESCE(CAST(:upload_id AS uuid), x_extension.gen_random_uuid()),
-    :provider, :dataset_key, :sync_scope, :original_filename,
+    :provider_dataset_id, :sync_scope, :original_filename,
     :storage_backend, :storage_key, :byte_size, :checksum_sha256,
     :detected_format, :detected_encoding, :created_by
 )
@@ -207,16 +206,16 @@ RETURNING {_RETURN_COLUMNS}
 
 _RESERVE_SQL: Final[str] = f"""
 INSERT INTO ops.offline_uploads (
-    upload_id, provider, dataset_key, sync_scope, original_filename,
+    upload_id, provider_dataset_id, sync_scope, original_filename,
     storage_backend, storage_key, byte_size, checksum_sha256,
     detected_format, detected_encoding, status, created_by
 ) VALUES (
-    CAST(:upload_id AS uuid), :provider, :dataset_key, :sync_scope,
+    CAST(:upload_id AS uuid), :provider_dataset_id, :sync_scope,
     :original_filename, :storage_backend, :storage_key, :byte_size,
     :checksum_sha256, :detected_format, :detected_encoding, 'uploading',
     :created_by
 )
-ON CONFLICT (provider, dataset_key, sync_scope, checksum_sha256) DO NOTHING
+ON CONFLICT (provider_dataset_id, sync_scope, checksum_sha256) DO NOTHING
 RETURNING {_RETURN_COLUMNS}
 """
 
@@ -236,8 +235,7 @@ FOR UPDATE
 _GET_BY_CHECKSUM_SQL: Final[str] = f"""
 SELECT {_RETURN_COLUMNS}
 FROM ops.offline_uploads
-WHERE provider = :provider
-  AND dataset_key = :dataset_key
+WHERE provider_dataset_id = :provider_dataset_id
   AND sync_scope = :sync_scope
   AND checksum_sha256 = :checksum_sha256
 ORDER BY created_at DESC, upload_id DESC
@@ -248,8 +246,10 @@ _LIST_SQL: Final[str] = f"""
 SELECT {_RETURN_COLUMNS}
 FROM ops.offline_uploads
 WHERE (CAST(:status AS text) IS NULL OR status = CAST(:status AS text))
-  AND (CAST(:provider AS text) IS NULL OR provider = CAST(:provider AS text))
-  AND (CAST(:dataset_key AS text) IS NULL OR dataset_key = CAST(:dataset_key AS text))
+  AND (
+      CAST(:provider_dataset_id AS bigint) IS NULL
+      OR provider_dataset_id = CAST(:provider_dataset_id AS bigint)
+  )
   AND (
     CAST(:cursor_created_at AS timestamptz) IS NULL
     OR (created_at, upload_id) < (
@@ -369,14 +369,13 @@ async def create_offline_upload(
     session: AsyncSession,
     *,
     upload_id: str | None = None,
-    provider: str,
-    dataset_key: str,
+    provider_dataset_id: int,
     original_filename: str,
     storage_backend: str,
     storage_key: str,
     byte_size: int,
     checksum_sha256: str,
-    sync_scope: str = "default",
+    sync_scope: str = "dataset_wide",
     detected_format: str | None = None,
     detected_encoding: str | None = None,
     created_by: str | None = None,
@@ -386,8 +385,7 @@ async def create_offline_upload(
         text(_INSERT_SQL),
         {
             "upload_id": upload_id,
-            "provider": provider,
-            "dataset_key": dataset_key,
+            "provider_dataset_id": provider_dataset_id,
             "sync_scope": sync_scope,
             "original_filename": original_filename,
             "storage_backend": storage_backend,
@@ -406,14 +404,13 @@ async def reserve_offline_upload(
     session: AsyncSession,
     *,
     upload_id: str,
-    provider: str,
-    dataset_key: str,
+    provider_dataset_id: int,
     original_filename: str,
     storage_backend: str,
     storage_key: str,
     byte_size: int,
     checksum_sha256: str,
-    sync_scope: str = "default",
+    sync_scope: str = "dataset_wide",
     detected_format: str | None = None,
     detected_encoding: str | None = None,
     created_by: str | None = None,
@@ -423,8 +420,7 @@ async def reserve_offline_upload(
         text(_RESERVE_SQL),
         {
             "upload_id": upload_id,
-            "provider": provider,
-            "dataset_key": dataset_key,
+            "provider_dataset_id": provider_dataset_id,
             "sync_scope": sync_scope,
             "original_filename": original_filename,
             "storage_backend": storage_backend,
@@ -536,17 +532,15 @@ async def get_offline_upload(
 async def get_offline_upload_by_checksum(
     session: AsyncSession,
     *,
-    provider: str,
-    dataset_key: str,
+    provider_dataset_id: int,
     sync_scope: str,
     checksum_sha256: str,
 ) -> OfflineUpload | None:
-    """provider/dataset/scope/checksum 조합으로 기존 업로드를 조회한다."""
+    """canonical dataset/scope/checksum 조합으로 기존 업로드를 조회한다."""
     result = await session.execute(
         text(_GET_BY_CHECKSUM_SQL),
         {
-            "provider": provider,
-            "dataset_key": dataset_key,
+            "provider_dataset_id": provider_dataset_id,
             "sync_scope": sync_scope,
             "checksum_sha256": checksum_sha256,
         },
@@ -559,8 +553,7 @@ async def list_offline_uploads(
     session: AsyncSession,
     *,
     status: str | None = None,
-    provider: str | None = None,
-    dataset_key: str | None = None,
+    provider_dataset_id: int | None = None,
     limit: int = 50,
     cursor: str | None = None,
 ) -> OfflineUploadPage:
@@ -574,8 +567,7 @@ async def list_offline_uploads(
             text(_LIST_SQL),
             {
                 "status": status,
-                "provider": provider,
-                "dataset_key": dataset_key,
+                "provider_dataset_id": provider_dataset_id,
                 "cursor_created_at": cursor_created_at,
                 "cursor_upload_id": cursor_upload_id,
                 "limit_plus_one": effective_limit + 1,
@@ -630,16 +622,16 @@ async def reserve_offline_upload_load(
         kind=job_kind,
         payload={
             "upload_id": upload.upload_id,
-            "provider": upload.provider,
-            "dataset_key": upload.dataset_key,
+            "provider_dataset_id": upload.provider_dataset_id,
             "sync_scope": upload.sync_scope,
             "storage_backend": upload.storage_backend,
             "storage_key": upload.storage_key,
             "dagster_run_id": None,
         },
         source_checksum=upload.checksum_sha256,
-        provider_dataset=ProviderDatasetOperationKey(
-            upload.provider, upload.dataset_key
+        dataset_membership=ImportJobDatasetTarget(
+            provider_dataset_id=upload.provider_dataset_id,
+            sync_scope=upload.sync_scope,
         ),
         trigger_kind="manual",
     )

@@ -162,16 +162,11 @@ def _source_detail() -> ReviewSourceDetail:
         dataset_key="visitkorea_festival_events",
         source_entity_type="festival",
         source_entity_id="2747929",
-        source_version=None,
-        raw_name="서울 봄꽃",
-        raw_address="서울",
-        raw_longitude=126.9001,
-        raw_latitude=37.5001,
         raw_payload_hash="hash-vk",
         raw_data={"eventstartdate": "20260405", "eventenddate": "20260412"},
         fetched_at=now,
         imported_at=now,
-        expires_at=None,
+        observed_at=now,
     )
 
 
@@ -189,6 +184,8 @@ def _review_detail(*, target_detail: dict[str, Any] | None = None) -> Enrichment
         source_dataset_key="visitkorea_festival_events",
         source_entity_id="2747929",
         source_name="서울 봄꽃",
+        source_lon=126.9001,
+        source_lat=37.5001,
         target_start_date="2026-04-05",
         target_end_date="2026-04-12",
         source_start_date="20260405",
@@ -304,7 +301,16 @@ def test_get_enrichment_review_detail_returns_compare_payload(
     # T-VN-32C 값 전환 — target/비교 snapshot의 feature 참조는 UUID 정본.
     assert data["target_feature_id"] == _expected_uuid("f_festival")
     assert data["target"]["feature_id"] == _expected_uuid("f_festival")
-    assert data["source"]["raw_name"] == "서울 봄꽃"
+    assert data["source_name"] == "서울 봄꽃"
+    assert data["source_lon"] == 126.9001
+    assert data["source_lat"] == 37.5001
+    assert {
+        "source_version",
+        "raw_name",
+        "raw_address",
+        "raw_longitude",
+        "raw_latitude",
+    }.isdisjoint(data["source"])
     assert data["default_detail_source"] == "target"
     assert data["detail_source_effect"] == "audit_only"
     assert data["target_detail_available"] is True

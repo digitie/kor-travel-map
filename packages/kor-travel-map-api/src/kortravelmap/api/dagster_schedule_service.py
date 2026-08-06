@@ -12,14 +12,6 @@ from typing import Final, Literal, Protocol, cast
 from uuid import UUID
 
 import httpx
-from kortravelmap.providers.feature_operation_registry import (
-    ADMIN_MANUAL_TRIGGER_TAG,
-    FeatureOperationRegistryError,
-    feature_operation_launch_tags,
-    resolve_feature_operation_launch,
-    resolve_feature_operation_runtime_snapshot,
-    validate_feature_operation_identity,
-)
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -66,6 +58,7 @@ AuditedScheduleOperation = Callable[
     [ScheduleMutationGuard], Awaitable[DagsterScheduleCommandResponse]
 ]
 _SCHEDULE_OPERATION_TIMEOUT_SECONDS: Final = 120.0
+_ADMIN_MANUAL_TRIGGER_TAG: Final = "kor_travel_map.admin_manual_trigger"
 
 
 class DagsterScheduleValidationError(ValueError):
@@ -265,26 +258,15 @@ _MIN_CRON_MINUTE_STEP: Final[int] = 10
 def _admin_feature_operation_launch(
     job_name: str,
 ) -> tuple[dict[str, object], dict[str, str]]:
-    """등록 feature job의 canonical manual run config/tag를 만든 뒤 자체 검증한다."""
-    runtime_snapshot = resolve_feature_operation_runtime_snapshot()
-    launch = resolve_feature_operation_launch(
-        job_name=job_name,
-        runtime_snapshot=runtime_snapshot,
-    )
-    if launch is None:
-        return {}, {}
-    identity, run_config = launch
-    tags = {
-        **feature_operation_launch_tags(identity, trigger_kind="manual"),
-        ADMIN_MANUAL_TRIGGER_TAG: "admin-ui",
-    }
-    validate_feature_operation_identity(
-        job_name=job_name,
-        selected_asset_keys=identity.asset_keys,
-        run_config=run_config,
-        tags=tags,
-    )
-    return run_config, tags
+    """수동 schedule launch의 generic audit tag만 추가한다.
+
+    provider/dataset membership은 schedule tag나 Python static registry가 아니라
+    실행 뒤 DB operation-key binding으로만 해석한다. schedule의 normal config는
+    Dagster definition이 정본이다.
+    """
+    if not job_name or job_name != job_name.strip():
+        raise ValueError("Dagster job_name must be a trimmed non-empty string")
+    return {}, {_ADMIN_MANUAL_TRIGGER_TAG: "admin-ui"}
 
 
 def _cron_part_is_valid(part: str, *, min_value: int, max_value: int) -> bool:
@@ -1922,19 +1904,7 @@ async def run_schedule_now(
             started_at=started_at,
         )
     reason = body.reason if body else None
-    try:
-        run_config, operation_tags = _admin_feature_operation_launch(schedule.pipeline_name)
-    except FeatureOperationRegistryError as exc:
-        return _schedule_command_response(
-            _command_error_data(
-                dagster_urls=urls,
-                checked_at=checked_at,
-                schedule_name=schedule_name,
-                command="run",
-                error=f"등록 feature operation launch identity 불일치: {exc.reason}",
-            ),
-            started_at=started_at,
-        )
+    run_config, operation_tags = _admin_feature_operation_launch(schedule.pipeline_name)
     metadata_tags = {
         **operation_tags,
         "kor_travel_map.schedule_name": schedule_name,

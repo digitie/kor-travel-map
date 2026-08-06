@@ -43,6 +43,8 @@ pytestmark = pytest.mark.unit
 
 _KST = timezone(timedelta(hours=9))
 _FETCHED_AT = datetime(2026, 6, 3, 14, 0, tzinfo=_KST)
+_PROVIDER_DATASET_ID = 101
+_SYNC_SCOPE = "dataset_wide"
 
 
 def test_parse_offline_feature_bundles_jsonl() -> None:
@@ -98,7 +100,7 @@ def test_parse_offline_feature_bundles_csv_with_column_mapping() -> None:
     assert parsed[0].feature.name == "오프라인 CSV 장소"
     assert parsed[0].feature.coord == Coordinate(lon=Decimal("126.9780"), lat=Decimal("37.5665"))
     assert parsed[0].source_record.source_entity_id == "csv-001"
-    assert parsed[0].source_record.raw_address == "서울특별시 중구 세종대로"
+    assert parsed[0].source_record.raw_data["address"] == "서울특별시 중구 세종대로"
 
 
 def test_preview_offline_tabular_upload_returns_headers_and_sample_rows() -> None:
@@ -125,6 +127,8 @@ def test_validate_offline_tabular_upload_reports_mapping_errors() -> None:
     result = validate_offline_tabular_upload(
         _csv_upload(body),
         body,
+        provider="offline-test-provider",
+        dataset_key="offline_csv",
         column_mapping={"name": "name", "lon": "x", "lat": "lat"},
     )
 
@@ -404,9 +408,6 @@ def _bundle(source_id: str) -> FeatureBundle:
         source_entity_type="offline_feature_bundle",
         source_entity_id=source_id,
         raw_payload_hash=payload_hash,
-        raw_name=feature.name,
-        raw_longitude=Decimal("126.9780"),
-        raw_latitude=Decimal("37.5665"),
         raw_data=raw_payload,
         fetched_at=_FETCHED_AT,
         source_record_key=source_record_key,
@@ -417,7 +418,6 @@ def _bundle(source_id: str) -> FeatureBundle:
         source_role=SourceRole.PRIMARY,
         match_method="offline_upload",
         confidence=100,
-        is_primary_source=True,
     )
     return FeatureBundle(
         feature=feature,
@@ -436,9 +436,8 @@ def _csv_upload(
     checksum = hashlib.sha256(body).hexdigest()
     return OfflineUpload(
         upload_id="00000000-0000-0000-0000-000000000011",
-        provider="offline-test-provider",
-        dataset_key="offline_csv",
-        sync_scope="default",
+        provider_dataset_id=_PROVIDER_DATASET_ID,
+        sync_scope=_SYNC_SCOPE,
         original_filename="features.csv",
         storage_backend="rustfs",
         storage_key="offline/features.csv",
@@ -508,6 +507,13 @@ def _patch_offline_job_repos(
     async def _get_offline_upload(_session: object, upload_id: str) -> OfflineUpload | None:
         return calls.upload if upload_id == calls.upload.upload_id else None
 
+    async def _resolve_provider_dataset_display(
+        _session: object,
+        provider_dataset_id: int,
+    ) -> tuple[str, str]:
+        assert provider_dataset_id == _PROVIDER_DATASET_ID
+        return "offline-test-provider", "offline_csv"
+
     async def _start_import_job(
         _session: object,
         *,
@@ -515,7 +521,7 @@ def _patch_offline_job_repos(
         payload: Mapping[str, Any] | None = None,
         source_checksum: str | None = None,
         dagster_run_id: str | None = None,
-        provider_dataset: object | None = None,
+        dataset_membership: object | None = None,
         trigger_kind: str | None = None,
     ) -> ImportJob:
         job_id = f"job-{len(calls.jobs) + 1}"
@@ -529,16 +535,6 @@ def _patch_offline_job_repos(
             source_checksum=source_checksum,
             error_message=None,
             dagster_run_id=dagster_run_id,
-            provider=(
-                provider_dataset.provider
-                if provider_dataset is not None
-                else None
-            ),
-            dataset_key=(
-                provider_dataset.dataset_key
-                if provider_dataset is not None
-                else None
-            ),
             trigger_kind=trigger_kind,  # type: ignore[arg-type]
         )
         calls.jobs[job_id] = job
@@ -649,6 +645,11 @@ def _patch_offline_job_repos(
 
     monkeypatch.setattr(offline_upload_mod, "try_advisory_lock", _try_advisory_lock)
     monkeypatch.setattr(offline_upload_mod, "get_offline_upload", _get_offline_upload)
+    monkeypatch.setattr(
+        offline_upload_mod,
+        "_resolve_provider_dataset_display",
+        _resolve_provider_dataset_display,
+    )
     monkeypatch.setattr(
         offline_upload_mod,
         "start_provider_dataset_import_job",

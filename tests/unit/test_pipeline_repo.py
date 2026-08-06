@@ -60,11 +60,10 @@ def _job_row(job_id: str, *, at: datetime) -> SimpleNamespace:
         id=job_id,
         status="running",
         created_at=at,
-        providers=["python-kma-api"],
-        dataset_keys=["kma_short_forecast"],
         provider_datasets=json.dumps(
             [
                 {
+                    "provider_dataset_id": 7,
                     "provider": "python-kma-api",
                     "dataset_key": "kma_short_forecast",
                     "sync_scope": None,
@@ -88,7 +87,7 @@ def _job_row(job_id: str, *, at: datetime) -> SimpleNamespace:
         dagster_run_id="run-1",
         dagster_run_status="STARTED",
         trigger_kind="manual",
-        operation_registry_version=None,
+        operation_key=None,
         requested_job_id=None,
         linked_job_count=2,
         projected_job_id="77777777-7777-4777-8777-777777777777",
@@ -103,7 +102,7 @@ def _job_row(job_id: str, *, at: datetime) -> SimpleNamespace:
         projected_dagster_run_id="run-child",
         projected_dagster_run_status=None,
         projected_trigger_kind="manual",
-        projected_operation_registry_version=None,
+        projected_operation_key=None,
         projected_load_batch_id="33333333-3333-3333-3333-333333333333",
         projected_parent_job_id=job_id,
         projected_depth=1,
@@ -115,6 +114,7 @@ def _job_row(job_id: str, *, at: datetime) -> SimpleNamespace:
         cancellation_retryable=None,
         cancellation_unresolved_member_count=None,
         selected_provider="python-kma-api",
+        selected_provider_dataset_id=7,
         selected_dataset_key="kma_short_forecast",
         selected_sync_scope="target_grids",
         selected_operation_member_id=job_id,
@@ -222,7 +222,7 @@ async def test_list_maps_rows_filters_and_next_cursor() -> None:
         cast(Any, session),
         kind="import_job",
         status="running",
-        provider="python-kma-api",
+        provider_dataset_id=7,
         load_batch_id="33333333-3333-3333-3333-333333333333",
         parent_job_id="11111111-1111-1111-1111-111111111111",
         limit=1,
@@ -232,7 +232,7 @@ async def test_list_maps_rows_filters_and_next_cursor() -> None:
     item = page.items[0]
     assert isinstance(item, PipelineExecution)
     assert item.kind == "import_job"
-    assert item.providers == ("python-kma-api",)
+    assert item.provider_datasets[0].provider_dataset_id == 7
     assert item.dagster_run_id == "run-1"
     assert item.provider_datasets[0].operation_member_id == item.id
     assert item.linked_job_count == 2
@@ -244,7 +244,7 @@ async def test_list_maps_rows_filters_and_next_cursor() -> None:
         filter_fingerprint=pipeline_repo._filter_fingerprint(
             kind="import_job",
             status="running",
-            provider="python-kma-api",
+            provider_dataset_id=7,
             load_batch_id="33333333-3333-3333-3333-333333333333",
             parent_job_id="11111111-1111-1111-1111-111111111111",
         ),
@@ -258,8 +258,7 @@ async def test_list_maps_rows_filters_and_next_cursor() -> None:
     params = session.params[0]
     assert params["kind"] == "import_job"
     assert params["status"] == "running"
-    assert params["provider"] == "python-kma-api"
-    assert params["dataset_key"] is None
+    assert params["provider_dataset_id"] == 7
     assert params["filter_sync_scopes"] is False
     assert params["sync_scopes"] == []
     assert params["include_unscoped_scope"] is False
@@ -278,6 +277,24 @@ def test_component_membership_filters_precede_cursor_and_limit() -> None:
 
     assert load_filter < cursor_filter < page_limit
     assert parent_filter < cursor_filter < page_limit
+
+
+def test_root_projection_reads_only_canonical_dataset_memberships() -> None:
+    """0090 뒤 삭제되는 pair/array column을 pipeline read model이 재도입하지 않는다."""
+    sql = pipeline_repo._PIPELINE_ROOT_BODY_SQL
+    assert "ops.feature_update_request_datasets AS member" in sql
+    assert "ops.import_job_datasets AS member" in sql
+    assert "provider_dataset_id" in sql
+    for dropped in (
+        "request.providers",
+        "request.dataset_keys",
+        "job.provider",
+        "job.dataset_key",
+        "identity_job.sync_scope",
+        "effective_providers",
+        "effective_dataset_keys",
+    ):
+        assert dropped not in sql
 
 
 async def test_status_counts_parses_aggregates() -> None:
@@ -309,6 +326,7 @@ async def test_latest_dataset_batch_maps_common_root_and_selected_pair() -> None
 
     assert len(items) == 1
     assert items[0].provider == "python-kma-api"
+    assert items[0].provider_dataset_id == 7
     assert items[0].dataset_key == "kma_short_forecast"
     assert items[0].sync_scope == "target_grids"
     assert items[0].execution.id == "11111111-1111-1111-1111-111111111111"
@@ -344,14 +362,14 @@ async def test_list_rejects_cursor_from_different_filter_set_before_query() -> N
         key="11111111-1111-1111-1111-111111111111",
         item_kind="import_job",
         filter_fingerprint=pipeline_repo._filter_fingerprint(
-            provider="provider-a",
+            provider_dataset_id=1,
         ),
     )
 
     with pytest.raises(PipelineCursorFilterMismatch, match="current filters"):
         await list_pipeline_executions(
             _NoQuerySession(),  # type: ignore[arg-type]
-            provider="provider-b",
+            provider_dataset_id=2,
             cursor=cursor,
         )
 
@@ -360,8 +378,7 @@ async def test_list_rejects_noncanonical_dataset_scope_before_query() -> None:
     with pytest.raises(ValueError, match="unsupported sync_scope"):
         await list_pipeline_executions(
             _NoQuerySession(),  # type: ignore[arg-type]
-            provider="python-kma-api",
-            dataset_key="kma_short_forecast",
+            provider_dataset_id=7,
             dataset_sync_scopes=("default",),
         )
 
@@ -393,11 +410,10 @@ async def test_list_rejects_invalid_cursor_before_query() -> None:
 async def test_list_requires_exact_dataset_identity_for_scope_filter() -> None:
     with pytest.raises(
         ValueError,
-        match="dataset_sync_scopes requires both provider and dataset_key",
+        match="dataset_sync_scopes requires provider_dataset_id",
     ):
         await list_pipeline_executions(
             _NoQuerySession(),  # type: ignore[arg-type]
-            provider="python-kma-api",
             dataset_sync_scopes=("target_grids",),
         )
 

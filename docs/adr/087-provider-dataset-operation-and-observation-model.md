@@ -18,10 +18,15 @@ pair 정본으로 남고, 동일 raw payload 재관측이 immutable record를 UP
    `schema_version`은 JSON number로 고정한다. 실행 enable/preview/refresh/scope를 JSON에
    중복하지 않는다. identity rename은 금지하며 deactivate + 새 row 생성만 허용한다.
 2. dataset의 실행 가능 operation은 `provider_dataset_operations`과 refresh scope 정규 child
-   `provider_dataset_operation_scopes`에 저장한다. sync state, job/request member, offline
-   upload은 `(provider_dataset_id, sync_scope)` FK로 이 child만 참조한다. 코드 registry는
-   operation key의 handler binding일 뿐 dataset/pair/capability의 정본이 아니다. 빈 DB는
-   versioned migration seed로 bootstrap하고 active DB operation과 handler의 exact set을 검증한다.
+   `provider_dataset_operation_scopes`에 저장한다. operation-scoped child의 실행 identity는 항상
+   `(provider_dataset_id, sync_scope, operation_key)` 세 값이다. sync state, job/request member,
+   offline upload은 이 triple의 composite FK로 child를 참조한다. `operation_key`가 다른 member를
+   같은 dataset/scope라고 합치거나 rank로 하나를 고르는 것은 금지한다.
+   `import_job_datasets`처럼 dataset member를 실제로 저장하는 모든 행은 non-null exact triple을
+   강제한다. operation이 없는 generic import job은 member 행을 만들지 않는다. provider-only
+   audit/file은 fake dataset을 만들지 않는 별도 owner 모델로 표현한다. 코드 registry는 operation
+   key의 handler binding일 뿐 dataset/pair/capability의 정본이 아니다. 빈 DB는 versioned migration
+   seed로 bootstrap하고 active DB operation과 handler의 exact set을 검증한다.
 3. raw snapshot은 `source_records`에 append-only로 저장한다. 재관측 시각·현재 만료는
    `source_entities`와 `source_entity_heads`가 소유한다. head는 same-entity composite FK와
    deferred completeness trigger로 정확히 하나의 current record를 보장한다. incoming
@@ -30,14 +35,15 @@ pair 정본으로 남고, 동일 raw payload 재관측이 immutable record를 UP
 4. multi-dataset operation은 scalar dataset FK가 아니라 membership table로 표현한다. event의
    pair는 job/member에서 파생한다. provider-only audit/file은 fake dataset을 만들지 않는
    명시적 예외다.
-5. legacy provider/dataset/raw-derived/primary-boolean columns은 T-VN-33C에서 normal read와
-   write에서 fence하고, exact removal manifest를 T-VN-39에 넘긴다. compatibility shim과
-   long-lived dual write는 만들지 않는다.
+5. legacy provider/dataset/raw-derived/primary-boolean columns은 T-VN-33C에서 normal
+   read/write를 제거한 뒤 같은 final-schema migration으로 물리 삭제한다. exact removal
+   manifest는 삭제 범위와 regression gate를 기록하며 compatibility shim·long-lived dual
+   write는 만들지 않는다.
 6. inactive dataset을 참조한 canonical child/membership의 insert/update/delete와 ownership
    clear·active dataset 간 재귀속은 공용 DB trigger가 SQLSTATE `23514`로 거부한다. direct FK
    child는 parent row shared lock으로 deactivate와 직렬화하고, indirect lineage child는
    entity→dataset join guard를 쓴다. job/request parent lifecycle도 member 전체를 검사한다.
-   T-VN-33에는 generic bypass가 없고 purge 권한 경계는 T-VN-39에서 별도로 정한다.
+   T-VN-33에는 generic bypass가 없으며 final-schema DB의 data 생성은 ETL 재실행만 허용한다.
    단, non-deferrable `ON DELETE CASCADE`로 삭제되는 indirect child는 parent row가 이미
    사라진 경우에만 referential action으로 판별해 허용한다. parent가 남은 standalone child
    DELETE는 기존 active guard를 반드시 통과한다.

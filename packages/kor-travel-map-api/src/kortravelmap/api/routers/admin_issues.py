@@ -102,6 +102,7 @@ class AdminIssueRecord(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     issue_id: str
+    provider_dataset_id: int | None = None
     provider: str | None = None
     dataset_key: str | None = None
     source_record_key: str | None = None
@@ -217,6 +218,7 @@ class AdminIssuePatchRequest(BaseModel):
 def _record(issue: OpsIntegrityIssue | DataIntegrityViolation) -> AdminIssueRecord:
     return AdminIssueRecord(
         issue_id=issue.issue_id,
+        provider_dataset_id=issue.provider_dataset_id,
         provider=issue.provider,
         dataset_key=issue.dataset_key,
         source_record_key=issue.source_record_key,
@@ -368,8 +370,7 @@ async def list_admin_issues(
     session: Annotated[AsyncSession, Depends(get_session)],
     issue_status: Annotated[IssueStatus | None, Query(alias="status")] = "open",
     issue_type: Annotated[str | None, Query()] = None,
-    provider: Annotated[str | None, Query()] = None,
-    dataset_key: Annotated[str | None, Query()] = None,
+    provider_dataset_id: Annotated[int | None, Query(gt=0)] = None,
     severity: Annotated[IssueSeverity | None, Query()] = None,
     feature_id: Annotated[str | None, Query()] = None,
     q: Annotated[
@@ -399,8 +400,7 @@ async def list_admin_issues(
             status=issue_status,
             severity=severity,
             violation_type=issue_type,
-            provider=provider,
-            dataset_key=dataset_key,
+            provider_dataset_id=provider_dataset_id,
             feature_id=await feature_identity.legacy_id_for_filter(session, feature_id),
             q=await feature_identity.legacy_id_for_filter(session, q),
             bbox=bbox_tuple,

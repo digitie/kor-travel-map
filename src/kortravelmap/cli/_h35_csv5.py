@@ -190,6 +190,36 @@ def _metadata(row: CurationImportRow) -> dict[str, Any]:
     return metadata
 
 
+def _required_provider_dataset_id(row: CurationImportRow) -> int:
+    if row.provider_dataset_id is None:
+        raise RuntimeError("csv5_provider_dataset_id_invalid")
+    return row.provider_dataset_id
+
+
+async def _lighthouse_provider_dataset_ids(
+    session: AsyncSession,
+    rows: tuple[CurationImportRow, ...],
+) -> frozenset[int]:
+    candidate_ids = sorted(
+        {
+            row.provider_dataset_id
+            for row in rows
+            if row.provider_dataset_id is not None
+        }
+    )
+    if not candidate_ids:
+        return frozenset()
+    result = await session.execute(
+        text(
+            "SELECT provider_dataset_id FROM provider_sync.provider_datasets "
+            "WHERE provider_dataset_id = ANY(CAST(:provider_dataset_ids AS bigint[])) "
+            "AND dataset_key LIKE 'lighthouse-stamp-tour-season-%'"
+        ),
+        {"provider_dataset_ids": candidate_ids},
+    )
+    return frozenset(int(value) for value in result.scalars())
+
+
 async def _resolved_rows(
     session: AsyncSession,
     *,
@@ -218,7 +248,12 @@ async def _resolved_rows(
             csv_row.row_number: provenance_row_payload(provenance, row)
             for csv_row, row in zip(preview.rows, provenance.rows, strict=True)
         }
-    elif requires_lighthouse_provenance(preview.rows):
+    elif requires_lighthouse_provenance(
+        preview.rows,
+        lighthouse_provider_dataset_ids=await _lighthouse_provider_dataset_ids(
+            session, preview.rows
+        ),
+    ):
         raise RuntimeError("csv5_provenance_missing")
 
     requests = tuple(
@@ -252,8 +287,7 @@ async def _resolved_rows(
                 theme_group=row.theme_group,
                 title=row.title,
                 edition_key=row.edition_key,
-                provider=row.provider,
-                dataset_key=row.dataset_key,
+                provider_dataset_id=_required_provider_dataset_id(row),
                 source_name=row.source_name,
                 source_url=row.source_url or None,
                 source_item_key=row.source_item_key,

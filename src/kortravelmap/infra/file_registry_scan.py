@@ -287,7 +287,8 @@ async def scan_mois_source(
             location=MANAGED_FILE_LOCATION_MOIS_SOURCE,
             path=name,
             kind="provider_download",
-            provider="mois",
+            # dataset가 없는 filesystem audit owner는 명시적 provider-only 예외다.
+            provider_name="mois",
             registered_by="scan",
             byte_size=size,
             actor=actor,
@@ -307,7 +308,7 @@ async def scan_mois_source(
 
 _OWNER_UPLOAD_SQL = text(
     """
-    SELECT upload_id, provider, dataset_key, byte_size, checksum_sha256
+    SELECT upload_id, provider_dataset_id, byte_size, checksum_sha256
     FROM ops.offline_uploads
     WHERE storage_key = :storage_key
     """
@@ -345,8 +346,9 @@ async def scan_s3_location(
             path=obj.object_key,
             kind="upload" if is_uploads else "feature_file",
             registered_by="scan",
-            provider=owner.provider if owner is not None else None,
-            dataset_key=owner.dataset_key if owner is not None else None,
+            provider_dataset_id=(
+                int(owner.provider_dataset_id) if owner is not None else None
+            ),
             byte_size=obj.byte_size,
             checksum_sha256=(
                 owner.checksum_sha256 if owner is not None else None
@@ -444,7 +446,7 @@ async def backfill_offline_upload_rows(
         await session.execute(
             text(
                 """
-                SELECT u.upload_id, u.provider, u.dataset_key, u.storage_key,
+                SELECT u.upload_id, u.provider_dataset_id, u.storage_key,
                        u.byte_size, u.checksum_sha256, u.created_at
                 FROM ops.offline_uploads AS u
                 WHERE NOT EXISTS (
@@ -466,8 +468,7 @@ async def backfill_offline_upload_rows(
             path=row.storage_key,
             kind="upload",
             registered_by="backfill",
-            provider=row.provider,
-            dataset_key=row.dataset_key,
+            provider_dataset_id=int(row.provider_dataset_id),
             byte_size=row.byte_size,
             checksum_sha256=row.checksum_sha256,
             upload_id=str(row.upload_id),

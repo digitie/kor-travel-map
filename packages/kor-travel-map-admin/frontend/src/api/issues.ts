@@ -44,8 +44,7 @@ function fetchAdminIssues(
     pathWithQuery("/v1/admin/issues", {
       status: params.status,
       issue_type: params.issue_type,
-      provider: params.provider,
-      dataset_key: params.dataset_key,
+      provider_dataset_id: params.provider_dataset_id,
       severity: params.severity,
       feature_id: params.feature_id,
       q: params.q,

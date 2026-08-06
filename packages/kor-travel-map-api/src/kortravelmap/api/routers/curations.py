@@ -39,6 +39,7 @@ from kortravelmap.curation_provenance import (
 )
 from kortravelmap.infra import curation_repo, feature_identity
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -87,6 +88,7 @@ class PublicCurationCollectionView(BaseModel):
     theme_name: str
     theme_group: str
     source_id: UUID | None
+    provider_dataset_id: int | None
     provider: str | None
     dataset_key: str | None
     source_name: str | None
@@ -112,6 +114,7 @@ class AdminCurationCollectionView(BaseModel):
     theme_name: str
     theme_group: str
     source_id: UUID | None
+    provider_dataset_id: int | None
     provider: str | None
     dataset_key: str | None
     source_name: str | None
@@ -142,6 +145,7 @@ class PublicCurationItemView(BaseModel):
     theme_slug: str
     theme_name: str
     theme_group: str
+    provider_dataset_id: int | None
     provider: str | None
     dataset_key: str | None
     source_name: str | None
@@ -179,6 +183,7 @@ class AdminCurationItemView(BaseModel):
     theme_slug: str
     theme_name: str
     theme_group: str
+    provider_dataset_id: int | None
     provider: str | None
     dataset_key: str | None
     source_name: str | None
@@ -581,6 +586,7 @@ class CurationQuarantineSourceView(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     source_id: UUID
+    provider_dataset_id: int | None
     provider: str | None
     dataset_key: str | None
     source_name: str | None
@@ -830,6 +836,32 @@ def _group_view(
         curations=[_public_item_view(item) for item in row.curations],
         curation_count=len(row.curations),
     )
+
+
+async def _lighthouse_provider_dataset_ids(
+    session: AsyncSession,
+    rows: Sequence[CurationImportRow],
+) -> frozenset[int]:
+    """CSV가 가리킨 catalog dataset 중 등대 공식 source ID만 반환한다."""
+
+    candidate_ids = sorted(
+        {
+            row.provider_dataset_id
+            for row in rows
+            if row.provider_dataset_id is not None
+        }
+    )
+    if not candidate_ids:
+        return frozenset()
+    result = await session.execute(
+        text(
+            "SELECT provider_dataset_id FROM provider_sync.provider_datasets "
+            "WHERE provider_dataset_id = ANY(CAST(:provider_dataset_ids AS bigint[])) "
+            "AND dataset_key LIKE 'lighthouse-stamp-tour-season-%'"
+        ),
+        {"provider_dataset_ids": candidate_ids},
+    )
+    return frozenset(int(value) for value in result.scalars())
 
 
 def _conflict(exc: IntegrityError) -> HTTPException:
@@ -1294,7 +1326,12 @@ async def import_admin_curations(
             csv_row.row_number: provenance_row_payload(provenance, row)
             for csv_row, row in zip(preview.rows, provenance.rows, strict=True)
         }
-    elif requires_lighthouse_provenance(preview.rows):
+    elif requires_lighthouse_provenance(preview.rows) or requires_lighthouse_provenance(
+        preview.rows,
+        lighthouse_provider_dataset_ids=await _lighthouse_provider_dataset_ids(
+            session, preview.rows
+        ),
+    ):
         raise HTTPException(
             status_code=422,
             detail=(
@@ -1394,6 +1431,13 @@ async def import_admin_curations(
             else:
                 row_status = "ambiguous"
             row_issues = [_unlinked_issue(row, matches)]
+        # parser가 valid로 분류한 행에는 canonical dataset ID가 반드시 있다.
+        # 이 fail-close는 parser/repository 계약 drift를 HTTP write까지 전파하지 않는다.
+        if row.provider_dataset_id is None:
+            raise HTTPException(
+                status_code=422,
+                detail="provider_dataset_id가 유효한 양의 정수가 아닙니다.",
+            )
         resolved_rows.append(
             curation_repo.ResolvedCurationImportRow(
                 row_number=row.row_number,
@@ -1403,8 +1447,7 @@ async def import_admin_curations(
                 theme_group=row.theme_group,
                 title=row.title,
                 edition_key=row.edition_key,
-                provider=row.provider,
-                dataset_key=row.dataset_key,
+                provider_dataset_id=row.provider_dataset_id,
                 source_name=row.source_name,
                 source_url=row.source_url or None,
                 source_item_key=row.source_item_key,
@@ -1559,7 +1602,7 @@ async def list_public_curation_groups(
     session: Annotated[AsyncSession, Depends(get_session)],
     theme_slug: Annotated[str | None, Query()] = None,
     edition_key: Annotated[str | None, Query()] = None,
-    provider: Annotated[str | None, Query()] = None,
+    provider_dataset_id: Annotated[int | None, Query(gt=0)] = None,
     q: Annotated[str | None, Query()] = None,
     min_lon: Annotated[float | None, Query()] = None,
     min_lat: Annotated[float | None, Query()] = None,
@@ -1575,7 +1618,7 @@ async def list_public_curation_groups(
             public_only=True,
             theme_slug=theme_slug,
             edition_key=edition_key,
-            provider=provider,
+            provider_dataset_id=provider_dataset_id,
             q=q,
             min_lon=min_lon,
             min_lat=min_lat,
@@ -1603,7 +1646,7 @@ async def list_public_curation_collections(
     session: Annotated[AsyncSession, Depends(get_session)],
     theme_slug: Annotated[str | None, Query()] = None,
     edition_key: Annotated[str | None, Query()] = None,
-    provider: Annotated[str | None, Query()] = None,
+    provider_dataset_id: Annotated[int | None, Query(gt=0)] = None,
     q: Annotated[str | None, Query()] = None,
     page_size: Annotated[int, Query(ge=1, le=500)] = 200,
     cursor: Annotated[str | None, Query()] = None,
@@ -1616,7 +1659,7 @@ async def list_public_curation_collections(
             visibility="public",
             theme_slug=theme_slug,
             edition_key=edition_key,
-            provider=provider,
+            provider_dataset_id=provider_dataset_id,
             q=q,
             public_only=True,
             limit=page_size,
@@ -1687,7 +1730,7 @@ async def list_admin_curation_collections(
     visibility: Annotated[CollectionVisibility | None, Query()] = None,
     theme_slug: Annotated[str | None, Query()] = None,
     edition_key: Annotated[str | None, Query()] = None,
-    provider: Annotated[str | None, Query()] = None,
+    provider_dataset_id: Annotated[int | None, Query(gt=0)] = None,
     q: Annotated[str | None, Query()] = None,
     include_archived: Annotated[bool, Query()] = False,
     page_size: Annotated[int, Query(ge=1, le=500)] = 200,
@@ -1701,7 +1744,7 @@ async def list_admin_curation_collections(
             visibility=visibility,
             theme_slug=theme_slug,
             edition_key=edition_key,
-            provider=provider,
+            provider_dataset_id=provider_dataset_id,
             q=q,
             include_archived=include_archived,
             limit=page_size,

@@ -15,7 +15,6 @@ ADR 참조
 from __future__ import annotations
 
 from datetime import datetime
-from decimal import Decimal
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -29,9 +28,13 @@ __all__ = ["SourceRecord", "SourceLink"]
 class SourceRecord(BaseModel):
     """provider raw payload 한 건 — ``provider_sync.source_records`` row.
 
-    고유성: ``(provider, dataset_key, source_entity_type, source_entity_id,
-    raw_payload_hash)``. 같은 entity_id라도 payload 변경 시 새 row (이력 보존).
-    PK는 ``source_record_key`` (``make_source_record_key(...)``).
+    입력 identity(``provider``/``dataset_key``/entity type/id)는 적재 시 canonical
+    ``source_entity_key``로 해석한다. record row에는 raw payload와 hash만 immutable
+    이력으로 남긴다. 같은 entity라도 payload가 바뀌면 새 row가 생기며, PK는
+    ``source_record_key`` (``make_source_record_key(...)``)다.
+
+    provider 응답은 ``raw_data``에만 원형으로 보존한다. 이름·주소·좌표·버전의
+    표준화된 복사본을 두지 않는다. 만료 관측값은 entity head를 갱신하는 입력이다.
 
     ``docs/architecture/feature-model.md §11`` + ``docs/architecture/data-model.md §2``.
     """
@@ -61,23 +64,9 @@ class SourceRecord(BaseModel):
         min_length=1,
         description="``make_payload_hash(raw_data)`` 결과 (ADR-009).",
     )
-    source_version: str | None = Field(
-        default=None,
-        description="provider API/dataset 버전 (있으면). 예: ``'1.4'``.",
-    )
-    raw_name: str | None = None
-    raw_address: str | None = None
-    raw_longitude: Decimal | None = Field(
-        default=None,
-        description="provider 원천 경도 (좌표 매핑 검증용). EPSG:4326 추정.",
-    )
-    raw_latitude: Decimal | None = Field(
-        default=None,
-        description="provider 원천 위도. EPSG:4326 추정.",
-    )
     raw_data: dict[str, Any] = Field(
         default_factory=dict,
-        description="provider 응답 raw payload (``JSONB``). canonical 직렬화 필수.",
+        description="provider 응답 raw payload 원형 (``JSONB``). JSON 직렬화만 허용.",
     )
     fetched_at: datetime = Field(
         description="provider 호출 시각 (aware datetime, ADR-019).",
@@ -89,8 +78,8 @@ class SourceRecord(BaseModel):
     expires_at: datetime | None = Field(
         default=None,
         description=(
-            "재호출/만료 시각 (옵션). 예: notice는 ``valid_end_time + 1 year`` "
-            "후 purge (ADR-017)."
+            "entity head의 재호출/만료 관측 입력 (옵션). 예: notice는 "
+            "``valid_end_time + 1 year`` 후 purge (ADR-017)."
         ),
     )
     source_record_key: str = Field(
@@ -117,7 +106,7 @@ class SourceLink(BaseModel):
 
     한 Feature는 여러 source에서 enrichment될 수 있다 (예: visitkorea primary +
     kakao_local 전화번호 보강). 한 SourceRecord는 한 Feature에 1차 매핑되는 것이
-    원칙 (``is_primary_source=True``는 한 SourceRecord당 최대 1건).
+    원칙 (``source_role='primary'`` link는 한 SourceRecord당 최대 1건).
 
     ``docs/architecture/feature-model.md §12`` + ``docs/architecture/data-model.md §3``.
     """
@@ -152,13 +141,6 @@ class SourceLink(BaseModel):
         ge=0,
         le=100,
         description="매칭 신뢰도 0~100 (ADR-016 scoring 결과 × 100).",
-    )
-    is_primary_source: bool = Field(
-        default=False,
-        description=(
-            "True인 매핑은 Feature당 최대 1건 (DB UNIQUE). primary source가 사라지면 "
-            "feature는 enrichment-only가 되어 ``status='broken'`` 후보."
-        ),
     )
     created_at: datetime = Field(
         default_factory=kst_now,

@@ -166,7 +166,7 @@ function FeatureDetailPanel({
   feature: DetailFeature;
   label: string;
 }) {
-  const primarySource = feature.sources.find((source) => source.is_primary_source);
+  const primarySource = feature.sources.find((source) => source.source_role === "primary");
   return (
     <section className="min-w-0 rounded-lg border bg-background p-4">
       <div className="mb-3">

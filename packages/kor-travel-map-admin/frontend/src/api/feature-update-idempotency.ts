@@ -3,14 +3,51 @@ import { idempotencyOperationKey } from "./client";
 type JsonObject = Record<string, unknown>;
 
 function sortedStringArray(value: unknown): unknown {
-  if (!Array.isArray(value) || !value.every((item) => typeof item === "string")) {
+  if (
+    !Array.isArray(value) ||
+    !value.every((item) => typeof item === "string")
+  ) {
     return value;
   }
   const strings = value as string[];
   return [...strings].sort((left, right) => left.localeCompare(right));
 }
 
-/** backend feature-update fingerprint와 같은 set 의미 배열을 정규화한다. */
+function sortedDatasetMemberships(value: unknown): unknown {
+  if (!Array.isArray(value)) {
+    return value;
+  }
+  if (
+    !value.every(
+      (item) =>
+        typeof item === "object" &&
+        item !== null &&
+        !Array.isArray(item) &&
+        typeof (item as JsonObject).provider_dataset_id === "number" &&
+        typeof (item as JsonObject).sync_scope === "string" &&
+        typeof (item as JsonObject).operation_key === "string",
+    )
+  ) {
+    return value;
+  }
+  return [...value].sort((left, right) => {
+    const leftMembership = left as JsonObject;
+    const rightMembership = right as JsonObject;
+    const idDifference =
+      (leftMembership.provider_dataset_id as number) -
+      (rightMembership.provider_dataset_id as number);
+    if (idDifference !== 0) return idDifference;
+    const scopeDifference = (leftMembership.sync_scope as string).localeCompare(
+      rightMembership.sync_scope as string,
+    );
+    if (scopeDifference !== 0) return scopeDifference;
+    return (leftMembership.operation_key as string).localeCompare(
+      rightMembership.operation_key as string,
+    );
+  });
+}
+
+/** backend feature-update fingerprint와 같은 set 의미 membership·scope 배열을 정규화한다. */
 export function canonicalFeatureUpdateIdempotencyBody<T>(body: T): T {
   if (typeof body !== "object" || body === null || Array.isArray(body)) {
     return body;
@@ -36,8 +73,13 @@ export function canonicalFeatureUpdateIdempotencyBody<T>(body: T): T {
     : scopeSource;
   return {
     ...source,
-    providers: sortedStringArray(source.providers),
-    dataset_keys: sortedStringArray(source.dataset_keys),
+    ...(source.dataset_memberships === undefined
+      ? {}
+      : {
+          dataset_memberships: sortedDatasetMemberships(
+            source.dataset_memberships,
+          ),
+        }),
     scope: canonicalScope,
   } as T;
 }

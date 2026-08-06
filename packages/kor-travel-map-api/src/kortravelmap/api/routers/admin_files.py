@@ -111,6 +111,7 @@ class ManagedFileModel(BaseModel):
     path: str
     is_directory: bool
     kind: str
+    provider_dataset_id: int | None
     provider: str | None
     dataset_key: str | None
     status: str
@@ -252,6 +253,7 @@ def _file_model(row: file_registry.ManagedFile) -> ManagedFileModel:
         path=row.path,
         is_directory=row.is_directory,
         kind=row.kind,
+        provider_dataset_id=row.provider_dataset_id,
         provider=row.provider,
         dataset_key=row.dataset_key,
         status=row.status,
@@ -319,12 +321,12 @@ def _build_links(row: file_registry.ManagedFile) -> list[ManagedFileLink]:
                 href=f"/admin/backups/{row.path}",
             )
         )
-    if row.provider:
+    if row.provider_dataset_id is not None:
         links.append(
             ManagedFileLink(
                 rel="provider",
                 label="데이터셋 상태",
-                href=f"/ops/datasets?provider={quote(row.provider, safe='')}",
+                href=f"/ops/datasets?provider_dataset_id={row.provider_dataset_id}",
             )
         )
     if row.origin_dagster_run_id:
@@ -363,7 +365,7 @@ async def list_files(
     request: Request,
     kind: Annotated[list[str] | None, Query()] = None,
     file_status: Annotated[list[str] | None, Query(alias="status")] = None,
-    provider: str | None = None,
+    provider_dataset_id: Annotated[int | None, Query(gt=0)] = None,
     location: str | None = None,
     registered_by: str | None = None,
     q: str | None = None,
@@ -373,7 +375,7 @@ async def list_files(
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> ManagedFileListResponse:
-    """레지스트리 파일 목록 — kind/status/provider/location/기간 필터 + 검색."""
+    """레지스트리 파일 목록 — kind/status/dataset/location/기간 필터 + 검색."""
 
     started = perf_counter()
     kinds = _validate_enum(kind, MANAGED_FILE_KIND_VALUES, "kind")
@@ -396,7 +398,7 @@ async def list_files(
         session,
         kinds=kinds,
         statuses=statuses,
-        provider=provider,
+        provider_dataset_id=provider_dataset_id,
         location=location,
         registered_by=registered_by,
         q=q,

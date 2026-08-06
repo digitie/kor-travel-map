@@ -131,16 +131,20 @@ class PublicFestivalPage:
 _SOURCE_PROVIDERS_LATERAL_SQL: Final[str] = """
 LEFT JOIN LATERAL (
     SELECT COALESCE(
-        array_agg(DISTINCT sr.provider ORDER BY sr.provider)
-            FILTER (WHERE sr.provider IS NOT NULL),
+        array_agg(DISTINCT dataset.provider ORDER BY dataset.provider)
+            FILTER (WHERE dataset.provider IS NOT NULL),
         ARRAY[]::text[]
     ) AS source_providers
     FROM provider_sync.source_links AS sl
     JOIN provider_sync.source_entities AS se
       ON se.source_entity_key = sl.source_entity_key
+    JOIN provider_sync.provider_datasets AS dataset
+      ON dataset.provider_dataset_id = se.provider_dataset_id
+    JOIN provider_sync.source_entity_heads AS head
+      ON head.source_entity_key = se.source_entity_key
     JOIN provider_sync.source_records AS sr
-      ON sr.source_entity_key = se.source_entity_key
-     AND sr.source_record_key = se.current_source_record_key
+      ON sr.source_entity_key = head.source_entity_key
+     AND sr.source_record_key = head.current_source_record_key
     WHERE sl.feature_id = f.feature_id
 ) AS sp ON true
 """
@@ -151,11 +155,13 @@ LEFT JOIN LATERAL (
     FROM provider_sync.source_links AS sl
     JOIN provider_sync.source_entities AS se
       ON se.source_entity_key = sl.source_entity_key
+    JOIN provider_sync.source_entity_heads AS head
+      ON head.source_entity_key = se.source_entity_key
     JOIN provider_sync.source_records AS sr
-      ON sr.source_entity_key = se.source_entity_key
-     AND sr.source_record_key = se.current_source_record_key
+      ON sr.source_entity_key = head.source_entity_key
+     AND sr.source_record_key = head.current_source_record_key
     WHERE sl.feature_id = f.feature_id
-      AND sl.is_primary_source
+      AND sl.source_role = 'primary'
     ORDER BY sl.created_at ASC, sr.imported_at ASC, sr.source_record_key ASC
     LIMIT 1
 ) AS ps ON true

@@ -17,10 +17,10 @@ import { installInertOpsLiveWebSocket } from "./ws-isolation";
  * - 상태 스트립: KPI + 큐 sensor 중지 시 destructive alert(설계 §1 — 침묵 정지
  *   실장애 모드 노출).
  * - root 타임라인(C3b 소비 정본 #689): request branch/standalone root 행,
- *   effective providers/dataset_keys + provider_datasets exact pair 표시,
+ *   canonical provider_dataset_id를 포함한 exact member 표시,
  *   projected_job 상태·진행 분리. Dagster run 상세는 C3c(#690) endpoint 소비.
  * - 상세 패널(행 클릭/딥링크), 스케줄 조작(성공 + problem+json 실패),
- *   요청 dialog(6-type scope 전환·별도 preview·409 Retry-After·MOIS 조건부 경고),
+ *   요청 dialog(6-type scope 전환·별도 preview·409 Retry-After),
  *   `?schedule=` 실동작 하이라이트.
  */
 
@@ -46,7 +46,6 @@ type FeatureUpdateRequestMutationResponse =
   Schemas["FeatureUpdateRequestMutationResponse"];
 type FeatureUpdateRequestPreviewResponse =
   Schemas["FeatureUpdateRequestPreviewResponse"];
-type PipelineJobPrecheckResponse = Schemas["PipelineJobPrecheckResponse"];
 type OpsDatasetGridRow = Schemas["OpsDatasetGridRow"];
 type OpsDatasetsGridResponse = Schemas["OpsDatasetsGridResponse"];
 
@@ -55,6 +54,24 @@ const TWIN_JOB_ID = "11111111-1111-1111-1111-111111111111";
 const SOLO_JOB_ID = "99999999-9999-4999-8999-999999999999";
 const NEW_REQUEST_ID = "33333333-3333-4333-8333-333333333333";
 const SCHEDULE_NAME = "feature_weather_kma_short_forecast_hourly_schedule";
+const PROVIDER_DATASET_IDS = {
+  "python-kma-api/kma_short_forecast": 101,
+  "python-mois-api/mois_licenses": 102,
+  "python-opinet-api/opinet_stations": 103,
+} as const;
+
+function providerDatasetId(provider: string, datasetKey: string): number {
+  const id =
+    PROVIDER_DATASET_IDS[
+      `${provider}/${datasetKey}` as keyof typeof PROVIDER_DATASET_IDS
+    ];
+  if (!id) {
+    throw new Error(
+      `missing e2e provider dataset id: ${provider}/${datasetKey}`,
+    );
+  }
+  return id;
+}
 
 async function expectScheduleControls(
   page: Page,
@@ -104,12 +121,12 @@ function makeCatalogRow(
           reason: null,
         };
   return {
+    provider_dataset_id: providerDatasetId(provider, datasetKey),
     provider,
     dataset_key: datasetKey,
     detail_url:
-      `/v1/ops/datasets/detail?provider=${encodeURIComponent(provider)}` +
-      `&dataset_key=${encodeURIComponent(datasetKey)}` +
-      `&sync_scope=${encodeURIComponent(syncScope)}`,
+      `/v1/ops/datasets/${providerDatasetId(provider, datasetKey)}` +
+      `?sync_scope=${encodeURIComponent(syncScope)}`,
     sync_scope: syncScope,
     status: "active",
     last_success_at: "2026-07-14T09:00:00.000Z",
@@ -139,10 +156,8 @@ function makeCatalogRow(
     mutable: true,
     catalog: {
       feature_kind: "place",
-      provider_state_default_scope:
-        syncScope === "dataset_wide" ? "default" : syncScope,
+      provider_state_default_scope: syncScope,
       label: datasetKey,
-      is_feature_load: true,
       is_refreshable: true,
       scope_refresh: scopeRefresh,
       preview: {
@@ -157,7 +172,6 @@ function makeCatalogRow(
     },
     refresh_policy: null,
     dataset_issues: { open_count: 0, severity_counts: {} },
-    provider_issues: { open_count: 0, severity_counts: {} },
   };
 }
 
@@ -193,32 +207,6 @@ function makeCatalogResponse(
   };
 }
 
-function makeMoisPrecheckResponse(
-  overrides: Partial<PipelineJobPrecheckResponse["data"]> = {},
-): PipelineJobPrecheckResponse {
-  return {
-    data: {
-      job_name: "mois_localdata_source_sync",
-      ready: true,
-      checked_at: "2026-07-17T09:00:00.000Z",
-      max_age_hours: 24,
-      age_hours: 1,
-      latest_run: {
-        run_id: "mois-source-run-1",
-        job_name: "mois_localdata_source_sync",
-        status: "SUCCESS",
-        start_time: Date.parse("2026-07-17T07:55:00.000Z") / 1000,
-        end_time: Date.parse("2026-07-17T08:00:00.000Z") / 1000,
-        update_time: Date.parse("2026-07-17T08:00:00.000Z") / 1000,
-        tags: {},
-      },
-      disabled_reason: null,
-      ...overrides,
-    },
-    meta: META,
-  };
-}
-
 function makeExecution(
   overrides: Partial<PipelineExecutionRecord> = {},
 ): PipelineExecutionRecord {
@@ -228,8 +216,6 @@ function makeExecution(
     status: "done",
     created_at: "2026-07-14T09:00:00.000Z",
     job_kind: "provider_load",
-    provider: "python-opinet-api",
-    dataset_key: "opinet_stations",
     progress: 100,
     current_stage: "load",
     scope_type: null,
@@ -242,7 +228,18 @@ function makeExecution(
     dagster_run_id: "run-solo",
     dagster_run_status: "SUCCESS",
     trigger_kind: "manual",
-    operation_registry_version: null,
+    operation_key: null,
+    provider_datasets: [
+      {
+        provider: "python-opinet-api",
+        dataset_key: "opinet_stations",
+        provider_dataset_id:
+          PROVIDER_DATASET_IDS["python-opinet-api/opinet_stations"],
+        sync_scope: "dataset_wide",
+        operation_member_id: SOLO_JOB_ID,
+        status: "done",
+      },
+    ],
     job_id: null,
     request_id: null,
     load_batch_id: null,
@@ -259,12 +256,12 @@ function makeRoots(): PipelineExecutionRootRecord[] {
     id: REQUEST_ID,
     status: "running",
     created_at: "2026-07-14T10:00:00.000Z",
-    providers: ["python-kma-api"],
-    dataset_keys: ["kma_short_forecast"],
     provider_datasets: [
       {
         provider: "python-kma-api",
         dataset_key: "kma_short_forecast",
+        provider_dataset_id:
+          PROVIDER_DATASET_IDS["python-kma-api/kma_short_forecast"],
         sync_scope: "target_grids",
         operation_member_id: TWIN_JOB_ID,
         status: "running",
@@ -282,7 +279,7 @@ function makeRoots(): PipelineExecutionRootRecord[] {
     dagster_run_id: "run-pair",
     dagster_run_status: "STARTED",
     trigger_kind: "update_request",
-    operation_registry_version: null,
+    operation_key: null,
     cancellation: null,
     linked_job_count: 2,
     requested_job_id: TWIN_JOB_ID,
@@ -300,7 +297,7 @@ function makeRoots(): PipelineExecutionRootRecord[] {
       dagster_run_id: null,
       dagster_run_status: null,
       trigger_kind: "update_request",
-      operation_registry_version: null,
+      operation_key: null,
       load_batch_id: null,
       parent_job_id: null,
       detail_url: `/v1/ops/pipeline/executions/import_job/${TWIN_JOB_ID}`,
@@ -312,12 +309,12 @@ function makeRoots(): PipelineExecutionRootRecord[] {
     id: SOLO_JOB_ID,
     status: "done",
     created_at: "2026-07-14T09:00:00.000Z",
-    providers: ["python-opinet-api"],
-    dataset_keys: ["opinet_stations"],
     provider_datasets: [
       {
         provider: "python-opinet-api",
         dataset_key: "opinet_stations",
+        provider_dataset_id:
+          PROVIDER_DATASET_IDS["python-opinet-api/opinet_stations"],
         sync_scope: "dataset_wide",
         operation_member_id: SOLO_JOB_ID,
         status: "done",
@@ -335,7 +332,7 @@ function makeRoots(): PipelineExecutionRootRecord[] {
     dagster_run_id: "run-solo",
     dagster_run_status: "SUCCESS",
     trigger_kind: "manual",
-    operation_registry_version: null,
+    operation_key: null,
     cancellation: null,
     linked_job_count: 1,
     requested_job_id: null,
@@ -353,7 +350,7 @@ function makeRoots(): PipelineExecutionRootRecord[] {
       dagster_run_id: "run-solo",
       dagster_run_status: "SUCCESS",
       trigger_kind: "manual",
-      operation_registry_version: null,
+      operation_key: null,
       load_batch_id: null,
       parent_job_id: null,
       detail_url: `/v1/ops/pipeline/executions/import_job/${SOLO_JOB_ID}`,
@@ -375,12 +372,12 @@ function makeOverflowExecution(index: number): PipelineExecutionRootRecord {
     ...source,
     id,
     created_at: createdAt,
-    providers: ["python-kma-api"],
-    dataset_keys: ["kma_short_forecast"],
     provider_datasets: [
       {
         provider: "python-kma-api",
         dataset_key: "kma_short_forecast",
+        provider_dataset_id:
+          PROVIDER_DATASET_IDS["python-kma-api/kma_short_forecast"],
         sync_scope: "target_grids",
         operation_member_id: id,
         status: "done",
@@ -408,9 +405,9 @@ function makeOverflowEvent(index: number): PipelineJobEventRecord {
   return {
     event_id: eventId,
     job_id: jobId,
-    provider: "python-kma-api",
-    dataset_key: "kma_short_forecast",
-    sync_scope: "target_grids",
+    import_job_dataset_id: null,
+    provider_dataset_id:
+      PROVIDER_DATASET_IDS["python-kma-api/kma_short_forecast"],
     feature_id: null,
     stage: "loading",
     level: "info",
@@ -477,8 +474,17 @@ function makeDetail(): PipelineExecutionDetailResponse {
     status: "queued",
     created_at: "2026-07-14T10:00:00.000Z",
     job_kind: null,
-    provider: "python-kma-api",
-    dataset_key: "kma_short_forecast",
+    provider_datasets: [
+      {
+        provider: "python-kma-api",
+        dataset_key: "kma_short_forecast",
+        provider_dataset_id:
+          PROVIDER_DATASET_IDS["python-kma-api/kma_short_forecast"],
+        sync_scope: "target_grids",
+        operation_member_id: TWIN_JOB_ID,
+        status: "queued",
+      },
+    ],
     progress: null,
     current_stage: null,
     scope_type: "provider_dataset",
@@ -507,9 +513,18 @@ function makeDetail(): PipelineExecutionDetailResponse {
         dagster_run_id: "run-pair",
         dagster_run_status: "STARTED",
         trigger_kind: "update_request",
-        operation_registry_version: null,
-        provider: "python-kma-api",
-        dataset_key: "kma_short_forecast",
+        operation_key: null,
+        provider_datasets: [
+          {
+            provider: "python-kma-api",
+            dataset_key: "kma_short_forecast",
+            provider_dataset_id:
+              PROVIDER_DATASET_IDS["python-kma-api/kma_short_forecast"],
+            sync_scope: "target_grids",
+            operation_member_id: TWIN_JOB_ID,
+            status: "running",
+          },
+        ],
         created_at: "2026-07-14T10:00:00.000Z",
         started_at: "2026-07-14T10:00:05.000Z",
         finished_at: null,
@@ -520,14 +535,17 @@ function makeDetail(): PipelineExecutionDetailResponse {
         scope_type: "provider_dataset",
         scope: {
           type: "provider_dataset",
-          provider: "python-kma-api",
-          dataset_key: "kma_short_forecast",
+          provider_dataset_id:
+            PROVIDER_DATASET_IDS["python-kma-api/kma_short_forecast"],
           sync_scope: "target_grids",
         },
-        requested_sync_scope: "target_grids",
-        effective_sync_scope: "target_grids",
-        providers: [],
-        dataset_keys: [],
+        dataset_memberships: [
+          {
+            provider_dataset_id:
+              PROVIDER_DATASET_IDS["python-kma-api/kma_short_forecast"],
+            sync_scope: "target_grids",
+          },
+        ],
         update_policy: {},
         run_mode: "queued",
         priority: 50,
@@ -551,9 +569,9 @@ function makeDetail(): PipelineExecutionDetailResponse {
         {
           event_id: "55555555-5555-5555-5555-555555555555",
           job_id: TWIN_JOB_ID,
-          provider: "python-kma-api",
-          dataset_key: "kma_short_forecast",
-          sync_scope: "target_grids",
+          import_job_dataset_id: null,
+          provider_dataset_id:
+            PROVIDER_DATASET_IDS["python-kma-api/kma_short_forecast"],
           feature_id: null,
           stage: "loading",
           level: "error",
@@ -574,8 +592,17 @@ function makeImportDetail(): PipelineExecutionDetailResponse {
   const execution = makeExecution({
     id: TWIN_JOB_ID,
     status: "running",
-    provider: "python-kma-api",
-    dataset_key: "kma_short_forecast",
+    provider_datasets: [
+      {
+        provider: "python-kma-api",
+        dataset_key: "kma_short_forecast",
+        provider_dataset_id:
+          PROVIDER_DATASET_IDS["python-kma-api/kma_short_forecast"],
+        sync_scope: "target_grids",
+        operation_member_id: TWIN_JOB_ID,
+        status: "running",
+      },
+    ],
     request_id: REQUEST_ID,
     detail_url: `/v1/ops/pipeline/executions/import_job/${TWIN_JOB_ID}`,
   });
@@ -715,9 +742,8 @@ function observedApiContract(request: { method(): string; url(): string }) {
 }
 
 type ExactPagedScope = {
-  datasetKey: string;
   pageSize: number;
-  provider: string;
+  providerDatasetId: number;
   syncScope: string;
 };
 
@@ -728,9 +754,8 @@ function requireExactPagedQuery(
   resource: string,
 ): string | null {
   const exactValues = {
-    dataset_key: expected.datasetKey,
     page_size: String(expected.pageSize),
-    provider: expected.provider,
+    provider_dataset_id: String(expected.providerDatasetId),
     sync_scope: expected.syncScope,
   };
   const allowedKeys = new Set([...Object.keys(exactValues), "cursor"]);
@@ -817,8 +842,6 @@ interface MockOptions {
   };
   catalogResponse?: { status: number; body: unknown };
   catalogResponses?: Array<{ status: number; body: unknown }>;
-  moisPrecheckResponse?: { status: number; body: unknown };
-  moisPrecheckResponses?: Array<{ status: number; body: unknown }>;
 }
 
 interface MockCounters {
@@ -849,7 +872,6 @@ interface MockCounters {
   detailQueries: Array<{ executionId: string; query: URLSearchParams }>;
   cancelBodies: unknown[];
   catalogCalls: number;
-  moisPrecheckCalls: number;
 }
 
 async function installPipelineMocks(
@@ -875,7 +897,6 @@ async function installPipelineMocks(
     detailQueries: [],
     cancelBodies: [],
     catalogCalls: 0,
-    moisPrecheckCalls: 0,
   };
   const claimResolutionLedger = new Map<
     string,
@@ -896,22 +917,6 @@ async function installPipelineMocks(
 
     if (pathname.endsWith("/v1/ops/pipeline/overview")) {
       await fulfillJson(route, options.overview ?? makeOverview({}));
-      return;
-    }
-    if (pathname.endsWith("/v1/ops/pipeline/prechecks/mois-source-sync")) {
-      const response =
-        options.moisPrecheckResponses?.[
-          Math.min(
-            counters.moisPrecheckCalls,
-            options.moisPrecheckResponses.length - 1,
-          )
-        ] ?? options.moisPrecheckResponse;
-      counters.moisPrecheckCalls += 1;
-      if (response) {
-        await fulfillJson(route, response.body, response.status);
-        return;
-      }
-      await fulfillJson(route, makeMoisPrecheckResponse());
       return;
     }
     if (pathname.endsWith("/v1/ops/pipeline/executions")) {
@@ -1486,11 +1491,17 @@ async function installPipelineMocks(
           scope_type: "provider_dataset",
           scope: {
             type: "provider_dataset",
-            provider: "python-mois-api",
-            dataset_key: "mois_licenses",
+            provider_dataset_id:
+              PROVIDER_DATASET_IDS["python-mois-api/mois_licenses"],
+            sync_scope: "dataset_wide",
           },
-          providers: [],
-          dataset_keys: [],
+          dataset_memberships: [
+            {
+              provider_dataset_id:
+                PROVIDER_DATASET_IDS["python-mois-api/mois_licenses"],
+              sync_scope: "dataset_wide",
+            },
+          ],
           update_policy: {},
           run_mode: "queued",
           priority: 50,
@@ -1572,14 +1583,17 @@ async function installPipelineMocks(
           scope_type: "provider_dataset",
           scope: {
             type: "provider_dataset",
-            provider: "python-kma-api",
-            dataset_key: "kma_short_forecast",
+            provider_dataset_id:
+              PROVIDER_DATASET_IDS["python-kma-api/kma_short_forecast"],
             sync_scope: "target_grids",
           },
-          requested_sync_scope: "target_grids",
-          effective_sync_scope: "target_grids",
-          providers: [],
-          dataset_keys: [],
+          dataset_memberships: [
+            {
+              provider_dataset_id:
+                PROVIDER_DATASET_IDS["python-kma-api/kma_short_forecast"],
+              sync_scope: "target_grids",
+            },
+          ],
           update_policy: {},
           run_mode: "queued",
           priority: 50,
@@ -1782,8 +1796,7 @@ test.describe("/ops/pipeline", () => {
     ).toBeVisible();
 
     await page.getByLabel("실행 상태").selectOption("running");
-    await page.getByLabel("provider 필터").fill("python-kma-api");
-    await page.getByLabel("데이터셋 필터").fill("kma_short_forecast");
+    await page.getByLabel("provider dataset ID 필터").fill("101");
     await page.getByLabel("sync scope 필터").fill("target_grids");
 
     await expect
@@ -1791,34 +1804,30 @@ test.describe("/ops/pipeline", () => {
         const last = counters.executionQueries.at(-1);
         return [
           last?.get("status"),
-          last?.get("provider"),
-          last?.get("dataset_key"),
+          last?.get("provider_dataset_id"),
           last?.get("sync_scope"),
         ].join("|");
       })
-      .toBe("running|python-kma-api|kma_short_forecast|target_grids");
+      .toBe("running|101|target_grids");
   });
 
-  test("타임라인 exact pair는 prerequisite를 강제하고 provider 변경 시 종속 필터를 원자 제거한다", async ({
+  test("타임라인 provider dataset ID는 scope prerequisite를 강제하고 ID 변경 시 scope를 원자 제거한다", async ({
     page,
   }) => {
     await installPipelineMocks(page);
     await page.goto("/ops/pipeline");
 
-    await expect(page.getByLabel("데이터셋 필터")).toBeDisabled();
     await expect(page.getByLabel("sync scope 필터")).toBeDisabled();
 
     await page.goto(
-      "/ops/pipeline?provider=python-kma-api&dataset_key=kma_short_forecast" +
-        "&sync_scope=target_grids",
+      "/ops/pipeline?provider_dataset_id=101&sync_scope=target_grids",
     );
-    await page.getByLabel("provider 필터").fill("python-mois-api");
+    await page.getByLabel("provider dataset ID 필터").fill("102");
 
-    await expect(page).toHaveURL(/provider=python-mois-api/);
-    await expect(page).not.toHaveURL(/dataset_key=|sync_scope=/);
-    await expect(page.getByLabel("데이터셋 필터")).toHaveValue("");
+    await expect(page).toHaveURL(/provider_dataset_id=102/);
+    await expect(page).not.toHaveURL(/sync_scope=/);
     await expect(page.getByLabel("sync scope 필터")).toHaveValue("");
-    await expect(page.getByLabel("sync scope 필터")).toBeDisabled();
+    await expect(page.getByLabel("sync scope 필터")).toBeEnabled();
   });
 
   test("dataset event history 딥링크가 exact scope 필터를 복원한다", async ({
@@ -1826,15 +1835,11 @@ test.describe("/ops/pipeline", () => {
   }) => {
     const counters = await installPipelineMocks(page);
     await page.goto(
-      "/ops/pipeline?tab=events&provider=python-kma-api&" +
-        "dataset_key=kma_short_forecast&sync_scope=target_grids",
+      "/ops/pipeline?tab=events&provider_dataset_id=101&sync_scope=target_grids",
     );
 
-    await expect(page.getByLabel("이벤트 provider 필터")).toHaveValue(
-      "python-kma-api",
-    );
-    await expect(page.getByLabel("이벤트 데이터셋 필터")).toHaveValue(
-      "kma_short_forecast",
+    await expect(page.getByLabel("이벤트 provider dataset ID 필터")).toHaveValue(
+      "101",
     );
     await expect(page.getByLabel("이벤트 sync scope 필터")).toHaveValue(
       "target_grids",
@@ -1843,12 +1848,11 @@ test.describe("/ops/pipeline", () => {
       .poll(() => {
         const last = counters.eventQueries.at(-1);
         return [
-          last?.get("provider"),
-          last?.get("dataset_key"),
+          last?.get("provider_dataset_id"),
           last?.get("sync_scope"),
         ].join("|");
       })
-      .toBe("python-kma-api|kma_short_forecast|target_grids");
+      .toBe("101|target_grids");
     await expect(page.getByText("target_grids", { exact: true })).toBeVisible();
   });
 
@@ -1859,8 +1863,7 @@ test.describe("/ops/pipeline", () => {
       eventNextCursor: "event-cursor-page-2",
     });
     await page.goto(
-      "/ops/pipeline?tab=events&provider=python-kma-api&" +
-        "dataset_key=kma_short_forecast&sync_scope=target_grids",
+      "/ops/pipeline?tab=events&provider_dataset_id=101&sync_scope=target_grids",
     );
 
     await page.getByRole("button", { name: "job 이벤트 다음 페이지" }).click();
@@ -1877,7 +1880,7 @@ test.describe("/ops/pipeline", () => {
       window.history.pushState(
         null,
         "",
-        "/ops/pipeline?tab=events&provider=python-kma-api&sync_scope=target_grids",
+        "/ops/pipeline?tab=events&sync_scope=target_grids",
       );
     });
 
@@ -1891,8 +1894,7 @@ test.describe("/ops/pipeline", () => {
           .slice(beforeInvalidTuple)
           .some(
             (query) =>
-              query.get("provider") === "python-kma-api" &&
-              !query.has("dataset_key") &&
+              !query.has("provider_dataset_id") &&
               !query.has("sync_scope") &&
               !query.has("cursor"),
           ),
@@ -1900,8 +1902,8 @@ test.describe("/ops/pipeline", () => {
       .toBe(true);
 
     await page.goBack();
-    await expect(page.getByLabel("이벤트 데이터셋 필터")).toHaveValue(
-      "kma_short_forecast",
+    await expect(page.getByLabel("이벤트 provider dataset ID 필터")).toHaveValue(
+      "101",
     );
     await expect(page.getByLabel("이벤트 sync scope 필터")).toHaveValue(
       "target_grids",
@@ -1909,7 +1911,7 @@ test.describe("/ops/pipeline", () => {
     await expect(page.getByText(/page 1/)).toBeVisible();
 
     await page.goForward();
-    await expect(page.getByLabel("이벤트 데이터셋 필터")).toHaveValue("");
+    await expect(page.getByLabel("이벤트 provider dataset ID 필터")).toHaveValue("");
     await expect(page.getByLabel("이벤트 sync scope 필터")).toBeDisabled();
   });
 
@@ -1925,9 +1927,8 @@ test.describe("/ops/pipeline", () => {
     const executionCursor = "execution-overflow-page-2";
     const eventCursor = "event-overflow-page-2";
     const exactPagedScope: ExactPagedScope = {
-      datasetKey: "kma_short_forecast",
       pageSize: 50,
-      provider: "python-kma-api",
+      providerDatasetId: PROVIDER_DATASET_IDS["python-kma-api/kma_short_forecast"],
       syncScope: "target_grids",
     };
     const counters = await installPipelineMocks(page, {
@@ -1944,9 +1945,7 @@ test.describe("/ops/pipeline", () => {
         second: events.slice(6),
       },
     });
-    const exactScope =
-      "provider=python-kma-api&dataset_key=kma_short_forecast&" +
-      "sync_scope=target_grids";
+    const exactScope = "provider_dataset_id=101&sync_scope=target_grids";
     const renderedIdentities = async (ariaLabel: string) =>
       page
         .getByRole("table", { name: ariaLabel })
@@ -2059,50 +2058,41 @@ test.describe("/ops/pipeline", () => {
     expect(eventTuples).toEqual(eventTuples.toSorted(descendingTupleOrder));
   });
 
-  test("텍스트 필터는 여러 글자를 입력해도 focus와 URL 상태를 유지한다", async ({
+  test("provider dataset ID 필터는 focus와 URL 상태를 유지한다", async ({
     page,
   }) => {
     await installPipelineMocks(page);
     await page.goto("/ops/pipeline");
-    const provider = page.getByLabel("provider 필터");
+    const providerDatasetId = page.getByLabel("provider dataset ID 필터");
 
-    await provider.pressSequentially("python-kma-api");
+    await providerDatasetId.fill("101");
 
-    await expect(provider).toBeFocused();
-    await expect(provider).toHaveValue("python-kma-api");
-    await expect(page).toHaveURL(/provider=python-kma-api/);
+    await expect(providerDatasetId).toBeFocused();
+    await expect(providerDatasetId).toHaveValue("101");
+    await expect(page).toHaveURL(/provider_dataset_id=101/);
   });
 
-  test("focus 중 programmatic history 변경은 세 타임라인 draft와 REST scope를 함께 교체한다", async ({
+  test("focus 중 programmatic history 변경은 provider dataset ID와 REST scope를 함께 교체한다", async ({
     page,
   }) => {
     const counters = await installPipelineMocks(page);
     await page.goto(
-      "/ops/pipeline?provider=alpha&dataset_key=alpha-data&sync_scope=alpha-scope",
+      "/ops/pipeline?provider_dataset_id=201&sync_scope=alpha-scope",
     );
     // same-route native history가 useSearchParams에 연결된 hydration 완료를 먼저 고정한다.
-    await expect(page.getByLabel("provider 필터")).toHaveValue("alpha");
-    await expect(page.getByLabel("데이터셋 필터")).toHaveValue("alpha-data");
+    await expect(page.getByLabel("provider dataset ID 필터")).toHaveValue("201");
     await expect(page.getByLabel("sync scope 필터")).toHaveValue("alpha-scope");
 
     const transitions = [
       {
-        label: "provider 필터",
-        provider: "beta",
-        datasetKey: "beta-data",
+        label: "provider dataset ID 필터",
+        providerDatasetId: "202",
         syncScope: "beta-scope",
       },
       {
-        label: "데이터셋 필터",
-        provider: "gamma",
-        datasetKey: "gamma-data",
-        syncScope: "gamma-scope",
-      },
-      {
         label: "sync scope 필터",
-        provider: "delta",
-        datasetKey: "delta-data",
-        syncScope: "delta-scope",
+        providerDatasetId: "203",
+        syncScope: "gamma-scope",
       },
     ] as const;
 
@@ -2110,21 +2100,17 @@ test.describe("/ops/pipeline", () => {
       const field = page.getByLabel(transition.label);
       await field.focus();
       const queryStart = counters.executionQueries.length;
-      await page.evaluate(({ provider, datasetKey, syncScope }) => {
+      await page.evaluate(({ providerDatasetId, syncScope }) => {
         const query = new URLSearchParams({
-          provider,
-          dataset_key: datasetKey,
+          provider_dataset_id: providerDatasetId,
           sync_scope: syncScope,
         });
         window.history.pushState(null, "", `/ops/pipeline?${query}`);
       }, transition);
 
       await expect(field).toBeFocused();
-      await expect(page.getByLabel("provider 필터")).toHaveValue(
-        transition.provider,
-      );
-      await expect(page.getByLabel("데이터셋 필터")).toHaveValue(
-        transition.datasetKey,
+      await expect(page.getByLabel("provider dataset ID 필터")).toHaveValue(
+        transition.providerDatasetId,
       );
       await expect(page.getByLabel("sync scope 필터")).toHaveValue(
         transition.syncScope,
@@ -2135,8 +2121,7 @@ test.describe("/ops/pipeline", () => {
             .slice(queryStart)
             .some(
               (query) =>
-                query.get("provider") === transition.provider &&
-                query.get("dataset_key") === transition.datasetKey &&
+                query.get("provider_dataset_id") === transition.providerDatasetId &&
                 query.get("sync_scope") === transition.syncScope,
             ),
         )
@@ -2144,23 +2129,24 @@ test.describe("/ops/pipeline", () => {
     }
   });
 
-  test("focus 중 Back/Forward는 세 타임라인 draft와 REST scope를 함께 복원한다", async ({
+  test("focus 중 Back/Forward는 provider dataset ID와 REST scope를 함께 복원한다", async ({
     page,
   }) => {
     const [alphaExecution, betaExecution] = makeRoots();
     await installPipelineMocks(page, {
       executionsForQuery: (query) =>
-        query.get("provider") === "beta" ? [betaExecution!] : [alphaExecution!],
+        query.get("provider_dataset_id") === "202"
+          ? [betaExecution!]
+          : [alphaExecution!],
     });
     const alphaUrl =
-      "/ops/pipeline?provider=alpha&dataset_key=alpha-data&sync_scope=alpha-scope";
+      "/ops/pipeline?provider_dataset_id=201&sync_scope=alpha-scope";
     const betaUrl =
-      "/ops/pipeline?provider=beta&dataset_key=beta-data&sync_scope=beta-scope";
+      "/ops/pipeline?provider_dataset_id=202&sync_scope=beta-scope";
     await page.goto(alphaUrl);
     // Next.js가 native history API를 연결한 뒤에만 same-route pushState가
     // useSearchParams를 갱신한다. 초기 URL 상태 렌더를 확인해 hydration 경계를 고정한다.
-    await expect(page.getByLabel("provider 필터")).toHaveValue("alpha");
-    await expect(page.getByLabel("데이터셋 필터")).toHaveValue("alpha-data");
+    await expect(page.getByLabel("provider dataset ID 필터")).toHaveValue("201");
     await expect(page.getByLabel("sync scope 필터")).toHaveValue("alpha-scope");
     await expect(
       page.getByTestId(`pipeline-execution-row-${alphaExecution!.id}`),
@@ -2171,7 +2157,7 @@ test.describe("/ops/pipeline", () => {
     await page.evaluate((url) => {
       window.history.pushState(null, "", url);
     }, betaUrl);
-    await expect(page.getByLabel("provider 필터")).toHaveValue("beta");
+    await expect(page.getByLabel("provider dataset ID 필터")).toHaveValue("202");
     await expect(
       page.getByTestId(`pipeline-execution-row-${betaExecution!.id}`),
     ).toBeVisible();
@@ -2179,14 +2165,13 @@ test.describe("/ops/pipeline", () => {
       page.getByTestId(`pipeline-execution-row-${alphaExecution!.id}`),
     ).toHaveCount(0);
 
-    for (const label of ["provider 필터", "데이터셋 필터", "sync scope 필터"]) {
+    for (const label of ["provider dataset ID 필터", "sync scope 필터"]) {
       const field = page.getByLabel(label);
       await field.focus();
       await page.goBack();
 
       await expect(field).toBeFocused();
-      await expect(page.getByLabel("provider 필터")).toHaveValue("alpha");
-      await expect(page.getByLabel("데이터셋 필터")).toHaveValue("alpha-data");
+      await expect(page.getByLabel("provider dataset ID 필터")).toHaveValue("201");
       await expect(page.getByLabel("sync scope 필터")).toHaveValue(
         "alpha-scope",
       );
@@ -2199,8 +2184,7 @@ test.describe("/ops/pipeline", () => {
 
       await page.goForward();
       await expect(field).toBeFocused();
-      await expect(page.getByLabel("provider 필터")).toHaveValue("beta");
-      await expect(page.getByLabel("데이터셋 필터")).toHaveValue("beta-data");
+      await expect(page.getByLabel("provider dataset ID 필터")).toHaveValue("202");
       await expect(page.getByLabel("sync scope 필터")).toHaveValue(
         "beta-scope",
       );
@@ -2218,17 +2202,12 @@ test.describe("/ops/pipeline", () => {
   }) => {
     await installPipelineMocks(page);
     await page.goto(
-      "/ops/pipeline?kind=update_request&status=running&provider=python-kma-api&dataset_key=kma_short_forecast&sync_scope=target_grids&created_from=2026-07-14T09%3A00&created_to=2026-07-14T12%3A00&tab=executions",
+      "/ops/pipeline?kind=update_request&status=running&provider_dataset_id=101&sync_scope=target_grids&created_from=2026-07-14T09%3A00&created_to=2026-07-14T12%3A00&tab=executions",
     );
 
     await expect(page.getByLabel("실행 종류")).toHaveValue("update_request");
     await expect(page.getByLabel("실행 상태")).toHaveValue("running");
-    await expect(page.getByLabel("provider 필터")).toHaveValue(
-      "python-kma-api",
-    );
-    await expect(page.getByLabel("데이터셋 필터")).toHaveValue(
-      "kma_short_forecast",
-    );
+    await expect(page.getByLabel("provider dataset ID 필터")).toHaveValue("101");
     await expect(page.getByLabel("sync scope 필터")).toHaveValue(
       "target_grids",
     );
@@ -2331,8 +2310,6 @@ test.describe("/ops/pipeline", () => {
       ...baseline,
       kind: "update_request",
       id: baseline.id,
-      providers: [],
-      dataset_keys: [],
       provider_datasets: [],
       linked_job_count: 1,
       detail_url: `/v1/ops/pipeline/executions/update_request/${baseline.id}`,
@@ -3559,7 +3536,9 @@ test.describe("/ops/pipeline", () => {
     ]);
   });
 
-  test("요청 dialog — scope 전환·MOIS 경고·별도 preview", async ({ page }) => {
+  test("요청 dialog — scope 전환·canonical membership·별도 preview", async ({
+    page,
+  }) => {
     const counters = await installPipelineMocks(page);
     await page.goto("/ops/pipeline");
 
@@ -3572,32 +3551,25 @@ test.describe("/ops/pipeline", () => {
     await expect(dialog.getByLabel("min_lon")).toBeVisible();
     await dialog.getByLabel("scope 유형").selectOption("provider_dataset");
 
-    // MOIS 조건부 경고 — provider 입력이 mois 계열일 때만.
-    await expect(dialog.getByTestId("mois-precheck-notice")).toHaveCount(0);
-    await dialog.getByLabel("provider").first().fill("python-mois-api");
-    const moisNotice = dialog.getByTestId("mois-precheck-notice");
-    await expect(moisNotice).toBeVisible();
-    await expect(moisNotice).toContainText("mois_localdata_source_sync");
-    await expect(moisNotice).toContainText("정상");
-
-    // preview 제출 → 매칭 대상 표시, 행 생성 없음.
-    await dialog.getByLabel("dataset_key").fill("mois_licenses");
-    await expect(dialog.getByLabel("sync_scope (선택)")).toBeDisabled();
-    await expect(
-      dialog.getByText("dataset-wide 갱신은 비워 두며 서버가 정규화합니다."),
-    ).toBeVisible();
+    // catalog가 투영한 id와 scope만 제출한다. MOIS 선행 검증은 서버가 책임진다.
+    await dialog.getByLabel("대상 데이터셋").selectOption("102");
+    await expect(dialog.getByLabel("sync_scope")).toBeDisabled();
     await dialog.getByRole("button", { name: "dry-run 실행" }).click();
     const resultAlert = dialog.getByTestId("request-preview-result");
     await expect(resultAlert).toBeVisible();
     await expect(resultAlert).toContainText("미리보기 결과");
+    await expect(resultAlert).toContainText("102 · dataset_wide");
     await expect(resultAlert).toContainText('"feature_count":12');
     expect(counters.previewBodies.at(0)).toMatchObject({
-      scope: { type: "provider_dataset", provider: "python-mois-api" },
+      scope: {
+        type: "provider_dataset",
+        provider_dataset_id:
+          PROVIDER_DATASET_IDS["python-mois-api/mois_licenses"],
+        sync_scope: "dataset_wide",
+      },
     });
-    expect(
-      (counters.previewBodies.at(0) as { scope: Record<string, unknown> })
-        .scope,
-    ).not.toHaveProperty("sync_scope");
+    expect(counters.previewBodies.at(0)).not.toHaveProperty("providers");
+    expect(counters.previewBodies.at(0)).not.toHaveProperty("dataset_keys");
     expect(counters.requestBodies).toHaveLength(0);
   });
 
@@ -3608,12 +3580,11 @@ test.describe("/ops/pipeline", () => {
     await page.goto("/ops/pipeline");
     await page.getByRole("button", { name: "갱신 요청 생성" }).click();
     const dialog = page.getByRole("dialog", { name: "갱신 요청 생성" });
-    await dialog.getByLabel("provider").first().fill("python-kma-api");
-    await dialog.getByLabel("dataset_key").fill("kma_short_forecast");
+    await dialog.getByLabel("대상 데이터셋").selectOption("101");
     await dialog.getByRole("button", { name: "dry-run 실행" }).click();
     await expect(dialog.getByTestId("request-preview-result")).toBeVisible();
 
-    await dialog.getByLabel("dataset_key").fill("opinet_stations");
+    await dialog.getByLabel("대상 데이터셋").selectOption("103");
 
     await expect(dialog.getByTestId("request-preview-result")).toHaveCount(0);
     expect(counters.previewBodies).toHaveLength(1);
@@ -3626,8 +3597,7 @@ test.describe("/ops/pipeline", () => {
     await page.goto("/ops/pipeline");
     await page.getByRole("button", { name: "갱신 요청 생성" }).click();
     const dialog = page.getByRole("dialog", { name: "갱신 요청 생성" });
-    await dialog.getByLabel("provider").first().fill("python-kma-api");
-    await dialog.getByLabel("dataset_key").fill("kma_short_forecast");
+    await dialog.getByLabel("대상 데이터셋").selectOption("101");
     await dialog.getByRole("button", { name: "dry-run 실행" }).click();
     await expect(dialog.getByTestId("request-preview-result")).toBeVisible();
 
@@ -3661,8 +3631,7 @@ test.describe("/ops/pipeline", () => {
     await page.goto("/ops/pipeline");
     await page.getByRole("button", { name: "갱신 요청 생성" }).click();
     const dialog = page.getByRole("dialog", { name: "갱신 요청 생성" });
-    await dialog.getByLabel("provider").first().fill("python-kma-api");
-    await dialog.getByLabel("dataset_key").fill("kma_short_forecast");
+    await dialog.getByLabel("대상 데이터셋").selectOption("101");
     await dialog.getByRole("button", { name: "dry-run 실행" }).click();
     await expect.poll(() => counters.previewBodies.length).toBe(1);
 
@@ -3692,7 +3661,6 @@ test.describe("/ops/pipeline", () => {
     await page.getByRole("button", { name: "갱신 요청 생성" }).click();
     const dialog = page.getByRole("dialog", { name: "갱신 요청 생성" });
     await dialog.getByLabel("scope 유형").selectOption("bbox");
-    await dialog.getByLabel("데이터셋 키 필터").fill("kma_short_forecast");
     await dialog
       .getByLabel("dry-run(행을 만들지 않고 대상 수만 확인)")
       .uncheck();
@@ -3708,7 +3676,6 @@ test.describe("/ops/pipeline", () => {
         dialog.getByRole("button", { name: "요청 생성", exact: true }),
       ).toBeDisabled();
       await expect(dialog.getByLabel("scope 유형")).toBeDisabled();
-      await expect(dialog.getByLabel("데이터셋 키 필터")).toBeDisabled();
       await expect(
         dialog.getByLabel("dry-run(행을 만들지 않고 대상 수만 확인)"),
       ).toBeDisabled();
@@ -3721,9 +3688,6 @@ test.describe("/ops/pipeline", () => {
     }
 
     await expect(dialog.getByTestId("request-create-result")).toBeVisible();
-    await expect(dialog.getByLabel("데이터셋 키 필터")).toHaveValue(
-      "kma_short_forecast",
-    );
     await expect(closeButton).toBeEnabled();
     await closeButton.click();
     await expect(dialog).toBeHidden();
@@ -3740,7 +3704,6 @@ test.describe("/ops/pipeline", () => {
     await page.getByRole("button", { name: "갱신 요청 생성" }).click();
     const dialog = page.getByRole("dialog", { name: "갱신 요청 생성" });
     await dialog.getByLabel("scope 유형").selectOption("bbox");
-    await dialog.getByLabel("데이터셋 키 필터").fill("kma_short_forecast");
     await dialog
       .getByLabel("dry-run(행을 만들지 않고 대상 수만 확인)")
       .uncheck();
@@ -3775,8 +3738,7 @@ test.describe("/ops/pipeline", () => {
     await page.goto("/ops/pipeline");
     await page.getByRole("button", { name: "갱신 요청 생성" }).click();
     const dialog = page.getByRole("dialog", { name: "갱신 요청 생성" });
-    await dialog.getByLabel("provider").first().fill("python-kma-api");
-    await dialog.getByLabel("dataset_key").fill("kma_short_forecast");
+    await dialog.getByLabel("대상 데이터셋").selectOption("101");
     await dialog.getByLabel("priority").fill("12.5");
     await dialog.getByRole("button", { name: "dry-run 실행" }).click();
 
@@ -3792,8 +3754,7 @@ test.describe("/ops/pipeline", () => {
     await page.goto("/ops/pipeline");
     await page.getByRole("button", { name: "갱신 요청 생성" }).click();
     const dialog = page.getByRole("dialog", { name: "갱신 요청 생성" });
-    await dialog.getByLabel("provider").first().fill("python-kma-api");
-    await dialog.getByLabel("dataset_key").fill("kma_short_forecast");
+    await dialog.getByLabel("대상 데이터셋").selectOption("101");
     await dialog.getByLabel("priority").fill("");
     await dialog.getByRole("button", { name: "dry-run 실행" }).click();
 
@@ -3855,8 +3816,7 @@ test.describe("/ops/pipeline", () => {
     await page.goto("/ops/pipeline");
     await page.getByRole("button", { name: "갱신 요청 생성" }).click();
     const dialog = page.getByRole("dialog", { name: "갱신 요청 생성" });
-    await dialog.getByLabel("provider").first().fill("python-kma-api");
-    await dialog.getByLabel("dataset_key").fill("kma_short_forecast");
+    await dialog.getByLabel("대상 데이터셋").selectOption("101");
     await dialog.getByRole("button", { name: "dry-run 실행" }).click();
 
     await expect(
@@ -3867,7 +3827,7 @@ test.describe("/ops/pipeline", () => {
     expect(counters.previewBodies).toHaveLength(0);
   });
 
-  test("요청 dialog — 제출 직전 catalog에서 사라진 exact pair를 차단", async ({
+  test("요청 dialog — 제출 직전 catalog에서 사라진 membership을 차단", async ({
     page,
   }) => {
     const counters = await installPipelineMocks(page, {
@@ -3884,131 +3844,13 @@ test.describe("/ops/pipeline", () => {
     await page.goto("/ops/pipeline");
     await page.getByRole("button", { name: "갱신 요청 생성" }).click();
     const dialog = page.getByRole("dialog", { name: "갱신 요청 생성" });
-    await dialog.getByLabel("provider").first().fill("python-kma-api");
-    await dialog.getByLabel("dataset_key").fill("kma_short_forecast");
+    await dialog.getByLabel("대상 데이터셋").selectOption("101");
     await dialog.getByRole("button", { name: "dry-run 실행" }).click();
 
     await expect(
-      dialog.getByText(
-        "현재 canonical catalog에 없는 provider/dataset 조합입니다.",
-      ),
+      dialog.getByText("현재 canonical catalog에 없는 데이터셋입니다."),
     ).toBeVisible();
     expect(counters.previewBodies).toHaveLength(0);
-  });
-
-  test("요청 dialog — 초기 MOIS precheck 성공 후 제출 직전 장애를 차단", async ({
-    page,
-  }) => {
-    const counters = await installPipelineMocks(page, {
-      moisPrecheckResponses: [
-        { status: 200, body: makeMoisPrecheckResponse() },
-        {
-          status: 503,
-          body: {
-            type: "https://kor-travel-map/errors/dagster-unavailable",
-            title: "Dagster unavailable",
-            status: 503,
-            detail: "Dagster unavailable",
-            code: "DAGSTER_UNAVAILABLE",
-            request_id: "e2e",
-            errors: [],
-          },
-        },
-      ],
-    });
-    await page.goto("/ops/pipeline");
-    await page.getByRole("button", { name: "갱신 요청 생성" }).click();
-    const dialog = page.getByRole("dialog", { name: "갱신 요청 생성" });
-    await dialog.getByLabel("provider").first().fill("python-mois-api");
-    await dialog.getByLabel("dataset_key").fill("mois_licenses");
-    await expect(dialog.getByTestId("mois-precheck-notice")).toContainText(
-      "정상",
-    );
-    await dialog.getByRole("button", { name: "dry-run 실행" }).click();
-
-    await expect(
-      dialog.getByText("MOIS 선행 source sync 최신 상태를 조회할 수 없어"),
-    ).toBeVisible();
-    expect(counters.moisPrecheckCalls).toBeGreaterThanOrEqual(2);
-    expect(counters.observedApiContracts).toContain(
-      "GET /v1/ops/pipeline/prechecks/mois-source-sync",
-    );
-    expect(counters.previewBodies).toHaveLength(0);
-  });
-
-  test("요청 dialog — dataset-only MOIS와 Dagster precheck 장애를 fail-closed", async ({
-    page,
-  }) => {
-    const counters = await installPipelineMocks(page, {
-      moisPrecheckResponse: {
-        status: 503,
-        body: {
-          type: "https://kor-travel-map/errors/dagster-unavailable",
-          title: "Dagster unavailable",
-          status: 503,
-          detail: "Dagster unavailable",
-          code: "DAGSTER_UNAVAILABLE",
-          request_id: "e2e",
-          errors: [],
-        },
-      },
-    });
-    await page.goto("/ops/pipeline");
-    await page.getByRole("button", { name: "갱신 요청 생성" }).click();
-    const dialog = page.getByRole("dialog", { name: "갱신 요청 생성" });
-    await dialog.getByLabel("scope 유형").selectOption("center_radius");
-    await dialog.getByLabel("데이터셋 키 필터").fill("mois_licenses");
-
-    const notice = dialog.getByTestId("mois-precheck-notice");
-    await expect(notice).toBeVisible();
-    await expect(notice).toContainText("Dagster run 조회 실패");
-    await dialog.getByRole("button", { name: "dry-run 실행" }).click();
-    await expect(
-      dialog.getByText("MOIS 선행 source sync 최신 상태를 조회할 수 없어"),
-    ).toBeVisible();
-    expect(counters.previewBodies).toHaveLength(0);
-  });
-
-  test("요청 dialog — MOIS 최근 run이 TTL을 넘으면 차단", async ({ page }) => {
-    const stalePrecheck: PipelineJobPrecheckResponse = {
-      data: {
-        job_name: "mois_localdata_source_sync",
-        ready: false,
-        checked_at: "2026-07-17T09:00:00.000Z",
-        max_age_hours: 24,
-        age_hours: 48,
-        latest_run: {
-          run_id: "mois-source-run-stale",
-          job_name: "mois_localdata_source_sync",
-          status: "SUCCESS",
-          start_time: Date.parse("2026-07-15T08:55:00.000Z") / 1000,
-          end_time: Date.parse("2026-07-15T09:00:00.000Z") / 1000,
-          update_time: Date.parse("2026-07-15T09:00:00.000Z") / 1000,
-          tags: {},
-        },
-        disabled_reason:
-          "MOIS source sync 최신 성공이 TTL(24시간)을 넘었습니다.",
-      },
-      meta: META,
-    };
-    await installPipelineMocks(page, {
-      moisPrecheckResponse: { status: 200, body: stalePrecheck },
-    });
-    await page.goto("/ops/pipeline");
-    await page.getByRole("button", { name: "갱신 요청 생성" }).click();
-    const dialog = page.getByRole("dialog", { name: "갱신 요청 생성" });
-    await dialog.getByLabel("provider").first().fill("python-mois-api");
-    await dialog.getByLabel("dataset_key").fill("mois_licenses");
-
-    const notice = dialog.getByTestId("mois-precheck-notice");
-    await expect(notice).toContainText("TTL(24시간)을 넘었습니다");
-    await dialog.getByRole("button", { name: "dry-run 실행" }).click();
-    await expect(
-      dialog.getByText(
-        "MOIS source sync 최신 성공이 TTL(24시간)을 넘었습니다.",
-        { exact: true },
-      ),
-    ).toBeVisible();
   });
 
   test("요청 생성 409는 Retry-After 안내로 표시", async ({ page }) => {
@@ -4019,8 +3861,7 @@ test.describe("/ops/pipeline", () => {
 
     await page.getByRole("button", { name: "갱신 요청 생성" }).click();
     const dialog = page.getByRole("dialog", { name: "갱신 요청 생성" });
-    await dialog.getByLabel("provider").first().fill("python-kma-api");
-    await dialog.getByLabel("dataset_key").fill("kma_short_forecast");
+    await dialog.getByLabel("대상 데이터셋").selectOption("101");
     await dialog.getByLabel("실행 모드").selectOption("now");
     await dialog.getByRole("checkbox").first().uncheck();
     await dialog.getByRole("button", { name: "요청 생성" }).click();
@@ -4044,16 +3885,16 @@ test.describe("/ops/pipeline", () => {
 
     await page.getByRole("button", { name: "갱신 요청 생성" }).click();
     const dialog = page.getByRole("dialog", { name: "갱신 요청 생성" });
-    await dialog.getByLabel("provider").first().fill("python-kma-api");
-    await dialog.getByLabel("dataset_key").fill("kma_short_forecast");
+    await dialog.getByLabel("대상 데이터셋").selectOption("101");
     await dialog.getByRole("checkbox").uncheck();
     await dialog.getByRole("button", { name: "요청 생성" }).click();
 
     await expect(dialog.getByText("기존 활성 요청 재사용")).toBeVisible();
     expect(counters.requestBodies.at(0)).toMatchObject({
       scope: {
-        dataset_key: "kma_short_forecast",
-        provider: "python-kma-api",
+        provider_dataset_id:
+          PROVIDER_DATASET_IDS["python-kma-api/kma_short_forecast"],
+        sync_scope: "target_grids",
         type: "provider_dataset",
       },
     });

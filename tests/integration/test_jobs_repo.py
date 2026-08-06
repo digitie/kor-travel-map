@@ -18,9 +18,9 @@ from sqlalchemy import text
 
 from kortravelmap.core.feature_operation import (
     FeatureOperationInvariantConflict,
-    ProviderDatasetOperationKey,
 )
 from kortravelmap.infra.jobs_repo import (
+    ImportJobDatasetTarget,
     attach_import_jobs_to_batch,
     cancel_import_job,
     claim_next_import_job,
@@ -41,12 +41,11 @@ pytestmark = pytest.mark.integration
 
 
 async def _state(session: AsyncSession, job_id: str) -> str:
-    return (
-        await session.execute(
-            text("SELECT status FROM ops.import_jobs WHERE job_id = :id"),
-            {"id": job_id},
-        )
-    ).scalar_one()
+    result = await session.execute(
+        text("SELECT status FROM ops.import_jobs WHERE job_id = :id"),
+        {"id": job_id},
+    )
+    return str(result.scalar_one())
 
 
 async def _event_codes(session: AsyncSession, job_id: str) -> list[str | None]:
@@ -64,6 +63,25 @@ async def _event_codes(session: AsyncSession, job_id: str) -> list[str | None]:
         )
     ).all()
     return [row.code for row in rows]
+
+
+async def _mois_bulk_membership(session: AsyncSession) -> ImportJobDatasetTarget:
+    row = (
+        await session.execute(
+            text(
+                """
+                SELECT provider_dataset_id
+                FROM provider_sync.provider_datasets
+                WHERE provider = 'python-mois-api'
+                  AND dataset_key = 'mois_license_features_bulk'
+                """
+            )
+        )
+    ).one()
+    return ImportJobDatasetTarget(
+        provider_dataset_id=int(row.provider_dataset_id),
+        sync_scope="dataset_wide",
+    )
 
 
 async def test_enqueue_creates_queued_job(migrated_session: AsyncSession) -> None:
@@ -208,6 +226,7 @@ async def test_finish_failed_records_error(migrated_session: AsyncSession) -> No
 async def test_record_import_job_event_defaults_context(
     migrated_session: AsyncSession,
 ) -> None:
+    target = await _mois_bulk_membership(migrated_session)
     job = await start_provider_dataset_import_job(
         migrated_session,
         kind="provider_event_context_test",
@@ -215,9 +234,7 @@ async def test_record_import_job_event_defaults_context(
             "provider": "python-mois-api",
             "dataset_key": "mois_license_features_bulk",
         },
-        provider_dataset=ProviderDatasetOperationKey(
-            "python-mois-api", "mois_license_features_bulk"
-        ),
+        dataset_membership=target,
         trigger_kind="manual",
     )
     await heartbeat_import_job(
@@ -231,17 +248,16 @@ async def test_record_import_job_event_defaults_context(
         code="provider.retry",
         message="provider retry scheduled",
         payload={"attempt": 2},
+        import_job_dataset_id=job.dataset_memberships[0].import_job_dataset_id,
     )
 
     assert event is not None
-    assert event.provider == "python-mois-api"
-    assert event.dataset_key == "mois_license_features_bulk"
-    assert event.sync_scope is None
+    assert event.import_job_dataset_id == job.dataset_memberships[0].import_job_dataset_id
     assert event.stage == "fetching"
     assert event.payload == {"attempt": 2}
 
 
-async def test_record_event_rejects_identity_on_untyped_job(
+async def test_record_event_rejects_member_on_root_job(
     migrated_session: AsyncSession,
 ) -> None:
     job = await start_unpaired_import_job(
@@ -254,24 +270,17 @@ async def test_record_event_rejects_identity_on_untyped_job(
         await record_import_job_event(
             migrated_session,
             job.job_id,
-            provider="event-provider",
-            dataset_key="event-dataset",
-            message="event-only identity must not be created",
+            import_job_dataset_id="00000000-0000-0000-0000-000000000001",
+            message="root event must not carry dataset membership",
         )
 
-    assert raised.value.details == {
-        "expected": None,
-        "actual": {
-            "provider": "event-provider",
-            "dataset_key": "event-dataset",
-        },
-    }
+    assert raised.value.details == {"reason": "missing_or_mismatched_job_membership"}
     count = (
         await migrated_session.execute(
             text(
                 "SELECT count(*) FROM ops.import_job_events "
                 "WHERE job_id = CAST(:job_id AS uuid) "
-                "AND provider IS NOT NULL"
+                "AND import_job_dataset_id IS NOT NULL"
             ),
             {"job_id": job.job_id},
         )

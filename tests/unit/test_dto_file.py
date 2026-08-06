@@ -61,7 +61,6 @@ def _link() -> SourceLink:
         source_role=SourceRole.PRIMARY,
         match_method="natural_key",
         confidence=100,
-        is_primary_source=True,
     )
 
 

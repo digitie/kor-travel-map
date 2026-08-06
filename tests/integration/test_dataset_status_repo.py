@@ -35,29 +35,54 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.integration
 
 
+async def _provider_dataset_id(
+    session: AsyncSession,
+    *,
+    provider: str,
+    dataset_key: str,
+) -> int:
+    value = await session.scalar(
+        text(
+            "SELECT provider_dataset_id "
+            "FROM provider_sync.provider_datasets "
+            "WHERE provider = :provider AND dataset_key = :dataset_key"
+        ),
+        {"provider": provider, "dataset_key": dataset_key},
+    )
+    assert value is not None
+    return int(value)
+
+
 async def test_count_open_issues_groups_by_dataset_and_severity(
     migrated_session: AsyncSession,
 ) -> None:
-    await create_data_integrity_violation(
+    mois_dataset_id = await _provider_dataset_id(
         migrated_session,
         provider="python-mois-api",
         dataset_key="mois_license_features_bulk",
+    )
+    krex_dataset_id = await _provider_dataset_id(
+        migrated_session,
+        provider="python-krex-api",
+        dataset_key="krex_rest_areas",
+    )
+    await create_data_integrity_violation(
+        migrated_session,
+        provider_dataset_id=mois_dataset_id,
         violation_type="missing_coordinate",
         severity="error",
         message="좌표 없음",
     )
     await create_data_integrity_violation(
         migrated_session,
-        provider="python-mois-api",
-        dataset_key="mois_license_features_bulk",
+        provider_dataset_id=mois_dataset_id,
         violation_type="missing_address",
         severity="warning",
         message="주소 없음",
     )
     acknowledged = await create_data_integrity_violation(
         migrated_session,
-        provider="python-mois-api",
-        dataset_key="mois_license_features_bulk",
+        provider_dataset_id=mois_dataset_id,
         violation_type="missing_address",
         severity="warning",
         message="주소 없음 (확인됨)",
@@ -68,8 +93,7 @@ async def test_count_open_issues_groups_by_dataset_and_severity(
     # 해결된 이슈는 집계에서 빠진다.
     resolved = await create_data_integrity_violation(
         migrated_session,
-        provider="python-mois-api",
-        dataset_key="mois_license_features_bulk",
+        provider_dataset_id=mois_dataset_id,
         violation_type="missing_address",
         severity="warning",
         message="주소 없음 (해결됨)",
@@ -80,21 +104,12 @@ async def test_count_open_issues_groups_by_dataset_and_severity(
     # 다른 dataset은 별도 행으로 집계된다.
     await create_data_integrity_violation(
         migrated_session,
-        provider="python-krex-api",
-        dataset_key="krex_rest_areas",
+        provider_dataset_id=krex_dataset_id,
         violation_type="missing_coordinate",
         severity="error",
         message="좌표 없음",
     )
-    # provider 단위 이슈는 dataset 이슈와 분리된 행으로 유지한다.
-    await create_data_integrity_violation(
-        migrated_session,
-        provider="python-mois-api",
-        violation_type="provider_contract_drift",
-        severity="warning",
-        message="provider 계약 drift",
-    )
-    # provider 없는 전역 이슈는 dataset 집계에서 제외한다.
+    # provider_dataset_id 없는 전역 이슈는 dataset 집계에 임의 귀속하지 않는다.
     await create_data_integrity_violation(
         migrated_session,
         violation_type="orphan_source_link",
@@ -104,38 +119,32 @@ async def test_count_open_issues_groups_by_dataset_and_severity(
     await migrated_session.flush()
 
     counts = await count_open_integrity_issues_by_dataset(migrated_session)
-    by_key = {(row.provider, row.dataset_key): row for row in counts}
-    assert set(by_key) == {
-        ("python-mois-api", "mois_license_features_bulk"),
-        ("python-mois-api", None),
-        ("python-krex-api", "krex_rest_areas"),
-    }
-    mois = by_key[("python-mois-api", "mois_license_features_bulk")]
+    by_dataset_id = {row.provider_dataset_id: row for row in counts}
+    assert set(by_dataset_id) == {mois_dataset_id, krex_dataset_id}
+    mois = by_dataset_id[mois_dataset_id]
+    assert (mois.provider, mois.dataset_key) == (
+        "python-mois-api",
+        "mois_license_features_bulk",
+    )
     assert mois.open_total == 3  # open 2 + acknowledged 1
     assert mois.by_severity == {"error": 1, "warning": 2}
-    krex = by_key[("python-krex-api", "krex_rest_areas")]
+    krex = by_dataset_id[krex_dataset_id]
     assert krex.open_total == 1
     assert krex.by_severity == {"error": 1}
 
-    # provider/dataset 필터 — 상세 화면 단건 조회 경로.
+    # canonical dataset ID 필터 — 상세 화면 단건 조회 경로.
     filtered = await count_open_integrity_issues_by_dataset(
         migrated_session,
-        provider="python-mois-api",
-        dataset_key="mois_license_features_bulk",
+        provider_dataset_id=mois_dataset_id,
     )
-    filtered_by_key = {row.dataset_key: row for row in filtered}
-    assert set(filtered_by_key) == {"mois_license_features_bulk", None}
-    assert filtered_by_key["mois_license_features_bulk"].open_total == 3
-    assert filtered_by_key[None].open_total == 1
+    assert [row.provider_dataset_id for row in filtered] == [mois_dataset_id]
+    assert filtered[0].open_total == 3
 
     missing = await count_open_integrity_issues_by_dataset(
         migrated_session,
-        provider="python-mois-api",
-        dataset_key="no_such_dataset",
+        provider_dataset_id=999_999,
     )
-    assert len(missing) == 1
-    assert missing[0].dataset_key is None
-    assert missing[0].open_total == 1
+    assert missing == ()
 
 
 async def test_latest_dataset_execution_collapses_linked_request_job_root(

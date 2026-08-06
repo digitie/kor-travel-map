@@ -358,6 +358,9 @@ async def test_execute_next_request_runs_provider_and_syncs_target_links(
         loaded = await _bundle("EXEC-LOADED")
         await feature_repo.load_bundle(session, loaded)
         return ProviderDatasetRefreshResult(
+            provider_dataset_id=scope.provider_dataset_id,
+            sync_scope=scope.sync_scope,
+            operation_key=scope.operation_key,
             provider=scope.provider,
             dataset_key=scope.dataset_key,
             loaded_feature_ids=(loaded.feature.feature_id,),
@@ -516,6 +519,9 @@ async def test_runner_level_skip_does_not_mark_cache_target_refreshed(
         scope: ProviderDatasetRefreshScope,
     ) -> ProviderDatasetRefreshResult:
         return ProviderDatasetRefreshResult(
+            provider_dataset_id=scope.provider_dataset_id,
+            sync_scope=scope.sync_scope,
+            operation_key=scope.operation_key,
             provider=scope.provider,
             dataset_key=scope.dataset_key,
             status="skipped",
@@ -1476,6 +1482,9 @@ async def test_execute_next_lock_busy_keeps_request_queued_and_rerunnable(
         nonlocal runner_calls
         runner_calls += 1
         return ProviderDatasetRefreshResult(
+            provider_dataset_id=scope.provider_dataset_id,
+            sync_scope=scope.sync_scope,
+            operation_key=scope.operation_key,
             provider=scope.provider,
             dataset_key=scope.dataset_key,
         )
@@ -1570,6 +1579,9 @@ async def test_preclaimed_running_request_requeues_when_scope_lock_is_busy(
         scope: ProviderDatasetRefreshScope,
     ) -> ProviderDatasetRefreshResult:
         return ProviderDatasetRefreshResult(
+            provider_dataset_id=scope.provider_dataset_id,
+            sync_scope=scope.sync_scope,
+            operation_key=scope.operation_key,
             provider=scope.provider,
             dataset_key=scope.dataset_key,
         )
@@ -1654,6 +1666,9 @@ async def test_request_lease_loser_touches_only_queued_run_key_and_can_retry(
         nonlocal runner_calls
         runner_calls += 1
         return ProviderDatasetRefreshResult(
+            provider_dataset_id=scope.provider_dataset_id,
+            sync_scope=scope.sync_scope,
+            operation_key=scope.operation_key,
             provider=scope.provider,
             dataset_key=scope.dataset_key,
         )
@@ -1872,6 +1887,9 @@ async def test_false_exact_unlock_invalidates_connection(
         )
         assert unlocked
         return ProviderDatasetRefreshResult(
+            provider_dataset_id=scope.provider_dataset_id,
+            sync_scope=scope.sync_scope,
+            operation_key=scope.operation_key,
             provider=scope.provider,
             dataset_key=scope.dataset_key,
         )
@@ -1986,6 +2004,9 @@ async def test_cancellation_marker_preserves_committed_scope_and_skips_next_runn
         scopes = tuple(
             ProviderDatasetRefreshScope(
                 request_id=current.request_id,
+                provider_dataset_id=1 if dataset_key == "phase-a" else 2,
+                sync_scope="dataset_wide",
+                operation_key=f"feature_place_python_phase_{dataset_key}_job",
                 provider="python-phase-api",
                 dataset_key=dataset_key,
                 scope_type=current.scope_type,
@@ -2078,6 +2099,9 @@ async def test_cancellation_marker_preserves_committed_scope_and_skips_next_runn
         cancellation_task = asyncio.create_task(cancel_after_first_scope())
         await asyncio.sleep(0)
         return ProviderDatasetRefreshResult(
+            provider_dataset_id=scope.provider_dataset_id,
+            sync_scope=scope.sync_scope,
+            operation_key=scope.operation_key,
             provider=scope.provider,
             dataset_key=scope.dataset_key,
             loaded_feature_ids=(loaded.feature.feature_id,),
@@ -2151,6 +2175,9 @@ async def test_failure_preserves_prior_scope_checkpoint_and_data(
         scopes = tuple(
             ProviderDatasetRefreshScope(
                 request_id=current.request_id,
+                provider_dataset_id=1 if dataset_key == "phase-a" else 2,
+                sync_scope="dataset_wide",
+                operation_key=f"feature_place_python_checkpoint_{dataset_key}_job",
                 provider="python-checkpoint-api",
                 dataset_key=dataset_key,
                 scope_type=current.scope_type,
@@ -2189,6 +2216,9 @@ async def test_failure_preserves_prior_scope_checkpoint_and_data(
         if scope.dataset_key == "phase-b":
             raise RuntimeError("second scope failed")
         return ProviderDatasetRefreshResult(
+            provider_dataset_id=scope.provider_dataset_id,
+            sync_scope=scope.sync_scope,
+            operation_key=scope.operation_key,
             provider=scope.provider,
             dataset_key=scope.dataset_key,
             loaded_feature_ids=(loaded.feature.feature_id,),
@@ -2258,6 +2288,9 @@ async def test_scope_checkpoint_commits_before_real_cancellation_marker_wins(
         del sigungu_resolver
         scope = ProviderDatasetRefreshScope(
             request_id=current.request_id,
+            provider_dataset_id=1,
+            sync_scope="dataset_wide",
+            operation_key="feature_place_python_marker_race_phase_a_job",
             provider="python-marker-race-api",
             dataset_key="phase-a",
             scope_type=current.scope_type,
@@ -2351,6 +2384,9 @@ async def test_scope_checkpoint_commits_before_real_cancellation_marker_wins(
         await asyncio.sleep(0.05)
         assert not marker_task.done()
         return ProviderDatasetRefreshResult(
+            provider_dataset_id=scope.provider_dataset_id,
+            sync_scope=scope.sync_scope,
+            operation_key=scope.operation_key,
             provider=scope.provider,
             dataset_key=scope.dataset_key,
             loaded_feature_ids=(loaded.feature.feature_id,),

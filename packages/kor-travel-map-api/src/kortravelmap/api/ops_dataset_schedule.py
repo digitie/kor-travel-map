@@ -1,8 +1,7 @@
-"""dataset grid용 Dagster schedule projection (#678).
+"""dataset grid용 Dagster schedule projection.
 
-전체 schedule을 GraphQL 한 번으로 읽고 공용 registry version/digest로 검증한
-canonical identity tag의 exact pair만 사용한다. 등록 feature job은 ``pipelineName``과
-identity job까지 같아야 한다. scalar provider/dataset fallback과 schedule 이름 추론은 금지한다.
+Schedule은 DB catalog가 소유한 ``operation_key`` tag로만 dataset에 연결한다.
+provider/dataset pair를 Dagster tag·Python registry에 중복 보관하지 않는다.
 """
 
 from __future__ import annotations
@@ -12,13 +11,6 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 
 import httpx
-from kortravelmap.providers.feature_operation_registry import (
-    FEATURE_OPERATION_IDENTITY_TAG,
-    FEATURE_OPERATION_REGISTRY_BY_JOB,
-    FEATURE_OPERATION_REGISTRY_VERSION_TAG,
-    FeatureOperationRegistryError,
-    parse_feature_operation_identity_tags,
-)
 
 from kortravelmap.api import dagster_graphql
 from kortravelmap.api.settings import ApiSettings
@@ -30,6 +22,7 @@ __all__ = [
 ]
 
 ScheduleSourceStatus = Literal["ok", "unavailable", "error"]
+OPERATION_KEY_TAG = "kor_travel_map.operation_key"
 
 _QUERY = """
 query KorTravelMapDatasetSchedules {
@@ -56,7 +49,7 @@ query KorTravelMapDatasetSchedules {
 class DatasetScheduleState:
     """동일 dataset에 매핑된 schedule들의 실제 상태."""
 
-    basis: Literal["dagster_definition_tags", "not_scheduled", "unknown"]
+    basis: Literal["dagster_operation_key_tag", "not_scheduled", "unknown"]
     status: str | None
     schedule_names: tuple[str, ...]
     active_schedule_names: tuple[str, ...]
@@ -69,12 +62,40 @@ class DatasetScheduleIndex:
 
     source_status: ScheduleSourceStatus
     errors: tuple[str, ...]
-    by_dataset: dict[tuple[str, str], DatasetScheduleState]
+    by_operation_key: dict[str, DatasetScheduleState]
 
-    def for_dataset(self, provider: str, dataset_key: str) -> DatasetScheduleState:
-        mapped = self.by_dataset.get((provider, dataset_key))
-        if mapped is not None:
-            return mapped
+    def for_operation_keys(
+        self,
+        operation_keys: tuple[str, ...],
+    ) -> DatasetScheduleState:
+        mapped = tuple(
+            self.by_operation_key[key]
+            for key in operation_keys
+            if key in self.by_operation_key
+        )
+        if mapped:
+            names = tuple(sorted({name for item in mapped for name in item.schedule_names}))
+            active_names = tuple(
+                sorted({name for item in mapped for name in item.active_schedule_names})
+            )
+            next_ticks = [item.next_scheduled_at for item in mapped if item.next_scheduled_at]
+            statuses = {item.status for item in mapped if item.status is not None}
+            status = (
+                "RUNNING"
+                if active_names
+                else next(iter(statuses))
+                if len(statuses) == 1
+                else "MIXED"
+                if statuses
+                else None
+            )
+            return DatasetScheduleState(
+                basis="dagster_operation_key_tag",
+                status=status,
+                schedule_names=names,
+                active_schedule_names=active_names,
+                next_scheduled_at=min(next_ticks) if next_ticks else None,
+            )
         if self.source_status == "ok":
             return DatasetScheduleState(
                 basis="not_scheduled",
@@ -119,7 +140,7 @@ def _parse(payload: dict[str, Any]) -> DatasetScheduleIndex:
                 dagster_graphql.graphql_error_message(error)
                 for error in graphql_errors
             ),
-            by_dataset={},
+            by_operation_key={},
         )
     connection = _dict(_dict(payload.get("data")).get("repositoriesOrError"))
     if connection.get("__typename") != "RepositoryConnection":
@@ -127,11 +148,10 @@ def _parse(payload: dict[str, Any]) -> DatasetScheduleIndex:
         return DatasetScheduleIndex(
             source_status="error",
             errors=(message,),
-            by_dataset={},
+            by_operation_key={},
         )
 
-    grouped: dict[tuple[str, str], list[tuple[str, str | None, datetime | None]]] = {}
-    identity_errors: list[str] = []
+    grouped: dict[str, list[tuple[str, str | None, datetime | None]]] = {}
     for node in _list(connection.get("nodes")):
         for raw_schedule in _list(_dict(node).get("schedules")):
             schedule = _dict(raw_schedule)
@@ -144,30 +164,11 @@ def _parse(payload: dict[str, Any]) -> DatasetScheduleIndex:
             name = _text(schedule.get("name"))
             if name is None:
                 continue
+            operation_key = tags.get(OPERATION_KEY_TAG)
+            if operation_key is None:
+                continue
             pipeline_name = _text(schedule.get("pipelineName"))
-            has_identity_tag = FEATURE_OPERATION_IDENTITY_TAG in tags
-            has_version_tag = FEATURE_OPERATION_REGISTRY_VERSION_TAG in tags
-            if pipeline_name is None:
-                identity_errors.append(f"{name}: pipelineName 누락")
-                continue
-            if not has_identity_tag and not has_version_tag:
-                if pipeline_name in FEATURE_OPERATION_REGISTRY_BY_JOB:
-                    identity_errors.append(
-                        f"{name}: 등록 feature job의 canonical identity/version tag 누락"
-                    )
-                continue
-            try:
-                identity = parse_feature_operation_identity_tags(tags)
-            except FeatureOperationRegistryError as exc:
-                identity_errors.append(f"{name}: {exc.reason}")
-                continue
-            if identity is None:
-                identity_errors.append(f"{name}: canonical identity 누락")
-                continue
-            if identity.job_name != pipeline_name:
-                identity_errors.append(
-                    f"{name}: identity job/pipelineName 불일치"
-                )
+            if pipeline_name != operation_key:
                 continue
             status = _text(_dict(schedule.get("scheduleState")).get("status"))
             next_tick: datetime | None = None
@@ -177,12 +178,9 @@ def _parse(payload: dict[str, Any]) -> DatasetScheduleIndex:
                 )
                 if future_results:
                     next_tick = _timestamp(_dict(future_results[0]).get("timestamp"))
-            for pair in identity.pairs:
-                grouped.setdefault((pair.provider, pair.dataset_key), []).append(
-                    (name, status, next_tick)
-                )
+            grouped.setdefault(operation_key, []).append((name, status, next_tick))
 
-    by_dataset: dict[tuple[str, str], DatasetScheduleState] = {}
+    by_operation_key: dict[str, DatasetScheduleState] = {}
     for group_key, schedules in grouped.items():
         names = tuple(sorted(name for name, _, _ in schedules))
         active_names = tuple(
@@ -202,17 +200,17 @@ def _parse(payload: dict[str, Any]) -> DatasetScheduleIndex:
             aggregate_status = "MIXED"
         else:
             aggregate_status = None
-        by_dataset[group_key] = DatasetScheduleState(
-            basis="dagster_definition_tags",
+        by_operation_key[group_key] = DatasetScheduleState(
+            basis="dagster_operation_key_tag",
             status=aggregate_status,
             schedule_names=names,
             active_schedule_names=active_names,
             next_scheduled_at=min(next_ticks) if next_ticks else None,
         )
     return DatasetScheduleIndex(
-        source_status="error" if identity_errors else "ok",
-        errors=tuple(identity_errors),
-        by_dataset=by_dataset,
+        source_status="ok",
+        errors=(),
+        by_operation_key=by_operation_key,
     )
 
 
@@ -226,7 +224,7 @@ async def load_dataset_schedule_index(
         urls = dagster_graphql.dagster_urls(settings)
     except dagster_graphql.DagsterUrlConfigurationError as exc:
         return DatasetScheduleIndex(
-            source_status="error", errors=(str(exc),), by_dataset={}
+            source_status="error", errors=(str(exc),), by_operation_key={}
         )
     try:
         payload = await dagster_graphql.post_graphql(
@@ -237,6 +235,6 @@ async def load_dataset_schedule_index(
         )
     except (httpx.HTTPError, ValueError) as exc:
         return DatasetScheduleIndex(
-            source_status="unavailable", errors=(str(exc),), by_dataset={}
+            source_status="unavailable", errors=(str(exc),), by_operation_key={}
         )
     return _parse(payload)

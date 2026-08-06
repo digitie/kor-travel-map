@@ -32,6 +32,7 @@ from datetime import datetime, timedelta, timezone
 from functools import partial
 from typing import TYPE_CHECKING, Any, Final, NoReturn, cast
 
+from kortravelmap.core.feature_operation import ProviderDatasetOperationMembership
 from kortravelmap.core.sync_scope import (
     TARGET_GRIDS_SYNC_SCOPE,
     parse_canonical_sync_scope,
@@ -74,7 +75,11 @@ from .assets import (
     _reverse_geocoder,
 )
 from .etl import DagsterFeatureLoadResult, _add_output_metadata
-from .feature_operation_tracking import run_tracked_feature_asset
+from .feature_operation_tracking import (
+    FeatureOperationGuardUnavailable,
+    require_feature_operation_guard,
+    run_tracked_feature_asset,
+)
 from .upstream_retry import (
     PROVIDER_BOUNDARY_BASE_DELAY_SECONDS,
     RetryBudget,
@@ -383,23 +388,93 @@ class KmaWeatherGridLimitExceeded(ProviderDatasetRefreshFailure):
     """KMA target 격자가 실행 상한을 초과해 전체 실행을 거부했다."""
 
 
+async def _exact_kma_sync_membership(
+    context: AssetExecutionContext,
+    client: "AsyncKorTravelMapClient",
+    *,
+    expected_sync_scope: str | None = None,
+) -> ProviderDatasetOperationMembership:
+    """scheduled/queue 실행 모두에서 DB exact membership만 sync-state에 쓴다.
+
+    queue worker는 request를 claim할 때 고정한 typed membership resource를 넘긴다.
+    scheduled run은 feature-operation guard의 operation key로 core resolver를 다시
+    조회해, guard snapshot과 동일한 enabled membership 하나만 허용한다. provider나
+    dataset label에서 membership을 역산하는 fallback은 두지 않는다.
+    """
+    resource_membership = await _resource_value(
+        context,
+        "feature_update_membership",
+        default=None,
+    )
+    if resource_membership is not None:
+        if not isinstance(resource_membership, ProviderDatasetOperationMembership):
+            raise FeatureOperationGuardUnavailable(
+                boundary="kma_sync_state",
+                reason="feature_update_membership_wrong_type",
+            )
+        membership = resource_membership
+    else:
+        guard = require_feature_operation_guard(context, boundary="kma_sync_state")
+        if guard.operation_key is None:
+            raise FeatureOperationGuardUnavailable(
+                boundary="kma_sync_state",
+                reason="operation_key_missing",
+            )
+        memberships = await client.resolve_feature_operation_memberships(
+            operation_key=guard.operation_key,
+        )
+        if memberships != guard.memberships:
+            raise FeatureOperationGuardUnavailable(
+                boundary="kma_sync_state",
+                reason="membership_snapshot_changed",
+            )
+        if len(memberships) != 1:
+            raise FeatureOperationGuardUnavailable(
+                boundary="kma_sync_state",
+                reason="operation_requires_exactly_one_membership",
+            )
+        membership = memberships[0]
+    if expected_sync_scope is not None and membership.sync_scope != expected_sync_scope:
+        raise FeatureOperationGuardUnavailable(
+            boundary="kma_sync_state",
+            reason="membership_sync_scope_mismatch",
+        )
+    return membership
+
+
+def _assert_failure_membership(
+    failure: ProviderDatasetRefreshFailure,
+    membership: ProviderDatasetOperationMembership,
+) -> None:
+    if (
+        failure.provider_dataset_id,
+        failure.sync_scope,
+        failure.operation_key,
+    ) != (
+        membership.provider_dataset_id,
+        membership.sync_scope,
+        membership.operation_key,
+    ):
+        raise RuntimeError("KMA refresh failure가 resolved membership과 일치하지 않음")
+
+
 async def _raise_kma_refresh_failure(
     context: AssetExecutionContext,
     client: "AsyncKorTravelMapClient",
+    membership: ProviderDatasetOperationMembership,
     failure: ProviderDatasetRefreshFailure,
     *,
     cause: Exception | None = None,
 ) -> NoReturn:
+    _assert_failure_membership(failure, membership)
     managed_by_executor = await _resource_value(
         context,
         "kma_weather_sync_failure_managed_by_executor",
         default=False,
     )
     if managed_by_executor is not True and failure.record_sync_failure:
-        await client.record_sync_failure(
-            provider=failure.provider,
-            dataset_key=failure.dataset_key,
-            sync_scope=failure.sync_scope,
+        await client.record_sync_failure_for_operation_membership(
+            membership=membership,
         )
     if cause is not None:
         raise failure from cause
@@ -446,6 +521,11 @@ async def _run_kma_weather_asset(
         raise ValueError(
             "KMA grid datasets require target_grids or external_system:<name> sync_scope"
         )
+    membership = await _exact_kma_sync_membership(
+        context,
+        kor_travel_map_client,
+        expected_sync_scope=sync_scope.value,
+    )
 
     target_coords = await kor_travel_map_client.list_poi_cache_target_coords(
         external_system=sync_scope.external_system,
@@ -475,10 +555,11 @@ async def _run_kma_weather_asset(
         await _raise_kma_refresh_failure(
             context,
             kor_travel_map_client,
+            membership,
             KmaWeatherGridLimitExceeded(
-                provider=KMA_PROVIDER_NAME,
-                dataset_key=dataset_key,
+                provider_dataset_id=membership.provider_dataset_id,
                 sync_scope=sync_scope.value,
+                operation_key=membership.operation_key,
                 message=(
                     "KMA target grid count exceeds max_grids; partial execution is forbidden: "
                     f"total={len(targets.grids) + targets.grids_dropped}, "
@@ -495,10 +576,11 @@ async def _run_kma_weather_asset(
         await _raise_kma_refresh_failure(
             context,
             kor_travel_map_client,
+            membership,
             KmaWeatherTargetScopeEmptyError(
-                provider=KMA_PROVIDER_NAME,
-                dataset_key=dataset_key,
+                provider_dataset_id=membership.provider_dataset_id,
                 sync_scope=sync_scope.value,
+                operation_key=membership.operation_key,
                 message=(
                     "KMA target scope has no active POI cache targets or effective "
                     f"grids after grid resolution and cap: {scope_detail}"
@@ -510,10 +592,8 @@ async def _run_kma_weather_asset(
     base_key = f"{base_date}{base_time}"
     membership_fingerprint = targets.membership_fingerprint
 
-    state = await kor_travel_map_client.get_sync_state(
-        provider=KMA_PROVIDER_NAME,
-        dataset_key=dataset_key,
-        sync_scope=sync_scope.value,
+    state = await kor_travel_map_client.get_sync_state_for_operation_membership(
+        membership=membership,
     )
     if (
         state is not None
@@ -603,10 +683,8 @@ async def _run_kma_weather_asset(
             values_loaded += await kor_travel_map_client.load_weather_values(grid_values)
             matched_features.add(anchor)
         if grids_fetched:
-            await kor_travel_map_client.record_sync_success(
-                provider=KMA_PROVIDER_NAME,
-                dataset_key=dataset_key,
-                sync_scope=sync_scope.value,
+            await kor_travel_map_client.record_sync_success_for_operation_membership(
+                membership=membership,
                 cursor={
                     "base_datetime": base_key,
                     "membership_fingerprint": membership_fingerprint,
@@ -617,15 +695,16 @@ async def _run_kma_weather_asset(
         raise
     except Exception as exc:
         failure = ProviderDatasetRefreshFailure(
-            provider=KMA_PROVIDER_NAME,
-            dataset_key=dataset_key,
+            provider_dataset_id=membership.provider_dataset_id,
             sync_scope=sync_scope.value,
+            operation_key=membership.operation_key,
             message=f"KMA provider refresh failed: {exc}",
         )
         primary_error = failure
         await _raise_kma_refresh_failure(
             context,
             kor_travel_map_client,
+            membership,
             failure,
             cause=exc,
         )
@@ -702,9 +781,7 @@ async def run_feature_weather_kma_ultra_short_nowcast(
 async def feature_weather_kma_ultra_short_nowcast(
     context: AssetExecutionContext,
 ) -> KmaWeatherLoadResult:
-    return await run_tracked_feature_asset(
-        context, run_feature_weather_kma_ultra_short_nowcast
-    )
+    return await run_tracked_feature_asset(context, run_feature_weather_kma_ultra_short_nowcast)
 
 
 async def run_feature_weather_kma_ultra_short_forecast(
@@ -735,9 +812,7 @@ async def run_feature_weather_kma_ultra_short_forecast(
 async def feature_weather_kma_ultra_short_forecast(
     context: AssetExecutionContext,
 ) -> KmaWeatherLoadResult:
-    return await run_tracked_feature_asset(
-        context, run_feature_weather_kma_ultra_short_forecast
-    )
+    return await run_tracked_feature_asset(context, run_feature_weather_kma_ultra_short_forecast)
 
 
 async def run_feature_weather_kma_short_forecast(
@@ -945,10 +1020,11 @@ async def run_feature_weather_kma_mid_forecast(
     kor_travel_map_client = cast(
         "AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client")
     )
+    membership = await _exact_kma_sync_membership(context, kor_travel_map_client)
     base_key = _latest_mid_base()
 
-    state = await kor_travel_map_client.get_sync_state(
-        provider=KMA_PROVIDER_NAME, dataset_key=KMA_MID_FORECAST_DATASET_KEY
+    state = await kor_travel_map_client.get_sync_state_for_operation_membership(
+        membership=membership,
     )
     if state is not None and state.cursor.get("base_datetime") == base_key:
         context.log.info(
@@ -1028,16 +1104,24 @@ async def run_feature_weather_kma_mid_forecast(
             if region_values and anchor is not None:
                 values_loaded += await kor_travel_map_client.load_weather_values(region_values)
                 matched_features.add(anchor)
-    except Exception:
-        await kor_travel_map_client.record_sync_failure(
-            provider=KMA_PROVIDER_NAME, dataset_key=KMA_MID_FORECAST_DATASET_KEY
+    except Exception as exc:
+        failure = ProviderDatasetRefreshFailure(
+            provider_dataset_id=membership.provider_dataset_id,
+            sync_scope=membership.sync_scope,
+            operation_key=membership.operation_key,
+            message=f"KMA mid forecast refresh failed: {exc}",
         )
-        raise
+        await _raise_kma_refresh_failure(
+            context,
+            kor_travel_map_client,
+            membership,
+            failure,
+            cause=exc,
+        )
 
     if regions_fetched:
-        await kor_travel_map_client.record_sync_success(
-            provider=KMA_PROVIDER_NAME,
-            dataset_key=KMA_MID_FORECAST_DATASET_KEY,
+        await kor_travel_map_client.record_sync_success_for_operation_membership(
+            membership=membership,
             cursor={"base_datetime": base_key},
         )
 
@@ -1188,9 +1272,7 @@ def _latest_notice_lineage_events(
         current = events.get(lineage_key)
         if current is None or changed_at > current[1]:
             events[lineage_key] = (present, changed_at, valid_until)
-        elif changed_at == current[1] and (
-            present != current[0] or valid_until != current[2]
-        ):
+        elif changed_at == current[1] and (present != current[0] or valid_until != current[2]):
             raise ValueError("KMA notice 계보의 동일 시각 발표/해제가 충돌한다.")
 
     for bundle in bundles:
@@ -1218,8 +1300,8 @@ async def run_feature_notice_kma_weather_alerts(
 ) -> DagsterFeatureLoadResult:
     """KMA 기상특보 record를 notice Feature로 적재한다(표준 record-resource 패턴).
 
-    좌표는 region 단위라 없음 — ``SourceRecord.raw_address``의 region명이 위치
-    단서로 주소 검증을 통과한다(T-219c, ADR-046 정합).
+    좌표는 region 단위라 없음 — raw payload의 ``region_name``이 위치 단서로 주소
+    검증을 통과한다(T-219c, ADR-046 정합).
     """
     records = await _record_list(context, "kma_weather_alert_records")
     # Protocol 인자 ``Sequence[Any]`` 우회 — frozen dataclass attr read-only 함정.

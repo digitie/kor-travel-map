@@ -4,7 +4,7 @@ export type EntityKind =
   | "feature"
   | "importJob"
   | "updateRequest"
-  | "provider"
+  | "providerDataset"
   | "issue"
   | "dagsterRun"
   | "loadBatch"
@@ -27,7 +27,7 @@ function withQuery(path: string, params?: EntityParams): string {
 
 export function hrefFor(
   kind: EntityKind,
-  id: string,
+  id: string | number,
   params?: EntityParams,
 ): string | null {
   switch (kind) {
@@ -37,13 +37,22 @@ export function hrefFor(
       return `/ops/pipeline?execution=import_job:${encodeURIComponent(id)}`;
     case "updateRequest":
       return `/ops/pipeline?execution=update_request:${encodeURIComponent(id)}`;
-    case "provider": {
-      const { dataset_key: dataset, sync_scope, ...rest } = params ?? {};
+    case "providerDataset": {
+      const syncScope = params?.sync_scope;
+      const operationKey = params?.operation_key;
+      if (
+        typeof id !== "number" ||
+        !Number.isSafeInteger(id) ||
+        id < 1 ||
+        !syncScope ||
+        !operationKey
+      ) {
+        return null;
+      }
       return withQuery("/ops/datasets", {
-        ...rest,
-        provider: id,
-        dataset,
-        sync_scope,
+        provider_dataset_id: String(id),
+        sync_scope: syncScope,
+        operation_key: operationKey,
       });
     }
     case "issue":
@@ -52,18 +61,21 @@ export function hrefFor(
       const rest = { ...params };
       delete rest.kind;
       delete rest.load_batch_id;
-      return withQuery("/ops/pipeline", { ...rest, load_batch_id: id });
+      return withQuery("/ops/pipeline", {
+        ...rest,
+        load_batch_id: String(id),
+      });
     }
     case "schedule":
       return withQuery("/ops/pipeline", {
         ...params,
         tab: "schedules",
-        schedule: id,
+        schedule: String(id),
       });
     case "changeRequest":
       return withQuery("/admin/features/change-requests", {
         ...params,
-        request_id: id,
+        request_id: String(id),
       });
     case "dagsterRun":
       return `${DAGSTER_UI_URL.replace(/\/+$/, "")}/runs/${encodeURIComponent(id)}`;

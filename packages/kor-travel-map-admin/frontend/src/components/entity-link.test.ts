@@ -27,36 +27,34 @@ describe("hrefFor", () => {
     },
   );
 
-  it("provider의 legacy dataset_key를 datasets URL 계약으로 변환한다", () => {
+  it("provider dataset membership은 canonical triple로만 datasets URL을 만든다", () => {
     expect(
-      hrefFor("provider", "python-kma-api", {
-        dataset_key: "kma_vilage_fcst",
+      hrefFor("providerDataset", 101, {
         sync_scope: "target_grids",
+        operation_key: "refresh_targeted",
       }),
     ).toBe(
-      "/ops/datasets?provider=python-kma-api&dataset=kma_vilage_fcst&sync_scope=target_grids",
+      "/ops/datasets?provider_dataset_id=101&sync_scope=target_grids&operation_key=refresh_targeted",
     );
   });
 
-  it("빈 provider 선택값은 URL query에 남기지 않는다", () => {
+  it("triple 일부가 없는 provider dataset membership 링크를 만들지 않는다", () => {
+    expect(hrefFor("providerDataset", 101)).toBeNull();
     expect(
-      hrefFor("provider", "python-kma-api", {
-        dataset_key: null,
-        sync_scope: undefined,
-      }),
-    ).toBe("/ops/datasets?provider=python-kma-api");
+      hrefFor("providerDataset", 101, { sync_scope: "target_grids" }),
+    ).toBeNull();
   });
 
   it("호출부 query가 canonical 엔티티 identity를 덮어쓰지 못한다", () => {
     expect(
-      hrefFor("provider", "python-kma-api", {
+      hrefFor("providerDataset", 101, {
         provider: "wrong-provider",
         dataset: "wrong-dataset",
-        dataset_key: "kma_vilage_fcst",
         sync_scope: "target_grids",
+        operation_key: "refresh_targeted",
       }),
     ).toBe(
-      "/ops/datasets?provider=python-kma-api&dataset=kma_vilage_fcst&sync_scope=target_grids",
+      "/ops/datasets?provider_dataset_id=101&sync_scope=target_grids&operation_key=refresh_targeted",
     );
     expect(
       hrefFor("loadBatch", "batch-a", {

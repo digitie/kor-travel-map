@@ -179,7 +179,6 @@ async def test_kcisa_common_bundle_core_fields_and_reverse_enrichment() -> None:
     assert src.source_entity_id == "과카몰레::(17982)경기도 평택시 팽성읍 안정순환로222번길 92"
     # raw_data는 CSV row 원본 보존.
     assert src.raw_data["COORDINATES"] == "N36.960756, E127.043367"
-    assert bundle.source_link.is_primary_source is True
 
 
 async def test_kcisa_common_placeholder_url_dropped() -> None:
@@ -229,7 +228,7 @@ async def test_leisure_classes_without_coordinates_keeps_address_clue() -> None:
     # 좌표가 없으면 reverse 미호출 — provider 주소 텍스트가 위치 단서.
     assert bundle.feature.address.bjd_code is None
     assert bundle.feature.address.admin == "서울특별시 강북구 수유동"
-    assert bundle.source_record.raw_address == "서울특별시 강북구 수유동"
+    assert bundle.source_record.raw_data["ADDRESS"] == "서울특별시 강북구 수유동"
 
 
 async def test_invalid_coordinates_fall_back_to_address_clue() -> None:
@@ -239,7 +238,7 @@ async def test_invalid_coordinates_fall_back_to_address_clue() -> None:
         fetched_at=_NOW,
     )
     assert bundle.feature.coord is None
-    assert bundle.source_record.raw_address is not None
+    assert bundle.source_record.raw_data["ADDRESS"]
 
 
 async def test_out_of_korea_coordinate_isolated_to_address_clue() -> None:
@@ -256,7 +255,7 @@ async def test_out_of_korea_coordinate_isolated_to_address_clue() -> None:
         fetched_at=_NOW,
     )
     assert bundle.feature.coord is None  # 좌표 격리
-    assert bundle.source_record.raw_address is not None  # 주소 단서 보존
+    assert bundle.source_record.raw_data["ADDRESS"]  # 주소 단서 원 payload 보존
 
 
 # -- CNTC_RESRCE 방언 ---------------------------------------------------------
@@ -308,7 +307,10 @@ async def test_split_coord_bundle_maps_fclty_columns() -> None:
     assert feature.detail.place_kind == "children_bookstore"  # type: ignore[union-attr]
     facility = feature.detail.facility_info  # type: ignore[union-attr]
     assert facility["source_category"] == "아동서점 > 아동서적"
-    assert bundle.source_record.raw_address == "경기 안양시 동안구 흥안대로 460 1층"
+    assert (
+        bundle.source_record.raw_data["FCLTY_ROAD_NM_ADDR"]
+        == "경기 안양시 동안구 흥안대로 460 1층"
+    )
 
 
 async def test_used_bookstores_reuses_split_coord_dialect() -> None:
@@ -363,8 +365,9 @@ async def test_korean_address_golf_course_composes_region_address() -> None:
     assert feature.name == "라데나골프클럽"
     assert feature.category == PlaceCategoryCode.TOURISM_ACTIVITY_GOLF.value
     assert feature.coord is None
-    # 지역 + 소재지 합성 주소 단서.
-    assert bundle.source_record.raw_address == "강원 춘천시 신동면 칠전동길 72"
+    # 지역 + 소재지 원 컬럼은 raw payload에서 재구성할 수 있다.
+    assert bundle.source_record.raw_data["지역"] == "강원"
+    assert bundle.source_record.raw_data["소재지"] == "춘천시 신동면 칠전동길 72"
     facility = feature.detail.facility_info  # type: ignore[union-attr]
     assert facility["source_category"] == "회원제"
     assert facility["hole_count"] == "27"

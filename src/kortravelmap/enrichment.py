@@ -14,7 +14,7 @@ ADR 참조
 - ADR-002 — async-only, commit은 호출자/감싼 transaction
 - ADR-006 — provider/외부 API 미import (결과 주입)
 - ADR-009 — source_record_key/payload_hash 결정적 생성
-- ADR-016 — source_role='enrichment'(보조 source, is_primary_source=False)
+- ADR-016 — source_role='enrichment' 보조 source
 """
 
 from __future__ import annotations
@@ -132,7 +132,7 @@ async def apply_place_phone_enrichment(
     2. feature 조회 — 없으면 ``feature_not_found``. 이미 같은 번호면 ``duplicate``.
        ``phones``가 이미 ``MAX_PHONES``개면 ``max_phones``.
     3. ``detail.phones``에 append + ``source_records``(enrichment) +
-       ``source_links(role='enrichment', is_primary_source=False)`` upsert.
+       ``source_links(source_role='enrichment')`` upsert.
 
     ``enrichment_provider``는 외부 source 이름(예: ``kakao-local-api``). commit은
     호출자 책임.
@@ -195,7 +195,6 @@ async def apply_place_phone_enrichment(
             source_role=SourceRole.ENRICHMENT,
             match_method="phone_enrichment",
             confidence=confidence,
-            is_primary_source=False,
         ),
     )
     return PhoneEnrichmentResult(

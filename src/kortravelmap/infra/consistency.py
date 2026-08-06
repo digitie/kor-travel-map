@@ -318,10 +318,10 @@ _F4_PENDING_SAMPLE_SQL: Final[str] = (
 
 _F5_PROVIDER_LAST_SUCCESS_COUNT_SQL: Final[str] = (
     "WITH stale_provider_sync AS ("
-    "  SELECT s.provider, s.dataset_key, s.sync_scope "
+    "  SELECT s.provider_dataset_id, s.sync_scope "
     "  FROM provider_sync.provider_sync_state s "
     "  LEFT JOIN ops.provider_refresh_policies p "
-    "    ON p.provider = s.provider AND p.dataset_key = s.dataset_key "
+    "    ON p.provider_dataset_id = s.provider_dataset_id "
     "  WHERE s.status = 'active' "
     "    AND COALESCE(p.enabled, true) "
     "    AND ("
@@ -337,11 +337,13 @@ _F5_PROVIDER_LAST_SUCCESS_COUNT_SQL: Final[str] = (
 _F5_PROVIDER_LAST_SUCCESS_SAMPLE_SQL: Final[str] = (
     "WITH stale_provider_sync AS ("
     "  SELECT "
-    "    s.provider || ':' || s.dataset_key || ':' || s.sync_scope AS id, "
-    "    s.provider, s.dataset_key, s.sync_scope "
+    "    s.provider_dataset_id::text || ':' || s.sync_scope AS id, "
+    "    s.provider_dataset_id, dataset.provider, dataset.dataset_key, s.sync_scope "
     "  FROM provider_sync.provider_sync_state s "
+    "  JOIN provider_sync.provider_datasets dataset "
+    "    ON dataset.provider_dataset_id = s.provider_dataset_id "
     "  LEFT JOIN ops.provider_refresh_policies p "
-    "    ON p.provider = s.provider AND p.dataset_key = s.dataset_key "
+    "    ON p.provider_dataset_id = s.provider_dataset_id "
     "  WHERE s.status = 'active' "
     "    AND COALESCE(p.enabled, true) "
     "    AND ("
@@ -353,7 +355,7 @@ _F5_PROVIDER_LAST_SUCCESS_SAMPLE_SQL: Final[str] = (
     "    )"
     ") "
     "SELECT id FROM stale_provider_sync "
-    "ORDER BY provider, dataset_key, sync_scope "
+    "ORDER BY provider_dataset_id, sync_scope "
     "LIMIT :lim"
 )
 
@@ -373,8 +375,8 @@ primary_sources AS (
   FROM (
     SELECT
       sl.feature_id,
-      sr.provider,
-      sr.dataset_key,
+      pd.provider,
+      pd.dataset_key,
       row_number() OVER (
         PARTITION BY sl.feature_id
         ORDER BY sr.imported_at DESC NULLS LAST, sr.source_record_key
@@ -382,10 +384,9 @@ primary_sources AS (
     FROM provider_sync.source_links AS sl
     JOIN provider_sync.source_entities AS se
       ON se.source_entity_key = sl.source_entity_key
-    JOIN provider_sync.source_records AS sr
-      ON sr.source_entity_key = se.source_entity_key
-     AND sr.source_record_key = se.current_source_record_key
-    WHERE sl.is_primary_source
+    JOIN provider_sync.provider_datasets AS pd
+      ON pd.provider_dataset_id = se.provider_dataset_id
+    WHERE sl.source_role = 'primary'
   ) AS ranked
   WHERE rn = 1
 )

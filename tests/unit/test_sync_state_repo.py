@@ -12,6 +12,7 @@ from typing import Any
 
 import pytest
 
+from kortravelmap.core.feature_operation import ProviderDatasetOperationMembership
 from kortravelmap.infra import sync_state_repo as repo
 
 _NOW = datetime(2026, 6, 6, tzinfo=UTC)
@@ -48,9 +49,10 @@ class _Session:
 
 def _state_row(**over: Any) -> dict[str, Any]:
     base = {
+        "provider_dataset_id": 42,
         "provider": "python-mois-api",
         "dataset_key": "mois_license_features_bulk",
-        "sync_scope": "default",
+        "sync_scope": "dataset_wide",
         "status": "active",
         "cursor": {"last_modified_date": "2026-06-01"},
         "last_success_at": _NOW,
@@ -69,6 +71,7 @@ async def test_get_sync_state_present_and_missing() -> None:
         dataset_key="mois_license_features_bulk",
     )
     assert state is not None
+    assert state.provider_dataset_id == 42
     assert state.cursor == {"last_modified_date": "2026-06-01"}
 
     missing = await repo.get_sync_state(
@@ -116,6 +119,8 @@ async def test_record_sync_success_serializes_cursor() -> None:
     assert json.loads(session.calls[0]["params"]["cursor"]) == {
         "last_modified_date": "2026-06-06"
     }
+    assert "provider_dataset_id" in session.calls[0]["sql"]
+    assert "provider_sync.provider_datasets" in session.calls[0]["sql"]
 
 
 async def test_record_sync_failure_increments() -> None:
@@ -127,6 +132,48 @@ async def test_record_sync_failure_increments() -> None:
     )
     assert state.consecutive_failures == 3
     assert "cursor" not in session.calls[0]["params"]
+    assert "ON CONFLICT (provider_dataset_id, sync_scope)" in session.calls[0]["sql"]
+
+
+async def test_exact_operation_membership_sync_state_uses_full_refresh_identity() -> None:
+    membership = ProviderDatasetOperationMembership(
+        provider_dataset_id=42,
+        sync_scope="dataset_wide",
+        operation_key="feature_place_mois_bulk_job",
+    )
+
+    get_session = _Session([_state_row()])
+    state = await repo.get_sync_state_for_operation_membership(
+        get_session,  # type: ignore[arg-type]
+        membership=membership,
+    )
+    assert state is not None
+    assert get_session.calls[0]["params"] == {
+        "provider_dataset_id": 42,
+        "sync_scope": "dataset_wide",
+        "operation_key": "feature_place_mois_bulk_job",
+    }
+    assert "dataset.provider_dataset_id" in get_session.calls[0]["sql"]
+    assert "scope.operation_key" in get_session.calls[0]["sql"]
+
+    success_session = _Session([_state_row()])
+    await repo.record_sync_success_for_operation_membership(
+        success_session,  # type: ignore[arg-type]
+        membership=membership,
+        cursor={"watermark": "2026-08-07"},
+    )
+    assert json.loads(success_session.calls[0]["params"]["cursor"]) == {
+        "watermark": "2026-08-07"
+    }
+    assert "exact_membership" in success_session.calls[0]["sql"]
+
+    failure_session = _Session([_state_row()])
+    await repo.record_sync_failure_for_operation_membership(
+        failure_session,  # type: ignore[arg-type]
+        membership=membership,
+    )
+    assert "cursor" not in failure_session.calls[0]["params"]
+    assert "scope.operation_key" in failure_session.calls[0]["sql"]
 
 
 @pytest.mark.parametrize("cursor", [None, {}])

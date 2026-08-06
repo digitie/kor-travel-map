@@ -441,17 +441,21 @@ active_uploads AS (
   ) AS active_uploads
   FROM (
     SELECT
-      upload_id::text AS upload_id,
-      provider,
-      dataset_key,
-      status,
-      validation_job_id::text AS validation_job_id,
-      load_job_id::text AS load_job_id,
-      created_at,
-      updated_at
-    FROM ops.offline_uploads
-    WHERE status IN ('validating', 'loading')
-    ORDER BY updated_at DESC, upload_id DESC
+      upload.upload_id::text AS upload_id,
+      upload.provider_dataset_id,
+      dataset.provider,
+      dataset.dataset_key,
+      upload.sync_scope,
+      upload.status,
+      upload.validation_job_id::text AS validation_job_id,
+      upload.load_job_id::text AS load_job_id,
+      upload.created_at,
+      upload.updated_at
+    FROM ops.offline_uploads AS upload
+    JOIN provider_sync.provider_datasets AS dataset
+      ON dataset.provider_dataset_id = upload.provider_dataset_id
+    WHERE upload.status IN ('validating', 'loading')
+    ORDER BY upload.updated_at DESC, upload.upload_id DESC
     LIMIT 20
   ) u
 )
@@ -467,17 +471,20 @@ GROUP BY status_counts.counts_by_status, active_uploads.active_uploads
 
 _OFFLINE_UPLOAD_LIVE_SQL: Final[str] = """
 SELECT
-  upload_id::text AS upload_id,
-  provider,
-  dataset_key,
-  sync_scope,
-  status,
-  validation_job_id::text AS validation_job_id,
-  load_job_id::text AS load_job_id,
-  created_at,
-  updated_at
-FROM ops.offline_uploads
-WHERE upload_id = CAST(:upload_id AS uuid)
+  upload.upload_id::text AS upload_id,
+  upload.provider_dataset_id,
+  dataset.provider,
+  dataset.dataset_key,
+  upload.sync_scope,
+  upload.status,
+  upload.validation_job_id::text AS validation_job_id,
+  upload.load_job_id::text AS load_job_id,
+  upload.created_at,
+  upload.updated_at
+FROM ops.offline_uploads AS upload
+JOIN provider_sync.provider_datasets AS dataset
+  ON dataset.provider_dataset_id = upload.provider_dataset_id
+WHERE upload.upload_id = CAST(:upload_id AS uuid)
 """
 
 # ADR-064/T-ADM-C3 — 실컬럼 ``dagster_run_id`` 우선 + payload 폴백 COALESCE.
@@ -694,6 +701,7 @@ async def _offline_upload_snapshot(session: AsyncSession, upload_id: str) -> dic
     return {
         "upload_id": row.get("upload_id"),
         "exists": True,
+        "provider_dataset_id": row.get("provider_dataset_id"),
         "provider": row.get("provider"),
         "dataset_key": row.get("dataset_key"),
         "sync_scope": row.get("sync_scope"),

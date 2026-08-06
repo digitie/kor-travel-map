@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
-from decimal import Decimal
 from typing import Any
 
 import pytest
@@ -68,21 +67,15 @@ def _observation(*, current: bool = True) -> FeatureObservation:
         first_seen_at=now,
         entity_last_seen_at=now,
         source_record_key="sr_current" if current else "sr_old",
-        source_version="2025" if current else "2023",
-        raw_name="같은 관광지",
-        raw_address="서울특별시",
-        raw_longitude=Decimal("126.978"),
-        raw_latitude=Decimal("37.566"),
         raw_data={"edition": "2025" if current else "2023"},
         raw_payload_hash="hash-current" if current else "hash-old",
         fetched_at=now,
         imported_at=now,
-        record_last_seen_at=now,
+        observed_at=now,
         expires_at=None,
         source_role="primary",
         match_method="natural_key",
         confidence=100,
-        is_primary_source=True,
         linked_at=now,
         is_current=current,
     )
@@ -153,6 +146,14 @@ def test_feature_sources_returns_every_current_observation_for_operator(
     assert observations[0]["raw_data"]["edition"] == "2025"
     assert observations[0]["raw_payload_hash"] == "hash-current"
     assert observations[0]["source_record_key"] == "sr_current"
+    assert observations[0]["observed_at"] == "2026-07-13T00:00:00Z"
+    assert {
+        "source_version",
+        "raw_name",
+        "raw_address",
+        "raw_longitude",
+        "raw_latitude",
+    }.isdisjoint(observations[0])
 
 
 @pytest.mark.unit

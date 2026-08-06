@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal, TypeAlias
 
+from kortravelmap.core.sync_scope import parse_canonical_sync_scope
+
 ExecutionState: TypeAlias = Literal["queued", "running", "done", "failed", "cancelled"]
 TriggerKind: TypeAlias = Literal[
     "schedule", "manual", "sensor", "update_request", "backfill", "system"
@@ -73,10 +75,35 @@ class ProviderDatasetOperationKey:
             raise ValueError("dataset_key must be trimmed and non-empty")
 
 
+@dataclass(frozen=True, order=True)
+class ProviderDatasetOperationMembership:
+    """Dagster operation이 실행하는 immutable canonical dataset scope."""
+
+    provider_dataset_id: int
+    sync_scope: str
+    operation_key: str
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.provider_dataset_id, int)
+            or isinstance(self.provider_dataset_id, bool)
+            or self.provider_dataset_id <= 0
+        ):
+            raise ValueError("provider_dataset_id must be a positive integer")
+        parse_canonical_sync_scope(self.sync_scope)
+        if (
+            not isinstance(self.operation_key, str)
+            or not self.operation_key
+            or self.operation_key != self.operation_key.strip()
+        ):
+            raise ValueError("operation_key must be trimmed and non-empty")
+
+
 @dataclass(frozen=True)
 class DagsterFeatureOperationMember:
     job_id: str
-    pair: ProviderDatasetOperationKey
+    import_job_dataset_id: str
+    membership: ProviderDatasetOperationMembership
     status: ExecutionState
     progress: int
     current_stage: str | None
@@ -96,7 +123,7 @@ class DagsterFeatureOperation:
     started_at: datetime | None
     finished_at: datetime | None
     trigger_kind: TriggerKind
-    registry_version: str
+    operation_key: str
     members: tuple[DagsterFeatureOperationMember, ...]
 
 
@@ -159,5 +186,6 @@ __all__ = [
     "ExecutionState",
     "FeatureOperationInvariantConflict",
     "ProviderDatasetOperationKey",
+    "ProviderDatasetOperationMembership",
     "TriggerKind",
 ]

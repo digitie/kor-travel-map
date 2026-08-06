@@ -41,11 +41,15 @@ const LEVEL_OPTIONS: Array<JobEventLevel | "all"> = [
 ];
 const PAGE_SIZE = 50;
 
+function positiveInteger(value: string): number | undefined {
+  const parsed = Number(value.trim());
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
 export function PipelineEventsPanel({
   onSelectExecution,
   onUrlChange,
-  provider,
-  datasetKey,
+  providerDatasetId,
   syncScope,
 }: {
   onSelectExecution: (kind: ExecutionKind, id: string) => void;
@@ -53,16 +57,14 @@ export function PipelineEventsPanel({
     updates: Record<string, string | null>,
     mode?: "push" | "replace",
   ) => void;
-  provider: string;
-  datasetKey: string;
+  providerDatasetId: string;
   syncScope: string;
 }) {
   const [level, setLevel] = useState<JobEventLevel | "all">("all");
   const [jobId, setJobId] = useState("");
   const filterSignature = JSON.stringify([
     level,
-    provider,
-    datasetKey,
+    providerDatasetId,
     syncScope,
     jobId,
   ]);
@@ -81,14 +83,12 @@ export function PipelineEventsPanel({
   }
 
   const cursor = activeCursorStack.at(-1) ?? null;
-  const providerFilter = provider.trim() || undefined;
-  const datasetFilter = providerFilter ? datasetKey.trim() || undefined : undefined;
+  const providerDatasetIdFilter = positiveInteger(providerDatasetId);
   const syncScopeFilter = syncScope.trim() || undefined;
   const events = usePipelineEvents({
     level: level === "all" ? undefined : level,
-    provider: providerFilter,
-    dataset_key: datasetFilter,
-    sync_scope: providerFilter && datasetFilter ? syncScopeFilter : undefined,
+    provider_dataset_id: providerDatasetIdFilter,
+    sync_scope: providerDatasetIdFilter ? syncScopeFilter : undefined,
     job_id: jobId.trim() || undefined,
     page_size: PAGE_SIZE,
     cursor,
@@ -116,27 +116,11 @@ export function PipelineEventsPanel({
         cell: ({ row }) => <StatusBadge status={row.original.level} />,
       },
       {
-        id: "provider",
-        header: "provider",
-        cell: ({ row }) => (
-          <span className="text-sm">{row.original.provider ?? "-"}</span>
-        ),
-      },
-      {
-        id: "dataset_key",
-        header: "데이터셋",
+        id: "provider_dataset_id",
+        header: "provider dataset ID",
         cell: ({ row }) => (
           <span className="font-mono text-xs">
-            {row.original.dataset_key ?? "-"}
-          </span>
-        ),
-      },
-      {
-        id: "sync_scope",
-        header: "scope",
-        cell: ({ row }) => (
-          <span className="font-mono text-xs">
-            {row.original.sync_scope ?? "-"}
+            {row.original.provider_dataset_id ?? "-"}
           </span>
         ),
       },
@@ -201,28 +185,17 @@ export function PipelineEventsPanel({
               ))}
             </NativeSelect>
           </FilterField>
-          <FilterField label="provider">
+          <FilterField label="provider dataset ID">
             <Input
-              aria-label="이벤트 provider 필터"
-              value={provider}
+              aria-label="이벤트 provider dataset ID 필터"
+              inputMode="numeric"
+              min="1"
+              type="number"
+              value={providerDatasetId}
               onChange={(event) => {
                 resetPage();
                 onUrlChange(
-                  { provider: event.target.value.trim() || null },
-                  "replace",
-                );
-              }}
-            />
-          </FilterField>
-          <FilterField label="데이터셋">
-            <Input
-              aria-label="이벤트 데이터셋 필터"
-              disabled={!providerFilter}
-              value={datasetKey}
-              onChange={(event) => {
-                resetPage();
-                onUrlChange(
-                  { dataset_key: event.target.value.trim() || null },
+                  { provider_dataset_id: event.target.value.trim() || null },
                   "replace",
                 );
               }}
@@ -231,7 +204,7 @@ export function PipelineEventsPanel({
           <FilterField label="sync scope">
             <Input
               aria-label="이벤트 sync scope 필터"
-              disabled={!providerFilter || !datasetFilter}
+              disabled={!providerDatasetIdFilter}
               value={syncScope}
               onChange={(event) => {
                 resetPage();

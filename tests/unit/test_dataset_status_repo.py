@@ -45,13 +45,15 @@ class _Session:
 
 
 def _count_row(
+    provider_dataset_id: int,
     provider: str,
-    dataset_key: str | None,
+    dataset_key: str,
     *,
     open_total: int,
     by_severity: dict[str, int],
 ) -> SimpleNamespace:
     return SimpleNamespace(
+        provider_dataset_id=provider_dataset_id,
         provider=provider,
         dataset_key=dataset_key,
         open_total=open_total,
@@ -66,8 +68,6 @@ def _pipeline_execution(*, at: datetime) -> PipelineExecution:
         id="11111111-1111-1111-1111-111111111111",
         status="running",
         created_at=at,
-        providers=("python-mois-api",),
-        dataset_keys=("mois_license_features_bulk",),
         provider_datasets=(),
         progress=None,
         current_stage=None,
@@ -81,7 +81,7 @@ def _pipeline_execution(*, at: datetime) -> PipelineExecution:
         dagster_run_id="run-1",
         dagster_run_status=None,
         trigger_kind="update_request",
-        operation_registry_version=None,
+        operation_key=None,
         requested_job_id="22222222-2222-2222-2222-222222222222",
         linked_job_count=1,
         projected_job=PipelineProjectedJob(
@@ -97,7 +97,7 @@ def _pipeline_execution(*, at: datetime) -> PipelineExecution:
             dagster_run_id="run-1",
             dagster_run_status=None,
             trigger_kind="update_request",
-            operation_registry_version=None,
+            operation_key=None,
             load_batch_id=None,
             parent_job_id=None,
             depth=0,
@@ -111,16 +111,11 @@ async def test_count_open_issues_by_dataset_maps_rows_and_defaults() -> None:
         _Result(
             [
                 _count_row(
+                    42,
                     "python-mois-api",
                     "mois_license_features_bulk",
                     open_total=3,
                     by_severity={"error": 2, "warning": 1},
-                ),
-                _count_row(
-                    "python-krex-api",
-                    None,
-                    open_total=1,
-                    by_severity={"warning": 1},
                 ),
             ]
         )
@@ -129,41 +124,45 @@ async def test_count_open_issues_by_dataset_maps_rows_and_defaults() -> None:
 
     counts = await count_open_integrity_issues_by_dataset(db)
 
-    assert session.params == [{"provider": None, "dataset_key": None}]
+    assert session.params == [{"provider_dataset_id": None}]
     assert counts == (
         DatasetIntegrityIssueCount(
+            provider_dataset_id=42,
             provider="python-mois-api",
             dataset_key="mois_license_features_bulk",
             open_total=3,
             by_severity={"error": 2, "warning": 1},
         ),
-        DatasetIntegrityIssueCount(
-            provider="python-krex-api",
-            dataset_key=None,
-            open_total=1,
-            by_severity={"warning": 1},
-        ),
     )
 
 
 @pytest.mark.unit
-async def test_count_open_issues_passes_filters() -> None:
+async def test_count_open_issues_passes_canonical_dataset_filter() -> None:
     session = _Session(_Result([]))
     db = cast(Any, session)
 
     counts = await count_open_integrity_issues_by_dataset(
         db,
-        provider="python-mois-api",
-        dataset_key="mois_license_features_bulk",
+        provider_dataset_id=42,
     )
 
     assert counts == ()
     assert session.params == [
         {
-            "provider": "python-mois-api",
-            "dataset_key": "mois_license_features_bulk",
+            "provider_dataset_id": 42,
         }
     ]
+
+
+def test_open_issue_query_projects_display_only_from_canonical_dataset_fk() -> None:
+    sql = dataset_status_repo._COUNT_OPEN_ISSUES_SQL
+
+    assert "violation.provider_dataset_id" in sql
+    assert "JOIN provider_sync.provider_datasets AS dataset" in sql
+    assert "dataset.provider" in sql
+    assert "dataset.dataset_key" in sql
+    assert "violation.provider," not in sql
+    assert "violation.dataset_key," not in sql
 
 
 @pytest.mark.unit
@@ -173,6 +172,7 @@ async def test_list_latest_dataset_executions_maps_common_projection(
     at = datetime(2026, 7, 15, tzinfo=UTC)
     session = _Session()
     projected = PipelineDatasetLatestExecution(
+        provider_dataset_id=42,
         provider="python-mois-api",
         dataset_key="mois_license_features_bulk",
         sync_scope="dataset_wide",
@@ -195,6 +195,7 @@ async def test_list_latest_dataset_executions_maps_common_projection(
     assert session.params == []
     assert executions == (
         DatasetLatestExecution(
+            provider_dataset_id=42,
             provider="python-mois-api",
             dataset_key="mois_license_features_bulk",
             sync_scope="dataset_wide",
@@ -212,6 +213,7 @@ async def test_list_dataset_execution_snapshots_maps_both_status_groups(
     at = datetime(2026, 7, 15, tzinfo=UTC)
     session = _Session()
     terminal = PipelineDatasetLatestExecution(
+        provider_dataset_id=42,
         provider="python-mois-api",
         dataset_key="mois_license_features_bulk",
         sync_scope="dataset_wide",
@@ -220,6 +222,7 @@ async def test_list_dataset_execution_snapshots_maps_both_status_groups(
         pair_status="done",
     )
     active = PipelineDatasetLatestExecution(
+        provider_dataset_id=terminal.provider_dataset_id,
         provider=terminal.provider,
         dataset_key=terminal.dataset_key,
         sync_scope=terminal.sync_scope,
@@ -228,6 +231,7 @@ async def test_list_dataset_execution_snapshots_maps_both_status_groups(
         pair_status="running",
     )
     projected = PipelineDatasetExecutionSnapshot(
+        provider_dataset_id=terminal.provider_dataset_id,
         provider=terminal.provider,
         dataset_key=terminal.dataset_key,
         sync_scope=terminal.sync_scope,
@@ -248,10 +252,12 @@ async def test_list_dataset_execution_snapshots_maps_both_status_groups(
 
     assert snapshots == (
         DatasetExecutionSnapshot(
+            provider_dataset_id=terminal.provider_dataset_id,
             provider=terminal.provider,
             dataset_key=terminal.dataset_key,
             sync_scope=terminal.sync_scope,
             latest_terminal=DatasetLatestExecution(
+                provider_dataset_id=terminal.provider_dataset_id,
                 provider=terminal.provider,
                 dataset_key=terminal.dataset_key,
                 sync_scope=terminal.sync_scope,
@@ -260,6 +266,7 @@ async def test_list_dataset_execution_snapshots_maps_both_status_groups(
                 pair_status="done",
             ),
             active=DatasetLatestExecution(
+                provider_dataset_id=active.provider_dataset_id,
                 provider=active.provider,
                 dataset_key=active.dataset_key,
                 sync_scope=active.sync_scope,
@@ -267,5 +274,52 @@ async def test_list_dataset_execution_snapshots_maps_both_status_groups(
                 operation_member_id=active.operation_member_id,
                 pair_status="running",
             ),
+        ),
+    )
+
+
+@pytest.mark.unit
+async def test_scoped_snapshot_forwards_canonical_dataset_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _Session()
+    projected = PipelineDatasetExecutionSnapshot(
+        provider_dataset_id=42,
+        provider="python-mois-api",
+        dataset_key="mois_license_features_bulk",
+        sync_scope="dataset_wide",
+        latest_terminal=None,
+        active=None,
+    )
+    observed: list[int] = []
+
+    async def _scoped(
+        _session: Any,
+        *,
+        provider_dataset_id: int,
+    ) -> tuple[PipelineDatasetExecutionSnapshot, ...]:
+        observed.append(provider_dataset_id)
+        return (projected,)
+
+    monkeypatch.setattr(
+        dataset_status_repo,
+        "list_dataset_pipeline_execution_snapshots_scoped",
+        _scoped,
+    )
+
+    snapshots = await dataset_status_repo.list_dataset_execution_snapshots_scoped(
+        cast(Any, session),
+        provider_dataset_id=42,
+    )
+
+    assert observed == [42]
+    assert snapshots == (
+        DatasetExecutionSnapshot(
+            provider_dataset_id=42,
+            provider="python-mois-api",
+            dataset_key="mois_license_features_bulk",
+            sync_scope="dataset_wide",
+            latest_terminal=None,
+            active=None,
         ),
     )

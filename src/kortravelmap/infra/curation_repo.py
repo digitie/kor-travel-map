@@ -124,6 +124,7 @@ class CurationCollection:
     theme_name: str
     theme_group: str
     source_id: str | None
+    provider_dataset_id: int | None
     provider: str | None
     dataset_key: str | None
     source_name: str | None
@@ -153,6 +154,7 @@ class CurationItem:
     theme_slug: str
     theme_name: str
     theme_group: str
+    provider_dataset_id: int | None
     provider: str | None
     dataset_key: str | None
     source_name: str | None
@@ -259,6 +261,7 @@ class CurationQuarantineSourceRef:
     """격리/원본 collection이 가리키는 source의 병렬 표시용 참조 (T-VN-H22A)."""
 
     source_id: str
+    provider_dataset_id: int | None
     provider: str | None
     dataset_key: str | None
     source_name: str | None
@@ -383,8 +386,7 @@ class ResolvedCurationImportRow:
     theme_group: str
     title: str
     edition_key: str
-    provider: str
-    dataset_key: str
+    provider_dataset_id: int
     source_name: str
     source_url: str | None
     source_item_key: str
@@ -462,8 +464,9 @@ SELECT
     t.theme_name,
     t.theme_group,
     c.source_id::text AS source_id,
-    s.provider,
-    s.dataset_key,
+    s.provider_dataset_id,
+    pd.provider,
+    pd.dataset_key,
     s.source_name,
     s.source_url,
     c.title,
@@ -521,6 +524,8 @@ SELECT
 FROM feature.curation_collections AS c
 JOIN feature.curated_themes AS t ON t.theme_id = c.theme_id
 LEFT JOIN feature.curated_sources AS s ON s.source_id = c.source_id
+LEFT JOIN provider_sync.provider_datasets AS pd
+  ON pd.provider_dataset_id = s.provider_dataset_id
 """
 
 _ITEM_SELECT_FIELDS: Final[str] = f"""
@@ -532,8 +537,9 @@ _ITEM_SELECT_FIELDS: Final[str] = f"""
     t.theme_slug,
     t.theme_name,
     t.theme_group,
-    s.provider,
-    s.dataset_key,
+    s.provider_dataset_id,
+    pd.provider,
+    pd.dataset_key,
     s.source_name,
     s.source_url,
     i.feature_id,
@@ -587,6 +593,8 @@ FROM feature.curation_items AS i
 JOIN feature.curation_collections AS c ON c.collection_id = i.collection_id
 JOIN feature.curated_themes AS t ON t.theme_id = c.theme_id
 LEFT JOIN feature.curated_sources AS s ON s.source_id = c.source_id
+LEFT JOIN provider_sync.provider_datasets AS pd
+  ON pd.provider_dataset_id = s.provider_dataset_id
 LEFT JOIN feature.features AS f ON f.feature_id = i.feature_id
 LEFT JOIN feature.curation_link_decisions AS link_decision
   ON link_decision.decision_id = i.accepted_link_decision_id
@@ -619,8 +627,8 @@ WHERE (:include_archived OR c.archived_at IS NULL)
       OR c.edition_key = CAST(:edition_key AS text)
   )
   AND (
-      CAST(:provider AS text) IS NULL
-      OR s.provider = CAST(:provider AS text)
+      CAST(:provider_dataset_id AS bigint) IS NULL
+      OR s.provider_dataset_id = CAST(:provider_dataset_id AS bigint)
   )
   AND (
       CAST(:q AS text) IS NULL
@@ -800,8 +808,8 @@ WHERE (
             OR matched_collection.edition_key = CAST(:edition_key AS text)
         )
         AND (
-            CAST(:provider AS text) IS NULL
-            OR matched_source.provider = CAST(:provider AS text)
+            CAST(:provider_dataset_id AS bigint) IS NULL
+            OR matched_source.provider_dataset_id = CAST(:provider_dataset_id AS bigint)
         )
         AND (
             CAST(:q AS text) IS NULL
@@ -1009,6 +1017,8 @@ FROM marked AS i
 JOIN feature.curation_collections AS c ON c.collection_id = i.collection_id
 JOIN feature.curated_themes AS t ON t.theme_id = c.theme_id
 LEFT JOIN feature.curated_sources AS s ON s.source_id = c.source_id
+LEFT JOIN provider_sync.provider_datasets AS pd
+  ON pd.provider_dataset_id = s.provider_dataset_id
 LEFT JOIN feature.features AS f ON f.feature_id = i.feature_id
 LEFT JOIN feature.curation_link_decisions AS link_decision
   ON link_decision.decision_id = i.accepted_link_decision_id
@@ -1460,8 +1470,9 @@ SELECT
     quarantine_theme.theme_group AS quarantine_theme_group,
     quarantine_theme.visibility AS quarantine_theme_visibility,
     quarantine_source.source_id::text AS quarantine_source_id,
-    quarantine_source.provider AS quarantine_provider,
-    quarantine_source.dataset_key AS quarantine_dataset_key,
+    quarantine_source.provider_dataset_id AS quarantine_provider_dataset_id,
+    quarantine_dataset.provider AS quarantine_provider,
+    quarantine_dataset.dataset_key AS quarantine_dataset_key,
     quarantine_source.source_name AS quarantine_source_name,
     original.collection_id::text AS original_collection_id,
     original.title AS original_title,
@@ -1473,20 +1484,25 @@ SELECT
     original_theme.theme_group AS original_theme_group,
     original_theme.visibility AS original_theme_visibility,
     original_source.source_id::text AS original_source_id,
-    original_source.provider AS original_provider,
-    original_source.dataset_key AS original_dataset_key,
+    original_source.provider_dataset_id AS original_provider_dataset_id,
+    original_dataset.provider AS original_provider,
+    original_dataset.dataset_key AS original_dataset_key,
     original_source.source_name AS original_source_name
 FROM feature.curation_collections AS quarantine
 JOIN feature.curated_themes AS quarantine_theme
   ON quarantine_theme.theme_id = quarantine.theme_id
 LEFT JOIN feature.curated_sources AS quarantine_source
   ON quarantine_source.source_id = quarantine.source_id
+LEFT JOIN provider_sync.provider_datasets AS quarantine_dataset
+  ON quarantine_dataset.provider_dataset_id = quarantine_source.provider_dataset_id
 LEFT JOIN feature.curation_collections AS original
   ON original.collection_id::text = quarantine.metadata ->> 'original_collection_id'
 LEFT JOIN feature.curated_themes AS original_theme
   ON original_theme.theme_id = original.theme_id
 LEFT JOIN feature.curated_sources AS original_source
   ON original_source.source_id = original.source_id
+LEFT JOIN provider_sync.provider_datasets AS original_dataset
+  ON original_dataset.provider_dataset_id = original_source.provider_dataset_id
 WHERE {_quarantine_marker_sql("quarantine")}
   AND (
       CAST(:cursor_collection_id AS uuid) IS NULL
@@ -1828,13 +1844,13 @@ LIMIT 1
 _UPSERT_SOURCE_SQL: Final[str] = """
 WITH written AS (
     INSERT INTO feature.curated_sources (
-        provider, dataset_key, source_name, source_url, source_kind,
+        provider_dataset_id, source_name, source_url, source_kind,
         update_cycle, provider_status, metadata, updated_at
     ) VALUES (
-        :provider, :dataset_key, :source_name, :source_url, 'manual',
+        :provider_dataset_id, :source_name, :source_url, 'manual',
         'unknown', 'manual_only', '{}'::jsonb, now()
     )
-    ON CONFLICT (provider, dataset_key) DO UPDATE SET
+    ON CONFLICT (provider_dataset_id) DO UPDATE SET
         source_name = EXCLUDED.source_name,
         source_url = COALESCE(
             EXCLUDED.source_url,
@@ -1854,8 +1870,7 @@ SELECT source_id FROM written
 UNION ALL
 SELECT existing.source_id::text
 FROM feature.curated_sources AS existing
-WHERE existing.provider = :provider
-  AND existing.dataset_key = :dataset_key
+WHERE existing.provider_dataset_id = :provider_dataset_id
   AND NOT EXISTS (SELECT 1 FROM written)
 LIMIT 1
 """
@@ -1914,11 +1929,10 @@ FROM feature.curated_themes
 WHERE theme_slug = :theme_slug
 """
 
-_GET_SOURCE_ID_BY_KEY_SQL: Final[str] = """
+_GET_SOURCE_ID_BY_DATASET_ID_SQL: Final[str] = """
 SELECT source_id::text
 FROM feature.curated_sources
-WHERE provider = :provider
-  AND dataset_key = :dataset_key
+WHERE provider_dataset_id = :provider_dataset_id
 """
 
 _GET_COLLECTION_ID_BY_KEY_SQL: Final[str] = """
@@ -2034,6 +2048,11 @@ def _collection(row: RowMapping | Mapping[str, Any]) -> CurationCollection:
         theme_name=str(row["theme_name"]),
         theme_group=str(row["theme_group"]),
         source_id=str(row["source_id"]) if row["source_id"] else None,
+        provider_dataset_id=(
+            int(row["provider_dataset_id"])
+            if row["provider_dataset_id"] is not None
+            else None
+        ),
         provider=row["provider"],
         dataset_key=row["dataset_key"],
         source_name=row["source_name"],
@@ -2064,6 +2083,11 @@ def _item(row: RowMapping | Mapping[str, Any]) -> CurationItem:
         theme_slug=str(row["theme_slug"]),
         theme_name=str(row["theme_name"]),
         theme_group=str(row["theme_group"]),
+        provider_dataset_id=(
+            int(row["provider_dataset_id"])
+            if row["provider_dataset_id"] is not None
+            else None
+        ),
         provider=row["provider"],
         dataset_key=row["dataset_key"],
         source_name=row["source_name"],
@@ -2194,6 +2218,11 @@ def _quarantine_source(
         return None
     return CurationQuarantineSourceRef(
         source_id=str(source_id),
+        provider_dataset_id=(
+            int(row[f"{prefix}_provider_dataset_id"])
+            if row[f"{prefix}_provider_dataset_id"] is not None
+            else None
+        ),
         provider=row[f"{prefix}_provider"],
         dataset_key=row[f"{prefix}_dataset_key"],
         source_name=row[f"{prefix}_source_name"],
@@ -2424,7 +2453,7 @@ async def list_curation_collections(
     visibility: str | None = None,
     theme_slug: str | None = None,
     edition_key: str | None = None,
-    provider: str | None = None,
+    provider_dataset_id: int | None = None,
     q: str | None = None,
     include_archived: bool = False,
     public_only: bool = False,
@@ -2446,7 +2475,7 @@ async def list_curation_collections(
                     "visibility": visibility,
                     "theme_slug": theme_slug,
                     "edition_key": edition_key,
-                    "provider": provider,
+                    "provider_dataset_id": provider_dataset_id,
                     "q": f"%{q.strip()}%" if q and q.strip() else None,
                     "include_archived": include_archived,
                     "public_only": public_only,
@@ -3808,7 +3837,7 @@ async def list_feature_curation_groups(
     public_only: bool = True,
     theme_slug: str | None = None,
     edition_key: str | None = None,
-    provider: str | None = None,
+    provider_dataset_id: int | None = None,
     q: str | None = None,
     min_lon: float | None = None,
     min_lat: float | None = None,
@@ -3831,7 +3860,7 @@ async def list_feature_curation_groups(
                     "public_only": public_only,
                     "theme_slug": theme_slug,
                     "edition_key": edition_key,
-                    "provider": provider,
+                    "provider_dataset_id": provider_dataset_id,
                     "q": f"%{q.strip()}%" if q and q.strip() else None,
                     "bbox_enabled": bbox_enabled,
                     "min_lon": min_lon,
@@ -4063,8 +4092,7 @@ def _canonical_import_row_payload(
         "theme_group": row.theme_group,
         "title": row.title,
         "edition_key": row.edition_key,
-        "provider": row.provider,
-        "dataset_key": row.dataset_key,
+        "provider_dataset_id": row.provider_dataset_id,
         "source_name": row.source_name,
         "source_url": row.source_url,
         "source_item_key": row.source_item_key,
@@ -4486,15 +4514,14 @@ async def import_curation_rows(
             theme_group=row.theme_group,
         )
         source_params = {
-            "provider": row.provider,
-            "dataset_key": row.dataset_key,
+            "provider_dataset_id": row.provider_dataset_id,
             "source_name": row.source_name,
             "source_url": row.source_url,
         }
         source_id = await _upsert_id_with_fallback(
             session,
             upsert_sql=_UPSERT_SOURCE_SQL,
-            lookup_sql=_GET_SOURCE_ID_BY_KEY_SQL,
+            lookup_sql=_GET_SOURCE_ID_BY_DATASET_ID_SQL,
             params=source_params,
             entity="curation source",
         )

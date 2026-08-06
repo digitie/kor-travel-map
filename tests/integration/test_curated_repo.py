@@ -119,6 +119,21 @@ async def _load_concierge_place(session: AsyncSession) -> str:
     return bundle.feature.feature_id
 
 
+async def _curated_source_for_catalog_display(
+    session: AsyncSession,
+    *,
+    provider: str,
+    dataset_key: str,
+) -> curated_repo.CuratedSource:
+    """표기용 pair는 seed catalog projection을 고를 때만 사용한다."""
+    sources = await curated_repo.list_curated_sources(session, limit=500)
+    return next(
+        source
+        for source in sources
+        if source.provider == provider and source.dataset_key == dataset_key
+    )
+
+
 async def test_seeded_theme_sets_include_seasonal_and_regional_expansion(
     migrated_session: AsyncSession,
 ) -> None:
@@ -140,12 +155,16 @@ async def test_seed_rule_apply_creates_candidate_and_detail_snapshot(
     migrated_session: AsyncSession,
 ) -> None:
     feature_id = await _load_seoul_bookstore(migrated_session)
+    source = await _curated_source_for_catalog_display(
+        migrated_session,
+        provider="python-datagokr-api",
+        dataset_key="datagokr_seoul_bookstores",
+    )
 
     rules = await curated_repo.list_curated_source_rules(
         migrated_session,
         theme_slug="bookstores",
-        provider="python-datagokr-api",
-        dataset_key="datagokr_seoul_bookstores",
+        source_id=source.source_id,
     )
     assert len(rules) == 1
 
@@ -209,8 +228,7 @@ async def test_seed_rule_apply_creates_candidate_and_detail_snapshot(
 
     refreshed = await curated_repo.refresh_curated_source_metadata(
         migrated_session,
-        provider="python-datagokr-api",
-        dataset_key="datagokr_seoul_bookstores",
+        provider_dataset_id=source.provider_dataset_id,
     )
     assert refreshed.sources_checked == 1
     assert refreshed.sources_with_records == 1
@@ -248,12 +266,16 @@ async def test_concierge_seed_rule_creates_curated_with_source_title(
     migrated_session: AsyncSession,
 ) -> None:
     feature_id = await _load_concierge_place(migrated_session)
+    source = await _curated_source_for_catalog_display(
+        migrated_session,
+        provider=KOR_TRAVEL_CONCIERGE_PROVIDER_NAME,
+        dataset_key=DATASET_KEY_YOUTUBE_PLACE_CANDIDATES,
+    )
 
     [rule] = await curated_repo.list_curated_source_rules(
         migrated_session,
         theme_slug="media-places",
-        provider=KOR_TRAVEL_CONCIERGE_PROVIDER_NAME,
-        dataset_key=DATASET_KEY_YOUTUBE_PLACE_CANDIDATES,
+        source_id=source.source_id,
     )
     assert rule.default_action == "curated"
 
@@ -266,8 +288,7 @@ async def test_concierge_seed_rule_creates_curated_with_source_title(
     page = await curated_repo.list_curated_features(
         migrated_session,
         theme_slug="media-places",
-        provider=KOR_TRAVEL_CONCIERGE_PROVIDER_NAME,
-        dataset_key=DATASET_KEY_YOUTUBE_PLACE_CANDIDATES,
+        provider_dataset_id=source.provider_dataset_id,
     )
     row = next(item for item in page.items if item.feature_id == feature_id)
     assert row.curation_status == "curated"
@@ -335,11 +356,10 @@ async def test_manual_create_patch_and_archive_curated_feature(
     )
     theme = next(item for item in themes if item.theme_group == "books")
     target_theme = next(item for item in themes if item.theme_id != theme.theme_id)
-    [source] = await curated_repo.list_curated_sources(
+    source = await _curated_source_for_catalog_display(
         migrated_session,
         provider="python-datagokr-api",
         dataset_key="datagokr_seoul_bookstores",
-        limit=1,
     )
 
     created = await curated_repo.create_curated_feature(
@@ -412,11 +432,10 @@ async def test_list_curated_features_distinct_by_feature_dedups_cross_theme(
     themes = await curated_repo.list_curated_themes(migrated_session, limit=50)
     theme_a = themes[0]
     theme_b = next(item for item in themes if item.theme_id != theme_a.theme_id)
-    [source] = await curated_repo.list_curated_sources(
+    source = await _curated_source_for_catalog_display(
         migrated_session,
         provider="python-datagokr-api",
         dataset_key="datagokr_seoul_bookstores",
-        limit=1,
     )
     await curated_repo.create_curated_feature(
         migrated_session,
@@ -463,11 +482,10 @@ async def test_list_curated_features_display_titles_multi_filter(
     """display_titles(멀티) 필터는 지정한 제목 집합만 반환한다(큐레이션 관리 title 필터)."""
     feature_id = await _load_seoul_bookstore(migrated_session)
     themes = await curated_repo.list_curated_themes(migrated_session, limit=50)
-    [source] = await curated_repo.list_curated_sources(
+    source = await _curated_source_for_catalog_display(
         migrated_session,
         provider="python-datagokr-api",
         dataset_key="datagokr_seoul_bookstores",
-        limit=1,
     )
     await curated_repo.create_curated_feature(
         migrated_session,
@@ -562,18 +580,16 @@ async def test_apply_rule_detail_selector_partitions_by_youtube_channel(
     fid_b = await _load_concierge_place_channel(
         migrated_session, candidate_id="sel-b", channel_id="channel-B", name="B 해변"
     )
-    [source] = await curated_repo.list_curated_sources(
+    source = await _curated_source_for_catalog_display(
         migrated_session,
         provider="kor-travel-concierge-youtube",
         dataset_key="youtube_place_candidates",
-        limit=1,
     )
     theme = (await curated_repo.list_curated_themes(migrated_session, limit=50))[0]
     rule = await curated_repo.create_curated_source_rule(
         migrated_session,
         theme_id=theme.theme_id,
         source_id=source.source_id,
-        dataset_key="youtube_place_candidates",
         place_kind="youtube_place_candidate",
         detail_selector={
             "path": ["payload", "kor_travel_concierge", "youtube", "channel_id"],
@@ -639,11 +655,15 @@ async def test_rejected_curated_feature_is_not_revived_by_rule_apply(
     migrated_session: AsyncSession,
 ) -> None:
     feature_id = await _load_seoul_bookstore(migrated_session)
+    source = await _curated_source_for_catalog_display(
+        migrated_session,
+        provider="python-datagokr-api",
+        dataset_key="datagokr_seoul_bookstores",
+    )
     [rule] = await curated_repo.list_curated_source_rules(
         migrated_session,
         theme_slug="bookstores",
-        provider="python-datagokr-api",
-        dataset_key="datagokr_seoul_bookstores",
+        source_id=source.source_id,
     )
     await curated_repo.apply_curated_source_rule(migrated_session, rule_id=rule.rule_id)
     [candidate] = (
@@ -710,11 +730,10 @@ async def test_curated_status_sweep_archives_inactive_feature(
         theme_group="books",
         limit=1,
     )
-    [source] = await curated_repo.list_curated_sources(
+    source = await _curated_source_for_catalog_display(
         migrated_session,
         provider="python-datagokr-api",
         dataset_key="datagokr_seoul_bookstores",
-        limit=1,
     )
     created = await curated_repo.create_curated_feature(
         migrated_session,

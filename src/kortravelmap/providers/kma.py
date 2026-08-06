@@ -238,11 +238,6 @@ async def grid_to_weather_bundle(
         source_entity_type=_GRID_ENTITY_TYPE,
         source_entity_id=natural_key,
         raw_payload_hash=payload_hash,
-        source_version=None,
-        raw_name=name,
-        raw_address=None,
-        raw_longitude=lon,
-        raw_latitude=lat,
         raw_data=raw_data,
         fetched_at=fetched_at,
         source_record_key=source_record_key,
@@ -253,7 +248,6 @@ async def grid_to_weather_bundle(
         source_role=SourceRole.PRIMARY,
         match_method="natural_key",
         confidence=100,
-        is_primary_source=True,
     )
     return FeatureBundle(feature=feature, source_record=source_record, source_link=source_link)
 
@@ -1049,7 +1043,6 @@ def _alert_region_to_bundle(
     raw_data: dict[str, Any] = {
         "alert_id": alert.alert_id,
         "alert_type": alert.alert_type,
-        "phenomenon": phenomenon,
         "level": alert.level,
         "title": alert.title,
         "description": alert.description,
@@ -1110,10 +1103,6 @@ def _alert_region_to_bundle(
         source_entity_type=_KMA_WEATHER_ALERT_ENTITY_TYPE,
         source_entity_id=natural_key,
         raw_payload_hash=payload_hash,
-        raw_name=alert.title,
-        # 특보는 region 단위 무좌표 notice — region명이 유일한 위치 단서다.
-        # Dagster 주소 검증(ADR-046 missing_address)이 이 단서를 인정한다(T-219c).
-        raw_address=region.region_name,
         raw_data=raw_data,
         fetched_at=fetched_at,
         source_record_key=source_record_key,
@@ -1124,7 +1113,6 @@ def _alert_region_to_bundle(
         source_role=SourceRole.PRIMARY,
         match_method="natural_key",
         confidence=100,
-        is_primary_source=True,
     )
     return FeatureBundle(feature=feature, source_record=source_record, source_link=source_link)
 

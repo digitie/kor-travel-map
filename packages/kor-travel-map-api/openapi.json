@@ -407,6 +407,17 @@
             ],
             "title": "Provider"
           },
+          "provider_dataset_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Dataset Id"
+          },
           "public_item_count": {
             "title": "Public Item Count",
             "type": "integer"
@@ -508,6 +519,7 @@
           "theme_name",
           "theme_group",
           "source_id",
+          "provider_dataset_id",
           "provider",
           "dataset_key",
           "source_name",
@@ -861,6 +873,17 @@
             ],
             "title": "Provider"
           },
+          "provider_dataset_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Dataset Id"
+          },
           "reuse_policy": {
             "enum": [
               "allowed",
@@ -963,6 +986,7 @@
           "theme_slug",
           "theme_name",
           "theme_group",
+          "provider_dataset_id",
           "provider",
           "dataset_key",
           "source_name",
@@ -2894,15 +2918,6 @@
             "title": "Imported At",
             "type": "string"
           },
-          "is_primary_source": {
-            "title": "Is Primary Source",
-            "type": "boolean"
-          },
-          "last_seen_at": {
-            "format": "date-time",
-            "title": "Last Seen At",
-            "type": "string"
-          },
           "linked_at": {
             "format": "date-time",
             "title": "Linked At",
@@ -2912,58 +2927,19 @@
             "title": "Match Method",
             "type": "string"
           },
+          "observed_at": {
+            "format": "date-time",
+            "title": "Observed At",
+            "type": "string"
+          },
           "provider": {
             "title": "Provider",
             "type": "string"
-          },
-          "raw_address": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Raw Address"
           },
           "raw_data": {
             "additionalProperties": true,
             "title": "Raw Data",
             "type": "object"
-          },
-          "raw_latitude": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Raw Latitude"
-          },
-          "raw_longitude": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Raw Longitude"
-          },
-          "raw_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Raw Name"
           },
           "raw_payload_hash": {
             "title": "Raw Payload Hash",
@@ -2988,17 +2964,6 @@
           "source_role": {
             "title": "Source Role",
             "type": "string"
-          },
-          "source_version": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Source Version"
           }
         },
         "required": [
@@ -3011,12 +2976,11 @@
           "source_role",
           "match_method",
           "confidence",
-          "is_primary_source",
           "raw_payload_hash",
           "raw_data",
           "fetched_at",
           "imported_at",
-          "last_seen_at",
+          "observed_at",
           "linked_at"
         ],
         "title": "AdminFeatureDetailSourceRecord",
@@ -4287,6 +4251,17 @@
             ],
             "title": "Provider"
           },
+          "provider_dataset_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Dataset Id"
+          },
           "resolved_at": {
             "anyOf": [
               {
@@ -5394,24 +5369,18 @@
       },
       "Body_create_offline_upload_request_v1_admin_offline_uploads_post": {
         "properties": {
-          "dataset_key": {
-            "minLength": 1,
-            "title": "Dataset Key",
-            "type": "string"
-          },
           "file": {
             "contentMediaType": "application/octet-stream",
             "description": "JSON/JSONL FeatureBundle 또는 CSV/TSV tabular 파일",
             "title": "File",
             "type": "string"
           },
-          "provider": {
-            "minLength": 1,
-            "title": "Provider",
-            "type": "string"
+          "provider_dataset_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Provider Dataset Id",
+            "type": "integer"
           },
           "sync_scope": {
-            "default": "default",
             "minLength": 1,
             "title": "Sync Scope",
             "type": "string"
@@ -5419,8 +5388,8 @@
         },
         "required": [
           "file",
-          "provider",
-          "dataset_key"
+          "provider_dataset_id",
+          "sync_scope"
         ],
         "title": "Body_create_offline_upload_request_v1_admin_offline_uploads_post",
         "type": "object"
@@ -9362,6 +9331,10 @@
             "title": "Provider",
             "type": "string"
           },
+          "provider_dataset_id": {
+            "title": "Provider Dataset Id",
+            "type": "integer"
+          },
           "rank_score": {
             "title": "Rank Score",
             "type": "number"
@@ -9518,6 +9491,7 @@
           "address",
           "detail",
           "source_id",
+          "provider_dataset_id",
           "provider",
           "dataset_key",
           "source_name",
@@ -9634,12 +9608,6 @@
       "CuratedSourceCreateRequest": {
         "additionalProperties": false,
         "properties": {
-          "dataset_key": {
-            "maxLength": 200,
-            "minLength": 1,
-            "title": "Dataset Key",
-            "type": "string"
-          },
           "freshness_note": {
             "anyOf": [
               {
@@ -9703,11 +9671,10 @@
             ],
             "title": "Next Expected At"
           },
-          "provider": {
-            "maxLength": 128,
-            "minLength": 1,
-            "title": "Provider",
-            "type": "string"
+          "provider_dataset_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Provider Dataset Id",
+            "type": "integer"
           },
           "provider_status": {
             "default": "implemented",
@@ -9776,8 +9743,7 @@
           }
         },
         "required": [
-          "provider",
-          "dataset_key",
+          "provider_dataset_id",
           "source_name",
           "source_kind"
         ],
@@ -9983,12 +9949,6 @@
             ],
             "title": "Category"
           },
-          "dataset_key": {
-            "maxLength": 200,
-            "minLength": 1,
-            "title": "Dataset Key",
-            "type": "string"
-          },
           "default_action": {
             "default": "candidate",
             "enum": [
@@ -10053,8 +10013,7 @@
         },
         "required": [
           "theme_id",
-          "source_id",
-          "dataset_key"
+          "source_id"
         ],
         "title": "CuratedSourceRuleCreateRequest",
         "type": "object"
@@ -10072,19 +10031,6 @@
               }
             ],
             "title": "Category"
-          },
-          "dataset_key": {
-            "anyOf": [
-              {
-                "maxLength": 200,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Dataset Key"
           },
           "default_action": {
             "anyOf": [
@@ -10260,6 +10206,10 @@
             "title": "Provider",
             "type": "string"
           },
+          "provider_dataset_id": {
+            "title": "Provider Dataset Id",
+            "type": "integer"
+          },
           "region_scope": {
             "additionalProperties": true,
             "title": "Region Scope",
@@ -10292,6 +10242,7 @@
           "theme_id",
           "theme_slug",
           "source_id",
+          "provider_dataset_id",
           "provider",
           "dataset_key",
           "region_scope",
@@ -10419,6 +10370,10 @@
             "title": "Provider",
             "type": "string"
           },
+          "provider_dataset_id": {
+            "title": "Provider Dataset Id",
+            "type": "integer"
+          },
           "provider_status": {
             "title": "Provider Status",
             "type": "string"
@@ -10469,6 +10424,7 @@
         },
         "required": [
           "source_id",
+          "provider_dataset_id",
           "provider",
           "dataset_key",
           "source_name",
@@ -12075,6 +12031,17 @@
             ],
             "title": "Provider"
           },
+          "provider_dataset_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Dataset Id"
+          },
           "source_id": {
             "format": "uuid",
             "title": "Source Id",
@@ -12094,6 +12061,7 @@
         },
         "required": [
           "source_id",
+          "provider_dataset_id",
           "provider",
           "dataset_key",
           "source_name"
@@ -13654,6 +13622,28 @@
             "title": "Source Entity Id",
             "type": "string"
           },
+          "source_lat": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Lat"
+          },
+          "source_lon": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Lon"
+          },
           "source_name": {
             "title": "Source Name",
             "type": "string"
@@ -14851,10 +14841,6 @@
             "title": "Is Current",
             "type": "boolean"
           },
-          "is_primary_source": {
-            "title": "Is Primary Source",
-            "type": "boolean"
-          },
           "linked_at": {
             "format": "date-time",
             "title": "Linked At",
@@ -14864,66 +14850,22 @@
             "title": "Match Method",
             "type": "string"
           },
+          "observed_at": {
+            "format": "date-time",
+            "title": "Observed At",
+            "type": "string"
+          },
           "provider": {
             "title": "Provider",
             "type": "string"
-          },
-          "raw_address": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Raw Address"
           },
           "raw_data": {
             "additionalProperties": true,
             "title": "Raw Data",
             "type": "object"
           },
-          "raw_latitude": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Raw Latitude"
-          },
-          "raw_longitude": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Raw Longitude"
-          },
-          "raw_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Raw Name"
-          },
           "raw_payload_hash": {
             "title": "Raw Payload Hash",
-            "type": "string"
-          },
-          "record_last_seen_at": {
-            "format": "date-time",
-            "title": "Record Last Seen At",
             "type": "string"
           },
           "source_entity_id": {
@@ -14945,17 +14887,6 @@
           "source_role": {
             "title": "Source Role",
             "type": "string"
-          },
-          "source_version": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Source Version"
           }
         },
         "required": [
@@ -14968,21 +14899,15 @@
           "first_seen_at",
           "entity_last_seen_at",
           "source_record_key",
-          "source_version",
-          "raw_name",
-          "raw_address",
-          "raw_longitude",
-          "raw_latitude",
           "raw_data",
           "raw_payload_hash",
           "fetched_at",
           "imported_at",
-          "record_last_seen_at",
+          "observed_at",
           "expires_at",
           "source_role",
           "match_method",
           "confidence",
-          "is_primary_source",
           "linked_at",
           "is_current"
         ],
@@ -15375,6 +15300,36 @@
         "title": "FeatureTripCard",
         "type": "object"
       },
+      "FeatureUpdateDatasetMembership": {
+        "additionalProperties": false,
+        "description": "요청 생성 시점에 고정된 실행 dataset membership.",
+        "properties": {
+          "operation_key": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Operation Key",
+            "type": "string"
+          },
+          "provider_dataset_id": {
+            "minimum": 1.0,
+            "title": "Provider Dataset Id",
+            "type": "integer"
+          },
+          "sync_scope": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Sync Scope",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider_dataset_id",
+          "sync_scope",
+          "operation_key"
+        ],
+        "title": "FeatureUpdateDatasetMembership",
+        "type": "object"
+      },
       "FeatureUpdatePoint": {
         "additionalProperties": false,
         "description": "WGS84 lon/lat 좌표.",
@@ -15436,34 +15391,12 @@
         "additionalProperties": false,
         "description": "DB와 import job을 반드시 생성하는 feature update 요청.",
         "properties": {
-          "dataset_keys": {
-            "items": {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            "maxItems": 64,
-            "title": "Dataset Keys",
-            "type": "array",
-            "uniqueItems": true
-          },
           "priority": {
             "default": 50,
             "maximum": 1000.0,
             "minimum": 0.0,
             "title": "Priority",
             "type": "integer"
-          },
-          "providers": {
-            "items": {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            "maxItems": 32,
-            "title": "Providers",
-            "type": "array",
-            "uniqueItems": true
           },
           "reason": {
             "anyOf": [
@@ -15580,11 +15513,12 @@
             ],
             "title": "Dagster Run Id"
           },
-          "dataset_keys": {
+          "dataset_memberships": {
+            "description": "제출 시점에 고정된 canonical dataset/sync scope/operation snapshot.",
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/FeatureUpdateDatasetMembership"
             },
-            "title": "Dataset Keys",
+            "title": "Dataset Memberships",
             "type": "array"
           },
           "dispatch_requested_at": {
@@ -15599,18 +15533,6 @@
             ],
             "description": "같은 canonical 작업의 즉시 dispatch가 요청된 최초 시각.",
             "title": "Dispatch Requested At"
-          },
-          "effective_sync_scope": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "실행과 활성 작업 유일성에 실제 적용되는 정규화된 sync scope.",
-            "title": "Effective Sync Scope"
           },
           "error_message": {
             "anyOf": [
@@ -15665,13 +15587,6 @@
             "title": "Priority",
             "type": "integer"
           },
-          "providers": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Providers",
-            "type": "array"
-          },
           "reason": {
             "anyOf": [
               {
@@ -15689,18 +15604,6 @@
             "format": "uuid",
             "title": "Request Id",
             "type": "string"
-          },
-          "requested_sync_scope": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "운영자가 provider_dataset 요청에 명시한 원본 sync scope.",
-            "title": "Requested Sync Scope"
           },
           "result_kind": {
             "const": "request",
@@ -15796,10 +15699,7 @@
           "request_id",
           "scope_type",
           "scope",
-          "requested_sync_scope",
-          "effective_sync_scope",
-          "providers",
-          "dataset_keys",
+          "dataset_memberships",
           "update_policy",
           "run_mode",
           "priority",
@@ -15843,11 +15743,11 @@
         "additionalProperties": false,
         "description": "DB write 없이 scope 해석 결과만 반환하는 preview 표현.",
         "properties": {
-          "dataset_keys": {
+          "dataset_memberships": {
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/FeatureUpdateDatasetMembership"
             },
-            "title": "Dataset Keys",
+            "title": "Dataset Memberships",
             "type": "array"
           },
           "matched_scope": {
@@ -15858,13 +15758,6 @@
           "priority": {
             "title": "Priority",
             "type": "integer"
-          },
-          "providers": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Providers",
-            "type": "array"
           },
           "result_kind": {
             "const": "preview",
@@ -15933,8 +15826,7 @@
           "result_kind",
           "scope_type",
           "scope",
-          "providers",
-          "dataset_keys",
+          "dataset_memberships",
           "update_policy",
           "run_mode",
           "priority",
@@ -15947,34 +15839,12 @@
         "additionalProperties": false,
         "description": "DB write 없이 scope 해석 결과만 계산하는 요청.",
         "properties": {
-          "dataset_keys": {
-            "items": {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            "maxItems": 64,
-            "title": "Dataset Keys",
-            "type": "array",
-            "uniqueItems": true
-          },
           "priority": {
             "default": 50,
             "maximum": 1000.0,
             "minimum": 0.0,
             "title": "Priority",
             "type": "integer"
-          },
-          "providers": {
-            "items": {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            "maxItems": 32,
-            "title": "Providers",
-            "type": "array",
-            "uniqueItems": true
           },
           "run_mode": {
             "default": "queued",
@@ -16068,11 +15938,12 @@
             ],
             "title": "Dagster Run Id"
           },
-          "dataset_keys": {
+          "dataset_memberships": {
+            "description": "제출 시점에 고정된 canonical dataset/sync scope/operation snapshot.",
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/FeatureUpdateDatasetMembership"
             },
-            "title": "Dataset Keys",
+            "title": "Dataset Memberships",
             "type": "array"
           },
           "dispatch_requested_at": {
@@ -16087,18 +15958,6 @@
             ],
             "description": "같은 canonical 작업의 즉시 dispatch가 요청된 최초 시각.",
             "title": "Dispatch Requested At"
-          },
-          "effective_sync_scope": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "실행과 활성 작업 유일성에 실제 적용되는 정규화된 sync scope.",
-            "title": "Effective Sync Scope"
           },
           "error_message": {
             "anyOf": [
@@ -16153,13 +16012,6 @@
             "title": "Priority",
             "type": "integer"
           },
-          "providers": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Providers",
-            "type": "array"
-          },
           "reason": {
             "anyOf": [
               {
@@ -16177,18 +16029,6 @@
             "format": "uuid",
             "title": "Request Id",
             "type": "string"
-          },
-          "requested_sync_scope": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "운영자가 provider_dataset 요청에 명시한 원본 sync scope.",
-            "title": "Requested Sync Scope"
           },
           "run_mode": {
             "enum": [
@@ -16279,10 +16119,7 @@
           "request_id",
           "scope_type",
           "scope",
-          "requested_sync_scope",
-          "effective_sync_scope",
-          "providers",
-          "dataset_keys",
+          "dataset_memberships",
           "update_policy",
           "run_mode",
           "priority",
@@ -17133,6 +16970,17 @@
             ],
             "title": "Provider"
           },
+          "provider_dataset_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Dataset Id"
+          },
           "registered_by": {
             "title": "Registered By",
             "type": "string"
@@ -17168,6 +17016,7 @@
           "path",
           "is_directory",
           "kind",
+          "provider_dataset_id",
           "provider",
           "dataset_key",
           "status",
@@ -17863,10 +17712,6 @@
             ],
             "title": "Created By"
           },
-          "dataset_key": {
-            "title": "Dataset Key",
-            "type": "string"
-          },
           "detected_encoding": {
             "anyOf": [
               {
@@ -17908,9 +17753,9 @@
             "title": "Original Filename",
             "type": "string"
           },
-          "provider": {
-            "title": "Provider",
-            "type": "string"
+          "provider_dataset_id": {
+            "title": "Provider Dataset Id",
+            "type": "integer"
           },
           "status": {
             "title": "Status",
@@ -17954,8 +17799,7 @@
         },
         "required": [
           "upload_id",
-          "provider",
-          "dataset_key",
+          "provider_dataset_id",
           "sync_scope",
           "original_filename",
           "storage_backend",
@@ -18337,10 +18181,6 @@
             "title": "Feature Kind",
             "type": "string"
           },
-          "is_feature_load": {
-            "title": "Is Feature Load",
-            "type": "boolean"
-          },
           "is_refreshable": {
             "title": "Is Refreshable",
             "type": "boolean"
@@ -18364,7 +18204,6 @@
           "feature_kind",
           "provider_state_default_scope",
           "label",
-          "is_feature_load",
           "is_refreshable",
           "scope_refresh",
           "preview"
@@ -18450,8 +18289,10 @@
             "title": "Provider",
             "type": "string"
           },
-          "provider_issues": {
-            "$ref": "#/components/schemas/OpsIssueSummary"
+          "provider_dataset_id": {
+            "minimum": 1.0,
+            "title": "Provider Dataset Id",
+            "type": "integer"
           },
           "refresh_policy": {
             "anyOf": [
@@ -18494,6 +18335,7 @@
           }
         },
         "required": [
+          "provider_dataset_id",
           "provider",
           "dataset_key",
           "catalog_state",
@@ -18510,8 +18352,7 @@
           "execution_coverage",
           "run_history",
           "event_history",
-          "dataset_issues",
-          "provider_issues"
+          "dataset_issues"
         ],
         "title": "OpsDatasetDetailData",
         "type": "object"
@@ -18588,6 +18429,18 @@
             "title": "Event Id",
             "type": "string"
           },
+          "import_job_dataset_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Import Job Dataset Id"
+          },
           "job_id": {
             "format": "uuid",
             "title": "Job Id",
@@ -18605,6 +18458,17 @@
             "format": "date-time",
             "title": "Occurred At",
             "type": "string"
+          },
+          "provider_dataset_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Dataset Id"
           },
           "stage": {
             "anyOf": [
@@ -18625,6 +18489,8 @@
         "required": [
           "event_id",
           "job_id",
+          "import_job_dataset_id",
+          "provider_dataset_id",
           "sync_scope",
           "stage",
           "level",
@@ -18676,13 +18542,6 @@
             ],
             "title": "Dagster Run Status"
           },
-          "dataset_keys": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Dataset Keys",
-            "type": "array"
-          },
           "detail_url": {
             "title": "Detail Url",
             "type": "string"
@@ -18723,12 +18582,7 @@
             "title": "Kind",
             "type": "string"
           },
-          "operation_member_id": {
-            "format": "uuid",
-            "title": "Operation Member Id",
-            "type": "string"
-          },
-          "operation_registry_version": {
+          "operation_key": {
             "anyOf": [
               {
                 "type": "string"
@@ -18737,7 +18591,12 @@
                 "type": "null"
               }
             ],
-            "title": "Operation Registry Version"
+            "title": "Operation Key"
+          },
+          "operation_member_id": {
+            "format": "uuid",
+            "title": "Operation Member Id",
+            "type": "string"
           },
           "pair_status": {
             "enum": [
@@ -18758,13 +18617,6 @@
               "$ref": "#/components/schemas/OpsDatasetProviderDataset"
             },
             "title": "Provider Datasets",
-            "type": "array"
-          },
-          "providers": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Providers",
             "type": "array"
           },
           "started_at": {
@@ -18821,8 +18673,6 @@
           "pair_status",
           "operation_member_id",
           "sync_scope",
-          "providers",
-          "dataset_keys",
           "provider_datasets",
           "created_at",
           "started_at",
@@ -18830,7 +18680,7 @@
           "dagster_run_id",
           "dagster_run_status",
           "trigger_kind",
-          "operation_registry_version",
+          "operation_key",
           "error_message",
           "projected_job",
           "cancellation"
@@ -19022,8 +18872,10 @@
             "title": "Provider",
             "type": "string"
           },
-          "provider_issues": {
-            "$ref": "#/components/schemas/OpsIssueSummary"
+          "provider_dataset_id": {
+            "minimum": 1.0,
+            "title": "Provider Dataset Id",
+            "type": "integer"
           },
           "refresh_policy": {
             "anyOf": [
@@ -19048,6 +18900,7 @@
           }
         },
         "required": [
+          "provider_dataset_id",
           "provider",
           "dataset_key",
           "detail_url",
@@ -19066,8 +18919,7 @@
           "mutable",
           "catalog",
           "refresh_policy",
-          "dataset_issues",
-          "provider_issues"
+          "dataset_issues"
         ],
         "title": "OpsDatasetGridRow",
         "type": "object"
@@ -19173,6 +19025,11 @@
             "title": "Provider",
             "type": "string"
           },
+          "provider_dataset_id": {
+            "minimum": 1.0,
+            "title": "Provider Dataset Id",
+            "type": "integer"
+          },
           "returned_items": {
             "title": "Returned Items",
             "type": "integer"
@@ -19180,6 +19037,10 @@
           "source": {
             "const": "fixture",
             "title": "Source",
+            "type": "string"
+          },
+          "sync_scope": {
+            "title": "Sync Scope",
             "type": "string"
           },
           "total_items": {
@@ -19196,6 +19057,8 @@
           }
         },
         "required": [
+          "provider_dataset_id",
+          "sync_scope",
           "provider",
           "dataset_key",
           "source",
@@ -19330,7 +19193,7 @@
             "title": "Job Kind",
             "type": "string"
           },
-          "operation_registry_version": {
+          "operation_key": {
             "anyOf": [
               {
                 "type": "string"
@@ -19339,7 +19202,7 @@
                 "type": "null"
               }
             ],
-            "title": "Operation Registry Version"
+            "title": "Operation Key"
           },
           "progress": {
             "title": "Progress",
@@ -19393,7 +19256,7 @@
           "dagster_run_id",
           "dagster_run_status",
           "trigger_kind",
-          "operation_registry_version",
+          "operation_key",
           "depth",
           "detail_url"
         ],
@@ -19416,6 +19279,11 @@
           "provider": {
             "title": "Provider",
             "type": "string"
+          },
+          "provider_dataset_id": {
+            "minimum": 1.0,
+            "title": "Provider Dataset Id",
+            "type": "integer"
           },
           "status": {
             "enum": [
@@ -19441,6 +19309,7 @@
           }
         },
         "required": [
+          "provider_dataset_id",
           "provider",
           "dataset_key",
           "sync_scope",
@@ -19516,7 +19385,7 @@
           },
           "basis": {
             "enum": [
-              "dagster_definition_tags",
+              "dagster_operation_key_tag",
               "not_scheduled",
               "unknown"
             ],
@@ -19998,6 +19867,17 @@
               }
             ],
             "title": "Provider"
+          },
+          "provider_dataset_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Dataset Id"
           },
           "resolved_at": {
             "anyOf": [
@@ -21066,17 +20946,6 @@
             ],
             "title": "Dagster Run Status"
           },
-          "dataset_key": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Dataset Key"
-          },
           "detail_url": {
             "title": "Detail Url",
             "type": "string"
@@ -21153,7 +21022,7 @@
             ],
             "title": "Load Batch Id"
           },
-          "operation_registry_version": {
+          "operation_key": {
             "anyOf": [
               {
                 "type": "string"
@@ -21162,7 +21031,7 @@
                 "type": "null"
               }
             ],
-            "title": "Operation Registry Version"
+            "title": "Operation Key"
           },
           "operator": {
             "anyOf": [
@@ -21209,16 +21078,12 @@
             ],
             "title": "Progress"
           },
-          "provider": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Provider"
+          "provider_datasets": {
+            "items": {
+              "$ref": "#/components/schemas/PipelineProviderDatasetIdentityRecord"
+            },
+            "title": "Provider Datasets",
+            "type": "array"
           },
           "request_id": {
             "anyOf": [
@@ -21296,8 +21161,7 @@
           "status",
           "created_at",
           "job_kind",
-          "provider",
-          "dataset_key",
+          "provider_datasets",
           "progress",
           "current_stage",
           "scope_type",
@@ -21310,7 +21174,7 @@
           "dagster_run_id",
           "dagster_run_status",
           "trigger_kind",
-          "operation_registry_version",
+          "operation_key",
           "job_id",
           "request_id",
           "load_batch_id",
@@ -21372,14 +21236,6 @@
             ],
             "title": "Dagster Run Status"
           },
-          "dataset_keys": {
-            "description": "표시·dataset-only 필터용 정렬된 유효 dataset 목록.",
-            "items": {
-              "type": "string"
-            },
-            "title": "Dataset Keys",
-            "type": "array"
-          },
           "detail_url": {
             "title": "Detail Url",
             "type": "string"
@@ -21425,7 +21281,7 @@
             "title": "Linked Job Count",
             "type": "integer"
           },
-          "operation_registry_version": {
+          "operation_key": {
             "anyOf": [
               {
                 "type": "string"
@@ -21434,7 +21290,7 @@
                 "type": "null"
               }
             ],
-            "title": "Operation Registry Version"
+            "title": "Operation Key"
           },
           "operator": {
             "anyOf": [
@@ -21478,14 +21334,6 @@
               "$ref": "#/components/schemas/PipelineProviderDatasetIdentityRecord"
             },
             "title": "Provider Datasets",
-            "type": "array"
-          },
-          "providers": {
-            "description": "표시·provider-only 필터용 정렬된 유효 provider 목록.",
-            "items": {
-              "type": "string"
-            },
-            "title": "Providers",
             "type": "array"
           },
           "requested_job_id": {
@@ -21563,8 +21411,6 @@
           "id",
           "status",
           "created_at",
-          "providers",
-          "dataset_keys",
           "provider_datasets",
           "progress",
           "current_stage",
@@ -21578,7 +21424,7 @@
           "dagster_run_id",
           "dagster_run_status",
           "trigger_kind",
-          "operation_registry_version",
+          "operation_key",
           "requested_job_id",
           "linked_job_count",
           "projected_job",
@@ -21672,17 +21518,6 @@
             ],
             "title": "Dagster Run Status"
           },
-          "dataset_key": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Dataset Key"
-          },
           "error_message": {
             "anyOf": [
               {
@@ -21739,7 +21574,7 @@
             ],
             "title": "Load Batch Id"
           },
-          "operation_registry_version": {
+          "operation_key": {
             "anyOf": [
               {
                 "type": "string"
@@ -21748,7 +21583,7 @@
                 "type": "null"
               }
             ],
-            "title": "Operation Registry Version"
+            "title": "Operation Key"
           },
           "parent_job_id": {
             "anyOf": [
@@ -21771,16 +21606,12 @@
             "title": "Progress",
             "type": "integer"
           },
-          "provider": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Provider"
+          "provider_datasets": {
+            "items": {
+              "$ref": "#/components/schemas/PipelineProviderDatasetIdentityRecord"
+            },
+            "title": "Provider Datasets",
+            "type": "array"
           },
           "source_checksum": {
             "anyOf": [
@@ -21840,10 +21671,9 @@
           "source_checksum",
           "error_message",
           "dagster_run_id",
-          "provider",
-          "dataset_key",
+          "provider_datasets",
           "trigger_kind",
-          "operation_registry_version",
+          "operation_key",
           "dagster_run_status",
           "created_at",
           "started_at",
@@ -21868,17 +21698,6 @@
             ],
             "title": "Code"
           },
-          "dataset_key": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Dataset Key"
-          },
           "event_id": {
             "format": "uuid",
             "title": "Event Id",
@@ -21894,6 +21713,18 @@
               }
             ],
             "title": "Feature Id"
+          },
+          "import_job_dataset_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Import Job Dataset Id"
           },
           "job_id": {
             "format": "uuid",
@@ -21918,16 +21749,16 @@
             "title": "Payload",
             "type": "object"
           },
-          "provider": {
+          "provider_dataset_id": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "integer"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Provider"
+            "title": "Provider Dataset Id"
           },
           "stage": {
             "anyOf": [
@@ -21939,25 +21770,13 @@
               }
             ],
             "title": "Stage"
-          },
-          "sync_scope": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Sync Scope"
           }
         },
         "required": [
           "event_id",
           "job_id",
-          "provider",
-          "dataset_key",
-          "sync_scope",
+          "import_job_dataset_id",
+          "provider_dataset_id",
           "feature_id",
           "stage",
           "level",
@@ -22213,7 +22032,7 @@
             ],
             "title": "Load Batch Id"
           },
-          "operation_registry_version": {
+          "operation_key": {
             "anyOf": [
               {
                 "type": "string"
@@ -22222,7 +22041,7 @@
                 "type": "null"
               }
             ],
-            "title": "Operation Registry Version"
+            "title": "Operation Key"
           },
           "parent_job_id": {
             "anyOf": [
@@ -22288,7 +22107,7 @@
           "dagster_run_id",
           "dagster_run_status",
           "trigger_kind",
-          "operation_registry_version",
+          "operation_key",
           "load_batch_id",
           "parent_job_id",
           "depth",
@@ -22314,6 +22133,11 @@
             "title": "Provider",
             "type": "string"
           },
+          "provider_dataset_id": {
+            "minimum": 1.0,
+            "title": "Provider Dataset Id",
+            "type": "integer"
+          },
           "status": {
             "enum": [
               "queued",
@@ -22338,6 +22162,7 @@
           }
         },
         "required": [
+          "provider_dataset_id",
           "provider",
           "dataset_key",
           "sync_scope",
@@ -23622,32 +23447,24 @@
       },
       "ProviderDatasetScope": {
         "additionalProperties": false,
-        "description": "특정 provider/dataset 자체 갱신 scope.",
+        "description": "특정 영속 dataset membership의 직접 갱신 scope.\n\n자연키는 API 경계에 다시 노출하지 않는다. ``provider_dataset_id``와 정규\n``sync_scope``와 ``operation_key``는 이 요청의 immutable member identity다.",
         "properties": {
-          "dataset_key": {
+          "operation_key": {
             "maxLength": 128,
             "minLength": 1,
-            "title": "Dataset Key",
+            "title": "Operation Key",
             "type": "string"
           },
-          "provider": {
-            "maxLength": 128,
-            "minLength": 1,
-            "title": "Provider",
-            "type": "string"
+          "provider_dataset_id": {
+            "minimum": 1.0,
+            "title": "Provider Dataset Id",
+            "type": "integer"
           },
           "sync_scope": {
-            "anyOf": [
-              {
-                "maxLength": 128,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Sync Scope"
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Sync Scope",
+            "type": "string"
           },
           "type": {
             "const": "provider_dataset",
@@ -23657,8 +23474,9 @@
         },
         "required": [
           "type",
-          "provider",
-          "dataset_key"
+          "provider_dataset_id",
+          "sync_scope",
+          "operation_key"
         ],
         "title": "ProviderDatasetScope",
         "type": "object"
@@ -23844,8 +23662,16 @@
             "type": "string"
           },
           "dataset_key": {
-            "title": "Dataset Key",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "provider_datasets join에서만 얻는 표시용 dataset key.",
+            "title": "Dataset Key"
           },
           "enabled": {
             "title": "Enabled",
@@ -23911,8 +23737,22 @@
             "title": "Optimal Interval Seconds"
           },
           "provider": {
-            "title": "Provider",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "provider_datasets join에서만 얻는 표시용 provider.",
+            "title": "Provider"
+          },
+          "provider_dataset_id": {
+            "description": "정책 저장·변경의 유일한 canonical provider dataset 식별자.",
+            "minimum": 1.0,
+            "title": "Provider Dataset Id",
+            "type": "integer"
           },
           "rate_limit_source": {
             "additionalProperties": true,
@@ -23962,8 +23802,7 @@
           }
         },
         "required": [
-          "provider",
-          "dataset_key",
+          "provider_dataset_id",
           "source_kind",
           "targeted_policy",
           "max_concurrent",
@@ -27020,6 +26859,17 @@
             ],
             "title": "Provider"
           },
+          "provider_dataset_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Dataset Id"
+          },
           "source_id": {
             "anyOf": [
               {
@@ -27106,6 +26956,7 @@
           "theme_name",
           "theme_group",
           "source_id",
+          "provider_dataset_id",
           "provider",
           "dataset_key",
           "source_name",
@@ -27314,6 +27165,17 @@
             ],
             "title": "Provider"
           },
+          "provider_dataset_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Dataset Id"
+          },
           "reuse_policy": {
             "enum": [
               "allowed",
@@ -27390,6 +27252,7 @@
           "theme_slug",
           "theme_name",
           "theme_group",
+          "provider_dataset_id",
           "provider",
           "dataset_key",
           "source_name",
@@ -28529,18 +28392,6 @@
             "title": "Dataset Key",
             "type": "string"
           },
-          "expires_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Expires At"
-          },
           "fetched_at": {
             "anyOf": [
               {
@@ -28565,17 +28416,6 @@
             ],
             "title": "Imported At"
           },
-          "is_primary_source": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Is Primary Source"
-          },
           "linked_at": {
             "anyOf": [
               {
@@ -28599,58 +28439,26 @@
             ],
             "title": "Match Method"
           },
-          "provider": {
-            "title": "Provider",
-            "type": "string"
-          },
-          "raw_address": {
+          "observed_at": {
             "anyOf": [
               {
+                "format": "date-time",
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Raw Address"
+            "title": "Observed At"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
           },
           "raw_data": {
             "additionalProperties": true,
             "title": "Raw Data",
             "type": "object"
-          },
-          "raw_latitude": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Raw Latitude"
-          },
-          "raw_longitude": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Raw Longitude"
-          },
-          "raw_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Raw Name"
           },
           "raw_payload_hash": {
             "title": "Raw Payload Hash",
@@ -28678,17 +28486,6 @@
               }
             ],
             "title": "Source Role"
-          },
-          "source_version": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Source Version"
           }
         },
         "required": [
@@ -30502,34 +30299,19 @@
           },
           {
             "in": "query",
-            "name": "provider",
+            "name": "provider_dataset_id",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "exclusiveMinimum": 0,
+                  "type": "integer"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "title": "Provider"
-            }
-          },
-          {
-            "in": "query",
-            "name": "dataset_key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Dataset Key"
+              "title": "Provider Dataset Id"
             }
           },
           {
@@ -30826,34 +30608,19 @@
         "parameters": [
           {
             "in": "query",
-            "name": "provider",
+            "name": "provider_dataset_id",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "exclusiveMinimum": 0,
+                  "type": "integer"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "title": "Provider"
-            }
-          },
-          {
-            "in": "query",
-            "name": "dataset_key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Dataset Key"
+              "title": "Provider Dataset Id"
             }
           },
           {
@@ -31403,18 +31170,19 @@
           },
           {
             "in": "query",
-            "name": "provider",
+            "name": "provider_dataset_id",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "exclusiveMinimum": 0,
+                  "type": "integer"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "title": "Provider"
+              "title": "Provider Dataset Id"
             }
           },
           {
@@ -32695,45 +32463,22 @@
             }
           },
           {
-            "description": "primary provider 반복 필터",
+            "description": "primary provider dataset canonical ID 필터",
             "in": "query",
-            "name": "provider",
+            "name": "provider_dataset_id",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "items": {
-                    "type": "string"
-                  },
-                  "type": "array"
+                  "minimum": 1,
+                  "type": "integer"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "primary provider 반복 필터",
-              "title": "Provider"
-            }
-          },
-          {
-            "description": "primary dataset_key 반복 필터",
-            "in": "query",
-            "name": "dataset_key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "items": {
-                    "type": "string"
-                  },
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "primary dataset_key 반복 필터",
-              "title": "Dataset Key"
+              "description": "primary provider dataset canonical ID 필터",
+              "title": "Provider Dataset Id"
             }
           },
           {
@@ -33396,34 +33141,19 @@
           },
           {
             "in": "query",
-            "name": "provider",
+            "name": "provider_dataset_id",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "exclusiveMinimum": 0,
+                  "type": "integer"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "title": "Provider"
-            }
-          },
-          {
-            "in": "query",
-            "name": "dataset_key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Dataset Key"
+              "title": "Provider Dataset Id"
             }
           },
           {
@@ -36113,7 +35843,7 @@
     },
     "/v1/admin/files": {
       "get": {
-        "description": "레지스트리 파일 목록 — kind/status/provider/location/기간 필터 + 검색.",
+        "description": "레지스트리 파일 목록 — kind/status/dataset/location/기간 필터 + 검색.",
         "operationId": "list_files_v1_admin_files_get",
         "parameters": [
           {
@@ -36156,18 +35886,19 @@
           },
           {
             "in": "query",
-            "name": "provider",
+            "name": "provider_dataset_id",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "exclusiveMinimum": 0,
+                  "type": "integer"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "title": "Provider"
+              "title": "Provider Dataset Id"
             }
           },
           {
@@ -36699,34 +36430,19 @@
           },
           {
             "in": "query",
-            "name": "provider",
+            "name": "provider_dataset_id",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "exclusiveMinimum": 0,
+                  "type": "integer"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "title": "Provider"
-            }
-          },
-          {
-            "in": "query",
-            "name": "dataset_key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Dataset Key"
+              "title": "Provider Dataset Id"
             }
           },
           {
@@ -37149,34 +36865,19 @@
           },
           {
             "in": "query",
-            "name": "provider",
+            "name": "provider_dataset_id",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "exclusiveMinimum": 0,
+                  "type": "integer"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "title": "Provider"
-            }
-          },
-          {
-            "in": "query",
-            "name": "dataset_key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Dataset Key"
+              "title": "Provider Dataset Id"
             }
           },
           {
@@ -39069,34 +38770,19 @@
         "parameters": [
           {
             "in": "query",
-            "name": "provider",
+            "name": "provider_dataset_id",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "exclusiveMinimum": 0,
+                  "type": "integer"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "title": "Provider"
-            }
-          },
-          {
-            "in": "query",
-            "name": "dataset_key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Dataset Key"
+              "title": "Provider Dataset Id"
             }
           },
           {
@@ -39297,18 +38983,19 @@
           },
           {
             "in": "query",
-            "name": "provider",
+            "name": "provider_dataset_id",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "exclusiveMinimum": 0,
+                  "type": "integer"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "title": "Provider"
+              "title": "Provider Dataset Id"
             }
           },
           {
@@ -39504,18 +39191,19 @@
           },
           {
             "in": "query",
-            "name": "provider",
+            "name": "provider_dataset_id",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "exclusiveMinimum": 0,
+                  "type": "integer"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "title": "Provider"
+              "title": "Provider Dataset Id"
             }
           },
           {
@@ -39890,7 +39578,7 @@
             }
           },
           {
-            "description": "primary provider(소스) 필터 (반복 가능). 미지정 시 전체. primary source(provider_sync.is_primary_source) 기준.",
+            "description": "primary provider(소스) 필터 (반복 가능). 미지정 시 전체. source_role='primary' 기준.",
             "in": "query",
             "name": "provider",
             "required": false,
@@ -39906,7 +39594,7 @@
                   "type": "null"
                 }
               ],
-              "description": "primary provider(소스) 필터 (반복 가능). 미지정 시 전체. primary source(provider_sync.is_primary_source) 기준.",
+              "description": "primary provider(소스) 필터 (반복 가능). 미지정 시 전체. source_role='primary' 기준.",
               "title": "Provider"
             }
           },
@@ -42863,34 +42551,19 @@
           },
           {
             "in": "query",
-            "name": "provider",
+            "name": "provider_dataset_id",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "exclusiveMinimum": 0,
+                  "type": "integer"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "title": "Provider"
-            }
-          },
-          {
-            "in": "query",
-            "name": "dataset_key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Dataset Key"
+              "title": "Provider Dataset Id"
             }
           },
           {
@@ -43454,7 +43127,7 @@
     },
     "/v1/ops/datasets": {
       "get": {
-        "description": "freshness SLA, Dagster 실제 다음 schedule tick, 최신 DB-recorded execution, dataset/provider integrity issue를 batch 조회한다. `eligible_after`는 backoff/rate-limit 시각이며 `schedule.next_scheduled_at`과 의미가 다르다.",
+        "description": "freshness SLA, Dagster 실제 다음 schedule tick, 최신 DB-recorded execution, 각 `provider_dataset_id`에 귀속된 integrity issue 집계를 batch 조회한다. provider-only issue group은 만들지 않는다. `eligible_after`는 backoff/rate-limit 시각이며 `schedule.next_scheduled_at`과 의미가 다르다.",
         "operationId": "list_datasets_grid_v1_ops_datasets_get",
         "parameters": [
           {
@@ -43543,28 +43216,126 @@
         ]
       }
     },
-    "/v1/ops/datasets/detail": {
-      "get": {
-        "operationId": "get_dataset_detail_v1_ops_datasets_detail_get",
+    "/v1/ops/datasets/refresh-policy": {
+      "put": {
+        "operationId": "put_dataset_refresh_policy_v1_ops_datasets_refresh_policy_put",
         "parameters": [
           {
             "in": "query",
-            "name": "provider",
+            "name": "provider_dataset_id",
             "required": true,
             "schema": {
-              "minLength": 1,
-              "title": "Provider",
-              "type": "string"
+              "minimum": 1,
+              "title": "Provider Dataset Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProviderRefreshPolicyUpsertRequest"
+              }
             }
           },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpsDatasetRefreshPolicyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "X-Kor-Travel-Map-Ops-Token 누락"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "token 불일치 또는 token에 결박되지 않은 scope/method/exact path 요청"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "canonical provider_dataset_id 없음"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderRefreshPolicyConflictProblem"
+                }
+              }
+            },
+            "description": "revision CAS 불일치·소진, source_kind 변경 또는 카탈로그에서 제거된 orphan row. 현재 record/revision 또는 mutation_disabled_reason 포함."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "X-Kor-Travel-Map-Ops-Scope 누락 또는 알 수 없는 scope"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
           {
-            "in": "query",
-            "name": "dataset_key",
+            "AdminBFF": []
+          }
+        ],
+        "summary": "canonical dataset refresh policy upsert",
+        "tags": [
+          "ops-datasets"
+        ]
+      }
+    },
+    "/v1/ops/datasets/{provider_dataset_id}": {
+      "get": {
+        "operationId": "get_dataset_detail_v1_ops_datasets__provider_dataset_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider_dataset_id",
             "required": true,
             "schema": {
-              "minLength": 1,
-              "title": "Dataset Key",
-              "type": "string"
+              "minimum": 1,
+              "title": "Provider Dataset Id",
+              "type": "integer"
             }
           },
           {
@@ -43673,28 +43444,28 @@
         ]
       }
     },
-    "/v1/ops/datasets/preview": {
+    "/v1/ops/datasets/{provider_dataset_id}/preview": {
       "post": {
         "description": "typed body(`source=fixture`, `max_items`)만 받는다. 외부 provider 호출 budget은 0이다. max_items는 응답 크기 cap이며 변환 CPU budget은 아니다.",
-        "operationId": "post_dataset_preview_v1_ops_datasets_preview_post",
+        "operationId": "post_dataset_preview_v1_ops_datasets__provider_dataset_id__preview_post",
         "parameters": [
           {
-            "in": "query",
-            "name": "provider",
+            "in": "path",
+            "name": "provider_dataset_id",
             "required": true,
             "schema": {
-              "minLength": 1,
-              "title": "Provider",
-              "type": "string"
+              "minimum": 1,
+              "title": "Provider Dataset Id",
+              "type": "integer"
             }
           },
           {
             "in": "query",
-            "name": "dataset_key",
+            "name": "sync_scope",
             "required": true,
             "schema": {
               "minLength": 1,
-              "title": "Dataset Key",
+              "title": "Sync Scope",
               "type": "string"
             }
           }
@@ -43797,124 +43568,6 @@
           }
         ],
         "summary": "fixture ETL 변환 preview",
-        "tags": [
-          "ops-datasets"
-        ]
-      }
-    },
-    "/v1/ops/datasets/refresh-policy": {
-      "put": {
-        "operationId": "put_dataset_refresh_policy_v1_ops_datasets_refresh_policy_put",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "provider",
-            "required": true,
-            "schema": {
-              "minLength": 1,
-              "title": "Provider",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "dataset_key",
-            "required": true,
-            "schema": {
-              "minLength": 1,
-              "title": "Dataset Key",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ProviderRefreshPolicyUpsertRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OpsDatasetRefreshPolicyResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "401": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "X-Kor-Travel-Map-Ops-Token 누락"
-          },
-          "403": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "token 불일치 또는 token에 결박되지 않은 scope/method/exact path 요청"
-          },
-          "404": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "dataset 없음"
-          },
-          "409": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProviderRefreshPolicyConflictProblem"
-                }
-              }
-            },
-            "description": "revision CAS 불일치·소진, source_kind 변경 또는 카탈로그에서 제거된 orphan row. 현재 record/revision 또는 mutation_disabled_reason 포함."
-          },
-          "422": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "X-Kor-Travel-Map-Ops-Scope 누락 또는 알 수 없는 scope"
-          },
-          "default": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
-          }
-        },
-        "security": [
-          {
-            "AdminBFF": []
-          }
-        ],
-        "summary": "canonical dataset refresh policy upsert",
         "tags": [
           "ops-datasets"
         ]
@@ -44331,7 +43984,7 @@
     },
     "/v1/ops/pipeline/events": {
       "get": {
-        "description": "어느 job인지 모르는 상태에서 최근 error를 훑는 전역 `ops.import_job_events` 스트림 — level/provider/dataset/scope/job 필터. sync_scope는 provider와 dataset_key를 함께 요구하며 canonical feature-update job/request의 effective scope를 조회한다.",
+        "description": "어느 job인지 모르는 상태에서 최근 error를 훑는 전역 `ops.import_job_events` 스트림 — level/provider-dataset/scope/job 필터. sync_scope는 provider_dataset_id를 함께 요구하며 canonical feature-update job/request의 effective scope를 조회한다.",
         "operationId": "list_pipeline_events_v1_ops_pipeline_events_get",
         "parameters": [
           {
@@ -44376,36 +44029,19 @@
           },
           {
             "in": "query",
-            "name": "provider",
+            "name": "provider_dataset_id",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "minLength": 1,
-                  "type": "string"
+                  "minimum": 1,
+                  "type": "integer"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "title": "Provider"
-            }
-          },
-          {
-            "in": "query",
-            "name": "dataset_key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "minLength": 1,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Dataset Key"
+              "title": "Provider Dataset Id"
             }
           },
           {
@@ -44541,7 +44177,7 @@
     },
     "/v1/ops/pipeline/executions": {
       "get": {
-        "description": "import job hierarchy를 job별 nearest request anchor branch와 standalone partition으로 접어 root만 반환한다. keyset total order는 `(created_at DESC, id DESC, kind DESC)`이며 Dagster run은 각 root/대표 job의 `dagster_run_id`로만 연결한다. `sync_scope`는 `provider`와 `dataset_key`를 함께 요구하며 dataset 기본 state의 logical scope alias를 적용한다. `load_batch_id`와 `parent_job_id`는 root의 전체 component membership에 대해 cursor/LIMIT 전에 적용한다.",
+        "description": "import job hierarchy를 job별 nearest request anchor branch와 standalone partition으로 접어 root만 반환한다. keyset total order는 `(created_at DESC, id DESC, kind DESC)`이며 Dagster run은 각 root/대표 job의 `dagster_run_id`로만 연결한다. `sync_scope`는 `provider_dataset_id`를 함께 요구하며 dataset 기본 state의 logical scope alias를 적용한다. `load_batch_id`와 `parent_job_id`는 root의 전체 component membership에 대해 cursor/LIMIT 전에 적용한다.",
         "operationId": "list_executions_v1_ops_pipeline_executions_get",
         "parameters": [
           {
@@ -44589,40 +44225,23 @@
           },
           {
             "in": "query",
-            "name": "provider",
+            "name": "provider_dataset_id",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "minLength": 1,
-                  "type": "string"
+                  "minimum": 1,
+                  "type": "integer"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "title": "Provider"
+              "title": "Provider Dataset Id"
             }
           },
           {
-            "in": "query",
-            "name": "dataset_key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "minLength": 1,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Dataset Key"
-            }
-          },
-          {
-            "description": "provider+dataset exact pair의 논리 scope. 두 query를 함께 주어야 하며 기본 state는 dataset_wide/NULL 저장 표현을 같은 이력으로 조회한다.",
+            "description": "canonical provider dataset의 논리 scope. ID query와 함께 주어야 하며 기본 state는 dataset_wide/NULL 저장 표현을 같은 이력으로 조회한다.",
             "in": "query",
             "name": "sync_scope",
             "required": false,
@@ -44636,7 +44255,7 @@
                   "type": "null"
                 }
               ],
-              "description": "provider+dataset exact pair의 논리 scope. 두 query를 함께 주어야 하며 기본 state는 dataset_wide/NULL 저장 표현을 같은 이력으로 조회한다.",
+              "description": "canonical provider dataset의 논리 scope. ID query와 함께 주어야 하며 기본 state는 dataset_wide/NULL 저장 표현을 같은 이력으로 조회한다.",
               "title": "Sync Scope"
             }
           },

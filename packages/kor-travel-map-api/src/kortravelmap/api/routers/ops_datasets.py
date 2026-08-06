@@ -9,7 +9,8 @@ from __future__ import annotations
 from time import perf_counter
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request, status
+from kortravelmap.core.sync_scope import parse_canonical_sync_scope
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api.auth import OPS_AUTH_ERROR_RESPONSES
@@ -38,7 +39,7 @@ from kortravelmap.api.ops_dataset_service import (
     load_datasets_grid,
     upsert_dataset_refresh_policy,
 )
-from kortravelmap.api.provider_catalog import find_catalog_entry
+from kortravelmap.api.provider_catalog import list_provider_dataset_catalog
 from kortravelmap.api.provider_refresh_schema import (
     ProviderRefreshPolicyConflictProblem,
     ProviderRefreshPolicyUpsertRequest,
@@ -67,7 +68,8 @@ router = APIRouter(
     summary="provider×dataset×sync_scope 상태 그리드",
     description=(
         "freshness SLA, Dagster 실제 다음 schedule tick, 최신 DB-recorded execution, "
-        "dataset/provider integrity issue를 batch 조회한다. `eligible_after`는 "
+        "각 `provider_dataset_id`에 귀속된 integrity issue 집계를 batch 조회한다. "
+        "provider-only issue group은 만들지 않는다. `eligible_after`는 "
         "backoff/rate-limit 시각이며 `schedule.next_scheduled_at`과 의미가 다르다."
     ),
 )
@@ -89,7 +91,7 @@ async def list_datasets_grid(
 
 
 @router.get(
-    "/detail",
+    "/{provider_dataset_id:int}",
     response_model=OpsDatasetDetailResponse,
     summary="dataset 상세 — scope 상태·실행·이벤트·정책",
     responses={
@@ -99,8 +101,7 @@ async def list_datasets_grid(
 )
 async def get_dataset_detail(
     request: Request,
-    provider: Annotated[str, Query(min_length=1)],
-    dataset_key: Annotated[str, Query(min_length=1)],
+    provider_dataset_id: Annotated[int, Path(ge=1)],
     sync_scope: Annotated[str, Query(min_length=1)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> OpsDatasetDetailResponse:
@@ -111,8 +112,7 @@ async def get_dataset_detail(
             session,
             settings=settings,
             dagster_client=dagster_client,
-            provider=provider,
-            dataset_key=dataset_key,
+            provider_dataset_id=provider_dataset_id,
             sync_scope=sync_scope,
         )
     except DatasetNotFoundError as exc:
@@ -133,7 +133,7 @@ async def get_dataset_detail(
     response_model=OpsDatasetRefreshPolicyResponse,
     summary="canonical dataset refresh policy upsert",
     responses={
-        404: {"description": "dataset 없음"},
+        404: {"description": "canonical provider_dataset_id 없음"},
         409: {
             "model": ProviderRefreshPolicyConflictProblem,
             "description": (
@@ -145,8 +145,7 @@ async def get_dataset_detail(
     },
 )
 async def put_dataset_refresh_policy(
-    provider: Annotated[str, Query(min_length=1)],
-    dataset_key: Annotated[str, Query(min_length=1)],
+    provider_dataset_id: Annotated[int, Query(ge=1)],
     body: ProviderRefreshPolicyUpsertRequest,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> OpsDatasetRefreshPolicyResponse:
@@ -154,8 +153,7 @@ async def put_dataset_refresh_policy(
     try:
         policy = await upsert_dataset_refresh_policy(
             session,
-            provider=provider,
-            dataset_key=dataset_key,
+            provider_dataset_id=provider_dataset_id,
             body=body,
         )
     except DatasetNotFoundError as exc:
@@ -242,7 +240,7 @@ async def put_dataset_refresh_policy(
 
 
 @router.post(
-    "/preview",
+    "/{provider_dataset_id:int}/preview",
     response_model=OpsDatasetPreviewResponse,
     summary="fixture ETL 변환 preview",
     description=(
@@ -256,18 +254,40 @@ async def put_dataset_refresh_policy(
     },
 )
 async def post_dataset_preview(
-    provider: Annotated[str, Query(min_length=1)],
-    dataset_key: Annotated[str, Query(min_length=1)],
+    provider_dataset_id: Annotated[int, Path(ge=1)],
+    sync_scope: Annotated[str, Query(min_length=1)],
     body: Annotated[OpsDatasetPreviewRequest, Body()],
+    session: Annotated[AsyncSession, Depends(get_session)],
 ) -> OpsDatasetPreviewResponse:
     started_at = perf_counter()
-    entry = find_catalog_entry(provider, dataset_key)
+    try:
+        canonical_scope = parse_canonical_sync_scope(sync_scope).value
+        if canonical_scope != sync_scope:
+            raise ValueError("sync_scope must be canonical")
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    entry = next(
+        (
+            item
+            for item in await list_provider_dataset_catalog(session)
+            if item.provider_dataset_id == provider_dataset_id
+        ),
+        None,
+    )
     if entry is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"등록되지 않은 dataset: {provider!r}/{dataset_key!r}",
+            detail=f"등록되지 않은 dataset: provider_dataset_id={provider_dataset_id!r}",
         )
-    if entry.preview != "fixture":
+    if canonical_scope not in entry.refresh_scopes:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=(
+                "등록되지 않은 dataset scope: "
+                f"provider_dataset_id={provider_dataset_id!r}/{canonical_scope!r}"
+            ),
+        )
+    if not entry.has_fixture_preview:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={
@@ -278,8 +298,8 @@ async def post_dataset_preview(
         )
     try:
         result = await run_dataset_fixture_preview(
-            provider,
-            dataset_key,
+            entry.provider,
+            entry.dataset_key,
             max_items=body.max_items,
         )
     except KeyError as exc:
@@ -300,6 +320,8 @@ async def post_dataset_preview(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return OpsDatasetPreviewResponse(
         data=OpsDatasetPreviewData(
+            provider_dataset_id=provider_dataset_id,
+            sync_scope=canonical_scope,
             provider=result.provider,
             dataset_key=result.dataset,
             source="fixture",

@@ -171,8 +171,8 @@ function EnrichmentDetailDialog({
   const hasMap =
     typeof target?.lon === "number" &&
     typeof target.lat === "number" &&
-    typeof source?.raw_longitude === "number" &&
-    typeof source.raw_latitude === "number";
+    typeof detail?.source_lon === "number" &&
+    typeof detail.source_lat === "number";
   return (
     <Dialog
       open
@@ -258,8 +258,8 @@ function EnrichmentDetailDialog({
                     <VWorldMapView
                       apiKey={VWORLD_KEY}
                       center={[
-                        ((target.lon ?? 0) + (source.raw_longitude ?? 0)) / 2,
-                        ((target.lat ?? 0) + (source.raw_latitude ?? 0)) / 2,
+                        ((target.lon ?? 0) + (detail.source_lon ?? 0)) / 2,
+                        ((target.lat ?? 0) + (detail.source_lat ?? 0)) / 2,
                       ]}
                       className="absolute inset-0 h-full w-full"
                       key={detail.review_id}
@@ -267,7 +267,7 @@ function EnrichmentDetailDialog({
                       onLoad={(map) =>
                         fitMapToPoints(map, [
                           [target.lon ?? 0, target.lat ?? 0],
-                          [source.raw_longitude ?? 0, source.raw_latitude ?? 0],
+                          [detail.source_lon ?? 0, detail.source_lat ?? 0],
                         ])
                       }
                       scale
@@ -281,9 +281,9 @@ function EnrichmentDetailDialog({
                         title={`datagokr: ${target.name}`}
                       />
                       <VWorldMarker
-                        lngLat={[source.raw_longitude ?? 0, source.raw_latitude ?? 0]}
+                        lngLat={[detail.source_lon ?? 0, detail.source_lat ?? 0]}
                         markerColor="#dc2626"
-                        title={`visitkorea: ${source.raw_name ?? detail.source_name}`}
+                        title={`visitkorea: ${detail.source_name}`}
                       />
                     </VWorldMapView>
                   </div>
@@ -342,7 +342,7 @@ function EnrichmentDetailDialog({
                       2차 visitkorea
                     </div>
                     <h3 className="break-words text-base font-semibold">
-                      {source.raw_name ?? detail.source_name}
+                      {detail.source_name}
                     </h3>
                     <div className="break-all font-mono text-xs text-muted-foreground">
                       {source.provider} · {source.source_entity_id}
@@ -359,13 +359,12 @@ function EnrichmentDetailDialog({
                     />
                     <DetailMetric
                       label="경도"
-                      value={source.raw_longitude?.toFixed(6)}
+                      value={detail.source_lon?.toFixed(6)}
                     />
                     <DetailMetric
                       label="위도"
-                      value={source.raw_latitude?.toFixed(6)}
+                      value={detail.source_lat?.toFixed(6)}
                     />
-                    <DetailMetric label="주소" value={source.raw_address} />
                     <DetailMetric label="레코드" value={source.source_record_key} />
                   </dl>
                   <div className="mt-4">

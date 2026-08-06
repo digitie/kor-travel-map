@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Final, Literal
 
@@ -277,13 +278,48 @@ def ensure_feature_address_valid(
 
 
 def _provider_address(bundle: FeatureBundle) -> str | None:
-    record = bundle.source_record
     address = bundle.feature.address
-    raw = record.raw_address or address.road or address.legal
+    raw = _raw_payload_address(bundle.source_record.raw_data)
+    raw = raw or address.road or address.legal
     if raw is None:
         return None
     normalized = " ".join(str(raw).split())
     return normalized or None
+
+
+def _raw_payload_address(raw_data: Mapping[str, object]) -> str | None:
+    """원 provider payload에서만 주소 단서를 읽는다.
+
+    ``SourceRecord``에는 표준화한 ``raw_address`` 복사본을 저장하지 않는다. 좌표가
+    없는 provider row의 사전 적재 검증에 위치 단서가 필요할 때만, provider 원 payload의
+    주소 필드 또는 고속도로 돌발의 원 노선/지점/방향 필드를 읽는다.
+    """
+    for key in (
+        "address",
+        "addr",
+        "address_road",
+        "address_jibun",
+        "rdnmadr",
+        "lnmadr",
+        "location_text",
+        "region_name",
+    ):
+        value = raw_data.get(key)
+        if value is not None and str(value).strip():
+            return str(value)
+
+    # EX 실시간 돌발 row는 원천에 단일 주소 필드가 없다. 아래 세 원 필드는 각각
+    # 원 payload에서 보존되며, 검증 순간에만 위치 단서로 결합한다.
+    traffic_parts = (
+        raw_data.get("roadNM")
+        or raw_data.get("route_name")
+        or raw_data.get("nosunNM")
+        or raw_data.get("route_no"),
+        raw_data.get("accPointNM") or raw_data.get("point_name"),
+        raw_data.get("startEndTypeCode") or raw_data.get("direction"),
+    )
+    clue = " ".join(str(part).strip() for part in traffic_parts if str(part).strip())
+    return clue or None
 
 
 _CLAIM_PRECISION: Final[dict[str, int]] = {

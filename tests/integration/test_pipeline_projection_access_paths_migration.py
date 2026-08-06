@@ -615,7 +615,7 @@ async def test_pipeline_projection_access_paths_upgrade_and_downgrade(
                     """
                     INSERT INTO ops.import_jobs (
                       job_id, kind, parent_job_id, payload, status, provider, dataset_key,
-                      dagster_run_id, trigger_kind, operation_registry_version,
+                      dagster_run_id, trigger_kind, operation_key,
                       dagster_run_status
                     ) VALUES
                     (
@@ -1073,7 +1073,7 @@ async def test_pipeline_projection_access_paths_upgrade_and_downgrade(
             assert "parent_job_id IS NULL" in update_request_shape
             assert "load_batch_id IS NULL" in update_request_shape
             assert "trigger_kind = 'update_request'" in update_request_shape
-            assert "operation_registry_version IS NULL" in update_request_shape
+            assert "operation_key IS NULL" in update_request_shape
             assert "dagster_run_status IS NULL" in update_request_shape
             assert "payload = '{}'::jsonb" in update_request_shape
             assert "dagster_run_id = btrim(dagster_run_id)" in update_request_shape
@@ -4064,7 +4064,7 @@ async def test_pipeline_projection_access_paths_rejects_active_relink_candidate(
                     INSERT INTO ops.import_jobs (
                       job_id, kind, parent_job_id, payload, status,
                       provider, dataset_key, dagster_run_id, trigger_kind,
-                      operation_registry_version, dagster_run_status
+                      operation_key, dagster_run_status
                     ) VALUES
                     (
                       :source_job_id, 'provider_feature_load_run', NULL,

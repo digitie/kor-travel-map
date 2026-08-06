@@ -115,6 +115,7 @@ def _item(*, item_id: str, edition: str) -> CurationItem:
         theme_slug="korean-tourism-100",
         theme_name="한국관광 100선",
         theme_group="관광 선정",
+        provider_dataset_id=101,
         provider="korea-tourism-organization",
         dataset_key=f"tourism-100-{edition}",
         source_name="문화체육관광부·한국관광공사",
@@ -166,6 +167,7 @@ def _collection() -> CurationCollection:
         theme_name="공개 건수 계약",
         theme_group="테스트",
         source_id="44444444-4444-4444-8444-444444444444",
+        provider_dataset_id=101,
         provider="test-provider",
         dataset_key="test-dataset",
         source_name="테스트 출처",
@@ -205,8 +207,7 @@ def _csv_content(
             "theme_group": "등대 스탬프투어",
             "title": "힐링의 등대",
             "edition_key": "season-5",
-            "provider": "korea-navigation-aids-agency",
-            "dataset_key": "lighthouse-stamp-tour",
+            "provider_dataset_id": "101",
             "source_name": "국립등대박물관",
             "source_item_key": "healing:ganjeolgot",
             "source_component_key": "primary",
@@ -220,8 +221,7 @@ def _csv_content(
         values.update(
             {
                 "collection_key": "lighthouse-stamp-tour:healing-lighthouses:season-5",
-                "provider": "korea-institute-of-aids-to-navigation",
-                "dataset_key": "lighthouse-stamp-tour-season-5",
+                "provider_dataset_id": "102",
             }
         )
     output = io.StringIO(newline="")
@@ -1438,6 +1438,7 @@ def _quarantine_collection_row() -> CurationQuarantineCollection:
         ),
         quarantine_source=CurationQuarantineSourceRef(
             source_id=_uuid("quarantine-source"),
+            provider_dataset_id=101,
             provider="korea-navigation-aids-agency",
             dataset_key="lighthouse-stamp-tour",
             source_name="국립등대박물관",

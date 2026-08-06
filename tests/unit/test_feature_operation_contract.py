@@ -14,10 +14,11 @@ from kortravelmap.core.feature_operation import (
     FEATURE_OPERATION_ROOT_KIND,
     FEATURE_UPDATE_REQUEST_JOB_KIND,
     FeatureOperationInvariantConflict,
-    ProviderDatasetOperationKey,
+    ProviderDatasetOperationMembership,
 )
 from kortravelmap.infra import feature_operation_repo, feature_update_repo, jobs_repo
 from kortravelmap.infra.feature_operation_repo import ensure_dagster_feature_operation
+from kortravelmap.infra.jobs_repo import ImportJobDatasetTarget
 from kortravelmap.infra.pipeline_cancellation_types import (
     PipelineCancellationScopeMember,
 )
@@ -30,14 +31,18 @@ _RESERVED_JOB_KINDS = (
 )
 
 
-def test_provider_dataset_key_rejects_blank_or_untrimmed_identity() -> None:
-    with pytest.raises(ValueError, match="provider"):
-        ProviderDatasetOperationKey(" provider", "dataset")
-    with pytest.raises(ValueError, match="dataset_key"):
-        ProviderDatasetOperationKey("provider", "")
+def test_operation_membership_rejects_invalid_canonical_identity() -> None:
+    with pytest.raises(ValueError, match="positive"):
+        ProviderDatasetOperationMembership(0, "dataset_wide", "feature_place_example_job")
+    with pytest.raises(ValueError, match="sync_scope"):
+        ProviderDatasetOperationMembership(
+            1,
+            " dataset_wide",
+            "feature_place_example_job",
+        )
 
 
-def test_generic_import_writers_make_pair_scope_explicit() -> None:
+def test_generic_import_writers_make_canonical_membership_explicit() -> None:
     for writer in (
         jobs_repo.enqueue_unpaired_import_job,
         jobs_repo.start_unpaired_import_job,
@@ -47,15 +52,17 @@ def test_generic_import_writers_make_pair_scope_explicit() -> None:
         jobs_repo.enqueue_provider_dataset_import_job,
         jobs_repo.start_provider_dataset_import_job,
     ):
-        parameter = inspect.signature(writer).parameters["provider_dataset"]
+        parameters = inspect.signature(writer).parameters
+        parameter = parameters["dataset_membership"]
         assert parameter.default is inspect.Parameter.empty
+        assert "provider_dataset" not in parameters
 
 
-def test_event_insert_only_copies_typed_job_identity() -> None:
-    assert "COALESCE(provider" not in jobs_repo._INSERT_EVENT_SQL
-    assert "COALESCE(dataset_key" not in jobs_repo._INSERT_EVENT_SQL
-    assert "provider = CAST(:provider AS text)" in jobs_repo._INSERT_EVENT_SQL
-    assert "dataset_key = CAST(:dataset_key AS text)" in jobs_repo._INSERT_EVENT_SQL
+def test_event_insert_requires_exact_canonical_member() -> None:
+    assert "import_job_dataset_id" in jobs_repo._INSERT_EVENT_SQL
+    assert "member.import_job_dataset_id" in jobs_repo._INSERT_EVENT_SQL
+    assert "provider = CAST(:provider AS text)" not in jobs_repo._INSERT_EVENT_SQL
+    assert "dataset_key = CAST(:dataset_key AS text)" not in jobs_repo._INSERT_EVENT_SQL
 
 
 @pytest.mark.parametrize(
@@ -78,14 +85,11 @@ async def test_generic_writer_rejects_reserved_feature_kind(
 
 
 async def test_feature_update_job_writer_rejects_noncanonical_scope_before_sql() -> None:
-    key = ProviderDatasetOperationKey("provider", "dataset")
     for invalid_scope in ("legacy-alias", "external_system:", f"external_system:{'x' * 113}"):
-        with pytest.raises(ValueError, match="canonical sync scope"):
-            await jobs_repo.enqueue_feature_update_request_job(
-                object(),  # type: ignore[arg-type]
-                provider_dataset=key,
-                effective_sync_scope=invalid_scope,
-                dispatch_requested=False,
+        with pytest.raises(ValueError, match="sync_scope"):
+            ImportJobDatasetTarget(
+                provider_dataset_id=1,
+                sync_scope=invalid_scope,
             )
 
 
@@ -126,7 +130,7 @@ def test_generic_job_sql_excludes_quarantined_targets_and_parents() -> None:
     for statement in (jobs_repo._INSERT_JOB_SQL, jobs_repo._START_JOB_SQL):
         assert "parent.quarantined_at IS NULL" in statement
 
-    assert "AND quarantined_at IS NULL" in jobs_repo._INSERT_EVENT_SQL
+    assert "AND job.quarantined_at IS NULL" in jobs_repo._INSERT_EVENT_SQL
 
     generic_target_sql = (
         jobs_repo._UPDATE_PAYLOAD_SQL,
@@ -164,7 +168,7 @@ def test_feature_operation_sql_excludes_quarantined_engine_state() -> None:
         feature_operation_repo._ADVANCE_MEMBERS_SQL,
         feature_operation_repo._ADVANCE_RAW_QUEUED_STATUS_SQL,
         feature_operation_repo._ADVANCE_RAW_CANCELING_STATUS_SQL,
-        feature_operation_repo._FINISH_PAIR_SQL,
+        feature_operation_repo._FINISH_MEMBERSHIP_SQL,
         feature_operation_repo._ACTIVE_ROOTS_PAGE_SQL,
     )
     assert all(
@@ -209,8 +213,14 @@ async def test_feature_operation_ensure_reports_quarantined_run_conflict() -> No
             session,  # type: ignore[arg-type]
             dagster_run_id="run-quarantined",
             trigger_kind="manual",
-            selected_pairs=(ProviderDatasetOperationKey("provider", "dataset"),),
-            registry_version="registry-v1",
+            selected_memberships=(
+                ProviderDatasetOperationMembership(
+                    1,
+                    "dataset_wide",
+                    "feature_place_example_job",
+                ),
+            ),
+            operation_key="feature_place_example_job",
             engine_created_at=datetime(2026, 7, 16, tzinfo=UTC),
             engine_started_at=None,
             observed_status="QUEUED",
@@ -316,8 +326,14 @@ async def test_invalid_engine_time_fails_before_any_db_write() -> None:
             object(),  # type: ignore[arg-type]
             dagster_run_id="run-invalid-time",
             trigger_kind="manual",
-            selected_pairs=(ProviderDatasetOperationKey("provider", "dataset"),),
-            registry_version="registry-v1",
+            selected_memberships=(
+                ProviderDatasetOperationMembership(
+                    1,
+                    "dataset_wide",
+                    "feature_place_example_job",
+                ),
+            ),
+            operation_key="feature_place_example_job",
             engine_created_at=created_at,
             engine_started_at=datetime(2026, 7, 15, 1, tzinfo=UTC),
             observed_status="STARTED",

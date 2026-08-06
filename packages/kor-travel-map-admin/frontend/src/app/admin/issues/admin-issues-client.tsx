@@ -100,6 +100,11 @@ function parseBbox(value: string) {
   return { min_lon, min_lat, max_lon, max_lat };
 }
 
+function positiveInteger(value: string): number | undefined {
+  const parsed = Number(value.trim());
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
 function IssueDetailPanel({ issueId }: { issueId: string | null }) {
   const detail = useAdminIssueDetail(issueId);
   const action = useAdminIssueActionMutation();
@@ -231,6 +236,8 @@ function IssueDetailPanel({ issueId }: { issueId: string | null }) {
               <dd>{issue.provider ?? "-"}</dd>
               <dt className="text-muted-foreground">dataset</dt>
               <dd>{issue.dataset_key ?? "-"}</dd>
+              <dt className="text-muted-foreground">provider dataset ID</dt>
+              <dd>{issue.provider_dataset_id ?? "-"}</dd>
               <dt className="text-muted-foreground">feature</dt>
               <dd className="break-all font-mono">
                 {issue.feature_id ? (
@@ -408,8 +415,7 @@ interface AdminIssueFilters {
   status: AdminIssueStatus | "all";
   severity: AdminIssueSeverity | "all";
   issueType: string;
-  provider: string;
-  datasetKey: string;
+  providerDatasetId: string;
   featureId: string;
   bbox: string;
   pageSize: (typeof PAGE_SIZE_OPTIONS)[number];
@@ -428,13 +434,11 @@ type AdminIssuesAction =
 
 function initialAdminIssuesState({
   initialFeatureId,
-  initialProvider,
-  initialDatasetKey,
+  initialProviderDatasetId,
   initialStatus,
 }: {
   initialFeatureId?: string;
-  initialProvider?: string;
-  initialDatasetKey?: string;
+  initialProviderDatasetId?: string;
   initialStatus?: string;
 }): AdminIssuesState {
   return {
@@ -442,8 +446,7 @@ function initialAdminIssuesState({
     status: parseInitialStatus(initialStatus),
     severity: "all",
     issueType: "",
-    provider: initialProvider ?? "",
-    datasetKey: initialDatasetKey ?? "",
+    providerDatasetId: initialProviderDatasetId ?? "",
     featureId: initialFeatureId ?? "",
     bbox: "",
     pageSize: 100,
@@ -466,8 +469,7 @@ function adminIssuesReducer(
         status: "open",
         severity: "all",
         issueType: "",
-        provider: "",
-        datasetKey: "",
+        providerDatasetId: "",
         featureId: "",
         bbox: "",
         cursor: null,
@@ -481,21 +483,18 @@ function adminIssuesReducer(
 
 function useAdminIssuesClientController({
   initialFeatureId,
-  initialProvider,
-  initialDatasetKey,
+  initialProviderDatasetId,
   initialStatus,
 }: {
   initialFeatureId?: string;
-  initialProvider?: string;
-  initialDatasetKey?: string;
+  initialProviderDatasetId?: string;
   initialStatus?: string;
 } = {}) {
   const [state, dispatch] = useReducer(
     adminIssuesReducer,
     {
       initialFeatureId,
-      initialProvider,
-      initialDatasetKey,
+      initialProviderDatasetId,
       initialStatus,
     },
     initialAdminIssuesState,
@@ -503,11 +502,10 @@ function useAdminIssuesClientController({
   const {
     bbox,
     cursor,
-    datasetKey,
     featureId,
     issueType,
     pageSize,
-    provider,
+    providerDatasetId,
     q,
     selectedIssueId,
     severity,
@@ -521,9 +519,7 @@ function useAdminIssuesClientController({
       status: status === "all" ? undefined : status,
       severity: severity === "all" ? undefined : severity,
       issue_type: issueType.trim().length > 0 ? issueType.trim() : undefined,
-      provider: provider.trim().length > 0 ? provider.trim() : undefined,
-      dataset_key:
-        datasetKey.trim().length > 0 ? datasetKey.trim() : undefined,
+      provider_dataset_id: positiveInteger(providerDatasetId),
       feature_id: featureId.trim().length > 0 ? featureId.trim() : undefined,
       ...(bbox.trim().length > 0 ? parseBbox(bbox) : {}),
       q: deferredQ.length > 0 ? deferredQ : undefined,
@@ -533,12 +529,11 @@ function useAdminIssuesClientController({
     [
       bbox,
       cursor,
-      datasetKey,
       deferredQ,
       featureId,
       issueType,
       pageSize,
-      provider,
+      providerDatasetId,
       severity,
       status,
     ],
@@ -715,7 +710,6 @@ function useAdminIssuesClientController({
     changeFilters,
     columns,
     cursor,
-    datasetKey,
     featureId,
     goFirstPage,
     goNextPage,
@@ -724,7 +718,7 @@ function useAdminIssuesClientController({
     items,
     nextCursor,
     pageSize,
-    provider,
+    providerDatasetId,
     q,
     resetFilters,
     selectIssue,
@@ -740,7 +734,6 @@ function AdminIssuesClientView({
   changeFilters,
   columns,
   cursor,
-  datasetKey,
   featureId,
   goFirstPage,
   goNextPage,
@@ -749,7 +742,7 @@ function AdminIssuesClientView({
   items,
   nextCursor,
   pageSize,
-  provider,
+  providerDatasetId,
   q,
   resetFilters,
   selectIssue,
@@ -854,21 +847,15 @@ function AdminIssuesClientView({
               }
             />
             <Input
-              aria-label="issue provider"
+              aria-label="issue provider dataset ID"
               className="w-40 shrink-0"
-              placeholder="provider"
-              value={provider}
+              inputMode="numeric"
+              min="1"
+              placeholder="provider_dataset_id"
+              type="number"
+              value={providerDatasetId}
               onChange={(event) =>
-                changeFilters({ provider: event.target.value })
-              }
-            />
-            <Input
-              aria-label="issue dataset"
-              className="w-40 shrink-0"
-              placeholder="dataset_key"
-              value={datasetKey}
-              onChange={(event) =>
-                changeFilters({ datasetKey: event.target.value })
+                changeFilters({ providerDatasetId: event.target.value })
               }
             />
             <Input
@@ -950,15 +937,17 @@ function AdminIssuesClientView({
 
 export function AdminIssuesClient({
   initialFeatureId,
-  initialProvider,
-  initialDatasetKey,
+  initialProviderDatasetId,
   initialStatus,
 }: {
   initialFeatureId?: string;
-  initialProvider?: string;
-  initialDatasetKey?: string;
+  initialProviderDatasetId?: string;
   initialStatus?: string;
 } = {}) {
-  const controller = useAdminIssuesClientController({ initialFeatureId, initialProvider, initialDatasetKey, initialStatus });
+  const controller = useAdminIssuesClientController({
+    initialFeatureId,
+    initialProviderDatasetId,
+    initialStatus,
+  });
   return <AdminIssuesClientView {...controller} />;
 }

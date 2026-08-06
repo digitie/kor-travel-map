@@ -76,6 +76,7 @@ def _theme_row(**overrides: Any) -> dict[str, Any]:
 def _source_row(**overrides: Any) -> dict[str, Any]:
     row: dict[str, Any] = {
         "source_id": _SOURCE_ID,
+        "provider_dataset_id": 101,
         "provider": "python-datagokr-api",
         "dataset_key": "datagokr_seoul_bookstores",
         "source_name": "서울특별시 책방",
@@ -103,6 +104,7 @@ def _rule_row(**overrides: Any) -> dict[str, Any]:
         "theme_id": _THEME_ID,
         "theme_slug": "bookstores",
         "source_id": _SOURCE_ID,
+        "provider_dataset_id": 101,
         "provider": "python-datagokr-api",
         "dataset_key": "datagokr_seoul_bookstores",
         "place_kind": "seoul_bookstore",
@@ -140,6 +142,7 @@ def _feature_row(**overrides: Any) -> dict[str, Any]:
         "address": {"admin": "서울특별시 중구"},
         "detail": {"place_kind": "seoul_bookstore"},
         "source_id": _SOURCE_ID,
+        "provider_dataset_id": 101,
         "provider": "python-datagokr-api",
         "dataset_key": "datagokr_seoul_bookstores",
         "source_name": "서울특별시 책방",
@@ -196,7 +199,7 @@ async def test_curated_repo_read_paths_with_fake_session() -> None:
 
     [source] = await curated_repo.list_curated_sources(
         session,
-        provider="python-datagokr-api",
+        provider_dataset_id=101,
         provider_status="implemented",
     )
     assert source.row_count == 555
@@ -270,7 +273,9 @@ async def test_curated_repo_write_paths_with_fake_session() -> None:
         [{"affected_count": 3}],
         [_theme_row()],
         [_theme_row(theme_name="수정 책방")],
+        [{"source_id": _SOURCE_ID}],
         [_source_row()],
+        [{"source_id": _SOURCE_ID}],
         [_source_row(source_name="수정 source")],
         [{"rule_id": _RULE_ID}],
         [_rule_row()],
@@ -373,8 +378,7 @@ async def test_curated_repo_write_paths_with_fake_session() -> None:
 
     source = await curated_repo.create_curated_source(
         session,
-        provider="python-datagokr-api",
-        dataset_key="datagokr_seoul_bookstores",
+        provider_dataset_id=101,
         source_name="서울특별시 책방",
         source_kind="filedata",
     )
@@ -392,7 +396,6 @@ async def test_curated_repo_write_paths_with_fake_session() -> None:
         session,
         theme_id=_THEME_ID,
         source_id=_SOURCE_ID,
-        dataset_key="datagokr_seoul_bookstores",
         region_scope={"sido_code": "11"},
         metadata={"curation_relation": "bookstore_stop"},
     )
@@ -445,14 +448,14 @@ async def test_curated_repo_dagster_batch_paths_with_fake_session() -> None:
 
     refreshed = await curated_repo.refresh_curated_source_metadata(
         session,
-        provider="python-datagokr-api",
+        provider_dataset_id=101,
     )
     assert refreshed.as_metadata() == {
         "sources_checked": 2,
         "sources_with_records": 1,
         "source_records_total": 7,
     }
-    assert session.calls[0][1]["provider"] == "python-datagokr-api"
+    assert session.calls[0][1]["provider_dataset_id"] == 101
 
     candidates = await curated_repo.apply_enabled_curated_source_rules(
         session,
@@ -627,8 +630,7 @@ async def test_curated_repo_validation_and_empty_paths() -> None:
     with pytest.raises(ValueError, match="source_kind"):
         await curated_repo.create_curated_source(
             _FakeSession(),
-            provider="p",
-            dataset_key="d",
+            provider_dataset_id=101,
             source_name="s",
             source_kind="bad",
         )

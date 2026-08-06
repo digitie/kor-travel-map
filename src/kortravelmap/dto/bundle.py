@@ -58,8 +58,7 @@ class FeatureBundle(BaseModel):
     ... #     source_record=SourceRecord(provider="python-visitkorea-api", ...),
     ... #     source_link=SourceLink(feature_id="f_...", source_record_key="sr_...",
     ... #                            source_role=SourceRole.PRIMARY,
-    ... #                            match_method="natural_key", confidence=100,
-    ... #                            is_primary_source=True),
+    ... #                            match_method="natural_key", confidence=100),
     ... # )
     """
 

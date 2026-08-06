@@ -1437,18 +1437,24 @@ WITH alert_records AS (
         sr.raw_data->>'source_agency' AS source_agency,
         sr.fetched_at,
         sr.imported_at,
-        sr.last_seen_at
-    FROM provider_sync.source_records AS sr
+        head.observed_at AS last_seen_at
+    FROM provider_sync.source_entities AS se
+    JOIN provider_sync.provider_datasets AS pd
+      ON pd.provider_dataset_id = se.provider_dataset_id
+    JOIN provider_sync.source_entity_heads AS head
+      ON head.source_entity_key = se.source_entity_key
+    JOIN provider_sync.source_records AS sr
+      ON sr.source_record_key = head.current_source_record_key
     LEFT JOIN provider_sync.source_links AS sl
-      ON sl.source_entity_key = sr.source_entity_key
-     AND sl.is_primary_source
+      ON sl.source_entity_key = se.source_entity_key
+     AND sl.source_role = 'primary'
     -- 공개 projection에만 조인: 비공개 anchor의 alert row는 살아남되
     -- feature_id/feature_name은 NULL로 떨어진다 (ADR-067 / T-VN-04).
     LEFT JOIN feature.public_features AS f
       ON f.feature_id = sl.feature_id
-    WHERE sr.provider = 'python-kma-api'
-      AND sr.dataset_key = 'kma_weather_alerts'
-      AND sr.source_entity_type = 'weather_alert'
+    WHERE pd.provider = 'python-kma-api'
+      AND pd.dataset_key = 'kma_weather_alerts'
+      AND se.source_entity_type = 'weather_alert'
 )
 SELECT *
 FROM alert_records

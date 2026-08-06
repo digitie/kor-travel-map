@@ -54,8 +54,8 @@ pytestmark = pytest.mark.integration
 _KST = timezone(timedelta(hours=9))
 _FETCHED = datetime(2026, 8, 4, 12, 0, tzinfo=_KST)
 
-_PROVIDER = "python-standard-data-api"
-_DATASET = "cultural_festivals"
+_PROVIDER = "data.go.kr-standard"
+_DATASET = "datagokr_cultural_festivals"
 _ENTITY_TYPE = "festival"
 
 
@@ -90,7 +90,6 @@ def _place_bundle(feature_id: str, *, name: str = "identity 검증 장소") -> F
         source_entity_type=_ENTITY_TYPE,
         source_entity_id=feature_id,
         raw_payload_hash=raw_payload_hash,
-        raw_name=name,
         raw_data=raw_data,
         fetched_at=_FETCHED,
         imported_at=_FETCHED,
@@ -102,7 +101,6 @@ def _place_bundle(feature_id: str, *, name: str = "identity 검증 장소") -> F
         source_role=SourceRole.PRIMARY,
         match_method="natural_key",
         confidence=100,
-        is_primary_source=True,
         created_at=_FETCHED,
     )
     return FeatureBundle(

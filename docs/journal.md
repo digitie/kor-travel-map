@@ -2,6 +2,34 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-06 (codex) — 사용자 지시로 T-VN-33 WIP 정리·중단
+
+- 진행 중이던 schema/core/API/frontend 에이전트를 중지하고, T-VN-33/F1D 변경은 미스테이징·미커밋
+  상태로 보존했다. rebase, push, CI, n150/컨테이너/DB mutation은 수행하지 않았다.
+- batch audit의 physical triple·sync-state·pipeline/API/UI/runtime·trigger/fixture P0와 검증
+  한계를 `reports/t-vn-33-hold-snapshot-2026-08-06.md`에 기록했다. `[~]` task는 완료가 아니라
+  WIP 중단 표식이다.
+- T-VN-41 F1D-D final live acceptance는 T-VN-33 merge와 final-schema ETL 재적재가 선행된다는
+  순서를 유지한다.
+
+## 2026-08-06 (codex) — T-VN-33 normal-path P0 재개방, T-VN-41 final gate 유지
+
+- actual 구현을 대상으로 한 적대 리뷰가 UI dataset detail/preview의 자연키 route,
+  direct ID scope 해석 불능, geo scope의 pair/rank 축약, request snapshot의
+  `operation_key` 누락과 정적 Dagster worker registry를 P0로 확인했다. 이들은
+  호환 fallback이 아니라 exact membership 전달 경로로 한 번에 제거한다.
+- 후속 batch audit는 job snapshot·active plan·pipeline read model도
+  `(provider_dataset_id, sync_scope)`로 `operation_key`를 축약하고 rank-select한다는 P0를
+  확인했다. ADR-087의 실행 identity를 triple로 명시하고, dataset member에는 예외 없이
+  non-null composite FK를 강제한다. operation 없는 generic import job은 dataset member 행을
+  만들지 않으므로 nullable/wildcard `operation_key` 예외를 두지 않는다.
+- DB 검토는 `0090`이 `source_records.provider/dataset_key`를 삭제한 뒤에도 살아 있는
+  `issue_curation_source_rule_decision()` trigger가 그 column을 읽음을 확인했다. migration에서
+  `source_records → source_entities → provider_datasets` 정본 join으로 trigger function을
+  교체하고, final-schema fixture를 일괄 전환한다.
+- T-VN-41 F1D-D의 n150 final live E2E는 T-VN-33 merge와 final-schema ETL 재적재가 선행
+  조건이라는 순서를 유지한다. 중간 DB 복구/보존은 수행하지 않는다.
+
 ## 2026-08-06 (codex) — T-VN-33 contract gate P0=0 통과
 
 - 스키마 5차와 마이그레이션 4차 적대 리뷰가 모두 P0 GO를 냈다. 마지막 P0였던

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 from collections.abc import AsyncIterator
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -16,7 +17,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap import offline_upload as offline_upload_module
 from kortravelmap.client import AsyncKorTravelMapClient
-from kortravelmap.core.feature_operation import ProviderDatasetOperationKey
 from kortravelmap.core.ids import (
     make_feature_id,
     make_payload_hash,
@@ -33,7 +33,10 @@ from kortravelmap.dto import (
     SourceRecord,
     SourceRole,
 )
-from kortravelmap.infra.jobs_repo import start_provider_dataset_import_job
+from kortravelmap.infra.jobs_repo import (
+    ImportJobDatasetTarget,
+    start_provider_dataset_import_job,
+)
 from kortravelmap.infra.offline_upload_repo import (
     OfflineUploadStatusConflict,
     create_offline_upload,
@@ -142,8 +145,9 @@ async def test_offline_upload_load_job_uses_preclaimed_load_job(
         job = await start_provider_dataset_import_job(
             session,
             kind="offline_upload_load",
-            provider_dataset=ProviderDatasetOperationKey(
-                "offline-test-provider", "offline_jsonl"
+            dataset_membership=ImportJobDatasetTarget(
+                provider_dataset_id=await _offline_provider_dataset_id(session),
+                sync_scope="dataset_wide",
             ),
             payload={"upload_id": upload_id, "dagster_run_id": None},
             source_checksum=hashlib.sha256(body).hexdigest(),
@@ -187,8 +191,9 @@ async def test_preclaimed_run_owner_mismatch_stops_before_object_io(
         job = await start_provider_dataset_import_job(
             session,
             kind="offline_upload_load",
-            provider_dataset=ProviderDatasetOperationKey(
-                "offline-test-provider", "offline_jsonl"
+            dataset_membership=ImportJobDatasetTarget(
+                provider_dataset_id=await _offline_provider_dataset_id(session),
+                sync_scope="dataset_wide",
             ),
             payload={"upload_id": upload_id},
             source_checksum=hashlib.sha256(body).hexdigest(),
@@ -236,8 +241,9 @@ async def test_preclaimed_marker_race_stops_before_object_and_feature_io(
         job = await start_provider_dataset_import_job(
             session,
             kind="offline_upload_load",
-            provider_dataset=ProviderDatasetOperationKey(
-                "offline-test-provider", "offline_jsonl"
+            dataset_membership=ImportJobDatasetTarget(
+                provider_dataset_id=await _offline_provider_dataset_id(session),
+                sync_scope="dataset_wide",
             ),
             payload={"upload_id": upload_id},
             source_checksum=hashlib.sha256(body).hexdigest(),
@@ -381,16 +387,18 @@ async def test_offline_upload_validate_then_load_csv(
         row = (
             await session.execute(
                 text(
-                    "SELECT f.name, sr.source_entity_id, ou.status AS upload_status "
+                    "SELECT f.name, se.source_entity_id, ou.status AS upload_status "
                     "FROM feature.features AS f "
                     "JOIN provider_sync.source_links AS sl "
                     "  ON sl.feature_id = f.feature_id "
                     "JOIN provider_sync.source_entities AS se "
                     "  ON se.source_entity_key = sl.source_entity_key "
+                    "JOIN provider_sync.source_entity_heads AS head "
+                    "  ON head.source_entity_key = se.source_entity_key "
                     "JOIN provider_sync.source_records AS sr "
-                    "  ON sr.source_record_key = se.current_source_record_key "
+                    "  ON sr.source_record_key = head.current_source_record_key "
                     "JOIN ops.offline_uploads AS ou ON ou.upload_id = :upload_id "
-                    "WHERE sr.source_entity_id = :source_entity_id"
+                    "WHERE se.source_entity_id = :source_entity_id"
                 ),
                 {"upload_id": upload_id, "source_entity_id": "csv-live-001"},
             )
@@ -478,8 +486,9 @@ async def test_offline_upload_repo_rejects_invalid_state_transitions(
         job = await start_provider_dataset_import_job(
             session,
             kind="offline_upload_load",
-            provider_dataset=ProviderDatasetOperationKey(
-                "offline-test-provider", "offline_jsonl"
+            dataset_membership=ImportJobDatasetTarget(
+                provider_dataset_id=await _offline_provider_dataset_id(session),
+                sync_scope="dataset_wide",
             ),
         )
         loading = await mark_offline_upload_loading(
@@ -561,9 +570,8 @@ async def test_offline_upload_repo_enforces_checksum_idempotency(
             await create_offline_upload(
                 session,
                 upload_id="00000000-0000-0000-0000-000000000099",
-                provider="offline-test-provider",
-                dataset_key="offline_jsonl",
-                sync_scope="default",
+                provider_dataset_id=await _offline_provider_dataset_id(session),
+                sync_scope="dataset_wide",
                 original_filename="features.jsonl",
                 storage_backend="rustfs",
                 storage_key="offline/idempotent/duplicate.jsonl",
@@ -577,9 +585,8 @@ async def test_offline_upload_repo_enforces_checksum_idempotency(
     async with AsyncSession(migrated_engine) as session:
         existing = await get_offline_upload_by_checksum(
             session,
-            provider="offline-test-provider",
-            dataset_key="offline_jsonl",
-            sync_scope="default",
+            provider_dataset_id=await _offline_provider_dataset_id(session),
+            sync_scope="dataset_wide",
             checksum_sha256=checksum,
         )
 
@@ -610,8 +617,7 @@ async def test_offline_upload_repo_lists_with_keyset_and_provided_upload_id(
     async with AsyncSession(migrated_engine) as session:
         page1 = await list_offline_uploads(
             session,
-            provider="offline-test-provider",
-            dataset_key="offline_jsonl",
+            provider_dataset_id=await _offline_provider_dataset_id(session),
             limit=1,
         )
         assert page1.next_cursor is not None
@@ -619,8 +625,7 @@ async def test_offline_upload_repo_lists_with_keyset_and_provided_upload_id(
 
         page2 = await list_offline_uploads(
             session,
-            provider="offline-test-provider",
-            dataset_key="offline_jsonl",
+            provider_dataset_id=await _offline_provider_dataset_id(session),
             limit=1,
             cursor=page1.next_cursor,
         )
@@ -687,8 +692,9 @@ async def test_delete_offline_upload_rejects_in_progress_and_keeps_jobs(
         job = await start_provider_dataset_import_job(
             session,
             kind="offline_upload_load",
-            provider_dataset=ProviderDatasetOperationKey(
-                "offline-test-provider", "offline_jsonl"
+            dataset_membership=ImportJobDatasetTarget(
+                provider_dataset_id=await _offline_provider_dataset_id(session),
+                sync_scope="dataset_wide",
             ),
             payload={"upload_id": upload_id, "dagster_run_id": None},
             source_checksum=hashlib.sha256(body).hexdigest(),
@@ -777,9 +783,10 @@ async def _create_upload(
         upload = await create_offline_upload(
             session,
             upload_id=upload_id,
-            provider="offline-test-provider",
-            dataset_key=dataset_key,
-            sync_scope="default",
+            provider_dataset_id=await _offline_provider_dataset_id(
+                session, dataset_key=dataset_key
+            ),
+            sync_scope="dataset_wide",
             original_filename=original_filename,
             storage_backend="rustfs",
             storage_key=storage_key,
@@ -795,6 +802,75 @@ async def _create_upload(
 async def _truncate(engine: AsyncEngine) -> None:
     async with AsyncSession(engine) as session, session.begin():
         await truncate_committed_test_rows(session, _TRUNCATE_SQL)
+
+
+async def _offline_provider_dataset_id(
+    session: AsyncSession,
+    *,
+    dataset_key: str = "offline_jsonl",
+) -> int:
+    dataset_id = int(
+        (
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO provider_sync.provider_datasets (
+                        provider, dataset_key, display_name, source_kind,
+                        is_active, capabilities
+                    ) VALUES (
+                        'offline-test-provider', :dataset_key,
+                        'offline integration fixture', 'manual', true,
+                        CAST(:capabilities AS jsonb)
+                    )
+                    ON CONFLICT (provider, dataset_key) DO UPDATE
+                    SET is_active = true
+                    RETURNING provider_dataset_id
+                    """
+                ),
+                {
+                    "dataset_key": dataset_key,
+                    "capabilities": json.dumps(
+                        {
+                            "schema_version": 1,
+                            "produces": ["place"],
+                            "extensions": {},
+                        }
+                    ),
+                },
+            )
+        ).scalar_one()
+    )
+    operation_key = f"offline_fixture_{dataset_key}_refresh"
+    await session.execute(
+        text(
+            """
+            INSERT INTO provider_sync.provider_dataset_operations (
+                provider_dataset_id, operation_key, operation_kind, is_enabled, config
+            ) VALUES (
+                :provider_dataset_id, :operation_key, 'refresh', true, '{}'::jsonb
+            )
+            ON CONFLICT (provider_dataset_id, operation_key, operation_kind) DO UPDATE
+            SET is_enabled = true
+            """
+        ),
+        {"provider_dataset_id": dataset_id, "operation_key": operation_key},
+    )
+    await session.execute(
+        text(
+            """
+            INSERT INTO provider_sync.provider_dataset_operation_scopes (
+                provider_dataset_id, sync_scope, operation_key, operation_kind
+            ) VALUES (
+                :provider_dataset_id, 'dataset_wide', :operation_key, 'refresh'
+            )
+            ON CONFLICT (provider_dataset_id, sync_scope) DO UPDATE
+            SET operation_key = EXCLUDED.operation_key,
+                operation_kind = EXCLUDED.operation_kind
+            """
+        ),
+        {"provider_dataset_id": dataset_id, "operation_key": operation_key},
+    )
+    return dataset_id
 
 
 async def _fake_address_resolver(address: Address) -> Address | None:
@@ -845,9 +921,6 @@ def _bundle(source_id: str) -> FeatureBundle:
         source_entity_type="offline_feature_bundle",
         source_entity_id=source_id,
         raw_payload_hash=payload_hash,
-        raw_name=feature.name,
-        raw_longitude=Decimal("126.9780"),
-        raw_latitude=Decimal("37.5665"),
         raw_data=raw_payload,
         fetched_at=_FETCHED_AT,
         source_record_key=source_record_key,
@@ -858,7 +931,6 @@ def _bundle(source_id: str) -> FeatureBundle:
         source_role=SourceRole.PRIMARY,
         match_method="offline_upload",
         confidence=100,
-        is_primary_source=True,
     )
     return FeatureBundle(
         feature=feature,

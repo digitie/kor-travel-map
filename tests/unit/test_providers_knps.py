@@ -168,7 +168,7 @@ def test_cultural_resource_bundle_dynamic_category() -> None:
 def test_missing_coord_yields_none() -> None:
     b = _one("knps_restrooms", longitude=None, latitude=None)
     assert b.feature.coord is None
-    assert b.source_record.raw_longitude is None
+    assert b.source_record.raw_data == {"MNG_NO": "KN-001"}
 
 
 def test_out_of_korea_coord_is_dropped() -> None:
@@ -193,7 +193,6 @@ def test_nameless_point_record_is_skipped() -> None:
 def test_primary_source_and_provider_name() -> None:
     b = _one("knps_visitor_centers")
     assert b.source_link.source_role is SourceRole.PRIMARY
-    assert b.source_link.is_primary_source is True
     assert b.source_link.confidence == 100
     assert b.source_record.provider == PROVIDER_NAME
 
@@ -305,8 +304,7 @@ def test_park_boundary_area_name_falls_back_to_raw_park_name() -> None:
     )[0]
     assert b.feature.kind is FeatureKind.AREA
     assert b.feature.name == "가야산 국립공원"
-    # raw_name은 합성("국립공원" 부착) 이전의 verbatim 원천 (#546).
-    assert b.source_record.raw_name == "가야산"
+    assert b.source_record.raw_data["NPK_NM"] == "가야산"
 
 
 def test_protected_area_translates_raw_english_name() -> None:
@@ -318,8 +316,7 @@ def test_protected_area_translates_raw_english_name() -> None:
     )[0]
     assert b.feature.kind is FeatureKind.AREA
     assert b.feature.name == "제주도"
-    # raw_name은 영문→한글 번역 이전의 verbatim 원천 (#546).
-    assert b.source_record.raw_name == "Jeju Island"
+    assert b.source_record.raw_data["NAME"] == "Jeju Island"
 
 
 def test_protected_area_prefers_recoverable_raw_korean_name() -> None:
@@ -330,8 +327,7 @@ def test_protected_area_prefers_recoverable_raw_korean_name() -> None:
         raw={"ORIG_NAME": "遊됲룊", "NAME": "Bongpyeong", "MNUM": "PROTECTED-1"},
     )[0]
     assert b.feature.name == "봉평"
-    # record.name이 있으면 그대로 verbatim (#546 — point path와 정합).
-    assert b.source_record.raw_name == "Bongpyeong"
+    assert b.source_record.raw_data["NAME"] == "Bongpyeong"
 
 
 def test_protected_area_ignores_lossy_mojibake_korean_name() -> None:
@@ -380,13 +376,13 @@ def test_protected_area_translation_table_has_no_latin_letters() -> None:
     )
 
 
-def test_geometry_raw_name_is_verbatim_not_normalized() -> None:
-    # #546 — raw_name은 normalized(Feature.name)가 아니라 verbatim 원천이어야 한다.
-    # (a) record.name이 있으면 trail 이름을 그대로 보존.
+def test_geometry_raw_payload_is_verbatim_not_normalized() -> None:
+    # raw payload는 normalized Feature.name과 별개로 provider 값을 원형 보존한다.
+    # (a) record.name이 있으면 raw mapping 자체는 변경하지 않는다.
     trail = _geo_one("knps_trails", _LINE, name="  북한산 둘레길  ")[0]
     assert trail.feature.name == "북한산 둘레길"  # normalized
-    assert trail.source_record.raw_name == "  북한산 둘레길  "  # verbatim
-    # (b) record.name이 비어 있으면 이름을 끌어온 raw column을 verbatim fallback.
+    assert trail.source_record.raw_data == {"NO": "G-001"}
+    # (b) 이름을 raw column에서 복구해도 원 mapping을 그대로 둔다.
     park = _geo_one(
         "knps_park_boundaries",
         _POLY,
@@ -394,7 +390,7 @@ def test_geometry_raw_name_is_verbatim_not_normalized() -> None:
         raw={"NPK_NM": "북한산", "NO": "PARK-9"},
     )[0]
     assert park.feature.name == "북한산 국립공원"  # 합성된 normalized
-    assert park.source_record.raw_name == "북한산"  # 합성 이전 verbatim
+    assert park.source_record.raw_data["NPK_NM"] == "북한산"
 
 
 def test_hazard_and_protected_area_kinds() -> None:

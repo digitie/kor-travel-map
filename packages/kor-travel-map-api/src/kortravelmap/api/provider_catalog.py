@@ -1,621 +1,358 @@
-"""``kortravelmap.api.provider_catalog`` — 전 provider×dataset 카탈로그 (정본).
+"""DB 정본 provider dataset catalog projection.
 
-배경
-----
-admin UI의 데이터셋 상태와 fixture preview는 서로 다른 source에서 provider
-목록을 그리던 과거 표면을 대체한다:
+T-VN-33부터 provider/dataset identity, 활성 상태, capability, 실행 operation과
+scope는 PostgreSQL이 소유한다. 이 모듈은 그 relation을 읽어 API/Dagster가 사용할
+불변 projection으로 조립할 뿐 provider 상수나 fixture 목록을 들고 있지 않다.
 
-- fixture preview → `etl_fixtures.FIXTURE_REGISTRY`
-- dataset 상태 → `provider_sync_state` row
-
-둘 중 어느 쪽도 mois/knps/krheritage/mcst 같은 "구현은 됐으나 fixture/sync
-state가 아직 없는" provider를 나타내지 못했다. 본 모듈은 **시스템이 ETL 하는
-모든 provider×dataset**의 단일 정본 카탈로그를 둔다.
-
-설계 원칙
---------
-- **drift-safe**: dataset_key/provider 이름은 가능한 한 provider 모듈의 **상수·
-  dict를 import 해서** 참조한다 (literal 중복 금지). provider 모듈이 dataset_key
-  를 바꾸면 본 카탈로그도 자동으로 따라간다.
-- **preview 가용성**: 각 dataset의 `preview`(`fixture`/`none`)는 import 시점에
-  `etl_fixtures.FIXTURE_REGISTRY`를 조회해 결정한다. 제품 API는 외부 provider를
-  호출하지 않는다.
-- 본 모듈은 **데이터(상수)만** 둔다 — DB/외부 호출 없음. 라우터가 이 카탈로그를
-  sync state와 LEFT JOIN 해서 응답을 만든다.
-
-ADR 참조
---------
-- ADR-006 — provider wrapper 금지. 본 모듈은 provider 모듈의 상수만 참조.
-- ADR-020 — REST API dist(`kortravelmap.api`)는 `kortravelmap` core/providers를
-  자유롭게 import. 본 모듈이 providers를 import 하는 건 dist 측이라 허용.
-- ADR-034 — provider 9단계 구현 순서.
+``operation_key``의 실행 handler는 main package의
+``feature_operation_registry``가 소유한다. DB의 활성 refresh operation key 집합과
+그 handler key 집합은 배포 전 exact-set으로 대조한다. 따라서 seed에 새 operation을
+넣고 handler를 빼먹거나, 제거한 operation의 handler를 남기는 어느 경우도
+fail-closed 한다.
 """
 
 from __future__ import annotations
 
+import json
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import Final, Literal
+from types import MappingProxyType
+from typing import TYPE_CHECKING, Any, Final, cast
 
-from kortravelmap.core.sync_scope import (
-    DATASET_WIDE_SYNC_SCOPE,
-    parse_canonical_sync_scope,
-)
-from kortravelmap.enrichment import ENRICHMENT_DATASET_KEY
-from kortravelmap.providers.airkorea import (
-    AIRKOREA_PROVIDER_NAME,
-    DATASET_KEY_AIR_QUALITY,
-    DATASET_KEY_STATIONS,
-)
-from kortravelmap.providers.datagokr_file_data import (
-    DATAGOKR_FILEDATA_DATASETS,
-    DATAGOKR_FILEDATA_PROVIDER_NAME,
-)
-from kortravelmap.providers.khoa import DATASET_KEY_BEACHES, KHOA_PROVIDER_NAME
-from kortravelmap.providers.kma import (
-    KMA_MID_FORECAST_DATASET_KEY,
-    KMA_PROVIDER_NAME,
-    KMA_SHORT_FORECAST_DATASET_KEY,
-    KMA_ULTRA_SHORT_FORECAST_DATASET_KEY,
-    KMA_ULTRA_SHORT_NOWCAST_DATASET_KEY,
-    KMA_WEATHER_ALERT_DATASET_KEY,
-)
-from kortravelmap.providers.knps import (
-    KNPS_GEOMETRY_DATASETS,
-    KNPS_PLACE_DATASETS,
-)
-from kortravelmap.providers.knps import (
-    PROVIDER_NAME as KNPS_PROVIDER_NAME,
-)
-from kortravelmap.providers.kor_travel_concierge import (
-    DATASET_KEY_YOUTUBE_PLACE_CANDIDATES,
-    KOR_TRAVEL_CONCIERGE_PROVIDER_NAME,
-)
-from kortravelmap.providers.krairport import (
-    DATASET_KEY_AIRPORTS,
-    KRAIRPORT_PROVIDER_NAME,
-)
-from kortravelmap.providers.krex import (
-    KREX_PROVIDER_NAME,
-    REST_AREA_DATASET_KEY,
-    REST_AREA_PRICES_DATASET_KEY,
-    REST_AREA_WEATHER_DATASET_KEY,
-    TRAFFIC_NOTICES_DATASET_KEY,
-)
-from kortravelmap.providers.krforest import (
-    DATASET_KEY_ARBORETUMS,
-    DATASET_KEY_RECREATION_FORESTS,
-    KRFOREST_PROVIDER_NAME,
-)
-from kortravelmap.providers.krheritage import (
-    DATASET_KEY_EVENT as KRHERITAGE_DATASET_KEY_EVENT,
-)
-from kortravelmap.providers.krheritage import (
-    DATASET_KEY_HERITAGE,
-)
-from kortravelmap.providers.krheritage import (
-    PROVIDER_NAME as KRHERITAGE_PROVIDER_NAME,
-)
-from kortravelmap.providers.mcst import (
-    MCST_FILE_DATASETS,
-    MCST_PROVIDER_NAME,
-)
-from kortravelmap.providers.mois import (
-    DATASET_KEY_BULK,
-    DATASET_KEY_CLOSED,
-    DATASET_KEY_DETAIL,
-    DATASET_KEY_HISTORY,
-)
-from kortravelmap.providers.mois import (
-    PROVIDER_NAME as MOIS_PROVIDER_NAME,
-)
-from kortravelmap.providers.opinet import (
-    OPINET_PRICE_DATASET_KEY,
-    OPINET_PROVIDER_NAME,
-    OPINET_STATION_DATASET_KEY,
-)
-from kortravelmap.providers.standard_data import (
-    DATASET_KEY_CULTURAL_FESTIVALS,
-    DATASET_KEY_MUSEUMS,
-    DATASET_KEY_PARKING_LOTS,
-    DATASET_KEY_SPECIAL_STREETS,
-    DATASET_KEY_TOURIST_ATTRACTIONS,
-    STANDARD_DATA_PROVIDER_NAME,
-)
-from kortravelmap.providers.visitkorea import (
-    DATASET_KEY_FESTIVAL_EVENTS,
-    VISITKOREA_PROVIDER_NAME,
-)
+from sqlalchemy import text
 
-from kortravelmap.api.etl_fixtures import FIXTURE_REGISTRY
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 __all__ = [
-    "PreviewKind",
-    "ScopeRefreshSelector",
+    "ActiveOperationHandlerDriftError",
     "ProviderDatasetCatalogEntry",
-    "PROVIDER_DATASET_CATALOG",
-    "list_catalog_providers",
-    "catalog_datasets",
-    "catalog_feature_load_entries",
-    "catalog_refreshable_entries",
-    "find_catalog_entry",
+    "ProviderDatasetOperation",
+    "ProviderDatasetOperationBinding",
+    "assert_active_operation_handler_exact_set",
+    "find_provider_dataset_catalog_entry",
+    "list_active_refresh_operation_bindings",
+    "list_provider_dataset_catalog",
 ]
 
 
-PreviewKind = Literal["fixture", "none"]
-"""dataset preview 가용성 — fixture(오프라인 replay) / none."""
+_CATALOG_SQL: Final[str] = """
+SELECT
+    dataset.provider_dataset_id,
+    dataset.provider,
+    dataset.dataset_key,
+    dataset.display_name,
+    dataset.source_kind,
+    dataset.is_active,
+    dataset.capabilities,
+    operation.operation_key,
+    operation.operation_kind,
+    operation.is_enabled AS operation_is_enabled,
+    operation.config AS operation_config,
+    scope.sync_scope
+FROM provider_sync.provider_datasets AS dataset
+LEFT JOIN provider_sync.provider_dataset_operations AS operation
+  ON operation.provider_dataset_id = dataset.provider_dataset_id
+LEFT JOIN provider_sync.provider_dataset_operation_scopes AS scope
+  ON scope.provider_dataset_id = operation.provider_dataset_id
+ AND scope.operation_key = operation.operation_key
+ AND scope.operation_kind = operation.operation_kind
+WHERE (CAST(:active_only AS boolean) = false OR dataset.is_active)
+ORDER BY
+    dataset.provider,
+    dataset.dataset_key,
+    operation.operation_key,
+    operation.operation_kind,
+    scope.sync_scope
+"""
 
-ScopeRefreshSelector = Literal["none", "poi_cache_targets"]
-"""dataset refresh가 운영자 선택형 sync scope를 지원하는 방식."""
-
-
-@dataclass(frozen=True)
-class ProviderDatasetCatalogEntry:
-    """시스템이 ETL 하는 1 provider×dataset 카탈로그 항목.
-
-    Attributes
-    ----------
-    provider:
-        provider canonical name (provider 모듈 ``*_PROVIDER_NAME`` 상수).
-    dataset_key:
-        provider_sync ``dataset_key`` (provider 모듈 상수/dict 키).
-    feature_kind:
-        산출 Feature 종류 (place/event/notice/price/weather/route/area).
-        WeatherValue/PriceValue load는 매칭 대상 Feature kind를 표기.
-    sync_scope:
-        provider_sync ``sync_scope`` — 대부분 ``default``, KMA grid 3종만
-        ``target_grids`` 예외.
-    label:
-        운영자용 한글 라벨.
-    is_feature_load:
-        새 Feature(FeatureBundle)를 적재하면 True. WeatherValue/PriceValue/
-        enrichment-only 경로는 False.
-    is_refreshable:
-        Dagster feature update request로 실행 가능한 적재/갱신 단위이면 True.
-        ``is_feature_load=False``인 PriceValue/WeatherValue/enrichment도 여기에
-        포함될 수 있다. 아직 runner가 없는 수동 보강/alias 항목은 False.
-    scope_refresh_selector:
-        운영자가 선택할 수 있는 refresh scope의 종류. ``poi_cache_targets``는
-        활성 POI cache target 전체 또는 특정 ``external_system``만 선택한다.
-    preview:
-        ETL preview 가용성 — import 시점에 fixture registry 조회로 결정.
-    """
-
-    provider: str
-    dataset_key: str
-    feature_kind: str
-    sync_scope: str
-    label: str
-    is_feature_load: bool
-    is_refreshable: bool
-    scope_refresh_selector: ScopeRefreshSelector
-    preview: PreviewKind
-
-
-_FIXTURE_KEYS: Final[frozenset[tuple[str, str]]] = frozenset(
-    (entry.provider, entry.dataset) for entry in FIXTURE_REGISTRY
-)
-
-
-def _preview_for(provider: str, dataset_key: str) -> PreviewKind:
-    """fixture registry를 조회해 dataset의 preview 가용성을 결정."""
-    if (provider, dataset_key) in _FIXTURE_KEYS:
-        return "fixture"
-    return "none"
-
-
-def _entry(
-    *,
-    provider: str,
-    dataset_key: str,
-    feature_kind: str,
-    label: str,
-    is_feature_load: bool,
-    is_refreshable: bool | None = None,
-    sync_scope: str = "default",
-    scope_refresh_selector: ScopeRefreshSelector = "none",
-) -> ProviderDatasetCatalogEntry:
-    return ProviderDatasetCatalogEntry(
-        provider=provider,
-        dataset_key=dataset_key,
-        feature_kind=feature_kind,
-        sync_scope=sync_scope,
-        label=label,
-        is_feature_load=is_feature_load,
-        is_refreshable=is_feature_load if is_refreshable is None else is_refreshable,
-        scope_refresh_selector=scope_refresh_selector,
-        preview=_preview_for(provider, dataset_key),
-    )
-
-
-# MCST 13 파일데이터 slug → 한글 라벨/category는 provider dict가 정본. 카탈로그는
-# dataset_key/label을 그 dict에서 그대로 끌어온다 (drift-safe, literal 중복 회피).
-_MCST_ENTRIES: Final[tuple[ProviderDatasetCatalogEntry, ...]] = tuple(
-    _entry(
-        provider=MCST_PROVIDER_NAME,
-        dataset_key=spec.dataset_key,
-        feature_kind="place",
-        label=spec.label,
-        is_feature_load=True,
-    )
-    for spec in MCST_FILE_DATASETS.values()
-)
-
-# KNPS place(point) 5 dataset — provider dict 키가 dataset_key 정본.
-_KNPS_PLACE_LABELS: Final[dict[str, str]] = {
-    "knps_visitor_centers": "국립공원 탐방안내소",
-    "knps_restrooms": "국립공원 화장실",
-    "knps_campgrounds": "국립공원 야영장",
-    "knps_shelters": "국립공원 대피소(산장)",
-    "knps_cultural_resources": "국립공원 문화자원(동적 category)",
-}
-_KNPS_GEOMETRY_LABELS: Final[dict[str, str]] = {
-    "knps_trails": "국립공원 탐방로(LINESTRING)",
-    "knps_linear_facilities": "국립공원 선형 시설도로(LINESTRING)",
-    "knps_park_boundaries": "국립공원 경계(POLYGON)",
-    "knps_hazard_zones": "국립공원 위험지역(POLYGON)",
-    "knps_protected_areas": "국립공원 보호지역(POLYGON)",
-}
-_KNPS_ENTRIES: Final[tuple[ProviderDatasetCatalogEntry, ...]] = tuple(
-    _entry(
-        provider=KNPS_PROVIDER_NAME,
-        dataset_key=spec.dataset_key,
-        feature_kind="place",
-        label=_KNPS_PLACE_LABELS.get(spec.dataset_key, spec.dataset_key),
-        is_feature_load=True,
-    )
-    for spec in KNPS_PLACE_DATASETS.values()
-) + tuple(
-    _entry(
-        provider=KNPS_PROVIDER_NAME,
-        dataset_key=spec.dataset_key,
-        # KnpsGeometryDatasetSpec.feature_kind는 FeatureKind StrEnum → str.
-        feature_kind=str(spec.feature_kind),
-        label=_KNPS_GEOMETRY_LABELS.get(spec.dataset_key, spec.dataset_key),
-        is_feature_load=True,
-    )
-    for spec in KNPS_GEOMETRY_DATASETS.values()
-)
-
-# datagokr fileData curated 4 dataset — provider dict 키가 dataset_key 정본.
-_DATAGOKR_FILEDATA_ENTRIES: Final[tuple[ProviderDatasetCatalogEntry, ...]] = tuple(
-    _entry(
-        provider=DATAGOKR_FILEDATA_PROVIDER_NAME,
-        dataset_key=spec.dataset_key,
-        feature_kind="place",
-        label=spec.label,
-        is_feature_load=True,
-    )
-    for spec in DATAGOKR_FILEDATA_DATASETS.values()
-)
-
-
-PROVIDER_DATASET_CATALOG: Final[tuple[ProviderDatasetCatalogEntry, ...]] = (
-    # ── data.go.kr 표준데이터 (standard_data) ─────────────────────────────
-    _entry(
-        provider=STANDARD_DATA_PROVIDER_NAME,
-        dataset_key=DATASET_KEY_CULTURAL_FESTIVALS,
-        feature_kind="event",
-        label="전국문화축제표준데이터 (1차 source, ADR-042)",
-        is_feature_load=True,
-    ),
-    _entry(
-        provider=STANDARD_DATA_PROVIDER_NAME,
-        dataset_key=DATASET_KEY_MUSEUMS,
-        feature_kind="place",
-        label="전국박물관미술관표준데이터",
-        is_feature_load=True,
-    ),
-    _entry(
-        provider=STANDARD_DATA_PROVIDER_NAME,
-        dataset_key=DATASET_KEY_TOURIST_ATTRACTIONS,
-        feature_kind="place",
-        label="전국관광지표준데이터",
-        is_feature_load=True,
-    ),
-    _entry(
-        provider=STANDARD_DATA_PROVIDER_NAME,
-        dataset_key=DATASET_KEY_PARKING_LOTS,
-        feature_kind="place",
-        label="전국주차장표준데이터",
-        is_feature_load=True,
-    ),
-    _entry(
-        provider=STANDARD_DATA_PROVIDER_NAME,
-        dataset_key=DATASET_KEY_SPECIAL_STREETS,
-        feature_kind="place",
-        label="전국지역특화거리표준데이터 (테마 구역 anchor)",
-        is_feature_load=True,
-    ),
-    # ── 기상청 (KMA) ─────────────────────────────────────────────────────
-    _entry(
-        provider=KMA_PROVIDER_NAME,
-        dataset_key=KMA_SHORT_FORECAST_DATASET_KEY,
-        feature_kind="weather",
-        sync_scope="target_grids",
-        label="KMA 단기예보 (getVilageFcst, 3시간×5일)",
-        is_feature_load=False,
-        is_refreshable=True,
-        scope_refresh_selector="poi_cache_targets",
-    ),
-    _entry(
-        provider=KMA_PROVIDER_NAME,
-        dataset_key=KMA_ULTRA_SHORT_NOWCAST_DATASET_KEY,
-        feature_kind="weather",
-        sync_scope="target_grids",
-        label="KMA 초단기실황 (getUltraSrtNcst, 관측)",
-        is_feature_load=False,
-        is_refreshable=True,
-        scope_refresh_selector="poi_cache_targets",
-    ),
-    _entry(
-        provider=KMA_PROVIDER_NAME,
-        dataset_key=KMA_ULTRA_SHORT_FORECAST_DATASET_KEY,
-        feature_kind="weather",
-        sync_scope="target_grids",
-        label="KMA 초단기예보 (getUltraSrtFcst, 30분×6시간)",
-        is_feature_load=False,
-        is_refreshable=True,
-        scope_refresh_selector="poi_cache_targets",
-    ),
-    _entry(
-        provider=KMA_PROVIDER_NAME,
-        dataset_key=KMA_MID_FORECAST_DATASET_KEY,
-        feature_kind="weather",
-        label="KMA 중기예보 (getMidLandFcst + getMidTa, 3~10일)",
-        is_feature_load=False,
-        is_refreshable=True,
-    ),
-    _entry(
-        provider=KMA_PROVIDER_NAME,
-        dataset_key=KMA_WEATHER_ALERT_DATASET_KEY,
-        feature_kind="notice",
-        label="KMA 기상특보 (특보×구역 fan-out)",
-        is_feature_load=True,
-    ),
-    # ── 해양수산부 (KHOA) ────────────────────────────────────────────────
-    _entry(
-        provider=KHOA_PROVIDER_NAME,
-        dataset_key=DATASET_KEY_BEACHES,
-        feature_kind="place",
-        label="해양수산부 해수욕장정보",
-        is_feature_load=True,
-    ),
-    # ── 한국환경공단 (AirKorea) ──────────────────────────────────────────
-    _entry(
-        provider=AIRKOREA_PROVIDER_NAME,
-        dataset_key=DATASET_KEY_STATIONS,
-        feature_kind="weather",
-        label="대기질 측정소 (weather-kind Feature)",
-        is_feature_load=False,
-        is_refreshable=False,
-    ),
-    _entry(
-        provider=AIRKOREA_PROVIDER_NAME,
-        dataset_key=DATASET_KEY_AIR_QUALITY,
-        feature_kind="weather",
-        label="대기질 측정소 + 측정값 (weather Feature + WeatherValue)",
-        is_feature_load=True,
-    ),
-    # ── 한국석유공사 (OpiNet) ────────────────────────────────────────────
-    _entry(
-        provider=OPINET_PROVIDER_NAME,
-        dataset_key=OPINET_STATION_DATASET_KEY,
-        feature_kind="place",
-        label="OpiNet 주유소 상세 (place Feature)",
-        is_feature_load=True,
-    ),
-    _entry(
-        provider=OPINET_PROVIDER_NAME,
-        dataset_key=OPINET_PRICE_DATASET_KEY,
-        feature_kind="price",
-        label="OpiNet 유가 시계열 (PriceValue)",
-        is_feature_load=False,
-        is_refreshable=True,
-    ),
-    # ── 한국도로공사 (krex) ──────────────────────────────────────────────
-    _entry(
-        provider=KREX_PROVIDER_NAME,
-        dataset_key=REST_AREA_DATASET_KEY,
-        feature_kind="place",
-        label="고속도로 휴게소 (place Feature)",
-        is_feature_load=True,
-    ),
-    _entry(
-        provider=KREX_PROVIDER_NAME,
-        dataset_key=REST_AREA_PRICES_DATASET_KEY,
-        feature_kind="price",
-        label="휴게소 food/fuel 가격 시계열 (PriceValue)",
-        is_feature_load=False,
-        is_refreshable=True,
-    ),
-    _entry(
-        provider=KREX_PROVIDER_NAME,
-        dataset_key=REST_AREA_WEATHER_DATASET_KEY,
-        feature_kind="weather",
-        label="휴게소 관측 기상 (observed WeatherValue + weather Feature)",
-        is_feature_load=False,
-        is_refreshable=True,
-    ),
-    _entry(
-        provider=KREX_PROVIDER_NAME,
-        dataset_key=TRAFFIC_NOTICES_DATASET_KEY,
-        feature_kind="notice",
-        label="고속도로 교통 공지/돌발 (notice Feature)",
-        is_feature_load=True,
-    ),
-    # ── 산림청 (krforest) ────────────────────────────────────────────────
-    _entry(
-        provider=KRFOREST_PROVIDER_NAME,
-        dataset_key=DATASET_KEY_RECREATION_FORESTS,
-        feature_kind="place",
-        label="전국자연휴양림",
-        is_feature_load=True,
-    ),
-    _entry(
-        provider=KRFOREST_PROVIDER_NAME,
-        dataset_key=DATASET_KEY_ARBORETUMS,
-        feature_kind="place",
-        label="수목원/식물원 (SHP)",
-        is_feature_load=True,
-    ),
-    # ── 한국공항공사 (krairport) ─────────────────────────────────────────
-    _entry(
-        provider=KRAIRPORT_PROVIDER_NAME,
-        dataset_key=DATASET_KEY_AIRPORTS,
-        feature_kind="place",
-        label="공항 메타데이터 (번들 정적)",
-        is_feature_load=True,
-    ),
-    # ── 국가유산청 (krheritage) ──────────────────────────────────────────
-    _entry(
-        provider=KRHERITAGE_PROVIDER_NAME,
-        dataset_key=DATASET_KEY_HERITAGE,
-        feature_kind="place",
-        label="국가유산 (국보/보물/사적/명승 등; place 또는 area)",
-        is_feature_load=True,
-    ),
-    _entry(
-        provider=KRHERITAGE_PROVIDER_NAME,
-        dataset_key=KRHERITAGE_DATASET_KEY_EVENT,
-        feature_kind="event",
-        label="국가유산 행사 목록",
-        is_feature_load=True,
-    ),
-    # ── 행정안전부 인허가 (MOIS) ─────────────────────────────────────────
-    _entry(
-        provider=MOIS_PROVIDER_NAME,
-        dataset_key=DATASET_KEY_BULK,
-        feature_kind="place",
-        label="MOIS 지방행정 인허가 bulk (영업중, PROMOTED 42업종)",
-        is_feature_load=True,
-    ),
-    _entry(
-        provider=MOIS_PROVIDER_NAME,
-        dataset_key=DATASET_KEY_HISTORY,
-        feature_kind="place",
-        label="MOIS 인허가 history (증분/변경분; 전용 runner 준비 전)",
-        is_feature_load=False,
-        is_refreshable=False,
-    ),
-    _entry(
-        provider=MOIS_PROVIDER_NAME,
-        dataset_key=DATASET_KEY_CLOSED,
-        feature_kind="place",
-        label="MOIS 인허가 closed (폐업 tombstone/inactive; 전용 runner 준비 전)",
-        is_feature_load=False,
-        is_refreshable=False,
-    ),
-    _entry(
-        provider=MOIS_PROVIDER_NAME,
-        dataset_key=DATASET_KEY_DETAIL,
-        feature_kind="place",
-        label="MOIS 인허가 상세(detail) 보강 (전용 secondary-source runner 준비 전)",
-        is_feature_load=False,
-        is_refreshable=False,
-    ),
-    # ── VisitKorea / 전화번호 enrichment ─────────────────────────────────
-    _entry(
-        provider=VISITKOREA_PROVIDER_NAME,
-        dataset_key=DATASET_KEY_FESTIVAL_EVENTS,
-        feature_kind="event",
-        label="VisitKorea 축제 enrichment (datagokr 1차에 2차 보강)",
-        is_feature_load=False,
-        is_refreshable=True,
-    ),
-    _entry(
-        provider=VISITKOREA_PROVIDER_NAME,
-        dataset_key=ENRICHMENT_DATASET_KEY,
-        feature_kind="place",
-        label="전화번호 보강 (place detail.phones; candidate: kakao/naver/google)",
-        is_feature_load=False,
-        is_refreshable=False,
-    ),
-    # ── kor-travel-concierge YouTube ─────────────────────────────────────
-    _entry(
-        provider=KOR_TRAVEL_CONCIERGE_PROVIDER_NAME,
-        dataset_key=DATASET_KEY_YOUTUBE_PLACE_CANDIDATES,
-        feature_kind="place",
-        label="kor-travel-concierge YouTube 장소 후보",
-        is_feature_load=True,
-    ),
-    # ── data.go.kr fileData curated (python-datagokr-api) ────────────────
-    *_DATAGOKR_FILEDATA_ENTRIES,
-    # ── 문화체육관광부 파일데이터 (MCST) 13 slug ────────────────────────
-    *_MCST_ENTRIES,
-    # ── 국립공원공단 (KNPS) place + geometry ─────────────────────────────
-    *_KNPS_ENTRIES,
-)
-"""시스템이 ETL 하는 전 provider×dataset 카탈로그 (단일 정본).
-
-새 provider/dataset 추가 시 본 tuple에 1행(또는 provider dict 참조) 추가하면
-canonical ``/ops/datasets`` 상태 그리드와 fixture preview에 자동 반영된다.
+_ACTIVE_REFRESH_OPERATION_BINDINGS_SQL: Final[str] = """
+SELECT
+    dataset.provider_dataset_id,
+    dataset.provider,
+    dataset.dataset_key,
+    operation.operation_key
+FROM provider_sync.provider_datasets AS dataset
+JOIN provider_sync.provider_dataset_operations AS operation
+  ON operation.provider_dataset_id = dataset.provider_dataset_id
+WHERE dataset.is_active
+  AND operation.is_enabled
+  AND operation.operation_kind = 'refresh'
+ORDER BY dataset.provider, dataset.dataset_key, operation.operation_key
 """
 
 
-def list_catalog_providers(*, feature_load_only: bool = False) -> list[str]:
-    """카탈로그 provider canonical name 목록 (중복 제거, 정렬).
+def _freeze_json(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return MappingProxyType({str(key): _freeze_json(item) for key, item in value.items()})
+    if isinstance(value, list | tuple):
+        return tuple(_freeze_json(item) for item in value)
+    return value
 
-    Parameters
-    ----------
-    feature_load_only:
-        True면 새 Feature를 적재하는 dataset이 1개라도 있는 provider만.
+
+def _json_object(value: Any) -> Mapping[str, Any]:
+    """PostgreSQL JSONB와 test double 양쪽을 deep immutable object로 정규화한다."""
+    decoded = json.loads(value) if isinstance(value, str) else value
+    if not isinstance(decoded, Mapping):
+        raise ValueError("provider dataset JSON column must be an object")
+    frozen = _freeze_json(decoded)
+    if not isinstance(frozen, Mapping):
+        raise AssertionError("JSON object freeze must preserve mapping shape")
+    return cast("Mapping[str, Any]", frozen)
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderDatasetOperation:
+    """DB가 소유한 dataset operation 1개와 정규 sync scope."""
+
+    operation_key: str
+    operation_kind: str
+    is_enabled: bool
+    config: Mapping[str, Any]
+    sync_scopes: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderDatasetCatalogEntry:
+    """``provider_datasets``의 API read projection.
+
+    ``produces``는 capabilities metadata에서만 읽는다. operation enable/handler/scope는
+    별도 operation relation을 읽으므로 동일 의미가 두 곳에 저장되지 않는다.
     """
-    if feature_load_only:
-        return sorted({e.provider for e in PROVIDER_DATASET_CATALOG if e.is_feature_load})
-    return sorted({e.provider for e in PROVIDER_DATASET_CATALOG})
+
+    provider_dataset_id: int
+    provider: str
+    dataset_key: str
+    display_name: str
+    source_kind: str
+    is_active: bool
+    capabilities: Mapping[str, Any]
+    operations: tuple[ProviderDatasetOperation, ...]
+
+    @property
+    def produces(self) -> tuple[str, ...]:
+        raw = self.capabilities.get("produces", ())
+        if not isinstance(raw, list | tuple) or not all(isinstance(value, str) for value in raw):
+            raise ValueError("provider dataset capabilities.produces must be a string array")
+        return tuple(raw)
+
+    @property
+    def feature_kind(self) -> str:
+        """UI가 표시할 대표 산출 종류.
+
+        capability는 복수 산출도 허용하지만 현 seed는 하나만 등록한다. 복수 산출은
+        순서로 의미를 만들지 않으며 안정적인 첫 값을 표시용으로만 사용한다.
+        """
+        return self.produces[0] if self.produces else "unknown"
+
+    @property
+    def enabled_refresh_operations(self) -> tuple[ProviderDatasetOperation, ...]:
+        return tuple(
+            operation
+            for operation in self.operations
+            if operation.operation_kind == "refresh" and operation.is_enabled
+        )
+
+    @property
+    def refresh_scopes(self) -> tuple[str, ...]:
+        return tuple(
+            sorted(
+                {
+                    scope
+                    for operation in self.enabled_refresh_operations
+                    for scope in operation.sync_scopes
+                }
+            )
+        )
+
+    @property
+    def is_refreshable(self) -> bool:
+        return self.is_active and bool(self.enabled_refresh_operations)
+
+    @property
+    def default_refresh_scope(self) -> str:
+        """DB가 선언한 기본 refresh scope.
+
+        target grid dataset은 전체 dataset 갱신과 별개로 운영자가 target scope를
+        선택하는 것이 유용하므로 target_grids를 우선한다. 나머지는 dataset_wide다.
+        """
+        if "target_grids" in self.refresh_scopes:
+            return "target_grids"
+        if "dataset_wide" in self.refresh_scopes:
+            return "dataset_wide"
+        raise ValueError(
+            "refresh operation must declare dataset_wide or target_grids default scope"
+        )
+
+    @property
+    def supports_targeted_refresh(self) -> bool:
+        return "target_grids" in self.refresh_scopes
+
+    @property
+    def has_fixture_preview(self) -> bool:
+        """fixture preview는 DB preview operation의 handler config로만 활성화한다."""
+        return any(
+            operation.operation_kind == "preview"
+            and operation.is_enabled
+            and operation.config.get("handler") == "fixture"
+            for operation in self.operations
+        )
 
 
-def catalog_datasets(provider: str) -> list[ProviderDatasetCatalogEntry]:
-    """주어진 provider의 카탈로그 항목 (dataset_key 정렬)."""
-    return sorted(
-        (e for e in PROVIDER_DATASET_CATALOG if e.provider == provider),
-        key=lambda e: e.dataset_key,
-    )
+@dataclass(frozen=True, slots=True)
+class ProviderDatasetOperationBinding:
+    """활성 refresh operation의 DB-owned dataset binding.
 
-
-def catalog_feature_load_entries() -> list[ProviderDatasetCatalogEntry]:
-    """새 Feature를 적재하는 (FeatureBundle) 항목만, provider→dataset 정렬.
-
-    WeatherValue/PriceValue/enrichment처럼 Feature를 만들지 않는 실행 단위는
-    ``catalog_refreshable_entries``에서 다룬다.
+    하나의 ``operation_key``는 여러 dataset row에 반복될 수 있다. handler registry는
+    여기의 provider/dataset 쌍을 알지 못하며, caller가 DB에서 받은 이 binding으로
+    실행 대상을 결정한다.
     """
-    return sorted(
-        (e for e in PROVIDER_DATASET_CATALOG if e.is_feature_load),
-        key=lambda e: (e.provider, e.dataset_key),
-    )
+
+    provider_dataset_id: int
+    provider: str
+    dataset_key: str
+    operation_key: str
 
 
-def catalog_refreshable_entries() -> list[ProviderDatasetCatalogEntry]:
-    """Dagster feature update request로 실행 가능한 항목만, provider→dataset 정렬."""
-    return sorted(
-        (e for e in PROVIDER_DATASET_CATALOG if e.is_refreshable),
-        key=lambda e: (e.provider, e.dataset_key),
-    )
+class ActiveOperationHandlerDriftError(RuntimeError):
+    """활성 DB operation과 Python handler exact-set이 다르다."""
+
+    def __init__(
+        self,
+        *,
+        missing_handler_operation_keys: frozenset[str],
+        stale_handler_operation_keys: frozenset[str],
+    ) -> None:
+        self.missing_handler_operation_keys = missing_handler_operation_keys
+        self.stale_handler_operation_keys = stale_handler_operation_keys
+        super().__init__(
+            "active provider dataset operations and handler bindings differ: "
+            f"missing_handler={sorted(missing_handler_operation_keys)!r}; "
+            f"stale_handler={sorted(stale_handler_operation_keys)!r}"
+        )
 
 
-def find_catalog_entry(provider: str, dataset_key: str) -> ProviderDatasetCatalogEntry | None:
-    """``(provider, dataset_key)`` 항목 또는 ``None``."""
-    for entry in PROVIDER_DATASET_CATALOG:
+def _catalog_entries(rows: Iterable[Any]) -> tuple[ProviderDatasetCatalogEntry, ...]:
+    datasets: dict[int, dict[str, Any]] = {}
+    for row in rows:
+        dataset_id = int(row["provider_dataset_id"])
+        item = datasets.setdefault(
+            dataset_id,
+            {
+                "provider": str(row["provider"]),
+                "dataset_key": str(row["dataset_key"]),
+                "display_name": str(row["display_name"]),
+                "source_kind": str(row["source_kind"]),
+                "is_active": bool(row["is_active"]),
+                "capabilities": _json_object(row["capabilities"]),
+                "operations": {},
+            },
+        )
+        operation_key = row["operation_key"]
+        if operation_key is None:
+            continue
+        operation_kind = str(row["operation_kind"])
+        operation_identity = (str(operation_key), operation_kind)
+        operation_rows: dict[tuple[str, str], dict[str, Any]] = item["operations"]
+        operation = operation_rows.setdefault(
+            operation_identity,
+            {
+                "is_enabled": bool(row["operation_is_enabled"]),
+                "config": _json_object(row["operation_config"]),
+                "sync_scopes": set(),
+            },
+        )
+        if row["sync_scope"] is not None:
+            operation["sync_scopes"].add(str(row["sync_scope"]))
+
+    entries: list[ProviderDatasetCatalogEntry] = []
+    for dataset_id, item in datasets.items():
+        catalog_operations = tuple(
+            ProviderDatasetOperation(
+                operation_key=operation_key,
+                operation_kind=operation_kind,
+                is_enabled=operation["is_enabled"],
+                config=operation["config"],
+                sync_scopes=tuple(sorted(operation["sync_scopes"])),
+            )
+            for (operation_key, operation_kind), operation in sorted(item["operations"].items())
+        )
+        entries.append(
+            ProviderDatasetCatalogEntry(
+                provider_dataset_id=dataset_id,
+                provider=item["provider"],
+                dataset_key=item["dataset_key"],
+                display_name=item["display_name"],
+                source_kind=item["source_kind"],
+                is_active=item["is_active"],
+                capabilities=item["capabilities"],
+                operations=catalog_operations,
+            )
+        )
+    return tuple(sorted(entries, key=lambda item: (item.provider, item.dataset_key)))
+
+
+async def list_provider_dataset_catalog(
+    session: AsyncSession,
+    *,
+    active_only: bool = False,
+) -> tuple[ProviderDatasetCatalogEntry, ...]:
+    """DB dataset catalog를 provider/dataset 순서의 immutable projection으로 읽는다."""
+    result = await session.execute(text(_CATALOG_SQL), {"active_only": active_only})
+    return _catalog_entries(result.mappings().all())
+
+
+async def find_provider_dataset_catalog_entry(
+    session: AsyncSession,
+    *,
+    provider: str,
+    dataset_key: str,
+    active_only: bool = False,
+) -> ProviderDatasetCatalogEntry | None:
+    """DB 정본에서 exact provider/dataset 하나를 찾는다."""
+    entries = await list_provider_dataset_catalog(session, active_only=active_only)
+    for entry in entries:
         if entry.provider == provider and entry.dataset_key == dataset_key:
             return entry
     return None
 
 
-def resolve_dataset_history_sync_scopes(
-    provider: str,
-    dataset_key: str,
-    sync_scope: str,
-) -> tuple[str | None, ...]:
-    """API의 canonical logical scope를 operation pair scope로 변환한다.
+async def list_active_refresh_operation_bindings(
+    session: AsyncSession,
+) -> tuple[ProviderDatasetOperationBinding, ...]:
+    """실행 가능한 refresh dataset binding을 DB에서 읽는다."""
+    result = await session.execute(text(_ACTIVE_REFRESH_OPERATION_BINDINGS_SQL))
+    return tuple(
+        ProviderDatasetOperationBinding(
+            provider_dataset_id=int(row["provider_dataset_id"]),
+            provider=str(row["provider"]),
+            dataset_key=str(row["dataset_key"]),
+            operation_key=str(row["operation_key"]),
+        )
+        for row in result.mappings().all()
+    )
 
-    선택형 target scope는 exact 값 하나만 허용한다. selector가 없는 일반 dataset의
-    ``dataset_wide``는 typed pair와 NULL pair를 같은 논리 이력으로 묶는다. 내부
-    provider-state namespace인 ``default``는 API identity나 URL로 노출하지 않는다.
+
+async def assert_active_operation_handler_exact_set(
+    session: AsyncSession,
+    *,
+    handler_operation_keys: Iterable[str],
+) -> frozenset[str]:
+    """활성 DB refresh operation key와 Python handler key를 exact 비교한다.
+
+    반환값은 검증된 DB key 집합이다. caller는 이 검증을 통과한 뒤에만 binding을
+    launch 대상으로 사용해야 한다.
     """
-    canonical_scope = parse_canonical_sync_scope(sync_scope).value
-    entry = find_catalog_entry(provider, dataset_key)
-    if canonical_scope == DATASET_WIDE_SYNC_SCOPE and (
-        entry is None or entry.scope_refresh_selector == "none"
-    ):
-        return (DATASET_WIDE_SYNC_SCOPE, None)
-    return (canonical_scope,)
+    bindings = await list_active_refresh_operation_bindings(session)
+    active_operation_keys = frozenset(binding.operation_key for binding in bindings)
+    handler_keys = frozenset(handler_operation_keys)
+    if any(not key or key != key.strip() for key in handler_keys):
+        raise ValueError("handler operation_key must be non-empty and trimmed")
+    missing_handler_keys = active_operation_keys - handler_keys
+    stale_handler_keys = handler_keys - active_operation_keys
+    if missing_handler_keys or stale_handler_keys:
+        raise ActiveOperationHandlerDriftError(
+            missing_handler_operation_keys=missing_handler_keys,
+            stale_handler_operation_keys=stale_handler_keys,
+        )
+    return active_operation_keys

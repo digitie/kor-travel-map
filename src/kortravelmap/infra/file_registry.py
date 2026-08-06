@@ -55,11 +55,13 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 _COLUMNS: Final[str] = (
-    "file_id, storage_backend, location, path, is_directory, kind, provider, "
-    "dataset_key, status, orphan_reason, registered_by, byte_size, "
-    "checksum_sha256, upload_id, origin_import_job_id, origin_dagster_run_id, "
-    "downloaded_at, last_loaded_at, last_seen_at, deleted_at, meta, "
-    "created_at, updated_at"
+    "mf.file_id, mf.storage_backend, mf.location, mf.path, mf.is_directory, mf.kind, "
+    "mf.provider_dataset_id, COALESCE(pd.provider, mf.provider_name) AS provider, "
+    "pd.dataset_key, "
+    "mf.status, mf.orphan_reason, mf.registered_by, mf.byte_size, "
+    "mf.checksum_sha256, mf.upload_id, mf.origin_import_job_id, "
+    "mf.origin_dagster_run_id, mf.downloaded_at, mf.last_loaded_at, "
+    "mf.last_seen_at, mf.deleted_at, mf.meta, mf.created_at, mf.updated_at"
 )
 
 _SORT_COLUMNS: Final[dict[str, str]] = {
@@ -81,6 +83,7 @@ class ManagedFile:
     path: str
     is_directory: bool
     kind: str
+    provider_dataset_id: int | None
     provider: str | None
     dataset_key: str | None
     status: str
@@ -139,6 +142,9 @@ def _row_to_file(row: Any) -> ManagedFile:
         path=row.path,
         is_directory=row.is_directory,
         kind=row.kind,
+        provider_dataset_id=(
+            int(row.provider_dataset_id) if row.provider_dataset_id is not None else None
+        ),
         provider=row.provider,
         dataset_key=row.dataset_key,
         status=row.status,
@@ -200,21 +206,31 @@ WITH prior AS (
       AND path = :path
 ), upserted AS (
     INSERT INTO ops.managed_files (
-        storage_backend, location, path, is_directory, kind, provider,
-        dataset_key, status, registered_by, byte_size, checksum_sha256,
+        storage_backend, location, path, is_directory, kind, provider_dataset_id,
+        provider_name, status, registered_by, byte_size, checksum_sha256,
         upload_id, origin_import_job_id, origin_dagster_run_id,
         downloaded_at, last_loaded_at, last_seen_at, meta
     ) VALUES (
-        :storage_backend, :location, :path, :is_directory, :kind, :provider,
-        :dataset_key, 'active', :registered_by, :byte_size, :checksum_sha256,
+        :storage_backend, :location, :path, :is_directory, :kind, :provider_dataset_id,
+        :provider_name, 'active', :registered_by, :byte_size, :checksum_sha256,
         CAST(:upload_id AS uuid), CAST(:origin_import_job_id AS uuid),
         :origin_dagster_run_id, :downloaded_at, NULL, now(), CAST(:meta AS jsonb)
     )
     ON CONFLICT (storage_backend, location, path) DO UPDATE SET
         is_directory = EXCLUDED.is_directory,
         kind = EXCLUDED.kind,
-        provider = COALESCE(EXCLUDED.provider, ops.managed_files.provider),
-        dataset_key = COALESCE(EXCLUDED.dataset_key, ops.managed_files.dataset_key),
+        provider_dataset_id = CASE
+            WHEN EXCLUDED.provider_dataset_id IS NOT NULL
+              OR EXCLUDED.provider_name IS NOT NULL
+            THEN EXCLUDED.provider_dataset_id
+            ELSE ops.managed_files.provider_dataset_id
+        END,
+        provider_name = CASE
+            WHEN EXCLUDED.provider_dataset_id IS NOT NULL
+              OR EXCLUDED.provider_name IS NOT NULL
+            THEN EXCLUDED.provider_name
+            ELSE ops.managed_files.provider_name
+        END,
         -- 재등록 = 물리 실체 확인 → deleted/missing/orphan 모두 active 부활.
         status = 'active',
         orphan_reason = NULL,
@@ -236,11 +252,13 @@ WITH prior AS (
         last_seen_at = now(),
         meta = ops.managed_files.meta || EXCLUDED.meta,
         updated_at = now()
-    RETURNING {_COLUMNS}
+    RETURNING *
 )
-SELECT upserted.*, prior.status AS prior_status
-FROM upserted
-LEFT JOIN prior ON prior.file_id = upserted.file_id
+SELECT {_COLUMNS}, prior.status AS prior_status
+FROM upserted AS mf
+LEFT JOIN provider_sync.provider_datasets AS pd
+  ON pd.provider_dataset_id = mf.provider_dataset_id
+LEFT JOIN prior ON prior.file_id = mf.file_id
 """
 
 
@@ -253,8 +271,8 @@ async def register_file(
     kind: str,
     registered_by: str = "hook",
     is_directory: bool = False,
-    provider: str | None = None,
-    dataset_key: str | None = None,
+    provider_dataset_id: int | None = None,
+    provider_name: str | None = None,
     byte_size: int | None = None,
     checksum_sha256: str | None = None,
     upload_id: str | None = None,
@@ -284,8 +302,8 @@ async def register_file(
                 "path": path,
                 "is_directory": is_directory,
                 "kind": kind,
-                "provider": provider,
-                "dataset_key": dataset_key,
+                "provider_dataset_id": provider_dataset_id,
+                "provider_name": provider_name,
                 "registered_by": registered_by,
                 "byte_size": byte_size,
                 "checksum_sha256": checksum_sha256,
@@ -585,7 +603,7 @@ async def list_managed_files(
     *,
     kinds: Sequence[str] | None = None,
     statuses: Sequence[str] | None = None,
-    provider: str | None = None,
+    provider_dataset_id: int | None = None,
     location: str | None = None,
     registered_by: str | None = None,
     q: str | None = None,
@@ -603,32 +621,36 @@ async def list_managed_files(
             text(
                 f"""
                 SELECT {_COLUMNS}, count(*) OVER () AS total_count
-                FROM ops.managed_files
-                WHERE (CAST(:kinds AS text[]) IS NULL OR kind = ANY(CAST(:kinds AS text[])))
+                FROM ops.managed_files AS mf
+                LEFT JOIN provider_sync.provider_datasets AS pd
+                  ON pd.provider_dataset_id = mf.provider_dataset_id
+                WHERE (CAST(:kinds AS text[]) IS NULL OR mf.kind = ANY(CAST(:kinds AS text[])))
                   AND (CAST(:statuses AS text[]) IS NULL
-                       OR status = ANY(CAST(:statuses AS text[])))
-                  AND (CAST(:provider AS text) IS NULL OR provider = CAST(:provider AS text))
-                  AND (CAST(:location AS text) IS NULL OR location = CAST(:location AS text))
+                       OR mf.status = ANY(CAST(:statuses AS text[])))
+                  AND (CAST(:provider_dataset_id AS bigint) IS NULL
+                       OR mf.provider_dataset_id = CAST(:provider_dataset_id AS bigint))
+                  AND (CAST(:location AS text) IS NULL OR mf.location = CAST(:location AS text))
                   AND (CAST(:registered_by AS text) IS NULL
-                       OR registered_by = CAST(:registered_by AS text))
+                       OR mf.registered_by = CAST(:registered_by AS text))
                   AND (
                        CAST(:q AS text) IS NULL
-                       OR path ILIKE '%' || CAST(:q AS text) || '%'
-                       OR provider ILIKE '%' || CAST(:q AS text) || '%'
-                       OR dataset_key ILIKE '%' || CAST(:q AS text) || '%'
+                       OR mf.path ILIKE '%' || CAST(:q AS text) || '%'
+                       OR COALESCE(pd.provider, mf.provider_name)
+                          ILIKE '%' || CAST(:q AS text) || '%'
+                       OR pd.dataset_key ILIKE '%' || CAST(:q AS text) || '%'
                   )
-                  AND (CAST(:min_age_days AS int) IS NULL OR downloaded_at
+                  AND (CAST(:min_age_days AS int) IS NULL OR mf.downloaded_at
                        <= now() - make_interval(days => CAST(:min_age_days AS int)))
-                  AND (CAST(:max_age_days AS int) IS NULL OR downloaded_at
+                  AND (CAST(:max_age_days AS int) IS NULL OR mf.downloaded_at
                        >= now() - make_interval(days => CAST(:max_age_days AS int)))
-                ORDER BY {sort_column} DESC NULLS LAST, file_id DESC
+                ORDER BY mf.{sort_column} DESC NULLS LAST, mf.file_id DESC
                 LIMIT :limit OFFSET :offset
                 """
             ),
             {
                 "kinds": list(kinds) if kinds else None,
                 "statuses": list(statuses) if statuses else None,
-                "provider": provider,
+                "provider_dataset_id": provider_dataset_id,
                 "location": location,
                 "registered_by": registered_by,
                 "q": q,
@@ -649,7 +671,11 @@ async def get_managed_file(
     row = (
         await session.execute(
             text(
-                f"SELECT {_COLUMNS} FROM ops.managed_files WHERE file_id = :file_id"
+                f"""SELECT {_COLUMNS}
+                FROM ops.managed_files AS mf
+                LEFT JOIN provider_sync.provider_datasets AS pd
+                  ON pd.provider_dataset_id = mf.provider_dataset_id
+                WHERE mf.file_id = :file_id"""
             ),
             {"file_id": file_id},
         )
@@ -668,9 +694,12 @@ async def get_managed_file_by_path(
         await session.execute(
             text(
                 f"""
-                SELECT {_COLUMNS} FROM ops.managed_files
-                WHERE storage_backend = :storage_backend
-                  AND location = :location AND path = :path
+                SELECT {_COLUMNS}
+                FROM ops.managed_files AS mf
+                LEFT JOIN provider_sync.provider_datasets AS pd
+                  ON pd.provider_dataset_id = mf.provider_dataset_id
+                WHERE mf.storage_backend = :storage_backend
+                  AND mf.location = :location AND mf.path = :path
                 """
             ),
             {

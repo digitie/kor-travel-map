@@ -292,8 +292,8 @@ ROUTE_POLICIES: dict[str, RoutePolicy] = {
     "/v1/admin/restore/{backup_id}/swap": RoutePolicy.OPERATOR,
     # -- operator — canonical ops datasets/pipeline (BFF 또는 ops principal).
     "/v1/ops/datasets": RoutePolicy.OPERATOR,
-    "/v1/ops/datasets/detail": RoutePolicy.OPERATOR,
-    "/v1/ops/datasets/preview": RoutePolicy.OPERATOR,
+    "/v1/ops/datasets/{provider_dataset_id:int}": RoutePolicy.OPERATOR,
+    "/v1/ops/datasets/{provider_dataset_id:int}/preview": RoutePolicy.OPERATOR,
     "/v1/ops/datasets/refresh-policy": RoutePolicy.OPERATOR,
     "/v1/ops/pipeline/dagster-runs": RoutePolicy.OPERATOR,
     "/v1/ops/pipeline/dagster-runs/{run_id:path}": RoutePolicy.OPERATOR,

@@ -166,8 +166,7 @@ class OfflineUploadRecord(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     upload_id: str
-    provider: str
-    dataset_key: str
+    provider_dataset_id: int
     sync_scope: str
     original_filename: str
     storage_backend: str
@@ -370,8 +369,7 @@ class _DagsterLaunch(BaseModel):
 def _record_from_upload(row: OfflineUpload) -> OfflineUploadRecord:
     return OfflineUploadRecord(
         upload_id=row.upload_id,
-        provider=row.provider,
-        dataset_key=row.dataset_key,
+        provider_dataset_id=row.provider_dataset_id,
         sync_scope=row.sync_scope,
         original_filename=row.original_filename,
         storage_backend=row.storage_backend,
@@ -623,11 +621,10 @@ def _duplicate_upload_conflict(upload: OfflineUpload) -> HTTPException:
         status_code=status.HTTP_409_CONFLICT,
         detail={
             "code": "OFFLINE_UPLOAD_DUPLICATE",
-            "message": "동일 provider/dataset/scope/checksum offline upload가 이미 있습니다.",
+            "message": "동일 dataset/scope/checksum offline upload가 이미 있습니다.",
             "details": {
                 "upload_id": upload.upload_id,
-                "provider": upload.provider,
-                "dataset_key": upload.dataset_key,
+                "provider_dataset_id": upload.provider_dataset_id,
                 "sync_scope": upload.sync_scope,
                 "checksum_sha256": upload.checksum_sha256,
             },
@@ -800,10 +797,9 @@ async def create_offline_upload_request(
         UploadFile,
         File(description="JSON/JSONL FeatureBundle 또는 CSV/TSV tabular 파일"),
     ],
-    provider: Annotated[str, Form(min_length=1)],
-    dataset_key: Annotated[str, Form(min_length=1)],
+    provider_dataset_id: Annotated[int, Form(gt=0)],
     idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
-    sync_scope: Annotated[str, Form(min_length=1)] = "default",
+    sync_scope: Annotated[str, Form(min_length=1)],
 ) -> OfflineUploadWriteResponse:
     started_at = perf_counter()
     settings = _kor_travel_map_settings_from_request(request)
@@ -836,15 +832,13 @@ async def create_offline_upload_request(
     store = _offline_upload_store_from_request(request)
     object_metadata = {
         "content-sha256": checksum_sha256,
-        "dataset-key": dataset_key,
-        "provider": provider,
+        "provider-dataset-id": str(provider_dataset_id),
         "sync-scope": sync_scope,
         "upload-id": upload_id,
     }
     metadata_digest = canonical_domain_command_fingerprint(object_metadata)
     payload = {
-        "provider": provider,
-        "dataset_key": dataset_key,
+        "provider_dataset_id": provider_dataset_id,
         "sync_scope": sync_scope,
         "filename": filename,
         "storage_backend": "rustfs",
@@ -883,8 +877,7 @@ async def create_offline_upload_request(
             upload = await reserve_offline_upload(
                 session,
                 upload_id=upload_id,
-                provider=provider,
-                dataset_key=dataset_key,
+                provider_dataset_id=provider_dataset_id,
                 sync_scope=sync_scope,
                 original_filename=filename,
                 storage_backend="rustfs",
@@ -898,8 +891,7 @@ async def create_offline_upload_request(
             if upload is None:
                 duplicate = await get_offline_upload_by_checksum(
                     session,
-                    provider=provider,
-                    dataset_key=dataset_key,
+                    provider_dataset_id=provider_dataset_id,
                     sync_scope=sync_scope,
                     checksum_sha256=checksum_sha256,
                 )
@@ -1054,8 +1046,7 @@ async def create_offline_upload_request(
             location=MANAGED_FILE_LOCATION_OFFLINE_UPLOADS,
             path=stored.object_key,
             kind="upload",
-            provider=provider,
-            dataset_key=dataset_key,
+            provider_dataset_id=provider_dataset_id,
             byte_size=stored.byte_size,
             checksum_sha256=checksum_sha256,
             upload_id=upload_id,
@@ -1078,8 +1069,7 @@ async def create_offline_upload_request(
 async def list_offline_upload_requests(
     session: Annotated[AsyncSession, Depends(get_session)],
     status_filter: Annotated[OfflineUploadState | None, Query(alias="status")] = None,
-    provider: Annotated[str | None, Query()] = None,
-    dataset_key: Annotated[str | None, Query()] = None,
+    provider_dataset_id: Annotated[int | None, Query(gt=0)] = None,
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
     cursor: Annotated[str | None, Query()] = None,
 ) -> OfflineUploadListResponse:
@@ -1088,8 +1078,7 @@ async def list_offline_upload_requests(
         page: OfflineUploadPage = await list_offline_uploads(
             session,
             status=status_filter,
-            provider=provider,
-            dataset_key=dataset_key,
+            provider_dataset_id=provider_dataset_id,
             limit=page_size,
             cursor=cursor,
         )
@@ -1308,8 +1297,7 @@ async def delete_offline_upload_request(
             location=MANAGED_FILE_LOCATION_OFFLINE_UPLOADS,
             path=row.storage_key,
             kind="upload",
-            provider=deleted.provider,
-            dataset_key=deleted.dataset_key,
+            provider_dataset_id=deleted.provider_dataset_id,
             byte_size=deleted.byte_size,
             checksum_sha256=deleted.checksum_sha256,
             upload_id=deleted.upload_id,

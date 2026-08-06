@@ -35,6 +35,7 @@ from kortravelmap.infra.merge_repo import (
 from kortravelmap.infra.models import (
     DedupReviewQueueRow,
     FeatureRow,
+    SourceEntityHeadRow,
     SourceEntityRow,
     SourceLinkRow,
     SourceRecordRow,
@@ -61,30 +62,25 @@ def _feature(feature_id: str, *, with_coord: bool) -> FeatureRow:
     )
 
 
-def _source_entity(key: str, provider: str) -> SourceEntityRow:
+def _source_entity(key: str, provider_dataset_id: int) -> SourceEntityRow:
     return SourceEntityRow(
         source_entity_key=key,
-        provider=provider,
-        dataset_key="d",
+        provider_dataset_id=provider_dataset_id,
         source_entity_type="t",
         source_entity_id=key,
-        current_source_record_key=None,
         first_seen_at=_FETCHED,
         last_seen_at=_FETCHED,
     )
 
 
-def _source_record(key: str, provider: str, *, source_entity_key: str) -> SourceRecordRow:
+def _source_record(key: str, *, source_entity_key: str) -> SourceRecordRow:
     return SourceRecordRow(
         source_record_key=key,
         source_entity_key=source_entity_key,
-        provider=provider,
-        dataset_key="d",
-        source_entity_type="t",
-        source_entity_id=source_entity_key,
-        raw_payload_hash="h",
+        raw_payload_hash=key.encode("utf-8").hex(),
         raw_data={},
         fetched_at=_FETCHED,
+        imported_at=_FETCHED,
     )
 
 
@@ -95,7 +91,35 @@ def _link(feature_id: str, entity_key: str, *, primary: bool = True) -> SourceLi
         source_role="primary" if primary else "enrichment",
         match_method="natural_key",
         confidence=100,
-        is_primary_source=primary,
+    )
+
+
+async def _seed_provider_dataset(
+    session: AsyncSession, *, provider: str, dataset_key: str
+) -> int:
+    return int(
+        (
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO provider_sync.provider_datasets (
+                        provider, dataset_key, display_name, source_kind
+                    ) VALUES (
+                        :provider, :dataset_key, :display_name, 'manual'
+                    )
+                    ON CONFLICT (provider, dataset_key) DO UPDATE SET
+                        display_name = EXCLUDED.display_name,
+                        is_active = true
+                    RETURNING provider_dataset_id
+                    """
+                ),
+                {
+                    "provider": provider,
+                    "dataset_key": dataset_key,
+                    "display_name": f"{provider}/{dataset_key}",
+                },
+            )
+        ).scalar_one()
     )
 
 
@@ -107,16 +131,37 @@ async def _seed_pair(engine: AsyncEngine) -> str:
     async with AsyncSession(engine) as session, session.begin():
         session.add(_feature("f_master", with_coord=True))
         session.add(_feature("f_loser", with_coord=False))
-        entity_1 = _source_entity("SE1", "python-mois-api")
-        entity_2 = _source_entity("SE2", "python-visitkorea-api")
+        mois_dataset_id = await _seed_provider_dataset(
+            session, provider="merge-test-mois", dataset_key="d"
+        )
+        visitkorea_dataset_id = await _seed_provider_dataset(
+            session, provider="merge-test-visitkorea", dataset_key="d"
+        )
+        curated_dataset_id = await _seed_provider_dataset(
+            session, provider="merge-test-provider", dataset_key="legacy-curation"
+        )
+        entity_1 = _source_entity("SE1", mois_dataset_id)
+        entity_2 = _source_entity("SE2", visitkorea_dataset_id)
         session.add(entity_1)
         session.add(entity_2)
         await session.flush()
-        session.add(_source_record("SR1", "python-mois-api", source_entity_key="SE1"))
-        session.add(_source_record("SR2", "python-visitkorea-api", source_entity_key="SE2"))
+        session.add(_source_record("SR1", source_entity_key="SE1"))
+        session.add(_source_record("SR2", source_entity_key="SE2"))
         await session.flush()
-        entity_1.current_source_record_key = "SR1"
-        entity_2.current_source_record_key = "SR2"
+        session.add_all(
+            (
+                SourceEntityHeadRow(
+                    source_entity_key="SE1",
+                    current_source_record_key="SR1",
+                    observed_at=_FETCHED,
+                ),
+                SourceEntityHeadRow(
+                    source_entity_key="SE2",
+                    current_source_record_key="SR2",
+                    observed_at=_FETCHED,
+                ),
+            )
+        )
         await session.flush()
         session.add(_link("f_master", "SE1"))
         session.add(_link("f_loser", "SE1", primary=False))  # 충돌 — master 보유
@@ -163,11 +208,10 @@ async def _seed_pair(engine: AsyncEngine) -> str:
                 """
                 WITH source AS (
                     INSERT INTO feature.curated_sources (
-                        provider, dataset_key, source_name, source_kind,
+                        provider_dataset_id, source_name, source_kind,
                         update_cycle, provider_status, metadata
                     ) VALUES (
-                        'merge-test-provider', 'legacy-curation',
-                        '병합 legacy 출처', 'manual', 'unknown',
+                        :curated_dataset_id, '병합 legacy 출처', 'manual', 'unknown',
                         'manual_only', '{}'::jsonb
                     )
                     RETURNING source_id
@@ -202,6 +246,8 @@ async def _seed_pair(engine: AsyncEngine) -> str:
                 WHERE themes.theme_slug = 'legacy-merge-loser-only'
                 """
             )
+            ,
+            {"curated_dataset_id": curated_dataset_id},
         )
         row = DedupReviewQueueRow(
             feature_id_a="f_loser",
@@ -502,12 +548,13 @@ async def seeded(pg_container: object, migrated_engine: AsyncEngine) -> object:
             ",'legacy-merge-loser-only-renamed'"
             ")",
             "DELETE FROM feature.curated_sources "
-            "WHERE provider = 'merge-test-provider' "
-            "AND dataset_key = 'legacy-curation'",
+            "WHERE provider_dataset_id IN ("
+            "SELECT provider_dataset_id FROM provider_sync.provider_datasets "
+            "WHERE provider IN ('merge-test-mois', 'merge-test-visitkorea', "
+            "'merge-test-provider'))",
             "DELETE FROM provider_sync.source_links "
             "WHERE feature_id IN ('f_master', 'f_loser')",
-            "UPDATE provider_sync.source_entities "
-            "SET current_source_record_key = NULL "
+            "DELETE FROM provider_sync.source_entity_heads "
             "WHERE source_entity_key IN ('SE1', 'SE2')",
             "DELETE FROM provider_sync.source_records "
             "WHERE source_record_key IN ('SR1', 'SR2')",
@@ -515,6 +562,9 @@ async def seeded(pg_container: object, migrated_engine: AsyncEngine) -> object:
             "WHERE source_entity_key IN ('SE1', 'SE2')",
             "DELETE FROM feature.features "
             "WHERE feature_id IN ('f_master', 'f_loser', 'f_theme_reuse')",
+            "DELETE FROM provider_sync.provider_datasets "
+            "WHERE provider IN ('merge-test-mois', 'merge-test-visitkorea', "
+            "'merge-test-provider')",
         ):
             await session.execute(text(statement))
 
@@ -878,6 +928,12 @@ async def test_duplicate_merge_appends_survivor_owned_current_import_row(
     seeded: str,
     migrated_engine: AsyncEngine,
 ) -> None:
+    provider = "merge-test-provider"
+    dataset_key = "duplicate-provenance"
+    async with AsyncSession(migrated_engine) as session, session.begin():
+        provider_dataset_id = await _seed_provider_dataset(
+            session, provider=provider, dataset_key=dataset_key
+        )
     common = {
         "collection_key": "merge-test:2026",
         "theme_slug": "merge-test",
@@ -885,8 +941,7 @@ async def test_duplicate_merge_appends_survivor_owned_current_import_row(
         "theme_group": "test",
         "title": "병합 테스트 2026",
         "edition_key": "2026",
-        "provider": "merge-test-provider",
-        "dataset_key": "duplicate-provenance",
+        "provider_dataset_id": provider_dataset_id,
         "source_name": "병합 테스트 출처",
         "source_url": None,
         "source_item_key": "shared",
@@ -978,6 +1033,8 @@ async def test_duplicate_merge_appends_survivor_owned_current_import_row(
                             import_row.curation_item_id::text AS row_owner,
                             import_row.row_payload->>'place_name' AS row_place_name,
                             import_row.row_payload->'metadata' AS row_metadata,
+                            import_row.row_payload->>'provider' AS row_provider,
+                            import_row.row_payload->>'dataset_key' AS row_dataset_key,
                             import_row.provenance,
                             batch.batch_kind,
                             batch.row_count,
@@ -1015,6 +1072,8 @@ async def test_duplicate_merge_appends_survivor_owned_current_import_row(
     assert survivor["row_owner"] == before["f_master"]["curation_item_id"]
     assert survivor["row_place_name"] == survivor["place_name"]
     assert survivor["row_metadata"] == survivor["metadata"]
+    assert survivor["row_provider"] == provider
+    assert survivor["row_dataset_key"] == dataset_key
     assert survivor["provenance"]["provider_winner_import_row_id"] == (
         before["f_loser"]["current_import_row_id"]
     )
@@ -1033,6 +1092,12 @@ async def test_duplicate_merge_reconciles_active_and_historical_components(
     seeded: str,
     migrated_engine: AsyncEngine,
 ) -> None:
+    async with AsyncSession(migrated_engine) as session, session.begin():
+        provider_dataset_id = await _seed_provider_dataset(
+            session,
+            provider="merge-test-provider",
+            dataset_key="duplicate-multi-component",
+        )
     common = {
         "collection_key": "merge-test:2026",
         "theme_slug": "merge-test",
@@ -1040,8 +1105,7 @@ async def test_duplicate_merge_reconciles_active_and_historical_components(
         "theme_group": "test",
         "title": "병합 테스트 2026",
         "edition_key": "2026",
-        "provider": "merge-test-provider",
-        "dataset_key": "duplicate-multi-component",
+        "provider_dataset_id": provider_dataset_id,
         "source_name": "병합 테스트 출처",
         "source_url": None,
         "source_item_key": "shared",
@@ -2132,19 +2196,24 @@ async def _seed_import_race_collection(
         await connection.execute(
             text(
                 """
-                WITH theme AS (
+                WITH dataset AS (
+                    INSERT INTO provider_sync.provider_datasets (
+                        provider, dataset_key, display_name, source_kind
+                    ) VALUES (:provider, 'race', 'merge/import race', 'manual')
+                    RETURNING provider_dataset_id
+                ), theme AS (
                     INSERT INTO feature.curated_themes (
                         theme_slug, theme_name, theme_group
                     ) VALUES (:theme_slug, 'merge/import race', 'test')
                     RETURNING theme_id
                 ), source AS (
                     INSERT INTO feature.curated_sources (
-                        provider, dataset_key, source_name, source_kind,
+                        provider_dataset_id, source_name, source_kind,
                         update_cycle, provider_status, metadata
-                    ) VALUES (
-                        :provider, 'race', 'merge/import race',
-                        'manual', 'unknown', 'manual_only', '{}'::jsonb
                     )
+                    SELECT provider_dataset_id, 'merge/import race',
+                           'manual', 'unknown', 'manual_only', '{}'::jsonb
+                    FROM dataset
                     RETURNING source_id
                 )
                 INSERT INTO feature.curation_collections (
@@ -2160,6 +2229,18 @@ async def _seed_import_race_collection(
                 "collection_key": collection_key,
             },
         )
+        provider_dataset_id = int(
+            (
+                await connection.execute(
+                    text(
+                        "SELECT provider_dataset_id "
+                        "FROM provider_sync.provider_datasets "
+                        "WHERE provider = :provider AND dataset_key = 'race'"
+                    ),
+                    {"provider": provider},
+                )
+            ).scalar_one()
+        )
     row = ResolvedCurationImportRow(
         row_number=2,
         collection_key=collection_key,
@@ -2168,8 +2249,7 @@ async def _seed_import_race_collection(
         theme_group="test",
         title="race",
         edition_key="2026",
-        provider=provider,
-        dataset_key="race",
+        provider_dataset_id=provider_dataset_id,
         source_name="merge/import race",
         source_url=None,
         source_item_key="loser-item",
@@ -2303,6 +2383,15 @@ async def test_merge_first_serializes_import_against_feature_lifecycle(
             await cleanup.execute(
                 text(
                     "DELETE FROM feature.curated_sources "
+                    "WHERE provider_dataset_id IN ("
+                    "SELECT provider_dataset_id FROM provider_sync.provider_datasets "
+                    "WHERE provider = :provider AND dataset_key = 'race')"
+                ),
+                {"provider": provider},
+            )
+            await cleanup.execute(
+                text(
+                    "DELETE FROM provider_sync.provider_datasets "
                     "WHERE provider = :provider AND dataset_key = 'race'"
                 ),
                 {"provider": provider},
@@ -2468,6 +2557,15 @@ async def test_import_first_merge_moves_newly_committed_membership(
             await cleanup.execute(
                 text(
                     "DELETE FROM feature.curated_sources "
+                    "WHERE provider_dataset_id IN ("
+                    "SELECT provider_dataset_id FROM provider_sync.provider_datasets "
+                    "WHERE provider = :provider AND dataset_key = 'race')"
+                ),
+                {"provider": provider},
+            )
+            await cleanup.execute(
+                text(
+                    "DELETE FROM provider_sync.provider_datasets "
                     "WHERE provider = :provider AND dataset_key = 'race'"
                 ),
                 {"provider": provider},
@@ -2724,13 +2822,19 @@ async def test_rule_apply_rechecks_feature_after_waiting_for_merge(
 ) -> None:
     suffix = uuid4().hex
     theme_slug = f"merge-rule-race-{suffix}"
+    provider = f"merge-rule-race-{suffix}"
     async with AsyncSession(migrated_engine) as setup, setup.begin():
         rule_id = str(
             (
                 await setup.execute(
                     text(
                         """
-                        WITH theme AS (
+                        WITH dataset AS (
+                            INSERT INTO provider_sync.provider_datasets (
+                                provider, dataset_key, display_name, source_kind
+                            ) VALUES (:provider, 'd', 'merge rule race', 'manual')
+                            RETURNING provider_dataset_id
+                        ), theme AS (
                             INSERT INTO feature.curated_themes (
                                 theme_slug, theme_name, theme_group
                             ) VALUES (
@@ -2739,27 +2843,26 @@ async def test_rule_apply_rechecks_feature_after_waiting_for_merge(
                             RETURNING theme_id
                         ), source AS (
                             INSERT INTO feature.curated_sources (
-                                provider, dataset_key, source_name,
+                                provider_dataset_id, source_name,
                                 source_kind, update_cycle,
                                 provider_status, metadata
-                            ) VALUES (
-                                'python-visitkorea-api', 'd',
-                                'merge rule race', 'openapi', 'unknown',
-                                'implemented', '{}'::jsonb
                             )
+                            SELECT provider_dataset_id, 'merge rule race',
+                                   'manual', 'unknown', 'manual_only', '{}'::jsonb
+                            FROM dataset
                             RETURNING source_id
                         )
                         INSERT INTO feature.curated_source_rules (
-                            theme_id, source_id, dataset_key, default_action,
+                            theme_id, source_id, default_action,
                             enabled, priority
                         )
                         SELECT
-                            theme_id, source_id, 'd', 'candidate', true, 1
+                            theme_id, source_id, 'candidate', true, 1
                         FROM theme CROSS JOIN source
                         RETURNING rule_id::text
                         """
                     ),
-                    {"theme_slug": theme_slug},
+                    {"theme_slug": theme_slug, "provider": provider},
                 )
             ).scalar_one()
         )
@@ -2848,10 +2951,19 @@ async def test_rule_apply_rechecks_feature_after_waiting_for_merge(
             await connection.execute(
                 text(
                     "DELETE FROM feature.curated_sources "
-                    "WHERE provider = 'python-visitkorea-api' "
-                    "AND dataset_key = 'd' "
-                    "AND source_name = 'merge rule race'"
-                )
+                    "WHERE source_name = 'merge rule race' "
+                    "AND provider_dataset_id IN ("
+                    "SELECT provider_dataset_id FROM provider_sync.provider_datasets "
+                    "WHERE provider = :provider AND dataset_key = 'd')"
+                ),
+                {"provider": provider},
+            )
+            await connection.execute(
+                text(
+                    "DELETE FROM provider_sync.provider_datasets "
+                    "WHERE provider = :provider AND dataset_key = 'd'"
+                ),
+                {"provider": provider},
             )
             await connection.execute(
                 text(

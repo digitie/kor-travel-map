@@ -17,7 +17,7 @@ from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from typing import Any, Final
 
-from kortravelmap.core.feature_operation import ProviderDatasetOperationKey
+from kortravelmap.core.feature_operation import ProviderDatasetOperationMembership
 from kortravelmap.providers.mcst import (
     MCST_FILE_DATASETS,
     MCST_PROVIDER_NAME,
@@ -36,9 +36,9 @@ from .assets import (
 )
 from .etl import DagsterFeatureLoadResult, _add_output_metadata
 from .feature_operation_tracking import (
-    append_failed_multi_pair_attempt,
-    ensure_tracked_multi_pair_asset,
-    finish_tracked_feature_pair,
+    append_failed_multi_member_attempt,
+    ensure_tracked_multi_member_asset,
+    finish_tracked_feature_membership,
 )
 
 __all__ = [
@@ -66,15 +66,10 @@ class McstLoadResult:
             "provider": self.provider,
             "datasets_loaded": len(self.results),
             "bundles_total": self.bundles_total,
-            "features_inserted": sum(
-                result.load.features_inserted for result in self.results
-            ),
-            "features_updated": sum(
-                result.load.features_updated for result in self.results
-            ),
+            "features_inserted": sum(result.load.features_inserted for result in self.results),
+            "features_updated": sum(result.load.features_updated for result in self.results),
             "bundles_by_dataset": {
-                result.dataset_key: result.load.bundles_total
-                for result in self.results
+                result.dataset_key: result.load.bundles_total for result in self.results
             },
         }
 
@@ -92,16 +87,23 @@ def group_records_by_slug(
 
 async def run_feature_place_mcst_culture(
     context: AssetExecutionContext,
-    on_pair_done: Callable[[str, str], Awaitable[None]] | None = None,
+    *,
+    memberships: tuple[ProviderDatasetOperationMembership, ...] = (),
+    on_memberships_completed: (
+        Callable[[tuple[ProviderDatasetOperationMembership, ...]], Awaitable[None]] | None
+    ) = None,
 ) -> McstLoadResult:
-    """MCST 파일데이터 등록 dataset CSV row를 slug별 place Feature로 적재한다."""
+    """MCST 파일데이터 등록 dataset CSV row를 slug별 place Feature로 적재한다.
+
+    multi-member operation의 completion은 slug/provider label을 identity로 다시
+    해석하지 않는다. 모든 load가 성공한 뒤 caller가 전달한 exact membership
+    snapshot 전체를 한 번에 완료 처리한다.
+    """
     records = await _record_list(context, "mcst_culture_records")
     grouped = group_records_by_slug(records)
     unknown = sorted(set(grouped) - set(MCST_FILE_DATASETS))
     if unknown:
-        raise KeyError(
-            f"MCST 메타표에 없는 slug: {unknown!r} (resource mcst_culture_records)"
-        )
+        raise KeyError(f"MCST 메타표에 없는 slug: {unknown!r} (resource mcst_culture_records)")
 
     fetched_at = await _fetched_at(context)
     geocoder = _reverse_geocoder(context)
@@ -110,8 +112,6 @@ async def run_feature_place_mcst_culture(
         slug_rows = grouped.get(slug)
         if not slug_rows:
             context.log.info("MCST %s row 없음 — skip.", spec.dataset_key)
-            if on_pair_done is not None:
-                await on_pair_done(MCST_PROVIDER_NAME, spec.dataset_key)
             continue
         bundles = await file_rows_to_bundles(
             slug_rows,
@@ -134,10 +134,10 @@ async def run_feature_place_mcst_culture(
             bundles=bundles,
             authoritative_snapshot_complete=True,
         )
-        if on_pair_done is not None:
-            await on_pair_done(MCST_PROVIDER_NAME, spec.dataset_key)
         results.append(loaded)
     result = McstLoadResult(provider=MCST_PROVIDER_NAME, results=tuple(results))
+    if on_memberships_completed is not None and memberships:
+        await on_memberships_completed(memberships)
     _add_output_metadata(context, result.as_metadata())
     return result
 
@@ -150,29 +150,35 @@ async def run_feature_place_mcst_culture(
 async def feature_place_mcst_culture(
     context: AssetExecutionContext,
 ) -> McstLoadResult:
-    completed: set[ProviderDatasetOperationKey] = set()
+    guard = await ensure_tracked_multi_member_asset(context)
+    memberships = guard.memberships if guard is not None else ()
+    completed_memberships: tuple[ProviderDatasetOperationMembership, ...] = ()
 
-    async def _on_pair_done(provider: str, dataset_key: str) -> None:
-        pair = ProviderDatasetOperationKey(provider, dataset_key)
-        if guard is not None:
-            await finish_tracked_feature_pair(guard, pair)
-        completed.add(pair)
+    async def _on_memberships_completed(
+        received_memberships: tuple[ProviderDatasetOperationMembership, ...],
+    ) -> None:
+        nonlocal completed_memberships
+        if guard is not None and received_memberships != memberships:
+            raise RuntimeError("MCST completed membership snapshot이 guard와 다름")
+        completed_memberships = received_memberships
 
-    pair_order = tuple(
-        ProviderDatasetOperationKey(MCST_PROVIDER_NAME, spec.dataset_key)
-        for spec in MCST_FILE_DATASETS.values()
-    )
-    guard = await ensure_tracked_multi_pair_asset(context)
     try:
-        return await run_feature_place_mcst_culture(
+        result = await run_feature_place_mcst_culture(
             context,
-            on_pair_done=_on_pair_done if guard is not None else None,
+            memberships=memberships,
+            on_memberships_completed=_on_memberships_completed if guard is not None else None,
         )
+        if guard is not None and completed_memberships != memberships:
+            raise RuntimeError("MCST raw runner가 exact membership completion을 emit하지 않음")
     except Exception as exc:
-        failed_pair = next((pair for pair in pair_order if pair not in completed), None)
-        if guard is not None and failed_pair is not None:
-            await append_failed_multi_pair_attempt(context, guard, failed_pair, exc)
+        if guard is not None:
+            for membership in memberships:
+                await append_failed_multi_member_attempt(context, guard, membership, exc)
         raise
+    if guard is not None:
+        for membership in completed_memberships:
+            await finish_tracked_feature_membership(guard, membership)
+    return result
 
 
 MCST_FEATURE_ASSETS: Final = [

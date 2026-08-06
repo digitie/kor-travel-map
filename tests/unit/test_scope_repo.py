@@ -32,7 +32,16 @@ def test_scope_resolution_matched_scope_includes_cache_target_payload() -> None:
             FeatureScopeRow("feature-1", "11110"),
             FeatureScopeRow("feature-2", "11140"),
         ),
-        provider_datasets=(ProviderDatasetScope("python-a-api", "dataset-a", 2),),
+        provider_datasets=(
+            ProviderDatasetScope(
+                "python-a-api",
+                "dataset-a",
+                2,
+                17,
+                "dataset_wide",
+                "refresh_dataset_a",
+            ),
+        ),
         sigungu_codes=("11110", "11140"),
         extra_matched_scope={
             "target_count": 2,
@@ -47,6 +56,9 @@ def test_scope_resolution_matched_scope_includes_cache_target_payload() -> None:
     assert matched["feature_count"] == 2
     assert matched["deduped_provider_scopes"] == [
         {
+            "provider_dataset_id": 17,
+            "sync_scope": "dataset_wide",
+            "operation_key": "refresh_dataset_a",
             "provider": "python-a-api",
             "dataset_key": "dataset-a",
             "feature_count": 2,
@@ -93,6 +105,7 @@ def test_scope_helper_conversions_cover_json_rows_and_dedup() -> None:
         _row(
             target_id="target-1",
             feature_id="feature-1",
+            provider_dataset_id=17,
             provider="python-a-api",
             dataset_key="dataset-a",
             distance_m="12.5",
@@ -108,6 +121,7 @@ def test_scope_helper_conversions_cover_json_rows_and_dedup() -> None:
             _row(
                 target_id="target-1",
                 feature_id="feature-2",
+                provider_dataset_id=None,
                 provider=None,
                 dataset_key=None,
                 distance_m=None,
@@ -123,6 +137,7 @@ def test_cache_target_match_helpers_preserve_first_feature_order() -> None:
         CacheTargetFeatureMatch(
             target_id="target-1",
             feature_id="feature-1",
+            provider_dataset_id=17,
             provider="python-a-api",
             dataset_key="dataset-a",
             distance_m=10.0,
@@ -131,6 +146,7 @@ def test_cache_target_match_helpers_preserve_first_feature_order() -> None:
         CacheTargetFeatureMatch(
             target_id="target-2",
             feature_id="feature-1",
+            provider_dataset_id=17,
             provider="python-a-api",
             dataset_key="dataset-a",
             distance_m=11.0,
@@ -139,6 +155,7 @@ def test_cache_target_match_helpers_preserve_first_feature_order() -> None:
         CacheTargetFeatureMatch(
             target_id="target-1",
             feature_id="feature-2",
+            provider_dataset_id=18,
             provider="python-b-api",
             dataset_key="dataset-b",
             distance_m=None,
@@ -213,6 +230,15 @@ async def test_count_features_matching_scope_dispatches_to_resolvers(
         def all(self) -> list[dict[str, object]]:
             return [{"feature_id": "feature-sigungu", "sigungu_code": "11110"}]
 
+        def one_or_none(self) -> dict[str, object]:
+            return {
+                "provider_dataset_id": 17,
+                "sync_scope": "dataset_wide",
+                "operation_key": "refresh_dataset_a",
+                "provider": "python-a-api",
+                "dataset_key": "dataset-a",
+            }
+
     class FakeSession:
         async def execute(self, *_args: object, **_kwargs: object) -> FakeExecuteResult:
             calls.append(("execute_preview", {}))
@@ -229,7 +255,16 @@ async def test_count_features_matching_scope_dispatches_to_resolvers(
         session: object, sql: str, params: dict[str, object]
     ) -> tuple[ProviderDatasetScope, ...]:
         calls.append(("provider_datasets", {"session": session, "sql": sql, "params": params}))
-        return (ProviderDatasetScope("python-a-api", "dataset-a", 3),)
+        return (
+            ProviderDatasetScope(
+                "python-a-api",
+                "dataset-a",
+                3,
+                17,
+                "dataset_wide",
+                "refresh_dataset_a",
+            ),
+        )
 
     async def fake_provider_datasets_for_ids(
         session: object, feature_ids: list[str] | tuple[str, ...]
@@ -240,7 +275,16 @@ async def test_count_features_matching_scope_dispatches_to_resolvers(
                 {"session": session, "feature_ids": tuple(feature_ids)},
             )
         )
-        return (ProviderDatasetScope("python-a-api", "dataset-a", 2),)
+        return (
+            ProviderDatasetScope(
+                "python-a-api",
+                "dataset-a",
+                2,
+                17,
+                "dataset_wide",
+                "refresh_dataset_a",
+            ),
+        )
 
     async def fake_sigungu_codes(
         session: object, sql: str, params: dict[str, object]
@@ -304,15 +348,21 @@ async def test_count_features_matching_scope_dispatches_to_resolvers(
         return result("bbox")
 
     async def fake_provider_dataset(
-        session: object, *, provider: str, dataset_key: str, limit: int
+        session: object,
+        *,
+        provider_dataset_id: int,
+        sync_scope: str,
+        operation_key: str,
+        limit: int,
     ) -> ScopeResolution:
         calls.append(
             (
                 "provider_dataset",
                 {
                     "session": session,
-                    "provider": provider,
-                    "dataset_key": dataset_key,
+                    "provider_dataset_id": provider_dataset_id,
+                    "sync_scope": sync_scope,
+                    "operation_key": operation_key,
                     "limit": limit,
                 },
             )
@@ -374,8 +424,9 @@ async def test_count_features_matching_scope_dispatches_to_resolvers(
         },
         {
             "type": "provider_dataset",
-            "provider": "python-a-api",
-            "dataset_key": "dataset-a",
+            "provider_dataset_id": 17,
+            "sync_scope": "dataset_wide",
+            "operation_key": "refresh_dataset_a",
         },
         {
             "type": "cache_target_keys",
@@ -456,14 +507,15 @@ def test_canonicalize_feature_update_scope_materializes_defaults_and_strips_gene
     assert canonicalize_feature_update_scope(
         {
             "type": "provider_dataset",
-            "provider": "\t provider \n",
-            "dataset_key": " dataset ",
-            "sync_scope": None,
+            "provider_dataset_id": 17,
+            "sync_scope": "dataset_wide",
+            "operation_key": "refresh_dataset_a",
         }
     ) == {
         "type": "provider_dataset",
-        "provider": "provider",
-        "dataset_key": "dataset",
+        "provider_dataset_id": 17,
+        "sync_scope": "dataset_wide",
+        "operation_key": "refresh_dataset_a",
     }
     assert canonicalize_feature_update_scope(
         {
@@ -506,8 +558,9 @@ def test_canonicalize_feature_update_scope_materializes_defaults_and_strips_gene
         },
         {
             "type": "provider_dataset",
-            "provider": "provider",
-            "dataset_key": "dataset",
+            "provider_dataset_id": 17,
+            "sync_scope": "dataset_wide",
+            "operation_key": "refresh_dataset_a",
             "extra": True,
         },
         {

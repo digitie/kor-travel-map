@@ -54,6 +54,7 @@ from kortravelmap.core.feature_operation import (
     DagsterFeatureOperationPage,
     FeatureOperationInvariantConflict,
     ProviderDatasetOperationKey,
+    ProviderDatasetOperationMembership,
 )
 from kortravelmap.enrichment import (
     PhoneEnrichmentCandidate,
@@ -148,7 +149,10 @@ from kortravelmap.infra.feature_operation_repo import (
     ensure_dagster_feature_operation as repo_ensure_dagster_feature_operation,
 )
 from kortravelmap.infra.feature_operation_repo import (
-    finish_dagster_feature_pair as repo_finish_dagster_feature_pair,
+    finish_dagster_feature_membership as repo_finish_dagster_feature_membership,
+)
+from kortravelmap.infra.feature_operation_repo import (
+    list_feature_operation_memberships as repo_list_feature_operation_memberships,
 )
 from kortravelmap.infra.feature_operation_repo import (
     list_reconcilable_dagster_feature_runs as repo_list_reconcilable_feature_runs,
@@ -158,6 +162,12 @@ from kortravelmap.infra.feature_operation_repo import (
 )
 from kortravelmap.infra.feature_operation_repo import (
     record_feature_operation_invariant_conflict,
+)
+from kortravelmap.infra.feature_operation_repo import (
+    resolve_feature_operation_dataset_membership as repo_resolve_operation_dataset_member,
+)
+from kortravelmap.infra.feature_operation_repo import (
+    resolve_feature_operation_memberships as repo_resolve_feature_operation_memberships,
 )
 from kortravelmap.infra.feature_repo import (
     AirQualityLoadResult,
@@ -272,13 +282,22 @@ from kortravelmap.infra.sync_state_repo import (
     get_sync_state as repo_get_sync_state,
 )
 from kortravelmap.infra.sync_state_repo import (
+    get_sync_state_for_operation_membership as repo_get_sync_state_for_operation_membership,
+)
+from kortravelmap.infra.sync_state_repo import (
     list_sync_states as repo_list_sync_states,
 )
 from kortravelmap.infra.sync_state_repo import (
     record_sync_failure as repo_record_sync_failure,
 )
 from kortravelmap.infra.sync_state_repo import (
+    record_sync_failure_for_operation_membership as repo_record_operation_failure,
+)
+from kortravelmap.infra.sync_state_repo import (
     record_sync_success as repo_record_sync_success,
+)
+from kortravelmap.infra.sync_state_repo import (
+    record_sync_success_for_operation_membership as repo_record_operation_success,
 )
 from kortravelmap.infra.weather_repo import (
     WeatherCard,
@@ -368,6 +387,7 @@ __all__ = [
     "OfflineUploadLoadResult",
     "OfflineUploadValidationResult",
     "PriceFeatureLoadResult",
+    "ProviderDatasetOperationMembership",
     "ProviderDatasetOperationKey",
 ]
 
@@ -816,21 +836,21 @@ class AsyncKorTravelMapClient:
         *,
         dagster_run_id: str,
         trigger_kind: str,
-        selected_pairs: Sequence[ProviderDatasetOperationKey],
-        registry_version: str,
+        selected_memberships: Sequence[ProviderDatasetOperationMembership],
+        operation_key: str,
         engine_created_at: datetime,
         engine_started_at: datetime | None,
         observed_status: str,
     ) -> DagsterFeatureOperationMutation:
-        """Dagster run root와 exact pair child 전체를 짧은 transaction에 ensure한다."""
+        """Dagster run root와 exact canonical member 전체를 ensure한다."""
         try:
             async with self._session_factory() as session, session.begin():
                 return await repo_ensure_dagster_feature_operation(
                     session,
                     dagster_run_id=dagster_run_id,
                     trigger_kind=trigger_kind,
-                    selected_pairs=selected_pairs,
-                    registry_version=registry_version,
+                    selected_memberships=selected_memberships,
+                    operation_key=operation_key,
                     engine_created_at=engine_created_at,
                     engine_started_at=engine_started_at,
                     observed_status=observed_status,
@@ -839,17 +859,17 @@ class AsyncKorTravelMapClient:
             await self._record_feature_operation_conflict(exc)
             raise
 
-    async def finish_dagster_feature_pair(
+    async def finish_dagster_feature_membership(
         self,
         *,
         dagster_run_id: str,
-        pair: ProviderDatasetOperationKey,
+        membership: ProviderDatasetOperationMembership,
     ) -> DagsterFeatureOperationMutation:
-        """wrapper가 성공한 exact pair child 하나를 완료한다."""
+        """wrapper가 성공한 exact canonical member 하나를 완료한다."""
         try:
             async with self._session_factory() as session, session.begin():
-                return await repo_finish_dagster_feature_pair(
-                    session, dagster_run_id=dagster_run_id, pair=pair
+                return await repo_finish_dagster_feature_membership(
+                    session, dagster_run_id=dagster_run_id, membership=membership
                 )
         except FeatureOperationInvariantConflict as exc:
             await self._record_feature_operation_conflict(exc)
@@ -859,7 +879,7 @@ class AsyncKorTravelMapClient:
         self,
         *,
         dagster_run_id: str,
-        pair: ProviderDatasetOperationKey,
+        membership: ProviderDatasetOperationMembership,
         attempt_number: int,
         outcome: str,
         error: Mapping[str, Any] | None,
@@ -870,7 +890,7 @@ class AsyncKorTravelMapClient:
                 return await repo_append_dagster_feature_attempt_event(
                     session,
                     dagster_run_id=dagster_run_id,
-                    pair=pair,
+                    membership=membership,
                     attempt_number=attempt_number,
                     outcome=outcome,
                     error=error,
@@ -885,8 +905,8 @@ class AsyncKorTravelMapClient:
         dagster_run_id: str,
         trigger_kind: str,
         terminal_status: str,
-        selected_pairs: Sequence[ProviderDatasetOperationKey],
-        registry_version: str,
+        selected_memberships: Sequence[ProviderDatasetOperationMembership],
+        operation_key: str,
         engine_created_at: datetime,
         engine_started_at: datetime | None,
         engine_finished_at: datetime,
@@ -900,8 +920,8 @@ class AsyncKorTravelMapClient:
                     dagster_run_id=dagster_run_id,
                     trigger_kind=trigger_kind,
                     terminal_status=terminal_status,
-                    selected_pairs=selected_pairs,
-                    registry_version=registry_version,
+                    selected_memberships=selected_memberships,
+                    operation_key=operation_key,
                     engine_created_at=engine_created_at,
                     engine_started_at=engine_started_at,
                     engine_finished_at=engine_finished_at,
@@ -921,6 +941,46 @@ class AsyncKorTravelMapClient:
         async with self._session_factory() as session, session.begin():
             return await repo_list_reconcilable_feature_runs(
                 session, cursor=cursor, page_size=page_size
+            )
+
+    async def list_feature_operation_memberships(
+        self,
+        *,
+        operation_key: str,
+    ) -> tuple[ProviderDatasetOperationMembership, ...]:
+        """DB operation key의 현재 enabled canonical member를 읽는다."""
+        async with self._session_factory() as session, session.begin():
+            return await repo_list_feature_operation_memberships(
+                session,
+                operation_key=operation_key,
+            )
+
+    async def resolve_feature_operation_memberships(
+        self,
+        *,
+        operation_key: str,
+    ) -> tuple[ProviderDatasetOperationMembership, ...]:
+        """schedule dispatch 전 enabled exact operation membership을 조회한다."""
+        async with self._session_factory() as session, session.begin():
+            return await repo_resolve_feature_operation_memberships(
+                session,
+                operation_key=operation_key,
+            )
+
+    async def resolve_feature_operation_dataset_membership(
+        self,
+        *,
+        operation_key: str,
+        provider: str,
+        dataset_key: str,
+    ) -> ProviderDatasetOperationMembership:
+        """provider callback의 runtime dataset을 exact canonical member로 바꾼다."""
+        async with self._session_factory() as session, session.begin():
+            return await repo_resolve_operation_dataset_member(
+                session,
+                operation_key=operation_key,
+                provider=provider,
+                dataset_key=dataset_key,
             )
 
     async def load_feature_bundles(self, bundles: Iterable[FeatureBundle]) -> FeatureLoadResult:
@@ -1797,15 +1857,13 @@ class AsyncKorTravelMapClient:
     async def refresh_curated_source_metadata(
         self,
         *,
-        provider: str | None = None,
-        dataset_key: str | None = None,
+        provider_dataset_id: int | None = None,
     ) -> CuratedSourceMetadataRefreshResult:
         """curated source metadata를 source_records 기준으로 갱신한다(T-223c-2)."""
         async with self._session_factory() as session, session.begin():
             return await repo_refresh_curated_source_metadata(
                 session,
-                provider=provider,
-                dataset_key=dataset_key,
+                provider_dataset_id=provider_dataset_id,
             )
 
     async def apply_curated_source_rules(
@@ -2192,6 +2250,18 @@ class AsyncKorTravelMapClient:
                 sync_scope=sync_scope,
             )
 
+    async def get_sync_state_for_operation_membership(
+        self,
+        *,
+        membership: ProviderDatasetOperationMembership,
+    ) -> SyncState | None:
+        """active exact operation membership의 sync cursor를 읽는다."""
+        async with self._session_factory() as session:
+            return await repo_get_sync_state_for_operation_membership(
+                session,
+                membership=membership,
+            )
+
     async def list_sync_states(
         self,
         *,
@@ -2228,6 +2298,22 @@ class AsyncKorTravelMapClient:
                 next_run_after=next_run_after,
             )
 
+    async def record_sync_success_for_operation_membership(
+        self,
+        *,
+        membership: ProviderDatasetOperationMembership,
+        cursor: dict[str, Any],
+        next_run_after: datetime | None = None,
+    ) -> SyncState:
+        """active exact operation membership의 cursor 성공 상태를 기록한다."""
+        async with self._session_factory() as session, session.begin():
+            return await repo_record_operation_success(
+                session,
+                membership=membership,
+                cursor=cursor,
+                next_run_after=next_run_after,
+            )
+
     async def record_sync_failure(
         self,
         *,
@@ -2243,6 +2329,20 @@ class AsyncKorTravelMapClient:
                 provider=provider,
                 dataset_key=dataset_key,
                 sync_scope=sync_scope,
+                next_run_after=next_run_after,
+            )
+
+    async def record_sync_failure_for_operation_membership(
+        self,
+        *,
+        membership: ProviderDatasetOperationMembership,
+        next_run_after: datetime | None = None,
+    ) -> SyncState:
+        """active exact operation membership의 실패를 cursor 보존 상태로 기록한다."""
+        async with self._session_factory() as session, session.begin():
+            return await repo_record_operation_failure(
+                session,
+                membership=membership,
                 next_run_after=next_run_after,
             )
 

@@ -56,6 +56,7 @@ class _UpsertSession:
 def _row(index: int) -> SimpleNamespace:
     now = datetime(2026, 7, 15, tzinfo=UTC)
     return SimpleNamespace(
+        provider_dataset_id=index + 1,
         provider=f"provider-{index:03d}",
         dataset_key=f"dataset-{index:03d}",
         source_kind="openapi",
@@ -95,23 +96,22 @@ async def test_upsert_distinguishes_omitted_and_explicit_provenance() -> None:
 
     await upsert_provider_refresh_policy(
         cast(Any, session),
-        provider="provider-000",
-        dataset_key="dataset-000",
+        provider_dataset_id=1,
         source_kind="openapi",
         expected_revision=None,
     )
     await upsert_provider_refresh_policy(
         cast(Any, session),
-        provider="provider-000",
-        dataset_key="dataset-000",
+        provider_dataset_id=1,
         source_kind="openapi",
         expected_revision=1,
         rate_limit_source={},
     )
 
     insert_sql, omitted_params = session.calls[0]
-    update_sql, explicit_params = session.calls[1]
-    assert "ON CONFLICT (provider, dataset_key) DO NOTHING" in insert_sql
+    update_sql, explicit_params = session.calls[2]
+    assert "ON CONFLICT (provider_dataset_id) DO NOTHING" in insert_sql
+    assert "provider_dataset_id" in update_sql
     assert "policy.revision = CAST(:expected_revision AS bigint)" in update_sql
     assert "revision = policy.revision + 1" in update_sql
     assert "policy.revision < 9223372036854775807" in update_sql
@@ -119,6 +119,7 @@ async def test_upsert_distinguishes_omitted_and_explicit_provenance() -> None:
     assert "SET source_kind" not in update_sql
     assert "ELSE policy.rate_limit_source" in update_sql
     assert omitted_params["rate_limit_source"] == "{}"
+    assert omitted_params["provider_dataset_id"] == 1
     assert omitted_params["rate_limit_source_provided"] is False
     assert explicit_params["rate_limit_source"] == "{}"
     assert explicit_params["rate_limit_source_provided"] is True

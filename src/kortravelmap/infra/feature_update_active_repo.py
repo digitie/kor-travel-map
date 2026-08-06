@@ -1,8 +1,8 @@
-"""Provider dataset update의 active identity와 dispatch intent repository (#686).
+"""Provider dataset update의 active membership과 dispatch intent repository.
 
-active identity는 lifecycle 단일 정본인 ``ops.import_jobs``의 typed
-``provider × dataset_key × sync_scope``를 사용한다. 조회는 request/job을 한 SQL
-snapshot으로 읽고, 생성 경합의 최종 방어선은 같은 컬럼의 partial unique index다.
+active identity는 request가 snapshot으로 보관한 canonical
+``provider_dataset_id × sync_scope``다. 조회는 request/job을 한 SQL snapshot으로
+읽고, 생성 경합의 최종 방어선은 canonical scope row lock 기반 DB trigger다.
 """
 
 from __future__ import annotations
@@ -14,9 +14,10 @@ from sqlalchemy.exc import IntegrityError
 
 from kortravelmap.core.sync_scope import parse_canonical_sync_scope
 from kortravelmap.infra.feature_update_repo import (
+    _REQUEST_MEMBERSHIP_JOINS,
     _REQUEST_RETURN_COLUMNS,
     FeatureUpdateRequest,
-    _row_to_request,
+    _rows_to_request,
     get_update_request,
 )
 
@@ -24,31 +25,35 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
 __all__ = [
-    "ACTIVE_PROVIDER_DATASET_UNIQUE_INDEX",
+    "ACTIVE_PROVIDER_DATASET_OVERLAP_CONSTRAINT",
     "FeatureUpdateDispatchConflict",
-    "effective_sync_scope",
     "find_active_provider_dataset_request",
     "is_active_provider_dataset_unique_violation",
     "request_feature_update_dispatch",
 ]
 
-ACTIVE_PROVIDER_DATASET_UNIQUE_INDEX: Final[str] = "uq_import_jobs_active_feature_update_scope"
+ACTIVE_PROVIDER_DATASET_OVERLAP_CONSTRAINT: Final[str] = (
+    "uq_feature_update_request_active_member"
+)
 
 _FIND_ACTIVE_REQUEST_SQL: Final[str] = f"""
 SELECT {_REQUEST_RETURN_COLUMNS}
 FROM ops.import_jobs AS job
 JOIN ops.feature_update_requests AS request ON request.job_id = job.job_id
+JOIN ops.feature_update_request_datasets AS target_member
+  ON target_member.request_id = request.request_id
+{_REQUEST_MEMBERSHIP_JOINS}
 WHERE job.kind = 'feature_update_request'
-  AND job.provider = CAST(:provider AS text)
-  AND job.dataset_key = CAST(:dataset_key AS text)
-  AND job.sync_scope = CAST(:sync_scope AS text)
+  AND target_member.provider_dataset_id = CAST(:provider_dataset_id AS bigint)
+  AND target_member.sync_scope = CAST(:sync_scope AS text)
   AND job.status IN ('queued', 'running')
   AND job.quarantined_at IS NULL
 ORDER BY (job.status = 'running') DESC,
          (job.dispatch_requested_at IS NOT NULL) DESC,
          request.created_at,
-         request.request_id
-LIMIT 1
+         request.request_id,
+         member.provider_dataset_id,
+         member.sync_scope
 """
 
 _REQUEST_DISPATCH_SQL: Final[str] = """
@@ -101,30 +106,35 @@ class FeatureUpdateDispatchConflict(RuntimeError):
         )
 
 
-def effective_sync_scope(sync_scope: str) -> str:
-    """active lookup 경계에서 canonical effective identity를 강제한다."""
-    return parse_canonical_sync_scope(sync_scope).value
-
-
 async def find_active_provider_dataset_request(
     session: AsyncSession,
     *,
-    provider: str,
-    dataset_key: str,
+    provider_dataset_id: int,
     sync_scope: str,
 ) -> FeatureUpdateRequest | None:
-    """같은 canonical direct scope의 active request를 한 SQL snapshot으로 읽는다."""
-    row = (
+    """같은 canonical dataset membership을 가진 active request를 읽는다."""
+    if (
+        not isinstance(provider_dataset_id, int)
+        or isinstance(provider_dataset_id, bool)
+        or provider_dataset_id <= 0
+    ):
+        raise ValueError("provider_dataset_id must be a positive integer")
+    parse_canonical_sync_scope(sync_scope)
+    rows = (
         await session.execute(
             text(_FIND_ACTIVE_REQUEST_SQL),
             {
-                "provider": provider,
-                "dataset_key": dataset_key,
-                "sync_scope": effective_sync_scope(sync_scope),
+                "provider_dataset_id": provider_dataset_id,
+                "sync_scope": sync_scope,
             },
         )
-    ).one_or_none()
-    return _row_to_request(row) if row is not None else None
+    ).all()
+    if not rows:
+        return None
+    requests_by_id: dict[str, list[Any]] = {}
+    for row in rows:
+        requests_by_id.setdefault(str(row.request_id), []).append(row)
+    return _rows_to_request(next(iter(requests_by_id.values())))
 
 
 def _driver_constraint_identity(exc: BaseException) -> tuple[str | None, str | None]:
@@ -162,14 +172,17 @@ def _driver_constraint_identity(exc: BaseException) -> tuple[str | None, str | N
 
 
 def is_active_provider_dataset_unique_violation(exc: BaseException) -> bool:
-    """active scope index의 ``23505``만 constraint metadata로 판정한다."""
+    """active membership overlap trigger의 ``23505``만 metadata로 판정한다."""
     current: BaseException | None = exc
     seen: set[int] = set()
     while current is not None and id(current) not in seen:
         seen.add(id(current))
         if isinstance(current, IntegrityError):
             sqlstate, constraint_name = _driver_constraint_identity(current)
-            if sqlstate == "23505" and constraint_name == ACTIVE_PROVIDER_DATASET_UNIQUE_INDEX:
+            if (
+                sqlstate == "23505"
+                and constraint_name == ACTIVE_PROVIDER_DATASET_OVERLAP_CONSTRAINT
+            ):
                 return True
         current = current.__cause__ or current.__context__
     return False

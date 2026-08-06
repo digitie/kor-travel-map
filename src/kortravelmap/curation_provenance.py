@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Final, Literal, cast
@@ -107,12 +108,21 @@ class CurationProvenance:
     rows: tuple[CurationRowProvenance, ...]
 
 
-def requires_lighthouse_provenance(rows: Sequence[CurationImportRow]) -> bool:
-    """저장소 공식 등대 seed identity면 sidecar를 반드시 요구한다."""
+def requires_lighthouse_provenance(
+    rows: Sequence[CurationImportRow],
+    *,
+    lighthouse_provider_dataset_ids: Collection[int] = (),
+) -> bool:
+    """저장소 공식 등대 seed이면 sidecar를 반드시 요구한다.
 
+    CSV에는 provider/dataset 자연키를 허용하지 않는다. 호출자는 catalog에서 확인한
+    canonical dataset ID만 이 순수 검증기에 전달한다.
+    """
+
+    lighthouse_ids = frozenset(lighthouse_provider_dataset_ids)
     return any(
         row.collection_key.startswith(LIGHTHOUSE_COLLECTION_PREFIX)
-        or row.dataset_key.startswith(LIGHTHOUSE_DATASET_PREFIX)
+        or row.provider_dataset_id in lighthouse_ids
         for row in rows
     )
 

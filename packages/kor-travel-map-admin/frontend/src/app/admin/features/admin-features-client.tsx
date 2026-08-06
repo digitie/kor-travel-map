@@ -29,10 +29,6 @@ import {
   type FeatureKind,
   type SortOrder,
 } from "@/api/features";
-import {
-  opsDatasetCatalogOptions,
-  useOpsDatasetCatalog,
-} from "@/api/datasets";
 import { AdminShell } from "@/components/admin-shell";
 import { CursorPager } from "@/components/pagination-bar";
 import { useConfirm } from "@/components/confirm-dialog";
@@ -74,6 +70,14 @@ const VWORLD_KEY = process.env.NEXT_PUBLIC_VWORLD_API_KEY;
 
 type FeatureStatusFilter = (typeof FEATURE_STATUSES)[number] | "all";
 type HasIssueFilter = "all" | "yes" | "no";
+
+function parseProviderDatasetId(value: string | undefined): number | null {
+  if (!value || !/^\d+$/.test(value)) return null;
+  const providerDatasetId = Number(value);
+  return Number.isSafeInteger(providerDatasetId) && providerDatasetId > 0
+    ? providerDatasetId
+    : null;
+}
 
 function JsonBlock({ value }: { value: unknown }) {
   return (
@@ -216,15 +220,13 @@ function useAdminFeaturesClientController({
   initialQ,
   initialKind,
   initialStatus,
-  initialProvider,
-  initialDatasetKey,
+  initialProviderDatasetId,
   initialHasIssue,
 }: {
   initialQ?: string;
   initialKind?: string;
   initialStatus?: string;
-  initialProvider?: string;
-  initialDatasetKey?: string;
+  initialProviderDatasetId?: string;
   initialHasIssue?: string;
 } = {}) {
   const [q, setQ] = useState(initialQ ?? "");
@@ -245,8 +247,9 @@ function useAdminFeaturesClientController({
       ? initialHasIssue
       : "all",
   );
-  const [provider, setProvider] = useState(initialProvider ?? "");
-  const [datasetKey, setDatasetKey] = useState(initialDatasetKey ?? "");
+  const [providerDatasetId, setProviderDatasetId] = useState<number | null>(
+    () => parseProviderDatasetId(initialProviderDatasetId),
+  );
   const [sort, setSort] = useState<AdminFeatureSort>("name");
   const [order, setOrder] = useState<SortOrder>("asc");
   const [pageSize, setPageSize] = useState<(typeof PAGE_SIZE_OPTIONS)[number]>(50);
@@ -262,9 +265,7 @@ function useAdminFeaturesClientController({
         status === "all" ? Array.from(FEATURE_STATUSES) : [status],
       has_issue:
         hasIssue === "all" ? undefined : hasIssue === "yes",
-      provider: provider.trim().length > 0 ? [provider.trim()] : undefined,
-      dataset_key:
-        datasetKey.trim().length > 0 ? [datasetKey.trim()] : undefined,
+      provider_dataset_id: providerDatasetId ?? undefined,
       page_size: pageSize,
       cursor: cursor ?? undefined,
       sort,
@@ -272,13 +273,12 @@ function useAdminFeaturesClientController({
     }),
     [
       cursor,
-      datasetKey,
       deferredQ,
       hasIssue,
       kind,
       order,
       pageSize,
-      provider,
+      providerDatasetId,
       sort,
       status,
     ],
@@ -286,18 +286,6 @@ function useAdminFeaturesClientController({
   const features = useAdminFeatures(params);
   const deactivate = useDeactivateAdminFeatureMutation();
   const confirm = useConfirm();
-  const datasetsQuery = useOpsDatasetCatalog();
-  const providerOptions = useMemo(
-    () => opsDatasetCatalogOptions(datasetsQuery.data?.data.items ?? []),
-    [datasetsQuery.data?.data.items],
-  );
-  const datasetOptions = useMemo(
-    () =>
-      providerOptions
-        .find((item) => item.provider === provider)
-        ?.datasets ?? [],
-    [provider, providerOptions],
-  );
   const items = features.data?.data.items ?? [];
   const nextCursor = features.data?.meta.page?.next_cursor ?? null;
   const durationMs = features.data?.meta.duration_ms ?? 0;
@@ -398,19 +386,7 @@ function useAdminFeaturesClientController({
           const feature = row.original;
           return (
             <>
-              {feature.primary_provider ? (
-                <EntityLink
-                  id={feature.primary_provider}
-                  kind="provider"
-                  params={{
-                    dataset_key: feature.primary_dataset_key ?? undefined,
-                  }}
-                >
-                  {feature.primary_provider}
-                </EntityLink>
-              ) : (
-                <div>-</div>
-              )}
+              <div>{feature.primary_provider ?? "-"}</div>
               <div className="text-xs text-muted-foreground">
                 {feature.primary_dataset_key ?? "-"}
               </div>
@@ -531,8 +507,6 @@ function useAdminFeaturesClientController({
   return {
     columns,
     cursor,
-    datasetKey,
-    datasetOptions,
     deactivate,
     durationMs,
     features,
@@ -546,18 +520,16 @@ function useAdminFeaturesClientController({
     order,
     pageIndex,
     pageSize,
-    provider,
-    providerOptions,
+    providerDatasetId,
     q,
     refresh,
     resetCursor,
     selectedFeatureId,
-    setDatasetKey,
     setHasIssue,
     setKind,
     setOrder,
     setPageSize,
-    setProvider,
+    setProviderDatasetId,
     setQ,
     setSelectedFeatureId,
     setSort,
@@ -571,8 +543,6 @@ function useAdminFeaturesClientController({
 function AdminFeaturesClientView({
   columns,
   cursor,
-  datasetKey,
-  datasetOptions,
   deactivate,
   durationMs,
   features,
@@ -586,18 +556,16 @@ function AdminFeaturesClientView({
   order,
   pageIndex,
   pageSize,
-  provider,
-  providerOptions,
+  providerDatasetId,
   q,
   refresh,
   resetCursor,
   selectedFeatureId,
-  setDatasetKey,
   setHasIssue,
   setKind,
   setOrder,
   setPageSize,
-  setProvider,
+  setProviderDatasetId,
   setQ,
   setSelectedFeatureId,
   setSort,
@@ -701,40 +669,29 @@ function AdminFeaturesClientView({
               <NativeSelectOption value="yes">issue only</NativeSelectOption>
               <NativeSelectOption value="no">no issue</NativeSelectOption>
             </NativeSelect>
-            <NativeSelect
-              aria-label="feature provider"
-              className="w-44 shrink-0"
-              value={provider}
+            <Input
+              aria-label="feature provider dataset ID"
+              className="w-52 shrink-0"
+              inputMode="numeric"
+              min={1}
+              placeholder="provider dataset ID"
+              type="number"
+              value={providerDatasetId ?? ""}
               onChange={(event) => {
-                setProvider(event.target.value);
-                setDatasetKey("");
+                setProviderDatasetId(parseProviderDatasetId(event.target.value));
                 resetCursor();
               }}
+            />
+            <Link
+              aria-label="데이터셋에서 선택"
+              className={cn(
+                buttonVariants({ variant: "outline", size: "sm" }),
+                "shrink-0",
+              )}
+              href="/ops/datasets"
             >
-              <NativeSelectOption value="">provider 전체</NativeSelectOption>
-              {providerOptions.map((item) => (
-                <NativeSelectOption key={item.provider} value={item.provider}>
-                  {item.provider}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
-            <NativeSelect
-              aria-label="feature dataset"
-              className="w-44 shrink-0"
-              disabled={provider.length === 0}
-              value={datasetKey}
-              onChange={(event) => {
-                setDatasetKey(event.target.value);
-                resetCursor();
-              }}
-            >
-              <NativeSelectOption value="">dataset 전체</NativeSelectOption>
-              {datasetOptions.map((item) => (
-                <NativeSelectOption key={item} value={item}>
-                  {item}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
+              데이터셋에서 선택
+            </Link>
             <NativeSelect
               aria-label="feature sort"
               className="w-48 shrink-0"
@@ -839,17 +796,21 @@ export function AdminFeaturesClient({
   initialQ,
   initialKind,
   initialStatus,
-  initialProvider,
-  initialDatasetKey,
+  initialProviderDatasetId,
   initialHasIssue,
 }: {
   initialQ?: string;
   initialKind?: string;
   initialStatus?: string;
-  initialProvider?: string;
-  initialDatasetKey?: string;
+  initialProviderDatasetId?: string;
   initialHasIssue?: string;
 } = {}) {
-  const controller = useAdminFeaturesClientController({ initialQ, initialKind, initialStatus, initialProvider, initialDatasetKey, initialHasIssue });
+  const controller = useAdminFeaturesClientController({
+    initialQ,
+    initialKind,
+    initialStatus,
+    initialProviderDatasetId,
+    initialHasIssue,
+  });
   return <AdminFeaturesClientView {...controller} />;
 }

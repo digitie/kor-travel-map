@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import json
+from hashlib import sha256
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
-from kortravelmap.core.ids import make_integrity_finding_key
 from kortravelmap.infra.integrity_violation_repo import (
     IntegrityObservationReceipt,
     sync_integrity_findings,
@@ -44,24 +44,14 @@ class _CapturingSession:
 
 
 def _finding(entity_id: str) -> dict[str, Any]:
-    provider = "test-provider"
-    dataset = "places"
     return {
-        "provider": provider,
-        "dataset_key": dataset,
         "source_record_key": None,
         "feature_id": None,
         "violation_type": "missing_address",
         "severity": "warning",
         "message": entity_id,
         "payload": {
-            "dedupe_key": make_integrity_finding_key(
-                provider=provider,
-                dataset_key=dataset,
-                source_entity_type="place",
-                source_entity_id=entity_id,
-                violation_type="missing_address",
-            ),
+            "dedupe_key": f"av2_{sha256(entity_id.encode()).hexdigest()}",
             "occurrence_count": 1,
         },
     }
@@ -73,8 +63,7 @@ async def test_sync_orders_every_array_by_dedupe_key_before_upsert() -> None:
 
     upserted = await sync_integrity_findings(
         cast("AsyncSession", session),
-        provider="test-provider",
-        dataset_key="places",
+        provider_dataset_id=101,
         findings=findings,
     )
 
@@ -93,8 +82,7 @@ async def test_sync_rejects_unbounded_legacy_dedupe_key() -> None:
     with pytest.raises(ValueError, match="av2_<sha256>"):
         await sync_integrity_findings(
             cast("AsyncSession", session),
-            provider="test-provider",
-            dataset_key="places",
+            provider_dataset_id=101,
             findings=[finding],
         )
 

@@ -67,13 +67,12 @@ function makeOfflineUpload(
       "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
     created_at: MOCK_NOW,
     created_by: "local-admin",
-    dataset_key: "offline_csv",
     detected_encoding: "utf-8",
     detected_format: "csv",
     load_job_id: null,
     load_url: `/v1/admin/offline-uploads/${OFFLINE_UPLOAD_ID}/load`,
     original_filename: "offline.csv",
-    provider: "offline-test-provider",
+    provider_dataset_id: 401,
     status: "uploaded",
     status_url: `/v1/admin/offline-uploads/${OFFLINE_UPLOAD_ID}`,
     storage_backend: "rustfs",
@@ -236,9 +235,13 @@ async function mockOfflineUploadMutations(page: Page) {
 
     if (request.method() === "GET" && apiPath === "/v1/admin/offline-uploads") {
       const status = url.searchParams.get("status");
-      const items = status
-        ? uploads.filter((item) => item.status === status)
-        : uploads;
+      const providerDatasetId = Number(url.searchParams.get("provider_dataset_id"));
+      const items = uploads.filter(
+        (item) =>
+          (!status || item.status === status) &&
+          (!Number.isSafeInteger(providerDatasetId) ||
+            item.provider_dataset_id === providerDatasetId),
+      );
       await fulfillJson(route, {
         data: { items },
         meta: {
@@ -258,6 +261,8 @@ async function mockOfflineUploadMutations(page: Page) {
       expect(request.headers()["content-type"]).toContain(
         "multipart/form-data",
       );
+      expect(request.postData()).toContain('name="provider_dataset_id"');
+      expect(request.postData()).toContain("401");
       uploads = [upload];
       await fulfillJson(route, {
         data: upload,
@@ -1523,8 +1528,7 @@ test.describe("admin/ops pages", () => {
     await expect(page.getByLabel("이슈 심각도 필터")).toBeVisible();
     await expect(page.getByLabel("issue page size")).toBeVisible();
     await expect(page.getByLabel("issue type")).toBeVisible();
-    await expect(page.getByLabel("issue provider")).toBeVisible();
-    await expect(page.getByLabel("issue dataset")).toBeVisible();
+    await expect(page.getByLabel("issue provider dataset ID")).toBeVisible();
     await expect(page.getByLabel("bbox")).toBeVisible();
     for (const column of [
       "이슈",
@@ -1757,19 +1761,18 @@ test.describe("admin/ops pages", () => {
     ).toBeVisible();
     await expect(page.getByText("파일 업로드")).toBeVisible();
     await expect(page.getByTestId("offline-upload-file-input")).toBeVisible();
-    for (const label of ["provider", "dataset key", "sync scope"]) {
+    for (const label of ["provider dataset ID", "sync scope"]) {
       await expect(page.getByLabel(label, { exact: true })).toBeVisible();
     }
     await expect(page.getByRole("button", { name: "업로드" })).toBeDisabled();
     await expect(page.getByText("CSV/TSV 업로드를 선택하면")).toBeVisible();
     await expect(page.getByLabel("offline upload status")).toBeVisible();
-    await expect(page.getByLabel("provider filter")).toBeVisible();
-    await expect(page.getByLabel("dataset filter")).toBeVisible();
+    await expect(page.getByLabel("provider dataset ID filter")).toBeVisible();
     for (const column of [
       "업로드",
       "상태",
       "형식",
-      "provider/dataset",
+      "provider dataset",
       "파일",
       "크기",
       "수정",
@@ -1790,6 +1793,7 @@ test.describe("admin/ops pages", () => {
       mimeType: "text/csv",
       name: "offline.csv",
     });
+    await page.getByLabel("provider dataset ID").fill("401");
     await page.getByRole("button", { name: "업로드" }).click();
 
     await expect.poll(() => requests.create).toBe(1);
@@ -1827,6 +1831,7 @@ test.describe("admin/ops pages", () => {
       mimeType: "text/csv",
       name: "offline.csv",
     });
+    await page.getByLabel("provider dataset ID").fill("401");
     await page.getByRole("button", { name: "업로드" }).click();
     await expect.poll(() => requests.create).toBe(1);
     await expect(page.getByTestId("offline-upload-row")).toBeVisible();
@@ -1842,6 +1847,7 @@ test.describe("admin/ops pages", () => {
       mimeType: "text/csv",
       name: "offline.csv",
     });
+    await page.getByLabel("provider dataset ID").fill("401");
     await page.getByRole("button", { name: "업로드" }).click();
     await expect.poll(() => requests.create).toBe(2);
     await expect(page.getByTestId("offline-upload-row")).toBeVisible();

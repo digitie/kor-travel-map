@@ -43,12 +43,12 @@ _INSERT_JOB_SQL = text(
     INSERT INTO ops.import_jobs (
         job_id, kind, load_batch_id, parent_job_id, payload, status, progress, current_stage,
         created_at, started_at, dagster_run_id, provider, dataset_key, sync_scope,
-        trigger_kind, operation_registry_version, dagster_run_status
+        trigger_kind, operation_key, dagster_run_status
     ) VALUES (
         CAST(:job_id AS uuid), :kind, CAST(:load_batch_id AS uuid), CAST(:parent_job_id AS uuid),
         CAST(:payload AS jsonb), :status, :progress, :current_stage,
         :created_at, :started_at, :dagster_run_id, :provider, :dataset_key,
-        :sync_scope, :trigger_kind, :operation_registry_version, :dagster_run_status
+        :sync_scope, :trigger_kind, :operation_key, :dagster_run_status
     )
     """
 )
@@ -119,7 +119,7 @@ async def _job(
                 if kind == "provider_feature_load_run"
                 else ("update_request" if kind == "feature_update_request" else None)
             ),
-            "operation_registry_version": (
+            "operation_key": (
                 "test-v1" if kind == "provider_feature_load_run" else None
             ),
             "dagster_run_status": ("STARTED" if kind == "provider_feature_load_run" else None),
@@ -468,7 +468,7 @@ async def test_feature_run_projects_root_and_exposes_pair_child_status(
             """
             INSERT INTO ops.import_jobs (
                 job_id, kind, payload, status, progress, current_stage,
-                dagster_run_id, trigger_kind, operation_registry_version,
+                dagster_run_id, trigger_kind, operation_key,
                 dagster_run_status, created_at, started_at
             ) VALUES (
                 CAST(:root_id AS uuid), 'provider_feature_load_run', '{}'::jsonb,
@@ -504,7 +504,7 @@ async def test_feature_run_projects_root_and_exposes_pair_child_status(
     assert root.status == "running"
     assert root.dagster_run_status == "STARTED"
     assert root.trigger_kind == "manual"
-    assert root.operation_registry_version == "v1"
+    assert root.operation_key == "v1"
     assert root.projected_job.id == root_id
     assert root.projected_job.status == "running"
     assert root.provider_datasets == (

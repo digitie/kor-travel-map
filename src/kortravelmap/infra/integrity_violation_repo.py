@@ -45,12 +45,8 @@ _RESOLVED_STATUSES: Final[frozenset[str]] = frozenset({"resolved", "ignored"})
 _MAX_LIST_LIMIT: Final[int] = 500
 
 _RETURN_COLUMNS: Final[str] = (
-    "issue_id, provider, dataset_key, source_record_key, feature_id, "
-    "violation_type, severity, message, payload, status, detected_at, "
-    "last_seen_at, resolved_at"
-)
-_RETURN_COLUMNS_V: Final[str] = (
-    "v.issue_id, v.provider, v.dataset_key, v.source_record_key, v.feature_id, "
+    "v.issue_id, v.provider_dataset_id, pd.provider, pd.dataset_key, "
+    "v.source_record_key, v.feature_id, "
     "v.violation_type, v.severity, v.message, v.payload, v.status, v.detected_at, "
     "v.last_seen_at, v.resolved_at"
 )
@@ -61,6 +57,7 @@ class DataIntegrityViolation:
     """``ops.data_integrity_violations`` row."""
 
     issue_id: str
+    provider_dataset_id: int | None
     provider: str | None
     dataset_key: str | None
     source_record_key: str | None
@@ -100,8 +97,7 @@ class IntegrityObservationRun:
     """provider/dataset scope에서 external run에 배정한 불변 generation."""
 
     observation_run_id: int
-    provider: str
-    dataset_key: str
+    provider_dataset_id: int
     generation: int
     external_run_id: str
     status: str
@@ -151,6 +147,9 @@ def _json_dict(value: Any) -> dict[str, Any]:
 def _row_to_violation(row: Any) -> DataIntegrityViolation:
     return DataIntegrityViolation(
         issue_id=str(row.issue_id),
+        provider_dataset_id=(
+            int(row.provider_dataset_id) if row.provider_dataset_id is not None else None
+        ),
         provider=row.provider,
         dataset_key=row.dataset_key,
         source_record_key=row.source_record_key,
@@ -180,24 +179,26 @@ def _validate_violation(
         raise ValueError("message must be non-empty")
 
 
-_INSERT_SQL: Final[str] = f"""
+_INSERT_SQL: Final[str] = """
 INSERT INTO ops.data_integrity_violations (
-    provider, dataset_key, source_record_key, feature_id, violation_type,
+    provider_dataset_id, source_record_key, feature_id, violation_type,
     severity, message, payload
 ) VALUES (
-    :provider, :dataset_key, :source_record_key, :feature_id, :violation_type,
+    :provider_dataset_id, :source_record_key, :feature_id, :violation_type,
     :severity, :message, CAST(:payload AS jsonb)
 )
-RETURNING {_RETURN_COLUMNS}
+RETURNING issue_id
 """
 
 _GET_SQL: Final[str] = f"""
 SELECT {_RETURN_COLUMNS}
-FROM ops.data_integrity_violations
-WHERE issue_id = :issue_id
+FROM ops.data_integrity_violations AS v
+LEFT JOIN provider_sync.provider_datasets AS pd
+  ON pd.provider_dataset_id = v.provider_dataset_id
+WHERE v.issue_id = :issue_id
 """
 
-_SET_STATUS_SQL: Final[str] = f"""
+_SET_STATUS_SQL: Final[str] = """
 WITH locked AS (
     SELECT issue_id, status
     FROM ops.data_integrity_violations
@@ -213,7 +214,7 @@ updated AS (
             ELSE NULL
         END,
         payload = CASE
-            WHEN CAST(:resolution_payload AS jsonb) = '{{}}'::jsonb THEN v.payload
+            WHEN CAST(:resolution_payload AS jsonb) = '{}'::jsonb THEN v.payload
             ELSE v.payload || jsonb_build_object(
                 'resolution',
                 CAST(:resolution_payload AS jsonb)
@@ -225,23 +226,27 @@ updated AS (
         locked.status = :status
         OR locked.status <> ALL(CAST(:resolved_statuses AS text[]))
       )
-    RETURNING {_RETURN_COLUMNS_V}
+    RETURNING v.issue_id
 )
-SELECT {_RETURN_COLUMNS}
+SELECT issue_id
 FROM updated
 """
 
 _LIST_SQL: Final[str] = f"""
 SELECT {_RETURN_COLUMNS}
-FROM ops.data_integrity_violations
-WHERE (CAST(:status AS text) IS NULL OR status = CAST(:status AS text))
-  AND (CAST(:severity AS text) IS NULL OR severity = CAST(:severity AS text))
+FROM ops.data_integrity_violations AS v
+LEFT JOIN provider_sync.provider_datasets AS pd
+  ON pd.provider_dataset_id = v.provider_dataset_id
+WHERE (CAST(:status AS text) IS NULL OR v.status = CAST(:status AS text))
+  AND (CAST(:severity AS text) IS NULL OR v.severity = CAST(:severity AS text))
   AND (CAST(:violation_type AS text) IS NULL
-       OR violation_type = CAST(:violation_type AS text))
-  AND (CAST(:feature_id AS text) IS NULL OR feature_id = CAST(:feature_id AS text))
-  AND (CAST(:provider AS text) IS NULL OR provider = CAST(:provider AS text))
-  AND (CAST(:dataset_key AS text) IS NULL OR dataset_key = CAST(:dataset_key AS text))
-ORDER BY last_seen_at DESC, issue_id DESC
+       OR v.violation_type = CAST(:violation_type AS text))
+  AND (CAST(:feature_id AS text) IS NULL OR v.feature_id = CAST(:feature_id AS text))
+  AND (
+      CAST(:provider_dataset_id AS bigint) IS NULL
+      OR v.provider_dataset_id = CAST(:provider_dataset_id AS bigint)
+  )
+ORDER BY v.last_seen_at DESC, v.issue_id DESC
 LIMIT :limit
 """
 
@@ -252,8 +257,7 @@ async def create_data_integrity_violation(
     violation_type: str,
     severity: str,
     message: str,
-    provider: str | None = None,
-    dataset_key: str | None = None,
+    provider_dataset_id: int | None = None,
     source_record_key: str | None = None,
     feature_id: str | None = None,
     payload: Mapping[str, Any] | None = None,
@@ -264,12 +268,11 @@ async def create_data_integrity_violation(
         severity=severity,
         message=message,
     )
-    row = (
+    issue_id = (
         await session.execute(
             text(_INSERT_SQL),
             {
-                "provider": provider,
-                "dataset_key": dataset_key,
+                "provider_dataset_id": provider_dataset_id,
                 "source_record_key": source_record_key,
                 "feature_id": feature_id,
                 "violation_type": violation_type,
@@ -282,8 +285,11 @@ async def create_data_integrity_violation(
                 ),
             },
         )
-    ).one()
-    return _row_to_violation(row)
+    ).scalar_one()
+    created = await get_data_integrity_violation(session, str(issue_id))
+    if created is None:
+        raise RuntimeError("created data integrity violation could not be read")
+    return created
 
 
 async def get_data_integrity_violation(
@@ -310,7 +316,7 @@ async def set_data_integrity_violation_status(
     """이슈 상태를 변경한다. ``resolved``/``ignored``는 ``resolved_at``을 찍는다."""
     if status not in _STATUSES:
         raise ValueError(f"status must be one of {sorted(_STATUSES)}")
-    row = (
+    updated_issue_id = (
         await session.execute(
             text(_SET_STATUS_SQL),
             {
@@ -324,9 +330,12 @@ async def set_data_integrity_violation_status(
                 ),
             },
         )
-    ).one_or_none()
-    if row is not None:
-        return _row_to_violation(row)
+    ).scalar_one_or_none()
+    if updated_issue_id is not None:
+        updated = await get_data_integrity_violation(session, str(updated_issue_id))
+        if updated is None:
+            raise RuntimeError("updated data integrity violation could not be read")
+        return updated
     existing = await get_data_integrity_violation(session, issue_id)
     if existing is None:
         return None
@@ -344,8 +353,7 @@ async def list_data_integrity_violations(
     severity: str | None = None,
     violation_type: str | None = None,
     feature_id: str | None = None,
-    provider: str | None = None,
-    dataset_key: str | None = None,
+    provider_dataset_id: int | None = None,
     limit: int = 200,
 ) -> tuple[DataIntegrityViolation, ...]:
     """운영 이슈 목록 조회."""
@@ -357,8 +365,7 @@ async def list_data_integrity_violations(
                 "severity": severity,
                 "violation_type": violation_type,
                 "feature_id": feature_id,
-                "provider": provider,
-                "dataset_key": dataset_key,
+                "provider_dataset_id": provider_dataset_id,
                 "limit": max(1, min(limit, _MAX_LIST_LIMIT)),
             },
         )
@@ -368,13 +375,12 @@ async def list_data_integrity_violations(
 
 _UPSERT_FINDINGS_BATCH_SQL: Final[str] = """
 INSERT INTO ops.data_integrity_violations (
-    provider, dataset_key, source_record_key, feature_id, violation_type,
+    provider_dataset_id, source_record_key, feature_id, violation_type,
     severity, message, payload, last_seen_at
 )
 SELECT finding.*, statement_timestamp()
 FROM unnest(
-        CAST(:providers AS text[]),
-        CAST(:datasets AS text[]),
+        CAST(:provider_dataset_ids AS bigint[]),
         CAST(:source_record_keys AS text[]),
         CAST(:feature_ids AS text[]),
         CAST(:violation_types AS text[]),
@@ -382,7 +388,7 @@ FROM unnest(
         CAST(:messages AS text[]),
         CAST(:payloads AS jsonb[])
     ) AS finding(
-        provider, dataset_key, source_record_key, feature_id, violation_type,
+        provider_dataset_id, source_record_key, feature_id, violation_type,
         severity, message, payload
     )
 ON CONFLICT ((payload ->> 'dedupe_key'))
@@ -431,24 +437,27 @@ RETURNING issue_id
 """
 
 _INSERT_OBSERVATION_SCOPE_SQL: Final[str] = """
-INSERT INTO ops.integrity_observation_scopes (provider, dataset_key)
-VALUES (:provider, :dataset_key)
-ON CONFLICT (provider, dataset_key) DO NOTHING
+INSERT INTO ops.integrity_observation_scopes (provider_dataset_id)
+VALUES (:provider_dataset_id)
+ON CONFLICT (provider_dataset_id) DO NOTHING
 """
 
 _LOCK_OBSERVATION_SCOPE_SQL: Final[str] = """
-SELECT latest_generation, latest_authoritative_generation
+SELECT integrity_observation_scope_id, latest_generation, latest_authoritative_generation
 FROM ops.integrity_observation_scopes
-WHERE provider = :provider
-  AND dataset_key = :dataset_key
+WHERE provider_dataset_id = :provider_dataset_id
 FOR UPDATE
 """
 
 _GET_OBSERVATION_RUN_SQL: Final[str] = """
-SELECT observation_run_id, provider, dataset_key, generation, external_run_id, status
-FROM ops.integrity_observation_runs
-WHERE provider = :provider
-  AND dataset_key = :dataset_key
+SELECT run.observation_run_id, scope.provider_dataset_id,
+       run.generation, run.external_run_id, run.status
+FROM ops.integrity_observation_runs AS run
+JOIN ops.integrity_observation_scopes AS scope
+  ON scope.integrity_observation_scope_id = run.integrity_observation_scope_id
+JOIN provider_sync.provider_datasets AS dataset
+  ON dataset.provider_dataset_id = scope.provider_dataset_id
+WHERE run.integrity_observation_scope_id = :integrity_observation_scope_id
   AND external_run_id = :external_run_id
 """
 
@@ -460,18 +469,17 @@ _ALLOCATE_OBSERVATION_GENERATION_SQL: Final[str] = """
 UPDATE ops.integrity_observation_scopes
 SET latest_generation = latest_generation + 1,
     updated_at = now()
-WHERE provider = :provider
-  AND dataset_key = :dataset_key
+WHERE integrity_observation_scope_id = :integrity_observation_scope_id
 RETURNING latest_generation
 """
 
 _INSERT_OBSERVATION_RUN_SQL: Final[str] = """
 INSERT INTO ops.integrity_observation_runs (
-    provider, dataset_key, generation, external_run_id
+    integrity_observation_scope_id, generation, external_run_id
 ) VALUES (
-    :provider, :dataset_key, :generation, :external_run_id
+    :integrity_observation_scope_id, :generation, :external_run_id
 )
-RETURNING observation_run_id, provider, dataset_key, generation, external_run_id, status
+RETURNING observation_run_id
 """
 
 _INSERT_FINDING_OBSERVATIONS_SQL: Final[str] = """
@@ -487,8 +495,7 @@ ON CONFLICT (observation_run_id, dedupe_key) DO NOTHING
 def _observation_run(row: Any) -> IntegrityObservationRun:
     return IntegrityObservationRun(
         observation_run_id=int(row.observation_run_id),
-        provider=str(row.provider),
-        dataset_key=str(row.dataset_key),
+        provider_dataset_id=int(row.provider_dataset_id),
         generation=int(row.generation),
         external_run_id=str(row.external_run_id),
         status=str(row.status),
@@ -498,30 +505,28 @@ def _observation_run(row: Any) -> IntegrityObservationRun:
 async def ensure_integrity_observation_run(
     session: AsyncSession,
     *,
-    provider: str,
-    dataset_key: str,
+    provider_dataset_id: int,
     external_run_id: str,
 ) -> IntegrityObservationRun:
     """scope row lock 아래에서 external run에 단조 generation을 한 번만 배정한다."""
 
-    if not provider or not dataset_key:
-        raise ValueError("provider/dataset_key는 observation scope에 필수다.")
+    if provider_dataset_id <= 0:
+        raise ValueError("provider_dataset_id는 observation scope에 필수다.")
     if not external_run_id.strip():
         raise ValueError("external_run_id는 비어 있을 수 없다.")
     await session.execute(
         text(_INSERT_OBSERVATION_SCOPE_SQL),
-        {"provider": provider, "dataset_key": dataset_key},
+        {"provider_dataset_id": provider_dataset_id},
     )
     scope = (
         await session.execute(
             text(_LOCK_OBSERVATION_SCOPE_SQL),
-            {"provider": provider, "dataset_key": dataset_key},
+            {"provider_dataset_id": provider_dataset_id},
         )
     ).one()
-    del scope
+    scope_id = int(scope.integrity_observation_scope_id)
     params = {
-        "provider": provider,
-        "dataset_key": dataset_key,
+        "integrity_observation_scope_id": scope_id,
         "external_run_id": external_run_id,
     }
     existing = (
@@ -534,16 +539,24 @@ async def ensure_integrity_observation_run(
         (
             await session.execute(
                 text(_ALLOCATE_OBSERVATION_GENERATION_SQL),
-                {"provider": provider, "dataset_key": dataset_key},
+                {"integrity_observation_scope_id": scope_id},
             )
         ).scalar_one()
     )
-    inserted = (
+    inserted_id = (
         await session.execute(
             text(_INSERT_OBSERVATION_RUN_SQL),
             {**params, "generation": generation},
         )
-    ).one()
+    ).scalar_one()
+    inserted = (
+        await session.execute(
+            text(_GET_OBSERVATION_RUN_SQL),
+            {"integrity_observation_scope_id": scope_id, "external_run_id": external_run_id},
+        )
+    ).one_or_none()
+    if inserted is None or int(inserted.observation_run_id) != int(inserted_id):
+        raise RuntimeError("created integrity observation run could not be read")
     return _observation_run(inserted)
 
 
@@ -551,8 +564,7 @@ async def ensure_integrity_observation_run(
 async def sync_integrity_findings(
     session: AsyncSession,
     *,
-    provider: str,
-    dataset_key: str,
+    provider_dataset_id: int,
     findings: Sequence[Mapping[str, Any]],
     external_run_id: str | None = None,
 ) -> int:
@@ -585,10 +597,6 @@ async def sync_integrity_findings(
             or any(char not in "0123456789abcdef" for char in dedupe_key[4:])
         ):
             raise ValueError("finding dedupe_key는 av2_<sha256> 형식이어야 한다.")
-        if finding.get("provider") != provider:
-            raise ValueError("finding provider가 sync 범위와 다르다.")
-        if finding.get("dataset_key") != dataset_key:
-            raise ValueError("finding dataset_key가 sync 범위와 다르다.")
         # batch 경로에도 같은 검증을 건다. 없으면 잘못된 severity가 DB CHECK까지 가서
         # unnest statement 전체를 실패시키고, 상위의 광범위 except가 삼켜
         # **그 run의 finding 전부**를 잃는다.
@@ -602,8 +610,7 @@ async def sync_integrity_findings(
     if external_run_id is not None:
         observation_run = await ensure_integrity_observation_run(
             session,
-            provider=provider,
-            dataset_key=dataset_key,
+            provider_dataset_id=provider_dataset_id,
             external_run_id=external_run_id,
         )
 
@@ -612,8 +619,7 @@ async def sync_integrity_findings(
         result = await session.execute(
             text(_UPSERT_FINDINGS_BATCH_SQL),
             {
-                "providers": [f.get("provider") for f in ordered_findings],
-                "datasets": [f.get("dataset_key") for f in ordered_findings],
+                "provider_dataset_ids": [provider_dataset_id] * len(ordered_findings),
                 "source_record_keys": [
                     f.get("source_record_key") for f in ordered_findings
                 ],
@@ -669,8 +675,7 @@ UPDATE ops.data_integrity_violations AS v
    SET status = 'resolved',
        resolved_at = now(),
        payload = v.payload || jsonb_build_object('resolution', CAST(:resolution AS jsonb))
- WHERE v.provider = :provider
-   AND v.dataset_key = :dataset_key
+ WHERE v.provider_dataset_id = :provider_dataset_id
    AND v.status = 'open'
    AND v.payload ? 'dedupe_key'
    AND v.payload ->> 'dedupe_key' LIKE 'av2\_%'
@@ -685,8 +690,7 @@ UPDATE ops.data_integrity_violations AS v
        FROM ops.integrity_observation_runs AS newer_run
        JOIN ops.integrity_finding_observations AS newer_observation
          ON newer_observation.observation_run_id = newer_run.observation_run_id
-       WHERE newer_run.provider = :provider
-         AND newer_run.dataset_key = :dataset_key
+       WHERE newer_run.integrity_observation_scope_id = :integrity_observation_scope_id
          AND newer_run.generation > :generation
          AND newer_observation.dedupe_key = v.payload ->> 'dedupe_key'
    )
@@ -709,8 +713,7 @@ _ADVANCE_AUTHORITATIVE_GENERATION_SQL: Final[str] = """
 UPDATE ops.integrity_observation_scopes
 SET latest_authoritative_generation = :generation,
     updated_at = now()
-WHERE provider = :provider
-  AND dataset_key = :dataset_key
+WHERE integrity_observation_scope_id = :integrity_observation_scope_id
 """
 
 # resolved 보존 기간이 지난 행을 **삭제**한다 (T-VN-H32R).
@@ -731,15 +734,14 @@ RETURNING v.issue_id
 async def close_stale_integrity_findings(
     session: AsyncSession,
     *,
-    provider: str,
-    dataset_key: str,
+    provider_dataset_id: int,
     run_id: str,
     receipt: IntegrityObservationReceipt,
 ) -> int:
     """최신 authoritative generation에서만 stale finding을 닫는다."""
 
-    if not provider or not dataset_key:
-        raise ValueError("provider/dataset_key는 close 범위에 필수다.")
+    if provider_dataset_id <= 0:
+        raise ValueError("provider_dataset_id는 close 범위에 필수다.")
     if not run_id:
         raise ValueError("run_id는 비어 있을 수 없다 — 빈 값은 큐 전체를 닫는다.")
     if not receipt.permits_stale_close:
@@ -747,13 +749,13 @@ async def close_stale_integrity_findings(
 
     await session.execute(
         text(_INSERT_OBSERVATION_SCOPE_SQL),
-        {"provider": provider, "dataset_key": dataset_key},
+        {"provider_dataset_id": provider_dataset_id},
     )
     scope = (
         (
             await session.execute(
                 text(_LOCK_OBSERVATION_SCOPE_SQL),
-                {"provider": provider, "dataset_key": dataset_key},
+                {"provider_dataset_id": provider_dataset_id},
             )
         )
         .mappings()
@@ -763,8 +765,7 @@ async def close_stale_integrity_findings(
         await session.execute(
             text(_GET_OBSERVATION_RUN_FOR_UPDATE_SQL),
             {
-                "provider": provider,
-                "dataset_key": dataset_key,
+                "integrity_observation_scope_id": int(scope["integrity_observation_scope_id"]),
                 "external_run_id": run_id,
             },
         )
@@ -796,8 +797,7 @@ async def close_stale_integrity_findings(
     await session.execute(
         text(_ADVANCE_AUTHORITATIVE_GENERATION_SQL),
         {
-            "provider": provider,
-            "dataset_key": dataset_key,
+            "integrity_observation_scope_id": int(scope["integrity_observation_scope_id"]),
             "generation": observation_run.generation,
         },
     )
@@ -811,8 +811,8 @@ async def close_stale_integrity_findings(
     result = await session.execute(
         text(_CLOSE_STALE_FINDINGS_SQL),
         {
-            "provider": provider,
-            "dataset_key": dataset_key,
+            "provider_dataset_id": provider_dataset_id,
+            "integrity_observation_scope_id": int(scope["integrity_observation_scope_id"]),
             "observation_run_id": observation_run.observation_run_id,
             "generation": observation_run.generation,
             "resolution": json.dumps(resolution, ensure_ascii=False),
@@ -824,8 +824,7 @@ async def close_stale_integrity_findings(
 async def finalize_integrity_observation_run(
     session: AsyncSession,
     *,
-    provider: str,
-    dataset_key: str,
+    provider_dataset_id: int,
     external_run_id: str,
     receipt: IntegrityObservationReceipt,
 ) -> int:
@@ -833,8 +832,7 @@ async def finalize_integrity_observation_run(
 
     return await close_stale_integrity_findings(
         session,
-        provider=provider,
-        dataset_key=dataset_key,
+        provider_dataset_id=provider_dataset_id,
         run_id=external_run_id,
         receipt=receipt,
     )

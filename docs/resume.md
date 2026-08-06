@@ -1,5 +1,34 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-06 — 사용자 지시로 T-VN-33 WIP 정리 후 중단
+
+T-VN-33 구현은 중단했다. draft PR #966 뒤의 변경은 미스테이징·미커밋 WIP이며 merge 가능 상태가
+아니다. 새 batch audit가 physical triple membership, sync state, pipeline, API/UI, scheduled
+runtime, final-schema trigger/fixture P0를 확인했으므로, 재개 때는 작은 pair/scope patch를 이어
+붙이지 말고 ADR-087의 non-null triple schema를 먼저 완결한다.
+
+**다음 한 작업**: 사용자가 재개를 지시할 때
+[`reports/t-vn-33-hold-snapshot-2026-08-06.md`](reports/t-vn-33-hold-snapshot-2026-08-06.md)의
+P0 순서대로 작업을 다시 분할한다. T-VN-41 F1D-D의 n150 final acceptance는 그 merge와 final
+schema ETL 재적재 뒤까지 보류한다.
+
+## 2026-08-06 — T-VN-33 normal-path 적대 리뷰로 P0 재개방, T-VN-41 final acceptance 대기 유지
+
+초기 target-contract gate는 통과했지만, actual 구현의 normal path를 분리 검토한 결과
+canonical dataset ID가 UI의 dataset detail/preview, generic geographic scope, Dagster request
+snapshot/worker dispatch까지 완결되지 않은 P0와, `0090` 뒤 legacy source column을 읽는
+curation trigger P0를 확인했다. 자연키 URL·effective-scope rank·정적 provider worker registry는
+호환 경로로 보존하지 않는다. 모든 membership은 정확한
+`provider_dataset_id + sync_scope + operation_key`로 request→job snapshot→pipeline projection
+→executor→worker까지 전달한다. dataset member에는 nullable/wildcard `operation_key`가 없으며,
+operation 없는 generic job은 member 행을 만들지 않는다.
+source-rule trigger는 catalog join으로 재작성한다.
+
+**다음 한 작업**: draft PR #966 안에서 backend/core/API·Dagster·frontend를 병렬 보완하고,
+최신 schema의 fixture를 일괄 전환한다. 두 독립 적대 리뷰가 P0=0을 다시 확인한 뒤에만
+T-VN-33을 merge한다. T-VN-41 F1D-D의 n150 최종 리허설은 merge→provenance pin→파괴적
+rebuild→final-schema ETL 재적재 뒤에만 재개한다.
+
 ## 2026-08-06 — T-VN-33 contract gate P0=0 통과, 단일 PR actual 구현 착수
 
 스키마 적대 리뷰 5차와 마이그레이션 적대 리뷰 4차가 모두 P0 GO를 냈다. 마지막 P0였던

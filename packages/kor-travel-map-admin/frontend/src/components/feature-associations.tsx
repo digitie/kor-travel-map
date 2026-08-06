@@ -67,9 +67,7 @@ function CurationDetails({ item }: { item: FeatureCurationMembership }) {
 function SourceDetails({ item }: { item: FeatureSourceAssociation }) {
   const firstSeenAt = "first_seen_at" in item ? item.first_seen_at : null;
   const entityLastSeenAt =
-    "entity_last_seen_at" in item ? item.entity_last_seen_at : item.last_seen_at;
-  const recordLastSeenAt =
-    "record_last_seen_at" in item ? item.record_last_seen_at : item.last_seen_at;
+    "entity_last_seen_at" in item ? item.entity_last_seen_at : null;
   const isCurrent = "is_current" in item ? item.is_current : true;
 
   return (
@@ -84,21 +82,14 @@ function SourceDetails({ item }: { item: FeatureSourceAssociation }) {
         <dd className="break-all font-mono">{item.source_entity_key}</dd>
         <dt className="text-muted-foreground">record key</dt>
         <dd className="break-all font-mono">{item.source_record_key}</dd>
-        <dt className="text-muted-foreground">source version</dt>
-        <dd><OptionalValue value={item.source_version} /></dd>
-        <dt className="text-muted-foreground">raw coord</dt>
-        <dd className="font-mono">
-          <OptionalValue value={item.raw_longitude} />, {" "}
-          <OptionalValue value={item.raw_latitude} />
-        </dd>
         <dt className="text-muted-foreground">payload hash</dt>
         <dd className="break-all font-mono">{item.raw_payload_hash}</dd>
         <dt className="text-muted-foreground">first seen</dt>
         <dd>{firstSeenAt ? formatDateTime(firstSeenAt) : "-"}</dd>
         <dt className="text-muted-foreground">entity last seen</dt>
-        <dd>{formatDateTime(entityLastSeenAt)}</dd>
-        <dt className="text-muted-foreground">record last seen</dt>
-        <dd>{formatDateTime(recordLastSeenAt)}</dd>
+        <dd>{entityLastSeenAt ? formatDateTime(entityLastSeenAt) : "-"}</dd>
+        <dt className="text-muted-foreground">observed</dt>
+        <dd>{formatDateTime(item.observed_at)}</dd>
         <dt className="text-muted-foreground">imported</dt>
         <dd>{formatDateTime(item.imported_at)}</dd>
         <dt className="text-muted-foreground">linked</dt>
@@ -197,16 +188,11 @@ export function FeatureAssociations({
                   <strong>{item.provider}</strong>
                   <Badge variant="outline">{item.dataset_key}</Badge>
                   <Badge variant="outline">{item.source_role}</Badge>
-                  {item.is_primary_source ? <Badge>primary</Badge> : null}
+                  {item.source_role === "primary" ? <Badge>primary</Badge> : null}
                 </div>
-                <p className="mt-1">
-                  {item.raw_name ?? `${item.source_entity_type}:${item.source_entity_id}`}
+                <p className="mt-1 font-mono text-xs">
+                  {item.source_entity_type}:{item.source_entity_id}
                 </p>
-                {item.raw_address ? (
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {item.raw_address}
-                  </p>
-                ) : null}
                 <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-2 gap-y-1 text-xs">
                   <dt className="text-muted-foreground">entity</dt>
                   <dd className="break-all font-mono">{item.source_entity_key}</dd>

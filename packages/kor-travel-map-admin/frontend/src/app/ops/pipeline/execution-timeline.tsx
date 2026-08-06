@@ -52,12 +52,17 @@ const STATUS_OPTIONS: Array<ExecutionStatus | "all"> = [
 ];
 const PAGE_SIZE = 50;
 
+function positiveInteger(value: string): number | undefined {
+  const parsed = Number(value.trim());
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
 export interface TimelineFilters {
   kind?: ExecutionKind;
   status?: ExecutionStatus;
-  provider?: string;
-  datasetKey?: string;
+  providerDatasetId?: number;
   syncScope?: string;
+  operationKey?: string;
   createdFrom?: string;
   createdTo?: string;
 }
@@ -65,9 +70,9 @@ export interface TimelineFilters {
 type TimelineUrlUpdates = Record<string, string | null>;
 
 interface TimelineDrafts {
-  datasetKey: string | null;
-  provider: string | null;
+  providerDatasetId: string | null;
   syncScope: string | null;
+  operationKey: string | null;
   urlSignature: string;
 }
 
@@ -126,43 +131,54 @@ function useExecutionTimelineController({
   const kind = initialFilters.kind ?? "all";
   const status = initialFilters.status ?? "all";
   const urlDraftSignature = JSON.stringify([
-    initialFilters.provider ?? "",
-    initialFilters.datasetKey ?? "",
+    initialFilters.providerDatasetId ?? "",
     initialFilters.syncScope ?? "",
+    initialFilters.operationKey ?? "",
   ]);
   const [drafts, setDrafts] = useState<TimelineDrafts>({
-    datasetKey: null,
-    provider: null,
+    providerDatasetId: null,
     syncScope: null,
+    operationKey: null,
     urlSignature: urlDraftSignature,
   });
   if (drafts.urlSignature !== urlDraftSignature) {
     setDrafts({
-      datasetKey: null,
-      provider: null,
+      providerDatasetId: null,
       syncScope: null,
+      operationKey: null,
       urlSignature: urlDraftSignature,
     });
   }
-  const provider = drafts.provider ?? initialFilters.provider ?? "";
-  const datasetKey = drafts.datasetKey ?? initialFilters.datasetKey ?? "";
+  const providerDatasetId =
+    drafts.providerDatasetId ??
+    (initialFilters.providerDatasetId
+      ? String(initialFilters.providerDatasetId)
+      : "");
   const syncScope = drafts.syncScope ?? initialFilters.syncScope ?? "";
+  const operationKey = drafts.operationKey ?? initialFilters.operationKey ?? "";
   const createdFrom = datetimeLocalValue(initialFilters.createdFrom);
   const createdTo = datetimeLocalValue(initialFilters.createdTo);
   const loadBatchId = initialLoadBatchId ?? "";
   const parentJobId = initialParentJobId ?? "";
-  const providerFilter = provider.trim() || undefined;
-  const datasetFilter = providerFilter
-    ? datasetKey.trim() || undefined
+  const providerDatasetIdFilter = positiveInteger(providerDatasetId);
+  const hasExactOperationFilter = Boolean(
+    providerDatasetIdFilter && syncScope.trim() && operationKey.trim(),
+  );
+  const exactProviderDatasetIdFilter = hasExactOperationFilter
+    ? providerDatasetIdFilter
     : undefined;
-  const syncScopeFilter =
-    providerFilter && datasetFilter ? syncScope.trim() || undefined : undefined;
+  const syncScopeFilter = hasExactOperationFilter
+    ? syncScope.trim()
+    : undefined;
+  const operationKeyFilter = hasExactOperationFilter
+    ? operationKey.trim()
+    : undefined;
   const filterSignature = JSON.stringify([
     kind,
     status,
-    provider,
-    datasetKey,
+    providerDatasetId,
     syncScope,
+    operationKey,
     createdFrom,
     createdTo,
     loadBatchId,
@@ -190,9 +206,9 @@ function useExecutionTimelineController({
     () => ({
       kind: kind === "all" ? undefined : kind,
       status: status === "all" ? undefined : status,
-      provider: providerFilter,
-      dataset_key: datasetFilter,
+      provider_dataset_id: exactProviderDatasetIdFilter,
       sync_scope: syncScopeFilter,
+      operation_key: operationKeyFilter,
       load_batch_id: loadBatchId.trim() || undefined,
       parent_job_id: parentJobId.trim() || undefined,
       created_from: datetimeLocalIsoValue(createdFrom),
@@ -202,9 +218,9 @@ function useExecutionTimelineController({
     [
       kind,
       status,
-      providerFilter,
-      datasetFilter,
+      exactProviderDatasetIdFilter,
       syncScopeFilter,
+      operationKeyFilter,
       loadBatchId,
       parentJobId,
       createdFrom,
@@ -310,6 +326,7 @@ function useExecutionTimelineController({
                       <span className="font-mono">
                         {pair.provider}/{pair.dataset_key}
                         {pair.sync_scope ? ` · ${pair.sync_scope}` : ""}
+                        {pair.operation_key ? ` · ${pair.operation_key}` : ""}
                       </span>
                       <StatusBadge status={pair.status} />
                     </li>
@@ -415,8 +432,6 @@ function useExecutionTimelineController({
     createdFrom,
     createdTo,
     cursorStack,
-    datasetFilter,
-    datasetKey,
     executions,
     goNextPage,
     kind,
@@ -427,8 +442,9 @@ function useExecutionTimelineController({
     onSelectExecution,
     onUrlChange,
     parentJobId,
-    provider,
-    providerFilter,
+    providerDatasetId,
+    providerDatasetIdFilter,
+    operationKey,
     resetToFirstPage,
     rows,
     selectedExecutionId,
@@ -445,8 +461,6 @@ function ExecutionTimelineView({
   createdFrom,
   createdTo,
   cursorStack,
-  datasetFilter,
-  datasetKey,
   executions,
   goNextPage,
   kind,
@@ -457,8 +471,9 @@ function ExecutionTimelineView({
   onSelectExecution,
   onUrlChange,
   parentJobId,
-  provider,
-  providerFilter,
+  providerDatasetId,
+  providerDatasetIdFilter,
+  operationKey,
   resetToFirstPage,
   rows,
   selectedExecutionId,
@@ -530,65 +545,48 @@ function ExecutionTimelineView({
               ))}
             </NativeSelect>
           </FilterField>
-          <FilterField label="provider">
+          <FilterField label="provider dataset ID">
             <Input
-              aria-label="provider 필터"
-              placeholder="예: python-kma-api"
-              value={provider}
+              aria-label="provider dataset ID 필터"
+              inputMode="numeric"
+              min="1"
+              placeholder="예: 42"
+              type="number"
+              value={providerDatasetId}
               onBlur={() =>
-                setDrafts((current) => ({ ...current, provider: null }))
+                setDrafts((current) => ({
+                  ...current,
+                  providerDatasetId: null,
+                }))
               }
               onChange={(event) => {
                 const value = event.target.value;
-                setDrafts((current) => ({ ...current, provider: value }));
+                setDrafts((current) => ({
+                  ...current,
+                  providerDatasetId: value,
+                }));
                 setStoredCursorStack([]);
                 setStoredBaselineTop(null);
-                onUrlChange({ provider: value.trim() || null }, "replace");
-              }}
-              onFocus={() => setDrafts((current) => ({ ...current, provider }))}
-            />
-          </FilterField>
-          <FilterField label="데이터셋">
-            <Input
-              aria-describedby={
-                !providerFilter ? "timeline-dataset-prerequisite" : undefined
-              }
-              aria-label="데이터셋 필터"
-              disabled={!providerFilter}
-              placeholder="예: kma_short_forecast"
-              value={datasetKey}
-              onBlur={() =>
-                setDrafts((current) => ({ ...current, datasetKey: null }))
-              }
-              onChange={(event) => {
-                const value = event.target.value;
-                setDrafts((current) => ({ ...current, datasetKey: value }));
-                setStoredCursorStack([]);
-                setStoredBaselineTop(null);
-                onUrlChange({ dataset_key: value.trim() || null }, "replace");
+                onUrlChange(
+                  { provider_dataset_id: value.trim() || null },
+                  "replace",
+                );
               }}
               onFocus={() =>
-                setDrafts((current) => ({ ...current, datasetKey }))
+                setDrafts((current) => ({
+                  ...current,
+                  providerDatasetId,
+                }))
               }
             />
-            {!providerFilter ? (
-              <p
-                className="text-xs text-text-tertiary"
-                id="timeline-dataset-prerequisite"
-              >
-                provider를 먼저 입력하세요.
-              </p>
-            ) : null}
           </FilterField>
           <FilterField label="sync scope">
             <Input
               aria-describedby={
-                !providerFilter || !datasetFilter
-                  ? "timeline-scope-prerequisite"
-                  : undefined
+                !providerDatasetIdFilter ? "timeline-scope-prerequisite" : undefined
               }
               aria-label="sync scope 필터"
-              disabled={!providerFilter || !datasetFilter}
+              disabled={!providerDatasetIdFilter}
               placeholder="예: target_grids"
               value={syncScope}
               onBlur={() =>
@@ -605,12 +603,49 @@ function ExecutionTimelineView({
                 setDrafts((current) => ({ ...current, syncScope }))
               }
             />
-            {!providerFilter || !datasetFilter ? (
+            {!providerDatasetIdFilter ? (
               <p
                 className="text-xs text-text-tertiary"
                 id="timeline-scope-prerequisite"
               >
-                provider와 데이터셋을 먼저 입력하세요.
+                provider dataset ID를 먼저 입력하세요.
+              </p>
+            ) : null}
+          </FilterField>
+          <FilterField label="operation key">
+            <Input
+              aria-describedby={
+                !providerDatasetIdFilter || !syncScope.trim()
+                  ? "timeline-operation-prerequisite"
+                  : undefined
+              }
+              aria-label="operation key 필터"
+              disabled={!providerDatasetIdFilter || !syncScope.trim()}
+              placeholder="예: refresh_targeted"
+              value={operationKey}
+              onBlur={() =>
+                setDrafts((current) => ({ ...current, operationKey: null }))
+              }
+              onChange={(event) => {
+                const value = event.target.value;
+                setDrafts((current) => ({ ...current, operationKey: value }));
+                setStoredCursorStack([]);
+                setStoredBaselineTop(null);
+                onUrlChange(
+                  { operation_key: value.trim() || null },
+                  "replace",
+                );
+              }}
+              onFocus={() =>
+                setDrafts((current) => ({ ...current, operationKey }))
+              }
+            />
+            {!providerDatasetIdFilter || !syncScope.trim() ? (
+              <p
+                className="text-xs text-text-tertiary"
+                id="timeline-operation-prerequisite"
+              >
+                provider dataset ID와 sync scope를 먼저 입력하세요.
               </p>
             ) : null}
           </FilterField>

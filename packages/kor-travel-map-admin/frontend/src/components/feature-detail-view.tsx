@@ -103,14 +103,7 @@ function SourcesTable({ data }: { data: AdminFeatureDetailData }) {
           const source = row.original;
           return (
             <>
-              <EntityLink
-                className="font-medium"
-                id={source.provider}
-                kind="provider"
-                params={{ dataset_key: source.dataset_key }}
-              >
-                {source.provider}
-              </EntityLink>
+              <span className="font-medium">{source.provider}</span>
               <div className="font-mono text-xs text-muted-foreground">
                 {source.dataset_key}
               </div>
@@ -128,7 +121,7 @@ function SourcesTable({ data }: { data: AdminFeatureDetailData }) {
             <>
               <div className="flex flex-wrap gap-1">
                 <Badge variant="outline">{source.source_role}</Badge>
-                {source.is_primary_source ? (
+                {source.source_role === "primary" ? (
                   <Badge variant="secondary">primary</Badge>
                 ) : null}
               </div>
@@ -180,7 +173,7 @@ function SourcesTable({ data }: { data: AdminFeatureDetailData }) {
           return (
             <>
               <div className="text-muted-foreground">
-                {formatDateTime(source.last_seen_at)}
+                {formatDateTime(source.observed_at)}
               </div>
               <div className="mt-1 text-xs text-muted-foreground">
                 imported {formatDateTime(source.imported_at)}
@@ -326,7 +319,6 @@ function noticeHistorySummary(source: SourceRow): string {
     noticeRawValue(source, "message") ??
     noticeRawValue(source, "description") ??
     noticeRawValue(source, "title") ??
-    source.raw_name ??
     source.source_record_key
   );
 }
@@ -342,10 +334,10 @@ function noticeHistoryState(source: SourceRow): string {
 
 function NoticeHistoryPanel({ data }: { data: AdminFeatureDetailData }) {
   const rows = useMemo(() => {
-    const primary = data.sources.filter((source) => source.is_primary_source);
+    const primary = data.sources.filter((source) => source.source_role === "primary");
     return (primary.length > 0 ? primary : data.sources).toSorted(
       (a, b) =>
-        Date.parse(b.last_seen_at) - Date.parse(a.last_seen_at) ||
+        Date.parse(b.observed_at) - Date.parse(a.observed_at) ||
         Date.parse(b.imported_at) - Date.parse(a.imported_at) ||
         b.source_record_key.localeCompare(a.source_record_key),
     );
@@ -359,7 +351,7 @@ function NoticeHistoryPanel({ data }: { data: AdminFeatureDetailData }) {
         cell: ({ row }) => (
           <>
             <div className="text-muted-foreground">
-              {formatDateTime(row.original.last_seen_at)}
+              {formatDateTime(row.original.observed_at)}
             </div>
             <div className="mt-1 font-mono text-xs text-muted-foreground">
               {shortId(row.original.raw_payload_hash, 12)}
@@ -930,7 +922,7 @@ export function FeatureDetailView({ featureId }: { featureId: string }) {
     return null;
   }
 
-  const primarySource = data.sources.find((source) => source.is_primary_source);
+  const primarySource = data.sources.find((source) => source.source_role === "primary");
 
   return (
     <div className="flex flex-col gap-4" data-testid="feature-detail-view">

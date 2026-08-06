@@ -261,18 +261,14 @@ def fetch_krheritage_items(
     krheritage = cast(Any, importlib.import_module("krheritage"))
 
     kind_codes = [
-        code.strip()
-        for code in settings.krheritage_kind_codes.split(",")
-        if code.strip()
+        code.strip() for code in settings.krheritage_kind_codes.split(",") if code.strip()
     ]
     max_items = settings.krheritage_max_items_per_run
     client = krheritage.HeritageClient()
     seen = 0
     try:
         for kind_code in kind_codes:
-            for record in client.search.iter_all_details(
-                page_size=100, ccba_kdcd=kind_code
-            ):
+            for record in client.search.iter_all_details(page_size=100, ccba_kdcd=kind_code):
                 yield record
                 seen += 1
                 if seen >= max_items:
@@ -320,9 +316,7 @@ def fetch_krex_rest_areas(
         page_no = 1
         seen = 0
         while True:
-            page = client.restarea.list_all(
-                num_of_rows=num_of_rows, page_no=page_no
-            )
+            page = client.restarea.list_all(num_of_rows=num_of_rows, page_no=page_no)
             items = list(page.items)
             if not items:
                 break
@@ -483,9 +477,7 @@ def _fetch_krex_traffic_notice_snapshot(
     page_no = 1
     expected_total: int | None = None
     while True:
-        page = client.traffic.incident(
-            num_of_rows=num_of_rows, page_no=page_no
-        )
+        page = client.traffic.incident(num_of_rows=num_of_rows, page_no=page_no)
         items = list(page.items)
         total_count = _validate_krex_traffic_notice_page(
             page,
@@ -561,14 +553,10 @@ def _validate_krex_traffic_notice_page(
     raw = getattr(page, "raw", None)
     if not isinstance(raw, dict):
         raise RuntimeError(
-            "KREX traffic_notices 응답 raw가 JSON object가 아니다: "
-            f"page_no={page_no}"
+            f"KREX traffic_notices 응답 raw가 JSON object가 아니다: page_no={page_no}"
         )
     if "realTimeSMSList" not in raw:
-        raise RuntimeError(
-            "KREX traffic_notices 응답에 realTimeSMSList가 없다: "
-            f"page_no={page_no}"
-        )
+        raise RuntimeError(f"KREX traffic_notices 응답에 realTimeSMSList가 없다: page_no={page_no}")
     raw_items = raw["realTimeSMSList"]
     if isinstance(raw_items, list):
         raw_item_count = len(raw_items)
@@ -576,8 +564,7 @@ def _validate_krex_traffic_notice_page(
         raw_item_count = 1
     else:
         raise RuntimeError(
-            "KREX traffic_notices realTimeSMSList가 list/object가 아니다: "
-            f"page_no={page_no}"
+            f"KREX traffic_notices realTimeSMSList가 list/object가 아니다: page_no={page_no}"
         )
     if raw_item_count != item_count:
         raise RuntimeError(
@@ -602,10 +589,7 @@ def _validate_krex_traffic_notice_page(
 
     total_count = _strict_non_negative_int(raw.get("count"))
     if total_count is None or total_count < 0:
-        raise RuntimeError(
-            "KREX traffic_notices 응답에 유효한 count가 없다: "
-            f"page_no={page_no}"
-        )
+        raise RuntimeError(f"KREX traffic_notices 응답에 유효한 count가 없다: page_no={page_no}")
     if getattr(page, "total_count", None) != total_count:
         raise RuntimeError(
             "KREX traffic_notices raw/parsed count가 다르다: "
@@ -661,9 +645,7 @@ def fetch_krex_rest_area_fuel_prices(
         page_no = 1
         seen = 0
         while True:
-            page = client.restarea.fuel_prices(
-                num_of_rows=num_of_rows, page_no=page_no
-            )
+            page = client.restarea.fuel_prices(num_of_rows=num_of_rows, page_no=page_no)
             items = list(page.items)
             if not items:
                 break
@@ -947,13 +929,15 @@ def fetch_krairport_airports(
 
 def fetch_mcst_culture_records(
     settings: KorTravelMapSettings,
+    *,
+    slugs: Iterable[str] | None = None,
 ) -> Iterator[Any]:
     """MCST 파일데이터 등록 dataset CSV row를 mcst public client로 stream한다 (#395).
 
     파일 다운로드는 **keyless** — ``FileDataClient()``가 카탈로그의 다운로드
     페이지를 스크레이핑해 최신 CSV를 받는다(provider #6/#7, krheritage items /
     knps file dataset과 동일하게 credential guard 없음). ``MCST_FILE_DATASETS``에
-    등록된 slug를 순회하며 ``client.iter_csv(slug)``의 raw row(dict)를
+    등록된 slug 또는 worker가 명시한 slug를 순회하며 ``client.iter_csv(slug)``의 raw row(dict)를
     ``(slug, row)`` 튜플로 lazily yield한다 — asset이 slug별로 분리
     ``_load``한다(dataset_key 단위 sync state 유지). dataset당
     ``settings.mcst_max_items_per_dataset`` 상한(이상 응답 방어). sync
@@ -962,11 +946,15 @@ def fetch_mcst_culture_records(
     # slug 메타표는 krtour(본 repo) — 변환과 fetch가 같은 표를 본다.
     from kortravelmap.providers.mcst import MCST_FILE_DATASETS
 
+    selected_slugs = tuple(MCST_FILE_DATASETS) if slugs is None else tuple(slugs)
+    unknown = sorted(set(selected_slugs) - set(MCST_FILE_DATASETS))
+    if unknown:
+        raise KeyError(f"MCST 메타표에 없는 slug: {unknown!r}")
     mcst = cast(Any, importlib.import_module("mcst"))
     client = mcst.FileDataClient()
     max_items = settings.mcst_max_items_per_dataset
     try:
-        for slug in MCST_FILE_DATASETS:
+        for slug in selected_slugs:
             for seen, row in enumerate(client.iter_csv(slug), start=1):
                 yield (slug, row)
                 if seen >= max_items:
@@ -1089,9 +1077,7 @@ def fetch_khoa_beaches(
         for sido in khoa.OCEANS_BEACH_INFO_DEFAULT_SIDO_NAMES:
             page_no = 1
             while True:
-                page = client.oceans_beach_info(
-                    sido, page_no=page_no, num_of_rows=num_of_rows
-                )
+                page = client.oceans_beach_info(sido, page_no=page_no, num_of_rows=num_of_rows)
                 items = list(page.items)
                 if not items:
                     break
@@ -1104,8 +1090,23 @@ def fetch_khoa_beaches(
 
 
 _AIRKOREA_SIDO_NAMES: Final[tuple[str, ...]] = (
-    "서울", "부산", "대구", "인천", "광주", "대전", "울산", "경기", "강원",
-    "충북", "충남", "전북", "전남", "경북", "경남", "제주", "세종",
+    "서울",
+    "부산",
+    "대구",
+    "인천",
+    "광주",
+    "대전",
+    "울산",
+    "경기",
+    "강원",
+    "충북",
+    "충남",
+    "전북",
+    "전남",
+    "경북",
+    "경남",
+    "제주",
+    "세종",
 )
 """airkorea ``sido_measurements`` 전국 순회용 17개 시도명(``SidoName`` 값)."""
 
@@ -1238,7 +1239,7 @@ def fetch_airkorea_air_quality(
                         num_of_rows=num_of_rows,
                     ),
                     label=f"airkorea sido_measurements {sido} p{page_no}",
-                base_delay=upstream_retry.PROVIDER_BOUNDARY_BASE_DELAY_SECONDS,
+                    base_delay=upstream_retry.PROVIDER_BOUNDARY_BASE_DELAY_SECONDS,
                     is_retryable=lambda exc: isinstance(exc, retryable_types),
                     budget=budget,
                     on_retry=_LOGGER.warning,
@@ -1253,9 +1254,7 @@ def fetch_airkorea_air_quality(
         _airkorea_close(client)
 
 
-def _airkorea_sido_page(
-    client: Any, sido: str, *, page_no: int, num_of_rows: int
-) -> list[Any]:
+def _airkorea_sido_page(client: Any, sido: str, *, page_no: int, num_of_rows: int) -> list[Any]:
     """시도별 측정값 1페이지를 **재시도 경계 안에서** 소진한다 — lazy iterator를
     경계 밖으로 내보내면 소비 중 network 예외가 재시도를 우회한다(H45)."""
 
@@ -1272,9 +1271,7 @@ def _parse_opinet_bbox(raw: str) -> tuple[float, float, float, float]:
     try:
         min_lon, min_lat, max_lon, max_lat = (float(p) for p in parts)
     except ValueError as exc:
-        raise ProviderCredentialMissing(
-            f"opinet_scope_bbox 숫자 파싱 실패: {raw!r}"
-        ) from exc
+        raise ProviderCredentialMissing(f"opinet_scope_bbox 숫자 파싱 실패: {raw!r}") from exc
     if not (min_lon < max_lon and min_lat < max_lat):
         raise ProviderCredentialMissing(
             "opinet_scope_bbox는 min_lon<max_lon, min_lat<max_lat 여야 한다."
@@ -1340,9 +1337,7 @@ WHERE deleted_at IS NULL
       ) <> 'disabled'
 """
 
-_OPINET_PROVIDER_OVERRIDE_KEY: Final[str] = (
-    f"{OPINET_PROVIDER_NAME}:{OPINET_STATION_DATASET_KEY}"
-)
+_OPINET_PROVIDER_OVERRIDE_KEY: Final[str] = f"{OPINET_PROVIDER_NAME}:{OPINET_STATION_DATASET_KEY}"
 """``provider_overrides`` JSONB 키(``<provider>:<dataset_key>``)."""
 
 _OPINET_LOW_TOP_PRODUCTS: Final[tuple[str, ...]] = ("B027", "D047", "B034")
@@ -1600,9 +1595,7 @@ def _opinet_no_data_error_type() -> type[Exception]:
     return RuntimeError
 
 
-def _opinet_rotation_offset(
-    *, window_areas: int, on_date: date | None = None
-) -> int:
+def _opinet_rotation_offset(*, window_areas: int, on_date: date | None = None) -> int:
     """시군 윈도 로테이션 offset (일 단위 결정적, KST 날짜 기준).
 
     호출 상한 때문에 한 run은 시군 목록의 앞쪽 윈도(기본 60개)만 소비한다 —
@@ -1875,9 +1868,7 @@ def fetch_visitkorea_festival_events(
     kst = timezone(timedelta(hours=9))
     start = date(datetime.now(kst).year, 1, 1)
     try:
-        for page in client.iter_pages(
-            client.search_festival, start, num_of_rows=100
-        ):
+        for page in client.iter_pages(client.search_festival, start, num_of_rows=100):
             yield from page.items
     finally:
         client.close()

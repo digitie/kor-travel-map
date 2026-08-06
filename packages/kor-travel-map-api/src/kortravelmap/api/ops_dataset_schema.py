@@ -70,7 +70,6 @@ class OpsDatasetCatalogInfo(BaseModel):
     feature_kind: str
     provider_state_default_scope: str
     label: str
-    is_feature_load: bool
     is_refreshable: bool
     scope_refresh: OpsDatasetScopeRefreshCapability
     preview: OpsDatasetPreviewCapability
@@ -95,7 +94,7 @@ class OpsDatasetScheduleSummary(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     source: Literal["dagster_graphql"] = "dagster_graphql"
-    basis: Literal["dagster_definition_tags", "not_scheduled", "unknown"]
+    basis: Literal["dagster_operation_key_tag", "not_scheduled", "unknown"]
     status: str | None
     schedule_names: list[str]
     active_schedule_names: list[str]
@@ -124,7 +123,7 @@ class OpsDatasetProjectedJob(BaseModel):
     dagster_run_id: str | None
     dagster_run_status: str | None
     trigger_kind: str | None
-    operation_registry_version: str | None
+    operation_key: str | None
     depth: int
     detail_url: str
 
@@ -134,6 +133,7 @@ class OpsDatasetProviderDataset(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    provider_dataset_id: int = Field(ge=1)
     provider: str
     dataset_key: str
     sync_scope: str | None
@@ -153,8 +153,6 @@ class OpsDatasetExecution(BaseModel):
     pair_status: OperationState
     operation_member_id: UUID
     sync_scope: str | None
-    providers: list[str]
-    dataset_keys: list[str]
     provider_datasets: list[OpsDatasetProviderDataset]
     created_at: datetime
     started_at: datetime | None
@@ -162,7 +160,7 @@ class OpsDatasetExecution(BaseModel):
     dagster_run_id: str | None
     dagster_run_status: str | None
     trigger_kind: str | None
-    operation_registry_version: str | None
+    operation_key: str | None
     error_message: str | None
     projected_job: OpsDatasetProjectedJob
     cancellation: PipelineCancellationSummaryRecord | None
@@ -182,6 +180,7 @@ class OpsDatasetGridRow(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    provider_dataset_id: int = Field(ge=1)
     provider: str
     dataset_key: str
     detail_url: str
@@ -210,7 +209,6 @@ class OpsDatasetGridRow(BaseModel):
     catalog: OpsDatasetCatalogInfo | None
     refresh_policy: ProviderRefreshPolicyRecord | None
     dataset_issues: OpsIssueSummary
-    provider_issues: OpsIssueSummary
 
 
 class OpsDatasetsGridData(BaseModel):
@@ -253,6 +251,8 @@ class OpsDatasetEventRecord(BaseModel):
 
     event_id: UUID
     job_id: UUID
+    import_job_dataset_id: UUID | None
+    provider_dataset_id: int | None
     sync_scope: str
     stage: str | None
     level: str
@@ -288,6 +288,7 @@ class OpsDatasetEventHistory(BaseModel):
 class OpsDatasetDetailData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    provider_dataset_id: int = Field(ge=1)
     provider: str
     dataset_key: str
     catalog_state: CatalogState
@@ -311,7 +312,6 @@ class OpsDatasetDetailData(BaseModel):
     run_history: OpsDatasetRunHistory
     event_history: OpsDatasetEventHistory
     dataset_issues: OpsIssueSummary
-    provider_issues: OpsIssueSummary
 
 
 class OpsDatasetDetailResponse(BaseModel):
@@ -348,6 +348,8 @@ class OpsDatasetPreviewBudget(BaseModel):
 class OpsDatasetPreviewData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    provider_dataset_id: int = Field(ge=1)
+    sync_scope: str
     provider: str
     dataset_key: str
     source: Literal["fixture"]

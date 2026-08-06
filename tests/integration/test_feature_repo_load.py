@@ -10,7 +10,7 @@
 
 from __future__ import annotations
 
-import asyncio
+import json
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
@@ -149,7 +149,6 @@ def _first_probe_notice_bundle(
         source_entity_type="traffic_notice",
         source_entity_id=raw_data["natural_key"],
         raw_payload_hash=raw_payload_hash,
-        raw_name=message,
         raw_data=raw_data,
         fetched_at=fetched_at,
         imported_at=fetched_at,
@@ -161,7 +160,6 @@ def _first_probe_notice_bundle(
         source_role=SourceRole.PRIMARY,
         match_method="natural_key",
         confidence=100,
-        is_primary_source=True,
         created_at=fetched_at,
     )
     return FeatureBundle(
@@ -252,21 +250,24 @@ async def test_load_bundle_inserts_and_roundtrips(
     assert abs(float(row["lon"]) - float(bundle.feature.coord.lon)) < 1e-6
     assert abs(float(row["lat"]) - float(bundle.feature.coord.lat)) < 1e-6
 
-    # source_link FK 정합
+    # source_link FK와 별도 entity head 정합
     link = (
         await migrated_session.execute(
             text(
-                "SELECT se.current_source_record_key AS source_record_key, "
-                "sl.is_primary_source "
+                "SELECT head.current_source_record_key AS source_record_key, "
+                "sl.source_role "
                 "FROM provider_sync.source_links AS sl "
                 "JOIN provider_sync.source_entities AS se "
                 "ON se.source_entity_key = sl.source_entity_key "
+                "JOIN provider_sync.source_entity_heads AS head "
+                "ON head.source_entity_key = se.source_entity_key "
                 "WHERE sl.feature_id = :fid"
             ),
             {"fid": bundle.feature.feature_id},
         )
     ).one()
     assert link.source_record_key == bundle.source_record.source_record_key
+    assert link.source_role == SourceRole.PRIMARY.value
 
 
 async def test_load_bundle_is_idempotent(migrated_session: AsyncSession) -> None:
@@ -280,14 +281,16 @@ async def test_load_bundle_is_idempotent(migrated_session: AsyncSession) -> None
     before = (
         await migrated_session.execute(
             text(
-                "SELECT last_seen_at FROM provider_sync.source_records "
-                "WHERE source_record_key = :k"
+                "SELECT head.observed_at "
+                "FROM provider_sync.source_entity_heads AS head "
+                "JOIN provider_sync.source_records AS sr "
+                "ON sr.source_entity_key = head.source_entity_key "
+                "WHERE sr.source_record_key = :k"
             ),
             {"k": bundle.source_record.source_record_key},
         )
     ).scalar_one()
 
-    await asyncio.sleep(0.01)
     mutated = bundle.model_copy(
         update={
             "feature": bundle.feature.model_copy(
@@ -296,7 +299,7 @@ async def test_load_bundle_is_idempotent(migrated_session: AsyncSession) -> None
         }
     )
 
-    # 동일 source_record_key 재적재 — 원문/feature 내용은 건드리지 않고 last_seen만 갱신.
+    # 동일 source_record_key 재적재 — immutable raw record와 entity head는 바뀌지 않는다.
     second = await feature_repo.load_bundle(migrated_session, mutated)
     await migrated_session.flush()
     assert second.features_inserted == 0
@@ -322,15 +325,17 @@ async def test_load_bundle_is_idempotent(migrated_session: AsyncSession) -> None
     source_row = (
         await migrated_session.execute(
             text(
-                "SELECT count(*) AS count, max(last_seen_at) AS last_seen_at "
-                "FROM provider_sync.source_records "
-                "WHERE source_record_key = :k"
+                "SELECT count(*) AS count, max(head.observed_at) AS observed_at "
+                "FROM provider_sync.source_records AS sr "
+                "JOIN provider_sync.source_entity_heads AS head "
+                "ON head.source_entity_key = sr.source_entity_key "
+                "WHERE sr.source_record_key = :k"
             ),
             {"k": bundle.source_record.source_record_key},
         )
     ).mappings().one()
     assert source_row["count"] == 1
-    assert source_row["last_seen_at"] > before
+    assert source_row["observed_at"] == before
 
 
 @pytest.mark.parametrize(
@@ -830,6 +835,24 @@ async def test_features_in_bbox_hides_stale_notice_revisions(
         ("new", "공사 내용 수정", "101", new_seen),
     ):
         source_entity_id = f"legacy-hash-key-{suffix}"
+        raw_data = {
+            "occurred_date": "2026.06.01",
+            "occurred_time": "09:00:00",
+            "route_no": "0010",
+            "direction": "서울방향",
+            "point_name": "천안분기점",
+            "incident_type_code": "3",
+            "series_no": series_no,
+            "message": message,
+        }
+        raw_payload_hash = make_payload_hash(raw_data)
+        source_record_key = make_source_record_key(
+            provider="python-krex-api",
+            dataset_key="krex_traffic_notices",
+            source_entity_type="traffic_notice",
+            source_entity_id=source_entity_id,
+            raw_payload_hash=raw_payload_hash,
+        )
         source_entity_key = feature_repo._make_source_entity_key(
             provider="python-krex-api",
             dataset_key="krex_traffic_notices",
@@ -840,11 +863,17 @@ async def test_features_in_bbox_hides_stale_notice_revisions(
             text(
                 """
                 INSERT INTO provider_sync.source_entities (
-                    source_entity_key, provider, dataset_key,
+                    source_entity_key, provider_dataset_id,
                     source_entity_type, source_entity_id,
                     first_seen_at, last_seen_at
                 ) VALUES (
-                    :source_entity_key, 'python-krex-api', 'krex_traffic_notices',
+                    :source_entity_key,
+                    (
+                        SELECT provider_dataset_id
+                        FROM provider_sync.provider_datasets
+                        WHERE provider = 'python-krex-api'
+                          AND dataset_key = 'krex_traffic_notices'
+                    ),
                     'traffic_notice', :source_entity_id,
                     :seen_at, :seen_at
                 )
@@ -860,52 +889,38 @@ async def test_features_in_bbox_hides_stale_notice_revisions(
             text(
                 """
                 INSERT INTO provider_sync.source_records (
-                    source_record_key, source_entity_key, provider, dataset_key,
-                    source_entity_type, source_entity_id,
-                    raw_name, raw_data, raw_payload_hash,
-                    fetched_at, imported_at, last_seen_at
+                    source_record_key, source_entity_key, raw_data, raw_payload_hash,
+                    fetched_at, imported_at
                 )
                 VALUES (
                     :source_record_key, :source_entity_key,
-                    'python-krex-api', 'krex_traffic_notices',
-                    'traffic_notice', :source_entity_id,
-                    :raw_name, CAST(:raw_data AS jsonb), :raw_payload_hash,
-                    :seen_at, :seen_at, :seen_at
+                    CAST(:raw_data AS jsonb), :raw_payload_hash,
+                    :seen_at, :seen_at
                 )
                 """
             ),
             {
-                "source_record_key": f"sr_notice_legacy_{suffix}",
+                "source_record_key": source_record_key,
                 "source_entity_key": source_entity_key,
-                "source_entity_id": source_entity_id,
-                "raw_name": message,
-                "raw_payload_hash": f"hash-{suffix}",
-                "raw_data": (
-                    "{"
-                    '"occurred_date":"2026.06.01",'
-                    '"occurred_time":"09:00:00",'
-                    '"route_no":"0010",'
-                    '"direction":"서울방향",'
-                    '"point_name":"천안분기점",'
-                    '"incident_type_code":"3",'
-                    f'"series_no":"{series_no}",'
-                    f'"message":"{message}"'
-                    "}"
-                ),
+                "raw_payload_hash": raw_payload_hash,
+                "raw_data": json.dumps(raw_data, ensure_ascii=False),
                 "seen_at": seen_at,
             },
         )
         await migrated_session.execute(
             text(
                 """
-                UPDATE provider_sync.source_entities
-                SET current_source_record_key = :source_record_key
-                WHERE source_entity_key = :source_entity_key
+                INSERT INTO provider_sync.source_entity_heads (
+                    source_entity_key, current_source_record_key, observed_at, expires_at
+                ) VALUES (
+                    :source_entity_key, :source_record_key, :seen_at, NULL
+                )
                 """
             ),
             {
-                "source_record_key": f"sr_notice_legacy_{suffix}",
+                "source_record_key": source_record_key,
                 "source_entity_key": source_entity_key,
+                "seen_at": seen_at,
             },
         )
         await migrated_session.execute(
@@ -913,11 +928,11 @@ async def test_features_in_bbox_hides_stale_notice_revisions(
                 """
                 INSERT INTO provider_sync.source_links (
                     feature_id, source_entity_key, source_role,
-                    match_method, confidence, is_primary_source, created_at
+                    match_method, confidence, created_at
                 )
                 VALUES (
                     :feature_id, :source_entity_key, 'primary',
-                    'natural_key', 100, true, :seen_at
+                    'natural_key', 100, :seen_at
                 )
                 """
             ),

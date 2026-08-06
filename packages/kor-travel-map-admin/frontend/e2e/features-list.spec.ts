@@ -1,7 +1,6 @@
 import { expect, type Page, type Route, test } from "@playwright/test";
 
 import type { components } from "../src/api/types";
-import { mockOpsDatasetCatalog } from "./ops-dataset-catalog-mock";
 
 // admin-ops.spec.ts house pattern: 손으로 쓴 record shape 대신 생성된 OpenAPI
 // 스키마(components["schemas"])에 mock factory를 바인딩한다(#308). 백엔드 DTO가
@@ -131,23 +130,17 @@ function makeAdminSource(
     expires_at: null,
     fetched_at: MOCK_NOW,
     imported_at: MOCK_NOW,
-    is_primary_source: true,
-    last_seen_at: MOCK_NOW,
+    observed_at: MOCK_NOW,
     linked_at: MOCK_NOW,
     match_method: "natural_key",
     provider: "admin-provider",
-    raw_address: "서울 마포구 와우산로",
     raw_data: { admin_source_marker: "admin-source-visible" },
-    raw_latitude: 37.5665,
-    raw_longitude: 126.978,
-    raw_name: "Admin source place",
     raw_payload_hash: "admin-source-hash",
     source_entity_id: "admin-entity-1",
     source_entity_key: "admin-provider::admin-dataset::admin-entity-1",
     source_entity_type: "place",
     source_record_key: "admin-provider::admin-dataset::admin-record-1",
     source_role: "primary",
-    source_version: "v1",
     ...overrides,
   };
 }
@@ -188,6 +181,7 @@ function makeCuration(
     metadata: { visibility: "admin_only" },
     place_name: feature.name,
     provider: "admin-provider",
+    provider_dataset_id: 702,
     reuse_policy: "manual_review",
     sort_order: 7,
     source_name: "Admin source",
@@ -260,7 +254,6 @@ async function mockFeaturesList(
     detail?: AdminFeatureDetailResponse;
   },
 ) {
-  await mockOpsDatasetCatalog(page);
   const listSearches: URLSearchParams[] = [];
   const deactivateBodies: Record<string, unknown>[] = [];
   const deactivateUrls: string[] = [];
@@ -339,6 +332,38 @@ test.describe("admin/features list depth", () => {
     expect(last?.has("cursor")).toBe(false); // resetCursor()로 cursor 제거.
     expect(last?.get("sort")).toBe("name"); // 기본 정렬 유지.
     expect(last?.get("order")).toBe("asc");
+  });
+
+  test("provider dataset ID 딥링크와 입력은 canonical ID만 목록 요청으로 전달한다", async ({
+    page,
+  }) => {
+    const mocks = await mockFeaturesList(page, {
+      handler: () => listResponse([makeAdminFeature()]),
+    });
+
+    // 자연키 잔재가 URL에 있어도 목록 API는 canonical membership ID만 사용한다.
+    await page.goto(
+      "/admin/features?provider_dataset_id=702&provider=legacy-provider&dataset_key=legacy-dataset",
+    );
+    const filter = page.getByLabel("feature provider dataset ID");
+    await expect(filter).toHaveValue("702");
+    await expect
+      .poll(() => {
+        const search = mocks.lastSearch();
+        return (
+          search?.get("provider_dataset_id") === "702" &&
+          !search.has("provider") &&
+          !search.has("dataset_key")
+        );
+      })
+      .toBe(true);
+
+    await filter.fill("703");
+    await expect.poll(() => mocks.lastSearch()?.get("provider_dataset_id")).toBe(
+      "703",
+    );
+    expect(mocks.lastSearch()?.has("provider")).toBe(false);
+    expect(mocks.lastSearch()?.has("dataset_key")).toBe(false);
   });
 
   test("sort/order controls drive server sort + order query params", async ({

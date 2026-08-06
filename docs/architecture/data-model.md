@@ -605,7 +605,7 @@ item actor처럼 표현력이 더 큰 데이터가 있으면 PostgreSQL `P0001` 
 > ADR-087 및 `contracts/vnext/target-schema-v1.sql`이다. 최종형은
 > `provider_datasets` FK identity, immutable `source_records`,
 > `source_entity_heads(observed_at, expires_at)`, role-only `source_links`를 사용하며
-> provider/dataset·current pointer·raw-derived·`is_primary_source` legacy 열은
+> provider/dataset·current pointer·raw-derived·legacy primary boolean 열은
 > `docs/removal-manifests/t-vn-33-source-lineage.md`에 따라 T-VN-39에서 제거한다.
 
 provider 자연 entity의 identity와 변경 불가능한 payload 관측 이력을 분리한다(ADR-063,
@@ -768,7 +768,6 @@ CREATE TABLE provider_sync.source_links (
   source_role          TEXT NOT NULL,                 -- SourceRole enum
   match_method         TEXT NOT NULL,                 -- 'natural_key', 'reverse_geocode', 'place_phone_search', ...
   confidence           NUMERIC(5,2) NOT NULL,
-  is_primary_source    BOOLEAN NOT NULL DEFAULT FALSE,
   created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
 
   PRIMARY KEY (feature_id, source_entity_key),
@@ -781,11 +780,12 @@ CREATE TABLE provider_sync.source_links (
 
 CREATE INDEX idx_source_links_entity       ON provider_sync.source_links (source_entity_key);
 CREATE INDEX idx_source_links_role         ON provider_sync.source_links (source_role);
-CREATE INDEX idx_source_links_primary      ON provider_sync.source_links (feature_id) WHERE is_primary_source;
+CREATE INDEX idx_source_links_primary      ON provider_sync.source_links (feature_id)
+  WHERE source_role = 'primary';
 ```
 
 link는 payload version이 아니라 provider entity에 붙는다. 따라서 같은 entity의 payload가
-바뀌어도 Feature link 수는 늘지 않는다. `is_primary_source=true`는 Feature당 하나라는
+바뀌어도 Feature link 수는 늘지 않는다. `source_role='primary'`는 Feature당 하나라는
 제약이 없으며 MOIS와 MCST처럼 서로 다른 primary entity를 모두 보존한다. 기본 Feature 상세는
 각 link의 `source_entities.current_source_record_key`를 따라 현재 관측 전부를 반환하고,
 과거 payload는 entity별 이력 API에서만 조회한다.

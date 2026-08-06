@@ -25,6 +25,7 @@ from kortravelmap.core.cache_target_stream import (
     validate_cache_target_external_system,
     validate_cache_target_key,
 )
+from kortravelmap.core.sync_scope import parse_canonical_sync_scope
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -71,12 +72,32 @@ class FeatureScopeRow:
 
 @dataclass(frozen=True)
 class ProviderDatasetScope:
-    """scope에 포함된 feature의 primary provider/dataset 묶음."""
+    """scope에 포함된 정확한 실행 가능한 refresh membership.
+
+    표시용 자연키는 catalog projection일 뿐이다. scope 해석과 이후 request
+    snapshot은 ``provider_dataset_id + sync_scope + operation_key``를 잃지 않는다.
+    """
 
     provider: str
     dataset_key: str
     feature_count: int
-    sync_scope: str | None = None
+    provider_dataset_id: int
+    sync_scope: str
+    operation_key: str
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.provider_dataset_id, int)
+            or isinstance(self.provider_dataset_id, bool)
+            or self.provider_dataset_id <= 0
+        ):
+            raise ValueError("provider_dataset_id must be a positive integer")
+        parse_canonical_sync_scope(self.sync_scope)
+        canonical_operation_key = _canonical_scope_text(
+            self.operation_key, field_name="operation_key", max_length=128
+        )
+        if canonical_operation_key != self.operation_key:
+            raise ValueError("operation_key must be canonical")
 
 
 def _canonical_scope_text(value: Any, *, field_name: str, max_length: int) -> str:
@@ -220,23 +241,27 @@ def canonicalize_feature_update_scope(scope: Mapping[str, Any]) -> dict[str, Any
     if scope_type == "provider_dataset":
         _require_exact_scope_keys(
             scope,
-            required=frozenset({"type", "provider", "dataset_key"}),
-            optional=frozenset({"sync_scope"}),
-        )
-        provider_payload: dict[str, Any] = {
-            "type": scope_type,
-            "provider": _canonical_scope_text(
-                scope["provider"], field_name="provider", max_length=128
+            required=frozenset(
+                {"type", "provider_dataset_id", "sync_scope", "operation_key"}
             ),
-            "dataset_key": _canonical_scope_text(
-                scope["dataset_key"], field_name="dataset_key", max_length=128
+        )
+        provider_dataset_id = scope["provider_dataset_id"]
+        if (
+            not isinstance(provider_dataset_id, int)
+            or isinstance(provider_dataset_id, bool)
+            or provider_dataset_id <= 0
+        ):
+            raise ValueError("provider_dataset_id must be a positive integer")
+        return {
+            "type": scope_type,
+            "provider_dataset_id": provider_dataset_id,
+            "sync_scope": _canonical_scope_text(
+                scope["sync_scope"], field_name="sync_scope", max_length=128
+            ),
+            "operation_key": _canonical_scope_text(
+                scope["operation_key"], field_name="operation_key", max_length=128
             ),
         }
-        if scope.get("sync_scope") is not None:
-            provider_payload["sync_scope"] = _canonical_scope_text(
-                scope["sync_scope"], field_name="sync_scope", max_length=128
-            )
-        return provider_payload
 
     if scope_type == "cache_target_keys":
         _require_exact_scope_keys(
@@ -301,6 +326,7 @@ class CacheTargetFeatureMatch:
 
     target_id: str
     feature_id: str
+    provider_dataset_id: int | None
     provider: str | None
     dataset_key: str | None
     distance_m: float | None
@@ -341,10 +367,12 @@ class ScopeResolution:
         if self.provider_datasets:
             provider_payload = [
                 {
+                    "provider_dataset_id": item.provider_dataset_id,
+                    "sync_scope": item.sync_scope,
+                    "operation_key": item.operation_key,
                     "provider": item.provider,
                     "dataset_key": item.dataset_key,
                     "feature_count": item.feature_count,
-                    **({"sync_scope": item.sync_scope} if item.sync_scope is not None else {}),
                 }
                 for item in self.provider_datasets
             ]
@@ -482,18 +510,32 @@ matched AS (
             CAST(:radius_m AS double precision)
           )
 )
-SELECT sr.provider, sr.dataset_key, count(DISTINCT m.feature_id)::int AS feature_count
+SELECT
+    pd.provider_dataset_id,
+    operation_scope.sync_scope,
+    operation_scope.operation_key,
+    pd.provider,
+    pd.dataset_key,
+    count(DISTINCT m.feature_id)::int AS feature_count
 FROM matched AS m
 JOIN provider_sync.source_links AS sl
   ON sl.feature_id = m.feature_id
- AND sl.is_primary_source
+ AND sl.source_role = 'primary'
 JOIN provider_sync.source_entities AS se
   ON se.source_entity_key = sl.source_entity_key
-JOIN provider_sync.source_records AS sr
-  ON sr.source_entity_key = se.source_entity_key
- AND sr.source_record_key = se.current_source_record_key
-GROUP BY sr.provider, sr.dataset_key
-ORDER BY sr.provider, sr.dataset_key
+JOIN provider_sync.provider_datasets AS pd
+  ON pd.provider_dataset_id = se.provider_dataset_id
+JOIN provider_sync.provider_dataset_operation_scopes AS operation_scope
+  ON operation_scope.provider_dataset_id = pd.provider_dataset_id
+ AND operation_scope.operation_kind = 'refresh'
+JOIN provider_sync.provider_dataset_operations AS operation
+  ON operation.provider_dataset_id = operation_scope.provider_dataset_id
+ AND operation.operation_key = operation_scope.operation_key
+ AND operation.operation_kind = operation_scope.operation_kind
+WHERE pd.is_active AND operation.is_enabled
+GROUP BY pd.provider_dataset_id, operation_scope.sync_scope, operation_scope.operation_key,
+         pd.provider, pd.dataset_key
+ORDER BY pd.provider_dataset_id, operation_scope.sync_scope, operation_scope.operation_key
 """
 
 _MATCHED_SIGUNGU_CENTER_RADIUS_SQL: Final[str] = """
@@ -566,18 +608,32 @@ WITH matched AS (
             4326
           )
 )
-SELECT sr.provider, sr.dataset_key, count(DISTINCT m.feature_id)::int AS feature_count
+SELECT
+    pd.provider_dataset_id,
+    operation_scope.sync_scope,
+    operation_scope.operation_key,
+    pd.provider,
+    pd.dataset_key,
+    count(DISTINCT m.feature_id)::int AS feature_count
 FROM matched AS m
 JOIN provider_sync.source_links AS sl
   ON sl.feature_id = m.feature_id
- AND sl.is_primary_source
+ AND sl.source_role = 'primary'
 JOIN provider_sync.source_entities AS se
   ON se.source_entity_key = sl.source_entity_key
-JOIN provider_sync.source_records AS sr
-  ON sr.source_entity_key = se.source_entity_key
- AND sr.source_record_key = se.current_source_record_key
-GROUP BY sr.provider, sr.dataset_key
-ORDER BY sr.provider, sr.dataset_key
+JOIN provider_sync.provider_datasets AS pd
+  ON pd.provider_dataset_id = se.provider_dataset_id
+JOIN provider_sync.provider_dataset_operation_scopes AS operation_scope
+  ON operation_scope.provider_dataset_id = pd.provider_dataset_id
+ AND operation_scope.operation_kind = 'refresh'
+JOIN provider_sync.provider_dataset_operations AS operation
+  ON operation.provider_dataset_id = operation_scope.provider_dataset_id
+ AND operation.operation_key = operation_scope.operation_key
+ AND operation.operation_kind = operation_scope.operation_kind
+WHERE pd.is_active AND operation.is_enabled
+GROUP BY pd.provider_dataset_id, operation_scope.sync_scope, operation_scope.operation_key,
+         pd.provider, pd.dataset_key
+ORDER BY pd.provider_dataset_id, operation_scope.sync_scope, operation_scope.operation_key
 """
 
 _MATCHED_SIGUNGU_BBOX_SQL: Final[str] = """
@@ -628,18 +684,32 @@ WITH matched AS (
     WHERE f.deleted_at IS NULL
       AND f.sigungu_code = ANY(CAST(:sigungu_codes AS text[]))
 )
-SELECT sr.provider, sr.dataset_key, count(DISTINCT m.feature_id)::int AS feature_count
+SELECT
+    pd.provider_dataset_id,
+    operation_scope.sync_scope,
+    operation_scope.operation_key,
+    pd.provider,
+    pd.dataset_key,
+    count(DISTINCT m.feature_id)::int AS feature_count
 FROM matched AS m
 JOIN provider_sync.source_links AS sl
   ON sl.feature_id = m.feature_id
- AND sl.is_primary_source
+ AND sl.source_role = 'primary'
 JOIN provider_sync.source_entities AS se
   ON se.source_entity_key = sl.source_entity_key
-JOIN provider_sync.source_records AS sr
-  ON sr.source_entity_key = se.source_entity_key
- AND sr.source_record_key = se.current_source_record_key
-GROUP BY sr.provider, sr.dataset_key
-ORDER BY sr.provider, sr.dataset_key
+JOIN provider_sync.provider_datasets AS pd
+  ON pd.provider_dataset_id = se.provider_dataset_id
+JOIN provider_sync.provider_dataset_operation_scopes AS operation_scope
+  ON operation_scope.provider_dataset_id = pd.provider_dataset_id
+ AND operation_scope.operation_kind = 'refresh'
+JOIN provider_sync.provider_dataset_operations AS operation
+  ON operation.provider_dataset_id = operation_scope.provider_dataset_id
+ AND operation.operation_key = operation_scope.operation_key
+ AND operation.operation_kind = operation_scope.operation_kind
+WHERE pd.is_active AND operation.is_enabled
+GROUP BY pd.provider_dataset_id, operation_scope.sync_scope, operation_scope.operation_key,
+         pd.provider, pd.dataset_key
+ORDER BY pd.provider_dataset_id, operation_scope.sync_scope, operation_scope.operation_key
 """
 
 _RESOLVE_PROVIDER_DATASET_SQL: Final[str] = """
@@ -649,13 +719,25 @@ JOIN provider_sync.source_links AS sl
   ON sl.feature_id = f.feature_id
 JOIN provider_sync.source_entities AS se
   ON se.source_entity_key = sl.source_entity_key
-JOIN provider_sync.source_records AS sr
-  ON sr.source_entity_key = se.source_entity_key
- AND sr.source_record_key = se.current_source_record_key
+JOIN provider_sync.provider_datasets AS pd
+  ON pd.provider_dataset_id = se.provider_dataset_id
 WHERE f.deleted_at IS NULL
-  AND sl.is_primary_source
-  AND sr.provider = :provider
-  AND sr.dataset_key = :dataset_key
+  AND sl.source_role = 'primary'
+  AND pd.provider_dataset_id = CAST(:provider_dataset_id AS bigint)
+  AND EXISTS (
+      SELECT 1
+      FROM provider_sync.provider_dataset_operation_scopes AS operation_scope
+      JOIN provider_sync.provider_dataset_operations AS operation
+        ON operation.provider_dataset_id = operation_scope.provider_dataset_id
+       AND operation.operation_key = operation_scope.operation_key
+       AND operation.operation_kind = operation_scope.operation_kind
+      WHERE operation_scope.provider_dataset_id = pd.provider_dataset_id
+        AND operation_scope.sync_scope = CAST(:sync_scope AS text)
+        AND operation_scope.operation_key = CAST(:operation_key AS text)
+        AND operation_scope.operation_kind = 'refresh'
+        AND operation.is_enabled
+        AND pd.is_active
+  )
 ORDER BY f.feature_id
 LIMIT CAST(:limit AS integer)
 """
@@ -667,13 +749,25 @@ JOIN provider_sync.source_links AS sl
   ON sl.feature_id = f.feature_id
 JOIN provider_sync.source_entities AS se
   ON se.source_entity_key = sl.source_entity_key
-JOIN provider_sync.source_records AS sr
-  ON sr.source_entity_key = se.source_entity_key
- AND sr.source_record_key = se.current_source_record_key
+JOIN provider_sync.provider_datasets AS pd
+  ON pd.provider_dataset_id = se.provider_dataset_id
 WHERE f.deleted_at IS NULL
-  AND sl.is_primary_source
-  AND sr.provider = :provider
-  AND sr.dataset_key = :dataset_key
+  AND sl.source_role = 'primary'
+  AND pd.provider_dataset_id = CAST(:provider_dataset_id AS bigint)
+  AND EXISTS (
+      SELECT 1
+      FROM provider_sync.provider_dataset_operation_scopes AS operation_scope
+      JOIN provider_sync.provider_dataset_operations AS operation
+        ON operation.provider_dataset_id = operation_scope.provider_dataset_id
+       AND operation.operation_key = operation_scope.operation_key
+       AND operation.operation_kind = operation_scope.operation_kind
+      WHERE operation_scope.provider_dataset_id = pd.provider_dataset_id
+        AND operation_scope.sync_scope = CAST(:sync_scope AS text)
+        AND operation_scope.operation_key = CAST(:operation_key AS text)
+        AND operation_scope.operation_kind = 'refresh'
+        AND operation.is_enabled
+        AND pd.is_active
+  )
 """
 
 _MATCHED_SIGUNGU_PROVIDER_DATASET_SQL: Final[str] = """
@@ -683,32 +777,81 @@ JOIN provider_sync.source_links AS sl
   ON sl.feature_id = f.feature_id
 JOIN provider_sync.source_entities AS se
   ON se.source_entity_key = sl.source_entity_key
-JOIN provider_sync.source_records AS sr
-  ON sr.source_entity_key = se.source_entity_key
- AND sr.source_record_key = se.current_source_record_key
+JOIN provider_sync.provider_datasets AS pd
+  ON pd.provider_dataset_id = se.provider_dataset_id
 WHERE f.deleted_at IS NULL
   AND f.sigungu_code IS NOT NULL
-  AND sl.is_primary_source
-  AND sr.provider = :provider
-  AND sr.dataset_key = :dataset_key
+  AND sl.source_role = 'primary'
+  AND pd.provider_dataset_id = CAST(:provider_dataset_id AS bigint)
+  AND EXISTS (
+      SELECT 1
+      FROM provider_sync.provider_dataset_operation_scopes AS operation_scope
+      JOIN provider_sync.provider_dataset_operations AS operation
+        ON operation.provider_dataset_id = operation_scope.provider_dataset_id
+       AND operation.operation_key = operation_scope.operation_key
+       AND operation.operation_kind = operation_scope.operation_kind
+      WHERE operation_scope.provider_dataset_id = pd.provider_dataset_id
+        AND operation_scope.sync_scope = CAST(:sync_scope AS text)
+        AND operation_scope.operation_key = CAST(:operation_key AS text)
+        AND operation_scope.operation_kind = 'refresh'
+        AND operation.is_enabled
+        AND pd.is_active
+  )
 ORDER BY f.sigungu_code
 """
 
 _PROVIDER_DATASETS_FOR_FEATURE_IDS_SQL: Final[str] = """
-SELECT sr.provider, sr.dataset_key, count(DISTINCT sl.feature_id)::int AS feature_count
+SELECT
+    pd.provider_dataset_id,
+    operation_scope.sync_scope,
+    operation_scope.operation_key,
+    pd.provider,
+    pd.dataset_key,
+    count(DISTINCT sl.feature_id)::int AS feature_count
 FROM provider_sync.source_links AS sl
 JOIN feature.features AS f
   ON f.feature_id = sl.feature_id
  AND f.deleted_at IS NULL
 JOIN provider_sync.source_entities AS se
   ON se.source_entity_key = sl.source_entity_key
-JOIN provider_sync.source_records AS sr
-  ON sr.source_entity_key = se.source_entity_key
- AND sr.source_record_key = se.current_source_record_key
-WHERE sl.is_primary_source
+JOIN provider_sync.provider_datasets AS pd
+  ON pd.provider_dataset_id = se.provider_dataset_id
+JOIN provider_sync.provider_dataset_operation_scopes AS operation_scope
+  ON operation_scope.provider_dataset_id = pd.provider_dataset_id
+ AND operation_scope.operation_kind = 'refresh'
+JOIN provider_sync.provider_dataset_operations AS operation
+  ON operation.provider_dataset_id = operation_scope.provider_dataset_id
+ AND operation.operation_key = operation_scope.operation_key
+ AND operation.operation_kind = operation_scope.operation_kind
+WHERE sl.source_role = 'primary'
   AND sl.feature_id = ANY(CAST(:feature_ids AS text[]))
-GROUP BY sr.provider, sr.dataset_key
-ORDER BY sr.provider, sr.dataset_key
+  AND pd.is_active
+  AND operation.is_enabled
+GROUP BY pd.provider_dataset_id, operation_scope.sync_scope, operation_scope.operation_key,
+         pd.provider, pd.dataset_key
+ORDER BY pd.provider_dataset_id, operation_scope.sync_scope, operation_scope.operation_key
+"""
+
+_PROVIDER_DATASET_MEMBERSHIP_SQL: Final[str] = """
+SELECT
+    pd.provider_dataset_id,
+    operation_scope.sync_scope,
+    operation_scope.operation_key,
+    pd.provider,
+    pd.dataset_key
+FROM provider_sync.provider_datasets AS pd
+JOIN provider_sync.provider_dataset_operation_scopes AS operation_scope
+  ON operation_scope.provider_dataset_id = pd.provider_dataset_id
+ AND operation_scope.operation_kind = 'refresh'
+JOIN provider_sync.provider_dataset_operations AS operation
+  ON operation.provider_dataset_id = operation_scope.provider_dataset_id
+ AND operation.operation_key = operation_scope.operation_key
+ AND operation.operation_kind = operation_scope.operation_kind
+WHERE pd.provider_dataset_id = CAST(:provider_dataset_id AS bigint)
+  AND operation_scope.sync_scope = CAST(:sync_scope AS text)
+  AND operation_scope.operation_key = CAST(:operation_key AS text)
+  AND pd.is_active
+  AND operation.is_enabled
 """
 
 _CACHE_TARGETS_BY_KEYS_SQL: Final[str] = """
@@ -765,8 +908,9 @@ SELECT
     t.target_id,
     f.feature_id,
     f.sigungu_code,
-    sr.provider,
-    sr.dataset_key,
+    pd.provider_dataset_id,
+    pd.provider,
+    pd.dataset_key,
     CASE
       WHEN f.coord_5179 IS NULL OR t.coord_5179 IS NULL THEN NULL
       ELSE x_extension.ST_Distance(f.coord_5179, t.coord_5179)::double precision
@@ -780,12 +924,11 @@ JOIN feature.features AS f
  AND x_extension.ST_DWithin(f.coord_5179, t.coord_5179, t.radius_m)
 LEFT JOIN provider_sync.source_links AS sl
   ON sl.feature_id = f.feature_id
- AND sl.is_primary_source
+ AND sl.source_role = 'primary'
 LEFT JOIN provider_sync.source_entities AS se
   ON se.source_entity_key = sl.source_entity_key
-LEFT JOIN provider_sync.source_records AS sr
-  ON sr.source_entity_key = se.source_entity_key
- AND sr.source_record_key = se.current_source_record_key
+LEFT JOIN provider_sync.provider_datasets AS pd
+  ON pd.provider_dataset_id = se.provider_dataset_id
 ORDER BY t.target_id, distance_m NULLS LAST, f.feature_id
 """
 
@@ -794,8 +937,9 @@ SELECT
     CAST(:target_id AS text) AS target_id,
     f.feature_id,
     f.sigungu_code,
-    sr.provider,
-    sr.dataset_key,
+    pd.provider_dataset_id,
+    pd.provider,
+    pd.dataset_key,
     CASE
       WHEN f.coord_5179 IS NULL OR t.coord_5179 IS NULL THEN NULL
       ELSE x_extension.ST_Distance(f.coord_5179, t.coord_5179)::double precision
@@ -807,12 +951,11 @@ JOIN feature.features AS f
  AND f.sigungu_code = ANY(CAST(:sigungu_codes AS text[]))
 LEFT JOIN provider_sync.source_links AS sl
   ON sl.feature_id = f.feature_id
- AND sl.is_primary_source
+ AND sl.source_role = 'primary'
 LEFT JOIN provider_sync.source_entities AS se
   ON se.source_entity_key = sl.source_entity_key
-LEFT JOIN provider_sync.source_records AS sr
-  ON sr.source_entity_key = se.source_entity_key
- AND sr.source_record_key = se.current_source_record_key
+LEFT JOIN provider_sync.provider_datasets AS pd
+  ON pd.provider_dataset_id = se.provider_dataset_id
 WHERE t.target_id::text = CAST(:target_id AS text)
 ORDER BY f.feature_id
 """
@@ -863,6 +1006,11 @@ def _row_to_cache_match(row: Any) -> CacheTargetFeatureMatch:
     return CacheTargetFeatureMatch(
         target_id=str(row["target_id"]),
         feature_id=str(row["feature_id"]),
+        provider_dataset_id=(
+            int(row["provider_dataset_id"])
+            if row["provider_dataset_id"] is not None
+            else None
+        ),
         provider=row["provider"],
         dataset_key=row["dataset_key"],
         distance_m=float(distance) if distance is not None else None,
@@ -897,6 +1045,9 @@ async def _provider_datasets_from_sql(
     rows = (await session.execute(text(sql), dict(params))).mappings().all()
     return tuple(
         ProviderDatasetScope(
+            provider_dataset_id=int(row["provider_dataset_id"]),
+            sync_scope=str(row["sync_scope"]),
+            operation_key=str(row["operation_key"]),
             provider=str(row["provider"]),
             dataset_key=str(row["dataset_key"]),
             feature_count=int(row["feature_count"]),
@@ -961,6 +1112,9 @@ async def _provider_datasets_for_feature_ids(
     )
     return tuple(
         ProviderDatasetScope(
+            provider_dataset_id=int(row["provider_dataset_id"]),
+            sync_scope=str(row["sync_scope"]),
+            operation_key=str(row["operation_key"]),
             provider=str(row["provider"]),
             dataset_key=str(row["dataset_key"]),
             feature_count=int(row["feature_count"]),
@@ -1145,18 +1299,32 @@ async def resolve_sigungu_by_radius(
 async def resolve_provider_dataset(
     session: AsyncSession,
     *,
-    provider: str,
-    dataset_key: str,
+    provider_dataset_id: int,
+    sync_scope: str,
+    operation_key: str,
     limit: int | None = None,
 ) -> ScopeResolution:
-    """primary source가 특정 provider/dataset인 feature를 해석한다."""
+    """exact canonical refresh membership에 속한 primary feature를 해석한다."""
+    membership_row = (
+        await session.execute(
+            text(_PROVIDER_DATASET_MEMBERSHIP_SQL),
+            {
+                "provider_dataset_id": provider_dataset_id,
+                "sync_scope": sync_scope,
+                "operation_key": operation_key,
+            },
+        )
+    ).mappings().one_or_none()
+    if membership_row is None:
+        raise ValueError("provider_dataset scope does not resolve an active refresh membership")
     rows = (
         (
             await session.execute(
                 text(_RESOLVE_PROVIDER_DATASET_SQL),
                 {
-                    "provider": provider,
-                    "dataset_key": dataset_key,
+                    "provider_dataset_id": provider_dataset_id,
+                    "sync_scope": sync_scope,
+                    "operation_key": operation_key,
                     "limit": _limit_value(limit),
                 },
             )
@@ -1164,7 +1332,22 @@ async def resolve_provider_dataset(
         .mappings()
         .all()
     )
-    return await _resolution(session, "provider_dataset", _rows_to_features(rows))
+    features = _rows_to_features(rows)
+    return ScopeResolution(
+        scope_type="provider_dataset",
+        features=features,
+        provider_datasets=(
+            ProviderDatasetScope(
+                provider_dataset_id=int(membership_row["provider_dataset_id"]),
+                sync_scope=str(membership_row["sync_scope"]),
+                operation_key=str(membership_row["operation_key"]),
+                provider=str(membership_row["provider"]),
+                dataset_key=str(membership_row["dataset_key"]),
+                feature_count=len(features),
+            ),
+        ),
+        sigungu_codes=_sigungu_codes(features),
+    )
 
 
 async def resolve_cache_target_keys(
@@ -1398,23 +1581,28 @@ async def count_features_matching_scope(
         )
     if scope_type == "provider_dataset":
         provider_params: dict[str, Any] = {
-            "provider": str(scope["provider"]),
-            "dataset_key": str(scope["dataset_key"]),
+            "provider_dataset_id": int(scope["provider_dataset_id"]),
+            "sync_scope": str(scope["sync_scope"]),
+            "operation_key": str(scope["operation_key"]),
         }
+        membership_row = (
+            await session.execute(
+                text(_PROVIDER_DATASET_MEMBERSHIP_SQL), provider_params
+            )
+        ).mappings().one_or_none()
+        if membership_row is None:
+            raise ValueError("provider_dataset scope does not resolve an active refresh membership")
         total_count = await _count_scalar(session, _COUNT_PROVIDER_DATASET_SQL, provider_params)
-        # executor의 _provider_dataset_scopes와 동일하게, 요청한 provider/dataset pair를
-        # feature 0건이어도 matched_scope에 항상 노출한다 — preview가 실제 실행(execute)과
-        # 같은 provider_datasets 모양을 보여주도록(WYSIWYG). primary-source feature가 아직
-        # 없는 dataset(예: kma_ultra_short_nowcast)도 preview에 pair로 표시된다.
-        requested_sync_scope = scope.get("sync_scope")
+        # feature가 아직 없어도, request가 고정할 exact operation membership은 항상
+        # preview에 남긴다. 자연키 pair나 effective-scope 선택은 하지 않는다.
         provider_datasets = (
             ProviderDatasetScope(
-                provider=str(provider_params["provider"]),
-                dataset_key=str(provider_params["dataset_key"]),
+                provider_dataset_id=int(membership_row["provider_dataset_id"]),
+                sync_scope=str(membership_row["sync_scope"]),
+                operation_key=str(membership_row["operation_key"]),
+                provider=str(membership_row["provider"]),
+                dataset_key=str(membership_row["dataset_key"]),
                 feature_count=total_count,
-                sync_scope=(
-                    str(requested_sync_scope) if requested_sync_scope is not None else None
-                ),
             ),
         )
         sigungu_codes = await _sigungu_codes_from_sql(
@@ -1422,8 +1610,9 @@ async def count_features_matching_scope(
         )
         preview = await resolve_provider_dataset(
             session,
-            provider=str(provider_params["provider"]),
-            dataset_key=str(provider_params["dataset_key"]),
+            provider_dataset_id=int(provider_params["provider_dataset_id"]),
+            sync_scope=str(provider_params["sync_scope"]),
+            operation_key=str(provider_params["operation_key"]),
             limit=limit,
         )
         return _counted_resolution(
