@@ -114,12 +114,14 @@ def _valid_evidence_manifest(run: Path) -> bool:
     except (OSError, ValueError, json.JSONDecodeError):
         return False
     keys = {
-        "alembic_head",
-        "compatible_pair_manifest_sha256",
+        "map_application_head",
+        "final_schema_reload_receipt_sha256",
         "files",
         "finished_at",
         "host_attestation_sha256",
         "orchestrator_verified",
+        "pinned_runtime_manifest_sha256",
+        "pinned_runtime_rebuild_journal_sha256",
         "playwright_image_id",
         "repository_commit",
         "status",
@@ -128,18 +130,27 @@ def _valid_evidence_manifest(run: Path) -> bool:
     if not isinstance(manifest, dict) or set(manifest) != keys:
         return False
     if (
-        manifest["version"] != 1
+        manifest["version"] != 4
         or type(manifest["status"]) is not int
         or type(manifest["orchestrator_verified"]) is not bool
-        or not isinstance(manifest["alembic_head"], str)
-        or not re.fullmatch(r"[0-9A-Za-z_]+", manifest["alembic_head"])
+        or not isinstance(manifest["map_application_head"], str)
+        or re.fullmatch(
+            r"[0-9a-z][0-9a-z_.-]{0,127}", manifest["map_application_head"]
+        )
+        is None
         or not isinstance(manifest["repository_commit"], str)
         or re.fullmatch(r"[0-9a-f]{40}", manifest["repository_commit"]) is None
         or not isinstance(manifest["playwright_image_id"], str)
         or re.fullmatch(r"sha256:[0-9a-f]{64}", manifest["playwright_image_id"])
         is None
-        or not isinstance(manifest["compatible_pair_manifest_sha256"], str)
-        or _SHA256_PATTERN.fullmatch(manifest["compatible_pair_manifest_sha256"])
+        or not isinstance(manifest["pinned_runtime_manifest_sha256"], str)
+        or _SHA256_PATTERN.fullmatch(manifest["pinned_runtime_manifest_sha256"])
+        is None
+        or not isinstance(manifest["pinned_runtime_rebuild_journal_sha256"], str)
+        or _SHA256_PATTERN.fullmatch(manifest["pinned_runtime_rebuild_journal_sha256"])
+        is None
+        or not isinstance(manifest["final_schema_reload_receipt_sha256"], str)
+        or _SHA256_PATTERN.fullmatch(manifest["final_schema_reload_receipt_sha256"])
         is None
         or not isinstance(manifest["host_attestation_sha256"], str)
         or _SHA256_PATTERN.fullmatch(manifest["host_attestation_sha256"]) is None
@@ -179,12 +190,22 @@ def _valid_evidence_manifest(run: Path) -> bool:
     if declared_files != observed_files:
         return False
     attestation = observed_files.get("runtime-attestation.json")
-    compatible_pair = observed_files.get("compatible-pair.json")
+    pinned_runtime_manifest = observed_files.get("pinned-runtime-manifest.json")
+    pinned_runtime_rebuild_journal = observed_files.get(
+        "pinned-runtime-rebuild-journal.json"
+    )
+    final_schema_reload_receipt = observed_files.get("final-schema-reload-receipt.json")
     return (
         attestation is not None
         and attestation[0] == manifest["host_attestation_sha256"]
-        and compatible_pair is not None
-        and compatible_pair[0] == manifest["compatible_pair_manifest_sha256"]
+        and pinned_runtime_manifest is not None
+        and pinned_runtime_manifest[0] == manifest["pinned_runtime_manifest_sha256"]
+        and pinned_runtime_rebuild_journal is not None
+        and pinned_runtime_rebuild_journal[0]
+        == manifest["pinned_runtime_rebuild_journal_sha256"]
+        and final_schema_reload_receipt is not None
+        and final_schema_reload_receipt[0]
+        == manifest["final_schema_reload_receipt_sha256"]
     )
 
 
@@ -580,7 +601,16 @@ def audit_state_root(root: Path) -> AuditResult:
             known = True
             temporary_files += int(not directory)
             outcome_paths[outcome_match.group(1)] = entry
-        elif name.startswith((".state.", "cap.", "attestation-", "compatible-pair-")):
+        elif name.startswith(
+            (
+                ".state.",
+                "cap.",
+                "attestation-",
+                "pinned-runtime-manifest-",
+                "pinned-runtime-rebuild-journal-",
+                "final-schema-reload-receipt-",
+            )
+        ):
             known = True
             temporary_files += int(not directory)
         else:

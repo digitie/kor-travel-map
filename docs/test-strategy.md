@@ -501,15 +501,21 @@ C7 prod runner는 실행자 입력만으로 prod를 주장하지 않는다. host
 모듈/상태 감사기도
 `/usr/local/lib/kor-travel-map/c7-runner/<exact commit>`의 root-owned Git archive snapshot과
 attested file hash에서만 실행한다. root-owned 고정 attestation 파일의
-machine-id/hostname/origin hash뿐 아니라 clean Git commit, C6c compatible-pair manifest hash와
-generation, compose project, Map API/UI/Dagster web·daemon/PinVi API의 실제 image·command·정렬 env
-hash를 대조한다. Map API image의 Alembic `current == unique heads`와 `alembic check`, 로그인 POST
+machine-id/hostname/origin hash뿐 아니라 clean Git commit, v5 pinned-runtime manifest·v7 committed
+rebuild journal·final-schema reload receipt hash와 generation, compose project, Map API/UI/Dagster
+web·daemon/PinVi API·web·Dagster의 signed compose service/container binding과 실제 image·command·정렬 env
+hash를 대조한다. Map API **image**에서 ADR-085 `ktm-application-schema head`가 출력한 installed
+artifact head와 DB Alembic `current`가 generation의 `map_application_head`에 각각 정확히 같고
+`alembic check`가 통과해야 하며, final-schema receipt는
+같은 manifest/journal·Map/Dagster/PinVi head, 성공한 source/ETL reload, canonical dataset availability를
+가져야 한다. 로그인 POST
 `200 + Set-Cookie`도 선행 조건이다. 로그인은 session/auth audit를 만들 수 있는 domain-state 비파괴
 검증이며, 나머지는 read-only다. 이 preflight를 모두 통과하기 전에는 고정 state root의
 `BLOCKED.json`과 mutation journal을 만들지 않는다. 값은 로그·attachment에 출력하지 않는다.
 보안 코어는 import 가능한 Python 모듈로 두고 runner가 검증한 동일 module bytes를 직접 실행한다.
 unit gate는 runner/helper/module 각각의 hash 변조, file/ancestor owner·mode 위반, attestation exact
-shape 위반, compatible-pair·OCI image/service runtime metadata 불일치를 실제 예외 또는 non-zero로
+shape 위반, stale reload receipt, caller service shadow injection, OCI image/service/container binding
+metadata 불일치를 실제 예외 또는 non-zero로
 확인한다. runner 문자열만 검사하는 정적 fixture는 이 보안 gate를 대체하지 않는다.
 
 Playwright는 host npm/Chromium이 아니라 `docker/c7-playwright.Dockerfile`로 만든 immutable image ID에서
@@ -541,7 +547,7 @@ settlement가 끝나기 전 teardown하지 않는다.
 strong ETag를 증명하지 못하면 target 삭제와 restored 성공을 금지한다.
 
 preview 응답은 request의 provider-dataset scope, 빈 중복 filters, update policy, run mode, priority와
-exact 일치해야 한다. terminal matched scope의 eligible/skipped/executed 집합은 KMA exact pair의
+exact 일치해야 한다. terminal matched scope의 eligible/skipped/executed 집합은 KMA exact triple의
 합집합이어야 하며 다른 provider/dataset을 허용하지 않는다. KMA metadata와 cursor의 fingerprint는
 소문자 64자리 SHA-256, base datetime은 달력상 유효한 비어 있지 않은 `YYYYMMDDHHmm`만 허용한다.
 
@@ -572,7 +578,7 @@ ETag·version을 다시 exact 비교한다. causal receipt가 유실됐거나 id
 target 전체 집합 barrier는 `external_system`별 `page_size=500` cursor를 최대 두 페이지까지 완주해
 501건을 검증한다. continuation page가 비거나 cursor가 반복되고, 상한 뒤에도 cursor가 남거나 다른
 external-system item이 섞이면 불완전한 소유권 증거이므로 mutation을 금지한다. preview의
-`matched_scope.provider_datasets`는 KMA provider/dataset/effective scope 한 쌍과 비음수 정수
+`matched_scope.provider_datasets`는 KMA provider/dataset/effective scope/operation 한 triple과 비음수 정수
 `feature_count`를 반드시 포함해야 하며 빈 배열과 추가 pair는 실패다.
 
 execution identity는 `(created_at, id, kind)`, event identity는 `(occurred_at, event_id)` total order를

@@ -108,7 +108,7 @@ PUT ensure                 PinVi normal cancel             POST finalize
 
 service OpenAPI artifact에는 이 3 route와 DTO, security requirement를 포함한다. runtime full
 `openapi.json`도 조립된 route audit을 위해 포함하며, user artifact는 제외한다. response의
-`capability_generation`은 compatible-pair pinset의 동일 값과 정확히 일치해야 한다.
+`capability_generation`은 v5 pinned-runtime generation의 `pinset_sha256`과 정확히 일치해야 한다.
 
 ## C6c 실행 순서
 
@@ -129,10 +129,11 @@ Manager가 Map DB 또는 container 상태를 읽어 추론하지 않는다.
 - Map unit/API/integration: auth exactness, PUT idempotency, state CHECK, generic worker/read
   exclusion, unsafe cancellation consume, finalize history preservation, duplicate/cross-ID
   rejection, old capability fail-close.
-- compatible pair: service OpenAPI artifact·capability generation re-pin, PinVi relay가 typed
+- pinned runtime generation: service OpenAPI artifact·capability generation re-pin, PinVi relay가 typed
   409 code를 보존하는 contract test.
-- n150: isolated rehearsal 뒤 prod F1D 한 회차와 admin UI live E2E. 중간 fixture 데이터는
-  보존 대상이 아니며 final schema의 backup/restore만 별도로 검증한다.
+- n150: isolated rehearsal 뒤 F1D-D의 final schema source/ETL 재적재 receipt와 admin UI live E2E.
+  중간 fixture·DB preimage는 보존 또는 복원 대상이 아니며, final schema 재적재 뒤 canonical dataset
+  availability를 receipt로 검증한다.
 
 ## 비목표
 

@@ -2,7 +2,8 @@
 
 이 runbook은 issue #741·#785와 `T-VN-15`의 남은 production 증거를 한 번의 owned
 Feature lane에서 검증한다. strict `T-ADM-C7`의 상태·증거에는 mutation을 섞지 않지만,
-실행 전 신뢰 경계는 C7 host attestation v3와 compatible-pair manifest v4를 그대로
+실행 전 신뢰 경계는 C7 host attestation v5, pinned-runtime manifest v5, rebuild journal v7,
+final-schema reload receipt v1을 그대로
 재사용한다. C7 성공을 대신하거나 C7보다 넓은 배포 조합을 허용하지 않는다.
 
 ## 1. 불변식
@@ -73,7 +74,9 @@ export E2E_ADMIN_PASSWORD='<admin-password>'
 export E2E_LIVE_ALLOW_PROD=1
 export E2E_ADMIN_FEATURE_ACCEPTANCE_WRITE=1
 export E2E_C7_EXPECTED_GIT_COMMIT='<40-hex>'
-export E2E_C7_COMPATIBLE_PAIR_MANIFEST='<root-owned-v4-manifest-path>'
+export E2E_C7_PINNED_RUNTIME_MANIFEST='<root-owned-v5-manifest-path>'
+export E2E_C7_PINNED_RUNTIME_REBUILD_JOURNAL='<root-owned-v7-journal-path>'
+export E2E_C7_FINAL_SCHEMA_RELOAD_RECEIPT='<root-owned-final-schema-reload-receipt-path>'
 export E2E_C7_PLAYWRIGHT_IMAGE='sha256:<64-hex>'
 export E2E_C7_EXPECTED_UI_ORIGIN_SHA256='<64-hex>'
 export E2E_C7_EXPECTED_API_WS_ORIGIN_SHA256='<64-hex>'
@@ -83,27 +86,35 @@ export E2E_C7_UI_SERVICE='<compose-service>'
 export E2E_C7_DAGSTER_WEB_SERVICE='<compose-service>'
 export E2E_C7_DAGSTER_DAEMON_SERVICE='<compose-service>'
 export E2E_C7_PINVI_API_SERVICE='<compose-service>'
+export E2E_C7_PINVI_WEB_SERVICE='<compose-service>'
+export E2E_C7_PINVI_DAGSTER_SERVICE='<compose-service>'
 ```
 
 root snapshot의 C7 verifier는 mutation 전에 다음을 actual runtime과 exact 비교한다.
 
 - host machine ID·hostname, compose project, 공개 UI/API/Dagster origin
-- active compatible pair의 Map API/UI/Dagster web/daemon 및 PinVi immutable image ID
+- active pinned generation의 Map API/UI/Dagster web/daemon 및 PinVi API/web/Dagster immutable image ID,
+  그리고 committed rebuild journal candidate의 exact 일치
+- Map API image의 ADR-085 installed artifact head와 DB Alembic `current`가 generation의
+  `map_application_head`에 각각 정확히 일치하고, final-schema reload receipt가 같은
+  manifest/journal·세 schema head·Map API image·active generation canonical SHA-256을 **각 source/ETL
+  reload output**에 exact 결박한다. 따라서 stale source/ETL output의 새 receipt 재포장은 거부하며,
+  canonical dataset availability도 같은 final reload evidence에 포함한다.
 - Map/PinVi source commit, OCI source revision, command hash, environment hash
 - Playwright executor image와 base image identity
 - Map API의 `profile=production`, features route `true`, 중복 없는 cursor signing secret
   1개(32자 이상·공백 없음), admin/service/ops read/ops cancel/metrics/VWorld credential과의 분리
-- Map UI·Dagster web·Dagster daemon·PinVi API에 cursor signing secret이 없다는 음성 계약
+- Map UI·Dagster web·Dagster daemon·PinVi API·web·Dagster에 cursor signing secret이 없다는 음성 계약
 
 caller가 임의 OCI label이나 자체 생성 attestation으로 이 경계를 우회할 수 없다. 검증 성공
-출력은 compatible-pair manifest와 host attestation의 SHA256 두 개뿐이며 result에 hash로만 남는다.
+출력은 pinned-runtime manifest, rebuild journal, final-schema reload receipt, host attestation의 SHA256 네 개뿐이며 result에 hash로만 남는다.
 
 ## 4. 실행 순서
 
 compose project directory에서 필요한 env를 보존해 commit별 runner를 실행한다.
 
 ```bash
-sudo --preserve-env=E2E_BASE_URL,NEXT_PUBLIC_KOR_TRAVEL_MAP_API,E2E_DAGSTER_URL,E2E_ADMIN_PASSWORD,E2E_ADMIN_USERNAME,E2E_LIVE_ALLOW_PROD,E2E_ADMIN_FEATURE_ACCEPTANCE_WRITE,E2E_C7_EXPECTED_GIT_COMMIT,E2E_C7_COMPATIBLE_PAIR_MANIFEST,E2E_C7_PLAYWRIGHT_IMAGE,E2E_C7_EXPECTED_UI_ORIGIN_SHA256,E2E_C7_EXPECTED_API_WS_ORIGIN_SHA256,E2E_C7_EXPECTED_DAGSTER_ORIGIN_SHA256,E2E_C7_MAP_API_SERVICE,E2E_C7_UI_SERVICE,E2E_C7_DAGSTER_WEB_SERVICE,E2E_C7_DAGSTER_DAEMON_SERVICE,E2E_C7_PINVI_API_SERVICE \
+sudo --preserve-env=E2E_BASE_URL,NEXT_PUBLIC_KOR_TRAVEL_MAP_API,E2E_DAGSTER_URL,E2E_ADMIN_PASSWORD,E2E_ADMIN_USERNAME,E2E_LIVE_ALLOW_PROD,E2E_ADMIN_FEATURE_ACCEPTANCE_WRITE,E2E_C7_EXPECTED_GIT_COMMIT,E2E_C7_PINNED_RUNTIME_MANIFEST,E2E_C7_PINNED_RUNTIME_REBUILD_JOURNAL,E2E_C7_FINAL_SCHEMA_RELOAD_RECEIPT,E2E_C7_PLAYWRIGHT_IMAGE,E2E_C7_EXPECTED_UI_ORIGIN_SHA256,E2E_C7_EXPECTED_API_WS_ORIGIN_SHA256,E2E_C7_EXPECTED_DAGSTER_ORIGIN_SHA256,E2E_C7_MAP_API_SERVICE,E2E_C7_UI_SERVICE,E2E_C7_DAGSTER_WEB_SERVICE,E2E_C7_DAGSTER_DAEMON_SERVICE,E2E_C7_PINVI_API_SERVICE,E2E_C7_PINVI_WEB_SERVICE,E2E_C7_PINVI_DAGSTER_SERVICE \
   /usr/local/lib/kor-travel-map/admin-feature-live-acceptance/<40-hex>/run-admin-feature-live-acceptance.sh run
 ```
 
@@ -166,20 +177,20 @@ Docker daemon 상태를 조사한 뒤 daemon restart 또는 host reboot로 late 
 
 ## 6. recovery
 
-v3 snapshot 배치 전 고정 state root에 `BLOCKED.json`이 없는지 확인한다. v2 BLOCKED가 남아 있으면
-v3 helper로 변환하거나 삭제하지 않는다. v2에는 실행 identity가 없어 자동 호환성 판정이 불가능하므로,
+v5 snapshot 배치 전 고정 state root에 `BLOCKED.json`이 없는지 확인한다. v4 이하 BLOCKED가 남아 있으면
+v5 helper로 변환하거나 삭제하지 않는다. 이전 version에는 실행 identity가 없어 자동 호환성 판정이 불가능하므로,
 생성 당시 설치 snapshot과 배포 기록을 운영자가 확정해 그 snapshot의 recovery를 먼저 완료한다.
 생성 snapshot을 확정할 수 없으면 §5의 ACTIVE/container/DB 소유권을 수동 감사하고 fail-closed 상태를
-유지한다. BLOCKED가 완전히 종결된 뒤에만 v3 snapshot을 활성화한다.
+유지한다. BLOCKED가 완전히 종결된 뒤에만 v5 snapshot을 활성화한다.
 
-같은 배포 env와 commit snapshot으로 실행한다. 최초 실행은 BLOCKED v3에 source commit,
-API·Playwright image ID, compatible-pair manifest와 host attestation hash의 exact execution
+같은 배포 env와 commit snapshot으로 실행한다. 최초 실행은 BLOCKED v5에 source commit,
+API·Playwright image ID, pinned-runtime manifest·rebuild journal·final-schema reload receipt·host attestation hash의 exact execution
 identity를 기록한다. recovery는 현재 runtime attestation에서 다시 얻은 identity가 BLOCKED와
 완전히 같을 때만 attempt를 증가시키며, 하나라도 다르면 mutation 전에 fail-closed한다. 성공 result
-v3에는 exact identity의 canonical SHA256과 pair/attestation hash만 남기고 원문은 남기지 않는다.
+v5에는 exact identity의 canonical SHA256과 manifest/journal/reload receipt/attestation hash만 남기고 원문은 남기지 않는다.
 
 ```bash
-sudo --preserve-env=E2E_BASE_URL,NEXT_PUBLIC_KOR_TRAVEL_MAP_API,E2E_DAGSTER_URL,E2E_ADMIN_PASSWORD,E2E_ADMIN_USERNAME,E2E_LIVE_ALLOW_PROD,E2E_ADMIN_FEATURE_ACCEPTANCE_WRITE,E2E_C7_EXPECTED_GIT_COMMIT,E2E_C7_COMPATIBLE_PAIR_MANIFEST,E2E_C7_PLAYWRIGHT_IMAGE,E2E_C7_EXPECTED_UI_ORIGIN_SHA256,E2E_C7_EXPECTED_API_WS_ORIGIN_SHA256,E2E_C7_EXPECTED_DAGSTER_ORIGIN_SHA256,E2E_C7_MAP_API_SERVICE,E2E_C7_UI_SERVICE,E2E_C7_DAGSTER_WEB_SERVICE,E2E_C7_DAGSTER_DAEMON_SERVICE,E2E_C7_PINVI_API_SERVICE \
+sudo --preserve-env=E2E_BASE_URL,NEXT_PUBLIC_KOR_TRAVEL_MAP_API,E2E_DAGSTER_URL,E2E_ADMIN_PASSWORD,E2E_ADMIN_USERNAME,E2E_LIVE_ALLOW_PROD,E2E_ADMIN_FEATURE_ACCEPTANCE_WRITE,E2E_C7_EXPECTED_GIT_COMMIT,E2E_C7_PINNED_RUNTIME_MANIFEST,E2E_C7_PINNED_RUNTIME_REBUILD_JOURNAL,E2E_C7_FINAL_SCHEMA_RELOAD_RECEIPT,E2E_C7_PLAYWRIGHT_IMAGE,E2E_C7_EXPECTED_UI_ORIGIN_SHA256,E2E_C7_EXPECTED_API_WS_ORIGIN_SHA256,E2E_C7_EXPECTED_DAGSTER_ORIGIN_SHA256,E2E_C7_MAP_API_SERVICE,E2E_C7_UI_SERVICE,E2E_C7_DAGSTER_WEB_SERVICE,E2E_C7_DAGSTER_DAEMON_SERVICE,E2E_C7_PINVI_API_SERVICE,E2E_C7_PINVI_WEB_SERVICE,E2E_C7_PINVI_DAGSTER_SERVICE \
   /usr/local/lib/kor-travel-map/admin-feature-live-acceptance/<40-hex>/run-admin-feature-live-acceptance.sh recover
 ```
 
@@ -200,7 +211,7 @@ fingerprint가 다르면 다른 운영 row일 수 있으므로 아무 것도 삭
 ## 7. 완료 판정
 
 - runner exit 0, `BLOCKED.json`·`ACTIVE.json` 없음
-- latest result가 `status=complete`, `phase=passed|recovered`, recovery attempt와 두 attestation
+- latest result가 `status=complete`, `phase=passed|recovered`, recovery attempt와 manifest·journal·reload receipt·attestation
   hash를 포함하고 원문 identity를 포함하지 않음
 - normal은 probe/direct seed·cleanup·audit, main/recovery report, 6개 operation × 8개 exact
   lifecycle phase가 있음; recovery는 3개 operation × 8개 phase가 있음
@@ -212,6 +223,6 @@ fingerprint가 다르면 다른 운영 row일 수 있으므로 아무 것도 삭
 - 같은 exact tree의 PostgreSQL regression 증거에서 search `include_total=false` COUNT 0회,
   `include_total=true` COUNT 1회. production HTTP 결과만으로 SQL 실행 횟수를 추정하지 않음
 
-이슈에는 실행 시각, exact source commit, compatible-pair/attestation hash, passed/recovered,
+이슈에는 실행 시각, exact source commit, manifest/journal/final-schema reload receipt/attestation hash, passed/recovered,
 cleanup/audit/container 0 결과만 적는다. secret·origin·host·run ID·Feature ID·container ID·cursor
 원문은 적지 않는다.

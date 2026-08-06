@@ -964,17 +964,16 @@ test.describe("dedup + enrichment reviews — 상세 비교 다이얼로그 필�
     if (typeof t.lat === "number") {
       await expect(dialog).toContainText(t.lat.toFixed(6));
     }
-    // 2차 source: provider/entity/dataset/record(+address/좌표).
+    // 2차 source: provider/entity/dataset/record + review 전용 파생 좌표.
     await expect(dialog).toContainText(src.provider);
     await expect(dialog).toContainText(src.source_entity_id);
     await expect(dialog).toContainText(src.dataset_key);
     await expect(dialog).toContainText(src.source_record_key);
-    if (src.raw_address) await expect(dialog).toContainText(src.raw_address);
-    if (typeof src.raw_longitude === "number") {
-      await expect(dialog).toContainText(src.raw_longitude.toFixed(6));
+    if (typeof body.data.source_lon === "number") {
+      await expect(dialog).toContainText(body.data.source_lon.toFixed(6));
     }
-    if (typeof src.raw_latitude === "number") {
-      await expect(dialog).toContainText(src.raw_latitude.toFixed(6));
+    if (typeof body.data.source_lat === "number") {
+      await expect(dialog).toContainText(body.data.source_lat.toFixed(6));
     }
     // 점수(name=toFixed(1), distance score=spatial_score) + 거리 + audit default.
     await expect(dialog).toContainText(body.data.name_score.toFixed(1));

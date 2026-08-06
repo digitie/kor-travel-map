@@ -10,6 +10,7 @@ type OfflineUploadDeleteResponse =
   components["schemas"]["OfflineUploadDeleteResponse"];
 type OfflineUploadListResponse =
   components["schemas"]["OfflineUploadListResponse"];
+type OpsDatasetsGridResponse = components["schemas"]["OpsDatasetsGridResponse"];
 
 type BrowserFetchResult<T> = {
   body: T | null;
@@ -21,11 +22,9 @@ const UI_TIMEOUT = 15_000;
 const FLOW_TIMEOUT = 5 * 60 * 1000;
 const T = { timeout: UI_TIMEOUT } as const;
 
-// 병렬/재실행 충돌 방지를 위한 고유 RUN_ID. provider/파일명에 박아 목록 필터로
-// 정확히 우리 업로드 한 건만 isolate 한다(checksum도 RUN_ID 덕에 unique → dedup 가드 회피).
+// 병렬/재실행 충돌 방지를 위한 고유 RUN_ID. 파일 본문에 박아 checksum을 유일하게
+// 만들어, 같은 canonical provider_dataset_id를 써도 dedup guard와 충돌하지 않는다.
 const RUN_ID = `live-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-const PROVIDER = `e2e-offline-${RUN_ID}`;
-const DATASET_KEY = "offline_e2e";
 const FILENAME = `e2e-${RUN_ID}.jsonl`;
 // JSON/JSONL FeatureBundle(non-tabular)을 올린다 — create는 바이트만 저장하고
 // 파싱하지 않으므로 내용은 비어 있지 않기만 하면 된다. RUN_ID로 checksum을 유일화한다.
@@ -36,17 +35,8 @@ const EXECUTE_OFFLINE_UPLOAD_WRITE =
   process.env.E2E_ADMIN_WRITE === "1" ||
   process.env.E2E_OFFLINE_UPLOAD_WRITE === "1";
 
-// 시나리오별로 exact-match provider를 분리한다(서버 목록 필터는 provider/status
-// 모두 등호 매칭 — offline_upload_repo._LIST_SQL). 같은 RUN_ID 접두사라도 suffix가
-// 달라 서로의 목록/카운트 단언에 누수되지 않고, 각 테스트 finally가 자기 provider만
-// sweep 한다.
-const PROVIDER_MULTI = `${PROVIDER}-multi`;
-const PROVIDER_STATUS = `${PROVIDER}-status`;
-const PROVIDER_INVALID = `${PROVIDER}-invalid`;
-const PROVIDER_DUP = `${PROVIDER}-dup`;
-
 // tag로 본문(=checksum)을 유일화한다. 같은 tag를 두 번 쓰면 동일 checksum →
-// provider/dataset/scope/checksum 멱등 가드(409 OFFLINE_UPLOAD_DUPLICATE)를 트리거한다.
+// provider_dataset_id/scope/checksum 멱등 가드(409 OFFLINE_UPLOAD_DUPLICATE)를 트리거한다.
 function fileBody(tag: string): string {
   return `{"kind":"place","name":"e2e offline upload ${tag}","run_id":"${RUN_ID}"}\n`;
 }
@@ -172,33 +162,42 @@ async function deleteOfflineUploadByApi(
   });
 }
 
-// best-effort 정리: 이 run의 unique PROVIDER로 목록을 훑어 남은 offline upload row(+
-// 저장 객체)를 모두 삭제한다. POST 201 응답 파싱이 step 중간에 실패해 uploadId를 못
-// 잡은 경우에도 RUN_ID로 isolate되는 row가 leak되지 않도록 보장한다(status 무관 전수).
-async function sweepOfflineUploadsByProvider(
+// POST 성공 응답에서 받은 upload_id만 best-effort로 지운다. 목록은
+// provider_dataset_id 경계라 같은 dataset을 쓰는 다른 run을 절대 sweep하지 않는다.
+async function deleteKnownOfflineUploads(
   page: Page,
-  provider: string,
+  uploadIds: Iterable<string | null>,
 ): Promise<void> {
-  const listed = await browserFetch<OfflineUploadListResponse>(
-    page,
-    `${listPath()}?provider=${encodeURIComponent(provider)}&page_size=200`,
-  );
-  for (const item of listed.body?.data.items ?? []) {
-    await deleteOfflineUploadByApi(page, item.upload_id);
+  for (const uploadId of uploadIds) {
+    if (uploadId !== null) {
+      await deleteOfflineUploadByApi(page, uploadId);
+    }
   }
 }
 
-// 업로드 폼(파일 input + provider/dataset/scope/created_by + submit)을 채우고 제출한 뒤
+async function canonicalProviderDatasetId(page: Page): Promise<number> {
+  const response = await browserFetch<OpsDatasetsGridResponse>(
+    page,
+    "/v1/ops/datasets",
+  );
+  expect(response.status).toBe(200);
+  const row = response.body?.data.items.find(
+    (item) => item.catalog_state === "canonical" && item.mutable,
+  );
+  expect(row, "offline upload live E2E에는 mutable canonical provider dataset이 필요합니다.").toBeDefined();
+  return row?.provider_dataset_id as number;
+}
+
+// 업로드 폼(파일 input + canonical provider dataset ID/scope + submit)을 채운 뒤
 // POST 응답을 그대로 돌려준다. 성공(201)/중복(409)/검증실패(422)를 호출부에서
 // 분기하도록 status 단언은 하지 않는다(읽기는 readWriteResponse로).
 async function submitUploadForm(
   page: Page,
   options: {
     body: string;
-    datasetKey: string;
     filename: string;
     mimeType?: string;
-    provider: string;
+    providerDatasetId: number;
   },
 ): Promise<Response> {
   await page.getByTestId("offline-upload-file-input").setInputFiles({
@@ -206,23 +205,24 @@ async function submitUploadForm(
     mimeType: options.mimeType ?? "application/x-ndjson",
     name: options.filename,
   });
-  await page.getByLabel("provider", { exact: true }).fill(options.provider);
-  await page.getByLabel("dataset key", { exact: true }).fill(options.datasetKey);
+  await page
+    .getByLabel("provider dataset ID", { exact: true })
+    .fill(String(options.providerDatasetId));
   await page.getByLabel("sync scope", { exact: true }).fill("default");
-  await page.getByLabel("created by", { exact: true }).fill("local-admin");
 
   const responsePromise = waitForApiResponse(page, "POST", listPath());
   await page.getByTestId("offline-upload-submit").click();
   return responsePromise;
 }
 
-// provider(+선택적 status)로 서버 목록을 직접 읽어 backend 필터/정렬을 검증한다.
-async function listUploadsByProvider(
+// canonical provider dataset ID(+선택적 status)로 서버 목록을 직접 읽어
+// backend 필터/정렬을 검증한다.
+async function listUploadsByProviderDatasetId(
   page: Page,
-  provider: string,
+  providerDatasetId: number,
   status?: string,
 ): Promise<OfflineUploadListResponse | null> {
-  let path = `${listPath()}?provider=${encodeURIComponent(provider)}&page_size=200`;
+  let path = `${listPath()}?provider_dataset_id=${providerDatasetId}&page_size=200`;
   if (status !== undefined) {
     path += `&status=${encodeURIComponent(status)}`;
   }
@@ -242,6 +242,7 @@ test.describe("/admin/offline-uploads live write workflow", () => {
 
     let uploadId: string | null = null;
     let checksum: string | null = null;
+    let providerDatasetId: number | null = null;
     let deleted = false;
 
     try {
@@ -253,10 +254,11 @@ test.describe("/admin/offline-uploads live write workflow", () => {
           mimeType: "application/x-ndjson",
           name: FILENAME,
         });
-        await page.getByLabel("provider", { exact: true }).fill(PROVIDER);
-        await page.getByLabel("dataset key", { exact: true }).fill(DATASET_KEY);
+        providerDatasetId = await canonicalProviderDatasetId(page);
+        await page
+          .getByLabel("provider dataset ID", { exact: true })
+          .fill(String(providerDatasetId));
         await page.getByLabel("sync scope", { exact: true }).fill("default");
-        await page.getByLabel("created by", { exact: true }).fill("local-admin");
 
         const responsePromise = waitForApiResponse(
           page,
@@ -270,10 +272,9 @@ test.describe("/admin/offline-uploads live write workflow", () => {
         checksum = createResponse.data.checksum_sha256;
         expect(uploadId).toBeTruthy();
         expect(createResponse.data).toMatchObject({
-          dataset_key: DATASET_KEY,
           detected_format: "jsonl",
           original_filename: FILENAME,
-          provider: PROVIDER,
+          provider_dataset_id: providerDatasetId,
           status: "uploaded",
           storage_backend: "rustfs",
           sync_scope: "default",
@@ -295,19 +296,19 @@ test.describe("/admin/offline-uploads live write workflow", () => {
         const detail = await fetchOfflineUpload(page, uploadId as string);
         expect(detail.status).toBe(200);
         expect(detail.body?.data).toMatchObject({
-          dataset_key: DATASET_KEY,
-          provider: PROVIDER,
+          provider_dataset_id: providerDatasetId,
           upload_id: uploadId as string,
         });
       });
 
-      await test.step("목록을 provider로 필터하면 새 업로드 row가 상태/포맷과 함께 보인다", async () => {
-        await page.getByLabel("provider filter").fill(PROVIDER);
+      await test.step("목록을 canonical ID로 필터하면 새 업로드 row가 상태/포맷과 함께 보인다", async () => {
+        await page
+          .getByLabel("provider dataset ID filter")
+          .fill(String(providerDatasetId));
 
         const row = page.getByTestId("offline-upload-row");
         await expect(row).toHaveCount(1, T);
-        await expect(row).toContainText(PROVIDER);
-        await expect(row).toContainText(DATASET_KEY);
+        await expect(row).toContainText(`#${providerDatasetId}`);
         // status badge는 statusLabel로 한글 렌더된다('uploaded'→'업로드됨'). status
         // <select>의 숨은 <option>은 영어 원문이므로 row scope으로 좁혀 한글 badge만 단언한다.
         await expect(row.getByText("업로드됨")).toBeVisible(T);
@@ -348,20 +349,19 @@ test.describe("/admin/offline-uploads live write workflow", () => {
           }, T)
           .toBe(404);
 
-        // UI reflection: provider 필터가 여전히 걸려 있어 목록이 비고 empty 메시지가 뜬다.
+        // UI reflection: canonical ID 필터가 유지되어 목록이 비고 empty 메시지가 뜬다.
         await expect(page.getByTestId("offline-upload-row")).toHaveCount(0, T);
         await expect(page.getByText("offline upload가 없습니다.")).toBeVisible(T);
       });
     } finally {
-      // UI 삭제가 확정되지 않았으면(중간 실패 포함) PROVIDER 전수 sweep으로 정리한다.
-      // uploadId 캡처 여부와 무관하게 이 run이 만든 row를 모두 제거해 leak을 막는다.
+      // UI 삭제가 확정되지 않았으면(중간 실패 포함) 응답에서 받은 row만 정리한다.
       if (!deleted) {
-        await sweepOfflineUploadsByProvider(page, PROVIDER);
+        await deleteKnownOfflineUploads(page, [uploadId]);
       }
     }
   });
 
-  test("같은 provider로 여러 업로드를 만들면 목록이 최신 생성순(created_at DESC)으로 정렬되고 provider 필터가 정확히 격리한다", async ({
+  test("같은 provider dataset으로 여러 업로드를 만들면 목록이 최신 생성순(created_at DESC)으로 정렬되고 canonical ID 필터가 정확히 격리한다", async ({
     page,
   }) => {
     test.skip(
@@ -372,19 +372,19 @@ test.describe("/admin/offline-uploads live write workflow", () => {
 
     const tags = ["multi-1", "multi-2", "multi-3"];
     const createdIds: string[] = [];
+    let providerDatasetId: number | null = null;
 
     try {
-      await test.step("같은 provider로 3개의 JSONL 업로드를 순차 생성한다", async () => {
+      await test.step("같은 provider dataset으로 3개의 JSONL 업로드를 순차 생성한다", async () => {
         await gotoOfflineUploads(page);
+        providerDatasetId = await canonicalProviderDatasetId(page);
         for (const tag of tags) {
           const response = await submitUploadForm(page, {
             body: fileBody(tag),
-            datasetKey: DATASET_KEY,
             filename: uploadFilename(tag),
-            provider: PROVIDER_MULTI,
+            providerDatasetId: providerDatasetId as number,
           });
           const created = await readWriteResponse(response);
-          expect(created.data.provider).toBe(PROVIDER_MULTI);
           expect(created.data.original_filename).toBe(uploadFilename(tag));
           expect(created.data.status).toBe("uploaded");
           createdIds.push(created.data.upload_id);
@@ -394,7 +394,11 @@ test.describe("/admin/offline-uploads live write workflow", () => {
       });
 
       await test.step("API 목록이 최신 생성 업로드를 먼저 반환한다(created_at DESC)", async () => {
-        const body = await listUploadsByProvider(page, PROVIDER_MULTI, "uploaded");
+        const body = await listUploadsByProviderDatasetId(
+          page,
+          providerDatasetId as number,
+          "uploaded",
+        );
         const items = body?.data.items ?? [];
         expect(items.map((item) => item.original_filename)).toEqual([
           uploadFilename("multi-3"),
@@ -410,7 +414,9 @@ test.describe("/admin/offline-uploads live write workflow", () => {
       });
 
       await test.step("UI 목록도 같은 순서로 3개 row를 렌더한다", async () => {
-        await page.getByLabel("provider filter").fill(PROVIDER_MULTI);
+        await page
+          .getByLabel("provider dataset ID filter")
+          .fill(String(providerDatasetId));
         const rows = page.getByTestId("offline-upload-row");
         await expect(rows).toHaveCount(3, T);
         await expect(page.getByText("3 rows")).toBeVisible(T);
@@ -418,7 +424,7 @@ test.describe("/admin/offline-uploads live write workflow", () => {
         await expect(rows.nth(2)).toContainText(uploadFilename("multi-1"));
       });
     } finally {
-      await sweepOfflineUploadsByProvider(page, PROVIDER_MULTI);
+      await deleteKnownOfflineUploads(page, createdIds);
     }
   });
 
@@ -432,15 +438,16 @@ test.describe("/admin/offline-uploads live write workflow", () => {
     test.setTimeout(FLOW_TIMEOUT);
 
     let uploadId: string | null = null;
+    let providerDatasetId: number | null = null;
 
     try {
       await test.step("status 라운드트립 검증용 업로드 1건을 생성한다", async () => {
         await gotoOfflineUploads(page);
+        providerDatasetId = await canonicalProviderDatasetId(page);
         const response = await submitUploadForm(page, {
           body: fileBody("status-1"),
-          datasetKey: DATASET_KEY,
           filename: uploadFilename("status-1"),
-          provider: PROVIDER_STATUS,
+          providerDatasetId: providerDatasetId as number,
         });
         const created = await readWriteResponse(response);
         uploadId = created.data.upload_id;
@@ -449,16 +456,26 @@ test.describe("/admin/offline-uploads live write workflow", () => {
 
       await test.step("backend status 쿼리 파라미터가 실제로 필터링한다", async () => {
         // 일치하는 status(uploaded)는 우리 업로드를, 불일치 status(loaded)는 0건을 반환.
-        const uploadedList = await listUploadsByProvider(page, PROVIDER_STATUS, "uploaded");
+        const uploadedList = await listUploadsByProviderDatasetId(
+          page,
+          providerDatasetId as number,
+          "uploaded",
+        );
         expect((uploadedList?.data.items ?? []).map((item) => item.upload_id)).toEqual([
           uploadId,
         ]);
-        const loadedList = await listUploadsByProvider(page, PROVIDER_STATUS, "loaded");
+        const loadedList = await listUploadsByProviderDatasetId(
+          page,
+          providerDatasetId as number,
+          "loaded",
+        );
         expect(loadedList?.data.items ?? []).toHaveLength(0);
       });
 
       await test.step("UI status select를 바꾸면 목록이 backend 결과를 반영한다", async () => {
-        await page.getByLabel("provider filter").fill(PROVIDER_STATUS);
+        await page
+          .getByLabel("provider dataset ID filter")
+          .fill(String(providerDatasetId));
         // 기본 status=uploaded → 우리 업로드 1건이 status badge(한글 '업로드됨')와 함께 보인다.
         await expect(page.getByTestId("offline-upload-row")).toHaveCount(1, T);
         await expect(page.getByText("1 rows")).toBeVisible(T);
@@ -477,7 +494,7 @@ test.describe("/admin/offline-uploads live write workflow", () => {
         await expect(page.getByTestId("offline-upload-row")).toHaveCount(1, T);
       });
     } finally {
-      await sweepOfflineUploadsByProvider(page, PROVIDER_STATUS);
+      await deleteKnownOfflineUploads(page, [uploadId]);
     }
   });
 
@@ -489,33 +506,36 @@ test.describe("/admin/offline-uploads live write workflow", () => {
       "E2E_OFFLINE_UPLOAD_WRITE=1 또는 E2E_ADMIN_WRITE=1일 때만 실제 offline upload write flow를 실행",
     );
     test.setTimeout(FLOW_TIMEOUT);
+    let providerDatasetId: number | null = null;
 
-    try {
-      await test.step(".txt 파일을 제출하면 서버가 422로 거절한다", async () => {
-        await gotoOfflineUploads(page);
-        // detected_format이 None이라 OFFLINE_UPLOAD_WRITEABLE_FORMATS(json/jsonl/csv/tsv)에
-        // 없으므로 라우터가 본문을 읽기 전에 422로 거절한다.
-        const response = await submitUploadForm(page, {
-          body: "this is not a feature bundle\n",
-          datasetKey: DATASET_KEY,
-          filename: `e2e-${RUN_ID}-invalid.txt`,
-          mimeType: "text/plain",
-          provider: PROVIDER_INVALID,
-        });
-        expect(response.status()).toBe(422);
-
-        // UI reflection: 업로드 실패 destructive alert.
-        await expect(page.getByText("업로드 실패")).toBeVisible(T);
+    await test.step(".txt 파일을 제출하면 서버가 422로 거절한다", async () => {
+      await gotoOfflineUploads(page);
+      providerDatasetId = await canonicalProviderDatasetId(page);
+      // detected_format이 None이라 OFFLINE_UPLOAD_WRITEABLE_FORMATS(json/jsonl/csv/tsv)에
+      // 없으므로 라우터가 본문을 읽기 전에 422로 거절한다.
+      const response = await submitUploadForm(page, {
+        body: "this is not a feature bundle\n",
+        filename: `e2e-${RUN_ID}-invalid.txt`,
+        mimeType: "text/plain",
+        providerDatasetId: providerDatasetId as number,
       });
+      expect(response.status()).toBe(422);
 
-      await test.step("거절된 업로드는 목록/백엔드에 만들어지지 않는다", async () => {
-        const body = await listUploadsByProvider(page, PROVIDER_INVALID);
-        expect(body?.data.items ?? []).toHaveLength(0);
-      });
-    } finally {
-      // 422라 row가 없어야 하지만, 회귀로 누수돼도 정리되도록 방어적으로 sweep.
-      await sweepOfflineUploadsByProvider(page, PROVIDER_INVALID);
-    }
+      // UI reflection: 업로드 실패 destructive alert.
+      await expect(page.getByText("업로드 실패")).toBeVisible(T);
+    });
+
+    await test.step("거절된 파일명은 해당 canonical ID 목록에 남지 않는다", async () => {
+      const body = await listUploadsByProviderDatasetId(
+        page,
+        providerDatasetId as number,
+      );
+      expect(
+        (body?.data.items ?? []).some(
+          (item) => item.original_filename === `e2e-${RUN_ID}-invalid.txt`,
+        ),
+      ).toBe(false);
+    });
   });
 
   test("중복 checksum 업로드는 409로 막히고, 삭제로 가드가 풀린 뒤 같은 내용을 새 upload_id로 재생성할 수 있다", async ({
@@ -533,15 +553,16 @@ test.describe("/admin/offline-uploads live write workflow", () => {
     let firstUploadId: string | null = null;
     let firstChecksum: string | null = null;
     let secondUploadId: string | null = null;
+    let providerDatasetId: number | null = null;
 
     try {
       await test.step("첫 업로드를 생성한다", async () => {
         await gotoOfflineUploads(page);
+        providerDatasetId = await canonicalProviderDatasetId(page);
         const response = await submitUploadForm(page, {
           body: dupBody,
-          datasetKey: DATASET_KEY,
           filename: dupFilename,
-          provider: PROVIDER_DUP,
+          providerDatasetId: providerDatasetId as number,
         });
         const created = await readWriteResponse(response);
         firstUploadId = created.data.upload_id;
@@ -549,12 +570,11 @@ test.describe("/admin/offline-uploads live write workflow", () => {
         expect(firstChecksum).toBeTruthy();
       });
 
-      await test.step("동일 provider/dataset/scope/checksum 재업로드는 409 OFFLINE_UPLOAD_DUPLICATE", async () => {
+      await test.step("동일 provider dataset/scope/checksum 재업로드는 409 OFFLINE_UPLOAD_DUPLICATE", async () => {
         const response = await submitUploadForm(page, {
           body: dupBody,
-          datasetKey: DATASET_KEY,
           filename: dupFilename,
-          provider: PROVIDER_DUP,
+          providerDatasetId: providerDatasetId as number,
         });
         expect(response.status()).toBe(409);
         expect(await response.text()).toContain("OFFLINE_UPLOAD_DUPLICATE");
@@ -562,14 +582,20 @@ test.describe("/admin/offline-uploads live write workflow", () => {
       });
 
       await test.step("중복은 persist 되지 않아 backend에는 여전히 첫 업로드 1건만 있다", async () => {
-        const body = await listUploadsByProvider(page, PROVIDER_DUP, "uploaded");
+        const body = await listUploadsByProviderDatasetId(
+          page,
+          providerDatasetId as number,
+          "uploaded",
+        );
         expect((body?.data.items ?? []).map((item) => item.upload_id)).toEqual([
           firstUploadId,
         ]);
       });
 
       await test.step("row 삭제 버튼으로 첫 업로드를 제거한다", async () => {
-        await page.getByLabel("provider filter").fill(PROVIDER_DUP);
+        await page
+          .getByLabel("provider dataset ID filter")
+          .fill(String(providerDatasetId));
         const row = page.getByTestId("offline-upload-row");
         await expect(row).toHaveCount(1, T);
 
@@ -600,9 +626,8 @@ test.describe("/admin/offline-uploads live write workflow", () => {
       await test.step("삭제로 멱등 가드가 풀려 같은 내용을 새 upload_id로 다시 만들 수 있다", async () => {
         const response = await submitUploadForm(page, {
           body: dupBody,
-          datasetKey: DATASET_KEY,
           filename: dupFilename,
-          provider: PROVIDER_DUP,
+          providerDatasetId: providerDatasetId as number,
         });
         const recreated = await readWriteResponse(response);
         secondUploadId = recreated.data.upload_id;
@@ -615,19 +640,22 @@ test.describe("/admin/offline-uploads live write workflow", () => {
         expect(detail.status).toBe(200);
         expect(detail.body?.data.status).toBe("uploaded");
 
-        // UI reflection: provider 필터가 걸린 목록에 1건이 다시 보인다.
+        // UI reflection: canonical ID 필터가 걸린 목록에 1건이 다시 보인다.
         await expect(page.getByTestId("offline-upload-row")).toHaveCount(1, T);
         await expect(page.getByTestId("offline-upload-row")).toContainText(dupFilename);
 
         // backend 목록도 재생성본 1건만 반환.
-        const body = await listUploadsByProvider(page, PROVIDER_DUP, "uploaded");
+        const body = await listUploadsByProviderDatasetId(
+          page,
+          providerDatasetId as number,
+          "uploaded",
+        );
         expect((body?.data.items ?? []).map((item) => item.upload_id)).toEqual([
           secondUploadId,
         ]);
       });
     } finally {
-      // 첫/재생성 업로드 모두(누수 포함) provider 전수 sweep으로 정리.
-      await sweepOfflineUploadsByProvider(page, PROVIDER_DUP);
+      await deleteKnownOfflineUploads(page, [firstUploadId, secondUploadId]);
     }
   });
 });

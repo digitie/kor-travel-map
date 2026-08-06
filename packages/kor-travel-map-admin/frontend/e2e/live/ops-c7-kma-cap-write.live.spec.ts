@@ -7,6 +7,7 @@ import {
 
 import {
   KMA_DATASET_KEY,
+  KMA_NOWCAST_OPERATION_KEY,
   KMA_PROVIDER,
   assertKmaDagsterWorkerJobDefinition,
   assertExactKmaPreviewResponse,
@@ -20,6 +21,7 @@ import {
   getExactDatasetDetail,
   putTrackedTarget,
   previewBody,
+  resolveKmaProviderDatasetId,
   requireBody,
   runCreateDeleteCanary,
   submitTrackedUiKmaCreate,
@@ -48,6 +50,7 @@ test.describe.configure({ mode: "serial", retries: 0 });
 
 async function createCapRequestFromUi(
   page: Page,
+  providerDatasetId: number,
   syncScope: string,
   reason: string,
   state: ReturnType<typeof createCleanupState>,
@@ -61,13 +64,10 @@ async function createCapRequestFromUi(
     name: "갱신 요청 생성",
     exact: true,
   });
-  await dialog.getByLabel("provider", { exact: true }).fill(KMA_PROVIDER);
   await dialog
-    .getByLabel("dataset_key", { exact: true })
-    .fill(KMA_DATASET_KEY);
-  await dialog
-    .getByLabel("sync_scope (선택)", { exact: true })
-    .fill(syncScope);
+    .getByLabel("대상 데이터셋", { exact: true })
+    .selectOption(String(providerDatasetId));
+  await dialog.getByLabel("sync_scope", { exact: true }).selectOption(syncScope);
   const previewResponsePromise = page.waitForResponse((response) => {
     return (
       response.request().method() === "POST" &&
@@ -80,6 +80,7 @@ async function createCapRequestFromUi(
     .click();
   const expectedPreview = previewBody(
     buildKmaRequest(
+      providerDatasetId,
       syncScope.slice("external_system:".length),
       reason,
     ),
@@ -95,7 +96,7 @@ async function createCapRequestFromUi(
   await dialog.getByRole("checkbox", { name: /dry-run/ }).uncheck();
   await dialog.getByLabel("사유", { exact: true }).fill(reason);
   const externalSystem = syncScope.slice("external_system:".length);
-  const expectedBody = buildKmaRequest(externalSystem, reason);
+  const expectedBody = buildKmaRequest(providerDatasetId, externalSystem, reason);
   const { created, recovered } = await submitTrackedUiKmaCreate(
     page,
     state,
@@ -132,7 +133,7 @@ async function assertCapFailureFromUi(
   syncScope: string,
   requestId: string,
 ): Promise<void> {
-  await page.goto(exactDatasetUiPath(syncScope));
+  await page.goto(await exactDatasetUiPath(page, syncScope));
   const region = page.getByRole("region", {
     name: `${KMA_PROVIDER}/${KMA_DATASET_KEY} 상세`,
     exact: true,
@@ -216,6 +217,7 @@ test.describe("C7 KMA grid cap destructive live E2E", () => {
     const state = createCleanupState("cap", RUN_ID);
     await bootstrapC7SameOriginPage(page, "/ops/pipeline");
     await assertKmaDagsterWorkerJobDefinition();
+    const providerDatasetId = await resolveKmaProviderDatasetId(page);
 
     await withC7Cleanup(
       page,
@@ -279,6 +281,7 @@ test.describe("C7 KMA grid cap destructive live E2E", () => {
 
         const created = await createCapRequestFromUi(
           page,
+          providerDatasetId,
           syncScope,
           `C7 ${RUN_ID} runtime cap ${cap}`,
           state,
@@ -292,7 +295,15 @@ test.describe("C7 KMA grid cap destructive live E2E", () => {
           state,
         );
         expect(terminal.data.execution.status).toBe("failed");
-        assertKmaOnlyTerminalProviderScopes(terminal, { executed: "empty" });
+        assertKmaOnlyTerminalProviderScopes(
+          terminal,
+          {
+            operationKey: KMA_NOWCAST_OPERATION_KEY,
+            providerDatasetId,
+            syncScope,
+          },
+          { executed: "empty" },
+        );
         expect(terminal.data.execution.error_message).toContain(
           "KmaWeatherGridLimitExceeded",
         );
