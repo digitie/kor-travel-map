@@ -135,7 +135,8 @@ async def _seed_exact_pre_cutover_surface(dsn: str) -> None:
                 text(
                     """
                     INSERT INTO feature.features (
-                        feature_id, kind, name, category, marker_icon, marker_color
+                        feature_id, kind, name, category, marker_icon, marker_color,
+                        detail
                     )
                     SELECT
                         'f_h35_source_' || value::text,
@@ -143,7 +144,13 @@ async def _seed_exact_pre_cutover_surface(dsn: str) -> None:
                         'H35 source fixture ' || value::text,
                         '01070100',
                         'place',
-                        'P-01'
+                        'P-01',
+                        -- place는 ``place_kind``를 갖는다(PlaceDetail 필수) — 0084가
+                        -- 이 fixture를 typed subtype으로 옮길 때 NOT NULL이 된다.
+                        jsonb_build_object(
+                            'feature_id', 'f_h35_source_' || value::text,
+                            'place_kind', 'attraction'
+                        )
                     FROM generate_series(1, :count) AS value
                     """
                 ),
@@ -153,7 +160,8 @@ async def _seed_exact_pre_cutover_surface(dsn: str) -> None:
                 text(
                     """
                     INSERT INTO feature.features (
-                        feature_id, kind, name, category, marker_icon, marker_color
+                        feature_id, kind, name, category, marker_icon, marker_color,
+                        detail
                     )
                     SELECT DISTINCT
                         feature_id,
@@ -161,7 +169,10 @@ async def _seed_exact_pre_cutover_surface(dsn: str) -> None:
                         'H35 CSV fixture ' || feature_id,
                         '01070100',
                         'place',
-                        'P-01'
+                        'P-01',
+                        jsonb_build_object(
+                            'feature_id', feature_id, 'place_kind', 'attraction'
+                        )
                     FROM unnest(CAST(:feature_ids AS text[])) AS feature_id
                     ON CONFLICT (feature_id) DO NOTHING
                     """

@@ -156,9 +156,8 @@ SELECT count(*), min(valid_at), max(valid_at)
 FROM feature.feature_weather_values WHERE valid_at < now() - interval '3 years';
 
 -- notice: 1년 이상 만료된 row가 있는가?
-SELECT count(*) FROM feature.feature_notice_details d
-JOIN feature.features f USING (feature_id)
-WHERE f.kind='notice' AND d.valid_end_time < now() - interval '1 year';
+SELECT count(*) FROM feature.feature_notices
+WHERE valid_end_time < now() - interval '1 year';
 ```
 
 count가 0이 아니면 purge job이 멈춰 있을 가능성 — kor-travel-map Dagster asset 점검.

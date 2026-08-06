@@ -36,7 +36,6 @@ def _feature_row(feature_id: str) -> FeatureRow:
         category="01070300",
         coord=WKTElement("POINT(126.9769 37.5759)", srid=4326),
         address={"road": "서울특별시 종로구 세종대로 1"},
-        detail={"place_kind": "attraction"},
         urls={},
         raw_refs=[],
         status="active",

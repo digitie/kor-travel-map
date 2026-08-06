@@ -53,6 +53,74 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-08-06 (1) — T-VN-35 A-D: kind별 typed subtype 분해 (ADR-086)
+
+- `feature.features`의 `detail` JSONB·`geom`을 **제거**하고 kind별 typed
+  subtype 5종(`feature_places`/`_events`/`_notices`/`_routes`/`_areas`)으로
+  분해. 응답용 `detail`/`geom`은 `feature.features_detailed` 뷰가 조립한다 —
+  값이 두 곳에 있지 않으므로 drift라는 개념이 사라진다(shadow 병행 폐기).
+  alembic 0084→0086, 세 revision 모두 단일 트랜잭션.
+- **배타 arc**: core `UNIQUE(feature_id, kind)` + subtype `kind` 상수 CHECK +
+  `(feature_id, kind)` 복합 FK. 한 feature는 최대 한 subtype에만 존재하고,
+  subtype 행이 있는 동안 **core kind 변경이 FK 위반으로 막힌다** — provider
+  upsert의 `kind = EXCLUDED.kind`가 kind를 조용히 바꾸던 구멍(실측)이 코드
+  규율이 아니라 DB 계약으로 닫혔다. 35B "혼합 kind row 거부"의 구현.
+- **원안 재해석 2건**(근거 실측): point subtype 미생성(coord는 4개 kind 공유라
+  kind 상수 CHECK 불가 → 배타 arc 파괴, place 96.6%·event 82% non-null이라 거의
+  모든 read가 조인 강제) · `parent_feature_id`/`sibling_group_id` core 유지
+  (prod 사용 0행). price/weather subtype도 미생성(detail 전수 `{}`).
+- **무손실 실증**(prod 복원본 731,765행, head→0083→head 왕복): place 729,972 ·
+  event 1,246 · price 97 · weather 305 = **731,620행 md5 바이트 동일**, notice
+  `valid_start_time` **145/145 동일**, 시각 외 notice 필드 전부 동일.
+  마이그레이션 실측 시간: 전진 54s·역행 4m55s·재전진 1m10s.
+- 대조가 결함 3건을 잡았다 — `jsonb_strip_nulls`의 중첩 null 소실,
+  `EventDetail.sigungu_code` 컬럼 누락, **세션 TimeZone 의존성**
+  (`to_jsonb(timestamptz)`가 GUC로 렌더 — 같은 공지가 Asia/Seoul `+09:00`,
+  UTC `+00:00`, America/New_York `-04:00`). KST 고정 렌더로 해소.
+- **notice 시간 CHECK는 두지 않는다**: provider가 미래 시행 공지를 철회하면
+  end < start가 실재한다(실측 `start=2026-07-13/end=2026-06-02`) — CHECK를
+  걸면 KREX notice ETL asset이 죽는다. `EventDetail`은 순서를 실제로 강제하므로
+  event 쪽에만 CHECK를 둔다. 즉 "DTO 불변식이 있는 곳에만 CHECK".
+- **적대 리뷰 2인 반영(P0×2·P1×6·P2×6)**. 가장 큰 둘:
+  ① create validator가 정규화 결과를 `object.__setattr__`로 되꽂아
+  `model_dump(exclude_unset=True)`에서 통째로 빠졌다 — 즉 정규화가 **한 번도
+  반영되지 않았고** detail 없는 생성은 500, review 모드에선 그 change request가
+  영구 승인 불가였다. 계약 판정을 write 경계(`subtype_params`, kind DTO 검증)
+  하나로 모으고 위반은 `SubtypeDetailError`→422로 옮겼다.
+  ② 0086이 geometry 없는 route/area를 조용히 건너뛴 뒤 `DROP COLUMN detail`을
+  해서 **복구 불가능한 소실**이 됐다. 0084~0086에 선점검을 넣어 위반 행의
+  feature_id와 함께 멈춘다(실패는 되돌릴 수 있고 소실은 되돌릴 수 없다).
+- 죽은 인덱스 2종(`idx_features_yt_*`)은 이관하지 않는다 — 옛 경로에 값이 있는
+  행이 prod **0건**(실제 위치는 `detail.payload.…` 1,481행)이고, 경로를 고쳐도
+  유일한 소비자 `detail_selector`는 경로가 런타임 값이라 매칭 불가다.
+- 성능: 술어는 subtype GiST를 타야 한다(뷰 컬럼을 술어에 쓰면 Hash Left Join
+  2단 퇴화 — EXPLAIN 실측). admin bbox **4158ms → 411ms**.
+- 응답 스키마는 user·service **바이트 동일**. admin은 `AdminFeature*Request`의
+  `geom` 제거(받아서 payload에 넣고 적용하지 않던 필드) + create description.
+- 배포 선행: orchestrator `.env`의 `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`를
+  `0087_route_area_subtypes`로 올려야 한다(안 올리면 api가 DB를 건드리기 전에
+  exit 1이고 dagster/daemon도 뜨지 않는다).
+- 문서에만 존재하던 테이블 5종(`feature_place_details` 등, 참조 0건)을 제거했다.
+  `feature_places`가 실제로 생기면서 이름이 겹쳐 purge·복구 런북 SQL이 위험해졌다.
+- 배터리 판정 주의: `test_domain_command_ledger`의 docker fence 2건은
+  **origin/main도 같이 실패**한다(같은 조건 baseline 2 failed / 23 passed 동일 —
+  이 박스의 docker-in-docker 문제). `test_batch_dag.py`는 격리 실행에서 전량
+  통과하고 전체 스위트 동시 실행에서만 흔들린다(docker.sock 경합).
+  `test_h35_exact_surface_network_free_rehearsal`도 main에서 같이 실패한다 —
+  "외부 접속 없음" socket guard가 컨테이너 안 testcontainers의 bridge IP를
+  외부로 판정한다(CI는 localhost라 무관).
+- **진짜 회귀 1건**(CI 통합 job에서도 동일 재현): `test_batch_dag` 5건이
+  consistency 게이트에 막혔다. 뿌리는 `test_admin_feature_repo`의 잠금
+  테스트가 rollback이 아니라 **커밋**한다는 것 — `migrated_engine`은 session
+  scope 공유 DB다. 종전엔 core 행에 `detail`이 딸려 남았지만 subtype 전환 뒤엔
+  core만 남아 세션 내내 F2("subtype 결측") 위반으로 떠 있었고, 뒤따르는 batch
+  DAG의 게이트가 mv_refresh를 막았다. 모듈 쌍 bisect로 확정(그 조합만 5건
+  재현, 나머지 3조합 전부 통과). 프로덕션 writer가 core+subtype을 한
+  트랜잭션에서 쓰므로 시드도 그렇게 맞췄다 — **F2 축 자체는 옳으므로 완화하지
+  않았다**.
+- 겸사겸사 게이트 실패 메시지가 막은 축의 코드·건수·표본 id를 남기게 했다.
+  `severity_max=ERROR`만으로는 운영자가 무엇을 고쳐야 할지 알 수 없고 그동안
+  배치가 멈춰 있게 된다.
 ## 2026-08-06 (3) — T-VN-41F1J-A: response-loss 재개 증빙 보강
 
 Manager 적대적 리뷰가 PinVi cancel HTTP 응답이 유실된 뒤 Map `consumed` state를 읽어도 journal에

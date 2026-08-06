@@ -9,6 +9,7 @@ from typing import Annotated, Any, Literal, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from kortravelmap.core import make_feature_id
+from kortravelmap.dto import EventDetail, PlaceDetail
 from kortravelmap.infra import curation_repo, feature_identity, price_repo, weather_repo
 from kortravelmap.infra.admin_feature_repo import (
     AdminFeatureDetail,
@@ -38,7 +39,14 @@ from kortravelmap.infra.admin_feature_repo import (
     reject_feature_change_request,
     submit_feature_change_request,
 )
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api.auth import (
@@ -86,6 +94,12 @@ router = APIRouter(prefix="/admin/features", tags=["admin-features"])
 
 _PHONE_RE = re.compile(r"^\+?[0-9][0-9()\-\s]{6,24}$")
 _HTTP_URL_RE = re.compile(r"^https?://[^\s/$.?#].[^\s]*$")
+
+#: kind별 detail 정본 모델 (T-VN-35 — subtype 컬럼 계약과 같은 원천).
+_DETAIL_MODEL_BY_KIND: dict[str, type[BaseModel]] = {
+    "place": PlaceDetail,
+    "event": EventDetail,
+}
 
 AdminFeatureSort = Literal[
     "name",
@@ -304,7 +318,10 @@ class AdminFeatureBaseMutation(BaseModel):
     category: str | None = Field(default=None, pattern=r"^\d{8}$")
     coord: AdminFeatureCoordInput | None = None
     coord_precision_digits: int | None = Field(default=None, ge=3, le=8)
-    geom: str | None = None
+    # ``geom``은 받지 않는다 — admin mutation은 place/event만 다루고, geometry
+    # 정본은 route/area subtype뿐이다(ADR-086). 종전엔 필드를 받아 change
+    # request payload에 넣기까지 했지만 적용 단계에서 **아무 데도 쓰지 않았다** —
+    # 받아 놓고 버리는 필드는 계약이 아니라 거짓말이다.
     address: dict[str, Any] | None = None
     legal_dong_code: str | None = Field(default=None, pattern=r"^\d{10}$")
     road_name_code: str | None = Field(default=None, pattern=r"^\d{7,12}$")
@@ -360,8 +377,43 @@ class AdminFeatureBaseMutation(BaseModel):
         return value
 
 
+_DETAIL_VALIDATION_PLACEHOLDER_ID = "f_validation_placeholder"
+
+
+def _reject_detail_not_matching_kind(kind: str, detail: dict[str, Any] | None) -> None:
+    """detail이 kind 계약에 맞는지 **경계에서 미리** 확인한다 (T-VN-35, ADR-086).
+
+    정본 판정은 write 경계(``feature_subtype.subtype_params``)가 갖는다 — 여기서
+    값을 고쳐 넣지 않는 이유가 그것이다. 종전 구현은 정규화한 detail을
+    ``object.__setattr__``로 되꽂았는데, 그건 pydantic의 ``__pydantic_fields_set__``
+    을 건드리지 않아 뒤이은 ``model_dump(exclude_unset=True)``에서 **통째로
+    빠졌다** — 즉 정규화가 실제로는 한 번도 payload에 반영되지 않았다.
+
+    이 함수의 값어치는 다른 데 있다: 검토(review) 모드에서 잘못된 detail이
+    **접수될 때** 422로 막힌다는 것. 그러지 않으면 승인 시점에야 터져서 그
+    change request는 영구히 승인 불가가 된다.
+    """
+    model = _DETAIL_MODEL_BY_KIND.get(kind)
+    if model is None:
+        return
+    payload = dict(detail or {})
+    payload.setdefault("feature_id", _DETAIL_VALIDATION_PLACEHOLDER_ID)
+    try:
+        model.model_validate(payload)
+    except ValidationError as exc:
+        raise ValueError(f"detail이 kind={kind} 계약과 맞지 않습니다: {exc}") from exc
+
+
+# ``detail``은 kind별 typed subtype으로 저장되므로(T-VN-35, ADR-086) 생성
+# 요청은 DTO 정본으로 검증·정규화한다 — 계약 문서에 내부 근거를 싣지 않도록
+# docstring이 아니라 여기 주석으로 남긴다.
 class AdminFeatureCreateRequest(AdminFeatureBaseMutation):
-    """``POST /admin/features`` body."""
+    """``POST /admin/features`` body.
+
+    ``detail``은 kind 계약(place/event)에 맞아야 한다 — DTO에 없는 키는
+    거부되므로 provider 원문은 ``detail.payload`` 아래 둔다. 생략하면 kind
+    기본값으로 채운다. 맞지 않으면 422다.
+    """
 
     feature_id: str | None = Field(
         default=None,
@@ -390,6 +442,12 @@ class AdminFeatureCreateRequest(AdminFeatureBaseMutation):
         default=None,
         description="feature_id 미지정 시 source_natural_key로 쓰는 caller-provided key.",
     )
+
+    @model_validator(mode="after")
+    def _detail_matches_kind(self) -> AdminFeatureCreateRequest:
+        # detail 미전송도 허용한다 — write 경계가 DTO 기본값으로 채운다.
+        _reject_detail_not_matching_kind(self.kind, self.detail)
+        return self
 
 
 class AdminFeaturePatchRequest(AdminFeatureBaseMutation):

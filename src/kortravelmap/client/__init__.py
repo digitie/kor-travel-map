@@ -1012,7 +1012,9 @@ class AsyncKorTravelMapClient:
 
         기존 변환 정책 보정용 메서드다. ``provider``/``dataset_key``/
         ``source_entity_type``으로 primary source를 한정하고, 실제 feature 조건은
-        ``kind='area' AND geom IS NULL``로 제한한다. 한 transaction.
+        ``kind='area'`` + ``feature.feature_areas`` 행 부재로 제한한다
+        (ADR-086 이후 geometry 정본은 area subtype이고 core ``geom``은 없다).
+        한 transaction.
         """
         async with self._session_factory() as session, session.begin():
             return await inactivate_geometryless_area_features_by_source(

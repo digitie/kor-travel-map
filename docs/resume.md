@@ -32,6 +32,25 @@ storage head를 attest하고 reset 뒤 migration을 증명한다.
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-08-06 (1) — T-VN-35 A-D 병합 (kind별 typed subtype 분해, ADR-086)
+
+`feature.features`의 `detail` JSONB·`geom`을 제거하고 kind별 typed subtype 5종으로
+분해했다. 배타 arc(core `UNIQUE(feature_id, kind)` + subtype `kind` 상수 CHECK +
+복합 FK)가 "한 feature는 최대 한 subtype"과 "subtype이 있는 동안 core kind 불변"을
+구조적으로 강제한다. 응답용 `detail`/`geom`은 `feature.features_detailed` 뷰가
+조립한다 — 값이 두 곳에 없으므로 drift라는 개념이 사라진다.
+
+무손실 실증(prod 복원본 731,765행, head→0083→head 왕복): place·event·price·weather
+**731,620행 md5 바이트 동일**, notice `valid_start_time` 145/145 동일. 적대 리뷰 2인
+P0×2·P1×6·P2×6 전량 반영. alembic `0085`→`0086`→`0087`(main의 `0084_c6c_cancel_probe_
+fixtures` 뒤), ADR은 codex와 두 번 겹쳐 084→085→**086**으로 밀렸다.
+
+**다음 한 작업**: 배포 — orchestrator `.env`의
+`KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`를 **`0087_route_area_subtypes`**로 선행
+갱신(안 하면 api가 DB를 건드리기 전에 exit 1이고 dagster/daemon도 뜨지 않는다) →
+api → dagster/daemon 재빌드. 그 뒤 Lane A 잔여 `T-VN-37A`(notice `tstzrange` —
+35B가 남긴 자리, empty range가 "발효 전 철회"를 정확히 표현한다).
+
 ## 2026-08-06 — T-VN-41F1J-A Map fixture 구현·검증·적대 리뷰 완료, PR 게이트 중
 
 `0084_c6c_cancel_probe_fixtures`가 transaction별 fixture/job, canonical cancellation

@@ -36,6 +36,8 @@ from kortravelmap.infra.models import (
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
 
+from tests.integration._subtype_seed import seed_feature_subtype
+
 pytestmark = pytest.mark.integration
 
 _NOW = datetime(2026, 6, 3, 10, 0, tzinfo=UTC)
@@ -54,7 +56,6 @@ def _feature_row(
         category="01070300",
         coord=WKTElement("POINT(126.9769 37.5759)", srid=4326),
         address={"road": "서울특별시 종로구 세종대로 1"},
-        detail={"place_kind": "attraction"},
         urls={},
         raw_refs=[],
         status=status,
@@ -251,7 +252,9 @@ async def test_user_update_version_overrides_provider_reload(
             "road_name_code": "111104100001",
             "admin_dong_code": "1111051500",
             "urls": {"homepage": "https://example.test/user-feature"},
-            "detail": {"note": "사용자 수정"},
+            # T-VN-35(ADR-086): admin detail도 kind별 typed 컬럼으로 들어가므로
+            # 필수 필드(place_kind)를 갖춘 shape이어야 한다. 자유 키는 payload로.
+            "detail": {"place_kind": "attraction", "payload": {"note": "사용자 수정"}},
         },
         review_mode="immediate",
         reason="사용자 제보 반영",
@@ -268,7 +271,10 @@ async def test_user_update_version_overrides_provider_reload(
         feature_id=feature_id,
         payload={
             "name": "사용자 수정 이름 2",
-            "detail": {"note": "사용자 수정 2"},
+            "detail": {
+                "place_kind": "attraction",
+                "payload": {"note": "사용자 수정 2"},
+            },
         },
         review_mode="immediate",
         reason="사용자 제보 추가 반영",
@@ -289,7 +295,7 @@ async def test_user_update_version_overrides_provider_reload(
                 SELECT
                     name, road_name_code, admin_dong_code, urls, detail,
                     data_origin, data_version, user_change_kind
-                FROM feature.features
+                FROM feature.features_detailed
                 WHERE feature_id = :feature_id
                 """
             ),
@@ -300,7 +306,7 @@ async def test_user_update_version_overrides_provider_reload(
     assert row["road_name_code"] == "111104100001"
     assert row["admin_dong_code"] == "1111051500"
     assert row["urls"]["homepage"] == "https://example.test/user-feature"
-    assert row["detail"]["note"] == "사용자 수정 2"
+    assert row["detail"]["payload"]["note"] == "사용자 수정 2"
     assert row["data_origin"] == "user_request"
     assert row["data_version"] == 2
     assert row["user_change_kind"] == "update"
@@ -518,6 +524,11 @@ async def test_merge_dedup_review_explicit_master_locks_review_row(
         session.add(_feature_row("feature-admin-lock-a", name="잠금 A"))
         session.add(_feature_row("feature-admin-lock-b", name="잠금 B"))
         await session.flush()
+        # 이 블록은 rollback이 아니라 **커밋**된다(세션 공유 DB). subtype 없는
+        # core 행을 남기면 뒤따르는 테스트의 consistency 게이트(F2 — subtype 결측)가
+        # 막힌다. 프로덕션 writer는 두 쓰기를 한 트랜잭션에서 하므로, 시드도 그렇게 한다.
+        for locked_id in ("feature-admin-lock-a", "feature-admin-lock-b"):
+            await seed_feature_subtype(session, feature_id=locked_id, kind="place")
         review = DedupReviewQueueRow(
             feature_id_a="feature-admin-lock-a",
             feature_id_b="feature-admin-lock-b",

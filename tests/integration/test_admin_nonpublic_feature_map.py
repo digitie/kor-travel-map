@@ -18,6 +18,7 @@ from kortravelmap.infra import (
     price_repo,
     weather_repo,
 )
+from tests.integration._subtype_seed import seed_feature_subtype
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -52,7 +53,7 @@ async def _insert_feature(
         text(
             """
             INSERT INTO feature.features (
-                feature_id, kind, name, category, coord, geom, status,
+                feature_id, kind, name, category, coord, status,
                 sido_code, sigungu_code, legal_dong_code, updated_at,
                 deleted_at, user_deleted_at
             ) VALUES (
@@ -60,10 +61,6 @@ async def _insert_feature(
                 CASE WHEN CAST(:lon AS double precision) IS NULL THEN NULL
                      ELSE x_extension.ST_SetSRID(
                          x_extension.ST_MakePoint(:lon, :lat), 4326
-                     ) END,
-                CASE WHEN CAST(:geom_wkt AS text) IS NULL THEN NULL
-                     ELSE x_extension.ST_SetSRID(
-                         x_extension.ST_GeomFromText(:geom_wkt), 4326
                      ) END,
                 :status, '11', '11110', '1111010100', :updated_at,
                 :deleted_at, :user_deleted_at
@@ -75,12 +72,15 @@ async def _insert_feature(
             "kind": kind,
             "lon": lon,
             "lat": lat,
-            "geom_wkt": geom_wkt,
             "status": status,
             "updated_at": _NOW,
             "deleted_at": deleted_at,
             "user_deleted_at": user_deleted_at,
         },
+    )
+    # T-VN-35(ADR-086): kind별 값·geometry의 정본은 subtype이다.
+    await seed_feature_subtype(
+        session, feature_id=feature_id, kind=kind, geom_wkt=geom_wkt
     )
 
 
@@ -211,7 +211,8 @@ async def test_admin_bbox_geometry_membership_is_serialization_only(
     assert [row["feature_id"] for row in light] == ["admin-map-hidden-route"]
     assert [row["feature_id"] for row in geometry] == ["admin-map-hidden-route"]
     assert light[0]["geometry"] is None
-    assert geometry[0]["geometry"]["type"] == "LineString"
+    # T-VN-35: subtype 컬럼 타입이 MultiLineString이라 단일 선분도 Multi로 승격된다.
+    assert geometry[0]["geometry"]["type"] in {"LineString", "MultiLineString"}
     assert _BBOX["min_lon"] <= light[0]["lon"] <= _BBOX["max_lon"]
     assert _BBOX["min_lat"] <= light[0]["lat"] <= _BBOX["max_lat"]
 

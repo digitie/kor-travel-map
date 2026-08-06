@@ -31,7 +31,7 @@ feature로 승격하는 ETL의 Step B 좁은 가이드다. 폐업/취소/제외 
 | dataset_key | `mois_license_features_bulk` |
 | Feature.kind | `place` |
 | source_entity_type | `license_place` |
-| 상세 테이블 | `feature_place_details` |
+| 상세 테이블 | `feature_places` |
 | 코드 entrypoint | `kortravelmap.providers.mois` (변환), `kortravelmap.mois` (loader) |
 | 갱신 주기 | 주 1회 (full update) |
 

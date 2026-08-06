@@ -764,7 +764,6 @@ async def test_ops_integrity_issues_q_and_bbox_filters(
             category="01070300",
             coord=WKTElement("POINT(126.9769 37.5759)", srid=4326),
             address={"road": "서울특별시 종로구 세종대로 1"},
-            detail={},
             urls={},
             raw_refs=[],
             status="active",

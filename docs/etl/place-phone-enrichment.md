@@ -24,7 +24,7 @@ Search Local / Google Places Text Search(New)로 보강하는 ETL이다.
 | 실행 소유 | PinVi (Dagster) 또는 admin trigger |
 | 기준 코드 | `kortravelmap.places`, `kortravelmap.load_feature_rows` |
 | Feature.kind | `place` (보강 only — 새 feature 생성 X) |
-| 상세 테이블 | `feature_place_details` |
+| 상세 테이블 | `feature_places` |
 | dataset_key | `place_phone_enrichment` |
 | source_role | `enrichment` |
 | category | **변경 없음** — 본 ETL은 기존 `place` feature의 `phones`만 보강. `features.category`는 그대로 유지 (`docs/architecture/category.md` §4 참고). 새 feature 생성 X, 카테고리 재할당 X |

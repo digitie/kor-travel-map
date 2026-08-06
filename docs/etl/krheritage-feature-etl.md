@@ -22,7 +22,7 @@ feature로 적재하는 ETL이다.
 | dataset_key (GIS) | `krheritage_gis_spca`, `krheritage_gis_3070426` |
 | Feature.kind | `place`, `area`, `event` |
 | source_entity_type | `heritage`, `heritage_event` |
-| 상세 테이블 | `feature_place_details`, `feature_area_details`, `feature_event_details`, `feature_files` |
+| 상세 테이블 | `feature_places`, `feature_areas`, `feature_events`, `feature_files` |
 | 코드 entrypoint | `kortravelmap.providers.krheritage`, `kortravelmap.heritage` |
 | 갱신 주기 (place/area) | 주 1회 |
 | 갱신 주기 (event) | 1일 1회 |
@@ -97,7 +97,8 @@ def _classify_heritage_kind(item) -> FeatureKind:
 - `area_square_meters`: 면적 (m²)
 - `regulation_scope`: 보호/규제 범위
 - `administrative_office`: 관리기관
-- `features.geom`: GIS `GeoFeature.geometry`를 PostGIS MultiPolygon으로
+- `feature.feature_areas.geom`: GIS `GeoFeature.geometry`를 PostGIS MultiPolygon으로
+  (`MULTIPOLYGON(4326)` NOT NULL, ADR-086)
 
 ### 5.3 event (`EventDetail`)
 
@@ -253,7 +254,7 @@ DATA_GO_KR_SERVICE_KEY=...               # data.go.kr 통합 키
 ### 14.2 통합 테스트
 
 - place/area kind 판정 (`_classify_heritage_kind`) 분기 전수 검증
-- area의 GeoJSON → `features.geom` PostGIS MULTIPOLYGON 적재
+- area의 GeoJSON → `feature.feature_areas.geom` PostGIS MULTIPOLYGON 적재
 - GIS spca 응답으로 area 면적 보강 (`area_square_meters` 갱신)
 
 ## 15. 후속

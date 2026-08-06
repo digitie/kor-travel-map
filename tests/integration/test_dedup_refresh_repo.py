@@ -113,7 +113,6 @@ async def _seed_feature(
             category=_CAT,
             coord=WKTElement("POINT(129.3320 35.7900)", srid=4326),
             coord_precision_digits=coord_precision_digits,
-            detail={"summary": "dedup refresh"},
             status="active",
             created_at=_T1,
             updated_at=updated_at,

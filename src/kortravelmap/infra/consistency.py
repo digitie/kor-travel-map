@@ -139,13 +139,29 @@ CONSISTENCY_CASES: Final[tuple[CaseSpec, ...]] = (
     CaseSpec(
         code="F2",
         severity="ERROR",
-        description="detail 누락 (detail-bearing kind인데 detail JSONB 비어있음, ADR-018)",
+        description=(
+            "subtype 행 결측 (subtype-bearing kind인데 typed subtype 행이 없음, "
+            "ADR-086)"
+        ),
+        # T-VN-35: 종전 축("detail JSONB가 비어 있음")은 core detail이 사라져
+        # 성립하지 않는다. 조립 뷰는 subtype 행이 없어도 NULL 필드로 채운
+        # 객체를 내므로 '{}' 술어는 영원히 0건이 된다 — 탐지 능력을 잃는
+        # 대신, 같은 결함의 **정확한 축**인 subtype 결측을 본다(배타 arc가
+        # 구조적으로 막지만 replica-mode 우회가 남는다 — 0083 identity 4축과
+        # 같은 성격의 보상 관측).
         sql=(
             "SELECT f.feature_id AS id "
             "FROM feature.features f "
+            "LEFT JOIN ("
+            "  SELECT feature_id FROM feature.feature_places "
+            "  UNION ALL SELECT feature_id FROM feature.feature_events "
+            "  UNION ALL SELECT feature_id FROM feature.feature_notices "
+            "  UNION ALL SELECT feature_id FROM feature.feature_routes "
+            "  UNION ALL SELECT feature_id FROM feature.feature_areas "
+            ") AS s ON s.feature_id = f.feature_id "
             "WHERE f.deleted_at IS NULL "
             f"  AND f.kind IN ({_DETAIL_KINDS_SQL}) "
-            "  AND (f.detail IS NULL OR f.detail = '{}'::jsonb)"
+            "  AND s.feature_id IS NULL"
         ),
     ),
     CaseSpec(
@@ -168,35 +184,44 @@ CONSISTENCY_CASES: Final[tuple[CaseSpec, ...]] = (
         severity="ERROR",
         description=("opening_hours 모순 (같은 요일 period에서 open.time > close.time, ADR-019)"),
         sql=(
+            # T-VN-35: opening_hours 보유 kind는 place(business_hours)와
+            # event(opening_hours) 둘뿐이다 — 각 subtype 컬럼을 직접 읽어
+            # ``idx_feature_places_opening_hours`` partial index가 후보를
+            # 좁히게 한다(종전 core detail 표현식 인덱스의 대체).
             "WITH candidate_features AS ("
-            "  SELECT f.feature_id, f.detail "
-            "  FROM feature.features f "
-            "  WHERE f.deleted_at IS NULL "
-            "    AND f.detail IS NOT NULL "
-            "    AND f.detail <> '{}'::jsonb "
-            "    AND f.detail ?| ARRAY['business_hours','opening_hours']"
+            "  SELECT p.feature_id, "
+            "         jsonb_build_object('business_hours', p.business_hours) AS hours "
+            "  FROM feature.feature_places p "
+            "  JOIN feature.features f ON f.feature_id = p.feature_id "
+            "  WHERE f.deleted_at IS NULL AND p.business_hours IS NOT NULL "
+            "  UNION ALL "
+            "  SELECT e.feature_id, "
+            "         jsonb_build_object('opening_hours', e.opening_hours) AS hours "
+            "  FROM feature.feature_events e "
+            "  JOIN feature.features f ON f.feature_id = e.feature_id "
+            "  WHERE f.deleted_at IS NULL AND e.opening_hours IS NOT NULL"
             "), opening_periods AS ("
-            "  SELECT f.feature_id, periods.period "
-            "  FROM candidate_features f "
+            "  SELECT c.feature_id, periods.period "
+            "  FROM candidate_features c "
             "  CROSS JOIN LATERAL ("
             "    SELECT period "
             "    FROM jsonb_path_query("
-            "      f.detail, '$.business_hours.periods[*] ? (@.close != null)'"
+            "      c.hours, '$.business_hours.periods[*] ? (@.close != null)'"
             "    ) AS period "
             "    UNION ALL "
             "    SELECT period "
             "    FROM jsonb_path_query("
-            "      f.detail, '$.opening_hours.periods[*] ? (@.close != null)'"
+            "      c.hours, '$.opening_hours.periods[*] ? (@.close != null)'"
             "    ) AS period "
             "    UNION ALL "
             "    SELECT period "
             "    FROM jsonb_path_query("
-            "      f.detail, '$.business_hours.special_days[*].periods[*] ? (@.close != null)'"
+            "      c.hours, '$.business_hours.special_days[*].periods[*] ? (@.close != null)'"
             "    ) AS period "
             "    UNION ALL "
             "    SELECT period "
             "    FROM jsonb_path_query("
-            "      f.detail, '$.opening_hours.special_days[*].periods[*] ? (@.close != null)'"
+            "      c.hours, '$.opening_hours.special_days[*].periods[*] ? (@.close != null)'"
             "    ) AS period "
             "  ) AS periods "
             ") "

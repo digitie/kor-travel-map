@@ -75,7 +75,7 @@ CREATE TABLE feature.features (
            ELSE ST_Transform(coord, 5179)
       END
     ) STORED,
-  geom                         geometry(Geometry, 4326), -- route LINESTRING / area MULTIPOLYGON
+  -- 선·면 geometry는 core에 없다 — route/area subtype이 정본 (§6, ADR-086)
 
   -- 주소 (kortravelmap.dto.Address 직렬화)
   address                      JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -96,7 +96,8 @@ CREATE TABLE feature.features (
   sibling_group_id             UUID,
 
   -- 상세
-  detail                       JSONB NOT NULL DEFAULT '{}'::jsonb,  -- Pydantic DETAIL_MODELS 직렬화 (ADR-018)
+  -- kind별 detail도 core에 없다 — typed subtype이 정본이고, 응답이 요구하는
+  -- detail/geom은 feature.features_detailed 뷰가 조립한다 (§6, ADR-086)
   raw_refs                     JSONB NOT NULL DEFAULT '[]'::jsonb,
   status                       TEXT NOT NULL DEFAULT 'active',      -- FeatureStatus enum
 
@@ -114,6 +115,7 @@ CREATE TABLE feature.features (
   updated_at                   TIMESTAMPTZ NOT NULL DEFAULT now(),
   deleted_at                   TIMESTAMPTZ,
 
+  CONSTRAINT uq_features_identity_kind UNIQUE (feature_id, kind),  -- subtype 배타 arc의 참조 대상 (ADR-086)
   CONSTRAINT ck_features_kind   CHECK (kind IN ('place','event','notice','price','weather','route','area')),
   CONSTRAINT ck_features_status CHECK (status IN ('draft','active','inactive','hidden','broken','deleted')),
   CONSTRAINT ck_features_data_origin CHECK (data_origin IN ('provider','user_request')),
@@ -155,7 +157,6 @@ CREATE TRIGGER trg_features_coord_precision
 -- 표준 인덱스 (성능 설계 — docs/architecture/performance.md 참고)
 CREATE INDEX idx_features_coord_gist        ON feature.features USING GIST (coord)       WHERE deleted_at IS NULL;
 CREATE INDEX idx_features_coord_5179_gist   ON feature.features USING GIST (coord_5179)  WHERE deleted_at IS NULL;
-CREATE INDEX idx_features_geom_gist         ON feature.features USING GIST (geom)        WHERE deleted_at IS NULL AND geom IS NOT NULL;
 CREATE INDEX idx_features_kind_category     ON feature.features (kind, category)         WHERE deleted_at IS NULL;
 CREATE INDEX idx_features_status_updated    ON feature.features (status, updated_at);
 CREATE INDEX idx_features_dedup_refresh_keyset
@@ -168,14 +169,6 @@ CREATE INDEX idx_features_sibling           ON feature.features (sibling_group_i
 CREATE INDEX idx_features_name_trgm         ON feature.features USING GIN (name x_extension.gin_trgm_ops);
 CREATE INDEX idx_features_data_origin       ON feature.features (data_origin, data_version);
 CREATE INDEX idx_features_user_deleted      ON feature.features (user_deleted_at)        WHERE user_deleted_at IS NOT NULL;
-
--- 부분 인덱스 (자주 쓰는 필터)
-CREATE INDEX idx_features_event_end
-  ON feature.features (((detail->>'ends_on')::date))
-  WHERE kind='event' AND deleted_at IS NULL;
-CREATE INDEX idx_features_notice_valid
-  ON feature.features (((detail->>'valid_end_time')::timestamptz))
-  WHERE kind='notice' AND deleted_at IS NULL;
 ```
 
 **인덱스 설계 근거**:
@@ -188,12 +181,13 @@ CREATE INDEX idx_features_notice_valid
   row이고, snapshot 보존은 `feature.feature_versions`가 맡는다.
 - `user_deleted_at` — 사용자 요청 soft delete marker. provider 재적재나 snapshot 미포함
   정리 작업은 이 값이 있는 row를 되살리지 않는다.
-- `geom_gist` — route LINESTRING / area MULTIPOLYGON 교차/포함 검색.
 - `kind_category WHERE deleted_at IS NULL` — `/features/in-bounds` 주된 필터.
 - `idx_features_dedup_refresh_keyset` — dedup refresh가 `(updated_at, feature_id)`
   keyset으로 진행하며 같은 앞부분만 반복 조회하지 않도록 한다.
 - `name_trgm GIN` — pg_trgm 부분 문자열 검색 (검색 페이지).
-- 부분 인덱스 `(event_end)`, `(notice_valid)` — 진행중/유효 필터를 자주 사용.
+- 진행중 행사/유효 공지, 선·면 geometry 필터는 core가 아니라 §6의 subtype 인덱스가 맡는다.
+- `uq_features_identity_kind` — 그 자체로는 아무 것도 강제하지 않고, subtype의 복합 FK가
+  참조할 수 있게 만드는 전제다 (§6).
 
 ### 1.1 `feature.feature_versions`
 
@@ -861,116 +855,211 @@ CREATE INDEX idx_feature_files_feature_order  ON feature.feature_files (feature_
 CREATE INDEX idx_feature_files_provider       ON feature.feature_files (provider, dataset_key) WHERE provider IS NOT NULL;
 ```
 
-## 6. kind별 detail 테이블
+## 6. kind별 typed subtype 테이블
 
-### 6.1 `feature.feature_place_details`
+kind별 값의 정본은 core가 아니라 typed subtype 테이블이다(ADR-086). core가
+`UNIQUE (feature_id, kind)`를 갖고 각 subtype이 kind 상수 CHECK + `(feature_id, kind)`
+복합 FK로 core를 참조하는 **배타 arc**이며, 여기서 두 성질이 구조적으로 따라온다 —
+① 한 feature는 최대 한 subtype에만 존재한다(core kind가 단일 값이므로) ② subtype 행이
+있는 동안 **core `kind` 변경이 FK 위반으로 막힌다**.
+
+모든 subtype이 공유하는 제약 3종:
+
+- `PRIMARY KEY (feature_id)` — core와 1:1.
+- `CHECK (kind = '<해당 kind>')` — 배타 arc의 상수 축.
+- `FOREIGN KEY (feature_id, kind)` → `feature.features (feature_id, kind)`와
+  `FOREIGN KEY (feature_id, feature_uuid)` → `feature.features (feature_id, feature_uuid)`.
+  뒤쪽은 `feature_aliases`와 같은 identity 사본 일치 계약이고, 둘 다 `ON DELETE CASCADE`다.
+
+price/weather subtype은 **두지 않는다** — detail이 비어 있고 값 정본은
+`feature.feature_price_values`/`feature_weather_values`가 이미 소유한다(§8). 빈 테이블은
+단일 정본 원칙 위반이다.
+
+### 6.1 `feature.feature_places`
 
 ```sql
-CREATE TABLE feature.feature_place_details (
-  feature_id              TEXT PRIMARY KEY REFERENCES feature.features(feature_id) ON DELETE CASCADE,
-  place_kind              TEXT NOT NULL DEFAULT 'place',
-  phones                  JSONB NOT NULL DEFAULT '[]'::jsonb,
-  reviews_link            JSONB NOT NULL DEFAULT '{}'::jsonb,
+CREATE TABLE feature.feature_places (
+  feature_id              TEXT NOT NULL,
+  feature_uuid            UUID NOT NULL,
+  kind                    TEXT NOT NULL,
+  place_kind              TEXT NOT NULL,
+  phones                  TEXT[] NOT NULL DEFAULT '{}'::text[],   -- PlaceDetail.phones (≤3)
+  biz_number              TEXT,
+  license_date            DATE,
   business_hours          JSONB,
   facility_info           JSONB NOT NULL DEFAULT '{}'::jsonb,
-  license_date            DATE,
-  biz_number              TEXT,
+  reviews_link            JSONB NOT NULL DEFAULT '{}'::jsonb,
   payload                 JSONB NOT NULL DEFAULT '{}'::jsonb,
-  CONSTRAINT ck_place_phones_len CHECK (jsonb_typeof(phones)='array' AND jsonb_array_length(phones) <= 3)
+  CONSTRAINT pk_feature_places PRIMARY KEY (feature_id),
+  CONSTRAINT ck_feature_places_kind CHECK (kind = 'place'),
+  CONSTRAINT fk_feature_places_feature_kind
+    FOREIGN KEY (feature_id, kind)
+    REFERENCES feature.features (feature_id, kind) ON DELETE CASCADE,
+  CONSTRAINT fk_feature_places_identity_pair
+    FOREIGN KEY (feature_id, feature_uuid)
+    REFERENCES feature.features (feature_id, feature_uuid) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_place_kind       ON feature.feature_place_details (place_kind);
-CREATE INDEX idx_place_biz_number ON feature.feature_place_details (biz_number) WHERE biz_number IS NOT NULL;
+CREATE INDEX idx_feature_places_opening_hours
+  ON feature.feature_places (feature_id) WHERE business_hours IS NOT NULL;
 ```
 
-### 6.2 `feature.feature_event_details`
+### 6.2 `feature.feature_events`
 
 ```sql
-CREATE TABLE feature.feature_event_details (
-  feature_id        TEXT PRIMARY KEY REFERENCES feature.features(feature_id) ON DELETE CASCADE,
-  event_kind        TEXT NOT NULL DEFAULT 'festival',
-  starts_on         DATE,
-  ends_on           DATE,
-  timezone          TEXT NOT NULL DEFAULT 'Asia/Seoul',
-  venue_name        TEXT,
-  tel               TEXT,
-  content_id        TEXT,
-  content_type_id   TEXT,
-  area_code         TEXT,
-  sigungu_code      TEXT,
-  payload           JSONB NOT NULL DEFAULT '{}'::jsonb,
-  CONSTRAINT ck_event_dates CHECK (starts_on IS NULL OR ends_on IS NULL OR ends_on >= starts_on)
+CREATE TABLE feature.feature_events (
+  feature_id              TEXT NOT NULL,
+  feature_uuid            UUID NOT NULL,
+  kind                    TEXT NOT NULL,
+  event_kind              TEXT NOT NULL,
+  starts_on               DATE,
+  ends_on                 DATE,
+  timezone                TEXT NOT NULL DEFAULT 'Asia/Seoul',
+  opening_hours           JSONB,
+  venue_name              TEXT,
+  tel                     TEXT,
+  content_id              TEXT,
+  content_type_id         TEXT,
+  area_code               TEXT,
+  sigungu_code            TEXT,
+  payload                 JSONB NOT NULL DEFAULT '{}'::jsonb,
+  CONSTRAINT pk_feature_events PRIMARY KEY (feature_id),
+  CONSTRAINT ck_feature_events_kind CHECK (kind = 'event'),
+  CONSTRAINT ck_feature_events_period
+    CHECK (starts_on IS NULL OR ends_on IS NULL OR starts_on <= ends_on)
+  -- + 공통 복합 FK 2종 (§6 도입부)
 );
 
-CREATE INDEX idx_event_dates       ON feature.feature_event_details (starts_on, ends_on);
-CREATE INDEX idx_event_kind        ON feature.feature_event_details (event_kind);
-CREATE INDEX idx_event_content_id  ON feature.feature_event_details (content_id) WHERE content_id IS NOT NULL;
+CREATE INDEX idx_feature_events_period
+  ON feature.feature_events (starts_on, ends_on);
+CREATE INDEX idx_feature_events_opening_hours
+  ON feature.feature_events (feature_id) WHERE opening_hours IS NOT NULL;
 ```
 
-### 6.3 `feature.feature_area_details`
+`idx_feature_events_period`의 선두는 `ends_on`이 아니라 `starts_on`이다 — 공개 festival
+경로가 `starts_on`으로 범위·keyset·`ORDER BY`를 건다. 질의가 `ends_on IS NULL`을 명시적으로
+포함하므로 그 행을 빼는 부분 조건도 두지 않는다.
+
+### 6.3 `feature.feature_notices`
 
 ```sql
-CREATE TABLE feature.feature_area_details (
-  feature_id              TEXT PRIMARY KEY REFERENCES feature.features(feature_id) ON DELETE CASCADE,
-  area_kind               TEXT NOT NULL DEFAULT 'area',  -- 'area' | 'national_park' | 'provincial_park' | 'recreation_forest' | 'tourism_district' | 'beach' | 'campsite' | 'heritage_area' | 'natural_heritage_area' | 'buried_heritage_area' | 'hazard_zone' (ADR-027) | 'other'
+CREATE TABLE feature.feature_notices (
+  feature_id              TEXT NOT NULL,
+  feature_uuid            UUID NOT NULL,
+  kind                    TEXT NOT NULL,
+  notice_type             TEXT NOT NULL,
+  severity                SMALLINT,
+  valid_start_time        TIMESTAMPTZ,
+  valid_end_time          TIMESTAMPTZ,
+  source_agency           TEXT,
+  officer_name            TEXT,
+  payload                 JSONB NOT NULL DEFAULT '{}'::jsonb,
+  CONSTRAINT pk_feature_notices PRIMARY KEY (feature_id),
+  CONSTRAINT ck_feature_notices_kind CHECK (kind = 'notice'),
+  CONSTRAINT ck_feature_notices_severity
+    CHECK (severity IS NULL OR severity BETWEEN 0 AND 5)
+  -- + 공통 복합 FK 2종 (§6 도입부)
+);
+
+CREATE INDEX idx_feature_notices_validity
+  ON feature.feature_notices (valid_end_time, valid_start_time);
+```
+
+유효기간은 typed `timestamptz`다 — read 필터가 문자열 파싱이나 방어용 cast 없이 직접
+비교한다. **`valid_start_time <= valid_end_time` CHECK는 두지 않는다**: provider가 미래
+발효 공고를 공표한 뒤 발효 전에 내리면 lifecycle이 `valid_end_time=철회시각`을 써
+`end < start`가 되며, 이는 "발효 전에 철회됨"이라는 정당한 사실이지 결함이 아니다.
+CHECK는 DTO가 실제로 강제하는 불변식(§6.2 event 기간)에만 둔다.
+
+### 6.4 `feature.feature_routes`
+
+```sql
+CREATE TABLE feature.feature_routes (
+  feature_id                 TEXT NOT NULL,
+  feature_uuid               UUID NOT NULL,
+  kind                       TEXT NOT NULL,
+  geom                       geometry(MultiLineString, 4326) NOT NULL,
+  route_type                 TEXT NOT NULL,
+  geometry_source            TEXT,
+  geometry_status            TEXT,        -- 'provided', 'missing_route_geometry'
+  total_distance_meters      NUMERIC,
+  expected_duration_minutes  INTEGER,
+  difficulty                 TEXT,
+  begin_name                 TEXT,
+  begin_address              TEXT,
+  end_name                   TEXT,
+  end_address                TEXT,
+  payload                    JSONB NOT NULL DEFAULT '{}'::jsonb,
+  CONSTRAINT pk_feature_routes PRIMARY KEY (feature_id),
+  CONSTRAINT ck_feature_routes_kind CHECK (kind = 'route')
+  -- + 공통 복합 FK 2종 (§6 도입부)
+);
+
+CREATE INDEX idx_feature_routes_geom_gist
+  ON feature.feature_routes USING GIST (geom);
+```
+
+### 6.5 `feature.feature_areas`
+
+```sql
+CREATE TABLE feature.feature_areas (
+  feature_id              TEXT NOT NULL,
+  feature_uuid            UUID NOT NULL,
+  kind                    TEXT NOT NULL,
+  geom                    geometry(MultiPolygon, 4326) NOT NULL,
+  area_kind               TEXT NOT NULL,  -- 'area' | 'national_park' | 'provincial_park' | 'recreation_forest' | 'tourism_district' | 'beach' | 'campsite' | 'heritage_area' | 'natural_heritage_area' | 'buried_heritage_area' | 'hazard_zone' (ADR-027) | 'protected_area' | 'other'
   boundary_source         TEXT,
-  area_square_meters      NUMERIC(18,4),
+  area_square_meters      NUMERIC,
   regulation_scope        TEXT,
   administrative_office   TEXT,
   description             TEXT,
-  geometry                JSONB,                      -- geom 컬럼은 features.geom; 본 컬럼은 부가
-  payload                 JSONB NOT NULL DEFAULT '{}'::jsonb  -- hazard_zone일 때 {"hazard_type": "rockfall|flash_flood|wildlife|...", "domain": "forest|coastal|..."} (ADR-027)
+  payload                 JSONB NOT NULL DEFAULT '{}'::jsonb,  -- hazard_zone일 때 {"hazard_type": "rockfall|flash_flood|wildlife|...", "domain": "forest|coastal|..."} (ADR-027)
+  CONSTRAINT pk_feature_areas PRIMARY KEY (feature_id),
+  CONSTRAINT ck_feature_areas_kind CHECK (kind = 'area')
+  -- + 공통 복합 FK 2종 (§6 도입부)
 );
 
-CREATE INDEX idx_area_kind            ON feature.feature_area_details (area_kind);
-CREATE INDEX idx_area_boundary_source ON feature.feature_area_details (boundary_source) WHERE boundary_source IS NOT NULL;
+CREATE INDEX idx_feature_areas_geom_gist
+  ON feature.feature_areas USING GIST (geom);
 ```
 
-### 6.4 `feature.feature_route_details`
+geometry 정본은 route/area subtype뿐이고 두 컬럼 모두 **NOT NULL**이다 — "geometry가
+필수인 kind"와 "없어야 하는 kind"가 술어가 아니라 테이블 구조로 갈린다. `Feature` DTO도
+같은 계약이라 다른 kind에 `geom`을 실으면 구성 시점에 거부된다.
+
+### 6.6 `feature.features_detailed` (조립 뷰)
+
+응답이 요구하는 `detail`/`geom`은 뷰 `feature.features_detailed`가 core + subtype 5종에서
+조립한다. 조립 규칙이 한 곳에만 존재하고 writer는 subtype에만 쓴다. 아래는 구조 요약이고,
+kind별 `jsonb_build_object` 전문은 alembic `0087_route_area_subtypes`가 정본이다.
 
 ```sql
-CREATE TABLE feature.feature_route_details (
-  feature_id                  TEXT PRIMARY KEY REFERENCES feature.features(feature_id) ON DELETE CASCADE,
-  route_type                  TEXT NOT NULL DEFAULT 'route',
-  geometry_source             TEXT,
-  geometry_status             TEXT,                   -- 'provided', 'missing_route_geometry'
-  total_distance_meters       NUMERIC(14,2),
-  expected_duration_minutes   INTEGER,
-  difficulty                  TEXT,
-  begin_name                  TEXT,
-  begin_address               TEXT,
-  end_name                    TEXT,
-  end_address                 TEXT,
-  payload                     JSONB NOT NULL DEFAULT '{}'::jsonb,
-  CONSTRAINT ck_route_distance CHECK (total_distance_meters IS NULL OR total_distance_meters >= 0),
-  CONSTRAINT ck_route_duration CHECK (expected_duration_minutes IS NULL OR expected_duration_minutes > 0)
-);
+CREATE VIEW feature.features_detailed AS
+SELECT f.*,                                     -- core 전 컬럼
+       COALESCE(r.geom, a.geom) AS geom,
+       COALESCE(<kind별 jsonb_build_object(...)>, '{}'::jsonb) AS detail
+FROM feature.features AS f
+LEFT JOIN feature.feature_places  AS p ON p.feature_id = f.feature_id
+LEFT JOIN feature.feature_events  AS e ON e.feature_id = f.feature_id
+LEFT JOIN feature.feature_notices AS n ON n.feature_id = f.feature_id
+LEFT JOIN feature.feature_routes  AS r ON r.feature_id = f.feature_id
+LEFT JOIN feature.feature_areas   AS a ON a.feature_id = f.feature_id;
 
-CREATE INDEX idx_route_type            ON feature.feature_route_details (route_type);
-CREATE INDEX idx_route_geometry_status ON feature.feature_route_details (geometry_status);
+CREATE VIEW feature.public_features AS      -- ADR-067 단일 공개 projection
+SELECT * FROM feature.features_detailed
+WHERE status = 'active' AND deleted_at IS NULL;
 ```
 
-### 6.5 `feature.feature_notice_details`
-
-```sql
-CREATE TABLE feature.feature_notice_details (
-  feature_id          TEXT PRIMARY KEY REFERENCES feature.features(feature_id) ON DELETE CASCADE,
-  notice_type         TEXT NOT NULL,
-  severity            SMALLINT,
-  valid_start_time    TIMESTAMPTZ,
-  valid_end_time      TIMESTAMPTZ,
-  source_agency       TEXT,
-  officer_name        TEXT,
-  payload             JSONB NOT NULL DEFAULT '{}'::jsonb,
-  CONSTRAINT ck_notice_severity CHECK (severity IS NULL OR severity BETWEEN 0 AND 5),
-  CONSTRAINT ck_notice_time_range CHECK (valid_start_time IS NULL OR valid_end_time IS NULL OR valid_end_time >= valid_start_time)
-);
-
-CREATE INDEX idx_notice_type         ON feature.feature_notice_details (notice_type);
-CREATE INDEX idx_notice_type_valid   ON feature.feature_notice_details (notice_type, valid_start_time, valid_end_time);
-CREATE INDEX idx_notice_valid_start  ON feature.feature_notice_details (valid_start_time);
-CREATE INDEX idx_notice_source_agency ON feature.feature_notice_details (source_agency) WHERE source_agency IS NOT NULL;
-```
+- `detail` 조립은 **원본 바이트와 동등**해야 한다(전수 md5 대조로 고정). NULL 키를
+  보존하므로 `jsonb_strip_nulls`를 쓰지 않는다 — 재귀적이라 `payload`/`facility_info`
+  내부의 정당한 null까지 지운다. price/weather는 CASE 미매치 → `{}`가 된다.
+- notice의 시각은 KST 고정 렌더(`to_char … AT TIME ZONE 'Asia/Seoul'`, 마이크로초가 0이면
+  생략)로 조립한다. `to_jsonb(timestamptz)`를 그대로 쓰면 문자열이 세션 `TimeZone` GUC에
+  의존해 서버 설정이 다른 인스턴스가 같은 공지에 다른 값을 돌려준다.
+- read 경로는 `FROM feature.features`를 이 뷰로 바꾸면 종전과 같은 모양을 얻는다. 단
+  **공간 술어만은 예외**로 subtype을 직접 참조한다 — 뷰의 `geom`은
+  `COALESCE(routes.geom, areas.geom)` 산출 컬럼이라 인덱스가 없고, 술어에 그대로 넣으면
+  전체 seq scan이 된다.
 
 ## 7. 영업시간
 
@@ -2088,7 +2177,7 @@ downgrade는 queued/running base row의 marker 또는 `in_progress`/`retryable` 
 운영 확인 후 테이블/컬럼을 제거하며, active marker를 조용히 drop해 worker를 재개시키는
 downgrade는 금지한다.
 
-#### 9.8.2a C6c cancel-probe fixture 수명주기 (T-VN-41F1J, ADR-084)
+#### 9.8.2a C6c cancel-probe fixture 수명주기 (T-VN-41F1J, ADR-086)
 
 C6c/F1D가 검증할 `running` + `dagster_run_id IS NULL` member는 provider workload에서
 우연히 얻지 않는다. Map이 fixture transaction ID마다 job을 만들고 canonical cancellation과
@@ -2764,15 +2853,20 @@ statement trigger는 원본 write와 같은 transaction에서 `revision = revisi
 -- weather_values: 기본 3년 보존(ADR-062). 예보 발표 이력 비교용이므로
 -- 별도 승인된 purge 작업 전에는 삭제하지 않는다.
 
--- notice: 종료일 또는 발표일 +1년 (kind='notice' AND valid_end_time < now() - 1y)
-DELETE FROM feature.feature_notice_details d USING feature.features f
-WHERE d.feature_id=f.feature_id
-  AND f.kind='notice' AND d.valid_end_time < now() - interval '1 year';
+-- notice: 종료일 또는 발표일 +1년.
+-- 기간 판정은 subtype의 typed timestamptz로 한다(문자열 파싱·방어 cast 없음).
+-- subtype 자체가 kind='notice'만 담으므로 kind 술어도 필요 없다(§6 배타 arc).
+-- core row를 지우면 subtype row는 복합 FK의 ON DELETE CASCADE로 함께 사라진다.
+DELETE FROM feature.features f
+USING feature.feature_notices n
+WHERE n.feature_id = f.feature_id
+  AND n.valid_end_time < now() - interval '1 year';
 
 -- event: 종료일 +20년
-DELETE FROM feature.feature_event_details d USING feature.features f
-WHERE d.feature_id=f.feature_id
-  AND f.kind='event' AND d.ends_on < (now() - interval '20 years')::date;
+DELETE FROM feature.features f
+USING feature.feature_events e
+WHERE e.feature_id = f.feature_id
+  AND e.ends_on < (now() - interval '20 years')::date;
 
 -- source_records: 현재 payload 포인터가 아니며 보존기한이 지난 이력만 정리한다.
 -- Feature link는 source_entity에 붙으므로 record 삭제가 link를 cascade하지 않는다.

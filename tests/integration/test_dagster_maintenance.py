@@ -24,6 +24,8 @@ from tests.integration._db_cleanup import truncate_committed_test_rows
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
 
+from tests.integration._subtype_seed import seed_feature_subtype
+
 pytestmark = pytest.mark.integration
 
 _NOW = datetime(2026, 6, 3, 12, 0, tzinfo=UTC)
@@ -130,7 +132,6 @@ async def _seed_feature_with_source(
                 name=name,
                 category=_TEMPLE_CAT,
                 coord=WKTElement("POINT(129.3320 35.7900)", srid=4326),
-                detail={"summary": "temple"},
                 status="active",
                 created_at=_NOW,
                 updated_at=_NOW,
@@ -149,6 +150,8 @@ async def _seed_feature_with_source(
             )
         )
         await session.flush()
+        # T-VN-35: place는 subtype 행이 정본이다 — 없으면 consistency F2가 잡는다.
+        await seed_feature_subtype(session, feature_id=feature_id, kind="place")
         session.add(
             SourceRecordRow(
                 source_record_key=source_record_key,

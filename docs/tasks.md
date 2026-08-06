@@ -72,7 +72,7 @@ barrier로 직렬화한다.
   - freeze(Lane A): [x] `T-VN-31A` → [x] `T-VN-31B` → [x] `T-VN-31C`
   - Lane A: [x] `T-VN-32A` → [x] `T-VN-32B` → [x] `T-VN-32C`(prod 배포·값 전환
     라이브 — Map #950/#952/#955/#956·PinVi #430/#432) →
-    [/] `T-VN-35A-D`(진행 중 — 설계 착수 2026-08-05, A-D 단일 PR 방침) →
+    [x] `T-VN-35A-D`(typed subtype 분해 — ADR-086, A-D 단일 PR) →
     [ ] `T-VN-37A` → [ ] `T-VN-37B` → [ ] `T-VN-37C`
   - Lane B shadow: [ ] `T-VN-33A` → [ ] `T-VN-33B` → [ ] `T-VN-33C` →
     [ ] `T-VN-38A` → [ ] `T-VN-38B` → [ ] `T-VN-38C` →
@@ -452,7 +452,7 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
     ⑤ **alembic 1.19 적응**(CheckConstraint naming-convention 비교 변경 —
     천장 핀 `<1.19` 해제 조건, #948 동봉 커밋 참조).
 
-- [~] T-VN-H43 — **prod 백업 체계 수립 (정기 dump·sha256·보존·rollback 기준선)**
+- [x] T-VN-H43 — **prod 백업 체계 수립 (정기 dump·sha256·보존·rollback 기준선)**
 
   절차 정본은 `docs/backup-restore.md` §9(2026-08-05 신설 — n150 수동 기준선,
   TCP 경로 강제·manifest 필수 항목 `ops.public_api_keys` 포함).
@@ -465,11 +465,11 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
     적용·값 전환 배포 후, manifest: features/aliases/public 731,765 동수 ·
     pair_mismatch 0 · orphan_alias 0)와 **dev box 외부 사본 1회 반출**
     (`~/ktm-h43-external/`, sha256 대조 OK) — 오프박스 사본의 첫 실물.
-  - [~] 정기화 — 보존 정책(개수·기간)·주기 실행·2차 외부 사본 자동화.
-    **소유 경계**: orchestration은 docker-manager — 결선 요청 기안 완료
-    (manager **#148**: 일 1회 dump+sha256+manifest, retention 7일/4주,
-    오프박스 자동 반출, 배포 직전 fence dump 관례 명문화). 절차 정본은 Map
-    runbook.
+  - [보류] 정기화 — 보존 정책·주기 실행·2차 외부 사본 자동화는 **현 환경에서
+    수행하지 않는다**. n150은 실 production이 아니며 손상 시 재적재가 정책이다
+    (사용자 지시 2026-08-06). 복원 가능성 자체는 H44가 실증했으므로 열린
+    리스크가 아니다. 실 prod 전환 시 manager **#148**(일 1회 dump+sha256+
+    manifest·retention·오프박스 반출·배포 직전 fence dump)로 재개한다.
   - [ ] 신규 DB 프로비저닝 함정 참조 링크 — superuser 확장 4종 사전 생성
     (manager #109 절차)을 restore 문서에서 링크한다.
 
@@ -642,26 +642,6 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   provider/admin writer와 admin/user DTO/UI를 3축으로 전환하고 old status 신규 write를 차단한다.
   legacy column/index는 held component rollback을 위해 유지하고 T-VN-39 removal manifest에 넣는다.
 
-### T-VN-35 — typed subtype 분해 (Lane A)
-
-- [ ] T-VN-35A — **feature core·point subtype**
-
-  공통 core와 point geometry/category 제약을 분리하고 기존 place/price/weather point row를
-  shadow backfill한다.
-
-- [ ] T-VN-35B — **event·notice subtype**
-
-  event/notice 전용 column과 시간/lineage 불변식을 typed table로 옮기고 혼합 kind row를 거부한다.
-
-- [ ] T-VN-35C — **route·area subtype**
-
-  route/area geometry type·SRID·category 제약과 parent/sibling 관계를 typed table로 옮긴다.
-
-- [ ] T-VN-35D — **repository/API projection cutover**
-
-  kind별 repository/read model을 subtype join으로 전환하고 nullable mega-row 분기를 제거한다.
-  subtype별 checksum·query plan을 독립 검증한다.
-
 ### T-VN-36 — field override 단일화 (Lane B)
 
 - [ ] T-VN-36A — **override schema·whole-row freeze backfill**
@@ -682,18 +662,29 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 
 ### T-VN-37 — typed notice state (Lane A)
 
+> **범위 축소(2026-08-06)**: T-VN-35B가 이미 `feature_notices.valid_start_time`/
+> `valid_end_time`을 typed `timestamptz`로 올렸고, read 필터의 문자열 파싱과
+> 비-ISO 방어 cast(`pg_input_is_valid`)는 그때 사라졌다. 37에 남은 것은 **range
+> 표현**과 lineage/current state다.
+
 - [ ] T-VN-37A — **notice range schema·backfill**
 
-  유효 기간과 lineage/current state를 typed range/FK/CHECK로 표현하고 오염 timestamp를 격리한다.
+  두 timestamptz를 `tstzrange`로 승격한다. 핵심은 **empty range**다 — provider가
+  미래 시행 공지를 철회하면 `end < start`가 실재하는데(실측
+  `start=2026-07-13/end=2026-06-02`), 그건 결함이 아니라 "발효 전에 철회됨"이다.
+  35B가 CHECK를 두지 않은 이유가 이것이고, empty range는 그 사실을 **금지하지 않고
+  정확히 표현**한다. lineage/current state도 같이 typed FK/CHECK로 올린다.
 
 - [ ] T-VN-37B — **notice writer/read query cutover**
 
-  notice provider writer와 public/admin history/current query를 range/index 기반으로 전환한다.
+  notice provider writer와 public/admin history/current query를 range 연산자
+  (`@>`/`&&`)와 GiST index 기반으로 전환한다.
 
-- [ ] T-VN-37C — **방어 cast·lineage anti-join 제거**
+- [ ] T-VN-37C — **lineage anti-join 제거**
 
-  T-VN-06의 잠정 cast와 공개 hot path anti-join을 제거하고 동등 결과·EXPLAIN·오염 입력 거부를
-  검증한다.
+  공개 hot path의 lineage anti-join을 range/index 기반 판정으로 대체하고 동등
+  결과·EXPLAIN·오염 입력 거부를 검증한다. (T-VN-06 잠정 cast는 35B에서 이미
+  제거됐다.)
 
 ### T-VN-38 — weather·price current summary (Lane B)
 

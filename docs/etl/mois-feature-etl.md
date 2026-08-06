@@ -19,7 +19,7 @@
 | canonical provider name | `python-mois-api` (legacy alias `python-krmois-api`, `krmois`, `mois`) |
 | Feature.kind | `place` (1차) |
 | source_entity_type | `license_place` |
-| 상세 테이블 | `feature_place_details` |
+| 상세 테이블 | `feature_places` |
 | dataset_key prefix | `mois_*` |
 | 의존 ADR | ADR-024 (naming), ADR-022 (namespace), ADR-006 (no wrapper), ADR-003 (function library) |
 

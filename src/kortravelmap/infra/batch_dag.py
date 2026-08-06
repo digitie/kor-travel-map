@@ -313,7 +313,17 @@ async def run_batch_consistency_phase(
     if updated is None:
         raise BatchDagCancellationWon
     if report.severity_max == "ERROR":
+        # 어떤 축이 막았는지 이름과 표본을 남긴다 — "severity_max=ERROR"만으로는
+        # 운영자가 무엇을 고쳐야 하는지 알 수 없고, 그동안 배치가 멈춰 있게 된다.
+        blocking = "; ".join(
+            f"{case.code}={case.count}"
+            + (f" e.g. {', '.join(case.sample_ids[:3])}" if case.sample_ids else "")
+            for case in report.cases
+            if case.severity == "ERROR" and case.count > 0
+        )
         message = "consistency gate blocked mv_refresh: severity_max=ERROR"
+        if blocking:
+            message = f"{message} ({blocking})"
         consistency_job = await finish_import_job(
             session,
             prepared.consistency_job.job_id,

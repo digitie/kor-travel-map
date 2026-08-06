@@ -44,6 +44,7 @@ from kortravelmap.providers.visitkorea import (
     festival_to_review_candidates,
 )
 from tests.integration._db_cleanup import truncate_committed_test_rows
+from tests.integration._subtype_seed import seed_feature_subtype
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
@@ -64,10 +65,27 @@ def _festival_feature(feature_id: str = _TARGET_ID, name: str = "서울 봄꽃 �
         category=_FESTIVAL_CAT,
         coord=WKTElement("POINT(126.9244 37.5261)", srid=4326),
         coord_precision_digits=6,
-        detail={
-            "starts_on": "2026-04-05",
-            "ends_on": "2026-04-12",
-        },
+    )
+
+
+#: T-VN-35(ADR-086): 축제 기간의 정본은 ``feature_events.starts_on/ends_on``이다.
+_FESTIVAL_DETAIL = {
+    "event_kind": "festival",
+    "starts_on": "2026-04-05",
+    "ends_on": "2026-04-12",
+}
+
+
+async def _add_festival(
+    session: AsyncSession,
+    feature_id: str = _TARGET_ID,
+    name: str = "서울 봄꽃 축제",
+) -> None:
+    """축제 event core + event subtype을 함께 심는다 (T-VN-35)."""
+    session.add(_festival_feature(feature_id, name))
+    await session.flush()
+    await seed_feature_subtype(
+        session, feature_id=feature_id, kind="event", detail=_FESTIVAL_DETAIL
     )
 
 
@@ -137,7 +155,7 @@ def _as_input(candidate: FestivalReviewCandidate) -> EnrichmentReviewInput:
 
 
 async def test_enqueue_inserts_pending(migrated_session: AsyncSession) -> None:
-    migrated_session.add(_festival_feature())
+    await _add_festival(migrated_session)
     await migrated_session.flush()
 
     result = await enqueue_review_candidates(
@@ -165,7 +183,7 @@ async def test_enqueue_inserts_pending(migrated_session: AsyncSession) -> None:
 async def test_reenqueue_updates_then_preserves_reviewed(
     migrated_session: AsyncSession,
 ) -> None:
-    migrated_session.add(_festival_feature())
+    await _add_festival(migrated_session)
     await migrated_session.flush()
     candidate = _as_input(_review_candidate("서울 봄꽃"))
 
@@ -189,8 +207,8 @@ async def test_reenqueue_updates_then_preserves_reviewed(
 async def test_pending_sorted_desc_and_float(
     migrated_session: AsyncSession,
 ) -> None:
-    migrated_session.add(_festival_feature("f_a_evt", "가나다 축제"))
-    migrated_session.add(_festival_feature("f_b_evt", "서울 봄꽃 축제"))
+    await _add_festival(migrated_session, "f_a_evt", "가나다 축제")
+    await _add_festival(migrated_session, "f_b_evt", "서울 봄꽃 축제")
     await migrated_session.flush()
 
     high = _as_input(
@@ -211,7 +229,7 @@ async def test_pending_sorted_desc_and_float(
 async def test_accept_applies_enrichment_link(
     migrated_session: AsyncSession,
 ) -> None:
-    migrated_session.add(_festival_feature())
+    await _add_festival(migrated_session)
     await migrated_session.flush()
     await enqueue_review_candidate(
         migrated_session, _as_input(_review_candidate("서울 봄꽃"))
@@ -257,7 +275,7 @@ async def test_accept_applies_enrichment_link(
 async def test_decide_idempotent_after_review(
     migrated_session: AsyncSession,
 ) -> None:
-    migrated_session.add(_festival_feature())
+    await _add_festival(migrated_session)
     await migrated_session.flush()
     await enqueue_review_candidate(
         migrated_session, _as_input(_review_candidate("서울 봄꽃"))
@@ -288,8 +306,8 @@ async def test_decide_rejects_invalid_decision(
 async def test_list_enrichment_reviews_admin_query(
     migrated_session: AsyncSession,
 ) -> None:
-    migrated_session.add(_festival_feature("f_a_evt", "가나다 축제"))
-    migrated_session.add(_festival_feature("f_b_evt", "서울 봄꽃 축제"))
+    await _add_festival(migrated_session, "f_a_evt", "가나다 축제")
+    await _add_festival(migrated_session, "f_b_evt", "서울 봄꽃 축제")
     await migrated_session.flush()
     await enqueue_review_candidates(
         migrated_session,
@@ -361,7 +379,7 @@ async def test_list_enrichment_reviews_admin_query(
 async def test_list_enrichment_reviews_far_distance_does_not_underflow(
     migrated_session: AsyncSession,
 ) -> None:
-    migrated_session.add(_festival_feature("f_far_evt", "서울 봄꽃 축제"))
+    await _add_festival(migrated_session, "f_far_evt", "서울 봄꽃 축제")
     await migrated_session.flush()
     await enqueue_review_candidates(
         migrated_session,
@@ -422,8 +440,7 @@ async def test_concurrent_decide_no_accepted_link_leak(
     try:
         # 1) feature + pending 후보를 commit 적재.
         async with _AsyncSession(migrated_engine) as session, session.begin():
-            session.add(_festival_feature())
-            await session.flush()
+            await _add_festival(session)
             await enqueue_review_candidate(
                 session, _as_input(_review_candidate("서울 봄꽃"))
             )
@@ -496,8 +513,7 @@ async def test_list_enrichment_reviews_keyset_walk_stable_under_mutation(
     migrated_session: AsyncSession,
 ) -> None:
     session = migrated_session
-    session.add(_festival_feature())
-    await session.flush()
+    await _add_festival(session)
     session.add_all(
         [
             _enrichment_queue_row(
@@ -588,8 +604,7 @@ async def test_list_enrichment_reviews_cursor_rejects_filter_change(
     migrated_session: AsyncSession,
 ) -> None:
     session = migrated_session
-    session.add(_festival_feature())
-    await session.flush()
+    await _add_festival(session)
     session.add_all(
         [
             _enrichment_queue_row(

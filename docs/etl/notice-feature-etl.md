@@ -18,7 +18,7 @@
 | provider | `python-krex-api`, `python-kma-api`, `python-krforest-api`, `python-khoa-api` |
 | dataset_key | `krex_traffic_notices`, `kma_weather_alerts` (구현됨) · `forest_safety_notices`, `khoa_coastal_notices` (planned/미구현) |
 | Feature.kind | `notice` |
-| 상세 테이블 | `feature_notice_details` |
+| 상세 테이블 | `feature_notices` |
 | 코드 entrypoint | `kortravelmap.providers.{krex,kma,krforest,khoa}`, `kortravelmap.notices` |
 
 ## 2. 4 dataset 갱신 주기

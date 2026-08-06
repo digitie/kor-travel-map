@@ -314,7 +314,8 @@ await load_feature_rows(
 1. resource에서 `reverse_geocoder` callable 생성
 2. 각 `Feature`의 `coord`가 있고 `address.legal_dong_code` 없으면 reverse 호출
 3. 결과를 `features.address`, `features.legal_dong_code` 등에 반영
-4. `AddressMatchReport`는 `features.detail.address_enrichment`에 저장
+4. `AddressMatchReport`는 kind subtype의 `payload.address_enrichment`에 저장
+   (조회는 `feature.features_detailed`가 조립한 `detail`, ADR-086)
 5. **`feature_id`는 재계산하지 않는다** — provider normalize 단계에서 정해진
    값을 따른다 (ADR-009 결정성 보장)
 
@@ -376,10 +377,10 @@ staleness 축은 발화하지 않는다.
 -- 일 1회 정합성 검토 (T-201 feature_consistency_reports 케이스 F1)
 SELECT 
   f.feature_id, f.name, f.legal_dong_code,
-  f.detail->'address_enrichment'->>'match_level' AS match_level,
-  f.detail->'address_enrichment'->>'notes' AS notes
-FROM feature.features f
-WHERE f.detail->'address_enrichment'->>'match_level' IN (
+  f.detail->'payload'->'address_enrichment'->>'match_level' AS match_level,
+  f.detail->'payload'->'address_enrichment'->>'notes' AS notes
+FROM feature.features_detailed f
+WHERE f.detail->'payload'->'address_enrichment'->>'match_level' IN (
   'legal_dong_conflict', 'sigungu_code_only', 'address_text_review',
   'not_geocoded'
 )

@@ -4,18 +4,24 @@
 raw SQL ``text()`` (ADR-004). 본 모듈은 Alembic ``target_metadata``의 원천이며
 ORM 인스턴스 read mapping 용도로도 사용 가능.
 
-PR#28 (Sprint 2 prep) scope:
-- ``features`` — 기준 테이블 (ADR-012 ``coord_5179`` STORED generated column)
+구성:
+- ``features`` — kind 공통 core (ADR-012 ``coord_5179`` STORED generated column).
+  kind별 값과 선·면 geometry는 여기 없다 — subtype이 정본이다(ADR-086).
+- kind별 typed subtype 5종 — ``feature_places`` / ``feature_events`` /
+  ``feature_notices`` / ``feature_routes`` / ``feature_areas``. core의
+  ``UNIQUE (feature_id, kind)``를 kind 상수 CHECK + 복합 FK로 참조하는
+  **배타 arc**다(한 feature는 최대 한 subtype, subtype이 있는 동안 kind 불변).
+- ``feature_weather_values`` / ``feature_price_values`` — weather/price는
+  subtype이 없고 값 정본이 이 둘이다.
 - ``source_records`` / ``source_links`` / ``provider_sync_state`` —
-  provider 적재 추적
+  provider 적재 추적. ``feature_files``, ``ops.*``도 여기 매핑돼 있다.
 - 4 schemas (feature / provider_sync / ops / x_extension)
 
-후속 PR에서 추가될 테이블:
-- detail 5종 (place/event/notice/area/route)
-- ``feature_opening_periods`` / ``feature_special_days``
-- ``feature_weather_values`` / ``feature_price_values``
-- ``feature_files``
-- ``ops.*`` (import_jobs / dedup_review_queue / ...)
+아직 없는 테이블: ``feature_opening_periods`` / ``feature_special_days``
+(0002의 후속 PR 항목 — 영업시간은 현재 subtype JSONB가 갖는다).
+
+뷰는 매핑하지 않는다 — ``feature.features_detailed``(조립)와
+``feature.public_features``는 alembic이 소유하고 repo가 raw SQL로 읽는다.
 
 ADR 참조
 --------
@@ -23,13 +29,14 @@ ADR 참조
 - ADR-007 — PostgreSQL 16 + PostGIS 3.5 + pg_trgm + pgcrypto
 - ADR-008 — extension은 ``x_extension`` schema 격리
 - ADR-012 — ``coord_5179`` STORED generated column (반경 검색 인덱스)
-- ADR-018 — Feature.detail JSONB (Pydantic 직렬화)
+- ADR-018 — Feature.detail은 kind별 Pydantic 모델 (자유 dict 금지)
+- ADR-086 — kind별 typed subtype 분해와 배타 arc
 - ADR-019 — 모든 datetime ``TIMESTAMPTZ`` (KST aware)
 """
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from geoalchemy2 import Geometry
@@ -261,12 +268,6 @@ class FeatureRow(Base):
             ),
         ),
         Index(
-            "idx_features_geom_gist",
-            "geom",
-            postgresql_using="gist",
-            postgresql_where=text("deleted_at IS NULL AND geom IS NOT NULL"),
-        ),
-        Index(
             "idx_features_kind_category",
             "kind",
             "category",
@@ -284,16 +285,6 @@ class FeatureRow(Base):
             text("feature_id DESC"),
         ),
         Index("idx_features_lower_name_keyset", text("lower(name)"), "feature_id"),
-        Index(
-            "idx_features_opening_hours_keyset",
-            "feature_id",
-            postgresql_where=text(
-                "deleted_at IS NULL "
-                "AND detail IS NOT NULL "
-                "AND detail <> '{}'::jsonb "
-                "AND detail ?| ARRAY['business_hours','opening_hours']"
-            ),
-        ),
         Index("idx_features_legal_dong_code", "legal_dong_code"),
         Index(
             "idx_features_sigungu",
@@ -329,6 +320,12 @@ class FeatureRow(Base):
         UniqueConstraint(
             "feature_id", "feature_uuid", name=conv("uq_features_identity_pair")
         ),
+        # T-VN-35A(0084) — typed subtype의 배타 arc 참조 대상. subtype 행이
+        # (feature_id, kind) 복합 FK로 이 UNIQUE를 참조하고 각자 kind 상수
+        # CHECK를 가지므로 ① 한 feature는 최대 한 subtype에만 존재하고
+        # ② subtype 행이 있는 동안 core kind 변경이 FK 위반으로 막힌다
+        # (혼합 kind row 거부 = 35B 요구의 선언적 구현).
+        UniqueConstraint("feature_id", "kind", name=conv("uq_features_identity_kind")),
         {"schema": "feature"},
     )
 
@@ -356,7 +353,6 @@ class FeatureRow(Base):
             persisted=True,
         ),
     )
-    geom: Mapped[Any | None] = mapped_column(Geometry("GEOMETRY", srid=4326, spatial_index=False))
 
     # 주소 (kortravelmap.dto.Address 직렬화, ADR-041 — kraddr-base 흡수).
     address: Mapped[dict[str, Any]] = mapped_column(
@@ -388,11 +384,6 @@ class FeatureRow(Base):
     sibling_group_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
 
     # 상세 (ADR-018 — Pydantic DETAIL_MODELS 직렬화).
-    detail: Mapped[dict[str, Any]] = mapped_column(
-        JSONB,
-        nullable=False,
-        server_default=text("'{}'::jsonb"),
-    )
     raw_refs: Mapped[list[dict[str, Any]]] = mapped_column(
         JSONB,
         nullable=False,
@@ -440,6 +431,218 @@ class FeatureRow(Base):
         server_default=text("now()"),
     )
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+# =============================================================================
+# feature.feature_{places,events,notices,routes,areas}  (T-VN-35 typed subtype)
+# =============================================================================
+#
+# 배타 arc(표준 typed-subtype 패턴): 각 subtype은 kind 상수 CHECK를 갖고
+# ``(feature_id, kind)`` 복합 FK로 core를 참조한다 — 한 feature는 최대 한
+# subtype에만 존재하고(core kind는 단일 값), subtype 행이 있는 동안 core
+# kind 변경이 FK 위반으로 막힌다. ``(feature_id, feature_uuid)`` 복합 FK는
+# 0083 ``feature_aliases`` 선례와 같은 identity 사본 일치 계약이다.
+#
+# T-VN-35(ADR-086 결정 4): core ``detail``/``geom``은 0086에서 **제거됐다**.
+# kind별 값의 정본은 subtype 테이블이고, 응답용 ``detail``/``geom``은
+# ``feature.features_detailed`` 뷰가 조립한다 — 이 ORM 매핑은 core 컬럼만
+# 반영한다(뷰는 read 전용이라 매핑하지 않는다).
+
+
+def _subtype_table_args(kind: str, *extra: Any) -> tuple[Any, ...]:
+    """subtype 공통 제약 — kind 상수 CHECK + 배타 arc FK + identity 사본 FK."""
+    table = f"feature_{kind}s"
+    return (
+        CheckConstraint(f"kind = '{kind}'", name=f"ck_{table}_kind"),
+        ForeignKeyConstraint(
+            ["feature_id", "kind"],
+            ["feature.features.feature_id", "feature.features.kind"],
+            name=conv(f"fk_{table}_feature_kind"),
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["feature_id", "feature_uuid"],
+            ["feature.features.feature_id", "feature.features.feature_uuid"],
+            name=conv(f"fk_{table}_identity_pair"),
+            ondelete="CASCADE",
+        ),
+        *extra,
+        {"schema": "feature"},
+    )
+
+
+class _FeatureSubtypeBase(Base):
+    """subtype 공통 identity 컬럼 (추상 — 테이블을 만들지 않는다)."""
+
+    __abstract__ = True
+
+    feature_id: Mapped[str] = mapped_column(String, primary_key=True)
+    feature_uuid: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    kind: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class FeaturePlaceRow(_FeatureSubtypeBase):
+    """``feature.feature_places`` — place 전용 typed 컬럼 (dto ``PlaceDetail``)."""
+
+    __tablename__ = "feature_places"
+    __table_args__ = _subtype_table_args(
+        "place",
+        Index(
+            "idx_feature_places_opening_hours",
+            "feature_id",
+            postgresql_where=text("business_hours IS NOT NULL"),
+        ),
+    )
+
+    place_kind: Mapped[str] = mapped_column(String, nullable=False)
+    phones: Mapped[list[str]] = mapped_column(
+        ARRAY(Text), nullable=False, server_default=text("'{}'::text[]")
+    )
+    biz_number: Mapped[str | None] = mapped_column(String)
+    license_date: Mapped[date | None] = mapped_column(Date)
+    business_hours: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    facility_info: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    reviews_link: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    payload: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+
+
+class FeatureEventRow(_FeatureSubtypeBase):
+    """``feature.feature_events`` — event 전용 typed 컬럼 (dto ``EventDetail``)."""
+
+    __tablename__ = "feature_events"
+    __table_args__ = _subtype_table_args(
+        "event",
+        CheckConstraint(
+            "starts_on IS NULL OR ends_on IS NULL OR starts_on <= ends_on",
+            name="ck_feature_events_period",
+        ),
+        Index(
+            "idx_feature_events_period",
+            "starts_on",
+            "ends_on",
+        ),
+        Index(
+            "idx_feature_events_opening_hours",
+            "feature_id",
+            postgresql_where=text("opening_hours IS NOT NULL"),
+        ),
+    )
+
+    event_kind: Mapped[str] = mapped_column(String, nullable=False)
+    starts_on: Mapped[date | None] = mapped_column(Date)
+    ends_on: Mapped[date | None] = mapped_column(Date)
+    timezone: Mapped[str] = mapped_column(
+        String, nullable=False, server_default=text("'Asia/Seoul'")
+    )
+    opening_hours: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    venue_name: Mapped[str | None] = mapped_column(String)
+    tel: Mapped[str | None] = mapped_column(String)
+    content_id: Mapped[str | None] = mapped_column(String)
+    content_type_id: Mapped[str | None] = mapped_column(String)
+    area_code: Mapped[str | None] = mapped_column(String)
+    sigungu_code: Mapped[str | None] = mapped_column(String)
+    payload: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+
+
+class FeatureNoticeRow(_FeatureSubtypeBase):
+    """``feature.feature_notices`` — notice 전용 typed 컬럼 (dto ``NoticeDetail``).
+
+    ``valid_start_time``/``valid_end_time``이 typed timestamptz가 되면서
+    read 필터의 ``detail->>'valid_end_time'`` 파싱(+ ``pg_input_is_valid``
+    방어 cast)이 소멸한다 — 35D의 최대 실익.
+    """
+
+    __tablename__ = "feature_notices"
+    __table_args__ = _subtype_table_args(
+        "notice",
+        CheckConstraint(
+            "severity IS NULL OR severity BETWEEN 0 AND 5",
+            name="ck_feature_notices_severity",
+        ),
+        Index(
+            "idx_feature_notices_validity",
+            "valid_end_time",
+            "valid_start_time",
+        ),
+    )
+
+    notice_type: Mapped[str] = mapped_column(String, nullable=False)
+    severity: Mapped[int | None] = mapped_column(SmallInteger)
+    valid_start_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    valid_end_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    source_agency: Mapped[str | None] = mapped_column(String)
+    officer_name: Mapped[str | None] = mapped_column(String)
+    payload: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+
+
+class FeatureRouteRow(_FeatureSubtypeBase):
+    """``feature.feature_routes`` — route 전용 (geometry 정본이 여기로 이동)."""
+
+    __tablename__ = "feature_routes"
+    __table_args__ = _subtype_table_args(
+        "route",
+        Index(
+            "idx_feature_routes_geom_gist",
+            "geom",
+            postgresql_using="gist",
+        ),
+    )
+
+    # core에서 이동한 geometry — route는 LineString 계열만 허용한다
+    # (core의 GEOMETRY 느슨한 타입이 여기서 정확해진다).
+    geom: Mapped[Any] = mapped_column(
+        Geometry("MULTILINESTRING", srid=4326, spatial_index=False), nullable=False
+    )
+    route_type: Mapped[str] = mapped_column(String, nullable=False)
+    geometry_source: Mapped[str | None] = mapped_column(String)
+    geometry_status: Mapped[str | None] = mapped_column(String)
+    total_distance_meters: Mapped[Any | None] = mapped_column(Numeric)
+    expected_duration_minutes: Mapped[int | None] = mapped_column(Integer)
+    difficulty: Mapped[str | None] = mapped_column(String)
+    begin_name: Mapped[str | None] = mapped_column(String)
+    begin_address: Mapped[str | None] = mapped_column(String)
+    end_name: Mapped[str | None] = mapped_column(String)
+    end_address: Mapped[str | None] = mapped_column(String)
+    payload: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+
+
+class FeatureAreaRow(_FeatureSubtypeBase):
+    """``feature.feature_areas`` — area 전용 (geometry 정본이 여기로 이동)."""
+
+    __tablename__ = "feature_areas"
+    __table_args__ = _subtype_table_args(
+        "area",
+        Index(
+            "idx_feature_areas_geom_gist",
+            "geom",
+            postgresql_using="gist",
+        ),
+    )
+
+    geom: Mapped[Any] = mapped_column(
+        Geometry("MULTIPOLYGON", srid=4326, spatial_index=False), nullable=False
+    )
+    area_kind: Mapped[str] = mapped_column(String, nullable=False)
+    boundary_source: Mapped[str | None] = mapped_column(String)
+    area_square_meters: Mapped[Any | None] = mapped_column(Numeric)
+    regulation_scope: Mapped[str | None] = mapped_column(String)
+    administrative_office: Mapped[str | None] = mapped_column(String)
+    description: Mapped[str | None] = mapped_column(Text)
+    payload: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
 
 
 class FeatureAliasRow(Base):
@@ -2478,7 +2681,7 @@ class ImportJobRow(Base):
 
 
 # =============================================================================
-# ops.c6c_cancel_probe_fixtures  (ADR-084 / T-VN-41F1J)
+# ops.c6c_cancel_probe_fixtures  (ADR-086 / T-VN-41F1J)
 # =============================================================================
 
 

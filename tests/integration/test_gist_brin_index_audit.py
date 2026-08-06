@@ -27,12 +27,20 @@ pytestmark = pytest.mark.integration
 # 서울 근처 bbox — 공개 조회 EXPLAIN용.
 _BBOX = (126.9, 37.5, 127.1, 37.7)
 
-_FULL_GIST = ("idx_features_coord", "idx_features_coord_5179", "idx_features_geom")
+# T-VN-35(alembic 0086): geometry는 core 컬럼이 아니다 — geom GiST 축은
+# route/area subtype으로 이동했다(``idx_feature_routes_geom_gist`` /
+# ``idx_feature_areas_geom_gist``). 따라서 core의 full/partial GiST 감사 대상은
+# coord 2축만 남는다.
+_FULL_GIST = ("idx_features_coord", "idx_features_coord_5179")
 _PARTIAL_GIST = (
     "idx_features_coord_gist",
     "idx_features_coord_5179_gist",
-    "idx_features_geom_gist",
 )
+#: geometry GiST 정본 — subtype 테이블별 1개씩.
+_SUBTYPE_GEOM_GIST = {
+    "feature_routes": "idx_feature_routes_geom_gist",
+    "feature_areas": "idx_feature_areas_geom_gist",
+}
 
 
 async def _index_names(session: Any, table: str, schema: str = "feature") -> set[str]:
@@ -49,12 +57,16 @@ async def _index_names(session: Any, table: str, schema: str = "feature") -> set
 async def test_head_keeps_partial_gist_and_drops_full_gist(
     migrated_session: Any,
 ) -> None:
-    """head(0061): partial GiST 3개 유지, 자동 full GiST 3개 제거."""
+    """head: core partial GiST 유지 · 자동 full GiST 제거 · geom GiST는 subtype."""
     names = await _index_names(migrated_session, "features")
     for partial in _PARTIAL_GIST:
         assert partial in names, f"partial GiST {partial} must remain"
     for full in _FULL_GIST:
         assert full not in names, f"auto full GiST {full} must be dropped"
+    # T-VN-35: core geom GiST는 사라지고 subtype이 각자 갖는다.
+    assert "idx_features_geom_gist" not in names
+    for table, index_name in _SUBTYPE_GEOM_GIST.items():
+        assert index_name in await _index_names(migrated_session, table)
 
 
 async def test_weather_source_record_support_index_exists(
@@ -216,12 +228,12 @@ async def test_dropping_full_gist_reduces_write_cost(pg_container: Any) -> None:
         # 기준 데이터(색인에 내용을 채운다).
         await _time_insert(engine, "base:", 20_000)
 
-        # before-state: 자동 full GiST 3개 재생성 → 6 GiST.
+        # before-state: 자동 full GiST 2개 재생성 → 4 GiST(T-VN-35 이후 core는
+        # coord 2축만 색인한다 — geom 축은 subtype 소유).
         async with engine.begin() as conn:
             for name, col in (
                 ("idx_features_coord", "coord"),
                 ("idx_features_coord_5179", "coord_5179"),
-                ("idx_features_geom", "geom"),
             ):
                 await conn.execute(
                     text(
@@ -233,7 +245,7 @@ async def test_dropping_full_gist_reduces_write_cost(pg_container: Any) -> None:
         await _time_insert(engine, "warm6:", 5_000)
         six_gist = await _time_insert(engine, "six:", 40_000)
 
-        # after-state: 자동 full 3개 제거 → 3 partial.
+        # after-state: 자동 full 제거 → partial만 남는다.
         async with engine.begin() as conn:
             for name in _FULL_GIST:
                 await conn.execute(text(f"DROP INDEX feature.{name}"))
@@ -248,8 +260,8 @@ async def test_dropping_full_gist_reduces_write_cost(pg_container: Any) -> None:
         )
         # 색인 3개를 덜 유지하므로 partial-only가 더 빠르다(약간의 노이즈 허용).
         assert three_gist < six_gist * 1.02, (
-            f"3-partial INSERT ({three_gist:.3f}s) should not exceed "
-            f"6-GiST ({six_gist:.3f}s)"
+            f"partial-only INSERT ({three_gist:.3f}s) should not exceed "
+            f"full+partial ({six_gist:.3f}s)"
         )
     finally:
         if engine is not None:

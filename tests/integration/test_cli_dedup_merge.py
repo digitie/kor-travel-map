@@ -53,7 +53,6 @@ def _feature(feature_id: str, *, with_coord: bool) -> FeatureRow:
         coord=WKTElement("POINT(129.3320 35.7900)", srid=4326)
         if with_coord
         else None,
-        detail={"summary": "temple"},
     )
 
 

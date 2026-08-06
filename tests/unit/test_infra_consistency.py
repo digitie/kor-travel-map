@@ -78,14 +78,36 @@ def test_f3_postgis_functions_are_schema_qualified() -> None:
     assert "x_extension.ST_Transform" in f3.sql
 
 
-def test_f6_scans_feature_table_once_before_lateral_period_expansion() -> None:
+def test_f6_narrows_candidates_by_subtype_columns_before_lateral_expansion() -> None:
+    """T-VN-35(ADR-086) — opening_hours 보유 kind는 place/event 둘뿐이고, 그
+    값은 subtype 컬럼이 정본이다. 후보를 subtype에서 좁혀야
+    ``idx_feature_places_opening_hours`` partial index가 구동된다(core detail
+    표현식 인덱스의 대체). core ``features``는 lifecycle 확인용으로만 조인한다.
+    """
     f6 = next(case for case in CONSISTENCY_CASES if case.code == "F6")
 
-    assert f6.sql.count("FROM feature.features f") == 1
     assert "WITH candidate_features AS" in f6.sql
-    assert "FROM candidate_features f" in f6.sql
+    assert "FROM feature.feature_places p " in f6.sql
+    assert "FROM feature.feature_events e " in f6.sql
+    assert "p.business_hours IS NOT NULL" in f6.sql
+    assert "e.opening_hours IS NOT NULL" in f6.sql
+    # core detail 문자열 탐침은 되돌아오면 안 된다(컬럼 자체가 없다).
+    assert "f.detail" not in f6.sql
+    assert "FROM candidate_features c" in f6.sql
     assert "CROSS JOIN LATERAL (" in f6.sql
     assert f6.sql.count("jsonb_path_query(") == 4
+
+
+def test_f2_detects_missing_subtype_rows_not_empty_detail() -> None:
+    """F2의 판정 축 교정 — 조립 뷰는 subtype이 없어도 비어있지 않은 detail을
+    내므로 ``detail = '{}'`` 술어는 영영 0건이다. 정확한 축은 subtype 결측이다.
+    """
+    f2 = next(case for case in CONSISTENCY_CASES if case.code == "F2")
+
+    assert "feature.feature_places" in f2.sql
+    assert "feature.feature_areas" in f2.sql
+    assert "s.feature_id IS NULL" in f2.sql
+    assert "detail" not in f2.sql
 
 
 def test_build_report_all_clean_is_ok() -> None:

@@ -516,6 +516,24 @@
         "0083_nonderived_uuid_generator"
       ],
       "revision": "0084_c6c_cancel_probe_fixtures"
+    },
+    {
+      "down_revision": [
+        "0084_c6c_cancel_probe_fixtures"
+      ],
+      "revision": "0085_feature_place_subtype"
+    },
+    {
+      "down_revision": [
+        "0085_feature_place_subtype"
+      ],
+      "revision": "0086_event_notice_subtypes"
+    },
+    {
+      "down_revision": [
+        "0086_event_notice_subtypes"
+      ],
+      "revision": "0087_route_area_subtypes"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

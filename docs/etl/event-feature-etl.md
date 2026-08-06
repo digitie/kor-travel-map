@@ -19,7 +19,7 @@
 | Feature.kind | `event` | (enrichment만) |
 | source_entity_type | `cultural_festival` | `festival` |
 | source_role | `primary` | `enrichment` |
-| 상세 테이블 | `feature_event_details` | (별도 row 없음 — enrichment 갱신만) |
+| 상세 테이블 | `feature_events` | (별도 row 없음 — enrichment 갱신만) |
 | 코드 entrypoint | `kortravelmap.providers.standard_data.cultural_festivals_to_bundles` | `kortravelmap.providers.visitkorea.festival_to_enrichment_links` |
 | 갱신 주기 | 1일 1회 (표준데이터 announce 주기) | 1주 1회 (enrichment 충분) |
 | 기본 page size | 1000 | 1000 |
@@ -45,7 +45,7 @@
 |------|----|
 | natural key | **`name::address` 파생** (ADR-009 `::`) — 원천에 관리번호 컬럼이 **없어** `정규화(축제명)::도로명주소(없으면 지번주소, 둘 다 없으면 빈 문자열)`로 파생한다 (#374). enrichment(visitkorea)의 natural key는 `content_id` |
 | FeatureKind | `event` |
-| detail table | `feature_event_details` |
+| detail table | `feature_events` |
 | category | event는 `EventDetail.event_kind`(`festival`/`concert`/`exhibition` 등)로 1차 분류. `features.category` 컬럼에는 `01000000` `TOURISM` (대분류) 또는 행사 성격에 맞는 `01040*` (문화시설) 카테고리 — 공식 카테고리 트리는 `docs/architecture/category.md` §4 |
 | source_role | `primary` |
 | marker_icon | `star` |
@@ -204,7 +204,7 @@ result = await load_visitkorea_festival_result(resources, run)
 `load_feature_rows()` 내부 적재 순서:
 1. `source_records`
 2. `features`
-3. `feature_event_details`
+3. `feature_events`
 4. `feature_files` (RustFS 업로드 완료 후 메타)
 5. `feature_opening_periods` / `feature_special_days` (있을 시)
 6. `source_links`
@@ -236,14 +236,15 @@ commit/rollback은 caller.
 
 ### 9.2 통합 테스트
 
-- testcontainers PostGIS에 적재 → `feature_event_details` row 검증.
+- testcontainers PostGIS에 적재 → `feature_events` row 검증.
 - 같은 입력 2회 적재 → idempotent (rows count 동일, updated_at만 갱신).
 - 이미지 업로드 → MinIO testcontainer로 PUT 호출 확인.
 
 ### 9.3 EXPLAIN
 
-`features_in_bounds(kinds=[event])` 쿼리가 `idx_features_kind_category`와
-`idx_features_event_end` 사용 확인.
+`features_in_bounds(kinds=[event])` 쿼리가 `idx_features_kind_category` 사용 확인.
+행사 기간 필터는 subtype 인덱스 `idx_feature_events_period`
+(`feature.feature_events (starts_on, ends_on)`, ADR-086)를 탄다.
 
 ## 10. 후속
 

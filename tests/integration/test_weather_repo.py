@@ -716,11 +716,11 @@ async def test_kma_weather_alert_history_reads_source_records(
         text(
             """
             INSERT INTO feature.features (
-                feature_id, kind, name, category, status, detail, updated_at
+                feature_id, kind, name, category, status, updated_at
             )
             VALUES (
                 'f_notice_weather', 'notice', '호우주의보', '99000000',
-                'active', '{}'::jsonb, now()
+                'active', now()
             )
             """
         )

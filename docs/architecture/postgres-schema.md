@@ -68,14 +68,15 @@ rollback 조건은 ADR-075와 [`../deploy.md`](../deploy.md)를 따른다.
 
 | 테이블 | PK | 핵심 컬럼 / 비고 |
 |--------|----|---------------|
-| `features` | `feature_id` | kind/name/category/coord/coord_precision_digits/coord_5179(generated)/geom/address/legal_dong_code/marker_*/parent/sibling_group_id/detail/raw_refs/status/data_origin/data_version/user_change_* |
+| `features` | `feature_id` | kind/name/category/coord/coord_precision_digits/coord_5179(generated)/address/legal_dong_code/marker_*/parent/sibling_group_id/raw_refs/status/data_origin/data_version/user_change_*; `UNIQUE (feature_id, kind)`는 아래 subtype 배타 arc의 참조 대상. kind별 detail과 선·면 geometry는 core에 없고 typed subtype이 정본이다 (ADR-086) |
+| `feature_places` | `feature_id` | place_kind (NOT NULL), phones `text[]` (≤3), biz_number, license_date, business_hours, facility_info, reviews_link, payload |
+| `feature_events` | `feature_id` | event_kind (NOT NULL), starts_on/ends_on (CHECK), timezone, opening_hours, venue_name, tel, content_id, content_type_id, area_code, sigungu_code, payload |
+| `feature_notices` | `feature_id` | notice_type (NOT NULL), severity (0-5 CHECK), valid_start/end_time `timestamptz`, source_agency, officer_name, payload |
+| `feature_routes` | `feature_id` | geom `MULTILINESTRING(4326)` NOT NULL, route_type (NOT NULL), geometry_source/status, total_distance_meters, expected_duration_minutes, difficulty, begin_*/end_*, payload |
+| `feature_areas` | `feature_id` | geom `MULTIPOLYGON(4326)` NOT NULL, area_kind (NOT NULL), boundary_source, area_square_meters, regulation_scope, administrative_office, description, payload |
+| `features_detailed` (view) | — | core + subtype 5종에서 `detail`/`geom`을 조립하는 단일 정본. `public_features`는 이 뷰 위의 `active AND deleted_at IS NULL` projection이다 |
 | `feature_versions` | `(feature_id, version)` | provider version 0과 user_request version 1 snapshot 보존; payload JSONB |
 | `feature_files` | `file_id` | feature_id FK CASCADE; UNIQUE (storage_backend,bucket,object_key); file_type CHECK |
-| `feature_place_details` | `feature_id` | place_kind, phones (≤3), reviews_link, business_hours, facility_info, license_date, biz_number |
-| `feature_event_details` | `feature_id` | event_kind, starts_on/ends_on (CHECK), venue_name, content_id, area_code |
-| `feature_notice_details` | `feature_id` | notice_type, severity (0-5), valid_start/end_time (CHECK), source_agency |
-| `feature_area_details` | `feature_id` | area_kind, boundary_source, area_square_meters, regulation_scope, administrative_office |
-| `feature_route_details` | `feature_id` | route_type, geometry_source, geometry_status, total_distance_meters (CHECK ≥0), expected_duration_minutes (CHECK >0) |
 | `feature_opening_periods` | `(feature_id, period_index)` | start_weekday (0-6), start_time (HHMM regex), duration_minutes (1~10080) |
 | `feature_special_days` | `(feature_id, special_date)` | is_closed, periods JSONB |
 | `feature_weather_values` | `weather_value_key` | UNIQUE (feature_id, provider, weather_domain, forecast_style, metric_key, issued_at, valid_at, observed_at) |
@@ -161,7 +162,7 @@ rollback 조건은 ADR-075와 [`../deploy.md`](../deploy.md)를 따른다.
 | `import_jobs` | `job_id UUID` | kind, `load_batch_id`, `parent_job_id` self-FK, payload, status/progress, heartbeat, `dagster_run_id`; 0051은 provider/dataset exact pair·trigger·registry/raw status, 0052는 격리 표식, 0053은 direct update job의 effective `sync_scope`와 `dispatch_requested_at`을 추가한다 |
 | `pipeline_cancellation_members` | `(cancellation_id, job_id)` | frozen import job 결과; `job_id → ops.import_jobs(job_id) ON DELETE RESTRICT`, `operation_kind`, `requires_run_termination`으로 run-backed queued와 generic queued를 구분 |
 | `pipeline_cancellation_runs` | `(cancellation_id, dagster_run_id)` | run terminate reservation/result 정본; 0051은 authoritative nullable `engine_started_at`/`engine_finished_at`을 terminal observation과 함께 영속 |
-| `c6c_cancel_probe_fixtures` | `transaction_id UUID` | **T-VN-41F1J 목표(ADR-084)** — Map-owned C6c fixture; unique job/cancellation FK와 `armed|consumed|finalized` CHECK로 cancellation history를 보존한 lifecycle을 강제 |
+| `c6c_cancel_probe_fixtures` | `transaction_id UUID` | **T-VN-41F1J 목표(ADR-086)** — Map-owned C6c fixture; unique job/cancellation FK와 `armed|consumed|finalized` CHECK로 cancellation history를 보존한 lifecycle을 강제 |
 | `dedup_review_queue` | `review_id UUID` | feature_id_a < feature_id_b canonical pair UNIQUE, total_score/name/spatial/category (0-100), status, decision_reason |
 | `feature_overrides` | `override_id UUID` | **구현됨(alembic 0010, ADR-045 T-207c)** — feature_id FK, field_path, source_value/override_value JSONB, prevent_provider_reactivation, status |
 | `feature_merge_history` | `merge_id UUID` | master_feature_id FK, loser_feature_id FK (둘 다 CASCADE), score, review_id FK (SET NULL), merged_by, reason, merged_at (alembic 0007, ADR-016) |
@@ -198,7 +199,6 @@ recovery하며, 명시적 0077 downgrade는 파생 관측 테이블을 버리고
 |--------|------|------|
 | `idx_features_coord_gist` | GIST(coord) | partial WHERE deleted_at IS NULL |
 | `idx_features_coord_5179_gist` | GIST(coord_5179) | 반경 검색 핵심 (ADR-012). STORED 값 PROJ drift·REINDEX: [runbook](../runbooks/coord-5179-proj-pin.md) (T-VN-H04) |
-| `idx_features_geom_gist` | GIST(geom) | route/area LINESTRING/MULTIPOLYGON |
 | `idx_features_kind_category` | (kind, category) | partial active |
 | `idx_features_status_updated` | (status, updated_at) | admin |
 | `idx_features_dedup_refresh_keyset` | (updated_at DESC, feature_id DESC) | partial active+coord, dedup refresh paging |
@@ -209,8 +209,8 @@ recovery하며, 명시적 0077 downgrade는 파생 관측 테이블을 버리고
 | `idx_features_name_trgm` | GIN(name gin_trgm_ops) | pg_trgm 부분 문자열 |
 | `idx_features_data_origin` | (data_origin, data_version) | provider/user_request effective row 필터 |
 | `idx_features_user_deleted` | (user_deleted_at) | partial user_deleted_at IS NOT NULL |
-| `idx_features_event_end` | ((detail->>'ends_on')::date) | partial event |
-| `idx_features_notice_valid` | ((detail->>'valid_end_time')::timestamptz) | partial notice |
+
+kind별 필터·geometry 인덱스는 core가 아니라 subtype이 갖는다 (§4.4).
 
 ### 4.1.1 `feature.feature_versions`
 
@@ -257,15 +257,22 @@ membership을 batch로 붙여 fan-out이 page 경계를 바꾸지 않게 한다.
 | `idx_feature_files_feature_order` | (feature_id, display_order) |
 | `idx_feature_files_provider` | (provider, dataset_key) partial NOT NULL |
 
-### 4.4 detail 테이블
+### 4.4 kind별 subtype / 영업시간
+
+| 인덱스 | 컬럼 | 비고 |
+|--------|------|------|
+| `idx_feature_places_opening_hours` | (feature_id) | partial `business_hours IS NOT NULL` |
+| `idx_feature_events_period` | (starts_on, ends_on) | 공개 festival 범위·keyset·정렬이 `starts_on` 선두를 요구 |
+| `idx_feature_events_opening_hours` | (feature_id) | partial `opening_hours IS NOT NULL` |
+| `idx_feature_notices_validity` | (valid_end_time, valid_start_time) | typed `timestamptz` 유효기간 필터 |
+| `idx_feature_routes_geom_gist` | GIST(geom) | route MULTILINESTRING 교차 |
+| `idx_feature_areas_geom_gist` | GIST(geom) | area MULTIPOLYGON 교차/포함 |
+
+subtype 테이블 자체가 kind로 갈리므로 `WHERE kind=...` 부분 조건이 필요 없다. 공간 술어는
+조립 뷰(`features_detailed`)의 산출 `geom`이 아니라 GiST가 붙은 subtype을 직접 참조해야 한다.
 
 | 테이블 | 인덱스 |
 |--------|--------|
-| `feature_place_details` | (place_kind), (biz_number) partial |
-| `feature_event_details` | (starts_on, ends_on), (event_kind), (content_id) partial |
-| `feature_notice_details` | (notice_type), (notice_type, valid_start_time, valid_end_time), (valid_start_time), (source_agency) partial |
-| `feature_area_details` | (area_kind), (boundary_source) partial |
-| `feature_route_details` | (route_type), (geometry_status), (geometry_source) |
 | `feature_opening_periods` | (start_weekday, start_time) |
 | `feature_special_days` | (special_date) |
 
@@ -353,12 +360,10 @@ membership을 batch로 붙여 fan-out이 page 경계를 바꾸지 않게 한다.
 | `feature_files` | `ck_feature_files_display_order` | ≥ 0 |
 | `feature_files` | `ck_feature_files_byte_size` | NULL or ≥ 0 |
 | `feature_files` | `ck_feature_files_width/height` | NULL or > 0 |
-| `feature_place_details` | `ck_place_phones_len` | jsonb_array_length ≤ 3 |
-| `feature_event_details` | `ck_event_dates` | starts_on ≤ ends_on |
-| `feature_notice_details` | `ck_notice_severity` | NULL or 0-5 |
-| `feature_notice_details` | `ck_notice_time_range` | valid_start ≤ valid_end |
-| `feature_route_details` | `ck_route_distance` | NULL or ≥ 0 |
-| `feature_route_details` | `ck_route_duration` | NULL or > 0 |
+| `features` | `uq_features_identity_kind` | `(feature_id, kind)` — subtype 배타 arc의 참조 대상 |
+| `feature_{places,events,notices,routes,areas}` | `ck_feature_*_kind` | 각 subtype의 kind 상수 (`kind = 'place'` 등) |
+| `feature_events` | `ck_feature_events_period` | starts_on ≤ ends_on (NULL 허용) |
+| `feature_notices` | `ck_feature_notices_severity` | NULL or 0-5 |
 | `feature_opening_periods` | `ck_opening_weekday` | 0-6 |
 | `feature_opening_periods` | `ck_opening_time` | regex `^([01]\d|2[0-3])[0-5]\d$` |
 | `feature_opening_periods` | `ck_opening_duration` | 0 < n ≤ 10080 |
@@ -419,7 +424,8 @@ membership을 batch로 붙여 fan-out이 page 경계를 바꾸지 않게 한다.
 |------|------|------|
 | `feature_files.feature_id` → `features` | CASCADE | feature 삭제 시 파일 메타도 |
 | `feature_files.source_record_key` → `source_records` | SET NULL | source 정리해도 파일은 유지 |
-| `feature_*_details.feature_id` → `features` | CASCADE | detail은 feature 종속 |
+| `feature_{places,events,notices,routes,areas}.(feature_id, kind)` → `features.(feature_id, kind)` | CASCADE | 배타 arc — subtype 행이 있는 동안 core kind 변경을 막는다 |
+| `feature_{places,events,notices,routes,areas}.(feature_id, feature_uuid)` → `features.(feature_id, feature_uuid)` | CASCADE | identity 사본 일치 (`feature_aliases`와 같은 규칙) |
 | `feature_opening_periods.feature_id` → `features` | CASCADE | |
 | `feature_special_days.feature_id` → `features` | CASCADE | |
 | `feature_weather_values.feature_id` → `features` | CASCADE | |
@@ -455,15 +461,18 @@ membership을 batch로 붙여 fan-out이 page 경계를 바꾸지 않게 한다.
 -- weather_values: 기본 3년 보존(ADR-062). 예보 발표 이력 비교용이므로
 -- 별도 승인된 purge 작업 전에는 삭제하지 않는다.
 
--- notice: 종료일/발표일 +1년
-DELETE FROM feature.feature_notice_details d USING feature.features f
-WHERE d.feature_id=f.feature_id
-  AND f.kind='notice' AND d.valid_end_time < now() - interval '1 year';
+-- notice: 종료일/발표일 +1년. subtype이 kind='notice'만 담으므로 kind 술어가 없고,
+-- core row를 지우면 subtype row는 복합 FK CASCADE로 함께 사라진다.
+DELETE FROM feature.features f
+USING feature.feature_notices n
+WHERE n.feature_id = f.feature_id
+  AND n.valid_end_time < now() - interval '1 year';
 
 -- event: 종료일 +20년
-DELETE FROM feature.feature_event_details d USING feature.features f
-WHERE d.feature_id=f.feature_id
-  AND f.kind='event' AND d.ends_on < (now() - interval '20 years')::date;
+DELETE FROM feature.features f
+USING feature.feature_events e
+WHERE e.feature_id = f.feature_id
+  AND e.ends_on < (now() - interval '20 years')::date;
 
 -- feature_price_values: 초기 유가 보관 기준 10년. domain별 세분화는 purge asset에서 관리.
 DELETE FROM feature.feature_price_values pv

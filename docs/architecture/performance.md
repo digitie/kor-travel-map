@@ -18,7 +18,8 @@
 7. **부분 인덱스 적극 활용** — `WHERE deleted_at IS NULL`, `WHERE status='active'`
    등 자주 쓰는 필터를 인덱스에 박는다.
 8. **JSONB 인덱스는 generated column으로** — 자주 조회하는 JSONB key는 표현식
-   인덱스 `((detail->>'key')::type)` 또는 generated column.
+   인덱스 `((payload->>'key')::type)` 또는 generated column. kind별 필드는
+   subtype의 typed 컬럼이라 애초에 이 패턴이 필요 없다 (ADR-086).
 
 ## 2. 공간 쿼리 표준 패턴
 
@@ -135,14 +136,20 @@ feature/cluster는 겹침 계산 전에 식별자로 제거한다.
 ```sql
 -- route 교차 — 입력 polygon과 교차하는 route 찾기
 SELECT f.feature_id, f.name
-FROM feature.features f
-WHERE f.kind = 'route'
-  AND ST_Intersects(f.geom, ST_GeomFromGeoJSON(:input_polygon_geojson))
+FROM feature.feature_routes r
+JOIN feature.features f ON f.feature_id = r.feature_id
+WHERE ST_Intersects(r.geom, ST_GeomFromGeoJSON(:input_polygon_geojson))
   AND f.deleted_at IS NULL
 LIMIT :limit;
 ```
 
-`idx_features_geom_gist`가 잡힌다.
+`idx_feature_routes_geom_gist`가 잡힌다. area는 `feature.feature_areas`로 같은
+모양이다. subtype 테이블 자체가 kind로 갈리므로 `kind='route'` 술어는 필요 없다.
+
+**공간 술어는 조립 뷰를 쓰지 않는다** (ADR-086). `feature.features_detailed`의
+`geom`은 `COALESCE(routes.geom, areas.geom)` 산출 컬럼이라 인덱스가 없고, 그대로
+술어에 넣으면 features 73만 행 seq scan이 된다. 뷰는 응답 조립용이고, 술어는 GiST가
+붙어 있는 subtype을 직접 참조한다.
 
 ## 3. pg_trgm 검색
 
@@ -294,15 +301,13 @@ CREATE INDEX idx_features_kind_category
   ON feature.features (kind, category)
   WHERE deleted_at IS NULL;
 
--- 진행중 행사
-CREATE INDEX idx_features_event_end
-  ON feature.features (((detail->>'ends_on')::date))
-  WHERE kind='event' AND deleted_at IS NULL;
+-- 진행중 행사 (subtype typed 컬럼 — kind 술어가 테이블로 대체돼 부분 조건이 없다)
+CREATE INDEX idx_feature_events_period
+  ON feature.feature_events (starts_on, ends_on);
 
 -- 유효 공지
-CREATE INDEX idx_features_notice_valid
-  ON feature.features (((detail->>'valid_end_time')::timestamptz))
-  WHERE kind='notice' AND deleted_at IS NULL;
+CREATE INDEX idx_feature_notices_validity
+  ON feature.feature_notices (valid_end_time, valid_start_time);
 
 -- 실행중 job (heartbeat 만료 검사)
 CREATE INDEX idx_import_jobs_heartbeat
@@ -376,18 +381,21 @@ ALTER TABLE feature.features
 CREATE INDEX idx_features_bjd_cached ON feature.features (bjd_code_cached);
 ```
 
-이미 `legal_dong_code` 컬럼이 별도로 있으므로 위는 예시. detail JSON의 자주
-쓰는 필드(`detail->>'place_kind'`)도 동일 패턴 가능.
+이미 `legal_dong_code` 컬럼이 별도로 있으므로 위는 예시. kind별 필드
+(`place_kind` 등)는 subtype의 typed 컬럼이라 이 패턴 자체가 필요 없고, 남은 JSONB는
+subtype의 `payload`뿐이다 (ADR-086).
 
 ### 7.2 GIN on JSONB
 
 ```sql
--- detail 자유 검색 (admin 디버그 페이지에서 사용)
-CREATE INDEX idx_features_detail_gin
-  ON feature.features USING GIN (detail jsonb_path_ops);
+-- provider 원문 payload 자유 검색 (admin 디버그 페이지에서 사용)
+CREATE INDEX idx_feature_places_payload_gin
+  ON feature.feature_places USING GIN (payload jsonb_path_ops);
 ```
 
-비용이 크므로 admin 검색이 자주 일어나는 경우에만.
+비용이 크므로 admin 검색이 자주 일어나는 경우에만. 조립 뷰
+(`feature.features_detailed`)의 `detail`은 산출 컬럼이라 인덱스를 걸 수 없다 —
+인덱스는 항상 subtype 실컬럼에 건다.
 
 ## 8. ORDER BY + LIMIT 최적화
 
@@ -542,19 +550,19 @@ tier-2 100만+ harness **수 분~수십 분(CI 아님)** 을 실측·재확인�
 > read 경로를 코드 기준으로 다시 검토해 **MV 도입 대상을 재타깃**한 결과다.
 > 실 latency 수치(P99) 측정은 T-212e live full reload 리포트에서 보강한다.
 
-#### 9.3.0 전제 정정 — "7-way detail JOIN"은 더 이상 없다
+#### 9.3.0 전제 정정 — detail 조립은 MV 대상이 아니다
 
 원래 §9.3은 "`feature + place_detail + opening_hours` 또는 7개 detail kind union을
-MV로 flatten"을 전제했다. **이 전제는 ADR-018로 무효화됐다.** 현재 스키마(alembic
-`0002_features_and_source_tables`)에서 detail은 **`feature.features.detail` 단일
-JSONB 컬럼**이고 `kind`로 구분된다. `place_details`/`event_details` 같은 per-kind
-detail 테이블은 **존재하지 않는다**. 따라서:
+MV로 flatten"을 전제했다. **이 전제는 성립하지 않는다.** kind별 값의 정본은
+ADR-086의 typed subtype 5종이고, 응답의 `detail`/`geom`은 뷰
+`feature.features_detailed`가 조립한다. 조립은 core PK ↔ subtype PK LEFT JOIN
+5개이며 배타 arc 때문에 한 feature는 그중 최대 하나에만 행을 갖는다. 따라서:
 
 - 단건/배치 detail 조회(`_GET_FEATURE_SQL`, `_GET_FEATURES_BY_IDS_SQL`,
-  `feature_repo.py`)는 이미 `feature.features` **PK/`ANY(ids)` 단일 테이블 조회 +
-  JSONB 인라인**이다. flatten할 JOIN이 없으므로 MV 이득이 **없다**.
-- viewport bbox 조회(`_FEATURES_IN_BBOX_SQL`)도 단일 테이블 GIST(`coord`) +
-  keyset이라 이미 최적이다.
+  `feature_repo.py`)는 **PK/`ANY(ids)`로 이미 좁혀진 행에만 PK join**이 붙는다.
+  사전조립으로 줄일 비용이 없으므로 MV 이득이 **없다**.
+- viewport bbox 조회(`_FEATURES_IN_BBOX_SQL`)는 detail을 조립하지 않고 core
+  GIST(`coord`) + subtype GiST 후보 + keyset이라 이미 최적이다.
 - 코드에 등장하는 `WITH ... AS MATERIALIZED (…)` CTE(`spatial_candidates` 등)는
   **planner 힌트(쿼리 1회 내 중간결과 고정)**일 뿐 **영속 MV가 아니다.** 혼동 주의.
 
@@ -566,7 +574,7 @@ read >> write 환경에서 실제로 반복 계산되는 비용은 아래 두 �
 | read 경로 | 구조 (`feature_repo.py`) | 반복 비용 | MV 적합성 |
 |-----------|--------------------------|-----------|-----------|
 | `/features/in-bounds` 개별, `/features` bbox | 단일 테이블 GIST(`coord`) + keyset | 없음(인덱스 only) | ❌ 불필요 |
-| `/features/{id}`, `/features/batch` | PK / `ANY(ids)` 단일 테이블 + JSONB detail 인라인 | 없음 | ❌ 불필요 |
+| `/features/{id}`, `/features/batch` | PK / `ANY(ids)` + `features_detailed` subtype PK join 조립 | 없음 | ❌ 불필요 |
 | `/features/search` | trgm GIN + `similarity()` 동적 채점 | 쿼리마다 결과 변동 | ❌ 사전계산 불가 |
 | **클러스터 rollup** (`_cluster_bbox_sql`, sido/sigungu/eupmyeondong) | viewport bbox 내 **`GROUP BY {code_col}` 집계 매 pan/zoom 재계산** | **viewport 이동마다 전체 후보 재집계** | ✅ **1순위** |
 | `/features/nearby`, `/nearby/by-target` | GIST `ST_DWithin(coord_5179)` + **primary-source LATERAL** | per-row `source_links→source_records` lateral | ⚠️ 2순위(대안 有) |
@@ -727,8 +735,8 @@ denormalized 컬럼**(`primary_provider`, `primary_dataset_key`)으로 더 싸�
 **도입 시 장점**:
 - 컨테이너 재시작/장애 복구 직후 cold-start cliff 제거. 첫 1~2분 P99
   outlier 사라짐 → PinVi가 부팅 직후 호출해도 정상 SLO.
-- `feature_coord_5179_gist`, `feature_kind_idx`, `ops.import_jobs`,
-  `feature_place_details` 같은 핫 path 인덱스/테이블을 부팅 시
+- `idx_features_coord_5179_gist`, `idx_features_kind_category`, `ops.import_jobs`,
+  `feature.feature_places` 같은 핫 path 인덱스/테이블을 부팅 시
   `shared_buffers`에 강제 로드.
 - `pg_prewarm` extension은 PostgreSQL 표준 (contrib), 추가 클러스터 인프라
   불필요.
@@ -820,8 +828,9 @@ PostGIS/testcontainers baseline으로 고정했다. 로컬 live DB 확인 결과
   - `idx_features_updated_keyset(updated_at DESC, feature_id DESC)`
   - `idx_features_status_updated(status, updated_at DESC, feature_id DESC)`
   - `idx_features_lower_name_keyset(lower(name), feature_id)`
-  - `idx_features_opening_hours_keyset(feature_id)` partial:
-    `deleted_at IS NULL AND detail ?| ARRAY['business_hours','opening_hours']`
+  - 운영시간 보유 feature keyset partial은 subtype이 갖는다 (ADR-086) —
+    `idx_feature_places_opening_hours(feature_id)` partial `business_hours IS NOT NULL`,
+    `idx_feature_events_opening_hours(feature_id)` partial `opening_hours IS NOT NULL`
 - `ops.import_jobs`
   - `idx_import_jobs_created_keyset(created_at DESC, job_id DESC)`
   - `idx_import_jobs_status(status, created_at, queue_sequence)` — claim FIFO tie-breaker

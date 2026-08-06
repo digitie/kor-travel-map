@@ -3355,6 +3355,10 @@ export interface components {
         /**
          * AdminFeatureCreateRequest
          * @description ``POST /admin/features`` body.
+         *
+         *     ``detail``은 kind 계약(place/event)에 맞아야 한다 — DTO에 없는 키는
+         *     거부되므로 provider 원문은 ``detail.payload`` 아래 둔다. 생략하면 kind
+         *     기본값으로 채운다. 맞지 않으면 422다.
          */
         AdminFeatureCreateRequest: {
             /** Address */
@@ -3377,8 +3381,6 @@ export interface components {
              * @description 기존 provider feature와 겹치는 사용자 version을 만들 때 명시한다. 미지정 시 user_request 자연키로 새 feature_id를 생성한다.
              */
             feature_id?: string | null;
-            /** Geom */
-            geom?: string | null;
             /**
              * Idempotency Key
              * @description feature_id 미지정 시 source_natural_key로 쓰는 caller-provided key.
@@ -3920,8 +3922,6 @@ export interface components {
             detail?: {
                 [key: string]: unknown;
             } | null;
-            /** Geom */
-            geom?: string | null;
             /** Legal Dong Code */
             legal_dong_code?: string | null;
             /** Marker Color */
