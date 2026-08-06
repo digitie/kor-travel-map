@@ -20,7 +20,8 @@ _MANIFEST_NAME: Final = "_application_migration_graph.json"
 _GRAPH_SCHEMA: Final = "kor-travel-map.application-migration-graph.v1"
 _HEAD_SCHEMA: Final = "kor-travel-map.application-head.v1"
 _ERROR_SCHEMA: Final = "kor-travel-map.application-head-error.v1"
-_REVISION_PATTERN: Final = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
+# Docker Manager F1D-C2의 pinned runtime receipt parser와 같은 정본 문법이다.
+_REVISION_PATTERN: Final = re.compile(r"^[0-9a-z][0-9a-z_.-]{0,127}$")
 
 
 class ApplicationSchemaHeadError(RuntimeError):
@@ -99,6 +100,23 @@ def _application_head(payload: object) -> str:
         reachable.add(revision)
         pending.extend(children.get(revision, ()))
     if reachable != revisions:
+        raise ApplicationSchemaHeadError("application_graph_invalid")
+
+    visit_state: dict[str, int] = {}
+
+    def _visit(revision: str) -> None:
+        state = visit_state.get(revision, 0)
+        if state == 1:
+            raise ApplicationSchemaHeadError("application_graph_invalid")
+        if state == 2:
+            return
+        visit_state[revision] = 1
+        for child in children.get(revision, ()):
+            _visit(child)
+        visit_state[revision] = 2
+
+    _visit(next(iter(roots)))
+    if len(visit_state) != len(revisions):
         raise ApplicationSchemaHeadError("application_graph_invalid")
     heads = revisions.difference(parents)
     if len(heads) != 1:

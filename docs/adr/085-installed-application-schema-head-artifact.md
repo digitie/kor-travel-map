@@ -20,8 +20,9 @@ terminal Alembic revision을 `kor-travel-map.application-head.v1` JSON으로 출
 
 artifact는 source `alembic/versions`의 module-top-level literal assignment를 AST로만 읽어
 생성한다. 새 migration PR은 generator `--check` equality를 통과해야 한다. graph가 dynamic,
-중복, orphan, zero/multiple head이면 command는 migration·DB 접속·application import 없이
-fail-closed한다.
+중복, orphan, cycle, zero/multiple head이면 generator와 command는 migration·DB 접속·
+application import 없이 fail-closed한다. 출력 head 문법은 Docker Manager와 동일한
+`^[0-9a-z][0-9a-z_.-]{0,127}$`로 고정한다.
 
 ## 근거
 

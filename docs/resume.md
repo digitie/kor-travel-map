@@ -5,7 +5,8 @@
 후보 API image의 `ktm-application-schema head`는 installed package의 immutable application
 migration graph만 읽어 단일 Alembic head를 JSON으로 attest한다. cwd/source mount/DB/환경변수와
 application·migration module import를 모두 경계 밖으로 두고, source AST literal graph와
-artifact equality를 회귀로 고정했다.
+artifact equality를 회귀로 고정했다. 적대 리뷰 반영으로 generator/image command 양쪽이
+root-connected cycle을 거부하며 Manager와 같은 revision 문법을 사용한다.
 
 **다음 한 작업**: C0a의 적대 리뷰·CI·merge 뒤 Docker Manager F1D-C2가 Map application,
 Dagster storage, PinVi 후보 head를 모두 attest하고 destructive rebuild를 진행한다.

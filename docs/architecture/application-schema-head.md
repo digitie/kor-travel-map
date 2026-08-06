@@ -27,6 +27,10 @@ ktm-application-schema head
 {"schema":"kor-travel-map.application-head-error.v1","code":"<stable-code>"}
 ```
 
+`head`는 Docker Manager candidate receipt parser와 동일한
+`^[0-9a-z][0-9a-z_.-]{0,127}$` 문법만 허용한다. Map과 Manager는 이 문법을 독립적으로
+완화하거나 확장하지 않는다.
+
 ## 정본과 검증
 
 `src/kortravelmap/_application_migration_graph.json`은 package data로 후보 API 이미지에
@@ -37,8 +41,8 @@ DB와 application/Alembic module import가 head 판정에 영향을 줄 수 없�
 artifact의 source는 `alembic/versions/*.py`의 module-top-level `revision`과
 `down_revision` literal AST다. `scripts/generate_application_migration_graph.py`는 migration
 module을 import·실행하지 않으며 dynamic assignment, 중복 revision, unknown parent를
-fail-closed한다. 명령도 graph의 root가 하나이고 모든 revision이 root에서 도달 가능하며
-terminal head가 정확히 하나일 때만 성공한다.
+fail-closed한다. generator와 명령 모두 graph의 root가 하나이고 모든 revision이 root에서
+도달 가능하며 DFS cycle이 없고 terminal head가 정확히 하나일 때만 성공한다.
 
 새 application migration을 추가할 때는 다음을 함께 실행해 artifact를 갱신·검증한다.
 

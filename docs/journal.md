@@ -13,6 +13,9 @@
   AST로 읽어 생성하며 generator `--check`가 checked-in equality를 고정한다. top-level side
   effect 미실행, cwd decoy 무시, zero/multiple/unknown head 거부와 API image command/package-data
   결선을 unit regression으로 추가했다.
+- 적대 리뷰 P1/P2를 반영해 generator와 image command 모두 root 도달성뿐 아니라 DFS cycle
+  부재와 단일 terminal head를 검증하게 했고, Docker Manager와 같은
+  `^[0-9a-z][0-9a-z_.-]{0,127}$` revision 문법의 경계·거부 회귀를 고정했다.
 
 ## 2026-08-06 (codex) — T-VN-41F1D-C0 Dagster storage migration artifact 완료
 

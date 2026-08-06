@@ -129,6 +129,53 @@ def test_application_graph_artifact_matches_literal_source_graph() -> None:
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
+    "revision",
+    [
+        "0",
+        "a.b-c",
+        "a" + "0" * 127,
+    ],
+)
+def test_application_head_uses_manager_schema_revision_grammar(revision: str) -> None:
+    """Map output은 Manager C2의 ``[0-9a-z][0-9a-z_.-]{0,127}``와 같아야 한다."""
+    command = _command_module()
+    generator = _generator_module()
+
+    assert command._revision_id(revision) == revision
+    assert generator._revision_id(
+        revision,
+        path=Path("migration.py"),
+        field="revision",
+    ) == revision
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "revision",
+    [
+        "",
+        "A",
+        "_first",
+        "a/slash",
+        "a" * 129,
+    ],
+)
+def test_application_head_rejects_revision_outside_manager_grammar(revision: str) -> None:
+    command = _command_module()
+    generator = _generator_module()
+
+    with pytest.raises(command.ApplicationSchemaHeadError):
+        command._revision_id(revision)
+    with pytest.raises(generator.ApplicationMigrationGraphError):
+        generator._revision_id(
+            revision,
+            path=Path("migration.py"),
+            field="revision",
+        )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
     ("revisions", "error_code"),
     [
         ([], "application_graph_invalid"),
@@ -147,9 +194,9 @@ def test_application_graph_artifact_matches_literal_source_graph() -> None:
         (
             [
                 {"revision": "root", "down_revision": []},
-                {"revision": "head", "down_revision": ["root"]},
-                {"revision": "cycle_a", "down_revision": ["cycle_b"]},
+                {"revision": "cycle_a", "down_revision": ["root", "cycle_b"]},
                 {"revision": "cycle_b", "down_revision": ["cycle_a"]},
+                {"revision": "head", "down_revision": ["cycle_b"]},
             ],
             "application_graph_invalid",
         ),
@@ -182,6 +229,30 @@ def test_application_head_fails_closed_for_invalid_or_ambiguous_graph(
         "schema": "kor-travel-map.application-head-error.v1",
         "code": error_code,
     }
+
+
+@pytest.mark.unit
+def test_generator_rejects_root_connected_cycle_with_single_terminal_head(
+    tmp_path: Path,
+) -> None:
+    """build artifact 단계도 runtime과 같은 root-connected cycle을 거부한다."""
+    generator = _generator_module()
+    versions = tmp_path / "versions"
+    versions.mkdir()
+    for filename, revision, down_revision in (
+        ("0001_root.py", "root", "None"),
+        ("0002_cycle_a.py", "cycle_a", "('root', 'cycle_b')"),
+        ("0003_cycle_b.py", "cycle_b", "'cycle_a'"),
+        ("0004_head.py", "head", "'cycle_b'"),
+    ):
+        (versions / filename).write_text(
+            f"revision = {revision!r}\n"
+            f"down_revision = {down_revision}\n",
+            encoding="utf-8",
+        )
+
+    with pytest.raises(generator.ApplicationMigrationGraphError, match="cycle"):
+        generator.build_application_migration_graph(versions)
 
 
 @pytest.mark.unit

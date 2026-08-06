@@ -19,7 +19,8 @@ from pathlib import Path
 from typing import Final
 
 _GRAPH_SCHEMA: Final = "kor-travel-map.application-migration-graph.v1"
-_REVISION_PATTERN: Final = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
+# Docker Manager F1D-C2의 candidate head parser와 같은 정본 문법이다.
+_REVISION_PATTERN: Final = re.compile(r"^[0-9a-z][0-9a-z_.-]{0,127}$")
 _ROOT: Final = Path(__file__).resolve().parents[1]
 _DEFAULT_VERSIONS_DIRECTORY: Final = _ROOT / "alembic" / "versions"
 _DEFAULT_OUTPUT: Final = _ROOT / "src" / "kortravelmap" / "_application_migration_graph.json"
@@ -89,6 +90,62 @@ def _down_revisions(value: object, *, path: Path) -> list[str]:
     )
 
 
+def _validate_graph(
+    revisions: list[dict[str, object]],
+    *,
+    revision_ids: set[str],
+    referenced_parents: set[str],
+) -> None:
+    """root 도달성·acyclic·단일 terminal head를 source 단계에서 함께 고정한다."""
+    unknown_parents = referenced_parents.difference(revision_ids)
+    if unknown_parents:
+        raise ApplicationMigrationGraphError(
+            "application migration graph has unknown parents: "
+            + ", ".join(sorted(unknown_parents))
+        )
+
+    roots: set[str] = set()
+    children: dict[str, set[str]] = {}
+    for record in revisions:
+        revision = record["revision"]
+        down_revision = record["down_revision"]
+        if not isinstance(revision, str) or not isinstance(down_revision, list):
+            raise ApplicationMigrationGraphError("application migration graph is invalid")
+        if not down_revision:
+            roots.add(revision)
+        for parent in down_revision:
+            if not isinstance(parent, str):
+                raise ApplicationMigrationGraphError("application migration graph is invalid")
+            children.setdefault(parent, set()).add(revision)
+    if len(roots) != 1:
+        raise ApplicationMigrationGraphError(
+            "application migration graph must have exactly one root"
+        )
+
+    visit_state: dict[str, int] = {}
+
+    def _visit(revision: str) -> None:
+        state = visit_state.get(revision, 0)
+        if state == 1:
+            raise ApplicationMigrationGraphError("application migration graph contains a cycle")
+        if state == 2:
+            return
+        visit_state[revision] = 1
+        for child in children.get(revision, ()):
+            _visit(child)
+        visit_state[revision] = 2
+
+    _visit(next(iter(roots)))
+    if set(visit_state) != revision_ids:
+        raise ApplicationMigrationGraphError(
+            "application migration graph has revisions unreachable from its root"
+        )
+    if len(revision_ids.difference(referenced_parents)) != 1:
+        raise ApplicationMigrationGraphError(
+            "application migration graph must have exactly one terminal head"
+        )
+
+
 def build_application_migration_graph(versions_directory: Path) -> dict[str, object]:
     """Alembic module을 실행하지 않고 정규화된 graph artifact를 만든다."""
     paths = sorted(versions_directory.glob("*.py"))
@@ -126,12 +183,11 @@ def build_application_migration_graph(versions_directory: Path) -> dict[str, obj
             }
         )
 
-    unknown_parents = referenced_parents.difference(seen)
-    if unknown_parents:
-        raise ApplicationMigrationGraphError(
-            "application migration graph has unknown parents: "
-            + ", ".join(sorted(unknown_parents))
-        )
+    _validate_graph(
+        revisions,
+        revision_ids=seen,
+        referenced_parents=referenced_parents,
+    )
     return {"schema": _GRAPH_SCHEMA, "revisions": revisions}
 
 
