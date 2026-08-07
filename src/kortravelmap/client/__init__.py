@@ -188,6 +188,9 @@ from kortravelmap.infra.feature_repo import (
     supersede_stale_notice_features,
 )
 from kortravelmap.infra.feature_repo import (
+    resolve_active_provider_dataset_id,
+)
+from kortravelmap.infra.feature_repo import (
     features_nearby as repo_features_nearby,
 )
 from kortravelmap.infra.feature_repo import (
@@ -259,6 +262,7 @@ from kortravelmap.infra.integrity_violation_repo import (
     purge_resolved_integrity_findings,
     sync_integrity_findings,
 )
+from kortravelmap.infra.jobs_repo import ImportJobDatasetTarget
 from kortravelmap.infra.jobs_repo import ImportJobEvent
 from kortravelmap.infra.merge_repo import MergeOutcome, merge_from_review
 from kortravelmap.infra.poi_cache_target_repo import (
@@ -1168,10 +1172,12 @@ class AsyncKorTravelMapClient:
         """불변 observation generation을 authoritative finalize한다. 한 transaction."""
 
         async with self._session_factory() as session, session.begin():
+            provider_dataset_id = await resolve_active_provider_dataset_id(
+                session, provider=provider, dataset_key=dataset_key
+            )
             return await close_stale_integrity_findings(
                 session,
-                provider=provider,
-                dataset_key=dataset_key,
+                provider_dataset_id=provider_dataset_id,
                 run_id=run_id,
                 receipt=receipt,
             )
@@ -1567,8 +1573,7 @@ class AsyncKorTravelMapClient:
         self,
         *,
         scope: Mapping[str, Any],
-        providers: Sequence[str] | None = None,
-        dataset_keys: Sequence[str] | None = None,
+        dataset_memberships: Sequence[ImportJobDatasetTarget] | None = None,
         update_policy: Mapping[str, Any] | None = None,
         run_mode: str = "queued",
         priority: int = 50,
@@ -1581,8 +1586,7 @@ class AsyncKorTravelMapClient:
             return await repo_enqueue_feature_update_request(
                 session,
                 scope=scope,
-                providers=providers,
-                dataset_keys=dataset_keys,
+                dataset_memberships=dataset_memberships,
                 update_policy=update_policy,
                 run_mode=run_mode,
                 priority=priority,
@@ -1595,8 +1599,7 @@ class AsyncKorTravelMapClient:
         self,
         *,
         scope: Mapping[str, Any],
-        providers: Sequence[str] | None = None,
-        dataset_keys: Sequence[str] | None = None,
+        dataset_memberships: Sequence[ImportJobDatasetTarget] | None = None,
         update_policy: Mapping[str, Any] | None = None,
         run_mode: str = "queued",
         priority: int = 50,
@@ -1607,8 +1610,7 @@ class AsyncKorTravelMapClient:
             return await repo_preview_feature_update_request(
                 session,
                 scope=scope,
-                providers=providers,
-                dataset_keys=dataset_keys,
+                dataset_memberships=dataset_memberships,
                 update_policy=update_policy,
                 run_mode=run_mode,
                 priority=priority,
@@ -2239,7 +2241,12 @@ class AsyncKorTravelMapClient:
     # ─── provider sync state (T-213g) ───────────────────────────────────────
 
     async def get_sync_state(
-        self, *, provider: str, dataset_key: str, sync_scope: str = "default"
+        self,
+        *,
+        provider: str,
+        dataset_key: str,
+        operation_key: str,
+        sync_scope: str = "dataset_wide",
     ) -> SyncState | None:
         """provider/dataset/scope 1건 sync state. 없으면 ``None`` (read)."""
         async with self._session_factory() as session:
@@ -2247,6 +2254,7 @@ class AsyncKorTravelMapClient:
                 session,
                 provider=provider,
                 dataset_key=dataset_key,
+                operation_key=operation_key,
                 sync_scope=sync_scope,
             )
 
@@ -2283,7 +2291,8 @@ class AsyncKorTravelMapClient:
         *,
         provider: str,
         dataset_key: str,
-        sync_scope: str = "default",
+        operation_key: str,
+        sync_scope: str = "dataset_wide",
         cursor: dict[str, Any],
         next_run_after: datetime | None = None,
     ) -> SyncState:
@@ -2293,6 +2302,7 @@ class AsyncKorTravelMapClient:
                 session,
                 provider=provider,
                 dataset_key=dataset_key,
+                operation_key=operation_key,
                 sync_scope=sync_scope,
                 cursor=cursor,
                 next_run_after=next_run_after,
@@ -2319,7 +2329,8 @@ class AsyncKorTravelMapClient:
         *,
         provider: str,
         dataset_key: str,
-        sync_scope: str = "default",
+        operation_key: str,
+        sync_scope: str = "dataset_wide",
         next_run_after: datetime | None = None,
     ) -> SyncState:
         """적재 실패 기록 — cursor 미전진 + last_failure_at + 연속 실패 +1 (write)."""
@@ -2328,6 +2339,7 @@ class AsyncKorTravelMapClient:
                 session,
                 provider=provider,
                 dataset_key=dataset_key,
+                operation_key=operation_key,
                 sync_scope=sync_scope,
                 next_run_after=next_run_after,
             )
@@ -2579,10 +2591,12 @@ class AsyncKorTravelMapClient:
         rows = [deduped[key] for key in sorted(deduped)]
         try:
             async with self._session_factory() as session, session.begin():
+                provider_dataset_id = await resolve_active_provider_dataset_id(
+                    session, provider=provider, dataset_key=dataset_key
+                )
                 upserted = await sync_integrity_findings(
                     session,
-                    provider=provider,
-                    dataset_key=dataset_key,
+                    provider_dataset_id=provider_dataset_id,
                     findings=rows,
                     external_run_id=run_id,
                 )

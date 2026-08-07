@@ -292,18 +292,20 @@ _DATASET_SEED: Final[tuple[tuple[str, str, str, str, str, str | None], ...]] = (
     (
         "python-mois-api",
         "mois_license_features_closed",
-        "MOIS 인허가 closed (폐업 tombstone/inactive; 전용 runner 준비 전)",
+        "MOIS 인허가 closed (폐업 tombstone/inactive)",
         "place",
         "dataset_wide",
-        None,
+        # `mois.py`가 이 dataset으로 import job을 시작하고 sync state를 기록한다.
+        # operation이 없으면 membership triple을 만들 수 없어 23503으로 죽는다.
+        "mois_license_closed_update",
     ),
     (
         "python-mois-api",
         "mois_license_detail",
-        "MOIS 인허가 상세(detail) 보강 (전용 secondary-source runner 준비 전)",
+        "MOIS 인허가 상세(detail) 보강",
         "place",
         "dataset_wide",
-        None,
+        "mois_license_detail_update",
     ),
     (
         "python-visitkorea-api",
@@ -775,6 +777,8 @@ def _create_provider_dataset_schema() -> None:
             sync_scope text NOT NULL,
             operation_key text NOT NULL,
             operation_kind text NOT NULL DEFAULT 'refresh',
+            -- 중간 단계에서는 pair PK를 쓴다. 0090의 membership FK가 아직
+            -- operation_key 열을 갖지 않기 때문이다. 0091이 triple로 승격한다.
             CONSTRAINT pk_provider_dataset_operation_scopes PRIMARY KEY (
                 provider_dataset_id, sync_scope
             ),
@@ -1017,8 +1021,14 @@ def _expand_lineage_and_ownership_columns() -> None:
         WHERE dataset.provider = source.provider
           AND dataset.dataset_key = source.dataset_key;
 
+        -- offline upload도 실행 membership이므로 triple을 갖는다(ADR-088 §결정 2).
+        -- 기존 행에는 operation이 없으므로 그 dataset+scope의 refresh operation에서
+        -- 유도한다. scope PK가 triple이라 후보가 여럿일 수 있는데, 과거 upload는
+        -- pair로만 식별됐으므로 결정적으로 고르려면 하나여야 한다 —
+        -- 아래 preflight가 그 조건을 검사한다.
         ALTER TABLE ops.offline_uploads
-            ADD COLUMN provider_dataset_id bigint;
+            ADD COLUMN provider_dataset_id bigint,
+            ADD COLUMN operation_key text;
         UPDATE ops.offline_uploads AS upload
         SET provider_dataset_id = dataset.provider_dataset_id,
             sync_scope = CASE
@@ -1028,6 +1038,11 @@ def _expand_lineage_and_ownership_columns() -> None:
         FROM provider_sync.provider_datasets AS dataset
         WHERE dataset.provider = upload.provider
           AND dataset.dataset_key = upload.dataset_key;
+        UPDATE ops.offline_uploads AS upload
+        SET operation_key = scope.operation_key
+        FROM provider_sync.provider_dataset_operation_scopes AS scope
+        WHERE scope.provider_dataset_id = upload.provider_dataset_id
+          AND scope.sync_scope = upload.sync_scope;
 
         ALTER TABLE ops.provider_refresh_policies
             ADD COLUMN provider_dataset_id bigint;
@@ -1096,6 +1111,28 @@ def _expand_lineage_and_ownership_columns() -> None:
         SET provider_name = provider
         WHERE provider_dataset_id IS NULL AND provider IS NOT NULL;
         """
+    )
+
+
+def _preflight_offline_upload_operation_is_unambiguous() -> None:
+    """기존 offline upload가 정확히 하나의 refresh operation으로 해석되는지 본다.
+
+    upload는 종전에 (provider, dataset_key, sync_scope) pair로만 식별됐다. triple로
+    올리면서 operation을 유도해야 하는데, 같은 scope에 refresh operation이 둘 이상
+    등록돼 있으면 어느 것을 골라도 임의 선택이다 — 조용히 고르지 않고 중단한다.
+    """
+    _preflight_or_raise(
+        "offline upload scope resolves to more than one refresh operation",
+        """
+        SELECT upload.upload_id
+        FROM ops.offline_uploads AS upload
+        JOIN provider_sync.provider_dataset_operation_scopes AS scope
+          ON scope.provider_dataset_id = upload.provider_dataset_id
+         AND scope.sync_scope = upload.sync_scope
+        GROUP BY upload.upload_id
+        HAVING count(*) <> 1
+        """,
+        "Record the operation explicitly on the upload before migrating.",
     )
 
 
@@ -1326,6 +1363,7 @@ def upgrade() -> None:
     _preflight_write_targets_are_active()
     _normalize_payload_hashes()
     _expand_lineage_and_ownership_columns()
+    _preflight_offline_upload_operation_is_unambiguous()
     _preflight_scope_memberships()
     _expand_job_and_request_membership()
 

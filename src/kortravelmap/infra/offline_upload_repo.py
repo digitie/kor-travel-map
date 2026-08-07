@@ -59,7 +59,7 @@ __all__ = [
 ]
 
 _RETURN_COLUMNS: Final[str] = (
-    "upload_id, provider_dataset_id, sync_scope, original_filename, "
+    "upload_id, provider_dataset_id, sync_scope, operation_key, original_filename, "
     "storage_backend, storage_key, byte_size, checksum_sha256, detected_format, "
     "detected_encoding, status, validation_job_id, load_job_id, created_by, "
     "delete_command_id, created_at, updated_at"
@@ -75,6 +75,7 @@ class OfflineUpload:
     upload_id: str
     provider_dataset_id: int
     sync_scope: str
+    operation_key: str
     original_filename: str
     storage_backend: str
     storage_key: str
@@ -96,6 +97,7 @@ class OfflineUpload:
             "upload_id": self.upload_id,
             "provider_dataset_id": self.provider_dataset_id,
             "sync_scope": self.sync_scope,
+            "operation_key": self.operation_key,
             "original_filename": self.original_filename,
             "storage_backend": self.storage_backend,
             "storage_key": self.storage_key,
@@ -145,6 +147,7 @@ def _row_to_upload(row: Any) -> OfflineUpload:
         upload_id=str(data["upload_id"]),
         provider_dataset_id=int(data["provider_dataset_id"]),
         sync_scope=str(data["sync_scope"]),
+        operation_key=str(data["operation_key"]),
         original_filename=str(data["original_filename"]),
         storage_backend=str(data["storage_backend"]),
         storage_key=str(data["storage_key"]),
@@ -192,12 +195,12 @@ def _decode_cursor(cursor: str | None) -> tuple[datetime | None, str | None]:
 
 _INSERT_SQL: Final[str] = f"""
 INSERT INTO ops.offline_uploads (
-    upload_id, provider_dataset_id, sync_scope, original_filename,
+    upload_id, provider_dataset_id, sync_scope, operation_key, original_filename,
     storage_backend, storage_key, byte_size, checksum_sha256,
     detected_format, detected_encoding, created_by
 ) VALUES (
     COALESCE(CAST(:upload_id AS uuid), x_extension.gen_random_uuid()),
-    :provider_dataset_id, :sync_scope, :original_filename,
+    :provider_dataset_id, :sync_scope, :operation_key, :original_filename,
     :storage_backend, :storage_key, :byte_size, :checksum_sha256,
     :detected_format, :detected_encoding, :created_by
 )
@@ -206,11 +209,11 @@ RETURNING {_RETURN_COLUMNS}
 
 _RESERVE_SQL: Final[str] = f"""
 INSERT INTO ops.offline_uploads (
-    upload_id, provider_dataset_id, sync_scope, original_filename,
+    upload_id, provider_dataset_id, sync_scope, operation_key, original_filename,
     storage_backend, storage_key, byte_size, checksum_sha256,
     detected_format, detected_encoding, status, created_by
 ) VALUES (
-    CAST(:upload_id AS uuid), :provider_dataset_id, :sync_scope,
+    CAST(:upload_id AS uuid), :provider_dataset_id, :sync_scope, :operation_key,
     :original_filename, :storage_backend, :storage_key, :byte_size,
     :checksum_sha256, :detected_format, :detected_encoding, 'uploading',
     :created_by

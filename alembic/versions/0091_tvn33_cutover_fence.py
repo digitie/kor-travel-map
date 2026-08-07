@@ -326,9 +326,34 @@ def _freeze_feature_update_operation_memberships() -> None:
     )
     _execute_sql_script(
         """
+        -- 실행 membership identity는 triple이다(ADR-088 §결정 2). 여기서 scope PK를
+        -- 승격한다 — 0089/0090은 membership 열이 아직 없어 pair PK를 쓴다.
+        -- pair PK로 남기면 한 dataset의 한 scope에 refresh operation을 **하나만**
+        -- 등록할 수 있고, UNIQUE로 triple을 걸어도 더 강한 PK가 이긴다.
+        -- pair PK를 참조하는 중간 FK를 먼저 떼야 PK를 바꿀 수 있다. 아래에서
+        -- 각 테이블이 triple FK로 다시 붙는다.
+        ALTER TABLE provider_sync.provider_sync_state
+            DROP CONSTRAINT IF EXISTS fk_provider_sync_state_scope;
+        ALTER TABLE ops.import_job_datasets
+            DROP CONSTRAINT IF EXISTS fk_import_job_datasets_scope;
+        ALTER TABLE ops.feature_update_request_datasets
+            DROP CONSTRAINT IF EXISTS fk_feature_update_request_datasets_scope;
+        ALTER TABLE ops.offline_uploads
+            DROP CONSTRAINT IF EXISTS fk_offline_uploads_scope;
+
         ALTER TABLE provider_sync.provider_dataset_operation_scopes
-            ADD CONSTRAINT uq_provider_dataset_operation_scopes_exact_identity
-            UNIQUE (provider_dataset_id, sync_scope, operation_key);
+            DROP CONSTRAINT IF EXISTS pk_provider_dataset_operation_scopes,
+            ADD CONSTRAINT pk_provider_dataset_operation_scopes
+                PRIMARY KEY (provider_dataset_id, sync_scope, operation_key);
+
+        -- offline upload도 실행 membership이므로 같은 triple을 참조한다.
+        ALTER TABLE ops.offline_uploads
+            ALTER COLUMN operation_key SET NOT NULL,
+            ADD CONSTRAINT fk_offline_uploads_exact_operation_scope
+            FOREIGN KEY (provider_dataset_id, sync_scope, operation_key)
+            REFERENCES provider_sync.provider_dataset_operation_scopes (
+                provider_dataset_id, sync_scope, operation_key
+            ) ON DELETE RESTRICT;
 
         ALTER TABLE provider_sync.provider_sync_state
             ADD COLUMN operation_key text;

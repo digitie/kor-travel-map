@@ -541,6 +541,7 @@ async def run_mois_license_closed_job(
                 session,
                 provider=PROVIDER_NAME,
                 dataset_key=DATASET_KEY_CLOSED,
+                operation_key=_CLOSED_JOB_KIND,
                 sync_scope=sync_scope,
             )
             await finish_import_job(
@@ -551,6 +552,7 @@ async def run_mois_license_closed_job(
             session,
             provider=PROVIDER_NAME,
             dataset_key=DATASET_KEY_CLOSED,
+            operation_key=_CLOSED_JOB_KIND,
             sync_scope=sync_scope,
             cursor=new_cursor,
         )

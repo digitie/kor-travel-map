@@ -2229,31 +2229,50 @@ class _SourceRecordUpsertState:
     became_current: bool
 
 
-async def _upsert_source_record_state(
-    session: AsyncSession, record: SourceRecord
-) -> _SourceRecordUpsertState:
+async def resolve_active_provider_dataset_id(
+    session: AsyncSession, *, provider: str, dataset_key: str, lock: bool = False
+) -> int:
+    """활성 ``provider_datasets`` 행의 대리 키를 찾는다 (T-VN-33, ADR-088).
+
+    문자열 pair를 받는 **경계**(공개 facade·admin 입력·provider 변환)에서만 쓴다.
+    내부 경로는 ``provider_dataset_id``를 그대로 들고 다닌다 — 그래야 record마다
+    조회가 붙지 않는다.
+
+    inactive이거나 seed되지 않았으면 ``LookupError``다. 조용히 NULL로 넘기면
+    cutover 뒤 첫 write가 ``ck_provider_dataset_active_write``로 죽는데, 그때는
+    어느 pair가 문제인지 알 수 없다.
+    """
+    lock_clause = "FOR SHARE" if lock else ""
     provider_dataset_id = (
         await session.execute(
             text(
-                """
+                f"""
                 SELECT provider_dataset_id
                 FROM provider_sync.provider_datasets
                 WHERE provider = :provider
                   AND dataset_key = :dataset_key
                   AND is_active
-                FOR SHARE
+                {lock_clause}
                 """
             ),
-            {"provider": record.provider, "dataset_key": record.dataset_key},
+            {"provider": provider, "dataset_key": dataset_key},
         )
     ).scalar_one_or_none()
     if provider_dataset_id is None:
         raise LookupError(
-            "no active provider dataset is seeded for "
-            f"{record.provider!r}/{record.dataset_key!r}"
+            f"no active provider dataset is seeded for {provider!r}/{dataset_key!r}"
         )
+    return int(provider_dataset_id)
 
-    params = _source_record_params(record, provider_dataset_id=int(provider_dataset_id))
+
+async def _upsert_source_record_state(
+    session: AsyncSession, record: SourceRecord
+) -> _SourceRecordUpsertState:
+    provider_dataset_id = await resolve_active_provider_dataset_id(
+        session, provider=record.provider, dataset_key=record.dataset_key, lock=True
+    )
+
+    params = _source_record_params(record, provider_dataset_id=provider_dataset_id)
     await session.execute(text(_UPSERT_SOURCE_ENTITY_SQL), params)
     row = (await session.execute(text(_UPSERT_SOURCE_RECORD_SQL), params)).mappings().one()
     inserted = bool(row["inserted"])
