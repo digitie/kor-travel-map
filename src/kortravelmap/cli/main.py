@@ -51,7 +51,7 @@ from kortravelmap.cli.consistency_report import (
 from kortravelmap.cli.mutex import dedup_merge_lock_key, try_mutex_lock
 from kortravelmap.cli.records import iter_mois_license_records
 from kortravelmap.client import AsyncKorTravelMapClient
-from kortravelmap.core import kst_now
+from kortravelmap.core import DATASET_WIDE_SYNC_SCOPE, kst_now
 from kortravelmap.core.exceptions import GeoAuthNotConfiguredError
 from kortravelmap.infra.consistency import (
     DEDUP_PENDING_WARN_THRESHOLD,
@@ -213,8 +213,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     mois_p.add_argument(
         "--sync-scope",
-        default="default",
-        help="incremental cursor scope (provider_sync_state.sync_scope, 기본 default).",
+        default=DATASET_WIDE_SYNC_SCOPE,
+        help=(
+            "incremental cursor scope (provider_sync_state.sync_scope, 기본 "
+            f"{DATASET_WIDE_SYNC_SCOPE})."
+        ),
     )
     mois_p.add_argument(
         "--batch-size",

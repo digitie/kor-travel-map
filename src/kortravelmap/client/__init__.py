@@ -56,6 +56,7 @@ from kortravelmap.core.feature_operation import (
     ProviderDatasetOperationKey,
     ProviderDatasetOperationMembership,
 )
+from kortravelmap.core.sync_scope import DATASET_WIDE_SYNC_SCOPE
 from kortravelmap.enrichment import (
     PhoneEnrichmentCandidate,
     PhoneEnrichmentResult,
@@ -1422,7 +1423,7 @@ class AsyncKorTravelMapClient:
         fetched_at: datetime,
         new_cursor: dict[str, Any],
         dataset_key: str = MOIS_DATASET_KEY_HISTORY,
-        sync_scope: str = "default",
+        sync_scope: str = DATASET_WIDE_SYNC_SCOPE,
         reverse_geocoder: ReverseGeocoder | None = None,
         address_resolver: AddressResolver | None = None,
         source_checksum: str | None = None,
@@ -1456,7 +1457,7 @@ class AsyncKorTravelMapClient:
         *,
         new_cursor: dict[str, Any],
         target_dataset_key: str = MOIS_DATASET_KEY_BULK,
-        sync_scope: str = "default",
+        sync_scope: str = DATASET_WIDE_SYNC_SCOPE,
         source_checksum: str | None = None,
     ) -> MoisClosedJobResult:
         """MOIS Step C 폐업/취소 — 대응 feature를 inactive로 전환(ADR-017).

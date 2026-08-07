@@ -162,7 +162,7 @@ def test_parser_import_mois_minimal() -> None:
     assert args.dataset_key is None
     assert args.mode == "bulk"
     assert args.cursor is None
-    assert args.sync_scope == "default"
+    assert args.sync_scope == "dataset_wide"
     assert args.geocoder_url is None
     assert hasattr(args, "func")
 
