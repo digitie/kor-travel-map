@@ -392,7 +392,11 @@ async def _skip_opinet_if_already_succeeded_today(
     실패 run은 success 시각을 전진시키지 않아 같은 날 재시도할 수 있다.
     """
     membership = await _exact_sync_membership(
-        context, client, boundary="opinet_sync_state"
+        context,
+        client,
+        boundary="opinet_sync_state",
+        provider=OPINET_PROVIDER_NAME,
+        dataset_key=dataset_key,
     )
     state = await client.get_sync_state_for_operation_membership(membership=membership)
     last_success_at = state.last_success_at if state is not None else None
@@ -724,7 +728,11 @@ async def _guard_notice_snapshot_watermark(
             watermarks.append(scope_watermark)
 
     membership = await _exact_sync_membership(
-        context, client, boundary="notice_snapshot_watermark"
+        context,
+        client,
+        boundary="notice_snapshot_watermark",
+        provider=provider,
+        dataset_key=dataset_key,
     )
     state = await get_sync_state(membership=membership)
     if state is not None:
@@ -1587,6 +1595,8 @@ async def _exact_sync_membership(
     client: "AsyncKorTravelMapClient",
     *,
     boundary: str,
+    provider: str,
+    dataset_key: str,
 ) -> ProviderDatasetOperationMembership:
     """sync-state 읽기·쓰기에 쓸 **exact** membership을 얻는다.
 
@@ -1629,12 +1639,21 @@ async def _exact_sync_membership(
             boundary=boundary,
             reason="membership_snapshot_changed",
         )
-    if len(memberships) != 1:
+    # 한 operation이 여러 dataset을 다루는 경우가 있다(예: KNPS point는 5개).
+    # 그래서 "정확히 하나"로는 고를 수 없고, **이번 호출이 적재한 dataset**으로
+    # 좁힌다. operation은 여전히 guard가 준 것이므로 label에서 역산하는 것이
+    # 아니다 — guard가 고정한 membership 집합 안에서 고르기만 한다.
+    membership = await client.resolve_feature_operation_dataset_membership(
+        operation_key=guard.operation_key,
+        provider=provider,
+        dataset_key=dataset_key,
+    )
+    if membership not in memberships:
         raise FeatureOperationGuardUnavailable(
             boundary=boundary,
-            reason="operation_requires_exactly_one_membership",
+            reason="membership_outside_guard_snapshot",
         )
-    return memberships[0]
+    return membership
 
 
 async def _record_feature_sync_success(
@@ -1663,7 +1682,11 @@ async def _record_feature_sync_success(
         **cursor_extra,
     }
     membership = await _exact_sync_membership(
-        context, client, boundary="feature_sync_state"
+        context,
+        client,
+        boundary="feature_sync_state",
+        provider=provider,
+        dataset_key=dataset_key,
     )
     await client.record_sync_success_for_operation_membership(
         membership=membership,
