@@ -40,6 +40,7 @@ from kortravelmap.infra.feature_update_repo import (  # noqa: PLC2701 - EXPLAIN 
     start_update_request,
 )
 from kortravelmap.infra.jobs_repo import (
+    ImportJobDatasetTarget,
     claim_next_import_job,
     enqueue_unpaired_import_job,
     heartbeat_import_job,
@@ -132,12 +133,8 @@ def test_scope_advisory_key_canonicalizes_filter_whitespace() -> None:
 
     assert feature_update_scope_advisory_key(
         **common,
-        providers=["\tpython-mois-api\u3000"],
-        dataset_keys=[" mois_license_features_bulk "],
     ) == feature_update_scope_advisory_key(
         **common,
-        providers=["python-mois-api"],
-        dataset_keys=["mois_license_features_bulk"],
     )
 
 
@@ -164,6 +161,57 @@ def test_scope_advisory_key_canonicalizes_set_scope_order_and_rejects_duplicates
             },
             providers=["python-mois-api"],
         )
+
+
+async def _canonical_membership(
+    session: AsyncSession,
+) -> ImportJobDatasetTarget:
+    """catalog에서 활성 triple 하나를 골라 membership으로 만든다.
+
+    T-VN-33 이후 feature update request는 **정확한** membership을 요구한다
+    (ADR-088 §결정 2) — 종전처럼 provider/dataset_key 배열을 넘기는 경로는 없다.
+    0089가 catalog를 seed하므로 여기서 실제 행을 읽어 쓴다.
+
+    활성 request가 이미 점유한 triple은 고르지 않는다. 같은 triple을 두 번 쓰면
+    ``assert_feature_update_request_member_available`` mutex에 걸리는데, 그것은
+    fixture의 문제이지 검증 대상이 아니다.
+    """
+
+    row = (
+        await session.execute(
+            text(
+                """
+                SELECT scope.provider_dataset_id, scope.sync_scope, scope.operation_key
+                FROM provider_sync.provider_dataset_operation_scopes AS scope
+                JOIN provider_sync.provider_datasets AS dataset
+                  ON dataset.provider_dataset_id = scope.provider_dataset_id
+                JOIN provider_sync.provider_dataset_operations AS operation
+                  ON operation.provider_dataset_id = scope.provider_dataset_id
+                 AND operation.operation_key = scope.operation_key
+                WHERE dataset.is_active AND operation.is_enabled
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM ops.feature_update_request_datasets AS member
+                      JOIN ops.feature_update_requests AS request
+                        ON request.request_id = member.request_id
+                      JOIN ops.import_jobs AS job ON job.job_id = request.job_id
+                      WHERE member.provider_dataset_id = scope.provider_dataset_id
+                        AND member.sync_scope = scope.sync_scope
+                        AND member.operation_key = scope.operation_key
+                        AND job.status IN ('queued', 'running')
+                  )
+                ORDER BY scope.provider_dataset_id, scope.sync_scope, scope.operation_key
+                LIMIT 1
+                """
+            )
+        )
+    ).one()
+    return ImportJobDatasetTarget(
+        provider_dataset_id=int(row.provider_dataset_id),
+        sync_scope=str(row.sync_scope),
+        operation_key=str(row.operation_key),
+    )
+
 
 
 async def test_preview_returns_plan_without_writes(
@@ -210,6 +258,7 @@ async def test_preview_and_enqueue_reject_noncanonical_update_policy(
         with pytest.raises(ValueError, match="(?i)policy"):
             await enqueue_feature_update_request(
                 migrated_session,
+                dataset_memberships=[await _canonical_membership(migrated_session)],
                 scope={"type": "feature_ids", "feature_ids": []},
                 update_policy=invalid_policy,
             )
@@ -259,8 +308,6 @@ async def test_preview_and_enqueue_reject_redundant_direct_filters(
                 "provider": "python-mois-api",
                 "dataset_key": "mois_license_features_bulk",
             },
-            providers=["python-mois-api"],
-            dataset_keys=["mois_license_features_bulk"],
         )
 
     assert await _count_rows(migrated_session, "ops.feature_update_requests") == 0
@@ -293,6 +340,7 @@ async def test_preview_and_enqueue_canonicalize_update_policy_none_values(
     )
     request = await enqueue_feature_update_request(
         migrated_session,
+        dataset_memberships=[await _canonical_membership(migrated_session)],
         scope={"type": "feature_ids", "feature_ids": []},
         update_policy=raw_policy,
     )
@@ -308,9 +356,8 @@ async def test_enqueue_creates_request_and_import_job(
 ) -> None:
     request = await enqueue_feature_update_request(
         migrated_session,
+        dataset_memberships=[await _canonical_membership(migrated_session)],
         scope={"type": "feature_ids", "feature_ids": []},
-        providers=["python-mois-api"],
-        dataset_keys=["mois_license_features_bulk"],
         update_policy={"mode": "refresh_existing"},
         priority=80,
         operator="local-admin",
@@ -336,6 +383,7 @@ async def test_generic_job_lifecycle_cannot_claim_or_mutate_feature_update_job(
 ) -> None:
     request = await enqueue_feature_update_request(
         migrated_session,
+        dataset_memberships=[await _canonical_membership(migrated_session)],
         scope={"type": "feature_ids", "feature_ids": []},
     )
     generic = await enqueue_unpaired_import_job(
@@ -396,11 +444,13 @@ async def test_peek_next_update_request_does_not_claim(
 ) -> None:
     low = await enqueue_feature_update_request(
         migrated_session,
+        dataset_memberships=[await _canonical_membership(migrated_session)],
         scope={"type": "feature_ids", "feature_ids": []},
         priority=10,
     )
     high = await enqueue_feature_update_request(
         migrated_session,
+        dataset_memberships=[await _canonical_membership(migrated_session)],
         scope={"type": "feature_ids", "feature_ids": []},
         priority=90,
     )
@@ -432,8 +482,6 @@ async def test_enqueue_now_raises_when_scope_lock_is_held(
     lock_key = feature_update_scope_advisory_key(
         scope_type="feature_ids",
         scope=scope,
-        providers=["python-a-api"],
-        dataset_keys=["dataset-a"],
     )
 
     async with (
@@ -444,9 +492,8 @@ async def test_enqueue_now_raises_when_scope_lock_is_held(
         with pytest.raises(FeatureUpdateLockBusy) as exc_info:
             await enqueue_feature_update_request(
                 migrated_session,
+                dataset_memberships=[await _canonical_membership(migrated_session)],
                 scope=scope,
-                providers=["python-a-api"],
-                dataset_keys=["dataset-a"],
                 run_mode="now",
             )
 
@@ -460,6 +507,7 @@ async def test_start_and_finish_update_linked_import_job(
 ) -> None:
     request = await enqueue_feature_update_request(
         migrated_session,
+        dataset_memberships=[await _canonical_membership(migrated_session)],
         scope={"type": "feature_ids", "feature_ids": []},
         run_mode="now",
     )
@@ -509,6 +557,7 @@ async def test_pre_start_failure_advances_only_matching_queued_generation(
 ) -> None:
     request = await enqueue_feature_update_request(
         migrated_session,
+        dataset_memberships=[await _canonical_membership(migrated_session)],
         scope={"type": "feature_ids", "feature_ids": []},
     )
     assert isinstance(request, FeatureUpdateRequest)
@@ -542,14 +591,17 @@ async def test_pre_start_failure_generation_does_not_mutate_other_states(
 ) -> None:
     running_request = await enqueue_feature_update_request(
         migrated_session,
+        dataset_memberships=[await _canonical_membership(migrated_session)],
         scope={"type": "feature_ids", "feature_ids": []},
     )
     terminal_request = await enqueue_feature_update_request(
         migrated_session,
+        dataset_memberships=[await _canonical_membership(migrated_session)],
         scope={"type": "feature_ids", "feature_ids": []},
     )
     marked_request = await enqueue_feature_update_request(
         migrated_session,
+        dataset_memberships=[await _canonical_membership(migrated_session)],
         scope={"type": "feature_ids", "feature_ids": []},
     )
     assert isinstance(running_request, FeatureUpdateRequest)
@@ -616,6 +668,7 @@ async def test_start_is_generation_and_owner_cas(
 ) -> None:
     request = await enqueue_feature_update_request(
         migrated_session,
+        dataset_memberships=[await _canonical_membership(migrated_session)],
         scope={"type": "feature_ids", "feature_ids": []},
     )
     assert isinstance(request, FeatureUpdateRequest)
@@ -757,6 +810,7 @@ async def test_start_rejects_linked_job_owner_mismatch_without_partial_write(
 ) -> None:
     request = await enqueue_feature_update_request(
         migrated_session,
+        dataset_memberships=[await _canonical_membership(migrated_session)],
         scope={"type": "feature_ids", "feature_ids": []},
     )
     assert isinstance(request, FeatureUpdateRequest)
@@ -795,6 +849,7 @@ async def test_stale_failure_run_cannot_finish_requeued_request_or_job(
 ) -> None:
     request = await enqueue_feature_update_request(
         migrated_session,
+        dataset_memberships=[await _canonical_membership(migrated_session)],
         scope={"type": "feature_ids", "feature_ids": []},
     )
     assert isinstance(request, FeatureUpdateRequest)
@@ -865,6 +920,7 @@ async def test_stale_failure_run_cannot_finish_requeued_request_or_job(
 async def test_finish_invalid_status_raises(migrated_session: AsyncSession) -> None:
     request = await enqueue_feature_update_request(
         migrated_session,
+        dataset_memberships=[await _canonical_membership(migrated_session)],
         scope={"type": "feature_ids", "feature_ids": []},
     )
     assert isinstance(request, FeatureUpdateRequest)
@@ -885,6 +941,7 @@ async def test_feature_update_lifecycle_rejects_missing_or_untrimmed_owner(
 ) -> None:
     request = await enqueue_feature_update_request(
         migrated_session,
+        dataset_memberships=[await _canonical_membership(migrated_session)],
         scope={"type": "feature_ids", "feature_ids": []},
     )
 
@@ -906,6 +963,7 @@ async def test_list_update_requests_uses_keyset_cursor(
     created = [
         await enqueue_feature_update_request(
             migrated_session,
+            dataset_memberships=[await _canonical_membership(migrated_session)],
             scope={"type": "feature_ids", "feature_ids": []},
             priority=priority,
         )
@@ -935,21 +993,18 @@ async def test_list_update_requests_filters_by_scope_provider_dataset_and_time(
 ) -> None:
     target = await enqueue_feature_update_request(
         migrated_session,
+        dataset_memberships=[await _canonical_membership(migrated_session)],
         scope={"type": "feature_ids", "feature_ids": []},
-        providers=["python-a-api"],
-        dataset_keys=["dataset-a"],
     )
     other_provider = await enqueue_feature_update_request(
         migrated_session,
+        dataset_memberships=[await _canonical_membership(migrated_session)],
         scope={"type": "feature_ids", "feature_ids": []},
-        providers=["python-b-api"],
-        dataset_keys=["dataset-a"],
     )
     other_scope = await enqueue_feature_update_request(
         migrated_session,
+        dataset_memberships=[await _canonical_membership(migrated_session)],
         scope={"type": "bbox", "min_lon": 126, "min_lat": 37, "max_lon": 127, "max_lat": 38},
-        providers=["python-a-api"],
-        dataset_keys=["dataset-b"],
     )
     assert isinstance(target, FeatureUpdateRequest)
     assert isinstance(other_provider, FeatureUpdateRequest)
@@ -969,6 +1024,7 @@ async def test_list_update_requests_filters_by_scope_provider_dataset_and_time(
 
     provider_dataset = await enqueue_feature_update_request(
         migrated_session,
+        dataset_memberships=[await _canonical_membership(migrated_session)],
         scope={
             "type": "provider_dataset",
             "provider": "python-c-api",

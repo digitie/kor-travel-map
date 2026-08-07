@@ -572,8 +572,9 @@ async def test_membership_modes_accept_only_a_complete_canonical_shape(
         )
         await freeze_db.execute(
             """
-            INSERT INTO ops.import_job_datasets (job_id, provider_dataset_id, sync_scope)
-            VALUES ($1, $2, 'dataset_wide')
+            INSERT INTO ops.import_job_datasets (
+                job_id, provider_dataset_id, sync_scope, operation_key
+            ) VALUES ($1, $2, 'dataset_wide', 'refresh')
             """,
             single_job_id,
             dataset_id,
@@ -591,8 +592,8 @@ async def test_membership_modes_accept_only_a_complete_canonical_shape(
         await freeze_db.execute(
             """
             INSERT INTO ops.feature_update_request_datasets (
-                request_id, provider_dataset_id, sync_scope
-            ) VALUES ($1, $2, 'dataset_wide')
+                request_id, provider_dataset_id, sync_scope, operation_key
+            ) VALUES ($1, $2, 'dataset_wide', 'refresh')
             """,
             request_id,
             dataset_id,

@@ -16,7 +16,18 @@ curation 자연키 되돌림의 API 미전파, event 인덱스 keyset 손실.
 mypy --strict 두 타깃, ruff, 통합 수집 오류 0이다. 잔여 단위 6건은 환경 노이즈다.
 **통합 테스트 본체는 live DB가 필요해 실행하지 않았다 — 머지 전 1회 실행이 남은 위험이다.**
 
-**다음 한 작업**: 통합 테스트를 live로 1회 돌린 뒤 #966을 머지한다.
+통합 테스트를 live로 돌렸다(testcontainers, docker socket 마운트). freeze 계약 6건 + 계약
+아티팩트 7건 + tvn33 migration contract 4건은 green이다. **`test_feature_update_repo.py`는
+25건이 실패한다** — 이 파일은 T-VN-33 이전 계약으로 쓰여 있어 membership을 안 넘겼고, 그
+1차 원인(52건 중 34건)은 고쳤다(`_canonical_membership` helper가 mutex에 걸리지 않는 triple을
+고른다). 남은 25건은 그 뒤에 드러난 **feature update lifecycle 자체의 회귀**로 보인다 —
+첫 사례는 `test_start_is_generation_and_owner_cas`에서 stale generation으로 부른
+`start_update_request`가 `None`이 아니라 request를 돌려준다. `_START_REQUEST_SQL`의 CAS
+술어 자체는 옳아 보이므로(`locked` CTE가 generation을 비교하고 `JOIN job`이 관문이다)
+generation이 실제로 증가하는지부터 확인해야 한다.
+
+**다음 한 작업**: `test_feature_update_repo.py` 잔여 25건을 진단한다. 이것이 #966의 마지막
+머지 차단 요소다. 그 뒤 #967(T-VN-41 F1D evidence)로 넘어간다.
 그다음 PR #967(T-VN-41 F1D evidence)을 마무리한다. alembic squash는 #966·#967 머지와 prod의
 head 배포가 끝난 뒤 독립 PR로 다룬다 — prod가 `0083`이라 지금 접으면 도달 경로가 사라진다.
 

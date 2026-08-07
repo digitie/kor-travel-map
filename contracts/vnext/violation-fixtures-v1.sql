@@ -356,11 +356,11 @@ INSERT INTO provider_sync.provider_dataset_operation_scopes (
 );
 INSERT INTO provider_sync.provider_sync_state (
     provider_dataset_id, sync_scope
-) VALUES (
+, operation_key) VALUES (
     (SELECT provider_dataset_id FROM provider_sync.provider_datasets
      WHERE provider = 'fixture' AND dataset_key = 'inactive-sync-state'),
     'dataset_wide'
-);
+, 'refresh');
 UPDATE provider_sync.provider_datasets
 SET is_active = false
 WHERE provider = 'fixture' AND dataset_key = 'inactive-sync-state';
@@ -374,11 +374,11 @@ INSERT INTO provider_sync.provider_datasets (
 ) VALUES ('fixture', 'unregistered-scope', 'unregistered scope dataset', 'manual');
 INSERT INTO provider_sync.provider_sync_state (
     provider_dataset_id, sync_scope
-) VALUES (
+, operation_key) VALUES (
     (SELECT provider_dataset_id FROM provider_sync.provider_datasets
      WHERE provider = 'fixture' AND dataset_key = 'unregistered-scope'),
     'dataset_wide'
-);
+, 'refresh');
 
 -- case: inactive_dataset_notice_lineage_write
 INSERT INTO provider_sync.provider_datasets (
@@ -445,13 +445,13 @@ INSERT INTO provider_sync.provider_dataset_operation_scopes (
     'dataset_wide', 'refresh'
 );
 INSERT INTO ops.import_jobs (kind, dataset_membership_mode) VALUES ('fixture', 'single');
-INSERT INTO ops.import_job_datasets (job_id, provider_dataset_id, sync_scope)
+INSERT INTO ops.import_job_datasets (job_id, provider_dataset_id, sync_scope, operation_key)
 VALUES (
     (SELECT job_id FROM ops.import_jobs WHERE kind = 'fixture'),
     (SELECT provider_dataset_id FROM provider_sync.provider_datasets
      WHERE provider = 'fixture' AND dataset_key = 'inactive-import-event'),
     'dataset_wide'
-);
+, 'refresh');
 UPDATE provider_sync.provider_datasets
 SET is_active = false
 WHERE provider = 'fixture' AND dataset_key = 'inactive-import-event';
@@ -482,13 +482,13 @@ INSERT INTO provider_sync.provider_dataset_operation_scopes (
 );
 INSERT INTO ops.import_jobs (kind, dataset_membership_mode)
 VALUES ('fixture-inactive-import-parent', 'single');
-INSERT INTO ops.import_job_datasets (job_id, provider_dataset_id, sync_scope)
+INSERT INTO ops.import_job_datasets (job_id, provider_dataset_id, sync_scope, operation_key)
 VALUES (
     (SELECT job_id FROM ops.import_jobs WHERE kind = 'fixture-inactive-import-parent'),
     (SELECT provider_dataset_id FROM provider_sync.provider_datasets
      WHERE provider = 'fixture' AND dataset_key = 'inactive-import-parent'),
     'dataset_wide'
-);
+, 'refresh');
 UPDATE provider_sync.provider_datasets
 SET is_active = false
 WHERE provider = 'fixture' AND dataset_key = 'inactive-import-parent';
@@ -518,12 +518,12 @@ INSERT INTO ops.feature_update_requests (dataset_membership_mode)
 VALUES ('single');
 INSERT INTO ops.feature_update_request_datasets (
     request_id, provider_dataset_id, sync_scope
-) VALUES (
+, operation_key) VALUES (
     (SELECT request_id FROM ops.feature_update_requests),
     (SELECT provider_dataset_id FROM provider_sync.provider_datasets
      WHERE provider = 'fixture' AND dataset_key = 'inactive-update-parent'),
     'dataset_wide'
-);
+, 'refresh');
 UPDATE provider_sync.provider_datasets
 SET is_active = false
 WHERE provider = 'fixture' AND dataset_key = 'inactive-update-parent';
@@ -647,13 +647,13 @@ INSERT INTO provider_sync.provider_dataset_operation_scopes (
 );
 INSERT INTO ops.import_jobs (kind, dataset_membership_mode)
 VALUES ('fixture-cross-job-a', 'single'), ('fixture-cross-job-b', 'single');
-INSERT INTO ops.import_job_datasets (job_id, provider_dataset_id, sync_scope)
+INSERT INTO ops.import_job_datasets (job_id, provider_dataset_id, sync_scope, operation_key)
 VALUES (
     (SELECT job_id FROM ops.import_jobs WHERE kind = 'fixture-cross-job-a'),
     (SELECT provider_dataset_id FROM provider_sync.provider_datasets
      WHERE provider = 'fixture' AND dataset_key = 'cross-job-member'),
     'dataset_wide'
-);
+, 'refresh');
 INSERT INTO ops.import_job_events (job_id, import_job_dataset_id, event_kind)
 VALUES (
     (SELECT job_id FROM ops.import_jobs WHERE kind = 'fixture-cross-job-b'),

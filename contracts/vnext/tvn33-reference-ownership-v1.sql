@@ -13,7 +13,7 @@ CREATE TABLE provider_sync.provider_dataset_operation_scopes (
     operation_key text NOT NULL,
     operation_kind text NOT NULL DEFAULT 'refresh',
     CONSTRAINT pk_provider_dataset_operation_scopes PRIMARY KEY (
-        provider_dataset_id, sync_scope
+        provider_dataset_id, sync_scope, operation_key
     ),
     CONSTRAINT fk_provider_dataset_operation_scopes_operation FOREIGN KEY (
         provider_dataset_id, operation_key, operation_kind
@@ -95,16 +95,20 @@ $$;
 CREATE TABLE provider_sync.provider_sync_state (
     provider_dataset_id bigint NOT NULL,
     sync_scope text NOT NULL,
+    operation_key text NOT NULL,
     status text NOT NULL DEFAULT 'active',
     cursor jsonb NOT NULL DEFAULT '{}'::jsonb,
     last_success_at timestamptz,
     next_run_after timestamptz,
     updated_at timestamptz NOT NULL DEFAULT now(),
-    CONSTRAINT pk_provider_sync_state PRIMARY KEY (provider_dataset_id, sync_scope),
-    CONSTRAINT fk_provider_sync_state_scope FOREIGN KEY (provider_dataset_id, sync_scope)
-        REFERENCES provider_sync.provider_dataset_operation_scopes (
-            provider_dataset_id, sync_scope
-        ),
+    CONSTRAINT pk_provider_sync_state PRIMARY KEY (
+        provider_dataset_id, sync_scope, operation_key
+    ),
+    CONSTRAINT fk_provider_sync_state_exact_operation_scope FOREIGN KEY (
+        provider_dataset_id, sync_scope, operation_key
+    ) REFERENCES provider_sync.provider_dataset_operation_scopes (
+        provider_dataset_id, sync_scope, operation_key
+    ),
     CONSTRAINT ck_provider_sync_state_status CHECK (
         status IN ('active', 'paused', 'disabled', 'failed')
     ),
@@ -324,16 +328,20 @@ CREATE TABLE ops.import_job_datasets (
     job_id uuid NOT NULL,
     provider_dataset_id bigint NOT NULL,
     sync_scope text NOT NULL,
+    operation_key text NOT NULL,
     created_at timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT pk_import_job_datasets PRIMARY KEY (import_job_dataset_id),
-    CONSTRAINT uq_import_job_datasets_identity UNIQUE (job_id, provider_dataset_id, sync_scope),
+    CONSTRAINT uq_import_job_datasets_identity UNIQUE (
+        job_id, provider_dataset_id, sync_scope, operation_key
+    ),
     CONSTRAINT uq_import_job_datasets_job_member UNIQUE (job_id, import_job_dataset_id),
     CONSTRAINT fk_import_job_datasets_job FOREIGN KEY (job_id)
         REFERENCES ops.import_jobs (job_id) ON DELETE CASCADE,
-    CONSTRAINT fk_import_job_datasets_scope FOREIGN KEY (provider_dataset_id, sync_scope)
-        REFERENCES provider_sync.provider_dataset_operation_scopes (
-            provider_dataset_id, sync_scope
-        )
+    CONSTRAINT fk_import_job_datasets_exact_operation_scope FOREIGN KEY (
+        provider_dataset_id, sync_scope, operation_key
+    ) REFERENCES provider_sync.provider_dataset_operation_scopes (
+        provider_dataset_id, sync_scope, operation_key
+    )
 );
 CREATE INDEX idx_import_job_datasets_dataset_job
     ON ops.import_job_datasets (provider_dataset_id, job_id);
@@ -535,16 +543,17 @@ CREATE TABLE ops.feature_update_request_datasets (
     request_id uuid NOT NULL,
     provider_dataset_id bigint NOT NULL,
     sync_scope text NOT NULL,
+    operation_key text NOT NULL,
     CONSTRAINT pk_feature_update_request_datasets PRIMARY KEY (feature_update_request_dataset_id),
     CONSTRAINT uq_feature_update_request_datasets_identity UNIQUE (
-        request_id, provider_dataset_id, sync_scope
+        request_id, provider_dataset_id, sync_scope, operation_key
     ),
     CONSTRAINT fk_feature_update_request_datasets_request FOREIGN KEY (request_id)
         REFERENCES ops.feature_update_requests (request_id) ON DELETE CASCADE,
-    CONSTRAINT fk_feature_update_request_datasets_scope FOREIGN KEY (
-        provider_dataset_id, sync_scope
+    CONSTRAINT fk_feature_update_request_datasets_exact_operation_scope FOREIGN KEY (
+        provider_dataset_id, sync_scope, operation_key
     ) REFERENCES provider_sync.provider_dataset_operation_scopes (
-        provider_dataset_id, sync_scope
+        provider_dataset_id, sync_scope, operation_key
     )
 );
 CREATE INDEX idx_feature_update_request_datasets_dataset_request
@@ -667,17 +676,21 @@ CREATE TABLE ops.offline_uploads (
     upload_id uuid NOT NULL DEFAULT x_extension.gen_random_uuid(),
     provider_dataset_id bigint NOT NULL,
     sync_scope text NOT NULL,
+    operation_key text NOT NULL,
     checksum_sha256 text NOT NULL,
     status text NOT NULL DEFAULT 'registered',
     created_at timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT pk_offline_uploads PRIMARY KEY (upload_id),
+    -- 멱등 키는 operation을 포함하지 않는다: 같은 (dataset, scope)에 같은 파일은
+    -- 한 번만 올린다. 반면 FK는 scope PK와 같은 triple이어야 한다.
     CONSTRAINT uq_offline_uploads_dataset_scope_checksum UNIQUE (
         provider_dataset_id, sync_scope, checksum_sha256
     ),
-    CONSTRAINT fk_offline_uploads_scope FOREIGN KEY (provider_dataset_id, sync_scope)
-        REFERENCES provider_sync.provider_dataset_operation_scopes (
-            provider_dataset_id, sync_scope
-        ),
+    CONSTRAINT fk_offline_uploads_exact_operation_scope FOREIGN KEY (
+        provider_dataset_id, sync_scope, operation_key
+    ) REFERENCES provider_sync.provider_dataset_operation_scopes (
+        provider_dataset_id, sync_scope, operation_key
+    ),
     CONSTRAINT ck_offline_uploads_checksum CHECK (checksum_sha256 ~ '^[0-9a-f]{64}$')
 );
 CREATE INDEX idx_offline_uploads_dataset_created

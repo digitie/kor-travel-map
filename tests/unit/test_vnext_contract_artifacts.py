@@ -32,17 +32,17 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
         "51c99c6ed806f96abaf7e30717bf9ddb893d04eac0862ed1bdc32fbb8611b672"
     ),
     "target-schema-fingerprints-v1.json": (
-        "9c9214f5d15f3188a6876c77be34673878aeada2cda73c67ab938fedb98d88d2"
+        "c06fae405af30967dd9e3b28c1aef5b4e80c8e56708050ae797e5f7b5ff12974"
     ),
     "tvn33-reference-ownership-v1.sql": (
-        "acd7066efe8da0ccf907264b95c9b5d43633d47df09731b10baa51675a774205"
+        "7505df3594b5ad03c086913f5298bbdd406e41633cdf3bd01f53f38462c3a6bc"
     ),
     "openapi-diff-v1.json": ("c927cec6a893c9a24cdd2d6e6252de47880d65c56063d34aff7c79bf7e6162c5"),
     "consumer-rollout-v1.json": (
         "573210a3949d78e3831f9581811f158cef8547328efea44d16cc6afb39b76c88"
     ),
     "violation-fixtures-v1.sql": (
-        "04c9cc87658175b89622353972059fd052f302b4dfe008eea506d8218411db3f"
+        "ddb0188e13cc75e4137370d613de83367163ec2893c0d13d97c39b622370af3c"
     ),
     "expected-rejections-v1.json": (
         "5351124ca55ae4280c0d6309de8c3490580fe3df3ee29b68c4e245fab0620426"
