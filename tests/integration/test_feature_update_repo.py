@@ -139,14 +139,16 @@ def test_scope_advisory_key_canonicalizes_set_scope_order_and_rejects_duplicates
             scope={"type": "feature_ids", "feature_ids": ["feature-a", "feature-a"]},
         dataset_memberships=[_LOCK_MEMBERSHIP],
         )
-    # provider_dataset scope는 정확히 하나의 membership을 요구한다 — 둘을 주면 거절한다.
+    # 같은 membership을 두 번 주면 거절한다. scope도 triple을 직접 든다 —
+    # provider/dataset_key 자연키로 지목하는 경로는 T-VN-33에서 없어졌다.
     with pytest.raises(ValueError, match="unique"):
         feature_update_scope_advisory_key(
             scope_type="provider_dataset",
             scope={
                 "type": "provider_dataset",
-                "provider": "python-mois-api",
-                "dataset_key": "mois_license_features_bulk",
+                "provider_dataset_id": _LOCK_MEMBERSHIP.provider_dataset_id,
+                "sync_scope": _LOCK_MEMBERSHIP.sync_scope,
+                "operation_key": _LOCK_MEMBERSHIP.operation_key,
             },
             dataset_memberships=[_LOCK_MEMBERSHIP, _LOCK_MEMBERSHIP],
         )
@@ -206,15 +208,20 @@ async def _canonical_membership(
 async def test_preview_returns_plan_without_writes(
     migrated_session: AsyncSession,
 ) -> None:
+    membership = await _canonical_membership(migrated_session)
     preview = await preview_feature_update_request(
         migrated_session,
+        dataset_memberships=[membership],
         scope={"type": "feature_ids", "feature_ids": []},
     )
 
     assert isinstance(preview, FeatureUpdateRequestPreview)
     assert preview.scope_type == "feature_ids"
-    assert preview.providers == ("python-mois-api",)
-    assert preview.matched_scope == {"feature_count": 0, "sigungu_codes": []}
+    # providers는 catalog projection일 뿐 identity가 아니다 — 정본은 triple이다.
+    assert [d.provider_dataset_id for d in preview.dataset_memberships] == [
+        membership.provider_dataset_id
+    ]
+    assert preview.matched_scope["feature_count"] == 0
     assert await _count_rows(migrated_session, "ops.feature_update_requests") == 0
     assert await _count_rows(migrated_session, "ops.import_jobs") == 0
 
@@ -239,6 +246,7 @@ async def test_preview_and_enqueue_reject_noncanonical_update_policy(
         with pytest.raises(ValueError, match="(?i)policy"):
             await preview_feature_update_request(
                 migrated_session,
+                dataset_memberships=[await _canonical_membership(migrated_session)],
                 scope={"type": "feature_ids", "feature_ids": []},
                 update_policy=invalid_policy,
             )
@@ -278,30 +286,6 @@ async def test_preview_and_enqueue_reject_invalid_priority(
     assert await _count_rows(migrated_session, "ops.import_jobs") == 0
 
 
-@pytest.mark.parametrize("operation", ["preview", "enqueue"])
-async def test_preview_and_enqueue_reject_redundant_direct_filters(
-    migrated_session: AsyncSession,
-    operation: str,
-) -> None:
-    call = (
-        preview_feature_update_request
-        if operation == "preview"
-        else enqueue_feature_update_request
-    )
-    with pytest.raises(ValueError, match="must not repeat"):
-        await call(
-            migrated_session,
-            scope={
-                "type": "provider_dataset",
-                "provider": "python-mois-api",
-                "dataset_key": "mois_license_features_bulk",
-            },
-        )
-
-    assert await _count_rows(migrated_session, "ops.feature_update_requests") == 0
-    assert await _count_rows(migrated_session, "ops.import_jobs") == 0
-
-
 async def test_preview_and_enqueue_canonicalize_update_policy_none_values(
     migrated_session: AsyncSession,
 ) -> None:
@@ -323,6 +307,7 @@ async def test_preview_and_enqueue_canonicalize_update_policy_none_values(
 
     preview = await preview_feature_update_request(
         migrated_session,
+        dataset_memberships=[await _canonical_membership(migrated_session)],
         scope={"type": "feature_ids", "feature_ids": []},
         update_policy=raw_policy,
     )
@@ -342,9 +327,10 @@ async def test_preview_and_enqueue_canonicalize_update_policy_none_values(
 async def test_enqueue_creates_request_and_import_job(
     migrated_session: AsyncSession,
 ) -> None:
+    membership = await _canonical_membership(migrated_session)
     request = await enqueue_feature_update_request(
         migrated_session,
-        dataset_memberships=[await _canonical_membership(migrated_session)],
+        dataset_memberships=[membership],
         scope={"type": "feature_ids", "feature_ids": []},
         update_policy={"mode": "refresh_existing"},
         priority=80,
@@ -356,7 +342,13 @@ async def test_enqueue_creates_request_and_import_job(
     assert request.status == "queued"
     assert request.priority == 80
     assert request.job_id is not None
-    assert request.matched_scope == {"feature_count": 0, "sigungu_codes": []}
+    # matched_scope는 요청 시점에 고정한 membership snapshot을 함께 담는다
+    # (실행기가 나중에 catalog를 다시 읽지 않도록).
+    assert request.matched_scope["feature_count"] == 0
+    assert request.matched_scope["sigungu_codes"] == []
+    assert [
+        m["provider_dataset_id"] for m in request.matched_scope["dataset_memberships"]
+    ] == [membership.provider_dataset_id]
     assert request.generation == 1
 
     job = await _job_row(migrated_session, request.job_id)
@@ -467,10 +459,23 @@ async def test_enqueue_now_raises_when_scope_lock_is_held(
     from sqlalchemy.ext.asyncio import AsyncSession
 
     scope = {"type": "feature_ids", "feature_ids": ["feature-1", "feature-2"]}
+    # lock key는 scope + membership으로 만들어진다 (T-VN-33). 같은 key로 경합시키려면
+    # holder와 enqueue가 **같은 membership**을 써야 한다 — 다른 것을 쓰면 애초에
+    # 다른 lock이라 경합 자체가 일어나지 않는다.
+    membership = await _canonical_membership(migrated_session)
     lock_key = feature_update_scope_advisory_key(
         scope_type="feature_ids",
         scope=scope,
-        dataset_memberships=[_LOCK_MEMBERSHIP],
+        dataset_memberships=[
+            FeatureUpdateRequestDataset(
+                feature_update_request_dataset_id=None,
+                provider_dataset_id=membership.provider_dataset_id,
+                sync_scope=membership.sync_scope,
+                provider="unused-projection",
+                dataset_key="unused-projection",
+                operation_key=membership.operation_key,
+            )
+        ],
     )
 
     async with (
@@ -481,7 +486,7 @@ async def test_enqueue_now_raises_when_scope_lock_is_held(
         with pytest.raises(FeatureUpdateLockBusy) as exc_info:
             await enqueue_feature_update_request(
                 migrated_session,
-                dataset_memberships=[await _canonical_membership(migrated_session)],
+                dataset_memberships=[membership],
                 scope=scope,
                 run_mode="now",
             )
@@ -980,30 +985,48 @@ async def test_list_update_requests_uses_keyset_cursor(
 async def test_list_update_requests_filters_by_scope_provider_dataset_and_time(
     migrated_session: AsyncSession,
 ) -> None:
+    """filter는 catalog projection(provider/dataset_key)으로도 걸린다.
+
+    identity는 triple이지만 운영자 UI는 자연키로 검색한다. 그래서 목록 filter는
+    membership → ``provider_datasets`` 조인으로 projection을 읽는다 —
+    요청 행에 사본을 두지 않는다.
+    """
+
+    target_membership = await _canonical_membership(migrated_session)
+    target_provider, target_dataset_key = (
+        await migrated_session.execute(
+            text(
+                "SELECT provider, dataset_key FROM provider_sync.provider_datasets "
+                "WHERE provider_dataset_id = :provider_dataset_id"
+            ),
+            {"provider_dataset_id": target_membership.provider_dataset_id},
+        )
+    ).one()
+
     target = await enqueue_feature_update_request(
         migrated_session,
-        dataset_memberships=[await _canonical_membership(migrated_session)],
-        scope={"type": "feature_ids", "feature_ids": []},
-    )
-    other_provider = await enqueue_feature_update_request(
-        migrated_session,
-        dataset_memberships=[await _canonical_membership(migrated_session)],
+        dataset_memberships=[target_membership],
         scope={"type": "feature_ids", "feature_ids": []},
     )
     other_scope = await enqueue_feature_update_request(
         migrated_session,
         dataset_memberships=[await _canonical_membership(migrated_session)],
-        scope={"type": "bbox", "min_lon": 126, "min_lat": 37, "max_lon": 127, "max_lat": 38},
+        scope={
+            "type": "bbox",
+            "min_lon": 126,
+            "min_lat": 37,
+            "max_lon": 127,
+            "max_lat": 38,
+        },
     )
     assert isinstance(target, FeatureUpdateRequest)
-    assert isinstance(other_provider, FeatureUpdateRequest)
     assert isinstance(other_scope, FeatureUpdateRequest)
 
     page = await list_update_requests(
         migrated_session,
         scope_type="feature_ids",
-        provider="python-a-api",
-        dataset_key="dataset-a",
+        provider=str(target_provider),
+        dataset_key=str(target_dataset_key),
         created_from=target.created_at,
         created_to=target.created_at,
         limit=10,
@@ -1011,23 +1034,23 @@ async def test_list_update_requests_filters_by_scope_provider_dataset_and_time(
 
     assert [item.request_id for item in page.items] == [target.request_id]
 
+    # provider_dataset scope는 triple을 직접 든다 — 자연키로 지목하는 경로는 없다.
+    scope_membership = await _canonical_membership(migrated_session)
     provider_dataset = await enqueue_feature_update_request(
         migrated_session,
-        dataset_memberships=[await _canonical_membership(migrated_session)],
+        dataset_memberships=[scope_membership],
         scope={
             "type": "provider_dataset",
-            "provider": "python-c-api",
-            "dataset_key": "dataset-c",
+            "provider_dataset_id": scope_membership.provider_dataset_id,
+            "sync_scope": scope_membership.sync_scope,
+            "operation_key": scope_membership.operation_key,
         },
-        effective_sync_scope="dataset_wide",
     )
     assert isinstance(provider_dataset, FeatureUpdateRequest)
 
     provider_dataset_page = await list_update_requests(
         migrated_session,
         scope_type="provider_dataset",
-        provider="python-c-api",
-        dataset_key="dataset-c",
         limit=10,
     )
 

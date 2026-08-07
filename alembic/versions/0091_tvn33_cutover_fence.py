@@ -662,6 +662,75 @@ def _preflight_source_role_matches_is_primary_source() -> None:
     )
 
 
+def _rewrite_feature_update_scope_validator() -> None:
+    """``provider_dataset`` scope를 triple 형태로 받도록 검증 함수를 올린다.
+
+    T-VN-33 전 shape은 ``{type, provider, dataset_key, sync_scope}``였다. identity가
+    ``provider_dataset_id + sync_scope + operation_key``로 바뀌었으므로 파이썬
+    쪽(``_canonicalize_request_scope``)은 이미 triple을 요구하는데, DB check는 옛
+    shape을 요구하고 있었다 — 그래서 이 scope type은 **어느 쪽으로도 쓸 수 없었다**.
+
+    0075와 같은 방식으로 이전 세대를 rename해 보존하고 위임한다. 다른 scope type의
+    규칙은 손대지 않는다.
+    """
+
+    op.execute(
+        "ALTER TABLE ops.feature_update_requests "
+        "DROP CONSTRAINT ck_feature_update_requests_scope_shape"
+    )
+    op.execute(
+        "ALTER FUNCTION ops.is_valid_feature_update_scope(text, jsonb) "
+        "RENAME TO is_valid_feature_update_scope_0075"
+    )
+    op.execute(
+        """
+        CREATE FUNCTION ops.is_valid_feature_update_scope(
+          p_scope_type text,
+          p_scope jsonb
+        ) RETURNS boolean
+        LANGUAGE plpgsql
+        IMMUTABLE
+        STRICT
+        PARALLEL SAFE
+        SET search_path = pg_catalog
+        AS $$
+        BEGIN
+          IF p_scope_type <> 'provider_dataset' THEN
+            RETURN ops.is_valid_feature_update_scope_0075(p_scope_type, p_scope);
+          END IF;
+          IF jsonb_typeof(p_scope) IS DISTINCT FROM 'object'
+             OR p_scope->>'type' IS DISTINCT FROM p_scope_type
+             OR p_scope - ARRAY[
+                  'type', 'provider_dataset_id', 'sync_scope', 'operation_key'
+                ]::text[] <> '{}'::jsonb
+             OR jsonb_typeof(p_scope->'provider_dataset_id') IS DISTINCT FROM 'number'
+             OR jsonb_typeof(p_scope->'sync_scope') IS DISTINCT FROM 'string'
+             OR jsonb_typeof(p_scope->'operation_key') IS DISTINCT FROM 'string' THEN
+            RETURN false;
+          END IF;
+          IF (p_scope->>'provider_dataset_id')::numeric <= 0
+             OR (p_scope->>'provider_dataset_id')::numeric
+                <> trunc((p_scope->>'provider_dataset_id')::numeric)
+             OR NOT provider_sync.is_valid_provider_dataset_sync_scope(
+                  p_scope->>'sync_scope'
+                )
+             OR p_scope->>'operation_key' = ''
+             OR p_scope->>'operation_key' <> btrim(p_scope->>'operation_key')
+             OR char_length(p_scope->>'operation_key') > 128 THEN
+            RETURN false;
+          END IF;
+          RETURN true;
+        END;
+        $$
+        """
+    )
+    op.execute(
+        "ALTER TABLE ops.feature_update_requests "
+        "ADD CONSTRAINT ck_feature_update_requests_scope_shape "
+        "CHECK (ops.is_valid_feature_update_scope(scope_type, scope))"
+    )
+
+
 def _drop_legacy_columns() -> None:
     _preflight_source_role_matches_is_primary_source()
     _execute_sql_script(
@@ -1792,6 +1861,7 @@ def upgrade() -> None:
     _rename_runtime_operation_key()
     _freeze_feature_update_operation_memberships()
     _move_notice_lineage_to_head()
+    _rewrite_feature_update_scope_validator()
     _drop_legacy_columns()
     _rewrite_final_curation_source_rule_trigger()
     _create_dataset_guard_functions()

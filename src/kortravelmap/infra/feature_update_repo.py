@@ -859,8 +859,10 @@ job AS (
     WHERE mutable_job.job_id = locked.job_id
     RETURNING mutable_job.*
 )
-SELECT job.job_id, job.status, job.progress, job.current_stage
+SELECT job.job_id, job.status, job.progress, job.current_stage,
+       member.import_job_dataset_id
 FROM job
+JOIN ops.import_job_datasets AS member ON member.job_id = job.job_id
 """
 
 _TOUCH_QUEUED_REQUEST_FOR_LOCK_RETRY_SQL: Final[str] = f"""
@@ -1488,6 +1490,7 @@ async def heartbeat_feature_update_request_job(
             message="import job heartbeat",
             payload={"status": str(row.status), "progress": int(row.progress)},
             stage=str(row.current_stage) if row.current_stage is not None else None,
+            import_job_dataset_id=str(row.import_job_dataset_id),
         )
     return True
 
