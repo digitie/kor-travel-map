@@ -594,13 +594,10 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 > ADR-066~075가 목표 스펙 정본이다. 각 migration task는 forward-only 격리 clone에서 검증하고,
 > 명시적 downgrade 수용 조건이 없는 한 전진 뒤 rollback하지 않는다.
 
-> **인덱스↔본문 의도적 불일치 (2026-08-07 재대조)**: `T-VN-37`·`T-VN-33`의 상단 인덱스
-> 줄은 재정의 후 상태(37 = 계보 key 물화 단일 task + 보류 `37D` / 33 = A/B/C 단일 PR)를
-> 반영하지만, **아래 `### T-VN-37`·`### T-VN-33` 절 본문은 아직 구 A/B/C 분해판**이다.
-> 두 절의 재작성은 각각 열린 PR **#968**(`feat/tvn37-notice-lineage-materialization`)과
-> **#966**(`feat/tvn33-provider-datasets`, draft)이 자기 브랜치에서 이미 소유하고 있어,
-> 머지 충돌을 만들지 않기 위해 이 재대조에서는 본문을 건드리지 않았다. 두 PR이 머지되면
-> 불일치는 자동 해소된다.
+> **인덱스↔본문 불일치 (`T-VN-33`만 잔여)**: `### T-VN-37` 절 본문은 이 PR(#968)이
+> 재정의판으로 바꿨다. `### T-VN-33` 절 본문은 아직 구 A/B/C 분해판이고, 그 재작성은
+> 열린 draft PR **#966**(`feat/tvn33-provider-datasets`)이 자기 브랜치에서 이미
+> 소유하고 있어 여기서 건드리지 않는다. #966이 머지되면 해소된다.
 
 ### T-VN-32 — UUID identity shadow 전환 (Lane A)
 
