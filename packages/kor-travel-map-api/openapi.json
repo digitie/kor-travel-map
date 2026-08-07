@@ -19271,6 +19271,10 @@
             "title": "Dataset Key",
             "type": "string"
           },
+          "operation_key": {
+            "title": "Operation Key",
+            "type": "string"
+          },
           "operation_member_id": {
             "format": "uuid",
             "title": "Operation Member Id",
@@ -19297,15 +19301,8 @@
             "type": "string"
           },
           "sync_scope": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Sync Scope"
+            "title": "Sync Scope",
+            "type": "string"
           }
         },
         "required": [
@@ -19313,6 +19310,7 @@
           "provider",
           "dataset_key",
           "sync_scope",
+          "operation_key",
           "operation_member_id",
           "status"
         ],
@@ -24011,6 +24009,10 @@
             ],
             "title": "Last Success At"
           },
+          "operation_key": {
+            "title": "Operation Key",
+            "type": "string"
+          },
           "provider": {
             "title": "Provider",
             "type": "string"
@@ -24027,6 +24029,7 @@
         "required": [
           "dataset_key",
           "sync_scope",
+          "operation_key",
           "status",
           "last_success_at",
           "last_failure_at",
@@ -28646,6 +28649,10 @@
             ],
             "title": "Last Success At"
           },
+          "operation_key": {
+            "title": "Operation Key",
+            "type": "string"
+          },
           "status": {
             "title": "Status",
             "type": "string"
@@ -28658,6 +28665,7 @@
         "required": [
           "dataset_key",
           "sync_scope",
+          "operation_key",
           "status",
           "last_success_at",
           "last_failure_at",
@@ -46227,6 +46235,24 @@
               ],
               "description": "sync_scope 필터",
               "title": "Sync Scope"
+            }
+          },
+          {
+            "description": "operation_key 필터",
+            "in": "query",
+            "name": "operation_key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "operation_key 필터",
+              "title": "Operation Key"
             }
           }
         ],

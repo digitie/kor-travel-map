@@ -2448,6 +2448,10 @@
             ],
             "title": "Last Success At"
           },
+          "operation_key": {
+            "title": "Operation Key",
+            "type": "string"
+          },
           "provider": {
             "title": "Provider",
             "type": "string"
@@ -2464,6 +2468,7 @@
         "required": [
           "dataset_key",
           "sync_scope",
+          "operation_key",
           "status",
           "last_success_at",
           "last_failure_at",
@@ -6300,6 +6305,10 @@
             ],
             "title": "Last Success At"
           },
+          "operation_key": {
+            "title": "Operation Key",
+            "type": "string"
+          },
           "status": {
             "title": "Status",
             "type": "string"
@@ -6312,6 +6321,7 @@
         "required": [
           "dataset_key",
           "sync_scope",
+          "operation_key",
           "status",
           "last_success_at",
           "last_failure_at",
@@ -10104,6 +10114,24 @@
               ],
               "description": "sync_scope 필터",
               "title": "Sync Scope"
+            }
+          },
+          {
+            "description": "operation_key 필터",
+            "in": "query",
+            "name": "operation_key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "operation_key 필터",
+              "title": "Operation Key"
             }
           }
         ],

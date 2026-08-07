@@ -9777,6 +9777,8 @@ export interface components {
         OpsDatasetProviderDataset: {
             /** Dataset Key */
             dataset_key: string;
+            /** Operation Key */
+            operation_key: string;
             /**
              * Operation Member Id
              * Format: uuid
@@ -9792,7 +9794,7 @@ export interface components {
              */
             status: "queued" | "running" | "done" | "failed" | "cancelled";
             /** Sync Scope */
-            sync_scope: string | null;
+            sync_scope: string;
         };
         /** OpsDatasetRefreshPolicyResponse */
         OpsDatasetRefreshPolicyResponse: {
@@ -11550,6 +11552,8 @@ export interface components {
             last_failure_at: string | null;
             /** Last Success At */
             last_success_at: string | null;
+            /** Operation Key */
+            operation_key: string;
             /** Provider */
             provider: string;
             /** Status */
@@ -12989,6 +12993,8 @@ export interface components {
             last_failure_at: string | null;
             /** Last Success At */
             last_success_at: string | null;
+            /** Operation Key */
+            operation_key: string;
             /** Status */
             status: string;
             /** Sync Scope */
@@ -21473,6 +21479,8 @@ export interface operations {
                 dataset_key?: string | null;
                 /** @description sync_scope 필터 */
                 sync_scope?: string | null;
+                /** @description operation_key 필터 */
+                operation_key?: string | null;
             };
             header?: never;
             path: {

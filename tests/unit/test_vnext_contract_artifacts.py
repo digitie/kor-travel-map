@@ -27,19 +27,19 @@ _CONTRACTS: Final = _ROOT / "contracts" / "vnext"
 # artifact bytes 고정 — 갱신 절차: artifact 수정 → 통합 테스트로 fingerprint 재고정
 # → 여기 sha256 갱신 (한 PR에서 함께).
 ARTIFACT_SHA256: Final[dict[str, str]] = {
-    "target-schema-v1.sql": ("4e0cbab589949ded9795b74d871d6e7612456d7d077f1be2abfdf51827eeecda"),
+    "target-schema-v1.sql": ("e0ffcd25effbbda10d85c10a6a1e150133b062fcaefcd0135d6109c1bc155280"),
     "target-invariants-v1.sql": (
         "51c99c6ed806f96abaf7e30717bf9ddb893d04eac0862ed1bdc32fbb8611b672"
     ),
     "target-schema-fingerprints-v1.json": (
-        "72067b9609c63a0317e9604a78d4d2766ec5d653091df8196ce43a66c5fc9d8e"
+        "f43a6aec212e174517c81360217d8d36f5ce7b1ffe6b51f02bcdc2017342b27b"
     ),
     "tvn33-reference-ownership-v1.sql": (
         "d8e6fc32278b6942f3c01f1b181b88cd019b9aeaa26f7b54cba18f04668940ca"
     ),
-    "openapi-diff-v1.json": ("01ad3d690d599020843be4c1f2dad5df9ffaaebeb6d87785e333e8015e942d6a"),
+    "openapi-diff-v1.json": ("127d13d79b66621029ef68cbad28e989850ea14cdef79e7665ae71ec01ea2080"),
     "consumer-rollout-v1.json": (
-        "f02da0185feee929f1bc6189ad03f8a51f9b641af03ae3b3f4332dc80511bcfa"
+        "573210a3949d78e3831f9581811f158cef8547328efea44d16cc6afb39b76c88"
     ),
     "violation-fixtures-v1.sql": (
         "04c9cc87658175b89622353972059fd052f302b4dfe008eea506d8218411db3f"

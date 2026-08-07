@@ -31,6 +31,9 @@ class SyncStateSummary(BaseModel):
 
     dataset_key: str
     sync_scope: str
+    # 실행 membership identity는 triple이다(ADR-088 §결정 2). operation_key가
+    # 없으면 operation만 다른 두 state가 같은 항목으로 보인다.
+    operation_key: str
     status: str
     last_success_at: datetime | None
     last_failure_at: datetime | None
@@ -74,6 +77,7 @@ def _summary(state: SyncState) -> SyncStateSummary:
     return SyncStateSummary(
         dataset_key=state.dataset_key,
         sync_scope=state.sync_scope,
+        operation_key=state.operation_key,
         status=state.status,
         last_success_at=state.last_success_at,
         last_failure_at=state.last_failure_at,
@@ -113,6 +117,7 @@ async def get_provider_last_sync(
     session: Annotated[AsyncSession, Depends(get_session)],
     dataset_key: Annotated[str | None, Query(description="dataset_key 필터")] = None,
     sync_scope: Annotated[str | None, Query(description="sync_scope 필터")] = None,
+    operation_key: Annotated[str | None, Query(description="operation_key 필터")] = None,
 ) -> ProviderLastSyncResponse:
     started_at = perf_counter()
     states = await sync_state_repo.list_sync_states(
@@ -120,6 +125,7 @@ async def get_provider_last_sync(
         provider=provider,
         dataset_key=dataset_key,
         sync_scope=sync_scope,
+        operation_key=operation_key,
     )
     if not states:
         raise HTTPException(
