@@ -111,5 +111,11 @@ async def test_ensure_attempt_and_finish_use_only_canonical_membership(
     assert created.operation.operation_key == operation_key
     assert created.operation.members[0].membership == membership
     assert event.import_job_dataset_id == created.operation.members[0].import_job_dataset_id
-    assert finished.operation.status == "done"
+    assert finished.outcome == "applied"
     assert finished.operation.members[0].membership == membership
+    # member 완료는 그 member의 job만 닫고 root의 진행률을 민다. root의 terminal
+    # 전이는 Dagster terminal handoff(``reconcile_dagster_feature_run``)만 한다 —
+    # 여기서 root까지 done으로 보면 handoff 없이 끝난 run이 완료로 보인다.
+    assert finished.operation.members[0].status == "done"
+    assert finished.operation.progress == 100
+    assert finished.operation.status == "running"

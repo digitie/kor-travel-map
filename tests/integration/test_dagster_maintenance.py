@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
+from hashlib import md5
 from typing import TYPE_CHECKING
 
 import pytest
@@ -15,6 +16,7 @@ from kortravelmap.client import AsyncKorTravelMapClient
 from kortravelmap.infra.dedup_refresh_repo import DedupRefreshScope
 from kortravelmap.infra.models import (
     FeatureRow,
+    SourceEntityHeadRow,
     SourceEntityRow,
     SourceLinkRow,
     SourceRecordRow,
@@ -31,7 +33,8 @@ pytestmark = pytest.mark.integration
 _NOW = datetime(2026, 6, 3, 12, 0, tzinfo=UTC)
 _TEMPLE_CAT = "01070100"
 _TRUNCATE_SQL = (
-    "TRUNCATE feature.features, provider_sync.source_records, "
+    "TRUNCATE feature.features, provider_sync.source_entities, "
+    "provider_sync.source_records, "
     "provider_sync.source_links, ops.dedup_review_queue, "
     "ops.feature_consistency_reports RESTART IDENTITY CASCADE"
 )
@@ -114,6 +117,37 @@ async def test_consistency_dedup_refresh_client_updates_queue_and_report(
     assert int(report_count) == 1
 
 
+async def _dataset_id(session: AsyncSession, *, provider: str, dataset_key: str) -> int:
+    """fixture 전용 catalog 행을 만들고 canonical id를 돌려준다 (T-VN-33).
+
+    dedup refresh scope는 여전히 provider/dataset_key 표시 자연키를 받지만,
+    source entity의 identity는 ``provider_dataset_id`` 하나다.
+    """
+
+    return int(
+        (
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO provider_sync.provider_datasets (
+                        provider, dataset_key, display_name, source_kind,
+                        is_active, capabilities
+                    )
+                    SELECT :provider, :dataset_key, :provider, 'system', true,
+                           jsonb_build_object('schema_version', 1,
+                                              'produces', '[]'::jsonb,
+                                              'extensions', '{}'::jsonb)
+                    ON CONFLICT (provider, dataset_key) DO UPDATE
+                        SET display_name = EXCLUDED.display_name
+                    RETURNING provider_dataset_id
+                    """
+                ),
+                {"provider": provider, "dataset_key": dataset_key},
+            )
+        ).scalar_one()
+    )
+
+
 async def _seed_feature_with_source(
     engine: AsyncEngine,
     *,
@@ -125,6 +159,7 @@ async def _seed_feature_with_source(
 ) -> None:
     source_entity_key = f"se-{source_record_key}"
     async with AsyncSession(engine) as session, session.begin():
+        dataset_id = await _dataset_id(session, provider=provider, dataset_key=dataset_key)
         session.add(
             FeatureRow(
                 feature_id=feature_id,
@@ -140,11 +175,9 @@ async def _seed_feature_with_source(
         session.add(
             SourceEntityRow(
                 source_entity_key=source_entity_key,
-                provider=provider,
-                dataset_key=dataset_key,
+                provider_dataset_id=dataset_id,
                 source_entity_type="place",
                 source_entity_id=feature_id,
-                current_source_record_key=None,
                 first_seen_at=_NOW,
                 last_seen_at=_NOW,
             )
@@ -156,22 +189,21 @@ async def _seed_feature_with_source(
             SourceRecordRow(
                 source_record_key=source_record_key,
                 source_entity_key=source_entity_key,
-                provider=provider,
-                dataset_key=dataset_key,
-                source_entity_type="place",
-                source_entity_id=feature_id,
-                raw_name=name,
-                raw_address="경상북도 경주시 불국로 385",
-                raw_payload_hash=f"hash-{source_record_key}",
-                raw_data={"feature_id": feature_id},
+                # ck_source_records_payload_hash_canonical = ^[0-9a-f]{1,64}$
+                raw_payload_hash=md5(source_record_key.encode()).hexdigest(),
+                raw_data={"feature_id": feature_id, "name": name},
                 fetched_at=_NOW,
                 imported_at=_NOW,
             )
         )
         await session.flush()
-        entity = await session.get(SourceEntityRow, source_entity_key)
-        assert entity is not None
-        entity.current_source_record_key = source_record_key
+        session.add(
+            SourceEntityHeadRow(
+                source_entity_key=source_entity_key,
+                current_source_record_key=source_record_key,
+                observed_at=_NOW,
+            )
+        )
         await session.flush()
         session.add(
             SourceLinkRow(

@@ -133,8 +133,13 @@ async def test_cli_import_mois_incremental_advances_cursor(
     from kortravelmap.providers.mois import DATASET_KEY_HISTORY
 
     async with AsyncSession(migrated_engine) as session:
+        # T-VN-33: sync state는 (dataset, sync_scope, operation_key) triple로
+        # 잡힌다 — 0089가 seed한 canonical operation key로 조회한다.
         state = await get_sync_state(
-            session, provider=PROVIDER_NAME, dataset_key=DATASET_KEY_HISTORY
+            session,
+            provider=PROVIDER_NAME,
+            dataset_key=DATASET_KEY_HISTORY,
+            operation_key="mois_license_incremental_update",
         )
     assert state is not None
     assert state.cursor == {"last_modified_date": "2026-06-01"}
@@ -200,7 +205,10 @@ async def test_cli_import_mois_closed_inactivates(
 
     async with AsyncSession(migrated_engine) as session:
         state = await get_sync_state(
-            session, provider=PROVIDER_NAME, dataset_key=DATASET_KEY_CLOSED
+            session,
+            provider=PROVIDER_NAME,
+            dataset_key=DATASET_KEY_CLOSED,
+            operation_key="mois_license_closed_update",
         )
     assert state is not None
     assert state.cursor == {"last_modified_date": "2026-06-03"}

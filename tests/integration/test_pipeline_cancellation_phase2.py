@@ -5,6 +5,7 @@ from __future__ import annotations
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.infra.jobs_repo import enqueue_unpaired_import_job
@@ -45,8 +46,8 @@ async def test_cancellation_reserves_one_generic_import_root(
     )
 
     assert detail is not None
-    assert detail.root_id == job.job_id
-    assert detail.root_kind == "import_job"
+    assert detail.attempt.root_id == job.job_id
+    assert detail.attempt.root_kind == "import_job"
     assert len(detail.members) == 1
     assert detail.members[0].job_id == job.job_id
 
@@ -68,4 +69,26 @@ async def test_cancellation_scope_does_not_synthesize_provider_dataset_identity(
     )
 
     assert scope is not None
-    assert scope.provider_datasets == ()
+    assert scope.root_kind == "import_job"
+    assert scope.root_id == job.job_id
+    assert tuple(member.job_id for member in scope.members) == (job.job_id,)
+    # T-VN-33: unpaired root는 dataset membership을 만들지 않는다. 자연키 사본이
+    # 사라졌으므로 합성 provider/dataset identity가 끼어들 자리도 없다 —
+    # membership 정본인 ``ops.import_job_datasets``가 비어 있어야 한다.
+    memberships = (
+        (
+            await migrated_session.execute(
+                text(
+                    """
+                    SELECT provider_dataset_id, sync_scope, operation_key
+                    FROM ops.import_job_datasets
+                    WHERE job_id = CAST(:job_id AS uuid)
+                    """
+                ),
+                {"job_id": job.job_id},
+            )
+        )
+        .mappings()
+        .all()
+    )
+    assert memberships == []

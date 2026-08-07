@@ -145,10 +145,7 @@ async def test_offline_upload_load_job_uses_preclaimed_load_job(
         job = await start_provider_dataset_import_job(
             session,
             kind="offline_upload_load",
-            dataset_membership=ImportJobDatasetTarget(
-                provider_dataset_id=await _offline_provider_dataset_id(session),
-                sync_scope="dataset_wide",
-            ),
+            dataset_membership=await _offline_membership(session),
             payload={"upload_id": upload_id, "dagster_run_id": None},
             source_checksum=hashlib.sha256(body).hexdigest(),
         )
@@ -191,10 +188,7 @@ async def test_preclaimed_run_owner_mismatch_stops_before_object_io(
         job = await start_provider_dataset_import_job(
             session,
             kind="offline_upload_load",
-            dataset_membership=ImportJobDatasetTarget(
-                provider_dataset_id=await _offline_provider_dataset_id(session),
-                sync_scope="dataset_wide",
-            ),
+            dataset_membership=await _offline_membership(session),
             payload={"upload_id": upload_id},
             source_checksum=hashlib.sha256(body).hexdigest(),
             dagster_run_id="owner-run",
@@ -241,10 +235,7 @@ async def test_preclaimed_marker_race_stops_before_object_and_feature_io(
         job = await start_provider_dataset_import_job(
             session,
             kind="offline_upload_load",
-            dataset_membership=ImportJobDatasetTarget(
-                provider_dataset_id=await _offline_provider_dataset_id(session),
-                sync_scope="dataset_wide",
-            ),
+            dataset_membership=await _offline_membership(session),
             payload={"upload_id": upload_id},
             source_checksum=hashlib.sha256(body).hexdigest(),
         )
@@ -486,10 +477,7 @@ async def test_offline_upload_repo_rejects_invalid_state_transitions(
         job = await start_provider_dataset_import_job(
             session,
             kind="offline_upload_load",
-            dataset_membership=ImportJobDatasetTarget(
-                provider_dataset_id=await _offline_provider_dataset_id(session),
-                sync_scope="dataset_wide",
-            ),
+            dataset_membership=await _offline_membership(session),
         )
         loading = await mark_offline_upload_loading(
             session,
@@ -692,10 +680,7 @@ async def test_delete_offline_upload_rejects_in_progress_and_keeps_jobs(
         job = await start_provider_dataset_import_job(
             session,
             kind="offline_upload_load",
-            dataset_membership=ImportJobDatasetTarget(
-                provider_dataset_id=await _offline_provider_dataset_id(session),
-                sync_scope="dataset_wide",
-            ),
+            dataset_membership=await _offline_membership(session),
             payload={"upload_id": upload_id, "dagster_run_id": None},
             source_checksum=hashlib.sha256(body).hexdigest(),
         )
@@ -804,6 +789,32 @@ async def _truncate(engine: AsyncEngine) -> None:
         await truncate_committed_test_rows(session, _TRUNCATE_SQL)
 
 
+def _offline_operation_key(dataset_key: str) -> str:
+    """fixture dataset이 소유하는 유일한 canonical operation key."""
+
+    return f"offline_fixture_{dataset_key}_refresh"
+
+
+async def _offline_membership(
+    session: AsyncSession,
+    *,
+    dataset_key: str = "offline_jsonl",
+) -> ImportJobDatasetTarget:
+    """T-VN-33 canonical membership — dataset+scope+operation triple.
+
+    ``ops.import_job_datasets``가 ``provider_dataset_operation_scopes``를 FK로
+    잡으므로 fixture pair도 catalog에 먼저 있어야 한다.
+    """
+
+    return ImportJobDatasetTarget(
+        provider_dataset_id=await _offline_provider_dataset_id(
+            session, dataset_key=dataset_key
+        ),
+        sync_scope="dataset_wide",
+        operation_key=_offline_operation_key(dataset_key),
+    )
+
+
 async def _offline_provider_dataset_id(
     session: AsyncSession,
     *,
@@ -840,7 +851,7 @@ async def _offline_provider_dataset_id(
             )
         ).scalar_one()
     )
-    operation_key = f"offline_fixture_{dataset_key}_refresh"
+    operation_key = _offline_operation_key(dataset_key)
     await session.execute(
         text(
             """
@@ -863,9 +874,8 @@ async def _offline_provider_dataset_id(
             ) VALUES (
                 :provider_dataset_id, 'dataset_wide', :operation_key, 'refresh'
             )
-            ON CONFLICT (provider_dataset_id, sync_scope) DO UPDATE
-            SET operation_key = EXCLUDED.operation_key,
-                operation_kind = EXCLUDED.operation_kind
+            ON CONFLICT (provider_dataset_id, sync_scope, operation_key) DO UPDATE
+            SET operation_kind = EXCLUDED.operation_kind
             """
         ),
         {"provider_dataset_id": dataset_id, "operation_key": operation_key},

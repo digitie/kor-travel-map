@@ -15,13 +15,16 @@ issue #452 / #445 회귀. DA-D-07에서 KHOA 해수욕장 category가 ``01020300
 
 Docker / testcontainers 미설치 환경에서는 conftest fixture가 ``pytest.skip``.
 0044 이후 head 스키마에서는 역사 migration 상수의 의도를 확인한 뒤
-``source_entity_key`` 동등 SQL로 실행한다.
+``source_entity_key`` 동등 SQL로 실행한다. T-VN-33 이후 provider/dataset 자연키
+사본이 사라졌으므로 provider 한정 술어는 ``provider_datasets`` 조인으로,
+primary 판정은 ``source_role = 'primary'``로 표현한다.
 """
 
 from __future__ import annotations
 
 import importlib.util
 from datetime import UTC, datetime
+from hashlib import md5
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -29,7 +32,12 @@ import pytest
 from sqlalchemy import text
 
 from kortravelmap.infra.feature_repo import _make_source_entity_key
-from kortravelmap.infra.models import SourceEntityRow, SourceLinkRow, SourceRecordRow
+from kortravelmap.infra.models import (
+    SourceEntityHeadRow,
+    SourceEntityRow,
+    SourceLinkRow,
+    SourceRecordRow,
+)
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -49,15 +57,17 @@ WHERE f.deleted_at IS NULL
     FROM provider_sync.source_links AS old_sl
     JOIN provider_sync.source_entities AS se
       ON se.source_entity_key = old_sl.source_entity_key
+    JOIN provider_sync.provider_datasets AS pd
+      ON pd.provider_dataset_id = se.provider_dataset_id
     JOIN provider_sync.source_links AS new_sl
       ON new_sl.source_entity_key = old_sl.source_entity_key
-     AND new_sl.is_primary_source
+     AND new_sl.source_role = 'primary'
     JOIN feature.features AS nf
       ON nf.feature_id = new_sl.feature_id
     WHERE old_sl.feature_id = f.feature_id
-      AND old_sl.is_primary_source
-      AND se.provider = 'python-khoa-api'
-      AND se.dataset_key = 'khoa_beaches'
+      AND old_sl.source_role = 'primary'
+      AND pd.provider = 'python-khoa-api'
+      AND pd.dataset_key = 'khoa_beaches'
       AND se.source_entity_type = 'beach'
       AND nf.category = '01050100'
       AND nf.deleted_at IS NULL
@@ -107,6 +117,33 @@ async def _insert_feature(
     )
 
 
+async def _dataset_id(session: AsyncSession, *, provider: str, dataset_key: str) -> int:
+    """T-VN-33: entity identity는 ``provider_dataset_id``다 — catalog 행을 확보한다."""
+
+    return int(
+        (
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO provider_sync.provider_datasets (
+                        provider, dataset_key, display_name, source_kind,
+                        is_active, capabilities
+                    )
+                    SELECT :provider, :dataset_key, :provider, 'system', true,
+                           jsonb_build_object('schema_version', 1,
+                                              'produces', '[]'::jsonb,
+                                              'extensions', '{}'::jsonb)
+                    ON CONFLICT (provider, dataset_key) DO UPDATE
+                        SET display_name = EXCLUDED.display_name
+                    RETURNING provider_dataset_id
+                    """
+                ),
+                {"provider": provider, "dataset_key": dataset_key},
+            )
+        ).scalar_one()
+    )
+
+
 async def _insert_source_record(
     session: AsyncSession,
     *,
@@ -122,32 +159,36 @@ async def _insert_source_record(
         source_entity_type=entity_type,
         source_entity_id=entity_id,
     )
-    entity = SourceEntityRow(
-        source_entity_key=source_entity_key,
-        provider=provider,
-        dataset_key=dataset_key,
-        source_entity_type=entity_type,
-        source_entity_id=entity_id,
-        current_source_record_key=None,
-        first_seen_at=_NOW,
-        last_seen_at=_NOW,
+    dataset_id = await _dataset_id(session, provider=provider, dataset_key=dataset_key)
+    session.add(
+        SourceEntityRow(
+            source_entity_key=source_entity_key,
+            provider_dataset_id=dataset_id,
+            source_entity_type=entity_type,
+            source_entity_id=entity_id,
+            first_seen_at=_NOW,
+            last_seen_at=_NOW,
+        )
     )
-    session.add(entity)
     await session.flush()
     session.add(
         SourceRecordRow(
             source_record_key=key,
             source_entity_key=source_entity_key,
-            provider=provider,
-            dataset_key=dataset_key,
-            source_entity_type=entity_type,
-            source_entity_id=entity_id,
-            raw_payload_hash="sha1:test",
+            # ck_source_records_payload_hash_canonical = ^[0-9a-f]{1,64}$
+            raw_payload_hash=md5(key.encode()).hexdigest(),
+            raw_data={"source_record_key": key},
             fetched_at=_NOW,
         )
     )
     await session.flush()
-    entity.current_source_record_key = key
+    session.add(
+        SourceEntityHeadRow(
+            source_entity_key=source_entity_key,
+            current_source_record_key=key,
+            observed_at=_NOW,
+        )
+    )
     await session.flush()
 
 

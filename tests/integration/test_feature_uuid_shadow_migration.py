@@ -55,6 +55,12 @@ _INVARIANTS_SQL: Final = _ROOT / "contracts" / "vnext" / "target-invariants-v1.s
 
 _PREV_REVISION: Final = "0078_cache_target_gc_observe"
 
+#: downgrade 왕복이 가능한 마지막 revision. 0089~0091(T-VN-33)은 forward-only이며
+#: downgrade가 ``RuntimeError``로 fail-close한다("rebuild from final ETL"). ADR-068
+#: shadow 구조물(0080~0083)의 무손실 왕복은 이 지점까지 올린 DB에서 판정한다 —
+#: fence 위쪽 revision은 애초에 왕복 계약이 없으므로 검증 대상이 아니다.
+_ROUNDTRIP_TOP_REVISION: Final = "0088_source_record_lineage_key"
+
 # 33A 목표 컬럼(provider_dataset_id)을 참조해 shadow 스키마에서 실행 불가.
 _INVARIANTS_NOT_RUNNABLE_ON_SHADOW: Final = frozenset({"INV-068-05"})
 
@@ -205,15 +211,20 @@ async def _seed_features(dsn: str) -> None:
         await engine.dispose()
 
 
-async def _build_shadow_db(pg_container: Any, prefix: str) -> tuple[str, str, str]:
-    """새 DB에 0078 → seed → head를 적용하고 (admin_dsn, dsn, database)를 반환."""
+async def _build_shadow_db(
+    pg_container: Any,
+    prefix: str,
+    *,
+    target: str = "head",
+) -> tuple[str, str, str]:
+    """새 DB에 0078 → seed → ``target``을 적용하고 (admin_dsn, dsn, database)를 반환."""
     admin_dsn = normalize_async_dsn(pg_container.get_connection_url())
     database = f"{prefix}_{uuid4().hex}"
     dsn = make_url(admin_dsn).set(database=database).render_as_string(hide_password=False)
     await _create_database(admin_dsn, database)
     await _upgrade(dsn, _PREV_REVISION)
     await _seed_features(dsn)
-    await _upgrade(dsn, "head")
+    await _upgrade(dsn, target)
     return admin_dsn, dsn, database
 
 
@@ -391,7 +402,9 @@ async def test_determinism_across_databases_and_lossless_downgrade_roundtrip(
     pg_container: Any,
     shadow_engine: AsyncEngine,
 ) -> None:
-    admin_dsn, dsn, database = await _build_shadow_db(pg_container, "uuid_shadow_replay")
+    admin_dsn, dsn, database = await _build_shadow_db(
+        pg_container, "uuid_shadow_replay", target=_ROUNDTRIP_TOP_REVISION
+    )
     engine = None
     try:
         # ③ 같은 legacy id → 별도 DB에서도 같은 UUID (snapshot 재실행 결정성).
@@ -464,7 +477,7 @@ async def test_determinism_across_databases_and_lossless_downgrade_roundtrip(
         engine = None
 
         # 재-upgrade — 같은 UUID가 재계산된다 (파생값 왕복 결정성).
-        await _upgrade(dsn, "head")
+        await _upgrade(dsn, _ROUNDTRIP_TOP_REVISION)
         engine = make_async_engine(dsn)
         async with engine.connect() as connection:
             recomputed = {
@@ -761,7 +774,9 @@ async def test_0083_downgrade_restores_not_valid_derivation_checks_and_reupgrade
     """0083 downgrade는 파생 CHECK를 ``NOT VALID``로 복원하고 신규 INSERT를 다시 막는다."""
     from sqlalchemy.exc import DBAPIError
 
-    admin_dsn, dsn, database = await _build_shadow_db(pg_container, "uuid_shadow_0083")
+    admin_dsn, dsn, database = await _build_shadow_db(
+        pg_container, "uuid_shadow_0083", target=_ROUNDTRIP_TOP_REVISION
+    )
     engine = None
     try:
         await _downgrade(dsn, "0082_legacy_write_fence")
@@ -840,7 +855,7 @@ async def test_0083_downgrade_restores_not_valid_derivation_checks_and_reupgrade
         engine = None
 
         # 재-upgrade — 0083이 다시 적용되고 비파생 INSERT가 되살아난다.
-        await _upgrade(dsn, "head")
+        await _upgrade(dsn, _ROUNDTRIP_TOP_REVISION)
         engine = make_async_engine(dsn)
         async with engine.begin() as connection:
             reupgraded = "f_global_p_shadow_reupgrade"

@@ -576,6 +576,8 @@ async def test_krex_notice_asset_snapshot_lifecycle_and_sync_cursor(
         state = await map_client.get_sync_state(
             provider="python-krex-api",
             dataset_key="krex_traffic_notices",
+            # T-VN-33 — sync state identity는 (dataset, scope, operation) 3축이다.
+            operation_key="feature_notice_krex_traffic_notices_job",
         )
         assert state is not None
         return state.cursor

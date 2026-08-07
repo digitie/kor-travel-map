@@ -153,14 +153,48 @@ _INSERT_JOB = text(
 _INSERT_REQUEST = text(
     """
     INSERT INTO ops.feature_update_requests (
-        request_id, scope_type, scope, providers, dataset_keys, update_policy,
+        request_id, scope_type, scope, update_policy,
         run_mode, priority, matched_scope, job_id, operator, created_at
     ) VALUES (
         CAST(:request_id AS uuid), 'feature_ids',
         '{"type":"feature_ids","feature_ids":["f-1"]}'::jsonb,
-        '{}'::text[], '{}'::text[], '{}'::jsonb, 'queued', 50,
+        '{}'::jsonb, 'queued', 50,
         '{}'::jsonb, CAST(:job_id AS uuid), 'tester', :created_at
     )
+    """
+)
+
+# T-VN-33: providers/dataset_keys 배열 사본이 사라졌고 request는 canonical
+# membership(dataset+scope+operation) 최소 1개를 요구한다(deferred
+# ``trg_feature_update_requests_membership_complete``). 0089가 seed한 catalog에서
+# 활성 request가 점유하지 않은 triple 하나를 골라 붙인다.
+_INSERT_REQUEST_MEMBER = text(
+    """
+    INSERT INTO ops.feature_update_request_datasets (
+        request_id, provider_dataset_id, sync_scope, operation_key
+    )
+    SELECT CAST(:request_id AS uuid), scope.provider_dataset_id,
+           scope.sync_scope, scope.operation_key
+    FROM provider_sync.provider_dataset_operation_scopes AS scope
+    JOIN provider_sync.provider_datasets AS dataset
+      ON dataset.provider_dataset_id = scope.provider_dataset_id
+    JOIN provider_sync.provider_dataset_operations AS operation
+      ON operation.provider_dataset_id = scope.provider_dataset_id
+     AND operation.operation_key = scope.operation_key
+    WHERE dataset.is_active AND operation.is_enabled
+      AND NOT EXISTS (
+          SELECT 1
+          FROM ops.feature_update_request_datasets AS member
+          JOIN ops.feature_update_requests AS request
+            ON request.request_id = member.request_id
+          JOIN ops.import_jobs AS job ON job.job_id = request.job_id
+          WHERE member.provider_dataset_id = scope.provider_dataset_id
+            AND member.sync_scope = scope.sync_scope
+            AND member.operation_key = scope.operation_key
+            AND job.status IN ('queued', 'running')
+      )
+    ORDER BY scope.provider_dataset_id, scope.sync_scope, scope.operation_key
+    LIMIT 1
     """
 )
 
@@ -216,6 +250,8 @@ async def _request(
             "created_at": created_at,
         },
     )
+    inserted = await session.execute(_INSERT_REQUEST_MEMBER, {"request_id": request_id})
+    assert inserted.rowcount == 1
 
 
 async def _scope(

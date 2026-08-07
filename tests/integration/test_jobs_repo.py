@@ -66,21 +66,33 @@ async def _event_codes(session: AsyncSession, job_id: str) -> list[str | None]:
 
 
 async def _mois_bulk_membership(session: AsyncSession) -> ImportJobDatasetTarget:
+    """catalog가 seed한 canonical membership triple을 그대로 읽는다 (T-VN-33).
+
+    job membership identity는 ``provider_dataset_id + sync_scope + operation_key``
+    셋 다이고 ``ops.import_job_datasets``가 그 triple을 operation scope로 FK한다 —
+    scope 행에서 읽지 않고 지어내면 FK에서 죽는다.
+    """
     row = (
         await session.execute(
             text(
                 """
-                SELECT provider_dataset_id
-                FROM provider_sync.provider_datasets
-                WHERE provider = 'python-mois-api'
-                  AND dataset_key = 'mois_license_features_bulk'
+                SELECT scope.provider_dataset_id, scope.sync_scope, scope.operation_key
+                FROM provider_sync.provider_dataset_operation_scopes AS scope
+                JOIN provider_sync.provider_datasets AS dataset
+                  ON dataset.provider_dataset_id = scope.provider_dataset_id
+                WHERE dataset.provider = 'python-mois-api'
+                  AND dataset.dataset_key = 'mois_license_features_bulk'
+                  AND scope.operation_kind = 'refresh'
+                ORDER BY scope.operation_key
+                LIMIT 1
                 """
             )
         )
     ).one()
     return ImportJobDatasetTarget(
         provider_dataset_id=int(row.provider_dataset_id),
-        sync_scope="dataset_wide",
+        sync_scope=str(row.sync_scope),
+        operation_key=str(row.operation_key),
     )
 
 

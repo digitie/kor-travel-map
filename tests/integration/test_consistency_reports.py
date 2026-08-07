@@ -12,13 +12,19 @@ dedup queue baseline 대비 현재 ``core.scoring`` 점수 회귀를 WARN으로 
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta, timezone
+from hashlib import md5
 from typing import TYPE_CHECKING
 
 import pytest
 from sqlalchemy import text
 
 from kortravelmap.infra.consistency import FileObjectRef, run_consistency_checks
-from kortravelmap.infra.models import FeatureRow, SourceEntityRow, SourceRecordRow
+from kortravelmap.infra.models import (
+    FeatureRow,
+    SourceEntityHeadRow,
+    SourceEntityRow,
+    SourceRecordRow,
+)
 from tests.integration._subtype_seed import seed_feature_subtype
 
 if TYPE_CHECKING:
@@ -56,6 +62,68 @@ async def _add_clean_place(session: AsyncSession, feature_id: str) -> FeatureRow
     return row
 
 
+async def _dataset_id(
+    session: AsyncSession, *, provider: str, dataset_key: str
+) -> int:
+    """catalog에 pair를 확보하고 canonical ``provider_dataset_id``를 돌려준다.
+
+    T-VN-33 이후 source entity/record는 자연키 사본을 갖지 않는다 — provider와
+    dataset_key는 ``provider_sync.provider_datasets``에만 산다.
+    """
+    return int(
+        (
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO provider_sync.provider_datasets (
+                        provider, dataset_key, display_name, source_kind,
+                        is_active, capabilities
+                    )
+                    SELECT :provider, :dataset_key, :provider, 'system', true,
+                           jsonb_build_object('schema_version', 1,
+                                              'produces', '[]'::jsonb,
+                                              'extensions', '{}'::jsonb)
+                    ON CONFLICT (provider, dataset_key) DO UPDATE
+                        SET display_name = EXCLUDED.display_name
+                    RETURNING provider_dataset_id
+                    """
+                ),
+                {"provider": provider, "dataset_key": dataset_key},
+            )
+        ).scalar_one()
+    )
+
+
+def _payload_hash(seed: str) -> str:
+    """``ck_source_records_payload_hash_canonical`` = ``^[0-9a-f]{1,64}$``."""
+    return md5(seed.encode("utf-8"), usedforsecurity=False).hexdigest()
+
+
+async def _seed_orphan_source_entity(
+    session: AsyncSession,
+    *,
+    entity_key: str,
+    provider: str,
+    dataset_key: str,
+    entity_type: str,
+    entity_id: str,
+) -> None:
+    """source_link가 없는 entity — F1이 잡아야 하는 위반."""
+    session.add(
+        SourceEntityRow(
+            source_entity_key=entity_key,
+            provider_dataset_id=await _dataset_id(
+                session, provider=provider, dataset_key=dataset_key
+            ),
+            source_entity_type=entity_type,
+            source_entity_id=entity_id,
+            first_seen_at=_FETCHED,
+            last_seen_at=_FETCHED,
+        )
+    )
+    await session.flush()
+
+
 async def _seed_source_entity_record(
     session: AsyncSession,
     *,
@@ -65,34 +133,39 @@ async def _seed_source_entity_record(
     dataset_key: str,
     entity_type: str,
     entity_id: str,
-    raw_payload_hash: str,
+    raw_payload_seed: str,
 ) -> None:
-    entity = SourceEntityRow(
-        source_entity_key=entity_key,
-        provider=provider,
-        dataset_key=dataset_key,
-        source_entity_type=entity_type,
-        source_entity_id=entity_id,
-        current_source_record_key=None,
-        first_seen_at=_FETCHED,
-        last_seen_at=_FETCHED,
+    session.add(
+        SourceEntityRow(
+            source_entity_key=entity_key,
+            provider_dataset_id=await _dataset_id(
+                session, provider=provider, dataset_key=dataset_key
+            ),
+            source_entity_type=entity_type,
+            source_entity_id=entity_id,
+            first_seen_at=_FETCHED,
+            last_seen_at=_FETCHED,
+        )
     )
-    session.add(entity)
     await session.flush()
     session.add(
         SourceRecordRow(
             source_record_key=record_key,
             source_entity_key=entity_key,
-            provider=provider,
-            dataset_key=dataset_key,
-            source_entity_type=entity_type,
-            source_entity_id=entity_id,
-            raw_payload_hash=raw_payload_hash,
+            raw_data={},
+            raw_payload_hash=_payload_hash(raw_payload_seed),
             fetched_at=_FETCHED,
         )
     )
     await session.flush()
-    entity.current_source_record_key = record_key
+    # 현재 record 포인터는 head가 소유한다(lineage_key는 트리거가 채운다).
+    session.add(
+        SourceEntityHeadRow(
+            source_entity_key=entity_key,
+            current_source_record_key=record_key,
+            observed_at=_FETCHED,
+        )
+    )
     await session.flush()
 
 
@@ -113,19 +186,14 @@ async def test_f1_detected_and_report_persisted(
     )
 
     # F1 위반 — source_links 없는 orphan source entity
-    migrated_session.add(
-        SourceEntityRow(
-            source_entity_key="orphan-se-1",
-            provider="datagokr",
-            dataset_key="cultural_festivals",
-            source_entity_type="festival",
-            source_entity_id="ORPHAN-1",
-            current_source_record_key=None,
-            first_seen_at=_FETCHED,
-            last_seen_at=_FETCHED,
-        )
+    await _seed_orphan_source_entity(
+        migrated_session,
+        entity_key="orphan-se-1",
+        provider="datagokr",
+        dataset_key="cultural_festivals",
+        entity_type="festival",
+        entity_id="ORPHAN-1",
     )
-    await migrated_session.flush()
 
     report = await run_consistency_checks(
         migrated_session, batch_id="11111111-1111-1111-1111-111111111111"
@@ -184,15 +252,15 @@ async def test_clean_data_reports_ok(migrated_session: AsyncSession) -> None:
         dataset_key="cultural_festivals",
         entity_type="festival",
         entity_id="LINKED-1",
-        raw_payload_hash="cafef00d",
+        raw_payload_seed="cafef00d",
     )
     await migrated_session.flush()
     await migrated_session.execute(
         text(
             "INSERT INTO provider_sync.source_links "
             "(feature_id, source_entity_key, source_role, match_method, "
-            " confidence, is_primary_source) "
-            "VALUES ('clean-2','linked-se-1','primary','exact',100,true)"
+            " confidence) "
+            "VALUES ('clean-2','linked-se-1','primary','exact',100)"
         )
     )
     await migrated_session.flush()
@@ -270,19 +338,14 @@ async def test_f4_warn_over_threshold(migrated_session: AsyncSession) -> None:
 async def test_f4_warn_does_not_block_errors(migrated_session: AsyncSession) -> None:
     # F4 WARN + F1 ERROR 공존 → severity_max는 ERROR(F4가 ERROR를 가리지 않음).
     await _seed_pending_dedup(migrated_session, 3)
-    migrated_session.add(
-        SourceEntityRow(
-            source_entity_key="f4-orphan",
-            provider="datagokr",
-            dataset_key="d",
-            source_entity_type="t",
-            source_entity_id="o1",
-            current_source_record_key=None,
-            first_seen_at=_FETCHED,
-            last_seen_at=_FETCHED,
-        )
+    await _seed_orphan_source_entity(
+        migrated_session,
+        entity_key="f4-orphan",
+        provider="datagokr",
+        dataset_key="d",
+        entity_type="t",
+        entity_id="o1",
     )
-    await migrated_session.flush()
     report = await run_consistency_checks(
         migrated_session, persist=False, dedup_pending_threshold=1
     )
@@ -297,51 +360,98 @@ async def test_f4_warn_does_not_block_errors(migrated_session: AsyncSession) -> 
 # ── F5: provider last_success SLA WARN (ADR-033 Phase 2) ─────────────────
 
 
+async def _catalog_operation_scope(
+    session: AsyncSession, offset: int
+) -> tuple[int, str, str]:
+    """catalog에서 활성 (dataset, sync_scope, operation) triple 하나를 고른다.
+
+    T-VN-33 이후 ``provider_sync_state`` PK는
+    ``(provider_dataset_id, sync_scope, operation_key)``이고 세 열 전부
+    ``provider_dataset_operation_scopes``를 FK로 참조한다 — 임의의 자연키
+    문자열로 행을 만들 수 없다. 0089가 seed한 실제 triple을 쓴다.
+    """
+    row = (
+        await session.execute(
+            text(
+                """
+                SELECT scope.provider_dataset_id, scope.sync_scope,
+                       scope.operation_key
+                FROM provider_sync.provider_dataset_operation_scopes AS scope
+                JOIN provider_sync.provider_datasets AS dataset
+                  ON dataset.provider_dataset_id = scope.provider_dataset_id
+                WHERE dataset.is_active
+                ORDER BY scope.provider_dataset_id, scope.sync_scope,
+                         scope.operation_key
+                OFFSET :offset LIMIT 1
+                """
+            ),
+            {"offset": offset},
+        )
+    ).one()
+    return int(row.provider_dataset_id), str(row.sync_scope), str(row.operation_key)
+
+
 async def _seed_provider_sync_state(
     session: AsyncSession,
     *,
-    provider: str,
-    dataset_key: str,
-    sync_scope: str = "system",
+    provider_dataset_id: int,
+    sync_scope: str,
+    operation_key: str,
     last_success_at: datetime | None,
     status: str = "active",
-) -> None:
+) -> str:
+    """sync cursor 1건을 적재하고 F5 sample id(``<dataset_id>:<scope>``)를 돌려준다."""
     await session.execute(
         text(
             "INSERT INTO provider_sync.provider_sync_state "
-            "(provider, dataset_key, sync_scope, status, last_success_at) "
-            "VALUES (:provider, :dataset_key, :sync_scope, :status, :last_success_at)"
+            "(provider_dataset_id, sync_scope, operation_key, status, "
+            " last_success_at) "
+            "VALUES (:provider_dataset_id, :sync_scope, :operation_key, "
+            " :status, :last_success_at)"
         ),
         {
-            "provider": provider,
-            "dataset_key": dataset_key,
+            "provider_dataset_id": provider_dataset_id,
             "sync_scope": sync_scope,
+            "operation_key": operation_key,
             "status": status,
             "last_success_at": last_success_at,
         },
     )
     await session.flush()
+    return f"{provider_dataset_id}:{sync_scope}"
 
 
 async def test_f5_warns_when_provider_last_success_sla_exceeded(
     migrated_session: AsyncSession,
 ) -> None:
-    await _seed_provider_sync_state(
+    never_dataset, never_scope, never_operation = await _catalog_operation_scope(
+        migrated_session, 0
+    )
+    stale_dataset, stale_scope, stale_operation = await _catalog_operation_scope(
+        migrated_session, 1
+    )
+    fresh_dataset, fresh_scope, fresh_operation = await _catalog_operation_scope(
+        migrated_session, 2
+    )
+    never_id = await _seed_provider_sync_state(
         migrated_session,
-        provider="f5_never",
-        dataset_key="dataset",
+        provider_dataset_id=never_dataset,
+        sync_scope=never_scope,
+        operation_key=never_operation,
         last_success_at=None,
     )
-    await _seed_provider_sync_state(
+    stale_id = await _seed_provider_sync_state(
         migrated_session,
-        provider="f5_stale",
-        dataset_key="dataset",
+        provider_dataset_id=stale_dataset,
+        sync_scope=stale_scope,
+        operation_key=stale_operation,
         last_success_at=datetime.now(UTC) - timedelta(days=2),
     )
     await _seed_provider_sync_state(
         migrated_session,
-        provider="f5_fresh",
-        dataset_key="dataset",
+        provider_dataset_id=fresh_dataset,
+        sync_scope=fresh_scope,
+        operation_key=fresh_operation,
         last_success_at=datetime.now(UTC),
     )
 
@@ -351,32 +461,43 @@ async def test_f5_warns_when_provider_last_success_sla_exceeded(
     f5 = by_code["F5"]
     assert f5.severity == "WARN"
     assert f5.count == 2
-    assert f5.sample_ids == ["f5_never:dataset:system", "f5_stale:dataset:system"]
+    # sample id는 자연키가 아니라 canonical dataset id + scope다 (T-VN-33).
+    assert f5.sample_ids == [never_id, stale_id]
     assert report.severity_max == "WARN"
 
 
 async def test_f5_uses_policy_interval_and_skips_disabled_policy(
     migrated_session: AsyncSession,
 ) -> None:
+    stale_dataset, stale_scope, stale_operation = await _catalog_operation_scope(
+        migrated_session, 0
+    )
+    disabled_dataset, disabled_scope, disabled_operation = (
+        await _catalog_operation_scope(migrated_session, 1)
+    )
+    # refresh policy PK는 provider_dataset_id 하나다 (T-VN-33).
     await migrated_session.execute(
         text(
             "INSERT INTO ops.provider_refresh_policies "
-            "(provider, dataset_key, source_kind, system_interval_seconds, enabled) "
+            "(provider_dataset_id, source_kind, system_interval_seconds, enabled) "
             "VALUES "
-            "('f5_policy_stale', 'dataset', 'openapi', 3600, true), "
-            "('f5_policy_disabled', 'dataset', 'openapi', 3600, false)"
-        )
+            "(:stale_dataset, 'openapi', 3600, true), "
+            "(:disabled_dataset, 'openapi', 3600, false)"
+        ),
+        {"stale_dataset": stale_dataset, "disabled_dataset": disabled_dataset},
     )
-    await _seed_provider_sync_state(
+    stale_id = await _seed_provider_sync_state(
         migrated_session,
-        provider="f5_policy_stale",
-        dataset_key="dataset",
+        provider_dataset_id=stale_dataset,
+        sync_scope=stale_scope,
+        operation_key=stale_operation,
         last_success_at=datetime.now(UTC) - timedelta(hours=2),
     )
     await _seed_provider_sync_state(
         migrated_session,
-        provider="f5_policy_disabled",
-        dataset_key="dataset",
+        provider_dataset_id=disabled_dataset,
+        sync_scope=disabled_scope,
+        operation_key=disabled_operation,
         last_success_at=datetime.now(UTC) - timedelta(hours=2),
     )
 
@@ -385,7 +506,7 @@ async def test_f5_uses_policy_interval_and_skips_disabled_policy(
     by_code = {c.code: c for c in report.cases}
     f5 = by_code["F5"]
     assert f5.count == 1
-    assert f5.sample_ids == ["f5_policy_stale:dataset:system"]
+    assert f5.sample_ids == [stale_id]
     assert report.severity_max == "WARN"
 
 
@@ -426,15 +547,15 @@ async def _seed_feature_with_primary_source(
         dataset_key=dataset_key,
         entity_type="place",
         entity_id=feature_id,
-        raw_payload_hash=f"hash-{feature_id}",
+        raw_payload_seed=f"hash-{feature_id}",
     )
     await session.flush()
     await session.execute(
         text(
             "INSERT INTO provider_sync.source_links "
             "(feature_id, source_entity_key, source_role, match_method, "
-            " confidence, is_primary_source) "
-            "VALUES (:feature_id, :source_entity_key, 'primary', 'exact', 100, true)"
+            " confidence) "
+            "VALUES (:feature_id, :source_entity_key, 'primary', 'exact', 100)"
         ),
         {"feature_id": feature_id, "source_entity_key": source_entity_key},
     )

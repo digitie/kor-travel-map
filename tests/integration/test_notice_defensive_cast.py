@@ -52,6 +52,19 @@ _BBOX = {"min_lon": 126.9, "min_lat": 37.5, "max_lon": 127.1, "max_lat": 37.7}
 # 종전 오염 변형: 빈 문자열 / garbage / 형태만 그럴듯한 달력 불가값 / 불가능한
 # timezone. (마지막 둘은 정규식 shape 가드가 놓치던 부류 — 그래서
 # ``pg_input_is_valid``가 필요했다. 이제는 컬럼 타입이 전부 막는다.)
+_FIXTURE_CATALOG_SQL = """
+INSERT INTO provider_sync.provider_datasets (
+    provider, dataset_key, display_name, source_kind, is_active, capabilities
+)
+SELECT :provider, :dataset_key, :provider, 'system', true,
+       jsonb_build_object('schema_version', 1,
+                          'produces', '[]'::jsonb,
+                          'extensions', '{}'::jsonb)
+ON CONFLICT (provider, dataset_key) DO UPDATE
+    SET display_name = EXCLUDED.display_name
+RETURNING provider_dataset_id
+"""
+
 _CORRUPTED_END_TIMES: tuple[str, ...] = (
     "",
     "garbage",
@@ -197,16 +210,21 @@ async def test_bbox_and_search_apply_typed_end_time_filter(
     """bbox/search가 typed ``valid_end_time`` 비교로 종료 notice만 감산한다."""
     ids = await _seed_notice_matrix(migrated_session)
     expected = {ids[s] for s in _EXPECTED_VISIBLE_NOTICES} | {ids["place"]}
+    # bbox는 세션 공유 DB의 다른 파일이 **커밋**한 fixture도 함께 잡는다
+    # (예: ``test_admin_feature_repo`` 잠금 시드). 판정 대상은 이 파일이 심은
+    # matrix뿐이므로 seeded 집합으로 좁혀 비교한다 — 아래 admin 목록 회귀와
+    # 같은 방식이다.
+    seeded = set(ids.values())
 
     bbox_rows = await feature_repo.features_in_bbox(
         migrated_session, **_BBOX, price_stale_hide_days=None
     )
-    assert {r["feature_id"] for r in bbox_rows} == expected
+    assert {r["feature_id"] for r in bbox_rows} & seeded == expected
 
     bbox_geom_rows = await feature_repo.features_in_bbox(
         migrated_session, **_BBOX, include_geometry=True, price_stale_hide_days=None
     )
-    assert {r["feature_id"] for r in bbox_geom_rows} == expected
+    assert {r["feature_id"] for r in bbox_geom_rows} & seeded == expected
 
     search = await feature_repo.search_features(
         migrated_session,
@@ -304,21 +322,31 @@ async def _seed_public_curation_foundation(session: AsyncSession) -> tuple[str, 
             )
         ).scalar_one()
     )
+    # T-VN-33: curated_sources는 자연키 사본 대신 catalog FK 하나만 든다.
+    provider_dataset_id = int(
+        (
+            await session.execute(
+                text(_FIXTURE_CATALOG_SQL),
+                {"provider": "python-krex-api", "dataset_key": "ndc-source"},
+            )
+        ).scalar_one()
+    )
     source_id = str(
         (
             await session.execute(
                 text(
                     """
                     INSERT INTO feature.curated_sources (
-                        provider, dataset_key, source_name, source_kind,
+                        provider_dataset_id, source_name, source_kind,
                         update_cycle, provider_status, metadata
                     ) VALUES (
-                        'python-krex-api', 'ndc-source', '테스트 출처',
+                        :provider_dataset_id, '테스트 출처',
                         'manual', 'unknown', 'manual_only', '{}'::jsonb
                     )
                     RETURNING source_id::text
                     """
-                )
+                ),
+                {"provider_dataset_id": provider_dataset_id},
             )
         ).scalar_one()
     )

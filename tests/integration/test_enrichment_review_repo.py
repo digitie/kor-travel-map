@@ -24,6 +24,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession as _AsyncSession
 
+from kortravelmap.core.ids import make_source_record_key
 from kortravelmap.infra.admin_feature_repo import (
     get_enrichment_review_detail,
     list_enrichment_reviews,
@@ -503,9 +504,26 @@ async def _enrichment_queue_row(
     source_entity_id: str,
     source_name: str = "서울 봄꽃",
 ) -> EnrichmentReviewQueueRow:
-    """keyset 회귀용 pending enrichment review 행(name_score·review_id 제어)."""
-    candidate = _as_input(_review_candidate(source_entity_id))
-    record = candidate.source_record
+    """keyset 회귀용 pending enrichment review 행(name_score·review_id 제어).
+
+    T-VN-33: queue row는 자연키 사본 대신 ``source_entity_key``/``source_record_key``
+    로 source를 가리킨다 — 행마다 다른 entity를 만들려면 실제 source record를 먼저
+    적재해야 한다. 후보 생성기는 이름 점수 밴드를 타므로 매칭되는 제목으로 template을
+    만든 뒤 entity id만 갈아끼운다(점수는 인자로 따로 준다).
+    """
+    template = _as_input(_review_candidate(source_name)).source_record
+    record = template.model_copy(
+        update={
+            "source_entity_id": source_entity_id,
+            "source_record_key": make_source_record_key(
+                provider=template.provider,
+                dataset_key=template.dataset_key,
+                source_entity_type=template.source_entity_type,
+                source_entity_id=source_entity_id,
+                raw_payload_hash=template.raw_payload_hash,
+            ),
+        }
+    )
     await upsert_source_record(session, record)
     source_entity_key = (
         await session.execute(

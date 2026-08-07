@@ -53,6 +53,10 @@ pytestmark = pytest.mark.integration
 
 _ROOT: Final = Path(__file__).resolve().parents[2]
 
+# T-VN-33(0089~0091) downgrade는 forward-only fence로 막혀 있다. fence 구조물
+# 왕복 회귀는 그 아래 마지막 되돌릴 수 있는 revision을 상단으로 쓴다.
+_FENCE_ROUNDTRIP_TOP: Final = "0088_source_record_lineage_key"
+
 # canonical 순서(UTF-8 byte 오름차순)가 ASCII → 비-ASCII로 갈리는 seed.
 _SEED_IDS: Final[tuple[str, ...]] = (
     "f_1168010100_p_3c0c2820e96d28d3",
@@ -196,12 +200,14 @@ async def _stored_alias_rows(engine: AsyncEngine) -> list[FeatureAliasMapRowV1]:
     return rows
 
 
-async def _build_fence_db(pg_container: Any, prefix: str) -> tuple[str, str, str]:
+async def _build_fence_db(
+    pg_container: Any, prefix: str, *, revision: str = "head"
+) -> tuple[str, str, str]:
     admin_dsn = normalize_async_dsn(pg_container.get_connection_url())
     database = f"{prefix}_{uuid4().hex}"
     dsn = make_url(admin_dsn).set(database=database).render_as_string(hide_password=False)
     await _create_database(admin_dsn, database)
-    await _upgrade(dsn, "head")
+    await _upgrade(dsn, revision)
     return admin_dsn, dsn, database
 
 
@@ -570,8 +576,15 @@ async def test_downgrade_removes_fences_and_upgrade_restores(
     seed는 **파생 세대**로 만든다 — 0083 downgrade가 파생 CHECK를 ``NOT VALID``로
     복원하면 그 뒤의 UPDATE는 검사되므로, 비파생 v7 행이면 fence와 무관하게
     23514로 죽어 이 회귀의 관측 축이 흐려진다.
+
+    T-VN-33(0089~0091)은 forward-only라 downgrade가 ``RuntimeError``다. 이 왕복
+    회귀가 보는 축은 0082/0083 fence 구조물뿐이므로, T-VN-33 직전이면서 아직
+    되돌릴 수 있는 마지막 revision(:data:`_FENCE_ROUNDTRIP_TOP`)을 왕복 상단으로
+    쓴다.
     """
-    admin_dsn, dsn, database = await _build_fence_db(pg_container, "fence_roundtrip")
+    admin_dsn, dsn, database = await _build_fence_db(
+        pg_container, "fence_roundtrip", revision=_FENCE_ROUNDTRIP_TOP
+    )
     engine = make_async_engine(dsn)
     try:
         await _seed_features_with_derived_uuid(engine, (_SEED_IDS[0],))
@@ -584,7 +597,7 @@ async def test_downgrade_removes_fences_and_upgrade_restores(
                 text("UPDATE feature.feature_aliases SET created_at = now()")
             )
         await engine.dispose()
-        await _upgrade(dsn, "head")
+        await _upgrade(dsn, _FENCE_ROUNDTRIP_TOP)
         engine = make_async_engine(dsn)
         async with engine.connect() as connection:
             with pytest.raises(DBAPIError, match="행은 불변입니다"):

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from hashlib import md5
 from typing import TYPE_CHECKING
 
 import pytest
@@ -28,6 +29,7 @@ from kortravelmap.infra.feature_repo import upsert_feature
 from kortravelmap.infra.models import (
     DedupReviewQueueRow,
     FeatureRow,
+    SourceEntityHeadRow,
     SourceEntityRow,
     SourceLinkRow,
     SourceRecordRow,
@@ -64,30 +66,46 @@ def _feature_row(
     )
 
 
-def _source_entity(key: str, provider: str = "python-mois-api") -> SourceEntityRow:
+_PROVIDER = "python-mois-api"
+_DATASET_KEY = "mois_license_features_bulk"
+
+_CATALOG_ID_SQL = """
+SELECT provider_dataset_id
+FROM provider_sync.provider_datasets
+WHERE provider = :provider AND dataset_key = :dataset_key
+"""
+
+
+async def _provider_dataset_id(session: AsyncSession) -> int:
+    """T-VN-33: source lineage identity는 catalog FK 하나뿐이다."""
+
+    return int(
+        (
+            await session.execute(
+                text(_CATALOG_ID_SQL),
+                {"provider": _PROVIDER, "dataset_key": _DATASET_KEY},
+            )
+        ).scalar_one()
+    )
+
+
+def _source_entity(key: str, provider_dataset_id: int) -> SourceEntityRow:
     return SourceEntityRow(
         source_entity_key=f"se-{key}",
-        provider=provider,
-        dataset_key="mois_license_features_bulk",
+        provider_dataset_id=provider_dataset_id,
         source_entity_type="license_place",
         source_entity_id=key,
-        current_source_record_key=None,
         first_seen_at=_NOW,
         last_seen_at=_NOW,
     )
 
 
-def _source_record(key: str, provider: str = "python-mois-api") -> SourceRecordRow:
+def _source_record(key: str) -> SourceRecordRow:
     return SourceRecordRow(
         source_record_key=key,
         source_entity_key=f"se-{key}",
-        provider=provider,
-        dataset_key="mois_license_features_bulk",
-        source_entity_type="license_place",
-        source_entity_id=key,
-        raw_name="광화문",
-        raw_address="서울특별시 종로구 세종대로 1",
-        raw_payload_hash=f"hash-{key}",
+        # raw_payload_hash는 ``^[0-9a-f]{1,64}$`` CHECK를 만족해야 한다.
+        raw_payload_hash=md5(key.encode("utf-8")).hexdigest(),
         raw_data={"id": key},
         fetched_at=_NOW,
         imported_at=_NOW,
@@ -132,12 +150,19 @@ async def _seed_feature(
     feature_id: str = "feature-admin-1",
 ) -> None:
     session.add(_feature_row(feature_id, name="광화문"))
-    entity = _source_entity(f"sr-{feature_id}")
+    entity = _source_entity(f"sr-{feature_id}", await _provider_dataset_id(session))
     session.add(entity)
     await session.flush()
     session.add(_source_record(f"sr-{feature_id}"))
     await session.flush()
-    entity.current_source_record_key = f"sr-{feature_id}"
+    # T-VN-33: 현재 record 포인터는 entity가 아니라 head가 소유한다.
+    session.add(
+        SourceEntityHeadRow(
+            source_entity_key=f"se-sr-{feature_id}",
+            current_source_record_key=f"sr-{feature_id}",
+            observed_at=_NOW,
+        )
+    )
     await session.flush()
     session.add(_source_link(feature_id, f"sr-{feature_id}"))
     await session.flush()
@@ -450,25 +475,29 @@ async def test_list_admin_features_filters_issue_and_primary_source(
     migrated_session: AsyncSession,
 ) -> None:
     await _seed_feature(migrated_session, "feature-admin-list")
+    provider_dataset_id = await _provider_dataset_id(migrated_session)
     await migrated_session.execute(
         text(
             """
             INSERT INTO ops.data_integrity_violations (
-                feature_id, provider, dataset_key,
+                feature_id, provider_dataset_id,
                 violation_type, severity, message
             ) VALUES (
-                :feature_id, 'python-mois-api', 'mois_license_features_bulk',
+                :feature_id, :provider_dataset_id,
                 'missing_address', 'warning', '주소 검토 필요'
             )
             """
         ),
-        {"feature_id": "feature-admin-list"},
+        {
+            "feature_id": "feature-admin-list",
+            "provider_dataset_id": provider_dataset_id,
+        },
     )
 
     page = await list_admin_features(
         migrated_session,
         q="광화문",
-        providers=["python-mois-api"],
+        provider_dataset_id=provider_dataset_id,
         has_issue=True,
         page_size=10,
     )
@@ -476,7 +505,8 @@ async def test_list_admin_features_filters_issue_and_primary_source(
     assert len(page.items) == 1
     item = page.items[0]
     assert item.feature_id == "feature-admin-list"
-    assert item.primary_provider == "python-mois-api"
+    assert item.primary_provider == _PROVIDER
+    assert item.primary_dataset_key == _DATASET_KEY
     assert item.issue_count == 1
     assert item.issues[0]["violation_type"] == "missing_address"
 

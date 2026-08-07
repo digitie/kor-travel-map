@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from hashlib import md5
 from typing import TYPE_CHECKING
 
 import pytest
@@ -17,7 +18,11 @@ from kortravelmap.infra.integrity_violation_repo import (
     set_data_integrity_violation_status,
     sync_integrity_findings,
 )
-from kortravelmap.infra.models import SourceEntityRow, SourceRecordRow
+from kortravelmap.infra.models import (
+    SourceEntityHeadRow,
+    SourceEntityRow,
+    SourceRecordRow,
+)
 from kortravelmap.infra.poi_cache_target_repo import (
     PoiCacheTargetConflict,
     PoiCacheTargetFeatureLinkCandidate,
@@ -44,6 +49,44 @@ pytestmark = pytest.mark.integration
 _KST = timezone(timedelta(hours=9))
 _FETCHED = datetime(2026, 6, 3, 12, 0, tzinfo=_KST)
 
+_MOIS_PROVIDER = "python-mois-api"
+_MOIS_DATASET = "mois_license_features_bulk"
+_KMA_PROVIDER = "python-kma-api"
+_KMA_DATASET = "kma_weather_alerts"
+
+
+async def _dataset_id(
+    session: AsyncSession, *, provider: str, dataset_key: str
+) -> int:
+    """catalog에서 canonical ``provider_dataset_id``를 얻는다.
+
+    T-VN-33 이후 ops/provider_sync 저장소는 자연키 사본을 갖지 않는다 —
+    identity는 ``provider_dataset_id``다. 0089가 seed한 pair면 그대로 읽고,
+    아니면 fixture 전용 행을 만든다.
+    """
+    return int(
+        (
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO provider_sync.provider_datasets (
+                        provider, dataset_key, display_name, source_kind,
+                        is_active, capabilities
+                    )
+                    SELECT :provider, :dataset_key, :provider, 'system', true,
+                           jsonb_build_object('schema_version', 1,
+                                              'produces', '[]'::jsonb,
+                                              'extensions', '{}'::jsonb)
+                    ON CONFLICT (provider, dataset_key) DO UPDATE
+                        SET display_name = EXCLUDED.display_name
+                    RETURNING provider_dataset_id
+                    """
+                ),
+                {"provider": provider, "dataset_key": dataset_key},
+            )
+        ).scalar_one()
+    )
+
 
 async def _insert_feature(session: AsyncSession, feature_id: str) -> None:
     await session.execute(
@@ -59,42 +102,53 @@ async def _insert_feature(session: AsyncSession, feature_id: str) -> None:
 
 async def _insert_source_record(session: AsyncSession, source_record_key: str) -> None:
     source_entity_key = f"se:{source_record_key}"
-    entity = SourceEntityRow(
-        source_entity_key=source_entity_key,
-        provider="python-mois-api",
-        dataset_key="mois_license_features_bulk",
-        source_entity_type="license",
-        source_entity_id=source_record_key,
-        current_source_record_key=None,
-        first_seen_at=_FETCHED,
-        last_seen_at=_FETCHED,
+    provider_dataset_id = await _dataset_id(
+        session, provider=_MOIS_PROVIDER, dataset_key=_MOIS_DATASET
     )
-    session.add(entity)
+    session.add(
+        SourceEntityRow(
+            source_entity_key=source_entity_key,
+            provider_dataset_id=provider_dataset_id,
+            source_entity_type="license",
+            source_entity_id=source_record_key,
+            first_seen_at=_FETCHED,
+            last_seen_at=_FETCHED,
+        )
+    )
     await session.flush()
     session.add(
         SourceRecordRow(
             source_record_key=source_record_key,
             source_entity_key=source_entity_key,
-            provider="python-mois-api",
-            dataset_key="mois_license_features_bulk",
-            source_entity_type="license",
-            source_entity_id=source_record_key,
-            raw_payload_hash=f"hash-{source_record_key}",
+            raw_data={},
+            # ck_source_records_payload_hash_canonical = ^[0-9a-f]{1,64}$
+            raw_payload_hash=md5(
+                source_record_key.encode("utf-8"), usedforsecurity=False
+            ).hexdigest(),
             fetched_at=_FETCHED,
         )
     )
     await session.flush()
-    entity.current_source_record_key = source_record_key
+    # 현재 record 포인터는 head가 소유한다(lineage_key는 트리거가 채운다).
+    session.add(
+        SourceEntityHeadRow(
+            source_entity_key=source_entity_key,
+            current_source_record_key=source_record_key,
+            observed_at=_FETCHED,
+        )
+    )
     await session.flush()
 
 
 async def test_provider_refresh_policy_upsert_get_list(
     migrated_session: AsyncSession,
 ) -> None:
+    provider_dataset_id = await _dataset_id(
+        migrated_session, provider=_KMA_PROVIDER, dataset_key=_KMA_DATASET
+    )
     created = await upsert_provider_refresh_policy(
         migrated_session,
-        provider="python-kma-api",
-        dataset_key="kma_weather_alerts",
+        provider_dataset_id=provider_dataset_id,
         source_kind="openapi",
         expected_revision=None,
         targeted_policy="allow_targeted",
@@ -119,8 +173,7 @@ async def test_provider_refresh_policy_upsert_get_list(
 
     updated = await upsert_provider_refresh_policy(
         migrated_session,
-        provider="python-kma-api",
-        dataset_key="kma_weather_alerts",
+        provider_dataset_id=provider_dataset_id,
         source_kind="openapi",
         expected_revision=created.revision,
         targeted_policy="follow_system",
@@ -137,8 +190,7 @@ async def test_provider_refresh_policy_upsert_get_list(
 
     explicitly_replaced = await upsert_provider_refresh_policy(
         migrated_session,
-        provider="python-kma-api",
-        dataset_key="kma_weather_alerts",
+        provider_dataset_id=provider_dataset_id,
         source_kind="openapi",
         expected_revision=updated.revision,
         targeted_policy="follow_system",
@@ -154,17 +206,16 @@ async def test_provider_refresh_policy_upsert_get_list(
 
     loaded = await get_provider_refresh_policy(
         migrated_session,
-        provider="python-kma-api",
-        dataset_key="kma_weather_alerts",
+        provider_dataset_id=provider_dataset_id,
     )
     assert loaded == explicitly_replaced
 
     assert await list_provider_refresh_policies(
-        migrated_session, provider="python-kma-api", enabled=False
+        migrated_session, provider_dataset_id=provider_dataset_id, enabled=False
     ) == (explicitly_replaced,)
     assert (
         await list_provider_refresh_policies(
-            migrated_session, provider="python-kma-api", enabled=True
+            migrated_session, provider_dataset_id=provider_dataset_id, enabled=True
         )
         == ()
     )
@@ -209,8 +260,9 @@ async def test_poi_cache_target_upsert_move_delete_and_links(
         migrated_session,
         target_id=target.target_id,
         feature_id="feature:poi:1",
-        provider="python-mois-api",
-        dataset_key="mois_license_features_bulk",
+        provider_dataset_id=await _dataset_id(
+            migrated_session, provider=_MOIS_PROVIDER, dataset_key=_MOIS_DATASET
+        ),
         distance_m=120.5,
     )
     assert link is not None
@@ -425,11 +477,13 @@ async def test_data_integrity_violation_lifecycle_and_fk_behavior(
 ) -> None:
     await _insert_feature(migrated_session, "feature:violation:1")
     await _insert_source_record(migrated_session, "src:violation:1")
+    provider_dataset_id = await _dataset_id(
+        migrated_session, provider=_MOIS_PROVIDER, dataset_key=_MOIS_DATASET
+    )
 
     violation = await create_data_integrity_violation(
         migrated_session,
-        provider="python-mois-api",
-        dataset_key="mois_license_features_bulk",
+        provider_dataset_id=provider_dataset_id,
         source_record_key="src:violation:1",
         feature_id="feature:violation:1",
         violation_type="provider_address_mismatch",
@@ -450,8 +504,7 @@ async def test_data_integrity_violation_lifecycle_and_fk_behavior(
     assert await list_data_integrity_violations(
         migrated_session,
         status="open",
-        provider="python-mois-api",
-        dataset_key="mois_license_features_bulk",
+        provider_dataset_id=provider_dataset_id,
     ) == (violation,)
 
     resolved = await set_data_integrity_violation_status(
@@ -489,10 +542,10 @@ async def test_data_integrity_violation_lifecycle_and_fk_behavior(
     assert still_resolved.status == "resolved"
     assert still_resolved.resolved_at == resolved.resolved_at
 
+    # 현재 record 포인터는 head가 소유한다 — record를 지우려면 head를 먼저 뗀다.
     await migrated_session.execute(
         text(
-            "UPDATE provider_sync.source_entities "
-            "SET current_source_record_key = NULL "
+            "DELETE FROM provider_sync.source_entity_heads "
             "WHERE current_source_record_key = 'src:violation:1'"
         )
     )
@@ -518,11 +571,14 @@ async def test_data_integrity_violation_lifecycle_and_fk_behavior(
 async def test_integrity_finding_recurrence_tracks_latest_fk_targets(
     migrated_session: AsyncSession,
 ) -> None:
-    provider = "python-mois-api"
-    dataset_key = "mois_license_features_bulk"
+    provider = _MOIS_PROVIDER
+    dataset_key = _MOIS_DATASET
     for suffix in ("old", "new"):
         await _insert_feature(migrated_session, f"feature:violation:{suffix}")
         await _insert_source_record(migrated_session, f"src:violation:{suffix}")
+    provider_dataset_id = await _dataset_id(
+        migrated_session, provider=provider, dataset_key=dataset_key
+    )
 
     dedupe_key = make_integrity_finding_key(
         provider=provider,
@@ -546,21 +602,18 @@ async def test_integrity_finding_recurrence_tracks_latest_fk_targets(
 
     await sync_integrity_findings(
         migrated_session,
-        provider=provider,
-        dataset_key=dataset_key,
+        provider_dataset_id=provider_dataset_id,
         findings=[finding("old")],
     )
     await sync_integrity_findings(
         migrated_session,
-        provider=provider,
-        dataset_key=dataset_key,
+        provider_dataset_id=provider_dataset_id,
         findings=[finding("new")],
     )
 
     rows = await list_data_integrity_violations(
         migrated_session,
-        provider=provider,
-        dataset_key=dataset_key,
+        provider_dataset_id=provider_dataset_id,
         violation_type="missing_address",
     )
     matched = [row for row in rows if row.payload.get("dedupe_key") == dedupe_key]

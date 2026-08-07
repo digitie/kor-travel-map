@@ -1348,16 +1348,31 @@ async def _assert_mixed_partial_state_rejected(dsn: str) -> None:
         await engine.dispose()
 
 
-def _loopback_only(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+def _loopback_only(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    allow_hosts: frozenset[str] = frozenset(),
+) -> list[str]:
+    """리허설이 **외부** 호스트로 나가지 않는지 감시한다.
+
+    판정 대상은 "loopback 문자열이냐"가 아니라 "이 리허설이 쓰는 DB 외의 곳으로
+    나가느냐"다. container-in-container 실행에서는 testcontainers가 같은 Postgres를
+    Docker bridge gateway(예: ``172.17.0.1``)로 알려주므로, 호출자가 그 호스트를
+    ``allow_hosts``로 넘긴다. 그 밖의 목적지는 그대로 거부한다.
+    """
+
     external_hosts: list[str] = []
     original = socket.socket.connect
+    allowed = {"127.0.0.1", "::1", "localhost"} | {h for h in allow_hosts if h}
 
     def guarded_connect(instance: socket.socket, address: Any) -> Any:
         if isinstance(address, tuple):
             host = str(address[0])
-            if host not in {"127.0.0.1", "::1", "localhost"}:
+            if host not in allowed:
                 external_hosts.append(host)
-                raise AssertionError("H35 rehearsal attempted an external network connection")
+                raise AssertionError(
+                    f"H35 rehearsal attempted an external network connection: {host}"
+                )
         return original(instance, address)
 
     monkeypatch.setattr(socket.socket, "connect", guarded_connect)
@@ -1370,7 +1385,10 @@ async def test_h35_exact_surface_network_free_rehearsal(
 ) -> None:
     admin_dsn = normalize_async_dsn(pg_container.get_connection_url())
     database, dsn = await _create_database(admin_dsn)
-    external_hosts = _loopback_only(monkeypatch)
+    external_hosts = _loopback_only(
+        monkeypatch,
+        allow_hosts=frozenset({str(make_url(admin_dsn).host or "")}),
+    )
     try:
         await asyncio.to_thread(_run_alembic, dsn, _PRE_REVISION)
         await _seed_exact_pre_cutover_surface(dsn)
@@ -1565,14 +1583,18 @@ async def test_partial_probe_passes_at_target_schema(pg_container: Any) -> None:
     admin_dsn = normalize_async_dsn(pg_container.get_connection_url())
     database, dsn = await _create_database(admin_dsn)
     try:
-        await asyncio.to_thread(_run_alembic, dsn, "head")
+        # H35 계약이 고정하는 지점은 `_TARGET_REVISION`(0079)이다. alembic head는
+        # 그 뒤로 계속 전진했고(T-VN-33은 0090에서 integrity partial index 집합을
+        # dataset 소유로 재정의한다) 0079 partial 계약을 head DB에 대고 재는 것은
+        # 서로 다른 스키마를 비교하는 것이다.
+        await asyncio.to_thread(_run_alembic, dsn, _TARGET_REVISION)
         engine = make_async_engine(dsn)
         try:
             async with engine.connect() as connection:
                 checks = await partial_probe(connection, _TARGET_REVISION)
                 failed = [str(value["name"]) for value in checks if value.get("passed") is not True]
             assert not failed, (
-                f"head({_TARGET_REVISION})에서 partial probe가 실패했다 — "
+                f"{_TARGET_REVISION}에서 partial probe가 실패했다 — "
                 f"migrate 재시도가 영구 불가해진다: {failed}"
             )
         finally:
@@ -1831,7 +1853,10 @@ async def test_quarantine_gate_fires_before_the_forward_boundary(pg_container: A
                 "0을 내면 preflight 게이트는 아무것도 막지 못한다."
             )
 
-            await asyncio.to_thread(_run_alembic, dsn, "head")
+            # H35 경계 뒤 = `_TARGET_REVISION`(0079). alembic head는 그 뒤로 더
+            # 전진했으므로 `verify_0075_0079`를 head DB에 대고 재면 H35와 무관한
+            # 후속 revision 변경까지 이 게이트가 뒤집어쓴다.
+            await asyncio.to_thread(_run_alembic, dsn, _TARGET_REVISION)
 
             # ② `0063` 술어가 고른 것이 진짜 `0065`의 격리 대상과 같다.
             async with engine.connect() as connection:

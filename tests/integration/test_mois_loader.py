@@ -42,6 +42,13 @@ pytestmark = pytest.mark.integration
 _KST = timezone(timedelta(hours=9))
 _FETCHED = datetime(2026, 6, 1, 12, 0, tzinfo=_KST)
 
+# T-VN-33: sync-state identity = provider_dataset_id + sync_scope + operation_key.
+# 자연키 사본이 사라졌고 scope 네임스페이스는 catalog(``provider_dataset_operation_scopes``)가
+# 소유한다 — MOIS refresh operation은 모두 ``dataset_wide``다.
+_SYNC_SCOPE = "dataset_wide"
+_INCREMENTAL_OPERATION_KEY = "mois_license_incremental_update"
+_CLOSED_OPERATION_KEY = "mois_license_closed_update"
+
 
 @dataclass(frozen=True)
 class _Record:
@@ -159,7 +166,7 @@ async def test_loader_persists_promoted_and_skips_others(
         await migrated_session.execute(select(SourceLinkRow))
     ).scalars().all()
     assert len(links) == 2
-    assert all(link.is_primary_source is True for link in links)
+    assert all(link.source_role == "primary" for link in links)
 
 
 async def test_loader_idempotent_reload(migrated_session: AsyncSession) -> None:
@@ -209,14 +216,12 @@ async def _active_entity_ids(session: AsyncSession) -> set[str]:
     rows = (
         await session.execute(
             text(
-                "SELECT sr.source_entity_id "
+                "SELECT se.source_entity_id "
                 "FROM feature.features f "
                 "JOIN provider_sync.source_links sl ON sl.feature_id = f.feature_id "
                 "JOIN provider_sync.source_entities se "
                 "  ON se.source_entity_key = sl.source_entity_key "
-                "JOIN provider_sync.source_records sr "
-                "  ON sr.source_record_key = se.current_source_record_key "
-                "WHERE f.deleted_at IS NULL AND sl.is_primary_source"
+                "WHERE f.deleted_at IS NULL AND sl.source_role = 'primary'"
             )
         )
     ).scalars().all()
@@ -447,6 +452,7 @@ async def test_incremental_job_loads_and_advances_cursor(
         ],
         fetched_at=_FETCHED,
         new_cursor={"last_modified_date": "2026-06-01"},
+        sync_scope=_SYNC_SCOPE,
     )
     assert result.acquired is True
     assert result.job is not None
@@ -458,7 +464,11 @@ async def test_incremental_job_loads_and_advances_cursor(
 
     # cursor가 provider_sync_state에 영속화됨.
     state = await get_sync_state(
-        migrated_session, provider=PROVIDER_NAME, dataset_key=DATASET_KEY_HISTORY
+        migrated_session,
+        provider=PROVIDER_NAME,
+        dataset_key=DATASET_KEY_HISTORY,
+        operation_key=_INCREMENTAL_OPERATION_KEY,
+        sync_scope=_SYNC_SCOPE,
     )
     assert state is not None
     assert state.cursor == {"last_modified_date": "2026-06-01"}
@@ -484,6 +494,7 @@ async def test_incremental_does_not_prune_existing(
         fetched_at=_FETCHED,
         new_cursor={"last_modified_date": "2026-06-02"},
         dataset_key=DATASET_KEY_HISTORY,
+        sync_scope=_SYNC_SCOPE,
     )
     await migrated_session.flush()
     # 둘 다 active — prune 없음(Step B).
@@ -554,6 +565,7 @@ async def test_run_closed_job_tracks_and_advances_cursor(
         migrated_session,
         [_Record(service_slug="general_restaurants", mng_no="c1")],
         new_cursor={"last_modified_date": "2026-06-03"},
+        sync_scope=_SYNC_SCOPE,
     )
     assert result.acquired is True
     assert result.job is not None
@@ -564,7 +576,11 @@ async def test_run_closed_job_tracks_and_advances_cursor(
 
     # closed dataset cursor 영속.
     state = await get_sync_state(
-        migrated_session, provider=PROVIDER_NAME, dataset_key=DATASET_KEY_CLOSED
+        migrated_session,
+        provider=PROVIDER_NAME,
+        dataset_key=DATASET_KEY_CLOSED,
+        operation_key=_CLOSED_OPERATION_KEY,
+        sync_scope=_SYNC_SCOPE,
     )
     assert state is not None
     assert state.cursor == {"last_modified_date": "2026-06-03"}

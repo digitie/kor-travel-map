@@ -14,18 +14,21 @@ source_entity_id)``로 join해 ``raw_payload_hash`` drift를 견딘다.
 - A(회귀): old(01020300)+new(01050100)가 **다른 raw_payload_hash → 다른
   source_record_key**(같은 안정 식별자) → old가 inactive+deleted_at. 0027 SQL이라면
   active로 남았을 케이스를 함께 단언(대조군).
-- B(primary 강등): 정리 후 구 feature의 primary link가 false로 강등.
+- B(primary 강등): 정리 후 구 feature의 primary link가 non-primary role로 강등.
 - D(no-op 가드): old만 존재(신 sibling 없음) → active 유지(가용성 공백 방지).
 
 Docker / testcontainers 미설치 환경에서는 conftest fixture가 ``pytest.skip``.
-0044 이후 head 스키마에서는 역사 migration 상수의 의도를 확인한 뒤
-``source_entity_key`` 동등 SQL로 실행한다.
+T-VN-33 이후 head 스키마에서는 안정 식별자가 ``source_entities``에
+``(provider_dataset_id, source_entity_type, source_entity_id)``로 남고 현재 record
+포인터는 ``source_entity_heads``가 소유하며, primary 판정은 ``source_role='primary'``
+하나가 든다. 역사 migration 상수의 의도를 확인한 뒤 그 head 동등 SQL로 실행한다.
 """
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -33,7 +36,12 @@ import pytest
 from sqlalchemy import text
 
 from kortravelmap.infra.feature_repo import _make_source_entity_key
-from kortravelmap.infra.models import SourceEntityRow, SourceLinkRow, SourceRecordRow
+from kortravelmap.infra.models import (
+    SourceEntityHeadRow,
+    SourceEntityRow,
+    SourceLinkRow,
+    SourceRecordRow,
+)
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -53,15 +61,17 @@ WHERE f.deleted_at IS NULL
     FROM provider_sync.source_links AS old_sl
     JOIN provider_sync.source_entities AS se
       ON se.source_entity_key = old_sl.source_entity_key
+    JOIN provider_sync.provider_datasets AS pd
+      ON pd.provider_dataset_id = se.provider_dataset_id
     JOIN provider_sync.source_links AS new_sl
       ON new_sl.source_entity_key = old_sl.source_entity_key
-     AND new_sl.is_primary_source
+     AND new_sl.source_role = 'primary'
     JOIN feature.features AS nf
       ON nf.feature_id = new_sl.feature_id
     WHERE old_sl.feature_id = f.feature_id
-      AND old_sl.is_primary_source
-      AND se.provider = 'python-khoa-api'
-      AND se.dataset_key = 'khoa_beaches'
+      AND old_sl.source_role = 'primary'
+      AND pd.provider = 'python-khoa-api'
+      AND pd.dataset_key = 'khoa_beaches'
       AND se.source_entity_type = 'beach'
       AND nf.category = '01050100'
       AND nf.status = 'active'
@@ -72,19 +82,26 @@ WHERE f.deleted_at IS NULL
 
 _HEAD_DEMOTE_SQL = """
 UPDATE provider_sync.source_links AS sl
-SET is_primary_source = false
-FROM provider_sync.source_entities AS se,
+SET source_role = 'enrichment'
+FROM provider_sync.source_entities AS se
+     JOIN provider_sync.provider_datasets AS pd
+       ON pd.provider_dataset_id = se.provider_dataset_id,
      feature.features AS f
 WHERE sl.source_entity_key = se.source_entity_key
   AND sl.feature_id = f.feature_id
-  AND sl.is_primary_source
-  AND se.provider = 'python-khoa-api'
-  AND se.dataset_key = 'khoa_beaches'
+  AND sl.source_role = 'primary'
+  AND pd.provider = 'python-khoa-api'
+  AND pd.dataset_key = 'khoa_beaches'
   AND se.source_entity_type = 'beach'
   AND f.category = '01020300'
   AND f.status = 'inactive'
   AND f.deleted_at IS NOT NULL
 """
+
+
+def _payload_hash(seed: str) -> str:
+    """``ck_source_records_payload_hash_canonical``(^[0-9a-f]{1,64}$) 준수 hash."""
+    return hashlib.sha256(seed.encode("utf-8")).hexdigest()
 
 
 def _load_migration() -> object:
@@ -159,6 +176,21 @@ async def _insert_feature(
     )
 
 
+async def _provider_dataset_id(
+    session: AsyncSession, *, provider: str, dataset_key: str
+) -> int:
+    """catalog canonical id — T-VN-33 이후 source entity의 dataset identity."""
+    value = await session.scalar(
+        text(
+            "SELECT provider_dataset_id FROM provider_sync.provider_datasets "
+            "WHERE provider = :provider AND dataset_key = :dataset_key"
+        ),
+        {"provider": provider, "dataset_key": dataset_key},
+    )
+    assert value is not None
+    return int(value)
+
+
 async def _insert_source_record(
     session: AsyncSession,
     *,
@@ -168,6 +200,7 @@ async def _insert_source_record(
     payload_hash: str,
     dataset_key: str = "khoa_beaches",
     entity_type: str = "beach",
+    observed_at: datetime = _NOW,
 ) -> None:
     source_entity_key = _make_source_entity_key(
         provider=provider,
@@ -179,13 +212,13 @@ async def _insert_source_record(
     if entity is None:
         entity = SourceEntityRow(
             source_entity_key=source_entity_key,
-            provider=provider,
-            dataset_key=dataset_key,
+            provider_dataset_id=await _provider_dataset_id(
+                session, provider=provider, dataset_key=dataset_key
+            ),
             source_entity_type=entity_type,
             source_entity_id=entity_id,
-            current_source_record_key=None,
             first_seen_at=_NOW,
-            last_seen_at=_NOW,
+            last_seen_at=observed_at,
         )
         session.add(entity)
         await session.flush()
@@ -193,17 +226,26 @@ async def _insert_source_record(
         SourceRecordRow(
             source_record_key=key,
             source_entity_key=source_entity_key,
-            provider=provider,
-            dataset_key=dataset_key,
-            source_entity_type=entity_type,
-            source_entity_id=entity_id,
+            raw_data={},
             raw_payload_hash=payload_hash,
             fetched_at=_NOW,
         )
     )
     await session.flush()
-    entity.current_source_record_key = key
-    entity.last_seen_at = _NOW
+    # 현재 record 포인터는 head가 소유한다(lineage_key는 BEFORE INSERT 트리거가 채움).
+    head = await session.get(SourceEntityHeadRow, source_entity_key)
+    if head is None:
+        session.add(
+            SourceEntityHeadRow(
+                source_entity_key=source_entity_key,
+                current_source_record_key=key,
+                observed_at=observed_at,
+            )
+        )
+    else:
+        head.current_source_record_key = key
+        head.observed_at = observed_at
+    entity.last_seen_at = observed_at
     await session.flush()
 
 
@@ -235,14 +277,20 @@ async def _status(session: AsyncSession, feature_id: str) -> str:
 async def _is_primary(
     session: AsyncSession, *, feature_id: str, record_key: str
 ) -> bool:
-    record = await session.get(SourceRecordRow, record_key)
-    assert record is not None
-    link = await session.get(
-        SourceLinkRow,
-        {"feature_id": feature_id, "source_entity_key": record.source_entity_key},
+    """raw SQL로 읽는다 — 정리 SQL이 ORM 뒤에서 role을 바꾸기 때문."""
+    row = await session.execute(
+        text(
+            """
+            SELECT sl.source_role
+            FROM provider_sync.source_links AS sl
+            JOIN provider_sync.source_records AS sr
+              ON sr.source_entity_key = sl.source_entity_key
+            WHERE sl.feature_id = :fid AND sr.source_record_key = :rk
+            """
+        ),
+        {"fid": feature_id, "rk": record_key},
     )
-    assert link is not None
-    return link.is_primary_source
+    return str(row.scalar_one()) == "primary"
 
 
 async def test_rekey_cleanup_survives_payload_hash_drift(
@@ -259,14 +307,15 @@ async def test_rekey_cleanup_survives_payload_hash_drift(
         key="sr_old",
         provider="python-khoa-api",
         entity_id=entity,
-        payload_hash="sha1:OLD",
+        payload_hash=_payload_hash("OLD"),
     )
     await _insert_source_record(
         session,
         key="sr_new",
         provider="python-khoa-api",
         entity_id=entity,
-        payload_hash="sha1:NEW",
+        payload_hash=_payload_hash("NEW"),
+        observed_at=_NOW + timedelta(hours=1),
     )
     await _insert_feature(session, feature_id="f_old", category="01020300")
     await _insert_feature(session, feature_id="f_new", category="01050100")
@@ -291,7 +340,7 @@ async def test_rekey_cleanup_survives_payload_hash_drift(
 async def test_rekey_demotes_stale_old_primary_link(
     migrated_session: AsyncSession,
 ) -> None:
-    """B: 정리 후 구 feature의 primary link가 false로 강등."""
+    """B: 정리 후 구 feature의 primary link가 non-primary role로 강등."""
     session = migrated_session
 
     entity = "협재::제주::한림읍"
@@ -300,14 +349,15 @@ async def test_rekey_demotes_stale_old_primary_link(
         key="sr_old2",
         provider="python-khoa-api",
         entity_id=entity,
-        payload_hash="sha1:OLD2",
+        payload_hash=_payload_hash("OLD2"),
     )
     await _insert_source_record(
         session,
         key="sr_new2",
         provider="python-khoa-api",
         entity_id=entity,
-        payload_hash="sha1:NEW2",
+        payload_hash=_payload_hash("NEW2"),
+        observed_at=_NOW + timedelta(hours=1),
     )
     await _insert_feature(session, feature_id="f_old2", category="01020300")
     await _insert_feature(session, feature_id="f_new2", category="01050100")
@@ -327,7 +377,7 @@ async def test_rekey_demotes_stale_old_primary_link(
         await _is_primary(session, feature_id="f_new2", record_key="sr_new2")
     ) is True
 
-    # 멱등 — 두 번째 demote도 동일(이미 false).
+    # 멱등 — 두 번째 demote도 동일(이미 강등됨).
     await session.execute(text(_demote_sql()))
     assert (
         await _is_primary(session, feature_id="f_old2", record_key="sr_old2")
@@ -345,7 +395,7 @@ async def test_rekey_noop_when_only_old_exists(
         key="sr_lonely",
         provider="python-khoa-api",
         entity_id="함덕::제주::조천읍",
-        payload_hash="sha1:LONELY",
+        payload_hash=_payload_hash("LONELY"),
     )
     await _insert_feature(session, feature_id="f_lonely_old", category="01020300")
     await _link_primary(session, feature_id="f_lonely_old", record_key="sr_lonely")

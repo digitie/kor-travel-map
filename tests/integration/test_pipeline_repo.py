@@ -1,8 +1,17 @@
-"""파이프라인 root projection 통합 테스트 (ADR-064 T-ADM-C3b)."""
+"""파이프라인 root projection 통합 테스트 (ADR-064 T-ADM-C3b).
+
+T-VN-33 이후 실행 identity는 자연키 사본이 아니라 canonical triple
+``(provider_dataset_id, sync_scope, operation_key)``이다. job/request 행은
+provider·dataset_key·sync_scope 열을 더 이상 갖지 않고, membership은
+``ops.import_job_datasets`` / ``ops.feature_update_request_datasets``가 든다.
+따라서 fixture는 catalog(datasets → operations → operation_scopes)를 먼저 심고
+그 triple로 membership을 쓴다.
+"""
 
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid5
@@ -13,9 +22,11 @@ from sqlalchemy.exc import IntegrityError
 
 from kortravelmap.infra import pipeline_repo
 from kortravelmap.infra.feature_update_repo import (
+    enqueue_feature_update_request,
     finish_update_request,
     start_update_request,
 )
+from kortravelmap.infra.jobs_repo import ImportJobDatasetTarget
 from kortravelmap.infra.pipeline_repo import (
     get_pipeline_execution,
     get_pipeline_status_counts,
@@ -37,45 +48,145 @@ _JOB_GRANDCHILD = "33333333-3333-4333-8333-333333333333"
 _REQUEST_OWNER = "44444444-4444-4444-8444-444444444444"
 _REQUEST_LOSER = "55555555-5555-4555-8555-555555555555"
 _REQUEST_JOB_NAMESPACE = UUID("8ff8c150-70cf-4dda-91bb-e6965fb5d0e3")
+_OPERATION_KEY = "test_pipeline_refresh"
+
+
+@dataclass(frozen=True)
+class _Member:
+    """catalog에 실재하는 exact membership triple (ADR-088 §결정 2)."""
+
+    provider_dataset_id: int
+    provider: str
+    dataset_key: str
+    sync_scope: str
+    operation_key: str
+
+
+_UPSERT_DATASET_SQL = text(
+    """
+    INSERT INTO provider_sync.provider_datasets (
+        provider, dataset_key, display_name, source_kind, is_active, capabilities
+    )
+    SELECT :provider, :dataset_key, :provider, 'system', true,
+           jsonb_build_object('schema_version', 1, 'produces', '[]'::jsonb,
+                              'extensions', '{}'::jsonb)
+    ON CONFLICT (provider, dataset_key) DO UPDATE SET display_name = EXCLUDED.display_name
+    RETURNING provider_dataset_id
+    """
+)
+
+_UPSERT_OPERATION_SQL = text(
+    """
+    INSERT INTO provider_sync.provider_dataset_operations (
+        provider_dataset_id, operation_key, operation_kind, is_enabled
+    )
+    VALUES (CAST(:provider_dataset_id AS bigint), :operation_key, 'refresh', true)
+    ON CONFLICT (provider_dataset_id, operation_key) DO NOTHING
+    """
+)
+
+_UPSERT_SCOPE_SQL = text(
+    """
+    INSERT INTO provider_sync.provider_dataset_operation_scopes (
+        provider_dataset_id, sync_scope, operation_key, operation_kind
+    )
+    VALUES (CAST(:provider_dataset_id AS bigint), :sync_scope, :operation_key, 'refresh')
+    ON CONFLICT (provider_dataset_id, sync_scope, operation_key) DO NOTHING
+    """
+)
 
 _INSERT_JOB_SQL = text(
     """
     INSERT INTO ops.import_jobs (
         job_id, kind, load_batch_id, parent_job_id, payload, status, progress, current_stage,
-        created_at, started_at, dagster_run_id, provider, dataset_key, sync_scope,
-        trigger_kind, operation_key, dagster_run_status
+        created_at, started_at, dagster_run_id, trigger_kind, operation_key,
+        dagster_run_status, dataset_membership_mode
     ) VALUES (
         CAST(:job_id AS uuid), :kind, CAST(:load_batch_id AS uuid), CAST(:parent_job_id AS uuid),
         CAST(:payload AS jsonb), :status, :progress, :current_stage,
-        :created_at, :started_at, :dagster_run_id, :provider, :dataset_key,
-        :sync_scope, :trigger_kind, :operation_key, :dagster_run_status
+        :created_at, :started_at, :dagster_run_id,
+        :trigger_kind, :operation_key, :dagster_run_status, :dataset_membership_mode
     )
+    """
+)
+
+_INSERT_JOB_MEMBER_SQL = text(
+    """
+    INSERT INTO ops.import_job_datasets (
+        job_id, provider_dataset_id, sync_scope, operation_key
+    ) VALUES (
+        CAST(:job_id AS uuid), CAST(:provider_dataset_id AS bigint), :sync_scope, :operation_key
+    )
+    RETURNING import_job_dataset_id::text AS member_id
     """
 )
 
 _INSERT_REQUEST_SQL = text(
     """
     INSERT INTO ops.feature_update_requests (
-        request_id, scope_type, scope, providers, dataset_keys, update_policy,
-        run_mode, priority, matched_scope, job_id, operator, created_at
+        request_id, scope_type, scope, update_policy,
+        run_mode, priority, matched_scope, job_id, operator, created_at,
+        dataset_membership_mode
     ) VALUES (
-        CAST(:request_id AS uuid), :scope_type, CAST(:scope AS jsonb),
-        CAST(:providers AS text[]), CAST(:dataset_keys AS text[]), '{}'::jsonb,
+        CAST(:request_id AS uuid), :scope_type, CAST(:scope AS jsonb), '{}'::jsonb,
         'queued', :priority, '{}'::jsonb,
-        CAST(:job_id AS uuid), :operator, :created_at
+        CAST(:job_id AS uuid), :operator, :created_at, 'single'
     )
     """
 )
 
+_INSERT_REQUEST_MEMBER_SQL = text(
+    """
+    INSERT INTO ops.feature_update_request_datasets (
+        request_id, provider_dataset_id, sync_scope, operation_key
+    ) VALUES (
+        CAST(:request_id AS uuid), CAST(:provider_dataset_id AS bigint),
+        :sync_scope, :operation_key
+    )
+    RETURNING feature_update_request_dataset_id::text AS member_id
+    """
+)
+
+# dataset membership을 가진 job의 event는 그 member를 반드시 지목해야 한다
+# (``ck_import_job_event_member_required``). root job event는 member가 NULL이어야 한다.
 _INSERT_EVENT_SQL = text(
     """
     INSERT INTO ops.import_job_events (
-        event_id, job_id, level, message, occurred_at
+        event_id, job_id, import_job_dataset_id, level, message, occurred_at
     ) VALUES (
-        CAST(:event_id AS uuid), CAST(:job_id AS uuid), 'info', 'seed', :occurred_at
+        CAST(:event_id AS uuid), CAST(:job_id AS uuid),
+        CAST(:import_job_dataset_id AS uuid), 'info', 'seed', :occurred_at
     )
     """
 )
+
+
+async def _member(
+    session: AsyncSession,
+    *,
+    provider: str,
+    dataset_key: str,
+    sync_scope: str = "dataset_wide",
+    operation_key: str = _OPERATION_KEY,
+) -> _Member:
+    """catalog에 dataset+operation+scope를 심고 exact triple을 돌려준다."""
+    provider_dataset_id = int(
+        (
+            await session.execute(
+                _UPSERT_DATASET_SQL, {"provider": provider, "dataset_key": dataset_key}
+            )
+        ).scalar_one()
+    )
+    params = {"provider_dataset_id": provider_dataset_id, "operation_key": operation_key}
+    await session.execute(_UPSERT_OPERATION_SQL, params)
+    await session.execute(_UPSERT_SCOPE_SQL, {**params, "sync_scope": sync_scope})
+    return _Member(
+        provider_dataset_id=provider_dataset_id,
+        provider=provider,
+        dataset_key=dataset_key,
+        sync_scope=sync_scope,
+        operation_key=operation_key,
+    )
 
 
 async def _job(
@@ -89,10 +200,9 @@ async def _job(
     status: str = "queued",
     progress: int = 0,
     payload: dict[str, Any] | None = None,
-    provider: str | None = None,
-    dataset_key: str | None = None,
-    sync_scope: str | None = None,
-) -> None:
+    member: _Member | None = None,
+) -> str | None:
+    """job 1건 + (선택) canonical dataset membership 1건. membership id를 돌려준다."""
     await session.execute(
         _INSERT_JOB_SQL,
         {
@@ -111,9 +221,6 @@ async def _job(
                 if kind == "feature_update_request" and status == "queued"
                 else f"run-{job_id[:8]}"
             ),
-            "provider": provider,
-            "dataset_key": dataset_key,
-            "sync_scope": sync_scope,
             "trigger_kind": (
                 "manual"
                 if kind == "provider_feature_load_run"
@@ -123,7 +230,23 @@ async def _job(
                 "test-v1" if kind == "provider_feature_load_run" else None
             ),
             "dagster_run_status": ("STARTED" if kind == "provider_feature_load_run" else None),
+            "dataset_membership_mode": "root" if member is None else "single",
         },
+    )
+    if member is None:
+        return None
+    return str(
+        (
+            await session.execute(
+                _INSERT_JOB_MEMBER_SQL,
+                {
+                    "job_id": job_id,
+                    "provider_dataset_id": member.provider_dataset_id,
+                    "sync_scope": member.sync_scope,
+                    "operation_key": member.operation_key,
+                },
+            )
+        ).scalar_one()
     )
 
 
@@ -133,24 +256,32 @@ async def _request(
     *,
     job_id: str | None,
     created_at: datetime,
-    providers: tuple[str, ...] = (),
-    dataset_keys: tuple[str, ...] = (),
-    scope: dict[str, Any] | None = None,
-) -> None:
-    request_scope = scope or {"type": "feature_ids", "feature_ids": ["f-1"]}
+    member: _Member,
+    direct: bool = False,
+) -> str:
+    """request 1건 + canonical membership 1건. membership id를 돌려준다.
+
+    ``job_id=None``이면 canonical ``feature_update_request`` job을 함께 만든다.
+    request root의 provider/dataset identity는 job이 아니라 request membership이
+    소유한다(``canonical_provider_datasets``).
+    """
+    request_scope: dict[str, Any] = (
+        {
+            "type": "provider_dataset",
+            "provider_dataset_id": member.provider_dataset_id,
+            "sync_scope": member.sync_scope,
+            "operation_key": member.operation_key,
+        }
+        if direct
+        else {"type": "feature_ids", "feature_ids": ["f-1"]}
+    )
     if job_id is None:
         job_id = str(uuid5(_REQUEST_JOB_NAMESPACE, request_id))
-        is_direct = request_scope["type"] == "provider_dataset"
         await _job(
             session,
             job_id,
             kind="feature_update_request",
             created_at=created_at,
-            provider=(str(request_scope.get("provider")) if is_direct else None),
-            dataset_key=(str(request_scope.get("dataset_key")) if is_direct else None),
-            sync_scope=(
-                str(request_scope.get("sync_scope", "dataset_wide")) if is_direct else None
-            ),
         )
     await session.execute(
         _INSERT_REQUEST_SQL,
@@ -158,13 +289,24 @@ async def _request(
             "request_id": request_id,
             "scope_type": request_scope["type"],
             "scope": json.dumps(request_scope),
-            "providers": providers,
-            "dataset_keys": dataset_keys,
             "priority": 50,
             "job_id": job_id,
             "operator": "tester",
             "created_at": created_at,
         },
+    )
+    return str(
+        (
+            await session.execute(
+                _INSERT_REQUEST_MEMBER_SQL,
+                {
+                    "request_id": request_id,
+                    "provider_dataset_id": member.provider_dataset_id,
+                    "sync_scope": member.sync_scope,
+                    "operation_key": member.operation_key,
+                },
+            )
+        ).scalar_one()
     )
 
 
@@ -173,15 +315,23 @@ async def _event(
     event_id: str,
     *,
     job_id: str,
+    member_id: str | None = None,
 ) -> None:
     await session.execute(
         _INSERT_EVENT_SQL,
         {
             "event_id": event_id,
             "job_id": job_id,
+            "import_job_dataset_id": member_id,
             "occurred_at": _T0,
         },
     )
+
+
+def _pairs(execution: Any) -> dict[tuple[str, str], Any]:
+    return {
+        (pair.provider, pair.dataset_key): pair for pair in execution.provider_datasets
+    }
 
 
 def _plan_nodes(plan: Any) -> list[dict[str, Any]]:
@@ -255,10 +405,13 @@ def _assert_bounded_selective_access(
         ]
 
 
-async def _seed_owned_hierarchy(session: AsyncSession) -> None:
+async def _seed_owned_hierarchy(session: AsyncSession) -> _Member:
     # ADR-077: lineage는 ≤2단계(root + 자식). 과거 3단계(grandchild)는 stamp
     # 트리거가 거부하므로 root + 자식 하나로 소유 계층을 구성한다. request root의
     # projected winner는 (run root가 아니므로) 가장 깊은 member = 자식이다.
+    member = await _member(
+        session, provider="stored-provider", dataset_key="stored-dataset"
+    )
     await _job(
         session,
         _JOB_ROOT,
@@ -278,15 +431,15 @@ async def _seed_owned_hierarchy(session: AsyncSession) -> None:
         _REQUEST_OWNER,
         job_id=_JOB_ROOT,
         created_at=_T0 + timedelta(minutes=3),
-        providers=("stored-b", "stored-a"),
-        dataset_keys=("dataset-b", "dataset-a"),
+        member=member,
     )
+    return member
 
 
 async def test_request_anchor_collapses_descendants_and_projects_deepest_job(
     migrated_session: AsyncSession,
 ) -> None:
-    await _seed_owned_hierarchy(migrated_session)
+    member = await _seed_owned_hierarchy(migrated_session)
 
     page = await list_pipeline_executions(migrated_session)
 
@@ -294,8 +447,12 @@ async def test_request_anchor_collapses_descendants_and_projects_deepest_job(
     root = page.items[0]
     assert root.requested_job_id == _JOB_ROOT
     assert root.linked_job_count == 2
-    assert root.providers == ("stored-a", "stored-b")
-    assert root.dataset_keys == ("dataset-a", "dataset-b")
+    assert [
+        (pair.provider, pair.dataset_key, pair.sync_scope, pair.operation_key)
+        for pair in root.provider_datasets
+    ] == [
+        (member.provider, member.dataset_key, member.sync_scope, member.operation_key)
+    ]
     assert root.progress is None
     assert root.projected_job.id == _JOB_CHILD
     assert root.projected_job.depth == 1
@@ -305,6 +462,9 @@ async def test_request_anchor_collapses_descendants_and_projects_deepest_job(
 async def test_standalone_hierarchy_ignores_audit_event_and_payload_identity(
     migrated_session: AsyncSession,
 ) -> None:
+    unrelated = await _member(
+        migrated_session, provider="provider-a", dataset_key="dataset-z"
+    )
     await _job(
         migrated_session,
         _JOB_ROOT,
@@ -333,16 +493,13 @@ async def test_standalone_hierarchy_ignores_audit_event_and_payload_identity(
     root = page.items[0]
     assert root.id == _JOB_ROOT
     assert root.linked_job_count == 2
-    assert root.providers == ()
-    assert root.dataset_keys == ()
+    # payload의 provider/dataset_key 문자열은 identity가 아니다 — membership이 없다.
     assert root.provider_datasets == ()
-    assert root.projected_job.id == _JOB_CHILD
     assert (
         await list_pipeline_executions(
-            migrated_session, provider="provider-a", dataset_key="dataset-z"
+            migrated_session, provider_dataset_id=unrelated.provider_dataset_id
         )
     ).items == ()
-    assert (await list_pipeline_executions(migrated_session, provider="misleading")).items == ()
 
 
 async def test_root_id_stamped_and_two_level_lineage_enforced(
@@ -421,6 +578,9 @@ async def test_duplicate_requests_on_same_anchor_are_rejected(
     migrated_session: AsyncSession,
 ) -> None:
     await _seed_owned_hierarchy(migrated_session)
+    loser_member = await _member(
+        migrated_session, provider="loser-provider", dataset_key="loser-dataset"
+    )
     with pytest.raises(IntegrityError):
         async with migrated_session.begin_nested():
             await _request(
@@ -428,6 +588,7 @@ async def test_duplicate_requests_on_same_anchor_are_rejected(
                 _REQUEST_LOSER,
                 job_id=_JOB_ROOT,
                 created_at=_T0 + timedelta(minutes=4),
+                member=loser_member,
             )
 
     page = await list_pipeline_executions(migrated_session)
@@ -441,6 +602,9 @@ async def test_request_cannot_anchor_to_noncanonical_child_job(
     migrated_session: AsyncSession,
 ) -> None:
     await _seed_owned_hierarchy(migrated_session)
+    nested_member = await _member(
+        migrated_session, provider="nested-provider", dataset_key="nested-dataset"
+    )
     nested_request = "56666666-6666-4666-8666-666666666666"
     with pytest.raises(IntegrityError):
         async with migrated_session.begin_nested():
@@ -449,6 +613,7 @@ async def test_request_cannot_anchor_to_noncanonical_child_job(
                 nested_request,
                 job_id=_JOB_CHILD,
                 created_at=_T0 + timedelta(minutes=4),
+                member=nested_member,
             )
 
     page = await list_pipeline_executions(migrated_session)
@@ -463,17 +628,20 @@ async def test_feature_run_projects_root_and_exposes_pair_child_status(
 ) -> None:
     root_id = "b1111111-1111-4111-8111-111111111111"
     child_id = "b2222222-2222-4222-8222-222222222222"
+    member = await _member(
+        migrated_session, provider="provider-a", dataset_key="dataset-a"
+    )
     await migrated_session.execute(
         text(
             """
             INSERT INTO ops.import_jobs (
                 job_id, kind, payload, status, progress, current_stage,
                 dagster_run_id, trigger_kind, operation_key,
-                dagster_run_status, created_at, started_at
+                dagster_run_status, created_at, started_at, dataset_membership_mode
             ) VALUES (
                 CAST(:root_id AS uuid), 'provider_feature_load_run', '{}'::jsonb,
                 'running', 15, 'engine', 'feature-run-1', 'manual', 'v1',
-                'STARTED', :created_at, :created_at
+                'STARTED', :created_at, :created_at, 'root'
             )
             """
         ),
@@ -484,17 +652,30 @@ async def test_feature_run_projects_root_and_exposes_pair_child_status(
             """
             INSERT INTO ops.import_jobs (
                 job_id, kind, parent_job_id, payload, status, progress,
-                current_stage, dagster_run_id, provider, dataset_key,
-                created_at, started_at, finished_at
+                current_stage, dagster_run_id,
+                created_at, started_at, finished_at, dataset_membership_mode
             ) VALUES (
                 CAST(:child_id AS uuid), 'provider_feature_load',
                 CAST(:root_id AS uuid), '{}'::jsonb, 'failed', 70, 'pair',
-                'feature-run-1', 'provider-a', 'dataset-a', :created_at,
-                :created_at, :created_at
+                'feature-run-1', :created_at,
+                :created_at, :created_at, 'single'
             )
             """
         ),
         {"root_id": root_id, "child_id": child_id, "created_at": _T0},
+    )
+    member_id = str(
+        (
+            await migrated_session.execute(
+                _INSERT_JOB_MEMBER_SQL,
+                {
+                    "job_id": child_id,
+                    "provider_dataset_id": member.provider_dataset_id,
+                    "sync_scope": member.sync_scope,
+                    "operation_key": member.operation_key,
+                },
+            )
+        ).scalar_one()
     )
 
     page = await list_pipeline_executions(migrated_session)
@@ -509,10 +690,12 @@ async def test_feature_run_projects_root_and_exposes_pair_child_status(
     assert root.projected_job.status == "running"
     assert root.provider_datasets == (
         pipeline_repo.PipelineProviderDatasetIdentity(
+            provider_dataset_id=member.provider_dataset_id,
             provider="provider-a",
             dataset_key="dataset-a",
-            sync_scope=None,
-            operation_member_id=child_id,
+            sync_scope="dataset_wide",
+            operation_key=_OPERATION_KEY,
+            operation_member_id=member_id,
             status="failed",
         ),
     )
@@ -529,16 +712,18 @@ async def test_feature_run_projects_root_and_exposes_pair_child_status(
 async def test_typed_pair_is_canonical_when_audit_event_inherits_owner_pair(
     migrated_session: AsyncSession,
 ) -> None:
-    await _job(
-        migrated_session,
-        _JOB_ROOT,
-        provider="typed-provider",
-        dataset_key="typed-dataset",
+    typed = await _member(
+        migrated_session, provider="typed-provider", dataset_key="typed-dataset"
     )
+    other = await _member(
+        migrated_session, provider="event-provider", dataset_key="event-dataset"
+    )
+    typed_member_id = await _job(migrated_session, _JOB_ROOT, member=typed)
     await _event(
         migrated_session,
         "b3333333-3333-4333-8333-333333333333",
         job_id=_JOB_ROOT,
+        member_id=typed_member_id,
     )
 
     root = (await list_pipeline_executions(migrated_session)).items[0]
@@ -548,9 +733,7 @@ async def test_typed_pair_is_canonical_when_audit_event_inherits_owner_pair(
     ]
     assert (
         await list_pipeline_executions(
-            migrated_session,
-            provider="event-provider",
-            dataset_key="event-dataset",
+            migrated_session, provider_dataset_id=other.provider_dataset_id
         )
     ).items == ()
     detail = await get_pipeline_execution(
@@ -566,19 +749,25 @@ async def test_typed_pair_is_canonical_when_audit_event_inherits_owner_pair(
     assert [(item.provider, item.dataset_key) for item in latest] == [
         ("typed-provider", "typed-dataset")
     ]
+    assert latest[0].provider_dataset_id == typed.provider_dataset_id
 
 
 async def test_event_only_sibling_does_not_create_canonical_pair(
     migrated_session: AsyncSession,
 ) -> None:
+    typed = await _member(
+        migrated_session, provider="provider-typed", dataset_key="dataset-typed"
+    )
+    legacy = await _member(
+        migrated_session, provider="provider-legacy", dataset_key="dataset-legacy"
+    )
     await _job(migrated_session, _JOB_ROOT, status="queued")
-    await _job(
+    typed_member_id = await _job(
         migrated_session,
         _JOB_CHILD,
         parent_job_id=_JOB_ROOT,
         status="running",
-        provider="provider-typed",
-        dataset_key="dataset-typed",
+        member=typed,
     )
     await _job(
         migrated_session,
@@ -590,6 +779,7 @@ async def test_event_only_sibling_does_not_create_canonical_pair(
         migrated_session,
         "b4444444-4444-4444-8444-444444444444",
         job_id=_JOB_CHILD,
+        member_id=typed_member_id,
     )
     await _event(
         migrated_session,
@@ -598,37 +788,18 @@ async def test_event_only_sibling_does_not_create_canonical_pair(
     )
 
     root = (await list_pipeline_executions(migrated_session)).items[0]
-    pairs = {(pair.provider, pair.dataset_key): pair for pair in root.provider_datasets}
+    pairs = _pairs(root)
 
     assert set(pairs) == {("provider-typed", "dataset-typed")}
-    assert pairs[("provider-typed", "dataset-typed")].operation_member_id == _JOB_CHILD
     assert pairs[("provider-typed", "dataset-typed")].status == "running"
-    for provider, dataset_key in pairs:
-        filtered = await list_pipeline_executions(
-            migrated_session,
-            provider=provider,
-            dataset_key=dataset_key,
-        )
-        assert [item.id for item in filtered.items] == [_JOB_ROOT]
+    filtered = await list_pipeline_executions(
+        migrated_session, provider_dataset_id=typed.provider_dataset_id
+    )
+    assert [item.id for item in filtered.items] == [_JOB_ROOT]
+    # membership이 없는 dataset은 event가 있어도 root를 만들지 않는다.
     assert (
         await list_pipeline_executions(
-            migrated_session,
-            provider="provider-typed",
-            dataset_key="dataset-legacy",
-        )
-    ).items == ()
-    assert (
-        await list_pipeline_executions(
-            migrated_session,
-            provider="provider-legacy",
-            dataset_key="dataset-legacy",
-        )
-    ).items == ()
-    assert (
-        await list_pipeline_executions(
-            migrated_session,
-            provider="provider-conflict",
-            dataset_key="dataset-conflict",
+            migrated_session, provider_dataset_id=legacy.provider_dataset_id
         )
     ).items == ()
 
@@ -651,31 +822,23 @@ async def test_event_only_sibling_does_not_create_canonical_pair(
 async def test_audit_events_never_create_provider_dataset_identity(
     migrated_session: AsyncSession,
 ) -> None:
+    """T-VN-33: identity는 membership FK뿐이다 — audit event는 결코 pair를 만들지
+    않는다(구 버전이 방어하던 자유 문자열 provider/dataset_key 열 자체가 사라졌다)."""
+    unrelated = await _member(
+        migrated_session, provider="provider-valid", dataset_key="dataset-valid"
+    )
     await _job(migrated_session, _JOB_ROOT)
     await _job(migrated_session, _JOB_CHILD, parent_job_id=_JOB_ROOT)
     await _job(migrated_session, _JOB_GRANDCHILD, parent_job_id=_JOB_ROOT)
-    await _event(
-        migrated_session,
-        "b6000000-0000-4000-8000-000000000001",
-        job_id=_JOB_CHILD,
-    )
-    malformed_pairs = (
-        (" provider-leading", "dataset-leading-provider"),
-        ("provider-trailing-dataset", "dataset-trailing "),
-        ("   ", "dataset-blank-provider"),
-        ("provider-blank-dataset", "   "),
-    )
-    for index, _ in enumerate(malformed_pairs, start=2):
+    for index in range(1, 6):
         await _event(
             migrated_session,
             f"b6000000-0000-4000-8000-{index:012d}",
-            job_id=_JOB_GRANDCHILD,
+            job_id=_JOB_GRANDCHILD if index > 1 else _JOB_CHILD,
         )
 
     root = (await list_pipeline_executions(migrated_session)).items[0]
 
-    assert root.providers == ()
-    assert root.dataset_keys == ()
     assert root.provider_datasets == ()
     detail = await get_pipeline_execution(
         migrated_session,
@@ -684,42 +847,38 @@ async def test_audit_events_never_create_provider_dataset_identity(
     )
     assert detail is not None
     assert detail.provider_datasets == root.provider_datasets
-    for provider, dataset_key in (
-        ("provider-valid", "dataset-valid"),
-        *malformed_pairs,
-    ):
-        assert (
-            await list_pipeline_executions(
-                migrated_session,
-                provider=provider,
-                dataset_key=dataset_key,
-            )
-        ).items == ()
+    assert (
+        await list_pipeline_executions(
+            migrated_session, provider_dataset_id=unrelated.provider_dataset_id
+        )
+    ).items == ()
     assert await list_latest_dataset_pipeline_executions(migrated_session) == ()
 
 
 async def test_direct_request_pair_is_unchanged_by_inherited_audit_identity(
     migrated_session: AsyncSession,
 ) -> None:
-    await _job(
+    direct = await _member(
         migrated_session,
-        _JOB_ROOT,
-        kind="feature_update_request",
         provider="provider-direct",
         dataset_key="dataset-direct",
         sync_scope="target_grids",
     )
-    await _request(
+    legacy = await _member(
+        migrated_session, provider="provider-legacy", dataset_key="dataset-legacy"
+    )
+    await _job(
+        migrated_session,
+        _JOB_ROOT,
+        kind="feature_update_request",
+    )
+    member_id = await _request(
         migrated_session,
         _REQUEST_OWNER,
         job_id=_JOB_ROOT,
         created_at=_T0 + timedelta(minutes=1),
-        scope={
-            "type": "provider_dataset",
-            "provider": "provider-direct",
-            "dataset_key": "dataset-direct",
-            "sync_scope": "target_grids",
-        },
+        member=direct,
+        direct=True,
     )
     await _event(
         migrated_session,
@@ -728,18 +887,16 @@ async def test_direct_request_pair_is_unchanged_by_inherited_audit_identity(
     )
 
     root = (await list_pipeline_executions(migrated_session)).items[0]
-    pairs = {(pair.provider, pair.dataset_key): pair for pair in root.provider_datasets}
+    pairs = _pairs(root)
 
     assert root.kind == "update_request"
     assert root.id == _REQUEST_OWNER
     assert set(pairs) == {("provider-direct", "dataset-direct")}
     assert pairs[("provider-direct", "dataset-direct")].sync_scope == "target_grids"
-    assert pairs[("provider-direct", "dataset-direct")].operation_member_id == _JOB_ROOT
+    assert pairs[("provider-direct", "dataset-direct")].operation_member_id == member_id
     assert (
         await list_pipeline_executions(
-            migrated_session,
-            provider="provider-legacy",
-            dataset_key="dataset-legacy",
+            migrated_session, provider_dataset_id=legacy.provider_dataset_id
         )
     ).items == ()
 
@@ -756,6 +913,18 @@ async def test_batch_root_keeps_two_request_branches_and_unowned_siblings_separa
     unowned_descendant = "c7777777-7777-4777-8777-777777777777"
     request_a = "d1111111-1111-4111-8111-111111111111"
     request_b = "d2222222-2222-4222-8222-222222222222"
+    owned = await _member(
+        migrated_session, provider="owned-provider", dataset_key="owned-dataset"
+    )
+    standalone_member = await _member(
+        migrated_session, provider="standalone-provider", dataset_key="standalone-dataset"
+    )
+    request_a_member = await _member(
+        migrated_session, provider="request-provider", dataset_key="request-dataset-a"
+    )
+    request_b_member = await _member(
+        migrated_session, provider="request-provider", dataset_key="request-dataset-b"
+    )
     await _job(migrated_session, batch_root, created_at=_T0)
     await _job(
         migrated_session,
@@ -763,13 +932,12 @@ async def test_batch_root_keeps_two_request_branches_and_unowned_siblings_separa
         kind="feature_update_request",
         created_at=_T0,
     )
-    await _job(
+    owned_member_id = await _job(
         migrated_session,
         branch_a_child,
         parent_job_id=branch_a,
         created_at=_T0 + timedelta(minutes=1),
-        provider="owned-provider",
-        dataset_key="owned-dataset",
+        member=owned,
     )
     await _job(
         migrated_session,
@@ -789,35 +957,38 @@ async def test_batch_root_keeps_two_request_branches_and_unowned_siblings_separa
         parent_job_id=batch_root,
         created_at=_T0 + timedelta(minutes=1),
     )
-    await _job(
+    standalone_member_id = await _job(
         migrated_session,
         unowned_descendant,
         parent_job_id=batch_root,
         created_at=_T0 + timedelta(minutes=2),
-        provider="standalone-provider",
-        dataset_key="standalone-dataset",
+        member=standalone_member,
     )
     await _request(
         migrated_session,
         request_a,
         job_id=branch_a,
         created_at=_T0 + timedelta(minutes=3),
+        member=request_a_member,
     )
     await _request(
         migrated_session,
         request_b,
         job_id=branch_b,
         created_at=_T0 + timedelta(minutes=4),
+        member=request_b_member,
     )
     await _event(
         migrated_session,
         "e1111111-1111-4111-8111-111111111111",
         job_id=branch_a_child,
+        member_id=owned_member_id,
     )
     await _event(
         migrated_session,
         "e2222222-2222-4222-8222-222222222222",
         job_id=unowned_descendant,
+        member_id=standalone_member_id,
     )
 
     page = await list_pipeline_executions(migrated_session)
@@ -831,14 +1002,18 @@ async def test_batch_root_keeps_two_request_branches_and_unowned_siblings_separa
     standalone = by_key[("import_job", batch_root)]
     assert standalone.linked_job_count == 3
     assert standalone.projected_job.id == unowned_descendant
-    assert standalone.providers == ("standalone-provider",)
-    assert standalone.dataset_keys == ("standalone-dataset",)
+    assert [
+        (pair.provider, pair.dataset_key) for pair in standalone.provider_datasets
+    ] == [("standalone-provider", "standalone-dataset")]
     assert by_key[("update_request", request_a)].linked_job_count == 2
     assert by_key[("update_request", request_b)].linked_job_count == 2
     assert sum(item.linked_job_count for item in page.items) == 7
+    # request branch가 소유한 job membership은 import_job root로 노출되지 않는다.
     assert (
         await list_pipeline_executions(
-            migrated_session, kind="import_job", provider="owned-provider"
+            migrated_session,
+            kind="import_job",
+            provider_dataset_id=owned.provider_dataset_id,
         )
     ).items == ()
 
@@ -848,8 +1023,11 @@ async def test_cursor_kind_breaks_same_timestamp_and_uuid_tie(
 ) -> None:
     shared = "91111111-1111-4111-8111-111111111111"
     at = _T0 + timedelta(days=1)
+    member = await _member(
+        migrated_session, provider="tie-provider", dataset_key="tie-dataset"
+    )
     await _job(migrated_session, shared, created_at=at)
-    await _request(migrated_session, shared, job_id=None, created_at=at)
+    await _request(migrated_session, shared, job_id=None, created_at=at, member=member)
 
     first = await list_pipeline_executions(migrated_session, limit=1)
     second = await list_pipeline_executions(migrated_session, limit=1, cursor=first.next_cursor)
@@ -909,6 +1087,9 @@ async def test_component_membership_filters_are_applied_before_page_limit(
     request_id = "a9666666-6666-4666-8666-666666666666"
     request_load_batch_id = "a9777777-7777-4777-8777-777777777777"
     request_projection = "a9888888-8888-4888-8888-888888888888"
+    request_member = await _member(
+        migrated_session, provider="membership-provider", dataset_key="membership-dataset"
+    )
     await _job(
         migrated_session,
         request_root,
@@ -933,6 +1114,7 @@ async def test_component_membership_filters_are_applied_before_page_limit(
         request_id,
         job_id=request_root,
         created_at=_T0 - timedelta(hours=2),
+        member=request_member,
     )
 
     request_by_batch = await list_pipeline_executions(
@@ -957,97 +1139,41 @@ async def test_component_membership_filters_are_applied_before_page_limit(
     assert request_by_parent.next_cursor is None
 
 
-async def test_request_arrays_are_single_filters_and_direct_scope_is_exact_pair(
+async def test_direct_scope_cannot_disagree_with_canonical_membership(
     migrated_session: AsyncSession,
 ) -> None:
-    array_request = "a1111111-1111-4111-8111-111111111111"
-    direct_request = "a2222222-2222-4222-8222-222222222222"
-    await _request(
-        migrated_session,
-        array_request,
-        job_id=None,
-        created_at=_T0,
-        providers=("array-provider",),
-        dataset_keys=("array-dataset",),
+    """direct scope는 자신의 canonical membership과 정확히 일치해야 한다.
+
+    T-VN-33 이전에는 request.scope의 provider/dataset_key 문자열과 job 열의 사본이
+    어긋나는지를 DB 트리거가 봤다. 사본이 사라진 지금 이 불변식은 제출 경로가
+    exact triple 대조로 든다(``_resolve_feature_update_plan``).
+    """
+    scope_member = await _member(
+        migrated_session, provider="scope-provider", dataset_key="scope-dataset"
     )
-    await _request(
-        migrated_session,
-        direct_request,
-        job_id=None,
-        created_at=_T0,
-        scope={
-            "type": "provider_dataset",
-            "provider": "direct-provider",
-            "dataset_key": "direct-dataset",
-            "sync_scope": "target_grids",
-        },
+    other_member = await _member(
+        migrated_session, provider="typed-provider", dataset_key="typed-dataset"
     )
 
-    assert (
-        await list_pipeline_executions(
+    with pytest.raises(ValueError, match="canonical membership"):
+        await enqueue_feature_update_request(
             migrated_session,
-            provider="array-provider",
-            dataset_key="array-dataset",
+            scope={
+                "type": "provider_dataset",
+                "provider_dataset_id": scope_member.provider_dataset_id,
+                "sync_scope": scope_member.sync_scope,
+                "operation_key": scope_member.operation_key,
+            },
+            dataset_memberships=[
+                ImportJobDatasetTarget(
+                    provider_dataset_id=other_member.provider_dataset_id,
+                    sync_scope=other_member.sync_scope,
+                    operation_key=other_member.operation_key,
+                )
+            ],
         )
-    ).items == ()
-    assert [
-        item.id
-        for item in (
-            await list_pipeline_executions(
-                migrated_session,
-                provider="array-provider",
-            )
-        ).items
-    ] == [array_request]
-    assert [
-        item.id
-        for item in (
-            await list_pipeline_executions(
-                migrated_session,
-                dataset_key="array-dataset",
-            )
-        ).items
-    ] == [array_request]
-    direct = await list_pipeline_executions(
-        migrated_session,
-        provider="direct-provider",
-        dataset_key="direct-dataset",
-    )
-    assert [item.id for item in direct.items] == [direct_request]
-    assert direct.items[0].providers == ("direct-provider",)
-    assert direct.items[0].dataset_keys == ("direct-dataset",)
-    assert len(direct.items[0].provider_datasets) == 1
-    pair = direct.items[0].provider_datasets[0]
-    assert pair.provider == "direct-provider"
-    assert pair.dataset_key == "direct-dataset"
-    assert pair.sync_scope == "target_grids"
-    assert pair.operation_member_id == str(uuid5(_REQUEST_JOB_NAMESPACE, direct_request))
 
-
-async def test_direct_scope_cannot_disagree_with_typed_job_identity(
-    migrated_session: AsyncSession,
-) -> None:
-    await _job(
-        migrated_session,
-        _JOB_ROOT,
-        kind="feature_update_request",
-        provider="typed-provider",
-        dataset_key="typed-dataset",
-        sync_scope="dataset_wide",
-    )
-    with pytest.raises(IntegrityError):
-        async with migrated_session.begin_nested():
-            await _request(
-                migrated_session,
-                _REQUEST_OWNER,
-                job_id=_JOB_ROOT,
-                created_at=_T0,
-                scope={
-                    "type": "provider_dataset",
-                    "provider": "scope-provider",
-                    "dataset_key": "scope-dataset",
-                },
-            )
+    assert (await list_pipeline_executions(migrated_session)).items == ()
 
 
 async def test_latest_dataset_execution_keeps_direct_scopes_separate(
@@ -1068,17 +1194,19 @@ async def test_latest_dataset_execution_keeps_direct_scopes_separate(
         ),
     )
     for request_id, sync_scope, created_at in requests:
+        member = await _member(
+            migrated_session,
+            provider=provider,
+            dataset_key=dataset_key,
+            sync_scope=sync_scope,
+        )
         await _request(
             migrated_session,
             request_id,
             job_id=None,
             created_at=created_at,
-            scope={
-                "type": "provider_dataset",
-                "provider": provider,
-                "dataset_key": dataset_key,
-                "sync_scope": sync_scope,
-            },
+            member=member,
+            direct=True,
         )
 
     latest = await list_latest_dataset_pipeline_executions(migrated_session)
@@ -1101,18 +1229,19 @@ async def test_dataset_execution_snapshot_keeps_terminal_and_active_independent(
     sync_scope = "target_grids"
     terminal_request_id = "a5555555-5555-4555-8555-555555555555"
     active_request_id = "a6666666-6666-4666-8666-666666666666"
-    scope = {
-        "type": "provider_dataset",
-        "provider": provider,
-        "dataset_key": dataset_key,
-        "sync_scope": sync_scope,
-    }
+    member = await _member(
+        migrated_session,
+        provider=provider,
+        dataset_key=dataset_key,
+        sync_scope=sync_scope,
+    )
     await _request(
         migrated_session,
         terminal_request_id,
         job_id=None,
         created_at=_T0,
-        scope=scope,
+        member=member,
+        direct=True,
     )
     started = await start_update_request(
         migrated_session,
@@ -1134,7 +1263,8 @@ async def test_dataset_execution_snapshot_keeps_terminal_and_active_independent(
         active_request_id,
         job_id=None,
         created_at=_T0 + timedelta(minutes=1),
-        scope=scope,
+        member=member,
+        direct=True,
     )
 
     snapshots = await list_dataset_pipeline_execution_snapshots(migrated_session)
@@ -1156,7 +1286,7 @@ async def test_dataset_execution_snapshot_keeps_terminal_and_active_independent(
 async def test_scoped_dataset_execution_snapshot_matches_unscoped_filtered(
     migrated_session: AsyncSession,
 ) -> None:
-    """scoped snapshot 쿼리는 대상 (provider, dataset_key)에 대해 unscoped 결과를
+    """scoped snapshot 쿼리는 대상 canonical dataset에 대해 unscoped 결과를
     필터한 것과 동일해야 한다(다른 dataset의 root가 존재해도 제외한다)."""
     provider = "python-kma-api"
     dataset_key = "kma_short_forecast"
@@ -1167,17 +1297,27 @@ async def test_scoped_dataset_execution_snapshot_matches_unscoped_filtered(
     target_active_id = str(uuid5(_REQUEST_JOB_NAMESPACE, "scoped-target-active"))
     other_request_id = str(uuid5(_REQUEST_JOB_NAMESPACE, "scoped-other-dataset"))
 
-    def _scope(ds_key: str) -> dict[str, Any]:
-        return {
-            "type": "provider_dataset",
-            "provider": provider,
-            "dataset_key": ds_key,
-            "sync_scope": sync_scope,
-        }
+    target = await _member(
+        migrated_session,
+        provider=provider,
+        dataset_key=dataset_key,
+        sync_scope=sync_scope,
+    )
+    other = await _member(
+        migrated_session,
+        provider=provider,
+        dataset_key=other_dataset_key,
+        sync_scope=sync_scope,
+    )
 
     # 대상 dataset: 종료 실행 + 활성 실행
     await _request(
-        migrated_session, target_terminal_id, job_id=None, created_at=_T0, scope=_scope(dataset_key)
+        migrated_session,
+        target_terminal_id,
+        job_id=None,
+        created_at=_T0,
+        member=target,
+        direct=True,
     )
     started = await start_update_request(
         migrated_session,
@@ -1199,7 +1339,8 @@ async def test_scoped_dataset_execution_snapshot_matches_unscoped_filtered(
         target_active_id,
         job_id=None,
         created_at=_T0 + timedelta(minutes=1),
-        scope=_scope(dataset_key),
+        member=target,
+        direct=True,
     )
     # 다른 dataset의 root — scoped 결과에서 반드시 제외돼야 한다
     await _request(
@@ -1207,19 +1348,19 @@ async def test_scoped_dataset_execution_snapshot_matches_unscoped_filtered(
         other_request_id,
         job_id=None,
         created_at=_T0 + timedelta(minutes=2),
-        scope=_scope(other_dataset_key),
+        member=other,
+        direct=True,
     )
 
     unscoped = await list_dataset_pipeline_execution_snapshots(migrated_session)
     scoped = await list_dataset_pipeline_execution_snapshots_scoped(
-        migrated_session, provider=provider, dataset_key=dataset_key
+        migrated_session, provider_dataset_id=target.provider_dataset_id
     )
 
     def _identity(items: tuple[Any, ...]) -> set[tuple[Any, ...]]:
         return {
             (
-                s.provider,
-                s.dataset_key,
+                s.provider_dataset_id,
                 s.sync_scope,
                 s.latest_terminal.execution.id if s.latest_terminal else None,
                 s.active.execution.id if s.active else None,
@@ -1228,19 +1369,19 @@ async def test_scoped_dataset_execution_snapshot_matches_unscoped_filtered(
         }
 
     unscoped_target = tuple(
-        s for s in unscoped if (s.provider, s.dataset_key) == (provider, dataset_key)
+        s for s in unscoped if s.provider_dataset_id == target.provider_dataset_id
     )
     # 핵심 등가 주장: scoped == unscoped를 대상 dataset으로 필터한 것
     assert _identity(scoped) == _identity(unscoped_target)
     # 다른 dataset은 unscoped엔 있고 scoped엔 없다
-    assert any(s.dataset_key == other_dataset_key for s in unscoped)
-    assert all(s.dataset_key == dataset_key for s in scoped)
+    assert any(s.provider_dataset_id == other.provider_dataset_id for s in unscoped)
+    assert all(s.provider_dataset_id == target.provider_dataset_id for s in scoped)
     # 대상 dataset의 terminal/active identity가 보존된다
-    target = next(s for s in scoped if s.sync_scope == sync_scope)
-    assert target.latest_terminal is not None
-    assert target.latest_terminal.execution.id == target_terminal_id
-    assert target.active is not None
-    assert target.active.execution.id == target_active_id
+    result = next(s for s in scoped if s.sync_scope == sync_scope)
+    assert result.latest_terminal is not None
+    assert result.latest_terminal.execution.id == target_terminal_id
+    assert result.active is not None
+    assert result.active.execution.id == target_active_id
 
 
 async def test_dataset_scope_filter_is_applied_before_page_limit(
@@ -1249,6 +1390,15 @@ async def test_dataset_scope_filter_is_applied_before_page_limit(
     provider = "python-kma-api"
     dataset_key = "kma_short_forecast"
     selected_scope = "external_system:retired"
+    selected = await _member(
+        migrated_session,
+        provider=provider,
+        dataset_key=dataset_key,
+        sync_scope=selected_scope,
+    )
+    child_member = await _member(
+        migrated_session, provider="python-other-api", dataset_key="other-dataset"
+    )
     selected_request_ids: list[str] = []
     for index in range(11):
         selected_request_id = str(uuid5(_REQUEST_JOB_NAMESPACE, f"selected-retired-scope-{index}"))
@@ -1259,12 +1409,8 @@ async def test_dataset_scope_filter_is_applied_before_page_limit(
             selected_request_id,
             job_id=None,
             created_at=selected_created_at,
-            scope={
-                "type": "provider_dataset",
-                "provider": provider,
-                "dataset_key": dataset_key,
-                "sync_scope": selected_scope,
-            },
+            member=selected,
+            direct=True,
         )
         selected_job_id = str(uuid5(_REQUEST_JOB_NAMESPACE, selected_request_id))
         if index == 0:
@@ -1275,8 +1421,7 @@ async def test_dataset_scope_filter_is_applied_before_page_limit(
                 created_at=selected_created_at,
                 status="done",
                 progress=100,
-                provider="python-other-api",
-                dataset_key="other-dataset",
+                member=child_member,
             )
         owner = f"selected-scope-run-{index}"
         started = await start_update_request(
@@ -1294,37 +1439,36 @@ async def test_dataset_scope_filter_is_applied_before_page_limit(
             expected_generation=1,
         )
         assert finished is not None
+        interleaved = await _member(
+            migrated_session,
+            provider=provider,
+            dataset_key=dataset_key,
+            sync_scope=f"external_system:other-{index}",
+        )
         await _request(
             migrated_session,
             str(uuid5(_REQUEST_JOB_NAMESPACE, f"interleaved-other-scope-{index}")),
             job_id=None,
             created_at=selected_created_at + timedelta(minutes=1),
-            scope={
-                "type": "provider_dataset",
-                "provider": provider,
-                "dataset_key": dataset_key,
-                "sync_scope": f"external_system:other-{index}",
-            },
+            member=interleaved,
+            direct=True,
         )
 
     unscoped_page = await list_pipeline_executions(
         migrated_session,
-        provider=provider,
-        dataset_key=dataset_key,
+        provider_dataset_id=selected.provider_dataset_id,
         limit=10,
     )
     exact_first_page = await list_pipeline_executions(
         migrated_session,
-        provider=provider,
-        dataset_key=dataset_key,
+        provider_dataset_id=selected.provider_dataset_id,
         dataset_sync_scopes=(selected_scope,),
         limit=10,
     )
     assert exact_first_page.next_cursor is not None
     exact_second_page = await list_pipeline_executions(
         migrated_session,
-        provider=provider,
-        dataset_key=dataset_key,
+        provider_dataset_id=selected.provider_dataset_id,
         dataset_sync_scopes=(selected_scope,),
         limit=10,
         cursor=exact_first_page.next_cursor,
@@ -1337,16 +1481,19 @@ async def test_dataset_scope_filter_is_applied_before_page_limit(
     assert exact_second_page.next_cursor is None
     multi_pair_root = exact_second_page.items[0]
     assert multi_pair_root.id == selected_request_ids[0]
+    # request root의 canonical pair는 request membership이 든다 — 하위 job의
+    # membership은 import_job root에서만 노출된다.
     assert {
         (pair.provider, pair.dataset_key, pair.sync_scope)
         for pair in multi_pair_root.provider_datasets
-    } == {
-        (provider, dataset_key, selected_scope),
-        ("python-other-api", "other-dataset", None),
-    }
+    } == {(provider, dataset_key, selected_scope)}
+    assert child_member.provider_dataset_id > 0
 
 
 async def test_status_counts_for_overview(migrated_session: AsyncSession) -> None:
+    member = await _member(
+        migrated_session, provider="counts-provider", dataset_key="counts-dataset"
+    )
     await _job(
         migrated_session,
         _JOB_ROOT,
@@ -1358,6 +1505,7 @@ async def test_status_counts_for_overview(migrated_session: AsyncSession) -> Non
         _REQUEST_OWNER,
         job_id=_JOB_ROOT,
         created_at=_T0,
+        member=member,
     )
 
     counts = await get_pipeline_status_counts(migrated_session)
@@ -1373,24 +1521,62 @@ async def test_more_than_one_thousand_roots_have_complete_pagination_and_latest(
     migrated_session: AsyncSession,
 ) -> None:
     root_count = 1_005
+    bulk = await _member(
+        migrated_session, provider="bulk-provider", dataset_key="bulk-dataset"
+    )
     await migrated_session.execute(
         text(
             """
-            INSERT INTO ops.import_jobs (
-                kind, payload, status, provider, dataset_key, trigger_kind,
-                created_at
+            INSERT INTO provider_sync.provider_dataset_operation_scopes (
+                provider_dataset_id, sync_scope, operation_key, operation_kind
             )
-            SELECT
-                'bulk_projection_fixture', '{}'::jsonb, 'queued',
-                'bulk-provider',
-                'bulk-dataset-' || lpad(seed.n::text, 4, '0'),
-                'manual',
-                CAST(:created_at AS timestamptz)
-                    + seed.n * INTERVAL '1 millisecond'
+            SELECT CAST(:provider_dataset_id AS bigint),
+                   'external_system:bulk-' || lpad(seed.n::text, 4, '0'),
+                   :operation_key, 'refresh'
             FROM generate_series(1, :root_count) AS seed(n)
             """
         ),
-        {"created_at": _T0, "root_count": root_count},
+        {
+            "provider_dataset_id": bulk.provider_dataset_id,
+            "operation_key": bulk.operation_key,
+            "root_count": root_count,
+        },
+    )
+    await migrated_session.execute(
+        text(
+            """
+            WITH inserted AS (
+                INSERT INTO ops.import_jobs (
+                    kind, payload, status, trigger_kind, created_at,
+                    dataset_membership_mode
+                )
+                SELECT
+                    'bulk_projection_fixture', '{}'::jsonb, 'queued', 'manual',
+                    CAST(:created_at AS timestamptz)
+                        + seed.n * INTERVAL '1 millisecond',
+                    'single'
+                FROM generate_series(1, :root_count) AS seed(n)
+                RETURNING job_id, created_at
+            )
+            INSERT INTO ops.import_job_datasets (
+                job_id, provider_dataset_id, sync_scope, operation_key
+            )
+            SELECT
+                inserted.job_id,
+                CAST(:provider_dataset_id AS bigint),
+                'external_system:bulk-' || lpad(
+                    (ROW_NUMBER() OVER (ORDER BY inserted.created_at))::text, 4, '0'
+                ),
+                :operation_key
+            FROM inserted
+            """
+        ),
+        {
+            "created_at": _T0,
+            "root_count": root_count,
+            "provider_dataset_id": bulk.provider_dataset_id,
+            "operation_key": bulk.operation_key,
+        },
     )
 
     seen: list[str] = []
@@ -1398,7 +1584,7 @@ async def test_more_than_one_thousand_roots_have_complete_pagination_and_latest(
     while True:
         page = await list_pipeline_executions(
             migrated_session,
-            provider="bulk-provider",
+            provider_dataset_id=bulk.provider_dataset_id,
             limit=200,
             cursor=cursor,
         )
@@ -1413,23 +1599,35 @@ async def test_more_than_one_thousand_roots_have_complete_pagination_and_latest(
     assert len(seen) == root_count
     assert len(set(seen)) == root_count
     assert len(latest) == root_count
-    assert {(item.provider, item.dataset_key) for item in latest} == {
-        ("bulk-provider", f"bulk-dataset-{number:04d}") for number in range(1, root_count + 1)
+    assert {
+        (item.provider, item.dataset_key, item.sync_scope) for item in latest
+    } == {
+        ("bulk-provider", "bulk-dataset", f"external_system:bulk-{number:04d}")
+        for number in range(1, root_count + 1)
     }
     assert counts.operations_by_status == {"queued": root_count}
     assert counts.active_operations == root_count
 
 
+_PLAN_NOISE_COUNT = 1_200
+
+
 async def _seed_selective_projection_cardinality(
     session: AsyncSession,
-) -> dict[str, str]:
+) -> dict[str, Any]:
     event_only_job_id = "71111111-1111-4111-8111-111111111111"
     direct_request_id = "72222222-2222-4222-8222-222222222222"
-    provider_array_request_id = "73333333-3333-4333-8333-333333333333"
-    dataset_array_request_id = "74444444-4444-4444-8444-444444444444"
-    provider_only_job_id = "76666666-6666-4666-8666-666666666666"
-    dataset_only_job_id = "77777777-7777-4777-8777-777777777777"
     membership_load_batch_id = "78888888-8888-4888-8888-888888888888"
+
+    typed = await _member(
+        session, provider="typed-provider", dataset_key="typed-dataset"
+    )
+    direct = await _member(
+        session, provider="direct-provider", dataset_key="direct-dataset"
+    )
+    owner = await _member(
+        session, provider="owner-provider", dataset_key="owner-dataset"
+    )
 
     await _job(session, _JOB_ROOT, kind="feature_update_request")
     await _job(
@@ -1437,26 +1635,14 @@ async def _seed_selective_projection_cardinality(
         _JOB_CHILD,
         load_batch_id=membership_load_batch_id,
         parent_job_id=_JOB_ROOT,
-        provider="typed-provider",
-        dataset_key="typed-dataset",
-    )
-    await _job(
-        session,
-        provider_only_job_id,
-        provider="provider-only",
-        dataset_key="provider-only-dataset",
-    )
-    await _job(
-        session,
-        dataset_only_job_id,
-        provider="dataset-only-provider",
-        dataset_key="dataset-only",
+        member=typed,
     )
     await _request(
         session,
         _REQUEST_OWNER,
         job_id=_JOB_ROOT,
         created_at=_T0 + timedelta(minutes=1),
+        member=owner,
     )
 
     await _job(session, event_only_job_id)
@@ -1470,299 +1656,208 @@ async def _seed_selective_projection_cardinality(
         direct_request_id,
         job_id=None,
         created_at=_T0,
-        scope={
-            "type": "provider_dataset",
-            "provider": "direct-provider",
-            "dataset_key": "direct-dataset",
-        },
-    )
-    await _request(
-        session,
-        provider_array_request_id,
-        job_id=None,
-        created_at=_T0,
-        providers=("array-provider",),
-    )
-    await _request(
-        session,
-        dataset_array_request_id,
-        job_id=None,
-        created_at=_T0,
-        dataset_keys=("array-dataset",),
+        member=direct,
+        direct=True,
     )
 
+    # --- noise: 서로 다른 canonical dataset을 가진 job/request root 다수 --------
+    noise_params = {"noise_count": _PLAN_NOISE_COUNT, "operation_key": _OPERATION_KEY}
     await session.execute(
         text(
             """
-            INSERT INTO ops.import_jobs (
-                job_id, kind, payload, status, provider, dataset_key, trigger_kind,
-                created_at
+            INSERT INTO provider_sync.provider_datasets (
+                provider, dataset_key, display_name, source_kind, is_active, capabilities
             )
-            SELECT
-                (
-                  '30000000-0000-4000-8000-'
-                  || lpad(seed.n::text, 12, '0')
-                )::uuid,
-                'projection_plan_noise', '{}'::jsonb, 'queued',
-                'noise-provider-' || seed.n::text,
-                'noise-dataset-' || seed.n::text,
-                'update_request', CAST(:created_at AS timestamptz)
-            FROM generate_series(1, 4000) AS seed(n)
-
-            UNION ALL
-
-            SELECT
-                (
-                  '36000000-0000-4000-8000-'
-                  || lpad(seed.n::text, 12, '0')
-                )::uuid,
-                'projection_exact_axis_noise', '{}'::jsonb, 'queued',
-                'typed-provider',
-                'typed-other-dataset-' || seed.n::text,
-                'update_request', CAST(:created_at AS timestamptz)
-            FROM generate_series(1, 2000) AS seed(n)
-
-            UNION ALL
-
-            SELECT
-                (
-                  '37000000-0000-4000-8000-'
-                  || lpad(seed.n::text, 12, '0')
-                )::uuid,
-                'projection_exact_axis_noise', '{}'::jsonb, 'queued',
-                'typed-other-provider-' || seed.n::text,
-                'typed-dataset',
-                'update_request', CAST(:created_at AS timestamptz)
-            FROM generate_series(1, 2000) AS seed(n)
+            SELECT 'noise-provider', 'noise-dataset-' || seed.n::text, 'noise', 'system',
+                   true,
+                   jsonb_build_object('schema_version', 1, 'produces', '[]'::jsonb,
+                                      'extensions', '{}'::jsonb)
+            FROM generate_series(1, :noise_count) AS seed(n)
             """
         ),
-        {"created_at": _T0},
+        noise_params,
     )
     await session.execute(
         text(
             """
-            INSERT INTO ops.import_jobs (
-                job_id, kind, payload, status, created_at
+            INSERT INTO provider_sync.provider_dataset_operations (
+                provider_dataset_id, operation_key, operation_kind, is_enabled
             )
-            SELECT
-                (
-                  '31000000-0000-4000-8000-'
-                  || lpad(seed.n::text, 12, '0')
-                )::uuid,
-                'projection_legacy_noise', '{}'::jsonb, 'queued',
-                CAST(:created_at AS timestamptz)
-            FROM generate_series(1, 4000) AS seed(n)
+            SELECT dataset.provider_dataset_id, :operation_key, 'refresh', true
+            FROM provider_sync.provider_datasets AS dataset
+            WHERE dataset.provider = 'noise-provider'
             """
         ),
-        {"created_at": _T0},
+        noise_params,
     )
     await session.execute(
         text(
             """
-            INSERT INTO ops.import_job_events (
-                event_id, job_id, level, message, occurred_at
+            INSERT INTO provider_sync.provider_dataset_operation_scopes (
+                provider_dataset_id, sync_scope, operation_key, operation_kind
             )
-            SELECT
-                (
-                  '32000000-0000-4000-8000-'
-                  || lpad(seed.n::text, 12, '0')
-                )::uuid,
-                (
-                  '31000000-0000-4000-8000-'
-                  || lpad(seed.n::text, 12, '0')
-                )::uuid,
-                'info', 'noise', CAST(:created_at AS timestamptz)
-            FROM generate_series(1, 4000) AS seed(n)
+            SELECT dataset.provider_dataset_id, 'dataset_wide', :operation_key, 'refresh'
+            FROM provider_sync.provider_datasets AS dataset
+            WHERE dataset.provider = 'noise-provider'
             """
         ),
-        {"created_at": _T0},
+        noise_params,
     )
     await session.execute(
         text(
             """
-            INSERT INTO ops.import_jobs (
-                job_id, kind, payload, status, provider, dataset_key, sync_scope,
-                trigger_kind, created_at
+            WITH noise AS (
+                SELECT dataset.provider_dataset_id,
+                       ROW_NUMBER() OVER (ORDER BY dataset.provider_dataset_id) AS rn
+                FROM provider_sync.provider_datasets AS dataset
+                WHERE dataset.provider = 'noise-provider'
+            ), inserted AS (
+                INSERT INTO ops.import_jobs (
+                    kind, payload, status, trigger_kind, created_at,
+                    dataset_membership_mode
+                )
+                SELECT 'projection_plan_noise', '{}'::jsonb, 'queued', 'update_request',
+                       CAST(:created_at AS timestamptz), 'single'
+                FROM noise
+                RETURNING job_id
+            ), numbered AS (
+                SELECT job_id, ROW_NUMBER() OVER (ORDER BY job_id) AS rn FROM inserted
             )
-            SELECT
-                (
-                  '3c000000-0000-4000-8000-'
-                  || lpad(seed.n::text, 12, '0')
-                )::uuid,
-                'feature_update_request', '{}'::jsonb, 'queued',
-                CASE
-                  WHEN seed.n <= 2000 THEN 'direct-provider'
-                  ELSE 'noise-direct-provider-' || seed.n::text
-                END,
-                CASE
-                  WHEN seed.n <= 2000
-                    THEN 'noise-direct-dataset-' || seed.n::text
-                  ELSE 'direct-dataset'
-                END,
-                'dataset_wide', 'update_request', CAST(:created_at AS timestamptz)
-            FROM generate_series(1, 4000) AS seed(n)
-
-            UNION ALL
-
-            SELECT
-                (
-                  '3d000000-0000-4000-8000-'
-                  || lpad(seed.n::text, 12, '0')
-                )::uuid,
-                'feature_update_request', '{}'::jsonb, 'queued',
-                NULL, NULL, NULL, 'update_request', CAST(:created_at AS timestamptz)
-            FROM generate_series(1, 4000) AS seed(n)
-
-            UNION ALL
-
-            SELECT
-                (
-                  '3e000000-0000-4000-8000-'
-                  || lpad(seed.n::text, 12, '0')
-                )::uuid,
-                'feature_update_request', '{}'::jsonb, 'queued',
-                NULL, NULL, NULL, 'update_request', CAST(:created_at AS timestamptz)
-            FROM generate_series(1, 4000) AS seed(n)
+            INSERT INTO ops.import_job_datasets (
+                job_id, provider_dataset_id, sync_scope, operation_key
+            )
+            SELECT numbered.job_id, noise.provider_dataset_id, 'dataset_wide', :operation_key
+            FROM numbered
+            JOIN noise ON noise.rn = numbered.rn
             """
         ),
-        {"created_at": _T0},
+        {**noise_params, "created_at": _T0},
     )
     await session.execute(
         text(
             """
-            INSERT INTO ops.feature_update_requests (
-                request_id, scope_type, scope, providers, dataset_keys,
-                run_mode, job_id, created_at
+            INSERT INTO provider_sync.provider_datasets (
+                provider, dataset_key, display_name, source_kind, is_active, capabilities
             )
-            SELECT
-                (
-                  '33000000-0000-4000-8000-'
-                  || lpad(seed.n::text, 12, '0')
-                )::uuid,
-                'provider_dataset',
-                jsonb_build_object(
-                  'type', 'provider_dataset',
-                  'provider', CASE
-                    WHEN seed.n <= 2000 THEN 'direct-provider'
-                    ELSE 'noise-direct-provider-' || seed.n::text
-                  END,
-                  'dataset_key', CASE
-                    WHEN seed.n <= 2000
-                      THEN 'noise-direct-dataset-' || seed.n::text
-                    ELSE 'direct-dataset'
-                  END
-                ),
-                '{}'::text[], '{}'::text[], 'queued',
-                (
-                  '3c000000-0000-4000-8000-'
-                  || lpad(seed.n::text, 12, '0')
-                )::uuid,
-                CAST(:created_at AS timestamptz)
-            FROM generate_series(1, 4000) AS seed(n)
-
-            UNION ALL
-
-            SELECT
-                (
-                  '34000000-0000-4000-8000-'
-                  || lpad(seed.n::text, 12, '0')
-                )::uuid,
-                'feature_ids', '{"type":"feature_ids","feature_ids":[]}'::jsonb,
-                ARRAY['noise-array-provider-' || seed.n::text]::text[],
-                '{}'::text[], 'queued',
-                (
-                  '3d000000-0000-4000-8000-'
-                  || lpad(seed.n::text, 12, '0')
-                )::uuid,
-                CAST(:created_at AS timestamptz)
-            FROM generate_series(1, 4000) AS seed(n)
-
-            UNION ALL
-
-            SELECT
-                (
-                  '35000000-0000-4000-8000-'
-                  || lpad(seed.n::text, 12, '0')
-                )::uuid,
-                'feature_ids', '{"type":"feature_ids","feature_ids":[]}'::jsonb,
-                '{}'::text[],
-                ARRAY['noise-array-dataset-' || seed.n::text]::text[],
-                'queued',
-                (
-                  '3e000000-0000-4000-8000-'
-                  || lpad(seed.n::text, 12, '0')
-                )::uuid,
-                CAST(:created_at AS timestamptz)
-            FROM generate_series(1, 4000) AS seed(n)
+            SELECT 'noise-request-provider', 'noise-request-dataset-' || seed.n::text,
+                   'noise', 'system', true,
+                   jsonb_build_object('schema_version', 1, 'produces', '[]'::jsonb,
+                                      'extensions', '{}'::jsonb)
+            FROM generate_series(1, :noise_count) AS seed(n)
             """
         ),
-        {"created_at": _T0},
+        noise_params,
+    )
+    await session.execute(
+        text(
+            """
+            INSERT INTO provider_sync.provider_dataset_operations (
+                provider_dataset_id, operation_key, operation_kind, is_enabled
+            )
+            SELECT dataset.provider_dataset_id, :operation_key, 'refresh', true
+            FROM provider_sync.provider_datasets AS dataset
+            WHERE dataset.provider = 'noise-request-provider'
+            """
+        ),
+        noise_params,
+    )
+    await session.execute(
+        text(
+            """
+            INSERT INTO provider_sync.provider_dataset_operation_scopes (
+                provider_dataset_id, sync_scope, operation_key, operation_kind
+            )
+            SELECT dataset.provider_dataset_id, 'dataset_wide', :operation_key, 'refresh'
+            FROM provider_sync.provider_datasets AS dataset
+            WHERE dataset.provider = 'noise-request-provider'
+            """
+        ),
+        noise_params,
+    )
+    await session.execute(
+        text(
+            """
+            WITH noise AS (
+                SELECT dataset.provider_dataset_id,
+                       ROW_NUMBER() OVER (ORDER BY dataset.provider_dataset_id) AS rn
+                FROM provider_sync.provider_datasets AS dataset
+                WHERE dataset.provider = 'noise-request-provider'
+            ), inserted AS (
+                INSERT INTO ops.import_jobs (
+                    kind, payload, status, trigger_kind, created_at,
+                    dataset_membership_mode
+                )
+                SELECT 'feature_update_request', '{}'::jsonb, 'queued', 'update_request',
+                       CAST(:created_at AS timestamptz), 'root'
+                FROM noise
+                RETURNING job_id
+            ), numbered AS (
+                SELECT job_id, ROW_NUMBER() OVER (ORDER BY job_id) AS rn FROM inserted
+            ), requests AS (
+                INSERT INTO ops.feature_update_requests (
+                    scope_type, scope, run_mode, job_id, created_at,
+                    dataset_membership_mode
+                )
+                SELECT
+                    'feature_ids',
+                    jsonb_build_object('type', 'feature_ids', 'feature_ids', '[]'::jsonb),
+                    'queued', numbered.job_id, CAST(:created_at AS timestamptz), 'single'
+                FROM numbered
+                RETURNING request_id, job_id
+            )
+            INSERT INTO ops.feature_update_request_datasets (
+                request_id, provider_dataset_id, sync_scope, operation_key
+            )
+            SELECT requests.request_id, noise.provider_dataset_id, 'dataset_wide',
+                   :operation_key
+            FROM requests
+            JOIN numbered ON numbered.job_id = requests.job_id
+            JOIN noise ON noise.rn = numbered.rn
+            """
+        ),
+        {**noise_params, "created_at": _T0},
     )
     for relation in (
         "ops.import_jobs",
         "ops.import_job_events",
         "ops.feature_update_requests",
+        "ops.import_job_datasets",
+        "ops.feature_update_request_datasets",
+        "provider_sync.provider_datasets",
     ):
         await session.execute(text(f"ANALYZE {relation}"))
 
     return {
         "event_only_job": event_only_job_id,
         "direct_request": direct_request_id,
-        "provider_array_request": provider_array_request_id,
-        "dataset_array_request": dataset_array_request_id,
         "membership_load_batch": membership_load_batch_id,
+        "typed": typed,
+        "direct": direct,
     }
 
 
 async def test_selective_projection_plans_use_natural_bounded_access_paths(
     migrated_session: AsyncSession,
 ) -> None:
-    await _seed_selective_projection_cardinality(migrated_session)
+    targets = await _seed_selective_projection_cardinality(migrated_session)
     await migrated_session.execute(text("SET LOCAL plan_cache_mode = force_generic_plan"))
     cases = (
         (
-            "typed-exact",
-            "typed-provider",
-            "typed-dataset",
-            "idx_import_jobs_provider_dataset_created",
+            "typed-job-membership",
+            targets["typed"].provider_dataset_id,
+            "idx_import_job_datasets_exact_operation_job",
         ),
         (
-            "direct-exact",
-            "direct-provider",
-            "direct-dataset",
-            "idx_import_jobs_provider_dataset_created",
-        ),
-        (
-            "typed-provider",
-            "provider-only",
-            None,
-            "idx_import_jobs_provider_created",
-        ),
-        (
-            "request-provider-array",
-            "array-provider",
-            None,
-            "idx_feature_update_providers_gin",
-        ),
-        (
-            "typed-dataset",
-            None,
-            "dataset-only",
-            "idx_import_jobs_dataset_created",
-        ),
-        (
-            "request-dataset-array",
-            None,
-            "array-dataset",
-            "idx_feature_update_dataset_keys_gin",
+            "direct-request-membership",
+            targets["direct"].provider_dataset_id,
+            "idx_feature_update_request_datasets_dataset_request",
         ),
     )
-    for label, provider, dataset_key, expected_index in cases:
+    for label, provider_dataset_id, expected_index in cases:
         params = {
             "kind": None,
             "status": None,
-            "provider": provider,
-            "dataset_key": dataset_key,
+            "provider_dataset_id": provider_dataset_id,
             "filter_sync_scopes": False,
             "sync_scopes": [],
             "include_unscoped_scope": False,
@@ -1817,8 +1912,7 @@ async def test_membership_projection_plans_use_natural_bounded_access_paths(
                 {
                     "kind": None,
                     "status": None,
-                    "provider": None,
-                    "dataset_key": None,
+                    "provider_dataset_id": None,
                     "filter_sync_scopes": False,
                     "sync_scopes": [],
                     "include_unscoped_scope": False,
@@ -1884,6 +1978,13 @@ async def test_external_system_scope_run_history_cursor_pages_past_boundary(
     page_size = 50
     total = page_size + 1
 
+    selected = await _member(
+        migrated_session,
+        provider=provider,
+        dataset_key=dataset_key,
+        sync_scope=sync_scope,
+    )
+
     ids: list[str] = []
     for index in range(total):
         request_id = str(uuid5(_REQUEST_JOB_NAMESPACE, f"c7-overflow-{index}"))
@@ -1893,16 +1994,12 @@ async def test_external_system_scope_run_history_cursor_pages_past_boundary(
             request_id,
             job_id=None,
             created_at=_T0 + timedelta(minutes=index),
-            scope={
-                "type": "provider_dataset",
-                "provider": provider,
-                "dataset_key": dataset_key,
-                "sync_scope": sync_scope,
-            },
+            member=selected,
+            direct=True,
         )
-        # 다음 동일-scope 요청을 만들기 전에 terminal로 보낸다 — active
-        # (provider,dataset_key,sync_scope) 하나만 허용하는 unique 제약을 피한다
-        # (실제 overflow도 각 요청을 done까지 몰고 다음을 만든다).
+        # 다음 동일-scope 요청을 만들기 전에 terminal로 보낸다 — active exact
+        # triple 하나만 허용하는 membership mutex를 피한다(실제 overflow도 각
+        # 요청을 done까지 몰고 다음을 만든다).
         owner = f"c7-overflow-run-{index}"
         started = await start_update_request(
             migrated_session, request_id, dagster_run_id=owner, expected_generation=1
@@ -1918,23 +2015,24 @@ async def test_external_system_scope_run_history_cursor_pages_past_boundary(
         assert finished is not None
         # 같은 dataset의 다른 scope를 사이사이 넣어, scope 필터가 page-limit 뒤에
         # 적용되면 첫 페이지가 밀려나도록(= 그러면 안 됨) 압박한다.
+        other = await _member(
+            migrated_session,
+            provider=provider,
+            dataset_key=dataset_key,
+            sync_scope=f"external_system:c7-other-{index}",
+        )
         await _request(
             migrated_session,
             str(uuid5(_REQUEST_JOB_NAMESPACE, f"c7-other-{index}")),
             job_id=None,
             created_at=_T0 + timedelta(minutes=index, seconds=30),
-            scope={
-                "type": "provider_dataset",
-                "provider": provider,
-                "dataset_key": dataset_key,
-                "sync_scope": f"external_system:c7-other-{index}",
-            },
+            member=other,
+            direct=True,
         )
 
     first = await list_pipeline_executions(
         migrated_session,
-        provider=provider,
-        dataset_key=dataset_key,
+        provider_dataset_id=selected.provider_dataset_id,
         dataset_sync_scopes=(sync_scope,),
         limit=page_size,
     )
@@ -1943,8 +2041,7 @@ async def test_external_system_scope_run_history_cursor_pages_past_boundary(
 
     second = await list_pipeline_executions(
         migrated_session,
-        provider=provider,
-        dataset_key=dataset_key,
+        provider_dataset_id=selected.provider_dataset_id,
         dataset_sync_scopes=(sync_scope,),
         limit=page_size,
         cursor=first.next_cursor,

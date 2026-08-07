@@ -2597,10 +2597,12 @@ async def test_merge_first_rechecks_all_membership_writer_feature_lifecycles(
             (
                 await setup.execute(
                     text(
-                        "SELECT source_id::text "
-                        "FROM feature.curated_sources "
-                        "WHERE provider = 'merge-test-provider' "
-                        "AND dataset_key = 'legacy-curation'"
+                        "SELECT source.source_id::text "
+                        "FROM feature.curated_sources AS source "
+                        "JOIN provider_sync.provider_datasets AS dataset "
+                        "  ON dataset.provider_dataset_id = source.provider_dataset_id "
+                        "WHERE dataset.provider = 'merge-test-provider' "
+                        "AND dataset.dataset_key = 'legacy-curation'"
                     )
                 )
             ).scalar_one()
@@ -2822,7 +2824,6 @@ async def test_rule_apply_rechecks_feature_after_waiting_for_merge(
 ) -> None:
     suffix = uuid4().hex
     theme_slug = f"merge-rule-race-{suffix}"
-    provider = f"merge-rule-race-{suffix}"
     async with AsyncSession(migrated_engine) as setup, setup.begin():
         rule_id = str(
             (
@@ -2830,10 +2831,14 @@ async def test_rule_apply_rechecks_feature_after_waiting_for_merge(
                     text(
                         """
                         WITH dataset AS (
-                            INSERT INTO provider_sync.provider_datasets (
-                                provider, dataset_key, display_name, source_kind
-                            ) VALUES (:provider, 'd', 'merge rule race', 'manual')
-                            RETURNING provider_dataset_id
+                            -- rule은 seeded fixture가 f_loser에 링크한 dataset
+                            -- (SE2)을 가리켜야 후보가 잡히고, merge가 잡고 있는
+                            -- feature 잠금에서 대기한다. 새 빈 dataset을 만들면
+                            -- 후보가 0건이라 잠금 자체를 안 잡는다.
+                            SELECT provider_dataset_id
+                            FROM provider_sync.provider_datasets
+                            WHERE provider = 'merge-test-visitkorea'
+                              AND dataset_key = 'd'
                         ), theme AS (
                             INSERT INTO feature.curated_themes (
                                 theme_slug, theme_name, theme_group
@@ -2862,7 +2867,7 @@ async def test_rule_apply_rechecks_feature_after_waiting_for_merge(
                         RETURNING rule_id::text
                         """
                     ),
-                    {"theme_slug": theme_slug, "provider": provider},
+                    {"theme_slug": theme_slug},
                 )
             ).scalar_one()
         )
@@ -2948,22 +2953,12 @@ async def test_rule_apply_rechecks_feature_after_waiting_for_merge(
                 ),
                 {"rule_id": rule_id},
             )
+            # dataset 자체는 seeded fixture 소유다 — source만 지운다.
             await connection.execute(
                 text(
                     "DELETE FROM feature.curated_sources "
-                    "WHERE source_name = 'merge rule race' "
-                    "AND provider_dataset_id IN ("
-                    "SELECT provider_dataset_id FROM provider_sync.provider_datasets "
-                    "WHERE provider = :provider AND dataset_key = 'd')"
-                ),
-                {"provider": provider},
-            )
-            await connection.execute(
-                text(
-                    "DELETE FROM provider_sync.provider_datasets "
-                    "WHERE provider = :provider AND dataset_key = 'd'"
-                ),
-                {"provider": provider},
+                    "WHERE source_name = 'merge rule race'"
+                )
             )
             await connection.execute(
                 text(

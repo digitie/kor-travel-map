@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from hashlib import md5
 from typing import TYPE_CHECKING
 
 import pytest
 from geoalchemy2 import WKTElement
+from sqlalchemy import text
 
 from kortravelmap.infra.dedup_refresh_repo import (
     DedupRefreshScope,
@@ -14,6 +16,7 @@ from kortravelmap.infra.dedup_refresh_repo import (
 )
 from kortravelmap.infra.models import (
     FeatureRow,
+    SourceEntityHeadRow,
     SourceEntityRow,
     SourceLinkRow,
     SourceRecordRow,
@@ -98,6 +101,37 @@ async def test_list_dedup_refresh_features_rejects_partial_cursor(
         )
 
 
+async def _dataset_id(session: AsyncSession) -> int:
+    """fixture 전용 catalog 행을 만들고 canonical id를 돌려준다 (T-VN-33).
+
+    dedup refresh scope는 여전히 provider/dataset_key 표시 자연키를 받지만,
+    source entity의 identity는 ``provider_dataset_id`` 하나다.
+    """
+
+    return int(
+        (
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO provider_sync.provider_datasets (
+                        provider, dataset_key, display_name, source_kind,
+                        is_active, capabilities
+                    )
+                    SELECT :provider, :dataset_key, :provider, 'system', true,
+                           jsonb_build_object('schema_version', 1,
+                                              'produces', '[]'::jsonb,
+                                              'extensions', '{}'::jsonb)
+                    ON CONFLICT (provider, dataset_key) DO UPDATE
+                        SET display_name = EXCLUDED.display_name
+                    RETURNING provider_dataset_id
+                    """
+                ),
+                {"provider": _PROVIDER, "dataset_key": _DATASET},
+            )
+        ).scalar_one()
+    )
+
+
 async def _seed_feature(
     session: AsyncSession,
     *,
@@ -105,6 +139,7 @@ async def _seed_feature(
     updated_at: datetime,
     coord_precision_digits: int,
 ) -> None:
+    dataset_id = await _dataset_id(session)
     session.add(
         FeatureRow(
             feature_id=feature_id,
@@ -121,11 +156,9 @@ async def _seed_feature(
     session.add(
         SourceEntityRow(
             source_entity_key=f"se-{feature_id}",
-            provider=_PROVIDER,
-            dataset_key=_DATASET,
+            provider_dataset_id=dataset_id,
             source_entity_type="place",
             source_entity_id=feature_id,
-            current_source_record_key=None,
             first_seen_at=updated_at,
             last_seen_at=updated_at,
         )
@@ -135,22 +168,21 @@ async def _seed_feature(
         SourceRecordRow(
             source_record_key=f"sr-{feature_id}",
             source_entity_key=f"se-{feature_id}",
-            provider=_PROVIDER,
-            dataset_key=_DATASET,
-            source_entity_type="place",
-            source_entity_id=feature_id,
-            raw_name=feature_id,
-            raw_address="경상북도 경주시 불국로 385",
-            raw_payload_hash=f"hash-{feature_id}",
+            # ck_source_records_payload_hash_canonical = ^[0-9a-f]{1,64}$
+            raw_payload_hash=md5(feature_id.encode()).hexdigest(),
             raw_data={"feature_id": feature_id},
             fetched_at=updated_at,
             imported_at=updated_at,
         )
     )
     await session.flush()
-    entity = await session.get(SourceEntityRow, f"se-{feature_id}")
-    assert entity is not None
-    entity.current_source_record_key = f"sr-{feature_id}"
+    session.add(
+        SourceEntityHeadRow(
+            source_entity_key=f"se-{feature_id}",
+            current_source_record_key=f"sr-{feature_id}",
+            observed_at=updated_at,
+        )
+    )
     await session.flush()
     session.add(
         SourceLinkRow(

@@ -245,18 +245,9 @@ _UNCOMPARED_INDEX_CONTRACTS: dict[
         ),
         "deleted_at IS NULL AND status = 'active' AND coord IS NOT NULL",
     ),
-    ("provider_sync", "idx_source_records_kma_alert_history"): (
-        False,
-        (
-            "provider ASC NULLS LAST",
-            "dataset_key ASC NULLS LAST",
-            "source_entity_type ASC NULLS LAST",
-            "fetched_at DESC NULLS FIRST",
-            "source_record_key ASC NULLS LAST",
-        ),
-        "provider = 'python-kma-api' AND dataset_key = 'kma_weather_alerts' "
-        "AND source_entity_type = 'weather_alert'",
-    ),
+    # T-VN-33(0091)이 ``idx_source_records_kma_alert_history``를 대체 없이 drop했다
+    # — 술어가 잡던 provider/dataset_key/source_entity_type 사본이 모두 사라져
+    # partial index 자체가 성립하지 않는다. 계약도 함께 사라진다.
 }
 
 
@@ -494,7 +485,11 @@ async def test_alembic_coord_precision_trigger_defaults_for_coord(
 async def test_alembic_creates_source_tables(
     pg_engine_with_migrations: AsyncEngine,
 ) -> None:
-    """provider sync의 entity / observation / link / cursor 테이블을 생성한다."""
+    """provider sync의 catalog / entity / observation / link / cursor 테이블.
+
+    T-VN-33(0089~0091): dataset identity 정본이 ``provider_datasets`` 3종 catalog로
+    올라오고, entity의 현재 record 포인터는 ``source_entity_heads``로 분리됐다.
+    """
     async with pg_engine_with_migrations.connect() as conn:
         result = await conn.execute(
             text(
@@ -507,8 +502,12 @@ async def test_alembic_creates_source_tables(
     assert tables == [
         "notice_lifecycle_scopes",
         "notice_lineage_states",
+        "provider_dataset_operation_scopes",
+        "provider_dataset_operations",
+        "provider_datasets",
         "provider_sync_state",
         "source_entities",
+        "source_entity_heads",
         "source_links",
         "source_records",
     ]

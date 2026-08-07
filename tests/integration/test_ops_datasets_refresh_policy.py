@@ -21,13 +21,13 @@ from typing import TYPE_CHECKING, Any
 import httpx
 import pytest
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.infra.provider_refresh_policy_repo import (
     get_provider_refresh_policy,
     upsert_provider_refresh_policy,
 )
-from kortravelmap.infra.sync_state_repo import record_sync_success
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
@@ -138,8 +138,7 @@ def _policy_body(
 async def _put_refresh_policy(
     engine: AsyncEngine,
     *,
-    provider: str,
-    dataset_key: str,
+    provider_dataset_id: int,
     expected_revision: str | None = None,
     targeted_policy: str = "allow_targeted",
     enabled: bool = False,
@@ -150,8 +149,7 @@ async def _put_refresh_policy(
     async with AsyncSession(engine, expire_on_commit=False) as session:
         return await upsert_dataset_refresh_policy(
             session,
-            provider=provider,
-            dataset_key=dataset_key,
+            provider_dataset_id=provider_dataset_id,
             body=_policy_body(
                 expected_revision=expected_revision,
                 targeted_policy=targeted_policy,
@@ -160,102 +158,125 @@ async def _put_refresh_policy(
         )
 
 
-async def _cleanup(engine: AsyncEngine, provider: str) -> None:
+async def _dataset_id(engine: AsyncEngine, *, provider: str, dataset_key: str) -> int:
+    """catalog 정본에서 canonical dataset id를 읽는다.
+
+    T-VN-33 이후 dataset identity는 ``provider_dataset_id`` 하나다 —
+    provider/dataset_key는 표시용 projection이라 API 경계에서도 id를 받는다.
+    """
+    async with AsyncSession(engine) as session:
+        return int(
+            (
+                await session.execute(
+                    text(
+                        "SELECT provider_dataset_id"
+                        " FROM provider_sync.provider_datasets"
+                        " WHERE provider = :p AND dataset_key = :d"
+                    ),
+                    {"p": provider, "d": dataset_key},
+                )
+            ).scalar_one()
+        )
+
+
+async def _ghost_dataset_id(engine: AsyncEngine) -> int:
+    """catalog에 **없는** dataset id — 어떤 seed와도 겹치지 않는다."""
+    async with AsyncSession(engine) as session:
+        return int(
+            (
+                await session.execute(
+                    text(
+                        "SELECT COALESCE(max(provider_dataset_id), 0) + 1000"
+                        " FROM provider_sync.provider_datasets"
+                    )
+                )
+            ).scalar_one()
+        )
+
+
+async def _cleanup(engine: AsyncEngine, provider_dataset_id: int) -> None:
     async with AsyncSession(engine) as session, session.begin():
         await session.execute(
-            text("DELETE FROM ops.provider_refresh_policies WHERE provider = :p"),
-            {"p": provider},
+            text(
+                "DELETE FROM ops.provider_refresh_policies"
+                " WHERE provider_dataset_id = :id"
+            ),
+            {"id": provider_dataset_id},
         )
         await session.execute(
-            text("DELETE FROM provider_sync.provider_sync_state WHERE provider = :p"),
-            {"p": provider},
+            text(
+                "DELETE FROM provider_sync.provider_sync_state"
+                " WHERE provider_dataset_id = :id"
+            ),
+            {"id": provider_dataset_id},
         )
 
 
-async def test_put_leftover_sync_state_combo_is_orphan_and_forbidden(
+async def test_orphan_policy_and_state_rows_cannot_exist(
     migrated_engine: AsyncEngine,
 ) -> None:
-    """카탈로그에 없고 sync state만 남은 조합은 이유가 있는 409 대상이다."""
-    from kortravelmap.api.ops_dataset_service import OrphanMutationDisabledError
+    """catalog 밖 dataset을 가리키는 policy/state row는 **만들어지지 않는다**.
 
-    provider = "it-legacy-provider"
-    dataset_key = "it_legacy_dataset"
-    try:
-        async with AsyncSession(migrated_engine) as seed, seed.begin():
-            await record_sync_success(
-                seed, provider=provider, dataset_key=dataset_key, cursor={}
-            )
+    예전에는 policy/state가 provider/dataset_key 사본을 들고 있어서 catalog에서
+    사라진 조합의 row가 유령으로 남았고, service가 mutation 시점에 그것을 orphan
+    409로 막았다. T-VN-33은 그 사본을 없애고 두 테이블 모두 canonical catalog를
+    FK로 참조하게 했다 — 유령이 애초에 생기지 않으므로 mutation 시점 방어보다
+    강한 보증이다. 이 FK가 빠지면 orphan은 조용히 되살아나고, 그것을 막던 코드는
+    이미 없다.
+    """
+    ghost_id = await _ghost_dataset_id(migrated_engine)
+    async with AsyncSession(migrated_engine) as session:
+        with pytest.raises(IntegrityError) as policy_violation:
+            async with session.begin():
+                await session.execute(
+                    text(
+                        """
+                        INSERT INTO ops.provider_refresh_policies (
+                            provider_dataset_id, source_kind, targeted_policy,
+                            max_concurrent, enabled
+                        ) VALUES (:id, 'manual', 'allow_targeted', 1, true)
+                        """
+                    ),
+                    {"id": ghost_id},
+                )
+    # FK 이전에 active-dataset write guard가 먼저 잡는다 — 둘 다 catalog 정본을
+    # 참조하므로 어느 쪽이 먼저 울려도 유령 row는 남지 않는다.
+    assert "provider dataset" in str(policy_violation.value)
 
-        with pytest.raises(OrphanMutationDisabledError) as excinfo:
-            await _put_refresh_policy(
-                migrated_engine, provider=provider, dataset_key=dataset_key
-            )
-        assert excinfo.value.mutation_disabled_reason == "catalog_missing_with_sync_state"
-        async with AsyncSession(migrated_engine) as verify:
-            saved = await get_provider_refresh_policy(
-                verify, provider=provider, dataset_key=dataset_key
-            )
-        assert saved is None
-    finally:
-        await _cleanup(migrated_engine, provider)
+    async with AsyncSession(migrated_engine) as session:
+        with pytest.raises(IntegrityError) as state_violation:
+            async with session.begin():
+                await session.execute(
+                    text(
+                        """
+                        INSERT INTO provider_sync.provider_sync_state (
+                            provider_dataset_id, sync_scope, operation_key, status
+                        ) VALUES (:id, 'dataset_wide', 'ghost_operation', 'active')
+                        """
+                    ),
+                    {"id": ghost_id},
+                )
+    assert "inactive refresh operation" in str(state_violation.value)
 
 
-async def test_put_policy_only_combo_is_orphan_and_forbidden(
+async def test_put_unknown_dataset_id_404_creates_no_policy_row(
     migrated_engine: AsyncEngine,
 ) -> None:
-    """policy-only 잔존 row도 조회는 가능하지만 mutation은 금지한다."""
-    from kortravelmap.api.ops_dataset_service import OrphanMutationDisabledError
+    """catalog에 없는 dataset id는 404 + transaction 롤백(유령 policy row 없음)."""
+    from kortravelmap.api.ops_dataset_service import DatasetNotFoundError
 
-    provider = "it-policy-only-provider"
-    dataset_key = "it_policy_only_dataset"
+    ghost_id = await _ghost_dataset_id(migrated_engine)
     try:
-        async with AsyncSession(migrated_engine) as seed, seed.begin():
-            await upsert_provider_refresh_policy(
-                seed,
-                provider=provider,
-                dataset_key=dataset_key,
-                source_kind="manual",
-                expected_revision=None,
-                enabled=True,
-            )
-
-        with pytest.raises(OrphanMutationDisabledError) as excinfo:
-            await _put_refresh_policy(
-                migrated_engine, provider=provider, dataset_key=dataset_key
-            )
-        assert excinfo.value.mutation_disabled_reason == "catalog_missing_with_policy"
-        async with AsyncSession(migrated_engine) as verify:
-            saved = await get_provider_refresh_policy(
-                verify, provider=provider, dataset_key=dataset_key
-            )
-        assert saved is not None
-        assert saved.enabled is True
-        assert saved.max_concurrent == 1
-    finally:
-        await _cleanup(migrated_engine, provider)
-
-
-async def test_put_unknown_combo_404_creates_no_policy_row(
-    migrated_engine: AsyncEngine,
-) -> None:
-    """어디에도 없는 조합은 404 + transaction 롤백(유령 policy row 없음)."""
-    provider = "it-ghost-provider"
-    dataset_key = "it_ghost_dataset"
-    try:
-        from kortravelmap.api.ops_dataset_service import DatasetNotFoundError
-
         with pytest.raises(DatasetNotFoundError):
-            await _put_refresh_policy(
-                migrated_engine, provider=provider, dataset_key=dataset_key
-            )
+            await _put_refresh_policy(migrated_engine, provider_dataset_id=ghost_id)
 
         async with AsyncSession(migrated_engine) as verify:
             saved = await get_provider_refresh_policy(
-                verify, provider=provider, dataset_key=dataset_key
+                verify, provider_dataset_id=ghost_id
             )
         assert saved is None
     finally:
-        await _cleanup(migrated_engine, provider)
+        await _cleanup(migrated_engine, ghost_id)
 
 
 async def test_put_catalog_combo_succeeds_on_fresh_session(
@@ -264,22 +285,25 @@ async def test_put_catalog_combo_succeeds_on_fresh_session(
     """카탈로그 조합(정상 경로)도 fresh 세션에서 한 transaction으로 성립한다."""
     provider = "python-mois-api"
     dataset_key = "mois_license_features_bulk"
+    dataset_id = await _dataset_id(
+        migrated_engine, provider=provider, dataset_key=dataset_key
+    )
     try:
         saved_response = await _put_refresh_policy(
-            migrated_engine, provider=provider, dataset_key=dataset_key
+            migrated_engine, provider_dataset_id=dataset_id
         )
 
         assert saved_response.provider == provider
         assert saved_response.enabled is False
         async with AsyncSession(migrated_engine) as verify:
             saved = await get_provider_refresh_policy(
-                verify, provider=provider, dataset_key=dataset_key
+                verify, provider_dataset_id=dataset_id
             )
         assert saved is not None
         assert saved.targeted_policy == "allow_targeted"
         assert saved.stale_after_minutes == 90
     finally:
-        await _cleanup(migrated_engine, provider)
+        await _cleanup(migrated_engine, dataset_id)
 
 
 async def test_same_revision_competition_is_cas_and_preserves_winner(
@@ -292,11 +316,13 @@ async def test_same_revision_competition_is_cas_and_preserves_winner(
 
     provider = "python-mois-api"
     dataset_key = "mois_license_features_bulk"
+    dataset_id = await _dataset_id(
+        migrated_engine, provider=provider, dataset_key=dataset_key
+    )
     try:
         created = await _put_refresh_policy(
             migrated_engine,
-            provider=provider,
-            dataset_key=dataset_key,
+            provider_dataset_id=dataset_id,
             expected_revision=None,
             targeted_policy="follow_system",
             enabled=True,
@@ -308,10 +334,10 @@ async def test_same_revision_competition_is_cas_and_preserves_winner(
             AsyncSession(migrated_engine) as client_b,
         ):
             observed_a = await get_provider_refresh_policy(
-                client_a, provider=provider, dataset_key=dataset_key
+                client_a, provider_dataset_id=dataset_id
             )
             observed_b = await get_provider_refresh_policy(
-                client_b, provider=provider, dataset_key=dataset_key
+                client_b, provider_dataset_id=dataset_id
             )
         assert observed_a is not None
         assert observed_b is not None
@@ -319,8 +345,7 @@ async def test_same_revision_competition_is_cas_and_preserves_winner(
 
         winner = await _put_refresh_policy(
             migrated_engine,
-            provider=provider,
-            dataset_key=dataset_key,
+            provider_dataset_id=dataset_id,
             expected_revision="1",
             targeted_policy="disabled",
             enabled=False,
@@ -330,8 +355,7 @@ async def test_same_revision_competition_is_cas_and_preserves_winner(
         with pytest.raises(ProviderRefreshPolicyRevisionConflict) as excinfo:
             await _put_refresh_policy(
                 migrated_engine,
-                provider=provider,
-                dataset_key=dataset_key,
+                provider_dataset_id=dataset_id,
                 expected_revision="1",
                 targeted_policy="allow_targeted",
                 enabled=True,
@@ -342,14 +366,14 @@ async def test_same_revision_competition_is_cas_and_preserves_winner(
 
         async with AsyncSession(migrated_engine) as verify:
             current = await get_provider_refresh_policy(
-                verify, provider=provider, dataset_key=dataset_key
+                verify, provider_dataset_id=dataset_id
             )
         assert current is not None
         assert current.revision == 2
         assert current.enabled is False
         assert current.targeted_policy == "disabled"
     finally:
-        await _cleanup(migrated_engine, provider)
+        await _cleanup(migrated_engine, dataset_id)
 
 
 async def test_create_update_kind_mismatch_and_rollback_do_not_advance_revision(
@@ -362,20 +386,21 @@ async def test_create_update_kind_mismatch_and_rollback_do_not_advance_revision(
 
     provider = "python-mois-api"
     dataset_key = "mois_license_features_bulk"
+    dataset_id = await _dataset_id(
+        migrated_engine, provider=provider, dataset_key=dataset_key
+    )
     try:
         with pytest.raises(ProviderRefreshPolicyRevisionConflict) as missing:
             await _put_refresh_policy(
                 migrated_engine,
-                provider=provider,
-                dataset_key=dataset_key,
+                provider_dataset_id=dataset_id,
                 expected_revision="1",
             )
         assert missing.value.current is None
 
         created = await _put_refresh_policy(
             migrated_engine,
-            provider=provider,
-            dataset_key=dataset_key,
+            provider_dataset_id=dataset_id,
             expected_revision=None,
             targeted_policy="follow_system",
             enabled=True,
@@ -383,8 +408,7 @@ async def test_create_update_kind_mismatch_and_rollback_do_not_advance_revision(
         with pytest.raises(ProviderRefreshPolicyRevisionConflict) as existing:
             await _put_refresh_policy(
                 migrated_engine,
-                provider=provider,
-                dataset_key=dataset_key,
+                provider_dataset_id=dataset_id,
                 expected_revision=None,
             )
         assert existing.value.current is not None
@@ -397,8 +421,7 @@ async def test_create_update_kind_mismatch_and_rollback_do_not_advance_revision(
             async with AsyncSession(migrated_engine) as session, session.begin():
                 changed = await upsert_provider_refresh_policy(
                     session,
-                    provider=provider,
-                    dataset_key=dataset_key,
+                    provider_dataset_id=dataset_id,
                     source_kind="manual",
                     expected_revision=created.revision,
                     targeted_policy="disabled",
@@ -412,14 +435,14 @@ async def test_create_update_kind_mismatch_and_rollback_do_not_advance_revision(
 
         async with AsyncSession(migrated_engine) as verify:
             current = await get_provider_refresh_policy(
-                verify, provider=provider, dataset_key=dataset_key
+                verify, provider_dataset_id=dataset_id
             )
         assert current is not None
         assert current.revision == 1
         assert current.targeted_policy == "follow_system"
         assert current.enabled is True
     finally:
-        await _cleanup(migrated_engine, provider)
+        await _cleanup(migrated_engine, dataset_id)
 
 
 async def test_real_row_lock_competition_returns_http_conflict_and_rollback_winner(
@@ -428,10 +451,13 @@ async def test_real_row_lock_competition_returns_http_conflict_and_rollback_winn
     """실제 독립 transaction/ASGI 요청이 row lock 뒤 CAS 결과를 관측한다."""
     provider = "python-mois-api"
     dataset_key = "mois_license_features_bulk"
+    dataset_id = await _dataset_id(
+        migrated_engine, provider=provider, dataset_key=dataset_key
+    )
     app = _policy_app(migrated_engine)
     pending: set[asyncio.Task[Any]] = set()
     try:
-        await _cleanup(migrated_engine, provider)
+        await _cleanup(migrated_engine, dataset_id)
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app),
             base_url="http://testserver",
@@ -447,8 +473,7 @@ async def test_real_row_lock_competition_returns_http_conflict_and_rollback_winn
                 ).scalar_one()
                 created = await upsert_provider_refresh_policy(
                     client_a,
-                    provider=provider,
-                    dataset_key=dataset_key,
+                    provider_dataset_id=dataset_id,
                     source_kind="manual",
                     expected_revision=None,
                 )
@@ -456,7 +481,7 @@ async def test_real_row_lock_competition_returns_http_conflict_and_rollback_winn
                 create_loser = asyncio.create_task(
                     client.put(
                         "/v1/ops/datasets/refresh-policy",
-                        params={"provider": provider, "dataset_key": dataset_key},
+                        params={"provider_dataset_id": dataset_id},
                         json={
                             "expected_revision": None,
                             "source_kind": "openapi",
@@ -495,8 +520,7 @@ async def test_real_row_lock_competition_returns_http_conflict_and_rollback_winn
                 ).scalar_one()
                 winner = await upsert_provider_refresh_policy(
                     client_a,
-                    provider=provider,
-                    dataset_key=dataset_key,
+                    provider_dataset_id=dataset_id,
                     source_kind="manual",
                     expected_revision=1,
                     targeted_policy="disabled",
@@ -505,7 +529,7 @@ async def test_real_row_lock_competition_returns_http_conflict_and_rollback_winn
                 stale_loser = asyncio.create_task(
                     client.put(
                         "/v1/ops/datasets/refresh-policy",
-                        params={"provider": provider, "dataset_key": dataset_key},
+                        params={"provider_dataset_id": dataset_id},
                         json={
                             "expected_revision": "1",
                             "source_kind": "manual",
@@ -545,8 +569,7 @@ async def test_real_row_lock_competition_returns_http_conflict_and_rollback_winn
                 ).scalar_one()
                 rolled_back = await upsert_provider_refresh_policy(
                     client_a,
-                    provider=provider,
-                    dataset_key=dataset_key,
+                    provider_dataset_id=dataset_id,
                     source_kind="manual",
                     expected_revision=2,
                     targeted_policy="follow_system",
@@ -555,7 +578,7 @@ async def test_real_row_lock_competition_returns_http_conflict_and_rollback_winn
                 rollback_winner = asyncio.create_task(
                     client.put(
                         "/v1/ops/datasets/refresh-policy",
-                        params={"provider": provider, "dataset_key": dataset_key},
+                        params={"provider_dataset_id": dataset_id},
                         json={
                             "expected_revision": "2",
                             "source_kind": "manual",
@@ -581,7 +604,7 @@ async def test_real_row_lock_competition_returns_http_conflict_and_rollback_winn
 
             immutable = await client.put(
                 "/v1/ops/datasets/refresh-policy",
-                params={"provider": provider, "dataset_key": dataset_key},
+                params={"provider_dataset_id": dataset_id},
                 json={
                     "expected_revision": "3",
                     "source_kind": "openapi",
@@ -600,7 +623,7 @@ async def test_real_row_lock_competition_returns_http_conflict_and_rollback_winn
             task.cancel()
         if pending:
             await asyncio.gather(*pending, return_exceptions=True)
-        await _cleanup(migrated_engine, provider)
+        await _cleanup(migrated_engine, dataset_id)
 
 
 async def test_bigint_revision_round_trip_and_exhaustion_are_typed(
@@ -609,13 +632,15 @@ async def test_bigint_revision_round_trip_and_exhaustion_are_typed(
     """2^53 초과 decimal string과 BIGINT 끝 경계를 HTTP에서 손실 없이 보존한다."""
     provider = "python-mois-api"
     dataset_key = "mois_license_features_bulk"
+    dataset_id = await _dataset_id(
+        migrated_engine, provider=provider, dataset_key=dataset_key
+    )
     app = _policy_app(migrated_engine)
     try:
-        await _cleanup(migrated_engine, provider)
+        await _cleanup(migrated_engine, dataset_id)
         await _put_refresh_policy(
             migrated_engine,
-            provider=provider,
-            dataset_key=dataset_key,
+            provider_dataset_id=dataset_id,
             expected_revision=None,
             enabled=True,
         )
@@ -625,10 +650,10 @@ async def test_bigint_revision_round_trip_and_exhaustion_are_typed(
                     """
                     UPDATE ops.provider_refresh_policies
                     SET revision = 9007199254740993
-                    WHERE provider = :provider AND dataset_key = :dataset_key
+                    WHERE provider_dataset_id = :provider_dataset_id
                     """
                 ),
-                {"provider": provider, "dataset_key": dataset_key},
+                {"provider_dataset_id": dataset_id},
             )
 
         async with httpx.AsyncClient(
@@ -637,7 +662,7 @@ async def test_bigint_revision_round_trip_and_exhaustion_are_typed(
         ) as client:
             stale = await client.put(
                 "/v1/ops/datasets/refresh-policy",
-                params={"provider": provider, "dataset_key": dataset_key},
+                params={"provider_dataset_id": dataset_id},
                 json={
                     "expected_revision": "9007199254740992",
                     "source_kind": "manual",
@@ -653,7 +678,7 @@ async def test_bigint_revision_round_trip_and_exhaustion_are_typed(
 
             large_update = await client.put(
                 "/v1/ops/datasets/refresh-policy",
-                params={"provider": provider, "dataset_key": dataset_key},
+                params={"provider_dataset_id": dataset_id},
                 json={
                     "expected_revision": "9007199254740993",
                     "source_kind": "manual",
@@ -670,15 +695,15 @@ async def test_bigint_revision_round_trip_and_exhaustion_are_typed(
                         """
                         UPDATE ops.provider_refresh_policies
                         SET revision = 9223372036854775806
-                        WHERE provider = :provider AND dataset_key = :dataset_key
+                        WHERE provider_dataset_id = :provider_dataset_id
                         """
                     ),
-                    {"provider": provider, "dataset_key": dataset_key},
+                    {"provider_dataset_id": dataset_id},
                 )
 
             to_max = await client.put(
                 "/v1/ops/datasets/refresh-policy",
-                params={"provider": provider, "dataset_key": dataset_key},
+                params={"provider_dataset_id": dataset_id},
                 json={
                     "expected_revision": "9223372036854775806",
                     "source_kind": "manual",
@@ -689,7 +714,7 @@ async def test_bigint_revision_round_trip_and_exhaustion_are_typed(
 
             exhausted = await client.put(
                 "/v1/ops/datasets/refresh-policy",
-                params={"provider": provider, "dataset_key": dataset_key},
+                params={"provider_dataset_id": dataset_id},
                 json={
                     "expected_revision": "9223372036854775807",
                     "source_kind": "manual",
@@ -703,4 +728,4 @@ async def test_bigint_revision_round_trip_and_exhaustion_are_typed(
                 "9223372036854775807"
             )
     finally:
-        await _cleanup(migrated_engine, provider)
+        await _cleanup(migrated_engine, dataset_id)

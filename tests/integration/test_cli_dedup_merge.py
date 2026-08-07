@@ -20,6 +20,7 @@ from kortravelmap.infra.advisory_lock import advisory_lock
 from kortravelmap.infra.models import (
     DedupReviewQueueRow,
     FeatureRow,
+    SourceEntityHeadRow,
     SourceEntityRow,
     SourceLinkRow,
     SourceRecordRow,
@@ -35,8 +36,12 @@ pytestmark = pytest.mark.integration
 
 _CAT = "01070100"
 _FETCHED = datetime(2026, 6, 1, 12, 0, tzinfo=UTC)
+# T-VN-33: entity가 더는 record를 참조하지 않으므로 source_records TRUNCATE가
+# source_entities까지 cascade하지 않는다 — entity를 직접 비워야 재실행이 안전하다
+# (head는 entity/record 양쪽에서 cascade된다).
 _TRUNCATE_SQL = (
-    "TRUNCATE feature.features, provider_sync.source_records, "
+    "TRUNCATE feature.features, provider_sync.source_entities, "
+    "provider_sync.source_records, "
     "provider_sync.source_links, ops.dedup_review_queue, "
     "ops.feature_merge_history RESTART IDENTITY CASCADE"
 )
@@ -58,16 +63,27 @@ def _feature(feature_id: str, *, with_coord: bool) -> FeatureRow:
 
 async def _seed_pair(engine: AsyncEngine) -> str:
     async with AsyncSession(engine) as session, session.begin():
+        # T-VN-33: entity identity의 dataset 소유는 provider_dataset_id 하나뿐이다.
+        provider_dataset_id = int(
+            (
+                await session.execute(
+                    text(
+                        "SELECT provider_dataset_id "
+                        "FROM provider_sync.provider_datasets "
+                        "WHERE provider = 'python-mois-api' "
+                        "  AND dataset_key = 'mois_license_features_bulk'"
+                    )
+                )
+            ).scalar_one()
+        )
         session.add(_feature("f_master", with_coord=True))
         session.add(_feature("f_loser", with_coord=False))
         session.add(
             SourceEntityRow(
                 source_entity_key="SE1",
-                provider="python-mois-api",
-                dataset_key="d",
+                provider_dataset_id=provider_dataset_id,
                 source_entity_type="t",
                 source_entity_id="SR1",
-                current_source_record_key=None,
                 first_seen_at=_FETCHED,
                 last_seen_at=_FETCHED,
             )
@@ -77,19 +93,22 @@ async def _seed_pair(engine: AsyncEngine) -> str:
             SourceRecordRow(
                 source_record_key="SR1",
                 source_entity_key="SE1",
-                provider="python-mois-api",
-                dataset_key="d",
-                source_entity_type="t",
-                source_entity_id="SR1",
-                raw_payload_hash="h",
+                # raw_payload_hash는 ^[0-9a-f]{1,64}$ 를 만족해야 한다.
+                raw_payload_hash="5d41402abc4b2a76b9719d911017c592",
                 raw_data={},
                 fetched_at=_FETCHED,
+                imported_at=_FETCHED,
             )
         )
         await session.flush()
-        entity = await session.get(SourceEntityRow, "SE1")
-        assert entity is not None
-        entity.current_source_record_key = "SR1"
+        # 현재 record 포인터는 entity가 아니라 head가 소유한다.
+        session.add(
+            SourceEntityHeadRow(
+                source_entity_key="SE1",
+                current_source_record_key="SR1",
+                observed_at=_FETCHED,
+            )
+        )
         await session.flush()
         session.add(
             SourceLinkRow(
