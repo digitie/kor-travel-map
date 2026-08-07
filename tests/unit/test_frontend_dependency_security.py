@@ -40,8 +40,16 @@ def test_frontend_security_versions_and_overrides_are_locked() -> None:
     assert root_package["packageManager"] == "npm@12.0.1"
     assert root_package["engines"] == expected_engines
     assert frontend_package["engines"] == expected_engines
+    # 차단 게이트는 **배포되는 의존성만** 본다. dev 전용 빌드 도구의 취약점은
+    # 사용자에게 나가지 않으므로 머지를 막지 않는다 —
+    # `@redocly/openapi-core` 1.x는 패치가 없고 2.x는 타입 생성을 깨뜨린다
+    # (docs/dev-environment.md §10.6에 근거와 다시 조일 조건).
     assert root_package["scripts"]["audit:high"] == (
-        "npx --yes npm@12.0.1 audit --audit-level=high"
+        "npx --yes npm@12.0.1 audit --audit-level=high --omit=dev"
+    )
+    # dev 취약점은 끄지 않는다 — 비차단으로 CI 로그에 계속 남긴다.
+    assert root_package["scripts"]["audit:dev"] == (
+        "npx --yes npm@12.0.1 audit --audit-level=high || true"
     )
     assert root_package["allowScripts"] == {
         "esbuild@0.28.1": True,

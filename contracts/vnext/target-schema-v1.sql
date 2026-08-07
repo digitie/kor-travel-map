@@ -6,7 +6,7 @@
 -- 정본 근거:
 --   * ADR-066~075 (특히 ADR-067 직교 상태 / ADR-068 UUID identity /
 --     ADR-069 provider_datasets / ADR-070 subtype / ADR-071 field override /
---     ADR-072 weather bitemporal), ADR-078 price series identity, ADR-087
+--     ADR-072 weather bitemporal), ADR-078 price series identity, ADR-088
 --     DB 소유 dataset operation/immutable observation head
 --   * docs/reports/system-structure-api-schema-review-2026-07-16.md §3(목표 DB
 --     schema 표), §2 D-3~D-8, §8.1
@@ -118,7 +118,7 @@ CREATE TABLE provider_sync.provider_datasets (
     -- 활성 상태 (ADR-069 결정 1)
     is_active boolean NOT NULL DEFAULT true,
     -- capability는 dataset의 산출 metadata만 소유한다. 실행 가능 operation과 scope는
-    -- provider_dataset_operations 및 그 정규 scope child가 유일하게 소유한다(ADR-087).
+    -- provider_dataset_operations 및 그 정규 scope child가 유일하게 소유한다(ADR-088).
     capabilities jsonb NOT NULL DEFAULT
         '{"schema_version":1,"produces":[],"extensions":{}}'::jsonb,
     created_at timestamptz NOT NULL DEFAULT now(),
@@ -154,7 +154,7 @@ BEGIN
     IF NEW.provider IS DISTINCT FROM OLD.provider
        OR NEW.dataset_key IS DISTINCT FROM OLD.dataset_key
     THEN
-        RAISE EXCEPTION 'provider dataset identity is immutable (ADR-087)'
+        RAISE EXCEPTION 'provider dataset identity is immutable (ADR-088)'
             USING ERRCODE = 'P0001';
     END IF;
     RETURN NEW;

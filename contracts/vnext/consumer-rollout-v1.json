@@ -28,7 +28,7 @@
     "T-VN-33": {
       "title": "provider dataset 정본 전환",
       "consumer_first_order": [
-        "33A: provider_datasets row·composite identity 생성 + source 계열과 모든 provider/dataset 소유 matrix의 FK/membership backfill (중복·orphan 0). 코드 projection은 역할 고정 — provider_catalog=capability, feature_operation_registry=실행 가능 operation (ADR-087)",
+        "33A: provider_datasets row·composite identity 생성 + source 계열과 모든 provider/dataset 소유 matrix의 FK/membership backfill (중복·orphan 0). 코드 projection은 역할 고정 — provider_catalog=capability, feature_operation_registry=실행 가능 operation (ADR-088)",
         "33B: writer·reader를 canonical FK 또는 member join으로 전환한다. entity-record 불일치는 composite FK로, inactive child/member write는 parent lock guard로 차단한다. import job/update request, policy, upload, curation, integrity, POI, enrichment, managed file의 exact target DDL은 tvn33-reference-ownership-v1.sql이 정본이다.",
         "33C: canonical query 전환 + 중복 column read-only fence + EXPLAIN/checksum 고정, DB projection 기반 /v1/provider-datasets operator 표면 공개"
       ],

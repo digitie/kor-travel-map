@@ -5,7 +5,7 @@
 T-VN-33 구현은 중단했다. draft PR #966 뒤의 변경은 미스테이징·미커밋 WIP이며 merge 가능 상태가
 아니다. 새 batch audit가 physical triple membership, sync state, pipeline, API/UI, scheduled
 runtime, final-schema trigger/fixture P0를 확인했으므로, 재개 때는 작은 pair/scope patch를 이어
-붙이지 말고 ADR-087의 non-null triple schema를 먼저 완결한다.
+붙이지 말고 ADR-088의 non-null triple schema를 먼저 완결한다.
 
 **다음 한 작업**: 사용자가 재개를 지시할 때
 [`reports/t-vn-33-hold-snapshot-2026-08-06.md`](reports/t-vn-33-hold-snapshot-2026-08-06.md)의
@@ -43,7 +43,7 @@ writer/reader/API cutover·legacy fence를 병행 구현한다. 모든 누적 de
 
 ## 2026-08-06 — T-VN-33 3차 P0 보완 계약 검증 완료
 
-T-VN-33의 target DDL·invariant·rejection fixture를 ADR-087에 맞춰 확장한 뒤 두 적대
+T-VN-33의 target DDL·invariant·rejection fixture를 ADR-088에 맞춰 확장한 뒤 두 적대
 리뷰어의 3차 NO-GO를 받았다. 이전 history/head completeness, full ownership DDL, removal
 manifest P0에 더해 capability/operation 이중 정본, unauthorized scope, inactive 기존/간접/
 nullable child의 update/delete/ownership clear, job/request parent lifecycle, membership

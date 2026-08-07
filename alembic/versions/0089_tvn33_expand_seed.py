@@ -1,6 +1,6 @@
 """T-VN-33A — provider dataset 정본과 lineage 확장/seed/backfill.
 
-Revision ID: 0088_tvn33_expand_seed
+Revision ID: 0089_tvn33_expand_seed
 Revises: 0087_route_area_subtypes
 
 이 revision은 런타임 registry를 import하지 않는다. provider×dataset과 실제
@@ -19,8 +19,8 @@ from sqlalchemy.util.concurrency import await_only
 
 from alembic import op
 
-revision: str = "0088_tvn33_expand_seed"
-down_revision: str | Sequence[str] | None = "0087_route_area_subtypes"
+revision: str = "0089_tvn33_expand_seed"
+down_revision: str | Sequence[str] | None = "0088_source_record_lineage_key"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

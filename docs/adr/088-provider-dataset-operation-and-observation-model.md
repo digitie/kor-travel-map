@@ -1,4 +1,4 @@
-# ADR-087: DB 소유 dataset operation과 immutable observation head
+# ADR-088: DB 소유 dataset operation과 immutable observation head
 
 - 상태: accepted
 - 날짜: 2026-08-06

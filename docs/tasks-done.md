@@ -101,6 +101,28 @@
   migration 결과, `public.alembic_version`이 모두 `29b539ebc72a`로 일치했다. Docker
   Manager F1D-C2는 이 image command만 호출해 candidate를 attest·migrate한다.
 
+## 2026-08-05 — T-VN-H42 provider 재적재 완주·수렴 검증 (41C 선행 조건 충족)
+
+> 2026-08-07 `tasks.md`↔실상태 재대조에서 이관. 판정 자체는 2026-08-05
+> (journal 2026-08-05 (5) — 최종 수치 고정) 완료됐고 열린 하위 항목이 남아 있지 않다.
+> 함께 신설됐던 H43/H44는 열린 잔여가 있어 `tasks.md`에 남는다.
+
+- [x] T-VN-H42 — **provider 재적재 완주·수렴 검증 (+ H35 prod live 검증 잔여)**
+      — **2026-08-05 판정 완료** (journal (5) — 최종 수치 고정·41C 선행 조건 충족)
+
+  **41C prod consumer enable의 선행 조건**. 완료 실측(2026-08-05): MOIS 702,955
+  3중 일치(source=links=features)·opinet 934(용인·수원 bbox — 전국 bbox quota 소진
+  재발 금지 준수)·unlinked 0건·공개 API/admin/quarantine live smoke green·소실됐던
+  공개 API key 재발급. KMA 4종+airkorea 만성 실패는 구조 결함으로 **H45 분리**.
+
+  - [x] 잔여 provider 로드 — MOIS bulk(dedup 룰 검증 후)·opinet bbox 완주.
+    KMA/airkorea 축은 H45 판정으로 연동, khoa 등 잔여 transport 실패군은 스케줄
+    수렴 감시 지속.
+  - [x] CSV 재import(authoritative replace) — 486행 재통과, 미해석 290→270
+    (구성: H31 구조 확정 103 + visitkorea/khoa 스케줄 수렴 대기 — 상시 운영).
+  - [x] 공개 표면 **최종 수치 고정**(2026-08-05 00:30Z): features 731,724 =
+    public = aliases · weather_values 56,310 · curation 4,910/링크 4,640.
+
 ## 2026-08-05 — 재생성 수렴·Wave 2 UUID 착지 일괄 아카이브 (배포 c0afaa4e)
 
 > prod 재생성 수렴(H42)·`0082` 배포 완료 시점의 일괄 정리. H30/H32/H22/T-VN-31 절 전체와

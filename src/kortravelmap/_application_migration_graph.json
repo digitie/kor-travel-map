@@ -539,19 +539,7 @@
       "down_revision": [
         "0087_route_area_subtypes"
       ],
-      "revision": "0088_tvn33_expand_seed"
-    },
-    {
-      "down_revision": [
-        "0088_tvn33_expand_seed"
-      ],
-      "revision": "0089_tvn33_constraints"
-    },
-    {
-      "down_revision": [
-        "0089_tvn33_constraints"
-      ],
-      "revision": "0090_tvn33_cutover_fence"
+      "revision": "0088_source_record_lineage_key"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

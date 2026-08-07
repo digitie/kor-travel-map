@@ -20,7 +20,7 @@ provider_dataset_id + sync_scope + operation_key
 `import_job_datasets`처럼 dataset member를 저장하는 행에는 세 값 모두 non-null이어야 한다.
 operation이 없는 generic job은 dataset member 행을 만들지 않는다. 같은 ID/scope에서 다른
 operation을 union·rank·대표 선택하거나 nullable/wildcard `operation_key`로 읽는 경로는
-금지한다. 상세 결정은 ADR-087 §결정 2가 정본이다.
+금지한다. 상세 결정은 ADR-088 §결정 2가 정본이다.
 
 ## 재개 전 반드시 해소할 P0
 

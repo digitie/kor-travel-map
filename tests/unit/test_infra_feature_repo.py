@@ -17,9 +17,11 @@ timestamptz 비교다.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from typing import Final
 
 import pytest
 
@@ -196,9 +198,9 @@ def test_notice_reconcile_reranks_only_out_of_scope_feature_lineages(
 ) -> None:
     """동일 scope는 ``ranked``를 재사용해 lineage 수의 제곱 비용을 피한다."""
     sql = feature_repo._supersede_stale_notice_sql(close_missing)
-    out_of_scope = sql.split("out_of_scope_feature_lineages AS (", 1)[1].split(
-        "),\nglobal_feature_wins AS (", 1
-    )[0]
+    out_of_scope = sql.split("out_of_scope_feature_lineages AS MATERIALIZED (", 1)[
+        1
+    ].split("),\nglobal_feature_wins AS MATERIALIZED (", 1)[0]
     normalized = " ".join(out_of_scope.split())
 
     assert (
@@ -207,6 +209,92 @@ def test_notice_reconcile_reranks_only_out_of_scope_feature_lineages(
     ) in normalized
     assert "FROM out_of_scope_feature_lineages AS current_notice" in sql
     assert "FROM global_feature_lineages AS current_notice" not in sql
+
+
+@pytest.mark.parametrize("close_missing", [False, True])
+def test_notice_reconcile_materializes_lineage_ctes(close_missing: bool) -> None:
+    """계보 승패 CTE는 질의당 1회만 계산돼야 한다 (ADR-087).
+
+    ``MATERIALIZED``가 없으면 Postgres가 이 CTE를 갱신 대상 feature마다 다시
+    실행한다 — 3,045 notice 규모에서 124.8초 대 0.58초다.
+    """
+    sql = feature_repo._supersede_stale_notice_sql(close_missing)
+
+    assert "out_of_scope_feature_lineages AS MATERIALIZED (" in sql
+    assert "global_feature_wins AS MATERIALIZED (" in sql
+
+
+#: ``public_active_notice_filter_sql(..., frozen_h35_schema=True)``의 고정값
+#: (2026-08-07 기준 = ``origin/main``의 필터와 byte-identical).
+#:
+#: H35 리허설의 존재 이유가 "0079 당시 표면을 그대로 재생한다"이므로, 이 SQL은
+#: 동등해 보이는 재작성조차 두지 않는다. 리허설 자체는 **컬럼 참조 오류만** 잡지
+#: 의미가 같은 재작성은 못 잡으므로(그 세대 스키마에서 실행만 되면 통과한다)
+#: 여기서 바이트로 못박는다. 값이 바뀌면 리허설이 재생하는 표면이 달라진 것이다.
+_FROZEN_H35_NOTICE_FILTER_SHA256: Final[str] = (
+    "e934cdb89f1e390bb054447d572ba103a1c74442138d1d8567a938c560db46a7"
+)
+
+
+def test_frozen_h35_notice_filter_is_byte_stable() -> None:
+    frozen = feature_repo.public_active_notice_filter_sql("f", frozen_h35_schema=True)
+
+    assert len(frozen) == 15672
+    assert (
+        hashlib.sha256(frozen.encode()).hexdigest()
+        == _FROZEN_H35_NOTICE_FILTER_SHA256
+    )
+
+
+def test_frozen_h35_notice_filter_does_not_touch_the_stored_column() -> None:
+    """0079 세대에는 ``lineage_key`` 컬럼도 파생 함수도 없다 (ADR-087)."""
+    frozen = feature_repo.public_active_notice_filter_sql("f", frozen_h35_schema=True)
+
+    assert "sr.lineage_key" not in frozen
+    assert "source_record_lineage_key" not in frozen
+    # 남는 두 토큰은 파생 테이블 alias뿐이다.
+    assert "AS lineage_key" in frozen
+    assert "current_notice.lineage_key" in frozen
+
+
+def test_current_notice_filter_reads_the_stored_lineage_column() -> None:
+    """현행 필터는 계보를 **재계산하지 않는다** (ADR-087).
+
+    재계산이 남으면 인덱스가 붙을 수 없고 경쟁자 탐색이 notice 전수 스캔으로
+    되돌아간다 — 3,045 notice에서 0.17초 대 21.2초다.
+    """
+    current = feature_repo.public_active_notice_filter_sql("f")
+
+    assert (
+        "COALESCE(other_sr.lineage_key, other_sr.source_entity_id)"
+        " = COALESCE(cur_sr.lineage_key, cur_sr.source_entity_id)"
+    ) in current
+    assert "raw_data" not in current
+    assert "concat_ws" not in current
+
+
+def test_current_notice_filter_keeps_the_ordering_test_indexable() -> None:
+    """순서 조건이 **행 비교 하나**여야 Index Cond로 밀린다 (ADR-087).
+
+    한 술어 안에 ``OR``로 묶으면 Postgres가 Filter로 남겨 계보의 payload 이력
+    전체를 훑는다 — 50,001 record 계보에서 ``Rows Removed by Filter: 50000``.
+    그래서 "확실히 나은 행"과 "동률"을 **두 EXISTS로 나눈다**.
+    """
+    current = feature_repo.public_active_notice_filter_sql("f")
+
+    normalized = " ".join(current.split())
+
+    assert (
+        "(other_sr.last_seen_at, other_sr.source_record_key)"
+        " > (cur_sr.last_seen_at, cur_sr.source_record_key)"
+    ) in normalized
+    assert current.count("HAVING bool_and(") == 1
+    # 죽은 COALESCE가 남으면 인덱스 열과 맞지 않는다 — last_seen_at은 NOT NULL이다.
+    assert "COALESCE(cur_sr.last_seen_at" not in current
+    assert "COALESCE(other_sr.last_seen_at" not in current
+    # 동률 분기는 별도 EXISTS여야 한다. 하나로 합치면 OR가 생겨 순서 조건이
+    # Index Cond에서 Filter로 떨어진다.
+    assert normalized.count("LIMIT 1 )") >= 2 or current.count("LIMIT 1") >= 2
 
 
 def test_nearby_feature_sql_guards_required_lon_lat_contract() -> None:

@@ -379,6 +379,7 @@ subtype 테이블 자체가 kind로 갈리므로 `WHERE kind=...` 부분 조건�
 | `import_jobs` | `ck_import_jobs_feature_engine_timeline` | feature root/child의 create ≤ start ≤ finish 순서(NULL 허용) |
 | `import_jobs` | `ck_import_jobs_dagster_run_status` | feature run root의 raw Dagster status 허용값 |
 | `import_jobs` | feature operation trigger 2종 | child parent kind/run 일치와 root/child identity update 금지 |
+| `source_records` | `trg_source_record_lineage_key` | `provider_sync.notice_lineage_key(NEW)`로 `lineage_key`를 파생한다. BEFORE INSERT/UPDATE OF (raw_data, provider, dataset_key, source_entity_type, source_entity_id, **lineage_key**) — 자신을 포함해야 파생 컬럼 직접 쓰기도 되돌려진다. `ENABLE ALWAYS`라 `session_replication_role=replica`에서도 돈다 (0088) |
 | `import_jobs` | `trg_import_jobs_identity_immutable` | 모든 generic/feature job의 kind/provider/dataset과 direct update effective sync scope identity는 insert 뒤 변경 금지 (0052+0053) |
 | `import_jobs` | `ck_import_jobs_update_request_shape` | direct update job은 pair+trimmed non-empty sync scope, non-direct는 세 identity 컬럼 모두 NULL (0053) |
 | `import_jobs` | `ck_import_jobs_dispatch_requested_at` | dispatch 시각은 feature update job에만 저장 (0053) |

@@ -20,7 +20,7 @@
   호환 fallback이 아니라 exact membership 전달 경로로 한 번에 제거한다.
 - 후속 batch audit는 job snapshot·active plan·pipeline read model도
   `(provider_dataset_id, sync_scope)`로 `operation_key`를 축약하고 rank-select한다는 P0를
-  확인했다. ADR-087의 실행 identity를 triple로 명시하고, dataset member에는 예외 없이
+  확인했다. ADR-088의 실행 identity를 triple로 명시하고, dataset member에는 예외 없이
   non-null composite FK를 강제한다. operation 없는 generic import job은 dataset member 행을
   만들지 않으므로 nullable/wildcard `operation_key` 예외를 두지 않는다.
 - DB 검토는 `0090`이 `source_records.provider/dataset_key`를 삭제한 뒤에도 살아 있는
@@ -72,7 +72,7 @@
 
 ## 2026-08-06 (codex) — T-VN-33 target contract 실행 검증
 
-- ADR-087의 versioned capability/operation, immutable source record, `observed_at` head,
+- ADR-088의 versioned capability/operation, immutable source record, `observed_at` head,
   inactive dataset 공용 write guard를 target DDL·invariant·rejection fixture에 고정했다.
   direct dataset FK guard는 operation, entity, notice state, weather history/summary까지
   동일 SQLSTATE `23514`로 검증한다.
@@ -87,7 +87,7 @@
 - 적대 스키마·마이그레이션 리뷰는 초기안에 공통 P0를 냈다. DB capability/operation 정본 부재,
   immutable record와 재관측 UPDATE의 충돌, 빈 DB seed 부재, 9개라는 불완전한 FK roster와
   multi-dataset job/request의 scalar FK 오용이다.
-- ADR-087과 T-VN-33 단일 PR 계획이 이를 해소했다. versioned seed와 DB catalog/handler
+- ADR-088과 T-VN-33 단일 PR 계획이 이를 해소했다. versioned seed와 DB catalog/handler
   exact-set gate, entity/head가 소유하는 observation freshness, full reference matrix와
   membership table, canonical CHECK/FK·legacy fence·3 revision forward-only migration을
   구현 계약으로 고정했다. weather/price와 typed notice fact는 순서대로 T-VN-38/T-VN-37에서

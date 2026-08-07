@@ -1,7 +1,7 @@
 """T-VN-33B — canonical dataset ownership FK/index convergence.
 
-Revision ID: 0089_tvn33_constraints
-Revises: 0088_tvn33_expand_seed
+Revision ID: 0090_tvn33_constraints
+Revises: 0089_tvn33_expand_seed
 
 Large FK는 모두 ``NOT VALID``로 연결한 뒤 이 revision에서 검증한다. writer는
 maintenance boundary에서 drain되어 있으므로, 여기서는 compatibility shadow나
@@ -16,8 +16,8 @@ from sqlalchemy.util.concurrency import await_only
 
 from alembic import op
 
-revision: str = "0089_tvn33_constraints"
-down_revision: str | Sequence[str] | None = "0088_tvn33_expand_seed"
+revision: str = "0090_tvn33_constraints"
+down_revision: str | Sequence[str] | None = "0089_tvn33_expand_seed"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

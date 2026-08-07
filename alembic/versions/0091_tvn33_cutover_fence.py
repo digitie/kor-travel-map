@@ -1,7 +1,7 @@
 """T-VN-33C — canonical writer cutover와 final physical schema.
 
-Revision ID: 0090_tvn33_cutover_fence
-Revises: 0089_tvn33_constraints
+Revision ID: 0091_tvn33_cutover_fence
+Revises: 0090_tvn33_constraints
 
 이 revision 이후 provider/dataset pair shadow는 운영 테이블에 남기지 않는다.
 normal write는 canonical ID·scope·membership만 쓴다. rollback은 지원하지 않으며
@@ -16,8 +16,8 @@ from sqlalchemy.util.concurrency import await_only
 
 from alembic import op
 
-revision: str = "0090_tvn33_cutover_fence"
-down_revision: str | Sequence[str] | None = "0089_tvn33_constraints"
+revision: str = "0091_tvn33_cutover_fence"
+down_revision: str | Sequence[str] | None = "0090_tvn33_constraints"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
