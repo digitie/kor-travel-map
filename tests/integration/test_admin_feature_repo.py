@@ -101,7 +101,6 @@ def _source_link(feature_id: str, source_record_key: str) -> SourceLinkRow:
         source_role="primary",
         match_method="natural_key",
         confidence=100,
-        is_primary_source=True,
         created_at=_NOW,
     )
 

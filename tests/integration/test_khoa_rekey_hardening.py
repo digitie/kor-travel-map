@@ -219,7 +219,6 @@ async def _link_primary(
             source_role="primary",
             match_method="khoa_beach",
             confidence=100,
-            is_primary_source=True,
         )
     )
     await session.flush()

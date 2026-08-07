@@ -180,7 +180,6 @@ async def _seed_feature_with_source(
                 source_role="primary",
                 match_method="natural_key",
                 confidence=100,
-                is_primary_source=True,
                 created_at=_NOW,
             )
         )

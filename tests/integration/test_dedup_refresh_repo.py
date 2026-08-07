@@ -159,7 +159,6 @@ async def _seed_feature(
             source_role="primary",
             match_method="natural_key",
             confidence=100,
-            is_primary_source=True,
             created_at=updated_at,
         )
     )

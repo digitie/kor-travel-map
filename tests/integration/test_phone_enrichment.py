@@ -97,7 +97,6 @@ async def _seed_place(
             source_role="primary",
             match_method="natural_key",
             confidence=100,
-            is_primary_source=True,
         )
     )
     await session.flush()

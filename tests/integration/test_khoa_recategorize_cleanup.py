@@ -161,7 +161,6 @@ async def _link_primary(session: AsyncSession, *, feature_id: str, record_key: s
             source_role="primary",
             match_method="khoa_beach",
             confidence=100,
-            is_primary_source=True,
         )
     )
     await session.flush()
