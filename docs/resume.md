@@ -1,5 +1,20 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-07 — T-VN-33 구현 완결, 적대 리뷰 대기
+
+`feat/tvn33-provider-datasets`(PR #966)의 구현이 끝났다. ADR-088 triple(`provider_dataset_id +
+sync_scope + operation_key`)이 scope PK와 참조 FK 4개, pipeline projection, API DTO, OpenAPI와
+생성 타입 양쪽까지 관통한다. notice 계보는 `source_entity_heads`에 물화됐고, 0091 guard 본문은
+`contracts/vnext/target-schema-v1.sql`과 바이트 동일하며 freeze fingerprint 7/7이 맞는다.
+
+검증은 prod 복원본(732,678 record) 위 0083 → 0091 완주 ×4, 단위 2,081 pass, mypy --strict,
+ruff, 통합 수집 오류 0이다. 잔여 단위 6건은 컨테이너에 없는 파일·docker CLI에 걸린 환경
+노이즈로 파일을 넣으면 통과함을 확인했다.
+
+**다음 한 작업**: 렌즈가 다른 적대 리뷰어 2명을 붙여 P0=0을 확인한 뒤 #966을 머지한다.
+그다음 PR #967(T-VN-41 F1D evidence)을 마무리한다. alembic squash는 #966·#967 머지와 prod의
+head 배포가 끝난 뒤 독립 PR로 다룬다 — prod가 `0083`이라 지금 접으면 도달 경로가 사라진다.
+
 ## 2026-08-06 — 사용자 지시로 T-VN-33 WIP 정리 후 중단
 
 T-VN-33 구현은 중단했다. draft PR #966 뒤의 변경은 미스테이징·미커밋 WIP이며 merge 가능 상태가

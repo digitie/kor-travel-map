@@ -2,6 +2,34 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-07 — T-VN-33 구현 완결: merge 유실 자산 복구 + freeze 계약 divergence 4건
+
+- **merge에서 T-VN-37 자산 둘이 조용히 사라져 있었다.** `feature_repo.py` 충돌을 tvn33 쪽으로
+  채택하면서 frozen H35 SQL이 통째로 없어졌는데 `frozen_h35_schema=True` 호출부(3곳)는 남아
+  있었다 — 리허설이 현행 필터를 받아 0079 세대에 없는 `source_entity_heads`·`provider_datasets`를
+  참조하므로 실행 즉시 죽는 상태였다. `origin/main`에서 복구했고 sha256 `e934cdb8` / 15,672
+  bytes로 T-VN-37의 핀과 일치한다. reconcile CTE의 `MATERIALIZED` 장벽도 함께 복구했다
+  (없으면 갱신 대상 feature마다 CTE 재실행 — 3,045 notice에서 87.9초 대 0.35초).
+- **freeze fingerprint를 실제로 재현해 guard divergence 4건을 잡았다.** `touch_provider_dataset`
+  계열이 `now()`(트랜잭션 시작 시각)를 써서 한 트랜잭션 안의 두 갱신이 같은 `updated_at`을
+  받고 있었고, identity-update guard의 SQLSTATE가 계약과 달랐으며, ADR-069 근거 문구 누락과
+  죽은 변수 잔존이 있었다. 계약대로 맞춰 guard 본문이 **바이트 동일**해졌다.
+  membership guard의 `operation_key IS NULL` wildcard 3곳도 제거했다 — 두 member 테이블 모두
+  NOT NULL이라 죽은 분기였고 비등식 join이라 scope PK를 못 탔다. 계약엔 처음부터 없었다.
+- **curation CSV를 자연키로 되돌렸다.** `provider_dataset_id`는 `GENERATED ALWAYS AS IDENTITY`고
+  0089 legacy sweep이 그 DB의 실데이터까지 훑어 seed하므로 값이 DB마다 다르다. 이 CSV는
+  저장소에 sha로 고정돼 어느 DB에나 적용되므로 surrogate를 파일에 박으면 **다른 DB에서 다른
+  dataset을 가리킨다**. 해석은 적재 시점 1회 질의로 옮기고 미해석 pair는 hard-fail한다.
+- `is_primary_source` ↔ `source_role` 불일치 preflight 추가(prod 0건, 한 행 뒤집어 발화 확인).
+  offline_uploads의 FK·멱등키·ORM을 scope PK와 같은 triple로 정렬. perf_gate seeder를 최종
+  스키마로 옮겨 실제 실행 확인.
+- 검증: prod 복원본(732,678 record) 위 0083 → 0091 완주 ×4, 계약 대비 guard 차이 0건,
+  fingerprint 7/7 일치, 단위 2,081 pass(잔여 6건은 컨테이너 파일·docker CLI 환경 노이즈),
+  mypy --strict 145 files, ruff clean, 통합 3,011개 수집 오류 0.
+- fingerprint 재현은 fixture의 jsonb type codec이 없으면 7종이 전부 어긋난다. `origin/main`
+  대조군으로 장치를 먼저 검증했고, 그 덕에 "환경 탓"이라는 오판과 divergence를 덮는
+  재생성을 둘 다 피했다.
+
 ## 2026-08-06 (codex) — 사용자 지시로 T-VN-33 WIP 정리·중단
 
 - 진행 중이던 schema/core/API/frontend 에이전트를 중지하고, T-VN-33/F1D 변경은 미스테이징·미커밋
