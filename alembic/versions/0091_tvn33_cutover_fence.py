@@ -648,7 +648,30 @@ def _move_notice_lineage_to_head() -> None:
     )
 
 
+def _preflight_source_role_matches_is_primary_source() -> None:
+    """두 컬럼이 같은 사실을 서로 다르게 적고 있으면 중단한다.
+
+    ``is_primary_source``와 ``source_role='primary'``는 같은 사실의 사본이다.
+    말없이 하나를 버리면 어긋난 행에서 **어느 link가 primary인지가 바뀐다** —
+    notice canonical identity가 primary link를 타고 결정되므로, 그 변화는 조용히
+    다른 feature를 정본으로 만든다. 값이 갈린 상태는 자동 보정할 근거가 없으니
+    (어느 쪽이 맞는지는 데이터가 말해주지 않는다) 운영자 판단으로 돌린다.
+    """
+
+    _preflight_or_raise(
+        "source_links.is_primary_source disagrees with source_role",
+        """
+        SELECT 1
+        FROM provider_sync.source_links
+        WHERE is_primary_source IS DISTINCT FROM (source_role = 'primary')
+        """,
+        "Reconcile the two columns before cutover: decide per row which value is "
+        "correct, then UPDATE source_role (the surviving column) to match.",
+    )
+
+
 def _drop_legacy_columns() -> None:
+    _preflight_source_role_matches_is_primary_source()
     _execute_sql_script(
         """
         ALTER TABLE provider_sync.source_entities
@@ -736,9 +759,8 @@ def _create_dataset_guard_functions() -> None:
         BEGIN
             IF NEW.provider IS DISTINCT FROM OLD.provider
                OR NEW.dataset_key IS DISTINCT FROM OLD.dataset_key THEN
-                RAISE EXCEPTION 'provider dataset identity is immutable'
-                    USING ERRCODE = '23514',
-                        CONSTRAINT = 'ck_provider_datasets_identity_immutable';
+                RAISE EXCEPTION 'provider dataset identity is immutable (ADR-088)'
+                    USING ERRCODE = 'P0001';
             END IF;
             RETURN NEW;
         END;
@@ -750,7 +772,7 @@ def _create_dataset_guard_functions() -> None:
         SET search_path = pg_catalog
         AS $$
         BEGIN
-            NEW.updated_at := now();
+            NEW.updated_at := clock_timestamp();
             RETURN NEW;
         END;
         $$;
@@ -860,7 +882,7 @@ def _create_dataset_guard_functions() -> None:
         SET search_path = pg_catalog
         AS $$
         BEGIN
-            NEW.updated_at := now();
+            NEW.updated_at := clock_timestamp();
             RETURN NEW;
         END;
         $$;
@@ -943,7 +965,7 @@ def _create_lineage_guard_functions() -> None:
         SET search_path = pg_catalog
         AS $$
         BEGIN
-            RAISE EXCEPTION 'provider_sync.source_records is immutable'
+            RAISE EXCEPTION 'provider_sync.source_records is immutable (ADR-069)'
                 USING ERRCODE = '23514', CONSTRAINT = 'ck_source_records_immutable';
         END;
         $$;
@@ -981,8 +1003,11 @@ def _create_lineage_guard_functions() -> None:
             record_count bigint;
             head_count bigint;
         BEGIN
-            entity_key := CASE WHEN TG_OP = 'DELETE' THEN OLD.source_entity_key
-                               ELSE NEW.source_entity_key END;
+            IF TG_OP = 'DELETE' THEN
+                entity_key := OLD.source_entity_key;
+            ELSE
+                entity_key := NEW.source_entity_key;
+            END IF;
             SELECT count(*) INTO record_count
             FROM provider_sync.source_records WHERE source_entity_key = entity_key;
             SELECT count(*) INTO head_count
@@ -1015,10 +1040,7 @@ def _create_membership_guard_functions() -> None:
             JOIN provider_sync.provider_dataset_operation_scopes AS scope
               ON scope.provider_dataset_id = member.provider_dataset_id
              AND scope.sync_scope = member.sync_scope
-             AND (
-                 member.operation_key IS NULL
-                 OR scope.operation_key = member.operation_key
-             )
+             AND scope.operation_key = member.operation_key
             JOIN provider_sync.provider_dataset_operations AS operation
               ON operation.provider_dataset_id = scope.provider_dataset_id
              AND operation.operation_key = scope.operation_key
@@ -1033,10 +1055,7 @@ def _create_membership_guard_functions() -> None:
                 JOIN provider_sync.provider_dataset_operation_scopes AS scope
                   ON scope.provider_dataset_id = member.provider_dataset_id
                  AND scope.sync_scope = member.sync_scope
-                 AND (
-                     member.operation_key IS NULL
-                     OR scope.operation_key = member.operation_key
-                 )
+                 AND scope.operation_key = member.operation_key
                 JOIN provider_sync.provider_dataset_operations AS operation
                   ON operation.provider_dataset_id = scope.provider_dataset_id
                  AND operation.operation_key = scope.operation_key
@@ -1079,7 +1098,7 @@ def _create_membership_guard_functions() -> None:
                   ON dataset.provider_dataset_id = scope.provider_dataset_id
                 WHERE scope.provider_dataset_id = target_dataset_id
                   AND scope.sync_scope = target_scope
-                  AND (target_operation_key IS NULL OR scope.operation_key = target_operation_key)
+                  AND scope.operation_key = target_operation_key
                   AND dataset.is_active
                   AND operation.is_enabled
             ) THEN
@@ -1095,9 +1114,9 @@ def _create_membership_guard_functions() -> None:
         CREATE FUNCTION provider_sync.assert_import_job_membership_complete()
         RETURNS trigger LANGUAGE plpgsql SET search_path = pg_catalog AS $$
         DECLARE target_job_id uuid := COALESCE(NEW.job_id, OLD.job_id);
-            mode_value text; job_kind text; member_count bigint;
+            mode_value text; member_count bigint;
         BEGIN
-            SELECT dataset_membership_mode, kind INTO mode_value, job_kind
+            SELECT dataset_membership_mode INTO mode_value
             FROM ops.import_jobs WHERE job_id = target_job_id;
             IF NOT FOUND THEN RETURN NULL; END IF;
             SELECT count(*) INTO member_count
@@ -1108,16 +1127,6 @@ def _create_membership_guard_functions() -> None:
                 RAISE EXCEPTION 'import job membership cardinality does not match mode'
                     USING ERRCODE = '23514',
                         CONSTRAINT = 'ck_import_job_membership_complete';
-            END IF;
-            IF job_kind = 'feature_update_request' AND EXISTS (
-                SELECT 1
-                FROM ops.import_job_datasets AS member
-                WHERE member.job_id = target_job_id
-                  AND member.operation_key IS NULL
-            ) THEN
-                RAISE EXCEPTION 'feature update job requires exact operation membership'
-                    USING ERRCODE = '23514',
-                        CONSTRAINT = 'ck_feature_update_job_exact_membership';
             END IF;
             RETURN NULL;
         END;
@@ -1463,6 +1472,11 @@ def _create_indirect_guards() -> None:
                     USING ERRCODE = '23514',
                         CONSTRAINT = 'ck_notice_lineage_ownership_immutable';
             END IF;
+            -- The scope row has already been removed when this DELETE comes from the
+            -- declared FK action. A standalone child DELETE cannot observe that
+            -- state: its non-deferrable FK requires the parent to exist. Therefore a
+            -- missing parent is precisely the active parent cascade path; checking it
+            -- through the normal indirect lookup would misclassify it as inactive.
             IF TG_OP = 'DELETE' AND NOT EXISTS (
                 SELECT 1 FROM provider_sync.notice_lifecycle_scopes
                 WHERE notice_lifecycle_scope_id = OLD.notice_lifecycle_scope_id
@@ -1505,6 +1519,8 @@ def _create_indirect_guards() -> None:
                     USING ERRCODE = '23514',
                         CONSTRAINT = 'ck_curated_source_rule_ownership_immutable';
             END IF;
+            -- `source_id` has a non-deferrable ON DELETE CASCADE FK. Once the source
+            -- row disappeared, this is the FK cascade, not a standalone child write.
             IF TG_OP = 'DELETE' AND NOT EXISTS (
                 SELECT 1 FROM feature.curated_sources WHERE source_id = OLD.source_id
             ) THEN RETURN OLD; END IF;
@@ -1544,6 +1560,8 @@ def _create_indirect_guards() -> None:
                     USING ERRCODE = '23514',
                         CONSTRAINT = 'ck_integrity_observation_ownership_immutable';
             END IF;
+            -- See the notice lineage equivalent: the non-deferrable ON DELETE CASCADE
+            -- FK makes an absent parent an unambiguous referential-action DELETE.
             IF TG_OP = 'DELETE' AND NOT EXISTS (
                 SELECT 1 FROM ops.integrity_observation_scopes
                 WHERE integrity_observation_scope_id = OLD.integrity_observation_scope_id
