@@ -12,14 +12,22 @@ from kortravelmap.infra.jobs_repo import ImportJobDatasetTarget
 
 def test_dataset_target_rejects_noncanonical_identity() -> None:
     with pytest.raises(ValueError, match="positive integer"):
-        ImportJobDatasetTarget(provider_dataset_id=0, sync_scope="dataset_wide")
+        ImportJobDatasetTarget(
+            provider_dataset_id=0, sync_scope="dataset_wide", operation_key="op"
+        )
     with pytest.raises(ValueError, match="sync_scope"):
-        ImportJobDatasetTarget(provider_dataset_id=7, sync_scope="default")
+        ImportJobDatasetTarget(
+            provider_dataset_id=7, sync_scope="default", operation_key="op"
+        )
 
 
 def test_membership_mode_is_derived_from_canonical_target_count() -> None:
-    target = ImportJobDatasetTarget(provider_dataset_id=7, sync_scope="dataset_wide")
-    other = ImportJobDatasetTarget(provider_dataset_id=8, sync_scope="target_grids")
+    target = ImportJobDatasetTarget(
+        provider_dataset_id=7, sync_scope="dataset_wide", operation_key="op_a"
+    )
+    other = ImportJobDatasetTarget(
+        provider_dataset_id=8, sync_scope="target_grids", operation_key="op_b"
+    )
 
     assert jobs_repo._membership_mode(()) == "root"
     assert jobs_repo._membership_mode((target,)) == "single"
@@ -27,7 +35,9 @@ def test_membership_mode_is_derived_from_canonical_target_count() -> None:
 
 
 def test_membership_writer_rejects_duplicate_dataset_scope() -> None:
-    target = ImportJobDatasetTarget(provider_dataset_id=7, sync_scope="dataset_wide")
+    target = ImportJobDatasetTarget(
+        provider_dataset_id=7, sync_scope="dataset_wide", operation_key="op"
+    )
 
     with pytest.raises(ValueError, match="duplicate"):
         jobs_repo._normalized_dataset_memberships((target, target))
@@ -88,3 +98,19 @@ def test_feature_update_writer_requires_canonical_memberships() -> None:
     assert "dataset_memberships" in parameters
     assert "provider_dataset" not in parameters
     assert "effective_sync_scope" not in parameters
+
+
+def test_membership_writer_allows_same_scope_with_different_operation() -> None:
+    """operation만 다르면 **다른 member**다 (ADR-088 §결정 2).
+
+    실행 membership identity가 triple이므로 같은 dataset+scope에 operation이
+    여럿 붙을 수 있다. pair로 중복 판정하면 둘 중 하나가 조용히 사라진다.
+    """
+    first = ImportJobDatasetTarget(
+        provider_dataset_id=7, sync_scope="dataset_wide", operation_key="op_a"
+    )
+    second = ImportJobDatasetTarget(
+        provider_dataset_id=7, sync_scope="dataset_wide", operation_key="op_b"
+    )
+
+    assert len(jobs_repo._normalized_dataset_memberships((first, second))) == 2

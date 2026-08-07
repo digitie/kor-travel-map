@@ -596,7 +596,10 @@ def _move_notice_lineage_to_head() -> None:
                 ),
                 entity.source_entity_id
               )
-              ELSE NULL
+              -- out-of-scope도 값을 갖는다. 읽는 쪽이
+              -- COALESCE(head.lineage_key, entity.source_entity_id)로 물러나면
+              -- **두 테이블에 걸친 식**이 되어 어떤 단일 인덱스도 받지 못한다.
+              ELSE entity.source_entity_id
             END
             FROM provider_sync.source_entities AS entity
             JOIN provider_sync.provider_datasets AS dataset
@@ -607,8 +610,9 @@ def _move_notice_lineage_to_head() -> None:
         $fn$;
 
         UPDATE provider_sync.source_entity_heads AS head
-        SET lineage_key = provider_sync.notice_lineage_key(head)
-        WHERE provider_sync.notice_lineage_key(head) IS NOT NULL;
+        SET lineage_key = provider_sync.notice_lineage_key(head);
+        ALTER TABLE provider_sync.source_entity_heads
+            ALTER COLUMN lineage_key SET NOT NULL;
 
         CREATE FUNCTION provider_sync.set_source_entity_head_lineage_key()
         RETURNS trigger LANGUAGE plpgsql AS $tg$
@@ -629,8 +633,7 @@ def _move_notice_lineage_to_head() -> None:
         CREATE INDEX idx_source_entity_heads_lineage
           ON provider_sync.source_entity_heads (
             lineage_key, observed_at DESC, current_source_record_key DESC
-          )
-          WHERE lineage_key IS NOT NULL;
+          );
 
         ANALYZE provider_sync.source_entity_heads;
         """

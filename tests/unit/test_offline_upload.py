@@ -44,6 +44,7 @@ pytestmark = pytest.mark.unit
 _KST = timezone(timedelta(hours=9))
 _FETCHED_AT = datetime(2026, 6, 3, 14, 0, tzinfo=_KST)
 _PROVIDER_DATASET_ID = 101
+_OPERATION_KEY = "offline_upload_test_op"
 _SYNC_SCOPE = "dataset_wide"
 
 
@@ -438,6 +439,7 @@ def _csv_upload(
         upload_id="00000000-0000-0000-0000-000000000011",
         provider_dataset_id=_PROVIDER_DATASET_ID,
         sync_scope=_SYNC_SCOPE,
+        operation_key=_OPERATION_KEY,
         original_filename="features.csv",
         storage_backend="rustfs",
         storage_key="offline/features.csv",

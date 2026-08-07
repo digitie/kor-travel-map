@@ -497,10 +497,31 @@ LEFT JOIN feature.features AS f
 """
 
 
+def _lineage_sql(head_alias: str, *, entity_alias: str) -> str:
+    """유효 계보 key — ``source_entity_heads``에 물화된 값을 읽는다 (ADR-087/088).
+
+    T-VN-37이 계보 key를 물화했고, T-VN-33이 그 자리를 record에서 **head**로
+    옮겼다. record는 payload **이력 전체**를 담지만 한 계보에서 실제로 경쟁하는
+    것은 entity당 current 하나뿐이라, head에 두면 탐색이 계보 깊이에 무관해진다.
+
+    **유효 계보를 통째로** 저장한다 — out-of-scope도 entity id가 값으로 들어간다.
+    읽는 쪽이 ``COALESCE(head.lineage_key, entity.source_entity_id)``로 물러나면
+    두 테이블에 걸친 식이 되어 어떤 단일 인덱스도 받지 못한다(실측으로 확인했다).
+    ``entity_alias``는 서명 호환을 위해 남기고 쓰지 않는다.
+    """
+
+    del entity_alias
+    return f"{head_alias}.lineage_key"
+
+
 def _notice_lineage_sql(
     record_alias: str, *, entity_alias: str, dataset_alias: str
 ) -> str:
-    """Current source head의 raw payload에서 notice lineage를 계산한다."""
+    """raw payload에서 계보를 **재계산**한다 (backfill·검증 전용).
+
+    현행 read 경로는 ``_lineage_sql``로 물화된 값을 읽는다. 이 재계산은 값이
+    맞는지 대조할 때와 컬럼이 없던 세대를 재생할 때만 쓴다.
+    """
 
     return f"""
     CASE
@@ -555,6 +576,7 @@ def _canonical_notice_feature_sql(
     *,
     entity_alias: str,
     dataset_alias: str,
+    lineage: str | None = None,
 ) -> str:
     """현재 사건 단위 identity로 만든 notice feature인지 판정하는 SQL.
 
@@ -564,7 +586,9 @@ def _canonical_notice_feature_sql(
     ``make_feature_id`` 결과를 정확히 알아낼 수 있다. 그 외 provider는 근거가
     없으므로 ``false``로 두고 stable ``feature_id`` tie-break에 맡긴다.
     """
-    lineage_sql = _notice_lineage_sql(
+    # 물화된 계보를 넘기면 그것을 쓴다. 안 넘기면 재계산인데, read 경로에서는
+    # raw_data JSON 추출이 행마다 붙어 T-VN-37이 없앤 비용이 되살아난다.
+    lineage_sql = lineage or _notice_lineage_sql(
         record_alias,
         entity_alias=entity_alias,
         dataset_alias=dataset_alias,
@@ -639,24 +663,41 @@ def _ended_notice_hidden_sql(feature_alias: str) -> str:
 def _latest_notice_only_sql(feature_alias: str) -> str:
     """구버전 notice를 숨기는 SQL fragment를 feature alias에 맞춰 만든다."""
 
-    current_lineage_sql = _notice_lineage_sql(
-        "cur_sr", entity_alias="cur_se", dataset_alias="cur_pd"
-    )
+    current_lineage_sql = _lineage_sql("cur_head", entity_alias="cur_se")
     current_canonical_sql = _canonical_notice_feature_sql(
         feature_alias,
         "cur_sr",
         entity_alias="cur_se",
         dataset_alias="cur_pd",
+        lineage=current_lineage_sql,
     )
-    other_lineage_sql = _notice_lineage_sql(
-        "other_sr", entity_alias="other_se", dataset_alias="other_pd"
-    )
+    other_lineage_sql = _lineage_sql("other_head", entity_alias="other_se")
     other_canonical_sql = _canonical_notice_feature_sql(
         "other_f",
         "other_sr",
         entity_alias="other_se",
         dataset_alias="other_pd",
+        lineage=other_lineage_sql,
     )
+    rivals = f"""            FROM provider_sync.source_entities AS other_se
+            JOIN provider_sync.provider_datasets AS other_pd
+              ON other_pd.provider_dataset_id = other_se.provider_dataset_id
+            JOIN provider_sync.source_entity_heads AS other_head
+              ON other_head.source_entity_key = other_se.source_entity_key
+            JOIN provider_sync.source_records AS other_sr
+              ON other_sr.source_record_key = other_head.current_source_record_key
+            JOIN provider_sync.source_links AS other_sl
+              ON other_sl.source_entity_key = other_se.source_entity_key
+             AND other_sl.source_role = 'primary'
+            JOIN feature.features AS other_f
+              ON other_f.feature_id = other_sl.feature_id
+            WHERE {other_lineage_sql} = current_notice.lineage_key
+              AND other_pd.provider = current_notice.provider
+              AND other_pd.dataset_key = current_notice.dataset_key
+              AND other_se.source_entity_type = current_notice.source_entity_type
+              AND other_f.feature_id <> {feature_alias}.feature_id
+              AND other_f.kind = 'notice'
+              AND other_f.deleted_at IS NULL"""
     return f"""
   AND (
     {feature_alias}.kind <> 'notice'
@@ -696,35 +737,23 @@ def _latest_notice_only_sql(feature_alias: str) -> str:
             cur_sr.source_record_key DESC
       ) AS current_notice
       LEFT JOIN LATERAL (
+        -- "나보다 나은 현재 head가 있나"를 **두 EXISTS로 나눈다**(ADR-087).
+        -- 한 술어 안에 OR로 두면 Postgres가 순서 조건을 Index Cond로 밀지 못하고
+        -- Filter로 남겨, 계보 전수를 훑는다. 나누면 앞쪽은 순수 행 비교라
+        -- idx_source_entity_heads_lineage의 범위가 되고, 뒤쪽은 동률(= 같은 head를
+        -- 두 feature가 공유하는 identity 이행)일 때만 돈다. 사전식 비교라 값은
+        -- 종전 3분기와 동일하다.
         SELECT 1 AS better_exists
-        FROM provider_sync.source_entities AS other_se
-        JOIN provider_sync.provider_datasets AS other_pd
-          ON other_pd.provider_dataset_id = other_se.provider_dataset_id
-        JOIN provider_sync.source_entity_heads AS other_head
-          ON other_head.source_entity_key = other_se.source_entity_key
-        JOIN provider_sync.source_records AS other_sr
-          ON other_sr.source_record_key = other_head.current_source_record_key
-         AND {other_lineage_sql} = current_notice.lineage_key
-        JOIN provider_sync.source_links AS other_sl
-          ON other_sl.source_entity_key = other_se.source_entity_key
-        JOIN feature.features AS other_f
-          ON other_f.feature_id = other_sl.feature_id
-        WHERE other_pd.provider = current_notice.provider
-          AND other_pd.dataset_key = current_notice.dataset_key
-          AND other_se.source_entity_type = current_notice.source_entity_type
-          AND other_sl.source_role = 'primary'
-          AND other_f.feature_id <> {feature_alias}.feature_id
-          AND other_f.kind = 'notice'
-          AND other_f.deleted_at IS NULL
-          AND (
-            other_head.observed_at > current_notice.seen_at
-            OR (
-              other_head.observed_at = current_notice.seen_at
-              AND other_sr.source_record_key > current_notice.source_record_key
-            )
-            OR (
-              other_head.observed_at = current_notice.seen_at
-              AND other_sr.source_record_key = current_notice.source_record_key
+        WHERE EXISTS (
+            SELECT 1{rivals}
+              AND (other_head.observed_at, other_sr.source_record_key)
+                  > (current_notice.seen_at, current_notice.source_record_key)
+            LIMIT 1
+        )
+        OR EXISTS (
+            SELECT 1{rivals}
+              AND (other_head.observed_at, other_sr.source_record_key)
+                  = (current_notice.seen_at, current_notice.source_record_key)
               AND (
                 (
                   {other_canonical_sql}
@@ -736,9 +765,8 @@ def _latest_notice_only_sql(feature_alias: str) -> str:
                   AND other_f.feature_id < {feature_alias}.feature_id
                 )
               )
-            )
-          )
-        LIMIT 1
+            LIMIT 1
+        )
       ) AS better ON true
       HAVING bool_and(better.better_exists IS NOT NULL)
     )
@@ -2900,25 +2928,21 @@ def _supersede_stale_notice_sql(close_missing: bool) -> str:
         if close_missing
         else "      AND f.deleted_at IS NULL\n"
     )
-    lineage_sql = _notice_lineage_sql(
-        "sr", entity_alias="se", dataset_alias="dataset"
-    )
+    lineage_sql = _lineage_sql("head", entity_alias="se")
     canonical_sql = _canonical_notice_feature_sql(
         "f",
         "sr",
         entity_alias="se",
         dataset_alias="dataset",
+        lineage=lineage_sql,
     )
-    other_lineage_sql = _notice_lineage_sql(
-        "other_sr",
-        entity_alias="other_se",
-        dataset_alias="other_dataset",
-    )
+    other_lineage_sql = _lineage_sql("other_head", entity_alias="other_se")
     other_canonical_sql = _canonical_notice_feature_sql(
         "other_f",
         "other_sr",
         entity_alias="other_se",
         dataset_alias="other_dataset",
+        lineage=other_lineage_sql,
     )
     lineage_cte = f"""
 WITH lineage_candidates AS (

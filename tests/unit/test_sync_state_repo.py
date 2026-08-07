@@ -89,6 +89,7 @@ async def test_row_to_state_parses_json_string_cursor() -> None:
         session,  # type: ignore[arg-type]
         provider="p",
         dataset_key="d",
+        operation_key="op_test",
     )
     assert state is not None
     assert state.cursor == {"k": "v"}
@@ -113,6 +114,7 @@ async def test_record_sync_success_serializes_cursor() -> None:
         session,  # type: ignore[arg-type]
         provider="python-mois-api",
         dataset_key="mois_license_features_bulk",
+        operation_key="op_test",
         cursor={"last_modified_date": "2026-06-06"},
     )
     assert state.consecutive_failures == 0
@@ -129,6 +131,7 @@ async def test_record_sync_failure_increments() -> None:
         session,  # type: ignore[arg-type]
         provider="python-mois-api",
         dataset_key="mois_license_features_bulk",
+        operation_key="op_test",
     )
     assert state.consecutive_failures == 3
     assert "cursor" not in session.calls[0]["params"]
