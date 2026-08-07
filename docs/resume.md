@@ -1,5 +1,39 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-08 — T-VN-33: 통합 라이브 실행이 제품 결함 다수를 드러냄, 머지 금지 유지
+
+통합 스위트를 최종 스키마로 전환해 live로 돌렸다(8 에이전트 병렬). 55개 파일 중 30개가
+green이고, 나머지는 대부분 **전환은 끝났으나 src 결함에 막혀** 있다.
+
+이 실행이 제품 결함 33건(중복 제거 약 20개 고유)을 드러냈다 — 전수 목록은
+[`reports/t-vn-33-live-product-defects-2026-08-08.md`](reports/t-vn-33-live-product-defects-2026-08-08.md).
+**단위 테스트로는 하나도 잡히지 않는다.** 이미 6건을 고쳤고(커밋 `2f123acb`) 그것만으로
+102개 테스트가 살아났다:
+
+- `pipeline_repo` 정렬 열 미투영 + `selected_operation_key` 누락 → pipeline projection 전체
+- `consistency` F7 · `dedup_refresh_repo`의 `sr` join 유실 → 정합성 검사·dedup 조회 전체
+- `curated_repo.create_curated_theme` f-string 누락 · `admin_feature_repo`의 삭제 열 참조
+
+**남은 P0** (배포 시 즉시 터짐):
+- dagster `assets.py` 3곳이 sync-state API에 `operation_key`를 안 넘김 → provider ETL asset 전부 사망.
+  설계 판단 필요: asset이 자기 operation을 어디서 얻는가(Dagster job name = operation_key인
+  registry가 있다 / client에 `*_for_operation_membership` 변형이 이미 있다).
+- `mois.py` `_BULK_JOB_KIND`가 catalog에 없는 operation_key → MOIS bulk 적재 불가.
+- `sync_scope="default"` 기본값이 최종 스키마에 없는 scope → MOIS incremental/closed와 CLI가
+  데이터는 다 쓰고 cursor 전진에서 rollback.
+- `cli/_h35_csv5.py`가 H35 0079 세대에 없는 `provider_datasets`를 조회 → 리허설 실행 불가
+  (2026-08-07 자연키 되돌림 때 내가 넣은 것이다).
+- `feature_update_executor`가 terminal event를 `import_job_dataset_id` 없이 기록 → heartbeat와
+  같은 계열의 결함.
+
+**남은 P1**: integrity violation 불변 트리거가 FK `ON DELETE SET NULL`·recurrence upsert와 모순 ·
+동시 create 데드락 · 재적재 idempotency 파손(매 관측마다 feature 재기록) · notice reopened 집계
+항상 0 · 0091이 job 형태 불변식 2개를 대체 없이 삭제 · alembic metadata drift.
+
+**다음 한 작업**: 위 P0을 순서대로 고친다. dagster 건이 가장 크고 설계 판단이 필요하다.
+그 뒤 통합 전체를 다시 돌린다. **#966은 그 전까지 머지 금지** — 지금 배포하면 ETL·ops UI·
+정합성 검사·MOIS 적재가 동시에 죽는다.
+
 ## 2026-08-07 — T-VN-33 구현 완결, 적대 리뷰 대기
 
 `feat/tvn33-provider-datasets`(PR #966)의 구현이 끝났다. ADR-088 triple(`provider_dataset_id +

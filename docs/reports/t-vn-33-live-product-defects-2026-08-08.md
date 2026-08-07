@@ -1,0 +1,179 @@
+# T-VN-33 통합 라이브 실행이 드러낸 제품 결함
+
+- 작성: 2026-08-08
+- 출처: 통합 테스트 55개 파일을 최종 스키마로 전환하며 live DB에서 실행한 결과
+- **이 결함들은 단위 테스트로 하나도 잡히지 않는다.** 대부분 파스/실행 시점에 죽거나,
+  트리거·제약이 붙은 실제 DB에서만 드러난다.
+
+## 이미 고친 것 (커밋 `2f123acb`)
+
+| 위치 | 증상 |
+|---|---|
+| `pipeline_repo` `job_provider_datasets` | ranked CTE의 정렬 열 미투영 → pipeline projection 전체 사망 |
+| `pipeline_repo` 바깥 SELECT | `selected_operation_key` 누락 → dataset latest/snapshot 사망 |
+| `consistency._F7_DEDUP_SCORE_ROWS_SQL` | `sr` join 유실 → 정합성 검사 전체가 파스 단계에서 사망 |
+| `dedup_refresh_repo._LIST_DEDUP_FEATURES_SQL` | 같은 형태 → dedup 목록 조회 사망 |
+| `curated_repo.create_curated_theme` | f-string 누락 → 항상 SyntaxError |
+| `admin_feature_repo` issues 질의 | 삭제된 `provider` 참조 → admin 상세·enrichment 리뷰 500 |
+
+## 남은 것
+
+### 1. src/kortravelmap/infra/alembic_exclusions.py:25 (UNCOMPARED_INDEXES) vs alembic/versions/0091_tvn33_cutover_fence.py:64
+
+T-VN-33 cutover가 DROP한 인덱스가 alembic 비교 제외 ledger에 그대로 남아 있다. ledger는 "검증 없는 제외 항목을 막는" 계약인데, 존재하지 않는 객체를 가리켜 계약 테스트가 영구 red가 된다.
+
+```
+0091 `_detach_legacy_constraints()`가 `DROP INDEX IF EXISTS provider_sync.idx_source_records_kma_alert_history;` 를 실행하고, 최종 스키마 DB(ktm_t33j)에서 `SELECT indexname FROM pg_indexes WHERE schemaname='provider_sync' AND tablename='source_records'` 결과에 그 이름이 없다(fetched_at/imported_at BRIN, pk, uq_source_records_entity_record, uq_source_records_entity_payload 만 존재). 그런데 src/kortravelmap/infra/alembic_exclusions.py 는 여전히 `("provider_sync", "idx_source_records_kma_alert_history")` 를 포함한다. 결과: tests/integration/test_alembic_upgrade.py:968 `assert set(_UNCOMPARED_INDEX_CONTRACTS) == UNCOMPARED_INDEXES` → "Extra items in the right set: ('provider_sync', 'idx_source_records_kma_alert_history')". 대체 인덱스도 없으므로 계약을 갱신하는 게 아니라 ledger 항목을 삭제하는 것이 맞다.
+```
+
+### 2. packages/kor-travel-map-dagster/src/kortravelmap/dagster/assets.py — 389행(_skip_opinet_if_already_succeeded_today), 715행(_guard_notice_snapshot_watermark), 1595행(_record_feature_sync_success)
+
+provider ETL asset이 전부 TypeError로 죽는다. sync cursor를 읽거나 쓰는 asset은 하나도 완주하지 못한다.
+
+```
+TypeError: AsyncKorTravelMapClient.record_sync_success() missing 1 required keyword-only argument: 'operation_key' (get_sync_state도 동일). client/__init__.py 2240·2286행에서 operation_key가 keyword-only 필수로 승격됐는데 dagster 쪽 3개 호출부가 provider/dataset_key만 넘긴다. 정본 operation은 provider_sync.provider_dataset_operations에 dataset당 1건씩 있다(예: krex_traffic_notices → feature_notice_krex_traffic_notices_job). probe로 3곳을 메우니 3건 중 2건 통과.
+```
+
+### 3. src/kortravelmap/infra/models.py:851-856 — ProviderDatasetRow.capabilities server_default
+
+alembic autogenerate/check가 server-default 비교 단계에서 크래시한다. metadata drift gate(§8.1)가 판정 자체를 못 낸다.
+
+```
+sqlalchemy.exc.StatementError: (InvalidRequestError) A value is required for bind parameter '1' / [SQL: SELECT '...'::jsonb = '{"schema_version"$1,"produces":[],"extensions":{}}'::jsonb]. server_default=text("'{\"schema_version\":1,...}'::jsonb") 안의 `:1`을 SQLAlchemy text()가 bind param으로 파싱한다. (이번 작업 지침이 테스트 쪽에 경고한 함정과 정확히 같은 함정이 제품 코드에 있다.)
+```
+
+### 4. alembic 0089/0090/0091 ↔ src/kortravelmap/infra/models.py (metadata drift)
+
+freshly-migrated 빈 DB에서 alembic check가 diff 다수를 검출한다 — migration과 ORM metadata가 갈라져 있다.
+
+```
+alembic.autogenerate 로그: added index 'idx_curated_sources_dataset'; changed index 'idx_data_integrity_violations_dataset_status' (expression 3→4); removed 'idx_enrichment_review_queue_source_entity_record' + added 'idx_enrichment_review_source_entity'; changed index 'idx_feature_update_request_datasets_dataset_request' (2→4); changed unique constraint 'uq_feature_update_request_datasets_identity' — ('provider_dataset_id','request_id','sync_scope') → ('operation_key','provider_dataset_id','request_id','sync_scope'); feature_update_request_datasets/import_job_datasets/offline_uploads 3개 테이블의 (provider_dataset_id, sync_scope, operation_key) FK removed+added; server default on 'notice_lifecycle_scopes.notice_lifecycle_scope_id' identity ['always']; removed index 'idx_notice_lineage_states_scope_present'.
+```
+
+### 5. src/kortravelmap/infra/feature_repo.py — notice snapshot reconcile, core_update RETURNING의 reopened 플래그 (약 3606행)
+
+사라졌던 notice가 feed에 재등장했을 때 valid_end_time은 올바르게 NULL로 되돌아가지만 reopened 집계가 0으로 남는다. Dagster cursor의 notices_reopened가 항상 0이고, 재등장 복구가 로그·metadata에 기록되지 않는다.
+
+```
+test_krex_notice_asset_snapshot_lifecycle_and_sync_cursor: seed→partial→empty→reappear 시나리오에서 `assert await _valid_end(a_id) is None`은 통과(=복구는 실제로 일어남)하는데 `cursor['notices_reopened'] == 1`이 0으로 실패. -l 로컬 덤프상 cursor는 최신(loaded_at=2026-06-02T12:30:00+09:00 = reappeared_at)이고 notices_closed도 0. dagster 로그: "feed 소멸 닫음 1건, 재등장 복구 0건". T-VN-33 cutover가 feature_repo.py의 notice lineage SQL을 987줄 규모로 갈아엎었고(_notice_lineage_sql → head.lineage_key 기반), was_visible/reopened 판정이 그 영향권에 있다. operation_key 결함을 probe로 메운 뒤에도 이 1건만 남는다.
+```
+
+### 6. src/kortravelmap/mois.py:362-367 (_BULK_JOB_KIND을 operation_key로 사용)
+
+`run_mois_license_bulk_job`이 canonical membership 해석에 실패해 항상 FeatureOperationInvariantConflict('runtime dataset does not resolve to exactly one operation membership')로 죽는다 — MOIS bulk 적재(ktmctl import mois, Step A) 경로 전체가 최종 스키마에서 실행 불가.
+
+```
+`_BULK_JOB_KIND = "mois_license_full_update"`(mois.py:73)를 import job kind이자 operation_key로 함께 넘기는데, 0089가 seed한 mois_license_features_bulk(provider_dataset_id=30)의 canonical operation_key는 `feature_place_mois_licenses_job`이다(alembic/versions/0089_tvn33_expand_seed.py:282, providers/feature_operation_registry.py:71, dagster/schedules.py:207 모두 동일). 그래서 _OPERATION_DATASET_MEMBERSHIP_SQL이 0행을 돌려준다. incremental/closed는 job kind와 operation key가 우연히 일치해서 이 단계는 통과한다. 컨테이너에서 그 한 인자만 'feature_place_mois_licenses_job'으로 바꾸자 test_cli_import_mois_loads_promoted가 통과했다.
+```
+
+### 7. src/kortravelmap/cli/main.py:214-218 (--sync-scope default="default"), src/kortravelmap/client/__init__.py:1425·1462 (sync_scope="default"), src/kortravelmap/mois.py:431·533 (sync_scope: str = "default")
+
+MOIS incremental/closed 적재가 데이터 upsert까지 다 하고 나서 cursor 전진에서 sqlalchemy.exc.NoResultFound로 죽는다(전체 transaction rollback). 기본값 경로라 옵션 없이 돌리는 프로덕션 호출이 전부 해당된다.
+
+```
+provider_sync.provider_dataset_operation_scopes의 유효 sync_scope는 dataset_wide(56행)/target_grids(3행)뿐이고 'default'는 없다. _RECORD_SUCCESS_SQL(sync_state_repo.py:125)이 scope 행을 join하므로 sync_scope='default'면 INSERT가 0행 → `.one()`에서 NoResultFound. 같은 함수가 job row용 membership은 `_dataset_membership`으로 제대로 해석해 dataset_wide를 쓰면서(mois.py:187-197), record_sync_success/record_sync_failure에는 낡은 리터럴 파라미터를 넘긴다. 컨테이너에서 CLI 기본값만 dataset_wide로 바꾸자 6/6 통과했다.
+```
+
+### 8. alembic/versions/0091_tvn33_cutover_fence.py:74 (_detach_legacy_constraints, ck_import_jobs_update_request_shape DROP)
+
+feature_update_request job의 status/owner 형태 불변식이 통째로 사라졌다. 이제 status='running'인데 dagster_run_id IS NULL이거나, status='queued'인데 owner가 박힌 job, payload가 '{}'가 아닌 job을 DB가 그대로 받는다 — 소유자 없는 running job은 stale 회수 로직이 판정 못 하는 상태다.
+
+```
+0053이 만든 이 CHECK은 pair 부분(provider/dataset_key/sync_scope) 외에 parent_job_id IS NULL, load_batch_id IS NULL, trigger_kind='update_request', operation_registry_version IS NULL, dagster_run_status IS NULL, payload='{}', dagster_run_id trim/non-empty, status<>'queued' OR dagster_run_id IS NULL, status<>'running' OR dagster_run_id IS NOT NULL을 함께 들고 있었다(0053_feature_update_scope_dispatch.py:400-411). 0091은 pair 컬럼 때문에 detach만 하고 canonical 잔여분을 재생성하지 않았다. 현재 ops.import_jobs의 CHECK 목록에도, 트리거 목록에도 대체물이 없다. docs/architecture/postgres-schema.md:384는 여전히 이 제약을 정본으로 문서화하고 있다.
+```
+
+### 9. alembic/versions/0091_tvn33_cutover_fence.py:126-127 (_replace_pre_tvn33_ownership_guards, enforce_feature_update_job_pair/assert_feature_update_job_pair DROP)
+
+job→request 방향의 pair 불변식이 사라져 request 없는 kind='feature_update_request' import job(비격리 상태)이 commit된다. pair는 이제 request→job 한 방향만 강제된다.
+
+```
+0052가 만든 assert_feature_update_job_pair(0052_pipeline_projection_access_paths.py:2145-2196)는 kind/quarantined_at/request 존재만 보는 함수로 provider·dataset_key·배열 컬럼을 전혀 읽지 않는다 — 즉 T-VN-33 때문에 지울 이유가 없었다. 0091은 이것을 지우면서 반대 방향(enforce_feature_update_request_job_identity)만 새로 만들었고, DB에서 feature_update_requests를 참조하는 함수는 이제 0건이다. test_feature_update_request_job_pair_is_bidirectional_and_immutable의 unpaired job INSERT + SET CONSTRAINTS ALL IMMEDIATE가 'DID NOT RAISE'로 실패한다.
+```
+
+### 10. packages/kor-travel-map-dagster/src/kortravelmap/dagster/assets.py:1595 (_record_feature_sync_success) vs src/kortravelmap/client/__init__.py:2286 (AsyncKorTravelMapClient.record_sync_success)
+
+provider asset의 적재 성공 경로가 전부 TypeError로 죽는다. record_sync_state=True인 모든 feature asset(_load → _record_feature_sync_success)이 client.record_sync_success(provider=, dataset_key=, cursor=)로 호출하는데, T-VN-33 이후 이 메서드는 keyword-only 필수 인자 operation_key를 요구한다. FeatureUpdateAssetRunner가 이 예외를 ProviderDatasetRefreshFailure('provider refresh asset execution failed')로 감싸므로 원인이 가려진다. runner는 이미 resources에 feature_update_membership(ProviderDatasetOperationMembership)을 주입하지만 assets.py는 그 값을 전혀 읽지 않는다 — record_sync_success_for_operation_membership로 옮겨야 할 것으로 보인다.
+
+```
+test_feature_update_executor.py::test_production_asset_runner_rolls_back_load_when_checkpoint_fails 가 error_message == 'RuntimeError: simulated provider checkpoint failure' 대신 'ProviderDatasetRefreshFailure: provider refresh asset execution failed'를 받는다(주입한 2번째 checkpoint 실패에 도달하기 전에 asset이 이미 죽음). grep 확인: assets.py는 feature_update_membership을 한 번도 참조하지 않고, 유일한 호출부(line 1595)는 operation_key 없이 호출한다.
+```
+
+### 11. src/kortravelmap/infra/feature_update_executor.py:799 (record_import_job_event 호출) + src/kortravelmap/infra/jobs_repo.py:402-431 (_INSERT_EVENT_SQL membership 가드)
+
+dataset membership을 가진 feature update job은 typed terminal event를 절대 기록할 수 없다. executor가 record_import_job_event(...)를 import_job_dataset_id 없이 호출하는데, enqueue_feature_update_request가 만든 job은 membership이 1개라 dataset_membership_mode='single'이다. _INSERT_EVENT_SQL은 root가 아닌 job에 대해 import_job_dataset_id가 NULL이면 어떤 행도 매칭하지 않으므로 record_import_job_event가 FeatureOperationInvariantConflict('event requires the exact canonical import job membership')를 던진다. 결과적으로 실행이 'failed'로 마감되는 대신 예외가 호출자까지 터져나가고, kma.target_scope_empty 같은 실패 코드 이벤트가 영영 남지 않는다. 앞서 보고된 heartbeat membership 누락과 같은 계열이다.
+
+```
+test_feature_update_executor.py::test_bound_kma_empty_target_fails_operation_without_provider_or_state_write 에서 KmaWeatherTargetScopeEmptyError 처리 중 /repo/src/kortravelmap/infra/jobs_repo.py:1010 FeatureOperationInvariantConflict 발생. jobs_repo._membership_mode(line 659)는 membership 1개 → 'single'을 반환하고, _INSERT_EVENT_SQL(line 419-431)은 mode<>'root'일 때 CAST(:import_job_dataset_id AS uuid)와 일치하는 ops.import_job_datasets 행을 EXISTS로 요구한다. executor(line 799)는 그 인자를 넘기지 않는다.
+```
+
+### 12. alembic/versions/0091_tvn33_cutover_fence.py:1673~1690 provider_sync.validate_data_integrity_violation_dataset() 트리거 vs ops.data_integrity_violations의 fk_data_integrity_violations_source_record_key_source_records (ON DELETE SET NULL)
+
+같은 head 스키마 안에서 두 규칙이 정면으로 모순된다. 트리거는 UPDATE 시 (provider_dataset_id, source_record_key)를 불변으로 강제하는데, FK는 source_record 삭제 시 source_record_key를 NULL로 UPDATE한다. 그래서 열린 finding이 가리키는 provider_sync.source_records 행은 이제 **삭제 자체가 불가능**하다 — SET NULL이 트리거에 걸려 CheckViolation으로 터진다. record GC/purge 경로가 있으면 그대로 막힌다.
+
+```
+test_phase2_ops_repos.py::test_data_integrity_violation_lifecycle_and_fk_behavior — `DELETE FROM provider_sync.source_records WHERE source_record_key='src:violation:1'` 에서 asyncpg.exceptions.CheckViolationError: integrity violation ownership is immutable (constraint ck_data_integrity_violation_ownership_immutable).
+```
+
+### 13. 같은 트리거(0091:1673~1690) vs F:\dev\ktm-tvn33\src\kortravelmap\infra\integrity_violation_repo.py — _UPSERT_FINDINGS_BATCH_SQL의 ON CONFLICT DO UPDATE SET source_record_key = CASE ...
+
+recurrence 추적이 구조적으로 불가능해졌다. dedupe_key는 entity 단위(av2_…)라 provider가 같은 entity를 새 payload로 다시 내보내면 새 source_record_key가 붙는데, batch upsert가 그 포인터를 최신으로 갱신하려는 순간 트리거가 23514로 statement 전체를 죽인다. AsyncKorTravelMapClient.sync_address_validation_findings(client/__init__.py:2588 부근)의 광범위 except가 이를 IntegrityFindingPersistenceError로 바꿔 삼키므로 **그 run의 finding이 전부 유실**된다 — 함수 docstring이 batch로 접은 이유로 든 실패 양상 그대로다.
+
+```
+test_phase2_ops_repos.py::test_integrity_finding_recurrence_tracks_latest_fk_targets — 두 번째 sync_integrity_findings(같은 dedupe_key, source_record_key만 old→new)에서 CheckViolationError: integrity violation ownership is immutable. 파라미터 로그에 ['src:violation:new'] 확인.
+```
+
+### 14. F:\dev\ktm-tvn33\src\kortravelmap\infra\jobs_repo.py:995 record_import_job_event (호출 경로 _insert_import_job:868 → _record_lifecycle_event:1040) / F:\dev\ktm-tvn33\src\kortravelmap\infra\feature_update_repo.py:1156~1188 enqueue_feature_update_request
+
+같은 canonical scope로 create_feature_update_request 2건이 동시에 들어오면 lock order 역전으로 데드락이 난다. 한 트랜잭션 안 순서가 (1) import_jobs + import_job_datasets INSERT — FK가 provider_dataset_operation_scopes 행에 KEY SHARE를 잡는다, (2) import_job_events INSERT — 트리거가 ops.import_job_event_clock 단일 행에 배타 락을 잡는다, (3) feature_update_request_datasets INSERT — 0091의 trg_feature_update_request_membership_overlap이 같은 scope 행에 FOR UPDATE를 잡는다. A가 (1) 뒤 (2)의 clock을 기다리는 동안 clock을 쥔 B가 (3)에서 A의 KEY SHARE를 기다려 순환이 닫힌다. 즉 'reuse 경합' 자체가 성립하지 못하고 FeatureUpdateEnqueueError로 500이 된다.
+
+```
+test_feature_update_active_repo.py::test_concurrent_service_create_reuses_one_canonical_active_request — 3회 연속 재현. asyncpg.exceptions.DeadlockDetectedError: deadlock detected → FeatureUpdateEnqueueError('feature update request enqueue failed'), 대기 statement는 jobs_repo.py:995 record_import_job_event. (데드락으로 세션이 checked-out 상태로 남아 teardown DROP DATABASE까지 연쇄 실패한다.)
+```
+
+### 15. src/kortravelmap/infra/feature_repo.py — _UPSERT_SOURCE_ENTITY_HEAD_SQL (약 373~404행), load_bundle에서 사용
+
+재적재 idempotency 파손. 같은 source_record_key를 다시 관측하면 became_current가 true로 나와 feature 본문이 매번 재upsert된다(features_updated>0, row_revision/updated_at churn). T-VN-33 checkpoint(2e76b80c)가 도입한 prior CTE 자체의 버그다.
+
+```
+직접 probe: 같은 params로 _UPSERT_SOURCE_RECORD_SQL+_UPSERT_SOURCE_ENTITY_HEAD_SQL를 2회 실행(2회차는 observed_at만 +1h) → r2={'source_record_key':'sr_probe','inserted':False} 인데 h2(became_current)=True. 원인: `prior AS MATERIALIZED (... FOR UPDATE)`가 같은 statement의 upserted CTE가 갱신한 행을 EvalPlanQual로 재조회하면서 cmin=현재 command라 보이지 않아 0행이 되고, `NOT EXISTS (SELECT 1 FROM prior)`가 true가 된다. 결과: tests/integration/test_mois_loader.py::test_loader_idempotent_reload → FeatureLoadResult(features_updated=2, source_records_inserted=0).
+```
+
+### 16. src/kortravelmap/mois.py:73 (_BULK_JOB_KIND) + 366 (_dataset_membership 호출)
+
+run_mois_license_bulk_job이 항상 FeatureOperationInvariantConflict('runtime dataset does not resolve to exactly one operation membership')로 죽는다 — MOIS bulk 적재 경로 전체가 막힘.
+
+```
+0089가 python-mois-api/mois_license_features_bulk의 operation_key를 'feature_place_mois_licenses_job'으로 seed하고 providers/feature_operation_registry.py:71도 같은 이름만 안다. 그런데 mois.py는 operation_key로 job kind 'mois_license_full_update'를 넘긴다(rg 결과 이 문자열은 mois.py에만 존재). psql: provider_dataset_operations에 mois_license_full_update 행 없음.
+```
+
+### 17. src/kortravelmap/mois.py:431,533 · src/kortravelmap/client/__init__.py:1425,1459 · src/kortravelmap/cli/main.py:216
+
+sync_scope 기본값 'default'가 최종 스키마에 존재하지 않는 scope다. record_sync_success/record_sync_failure의 exact_membership CTE가 0행을 내고 .one()이 NoResultFound를 던져 MOIS incremental/closed job과 CLI/client sync-state 경로가 실패한다.
+
+```
+psql: provider_dataset_operation_scopes.sync_scope 분포 = dataset_wide(56), target_grids(3). 'default' 없음. is_valid_provider_dataset_sync_scope도 dataset_wide/target_grids/external_system:* 만 허용. 테스트에서는 sync_scope='dataset_wide'를 명시해 우회했으나 기본값은 여전히 깨져 있다.
+```
+
+### 18. src/kortravelmap/infra/cache_target_service_repo.py:221 (create_cache_target_refresh_request → enqueue_feature_update_request)
+
+(경미) PinVi 대면 service 경로가 dataset_memberships를 넘기지 않아, 요청한 cache target 반경 안에 feature가 하나도 없으면 typed conflict가 아니라 맨 ValueError('feature update request requires at least one dataset membership')가 그대로 올라간다(500).
+
+```
+feature_update_repo._resolve_feature_update_plan은 memberships 미지정 시 scope 해석 결과(resolution.provider_datasets)에서 유도하는데, cache_target_keys scope의 provider_datasets는 target 반경 안 feature의 primary source에서만 나온다. 테스트에서는 반경 안 feature를 seed해 우회했다. create_cache_target_refresh_request에는 membership 인자가 없어 호출자가 손쓸 수 없다.
+```
+
+### 19. src/kortravelmap/cli/_h35_csv5.py:196-244 (_provider_dataset_ids_by_pair, _lighthouse_dataset_pairs)
+
+The H35 cutover csv5 step queries a table that does not exist at H35's own target schema, so the frozen 0063 -> 0079 cutover operation can no longer run: `relation "provider_sync.provider_datasets" does not exist`.
+
+```
+`SELECT provider, dataset_key FROM provider_sync.provider_datasets WHERE dataset_key = ANY(...) AND dataset_key LIKE 'lighthouse-stamp-tour-season-%'` — provider_sync.provider_datasets is created by alembic 0089_tvn33_expand_seed, but src/kortravelmap/cli/_h35_schema.py pins TARGET_SCHEMA = '0079_cache_target_writer_drain' (PRE_SCHEMA = '0063_pipeline_root_id'). Traceback: h35_cutover._execute -> _h35_csv5.run_csv5 -> _resolved_rows -> _lighthouse_dataset_pairs, in tests/integration/test_h35_cutover_rehearsal.py::test_h35_exact_surface_network_free_rehearsal.
+```
+
+### 20. src/kortravelmap/infra/ops_repo.py:367-405 (_list_import_job_events_sql) vs alembic 0090 idx_import_job_events_member_time
+
+Performance regression, not a crash: the dataset/scope-filtered import-job event audit has no bounded index path any more. 0091 dropped idx_import_job_events_provider_time / _provider_dataset_time / _provider_dataset_scope_time and 0090 created idx_import_job_events_member_time as the replacement, but the query shape cannot reach it, so the planner walks the global time index and discards non-matching rows until LIMIT is satisfied. For a rarely-active dataset this degrades toward a full timeline scan.
+
+```
+The SQL LEFT JOINs ops.import_job_datasets AS member on import_job_dataset_id, filters member.provider_dataset_id / member.sync_scope, and orders globally by event.occurred_at DESC, event.event_id DESC. EXPLAIN ANALYZE on an 8,000-event fixture (2 members, 4,000 events each) for the exact-scope filter: Limit -> Nested Loop -> (Materialize -> Seq Scan import_job_datasets, 1 row) + Index Scan import_job_events using idx_import_job_events_time, Actual Rows 4052 for 51 returned. Identical plan under both `SET LOCAL plan_cache_mode = force_generic_plan` and `force_custom_plan`, with ANALYZE run on both tables. Because of this I did not pin a plan in tests/integration/test_ops_repo.py::test_exact_scope_event_history_filters_on_canonical_membership; see its docstring.
+```
