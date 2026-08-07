@@ -37,8 +37,14 @@ jobs:
         # dep 없음 (maplibre-vworld git dep는 #476에서 제거).
         run: npx --yes npm@12.0.1 ci --workspaces --include=optional --no-audit --no-fund
 
-      - name: npm high 취약점 gate
+      # 게이트는 **배포되는 의존성**만 막는다(`--omit=dev`). dev 전용 도구의 취약점은
+      # 사용자에게 나가지 않으므로 머지를 막지 않되, 아래 단계가 그대로 출력해
+      # 눈에 보이게 둔다. 근거와 현재 미해결 건은 docs/dev-environment.md.
+      - name: npm high 취약점 gate (배포 의존성)
         run: npx --yes npm@12.0.1 run audit:high
+
+      - name: npm 취약점 리포트 (dev 포함, 비차단)
+        run: npx --yes npm@12.0.1 run audit:dev
 
       - name: npm dependency tree integrity
         run: npx --yes npm@12.0.1 run verify:npm-tree

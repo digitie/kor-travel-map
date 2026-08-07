@@ -493,6 +493,28 @@ uv pip show gdal                # Python GDAL
 # 두 버전이 다르면 segfault. uv pip install "gdal==$(gdal-config --version)"
 ```
 
+## 10.6 npm 취약점 게이트가 dev 의존성에서 막힐 때
+
+CI의 `npm high 취약점 gate`는 **배포되는 의존성만** 본다(`npm audit
+--audit-level=high --omit=dev`). dev 전용 빌드 도구의 취약점은 사용자에게 나가지
+않으므로 머지를 막지 않고, 바로 뒤 `npm 취약점 리포트 (dev 포함, 비차단)` 단계가
+전체 트리를 그대로 출력해 눈에 보이게 둔다.
+
+**현재 미해결(2026-08-07)**: `@redocly/openapi-core` 1.34.x가
+[GHSA-5p4m-2wfm-xmqj](https://github.com/advisories/GHSA-5p4m-2wfm-xmqj)
+(`js-yaml` quadratic CPU, CVE-2026-59870)에 걸린다.
+
+- 취약 범위 `1.34.8 - 1.34.18`인데 **v1 계열 마지막이 1.34.18**이라 1.x 패치가 없다.
+- `openapi-typescript`(타입 생성기, 양쪽 frontend의 devDependency)가 이것을 끌어온다.
+- 2.x로 강제 override하면 audit은 통과하지만 **타입 생성이 깨진다** —
+  `openapi-typescript@7.13.0`이 2.x가 더 이상 export하지 않는
+  `@redocly/openapi-core/lib/ref-utils.js`를 import한다
+  (`ERR_PACKAGE_PATH_NOT_EXPORTED`). 그리고 7.13.0이 최신이다.
+- 배포 의존성만 보면 취약점 **0건**이다(실측).
+
+**게이트를 다시 조일 조건**: `openapi-typescript`가 redocly 2.x 호환 릴리스를
+내면 override와 `--omit=dev`를 함께 걷어낸다.
+
 ## 11. 운영 환경 정보 (참고)
 
 운영 환경(Odroid M1S, ARM64)에 대한 상세 임계값은 SPEC V8 v8_0이 정한다.
