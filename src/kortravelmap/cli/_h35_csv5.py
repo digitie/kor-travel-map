@@ -29,6 +29,7 @@ from kortravelmap.cli._h35_contract import (
 from kortravelmap.cli._h35_schema_version import FORWARD_BOUNDARY, TARGET_SCHEMA
 from kortravelmap.curation_import import CurationImportRow, parse_curation_csv
 from kortravelmap.curation_provenance import (
+    LIGHTHOUSE_DATASET_PREFIX,
     parse_curation_provenance,
     provenance_row_payload,
     requires_lighthouse_provenance,
@@ -190,58 +191,22 @@ def _metadata(row: CurationImportRow) -> dict[str, Any]:
     return metadata
 
 
-async def _provider_dataset_ids_by_pair(
-    session: AsyncSession,
-    rows: tuple[CurationImportRow, ...],
-) -> dict[tuple[str, str], int]:
-    """CSV의 자연키를 이 DB의 surrogate로 해석한다 (질의 1회).
-
-    CSV가 자연키를 들고 있으므로 해석은 **적재 시점**에 한다. 해석 못 한 pair는
-    조용히 건너뛰지 않고 실패시킨다 — 통과시키면 curation이 대상 없이 적재된다.
-    """
-
-    pairs = sorted({(row.provider, row.dataset_key) for row in rows})
-    if not pairs:
-        return {}
-    result = await session.execute(
-        text(
-            "SELECT provider, dataset_key, provider_dataset_id "
-            "FROM provider_sync.provider_datasets "
-            "WHERE (provider, dataset_key) IN ("
-            "  SELECT unnest(CAST(:providers AS text[])), "
-            "         unnest(CAST(:dataset_keys AS text[]))"
-            ")"
-        ),
-        {
-            "providers": [pair[0] for pair in pairs],
-            "dataset_keys": [pair[1] for pair in pairs],
-        },
-    )
-    resolved = {
-        (str(row.provider), str(row.dataset_key)): int(row.provider_dataset_id)
-        for row in result
-    }
-    if missing := [pair for pair in pairs if pair not in resolved]:
-        raise RuntimeError(f"csv5_provider_dataset_unknown:{missing[0][0]}/{missing[0][1]}")
-    return resolved
-
-
-async def _lighthouse_dataset_pairs(
-    session: AsyncSession,
+def _frozen_h35_lighthouse_dataset_pairs(
     rows: tuple[CurationImportRow, ...],
 ) -> frozenset[tuple[str, str]]:
-    candidates = sorted({row.dataset_key for row in rows})
-    if not candidates:
-        return frozenset()
-    result = await session.execute(
-        text(
-            "SELECT provider, dataset_key FROM provider_sync.provider_datasets "
-            "WHERE dataset_key = ANY(CAST(:dataset_keys AS text[])) "
-            "AND dataset_key LIKE 'lighthouse-stamp-tour-season-%'"
-        ),
-        {"dataset_keys": candidates},
+    """등대 seed pair를 CSV 자연키만으로 판정한다 (질의 없음).
+
+    이 CLI는 0063~0079 고정 세대에서만 돈다 — dataset catalog
+    ``provider_sync.provider_datasets``는 0089가 만들므로 조회할 대상이 없다.
+    당시 판정은 ``dataset_key`` prefix 하나였고, 그 술어를 그대로 보존한다
+    (역사 표면 보존, ADR-075).
+    """
+
+    return frozenset(
+        (row.provider, row.dataset_key)
+        for row in rows
+        if row.dataset_key.startswith(LIGHTHOUSE_DATASET_PREFIX)
     )
-    return frozenset((str(row.provider), str(row.dataset_key)) for row in result)
 
 
 async def _resolved_rows(
@@ -274,11 +239,9 @@ async def _resolved_rows(
         }
     elif requires_lighthouse_provenance(
         preview.rows,
-        lighthouse_dataset_pairs=await _lighthouse_dataset_pairs(session, preview.rows),
+        lighthouse_dataset_pairs=_frozen_h35_lighthouse_dataset_pairs(preview.rows),
     ):
         raise RuntimeError("csv5_provenance_missing")
-
-    provider_dataset_ids = await _provider_dataset_ids_by_pair(session, preview.rows)
 
     requests = tuple(
         curation_repo.FeatureMatchRequest(
@@ -311,7 +274,10 @@ async def _resolved_rows(
                 theme_group=row.theme_group,
                 title=row.title,
                 edition_key=row.edition_key,
-                provider_dataset_id=provider_dataset_ids[(row.provider, row.dataset_key)],
+                # 0063~0079 고정 세대 — ``feature.curated_sources``의 identity는
+                # 자연키이고 surrogate 열도 catalog도 없다(둘 다 0089/0090 산물).
+                provider_dataset_id=None,
+                frozen_h35_dataset=(row.provider, row.dataset_key),
                 source_name=row.source_name,
                 source_url=row.source_url or None,
                 source_item_key=row.source_item_key,

@@ -851,9 +851,14 @@ DECLARE
     new_record_dataset_id bigint;
     old_record_dataset_id bigint;
 BEGIN
+    -- Ownership is the dataset alone. source_record_key is a *pointer* to the record
+    -- that currently exhibits the finding, and it must stay mutable: the
+    -- ON DELETE SET NULL FK nulls it when the record is purged, and recurrence upserts
+    -- re-point it at the newest record for the same dedupe_key. Re-parenting is still
+    -- blocked because the dataset agreement check below runs on every write, so the
+    -- pointer can only move inside the owning dataset (or to NULL).
     IF TG_OP = 'UPDATE'
-       AND (OLD.provider_dataset_id, OLD.source_record_key)
-           IS DISTINCT FROM (NEW.provider_dataset_id, NEW.source_record_key)
+       AND OLD.provider_dataset_id IS DISTINCT FROM NEW.provider_dataset_id
     THEN
         RAISE EXCEPTION 'integrity violation ownership is immutable'
             USING ERRCODE = '23514', CONSTRAINT = 'ck_data_integrity_violation_ownership_immutable';

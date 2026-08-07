@@ -252,6 +252,89 @@ def _replace_pre_tvn33_ownership_guards() -> None:
     )
 
 
+def _restore_feature_update_job_shape_invariants() -> None:
+    """열 삭제와 무관한 job 형태·pair 불변식을 최종 스키마 형태로 되살린다.
+
+    ``_detach_legacy_constraints``/``_replace_pre_tvn33_ownership_guards``는 삭제할
+    pair shadow를 읽는 부분 때문에 세 객체를 통째로 떼어냈지만, 남은 조건은 전부
+    canonical 열만 읽는다.
+
+    * ``ck_import_jobs_update_request_shape`` — 0053이 덧붙인 scope 절
+      (``provider``/``dataset_key``/``sync_scope``)만 성립 불가다. 그 부분은
+      ``ops.import_job_datasets`` membership이 소유하므로 버리고, 0052 canonical
+      본체는 ``operation_registry_version`` → ``operation_key`` 이름만 바꿔 되살린다.
+      이게 없으면 owner 없는 ``running`` job이 들어와 stale 회수가 판정하지 못한다.
+    * ``assert_feature_update_job_pair``/``enforce_feature_update_job_pair`` —
+      ``kind``/``quarantined_at``/request 존재만 읽는다. T-VN-33이 지울 이유가 없었고,
+      writer(``enqueue_feature_update_request_job``)는 이 deferred 양방향 trigger가
+      있다고 전제한다. request 없는 canonical job이 commit되지 않도록 되돌린다.
+    """
+    _execute_sql_script(
+        """
+        ALTER TABLE ops.import_jobs
+            ADD CONSTRAINT ck_import_jobs_update_request_shape CHECK (
+                kind <> 'feature_update_request' OR quarantined_at IS NOT NULL OR (
+                    parent_job_id IS NULL AND load_batch_id IS NULL
+                    AND trigger_kind = 'update_request'
+                    AND operation_key IS NULL AND dagster_run_status IS NULL
+                    AND payload = '{}'::jsonb
+                    AND (
+                        dagster_run_id IS NULL
+                        OR (dagster_run_id = btrim(dagster_run_id) AND dagster_run_id <> '')
+                    )
+                    AND (status <> 'queued' OR dagster_run_id IS NULL)
+                    AND (status <> 'running' OR dagster_run_id IS NOT NULL)
+                )
+            );
+
+        CREATE OR REPLACE FUNCTION ops.assert_feature_update_job_pair(candidate_job_id uuid)
+        RETURNS void
+        LANGUAGE plpgsql
+        SET search_path = pg_catalog
+        AS $$
+        DECLARE job_kind text; job_quarantined_at timestamptz;
+        BEGIN
+            SELECT job.kind, job.quarantined_at
+              INTO job_kind, job_quarantined_at
+            FROM ops.import_jobs AS job
+            WHERE job.job_id = candidate_job_id;
+            IF NOT FOUND
+               OR job_kind IS DISTINCT FROM 'feature_update_request'
+               OR job_quarantined_at IS NOT NULL THEN
+                RETURN;
+            END IF;
+
+            PERFORM 1
+            FROM ops.feature_update_requests AS request
+            WHERE request.job_id = candidate_job_id;
+            IF NOT FOUND THEN
+                RAISE EXCEPTION
+                    'non-quarantined canonical feature update job must have exactly one request: %',
+                    candidate_job_id
+                    USING ERRCODE = '23514',
+                        CONSTRAINT = 'ck_import_jobs_feature_update_pair';
+            END IF;
+        END;
+        $$;
+        CREATE OR REPLACE FUNCTION ops.enforce_feature_update_job_pair()
+        RETURNS trigger
+        LANGUAGE plpgsql
+        SET search_path = pg_catalog
+        AS $$
+        BEGIN
+            PERFORM ops.assert_feature_update_job_pair(NEW.job_id);
+            RETURN NULL;
+        END;
+        $$;
+        DROP TRIGGER IF EXISTS trg_import_jobs_feature_update_pair ON ops.import_jobs;
+        CREATE CONSTRAINT TRIGGER trg_import_jobs_feature_update_pair
+            AFTER INSERT ON ops.import_jobs
+            DEFERRABLE INITIALLY DEFERRED
+            FOR EACH ROW EXECUTE FUNCTION ops.enforce_feature_update_job_pair();
+        """
+    )
+
+
 def _rename_runtime_operation_key() -> None:
     """정적 registry version shadow를 DB handler ``operation_key``로 hard-cut한다."""
     _execute_sql_script(
@@ -387,9 +470,20 @@ def _freeze_feature_update_operation_memberships() -> None:
           FROM provider_sync.provider_dataset_operation_scopes AS scope
          WHERE scope.provider_dataset_id = member.provider_dataset_id
            AND scope.sync_scope = member.sync_scope;
+        -- request membership identity도 exact triple로 넓힌다. 0089가 만든
+        -- (request_id, provider_dataset_id, sync_scope)는 operation_key가 없던
+        -- 시절의 pair identity라, scope PK가 triple인 지금은 한 (dataset, scope)의
+        -- 서로 다른 operation 두 건을 같은 request에 담을 수 없게 만든다 —
+        -- 이 migration이 만든 guard(assert_feature_update_request_member_available
+        -- 등)와 형제 테이블 ``uq_import_job_datasets_exact_identity``, freeze 계약
+        -- (contracts/vnext/tvn33-reference-ownership-v1.sql:551)은 모두 4열이다.
         ALTER TABLE ops.feature_update_request_datasets
             ALTER COLUMN operation_key SET NOT NULL,
             DROP CONSTRAINT IF EXISTS fk_feature_update_request_datasets_scope,
+            DROP CONSTRAINT IF EXISTS uq_feature_update_request_datasets_identity,
+            ADD CONSTRAINT uq_feature_update_request_datasets_identity UNIQUE (
+                request_id, provider_dataset_id, sync_scope, operation_key
+            ),
             ADD CONSTRAINT fk_feature_update_request_datasets_exact_operation_scope
                 FOREIGN KEY (provider_dataset_id, sync_scope, operation_key)
                 REFERENCES provider_sync.provider_dataset_operation_scopes (
@@ -805,6 +899,31 @@ def _drop_legacy_columns() -> None:
         ALTER TABLE ops.managed_files
             DROP COLUMN provider,
             DROP COLUMN dataset_key;
+        """
+    )
+
+
+def _recreate_source_record_history_index() -> None:
+    """entity별 payload 이력 cursor index를 cutover 이후 모양으로 되만든다.
+
+    ``_detach_legacy_constraints()``가 지운 0044판은 두 번째 키가 ``last_seen_at``
+    이었다 — 그 컬럼은 head(``observed_at``)로 옮겨가 ``_drop_legacy_columns()``에서
+    사라지므로 옛 정의 그대로는 성립하지 않는다. 대체 index가 없으면
+    ``observation_repo._GET_OBSERVATION_HISTORY_SQL``의 keyset 조회
+    (``WHERE source_entity_key = :key ORDER BY fetched_at DESC, imported_at DESC,
+    source_record_key DESC``)가 entity의 record 전체를 읽고 정렬한다.
+    docs/architecture/postgres-schema.md §4.2와
+    docs/removal-manifests/t-vn-33-source-lineage.md가 이 "새 history index"를
+    최종 스키마로 못박고 있다. 컬럼 삭제 뒤에 만들어야 하므로 여기에 둔다.
+    """
+
+    _execute_sql_script(
+        """
+        CREATE INDEX idx_source_records_entity_history
+            ON provider_sync.source_records (
+                source_entity_key, fetched_at DESC, imported_at DESC,
+                source_record_key DESC
+            );
         """
     )
 
@@ -1674,9 +1793,16 @@ def _create_indirect_guards() -> None:
         RETURNS trigger LANGUAGE plpgsql SET search_path = pg_catalog AS $$
         DECLARE new_record_dataset_id bigint; old_record_dataset_id bigint;
         BEGIN
+            -- Ownership is the dataset alone. source_record_key is a *pointer* to the
+            -- record that currently exhibits the finding, and it must stay mutable:
+            -- fk_data_integrity_violations_source_record_key_source_records is
+            -- ON DELETE SET NULL (record purge nulls the pointer) and recurrence
+            -- upserts re-point it at the newest record for the same dedupe_key.
+            -- Re-parenting is still blocked because the dataset agreement check below
+            -- runs on every write, so the pointer can only move inside the owning
+            -- dataset (or to NULL).
             IF TG_OP = 'UPDATE'
-               AND (OLD.provider_dataset_id, OLD.source_record_key)
-                   IS DISTINCT FROM (NEW.provider_dataset_id, NEW.source_record_key) THEN
+               AND OLD.provider_dataset_id IS DISTINCT FROM NEW.provider_dataset_id THEN
                 RAISE EXCEPTION 'integrity violation ownership is immutable'
                     USING ERRCODE = '23514',
                         CONSTRAINT = 'ck_data_integrity_violation_ownership_immutable';
@@ -1863,6 +1989,8 @@ def upgrade() -> None:
     _move_notice_lineage_to_head()
     _rewrite_feature_update_scope_validator()
     _drop_legacy_columns()
+    _recreate_source_record_history_index()
+    _restore_feature_update_job_shape_invariants()
     _rewrite_final_curation_source_rule_trigger()
     _create_dataset_guard_functions()
     _create_lineage_guard_functions()

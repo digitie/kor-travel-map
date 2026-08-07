@@ -166,6 +166,9 @@ def test_source_lineage_mappings_keep_mutable_observation_out_of_raw_record() ->
         "observed_at",
         "expires_at",
         "updated_at",
+        # T-VN-37 계보 key는 record가 아니라 head에 물화된다(ADR-087/088). 트리거가
+        # 채우는 파생 열이지만 ORM이 알아야 read 경로가 컬럼을 참조할 수 있다.
+        "lineage_key",
     }
     assert "is_primary_source" not in link_columns
     assert any(

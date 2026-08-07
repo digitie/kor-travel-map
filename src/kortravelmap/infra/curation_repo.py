@@ -379,6 +379,16 @@ class CurationImportRowReceipt:
 
 @dataclass(frozen=True)
 class ResolvedCurationImportRow:
+    """적재 대상 dataset identity는 스키마 세대마다 **정확히 하나**만 든다.
+
+    현행 스키마에서는 ``provider_dataset_id`` surrogate가 정본이다(ADR-088).
+    H35 cutover 리허설이 도는 0063~0079 고정 세대에는 ``provider_datasets``
+    catalog 자체가 없고 ``feature.curated_sources``가 ``(provider, dataset_key)``
+    자연키로 키를 잡으므로, 그 경로만 ``frozen_h35_dataset``을 든다. 둘 중
+    하나만 채워야 하며 위반은 ``import_curation_rows``가 거절한다 — 옵셔널로
+    풀어 둔 자리에 final 경로가 조용히 NULL을 흘리지 못하게 한다.
+    """
+
     row_number: int
     collection_key: str
     theme_slug: str
@@ -386,7 +396,7 @@ class ResolvedCurationImportRow:
     theme_group: str
     title: str
     edition_key: str
-    provider_dataset_id: int
+    provider_dataset_id: int | None
     source_name: str
     source_url: str | None
     source_item_key: str
@@ -399,6 +409,7 @@ class ResolvedCurationImportRow:
     metadata: dict[str, Any]
     source_component_key: str = "primary"
     provenance: dict[str, Any] | None = None
+    frozen_h35_dataset: tuple[str, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -1749,21 +1760,48 @@ SELECT
 FROM classified
 """
 
+
+def _replace_once(sql: str, old: str, new: str) -> str:
+    """고정-세대 변형이 **조용히 no-op** 되는 것을 import 시점에 차단한다.
+
+    ``str.replace``는 needle 표기가 drift하면 원본을 그대로 돌려주고, 그 실패는
+    0063~0079 고정 세대를 실제로 띄우는 h35 리허설에서만 UndefinedColumn /
+    UndefinedTable로 뒤늦게 드러난다(적대 리뷰 2 권고).
+    """
+
+    if sql.count(old) != 1:
+        raise RuntimeError(f"고정-세대 SQL 변형 needle이 정확히 1회가 아닙니다: {old!r}")
+    return sql.replace(old, new, 1)
+
+
 # h35 cutover CLI 전용 — 0063 고정(pre-0080, feature_uuid column 부재) 스키마
 # 세대에서 같은 import 경로를 돌린다 (역사 표면 보존, ADR-075).
-_MARK_IMPORT_REMOVALS_PRE_UUID_SQL: Final[str] = _MARK_IMPORT_REMOVALS_SQL.replace(
-    "CAST(f.feature_uuid AS text) AS feature_uuid",
-    "NULL::text AS feature_uuid",
-    1,
-).replace(
-    # 0085가 신설한 ``feature.feature_notices``도 그 세대엔 없다 — 당시의
-    # detail 문자열 판정으로 되돌린다(T-VN-35).
-    #
-    # ``_PREVIEW_IMPORT_REMOVALS_SQL``에는 같은 변형을 두지 않는다. preview는
-    # h35 replay 경로(``run_csv5``)에서 호출되지 않고 현행 스키마에서만 도므로,
-    # 고정-세대 변형을 만들면 아무도 실행하지 않는 두 번째 SQL이 생긴다.
-    _ITEM_PUBLIC_NOTICE_FILTER_SQL,
-    public_active_notice_filter_sql("pf", frozen_h35_schema=True),
+_MARK_IMPORT_REMOVALS_PRE_UUID_SQL: Final[str] = _replace_once(
+    _replace_once(
+        _replace_once(
+            _replace_once(
+                _MARK_IMPORT_REMOVALS_SQL,
+                "CAST(f.feature_uuid AS text) AS feature_uuid",
+                "NULL::text AS feature_uuid",
+            ),
+            # 0085가 신설한 ``feature.feature_notices``도 그 세대엔 없다 — 당시의
+            # detail 문자열 판정으로 되돌린다(T-VN-35).
+            #
+            # ``_PREVIEW_IMPORT_REMOVALS_SQL``에는 같은 변형을 두지 않는다. preview는
+            # h35 replay 경로(``run_csv5``)에서 호출되지 않고 현행 스키마에서만 도므로,
+            # 고정-세대 변형을 만들면 아무도 실행하지 않는 두 번째 SQL이 생긴다.
+            _ITEM_PUBLIC_NOTICE_FILTER_SQL,
+            public_active_notice_filter_sql("pf", frozen_h35_schema=True),
+        ),
+        # T-VN-33은 자연키를 ``provider_sync.provider_datasets`` projection으로
+        # 옮겼지만, 그 catalog를 만드는 것은 0089다. 고정 세대에서 자연키는
+        # ``feature.curated_sources``에 그대로 있고 surrogate는 존재하지 않는다.
+        "    s.provider_dataset_id,\n    pd.provider,\n    pd.dataset_key,",
+        "    NULL::bigint AS provider_dataset_id,\n    s.provider,\n    s.dataset_key,",
+    ),
+    "LEFT JOIN provider_sync.provider_datasets AS pd\n"
+    "  ON pd.provider_dataset_id = s.provider_dataset_id\n",
+    "",
 )
 
 _PREVIEW_IMPORT_REMOVALS_SQL: Final[str] = (
@@ -1933,6 +1971,53 @@ _GET_SOURCE_ID_BY_DATASET_ID_SQL: Final[str] = """
 SELECT source_id::text
 FROM feature.curated_sources
 WHERE provider_dataset_id = :provider_dataset_id
+"""
+
+# h35 cutover CLI 전용 — 0063~0079 고정 세대의 ``feature.curated_sources``는
+# ``(provider, dataset_key)`` 자연키가 곧 identity이고 ``provider_dataset_id``
+# 열도 그 열을 채울 ``provider_sync.provider_datasets`` catalog도 없다(둘 다
+# 0089/0090이 만든다). 그 세대의 write 표면을 **바이트로 고정**해 보존한다
+# (역사 표면 보존, ADR-075 — ``feature_repo._frozen_h35_*``와 같은 규약).
+_FROZEN_H35_UPSERT_SOURCE_SQL: Final[str] = """
+WITH written AS (
+    INSERT INTO feature.curated_sources (
+        provider, dataset_key, source_name, source_url, source_kind,
+        update_cycle, provider_status, metadata, updated_at
+    ) VALUES (
+        :provider, :dataset_key, :source_name, :source_url, 'manual',
+        'unknown', 'manual_only', '{}'::jsonb, now()
+    )
+    ON CONFLICT (provider, dataset_key) DO UPDATE SET
+        source_name = EXCLUDED.source_name,
+        source_url = COALESCE(
+            EXCLUDED.source_url,
+            feature.curated_sources.source_url
+        ),
+        updated_at = now()
+    WHERE (
+        feature.curated_sources.source_name,
+        feature.curated_sources.source_url
+    ) IS DISTINCT FROM (
+        EXCLUDED.source_name,
+        COALESCE(EXCLUDED.source_url, feature.curated_sources.source_url)
+    )
+    RETURNING source_id::text
+)
+SELECT source_id FROM written
+UNION ALL
+SELECT existing.source_id::text
+FROM feature.curated_sources AS existing
+WHERE existing.provider = :provider
+  AND existing.dataset_key = :dataset_key
+  AND NOT EXISTS (SELECT 1 FROM written)
+LIMIT 1
+"""
+
+_FROZEN_H35_GET_SOURCE_ID_BY_KEY_SQL: Final[str] = """
+SELECT source_id::text
+FROM feature.curated_sources
+WHERE provider = :provider
+  AND dataset_key = :dataset_key
 """
 
 _GET_COLLECTION_ID_BY_KEY_SQL: Final[str] = """
@@ -4081,9 +4166,43 @@ def _ensure_resolved_curation_identities(
         raise ValueError(issues[0].message)
 
 
+def _ensure_curation_dataset_identity(
+    rows: Sequence[ResolvedCurationImportRow],
+    *,
+    frozen_h35_schema: bool,
+) -> None:
+    """행이 든 dataset identity가 실행 대상 스키마 세대와 일치하는지 확인한다.
+
+    ``provider_dataset_id``를 ``int | None``으로 푼 것은 고정 세대에 그 열이
+    없기 때문일 뿐이다. 그 완화가 현행 스키마의 NOT NULL identity를 무르게
+    만들지 않도록, write 경계에서 정확히 한 쪽만 채워졌음을 강제한다.
+    """
+
+    for row in rows:
+        if frozen_h35_schema:
+            if row.frozen_h35_dataset is None or row.provider_dataset_id is not None:
+                raise ValueError(
+                    "0063~0079 고정 세대 import는 (provider, dataset_key) 자연키만 "
+                    f"들어야 합니다: row_number={row.row_number}"
+                )
+        elif row.provider_dataset_id is None or row.frozen_h35_dataset is not None:
+            raise ValueError(
+                "현행 스키마 import는 provider_dataset_id surrogate만 들어야 합니다: "
+                f"row_number={row.row_number}"
+            )
+
+
 def _canonical_import_row_payload(
     row: ResolvedCurationImportRow,
 ) -> dict[str, Any]:
+    # 영속되는 provenance payload는 그 세대가 실제로 갖는 dataset identity를
+    # 적는다. 고정 세대에 surrogate를 적으면 가리키는 대상이 없는 값이 남고,
+    # 현행 스키마에 자연키를 적으면 삭제된 사본이 되살아난다.
+    dataset_identity: dict[str, Any] = (
+        {"provider": row.frozen_h35_dataset[0], "dataset_key": row.frozen_h35_dataset[1]}
+        if row.frozen_h35_dataset is not None
+        else {"provider_dataset_id": row.provider_dataset_id}
+    )
     return {
         "row_number": row.row_number,
         "collection_key": row.collection_key,
@@ -4092,7 +4211,7 @@ def _canonical_import_row_payload(
         "theme_group": row.theme_group,
         "title": row.title,
         "edition_key": row.edition_key,
-        "provider_dataset_id": row.provider_dataset_id,
+        **dataset_identity,
         "source_name": row.source_name,
         "source_url": row.source_url,
         "source_item_key": row.source_item_key,
@@ -4444,9 +4563,12 @@ async def import_curation_rows(
 
     ``frozen_h35_schema``: h35 cutover CLI 전용 — 0063~0079 고정 세대에서
     removal projection의 ``feature_uuid``를 NULL로 채우고, public 판정을
-    typed ``feature_notices`` 대신 당시의 detail 문자열 술어로 되돌린다.
+    typed ``feature_notices`` 대신 당시의 detail 문자열 술어로 되돌리며,
+    curated source를 surrogate가 아닌 ``(provider, dataset_key)`` 자연키로
+    upsert한다(그 세대엔 ``provider_sync.provider_datasets``가 없다).
     """
     _ensure_resolved_curation_identities(rows)
+    _ensure_curation_dataset_identity(rows, frozen_h35_schema=frozen_h35_schema)
     collections: dict[str, str] = {}
     item_values: list[dict[str, Any]] = []
     if rows:
@@ -4513,15 +4635,25 @@ async def import_curation_rows(
             theme_name=row.theme_name,
             theme_group=row.theme_group,
         )
-        source_params = {
-            "provider_dataset_id": row.provider_dataset_id,
+        source_params: dict[str, Any] = {
             "source_name": row.source_name,
             "source_url": row.source_url,
         }
+        if row.frozen_h35_dataset is not None:
+            source_params["provider"] = row.frozen_h35_dataset[0]
+            source_params["dataset_key"] = row.frozen_h35_dataset[1]
+        else:
+            source_params["provider_dataset_id"] = row.provider_dataset_id
         source_id = await _upsert_id_with_fallback(
             session,
-            upsert_sql=_UPSERT_SOURCE_SQL,
-            lookup_sql=_GET_SOURCE_ID_BY_DATASET_ID_SQL,
+            upsert_sql=(
+                _FROZEN_H35_UPSERT_SOURCE_SQL if frozen_h35_schema else _UPSERT_SOURCE_SQL
+            ),
+            lookup_sql=(
+                _FROZEN_H35_GET_SOURCE_ID_BY_KEY_SQL
+                if frozen_h35_schema
+                else _GET_SOURCE_ID_BY_DATASET_ID_SQL
+            ),
             params=source_params,
             entity="curation source",
         )

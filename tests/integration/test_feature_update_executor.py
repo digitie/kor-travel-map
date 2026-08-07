@@ -1259,7 +1259,7 @@ async def test_bound_kma_empty_target_fails_operation_without_provider_or_state_
             yield session
 
     async def _empty_schedule_index(**_kwargs: object) -> DatasetScheduleIndex:
-        return DatasetScheduleIndex(source_status="ok", errors=(), by_dataset={})
+        return DatasetScheduleIndex(source_status="ok", errors=(), by_operation_key={})
 
     monkeypatch.setattr(
         dataset_service,

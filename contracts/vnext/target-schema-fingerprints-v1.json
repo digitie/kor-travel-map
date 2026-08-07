@@ -4,11 +4,11 @@
   "description": "target-schema-v1.sql을 빈 PostGIS DB(x_extension 확장 사전 생성)에 적용한 뒤 H35 7 카테고리 catalog 질의(출처: src/kortravelmap/cli/_h35_catalog.py — schema-qualified relation 목록으로 적응)로 산출한 category별 canonical SHA-256. tests/integration/test_vnext_target_freeze.py가 실제 적용 직후 재계산해 drift를 fail-close한다.",
   "environment": "postgis/postgis:16-3.5-alpine (PostgreSQL 16 / PostGIS 3.5)",
   "target_schema_sql_sha256": "e0ffcd25effbbda10d85c10a6a1e150133b062fcaefcd0135d6109c1bc155280",
-  "tvn33_reference_ownership_sql_sha256": "5de99c17a095130e822788965cae66bbb2f4b15a25c8971b257bccb3ecaff4a0",
+  "tvn33_reference_ownership_sql_sha256": "1be5cd9370d974a94adb2146947732f79d756ad3411e137d3846b33a5ba8e13a",
   "fingerprints": {
     "columns": "9da11b67dc45b9b266a9394db33b0505d30d70d4ef6953fec4e015149713aba2",
     "constraints": "54e465b3458472e3a02a6cc41069824a53169e6fd002dc2a1b2539b5c5ad1a18",
-    "functions": "b0e91b706fdfb6d4784e4a30632ff95c1ab4d86417f4dd38f41f5af736ab59c2",
+    "functions": "139469bee0331ff88c216a66868a48650a9318f3594a7ce22dacbf3e5c3290e7",
     "indexes": "8b47bcaa3cf7bfbe59dd552297625f85c894385a31b06984245e1aa6e6b1299a",
     "relations": "4982e090cf1dc833303dc15d6c5607bd1539de293b145b34b25e0b24bb3db461",
     "sequence": "7bc70df37bf9099f5804124715ca3c87d06fde7acf75a4ec8a834a295ca66ee0",

@@ -3145,6 +3145,11 @@ def _supersede_stale_notice_sql(close_missing: bool) -> str:
     그 계보로 열린 공유 feature를 현재 scope의 snapshot 부재로 닫지 않는다. 호출
     scope 자체의 winner는 ``ranked``에서 이미 계산하므로 cross-scope 보호 CTE에서
     다시 전수 비교하지 않는다.
+
+    ``close_missing=True``는 ``:hidden_before``(적재 이전에 안 보이던 feature_id
+    배열)를 추가로 요구한다 — 같은 statement에서 읽는 상태는 이미 이번 적재가
+    지나간 뒤라 "직전 가시성"을 스스로 관측할 수 없기 때문이다
+    (``_hidden_notice_features``).
     """
     candidate_lifecycle = (
         """
@@ -3538,7 +3543,17 @@ global_feature_wins AS MATERIALIZED (
             )
         ) AS should_activate,
         (
-            desired.old_status = 'active'
+            -- 이 statement가 읽는 core/subtype 상태는 **이미 이번 적재가 지나간
+            -- 뒤**다. 같은 계보가 다시 나타나면 bundle 적재가 notice subtype을
+            -- 통째로 다시 써서(``valid_end_time = EXCLUDED.valid_end_time``,
+            -- KREX DTO는 NULL) 닫혀 있던 feature가 여기 도달하기 전에 이미
+            -- 열린다. 그러면 "직전에 안 보였다"가 관측 불가라 재등장 집계가
+            -- 구조적으로 항상 0이 된다(실측: 적재 전 valid_end=03:20 → 적재 후
+            -- NULL → reconcile 반환행 0건). 그래서 **적재 이전** 가시성은
+            -- 호출자가 재어 ``:hidden_before``로 넘긴다 — 적재가 없는 경로
+            -- (close/supersede)는 빈 배열이라 종전 판정 그대로다.
+            NOT (desired.feature_id = ANY(CAST(:hidden_before AS text[])))
+            AND desired.old_status = 'active'
             AND desired.old_deleted_at IS NULL
             AND (
                 desired.old_valid_end_time IS NULL
@@ -3604,6 +3619,15 @@ global_feature_wins AS MATERIALIZED (
                   OR target.old_status <> 'active'
               )
           )
+          -- 적재가 먼저 되살린 재등장은 여기 도달했을 때 core/subtype이 이미
+          -- 최종 상태다(갱신할 컬럼이 없다). 그래도 RETURNING에 실어야 재등장
+          -- 집계가 잡히므로 전이 자체를 갱신 조건에 포함한다. ``was_visible``이
+          -- ``:hidden_before``로 고정되는 경로에서만 참이 되므로, 적재가 이미
+          -- 손댄 행 외에는 추가 갱신이 생기지 않는다.
+          OR (
+              NOT target.was_visible
+              AND target.will_be_visible
+          )
       )
     RETURNING
         f.feature_id,
@@ -3646,6 +3670,49 @@ WHERE f.feature_id = r.feature_id
 RETURNING f.feature_id
 """
     )
+
+
+# 적재 **이전** 가시성 관측 — ``was_visible``의 정본 입력.
+#
+# ``_supersede_stale_notice_sql(close_missing=True)``의 판정과 글자 그대로 같은
+# 술어의 부정이다(status/deleted_at/valid_end_time + 같은 ``evaluated_at``).
+# subtype 행이 아직 없는 신규 feature는 LEFT JOIN으로 ``valid_end_time IS NULL``
+# 이 되지만 features 행 자체가 없으므로 결과에 들어오지 않는다 — 처음 적재되는
+# 공고를 "재등장"으로 세지 않기 위해 필요한 성질이다.
+_HIDDEN_NOTICE_FEATURES_SQL: Final[str] = """
+SELECT f.feature_id
+FROM feature.features AS f
+LEFT JOIN feature.feature_notices AS n
+  ON n.feature_id = f.feature_id
+WHERE f.feature_id = ANY(CAST(:feature_ids AS text[]))
+  AND NOT (
+      f.status = 'active'
+      AND f.deleted_at IS NULL
+      AND (
+          n.valid_end_time IS NULL
+          OR n.valid_end_time > CAST(:evaluated_at AS timestamptz)
+      )
+  )
+"""
+
+
+async def _hidden_notice_features(
+    session: AsyncSession,
+    *,
+    feature_ids: Collection[str],
+    evaluated_at: datetime,
+) -> frozenset[str]:
+    """``feature_ids`` 중 지금 시점에 **보이지 않는** feature 집합."""
+    if not feature_ids:
+        return frozenset()
+    rows = await session.execute(
+        text(_HIDDEN_NOTICE_FEATURES_SQL),
+        {
+            "feature_ids": sorted(set(feature_ids)),
+            "evaluated_at": evaluated_at,
+        },
+    )
+    return frozenset(str(row.feature_id) for row in rows)
 
 
 @dataclass(frozen=True)
@@ -3691,6 +3758,15 @@ async def load_authoritative_notice_snapshot(
         checked_at=observed_at,
         fingerprint=fingerprint,
     )
+    # 적재는 notice subtype을 통째로 다시 쓰므로(``valid_end_time``까지) 닫혀
+    # 있던 feature가 여기서 이미 열린다. lifecycle 판정이 "직전에 안 보였다"를
+    # 잃지 않도록 적재 **이전**에 재고, 같은 시각 기준을 lifecycle에도 넘긴다.
+    evaluated_at = datetime.now(UTC)
+    hidden_before = await _hidden_notice_features(
+        session,
+        feature_ids=[bundle.feature.feature_id for bundle in bundles],
+        evaluated_at=evaluated_at,
+    )
     loaded = await load_bundles(session, bundles)
     await _persist_notice_snapshot_state(
         session,
@@ -3706,6 +3782,8 @@ async def load_authoritative_notice_snapshot(
         dataset_key=dataset_key,
         source_entity_type=source_entity_type,
         closed_at=observed_at,
+        evaluated_at=evaluated_at,
+        hidden_before=hidden_before,
     )
     return NoticeFeatureLoadResult(load=loaded, reconcile=reconciled)
 
@@ -3772,6 +3850,12 @@ async def load_notice_event_bundles(
             else expired_bundles
         )
         target.append(bundle)
+    # snapshot 경로와 같은 이유로 적재 이전 가시성을 먼저 잰다.
+    hidden_before = await _hidden_notice_features(
+        session,
+        feature_ids=[bundle.feature.feature_id for bundle in active_bundles],
+        evaluated_at=materialized_at,
+    )
     loaded = await load_bundles(session, active_bundles)
     # 만료된 rolling-window 발표도 SourceRecord 감사 이력은 남긴다. 다만 일반
     # bundle load의 provider reactivation을 거치면 soft-delete/purge된 Feature가
@@ -3796,6 +3880,7 @@ async def load_notice_event_bundles(
             default=observed_at,
         ),
         evaluated_at=materialized_at,
+        hidden_before=hidden_before,
     )
     return NoticeFeatureLoadResult(load=loaded, reconcile=reconciled)
 
@@ -3929,8 +4014,15 @@ async def _reconcile_persisted_notice_scope(
     source_entity_type: str,
     closed_at: datetime | None,
     evaluated_at: datetime | None = None,
+    hidden_before: Collection[str] = (),
 ) -> NoticeReconcileResult:
-    """영속 lineage state로 scope의 dedup과 Feature lifecycle을 재계산한다."""
+    """영속 lineage state로 scope의 dedup과 Feature lifecycle을 재계산한다.
+
+    ``hidden_before``는 **이번 적재 이전에** 보이지 않던 feature_id다. 이 함수가
+    읽는 상태는 적재가 지나간 뒤라 재등장 feature가 이미 열려 있으므로, 적재를
+    앞세우는 호출자(``load_*_notice_*``)는 ``_hidden_notice_features``로 잰 값을
+    반드시 넘겨야 재등장/종료 집계가 맞는다. 적재가 없는 호출자는 생략한다.
+    """
     lifecycle_evaluated_at = evaluated_at or datetime.now(UTC)
     result = await session.execute(
         text(_supersede_stale_notice_sql(close_missing=False)),
@@ -3952,6 +4044,7 @@ async def _reconcile_persisted_notice_scope(
                 "source_entity_type": source_entity_type,
                 "closed_at": closed_at,
                 "evaluated_at": lifecycle_evaluated_at,
+                "hidden_before": sorted(set(hidden_before)),
             },
         )
         snapshot_updates = result.mappings().all()

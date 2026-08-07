@@ -42,7 +42,7 @@ from kortravelmap.infra.feature_update_repo import (
     start_update_request,
     touch_queued_update_request_for_lock_retry,
 )
-from kortravelmap.infra.jobs_repo import record_import_job_event
+from kortravelmap.infra.jobs_repo import get_import_job, record_import_job_event
 from kortravelmap.infra.poi_cache_target_repo import (
     PoiCacheTargetFeatureLinkCandidate,
     mark_poi_cache_targets_refresh_failed,
@@ -754,6 +754,28 @@ async def _reload_stopped_result(
     )
 
 
+async def _terminal_event_member_ids(
+    session: AsyncSession,
+    job_id: str,
+) -> tuple[str | None, ...]:
+    """terminal event가 붙어야 할 canonical import job membership id를 고른다.
+
+    ``ops.import_job_events``는 root job에만 member 없는 event를 허용하고 그
+    밖의 job에는 해당 job에 속한 exact ``import_job_dataset_id``를 요구한다
+    (``jobs_repo._INSERT_EVENT_SQL``). request job은 memberships가 1건이면
+    ``single``, 여러 건이면 ``multiple``이므로 member id를 반드시 넘겨야 한다.
+    job이 사라졌거나 member가 비어 있으면 ``(None,)``을 돌려 호출자의 insert가
+    실패하게 두고, 조용히 event를 건너뛰지 않는다.
+    """
+    job = await get_import_job(session, job_id)
+    if job is None or job.dataset_membership_mode == "root":
+        return (None,)
+    member_ids = tuple(
+        membership.import_job_dataset_id for membership in job.dataset_memberships
+    )
+    return member_ids or (None,)
+
+
 async def _finish_failed_execution(
     session: AsyncSession,
     request: FeatureUpdateRequest,
@@ -796,18 +818,23 @@ async def _finish_failed_execution(
                 error_code=event_code,
             )
             if event_code is not None:
-                event = await record_import_job_event(
+                for import_job_dataset_id in await _terminal_event_member_ids(
                     session,
                     failed.job_id,
-                    level="error",
-                    code=event_code,
-                    message=error_message,
-                    payload={"status": "failed", "failure_code": event_code},
-                )
-                if event is None:
-                    raise RuntimeError(
-                        "canonical feature update terminal event insert failed"
+                ):
+                    event = await record_import_job_event(
+                        session,
+                        failed.job_id,
+                        level="error",
+                        code=event_code,
+                        message=error_message,
+                        payload={"status": "failed", "failure_code": event_code},
+                        import_job_dataset_id=import_job_dataset_id,
                     )
+                    if event is None:
+                        raise RuntimeError(
+                            "canonical feature update terminal event insert failed"
+                        )
     except _FeatureUpdateExecutionStopped:
         return await _reload_stopped_result(
             session,

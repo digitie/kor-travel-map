@@ -493,6 +493,12 @@ def _create_indexes_concurrently() -> None:
             WHERE status = 'active'
             """
         )
+        # 위 index는 0002의 ``idx_sync_state_next_run``을 T-VN-33 이름 규약
+        # (``idx_<table>_…``, contracts/vnext/tvn33-reference-ownership-v1.sql)으로
+        # 개명한 것이다. 옛 이름을 남겨두면 술어·열이 완전히 같은 index 두 개가
+        # 공존해 쓰기 비용과 저장 공간을 두 번 낸다. 새 index를 만든 뒤에 지워
+        # 폴링 경로가 index 없는 구간을 겪지 않게 한다.
+        op.execute("DROP INDEX CONCURRENTLY IF EXISTS provider_sync.idx_sync_state_next_run")
         op.execute(
             """
             CREATE INDEX CONCURRENTLY idx_notice_lineage_states_scope_present

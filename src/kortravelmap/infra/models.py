@@ -851,8 +851,15 @@ class ProviderDatasetRow(Base):
     capabilities: Mapped[dict[str, Any]] = mapped_column(
         JSONB,
         nullable=False,
+        # NOTE: JSON 리터럴로 쓰면 ``:1``이 SQLAlchemy ``text()`` bind param으로
+        # 잡혀 alembic autogenerate/check가 server-default 비교에서 크래시한다.
+        # jsonb_build_object로 콜론을 없애 같은 기본값을 표현한다.
         server_default=text(
-            "'{\"schema_version\":1,\"produces\":[],\"extensions\":{}}'::jsonb"
+            "jsonb_build_object("
+            "'schema_version', 1, "
+            "'produces', jsonb_build_array(), "
+            "'extensions', jsonb_build_object()"
+            ")"
         ),
     )
     created_at: Mapped[datetime] = mapped_column(
@@ -1040,7 +1047,11 @@ class NoticeLifecycleScopeRow(Base):
         {"schema": "provider_sync"},
     )
 
-    notice_lifecycle_scope_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    notice_lifecycle_scope_id: Mapped[int] = mapped_column(
+        BigInteger,
+        Identity(always=True),
+        primary_key=True,
+    )
     provider_dataset_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     source_entity_type: Mapped[str] = mapped_column(Text, nullable=False)
     mode: Mapped[str] = mapped_column(Text, nullable=False)
@@ -1058,6 +1069,12 @@ class NoticeLineageStateRow(Base):
             ["provider_sync.notice_lifecycle_scopes.notice_lifecycle_scope_id"],
             name="fk_notice_lineage_states_scope",
             ondelete="CASCADE",
+        ),
+        Index(
+            "idx_notice_lineage_states_scope_present",
+            "notice_lifecycle_scope_id",
+            "present",
+            text("changed_at DESC"),
         ),
         {"schema": "provider_sync"},
     )
@@ -1095,6 +1112,16 @@ class SourceRecordRow(Base):
             text("imported_at DESC"),
             text("source_record_key DESC"),
         ),
+        Index(
+            "idx_source_records_imported_at_brin",
+            "imported_at",
+            postgresql_using="brin",
+        ),
+        Index(
+            "idx_source_records_fetched_at_brin",
+            "fetched_at",
+            postgresql_using="brin",
+        ),
         {"schema": "provider_sync"},
     )
 
@@ -1110,6 +1137,7 @@ class SourceRecordRow(Base):
     raw_data: Mapped[dict[str, Any]] = mapped_column(
         JSONB,
         nullable=False,
+        server_default=text("'{}'::jsonb"),
     )
     raw_payload_hash: Mapped[str] = mapped_column(String, nullable=False)
     fetched_at: Mapped[datetime] = mapped_column(
@@ -1143,6 +1171,12 @@ class SourceEntityHeadRow(Base):
             name="fk_source_entity_heads_record",
             ondelete="RESTRICT",
         ),
+        Index(
+            "idx_source_entity_heads_lineage",
+            "lineage_key",
+            text("observed_at DESC"),
+            text("current_source_record_key DESC"),
+        ),
         {"schema": "provider_sync"},
     )
 
@@ -1155,6 +1189,10 @@ class SourceEntityHeadRow(Base):
         nullable=False,
         server_default=text("now()"),
     )
+    # T-VN-33(0091)이 notice 계보 물화를 source_records에서 head로 옮겼다.
+    # ``trg_source_entity_head_lineage_key``(ENABLE ALWAYS)가 값을 소유하므로
+    # writer는 채우지 않는다 — metadata는 NOT NULL 물리 컬럼만 선언한다.
+    lineage_key: Mapped[str] = mapped_column(String, nullable=False)
 
 
 # =============================================================================
@@ -1323,7 +1361,9 @@ class CuratedSourceRow(Base):
             "row_count IS NULL OR row_count >= 0",
             name="ck_curated_sources_row_count",
         ),
-        Index("idx_curated_sources_dataset", "provider_dataset_id"),
+        # ``uq_curated_sources_dataset``(UNIQUE)가 이미 provider_dataset_id 단일
+        # 열 btree를 만든다 — 0090/freeze 계약 어디에도 같은 열의 별도 index는
+        # 없다. 중복 선언은 metadata에만 존재하는 유령이었다.
         Index(
             "idx_curated_sources_status",
             "provider_status",
@@ -2167,13 +2207,14 @@ class ProviderSyncStateRow(Base):
                 "provider_sync.provider_dataset_operation_scopes.operation_key",
             ],
             name="fk_provider_sync_state_exact_operation_scope",
+            ondelete="RESTRICT",
         ),
         CheckConstraint(
             "status IN ('active','paused','disabled','failed')",
             name="provider_sync_state_status",
         ),
         Index(
-            "idx_sync_state_next_run",
+            "idx_provider_sync_state_next_run",
             "next_run_after",
             postgresql_where=text("status='active'"),
         ),
@@ -2182,7 +2223,7 @@ class ProviderSyncStateRow(Base):
 
     provider_dataset_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     sync_scope: Mapped[str] = mapped_column(String, primary_key=True)
-    operation_key: Mapped[str] = mapped_column(String, primary_key=True)
+    operation_key: Mapped[str] = mapped_column(Text, primary_key=True)
     status: Mapped[str] = mapped_column(
         String,
         nullable=False,
@@ -2396,7 +2437,14 @@ class EnrichmentReviewQueueRow(Base):
             text("name_score DESC"),
             text("review_id DESC"),
         ),
-        Index("idx_enrichment_review_source_entity", "source_entity_key"),
+        # 0090이 만든 index는 (source_entity_key, source_record_key) 2열이다 —
+        # ``fk_enrichment_review_queue_source_record``를 그대로 뒷받침하고
+        # source_entity_key 단독 조회는 선행 prefix로 함께 처리한다.
+        Index(
+            "idx_enrichment_review_queue_source_entity_record",
+            "source_entity_key",
+            "source_record_key",
+        ),
         {"schema": "ops"},
     )
 
@@ -2875,6 +2923,7 @@ class ImportJobDatasetRow(Base):
                 "provider_sync.provider_dataset_operation_scopes.operation_key",
             ],
             name="fk_import_job_datasets_exact_operation_scope",
+            ondelete="RESTRICT",
         ),
         UniqueConstraint(
             "job_id",
@@ -3062,6 +3111,7 @@ class OfflineUploadRow(Base):
                 "provider_sync.provider_dataset_operation_scopes.operation_key",
             ],
             name="fk_offline_uploads_exact_operation_scope",
+            ondelete="RESTRICT",
         ),
         # 멱등 키는 freeze 계약(tvn33-reference-ownership-v1.sql)이 선언한 3열
         # 그대로다. writer의 ``ON CONFLICT``가 이 열 집합을 중재자로 지목하므로
@@ -3269,6 +3319,7 @@ class FeatureUpdateRequestDatasetRow(Base):
                 "provider_sync.provider_dataset_operation_scopes.operation_key",
             ],
             name="fk_feature_update_request_datasets_exact_operation_scope",
+            ondelete="RESTRICT",
         ),
         UniqueConstraint(
             "request_id",
@@ -3277,11 +3328,13 @@ class FeatureUpdateRequestDatasetRow(Base):
             "operation_key",
             name="uq_feature_update_request_datasets_identity",
         ),
+        # 조회는 ``scoped_request_seeds``(pipeline_repo) 한 곳뿐이고 술어는
+        # provider_dataset_id 하나, 투영은 request_id 하나다 — 0090/freeze 계약이
+        # 정한 2열이 그 경로를 index-only로 덮는다. scope/operation을 중간에
+        # 끼우면 index만 넓어지고 얻는 것이 없다.
         Index(
             "idx_feature_update_request_datasets_dataset_request",
             "provider_dataset_id",
-            "sync_scope",
-            "operation_key",
             "request_id",
         ),
         {"schema": "ops"},
@@ -4284,7 +4337,6 @@ class DataIntegrityViolationRow(Base):
             "provider_dataset_id",
             "status",
             text("last_seen_at DESC"),
-            text("issue_id DESC"),
             postgresql_where=text("provider_dataset_id IS NOT NULL"),
         ),
         Index(

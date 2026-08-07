@@ -6,7 +6,7 @@ import csv
 import hashlib
 import io
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Any
@@ -48,10 +48,47 @@ def _uuid(label: str) -> str:
     return str(uuid5(NAMESPACE_URL, label))
 
 
+class _FakeCatalogRow:
+    """``provider_datasets`` 한 행 — 자연키와 canonical id."""
+
+    def __init__(self, provider: str, dataset_key: str, provider_dataset_id: int) -> None:
+        self.provider = provider
+        self.dataset_key = dataset_key
+        self.provider_dataset_id = provider_dataset_id
+
+
+class _FakeResult:
+    def __iter__(self) -> Iterator[_FakeCatalogRow]:
+        return iter(
+            (
+                # 101은 **등대가 아닌** dataset이다 — 등대면 provenance가 필수라
+                # 일반 import 경로를 검증할 수 없다. 102만 공식 등대다.
+                _FakeCatalogRow("korea-lighthouse-museum", "lighthouse-museum-curations", 101),
+                _FakeCatalogRow(
+                    "korea-lighthouse-museum",
+                    "lighthouse-stamp-tour-season-5",
+                    102,
+                ),
+                _FakeCatalogRow("korea-tourism-organization", "tourism-100-2026", 103),
+            )
+        )
+
+
 class _FakeSession:
+    """라우터 경계용 stub.
+
+    CSV가 자연키를 들고 오므로 import 경로는 catalog에서 canonical
+    ``provider_dataset_id``를 한 번 해석한다(T-VN-33). 이 stub은 그 조회에
+    고정 매핑을 돌려준다 — 실제 해석은 통합 테스트가 검증한다.
+    """
+
     def __init__(self) -> None:
         self.commits = 0
         self.rollbacks = 0
+
+    async def execute(self, statement: object, params: object = None) -> _FakeResult:
+        del statement, params
+        return _FakeResult()
 
     async def commit(self) -> None:
         self.commits += 1
@@ -207,7 +244,8 @@ def _csv_content(
             "theme_group": "등대 스탬프투어",
             "title": "힐링의 등대",
             "edition_key": "season-5",
-            "provider_dataset_id": "101",
+            "provider": "korea-lighthouse-museum",
+            "dataset_key": "lighthouse-museum-curations",
             "source_name": "국립등대박물관",
             "source_item_key": "healing:ganjeolgot",
             "source_component_key": "primary",
@@ -221,7 +259,7 @@ def _csv_content(
         values.update(
             {
                 "collection_key": "lighthouse-stamp-tour:healing-lighthouses:season-5",
-                "provider_dataset_id": "102",
+                "dataset_key": "lighthouse-stamp-tour-season-5",
             }
         )
     output = io.StringIO(newline="")
