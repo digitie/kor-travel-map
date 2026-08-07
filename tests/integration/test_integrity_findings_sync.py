@@ -35,6 +35,63 @@ _PROVIDER = "test-provider-h30a"
 _DATASET = "test_dataset_h30a"
 
 
+async def _named_dataset_id(session: AsyncSession, dataset_key: str) -> int:
+    """이름을 지정해 fixture catalog 행을 만들고 canonical id를 돌려준다."""
+
+    return int(
+        (
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO provider_sync.provider_datasets (
+                        provider, dataset_key, display_name, source_kind,
+                        is_active, capabilities
+                    )
+                    SELECT :provider, :dataset_key, :provider, 'system', true,
+                           jsonb_build_object('schema_version', 1,
+                                              'produces', '[]'::jsonb,
+                                              'extensions', '{}'::jsonb)
+                    ON CONFLICT (provider, dataset_key) DO UPDATE
+                        SET display_name = EXCLUDED.display_name
+                    RETURNING provider_dataset_id
+                    """
+                ),
+                {"provider": _PROVIDER, "dataset_key": dataset_key},
+            )
+        ).scalar_one()
+    )
+
+
+async def _dataset_id(session: AsyncSession) -> int:
+    """fixture 전용 catalog 행을 만들고 canonical id를 돌려준다.
+
+    T-VN-33 이후 integrity finding은 ``provider_dataset_id``로 기록된다 —
+    자연키는 표시용 projection일 뿐 identity가 아니다.
+    """
+
+    return int(
+        (
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO provider_sync.provider_datasets (
+                        provider, dataset_key, display_name, source_kind,
+                        is_active, capabilities
+                    )
+                    SELECT :provider, :dataset_key, :provider, 'system', true,
+                           jsonb_build_object('schema_version', 1,
+                                              'produces', '[]'::jsonb,
+                                              'extensions', '{}'::jsonb)
+                    ON CONFLICT (provider, dataset_key) DO UPDATE
+                        SET display_name = EXCLUDED.display_name
+                    RETURNING provider_dataset_id
+                    """
+                ),
+                {"provider": _PROVIDER, "dataset_key": _DATASET},
+            )
+        ).scalar_one()
+    )
+
 def _finding(
     entity_id: str,
     code: str = "reverse_geocode_unavailable",
@@ -72,9 +129,9 @@ async def _rows(session: AsyncSession) -> list[Any]:
             "message, severity, detected_at, last_seen_at, "
             "source_record_key, feature_id "
             "from ops.data_integrity_violations "
-            "where provider = :p order by k"
+            "where provider_dataset_id = :p order by k"
         ),
-        {"p": _PROVIDER},
+        {"p": await _dataset_id(session)},
     )
     return list(result.mappings())
 
@@ -86,8 +143,7 @@ async def test_batch_upsert_folds_reruns_and_counts_occurrences(
     findings = [_finding("e1"), _finding("e2")]
     upserted = await sync_integrity_findings(
         migrated_session,
-        provider=_PROVIDER,
-        dataset_key=_DATASET,
+        provider_dataset_id=await _dataset_id(migrated_session),
         findings=findings,
     )
     assert upserted == 2
@@ -100,15 +156,14 @@ async def test_batch_upsert_folds_reruns_and_counts_occurrences(
         text(
             "UPDATE ops.data_integrity_violations "
             "SET last_seen_at = detected_at - interval '1 day' "
-            "WHERE provider = :provider"
+            "WHERE provider_dataset_id = :provider_dataset_id"
         ),
-        {"provider": _PROVIDER},
+        {"provider_dataset_id": await _dataset_id(migrated_session)},
     )
 
     await sync_integrity_findings(
         migrated_session,
-        provider=_PROVIDER,
-        dataset_key=_DATASET,
+        provider_dataset_id=await _dataset_id(migrated_session),
         findings=findings,
     )
     rows = await _rows(migrated_session)
@@ -125,16 +180,14 @@ async def test_null_payload_field_does_not_erase_prior_evidence(
     first = _finding("e1")
     await sync_integrity_findings(
         migrated_session,
-        provider=_PROVIDER,
-        dataset_key=_DATASET,
+        provider_dataset_id=await _dataset_id(migrated_session),
         findings=[first],
     )
     second = _finding("e1")
     second["payload"]["provider_address"] = None  # 2회차엔 단서가 없다
     await sync_integrity_findings(
         migrated_session,
-        provider=_PROVIDER,
-        dataset_key=_DATASET,
+        provider_dataset_id=await _dataset_id(migrated_session),
         findings=[second],
     )
     rows = await _rows(migrated_session)
@@ -148,8 +201,7 @@ async def test_older_overlapping_batch_cannot_replace_newer_evidence(
     current = _finding("overlap")
     await sync_integrity_findings(
         migrated_session,
-        provider=_PROVIDER,
-        dataset_key=_DATASET,
+        provider_dataset_id=await _dataset_id(migrated_session),
         findings=[current],
     )
     await migrated_session.execute(
@@ -160,12 +212,12 @@ async def test_older_overlapping_batch_cannot_replace_newer_evidence(
                 message = 'newer evidence',
                 severity = 'error',
                 payload = payload || '{"provider_address":"newer address"}'::jsonb
-            WHERE provider = :provider
+            WHERE provider_dataset_id = :provider_dataset_id
               AND payload ->> 'dedupe_key' = :dedupe_key
             """
         ),
         {
-            "provider": _PROVIDER,
+            "provider_dataset_id": await _dataset_id(migrated_session),
             "dedupe_key": current["payload"]["dedupe_key"],
         },
     )
@@ -176,8 +228,7 @@ async def test_older_overlapping_batch_cannot_replace_newer_evidence(
     stale["payload"]["provider_address"] = "stale address"
     await sync_integrity_findings(
         migrated_session,
-        provider=_PROVIDER,
-        dataset_key=_DATASET,
+        provider_dataset_id=await _dataset_id(migrated_session),
         findings=[stale],
     )
     after = (await _rows(migrated_session))[0]
@@ -207,8 +258,7 @@ async def test_dedupe_survives_payload_change(
     first["payload"]["provider_address"] = "옛 주소"
     await sync_integrity_findings(
         migrated_session,
-        provider=_PROVIDER,
-        dataset_key=_DATASET,
+        provider_dataset_id=await _dataset_id(migrated_session),
         findings=[first],
     )
 
@@ -219,8 +269,7 @@ async def test_dedupe_survives_payload_change(
     second["message"] = "같은 문제, 새 payload"
     await sync_integrity_findings(
         migrated_session,
-        provider=_PROVIDER,
-        dataset_key=_DATASET,
+        provider_dataset_id=await _dataset_id(migrated_session),
         findings=[second],
     )
 
@@ -236,8 +285,7 @@ async def test_source_entity_type_is_part_of_dedupe_identity(
 ) -> None:
     await sync_integrity_findings(
         migrated_session,
-        provider=_PROVIDER,
-        dataset_key=_DATASET,
+        provider_dataset_id=await _dataset_id(migrated_session),
         findings=[
             _finding("shared-id", entity_type="license"),
             _finding("shared-id", entity_type="closed_license"),
@@ -267,6 +315,21 @@ async def test_client_reports_observed_unique_and_upserted_counts(
         provider="test-provider-h30a-result",
         dataset_key="dataset",
     )
+    async with migrated_engine.begin() as connection:
+        await connection.execute(
+            text(
+                """
+                INSERT INTO provider_sync.provider_datasets (
+                    provider, dataset_key, display_name, source_kind,
+                    is_active, capabilities
+                ) VALUES (
+                    'test-provider-h30a-result', 'dataset', 'fixture', 'system', true,
+                    jsonb_build_object('schema_version', 1, 'produces', '[]'::jsonb,
+                                       'extensions', '{}'::jsonb)
+                ) ON CONFLICT (provider, dataset_key) DO NOTHING
+                """
+            )
+        )
     client = AsyncKorTravelMapClient(migrated_engine)
 
     try:
@@ -280,7 +343,9 @@ async def test_client_reports_observed_unique_and_upserted_counts(
             await connection.execute(
                 text(
                     "DELETE FROM ops.data_integrity_violations "
-                    "WHERE provider = 'test-provider-h30a-result'"
+                    "WHERE provider_dataset_id IN ("
+                    "  SELECT provider_dataset_id FROM provider_sync.provider_datasets"
+                    "  WHERE provider = 'test-provider-h30a-result')"
                 )
             )
 
@@ -319,8 +384,7 @@ async def _observe(
 ) -> None:
     await sync_integrity_findings(
         session,
-        provider=_PROVIDER,
-        dataset_key=_DATASET,
+        provider_dataset_id=await _dataset_id(session),
         findings=[_finding(entity_id) for entity_id in entity_ids],
         external_run_id=run_id,
     )
@@ -334,8 +398,7 @@ async def _close(
 ) -> int:
     return await close_stale_integrity_findings(
         session,
-        provider=_PROVIDER,
-        dataset_key=_DATASET,
+        provider_dataset_id=await _dataset_id(session),
         run_id=run_id,
         receipt=_receipt(
             findings_observed=finding_count,
@@ -349,9 +412,9 @@ async def _statuses(session: AsyncSession) -> dict[str, str]:
     result = await session.execute(
         text(
             "select payload->>'dedupe_key' as k, status "
-            "from ops.data_integrity_violations where provider = :p"
+            "from ops.data_integrity_violations where provider_dataset_id = :p"
         ),
-        {"p": _PROVIDER},
+        {"p": await _dataset_id(session)},
     )
     return {r["k"]: r["status"] for r in result.mappings()}
 
@@ -425,11 +488,14 @@ async def test_older_run_is_superseded_after_newer_authoritative_close(
         (
             await migrated_session.execute(
                 text(
-                    "SELECT external_run_id, status "
-                    "FROM ops.integrity_observation_runs "
-                    "WHERE provider = :provider AND dataset_key = :dataset"
+                    "SELECT run.external_run_id, run.status "
+                    "FROM ops.integrity_observation_runs AS run "
+                    "JOIN ops.integrity_observation_scopes AS scope "
+                    "  ON scope.integrity_observation_scope_id "
+                    "     = run.integrity_observation_scope_id "
+                    "WHERE scope.provider_dataset_id = :provider_dataset_id"
                 ),
-                {"provider": _PROVIDER, "dataset": _DATASET},
+                {"provider_dataset_id": await _dataset_id(migrated_session)},
             )
         )
         .mappings()
@@ -453,8 +519,7 @@ async def test_concurrent_scope_allocation_assigns_unique_monotonic_generations(
         async with AsyncSession(migrated_engine) as session, session.begin():
             await sync_integrity_findings(
                 session,
-                provider=provider,
-                dataset_key=dataset,
+                provider_dataset_id=await _named_dataset_id(session, dataset),
                 findings=[],
                 external_run_id=run_id,
             )
@@ -465,12 +530,15 @@ async def test_concurrent_scope_allocation_assigns_unique_monotonic_generations(
             (
                 await session.execute(
                     text(
-                        "SELECT generation "
-                        "FROM ops.integrity_observation_runs "
-                        "WHERE provider = :provider AND dataset_key = :dataset "
-                        "ORDER BY generation"
+                        "SELECT run.generation "
+                        "FROM ops.integrity_observation_runs AS run "
+                        "JOIN ops.integrity_observation_scopes AS scope "
+                        "  ON scope.integrity_observation_scope_id "
+                        "     = run.integrity_observation_scope_id "
+                        "WHERE scope.provider_dataset_id = :provider_dataset_id "
+                        "ORDER BY run.generation"
                     ),
-                    {"provider": provider, "dataset": dataset},
+                    {"provider_dataset_id": await _named_dataset_id(session, dataset)},
                 )
             )
             .scalars()
@@ -480,9 +548,9 @@ async def test_concurrent_scope_allocation_assigns_unique_monotonic_generations(
         await session.execute(
             text(
                 "DELETE FROM ops.integrity_observation_scopes "
-                "WHERE provider = :provider AND dataset_key = :dataset"
+                "WHERE provider_dataset_id = :provider_dataset_id"
             ),
-            {"provider": provider, "dataset": dataset},
+            {"provider_dataset_id": await _named_dataset_id(session, dataset)},
         )
 
 
@@ -495,9 +563,9 @@ async def test_close_never_touches_acknowledged(
     await migrated_session.execute(
         text(
             "update ops.data_integrity_violations set status='acknowledged' "
-            "where provider = :p"
+            "where provider_dataset_id = :p"
         ),
-        {"p": _PROVIDER},
+        {"p": await _dataset_id(migrated_session)},
     )
     closed = await _close(migrated_session, "run-2", finding_count=0)
     assert closed == 0
@@ -515,11 +583,11 @@ async def test_close_does_not_sweep_other_subsystem_findings(
     await migrated_session.execute(
         text(
             "insert into ops.data_integrity_violations "
-            "(provider, dataset_key, violation_type, severity, message, payload) "
-            "values (:p, :d, 'curation_feature_region_mismatch', 'warning', 'x', "
+            "(provider_dataset_id, violation_type, severity, message, payload) "
+            "values (:p, 'curation_feature_region_mismatch', 'warning', 'x', "
             "jsonb_build_object('dedupe_key', 'curation_mislink:foo:bar'))"
         ),
-        {"p": _PROVIDER, "d": _DATASET},
+        {"p": await _dataset_id(migrated_session)},
     )
     await _observe(migrated_session, "run-9", [])
     closed = await _close(migrated_session, "run-9", finding_count=0)
@@ -533,21 +601,19 @@ async def test_close_respects_provider_and_dataset_boundary(
     """provider 경계를 넘지 않는다."""
     await sync_integrity_findings(
         migrated_session,
-        provider=_PROVIDER,
-        dataset_key=_DATASET,
+        provider_dataset_id=await _dataset_id(migrated_session),
         findings=[_finding("a")],
     )
+    other_dataset_id = await _named_dataset_id(migrated_session, "another_dataset")
     await sync_integrity_findings(
         migrated_session,
-        provider=_PROVIDER,
-        dataset_key="another_dataset",
+        provider_dataset_id=other_dataset_id,
         findings=[],
         external_run_id="run-2",
     )
     closed_other = await close_stale_integrity_findings(
         migrated_session,
-        provider=_PROVIDER,
-        dataset_key="another_dataset",
+        provider_dataset_id=other_dataset_id,
         run_id="run-2",
         receipt=_receipt(),
     )
@@ -560,8 +626,7 @@ async def test_close_rejects_empty_run_id(migrated_session: AsyncSession) -> Non
     with pytest.raises(ValueError, match="run_id"):
         await close_stale_integrity_findings(
             migrated_session,
-            provider=_PROVIDER,
-            dataset_key=_DATASET,
+            provider_dataset_id=await _dataset_id(migrated_session),
             run_id="",
             receipt=_receipt(),
         )
@@ -588,8 +653,7 @@ async def test_close_rejects_incomplete_receipt(
     with pytest.raises(ValueError, match="receipt"):
         await close_stale_integrity_findings(
             migrated_session,
-            provider=_PROVIDER,
-            dataset_key=_DATASET,
+            provider_dataset_id=await _dataset_id(migrated_session),
             run_id="run-incomplete",
             receipt=receipt,
         )
@@ -609,9 +673,9 @@ async def test_close_stamps_resolution_and_is_idempotent(
         text(
             "select payload->'resolution'->>'closed_by' as closed_by, "
             "payload->'resolution'->>'run_id' as rid, resolved_at "
-            "from ops.data_integrity_violations where provider = :p"
+            "from ops.data_integrity_violations where provider_dataset_id = :p"
         ),
-        {"p": _PROVIDER},
+        {"p": await _dataset_id(migrated_session)},
     )
     row = result.mappings().one()
     assert row["closed_by"] == "observation_generation_sweep"
@@ -625,8 +689,7 @@ async def test_purge_removes_only_aged_resolved_rows(
     """retention이 지난 ``resolved``만 삭제하고 ``acknowledged``/``open``은 남긴다."""
     await sync_integrity_findings(
         migrated_session,
-        provider=_PROVIDER,
-        dataset_key=_DATASET,
+        provider_dataset_id=await _dataset_id(migrated_session),
         findings=[
             _finding("a"),
             _finding("b"),
@@ -638,16 +701,16 @@ async def test_purge_removes_only_aged_resolved_rows(
         text(
             "update ops.data_integrity_violations "
             "set status='resolved', resolved_at = now() - interval '200 days' "
-            "where provider = :p and payload->>'dedupe_key' = :k"
+            "where provider_dataset_id = :p and payload->>'dedupe_key' = :k"
         ),
-        {"p": _PROVIDER, "k": keys[0]},
+        {"p": await _dataset_id(migrated_session), "k": keys[0]},
     )
     await migrated_session.execute(
         text(
             "update ops.data_integrity_violations set status='acknowledged' "
-            "where provider = :p and payload->>'dedupe_key' = :k"
+            "where provider_dataset_id = :p and payload->>'dedupe_key' = :k"
         ),
-        {"p": _PROVIDER, "k": keys[1]},
+        {"p": await _dataset_id(migrated_session), "k": keys[1]},
     )
 
     purged = await purge_resolved_integrity_findings(
