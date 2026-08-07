@@ -109,8 +109,20 @@ async def test_distinct_sync_scope_independent(
         sync_scope="b",
         cursor={"last_modified_date": "2026-09-09"},
     )
-    a = await get_sync_state(migrated_session, provider=_P, dataset_key=_D, operation_key=_O, sync_scope="a")
-    b = await get_sync_state(migrated_session, provider=_P, dataset_key=_D, operation_key=_O, sync_scope="b")
+    a = await get_sync_state(
+        migrated_session,
+        provider=_P,
+        dataset_key=_D,
+        operation_key=_O,
+        sync_scope="a",
+    )
+    b = await get_sync_state(
+        migrated_session,
+        provider=_P,
+        dataset_key=_D,
+        operation_key=_O,
+        sync_scope="b",
+    )
     assert a is not None
     assert b is not None
     assert a.cursor == {"last_modified_date": "2026-01-01"}
