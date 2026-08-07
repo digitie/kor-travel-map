@@ -19,7 +19,7 @@ from sqlalchemy import text
 from kortravelmap.core.feature_operation import FeatureOperationInvariantConflict
 from kortravelmap.infra.advisory_lock import advisory_lock
 from kortravelmap.infra.feature_update_repo import (  # noqa: PLC2701 - EXPLAIN 대상 SQL
-    _LIST_PROVIDER_DATASET_REQUESTS_SQL,
+    _LIST_REQUESTS_SQL,
     FEATURE_UPDATE_JOB_KIND,
     FeatureUpdateLockBusy,
     FeatureUpdateRequest,
@@ -990,34 +990,73 @@ async def test_list_update_requests_filters_by_scope_provider_dataset_and_time(
         provider_dataset.request_id
     ]
 
-
-async def test_provider_dataset_list_filter_uses_typed_and_gin_seed_indexes(
+async def test_provider_dataset_list_filter_reads_membership_not_denormalized_arrays(
     migrated_session: AsyncSession,
 ) -> None:
+    """provider filter가 membership 인덱스를 타고 큰 테이블을 Seq Scan하지 않는다.
+
+    T-VN-33 전에는 ``feature_update_requests``가 ``providers``/``dataset_keys``
+    text[]를 들고 GIN 두 개로 걸렀다. 사본을 없앴으므로 그 인덱스도 없어졌고
+    (0091이 drop) 판정 대상은 membership 경로다.
+
+    실측(4,000 request / target 20건, prod 복원본 위): Postgres가 상관 EXISTS를
+    hashed SubPlan으로 바꿔 membership 집합을 **한 번** 만든 뒤
+    ``feature_update_requests``를 created_at 역순으로 훑는다 — buffers 405,
+    ``idx_feature_update_request_datasets_dataset_request``에서 Heap Fetches 0.
+    이 fixture는 prod 전체 import job 이력(986건)의 4배다.
+    """
+
     await migrated_session.execute(
         text(
             """
-            INSERT INTO ops.import_jobs (
-              job_id, kind, payload, status, provider, dataset_key, sync_scope,
-              trigger_kind
+            INSERT INTO provider_sync.provider_datasets (
+              provider, dataset_key, display_name, source_kind, is_active, capabilities
+            ) VALUES
+              ('target-provider', 'target-dataset', 'target', 'system', true,
+               '{"schema_version":1,"produces":[],"extensions":{}}'::jsonb),
+              ('other-provider', 'other-dataset', 'other', 'system', true,
+               '{"schema_version":1,"produces":[],"extensions":{}}'::jsonb)
+            ON CONFLICT (provider, dataset_key) DO NOTHING
+            """
+        )
+    )
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO provider_sync.provider_dataset_operations (
+              provider_dataset_id, operation_key, operation_kind, is_enabled, config
             )
+            SELECT provider_dataset_id, 'feature_update', 'refresh', true, '{}'::jsonb
+            FROM provider_sync.provider_datasets
+            WHERE provider IN ('target-provider', 'other-provider')
+            ON CONFLICT DO NOTHING
+            """
+        )
+    )
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO provider_sync.provider_dataset_operation_scopes (
+              provider_dataset_id, sync_scope, operation_key, operation_kind
+            )
+            SELECT provider_dataset_id, 'dataset_wide', 'feature_update', 'refresh'
+            FROM provider_sync.provider_datasets
+            WHERE provider IN ('target-provider', 'other-provider')
+            ON CONFLICT DO NOTHING
+            """
+        )
+    )
+    # job은 done으로 심는다. active request는 (dataset, scope, operation)당 하나만
+    # 허용되므로(``assert_feature_update_request_member_available``) 깊은 이력은
+    # 정의상 종료된 request들이다.
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO ops.import_jobs (job_id, kind, payload, status, created_at)
             SELECT
               ('51000000-0000-4000-8000-' || lpad(seed.n::text, 12, '0'))::uuid,
               'feature_update_request', '{}'::jsonb, 'done',
-              CASE WHEN seed.n <= 200 THEN 'target-provider'
-                   ELSE 'direct-provider-' || seed.n::text END,
-              CASE WHEN seed.n % 20 = 0 THEN 'target-dataset'
-                   ELSE 'direct-dataset-' || seed.n::text END,
-              'dataset_wide',
-              'update_request'
-            FROM generate_series(1, 4000) AS seed(n)
-
-            UNION ALL
-
-            SELECT
-              ('52000000-0000-4000-8000-' || lpad(seed.n::text, 12, '0'))::uuid,
-              'feature_update_request', '{}'::jsonb, 'done',
-              NULL, NULL, NULL, 'update_request'
+              now() - (seed.n || ' minutes')::interval
             FROM generate_series(1, 4000) AS seed(n)
             """
         )
@@ -1026,54 +1065,49 @@ async def test_provider_dataset_list_filter_uses_typed_and_gin_seed_indexes(
         text(
             """
             INSERT INTO ops.feature_update_requests (
-              request_id, scope_type, scope, providers, dataset_keys,
-              run_mode, job_id
+              request_id, scope_type, scope, run_mode, job_id, created_at
             )
             SELECT
               ('61000000-0000-4000-8000-' || lpad(seed.n::text, 12, '0'))::uuid,
-              'provider_dataset',
-              jsonb_build_object(
-                'type', 'provider_dataset',
-                'provider', CASE WHEN seed.n <= 200 THEN 'target-provider'
-                                 ELSE 'direct-provider-' || seed.n::text END,
-                'dataset_key', CASE WHEN seed.n % 20 = 0 THEN 'target-dataset'
-                                    ELSE 'direct-dataset-' || seed.n::text END
-              ),
-              '{}'::text[], '{}'::text[], 'queued',
-              ('51000000-0000-4000-8000-' || lpad(seed.n::text, 12, '0'))::uuid
+              'feature_ids', '{"type":"feature_ids","feature_ids":[]}'::jsonb, 'queued',
+              ('51000000-0000-4000-8000-' || lpad(seed.n::text, 12, '0'))::uuid,
+              now() - (seed.n || ' minutes')::interval
             FROM generate_series(1, 4000) AS seed(n)
-
-            UNION ALL
-
+            """
+        )
+    )
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO ops.feature_update_request_datasets (
+              request_id, provider_dataset_id, sync_scope, operation_key
+            )
             SELECT
-              ('62000000-0000-4000-8000-' || lpad(seed.n::text, 12, '0'))::uuid,
-              'feature_ids', '{"type":"feature_ids","feature_ids":[]}'::jsonb,
-              CASE WHEN seed.n <= 200 THEN ARRAY['target-provider']::text[]
-                   ELSE ARRAY['array-provider-' || seed.n::text]::text[] END,
-              CASE WHEN seed.n % 20 = 0 THEN ARRAY['target-dataset']::text[]
-                   ELSE ARRAY['array-dataset-' || seed.n::text]::text[] END,
-              'queued',
-              ('52000000-0000-4000-8000-' || lpad(seed.n::text, 12, '0'))::uuid
+              ('61000000-0000-4000-8000-' || lpad(seed.n::text, 12, '0'))::uuid,
+              (
+                SELECT provider_dataset_id FROM provider_sync.provider_datasets
+                WHERE provider = CASE WHEN seed.n % 200 = 0
+                                      THEN 'target-provider' ELSE 'other-provider' END
+              ),
+              'dataset_wide', 'feature_update'
             FROM generate_series(1, 4000) AS seed(n)
             """
         )
     )
     await migrated_session.execute(text("ANALYZE ops.import_jobs"))
     await migrated_session.execute(text("ANALYZE ops.feature_update_requests"))
+    await migrated_session.execute(
+        text("ANALYZE ops.feature_update_request_datasets")
+    )
 
     plan = (
         await migrated_session.execute(
-            text(
-                "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) "
-                + _LIST_PROVIDER_DATASET_REQUESTS_SQL
-            ),
+            text("EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) " + _LIST_REQUESTS_SQL),
             {
                 "status": None,
                 "scope_type": None,
                 "provider": "target-provider",
-                "provider_filter": ["target-provider"],
                 "dataset_key": "target-dataset",
-                "dataset_key_filter": ["target-dataset"],
                 "created_from": None,
                 "created_to": None,
                 "cursor_created_at": None,
@@ -1096,9 +1130,10 @@ async def test_provider_dataset_list_filter_uses_typed_and_gin_seed_indexes(
         for node in nodes
         if node.get("Index Name") is not None
     }
-    assert "idx_import_jobs_provider_dataset_created" in used_indexes
-    assert "idx_feature_update_providers_gin" in used_indexes
-    assert "idx_feature_update_dataset_keys_gin" in used_indexes
+    assert "idx_feature_update_request_datasets_dataset_request" in used_indexes
+    # 비정규화 배열과 함께 사라진 인덱스가 되살아나지 않았는지도 본다.
+    assert "idx_feature_update_providers_gin" not in used_indexes
+    assert "idx_feature_update_dataset_keys_gin" not in used_indexes
 
 
 async def test_invalid_cursor_raises(migrated_session: AsyncSession) -> None:

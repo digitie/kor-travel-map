@@ -18,7 +18,7 @@ from sqlalchemy.exc import DBAPIError, IntegrityError
 from kortravelmap.infra import curated_repo
 from kortravelmap.infra.curation_repo import (
     _GET_COLLECTION_ID_BY_KEY_SQL,  # noqa: PLC2701 - concurrency regression
-    _GET_SOURCE_ID_BY_KEY_SQL,  # noqa: PLC2701 - concurrency regression
+    _GET_SOURCE_ID_BY_DATASET_ID_SQL,  # noqa: PLC2701 - concurrency regression
     _LIST_FEATURE_ITEMS_SQL,  # noqa: PLC2701 - EXPLAIN 대상
     _RESOLVE_FEATURES_BATCH_SQL,  # noqa: PLC2701 - EXPLAIN 대상
     _UPSERT_COLLECTION_SQL,  # noqa: PLC2701 - concurrency regression
@@ -2844,9 +2844,29 @@ async def test_source_and_collection_fallbacks_see_concurrent_identical_insert(
 
     suffix = uuid4().hex
     theme_slug = f"concurrent-import-foundation-{suffix}"
+    async with AsyncSession(migrated_engine, expire_on_commit=False) as catalog:
+        provider_dataset_id = int(
+            (
+                await catalog.execute(
+                    text(
+                        """
+                        INSERT INTO provider_sync.provider_datasets (
+                            provider, dataset_key, display_name, source_kind,
+                            is_active, capabilities
+                        ) VALUES (
+                            :provider, 'dataset', 'concurrent', 'system', true,
+                            '{"schema_version":1,"produces":[],"extensions":{}}'::jsonb
+                        )
+                        RETURNING provider_dataset_id
+                        """
+                    ),
+                    {"provider": f"concurrent-source-{suffix}"},
+                )
+            ).scalar_one()
+        )
+        await catalog.commit()
     source_params = {
-        "provider": f"concurrent-source-{suffix}",
-        "dataset_key": "dataset",
+        "provider_dataset_id": provider_dataset_id,
         "source_name": "동시 생성 출처",
         "source_url": None,
     }
@@ -2870,10 +2890,10 @@ async def test_source_and_collection_fallbacks_see_concurrent_identical_insert(
                     text(
                         """
                         INSERT INTO feature.curated_sources (
-                            provider, dataset_key, source_name, source_url,
+                            provider_dataset_id, source_name, source_url,
                             source_kind, update_cycle, provider_status, metadata
                         ) VALUES (
-                            :provider, :dataset_key, :source_name, :source_url,
+                            :provider_dataset_id, :source_name, :source_url,
                             'manual', 'unknown', 'manual_only', '{}'::jsonb
                         )
                         RETURNING source_id::text
@@ -2888,7 +2908,7 @@ async def test_source_and_collection_fallbacks_see_concurrent_identical_insert(
             _upsert_id_with_fallback(
                 second_session,
                 upsert_sql=_UPSERT_SOURCE_SQL,
-                lookup_sql=_GET_SOURCE_ID_BY_KEY_SQL,
+                lookup_sql=_GET_SOURCE_ID_BY_DATASET_ID_SQL,
                 params=source_params,
                 entity="test source",
             )
