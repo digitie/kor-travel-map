@@ -3046,17 +3046,24 @@ class OfflineUploadRow(Base):
             "(status = 'deleting') = (delete_command_id IS NOT NULL)",
             name="ck_offline_uploads_delete_owner",
         ),
+        # offline upload도 실행 membership이라 scope PK와 같은 triple을 참조한다
+        # (ADR-088 §결정 2). pair FK로 두면 scope PK가 triple인 이상 붙지 않는다.
         ForeignKeyConstraint(
-            ["provider_dataset_id", "sync_scope"],
+            ["provider_dataset_id", "sync_scope", "operation_key"],
             [
                 "provider_sync.provider_dataset_operation_scopes.provider_dataset_id",
                 "provider_sync.provider_dataset_operation_scopes.sync_scope",
+                "provider_sync.provider_dataset_operation_scopes.operation_key",
             ],
-            name="fk_offline_uploads_scope",
+            name="fk_offline_uploads_exact_operation_scope",
         ),
+        # 멱등 키에도 operation_key가 들어간다. pair로 두면 같은 파일을 서로 다른
+        # operation에 올리는 정상 흐름이 충돌로 막힌다 — cutover 전에는 operation
+        # 구분 자체가 없었으므로 잃는 보증은 없다.
         UniqueConstraint(
             "provider_dataset_id",
             "sync_scope",
+            "operation_key",
             "checksum_sha256",
             name="uq_offline_uploads_dataset_scope_checksum",
         ),
@@ -3080,6 +3087,7 @@ class OfflineUploadRow(Base):
         nullable=False,
         server_default=text("'dataset_wide'"),
     )
+    operation_key: Mapped[str] = mapped_column(Text, nullable=False)
     original_filename: Mapped[str] = mapped_column(Text, nullable=False)
     storage_backend: Mapped[str] = mapped_column(Text, nullable=False)
     storage_key: Mapped[str] = mapped_column(Text, nullable=False)

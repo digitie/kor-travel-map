@@ -149,10 +149,11 @@ def test_source_record_params_serializes_raw_data() -> None:
         raw_data={"a": 1, "b": "값"},
         fetched_at=_NOW,
     )
-    params = _source_record_params(record)
+    params = _source_record_params(record, provider_dataset_id=7)
 
     assert params["source_record_key"] == "sr_key1"
     assert params["provider"] == "python-datagokr-api"
+    assert params["provider_dataset_id"] == 7
     loaded = json.loads(params["raw_data"])
     assert loaded == {"a": 1, "b": "값"}
 
@@ -164,14 +165,15 @@ def test_source_link_params_maps_enum_value() -> None:
         source_role=SourceRole.PRIMARY,
         match_method="natural_key",
         confidence=100,
-        is_primary_source=True,
         created_at=_NOW,
     )
     params = _source_link_params(link)
 
     assert params["source_role"] == "primary"
     assert params["confidence"] == 100
-    assert params["is_primary_source"] is True
+    # ``is_primary_source``는 T-VN-33에서 ``source_role``로 흡수됐다 —
+    # 같은 사실을 두 컬럼에 적으면 서로 어긋날 수 있어 파생 컬럼을 없앴다.
+    assert "is_primary_source" not in params
 
 
 def test_feature_load_result_defaults_zero() -> None:
@@ -204,8 +206,8 @@ def test_notice_reconcile_reranks_only_out_of_scope_feature_lineages(
     normalized = " ".join(out_of_scope.split())
 
     assert (
-        "sr.provider <> :provider OR sr.dataset_key <> :dataset_key OR "
-        "sr.source_entity_type <> :source_entity_type"
+        "dataset.provider <> :provider OR dataset.dataset_key <> :dataset_key OR "
+        "se.source_entity_type <> :source_entity_type"
     ) in normalized
     assert "FROM out_of_scope_feature_lineages AS current_notice" in sql
     assert "FROM global_feature_lineages AS current_notice" not in sql
@@ -265,10 +267,13 @@ def test_current_notice_filter_reads_the_stored_lineage_column() -> None:
     """
     current = feature_repo.public_active_notice_filter_sql("f")
 
-    assert (
-        "COALESCE(other_sr.lineage_key, other_sr.source_entity_id)"
-        " = COALESCE(cur_sr.lineage_key, cur_sr.source_entity_id)"
-    ) in current
+    # T-VN-33에서 계보는 ``source_records``에서 ``source_entity_heads``로 옮겼다.
+    # ``COALESCE(head.lineage_key, entity.source_entity_id)``는 **두 테이블에**
+    # 걸쳐 있어 어떤 인덱스도 못 태운다(EXPLAIN에서 index 노드 0개). 그래서
+    # head에 완전 물화하고 필터는 컬럼을 그대로 읽는다.
+    assert "other_head.lineage_key = current_notice.lineage_key" in current
+    assert "cur_head.lineage_key AS lineage_key" in current
+    assert "COALESCE(" not in current
     assert "raw_data" not in current
     assert "concat_ws" not in current
 
@@ -285,8 +290,8 @@ def test_current_notice_filter_keeps_the_ordering_test_indexable() -> None:
     normalized = " ".join(current.split())
 
     assert (
-        "(other_sr.last_seen_at, other_sr.source_record_key)"
-        " > (cur_sr.last_seen_at, cur_sr.source_record_key)"
+        "(other_head.observed_at, other_sr.source_record_key)"
+        " > (current_notice.seen_at, current_notice.source_record_key)"
     ) in normalized
     assert current.count("HAVING bool_and(") == 1
     # 죽은 COALESCE가 남으면 인덱스 열과 맞지 않는다 — last_seen_at은 NOT NULL이다.

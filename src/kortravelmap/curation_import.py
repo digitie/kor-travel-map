@@ -16,7 +16,8 @@ CURATION_CSV_HEADERS: Final[tuple[str, ...]] = (
     "title",
     "edition_key",
     "subcourse",
-    "provider_dataset_id",
+    "provider",
+    "dataset_key",
     "source_name",
     "source_url",
     "source_item_key",
@@ -41,16 +42,13 @@ _REQUIRED_VALUES: Final[tuple[str, ...]] = (
     "theme_name",
     "theme_group",
     "title",
-    "provider_dataset_id",
+    "provider",
+    "dataset_key",
     "source_name",
     "source_item_key",
     "source_component_key",
 )
-_INTEGER_COLUMNS: Final[tuple[str, ...]] = (
-    "provider_dataset_id",
-    "official_ordinal",
-    "sort_order",
-)
+_INTEGER_COLUMNS: Final[tuple[str, ...]] = ("official_ordinal", "sort_order")
 
 
 @dataclass(frozen=True)
@@ -76,7 +74,8 @@ class CurationImportRow:
     title: str
     edition_key: str
     subcourse: str
-    provider_dataset_id: int | None
+    provider: str
+    dataset_key: str
     source_name: str
     source_url: str
     source_item_key: str
@@ -302,7 +301,8 @@ def _parse_row(
         title=values["title"],
         edition_key=values["edition_key"],
         subcourse=values["subcourse"],
-        provider_dataset_id=integers["provider_dataset_id"],
+        provider=values["provider"],
+        dataset_key=values["dataset_key"],
         source_name=values["source_name"],
         source_url=values["source_url"],
         source_item_key=values["source_item_key"],
@@ -349,16 +349,6 @@ def _parse_integer(
             )
         )
         return None
-    if column == "provider_dataset_id" and parsed == 0:
-        issues.append(
-            CurationImportIssue(
-                code="non_positive_provider_dataset_id",
-                message="provider_dataset_id는 1 이상의 정수여야 합니다.",
-                row_number=row_number,
-                column=column,
-            )
-        )
-        return None
     if parsed > CURATION_INTEGER_MAX:
         issues.append(
             CurationImportIssue(
@@ -377,7 +367,7 @@ def _validate_collection_consistency(
 ) -> list[CurationImportRow]:
     """같은 collection_key가 서로 다른 묶음 정의로 덮어쓰이지 않게 한다."""
 
-    signatures: dict[str, tuple[object, ...]] = {}
+    signatures: dict[str, tuple[str, ...]] = {}
     item_identities: set[tuple[str, str, str]] = set()
     resolved_targets: set[tuple[str, str, str]] = set()
     validated: list[CurationImportRow] = []
@@ -388,7 +378,8 @@ def _validate_collection_consistency(
             row.theme_group,
             row.title,
             row.edition_key,
-            row.provider_dataset_id,
+            row.provider,
+            row.dataset_key,
             row.source_name,
             row.source_url,
         )

@@ -111,18 +111,22 @@ class CurationProvenance:
 def requires_lighthouse_provenance(
     rows: Sequence[CurationImportRow],
     *,
-    lighthouse_provider_dataset_ids: Collection[int] = (),
+    lighthouse_dataset_pairs: Collection[tuple[str, str]] = (),
 ) -> bool:
     """저장소 공식 등대 seed이면 sidecar를 반드시 요구한다.
 
-    CSV에는 provider/dataset 자연키를 허용하지 않는다. 호출자는 catalog에서 확인한
-    canonical dataset ID만 이 순수 검증기에 전달한다.
+    판정 축은 ``(provider, dataset_key)`` 자연키다. ``provider_dataset_id``는
+    ``GENERATED ALWAYS AS IDENTITY``라 DB마다 값이 다르고, 0089의 legacy sweep은
+    그 DB에 실제로 있던 데이터까지 훑어 seed하므로 순서도 재현되지 않는다. 반면
+    이 CSV는 저장소에 sha로 고정돼 어느 DB에나 그대로 적용되므로, surrogate를
+    파일에 박으면 다른 DB에서 **다른 dataset을 가리킨다**. 호출자가 catalog에서
+    등대 pair를 확인해 넘긴다.
     """
 
-    lighthouse_ids = frozenset(lighthouse_provider_dataset_ids)
+    lighthouse_pairs = frozenset(lighthouse_dataset_pairs)
     return any(
         row.collection_key.startswith(LIGHTHOUSE_COLLECTION_PREFIX)
-        or row.provider_dataset_id in lighthouse_ids
+        or (row.provider, row.dataset_key) in lighthouse_pairs
         for row in rows
     )
 

@@ -90,6 +90,7 @@ async def test_feature_update_job_writer_rejects_noncanonical_scope_before_sql()
             ImportJobDatasetTarget(
                 provider_dataset_id=1,
                 sync_scope=invalid_scope,
+                operation_key="mois_license_features_bulk_refresh",
             )
 
 

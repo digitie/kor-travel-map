@@ -53,6 +53,7 @@ def _state_row(**over: Any) -> dict[str, Any]:
         "provider": "python-mois-api",
         "dataset_key": "mois_license_features_bulk",
         "sync_scope": "dataset_wide",
+        "operation_key": "mois_license_features_bulk_refresh",
         "status": "active",
         "cursor": {"last_modified_date": "2026-06-01"},
         "last_success_at": _NOW,
@@ -69,6 +70,7 @@ async def test_get_sync_state_present_and_missing() -> None:
         _Session([_state_row()]),  # type: ignore[arg-type]
         provider="python-mois-api",
         dataset_key="mois_license_features_bulk",
+        operation_key="mois_license_features_bulk_refresh",
     )
     assert state is not None
     assert state.provider_dataset_id == 42
@@ -78,6 +80,7 @@ async def test_get_sync_state_present_and_missing() -> None:
         _Session([]),  # type: ignore[arg-type]
         provider="x",
         dataset_key="y",
+        operation_key="op_missing",
     )
     assert missing is None
 
@@ -135,7 +138,12 @@ async def test_record_sync_failure_increments() -> None:
     )
     assert state.consecutive_failures == 3
     assert "cursor" not in session.calls[0]["params"]
-    assert "ON CONFLICT (provider_dataset_id, sync_scope)" in session.calls[0]["sql"]
+    # sync state의 정체성은 T-VN-33에서 triple로 올라갔다 (ADR-088 §결정 2) —
+    # pair로 남기면 서로 다른 operation의 커서가 한 행을 덮어쓴다.
+    assert (
+        "ON CONFLICT (provider_dataset_id, sync_scope, operation_key)"
+        in session.calls[0]["sql"]
+    )
 
 
 async def test_exact_operation_membership_sync_state_uses_full_refresh_identity() -> None:
@@ -185,6 +193,7 @@ async def test_row_to_state_empty_cursor(cursor: Any) -> None:
         _Session([_state_row(cursor=cursor)]),  # type: ignore[arg-type]
         provider="p",
         dataset_key="d",
+        operation_key="op_test",
     )
     assert state is not None
     assert state.cursor == {}

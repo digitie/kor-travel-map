@@ -50,6 +50,26 @@ _FORBIDDEN_SOURCE_LINEAGE_COLUMNS = {
 }
 
 
+def _frozen_h35_constants(tree: ast.Module) -> frozenset[int]:
+    """``_frozen_h35_*`` 안의 문자열은 이 검사에서 뺀다.
+
+    H35 리허설은 **0079 세대 스키마를 그대로 재생하는 것이 존재 이유**다. 그
+    세대에는 ``source_links.is_primary_source``가 실재했으므로, 그 SQL이 이 열을
+    읽는 것은 위반이 아니라 요구사항이다. 반대로 final 스키마 기준으로
+    "고쳐" 두면 리허설이 재생하는 표면이 달라져 목적을 잃는다.
+
+    이 면제가 안전한 이유는 frozen SQL이 별도로 **바이트로 못박혀** 있기 때문이다
+    (``test_frozen_h35_notice_filter_is_byte_stable``). 면제 범위가 조용히
+    넓어지면 그 sha가 먼저 깨진다.
+    """
+
+    frozen: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name.startswith("_frozen_h35_"):
+            frozen.update(id(child) for child in ast.walk(node))
+    return frozenset(frozen)
+
+
 def _production_source_lineage_sql_literals() -> list[tuple[Path, str]]:
     """정적 문자열 SQL만 검사해 DTO input 필드를 DB 열로 오인하지 않는다."""
 
@@ -61,7 +81,10 @@ def _production_source_lineage_sql_literals() -> list[tuple[Path, str]]:
     for root in _PRODUCTION_SOURCE_ROOTS:
         for path in root.rglob("*.py"):
             tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            frozen = _frozen_h35_constants(tree)
             for node in ast.walk(tree):
+                if id(node) in frozen:
+                    continue
                 if not isinstance(node, ast.Constant) or not isinstance(node.value, str):
                     continue
                 if any(marker in node.value for marker in table_markers) and sql_keyword.search(

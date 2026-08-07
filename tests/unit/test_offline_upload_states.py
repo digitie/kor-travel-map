@@ -100,13 +100,13 @@ def test_offline_upload_orm_checksum_idempotency_constraint_matches_migration() 
         constraint
         for constraint in OfflineUploadRow.__table__.constraints
         if isinstance(constraint, UniqueConstraint)
-        and constraint.name == "uq_offline_uploads_provider_dataset_scope_checksum"
+        and constraint.name == "uq_offline_uploads_dataset_scope_checksum"
     ]
 
     assert len(constraints) == 1
     assert [column.name for column in constraints[0].columns] == [
-        "provider",
-        "dataset_key",
+        "provider_dataset_id",
         "sync_scope",
+        "operation_key",
         "checksum_sha256",
     ]

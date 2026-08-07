@@ -190,34 +190,58 @@ def _metadata(row: CurationImportRow) -> dict[str, Any]:
     return metadata
 
 
-def _required_provider_dataset_id(row: CurationImportRow) -> int:
-    if row.provider_dataset_id is None:
-        raise RuntimeError("csv5_provider_dataset_id_invalid")
-    return row.provider_dataset_id
-
-
-async def _lighthouse_provider_dataset_ids(
+async def _provider_dataset_ids_by_pair(
     session: AsyncSession,
     rows: tuple[CurationImportRow, ...],
-) -> frozenset[int]:
-    candidate_ids = sorted(
+) -> dict[tuple[str, str], int]:
+    """CSV의 자연키를 이 DB의 surrogate로 해석한다 (질의 1회).
+
+    CSV가 자연키를 들고 있으므로 해석은 **적재 시점**에 한다. 해석 못 한 pair는
+    조용히 건너뛰지 않고 실패시킨다 — 통과시키면 curation이 대상 없이 적재된다.
+    """
+
+    pairs = sorted({(row.provider, row.dataset_key) for row in rows})
+    if not pairs:
+        return {}
+    result = await session.execute(
+        text(
+            "SELECT provider, dataset_key, provider_dataset_id "
+            "FROM provider_sync.provider_datasets "
+            "WHERE (provider, dataset_key) IN ("
+            "  SELECT unnest(CAST(:providers AS text[])), "
+            "         unnest(CAST(:dataset_keys AS text[]))"
+            ")"
+        ),
         {
-            row.provider_dataset_id
-            for row in rows
-            if row.provider_dataset_id is not None
-        }
+            "providers": [pair[0] for pair in pairs],
+            "dataset_keys": [pair[1] for pair in pairs],
+        },
     )
-    if not candidate_ids:
+    resolved = {
+        (str(row.provider), str(row.dataset_key)): int(row.provider_dataset_id)
+        for row in result
+    }
+    if missing := [pair for pair in pairs if pair not in resolved]:
+        raise RuntimeError(f"csv5_provider_dataset_unknown:{missing[0][0]}/{missing[0][1]}")
+    return resolved
+
+
+async def _lighthouse_dataset_pairs(
+    session: AsyncSession,
+    rows: tuple[CurationImportRow, ...],
+) -> frozenset[tuple[str, str]]:
+    candidates = sorted({row.dataset_key for row in rows})
+    if not candidates:
         return frozenset()
     result = await session.execute(
         text(
-            "SELECT provider_dataset_id FROM provider_sync.provider_datasets "
-            "WHERE provider_dataset_id = ANY(CAST(:provider_dataset_ids AS bigint[])) "
+            "SELECT provider, dataset_key FROM provider_sync.provider_datasets "
+            "WHERE dataset_key = ANY(CAST(:dataset_keys AS text[])) "
             "AND dataset_key LIKE 'lighthouse-stamp-tour-season-%'"
         ),
-        {"provider_dataset_ids": candidate_ids},
+        {"dataset_keys": candidates},
     )
-    return frozenset(int(value) for value in result.scalars())
+    return frozenset((str(row.provider), str(row.dataset_key)) for row in result)
 
 
 async def _resolved_rows(
@@ -250,11 +274,11 @@ async def _resolved_rows(
         }
     elif requires_lighthouse_provenance(
         preview.rows,
-        lighthouse_provider_dataset_ids=await _lighthouse_provider_dataset_ids(
-            session, preview.rows
-        ),
+        lighthouse_dataset_pairs=await _lighthouse_dataset_pairs(session, preview.rows),
     ):
         raise RuntimeError("csv5_provenance_missing")
+
+    provider_dataset_ids = await _provider_dataset_ids_by_pair(session, preview.rows)
 
     requests = tuple(
         curation_repo.FeatureMatchRequest(
@@ -287,7 +311,7 @@ async def _resolved_rows(
                 theme_group=row.theme_group,
                 title=row.title,
                 edition_key=row.edition_key,
-                provider_dataset_id=_required_provider_dataset_id(row),
+                provider_dataset_id=provider_dataset_ids[(row.provider, row.dataset_key)],
                 source_name=row.source_name,
                 source_url=row.source_url or None,
                 source_item_key=row.source_item_key,

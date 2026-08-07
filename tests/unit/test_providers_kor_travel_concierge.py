@@ -122,7 +122,10 @@ async def test_kor_travel_concierge_youtube_item_to_feature_bundle() -> None:
     assert source_record.dataset_key == DATASET_KEY_YOUTUBE_PLACE_CANDIDATES
     assert source_record.source_entity_type == "extracted_place_candidate"
     assert source_record.source_entity_id == "123"
-    assert source_record.raw_payload_hash == "sha256:krtour-ai-hash"
+    # concierge는 ``sha256:<hex>``로 보내지만 저장 정본은 접두 없는 lowercase
+    # hex다 (T-VN-33 ``ck_source_records_payload_hash_canonical``). 안 벗기면
+    # 제약 validate가 막히므로 **받는 자리에서** 정규화한다.
+    assert source_record.raw_payload_hash == "krtour-ai-hash"
     assert source_record.raw_data["youtube"]["video_title"] == "제주 동쪽 여행"
 
     assert bundle.source_link.source_role is SourceRole.PRIMARY

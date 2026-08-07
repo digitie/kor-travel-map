@@ -355,6 +355,14 @@ def _freeze_feature_update_operation_memberships() -> None:
                 provider_dataset_id, sync_scope, operation_key
             ) ON DELETE RESTRICT;
 
+        -- 멱등 키도 같은 triple로 올린다. pair로 남기면 같은 파일을 서로 다른
+        -- operation에 올리는 정상 흐름이 충돌로 막힌다 (cutover 전에는 operation
+        -- 구분이 없었으므로 잃는 보증은 없다).
+        ALTER TABLE ops.offline_uploads
+            DROP CONSTRAINT IF EXISTS uq_offline_uploads_dataset_scope_checksum,
+            ADD CONSTRAINT uq_offline_uploads_dataset_scope_checksum
+            UNIQUE (provider_dataset_id, sync_scope, operation_key, checksum_sha256);
+
         ALTER TABLE provider_sync.provider_sync_state
             ADD COLUMN operation_key text;
         UPDATE provider_sync.provider_sync_state AS state
