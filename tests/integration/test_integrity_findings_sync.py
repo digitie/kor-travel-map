@@ -512,8 +512,7 @@ async def test_concurrent_scope_allocation_assigns_unique_monotonic_generations(
 ) -> None:
     """서로 다른 DB connection도 scope row fence에서 generation을 직렬화한다."""
 
-    provider = f"concurrent-{uuid4().hex}"
-    dataset = "generation-allocation"
+    dataset = f"generation-allocation-{uuid4().hex}"
 
     async def allocate(run_id: str) -> None:
         async with AsyncSession(migrated_engine) as session, session.begin():
