@@ -555,7 +555,7 @@ def _operation_key(tags: Mapping[str, str]) -> str | None:
 def _trigger_kind(tags: Mapping[str, str]) -> TriggerKind | None:
     raw = tags.get(_TRIGGER_KIND_TAG)
     if raw in TRIGGER_KIND_VALUES:
-        return cast(TriggerKind, raw)
+        return raw
     if tags.get(_ADMIN_MANUAL_TRIGGER_TAG) == "admin-ui":
         return "manual"
     return "schedule" if _operation_key(tags) is not None else None

@@ -24,11 +24,17 @@ from kortravelmap.dagster.assets import (
     run_feature_price_opinet_stations,
     run_feature_weather_airkorea_air_quality,
 )
+from kortravelmap.dagster.feature_operation_tracking import (
+    FeatureOperationExecutionGuard,
+)
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.client import AsyncKorTravelMapClient
 from kortravelmap.dto import Address, Coordinate
+from kortravelmap.providers.feature_operation_registry import (
+    FEATURE_OPERATION_HANDLERS,
+)
 from tests.integration._db_cleanup import truncate_committed_test_rows
 
 pytestmark = pytest.mark.integration
@@ -637,6 +643,14 @@ async def _run_asset(
     client: AsyncKorTravelMapClient,
     **resources: object,
 ) -> Any:
+    if "feature_operation_guard" not in resources:
+        # asset 이름과 operation key는 registry에서 1:1이다(`run_<asset>` ↔ `<asset>_job`).
+        # 등록된 operation일 때만 guard를 넣는다 — 그렇지 않은 helper asset은 그대로 둔다.
+        operation_key = f"{runner.__name__.removeprefix('run_')}_job"
+        if operation_key in FEATURE_OPERATION_HANDLERS:
+            resources["feature_operation_guard"] = await _guard_resource(
+                client, operation_key
+            )
     context = build_asset_context(
         resources={
             "kor_travel_map_client": client,
@@ -646,6 +660,31 @@ async def _run_asset(
         }
     )
     return await runner(context)
+
+
+async def _guard_resource(
+    client: AsyncKorTravelMapClient,
+    operation_key: str,
+) -> FeatureOperationExecutionGuard:
+    """asset이 sync-state를 쓰려면 feature-operation guard가 있어야 한다.
+
+    프로덕션에서는 ``run_tracked_feature_asset``이 실행 시작 시 이 guard를 넣는다.
+    sync state의 정체성이 triple이 된 뒤(ADR-088) provider/dataset label로는 어느
+    행인지 결정되지 않으므로, 직접 호출하는 테스트도 실행이 어느 operation인지
+    똑같이 선언해야 한다 — 역산 fallback은 두지 않는 것이 계약이다.
+    """
+
+    memberships = await client.resolve_feature_operation_memberships(
+        operation_key=operation_key,
+    )
+    return FeatureOperationExecutionGuard(
+        client=client,
+        instance=None,
+        operation_key=operation_key,
+        memberships=memberships,
+        dagster_run_id="00000000-0000-4000-8000-000000000001",
+        trigger_kind="schedule",
+    )
 
 
 @dataclass(frozen=True)
@@ -697,6 +736,9 @@ async def test_airkorea_asset_distinct_features_for_same_station_name(
             "fetched_at": _FETCHED,
             "airkorea_stations": stations,
             "airkorea_air_quality": measurements,
+            "feature_operation_guard": await _guard_resource(
+                map_client, "feature_weather_airkorea_air_quality_job"
+            ),
         }
     )
     result = await run_feature_weather_airkorea_air_quality(context)

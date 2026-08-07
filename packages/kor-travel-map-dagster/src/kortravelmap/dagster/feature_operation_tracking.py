@@ -105,7 +105,7 @@ def _operation_key(tags: Mapping[str, object]) -> str | None:
 def _trigger_kind(tags: Mapping[str, object]) -> TriggerKind | None:
     raw = tags.get(_TRIGGER_KIND_TAG)
     if raw in TRIGGER_KIND_VALUES:
-        return cast(TriggerKind, raw)
+        return raw
     if tags.get(_ADMIN_MANUAL_TRIGGER_TAG) == "admin-ui":
         return "manual"
     return "schedule" if _operation_key(tags) is not None else None
@@ -119,9 +119,22 @@ def _context_job_name(context: Any) -> str | None:
 
 
 def _context_run_id(context: Any) -> str | None:
-    run_id = getattr(getattr(context, "run", None), "run_id", None)
+    """run id를 얻되, 없으면 ``None``.
+
+    직접 호출된 asset context에서 ``.run``/``.run_id``는 ``AttributeError``가 아니라
+    ``DagsterInvalidPropertyError``를 던진다. ``getattr`` 기본값으로는 잡히지 않아
+    "없으면 None"이라는 이 함수의 계약이 깨졌다 — 예외도 부재로 본다.
+    """
+
+    def _probe(target: Any, name: str) -> Any:
+        try:
+            return getattr(target, name, None)
+        except Exception:  # noqa: BLE001 - 부재 신호가 예외로 오는 경로가 있다
+            return None
+
+    run_id = _probe(_probe(context, "run"), "run_id")
     if not isinstance(run_id, str):
-        run_id = getattr(context, "run_id", None)
+        run_id = _probe(context, "run_id")
     return run_id if isinstance(run_id, str) and run_id.strip() else None
 
 
