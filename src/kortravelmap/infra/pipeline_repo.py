@@ -90,7 +90,9 @@ class PipelineProviderDatasetIdentity:
     provider_dataset_id: int
     provider: str
     dataset_key: str
-    sync_scope: str | None
+    # membership identity는 triple이다(ADR-088 §결정 2) — 셋 다 non-null이다.
+    sync_scope: str
+    operation_key: str
     operation_member_id: str
     status: str
 
@@ -140,7 +142,8 @@ class PipelineDatasetLatestExecution:
 
     provider: str
     dataset_key: str
-    sync_scope: str | None
+    sync_scope: str
+    operation_key: str
     execution: PipelineExecution
     operation_member_id: str
     pair_status: str
@@ -491,6 +494,7 @@ request_provider_datasets AS (
         provider_dataset.provider,
         provider_dataset.dataset_key,
         member.sync_scope,
+        member.operation_key,
         member.feature_update_request_dataset_id AS operation_member_id,
         request.status
     FROM ops.feature_update_request_datasets AS member
@@ -506,6 +510,7 @@ job_provider_datasets AS (
         provider_dataset.provider,
         provider_dataset.dataset_key,
         member.sync_scope,
+        member.operation_key,
         member.import_job_dataset_id AS operation_member_id,
         root.status
     FROM root_job_members AS root
@@ -517,9 +522,11 @@ ranked_job_provider_datasets AS (
     SELECT
         member.*,
         ROW_NUMBER() OVER (
+            -- 실행 membership identity는 triple이다(ADR-088 §결정 2). scope까지만
+            -- partition하면 **operation만 다른 두 member가 하나로 뭉개진다**.
             PARTITION BY
                 member.root_kind, member.root_id,
-                member.provider_dataset_id, member.sync_scope
+                member.provider_dataset_id, member.sync_scope, member.operation_key
             ORDER BY member.depth DESC, member.created_at DESC, member.job_id DESC
         ) AS membership_rank
     FROM job_provider_datasets AS member
@@ -532,6 +539,7 @@ canonical_provider_datasets AS (
         provider,
         dataset_key,
         sync_scope,
+        operation_key,
         operation_member_id,
         status
     FROM request_provider_datasets
@@ -545,6 +553,7 @@ canonical_provider_datasets AS (
         provider,
         dataset_key,
         sync_scope,
+        operation_key,
         operation_member_id,
         status
     FROM ranked_job_provider_datasets
@@ -561,10 +570,11 @@ roots_with_identity AS (
                         'provider', pair.provider,
                         'dataset_key', pair.dataset_key,
                         'sync_scope', pair.sync_scope,
+                        'operation_key', pair.operation_key,
                         'operation_member_id', pair.operation_member_id,
                         'status', pair.status
                     )
-                    ORDER BY pair.provider_dataset_id, pair.sync_scope NULLS FIRST
+                    ORDER BY pair.provider_dataset_id, pair.sync_scope, pair.operation_key
                 )
                 FROM canonical_provider_datasets AS pair
                 WHERE pair.root_kind = root.kind AND pair.root_id = root.id
@@ -1017,11 +1027,15 @@ ranked_dataset_roots AS (
         pair.provider AS selected_provider,
         pair.dataset_key AS selected_dataset_key,
         pair.sync_scope AS selected_sync_scope,
+        pair.operation_key AS selected_operation_key,
         pair.operation_member_id AS selected_operation_member_id,
         pair.status AS selected_pair_status,
         pair.status IN ('queued', 'running') AS selected_is_active,
         ROW_NUMBER() OVER (
-            PARTITION BY pair.provider_dataset_id, pair.sync_scope
+            -- triple 단위로 최신 실행을 고른다. scope까지만 partition하면
+            -- operation만 다른 실행이 서로를 가린다(ADR-088 §결정 2).
+            PARTITION BY
+                pair.provider_dataset_id, pair.sync_scope, pair.operation_key
             ORDER BY root.created_at DESC, root.id DESC, root.kind DESC
         ) AS dataset_rank
     FROM roots_with_identity AS root
@@ -1043,6 +1057,7 @@ ranked_dataset_roots AS (
         pair.provider AS selected_provider,
         pair.dataset_key AS selected_dataset_key,
         pair.sync_scope AS selected_sync_scope,
+        pair.operation_key AS selected_operation_key,
         pair.operation_member_id AS selected_operation_member_id,
         pair.status AS selected_pair_status,
         pair.status IN ('queued', 'running') AS selected_is_active,
@@ -1050,6 +1065,7 @@ ranked_dataset_roots AS (
             PARTITION BY
                 pair.provider_dataset_id,
                 pair.sync_scope,
+                pair.operation_key,
                 (pair.status IN ('queued', 'running'))
             ORDER BY root.created_at DESC, root.id DESC, root.kind DESC
         ) AS dataset_rank
@@ -1080,6 +1096,7 @@ ranked_dataset_roots AS (
         pair.provider AS selected_provider,
         pair.dataset_key AS selected_dataset_key,
         pair.sync_scope AS selected_sync_scope,
+        pair.operation_key AS selected_operation_key,
         pair.operation_member_id AS selected_operation_member_id,
         pair.status AS selected_pair_status,
         pair.status IN ('queued', 'running') AS selected_is_active,
@@ -1087,6 +1104,7 @@ ranked_dataset_roots AS (
             PARTITION BY
                 pair.provider_dataset_id,
                 pair.sync_scope,
+                pair.operation_key,
                 (pair.status IN ('queued', 'running'))
             ORDER BY root.created_at DESC, root.id DESC, root.kind DESC
         ) AS dataset_rank
@@ -1187,7 +1205,8 @@ def _row_to_execution(row: Any) -> PipelineExecution:
             provider_dataset_id=int(item["provider_dataset_id"]),
             provider=str(item["provider"]),
             dataset_key=str(item["dataset_key"]),
-            sync_scope=(str(item["sync_scope"]) if item.get("sync_scope") is not None else None),
+            sync_scope=str(item["sync_scope"]),
+            operation_key=str(item["operation_key"]),
             operation_member_id=str(item["operation_member_id"]),
             status=str(item["status"]),
         )
@@ -1401,7 +1420,8 @@ def _row_to_dataset_execution(row: Any) -> PipelineDatasetLatestExecution:
     return PipelineDatasetLatestExecution(
         provider=str(row.selected_provider),
         dataset_key=str(row.selected_dataset_key),
-        sync_scope=(str(row.selected_sync_scope) if row.selected_sync_scope is not None else None),
+        sync_scope=str(row.selected_sync_scope),
+        operation_key=str(row.selected_operation_key),
         execution=_row_to_execution(row),
         operation_member_id=str(row.selected_operation_member_id),
         pair_status=str(row.selected_pair_status),

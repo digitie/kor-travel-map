@@ -366,6 +366,7 @@ def _execution_record(
                 provider=pair.provider,
                 dataset_key=pair.dataset_key,
                 sync_scope=pair.sync_scope,
+                operation_key=pair.operation_key,
                 operation_member_id=pair.operation_member_id,
                 status=pair.status,
             )

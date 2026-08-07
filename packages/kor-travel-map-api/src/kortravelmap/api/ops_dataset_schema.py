@@ -136,7 +136,11 @@ class OpsDatasetProviderDataset(BaseModel):
     provider_dataset_id: int = Field(ge=1)
     provider: str
     dataset_key: str
-    sync_scope: str | None
+    # 실행 membership identity는 triple이다(ADR-088 §결정 2). 셋 다 non-null이라야
+    # UI가 member를 구분해 표시하고 deep link를 만들 수 있다 — nullable로 두면
+    # operation만 다른 두 member가 화면에서 같은 행으로 보인다.
+    sync_scope: str
+    operation_key: str
     operation_member_id: UUID
     status: OperationState
 
