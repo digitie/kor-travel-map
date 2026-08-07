@@ -107,6 +107,25 @@ _DATASET_SEED: Final[tuple[tuple[str, str, str, str, str, str | None], ...]] = (
         "dataset_wide",
         "feature_weather_kma_mid_forecast_job",
     ),
+    # KMA 예보 operation이 격자 단위로 남기는 source record의 dataset이다. 자기
+    # operation은 없고(예보 operation이 대신 돈다) 쓰기만 받으므로
+    # ``_WRITE_TARGET_DATASETS``가 active로 만든다.
+    (
+        "python-kma-api",
+        "kma_ultra_short_grid",
+        "KMA 초단기 격자 관측 source record",
+        "weather",
+        "dataset_wide",
+        None,
+    ),
+    (
+        "python-kma-api",
+        "kma_short_grid",
+        "KMA 단기 격자 예보 source record",
+        "weather",
+        "dataset_wide",
+        None,
+    ),
     (
         "python-kma-api",
         "kma_weather_alerts",
@@ -504,6 +523,26 @@ _DATASET_SEED: Final[tuple[tuple[str, str, str, str, str, str | None], ...]] = (
 
 # Fixture preview는 Dagster refresh handler와 별도 operation이다. migration은
 # runtime registry를 읽지 않으므로, cutover 시점의 fixture 지원 쌍을 literal로 고정한다.
+# 자기 operation은 없지만 **source record를 직접 받는** dataset.
+#
+# `is_active`는 "operation handler가 있다"가 아니라 **"쓰기를 받을 수 있다"**를
+# 뜻한다. 두 축이 다르다는 것이 KMA에서 드러난다 — operation은
+# `kma_ultra_short_nowcast`/`kma_short_forecast` 같은 예보 단위인데, source record는
+# 격자 단위 `kma_*_grid`로 쓴다(`providers/kma.py`의 `KMA_*_GRID_DATASET_KEY`).
+# 이 집합이 없으면 두 격자가 legacy pair sweep으로 `is_active=false` seed되고,
+# cutover 직후 KMA 적재가 `ck_provider_dataset_active_write`로 전멸한다(prod에 실제
+# record 118행 존재). operation과 record의 dataset_key를 조인해 유도하려 하면
+# 이 4쌍에서 0행이 나오므로, 유도하지 않고 명시한다.
+_WRITE_TARGET_DATASETS: Final[frozenset[tuple[str, str]]] = frozenset(
+    {
+        ("python-kma-api", "kma_ultra_short_grid"),
+        ("python-kma-api", "kma_short_grid"),
+        ("python-airkorea-api", "airkorea_stations"),
+        ("python-mois-api", "mois_license_features_history"),
+    }
+)
+
+
 _FIXTURE_PREVIEW_DATASETS: Final[frozenset[tuple[str, str]]] = frozenset(
     {
         ("data.go.kr-standard", "datagokr_cultural_festivals"),
@@ -761,7 +800,8 @@ def _seed_provider_datasets() -> None:
                 "display_name": display_name,
                 "source_kind": _source_kind(provider),
                 "is_active": job_name is not None
-                or (provider, dataset_key) in _FIXTURE_PREVIEW_DATASETS,
+                or (provider, dataset_key) in _FIXTURE_PREVIEW_DATASETS
+                or (provider, dataset_key) in _WRITE_TARGET_DATASETS,
                 "capabilities": json.dumps(
                     {"schema_version": 1, "produces": [produced], "extensions": {}}
                 ),
@@ -1158,10 +1198,91 @@ def _expand_job_and_request_membership() -> None:
     )
 
 
+def _preflight_write_targets_are_active() -> None:
+    """실제로 lineage row를 가진 pair가 inactive로 seed되면 **중단**한다.
+
+    `is_active`는 "쓰기를 받을 수 있다"를 뜻하고, cutover 뒤 inactive dataset에
+    대한 INSERT/UPDATE는 `ck_provider_dataset_active_write`로 거부된다. 그런데
+    seed의 활성 판정은 operation handler 유무에서 출발하고, **operation의
+    dataset_key와 source record의 dataset_key는 같지 않다**(KMA 예보 operation이
+    격자 dataset에 record를 남긴다). 그래서 handler가 없는 write target이 조용히
+    inactive로 들어가 다음 적재부터 전멸시킬 수 있다 — 실제로 그 상태로 있었다.
+
+    `_WRITE_TARGET_DATASETS`가 알려진 것을 덮지만, 새 provider가 생기면 같은 일이
+    반복된다. 그래서 알고 있는 목록이 아니라 **DB에 실재하는 데이터**를 기준으로
+    검사한다. 여기서 걸리면 그 pair를 seed에 넣고 write target으로 표시할 것.
+    """
+    _preflight_or_raise(
+        "dataset has source lineage rows but would be seeded inactive",
+        """
+        SELECT dataset.provider, dataset.dataset_key
+        FROM provider_sync.provider_datasets AS dataset
+        WHERE NOT dataset.is_active
+          AND EXISTS (
+              SELECT 1
+              FROM provider_sync.source_entities AS entity
+              WHERE entity.provider = dataset.provider
+                AND entity.dataset_key = dataset.dataset_key
+          )
+        """,
+        "Add the pair to _DATASET_SEED and _WRITE_TARGET_DATASETS in this revision.",
+    )
+
+
+def _normalize_payload_hashes() -> None:
+    """외부 시스템이 붙인 알고리즘 접두를 벗겨 canonical hex로 만든다.
+
+    `raw_payload_hash`는 provider가 준 값을 그대로 저장한다
+    (`providers/kor_travel_concierge.py`의 `source_record.raw_payload_hash`).
+    concierge는 `sha256:<hex>` 형태로 보내므로 prod에 그 형태가 실재한다
+    (실측 1,481행, 전부 `kor-travel-concierge-youtube/youtube_place_candidates`).
+    0090이 `ck_source_records_payload_hash_canonical`(`^[0-9a-f]{1,64}$`)을
+    validate하면 그 행들에서 **중단된다** — 실제로 그렇게 막혔다.
+
+    `source_record_key`는 저장 후 opaque key이므로(단일 PR 설계 §2) 해시만 고쳐도
+    키는 그대로다. 접두 제거 후 비정본 0건·`uq_source_records` 충돌 0건을 prod
+    복원본에서 확인했고, 아래 preflight가 그 두 조건을 매 실행마다 다시 본다.
+    """
+    _preflight_or_raise(
+        "payload hash is not canonical even after stripping the algorithm prefix",
+        """
+        SELECT source_record_key
+        FROM provider_sync.source_records
+        WHERE NOT (
+            lower(regexp_replace(raw_payload_hash, '^(sha256|sha1|md5|sha512):', ''))
+            ~ '^[0-9a-f]{1,64}$'
+        )
+        """,
+        "Repair the payload hash at the provider, or rebuild from the final ETL.",
+    )
+    _preflight_or_raise(
+        "stripping the payload hash prefix would collide within uq_source_records",
+        """
+        SELECT provider, dataset_key, source_entity_type, source_entity_id
+        FROM provider_sync.source_records
+        GROUP BY provider, dataset_key, source_entity_type, source_entity_id,
+                 lower(regexp_replace(raw_payload_hash, '^(sha256|sha1|md5|sha512):', ''))
+        HAVING count(*) > 1
+        """,
+        "Deduplicate the conflicting source records before rerunning the migration.",
+    )
+    op.execute(
+        """
+        UPDATE provider_sync.source_records
+        SET raw_payload_hash =
+            lower(regexp_replace(raw_payload_hash, '^(sha256|sha1|md5|sha512):', ''))
+        WHERE raw_payload_hash <>
+            lower(regexp_replace(raw_payload_hash, '^(sha256|sha1|md5|sha512):', ''))
+        """
+    )
+
+
 def upgrade() -> None:
     _preflight_legacy_rows()
     _create_provider_dataset_schema()
     _seed_provider_datasets()
+    _preflight_write_targets_are_active()
+    _normalize_payload_hashes()
     _expand_lineage_and_ownership_columns()
     _preflight_scope_memberships()
     _expand_job_and_request_membership()

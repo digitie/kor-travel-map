@@ -486,6 +486,132 @@ def _rewrite_final_curation_source_rule_trigger() -> None:
     )
 
 
+def _move_notice_lineage_to_head() -> None:
+    """notice 계보 물화를 ``source_records``에서 ``source_entity_heads``로 옮긴다.
+
+    T-VN-37(ADR-087)은 계보 key를 ``source_records.lineage_key``에 물화하고
+    ``(COALESCE(lineage_key, source_entity_id), last_seen_at DESC,
+    source_record_key DESC)`` 표현식 인덱스로 경쟁자를 찾았다. 그 세 입력
+    (``source_entity_id``·``last_seen_at``·scope 3열)을 이 revision이 전부
+    폐기하므로 그대로 둘 수 없다 — 실제로 트리거의 ``UPDATE OF`` 열 목록이
+    ``DROP COLUMN provider``를 막는다.
+
+    옮길 자리는 head다. 이유가 두 가지다.
+
+    1. **깊이 무관.** ``source_records``는 payload **이력 전체**를 담는데 한 계보에서
+       실제로 경쟁하는 것은 entity당 current 하나뿐이다. 인덱스를 record에 두면
+       스캔이 이력 깊이에 비례하고, KMA 계보 key에는 시간 성분이 없어 그 깊이가
+       영원히 증가한다. head는 entity당 정확히 한 행이라 그 축이 사라진다.
+    2. **순서 축이 이미 여기 있다.** 승자 판정 축은 ``observed_at``이고 그것을
+       소유하는 것이 head다(ADR-088). record의 ``last_seen_at``은 폐기된다.
+
+    계보 값 자체는 여전히 record의 불변 ``raw_data``에서 나온다 — head가 가리키는
+    current record에서 계산해 head에 캐시한다. head가 움직이면 트리거가 다시
+    계산하므로 낡지 않는다.
+    """
+    _execute_sql_script(
+        """
+        DROP TRIGGER IF EXISTS trg_source_record_lineage_key
+            ON provider_sync.source_records;
+        DROP FUNCTION IF EXISTS provider_sync.set_source_record_lineage_key();
+        DROP INDEX IF EXISTS provider_sync.idx_source_records_lineage;
+        DROP FUNCTION IF EXISTS provider_sync.notice_lineage_key(
+            provider_sync.source_records
+        );
+        ALTER TABLE provider_sync.source_records DROP COLUMN IF EXISTS lineage_key;
+
+        ALTER TABLE provider_sync.source_entity_heads
+            ADD COLUMN lineage_key varchar;
+
+        CREATE FUNCTION provider_sync.notice_lineage_key(
+            head provider_sync.source_entity_heads
+        ) RETURNS text
+        LANGUAGE sql STABLE
+        AS $fn$
+            SELECT CASE
+              WHEN dataset.provider = 'python-krex-api'
+               AND dataset.dataset_key = 'krex_traffic_notices'
+               AND entity.source_entity_type = 'traffic_notice'
+              THEN COALESCE(
+                NULLIF(
+                  concat_ws(
+                    '::',
+                    NULLIF(lower(btrim(record.raw_data->>'occurred_date')), ''),
+                    NULLIF(lower(btrim(record.raw_data->>'occurred_time')), ''),
+                    NULLIF(lower(btrim(record.raw_data->>'route_no')), ''),
+                    NULLIF(lower(btrim(record.raw_data->>'direction')), ''),
+                    NULLIF(lower(btrim(record.raw_data->>'point_name')), ''),
+                    NULLIF(
+                      lower(btrim(record.raw_data->>'incident_type_code')), ''
+                    )
+                  ),
+                  ''
+                ),
+                entity.source_entity_id
+              )
+              WHEN dataset.provider = 'python-kma-api'
+               AND dataset.dataset_key = 'kma_weather_alerts'
+               AND entity.source_entity_type = 'weather_alert'
+              THEN COALESCE(
+                NULLIF(
+                  concat_ws(
+                    '::',
+                    NULLIF(btrim(record.raw_data->>'region_code'), ''),
+                    NULLIF(
+                      btrim(
+                        COALESCE(
+                          record.raw_data->>'phenomenon',
+                          record.raw_data->>'alert_type'
+                        )
+                      ),
+                      ''
+                    )
+                  ),
+                  ''
+                ),
+                entity.source_entity_id
+              )
+              ELSE NULL
+            END
+            FROM provider_sync.source_entities AS entity
+            JOIN provider_sync.provider_datasets AS dataset
+              ON dataset.provider_dataset_id = entity.provider_dataset_id
+            JOIN provider_sync.source_records AS record
+              ON record.source_record_key = head.current_source_record_key
+            WHERE entity.source_entity_key = head.source_entity_key
+        $fn$;
+
+        UPDATE provider_sync.source_entity_heads AS head
+        SET lineage_key = provider_sync.notice_lineage_key(head)
+        WHERE provider_sync.notice_lineage_key(head) IS NOT NULL;
+
+        CREATE FUNCTION provider_sync.set_source_entity_head_lineage_key()
+        RETURNS trigger LANGUAGE plpgsql AS $tg$
+        BEGIN
+            NEW.lineage_key := provider_sync.notice_lineage_key(NEW);
+            RETURN NEW;
+        END
+        $tg$;
+
+        CREATE TRIGGER trg_source_entity_head_lineage_key
+          BEFORE INSERT OR UPDATE OF current_source_record_key, lineage_key
+          ON provider_sync.source_entity_heads
+          FOR EACH ROW
+          EXECUTE FUNCTION provider_sync.set_source_entity_head_lineage_key();
+        ALTER TABLE provider_sync.source_entity_heads
+          ENABLE ALWAYS TRIGGER trg_source_entity_head_lineage_key;
+
+        CREATE INDEX idx_source_entity_heads_lineage
+          ON provider_sync.source_entity_heads (
+            lineage_key, observed_at DESC, current_source_record_key DESC
+          )
+          WHERE lineage_key IS NOT NULL;
+
+        ANALYZE provider_sync.source_entity_heads;
+        """
+    )
+
+
 def _drop_legacy_columns() -> None:
     _execute_sql_script(
         """
@@ -901,7 +1027,8 @@ def _create_membership_guard_functions() -> None:
 
         CREATE FUNCTION provider_sync.reject_inactive_import_job_dataset_membership()
         RETURNS trigger LANGUAGE plpgsql SET search_path = pg_catalog AS $$
-        DECLARE target_dataset_id bigint := COALESCE(NEW.provider_dataset_id, OLD.provider_dataset_id);
+        DECLARE target_dataset_id bigint :=
+            COALESCE(NEW.provider_dataset_id, OLD.provider_dataset_id);
             target_scope text := COALESCE(NEW.sync_scope, OLD.sync_scope);
             target_operation_key text := COALESCE(NEW.operation_key, OLD.operation_key);
         BEGIN
@@ -1059,7 +1186,8 @@ def _create_membership_guard_functions() -> None:
 
         CREATE FUNCTION provider_sync.reject_inactive_feature_update_request_dataset_membership()
         RETURNS trigger LANGUAGE plpgsql SET search_path = pg_catalog AS $$
-        DECLARE target_dataset_id bigint := COALESCE(NEW.provider_dataset_id, OLD.provider_dataset_id);
+        DECLARE target_dataset_id bigint :=
+            COALESCE(NEW.provider_dataset_id, OLD.provider_dataset_id);
             target_scope text := COALESCE(NEW.sync_scope, OLD.sync_scope);
             target_operation_key text := COALESCE(NEW.operation_key, OLD.operation_key);
         BEGIN
@@ -1089,7 +1217,8 @@ def _create_membership_guard_functions() -> None:
 
         CREATE FUNCTION provider_sync.reject_inactive_sync_state_operation()
         RETURNS trigger LANGUAGE plpgsql SET search_path = pg_catalog AS $$
-        DECLARE target_dataset_id bigint := COALESCE(NEW.provider_dataset_id, OLD.provider_dataset_id);
+        DECLARE target_dataset_id bigint :=
+            COALESCE(NEW.provider_dataset_id, OLD.provider_dataset_id);
             target_scope text := COALESCE(NEW.sync_scope, OLD.sync_scope);
             target_operation_key text := COALESCE(NEW.operation_key, OLD.operation_key);
         BEGIN
@@ -1604,6 +1733,7 @@ def upgrade() -> None:
     _replace_pre_tvn33_ownership_guards()
     _rename_runtime_operation_key()
     _freeze_feature_update_operation_memberships()
+    _move_notice_lineage_to_head()
     _drop_legacy_columns()
     _rewrite_final_curation_source_rule_trigger()
     _create_dataset_guard_functions()
