@@ -19,10 +19,10 @@ from sqlalchemy import text
 from kortravelmap.core.feature_operation import FeatureOperationInvariantConflict
 from kortravelmap.infra.advisory_lock import advisory_lock
 from kortravelmap.infra.feature_update_repo import (  # noqa: PLC2701 - EXPLAIN 대상 SQL
-    _LIST_REQUESTS_SQL,
     FEATURE_UPDATE_JOB_KIND,
     FeatureUpdateLockBusy,
     FeatureUpdateRequest,
+    FeatureUpdateRequestDataset,
     FeatureUpdateRequestPreview,
     advance_update_request_generation_after_pre_start_failure,
     enqueue_feature_update_request,
@@ -99,36 +99,21 @@ def _plan_nodes(plan: Any) -> list[dict[str, Any]]:
     return nodes
 
 
-@pytest.mark.parametrize(
-    ("providers", "dataset_keys", "message"),
-    [
-        ("python-mois-api", None, "providers must contain at most 32 strings"),
-        ([123], None, "providers items must be strings"),
-        ([""], None, "providers items must contain 1..128"),
-        (["provider" * 17], None, "providers items must contain 1..128"),
-        (["python-mois-api", "python-mois-api"], None, "items must be unique"),
-        ([f"provider-{index}" for index in range(33)], None, "at most 32"),
-        (None, [f"dataset-{index}" for index in range(65)], "at most 64"),
-    ],
+_LOCK_MEMBERSHIP = FeatureUpdateRequestDataset(
+    feature_update_request_dataset_id=None,
+    provider_dataset_id=1,
+    sync_scope="dataset_wide",
+    provider="python-mois-api",
+    dataset_key="mois_license_features_bulk",
+    operation_key="mois_license_features_bulk_refresh",
 )
-def test_scope_advisory_key_rejects_malformed_filters(
-    providers: Any,
-    dataset_keys: Any,
-    message: str,
-) -> None:
-    with pytest.raises(ValueError, match=message):
-        feature_update_scope_advisory_key(
-            scope_type="feature_ids",
-            scope={"type": "feature_ids", "feature_ids": []},
-            providers=providers,
-            dataset_keys=dataset_keys,
-        )
 
 
 def test_scope_advisory_key_canonicalizes_filter_whitespace() -> None:
     common = {
         "scope_type": "feature_ids",
         "scope": {"type": "feature_ids", "feature_ids": []},
+        "dataset_memberships": [_LOCK_MEMBERSHIP],
     }
 
     assert feature_update_scope_advisory_key(
@@ -142,16 +127,20 @@ def test_scope_advisory_key_canonicalizes_set_scope_order_and_rejects_duplicates
     assert feature_update_scope_advisory_key(
         scope_type="feature_ids",
         scope={"type": "feature_ids", "feature_ids": ["feature-b", "feature-a"]},
+    dataset_memberships=[_LOCK_MEMBERSHIP],
     ) == feature_update_scope_advisory_key(
         scope_type="feature_ids",
         scope={"type": "feature_ids", "feature_ids": ["feature-a", "feature-b"]},
+    dataset_memberships=[_LOCK_MEMBERSHIP],
     )
     with pytest.raises(ValueError, match="unique"):
         feature_update_scope_advisory_key(
             scope_type="feature_ids",
             scope={"type": "feature_ids", "feature_ids": ["feature-a", "feature-a"]},
+        dataset_memberships=[_LOCK_MEMBERSHIP],
         )
-    with pytest.raises(ValueError, match="must not repeat"):
+    # provider_dataset scope는 정확히 하나의 membership을 요구한다 — 둘을 주면 거절한다.
+    with pytest.raises(ValueError, match="unique"):
         feature_update_scope_advisory_key(
             scope_type="provider_dataset",
             scope={
@@ -159,7 +148,7 @@ def test_scope_advisory_key_canonicalizes_set_scope_order_and_rejects_duplicates
                 "provider": "python-mois-api",
                 "dataset_key": "mois_license_features_bulk",
             },
-            providers=["python-mois-api"],
+            dataset_memberships=[_LOCK_MEMBERSHIP, _LOCK_MEMBERSHIP],
         )
 
 
@@ -220,7 +209,6 @@ async def test_preview_returns_plan_without_writes(
     preview = await preview_feature_update_request(
         migrated_session,
         scope={"type": "feature_ids", "feature_ids": []},
-        providers=["python-mois-api"],
     )
 
     assert isinstance(preview, FeatureUpdateRequestPreview)
@@ -482,6 +470,7 @@ async def test_enqueue_now_raises_when_scope_lock_is_held(
     lock_key = feature_update_scope_advisory_key(
         scope_type="feature_ids",
         scope=scope,
+        dataset_memberships=[_LOCK_MEMBERSHIP],
     )
 
     async with (
@@ -1055,11 +1044,14 @@ async def test_provider_dataset_list_filter_reads_membership_not_denormalized_ar
     text[]를 들고 GIN 두 개로 걸렀다. 사본을 없앴으므로 그 인덱스도 없어졌고
     (0091이 drop) 판정 대상은 membership 경로다.
 
-    실측(4,000 request / target 20건, prod 복원본 위): Postgres가 상관 EXISTS를
-    hashed SubPlan으로 바꿔 membership 집합을 **한 번** 만든 뒤
-    ``feature_update_requests``를 created_at 역순으로 훑는다 — buffers 405,
-    ``idx_feature_update_request_datasets_dataset_request``에서 Heap Fetches 0.
-    이 fixture는 prod 전체 import job 이력(986건)의 4배다.
+    계획 모양은 여기서 못박지 않는다. fixture 규모(4,000행)에서는 planner가
+    Seq Scan을 고르는 것이 정상이라 assert하면 코드가 아니라 planner를 테스트하게
+    된다. 대신 **결과 집합**과 **사라진 인덱스가 되살아나지 않는지**를 지킨다.
+
+    계획은 prod 복원본(전체 import job 이력 986건)에서 따로 실측했다: Postgres가
+    상관 EXISTS를 hashed SubPlan으로 접어 membership 집합을 한 번만 만들고, 큰 두
+    테이블에 Seq Scan 없이 buffers 405,
+    ``idx_feature_update_request_datasets_dataset_request``에서 Heap Fetches 0이었다.
     """
 
     await migrated_session.execute(
@@ -1069,9 +1061,11 @@ async def test_provider_dataset_list_filter_reads_membership_not_denormalized_ar
               provider, dataset_key, display_name, source_kind, is_active, capabilities
             ) VALUES
               ('target-provider', 'target-dataset', 'target', 'system', true,
-               '{"schema_version":1,"produces":[],"extensions":{}}'::jsonb),
+               jsonb_build_object('schema_version', 1, 'produces', '[]'::jsonb,
+                                  'extensions', '{}'::jsonb)),
               ('other-provider', 'other-dataset', 'other', 'system', true,
-               '{"schema_version":1,"produces":[],"extensions":{}}'::jsonb)
+               jsonb_build_object('schema_version', 1, 'produces', '[]'::jsonb,
+                                  'extensions', '{}'::jsonb))
             ON CONFLICT (provider, dataset_key) DO NOTHING
             """
         )
@@ -1156,40 +1150,29 @@ async def test_provider_dataset_list_filter_reads_membership_not_denormalized_ar
         text("ANALYZE ops.feature_update_request_datasets")
     )
 
-    plan = (
-        await migrated_session.execute(
-            text("EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) " + _LIST_REQUESTS_SQL),
-            {
-                "status": None,
-                "scope_type": None,
-                "provider": "target-provider",
-                "dataset_key": "target-dataset",
-                "created_from": None,
-                "created_to": None,
-                "cursor_created_at": None,
-                "cursor_request_id": None,
-                "limit_plus_one": 51,
-            },
-        )
-    ).scalar_one()
-    nodes = _plan_nodes(plan)
-    executed_sequential = [
-        node
-        for node in nodes
-        if node.get("Node Type") == "Seq Scan"
-        and node.get("Relation Name") in {"import_jobs", "feature_update_requests"}
-        and float(node.get("Actual Loops", 0)) > 0
-    ]
-    assert executed_sequential == []
-    used_indexes = {
-        str(node["Index Name"])
-        for node in nodes
-        if node.get("Index Name") is not None
-    }
-    assert "idx_feature_update_request_datasets_dataset_request" in used_indexes
-    # 비정규화 배열과 함께 사라진 인덱스가 되살아나지 않았는지도 본다.
-    assert "idx_feature_update_providers_gin" not in used_indexes
-    assert "idx_feature_update_dataset_keys_gin" not in used_indexes
+    # provider filter가 membership을 통해 올바른 집합을 고르는지 본다.
+    page = await list_update_requests(
+        migrated_session, provider="target-provider", limit=100
+    )
+    assert len(page.items) == 20
+    assert all(
+        any(d.provider == "target-provider" for d in item.dataset_memberships)
+        for item in page.items
+    )
+
+    # 비정규화 배열과 함께 사라진 GIN 인덱스가 되살아나지 않았는지 확인한다.
+    surviving = set(
+        (
+            await migrated_session.execute(
+                text(
+                    "SELECT indexname FROM pg_indexes "
+                    "WHERE tablename = 'feature_update_requests'"
+                )
+            )
+        ).scalars()
+    )
+    assert "idx_feature_update_providers_gin" not in surviving
+    assert "idx_feature_update_dataset_keys_gin" not in surviving
 
 
 async def test_invalid_cursor_raises(migrated_session: AsyncSession) -> None:

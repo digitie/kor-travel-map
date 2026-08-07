@@ -1068,7 +1068,10 @@ def _create_membership_guard_functions() -> None:
         RETURNS trigger LANGUAGE plpgsql SET search_path = pg_catalog AS $$
         BEGIN
             PERFORM provider_sync.assert_import_job_members_active(OLD.job_id);
-            RETURN OLD;
+            IF TG_OP = 'DELETE' THEN
+                RETURN OLD;
+            END IF;
+            RETURN NEW;
         END;
         $$;
 
@@ -1223,7 +1226,10 @@ def _create_membership_guard_functions() -> None:
         RETURNS trigger LANGUAGE plpgsql SET search_path = pg_catalog AS $$
         BEGIN
             PERFORM provider_sync.assert_feature_update_request_members_active(OLD.request_id);
-            RETURN OLD;
+            IF TG_OP = 'DELETE' THEN
+                RETURN OLD;
+            END IF;
+            RETURN NEW;
         END;
         $$;
 

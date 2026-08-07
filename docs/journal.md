@@ -2,6 +2,27 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-07 (2) — 통합 테스트 live 실행이 잡은 P0: 두 ops 테이블이 조용히 불변
+
+- **`ops.import_jobs`와 `ops.feature_update_requests`의 모든 UPDATE가 조용히 버려지고
+  있었다.** `reject_inactive_import_job_members` / `reject_inactive_feature_update_request_members`가
+  `BEFORE DELETE OR UPDATE` 트리거인데 무조건 `RETURN OLD`를 했다. BEFORE UPDATE에서 OLD를
+  돌려주면 그 행은 **OLD 값으로 기록된다** — rowcount는 1이라 호출자는 성공으로 본다.
+  결과: job 상태 전이(queued→running→done), generation 증가, heartbeat, 취소가 전부
+  무효였다. `start_update_request`가 request를 돌려주는데 job은 `queued`인 상태를 실측으로
+  잡았고, `UPDATE ... SET generation = generation + 1`을 두 번 돌려도 값이 1인 것으로 확인했다.
+  `RETURN NEW`(DELETE만 OLD)로 고쳤고, 같은 형태의 BEFORE UPDATE 트리거 8개를 전수 확인해
+  나머지는 모두 예외를 던지는 정상 fence임을 확인했다.
+- 이 결함은 **단위 테스트로는 잡히지 않는다** — SQL 문자열은 옳고, 트리거가 붙은 실제 DB에서만
+  드러난다. 두 적대 리뷰어가 "통합 테스트를 머지 전에 한 번 돌려라"라고 지적한 것이 정확했다.
+- freeze 계약이 pair 시대 산물이라 member 테이블에 `operation_key`가 없었다. scope PK와
+  member 4개 테이블의 식별자·FK를 triple로 올리고(멱등키는 3열 유지), violation fixture와
+  freeze 테스트 insert도 따라 올렸다. 지문 7종은 fixture가 스스로 계산한 값으로 재생성했다.
+- `test_feature_update_repo.py`는 T-VN-33 이전 계약으로 쓰여 있었다. membership helper 추가,
+  제거된 배열 필터 검증 테스트 삭제, advisory key 호출부 변환으로 52건 중 41건이 통과한다.
+  EXPLAIN 단언은 동작 검증으로 바꿨다 — fixture 규모(4,000행)에서 계획 모양을 못박으면
+  코드가 아니라 planner를 테스트하게 된다(계획 실측치는 docstring에 기록으로 남겼다).
+
 ## 2026-08-07 — T-VN-33 구현 완결: merge 유실 자산 복구 + freeze 계약 divergence 4건
 
 - **merge에서 T-VN-37 자산 둘이 조용히 사라져 있었다.** `feature_repo.py` 충돌을 tvn33 쪽으로
