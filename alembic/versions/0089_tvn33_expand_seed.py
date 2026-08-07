@@ -107,6 +107,33 @@ _DATASET_SEED: Final[tuple[tuple[str, str, str, str, str, str | None], ...]] = (
         "dataset_wide",
         "feature_weather_kma_mid_forecast_job",
     ),
+    # place phone enrichment — provider를 호출자가 주고(`enrichment.py`) dataset_key는
+    # 고정이다. catalog에 없으므로 문서가 고정한 3종을 직접 seed한다. 자기 operation은
+    # 없고 record만 받으므로 `_WRITE_TARGET_DATASETS`가 active로 만든다.
+    (
+        "kakao-local-api",
+        "place_phone_enrichment",
+        "Kakao Local 전화번호 보강",
+        "place",
+        "dataset_wide",
+        None,
+    ),
+    (
+        "naver-search-api",
+        "place_phone_enrichment",
+        "Naver Search 전화번호 보강",
+        "place",
+        "dataset_wide",
+        None,
+    ),
+    (
+        "google-places-api-new",
+        "place_phone_enrichment",
+        "Google Places 전화번호 보강",
+        "place",
+        "dataset_wide",
+        None,
+    ),
     # KMA 예보 operation이 격자 단위로 남기는 source record의 dataset이다. 자기
     # operation은 없고(예보 operation이 대신 돈다) 쓰기만 받으므로
     # ``_WRITE_TARGET_DATASETS``가 active로 만든다.
@@ -539,6 +566,15 @@ _WRITE_TARGET_DATASETS: Final[frozenset[tuple[str, str]]] = frozenset(
         ("python-kma-api", "kma_short_grid"),
         ("python-airkorea-api", "airkorea_stations"),
         ("python-mois-api", "mois_license_features_history"),
+        ("python-mois-api", "mois_license_features_closed"),
+        ("python-mois-api", "mois_license_detail"),
+        # place phone enrichment은 provider를 **호출자가** 준다
+        # (`enrichment.py`의 `normalize_provider_name`). catalog에 나타나지 않으므로
+        # 문서(`docs/etl/place-phone-enrichment.md`)가 고정한 3종을 여기 박는다.
+        # 빠지면 적재가 `LookupError: no active provider dataset is seeded`로 죽는다.
+        ("kakao-local-api", "place_phone_enrichment"),
+        ("naver-search-api", "place_phone_enrichment"),
+        ("google-places-api-new", "place_phone_enrichment"),
     }
 )
 
@@ -852,8 +888,15 @@ def _seed_provider_datasets() -> None:
                 },
             )
 
-    # An old pair is evidence, never an implicit handler registration. The
-    # inactive row keeps lineage readable while rejecting every normal write.
+    # 코드 catalog 밖의 pair를 데이터에서 주워 담는다. handler 등록은 아니지만
+    # **소유 행이 있으면 active**여야 한다 — inactive는 그 행에 대한 모든 normal
+    # write를 영구히 거부하고(`assert_active_provider_dataset`), dataset identity는
+    # immutable이라 되돌리려면 새 migration이 필요하다.
+    #
+    # 실측으로 잡힌 것: 현재 시즌 curation source 11건(등대 스탬프투어 6, 한국관광
+    # 100선 2, 수목원, 국가유산 방문 캠페인, 특화거리)이 이 경로로 들어오는데
+    # handler가 없어 종전에는 전부 inactive였다. `_preflight_write_targets_are_active`
+    # 가 이제 그 상태를 fail-close로 잡는다.
     op.execute(
         f"""
         INSERT INTO provider_sync.provider_datasets (
@@ -864,7 +907,7 @@ def _seed_provider_datasets() -> None:
             dataset_key,
             provider || ' / ' || dataset_key,
             'system',
-            false,
+            true,
             '{{"schema_version" : 1,"produces":[],"extensions":{{}}}}'::jsonb
         FROM ({_LEGACY_PAIRS_SQL}) AS legacy_pair
         WHERE provider IS NOT NULL AND dataset_key IS NOT NULL
@@ -1213,19 +1256,18 @@ def _preflight_write_targets_are_active() -> None:
     검사한다. 여기서 걸리면 그 pair를 seed에 넣고 write target으로 표시할 것.
     """
     _preflight_or_raise(
-        "dataset has source lineage rows but would be seeded inactive",
-        """
+        "dataset owns live rows but would be seeded inactive",
+        f"""
         SELECT dataset.provider, dataset.dataset_key
         FROM provider_sync.provider_datasets AS dataset
         WHERE NOT dataset.is_active
-          AND EXISTS (
-              SELECT 1
-              FROM provider_sync.source_entities AS entity
-              WHERE entity.provider = dataset.provider
-                AND entity.dataset_key = dataset.dataset_key
+          AND (dataset.provider, dataset.dataset_key) IN (
+              SELECT provider, dataset_key FROM ({_LEGACY_PAIRS_SQL}) AS owned
+              WHERE provider IS NOT NULL AND dataset_key IS NOT NULL
           )
         """,
-        "Add the pair to _DATASET_SEED and _WRITE_TARGET_DATASETS in this revision.",
+        "Add the pair to _DATASET_SEED (and _WRITE_TARGET_DATASETS if it has no "
+        "operation of its own) in this revision.",
     )
 
 

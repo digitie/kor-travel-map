@@ -167,6 +167,83 @@ def _preflight() -> None:
 
 
 def _constraints() -> None:
+    # **재실행 안전.** 이 revision은 중간에 ``autocommit_block``으로 concurrent
+    # index를 만들기 때문에, 그 뒤에서 실패하면 여기까지의 DDL이 **0089 stamp 아래
+    # 커밋된 채** 남는다(`alembic/env.py`가 chain 전체를 한 트랜잭션으로 감싼다).
+    # 그 상태에서 재실행하면 종전에는 `DuplicateTableError`로 죽었고, `downgrade`는
+    # 설계상 예외를 던지므로 복구 경로가 없었다 — 적대 리뷰가 재현했다.
+    # 그래서 붙이기 전에 같은 이름을 먼저 걷어낸다. PK는 여기서 손대지 않는다 —
+    # 아래 ALTER가 같은 문장 안에서 교체하고, 선삭제하면 의존 FK가 막는다.
+    _execute_sql_script(
+        """
+        ALTER TABLE provider_sync.source_entities
+            DROP CONSTRAINT IF EXISTS fk_source_entities_provider_dataset;
+        ALTER TABLE provider_sync.source_entities
+            DROP CONSTRAINT IF EXISTS uq_source_entities_provider_identity;
+        ALTER TABLE provider_sync.source_records
+            DROP CONSTRAINT IF EXISTS uq_source_records_entity_payload;
+        ALTER TABLE provider_sync.source_records
+            DROP CONSTRAINT IF EXISTS ck_source_records_raw_data_object;
+        ALTER TABLE provider_sync.source_records
+            DROP CONSTRAINT IF EXISTS ck_source_records_payload_hash_canonical;
+        ALTER TABLE provider_sync.provider_sync_state
+            DROP CONSTRAINT IF EXISTS fk_provider_sync_state_scope;
+        ALTER TABLE provider_sync.notice_lifecycle_scopes
+            DROP CONSTRAINT IF EXISTS uq_notice_lifecycle_scopes_identity;
+        ALTER TABLE provider_sync.notice_lifecycle_scopes
+            DROP CONSTRAINT IF EXISTS fk_notice_lifecycle_scopes_dataset;
+        ALTER TABLE provider_sync.notice_lineage_states
+            DROP CONSTRAINT IF EXISTS fk_notice_lineage_states_scope;
+        ALTER TABLE feature.curated_sources
+            DROP CONSTRAINT IF EXISTS uq_curated_sources_dataset;
+        ALTER TABLE feature.curated_sources
+            DROP CONSTRAINT IF EXISTS fk_curated_sources_dataset;
+        ALTER TABLE ops.import_jobs
+            DROP CONSTRAINT IF EXISTS ck_import_jobs_membership_mode;
+        ALTER TABLE ops.import_job_datasets
+            DROP CONSTRAINT IF EXISTS fk_import_job_datasets_job;
+        ALTER TABLE ops.import_job_datasets
+            DROP CONSTRAINT IF EXISTS fk_import_job_datasets_scope;
+        ALTER TABLE ops.import_job_events
+            DROP CONSTRAINT IF EXISTS fk_import_job_events_job_member;
+        ALTER TABLE ops.feature_update_requests
+            DROP CONSTRAINT IF EXISTS ck_feature_update_requests_membership_mode;
+        ALTER TABLE ops.feature_update_request_datasets
+            DROP CONSTRAINT IF EXISTS fk_feature_update_request_datasets_request;
+        ALTER TABLE ops.feature_update_request_datasets
+            DROP CONSTRAINT IF EXISTS fk_feature_update_request_datasets_scope;
+        ALTER TABLE ops.offline_uploads
+            DROP CONSTRAINT IF EXISTS fk_offline_uploads_scope;
+        ALTER TABLE ops.offline_uploads
+            DROP CONSTRAINT IF EXISTS uq_offline_uploads_dataset_scope_checksum;
+        ALTER TABLE ops.provider_refresh_policies
+            DROP CONSTRAINT IF EXISTS fk_provider_refresh_policies_dataset;
+        ALTER TABLE ops.integrity_observation_scopes
+            DROP CONSTRAINT IF EXISTS uq_integrity_observation_scopes_dataset;
+        ALTER TABLE ops.integrity_observation_scopes
+            DROP CONSTRAINT IF EXISTS fk_integrity_observation_scopes_dataset;
+        ALTER TABLE ops.integrity_observation_runs
+            DROP CONSTRAINT IF EXISTS fk_integrity_observation_runs_scope;
+        ALTER TABLE ops.integrity_observation_runs
+            DROP CONSTRAINT IF EXISTS uq_integrity_observation_runs_generation_v2;
+        ALTER TABLE ops.integrity_observation_runs
+            DROP CONSTRAINT IF EXISTS uq_integrity_observation_runs_external_run_v2;
+        ALTER TABLE ops.data_integrity_violations
+            DROP CONSTRAINT IF EXISTS fk_data_integrity_violations_dataset;
+        ALTER TABLE ops.poi_cache_target_feature_links
+            DROP CONSTRAINT IF EXISTS fk_poi_cache_target_feature_links_dataset;
+        ALTER TABLE ops.enrichment_review_queue
+            DROP CONSTRAINT IF EXISTS uq_enrichment_review_candidate;
+        ALTER TABLE ops.enrichment_review_queue
+            DROP CONSTRAINT IF EXISTS fk_enrichment_review_queue_source_entity;
+        ALTER TABLE ops.enrichment_review_queue
+            DROP CONSTRAINT IF EXISTS fk_enrichment_review_queue_source_record;
+        ALTER TABLE ops.managed_files
+            DROP CONSTRAINT IF EXISTS fk_managed_files_dataset;
+        ALTER TABLE ops.managed_files
+            DROP CONSTRAINT IF EXISTS ck_managed_files_owner_v2;
+        """
+    )
     _execute_sql_script(
         """
         ALTER TABLE provider_sync.source_entities
