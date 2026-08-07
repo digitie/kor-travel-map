@@ -5,13 +5,18 @@
 `feat/tvn33-provider-datasets`(PR #966)의 구현이 끝났다. ADR-088 triple(`provider_dataset_id +
 sync_scope + operation_key`)이 scope PK와 참조 FK 4개, pipeline projection, API DTO, OpenAPI와
 생성 타입 양쪽까지 관통한다. notice 계보는 `source_entity_heads`에 물화됐고, 0091 guard 본문은
-`contracts/vnext/target-schema-v1.sql`과 바이트 동일하며 freeze fingerprint 7/7이 맞는다.
+`contracts/vnext/tvn33-reference-ownership-v1.sql`과 **공백 정규화 기준 31/31 동일**하며
+freeze fingerprint 7/7이 맞는다. (들여쓰기까지 같지는 않다 — 마이그레이션은 Python 문자열
+안이고 계약은 flush-left다.)
 
-검증은 prod 복원본(732,678 record) 위 0083 → 0091 완주 ×4, 단위 2,081 pass, mypy --strict,
-ruff, 통합 수집 오류 0이다. 잔여 단위 6건은 컨테이너에 없는 파일·docker CLI에 걸린 환경
-노이즈로 파일을 넣으면 통과함을 확인했다.
+적대 리뷰 2건이 P0 4건을 잡았고 모두 고쳤다: 0090 재실행 불가, offline upload writer 파손,
+curation 자연키 되돌림의 API 미전파, event 인덱스 keyset 손실.
 
-**다음 한 작업**: 렌즈가 다른 적대 리뷰어 2명을 붙여 P0=0을 확인한 뒤 #966을 머지한다.
+검증은 prod 복원본(732,678 record) 위 0083 → 0091 완주 + 재시도 시나리오, 단위 2,081 pass,
+mypy --strict 두 타깃, ruff, 통합 수집 오류 0이다. 잔여 단위 6건은 환경 노이즈다.
+**통합 테스트 본체는 live DB가 필요해 실행하지 않았다 — 머지 전 1회 실행이 남은 위험이다.**
+
+**다음 한 작업**: 통합 테스트를 live로 1회 돌린 뒤 #966을 머지한다.
 그다음 PR #967(T-VN-41 F1D evidence)을 마무리한다. alembic squash는 #966·#967 머지와 prod의
 head 배포가 끝난 뒤 독립 PR로 다룬다 — prod가 `0083`이라 지금 접으면 도달 경로가 사라진다.
 

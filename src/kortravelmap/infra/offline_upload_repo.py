@@ -39,6 +39,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
 __all__ = [
+    "OfflineUploadScopeOperationUnresolved",
     "OfflineUpload",
     "OfflineUploadPage",
     "OfflineUploadStatusConflict",
@@ -118,6 +119,10 @@ class OfflineUploadPage:
 
     items: tuple[OfflineUpload, ...]
     next_cursor: str | None
+
+
+class OfflineUploadScopeOperationUnresolved(ValueError):
+    """scope가 정확히 하나의 operation으로 해석되지 않는다."""
 
 
 class OfflineUploadStatusConflict(ValueError):
@@ -384,12 +389,16 @@ async def create_offline_upload(
     created_by: str | None = None,
 ) -> OfflineUpload:
     """업로드 메타데이터를 생성한다. commit은 호출자 책임."""
+    operation_key = await _resolve_scope_operation_key(
+        session, provider_dataset_id=provider_dataset_id, sync_scope=sync_scope
+    )
     result = await session.execute(
         text(_INSERT_SQL),
         {
             "upload_id": upload_id,
             "provider_dataset_id": provider_dataset_id,
             "sync_scope": sync_scope,
+            "operation_key": operation_key,
             "original_filename": original_filename,
             "storage_backend": storage_backend,
             "storage_key": storage_key,
@@ -401,6 +410,47 @@ async def create_offline_upload(
         },
     )
     return _row_to_upload(result.one())
+
+
+_RESOLVE_SCOPE_OPERATION_SQL: Final[str] = """
+SELECT operation_key
+FROM provider_sync.provider_dataset_operation_scopes
+WHERE provider_dataset_id = :provider_dataset_id
+  AND sync_scope = :sync_scope
+ORDER BY operation_key
+"""
+
+
+async def _resolve_scope_operation_key(
+    session: AsyncSession,
+    *,
+    provider_dataset_id: int,
+    sync_scope: str,
+) -> str:
+    """upload가 가리키는 scope의 operation을 유도한다.
+
+    업로드 요청 표면에는 operation이 없다 — 운영자는 dataset과 scope로 파일을
+    올린다. 그런데 ``ops.offline_uploads``는 scope PK와 같은 triple을 참조하므로
+    (ADR-088) 쓰기 시점에 operation이 정해져야 한다.
+
+    유도 규칙은 alembic 0089의 ``_preflight_offline_upload_operation_is_unambiguous``
+    와 같다: scope에 operation이 정확히 하나일 때만 그것을 쓴다. 둘 이상이면 어느
+    것을 골라도 임의 선택이므로 조용히 고르지 않고 실패시킨다 — 잘못 고르면 upload가
+    엉뚱한 실행에 결박된다.
+    """
+
+    keys = (
+        await session.execute(
+            text(_RESOLVE_SCOPE_OPERATION_SQL),
+            {"provider_dataset_id": provider_dataset_id, "sync_scope": sync_scope},
+        )
+    ).scalars().all()
+    if len(keys) != 1:
+        raise OfflineUploadScopeOperationUnresolved(
+            f"offline upload scope resolves to {len(keys)} operations "
+            f"(provider_dataset_id={provider_dataset_id}, sync_scope={sync_scope!r})"
+        )
+    return str(keys[0])
 
 
 async def reserve_offline_upload(
@@ -419,12 +469,16 @@ async def reserve_offline_upload(
     created_by: str | None = None,
 ) -> OfflineUpload | None:
     """외부 저장 전에 ``uploading`` row와 checksum 소유권을 원자적으로 선점한다."""
+    operation_key = await _resolve_scope_operation_key(
+        session, provider_dataset_id=provider_dataset_id, sync_scope=sync_scope
+    )
     result = await session.execute(
         text(_RESERVE_SQL),
         {
             "upload_id": upload_id,
             "provider_dataset_id": provider_dataset_id,
             "sync_scope": sync_scope,
+            "operation_key": operation_key,
             "original_filename": original_filename,
             "storage_backend": storage_backend,
             "storage_key": storage_key,

@@ -171,13 +171,25 @@ _PAYLOAD_HASH_ALGORITHM_PREFIX: Final[re.Pattern[str]] = re.compile(
 )
 
 
+_CANONICAL_PAYLOAD_HASH: Final[re.Pattern[str]] = re.compile(r"[0-9a-f]{1,64}")
+
+
 def _canonical_payload_hash(value: str | None) -> str | None:
-    """알고리즘 접두를 벗기고 lowercase hex로 만든다 (없으면 None)."""
+    """알고리즘 접두를 벗겨 정본 hex로 만든다. 정본이 아니면 ``None``.
+
+    접두 제거만으로는 부족하다 — 저장 제약이
+    ``ck_source_records_payload_hash_canonical``(``^[0-9a-f]{1,64}$``)이므로
+    provider가 hex가 아닌 다이제스트를 보내면 INSERT가 통째로 죽는다. 여기서
+    걸러 ``None``을 돌려주면 호출자가 payload로 직접 계산한다(적재는 계속되고
+    해시만 우리 것이 된다).
+    """
 
     if not value:
         return None
     stripped = _PAYLOAD_HASH_ALGORITHM_PREFIX.sub("", value.strip()).lower()
-    return stripped or None
+    if not _CANONICAL_PAYLOAD_HASH.fullmatch(stripped):
+        return None
+    return stripped
 
 
 def _quarantine_item_key(item: KorTravelConciergeFeatureItem) -> str:

@@ -10,12 +10,19 @@
   참조하므로 실행 즉시 죽는 상태였다. `origin/main`에서 복구했고 sha256 `e934cdb8` / 15,672
   bytes로 T-VN-37의 핀과 일치한다. reconcile CTE의 `MATERIALIZED` 장벽도 함께 복구했다
   (없으면 갱신 대상 feature마다 CTE 재실행 — 3,045 notice에서 87.9초 대 0.35초).
-- **freeze fingerprint를 실제로 재현해 guard divergence 4건을 잡았다.** `touch_provider_dataset`
+- **freeze fingerprint를 실제로 재현해 guard divergence를 잡았다.** `touch_provider_dataset`
   계열이 `now()`(트랜잭션 시작 시각)를 써서 한 트랜잭션 안의 두 갱신이 같은 `updated_at`을
   받고 있었고, identity-update guard의 SQLSTATE가 계약과 달랐으며, ADR-069 근거 문구 누락과
-  죽은 변수 잔존이 있었다. 계약대로 맞춰 guard 본문이 **바이트 동일**해졌다.
-  membership guard의 `operation_key IS NULL` wildcard 3곳도 제거했다 — 두 member 테이블 모두
-  NOT NULL이라 죽은 분기였고 비등식 join이라 scope PK를 못 탔다. 계약엔 처음부터 없었다.
+  죽은 변수 잔존이 있었다. membership guard의 `operation_key IS NULL` wildcard 3곳도 제거했다 —
+  두 member 테이블 모두 NOT NULL이라 죽은 분기였고 비등식 join이라 scope PK를 못 탔다.
+- **적대 리뷰가 그 정렬 작업의 두 오류를 잡았다.** ①처음 대조는 fingerprint 대상
+  `_TARGET_FUNCTIONS` 19개만 봐서 좁았다. 전수 31개로 넓히니 의미 차이가 4건 더 있었다 —
+  member-active guard 2개에서 계약이 `scope.operation_key = member.operation_key` 등식을
+  빠뜨려 무관한 sibling operation 하나가 비활성이면 member까지 막히는 형태였다(이 건은
+  **마이그레이션이 옳고 계약이 낡았다** — 계약을 고쳤다). 나머지 2건은 마이그레이션을 계약에
+  맞췄다. ②"바이트 동일"은 **거짓이었다** — 실제로 잰 것은 공백 정규화 기준이고, 31개 전부
+  들여쓰기가 다르다(마이그레이션은 Python 문자열 안, 계약은 flush-left). 현재 보증은
+  **공백 정규화 기준 31/31 동일**이다.
 - **curation CSV를 자연키로 되돌렸다.** `provider_dataset_id`는 `GENERATED ALWAYS AS IDENTITY`고
   0089 legacy sweep이 그 DB의 실데이터까지 훑어 seed하므로 값이 DB마다 다르다. 이 CSV는
   저장소에 sha로 고정돼 어느 DB에나 적용되므로 surrogate를 파일에 박으면 **다른 DB에서 다른
@@ -23,9 +30,26 @@
 - `is_primary_source` ↔ `source_role` 불일치 preflight 추가(prod 0건, 한 행 뒤집어 발화 확인).
   offline_uploads의 FK·멱등키·ORM을 scope PK와 같은 triple로 정렬. perf_gate seeder를 최종
   스키마로 옮겨 실제 실행 확인.
-- 검증: prod 복원본(732,678 record) 위 0083 → 0091 완주 ×4, 계약 대비 guard 차이 0건,
-  fingerprint 7/7 일치, 단위 2,081 pass(잔여 6건은 컨테이너 파일·docker CLI 환경 노이즈),
-  mypy --strict 145 files, ruff clean, 통합 3,011개 수집 오류 0.
+- **0090이 재실행 안전하지 않았다(P0).** `notice_lineage_states.notice_lifecycle_scope_id`
+  `ADD COLUMN`에 `IF NOT EXISTS`가 없었다. 0090은 중간에 `autocommit_block`으로 커밋되고 그
+  시점 stamp는 아직 `0089`이므로, 뒤이어 0091이 실패하면 재시도가 여기서 `42701
+  duplicate_column`으로 죽는다 — forward-only라 되돌릴 길도 없다. 0091까지 적용 후 stamp를
+  0089로 되돌려 재현하고, 고친 뒤 재시도가 head까지 도달하는 것을 확인했다. `CREATE INDEX
+  CONCURRENTLY` 16개는 앞의 `DROP INDEX CONCURRENTLY IF EXISTS`가 이미 담당하므로 건드리지
+  않았다(`IF NOT EXISTS`를 얹으면 실패가 남긴 INVALID 인덱스를 건너뛴다).
+- offline upload writer 2개가 `:operation_key`를 bind하면서 값을 넘기지 않아 모든 업로드가
+  `StatementError`로 죽는 상태였고, `ON CONFLICT`도 넓힌 멱등키와 어긋나 있었다. 멱등키는
+  계약이 선언한 3열로 되돌리고(폭을 넓힌 근거는 실제 요구가 아니라 추측이었다), operation은
+  scope에서 유도하되 모호하면 실패시킨다. live에서 create/reserve/중복/모호 4경로 확인.
+- curation 자연키 되돌림이 `packages/kor-travel-map-api`에 전파되지 않아 라우터가 삭제된
+  필드를 참조하고 있었다. `mypy --strict -p kortravelmap.api`를 안 돌린 탓이라 이제 두
+  타깃을 모두 돌린다.
+- event 타임라인 인덱스가 keyset tiebreaker(`event_id DESC`)와 부분 술어
+  (`quarantined_at IS NULL`)를 잃어 페이지마다 Sort가 붙고 격리 행을 훑고 있었다. 복구했다.
+- 검증: prod 복원본(732,678 record) 위 0083 → 0091 완주, 재시도 시나리오 1회, 계약 대비
+  guard **공백 정규화 기준 31/31 동일**, fingerprint 7/7 일치, 단위 2,081 pass(잔여 6건은
+  컨테이너 파일·docker CLI 환경 노이즈), mypy --strict 두 타깃(145 + 67 files), ruff clean,
+  통합 3,011개 수집 오류 0. 통합 테스트 본체는 live DB가 필요해 실행하지 않았다.
 - fingerprint 재현은 fixture의 jsonb type codec이 없으면 7종이 전부 어긋난다. `origin/main`
   대조군으로 장치를 먼저 검증했고, 그 덕에 "환경 탓"이라는 오판과 divergence를 덮는
   재생성을 둘 다 피했다.

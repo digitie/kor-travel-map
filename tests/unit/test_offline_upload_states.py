@@ -104,9 +104,10 @@ def test_offline_upload_orm_checksum_idempotency_constraint_matches_migration() 
     ]
 
     assert len(constraints) == 1
+    # writer가 이 열 집합을 ``ON CONFLICT`` 중재자로 지목한다. 폭이 달라지면
+    # PostgreSQL이 42P10으로 거절하므로 여기서 못박는다.
     assert [column.name for column in constraints[0].columns] == [
         "provider_dataset_id",
         "sync_scope",
-        "operation_key",
         "checksum_sha256",
     ]

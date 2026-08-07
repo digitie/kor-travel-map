@@ -2950,11 +2950,17 @@ class ImportJobEventRow(Base):
             text("event_id DESC"),
             postgresql_where=text("quarantined_at IS NULL"),
         ),
+        # keyset은 ``(occurred_at, event_id)``다 — tiebreaker가 빠지면 페이지마다
+        # Sort가 붙는다. 부분 술어도 질의의 ``quarantined_at IS NULL``과 같아야
+        # 격리 행을 훑지 않는다 (0057이 갖고 있던 두 보증).
         Index(
             "idx_import_job_events_member_time",
             "import_job_dataset_id",
             text("occurred_at DESC"),
-            postgresql_where=text("import_job_dataset_id IS NOT NULL"),
+            text("event_id DESC"),
+            postgresql_where=text(
+                "import_job_dataset_id IS NOT NULL AND quarantined_at IS NULL"
+            ),
         ),
         {"schema": "ops"},
     )
@@ -3057,13 +3063,12 @@ class OfflineUploadRow(Base):
             ],
             name="fk_offline_uploads_exact_operation_scope",
         ),
-        # 멱등 키에도 operation_key가 들어간다. pair로 두면 같은 파일을 서로 다른
-        # operation에 올리는 정상 흐름이 충돌로 막힌다 — cutover 전에는 operation
-        # 구분 자체가 없었으므로 잃는 보증은 없다.
+        # 멱등 키는 freeze 계약(tvn33-reference-ownership-v1.sql)이 선언한 3열
+        # 그대로다. writer의 ``ON CONFLICT``가 이 열 집합을 중재자로 지목하므로
+        # 폭을 바꾸면 42P10으로 죽는다 — operation을 넣을 실제 요구도 없었다.
         UniqueConstraint(
             "provider_dataset_id",
             "sync_scope",
-            "operation_key",
             "checksum_sha256",
             name="uq_offline_uploads_dataset_scope_checksum",
         ),

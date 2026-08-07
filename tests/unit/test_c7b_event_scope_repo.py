@@ -209,7 +209,13 @@ def test_event_scope_columns_are_not_denormalized_onto_the_event() -> None:
     assert tuple(str(expr) for expr in member_index.expressions) == (
         "import_job_events.import_job_dataset_id",
         "occurred_at DESC",
+        "event_id DESC",
     )
+    # cursor가 ``(occurred_at, event_id)`` keyset이므로 tiebreaker까지 인덱스에
+    # 있어야 정렬이 인덱스로 해결된다. 부분 술어는 질의 술어와 같아야 한다.
+    predicate = str(member_index.dialect_options["postgresql"]["where"])
+    assert "quarantined_at IS NULL" in predicate
+    assert "import_job_dataset_id IS NOT NULL" in predicate
 
 
 @pytest.mark.unit

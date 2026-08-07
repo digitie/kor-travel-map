@@ -32,10 +32,10 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
         "51c99c6ed806f96abaf7e30717bf9ddb893d04eac0862ed1bdc32fbb8611b672"
     ),
     "target-schema-fingerprints-v1.json": (
-        "d6467db51af6457ebe39771fc2cd67493c371c68a89a65af22801378c64d7628"
+        "9c9214f5d15f3188a6876c77be34673878aeada2cda73c67ab938fedb98d88d2"
     ),
     "tvn33-reference-ownership-v1.sql": (
-        "d8e6fc32278b6942f3c01f1b181b88cd019b9aeaa26f7b54cba18f04668940ca"
+        "acd7066efe8da0ccf907264b95c9b5d43633d47df09731b10baa51675a774205"
     ),
     "openapi-diff-v1.json": ("c927cec6a893c9a24cdd2d6e6252de47880d65c56063d34aff7c79bf7e6162c5"),
     "consumer-rollout-v1.json": (

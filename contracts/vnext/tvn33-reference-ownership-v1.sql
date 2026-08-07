@@ -352,6 +352,7 @@ BEGIN
     JOIN provider_sync.provider_dataset_operation_scopes AS scope
       ON scope.provider_dataset_id = member.provider_dataset_id
      AND scope.sync_scope = member.sync_scope
+     AND scope.operation_key = member.operation_key
     JOIN provider_sync.provider_dataset_operations AS operation
       ON operation.provider_dataset_id = scope.provider_dataset_id
      AND operation.operation_key = scope.operation_key
@@ -366,6 +367,7 @@ BEGIN
         JOIN provider_sync.provider_dataset_operation_scopes AS scope
           ON scope.provider_dataset_id = member.provider_dataset_id
          AND scope.sync_scope = member.sync_scope
+         AND scope.operation_key = member.operation_key
         JOIN provider_sync.provider_dataset_operations AS operation
           ON operation.provider_dataset_id = scope.provider_dataset_id
          AND operation.operation_key = scope.operation_key
@@ -562,6 +564,7 @@ BEGIN
     JOIN provider_sync.provider_dataset_operation_scopes AS scope
       ON scope.provider_dataset_id = member.provider_dataset_id
      AND scope.sync_scope = member.sync_scope
+     AND scope.operation_key = member.operation_key
     JOIN provider_sync.provider_dataset_operations AS operation
       ON operation.provider_dataset_id = scope.provider_dataset_id
      AND operation.operation_key = scope.operation_key
@@ -576,6 +579,7 @@ BEGIN
         JOIN provider_sync.provider_dataset_operation_scopes AS scope
           ON scope.provider_dataset_id = member.provider_dataset_id
          AND scope.sync_scope = member.sync_scope
+         AND scope.operation_key = member.operation_key
         JOIN provider_sync.provider_dataset_operations AS operation
           ON operation.provider_dataset_id = scope.provider_dataset_id
          AND operation.operation_key = scope.operation_key

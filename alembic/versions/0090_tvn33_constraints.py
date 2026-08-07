@@ -284,7 +284,7 @@ def _constraints() -> None:
                 FOREIGN KEY (provider_dataset_id)
                 REFERENCES provider_sync.provider_datasets (provider_dataset_id) NOT VALID;
         ALTER TABLE provider_sync.notice_lineage_states
-            ADD COLUMN notice_lifecycle_scope_id bigint;
+            ADD COLUMN IF NOT EXISTS notice_lifecycle_scope_id bigint;
         UPDATE provider_sync.notice_lineage_states AS lineage
         SET notice_lifecycle_scope_id = scope.notice_lifecycle_scope_id
         FROM provider_sync.notice_lifecycle_scopes AS scope
@@ -512,8 +512,10 @@ def _create_indexes_concurrently() -> None:
         op.execute(
             """
             CREATE INDEX CONCURRENTLY idx_import_job_events_member_time
-            ON ops.import_job_events (import_job_dataset_id, occurred_at DESC)
-            WHERE import_job_dataset_id IS NOT NULL
+            ON ops.import_job_events (
+                import_job_dataset_id, occurred_at DESC, event_id DESC
+            )
+            WHERE import_job_dataset_id IS NOT NULL AND quarantined_at IS NULL
             """
         )
         op.execute(

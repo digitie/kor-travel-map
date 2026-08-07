@@ -7,7 +7,7 @@
 이 문서는 T-VN-33C가 final schema에서 삭제한 legacy source-lineage 객체의 전수
 목록이다. 서비스 전 단계에서는 intermediate data·downgrade를 보전하지 않는다.
 따라서 normal reader·writer·DTO의 참조가 0임을 static gate로 확인한 뒤 동일 PR의
-0090 migration에서 삭제하고, 새 DB는 ETL 재실행으로 만든다.
+0091 migration(`_drop_legacy_columns`)에서 삭제하고, 새 DB는 ETL 재실행으로 만든다.
 
 ## 1. 제거 대상 DB 객체
 
@@ -53,7 +53,7 @@
 
 ## 4. T-VN-33 acceptance
 
-- manifest의 모든 column/constraint/index가 0090 뒤 물리적으로 존재하지 않는다.
+- manifest의 모든 column/constraint/index가 0091 뒤 물리적으로 존재하지 않는다.
 - production source static gate와 catalog query에서 forbidden identifier가 0건이다.
 - final-schema 새 DB에서 ETL 재실행으로 data를 만들고 source record/history/head/link
   integrity와 active guard를 다시 검증한다. 이전 DB data 보존 또는 downgrade는 acceptance

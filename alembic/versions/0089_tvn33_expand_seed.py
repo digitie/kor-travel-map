@@ -696,11 +696,14 @@ def _create_provider_dataset_schema() -> None:
                     RETURN false;
                 END IF;
             END LOOP;
-            RETURN NOT EXISTS (
+            IF EXISTS (
                 SELECT 1
                 FROM jsonb_array_elements_text(value -> 'produces') AS item(value)
                 GROUP BY item.value HAVING count(*) > 1
-            );
+            ) THEN
+                RETURN false;
+            END IF;
+            RETURN true;
         END;
         $$;
 
