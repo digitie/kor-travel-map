@@ -32,7 +32,7 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
         "51c99c6ed806f96abaf7e30717bf9ddb893d04eac0862ed1bdc32fbb8611b672"
     ),
     "target-schema-fingerprints-v1.json": (
-        "201c0e78ee09b5c318e5d09db3c2a50cd569e39c31f46d4277fb0ccbfe1b4b69"
+        "d6467db51af6457ebe39771fc2cd67493c371c68a89a65af22801378c64d7628"
     ),
     "tvn33-reference-ownership-v1.sql": (
         "d8e6fc32278b6942f3c01f1b181b88cd019b9aeaa26f7b54cba18f04668940ca"
