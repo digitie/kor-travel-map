@@ -635,6 +635,7 @@ async def reserve_offline_upload_load(
         dataset_membership=ImportJobDatasetTarget(
             provider_dataset_id=upload.provider_dataset_id,
             sync_scope=upload.sync_scope,
+            operation_key=upload.operation_key,
         ),
         trigger_kind="manual",
     )

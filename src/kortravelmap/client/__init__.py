@@ -185,10 +185,8 @@ from kortravelmap.infra.feature_repo import (
     inactivate_geometryless_area_features_by_source,
     load_bundles,
     load_source_record_links,
-    supersede_stale_notice_features,
-)
-from kortravelmap.infra.feature_repo import (
     resolve_active_provider_dataset_id,
+    supersede_stale_notice_features,
 )
 from kortravelmap.infra.feature_repo import (
     features_nearby as repo_features_nearby,
@@ -262,8 +260,7 @@ from kortravelmap.infra.integrity_violation_repo import (
     purge_resolved_integrity_findings,
     sync_integrity_findings,
 )
-from kortravelmap.infra.jobs_repo import ImportJobDatasetTarget
-from kortravelmap.infra.jobs_repo import ImportJobEvent
+from kortravelmap.infra.jobs_repo import ImportJobDatasetTarget, ImportJobEvent
 from kortravelmap.infra.merge_repo import MergeOutcome, merge_from_review
 from kortravelmap.infra.poi_cache_target_repo import (
     has_active_poi_cache_targets_for_external_system as _repo_has_active_target_system,

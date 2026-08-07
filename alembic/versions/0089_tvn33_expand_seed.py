@@ -284,10 +284,11 @@ _DATASET_SEED: Final[tuple[tuple[str, str, str, str, str, str | None], ...]] = (
     (
         "python-mois-api",
         "mois_license_features_history",
-        "MOIS 인허가 history (증분/변경분; 전용 runner 준비 전)",
+        "MOIS 인허가 history (증분/변경분)",
         "place",
         "dataset_wide",
-        None,
+        # `mois.py`의 증분 job이 이 dataset으로 돈다.
+        "mois_license_incremental_update",
     ),
     (
         "python-mois-api",
@@ -567,7 +568,6 @@ _WRITE_TARGET_DATASETS: Final[frozenset[tuple[str, str]]] = frozenset(
         ("python-kma-api", "kma_ultra_short_grid"),
         ("python-kma-api", "kma_short_grid"),
         ("python-airkorea-api", "airkorea_stations"),
-        ("python-mois-api", "mois_license_features_history"),
         ("python-mois-api", "mois_license_features_closed"),
         ("python-mois-api", "mois_license_detail"),
         # place phone enrichment은 provider를 **호출자가** 준다

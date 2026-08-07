@@ -26,8 +26,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
-from kortravelmap.core.feature_operation import ProviderDatasetOperationKey
 from kortravelmap.infra.advisory_lock import try_advisory_lock
+from kortravelmap.infra.feature_operation_repo import (
+    resolve_feature_operation_dataset_membership,
+)
 from kortravelmap.infra.feature_repo import (
     FeatureLoadResult,
     inactivate_features_by_source_entity_ids,
@@ -36,6 +38,7 @@ from kortravelmap.infra.feature_repo import (
 )
 from kortravelmap.infra.jobs_repo import (
     ImportJob,
+    ImportJobDatasetTarget,
     finish_import_job,
     start_provider_dataset_import_job,
 )
@@ -169,6 +172,29 @@ class MoisClosedJobResult:
     job: ImportJob | None = None
     deactivated: int = 0
     sync_state: SyncState | None = None
+
+
+
+async def _dataset_membership(
+    session: AsyncSession, dataset_key: str, operation_key: str
+) -> ImportJobDatasetTarget:
+    """MOIS dataset의 canonical refresh membership을 해석한다 (T-VN-33).
+
+    실행 membership identity는 ``provider_dataset_id + sync_scope + operation_key``
+    triple이다(ADR-088 §결정 2). 자연키를 job row에 저장하지 않고, 경계에서 한 번
+    해석해 넘긴다.
+    """
+    membership = await resolve_feature_operation_dataset_membership(
+        session,
+        operation_key=operation_key,
+        provider=PROVIDER_NAME,
+        dataset_key=dataset_key,
+    )
+    return ImportJobDatasetTarget(
+        provider_dataset_id=membership.provider_dataset_id,
+        sync_scope=membership.sync_scope,
+        operation_key=membership.operation_key,
+    )
 
 
 async def load_mois_license_features_bulk(
@@ -336,7 +362,9 @@ async def run_mois_license_bulk_job(
             kind=_BULK_JOB_KIND,
             payload={"dataset_key": dataset_key},
             source_checksum=source_checksum,
-            provider_dataset=ProviderDatasetOperationKey(PROVIDER_NAME, dataset_key),
+            dataset_membership=await _dataset_membership(
+                session, dataset_key, _BULK_JOB_KIND
+            ),
             trigger_kind="system",
         )
         try:
@@ -428,7 +456,9 @@ async def run_mois_license_incremental_job(
             kind=_INCREMENTAL_JOB_KIND,
             payload={"dataset_key": dataset_key, "sync_scope": sync_scope},
             source_checksum=source_checksum,
-            provider_dataset=ProviderDatasetOperationKey(PROVIDER_NAME, dataset_key),
+            dataset_membership=await _dataset_membership(
+                session, dataset_key, _INCREMENTAL_JOB_KIND
+            ),
             trigger_kind="system",
         )
         try:
@@ -446,6 +476,7 @@ async def run_mois_license_incremental_job(
                 session,
                 provider=PROVIDER_NAME,
                 dataset_key=dataset_key,
+                operation_key=_INCREMENTAL_JOB_KIND,
                 sync_scope=sync_scope,
             )
             await finish_import_job(
@@ -456,6 +487,7 @@ async def run_mois_license_incremental_job(
             session,
             provider=PROVIDER_NAME,
             dataset_key=dataset_key,
+            operation_key=_INCREMENTAL_JOB_KIND,
             sync_scope=sync_scope,
             cursor=new_cursor,
         )
@@ -527,8 +559,8 @@ async def run_mois_license_closed_job(
                 "sync_scope": sync_scope,
             },
             source_checksum=source_checksum,
-            provider_dataset=ProviderDatasetOperationKey(
-                PROVIDER_NAME, DATASET_KEY_CLOSED
+            dataset_membership=await _dataset_membership(
+                session, DATASET_KEY_CLOSED, _CLOSED_JOB_KIND
             ),
             trigger_kind="system",
         )
