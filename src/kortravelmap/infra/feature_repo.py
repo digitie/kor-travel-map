@@ -372,10 +372,15 @@ FROM canonical
 
 _UPSERT_SOURCE_ENTITY_HEAD_SQL: Final[str] = """
 WITH prior AS MATERIALIZED (
+    -- ``FOR UPDATE``를 걸면 **안 된다**. 같은 문장의 ``upserted``가 이 행을
+    -- 갱신하므로 lock 획득이 그 갱신을 따라가며 행을 못 보고, ``prior``가 빈
+    -- 결과가 된다 — 그러면 ``NOT EXISTS (prior)``가 항상 참이라 재관측마다
+    -- ``became_current``가 참이 되어 feature 본문이 매번 재기록된다(실측:
+    -- 같은 record 재적재에서 features_updated>0). 동시성은 ON CONFLICT의 행
+    -- 잠금이 이미 담당한다 — 여기서 필요한 것은 **문장 이전 값**을 읽는 것뿐이다.
     SELECT current_source_record_key
     FROM provider_sync.source_entity_heads
     WHERE source_entity_key = :source_entity_key
-    FOR UPDATE
 ), upserted AS (
     INSERT INTO provider_sync.source_entity_heads (
         source_entity_key, current_source_record_key, observed_at, expires_at
