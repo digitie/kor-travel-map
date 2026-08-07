@@ -1436,20 +1436,25 @@ ORDER BY (sl.source_role = 'primary') DESC, head.observed_at DESC,
 
 _ADMIN_FEATURE_ISSUES_SQL: Final[str] = """
 SELECT
-    issue_id::text AS issue_id,
-    provider,
-    dataset_key,
-    source_record_key,
-    violation_type,
-    severity,
-    message,
-    payload,
-    status,
-    detected_at,
-    resolved_at
-FROM ops.data_integrity_violations
-WHERE feature_id = :feature_id
-ORDER BY (status = 'open') DESC, detected_at DESC, issue_id DESC
+    violation.issue_id::text AS issue_id,
+    -- provider/dataset_key는 violation 행에서 사라졌다. 표시용 projection이므로
+    -- catalog에서 읽는다 (identity는 provider_dataset_id다).
+    dataset.provider,
+    dataset.dataset_key,
+    violation.source_record_key,
+    violation.violation_type,
+    violation.severity,
+    violation.message,
+    violation.payload,
+    violation.status,
+    violation.detected_at,
+    violation.resolved_at
+FROM ops.data_integrity_violations AS violation
+LEFT JOIN provider_sync.provider_datasets AS dataset
+  ON dataset.provider_dataset_id = violation.provider_dataset_id
+WHERE violation.feature_id = :feature_id
+ORDER BY (violation.status = 'open') DESC, violation.detected_at DESC,
+         violation.issue_id DESC
 LIMIT 100
 """
 

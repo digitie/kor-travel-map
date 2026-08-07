@@ -512,7 +512,12 @@ job_provider_datasets AS (
         member.sync_scope,
         member.operation_key,
         member.import_job_dataset_id AS operation_member_id,
-        root.status
+        root.status,
+        -- 아래 ranked CTE가 이 세 열로 정렬한다. 투영하지 않으면 CTE 밖의
+        -- 이름을 참조하게 되어 질의가 파스 단계에서 죽는다.
+        root.depth,
+        root.created_at,
+        root.job_id
     FROM root_job_members AS root
     JOIN ops.import_job_datasets AS member ON member.job_id = root.job_id
     JOIN provider_sync.provider_datasets AS provider_dataset
@@ -977,6 +982,7 @@ SELECT
     page.projected_depth,
     page.selected_provider_dataset_id, page.selected_provider,
     page.selected_dataset_key, page.selected_sync_scope,
+    page.selected_operation_key,
     page.selected_operation_member_id, page.selected_pair_status,
     page.selected_is_active,
     cancellation.cancellation_id,

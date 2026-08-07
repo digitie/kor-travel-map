@@ -386,6 +386,12 @@ primary_sources AS (
       ON se.source_entity_key = sl.source_entity_key
     JOIN provider_sync.provider_datasets AS pd
       ON pd.provider_dataset_id = se.provider_dataset_id
+    -- 정렬축(``sr.imported_at``)은 **현재** record의 것이다. head가 그 포인터를
+    -- 들고 있으므로 head → source_records로 도달한다.
+    JOIN provider_sync.source_entity_heads AS head
+      ON head.source_entity_key = se.source_entity_key
+    JOIN provider_sync.source_records AS sr
+      ON sr.source_record_key = head.current_source_record_key
     WHERE sl.source_role = 'primary'
   ) AS ranked
   WHERE rn = 1

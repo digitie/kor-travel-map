@@ -2204,7 +2204,7 @@ async def create_curated_theme(
     row = (
         await session.execute(
             text(
-                """
+                f"""
                 INSERT INTO feature.curated_themes (
                     theme_slug, theme_name, theme_description, theme_group,
                     default_curated, visibility, metadata, updated_at
