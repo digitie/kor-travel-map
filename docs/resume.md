@@ -1,5 +1,91 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-07 — T-VN-37 notice 계보 key 물화 (ADR-087, PR 미생성 · 머지 금지)
+
+브랜치 `feat/tvn37-notice-lineage-materialization` (origin에 push 완료).
+**PR은 아직 만들지 않았다. 사용자 지시 전까지 머지 금지.**
+
+### 무엇을 했나
+
+`provider_sync.source_records.lineage_key`(nullable, notice scope만 — DB 트리거
+`trg_source_record_lineage_key`가 `provider_sync.notice_lineage_key`로 파생,
+`ENABLE ALWAYS`) + 표현식 인덱스 `idx_source_records_lineage
+((COALESCE(lineage_key, source_entity_id)), provider, dataset_key,
+source_entity_type)`. read 필터는 correlated 유지, 계보 등식만 컬럼으로.
+reconcile CTE 2개에 `MATERIALIZED` 장벽. 마이그레이션 `0088`은 `ANALYZE`로 끝난다
+(표현식 인덱스는 통계 전까지 planner가 무시한다).
+
+실측(clean clone, jit=off, 교차 반복 최소값):
+
+| | 3,045 notice | 145행(현행 prod) | 50,001 record 한 계보 |
+| --- | --- | --- | --- |
+| notice 목록 | 17.6초 → 0.18초 | 82.6ms → 20.9ms | 87.3ms → 22.4ms |
+| 단건(승자) | 33.1ms → 19.7ms | 26.3ms → 19.2ms | 24.5ms → 20.2ms |
+| 단건(패자) | 22.4ms → 20.0ms | 20.7ms → 19.0ms | 25.4ms → 20.2ms |
+| reconcile | 118.4초 → 0.36초 | 26.2ms → 23.5ms | — |
+
+(마지막 열은 50,002 record 한 계보. 절대값은 리뷰어 2명이 같은 서버를 쓰던
+중이라 전체적으로 높다 — 교차 반복이라 비교는 유효하다.)
+
+**현행 prod 규모에서 이득은 작다.** 이 변경이 사는 곳은 규모다 — 적대 리뷰가
+만든 20,059 계보/26,811 notice(KMA 특보 Phase 2 형태)에서 종전은 13분 42초에도
+끝나지 않아 중단됐고 현재는 508ms다.
+
+### 검증 상태 (2026-08-07)
+
+- 전체 배터리: `GRAPH_OK` · mypy 145 clean · lint-imports 4 kept 0 broken ·
+  unit 2,049 passed / 5 failed · integration 954 passed / 3 failed.
+  **실패 8건 전부 환경 원인**이고 브랜치와 무관하다 — `docker` 바이너리 부재 7건
+  (`test_docker_dagster_runtime` 5, `test_domain_command_ledger` 2),
+  H35 socket guard 1건(`test_h35_exact_surface_network_free_rehearsal`,
+  `origin/main`에서도 같은 컨테이너에서 동일 실패 확인).
+- 결과 집합 동일성: 적대 리뷰가 prod restore·3,045 fixture·220 feature 랜덤
+  fixture·38 feature 수제 lab 4종에서 **양방향 차집합 0/0** 확인.
+- reconcile 종료 상태도 `close_missing` 양쪽에서 동일.
+- 적대 리뷰 **6회**(정확성 3 · 성능 3) 전부 반영 완료.
+
+### 번호 충돌 — **해결: 이 브랜치가 우선** (사용자 결정 2026-08-07)
+
+#966(`feat/tvn33-provider-datasets`)이 WIP 커밋 `2e76b80c`에서 `0088`~`0090`을
+잡았고 ADR-087도 같이 쓴다. **alembic revision 우선권은 T-VN-37에 있다.**
+
+- 이 브랜치는 **그대로 둔다** — `0088_source_record_lineage_key`
+  (`down_revision = 0087_route_area_subtypes`), ADR-087.
+- **#966이 밀린다**: `0088_tvn33_expand_seed` → `0089`,
+  `0089_tvn33_constraints` → `0090`, `0090_tvn33_cutover_fence` → `0091`.
+  체인 시작을 `down_revision = "0088_source_record_lineage_key"`로 바꾸고
+  `_application_migration_graph.json`을 재생성한다. ADR도 087 → 088로 옮기고
+  `docs/adr/README.md`와 hold snapshot·plan 문서의 "ADR-087 §결정 2" 참조를
+  함께 고친다.
+- 순서상 **이 브랜치가 먼저 머지돼야** #966의 체인이 성립한다. 그 전에는 두
+  브랜치 모두 `down_revision = 0087`이라 alembic이 head 2개로 본다.
+
+### 다음 한 작업
+
+2. `tests/integration/test_t212d_perf_explain.py`의 `_assert_uses_index`로 계보
+   인덱스 사용을 EXPLAIN으로 고정(현재는 `pg_indexes.indexdef` 문자열 비교뿐이라
+   planner가 인덱스를 안 고르게 되는 회귀를 CI가 못 잡는다).
+3. PR 생성(제목: `perf(notice): 계보 key 물화 + 인덱스 probe (T-VN-37, ADR-087)`).
+4. **머지는 사용자 지시 대기.**
+
+배포 시 `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`를
+`0088_source_record_lineage_key`로 **선행 갱신**(api 먼저, dagster/daemon 재빌드).
+`0087_route_area_subtypes`도 아직 미배포다(태스크 #38 게이트).
+
+### 남긴 가정 (ADR-087 §결과에 명시)
+
+- (해소됨) record쪽 scope 등식을 지워 record/entity 사본 일치 가정이 더 이상
+  정확성의 전제가 아니다. 이 필터는 `origin/main`의 술어 집합과 계보 비교만 다르다.
+- (해소됨) 깊은 이력 계보 회귀 — 두 `EXISTS` 분리 + 죽은 `COALESCE` 제거 +
+  인덱스 꼬리 `last_seen_at DESC, source_record_key DESC`. **DESC가 핵심**이다
+  (ASC면 패자가 158.7ms). 승자·패자·목록 세 축 전부 main 우위.
+- 후속 후보: `source_entity_heads`(T-VN-33 신설)에 현재 계보 요약을 얹으면 계보
+  깊이에 무관해진다. 프로토타입 수치는 ADR-087 §결과.
+- 인덱스가 `source_records` 쓰기에 상시 **WAL +17.5% / dirtied page +16.9%**를
+  더한다(10만 행 bulk INSERT 실측). 트리거는 공짜다(WAL +2). 대안 2개는 실측으로
+  배제 — 평컬럼 인덱스 파국(71.1 대 17.7초), 부분 인덱스는 planner가 증명 불가.
+- 인덱스 91MB의 99.9%는 `idx_source_records_provider_dataset_entity`와 중복이다.
+
 ## 2026-08-06 — T-VN-41F1D-C0a·F1J-A 병합, v5 dynamic fixture 결선 대기
 
 Map application schema head artifact(PR #963)와 Map-owned cancel-probe fixture lifecycle(PR #960)가

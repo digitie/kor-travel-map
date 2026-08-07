@@ -2,6 +2,75 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-07 — T-VN-37: notice 계보 key 물화 + 인덱스 probe (ADR-087)
+
+- 공개 notice read와 reconcile이 계보 key를 `raw_data` JSON에서 **매 행 재계산**해
+  인덱스가 붙을 수 없었고(`concat_ws`가 STABLE), 경쟁자 탐색이 매번 notice 전수
+  스캔이 됐다. `source_records.lineage_key`로 물화하고
+  `(COALESCE(lineage_key, source_entity_id), provider, dataset_key,
+  source_entity_type)` 인덱스를 걸었다. correlated 형태는 **그대로 유지**한다.
+- 실측(clean clone, jit=off, 교차 반복 최소값):
+
+  | | 3,045 notice | 145행(현행 prod) |
+  | --- | --- | --- |
+  | notice 목록 | 20.4초 → 0.19초 | 60.8ms → 5.2ms |
+  | 전체 feature | 20.1초 → 0.67초 | 614ms → 520ms |
+  | 단건 조회 | 15.6ms → 3.7ms | 6.4ms → 3.4ms |
+  | reconcile | 118.4초 → 0.36초 | 26.2ms → 23.5ms |
+
+  결과 집합 양방향 차집합 0, reconcile 종료 상태도 `close_missing` 양쪽 동일.
+- **인덱스 꼬리는 DESC여야 한다 — 적대 리뷰가 잡았다.** 순서 조건을 인덱스로 민 뒤
+  "해결됐다"고 적었는데, 그 측정이 **승자만** 본 것이었다(fixture의 그 계보에
+  feature가 하나뿐이었다). 계보에서 실제로 조인되는 행은 현재 record 하나뿐이고
+  그것은 그 계보의 최댓값이라, ASC면 **패자**의 스캔 범위 맨 끝에 놓여 EXISTS가
+  이력을 전부 소비한다 — 50,002 record 계보에서 패자 단건 158.7ms(main 29.1ms).
+  DESC로 뒤집으니 25.0ms. **패자가 다수다**(prod 145건 중 98건) — 성능 주장은
+  필터가 숨기려는 쪽에서 재야 한다. 승자·패자·목록 세 축을 세 규모에서 다시 쟀고
+  전부 main보다 빠르다.
+- **DB 스키마 대안도 재봤다.** `source_entity_heads`에 현재 계보 요약을 얹으면
+  탐색이 record를 아예 안 건드려 깊이에 무관해진다(패자 19.2 / 승자 20.5 /
+  목록 20.4ms). DESC 인덱스판과 수 ms 차이인데 인덱스 72MB + 가변 컬럼 3개 +
+  유지 트리거를 더 낸다. T-VN-33이 그 테이블을 신설 중이라 **거기서 하는 게 맞다** —
+  ADR-087 §결과에 근거와 수치를 남겼다.
+- **순서 조건을 인덱스로 밀었다.** "나보다 나은 행이 있나"를 한 술어 안 `OR`로
+  두면 Postgres가 Index Cond로 밀지 못하고 Filter로 남겨 계보의 payload 이력
+  전체를 훑는다 — 50,001 record 계보에서 `Rows Removed by Filter: 50000`,
+  단건 조회가 main보다 8배 느렸다(적대 리뷰 실측). 두 `EXISTS`로 나누고
+  (`> 행 비교` / `= 동률`), 죽은 `COALESCE(last_seen_at, …)`를 평컬럼으로 바꾸고,
+  인덱스 꼬리에 `last_seen_at, source_record_key`를 붙였다. 같은 fixture에서
+  26.8 → **21.8ms로 main보다 빠르다**. 세 규모 전부 main 우위.
+  **현행 prod 규모에서 이득은 작다** — 145행은 어느 형태로도 빠르다. 실제로 사는
+  곳은 규모다: 적대 리뷰가 만든 20,059 계보 / 26,811 notice에서 종전은 13분 42초에도
+  끝나지 않아 중단됐고 현재는 508ms다(96만 record로 늘려도 559ms, 선형).
+- **설계를 다섯 번 갈아엎었고 그중 셋은 적대 리뷰가 무너뜨렸다.**
+  ① 비상관 InitPlan(`<> ALL(ARRAY(...))`) — Param 배열은 해시되지 않아 복잡도가
+  그대로였고 단건 조회가 36배 느려졌다. ② 전 행 backfill + NOT NULL — 근거였던
+  "`COALESCE`로 물러나면 인덱스가 안 쓰인다"가 **틀렸다**. 인덱스를 같은 COALESCE
+  식에 걸면 되고, 두 인자가 저장 컬럼이라 IMMUTABLE이다. 인덱스를 막는 건
+  `concat_ws`가 든 재계산 CASE 쪽인데 그 둘을 혼동했다. 73만 행 중 규칙 대상이
+  744행(0.10%)뿐이라 전 행을 채우면 **heap이 822→1,700MB로 영구히 부풀고**
+  (VACUUM도 OS에 반환 안 함) 124초 ACCESS EXCLUSIVE가 걸린다. scope 한정으로
+  바꿔 **마이그레이션 전체 3.1초, heap +1MB**.
+- 파생은 **DB 트리거**가 한다(`provider_sync.notice_lineage_key`). 식의 정본이 한
+  곳이 되고 픽스처·수동 SQL·앞으로의 writer가 전부 자동으로 맞는다. `UPDATE OF`에
+  `lineage_key` **자신**을 넣어야 파생 컬럼 직접 쓰기도 되돌려진다(리뷰어가
+  한 줄로 되살아나는 공지를 실증). `ENABLE ALWAYS`라 복원 드릴의
+  `session_replication_role=replica`에서도 돈다.
+- 트리거 비용: 순수 INSERT 10만행 5,840ms vs 비활성 5,996ms(차이 없음). 단
+  `INSERT ... ON CONFLICT DO UPDATE`는 **충돌해도 BEFORE INSERT arm이 돈다**
+  (`calls=100000`, 행당 2.8µs ≈ 문장의 4%) — "hot path는 안 탄다"고 적었던 건 틀렸다.
+- 표현식 인덱스는 `ANALYZE` 전까지 통계가 없어 planner가 무시한다(리뷰어가 그
+  상태를 측정해 "인덱스가 안 쓰인다"고 보고했다). 마이그레이션이 `ANALYZE`로 끝나
+  배포 직후 그 창이 열리지 않게 했다.
+- reconcile에는 원인이 하나 더 있었다 — `out_of_scope_feature_lineages` CTE가 갱신
+  행마다 재실행(loops=2,900). `MATERIALIZED` 장벽으로 잡았다.
+- H35 고정 세대 replay는 0079 SQL을 **바이트 그대로** 유지한다(sha256 핀 테스트
+  신설). 리뷰어가 `origin/main`과 byte-identical임을 독립 확인했다.
+- 남은 가정 2개를 ADR에 명시했다: record/entity의 scope 3열 일치가 제약으로
+  강제되지 않는다(prod 0건, 코드로 도달 불가) · 계보 key에 시간 성분이 없어 계보당
+  인덱스 항목이 이력만큼 증가한다(50,011 record 계보에서 단건 3.3→12.5ms).
+- 배포 선행: `EXPECTED_HEAD`를 `0088_source_record_lineage_key`로.
+
 ## 2026-08-06 (codex) — T-VN-41F1D-C3 n150 파기형 rebuild 결선
 
 - Manager PR #167의 최신 Map typed-subtype pin으로 n150 `rebuild-pinned` generation을 committed했다.

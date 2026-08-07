@@ -594,13 +594,10 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 > ADR-066~075가 목표 스펙 정본이다. 각 migration task는 forward-only 격리 clone에서 검증하고,
 > 명시적 downgrade 수용 조건이 없는 한 전진 뒤 rollback하지 않는다.
 
-> **인덱스↔본문 의도적 불일치 (2026-08-07 재대조)**: `T-VN-37`·`T-VN-33`의 상단 인덱스
-> 줄은 재정의 후 상태(37 = 계보 key 물화 단일 task + 보류 `37D` / 33 = A/B/C 단일 PR)를
-> 반영하지만, **아래 `### T-VN-37`·`### T-VN-33` 절 본문은 아직 구 A/B/C 분해판**이다.
-> 두 절의 재작성은 각각 열린 PR **#968**(`feat/tvn37-notice-lineage-materialization`)과
-> **#966**(`feat/tvn33-provider-datasets`, draft)이 자기 브랜치에서 이미 소유하고 있어,
-> 머지 충돌을 만들지 않기 위해 이 재대조에서는 본문을 건드리지 않았다. 두 PR이 머지되면
-> 불일치는 자동 해소된다.
+> **인덱스↔본문 불일치 (`T-VN-33`만 잔여)**: `### T-VN-37` 절 본문은 이 PR(#968)이
+> 재정의판으로 바꿨다. `### T-VN-33` 절 본문은 아직 구 A/B/C 분해판이고, 그 재작성은
+> 열린 draft PR **#966**(`feat/tvn33-provider-datasets`)이 자기 브랜치에서 이미
+> 소유하고 있어 여기서 건드리지 않는다. #966이 머지되면 해소된다.
 
 ### T-VN-32 — UUID identity shadow 전환 (Lane A)
 
@@ -683,31 +680,35 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   비활성화한다. whole-row freeze column/trigger는 rollback shadow로 유지하고 물리 삭제 목록을
   T-VN-39에 넘긴다.
 
-### T-VN-37 — typed notice state (Lane A)
+### T-VN-37 — notice 계보 판정 (Lane A)
 
-> **범위 축소(2026-08-06)**: T-VN-35B가 이미 `feature_notices.valid_start_time`/
-> `valid_end_time`을 typed `timestamptz`로 올렸고, read 필터의 문자열 파싱과
-> 비-ISO 방어 cast(`pg_input_is_valid`)는 그때 사라졌다. 37에 남은 것은 **range
-> 표현**과 lineage/current state다.
+> **범위 재정의(2026-08-07)**: 원안은 "두 timestamptz를 `tstzrange`로 승격하고
+> read를 range 연산자·GiST로 전환"이었다. 그 방향은 **폐기했다**(ADR-087):
+> `feature_notices`는 feature당 최대 1행 + PK 단일이라 공개 필터가 언제나 PK 단일
+> probe여서 GiST가 구조적으로 쓰이지 않고, 시작 시각을 보는 술어로 바꾸면 미래
+> 발효 KMA 특보가 발효 전까지 숨어 사전 경고가 사라진다. 실제 병목은 range 표현이
+> 아니라 **계보 key를 매 행 JSON에서 재계산**하는 것이었다.
+>
+> 35B가 이미 typed `timestamptz`와 문자열 파싱 제거를 끝냈으므로, 37에 남은 것은
+> 계보 판정 하나다.
 
-- [ ] T-VN-37A — **notice range schema·backfill**
+- [x] T-VN-37 — **계보 key 물화 + 인덱스 probe** (PR 대기, 머지 보류)
 
-  두 timestamptz를 `tstzrange`로 승격한다. 핵심은 **empty range**다 — provider가
-  미래 시행 공지를 철회하면 `end < start`가 실재하는데(실측
-  `start=2026-07-13/end=2026-06-02`), 그건 결함이 아니라 "발효 전에 철회됨"이다.
-  35B가 CHECK를 두지 않은 이유가 이것이고, empty range는 그 사실을 **금지하지 않고
-  정확히 표현**한다. lineage/current state도 같이 typed FK/CHECK로 올린다.
+  `provider_sync.source_records.lineage_key`(nullable, notice scope만 — DB 트리거
+  파생) + `(COALESCE(lineage_key, source_entity_id), provider, dataset_key,
+  source_entity_type)` 표현식 인덱스. read 필터는 correlated를 유지하고 계보
+  등식만 컬럼으로 바꾼다. reconcile CTE에 `MATERIALIZED` 장벽. 3,045 notice에서
+  목록 20.4초 → 0.19초, reconcile 118.4초 → 0.36초(현행 prod 145행에서는
+  60.8ms → 5.2ms로 이득이 작다 — 이 변경이 사는 곳은 규모다). 결과 집합·reconcile
+  종료 상태 동일. 마이그레이션 3.1초. alembic `0088`, ADR-087.
 
-- [ ] T-VN-37B — **notice writer/read query cutover**
+- [ ] T-VN-37D — **empty range 표현 (보류)**
 
-  notice provider writer와 public/admin history/current query를 range 연산자
-  (`@>`/`&&`)와 GiST index 기반으로 전환한다.
-
-- [ ] T-VN-37C — **lineage anti-join 제거**
-
-  공개 hot path의 lineage anti-join을 range/index 기반 판정으로 대체하고 동등
-  결과·EXPLAIN·오염 입력 거부를 검증한다. (T-VN-06 잠정 cast는 35B에서 이미
-  제거됐다.)
+  provider가 미래 시행 공지를 철회하면 `end < start`가 실재한다(실측
+  `start=2026-07-13/end=2026-06-02`). 결함이 아니라 "발효 전에 철회됨"이고, 35B가
+  CHECK를 두지 않은 이유다. 이를 `tstzrange` empty로 **정확히 표현**하는 것은
+  여전히 가치가 있으나, 위 성능 문제와 무관하고 read 술어 변경(=제품 결정)이
+  선행돼야 하므로 분리한다. notice_type별 "미래 발효를 보일 것인가" 결정이 먼저다.
 
 ### T-VN-38 — weather·price current summary (Lane B)
 

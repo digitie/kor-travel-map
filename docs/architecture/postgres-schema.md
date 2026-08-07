@@ -151,7 +151,7 @@ rollback 조건은 ADR-075와 [`../deploy.md`](../deploy.md)를 따른다.
 | 테이블 | PK | 핵심 컬럼 / 비고 |
 |--------|----|---------------|
 | `source_entities` | `source_entity_key` | UNIQUE (provider,dataset_key,source_entity_type,source_entity_id); current_source_record_key; first/last_seen_at |
-| `source_records` | `source_record_key` | source_entity_key FK; UNIQUE (provider,dataset_key,source_entity_type,source_entity_id,raw_payload_hash); immutable raw_data JSONB 이력 |
+| `source_records` | `source_record_key` | source_entity_key FK; UNIQUE (provider,dataset_key,source_entity_type,source_entity_id,raw_payload_hash); immutable raw_data JSONB 이력; `lineage_key`(nullable, notice scope만 — 트리거 파생, ADR-087) |
 | `source_links` | `(feature_id, source_entity_key)` | Feature↔provider entity N:M; source_role CHECK 8종, confidence 0-100, 여러 primary 허용 |
 | `provider_sync_state` | `(provider, dataset_key, sync_scope)` | status, cursor JSONB, last_success_at, next_run_after |
 
@@ -239,6 +239,7 @@ membership을 batch로 붙여 fan-out이 page 경계를 바꾸지 않게 한다.
 |--------|------|------|
 | `idx_source_entities_current_record` | (current_source_record_key) | partial NOT NULL, 현재 immutable payload 포인터 |
 | `idx_source_records_provider_dataset_entity` | (provider, dataset_key, source_entity_type, source_entity_id) | |
+| `idx_source_records_lineage` | ((COALESCE(lineage_key, source_entity_id)), last_seen_at, source_record_key) | notice 계보 probe (ADR-087). read와 같은 식이어야 쓰인다. 뒤 두 열이 순서 규칙이라 "나보다 나은 행" 판정이 범위로 끊긴다 |
 | `idx_source_records_entity_history` | (source_entity_key, last_seen_at DESC, fetched_at DESC, imported_at DESC, source_record_key DESC) | 재관측 시각 우선 entity payload 이력 cursor |
 | `idx_source_records_imported_at_brin` | BRIN(imported_at) | 시계열 |
 | `idx_source_records_fetched_at_brin` | BRIN(fetched_at) | |
@@ -379,6 +380,7 @@ subtype 테이블 자체가 kind로 갈리므로 `WHERE kind=...` 부분 조건�
 | `import_jobs` | `ck_import_jobs_feature_engine_timeline` | feature root/child의 create ≤ start ≤ finish 순서(NULL 허용) |
 | `import_jobs` | `ck_import_jobs_dagster_run_status` | feature run root의 raw Dagster status 허용값 |
 | `import_jobs` | feature operation trigger 2종 | child parent kind/run 일치와 root/child identity update 금지 |
+| `source_records` | `trg_source_record_lineage_key` | `provider_sync.notice_lineage_key(NEW)`로 `lineage_key`를 파생한다. BEFORE INSERT/UPDATE OF (raw_data, provider, dataset_key, source_entity_type, source_entity_id, **lineage_key**) — 자신을 포함해야 파생 컬럼 직접 쓰기도 되돌려진다. `ENABLE ALWAYS`라 `session_replication_role=replica`에서도 돈다 (0088) |
 | `import_jobs` | `trg_import_jobs_identity_immutable` | 모든 generic/feature job의 kind/provider/dataset과 direct update effective sync scope identity는 insert 뒤 변경 금지 (0052+0053) |
 | `import_jobs` | `ck_import_jobs_update_request_shape` | direct update job은 pair+trimmed non-empty sync scope, non-direct는 세 identity 컬럼 모두 NULL (0053) |
 | `import_jobs` | `ck_import_jobs_dispatch_requested_at` | dispatch 시각은 feature update job에만 저장 (0053) |

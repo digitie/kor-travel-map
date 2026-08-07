@@ -946,6 +946,16 @@ class SourceRecordRow(Base):
             text("imported_at DESC"),
             text("source_record_key DESC"),
         ),
+        # notice 계보 탐색(read 필터) — ADR-087. read와 **같은 식**이어야 쓰인다
+        # (두 인자가 저장 컬럼이라 IMMUTABLE). 뒤 두 열은 순서 규칙이고 **DESC**다 —
+        # 계보에서 실제로 조인되는 행(현재 record)은 그 계보의 최댓값이라, ASC면
+        # 패자의 스캔 범위 맨 끝에 놓여 이력을 전부 훑는다.
+        Index(
+            "idx_source_records_lineage",
+            text("(COALESCE(lineage_key, source_entity_id))"),
+            text("last_seen_at DESC"),
+            text("source_record_key DESC"),
+        ),
         {"schema": "provider_sync"},
     )
 
@@ -967,6 +977,13 @@ class SourceRecordRow(Base):
     raw_address: Mapped[str | None] = mapped_column(String)
     raw_longitude: Mapped[Any | None] = mapped_column(Numeric(12, 8))
     raw_latitude: Mapped[Any | None] = mapped_column(Numeric(12, 8))
+
+    # notice 계보 key — ``raw_data``에서 파생되고 record별로 불변이라 저장해도
+    # 낡지 않는다(ADR-087). 값을 넣는 것은 **DB 트리거**이고 애플리케이션은 읽기만
+    # 한다. notice 전용 규칙이 있는 scope에만 채워지고 그 밖은 NULL이며, 유효 계보는
+    # ``COALESCE(lineage_key, source_entity_id)``다 — 73만 행 중 규칙 대상이
+    # 744행(0.10%)뿐이라 전 행에 사본을 물화할 이유가 없다.
+    lineage_key: Mapped[str | None] = mapped_column(String)
     raw_data: Mapped[dict[str, Any]] = mapped_column(
         JSONB,
         nullable=False,
