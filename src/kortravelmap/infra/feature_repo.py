@@ -1293,6 +1293,7 @@ price_points AS (
       ON fact.price_value_key = summary.price_value_key
     JOIN provider_sync.provider_datasets AS dataset
       ON dataset.provider_dataset_id = fact.provider_dataset_id
+     AND dataset.is_active
     WHERE candidate.kind = 'price'
       AND (
         CAST(:price_stale_hide_days AS integer) IS NULL
@@ -1353,6 +1354,7 @@ weather_ranked AS (
         fact.valid_at,
         fact.observed_at,
         fact.known_at,
+        summary.refresh_after,
         row_number() OVER (
             PARTITION BY candidate.feature_id
             ORDER BY
@@ -1381,7 +1383,9 @@ weather_ranked AS (
       ON fact.weather_value_key = summary.weather_value_key
     JOIN provider_sync.provider_datasets AS dataset
       ON dataset.provider_dataset_id = fact.provider_dataset_id
+     AND dataset.is_active
     WHERE candidate.kind = 'weather'
+      AND summary.refresh_after > clock_timestamp()
       AND fact.metric_key IN (
         'T1H', 'TMP', 'TMN', 'TMX', 'POP', 'SKY', 'REH', 'PTY', 'PCP',
         'PM10', 'PM2_5', 'CAI', 'O3', 'NO2', 'SO2', 'CO'
@@ -1405,7 +1409,8 @@ weather_summaries AS (
             'issued_at', issued_at,
             'valid_at', valid_at,
             'observed_at', observed_at,
-            'known_at', known_at
+            'known_at', known_at,
+            'refresh_after', refresh_after
         ) AS weather_summary
     FROM weather_ranked
     WHERE rank = 1

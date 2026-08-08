@@ -2,6 +2,21 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-08 (codex) — T-VN-38 final P0 보강: deadline scheduler와 reader fail-closed
+
+- weather current projection을 `pg_advisory_xact_lock`으로 전역 직렬화했다. desired set을 보지
+  못한 동시 writer가 다른 series summary를 지우는 race를 막고, unchanged winner/deadline은 receipt만
+  남겨 MVCC hot-row churn을 없앴다.
+- Dagster `current_weather_summary_refresh` job/schedule을 추가했다. minute tick은 새 provider
+  fact 없이 future forecast eligibility·validity·SLA deadline을 재물화한다.
+- weather/price current card, weather own/nearest anchor, public/admin bbox가 inactive dataset을
+  즉시 제외하고, weather current path는 `refresh_after > clock_timestamp()`를 요구한다. map summary는
+  canonical dataset identity와 deadline을 필수 계약으로 노출한다.
+- target invariant의 winner eligibility를 materializer와 같은 active dataset·enabled policy·SLA
+  predicate로 맞췄고, partial-own batch anchor의 self fallback을 제거했다.
+- 검증: vNext artifact unit 7 passed, API weather 26 passed, Dagster maintenance/definition package
+  gate green. focused PostGIS/n150 live E2E는 재리뷰 후 final head에서 실행한다.
+
 ## 2026-08-08 (codex) — T-VN-38 final reader 계약·fixture 정리 checkpoint
 
 - `0094`가 0060의 mutable weather upsert/legacy batch와 `weather_metric_series` table·trigger·ORM

@@ -410,6 +410,18 @@ FROM (
         SELECT feature_id, provider_dataset_id, weather_domain, forecast_style, metric_key,
                weather_value_key
         FROM feature.current_weather_summary
+    ), policy_facts AS (
+        SELECT
+            fact.*,
+            policy.stale_after_minutes
+        FROM feature.feature_weather_values AS fact
+        JOIN provider_sync.provider_datasets AS dataset
+          ON dataset.provider_dataset_id = fact.provider_dataset_id
+         AND dataset.is_active
+        JOIN ops.provider_refresh_policies AS policy
+          ON policy.provider_dataset_id = fact.provider_dataset_id
+         AND policy.enabled
+         AND policy.stale_after_minutes IS NOT NULL
     ), ranked AS (
         SELECT
             s.feature_id, s.provider_dataset_id, s.weather_domain, s.forecast_style, s.metric_key,
@@ -426,7 +438,7 @@ FROM (
                          w.weather_value_key DESC
             ) AS row_number
         FROM feature.current_weather_summary AS s
-        JOIN feature.feature_weather_values AS w
+        JOIN policy_facts AS w
           ON w.feature_id = s.feature_id
          AND w.provider_dataset_id = s.provider_dataset_id
          AND w.weather_domain = s.weather_domain
@@ -435,6 +447,8 @@ FROM (
         WHERE w.known_at <= s.selected_at
           AND w.target_at <= s.selected_at
           AND (w.valid_during IS NULL OR w.valid_during @> s.selected_at)
+          AND w.known_at + (w.stale_after_minutes * interval '1 minute')
+                > s.selected_at
     ), expected AS (
         SELECT feature_id, provider_dataset_id, weather_domain, forecast_style, metric_key,
                weather_value_key
@@ -451,9 +465,17 @@ SELECT count(*)
 FROM feature.current_weather_summary AS s
 JOIN feature.feature_weather_values AS w
   ON w.weather_value_key = s.weather_value_key
+JOIN provider_sync.provider_datasets AS dataset
+  ON dataset.provider_dataset_id = w.provider_dataset_id
+ AND dataset.is_active
+JOIN ops.provider_refresh_policies AS policy
+  ON policy.provider_dataset_id = w.provider_dataset_id
+ AND policy.enabled
+ AND policy.stale_after_minutes IS NOT NULL
 WHERE w.known_at > s.selected_at
    OR w.target_at > s.selected_at
    OR (w.valid_during IS NOT NULL AND NOT (w.valid_during @> s.selected_at))
+   OR w.known_at + (policy.stale_after_minutes * interval '1 minute') <= s.selected_at
    OR s.refresh_after <= s.selected_at; -- expect: 0 -- phase: post-backfill
 
 -- [INV-089-03] summary는 성공한 같은 projection receipt만 참조한다.

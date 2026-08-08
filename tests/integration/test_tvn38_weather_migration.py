@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING
@@ -23,7 +24,7 @@ from kortravelmap.infra.weather_repo import (
 )
 
 if TYPE_CHECKING:
-    from sqlalchemy.ext.asyncio import AsyncSession
+    from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 
 pytestmark = pytest.mark.integration
@@ -215,7 +216,9 @@ async def test_weather_summary_uses_business_time_and_expires_stale_rows(
         run_kind="ingest",
     )
     assert result.input_count == 2
-    assert result.updated_count == 1
+    # 같은 winner/deadline의 reconcile은 receipt만 추가하고 projection row를 다시
+    # 쓰지 않는다. 이는 summary hot-row churn을 막는 ADR-089 계약이다.
+    assert result.updated_count == 0
     assert await migrated_session.scalar(
         text(
             """
@@ -236,6 +239,15 @@ async def test_weather_summary_uses_business_time_and_expires_stale_rows(
             """
         )
     ) == _BASE + timedelta(minutes=125)
+    await migrated_session.execute(
+        text(
+            """
+            UPDATE feature.current_weather_summary
+            SET refresh_after = clock_timestamp() + interval '1 hour'
+            WHERE feature_id = 'tvn38-summary-feature'
+            """
+        )
+    )
     card = await build_weather_card(
         migrated_session,
         feature_id="tvn38-summary-feature",
@@ -259,3 +271,190 @@ async def test_weather_summary_uses_business_time_and_expires_stale_rows(
             """
         )
     ) == 0
+
+
+async def test_weather_reconcile_advances_future_candidate_without_new_provider_write(
+    migrated_session: AsyncSession,
+) -> None:
+    """deadline scheduler는 새 ingest 없이 eligible해진 future forecast를 고른다."""
+
+    dataset_id, first_response = await _seed_response_record(migrated_session)
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO feature.features (feature_id, kind, name, category)
+            VALUES ('tvn38-future-feature', 'weather', 'T-VN-38 future', '00000000')
+            """
+        )
+    )
+    current = WeatherValue(
+        feature_id="tvn38-future-feature",
+        provider=_PROVIDER,
+        weather_domain="kma_short_forecast",
+        forecast_style="short",
+        metric_key="TMP",
+        valid_at=_BASE,
+        value_number=Decimal("20.0"),
+    )
+    future = current.model_copy(
+        update={
+            "valid_at": _BASE + timedelta(minutes=30),
+            "value_number": Decimal("22.0"),
+        }
+    )
+    assert await load_weather_values(
+        migrated_session,
+        [current],
+        provider_dataset_id=dataset_id,
+        source_record=first_response,
+        selected_at=_BASE,
+    ) == 1
+    future_response = SourceRecord(
+        provider=_PROVIDER,
+        dataset_key=_DATASET,
+        source_entity_type="weather_response",
+        source_entity_id="response-20260808T030000Z",
+        raw_payload_hash=make_payload_hash({"response": "future"}),
+        raw_data={"response": "future"},
+        fetched_at=_BASE,
+        imported_at=_BASE,
+        source_record_key="tvn38-weather-response-future",
+    )
+    assert await load_weather_values(
+        migrated_session,
+        [future],
+        provider_dataset_id=dataset_id,
+        source_record=future_response,
+        selected_at=_BASE,
+    ) == 1
+
+    # test clock과 real clock을 분리한 current reader라 fixture deadline을 명시한다.
+    await migrated_session.execute(
+        text(
+            """
+            UPDATE feature.current_weather_summary
+            SET refresh_after = clock_timestamp() + interval '1 hour'
+            WHERE feature_id = 'tvn38-future-feature'
+            """
+        )
+    )
+    before = await build_weather_card(
+        migrated_session, feature_id="tvn38-future-feature"
+    )
+    assert before.metrics[0].value_number == Decimal("20.0")
+
+    result = await materialize_current_weather_summary(
+        migrated_session,
+        selected_at=_BASE + timedelta(minutes=31),
+    )
+    assert result.updated_count == 1
+    selected = await migrated_session.scalar(
+        text(
+            """
+            SELECT fact.value_number
+            FROM feature.current_weather_summary AS summary
+            JOIN feature.feature_weather_values AS fact
+              ON fact.weather_value_key = summary.weather_value_key
+            WHERE summary.feature_id = 'tvn38-future-feature'
+            """
+        )
+    )
+    assert selected == Decimal("22.0000")
+
+
+async def test_weather_current_reader_hides_inactive_dataset_before_reconcile(
+    migrated_session: AsyncSession,
+) -> None:
+    """dataset deactivation 직후 derived summary가 남아도 current card는 fail-closed다."""
+
+    dataset_id, source_record = await _seed_response_record(migrated_session)
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO feature.features (feature_id, kind, name, category)
+            VALUES ('tvn38-inactive-feature', 'weather', 'T-VN-38 inactive', '00000000')
+            """
+        )
+    )
+    assert await load_weather_values(
+        migrated_session,
+        [
+            WeatherValue(
+                feature_id="tvn38-inactive-feature",
+                provider=_PROVIDER,
+                weather_domain="kma_short_forecast",
+                forecast_style="short",
+                metric_key="TMP",
+                valid_at=_BASE,
+                value_number=Decimal("19.0"),
+            )
+        ],
+        provider_dataset_id=dataset_id,
+        source_record=source_record,
+        selected_at=_BASE,
+    ) == 1
+    await migrated_session.execute(
+        text(
+            """
+            UPDATE feature.current_weather_summary
+            SET refresh_after = clock_timestamp() + interval '1 hour'
+            WHERE feature_id = 'tvn38-inactive-feature'
+            """
+        )
+    )
+    assert (await build_weather_card(
+        migrated_session, feature_id="tvn38-inactive-feature"
+    )).metrics
+
+    await migrated_session.execute(
+        text(
+            """
+            UPDATE provider_sync.provider_datasets
+            SET is_active = false
+            WHERE provider_dataset_id = :provider_dataset_id
+            """
+        ),
+        {"provider_dataset_id": dataset_id},
+    )
+    inactive = await build_weather_card(
+        migrated_session, feature_id="tvn38-inactive-feature"
+    )
+    assert inactive.metrics == []
+
+
+async def test_weather_global_projection_uses_transaction_advisory_lock(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """겹친 writer가 서로의 global summary를 stale-delete하지 못하게 직렬화한다."""
+
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from kortravelmap.infra.advisory_lock import advisory_lock_key
+
+    holder = AsyncSession(migrated_engine, expire_on_commit=False)
+    contender = AsyncSession(migrated_engine, expire_on_commit=False)
+    try:
+        await holder.begin()
+        await holder.execute(
+            text("SELECT pg_advisory_xact_lock(CAST(:lock_id AS bigint))"),
+            {"lock_id": advisory_lock_key("projection:current-weather-summary")},
+        )
+        task = asyncio.create_task(
+            materialize_current_weather_summary(
+                contender,
+                selected_at=_BASE,
+                run_kind="reconcile",
+            )
+        )
+        await asyncio.sleep(0.05)
+        assert not task.done()
+        await holder.commit()
+        result = await asyncio.wait_for(task, timeout=3)
+        assert result.input_count == 0
+    finally:
+        if holder.in_transaction():
+            await holder.rollback()
+        if contender.in_transaction():
+            await contender.rollback()
+        await holder.close()
+        await contender.close()

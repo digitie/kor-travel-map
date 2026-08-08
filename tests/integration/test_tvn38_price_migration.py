@@ -13,7 +13,7 @@ from sqlalchemy.exc import DBAPIError
 from kortravelmap.core.ids import make_payload_hash
 from kortravelmap.dto import SourceRecord
 from kortravelmap.dto.price import PriceValue
-from kortravelmap.infra.price_repo import load_price_values
+from kortravelmap.infra.price_repo import build_price_card, load_price_values
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -162,3 +162,60 @@ async def test_price_fact_is_immutable_and_current_rank_uses_known_at(
             """
         )
     ) == 0
+
+
+async def test_price_current_reader_hides_inactive_dataset_before_reconcile(
+    migrated_session: AsyncSession,
+) -> None:
+    """dataset deactivation과 delayed projection cleanup 사이에 current price를 노출하지 않는다."""
+
+    dataset_id, response = await _seed_response_record(
+        migrated_session, suffix="a", fetched_at=_BASE
+    )
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO feature.features (feature_id, kind, name, category)
+            VALUES ('tvn38-price-inactive', 'price', 'T-VN-38 inactive price', '00000000')
+            """
+        )
+    )
+    assert await load_price_values(
+        migrated_session,
+        [
+            PriceValue(
+                feature_id="tvn38-price-inactive",
+                provider=_PROVIDER,
+                price_domain="opinet_gas_station",
+                product_key="gasoline",
+                value_number=Decimal("1700"),
+                unit="KRW/L",
+                observed_at=_BASE,
+            )
+        ],
+        provider_dataset_id=dataset_id,
+        source_record=response,
+    ) == 1
+    active = await build_price_card(
+        migrated_session,
+        feature_id="tvn38-price-inactive",
+        stale_hide_days=None,
+    )
+    assert len(active.current) == 1
+
+    await migrated_session.execute(
+        text(
+            """
+            UPDATE provider_sync.provider_datasets
+            SET is_active = false
+            WHERE provider_dataset_id = :provider_dataset_id
+            """
+        ),
+        {"provider_dataset_id": dataset_id},
+    )
+    inactive = await build_price_card(
+        migrated_session,
+        feature_id="tvn38-price-inactive",
+        stale_hide_days=None,
+    )
+    assert inactive.current == []

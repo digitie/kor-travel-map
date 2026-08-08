@@ -44,13 +44,18 @@ mutable upsert/batch SQL·ORM mapping을 물리 제거했다. normal card/bbox�
 set read만 사용하고, `(target_at, known_at)` 또는 `(observed_at, known_at)`를 모두 가진 snapshot
 endpoint만 raw fact를 재순위화한다.
 
+final review P0 보강으로 weather projection에는 transaction advisory lock을 두고 same-winner
+reconcile의 summary row rewrite를 제거했다. 기본 실행 minute Dagster job은 새 provider write 없이
+future candidate eligibility·validity·SLA deadline을 재물화한다. normal card·anchor·bbox는 inactive
+dataset과 `refresh_after`가 지난 weather summary를 DB에서 즉시 제외한다.
+
 OpenAPI admin/user/service 세 spec과 admin/user generated type을 재생성했다. dataset id/key/display와
 `known_at`은 price/weather DTO의 필수 identity이며 admin map/chart/table React key도 그 identity를
 사용한다. live fixture는 producing response source·dataset policy를 재시도 안전하게 만들고 feature
 cleanup 뒤 source head/record/entity/policy/dataset까지 지운다.
 
-검증: isolated API weather unit 26건, root fixture/price unit 46건, weather batch/repo integration
-집중 gate, ruff/py_compile을 통과했다. 남은 완료 조건은 최종 누적 delta의 적대 리뷰 2인 P0=0,
+검증: vNext artifact unit 7건, isolated API weather unit 26건, Dagster maintenance/definition gate,
+ruff/py_compile을 통과했다. 남은 완료 조건은 최종 누적 delta의 적대 리뷰 2인 P0=0,
 base rebase, n150 final-head destructive rebuild와 live UI E2E다.
 
 **다음 한 작업**: UI generated mock typecheck를 고정한 뒤 적대 리뷰 2인에게 현재 작업트리를

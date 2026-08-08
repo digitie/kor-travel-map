@@ -104,6 +104,9 @@ def test_feature_update_job_and_sensors_registered() -> None:
     assert defs.get_job_def("cache_target_snapshot_gc").name == (
         "cache_target_snapshot_gc"
     )
+    assert defs.get_job_def("current_weather_summary_refresh").name == (
+        "current_weather_summary_refresh"
+    )
     assert defs.get_job_def("full_load_batch_consistency_gate").name == (
         "full_load_batch_consistency_gate"
     )
@@ -427,6 +430,34 @@ def test_cache_target_snapshot_gc_hourly_schedule_registered() -> None:
     assert schedule.job_name == "cache_target_snapshot_gc"
     assert schedule.tags["kor_travel_map.job_scope"] == "maintenance"
     assert schedule.tags["kor_travel_map.job_kind"] == "cache_target_snapshot_gc"
+
+
+def test_current_weather_summary_refresh_schedule_is_running_and_minutely() -> None:
+    schedule = defs.resolve_schedule_def(
+        "current_weather_summary_refresh_minutely_schedule"
+    )
+    assert schedule.name == "current_weather_summary_refresh_minutely_schedule"
+    assert schedule.cron_schedule == "* * * * *"
+    assert schedule.execution_timezone == KST_TIMEZONE
+    assert schedule.default_status == DefaultScheduleStatus.RUNNING
+    assert schedule.job_name == "current_weather_summary_refresh"
+    assert schedule.tags["kor_travel_map.job_scope"] == "maintenance"
+    assert schedule.tags["kor_travel_map.job_kind"] == "current_weather_summary_refresh"
+
+
+def test_current_weather_summary_refresh_schedule_coalesces_active_global_run() -> None:
+    schedule = defs.resolve_schedule_def(
+        "current_weather_summary_refresh_minutely_schedule"
+    )
+    job = defs.resolve_job_def("current_weather_summary_refresh")
+    with DagsterInstance.local_temp() as instance:
+        instance.create_run_for_job(job, status=DagsterRunStatus.STARTED)
+        with build_schedule_context(instance=instance) as context:
+            tick = schedule.evaluate_tick(context)
+
+    assert tick.run_requests == []
+    assert tick.skip_message is not None
+    assert "STARTED" in tick.skip_message
 
 
 def test_curated_features_refresh_schedule_registered() -> None:

@@ -21,6 +21,7 @@ from sqlalchemy.exc import DBAPIError
 
 from kortravelmap.core.ids import make_weather_value_key
 from kortravelmap.dto._time import kst_now
+from kortravelmap.infra.advisory_lock import advisory_lock_key
 
 if TYPE_CHECKING:
     from sqlalchemy import RowMapping
@@ -75,6 +76,11 @@ __all__ = [
 DEFAULT_WEATHER_FRESHNESS_SECONDS: Final[int] = 6 * 60 * 60
 DEFAULT_WEATHER_HISTORY_RETENTION_DAYS: Final[int] = 365 * 3
 """REST weather history 기본 보존/조회 지평선(3년)."""
+
+_WEATHER_CURRENT_SUMMARY_LOCK_ID: Final[int] = advisory_lock_key(
+    "projection:current-weather-summary"
+)
+"""weather current projection 전체를 직렬화하는 transaction advisory lock."""
 
 WEATHER_BATCH_TIMELINE_DAYS: Final[int] = 1
 """batch snapshot이 ``target_at`` 뒤에 제공하는 24시간 예보 timeline 지평선."""
@@ -505,8 +511,30 @@ DO UPDATE SET
 """
 
 _DELETE_SUPERSEDED_WEATHER_SUMMARIES_SQL: Final[str] = """
-DELETE FROM feature.current_weather_summary
-WHERE summary_run_id <> :summary_run_id
+WITH desired AS (
+    SELECT *
+    FROM jsonb_to_recordset(CAST(:identities AS jsonb)) AS row(
+        feature_id text,
+        provider_dataset_id bigint,
+        weather_domain text,
+        forecast_style text,
+        metric_key text
+    )
+)
+DELETE FROM feature.current_weather_summary AS summary
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM desired
+    WHERE desired.feature_id = summary.feature_id
+      AND desired.provider_dataset_id = summary.provider_dataset_id
+      AND desired.weather_domain = summary.weather_domain
+      AND desired.forecast_style = summary.forecast_style
+      AND desired.metric_key = summary.metric_key
+)
+"""
+
+_ACQUIRE_WEATHER_CURRENT_SUMMARY_LOCK_SQL: Final[str] = """
+SELECT pg_advisory_xact_lock(CAST(:lock_id AS bigint))
 """
 
 _CURRENT_CARD_SQL: Final[str] = """
@@ -540,7 +568,9 @@ JOIN feature.feature_weather_values AS fact
   ON fact.weather_value_key = summary.weather_value_key
 JOIN provider_sync.provider_datasets AS dataset
   ON dataset.provider_dataset_id = fact.provider_dataset_id
+ AND dataset.is_active
 WHERE summary.feature_id = :feature_id
+  AND summary.refresh_after > clock_timestamp()
 ORDER BY
     fact.forecast_style,
     fact.metric_key,
@@ -771,6 +801,7 @@ candidate_capabilities AS MATERIALIZED (
 own_capabilities AS (
     SELECT
         parent.ordinality,
+        parent.visible_feature_id,
         coalesce(capability.has_temperature, false) AS has_temperature,
         capability.source_feature_id IS NOT NULL AS has_any
     FROM parents AS parent
@@ -790,6 +821,7 @@ kma_ranked AS (
     JOIN own_capabilities AS own
       ON own.ordinality = capability.ordinality
     WHERE NOT own.has_temperature
+      AND capability.source_feature_id IS DISTINCT FROM own.visible_feature_id
       AND capability.has_kma_forecast
 ),
 observed_ranked AS (
@@ -804,6 +836,7 @@ observed_ranked AS (
     JOIN own_capabilities AS own
       ON own.ordinality = capability.ordinality
     WHERE NOT own.has_temperature
+      AND capability.source_feature_id IS DISTINCT FROM own.visible_feature_id
       AND capability.has_observed_temperature
 ),
 preferred_sources AS (
@@ -1270,7 +1303,11 @@ WHERE f.kind = 'weather'
         FROM feature.current_weather_summary AS current_summary
         JOIN feature.feature_weather_values AS w
           ON w.weather_value_key = current_summary.weather_value_key
+        JOIN provider_sync.provider_datasets AS dataset
+          ON dataset.provider_dataset_id = w.provider_dataset_id
+         AND dataset.is_active
         WHERE current_summary.feature_id = f.feature_id
+          AND current_summary.refresh_after > clock_timestamp()
           {exists_predicate}
       )
 ORDER BY f.coord_5179 OPERATOR(x_extension.<->) t.coord_5179, f.feature_id
@@ -1359,7 +1396,11 @@ WHERE f.deleted_at IS NULL
         FROM feature.current_weather_summary AS current_summary
         JOIN feature.feature_weather_values AS w
           ON w.weather_value_key = current_summary.weather_value_key
+        JOIN provider_sync.provider_datasets AS dataset
+          ON dataset.provider_dataset_id = w.provider_dataset_id
+         AND dataset.is_active
         WHERE current_summary.feature_id = f.feature_id
+          AND current_summary.refresh_after > clock_timestamp()
           {exists_predicate}
       )
 ORDER BY f.coord_5179 OPERATOR(x_extension.<->) t.coord_5179, f.feature_id
@@ -1731,6 +1772,14 @@ async def materialize_current_weather_summary(
     if run_kind not in {"ingest", "reconcile", "backfill", "restore"}:
         raise ValueError("unsupported weather summary run_kind")
 
+    # summary는 전역 projection이므로 transaction snapshot에서 desired를 계산하고
+    # 다른 writer의 series를 stale delete하는 race를 허용하지 않는다. xact lock은
+    # caller transaction이 끝날 때 자동 해제돼 retry/rollback에 별도 unlock이 없다.
+    await session.execute(
+        text(_ACQUIRE_WEATHER_CURRENT_SUMMARY_LOCK_SQL),
+        {"lock_id": _WEATHER_CURRENT_SUMMARY_LOCK_ID},
+    )
+
     summary_run_id = await session.scalar(
         text(_INSERT_CURRENT_SUMMARY_RUN_SQL),
         {
@@ -1749,40 +1798,52 @@ async def materialize_current_weather_summary(
     input_count = await session.scalar(
         text(_WEATHER_SUMMARY_INPUT_COUNT_SQL), {"selected_at": selected_at}
     )
-    existing = (
+    existing_rows = (
         await session.execute(
             text(
                 """
                 SELECT feature_id, provider_dataset_id, weather_domain, forecast_style,
-                       metric_key
+                       metric_key, weather_value_key, refresh_after
                 FROM feature.current_weather_summary
                 """
             )
         )
     ).mappings().all()
-    existing_keys = {
+    existing = {
         (
             str(row["feature_id"]),
             int(row["provider_dataset_id"]),
             str(row["weather_domain"]),
             str(row["forecast_style"]),
             str(row["metric_key"]),
-        )
-        for row in existing
+        ): (str(row["weather_value_key"]), row["refresh_after"])
+        for row in existing_rows
     }
-    desired_keys = {
+    desired_by_key = {
         (
             str(row["feature_id"]),
             int(row["provider_dataset_id"]),
             str(row["weather_domain"]),
             str(row["forecast_style"]),
             str(row["metric_key"]),
-        )
+        ): row
         for row in desired
     }
-    inserted_count = len(desired_keys - existing_keys)
-    updated_count = len(desired_keys & existing_keys)
-    deleted_count = len(existing_keys - desired_keys)
+    inserted_count = sum(key not in existing for key in desired_by_key)
+    updated_count = sum(
+        key in existing
+        and existing[key]
+        != (str(row["weather_value_key"]), row["refresh_after"])
+        for key, row in desired_by_key.items()
+    )
+    deleted_count = sum(key not in desired_by_key for key in existing)
+    changed = [
+        row
+        for key, row in desired_by_key.items()
+        if key not in existing
+        or existing[key]
+        != (str(row["weather_value_key"]), row["refresh_after"])
+    ]
 
     completed = await session.execute(
         text(_COMPLETE_CURRENT_SUMMARY_RUN_SQL),
@@ -1802,7 +1863,7 @@ async def materialize_current_weather_summary(
     )
     if completed.rowcount != 1:
         raise AssertionError("weather current-summary receipt could not become succeeded")
-    if desired:
+    if changed:
         await session.execute(
             text(_UPSERT_CURRENT_WEATHER_SUMMARY_SQL),
             [
@@ -1811,12 +1872,25 @@ async def materialize_current_weather_summary(
                     "summary_run_id": summary_run_id,
                     "selected_at": selected_at,
                 }
-                for row in desired
+                for row in changed
             ],
         )
     await session.execute(
         text(_DELETE_SUPERSEDED_WEATHER_SUMMARIES_SQL),
-        {"summary_run_id": summary_run_id},
+        {
+            "identities": json.dumps(
+                [
+                    {
+                        "feature_id": key[0],
+                        "provider_dataset_id": key[1],
+                        "weather_domain": key[2],
+                        "forecast_style": key[3],
+                        "metric_key": key[4],
+                    }
+                    for key in desired_by_key
+                ]
+            )
+        },
     )
     return WeatherSummaryMaterializeResult(
         summary_run_id=int(summary_run_id),

@@ -43,8 +43,11 @@ winner의 시간으로 쓰면 더 늦은 재적재가 더 오래된 관측을 �
 6. weather summary에는 `GREATEST(target_at, known_at, lower(valid_during))`인 다음 candidate
    eligibility, selected validity 종료,
    canonical freshness SLA 중 가장 빠른 future 경계(`refresh_after`)를 보관한다. weather dataset은
-   non-null freshness SLA가 있어야 normal current summary를 제공한다. Dagster가 deadline 전에
-   재물화하며, 만료한 summary는 current 결과로 조용히 반환하지 않고 stale 상태로 드러낸다.
+   non-null freshness SLA가 있어야 normal current summary를 제공한다. Dagster의 기본 실행
+   minute schedule이 새 provider write 없이도 deadline을 재물화하며, 전체 projection은 transaction
+   advisory lock으로 직렬화한다. normal card·anchor·bbox는 active dataset이면서
+   `refresh_after > clock_timestamp()`인 summary만 읽는다. 따라서 scheduler 지연 중에는 만료
+   값을 stale marker로 위장하지 않고 결과에서 제외한다.
 7. normal current read는 target별 own/nearest/KMA tier anchor를 window-ranked set CTE로 먼저
    고른 뒤 summary set join을 사용한다. explicit time-travel/timeline은 raw facts의
    set-based ranked CTE를 쓰며 normal summary fallback으로 위장하지 않는다. per-row `LATERAL`
@@ -67,6 +70,8 @@ receipt를 business fact와 분리하면 복구·재적재의 운영 사실을 �
 - 긍정: current/history 값 drift가 구조적으로 사라지고, 두 domain이 같은 provider dataset
   정본과 정확한 full-series cardinality를 공유한다.
 - 긍정: restore/backfill은 재현 가능하고, 행 단위 재적재가 최신 관측을 역행시키지 않는다.
+- 긍정: 같은 winner/deadline의 reconcile은 receipt만 남기고 summary hot row를 재기록하지 않으며,
+  다른 writer가 전역 projection의 보이지 않는 series를 삭제할 수 없다.
 - 부정: fact insert와 projection maintenance/reconciliation을 함께 구현·검증해야 하며, final
   schema DB를 다시 적재해야 한다.
 

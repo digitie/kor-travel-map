@@ -227,3 +227,47 @@ async def test_batch_enforces_source_work_budget_before_metrics(
             known_at=target_at,
             series_work_limit=1,
         )
+
+
+async def test_batch_partial_own_weather_uses_next_kma_anchor_for_temperature(
+    migrated_session: AsyncSession,
+) -> None:
+    """own anchor가 온도 없이 일부 metric만 가지면 self를 fallback으로 재선정하지 않는다."""
+
+    target_at = _BASE + timedelta(hours=2)
+    dataset_id, response = await _response(
+        migrated_session, suffix="a", fetched_at=_BASE
+    )
+    await _insert_feature(migrated_session, "batch-partial-own", kind="weather")
+    await _insert_feature(
+        migrated_session,
+        "batch-next-kma-anchor",
+        kind="weather",
+        lon=126.9804,
+        lat=37.5665,
+    )
+    assert await weather_repo.load_weather_values(
+        migrated_session,
+        [
+            _value("batch-partial-own", "SKY", target_at=target_at, value="1"),
+            _value("batch-next-kma-anchor", "TMP", target_at=target_at, value="22"),
+        ],
+        provider_dataset_id=dataset_id,
+        source_record=response,
+        selected_at=target_at,
+    ) == 2
+
+    snapshots = await weather_repo.get_weather_batch_snapshots(
+        migrated_session,
+        targets=(
+            weather_repo.WeatherBatchTarget(
+                target_at=target_at,
+                feature_ids=("batch-partial-own",),
+            ),
+        ),
+        known_at=target_at,
+    )
+    card = snapshots[0].cards[0]
+    metrics = {(metric.forecast_style, metric.metric_key): metric for metric in card.current}
+    assert metrics[("short", "SKY")].value_number == Decimal("1")
+    assert metrics[("short", "TMP")].value_number == Decimal("22")

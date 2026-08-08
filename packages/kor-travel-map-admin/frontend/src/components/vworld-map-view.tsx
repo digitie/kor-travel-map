@@ -484,10 +484,10 @@ export interface ClusterFeatureInput {
 
 
 interface ClusterWeatherSummaryPoint {
-  provider_dataset_id?: number;
-  dataset_key?: string;
-  dataset_display_name?: string;
-  provider?: string | null;
+  provider_dataset_id: number;
+  dataset_key: string;
+  dataset_display_name: string;
+  provider: string;
   forecast_style?: string | null;
   metric_key: string;
   metric_name?: string | null;
@@ -498,6 +498,7 @@ interface ClusterWeatherSummaryPoint {
   valid_at?: string | null;
   issued_at?: string | null;
   known_at?: string | null;
+  refresh_after: string;
 }
 
 type GeometryFeatureKind = "route" | "area";
