@@ -108,6 +108,15 @@ def test_clone_checkpoint_schema_digest_uses_restore_stable_catalog() -> None:
     assert "attnum gap은 pg_dump/pg_restore가 정규화한다" in source
 
 
+def test_live_fixture_counts_only_direct_feature_id_references() -> None:
+    """composite subtype/alias fence는 fixture feature_id만으로 억지로 계수하지 않는다."""
+    source = _FIXTURE.read_text(encoding="utf-8")
+
+    assert "AND cardinality(constraint_row.conkey) = 1" in source
+    assert "AND cardinality(constraint_row.confkey) = 1" in source
+    assert "composite FK는 이 fixture가 가진 feature_id만으로 reference를 셀 수" in source
+
+
 def _execution_args(path: Path, identity: dict[str, str]) -> SimpleNamespace:
     return SimpleNamespace(
         api_image_id=identity["api_image_id"],
@@ -576,8 +585,10 @@ def test_direct_cleanup_locks_owned_parents_before_fk_audit_and_delete() -> None
     assert "owned fixture ID의 소유권 fingerprint가 다릅니다" in fixture
     assert "owned weather value fingerprint가 다릅니다" in fixture
     assert "owned price value fingerprint가 다릅니다" in fixture
+    assert '"feature.feature_aliases.feature_id"] = len(present)' in fixture
     assert '"feature.current_weather_summary.feature_id"] = 1' in fixture
     assert '"feature.current_price_summary.feature_id"] = 1' in fixture
+    assert '"feature.feature_aliases.feature_id": len(rows)' in inspection
     assert cleanup.count("DELETE FROM feature.features") == 1
     assert purge.count("DELETE FROM feature.features") == 1
     assert "DELETE FROM ops.feature_change_requests" in purge

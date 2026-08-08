@@ -1164,7 +1164,7 @@ def _api_owned_audit_counts(path: Path) -> dict[str, int]:
         or evidence.get("action") != "api-audit"
         or counts
         != {"change_requests": 14, "feature_versions": 13, "features": 6}
-        or evidence.get("foreign_key_references") != 13
+        or evidence.get("foreign_key_references") != 19
         or not isinstance(evidence.get("foreign_key_constraints_checked"), int)
         or evidence["foreign_key_constraints_checked"] < 1
     ):
@@ -1467,7 +1467,7 @@ def _build_result(
         runtime / "direct-seed.json",
         "seed",
         {"features": 2, "price_values": 1, "weather_values": 1},
-        expected_foreign_key_references=2,
+        expected_foreign_key_references=6,
     )
     cleanup = _fixture_counts(
         runtime / "direct-cleanup.json",

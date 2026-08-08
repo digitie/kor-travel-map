@@ -269,9 +269,7 @@ async def _foreign_key_reference_counts(
                   local_schema.nspname AS schema_name,
                   local_table.relname AS table_name,
                   local_column.attname AS column_name,
-                  target_column.attname AS target_column_name,
-                  cardinality(constraint_row.conkey) AS local_column_count,
-                  cardinality(constraint_row.confkey) AS target_column_count
+                  target_column.attname AS target_column_name
                 FROM pg_catalog.pg_constraint AS constraint_row
                 JOIN pg_catalog.pg_class AS local_table
                   ON local_table.oid = constraint_row.conrelid
@@ -285,6 +283,12 @@ async def _foreign_key_reference_counts(
                  AND target_column.attnum = constraint_row.confkey[1]
                 WHERE constraint_row.contype = 'f'
                   AND constraint_row.confrelid = 'feature.features'::regclass
+                  -- subtype/alias identity fence처럼 feature_id에 다른 정본 열을 붙이는
+                  -- composite FK는 이 fixture가 가진 feature_id만으로 reference를 셀 수
+                  -- 없다. 이 ownership 검사는 단일 feature_id FK의 cascade 잔여만
+                  -- 정확히 계수한다.
+                  AND cardinality(constraint_row.conkey) = 1
+                  AND cardinality(constraint_row.confkey) = 1
                 ORDER BY local_schema.nspname, local_table.relname,
                          local_column.attname, constraint_row.conname
                 """
@@ -293,11 +297,7 @@ async def _foreign_key_reference_counts(
     ).mappings()
     counts: dict[str, int] = {}
     for constraint in constraints:
-        if (
-            int(constraint["local_column_count"]) != 1
-            or int(constraint["target_column_count"]) != 1
-            or str(constraint["target_column_name"]) != "feature_id"
-        ):
+        if str(constraint["target_column_name"]) != "feature_id":
             raise RuntimeError("feature FK topology가 단일 feature_id 계약과 다릅니다")
         schema_name = str(constraint["schema_name"])
         table_name = str(constraint["table_name"])
@@ -427,6 +427,10 @@ async def _assert_owned_state(
     await _assert_owned_values(session, run_id, feature_ids, present, lock=lock)
     foreign_keys = await _foreign_key_reference_counts(session, feature_ids)
     expected_references: dict[str, int] = {}
+    if present:
+        # feature INSERT trigger가 canonical alias를 함께 만든다. alias는 direct
+        # feature_id FK이므로 fixture cleanup의 cascade evidence에 포함한다.
+        expected_references["feature.feature_aliases.feature_id"] = len(present)
     if feature_ids[0] in present:
         expected_references["feature.feature_weather_values.feature_id"] = 1
         expected_references["feature.current_weather_summary.feature_id"] = 1
@@ -829,17 +833,17 @@ async def _inspect_api_owned(
         raise RuntimeError("API-owned Feature와 version 이력이 일치하지 않습니다")
 
     foreign_keys = await _foreign_key_reference_counts(session, feature_ids)
-    unexpected_references = {
+    expected_references = {
+        "feature.feature_aliases.feature_id": len(rows),
+        "feature.feature_versions.feature_id": len(version_rows),
+    }
+    observed_references = {
         key: value
         for key, value in foreign_keys.items()
-        if value and key != "feature.feature_versions.feature_id"
+        if value
     }
-    if unexpected_references:
+    if observed_references != expected_references:
         raise RuntimeError("API-owned Feature에 예상하지 않은 FK reference가 있습니다")
-    if foreign_keys.get("feature.feature_versions.feature_id", 0) != len(
-        version_rows
-    ):
-        raise RuntimeError("API-owned Feature version FK 수가 다릅니다")
     return _ApiOwnedInspection(
         feature_ids=feature_ids,
         features=len(rows),
