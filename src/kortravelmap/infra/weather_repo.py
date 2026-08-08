@@ -125,6 +125,7 @@ class WeatherMetric:
     issued_at: datetime | None
     valid_at: datetime | None
     observed_at: datetime | None
+    known_at: datetime | None = None
     provider: str | None = None
     weather_domain: str | None = None
     valid_from: datetime | None = None
@@ -765,7 +766,7 @@ _OBSERVED_TEMP_PREDICATE: Final[str] = (
 # 0060은 full correction history/current-summary 이전 단계라 ``collected_at``이
 # ``known_at`` proxy다(ADR-072). forecast는 미래 지식 누출을 막기 위해
 # ``issued_at <= known_at``도 함께 강제한다.
-_WEATHER_BATCH_SQL: Final[str] = f"""
+_LEGACY_WEATHER_BATCH_SQL: Final[str] = f"""
 WITH requested AS (
     SELECT item.feature_id, item.target_at, item.ordinality
     FROM unnest(
@@ -1475,6 +1476,554 @@ CROSS JOIN weather_response_size
 ORDER BY
     CASE batch.row_kind WHEN 'item' THEN 0 ELSE 1 END,
     COALESCE(batch.item_ordinality, batch.card_ordinal),
+    CASE batch.section WHEN 'current' THEN 0 WHEN 'timeline' THEN 1 ELSE 2 END,
+    batch.effective_at,
+    batch.forecast_style,
+    batch.metric_key
+"""
+
+# T-VN-38C — immutable fact snapshot batch.
+#
+# This is intentionally independent of the retired 0060 metric catalog.  The
+# query first ranks every candidate anchor in a set, then ranks immutable
+# facts at the requested business/knowledge time.  It therefore keeps the
+# own → KMA forecast → observed temperature → nearest-any semantics without
+# a per-parent LATERAL probe or a mutable "latest row" table.
+_WEATHER_BATCH_SQL: Final[str] = """
+WITH requested AS (
+    SELECT item.feature_id, item.target_at, item.ordinality
+    FROM unnest(
+        CAST(:feature_ids AS text[]),
+        CAST(:target_ats AS timestamptz[])
+    ) WITH ORDINALITY AS item(feature_id, target_at, ordinality)
+),
+parents AS (
+    SELECT
+        requested.feature_id,
+        requested.target_at,
+        requested.ordinality,
+        visible.feature_id AS visible_feature_id,
+        visible.feature_uuid,
+        visible.coord_5179
+    FROM requested
+    LEFT JOIN feature.public_features AS visible
+      ON visible.feature_id = requested.feature_id
+),
+spatial_candidates AS MATERIALIZED (
+    SELECT
+        parent.ordinality,
+        candidate.feature_id AS source_feature_id,
+        candidate.coord_5179 OPERATOR(x_extension.<->) parent.coord_5179 AS distance_order
+    FROM parents AS parent
+    JOIN feature.public_features AS candidate
+      ON parent.visible_feature_id IS NOT NULL
+     AND parent.coord_5179 IS NOT NULL
+     AND candidate.kind = 'weather'
+     AND candidate.coord_5179 IS NOT NULL
+     AND x_extension.ST_DWithin(
+           candidate.coord_5179,
+           parent.coord_5179,
+           CAST(:radius_m AS double precision)
+         )
+),
+eligible_anchor_facts AS MATERIALIZED (
+    SELECT
+        parent.ordinality,
+        parent.target_at AS requested_target_at,
+        candidate.source_feature_id,
+        candidate.distance_order,
+        fact.weather_value_key,
+        fact.provider_dataset_id,
+        dataset.provider,
+        dataset.dataset_key,
+        dataset.display_name AS dataset_display_name,
+        fact.weather_domain,
+        fact.forecast_style,
+        fact.timeline_bucket,
+        fact.metric_key,
+        fact.metric_name,
+        fact.value_number,
+        fact.value_text,
+        fact.unit,
+        fact.severity,
+        fact.issued_at,
+        fact.valid_at,
+        lower(fact.valid_during) AS valid_from,
+        upper(fact.valid_during) AS valid_until,
+        fact.observed_at,
+        fact.target_at,
+        fact.known_at,
+        fact.source_record_key
+    FROM parents AS parent
+    JOIN spatial_candidates AS candidate
+      ON candidate.ordinality = parent.ordinality
+    JOIN feature.feature_weather_values AS fact
+      ON fact.feature_id = candidate.source_feature_id
+     AND fact.known_at <= CAST(:known_at AS timestamptz)
+     AND fact.target_at <= parent.target_at
+     AND (fact.valid_during IS NULL OR fact.valid_during @> parent.target_at)
+    JOIN provider_sync.provider_datasets AS dataset
+      ON dataset.provider_dataset_id = fact.provider_dataset_id
+     AND dataset.is_active
+),
+candidate_capabilities AS MATERIALIZED (
+    SELECT
+        ordinality,
+        source_feature_id,
+        min(distance_order) AS distance_order,
+        bool_or(
+            provider = 'python-kma-api'
+            AND forecast_style IN ('nowcast', 'ultra_short', 'short', 'mid')
+        ) AS has_kma_forecast,
+        bool_or(
+            forecast_style = 'observed' AND metric_key IN ('T1H', 'TMP')
+        ) AS has_observed_temperature,
+        bool_or(metric_key IN ('T1H', 'TMP')) AS has_temperature
+    FROM eligible_anchor_facts
+    GROUP BY ordinality, source_feature_id
+),
+own_capabilities AS (
+    SELECT
+        parent.ordinality,
+        coalesce(capability.has_temperature, false) AS has_temperature,
+        capability.source_feature_id IS NOT NULL AS has_any
+    FROM parents AS parent
+    LEFT JOIN candidate_capabilities AS capability
+      ON capability.ordinality = parent.ordinality
+     AND capability.source_feature_id = parent.visible_feature_id
+),
+kma_ranked AS (
+    SELECT
+        capability.ordinality,
+        capability.source_feature_id,
+        row_number() OVER (
+            PARTITION BY capability.ordinality
+            ORDER BY capability.distance_order, capability.source_feature_id
+        ) AS rank
+    FROM candidate_capabilities AS capability
+    JOIN own_capabilities AS own
+      ON own.ordinality = capability.ordinality
+    WHERE NOT own.has_temperature
+      AND capability.has_kma_forecast
+),
+observed_ranked AS (
+    SELECT
+        capability.ordinality,
+        capability.source_feature_id,
+        row_number() OVER (
+            PARTITION BY capability.ordinality
+            ORDER BY capability.distance_order, capability.source_feature_id
+        ) AS rank
+    FROM candidate_capabilities AS capability
+    JOIN own_capabilities AS own
+      ON own.ordinality = capability.ordinality
+    WHERE NOT own.has_temperature
+      AND capability.has_observed_temperature
+),
+preferred_sources AS (
+    SELECT
+        parent.ordinality,
+        parent.target_at,
+        parent.visible_feature_id AS source_feature_id,
+        0 AS tier
+    FROM parents AS parent
+    JOIN own_capabilities AS own USING (ordinality)
+    WHERE own.has_any
+    UNION ALL
+    SELECT ranked.ordinality, parent.target_at, ranked.source_feature_id, 1 AS tier
+    FROM kma_ranked AS ranked
+    JOIN parents AS parent USING (ordinality)
+    WHERE ranked.rank = 1
+    UNION ALL
+    SELECT ranked.ordinality, parent.target_at, ranked.source_feature_id, 2 AS tier
+    FROM observed_ranked AS ranked
+    JOIN parents AS parent USING (ordinality)
+    WHERE ranked.rank = 1
+),
+nearest_any_ranked AS (
+    SELECT
+        capability.ordinality,
+        capability.source_feature_id,
+        row_number() OVER (
+            PARTITION BY capability.ordinality
+            ORDER BY capability.distance_order, capability.source_feature_id
+        ) AS rank
+    FROM candidate_capabilities AS capability
+    WHERE NOT EXISTS (
+        SELECT 1
+        FROM preferred_sources AS preferred
+        WHERE preferred.ordinality = capability.ordinality
+    )
+),
+raw_sources AS (
+    SELECT * FROM preferred_sources
+    UNION ALL
+    SELECT ranked.ordinality, parent.target_at, ranked.source_feature_id, 3 AS tier
+    FROM nearest_any_ranked AS ranked
+    JOIN parents AS parent USING (ordinality)
+    WHERE ranked.rank = 1
+),
+sources AS MATERIALIZED (
+    SELECT DISTINCT ON (ordinality, source_feature_id)
+        ordinality, target_at, source_feature_id, tier
+    FROM raw_sources
+    ORDER BY ordinality, source_feature_id, tier
+),
+source_bundles AS (
+    SELECT
+        parent.ordinality,
+        parent.target_at,
+        coalesce(
+            array_agg(source.source_feature_id ORDER BY source.tier, source.source_feature_id)
+                FILTER (WHERE source.source_feature_id IS NOT NULL),
+            CAST(ARRAY[] AS text[])
+        ) AS source_feature_ids
+    FROM parents AS parent
+    LEFT JOIN sources AS source USING (ordinality, target_at)
+    GROUP BY parent.ordinality, parent.target_at
+),
+cards AS MATERIALIZED (
+    SELECT
+        target_at,
+        source_feature_ids,
+        min(ordinality) AS card_ordinal
+    FROM source_bundles
+    WHERE cardinality(source_feature_ids) > 0
+    GROUP BY target_at, source_feature_ids
+),
+parent_cards AS (
+    SELECT bundle.ordinality, card.card_ordinal
+    FROM source_bundles AS bundle
+    JOIN cards AS card
+      ON card.target_at = bundle.target_at
+     AND card.source_feature_ids = bundle.source_feature_ids
+),
+card_sources AS MATERIALIZED (
+    SELECT
+        card.card_ordinal,
+        card.target_at,
+        source.source_feature_id,
+        source.tier
+    FROM cards AS card
+    JOIN sources AS source
+      ON source.ordinality = card.card_ordinal
+     AND source.target_at = card.target_at
+),
+source_series AS MATERIALIZED (
+    SELECT DISTINCT
+        source.card_ordinal,
+        source.target_at,
+        source.source_feature_id,
+        source.tier,
+        fact.provider_dataset_id,
+        fact.weather_domain,
+        fact.forecast_style,
+        fact.metric_key
+    FROM card_sources AS source
+    JOIN feature.feature_weather_values AS fact
+      ON fact.feature_id = source.source_feature_id
+     AND fact.known_at <= CAST(:known_at AS timestamptz)
+    JOIN provider_sync.provider_datasets AS dataset
+      ON dataset.provider_dataset_id = fact.provider_dataset_id
+     AND dataset.is_active
+),
+source_series_count AS MATERIALIZED (
+    SELECT count(*)::bigint AS value
+    FROM source_series
+),
+gated_card_sources AS MATERIALIZED (
+    SELECT source.*
+    FROM card_sources AS source
+    CROSS JOIN source_series_count
+    WHERE source_series_count.value <= CAST(:series_work_limit AS bigint)
+),
+current_ranked AS (
+    SELECT
+        source.card_ordinal,
+        source.target_at AS requested_target_at,
+        source.tier,
+        fact.weather_value_key,
+        fact.provider_dataset_id,
+        dataset.provider,
+        dataset.dataset_key,
+        dataset.display_name AS dataset_display_name,
+        fact.weather_domain,
+        fact.forecast_style,
+        fact.timeline_bucket,
+        fact.metric_key,
+        fact.metric_name,
+        fact.value_number,
+        fact.value_text,
+        fact.unit,
+        fact.severity,
+        fact.issued_at,
+        fact.valid_at,
+        lower(fact.valid_during) AS valid_from,
+        upper(fact.valid_during) AS valid_until,
+        fact.observed_at,
+        fact.target_at AS effective_at,
+        fact.known_at,
+        fact.source_record_key,
+        row_number() OVER (
+            PARTITION BY
+                source.card_ordinal, source.source_feature_id,
+                fact.provider_dataset_id, fact.weather_domain,
+                fact.forecast_style, fact.metric_key
+            ORDER BY
+                fact.target_at DESC,
+                fact.known_at DESC,
+                upper(fact.valid_during) DESC NULLS LAST,
+                fact.issued_at DESC NULLS LAST,
+                fact.valid_at DESC NULLS LAST,
+                fact.observed_at DESC NULLS LAST,
+                fact.weather_value_key DESC
+        ) AS rank
+    FROM gated_card_sources AS source
+    JOIN feature.feature_weather_values AS fact
+      ON fact.feature_id = source.source_feature_id
+     AND fact.known_at <= CAST(:known_at AS timestamptz)
+     AND fact.target_at <= source.target_at
+     AND (fact.valid_during IS NULL OR fact.valid_during @> source.target_at)
+    JOIN provider_sync.provider_datasets AS dataset
+      ON dataset.provider_dataset_id = fact.provider_dataset_id
+     AND dataset.is_active
+),
+current_rows AS (
+    SELECT DISTINCT ON (card_ordinal, forecast_style, metric_key)
+        card_ordinal,
+        'current'::text AS section,
+        forecast_style,
+        metric_key,
+        metric_name,
+        timeline_bucket,
+        value_number,
+        value_text,
+        unit,
+        severity,
+        issued_at,
+        valid_at,
+        valid_from,
+        valid_until,
+        observed_at,
+        provider_dataset_id,
+        provider,
+        dataset_key,
+        dataset_display_name,
+        weather_domain,
+        effective_at,
+        known_at,
+        source_record_key
+    FROM current_ranked
+    WHERE rank = 1
+    ORDER BY
+        card_ordinal, forecast_style, metric_key,
+        tier, effective_at DESC, known_at DESC, weather_value_key DESC
+),
+timeline_ranked AS (
+    SELECT
+        source.card_ordinal,
+        source.tier,
+        fact.weather_value_key,
+        fact.provider_dataset_id,
+        dataset.provider,
+        dataset.dataset_key,
+        dataset.display_name AS dataset_display_name,
+        fact.weather_domain,
+        fact.forecast_style,
+        fact.timeline_bucket,
+        fact.metric_key,
+        fact.metric_name,
+        fact.value_number,
+        fact.value_text,
+        fact.unit,
+        fact.severity,
+        fact.issued_at,
+        fact.valid_at,
+        lower(fact.valid_during) AS valid_from,
+        upper(fact.valid_during) AS valid_until,
+        fact.observed_at,
+        fact.target_at AS effective_at,
+        fact.known_at,
+        fact.source_record_key,
+        row_number() OVER (
+            PARTITION BY
+                source.card_ordinal, source.source_feature_id,
+                fact.provider_dataset_id, fact.weather_domain,
+                fact.forecast_style, fact.metric_key, fact.target_at
+            ORDER BY
+                fact.known_at DESC,
+                upper(fact.valid_during) DESC NULLS LAST,
+                fact.issued_at DESC NULLS LAST,
+                fact.valid_at DESC NULLS LAST,
+                fact.observed_at DESC NULLS LAST,
+                fact.weather_value_key DESC
+        ) AS rank
+    FROM gated_card_sources AS source
+    JOIN feature.feature_weather_values AS fact
+      ON fact.feature_id = source.source_feature_id
+     AND fact.known_at <= CAST(:known_at AS timestamptz)
+     AND fact.target_at > source.target_at
+     AND fact.target_at <= source.target_at
+         + make_interval(days => CAST(:timeline_days AS integer))
+     AND (fact.valid_during IS NULL OR fact.valid_during @> fact.target_at)
+    JOIN provider_sync.provider_datasets AS dataset
+      ON dataset.provider_dataset_id = fact.provider_dataset_id
+     AND dataset.is_active
+),
+timeline_rows AS (
+    SELECT DISTINCT ON (card_ordinal, forecast_style, metric_key, effective_at)
+        card_ordinal,
+        'timeline'::text AS section,
+        forecast_style,
+        metric_key,
+        metric_name,
+        timeline_bucket,
+        value_number,
+        value_text,
+        unit,
+        severity,
+        issued_at,
+        valid_at,
+        valid_from,
+        valid_until,
+        observed_at,
+        provider_dataset_id,
+        provider,
+        dataset_key,
+        dataset_display_name,
+        weather_domain,
+        effective_at,
+        known_at,
+        source_record_key
+    FROM timeline_ranked
+    WHERE rank = 1
+    ORDER BY
+        card_ordinal, forecast_style, metric_key, effective_at,
+        tier, known_at DESC, weather_value_key DESC
+),
+weather_rows AS (
+    SELECT * FROM current_rows
+    UNION ALL
+    SELECT * FROM timeline_rows
+),
+weather_row_count AS (
+    SELECT count(*)::bigint AS value
+    FROM weather_rows
+),
+weather_response_size AS (
+    SELECT (
+        4096
+        + coalesce(sum(octet_length(CAST(jsonb_build_object(
+            'forecast_style', forecast_style,
+            'metric_key', metric_key,
+            'provider_dataset_id', provider_dataset_id,
+            'dataset_key', dataset_key,
+            'known_at', known_at,
+            'effective_at', effective_at,
+            'value_number', value_number,
+            'value_text', value_text
+        ) AS text))), 0)
+        + (SELECT coalesce(sum(256 + octet_length(feature_id)), 0) FROM parents)
+        + (SELECT count(*) * 256 FROM cards)
+    )::bigint AS value
+    FROM weather_rows
+),
+card_states AS (
+    SELECT
+        card.card_ordinal,
+        EXISTS (
+            SELECT 1 FROM weather_rows AS weather
+            WHERE weather.card_ordinal = card.card_ordinal
+        ) AS has_weather
+    FROM cards AS card
+),
+batch_rows AS (
+    SELECT
+        'item'::text AS row_kind,
+        parent.ordinality AS item_ordinality,
+        parent.feature_id,
+        CAST(parent.feature_uuid AS text) AS feature_uuid,
+        CASE WHEN parent.visible_feature_id IS NOT NULL AND state.has_weather
+             THEN parent_card.card_ordinal END AS card_ordinal,
+        CASE
+            WHEN parent.visible_feature_id IS NULL THEN 'retired'
+            WHEN state.has_weather THEN 'found'
+            ELSE 'no_data'
+        END AS state,
+        NULL::text AS section,
+        NULL::text AS forecast_style,
+        NULL::text AS metric_key,
+        NULL::text AS metric_name,
+        NULL::text AS timeline_bucket,
+        NULL::numeric AS value_number,
+        NULL::text AS value_text,
+        NULL::text AS unit,
+        NULL::text AS severity,
+        NULL::timestamptz AS issued_at,
+        NULL::timestamptz AS valid_at,
+        NULL::timestamptz AS valid_from,
+        NULL::timestamptz AS valid_until,
+        NULL::timestamptz AS observed_at,
+        NULL::bigint AS provider_dataset_id,
+        NULL::text AS provider,
+        NULL::text AS dataset_key,
+        NULL::text AS dataset_display_name,
+        NULL::text AS weather_domain,
+        NULL::timestamptz AS effective_at,
+        NULL::timestamptz AS known_at,
+        NULL::text AS source_record_key
+    FROM parents AS parent
+    LEFT JOIN parent_cards AS parent_card USING (ordinality)
+    LEFT JOIN card_states AS state
+      ON state.card_ordinal = parent_card.card_ordinal
+    UNION ALL
+    SELECT
+        'metric'::text,
+        NULL::bigint,
+        NULL::text,
+        NULL::text,
+        weather.card_ordinal,
+        NULL::text,
+        weather.section,
+        weather.forecast_style,
+        weather.metric_key,
+        weather.metric_name,
+        weather.timeline_bucket,
+        weather.value_number,
+        weather.value_text,
+        weather.unit,
+        weather.severity,
+        weather.issued_at,
+        weather.valid_at,
+        weather.valid_from,
+        weather.valid_until,
+        weather.observed_at,
+        weather.provider_dataset_id,
+        weather.provider,
+        weather.dataset_key,
+        weather.dataset_display_name,
+        weather.weather_domain,
+        weather.effective_at,
+        weather.known_at,
+        weather.source_record_key
+    FROM weather_rows AS weather
+    CROSS JOIN weather_row_count
+    CROSS JOIN weather_response_size
+    WHERE weather_row_count.value <= CAST(:metric_row_limit AS bigint)
+      AND weather_response_size.value <= CAST(:response_byte_limit AS bigint)
+)
+SELECT
+    batch.*,
+    source_series_count.value AS series_work_count,
+    weather_row_count.value AS metric_row_count,
+    weather_response_size.value AS response_payload_bytes
+FROM batch_rows AS batch
+CROSS JOIN source_series_count
+CROSS JOIN weather_row_count
+CROSS JOIN weather_response_size
+ORDER BY
+    CASE batch.row_kind WHEN 'item' THEN 0 ELSE 1 END,
+    coalesce(batch.item_ordinality, batch.card_ordinal),
     CASE batch.section WHEN 'current' THEN 0 WHEN 'timeline' THEN 1 ELSE 2 END,
     batch.effective_at,
     batch.forecast_style,
@@ -2326,6 +2875,7 @@ def _weather_metric(row: RowMapping) -> WeatherMetric:
         issued_at=issued_at,
         valid_at=valid_at,
         observed_at=observed_at,
+        known_at=row.get("known_at"),
         provider=row["provider"],
         weather_domain=row["weather_domain"],
         valid_from=valid_from,

@@ -151,6 +151,7 @@ class PricePointOut(BaseModel):
     value_number: float
     unit: str
     observed_at: datetime
+    known_at: datetime
 
 
 class WeatherSummaryOut(BaseModel):
@@ -950,6 +951,7 @@ def _price_point_out(point: price_repo.PricePoint) -> PricePointOut:
         value_number=float(point.value_number),
         unit=point.unit,
         observed_at=point.observed_at,
+        known_at=point.known_at,
     )
 
 
@@ -1590,6 +1592,7 @@ class WeatherMetricOut(BaseModel):
     valid_from: datetime | None = None
     valid_until: datetime | None = None
     observed_at: datetime | None = None
+    known_at: datetime | None = None
     effective_at: datetime | None = None
     provider_dataset_id: int | None = None
     dataset_key: str | None = None
@@ -1613,6 +1616,7 @@ def _weather_metric_out(metric: weather_repo.WeatherMetric) -> WeatherMetricOut:
         valid_from=metric.valid_from,
         valid_until=metric.valid_until,
         observed_at=metric.observed_at,
+        known_at=metric.known_at,
         effective_at=metric.effective_at,
         provider_dataset_id=metric.provider_dataset_id,
         dataset_key=metric.dataset_key,
