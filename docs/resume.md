@@ -1,5 +1,41 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-09 — T-VN-33: CI 미러 게이트 24종 중 20종 GREEN, 잔여 4는 전부 선재/환경
+
+적대 리뷰 **4라운드 연속 REJECT**를 거쳤다. 네 번 다 같은 실패였다 — **변경 범위보다
+좁은 집합으로 검증하고 green이라 선언**했다. 네 번째는 그것을 막으려고 만든
+`scripts/verify-all-gates.sh`가 CI 차단 스텝 22개 중 10개만 돌리면서 상단에 "전부
+돌린다"고 적은 것이었고, 그 사각에서 branch-caused ESLint 실패가 나왔다.
+
+**스크립트를 CI와 1:1로 재작성**했다(24개). 목록을 추측하지 않고
+`.github/workflows/*.yml`의 `run:` 스텝을 옮겼다. 정합성은
+`tests/unit/test_gate_script_mirrors_ci.py`가 지킨다 — 워크플로를 파싱해 누락을
+잡고, 면제에는 이유 문자열을 강제한다.
+
+**현재: 24종 중 20종 통과.** 실패 4종의 귀속을 전부 실측했다:
+- `pytest unit+lint` 6건 / `pytest integration` 7건 = **전부 환경 노이즈**
+  (docker CLI 부재 5, package.json 미마운트 1, geo live 키 미마운트 5,
+  docker effect 2). 제품 실패 0건. api 1080 passed, dagster 458 passed.
+- `audit:high` — nanoid advisory. `origin/main`도 같은 lockfile이라 main도 red다.
+- `admin react-doctor` — origin/main 프론트 src를 git archive로 떠서 같은 명령을
+  돌리니 **main 10건 / 이 브랜치 7건**이다. 선재이고 이 브랜치가 3건 줄였다.
+
+**게이트 재작성이 실제로 잡은 것**(구 스크립트는 하나도 못 봤다):
+- branch-caused ESLint red 2건
+- `operation_key=null` 행 상세가 **422**가 되는 신규 회귀(74개 dataset 중 17개).
+  직전 커밋이 프론트에서 고친 것을 그 다음 커밋이 서버 `min_length=1`로 다시 깨뜨렸다.
+- **기능 손실 하나** — MOIS 사전점검 경고가 통째로 사라져 있었다. 타입체크도
+  테스트도 못 잡는다(아무도 안 쓰는 export가 남을 뿐이라 컴파일은 통과한다).
+  `react-doctor`만 잡았다.
+- 감사 테스트가 **자기가 감시하는 파일의 옛 사본**을 읽던 문제(컨테이너 복사 목록에
+  `scripts/`·`.github/`가 없었다).
+
+**결함을 지키던 단언 3건**을 이유와 함께 뒤집었다 — scope 접기, run history 접기,
+event 축 부재. 셋 다 "형제 operation을 중복으로 규정"하는 형태였다.
+
+**다음**: 5라운드 리뷰 승인 → #966 머지 → PR #967(T-VN-41 F1D, D1/D2 분리).
+후속은 태스크 #42(계약↔head 대조 게이트, offline upload 500).
+
 ## 2026-08-08 (3) — T-VN-33: 적대 리뷰 3회 REJECT를 거쳐 게이트 10종 중 9종 GREEN
 
 리뷰어 2명이 **세 라운드 연속 REJECT**했고 지적이 전부 타당했다. 세 번 다 같은
