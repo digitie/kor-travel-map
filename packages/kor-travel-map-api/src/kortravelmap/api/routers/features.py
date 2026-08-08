@@ -159,10 +159,10 @@ class WeatherSummaryOut(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    provider: str | None = None
-    provider_dataset_id: int | None = None
-    dataset_key: str | None = None
-    dataset_display_name: str | None = None
+    provider: str
+    provider_dataset_id: int
+    dataset_key: str
+    dataset_display_name: str
     weather_domain: str | None = None
     forecast_style: str | None = None
     metric_key: str
@@ -174,6 +174,7 @@ class WeatherSummaryOut(BaseModel):
     valid_at: datetime | None = None
     observed_at: datetime | None = None
     known_at: datetime | None = None
+    refresh_after: datetime
 
 
 class FeatureSummary(BaseModel):

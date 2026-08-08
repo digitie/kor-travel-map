@@ -41,7 +41,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from time import monotonic
 from types import TracebackType
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -301,12 +301,18 @@ from kortravelmap.infra.sync_state_repo import (
 from kortravelmap.infra.sync_state_repo import (
     record_sync_success_for_operation_membership as repo_record_operation_success,
 )
-from kortravelmap.infra.weather_repo import WeatherCard
+from kortravelmap.infra.weather_repo import (
+    WeatherCard,
+    WeatherSummaryMaterializeResult,
+)
 from kortravelmap.infra.weather_repo import (
     build_weather_card as repo_build_weather_card,
 )
 from kortravelmap.infra.weather_repo import (
     load_weather_values as repo_load_weather_values,
+)
+from kortravelmap.infra.weather_repo import (
+    materialize_current_weather_summary as repo_materialize_current_weather_summary,
 )
 from kortravelmap.mois import DEFAULT_BATCH_SIZE as MOIS_DEFAULT_BATCH_SIZE
 from kortravelmap.mois import (
@@ -2446,6 +2452,20 @@ class AsyncKorTravelMapClient:
                 provider_dataset_id=provider_dataset_id,
                 source_record=source_record,
                 selected_at=selected_at,
+            )
+
+    async def materialize_current_weather_summary(
+        self,
+        *,
+        selected_at: datetime,
+        run_kind: Literal["ingest", "reconcile", "backfill", "restore"] = "reconcile",
+    ) -> WeatherSummaryMaterializeResult:
+        """새 provider write 없이 weather current projection을 business time으로 갱신한다."""
+        async with self._session_factory() as session, session.begin():
+            return await repo_materialize_current_weather_summary(
+                session,
+                selected_at=selected_at,
+                run_kind=run_kind,
             )
 
     # ─── price values (T-price) ───────────────────────────────────────────────

@@ -198,6 +198,18 @@ async def test_weather_summary_distinguishes_kma_and_airkorea_values(
         ),
         {"feature_ids": [kma.feature.feature_id, airkorea.feature.feature_id]},
     )
+    # actual database clock와 provider fixture business time을 분리한다. map current
+    # reader의 expiry gate를 검증하므로 fixture summary를 현재 wall clock 기준 fresh로 둔다.
+    await migrated_session.execute(
+        text(
+            """
+            UPDATE feature.current_weather_summary
+            SET refresh_after = clock_timestamp() + interval '1 hour'
+            WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
+            """
+        ),
+        {"feature_ids": [kma.feature.feature_id, airkorea.feature.feature_id]},
+    )
 
     for include_geometry in (False, True):
         rows = await feature_repo.features_in_bbox(
@@ -217,6 +229,7 @@ async def test_weather_summary_distinguishes_kma_and_airkorea_values(
         assert kma_summary["dataset_key"] == KMA_ULTRA_SHORT_NOWCAST_DATASET_KEY
         assert kma_summary["metric_key"] == "T1H"
         assert float(kma_summary["value_number"]) == 27.5
+        assert kma_summary["refresh_after"] > _NOW
 
         airkorea_summary = by_id[airkorea.feature.feature_id]["weather_summary"]
         assert airkorea_summary["provider"] == "python-airkorea-api"
@@ -224,6 +237,31 @@ async def test_weather_summary_distinguishes_kma_and_airkorea_values(
         assert airkorea_summary["dataset_key"] == DATASET_KEY_AIR_QUALITY
         assert airkorea_summary["metric_key"] == "PM10"
         assert float(airkorea_summary["value_number"]) == 42.0
+        assert airkorea_summary["refresh_after"] > _NOW
 
         assert by_id[kma.feature.feature_id]["marker_icon"] == "marker"
         assert by_id[airkorea.feature.feature_id]["marker_icon"] == "marker"
+
+    # derived row cleanup 전에 dataset을 비활성화해도 bbox normal reader가 즉시
+    # fail-closed여야 한다. 다른 active dataset summary는 계속 보인다.
+    await migrated_session.execute(
+        text(
+            """
+            UPDATE provider_sync.provider_datasets
+            SET is_active = false
+            WHERE provider_dataset_id = :provider_dataset_id
+            """
+        ),
+        {"provider_dataset_id": kma_dataset_id},
+    )
+    rows = await feature_repo.features_in_bbox(
+        migrated_session,
+        min_lon=126.9,
+        min_lat=37.5,
+        max_lon=127.1,
+        max_lat=37.7,
+        kinds=["weather"],
+    )
+    by_id = {row["feature_id"]: row for row in rows}
+    assert by_id[kma.feature.feature_id]["weather_summary"] is None
+    assert by_id[airkorea.feature.feature_id]["weather_summary"] is not None

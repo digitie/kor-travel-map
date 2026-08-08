@@ -259,6 +259,7 @@ JOIN feature.feature_price_values AS fact
   ON fact.price_value_key = summary.price_value_key
 JOIN provider_sync.provider_datasets AS dataset
   ON dataset.provider_dataset_id = fact.provider_dataset_id
+ AND dataset.is_active
 WHERE summary.feature_id = :feature_id
   AND (
     CAST(:stale_hide_days AS integer) IS NULL

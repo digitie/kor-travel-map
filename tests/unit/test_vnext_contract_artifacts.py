@@ -29,7 +29,7 @@ _CONTRACTS: Final = _ROOT / "contracts" / "vnext"
 ARTIFACT_SHA256: Final[dict[str, str]] = {
     "target-schema-v1.sql": ("87048b3caaabf60b9f3f0d03d06057f53706417ca99773e2013e4dda85fbdf03"),
     "target-invariants-v1.sql": (
-        "68ed9bcf7252d3c659830871e39cb827bfaefc7c384d39f5d04c650d77e3b7a5"
+        "8e193b1522f21af27a19ce0a5fbd30b9b418c5e13242dc2a831daa1869b5ac77"
     ),
     "target-schema-fingerprints-v1.json": (
         "7db6129fa7850ff2f62390b2475b25c194ca9c0442a56d5589983601502c5ad8"
@@ -37,7 +37,7 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     "tvn33-reference-ownership-v1.sql": (
         "1be5cd9370d974a94adb2146947732f79d756ad3411e137d3846b33a5ba8e13a"
     ),
-    "openapi-diff-v1.json": ("f635f54b54be29e2f2f727d2bfa544e6bdafcda176f738c0f23eb6b8e86f5b3e"),
+    "openapi-diff-v1.json": ("3175237768d07c08a903637dc326ae3d819a8374f2368c9786f4af213d7e3440"),
     "consumer-rollout-v1.json": (
         "d9983dbe96094c9439b575e8ff8e5f1e4bca0656fa4b8166f2449010ad2b8d38"
     ),

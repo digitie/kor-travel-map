@@ -5,18 +5,23 @@
   "baseline": {
     "admin": {
       "file": "packages/kor-travel-map-api/openapi.json",
-      "sha256": "ae706a2a2dc82edb4793ad3f6372861e64566d653bebec0ae4a75f9f65f70932"
+      "sha256": "4fa5fcf0602156aef4663e9e74f0ad76a860b9fad9caad4393962c17a8e5400d"
     },
     "user": {
       "file": "packages/kor-travel-map-api/openapi.user.json",
-      "sha256": "353cd01b7953de4b44a926bd1bf926d36a08fe1c9feaacce042c731727827c70"
+      "sha256": "81f33430acfd7a8ac9d2f1f35e1cb035f2230c5844ef294640c88cb1ae9d6a58"
     },
     "service": {
       "file": "packages/kor-travel-map-api/openapi.service.json",
-      "sha256": "6ad8c1c9c1d391c54e7592b64ed9f0225164b613a5c2824d8eafd3da9bd36f1e"
+      "sha256": "ebe7f2afaf70727e850b21cd8163a2dbff374dc942ad0e158d574f91c1863de5"
     }
   },
   "revisions": [
+    {
+      "date": "2026-08-08",
+      "task": "T-VN-38C",
+      "change": "admin/user/service baseline sha256 재고정 — 지도 weather summary가 canonical dataset identity(provider_dataset_id, dataset_key, dataset_display_name)를 필수로 하고 selection deadline refresh_after를 노출한다. 정상 current bbox는 deadline 초과 row를 제외하므로 이 필드는 stale marker가 아니라 현재 projection의 재검증 시각이다. current와 explicit snapshot route 분리는 Wave 2 목표 diff 항목을 새로 만들지 않으며, 기존 bitemporal 항목의 구현을 완결한다."
+    },
     {
       "date": "2026-08-06",
       "task": "T-VN-35",

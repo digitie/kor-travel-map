@@ -2882,9 +2882,9 @@ export interface components {
          */
         WeatherSummaryOut: {
             /** Dataset Display Name */
-            dataset_display_name?: string | null;
+            dataset_display_name: string;
             /** Dataset Key */
-            dataset_key?: string | null;
+            dataset_key: string;
             /** Forecast Style */
             forecast_style?: string | null;
             /** Issued At */
@@ -2898,9 +2898,14 @@ export interface components {
             /** Observed At */
             observed_at?: string | null;
             /** Provider */
-            provider?: string | null;
+            provider: string;
             /** Provider Dataset Id */
-            provider_dataset_id?: number | null;
+            provider_dataset_id: number;
+            /**
+             * Refresh After
+             * Format: date-time
+             */
+            refresh_after: string;
             /** Unit */
             unit?: string | null;
             /** Valid At */

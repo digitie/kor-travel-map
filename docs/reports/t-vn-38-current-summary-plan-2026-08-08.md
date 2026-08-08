@@ -94,9 +94,12 @@ DELETE할 수 없다. summary row는 마지막 successful verifier run을 **반�
 weather의 `current`는 위 selection 시각 winner다. summary의 `refresh_after`는 다음 후보의
 `GREATEST(target_at, known_at, lower(valid_during))`, selected fact의 `valid_during` upper bound, 그리고 canonical
 refresh policy의 `stale_after_minutes` 경계 중 selection 이후 가장 이른 시각이다. weather
-dataset은 non-null SLA가 있어야 normal current summary를 제공한다. Dagster materializer는
-`refresh_after` 전에 재계산한다. 만료 summary를 normal API가 조용히 정답처럼 반환하지 않으며,
-scheduler 지연 시 명시적 stale 상태와 운영 경보를 낸다.
+dataset은 non-null SLA가 있어야 normal current summary를 제공한다. Dagster의
+`current_weather_summary_refresh` job은 기본 실행 minute schedule로 `refresh_after` 경계를
+재계산한다. 전역 weather projection은 transaction advisory lock 아래 desired set을 만들고,
+같은 winner/deadline은 receipt만 남기며 달라진 pointer/deadline만 upsert한다. 만료 summary와
+inactive dataset은 normal card·anchor·bbox join에서 제외한다. 따라서 scheduler 지연은 오래된
+값을 정답처럼 표시하지 않는 empty current 결과로 관측된다.
 
 ## 조회 cutover (T-VN-38C)
 
@@ -112,6 +115,8 @@ current endpoint는 summary만 읽고 `asof`를 받지 않는다. historical sna
 `target_at`, `known_at`을 모두 필수로 받아 raw ranked CTE를 실행한다. current/history·bbox API
 DTO와 OpenAPI/UI React key는 `provider_dataset_id`, `dataset_key`, `display_name`을 series identity로
 노출한다. provider name은 표시 보조값일 뿐 key가 아니다.
+summary가 존재하는 map DTO는 `provider_dataset_id`, `dataset_key`, `dataset_display_name`,
+`refresh_after`를 필수로 하며, marker는 deadline을 넘긴 row를 받지 않는다.
 
 기존 history index는 T-VN-39 removal manifest 판단 전까지 shadow로 남긴다. 신규 summary
 index는 identity와 fact-key join을 실제 EXPLAIN으로 검증한 뒤에만 추가한다. 단순히

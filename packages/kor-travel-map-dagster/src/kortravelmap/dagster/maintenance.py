@@ -5,6 +5,7 @@ from datetime import datetime
 from time import monotonic
 from typing import TYPE_CHECKING, Any, Final, cast
 
+from kortravelmap.dto._time import kst_now
 from kortravelmap.infra.consistency import DEDUP_PENDING_WARN_THRESHOLD
 from kortravelmap.infra.dedup_refresh_repo import (
     DEDUP_REFRESH_DEFAULT_LIMIT,
@@ -15,6 +16,7 @@ from dagster import (
     Array,
     Backoff,
     Bool,
+    DagsterRunStatus,
     DefaultScheduleStatus,
     Failure,
     Field,
@@ -22,7 +24,11 @@ from dagster import (
     OpExecutionContext,
     Permissive,
     RetryPolicy,
+    RunRequest,
+    RunsFilter,
     ScheduleDefinition,
+    ScheduleEvaluationContext,
+    SkipReason,
     job,
     op,
 )
@@ -39,6 +45,8 @@ _PERMISSIVE_CONFIG = cast(Any, Permissive)
 __all__ = [
     "CACHE_TARGET_SNAPSHOT_GC_JOB_TAGS",
     "CACHE_TARGET_SNAPSHOT_GC_SCHEDULES",
+    "CURRENT_WEATHER_SUMMARY_REFRESH_JOB_TAGS",
+    "CURRENT_WEATHER_SUMMARY_REFRESH_SCHEDULES",
     "CONSISTENCY_DEDUP_REFRESH_JOB_TAGS",
     "CONSISTENCY_DEDUP_REFRESH_SCHEDULES",
     "DEFAULT_DEDUP_SCOPE_PAIRS",
@@ -50,7 +58,9 @@ __all__ = [
     "NOTICE_PURGE_DEFAULT_RETENTION",
     "consistency_dedup_refresh_job",
     "cache_target_snapshot_gc_job",
+    "current_weather_summary_refresh_job",
     "drain_expired_cache_target_snapshots_op",
+    "materialize_current_weather_summary_op",
     "purge_expired_notices_op",
     "purge_resolved_integrity_findings_op",
     "refresh_dedup_candidates_op",
@@ -70,6 +80,23 @@ CACHE_TARGET_SNAPSHOT_GC_JOB_TAGS: Final[dict[str, str]] = {
     "kor_travel_map.timezone": KST_TIMEZONE,
 }
 """cache-target snapshot background GC job 공통 tag."""
+
+CURRENT_WEATHER_SUMMARY_REFRESH_JOB_TAGS: Final[dict[str, str]] = {
+    "kor_travel_map.job_scope": "maintenance",
+    "kor_travel_map.job_kind": "current_weather_summary_refresh",
+    "kor_travel_map.timezone": KST_TIMEZONE,
+}
+"""weather deadline-driven current projection refresh Dagster job 공통 tag."""
+
+_WEATHER_SUMMARY_ACTIVE_RUN_STATUSES: Final[tuple[DagsterRunStatus, ...]] = (
+    DagsterRunStatus.QUEUED,
+    DagsterRunStatus.NOT_STARTED,
+    DagsterRunStatus.MANAGED,
+    DagsterRunStatus.STARTING,
+    DagsterRunStatus.STARTED,
+    DagsterRunStatus.CANCELING,
+)
+"""minute tick이 전역 projection job을 backlog로 쌓지 않게 하는 active 상태."""
 
 MAINTENANCE_RETRY_POLICY: Final[RetryPolicy] = RetryPolicy(
     max_retries=3,
@@ -545,6 +572,32 @@ async def drain_expired_cache_target_snapshots_op(
     return metadata
 
 
+@op(
+    name="materialize_current_weather_summary",
+    required_resource_keys={"kor_travel_map_client"},
+    retry_policy=MAINTENANCE_RETRY_POLICY,
+)
+async def materialize_current_weather_summary_op(
+    context: OpExecutionContext,
+) -> dict[str, object]:
+    """새 provider write가 없어도 deadline을 지난 weather winner를 재선정한다."""
+    client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
+    result = await client.materialize_current_weather_summary(
+        selected_at=kst_now(),
+        run_kind="reconcile",
+    )
+    metadata: dict[str, object] = {
+        "summary_run_id": result.summary_run_id,
+        "selected_at": result.selected_at.isoformat(),
+        "input_count": result.input_count,
+        "inserted_count": result.inserted_count,
+        "updated_count": result.updated_count,
+        "deleted_count": result.deleted_count,
+    }
+    context.add_output_metadata(metadata)
+    return metadata
+
+
 @job(
     name="consistency_dedup_refresh",
     tags=CONSISTENCY_DEDUP_REFRESH_JOB_TAGS,
@@ -571,6 +624,44 @@ def consistency_dedup_refresh_job() -> None:
 def cache_target_snapshot_gc_job() -> None:
     """hourly cache-target snapshot background GC 전용 job."""
     drain_expired_cache_target_snapshots_op()
+
+
+@job(
+    name="current_weather_summary_refresh",
+    tags=CURRENT_WEATHER_SUMMARY_REFRESH_JOB_TAGS,
+    description=(
+        "새 provider write 없이 weather current summary deadline을 재평가해 "
+        "eligible winner와 stale projection을 원자적으로 갱신한다."
+    ),
+)
+def current_weather_summary_refresh_job() -> None:
+    """deadline-driven weather current projection reconciliation 전용 job."""
+    materialize_current_weather_summary_op()
+
+
+def _weather_summary_refresh_execution_fn(
+    context: ScheduleEvaluationContext,
+) -> RunRequest | SkipReason:
+    """실행 중인 global projection이 있으면 minute tick을 합친다."""
+    active_runs = context.instance.get_runs(
+        filters=RunsFilter(
+            job_name="current_weather_summary_refresh",
+            statuses=_WEATHER_SUMMARY_ACTIVE_RUN_STATUSES,
+        ),
+        limit=1,
+    )
+    if active_runs:
+        active_run = active_runs[0]
+        return SkipReason(
+            "current_weather_summary_refresh의 "
+            f"{active_run.status.value} run({active_run.run_id})이 있어 이번 tick을 생략함"
+        )
+    return RunRequest(
+        tags={
+            **CURRENT_WEATHER_SUMMARY_REFRESH_JOB_TAGS,
+            "kor_travel_map.trigger_kind": "schedule",
+        }
+    )
 
 
 CONSISTENCY_DEDUP_REFRESH_SCHEDULES: Final = [
@@ -611,13 +702,35 @@ CACHE_TARGET_SNAPSHOT_GC_SCHEDULES: Final = [
 ]
 """cache-target snapshot GC hourly schedule. 운영 enable 전까지 STOPPED."""
 
+CURRENT_WEATHER_SUMMARY_REFRESH_SCHEDULES: Final = [
+    ScheduleDefinition(
+        name="current_weather_summary_refresh_minutely_schedule",
+        job=current_weather_summary_refresh_job,
+        cron_schedule=cron_for_schedule(
+            "current_weather_summary_refresh_minutely_schedule",
+            "* * * * *",
+        ),
+        execution_timezone=KST_TIMEZONE,
+        default_status=DefaultScheduleStatus.RUNNING,
+        tags=CURRENT_WEATHER_SUMMARY_REFRESH_JOB_TAGS,
+        execution_fn=_weather_summary_refresh_execution_fn,
+        description=(
+            "weather summary의 next eligibility·validity·SLA deadline을 1분마다 "
+            "재계산한다. projection transaction lock이 동시 실행을 직렬화한다."
+        ),
+    )
+]
+"""weather current projection deadline schedule — 운영에서 기본 실행한다."""
+
 MAINTENANCE_JOBS: Final = [
     consistency_dedup_refresh_job,
     cache_target_snapshot_gc_job,
+    current_weather_summary_refresh_job,
 ]
 MAINTENANCE_SCHEDULES: Final = [
     *CONSISTENCY_DEDUP_REFRESH_SCHEDULES,
     *CACHE_TARGET_SNAPSHOT_GC_SCHEDULES,
+    *CURRENT_WEATHER_SUMMARY_REFRESH_SCHEDULES,
 ]
 
 
