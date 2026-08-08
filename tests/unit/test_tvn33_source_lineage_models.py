@@ -136,9 +136,12 @@ def test_provider_dataset_and_operation_mappings_have_db_owned_identity() -> Non
         "provider_dataset_id",
         "operation_key",
     }
+    # scope의 PK도 triple이다 — DB ``pk_provider_dataset_operation_scopes``와 같은
+    # 모양이라야 ORM identity map이 operation만 다른 두 행을 접지 않는다.
     assert set(ProviderDatasetOperationScopeRow.__table__.primary_key.columns.keys()) == {
         "provider_dataset_id",
         "sync_scope",
+        "operation_key",
     }
 
 

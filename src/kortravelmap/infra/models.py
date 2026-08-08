@@ -968,9 +968,13 @@ class ProviderDatasetOperationScopeRow(Base):
         {"schema": "provider_sync"},
     )
 
+    # DB PK는 triple이다(``pk_provider_dataset_operation_scopes``). ORM이 pair만
+    # PK로 선언하면 identity map이 operation만 다른 두 행을 **같은 객체로 접어**
+    # 뒤에 읽은 행이 앞의 행을 덮는다. 지금은 아래 refresh-only CHECK가 그 조합을
+    # 막아 드러나지 않지만, preview operation에 scope를 허용하는 순간 조용히 깨진다.
     provider_dataset_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     sync_scope: Mapped[str] = mapped_column(Text, primary_key=True)
-    operation_key: Mapped[str] = mapped_column(Text, nullable=False)
+    operation_key: Mapped[str] = mapped_column(Text, primary_key=True)
     operation_kind: Mapped[str] = mapped_column(
         Text,
         nullable=False,
