@@ -1007,6 +1007,8 @@ async function assertStaleCorrection(page: Page): Promise<void> {
   const revisionResponses: Array<{ entityTag: string | null; status: number }> =
     [];
   const uiPatchRequests: Request[] = [];
+  const uiFeaturePatchRequests: Request[] = [];
+  const uiFeaturePatchResponses: Response[] = [];
   page.on("response", (response) => {
     if (
       response.request().method() === "GET" &&
@@ -1022,10 +1024,24 @@ async function assertStaleCorrection(page: Page): Promise<void> {
   page.on("request", (request) => {
     if (
       request.method() === "PATCH" &&
+      requestApiPath(request).startsWith("/v1/admin/features/")
+    ) {
+      uiFeaturePatchRequests.push(request);
+    }
+    if (
+      request.method() === "PATCH" &&
       requestApiPath(request) ===
         decodeURIComponent(adminFeaturePath(correctionId))
     ) {
       uiPatchRequests.push(request);
+    }
+  });
+  page.on("response", (response) => {
+    if (
+      response.request().method() === "PATCH" &&
+      responseApiPath(response).startsWith("/v1/admin/features/")
+    ) {
+      uiFeaturePatchResponses.push(response);
     }
   });
 
@@ -1097,6 +1113,8 @@ async function assertStaleCorrection(page: Page): Promise<void> {
 
   failureDetail = "stale-etag:stale-submit:prepare";
   uiPatchRequests.length = 0;
+  uiFeaturePatchRequests.length = 0;
+  uiFeaturePatchResponses.length = 0;
   const revisionsBeforeSubmit = revisionResponses.length;
   const staleResponsePromise = page.waitForResponse(
     (response) =>
@@ -1138,8 +1156,35 @@ async function assertStaleCorrection(page: Page): Promise<void> {
                     ? "missing-feature-id"
                     : message.includes("편집 기준")
                       ? "missing-basis"
-                      : "other";
-      failureDetail = `stale-etag:stale-submit:client-error:${category}`;
+                      : message.includes("같은 command slot")
+                        ? "idempotency-mismatch"
+                        : message.includes("저장된 idempotency")
+                          ? "idempotency-storage"
+                          : message.includes("revision과 상세")
+                            ? "basis-inconsistent"
+                            : message.includes("다른 Feature")
+                              ? "basis-mismatch"
+                              : message.includes("최신 Feature")
+                                ? "conflict-preflight"
+                                : message.includes("수동 생성/수정 대상")
+                                  ? "unsupported-kind"
+                                  : message.includes("lon과 lat") ||
+                                      message.includes("대한민국 범위")
+                                    ? "coordinate"
+                                    : "other";
+      const path =
+        uiPatchRequests.length === 1
+          ? "canonical-request"
+          : uiFeaturePatchRequests.length === 1
+            ? "alternate-request"
+            : "no-request";
+      const response =
+        uiFeaturePatchResponses.length === 1
+          ? uiFeaturePatchResponses[0].status() >= 500
+            ? "server-response"
+            : "client-response"
+          : "no-response";
+      failureDetail = `stale-etag:stale-submit:client-error:${category}:${path}:${response}`;
     } else {
       failureDetail =
         uiPatchRequests.length === 1
