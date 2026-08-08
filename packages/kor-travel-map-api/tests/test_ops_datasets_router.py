@@ -498,8 +498,18 @@ def test_ops_datasets_openapi_exposes_hardened_contract(client: TestClient) -> N
         "null",
     }
     event_schema = spec["components"]["schemas"]["OpsDatasetEventRecord"]
-    assert event_schema["properties"]["sync_scope"]["type"] == "string"
-    assert "sync_scope" in event_schema["required"]
+    # 행 자신의 membership 축이다(요청 필터 값이 아니라). member 없는 job-level
+    # event는 null이므로 nullable이고, 같은 리소스의 다른 표현
+    # (`PipelineJobEventRecord`)과 모양이 같아야 한다. required에는 남는다 —
+    # "값이 null일 수 있다"와 "키가 없을 수 있다"는 다르다.
+    assert {entry["type"] for entry in event_schema["properties"]["sync_scope"]["anyOf"]} == {
+        "string",
+        "null",
+    }
+    assert {
+        entry["type"] for entry in event_schema["properties"]["operation_key"]["anyOf"]
+    } == {"string", "null"}
+    assert {"sync_scope", "operation_key"} <= set(event_schema["required"])
 
 
 @pytest.mark.unit
