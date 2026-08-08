@@ -801,8 +801,10 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   lock으로 직렬화하고 same-winner reconcile의 row rewrite를 제거했다. deadline-only Dagster
   reconciliation을 기본 실행 minute schedule로 추가했으며, active dataset·`refresh_after` gate를
   public/admin card·anchor·bbox 모두에 적용했다. map weather summary의 canonical dataset identity와
-  deadline은 필수다. partial-own anchor가 자신을 KMA/observed fallback으로 재선정하지 않도록
-  고쳤다. 재리뷰 2인 P0=0 및 n150 destructive rebuild/live UI E2E가 남았다.
+  deadline은 필수다. summary가 전혀 없는 eligible raw series까지 expected set-diff로 검출하고,
+  partial-own anchor가 batch뿐 아니라 current·snapshot·admin single-card에서도 자신을 KMA/observed
+  fallback으로 재선정하지 않도록 고쳤다. 재리뷰 2인 P0=0 및 n150 destructive rebuild/live UI E2E가
+  남았다.
 
 ### T-VN-40 — curation write model 단일화 (Lane B)
 

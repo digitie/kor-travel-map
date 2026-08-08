@@ -229,7 +229,7 @@ async def test_weather_summary_distinguishes_kma_and_airkorea_values(
         assert kma_summary["dataset_key"] == KMA_ULTRA_SHORT_NOWCAST_DATASET_KEY
         assert kma_summary["metric_key"] == "T1H"
         assert float(kma_summary["value_number"]) == 27.5
-        assert kma_summary["refresh_after"] > _NOW
+        assert datetime.fromisoformat(kma_summary["refresh_after"]) > _NOW
 
         airkorea_summary = by_id[airkorea.feature.feature_id]["weather_summary"]
         assert airkorea_summary["provider"] == "python-airkorea-api"
@@ -237,7 +237,7 @@ async def test_weather_summary_distinguishes_kma_and_airkorea_values(
         assert airkorea_summary["dataset_key"] == DATASET_KEY_AIR_QUALITY
         assert airkorea_summary["metric_key"] == "PM10"
         assert float(airkorea_summary["value_number"]) == 42.0
-        assert airkorea_summary["refresh_after"] > _NOW
+        assert datetime.fromisoformat(airkorea_summary["refresh_after"]) > _NOW
 
         assert by_id[kma.feature.feature_id]["marker_icon"] == "marker"
         assert by_id[airkorea.feature.feature_id]["marker_icon"] == "marker"
