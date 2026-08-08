@@ -177,3 +177,59 @@ Performance regression, not a crash: the dataset/scope-filtered import-job event
 ```
 The SQL LEFT JOINs ops.import_job_datasets AS member on import_job_dataset_id, filters member.provider_dataset_id / member.sync_scope, and orders globally by event.occurred_at DESC, event.event_id DESC. EXPLAIN ANALYZE on an 8,000-event fixture (2 members, 4,000 events each) for the exact-scope filter: Limit -> Nested Loop -> (Materialize -> Seq Scan import_job_datasets, 1 row) + Index Scan import_job_events using idx_import_job_events_time, Actual Rows 4052 for 51 returned. Identical plan under both `SET LOCAL plan_cache_mode = force_generic_plan` and `force_custom_plan`, with ANALYZE run on both tables. Because of this I did not pin a plan in tests/integration/test_ops_repo.py::test_exact_scope_event_history_filters_on_canonical_membership; see its docstring.
 ```
+
+### 21. src/kortravelmap/infra/pipeline_repo.py:1452 (_group_dataset_execution_snapshot_rows)
+
+SQL은 exact membership triple로 `PARTITION BY`하는데 Python 집계는 pair로 키를 잡는다. 한 dataset에 refresh operation을 하나 더 등록하고 두 operation이 각각 실행을 가지면, SQL이 정확히 분리해 낸 두 행이 같은 칸에 떨어져 `RuntimeError: dataset execution snapshot returned duplicate status groups`로 터진다 — dataset 상태 목록/상세가 통째로 500이 된다.
+
+```
+스키마가 이 조합을 허용한다는 것을 live로 확인했다(ktm_t33j, 롤백 트랜잭션):
+provider_dataset_operations PK는 (provider_dataset_id, operation_key)이므로 한 dataset에
+refresh operation이 여러 개 있을 수 있고, provider_dataset_operation_scopes PK가 triple이라
+그 둘이 같은 'dataset_wide'를 함께 가질 수 있다 — 두 번째 refresh operation + 같은 scope
+삽입이 모두 성공해 scope 행이 2개가 됐다. scope의 refresh-only CHECK가 막는 것은 preview
+operation(23개)이지 복수 refresh가 아니다.
+
+지금 터지지 않는 것은 seed된 카탈로그가 dataset마다 refresh operation을 하나씩만 주기
+때문일 뿐(58쌍, 충돌 0건), 제약이 막아 주기 때문이 아니다. 스키마 변경 없이 카탈로그에
+operation 하나를 더 등록하는 평범한 작업만으로 재현된다.
+
+재현: tests/integration/test_pipeline_repo.py::
+test_dataset_execution_snapshot_separates_operations_on_one_scope
+A/B — 집계 키가 pair일 때 위 RuntimeError, triple로 고치면 통과(25/25).
+
+API 표면 테스트가 이 결함을 못 잡은 이유: packages/kor-travel-map-api/tests/
+test_ops_datasets_router.py가 monkeypatch.setattr로 list_dataset_execution_snapshots
+자체를 스텁으로 교체한다(4곳). 실제 집계 코드가 한 번도 실행되지 않는다.
+```
+
+### 22. src/kortravelmap/infra/models.py:970 (ProviderDatasetOperationScopeRow)
+
+ORM이 DB보다 좁은 PK를 선언했다. DB `pk_provider_dataset_operation_scopes`는 triple인데 ORM은 `(provider_dataset_id, sync_scope)` 2열만 `primary_key=True`로 뒀다. SQLAlchemy identity map이 `operation_key`만 다른 두 행을 같은 객체로 접어 뒤에 읽은 행이 앞의 행을 덮는다.
+
+```
+이 부류를 아무도 검사하지 않고 있었다 — ORM 메타데이터의 PK를 DB와 대조하는 테스트가
+저장소에 없었다. tests/integration/test_alembic_upgrade.py::
+test_alembic_head_primary_keys_match_orm_declarations로 게이트를 세웠고, A/B로 증명했다
+(되돌리면 두 모양을 나란히 지목하며 실패). 현재 어긋난 mapped table은 이 하나뿐이었다.
+게다가 tests/unit/test_tvn33_source_lineage_models.py가 틀린 2열 모양을 단언해 어긋남을
+고정하고 있었다.
+```
+
+### 23. API 표면이 identity triple 중 2/3만 노출 (4개 record)
+
+아래 계층 DTO는 triple을 온전히 들고 있는데 HTTP 표현에서만 `operation_key`가 사라지고, `sync_scope`가 근거 없이 nullable로 넓어진다. 소비자가 member를 구분하거나 deep link를 만들 수 없다.
+
+```
+- routers/ops_pipeline.py PipelineProviderDatasetIdentityRecord — operation_key 없음,
+  sync_scope: str | None (원본 PipelineProviderDatasetIdentity는 sync_scope: str + operation_key)
+- routers/offline_uploads.py OfflineUploadRecord — operation_key 없음
+  (ops.offline_uploads의 세 열이 모두 NOT NULL, repo DTO OfflineUpload도 셋을 보유)
+- infra/ops_repo.py OpsImportJobDataset + _IMPORT_JOB_MEMBERSHIPS_SQL — jsonb_build_object가
+  operation_key를 아예 select하지 않음
+- infra/dataset_status_repo.py DatasetLatestExecution / DatasetExecutionSnapshot — 위 21번과 동반
+
+같은 커밋의 ops_dataset_schema.py OpsDatasetProviderDataset은 셋을 모두 노출하며 docstring에
+"셋 다 non-null이라야 UI가 member를 구분해 표시하고 deep link를 만들 수 있다"고 적어 두었다
+— 내부 불일치다. feature_update 경로(FeatureUpdateDatasetMembership)는 이미 triple이 온전하다.
+```

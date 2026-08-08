@@ -17749,6 +17749,10 @@
             "title": "Load Url",
             "type": "string"
           },
+          "operation_key": {
+            "title": "Operation Key",
+            "type": "string"
+          },
           "original_filename": {
             "title": "Original Filename",
             "type": "string"
@@ -17801,6 +17805,7 @@
           "upload_id",
           "provider_dataset_id",
           "sync_scope",
+          "operation_key",
           "original_filename",
           "storage_backend",
           "storage_key",
@@ -22116,10 +22121,14 @@
       },
       "PipelineProviderDatasetIdentityRecord": {
         "additionalProperties": false,
-        "description": "canonical root에 귀속된 exact pair 상태.",
+        "description": "canonical root에 귀속된 exact membership 상태.\n\nmembership identity는 triple이다(ADR-088 §결정 2). 아래 계층의\n``PipelineProviderDatasetIdentity``가 이미 셋을 non-null로 들고 있으므로 여기서\n``operation_key``를 떨어뜨리거나 ``sync_scope``를 nullable로 넓히면 표현할 수\n있는 사실을 표면에서만 잃는다 — 소비자가 member를 구분하거나 deep link를\n만들 수 없다.",
         "properties": {
           "dataset_key": {
             "title": "Dataset Key",
+            "type": "string"
+          },
+          "operation_key": {
+            "title": "Operation Key",
             "type": "string"
           },
           "operation_member_id": {
@@ -22148,15 +22157,8 @@
             "type": "string"
           },
           "sync_scope": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Sync Scope"
+            "title": "Sync Scope",
+            "type": "string"
           }
         },
         "required": [
@@ -22164,6 +22166,7 @@
           "provider",
           "dataset_key",
           "sync_scope",
+          "operation_key",
           "operation_member_id",
           "status"
         ],

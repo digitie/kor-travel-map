@@ -111,7 +111,10 @@ class OpsImportJobDataset:
     provider_dataset_id: int
     provider: str
     dataset_key: str
+    # membership identity는 triple이다(ADR-088 §결정 2). ``provider``/``dataset_key``는
+    # catalog projection일 뿐이므로 셋 중 하나라도 빠지면 member를 되짚을 수 없다.
     sync_scope: str
+    operation_key: str
 
 
 @dataclass(frozen=True)
@@ -308,7 +311,8 @@ LEFT JOIN LATERAL (
                 'provider_dataset_id', provider_dataset.provider_dataset_id,
                 'provider', provider_dataset.provider,
                 'dataset_key', provider_dataset.dataset_key,
-                'sync_scope', member.sync_scope
+                'sync_scope', member.sync_scope,
+                'operation_key', member.operation_key
             ) ORDER BY member.import_job_dataset_id
         ),
         '[]'::jsonb
@@ -613,6 +617,7 @@ def _row_to_import_job(row: Any) -> OpsImportJob:
             provider=str(item["provider"]),
             dataset_key=str(item["dataset_key"]),
             sync_scope=str(item["sync_scope"]),
+            operation_key=str(item["operation_key"]),
         )
         for item in _json_list(row.dataset_memberships)
     )

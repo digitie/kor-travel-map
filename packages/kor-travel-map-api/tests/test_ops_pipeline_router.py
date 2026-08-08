@@ -432,6 +432,7 @@ def _job(
                     provider=provider,
                     dataset_key=dataset_key,
                     sync_scope="dataset_wide",
+                    operation_key="feature_place_test_job",
                 ),
             )
         ),

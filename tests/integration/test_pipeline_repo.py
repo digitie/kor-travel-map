@@ -2056,3 +2056,66 @@ async def test_external_system_scope_run_history_cursor_pages_past_boundary(
     assert {item.id for item in first.items}.isdisjoint(
         {item.id for item in second.items}
     )
+
+
+async def test_dataset_execution_snapshot_separates_operations_on_one_scope(
+    migrated_session: AsyncSession,
+) -> None:
+    """같은 dataset+scope의 두 operation은 **각각의 snapshot**으로 나와야 한다.
+
+    스키마는 한 dataset에 refresh operation을 여러 개 두는 것을 허용하고
+    (``provider_dataset_operations`` PK는 ``(provider_dataset_id, operation_key)``),
+    scope PK가 triple이라 그 둘이 같은 ``dataset_wide``를 함께 가질 수 있다 —
+    실측으로 확인했다. 그러면 ``import_job_datasets``에 operation만 다른 두
+    membership이 생긴다.
+
+    SQL은 triple로 partition해 두 행을 정확히 내보내지만, 집계가 pair로 키를
+    잡으면 두 번째 행이 첫 행과 충돌한다. 지금 그 조합이 없는 것은 seed된
+    카탈로그가 dataset마다 refresh operation을 하나씩만 주기 때문일 뿐, 제약이
+    막아 주는 것이 아니다.
+    """
+    provider = "data.go.kr-standard"
+    dataset_key = "datagokr_museums"
+    sync_scope = "dataset_wide"
+    first = await _member(
+        migrated_session,
+        provider=provider,
+        dataset_key=dataset_key,
+        sync_scope=sync_scope,
+        operation_key="feature_place_standard_museums_job",
+    )
+    second = await _member(
+        migrated_session,
+        provider=provider,
+        dataset_key=dataset_key,
+        sync_scope=sync_scope,
+        operation_key="feature_place_standard_museums_job.backfill",
+    )
+    for index, (request_id, member) in enumerate(
+        (
+            ("a7777777-7777-4777-8777-777777777777", first),
+            ("a8888888-8888-4888-8888-888888888888", second),
+        )
+    ):
+        await _request(
+            migrated_session,
+            request_id,
+            job_id=None,
+            created_at=_T0 + timedelta(minutes=index),
+            member=member,
+            direct=True,
+        )
+
+    snapshots = await list_dataset_pipeline_execution_snapshots(migrated_session)
+    matched = [
+        item
+        for item in snapshots
+        if (item.provider, item.dataset_key, item.sync_scope)
+        == (provider, dataset_key, sync_scope)
+    ]
+
+    assert len(matched) == 2, "operation별로 snapshot이 분리돼야 한다"
+    assert {item.operation_key for item in matched} == {
+        first.operation_key,
+        second.operation_key,
+    }

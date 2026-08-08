@@ -224,14 +224,22 @@ class PipelineProjectedJobRecord(BaseModel):
 
 
 class PipelineProviderDatasetIdentityRecord(BaseModel):
-    """canonical root에 귀속된 exact pair 상태."""
+    """canonical root에 귀속된 exact membership 상태.
+
+    membership identity는 triple이다(ADR-088 §결정 2). 아래 계층의
+    ``PipelineProviderDatasetIdentity``가 이미 셋을 non-null로 들고 있으므로 여기서
+    ``operation_key``를 떨어뜨리거나 ``sync_scope``를 nullable로 넓히면 표현할 수
+    있는 사실을 표면에서만 잃는다 — 소비자가 member를 구분하거나 deep link를
+    만들 수 없다.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     provider_dataset_id: int = Field(ge=1)
     provider: str
     dataset_key: str
-    sync_scope: str | None
+    sync_scope: str
+    operation_key: str
     operation_member_id: UUID
     status: OperationState
 
@@ -789,6 +797,7 @@ def _provider_dataset_record(
         provider=row.provider,
         dataset_key=row.dataset_key,
         sync_scope=row.sync_scope,
+        operation_key=row.operation_key,
         operation_member_id=row.operation_member_id,
         status=row.status,
     )
@@ -839,6 +848,7 @@ def _execution_from_job(
                 provider=item.provider,
                 dataset_key=item.dataset_key,
                 sync_scope=item.sync_scope,
+                operation_key=item.operation_key,
                 operation_member_id=item.import_job_dataset_id,
                 status=job.status,
             )
@@ -881,6 +891,7 @@ def _execution_from_request(
                 provider=item.provider,
                 dataset_key=item.dataset_key,
                 sync_scope=item.sync_scope,
+                operation_key=item.operation_key,
                 operation_member_id=item.import_job_dataset_id,
                 status=linked_job.status,
             )
@@ -926,6 +937,7 @@ def _import_job_record(job: OpsImportJob) -> PipelineImportJobRecord:
                 provider=item.provider,
                 dataset_key=item.dataset_key,
                 sync_scope=item.sync_scope,
+                operation_key=item.operation_key,
                 operation_member_id=item.import_job_dataset_id,
                 status=job.status,
             )

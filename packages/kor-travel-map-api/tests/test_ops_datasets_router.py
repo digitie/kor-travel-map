@@ -1084,6 +1084,7 @@ async def test_grid_calculates_freshness_and_keeps_time_meanings_separate(
         provider=state.provider,
         dataset_key=state.dataset_key,
         sync_scope=None,
+        operation_key="test_operation_job",
         execution=_pipeline_execution(
             provider=state.provider,
             dataset_key=state.dataset_key,
@@ -1097,6 +1098,7 @@ async def test_grid_calculates_freshness_and_keeps_time_meanings_separate(
         provider=state.provider,
         dataset_key=state.dataset_key,
         sync_scope="dataset_wide",
+        operation_key="test_operation_job",
         execution=_pipeline_execution(
             provider=state.provider,
             dataset_key=state.dataset_key,
@@ -1145,6 +1147,7 @@ async def test_grid_calculates_freshness_and_keeps_time_meanings_separate(
                 provider=state.provider,
                 dataset_key=state.dataset_key,
                 sync_scope=None,
+                operation_key="test_operation_job",
                 latest_terminal=None,
                 active=active_unscoped,
             ),
@@ -1153,6 +1156,7 @@ async def test_grid_calculates_freshness_and_keeps_time_meanings_separate(
                 provider=state.provider,
                 dataset_key=state.dataset_key,
                 sync_scope="dataset_wide",
+                operation_key="test_operation_job",
                 latest_terminal=newer_terminal,
                 active=None,
             ),
@@ -1265,6 +1269,7 @@ async def test_grid_projects_active_execution_by_exact_sync_scope(
             provider=provider,
             dataset_key=dataset_key,
             sync_scope=scope,
+            operation_key="test_operation_job",
             execution=_pipeline_execution(
                 provider=provider,
                 dataset_key=dataset_key,
@@ -1284,6 +1289,7 @@ async def test_grid_projects_active_execution_by_exact_sync_scope(
         provider=provider,
         dataset_key=dataset_key,
         sync_scope=None,
+        operation_key="test_operation_job",
         execution=_pipeline_execution(
             provider=provider,
             dataset_key=dataset_key,
@@ -1309,6 +1315,7 @@ async def test_grid_projects_active_execution_by_exact_sync_scope(
                 provider=item.provider,
                 dataset_key=item.dataset_key,
                 sync_scope=item.sync_scope,
+                operation_key="test_operation_job",
                 latest_terminal=None,
                 active=item,
             )
@@ -1393,6 +1400,7 @@ async def test_detail_materializes_all_catalog_target_scopes(
         provider=provider,
         dataset_key=dataset_key,
         sync_scope="external_system:concierge",
+        operation_key="test_operation_job",
         execution=_pipeline_execution(
             provider=provider,
             dataset_key=dataset_key,
@@ -1408,6 +1416,7 @@ async def test_detail_materializes_all_catalog_target_scopes(
         provider=provider,
         dataset_key=dataset_key,
         sync_scope="external_system:concierge",
+        operation_key="test_operation_job",
         execution=_pipeline_execution(
             provider=provider,
             dataset_key=dataset_key,
@@ -1450,6 +1459,7 @@ async def test_detail_materializes_all_catalog_target_scopes(
                 provider=provider,
                 dataset_key=dataset_key,
                 sync_scope="external_system:concierge",
+                operation_key="test_operation_job",
                 latest_terminal=terminal,
                 active=active,
             ),
@@ -1539,6 +1549,7 @@ async def test_grid_keeps_invalid_scope_orphan_as_dataset_wide_placeholder(
         provider=provider,
         dataset_key=dataset_key,
         sync_scope=None,
+        operation_key="test_operation_job",
         execution=_pipeline_execution(
             provider=provider,
             dataset_key=dataset_key,
@@ -1557,6 +1568,7 @@ async def test_grid_keeps_invalid_scope_orphan_as_dataset_wide_placeholder(
         provider=policy_provider,
         dataset_key=policy_dataset_key,
         sync_scope=None,
+        operation_key="test_operation_job",
         execution=_pipeline_execution(
             provider=policy_provider,
             dataset_key=policy_dataset_key,
@@ -1586,6 +1598,7 @@ async def test_grid_keeps_invalid_scope_orphan_as_dataset_wide_placeholder(
                 provider=item.provider,
                 dataset_key=item.dataset_key,
                 sync_scope=item.sync_scope,
+                operation_key="test_operation_job",
                 latest_terminal=None,
                 active=item,
             )

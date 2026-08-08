@@ -62,11 +62,12 @@ class DatasetIntegrityIssueCount:
 
 @dataclass(frozen=True)
 class DatasetLatestExecution:
-    """provider×dataset×scope의 최신 canonical root와 exact pair 상태."""
+    """exact membership triple의 최신 canonical root와 그 member 상태."""
 
     provider: str
     dataset_key: str
-    sync_scope: str | None
+    sync_scope: str
+    operation_key: str
     execution: PipelineExecution
     operation_member_id: str
     pair_status: str
@@ -75,11 +76,12 @@ class DatasetLatestExecution:
 
 @dataclass(frozen=True)
 class DatasetExecutionSnapshot:
-    """provider×dataset×scope의 최신 종료 실행과 현재 활성 실행."""
+    """exact membership triple의 최신 종료 실행과 현재 활성 실행."""
 
     provider: str
     dataset_key: str
-    sync_scope: str | None
+    sync_scope: str
+    operation_key: str
     latest_terminal: DatasetLatestExecution | None
     active: DatasetLatestExecution | None
     provider_dataset_id: int
@@ -168,6 +170,7 @@ async def list_latest_dataset_executions(
             provider=row.provider,
             dataset_key=row.dataset_key,
             sync_scope=row.sync_scope,
+            operation_key=row.operation_key,
             execution=row.execution,
             operation_member_id=row.operation_member_id,
             pair_status=row.pair_status,
@@ -186,6 +189,7 @@ def _dataset_execution(
         provider=row.provider,
         dataset_key=row.dataset_key,
         sync_scope=row.sync_scope,
+        operation_key=row.operation_key,
         execution=row.execution,
         operation_member_id=row.operation_member_id,
         pair_status=row.pair_status,
@@ -203,6 +207,7 @@ async def list_dataset_execution_snapshots(
             provider=row.provider,
             dataset_key=row.dataset_key,
             sync_scope=row.sync_scope,
+            operation_key=row.operation_key,
             latest_terminal=_dataset_execution(row.latest_terminal),
             active=_dataset_execution(row.active),
             provider_dataset_id=row.provider_dataset_id,
@@ -232,6 +237,7 @@ async def list_dataset_execution_snapshots_scoped(
             provider=row.provider,
             dataset_key=row.dataset_key,
             sync_scope=row.sync_scope,
+            operation_key=row.operation_key,
             latest_terminal=_dataset_execution(row.latest_terminal),
             active=_dataset_execution(row.active),
             provider_dataset_id=row.provider_dataset_id,

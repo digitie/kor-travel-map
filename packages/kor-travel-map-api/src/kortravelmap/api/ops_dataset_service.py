@@ -460,7 +460,6 @@ def _run_history_records(
             pairs,
             key=lambda item: (
                 item.sync_scope == DATASET_WIDE_SYNC_SCOPE,
-                item.sync_scope is not None,
                 item.operation_member_id,
             ),
         )
@@ -471,6 +470,7 @@ def _run_history_records(
                     provider=pair.provider,
                     dataset_key=pair.dataset_key,
                     sync_scope=pair.sync_scope,
+                    operation_key=pair.operation_key,
                     execution=execution,
                     operation_member_id=pair.operation_member_id,
                     pair_status=pair.status,

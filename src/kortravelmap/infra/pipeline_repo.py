@@ -152,11 +152,17 @@ class PipelineDatasetLatestExecution:
 
 @dataclass(frozen=True)
 class PipelineDatasetExecutionSnapshot:
-    """동일 DB snapshot에서 읽은 exact scope의 종료/활성 실행."""
+    """동일 DB snapshot에서 읽은 exact membership의 종료/활성 실행.
+
+    identity는 triple이다(ADR-088 §결정 2). 한 dataset이 refresh operation을 여러 개
+    가질 수 있고 그 둘이 같은 ``sync_scope``를 공유할 수 있으므로, pair로 키를 잡으면
+    두 operation의 실행이 한 칸을 두고 다툰다.
+    """
 
     provider: str
     dataset_key: str
-    sync_scope: str | None
+    sync_scope: str
+    operation_key: str
     latest_terminal: PipelineDatasetLatestExecution | None
     active: PipelineDatasetLatestExecution | None
     provider_dataset_id: int
@@ -1438,15 +1444,20 @@ def _row_to_dataset_execution(row: Any) -> PipelineDatasetLatestExecution:
 def _group_dataset_execution_snapshot_rows(
     rows: Collection[Any],
 ) -> tuple[PipelineDatasetExecutionSnapshot, ...]:
-    """dataset execution snapshot row를 (provider, dataset_key, sync_scope)별
-    최신 종료/활성 실행 쌍으로 묶는다. unscoped·scoped 쿼리가 공유한다."""
+    """dataset execution snapshot row를 exact membership triple별 최신 종료/활성
+    실행 쌍으로 묶는다. unscoped·scoped 쿼리가 공유한다.
+
+    키는 SQL의 ``PARTITION BY``와 **같은 triple**이라야 한다. pair로 좁히면 SQL이
+    정확히 분리해 낸 두 행이 같은 칸에 떨어져 아래 RuntimeError로 터진다 — 한
+    dataset에 refresh operation을 하나 더 등록하는 것만으로 재현된다.
+    """
     grouped: dict[
-        tuple[int, str | None],
+        tuple[int, str, str],
         dict[bool, PipelineDatasetLatestExecution],
     ] = {}
     for row in rows:
         item = _row_to_dataset_execution(row)
-        key = (item.provider_dataset_id, item.sync_scope)
+        key = (item.provider_dataset_id, item.sync_scope, item.operation_key)
         is_active = bool(row.selected_is_active)
         if is_active in grouped.setdefault(key, {}):
             raise RuntimeError("dataset execution snapshot returned duplicate status groups")
@@ -1456,11 +1467,12 @@ def _group_dataset_execution_snapshot_rows(
             provider=provider,
             dataset_key=dataset_key,
             sync_scope=sync_scope,
+            operation_key=operation_key,
             latest_terminal=items.get(False),
             active=items.get(True),
             provider_dataset_id=provider_dataset_id,
         )
-        for (provider_dataset_id, sync_scope), items in grouped.items()
+        for (provider_dataset_id, sync_scope, operation_key), items in grouped.items()
         for provider, dataset_key in [
             next(
                 (entry.provider, entry.dataset_key)

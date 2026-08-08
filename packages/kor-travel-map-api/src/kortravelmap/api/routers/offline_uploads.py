@@ -167,7 +167,11 @@ class OfflineUploadRecord(BaseModel):
 
     upload_id: str
     provider_dataset_id: int
+    # upload identity는 triple이다(ADR-088 §결정 2). ``ops.offline_uploads``의 세 열이
+    # 모두 NOT NULL이고 repo DTO도 셋을 들고 있으므로, 여기서 ``operation_key``를
+    # 떨어뜨리면 소비자가 어느 operation에 붙은 업로드인지 되짚을 수 없다.
     sync_scope: str
+    operation_key: str
     original_filename: str
     storage_backend: str
     storage_key: str
@@ -371,6 +375,7 @@ def _record_from_upload(row: OfflineUpload) -> OfflineUploadRecord:
         upload_id=row.upload_id,
         provider_dataset_id=row.provider_dataset_id,
         sync_scope=row.sync_scope,
+        operation_key=row.operation_key,
         original_filename=row.original_filename,
         storage_backend=row.storage_backend,
         storage_key=row.storage_key,
