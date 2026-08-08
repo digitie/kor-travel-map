@@ -57,6 +57,10 @@ pytestmark = pytest.mark.filterwarnings(
 _PANEL_CLIENT = object()
 _PANEL_INSTANCE = object()
 _PANEL_RUN_ID = "panel-test"
+# ``build_asset_context``로 직접 호출한 asset이 보고하는 Dagster run id.
+# ``require_feature_operation_guard``는 guard가 다른 run에서 온 snapshot이면
+# ``run_id_mismatch``로 거부하므로, 직접 호출 테스트의 guard도 이 run id를 쓴다.
+_DIRECT_INVOCATION_RUN_ID = "EPHEMERAL"
 _PANEL_GUARD = FeatureOperationExecutionGuard(
     client=cast(Any, _PANEL_CLIENT),
     instance=_PANEL_INSTANCE,
@@ -210,6 +214,19 @@ class _FakeKrtourClient:
         self.failure_calls: list[dict[str, Any]] = []
         self.failure_scope_calls: list[dict[str, Any]] = []
         self.resolve_membership_calls: list[dict[str, Any]] = []
+        self.operation_calls: list[tuple[str, dict[str, Any]]] = []
+
+    async def ensure_dagster_feature_operation(self, **kwargs: Any) -> Any:
+        """scheduled run에서 guard resource가 여는 canonical operation lifecycle."""
+        self.operation_calls.append(("ensure", kwargs))
+        return SimpleNamespace(outcome="applied", block_reason=None)
+
+    async def finish_dagster_feature_membership(self, **kwargs: Any) -> Any:
+        self.operation_calls.append(("finish", kwargs))
+        return SimpleNamespace(outcome="applied", block_reason=None)
+
+    async def append_dagster_feature_attempt_event(self, **kwargs: Any) -> None:
+        self.operation_calls.append(("attempt", kwargs))
 
     async def resolve_feature_operation_memberships(
         self,
@@ -605,7 +622,7 @@ async def test_scheduled_grid_resolves_guard_operation_to_exact_membership(
         instance=object(),
         operation_key=membership.operation_key,
         memberships=(membership,),
-        dagster_run_id="scheduled-kma-run",
+        dagster_run_id=_DIRECT_INVOCATION_RUN_ID,
         trigger_kind="schedule",
     )
     forecast = _FakeForecastService(snapshot=_NOWCAST_SNAPSHOT)
@@ -649,7 +666,7 @@ async def test_scheduled_grid_rejects_membership_changed_since_guard_snapshot(
         instance=object(),
         operation_key=frozen.operation_key,
         memberships=(frozen,),
-        dagster_run_id="scheduled-kma-run",
+        dagster_run_id=_DIRECT_INVOCATION_RUN_ID,
         trigger_kind="schedule",
     )
 
@@ -1296,9 +1313,19 @@ def test_scheduled_kma_materialization_defers_public_client_until_after_prefligh
         if preflight == "cursor_same"
         else None
     )
+    # scheduled run은 queue worker의 typed membership resource가 없다. sync-state
+    # 정체성이 triple이 된 뒤(T-VN-33/ADR-088) asset은 run tag의 operation key로
+    # guard resource가 DB에서 고정한 exact membership만 쓴다 — provider/dataset
+    # label에서 역산하는 fallback은 없다.
+    scheduled_membership = ProviderDatasetOperationMembership(
+        provider_dataset_id=101,
+        sync_scope="target_grids",
+        operation_key=operation_key,
+    )
     kor_travel_map_client = _FakeKrtourClient(
         target_coords=target_coords,
         sync_state=sync_state,
+        resolved_memberships=(scheduled_membership,),
     )
     constructor_calls: list[str] = []
     import_calls: list[str] = []
@@ -1335,11 +1362,10 @@ def test_scheduled_kma_materialization_defers_public_client_until_after_prefligh
             "kma_weather_extra_points": None,
             "kma_weather_max_grids_per_run": 50,
             "reverse_geocoder": None,
-            "feature_update_membership": ProviderDatasetOperationMembership(
-                provider_dataset_id=101,
-                sync_scope="target_grids",
-                operation_key=operation_key,
-            ),
+        },
+        tags={
+            "kor_travel_map.operation_key": operation_key,
+            "kor_travel_map.trigger_kind": "schedule",
         },
         raise_on_error=False,
     )
@@ -1347,6 +1373,16 @@ def test_scheduled_kma_materialization_defers_public_client_until_after_prefligh
     assert result.success is (preflight == "cursor_same")
     assert import_calls == []
     assert constructor_calls == []
+    # guard는 run tag의 operation key로만 membership을 확정한다(label 역산 없음).
+    assert {call["operation_key"] for call in kor_travel_map_client.resolve_membership_calls} == {
+        operation_key
+    }
+    # target scope가 비면 cursor를 읽기도 전에 거부되고, 그 외에는 preflight
+    # 판정이 guard가 고정한 exact membership 위에서만 일어난다.
+    expected_state_calls = [scheduled_membership] if preflight == "cursor_same" else []
+    assert [
+        call["membership"] for call in kor_travel_map_client.get_state_calls
+    ] == expected_state_calls
 
 
 # -- T-219c: 중기예보 -------------------------------------------------------

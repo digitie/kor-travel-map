@@ -190,7 +190,18 @@ def _execution_result(
     resolution = ScopeResolution(
         scope_type="provider_dataset",
         features=(FeatureScopeRow("feature-1"),),
-        provider_datasets=(ProviderDatasetScope("demo", "places", 1),),
+        provider_datasets=(
+            # T-VN-33: scope 해석 결과도 자연키 label 뒤에 exact refresh membership
+            # (provider_dataset_id + sync_scope + operation_key)을 그대로 들고 있다.
+            ProviderDatasetScope(
+                provider="demo",
+                dataset_key="places",
+                feature_count=1,
+                provider_dataset_id=1,
+                sync_scope="dataset_wide",
+                operation_key="feature_place_opinet_stations_job",
+            ),
+        ),
     )
     refresh_scope = ProviderDatasetRefreshScope(
         request_id=request.request_id,

@@ -37,7 +37,8 @@ _PANEL_RUN_ID = "panel-test"
 _PANEL_GUARD = FeatureOperationExecutionGuard(
     client=cast(Any, _PANEL_CLIENT),
     instance=_PANEL_INSTANCE,
-    identity=None,
+    operation_key=None,
+    memberships=(),
     dagster_run_id=_PANEL_RUN_ID,
     trigger_kind=None,
 )

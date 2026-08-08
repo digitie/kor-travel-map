@@ -467,7 +467,8 @@ def test_list_admin_features_passes_filters(
         assert kwargs["q"] == "광화문"
         assert kwargs["kinds"] == ["place"]
         assert kwargs["statuses"] == ["inactive"]
-        assert kwargs["providers"] == ["python-mois-api"]
+        # ADR-088 — provider 자연키 반복 필터는 삭제됐고 dataset canonical ID다.
+        assert kwargs["provider_dataset_id"] == 7
         assert kwargs["page_size"] == 25
         assert kwargs["sort"] == "issue_count"
         assert kwargs["order"] == "desc"
@@ -481,7 +482,7 @@ def test_list_admin_features_passes_filters(
             "q": "광화문",
             "kind": "place",
             "status": "inactive",
-            "provider": "python-mois-api",
+            "provider_dataset_id": "7",
             "page_size": "25",
             "sort": "issue_count",
         },

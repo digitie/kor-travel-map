@@ -102,14 +102,16 @@ def test_managed_file_links_use_canonical_admin_pages() -> None:
             location="object_store",
             kind="provider_source",
             path="source/file.csv",
-            provider="provider/name",
+            # dataset deep-link identity는 provider_dataset_id다(ADR-088) —
+            # provider/dataset_key 자연키 사본은 삭제됐다.
+            provider_dataset_id=7,
             origin_dagster_run_id=None,
         )
     )
 
     assert [(link.rel, link.href) for link in links] == [
         ("import-job", "/ops/pipeline?execution=import_job:job%2F1"),
-        ("provider", "/ops/datasets?provider=provider%2Fname"),
+        ("provider", "/ops/datasets?provider_dataset_id=7"),
     ]
 
 

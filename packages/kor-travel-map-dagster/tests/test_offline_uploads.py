@@ -148,9 +148,9 @@ def test_offline_upload_load_job_fails_on_lock_busy_skip() -> None:
 def _upload(upload_id: str) -> OfflineUpload:
     return OfflineUpload(
         upload_id=upload_id,
-        provider="offline-test-provider",
-        dataset_key="offline_jsonl",
-        sync_scope="default",
+        provider_dataset_id=1,
+        sync_scope="dataset_wide",
+        operation_key="feature_event_datagokr_cultural_festivals_job",
         original_filename="features.jsonl",
         storage_backend="rustfs",
         storage_key=f"offline/{upload_id}/features.jsonl",

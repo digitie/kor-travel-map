@@ -770,11 +770,11 @@ async def test_kma_weather_alert_history_reads_source_records(
             """
             INSERT INTO provider_sync.source_links (
                 feature_id, source_entity_key, source_role, match_method,
-                confidence, is_primary_source
+                confidence
             )
             VALUES (
                 'f_notice_weather', 'se_kma_alert_1', 'primary',
-                'natural_key', 100, true
+                'natural_key', 100
             )
             """
         )

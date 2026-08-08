@@ -72,6 +72,9 @@ from kortravelmap.api.routers import ops_pipeline as pipeline_mod
 from kortravelmap.api.settings import ApiSettings
 
 _NOW = datetime(2026, 7, 14, 9, 0, tzinfo=UTC)
+# T-VN-33: 실행 membership identity는 (provider_dataset_id, sync_scope, operation_key)
+# triple이다(ADR-088). provider/dataset_key는 표시용 projection일 뿐이다.
+_MOIS_BULK_OPERATION_KEY = "feature_place_mois_licenses_job"
 _OPS_READ_TOKEN = "read-token-00000000000000000000000000000000"
 _OPS_CANCEL_TOKEN = "cancel-token-000000000000000000000000000000"
 _OPS_FIXTURE_TOKEN = "fixture-token-00000000000000000000000000000"
@@ -204,11 +207,20 @@ def client(session: _FakeSession, monkeypatch: pytest.MonkeyPatch) -> TestClient
         sigungu_resolver: Any,
     ) -> FeatureUpdateRequestPreview:
         del sigungu_resolver
+        # T-VN-33: provider_dataset scope는 (provider_dataset_id, sync_scope,
+        # operation_key) triple 전부를 core로 내려보낸다.
         if (
-            scope != {"type": "provider_dataset", "provider_dataset_id": 1}
-            or dataset_memberships is None
+            dataset_memberships is None
             or len(dataset_memberships) != 1
+            or scope
+            != {
+                "type": "provider_dataset",
+                "provider_dataset_id": dataset_memberships[0].provider_dataset_id,
+                "sync_scope": dataset_memberships[0].sync_scope,
+                "operation_key": dataset_memberships[0].operation_key,
+            }
             or dataset_memberships[0].provider_dataset_id != 1
+            or dataset_memberships[0].operation_key != _MOIS_BULK_OPERATION_KEY
         ):
             raise fur_mod.FeatureUpdateValidationError(
                 "존재하지 않거나 비활성인 provider_dataset_id입니다."
@@ -228,6 +240,7 @@ def client(session: _FakeSession, monkeypatch: pytest.MonkeyPatch) -> TestClient
                     sync_scope=sync_scope,
                     provider=MOIS_PROVIDER_NAME,
                     dataset_key=DATASET_KEY_BULK,
+                    operation_key=_MOIS_BULK_OPERATION_KEY,
                 ),
             ),
             update_policy=update_policy,
@@ -441,6 +454,8 @@ def _update_request(
         scope={
             "type": "provider_dataset",
             "provider_dataset_id": 1,
+            "sync_scope": "dataset_wide",
+            "operation_key": _MOIS_BULK_OPERATION_KEY,
         },
         dataset_membership_mode="single",
         dataset_memberships=(
@@ -450,6 +465,7 @@ def _update_request(
                 sync_scope="dataset_wide",
                 provider=MOIS_PROVIDER_NAME,
                 dataset_key=DATASET_KEY_BULK,
+                operation_key=_MOIS_BULK_OPERATION_KEY,
             ),
         ),
         update_policy={},
@@ -601,6 +617,7 @@ def _execution(
                 provider=MOIS_PROVIDER_NAME,
                 dataset_key=DATASET_KEY_BULK,
                 sync_scope="dataset_wide",
+                operation_key=_MOIS_BULK_OPERATION_KEY,
                 operation_member_id="11111111-1111-1111-1111-111111111111",
                 status="running",
             ),
@@ -1579,6 +1596,7 @@ def test_execution_detail_non_exact_request_keeps_arrays_on_root_only(
                 sync_scope="dataset_wide",
                 provider="provider-a",
                 dataset_key="dataset-a",
+                operation_key="provider_a_refresh",
             ),
             FeatureUpdateRequestDataset(
                 feature_update_request_dataset_id="22222222-2222-2222-2222-222222222222",
@@ -1586,6 +1604,7 @@ def test_execution_detail_non_exact_request_keeps_arrays_on_root_only(
                 sync_scope="target_grids",
                 provider="provider-b",
                 dataset_key="dataset-b",
+                operation_key="provider_b_refresh",
             ),
         ),
     )
@@ -1601,6 +1620,7 @@ def test_execution_detail_non_exact_request_keeps_arrays_on_root_only(
                 provider="provider-a",
                 dataset_key="dataset-a",
                 sync_scope="dataset_wide",
+                operation_key="provider_a_refresh",
                 operation_member_id="11111111-1111-1111-1111-111111111111",
                 status="running",
             ),
@@ -1609,6 +1629,7 @@ def test_execution_detail_non_exact_request_keeps_arrays_on_root_only(
                 provider="provider-b",
                 dataset_key="dataset-b",
                 sync_scope="target_grids",
+                operation_key="provider_b_refresh",
                 operation_member_id="22222222-2222-2222-2222-222222222222",
                 status="running",
             ),
@@ -3415,6 +3436,7 @@ def test_preview_request_returns_preview(
                     sync_scope="dataset_wide",
                     provider=MOIS_PROVIDER_NAME,
                     dataset_key=DATASET_KEY_BULK,
+                    operation_key=_MOIS_BULK_OPERATION_KEY,
                 ),
             ),
             update_policy={},
@@ -3432,6 +3454,7 @@ def test_preview_request_returns_preview(
                 "type": "provider_dataset",
                 "provider_dataset_id": 1,
                 "sync_scope": "dataset_wide",
+                "operation_key": _MOIS_BULK_OPERATION_KEY,
             },
         },
     )
@@ -3461,6 +3484,7 @@ def test_create_request_rejects_dry_run_flag(
                 "type": "provider_dataset",
                 "provider_dataset_id": 1,
                 "sync_scope": "dataset_wide",
+                "operation_key": _MOIS_BULK_OPERATION_KEY,
             },
             "dry_run": True,
         },
@@ -3481,6 +3505,7 @@ def test_create_request_requires_uuid_idempotency_key(client: TestClient) -> Non
                 "type": "provider_dataset",
                 "provider_dataset_id": 1,
                 "sync_scope": "dataset_wide",
+                "operation_key": _MOIS_BULK_OPERATION_KEY,
             }
         },
     )
@@ -3531,6 +3556,7 @@ def test_create_request_idempotency_replays_and_rejects_mismatch(
             "type": "provider_dataset",
             "provider_dataset_id": 1,
             "sync_scope": "dataset_wide",
+            "operation_key": _MOIS_BULK_OPERATION_KEY,
         },
         "reason": "same",
     }
@@ -3639,6 +3665,7 @@ def test_create_request_idempotency_replays_and_rejects_mismatch(
                     "type": "provider_dataset",
                     "provider_dataset_id": 1,
                     "sync_scope": "dataset_wide",
+                    "operation_key": _MOIS_BULK_OPERATION_KEY,
                 },
                 "providers": [MOIS_PROVIDER_NAME],
                 "dataset_keys": [DATASET_KEY_BULK],
@@ -3745,6 +3772,7 @@ def test_create_request_persists_with_new_status_url(
                 "type": "provider_dataset",
                 "provider_dataset_id": 1,
                 "sync_scope": "dataset_wide",
+                "operation_key": _MOIS_BULK_OPERATION_KEY,
             },
             "reason": "stale 복구",
         },
@@ -3805,6 +3833,7 @@ def test_create_request_enforces_mois_precheck_at_canonical_write_boundary(
                 "type": "provider_dataset",
                 "provider_dataset_id": 1,
                 "sync_scope": "dataset_wide",
+                "operation_key": _MOIS_BULK_OPERATION_KEY,
             }
         },
     )
@@ -3823,6 +3852,7 @@ def test_create_request_rejects_unknown_provider_dataset_id(client: TestClient) 
                 "type": "provider_dataset",
                 "provider_dataset_id": 999_999,
                 "sync_scope": "dataset_wide",
+                "operation_key": _MOIS_BULK_OPERATION_KEY,
             }
         },
     )
@@ -3841,6 +3871,7 @@ def test_create_request_rejects_sync_scope_for_dataset_wide_catalog_entry(
                 "type": "provider_dataset",
                 "provider_dataset_id": 1,
                 "sync_scope": "target_grids",
+                "operation_key": _MOIS_BULK_OPERATION_KEY,
             }
         },
     )
@@ -3874,6 +3905,7 @@ def test_create_request_reuses_same_active_effective_scope(
                 "type": "provider_dataset",
                 "provider_dataset_id": 1,
                 "sync_scope": "dataset_wide",
+                "operation_key": _MOIS_BULK_OPERATION_KEY,
             },
             "reason": "same",
         },
@@ -3903,6 +3935,7 @@ def test_create_request_rejects_different_plan_on_active_effective_scope(
                 "type": "provider_dataset",
                 "provider_dataset_id": 1,
                 "sync_scope": "dataset_wide",
+                "operation_key": _MOIS_BULK_OPERATION_KEY,
             },
             "priority": 51,
             "reason": "same",
@@ -3930,6 +3963,7 @@ def test_create_request_scope_lock_busy_maps_to_409(
                 "type": "provider_dataset",
                 "provider_dataset_id": 1,
                 "sync_scope": "dataset_wide",
+                "operation_key": _MOIS_BULK_OPERATION_KEY,
             },
             "run_mode": "now",
         },

@@ -85,6 +85,7 @@ def _state(
     *,
     provider: str = "python-mois-api",
     dataset_key: str = "mois_license_features_bulk",
+    operation_key: str = "mois_refresh",
     last_success_at: datetime | None = _NOW,
     eligible_after: datetime | None = None,
 ) -> SyncState:
@@ -93,6 +94,7 @@ def _state(
         provider=provider,
         dataset_key=dataset_key,
         sync_scope="dataset_wide",
+        operation_key=operation_key,
         status="active",
         cursor={},
         last_success_at=last_success_at,
@@ -209,6 +211,7 @@ def _pipeline_execution(
     execution_id: str,
     created_at: datetime = _NOW,
     status: str = "running",
+    operation_key: str = "dataset_refresh",
 ) -> PipelineExecution:
     job_id = execution_id.replace("11111111", "22222222")
     return PipelineExecution(
@@ -222,6 +225,7 @@ def _pipeline_execution(
                 provider=provider,
                 dataset_key=dataset_key,
                 sync_scope="dataset_wide",
+                operation_key=operation_key,
                 operation_member_id=job_id,
                 status=status,
             ),
@@ -414,7 +418,15 @@ def test_ops_datasets_openapi_exposes_hardened_contract(client: TestClient) -> N
     assert set(latest["properties"]["pair_status"]["enum"]) == operation_states
     assert "status_source" not in latest["properties"]
     pair = spec["components"]["schemas"]["OpsDatasetProviderDataset"]
-    assert "operation_member_id" in pair["required"]
+    # membership identity는 triple이다(ADR-088) — 셋 다 non-null 필수다.
+    assert {
+        "provider_dataset_id",
+        "sync_scope",
+        "operation_key",
+        "operation_member_id",
+    } <= set(pair["required"])
+    assert pair["properties"]["sync_scope"]["type"] == "string"
+    assert pair["properties"]["operation_key"]["type"] == "string"
     assert pair["properties"]["operation_member_id"]["format"] == "uuid"
     assert set(pair["properties"]["status"]["enum"]) == operation_states
     assert "status_source" not in pair["properties"]
@@ -579,7 +591,14 @@ def test_removed_natural_dataset_routes_are_not_reintroduced(client: TestClient)
 
 
 @pytest.mark.unit
-def test_run_history_emits_one_record_per_root_for_dataset_wide_aliases() -> None:
+def test_run_history_emits_one_record_per_root_for_sibling_operation_members() -> None:
+    """T-VN-33: 같은 root에 같은 scope의 member가 여러 개여도 record는 root당 1건.
+
+    membership identity가 triple(provider_dataset_id, sync_scope, operation_key)이
+    되면서 한 root가 같은 dataset·scope에 대해 operation만 다른 member를 여러 개
+    가질 수 있다. 옛 ``sync_scope=NULL`` alias member는 스키마에서 사라졌으므로
+    중복 제거 대상은 sibling operation member다.
+    """
     from kortravelmap.api import ops_dataset_service as service
 
     provider = "python-mois-api"
@@ -596,7 +615,8 @@ def test_run_history_emits_one_record_per_root_for_dataset_wide_aliases() -> Non
                 provider_dataset_id=42,
                 provider=provider,
                 dataset_key=dataset_key,
-                sync_scope=None,
+                sync_scope="dataset_wide",
+                operation_key="mois_bulk_refresh",
                 operation_member_id="22222222-2222-4222-8222-222222222222",
                 status="done",
             ),
@@ -605,7 +625,17 @@ def test_run_history_emits_one_record_per_root_for_dataset_wide_aliases() -> Non
                 provider=provider,
                 dataset_key=dataset_key,
                 sync_scope="dataset_wide",
+                operation_key="mois_sibling_refresh",
                 operation_member_id="33333333-3333-4333-8333-333333333333",
+                status="done",
+            ),
+            PipelineProviderDatasetIdentity(
+                provider_dataset_id=42,
+                provider=provider,
+                dataset_key=dataset_key,
+                sync_scope="target_grids",
+                operation_key="mois_targeted_refresh",
+                operation_member_id="44444444-4444-4444-8444-444444444444",
                 status="done",
             ),
         ),
@@ -614,7 +644,7 @@ def test_run_history_emits_one_record_per_root_for_dataset_wide_aliases() -> Non
     records = service._run_history_records(
         (execution,),
         provider_dataset_id=42,
-        sync_scopes=("dataset_wide", None),
+        sync_scopes=("dataset_wide",),
     )
 
     assert len(records) == 1
@@ -625,15 +655,24 @@ def test_run_history_emits_one_record_per_root_for_dataset_wide_aliases() -> Non
 
 
 @pytest.mark.unit
-def test_state_aliases_emit_one_logical_scope_and_prefer_canonical_row() -> None:
+def test_states_fold_to_one_logical_scope_and_drop_noncanonical_rows() -> None:
+    """T-VN-33: ``default`` alias 보정은 사라졌고 비정규 scope는 API에서 감춘다.
+
+    state PK가 (provider_dataset_id, sync_scope, operation_key) triple이 되면서
+    같은 logical scope에 operation만 다른 row가 여러 개 남을 수 있다. API scope
+    resource는 그래도 하나여야 한다.
+    """
     from kortravelmap.api import ops_dataset_service as service
 
-    def state(sync_scope: str, *, status: str) -> SyncState:
+    def state(
+        sync_scope: str, *, status: str, operation_key: str = "refresh"
+    ) -> SyncState:
         return SyncState(
             provider_dataset_id=42,
             provider="removed-provider",
             dataset_key="removed-dataset",
             sync_scope=sync_scope,
+            operation_key=operation_key,
             status=cast(Any, status),
             cursor={},
             last_success_at=None,
@@ -646,7 +685,9 @@ def test_state_aliases_emit_one_logical_scope_and_prefer_canonical_row() -> None
         None,
         (
             state("default", status="paused"),
+            state("legacy-scope", status="paused"),
             state("dataset_wide", status="active"),
+            state("dataset_wide", status="paused", operation_key="sibling_refresh"),
         ),
     )
 
@@ -1208,6 +1249,7 @@ async def test_grid_projects_active_execution_by_exact_sync_scope(
             provider=provider,
             dataset_key=dataset_key,
             sync_scope=scope,
+            operation_key="kma_refresh",
             status="active",
             cursor={},
             last_success_at=_NOW,
@@ -1338,6 +1380,7 @@ async def test_detail_materializes_all_catalog_target_scopes(
         provider=provider,
         dataset_key=dataset_key,
         sync_scope="external_system:concierge",
+        operation_key="kma_refresh",
         status="active",
         cursor={},
         last_success_at=_NOW,
@@ -1481,6 +1524,7 @@ async def test_grid_keeps_invalid_scope_orphan_as_dataset_wide_placeholder(
             provider=provider,
             dataset_key=dataset_key,
             sync_scope=scope,
+            operation_key="orphan_refresh",
             status="active",
             cursor={},
             last_success_at=_NOW,
