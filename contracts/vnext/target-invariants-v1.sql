@@ -408,7 +408,7 @@ SELECT count(*)
 FROM (
     WITH actual AS (
         SELECT feature_id, provider_dataset_id, weather_domain, forecast_style, metric_key,
-               weather_value_key
+               weather_value_key, selected_at
         FROM feature.current_weather_summary
     ), policy_facts AS (
         SELECT
@@ -422,42 +422,89 @@ FROM (
           ON policy.provider_dataset_id = fact.provider_dataset_id
          AND policy.enabled
          AND policy.stale_after_minutes IS NOT NULL
+    ), actual_series AS (
+        SELECT
+            feature_id, provider_dataset_id, weather_domain, forecast_style, metric_key,
+            max(selected_at) AS selected_at
+        FROM actual
+        GROUP BY feature_id, provider_dataset_id, weather_domain, forecast_style, metric_key
+    ), missing_series AS (
+        SELECT DISTINCT
+            fact.feature_id, fact.provider_dataset_id, fact.weather_domain,
+            fact.forecast_style, fact.metric_key
+        FROM policy_facts AS fact
+        WHERE NOT EXISTS (
+            SELECT 1
+            FROM actual_series AS actual_series
+            WHERE actual_series.feature_id = fact.feature_id
+              AND actual_series.provider_dataset_id = fact.provider_dataset_id
+              AND actual_series.weather_domain = fact.weather_domain
+              AND actual_series.forecast_style = fact.forecast_style
+              AND actual_series.metric_key = fact.metric_key
+        )
+    ), series_clocks AS (
+        SELECT
+            feature_id, provider_dataset_id, weather_domain, forecast_style, metric_key,
+            selected_at
+        FROM actual_series
+        UNION ALL
+        SELECT
+            missing.feature_id, missing.provider_dataset_id, missing.weather_domain,
+            missing.forecast_style, missing.metric_key, clock.selected_at
+        FROM missing_series AS missing
+        CROSS JOIN (SELECT clock_timestamp() AS selected_at) AS clock
     ), ranked AS (
         SELECT
-            s.feature_id, s.provider_dataset_id, s.weather_domain, s.forecast_style, s.metric_key,
-            w.weather_value_key,
+            series.feature_id, series.provider_dataset_id, series.weather_domain,
+            series.forecast_style, series.metric_key, fact.weather_value_key,
             row_number() OVER (
-                PARTITION BY s.feature_id, s.provider_dataset_id, s.weather_domain,
-                             s.forecast_style, s.metric_key
-                ORDER BY w.target_at DESC,
-                         w.known_at DESC,
-                         upper(w.valid_during) DESC NULLS LAST,
-                         w.issued_at DESC NULLS LAST,
-                         w.valid_at DESC NULLS LAST,
-                         w.observed_at DESC NULLS LAST,
-                         w.weather_value_key DESC
+                PARTITION BY series.feature_id, series.provider_dataset_id,
+                             series.weather_domain, series.forecast_style, series.metric_key
+                ORDER BY fact.target_at DESC,
+                         fact.known_at DESC,
+                         upper(fact.valid_during) DESC NULLS LAST,
+                         fact.issued_at DESC NULLS LAST,
+                         fact.valid_at DESC NULLS LAST,
+                         fact.observed_at DESC NULLS LAST,
+                         fact.weather_value_key DESC
             ) AS row_number
-        FROM feature.current_weather_summary AS s
-        JOIN policy_facts AS w
-          ON w.feature_id = s.feature_id
-         AND w.provider_dataset_id = s.provider_dataset_id
-         AND w.weather_domain = s.weather_domain
-         AND w.forecast_style = s.forecast_style
-         AND w.metric_key = s.metric_key
-        WHERE w.known_at <= s.selected_at
-          AND w.target_at <= s.selected_at
-          AND (w.valid_during IS NULL OR w.valid_during @> s.selected_at)
-          AND w.known_at + (w.stale_after_minutes * interval '1 minute')
-                > s.selected_at
+        FROM series_clocks AS series
+        JOIN policy_facts AS fact
+          ON fact.feature_id = series.feature_id
+         AND fact.provider_dataset_id = series.provider_dataset_id
+         AND fact.weather_domain = series.weather_domain
+         AND fact.forecast_style = series.forecast_style
+         AND fact.metric_key = series.metric_key
+        WHERE fact.known_at <= series.selected_at
+          AND fact.target_at <= series.selected_at
+          AND (fact.valid_during IS NULL OR fact.valid_during @> series.selected_at)
+          AND fact.known_at + (fact.stale_after_minutes * interval '1 minute')
+                > series.selected_at
     ), expected AS (
         SELECT feature_id, provider_dataset_id, weather_domain, forecast_style, metric_key,
                weather_value_key
         FROM ranked
         WHERE row_number = 1
     )
-    (SELECT * FROM expected EXCEPT ALL SELECT * FROM actual)
+    (
+        SELECT feature_id, provider_dataset_id, weather_domain, forecast_style, metric_key,
+               weather_value_key
+        FROM expected
+        EXCEPT ALL
+        SELECT feature_id, provider_dataset_id, weather_domain, forecast_style, metric_key,
+               weather_value_key
+        FROM actual
+    )
     UNION ALL
-    (SELECT * FROM actual EXCEPT ALL SELECT * FROM expected)
+    (
+        SELECT feature_id, provider_dataset_id, weather_domain, forecast_style, metric_key,
+               weather_value_key
+        FROM actual
+        EXCEPT ALL
+        SELECT feature_id, provider_dataset_id, weather_domain, forecast_style, metric_key,
+               weather_value_key
+        FROM expected
+    )
 ) AS difference; -- expect: 0 -- phase: post-backfill
 
 -- [INV-089-02] selected weather fact는 eligible하고 refresh deadline은 미래다.
@@ -537,6 +584,9 @@ FROM (
                 ORDER BY p.observed_at DESC, p.known_at DESC, p.price_value_key DESC
             ) AS row_number
         FROM feature.feature_price_values AS p
+        JOIN provider_sync.provider_datasets AS dataset
+          ON dataset.provider_dataset_id = p.provider_dataset_id
+         AND dataset.is_active
     ), expected AS (
         SELECT feature_id, provider_dataset_id, price_domain, product_key, price_value_key
         FROM ranked

@@ -290,6 +290,46 @@ async def test_current_card_merges_kma_and_observed_anchors_only_without_own_tem
     own = await weather_repo.build_weather_card(migrated_session, feature_id="weather-own")
     assert {(item.forecast_style, item.metric_key) for item in own.metrics} == {("short", "TMP")}
 
+    # 자기 anchor가 SKY만 가진 KMA row여도 KMA tier가 자기 자신을 재선정하면 안 된다.
+    # 다음 KMA anchor의 기온을 병합해 own → KMA → observed 순서를 완결한다.
+    await _insert_feature(
+        migrated_session,
+        "weather-partial-own",
+        kind="place",
+        lon=126.9804,
+        lat=37.5665,
+    )
+    assert await weather_repo.load_weather_values(
+        migrated_session,
+        [
+            _value(
+                "weather-partial-own",
+                "SKY",
+                provider=_KMA,
+                domain="kma_short_forecast",
+                style="short",
+                target_at=_TARGET,
+                value_text="맑음",
+            )
+        ],
+        provider_dataset_id=kma_id,
+        source_record=_response(
+            provider=_KMA,
+            dataset_key=kma_key,
+            suffix="c",
+            fetched_at=_BASE + timedelta(minutes=2),
+        ),
+        selected_at=_TARGET,
+    ) == 1
+    partial = await weather_repo.build_weather_card(
+        migrated_session, feature_id="weather-partial-own"
+    )
+    partial_by_key = {
+        (item.forecast_style, item.metric_key): item for item in partial.metrics
+    }
+    assert partial_by_key[("short", "SKY")].value_text == "맑음"
+    assert partial_by_key[("short", "TMP")].value_number == Decimal("21")
+
 
 async def test_nearest_weather_anchor_reads_current_summary_not_legacy_catalog(
     migrated_session: AsyncSession,

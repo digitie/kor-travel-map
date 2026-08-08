@@ -2,6 +2,17 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-08 (codex) — T-VN-38 final review P1 수렴
+
+- `INV-089-01`의 expected set을 existing summary가 아니라 active dataset·enabled refresh policy의
+  eligible immutable fact 전체에서 만들도록 고쳤다. summary가 전혀 없는 raw series도 현재
+  reconciliation 시각 기준 winner로 set-diff에 남으므로 projection 누락을 숨기지 않는다.
+- price winner invariant도 runtime처럼 inactive dataset을 제외했다. single-card의 KMA/observed
+  fallback은 자기 partial weather row를 후보로 다시 고르지 않으며, own `SKY` + 이웃 `TMP`를
+  검증하는 PostGIS 회귀를 추가했다.
+- map JSON `refresh_after`는 OpenAPI `date-time` 문자열이라는 경계를 통합 테스트에서도
+  `fromisoformat`으로 검증하도록 맞췄다. 최종 final-head PostGIS·n150 live gate만 남았다.
+
 ## 2026-08-08 (codex) — T-VN-38 final P0 보강: deadline scheduler와 reader fail-closed
 
 - weather current projection을 `pg_advisory_xact_lock`으로 전역 직렬화했다. desired set을 보지

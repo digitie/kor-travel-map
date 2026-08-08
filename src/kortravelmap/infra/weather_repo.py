@@ -1270,7 +1270,9 @@ SELECT set_config('statement_timeout', :statement_timeout, true)
 _NEAREST_WEATHER_RADIUS_M: Final[float] = 50_000.0
 
 
-def _nearest_anchor_sql(exists_predicate: str) -> str:
+def _nearest_anchor_sql(
+    exists_predicate: str, *, exclude_target: bool = False
+) -> str:
     """반경 내 가장 가까운(KNN) anchor feature 1건을 찾는 SQL.
 
     #499: 과거 구현은 ``SELECT DISTINCT feature_id FROM feature_weather_values``
@@ -1284,6 +1286,7 @@ def _nearest_anchor_sql(exists_predicate: str) -> str:
     target·anchor 모두 ADR-067 ``feature.public_features`` projection에서만 찾는다
     — 비공개 feature는 anchor가 될 수 없고, 비공개 target은 빈 결과가 된다(F-1).
     """
+    target_exclusion = "AND f.feature_id <> :feature_id" if exclude_target else ""
     return f"""
 WITH target AS (
     SELECT coord_5179
@@ -1295,6 +1298,7 @@ SELECT f.feature_id
 FROM feature.public_features AS f, target AS t
 WHERE f.kind = 'weather'
   AND f.coord_5179 IS NOT NULL
+  {target_exclusion}
   AND x_extension.ST_DWithin(
         f.coord_5179, t.coord_5179, CAST(:radius_m AS double precision)
       )
@@ -1319,15 +1323,22 @@ LIMIT 1
 _NEAREST_WEATHER_SQL: Final[str] = _nearest_anchor_sql("")
 
 # 반경 내 가장 가까운 KMA-forecast anchor — SKY/POP/TMN/TMX(+TMP/T1H) 보유.
-_NEAREST_KMA_FORECAST_SQL: Final[str] = _nearest_anchor_sql(f"AND {_KMA_FORECAST_PREDICATE}")
+_NEAREST_KMA_FORECAST_SQL: Final[str] = _nearest_anchor_sql(
+    f"AND {_KMA_FORECAST_PREDICATE}", exclude_target=True
+)
 
 # 반경 내 가장 가까운 관측 기온 anchor — observed T1H/TMP 보유(휴게소 등).
-_NEAREST_OBSERVED_TEMP_SQL: Final[str] = _nearest_anchor_sql(f"AND {_OBSERVED_TEMP_PREDICATE}")
+_NEAREST_OBSERVED_TEMP_SQL: Final[str] = _nearest_anchor_sql(
+    f"AND {_OBSERVED_TEMP_PREDICATE}", exclude_target=True
+)
 
 
-def _historical_nearest_anchor_sql(exists_predicate: str) -> str:
+def _historical_nearest_anchor_sql(
+    exists_predicate: str, *, exclude_target: bool = False
+) -> str:
     """명시된 business-time snapshot에서만 존재하는 가장 가까운 anchor를 찾는다."""
 
+    target_exclusion = "AND f.feature_id <> :feature_id" if exclude_target else ""
     return f"""
 WITH target AS (
     SELECT coord_5179
@@ -1339,6 +1350,7 @@ SELECT f.feature_id
 FROM feature.public_features AS f, target AS t
 WHERE f.kind = 'weather'
   AND f.coord_5179 IS NOT NULL
+  {target_exclusion}
   AND x_extension.ST_DWithin(
         f.coord_5179, t.coord_5179, CAST(:radius_m AS double precision)
       )
@@ -1361,16 +1373,19 @@ LIMIT 1
 
 _HISTORICAL_NEAREST_WEATHER_SQL: Final[str] = _historical_nearest_anchor_sql("")
 _HISTORICAL_NEAREST_KMA_FORECAST_SQL: Final[str] = _historical_nearest_anchor_sql(
-    f"AND {_KMA_FORECAST_PREDICATE}"
+    f"AND {_KMA_FORECAST_PREDICATE}", exclude_target=True
 )
 _HISTORICAL_NEAREST_OBSERVED_TEMP_SQL: Final[str] = _historical_nearest_anchor_sql(
-    f"AND {_OBSERVED_TEMP_PREDICATE}"
+    f"AND {_OBSERVED_TEMP_PREDICATE}", exclude_target=True
 )
 
 
-def _admin_nearest_anchor_sql(exists_predicate: str) -> str:
+def _admin_nearest_anchor_sql(
+    exists_predicate: str, *, exclude_target: bool = False
+) -> str:
     """삭제 전 base Feature에서 admin weather anchor를 찾는 SQL."""
 
+    target_exclusion = "AND f.feature_id <> :feature_id" if exclude_target else ""
     return f"""
 WITH target AS (
     SELECT coord_5179
@@ -1388,6 +1403,7 @@ WHERE f.deleted_at IS NULL
   AND f.status <> 'deleted'
   AND f.kind = 'weather'
   AND f.coord_5179 IS NOT NULL
+  {target_exclusion}
   AND x_extension.ST_DWithin(
         f.coord_5179, t.coord_5179, CAST(:radius_m AS double precision)
       )
@@ -1410,10 +1426,10 @@ LIMIT 1
 
 _ADMIN_NEAREST_WEATHER_SQL: Final[str] = _admin_nearest_anchor_sql("")
 _ADMIN_NEAREST_KMA_FORECAST_SQL: Final[str] = _admin_nearest_anchor_sql(
-    f"AND {_KMA_FORECAST_PREDICATE}"
+    f"AND {_KMA_FORECAST_PREDICATE}", exclude_target=True
 )
 _ADMIN_NEAREST_OBSERVED_TEMP_SQL: Final[str] = _admin_nearest_anchor_sql(
-    f"AND {_OBSERVED_TEMP_PREDICATE}"
+    f"AND {_OBSERVED_TEMP_PREDICATE}", exclude_target=True
 )
 
 _LIST_WEATHER_VALUES_SQL: Final[str] = """

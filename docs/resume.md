@@ -49,18 +49,22 @@ reconcile의 summary row rewrite를 제거했다. 기본 실행 minute Dagster j
 future candidate eligibility·validity·SLA deadline을 재물화한다. normal card·anchor·bbox는 inactive
 dataset과 `refresh_after`가 지난 weather summary를 DB에서 즉시 제외한다.
 
+마지막 P1도 수렴했다. `INV-089-01`은 summary row를 driver로 삼지 않고 active/policy eligible
+immutable fact 전체에서 expected winner를 만들어 누락 series까지 잡는다. price invariant도 active
+dataset만 rank하며, current·historical·admin single-card의 KMA/observed tier는 partial-own anchor를
+자기 자신으로 재선정하지 않는다.
+
 OpenAPI admin/user/service 세 spec과 admin/user generated type을 재생성했다. dataset id/key/display와
 `known_at`은 price/weather DTO의 필수 identity이며 admin map/chart/table React key도 그 identity를
 사용한다. live fixture는 producing response source·dataset policy를 재시도 안전하게 만들고 feature
 cleanup 뒤 source head/record/entity/policy/dataset까지 지운다.
 
 검증: vNext artifact unit 7건, isolated API weather unit 26건, Dagster maintenance/definition gate,
-ruff/py_compile을 통과했다. 남은 완료 조건은 최종 누적 delta의 적대 리뷰 2인 P0=0,
+ruff/py_compile을 통과했다. 남은 완료 조건은 reviewer-feedback 누적 delta의 적대 리뷰 2인 P0=0,
 base rebase, n150 final-head destructive rebuild와 live UI E2E다.
 
-**다음 한 작업**: UI generated mock typecheck를 고정한 뒤 적대 리뷰 2인에게 현재 작업트리를
-제출하고 모든 P0/P1을 반영한다. 그 후 n150에서 final-head rebuild/API·Dagster·Playwright live E2E를
-실행한다.
+**다음 한 작업**: reviewer-feedback 누적 delta의 적대 리뷰 2인 final GO를 받은 뒤 n150에서
+final-head rebuild/API·Dagster·Playwright live E2E를 실행한다.
 
 ## 2026-08-08 (3) — T-VN-33: 적대 리뷰 3회 REJECT를 거쳐 게이트 10종 중 9종 GREEN
 
