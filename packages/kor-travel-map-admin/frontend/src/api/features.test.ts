@@ -194,6 +194,20 @@ describe("admin feature correction basis", () => {
     });
   });
 
+  it("legacy 입력도 UUID detail을 canonical write basis로 수렴한다", async () => {
+    const canonicalFeatureId = "018f9b5e-5b66-7d0d-b24f-1029384756aa";
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(revisionResponse(7, '"7"', "feature-1"))
+      .mockResolvedValueOnce(detailResponse(7, canonicalFeatureId));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const basis = await fetchAdminFeatureCorrectionBasis("feature-1");
+
+    expect(basis.featureId).toBe(canonicalFeatureId);
+    expect(basis.detail.data.feature.feature_id).toBe(canonicalFeatureId);
+  });
+
   it("revision과 detail 사이 경쟁 갱신은 제한 재조회 후 일치하는 basis만 반환한다", async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
