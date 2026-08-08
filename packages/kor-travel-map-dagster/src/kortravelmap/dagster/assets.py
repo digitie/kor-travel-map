@@ -10,11 +10,14 @@ from collections.abc import (
     Mapping,
     Sequence,
 )
+from dataclasses import asdict, is_dataclass
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Final, cast
 
 from kortravelmap.client import FestivalEnrichmentReviewRefreshResult
 from kortravelmap.core.feature_operation import ProviderDatasetOperationMembership
+from kortravelmap.core.ids import make_payload_hash, make_source_record_key
+from kortravelmap.dto import SourceRecord
 from kortravelmap.geocoding import ReverseGeocoder
 from kortravelmap.infra.feature_repo import (
     AirQualityLoadResult,
@@ -178,6 +181,57 @@ MOIS_RECORD_BATCH_SIZE: Final[int] = 1000
 
 _KST = timezone(timedelta(hours=9))
 _MISSING: Final = object()
+
+
+def _response_payload_item(item: Any) -> dict[str, Any]:
+    """provider response item을 source record에 보존할 canonical JSON object로 만든다."""
+
+    if is_dataclass(item) and not isinstance(item, type):
+        return cast("dict[str, Any]", asdict(item))
+    raw = getattr(item, "raw", None)
+    if isinstance(raw, dict):
+        return dict(raw)
+    model_dump = getattr(item, "model_dump", None)
+    if callable(model_dump):
+        dumped = model_dump(mode="json")
+        if isinstance(dumped, dict):
+            return dumped
+    if isinstance(item, dict):
+        return dict(item)
+    raise TypeError(f"provider response item cannot be preserved as JSON: {type(item).__name__}")
+
+
+def _weather_response_source_record(
+    *,
+    provider: str,
+    dataset_key: str,
+    source_entity_id: str,
+    records: Sequence[Any],
+    fetched_at: datetime,
+) -> SourceRecord:
+    """value producer dataset이 소유하는 immutable response source record를 만든다."""
+
+    raw_data = {
+        "source_entity_id": source_entity_id,
+        "records": [_response_payload_item(record) for record in records],
+    }
+    payload_hash = make_payload_hash(raw_data)
+    return SourceRecord(
+        provider=provider,
+        dataset_key=dataset_key,
+        source_entity_type="weather_response",
+        source_entity_id=source_entity_id,
+        raw_payload_hash=payload_hash,
+        raw_data=raw_data,
+        fetched_at=fetched_at,
+        source_record_key=make_source_record_key(
+            provider=provider,
+            dataset_key=dataset_key,
+            source_entity_type="weather_response",
+            source_entity_id=source_entity_id,
+            raw_payload_hash=payload_hash,
+        ),
+    )
 _COMMON_RESOURCE_KEYS: Final[set[str]] = {
     "feature_operation_guard",
     "kor_travel_map_client",
@@ -1424,7 +1478,25 @@ async def run_feature_weather_airkorea_air_quality(
     }
     values = air_quality_to_weather_values(measurements, station_feature_ids=station_feature_ids)
     client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
-    result = await client.load_air_quality(bundles, values)
+    membership = await _exact_sync_membership(
+        context,
+        client,
+        boundary="air_quality_weather_value_write",
+        provider=AIRKOREA_PROVIDER_NAME,
+        dataset_key=DATASET_KEY_AIR_QUALITY,
+    )
+    result = await client.load_air_quality(
+        bundles,
+        values,
+        provider_dataset_id=membership.provider_dataset_id,
+        source_record=_weather_response_source_record(
+            provider=AIRKOREA_PROVIDER_NAME,
+            dataset_key=DATASET_KEY_AIR_QUALITY,
+            source_entity_id=f"run:{fetched_at.isoformat()}",
+            records=measurements,
+            fetched_at=fetched_at,
+        ),
+    )
     _add_output_metadata(
         context,
         {
@@ -1481,7 +1553,25 @@ async def run_feature_weather_krex_rest_areas(
     }
     values = rest_area_weather_records_to_values(records, station_feature_ids=station_feature_ids)
     client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
-    result = await client.load_air_quality(bundles, values)
+    membership = await _exact_sync_membership(
+        context,
+        client,
+        boundary="krex_weather_value_write",
+        provider=KREX_PROVIDER_NAME,
+        dataset_key=REST_AREA_WEATHER_DATASET_KEY,
+    )
+    result = await client.load_air_quality(
+        bundles,
+        values,
+        provider_dataset_id=membership.provider_dataset_id,
+        source_record=_weather_response_source_record(
+            provider=KREX_PROVIDER_NAME,
+            dataset_key=REST_AREA_WEATHER_DATASET_KEY,
+            source_entity_id=f"run:{fetched_at.isoformat()}",
+            records=records,
+            fetched_at=fetched_at,
+        ),
+    )
     _add_output_metadata(
         context,
         {

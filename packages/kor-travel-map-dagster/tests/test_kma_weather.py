@@ -272,7 +272,7 @@ class _FakeKrtourClient:
         self.loaded_bundles.extend(materialized)
         return SimpleNamespace(inserted=len(materialized))
 
-    async def load_weather_values(self, values: Any) -> int:
+    async def load_weather_values(self, values: Any, **_kwargs: Any) -> int:
         materialized = list(values)
         if self.load_error is not None:
             raise self.load_error
