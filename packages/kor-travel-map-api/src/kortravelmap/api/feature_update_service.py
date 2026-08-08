@@ -705,6 +705,7 @@ async def _find_reusable_active_request(
             session,
             provider_dataset_id=membership.provider_dataset_id,
             sync_scope=membership.sync_scope,
+            operation_key=membership.operation_key,
         )
         if existing is not None:
             existing_by_id[existing.request_id] = existing

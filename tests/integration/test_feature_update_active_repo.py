@@ -211,6 +211,7 @@ async def test_active_identity_uses_job_effective_scope_and_constraint_metadata(
         migrated_session,
         provider_dataset_id=targeted.provider_dataset_id,
         sync_scope="target_grids",
+        operation_key=targeted.operation_key,
     )
     assert found is not None
     assert found.request_id == first.request_id
@@ -253,6 +254,7 @@ async def test_active_identity_uses_job_effective_scope_and_constraint_metadata(
         migrated_session,
         provider_dataset_id=targeted.provider_dataset_id,
         sync_scope="target_grids",
+        operation_key=targeted.operation_key,
     )
     assert cancellation_marked is not None
     assert cancellation_marked.cancellation_id == "68000000-0000-4000-8000-000000000001"
@@ -809,6 +811,7 @@ async def test_direct_writer_requires_canonical_effective_scope(
             migrated_session,
             provider_dataset_id=targeted.provider_dataset_id,
             sync_scope="legacy-alias",
+            operation_key=targeted.operation_key,
         )
 
     # membership이 아예 없는 요청도 거부한다 (scope 종류와 무관).
@@ -886,3 +889,70 @@ async def test_dispatch_conflict_exposes_current_lifecycle(
             migrated_session, "00000000-0000-4000-8000-000000000000"
         )
     assert missing_info.value.current_status == "not_found"
+
+
+async def test_active_lookup_does_not_match_sibling_operation_on_same_scope(
+    migrated_session: AsyncSession,
+) -> None:
+    """active 조회는 membership triple로 판정한다 — 형제 operation을 잡으면 안 된다.
+
+    ``ops.feature_update_request_datasets``의 세 열이 모두 NOT NULL이고 DB trigger도
+    triple로 경합을 본다. 조회만 pair로 좁히면 operation A의 active request가
+    operation B의 요청에 걸려, 상위 ``_assert_reusable_active_request``의 triple
+    비교가 불일치를 내며 **정당한 요청에 409**를 준다 — Python 가드가 자기가 흉내
+    내는 DB 가드보다 엄격해지는 상태다.
+    """
+    targeted = await _operation_scope(migrated_session, sync_scope="target_grids")
+    sibling_operation_key = f"{targeted.operation_key}.sibling"
+    await migrated_session.execute(
+        text(
+            "INSERT INTO provider_sync.provider_dataset_operations "
+            "(provider_dataset_id, operation_key, operation_kind) "
+            "VALUES (:provider_dataset_id, :operation_key, 'refresh')"
+        ),
+        {
+            "provider_dataset_id": targeted.provider_dataset_id,
+            "operation_key": sibling_operation_key,
+        },
+    )
+    await migrated_session.execute(
+        text(
+            "INSERT INTO provider_sync.provider_dataset_operation_scopes "
+            "(provider_dataset_id, sync_scope, operation_key, operation_kind) "
+            "VALUES (:provider_dataset_id, 'target_grids', :operation_key, 'refresh')"
+        ),
+        {
+            "provider_dataset_id": targeted.provider_dataset_id,
+            "operation_key": sibling_operation_key,
+        },
+    )
+    sibling = ImportJobDatasetTarget(
+        provider_dataset_id=targeted.provider_dataset_id,
+        sync_scope="target_grids",
+        operation_key=sibling_operation_key,
+    )
+
+    active = await enqueue_feature_update_request(
+        migrated_session,
+        scope=_scope(targeted),
+        dataset_memberships=[targeted],
+    )
+
+    same = await find_active_provider_dataset_request(
+        migrated_session,
+        provider_dataset_id=targeted.provider_dataset_id,
+        sync_scope="target_grids",
+        operation_key=targeted.operation_key,
+    )
+    assert same is not None
+    assert same.request_id == active.request_id
+
+    other = await find_active_provider_dataset_request(
+        migrated_session,
+        provider_dataset_id=sibling.provider_dataset_id,
+        sync_scope="target_grids",
+        operation_key=sibling.operation_key,
+    )
+    assert other is None, (
+        "형제 operation의 active request를 자기 것으로 잡으면 거짓 409가 난다"
+    )

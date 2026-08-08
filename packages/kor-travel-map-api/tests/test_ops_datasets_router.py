@@ -286,6 +286,7 @@ def _empty_detail() -> OpsDatasetDetailData:
         scopes=[
             OpsDatasetScopeState(
                 sync_scope="dataset_wide",
+                operation_key="fixture_refresh",
                 status="never_run",
                 cursor={},
                 last_success_at=None,
@@ -655,12 +656,18 @@ def test_run_history_emits_one_record_per_root_for_sibling_operation_members() -
 
 
 @pytest.mark.unit
-def test_states_fold_to_one_logical_scope_and_drop_noncanonical_rows() -> None:
-    """T-VN-33: ``default`` alias 보정은 사라졌고 비정규 scope는 API에서 감춘다.
+def test_states_keep_each_operation_and_drop_noncanonical_rows() -> None:
+    """T-VN-33: 비정규 scope는 감추되, operation별 state는 **접지 않는다**.
 
-    state PK가 (provider_dataset_id, sync_scope, operation_key) triple이 되면서
-    같은 logical scope에 operation만 다른 row가 여러 개 남을 수 있다. API scope
-    resource는 그래도 하나여야 한다.
+    state PK가 (provider_dataset_id, sync_scope, operation_key) triple이므로 같은
+    logical scope에 operation만 다른 row가 여러 개 남는다. 예전에는 이것을 "API
+    scope resource는 하나여야 한다"며 하나로 접었는데, 그러면 형제 operation의
+    상태가 무경고로 사라진다 — 아래 fixture처럼 한쪽이 ``paused``면 운영자는 멈춘
+    operation을 영영 못 본다. 접기는 ``default`` alias 시대의 규칙이었고, alias가
+    사라진 뒤로는 alias가 아니라 operation을 접고 있었다.
+
+    비정규 scope(``default``/``legacy-scope``)를 숨기는 규칙은 그대로다 — 그건
+    API가 표현할 수 없는 값이라서지 중복이라서가 아니다.
     """
     from kortravelmap.api import ops_dataset_service as service
 
@@ -681,7 +688,7 @@ def test_states_fold_to_one_logical_scope_and_drop_noncanonical_rows() -> None:
             next_run_after=None,
         )
 
-    selected = service._states_by_api_scope(
+    selected = service._states_by_api_membership(
         None,
         (
             state("default", status="paused"),
@@ -691,9 +698,14 @@ def test_states_fold_to_one_logical_scope_and_drop_noncanonical_rows() -> None:
         ),
     )
 
-    assert set(selected) == {"dataset_wide"}
-    assert selected["dataset_wide"].sync_scope == "dataset_wide"
-    assert selected["dataset_wide"].status == "active"
+    assert set(selected) == {
+        ("dataset_wide", "refresh"),
+        ("dataset_wide", "sibling_refresh"),
+    }
+    assert selected[("dataset_wide", "refresh")].status == "active"
+    assert selected[("dataset_wide", "sibling_refresh")].status == "paused", (
+        "형제 operation의 상태를 접으면 멈춘 operation이 보이지 않는다"
+    )
 
 
 @pytest.mark.unit
@@ -1083,8 +1095,8 @@ async def test_grid_calculates_freshness_and_keeps_time_meanings_separate(
         provider_dataset_id=42,
         provider=state.provider,
         dataset_key=state.dataset_key,
-        sync_scope=None,
-        operation_key="test_operation_job",
+        sync_scope="dataset_wide",
+        operation_key="mois_refresh",
         execution=_pipeline_execution(
             provider=state.provider,
             dataset_key=state.dataset_key,
@@ -1098,7 +1110,7 @@ async def test_grid_calculates_freshness_and_keeps_time_meanings_separate(
         provider=state.provider,
         dataset_key=state.dataset_key,
         sync_scope="dataset_wide",
-        operation_key="test_operation_job",
+        operation_key="mois_refresh",
         execution=_pipeline_execution(
             provider=state.provider,
             dataset_key=state.dataset_key,
@@ -1146,8 +1158,8 @@ async def test_grid_calculates_freshness_and_keeps_time_meanings_separate(
                 provider_dataset_id=state.provider_dataset_id,
                 provider=state.provider,
                 dataset_key=state.dataset_key,
-                sync_scope=None,
-                operation_key="test_operation_job",
+                sync_scope="dataset_wide",
+                operation_key="mois_refresh",
                 latest_terminal=None,
                 active=active_unscoped,
             ),
@@ -1156,7 +1168,7 @@ async def test_grid_calculates_freshness_and_keeps_time_meanings_separate(
                 provider=state.provider,
                 dataset_key=state.dataset_key,
                 sync_scope="dataset_wide",
-                operation_key="test_operation_job",
+                operation_key="mois_refresh",
                 latest_terminal=newer_terminal,
                 active=None,
             ),
@@ -1219,7 +1231,8 @@ async def test_grid_calculates_freshness_and_keeps_time_meanings_separate(
     assert str(row.latest_execution.id) == newer_terminal.execution.id
     assert row.active_execution is not None
     assert row.active_execution.status == "running"
-    assert row.active_execution.sync_scope is None
+    # ``sync_scope``는 non-null이다 — DB 열도 NOT NULL이고 공급 DTO도 ``str``다.
+    assert row.active_execution.sync_scope == "dataset_wide"
     assert str(row.active_execution.id) == active_unscoped.execution.id
     assert row.catalog is not None
     assert row.catalog.provider_state_default_scope == "dataset_wide"
@@ -1269,7 +1282,7 @@ async def test_grid_projects_active_execution_by_exact_sync_scope(
             provider=provider,
             dataset_key=dataset_key,
             sync_scope=scope,
-            operation_key="test_operation_job",
+            operation_key="kma_refresh",
             execution=_pipeline_execution(
                 provider=provider,
                 dataset_key=dataset_key,
@@ -1288,8 +1301,8 @@ async def test_grid_projects_active_execution_by_exact_sync_scope(
         provider_dataset_id=42,
         provider=provider,
         dataset_key=dataset_key,
-        sync_scope=None,
-        operation_key="test_operation_job",
+        sync_scope="dataset_wide",
+        operation_key="kma_refresh",
         execution=_pipeline_execution(
             provider=provider,
             dataset_key=dataset_key,
@@ -1315,7 +1328,7 @@ async def test_grid_projects_active_execution_by_exact_sync_scope(
                 provider=item.provider,
                 dataset_key=item.dataset_key,
                 sync_scope=item.sync_scope,
-                operation_key="test_operation_job",
+                operation_key="kma_refresh",
                 latest_terminal=None,
                 active=item,
             )
@@ -1400,7 +1413,7 @@ async def test_detail_materializes_all_catalog_target_scopes(
         provider=provider,
         dataset_key=dataset_key,
         sync_scope="external_system:concierge",
-        operation_key="test_operation_job",
+        operation_key="kma_refresh",
         execution=_pipeline_execution(
             provider=provider,
             dataset_key=dataset_key,
@@ -1416,7 +1429,7 @@ async def test_detail_materializes_all_catalog_target_scopes(
         provider=provider,
         dataset_key=dataset_key,
         sync_scope="external_system:concierge",
-        operation_key="test_operation_job",
+        operation_key="kma_refresh",
         execution=_pipeline_execution(
             provider=provider,
             dataset_key=dataset_key,
@@ -1459,7 +1472,7 @@ async def test_detail_materializes_all_catalog_target_scopes(
                 provider=provider,
                 dataset_key=dataset_key,
                 sync_scope="external_system:concierge",
-                operation_key="test_operation_job",
+                operation_key="kma_refresh",
                 latest_terminal=terminal,
                 active=active,
             ),
@@ -1548,8 +1561,8 @@ async def test_grid_keeps_invalid_scope_orphan_as_dataset_wide_placeholder(
         provider_dataset_id=42,
         provider=provider,
         dataset_key=dataset_key,
-        sync_scope=None,
-        operation_key="test_operation_job",
+        sync_scope="dataset_wide",
+        operation_key="orphan_refresh",
         execution=_pipeline_execution(
             provider=provider,
             dataset_key=dataset_key,
@@ -1567,8 +1580,8 @@ async def test_grid_keeps_invalid_scope_orphan_as_dataset_wide_placeholder(
         provider_dataset_id=43,
         provider=policy_provider,
         dataset_key=policy_dataset_key,
-        sync_scope=None,
-        operation_key="test_operation_job",
+        sync_scope="dataset_wide",
+        operation_key="orphan_refresh",
         execution=_pipeline_execution(
             provider=policy_provider,
             dataset_key=policy_dataset_key,
@@ -1598,7 +1611,7 @@ async def test_grid_keeps_invalid_scope_orphan_as_dataset_wide_placeholder(
                 provider=item.provider,
                 dataset_key=item.dataset_key,
                 sync_scope=item.sync_scope,
-                operation_key="test_operation_job",
+                operation_key="orphan_refresh",
                 latest_terminal=None,
                 active=item,
             )

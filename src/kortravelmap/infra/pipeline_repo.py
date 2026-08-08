@@ -1022,9 +1022,13 @@ LEFT JOIN LATERAL (
     LIMIT 1
 ) AS cancellation ON true
 WHERE page.dataset_rank = 1
+-- 정렬 키는 위 ``PARTITION BY``와 같은 triple이라야 총순서가 된다. pair로 두면
+-- 형제 operation 사이 순서가 비결정적이다. ``NULLS FIRST``는 scope가 nullable이던
+-- 시절의 잔재다 — 해당 열은 모두 NOT NULL이다.
 ORDER BY
     page.selected_provider_dataset_id,
-    page.selected_sync_scope NULLS FIRST,
+    page.selected_sync_scope,
+    page.selected_operation_key,
     page.selected_is_active
 """
 

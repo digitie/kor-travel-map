@@ -559,6 +559,38 @@ docker run --rm --network host -v /var/run/docker.sock:/var/run/docker.sock   -v
 `field: key`가 오는데, 클라이언트는 그 응답을 **키 거부로 해석**한다
 (`geocoding.py::_is_public_key_rejection`) — 진단할 때 헷갈리기 쉬우니 주의.
 
+## 10.8 파이썬 컨테이너 하네스는 프론트 게이트를 못 본다
+
+`ktm-battery:*` 컨테이너로 도는 스위트는 `src/ tests/ packages/ contracts/ alembic/`만
+복사한다. 그래서 **다음 CI 게이트를 한 번도 실행하지 않는다** —
+`.github/workflows/frontend.yml`의 `gen:types:check`(체크인된
+`packages/kor-travel-map-admin/frontend/src/api/types.ts`가 `openapi.json`과
+일치하는지), `lint`, `next build`(타입체크 포함).
+
+실측 사고(2026-08-08): `openapi.json`만 바꾸고 `types.ts`를 재생성하지 않아
+`gen:types:check`가 exit 0 → exit 1로 뒤집혔는데, 파이썬 스위트는 4,529 passed로
+green이었다. "환경 노이즈만 남았다"는 판정이 프론트를 보지 못한 판정이었다.
+
+**OpenAPI를 건드렸으면 반드시 함께 돌린다:**
+
+```bash
+# 1) 스펙 재생성 (컨테이너 안, 저장소 루트에서 — 하위 디렉터리에서 돌리면 중첩 경로에 쓴다)
+python packages/kor-travel-map-api/scripts/export_openapi.py
+
+# 2) 체크인된 프론트 타입 재생성 (WSL, 루트 node_modules 사용)
+wsl -e bash -lc 'cd /mnt/f/dev/<worktree>/packages/kor-travel-map-admin/frontend   && ../../../node_modules/.bin/openapi-typescript ../../kor-travel-map-api/openapi.json -o src/api/types.ts'
+
+# 3) 게이트 확인 (exit 0이라야 한다)
+wsl -e bash -lc 'cd /mnt/f/dev/<worktree>/packages/kor-travel-map-admin/frontend   && ../../../node_modules/.bin/openapi-typescript ../../kor-travel-map-api/openapi.json -o src/api/types.ts --check; echo EXIT=$?'
+
+# 4) 프론트 타입체크 (next build가 CI에서 이걸 한다)
+wsl -e bash -lc 'cd /mnt/f/dev/<worktree>/packages/kor-travel-map-admin/frontend   && ../../../node_modules/.bin/tsc --noEmit'
+```
+
+`contracts/vnext/openapi-diff-v1.json`의 baseline sha와
+`tests/unit/test_vnext_contract_artifacts.py`의 아티팩트 핀도 함께 갱신해야 한다.
+**핀 파일은 LF로 써야 한다** — CRLF로 쓰면 git 정규화 후 CI가 다른 sha를 본다.
+
 ## 11. 운영 환경 정보 (참고)
 
 운영 환경(Odroid M1S, ARM64)에 대한 상세 임계값은 SPEC V8 v8_0이 정한다.

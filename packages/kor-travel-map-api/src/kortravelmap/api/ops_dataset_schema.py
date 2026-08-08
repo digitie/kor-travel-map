@@ -156,7 +156,8 @@ class OpsDatasetExecution(BaseModel):
     status: OperationState
     pair_status: OperationState
     operation_member_id: UUID
-    sync_scope: str | None
+    # 공급원 ``DatasetLatestExecution.sync_scope``가 non-null이고 DB 열도 NOT NULL이다.
+    sync_scope: str
     provider_datasets: list[OpsDatasetProviderDataset]
     created_at: datetime
     started_at: datetime | None
@@ -180,7 +181,17 @@ class OpsIssueSummary(BaseModel):
 
 
 class OpsDatasetGridRow(BaseModel):
-    """provider×dataset×sync_scope 그리드 1행."""
+    """exact membership triple 그리드 1행.
+
+    행 identity는 ``provider_dataset_id × sync_scope × operation_key``다
+    (ADR-088 §결정 2). 한 dataset이 refresh operation을 여럿 가질 수 있고 그 둘이
+    같은 ``sync_scope``를 공유할 수 있으므로, pair로 접으면 형제 operation의 상태가
+    무경고로 사라진다 — 실패 중인 operation이 형제에 가려 보이지 않는다.
+
+    ``operation_key``가 null인 행은 **실행 가능한 refresh operation이 없는 catalog
+    행**이다(실측 74개 dataset 중 18개). 그 행에는 결박할 실행 identity가 아예 없으며,
+    운영자에게는 catalog 존재·orphan 사유·issue를 보이기 위해 남긴다.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -189,6 +200,12 @@ class OpsDatasetGridRow(BaseModel):
     dataset_key: str
     detail_url: str
     sync_scope: str
+    operation_key: str | None = Field(
+        description=(
+            "이 행이 가리키는 실행 operation. null이면 실행 가능한 refresh "
+            "operation이 없는 catalog 전용 행이다."
+        )
+    )
     status: str
     last_success_at: datetime | None
     last_failure_at: datetime | None
@@ -236,11 +253,17 @@ class OpsDatasetsGridResponse(BaseModel):
 
 
 class OpsDatasetScopeState(BaseModel):
-    """상세의 sync_scope 상태."""
+    """상세의 membership별 sync state.
+
+    ``pk_provider_sync_state``가 triple이므로 scope 하나에 operation별 state가 여러 개
+    존재할 수 있다. ``operation_key`` 없이 내보내면 클라이언트가 어느 operation의
+    상태인지 가릴 수 없다.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     sync_scope: str
+    operation_key: str
     status: str
     cursor: dict[str, Any]
     last_success_at: datetime | None

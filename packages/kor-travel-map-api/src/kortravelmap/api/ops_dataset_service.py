@@ -198,10 +198,27 @@ def _scope_refresh_capability(
     )
 
 
-def _catalog_state_sync_scopes(entry: ProviderDatasetCatalogEntry) -> tuple[str, ...]:
+def _catalog_state_memberships(
+    entry: ProviderDatasetCatalogEntry,
+) -> tuple[tuple[str, str | None], ...]:
+    """catalog가 선언한 exact membership을 ``(sync_scope, operation_key)``로 편다.
+
+    ``entry.refresh_scopes``는 operation을 가로질러 scope로 합집합한다 — 그 모양으로
+    행을 만들면 같은 scope를 공유하는 형제 operation이 한 행으로 접힌다. 여기서는
+    접지 않고 operation별로 편다.
+
+    refresh operation이 하나도 없는 dataset(실측 74개 중 18개)은 결박할 실행
+    identity가 없으므로 ``operation_key=None``인 catalog 전용 행 하나를 낸다.
+    """
     if not entry.is_refreshable:
-        return (DATASET_WIDE_SYNC_SCOPE,)
-    return entry.refresh_scopes
+        return ((DATASET_WIDE_SYNC_SCOPE, None),)
+    return tuple(
+        dict.fromkeys(
+            (sync_scope, operation.operation_key)
+            for operation in entry.enabled_refresh_operations
+            for sync_scope in operation.sync_scopes
+        )
+    )
 
 
 def _logical_state_scope(
@@ -229,22 +246,25 @@ def _api_state_scope(
         return None
 
 
-def _states_by_api_scope(
+def _states_by_api_membership(
     entry: ProviderDatasetCatalogEntry | None,
     states: Sequence[SyncState],
-) -> dict[str, SyncState]:
-    """raw state alias를 logical API resource 하나로 deterministic하게 접는다."""
-    selected: dict[str, SyncState] = {}
+) -> dict[tuple[str, str], SyncState]:
+    """sync state를 exact membership triple로 색인한다.
+
+    ``pk_provider_sync_state``가 triple이므로 scope 하나에 operation별 state가 여러 개
+    있을 수 있다. scope 문자열만으로 키를 잡으면 형제 operation이 조용히 덮여, 실패
+    중인 operation이 형제에 가려 보이지 않는다 — cutover로 ``default`` alias가
+    사라진 뒤로 옛 접기 규칙은 alias가 아니라 operation을 접고 있었다.
+
+    표현 불가능한 legacy scope는 그대로 숨긴다.
+    """
+    selected: dict[tuple[str, str], SyncState] = {}
     for state in states:
         logical_scope = _api_state_scope(entry, state.sync_scope)
         if logical_scope is None:
             continue
-        current = selected.get(logical_scope)
-        if current is None or (
-            current.sync_scope != logical_scope
-            and state.sync_scope == logical_scope
-        ):
-            selected[logical_scope] = state
+        selected[(logical_scope, state.operation_key)] = state
     return selected
 
 
@@ -406,17 +426,29 @@ def _dataset_execution_projection(
     *,
     provider_dataset_id: int,
     sync_scope: str,
+    operation_key: str | None,
 ) -> tuple[DatasetLatestExecution | None, DatasetLatestExecution | None]:
-    """logical scope의 terminal 최신값과 active 최신값을 같은 snapshot에서 고른다."""
-    storage_scopes: tuple[str | None, ...] = (sync_scope,)
-    if sync_scope == DATASET_WIDE_SYNC_SCOPE:
-        storage_scopes = (DATASET_WIDE_SYNC_SCOPE, None)
+    """exact membership의 terminal 최신값과 active 최신값을 같은 snapshot에서 고른다.
+
+    repo가 triple별로 분리해 준 snapshot을 여기서 scope로만 모으면 도로 접힌다 —
+    형제 operation의 실행이 서로의 자리를 다툰다. ``operation_key``가 None인
+    catalog 전용 행에는 결박할 실행이 없으므로 후보가 비는 것이 정상이다.
+    """
     candidates = tuple(
         snapshot
         for snapshot in snapshots
         if snapshot.provider_dataset_id == provider_dataset_id
-        and snapshot.sync_scope in storage_scopes
+        and snapshot.sync_scope == sync_scope
+        and snapshot.operation_key == operation_key
     )
+
+    return _latest_terminal_and_active(candidates)
+
+
+def _latest_terminal_and_active(
+    candidates: tuple[DatasetExecutionSnapshot, ...],
+) -> tuple[DatasetLatestExecution | None, DatasetLatestExecution | None]:
+    """후보 snapshot에서 terminal 최신값과 active 최신값을 각각 고른다."""
 
     def latest(
         selections: tuple[DatasetLatestExecution | None, ...],
@@ -488,12 +520,34 @@ def _orphan_reason(*, has_state: bool, has_policy: bool) -> str:
     return "catalog_missing_with_policy"
 
 
+def _scope_execution_rollup(
+    snapshots: tuple[DatasetExecutionSnapshot, ...],
+    *,
+    provider_dataset_id: int,
+    sync_scope: str,
+) -> tuple[DatasetLatestExecution | None, DatasetLatestExecution | None]:
+    """scope 안의 **모든 operation을 가로지른** terminal/active 최신값.
+
+    dataset 상세 URL이 scope 단위라 헤드라인 실행은 membership 하나로 좁힐 수 없다.
+    이건 의도된 롤업이고, membership별 상태는 같은 응답의 ``scopes``가 따로 낸다 —
+    ``_dataset_execution_projection``(triple 정확 일치)과 혼동하지 말 것.
+    """
+    candidates = tuple(
+        snapshot
+        for snapshot in snapshots
+        if snapshot.provider_dataset_id == provider_dataset_id
+        and snapshot.sync_scope == sync_scope
+    )
+    return _latest_terminal_and_active(candidates)
+
+
 def _grid_row(
     *,
     provider: str,
     dataset_key: str,
     provider_dataset_id: int,
     sync_scope: str,
+    operation_key: str | None,
     state: SyncState | None,
     has_persisted_state: bool,
     entry: ProviderDatasetCatalogEntry | None,
@@ -511,6 +565,7 @@ def _grid_row(
         dataset_key=dataset_key,
         detail_url=_dataset_detail_url(provider_dataset_id, sync_scope),
         sync_scope=sync_scope,
+        operation_key=operation_key,
         status=state.status if state is not None else _NEVER_RUN_STATUS,
         last_success_at=state.last_success_at if state is not None else None,
         last_failure_at=state.last_failure_at if state is not None else None,
@@ -581,24 +636,41 @@ async def load_datasets_grid(
     for entry in catalog_entries:
         entry_states = states_by_dataset_id.pop(entry.provider_dataset_id, [])
         policy = policies_by_dataset_id.pop(entry.provider_dataset_id, None)
-        states_by_scope = _states_by_api_scope(entry, entry_states)
-        expected_scopes = _catalog_state_sync_scopes(entry)
-        stale_scopes = tuple(
+        states_by_membership = _states_by_api_membership(entry, entry_states)
+        expected_memberships = _catalog_state_memberships(entry)
+        # catalog가 선언하지 않았는데 state가 남아 있는 membership도 보여 준다 —
+        # operation이 카탈로그에서 빠졌는데 state만 남은 상태가 여기서 드러난다.
+        stale_memberships = tuple(
             dict.fromkeys(
-                logical_scope
-                for state in entry_states
-                if (logical_scope := _api_state_scope(entry, state.sync_scope))
-                is not None
-                and logical_scope not in expected_scopes
+                membership
+                for membership in states_by_membership
+                if membership not in expected_memberships
             )
         )
-        row_scopes = tuple(dict.fromkeys((*expected_scopes, *stale_scopes)))
-        for row_sync_scope in row_scopes:
-            entry_state = states_by_scope.get(row_sync_scope)
-            latest_execution, active_execution = _dataset_execution_projection(
-                execution_snapshots,
-                provider_dataset_id=entry.provider_dataset_id,
-                sync_scope=row_sync_scope,
+        row_memberships = tuple(
+            dict.fromkeys((*expected_memberships, *stale_memberships))
+        )
+        for row_sync_scope, row_operation_key in row_memberships:
+            entry_state = (
+                states_by_membership.get((row_sync_scope, row_operation_key))
+                if row_operation_key is not None
+                else None
+            )
+            latest_execution, active_execution = (
+                _dataset_execution_projection(
+                    execution_snapshots,
+                    provider_dataset_id=entry.provider_dataset_id,
+                    sync_scope=row_sync_scope,
+                    operation_key=row_operation_key,
+                )
+                if row_operation_key is not None
+                # refresh operation이 없는 catalog 행은 결박할 membership이 없다.
+                # 실행이 남아 있다면 그 scope의 롤업으로 보여 준다.
+                else _scope_execution_rollup(
+                    execution_snapshots,
+                    provider_dataset_id=entry.provider_dataset_id,
+                    sync_scope=row_sync_scope,
+                )
             )
             rows.append(
                 _grid_row(
@@ -606,6 +678,7 @@ async def load_datasets_grid(
                     dataset_key=entry.dataset_key,
                     provider_dataset_id=entry.provider_dataset_id,
                     sync_scope=row_sync_scope,
+                    operation_key=row_operation_key,
                     state=entry_state,
                     has_persisted_state=entry_state is not None,
                     entry=entry,
@@ -622,12 +695,13 @@ async def load_datasets_grid(
         provider = orphan_states[0].provider
         dataset_key = orphan_states[0].dataset_key
         policy = policies_by_dataset_id.pop(provider_dataset_id, None)
-        orphan_states_by_scope = _states_by_api_scope(None, orphan_states)
-        for logical_scope, state in orphan_states_by_scope.items():
+        orphan_states_by_membership = _states_by_api_membership(None, orphan_states)
+        for (logical_scope, operation_key), state in orphan_states_by_membership.items():
             latest_execution, active_execution = _dataset_execution_projection(
                 execution_snapshots,
                 provider_dataset_id=state.provider_dataset_id,
                 sync_scope=logical_scope,
+                operation_key=operation_key,
             )
             rows.append(
                 _grid_row(
@@ -635,6 +709,7 @@ async def load_datasets_grid(
                     dataset_key=dataset_key,
                     provider_dataset_id=state.provider_dataset_id,
                     sync_scope=logical_scope,
+                    operation_key=operation_key,
                     state=state,
                     has_persisted_state=True,
                     entry=None,
@@ -646,10 +721,12 @@ async def load_datasets_grid(
                     now=reference,
                 )
             )
-        if orphan_states_by_scope:
+        if orphan_states_by_membership:
             continue
         logical_scope = DATASET_WIDE_SYNC_SCOPE
-        latest_execution, active_execution = _dataset_execution_projection(
+        # membership이 없는 자리표시자 행이므로 triple 정확 일치로는 아무것도 못 붙인다.
+        # 운영자가 실행 자체를 잃지 않도록 scope 롤업을 쓴다(의도된 접기).
+        latest_execution, active_execution = _scope_execution_rollup(
             execution_snapshots,
             provider_dataset_id=orphan_states[0].provider_dataset_id,
             sync_scope=logical_scope,
@@ -660,6 +737,7 @@ async def load_datasets_grid(
                 dataset_key=dataset_key,
                 provider_dataset_id=orphan_states[0].provider_dataset_id,
                 sync_scope=logical_scope,
+                operation_key=None,
                 state=None,
                 has_persisted_state=True,
                 entry=None,
@@ -677,7 +755,7 @@ async def load_datasets_grid(
             continue
         provider = policy.provider
         dataset_key = policy.dataset_key
-        latest_execution, active_execution = _dataset_execution_projection(
+        latest_execution, active_execution = _scope_execution_rollup(
             execution_snapshots,
             provider_dataset_id=policy.provider_dataset_id,
             sync_scope=DATASET_WIDE_SYNC_SCOPE,
@@ -688,6 +766,7 @@ async def load_datasets_grid(
                 dataset_key=dataset_key,
                 provider_dataset_id=policy.provider_dataset_id,
                 sync_scope=DATASET_WIDE_SYNC_SCOPE,
+                operation_key=None,
                 state=None,
                 has_persisted_state=False,
                 entry=None,
@@ -714,10 +793,12 @@ def _scope_state(
     policy: ProviderRefreshPolicy | None,
     *,
     sync_scope: str,
+    operation_key: str,
     now: datetime,
 ) -> OpsDatasetScopeState:
     return OpsDatasetScopeState(
         sync_scope=sync_scope,
+        operation_key=operation_key,
         status=state.status,
         cursor=state.cursor,
         last_success_at=state.last_success_at,
@@ -778,44 +859,47 @@ async def load_dataset_detail(
     if entry is None and not states and policy is None:
         raise DatasetNotFoundError(f"ops dataset 없음: provider_dataset_id={provider_dataset_id!r}")
 
-    states_by_scope = _states_by_api_scope(entry, states)
+    states_by_membership = _states_by_api_membership(entry, states)
     if entry is not None:
-        expected_scopes = _catalog_state_sync_scopes(entry)
-        stale_scopes = tuple(
+        expected_memberships = _catalog_state_memberships(entry)
+        stale_memberships = tuple(
             dict.fromkeys(
-                logical_scope
-                for state in states
-                if (logical_scope := _api_state_scope(entry, state.sync_scope))
-                is not None
-                and logical_scope not in expected_scopes
+                membership
+                for membership in states_by_membership
+                if membership not in expected_memberships
             )
         )
-        detail_scopes = tuple(dict.fromkeys((*expected_scopes, *stale_scopes)))
+        detail_memberships = tuple(
+            dict.fromkeys((*expected_memberships, *stale_memberships))
+        )
     else:
-        detail_scopes = tuple(
-            dict.fromkeys(
-                logical_scope
-                for state in states
-                if (logical_scope := _api_state_scope(None, state.sync_scope))
-                is not None
-            )
-        ) or (DATASET_WIDE_SYNC_SCOPE,)
+        detail_memberships = tuple(dict.fromkeys(states_by_membership)) or (
+            (DATASET_WIDE_SYNC_SCOPE, None),
+        )
+    detail_scopes = tuple(dict.fromkeys(scope for scope, _ in detail_memberships))
     if canonical_scope not in detail_scopes:
         raise DatasetNotFoundError(
             "ops dataset scope 없음: "
             f"provider_dataset_id={provider_dataset_id!r}/{canonical_scope!r}"
         )
+    # membership마다 한 줄이다 — scope로 접으면 형제 operation의 상태가 사라진다.
+    # ``operation_key``가 None인 catalog 전용 membership에는 결박할 state가 없으므로
+    # never-run 자리표시자를 낸다.
     scopes = [
         (
             _scope_state(
                 state,
                 policy,
                 sync_scope=sync_scope,
+                operation_key=operation_key,
                 now=reference,
             )
-            if (state := states_by_scope.get(sync_scope)) is not None
+            if operation_key is not None
+            and (state := states_by_membership.get((sync_scope, operation_key)))
+            is not None
             else OpsDatasetScopeState(
                 sync_scope=sync_scope,
+                operation_key=operation_key or "",
                 status=_NEVER_RUN_STATUS,
                 cursor={},
                 last_success_at=None,
@@ -825,7 +909,7 @@ async def load_dataset_detail(
                 freshness=_freshness(None, policy, now=reference),
             )
         )
-        for sync_scope in detail_scopes
+        for sync_scope, operation_key in detail_memberships
     ]
 
     history_sync_scopes = (canonical_scope,)
@@ -849,7 +933,10 @@ async def load_dataset_detail(
     execution_snapshots = await list_dataset_execution_snapshots_scoped(
         session, provider_dataset_id=provider_dataset_id
     )
-    latest_execution, active_execution = _dataset_execution_projection(
+    # 상세 URL은 scope 단위이므로 헤드라인 실행은 그 scope의 **모든 membership을
+    # 가로지르는 명시적 롤업**이다. grid 행처럼 membership 단위로 좁힐 수 없다 —
+    # 접기를 없애는 대신 의도된 롤업임을 이름과 주석으로 드러낸다.
+    latest_execution, active_execution = _scope_execution_rollup(
         execution_snapshots,
         provider_dataset_id=provider_dataset_id,
         sync_scope=canonical_scope,

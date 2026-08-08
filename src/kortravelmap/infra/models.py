@@ -968,10 +968,13 @@ class ProviderDatasetOperationScopeRow(Base):
         {"schema": "provider_sync"},
     )
 
-    # DB PK는 triple이다(``pk_provider_dataset_operation_scopes``). ORM이 pair만
-    # PK로 선언하면 identity map이 operation만 다른 두 행을 **같은 객체로 접어**
-    # 뒤에 읽은 행이 앞의 행을 덮는다. 지금은 아래 refresh-only CHECK가 그 조합을
-    # 막아 드러나지 않지만, preview operation에 scope를 허용하는 순간 조용히 깨진다.
+    # DB PK는 triple이다(``pk_provider_dataset_operation_scopes``). 이 모듈은 raw SQL
+    # 저장소의 Alembic ``target_metadata`` 원천이므로(모듈 docstring, ADR-004) 이
+    # class를 ORM 방식으로 쓰는 코드는 없다 — identity map이 행을 접는 시나리오는
+    # 이 저장소에서 도달하지 않는다. 실제 위험은 **아무 게이트도 이 어긋남을 보지
+    # 못한다**는 것이다: alembic autogenerate는 PK 제약을 비교 대상에 넣지 않아
+    # `alembic check`가 통과한다. 그래서 PK 전용 대조 게이트를 따로 세웠다
+    # (``test_alembic_head_primary_keys_match_orm_declarations``).
     provider_dataset_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     sync_scope: Mapped[str] = mapped_column(Text, primary_key=True)
     operation_key: Mapped[str] = mapped_column(Text, primary_key=True)

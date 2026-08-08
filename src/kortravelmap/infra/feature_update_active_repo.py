@@ -1,8 +1,13 @@
 """Provider dataset update의 active membership과 dispatch intent repository.
 
-active identity는 request가 snapshot으로 보관한 canonical
-``provider_dataset_id × sync_scope``다. 조회는 request/job을 한 SQL snapshot으로
-읽고, 생성 경합의 최종 방어선은 canonical scope row lock 기반 DB trigger다.
+active identity는 request가 snapshot으로 보관한 canonical membership **triple**
+(``provider_dataset_id × sync_scope × operation_key``)이다 — ADR-088 §결정 2, 그리고
+``ops.feature_update_request_datasets``의 세 열이 모두 NOT NULL이다. pair로 좁혀
+조회하면 operation만 다른 형제 request를 자기 것으로 오인해, 상위의 triple 비교가
+불일치를 내며 정당한 요청에 409를 준다 — DB trigger는 triple로 판정하므로 Python
+가드가 자기가 흉내 내는 DB 가드보다 엄격해진다. 조회는 request/job을 한 SQL
+snapshot으로 읽고, 생성 경합의 최종 방어선은 canonical scope row lock 기반 DB
+trigger다.
 """
 
 from __future__ import annotations
@@ -46,6 +51,7 @@ JOIN ops.feature_update_request_datasets AS target_member
 WHERE job.kind = 'feature_update_request'
   AND target_member.provider_dataset_id = CAST(:provider_dataset_id AS bigint)
   AND target_member.sync_scope = CAST(:sync_scope AS text)
+  AND target_member.operation_key = CAST(:operation_key AS text)
   AND job.status IN ('queued', 'running')
   AND job.quarantined_at IS NULL
 ORDER BY (job.status = 'running') DESC,
@@ -111,8 +117,9 @@ async def find_active_provider_dataset_request(
     *,
     provider_dataset_id: int,
     sync_scope: str,
+    operation_key: str,
 ) -> FeatureUpdateRequest | None:
-    """같은 canonical dataset membership을 가진 active request를 읽는다."""
+    """같은 canonical membership triple을 가진 active request를 읽는다."""
     if (
         not isinstance(provider_dataset_id, int)
         or isinstance(provider_dataset_id, bool)
@@ -120,12 +127,15 @@ async def find_active_provider_dataset_request(
     ):
         raise ValueError("provider_dataset_id must be a positive integer")
     parse_canonical_sync_scope(sync_scope)
+    if not operation_key:
+        raise ValueError("operation_key must be a non-empty string")
     rows = (
         await session.execute(
             text(_FIND_ACTIVE_REQUEST_SQL),
             {
                 "provider_dataset_id": provider_dataset_id,
                 "sync_scope": sync_scope,
+                "operation_key": operation_key,
             },
         )
     ).all()

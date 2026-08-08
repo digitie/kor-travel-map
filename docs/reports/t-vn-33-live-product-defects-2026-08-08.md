@@ -233,3 +233,98 @@ test_alembic_head_primary_keys_match_orm_declarations로 게이트를 세웠고,
 "셋 다 non-null이라야 UI가 member를 구분해 표시하고 deep link를 만들 수 있다"고 적어 두었다
 — 내부 불일치다. feature_update 경로(FeatureUpdateDatasetMembership)는 이미 triple이 온전하다.
 ```
+
+---
+
+## 적대 리뷰 2명이 REJECT하며 추가로 드러난 것 (2026-08-08)
+
+리뷰어 둘이 독립적으로 REJECT했고, 지적의 핵심은 **"바꾼 것 중 틀린 것은 없으나, 스스로 '전수/부류 전체'라고 선언한 범위 안에 같은 결함이 남았다"**는 것이다. 아래는 그 목록이다.
+
+### 24. packages/kor-travel-map-admin/frontend/src/api/types.ts (CI 블로커)
+
+`openapi.json`을 바꾸고 그 스펙에서 생성돼 **체크인된** `types.ts`를 재생성하지 않았다. `.github/workflows/frontend.yml:70`의 `gen:types:check`가 이를 게이트한다.
+
+```
+리뷰어 A/B 실증: 직전 커밋(2eaf6600)의 openapi.json 기준 exit 0 → 이 브랜치 HEAD 기준 exit 1.
+직전 커밋 26edbdee는 같은 상황에서 types.ts를 함께 재생성했다. 이번엔 빠졌다.
+
+왜 못 봤는가: ktm-battery 컨테이너 하네스가 src/tests/packages/contracts/alembic만
+복사해 프론트 게이트(gen:types:check / tsc / next build)를 한 번도 돌리지 않는다.
+파이썬 스위트가 4,529 passed로 green이던 시점에 프론트 게이트는 red였다.
+"잔여는 환경 노이즈"라는 판정 자체가 프론트를 보지 못한 판정이었다.
+재발 방지: docs/dev-environment.md §10.8에 절차를 박았다.
+```
+
+### 25. ops_dataset_service._states_by_api_scope + _dataset_execution_projection (두 리뷰어가 독립 지목)
+
+repo 계층을 triple로 고쳐 놓고 **API service가 한 층 위에서 도로 pair로 접었다.** `_states_by_api_scope`가 `dict[str, SyncState]`—scope 문자열 단일 키—라 operation만 다른 state가 first-wins로 덮인다. 실패 중인 operation이 형제에 가려 보이지 않는다.
+
+```
+tie-break `current.sync_scope != logical_scope`는 최초 삽입 후 항상 False다 —
+`_logical_state_scope`가 cutover 뒤 `del entry; return state_scope`인 항등함수이기 때문.
+즉 갱신 조건이 죽어 있어 조용한 first-wins가 된다.
+
+이건 실수가 아니라 명시적 결정이었다: test_states_fold_to_one_logical_scope_and_drop_
+noncanonical_rows가 "같은 logical scope에 operation만 다른 row가 여러 개 남을 수 있다"고
+docstring에 적고서 "API scope resource는 그래도 하나여야 한다"며 형제의 paused 상태가
+버려지는 것을 단언했다. 테스트가 결함을 고정하고 있었다.
+
+또 프론트는 이미 grid 행을 triple로 모델링해 두었다 —
+datasets-client.tsx:118이 rowKey를 [provider_dataset_id, sync_scope, operation_key]로
+만든다. API가 뒤처져 있었고 그래서 tsc가 TS2339로 red였다.
+```
+
+### 26. OpsDatasetGridRow / OpsDatasetScopeState / OpsDatasetExecution (자기모순)
+
+23번에서 "identity triple을 표면에 노출한다"고 하고 정작 **admin UI가 쓰는 grid·상세 표면**을 건너뛰었다. `OpsDatasetExecution.sync_scope`는 "근거 없는 `| None`을 좁혔다"는 커밋 주장과 반대로 nullable 그대로였다.
+
+```
+덤으로 test_ops_datasets_router.py가 `str` 선언 필드에 sync_scope=None을 5곳에서
+넣고 있었다. dataclass라 런타임 통과, mypy는 tests를 검사하지 않아 CI도 통과 —
+테스트가 커밋의 핵심 주장을 반증하는 모양으로 남아 있었다.
+```
+
+### 27. feature_update_active_repo.find_active_provider_dataset_request (거짓 409)
+
+`_FIND_ACTIVE_REQUEST_SQL`이 pair로 조회하는데 상위 `_assert_reusable_active_request`는 triple로 비교한다. operation만 다른 정당한 요청이 형제의 active request를 자기 것으로 잡고 비교 불일치로 409를 받는다. **DB trigger는 triple로 판정하므로 Python 가드가 자기가 흉내 내는 DB 가드보다 엄격했다.**
+
+```
+모듈 docstring부터 "active identity는 provider_dataset_id × sync_scope다"로 pair 계약을
+박아 두고 있었다. 호출부 feature_update_service.py는 membership.operation_key를 갖고
+있으면서 넘기지 않았다.
+
+A/B: tests/integration/test_feature_update_active_repo.py::
+test_active_lookup_does_not_match_sibling_operation_on_same_scope —
+술어를 되돌리면 형제 request를 잡아 실패, 고치면 8/8 통과.
+```
+
+### 28. 근거 서술 오류 (22번 정정)
+
+22번의 "identity map이 두 행을 접어 뒤 행이 앞 행을 덮는다"는 **이 저장소에서 도달 불가능하다.** `models.py`는 raw SQL 저장소의 Alembic `target_metadata` 원천일 뿐이고(ADR-004), `ProviderDatasetOperationScopeRow`를 ORM 방식(`session.get`/`relationship`/`select`)으로 쓰는 코드가 0건이다.
+
+```
+변경은 옳지만 이유가 틀렸다. 올바른 이유는 리뷰어 A가 A/B로 실증했다 —
+alembic autogenerate가 PK 제약을 비교 대상에 넣지 않아, ORM PK를 pair로 되돌려도
+`alembic check`와 test_alembic_metadata_consistency는 통과한다. 새 PK 대조 게이트만
+실패한다. 즉 실효는 "아무 게이트도 이 어긋남을 못 보던 사각을 메운 것"이다.
+
+같은 리뷰에서 게이트의 실제 한계도 드러났다: contype='p'만 보므로 unique/FK/CHECK/
+nullable은 검사하지 않는다. 실재하는 nullability divergence 1건 확인 —
+models.py:4494 poi_cache_targets.coord_5179가 Computed 열에 nullable 미지정이라
+ORM은 NOT NULL, head는 nullable(실해는 없다 — 원본 coord가 NOT NULL).
+```
+
+### 29. (미해결) offline upload 리졸버가 500을 낸다 — 21번과 전제조건이 같다
+
+`_resolve_scope_operation_key`는 scope에 operation이 둘 이상이면 `OfflineUploadScopeOperationUnresolved(ValueError)`를 던지는데, 호출부는 `DomainCommandPending`만 잡아 catch-all이 **500 INTERNAL_ERROR**로 만든다.
+
+```
+리뷰어 A의 지적이 날카롭다: 21번은 "dataset에 refresh operation 하나 더 등록하는
+평범한 작업"이라고 규정했는데, 바로 그 상태에서 offline upload 기능 전체가 500으로
+죽는다. 둘 중 하나는 틀렸다 — 그 조합이 평범하면 이건 실제 결함이고, 평범하지
+않으면 21번의 심각도가 과장이다.
+
+판단: 21번이 맞다(스키마가 허용하고 카탈로그 등록만으로 도달). 따라서 이건 실제
+결함이며, 최소한 500이 아니라 typed 4xx여야 한다. 이번 PR 범위 밖으로 두되
+후속으로 남긴다.
+```
