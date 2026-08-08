@@ -1,5 +1,38 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-08 (2) — T-VN-33: 기능 게이트 GREEN, 설계 재검토로 결함 4건 추가 해소
+
+전체 스위트 **4,534 passed / 6 failed**로 수렴했다(시작 298 실패). 실패 6건은 전부
+컨테이너 환경 노이즈다 — docker CLI 바이너리 부재 5건, 40k INSERT 벽시계 비율을 2%
+허용오차로 비교하는 부하 민감 테스트 1건(단독 통과). 내 브랜치는 두 파일 모두 안 건드렸다.
+
+이후 사용자 지시("호환성·최소수정보다 설계적 우수성·확장성·성능·유지보수성")에 따라
+설계 재검토를 돌려 결함 4건을 더 찾아 고쳤다. 전부 live 실측 + A/B 증명을 붙였다 —
+전수는 [`reports/t-vn-33-live-product-defects-2026-08-08.md`](reports/t-vn-33-live-product-defects-2026-08-08.md)
+21~23번.
+
+- **ORM PK가 DB보다 좁았다**(`provider_dataset_operation_scopes`). identity map이
+  `operation_key`만 다른 두 행을 접는다. 내 단위 테스트가 틀린 2열 모양을 단언해
+  어긋남을 고정하고 있었다. ORM 메타데이터 PK를 DB와 대조하는 테스트가 저장소에
+  아예 없어서 살아남았다 — `test_alembic_head_primary_keys_match_orm_declarations`로
+  게이트를 세웠고, 되돌리면 두 모양을 나란히 지목하며 실패한다.
+- **dataset snapshot 집계가 pair 키 → 하드 500.** SQL은 triple로 partition하는데
+  Python이 pair로 다시 묶어 `RuntimeError`. 스키마 변경 없이 카탈로그에 refresh
+  operation 하나 더 등록하면 재현된다(롤백 트랜잭션으로 스키마가 허용함을 확인).
+  API 테스트가 못 잡은 이유는 monkeypatch가 그 함수 자체를 스텁으로 갈아끼우기 때문.
+- **API 표면이 identity 2/3만 노출**하던 4곳을 이었다. `sync_scope`의 근거 없는
+  `| None`도 좁혔다(DB 세 열 모두 NOT NULL). OpenAPI admin 표면만 갱신됐다.
+- **정합성 F5 sample id를 pair로 합성**해 중복 식별자를 냈다. `LIMIT` 쿼리의 정렬도
+  PK 3열 중 2열뿐이라 비결정적이었다.
+
+**검토했으나 하지 않은 것 2건** — 지시가 "설계 우선"이라도 동작이 안 바뀌는 변경은
+밀어붙이지 않았다. offline_uploads 멱등키 4열화(구현까지 했다가 되돌림: 업로드 표면에
+operation 입력이 없고 리졸버가 모호하면 실패시켜 죽은 폭), identity guard SQLSTATE
+통일(38 대 1로 이것만 예외지만 분기하는 소비자가 없어 freeze 아티팩트를 흔들 값어치 없음).
+
+**다음**: 적대 리뷰어 2명의 승인(사용자 요구 조건) → #966 머지 → PR #967(T-VN-41 F1D,
+D1/D2 분리).
+
 ## 2026-08-08 — T-VN-33: 통합 라이브 실행이 제품 결함 다수를 드러냄, 머지 금지 유지
 
 통합 스위트를 최종 스키마로 전환해 live로 돌렸다(8 에이전트 병렬). 55개 파일 중 30개가
