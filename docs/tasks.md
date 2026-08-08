@@ -792,8 +792,9 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   weather/price summary set join으로 바꾸고 per-row LATERAL reader를 제거한다. current endpoint와
   explicit `(target_at, known_at)` snapshot endpoint를 분리한다. cardinality, freshness,
   reconciliation set-diff, EXPLAIN과 n150 final-head destructive rebuild/live UI E2E를 통과시킨다.
-  구현은 complete이며 완료 표시는 final cumulative adversarial review 2인 P0=0, base rebase,
-  n150 destructive rebuild와 live UI E2E가 모두 끝난 merge commit에서만 `tasks-done.md`로 옮긴다.
+  구현은 complete이며 완료 표시는 final cumulative adversarial review 2인 P0=0, #966 병합 뒤
+  최신 main rebase, GitHub Actions CI·required approval이 모두 끝난 merge commit에서만
+  `tasks-done.md`로 옮긴다.
 
   **2026-08-08 final-review 보강 checkpoint**: weather global projection을 transaction advisory
   lock으로 직렬화하고 same-winner reconcile의 row rewrite를 제거했다. deadline-only Dagster
@@ -801,8 +802,9 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   public/admin card·anchor·bbox 모두에 적용했다. map weather summary의 canonical dataset identity와
   deadline은 필수다. summary가 전혀 없는 eligible raw series까지 expected set-diff로 검출하고,
   partial-own anchor가 batch뿐 아니라 current·snapshot·admin single-card에서도 자신을 KMA/observed
-  fallback으로 재선정하지 않도록 고쳤다. 재리뷰 2인 P0=0 및 n150 destructive rebuild/live UI E2E가
-  남았다.
+  fallback으로 재선정하지 않도록 고쳤다. 재리뷰 2인 P0=0과 n150 destructive rebuild/live UI E2E
+  (메인·복구 각 2/2)는 완료했다. stacked base #966 병합 뒤 최신 main rebase, CI와 required
+  approval이 남았다.
 
 ### T-VN-40 — curation write model 단일화 (Lane B)
 
