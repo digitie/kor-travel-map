@@ -428,20 +428,21 @@ export async function fetchAdminFeatureCorrectionBasis(
     if (entityTag === null) {
       throw new Error(`GET ${revisionPath} 응답에 ETag가 없습니다.`);
     }
-    if (revision.data.feature_id !== featureId) {
-      throw new Error(`GET ${revisionPath} 응답의 feature_id가 다릅니다.`);
-    }
 
     const detail = await fetchAdminFeatureDetail(featureId, signal);
     const feature = detail.data.feature;
     if (
-      feature.feature_id === featureId &&
+      // T-VN-32C 경계에서 revision은 해석된 legacy ID를 echo하지만 detail은
+      // UUID 정본을 반환한다. 어느 쪽이든 요청 ref를 확인하고, 이후 UI/write에는
+      // detail의 UUID 정본만 사용한다.
+      (revision.data.feature_id === featureId ||
+        feature.feature_id === featureId) &&
       feature.row_revision === revision.data.row_revision
     ) {
       return {
         detail,
         entityTag,
-        featureId,
+        featureId: feature.feature_id,
         rowRevision: revision.data.row_revision,
       };
     }
