@@ -41,8 +41,14 @@ pytestmark = pytest.mark.integration
 
 _KST = timezone(timedelta(hours=9))
 _FETCHED = datetime(2026, 6, 2, 12, 0, tzinfo=_KST)
+# ``source_entities``를 빼면 안 된다. record만 지우면 entity가 링크 없이 남아
+# 정합성 검사 F1(orphan source_entity)이 **다른 테스트에서** 켜진다 — 이 파일은
+# commit하므로 남는 행이 세션 전역에 보인다. 실측: 이 목록에 entity가 없어
+# `test_consistency_reports` 9건이 단독 실행에선 통과하고 전체 실행에선 실패했다.
+# (heads는 record CASCADE로 함께 지워지지만 명시해 의도를 남긴다.)
 _TRUNCATE_SQL = (
-    "TRUNCATE feature.features, provider_sync.source_records, "
+    "TRUNCATE feature.features, provider_sync.source_entities, "
+    "provider_sync.source_entity_heads, provider_sync.source_records, "
     "provider_sync.source_links, provider_sync.provider_sync_state, "
     "provider_sync.notice_lifecycle_scopes, "
     "provider_sync.notice_lineage_states, "
