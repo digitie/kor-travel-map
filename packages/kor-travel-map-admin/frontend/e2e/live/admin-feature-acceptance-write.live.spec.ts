@@ -1114,15 +1114,38 @@ async function assertStaleCorrection(page: Page): Promise<void> {
   try {
     staleResponse = await staleResponsePromise;
   } catch (error) {
-    const clientErrorVisible = await page
-      .getByText("Feature 변경 처리 실패", { exact: true })
-      .isVisible()
-      .catch(() => false);
-    failureDetail = clientErrorVisible
-      ? "stale-etag:stale-submit:client-error"
-      : uiPatchRequests.length === 1
-        ? "stale-etag:stale-submit:request-pending"
-        : "stale-etag:stale-submit:no-request";
+    const clientError = page.getByRole("alert").filter({
+      has: page.getByText("Feature 변경 처리 실패", { exact: true }),
+    });
+    const clientErrorVisible = await clientError.isVisible().catch(() => false);
+    if (clientErrorVisible) {
+      // Persist only a fixed diagnostic category: live artifacts must never
+      // contain feature names, request IDs, or server-provided error text.
+      const message = await clientError.innerText().catch(() => "");
+      const category = message.includes("목록에 있는 카테고리")
+        ? "category"
+        : message.includes("목록에 있는 마커 아이콘")
+          ? "marker-icon"
+          : message.includes("목록에 있는 마커 색상")
+            ? "marker-color"
+            : message.includes("좌표")
+              ? "coordinate"
+              : message.includes("주소 코드")
+                ? "address-code"
+                : message.includes("reason은 필수")
+                  ? "missing-reason"
+                  : message.includes("feature_id가 필요")
+                    ? "missing-feature-id"
+                    : message.includes("편집 기준")
+                      ? "missing-basis"
+                      : "other";
+      failureDetail = `stale-etag:stale-submit:client-error:${category}`;
+    } else {
+      failureDetail =
+        uiPatchRequests.length === 1
+          ? "stale-etag:stale-submit:request-pending"
+          : "stale-etag:stale-submit:no-request";
+    }
     throw error;
   }
   expect(staleResponse.status()).toBe(412);
