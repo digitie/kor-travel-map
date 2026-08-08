@@ -413,8 +413,26 @@ COPY (
     UNION ALL
     SELECT
       'constraint', namespace.nspname, relation.relname,
-      constraint_row.conname || ':' ||
-      pg_catalog.pg_get_constraintdef(constraint_row.oid, true)
+      -- pg_restore는 같은 CHECK AST를 다시 parse/deparse하면서 괄호·암묵 cast의
+      -- 텍스트만 바꿀 수 있다. dump SHA-256 + pg_restore 성공이 expression bytes와
+      -- 적용을 보장하므로, restore 동등성 fingerprint에는 deparser 문자열 대신
+      -- structural catalog 축만 넣는다. 그렇지 않으면 같은 constraint가 false-red가 된다.
+      concat_ws(
+        ':',
+        constraint_row.conname,
+        constraint_row.contype,
+        COALESCE(constraint_row.conkey::text, ''),
+        COALESCE(constraint_row.confkey::text, ''),
+        COALESCE(constraint_row.confrelid::regclass::text, ''),
+        constraint_row.confupdtype,
+        constraint_row.confdeltype,
+        constraint_row.confmatchtype,
+        constraint_row.condeferrable,
+        constraint_row.condeferred,
+        constraint_row.convalidated,
+        constraint_row.connoinherit,
+        COALESCE(constraint_row.conexclop::text, '')
+      )
     FROM pg_catalog.pg_constraint AS constraint_row
     JOIN pg_catalog.pg_class AS relation ON relation.oid = constraint_row.conrelid
     JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace
@@ -494,8 +512,13 @@ COPY (
       'domain_constraint',
       namespace.nspname,
       type_row.typname,
-      constraint_row.conname || ':' ||
-        pg_catalog.pg_get_constraintdef(constraint_row.oid, true)
+      concat_ws(
+        ':',
+        constraint_row.conname,
+        constraint_row.contype,
+        constraint_row.convalidated,
+        constraint_row.connoinherit
+      )
     FROM pg_catalog.pg_constraint AS constraint_row
     JOIN pg_catalog.pg_type AS type_row
       ON type_row.oid = constraint_row.contypid
