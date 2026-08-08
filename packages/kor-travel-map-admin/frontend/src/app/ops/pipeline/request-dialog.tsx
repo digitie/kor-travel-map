@@ -204,12 +204,17 @@ function useRequestScopeForm(catalogRows: CanonicalCatalogRow[]) {
   // T-VN-33 전에는 provider 이름 입력으로 MOIS 여부를 봤다. 그 입력이 사라져
   // 사전점검 경고가 통째로 없어졌었다(react-doctor가 죽은 export로 잡아냈다).
   // 이제 선택된 catalog 행의 provider로 판정한다 — 같은 사실을 triple 선택에서 읽는다.
+  // `scopeType` 가드가 필요하다: `scopeProviderDatasetId` state는 scope 타입을
+  // 바꿔도 남으므로, MOIS dataset을 고른 뒤 bbox/center_radius/feature_ids로
+  // 전환하면 **provider가 실려 나가지도 않는 요청에** MOIS 경고가 뜬다.
   const moisSelected = useMemo(
     () =>
-      selectedCatalogRow !== null && isMoisProvider(selectedCatalogRow.provider)
+      scopeType === "provider_dataset" &&
+      selectedCatalogRow !== null &&
+      isMoisProvider(selectedCatalogRow.provider)
         ? selectedCatalogRow.provider
         : null,
-    [selectedCatalogRow],
+    [scopeType, selectedCatalogRow],
   );
   const selectedScopeCapability =
     selectedCatalogRow?.catalog?.scope_refresh ?? null;

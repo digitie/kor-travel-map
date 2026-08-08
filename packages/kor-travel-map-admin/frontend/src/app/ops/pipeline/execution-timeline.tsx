@@ -456,58 +456,43 @@ function useExecutionTimelineController({
   };
 }
 
-function ExecutionTimelineView({
-  columns,
+/**
+ * 실행 목록 필터 막대.
+ *
+ * `ExecutionTimelineView`에서 떼어냈다 — T-VN-33이 provider dataset ID·sync_scope·
+ * operation_key 필터를 더하면서 그 컴포넌트가 300줄 임계를 넘었고 `react-doctor`
+ * 게이트가 red가 됐다. 필터는 표시 상태를 갖지 않고 controller 값만 읽으므로
+ * 경계가 깨끗하다.
+ */
+function ExecutionTimelineFilters({
   createdFrom,
   createdTo,
-  cursorStack,
-  executions,
-  goNextPage,
   kind,
-  loadBatchId,
-  newCount,
-  newCountLabel,
-  nextCursor,
-  onSelectExecution,
   onUrlChange,
-  parentJobId,
+  operationKey,
   providerDatasetId,
   providerDatasetIdFilter,
-  operationKey,
-  resetToFirstPage,
-  rows,
-  selectedExecutionId,
   setDrafts,
   setStoredBaselineTop,
   setStoredCursorStack,
   status,
   syncScope,
-}: ReturnType<typeof useExecutionTimelineController>) {
+}: Pick<
+  ReturnType<typeof useExecutionTimelineController>,
+  | "createdFrom"
+  | "createdTo"
+  | "kind"
+  | "onUrlChange"
+  | "operationKey"
+  | "providerDatasetId"
+  | "providerDatasetIdFilter"
+  | "setDrafts"
+  | "setStoredBaselineTop"
+  | "setStoredCursorStack"
+  | "status"
+  | "syncScope"
+>) {
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <CardTitle>실행 타임라인</CardTitle>
-            <CardDescription>
-              request branch·standalone root 단위 통합 목록 — 하위 작업은 별도
-              행으로 나오지 않습니다.
-            </CardDescription>
-          </div>
-          {newCount > 0 ? (
-            <Button
-              aria-label={`새 실행 ${newCountLabel}건 반영`}
-              size="sm"
-              type="button"
-              variant="outline"
-              onClick={resetToFirstPage}
-            >
-              새 실행 {newCountLabel}건 — 첫 페이지로
-            </Button>
-          ) : null}
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
         <FilterBar>
           <FilterField label="종류">
             <NativeSelect
@@ -680,6 +665,75 @@ function ExecutionTimelineView({
             />
           </FilterField>
         </FilterBar>
+  );
+}
+
+function ExecutionTimelineView({
+  columns,
+  createdFrom,
+  createdTo,
+  cursorStack,
+  executions,
+  goNextPage,
+  kind,
+  loadBatchId,
+  newCount,
+  newCountLabel,
+  nextCursor,
+  onSelectExecution,
+  onUrlChange,
+  parentJobId,
+  providerDatasetId,
+  providerDatasetIdFilter,
+  operationKey,
+  resetToFirstPage,
+  rows,
+  selectedExecutionId,
+  setDrafts,
+  setStoredBaselineTop,
+  setStoredCursorStack,
+  status,
+  syncScope,
+}: ReturnType<typeof useExecutionTimelineController>) {
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <CardTitle>실행 타임라인</CardTitle>
+            <CardDescription>
+              request branch·standalone root 단위 통합 목록 — 하위 작업은 별도
+              행으로 나오지 않습니다.
+            </CardDescription>
+          </div>
+          {newCount > 0 ? (
+            <Button
+              aria-label={`새 실행 ${newCountLabel}건 반영`}
+              size="sm"
+              type="button"
+              variant="outline"
+              onClick={resetToFirstPage}
+            >
+              새 실행 {newCountLabel}건 — 첫 페이지로
+            </Button>
+          ) : null}
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <ExecutionTimelineFilters
+          createdFrom={createdFrom}
+          createdTo={createdTo}
+          kind={kind}
+          onUrlChange={onUrlChange}
+          operationKey={operationKey}
+          providerDatasetId={providerDatasetId}
+          providerDatasetIdFilter={providerDatasetIdFilter}
+          setDrafts={setDrafts}
+          setStoredBaselineTop={setStoredBaselineTop}
+          setStoredCursorStack={setStoredCursorStack}
+          status={status}
+          syncScope={syncScope}
+        />
 
         {loadBatchId.trim() || parentJobId.trim() ? (
           <div className="flex flex-wrap items-center gap-2">

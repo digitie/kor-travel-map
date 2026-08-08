@@ -10,7 +10,7 @@
 #
 # 그래서 목록을 **추측하지 않는다.** 아래는 `.github/workflows/{ci,lint,openapi,
 # frontend}.yml`의 `run:` 스텝을 그대로 옮긴 것이다. 워크플로가 바뀌면 이 파일도
-# 같이 바꾼다 — `scripts/audit-gate-coverage.sh`가 그 누락을 검사한다.
+# 같이 바꾼다 — `tests/unit/test_gate_script_mirrors_ci.py`가 그 누락을 검사한다.
 #
 # **의도적으로 제외한 것**(CI에서도 안 돈다):
 #   - `lint.yml` `ruff format --check` — `if: false`. 이 저장소는 자동 format을
@@ -18,8 +18,10 @@
 #
 # **여기서 재현 불가한 것**(로컬 하네스의 한계 — 반드시 인지하고 있어야 한다):
 #   - Python 3.11/3.12 매트릭스: 컨테이너는 3.13 하나다.
-#   - coverage 임계(`--cov-fail-under`): 아래 pytest 게이트가 CI와 같은 플래그로
-#     돈다. 컨테이너에 pytest-cov가 없으면 SKIP으로 보고한다.
+#
+# coverage는 재현한다 — 아래 api/dagster 게이트가 CI와 같은 `--cov-fail-under`를
+# 건다. (통합 job의 합산 `fail_under=80`은 `pyproject.toml`이 들고 있어
+# integration 게이트가 그대로 적용받는다.)
 #
 # 사용:  bash scripts/verify-all-gates.sh [worktree-절대경로]
 
@@ -41,7 +43,6 @@ IMAGE="${KTM_BATTERY_IMAGE:-ktm-battery:t37}"
 NPM="npx --yes npm@12.0.1"
 ADMIN="packages/kor-travel-map-admin/frontend"
 FAILED=()
-SKIPPED=()
 
 run_gate() {
   local name="$1"; shift
@@ -97,9 +98,9 @@ echo "===== ci.yml"
 run_gate "pytest unit+lint" py \
   'timeout 1800 python -m pytest tests/unit tests/lint -q > /tmp/g1.log 2>&1; rc=$?; tail -20 /tmp/g1.log; exit $rc'
 run_gate "pytest api" py \
-  'timeout 1800 python -m pytest packages/kor-travel-map-api/tests/ -q > /tmp/g2.log 2>&1; rc=$?; tail -20 /tmp/g2.log; exit $rc'
+  'timeout 1800 python -m pytest packages/kor-travel-map-api/tests/ -q --cov=packages/kor-travel-map-api/src/kortravelmap/api --cov-report=term-missing --cov-fail-under=70 > /tmp/g2.log 2>&1; rc=$?; tail -20 /tmp/g2.log; exit $rc'
 run_gate "pytest dagster" py \
-  'timeout 1800 python -m pytest packages/kor-travel-map-dagster/tests/ -q > /tmp/g3.log 2>&1; rc=$?; tail -20 /tmp/g3.log; exit $rc'
+  'timeout 1800 python -m pytest packages/kor-travel-map-dagster/tests/ -q --cov=packages/kor-travel-map-dagster/src/kortravelmap/dagster --cov-report=term-missing --cov-fail-under=80 > /tmp/g3.log 2>&1; rc=$?; tail -20 /tmp/g3.log; exit $rc'
 run_gate "pytest integration" py \
   'timeout 3000 python -m pytest tests/integration -q > /tmp/g4.log 2>&1; rc=$?; tail -25 /tmp/g4.log; exit $rc'
 
@@ -123,13 +124,9 @@ run_gate "admin type-check (app+e2e)" repo "$NPM -w $ADMIN run type-check"
 run_gate "admin next build" repo   "NEXT_PUBLIC_KOR_TRAVEL_MAP_API=http://127.0.0.1:8087    NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL=http://127.0.0.1:12302    NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL=http://127.0.0.1:12201    $NPM -w $ADMIN run build"
 
 echo
-if [ ${#SKIPPED[@]} -gt 0 ]; then
-  echo "재현 불가로 건너뜀 ${#SKIPPED[@]}개:"
-  printf '  - %s\n' "${SKIPPED[@]}"
-fi
 if [ ${#FAILED[@]} -eq 0 ]; then
   echo "미러링한 CI 차단 스텝을 모두 통과했다."
-  echo "주의: Python 3.11/3.12 매트릭스와 coverage 임계는 로컬에서 재현하지 않는다."
+  echo "주의: Python 3.11/3.12 매트릭스는 로컬에서 재현하지 않는다(컨테이너는 3.13)."
   exit 0
 fi
 echo "실패한 게이트 ${#FAILED[@]}개:"

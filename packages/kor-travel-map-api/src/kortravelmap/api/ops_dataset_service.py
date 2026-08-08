@@ -851,7 +851,11 @@ def _event_record(
         job_id=event.job_id,
         import_job_dataset_id=event.import_job_dataset_id,
         provider_dataset_id=event.provider_dataset_id,
-        sync_scope=sync_scope,
+        # 행 자신의 값을 쓴다. 요청 필터 값을 각인하면 "사본이 아니라 projection"이라는
+        # 규칙을 표면에서 어기는 셈이고, 필터가 넓어지는 순간 거짓말이 된다.
+        # member 없는 job-level event는 null이다 — 같은 리소스의 두 표현
+        # (`PipelineJobEventRecord`)과 nullability도 맞춘다.
+        sync_scope=event.sync_scope,
         operation_key=event.operation_key,
         stage=event.stage,
         level=event.level,

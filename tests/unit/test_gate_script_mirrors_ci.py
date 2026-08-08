@@ -34,6 +34,11 @@ _EXEMPT: dict[str, str] = {
     "pip install": "의존성 설치는 컨테이너 이미지가 대신한다(위 항목과 같은 이유).",
     "mv ": "coverage 데이터 이동은 job 간 전달용이라 로컬에 대응물이 없다.",
     "npm@12.0.1 ci": "의존성 설치. 로컬은 이미 설치된 node_modules를 쓴다.",
+    "tests/fixtures": (
+        "fixture-replay 스텝은 `if [ -d tests/fixtures ]`로 자기 자신을 가드한다. "
+        "이 저장소에 tests/fixtures가 없어 CI에서도 echo만 하고 끝난다 — 디렉터리가 "
+        "생기면 이 면제를 지우고 게이트에 넣어야 한다."
+    ),
 }
 
 
@@ -44,32 +49,35 @@ def _workflow_commands() -> dict[str, list[str]]:
     for name in _WORKFLOWS:
         path = _ROOT / ".github" / "workflows" / f"{name}.yml"
         lines = path.read_text(encoding="utf-8").split("\n")
+        # 스텝 경계는 **다음 ``- name:``까지**다. 고정 크기 창(예전 8줄)으로 자르면
+        # ``- name:``과 ``run:`` 사이 주석이 길 때 스텝을 통째로 놓친다 — 실제로
+        # ``ci.yml``의 integration 차단 스텝이 주석 10줄 때문에 그렇게 사라져 있었고
+        # 적대 리뷰의 변이 테스트가 그것을 잡아냈다.
+        starts = [
+            index for index, line in enumerate(lines) if re.match(r"^\s*- name: ", line)
+        ]
+        starts.append(len(lines))
         commands: list[str] = []
-        index = 0
-        while index < len(lines):
-            line = lines[index]
-            if re.match(r"^\s*- name: ", line):
-                block = lines[index : index + 8]
-                disabled = any(
-                    re.match(r"^\s*if:\s*false\s*$", entry) for entry in block
-                )
-                for offset, entry in enumerate(block):
-                    run = re.match(r"^(\s*)run: (.*)$", entry)
-                    if run is None:
-                        continue
-                    body = run.group(2).strip()
-                    if body == "|":
-                        indent = len(run.group(1)) + 2
-                        tail: list[str] = []
-                        for follow in lines[index + offset + 1 :]:
-                            if follow.strip() and not follow.startswith(" " * indent):
-                                break
-                            tail.append(follow.strip())
-                        body = " ".join(part for part in tail if part)
-                    if body and not disabled:
-                        commands.append(body)
-                    break
-            index += 1
+        for begin, stop in zip(starts, starts[1:], strict=False):
+            block = lines[begin:stop]
+            if any(re.match(r"^\s*if:\s*false\s*$", entry) for entry in block):
+                continue
+            for offset, entry in enumerate(block):
+                run = re.match(r"^(\s*)run: (.*)$", entry)
+                if run is None:
+                    continue
+                body = run.group(2).strip()
+                if body == "|":
+                    indent = len(run.group(1)) + 2
+                    tail: list[str] = []
+                    for follow in lines[begin + offset + 1 : stop]:
+                        if follow.strip() and not follow.startswith(" " * indent):
+                            break
+                        tail.append(follow.strip())
+                    body = " ".join(part for part in tail if part)
+                if body:
+                    commands.append(body)
+                break
         found[name] = commands
     return found
 
@@ -88,12 +96,16 @@ def test_gate_script_covers_every_ci_blocking_command() -> None:
 
     script = _SCRIPT.read_text(encoding="utf-8")
     missing: list[str] = []
+    unrecognized: list[str] = []
     for workflow, commands in _workflow_commands().items():
         for command in commands:
             if _is_exempt(command):
                 continue
             marker = _identifying_fragment(command)
             if marker is None:
+                # 알아보지 못하는 명령 형태를 조용히 넘기면 새 게이트가 무방비로
+                # 추가된다(적대 리뷰의 변이 테스트가 shell 스크립트 스텝으로 재현).
+                unrecognized.append(f"{workflow}.yml: {command[:90]}")
                 continue
             if marker not in script:
                 missing.append(f"{workflow}.yml: {command[:90]} (조각 {marker!r})")
@@ -101,6 +113,11 @@ def test_gate_script_covers_every_ci_blocking_command() -> None:
     assert missing == [], (
         "CI 차단 스텝이 scripts/verify-all-gates.sh에 없다. 스크립트에 추가하거나, "
         "돌리지 않는 이유를 _EXEMPT에 적어라:\n" + "\n".join(missing)
+    )
+    assert unrecognized == [], (
+        "이 명령 형태를 감사기가 식별하지 못한다 — 조용히 통과시키면 새 게이트가 "
+        "무방비가 된다. _identifying_fragment에 규칙을 넣거나 _EXEMPT에 이유를 "
+        "적어라:\n" + "\n".join(unrecognized)
     )
 
 

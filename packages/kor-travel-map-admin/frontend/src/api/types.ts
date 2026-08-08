@@ -9496,7 +9496,7 @@ export interface components {
             /** Stage */
             stage: string | null;
             /** Sync Scope */
-            sync_scope: string;
+            sync_scope: string | null;
         };
         /**
          * OpsDatasetExecution

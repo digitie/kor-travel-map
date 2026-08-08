@@ -18498,8 +18498,15 @@
             "title": "Stage"
           },
           "sync_scope": {
-            "title": "Sync Scope",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sync Scope"
           }
         },
         "required": [

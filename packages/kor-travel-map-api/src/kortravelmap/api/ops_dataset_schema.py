@@ -288,9 +288,10 @@ class OpsDatasetEventRecord(BaseModel):
     job_id: UUID
     import_job_dataset_id: UUID | None
     provider_dataset_id: int | None
-    sync_scope: str
-    # membership identity의 나머지 한 축 — 형제 operation의 event를 가르려면 필요하다.
-    # member가 없는 event(dataset에 결박되지 않은 job-level event)는 null이다.
+    # 둘 다 행 자신의 membership 축이다(요청 필터 값이 아니라). member가 없는
+    # job-level event는 둘 다 null이다 — 같은 리소스의 다른 표현
+    # (`PipelineJobEventRecord`)과 nullability를 맞춘다.
+    sync_scope: str | None
     operation_key: str | None
     stage: str | None
     level: str
