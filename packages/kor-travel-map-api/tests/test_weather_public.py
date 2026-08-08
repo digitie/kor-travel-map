@@ -91,6 +91,10 @@ def test_weather_forecast_coordinate_response(
                 observed_at=None,
                 collected_at=issued,
                 source_record_key="sr1",
+                provider_dataset_id=17,
+                dataset_key="kma_mid_forecast",
+                dataset_display_name="기상청 중기예보",
+                known_at=issued,
             )
         ]
 
@@ -109,6 +113,8 @@ def test_weather_forecast_coordinate_response(
         assert data["anchor"]["feature_id"] == anchor_uuid
         assert data["items"][0]["feature_id"] == anchor_uuid
         assert data["items"][0]["weather_domain"] == "kma_mid_forecast"
+        assert data["items"][0]["provider_dataset_id"] == 17
+        assert data["items"][0]["dataset_key"] == "kma_mid_forecast"
         assert data["items"][0]["value_number"] == 31.5
         assert "source_record_key" not in data["items"][0]
     finally:

@@ -1568,6 +1568,9 @@ class WeatherMetricOut(BaseModel):
     valid_until: datetime | None = None
     observed_at: datetime | None = None
     effective_at: datetime | None = None
+    provider_dataset_id: int | None = None
+    dataset_key: str | None = None
+    dataset_display_name: str | None = None
     provider: str | None = None
     weather_domain: str | None = None
 
@@ -1588,6 +1591,9 @@ def _weather_metric_out(metric: weather_repo.WeatherMetric) -> WeatherMetricOut:
         valid_until=metric.valid_until,
         observed_at=metric.observed_at,
         effective_at=metric.effective_at,
+        provider_dataset_id=metric.provider_dataset_id,
+        dataset_key=metric.dataset_key,
+        dataset_display_name=metric.dataset_display_name,
         provider=metric.provider,
         weather_domain=metric.weather_domain,
     )
