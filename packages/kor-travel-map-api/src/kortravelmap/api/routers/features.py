@@ -23,7 +23,7 @@ ADR 참조
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from time import perf_counter
 from typing import Annotated, Any, Literal, assert_never
 
@@ -135,10 +135,13 @@ def _search_cursor_http_error(exc: FeatureSearchCursorError) -> HTTPException:
 
 
 class PricePointOut(BaseModel):
-    """provider/price_domain/product series의 가격 관측 1건."""
+    """canonical dataset/price_domain/product series의 가격 관측 1건."""
 
     model_config = ConfigDict(extra="forbid")
 
+    provider_dataset_id: int
+    dataset_key: str
+    dataset_display_name: str
     provider: str
     price_domain: str
     product_key: str
@@ -156,6 +159,9 @@ class WeatherSummaryOut(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     provider: str | None = None
+    provider_dataset_id: int | None = None
+    dataset_key: str | None = None
+    dataset_display_name: str | None = None
     weather_domain: str | None = None
     forecast_style: str | None = None
     metric_key: str
@@ -166,6 +172,7 @@ class WeatherSummaryOut(BaseModel):
     issued_at: datetime | None = None
     valid_at: datetime | None = None
     observed_at: datetime | None = None
+    known_at: datetime | None = None
 
 
 class FeatureSummary(BaseModel):
@@ -424,7 +431,6 @@ class PriceCardData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     feature_id: str
-    asof: datetime | None = None
     current: list[PricePointOut] = Field(
         description="provider/price_domain/product series별 최신 관측 1건."
     )
@@ -441,6 +447,20 @@ class FeaturePriceResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     data: PriceCardData
+    meta: Meta
+
+
+class PriceSnapshotData(PriceCardData):
+    """명시된 business time에서 immutable price facts를 재현한 card."""
+
+    observed_at: datetime
+    known_at: datetime
+
+
+class FeaturePriceSnapshotResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    data: PriceSnapshotData
     meta: Meta
 
 
@@ -918,6 +938,9 @@ def _observation_view(
 
 def _price_point_out(point: price_repo.PricePoint) -> PricePointOut:
     return PricePointOut(
+        provider_dataset_id=point.provider_dataset_id,
+        dataset_key=point.dataset_key,
+        dataset_display_name=point.dataset_display_name,
         provider=point.provider,
         price_domain=point.price_domain,
         product_key=point.product_key,
@@ -1605,11 +1628,12 @@ class WeatherCardData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     feature_id: str
-    asof: datetime | None = None
     source_styles: list[str]
     metrics: list[WeatherMetricOut]
     latest_at: datetime | None = None
     is_stale: bool
+    selected_at: datetime | None = None
+    refresh_after: datetime | None = None
 
 
 class FeatureWeatherResponse(BaseModel):
@@ -1618,6 +1642,20 @@ class FeatureWeatherResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     data: WeatherCardData
+    meta: Meta
+
+
+class WeatherSnapshotData(WeatherCardData):
+    """명시된 target/knowledge time에서 immutable weather facts를 재현한 card."""
+
+    target_at: datetime
+    known_at: datetime
+
+
+class FeatureWeatherSnapshotResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    data: WeatherSnapshotData
     meta: Meta
 
 
@@ -2049,60 +2087,74 @@ async def get_feature_weather(
             max_length=weather_repo.WEATHER_BATCH_MAX_FEATURE_ID_LENGTH,
         ),
     ],
-    asof: Annotated[
-        _WeatherTargetAt | None,
-        Query(description="이 시점 이하 weather만(미래 예보 제외)."),
-    ] = None,
 ) -> FeatureWeatherResponse:
     started_at = perf_counter()
     # T-VN-32B 경계 alias 해석 — 해석 실패는 404, 이후 판정은 정본 키로.
     identity = await resolve_feature_ref_or_error(session, feature_id)
     canonical_id = identity.feature_id
-    known_at = datetime.now(UTC)
-    target_at = asof or known_at
-    # 단건도 batch의 parent/no-data 판정과 bitemporal cutoff를 그대로 재사용한다.
-    try:
-        snapshots = await weather_repo.get_weather_batch_snapshots(
-            session,
-            targets=(
-                weather_repo.WeatherBatchTarget(
-                    target_at=target_at,
-                    feature_ids=(canonical_id,),
-                ),
-            ),
-            known_at=known_at,
-        )
-    except _WEATHER_BATCH_READ_EXCEPTIONS as exc:
-        raise _weather_batch_http_exception(exc) from exc
-    item = snapshots[0].items[0]
-    if item.state == "retired":
-        raise HTTPException(status_code=404, detail="공개 feature 없음")
-    card = None
-    if item.card_key is not None:
-        card = next(
-            (
-                candidate
-                for candidate in snapshots[0].cards
-                if candidate.card_key == item.card_key
-            ),
-            None,
-        )
-        if card is None:
-            raise RuntimeError("weather batch item references a missing card")
-    metrics = [] if card is None else [_weather_metric_out(metric) for metric in card.current]
+    await _public_feature_row_or_404(session, canonical_id, display_ref=feature_id)
+    card = await weather_repo.build_weather_card(session, feature_id=canonical_id)
     return FeatureWeatherResponse(
         data=WeatherCardData(
             # T-VN-32C PR-2 — 단건 card 응답의 feature_id는 UUID 정본 값.
             feature_id=identity.feature_uuid,
-            asof=asof,
-            source_styles=(
-                []
-                if card is None
-                else sorted({metric.forecast_style for metric in card.current})
-            ),
-            metrics=metrics,
-            latest_at=None if card is None else card.latest_at,
-            is_stale=True if card is None else card.is_stale,
+            source_styles=card.source_styles,
+            metrics=[_weather_metric_out(metric) for metric in card.metrics],
+            latest_at=card.latest_at,
+            is_stale=card.is_stale,
+            selected_at=card.selected_at,
+            refresh_after=card.refresh_after,
+        ),
+        meta=make_meta(request, started_at=started_at),
+    )
+
+
+@router.get(
+    "/{feature_id}/weather/snapshot",
+    response_model=FeatureWeatherSnapshotResponse,
+    summary="명시된 target/knowledge time의 weather snapshot",
+    responses={404: {"description": "공개 feature 없음"}},
+)
+async def get_feature_weather_snapshot(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    feature_id: Annotated[
+        str,
+        Path(
+            min_length=1,
+            max_length=weather_repo.WEATHER_BATCH_MAX_FEATURE_ID_LENGTH,
+        ),
+    ],
+    target_at: Annotated[datetime, Query(description="재현할 weather 대상 시각.")],
+    known_at: Annotated[datetime, Query(description="그 시점에 알려진 response cutoff.")],
+) -> FeatureWeatherSnapshotResponse:
+    started_at = perf_counter()
+    identity = await resolve_feature_ref_or_error(session, feature_id)
+    canonical_id = identity.feature_id
+    await _public_feature_row_or_404(session, canonical_id, display_ref=feature_id)
+    try:
+        card = await weather_repo.build_weather_snapshot(
+            session,
+            feature_id=canonical_id,
+            target_at=target_at,
+            known_at=known_at,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+    return FeatureWeatherSnapshotResponse(
+        data=WeatherSnapshotData(
+            feature_id=identity.feature_uuid,
+            target_at=target_at,
+            known_at=known_at,
+            source_styles=card.source_styles,
+            metrics=[_weather_metric_out(metric) for metric in card.metrics],
+            latest_at=card.latest_at,
+            is_stale=card.is_stale,
+            selected_at=card.selected_at,
+            refresh_after=card.refresh_after,
         ),
         meta=make_meta(request, started_at=started_at),
     )
@@ -2164,10 +2216,6 @@ async def get_feature_price(
     request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
     feature_id: str,
-    asof: Annotated[
-        datetime | None,
-        Query(description="이 시점 이하 price만 조회."),
-    ] = None,
     history_limit: Annotated[
         int,
         Query(ge=1, le=500, description="최근 price history 반환 개수."),
@@ -2182,14 +2230,60 @@ async def get_feature_price(
     card = await price_repo.build_price_card(
         session,
         feature_id=canonical_id,
-        asof=asof,
         history_limit=history_limit,
     )
     return FeaturePriceResponse(
         data=PriceCardData(
             # T-VN-32C PR-2 — 단건 card 응답의 feature_id는 UUID 정본 값.
             feature_id=identity.feature_uuid,
-            asof=card.asof,
+            current=[_price_point_out(point) for point in card.current],
+            history=[_price_point_out(point) for point in card.history],
+            latest_at=card.latest_at,
+            is_stale=card.is_stale,
+        ),
+        meta=make_meta(request, started_at=started_at),
+    )
+
+
+@router.get(
+    "/{feature_id}/price/snapshot",
+    response_model=FeaturePriceSnapshotResponse,
+    summary="명시된 observed/knowledge time의 price snapshot",
+    responses={404: {"description": "공개 feature 없음"}},
+)
+async def get_feature_price_snapshot(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    feature_id: str,
+    observed_at: Annotated[datetime, Query(description="재현할 price 관측 cutoff.")],
+    known_at: Annotated[datetime, Query(description="그 시점에 알려진 response cutoff.")],
+    history_limit: Annotated[
+        int,
+        Query(ge=1, le=500, description="snapshot history 반환 개수."),
+    ] = 100,
+) -> FeaturePriceSnapshotResponse:
+    started_at = perf_counter()
+    identity = await resolve_feature_ref_or_error(session, feature_id)
+    canonical_id = identity.feature_id
+    await _public_feature_row_or_404(session, canonical_id, display_ref=feature_id)
+    try:
+        card = await price_repo.build_price_snapshot(
+            session,
+            feature_id=canonical_id,
+            observed_at=observed_at,
+            known_at=known_at,
+            history_limit=history_limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+    return FeaturePriceSnapshotResponse(
+        data=PriceSnapshotData(
+            feature_id=identity.feature_uuid,
+            observed_at=observed_at,
+            known_at=known_at,
             current=[_price_point_out(point) for point in card.current],
             history=[_price_point_out(point) for point in card.history],
             latest_at=card.latest_at,

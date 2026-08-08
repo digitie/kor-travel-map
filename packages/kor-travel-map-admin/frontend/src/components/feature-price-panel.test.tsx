@@ -6,13 +6,26 @@ import type { PricePoint } from "@/api/features";
 
 import { PriceHistoryChart } from "./feature-price-panel";
 
+type CanonicalPricePoint = PricePoint & {
+  provider_dataset_id: number;
+  dataset_key: string;
+  dataset_display_name: string;
+  known_at: string;
+};
+
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
 });
 
-function point(overrides: Partial<PricePoint> = {}): PricePoint {
+function point(
+  overrides: Partial<CanonicalPricePoint> = {},
+): CanonicalPricePoint {
   return {
+    provider_dataset_id: 17,
+    dataset_key: "opinet_gas_station_prices",
+    dataset_display_name: "OpiNet 주유소 가격",
+    known_at: "2026-07-13T06:05:00.000Z",
     observed_at: "2026-07-13T06:00:00.000Z",
     price_domain: "opinet_gas_station",
     product_key: "gasoline",
@@ -73,21 +86,23 @@ describe("PriceHistoryChart", () => {
     expect(graph.querySelectorAll("polyline")).toHaveLength(1);
   });
 
-  it("같은 product라도 provider·price domain이 다르면 별도 series로 그린다", () => {
+  it("같은 provider라도 canonical dataset이 다르면 별도 series로 그린다", () => {
     render(
       <PriceHistoryChart
         history={[
           point({ observed_at: "2026-07-12T06:00:00.000Z" }),
           point({ observed_at: "2026-07-13T06:00:00.000Z" }),
           point({
-            provider: "manual-admin",
-            price_domain: "curated_price",
+            provider_dataset_id: 29,
+            dataset_key: "expressway_rest_area_prices",
+            dataset_display_name: "휴게소 유가",
             observed_at: "2026-07-12T06:00:00.000Z",
             value_number: 1_810,
           }),
           point({
-            provider: "manual-admin",
-            price_domain: "curated_price",
+            provider_dataset_id: 29,
+            dataset_key: "expressway_rest_area_prices",
+            dataset_display_name: "휴게소 유가",
             observed_at: "2026-07-13T06:00:00.000Z",
             value_number: 1_830,
           }),
@@ -111,13 +126,39 @@ describe("PriceHistoryChart", () => {
         Array.from(graph.querySelectorAll("circle"), (circle) =>
           circle.getAttribute("fill"),
         ),
-      ).size,
+    ).size,
     ).toBe(2);
+  });
+
+  it("provider 표시명이 달라도 같은 canonical dataset은 한 series로 그린다", () => {
+    render(
+      <PriceHistoryChart
+        history={[
+          point({ observed_at: "2026-07-12T06:00:00.000Z" }),
+          point({
+            observed_at: "2026-07-13T06:00:00.000Z",
+            provider: "renamed-opinet-provider",
+            value_number: 1_820,
+          }),
+        ]}
+      />,
+    );
+
+    const graph = screen.getByRole("img", { name: "price history graph" });
+    expect(graph.querySelectorAll(":scope > g")).toHaveLength(1);
+    expect(graph.querySelectorAll("polyline")).toHaveLength(1);
   });
 
   it("동일 series·시각의 중복 관측도 고유 React key로 표시한다", () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    render(<PriceHistoryChart history={[point(), point()]} />);
+    render(
+      <PriceHistoryChart
+        history={[
+          point(),
+          point({ known_at: "2026-07-13T06:10:00.000Z", value_number: 1_821 }),
+        ]}
+      />,
+    );
 
     const graph = screen.getByRole("img", { name: "price history graph" });
     expect(graph.querySelectorAll("circle")).toHaveLength(2);

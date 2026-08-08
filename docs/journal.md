@@ -2,6 +2,21 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-08 (codex) — T-VN-38B checkpoint와 summary reader/API/UI 전환 시작
+
+- `0093`은 price provider 문자열 identity/current upsert를 파기했다. producer dataset과 response
+  revision의 composite lineage, immutable fact trigger, successful receipt만 가리키는 current summary를
+  same-transaction writer로 묶었다. same-observed correction은 새 source record로 append하고 known-at
+  rank로 선택한다.
+- OpiNet/KREX assets도 exact operation membership id와 `price_response` source record를 전달한다.
+  price migration fresh-upgrade, weather/price migration 회귀, price mapper/key 단위 검증을 실행했다.
+- public/admin bbox normal path는 row별 LATERAL raw fact scan 대신 candidate-set에서 current summary와
+  selected fact를 한 번씩 join한다. JSON projection에 `provider_dataset_id`, `dataset_key`, display name,
+  `known_at`을 넣었고 admin UI chart/table/map key도 canonical dataset identity로 바꿨다.
+- current route의 암묵적 `asof` 재순위는 제거했다. 명시 snapshot route는 weather의
+  `target_at + known_at`, price의 `observed_at + known_at`를 모두 요구한다. 남은 service batch와
+  legacy fixture는 같은 final snapshot boundary로 이관 중이다.
+
 ## 2026-08-08 (codex) — T-VN-38A immutable weather writer checkpoint
 
 - `0092` 위 writer가 response `SourceRecord`와 exact `provider_dataset_id`를 받도록 하여

@@ -76,6 +76,24 @@ event 축 부재. 셋 다 "형제 operation을 중복으로 규정"하는 형태
 
 **다음**: 4라운드 리뷰 승인 → #966 머지 → PR #967(T-VN-41 F1D, D1/D2 분리).
 
+## 2026-08-08 (codex) — T-VN-38B 완료 checkpoint, C reader/API/UI 결선 중
+
+`0093_price_current_summary`가 `0092` 뒤에 immutable price fact, canonical dataset/source
+lineage 복합 FK, terminal receipt-backed current pointer를 만든다. price correction identity는
+`provider_dataset_id + observed_at + source_record_key`이며 current winner는
+`observed_at DESC, known_at DESC, key DESC`로 고정했다. OpiNet/KREX Dagster asset은 exact
+operation membership id와 producing response `SourceRecord`를 writer에 전달한다.
+
+T-VN-38C는 public/admin bbox의 price/weather `LATERAL` read를 candidate-set → current
+summary → fact → dataset join/aggregate로 바꿨다. current weather/price route는 `asof` raw
+재순위를 제거했고, `/weather/snapshot?target_at=&known_at=` 및
+`/price/snapshot?observed_at=&known_at=`에만 immutable raw time-travel을 둔다. dataset id/key/display
+identity는 API와 admin React key/chart/map에 전달 중이다.
+
+**다음 한 작업**: service weather batch의 old catalog/raw query를 final fact snapshot query로
+교체하고, 남은 legacy weather tests/live fixture를 response lineage로 전환한다. 이후 OpenAPI/type
+재생성, 적대 리뷰 2인, n150 파괴적 rebuild/live UI E2E를 실행한다.
+
 ## 2026-08-08 (codex) — T-VN-38A writer/receipt/current-card checkpoint
 
 draft PR #971의 0092 실제 migration 위에서 weather fact writer를 source-less upsert에서

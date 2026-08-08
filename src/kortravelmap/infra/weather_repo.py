@@ -62,6 +62,7 @@ __all__ = [
     "materialize_current_weather_summary",
     "build_admin_weather_card",
     "build_weather_card",
+    "build_weather_snapshot",
     "get_weather_batch_snapshots",
     "list_weather_values",
     "weather_history_floor",
@@ -660,9 +661,9 @@ WITH eligible AS (
       ON dataset.provider_dataset_id = fact.provider_dataset_id
      AND dataset.is_active
     WHERE fact.feature_id = :feature_id
-      AND fact.known_at <= CAST(:asof AS timestamptz)
-      AND fact.target_at <= CAST(:asof AS timestamptz)
-      AND (fact.valid_during IS NULL OR fact.valid_during @> CAST(:asof AS timestamptz))
+      AND fact.known_at <= CAST(:known_at AS timestamptz)
+      AND fact.target_at <= CAST(:target_at AS timestamptz)
+      AND (fact.valid_during IS NULL OR fact.valid_during @> CAST(:target_at AS timestamptz))
 )
 SELECT
     weather_value_key,
@@ -687,7 +688,7 @@ SELECT
     observed_at,
     known_at,
     source_record_key,
-    CAST(:asof AS timestamptz) AS selected_at,
+    CAST(:target_at AS timestamptz) AS selected_at,
     NULL::timestamptz AS refresh_after
 FROM eligible
 WHERE rank = 1
@@ -1531,8 +1532,10 @@ WHERE f.kind = 'weather'
       )
   AND EXISTS (
         SELECT 1
-        FROM feature.feature_weather_values AS w
-        WHERE w.feature_id = f.feature_id
+        FROM feature.current_weather_summary AS current_summary
+        JOIN feature.feature_weather_values AS w
+          ON w.weather_value_key = current_summary.weather_value_key
+        WHERE current_summary.feature_id = f.feature_id
           {exists_predicate}
       )
 ORDER BY f.coord_5179 OPERATOR(x_extension.<->) t.coord_5179, f.feature_id
@@ -1548,6 +1551,49 @@ _NEAREST_KMA_FORECAST_SQL: Final[str] = _nearest_anchor_sql(f"AND {_KMA_FORECAST
 
 # 반경 내 가장 가까운 관측 기온 anchor — observed T1H/TMP 보유(휴게소 등).
 _NEAREST_OBSERVED_TEMP_SQL: Final[str] = _nearest_anchor_sql(f"AND {_OBSERVED_TEMP_PREDICATE}")
+
+
+def _historical_nearest_anchor_sql(exists_predicate: str) -> str:
+    """명시된 business-time snapshot에서만 존재하는 가장 가까운 anchor를 찾는다."""
+
+    return f"""
+WITH target AS (
+    SELECT coord_5179
+    FROM feature.public_features
+    WHERE feature_id = :feature_id
+      AND coord_5179 IS NOT NULL
+)
+SELECT f.feature_id
+FROM feature.public_features AS f, target AS t
+WHERE f.kind = 'weather'
+  AND f.coord_5179 IS NOT NULL
+  AND x_extension.ST_DWithin(
+        f.coord_5179, t.coord_5179, CAST(:radius_m AS double precision)
+      )
+  AND EXISTS (
+        SELECT 1
+        FROM feature.feature_weather_values AS w
+        JOIN provider_sync.provider_datasets AS dataset
+          ON dataset.provider_dataset_id = w.provider_dataset_id
+         AND dataset.is_active
+        WHERE w.feature_id = f.feature_id
+          AND w.known_at <= CAST(:known_at AS timestamptz)
+          AND w.target_at <= CAST(:target_at AS timestamptz)
+          AND (w.valid_during IS NULL OR w.valid_during @> CAST(:target_at AS timestamptz))
+          {exists_predicate}
+      )
+ORDER BY f.coord_5179 OPERATOR(x_extension.<->) t.coord_5179, f.feature_id
+LIMIT 1
+"""
+
+
+_HISTORICAL_NEAREST_WEATHER_SQL: Final[str] = _historical_nearest_anchor_sql("")
+_HISTORICAL_NEAREST_KMA_FORECAST_SQL: Final[str] = _historical_nearest_anchor_sql(
+    f"AND {_KMA_FORECAST_PREDICATE}"
+)
+_HISTORICAL_NEAREST_OBSERVED_TEMP_SQL: Final[str] = _historical_nearest_anchor_sql(
+    f"AND {_OBSERVED_TEMP_PREDICATE}"
+)
 
 
 def _admin_nearest_anchor_sql(exists_predicate: str) -> str:
@@ -1575,8 +1621,10 @@ WHERE f.deleted_at IS NULL
       )
   AND EXISTS (
         SELECT 1
-        FROM feature.feature_weather_values AS w
-        WHERE w.feature_id = f.feature_id
+        FROM feature.current_weather_summary AS current_summary
+        JOIN feature.feature_weather_values AS w
+          ON w.weather_value_key = current_summary.weather_value_key
+        WHERE current_summary.feature_id = f.feature_id
           {exists_predicate}
       )
 ORDER BY f.coord_5179 OPERATOR(x_extension.<->) t.coord_5179, f.feature_id
@@ -2538,7 +2586,8 @@ async def _build_weather_card(
     session: AsyncSession,
     *,
     feature_id: str,
-    asof: datetime | None,
+    target_at: datetime | None,
+    known_at: datetime | None,
     freshness_seconds: int,
     nearest_weather_sql: str,
     nearest_kma_forecast_sql: str,
@@ -2546,9 +2595,9 @@ async def _build_weather_card(
 ) -> WeatherCard:
     """feature의 weather card — forecast_style × metric_key별 최신값 + freshness.
 
-    ``asof``가 주어지면 그 시점 이하 값만(미래 예보 제외). 각 (forecast_style,
-    metric_key)에서 ``COALESCE(valid_at, observed_at, issued_at)`` 최신 1건을 고른다
-    (``DISTINCT ON``). ``is_stale``은 최신 시각이 ``asof``(또는 now) 기준
+    ``target_at``와 ``known_at``가 함께 주어지면 immutable raw fact에서 그
+    business-time snapshot을 순위화하고, 둘 다 없으면 receipt-backed current
+    summary만 읽는다. ``is_stale``은 최신 시각이 target(또는 now) 기준
     ``freshness_seconds``를 넘으면 True. source trace는 ``source_styles``로 노출.
 
     폴백 병합 (#498) — 자기 weather row가 기온을 못 채우는 농촌/비격자 feature는
@@ -2565,13 +2614,20 @@ async def _build_weather_card(
 
     card.feature_id는 요청 feature_id를 유지한다.
     """
-    card_sql = _CURRENT_CARD_SQL if asof is None else _HISTORICAL_CARD_SQL
+    if (target_at is None) != (known_at is None):
+        raise ValueError("weather snapshot requires target_at and known_at together")
+    card_sql = _CURRENT_CARD_SQL if target_at is None else _HISTORICAL_CARD_SQL
 
     async def _card_rows(card_feature_id: str) -> list[RowMapping]:
         return list(
             (
                 await session.execute(
-                    text(card_sql), {"feature_id": card_feature_id, "asof": asof}
+                    text(card_sql),
+                    {
+                        "feature_id": card_feature_id,
+                        "target_at": target_at,
+                        "known_at": known_at,
+                    },
                 )
             )
             .mappings()
@@ -2579,7 +2635,12 @@ async def _build_weather_card(
         )
 
     rows = await _card_rows(feature_id)
-    params = {"feature_id": feature_id, "radius_m": _NEAREST_WEATHER_RADIUS_M}
+    params = {
+        "feature_id": feature_id,
+        "radius_m": _NEAREST_WEATHER_RADIUS_M,
+        "target_at": target_at,
+        "known_at": known_at,
+    }
 
     async def _anchor_rows(sql: str) -> list[RowMapping]:
         anchor_id = (await session.execute(text(sql), params)).scalar_one_or_none()
@@ -2610,22 +2671,27 @@ async def _build_weather_card(
         ts for m in metrics if (ts := (m.valid_at or m.observed_at or m.issued_at)) is not None
     ]
     latest_at = max(candidates) if candidates else None
-    reference = asof if asof is not None else kst_now()
+    reference = target_at if target_at is not None else kst_now()
     refresh_afters = [row["refresh_after"] for row in rows if row["refresh_after"] is not None]
     selected_ats = [row["selected_at"] for row in rows if row["selected_at"] is not None]
     is_stale = (
         latest_at is None
-        or (asof is None and (not refresh_afters or min(refresh_afters) <= reference))
-        or (asof is not None and (reference - latest_at).total_seconds() > freshness_seconds)
+        or (
+            target_at is None and (not refresh_afters or min(refresh_afters) <= reference)
+        )
+        or (
+            target_at is not None
+            and (reference - latest_at).total_seconds() > freshness_seconds
+        )
     )
     return WeatherCard(
         feature_id=feature_id,
-        asof=asof,
+        asof=target_at,
         source_styles=source_styles,
         metrics=metrics,
         latest_at=latest_at,
         is_stale=is_stale,
-        selected_at=max(selected_ats) if selected_ats else asof,
+        selected_at=max(selected_ats) if selected_ats else target_at,
         refresh_after=min(refresh_afters) if refresh_afters else None,
     )
 
@@ -2634,7 +2700,6 @@ async def build_weather_card(
     session: AsyncSession,
     *,
     feature_id: str,
-    asof: datetime | None = None,
     freshness_seconds: int = DEFAULT_WEATHER_FRESHNESS_SECONDS,
 ) -> WeatherCard:
     """공개 Feature와 공개 anchor만 사용하는 weather card."""
@@ -2642,7 +2707,8 @@ async def build_weather_card(
     return await _build_weather_card(
         session,
         feature_id=feature_id,
-        asof=asof,
+        target_at=None,
+        known_at=None,
         freshness_seconds=freshness_seconds,
         nearest_weather_sql=_NEAREST_WEATHER_SQL,
         nearest_kma_forecast_sql=_NEAREST_KMA_FORECAST_SQL,
@@ -2650,11 +2716,36 @@ async def build_weather_card(
     )
 
 
+async def build_weather_snapshot(
+    session: AsyncSession,
+    *,
+    feature_id: str,
+    target_at: datetime,
+    known_at: datetime,
+    freshness_seconds: int = DEFAULT_WEATHER_FRESHNESS_SECONDS,
+) -> WeatherCard:
+    """명시된 target/knowledge time에서 raw immutable fact를 재현한다."""
+
+    if target_at.tzinfo is None or target_at.utcoffset() is None:
+        raise ValueError("weather snapshot target_at must be timezone-aware")
+    if known_at.tzinfo is None or known_at.utcoffset() is None:
+        raise ValueError("weather snapshot known_at must be timezone-aware")
+    return await _build_weather_card(
+        session,
+        feature_id=feature_id,
+        target_at=target_at,
+        known_at=known_at,
+        freshness_seconds=freshness_seconds,
+        nearest_weather_sql=_HISTORICAL_NEAREST_WEATHER_SQL,
+        nearest_kma_forecast_sql=_HISTORICAL_NEAREST_KMA_FORECAST_SQL,
+        nearest_observed_temp_sql=_HISTORICAL_NEAREST_OBSERVED_TEMP_SQL,
+    )
+
+
 async def build_admin_weather_card(
     session: AsyncSession,
     *,
     feature_id: str,
-    asof: datetime | None = None,
     freshness_seconds: int = DEFAULT_WEATHER_FRESHNESS_SECONDS,
 ) -> WeatherCard:
     """삭제 전 base Feature와 base anchor를 사용하는 admin weather card."""
@@ -2662,7 +2753,8 @@ async def build_admin_weather_card(
     return await _build_weather_card(
         session,
         feature_id=feature_id,
-        asof=asof,
+        target_at=None,
+        known_at=None,
         freshness_seconds=freshness_seconds,
         nearest_weather_sql=_ADMIN_NEAREST_WEATHER_SQL,
         nearest_kma_forecast_sql=_ADMIN_NEAREST_KMA_FORECAST_SQL,

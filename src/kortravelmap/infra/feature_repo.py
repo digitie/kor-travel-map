@@ -1269,264 +1269,229 @@ LIMIT 1
 # 공개 read SQL은 술어를 재구현하지 않는다. view 술어가 ``deleted_at IS NULL``을
 # 함의하므로 partial GiST 인덱스는 그대로 사용된다.
 # kinds 필터는 NULL이면 전체 (asyncpg ARRAY 바인딩). 경량 표현(좌표 + 표시 메타).
-_FEATURES_IN_BBOX_SQL: Final[str] = f"""
-SELECT
-    f.feature_id, CAST(f.feature_uuid AS text) AS feature_uuid,
-    f.kind, f.name, f.category,
-    x_extension.ST_X(f.coord) AS lon, x_extension.ST_Y(f.coord) AS lat,
-    f.marker_icon, f.marker_color, f.status,
-    ps.price_summary,
-    ws.weather_summary
-FROM feature.public_features AS f
-LEFT JOIN LATERAL (
-    SELECT jsonb_agg(
-        jsonb_build_object(
-            'provider', provider,
-            'price_domain', price_domain,
-            'product_key', product_key,
-            'product_name', product_name,
-            'source_product_key', source_product_key,
-            'source_product_name', source_product_name,
-            'value_number', value_number,
-            'unit', unit,
-            'observed_at', observed_at
-        )
-        ORDER BY
-            CASE product_key
-              WHEN 'gasoline' THEN 10
-              WHEN 'diesel' THEN 20
-              WHEN 'premium_gasoline' THEN 30
-              WHEN 'lpg' THEN 40
-              ELSE 100
-            END,
-            product_name NULLS LAST,
-            product_key,
-            provider,
-            price_domain
-    ) AS price_summary
-    FROM (
-        SELECT DISTINCT ON (provider, price_domain, product_key)
-            provider, price_domain, product_key, product_name,
-            source_product_key, source_product_name,
-            value_number, unit, observed_at
-        FROM feature.feature_price_values AS pv
-        WHERE pv.feature_id = f.feature_id
-          -- 신선도 지평선: 로테이션 주기 밖 관측은 현재가 마커에서 제외(이력 보존).
-          AND (
-            CAST(:price_stale_hide_days AS integer) IS NULL
-            OR pv.observed_at >= now()
-                 - make_interval(days => CAST(:price_stale_hide_days AS integer))
-          )
-        ORDER BY provider DESC, price_domain DESC, product_key DESC, observed_at DESC
-    ) AS latest_price
-) AS ps ON f.kind = 'price'
-LEFT JOIN LATERAL (
-    SELECT jsonb_build_object(
-        'provider', provider,
-        'weather_domain', weather_domain,
-        'forecast_style', forecast_style,
-        'metric_key', metric_key,
-        'metric_name', metric_name,
-        'value_number', value_number,
-        'value_text', value_text,
-        'unit', unit,
-        'issued_at', issued_at,
-        'valid_at', valid_at,
-        'observed_at', observed_at
-    ) AS weather_summary
-    FROM feature.feature_weather_values AS w
-    WHERE w.feature_id = f.feature_id
-      AND w.metric_key IN (
+_CURRENT_MAP_SUMMARY_CTES: Final[str] = """
+price_points AS (
+    SELECT
+        candidate.feature_id,
+        fact.provider_dataset_id,
+        dataset.dataset_key,
+        dataset.display_name AS dataset_display_name,
+        dataset.provider,
+        fact.price_domain,
+        fact.product_key,
+        fact.product_name,
+        fact.source_product_key,
+        fact.source_product_name,
+        fact.value_number,
+        fact.unit,
+        fact.observed_at,
+        fact.known_at
+    FROM candidates AS candidate
+    JOIN feature.current_price_summary AS summary
+      ON summary.feature_id = candidate.feature_id
+    JOIN feature.feature_price_values AS fact
+      ON fact.price_value_key = summary.price_value_key
+    JOIN provider_sync.provider_datasets AS dataset
+      ON dataset.provider_dataset_id = fact.provider_dataset_id
+    WHERE candidate.kind = 'price'
+      AND (
+        CAST(:price_stale_hide_days AS integer) IS NULL
+        OR fact.observed_at >= now()
+             - make_interval(days => CAST(:price_stale_hide_days AS integer))
+      )
+),
+price_summaries AS (
+    SELECT
+        feature_id,
+        jsonb_agg(
+            jsonb_build_object(
+                'provider_dataset_id', provider_dataset_id,
+                'dataset_key', dataset_key,
+                'dataset_display_name', dataset_display_name,
+                'provider', provider,
+                'price_domain', price_domain,
+                'product_key', product_key,
+                'product_name', product_name,
+                'source_product_key', source_product_key,
+                'source_product_name', source_product_name,
+                'value_number', value_number,
+                'unit', unit,
+                'observed_at', observed_at,
+                'known_at', known_at
+            )
+            ORDER BY
+                CASE product_key
+                  WHEN 'gasoline' THEN 10
+                  WHEN 'diesel' THEN 20
+                  WHEN 'premium_gasoline' THEN 30
+                  WHEN 'lpg' THEN 40
+                  ELSE 100
+                END,
+                product_name NULLS LAST,
+                product_key,
+                provider_dataset_id,
+                price_domain
+        ) AS price_summary
+    FROM price_points
+    GROUP BY feature_id
+),
+weather_ranked AS (
+    SELECT
+        candidate.feature_id,
+        fact.provider_dataset_id,
+        dataset.dataset_key,
+        dataset.display_name AS dataset_display_name,
+        dataset.provider,
+        fact.weather_domain,
+        fact.forecast_style,
+        fact.metric_key,
+        fact.metric_name,
+        fact.value_number,
+        fact.value_text,
+        fact.unit,
+        fact.issued_at,
+        fact.valid_at,
+        fact.observed_at,
+        fact.known_at,
+        row_number() OVER (
+            PARTITION BY candidate.feature_id
+            ORDER BY
+                CASE fact.metric_key
+                  WHEN 'T1H' THEN 10 WHEN 'TMP' THEN 20 WHEN 'TMN' THEN 30
+                  WHEN 'TMX' THEN 40 WHEN 'POP' THEN 50 WHEN 'SKY' THEN 60
+                  WHEN 'REH' THEN 70 WHEN 'PTY' THEN 80 WHEN 'PCP' THEN 90
+                  WHEN 'PM10' THEN 110 WHEN 'PM2_5' THEN 120 WHEN 'CAI' THEN 130
+                  WHEN 'O3' THEN 140 WHEN 'NO2' THEN 150 WHEN 'SO2' THEN 160
+                  WHEN 'CO' THEN 170 ELSE 100
+                END,
+                CASE fact.forecast_style
+                  WHEN 'observed' THEN 10 WHEN 'nowcast' THEN 20
+                  WHEN 'ultra_short' THEN 30 WHEN 'short' THEN 40 WHEN 'mid' THEN 50
+                  ELSE 100
+                END,
+                CASE WHEN fact.target_at >= now() THEN 0 ELSE 1 END,
+                abs(extract(epoch FROM (fact.target_at - now()))),
+                fact.known_at DESC,
+                fact.weather_value_key DESC
+        ) AS rank
+    FROM candidates AS candidate
+    JOIN feature.current_weather_summary AS summary
+      ON summary.feature_id = candidate.feature_id
+    JOIN feature.feature_weather_values AS fact
+      ON fact.weather_value_key = summary.weather_value_key
+    JOIN provider_sync.provider_datasets AS dataset
+      ON dataset.provider_dataset_id = fact.provider_dataset_id
+    WHERE candidate.kind = 'weather'
+      AND fact.metric_key IN (
         'T1H', 'TMP', 'TMN', 'TMX', 'POP', 'SKY', 'REH', 'PTY', 'PCP',
         'PM10', 'PM2_5', 'CAI', 'O3', 'NO2', 'SO2', 'CO'
       )
-    ORDER BY
-        CASE w.metric_key
-          WHEN 'T1H' THEN 10
-          WHEN 'TMP' THEN 20
-          WHEN 'TMN' THEN 30
-          WHEN 'TMX' THEN 40
-          WHEN 'POP' THEN 50
-          WHEN 'SKY' THEN 60
-          WHEN 'REH' THEN 70
-          WHEN 'PTY' THEN 80
-          WHEN 'PCP' THEN 90
-          WHEN 'PM10' THEN 110
-          WHEN 'PM2_5' THEN 120
-          WHEN 'CAI' THEN 130
-          WHEN 'O3' THEN 140
-          WHEN 'NO2' THEN 150
-          WHEN 'SO2' THEN 160
-          WHEN 'CO' THEN 170
-          ELSE 100
-        END,
-        CASE w.forecast_style
-          WHEN 'observed' THEN 10
-          WHEN 'nowcast' THEN 20
-          WHEN 'ultra_short' THEN 30
-          WHEN 'short' THEN 40
-          WHEN 'mid' THEN 50
-          ELSE 100
-        END,
-        CASE
-          WHEN COALESCE(w.valid_at, w.observed_at, w.issued_at) >= now() THEN 0
-          ELSE 1
-        END,
-        abs(
-          extract(
-            epoch FROM (COALESCE(w.valid_at, w.observed_at, w.issued_at) - now())
-          )
-        ) ASC NULLS LAST,
-        COALESCE(w.observed_at, w.valid_at, w.issued_at) DESC NULLS LAST
-    LIMIT 1
-) AS ws ON f.kind = 'weather'
-WHERE {_bbox_candidate_predicate_sql("f")}
-{_bbox_attribute_filter_sql("f")}
-  AND (
-    CAST(:cursor_feature_id AS text) IS NULL
-    OR f.feature_id > CAST(:cursor_feature_id AS text)
-  )
-{_PUBLIC_ACTIVE_NOTICE_FILTER_SQL}
-ORDER BY f.feature_id ASC
-LIMIT :limit
+),
+weather_summaries AS (
+    SELECT
+        feature_id,
+        jsonb_build_object(
+            'provider_dataset_id', provider_dataset_id,
+            'dataset_key', dataset_key,
+            'dataset_display_name', dataset_display_name,
+            'provider', provider,
+            'weather_domain', weather_domain,
+            'forecast_style', forecast_style,
+            'metric_key', metric_key,
+            'metric_name', metric_name,
+            'value_number', value_number,
+            'value_text', value_text,
+            'unit', unit,
+            'issued_at', issued_at,
+            'valid_at', valid_at,
+            'observed_at', observed_at,
+            'known_at', known_at
+        ) AS weather_summary
+    FROM weather_ranked
+    WHERE rank = 1
+)
+"""
+
+_FEATURES_IN_BBOX_SQL: Final[str] = f"""
+WITH candidates AS MATERIALIZED (
+    SELECT
+        f.feature_id, CAST(f.feature_uuid AS text) AS feature_uuid,
+        f.kind, f.name, f.category,
+        x_extension.ST_X(f.coord) AS lon, x_extension.ST_Y(f.coord) AS lat,
+        f.marker_icon, f.marker_color, f.status
+    FROM feature.public_features AS f
+    WHERE {_bbox_candidate_predicate_sql("f")}
+    {_bbox_attribute_filter_sql("f")}
+      AND (
+        CAST(:cursor_feature_id AS text) IS NULL
+        OR f.feature_id > CAST(:cursor_feature_id AS text)
+      )
+    {_PUBLIC_ACTIVE_NOTICE_FILTER_SQL}
+    ORDER BY f.feature_id ASC
+    LIMIT :limit
+),
+{_CURRENT_MAP_SUMMARY_CTES}
+SELECT
+    candidate.feature_id, candidate.feature_uuid,
+    candidate.kind, candidate.name, candidate.category,
+    candidate.lon, candidate.lat,
+    candidate.marker_icon, candidate.marker_color, candidate.status,
+    price_summaries.price_summary,
+    weather_summaries.weather_summary
+FROM candidates AS candidate
+LEFT JOIN price_summaries USING (feature_id)
+LEFT JOIN weather_summaries USING (feature_id)
+ORDER BY candidate.feature_id ASC
 """
 
 _FEATURES_IN_BBOX_WITH_GEOMETRY_SQL: Final[str] = f"""
-SELECT
-    f.feature_id, CAST(f.feature_uuid AS text) AS feature_uuid,
-    f.kind, f.name, f.category,
-    x_extension.ST_X(f.coord) AS lon,
-    x_extension.ST_Y(f.coord) AS lat,
-    f.marker_icon, f.marker_color, f.status,
-    ps.price_summary,
-    ws.weather_summary,
-    CASE
-      WHEN f.kind = 'route' AND f.geom IS NOT NULL
-      THEN CAST(x_extension.ST_AsGeoJSON(x_extension.ST_Simplify(f.geom, 0.0001), 6) AS jsonb)
-      WHEN f.kind = 'area' AND f.geom IS NOT NULL
-      THEN CAST(
-        x_extension.ST_AsGeoJSON(x_extension.ST_SimplifyPreserveTopology(f.geom, 0.0001), 6)
-        AS jsonb
-      )
-      ELSE NULL
-    END AS geometry,
-    CASE
-      WHEN f.kind = 'area' AND f.geom IS NOT NULL
-      THEN x_extension.ST_Area(CAST(f.geom AS x_extension.geography))
-      ELSE NULL
-    END AS area_square_meters
-FROM feature.public_features AS f
-LEFT JOIN LATERAL (
-    SELECT jsonb_agg(
-        jsonb_build_object(
-            'provider', provider,
-            'price_domain', price_domain,
-            'product_key', product_key,
-            'product_name', product_name,
-            'source_product_key', source_product_key,
-            'source_product_name', source_product_name,
-            'value_number', value_number,
-            'unit', unit,
-            'observed_at', observed_at
-        )
-        ORDER BY
-            CASE product_key
-              WHEN 'gasoline' THEN 10
-              WHEN 'diesel' THEN 20
-              WHEN 'premium_gasoline' THEN 30
-              WHEN 'lpg' THEN 40
-              ELSE 100
-            END,
-            product_name NULLS LAST,
-            product_key,
-            provider,
-            price_domain
-    ) AS price_summary
-    FROM (
-        SELECT DISTINCT ON (provider, price_domain, product_key)
-            provider, price_domain, product_key, product_name,
-            source_product_key, source_product_name,
-            value_number, unit, observed_at
-        FROM feature.feature_price_values AS pv
-        WHERE pv.feature_id = f.feature_id
-          -- 신선도 지평선: 로테이션 주기 밖 관측은 현재가 마커에서 제외(이력 보존).
-          AND (
-            CAST(:price_stale_hide_days AS integer) IS NULL
-            OR pv.observed_at >= now()
-                 - make_interval(days => CAST(:price_stale_hide_days AS integer))
-          )
-        ORDER BY provider DESC, price_domain DESC, product_key DESC, observed_at DESC
-    ) AS latest_price
-) AS ps ON f.kind = 'price'
-LEFT JOIN LATERAL (
-    SELECT jsonb_build_object(
-        'provider', provider,
-        'weather_domain', weather_domain,
-        'forecast_style', forecast_style,
-        'metric_key', metric_key,
-        'metric_name', metric_name,
-        'value_number', value_number,
-        'value_text', value_text,
-        'unit', unit,
-        'issued_at', issued_at,
-        'valid_at', valid_at,
-        'observed_at', observed_at
-    ) AS weather_summary
-    FROM feature.feature_weather_values AS w
-    WHERE w.feature_id = f.feature_id
-      AND w.metric_key IN (
-        'T1H', 'TMP', 'TMN', 'TMX', 'POP', 'SKY', 'REH', 'PTY', 'PCP',
-        'PM10', 'PM2_5', 'CAI', 'O3', 'NO2', 'SO2', 'CO'
-      )
-    ORDER BY
-        CASE w.metric_key
-          WHEN 'T1H' THEN 10
-          WHEN 'TMP' THEN 20
-          WHEN 'TMN' THEN 30
-          WHEN 'TMX' THEN 40
-          WHEN 'POP' THEN 50
-          WHEN 'SKY' THEN 60
-          WHEN 'REH' THEN 70
-          WHEN 'PTY' THEN 80
-          WHEN 'PCP' THEN 90
-          WHEN 'PM10' THEN 110
-          WHEN 'PM2_5' THEN 120
-          WHEN 'CAI' THEN 130
-          WHEN 'O3' THEN 140
-          WHEN 'NO2' THEN 150
-          WHEN 'SO2' THEN 160
-          WHEN 'CO' THEN 170
-          ELSE 100
-        END,
-        CASE w.forecast_style
-          WHEN 'observed' THEN 10
-          WHEN 'nowcast' THEN 20
-          WHEN 'ultra_short' THEN 30
-          WHEN 'short' THEN 40
-          WHEN 'mid' THEN 50
-          ELSE 100
-        END,
+WITH candidates AS MATERIALIZED (
+    SELECT
+        f.feature_id, CAST(f.feature_uuid AS text) AS feature_uuid,
+        f.kind, f.name, f.category,
+        x_extension.ST_X(f.coord) AS lon,
+        x_extension.ST_Y(f.coord) AS lat,
+        f.marker_icon, f.marker_color, f.status,
         CASE
-          WHEN COALESCE(w.valid_at, w.observed_at, w.issued_at) >= now() THEN 0
-          ELSE 1
-        END,
-        abs(
-          extract(
-            epoch FROM (COALESCE(w.valid_at, w.observed_at, w.issued_at) - now())
+          WHEN f.kind = 'route' AND f.geom IS NOT NULL
+          THEN CAST(x_extension.ST_AsGeoJSON(x_extension.ST_Simplify(f.geom, 0.0001), 6) AS jsonb)
+          WHEN f.kind = 'area' AND f.geom IS NOT NULL
+          THEN CAST(
+            x_extension.ST_AsGeoJSON(x_extension.ST_SimplifyPreserveTopology(f.geom, 0.0001), 6)
+            AS jsonb
           )
-        ) ASC NULLS LAST,
-        COALESCE(w.observed_at, w.valid_at, w.issued_at) DESC NULLS LAST
-    LIMIT 1
-) AS ws ON f.kind = 'weather'
-WHERE {_bbox_candidate_predicate_sql("f")}
-{_bbox_attribute_filter_sql("f")}
-  AND (
-    CAST(:cursor_feature_id AS text) IS NULL
-    OR f.feature_id > CAST(:cursor_feature_id AS text)
-  )
-{_PUBLIC_ACTIVE_NOTICE_FILTER_SQL}
-ORDER BY f.feature_id ASC
-LIMIT :limit
+          ELSE NULL
+        END AS geometry,
+        CASE
+          WHEN f.kind = 'area' AND f.geom IS NOT NULL
+          THEN x_extension.ST_Area(CAST(f.geom AS x_extension.geography))
+          ELSE NULL
+        END AS area_square_meters
+    FROM feature.public_features AS f
+    WHERE {_bbox_candidate_predicate_sql("f")}
+    {_bbox_attribute_filter_sql("f")}
+      AND (
+        CAST(:cursor_feature_id AS text) IS NULL
+        OR f.feature_id > CAST(:cursor_feature_id AS text)
+      )
+    {_PUBLIC_ACTIVE_NOTICE_FILTER_SQL}
+    ORDER BY f.feature_id ASC
+    LIMIT :limit
+),
+{_CURRENT_MAP_SUMMARY_CTES}
+SELECT
+    candidate.feature_id, candidate.feature_uuid,
+    candidate.kind, candidate.name, candidate.category,
+    candidate.lon, candidate.lat,
+    candidate.marker_icon, candidate.marker_color, candidate.status,
+    price_summaries.price_summary,
+    weather_summaries.weather_summary,
+    candidate.geometry,
+    candidate.area_square_meters
+FROM candidates AS candidate
+LEFT JOIN price_summaries USING (feature_id)
+LEFT JOIN weather_summaries USING (feature_id)
+ORDER BY candidate.feature_id ASC
 """
 
 

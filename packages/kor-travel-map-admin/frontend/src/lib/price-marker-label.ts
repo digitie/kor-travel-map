@@ -1,6 +1,9 @@
 import { opinetPastPriceLabel } from "@/lib/price-freshness";
 
 export interface ClusterPriceSummaryPoint {
+  provider_dataset_id?: number;
+  dataset_key?: string;
+  dataset_display_name?: string;
   provider: string;
   price_domain: string;
   product_key: string;
@@ -8,6 +11,7 @@ export interface ClusterPriceSummaryPoint {
   value_number: number;
   unit: string;
   observed_at: string;
+  known_at?: string;
 }
 
 const PRICE_FORMATTER = new Intl.NumberFormat("ko-KR", {
@@ -15,6 +19,29 @@ const PRICE_FORMATTER = new Intl.NumberFormat("ko-KR", {
 });
 const FUEL_PRICE_ORDER = ["gasoline", "diesel", "premium_gasoline"] as const;
 const FUEL_PRICE_KEYS = new Set<string>(FUEL_PRICE_ORDER);
+
+function canonicalDatasetIdentity(point: ClusterPriceSummaryPoint): string {
+  return JSON.stringify([point.provider_dataset_id ?? null, point.dataset_key ?? null]);
+}
+
+function compareCanonicalDatasets(
+  left: ClusterPriceSummaryPoint,
+  right: ClusterPriceSummaryPoint,
+): number {
+  const leftId = left.provider_dataset_id ?? Number.MAX_SAFE_INTEGER;
+  const rightId = right.provider_dataset_id ?? Number.MAX_SAFE_INTEGER;
+  return (
+    leftId - rightId ||
+    (left.dataset_key ?? "").localeCompare(right.dataset_key ?? "") ||
+    canonicalDatasetIdentity(left).localeCompare(canonicalDatasetIdentity(right))
+  );
+}
+
+function canonicalDatasetLabel(point: ClusterPriceSummaryPoint): string {
+  const displayName = point.dataset_display_name ?? point.dataset_key ?? "데이터셋";
+  const id = point.provider_dataset_id;
+  return typeof id === "number" ? `${displayName} #${id}` : displayName;
+}
 
 function fuelPriceOrder(productKey: string): number {
   const index = FUEL_PRICE_ORDER.indexOf(
@@ -43,7 +70,7 @@ export function priceMarkerLabel(
   points.sort(
     (left, right) =>
       fuelPriceOrder(left.product_key) - fuelPriceOrder(right.product_key) ||
-      left.provider.localeCompare(right.provider) ||
+      compareCanonicalDatasets(left, right) ||
       left.price_domain.localeCompare(right.price_domain),
   );
   if (points.length === 0) return null;
@@ -59,7 +86,7 @@ export function priceMarkerLabel(
     .map((point) => {
       const identity =
         (countByProduct.get(point.product_key) ?? 0) > 1
-          ? ` ${point.provider}/${point.price_domain}`
+          ? ` ${canonicalDatasetLabel(point)} (${point.provider})/${point.price_domain}`
           : "";
       const price = `${fuelShortLabel(
         point.product_key,
