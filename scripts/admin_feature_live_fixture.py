@@ -32,6 +32,7 @@ from kortravelmap.dto.weather import WeatherValue
 from kortravelmap.infra import price_repo, weather_repo
 from kortravelmap.infra.db import make_async_engine
 from kortravelmap.infra.provider_refresh_policy_repo import (
+    get_provider_refresh_policy,
     upsert_provider_refresh_policy,
 )
 from kortravelmap.settings import KorTravelMapSettings
@@ -68,11 +69,14 @@ async def _ensure_dataset(session: AsyncSession, *, run_id: str, kind: str) -> i
     assert value is not None
     dataset_id = int(value)
     if kind == "weather":
+        policy = await get_provider_refresh_policy(
+            session, provider_dataset_id=dataset_id
+        )
         await upsert_provider_refresh_policy(
             session,
             provider_dataset_id=dataset_id,
             source_kind="manual",
-            expected_revision=None,
+            expected_revision=(policy.revision if policy is not None else None),
             stale_after_minutes=24 * 60,
         )
     return dataset_id
@@ -551,7 +555,76 @@ async def _cleanup(
     observed, foreign_keys = await _assert_owned_state(session, run_id, feature_ids)
     if observed != {"features": 0, "weather_values": 0, "price_values": 0}:
         raise RuntimeError("owned weather/price fixture cleanup이 완결되지 않았습니다")
+    await _delete_owned_datasets(session, run_id)
     return observed, foreign_keys
+
+
+async def _delete_owned_datasets(session: AsyncSession, run_id: str) -> None:
+    """fixture response lineage와 dataset/policy를 feature 삭제 뒤 완전히 지운다."""
+
+    dataset_keys = [_dataset_key(run_id, kind) for kind in ("weather", "price")]
+    params = {"provider": _E2E_PROVIDER, "dataset_keys": dataset_keys}
+    # 0091의 entity-head 완결성 trigger 때문에 head → record → entity 순서가
+    # 필수다. dataset은 모든 raw 계보와 policy가 사라진 뒤에만 지운다.
+    for statement in (
+        """
+        DELETE FROM provider_sync.source_entity_heads AS head
+        USING provider_sync.source_entities AS entity,
+              provider_sync.provider_datasets AS dataset
+        WHERE head.source_entity_key = entity.source_entity_key
+          AND entity.provider_dataset_id = dataset.provider_dataset_id
+          AND dataset.provider = :provider
+          AND dataset.dataset_key = ANY(CAST(:dataset_keys AS text[]))
+        """,
+        """
+        DELETE FROM provider_sync.source_records AS record
+        USING provider_sync.source_entities AS entity,
+              provider_sync.provider_datasets AS dataset
+        WHERE record.source_entity_key = entity.source_entity_key
+          AND entity.provider_dataset_id = dataset.provider_dataset_id
+          AND dataset.provider = :provider
+          AND dataset.dataset_key = ANY(CAST(:dataset_keys AS text[]))
+        """,
+        """
+        DELETE FROM provider_sync.source_entities AS entity
+        USING provider_sync.provider_datasets AS dataset
+        WHERE entity.provider_dataset_id = dataset.provider_dataset_id
+          AND dataset.provider = :provider
+          AND dataset.dataset_key = ANY(CAST(:dataset_keys AS text[]))
+        """,
+        """
+        DELETE FROM ops.provider_refresh_policies AS policy
+        USING provider_sync.provider_datasets AS dataset
+        WHERE policy.provider_dataset_id = dataset.provider_dataset_id
+          AND dataset.provider = :provider
+          AND dataset.dataset_key = ANY(CAST(:dataset_keys AS text[]))
+        """,
+        """
+        DELETE FROM provider_sync.provider_datasets
+        WHERE provider = :provider
+          AND dataset_key = ANY(CAST(:dataset_keys AS text[]))
+        """,
+    ):
+        await session.execute(text(statement), params)
+    remaining = int(
+        (
+            await session.execute(
+                text(
+                    """
+                    SELECT count(*)
+                    FROM provider_sync.provider_datasets
+                    WHERE provider = :provider
+                      AND dataset_key = ANY(CAST(:dataset_keys AS text[]))
+                    """
+                ),
+                params,
+            )
+        )
+        .scalars()
+        .one()
+    )
+    if remaining:
+        raise RuntimeError("owned fixture provider dataset cleanup이 완결되지 않았습니다")
 
 
 class _ApiOwnedInspection(NamedTuple):

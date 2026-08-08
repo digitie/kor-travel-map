@@ -15,42 +15,15 @@ import { Badge } from "@/components/ui/badge";
 import { DataTable } from "@/components/ui/data-table";
 import { formatDateTime } from "@/lib/format";
 
-type CanonicalWeatherMetric = WeatherMetric & {
-  provider_dataset_id: number;
-  dataset_key: string;
-  dataset_display_name: string;
-  known_at: string;
-};
-
-type CanonicalWeatherCardData = WeatherCardData & {
-  selected_at: string | null;
-  refresh_after: string | null;
-};
-
-function canonicalWeatherMetric(metric: WeatherMetric): CanonicalWeatherMetric {
-  // OpenAPI 재생성 전에도 0094 DTO의 정본 필드를 사용한다. generated type은
-  // API export lane이 갱신한다.
-  return metric as CanonicalWeatherMetric;
-}
-
-function canonicalWeatherCardData(
-  data: WeatherCardData,
-): CanonicalWeatherCardData {
-  // OpenAPI 재생성 전에도 0094 current-card 필드를 사용한다. generated type은
-  // API export lane이 갱신한다.
-  return data as CanonicalWeatherCardData;
-}
-
 function weatherMetricIdentity(metric: WeatherMetric): string {
-  const canonical = canonicalWeatherMetric(metric);
   return JSON.stringify([
-    canonical.provider_dataset_id,
-    canonical.dataset_key,
+    metric.provider_dataset_id,
+    metric.dataset_key,
     metric.weather_domain ?? null,
     metric.forecast_style,
     metric.metric_key,
     metric.valid_at ?? metric.observed_at ?? null,
-    canonical.known_at,
+    metric.known_at,
   ]);
 }
 
@@ -70,7 +43,6 @@ export function FeatureWeatherPanel({
 }) {
   const weather = useAdminFeatureWeather(featureId);
   const data = weather.data?.data;
-  const currentCard = data ? canonicalWeatherCardData(data) : null;
   const metrics = data?.metrics ?? [];
 
   const columns = useMemo<ColumnDef<WeatherMetric, unknown>[]>(() => {
@@ -110,12 +82,11 @@ export function FeatureWeatherPanel({
         header: "dataset",
         accessorFn: weatherMetricIdentity,
         cell: ({ row }) => {
-          const canonical = canonicalWeatherMetric(row.original);
           return (
             <>
-              <div className="font-medium">{canonical.dataset_display_name}</div>
+              <div className="font-medium">{row.original.dataset_display_name}</div>
               <div className="font-mono text-xs text-muted-foreground">
-                {canonical.dataset_key} · #{canonical.provider_dataset_id}
+                {row.original.dataset_key} · #{row.original.provider_dataset_id}
               </div>
             </>
           );
@@ -162,10 +133,10 @@ export function FeatureWeatherPanel({
       cols.push({
         id: "known",
         header: "known",
-        accessorFn: (metric) => canonicalWeatherMetric(metric).known_at,
+        accessorFn: (metric) => metric.known_at,
         cell: ({ row }) => (
           <span className="text-muted-foreground">
-            {formatDateTime(canonicalWeatherMetric(row.original).known_at)}
+            {formatDateTime(row.original.known_at)}
           </span>
         ),
       });
@@ -210,9 +181,9 @@ export function FeatureWeatherPanel({
               <dt className="text-muted-foreground">최근 업데이트</dt>
               <dd>{formatDateTime(data.latest_at)}</dd>
               <dt className="text-muted-foreground">선정 시각</dt>
-              <dd>{formatDateTime(currentCard?.selected_at)}</dd>
+              <dd>{formatDateTime(data.selected_at)}</dd>
               <dt className="text-muted-foreground">다음 갱신</dt>
-              <dd>{formatDateTime(currentCard?.refresh_after)}</dd>
+              <dd>{formatDateTime(data.refresh_after)}</dd>
               <dt className="text-muted-foreground">styles</dt>
               <dd className="flex flex-wrap gap-1">
                 {data.source_styles.length > 0

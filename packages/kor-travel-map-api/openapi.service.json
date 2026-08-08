@@ -3559,6 +3559,14 @@
         "additionalProperties": false,
         "description": "weather card metric 1건 (forecast_style × metric_key 최신값, T-213e).",
         "properties": {
+          "dataset_display_name": {
+            "title": "Dataset Display Name",
+            "type": "string"
+          },
+          "dataset_key": {
+            "title": "Dataset Key",
+            "type": "string"
+          },
           "effective_at": {
             "anyOf": [
               {
@@ -3586,6 +3594,11 @@
               }
             ],
             "title": "Issued At"
+          },
+          "known_at": {
+            "format": "date-time",
+            "title": "Known At",
+            "type": "string"
           },
           "metric_key": {
             "title": "Metric Key",
@@ -3624,6 +3637,10 @@
               }
             ],
             "title": "Provider"
+          },
+          "provider_dataset_id": {
+            "title": "Provider Dataset Id",
+            "type": "integer"
           },
           "severity": {
             "anyOf": [
@@ -3730,7 +3747,11 @@
         },
         "required": [
           "forecast_style",
-          "metric_key"
+          "metric_key",
+          "provider_dataset_id",
+          "dataset_key",
+          "dataset_display_name",
+          "known_at"
         ],
         "title": "WeatherMetricOut",
         "type": "object"

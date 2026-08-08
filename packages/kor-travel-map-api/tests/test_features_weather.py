@@ -20,6 +20,7 @@ from kortravelmap.infra.weather_repo import (
     WeatherBatchSnapshot,
     WeatherBatchTarget,
     WeatherBatchWorkLimitExceededError,
+    WeatherCard,
     WeatherMetric,
 )
 from sqlalchemy.exc import OperationalError
@@ -70,7 +71,10 @@ def test_weather_in_openapi(client: TestClient) -> None:
     operation = spec["paths"]["/v1/features/weather/batch"]["post"]
     assert "413" in operation["responses"]
     single_operation = spec["paths"]["/v1/features/{feature_id}/weather"]["get"]
-    assert {"413", "503"} <= single_operation["responses"].keys()
+    assert "413" not in single_operation["responses"]
+    assert "503" in single_operation["responses"]
+    assert "/v1/features/{feature_id}/weather/snapshot" in spec["paths"]
+    assert "/v1/features/{feature_id}/price/snapshot" in spec["paths"]
     feature_id_parameter = next(
         parameter
         for parameter in single_operation["parameters"]
@@ -108,13 +112,17 @@ def test_weather_card_response_maps_metrics(
     from kortravelmap.api.routers import features as mod
 
     valid_at = datetime(2026, 6, 6, 3, 0, tzinfo=UTC)
-    card = WeatherBatchCard(
-        card_key="c1",
-        source_styles=["mid", "short"],
-        current=[
+    card = WeatherCard(
+        feature_id="f1",
+        source_styles=["short"],
+        metrics=[
             WeatherMetric(
                 forecast_style="short",
                 metric_key="TMP",
+                provider_dataset_id=17,
+                dataset_key="kma_short_forecast",
+                dataset_display_name="기상청 단기예보",
+                known_at=valid_at,
                 metric_name="기온",
                 timeline_bucket="short",
                 value_number=Decimal("25.0"),
@@ -128,35 +136,20 @@ def test_weather_card_response_maps_metrics(
                 weather_domain="kma_short_forecast",
             )
         ],
-        timeline=[
-            WeatherMetric(
-                forecast_style="mid",
-                metric_key="TMX",
-                metric_name="최고 기온",
-                timeline_bucket="mid",
-                value_number=Decimal("28.0"),
-                value_text=None,
-                unit="deg_c",
-                severity=None,
-                issued_at=valid_at,
-                valid_at=valid_at.replace(hour=6),
-                observed_at=None,
-                provider="python-kma-api",
-                weather_domain="kma_mid_forecast",
-            )
-        ],
         latest_at=valid_at,
         is_stale=False,
     )
-    item = WeatherBatchItem(feature_id="f1", state="found", card_key="c1")
 
-    async def _batch(_s: Any, **kw: Any) -> tuple[WeatherBatchSnapshot, ...]:
-        target = kw["targets"][0]
-        assert target.feature_ids == ("f1",)
-        assert target.target_at == kw["known_at"]
-        return _snapshot(target.target_at, item, cards=(card,))
+    async def _current_card(_s: Any, **kw: Any) -> WeatherCard:
+        assert kw == {"feature_id": "f1"}
+        return card
 
-    monkeypatch.setattr(mod.weather_repo, "get_weather_batch_snapshots", _batch)
+    async def _public_row(_s: Any, feature_id: str) -> dict[str, Any]:
+        assert feature_id == "f1"
+        return {"feature_id": "f1", "kind": "weather", "status": "active"}
+
+    monkeypatch.setattr(mod.weather_repo, "build_weather_card", _current_card)
+    monkeypatch.setattr(mod.feature_repo, "get_public_feature_row", _public_row)
     _fake_session(client)
     try:
         r = client.get("/v1/features/f1/weather")
@@ -182,48 +175,53 @@ def test_weather_card_response_maps_metrics(
 
 
 @pytest.mark.unit
-def test_weather_card_asof_only_changes_target_time(
+def test_weather_snapshot_requires_explicit_business_and_knowledge_time(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from kortravelmap.api.routers import features as mod
 
-    asof = datetime(2026, 6, 6, 3, 0, tzinfo=UTC)
+    target_at = datetime(2026, 6, 6, 3, 0, tzinfo=UTC)
+    known_at = datetime(2026, 6, 6, 4, 0, tzinfo=UTC)
 
-    async def _batch(_s: Any, **kw: Any) -> tuple[WeatherBatchSnapshot, ...]:
-        target = kw["targets"][0]
-        assert target.target_at == asof
-        assert kw["known_at"] > asof
-        return _snapshot(
-            asof,
-            WeatherBatchItem(
-                feature_id="f1",
-                state="no_data",
-                card_key=None,
-            ),
+    async def _snapshot_card(_s: Any, **kw: Any) -> WeatherCard:
+        assert kw == {
+            "feature_id": "f1",
+            "target_at": target_at,
+            "known_at": known_at,
+        }
+        return WeatherCard(
+            feature_id="f1",
+            source_styles=[],
+            metrics=[],
+            latest_at=None,
+            is_stale=True,
         )
 
-    monkeypatch.setattr(mod.weather_repo, "get_weather_batch_snapshots", _batch)
+    async def _public_row(_s: Any, feature_id: str) -> dict[str, Any]:
+        assert feature_id == "f1"
+        return {"feature_id": "f1", "kind": "weather", "status": "active"}
+
+    monkeypatch.setattr(mod.weather_repo, "build_weather_snapshot", _snapshot_card)
+    monkeypatch.setattr(mod.feature_repo, "get_public_feature_row", _public_row)
     _fake_session(client)
     try:
         response = client.get(
-            "/v1/features/f1/weather",
-            params={"asof": asof.isoformat()},
+            "/v1/features/f1/weather/snapshot",
+            params={"target_at": target_at.isoformat(), "known_at": known_at.isoformat()},
         )
         assert response.status_code == 200
+        assert response.json()["data"]["target_at"] == "2026-06-06T03:00:00Z"
+        assert response.json()["data"]["known_at"] == "2026-06-06T04:00:00Z"
     finally:
         client.app.dependency_overrides.clear()
 
 
 @pytest.mark.unit
-def test_weather_card_rejects_asof_without_timeline_headroom(
+def test_weather_snapshot_requires_both_time_axes(
     client: TestClient,
 ) -> None:
-    response = client.get(
-        "/v1/features/f1/weather",
-        params={"asof": "9999-12-31T23:59:59.999999Z"},
-    )
+    response = client.get("/v1/features/f1/weather/snapshot")
     assert response.status_code == 422
-    assert response.json()["code"] == "VALIDATION_ERROR"
 
 
 @pytest.mark.unit
@@ -234,17 +232,10 @@ def test_weather_card_404_when_feature_not_public(
     노출되지 않는다 — ADR-067 단일 공개 projection, F-1 (T-VN-04)."""
     from kortravelmap.api.routers import features as mod
 
-    async def _retired(_s: Any, **kw: Any) -> tuple[WeatherBatchSnapshot, ...]:
-        return _snapshot(
-            kw["targets"][0].target_at,
-            WeatherBatchItem(
-                feature_id="hidden-f",
-                state="retired",
-                card_key=None,
-            ),
-        )
+    async def _none(_s: Any, feature_id: str) -> None:
+        assert feature_id == "hidden-f"
 
-    monkeypatch.setattr(mod.weather_repo, "get_weather_batch_snapshots", _retired)
+    monkeypatch.setattr(mod.feature_repo, "get_public_feature_row", _none)
     _fake_session(client)
     try:
         r = client.get("/v1/features/hidden-f/weather")
@@ -303,7 +294,7 @@ def test_weather_card_404_when_feature_not_public(
         ),
     ],
 )
-def test_weather_card_maps_shared_repository_failures(
+def test_weather_batch_maps_repository_failures(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
     repo_error: Exception,
@@ -319,7 +310,18 @@ def test_weather_card_maps_shared_repository_failures(
     monkeypatch.setattr(mod.weather_repo, "get_weather_batch_snapshots", _failed)
     _fake_session(client)
     try:
-        response = client.get("/v1/features/f1/weather")
+        response = client.post(
+            "/v1/features/weather/batch",
+            json={
+                "targets": [
+                    {
+                        "target_at": "2026-06-06T03:00:00Z",
+                        "feature_ids": ["f1"],
+                    }
+                ],
+                "known_at": "2026-06-06T04:00:00Z",
+            },
+        )
         assert response.status_code == expected_status
         assert response.headers["content-type"].startswith("application/problem+json")
         problem = response.json()
@@ -343,6 +345,10 @@ def test_weather_batch_maps_found_no_data_retired_and_bitemporal_fields(
     current_metric = WeatherMetric(
         forecast_style="observed",
         metric_key="T1H",
+        provider_dataset_id=23,
+        dataset_key="rest_area_weather",
+        dataset_display_name="휴게소 관측",
+        known_at=known_at,
         metric_name="기온",
         timeline_bucket="ultra_short",
         value_number=Decimal("24.5"),
@@ -359,6 +365,10 @@ def test_weather_batch_maps_found_no_data_retired_and_bitemporal_fields(
     timeline_metric = WeatherMetric(
         forecast_style="short",
         metric_key="TMP",
+        provider_dataset_id=24,
+        dataset_key="kma_short_forecast",
+        dataset_display_name="기상청 단기예보",
+        known_at=known_at,
         metric_name="기온",
         timeline_bucket="short",
         value_number=Decimal("27.0"),

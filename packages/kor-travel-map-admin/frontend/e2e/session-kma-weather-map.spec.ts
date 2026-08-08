@@ -141,11 +141,12 @@ function makeAdminFeatureDetailResponse(
 function makeFeatureWeatherResponse(featureId: string): FeatureWeatherResponse {
   return {
     data: {
-      asof: null,
       feature_id: featureId,
       is_stale: false,
       latest_at: null,
       metrics: [],
+      refresh_after: null,
+      selected_at: null,
       source_styles: [],
     },
     meta: makeMeta({ request_id: "e2e-session-kma-weather" }),
