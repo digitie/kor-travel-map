@@ -1045,8 +1045,9 @@ async function assertStaleCorrection(page: Page): Promise<void> {
     }
   });
 
-  failureDetail = "stale-etag:load";
+  failureDetail = "stale-etag:load:navigate";
   await page.goto("/admin/features/change-requests");
+  failureDetail = "stale-etag:load:secure-context";
   expect(
     await page.evaluate(() => ({
       isSecureContext: globalThis.isSecureContext,
@@ -1058,12 +1059,15 @@ async function assertStaleCorrection(page: Page): Promise<void> {
     randomUUID: true,
     subtleCrypto: true,
   });
+  failureDetail = "stale-etag:load:action";
   await page
     .getByLabel("change action", { exact: true })
     .selectOption("update");
+  failureDetail = "stale-etag:load:feature-id";
   await page
     .getByLabel("change feature id", { exact: true })
     .fill(correctionId);
+  failureDetail = "stale-etag:load:basis";
   await expect(page.getByText("데이터 로드됨")).toBeVisible({
     timeout: UI_TIMEOUT,
   });
