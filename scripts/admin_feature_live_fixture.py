@@ -833,10 +833,11 @@ async def _inspect_api_owned(
         raise RuntimeError("API-owned Feature와 version 이력이 일치하지 않습니다")
 
     foreign_keys = await _foreign_key_reference_counts(session, feature_ids)
-    expected_references = {
-        "feature.feature_aliases.feature_id": len(rows),
-        "feature.feature_versions.feature_id": len(version_rows),
-    }
+    expected_references: dict[str, int] = {}
+    if rows:
+        expected_references["feature.feature_aliases.feature_id"] = len(rows)
+    if version_rows:
+        expected_references["feature.feature_versions.feature_id"] = len(version_rows)
     observed_references = {
         key: value
         for key, value in foreign_keys.items()
