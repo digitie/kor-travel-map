@@ -1,5 +1,45 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-08 (3) — T-VN-33: 적대 리뷰 3회 REJECT를 거쳐 게이트 10종 중 9종 GREEN
+
+리뷰어 2명이 **세 라운드 연속 REJECT**했고 지적이 전부 타당했다. 세 번 다 같은
+실패였다 — **변경 범위보다 좁은 집합으로 검증하고 green이라 선언**했다.
+(1) 파이썬만 돌리고 프론트를 안 봄 (2) 프론트 `tsc`를 돌렸는데 CI가 쓰는
+`type-check`는 tsc를 **두 번** 돌리므로 절반만 돌림 (3) 함수 시그니처를 바꾸고 그걸
+호출하는 다른 테스트 파일·파생 산출물을 안 돌림. 세 번째는 그 실수를 사과하는
+커밋 안에서 났다.
+
+**프로세스를 고쳤다**: `scripts/verify-all-gates.sh`가 CI 게이트 10종을 한 번에
+돌린다(ruff / mypy 3타깃 / lint-imports / OpenAPI drift / pytest 3개 루트 /
+프론트 gen:types:check · app tsc · **e2e tsc**). 무엇을 돌릴지 매번 판단하지 않는다.
+그 스크립트에도 같은 함정이 있었다 — 컨테이너 `sh`에 pipefail이 없어
+`pytest | tail`이 늘 통과했다. 만들자마자 거짓 green을 재현할 뻔했고 고쳤다.
+
+현재: **9/10 통과.** 남은 pytest는 13건 실패인데 전부 컨테이너 환경 노이즈다
+(docker CLI 부재 5, docker effect 2, geo live 키 미마운트 5, package.json 1).
+제품 실패 0건, 4,530 passed.
+
+리뷰가 드러낸 실제 결함(보고서 24~30번) 중 이번에 닫은 것:
+- **CI 블로커** — openapi.json을 바꾸고 체크인된 `types.ts`를 재생성하지 않아
+  `gen:types:check`가 exit 0 → 1로 뒤집혀 있었다.
+- **거짓 409** — active request 조회가 pair인데 상위 비교는 triple이라, operation만
+  다른 정당한 요청이 409를 받았다. DB trigger는 triple로 판정하므로 Python 가드가
+  자기가 흉내 내는 DB 가드보다 엄격했다.
+- **service가 한 층 위에서 도로 pair로 접음** — `_states_by_api_scope`가 형제
+  operation의 state를 first-wins로 덮었다. 이건 실수가 아니라 **명시적 결정**이었다:
+  테스트 두 개가 "API resource는 하나여야 한다"며 형제의 paused 상태가 버려지는 것을
+  단언하고 있었다. 둘 다 뒤집었다.
+- **콘솔이 보내는 축을 서버가 버림** — `/v1/ops/datasets/{id}`와 `/preview`가
+  `operation_key`를 선언하지 않아 operation만 다른 두 grid 행이 같은 상세를 반환했다.
+- **e2e 전량 pair 기반** — `_ops-c7-admin-api.ts`에 런타임 resolver를 심어 40 → 0.
+- **한 객체 안의 축 어긋남** — `OpsDatasetExecution`의 `sync_scope`는 member 것인데
+  `operation_key`만 root 것이었다. member로 통일.
+
+후속으로 뺀 것은 태스크 #42(계약↔head 대조 게이트 부재, offline upload 500).
+근거는 보고서 29·30번에 evidence와 함께 남겼다.
+
+**다음**: 4라운드 리뷰 승인 → #966 머지 → PR #967(T-VN-41 F1D, D1/D2 분리).
+
 ## 2026-08-08 (2) — T-VN-33: 기능 게이트 GREEN, 설계 재검토로 결함 4건 추가 해소
 
 전체 스위트 **4,534 passed / 6 failed**로 수렴했다(시작 298 실패). 실패 6건은 전부
