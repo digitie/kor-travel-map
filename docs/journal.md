@@ -2,6 +2,22 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-09 (codex) — T-VN-38 final n150 격리 UI E2E 완료
+
+- exact-source final head의 fresh `0094` candidate DB checkpoint를 custom dump로 restore하고,
+  같은 checkpoint 재사용까지 검증했다. 이후 admin UI의 메인·복구 파괴형 live E2E가 각각 2/2를
+  통과했다. 성공 후 runner는 `BLOCKED.json`과 run artifact를 남기지 않았으며, 서비스 컨테이너와
+  DB에는 접근하지 않았다.
+- 후보 Docker hostname의 평문 HTTP가 Web Crypto를 제공하지 않아 correction mutation이 제출 전에
+  멈추던 문제를 고쳤다. `E2E_ISOLATED_LIVE_DOCKER_NETWORK=1`이고 authority가 정확히
+  `candidate-ui`인 경우에만 그 동적 origin을 browser secure-context flag로 허용한다. credential,
+  path, query, hash가 있거나 일반 loopback/운영 origin이면 flag를 넣지 않는 config 회귀를 추가했다.
+- stale correction fixture는 secure context·`crypto.randomUUID`·`crypto.subtle`을 먼저 확인하고,
+  safe debug stage를 load의 navigate/context/action/identity/basis로 나눴다. 실패 분류가 원인 없는
+  browser request 누락으로 뭉개지지 않는다.
+- 재확인: `tests/unit/test_vnext_contract_artifacts.py` 7 passed, live runner `bash -n` 통과.
+  T-VN-38A/B/C는 PR #971의 base 최신화·CI·승인·병합 단계만 남았다.
+
 ## 2026-08-08 (codex) — T-VN-38 n150 checkpoint restore fingerprint 정규화
 
 - final-head empty PostGIS를 `0094_drop_weather_metric_series`까지 fresh upgrade한 뒤

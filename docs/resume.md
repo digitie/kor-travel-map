@@ -1,5 +1,22 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-09 (codex) — T-VN-38A/B/C 구현·격리 live E2E 완료, PR 병합 대기
+
+T-VN-38A/B/C의 final migration head `0094`와 immutable weather/price fact·receipt-backed
+current summary·summary-only normal reader cutover를 마쳤다. 적대적 DB/reader 재리뷰는
+최종 P0=0 GO였고, active dataset·deadline fail-closed, weather projection advisory lock,
+deadline-only Dagster reconciliation, immutable provenance와 fact-driven set-diff invariant까지
+동일한 current semantics로 고정했다.
+
+n150의 서비스와 분리된 후보 DB·네트워크에서 exact-source checkpoint를 fresh restore한 뒤, Node 22
+브라우저로 admin UI 파괴형 live E2E를 실행했다. 메인과 복구 경로 모두 2/2를 통과했고 runner는
+차단 파일과 임시 실행 디렉터리를 남기지 않았다. 격리 HTTP `candidate-ui` origin에만 Web Crypto
+secure-context browser flag를 주도록 좁혀, 일반 loopback·운영 origin에는 승격이 적용되지 않는다.
+
+로컬 재확인으로 vNext contract artifact unit 7건과 live runner shell syntax도 통과했다. 현재는
+PR #971의 base 최신화·CI·승인과 병합만 남았으며, `tasks.md`의 완료 항목 이동은 merge commit 뒤에
+수행한다.
+
 ## 2026-08-09 — T-VN-33: CI 미러 게이트 24종 중 20종 GREEN, 잔여 4는 전부 선재/환경
 
 적대 리뷰 **4라운드 연속 REJECT**를 거쳤다. 네 번 다 같은 실패였다 — **변경 범위보다
