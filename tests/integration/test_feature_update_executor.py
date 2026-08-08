@@ -89,6 +89,10 @@ KMA_ULTRA_SHORT_NOWCAST_OPERATION_KEY = "feature_weather_kma_ultra_short_nowcast
 _TRUNCATE_SQL = """
 TRUNCATE
     feature.features,
+    -- entity를 빼면 링크 없는 entity가 남아 정합성 F1(orphan)이 다른 테스트에서
+    -- 켜진다. T-VN-33의 head 도입으로 record CASCADE가 entity를 지우지 않는다.
+    provider_sync.source_entities,
+    provider_sync.source_entity_heads,
     provider_sync.source_records,
     provider_sync.source_links,
     provider_sync.provider_sync_state,

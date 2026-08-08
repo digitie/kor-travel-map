@@ -2,6 +2,40 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-08 (2) — T-VN-33 통합 전량 전환 완료, 제품 결함 25건 이상 수정
+
+- **라이브 실행이 잡은 결함은 전부 단위 테스트로는 안 잡히는 종류였다.** 세 가지 기제다:
+  ① SQL은 문자열이라 mypy도 단위 테스트도 안 본다(`sr` alias 유실 2건 — 정합성 검사와
+  dedup 조회가 파스 단계에서 죽었다), ② 트리거·제약은 DB에만 있다(`BEFORE UPDATE`가
+  `RETURN OLD`를 해서 **두 ops 테이블의 모든 UPDATE가 조용히 버려지고** 있었다 — rowcount는
+  1이라 호출자는 성공으로 본다), ③ 코드와 제약이 서로 반대로 갔다(`provider_dataset` scope는
+  파이썬이 triple을, DB check가 자연키를 요구해 **어느 형태로도 쓸 수 없었다**).
+- 고친 것 중 파급이 큰 순: `pipeline_repo`의 미투영 열 한 줄(projection 전체 26건),
+  `sr` join 2줄(38건), dagster sync-state 이관(provider ETL asset 전부), `sync_scope="default"`
+  (MOIS 적재가 데이터를 다 쓰고 cursor에서 rollback), 재적재 idempotency(`prior` CTE의
+  `FOR UPDATE`가 자기 문장에 가려져 feature가 매 관측마다 재기록), 데드락(전역 singleton
+  clock 행과 scope 행의 공유→배타 승격이 엇갈림), event 감사 인덱스(dense shape에서
+  10,481 buffer/75ms → 225/0.31ms).
+- **테스트는 55 + 18 = 73개 파일을 최종 스키마로 옮겼다.** 통합 실패가 298 → 16 → 0
+  경로로 줄었다. 마지막 16건 중 10건은 제품이 아니라 **테스트 오염**이었다 —
+  `test_dagster_feature_etl`의 TRUNCATE 목록에 `source_entities`가 없어 entity가 링크 없이
+  남고 정합성 F1(orphan)이 다른 테스트에서 켜졌다. T-VN-33이 head를 끼우면서 record
+  CASCADE가 더 이상 entity를 지우지 않게 된 것이 원인이다.
+- **커버리지 공백 2건을 메웠다.** notice 재등장 테스트가 **바이트 동일** 경로만 검증해
+  결함이 있어도 통과했고(내용이 바뀐 재등장은 `became_current=True`라 적재가 subtype을
+  덮어써 lifecycle이 "직전에 닫혀 있었다"를 관측할 수 없다), 등대 판정의 catalog pair 축은
+  테스트가 아예 없었다. 둘 다 결함 코드에서 새 테스트만 실패함을 A/B로 증명했다.
+- geo live 테스트 5건은 T-VN-33과 무관한 환경 미비였다. 막히는 지점이 셋이고 셋 다
+  오진을 유발한다 — 자세한 것은 `dev-environment.md` §10.7에 남겼다. Map public API key는
+  VWorld 키가 **아니고**, 정본은 n150 `~/.secrets/`이며, 테스트가 읽는 변수는
+  `LIVE_KOR_TRAVEL_GEO_BASE_URL`이다(다른 변수만 넘기면 원인은 주소인데 메시지는 키를
+  가리킨다).
+- 미수정으로 남긴 것: API 표면이 identity triple 중 2/3만 노출한다(에이전트 보고 6건).
+  `OfflineUploadRecord`에 `operation_key`가 없어 409가 알려준 operation을 어느 read 표면과도
+  대조할 수 없고, `PipelineProviderDatasetIdentityRecord`도 그것을 버려 operation만 다른 두
+  member가 같은 객체로 보인다 — 같은 커밋의 `OpsDatasetProviderDataset`이 정확히 그 실패
+  모드를 주석으로 경고하며 non-null로 두고 있어 내부 불일치다.
+
 ## 2026-08-07 (2) — 통합 테스트 live 실행이 잡은 P0: 두 ops 테이블이 조용히 불변
 
 - **`ops.import_jobs`와 `ops.feature_update_requests`의 모든 UPDATE가 조용히 버려지고

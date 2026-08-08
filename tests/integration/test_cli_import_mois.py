@@ -32,7 +32,11 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.integration
 
 _TRUNCATE_SQL = (
-    "TRUNCATE feature.features, provider_sync.source_records, "
+    # ``source_entities``를 빼면 record만 지워지고 entity가 링크 없이 남아
+    # 정합성 검사 F1(orphan source_entity)이 **다른 테스트에서** 켜진다.
+    # T-VN-33이 head를 끼우면서 record CASCADE가 더 이상 entity를 지우지 않는다.
+    "TRUNCATE feature.features, provider_sync.source_entities, "
+    "provider_sync.source_entity_heads, provider_sync.source_records, "
     "provider_sync.source_links, provider_sync.provider_sync_state, "
     "ops.import_jobs RESTART IDENTITY CASCADE"
 )

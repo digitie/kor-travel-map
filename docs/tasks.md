@@ -577,22 +577,32 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 > fixture 생성·소비·종결과 durable 상태는 Map이 소유하고, Manager는 service OpenAPI로
 > transaction ID만 전달한다. PinVi에는 기존 `ops:cancel` 외 권한을 주지 않는다(ADR-084).
 
-- [/] **T-VN-41F1D-D — 최종 격리 리허설·live UI E2E** *(공동, docs-only)*
+- [/] **T-VN-41F1D-D1 — 최종 격리 리허설·provenance attestation** *(공동, docs-only)*
 
-  C3가 결선된 새 generation에서 schema head, canonical `409` receipt, finalize와 관리자 live UI·PinVi
-  mutating E2E 결과를 기록한다. 2026-08-06 n150 rebuild는 committed했고 Map application
-  `0087_route_area_subtypes`, Map Dagster `29b539ebc72a`, PinVi `20260804_0049`와 fixture
-  `finalized`/정확한 `409 PIPELINE_CANCELLATION_UNSAFE`를 확인했다. 로그인과 데이터 비의존 UI smoke는
-  통과했으나, 비어 있는 새 DB에서 고정 curated/feature ID를 요구하는 기존 suite는 ETL 재적재 뒤 별도
-  acceptance로 재실행한다. **T-VN-33의 final schema가 병합되고 그 schema에 source/ETL을 다시
-  적재하기 전에는 F1D-D를 재실행하지 않는다.** 서비스 전 단계이므로 중간 DB 데이터 복구는 수행하지 않고
-  final schema에서 source/ETL을 새로 적재한다. 실행 순서는 반드시 `T-VN-33 merge → final Map
-  source/image/OpenAPI provenance pin·attestation → destructive rebuild-pinned(세 DB 재생성+F1J) →
-  final-schema ETL 재적재 → data-dependent admin/PinVi live E2E`다. 이전 C3의 pin·smoke는 새
-  schema acceptance 증거로 재사용하지 않는다. Manager의 tracked Map source가 병합 SHA와 같고,
-  Map API/UI/Dagster/daemon 및 PinVi API/Web/Dagster 일곱 image의 immutable ID·각 schema head·resolved
-  compose/pinset/OpenAPI provenance가 candidate에 attest되어야 한다. v5 active generation과 v7 journal만
-  실행 authority이며 이전 compatible-pair manifest를 재사용하지 않는다.
+  C3가 결선된 새 generation에서 schema head, canonical `409` receipt, finalize와 **데이터
+  비의존** 관리자 UI smoke(로그인 포함)를 기록한다. 2026-08-06 n150 rebuild는 committed했고
+  Map application `0087_route_area_subtypes`, Map Dagster `29b539ebc72a`, PinVi `20260804_0049`와
+  fixture `finalized`/정확한 `409 PIPELINE_CANCELLATION_UNSAFE`를 확인했다.
+
+  **선행**: T-VN-33 merge. 실행 순서는 `T-VN-33 merge → final Map source/image/OpenAPI
+  provenance pin·attestation → destructive rebuild-pinned(세 DB 재생성+F1J) → final-schema
+  ETL 재적재`까지다. 서비스 전 단계이므로 중간 DB 데이터 복구는 수행하지 않고 final schema에서
+  source/ETL을 새로 적재한다. 이전 C3의 pin·smoke는 새 schema acceptance 증거로 재사용하지
+  않는다. Manager의 tracked Map source가 병합 SHA와 같고, Map API/UI/Dagster/daemon 및 PinVi
+  API/Web/Dagster 일곱 image의 immutable ID·각 schema head·resolved compose/pinset/OpenAPI
+  provenance가 candidate에 attest되어야 한다. v5 active generation과 v7 journal만 실행
+  authority이며 이전 compatible-pair manifest를 재사용하지 않는다.
+
+- [ ] **T-VN-41F1D-D2 — data-dependent admin/PinVi live E2E** *(공동, docs-only)*
+
+  비어 있는 새 DB에서 **고정 curated/feature ID를 요구하는** admin live UI·PinVi mutating E2E를
+  재실행한다. D1이 적재한 final-schema 데이터 위에서 돈다.
+
+  **선행: T-VN-40 완료**(사용자 판단 2026-08-08). T-VN-40B가 admin/public/PinVi consumer를
+  `curation_collections/items` 정본만 읽도록 전환하므로, 그 전에 이 suite를 돌리면 증거가
+  T-VN-40 머지 즉시 낡는다. 이 acceptance의 비용은 파괴적 rebuild + 전량 ETL 재적재 + 일곱
+  image attestation이라 두 번 돌릴 값이 아니다. 반대로 D1은 curation read 경로와 무관하고
+  "rebuild-from-scratch가 실제로 되는가"를 보증하므로 join barrier까지 비워두지 않는다.
 
 - [~] **T-VN-41F1D-E — v4 compatible-pair live runner 퇴역·v5/v7 attestation 전환**
 
