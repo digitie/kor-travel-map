@@ -40,6 +40,7 @@ const KMA_PROVIDER = "python-kma-api";
 const KMA_DATASET = "kma_short_forecast";
 const KMA_PROVIDER_DATASET_ID = 101;
 const KMA_SCOPE = "target_grids";
+const KMA_OPERATION_KEY = "kma_refresh";
 const ACTIVE_EXTERNAL_SCOPE = "external_system:concierge";
 const STALE_EXTERNAL_SCOPE = "external_system:retired";
 // URL query가 선택 정본이라(#684 C4R) drawer를 여는 테스트는 딥링크로 진입한다
@@ -416,9 +417,10 @@ function makeCreatedRequest(
       type: "provider_dataset",
       provider_dataset_id: KMA_PROVIDER_DATASET_ID,
       sync_scope: KMA_SCOPE,
+      operation_key: KMA_OPERATION_KEY,
     },
     dataset_memberships: [
-      { provider_dataset_id: KMA_PROVIDER_DATASET_ID, sync_scope: KMA_SCOPE },
+      { provider_dataset_id: KMA_PROVIDER_DATASET_ID, sync_scope: KMA_SCOPE, operation_key: KMA_OPERATION_KEY },
     ],
     update_policy: {},
     run_mode: "now",
@@ -1922,6 +1924,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
         type: "provider_dataset",
         provider_dataset_id: KMA_PROVIDER_DATASET_ID,
         sync_scope: KMA_SCOPE,
+        operation_key: KMA_OPERATION_KEY,
       },
       run_mode: "now",
     });
@@ -2285,6 +2288,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     expect(pipeline.posts[0].body.scope).toMatchObject({
       type: "provider_dataset",
       sync_scope: ACTIVE_EXTERNAL_SCOPE,
+      operation_key: KMA_OPERATION_KEY,
     });
   });
 
@@ -2503,6 +2507,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
         type: "provider_dataset",
         provider_dataset_id: MOIS_PROVIDER_DATASET_ID,
         sync_scope: "dataset_wide",
+        operation_key: KMA_OPERATION_KEY,
       },
       run_mode: "now",
     });

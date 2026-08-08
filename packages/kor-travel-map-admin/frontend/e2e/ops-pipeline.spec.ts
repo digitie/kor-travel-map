@@ -50,6 +50,7 @@ type OpsDatasetGridRow = Schemas["OpsDatasetGridRow"];
 type OpsDatasetsGridResponse = Schemas["OpsDatasetsGridResponse"];
 
 const REQUEST_ID = "22222222-2222-2222-2222-222222222222";
+const KMA_OPERATION_KEY = "kma_refresh";
 const TWIN_JOB_ID = "11111111-1111-1111-1111-111111111111";
 const SOLO_JOB_ID = "99999999-9999-4999-8999-999999999999";
 const NEW_REQUEST_ID = "33333333-3333-4333-8333-333333333333";
@@ -545,6 +546,7 @@ function makeDetail(): PipelineExecutionDetailResponse {
           provider_dataset_id:
             PROVIDER_DATASET_IDS["python-kma-api/kma_short_forecast"],
           sync_scope: "target_grids",
+          operation_key: KMA_OPERATION_KEY,
         },
         dataset_memberships: [
           {
@@ -1503,6 +1505,7 @@ async function installPipelineMocks(
             provider_dataset_id:
               PROVIDER_DATASET_IDS["python-mois-api/mois_licenses"],
             sync_scope: "dataset_wide",
+            operation_key: KMA_OPERATION_KEY,
           },
           dataset_memberships: [
             {
@@ -1596,6 +1599,7 @@ async function installPipelineMocks(
             provider_dataset_id:
               PROVIDER_DATASET_IDS["python-kma-api/kma_short_forecast"],
             sync_scope: "target_grids",
+            operation_key: KMA_OPERATION_KEY,
           },
           dataset_memberships: [
             {
@@ -3577,6 +3581,7 @@ test.describe("/ops/pipeline", () => {
         provider_dataset_id:
           PROVIDER_DATASET_IDS["python-mois-api/mois_licenses"],
         sync_scope: "dataset_wide",
+        operation_key: KMA_OPERATION_KEY,
       },
     });
     expect(counters.previewBodies.at(0)).not.toHaveProperty("providers");

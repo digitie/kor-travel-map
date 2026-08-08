@@ -37,7 +37,7 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     "tvn33-reference-ownership-v1.sql": (
         "1be5cd9370d974a94adb2146947732f79d756ad3411e137d3846b33a5ba8e13a"
     ),
-    "openapi-diff-v1.json": ("751b16441fcb4295c44177b6a3700c5d3f136208268ccc4b7dfb2aff062c19f8"),
+    "openapi-diff-v1.json": ("eb83dd6b4053f818ef7e70ab1975a9f29ce2dd30445dc86422b601054ab0eed6"),
     "consumer-rollout-v1.json": (
         "573210a3949d78e3831f9581811f158cef8547328efea44d16cc6afb39b76c88"
     ),

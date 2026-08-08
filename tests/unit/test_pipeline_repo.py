@@ -263,7 +263,8 @@ async def test_list_maps_rows_filters_and_next_cursor() -> None:
     assert params["provider_dataset_id"] == 7
     assert params["filter_sync_scopes"] is False
     assert params["sync_scopes"] == []
-    assert params["include_unscoped_scope"] is False
+    # scope는 NOT NULL이라 unscoped 분기는 없앴다. 대신 membership 축을 확인한다.
+    assert params["operation_key"] is None
     assert params["load_batch_id"] == "33333333-3333-3333-3333-333333333333"
     assert params["parent_job_id"] == "11111111-1111-1111-1111-111111111111"
     assert params["page_limit"] == 2

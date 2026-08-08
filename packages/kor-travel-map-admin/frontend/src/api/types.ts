@@ -9909,7 +9909,7 @@ export interface components {
             /** Last Success At */
             last_success_at: string | null;
             /** Operation Key */
-            operation_key: string;
+            operation_key: string | null;
             /** Status */
             status: string;
             /** Sync Scope */
@@ -19886,6 +19886,8 @@ export interface operations {
         parameters: {
             query: {
                 sync_scope: string;
+                /** @description exact membership의 operation. 주면 그 membership 하나로 좁힌다. 생략하면 scope 안의 모든 operation을 롤업해 보여 준다. */
+                operation_key?: string | null;
             };
             header?: {
                 /** @description service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다. */
@@ -19958,6 +19960,8 @@ export interface operations {
         parameters: {
             query: {
                 sync_scope: string;
+                /** @description exact membership의 operation. 주면 그 dataset/scope에 실재하는 operation인지 검증한다 — 콘솔이 보내는 축을 서버가 조용히 버리면 형제 operation을 고른 것이 아무 효과도 내지 않는다. */
+                operation_key?: string | null;
             };
             header?: never;
             path: {

@@ -592,13 +592,17 @@ def test_removed_natural_dataset_routes_are_not_reintroduced(client: TestClient)
 
 
 @pytest.mark.unit
-def test_run_history_emits_one_record_per_root_for_sibling_operation_members() -> None:
-    """T-VN-33: 같은 root에 같은 scope의 member가 여러 개여도 record는 root당 1건.
+def test_run_history_emits_one_record_per_membership() -> None:
+    """T-VN-33: 형제 operation member는 **각각 한 줄**로 나온다.
 
-    membership identity가 triple(provider_dataset_id, sync_scope, operation_key)이
-    되면서 한 root가 같은 dataset·scope에 대해 operation만 다른 member를 여러 개
-    가질 수 있다. 옛 ``sync_scope=NULL`` alias member는 스키마에서 사라졌으므로
-    중복 제거 대상은 sibling operation member다.
+    예전에는 root당 1건으로 접고 ``operation_member_id``(UUID) tie-break로 하나를
+    골랐다. 그건 형제 operation 중 임의 선택이고, 고른 쪽의 ``operation_key``와
+    ``pair_status``만 응답에 실리므로 운영자는 다른 operation이 어떤 상태였는지
+    알 방법이 없었다.
+
+    같은 root가 두 membership을 건드렸다면 중복이 아니라 **서로 다른 두 사실**이다.
+    identity가 triple이므로 행이 늘어나는 것이 맞고, ``operation_key``가 함께
+    실리므로 화면에서 구분된다.
     """
     from kortravelmap.api import ops_dataset_service as service
 
@@ -648,11 +652,18 @@ def test_run_history_emits_one_record_per_root_for_sibling_operation_members() -
         sync_scopes=("dataset_wide",),
     )
 
-    assert len(records) == 1
-    assert records[0].sync_scope == "dataset_wide"
-    assert str(records[0].operation_member_id) == (
-        "33333333-3333-4333-8333-333333333333"
-    )
+    # 요청한 scope의 member 둘 다 나온다. 정렬은 (sync_scope, operation_key)로
+    # 결정적이라 UUID 우연에 기대지 않는다.
+    assert len(records) == 2
+    assert [record.sync_scope for record in records] == ["dataset_wide"] * 2
+    assert [record.operation_key for record in records] == [
+        "mois_bulk_refresh",
+        "mois_sibling_refresh",
+    ]
+    assert {str(record.operation_member_id) for record in records} == {
+        "22222222-2222-4222-8222-222222222222",
+        "33333333-3333-4333-8333-333333333333",
+    }
 
 
 @pytest.mark.unit

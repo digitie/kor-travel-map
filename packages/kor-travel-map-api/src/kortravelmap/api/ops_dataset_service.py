@@ -97,12 +97,23 @@ _RECENT_RUNS_LIMIT = 10
 _RECENT_EVENTS_LIMIT = 20
 
 
-def _dataset_detail_url(provider_dataset_id: int, sync_scope: str) -> str:
+def _dataset_detail_url(
+    provider_dataset_id: int,
+    sync_scope: str,
+    operation_key: str | None = None,
+) -> str:
+    """membership을 주소로 갖는 상세 링크.
+
+    ``operation_key`` 없이 만들면 같은 scope의 형제 operation 행들이 **같은 링크**를
+    갖게 돼, 그리드에서 어느 행을 눌러도 같은 화면이 열린다. 실행 가능한 operation이
+    없는 catalog 행만 scope 단위 링크를 갖는다.
+    """
     return (
         f"/v1/ops/datasets/{provider_dataset_id}?"
         + urlencode(
             {
                 "sync_scope": sync_scope,
+                **({"operation_key": operation_key} if operation_key else {}),
             },
             quote_via=quote,
         )
@@ -568,7 +579,7 @@ def _grid_row(
         provider_dataset_id=provider_dataset_id,
         provider=provider,
         dataset_key=dataset_key,
-        detail_url=_dataset_detail_url(provider_dataset_id, sync_scope),
+        detail_url=_dataset_detail_url(provider_dataset_id, sync_scope, operation_key),
         sync_scope=sync_scope,
         operation_key=operation_key,
         status=state.status if state is not None else _NEVER_RUN_STATUS,
@@ -839,6 +850,7 @@ async def load_dataset_detail(
     dagster_client: httpx.AsyncClient,
     provider_dataset_id: int,
     sync_scope: str,
+    operation_key: str | None = None,
     now: datetime | None = None,
 ) -> OpsDatasetDetailData:
     canonical_scope = parse_canonical_sync_scope(sync_scope).value
@@ -881,6 +893,14 @@ async def load_dataset_detail(
     else:
         detail_memberships = tuple(dict.fromkeys(states_by_membership)) or (
             (DATASET_WIDE_SYNC_SCOPE, None),
+        )
+    if operation_key is not None:
+        # membership을 지목했으면 그 하나로 좁힌다 — 형제 operation의 상태·실행이
+        # 섞이지 않는다. 없는 조합이면 아래 scope 검사에서 404로 떨어진다.
+        detail_memberships = tuple(
+            membership
+            for membership in detail_memberships
+            if membership[1] == operation_key
         )
     detail_scopes = tuple(dict.fromkeys(scope for scope, _ in detail_memberships))
     if canonical_scope not in detail_scopes:
@@ -942,10 +962,19 @@ async def load_dataset_detail(
     # 상세 URL은 scope 단위이므로 헤드라인 실행은 그 scope의 **모든 membership을
     # 가로지르는 명시적 롤업**이다. grid 행처럼 membership 단위로 좁힐 수 없다 —
     # 접기를 없애는 대신 의도된 롤업임을 이름과 주석으로 드러낸다.
-    latest_execution, active_execution = _scope_execution_rollup(
-        execution_snapshots,
-        provider_dataset_id=provider_dataset_id,
-        sync_scope=canonical_scope,
+    latest_execution, active_execution = (
+        _dataset_execution_projection(
+            execution_snapshots,
+            provider_dataset_id=provider_dataset_id,
+            sync_scope=canonical_scope,
+            operation_key=operation_key,
+        )
+        if operation_key is not None
+        else _scope_execution_rollup(
+            execution_snapshots,
+            provider_dataset_id=provider_dataset_id,
+            sync_scope=canonical_scope,
+        )
     )
     executions_page = await list_pipeline_executions(
         session,

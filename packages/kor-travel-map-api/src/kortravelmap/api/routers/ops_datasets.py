@@ -104,12 +104,23 @@ async def get_dataset_detail(
     provider_dataset_id: Annotated[int, Path(ge=1)],
     sync_scope: Annotated[str, Query(min_length=1)],
     session: Annotated[AsyncSession, Depends(get_session)],
+    operation_key: Annotated[
+        str | None,
+        Query(
+            min_length=1,
+            description=(
+                "exact membership의 operation. 주면 그 membership 하나로 좁힌다. "
+                "생략하면 scope 안의 모든 operation을 롤업해 보여 준다."
+            ),
+        ),
+    ] = None,
 ) -> OpsDatasetDetailResponse:
     started_at = perf_counter()
     settings, dagster_client = dagster_http_dependencies(request)
     try:
         data = await load_dataset_detail(
             session,
+            operation_key=operation_key,
             settings=settings,
             dagster_client=dagster_client,
             provider_dataset_id=provider_dataset_id,
@@ -258,6 +269,17 @@ async def post_dataset_preview(
     sync_scope: Annotated[str, Query(min_length=1)],
     body: Annotated[OpsDatasetPreviewRequest, Body()],
     session: Annotated[AsyncSession, Depends(get_session)],
+    operation_key: Annotated[
+        str | None,
+        Query(
+            min_length=1,
+            description=(
+                "exact membership의 operation. 주면 그 dataset/scope에 실재하는 "
+                "operation인지 검증한다 — 콘솔이 보내는 축을 서버가 조용히 "
+                "버리면 형제 operation을 고른 것이 아무 효과도 내지 않는다."
+            ),
+        ),
+    ] = None,
 ) -> OpsDatasetPreviewResponse:
     started_at = perf_counter()
     try:
@@ -285,6 +307,18 @@ async def post_dataset_preview(
             detail=(
                 "등록되지 않은 dataset scope: "
                 f"provider_dataset_id={provider_dataset_id!r}/{canonical_scope!r}"
+            ),
+        )
+    if operation_key is not None and not any(
+        operation.operation_key == operation_key and canonical_scope in operation.sync_scopes
+        for operation in entry.enabled_refresh_operations
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=(
+                "등록되지 않은 dataset membership: "
+                f"provider_dataset_id={provider_dataset_id!r}/"
+                f"{canonical_scope!r}/{operation_key!r}"
             ),
         )
     if not entry.has_fixture_preview:
