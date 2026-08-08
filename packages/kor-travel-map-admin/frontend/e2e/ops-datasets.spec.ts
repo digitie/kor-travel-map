@@ -163,6 +163,9 @@ function makeGridRow(
     provider,
     dataset_key: datasetKey,
     sync_scope: syncScope,
+    // ADR-088 triple identity: 행이 가리키는 실행 operation. 갱신 POST의
+    // scope.operation_key가 이 값으로 나가는지까지 테스트가 검증한다.
+    operation_key: KMA_OPERATION_KEY,
     status: "active",
     last_success_at: FRESH_AT,
     last_failure_at: null,
@@ -352,6 +355,10 @@ function makeDetail(
   return {
     provider,
     dataset_key: datasetKey,
+    // detail은 grid 행과 같은 provider_dataset_id를 가리켜야 한다(mock router가
+    // /v1/ops/datasets/{id}로 조회하므로).
+    provider_dataset_id:
+      overrides.provider_dataset_id ?? providerDatasetId(provider, datasetKey),
     catalog: makeCatalog(),
     scopes: [
       {
@@ -613,6 +620,8 @@ async function mockOpsDatasets(
         data: {
           provider: KMA_PROVIDER,
           dataset_key: KMA_DATASET,
+          provider_dataset_id: KMA_PROVIDER_DATASET_ID,
+          sync_scope: KMA_SCOPE,
           source: "fixture",
           variant: "WeatherValue",
           description: "KMA 단기예보 fixture",
@@ -1813,6 +1822,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
       items: [orphan],
       details: {
         "retired-provider/retired-dataset": makeDetail({
+          provider_dataset_id: 104,
           provider: "retired-provider",
           dataset_key: "retired-dataset",
           catalog: null,

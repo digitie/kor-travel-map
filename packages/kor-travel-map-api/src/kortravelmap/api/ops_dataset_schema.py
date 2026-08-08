@@ -165,6 +165,9 @@ class OpsDatasetExecution(BaseModel):
     dagster_run_id: str | None
     dagster_run_status: str | None
     trigger_kind: str | None
+    # 이 레코드가 **어느 membership을 본 것인지**를 말한다 — 바로 위 ``sync_scope``와
+    # 같은 축이다. 한 root가 형제 operation 둘을 건드리면 레코드가 둘 나오고, 이
+    # 값으로만 구분된다. root 자신의 trigger operation은 ``projected_job``이 든다.
     operation_key: str | None
     error_message: str | None
     projected_job: OpsDatasetProjectedJob

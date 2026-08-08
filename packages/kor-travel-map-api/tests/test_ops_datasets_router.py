@@ -359,6 +359,10 @@ def test_ops_datasets_openapi_exposes_hardened_contract(client: TestClient) -> N
             else {
                 ("provider_dataset_id", "path"),
                 ("sync_scope", "query"),
+                # membership identity는 triple이다(ADR-088). 콘솔이 이 축을 보내는데
+                # 서버가 선언하지 않으면 FastAPI가 조용히 버려, operation만 다른 두
+                # grid 행이 같은 상세를 반환한다.
+                ("operation_key", "query"),
             }
         )
         if method == "get":
@@ -1228,8 +1232,10 @@ async def test_grid_calculates_freshness_and_keeps_time_meanings_separate(
     )
     assert row.eligible_after == eligible_after
     assert row.sync_scope == "dataset_wide"
+    # 링크가 membership을 주소로 갖는다 — operation을 빼면 형제 operation 행들이
+    # 같은 링크를 갖게 돼 어느 행을 눌러도 같은 화면이 열린다.
     assert row.detail_url == (
-        "/v1/ops/datasets/42?sync_scope=dataset_wide"
+        "/v1/ops/datasets/42?sync_scope=dataset_wide&operation_key=mois_refresh"
     )
     assert row.schedule.next_scheduled_at == next_scheduled_at
     assert row.freshness.state == "fresh"

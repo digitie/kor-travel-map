@@ -44,6 +44,8 @@ export type PipelineExecutionsListResponse =
   components["schemas"]["PipelineExecutionsListResponse"];
 export type OpsDatasetDetailResponse =
   components["schemas"]["OpsDatasetDetailResponse"];
+export type OpsDatasetsGridResponse =
+  components["schemas"]["OpsDatasetsGridResponse"];
 export type PipelineCancellationResponse =
   components["schemas"]["PipelineCancellationResponse"];
 
@@ -304,6 +306,73 @@ export async function bootstrapC7SameOriginPage(
     throw new Error("C7 same-origin/auth bootstrap guard 실패 (values redacted)");
   }
   bootstrappedPages.add(page);
+  // ADR-088 triple identity는 카탈로그가 발급하는 런타임 값이라 상수로 박을 수 없다.
+  // KMA mutation plan을 동기적으로 조립하는 헬퍼들이 쓸 수 있도록 bootstrap에서
+  // 미리 푼다. 여기서 실패해도 bootstrap 자체는 막지 않는다 — KMA identity를
+  // 실제로 요구하는 헬퍼가 requireKmaDatasetIdentity()로 명시적으로 실패한다
+  // (KMA를 쓰지 않는 C7 read/schedule spec 보호).
+  await resolveKmaDatasetIdentity(page).catch(() => undefined);
+}
+
+/** ADR-088 exact membership triple 중 dataset이 발급하는 두 값. */
+export type KmaDatasetIdentity = {
+  operationKey: string;
+  providerDatasetId: number;
+};
+
+let resolvedKmaDatasetIdentity: KmaDatasetIdentity | null = null;
+
+/**
+ * `/v1/ops/datasets` 그리드에서 canonical KMA 행을 찾아 `provider_dataset_id`와
+ * `operation_key`를 푼다.
+ *
+ * 그리드 1행의 identity는 `provider_dataset_id × sync_scope × operation_key`라
+ * external_system scope마다 행이 늘어난다. dataset identity는
+ * `(provider_dataset_id, operation_key)`로 접고, 형제 operation이 둘 이상이면
+ * C7 mutation이 어느 operation을 실행하는지 단정할 수 없으므로 실패시킨다.
+ */
+export async function resolveKmaDatasetIdentity(
+  page: Page,
+): Promise<KmaDatasetIdentity> {
+  if (resolvedKmaDatasetIdentity !== null) return resolvedKmaDatasetIdentity;
+  const grid = requireBody(
+    await browserFetch<OpsDatasetsGridResponse>(page, "/v1/ops/datasets", {
+      timeoutMs: DATASET_DETAIL_FETCH_TIMEOUT_MS,
+    }),
+    200,
+  );
+  const unique = new Map<string, KmaDatasetIdentity>();
+  for (const row of grid.data.items) {
+    if (
+      row.provider !== KMA_PROVIDER ||
+      row.dataset_key !== KMA_DATASET_KEY ||
+      row.operation_key === null
+    ) {
+      continue;
+    }
+    unique.set(`${row.provider_dataset_id}\u0000${row.operation_key}`, {
+      operationKey: row.operation_key,
+      providerDatasetId: row.provider_dataset_id,
+    });
+  }
+  const identities = [...unique.values()];
+  if (identities.length !== 1) {
+    throw new Error(
+      "C7 live E2E는 KMA dataset의 단일 canonical (provider_dataset_id, operation_key) identity를 요구합니다",
+    );
+  }
+  resolvedKmaDatasetIdentity = identities[0];
+  return identities[0];
+}
+
+/** 이미 해석된 KMA triple identity를 동기 plan 조립/가드에서 읽는다. */
+function requireKmaDatasetIdentity(): KmaDatasetIdentity {
+  if (resolvedKmaDatasetIdentity === null) {
+    throw new Error(
+      "KMA provider_dataset_id/operation_key가 아직 해석되지 않았습니다 — bootstrapC7SameOriginPage 또는 resolveKmaDatasetIdentity를 먼저 호출하세요",
+    );
+  }
+  return resolvedKmaDatasetIdentity;
 }
 
 function cleanupStateFile(): string {
@@ -1007,6 +1076,7 @@ async function assertTerminalDagsterRunIdentity(
   page: Page,
   detail: PipelineExecutionDetailResponse,
 ): Promise<void> {
+  const identity = requireKmaDatasetIdentity();
   const execution = detail.data.execution;
   const updateRequest = detail.data.update_request;
   const runId = execution.dagster_run_id;
@@ -1018,8 +1088,8 @@ async function assertTerminalDagsterRunIdentity(
     !Number.isSafeInteger(updateRequest.generation) ||
     updateRequest.generation <= 0 ||
     updateRequest.scope.type !== "provider_dataset" ||
-    updateRequest.scope.provider !== KMA_PROVIDER ||
-    updateRequest.scope.dataset_key !== KMA_DATASET_KEY
+    updateRequest.scope.provider_dataset_id !== identity.providerDatasetId ||
+    updateRequest.scope.operation_key !== identity.operationKey
   ) {
     throw new Error(
       "C7 terminal request/Dagster owner identity 계약이 실패했습니다 (values redacted)",
@@ -1264,15 +1334,14 @@ export function buildKmaRequest(
   reason: string,
   runMode: "queued" | "now" = "queued",
 ): FeatureUpdateRequestCreateRequest {
+  const identity = requireKmaDatasetIdentity();
   const body: FeatureUpdateRequestCreateRequest = {
     scope: {
       type: "provider_dataset",
-      provider: KMA_PROVIDER,
-      dataset_key: KMA_DATASET_KEY,
+      provider_dataset_id: identity.providerDatasetId,
+      operation_key: identity.operationKey,
       sync_scope: `external_system:${externalSystem}`,
     },
-    providers: [],
-    dataset_keys: [],
     run_mode: runMode,
     priority: 50,
     reason,
@@ -1286,8 +1355,6 @@ export function previewBody(
 ): FeatureUpdateRequestPreviewRequest {
   const preview: FeatureUpdateRequestPreviewRequest = {
     scope: body.scope,
-    providers: body.providers,
-    dataset_keys: body.dataset_keys,
     update_policy: body.update_policy,
     run_mode: body.run_mode,
     priority: body.priority,
@@ -1303,19 +1370,17 @@ function assertKmaOnlyPlan(
   if (FORBIDDEN_PROVIDER_PATTERN.test(serialized)) {
     throw new Error("C7 live E2E에서는 OpiNet provider를 호출할 수 없습니다.");
   }
+  const identity = requireKmaDatasetIdentity();
   const scope = body.scope;
   if (
     scope.type !== "provider_dataset" ||
-    scope.provider !== KMA_PROVIDER ||
-    scope.dataset_key !== KMA_DATASET_KEY ||
-    !scope.sync_scope?.startsWith("external_system:")
+    scope.provider_dataset_id !== identity.providerDatasetId ||
+    scope.operation_key !== identity.operationKey ||
+    !scope.sync_scope.startsWith("external_system:")
   ) {
     throw new Error(
       "C7 live E2E mutation은 canonical KMA external_system scope만 허용합니다.",
     );
-  }
-  if ((body.providers?.length ?? 0) > 0 || (body.dataset_keys?.length ?? 0) > 0) {
-    throw new Error("provider_dataset scope에 providers/dataset_keys 필터를 중복할 수 없습니다.");
   }
 }
 
@@ -1375,6 +1440,7 @@ function assertExactKmaPreviewBody(
 ): void {
   const data = response.data;
   assertKmaOnlyPlan(expected);
+  const identity = requireKmaDatasetIdentity();
   const expectedEffectiveSyncScope =
     expected.scope.type === "provider_dataset"
       ? expected.scope.sync_scope
@@ -1386,12 +1452,19 @@ function assertExactKmaPreviewBody(
     data.scope_type !== "provider_dataset" ||
     !exactJson(data.scope, expected.scope) ||
     responseScope.type !== "provider_dataset" ||
-    responseScope.provider !== KMA_PROVIDER ||
-    responseScope.dataset_key !== KMA_DATASET_KEY ||
+    responseScope.provider_dataset_id !== identity.providerDatasetId ||
+    responseScope.operation_key !== identity.operationKey ||
     responseScope.sync_scope !== expectedEffectiveSyncScope ||
     !expectedEffectiveSyncScope?.startsWith("external_system:") ||
-    !exactJson(data.providers, expected.providers ?? []) ||
-    !exactJson(data.dataset_keys, expected.dataset_keys ?? []) ||
+    // providers[]/dataset_keys[] plan echo는 삭제됐다 — membership 정본은
+    // dataset_memberships[{provider_dataset_id, sync_scope, operation_key}]다.
+    !exactJson(data.dataset_memberships, [
+      {
+        operation_key: identity.operationKey,
+        provider_dataset_id: identity.providerDatasetId,
+        sync_scope: expectedEffectiveSyncScope,
+      },
+    ]) ||
     data.run_mode !== expected.run_mode ||
     data.priority !== expected.priority ||
     !exactJson(data.update_policy, expected.update_policy ?? {}) ||
@@ -1448,15 +1521,21 @@ export function assertKmaOnlyTerminalProviderScopes(
   detail: PipelineExecutionDetailResponse,
   options: { executed: "empty" | "nonempty" },
 ): void {
+  const identity = requireKmaDatasetIdentity();
   const updateRequest = detail.data.update_request;
+  const membership = updateRequest?.dataset_memberships[0];
   if (
     updateRequest === null ||
     updateRequest.scope.type !== "provider_dataset" ||
-    updateRequest.scope.provider !== KMA_PROVIDER ||
-    updateRequest.scope.dataset_key !== KMA_DATASET_KEY ||
-    !updateRequest.effective_sync_scope?.startsWith("external_system:") ||
-    updateRequest.providers.length !== 0 ||
-    updateRequest.dataset_keys.length !== 0
+    updateRequest.scope.provider_dataset_id !== identity.providerDatasetId ||
+    updateRequest.scope.operation_key !== identity.operationKey ||
+    !updateRequest.scope.sync_scope.startsWith("external_system:") ||
+    // effective_sync_scope와 providers[]/dataset_keys[]는 삭제됐다. 실행 membership
+    // 정본은 dataset_memberships이며 scope와 정확히 같은 triple 하나여야 한다.
+    updateRequest.dataset_memberships.length !== 1 ||
+    membership?.provider_dataset_id !== identity.providerDatasetId ||
+    membership.operation_key !== identity.operationKey ||
+    membership.sync_scope !== updateRequest.scope.sync_scope
   ) {
     throw new Error("terminal update request KMA-only plan 계약 불일치");
   }
@@ -1725,6 +1804,7 @@ export async function runTrackedRequestNowFromUi(
   syncScope: string,
   submit: () => Promise<void>,
 ): Promise<FeatureUpdateRequestMutationResponse> {
+  const runNowIdentity = requireKmaDatasetIdentity();
   const exactPath = `/api/proxy/v1/ops/pipeline/requests/${encodeURIComponent(
     requestId,
   )}/run-now`;
@@ -1777,10 +1857,9 @@ export async function runTrackedRequestNowFromUi(
         updateRequest.request_id !== requestId ||
         updateRequest.job_id !== jobId ||
         updateRequest.status !== "running" ||
-        updateRequest.effective_sync_scope !== syncScope ||
         scope?.type !== "provider_dataset" ||
-        scope.provider !== KMA_PROVIDER ||
-        scope.dataset_key !== KMA_DATASET_KEY ||
+        scope.provider_dataset_id !== runNowIdentity.providerDatasetId ||
+        scope.operation_key !== runNowIdentity.operationKey ||
         scope.sync_scope !== syncScope ||
         detail.data.cancellation !== null ||
         detail.data.root.cancellation !== null
@@ -1878,6 +1957,7 @@ export async function runRequestNow(
   if (!state) {
     throw new Error("run-now direct dispatch에는 cleanup ownership state가 필요합니다");
   }
+  const identity = requireKmaDatasetIdentity();
   const detail = requireBody(await getRequestDetail(page, requestId), 200);
   const updateRequest = detail.data.update_request;
   const scope = updateRequest?.scope;
@@ -1886,9 +1966,9 @@ export async function runRequestNow(
     updateRequest === null ||
     updateRequest.request_id !== requestId ||
     scope?.type !== "provider_dataset" ||
-    scope.provider !== KMA_PROVIDER ||
-    scope.dataset_key !== KMA_DATASET_KEY ||
-    !scope.sync_scope?.startsWith("external_system:")
+    scope.provider_dataset_id !== identity.providerDatasetId ||
+    scope.operation_key !== identity.operationKey ||
+    !scope.sync_scope.startsWith("external_system:")
   ) {
     throw new Error("run-now direct KMA request identity barrier 실패");
   }
@@ -1936,18 +2016,19 @@ export async function getRequestDetail(
 }
 
 function exactScopeQuery(syncScope: string): string {
+  const identity = requireKmaDatasetIdentity();
   return new URLSearchParams({
-    provider: KMA_PROVIDER,
-    dataset_key: KMA_DATASET_KEY,
     sync_scope: syncScope,
+    operation_key: identity.operationKey,
   }).toString();
 }
 
 export function exactDatasetUiPath(syncScope: string): string {
+  const identity = requireKmaDatasetIdentity();
   const query = new URLSearchParams({
-    provider: KMA_PROVIDER,
-    dataset: KMA_DATASET_KEY,
+    provider_dataset_id: String(identity.providerDatasetId),
     sync_scope: syncScope,
+    operation_key: identity.operationKey,
     panel: "history",
   });
   return `/ops/datasets?${query.toString()}`;
@@ -1957,9 +2038,12 @@ export async function getExactDatasetDetail(
   page: Page,
   syncScope: string,
 ): Promise<BrowserFetchResult<OpsDatasetDetailResponse>> {
+  const identity = requireKmaDatasetIdentity();
   return browserFetch<OpsDatasetDetailResponse>(
     page,
-    `/v1/ops/datasets/detail?${exactScopeQuery(syncScope)}`,
+    `/v1/ops/datasets/${identity.providerDatasetId}?${exactScopeQuery(
+      syncScope,
+    )}`,
     { timeoutMs: DATASET_DETAIL_FETCH_TIMEOUT_MS },
   );
 }

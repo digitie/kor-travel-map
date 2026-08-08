@@ -328,3 +328,30 @@ ORM은 NOT NULL, head는 nullable(실해는 없다 — 원본 coord가 NOT NULL)
 결함이며, 최소한 500이 아니라 typed 4xx여야 한다. 이번 PR 범위 밖으로 두되
 후속으로 남긴다.
 ```
+
+### 30. contracts/vnext/tvn33-reference-ownership-v1.sql ↔ alembic head 대조 게이트 부재
+
+계약 파일은 스스로 "T-VN-33 **도착점**"이라 선언하는데(파일 머리말), 실제 마이그레이션이 도착하는 곳과 어긋난다. 그리고 **둘을 대조하는 게이트가 없어** 무한정 벌어질 수 있다 — `test_vnext_target_freeze`는 계약을 *새 DB*에 적용해 자기 자신과의 일관성만 본다.
+
+```
+실측 divergence (bench DB = alembic head 적용본):
+  계약 512행  ops.import_job_events.event_id  bigint GENERATED ALWAYS AS IDENTITY
+  head                                        uuid
+  계약 334행  uq_import_job_datasets_identity
+  head        uq_import_job_datasets_exact_identity
+  계약 346행  idx_import_job_datasets_dataset_job (provider_dataset_id, job_id)
+  head        idx_import_job_datasets_exact_operation_job
+              (provider_dataset_id, sync_scope, operation_key, job_id)
+  계약        idx_import_job_events_member_time 에 event_id DESC 열 없음
+  — 그런데 ops_repo.py:390-400의 성능 논증("member 마다 상위 :limit만 뽑아 합치면
+    전체 상위 :limit이 된다")이 바로 그 열에 의존한다.
+
+이 부류는 이번 작업에서 ORM↔DB PK 어긋남으로 이미 한 번 나왔다(22번). 그때 세운
+게이트(test_alembic_head_primary_keys_match_orm_declarations)와 같은 성격의
+대조가 계약↔head 사이에는 없다.
+
+판단: 선재 결함이고 이번 PR이 만든 것은 아니지만 T-VN-33이 소유한 아티팩트 안에
+있다. 개별 divergence를 손으로 맞추는 것은 다음 drift를 막지 못하므로, 계약이
+선언한 테이블에 한해 head와 대조하는 게이트를 세우는 것이 정본 수정이다.
+아티팩트 fingerprint 재생성이 딸리므로 이번 PR 범위 밖으로 두고 후속으로 남긴다.
+```

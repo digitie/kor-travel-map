@@ -35,6 +35,10 @@ const MOCK_REVIEWED_AT = "2026-06-08T00:10:00.000Z";
 const OFFLINE_UPLOAD_ID = "11111111-1111-4111-8111-111111111111";
 const OFFLINE_VALIDATION_JOB_ID = "22222222-2222-4222-8222-222222222222";
 const OFFLINE_LOAD_JOB_ID = "33333333-3333-4333-8333-333333333333";
+// ADR-088 triple identity: offline upload 행도 provider_dataset_id + sync_scope +
+// operation_key 셋으로 식별된다. operation_key는 화면에 노출되지 않으므로 e2e에서는
+// 고정 mock 값을 쓴다(실서버 값은 API가 scope의 canonical operation에서 유도한다).
+const OFFLINE_OPERATION_KEY = "e2e_offline_upload_job";
 const OFFLINE_DAGSTER_RUN_ID = "dagster-run-offline-upload-001";
 const POI_TARGET_ID = "44444444-4444-4444-8444-444444444444";
 const FEATURE_CHANGE_ID = "55555555-5555-4555-8555-555555555555";
@@ -71,6 +75,7 @@ function makeOfflineUpload(
     detected_format: "csv",
     load_job_id: null,
     load_url: `/v1/admin/offline-uploads/${OFFLINE_UPLOAD_ID}/load`,
+    operation_key: OFFLINE_OPERATION_KEY,
     original_filename: "offline.csv",
     provider_dataset_id: 401,
     status: "uploaded",

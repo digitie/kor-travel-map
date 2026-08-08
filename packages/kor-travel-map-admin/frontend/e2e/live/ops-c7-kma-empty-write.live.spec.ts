@@ -36,6 +36,7 @@ import {
   previewBody,
   putTrackedTarget,
   requireBody,
+  resolveKmaDatasetIdentity,
   waitForTerminal,
   withC7Cleanup,
   type FeatureUpdateRequestCreateResponse,
@@ -250,6 +251,7 @@ test.describe("C7 KMA empty exact scope destructive live E2E", () => {
     });
     const state = createCleanupState("empty", RUN_ID);
     await bootstrapC7SameOriginPage(page, "/ops/pipeline");
+    const kmaIdentity = await resolveKmaDatasetIdentity(page);
     await assertKmaDagsterWorkerJobDefinition();
     const controller = await createQueueSensorController();
     const sensorSnapshot = await snapshotQueueSensor(controller);
@@ -344,7 +346,10 @@ test.describe("C7 KMA empty exact scope destructive live E2E", () => {
         const emptyEvents = terminal.data.events.filter(
           (event) =>
             event.code === "kma.target_scope_empty" &&
-            event.sync_scope === syncScope &&
+            // pipeline job event의 sync_scope는 삭제됐다 — dataset 귀속 identity는
+            // provider_dataset_id다(ADR-088). job_id가 이미 이 request의 scope를
+            // 결박하므로 dataset identity만 추가로 확인한다.
+            event.provider_dataset_id === kmaIdentity.providerDatasetId &&
             event.job_id === created.data.job_id,
         );
         expect(emptyEvents).toHaveLength(1);

@@ -32,6 +32,10 @@ type PageMeta = components["schemas"]["PageMeta"];
 const MOCK_NOW = "2026-06-08T00:00:00.000Z";
 const OFFLINE_UPLOAD_ID = "11111111-1111-4111-8111-111111111111";
 const OFFLINE_VALIDATION_JOB_ID = "22222222-2222-4222-8222-222222222222";
+// ADR-088 triple identity: offline upload 행도 provider_dataset_id + sync_scope +
+// operation_key 셋으로 식별된다. operation_key는 화면에 노출되지 않으므로 e2e에서는
+// 고정 mock 값을 쓴다(실서버 값은 API가 scope의 canonical operation에서 유도한다).
+const OFFLINE_OPERATION_KEY = "e2e_offline_upload_job";
 const CHECKSUM =
   "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
@@ -84,6 +88,7 @@ function makeOfflineUpload(
     detected_format: "csv",
     load_job_id: null,
     load_url: `/v1/admin/offline-uploads/${OFFLINE_UPLOAD_ID}/load`,
+    operation_key: OFFLINE_OPERATION_KEY,
     original_filename: "offline.csv",
     provider_dataset_id: 401,
     status: "uploaded",

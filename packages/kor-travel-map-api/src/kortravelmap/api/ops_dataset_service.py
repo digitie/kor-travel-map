@@ -409,7 +409,9 @@ def _execution_record(
         dagster_run_id=root.dagster_run_id,
         dagster_run_status=root.dagster_run_status,
         trigger_kind=root.trigger_kind,
-        operation_key=root.operation_key,
+        # membership 축이다(``sync_scope``와 짝). root 자신의 operation은
+        # ``projected_job.operation_key``가 들고 있어 잃지 않는다.
+        operation_key=item.operation_key,
         error_message=root.error_message,
         projected_job=OpsDatasetProjectedJob(
             id=projected.id,

@@ -134,8 +134,10 @@ function executedKmaMetadata(
       LOWERCASE_SHA256_PATTERN.test(metadata.membership_fingerprint),
   ).toBe(true);
   expect(typeof metadata?.skipped).toBe("boolean");
+  // effective_sync_scope는 삭제됐다 — scope 안의 sync_scope가 정본이다(ADR-088).
+  const requestScope = detail.data.update_request?.scope;
   expect(metadata?.sync_scope).toBe(
-    detail.data.update_request?.effective_sync_scope,
+    requestScope?.type === "provider_dataset" ? requestScope.sync_scope : undefined,
   );
   return metadata as KmaExecutionMetadata;
 }
