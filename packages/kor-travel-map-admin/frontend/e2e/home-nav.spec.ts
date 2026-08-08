@@ -198,6 +198,7 @@ function makeImportExecution(
         provider_dataset_id: 801,
         status: "running",
         sync_scope: "dataset_wide",
+        operation_key: "e2e_refresh",
       },
     ],
     requested_job_id: null,

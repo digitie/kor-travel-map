@@ -590,6 +590,7 @@ def _event(
         job_id="11111111-1111-1111-1111-111111111111",
         import_job_dataset_id="11111111-1111-1111-1111-111111111111",
         provider_dataset_id=1,
+        operation_key=_MOIS_BULK_OPERATION_KEY,
         feature_id=None,
         stage="loading",
         level="error",

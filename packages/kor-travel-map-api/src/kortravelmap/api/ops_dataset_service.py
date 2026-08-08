@@ -475,40 +475,45 @@ def _run_history_records(
     executions: tuple[PipelineExecution, ...],
     *,
     provider_dataset_id: int,
-    sync_scopes: tuple[str | None, ...],
+    sync_scopes: tuple[str, ...],
 ) -> list[OpsDatasetExecution]:
-    """canonical root마다 논리 scope pair 하나만 골라 중복 없는 이력을 만든다."""
+    """root가 건드린 **membership마다** 한 줄을 낸다.
+
+    예전에는 root마다 membership 하나를 ``operation_member_id``(UUID) tie-break로
+    골랐다. 그건 형제 operation 중 임의 선택이고, 이 작업이 없애려던 바로 그
+    모양이다 — 게다가 고른 쪽의 ``operation_key``와 ``pair_status``가 응답에
+    실리므로 운영자는 다른 operation이 어떤 상태였는지 알 방법이 없다.
+
+    같은 root가 두 membership을 건드렸다면 그건 중복이 아니라 **서로 다른 두
+    사실**이다. 행이 늘어나 보이는 것은 identity가 triple이기 때문이고,
+    ``operation_key``가 함께 실리므로 화면에서 구분된다.
+    """
     records: list[OpsDatasetExecution] = []
     for execution in executions:
-        pairs = tuple(
-            pair
-            for pair in execution.provider_datasets
-            if pair.provider_dataset_id == provider_dataset_id
-            and pair.sync_scope in sync_scopes
-        )
-        if not pairs:
-            continue
-        pair = max(
-            pairs,
-            key=lambda item: (
-                item.sync_scope == DATASET_WIDE_SYNC_SCOPE,
-                item.operation_member_id,
+        members = sorted(
+            (
+                member
+                for member in execution.provider_datasets
+                if member.provider_dataset_id == provider_dataset_id
+                and member.sync_scope in sync_scopes
             ),
+            key=lambda item: (item.sync_scope, item.operation_key),
         )
-        records.append(
-            _execution_record(
-                DatasetLatestExecution(
-                    provider_dataset_id=provider_dataset_id,
-                    provider=pair.provider,
-                    dataset_key=pair.dataset_key,
-                    sync_scope=pair.sync_scope,
-                    operation_key=pair.operation_key,
-                    execution=execution,
-                    operation_member_id=pair.operation_member_id,
-                    pair_status=pair.status,
+        for member in members:
+            records.append(
+                _execution_record(
+                    DatasetLatestExecution(
+                        provider_dataset_id=provider_dataset_id,
+                        provider=member.provider,
+                        dataset_key=member.dataset_key,
+                        sync_scope=member.sync_scope,
+                        operation_key=member.operation_key,
+                        execution=execution,
+                        operation_member_id=member.operation_member_id,
+                        pair_status=member.status,
+                    )
                 )
             )
-        )
     return records
 
 
@@ -793,7 +798,7 @@ def _scope_state(
     policy: ProviderRefreshPolicy | None,
     *,
     sync_scope: str,
-    operation_key: str,
+    operation_key: str | None,
     now: datetime,
 ) -> OpsDatasetScopeState:
     return OpsDatasetScopeState(
@@ -900,7 +905,7 @@ async def load_dataset_detail(
             is not None
             else OpsDatasetScopeState(
                 sync_scope=sync_scope,
-                operation_key=operation_key or "",
+                operation_key=operation_key,
                 status=_NEVER_RUN_STATUS,
                 cursor={},
                 last_success_at=None,

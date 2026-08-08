@@ -15,10 +15,12 @@
 
 가장 값어치 있었던 것은 **ORM PK가 DB보다 좁게 선언돼 있던 것**이다.
 `provider_dataset_operation_scopes`의 DB PK는 triple인데 ORM은 2열만 `primary_key=True`로
-뒀다. SQLAlchemy identity map이 `operation_key`만 다른 두 행을 같은 객체로 접는다. 이게
-살아남은 이유가 더 나쁘다 — ORM 메타데이터의 PK를 DB와 대조하는 테스트가 저장소에 아예
-없었고, 게다가 내가 쓴 단위 테스트가 **틀린 2열 모양을 단언해 그 어긋남을 고정**하고
-있었다. 부류 전체를 막는 게이트를 세우고(mapped table 전수 대조) A/B로 증명했다.
+뒀다. 처음에는 이것을 "identity map이 두 행을 접는다"로 정당화했는데 **그 근거는 틀렸다** —
+이 저장소는 raw SQL 전용이고(ADR-004) 이 class를 ORM 방식으로 쓰는 코드가 0건이라 그
+시나리오는 도달하지 않는다. 적대 리뷰가 A/B로 진짜 이유를 밝혔다: **alembic autogenerate가
+PK 제약을 비교 대상에 넣지 않아** ORM PK를 pair로 되돌려도 `alembic check`와 기존 메타데이터
+테스트가 모두 통과한다. 즉 아무 게이트도 이 어긋남을 보지 못하고 있었다. 게다가 내가 쓴
+단위 테스트가 **틀린 2열 모양을 단언해 그 어긋남을 고정**하고 있었다. 부류 전체를 막는 게이트를 세우고(mapped table 전수 대조) A/B로 증명했다.
 
 두 번째는 **하드 500**이다. `_group_dataset_execution_snapshot_rows`가 SQL이 triple로
 partition해 내보낸 행을 pair로 다시 묶어 `RuntimeError`를 낸다. 스키마 변경 없이

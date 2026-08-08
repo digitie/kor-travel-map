@@ -11,10 +11,11 @@
 전수는 [`reports/t-vn-33-live-product-defects-2026-08-08.md`](reports/t-vn-33-live-product-defects-2026-08-08.md)
 21~23번.
 
-- **ORM PK가 DB보다 좁았다**(`provider_dataset_operation_scopes`). identity map이
-  `operation_key`만 다른 두 행을 접는다. 내 단위 테스트가 틀린 2열 모양을 단언해
-  어긋남을 고정하고 있었다. ORM 메타데이터 PK를 DB와 대조하는 테스트가 저장소에
-  아예 없어서 살아남았다 — `test_alembic_head_primary_keys_match_orm_declarations`로
+- **ORM PK가 DB보다 좁았다**(`provider_dataset_operation_scopes`). 처음 근거로 든
+  "identity map이 행을 접는다"는 이 저장소에서 도달 불가였고(raw SQL 전용), 진짜
+  이유는 적대 리뷰가 A/B로 밝혔다 — **alembic autogenerate가 PK를 비교하지 않아**
+  어떤 게이트도 이 어긋남을 못 봤다. 내 단위 테스트는 틀린 2열 모양을 단언해
+  어긋남을 고정하고 있었다 — `test_alembic_head_primary_keys_match_orm_declarations`로
   게이트를 세웠고, 되돌리면 두 모양을 나란히 지목하며 실패한다.
 - **dataset snapshot 집계가 pair 키 → 하드 500.** SQL은 triple로 partition하는데
   Python이 pair로 다시 묶어 `RuntimeError`. 스키마 변경 없이 카탈로그에 refresh

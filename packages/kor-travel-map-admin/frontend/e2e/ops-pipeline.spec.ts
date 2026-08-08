@@ -128,6 +128,7 @@ function makeCatalogRow(
       `/v1/ops/datasets/${providerDatasetId(provider, datasetKey)}` +
       `?sync_scope=${encodeURIComponent(syncScope)}`,
     sync_scope: syncScope,
+    operation_key: "e2e_refresh",
     status: "active",
     last_success_at: "2026-07-14T09:00:00.000Z",
     last_failure_at: null,
@@ -236,6 +237,7 @@ function makeExecution(
         provider_dataset_id:
           PROVIDER_DATASET_IDS["python-opinet-api/opinet_stations"],
         sync_scope: "dataset_wide",
+        operation_key: "e2e_refresh",
         operation_member_id: SOLO_JOB_ID,
         status: "done",
       },
@@ -263,6 +265,7 @@ function makeRoots(): PipelineExecutionRootRecord[] {
         provider_dataset_id:
           PROVIDER_DATASET_IDS["python-kma-api/kma_short_forecast"],
         sync_scope: "target_grids",
+        operation_key: "e2e_refresh",
         operation_member_id: TWIN_JOB_ID,
         status: "running",
       },
@@ -316,6 +319,7 @@ function makeRoots(): PipelineExecutionRootRecord[] {
         provider_dataset_id:
           PROVIDER_DATASET_IDS["python-opinet-api/opinet_stations"],
         sync_scope: "dataset_wide",
+        operation_key: "e2e_refresh",
         operation_member_id: SOLO_JOB_ID,
         status: "done",
       },
@@ -379,6 +383,7 @@ function makeOverflowExecution(index: number): PipelineExecutionRootRecord {
         provider_dataset_id:
           PROVIDER_DATASET_IDS["python-kma-api/kma_short_forecast"],
         sync_scope: "target_grids",
+        operation_key: "e2e_refresh",
         operation_member_id: id,
         status: "done",
       },
@@ -481,6 +486,7 @@ function makeDetail(): PipelineExecutionDetailResponse {
         provider_dataset_id:
           PROVIDER_DATASET_IDS["python-kma-api/kma_short_forecast"],
         sync_scope: "target_grids",
+        operation_key: "e2e_refresh",
         operation_member_id: TWIN_JOB_ID,
         status: "queued",
       },
@@ -521,6 +527,7 @@ function makeDetail(): PipelineExecutionDetailResponse {
             provider_dataset_id:
               PROVIDER_DATASET_IDS["python-kma-api/kma_short_forecast"],
             sync_scope: "target_grids",
+            operation_key: "e2e_refresh",
             operation_member_id: TWIN_JOB_ID,
             status: "running",
           },
@@ -544,6 +551,7 @@ function makeDetail(): PipelineExecutionDetailResponse {
             provider_dataset_id:
               PROVIDER_DATASET_IDS["python-kma-api/kma_short_forecast"],
             sync_scope: "target_grids",
+            operation_key: "e2e_refresh",
           },
         ],
         update_policy: {},
@@ -599,6 +607,7 @@ function makeImportDetail(): PipelineExecutionDetailResponse {
         provider_dataset_id:
           PROVIDER_DATASET_IDS["python-kma-api/kma_short_forecast"],
         sync_scope: "target_grids",
+        operation_key: "e2e_refresh",
         operation_member_id: TWIN_JOB_ID,
         status: "running",
       },
@@ -1500,6 +1509,7 @@ async function installPipelineMocks(
               provider_dataset_id:
                 PROVIDER_DATASET_IDS["python-mois-api/mois_licenses"],
               sync_scope: "dataset_wide",
+              operation_key: "e2e_refresh",
             },
           ],
           update_policy: {},
@@ -1592,6 +1602,7 @@ async function installPipelineMocks(
               provider_dataset_id:
                 PROVIDER_DATASET_IDS["python-kma-api/kma_short_forecast"],
               sync_scope: "target_grids",
+              operation_key: "e2e_refresh",
             },
           ],
           update_policy: {},

@@ -228,6 +228,7 @@ function makeExecution(
         dataset_key: KMA_DATASET,
         provider_dataset_id: KMA_PROVIDER_DATASET_ID,
         sync_scope: KMA_SCOPE,
+        operation_key: "e2e_refresh",
         status: "done",
         operation_member_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
       },
@@ -278,6 +279,7 @@ function makeExactExecution(
         dataset_key: datasetKey,
         provider_dataset_id: providerDatasetId(provider, datasetKey),
         sync_scope: syncScope,
+        operation_key: "e2e_refresh",
         status: execution.pair_status,
         operation_member_id: execution.operation_member_id,
       },
@@ -353,6 +355,7 @@ function makeDetail(
     scopes: [
       {
         sync_scope: KMA_SCOPE,
+        operation_key: "e2e_refresh",
         status: "active",
         cursor: { base_date: "20260714", base_time: "0500" },
         last_success_at: FRESH_AT,
@@ -865,6 +868,7 @@ async function mockPipelineRequests(
                 dataset_key: KMA_DATASET,
                 provider_dataset_id: KMA_PROVIDER_DATASET_ID,
                 sync_scope: KMA_SCOPE,
+                operation_key: "e2e_refresh",
                 status: executionStatus as "done",
                 operation_member_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
               },
@@ -898,6 +902,7 @@ async function mockPipelineRequests(
                 dataset_key: KMA_DATASET,
                 provider_dataset_id: KMA_PROVIDER_DATASET_ID,
                 sync_scope: KMA_SCOPE,
+                operation_key: "e2e_refresh",
                 status: executionStatus as "done",
                 operation_member_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
               },
@@ -1054,6 +1059,7 @@ function defaultGrid(): {
               import_job_dataset_id: null,
               provider_dataset_id: KMA_PROVIDER_DATASET_ID,
               sync_scope: KMA_SCOPE,
+              operation_key: "e2e_refresh",
               stage: "loading",
               level: "error",
               code: "provider.timeout",
@@ -1091,6 +1097,7 @@ function defaultGrid(): {
         scopes: [
           {
             sync_scope: "dataset_wide",
+            operation_key: "e2e_refresh",
             status: "never_run",
             cursor: {},
             last_success_at: null,
@@ -2229,6 +2236,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
         ...makeDetail().scopes,
         {
           sync_scope: ACTIVE_EXTERNAL_SCOPE,
+          operation_key: "e2e_refresh",
           status: "never_run",
           cursor: {},
           last_success_at: null,
@@ -2336,6 +2344,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
           dataset_key: KMA_DATASET,
           provider_dataset_id: KMA_PROVIDER_DATASET_ID,
           sync_scope: ACTIVE_EXTERNAL_SCOPE,
+          operation_key: "e2e_refresh",
           status: "done",
           operation_member_id: "ffffffff-ffff-4fff-8fff-ffffffffffff",
         },
@@ -2396,6 +2405,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
           dataset_key: KMA_DATASET,
           provider_dataset_id: KMA_PROVIDER_DATASET_ID,
           sync_scope: STALE_EXTERNAL_SCOPE,
+          operation_key: "e2e_refresh",
           status: "done",
           operation_member_id: "88888888-8888-4888-8888-888888888888",
         },
@@ -2410,6 +2420,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
         ...makeDetail().scopes,
         {
           sync_scope: STALE_EXTERNAL_SCOPE,
+          operation_key: "e2e_refresh",
           status: "active",
           cursor: {},
           last_success_at: MOCK_OLD,

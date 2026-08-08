@@ -2092,10 +2092,14 @@ function useDatasetsClientController({
   ]);
 
   const selectionResolution = useMemo(() => {
+    // ``operation_key``는 **비어 있는 값이 유효하다** — refresh operation이 없는
+    // catalog 행(실측 74개 dataset 중 17개)과 orphan/policy 자리표시자 행이 그렇다.
+    // 그래서 "없음"(null)과 "빈 값"("")을 갈라야 한다. Boolean()으로 접으면 그
+    // 행들이 영영 선택되지 않아 drawer가 열리지 않는다.
     const hasSelectionParams = Boolean(
       urlProviderDatasetIdRaw ||
         urlSyncScope ||
-        urlOperationKey ||
+        urlOperationKey !== null ||
         hasLegacySelectionParams,
     );
     if (hasLegacySelectionParams) {
@@ -2104,7 +2108,7 @@ function useDatasetsClientController({
         invalid: true,
       };
     }
-    if (!urlProviderDatasetId || !urlSyncScope || !urlOperationKey) {
+    if (!urlProviderDatasetId || !urlSyncScope || urlOperationKey === null) {
       return { selection: null, invalid: hasSelectionParams };
     }
     if (items.length === 0) {
@@ -2117,7 +2121,9 @@ function useDatasetsClientController({
       (row) =>
         row.provider_dataset_id === urlProviderDatasetId &&
         row.sync_scope === urlSyncScope &&
-        row.operation_key === urlOperationKey,
+        // 경계 규약대로 정규화를 거친다 — raw ``operation_key``를 직접 비교하면
+        // catalog 행의 null이 URL의 빈 문자열과 어긋난다.
+        rowOperationKey(row) === urlOperationKey,
     );
     if (!requested) {
       // 잘못된 ID/scope는 같은 provider의 대표 행으로 대체하지 않는다. 잘못된

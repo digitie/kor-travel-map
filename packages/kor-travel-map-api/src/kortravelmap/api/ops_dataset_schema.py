@@ -263,7 +263,10 @@ class OpsDatasetScopeState(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     sync_scope: str
-    operation_key: str
+    # grid 행과 같은 규약이다 — refresh operation이 없는 catalog membership은 null이다.
+    # 여기만 ``""``로 채우면 같은 응답 안에서 표면이 어긋나고, 빈 문자열이 실재하는
+    # operation처럼 보인다.
+    operation_key: str | None
     status: str
     cursor: dict[str, Any]
     last_success_at: datetime | None

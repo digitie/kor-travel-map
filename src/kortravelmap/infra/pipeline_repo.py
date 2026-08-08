@@ -179,7 +179,6 @@ def _filter_fingerprint(
     provider_dataset_id: int | None = None,
     sync_scopes: tuple[str, ...] = (),
     operation_key: str | None = None,
-    include_unscoped_scope: bool = False,
     filter_sync_scopes: bool = False,
     load_batch_id: str | None = None,
     parent_job_id: str | None = None,
@@ -192,7 +191,6 @@ def _filter_fingerprint(
         "provider_dataset_id": provider_dataset_id,
         "sync_scopes": sorted(sync_scopes),
         "operation_key": operation_key,
-        "include_unscoped_scope": include_unscoped_scope,
         "filter_sync_scopes": filter_sync_scopes,
         "load_batch_id": load_batch_id,
         "parent_job_id": parent_job_id,
@@ -1361,7 +1359,6 @@ async def list_pipeline_executions(
             if scope is not None
         )
     )
-    include_unscoped_scope = bool(dataset_sync_scopes is not None and None in dataset_sync_scopes)
     filter_sync_scopes = dataset_sync_scopes is not None
     page_size = _limit(limit)
     filter_fingerprint = _filter_fingerprint(
@@ -1370,7 +1367,6 @@ async def list_pipeline_executions(
         provider_dataset_id=provider_dataset_id,
         sync_scopes=sync_scopes,
         operation_key=dataset_operation_key,
-        include_unscoped_scope=include_unscoped_scope,
         filter_sync_scopes=filter_sync_scopes,
         load_batch_id=normalized_load_batch_id,
         parent_job_id=normalized_parent_job_id,
@@ -1396,7 +1392,6 @@ async def list_pipeline_executions(
         "filter_sync_scopes": filter_sync_scopes,
         "sync_scopes": list(sync_scopes),
         "operation_key": dataset_operation_key,
-        "include_unscoped_scope": include_unscoped_scope,
         "load_batch_id": normalized_load_batch_id,
         "parent_job_id": normalized_parent_job_id,
         "created_from": created_from,

@@ -103,6 +103,7 @@ def _event_row(event_id: str, *, at: datetime) -> SimpleNamespace:
         job_id="11111111-1111-1111-1111-111111111111",
         import_job_dataset_id="11111111-1111-1111-1111-111111111111",
         provider_dataset_id=1,
+        operation_key="feature_place_mois_licenses_job",
         feature_id=None,
         stage="loading",
         level="error",
@@ -147,6 +148,7 @@ def test_import_job_reads_exclude_quarantined_rows() -> None:
         level=None,
         provider_dataset_id=None,
         sync_scope=None,
+        operation_key=None,
         cursor_occurred_at=None,
     )
     assert "event.quarantined_at IS NULL" in events_sql

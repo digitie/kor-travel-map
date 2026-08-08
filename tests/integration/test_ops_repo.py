@@ -753,6 +753,7 @@ async def test_event_audit_filters_use_bounded_natural_plans(
                 level=level,
                 provider_dataset_id=provider_dataset_id,
                 sync_scope=None,
+                operation_key=None,
                 cursor_occurred_at=cursor_at,
             )
             plan = (
