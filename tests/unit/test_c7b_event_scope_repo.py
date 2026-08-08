@@ -41,6 +41,7 @@ def _event(event_id: str, *, at: datetime) -> SimpleNamespace:
         job_id="57000000-0000-4000-8000-000000000001",
         import_job_dataset_id="57000000-0000-4000-8000-0000000000a1",
         provider_dataset_id=7,
+        sync_scope="dataset_wide",
         operation_key="fixture_refresh",
         feature_id=None,
         stage="loading",

@@ -103,6 +103,7 @@ def _event_row(event_id: str, *, at: datetime) -> SimpleNamespace:
         job_id="11111111-1111-1111-1111-111111111111",
         import_job_dataset_id="11111111-1111-1111-1111-111111111111",
         provider_dataset_id=1,
+        sync_scope="dataset_wide",
         operation_key="feature_place_mois_licenses_job",
         feature_id=None,
         stage="loading",

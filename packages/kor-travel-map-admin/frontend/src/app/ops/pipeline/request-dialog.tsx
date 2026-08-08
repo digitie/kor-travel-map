@@ -8,7 +8,9 @@ import {
   type ExecutionKind,
   type FeatureUpdateScope,
   type PipelineDatasetsCatalogResponse,
+  type PipelineJobPrecheckResponse,
   useCreateUpdateRequestMutation,
+  useMoisSourceSyncPrecheck,
   usePipelineDatasetsCatalog,
   usePreviewUpdateRequestMutation,
 } from "@/api/pipeline";
@@ -25,7 +27,7 @@ import {
 } from "@/components/ui/dialog";
 import { FormField, FormSelect } from "@/components/ui/form-field";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
-import { shortId } from "@/lib/format";
+import { formatDateTime, shortId } from "@/lib/format";
 
 type CatalogRow = PipelineDatasetsCatalogResponse["data"]["items"][number];
 type CanonicalCatalogRow = CatalogRow & { provider_dataset_id: number };
@@ -62,6 +64,52 @@ const SCOPE_TYPE_ORDER: readonly ScopeType[] = [
   "bbox",
   "cache_target_keys",
 ];
+
+function isMoisProvider(value: string): boolean {
+  return value.toLowerCase().includes("mois");
+}
+
+function MoisPrecheckNotice({
+  data,
+  isError,
+  isLoading,
+}: {
+  data: PipelineJobPrecheckResponse["data"] | undefined;
+  isError: boolean;
+  isLoading: boolean;
+}) {
+  const sourceReady = data?.ready === true;
+  const latestRun = data?.latest_run;
+  const completedAt = latestRun?.end_time ?? latestRun?.update_time ?? null;
+
+  return (
+    <Alert
+      data-testid="mois-precheck-notice"
+      variant={sourceReady ? "default" : "destructive"}
+    >
+      <AlertTitle>MOIS 선행 동기화 확인</AlertTitle>
+      <AlertDescription>
+        <p>
+          MOIS 적재는 Dagster 선행 작업{" "}
+          <code className="font-mono">mois_localdata_source_sync</code>가 먼저
+          실행되어 있어야 합니다.
+        </p>
+        <p className="mt-1">
+          선행 sync 상태:{" "}
+          {isLoading
+            ? "확인 중…"
+            : isError
+              ? "Dagster run 조회 실패 — 요청을 진행할 수 없습니다."
+              : sourceReady
+                ? `정상 · ${formatDateTime(completedAt)} · ${data.max_age_hours}시간 이내`
+                : `${latestRun?.status ?? "이력 없음"} · ${
+                    data?.disabled_reason ?? "소스 동기화를 먼저 실행하세요."
+                  }`}
+        </p>
+      </AlertDescription>
+    </Alert>
+  );
+}
 
 function splitList(value: string): string[] {
   return value
@@ -152,6 +200,16 @@ function useRequestScopeForm(catalogRows: CanonicalCatalogRow[]) {
         (row) => row.provider_dataset_id === Number(scopeProviderDatasetId),
       ) ?? null,
     [catalogRows, scopeProviderDatasetId],
+  );
+  // T-VN-33 전에는 provider 이름 입력으로 MOIS 여부를 봤다. 그 입력이 사라져
+  // 사전점검 경고가 통째로 없어졌었다(react-doctor가 죽은 export로 잡아냈다).
+  // 이제 선택된 catalog 행의 provider로 판정한다 — 같은 사실을 triple 선택에서 읽는다.
+  const moisSelected = useMemo(
+    () =>
+      selectedCatalogRow !== null && isMoisProvider(selectedCatalogRow.provider)
+        ? selectedCatalogRow.provider
+        : null,
+    [selectedCatalogRow],
   );
   const selectedScopeCapability =
     selectedCatalogRow?.catalog?.scope_refresh ?? null;
@@ -271,6 +329,7 @@ function useRequestScopeForm(catalogRows: CanonicalCatalogRow[]) {
       radiusKm,
       scopeProviderDatasetId,
       scopeType,
+      moisSelected,
       selectedCatalogRow,
       selectedScopeCapability,
       syncScopeOptions,
@@ -291,6 +350,7 @@ function useRequestScopeForm(catalogRows: CanonicalCatalogRow[]) {
       effectiveScopeSyncScope,
       featureIdsText,
       lat,
+      moisSelected,
       lon,
       maxLat,
       maxLon,
@@ -397,6 +457,8 @@ function useRequestCreateDialogController() {
     [catalogQuery.data],
   );
   const scopeForm = useRequestScopeForm(catalogRows);
+  const moisSelected = scopeForm.moisSelected;
+  const moisPrecheck = useMoisSourceSyncPrecheck(moisSelected !== null);
   const targetForm = useRequestTargetForm();
   const executionForm = useRequestExecutionForm();
   const {
@@ -596,6 +658,8 @@ function useRequestCreateDialogController() {
     previewRequest,
     requestError,
     retryAfterSeconds,
+    moisPrecheck,
+    moisSelected,
     scopeForm,
     setFormError,
     submit,
@@ -928,6 +992,8 @@ function RequestResultFeedback({
   createRequest,
   created,
   formError,
+  moisPrecheck,
+  moisSelected,
   onCreated,
   preview,
   requestError,
@@ -940,6 +1006,8 @@ function RequestResultFeedback({
   | "createRequest"
   | "created"
   | "formError"
+  | "moisPrecheck"
+  | "moisSelected"
   | "preview"
   | "requestError"
   | "retryAfterSeconds"
@@ -956,6 +1024,14 @@ function RequestResultFeedback({
             차단합니다. {catalogQuery.error.message}
           </AlertDescription>
         </Alert>
+      ) : null}
+
+      {moisSelected ? (
+        <MoisPrecheckNotice
+          isError={moisPrecheck.isError}
+          isLoading={moisPrecheck.isLoading}
+          data={moisPrecheck.data?.data}
+        />
       ) : null}
 
       {formError ? (
@@ -1063,6 +1139,8 @@ export function RequestCreateDialog({
     executionForm,
     formError,
     handleOpenChange,
+    moisPrecheck,
+    moisSelected,
     open,
     openDialog,
     preview,
@@ -1115,6 +1193,8 @@ export function RequestCreateDialog({
               createRequest={createRequest}
               created={created}
               formError={formError}
+              moisPrecheck={moisPrecheck}
+              moisSelected={moisSelected}
               onCreated={onCreated}
               preview={preview}
               requestError={requestError}
