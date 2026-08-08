@@ -617,6 +617,14 @@ def _storage_key(settings: KorTravelMapSettings, upload_id: str, filename: str) 
 
 
 def _duplicate_upload_conflict(upload: OfflineUpload) -> HTTPException:
+    """중복 409는 **가리키는 행의 exact identity**를 그대로 실어 보낸다.
+
+    멱등 키는 계약대로 dataset/scope/checksum 3열이지만, upload 행의 identity는
+    ``provider_dataset_id + sync_scope + operation_key``다(ADR-088). ``operation_key``를
+    빼면 운영자는 409가 가리키는 upload가 어느 operation 실행에 결박돼 있는지 알 수
+    없어 재시도/삭제 판단을 못 한다. status까지 함께 실어 "이미 적재된 건인지"도
+    본문만으로 판정되게 한다.
+    """
     return HTTPException(
         status_code=status.HTTP_409_CONFLICT,
         detail={
@@ -626,7 +634,9 @@ def _duplicate_upload_conflict(upload: OfflineUpload) -> HTTPException:
                 "upload_id": upload.upload_id,
                 "provider_dataset_id": upload.provider_dataset_id,
                 "sync_scope": upload.sync_scope,
+                "operation_key": upload.operation_key,
                 "checksum_sha256": upload.checksum_sha256,
+                "status": upload.status,
             },
         },
     )

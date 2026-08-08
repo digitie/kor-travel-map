@@ -515,12 +515,20 @@ def _create_indexes_concurrently() -> None:
             )
             """
         )
+        # 0091이 지운 ``idx_import_job_events_provider_dataset_scope_time``의
+        # 대체 경로다. scope 정본이 membership으로 옮겨갔으므로 event 감사
+        # 조회(``ops_repo._scoped_import_job_events_sql``)는 member 마다 상위
+        # ``limit``만 뽑아 합친다. ``level``을 INCLUDE에 두는 이유는 그 per-member
+        # scan을 level filter가 붙어도 index-only로 유지하기 위해서다 — heap을
+        # 때리기 시작하면 member 수에 비례한 random I/O가 그대로 돌아온다
+        # (실측: 300k event / 300 member scope에서 61,422 → 1,533 buffer).
         op.execute(
             """
             CREATE INDEX CONCURRENTLY idx_import_job_events_member_time
             ON ops.import_job_events (
                 import_job_dataset_id, occurred_at DESC, event_id DESC
             )
+            INCLUDE (level)
             WHERE import_job_dataset_id IS NOT NULL AND quarantined_at IS NULL
             """
         )

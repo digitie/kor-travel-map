@@ -364,6 +364,87 @@ _IMPORT_JOB_EVENT_COLUMNS: Final[str] = (
     "event.message, event.payload, event.occurred_at"
 )
 
+_SCOPED_IMPORT_JOB_EVENT_COLUMNS: Final[str] = (
+    "event.event_id, event.job_id, event.import_job_dataset_id, "
+    "scope_page.provider_dataset_id, event.feature_id, event.stage, event.level, "
+    "event.code, event.message, event.payload, event.occurred_at"
+)
+
+
+def _scoped_import_job_events_sql(
+    *,
+    job_id: str | None,
+    level: str | None,
+    sync_scope: str | None,
+    cursor_occurred_at: datetime | None,
+) -> str:
+    """dataset scope 조회를 membership 축 partial index로 경계 짓는다.
+
+    scope 정본은 ``ops.import_job_datasets``고 event가 갖는 것은
+    ``import_job_dataset_id`` 하나뿐이다(T-VN-33). 그래서 event를 곧장
+    ``(provider_dataset_id, sync_scope, occurred_at DESC)``로 훑는 index는
+    존재할 수 없다 — 그 열들을 event에 사본으로 되돌리는 것이 되기 때문이다.
+
+    남는 경계는 member 하나뿐이다: ``idx_import_job_events_member_time``이
+    member 별로 이미 ``occurred_at DESC, event_id DESC``로 정렬돼 있으므로
+    member 마다 상위 ``:limit``만 뽑아 합치면 전체 상위 ``:limit``이 된다
+    (한 member가 전체 상위 N에 N건 넘게 들어갈 수 없다). 그래서 읽는 양이
+    scope의 총 event 수가 아니라 **member 수 × :limit**으로 묶인다.
+
+    keyset만 뽑는 CTE로 만든 이유는 그 안쪽 scan을 index-only로 유지하기
+    위해서다. payload/message까지 안쪽에서 읽으면 member 마다 heap을 때려
+    member 수에 비례한 random I/O가 그대로 살아난다. ``level`` filter도 같은
+    이유로 index INCLUDE 열을 쓴다.
+    """
+    member_clauses: list[str] = [
+        "member.provider_dataset_id = CAST(:provider_dataset_id AS bigint)"
+    ]
+    if sync_scope is not None:
+        member_clauses.append("member.sync_scope = CAST(:sync_scope AS text)")
+    if job_id is not None:
+        # composite FK ``fk_import_job_events_job_member (job_id,
+        # import_job_dataset_id)`` 때문에 member의 job_id는 그 member에 달린
+        # event의 job_id와 같다. member 쪽에 걸어야 member scan 자체가 좁아진다.
+        member_clauses.append("member.job_id = CAST(:job_id AS uuid)")
+    event_clauses: list[str] = [
+        "event.import_job_dataset_id = scope_member.import_job_dataset_id",
+        "event.quarantined_at IS NULL",
+    ]
+    if level is not None:
+        event_clauses.append("event.level = CAST(:level AS text)")
+    if cursor_occurred_at is not None:
+        event_clauses.append(
+            "(event.occurred_at, event.event_id) < "
+            "(CAST(:cursor_occurred_at AS timestamptz), "
+            "CAST(:cursor_event_id AS uuid))"
+        )
+    member_sql = "\n      AND ".join(member_clauses)
+    event_sql = "\n          AND ".join(event_clauses)
+    return f"""
+WITH scope_member AS (
+    SELECT member.import_job_dataset_id, member.provider_dataset_id
+    FROM ops.import_job_datasets AS member
+    WHERE {member_sql}
+),
+scope_page AS (
+    SELECT ranked.event_id, ranked.occurred_at, scope_member.provider_dataset_id
+    FROM scope_member
+    CROSS JOIN LATERAL (
+        SELECT event.event_id, event.occurred_at
+        FROM ops.import_job_events AS event
+        WHERE {event_sql}
+        ORDER BY event.occurred_at DESC, event.event_id DESC
+        LIMIT :limit
+    ) AS ranked
+    ORDER BY ranked.occurred_at DESC, ranked.event_id DESC
+    LIMIT :limit
+)
+SELECT {_SCOPED_IMPORT_JOB_EVENT_COLUMNS}
+FROM scope_page
+JOIN ops.import_job_events AS event ON event.event_id = scope_page.event_id
+ORDER BY event.occurred_at DESC, event.event_id DESC
+"""
+
 
 def _list_import_job_events_sql(
     *,
@@ -374,6 +455,13 @@ def _list_import_job_events_sql(
     cursor_occurred_at: datetime | None,
 ) -> str:
     """고정 clause만 조합해 각 감사 filter의 B-tree 경로를 보존한다."""
+    if provider_dataset_id is not None:
+        return _scoped_import_job_events_sql(
+            job_id=job_id,
+            level=level,
+            sync_scope=sync_scope,
+            cursor_occurred_at=cursor_occurred_at,
+        )
     clauses: list[str] = [
         "event.quarantined_at IS NULL",
     ]
@@ -381,14 +469,6 @@ def _list_import_job_events_sql(
         clauses.append("event.job_id = CAST(:job_id AS uuid)")
     if level is not None:
         clauses.append("event.level = CAST(:level AS text)")
-    if provider_dataset_id is not None:
-        clauses.append("member.provider_dataset_id = CAST(:provider_dataset_id AS bigint)")
-    if sync_scope is not None:
-        clauses.extend(
-            (
-                "member.sync_scope = CAST(:sync_scope AS text)",
-            )
-        )
     if cursor_occurred_at is not None:
         clauses.append(
             "(event.occurred_at, event.event_id) < "

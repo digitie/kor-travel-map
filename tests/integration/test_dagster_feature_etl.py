@@ -544,10 +544,41 @@ async def test_dagster_assets_validate_coordinates_and_load_to_postgis(
     assert price_value_count == 5
 
 
+async def _notice_valid_end(
+    client: AsyncKorTravelMapClient, feature_id: str
+) -> datetime | None:
+    """공개 read가 보는 notice 효력 종료 시각 (없으면 ``None`` = 열려 있음)."""
+    row = await client.get_feature(feature_id)
+    assert row is not None
+    detail = row["detail"]
+    assert isinstance(detail, dict)
+    value = detail.get("valid_end_time")
+    assert value is None or isinstance(value, str)
+    return datetime.fromisoformat(value) if value is not None else None
+
+
+async def _krex_notice_sync_cursor(client: AsyncKorTravelMapClient) -> dict[str, Any]:
+    """KREX notice snapshot asset이 마지막 성공에 기록한 cursor."""
+    state = await client.get_sync_state(
+        provider="python-krex-api",
+        dataset_key="krex_traffic_notices",
+        # T-VN-33 — sync state identity는 (dataset, scope, operation) 3축이다.
+        operation_key="feature_notice_krex_traffic_notices_job",
+    )
+    assert state is not None
+    return state.cursor
+
+
 async def test_krex_notice_asset_snapshot_lifecycle_and_sync_cursor(
     map_client: AsyncKorTravelMapClient,
 ) -> None:
-    """seed→partial→empty→reappear snapshot이 종료/복구와 cursor를 함께 반영한다."""
+    """seed→partial→empty→reappear snapshot이 종료/복구와 cursor를 함께 반영한다.
+
+    여기서 재등장하는 ``a``는 **byte 단위로 같은** row다 — source entity head가
+    그대로라 ``became_current``가 거짓이고 bundle load가 notice subtype을 아예
+    다시 쓰지 않는다. 내용이 바뀐 재등장(실제 피드의 정상 케이스)은
+    ``test_krex_notice_content_change_reappearance_reopens_and_counts``가 맡는다.
+    """
 
     def _notice(*, occurred_time: str, route_no: str, point_name: str) -> _Notice:
         return _Notice(
@@ -569,25 +600,6 @@ async def test_krex_notice_asset_snapshot_lifecycle_and_sync_cursor(
             raw={"routeNo": route_no, "pointName": point_name},
         )
 
-    async def _valid_end(feature_id: str) -> datetime | None:
-        row = await map_client.get_feature(feature_id)
-        assert row is not None
-        detail = row["detail"]
-        assert isinstance(detail, dict)
-        value = detail.get("valid_end_time")
-        assert value is None or isinstance(value, str)
-        return datetime.fromisoformat(value) if value is not None else None
-
-    async def _sync_cursor() -> dict[str, Any]:
-        state = await map_client.get_sync_state(
-            provider="python-krex-api",
-            dataset_key="krex_traffic_notices",
-            # T-VN-33 — sync state identity는 (dataset, scope, operation) 3축이다.
-            operation_key="feature_notice_krex_traffic_notices_job",
-        )
-        assert state is not None
-        return state.cursor
-
     first_seen = _FETCHED
     partial_at = first_seen + timedelta(minutes=10)
     empty_at = first_seen + timedelta(minutes=20)
@@ -602,8 +614,8 @@ async def test_krex_notice_asset_snapshot_lifecycle_and_sync_cursor(
         fetched_at=first_seen,
     )
     a_id, b_id = seeded.feature_ids
-    assert await _valid_end(a_id) is None
-    assert await _valid_end(b_id) is None
+    assert await _notice_valid_end(map_client, a_id) is None
+    assert await _notice_valid_end(map_client, b_id) is None
 
     await _run_asset(
         run_feature_notice_krex_traffic_notices,
@@ -611,9 +623,9 @@ async def test_krex_notice_asset_snapshot_lifecycle_and_sync_cursor(
         krex_traffic_notices=[a],
         fetched_at=partial_at,
     )
-    assert await _valid_end(a_id) is None
-    assert await _valid_end(b_id) == partial_at
-    assert (await _sync_cursor())["notices_closed"] == 1
+    assert await _notice_valid_end(map_client, a_id) is None
+    assert await _notice_valid_end(map_client, b_id) == partial_at
+    assert (await _krex_notice_sync_cursor(map_client))["notices_closed"] == 1
 
     await _run_asset(
         run_feature_notice_krex_traffic_notices,
@@ -621,9 +633,9 @@ async def test_krex_notice_asset_snapshot_lifecycle_and_sync_cursor(
         krex_traffic_notices=[],
         fetched_at=empty_at,
     )
-    assert await _valid_end(a_id) == empty_at
-    assert await _valid_end(b_id) == partial_at
-    assert (await _sync_cursor())["notices_closed"] == 1
+    assert await _notice_valid_end(map_client, a_id) == empty_at
+    assert await _notice_valid_end(map_client, b_id) == partial_at
+    assert (await _krex_notice_sync_cursor(map_client))["notices_closed"] == 1
 
     await _run_asset(
         run_feature_notice_krex_traffic_notices,
@@ -631,11 +643,117 @@ async def test_krex_notice_asset_snapshot_lifecycle_and_sync_cursor(
         krex_traffic_notices=[a],
         fetched_at=reappeared_at,
     )
-    assert await _valid_end(a_id) is None
-    assert await _valid_end(b_id) == partial_at
-    cursor = await _sync_cursor()
+    assert await _notice_valid_end(map_client, a_id) is None
+    assert await _notice_valid_end(map_client, b_id) == partial_at
+    cursor = await _krex_notice_sync_cursor(map_client)
     assert cursor["notices_reopened"] == 1
     assert cursor["loaded_at"] == reappeared_at.isoformat()
+
+
+async def test_krex_notice_content_change_reappearance_reopens_and_counts(
+    map_client: AsyncKorTravelMapClient,
+) -> None:
+    """내용이 바뀐 재등장도 종료를 되돌리고 ``notices_reopened``로 집계한다.
+
+    byte 단위로 같은 row가 다시 오면 entity head의 current record가 그대로라
+    ``became_current``가 거짓이고, bundle load가 notice subtype을 아예 다시 쓰지
+    않는다 — lifecycle이 "직전에 닫혀 있었다"를 DB에서 그대로 읽을 수 있어 관측
+    시점 결함이 있어도 통과한다. 그러나 실제 KREX 실시간 피드의 정상 재등장은
+    자연키(발생일시·노선·방향·지점·사고유형코드)만 같고 payload(process_status·
+    정체 길이·원문 row)가 바뀐 경우다. 그때는 적재가 lifecycle보다 **먼저**
+    ``valid_end_time``을 NULL로 되돌리므로, 적재 직전 비가시 집합을 재두지 않으면
+    재등장이 관측 불가가 되어 집계가 구조적으로 항상 0이 된다(T-VN-33 회귀).
+    """
+
+    def _notice(*, point_name: str, process_status: str, revision: int) -> _Notice:
+        # 자연키는 occurred_date/time·route_no·direction·point_name·
+        # incident_type_code만 쓴다(`krex._traffic_notice_natural_key`). 아래에서
+        # 바꾸는 process_status/정체 길이/raw는 자연키 밖이라 **같은 feature**를
+        # 가리키면서 raw payload hash만 달라진다.
+        congestion_length = 1.5 * revision
+        return _Notice(
+            occurred_date="2026.07.14",
+            occurred_time="09:30:00",
+            incident_type="정체",
+            incident_type_code="2",
+            direction="부산방향",
+            message=f"{point_name} 정체 {congestion_length}km ({process_status})",
+            point_name=point_name,
+            route_no="0010",
+            route_name="경부고속도로",
+            process_status=process_status,
+            process_status_code=str(revision),
+            latitude=None,
+            longitude=None,
+            congestion_length=congestion_length,
+            series_no=revision,
+            raw={
+                "routeNo": "0010",
+                "pointName": point_name,
+                "processStatus": process_status,
+                "lateLength": congestion_length,
+                "seriesNo": revision,
+            },
+        )
+
+    seeded_at = _FETCHED + timedelta(hours=1)
+    closed_at = seeded_at + timedelta(minutes=10)
+    reappeared_at = seeded_at + timedelta(minutes=20)
+    target = _notice(point_name="기흥", process_status="진행", revision=1)
+    bystander = _notice(point_name="죽전", process_status="진행", revision=1)
+    # 같은 사건의 후속 관측 — 자연키는 그대로, 내용만 바뀐 재등장.
+    target_again = _notice(point_name="기흥", process_status="정체해소중", revision=2)
+
+    seeded = await _run_asset(
+        run_feature_notice_krex_traffic_notices,
+        map_client,
+        krex_traffic_notices=[target, bystander],
+        fetched_at=seeded_at,
+    )
+    seeded_ids = set(seeded.feature_ids)
+    assert len(seeded_ids) == 2
+    assert seeded.load.features_inserted == 2
+    seed_cursor = await _krex_notice_sync_cursor(map_client)
+    # 처음 적재된 공고는 재등장도 종료도 아니다.
+    assert seed_cursor["notices_reopened"] == 0
+    assert seed_cursor["notices_closed"] == 0
+
+    await _run_asset(
+        run_feature_notice_krex_traffic_notices,
+        map_client,
+        krex_traffic_notices=[],
+        fetched_at=closed_at,
+    )
+    for feature_id in sorted(seeded_ids):
+        assert await _notice_valid_end(map_client, feature_id) == closed_at
+    closed_cursor = await _krex_notice_sync_cursor(map_client)
+    assert closed_cursor["notices_closed"] == 2
+    assert closed_cursor["notices_reopened"] == 0
+
+    reappeared = await _run_asset(
+        run_feature_notice_krex_traffic_notices,
+        map_client,
+        krex_traffic_notices=[target_again],
+        fetched_at=reappeared_at,
+    )
+    # 자연키가 같으니 새 feature가 아니라 닫혀 있던 그 feature여야 한다. 여기서
+    # 갈라지면 아래 단언은 재등장이 아니라 신규 적재를 보게 된다.
+    (target_id,) = reappeared.feature_ids
+    assert target_id in seeded_ids
+    (bystander_id,) = seeded_ids - {target_id}
+    # 내용이 바뀌었으므로 이번엔 적재가 feature 본문을 실제로 다시 쓴다. byte 동일
+    # 재등장(features_updated == 0)과 갈리는 지점이 정확히 여기다.
+    assert reappeared.load.source_records_inserted == 1
+    assert reappeared.load.features_inserted == 0
+    assert reappeared.load.features_updated == 1
+
+    assert await _notice_valid_end(map_client, target_id) is None
+    assert await _notice_valid_end(map_client, bystander_id) == closed_at
+    cursor = await _krex_notice_sync_cursor(map_client)
+    assert cursor["notices_reopened"] == 1
+    # 적재 직전 이미 닫혀 있던 ``bystander``를 다시 닫았다고 세면 유령 집계다.
+    assert cursor["notices_closed"] == 0
+    assert cursor["notices_superseded"] == 0
 
 
 async def _run_asset(

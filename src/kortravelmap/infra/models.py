@@ -3002,11 +3002,16 @@ class ImportJobEventRow(Base):
         # keyset은 ``(occurred_at, event_id)``다 — tiebreaker가 빠지면 페이지마다
         # Sort가 붙는다. 부분 술어도 질의의 ``quarantined_at IS NULL``과 같아야
         # 격리 행을 훑지 않는다 (0057이 갖고 있던 두 보증).
+        # ``level``은 key가 아니라 INCLUDE다: dataset scope 조회는 member 마다
+        # 상위 limit만 뽑아 합치는데, level filter가 heap을 때리면 member 수에
+        # 비례한 random I/O가 살아난다. INCLUDE로 두면 그 scan이 index-only로
+        # 남고 key 순서(=keyset 정렬)는 건드리지 않는다.
         Index(
             "idx_import_job_events_member_time",
             "import_job_dataset_id",
             text("occurred_at DESC"),
             text("event_id DESC"),
+            postgresql_include=["level"],
             postgresql_where=text(
                 "import_job_dataset_id IS NOT NULL AND quarantined_at IS NULL"
             ),

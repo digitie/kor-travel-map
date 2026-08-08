@@ -81,6 +81,14 @@ async def test_exact_scope_uses_typed_event_column_before_cursor_and_limit() -> 
         < sql.index("ORDER BY")
         < sql.index("LIMIT")
     )
+    # per-member top-N을 합쳐 페이지를 만든다. 안쪽 LIMIT은 member에 묶인
+    # correlated scan 안에 있어야 하고(그래야 scope 밖 event를 볼 수 없다),
+    # scope 밖에서 event를 다시 끌어오는 join이 없어야 한다.
+    assert "CROSS JOIN LATERAL" in sql
+    assert (
+        sql.index("event.import_job_dataset_id = scope_member.import_job_dataset_id")
+        < sql.index("LIMIT :limit")
+    )
 
 
 @pytest.mark.unit
@@ -181,6 +189,34 @@ def test_exact_scope_index_predicate_matches_repository_query() -> None:
 
 
 @pytest.mark.unit
+def test_scope_page_filters_stay_inside_the_member_bounded_scan() -> None:
+    """scope 조회의 event 쪽 술어는 전부 member correlated scan 안에 있어야 한다.
+
+    ``idx_import_job_events_member_time``은 member 마다
+    ``(occurred_at DESC, event_id DESC)``로 정렬돼 있고 ``level``을 INCLUDE로
+    갖는다. level·cursor 술어가 그 scan 밖으로 새어나가면 member 별 상위
+    ``limit``을 못 자르고 scope 전체를 모아 정렬하게 된다 — 인덱스가 있어도
+    읽는 양이 페이지 크기가 아니라 scope 크기에 비례한다.
+    """
+
+    sql = ops_repo._list_import_job_events_sql(
+        job_id=None,
+        level="error",
+        provider_dataset_id=7,
+        sync_scope="dataset_wide",
+        cursor_occurred_at=datetime(2026, 7, 18, tzinfo=UTC),
+    )
+    lateral_at = sql.index("CROSS JOIN LATERAL")
+    page_cut_at = sql.rindex("LIMIT :limit")
+    for predicate in (
+        "event.level = CAST(:level AS text)",
+        "(event.occurred_at, event.event_id) < ",
+        "event.quarantined_at IS NULL",
+    ):
+        assert lateral_at < sql.index(predicate) < page_cut_at
+
+
+@pytest.mark.unit
 def test_event_scope_columns_are_not_denormalized_onto_the_event() -> None:
     """0057의 비정규화 3열은 T-VN-33에서 membership으로 흡수됐다.
 
@@ -216,6 +252,9 @@ def test_event_scope_columns_are_not_denormalized_onto_the_event() -> None:
     predicate = str(member_index.dialect_options["postgresql"]["where"])
     assert "quarantined_at IS NULL" in predicate
     assert "import_job_dataset_id IS NOT NULL" in predicate
+    # ``level``은 key가 아니라 INCLUDE여야 한다. key로 올리면 keyset 정렬이
+    # 깨지고, 빼면 level filter가 member 마다 heap을 때린다.
+    assert list(member_index.dialect_options["postgresql"]["include"]) == ["level"]
 
 
 @pytest.mark.unit

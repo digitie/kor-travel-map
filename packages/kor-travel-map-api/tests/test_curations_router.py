@@ -6,7 +6,7 @@ import csv
 import hashlib
 import io
 import json
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Iterator, Mapping
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Any
@@ -57,21 +57,25 @@ class _FakeCatalogRow:
         self.provider_dataset_id = provider_dataset_id
 
 
+_CATALOG_ROWS: tuple[_FakeCatalogRow, ...] = (
+    # 101은 **등대가 아닌** dataset이다 — 등대면 provenance가 필수라
+    # 일반 import 경로를 검증할 수 없다. 102만 공식 등대다.
+    _FakeCatalogRow("korea-lighthouse-museum", "lighthouse-museum-curations", 101),
+    _FakeCatalogRow("korea-lighthouse-museum", "lighthouse-stamp-tour-season-5", 102),
+    _FakeCatalogRow("korea-tourism-organization", "tourism-100-2026", 103),
+)
+
+#: ``_lighthouse_dataset_pairs``의 ``LIKE`` 술어와 같은 축. 공식 등대 판정은
+#: 자연키 dataset_key prefix로만 한다 (``curation_provenance`` docstring).
+_LIGHTHOUSE_DATASET_PREFIX = "lighthouse-stamp-tour-season-"
+
+
 class _FakeResult:
+    def __init__(self, rows: tuple[_FakeCatalogRow, ...]) -> None:
+        self._rows = rows
+
     def __iter__(self) -> Iterator[_FakeCatalogRow]:
-        return iter(
-            (
-                # 101은 **등대가 아닌** dataset이다 — 등대면 provenance가 필수라
-                # 일반 import 경로를 검증할 수 없다. 102만 공식 등대다.
-                _FakeCatalogRow("korea-lighthouse-museum", "lighthouse-museum-curations", 101),
-                _FakeCatalogRow(
-                    "korea-lighthouse-museum",
-                    "lighthouse-stamp-tour-season-5",
-                    102,
-                ),
-                _FakeCatalogRow("korea-tourism-organization", "tourism-100-2026", 103),
-            )
-        )
+        return iter(self._rows)
 
 
 class _FakeSession:
@@ -86,9 +90,33 @@ class _FakeSession:
         self.commits = 0
         self.rollbacks = 0
 
-    async def execute(self, statement: object, params: object = None) -> _FakeResult:
-        del statement, params
-        return _FakeResult()
+    async def execute(
+        self, statement: object, params: Mapping[str, Any] | None = None
+    ) -> _FakeResult:
+        """``provider_sync.provider_datasets`` 조회 2종을 술어까지 흉내낸다.
+
+        둘 다 같은 표를 읽지만 술어가 다르다 — pair 해석은 (provider,
+        dataset_key) 전부를, 등대 판정은 ``LIKE 'lighthouse-stamp-tour-season-%'``
+        로 좁힌 것만 돌려준다. 술어를 무시하고 한 벌을 그대로 돌려주면 평범한
+        dataset까지 공식 등대로 오판돼 모든 import가 provenance 422가 된다.
+        """
+        sql = str(statement)
+        if "provider_sync.provider_datasets" not in sql:
+            raise AssertionError(f"stub이 모르는 질의입니다: {sql}")
+        bound = params or {}
+        dataset_keys = frozenset(bound.get("dataset_keys", ()))
+        rows = tuple(row for row in _CATALOG_ROWS if row.dataset_key in dataset_keys)
+        providers = bound.get("providers")
+        if providers is not None:
+            pairs = frozenset(zip(providers, bound["dataset_keys"], strict=True))
+            rows = tuple(row for row in rows if (row.provider, row.dataset_key) in pairs)
+        if _LIGHTHOUSE_DATASET_PREFIX in sql:
+            rows = tuple(
+                row
+                for row in rows
+                if row.dataset_key.startswith(_LIGHTHOUSE_DATASET_PREFIX)
+            )
+        return _FakeResult(rows)
 
     async def commit(self) -> None:
         self.commits += 1
@@ -234,6 +262,7 @@ def _csv_content(
     official_ordinal: str = "",
     sort_order: str = "",
     official_lighthouse: bool = False,
+    dataset_key: str | None = None,
 ) -> bytes:
     values = dict.fromkeys(CURATION_CSV_HEADERS, "")
     values.update(
@@ -262,6 +291,8 @@ def _csv_content(
                 "dataset_key": "lighthouse-stamp-tour-season-5",
             }
         )
+    if dataset_key is not None:
+        values["dataset_key"] = dataset_key
     output = io.StringIO(newline="")
     writer = csv.DictWriter(output, fieldnames=CURATION_CSV_HEADERS)
     writer.writeheader()
@@ -383,6 +414,40 @@ def test_official_lighthouse_import_requires_provenance_sidecar(
             "file": (
                 "lighthouse-stamp-tour.csv",
                 _csv_content(official_lighthouse=True),
+                "text/csv",
+            )
+        },
+    )
+
+    assert response.status_code == 422
+    assert "provenance_file" in response.json()["detail"]
+    matches.assert_not_awaited()
+
+
+@pytest.mark.unit
+def test_official_lighthouse_dataset_key_alone_requires_provenance_sidecar(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """collection_key가 등대 접두어가 아니어도 catalog dataset이 등대면 422다.
+
+    T-VN-33이 남긴 두 번째 판정 축(자연키 pair를 catalog에서 확인)을 단독으로
+    고정한다. 위 테스트의 CSV는 collection_key 접두어로도 걸려서 이 축이
+    죽어도 통과한다 — 그러면 등대 seed가 provenance 없이 들어온다.
+    """
+    from kortravelmap.api.routers import curations as module
+
+    matches = AsyncMock()
+    monkeypatch.setattr(module.curation_repo, "resolve_feature_matches", matches)
+
+    response = client.post(
+        "/v1/admin/curations/import",
+        params={"dry_run": "false"},
+        files={
+            "file": (
+                "lighthouse-stamp-tour.csv",
+                # collection_key는 기본값 `lighthouse:healing` — 접두어 축은 꺼진다.
+                _csv_content(dataset_key="lighthouse-stamp-tour-season-5"),
                 "text/csv",
             )
         },

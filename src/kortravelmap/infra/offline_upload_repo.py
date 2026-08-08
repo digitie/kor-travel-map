@@ -240,14 +240,17 @@ WHERE upload_id = :upload_id
 FOR UPDATE
 """
 
+# 멱등 키는 계약대로 3열이다 — ``uq_offline_uploads_dataset_scope_checksum``.
+# 그래서 이 read는 "여러 후보 중 최신 하나"가 아니라 **그 unique 제약이 가리키는
+# 정확히 그 행**을 읽는다. ``ORDER BY ... LIMIT 1``을 두면 제약이 바뀌거나 사라져도
+# 임의의 행을 조용히 골라 409가 엉뚱한 upload/operation을 가리키게 된다. 정렬을 빼고
+# ``one_or_none()``으로 받아 그런 상태는 조용히 넘어가지 않고 드러나게 한다.
 _GET_BY_CHECKSUM_SQL: Final[str] = f"""
 SELECT {_RETURN_COLUMNS}
 FROM ops.offline_uploads
 WHERE provider_dataset_id = :provider_dataset_id
   AND sync_scope = :sync_scope
   AND checksum_sha256 = :checksum_sha256
-ORDER BY created_at DESC, upload_id DESC
-LIMIT 1
 """
 
 _LIST_SQL: Final[str] = f"""
@@ -593,7 +596,12 @@ async def get_offline_upload_by_checksum(
     sync_scope: str,
     checksum_sha256: str,
 ) -> OfflineUpload | None:
-    """canonical dataset/scope/checksum 조합으로 기존 업로드를 조회한다."""
+    """canonical dataset/scope/checksum 조합으로 기존 업로드를 조회한다.
+
+    반환 행은 ``operation_key``까지 든 exact identity(ADR-088)다. 중복 409를 만드는
+    호출자는 그 값을 응답에 실어 운영자가 어느 operation에 결박된 upload인지
+    구분할 수 있게 해야 한다.
+    """
     result = await session.execute(
         text(_GET_BY_CHECKSUM_SQL),
         {

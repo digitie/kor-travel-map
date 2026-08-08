@@ -548,6 +548,39 @@ def _decode_cursor(cursor: str | None) -> tuple[datetime | None, str | None]:
     return created_at, request_id
 
 
+#: 요청 생성 transaction의 **첫 lock**으로 canonical scope 행을 정렬 순서로 잡는다.
+#:
+#: 이 lock이 없으면 같은 canonical scope의 동시 생성이 아래 순서 역전으로
+#: deadlock한다 (실측 서버 로그 기준):
+#:
+#: 1. ``ops.import_job_datasets`` INSERT의 FK가 scope 행에 ``FOR KEY SHARE``를
+#:    건다 — 공유 lock이라 두 transaction이 동시에 보유한다.
+#: 2. ``ops.import_job_events`` INSERT의 statement trigger가 전역 singleton
+#:    ``ops.import_job_event_clock`` 행을 commit까지 배타 점유한다.
+#: 3. request membership INSERT의 overlap trigger
+#:    (``assert_feature_update_request_member_available``)가 같은 scope 행을
+#:    ``FOR UPDATE``로 **승격**한다 — 상대의 KEY SHARE 때문에 대기한다.
+#:
+#: clock 행을 먼저 잡은 쪽은 3에서, 못 잡은 쪽은 2에서 서로를 기다린다. 강한
+#: lock을 미리 잡아 두면 모든 transaction이 scope → clock 한 방향으로만 lock을
+#: 얻으므로 순환이 생기지 않는다. 정렬 순서는 DB 쪽
+#: ``lock_feature_update_request_member_scopes`` / membership 검사 loop와 같은
+#: ``(provider_dataset_id, sync_scope, operation_key)``다 — 다중 membership끼리도
+#: 순서가 엇갈리지 않는다.
+_LOCK_MEMBER_SCOPES_SQL: Final[str] = """
+SELECT scope.provider_dataset_id
+FROM provider_sync.provider_dataset_operation_scopes AS scope
+JOIN jsonb_to_recordset(CAST(:dataset_memberships AS jsonb)) AS target(
+    provider_dataset_id bigint,
+    sync_scope text,
+    operation_key text
+) ON target.provider_dataset_id = scope.provider_dataset_id
+ AND target.sync_scope = scope.sync_scope
+ AND target.operation_key = scope.operation_key
+ORDER BY scope.provider_dataset_id, scope.sync_scope, scope.operation_key
+FOR UPDATE OF scope
+"""
+
 _INSERT_REQUEST_SQL: Final[str] = f"""
 WITH expected_members AS (
     SELECT target.provider_dataset_id, target.sync_scope, target.operation_key
@@ -1154,6 +1187,23 @@ async def enqueue_feature_update_request(
             if not acquired:
                 raise FeatureUpdateLockBusy(lock_key=scope_lock_key)
 
+    membership_param = json.dumps(
+        [
+            {
+                "provider_dataset_id": member.provider_dataset_id,
+                "sync_scope": member.sync_scope,
+                "operation_key": member.operation_key,
+            }
+            for member in memberships
+        ]
+    )
+    # 아래 job/request INSERT가 같은 scope 행의 lock을 KEY SHARE → FOR UPDATE로
+    # 승격하며 서로 교차 대기하지 않도록, 강한 lock을 정렬 순서로 미리 잡는다
+    # (``_LOCK_MEMBER_SCOPES_SQL`` 주석의 실측 deadlock 사슬 참조).
+    await session.execute(
+        text(_LOCK_MEMBER_SCOPES_SQL),
+        {"dataset_memberships": membership_param},
+    )
     request_id = str(uuid4())
     job = await enqueue_feature_update_request_job(
         session,
@@ -1168,16 +1218,7 @@ async def enqueue_feature_update_request(
                 "scope_type": scope_type,
                 "scope": _json_param(scope_payload),
                 "dataset_membership_mode": "single" if len(memberships) == 1 else "multiple",
-                "dataset_memberships": json.dumps(
-                    [
-                        {
-                            "provider_dataset_id": member.provider_dataset_id,
-                            "sync_scope": member.sync_scope,
-                            "operation_key": member.operation_key,
-                        }
-                        for member in memberships
-                    ]
-                ),
+                "dataset_memberships": membership_param,
                 "update_policy": _json_param(policy),
                 "run_mode": plan.run_mode,
                 "priority": plan.priority,
