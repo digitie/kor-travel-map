@@ -515,6 +515,50 @@ CI의 `npm high 취약점 gate`는 **배포되는 의존성만** 본다(`npm aud
 **게이트를 다시 조일 조건**: `openapi-typescript`가 redocly 2.x 호환 릴리스를
 내면 override와 `--omit=dev`를 함께 걷어낸다.
 
+## 10.7 geo live 테스트가 "public API key 거부"로 실패할 때
+
+`tests/integration/test_dedup_with_kraddr_geo_live.py`는 실제 kor-travel-geo를 호출한다.
+막히는 지점이 셋이고 셋 다 헷갈리게 생겼다 — 2026-08-08에 전부 밟았다.
+
+**① 키는 VWorld 키가 아니다.** `.env.example`의
+`KOR_TRAVEL_GEO_API_KEY=$NEXT_PUBLIC_VWORLD_API_KEY` 주석은 낡았다. 두 키는 방향이 다르다:
+
+    Map ──[Map public API key]──▶ geo ──[VWorld key]──▶ VWorld
+          geo가 소비자별로 발급          네 곳이 공유(확인됨)
+
+VWorld 키는 `python-vworld-api/.env` · `kor-travel-map/.env`(2개) · geo 컨테이너
+`KTG_VWORLD_API_KEY`가 **전부 동일**하다. 하지만 그것으로 geo에 인증하면 거부된다.
+
+**② 키 정본은 n150 `~/.secrets/kor-travel-map-public-api-key`(600)다.**
+평문은 채팅·로그·저장소에 남기지 않는다. geo의 `ops.public_api_keys`는 `key_hash`와
+`key_hint`만 저장하므로 **분실 시 복구 불가, 재발급만 가능**하다. 발급 현황 확인:
+
+```bash
+ssh n150 'docker exec kor-travel-geo-postgres psql -U addr -d kor_travel_geo   -c "SELECT label, state, key_hint, created_at::date FROM ops.public_api_keys ORDER BY created_at DESC;"'
+```
+
+`state=active`인 `kor-travel-map` 행이 있어야 한다. 로컬(개발 머신)의 geo DB에는
+활성 키가 없을 수 있으니 **prod(n150)** 쪽을 봐야 한다.
+
+**③ 테스트가 읽는 base URL 변수는 `LIVE_KOR_TRAVEL_GEO_BASE_URL`이다.**
+`KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_BASE_URL`이 아니다. 이것만 넘기면 테스트는 기본값
+(로컬 12501)으로 가고, 로컬에 활성 키가 없으면 "키 거부"처럼 보인다 — 원인이
+키가 아니라 **주소**인데 메시지는 키를 가리킨다.
+
+실행 예(prod geo에 SSH 터널을 뚫고 도는 형태):
+
+```bash
+wsl -e bash -lc "ssh -N -L 12599:127.0.0.1:12501 n150" &
+GK=$(wsl -e bash -lc 'ssh n150 "cat ~/.secrets/kor-travel-map-public-api-key"' | tr -d '
+')
+docker run --rm --network host -v /var/run/docker.sock:/var/run/docker.sock   -v /mnt/f/dev/<worktree>:/src -e TESTCONTAINERS_RYUK_DISABLED=true   -e KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY="$GK"   -e LIVE_KOR_TRAVEL_GEO_BASE_URL="http://127.0.0.1:12599"   ktm-battery:t37 sh -c '... pytest tests/integration/test_dedup_with_kraddr_geo_live.py'
+```
+
+키 전송은 클라이언트가 `X-KTG-API-Key` 헤더로 한다. geo는 쿼리 파라미터 `key`도
+받는다(curl로 확인할 때 편하다). 헤더 이름을 `x-api-key`로 잘못 쓰면 400/E0100/
+`field: key`가 오는데, 클라이언트는 그 응답을 **키 거부로 해석**한다
+(`geocoding.py::_is_public_key_rejection`) — 진단할 때 헷갈리기 쉬우니 주의.
+
 ## 11. 운영 환경 정보 (참고)
 
 운영 환경(Odroid M1S, ARM64)에 대한 상세 임계값은 SPEC V8 v8_0이 정한다.
