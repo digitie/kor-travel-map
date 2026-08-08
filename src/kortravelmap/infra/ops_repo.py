@@ -94,6 +94,9 @@ class OpsImportJobEvent:
     job_id: str
     import_job_dataset_id: str | None
     provider_dataset_id: int | None
+    # membership identity의 나머지 한 축. event는 import_job_dataset_id만 들고 있으므로
+    # member join으로 되짚는다 — 사본을 event에 두면 T-VN-33이 없앤 그 모양이 된다.
+    operation_key: str | None
     feature_id: str | None
     stage: str | None
     level: str
@@ -364,14 +367,15 @@ WHERE job.job_id = CAST(:job_id AS uuid)
 
 _IMPORT_JOB_EVENT_COLUMNS: Final[str] = (
     "event.event_id, event.job_id, event.import_job_dataset_id, "
-    "member.provider_dataset_id, event.feature_id, event.stage, event.level, event.code, "
-    "event.message, event.payload, event.occurred_at"
+    "member.provider_dataset_id, member.operation_key, event.feature_id, event.stage, "
+    "event.level, event.code, event.message, event.payload, event.occurred_at"
 )
 
 _SCOPED_IMPORT_JOB_EVENT_COLUMNS: Final[str] = (
     "event.event_id, event.job_id, event.import_job_dataset_id, "
-    "scope_page.provider_dataset_id, event.feature_id, event.stage, event.level, "
-    "event.code, event.message, event.payload, event.occurred_at"
+    "scope_page.provider_dataset_id, scope_page.operation_key, event.feature_id, "
+    "event.stage, event.level, event.code, event.message, event.payload, "
+    "event.occurred_at"
 )
 
 
@@ -380,6 +384,7 @@ def _scoped_import_job_events_sql(
     job_id: str | None,
     level: str | None,
     sync_scope: str | None,
+    operation_key: str | None,
     cursor_occurred_at: datetime | None,
 ) -> str:
     """dataset scope 조회를 membership 축 partial index로 경계 짓는다.
@@ -405,6 +410,10 @@ def _scoped_import_job_events_sql(
     ]
     if sync_scope is not None:
         member_clauses.append("member.sync_scope = CAST(:sync_scope AS text)")
+    if operation_key is not None:
+        # membership identity는 triple이다 — scope까지만 좁히면 형제 operation의
+        # event가 섞여 나온다. member 축 index가 이 열도 이미 앞쪽에 들고 있다.
+        member_clauses.append("member.operation_key = CAST(:operation_key AS text)")
     if job_id is not None:
         # composite FK ``fk_import_job_events_job_member (job_id,
         # import_job_dataset_id)`` 때문에 member의 job_id는 그 member에 달린
@@ -426,12 +435,14 @@ def _scoped_import_job_events_sql(
     event_sql = "\n          AND ".join(event_clauses)
     return f"""
 WITH scope_member AS (
-    SELECT member.import_job_dataset_id, member.provider_dataset_id
+    SELECT member.import_job_dataset_id, member.provider_dataset_id,
+           member.operation_key
     FROM ops.import_job_datasets AS member
     WHERE {member_sql}
 ),
 scope_page AS (
-    SELECT ranked.event_id, ranked.occurred_at, scope_member.provider_dataset_id
+    SELECT ranked.event_id, ranked.occurred_at, scope_member.provider_dataset_id,
+           scope_member.operation_key
     FROM scope_member
     CROSS JOIN LATERAL (
         SELECT event.event_id, event.occurred_at
@@ -456,6 +467,7 @@ def _list_import_job_events_sql(
     level: str | None,
     provider_dataset_id: int | None,
     sync_scope: str | None,
+    operation_key: str | None,
     cursor_occurred_at: datetime | None,
 ) -> str:
     """고정 clause만 조합해 각 감사 filter의 B-tree 경로를 보존한다."""
@@ -464,6 +476,7 @@ def _list_import_job_events_sql(
             job_id=job_id,
             level=level,
             sync_scope=sync_scope,
+            operation_key=operation_key,
             cursor_occurred_at=cursor_occurred_at,
         )
     clauses: list[str] = [
@@ -661,6 +674,9 @@ def _row_to_import_job_event(row: Any) -> OpsImportJobEvent:
             if row.provider_dataset_id is not None
             else None
         ),
+        operation_key=(
+            str(row.operation_key) if row.operation_key is not None else None
+        ),
         feature_id=row.feature_id,
         stage=row.stage,
         level=str(row.level),
@@ -758,6 +774,7 @@ async def list_ops_import_job_events(
     level: str | None = None,
     provider_dataset_id: int | None = None,
     sync_scope: str | None = None,
+    operation_key: str | None = None,
     limit: int = 50,
     cursor: str | None = None,
 ) -> OpsImportJobEventPage:
@@ -778,6 +795,9 @@ async def list_ops_import_job_events(
         "level": level,
         "provider_dataset_id": str(provider_dataset_id) if provider_dataset_id else None,
         "sync_scope": sync_scope,
+        # cursor는 filter 집합에 묶인다 — operation_key를 빼면 다른 filter로 발급한
+        # cursor를 재사용해 페이지가 조용히 어긋난다.
+        "operation_key": operation_key,
     }
     cursor_occurred_at, cursor_event_id = _decode_bound_cursor(
         cursor,
@@ -789,6 +809,7 @@ async def list_ops_import_job_events(
         level=level,
         provider_dataset_id=provider_dataset_id,
         sync_scope=sync_scope,
+        operation_key=operation_key,
         cursor_occurred_at=cursor_occurred_at,
     )
     rows = (
@@ -799,6 +820,7 @@ async def list_ops_import_job_events(
                 "level": level,
                 "provider_dataset_id": provider_dataset_id,
                 "sync_scope": sync_scope,
+                "operation_key": operation_key,
                 "cursor_occurred_at": cursor_occurred_at,
                 "cursor_event_id": cursor_event_id,
                 "limit": page_size + 1,

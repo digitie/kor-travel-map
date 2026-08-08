@@ -110,12 +110,23 @@ type DatasetSelection = {
   provider: string;
   datasetKey: string;
   syncScope: string;
+  /**
+   * membership의 operation. API는 refresh operation이 없는 catalog 전용 행에
+   * null을 내지만(스키마 참조), UI 내부에서는 빈 문자열로 정규화해 들고 다닌다 —
+   * 선택/비교/URL 경로마다 null 분기를 퍼뜨리지 않기 위해서다. 정규화는
+   * `rowOperationKey` 한 곳에서만 한다.
+   */
   operationKey: string;
 };
 
+/** API 경계에서 null을 없앤다 — 이 함수 밖에서는 operation_key를 직접 읽지 않는다. */
+function rowOperationKey(row: OpsDatasetGridRow): string {
+  return row.operation_key ?? "";
+}
+
 /** text-safe stable tuple key — NUL 문자는 diff를 binary로 만들었다(리뷰 검출). */
 function rowKey(row: OpsDatasetGridRow): string {
-  return [row.provider_dataset_id, row.sync_scope, row.operation_key]
+  return [String(row.provider_dataset_id), row.sync_scope, rowOperationKey(row)]
     .map(encodeURIComponent)
     .join("|");
 }
@@ -126,7 +137,7 @@ function selectionFromRow(row: OpsDatasetGridRow): DatasetSelection {
     provider: row.provider,
     datasetKey: row.dataset_key,
     syncScope: row.sync_scope,
-    operationKey: row.operation_key,
+    operationKey: rowOperationKey(row),
   };
 }
 
@@ -134,7 +145,7 @@ function sameRow(row: OpsDatasetGridRow, selection: DatasetSelection): boolean {
   return (
     row.provider_dataset_id === selection.providerDatasetId &&
     row.sync_scope === selection.syncScope &&
-    row.operation_key === selection.operationKey
+    rowOperationKey(row) === selection.operationKey
   );
 }
 

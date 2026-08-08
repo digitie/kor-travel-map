@@ -756,10 +756,17 @@ def _canonical_dataset_filter(
     *,
     provider_dataset_id: int | None,
     sync_scope: str | None,
+    operation_key: str | None = None,
 ) -> str | None:
-    """canonical dataset 없이 scope로 필터하는 요청을 거부한다."""
+    """canonical dataset 없이 membership 축으로 필터하는 요청을 거부한다.
+
+    ``sync_scope``/``operation_key``는 membership identity의 일부이므로 dataset을
+    지목하지 않은 채 주면 무엇에 대한 scope/operation인지 정해지지 않는다.
+    """
     if provider_dataset_id is not None and provider_dataset_id <= 0:
         raise ValueError("provider_dataset_id must be greater than 0")
+    if operation_key is not None and provider_dataset_id is None:
+        raise ValueError("operation_key requires provider_dataset_id")
     if sync_scope is None:
         return None
     if provider_dataset_id is None:
@@ -1200,8 +1207,19 @@ async def list_executions(
         Query(
             min_length=1,
             description=(
-                "canonical provider dataset의 논리 scope. ID query와 함께 주어야 하며 "
-                "기본 state는 dataset_wide/NULL 저장 표현을 같은 이력으로 조회한다."
+                "canonical provider dataset의 논리 scope. ID query와 함께 주어야 한다."
+            ),
+        ),
+    ] = None,
+    operation_key: Annotated[
+        str | None,
+        Query(
+            min_length=1,
+            description=(
+                "exact membership의 operation. ID query와 함께 주어야 한다. "
+                "생략하면 그 dataset/scope의 모든 operation을 함께 조회한다 — "
+                "membership identity는 triple이므로(ADR-088) 형제 operation을 "
+                "가르려면 이 값이 필요하다."
             ),
         ),
     ] = None,
@@ -1217,6 +1235,7 @@ async def list_executions(
         canonical_sync_scope = _canonical_dataset_filter(
             provider_dataset_id=provider_dataset_id,
             sync_scope=sync_scope,
+            operation_key=operation_key,
         )
         dataset_sync_scopes = None
         if canonical_sync_scope is not None:
@@ -1228,6 +1247,7 @@ async def list_executions(
             status=status_filter,
             provider_dataset_id=provider_dataset_id,
             dataset_sync_scopes=dataset_sync_scopes,
+            dataset_operation_key=operation_key,
             load_batch_id=(str(load_batch_id) if load_batch_id is not None else None),
             parent_job_id=(str(parent_job_id) if parent_job_id is not None else None),
             created_from=created_from,
@@ -1478,6 +1498,16 @@ async def list_pipeline_events(
     level: Annotated[JobEventLevel | None, Query()] = None,
     provider_dataset_id: Annotated[int | None, Query(ge=1)] = None,
     sync_scope: Annotated[str | None, Query(min_length=1)] = None,
+    operation_key: Annotated[
+        str | None,
+        Query(
+            min_length=1,
+            description=(
+                "exact membership의 operation. ID query와 함께 주어야 한다. "
+                "생략하면 그 dataset/scope의 모든 operation event를 함께 본다."
+            ),
+        ),
+    ] = None,
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
     cursor: Annotated[str | None, Query()] = None,
 ) -> PipelineEventsListResponse:
@@ -1486,6 +1516,7 @@ async def list_pipeline_events(
         canonical_sync_scope = _canonical_dataset_filter(
             provider_dataset_id=provider_dataset_id,
             sync_scope=sync_scope,
+            operation_key=operation_key,
         )
         page = await list_ops_import_job_events(
             session,
@@ -1493,6 +1524,7 @@ async def list_pipeline_events(
             level=level,
             provider_dataset_id=provider_dataset_id,
             sync_scope=canonical_sync_scope,
+            operation_key=operation_key,
             limit=page_size,
             cursor=cursor,
         )

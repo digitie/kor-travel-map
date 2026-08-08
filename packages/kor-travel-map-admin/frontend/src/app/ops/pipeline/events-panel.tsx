@@ -51,6 +51,7 @@ export function PipelineEventsPanel({
   onUrlChange,
   providerDatasetId,
   syncScope,
+  operationKey,
 }: {
   onSelectExecution: (kind: ExecutionKind, id: string) => void;
   onUrlChange: (
@@ -59,6 +60,8 @@ export function PipelineEventsPanel({
   ) => void;
   providerDatasetId: string;
   syncScope: string;
+  /** membership identity의 나머지 한 축. 비우면 그 dataset/scope의 모든 operation. */
+  operationKey: string;
 }) {
   const [level, setLevel] = useState<JobEventLevel | "all">("all");
   const [jobId, setJobId] = useState("");
@@ -66,6 +69,7 @@ export function PipelineEventsPanel({
     level,
     providerDatasetId,
     syncScope,
+    operationKey,
     jobId,
   ]);
   const [paginationSignature, setPaginationSignature] =
@@ -85,10 +89,12 @@ export function PipelineEventsPanel({
   const cursor = activeCursorStack.at(-1) ?? null;
   const providerDatasetIdFilter = positiveInteger(providerDatasetId);
   const syncScopeFilter = syncScope.trim() || undefined;
+  const operationKeyFilter = operationKey.trim() || undefined;
   const events = usePipelineEvents({
     level: level === "all" ? undefined : level,
     provider_dataset_id: providerDatasetIdFilter,
     sync_scope: providerDatasetIdFilter ? syncScopeFilter : undefined,
+    operation_key: providerDatasetIdFilter ? operationKeyFilter : undefined,
     job_id: jobId.trim() || undefined,
     page_size: PAGE_SIZE,
     cursor,

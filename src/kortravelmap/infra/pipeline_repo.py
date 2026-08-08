@@ -178,6 +178,7 @@ def _filter_fingerprint(
     status: str | None = None,
     provider_dataset_id: int | None = None,
     sync_scopes: tuple[str, ...] = (),
+    operation_key: str | None = None,
     include_unscoped_scope: bool = False,
     filter_sync_scopes: bool = False,
     load_batch_id: str | None = None,
@@ -190,6 +191,7 @@ def _filter_fingerprint(
         "status": status,
         "provider_dataset_id": provider_dataset_id,
         "sync_scopes": sorted(sync_scopes),
+        "operation_key": operation_key,
         "include_unscoped_scope": include_unscoped_scope,
         "filter_sync_scopes": filter_sync_scopes,
         "load_batch_id": load_batch_id,
@@ -794,10 +796,12 @@ filtered_roots AS (
             AND (
               NOT CAST(:filter_sync_scopes AS boolean)
               OR pair.sync_scope = ANY(CAST(:sync_scopes AS text[]))
-              OR (
-                CAST(:include_unscoped_scope AS boolean)
-                AND pair.sync_scope IS NULL
-              )
+            )
+            -- membership identity는 triple이다. scope까지만 좁히면 형제 operation의
+            -- 실행이 섞여 나온다.
+            AND (
+              CAST(:operation_key AS text) IS NULL
+              OR pair.operation_key = CAST(:operation_key AS text)
             )
         )
       )
@@ -1321,6 +1325,7 @@ async def list_pipeline_executions(
     status: str | None = None,
     provider_dataset_id: int | None = None,
     dataset_sync_scopes: Collection[str | None] | None = None,
+    dataset_operation_key: str | None = None,
     load_batch_id: str | None = None,
     parent_job_id: str | None = None,
     created_from: datetime | None = None,
@@ -1339,6 +1344,8 @@ async def list_pipeline_executions(
         raise ValueError("provider_dataset_id must be greater than 0")
     if dataset_sync_scopes is not None and provider_dataset_id is None:
         raise ValueError("dataset_sync_scopes requires provider_dataset_id")
+    if dataset_operation_key is not None and provider_dataset_id is None:
+        raise ValueError("dataset_operation_key requires provider_dataset_id")
     try:
         normalized_load_batch_id = str(UUID(load_batch_id)) if load_batch_id is not None else None
     except (TypeError, ValueError) as exc:
@@ -1362,6 +1369,7 @@ async def list_pipeline_executions(
         status=status,
         provider_dataset_id=provider_dataset_id,
         sync_scopes=sync_scopes,
+        operation_key=dataset_operation_key,
         include_unscoped_scope=include_unscoped_scope,
         filter_sync_scopes=filter_sync_scopes,
         load_batch_id=normalized_load_batch_id,
@@ -1387,6 +1395,7 @@ async def list_pipeline_executions(
         "provider_dataset_id": provider_dataset_id,
         "filter_sync_scopes": filter_sync_scopes,
         "sync_scopes": list(sync_scopes),
+        "operation_key": dataset_operation_key,
         "include_unscoped_scope": include_unscoped_scope,
         "load_batch_id": normalized_load_batch_id,
         "parent_job_id": normalized_parent_job_id,

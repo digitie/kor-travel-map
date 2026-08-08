@@ -41,6 +41,7 @@ def _event(event_id: str, *, at: datetime) -> SimpleNamespace:
         job_id="57000000-0000-4000-8000-000000000001",
         import_job_dataset_id="57000000-0000-4000-8000-0000000000a1",
         provider_dataset_id=7,
+        operation_key="fixture_refresh",
         feature_id=None,
         stage="loading",
         level="info",
@@ -134,11 +135,16 @@ async def test_event_cursor_rejects_invalid_keyset_before_query(
     at: datetime,
     key: str,
 ) -> None:
+    # cursor filter 집합은 아래 호출과 **정확히 같아야** 한다 — 어긋나면 keyset 검사
+    # 전에 filter mismatch로 먼저 걸려 이 테스트의 의도(잘못된 keyset을 쿼리 전에
+    # 거부)를 검증하지 못한다. membership triple이 filter에 들어가므로 operation_key도
+    # 포함한다.
     filters = {
         "job_id": None,
         "level": None,
         "provider_dataset_id": "7",
         "sync_scope": "dataset_wide",
+        "operation_key": None,
     }
     cursor = ops_repo._encode_bound_cursor(
         "import_job_events",
@@ -178,11 +184,15 @@ def test_exact_scope_index_predicate_matches_repository_query() -> None:
         level=None,
         provider_dataset_id=7,
         sync_scope="dataset_wide",
+        operation_key="fixture_refresh",
         cursor_occurred_at=None,
     )
     for predicate in (
         "member.provider_dataset_id = CAST(:provider_dataset_id AS bigint)",
         "member.sync_scope = CAST(:sync_scope AS text)",
+        # membership identity는 triple이다 — operation 축까지 member 절 안에 있어야
+        # 형제 operation의 event가 섞이지 않고, member 축 index 경계도 유지된다.
+        "member.operation_key = CAST(:operation_key AS text)",
         "event.quarantined_at IS NULL",
     ):
         assert predicate in sql
@@ -204,6 +214,7 @@ def test_scope_page_filters_stay_inside_the_member_bounded_scan() -> None:
         level="error",
         provider_dataset_id=7,
         sync_scope="dataset_wide",
+        operation_key="fixture_refresh",
         cursor_occurred_at=datetime(2026, 7, 18, tzinfo=UTC),
     )
     lateral_at = sql.index("CROSS JOIN LATERAL")

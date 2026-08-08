@@ -9489,6 +9489,8 @@ export interface components {
              * Format: date-time
              */
             occurred_at: string;
+            /** Operation Key */
+            operation_key: string | null;
             /** Provider Dataset Id */
             provider_dataset_id: number | null;
             /** Stage */
@@ -20285,6 +20287,8 @@ export interface operations {
                 level?: ("debug" | "info" | "warning" | "error" | "critical") | null;
                 provider_dataset_id?: number | null;
                 sync_scope?: string | null;
+                /** @description exact membership의 operation. ID query와 함께 주어야 한다. 생략하면 그 dataset/scope의 모든 operation event를 함께 본다. */
+                operation_key?: string | null;
                 page_size?: number;
                 cursor?: string | null;
             };
@@ -20350,8 +20354,10 @@ export interface operations {
                 kind?: ("import_job" | "update_request") | null;
                 status?: ("queued" | "running" | "done" | "failed" | "cancelled") | null;
                 provider_dataset_id?: number | null;
-                /** @description canonical provider dataset의 논리 scope. ID query와 함께 주어야 하며 기본 state는 dataset_wide/NULL 저장 표현을 같은 이력으로 조회한다. */
+                /** @description canonical provider dataset의 논리 scope. ID query와 함께 주어야 한다. */
                 sync_scope?: string | null;
+                /** @description exact membership의 operation. ID query와 함께 주어야 한다. 생략하면 그 dataset/scope의 모든 operation을 함께 조회한다 — membership identity는 triple이므로(ADR-088) 형제 operation을 가르려면 이 값이 필요하다. */
+                operation_key?: string | null;
                 load_batch_id?: string | null;
                 parent_job_id?: string | null;
                 created_from?: string | null;

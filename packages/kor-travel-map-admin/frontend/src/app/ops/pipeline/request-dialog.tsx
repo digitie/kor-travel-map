@@ -35,7 +35,9 @@ type ScopeType = FeatureUpdateScope["type"];
 type ProviderDatasetScope = {
   type: "provider_dataset";
   provider_dataset_id: number;
+  // membership identity는 triple이다(ADR-088) — 서버 스키마가 셋을 모두 요구한다.
   sync_scope: string;
+  operation_key: string;
 };
 
 type RequestScope =
@@ -170,10 +172,21 @@ function useRequestScopeForm(catalogRows: CanonicalCatalogRow[]) {
       if (!effectiveScopeSyncScope) {
         return "sync_scope를 선택하세요.";
       }
+      // grid 행은 membership 단위다(ADR-088 triple) — dataset만으로 고르면 형제
+      // operation 중 아무거나 집는다. 고른 scope에 해당하는 행에서 operation을 읽는다.
+      const membershipRow = catalogRows.find(
+        (row) =>
+          row.provider_dataset_id === providerDatasetId &&
+          row.sync_scope === effectiveScopeSyncScope,
+      );
+      if (!membershipRow?.operation_key) {
+        return "이 dataset/scope에는 실행 가능한 refresh operation이 없습니다.";
+      }
       return {
         type: "provider_dataset",
         provider_dataset_id: providerDatasetId,
         sync_scope: effectiveScopeSyncScope,
+        operation_key: membershipRow.operation_key,
       };
     }
     if (scopeType === "center_radius" || scopeType === "sigungu_by_radius") {

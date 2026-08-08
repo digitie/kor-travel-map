@@ -818,6 +818,7 @@ def _event_record(
         import_job_dataset_id=event.import_job_dataset_id,
         provider_dataset_id=event.provider_dataset_id,
         sync_scope=sync_scope,
+        operation_key=event.operation_key,
         stage=event.stage,
         level=event.level,
         code=event.code,

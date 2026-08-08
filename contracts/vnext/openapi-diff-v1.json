@@ -5,7 +5,7 @@
   "baseline": {
     "admin": {
       "file": "packages/kor-travel-map-api/openapi.json",
-      "sha256": "8336490b8bf603a47176a7bbe64708375b5471a458214c26cb01c23ae648a87d"
+      "sha256": "848154267025980ab4fe9799372a065aef082a42b1b39a5932f135343e6b6ba1"
     },
     "user": {
       "file": "packages/kor-travel-map-api/openapi.user.json",
