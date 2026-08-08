@@ -16,6 +16,7 @@ from kortravelmap.infra.price_repo import (
     _enum_value,
     _price_point,
     _price_value_params,
+    _PriceValueWriteContext,
     _sort_current,
 )
 
@@ -25,6 +26,9 @@ pytestmark = pytest.mark.unit
 def _point(product_key: str, product_name: str | None = None):  # type: ignore[no-untyped-def]
     return _price_point(
         {
+            "provider_dataset_id": 17,
+            "dataset_key": "retail_prices",
+            "dataset_display_name": "소매 가격",
             "provider": "python-opinet-api",
             "price_domain": "fuel",
             "product_key": product_key,
@@ -34,6 +38,7 @@ def _point(product_key: str, product_name: str | None = None):  # type: ignore[n
             "value_number": Decimal("1500"),
             "unit": "KRW/L",
             "observed_at": datetime(2026, 7, 4, 9, 0, tzinfo=UTC),
+            "known_at": datetime(2026, 7, 4, 9, 5, tzinfo=UTC),
         }
     )
 
@@ -49,6 +54,9 @@ def test_enum_value_unwraps_enum_and_passes_through_plain() -> None:
 
 def test_price_point_maps_row_columns() -> None:
     row = {
+        "provider_dataset_id": 17,
+        "dataset_key": "retail_prices",
+        "dataset_display_name": "소매 가격",
         "provider": "python-opinet-api",
         "price_domain": "fuel",
         "product_key": "gasoline",
@@ -58,8 +66,12 @@ def test_price_point_maps_row_columns() -> None:
         "value_number": Decimal("1685.00"),
         "unit": "KRW/L",
         "observed_at": datetime(2026, 7, 4, 9, 0, tzinfo=UTC),
+        "known_at": datetime(2026, 7, 4, 9, 5, tzinfo=UTC),
     }
     point = _price_point(row)  # type: ignore[arg-type]
+    assert point.provider_dataset_id == 17
+    assert point.dataset_key == "retail_prices"
+    assert point.dataset_display_name == "소매 가격"
     assert point.provider == "python-opinet-api"
     assert point.price_domain == "fuel"
     assert point.product_key == "gasoline"
@@ -67,6 +79,7 @@ def test_price_point_maps_row_columns() -> None:
     assert point.value_number == Decimal("1685.00")
     assert point.unit == "KRW/L"
     assert point.observed_at.tzinfo is not None
+    assert point.known_at.tzinfo is not None
 
 
 def test_price_value_params_builds_deterministic_upsert_row() -> None:
@@ -80,12 +93,20 @@ def test_price_value_params_builds_deterministic_upsert_row() -> None:
         unit="KRW/L",
         observed_at=datetime(2026, 7, 4, 3, 0, tzinfo=UTC),
     )
-    params = _price_value_params(value)
+    params = _price_value_params(
+        value,
+        context=_PriceValueWriteContext(
+            provider_dataset_id=17,
+            source_entity_key="price-response-entity",
+            source_record_key="sr_price_response",
+            known_at=datetime(2026, 7, 4, 3, 5, tzinfo=UTC),
+        ),
+    )
 
     # price_domain enum은 문자열로 정규화된다.
     assert params["price_domain"] == "opinet_gas_station"
     assert params["feature_id"] == "f_1156010100_p_abc"
-    assert params["provider"] == "python-opinet-api"
+    assert params["provider_dataset_id"] == 17
     assert params["product_key"] == "gasoline"
     assert params["value_number"] == Decimal("1820.0")
     # 결정적 PK key가 채워진다.
@@ -93,6 +114,8 @@ def test_price_value_params_builds_deterministic_upsert_row() -> None:
     assert params["price_value_key"]
     # payload는 JSON 문자열로 직렬화.
     assert isinstance(params["payload"], str)
+    assert params["source_record_key"] == "sr_price_response"
+    assert params["known_at"] == datetime(2026, 7, 4, 3, 5, tzinfo=UTC)
 
 
 def test_sort_current_tiebreaks_by_name_then_key() -> None:

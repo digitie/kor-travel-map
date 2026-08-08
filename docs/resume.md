@@ -1,5 +1,22 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-09 (codex) — T-VN-38A/B/C 구현·격리 live E2E 완료, PR 병합 대기
+
+T-VN-38A/B/C의 final migration head `0094`와 immutable weather/price fact·receipt-backed
+current summary·summary-only normal reader cutover를 마쳤다. 적대적 DB/reader 재리뷰는
+최종 P0=0 GO였고, active dataset·deadline fail-closed, weather projection advisory lock,
+deadline-only Dagster reconciliation, immutable provenance와 fact-driven set-diff invariant까지
+동일한 current semantics로 고정했다.
+
+n150의 서비스와 분리된 후보 DB·네트워크에서 exact-source checkpoint를 fresh restore한 뒤, Node 22
+브라우저로 admin UI 파괴형 live E2E를 실행했다. 메인과 복구 경로 모두 2/2를 통과했고 runner는
+차단 파일과 임시 실행 디렉터리를 남기지 않았다. 격리 HTTP `candidate-ui` origin에만 Web Crypto
+secure-context browser flag를 주도록 좁혀, 일반 loopback·운영 origin에는 승격이 적용되지 않는다.
+
+로컬 재확인으로 vNext contract artifact unit 7건과 live runner shell syntax도 통과했다. 현재는
+PR #971의 base 최신화·CI·승인과 병합만 남았으며, `tasks.md`의 완료 항목 이동은 merge commit 뒤에
+수행한다.
+
 ## 2026-08-09 — T-VN-33: CI 미러 게이트 24종 중 20종 GREEN, 잔여 4는 전부 선재/환경
 
 적대 리뷰 **4라운드 연속 REJECT**를 거쳤다. 네 번 다 같은 실패였다 — **변경 범위보다
@@ -35,6 +52,36 @@ event 축 부재. 셋 다 "형제 operation을 중복으로 규정"하는 형태
 
 **다음**: 5라운드 리뷰 승인 → #966 머지 → PR #967(T-VN-41 F1D, D1/D2 분리).
 후속은 태스크 #42(계약↔head 대조 게이트, offline upload 500).
+
+## 2026-08-08 (codex) — T-VN-38A/B/C 구현 결선, 재리뷰·n150 gate 대기
+
+`0092 → 0093 → 0094` final head에서 weather/price를 모두 immutable response fact와
+receipt-backed current summary로 전환했다. `0094`는 retired `weather_metric_series`와 0060
+mutable upsert/batch SQL·ORM mapping을 물리 제거했다. normal card/bbox는 current summary→fact→dataset
+set read만 사용하고, `(target_at, known_at)` 또는 `(observed_at, known_at)`를 모두 가진 snapshot
+endpoint만 raw fact를 재순위화한다.
+
+final review P0 보강으로 weather projection에는 transaction advisory lock을 두고 same-winner
+reconcile의 summary row rewrite를 제거했다. 기본 실행 minute Dagster job은 새 provider write 없이
+future candidate eligibility·validity·SLA deadline을 재물화한다. normal card·anchor·bbox는 inactive
+dataset과 `refresh_after`가 지난 weather summary를 DB에서 즉시 제외한다.
+
+마지막 P1도 수렴했다. `INV-089-01`은 summary row를 driver로 삼지 않고 active/policy eligible
+immutable fact 전체에서 expected winner를 만들어 누락 series까지 잡는다. price invariant도 active
+dataset만 rank하며, current·historical·admin single-card의 KMA/observed tier는 partial-own anchor를
+자기 자신으로 재선정하지 않는다.
+
+OpenAPI admin/user/service 세 spec과 admin/user generated type을 재생성했다. dataset id/key/display와
+`known_at`은 price/weather DTO의 필수 identity이며 admin map/chart/table React key도 그 identity를
+사용한다. live fixture는 producing response source·dataset policy를 재시도 안전하게 만들고 feature
+cleanup 뒤 source head/record/entity/policy/dataset까지 지운다.
+
+검증: vNext artifact unit 7건, isolated API weather unit 26건, Dagster maintenance/definition gate,
+ruff/py_compile을 통과했다. 남은 완료 조건은 reviewer-feedback 누적 delta의 적대 리뷰 2인 P0=0,
+base rebase, n150 final-head destructive rebuild와 live UI E2E다.
+
+**다음 한 작업**: reviewer-feedback 누적 delta의 적대 리뷰 2인 final GO를 받은 뒤 n150에서
+final-head rebuild/API·Dagster·Playwright live E2E를 실행한다.
 
 ## 2026-08-08 (3) — T-VN-33: 적대 리뷰 3회 REJECT를 거쳐 게이트 10종 중 9종 GREEN
 
@@ -76,6 +123,42 @@ event 축 부재. 셋 다 "형제 operation을 중복으로 규정"하는 형태
 
 **다음**: 4라운드 리뷰 승인 → #966 머지 → PR #967(T-VN-41 F1D, D1/D2 분리).
 
+## 2026-08-08 (codex) — T-VN-38B 완료 checkpoint, C reader/API/UI 결선 중
+
+`0093_price_current_summary`가 `0092` 뒤에 immutable price fact, canonical dataset/source
+lineage 복합 FK, terminal receipt-backed current pointer를 만든다. price correction identity는
+`provider_dataset_id + observed_at + source_record_key`이며 current winner는
+`observed_at DESC, known_at DESC, key DESC`로 고정했다. OpiNet/KREX Dagster asset은 exact
+operation membership id와 producing response `SourceRecord`를 writer에 전달한다.
+
+T-VN-38C는 public/admin bbox의 price/weather `LATERAL` read를 candidate-set → current
+summary → fact → dataset join/aggregate로 바꿨다. current weather/price route는 `asof` raw
+재순위를 제거했고, `/weather/snapshot?target_at=&known_at=` 및
+`/price/snapshot?observed_at=&known_at=`에만 immutable raw time-travel을 둔다. dataset id/key/display
+identity는 API와 admin React key/chart/map에 전달 중이다.
+
+**다음 한 작업**: service weather batch의 old catalog/raw query를 final fact snapshot query로
+교체하고, 남은 legacy weather tests/live fixture를 response lineage로 전환한다. 이후 OpenAPI/type
+재생성, 적대 리뷰 2인, n150 파괴적 rebuild/live UI E2E를 실행한다.
+
+## 2026-08-08 (codex) — T-VN-38A writer/receipt/current-card checkpoint
+
+draft PR #971의 0092 실제 migration 위에서 weather fact writer를 source-less upsert에서
+`provider_dataset_id + producing response SourceRecord`가 반드시 필요한 immutable append로
+전환했다. writer transaction은 response source upsert, fact append, business-time current
+summary reconciliation receipt를 함께 완료한다. KMA grid Feature source와 forecast response
+source를 분리했고, AirKorea/KREX도 exact operation membership id를 함께 넘기도록 변경 중이다.
+normal weather card는 summary→fact join을 쓰며, 명시 `asof`는 raw bitemporal rank를 쓴다.
+
+`tests/integration/test_tvn38_weather_migration.py`는 빈 DB fresh upgrade로 facts/receipt
+immutable, correction winner, stale summary deletion, current-card dataset identity를 확인해
+2 passed 했다. package Dagster test는 이 root venv에 `dagster`가 없어 아직 n150/package
+environment에서 실행해야 한다.
+
+**다음 한 작업**: AirKorea/KREX/KMA call-site와 tests를 모두 final writer signature로
+수렴한 뒤 0093 price immutable fact/current summary를 구현한다. 그 뒤 0094 reader/API/UI
+cutover, 두 적대 리뷰, n150 파괴적 live E2E를 실행한다.
+
 ## 2026-08-08 (2) — T-VN-33: 기능 게이트 GREEN, 설계 재검토로 결함 4건 추가 해소
 
 전체 스위트 **4,534 passed / 6 failed**로 수렴했다(시작 298 실패). 실패 6건은 전부
@@ -109,6 +192,22 @@ operation 입력이 없고 리졸버가 모호하면 실패시켜 죽은 폭), i
 
 **다음**: 적대 리뷰어 2명의 승인(사용자 요구 조건) → #966 머지 → PR #967(T-VN-41 F1D,
 D1/D2 분리).
+## 2026-08-08 — T-VN-38A/B/C 단일 stacked PR 설계 승인·사전 계약 고정
+
+T-VN-38은 T-VN-33 draft PR #966의 final schema revision `0091` 위에 쌓는 단일 PR로
+진행한다. weather·price 모두 canonical `provider_dataset_id`를 사용하고, current summary는
+값을 중복 저장하지 않고 선택한 immutable fact key만 참조한다. `ops.current_summary_runs`는
+ingest/reconcile/backfill/restore를 감사하되 current 순위를 바꾸지 않는다. normal card/bbox는
+summary set join, 명시적 time-travel은 raw-history ranked CTE로 분리한다.
+
+독립 적대 리뷰어 2명이 P0=0 GO를 냈고, source-less lineage·KMA producing response·fact
+immutability·terminal receipt·summary pointer·refresh deadline의 rejection fixture와 빈 target
+positive cascade를 추가했다. artifact unit + target freeze 14건이 통과하며 catalog fingerprint와
+SHA를 재동결했다.
+
+**다음 한 작업**: #966 최신 head에 rebase한 T-VN-38 draft PR을 열고 actual `0092`부터
+구현한다. actual migration의 `feature_id` FK는 final target artifact(UUID)이 아니라 #966 현재
+physical PK(TEXT)를 사용한다.
 
 ## 2026-08-08 — T-VN-33: 통합 라이브 실행이 제품 결함 다수를 드러냄, 머지 금지 유지
 

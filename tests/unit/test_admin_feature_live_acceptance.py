@@ -88,6 +88,35 @@ def test_clone_recovery_purge_uses_exact_api_owned_fingerprints() -> None:
     }
 
 
+def test_clone_checkpoint_schema_digest_uses_restore_stable_catalog() -> None:
+    """restore가 정규화하는 CHECK 표현·dropped-column ordinal을 오판하지 않는다."""
+    source = (
+        _ROOT / "scripts" / "run-admin-feature-clone-live-acceptance.sh"
+    ).read_text(encoding="utf-8")
+
+    assert "constraint_row.conkey::text" not in source
+    assert "constraint_row.confkey::text" not in source
+    assert "key_attribute.attname" in source
+    assert "referenced_attribute.attname" in source
+    assert "array_position(constraint_row.conkey, key_attribute.attnum)" in source
+    assert "constraint_row.confrelid::regclass::text" in source
+    assert "constraint_row.convalidated" in source
+    assert "pg_get_constraintdef(constraint_row.oid, true)" not in source
+    assert "row_number() OVER (" in source
+    assert "PARTITION BY attribute.attrelid ORDER BY attribute.attnum" in source
+    assert "attribute.attnum::text || attribute.attname" not in source
+    assert "attnum gap은 pg_dump/pg_restore가 정규화한다" in source
+
+
+def test_live_fixture_counts_only_direct_feature_id_references() -> None:
+    """composite subtype/alias fence는 fixture feature_id만으로 억지로 계수하지 않는다."""
+    source = _FIXTURE.read_text(encoding="utf-8")
+
+    assert "AND cardinality(constraint_row.conkey) = 1" in source
+    assert "AND cardinality(constraint_row.confkey) = 1" in source
+    assert "composite FK는 이 fixture가 가진 feature_id만으로 reference를 셀 수" in source
+
+
 def _execution_args(path: Path, identity: dict[str, str]) -> SimpleNamespace:
     return SimpleNamespace(
         api_image_id=identity["api_image_id"],
@@ -544,8 +573,8 @@ def test_direct_cleanup_locks_owned_parents_before_fk_audit_and_delete() -> None
         )
     ]
     assert fixture.count('lock_clause = " FOR UPDATE" if lock else ""') == 2
-    assert owned_values.count("+ lock_clause") == 3
-    assert "_assert_owned_values(session, feature_ids, present, lock=lock)" in fixture
+    assert owned_values.count("+ lock_clause") == 2
+    assert "_assert_owned_values(session, run_id, feature_ids, present, lock=lock)" in fixture
     lock = cleanup.index("lock=True")
     foreign_key_audit = cleanup.index("DELETE FROM feature.features")
     assert lock < foreign_key_audit
@@ -555,9 +584,12 @@ def test_direct_cleanup_locks_owned_parents_before_fk_audit_and_delete() -> None
     assert "foreign_key_references" in fixture
     assert "owned fixture ID의 소유권 fingerprint가 다릅니다" in fixture
     assert "owned weather value fingerprint가 다릅니다" in fixture
-    assert "owned weather series fingerprint가 다릅니다" in fixture
     assert "owned price value fingerprint가 다릅니다" in fixture
-    assert '"feature.weather_metric_series.feature_id"] = 1' in fixture
+    assert '"feature.feature_aliases.feature_id"] = len(present)' in fixture
+    assert '"feature.current_weather_summary.feature_id"] = 1' in fixture
+    assert '"feature.current_price_summary.feature_id"] = 1' in fixture
+    assert 'if rows:' in inspection
+    assert '"feature.feature_aliases.feature_id"] = len(rows)' in inspection
     assert cleanup.count("DELETE FROM feature.features") == 1
     assert purge.count("DELETE FROM feature.features") == 1
     assert "DELETE FROM ops.feature_change_requests" in purge

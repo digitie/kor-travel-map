@@ -85,7 +85,10 @@ barrier로 직렬화한다.
     [x] `T-VN-35A-D`(typed subtype 분해 — ADR-086, A-D 단일 PR) →
     [ ] `T-VN-37A` → [ ] `T-VN-37B` → [ ] `T-VN-37C`
   - Lane B shadow: [~] `T-VN-33`(A/B/C 단일 PR — DB 정본·writer/reader cutover·legacy fence) →
-    [ ] `T-VN-38A` → [ ] `T-VN-38B` → [ ] `T-VN-38C` →
+    [/] `T-VN-38A`(PR #971: 0092·weather immutable response lineage·receipt summary writer
+    ·KMA/AirKorea/KREX call-site cutover 구현) → [/] `T-VN-38B`(0093·price immutable fact
+    ·receipt summary·Dagster producer lineage 구현) → [/] `T-VN-38C`(0094 summary-only reader/API/UI
+    ·snapshot 분리·OpenAPI/type 재생성 완료, 2인 재리뷰·n150 live 검증 대기) →
     [ ] `T-VN-34A` → [ ] `T-VN-34B` → [ ] `T-VN-34C` →
     [ ] `T-VN-36A` → [ ] `T-VN-36B` → [ ] `T-VN-36C`
   - 32~38 join barrier 뒤 Lane B: [ ] `T-VN-40A` → [ ] `T-VN-40B` →
@@ -759,23 +762,49 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   여전히 가치가 있으나, 위 성능 문제와 무관하고 read 술어 변경(=제품 결정)이
   선행돼야 하므로 분리한다. notice_type별 "미래 발효를 보일 것인가" 결정이 먼저다.
 
-### T-VN-38 — weather·price current summary (Lane B)
+### T-VN-38A/B/C — weather·price current summary와 set-based cutover (Lane B, 단일 PR)
 
-- [ ] T-VN-38A — **weather current summary**
+> **PR 단위**: T-VN-38A/B/C는 한 개의 stacked draft PR로만 진행한다. base는 T-VN-33
+> PR #966이며 migration은 `0091 → 0092 → 0093 → 0094` 단일 head다. #966 병합 때 즉시
+> main 위로 rebase/retarget한다. 중간 DB 보존·provider 문자열 호환·dual write는 만들지
+> 않고 final schema empty rebuild 뒤 provider ETL로 재적재한다.
+>
+> **사전 승인**: 코드 전 ADR-089와
+> [`reports/t-vn-38-current-summary-plan-2026-08-08.md`](reports/t-vn-38-current-summary-plan-2026-08-08.md)를
+> 적대 리뷰어 2명이 P0=0으로 승인해야 한다.
 
-  bitemporal 원본 이력을 보존하면서 identity당 current weather를 원자 유지하는 summary와
-  reconciliation을 추가한다.
+- [/] T-VN-38A — **weather immutable-fact current summary**
 
-- [ ] T-VN-38B — **price current summary**
+  `current_summary_runs`부터 만들고 `provider_dataset_id + source entity/record + fetched known_at`
+  복합 provenance, immutable fact, selected `weather_value_key` 참조 summary를 추가한다. KMA grid
+  source와 forecast response source는 exact producing dataset의 별도 record로 분리한다. same
+  transaction의 fact+summary write, deterministic bitemporal winner, refresh deadline Dagster
+  materializer 및 set-based reconciliation을 추가한다.
 
-  `provider + price_domain + product_key` identity당 current price summary와 reconciliation을
-  추가하고 restore/backfill generation을 구분한다.
+- [/] T-VN-38B — **price immutable-fact current summary**
 
-- [ ] T-VN-38C — **bbox/detail set-based cutover**
+  price의 `provider` 저장 identity를 `provider_dataset_id`와 immutable source provenance로 clean
+  cut하고 selected `price_value_key` 참조 summary와 restore/backfill safe reconciliation을 추가한다.
 
-  per-row LATERAL을 weather/price summary set join으로 바꾸고 old query를 normal path에서
-  비활성화한다. rollback shadow index는 보존해 T-VN-39 removal manifest로 넘기고,
-  cardinality·freshness·EXPLAIN을 실데이터로 고정한다.
+- [/] T-VN-38C — **normal reader set-based cutover**
+
+  own/nearest/KMA tier anchor를 window-ranked CTE로 먼저 선택한 뒤 card/bbox/detail normal path를
+  weather/price summary set join으로 바꾸고 per-row LATERAL reader를 제거한다. current endpoint와
+  explicit `(target_at, known_at)` snapshot endpoint를 분리한다. cardinality, freshness,
+  reconciliation set-diff, EXPLAIN과 n150 final-head destructive rebuild/live UI E2E를 통과시킨다.
+  구현은 complete이며 완료 표시는 final cumulative adversarial review 2인 P0=0, #966 병합 뒤
+  최신 main rebase, GitHub Actions CI·required approval이 모두 끝난 merge commit에서만
+  `tasks-done.md`로 옮긴다.
+
+  **2026-08-08 final-review 보강 checkpoint**: weather global projection을 transaction advisory
+  lock으로 직렬화하고 same-winner reconcile의 row rewrite를 제거했다. deadline-only Dagster
+  reconciliation을 기본 실행 minute schedule로 추가했으며, active dataset·`refresh_after` gate를
+  public/admin card·anchor·bbox 모두에 적용했다. map weather summary의 canonical dataset identity와
+  deadline은 필수다. summary가 전혀 없는 eligible raw series까지 expected set-diff로 검출하고,
+  partial-own anchor가 batch뿐 아니라 current·snapshot·admin single-card에서도 자신을 KMA/observed
+  fallback으로 재선정하지 않도록 고쳤다. 재리뷰 2인 P0=0과 n150 destructive rebuild/live UI E2E
+  (메인·복구 각 2/2)는 완료했다. stacked base #966 병합 뒤 최신 main rebase, CI와 required
+  approval이 남았다.
 
 ### T-VN-40 — curation write model 단일화 (Lane B)
 

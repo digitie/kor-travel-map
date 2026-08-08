@@ -265,7 +265,7 @@ def _prepare_runtime(tmp_path: Path) -> tuple[Path, Path]:
         features=2,
         weather=1,
         price=1,
-        foreign_key_references=2,
+        foreign_key_references=6,
     )
     _write_fixture(
         runtime / "direct-cleanup.json", features=0, weather=0, price=0
@@ -281,7 +281,7 @@ def _prepare_runtime(tmp_path: Path) -> tuple[Path, Path]:
                     "features": 6,
                 },
                 "foreign_key_constraints_checked": 12,
-                "foreign_key_references": 13,
+                "foreign_key_references": 19,
                 "version": 1,
             }
         ),

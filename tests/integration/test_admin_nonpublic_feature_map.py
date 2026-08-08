@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING
 import pytest
 from sqlalchemy import text
 
+from kortravelmap.core.ids import make_payload_hash, make_source_record_key
+from kortravelmap.dto import SourceRecord
 from kortravelmap.dto._enums import PriceDomain
 from kortravelmap.dto.price import PriceValue
 from kortravelmap.dto.weather import WeatherValue
@@ -35,6 +37,46 @@ _BBOX = {
     "max_lon": _TEST_LON + 0.00001,
     "max_lat": _TEST_LAT + 0.00001,
 }
+
+
+async def _dataset_id(
+    session: AsyncSession, *, provider: str, dataset_key: str
+) -> int:
+    value = await session.scalar(
+        text(
+            """
+            SELECT provider_dataset_id
+            FROM provider_sync.provider_datasets
+            WHERE provider = :provider AND dataset_key = :dataset_key
+            """
+        ),
+        {"provider": provider, "dataset_key": dataset_key},
+    )
+    assert value is not None
+    return int(value)
+
+
+def _response_record(
+    *, provider: str, dataset_key: str, source_entity_type: str, raw_data: dict[str, object]
+) -> SourceRecord:
+    payload_hash = make_payload_hash(raw_data)
+    source_entity_id = f"test:{payload_hash[:20]}"
+    return SourceRecord(
+        provider=provider,
+        dataset_key=dataset_key,
+        source_entity_type=source_entity_type,
+        source_entity_id=source_entity_id,
+        raw_payload_hash=payload_hash,
+        raw_data=raw_data,
+        fetched_at=_NOW,
+        source_record_key=make_source_record_key(
+            provider=provider,
+            dataset_key=dataset_key,
+            source_entity_type=source_entity_type,
+            source_entity_id=source_entity_id,
+            raw_payload_hash=payload_hash,
+        ),
+    )
 
 
 async def _insert_feature(
@@ -259,6 +301,18 @@ async def test_admin_weather_card_uses_nonpublic_target_and_anchor(
                 valid_at=_NOW,
             )
         ],
+        provider_dataset_id=await _dataset_id(
+            migrated_session,
+            provider="python-kma-api",
+            dataset_key="kma_short_forecast",
+        ),
+        source_record=_response_record(
+            provider="python-kma-api",
+            dataset_key="kma_short_forecast",
+            source_entity_type="weather_response",
+            raw_data={"metric": "TMP", "feature_id": "admin-hidden-weather-anchor"},
+        ),
+        selected_at=_NOW,
     )
     await migrated_session.flush()
 
@@ -294,49 +348,73 @@ async def test_admin_price_card_and_map_summary_include_nonpublic_feature(
         status="hidden",
         kind="price",
     )
+    opinet_value = PriceValue(
+        feature_id=feature_id,
+        provider="python-opinet-api",
+        price_domain=PriceDomain.OPINET_GAS_STATION,
+        product_key="gasoline",
+        product_name="휘발유",
+        source_product_key="B027",
+        source_product_name="휘발유",
+        observed_at=_NOW,
+        value_number=Decimal("1789"),
+        unit="KRW/L",
+        normalization_version="test-v1",
+        payload={},
+        collected_at=_NOW,
+        source_record_key=None,
+    )
+    krex_value = PriceValue(
+        feature_id=feature_id,
+        provider="python-krex-api",
+        price_domain=PriceDomain.REST_AREA_FUEL,
+        product_key="gasoline",
+        product_name="휘발유",
+        source_product_key="B027",
+        source_product_name="휘발유",
+        observed_at=_NOW,
+        value_number=Decimal("1799"),
+        unit="KRW/L",
+        normalization_version="test-v1",
+        payload={},
+        collected_at=_NOW,
+        source_record_key=None,
+    )
     await price_repo.load_price_values(
         migrated_session,
-        [
-            PriceValue(
-                feature_id=feature_id,
-                provider="python-opinet-api",
-                price_domain=PriceDomain.OPINET_GAS_STATION,
-                product_key="gasoline",
-                product_name="휘발유",
-                source_product_key="B027",
-                source_product_name="휘발유",
-                observed_at=_NOW,
-                value_number=Decimal("1789"),
-                unit="KRW/L",
-                normalization_version="test-v1",
-                payload={},
-                collected_at=_NOW,
-                source_record_key=None,
-            ),
-            PriceValue(
-                feature_id=feature_id,
-                provider="python-krex-api",
-                price_domain=PriceDomain.REST_AREA_FUEL,
-                product_key="gasoline",
-                product_name="휘발유",
-                source_product_key="B027",
-                source_product_name="휘발유",
-                observed_at=_NOW,
-                value_number=Decimal("1799"),
-                unit="KRW/L",
-                normalization_version="test-v1",
-                payload={},
-                collected_at=_NOW,
-                source_record_key=None,
-            )
-        ],
+        [opinet_value],
+        provider_dataset_id=await _dataset_id(
+            migrated_session,
+            provider="python-opinet-api",
+            dataset_key="opinet_gas_station_prices",
+        ),
+        source_record=_response_record(
+            provider="python-opinet-api",
+            dataset_key="opinet_gas_station_prices",
+            source_entity_type="price_response",
+            raw_data={"feature_id": feature_id, "value": "1789"},
+        ),
+    )
+    await price_repo.load_price_values(
+        migrated_session,
+        [krex_value],
+        provider_dataset_id=await _dataset_id(
+            migrated_session,
+            provider="python-krex-api",
+            dataset_key="krex_rest_area_prices",
+        ),
+        source_record=_response_record(
+            provider="python-krex-api",
+            dataset_key="krex_rest_area_prices",
+            source_entity_type="price_response",
+            raw_data={"feature_id": feature_id, "value": "1799"},
+        ),
     )
     await migrated_session.flush()
 
     card = await price_repo.build_price_card(
         migrated_session,
         feature_id=feature_id,
-        asof=_NOW,
     )
     map_rows = await admin_feature_repo.admin_features_in_bbox(
         migrated_session,

@@ -187,25 +187,21 @@ export type FeaturesNearbyParams = Omit<
 
 async function fetchAdminFeatureWeather(
   featureId: string,
-  params: { asof?: string | Date | null } = {},
   signal?: AbortSignal,
 ): Promise<FeatureWeatherResponse> {
   return getJson<FeatureWeatherResponse>(
-    pathWithQuery(`/v1/admin/features/${encodeURIComponent(featureId)}/weather`, {
-      asof: params.asof,
-    }),
+    `/v1/admin/features/${encodeURIComponent(featureId)}/weather`,
     { signal },
   );
 }
 
 export function useAdminFeatureWeather(
   featureId: string | null,
-  params: { asof?: string | Date | null } = {},
 ) {
   return useQuery<FeatureWeatherResponse, Error>({
-    queryKey: ["admin-feature-card", featureId, "weather", params.asof ?? null] as const,
+    queryKey: ["admin-feature-card", featureId, "weather"] as const,
     queryFn: ({ signal }) =>
-      fetchAdminFeatureWeather(featureId as string, params, signal),
+      fetchAdminFeatureWeather(featureId as string, signal),
     enabled: featureId !== null && featureId.length > 0,
     staleTime: 60_000,
   });
@@ -213,12 +209,11 @@ export function useAdminFeatureWeather(
 
 async function fetchAdminFeaturePrice(
   featureId: string,
-  params: { asof?: string | Date | null; historyLimit?: number } = {},
+  params: { historyLimit?: number } = {},
   signal?: AbortSignal,
 ): Promise<FeaturePriceResponse> {
   return getJson<FeaturePriceResponse>(
     pathWithQuery(`/v1/admin/features/${encodeURIComponent(featureId)}/price`, {
-      asof: params.asof,
       history_limit: params.historyLimit,
     }),
     { signal },
@@ -227,14 +222,13 @@ async function fetchAdminFeaturePrice(
 
 export function useAdminFeaturePrice(
   featureId: string | null,
-  params: { asof?: string | Date | null; historyLimit?: number } = {},
+  params: { historyLimit?: number } = {},
 ) {
   return useQuery<FeaturePriceResponse, Error>({
     queryKey: [
       "admin-feature-card",
       featureId,
       "price",
-      params.asof ?? null,
       params.historyLimit ?? null,
     ] as const,
     queryFn: ({ signal }) =>
@@ -434,20 +428,21 @@ export async function fetchAdminFeatureCorrectionBasis(
     if (entityTag === null) {
       throw new Error(`GET ${revisionPath} 응답에 ETag가 없습니다.`);
     }
-    if (revision.data.feature_id !== featureId) {
-      throw new Error(`GET ${revisionPath} 응답의 feature_id가 다릅니다.`);
-    }
 
     const detail = await fetchAdminFeatureDetail(featureId, signal);
     const feature = detail.data.feature;
     if (
-      feature.feature_id === featureId &&
+      // T-VN-32C 경계에서 revision은 해석된 legacy ID를 echo하지만 detail은
+      // UUID 정본을 반환한다. 어느 쪽이든 요청 ref를 확인하고, 이후 UI/write에는
+      // detail의 UUID 정본만 사용한다.
+      (revision.data.feature_id === featureId ||
+        feature.feature_id === featureId) &&
       feature.row_revision === revision.data.row_revision
     ) {
       return {
         detail,
         entityTag,
-        featureId,
+        featureId: feature.feature_id,
         rowRevision: revision.data.row_revision,
       };
     }

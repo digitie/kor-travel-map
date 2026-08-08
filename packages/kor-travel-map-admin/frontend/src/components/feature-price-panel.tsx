@@ -20,12 +20,44 @@ const chartPriceFormatter = new Intl.NumberFormat("ko-KR", {
   maximumFractionDigits: 0,
 });
 
+type CanonicalPricePoint = PricePoint & {
+  provider_dataset_id: number;
+  dataset_key: string;
+  dataset_display_name: string;
+  known_at: string;
+};
+
+function canonicalPricePoint(point: PricePoint): CanonicalPricePoint {
+  // OpenAPI 재생성 전에도 0094 DTO의 정본 필드를 사용한다. generated type은
+  // API export lane이 갱신한다.
+  return point as CanonicalPricePoint;
+}
+
 function productLabel(point: PricePoint): string {
   return point.product_name ?? point.product_key;
 }
 
 function priceSeriesIdentity(point: PricePoint): string {
-  return JSON.stringify([point.provider, point.price_domain, point.product_key]);
+  const canonical = canonicalPricePoint(point);
+  return JSON.stringify([
+    canonical.provider_dataset_id,
+    canonical.dataset_key,
+    point.price_domain,
+    point.product_key,
+  ]);
+}
+
+function pricePointIdentity(point: PricePoint): string {
+  return JSON.stringify([
+    priceSeriesIdentity(point),
+    point.observed_at,
+    canonicalPricePoint(point).known_at,
+  ]);
+}
+
+function datasetLabel(point: PricePoint): string {
+  const canonical = canonicalPricePoint(point);
+  return `${canonical.dataset_display_name} · ${canonical.dataset_key} · #${canonical.provider_dataset_id}`;
 }
 
 function priceLabel(point: PricePoint): string {
@@ -43,7 +75,7 @@ export function PriceHistoryChart({ history }: { history: PricePoint[] }) {
     for (const point of history) {
       const seriesKey = priceSeriesIdentity(point);
       const group = groups.get(seriesKey) ?? {
-        label: `${productLabel(point)} · ${point.provider}/${point.price_domain}`,
+        label: `${productLabel(point)} · ${datasetLabel(point)} · ${point.provider}/${point.price_domain}`,
         points: [],
       };
       group.points.push(point);
@@ -149,7 +181,7 @@ export function PriceHistoryChart({ history }: { history: PricePoint[] }) {
             ) : null}
             {withOccurrenceKeys(
               item.points,
-              (point) => point.observed_at,
+              pricePointIdentity,
             ).map(({ key, value: point }) => (
               <circle
                 cx={x(point.timestamp)}
@@ -236,6 +268,22 @@ export function FeaturePricePanel({
         ),
       });
       cols.push({
+        id: "dataset",
+        header: "dataset",
+        accessorFn: datasetLabel,
+        cell: ({ row }) => {
+          const canonical = canonicalPricePoint(row.original);
+          return (
+            <>
+              <div className="font-medium">{canonical.dataset_display_name}</div>
+              <div className="font-mono text-xs text-muted-foreground">
+                {canonical.dataset_key} · #{canonical.provider_dataset_id}
+              </div>
+            </>
+          );
+        },
+      });
+      cols.push({
         id: "provider",
         header: "provider",
         accessorKey: "provider",
@@ -249,6 +297,16 @@ export function FeaturePricePanel({
         accessorKey: "price_domain",
         cell: ({ row }) => (
           <Badge variant="outline">{row.original.price_domain}</Badge>
+        ),
+      });
+      cols.push({
+        id: "known",
+        header: "known",
+        accessorFn: (point) => canonicalPricePoint(point).known_at,
+        cell: ({ row }) => (
+          <span className="text-muted-foreground">
+            {formatDateTime(canonicalPricePoint(row.original).known_at)}
+          </span>
         ),
       });
     }
@@ -265,7 +323,7 @@ export function FeaturePricePanel({
             Price
           </div>
           <div className="mt-1 text-xs text-muted-foreground">
-            provider/domain/product series별 최신 가격과 최근 이력
+            canonical dataset/domain/product series별 최신 가격과 최근 이력
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -288,16 +346,14 @@ export function FeaturePricePanel({
             <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
               <dt className="text-muted-foreground">latest</dt>
               <dd>{formatDateTime(data.latest_at)}</dd>
-              <dt className="text-muted-foreground">asof</dt>
-              <dd>{formatDateTime(data.asof)}</dd>
               <dt className="text-muted-foreground">current</dt>
               <dd className="flex flex-wrap gap-2">
                 {current.length > 0
                   ? withOccurrenceKeys(current, priceSeriesIdentity).map(
                       ({ key, value: point }) => (
                         <Badge key={key} variant="outline">
-                          {productLabel(point)} · {point.provider}/{point.price_domain}{" "}
-                          {priceFormatter.format(point.value_number)}
+                          {productLabel(point)} · {datasetLabel(point)} · {point.provider}/
+                          {point.price_domain} {priceFormatter.format(point.value_number)}
                         </Badge>
                       ),
                     )
@@ -323,12 +379,7 @@ export function FeaturePricePanel({
               columns={historyColumns}
               data={history}
               getRowId={(point) =>
-                JSON.stringify([
-                  point.provider,
-                  point.price_domain,
-                  point.product_key,
-                  point.observed_at,
-                ])
+                pricePointIdentity(point)
               }
               isLoading={price.isLoading}
               emptyMessage="price history가 없습니다."

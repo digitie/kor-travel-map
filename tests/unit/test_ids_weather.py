@@ -16,10 +16,12 @@ KST = timezone(timedelta(hours=9))
 
 _BASE_ARGS = dict(
     feature_id="f_global_w_seoul",
-    provider="python-kma-api",
+    provider_dataset_id=42,
     weather_domain="kma_short_forecast",
     forecast_style="short",
     metric_key="TMP",
+    target_at=datetime(2026, 5, 28, 9, 0, tzinfo=KST),
+    source_record_key="sr_weather_response_a",
 )
 
 
@@ -45,39 +47,28 @@ def test_differs_when_metric_key_changes() -> None:
 
 
 @pytest.mark.unit
-def test_differs_when_provider_changes() -> None:
+def test_differs_when_dataset_changes() -> None:
     a = make_weather_value_key(**_BASE_ARGS)
-    b = make_weather_value_key(**{**_BASE_ARGS, "provider": "python-krforest-api"})
+    b = make_weather_value_key(**{**_BASE_ARGS, "provider_dataset_id": 43})
     assert a != b
 
 
 @pytest.mark.unit
-def test_differs_when_valid_at_changes() -> None:
-    a = make_weather_value_key(
-        **_BASE_ARGS,
-        valid_at=datetime(2026, 5, 28, 9, 0, tzinfo=KST),
-    )
+def test_differs_when_target_or_response_revision_changes() -> None:
+    a = make_weather_value_key(**_BASE_ARGS)
     b = make_weather_value_key(
-        **_BASE_ARGS,
-        valid_at=datetime(2026, 5, 28, 12, 0, tzinfo=KST),
+        **{**_BASE_ARGS, "target_at": datetime(2026, 5, 28, 12, 0, tzinfo=KST)}
     )
     assert a != b
+    assert a != make_weather_value_key(**{**_BASE_ARGS, "source_record_key": "sr_b"})
 
 
 @pytest.mark.unit
 def test_same_when_only_timeline_bucket_would_change() -> None:
-    """make_weather_value_key는 timeline_bucket을 인자로 받지 않음 — ADR-010."""
+    """timeline_bucket은 immutable fact identity에 참여하지 않는다."""
     # 같은 input은 같은 key. timeline_bucket이 다르더라도 key 계산에 영향 X.
-    a = make_weather_value_key(
-        **_BASE_ARGS,
-        issued_at=datetime(2026, 5, 27, 23, 0, tzinfo=KST),
-        valid_at=datetime(2026, 5, 28, 9, 0, tzinfo=KST),
-    )
-    b = make_weather_value_key(
-        **_BASE_ARGS,
-        issued_at=datetime(2026, 5, 27, 23, 0, tzinfo=KST),
-        valid_at=datetime(2026, 5, 28, 9, 0, tzinfo=KST),
-    )
+    a = make_weather_value_key(**_BASE_ARGS)
+    b = make_weather_value_key(**_BASE_ARGS)
     assert a == b
 
 
@@ -99,7 +90,6 @@ def test_pipe_separator_in_component_rejected() -> None:
 
 
 @pytest.mark.unit
-def test_all_time_fields_none_ok() -> None:
-    """시간 필드 미상이어도 key 생성 가능 (advisory 등)."""
-    key = make_weather_value_key(**_BASE_ARGS)
-    assert key.startswith("wv_")
+def test_nonpositive_dataset_rejected() -> None:
+    with pytest.raises(ValueError, match="positive"):
+        make_weather_value_key(**{**_BASE_ARGS, "provider_dataset_id": 0})

@@ -1058,15 +1058,10 @@ function useFeatureChangeRequestsClientController({
       ? form.featureId.trim() || prefillFeatureId
       : null;
   const correctionBasis = useAdminFeatureCorrectionBasis(correctionLookupId);
-  const selectedCorrectionBasis =
-    correctionBasis.data?.featureId === correctionLookupId
-      ? correctionBasis.data
-      : null;
+  const selectedCorrectionBasis = correctionBasis.data ?? null;
   const loadedUpdateFeature =
-    form.action === "update" &&
-    selectedCorrectionBasis?.detail.data.feature.feature_id ===
-      form.featureId.trim()
-      ? selectedCorrectionBasis.detail.data.feature
+    form.action === "update"
+      ? (selectedCorrectionBasis?.detail.data.feature ?? null)
       : null;
   const unsupportedUpdateKind =
     loadedUpdateFeature &&
@@ -1212,7 +1207,7 @@ function useFeatureChangeRequestsClientController({
     if (form.action !== "update") return;
     // URL prefill 또는 update에서 직접 입력한 Feature ID의 feature가 로드되면 폼을 그 값으로 채운다.
     const targetId = form.featureId.trim() || prefillFeatureId;
-    if (!targetId || feature.feature_id !== targetId) return;
+    if (!targetId) return;
     // basis가 explicit reload로 바뀌어도 effect가 dirty form을 자동으로 덮지 않는다.
     const key = feature.feature_id;
     if (appliedFeaturePrefillRef.current === key) return;
@@ -1253,7 +1248,7 @@ function useFeatureChangeRequestsClientController({
     }
     const feature = result.data.detail.data.feature;
     if (
-      feature.feature_id !== correctionLookupId ||
+      feature.feature_id !== result.data.featureId ||
       feature.row_revision !== result.data.rowRevision
     ) {
       throw new Error("다른 Feature의 편집 기준이 반환되었습니다.");
@@ -1296,12 +1291,11 @@ function useFeatureChangeRequestsClientController({
             `${unsupportedUpdateKind} Feature는 수동 생성/수정 대상이 아닙니다.`,
           );
         }
-        const featureId = form.featureId.trim();
         if (!selectedCorrectionBasis) {
           throw new Error("수정할 Feature의 편집 기준을 먼저 불러와야 합니다.");
         }
         const response = await patchFeature.mutateAsync({
-          featureId,
+          featureId: selectedCorrectionBasis.featureId,
           entityTag: selectedCorrectionBasis.entityTag,
           body: buildPatchPayload(
             form,
@@ -1311,10 +1305,6 @@ function useFeatureChangeRequestsClientController({
         });
         setSelectedRequest(response.data.request);
       } else {
-        const featureId = form.featureId.trim();
-        if (featureId.length === 0) {
-          throw new Error("delete에는 feature_id가 필요합니다.");
-        }
         if (form.reason.trim().length === 0) {
           throw new Error("reason은 필수입니다.");
         }
@@ -1322,7 +1312,7 @@ function useFeatureChangeRequestsClientController({
           throw new Error("삭제할 Feature의 편집 기준을 먼저 불러와야 합니다.");
         }
         const response = await deleteFeature.mutateAsync({
-          featureId,
+          featureId: selectedCorrectionBasis.featureId,
           entityTag: selectedCorrectionBasis.entityTag,
           body: {
             reason: form.reason.trim(),

@@ -41,7 +41,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from time import monotonic
 from types import TracebackType
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -303,12 +303,16 @@ from kortravelmap.infra.sync_state_repo import (
 )
 from kortravelmap.infra.weather_repo import (
     WeatherCard,
+    WeatherSummaryMaterializeResult,
 )
 from kortravelmap.infra.weather_repo import (
     build_weather_card as repo_build_weather_card,
 )
 from kortravelmap.infra.weather_repo import (
     load_weather_values as repo_load_weather_values,
+)
+from kortravelmap.infra.weather_repo import (
+    materialize_current_weather_summary as repo_materialize_current_weather_summary,
 )
 from kortravelmap.mois import DEFAULT_BATCH_SIZE as MOIS_DEFAULT_BATCH_SIZE
 from kortravelmap.mois import (
@@ -358,7 +362,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
 
     from kortravelmap.core.dedup import DedupCandidate, DedupInput
-    from kortravelmap.dto import FeatureBundle
+    from kortravelmap.dto import FeatureBundle, SourceRecord
     from kortravelmap.dto.price import PriceValue
     from kortravelmap.dto.weather import WeatherValue
     from kortravelmap.geocoding import AddressResolver, ReverseGeocoder
@@ -2426,42 +2430,93 @@ class AsyncKorTravelMapClient:
 
     # ─── weather card (T-213e) ───────────────────────────────────────────────
 
-    async def load_weather_values(self, values: Iterable[WeatherValue]) -> int:
-        """``WeatherValue`` 들을 ``feature_weather_values``에 멱등 upsert (write)."""
+    async def load_weather_values(
+        self,
+        values: Iterable[WeatherValue],
+        *,
+        provider_dataset_id: int,
+        source_record: SourceRecord,
+        selected_at: datetime | None = None,
+    ) -> int:
+        """exact operation response가 소유하는 immutable weather facts를 append한다."""
         async with self._session_factory() as session, session.begin():
-            return await repo_load_weather_values(session, values)
+            return await repo_load_weather_values(
+                session,
+                values,
+                provider_dataset_id=provider_dataset_id,
+                source_record=source_record,
+                selected_at=selected_at,
+            )
+
+    async def materialize_current_weather_summary(
+        self,
+        *,
+        selected_at: datetime,
+        run_kind: Literal["ingest", "reconcile", "backfill", "restore"] = "reconcile",
+    ) -> WeatherSummaryMaterializeResult:
+        """새 provider write 없이 weather current projection을 business time으로 갱신한다."""
+        async with self._session_factory() as session, session.begin():
+            return await repo_materialize_current_weather_summary(
+                session,
+                selected_at=selected_at,
+                run_kind=run_kind,
+            )
 
     # ─── price values (T-price) ───────────────────────────────────────────────
 
-    async def load_price_values(self, values: Iterable[PriceValue]) -> int:
-        """``PriceValue`` 들을 ``feature_price_values``에 멱등 upsert (write)."""
+    async def load_price_values(
+        self,
+        values: Iterable[PriceValue],
+        *,
+        provider_dataset_id: int,
+        source_record: SourceRecord,
+    ) -> int:
+        """exact response가 소유하는 immutable price facts를 append한다."""
         async with self._session_factory() as session, session.begin():
-            return await repo_load_price_values(session, values)
+            return await repo_load_price_values(
+                session,
+                values,
+                provider_dataset_id=provider_dataset_id,
+                source_record=source_record,
+            )
 
     async def load_price_features(
         self,
         price_bundles: Iterable[FeatureBundle],
         price_values: Iterable[PriceValue],
+        *,
+        provider_dataset_id: int,
+        source_record: SourceRecord,
     ) -> PriceFeatureLoadResult:
-        """price-kind anchor feature + 가격값을 한 transaction으로 적재한다."""
+        """price anchor와 exact-response immutable facts를 한 transaction으로 적재한다."""
         bundles = list(price_bundles)
         values = list(price_values)
         async with self._session_factory() as session, session.begin():
             features = await load_bundles(session, bundles)
-            value_count = await repo_load_price_values(session, values)
+            value_count = await repo_load_price_values(
+                session,
+                values,
+                provider_dataset_id=provider_dataset_id,
+                source_record=source_record,
+            )
         return PriceFeatureLoadResult(features=features, price_values=value_count)
 
     async def load_air_quality(
         self,
         station_bundles: Iterable[FeatureBundle],
         weather_values: Iterable[WeatherValue],
+        *,
+        provider_dataset_id: int,
+        source_record: SourceRecord,
+        selected_at: datetime | None = None,
     ) -> AirQualityLoadResult:
         """대기질 측정소 weather feature + 측정값을 **한 transaction**으로 적재(T-RV-55d).
 
         ① 측정소 weather-kind ``FeatureBundle``을 ``load_bundles``로 적재(FK 선결),
-        ② 같은 transaction에서 air_quality ``WeatherValue``를 ``load_weather_values``로
-        upsert한다. weather value의 ``feature_id``는 같은 transaction에서 막 적재된
-        측정소 feature를 참조하므로 FK가 충족된다. 하나라도 실패하면 전체 rollback.
+        ② 같은 transaction에서 operation response ``SourceRecord``를 만든 뒤
+        air_quality ``WeatherValue``를 immutable append한다. weather value의
+        ``feature_id``는 같은 transaction에서 막 적재된 측정소 feature를 참조하므로
+        FK가 충족된다. 하나라도 실패하면 전체 rollback.
 
         변환(측정소→bundle, 측정값→value)은 호출자(dagster asset) 책임 —
         ``air_quality_stations_to_bundles`` / ``air_quality_to_weather_values``.
@@ -2470,14 +2525,19 @@ class AsyncKorTravelMapClient:
         values = list(weather_values)
         async with self._session_factory() as session, session.begin():
             stations = await load_bundles(session, bundles)
-            value_count = await repo_load_weather_values(session, values)
+            value_count = await repo_load_weather_values(
+                session,
+                values,
+                provider_dataset_id=provider_dataset_id,
+                source_record=source_record,
+                selected_at=selected_at,
+            )
         return AirQualityLoadResult(stations=stations, weather_values=value_count)
 
     async def build_weather_card(
         self,
         *,
         feature_id: str,
-        asof: datetime | None = None,
         freshness_seconds: int | None = None,
     ) -> WeatherCard:
         """feature weather card — forecast_style×metric_key 최신값 + freshness (read).
@@ -2493,7 +2553,7 @@ class AsyncKorTravelMapClient:
         )
         async with self._session_factory() as session:
             return await repo_build_weather_card(
-                session, feature_id=feature_id, asof=asof, freshness_seconds=fresh
+                session, feature_id=feature_id, freshness_seconds=fresh
             )
 
     async def get_update_request(self, request_id: str) -> FeatureUpdateRequest | None:

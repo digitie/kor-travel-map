@@ -27,17 +27,18 @@ import importlib
 import inspect
 import json
 from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 from datetime import datetime, timedelta, timezone
 from functools import partial
 from typing import TYPE_CHECKING, Any, Final, NoReturn, cast
 
 from kortravelmap.core.feature_operation import ProviderDatasetOperationMembership
+from kortravelmap.core.ids import make_payload_hash, make_source_record_key
 from kortravelmap.core.sync_scope import (
     TARGET_GRIDS_SYNC_SCOPE,
     parse_canonical_sync_scope,
 )
-from kortravelmap.dto import kst_now
+from kortravelmap.dto import SourceRecord, kst_now
 from kortravelmap.dto.weather import WeatherValue
 from kortravelmap.infra.feature_repo import FeatureLoadResult, NoticeFeatureLoadResult
 from kortravelmap.infra.feature_update_executor import ProviderDatasetRefreshFailure
@@ -119,6 +120,7 @@ __all__ = [
     "run_feature_weather_kma_ultra_short_forecast",
     "run_feature_weather_kma_ultra_short_nowcast",
     "weather_warning_rows",
+    "weather_response_source_record",
 ]
 
 _KST: Final = timezone(timedelta(hours=9))
@@ -133,6 +135,61 @@ _KMA_WEATHER_RESOURCE_KEYS: Final[set[str]] = {
     "reverse_geocoder",
 }
 """KMA weather asset 공통 resource key."""
+
+
+def _response_row_payload(row: Any) -> dict[str, Any]:
+    """typed KMA row를 source record에 보존할 canonical JSON object로 바꾼다."""
+
+    if is_dataclass(row) and not isinstance(row, type):
+        return cast("dict[str, Any]", asdict(row))
+    raw = getattr(row, "raw", None)
+    if isinstance(raw, dict):
+        return dict(raw)
+    model_dump = getattr(row, "model_dump", None)
+    if callable(model_dump):
+        dumped = model_dump(mode="json")
+        if isinstance(dumped, dict):
+            return dumped
+    if isinstance(row, dict):
+        return dict(row)
+    raise TypeError(f"KMA response row cannot be preserved as JSON: {type(row).__name__}")
+
+
+def weather_response_source_record(
+    *,
+    dataset_key: str,
+    source_entity_id: str,
+    rows: Sequence[Any],
+    fetched_at: datetime,
+) -> SourceRecord:
+    """forecast dataset response 1건의 immutable provenance record를 만든다.
+
+    KMA grid Feature의 raw source는 ``kma_*_grid`` dataset에 속한다. 값 fact는
+    forecast/nowcast membership이 생산한 응답을 provenance로 가져야 하므로 이
+    별도 record를 사용한다(ADR-089).
+    """
+
+    raw_data = {
+        "source_entity_id": source_entity_id,
+        "rows": [_response_row_payload(row) for row in rows],
+    }
+    payload_hash = make_payload_hash(raw_data)
+    return SourceRecord(
+        provider=KMA_PROVIDER_NAME,
+        dataset_key=dataset_key,
+        source_entity_type="weather_response",
+        source_entity_id=source_entity_id,
+        raw_payload_hash=payload_hash,
+        raw_data=raw_data,
+        fetched_at=fetched_at,
+        source_record_key=make_source_record_key(
+            provider=KMA_PROVIDER_NAME,
+            dataset_key=dataset_key,
+            source_entity_type="weather_response",
+            source_entity_id=source_entity_id,
+            raw_payload_hash=payload_hash,
+        ),
+    )
 
 
 # -- Protocol-만족 row (raw payload → krtour 변환 입력) -------------------
@@ -680,7 +737,17 @@ async def _run_kma_weather_asset(
             await kor_travel_map_client.load_feature_bundles([bundle])
             anchor = bundle.feature.feature_id
             grid_values: list[WeatherValue] = list(to_values(rows, anchor))
-            values_loaded += await kor_travel_map_client.load_weather_values(grid_values)
+            response_record = weather_response_source_record(
+                dataset_key=dataset_key,
+                source_entity_id=f"grid:{nx}:{ny}",
+                rows=rows,
+                fetched_at=fetched_at,
+            )
+            values_loaded += await kor_travel_map_client.load_weather_values(
+                grid_values,
+                provider_dataset_id=membership.provider_dataset_id,
+                source_record=response_record,
+            )
             matched_features.add(anchor)
         if grids_fetched:
             await kor_travel_map_client.record_sync_success_for_operation_membership(
@@ -1057,6 +1124,7 @@ async def run_feature_weather_kma_mid_forecast(
     regions_fetched = 0
     values_loaded = 0
     matched_features: set[str] = set()
+    fetched_at = kst_now()
     try:
         # H45(재리뷰 2 N-1): client retries=1 정산은 mid에도 적용되므로, 경계
         # 재시도 없이는 mid만 HTTP 4→2 시도로 약화된다 — 격자 루프와 동일하게
@@ -1092,17 +1160,39 @@ async def run_feature_weather_kma_mid_forecast(
             regions_fetched += 1
             # 복제 제거(메인 격자 루프와 동일 원칙): region 응답을 대표 feature
             # 1개(anchor)에만 적재. 나머지는 read 시 nearest-temp로 서빙.
-            region_values: list[WeatherValue] = []
+            land_values: list[WeatherValue] = []
+            temperature_values: list[WeatherValue] = []
             anchor = spec.feature_ids[0] if spec.feature_ids else None
             if anchor is not None:
-                region_values.extend(
-                    mid_land_forecast_to_weather_values(land_rows, feature_id=anchor)
+                land_values = mid_land_forecast_to_weather_values(
+                    land_rows, feature_id=anchor
                 )
-                region_values.extend(
-                    mid_temperature_to_weather_values(temp_rows, feature_id=anchor)
+                temperature_values = mid_temperature_to_weather_values(
+                    temp_rows, feature_id=anchor
                 )
-            if region_values and anchor is not None:
-                values_loaded += await kor_travel_map_client.load_weather_values(region_values)
+            if anchor is not None and land_values:
+                values_loaded += await kor_travel_map_client.load_weather_values(
+                    land_values,
+                    provider_dataset_id=membership.provider_dataset_id,
+                    source_record=weather_response_source_record(
+                        dataset_key=KMA_MID_FORECAST_DATASET_KEY,
+                        source_entity_id=f"mid-land:{spec.land_reg_id}",
+                        rows=land_rows,
+                        fetched_at=fetched_at,
+                    ),
+                )
+            if anchor is not None and temperature_values:
+                values_loaded += await kor_travel_map_client.load_weather_values(
+                    temperature_values,
+                    provider_dataset_id=membership.provider_dataset_id,
+                    source_record=weather_response_source_record(
+                        dataset_key=KMA_MID_FORECAST_DATASET_KEY,
+                        source_entity_id=f"mid-temperature:{spec.ta_reg_id}",
+                        rows=temp_rows,
+                        fetched_at=fetched_at,
+                    ),
+                )
+            if (land_values or temperature_values) and anchor is not None:
                 matched_features.add(anchor)
     except Exception as exc:
         failure = ProviderDatasetRefreshFailure(

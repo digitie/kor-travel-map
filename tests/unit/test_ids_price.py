@@ -15,10 +15,11 @@ KST = timezone(timedelta(hours=9))
 
 _BASE = dict(
     feature_id="f_1156010100_p_abc",
-    provider="python-opinet-api",
+    provider_dataset_id=17,
     price_domain="opinet_gas_station",
     product_key="gasoline",
     observed_at=datetime(2026, 5, 28, 3, 0, tzinfo=KST),
+    source_record_key="sr_price_response_a",
 )
 
 
@@ -51,9 +52,16 @@ def test_differs_when_observed_at_changes() -> None:
 
 
 @pytest.mark.unit
-def test_differs_when_provider_changes() -> None:
+def test_differs_when_provider_dataset_changes() -> None:
     a = make_price_value_key(**_BASE)
-    b = make_price_value_key(**{**_BASE, "provider": "python-krex-api"})
+    b = make_price_value_key(**{**_BASE, "provider_dataset_id": 18})
+    assert a != b
+
+
+@pytest.mark.unit
+def test_differs_when_source_response_revision_changes() -> None:
+    a = make_price_value_key(**_BASE)
+    b = make_price_value_key(**{**_BASE, "source_record_key": "sr_price_response_b"})
     assert a != b
 
 

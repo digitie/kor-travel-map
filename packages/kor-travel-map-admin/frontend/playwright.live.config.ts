@@ -26,6 +26,7 @@ const isolatedEvidenceRaw = process.env[ISOLATED_EVIDENCE_ENV];
 const isolatedEvidence = isolatedEvidenceRaw === "1";
 const isolatedDockerNetworkRaw = process.env[ISOLATED_DOCKER_NETWORK_ENV];
 const isolatedDockerNetwork = isolatedDockerNetworkRaw === "1";
+const parsedBaseURL = URL.canParse(baseURL) ? new URL(baseURL) : null;
 
 function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
@@ -126,6 +127,11 @@ function isTrustedIsolatedDockerOrigin(url: URL): boolean {
     url.hash === ""
   );
 }
+
+const isolatedHttpOrigin =
+  parsedBaseURL !== null && isTrustedIsolatedDockerOrigin(parsedBaseURL)
+    ? parsedBaseURL.origin
+    : null;
 
 (function assertNotProdUnlessOptedIn() {
   let parsed: URL;
@@ -259,6 +265,17 @@ export default defineConfig({
       ],
   use: {
     baseURL,
+    // 격리 Docker candidate는 HTTP지만 runner가 검증한 `candidate-ui` origin만
+    // secure context로 승격한다. idempotency fingerprint의 Web Crypto를 실제
+    // 브라우저 submit 경로에서도 검증하되, 임의 HTTP origin에는 적용하지 않는다.
+    launchOptions:
+      isolatedHttpOrigin === null
+        ? undefined
+        : {
+            args: [
+              `--unsafely-treat-insecure-origin-as-secure=${isolatedHttpOrigin}`,
+            ],
+          },
     // 방어선(T-ADM-C7RUN): 기본 action/navigation timeout은 0(무제한)이라, 조건부 렌더
     // element를 기다리는 click/fill/goto가 조건이 끝내 참이 되지 않으면 spec의 30분
     // test-timeout까지 조용히 매달린다(관측된 empty-write hang의 근본 조건). 정상 UI

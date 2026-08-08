@@ -2,6 +2,105 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-09 (codex) — T-VN-38 final n150 격리 UI E2E 완료
+
+- exact-source final head의 fresh `0094` candidate DB checkpoint를 custom dump로 restore하고,
+  같은 checkpoint 재사용까지 검증했다. 이후 admin UI의 메인·복구 파괴형 live E2E가 각각 2/2를
+  통과했다. 성공 후 runner는 `BLOCKED.json`과 run artifact를 남기지 않았으며, 서비스 컨테이너와
+  DB에는 접근하지 않았다.
+- 후보 Docker hostname의 평문 HTTP가 Web Crypto를 제공하지 않아 correction mutation이 제출 전에
+  멈추던 문제를 고쳤다. `E2E_ISOLATED_LIVE_DOCKER_NETWORK=1`이고 authority가 정확히
+  `candidate-ui`인 경우에만 그 동적 origin을 browser secure-context flag로 허용한다. credential,
+  path, query, hash가 있거나 일반 loopback/운영 origin이면 flag를 넣지 않는 config 회귀를 추가했다.
+- stale correction fixture는 secure context·`crypto.randomUUID`·`crypto.subtle`을 먼저 확인하고,
+  safe debug stage를 load의 navigate/context/action/identity/basis로 나눴다. 실패 분류가 원인 없는
+  browser request 누락으로 뭉개지지 않는다.
+- 재확인: `tests/unit/test_vnext_contract_artifacts.py` 7 passed, live runner `bash -n` 통과.
+  T-VN-38A/B/C는 PR #971의 base 최신화·CI·승인·병합 단계만 남았다.
+
+## 2026-08-08 (codex) — T-VN-38 n150 checkpoint restore fingerprint 정규화
+
+- final-head empty PostGIS를 `0094_drop_weather_metric_series`까지 fresh upgrade한 뒤
+  checkpoint restore를 실행했다. PostgreSQL이 같은 CHECK AST를 restore하면서 괄호·암묵 cast만
+  다르게 deparse해 schema hash가 false-red인 것을 재현했다.
+- clone live runner는 dump SHA-256와 `pg_restore --exit-on-error`를 expression-byte/적용 증거로
+  유지하고, restore 동등성 schema fingerprint는 constraint name/type/key/FK action/validation 같은
+  structural catalog 축으로 고정했다. text deparser 모양과 dropped column의 `attnum` gap은 비교
+  대상에서 제외한다. 후자는 custom dump restore가 같은 named column contract로 정규화한다.
+- n150 UI 인수 중 canonical alias trigger와 immutable current summary가 드러내는 direct FK
+  소유 증거를 재고정했다. seed는 alias 2 + fact 2 + summary 2 = 6, soft-delete API audit은
+  alias 6 + feature version 13 = 19다. subtype/identity composite FK는 parent delete와 zero audit으로
+  검증하며, fixture ID만으로 단일 열 reference를 억지로 계수하지 않는다.
+
+## 2026-08-08 (codex) — T-VN-38 final review P1 수렴
+
+- `INV-089-01`의 expected set을 existing summary가 아니라 active dataset·enabled refresh policy의
+  eligible immutable fact 전체에서 만들도록 고쳤다. summary가 전혀 없는 raw series도 현재
+  reconciliation 시각 기준 winner로 set-diff에 남으므로 projection 누락을 숨기지 않는다.
+- price winner invariant도 runtime처럼 inactive dataset을 제외했다. single-card의 KMA/observed
+  fallback은 자기 partial weather row를 후보로 다시 고르지 않으며, own `SKY` + 이웃 `TMP`를
+  검증하는 PostGIS 회귀를 추가했다.
+- map JSON `refresh_after`는 OpenAPI `date-time` 문자열이라는 경계를 통합 테스트에서도
+  `fromisoformat`으로 검증하도록 맞췄다. 최종 final-head PostGIS·n150 live gate만 남았다.
+
+## 2026-08-08 (codex) — T-VN-38 final P0 보강: deadline scheduler와 reader fail-closed
+
+- weather current projection을 `pg_advisory_xact_lock`으로 전역 직렬화했다. desired set을 보지
+  못한 동시 writer가 다른 series summary를 지우는 race를 막고, unchanged winner/deadline은 receipt만
+  남겨 MVCC hot-row churn을 없앴다.
+- Dagster `current_weather_summary_refresh` job/schedule을 추가했다. minute tick은 새 provider
+  fact 없이 future forecast eligibility·validity·SLA deadline을 재물화한다.
+- weather/price current card, weather own/nearest anchor, public/admin bbox가 inactive dataset을
+  즉시 제외하고, weather current path는 `refresh_after > clock_timestamp()`를 요구한다. map summary는
+  canonical dataset identity와 deadline을 필수 계약으로 노출한다.
+- target invariant의 winner eligibility를 materializer와 같은 active dataset·enabled policy·SLA
+  predicate로 맞췄고, partial-own batch anchor의 self fallback을 제거했다.
+- 검증: vNext artifact unit 7 passed, API weather 26 passed, Dagster maintenance/definition package
+  gate green. focused PostGIS/n150 live E2E는 재리뷰 후 final head에서 실행한다.
+
+## 2026-08-08 (codex) — T-VN-38 final reader 계약·fixture 정리 checkpoint
+
+- `0094`가 0060의 mutable weather upsert/legacy batch와 `weather_metric_series` table·trigger·ORM
+  mapping을 제거했다. service batch는 immutable fact의 set-ranked anchor/fact query이고 normal
+  card/bbox는 receipt-backed summary만 읽는다.
+- public current와 explicit snapshot을 분리했다. snapshot은 weather `target_at + known_at`, price
+  `observed_at + known_at` 두 축을 강제하고 route policy도 public keyed로 등록했다. admin/user/service
+  OpenAPI와 두 TypeScript client 산출물을 재생성했다.
+- weather metric과 price point는 canonical dataset id/key/display와 `known_at`을 필수로 내보낸다.
+  admin UI identity는 provider 표시문자열이 아니라 이 dataset identity를 쓴다.
+- destructive live fixture가 partial retry에서 refresh-policy CAS 충돌을 내지 않도록 보강했고,
+  cleanup은 feature cascade 뒤 owned source lineage와 dataset/policy까지 제거한다.
+- 검증: isolated API weather unit 26 passed, fixture/price unit 46 passed, weather batch/repo integration
+  집중 gate, ruff·py_compile 통과. 최종 2인 재리뷰와 n150 final-head live gate가 남았다.
+
+## 2026-08-08 (codex) — T-VN-38B checkpoint와 summary reader/API/UI 전환 시작
+
+- `0093`은 price provider 문자열 identity/current upsert를 파기했다. producer dataset과 response
+  revision의 composite lineage, immutable fact trigger, successful receipt만 가리키는 current summary를
+  same-transaction writer로 묶었다. same-observed correction은 새 source record로 append하고 known-at
+  rank로 선택한다.
+- OpiNet/KREX assets도 exact operation membership id와 `price_response` source record를 전달한다.
+  price migration fresh-upgrade, weather/price migration 회귀, price mapper/key 단위 검증을 실행했다.
+- public/admin bbox normal path는 row별 LATERAL raw fact scan 대신 candidate-set에서 current summary와
+  selected fact를 한 번씩 join한다. JSON projection에 `provider_dataset_id`, `dataset_key`, display name,
+  `known_at`을 넣었고 admin UI chart/table/map key도 canonical dataset identity로 바꿨다.
+- current route의 암묵적 `asof` 재순위는 제거했다. 명시 snapshot route는 weather의
+  `target_at + known_at`, price의 `observed_at + known_at`를 모두 요구한다. 남은 service batch와
+  legacy fixture는 같은 final snapshot boundary로 이관 중이다.
+
+## 2026-08-08 (codex) — T-VN-38A immutable weather writer checkpoint
+
+- `0092` 위 writer가 response `SourceRecord`와 exact `provider_dataset_id`를 받도록 하여
+  fact dataset/source lineage를 DB composite FK까지 보장하게 했다. DTO의 provider 문자열은
+  pure transform 입력으로만 남고 persistence identity가 아니다.
+- writer transaction은 fact append 뒤 `ops.current_summary_runs` receipt를 성공으로 전이하고
+  current summary를 set reconciliation한다. weather winner는 `target_at`, `known_at`, validity,
+  native time/key 순위이며 stale deadline을 넘긴 row는 summary에서 삭제된다.
+- KMA forecast response source는 grid Feature source와 분리했다. AirKorea/KREX value asset도
+  producing membership id와 response record를 전달하도록 이관했다. fresh-upgrade integration
+  test 2건과 ruff를 통과했다. root venv에는 Dagster dependency가 없어 package test는 n150
+  package 환경에서 재실행한다.
+
 ## 2026-08-08 (3) — T-VN-33 기능 게이트 GREEN + 설계 재검토 4건
 
 전체 스위트가 **4,534 passed / 6 failed**로 수렴했다(시작 298). 6건은 전부 컨테이너
@@ -36,6 +135,14 @@ partition하고 있었고, 다음엔 반대로 "refresh-only CHECK가 막아 도
 다른 두 upload를 만들 방법 자체가 없어 죽은 폭이었다. SQLSTATE 통일(38 대 1)도 분기하는
 소비자가 없어 접었다. 지시가 "설계 우선"이어도, 동작이 안 바뀌는 변경으로 freeze
 아티팩트를 흔드는 건 설계 개선이 아니다.
+## 2026-08-08 (codex) — T-VN-38 설계 승인·target freeze 재고정
+
+- 독립 DB·reader 적대 리뷰어 2명이 P0=0 GO를 냈다. source-less write, fact/source
+  dataset 불일치와 KMA grid provenance, immutable update/delete, terminal receipt, summary
+  cross-series pointer, refresh deadline을 DB rejection fixture로 고정했다.
+- 빈 PostGIS target에서 KMA producing response source의 양성 경로와 feature→fact→summary
+  cascade도 확인했다. artifact unit + target freeze는 14건 통과했고, 갱신한 catalog
+  fingerprint와 artifact SHA로 재동결했다. ADR-089를 accepted로 전환한다.
 
 ## 2026-08-08 (2) — T-VN-33 통합 전량 전환 완료, 제품 결함 25건 이상 수정
 

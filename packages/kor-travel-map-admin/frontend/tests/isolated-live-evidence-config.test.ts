@@ -63,6 +63,20 @@ describe("isolated Live evidence config", () => {
 
     expect(config.use?.baseURL).toBe("http://candidate-ui:18705");
     expect(config.use?.trace).toBe("off");
+    expect(config.use?.launchOptions).toEqual({
+      args: [
+        "--unsafely-treat-insecure-origin-as-secure=http://candidate-ui:18705",
+      ],
+    });
+  });
+
+  it("일반 HTTP origin에는 secure-context 승격 옵션을 넣지 않는다", async () => {
+    process.env.E2E_BASE_URL = "http://127.0.0.1:18705";
+    process.env.E2E_ISOLATED_LIVE_EVIDENCE = "1";
+
+    const config = await loadConfig();
+
+    expect(config.use?.launchOptions).toBeUndefined();
   });
 
   it("Docker 격리 opt-in으로 임의 hostname을 허용하지 않는다", async () => {
