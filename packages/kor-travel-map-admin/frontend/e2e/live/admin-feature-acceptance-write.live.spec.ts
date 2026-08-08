@@ -1095,7 +1095,7 @@ async function assertStaleCorrection(page: Page): Promise<void> {
   expect(competingDetail.data.feature.name).toBe(competingName);
   expect(`"${competingDetail.data.feature.row_revision}"`).toBe(competingTag);
 
-  failureDetail = "stale-etag:stale-submit";
+  failureDetail = "stale-etag:stale-submit:prepare";
   uiPatchRequests.length = 0;
   const revisionsBeforeSubmit = revisionResponses.length;
   const staleResponsePromise = page.waitForResponse(
@@ -1105,7 +1105,11 @@ async function assertStaleCorrection(page: Page): Promise<void> {
         decodeURIComponent(adminFeaturePath(correctionId)),
     { timeout: FLOW_TIMEOUT },
   );
-  await page.getByRole("button", { name: "요청 생성" }).click();
+  failureDetail = "stale-etag:stale-submit:click";
+  await page
+    .getByRole("button", { name: "요청 생성" })
+    .click({ timeout: UI_TIMEOUT });
+  failureDetail = "stale-etag:stale-submit:response";
   const staleResponse = await staleResponsePromise;
   expect(staleResponse.status()).toBe(412);
   expect(staleResponse.request().headers()["if-match"]).toBe(baselineTag);
