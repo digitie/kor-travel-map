@@ -201,15 +201,21 @@ def _response_payload_item(item: Any) -> dict[str, Any]:
     raise TypeError(f"provider response item cannot be preserved as JSON: {type(item).__name__}")
 
 
-def _weather_response_source_record(
+def _value_response_source_record(
     *,
     provider: str,
     dataset_key: str,
+    source_entity_type: str,
     source_entity_id: str,
     records: Sequence[Any],
     fetched_at: datetime,
 ) -> SourceRecord:
-    """value producer dataset이 소유하는 immutable response source record를 만든다."""
+    """value producer dataset이 소유하는 immutable response source record를 만든다.
+
+    날씨 grid/station Feature의 source entity와 value를 만든 provider response는
+    서로 다를 수 있다. 따라서 response 자체를 producer dataset에 귀속한 별도
+    source entity로 보존하고, fact는 이 record만 lineage로 참조한다.
+    """
 
     raw_data = {
         "source_entity_id": source_entity_id,
@@ -219,7 +225,7 @@ def _weather_response_source_record(
     return SourceRecord(
         provider=provider,
         dataset_key=dataset_key,
-        source_entity_type="weather_response",
+        source_entity_type=source_entity_type,
         source_entity_id=source_entity_id,
         raw_payload_hash=payload_hash,
         raw_data=raw_data,
@@ -227,7 +233,7 @@ def _weather_response_source_record(
         source_record_key=make_source_record_key(
             provider=provider,
             dataset_key=dataset_key,
-            source_entity_type="weather_response",
+            source_entity_type=source_entity_type,
             source_entity_id=source_entity_id,
             raw_payload_hash=payload_hash,
         ),
@@ -404,7 +410,26 @@ async def _run_feature_price_opinet_stations_locked(
     # ``fk_features_parent_feature_id_features``을 위반하지 않는다.
     if station_bundles:
         await client.load_feature_bundles(station_bundles)
-    result = await client.load_price_features(bundles, values)
+    membership = await _exact_sync_membership(
+        context,
+        client,
+        boundary="opinet_price_value_write",
+        provider=OPINET_PROVIDER_NAME,
+        dataset_key=OPINET_PRICE_DATASET_KEY,
+    )
+    result = await client.load_price_features(
+        bundles,
+        values,
+        provider_dataset_id=membership.provider_dataset_id,
+        source_record=_value_response_source_record(
+            provider=OPINET_PROVIDER_NAME,
+            dataset_key=OPINET_PRICE_DATASET_KEY,
+            source_entity_type="price_response",
+            source_entity_id=f"run:{fetched_at.isoformat()}",
+            records=records,
+            fetched_at=fetched_at,
+        ),
+    )
     coverage = "configured_scope" if has_station_details else "rotating_partial"
     load_metadata = {
         **result.as_metadata(),
@@ -599,7 +624,26 @@ async def run_feature_price_krex_rest_areas(
         fetched_at=fetched_at,
         place_locator=place_locator,
     )
-    result = await client.load_price_features(bundles, values)
+    membership = await _exact_sync_membership(
+        context,
+        client,
+        boundary="krex_price_value_write",
+        provider=KREX_PROVIDER_NAME,
+        dataset_key=REST_AREA_PRICES_DATASET_KEY,
+    )
+    result = await client.load_price_features(
+        bundles,
+        values,
+        provider_dataset_id=membership.provider_dataset_id,
+        source_record=_value_response_source_record(
+            provider=KREX_PROVIDER_NAME,
+            dataset_key=REST_AREA_PRICES_DATASET_KEY,
+            source_entity_type="price_response",
+            source_entity_id=f"run:{fetched_at.isoformat()}",
+            records=records,
+            fetched_at=fetched_at,
+        ),
+    )
     _add_output_metadata(
         context,
         {
@@ -1489,9 +1533,10 @@ async def run_feature_weather_airkorea_air_quality(
         bundles,
         values,
         provider_dataset_id=membership.provider_dataset_id,
-        source_record=_weather_response_source_record(
+        source_record=_value_response_source_record(
             provider=AIRKOREA_PROVIDER_NAME,
             dataset_key=DATASET_KEY_AIR_QUALITY,
+            source_entity_type="weather_response",
             source_entity_id=f"run:{fetched_at.isoformat()}",
             records=measurements,
             fetched_at=fetched_at,
@@ -1564,9 +1609,10 @@ async def run_feature_weather_krex_rest_areas(
         bundles,
         values,
         provider_dataset_id=membership.provider_dataset_id,
-        source_record=_weather_response_source_record(
+        source_record=_value_response_source_record(
             provider=KREX_PROVIDER_NAME,
             dataset_key=REST_AREA_WEATHER_DATASET_KEY,
+            source_entity_type="weather_response",
             source_entity_id=f"run:{fetched_at.isoformat()}",
             records=records,
             fetched_at=fetched_at,

@@ -2450,22 +2450,41 @@ class AsyncKorTravelMapClient:
 
     # ─── price values (T-price) ───────────────────────────────────────────────
 
-    async def load_price_values(self, values: Iterable[PriceValue]) -> int:
-        """``PriceValue`` 들을 ``feature_price_values``에 멱등 upsert (write)."""
+    async def load_price_values(
+        self,
+        values: Iterable[PriceValue],
+        *,
+        provider_dataset_id: int,
+        source_record: SourceRecord,
+    ) -> int:
+        """exact response가 소유하는 immutable price facts를 append한다."""
         async with self._session_factory() as session, session.begin():
-            return await repo_load_price_values(session, values)
+            return await repo_load_price_values(
+                session,
+                values,
+                provider_dataset_id=provider_dataset_id,
+                source_record=source_record,
+            )
 
     async def load_price_features(
         self,
         price_bundles: Iterable[FeatureBundle],
         price_values: Iterable[PriceValue],
+        *,
+        provider_dataset_id: int,
+        source_record: SourceRecord,
     ) -> PriceFeatureLoadResult:
-        """price-kind anchor feature + 가격값을 한 transaction으로 적재한다."""
+        """price anchor와 exact-response immutable facts를 한 transaction으로 적재한다."""
         bundles = list(price_bundles)
         values = list(price_values)
         async with self._session_factory() as session, session.begin():
             features = await load_bundles(session, bundles)
-            value_count = await repo_load_price_values(session, values)
+            value_count = await repo_load_price_values(
+                session,
+                values,
+                provider_dataset_id=provider_dataset_id,
+                source_record=source_record,
+            )
         return PriceFeatureLoadResult(features=features, price_values=value_count)
 
     async def load_air_quality(
@@ -2505,7 +2524,6 @@ class AsyncKorTravelMapClient:
         self,
         *,
         feature_id: str,
-        asof: datetime | None = None,
         freshness_seconds: int | None = None,
     ) -> WeatherCard:
         """feature weather card — forecast_style×metric_key 최신값 + freshness (read).
@@ -2521,7 +2539,7 @@ class AsyncKorTravelMapClient:
         )
         async with self._session_factory() as session:
             return await repo_build_weather_card(
-                session, feature_id=feature_id, asof=asof, freshness_seconds=fresh
+                session, feature_id=feature_id, freshness_seconds=fresh
             )
 
     async def get_update_request(self, request_id: str) -> FeatureUpdateRequest | None:

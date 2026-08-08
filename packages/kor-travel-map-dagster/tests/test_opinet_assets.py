@@ -58,6 +58,7 @@ class _Client:
         self.events: list[str] = []
         self.sync_success_calls: list[dict[str, Any]] = []
         self.loaded_price_values: list[PriceValue] = []
+        self.price_write_context: dict[str, Any] | None = None
         self.last_success_at = last_success_at
         self.sync_cursor = sync_cursor
         self.sync_state_reads: list[ProviderDatasetOperationMembership] = []
@@ -116,9 +117,12 @@ class _Client:
         self.events.append("load")
         return FeatureLoadResult(bundles_total=len(materialized))
 
-    async def load_price_features(self, bundles: Any, values: Any) -> PriceFeatureLoadResult:
+    async def load_price_features(
+        self, bundles: Any, values: Any, **kwargs: Any
+    ) -> PriceFeatureLoadResult:
         materialized_bundles = list(bundles)
         self.loaded_price_values = list(values)
+        self.price_write_context = kwargs
         self.events.append("load_price")
         return PriceFeatureLoadResult(
             features=FeatureLoadResult(bundles_total=len(materialized_bundles)),

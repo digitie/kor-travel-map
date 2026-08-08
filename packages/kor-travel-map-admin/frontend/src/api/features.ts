@@ -187,25 +187,21 @@ export type FeaturesNearbyParams = Omit<
 
 async function fetchAdminFeatureWeather(
   featureId: string,
-  params: { asof?: string | Date | null } = {},
   signal?: AbortSignal,
 ): Promise<FeatureWeatherResponse> {
   return getJson<FeatureWeatherResponse>(
-    pathWithQuery(`/v1/admin/features/${encodeURIComponent(featureId)}/weather`, {
-      asof: params.asof,
-    }),
+    `/v1/admin/features/${encodeURIComponent(featureId)}/weather`,
     { signal },
   );
 }
 
 export function useAdminFeatureWeather(
   featureId: string | null,
-  params: { asof?: string | Date | null } = {},
 ) {
   return useQuery<FeatureWeatherResponse, Error>({
-    queryKey: ["admin-feature-card", featureId, "weather", params.asof ?? null] as const,
+    queryKey: ["admin-feature-card", featureId, "weather"] as const,
     queryFn: ({ signal }) =>
-      fetchAdminFeatureWeather(featureId as string, params, signal),
+      fetchAdminFeatureWeather(featureId as string, signal),
     enabled: featureId !== null && featureId.length > 0,
     staleTime: 60_000,
   });
@@ -213,12 +209,11 @@ export function useAdminFeatureWeather(
 
 async function fetchAdminFeaturePrice(
   featureId: string,
-  params: { asof?: string | Date | null; historyLimit?: number } = {},
+  params: { historyLimit?: number } = {},
   signal?: AbortSignal,
 ): Promise<FeaturePriceResponse> {
   return getJson<FeaturePriceResponse>(
     pathWithQuery(`/v1/admin/features/${encodeURIComponent(featureId)}/price`, {
-      asof: params.asof,
       history_limit: params.historyLimit,
     }),
     { signal },
@@ -227,14 +222,13 @@ async function fetchAdminFeaturePrice(
 
 export function useAdminFeaturePrice(
   featureId: string | null,
-  params: { asof?: string | Date | null; historyLimit?: number } = {},
+  params: { historyLimit?: number } = {},
 ) {
   return useQuery<FeaturePriceResponse, Error>({
     queryKey: [
       "admin-feature-card",
       featureId,
       "price",
-      params.asof ?? null,
       params.historyLimit ?? null,
     ] as const,
     queryFn: ({ signal }) =>

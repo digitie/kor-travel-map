@@ -430,7 +430,6 @@ def test_admin_weather_and_price_cards_accept_nonpublic_feature(
         assert kwargs["feature_id"] == "hidden-1"
         return PriceCard(
             feature_id="hidden-1",
-            asof=None,
             current=[],
             history=[],
             latest_at=None,
