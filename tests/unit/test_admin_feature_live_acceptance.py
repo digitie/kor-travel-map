@@ -588,7 +588,8 @@ def test_direct_cleanup_locks_owned_parents_before_fk_audit_and_delete() -> None
     assert '"feature.feature_aliases.feature_id"] = len(present)' in fixture
     assert '"feature.current_weather_summary.feature_id"] = 1' in fixture
     assert '"feature.current_price_summary.feature_id"] = 1' in fixture
-    assert '"feature.feature_aliases.feature_id": len(rows)' in inspection
+    assert 'if rows:' in inspection
+    assert '"feature.feature_aliases.feature_id"] = len(rows)' in inspection
     assert cleanup.count("DELETE FROM feature.features") == 1
     assert purge.count("DELETE FROM feature.features") == 1
     assert "DELETE FROM ops.feature_change_requests" in purge
