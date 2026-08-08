@@ -303,6 +303,7 @@ from kortravelmap.infra.sync_state_repo import (
 )
 from kortravelmap.infra.weather_repo import (
     WeatherCard,
+    WeatherValueWriteContext,
 )
 from kortravelmap.infra.weather_repo import (
     build_weather_card as repo_build_weather_card,
@@ -2432,10 +2433,15 @@ class AsyncKorTravelMapClient:
 
     # ─── weather card (T-213e) ───────────────────────────────────────────────
 
-    async def load_weather_values(self, values: Iterable[WeatherValue]) -> int:
-        """``WeatherValue`` 들을 ``feature_weather_values``에 멱등 upsert (write)."""
+    async def load_weather_values(
+        self,
+        values: Iterable[WeatherValue],
+        *,
+        context: WeatherValueWriteContext,
+    ) -> int:
+        """response lineage가 고정된 immutable weather facts를 append한다."""
         async with self._session_factory() as session, session.begin():
-            return await repo_load_weather_values(session, values)
+            return await repo_load_weather_values(session, values, context=context)
 
     # ─── price values (T-price) ───────────────────────────────────────────────
 

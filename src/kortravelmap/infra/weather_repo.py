@@ -38,6 +38,7 @@ __all__ = [
     "WeatherBatchPayloadLimitExceededError",
     "WeatherBatchQueryTimeoutError",
     "WeatherBatchWorkLimitExceededError",
+    "WeatherValueWriteContext",
     "WeatherBatchSnapshot",
     "WeatherBatchTarget",
     "WeatherAnchor",
@@ -286,6 +287,16 @@ class WeatherAlertHistoryRow:
     feature_uuid: str | None = None
 
 
+@dataclass(frozen=True)
+class WeatherValueWriteContext:
+    """하나의 raw provider response가 소유하는 immutable weather fact write 경계."""
+
+    provider_dataset_id: int
+    source_entity_key: str
+    source_record_key: str
+    known_at: datetime
+
+
 # weather semantic identity tuple — alembic 0060 ``uq_weather_value_identity``
 # (NULLS NOT DISTINCT) index 컬럼과 **정확히 동일**하고, ``WeatherValue.identity()``·
 # ``make_weather_value_key`` 축과도 같다(timeline_bucket 제외). 단일 정본으로 두어
@@ -373,6 +384,28 @@ WHERE EXCLUDED.collected_at >= feature_weather_values.collected_at
       feature_weather_values.source_record_key,
       feature_weather_values.collected_at
   )
+"""
+
+_IMMUTABLE_INSERT_SQL: Final[str] = """
+INSERT INTO feature.feature_weather_values (
+    weather_value_key, feature_id, provider_dataset_id, weather_domain, forecast_style,
+    timeline_bucket, metric_key, metric_name, source_metric_key, source_metric_name,
+    value_number, value_text, unit, severity, issued_at, valid_at, valid_during,
+    observed_at, target_at, known_at, normalization_version, payload,
+    source_entity_key, source_record_key
+) VALUES (
+    :weather_value_key, :feature_id, :provider_dataset_id, :weather_domain, :forecast_style,
+    :timeline_bucket, :metric_key, :metric_name, :source_metric_key, :source_metric_name,
+    :value_number, :value_text, :unit, :severity, :issued_at, :valid_at,
+    CASE WHEN CAST(:valid_from AS timestamptz) IS NULL
+                   AND CAST(:valid_until AS timestamptz) IS NULL THEN NULL
+         ELSE tstzrange(CAST(:valid_from AS timestamptz),
+                         CAST(:valid_until AS timestamptz), '[)') END,
+    :observed_at, :target_at, :known_at, :normalization_version, CAST(:payload AS jsonb),
+    :source_entity_key, :source_record_key
+)
+ON CONFLICT (feature_id, provider_dataset_id, weather_domain, forecast_style,
+             metric_key, target_at, source_record_key) DO NOTHING
 """
 
 _CARD_SQL: Final[str] = """
@@ -1492,21 +1525,32 @@ def _enum_value(value: Any) -> str:
     return str(getattr(value, "value", value))
 
 
-def _weather_value_params(value: WeatherValue) -> dict[str, Any]:
+def _weather_target_at(value: WeatherValue) -> datetime:
+    target_at = value.valid_at or value.valid_from or value.observed_at
+    if target_at is None:
+        raise ValueError(
+            "weather fact requires valid_at, valid_from, or observed_at for target_at"
+        )
+    return target_at
+
+
+def _weather_value_params(
+    value: WeatherValue, *, context: WeatherValueWriteContext
+) -> dict[str, Any]:
+    target_at = _weather_target_at(value)
     key = make_weather_value_key(
         feature_id=value.feature_id,
-        provider=value.provider,
+        provider_dataset_id=context.provider_dataset_id,
         weather_domain=_enum_value(value.weather_domain),
         forecast_style=_enum_value(value.forecast_style),
         metric_key=value.metric_key,
-        issued_at=value.issued_at,
-        valid_at=value.valid_at,
-        observed_at=value.observed_at,
+        target_at=target_at,
+        source_record_key=context.source_record_key,
     )
     return {
         "weather_value_key": key,
         "feature_id": value.feature_id,
-        "provider": value.provider,
+        "provider_dataset_id": context.provider_dataset_id,
         "weather_domain": _enum_value(value.weather_domain),
         "forecast_style": _enum_value(value.forecast_style),
         "timeline_bucket": (
@@ -1527,22 +1571,56 @@ def _weather_value_params(value: WeatherValue) -> dict[str, Any]:
         "observed_at": value.observed_at,
         "normalization_version": value.normalization_version,
         "payload": json.dumps(value.payload, ensure_ascii=False, default=str),
-        "source_record_key": value.source_record_key,
-        "collected_at": value.collected_at,
+        "source_entity_key": context.source_entity_key,
+        "source_record_key": context.source_record_key,
+        "target_at": target_at,
+        "known_at": context.known_at,
     }
 
 
-async def load_weather_values(session: AsyncSession, values: Iterable[WeatherValue]) -> int:
-    """``WeatherValue`` 들을 멱등 upsert 적재한다. 적재 건수 반환 (commit은 호출자).
+async def load_weather_values(
+    session: AsyncSession,
+    values: Iterable[WeatherValue],
+    *,
+    context: WeatherValueWriteContext,
+) -> int:
+    """한 raw response의 weather facts를 append-only로 적재한다.
 
-    semantic tuple이 같으면 최신 ``collected_at``만 현재 row를 갱신한다. 더 오래된
-    backfill과 완전히 같은 재적재는 DB no-op이다. 반환값은 실제 UPDATE 수가 아니라
-    입력으로 수용한 건수다. weather kind ``feature``가 먼저 존재해야 한다(FK).
+    ``context``는 exact operation membership이 만든 response ``SourceRecord``의
+    dataset/entity/key/fetched_at을 그대로 전달한다. writer는 source-less 값이나
+    response 시각을 임의 추정하는 경로를 제공하지 않는다.
     """
-    params = [_weather_value_params(v) for v in values]
+    if context.provider_dataset_id <= 0:
+        raise ValueError("provider_dataset_id must be positive")
+    if not context.source_entity_key or not context.source_record_key:
+        raise ValueError("weather write context requires canonical source lineage")
+    params = [_weather_value_params(v, context=context) for v in values]
     if not params:
         return 0
-    await session.execute(text(_INSERT_SQL), params)
+    lineage = (
+        await session.execute(
+            text(
+                """
+                SELECT record.source_entity_key, record.fetched_at
+                FROM provider_sync.source_records AS record
+                JOIN provider_sync.source_entities AS entity
+                  ON entity.source_entity_key = record.source_entity_key
+                WHERE record.source_record_key = :source_record_key
+                  AND entity.provider_dataset_id = :provider_dataset_id
+                """
+            ),
+            {
+                "source_record_key": context.source_record_key,
+                "provider_dataset_id": context.provider_dataset_id,
+            },
+        )
+    ).mappings().one_or_none()
+    if lineage is None or (
+        lineage["source_entity_key"] != context.source_entity_key
+        or lineage["fetched_at"] != context.known_at
+    ):
+        raise ValueError("weather write context does not match persisted source response")
+    await session.execute(text(_IMMUTABLE_INSERT_SQL), params)
     return len(params)
 
 

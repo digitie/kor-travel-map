@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from typing import TYPE_CHECKING
 
 import pytest
@@ -11,7 +12,9 @@ from sqlalchemy.exc import DBAPIError
 
 from kortravelmap.core.ids import make_payload_hash
 from kortravelmap.dto import SourceRecord
+from kortravelmap.dto.weather import WeatherValue
 from kortravelmap.infra.feature_repo import upsert_source_record
+from kortravelmap.infra.weather_repo import WeatherValueWriteContext, load_weather_values
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -113,28 +116,27 @@ async def test_weather_fact_is_immutable_and_summary_requires_successful_receipt
         {"finished_at": _BASE + timedelta(minutes=1), "summary_run_id": run_id},
     )
 
-    await migrated_session.execute(
-        text(
-            """
-            INSERT INTO feature.feature_weather_values (
-                weather_value_key, feature_id, provider_dataset_id, weather_domain,
-                forecast_style, metric_key, value_number, target_at, known_at,
-                source_entity_key, source_record_key
-            ) VALUES (
-                'tvn38-weather-fact-a', 'tvn38-weather-feature', :dataset_id,
-                'test_forecast', 'short', 'TMP', 23.5, :target_at, :known_at,
-                :source_entity_key, :source_record_key
-            )
-            """
-        ),
-        {
-            "dataset_id": dataset_id,
-            "target_at": _BASE,
-            "known_at": _BASE,
-            "source_entity_key": source_entity_key,
-            "source_record_key": source_record.source_record_key,
-        },
+    context = WeatherValueWriteContext(
+        provider_dataset_id=dataset_id,
+        source_entity_key=str(source_entity_key),
+        source_record_key=source_record.source_record_key,
+        known_at=_BASE,
     )
+    assert await load_weather_values(
+        migrated_session,
+        [
+            WeatherValue(
+                feature_id="tvn38-weather-feature",
+                provider=_PROVIDER,
+                weather_domain="kma_short_forecast",
+                forecast_style="short",
+                metric_key="TMP",
+                valid_at=_BASE,
+                value_number=Decimal("23.5"),
+            )
+        ],
+        context=context,
+    ) == 1
     await migrated_session.execute(
         text(
             """
@@ -142,8 +144,10 @@ async def test_weather_fact_is_immutable_and_summary_requires_successful_receipt
                 feature_id, provider_dataset_id, weather_domain, forecast_style,
                 metric_key, weather_value_key, summary_run_id, selected_at, refresh_after
             ) VALUES (
-                'tvn38-weather-feature', :dataset_id, 'test_forecast', 'short', 'TMP',
-                'tvn38-weather-fact-a', :summary_run_id, :selected_at, :refresh_after
+                'tvn38-weather-feature', :dataset_id, 'kma_short_forecast', 'short', 'TMP',
+                (SELECT weather_value_key FROM feature.feature_weather_values
+                 WHERE feature_id = 'tvn38-weather-feature'),
+                :summary_run_id, :selected_at, :refresh_after
             )
             """
         ),
@@ -162,7 +166,7 @@ async def test_weather_fact_is_immutable_and_summary_requires_successful_receipt
                     """
                     UPDATE feature.feature_weather_values
                     SET value_number = 99
-                    WHERE weather_value_key = 'tvn38-weather-fact-a'
+                    WHERE feature_id = 'tvn38-weather-feature'
                     """
                 )
             )
@@ -187,7 +191,7 @@ async def test_weather_fact_is_immutable_and_summary_requires_successful_receipt
         text(
             """
             SELECT count(*) FROM feature.current_weather_summary
-            WHERE weather_value_key = 'tvn38-weather-fact-a'
+            WHERE feature_id = 'tvn38-weather-feature'
             """
         )
     ) == 0
