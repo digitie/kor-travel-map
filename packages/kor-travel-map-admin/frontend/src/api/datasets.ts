@@ -154,7 +154,11 @@ function datasetDetailPath(
 ): string {
   return pathWithQuery(`/v1/ops/datasets/${providerDatasetId}`, {
     sync_scope: syncScope,
-    operation_key: operationKey,
+    // 빈 문자열은 **보내지 않는다**. UI 내부에서 ""는 "실행 가능한 operation이
+    // 없는 catalog 행"을 뜻하는 정규화 값인데(rowOperationKey), 서버의
+    // `operation_key`는 `min_length=1`이라 `operation_key=`를 받으면 422다.
+    // 74개 dataset 중 17개가 그 행이라 빼먹으면 상세가 아예 열리지 않는다.
+    operation_key: operationKey || null,
   });
 }
 
@@ -165,7 +169,11 @@ function datasetPreviewPath(
 ): string {
   return pathWithQuery(`/v1/ops/datasets/${providerDatasetId}/preview`, {
     sync_scope: syncScope,
-    operation_key: operationKey,
+    // 빈 문자열은 **보내지 않는다**. UI 내부에서 ""는 "실행 가능한 operation이
+    // 없는 catalog 행"을 뜻하는 정규화 값인데(rowOperationKey), 서버의
+    // `operation_key`는 `min_length=1`이라 `operation_key=`를 받으면 422다.
+    // 74개 dataset 중 17개가 그 행이라 빼먹으면 상세가 아예 열리지 않는다.
+    operation_key: operationKey || null,
   });
 }
 

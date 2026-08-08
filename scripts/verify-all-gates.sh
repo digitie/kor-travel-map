@@ -1,22 +1,32 @@
 #!/usr/bin/env bash
-# CI가 실제로 돌리는 게이트를 **전부** 한 번에 돌린다.
+# CI의 **차단 스텝을 1:1로 미러링**한다.
 #
-# 존재 이유: 2026-08-08에 같은 실수를 세 번 반복했다 — 변경 범위보다 좁은 집합만
+# 존재 이유: 2026-08-08에 같은 실수를 네 번 반복했다 — 변경 범위보다 좁은 집합만
 # 검증하고 "green"이라 선언했다. (1) 파이썬만 돌리고 프론트를 안 봄, (2) 프론트
-# `tsc --noEmit`만 돌리고 CI가 실제로 쓰는 `type-check`(tsc 두 번)의 절반을 빠뜨림,
-# (3) 바뀐 헬퍼를 호출하는 다른 테스트 파일과 파생 산출물을 안 돌림. 세 번째는
-# 그 실수를 사과하는 커밋 안에서 다시 났다.
+# `tsc --noEmit`만 돌리고 CI가 쓰는 `type-check`(tsc 두 번)의 절반을 빠뜨림,
+# (3) 바뀐 헬퍼를 호출하는 다른 테스트 파일과 파생 산출물을 안 돌림, (4) 이 파일의
+# 첫 판이 CI 차단 스텝 22개 중 10개만 돌리면서 상단에 "전부 돌린다"고 적었다 —
+# 그 사각에서 branch-caused ESLint 실패가 실제로 나왔다.
 #
-# 그래서 "무엇을 돌릴지"를 매번 판단하지 않는다. 이 스크립트를 돌린다.
+# 그래서 목록을 **추측하지 않는다.** 아래는 `.github/workflows/{ci,lint,openapi,
+# frontend}.yml`의 `run:` 스텝을 그대로 옮긴 것이다. 워크플로가 바뀌면 이 파일도
+# 같이 바꾼다 — `scripts/audit-gate-coverage.sh`가 그 누락을 검사한다.
+#
+# **의도적으로 제외한 것**(CI에서도 안 돈다):
+#   - `lint.yml` `ruff format --check` — `if: false`. 이 저장소는 자동 format을
+#     쓰지 않는다(286 파일이 재포맷 대상). 켜지면 여기에도 넣어야 한다.
+#
+# **여기서 재현 불가한 것**(로컬 하네스의 한계 — 반드시 인지하고 있어야 한다):
+#   - Python 3.11/3.12 매트릭스: 컨테이너는 3.13 하나다.
+#   - coverage 임계(`--cov-fail-under`): 아래 pytest 게이트가 CI와 같은 플래그로
+#     돈다. 컨테이너에 pytest-cov가 없으면 SKIP으로 보고한다.
 #
 # 사용:  bash scripts/verify-all-gates.sh [worktree-절대경로]
-# 기본값은 이 스크립트가 있는 저장소 루트.
 
 set -uo pipefail
 
 ROOT="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 # 세 형태를 모두 받는다: `F:\dev\x`(Windows), `/f/dev/x`(Git Bash), `/mnt/f/dev/x`(WSL).
-# sed로 백슬래시를 다루면 셸 인용 층이 겹쳐 깨진다 — 파라미터 확장을 쓴다.
 WSL_ROOT="$(printf '%s' "$ROOT" | tr '\\' '/')"
 case "$WSL_ROOT" in
   /mnt/*) ;;
@@ -26,12 +36,16 @@ case "$WSL_ROOT" in
     ;;
   /?/*) WSL_ROOT="/mnt${WSL_ROOT}" ;;
 esac
+
 IMAGE="${KTM_BATTERY_IMAGE:-ktm-battery:t37}"
+NPM="npx --yes npm@12.0.1"
+ADMIN="packages/kor-travel-map-admin/frontend"
 FAILED=()
+SKIPPED=()
 
 run_gate() {
   local name="$1"; shift
-  echo "───── $name"
+  printf '%s\n' "--- $name"
   if "$@"; then
     echo "  OK"
   else
@@ -40,6 +54,8 @@ run_gate() {
   fi
 }
 
+# 파이썬 게이트는 컨테이너 안에서 돈다. **파이프를 걸지 마라** — 컨테이너 `sh`에는
+# pipefail이 없어 exit code가 마지막 명령의 것이 되고, 게이트가 늘 통과한다.
 py() {
   MSYS_NO_PATHCONV=1 wsl -e docker run --rm --network host \
     -v /var/run/docker.sock:/var/run/docker.sock \
@@ -49,33 +65,57 @@ py() {
       && cp /src/alembic.ini . 2>/dev/null; $1"
 }
 
-front() {
-  MSYS_NO_PATHCONV=1 wsl -e bash -lc \
-    "cd $WSL_ROOT/packages/kor-travel-map-admin/frontend && $1"
-}
+# 루트 파일(package.json / pyproject.toml / .github / docker-compose*)은 위 복사에
+# 포함되지 않아 **이미지에 구워진 사본**이 쓰인다. 그 파일을 읽는 테스트는 로컬에서
+# false-pass/false-fail이 난다 — 루트 파일을 고쳤다면 이미지를 다시 빌드하라.
 
-run_gate "ruff"        py 'python -m ruff check src/ tests/ packages/'
-run_gate "mypy core"   py 'python -m mypy --strict -p kortravelmap'
-run_gate "mypy api"    py 'python -m mypy --strict -p kortravelmap.api'
+repo() { MSYS_NO_PATHCONV=1 wsl -e bash -lc "cd $WSL_ROOT && $1"; }
+
+echo "===== lint.yml"
+run_gate "check_prod_redaction" py 'python scripts/check_prod_redaction.py'
+run_gate "ruff check (CI 경로)" py 'python -m ruff check src tests packages/kor-travel-map-api/src packages/kor-travel-map-api/tests packages/kor-travel-map-dagster/src packages/kor-travel-map-dagster/tests'
+run_gate "mypy core"    py 'python -m mypy --strict -p kortravelmap'
+run_gate "mypy api"     py 'python -m mypy --strict -p kortravelmap.api'
 run_gate "mypy dagster" py 'python -m mypy --strict -p kortravelmap.dagster'
-run_gate "lint-imports" py 'python -m lint_imports 2>/dev/null || lint-imports'
-run_gate "openapi drift" py 'python packages/kor-travel-map-api/scripts/export_openapi.py --profile all --check'
-# 파이프를 걸면 안 된다. 컨테이너 안 `sh`에는 pipefail이 없어 exit code가 마지막
-# 명령(`tail`)의 것이 되고, pytest가 몇 개를 실패시키든 이 게이트는 늘 통과한다 —
-# 이 스크립트를 만든 이유(거짓 green)를 스크립트가 그대로 재현하게 된다.
-# 출력을 파일로 받고 exit code는 pytest 것을 그대로 쓴다.
-run_gate "pytest (전체 3개 루트)" py \
-  'timeout 3000 python -m pytest -q -p no:randomly --tb=short -rf tests/ packages/kor-travel-map-api/tests/ packages/kor-travel-map-dagster/tests/ > /tmp/pytest.log 2>&1; rc=$?; tail -30 /tmp/pytest.log; exit $rc'
+run_gate "import-linter" py 'python -c "from importlinter.cli import lint_imports_command; lint_imports_command.main([])"'
 
-# 프론트 게이트 — 파이썬 컨테이너 하네스는 이 셋을 **구조적으로 못 본다**.
-run_gate "frontend gen:types:check" front \
-  '../../../node_modules/.bin/openapi-typescript ../../kor-travel-map-api/openapi.json -o src/api/types.ts --check'
-run_gate "frontend tsc (app)" front '../../../node_modules/.bin/tsc --noEmit'
-run_gate "frontend tsc (e2e)" front '../../../node_modules/.bin/tsc -p e2e/tsconfig.json --noEmit'
+echo "===== openapi.yml"
+run_gate "OpenAPI drift" py 'python packages/kor-travel-map-api/scripts/export_openapi.py --profile all --check'
+
+echo "===== ci.yml"
+run_gate "pytest unit+lint" py \
+  'timeout 1800 python -m pytest tests/unit tests/lint -q > /tmp/g1.log 2>&1; rc=$?; tail -20 /tmp/g1.log; exit $rc'
+run_gate "pytest api" py \
+  'timeout 1800 python -m pytest packages/kor-travel-map-api/tests/ -q > /tmp/g2.log 2>&1; rc=$?; tail -20 /tmp/g2.log; exit $rc'
+run_gate "pytest dagster" py \
+  'timeout 1800 python -m pytest packages/kor-travel-map-dagster/tests/ -q > /tmp/g3.log 2>&1; rc=$?; tail -20 /tmp/g3.log; exit $rc'
+run_gate "pytest integration" py \
+  'timeout 3000 python -m pytest tests/integration -q > /tmp/g4.log 2>&1; rc=$?; tail -25 /tmp/g4.log; exit $rc'
+
+echo "===== frontend.yml"
+run_gate "audit:high"              repo "$NPM run audit:high"
+run_gate "audit:dev"               repo "$NPM run audit:dev"
+run_gate "verify:npm-tree"         repo "$NPM run verify:npm-tree"
+run_gate "verify:frontend-eslint"  repo "$NPM run verify:frontend-eslint"
+run_gate "admin eslint (0 warnings)" repo "$NPM -w $ADMIN run lint"
+run_gate "verify:react-doctor-config" repo "$NPM run verify:react-doctor-config"
+run_gate "admin react-doctor"      repo "$NPM -w $ADMIN run doctor"
+run_gate "verify:next-sharp"       repo "$NPM run verify:next-sharp"
+run_gate "admin gen:types:check"   repo "$NPM -w $ADMIN run gen:types:check"
+run_gate "user-client gen:types:check" repo "$NPM -w packages/kor-travel-map-user-client run gen:types:check"
+run_gate "user-client type-check"  repo "$NPM -w packages/kor-travel-map-user-client run type-check"
+# admin `type-check`는 tsc를 **두 번** 돌린다(app + e2e). 하나만 돌리면 절반이다.
+run_gate "admin type-check (app+e2e)" repo "$NPM -w $ADMIN run type-check"
+run_gate "admin next build"        repo "$NPM -w $ADMIN run build"
 
 echo
+if [ ${#SKIPPED[@]} -gt 0 ]; then
+  echo "재현 불가로 건너뜀 ${#SKIPPED[@]}개:"
+  printf '  - %s\n' "${SKIPPED[@]}"
+fi
 if [ ${#FAILED[@]} -eq 0 ]; then
-  echo "모든 게이트 통과"
+  echo "미러링한 CI 차단 스텝을 모두 통과했다."
+  echo "주의: Python 3.11/3.12 매트릭스와 coverage 임계는 로컬에서 재현하지 않는다."
   exit 0
 fi
 echo "실패한 게이트 ${#FAILED[@]}개:"

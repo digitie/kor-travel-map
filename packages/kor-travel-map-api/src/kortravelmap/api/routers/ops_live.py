@@ -446,6 +446,7 @@ active_uploads AS (
       dataset.provider,
       dataset.dataset_key,
       upload.sync_scope,
+      upload.operation_key,
       upload.status,
       upload.validation_job_id::text AS validation_job_id,
       upload.load_job_id::text AS load_job_id,
@@ -476,6 +477,7 @@ SELECT
   dataset.provider,
   dataset.dataset_key,
   upload.sync_scope,
+  upload.operation_key,
   upload.status,
   upload.validation_job_id::text AS validation_job_id,
   upload.load_job_id::text AS load_job_id,
@@ -705,6 +707,11 @@ async def _offline_upload_snapshot(session: AsyncSession, upload_id: str) -> dic
         "provider": row.get("provider"),
         "dataset_key": row.get("dataset_key"),
         "sync_scope": row.get("sync_scope"),
+        # membership identity는 triple이다. 같은 PR의 REST 표면
+        # (routers/offline_uploads.py)이 "세 열이 모두 NOT NULL이므로 여기서
+        # operation_key를 떨어뜨리면 표현 가능한 사실을 표면에서만 잃는다"고
+        # 적어 두었다 — live 스냅샷도 같은 규칙을 따라야 한다.
+        "operation_key": row.get("operation_key"),
         "status": row.get("status"),
         "validation_job_id": row.get("validation_job_id"),
         "load_job_id": row.get("load_job_id"),

@@ -1268,6 +1268,12 @@ function RefreshNowSection({
     if (!scopeDecision.allowed) {
       return;
     }
+    // 실행 가능한 refresh operation이 없는 catalog 행(74개 dataset 중 17개)은
+    // 돌릴 대상 자체가 없다. 빈 operation_key를 보내면 서버 스키마
+    // (`minLength: 1`)가 422로 거부하므로, 여기서 명시적으로 막는다.
+    if (!selection.operationKey) {
+      return;
+    }
     refreshNow.mutate(
       {
         providerDatasetId: selection.providerDatasetId,

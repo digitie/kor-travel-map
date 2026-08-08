@@ -94,8 +94,9 @@ class OpsImportJobEvent:
     job_id: str
     import_job_dataset_id: str | None
     provider_dataset_id: int | None
-    # membership identity의 나머지 한 축. event는 import_job_dataset_id만 들고 있으므로
+    # membership identity의 나머지 두 축. event는 import_job_dataset_id만 들고 있으므로
     # member join으로 되짚는다 — 사본을 event에 두면 T-VN-33이 없앤 그 모양이 된다.
+    sync_scope: str | None
     operation_key: str | None
     feature_id: str | None
     stage: str | None
@@ -367,13 +368,15 @@ WHERE job.job_id = CAST(:job_id AS uuid)
 
 _IMPORT_JOB_EVENT_COLUMNS: Final[str] = (
     "event.event_id, event.job_id, event.import_job_dataset_id, "
-    "member.provider_dataset_id, member.operation_key, event.feature_id, event.stage, "
+    "member.provider_dataset_id, member.sync_scope, member.operation_key, "
+    "event.feature_id, event.stage, "
     "event.level, event.code, event.message, event.payload, event.occurred_at"
 )
 
 _SCOPED_IMPORT_JOB_EVENT_COLUMNS: Final[str] = (
     "event.event_id, event.job_id, event.import_job_dataset_id, "
-    "scope_page.provider_dataset_id, scope_page.operation_key, event.feature_id, "
+    "scope_page.provider_dataset_id, scope_page.sync_scope, "
+    "scope_page.operation_key, event.feature_id, "
     "event.stage, event.level, event.code, event.message, event.payload, "
     "event.occurred_at"
 )
@@ -436,13 +439,13 @@ def _scoped_import_job_events_sql(
     return f"""
 WITH scope_member AS (
     SELECT member.import_job_dataset_id, member.provider_dataset_id,
-           member.operation_key
+           member.sync_scope, member.operation_key
     FROM ops.import_job_datasets AS member
     WHERE {member_sql}
 ),
 scope_page AS (
     SELECT ranked.event_id, ranked.occurred_at, scope_member.provider_dataset_id,
-           scope_member.operation_key
+           scope_member.sync_scope, scope_member.operation_key
     FROM scope_member
     CROSS JOIN LATERAL (
         SELECT event.event_id, event.occurred_at
@@ -674,6 +677,7 @@ def _row_to_import_job_event(row: Any) -> OpsImportJobEvent:
             if row.provider_dataset_id is not None
             else None
         ),
+        sync_scope=(str(row.sync_scope) if row.sync_scope is not None else None),
         operation_key=(
             str(row.operation_key) if row.operation_key is not None else None
         ),

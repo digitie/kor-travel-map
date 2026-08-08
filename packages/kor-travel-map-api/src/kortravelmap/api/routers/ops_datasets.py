@@ -356,6 +356,7 @@ async def post_dataset_preview(
         data=OpsDatasetPreviewData(
             provider_dataset_id=provider_dataset_id,
             sync_scope=canonical_scope,
+            operation_key=operation_key,
             provider=result.provider,
             dataset_key=result.dataset,
             source="fixture",

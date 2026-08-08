@@ -333,6 +333,11 @@ class PipelineJobEventRecord(BaseModel):
     job_id: UUID
     import_job_dataset_id: UUID | None
     provider_dataset_id: int | None
+    # membership identity의 나머지 두 축. operation_key로 **필터는 되는데** 반환 행이
+    # 어느 membership 것인지 말하지 않으면 소비자가 결과를 되짚을 수 없다.
+    # member가 없는 job-level event는 둘 다 null이다.
+    sync_scope: str | None
+    operation_key: str | None
     feature_id: str | None
     stage: str | None
     level: str
@@ -966,6 +971,8 @@ def _event_record(event: OpsImportJobEvent) -> PipelineJobEventRecord:
         job_id=event.job_id,
         import_job_dataset_id=event.import_job_dataset_id,
         provider_dataset_id=event.provider_dataset_id,
+        sync_scope=event.sync_scope,
+        operation_key=event.operation_key,
         feature_id=event.feature_id,
         stage=event.stage,
         level=event.level,
@@ -1270,6 +1277,10 @@ async def list_executions(
                     ("status", status_filter),
                     ("provider_dataset_id", provider_dataset_id),
                     ("sync_scope", canonical_sync_scope),
+                    # cursor fingerprint에 들어 있는 filter는 canonical_url에도 있어야
+                    # 한다 — 빠지면 이 URL과 응답의 next_cursor를 합쳤을 때 filter
+                    # mismatch로 422가 난다(자기 응답만으로 페이지네이션이 깨진다).
+                    ("operation_key", operation_key),
                     ("load_batch_id", load_batch_id),
                     ("parent_job_id", parent_job_id),
                     ("created_from", created_from),
@@ -1543,6 +1554,7 @@ async def list_pipeline_events(
                     ("level", level),
                     ("provider_dataset_id", provider_dataset_id),
                     ("sync_scope", canonical_sync_scope),
+                    ("operation_key", operation_key),
                 ),
             ),
         ),

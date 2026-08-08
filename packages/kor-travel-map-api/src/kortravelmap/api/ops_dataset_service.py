@@ -123,13 +123,21 @@ def _dataset_detail_url(
 def _event_history_url(
     provider_dataset_id: int,
     effective_sync_scope: str,
+    operation_key: str | None = None,
 ) -> str:
+    """이 응답이 실은 첫 페이지와 **같은 filter 집합**을 가리키는 canonical 링크.
+
+    ``operation_key``를 빼면 안 된다 — cursor fingerprint에는 들어 있으므로,
+    클라이언트가 이 URL과 응답의 ``next_cursor``를 합치면 filter mismatch로 422가
+    난다. 그리고 embedded 첫 페이지와 "전체 목록"의 내용이 달라진다.
+    """
     return (
         "/v1/ops/pipeline/events?"
         + urlencode(
             {
                 "provider_dataset_id": provider_dataset_id,
                 "sync_scope": effective_sync_scope,
+                **({"operation_key": operation_key} if operation_key else {}),
             },
             quote_via=quote,
         )
@@ -139,13 +147,21 @@ def _event_history_url(
 def _run_history_url(
     provider_dataset_id: int,
     logical_sync_scope: str,
+    operation_key: str | None = None,
 ) -> str:
+    """이 응답이 실은 첫 페이지와 **같은 filter 집합**을 가리키는 canonical 링크.
+
+    ``operation_key``를 빼면 안 된다 — cursor fingerprint에는 들어 있으므로,
+    클라이언트가 이 URL과 응답의 ``next_cursor``를 합치면 filter mismatch로 422가
+    난다. 그리고 embedded 첫 페이지와 "전체 목록"의 내용이 달라진다.
+    """
     return (
         "/v1/ops/pipeline/executions?"
         + urlencode(
             {
                 "provider_dataset_id": provider_dataset_id,
                 "sync_scope": logical_sync_scope,
+                **({"operation_key": operation_key} if operation_key else {}),
             },
             quote_via=quote,
         )
@@ -591,13 +607,13 @@ def _grid_row(
         eligible_after=state.next_run_after if state is not None else None,
         freshness=_freshness(state, policy, now=now),
         schedule=_schedule_summary(
+            # 이 행이 지목한 operation의 schedule만 본다. dataset의 모든 operation을
+            # 넘기면 멈춘 operation 행이 형제의 RUNNING/next tick을 자기 것으로
+            # 보고한다 — ``OpsDatasetGridRow`` docstring이 금지한 바로 그 모양이다.
+            # None인 catalog 전용 행은 refresh operation이 없어야 나오므로 빈 튜플이
+            # 정확하다.
             schedules.for_operation_keys(
-                tuple(
-                    operation.operation_key
-                    for operation in entry.enabled_refresh_operations
-                )
-                if entry is not None
-                else ()
+                (operation_key,) if operation_key is not None else ()
             )
         ),
         latest_execution=_execution_record(latest_execution),
@@ -961,9 +977,10 @@ async def load_dataset_detail(
     execution_snapshots = await list_dataset_execution_snapshots_scoped(
         session, provider_dataset_id=provider_dataset_id
     )
-    # 상세 URL은 scope 단위이므로 헤드라인 실행은 그 scope의 **모든 membership을
-    # 가로지르는 명시적 롤업**이다. grid 행처럼 membership 단위로 좁힐 수 없다 —
-    # 접기를 없애는 대신 의도된 롤업임을 이름과 주석으로 드러낸다.
+    # ``operation_key``를 주면 membership 정확 일치, 없으면 그 scope의 모든
+    # membership을 가로지르는 **명시적 롤업**이다 — 접기를 없애는 대신 의도된
+    # 롤업임을 이름과 분기로 드러낸다. ``scopes``/``run_history``/``event_history``도
+    # 같은 규칙을 따른다.
     latest_execution, active_execution = (
         _dataset_execution_projection(
             execution_snapshots,
@@ -1020,8 +1037,12 @@ async def load_dataset_detail(
         ),
         scopes=scopes,
         schedule=_schedule_summary(
+            # membership을 지목했으면 그 operation의 schedule만, 아니면 scope 전체의
+            # 롤업이다 — ``latest_execution``/``run_history``와 같은 규칙이다.
             schedules.for_operation_keys(
-                tuple(
+                (operation_key,)
+                if operation_key is not None
+                else tuple(
                     operation.operation_key
                     for operation in entry.enabled_refresh_operations
                 )
@@ -1047,6 +1068,7 @@ async def load_dataset_detail(
             canonical_url=_run_history_url(
                 provider_dataset_id,
                 canonical_scope,
+                operation_key,
             ),
         ),
         event_history=OpsDatasetEventHistory(
@@ -1055,6 +1077,7 @@ async def load_dataset_detail(
             canonical_url=_event_history_url(
                 provider_dataset_id,
                 event_sync_scope,
+                operation_key,
             ),
         ),
         dataset_issues=_issue_summary(dataset_issues),

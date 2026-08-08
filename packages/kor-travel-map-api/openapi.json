@@ -19044,6 +19044,17 @@
             "title": "Items",
             "type": "array"
           },
+          "operation_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operation Key"
+          },
           "provider": {
             "title": "Provider",
             "type": "string"
@@ -19082,6 +19093,7 @@
         "required": [
           "provider_dataset_id",
           "sync_scope",
+          "operation_key",
           "provider",
           "dataset_key",
           "source",
@@ -21777,6 +21789,17 @@
             "title": "Occurred At",
             "type": "string"
           },
+          "operation_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operation Key"
+          },
           "payload": {
             "additionalProperties": true,
             "title": "Payload",
@@ -21803,6 +21826,17 @@
               }
             ],
             "title": "Stage"
+          },
+          "sync_scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sync Scope"
           }
         },
         "required": [
@@ -21810,6 +21844,8 @@
           "job_id",
           "import_job_dataset_id",
           "provider_dataset_id",
+          "sync_scope",
+          "operation_key",
           "feature_id",
           "stage",
           "level",

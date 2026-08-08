@@ -9701,6 +9701,8 @@ export interface components {
             items: {
                 [key: string]: unknown;
             }[];
+            /** Operation Key */
+            operation_key: string | null;
             /** Provider */
             provider: string;
             /** Provider Dataset Id */
@@ -10700,6 +10702,8 @@ export interface components {
              * Format: date-time
              */
             occurred_at: string;
+            /** Operation Key */
+            operation_key: string | null;
             /** Payload */
             payload: {
                 [key: string]: unknown;
@@ -10708,6 +10712,8 @@ export interface components {
             provider_dataset_id: number | null;
             /** Stage */
             stage: string | null;
+            /** Sync Scope */
+            sync_scope: string | null;
         };
         /**
          * PipelineJobPrecheckData

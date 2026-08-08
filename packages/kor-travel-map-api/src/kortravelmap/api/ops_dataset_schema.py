@@ -386,6 +386,10 @@ class OpsDatasetPreviewData(BaseModel):
 
     provider_dataset_id: int = Field(ge=1)
     sync_scope: str
+    # 요청이 membership을 지목했으면 응답도 그것을 되울린다. 라우터가 404로 검증까지
+    # 해 놓고 값을 버리면 소비자는 자기가 무엇을 미리보기 했는지 되짚을 수 없다.
+    # fixture preview는 operation과 무관하지만, 그 사실 자체가 응답에 드러나야 한다.
+    operation_key: str | None
     provider: str
     dataset_key: str
     source: Literal["fixture"]

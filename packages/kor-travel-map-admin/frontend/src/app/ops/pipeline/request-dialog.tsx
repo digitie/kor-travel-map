@@ -155,7 +155,11 @@ function useRequestScopeForm(catalogRows: CanonicalCatalogRow[]) {
   );
   const selectedScopeCapability =
     selectedCatalogRow?.catalog?.scope_refresh ?? null;
-  const syncScopeOptions = selectedScopeCapability?.allowed_sync_scopes ?? [];
+  // `?? []`는 매 렌더 새 배열을 만들어 이 값을 의존성으로 쓰는 훅이 항상 재실행된다.
+  const syncScopeOptions = useMemo(
+    () => selectedScopeCapability?.allowed_sync_scopes ?? [],
+    [selectedScopeCapability],
+  );
   const effectiveScopeSyncScope =
     scopeSyncScope.trim() || selectedScopeCapability?.default_sync_scope || "";
 
@@ -237,6 +241,8 @@ function useRequestScopeForm(catalogRows: CanonicalCatalogRow[]) {
     }
     return "cache target scope 입력을 확인하세요.";
   }, [
+    // `buildScope`가 membership 행을 찾을 때 읽는다(triple로 operation을 고른다).
+    catalogRows,
     effectiveScopeSyncScope,
     featureIdsText,
     lat,
