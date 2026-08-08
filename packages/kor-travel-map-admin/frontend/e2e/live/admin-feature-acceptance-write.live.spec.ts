@@ -6,6 +6,8 @@ import {
   type Response,
 } from "@playwright/test";
 import { createHash } from "node:crypto";
+import { writeFileSync } from "node:fs";
+import path from "node:path";
 
 import { expectDetailPanelAboveScaleControl } from "../map-control-assertions";
 import type { components } from "../../src/api/types";
@@ -36,6 +38,9 @@ const RUN_ID = process.env.E2E_ADMIN_FEATURE_ACCEPTANCE_RUN_ID ?? "";
 const EXECUTE = process.env.E2E_ADMIN_FEATURE_ACCEPTANCE_WRITE === "1";
 const RECOVERY_ONLY =
   process.env.E2E_ADMIN_FEATURE_ACCEPTANCE_RECOVERY_ONLY === "1";
+const ISOLATED_EVIDENCE = process.env.E2E_ISOLATED_LIVE_EVIDENCE === "1";
+const ARTIFACT_ROOT = process.env.PLAYWRIGHT_ARTIFACT_ROOT;
+let lastBrowserFetchStatus: number | null = null;
 // base 좌표는 고정한다. weather/price/correction/search fixture는 이 base에서 파생되고,
 // weather/price는 orchestrator의 seeding helper(scripts/admin_feature_live_fixture.py의
 // `_LON=127.5`/`_LAT=36.5` 고정)가 물리 seed하며 spec은 API in-bounds/search로 featureId·
@@ -174,7 +179,7 @@ async function browserFetch<T>(
     method?: "GET" | "POST" | "PATCH" | "DELETE";
   } = {},
 ): Promise<FetchResult<T>> {
-  return page.evaluate(
+  const result = await page.evaluate(
     async ({ body, headers, method, path }) => {
       const response = await fetch(`/api/proxy${path}`, {
         method,
@@ -208,6 +213,21 @@ async function browserFetch<T>(
       path,
     },
   );
+  lastBrowserFetchStatus = result.status;
+  return result;
+}
+
+function writeSafeFailureStage(stage: string): void {
+  if (!ISOLATED_EVIDENCE || ARTIFACT_ROOT === undefined) return;
+  try {
+    writeFileSync(
+      path.join(ARTIFACT_ROOT, "admin-feature-acceptance-safe-debug.json"),
+      `${JSON.stringify({ last_browser_fetch_status: lastBrowserFetchStatus, stage })}\n`,
+      { encoding: "utf8", mode: 0o600 },
+    );
+  } catch {
+    // 진단 evidence 실패가 원래 browser failure를 가리면 안 된다.
+  }
 }
 
 function requireBody<T>(result: FetchResult<T>, label: string): T {
@@ -1050,8 +1070,11 @@ test("@admin-feature-live-acceptance #741/#785 owned production acceptance", asy
     "E2E_ADMIN_FEATURE_ACCEPTANCE_WRITE=1일 때만 targeted production write lane 실행",
   );
   test.setTimeout(20 * 60 * 1000);
+  lastBrowserFetchStatus = null;
+  let stage = "landing";
   await page.goto("/");
   if (RECOVERY_ONLY) {
+    stage = "recovery-cleanup";
     await cleanupApiOwnedFeatures(page);
     return;
   }
@@ -1059,28 +1082,38 @@ test("@admin-feature-live-acceptance #741/#785 owned production acceptance", asy
   let primaryError: unknown = null;
   try {
     for (const fixture of STATUS_FEATURES) {
+      stage = `create-${fixture.status}`;
       await createOwnedPlace(page, fixture);
     }
+    stage = "create-correction";
     await createOwnedPlace(page, {
       ...CORRECTION_FEATURE,
       status: "active",
     });
     for (const fixture of SEARCH_FEATURES) {
+      stage = `create-search-${
+        fixture.featureId.endsWith("::alpha") ? "alpha" : "beta"
+      }`;
       await createOwnedPlace(page, fixture);
     }
 
     for (const fixture of STATUS_FEATURES) {
+      stage = `status-marker-${fixture.status}`;
       await test.step(`${fixture.status} admin marker와 public 음성`, () =>
         assertStatusMarker(page, fixture));
     }
+    stage = "nonpublic-kind-cards";
     await test.step("hidden weather/price admin card와 UI panel", () =>
       assertNonpublicKindCards(page));
+    stage = "search-cursor-contract";
     await test.step("T-VN-15 search total/cursor/mismatch/tamper", () =>
       assertSearchCursorContract(page));
+    stage = "stale-etag";
     await test.step("approved competing update 뒤 stale raw If-Match 412", () =>
       assertStaleCorrection(page));
   } catch (error: unknown) {
     primaryError = error;
+    writeSafeFailureStage(stage);
   }
 
   let cleanupError: unknown = null;
