@@ -9,7 +9,8 @@
   다르게 deparse해 schema hash가 false-red인 것을 재현했다.
 - clone live runner는 dump SHA-256와 `pg_restore --exit-on-error`를 expression-byte/적용 증거로
   유지하고, restore 동등성 schema fingerprint는 constraint name/type/key/FK action/validation 같은
-  structural catalog 축으로 고정했다. text deparser 모양은 비교 대상에서 제외한다.
+  structural catalog 축으로 고정했다. text deparser 모양과 dropped column의 `attnum` gap은 비교
+  대상에서 제외한다. 후자는 custom dump restore가 같은 named column contract로 정규화한다.
 
 ## 2026-08-08 (codex) — T-VN-38 final review P1 수렴
 
