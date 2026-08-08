@@ -1047,6 +1047,17 @@ async function assertStaleCorrection(page: Page): Promise<void> {
 
   failureDetail = "stale-etag:load";
   await page.goto("/admin/features/change-requests");
+  expect(
+    await page.evaluate(() => ({
+      isSecureContext: globalThis.isSecureContext,
+      randomUUID: typeof globalThis.crypto?.randomUUID === "function",
+      subtleCrypto: globalThis.crypto?.subtle !== undefined,
+    })),
+  ).toEqual({
+    isSecureContext: true,
+    randomUUID: true,
+    subtleCrypto: true,
+  });
   await page
     .getByLabel("change action", { exact: true })
     .selectOption("update");
