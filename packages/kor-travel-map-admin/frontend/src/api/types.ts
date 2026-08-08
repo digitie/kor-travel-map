@@ -9530,7 +9530,7 @@ export interface components {
              */
             kind: "import_job" | "update_request";
             /** Operation Key */
-            operation_key: string | null;
+            operation_key: string;
             /**
              * Operation Member Id
              * Format: uuid

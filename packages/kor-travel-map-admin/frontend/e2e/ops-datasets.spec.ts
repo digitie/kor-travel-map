@@ -622,6 +622,7 @@ async function mockOpsDatasets(
           dataset_key: KMA_DATASET,
           provider_dataset_id: KMA_PROVIDER_DATASET_ID,
           sync_scope: KMA_SCOPE,
+          operation_key: KMA_OPERATION_KEY,
           source: "fixture",
           variant: "WeatherValue",
           description: "KMA 단기예보 fixture",

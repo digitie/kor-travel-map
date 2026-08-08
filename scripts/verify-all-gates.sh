@@ -71,8 +71,13 @@ py() {
 
 repo() { MSYS_NO_PATHCONV=1 wsl -e bash -lc "cd $WSL_ROOT && $1"; }
 
+# git이 필요한 게이트는 Git Bash(Windows) 쪽에서 돈다 — 위 주석 참조.
+host_py() { ( cd "$ROOT" && eval "$1" ); }
+
 echo "===== lint.yml"
-run_gate "check_prod_redaction" py 'python scripts/check_prod_redaction.py'
+# 이 스크립트는 `git ls-files`를 쓴다. 워크트리의 `.git`이 Windows 경로를 담고 있어
+# WSL/컨테이너에서는 "not a git repository"로 죽는다 — Git Bash 쪽에서 돌려야 한다.
+run_gate "check_prod_redaction" host_py 'python scripts/check_prod_redaction.py' 
 run_gate "ruff check (CI 경로)" py 'python -m ruff check src tests packages/kor-travel-map-api/src packages/kor-travel-map-api/tests packages/kor-travel-map-dagster/src packages/kor-travel-map-dagster/tests'
 run_gate "mypy core"    py 'python -m mypy --strict -p kortravelmap'
 run_gate "mypy api"     py 'python -m mypy --strict -p kortravelmap.api'
@@ -106,7 +111,10 @@ run_gate "user-client gen:types:check" repo "$NPM -w packages/kor-travel-map-use
 run_gate "user-client type-check"  repo "$NPM -w packages/kor-travel-map-user-client run type-check"
 # admin `type-check`는 tsc를 **두 번** 돌린다(app + e2e). 하나만 돌리면 절반이다.
 run_gate "admin type-check (app+e2e)" repo "$NPM -w $ADMIN run type-check"
-run_gate "admin next build"        repo "$NPM -w $ADMIN run build"
+# CI는 이 스텝에 NEXT_PUBLIC_* 를 넣는다(frontend.yml). build-time inline이라 실
+# 호출은 없고 임의 값이면 된다 — 안 넘기면 prerender가 "required in production"으로
+# 죽어 코드 결함처럼 보인다.
+run_gate "admin next build" repo   "NEXT_PUBLIC_KOR_TRAVEL_MAP_API=http://127.0.0.1:8087    NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL=http://127.0.0.1:12302    NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL=http://127.0.0.1:12201    $NPM -w $ADMIN run build"
 
 echo
 if [ ${#SKIPPED[@]} -gt 0 ]; then

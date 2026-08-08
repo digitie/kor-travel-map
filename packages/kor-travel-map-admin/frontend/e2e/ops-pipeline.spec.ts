@@ -414,6 +414,9 @@ function makeOverflowEvent(index: number): PipelineJobEventRecord {
     import_job_dataset_id: null,
     provider_dataset_id:
       PROVIDER_DATASET_IDS["python-kma-api/kma_short_forecast"],
+    // member 없는 job-level event라 membership 두 축은 null이다.
+    sync_scope: null,
+    operation_key: null,
     feature_id: null,
     stage: "loading",
     level: "info",
@@ -582,6 +585,8 @@ function makeDetail(): PipelineExecutionDetailResponse {
           import_job_dataset_id: null,
           provider_dataset_id:
             PROVIDER_DATASET_IDS["python-kma-api/kma_short_forecast"],
+          sync_scope: null,
+          operation_key: null,
           feature_id: null,
           stage: "loading",
           level: "error",

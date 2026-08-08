@@ -18600,15 +18600,8 @@
             "type": "string"
           },
           "operation_key": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Operation Key"
+            "title": "Operation Key",
+            "type": "string"
           },
           "operation_member_id": {
             "format": "uuid",

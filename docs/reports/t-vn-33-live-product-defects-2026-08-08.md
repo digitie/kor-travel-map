@@ -355,3 +355,36 @@ ORM은 NOT NULL, head는 nullable(실해는 없다 — 원본 coord가 NOT NULL)
 선언한 테이블에 한해 head와 대조하는 게이트를 세우는 것이 정본 수정이다.
 아티팩트 fingerprint 재생성이 딸리므로 이번 PR 범위 밖으로 두고 후속으로 남긴다.
 ```
+
+### 31. (선재, 이 브랜치 무관) `audit:high`가 red — nanoid advisory
+
+`.github/workflows/frontend.yml:44`의 `audit:high`가 exit 1이다. `nanoid <3.3.17` high (GHSA-2v37-7h3g-55p8), 배포 의존성(`postcss` → `nanoid`).
+
+```
+origin/main의 package-lock.json도 nanoid-3.3.16이다 — 이 브랜치가 만든 것이 아니라
+lockfile이 고정된 뒤 advisory가 새로 등록된 drift다. main도 같이 red이므로 #966만의
+머지 블로커가 아니다.
+
+고치려면 package.json overrides에 nanoid를 박고 lockfile을 재생성해야 한다. 52커밋짜리
+identity PR에 lockfile 변경을 끼워 넣으면 리뷰만 어려워지므로 분리한다.
+루트 파일이라 컨테이너 하네스가 이미지에 구운 사본을 쓴다는 점도 주의해야 한다
+(scripts/verify-all-gates.sh 머리말 참조) — 고칠 때는 이미지를 다시 빌드해야 한다.
+```
+
+### 32. 컨테이너 하네스가 루트 파일을 이미지 사본으로 읽는다
+
+`scripts/verify-all-gates.sh`의 `py()`는 `src tests packages contracts alembic alembic.ini`만 복사한다. `package.json` · `package-lock.json` · `pyproject.toml` · `.github/` · `docker-compose*.yml` · `.env.example`은 **이미지에 구워진 사본**이 쓰인다.
+
+```
+이 파일들을 읽는 테스트가 7개 있다: test_frontend_dependency_security /
+test_ci_workflows / test_docker_dagster_runtime / test_backup_artifacts /
+test_deploy_automation / test_c7_prod_live_runner_contract / test_docker_backup_runbook.
+
+이번에는 false-fail 1건으로만 드러났다(이미지의 stale package.json에 `--omit=dev`가
+없어 test_frontend_dependency_security가 실패). 그러나 루트 파일을 **고치는** PR에서는
+false-pass를 낸다 — 고친 내용이 컨테이너에 반영되지 않으므로 옛 값으로 통과한다.
+이 브랜치는 .env.example을 고쳤다.
+
+대응: 스크립트 머리말에 명시했다. 근본 해결은 py()가 루트 파일도 복사하거나 이미지를
+다시 빌드하는 것이다 — 후속 태스크로 남긴다.
+```
