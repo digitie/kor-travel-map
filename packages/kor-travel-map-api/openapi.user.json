@@ -1258,6 +1258,23 @@
         "title": "FeaturePriceResponse",
         "type": "object"
       },
+      "FeaturePriceSnapshotResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PriceSnapshotData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "FeaturePriceSnapshotResponse",
+        "type": "object"
+      },
       "FeatureSearchData": {
         "additionalProperties": false,
         "description": "사용자 feature 검색 data payload.",
@@ -1517,6 +1534,23 @@
           "meta"
         ],
         "title": "FeatureWeatherResponse",
+        "type": "object"
+      },
+      "FeatureWeatherSnapshotResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/WeatherSnapshotData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "FeatureWeatherSnapshotResponse",
         "type": "object"
       },
       "FeaturesInBboxData": {
@@ -2154,18 +2188,6 @@
         "additionalProperties": false,
         "description": "``GET /features/{feature_id}/price`` data payload.",
         "properties": {
-          "asof": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Asof"
-          },
           "current": {
             "description": "provider/price_domain/product series별 최신 관측 1건.",
             "items": {
@@ -2214,8 +2236,21 @@
       },
       "PricePointOut": {
         "additionalProperties": false,
-        "description": "provider/price_domain/product series의 가격 관측 1건.",
+        "description": "canonical dataset/price_domain/product series의 가격 관측 1건.",
         "properties": {
+          "dataset_display_name": {
+            "title": "Dataset Display Name",
+            "type": "string"
+          },
+          "dataset_key": {
+            "title": "Dataset Key",
+            "type": "string"
+          },
+          "known_at": {
+            "format": "date-time",
+            "title": "Known At",
+            "type": "string"
+          },
           "observed_at": {
             "format": "date-time",
             "title": "Observed At",
@@ -2243,6 +2278,10 @@
           "provider": {
             "title": "Provider",
             "type": "string"
+          },
+          "provider_dataset_id": {
+            "title": "Provider Dataset Id",
+            "type": "integer"
           },
           "source_product_key": {
             "anyOf": [
@@ -2276,14 +2315,80 @@
           }
         },
         "required": [
+          "provider_dataset_id",
+          "dataset_key",
+          "dataset_display_name",
           "provider",
           "price_domain",
           "product_key",
           "value_number",
           "unit",
-          "observed_at"
+          "observed_at",
+          "known_at"
         ],
         "title": "PricePointOut",
+        "type": "object"
+      },
+      "PriceSnapshotData": {
+        "additionalProperties": false,
+        "description": "명시된 business time에서 immutable price facts를 재현한 card.",
+        "properties": {
+          "current": {
+            "description": "provider/price_domain/product series별 최신 관측 1건.",
+            "items": {
+              "$ref": "#/components/schemas/PricePointOut"
+            },
+            "title": "Current",
+            "type": "array"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "history": {
+            "description": "series를 합쳐 observed_at 내림차순으로 자른 최근 관측.",
+            "items": {
+              "$ref": "#/components/schemas/PricePointOut"
+            },
+            "title": "History",
+            "type": "array"
+          },
+          "is_stale": {
+            "title": "Is Stale",
+            "type": "boolean"
+          },
+          "known_at": {
+            "format": "date-time",
+            "title": "Known At",
+            "type": "string"
+          },
+          "latest_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest At"
+          },
+          "observed_at": {
+            "format": "date-time",
+            "title": "Observed At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "feature_id",
+          "current",
+          "history",
+          "is_stale",
+          "observed_at",
+          "known_at"
+        ],
+        "title": "PriceSnapshotData",
         "type": "object"
       },
       "ProblemDetail": {
@@ -6101,9 +6206,12 @@
         "additionalProperties": false,
         "description": "weather timeline row 1건.",
         "properties": {
-          "collected_at": {
-            "format": "date-time",
-            "title": "Collected At",
+          "dataset_display_name": {
+            "title": "Dataset Display Name",
+            "type": "string"
+          },
+          "dataset_key": {
+            "title": "Dataset Key",
             "type": "string"
           },
           "feature_id": {
@@ -6125,6 +6233,11 @@
               }
             ],
             "title": "Issued At"
+          },
+          "known_at": {
+            "format": "date-time",
+            "title": "Known At",
+            "type": "string"
           },
           "metric_key": {
             "title": "Metric Key",
@@ -6156,6 +6269,10 @@
           "provider": {
             "title": "Provider",
             "type": "string"
+          },
+          "provider_dataset_id": {
+            "title": "Provider Dataset Id",
+            "type": "integer"
           },
           "severity": {
             "anyOf": [
@@ -6260,11 +6377,14 @@
         "required": [
           "weather_value_key",
           "feature_id",
+          "provider_dataset_id",
+          "dataset_key",
+          "dataset_display_name",
           "provider",
           "weather_domain",
           "forecast_style",
           "metric_key",
-          "collected_at"
+          "known_at"
         ],
         "title": "PublicWeatherValueItem",
         "type": "object"
@@ -6422,18 +6542,6 @@
         "additionalProperties": false,
         "description": "``GET /features/{feature_id}/weather`` data payload.",
         "properties": {
-          "asof": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Asof"
-          },
           "feature_id": {
             "title": "Feature Id",
             "type": "string"
@@ -6461,6 +6569,30 @@
             "title": "Metrics",
             "type": "array"
           },
+          "refresh_after": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refresh After"
+          },
+          "selected_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selected At"
+          },
           "source_styles": {
             "items": {
               "type": "string"
@@ -6482,6 +6614,14 @@
         "additionalProperties": false,
         "description": "weather card metric 1건 (forecast_style × metric_key 최신값, T-213e).",
         "properties": {
+          "dataset_display_name": {
+            "title": "Dataset Display Name",
+            "type": "string"
+          },
+          "dataset_key": {
+            "title": "Dataset Key",
+            "type": "string"
+          },
           "effective_at": {
             "anyOf": [
               {
@@ -6509,6 +6649,11 @@
               }
             ],
             "title": "Issued At"
+          },
+          "known_at": {
+            "format": "date-time",
+            "title": "Known At",
+            "type": "string"
           },
           "metric_key": {
             "title": "Metric Key",
@@ -6547,6 +6692,10 @@
               }
             ],
             "title": "Provider"
+          },
+          "provider_dataset_id": {
+            "title": "Provider Dataset Id",
+            "type": "integer"
           },
           "severity": {
             "anyOf": [
@@ -6653,15 +6802,125 @@
         },
         "required": [
           "forecast_style",
-          "metric_key"
+          "metric_key",
+          "provider_dataset_id",
+          "dataset_key",
+          "dataset_display_name",
+          "known_at"
         ],
         "title": "WeatherMetricOut",
+        "type": "object"
+      },
+      "WeatherSnapshotData": {
+        "additionalProperties": false,
+        "description": "명시된 target/knowledge time에서 immutable weather facts를 재현한 card.",
+        "properties": {
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "is_stale": {
+            "title": "Is Stale",
+            "type": "boolean"
+          },
+          "known_at": {
+            "format": "date-time",
+            "title": "Known At",
+            "type": "string"
+          },
+          "latest_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest At"
+          },
+          "metrics": {
+            "items": {
+              "$ref": "#/components/schemas/WeatherMetricOut"
+            },
+            "title": "Metrics",
+            "type": "array"
+          },
+          "refresh_after": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refresh After"
+          },
+          "selected_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selected At"
+          },
+          "source_styles": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Styles",
+            "type": "array"
+          },
+          "target_at": {
+            "format": "date-time",
+            "title": "Target At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "feature_id",
+          "source_styles",
+          "metrics",
+          "is_stale",
+          "target_at",
+          "known_at"
+        ],
+        "title": "WeatherSnapshotData",
         "type": "object"
       },
       "WeatherSummaryOut": {
         "additionalProperties": false,
         "description": "지도 marker용 weather 값 요약.",
         "properties": {
+          "dataset_display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dataset Display Name"
+          },
+          "dataset_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dataset Key"
+          },
           "forecast_style": {
             "anyOf": [
               {
@@ -6684,6 +6943,18 @@
               }
             ],
             "title": "Issued At"
+          },
+          "known_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Known At"
           },
           "metric_key": {
             "title": "Metric Key",
@@ -6722,6 +6993,17 @@
               }
             ],
             "title": "Provider"
+          },
+          "provider_dataset_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Dataset Id"
           },
           "unit": {
             "anyOf": [
@@ -9590,25 +9872,6 @@
             }
           },
           {
-            "description": "이 시점 이하 price만 조회.",
-            "in": "query",
-            "name": "asof",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "format": "date-time",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "이 시점 이하 price만 조회.",
-              "title": "Asof"
-            }
-          },
-          {
             "description": "최근 price history 반환 개수.",
             "in": "query",
             "name": "history_limit",
@@ -9679,6 +9942,114 @@
         ]
       }
     },
+    "/v1/features/{feature_id}/price/snapshot": {
+      "get": {
+        "operationId": "get_feature_price_snapshot_v1_features__feature_id__price_snapshot_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "feature_id",
+            "required": true,
+            "schema": {
+              "title": "Feature Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "재현할 price 관측 cutoff.",
+            "in": "query",
+            "name": "observed_at",
+            "required": true,
+            "schema": {
+              "description": "재현할 price 관측 cutoff.",
+              "format": "date-time",
+              "title": "Observed At",
+              "type": "string"
+            }
+          },
+          {
+            "description": "그 시점에 알려진 response cutoff.",
+            "in": "query",
+            "name": "known_at",
+            "required": true,
+            "schema": {
+              "description": "그 시점에 알려진 response cutoff.",
+              "format": "date-time",
+              "title": "Known At",
+              "type": "string"
+            }
+          },
+          {
+            "description": "snapshot history 반환 개수.",
+            "in": "query",
+            "name": "history_limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "description": "snapshot history 반환 개수.",
+              "maximum": 500,
+              "minimum": 1,
+              "title": "History Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeaturePriceSnapshotResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "공개 feature 없음"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "PublicApiKey": []
+          },
+          {
+            "ServiceToken": []
+          }
+        ],
+        "summary": "명시된 observed/knowledge time의 price snapshot",
+        "tags": [
+          "features"
+        ]
+      }
+    },
     "/v1/features/{feature_id}/weather": {
       "get": {
         "operationId": "get_feature_weather_v1_features__feature_id__weather_get",
@@ -9692,25 +10063,6 @@
               "minLength": 1,
               "title": "Feature Id",
               "type": "string"
-            }
-          },
-          {
-            "description": "이 시점 이하 weather만(미래 예보 제외).",
-            "in": "query",
-            "name": "asof",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "format": "date-time",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "이 시점 이하 weather만(미래 예보 제외).",
-              "title": "Asof"
             }
           }
         ],
@@ -9735,16 +10087,6 @@
             },
             "description": "공개 feature 없음"
           },
-          "413": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "WEATHER_BATCH_RESULT_LIMIT_EXCEEDED — source-series 작업량, metric row 또는 payload byte 예산 초과"
-          },
           "422": {
             "content": {
               "application/problem+json": {
@@ -9763,7 +10105,7 @@
                 }
               }
             },
-            "description": "WEATHER_BATCH_UNAVAILABLE — weather 저장소 연결/조회 실패"
+            "description": "WEATHER_CARD_UNAVAILABLE — weather 저장소 연결/조회 실패"
           },
           "default": {
             "content": {
@@ -10022,6 +10364,112 @@
           }
         ],
         "summary": "feature 기준 nearest weather forecast timeline",
+        "tags": [
+          "features"
+        ]
+      }
+    },
+    "/v1/features/{feature_id}/weather/snapshot": {
+      "get": {
+        "operationId": "get_feature_weather_snapshot_v1_features__feature_id__weather_snapshot_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "feature_id",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "title": "Feature Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "재현할 weather 대상 시각.",
+            "in": "query",
+            "name": "target_at",
+            "required": true,
+            "schema": {
+              "description": "재현할 weather 대상 시각.",
+              "format": "date-time",
+              "title": "Target At",
+              "type": "string"
+            }
+          },
+          {
+            "description": "그 시점에 알려진 response cutoff.",
+            "in": "query",
+            "name": "known_at",
+            "required": true,
+            "schema": {
+              "description": "그 시점에 알려진 response cutoff.",
+              "format": "date-time",
+              "title": "Known At",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureWeatherSnapshotResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "공개 feature 없음"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "WEATHER_CARD_UNAVAILABLE — weather 저장소 연결/조회 실패"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "PublicApiKey": []
+          },
+          {
+            "ServiceToken": []
+          }
+        ],
+        "summary": "명시된 target/knowledge time의 weather snapshot",
         "tags": [
           "features"
         ]

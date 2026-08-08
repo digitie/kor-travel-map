@@ -233,11 +233,12 @@ function makeAdminFeatureDetailResponse(
 function makeFeatureWeatherResponse(): FeatureWeatherResponse {
   return {
     data: {
-      asof: null,
       feature_id: FEATURE_ID,
       is_stale: false,
       latest_at: null,
       metrics: [],
+      refresh_after: null,
+      selected_at: null,
       source_styles: [],
     },
     meta: makeMeta({ request_id: "e2e-feature-weather" }),
@@ -246,11 +247,15 @@ function makeFeatureWeatherResponse(): FeatureWeatherResponse {
 
 function makeFeaturePriceResponse(): FeaturePriceResponse {
   const point = {
+    dataset_display_name: "OpiNet 유가",
+    dataset_key: "opinet_gas_station",
+    known_at: "2026-06-26T06:23:00.000Z",
     observed_at: "2026-06-26T06:18:00.000Z",
     price_domain: "opinet_gas_station",
     product_key: "gasoline",
     product_name: "휘발유",
     provider: "python-opinet-api",
+    provider_dataset_id: 201,
     source_product_key: "B027",
     source_product_name: "휘발유",
     unit: "KRW/L",
@@ -258,7 +263,6 @@ function makeFeaturePriceResponse(): FeaturePriceResponse {
   };
   return {
     data: {
-      asof: null,
       current: [point],
       feature_id: FEATURE_ID,
       history: [point],
@@ -856,33 +860,45 @@ test.describe("/features map interactions", () => {
     const observedToday = "2026-06-26T15:00:00.000Z"; // 6/27 00:00 KST
     const priceSummary = [
       {
+        dataset_display_name: "OpiNet 유가",
+        dataset_key: "opinet_gas_station",
+        known_at: "2026-06-26T06:23:00.000Z",
         observed_at: "2026-06-26T06:18:00.000Z",
         price_domain: "opinet_gas_station",
         product_key: "gasoline",
         product_name: "휘발유",
         provider: "python-opinet-api",
+        provider_dataset_id: 201,
         source_product_key: "B027",
         source_product_name: "휘발유",
         unit: "KRW/L",
         value_number: 1820,
       },
       {
+        dataset_display_name: "OpiNet 유가",
+        dataset_key: "opinet_gas_station",
+        known_at: "2026-06-26T15:05:00.000Z",
         observed_at: observedToday,
         price_domain: "opinet_gas_station",
         product_key: "diesel",
         product_name: "경유",
         provider: "python-opinet-api",
+        provider_dataset_id: 201,
         source_product_key: "D047",
         source_product_name: "경유",
         unit: "KRW/L",
         value_number: 1650,
       },
       {
+        dataset_display_name: "OpiNet 유가",
+        dataset_key: "opinet_gas_station",
+        known_at: "2026-06-26T06:23:00.000Z",
         observed_at: "2026-06-26T06:18:00.000Z",
         price_domain: "opinet_gas_station",
         product_key: "premium_gasoline",
         product_name: "고급휘발유",
         provider: "python-opinet-api",
+        provider_dataset_id: 201,
         source_product_key: "B034",
         source_product_name: "고급휘발유",
         unit: "KRW/L",
@@ -904,7 +920,6 @@ test.describe("/features map interactions", () => {
       ],
       price: {
         data: {
-          asof: null,
           current: priceSummary,
           feature_id: FEATURE_ID,
           history: priceSummary,

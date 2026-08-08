@@ -283,10 +283,14 @@ function makeWeatherMetric(
 ): WeatherMetricOut {
   return {
     forecast_style: "short_term",
+    dataset_display_name: "기상청 단기예보",
+    dataset_key: "kma_short_forecast",
     issued_at: "2026-06-08T00:00:00.000Z",
+    known_at: "2026-06-08T08:00:00.000Z",
     metric_key: "T1H",
     metric_name: "기온",
     observed_at: null,
+    provider_dataset_id: 101,
     severity: "normal",
     timeline_bucket: null,
     unit: "°C",
@@ -324,11 +328,12 @@ function makeWeatherResponse(
 ): FeatureWeatherResponse {
   return {
     data: {
-      asof: null,
       feature_id: FEATURE_ID,
       is_stale: false,
       latest_at: null,
       metrics: [],
+      refresh_after: null,
+      selected_at: null,
       source_styles: [],
       ...data,
     },
@@ -604,16 +609,17 @@ test.describe("/features/[featureId] 섹션 깊이", () => {
     ).toBeVisible();
   });
 
-  test("Weather 패널 깊이 — metric 행 + styles/asof dl + stale 배지", async ({
+  test("Weather 패널 깊이 — metric 행 + current 상태 dl + stale 배지", async ({
     page,
   }) => {
     await mockFeatureDetail(page, {
       data: makeDetailData({ feature: makeFeature({ kind: "weather" }) }),
       weather: {
-        asof: "2026-06-08T09:00:00.000Z",
         is_stale: true,
         latest_at: "2026-06-08T08:00:00.000Z",
         metrics: [makeWeatherMetric()],
+        refresh_after: "2026-06-08T10:00:00.000Z",
+        selected_at: "2026-06-08T09:00:00.000Z",
         source_styles: ["short_term", "mid_term"],
       },
     });
@@ -630,7 +636,8 @@ test.describe("/features/[featureId] 섹션 깊이", () => {
 
     // dl 라벨 + source_styles outline 배지(패널 scope에서 헤더 동명 라벨과 분리).
     await expect(panel.getByText("최근 업데이트", { exact: true })).toBeVisible();
-    await expect(panel.getByText("asof", { exact: true })).toBeVisible();
+    await expect(panel.getByText("선정 시각", { exact: true })).toBeVisible();
+    await expect(panel.getByText("다음 갱신", { exact: true })).toBeVisible();
     await expect(panel.getByText("styles", { exact: true })).toBeVisible();
     await expect(panel.getByText("short_term").first()).toBeVisible();
     await expect(panel.getByText("mid_term")).toBeVisible();

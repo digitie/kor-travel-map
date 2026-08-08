@@ -2,6 +2,21 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-08 (codex) — T-VN-38 final reader 계약·fixture 정리 checkpoint
+
+- `0094`가 0060의 mutable weather upsert/legacy batch와 `weather_metric_series` table·trigger·ORM
+  mapping을 제거했다. service batch는 immutable fact의 set-ranked anchor/fact query이고 normal
+  card/bbox는 receipt-backed summary만 읽는다.
+- public current와 explicit snapshot을 분리했다. snapshot은 weather `target_at + known_at`, price
+  `observed_at + known_at` 두 축을 강제하고 route policy도 public keyed로 등록했다. admin/user/service
+  OpenAPI와 두 TypeScript client 산출물을 재생성했다.
+- weather metric과 price point는 canonical dataset id/key/display와 `known_at`을 필수로 내보낸다.
+  admin UI identity는 provider 표시문자열이 아니라 이 dataset identity를 쓴다.
+- destructive live fixture가 partial retry에서 refresh-policy CAS 충돌을 내지 않도록 보강했고,
+  cleanup은 feature cascade 뒤 owned source lineage와 dataset/policy까지 제거한다.
+- 검증: isolated API weather unit 26 passed, fixture/price unit 46 passed, weather batch/repo integration
+  집중 gate, ruff·py_compile 통과. 최종 2인 재리뷰와 n150 final-head live gate가 남았다.
+
 ## 2026-08-08 (codex) — T-VN-38B checkpoint와 summary reader/API/UI 전환 시작
 
 - `0093`은 price provider 문자열 identity/current upsert를 파기했다. producer dataset과 response

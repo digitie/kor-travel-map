@@ -36,6 +36,27 @@ event 축 부재. 셋 다 "형제 operation을 중복으로 규정"하는 형태
 **다음**: 5라운드 리뷰 승인 → #966 머지 → PR #967(T-VN-41 F1D, D1/D2 분리).
 후속은 태스크 #42(계약↔head 대조 게이트, offline upload 500).
 
+## 2026-08-08 (codex) — T-VN-38A/B/C 구현 결선, 재리뷰·n150 gate 대기
+
+`0092 → 0093 → 0094` final head에서 weather/price를 모두 immutable response fact와
+receipt-backed current summary로 전환했다. `0094`는 retired `weather_metric_series`와 0060
+mutable upsert/batch SQL·ORM mapping을 물리 제거했다. normal card/bbox는 current summary→fact→dataset
+set read만 사용하고, `(target_at, known_at)` 또는 `(observed_at, known_at)`를 모두 가진 snapshot
+endpoint만 raw fact를 재순위화한다.
+
+OpenAPI admin/user/service 세 spec과 admin/user generated type을 재생성했다. dataset id/key/display와
+`known_at`은 price/weather DTO의 필수 identity이며 admin map/chart/table React key도 그 identity를
+사용한다. live fixture는 producing response source·dataset policy를 재시도 안전하게 만들고 feature
+cleanup 뒤 source head/record/entity/policy/dataset까지 지운다.
+
+검증: isolated API weather unit 26건, root fixture/price unit 46건, weather batch/repo integration
+집중 gate, ruff/py_compile을 통과했다. 남은 완료 조건은 최종 누적 delta의 적대 리뷰 2인 P0=0,
+base rebase, n150 final-head destructive rebuild와 live UI E2E다.
+
+**다음 한 작업**: UI generated mock typecheck를 고정한 뒤 적대 리뷰 2인에게 현재 작업트리를
+제출하고 모든 P0/P1을 반영한다. 그 후 n150에서 final-head rebuild/API·Dagster·Playwright live E2E를
+실행한다.
+
 ## 2026-08-08 (3) — T-VN-33: 적대 리뷰 3회 REJECT를 거쳐 게이트 10종 중 9종 GREEN
 
 리뷰어 2명이 **세 라운드 연속 REJECT**했고 지적이 전부 타당했다. 세 번 다 같은

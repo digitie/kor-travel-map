@@ -87,8 +87,8 @@ barrier로 직렬화한다.
   - Lane B shadow: [~] `T-VN-33`(A/B/C 단일 PR — DB 정본·writer/reader cutover·legacy fence) →
     [/] `T-VN-38A`(PR #971: 0092·weather immutable response lineage·receipt summary writer
     ·KMA/AirKorea/KREX call-site cutover 구현) → [/] `T-VN-38B`(0093·price immutable fact
-    ·receipt summary·Dagster producer lineage 구현) → [/] `T-VN-38C`(summary-only reader/API/UI
-    ·snapshot 분리·live 검증 진행) →
+    ·receipt summary·Dagster producer lineage 구현) → [/] `T-VN-38C`(0094 summary-only reader/API/UI
+    ·snapshot 분리·OpenAPI/type 재생성 완료, 2인 재리뷰·n150 live 검증 대기) →
     [ ] `T-VN-34A` → [ ] `T-VN-34B` → [ ] `T-VN-34C` →
     [ ] `T-VN-36A` → [ ] `T-VN-36B` → [ ] `T-VN-36C`
   - 32~38 join barrier 뒤 Lane B: [ ] `T-VN-40A` → [ ] `T-VN-40B` →
@@ -792,6 +792,8 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   weather/price summary set join으로 바꾸고 per-row LATERAL reader를 제거한다. current endpoint와
   explicit `(target_at, known_at)` snapshot endpoint를 분리한다. cardinality, freshness,
   reconciliation set-diff, EXPLAIN과 n150 final-head destructive rebuild/live UI E2E를 통과시킨다.
+  구현은 complete이며 완료 표시는 final cumulative adversarial review 2인 P0=0, base rebase,
+  n150 destructive rebuild와 live UI E2E가 모두 끝난 merge commit에서만 `tasks-done.md`로 옮긴다.
 
 ### T-VN-40 — curation write model 단일화 (Lane B)
 

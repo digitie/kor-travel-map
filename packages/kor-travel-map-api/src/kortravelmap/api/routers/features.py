@@ -1581,6 +1581,10 @@ class WeatherMetricOut(BaseModel):
 
     forecast_style: str
     metric_key: str
+    provider_dataset_id: int
+    dataset_key: str
+    dataset_display_name: str
+    known_at: datetime
     metric_name: str | None = None
     timeline_bucket: str | None = None
     value_number: float | None = None
@@ -1592,11 +1596,7 @@ class WeatherMetricOut(BaseModel):
     valid_from: datetime | None = None
     valid_until: datetime | None = None
     observed_at: datetime | None = None
-    known_at: datetime | None = None
     effective_at: datetime | None = None
-    provider_dataset_id: int | None = None
-    dataset_key: str | None = None
-    dataset_display_name: str | None = None
     provider: str | None = None
     weather_domain: str | None = None
 
@@ -1958,6 +1958,19 @@ def _weather_batch_http_exception(
     )
 
 
+def _weather_card_http_exception(_exc: SQLAlchemyError) -> HTTPException:
+    """current/snapshot card의 DB 실패를 batch 예산 오류와 분리한다."""
+
+    return HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail={
+            "code": "WEATHER_CARD_UNAVAILABLE",
+            "message": "weather current/snapshot 저장소를 사용할 수 없습니다.",
+            "details": {},
+        },
+    )
+
+
 @router.post(
     "/weather/batch",
     response_model=WeatherBatchResponse,
@@ -2068,16 +2081,9 @@ async def get_feature_weather_batch(
     summary="feature weather card (forecast_style별 최신값 + freshness)",
     responses={
         404: {"description": "공개 feature 없음"},
-        413: {
-            "model": ProblemDetail,
-            "description": (
-                "WEATHER_BATCH_RESULT_LIMIT_EXCEEDED — source-series 작업량, "
-                "metric row 또는 payload byte 예산 초과"
-            ),
-        },
         503: {
             "model": ProblemDetail,
-            "description": "WEATHER_BATCH_UNAVAILABLE — weather 저장소 연결/조회 실패",
+            "description": "WEATHER_CARD_UNAVAILABLE — weather 저장소 연결/조회 실패",
         },
     },
 )
@@ -2097,7 +2103,10 @@ async def get_feature_weather(
     identity = await resolve_feature_ref_or_error(session, feature_id)
     canonical_id = identity.feature_id
     await _public_feature_row_or_404(session, canonical_id, display_ref=feature_id)
-    card = await weather_repo.build_weather_card(session, feature_id=canonical_id)
+    try:
+        card = await weather_repo.build_weather_card(session, feature_id=canonical_id)
+    except SQLAlchemyError as exc:
+        raise _weather_card_http_exception(exc) from exc
     return FeatureWeatherResponse(
         data=WeatherCardData(
             # T-VN-32C PR-2 — 단건 card 응답의 feature_id는 UUID 정본 값.
@@ -2117,7 +2126,13 @@ async def get_feature_weather(
     "/{feature_id}/weather/snapshot",
     response_model=FeatureWeatherSnapshotResponse,
     summary="명시된 target/knowledge time의 weather snapshot",
-    responses={404: {"description": "공개 feature 없음"}},
+    responses={
+        404: {"description": "공개 feature 없음"},
+        503: {
+            "model": ProblemDetail,
+            "description": "WEATHER_CARD_UNAVAILABLE — weather 저장소 연결/조회 실패",
+        },
+    },
 )
 async def get_feature_weather_snapshot(
     request: Request,
@@ -2148,6 +2163,8 @@ async def get_feature_weather_snapshot(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(exc),
         ) from exc
+    except SQLAlchemyError as exc:
+        raise _weather_card_http_exception(exc) from exc
     return FeatureWeatherSnapshotResponse(
         data=WeatherSnapshotData(
             feature_id=identity.feature_uuid,
