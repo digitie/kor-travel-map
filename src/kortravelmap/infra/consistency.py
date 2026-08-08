@@ -337,8 +337,13 @@ _F5_PROVIDER_LAST_SUCCESS_COUNT_SQL: Final[str] = (
 _F5_PROVIDER_LAST_SUCCESS_SAMPLE_SQL: Final[str] = (
     "WITH stale_provider_sync AS ("
     "  SELECT "
-    "    s.provider_dataset_id::text || ':' || s.sync_scope AS id, "
-    "    s.provider_dataset_id, dataset.provider, dataset.dataset_key, s.sync_scope "
+    # ``pk_provider_sync_state``가 triple이므로 id도 triple이라야 한다. pair로
+    # 합성하면 operation만 다른 두 stale 상태가 같은 id로 중복 표시돼 운영자가
+    # 어느 쪽을 봐야 하는지 가릴 수 없다.
+    "    s.provider_dataset_id::text || ':' || s.sync_scope "
+    "      || ':' || s.operation_key AS id, "
+    "    s.provider_dataset_id, dataset.provider, dataset.dataset_key, "
+    "    s.sync_scope, s.operation_key "
     "  FROM provider_sync.provider_sync_state s "
     "  JOIN provider_sync.provider_datasets dataset "
     "    ON dataset.provider_dataset_id = s.provider_dataset_id "
@@ -355,7 +360,7 @@ _F5_PROVIDER_LAST_SUCCESS_SAMPLE_SQL: Final[str] = (
     "    )"
     ") "
     "SELECT id FROM stale_provider_sync "
-    "ORDER BY provider_dataset_id, sync_scope "
+    "ORDER BY provider_dataset_id, sync_scope, operation_key "
     "LIMIT :lim"
 )
 

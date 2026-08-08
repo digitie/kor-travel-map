@@ -418,7 +418,7 @@ async def _seed_provider_sync_state(
         },
     )
     await session.flush()
-    return f"{provider_dataset_id}:{sync_scope}"
+    return f"{provider_dataset_id}:{sync_scope}:{operation_key}"
 
 
 async def test_f5_warns_when_provider_last_success_sla_exceeded(
