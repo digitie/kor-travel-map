@@ -31,6 +31,12 @@ type FetchResult<T> = {
   status: number;
 };
 
+type BrowserFetchOptions = {
+  body?: unknown;
+  headers?: Record<string, string>;
+  method?: "GET" | "POST" | "PATCH" | "DELETE";
+};
+
 const FLOW_TIMEOUT = 5 * 60 * 1000;
 const UI_TIMEOUT = 30_000;
 const RUN_ID_PATTERN = /^[a-z0-9][a-z0-9-]{15,79}$/;
@@ -170,22 +176,47 @@ function requestApiPath(request: Request): string {
   return decodeURIComponent(path);
 }
 
+function commandIdempotencyKey(
+  method: NonNullable<BrowserFetchOptions["method"]>,
+  path: string,
+  body: unknown,
+): string {
+  // 같은 live E2E run에서 같은 write를 다시 시도하면 durable command ledger가
+  // 응답을 재생해야 한다. body/path/method hash를 RFC 4122 v4 형식으로 바꿔
+  // 매 요청의 identity를 분리하면서 재시도 안정성을 유지한다.
+  const digest = createHash("sha256")
+    .update(JSON.stringify({ body, method, path }), "utf8")
+    .digest("hex");
+  const variant = (8 + (Number.parseInt(digest[16], 16) & 0x03)).toString(16);
+  return [
+    digest.slice(0, 8),
+    digest.slice(8, 12),
+    `4${digest.slice(13, 16)}`,
+    `${variant}${digest.slice(17, 20)}`,
+    digest.slice(20, 32),
+  ].join("-");
+}
+
 async function browserFetch<T>(
   page: Page,
   path: string,
-  options: {
-    body?: unknown;
-    headers?: Record<string, string>;
-    method?: "GET" | "POST" | "PATCH" | "DELETE";
-  } = {},
+  options: BrowserFetchOptions = {},
 ): Promise<FetchResult<T>> {
+  const method = options.method ?? "GET";
+  const idempotencyKey =
+    method === "GET"
+      ? undefined
+      : commandIdempotencyKey(method, path, options.body);
   const result = await page.evaluate(
-    async ({ body, headers, method, path }) => {
+    async ({ body, headers, idempotencyKey, method, path }) => {
       const response = await fetch(`/api/proxy${path}`, {
         method,
         headers: {
           Accept: "application/json",
           ...headers,
+          ...(idempotencyKey === undefined
+            ? {}
+            : { "Idempotency-Key": idempotencyKey }),
           ...(body === undefined ? {} : { "Content-Type": "application/json" }),
         },
         credentials: "same-origin",
@@ -209,7 +240,8 @@ async function browserFetch<T>(
     {
       body: options.body,
       headers: options.headers,
-      method: options.method ?? "GET",
+      idempotencyKey,
+      method,
       path,
     },
   );
