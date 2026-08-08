@@ -2,6 +2,19 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-08 (codex) — T-VN-38A immutable weather writer checkpoint
+
+- `0092` 위 writer가 response `SourceRecord`와 exact `provider_dataset_id`를 받도록 하여
+  fact dataset/source lineage를 DB composite FK까지 보장하게 했다. DTO의 provider 문자열은
+  pure transform 입력으로만 남고 persistence identity가 아니다.
+- writer transaction은 fact append 뒤 `ops.current_summary_runs` receipt를 성공으로 전이하고
+  current summary를 set reconciliation한다. weather winner는 `target_at`, `known_at`, validity,
+  native time/key 순위이며 stale deadline을 넘긴 row는 summary에서 삭제된다.
+- KMA forecast response source는 grid Feature source와 분리했다. AirKorea/KREX value asset도
+  producing membership id와 response record를 전달하도록 이관했다. fresh-upgrade integration
+  test 2건과 ruff를 통과했다. root venv에는 Dagster dependency가 없어 package test는 n150
+  package 환경에서 재실행한다.
+
 ## 2026-08-08 (3) — T-VN-33 기능 게이트 GREEN + 설계 재검토 4건
 
 전체 스위트가 **4,534 passed / 6 failed**로 수렴했다(시작 298). 6건은 전부 컨테이너

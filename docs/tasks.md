@@ -85,7 +85,8 @@ barrier로 직렬화한다.
     [x] `T-VN-35A-D`(typed subtype 분해 — ADR-086, A-D 단일 PR) →
     [ ] `T-VN-37A` → [ ] `T-VN-37B` → [ ] `T-VN-37C`
   - Lane B shadow: [~] `T-VN-33`(A/B/C 단일 PR — DB 정본·writer/reader cutover·legacy fence) →
-    [ ] `T-VN-38A` → [ ] `T-VN-38B` → [ ] `T-VN-38C` →
+    [/] `T-VN-38A`(PR #971: 0092·weather immutable response lineage·receipt summary writer
+    ·KMA/AirKorea/KREX call-site cutover 진행 중) → [ ] `T-VN-38B` → [ ] `T-VN-38C` →
     [ ] `T-VN-34A` → [ ] `T-VN-34B` → [ ] `T-VN-34C` →
     [ ] `T-VN-36A` → [ ] `T-VN-36B` → [ ] `T-VN-36C`
   - 32~38 join barrier 뒤 Lane B: [ ] `T-VN-40A` → [ ] `T-VN-40B` →

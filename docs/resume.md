@@ -76,6 +76,24 @@ event 축 부재. 셋 다 "형제 operation을 중복으로 규정"하는 형태
 
 **다음**: 4라운드 리뷰 승인 → #966 머지 → PR #967(T-VN-41 F1D, D1/D2 분리).
 
+## 2026-08-08 (codex) — T-VN-38A writer/receipt/current-card checkpoint
+
+draft PR #971의 0092 실제 migration 위에서 weather fact writer를 source-less upsert에서
+`provider_dataset_id + producing response SourceRecord`가 반드시 필요한 immutable append로
+전환했다. writer transaction은 response source upsert, fact append, business-time current
+summary reconciliation receipt를 함께 완료한다. KMA grid Feature source와 forecast response
+source를 분리했고, AirKorea/KREX도 exact operation membership id를 함께 넘기도록 변경 중이다.
+normal weather card는 summary→fact join을 쓰며, 명시 `asof`는 raw bitemporal rank를 쓴다.
+
+`tests/integration/test_tvn38_weather_migration.py`는 빈 DB fresh upgrade로 facts/receipt
+immutable, correction winner, stale summary deletion, current-card dataset identity를 확인해
+2 passed 했다. package Dagster test는 이 root venv에 `dagster`가 없어 아직 n150/package
+environment에서 실행해야 한다.
+
+**다음 한 작업**: AirKorea/KREX/KMA call-site와 tests를 모두 final writer signature로
+수렴한 뒤 0093 price immutable fact/current summary를 구현한다. 그 뒤 0094 reader/API/UI
+cutover, 두 적대 리뷰, n150 파괴적 live E2E를 실행한다.
+
 ## 2026-08-08 (2) — T-VN-33: 기능 게이트 GREEN, 설계 재검토로 결함 4건 추가 해소
 
 전체 스위트 **4,534 passed / 6 failed**로 수렴했다(시작 298 실패). 실패 6건은 전부
