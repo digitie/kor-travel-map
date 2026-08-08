@@ -38,6 +38,7 @@ def _point(product_key: str, product_name: str | None = None):  # type: ignore[n
             "value_number": Decimal("1500"),
             "unit": "KRW/L",
             "observed_at": datetime(2026, 7, 4, 9, 0, tzinfo=UTC),
+            "known_at": datetime(2026, 7, 4, 9, 5, tzinfo=UTC),
         }
     )
 
@@ -65,6 +66,7 @@ def test_price_point_maps_row_columns() -> None:
         "value_number": Decimal("1685.00"),
         "unit": "KRW/L",
         "observed_at": datetime(2026, 7, 4, 9, 0, tzinfo=UTC),
+        "known_at": datetime(2026, 7, 4, 9, 5, tzinfo=UTC),
     }
     point = _price_point(row)  # type: ignore[arg-type]
     assert point.provider_dataset_id == 17
@@ -77,6 +79,7 @@ def test_price_point_maps_row_columns() -> None:
     assert point.value_number == Decimal("1685.00")
     assert point.unit == "KRW/L"
     assert point.observed_at.tzinfo is not None
+    assert point.known_at.tzinfo is not None
 
 
 def test_price_value_params_builds_deterministic_upsert_row() -> None:

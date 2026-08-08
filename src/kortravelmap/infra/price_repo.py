@@ -71,6 +71,7 @@ class PricePoint:
     value_number: Decimal
     unit: str
     observed_at: datetime
+    known_at: datetime
 
 
 @dataclass(frozen=True)
@@ -251,7 +252,8 @@ SELECT
     fact.source_product_name,
     fact.value_number,
     fact.unit,
-    fact.observed_at
+    fact.observed_at,
+    fact.known_at
 FROM feature.current_price_summary AS summary
 JOIN feature.feature_price_values AS fact
   ON fact.price_value_key = summary.price_value_key
@@ -291,6 +293,7 @@ WITH ranked AS (
         fact.value_number,
         fact.unit,
         fact.observed_at,
+        fact.known_at,
         row_number() OVER (
             PARTITION BY fact.provider_dataset_id, fact.price_domain, fact.product_key
             ORDER BY fact.observed_at DESC, fact.known_at DESC, fact.price_value_key DESC
@@ -333,7 +336,8 @@ SELECT
     fact.source_product_name,
     fact.value_number,
     fact.unit,
-    fact.observed_at
+    fact.observed_at,
+    fact.known_at
 FROM feature.feature_price_values AS fact
 JOIN provider_sync.provider_datasets AS dataset
   ON dataset.provider_dataset_id = fact.provider_dataset_id
@@ -552,6 +556,7 @@ def _price_point(row: RowMapping) -> PricePoint:
         value_number=row["value_number"],
         unit=str(row["unit"]),
         observed_at=row["observed_at"],
+        known_at=row["known_at"],
     )
 
 

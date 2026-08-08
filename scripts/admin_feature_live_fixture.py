@@ -16,7 +16,7 @@ import json
 import math
 import re
 from collections import Counter
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Final, NamedTuple
 
@@ -24,16 +24,83 @@ from sqlalchemy import text
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from kortravelmap.core.ids import make_payload_hash, make_source_record_key
+from kortravelmap.dto import SourceRecord
 from kortravelmap.dto._time import kst_now
 from kortravelmap.dto.price import PriceValue
 from kortravelmap.dto.weather import WeatherValue
 from kortravelmap.infra import price_repo, weather_repo
 from kortravelmap.infra.db import make_async_engine
+from kortravelmap.infra.provider_refresh_policy_repo import (
+    upsert_provider_refresh_policy,
+)
 from kortravelmap.settings import KorTravelMapSettings
 
 _RUN_ID_RE: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9][a-z0-9-]{15,79}$")
 _LON: Final[float] = 127.5
 _LAT: Final[float] = 36.5
+_E2E_PROVIDER: Final[str] = "e2e-live-acceptance"
+
+
+def _dataset_key(run_id: str, kind: str) -> str:
+    return f"admin-live-{run_id}-{kind}"
+
+
+async def _ensure_dataset(session: AsyncSession, *, run_id: str, kind: str) -> int:
+    dataset_key = _dataset_key(run_id, kind)
+    value = await session.scalar(
+        text(
+            """
+            INSERT INTO provider_sync.provider_datasets (
+                provider, dataset_key, display_name, source_kind
+            ) VALUES (:provider, :dataset_key, :display_name, 'manual')
+            ON CONFLICT (provider, dataset_key) DO UPDATE
+            SET is_active = true
+            RETURNING provider_dataset_id
+            """
+        ),
+        {
+            "provider": _E2E_PROVIDER,
+            "dataset_key": dataset_key,
+            "display_name": f"E2E admin {kind} {run_id}",
+        },
+    )
+    assert value is not None
+    dataset_id = int(value)
+    if kind == "weather":
+        await upsert_provider_refresh_policy(
+            session,
+            provider_dataset_id=dataset_id,
+            source_kind="manual",
+            expected_revision=None,
+            stale_after_minutes=24 * 60,
+        )
+    return dataset_id
+
+
+def _response_record(
+    *, run_id: str, kind: str, fetched_at: datetime
+) -> SourceRecord:
+    dataset_key = _dataset_key(run_id, kind)
+    raw_data = {"fixture": "admin-feature-live-acceptance", "run_id": run_id, "kind": kind}
+    payload_hash = make_payload_hash(raw_data)
+    source_entity_id = f"run:{run_id}:{kind}"
+    return SourceRecord(
+        provider=_E2E_PROVIDER,
+        dataset_key=dataset_key,
+        source_entity_type=f"{kind}_response",
+        source_entity_id=source_entity_id,
+        raw_payload_hash=payload_hash,
+        raw_data=raw_data,
+        fetched_at=fetched_at,
+        source_record_key=make_source_record_key(
+            provider=_E2E_PROVIDER,
+            dataset_key=dataset_key,
+            source_entity_type=f"{kind}_response",
+            source_entity_id=source_entity_id,
+            raw_payload_hash=payload_hash,
+        ),
+    )
 
 
 def _feature_ids(run_id: str) -> tuple[str, str]:
@@ -255,6 +322,7 @@ async def _foreign_key_reference_counts(
 
 async def _assert_owned_values(
     session: AsyncSession,
+    run_id: str,
     feature_ids: tuple[str, str],
     present: set[str],
     *,
@@ -266,23 +334,13 @@ async def _assert_owned_values(
             text(
                 """
                 SELECT
-                  provider, weather_domain, forecast_style, timeline_bucket,
+                  dataset.provider, dataset.dataset_key,
+                  weather_domain, forecast_style, timeline_bucket,
                   metric_key, metric_name, value_number, unit,
                   normalization_version, payload
-                FROM feature.feature_weather_values
-                WHERE feature_id = :feature_id
-                """
-                + lock_clause
-            ),
-            {"feature_id": feature_ids[0]},
-        )
-    ).mappings().all()
-    weather_series_rows = (
-        await session.execute(
-            text(
-                """
-                SELECT provider, weather_domain, forecast_style, metric_key
-                FROM feature.weather_metric_series
+                FROM feature.feature_weather_values AS fact
+                JOIN provider_sync.provider_datasets AS dataset
+                  ON dataset.provider_dataset_id = fact.provider_dataset_id
                 WHERE feature_id = :feature_id
                 """
                 + lock_clause
@@ -295,9 +353,12 @@ async def _assert_owned_values(
             text(
                 """
                 SELECT
-                  provider, price_domain, product_key, product_name,
+                  dataset.provider, dataset.dataset_key,
+                  price_domain, product_key, product_name,
                   value_number, unit, normalization_version, payload
-                FROM feature.feature_price_values
+                FROM feature.feature_price_values AS fact
+                JOIN provider_sync.provider_datasets AS dataset
+                  ON dataset.provider_dataset_id = fact.provider_dataset_id
                 WHERE feature_id = :feature_id
                 """
                 + lock_clause
@@ -314,20 +375,11 @@ async def _assert_owned_values(
                 "metric_name": "인수 기온",
                 "normalization_version": "e2e-v1",
                 "payload": {"fixture": "admin-feature-live-acceptance"},
-                "provider": "e2e-live-acceptance",
+                "provider": _E2E_PROVIDER,
+                "dataset_key": _dataset_key(run_id, "weather"),
                 "timeline_bucket": "short",
                 "unit": "deg_c",
                 "value_number": Decimal("21.5"),
-                "weather_domain": "kma_short_forecast",
-            }
-        )
-    expected_weather_series = []
-    if feature_ids[0] in present:
-        expected_weather_series.append(
-            {
-                "forecast_style": "short",
-                "metric_key": "TMP",
-                "provider": "e2e-live-acceptance",
                 "weather_domain": "kma_short_forecast",
             }
         )
@@ -340,15 +392,14 @@ async def _assert_owned_values(
                 "price_domain": "opinet_gas_station",
                 "product_key": "gasoline",
                 "product_name": "인수 휘발유",
-                "provider": "e2e-live-acceptance",
+                "provider": _E2E_PROVIDER,
+                "dataset_key": _dataset_key(run_id, "price"),
                 "unit": "KRW/L",
                 "value_number": Decimal("1711"),
             }
         )
     if [dict(row) for row in weather_rows] != expected_weather:
         raise RuntimeError("owned weather value fingerprint가 다릅니다")
-    if [dict(row) for row in weather_series_rows] != expected_weather_series:
-        raise RuntimeError("owned weather series fingerprint가 다릅니다")
     if [dict(row) for row in price_rows] != expected_price:
         raise RuntimeError("owned price value fingerprint가 다릅니다")
 
@@ -369,14 +420,15 @@ async def _assert_owned_state(
     counts = await _counts(session, feature_ids)
     if counts["features"] != len(present):
         raise RuntimeError("owned fixture cardinality와 fingerprint가 다릅니다")
-    await _assert_owned_values(session, feature_ids, present, lock=lock)
+    await _assert_owned_values(session, run_id, feature_ids, present, lock=lock)
     foreign_keys = await _foreign_key_reference_counts(session, feature_ids)
     expected_references: dict[str, int] = {}
     if feature_ids[0] in present:
         expected_references["feature.feature_weather_values.feature_id"] = 1
-        expected_references["feature.weather_metric_series.feature_id"] = 1
+        expected_references["feature.current_weather_summary.feature_id"] = 1
     if feature_ids[1] in present:
         expected_references["feature.feature_price_values.feature_id"] = 1
+        expected_references["feature.current_price_summary.feature_id"] = 1
     observed_references = {key: value for key, value in foreign_keys.items() if value}
     if observed_references != expected_references:
         raise RuntimeError("owned fixture에 예상하지 않은 FK reference가 있습니다")
@@ -428,6 +480,8 @@ async def _seed(
         },
     )
     now = kst_now().replace(microsecond=0)
+    weather_dataset_id = await _ensure_dataset(session, run_id=run_id, kind="weather")
+    price_dataset_id = await _ensure_dataset(session, run_id=run_id, kind="price")
     await weather_repo.load_weather_values(
         session,
         [
@@ -445,9 +499,11 @@ async def _seed(
                 valid_at=now,
                 normalization_version="e2e-v1",
                 payload={"fixture": "admin-feature-live-acceptance"},
-                collected_at=now,
             )
         ],
+        provider_dataset_id=weather_dataset_id,
+        source_record=_response_record(run_id=run_id, kind="weather", fetched_at=now),
+        selected_at=now,
     )
     await price_repo.load_price_values(
         session,
@@ -463,9 +519,10 @@ async def _seed(
                 observed_at=now,
                 normalization_version="e2e-v1",
                 payload={"fixture": "admin-feature-live-acceptance"},
-                collected_at=now,
             )
         ],
+        provider_dataset_id=price_dataset_id,
+        source_record=_response_record(run_id=run_id, kind="price", fetched_at=now),
     )
     observed, foreign_keys = await _assert_owned_state(session, run_id, feature_ids)
     if observed != {"features": 2, "weather_values": 1, "price_values": 1}:
