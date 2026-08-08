@@ -48,6 +48,9 @@ class PublicWeatherValueItem(BaseModel):
 
     weather_value_key: str
     feature_id: str
+    provider_dataset_id: int
+    dataset_key: str
+    dataset_display_name: str
     provider: str
     weather_domain: str
     forecast_style: str
@@ -63,7 +66,7 @@ class PublicWeatherValueItem(BaseModel):
     valid_from: datetime | None = None
     valid_until: datetime | None = None
     observed_at: datetime | None = None
-    collected_at: datetime
+    known_at: datetime
 
 
 class PublicWeatherForecastData(BaseModel):
@@ -200,6 +203,9 @@ def _public_value_out(
     return PublicWeatherValueItem(
         weather_value_key=value.weather_value_key,
         feature_id=anchor_feature_uuid,
+        provider_dataset_id=_require_provider_dataset_id(value),
+        dataset_key=_require_dataset_key(value),
+        dataset_display_name=_require_dataset_display_name(value),
         provider=value.provider,
         weather_domain=value.weather_domain,
         forecast_style=value.forecast_style,
@@ -215,8 +221,26 @@ def _public_value_out(
         valid_from=value.valid_from,
         valid_until=value.valid_until,
         observed_at=value.observed_at,
-        collected_at=value.collected_at,
+        known_at=value.known_at or value.collected_at,
     )
+
+
+def _require_provider_dataset_id(value: weather_repo.WeatherValueTimelineRow) -> int:
+    if value.provider_dataset_id is None:
+        raise ValueError("weather timeline row에 provider_dataset_id가 없습니다")
+    return value.provider_dataset_id
+
+
+def _require_dataset_key(value: weather_repo.WeatherValueTimelineRow) -> str:
+    if not value.dataset_key:
+        raise ValueError("weather timeline row에 dataset_key가 없습니다")
+    return value.dataset_key
+
+
+def _require_dataset_display_name(value: weather_repo.WeatherValueTimelineRow) -> str:
+    if not value.dataset_display_name:
+        raise ValueError("weather timeline row에 dataset_display_name이 없습니다")
+    return value.dataset_display_name
 
 
 def _alert_response_feature_id(value: weather_repo.WeatherAlertHistoryRow) -> str | None:
