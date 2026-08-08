@@ -585,6 +585,10 @@ CREATE TABLE provider_sync.source_entities (
     CONSTRAINT uq_source_entities_provider_identity UNIQUE (
         provider_dataset_id, source_entity_type, source_entity_id
     ),
+    -- domain fact의 source lineage dataset 일치 복합 FK target (ADR-089).
+    CONSTRAINT uq_source_entities_key_dataset UNIQUE (
+        source_entity_key, provider_dataset_id
+    ),
     CONSTRAINT ck_source_entities_type_canonical CHECK (
         source_entity_type <> '' AND source_entity_type = btrim(source_entity_type)
         AND source_entity_type = normalize(source_entity_type, NFC)
@@ -652,6 +656,10 @@ CREATE TABLE provider_sync.source_records (
     CONSTRAINT uq_source_records_entity_payload UNIQUE (source_entity_key, raw_payload_hash),
     -- head composite FK 대상 (ADR-069 결정 3)
     CONSTRAINT uq_source_records_entity_record UNIQUE (source_entity_key, source_record_key),
+    -- domain fact의 known_at=fetched_at provenance 복합 FK target (ADR-089).
+    CONSTRAINT uq_source_records_record_entity_fetched UNIQUE (
+        source_record_key, source_entity_key, fetched_at
+    ),
     CONSTRAINT ck_source_records_raw_data_object CHECK (jsonb_typeof(raw_data) = 'object'),
     CONSTRAINT ck_source_records_payload_hash_canonical CHECK (
         raw_payload_hash ~ '^[0-9a-f]{1,64}$'
@@ -860,6 +868,73 @@ CREATE UNIQUE INDEX uq_feature_overrides_active
 CREATE INDEX idx_feature_overrides_feature ON ops.feature_overrides (feature_id);
 
 -- =============================================================================
+-- 8A. current summary projection receipt (ADR-089, T-VN-38)
+-- =============================================================================
+-- 사실의 business time과 projection/rebuild의 실행 시각을 분리한다. summary는 성공한
+-- receipt만 복합 FK로 참조한다. run은 weather/price 전체 또는 일부 dataset을 set-based로
+-- materialize할 수 있으므로 provider_dataset_id를 row마다 중복 저장하지 않는다.
+CREATE TABLE ops.current_summary_runs (
+    summary_run_id bigint GENERATED ALWAYS AS IDENTITY,
+    projection_kind text NOT NULL,
+    run_kind text NOT NULL,
+    status text NOT NULL,
+    started_at timestamptz NOT NULL DEFAULT now(),
+    finished_at timestamptz,
+    input_count bigint NOT NULL DEFAULT 0,
+    inserted_count bigint NOT NULL DEFAULT 0,
+    updated_count bigint NOT NULL DEFAULT 0,
+    deleted_count bigint NOT NULL DEFAULT 0,
+    scope jsonb NOT NULL DEFAULT '{}'::jsonb,
+    detail jsonb NOT NULL DEFAULT '{}'::jsonb,
+    CONSTRAINT pk_current_summary_runs PRIMARY KEY (summary_run_id),
+    CONSTRAINT uq_current_summary_runs_receipt_state UNIQUE (
+        summary_run_id, projection_kind, status
+    ),
+    CONSTRAINT ck_current_summary_runs_projection_kind CHECK (
+        projection_kind IN ('weather', 'price')
+    ),
+    CONSTRAINT ck_current_summary_runs_run_kind CHECK (
+        run_kind IN ('ingest', 'reconcile', 'backfill', 'restore')
+    ),
+    CONSTRAINT ck_current_summary_runs_status CHECK (
+        status IN ('running', 'succeeded', 'failed')
+    ),
+    CONSTRAINT ck_current_summary_runs_finished_at CHECK (
+        (status = 'running' AND finished_at IS NULL)
+        OR (status IN ('succeeded', 'failed') AND finished_at >= started_at)
+    ),
+    CONSTRAINT ck_current_summary_runs_counts_nonnegative CHECK (
+        input_count >= 0 AND inserted_count >= 0 AND updated_count >= 0 AND deleted_count >= 0
+    ),
+    CONSTRAINT ck_current_summary_runs_scope_object CHECK (jsonb_typeof(scope) = 'object'),
+    CONSTRAINT ck_current_summary_runs_detail_object CHECK (jsonb_typeof(detail) = 'object')
+);
+
+CREATE INDEX idx_current_summary_runs_projection_finished
+    ON ops.current_summary_runs (projection_kind, finished_at DESC)
+    WHERE status = 'succeeded';
+
+CREATE FUNCTION ops.reject_terminal_current_summary_run_mutation()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = pg_catalog
+AS $$
+BEGIN
+    IF OLD.status IN ('succeeded', 'failed') THEN
+        RAISE EXCEPTION 'terminal current summary receipt is immutable: %', OLD.summary_run_id
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_current_summary_runs_terminal_immutable';
+    END IF;
+    -- 실행 중 receipt만 진행 건수·scope를 갱신하거나 terminal 상태로 전이할 수 있다.
+    -- status CHECK가 허용 domain을 제한하므로 failed → succeeded 같은 재개는 불가능하다.
+    RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
+END;
+$$;
+
+CREATE TRIGGER trg_current_summary_runs_terminal_immutable
+    BEFORE UPDATE OR DELETE ON ops.current_summary_runs
+    FOR EACH ROW EXECUTE FUNCTION ops.reject_terminal_current_summary_run_mutation();
+
+-- =============================================================================
 -- 9. typed notice state (보고서 D-9-7, T-VN-37)
 -- =============================================================================
 -- 현행 provider_sync.notice_lineage_states(문자열 시각·anti-join hot path)의
@@ -903,7 +978,7 @@ CREATE TRIGGER trg_notice_states_active_dataset_write
 -- 10. weather bitemporal history + current summary (ADR-072, T-VN-38A)
 -- =============================================================================
 -- 현행 feature.feature_weather_values(0060 이후)의 목표형 — 변경점:
---   * feature_id uuid FK / provider → provider_dataset_id FK (ADR-072 결정 2)
+--   * final feature_id uuid FK / provider → provider_dataset_id FK (ADR-072 결정 2)
 --   * bitemporal 축 target_at/known_at 명시 (ADR-072 결정 1)
 --   * provider-native 발표/유효/관측 시각은 typed 컬럼으로 보존
 -- BRIN-on-time은 실측 후 채택: 미정(ADR-072 결정 5, T-VN-38C 구현 소관)
@@ -915,9 +990,13 @@ CREATE TABLE feature.feature_weather_values (
     forecast_style text NOT NULL,
     timeline_bucket text,
     metric_key text NOT NULL,
+    metric_name text,
+    source_metric_key text,
+    source_metric_name text,
     value_number numeric(14, 4),
     value_text text,
     unit text,
+    severity text,
     issued_at timestamptz,
     valid_at timestamptz,
     -- 유효 기간 — range type 채택 (ADR-072 결정 2 "기간은 range type과 순서
@@ -928,18 +1007,26 @@ CREATE TABLE feature.feature_weather_values (
     -- bitemporal 축 (ADR-072 결정 1)
     target_at timestamptz NOT NULL,
     known_at timestamptz NOT NULL,
+    normalization_version text,
     payload jsonb NOT NULL DEFAULT '{}'::jsonb,
-    source_record_key text,
-    collected_at timestamptz NOT NULL DEFAULT now(),
+    source_entity_key text NOT NULL,
+    source_record_key text NOT NULL,
     created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT pk_feature_weather_values PRIMARY KEY (weather_value_key),
     CONSTRAINT fk_weather_values_feature FOREIGN KEY (feature_id)
         REFERENCES feature.features (feature_id) ON DELETE CASCADE,
     CONSTRAINT fk_weather_values_provider_dataset FOREIGN KEY (provider_dataset_id)
         REFERENCES provider_sync.provider_datasets (provider_dataset_id),
-    CONSTRAINT fk_weather_value_source_record FOREIGN KEY (source_record_key)
-        REFERENCES provider_sync.source_records (source_record_key) ON DELETE SET NULL,
+    CONSTRAINT fk_weather_value_source_lineage FOREIGN KEY (
+        source_record_key, source_entity_key, known_at
+    ) REFERENCES provider_sync.source_records (
+        source_record_key, source_entity_key, fetched_at
+    ) ON DELETE RESTRICT,
+    CONSTRAINT fk_weather_value_source_dataset FOREIGN KEY (
+        source_entity_key, provider_dataset_id
+    ) REFERENCES provider_sync.source_entities (
+        source_entity_key, provider_dataset_id
+    ) ON DELETE RESTRICT,
     CONSTRAINT ck_weather_value_present CHECK (
         value_number IS NOT NULL OR value_text IS NOT NULL
     ),
@@ -959,121 +1046,203 @@ CREATE TABLE feature.feature_weather_values (
 CREATE UNIQUE INDEX uq_weather_value_identity
     ON feature.feature_weather_values (
         feature_id, provider_dataset_id, weather_domain, forecast_style, metric_key,
-        issued_at, valid_at, observed_at
-    )
-    NULLS NOT DISTINCT;
+        target_at, source_record_key
+    );
+
+-- summary가 다른 feature/dataset/series의 fact를 가리키지 못하게 하는 복합 FK target.
+CREATE UNIQUE INDEX uq_weather_value_summary_reference
+    ON feature.feature_weather_values (
+        weather_value_key, feature_id, provider_dataset_id, weather_domain, forecast_style, metric_key
+    );
 
 -- target_at/known_at hot path 복합 B-tree (ADR-072 결정 5)
 CREATE INDEX idx_weather_values_feature_target_known
     ON feature.feature_weather_values (feature_id, target_at DESC, known_at DESC);
 
 CREATE TRIGGER trg_feature_weather_values_active_dataset_write
-    BEFORE INSERT OR UPDATE OR DELETE ON feature.feature_weather_values
+    BEFORE INSERT ON feature.feature_weather_values
     FOR EACH ROW EXECUTE FUNCTION provider_sync.reject_inactive_provider_dataset();
 
--- current weather summary (ADR-072 결정 4, T-VN-38A) — bbox 매행 LATERAL을
--- set JOIN으로 치환하는 검증 가능 projection. 원본 이력에서 재생성 가능하다.
--- reconciliation 절차·summary 값 컬럼 확장: 미정(T-VN-38A 구현 소관)
+CREATE FUNCTION feature.reject_weather_value_mutation()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = pg_catalog
+AS $$
+BEGIN
+    IF TG_OP = 'DELETE' AND NOT EXISTS (
+        SELECT 1 FROM feature.features AS f WHERE f.feature_id = OLD.feature_id
+    ) THEN
+        RETURN OLD;
+    END IF;
+    RAISE EXCEPTION 'feature_weather_values facts are immutable (ADR-089)'
+        USING ERRCODE = '23514', CONSTRAINT = 'ck_weather_values_immutable';
+END;
+$$;
+
+CREATE TRIGGER trg_feature_weather_values_immutable
+    BEFORE UPDATE OR DELETE ON feature.feature_weather_values
+    FOR EACH ROW EXECUTE FUNCTION feature.reject_weather_value_mutation();
+
+-- current weather summary (ADR-072 결정 4, ADR-089, T-VN-38A) — bbox 매행
+-- LATERAL을 set JOIN으로 치환하는 검증 가능 projection. 값/시각을 복제하지 않고
+-- immutable fact와 성공한 materialization receipt만 참조하므로 history와 drift하지 않는다.
 CREATE TABLE feature.current_weather_summary (
-    -- surrogate PK — price summary와 대칭·replica identity 확보 (리뷰 D4).
-    summary_id bigint GENERATED ALWAYS AS IDENTITY,
     feature_id uuid NOT NULL,
     provider_dataset_id bigint NOT NULL,
     weather_domain text NOT NULL,
     forecast_style text NOT NULL,
     metric_key text NOT NULL,
-    -- timeline_bucket은 identity가 아니다 — ADR-010 분류 결과(재계산 가능)라
-    -- 정본 identity에서 제외한다(0060 정본: "timeline_bucket은 ADR-010 분류
-    -- 결과(재계산 가능)라 제외한다", dto/weather.py identity() 동일). 표시용
-    -- 컬럼으로만 보존한다.
-    timeline_bucket text,
-    target_at timestamptz NOT NULL,
-    known_at timestamptz NOT NULL,
-    value_number numeric(14, 4),
-    value_text text,
-    unit text,
-    updated_at timestamptz NOT NULL DEFAULT now(),
-    CONSTRAINT pk_current_weather_summary PRIMARY KEY (summary_id),
+    weather_value_key text NOT NULL,
+    summary_run_id bigint NOT NULL,
+    selected_at timestamptz NOT NULL,
+    refresh_after timestamptz NOT NULL,
+    projection_kind text NOT NULL DEFAULT 'weather',
+    receipt_status text NOT NULL DEFAULT 'succeeded',
+    CONSTRAINT pk_current_weather_summary PRIMARY KEY (
+        feature_id, provider_dataset_id, weather_domain, forecast_style, metric_key
+    ),
     CONSTRAINT fk_current_weather_summary_feature FOREIGN KEY (feature_id)
         REFERENCES feature.features (feature_id) ON DELETE CASCADE,
     CONSTRAINT fk_current_weather_summary_provider_dataset FOREIGN KEY (provider_dataset_id)
         REFERENCES provider_sync.provider_datasets (provider_dataset_id),
-    CONSTRAINT ck_current_weather_summary_value_present CHECK (
-        value_number IS NOT NULL OR value_text IS NOT NULL
+    CONSTRAINT fk_current_weather_summary_fact FOREIGN KEY (
+        weather_value_key, feature_id, provider_dataset_id, weather_domain, forecast_style, metric_key
+    ) REFERENCES feature.feature_weather_values (
+        weather_value_key, feature_id, provider_dataset_id, weather_domain, forecast_style, metric_key
+    ) ON DELETE CASCADE,
+    CONSTRAINT fk_current_weather_summary_successful_run FOREIGN KEY (
+        summary_run_id, projection_kind, receipt_status
+    ) REFERENCES ops.current_summary_runs (summary_run_id, projection_kind, status),
+    CONSTRAINT ck_current_weather_summary_projection_kind CHECK (projection_kind = 'weather'),
+    CONSTRAINT ck_current_weather_summary_receipt_status CHECK (receipt_status = 'succeeded'),
+    CONSTRAINT ck_current_weather_summary_refresh_after CHECK (
+        refresh_after > selected_at
     )
 );
 
--- summary identity — history native tuple의 non-null 축(시간 instant 제외).
--- 전 구성원이 NOT NULL이므로 평문 UNIQUE로 충분하다(NULLS NOT DISTINCT는
--- history tuple의 nullable 시간축 소관 — uq_weather_value_identity).
-CREATE UNIQUE INDEX uq_current_weather_summary_identity
-    ON feature.current_weather_summary (
-        feature_id, provider_dataset_id, weather_domain, forecast_style, metric_key
-    );
+CREATE INDEX idx_current_weather_summary_fact
+    ON feature.current_weather_summary (weather_value_key);
 
 CREATE TRIGGER trg_current_weather_summary_active_dataset_write
-    BEFORE INSERT OR UPDATE OR DELETE ON feature.current_weather_summary
+    BEFORE INSERT OR UPDATE ON feature.current_weather_summary
     FOR EACH ROW EXECUTE FUNCTION provider_sync.reject_inactive_provider_dataset();
 
 -- =============================================================================
 -- 11. price history + current summary (ADR-078, T-VN-38B)
 -- =============================================================================
--- 현행 feature.feature_price_values의 목표형(feature_id uuid). series identity는
--- `(feature_id, provider, price_domain, product_key)` (ADR-078 결정 1).
--- provider 문자열의 provider_dataset_id FK 수렴(ADR-069 결정 5와의 조정):
--- 미정(T-VN-38B·T-VN-33B 조율 소관)
+-- price series identity는 `(feature_id, provider_dataset_id, price_domain, product_key)`다.
+-- provider 표시는 canonical dataset join으로만 얻으며 문자열은 stored identity가 아니다.
 CREATE TABLE feature.feature_price_values (
     price_value_key text NOT NULL,
     feature_id uuid NOT NULL,
-    provider text NOT NULL,
+    provider_dataset_id bigint NOT NULL,
     price_domain text NOT NULL,
     product_key text NOT NULL,
+    product_name text,
+    source_product_key text,
+    source_product_name text,
     observed_at timestamptz NOT NULL,
+    known_at timestamptz NOT NULL,
     value_number numeric(14, 4) NOT NULL,
     unit text NOT NULL DEFAULT 'KRW',
+    normalization_version text,
     payload jsonb NOT NULL DEFAULT '{}'::jsonb,
-    source_record_key text,
-    collected_at timestamptz NOT NULL DEFAULT now(),
+    source_entity_key text NOT NULL,
+    source_record_key text NOT NULL,
     created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT pk_feature_price_values PRIMARY KEY (price_value_key),
     CONSTRAINT fk_price_values_feature FOREIGN KEY (feature_id)
         REFERENCES feature.features (feature_id) ON DELETE CASCADE,
-    CONSTRAINT fk_price_value_source_record FOREIGN KEY (source_record_key)
-        REFERENCES provider_sync.source_records (source_record_key) ON DELETE SET NULL,
+    CONSTRAINT fk_price_values_provider_dataset FOREIGN KEY (provider_dataset_id)
+        REFERENCES provider_sync.provider_datasets (provider_dataset_id),
+    CONSTRAINT fk_price_value_source_lineage FOREIGN KEY (
+        source_record_key, source_entity_key, known_at
+    ) REFERENCES provider_sync.source_records (
+        source_record_key, source_entity_key, fetched_at
+    ) ON DELETE RESTRICT,
+    CONSTRAINT fk_price_value_source_dataset FOREIGN KEY (
+        source_entity_key, provider_dataset_id
+    ) REFERENCES provider_sync.source_entities (
+        source_entity_key, provider_dataset_id
+    ) ON DELETE RESTRICT,
     CONSTRAINT ck_price_value_nonnegative CHECK (value_number >= 0),
     CONSTRAINT ck_price_value_payload_object CHECK (jsonb_typeof(payload) = 'object'),
     CONSTRAINT uq_price_value_identity UNIQUE (
-        feature_id, provider, price_domain, product_key, observed_at
+        feature_id, provider_dataset_id, price_domain, product_key, observed_at, source_record_key
     )
 );
+
+CREATE UNIQUE INDEX uq_price_value_summary_reference
+    ON feature.feature_price_values (
+        price_value_key, feature_id, provider_dataset_id, price_domain, product_key
+    );
 
 -- history access path (ADR-078 결정 5)
 CREATE INDEX idx_price_values_feature_observed_identity
     ON feature.feature_price_values (
-        feature_id, observed_at DESC, provider, price_domain, product_key
+        feature_id, observed_at DESC, known_at DESC, provider_dataset_id, price_domain, product_key
     );
 
--- current price summary (T-VN-38B) — series identity당 current 1건.
--- restore/backfill generation 구분의 표현(전용 컬럼 vs restore epoch 참조)과
--- price의 bitemporal known_at 채택 여부(ADR-078에 price bitemporal 결정 없음):
--- 미정(T-VN-38B 구현 소관)
+CREATE FUNCTION feature.reject_price_value_mutation()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = pg_catalog
+AS $$
+BEGIN
+    IF TG_OP = 'DELETE' AND NOT EXISTS (
+        SELECT 1 FROM feature.features AS f WHERE f.feature_id = OLD.feature_id
+    ) THEN
+        RETURN OLD;
+    END IF;
+    RAISE EXCEPTION 'feature_price_values facts are immutable (ADR-089)'
+        USING ERRCODE = '23514', CONSTRAINT = 'ck_price_values_immutable';
+END;
+$$;
+
+CREATE TRIGGER trg_feature_price_values_immutable
+    BEFORE UPDATE OR DELETE ON feature.feature_price_values
+    FOR EACH ROW EXECUTE FUNCTION feature.reject_price_value_mutation();
+
+CREATE TRIGGER trg_feature_price_values_active_dataset_write
+    BEFORE INSERT ON feature.feature_price_values
+    FOR EACH ROW EXECUTE FUNCTION provider_sync.reject_inactive_provider_dataset();
+
+-- current price summary (T-VN-38B) — series identity당 current 1건. price 값을
+-- 복제하지 않고 선택된 immutable fact와 successful receipt를 참조한다.
 CREATE TABLE feature.current_price_summary (
     feature_id uuid NOT NULL,
-    provider text NOT NULL,
+    provider_dataset_id bigint NOT NULL,
     price_domain text NOT NULL,
     product_key text NOT NULL,
-    observed_at timestamptz NOT NULL,
-    value_number numeric(14, 4) NOT NULL,
-    unit text NOT NULL DEFAULT 'KRW',
-    updated_at timestamptz NOT NULL DEFAULT now(),
+    price_value_key text NOT NULL,
+    summary_run_id bigint NOT NULL,
+    projection_kind text NOT NULL DEFAULT 'price',
+    receipt_status text NOT NULL DEFAULT 'succeeded',
     CONSTRAINT pk_current_price_summary PRIMARY KEY (
-        feature_id, provider, price_domain, product_key
+        feature_id, provider_dataset_id, price_domain, product_key
     ),
     CONSTRAINT fk_current_price_summary_feature FOREIGN KEY (feature_id)
         REFERENCES feature.features (feature_id) ON DELETE CASCADE,
-    CONSTRAINT ck_current_price_summary_nonnegative CHECK (value_number >= 0)
+    CONSTRAINT fk_current_price_summary_provider_dataset FOREIGN KEY (provider_dataset_id)
+        REFERENCES provider_sync.provider_datasets (provider_dataset_id),
+    CONSTRAINT fk_current_price_summary_fact FOREIGN KEY (
+        price_value_key, feature_id, provider_dataset_id, price_domain, product_key
+    ) REFERENCES feature.feature_price_values (
+        price_value_key, feature_id, provider_dataset_id, price_domain, product_key
+    ) ON DELETE CASCADE,
+    CONSTRAINT fk_current_price_summary_successful_run FOREIGN KEY (
+        summary_run_id, projection_kind, receipt_status
+    ) REFERENCES ops.current_summary_runs (summary_run_id, projection_kind, status),
+    CONSTRAINT ck_current_price_summary_projection_kind CHECK (projection_kind = 'price'),
+    CONSTRAINT ck_current_price_summary_receipt_status CHECK (receipt_status = 'succeeded')
 );
+
+CREATE INDEX idx_current_price_summary_fact
+    ON feature.current_price_summary (price_value_key);
+
+CREATE TRIGGER trg_current_price_summary_active_dataset_write
+    BEFORE INSERT OR UPDATE ON feature.current_price_summary
+    FOR EACH ROW EXECUTE FUNCTION provider_sync.reject_inactive_provider_dataset();
 
 -- =============================================================================
 -- 12. curation 단일 write model (보고서 F-16, T-VN-40)

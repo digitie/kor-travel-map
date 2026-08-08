@@ -341,15 +341,14 @@ WHERE isempty(valid_during); -- expect: 0 -- phase: both
 -- ADR-072 — weather bitemporal + current summary (T-VN-38A)
 -- -----------------------------------------------------------------------------
 
--- [INV-072-01] native semantic tuple 중복 없음 — NULLS NOT DISTINCT 의미
--- (GROUP BY는 NULL을 동일 그룹으로 묶는다; UNIQUE 연결 전 preflight).
+-- [INV-072-01] immutable source revision당 weather fact identity 중복 없음.
 SELECT count(*)
 FROM (
     SELECT feature_id, provider_dataset_id, weather_domain, forecast_style,
-           metric_key, issued_at, valid_at, observed_at
+           metric_key, target_at, source_record_key
     FROM feature.feature_weather_values
     GROUP BY feature_id, provider_dataset_id, weather_domain, forecast_style,
-             metric_key, issued_at, valid_at, observed_at
+             metric_key, target_at, source_record_key
     HAVING count(*) > 1
 ) AS duplicated; -- expect: 0 -- phase: both
 
@@ -380,7 +379,7 @@ WHERE w.source_record_key IS NOT NULL
   AND r.source_record_key IS NULL; -- expect: 0 -- phase: both
 
 -- [INV-072-06] current summary identity 중복 없음 (non-null 축 — timeline_bucket
--- 제외, 0060 정본).
+-- 제외). 사실 key를 따로 복제한 summary가 아니라 fact pointer 하나를 보유한다.
 SELECT count(*)
 FROM (
     SELECT feature_id, provider_dataset_id, weather_domain, forecast_style,
@@ -391,30 +390,97 @@ FROM (
     HAVING count(*) > 1
 ) AS duplicated; -- expect: 0 -- phase: both
 
--- [INV-072-07] summary orphan 없음 — summary는 원본 이력에서 재생성 가능해야
--- 하므로 대응 history 행이 존재한다 (ADR-072 결정 4; reconciliation gate).
+-- [INV-072-07] summary pointer는 정확히 같은 identity의 immutable history fact를
+-- 가리킨다 (ADR-089; reconciliation gate).
 SELECT count(*)
 FROM feature.current_weather_summary AS s
-WHERE NOT EXISTS (
-    SELECT 1
-    FROM feature.feature_weather_values AS w
-    WHERE w.feature_id = s.feature_id
-      AND w.provider_dataset_id = s.provider_dataset_id
-      AND w.weather_domain = s.weather_domain
-      AND w.forecast_style = s.forecast_style
-      AND w.metric_key = s.metric_key
-); -- expect: 0 -- phase: post-backfill
+LEFT JOIN feature.feature_weather_values AS w
+    ON w.weather_value_key = s.weather_value_key
+   AND w.feature_id = s.feature_id
+   AND w.provider_dataset_id = s.provider_dataset_id
+   AND w.weather_domain = s.weather_domain
+   AND w.forecast_style = s.forecast_style
+   AND w.metric_key = s.metric_key
+WHERE w.weather_value_key IS NULL; -- expect: 0 -- phase: post-backfill
+
+-- [INV-089-01] weather summary는 selected_at에서 eligible한 winner를 정확히 가리킨다.
+SELECT count(*)
+FROM (
+    WITH actual AS (
+        SELECT feature_id, provider_dataset_id, weather_domain, forecast_style, metric_key,
+               weather_value_key
+        FROM feature.current_weather_summary
+    ), ranked AS (
+        SELECT
+            s.feature_id, s.provider_dataset_id, s.weather_domain, s.forecast_style, s.metric_key,
+            w.weather_value_key,
+            row_number() OVER (
+                PARTITION BY s.feature_id, s.provider_dataset_id, s.weather_domain,
+                             s.forecast_style, s.metric_key
+                ORDER BY w.target_at DESC,
+                         w.known_at DESC,
+                         upper(w.valid_during) DESC NULLS LAST,
+                         w.issued_at DESC NULLS LAST,
+                         w.valid_at DESC NULLS LAST,
+                         w.observed_at DESC NULLS LAST,
+                         w.weather_value_key DESC
+            ) AS row_number
+        FROM feature.current_weather_summary AS s
+        JOIN feature.feature_weather_values AS w
+          ON w.feature_id = s.feature_id
+         AND w.provider_dataset_id = s.provider_dataset_id
+         AND w.weather_domain = s.weather_domain
+         AND w.forecast_style = s.forecast_style
+         AND w.metric_key = s.metric_key
+        WHERE w.known_at <= s.selected_at
+          AND w.target_at <= s.selected_at
+          AND (w.valid_during IS NULL OR w.valid_during @> s.selected_at)
+    ), expected AS (
+        SELECT feature_id, provider_dataset_id, weather_domain, forecast_style, metric_key,
+               weather_value_key
+        FROM ranked
+        WHERE row_number = 1
+    )
+    (SELECT * FROM expected EXCEPT ALL SELECT * FROM actual)
+    UNION ALL
+    (SELECT * FROM actual EXCEPT ALL SELECT * FROM expected)
+) AS difference; -- expect: 0 -- phase: post-backfill
+
+-- [INV-089-02] selected weather fact는 eligible하고 refresh deadline은 미래다.
+SELECT count(*)
+FROM feature.current_weather_summary AS s
+JOIN feature.feature_weather_values AS w
+  ON w.weather_value_key = s.weather_value_key
+WHERE w.known_at > s.selected_at
+   OR w.target_at > s.selected_at
+   OR (w.valid_during IS NOT NULL AND NOT (w.valid_during @> s.selected_at))
+   OR s.refresh_after <= s.selected_at; -- expect: 0 -- phase: post-backfill
+
+-- [INV-089-03] summary는 성공한 같은 projection receipt만 참조한다.
+SELECT count(*)
+FROM (
+    SELECT summary_run_id, projection_kind, receipt_status
+    FROM feature.current_weather_summary
+    UNION ALL
+    SELECT summary_run_id, projection_kind, receipt_status
+    FROM feature.current_price_summary
+) AS s
+LEFT JOIN ops.current_summary_runs AS r
+    ON r.summary_run_id = s.summary_run_id
+   AND r.projection_kind = s.projection_kind
+   AND r.status = s.receipt_status
+WHERE r.summary_run_id IS NULL OR r.status <> 'succeeded'; -- expect: 0 -- phase: post-backfill
 
 -- -----------------------------------------------------------------------------
 -- ADR-078 — price series identity (T-VN-38B)
 -- -----------------------------------------------------------------------------
 
--- [INV-078-01] observation identity 중복 없음 (series identity + observed_at).
+-- [INV-078-01] immutable source revision당 observation identity 중복 없음.
 SELECT count(*)
 FROM (
-    SELECT feature_id, provider, price_domain, product_key, observed_at
+    SELECT feature_id, provider_dataset_id, price_domain, product_key, observed_at, source_record_key
     FROM feature.feature_price_values
-    GROUP BY feature_id, provider, price_domain, product_key, observed_at
+    GROUP BY feature_id, provider_dataset_id, price_domain, product_key, observed_at, source_record_key
     HAVING count(*) > 1
 ) AS duplicated; -- expect: 0 -- phase: both
 
@@ -423,19 +489,59 @@ SELECT count(*)
 FROM feature.feature_price_values
 WHERE value_number < 0; -- expect: 0 -- phase: both
 
--- [INV-078-03] price current summary는 series 최신 관측과 일치할 수 있는
--- history 행을 가진다 (reconciliation gate).
+-- [INV-078-03] price current summary pointer는 같은 canonical series의 immutable
+-- history fact를 가리킨다 (ADR-089 reconciliation gate).
 SELECT count(*)
 FROM feature.current_price_summary AS s
-WHERE NOT EXISTS (
-    SELECT 1
+LEFT JOIN feature.feature_price_values AS p
+    ON p.price_value_key = s.price_value_key
+   AND p.feature_id = s.feature_id
+   AND p.provider_dataset_id = s.provider_dataset_id
+   AND p.price_domain = s.price_domain
+   AND p.product_key = s.product_key
+WHERE p.price_value_key IS NULL; -- expect: 0 -- phase: post-backfill
+
+-- [INV-089-04] price summary는 observed/known/key winner를 정확히 가리킨다.
+SELECT count(*)
+FROM (
+    WITH actual AS (
+        SELECT feature_id, provider_dataset_id, price_domain, product_key, price_value_key
+        FROM feature.current_price_summary
+    ), ranked AS (
+        SELECT
+            p.feature_id, p.provider_dataset_id, p.price_domain, p.product_key, p.price_value_key,
+            row_number() OVER (
+                PARTITION BY p.feature_id, p.provider_dataset_id, p.price_domain, p.product_key
+                ORDER BY p.observed_at DESC, p.known_at DESC, p.price_value_key DESC
+            ) AS row_number
+        FROM feature.feature_price_values AS p
+    ), expected AS (
+        SELECT feature_id, provider_dataset_id, price_domain, product_key, price_value_key
+        FROM ranked
+        WHERE row_number = 1
+    )
+    (SELECT * FROM expected EXCEPT ALL SELECT * FROM actual)
+    UNION ALL
+    (SELECT * FROM actual EXCEPT ALL SELECT * FROM expected)
+) AS difference; -- expect: 0 -- phase: post-backfill
+
+-- [INV-089-05] 두 fact domain의 source record/entity/dataset lineage는 한 소유자다.
+SELECT count(*)
+FROM (
+    SELECT w.source_record_key, w.source_entity_key, w.provider_dataset_id, w.known_at
+    FROM feature.feature_weather_values AS w
+    UNION ALL
+    SELECT p.source_record_key, p.source_entity_key, p.provider_dataset_id, p.known_at
     FROM feature.feature_price_values AS p
-    WHERE p.feature_id = s.feature_id
-      AND p.provider = s.provider
-      AND p.price_domain = s.price_domain
-      AND p.product_key = s.product_key
-      AND p.observed_at = s.observed_at
-); -- expect: 0 -- phase: post-backfill
+) AS fact
+LEFT JOIN provider_sync.source_records AS record
+  ON record.source_record_key = fact.source_record_key
+ AND record.source_entity_key = fact.source_entity_key
+ AND record.fetched_at = fact.known_at
+LEFT JOIN provider_sync.source_entities AS entity
+  ON entity.source_entity_key = fact.source_entity_key
+ AND entity.provider_dataset_id = fact.provider_dataset_id
+WHERE record.source_record_key IS NULL OR entity.source_entity_key IS NULL; -- expect: 0 -- phase: both
 
 -- -----------------------------------------------------------------------------
 -- T-VN-40 — curation 단일 write model

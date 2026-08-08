@@ -33,10 +33,10 @@
       "constraint": "uq_notice_states_current",
       "basis": "T-VN-37"
     },
-    "weather_identity_nulls_not_distinct_duplicate": {
+    "weather_source_revision_identity_duplicate": {
       "sqlstate": "23505",
       "constraint": "uq_weather_value_identity",
-      "basis": "ADR-072"
+      "basis": "ADR-089"
     },
     "weather_bitemporal_inversion": {
       "sqlstate": "23514",
@@ -172,6 +172,46 @@
       "sqlstate": "23514",
       "constraint": "ck_source_entity_heads_complete",
       "basis": "ADR-087"
+    },
+    "weather_source_lineage_required": {
+      "sqlstate": "23502",
+      "column": "source_entity_key",
+      "basis": "ADR-089"
+    },
+    "weather_source_dataset_mismatch": {
+      "sqlstate": "23503",
+      "constraint": "fk_weather_value_source_dataset",
+      "basis": "ADR-089"
+    },
+    "weather_kma_grid_record_dataset_mismatch": {
+      "sqlstate": "23503",
+      "constraint": "fk_weather_value_source_dataset",
+      "basis": "ADR-089"
+    },
+    "weather_fact_immutable_update": {
+      "sqlstate": "23514",
+      "constraint": "ck_weather_values_immutable",
+      "basis": "ADR-089"
+    },
+    "price_fact_immutable_delete": {
+      "sqlstate": "23514",
+      "constraint": "ck_price_values_immutable",
+      "basis": "ADR-089"
+    },
+    "terminal_summary_receipt_immutable": {
+      "sqlstate": "23514",
+      "constraint": "ck_current_summary_runs_terminal_immutable",
+      "basis": "ADR-089"
+    },
+    "current_weather_summary_cross_series_fact": {
+      "sqlstate": "23503",
+      "constraint": "fk_current_weather_summary_fact",
+      "basis": "ADR-089"
+    },
+    "current_weather_summary_refresh_after_invalid": {
+      "sqlstate": "23514",
+      "constraint": "ck_current_weather_summary_refresh_after",
+      "basis": "ADR-089"
     }
   }
 }

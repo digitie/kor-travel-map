@@ -104,12 +104,12 @@
     "T-VN-38": {
       "title": "weather·price current summary",
       "consumer_first_order": [
-        "38A: weather current summary + reconciliation (원본 이력 보존)",
-        "38B: price current summary + reconciliation + restore/backfill generation 구분",
-        "38C: bbox/detail per-row LATERAL → summary set join 전환, old query 비활성화"
+        "38A: 0092에서 T-VN-33 exact operation membership의 provider_dataset_id와 producing response SourceRecord를 강제한 immutable weather fact·summary receipt·winner reconciliation을 만든다. KMA grid record는 forecast value provenance가 될 수 없다.",
+        "38B: 0093에서 동일 lineage/append model의 price fact·summary와 correction(새 source record + fact append)·backfill/restore receipt를 만든다.",
+        "38C: 0094에서 bbox/detail의 own/nearest/KMA anchor를 window-ranked set CTE로 고른 뒤 summary set join으로 전환한다. current와 explicit (target_at, known_at) snapshot API를 분리하고 DTO/UI identity를 provider_dataset_id+dataset_key로 고정한다."
       ],
-      "write_fence": "38C에서 old query 경로를 normal path에서 비활성화 (summary는 원본에서 재생성 가능 — ADR-072 전환)",
-      "compat_drop": "rollback shadow index 삭제는 T-VN-39 removal manifest",
+      "write_fence": "38A부터 source-less value write와 provider 문자열 identity를 차단하고, 38C에서 raw current/LATERAL query를 normal path에서 제거한다. summary는 immutable fact에서만 재생성한다.",
+      "compat_drop": "서비스 전 destructive rebuild를 전제로 T-VN-38 완료 시 old provider-string writer/query와 current-summary compatibility path를 유지하지 않는다. legacy 객체의 최종 제거 명세는 T-VN-39 manifest에도 반영한다.",
       "pinvi_snapshot_revendor": {
         "user": "no",
         "service": "no",

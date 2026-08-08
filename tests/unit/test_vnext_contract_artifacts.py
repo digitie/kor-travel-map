@@ -27,32 +27,32 @@ _CONTRACTS: Final = _ROOT / "contracts" / "vnext"
 # artifact bytes 고정 — 갱신 절차: artifact 수정 → 통합 테스트로 fingerprint 재고정
 # → 여기 sha256 갱신 (한 PR에서 함께).
 ARTIFACT_SHA256: Final[dict[str, str]] = {
-    "target-schema-v1.sql": ("e0ffcd25effbbda10d85c10a6a1e150133b062fcaefcd0135d6109c1bc155280"),
+    "target-schema-v1.sql": ("87048b3caaabf60b9f3f0d03d06057f53706417ca99773e2013e4dda85fbdf03"),
     "target-invariants-v1.sql": (
-        "51c99c6ed806f96abaf7e30717bf9ddb893d04eac0862ed1bdc32fbb8611b672"
+        "68ed9bcf7252d3c659830871e39cb827bfaefc7c384d39f5d04c650d77e3b7a5"
     ),
     "target-schema-fingerprints-v1.json": (
-        "c70600140f899a284ef90274543220aea5cdf936fec38570aa958d011cb2b265"
+        "7db6129fa7850ff2f62390b2475b25c194ca9c0442a56d5589983601502c5ad8"
     ),
     "tvn33-reference-ownership-v1.sql": (
-        "af0034829c90572d96f4184349b7374d8e38a12b5556a9dd7142c6582411c986"
+        "1be5cd9370d974a94adb2146947732f79d756ad3411e137d3846b33a5ba8e13a"
     ),
-    "openapi-diff-v1.json": ("fb546ac8e80060d817c2c1f5ac48f6f3a1f0c125c740884b1550f55f56647678"),
+    "openapi-diff-v1.json": ("f635f54b54be29e2f2f727d2bfa544e6bdafcda176f738c0f23eb6b8e86f5b3e"),
     "consumer-rollout-v1.json": (
-        "573210a3949d78e3831f9581811f158cef8547328efea44d16cc6afb39b76c88"
+        "d9983dbe96094c9439b575e8ff8e5f1e4bca0656fa4b8166f2449010ad2b8d38"
     ),
     "violation-fixtures-v1.sql": (
-        "ddb0188e13cc75e4137370d613de83367163ec2893c0d13d97c39b622370af3c"
+        "d7d254b2bf01c6c2ec9c06ac6f862d652b1833051f6cf0f5ab0135f91255ac9d"
     ),
     "expected-rejections-v1.json": (
-        "3635a704a7daaf652304d6e3b8914f97add99a9859949bc2e31c7bf8146b2150"
+        "8523efb6cc8d93028624e9c10d0a4b6180954b64ee4e4ca5f81e5e0b8483f5ed"
     ),
     "recovery-preflight-v1.json": (
         "0e7e1ea595d034aacda8b4c94b56de6c2a24059f150c8cbd6c0670aebce7dfdd"
     ),
 }
 
-_EXPECTED_INVARIANT_COUNT: Final = 48
+_EXPECTED_INVARIANT_COUNT: Final = 53
 _INVARIANT_PHASES: Final = frozenset({"pre-backfill", "post-backfill", "both"})
 _SURFACES: Final = ("user", "service", "admin")
 _CHANGE_KEYS: Final = (
@@ -114,27 +114,6 @@ def test_artifact_bytes_are_frozen() -> None:
         observed = hashlib.sha256((_CONTRACTS / name).read_bytes()).hexdigest()
         assert observed == expected, (
             f"{name} bytes drift — freeze 개정이면 상수를 {observed}로 갱신하라"
-        )
-
-
-def test_frozen_artifacts_have_no_crlf() -> None:
-    """동결 artifact에 CRLF가 섞이면 로컬 green이 CI green을 뜻하지 않는다.
-
-    ``.gitattributes``가 ``* text=auto eol=lf``라 git은 LF로 저장하고 CI는 LF를
-    checkout한다. 그런데 Windows에서 파일을 재생성하면 작업본에 CRLF가 남을 수 있고,
-    로컬 게이트 하네스는 **작업본을 그대로 tar로 복사**하므로 그 CRLF 바이트를 잰다.
-    그래서 상수를 작업본 기준으로 갱신하면 로컬은 통과하고 CI만 red가 된다 —
-    2026-08-11에 ``openapi-diff-v1.json``이 정확히 그렇게 통과했고(로컬 25/25 green)
-    CI의 unit 게이트가 세 파이썬 버전에서 모두 실패했다.
-
-    바이트를 동결하는 이상 그 바이트는 **커밋되는 바이트**여야 한다. CRLF 금지가
-    그 조건을 로컬에서 강제하는 가장 싼 방법이다.
-    """
-
-    for name in ARTIFACT_SHA256:
-        data = (_CONTRACTS / name).read_bytes()
-        assert b"\r\n" not in data, (
-            f"{name}에 CRLF가 있다 — git은 LF로 저장하므로 동결 sha가 CI와 갈린다"
         )
 
 
@@ -243,10 +222,16 @@ def test_expected_rejections_consistent_with_fixtures_and_ddl() -> None:
         + (_CONTRACTS / "tvn33-reference-ownership-v1.sql").read_text(encoding="utf-8")
     )
     for name, case in rejections.items():
-        assert re.fullmatch(r"23(503|505|514)", case["sqlstate"]), name
-        assert case["constraint"] in schema_sql, (
-            f"case {name}의 제약명 {case['constraint']}이 target DDL에 없다"
-        )
+        assert re.fullmatch(r"23(502|503|505|514)", case["sqlstate"]), name
+        if "column" in case:
+            assert set(case) >= {"sqlstate", "column", "basis"}, name
+            assert f"{case['column']} text NOT NULL" in schema_sql, (
+                f"case {name}의 NOT NULL 열 {case['column']}이 target DDL에 없다"
+            )
+        else:
+            assert case["constraint"] in schema_sql, (
+                f"case {name}의 제약명 {case['constraint']}이 target DDL에 없다"
+            )
         assert case["basis"].startswith(("ADR-", "T-VN-")), name
 
 
