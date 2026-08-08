@@ -1103,14 +1103,28 @@ async function assertStaleCorrection(page: Page): Promise<void> {
       response.request().method() === "PATCH" &&
       responseApiPath(response) ===
         decodeURIComponent(adminFeaturePath(correctionId)),
-    { timeout: FLOW_TIMEOUT },
+    { timeout: UI_TIMEOUT },
   );
   failureDetail = "stale-etag:stale-submit:click";
   await page
     .getByRole("button", { name: "요청 생성" })
     .click({ timeout: UI_TIMEOUT });
   failureDetail = "stale-etag:stale-submit:response";
-  const staleResponse = await staleResponsePromise;
+  let staleResponse: Response;
+  try {
+    staleResponse = await staleResponsePromise;
+  } catch (error) {
+    const clientErrorVisible = await page
+      .getByText("Feature 변경 처리 실패", { exact: true })
+      .isVisible()
+      .catch(() => false);
+    failureDetail = clientErrorVisible
+      ? "stale-etag:stale-submit:client-error"
+      : uiPatchRequests.length === 1
+        ? "stale-etag:stale-submit:request-pending"
+        : "stale-etag:stale-submit:no-request";
+    throw error;
+  }
   expect(staleResponse.status()).toBe(412);
   expect(staleResponse.request().headers()["if-match"]).toBe(baselineTag);
   expect(uiPatchRequests).toHaveLength(1);
