@@ -368,7 +368,12 @@ COPY (
       'column'::text AS kind,
       namespace.nspname AS schema_name,
       relation.relname AS object_name,
-      attribute.attnum::text || ':' || attribute.attname || ':' ||
+      -- ALTER TABLE DROP COLUMN 뒤의 attnum gap은 pg_dump/pg_restore가 정규화한다.
+      -- 이름·형식·필수성·identity/generated/default와 active-column 상대 순서가
+      -- column contract이다. gap만 무시하도록 dense ordinal을 넣는다.
+      row_number() OVER (
+        PARTITION BY attribute.attrelid ORDER BY attribute.attnum
+      )::text || ':' || attribute.attname || ':' ||
       pg_catalog.format_type(attribute.atttypid, attribute.atttypmod) || ':' ||
       attribute.attnotnull::text || ':' ||
       attribute.attidentity::text || ':' ||
@@ -416,13 +421,40 @@ COPY (
       -- pg_restore는 같은 CHECK AST를 다시 parse/deparse하면서 괄호·암묵 cast의
       -- 텍스트만 바꿀 수 있다. dump SHA-256 + pg_restore 성공이 expression bytes와
       -- 적용을 보장하므로, restore 동등성 fingerprint에는 deparser 문자열 대신
-      -- structural catalog 축만 넣는다. 그렇지 않으면 같은 constraint가 false-red가 된다.
+      -- structural catalog 축만 넣는다. conkey/confkey도 dropped column 뒤에는 raw
+      -- attnum을 보유하므로, key 순서를 보존한 column name으로 정규화한다. 그렇지
+      -- 않으면 같은 constraint가 false-red가 된다.
       concat_ws(
         ':',
         constraint_row.conname,
         constraint_row.contype,
-        COALESCE(constraint_row.conkey::text, ''),
-        COALESCE(constraint_row.confkey::text, ''),
+        COALESCE(
+          (
+            SELECT string_agg(
+              key_attribute.attname,
+              ',' ORDER BY array_position(constraint_row.conkey, key_attribute.attnum)
+            )
+            FROM pg_catalog.pg_attribute AS key_attribute
+            WHERE key_attribute.attrelid = constraint_row.conrelid
+              AND key_attribute.attnum = ANY(constraint_row.conkey)
+          ),
+          ''
+        ),
+        COALESCE(
+          (
+            SELECT string_agg(
+              referenced_attribute.attname,
+              ',' ORDER BY array_position(
+                constraint_row.confkey,
+                referenced_attribute.attnum
+              )
+            )
+            FROM pg_catalog.pg_attribute AS referenced_attribute
+            WHERE referenced_attribute.attrelid = constraint_row.confrelid
+              AND referenced_attribute.attnum = ANY(constraint_row.confkey)
+          ),
+          ''
+        ),
         COALESCE(constraint_row.confrelid::regclass::text, ''),
         constraint_row.confupdtype,
         constraint_row.confdeltype,
