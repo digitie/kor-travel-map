@@ -88,6 +88,18 @@ def test_clone_recovery_purge_uses_exact_api_owned_fingerprints() -> None:
     }
 
 
+def test_clone_checkpoint_schema_digest_uses_structural_constraint_catalog() -> None:
+    """dump/restore의 동등 CHECK 표현을 deparser 문자열로 오판하지 않는다."""
+    source = (
+        _ROOT / "scripts" / "run-admin-feature-clone-live-acceptance.sh"
+    ).read_text(encoding="utf-8")
+
+    assert "constraint_row.conkey::text" in source
+    assert "constraint_row.confrelid::regclass::text" in source
+    assert "constraint_row.convalidated" in source
+    assert "pg_get_constraintdef(constraint_row.oid, true)" not in source
+
+
 def _execution_args(path: Path, identity: dict[str, str]) -> SimpleNamespace:
     return SimpleNamespace(
         api_image_id=identity["api_image_id"],
