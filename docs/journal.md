@@ -11,6 +11,10 @@
   유지하고, restore 동등성 schema fingerprint는 constraint name/type/key/FK action/validation 같은
   structural catalog 축으로 고정했다. text deparser 모양과 dropped column의 `attnum` gap은 비교
   대상에서 제외한다. 후자는 custom dump restore가 같은 named column contract로 정규화한다.
+- n150 UI 인수 중 canonical alias trigger와 immutable current summary가 드러내는 direct FK
+  소유 증거를 재고정했다. seed는 alias 2 + fact 2 + summary 2 = 6, soft-delete API audit은
+  alias 6 + feature version 13 = 19다. subtype/identity composite FK는 parent delete와 zero audit으로
+  검증하며, fixture ID만으로 단일 열 reference를 억지로 계수하지 않는다.
 
 ## 2026-08-08 (codex) — T-VN-38 final review P1 수렴
 
