@@ -488,6 +488,7 @@ interface ClusterWeatherSummaryPoint {
   dataset_key: string;
   dataset_display_name: string;
   provider: string;
+  weather_domain?: string | null;
   forecast_style?: string | null;
   metric_key: string;
   metric_name?: string | null;
