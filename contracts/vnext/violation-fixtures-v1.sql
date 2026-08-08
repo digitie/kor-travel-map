@@ -128,7 +128,7 @@ INSERT INTO provider_sync.notice_states (
     tstzrange('2026-02-01+00', '2026-03-01+00', '[)'), true
 );
 
--- case: weather_identity_nulls_not_distinct_duplicate
+-- case: weather_source_revision_identity_duplicate
 INSERT INTO feature.categories (kind, code) VALUES ('weather', 'fixture');
 INSERT INTO feature.features (
     feature_id, kind, name, category_code,
@@ -140,30 +140,46 @@ INSERT INTO feature.features (
 INSERT INTO provider_sync.provider_datasets (
     provider, dataset_key, display_name, source_kind
 ) VALUES ('fixture', 'fixture', 'fixture dataset', 'manual');
--- nullable 시간축(issued_at/valid_at/observed_at) 전부 NULL 2건 — NULLS NOT
--- DISTINCT UNIQUE(uq_weather_value_identity)가 "NULL끼리 같은 행"으로 묶어
--- 거부한다 (ADR-072 결정 3, 0060 정본).
+INSERT INTO provider_sync.source_entities (
+    source_entity_key, provider_dataset_id, source_entity_type, source_entity_id,
+    first_seen_at, last_seen_at
+) VALUES (
+    'weather-identity-entity',
+    (SELECT provider_dataset_id FROM provider_sync.provider_datasets
+     WHERE provider = 'fixture' AND dataset_key = 'fixture'),
+    'weather-response', 'identity-revision', '2026-01-01T00:00:00+00', '2026-01-01T00:00:00+00'
+);
+INSERT INTO provider_sync.source_records (
+    source_record_key, source_entity_key, raw_data, raw_payload_hash, fetched_at
+) VALUES (
+    'weather-identity-record', 'weather-identity-entity', '{}'::jsonb, 'd1',
+    '2026-01-01T00:00:00+00'
+);
+-- 동일 source-record revision을 다시 저장하면 fact key가 달라도 immutable identity가
+-- 충돌한다. correction은 새 record와 새 fact를 append해야 한다(ADR-089).
 INSERT INTO feature.feature_weather_values (
     weather_value_key, feature_id, provider_dataset_id, weather_domain,
     forecast_style, metric_key, value_number,
-    issued_at, valid_at, observed_at, target_at, known_at
+    target_at, known_at, source_entity_key, source_record_key
 ) VALUES (
-    'weather-nnd-1', '00000000-0000-0000-0000-000000000005',
+    'weather-identity-1', '00000000-0000-0000-0000-000000000005',
     (SELECT provider_dataset_id FROM provider_sync.provider_datasets
      WHERE provider = 'fixture' AND dataset_key = 'fixture'),
     'forecast', 'short', 'TMP', 1.0,
-    NULL, NULL, NULL, '2026-01-01T00:00:00+00', '2026-01-01T00:00:00+00'
+    '2026-01-01T03:00:00+00', '2026-01-01T00:00:00+00',
+    'weather-identity-entity', 'weather-identity-record'
 );
 INSERT INTO feature.feature_weather_values (
     weather_value_key, feature_id, provider_dataset_id, weather_domain,
     forecast_style, metric_key, value_number,
-    issued_at, valid_at, observed_at, target_at, known_at
+    target_at, known_at, source_entity_key, source_record_key
 ) VALUES (
-    'weather-nnd-2', '00000000-0000-0000-0000-000000000005',
+    'weather-identity-2', '00000000-0000-0000-0000-000000000005',
     (SELECT provider_dataset_id FROM provider_sync.provider_datasets
      WHERE provider = 'fixture' AND dataset_key = 'fixture'),
     'forecast', 'short', 'TMP', 2.0,
-    NULL, NULL, NULL, '2026-01-02T00:00:00+00', '2026-01-02T00:00:00+00'
+    '2026-01-01T03:00:00+00', '2026-01-01T00:00:00+00',
+    'weather-identity-entity', 'weather-identity-record'
 );
 
 -- case: weather_bitemporal_inversion
@@ -178,18 +194,34 @@ INSERT INTO feature.features (
 INSERT INTO provider_sync.provider_datasets (
     provider, dataset_key, display_name, source_kind
 ) VALUES ('fixture', 'fixture', 'fixture dataset', 'manual');
+INSERT INTO provider_sync.source_entities (
+    source_entity_key, provider_dataset_id, source_entity_type, source_entity_id,
+    first_seen_at, last_seen_at
+) VALUES (
+    'weather-bitemporal-entity',
+    (SELECT provider_dataset_id FROM provider_sync.provider_datasets
+     WHERE provider = 'fixture' AND dataset_key = 'fixture'),
+    'weather-response', 'bitemporal-revision', '2026-01-01T00:00:00+00', '2026-01-01T00:00:00+00'
+);
+INSERT INTO provider_sync.source_records (
+    source_record_key, source_entity_key, raw_data, raw_payload_hash, fetched_at
+) VALUES (
+    'weather-bitemporal-record', 'weather-bitemporal-entity', '{}'::jsonb, 'd2',
+    '2026-01-01T00:00:00+00'
+);
 
 -- issued_at > known_at — 미래지식 누출 (보고서 D-8-3) 거부.
 INSERT INTO feature.feature_weather_values (
     weather_value_key, feature_id, provider_dataset_id, weather_domain,
     forecast_style, metric_key, value_number,
-    issued_at, target_at, known_at
+    issued_at, target_at, known_at, source_entity_key, source_record_key
 ) VALUES (
     'weather-value-1', '00000000-0000-0000-0000-000000000006',
     (SELECT provider_dataset_id FROM provider_sync.provider_datasets
      WHERE provider = 'fixture' AND dataset_key = 'fixture'),
     'forecast', 'short', 'TMP', 1.0,
-    '2026-01-02T00:00:00+00', '2026-01-02T03:00:00+00', '2026-01-01T00:00:00+00'
+    '2026-01-02T00:00:00+00', '2026-01-02T03:00:00+00', '2026-01-01T00:00:00+00',
+    'weather-bitemporal-entity', 'weather-bitemporal-record'
 );
 
 -- case: provider_dataset_capability_invalid
@@ -747,3 +779,323 @@ INSERT INTO provider_sync.source_records (
     source_record_key, source_entity_key, raw_data, raw_payload_hash, fetched_at
 ) VALUES ('head-missing-record', 'head-missing-entity', '{}'::jsonb, 'a4', now());
 SET CONSTRAINTS ALL IMMEDIATE;
+
+-- case: weather_source_lineage_required
+INSERT INTO feature.categories (kind, code) VALUES ('weather', 'fixture');
+INSERT INTO feature.features (
+    feature_id, kind, name, category_code,
+    lifecycle_state, publication_state, quality_state
+) VALUES (
+    '00000000-0000-0000-0000-000000000008', 'weather', 'source 없는 weather fact', 'fixture',
+    'active', 'published', 'valid'
+);
+INSERT INTO provider_sync.provider_datasets (
+    provider, dataset_key, display_name, source_kind
+) VALUES ('fixture', 'weather-source-required', 'weather source required', 'manual');
+-- source-less fact write는 NOT NULL에서 즉시 거부된다. loader의 fallback/upsert로
+-- provenance를 추정하는 우회는 허용하지 않는다(ADR-089 결정 1).
+INSERT INTO feature.feature_weather_values (
+    weather_value_key, feature_id, provider_dataset_id, weather_domain,
+    forecast_style, metric_key, value_number, target_at, known_at
+) VALUES (
+    'weather-source-required', '00000000-0000-0000-0000-000000000008',
+    (SELECT provider_dataset_id FROM provider_sync.provider_datasets
+     WHERE provider = 'fixture' AND dataset_key = 'weather-source-required'),
+    'forecast', 'short', 'TMP', 1.0,
+    '2026-01-01T03:00:00+00', '2026-01-01T00:00:00+00'
+);
+
+-- case: weather_source_dataset_mismatch
+INSERT INTO feature.categories (kind, code) VALUES ('weather', 'fixture');
+INSERT INTO feature.features (
+    feature_id, kind, name, category_code,
+    lifecycle_state, publication_state, quality_state
+) VALUES (
+    '00000000-0000-0000-0000-000000000009', 'weather', 'dataset 불일치 weather fact', 'fixture',
+    'active', 'published', 'valid'
+);
+INSERT INTO provider_sync.provider_datasets (
+    provider, dataset_key, display_name, source_kind
+) VALUES
+    ('fixture', 'weather-source-owner', 'weather source owner', 'manual'),
+    ('fixture', 'weather-fact-owner', 'weather fact owner', 'manual');
+INSERT INTO provider_sync.source_entities (
+    source_entity_key, provider_dataset_id, source_entity_type, source_entity_id,
+    first_seen_at, last_seen_at
+) VALUES (
+    'weather-source-owner-entity',
+    (SELECT provider_dataset_id FROM provider_sync.provider_datasets
+     WHERE provider = 'fixture' AND dataset_key = 'weather-source-owner'),
+    'weather-response', 'weather-source-owner', '2026-01-01T00:00:00+00', '2026-01-01T00:00:00+00'
+);
+INSERT INTO provider_sync.source_records (
+    source_record_key, source_entity_key, raw_data, raw_payload_hash, fetched_at
+) VALUES (
+    'weather-source-owner-record', 'weather-source-owner-entity', '{}'::jsonb, 'd3',
+    '2026-01-01T00:00:00+00'
+);
+INSERT INTO feature.feature_weather_values (
+    weather_value_key, feature_id, provider_dataset_id, weather_domain,
+    forecast_style, metric_key, value_number, target_at, known_at,
+    source_entity_key, source_record_key
+) VALUES (
+    'weather-source-dataset-mismatch', '00000000-0000-0000-0000-000000000009',
+    (SELECT provider_dataset_id FROM provider_sync.provider_datasets
+     WHERE provider = 'fixture' AND dataset_key = 'weather-fact-owner'),
+    'forecast', 'short', 'TMP', 1.0,
+    '2026-01-01T03:00:00+00', '2026-01-01T00:00:00+00',
+    'weather-source-owner-entity', 'weather-source-owner-record'
+);
+
+-- case: weather_kma_grid_record_dataset_mismatch
+INSERT INTO feature.categories (kind, code) VALUES ('weather', 'fixture');
+INSERT INTO feature.features (
+    feature_id, kind, name, category_code,
+    lifecycle_state, publication_state, quality_state
+) VALUES (
+    '00000000-0000-0000-0000-000000000010', 'weather', 'KMA grid provenance 거부', 'fixture',
+    'active', 'published', 'valid'
+);
+INSERT INTO provider_sync.provider_datasets (
+    provider, dataset_key, display_name, source_kind
+) VALUES
+    ('kma', 'kma_short_grid', 'KMA short grid', 'openapi'),
+    ('kma', 'kma_short_forecast', 'KMA short forecast', 'openapi');
+INSERT INTO provider_sync.source_entities (
+    source_entity_key, provider_dataset_id, source_entity_type, source_entity_id,
+    first_seen_at, last_seen_at
+) VALUES (
+    'kma-grid-source-entity',
+    (SELECT provider_dataset_id FROM provider_sync.provider_datasets
+     WHERE provider = 'kma' AND dataset_key = 'kma_short_grid'),
+    'grid', '60:127', '2026-01-01T00:00:00+00', '2026-01-01T00:00:00+00'
+);
+INSERT INTO provider_sync.source_records (
+    source_record_key, source_entity_key, raw_data, raw_payload_hash, fetched_at
+) VALUES (
+    'kma-grid-source-record', 'kma-grid-source-entity', '{}'::jsonb, 'd4',
+    '2026-01-01T00:00:00+00'
+);
+-- grid Feature source record는 forecast value fact의 raw response가 아니다. forecast
+-- producer dataset의 별도 response entity/record가 필요하다(ADR-089 결정 1).
+INSERT INTO feature.feature_weather_values (
+    weather_value_key, feature_id, provider_dataset_id, weather_domain,
+    forecast_style, metric_key, value_number, target_at, known_at,
+    source_entity_key, source_record_key
+) VALUES (
+    'kma-grid-record-for-forecast', '00000000-0000-0000-0000-000000000010',
+    (SELECT provider_dataset_id FROM provider_sync.provider_datasets
+     WHERE provider = 'kma' AND dataset_key = 'kma_short_forecast'),
+    'forecast', 'short', 'TMP', 1.0,
+    '2026-01-01T03:00:00+00', '2026-01-01T00:00:00+00',
+    'kma-grid-source-entity', 'kma-grid-source-record'
+);
+
+-- case: weather_fact_immutable_update
+INSERT INTO feature.categories (kind, code) VALUES ('weather', 'fixture');
+INSERT INTO feature.features (
+    feature_id, kind, name, category_code,
+    lifecycle_state, publication_state, quality_state
+) VALUES (
+    '00000000-0000-0000-0000-000000000011', 'weather', 'weather 불변 fact', 'fixture',
+    'active', 'published', 'valid'
+);
+INSERT INTO provider_sync.provider_datasets (
+    provider, dataset_key, display_name, source_kind
+) VALUES ('fixture', 'weather-immutable', 'weather immutable', 'manual');
+INSERT INTO provider_sync.source_entities (
+    source_entity_key, provider_dataset_id, source_entity_type, source_entity_id,
+    first_seen_at, last_seen_at
+) VALUES (
+    'weather-immutable-entity',
+    (SELECT provider_dataset_id FROM provider_sync.provider_datasets
+     WHERE provider = 'fixture' AND dataset_key = 'weather-immutable'),
+    'weather-response', 'weather-immutable', '2026-01-01T00:00:00+00', '2026-01-01T00:00:00+00'
+);
+INSERT INTO provider_sync.source_records (
+    source_record_key, source_entity_key, raw_data, raw_payload_hash, fetched_at
+) VALUES (
+    'weather-immutable-record', 'weather-immutable-entity', '{}'::jsonb, 'd5',
+    '2026-01-01T00:00:00+00'
+);
+INSERT INTO feature.feature_weather_values (
+    weather_value_key, feature_id, provider_dataset_id, weather_domain,
+    forecast_style, metric_key, value_number, target_at, known_at,
+    source_entity_key, source_record_key
+) VALUES (
+    'weather-immutable-fact', '00000000-0000-0000-0000-000000000011',
+    (SELECT provider_dataset_id FROM provider_sync.provider_datasets
+     WHERE provider = 'fixture' AND dataset_key = 'weather-immutable'),
+    'forecast', 'short', 'TMP', 1.0,
+    '2026-01-01T03:00:00+00', '2026-01-01T00:00:00+00',
+    'weather-immutable-entity', 'weather-immutable-record'
+);
+UPDATE feature.feature_weather_values
+SET value_number = 2.0
+WHERE weather_value_key = 'weather-immutable-fact';
+
+-- case: price_fact_immutable_delete
+INSERT INTO feature.categories (kind, code) VALUES ('price', 'fixture');
+INSERT INTO feature.features (
+    feature_id, kind, name, category_code,
+    lifecycle_state, publication_state, quality_state
+) VALUES (
+    '00000000-0000-0000-0000-000000000012', 'price', 'price 불변 fact', 'fixture',
+    'active', 'published', 'valid'
+);
+INSERT INTO provider_sync.provider_datasets (
+    provider, dataset_key, display_name, source_kind
+) VALUES ('fixture', 'price-immutable', 'price immutable', 'manual');
+INSERT INTO provider_sync.source_entities (
+    source_entity_key, provider_dataset_id, source_entity_type, source_entity_id,
+    first_seen_at, last_seen_at
+) VALUES (
+    'price-immutable-entity',
+    (SELECT provider_dataset_id FROM provider_sync.provider_datasets
+     WHERE provider = 'fixture' AND dataset_key = 'price-immutable'),
+    'price-response', 'price-immutable', '2026-01-01T00:00:00+00', '2026-01-01T00:00:00+00'
+);
+INSERT INTO provider_sync.source_records (
+    source_record_key, source_entity_key, raw_data, raw_payload_hash, fetched_at
+) VALUES (
+    'price-immutable-record', 'price-immutable-entity', '{}'::jsonb, 'd6',
+    '2026-01-01T00:00:00+00'
+);
+INSERT INTO feature.feature_price_values (
+    price_value_key, feature_id, provider_dataset_id, price_domain, product_key,
+    observed_at, known_at, value_number, source_entity_key, source_record_key
+) VALUES (
+    'price-immutable-fact', '00000000-0000-0000-0000-000000000012',
+    (SELECT provider_dataset_id FROM provider_sync.provider_datasets
+     WHERE provider = 'fixture' AND dataset_key = 'price-immutable'),
+    'retail', 'B027', '2026-01-01T03:00:00+00', '2026-01-01T00:00:00+00', 1500.0,
+    'price-immutable-entity', 'price-immutable-record'
+);
+DELETE FROM feature.feature_price_values
+WHERE price_value_key = 'price-immutable-fact';
+
+-- case: terminal_summary_receipt_immutable
+INSERT INTO ops.current_summary_runs (
+    projection_kind, run_kind, status, started_at, finished_at
+) VALUES (
+    'weather', 'reconcile', 'succeeded', '2026-01-01T00:00:00+00', '2026-01-01T00:01:00+00'
+);
+UPDATE ops.current_summary_runs
+SET detail = '{"rewritten":true}'::jsonb
+WHERE projection_kind = 'weather' AND status = 'succeeded';
+
+-- case: current_weather_summary_cross_series_fact
+INSERT INTO feature.categories (kind, code) VALUES ('weather', 'fixture');
+INSERT INTO feature.features (
+    feature_id, kind, name, category_code,
+    lifecycle_state, publication_state, quality_state
+) VALUES (
+    '00000000-0000-0000-0000-000000000013', 'weather', 'summary 다른 series fact', 'fixture',
+    'active', 'published', 'valid'
+);
+INSERT INTO provider_sync.provider_datasets (
+    provider, dataset_key, display_name, source_kind
+) VALUES
+    ('fixture', 'summary-fact-a', 'summary fact A', 'manual'),
+    ('fixture', 'summary-fact-b', 'summary fact B', 'manual');
+INSERT INTO provider_sync.source_entities (
+    source_entity_key, provider_dataset_id, source_entity_type, source_entity_id,
+    first_seen_at, last_seen_at
+) VALUES (
+    'summary-fact-a-entity',
+    (SELECT provider_dataset_id FROM provider_sync.provider_datasets
+     WHERE provider = 'fixture' AND dataset_key = 'summary-fact-a'),
+    'weather-response', 'summary-fact-a', '2026-01-01T00:00:00+00', '2026-01-01T00:00:00+00'
+);
+INSERT INTO provider_sync.source_records (
+    source_record_key, source_entity_key, raw_data, raw_payload_hash, fetched_at
+) VALUES (
+    'summary-fact-a-record', 'summary-fact-a-entity', '{}'::jsonb, 'd7',
+    '2026-01-01T00:00:00+00'
+);
+INSERT INTO feature.feature_weather_values (
+    weather_value_key, feature_id, provider_dataset_id, weather_domain,
+    forecast_style, metric_key, value_number, target_at, known_at,
+    source_entity_key, source_record_key
+) VALUES (
+    'summary-fact-a-value', '00000000-0000-0000-0000-000000000013',
+    (SELECT provider_dataset_id FROM provider_sync.provider_datasets
+     WHERE provider = 'fixture' AND dataset_key = 'summary-fact-a'),
+    'forecast', 'short', 'TMP', 1.0,
+    '2026-01-01T03:00:00+00', '2026-01-01T00:00:00+00',
+    'summary-fact-a-entity', 'summary-fact-a-record'
+);
+INSERT INTO ops.current_summary_runs (
+    projection_kind, run_kind, status, started_at, finished_at
+) VALUES (
+    'weather', 'reconcile', 'succeeded', '2026-01-01T03:00:00+00', '2026-01-01T03:01:00+00'
+);
+INSERT INTO feature.current_weather_summary (
+    feature_id, provider_dataset_id, weather_domain, forecast_style, metric_key,
+    weather_value_key, summary_run_id, selected_at, refresh_after
+) VALUES (
+    '00000000-0000-0000-0000-000000000013',
+    (SELECT provider_dataset_id FROM provider_sync.provider_datasets
+     WHERE provider = 'fixture' AND dataset_key = 'summary-fact-b'),
+    'forecast', 'short', 'TMP', 'summary-fact-a-value',
+    (SELECT summary_run_id FROM ops.current_summary_runs
+     WHERE projection_kind = 'weather' AND status = 'succeeded'),
+    '2026-01-01T03:00:00+00', '2026-01-01T04:00:00+00'
+);
+
+-- case: current_weather_summary_refresh_after_invalid
+INSERT INTO feature.categories (kind, code) VALUES ('weather', 'fixture');
+INSERT INTO feature.features (
+    feature_id, kind, name, category_code,
+    lifecycle_state, publication_state, quality_state
+) VALUES (
+    '00000000-0000-0000-0000-000000000014', 'weather', 'summary refresh deadline', 'fixture',
+    'active', 'published', 'valid'
+);
+INSERT INTO provider_sync.provider_datasets (
+    provider, dataset_key, display_name, source_kind
+) VALUES ('fixture', 'summary-refresh', 'summary refresh', 'manual');
+INSERT INTO provider_sync.source_entities (
+    source_entity_key, provider_dataset_id, source_entity_type, source_entity_id,
+    first_seen_at, last_seen_at
+) VALUES (
+    'summary-refresh-entity',
+    (SELECT provider_dataset_id FROM provider_sync.provider_datasets
+     WHERE provider = 'fixture' AND dataset_key = 'summary-refresh'),
+    'weather-response', 'summary-refresh', '2026-01-01T00:00:00+00', '2026-01-01T00:00:00+00'
+);
+INSERT INTO provider_sync.source_records (
+    source_record_key, source_entity_key, raw_data, raw_payload_hash, fetched_at
+) VALUES (
+    'summary-refresh-record', 'summary-refresh-entity', '{}'::jsonb, 'd8',
+    '2026-01-01T00:00:00+00'
+);
+INSERT INTO feature.feature_weather_values (
+    weather_value_key, feature_id, provider_dataset_id, weather_domain,
+    forecast_style, metric_key, value_number, target_at, known_at,
+    source_entity_key, source_record_key
+) VALUES (
+    'summary-refresh-value', '00000000-0000-0000-0000-000000000014',
+    (SELECT provider_dataset_id FROM provider_sync.provider_datasets
+     WHERE provider = 'fixture' AND dataset_key = 'summary-refresh'),
+    'forecast', 'short', 'TMP', 1.0,
+    '2026-01-01T03:00:00+00', '2026-01-01T00:00:00+00',
+    'summary-refresh-entity', 'summary-refresh-record'
+);
+INSERT INTO ops.current_summary_runs (
+    projection_kind, run_kind, status, started_at, finished_at
+) VALUES (
+    'weather', 'reconcile', 'succeeded', '2026-01-01T03:00:00+00', '2026-01-01T03:01:00+00'
+);
+INSERT INTO feature.current_weather_summary (
+    feature_id, provider_dataset_id, weather_domain, forecast_style, metric_key,
+    weather_value_key, summary_run_id, selected_at, refresh_after
+) VALUES (
+    '00000000-0000-0000-0000-000000000014',
+    (SELECT provider_dataset_id FROM provider_sync.provider_datasets
+     WHERE provider = 'fixture' AND dataset_key = 'summary-refresh'),
+    'forecast', 'short', 'TMP', 'summary-refresh-value',
+    (SELECT summary_run_id FROM ops.current_summary_runs
+     WHERE projection_kind = 'weather' AND status = 'succeeded'),
+    '2026-01-01T03:00:00+00', '2026-01-01T03:00:00+00'
+);

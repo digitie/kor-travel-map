@@ -36,6 +36,14 @@ partition하고 있었고, 다음엔 반대로 "refresh-only CHECK가 막아 도
 다른 두 upload를 만들 방법 자체가 없어 죽은 폭이었다. SQLSTATE 통일(38 대 1)도 분기하는
 소비자가 없어 접었다. 지시가 "설계 우선"이어도, 동작이 안 바뀌는 변경으로 freeze
 아티팩트를 흔드는 건 설계 개선이 아니다.
+## 2026-08-08 (codex) — T-VN-38 설계 승인·target freeze 재고정
+
+- 독립 DB·reader 적대 리뷰어 2명이 P0=0 GO를 냈다. source-less write, fact/source
+  dataset 불일치와 KMA grid provenance, immutable update/delete, terminal receipt, summary
+  cross-series pointer, refresh deadline을 DB rejection fixture로 고정했다.
+- 빈 PostGIS target에서 KMA producing response source의 양성 경로와 feature→fact→summary
+  cascade도 확인했다. artifact unit + target freeze는 14건 통과했고, 갱신한 catalog
+  fingerprint와 artifact SHA로 재동결했다. ADR-089를 accepted로 전환한다.
 
 ## 2026-08-08 (2) — T-VN-33 통합 전량 전환 완료, 제품 결함 25건 이상 수정
 

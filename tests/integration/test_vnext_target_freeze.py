@@ -42,7 +42,7 @@ _FINGERPRINTS_JSON: Final = _CONTRACTS / "target-schema-fingerprints-v1.json"
 _VIOLATIONS_SQL: Final = _CONTRACTS / "violation-fixtures-v1.sql"
 _REJECTIONS_JSON: Final = _CONTRACTS / "expected-rejections-v1.json"
 
-_EXPECTED_INVARIANT_COUNT: Final = 48
+_EXPECTED_INVARIANT_COUNT: Final = 53
 _INVARIANT_PHASES: Final = frozenset({"pre-backfill", "post-backfill", "both"})
 
 # fingerprint 대상 — target-schema-v1.sql과 T-VN-33 reference ownership DDL의 전체 relation.
@@ -76,6 +76,7 @@ _TARGET_TABLES: Final = (
     "provider_sync.notice_lineage_states",
     "ops.feature_override_field_paths",
     "ops.feature_overrides",
+    "ops.current_summary_runs",
     "provider_sync.provider_sync_state",
     "feature.curated_sources",
     "feature.curated_source_rules",
@@ -107,6 +108,9 @@ _TARGET_FUNCTIONS: Final = (
     "provider_sync.reject_inactive_source_entity_dataset()",
     "provider_sync.touch_provider_dataset_operation()",
     "provider_sync.reject_source_record_update()",
+    "ops.reject_terminal_current_summary_run_mutation()",
+    "feature.reject_weather_value_mutation()",
+    "feature.reject_price_value_mutation()",
     "provider_sync.enforce_source_entity_head_freshness()",
     "provider_sync.enforce_source_entity_identity_and_seen_at()",
     "provider_sync.assert_source_entity_head_completeness()",
@@ -474,11 +478,16 @@ async def test_violation_fixtures_rejected_with_expected_sqlstate(
             f"case {name}: SQLSTATE {getattr(error, 'sqlstate', None)!r} != "
             f"{expected['sqlstate']!r} ({error})"
         )
-        constraint = getattr(error, "constraint_name", None)
-        if constraint is not None:
-            assert constraint == expected["constraint"], f"case {name}: {error}"
+        if "column" in expected:
+            assert getattr(error, "column_name", None) == expected["column"], (
+                f"case {name}: {error}"
+            )
         else:
-            assert expected["constraint"] in str(error), f"case {name}: {error}"
+            constraint = getattr(error, "constraint_name", None)
+            if constraint is not None:
+                assert constraint == expected["constraint"], f"case {name}: {error}"
+            else:
+                assert expected["constraint"] in str(error), f"case {name}: {error}"
 
 
 async def test_multiple_records_with_one_head_satisfy_completeness_invariant(
@@ -705,6 +714,139 @@ async def test_active_parent_cascades_preserve_indirect_owner_guards(
             await freeze_db.fetchval("SELECT count(*) FROM feature.curated_source_rules")
             == 0
         )
+    finally:
+        await transaction.rollback()
+
+
+async def test_kma_producing_response_lineage_and_feature_summary_cascade(
+    freeze_db: asyncpg.Connection,
+) -> None:
+    """KMA grid는 anchor 입력일 뿐 forecast fact의 source가 아니다.
+
+    feature 삭제는 파생 summary까지 끝낸다.
+    """
+    transaction = freeze_db.transaction()
+    await transaction.start()
+    try:
+        feature_id = uuid4()
+        await freeze_db.execute(
+            "INSERT INTO feature.categories (kind, code) VALUES ('weather', 'positive-kma')"
+        )
+        await freeze_db.execute(
+            """
+            INSERT INTO feature.features (
+                feature_id, kind, name, category_code,
+                lifecycle_state, publication_state, quality_state
+            ) VALUES ($1, 'weather', 'KMA response lineage', 'positive-kma',
+                      'active', 'published', 'valid')
+            """,
+            feature_id,
+        )
+        grid_dataset_id = await freeze_db.fetchval(
+            """
+            INSERT INTO provider_sync.provider_datasets (
+                provider, dataset_key, display_name, source_kind
+            ) VALUES ('kma', 'positive-kma-grid', 'positive KMA grid', 'openapi')
+            RETURNING provider_dataset_id
+            """
+        )
+        forecast_dataset_id = await freeze_db.fetchval(
+            """
+            INSERT INTO provider_sync.provider_datasets (
+                provider, dataset_key, display_name, source_kind
+            ) VALUES ('kma', 'positive-kma-forecast', 'positive KMA forecast', 'openapi')
+            RETURNING provider_dataset_id
+            """
+        )
+        await freeze_db.execute(
+            """
+            INSERT INTO provider_sync.source_entities (
+                source_entity_key, provider_dataset_id, source_entity_type, source_entity_id,
+                first_seen_at, last_seen_at
+            ) VALUES
+                ('positive-kma-grid-entity', $1, 'grid', '60:127',
+                 '2026-01-01T00:00:00+00', '2026-01-01T00:00:00+00'),
+                ('positive-kma-response-entity', $2, 'weather-response', '2026-01-01T00',
+                 '2026-01-01T00:00:00+00', '2026-01-01T00:00:00+00')
+            """,
+            grid_dataset_id,
+            forecast_dataset_id,
+        )
+        await freeze_db.execute(
+            """
+            INSERT INTO provider_sync.source_records (
+                source_record_key, source_entity_key, raw_data, raw_payload_hash, fetched_at
+            ) VALUES
+                ('positive-kma-grid-record', 'positive-kma-grid-entity', '{}'::jsonb, 'e1',
+                 '2026-01-01T00:00:00+00'),
+                ('positive-kma-response-record', 'positive-kma-response-entity', '{}'::jsonb, 'e2',
+                 '2026-01-01T00:00:00+00')
+            """
+        )
+        await freeze_db.execute(
+            """
+            INSERT INTO provider_sync.source_entity_heads (
+                source_entity_key, current_source_record_key, observed_at
+            ) VALUES
+                ('positive-kma-grid-entity', 'positive-kma-grid-record', '2026-01-01T00:00:00+00'),
+                (
+                    'positive-kma-response-entity', 'positive-kma-response-record',
+                    '2026-01-01T00:00:00+00'
+                )
+            """
+        )
+        await freeze_db.execute(
+            """
+            INSERT INTO feature.feature_weather_values (
+                weather_value_key, feature_id, provider_dataset_id, weather_domain,
+                forecast_style, metric_key, value_number, target_at, known_at,
+                source_entity_key, source_record_key
+            ) VALUES (
+                'positive-kma-forecast-fact', $1, $2, 'forecast', 'short', 'TMP', 1.0,
+                '2026-01-01T03:00:00+00', '2026-01-01T00:00:00+00',
+                'positive-kma-response-entity', 'positive-kma-response-record'
+            )
+            """,
+            feature_id,
+            forecast_dataset_id,
+        )
+        receipt_id = await freeze_db.fetchval(
+            """
+            INSERT INTO ops.current_summary_runs (
+                projection_kind, run_kind, status, started_at, finished_at
+            ) VALUES (
+                'weather', 'reconcile', 'succeeded',
+                '2026-01-01T03:00:00+00', '2026-01-01T03:01:00+00'
+            ) RETURNING summary_run_id
+            """
+        )
+        await freeze_db.execute(
+            """
+            INSERT INTO feature.current_weather_summary (
+                feature_id, provider_dataset_id, weather_domain, forecast_style, metric_key,
+                weather_value_key, summary_run_id, selected_at, refresh_after
+            ) VALUES (
+                $1, $2, 'forecast', 'short', 'TMP', 'positive-kma-forecast-fact', $3,
+                '2026-01-01T03:00:00+00', '2026-01-01T04:00:00+00'
+            )
+            """,
+            feature_id,
+            forecast_dataset_id,
+            receipt_id,
+        )
+        assert await freeze_db.fetchval(
+            "SELECT count(*) FROM feature.current_weather_summary"
+        ) == 1
+
+        await freeze_db.execute("DELETE FROM feature.features WHERE feature_id = $1", feature_id)
+
+        assert await freeze_db.fetchval(
+            "SELECT count(*) FROM feature.feature_weather_values"
+        ) == 0
+        assert await freeze_db.fetchval(
+            "SELECT count(*) FROM feature.current_weather_summary"
+        ) == 0
+        await freeze_db.execute("SET CONSTRAINTS ALL IMMEDIATE")
     finally:
         await transaction.rollback()
 

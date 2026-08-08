@@ -109,6 +109,22 @@ operation 입력이 없고 리졸버가 모호하면 실패시켜 죽은 폭), i
 
 **다음**: 적대 리뷰어 2명의 승인(사용자 요구 조건) → #966 머지 → PR #967(T-VN-41 F1D,
 D1/D2 분리).
+## 2026-08-08 — T-VN-38A/B/C 단일 stacked PR 설계 승인·사전 계약 고정
+
+T-VN-38은 T-VN-33 draft PR #966의 final schema revision `0091` 위에 쌓는 단일 PR로
+진행한다. weather·price 모두 canonical `provider_dataset_id`를 사용하고, current summary는
+값을 중복 저장하지 않고 선택한 immutable fact key만 참조한다. `ops.current_summary_runs`는
+ingest/reconcile/backfill/restore를 감사하되 current 순위를 바꾸지 않는다. normal card/bbox는
+summary set join, 명시적 time-travel은 raw-history ranked CTE로 분리한다.
+
+독립 적대 리뷰어 2명이 P0=0 GO를 냈고, source-less lineage·KMA producing response·fact
+immutability·terminal receipt·summary pointer·refresh deadline의 rejection fixture와 빈 target
+positive cascade를 추가했다. artifact unit + target freeze 14건이 통과하며 catalog fingerprint와
+SHA를 재동결했다.
+
+**다음 한 작업**: #966 최신 head에 rebase한 T-VN-38 draft PR을 열고 actual `0092`부터
+구현한다. actual migration의 `feature_id` FK는 final target artifact(UUID)이 아니라 #966 현재
+physical PK(TEXT)를 사용한다.
 
 ## 2026-08-08 — T-VN-33: 통합 라이브 실행이 제품 결함 다수를 드러냄, 머지 금지 유지
 
