@@ -30,9 +30,6 @@ from kortravelmap.infra.ops_repo import (
     list_ops_import_job_events,
 )
 from kortravelmap.infra.pipeline_repo import PipelineExecution, list_pipeline_executions
-from kortravelmap.infra.poi_cache_target_repo import (
-    list_active_poi_cache_target_external_systems,
-)
 from kortravelmap.infra.provider_refresh_policy_repo import (
     ProviderRefreshPolicy,
     ProviderRefreshPolicyRevisionConflict,
@@ -75,10 +72,8 @@ from kortravelmap.api.ops_dataset_schema import (
 )
 from kortravelmap.api.pipeline_cancellation_schema import cancellation_summary_record
 from kortravelmap.api.provider_catalog import (
-    PROVIDER_DATASET_CATALOG,
     ProviderDatasetCatalogEntry,
-    find_catalog_entry,
-    resolve_dataset_history_sync_scopes,
+    list_provider_dataset_catalog,
 )
 from kortravelmap.api.provider_refresh_schema import (
     ProviderRefreshPolicyUpsertRequest,
@@ -102,14 +97,23 @@ _RECENT_RUNS_LIMIT = 10
 _RECENT_EVENTS_LIMIT = 20
 
 
-def _dataset_detail_url(provider: str, dataset_key: str, sync_scope: str) -> str:
+def _dataset_detail_url(
+    provider_dataset_id: int,
+    sync_scope: str,
+    operation_key: str | None = None,
+) -> str:
+    """membership을 주소로 갖는 상세 링크.
+
+    ``operation_key`` 없이 만들면 같은 scope의 형제 operation 행들이 **같은 링크**를
+    갖게 돼, 그리드에서 어느 행을 눌러도 같은 화면이 열린다. 실행 가능한 operation이
+    없는 catalog 행만 scope 단위 링크를 갖는다.
+    """
     return (
-        "/v1/ops/datasets/detail?"
+        f"/v1/ops/datasets/{provider_dataset_id}?"
         + urlencode(
             {
-                "provider": provider,
-                "dataset_key": dataset_key,
                 "sync_scope": sync_scope,
+                **({"operation_key": operation_key} if operation_key else {}),
             },
             quote_via=quote,
         )
@@ -117,17 +121,23 @@ def _dataset_detail_url(provider: str, dataset_key: str, sync_scope: str) -> str
 
 
 def _event_history_url(
-    provider: str,
-    dataset_key: str,
+    provider_dataset_id: int,
     effective_sync_scope: str,
+    operation_key: str | None = None,
 ) -> str:
+    """이 응답이 실은 첫 페이지와 **같은 filter 집합**을 가리키는 canonical 링크.
+
+    ``operation_key``를 빼면 안 된다 — cursor fingerprint에는 들어 있으므로,
+    클라이언트가 이 URL과 응답의 ``next_cursor``를 합치면 filter mismatch로 422가
+    난다. 그리고 embedded 첫 페이지와 "전체 목록"의 내용이 달라진다.
+    """
     return (
         "/v1/ops/pipeline/events?"
         + urlencode(
             {
-                "provider": provider,
-                "dataset_key": dataset_key,
+                "provider_dataset_id": provider_dataset_id,
                 "sync_scope": effective_sync_scope,
+                **({"operation_key": operation_key} if operation_key else {}),
             },
             quote_via=quote,
         )
@@ -135,17 +145,23 @@ def _event_history_url(
 
 
 def _run_history_url(
-    provider: str,
-    dataset_key: str,
+    provider_dataset_id: int,
     logical_sync_scope: str,
+    operation_key: str | None = None,
 ) -> str:
+    """이 응답이 실은 첫 페이지와 **같은 filter 집합**을 가리키는 canonical 링크.
+
+    ``operation_key``를 빼면 안 된다 — cursor fingerprint에는 들어 있으므로,
+    클라이언트가 이 URL과 응답의 ``next_cursor``를 합치면 filter mismatch로 422가
+    난다. 그리고 embedded 첫 페이지와 "전체 목록"의 내용이 달라진다.
+    """
     return (
         "/v1/ops/pipeline/executions?"
         + urlencode(
             {
-                "provider": provider,
-                "dataset_key": dataset_key,
+                "provider_dataset_id": provider_dataset_id,
                 "sync_scope": logical_sync_scope,
+                **({"operation_key": operation_key} if operation_key else {}),
             },
             quote_via=quote,
         )
@@ -167,7 +183,7 @@ class OrphanMutationDisabledError(RuntimeError):
 def _preview_capability(
     entry: ProviderDatasetCatalogEntry,
 ) -> OpsDatasetPreviewCapability:
-    supported = entry.preview == "fixture"
+    supported = entry.has_fixture_preview
     return OpsDatasetPreviewCapability(
         supported=supported,
         sources=["fixture"] if supported else [],
@@ -180,8 +196,6 @@ def _preview_capability(
 
 def _scope_refresh_capability(
     entry: ProviderDatasetCatalogEntry,
-    *,
-    active_external_systems: tuple[str, ...],
 ) -> OpsDatasetScopeRefreshCapability:
     if not entry.is_refreshable:
         return OpsDatasetScopeRefreshCapability(
@@ -192,7 +206,7 @@ def _scope_refresh_capability(
             allowed_sync_scopes=[],
             reason="이 dataset에는 실행 가능한 refresh runner가 없습니다.",
         )
-    if entry.scope_refresh_selector == "none":
+    if not entry.supports_targeted_refresh:
         return OpsDatasetScopeRefreshCapability(
             supported=False,
             selector="none",
@@ -201,46 +215,49 @@ def _scope_refresh_capability(
             allowed_sync_scopes=[],
             reason="이 dataset은 전체 dataset 단위로만 갱신합니다.",
         )
-    allowed = ["target_grids"]
-    allowed.extend(f"external_system:{name}" for name in active_external_systems)
     return OpsDatasetScopeRefreshCapability(
         supported=True,
         selector="poi_cache_targets",
         effect="sync_scope",
         default_sync_scope="target_grids",
-        allowed_sync_scopes=allowed,
+        allowed_sync_scopes=["target_grids"],
         reason=None,
     )
 
 
-def _catalog_state_sync_scopes(
+def _catalog_state_memberships(
     entry: ProviderDatasetCatalogEntry,
-    *,
-    active_external_systems: tuple[str, ...],
-) -> tuple[str, ...]:
-    scopes = [
-        (
-            DATASET_WIDE_SYNC_SCOPE
-            if entry.scope_refresh_selector == "none"
-            else entry.sync_scope
+) -> tuple[tuple[str, str | None], ...]:
+    """catalog가 선언한 exact membership을 ``(sync_scope, operation_key)``로 편다.
+
+    ``entry.refresh_scopes``는 operation을 가로질러 scope로 합집합한다 — 그 모양으로
+    행을 만들면 같은 scope를 공유하는 형제 operation이 한 행으로 접힌다. 여기서는
+    접지 않고 operation별로 편다.
+
+    refresh operation이 하나도 없는 dataset(실측 74개 중 18개)은 결박할 실행
+    identity가 없으므로 ``operation_key=None``인 catalog 전용 행 하나를 낸다.
+    """
+    if not entry.is_refreshable:
+        return ((DATASET_WIDE_SYNC_SCOPE, None),)
+    return tuple(
+        dict.fromkeys(
+            (sync_scope, operation.operation_key)
+            for operation in entry.enabled_refresh_operations
+            for sync_scope in operation.sync_scopes
         )
-    ]
-    if entry.scope_refresh_selector == "poi_cache_targets":
-        scopes.extend(
-            f"external_system:{name}" for name in active_external_systems
-        )
-    return tuple(dict.fromkeys(scopes))
+    )
 
 
 def _logical_state_scope(
     entry: ProviderDatasetCatalogEntry | None,
     state_scope: str,
 ) -> str:
-    """내부 state namespace를 외부 canonical sync scope로 투영한다."""
-    if state_scope == "default" and (
-        entry is None or entry.scope_refresh_selector == "none"
-    ):
-        return DATASET_WIDE_SYNC_SCOPE
+    """정규화된 DB state scope를 API scope로 투영한다.
+
+    T-VN-33 cutover 뒤 state PK/FK는 canonical scope만 허용한다. 옛 ``default``
+    alias를 보정하는 compatibility branch는 의도적으로 남기지 않는다.
+    """
+    del entry
     return state_scope
 
 
@@ -256,40 +273,37 @@ def _api_state_scope(
         return None
 
 
-def _states_by_api_scope(
+def _states_by_api_membership(
     entry: ProviderDatasetCatalogEntry | None,
     states: Sequence[SyncState],
-) -> dict[str, SyncState]:
-    """raw state alias를 logical API resource 하나로 deterministic하게 접는다."""
-    selected: dict[str, SyncState] = {}
+) -> dict[tuple[str, str], SyncState]:
+    """sync state를 exact membership triple로 색인한다.
+
+    ``pk_provider_sync_state``가 triple이므로 scope 하나에 operation별 state가 여러 개
+    있을 수 있다. scope 문자열만으로 키를 잡으면 형제 operation이 조용히 덮여, 실패
+    중인 operation이 형제에 가려 보이지 않는다 — cutover로 ``default`` alias가
+    사라진 뒤로 옛 접기 규칙은 alias가 아니라 operation을 접고 있었다.
+
+    표현 불가능한 legacy scope는 그대로 숨긴다.
+    """
+    selected: dict[tuple[str, str], SyncState] = {}
     for state in states:
         logical_scope = _api_state_scope(entry, state.sync_scope)
         if logical_scope is None:
             continue
-        current = selected.get(logical_scope)
-        if current is None or (
-            current.sync_scope != logical_scope
-            and state.sync_scope == logical_scope
-        ):
-            selected[logical_scope] = state
+        selected[(logical_scope, state.operation_key)] = state
     return selected
 
 
-def _catalog_info(
-    entry: ProviderDatasetCatalogEntry,
-    *,
-    active_external_systems: tuple[str, ...],
-) -> OpsDatasetCatalogInfo:
+def _catalog_info(entry: ProviderDatasetCatalogEntry) -> OpsDatasetCatalogInfo:
     return OpsDatasetCatalogInfo(
         feature_kind=entry.feature_kind,
-        provider_state_default_scope=entry.sync_scope,
-        label=entry.label,
-        is_feature_load=entry.is_feature_load,
-        is_refreshable=entry.is_refreshable,
-        scope_refresh=_scope_refresh_capability(
-            entry,
-            active_external_systems=active_external_systems,
+        provider_state_default_scope=(
+            entry.default_refresh_scope if entry.is_refreshable else DATASET_WIDE_SYNC_SCOPE
         ),
+        label=entry.display_name,
+        is_refreshable=entry.is_refreshable,
+        scope_refresh=_scope_refresh_capability(entry),
         preview=_preview_capability(entry),
     )
 
@@ -393,13 +407,13 @@ def _execution_record(
         pair_status=item.pair_status,
         operation_member_id=item.operation_member_id,
         sync_scope=item.sync_scope,
-        providers=list(root.providers),
-        dataset_keys=list(root.dataset_keys),
         provider_datasets=[
             OpsDatasetProviderDataset(
+                provider_dataset_id=pair.provider_dataset_id,
                 provider=pair.provider,
                 dataset_key=pair.dataset_key,
                 sync_scope=pair.sync_scope,
+                operation_key=pair.operation_key,
                 operation_member_id=pair.operation_member_id,
                 status=pair.status,
             )
@@ -411,7 +425,9 @@ def _execution_record(
         dagster_run_id=root.dagster_run_id,
         dagster_run_status=root.dagster_run_status,
         trigger_kind=root.trigger_kind,
-        operation_registry_version=root.operation_registry_version,
+        # membership 축이다(``sync_scope``와 짝). root 자신의 operation은
+        # ``projected_job.operation_key``가 들고 있어 잃지 않는다.
+        operation_key=item.operation_key,
         error_message=root.error_message,
         projected_job=OpsDatasetProjectedJob(
             id=projected.id,
@@ -426,7 +442,7 @@ def _execution_record(
             dagster_run_id=projected.dagster_run_id,
             dagster_run_status=projected.dagster_run_status,
             trigger_kind=projected.trigger_kind,
-            operation_registry_version=projected.operation_registry_version,
+            operation_key=projected.operation_key,
             depth=projected.depth,
             detail_url=f"/v1/ops/pipeline/executions/import_job/{projected.id}",
         ),
@@ -437,21 +453,31 @@ def _execution_record(
 def _dataset_execution_projection(
     snapshots: tuple[DatasetExecutionSnapshot, ...],
     *,
-    provider: str,
-    dataset_key: str,
+    provider_dataset_id: int,
     sync_scope: str,
+    operation_key: str | None,
 ) -> tuple[DatasetLatestExecution | None, DatasetLatestExecution | None]:
-    """logical scope의 terminal 최신값과 active 최신값을 같은 snapshot에서 고른다."""
-    storage_scopes: tuple[str | None, ...] = (sync_scope,)
-    if sync_scope == DATASET_WIDE_SYNC_SCOPE:
-        storage_scopes = (DATASET_WIDE_SYNC_SCOPE, None)
+    """exact membership의 terminal 최신값과 active 최신값을 같은 snapshot에서 고른다.
+
+    repo가 triple별로 분리해 준 snapshot을 여기서 scope로만 모으면 도로 접힌다 —
+    형제 operation의 실행이 서로의 자리를 다툰다. ``operation_key``가 None인
+    catalog 전용 행에는 결박할 실행이 없으므로 후보가 비는 것이 정상이다.
+    """
     candidates = tuple(
         snapshot
         for snapshot in snapshots
-        if snapshot.provider == provider
-        and snapshot.dataset_key == dataset_key
-        and snapshot.sync_scope in storage_scopes
+        if snapshot.provider_dataset_id == provider_dataset_id
+        and snapshot.sync_scope == sync_scope
+        and snapshot.operation_key == operation_key
     )
+
+    return _latest_terminal_and_active(candidates)
+
+
+def _latest_terminal_and_active(
+    candidates: tuple[DatasetExecutionSnapshot, ...],
+) -> tuple[DatasetLatestExecution | None, DatasetLatestExecution | None]:
+    """후보 snapshot에서 terminal 최신값과 active 최신값을 각각 고른다."""
 
     def latest(
         selections: tuple[DatasetLatestExecution | None, ...],
@@ -477,42 +503,46 @@ def _dataset_execution_projection(
 def _run_history_records(
     executions: tuple[PipelineExecution, ...],
     *,
-    provider: str,
-    dataset_key: str,
-    sync_scopes: tuple[str | None, ...],
+    provider_dataset_id: int,
+    sync_scopes: tuple[str, ...],
 ) -> list[OpsDatasetExecution]:
-    """canonical root마다 논리 scope pair 하나만 골라 중복 없는 이력을 만든다."""
+    """root가 건드린 **membership마다** 한 줄을 낸다.
+
+    예전에는 root마다 membership 하나를 ``operation_member_id``(UUID) tie-break로
+    골랐다. 그건 형제 operation 중 임의 선택이고, 이 작업이 없애려던 바로 그
+    모양이다 — 게다가 고른 쪽의 ``operation_key``와 ``pair_status``가 응답에
+    실리므로 운영자는 다른 operation이 어떤 상태였는지 알 방법이 없다.
+
+    같은 root가 두 membership을 건드렸다면 그건 중복이 아니라 **서로 다른 두
+    사실**이다. 행이 늘어나 보이는 것은 identity가 triple이기 때문이고,
+    ``operation_key``가 함께 실리므로 화면에서 구분된다.
+    """
     records: list[OpsDatasetExecution] = []
     for execution in executions:
-        pairs = tuple(
-            pair
-            for pair in execution.provider_datasets
-            if pair.provider == provider
-            and pair.dataset_key == dataset_key
-            and pair.sync_scope in sync_scopes
-        )
-        if not pairs:
-            continue
-        pair = max(
-            pairs,
-            key=lambda item: (
-                item.sync_scope == DATASET_WIDE_SYNC_SCOPE,
-                item.sync_scope is not None,
-                item.operation_member_id,
+        members = sorted(
+            (
+                member
+                for member in execution.provider_datasets
+                if member.provider_dataset_id == provider_dataset_id
+                and member.sync_scope in sync_scopes
             ),
+            key=lambda item: (item.sync_scope, item.operation_key),
         )
-        records.append(
-            _execution_record(
-                DatasetLatestExecution(
-                    provider=provider,
-                    dataset_key=dataset_key,
-                    sync_scope=pair.sync_scope,
-                    execution=execution,
-                    operation_member_id=pair.operation_member_id,
-                    pair_status=pair.status,
+        for member in members:
+            records.append(
+                _execution_record(
+                    DatasetLatestExecution(
+                        provider_dataset_id=provider_dataset_id,
+                        provider=member.provider,
+                        dataset_key=member.dataset_key,
+                        sync_scope=member.sync_scope,
+                        operation_key=member.operation_key,
+                        execution=execution,
+                        operation_member_id=member.operation_member_id,
+                        pair_status=member.status,
+                    )
                 )
             )
-        )
     return records
 
 
@@ -524,36 +554,68 @@ def _orphan_reason(*, has_state: bool, has_policy: bool) -> str:
     return "catalog_missing_with_policy"
 
 
+def _scope_execution_rollup(
+    snapshots: tuple[DatasetExecutionSnapshot, ...],
+    *,
+    provider_dataset_id: int,
+    sync_scope: str,
+) -> tuple[DatasetLatestExecution | None, DatasetLatestExecution | None]:
+    """scope 안의 **모든 operation을 가로지른** terminal/active 최신값.
+
+    dataset 상세 URL이 scope 단위라 헤드라인 실행은 membership 하나로 좁힐 수 없다.
+    이건 의도된 롤업이고, membership별 상태는 같은 응답의 ``scopes``가 따로 낸다 —
+    ``_dataset_execution_projection``(triple 정확 일치)과 혼동하지 말 것.
+    """
+    candidates = tuple(
+        snapshot
+        for snapshot in snapshots
+        if snapshot.provider_dataset_id == provider_dataset_id
+        and snapshot.sync_scope == sync_scope
+    )
+    return _latest_terminal_and_active(candidates)
+
+
 def _grid_row(
     *,
     provider: str,
     dataset_key: str,
+    provider_dataset_id: int,
     sync_scope: str,
+    operation_key: str | None,
     state: SyncState | None,
     has_persisted_state: bool,
     entry: ProviderDatasetCatalogEntry | None,
     policy: ProviderRefreshPolicy | None,
     dataset_issues: DatasetIntegrityIssueCount | None,
-    provider_issues: DatasetIntegrityIssueCount | None,
     latest_execution: DatasetLatestExecution | None,
     active_execution: DatasetLatestExecution | None,
     schedules: DatasetScheduleIndex,
-    active_external_systems: tuple[str, ...],
     now: datetime,
 ) -> OpsDatasetGridRow:
     canonical = entry is not None
     return OpsDatasetGridRow(
+        provider_dataset_id=provider_dataset_id,
         provider=provider,
         dataset_key=dataset_key,
-        detail_url=_dataset_detail_url(provider, dataset_key, sync_scope),
+        detail_url=_dataset_detail_url(provider_dataset_id, sync_scope, operation_key),
         sync_scope=sync_scope,
+        operation_key=operation_key,
         status=state.status if state is not None else _NEVER_RUN_STATUS,
         last_success_at=state.last_success_at if state is not None else None,
         last_failure_at=state.last_failure_at if state is not None else None,
         consecutive_failures=(state.consecutive_failures if state is not None else 0),
         eligible_after=state.next_run_after if state is not None else None,
         freshness=_freshness(state, policy, now=now),
-        schedule=_schedule_summary(schedules.for_dataset(provider, dataset_key)),
+        schedule=_schedule_summary(
+            # 이 행이 지목한 operation의 schedule만 본다. dataset의 모든 operation을
+            # 넘기면 멈춘 operation 행이 형제의 RUNNING/next tick을 자기 것으로
+            # 보고한다 — ``OpsDatasetGridRow`` docstring이 금지한 바로 그 모양이다.
+            # None인 catalog 전용 행은 refresh operation이 없어야 나오므로 빈 튜플이
+            # 정확하다.
+            schedules.for_operation_keys(
+                (operation_key,) if operation_key is not None else ()
+            )
+        ),
         latest_execution=_execution_record(latest_execution),
         active_execution=_execution_record(active_execution),
         catalog_state="canonical" if canonical else "orphan",
@@ -567,10 +629,7 @@ def _grid_row(
         ),
         mutable=canonical,
         catalog=(
-            _catalog_info(
-                entry,
-                active_external_systems=active_external_systems,
-            )
+            _catalog_info(entry)
             if entry is not None
             else None
         ),
@@ -578,7 +637,6 @@ def _grid_row(
             provider_refresh_policy_record(policy) if policy is not None else None
         ),
         dataset_issues=_issue_summary(dataset_issues),
-        provider_issues=_issue_summary(provider_issues),
     )
 
 
@@ -594,156 +652,163 @@ async def load_datasets_grid(
     policies = await list_all_provider_refresh_policies(session)
     issue_counts = await count_open_integrity_issues_by_dataset(session)
     execution_snapshots = await list_dataset_execution_snapshots(session)
-    active_external_systems = tuple(
-        await list_active_poi_cache_target_external_systems(session)
-    )
     schedules = await load_dataset_schedule_index(
         settings=settings,
         client=dagster_client,
     )
+    catalog_entries = await list_provider_dataset_catalog(session)
     reference = now or kst_now()
 
-    states_by_key: dict[tuple[str, str], list[SyncState]] = {}
+    states_by_dataset_id: dict[int, list[SyncState]] = {}
     for state in states:
-        states_by_key.setdefault((state.provider, state.dataset_key), []).append(state)
-    policies_by_key = {
-        (policy.provider, policy.dataset_key): policy for policy in policies
+        states_by_dataset_id.setdefault(state.provider_dataset_id, []).append(state)
+    policies_by_dataset_id = {
+        policy.provider_dataset_id: policy for policy in policies
     }
-    dataset_issues_by_key = {
-        (item.provider, item.dataset_key): item
-        for item in issue_counts
-        if item.dataset_key is not None
-    }
-    provider_issues_by_key = {
-        item.provider: item for item in issue_counts if item.dataset_key is None
-    }
+    dataset_issues_by_id = {item.provider_dataset_id: item for item in issue_counts}
     rows: list[OpsDatasetGridRow] = []
-    for entry in PROVIDER_DATASET_CATALOG:
-        key = (entry.provider, entry.dataset_key)
-        entry_states = states_by_key.pop(key, [])
-        policy = policies_by_key.pop(key, None)
-        states_by_scope = _states_by_api_scope(entry, entry_states)
-        expected_scopes = _catalog_state_sync_scopes(
-            entry,
-            active_external_systems=active_external_systems,
-        )
-        stale_scopes = tuple(
+    for entry in catalog_entries:
+        entry_states = states_by_dataset_id.pop(entry.provider_dataset_id, [])
+        policy = policies_by_dataset_id.pop(entry.provider_dataset_id, None)
+        states_by_membership = _states_by_api_membership(entry, entry_states)
+        expected_memberships = _catalog_state_memberships(entry)
+        # catalog가 선언하지 않았는데 state가 남아 있는 membership도 보여 준다 —
+        # operation이 카탈로그에서 빠졌는데 state만 남은 상태가 여기서 드러난다.
+        stale_memberships = tuple(
             dict.fromkeys(
-                logical_scope
-                for state in entry_states
-                if (logical_scope := _api_state_scope(entry, state.sync_scope))
-                is not None
-                and logical_scope not in expected_scopes
+                membership
+                for membership in states_by_membership
+                if membership not in expected_memberships
             )
         )
-        row_scopes = tuple(dict.fromkeys((*expected_scopes, *stale_scopes)))
-        for row_sync_scope in row_scopes:
-            entry_state = states_by_scope.get(row_sync_scope)
-            latest_execution, active_execution = _dataset_execution_projection(
-                execution_snapshots,
-                provider=entry.provider,
-                dataset_key=entry.dataset_key,
-                sync_scope=row_sync_scope,
+        row_memberships = tuple(
+            dict.fromkeys((*expected_memberships, *stale_memberships))
+        )
+        for row_sync_scope, row_operation_key in row_memberships:
+            entry_state = (
+                states_by_membership.get((row_sync_scope, row_operation_key))
+                if row_operation_key is not None
+                else None
+            )
+            latest_execution, active_execution = (
+                _dataset_execution_projection(
+                    execution_snapshots,
+                    provider_dataset_id=entry.provider_dataset_id,
+                    sync_scope=row_sync_scope,
+                    operation_key=row_operation_key,
+                )
+                if row_operation_key is not None
+                # refresh operation이 없는 catalog 행은 결박할 membership이 없다.
+                # 실행이 남아 있다면 그 scope의 롤업으로 보여 준다.
+                else _scope_execution_rollup(
+                    execution_snapshots,
+                    provider_dataset_id=entry.provider_dataset_id,
+                    sync_scope=row_sync_scope,
+                )
             )
             rows.append(
                 _grid_row(
                     provider=entry.provider,
                     dataset_key=entry.dataset_key,
+                    provider_dataset_id=entry.provider_dataset_id,
                     sync_scope=row_sync_scope,
+                    operation_key=row_operation_key,
                     state=entry_state,
                     has_persisted_state=entry_state is not None,
                     entry=entry,
                     policy=policy,
-                    dataset_issues=dataset_issues_by_key.get(key),
-                    provider_issues=provider_issues_by_key.get(entry.provider),
+                    dataset_issues=dataset_issues_by_id.get(entry.provider_dataset_id),
                     latest_execution=latest_execution,
                     active_execution=active_execution,
                     schedules=schedules,
-                    active_external_systems=active_external_systems,
                     now=reference,
                 )
             )
 
-    for (provider, dataset_key), orphan_states in states_by_key.items():
-        key = (provider, dataset_key)
-        policy = policies_by_key.pop(key, None)
-        orphan_states_by_scope = _states_by_api_scope(None, orphan_states)
-        for logical_scope, state in orphan_states_by_scope.items():
+    for provider_dataset_id, orphan_states in states_by_dataset_id.items():
+        provider = orphan_states[0].provider
+        dataset_key = orphan_states[0].dataset_key
+        policy = policies_by_dataset_id.pop(provider_dataset_id, None)
+        orphan_states_by_membership = _states_by_api_membership(None, orphan_states)
+        for (logical_scope, operation_key), state in orphan_states_by_membership.items():
             latest_execution, active_execution = _dataset_execution_projection(
                 execution_snapshots,
-                provider=provider,
-                dataset_key=dataset_key,
+                provider_dataset_id=state.provider_dataset_id,
                 sync_scope=logical_scope,
+                operation_key=operation_key,
             )
             rows.append(
                 _grid_row(
                     provider=provider,
                     dataset_key=dataset_key,
+                    provider_dataset_id=state.provider_dataset_id,
                     sync_scope=logical_scope,
+                    operation_key=operation_key,
                     state=state,
                     has_persisted_state=True,
                     entry=None,
                     policy=policy,
-                    dataset_issues=dataset_issues_by_key.get(key),
-                    provider_issues=provider_issues_by_key.get(provider),
+                    dataset_issues=dataset_issues_by_id.get(state.provider_dataset_id),
                     latest_execution=latest_execution,
                     active_execution=active_execution,
                     schedules=schedules,
-                    active_external_systems=active_external_systems,
                     now=reference,
                 )
             )
-        if orphan_states_by_scope:
+        if orphan_states_by_membership:
             continue
         logical_scope = DATASET_WIDE_SYNC_SCOPE
-        latest_execution, active_execution = _dataset_execution_projection(
+        # membership이 없는 자리표시자 행이므로 triple 정확 일치로는 아무것도 못 붙인다.
+        # 운영자가 실행 자체를 잃지 않도록 scope 롤업을 쓴다(의도된 접기).
+        latest_execution, active_execution = _scope_execution_rollup(
             execution_snapshots,
-            provider=provider,
-            dataset_key=dataset_key,
+            provider_dataset_id=orphan_states[0].provider_dataset_id,
             sync_scope=logical_scope,
         )
         rows.append(
             _grid_row(
                 provider=provider,
                 dataset_key=dataset_key,
+                provider_dataset_id=orphan_states[0].provider_dataset_id,
                 sync_scope=logical_scope,
+                operation_key=None,
                 state=None,
                 has_persisted_state=True,
                 entry=None,
                 policy=policy,
-                dataset_issues=dataset_issues_by_key.get(key),
-                provider_issues=provider_issues_by_key.get(provider),
+                dataset_issues=dataset_issues_by_id.get(orphan_states[0].provider_dataset_id),
                 latest_execution=latest_execution,
                 active_execution=active_execution,
                 schedules=schedules,
-                active_external_systems=active_external_systems,
                 now=reference,
             )
         )
 
-    for (provider, dataset_key), policy in policies_by_key.items():
-        key = (provider, dataset_key)
-        latest_execution, active_execution = _dataset_execution_projection(
+    for policy in policies_by_dataset_id.values():
+        if policy.provider is None or policy.dataset_key is None:
+            continue
+        provider = policy.provider
+        dataset_key = policy.dataset_key
+        latest_execution, active_execution = _scope_execution_rollup(
             execution_snapshots,
-            provider=provider,
-            dataset_key=dataset_key,
+            provider_dataset_id=policy.provider_dataset_id,
             sync_scope=DATASET_WIDE_SYNC_SCOPE,
         )
         rows.append(
             _grid_row(
                 provider=provider,
                 dataset_key=dataset_key,
+                provider_dataset_id=policy.provider_dataset_id,
                 sync_scope=DATASET_WIDE_SYNC_SCOPE,
+                operation_key=None,
                 state=None,
                 has_persisted_state=False,
                 entry=None,
                 policy=policy,
-                dataset_issues=dataset_issues_by_key.get(key),
-                provider_issues=provider_issues_by_key.get(provider),
+                dataset_issues=dataset_issues_by_id.get(policy.provider_dataset_id),
                 latest_execution=latest_execution,
                 active_execution=active_execution,
                 schedules=schedules,
-                active_external_systems=active_external_systems,
                 now=reference,
             )
         )
@@ -762,10 +827,12 @@ def _scope_state(
     policy: ProviderRefreshPolicy | None,
     *,
     sync_scope: str,
+    operation_key: str | None,
     now: datetime,
 ) -> OpsDatasetScopeState:
     return OpsDatasetScopeState(
         sync_scope=sync_scope,
+        operation_key=operation_key,
         status=state.status,
         cursor=state.cursor,
         last_success_at=state.last_success_at,
@@ -776,13 +843,20 @@ def _scope_state(
     )
 
 
-def _event_record(event: OpsImportJobEvent) -> OpsDatasetEventRecord:
-    if event.sync_scope is None:
-        raise AssertionError("dataset canonical event must have an effective sync_scope")
+def _event_record(
+    event: OpsImportJobEvent, *, sync_scope: str
+) -> OpsDatasetEventRecord:
     return OpsDatasetEventRecord(
         event_id=event.event_id,
         job_id=event.job_id,
+        import_job_dataset_id=event.import_job_dataset_id,
+        provider_dataset_id=event.provider_dataset_id,
+        # 행 자신의 값을 쓴다. 요청 필터 값을 각인하면 "사본이 아니라 projection"이라는
+        # 규칙을 표면에서 어기는 셈이고, 필터가 넓어지는 순간 거짓말이 된다.
+        # member 없는 job-level event는 null이다 — 같은 리소스의 두 표현
+        # (`PipelineJobEventRecord`)과 nullability도 맞춘다.
         sync_scope=event.sync_scope,
+        operation_key=event.operation_key,
         stage=event.stage,
         level=event.level,
         code=event.code,
@@ -796,67 +870,84 @@ async def load_dataset_detail(
     *,
     settings: ApiSettings,
     dagster_client: httpx.AsyncClient,
-    provider: str,
-    dataset_key: str,
+    provider_dataset_id: int,
     sync_scope: str,
+    operation_key: str | None = None,
     now: datetime | None = None,
 ) -> OpsDatasetDetailData:
     canonical_scope = parse_canonical_sync_scope(sync_scope).value
     reference = now or kst_now()
-    entry = find_catalog_entry(provider, dataset_key)
-    states = await sync_state_repo.list_sync_states(
-        session, provider=provider, dataset_key=dataset_key
+    entry = next(
+        (
+            item
+            for item in await list_provider_dataset_catalog(session)
+            if item.provider_dataset_id == provider_dataset_id
+        ),
+        None,
     )
-    policy = await get_provider_refresh_policy(
-        session, provider=provider, dataset_key=dataset_key
+    states = await sync_state_repo.list_sync_states_by_dataset_id(
+        session, provider_dataset_id=provider_dataset_id
+    )
+    policy = (
+        await get_provider_refresh_policy(
+            session,
+            provider_dataset_id=entry.provider_dataset_id,
+        )
+        if entry is not None
+        else None
     )
     if entry is None and not states and policy is None:
-        raise DatasetNotFoundError(f"ops dataset 없음: {provider!r}/{dataset_key!r}")
+        raise DatasetNotFoundError(f"ops dataset 없음: provider_dataset_id={provider_dataset_id!r}")
 
-    active_external_systems = tuple(
-        await list_active_poi_cache_target_external_systems(session)
-    )
-    states_by_scope = _states_by_api_scope(entry, states)
+    states_by_membership = _states_by_api_membership(entry, states)
     if entry is not None:
-        expected_scopes = _catalog_state_sync_scopes(
-            entry,
-            active_external_systems=active_external_systems,
-        )
-        stale_scopes = tuple(
+        expected_memberships = _catalog_state_memberships(entry)
+        stale_memberships = tuple(
             dict.fromkeys(
-                logical_scope
-                for state in states
-                if (logical_scope := _api_state_scope(entry, state.sync_scope))
-                is not None
-                and logical_scope not in expected_scopes
+                membership
+                for membership in states_by_membership
+                if membership not in expected_memberships
             )
         )
-        detail_scopes = tuple(dict.fromkeys((*expected_scopes, *stale_scopes)))
+        detail_memberships = tuple(
+            dict.fromkeys((*expected_memberships, *stale_memberships))
+        )
     else:
-        detail_scopes = tuple(
-            dict.fromkeys(
-                logical_scope
-                for state in states
-                if (logical_scope := _api_state_scope(None, state.sync_scope))
-                is not None
-            )
-        ) or (DATASET_WIDE_SYNC_SCOPE,)
+        detail_memberships = tuple(dict.fromkeys(states_by_membership)) or (
+            (DATASET_WIDE_SYNC_SCOPE, None),
+        )
+    if operation_key is not None:
+        # membership을 지목했으면 그 하나로 좁힌다 — 형제 operation의 상태·실행이
+        # 섞이지 않는다. 없는 조합이면 아래 scope 검사에서 404로 떨어진다.
+        detail_memberships = tuple(
+            membership
+            for membership in detail_memberships
+            if membership[1] == operation_key
+        )
+    detail_scopes = tuple(dict.fromkeys(scope for scope, _ in detail_memberships))
     if canonical_scope not in detail_scopes:
         raise DatasetNotFoundError(
             "ops dataset scope 없음: "
-            f"{provider!r}/{dataset_key!r}/{canonical_scope!r}"
+            f"provider_dataset_id={provider_dataset_id!r}/{canonical_scope!r}"
         )
+    # membership마다 한 줄이다 — scope로 접으면 형제 operation의 상태가 사라진다.
+    # ``operation_key``가 None인 catalog 전용 membership에는 결박할 state가 없으므로
+    # never-run 자리표시자를 낸다.
     scopes = [
         (
             _scope_state(
                 state,
                 policy,
                 sync_scope=sync_scope,
+                operation_key=operation_key,
                 now=reference,
             )
-            if (state := states_by_scope.get(sync_scope)) is not None
+            if operation_key is not None
+            and (state := states_by_membership.get((sync_scope, operation_key)))
+            is not None
             else OpsDatasetScopeState(
                 sync_scope=sync_scope,
+                operation_key=operation_key,
                 status=_NEVER_RUN_STATUS,
                 cursor={},
                 last_success_at=None,
@@ -866,14 +957,10 @@ async def load_dataset_detail(
                 freshness=_freshness(None, policy, now=reference),
             )
         )
-        for sync_scope in detail_scopes
+        for sync_scope, operation_key in detail_memberships
     ]
 
-    history_sync_scopes = resolve_dataset_history_sync_scopes(
-        provider,
-        dataset_key,
-        canonical_scope,
-    )
+    history_sync_scopes = (canonical_scope,)
     event_sync_scope = (
         DATASET_WIDE_SYNC_SCOPE
         if DATASET_WIDE_SYNC_SCOPE in history_sync_scopes
@@ -886,39 +973,49 @@ async def load_dataset_detail(
     # roots_with_identity를 대상 dataset의 canonical pair root로만 좁혀 시간창이
     # 아니라 dataset 범위로 제한하므로 누적·유휴 여부와 무관하게 빠르다.
     # snapshot은 시간창을 두지 않아 유휴 scope의 latest_terminal/active도 보존한다.
+    if entry is None:
+        raise DatasetNotFoundError(
+            "canonical pipeline dataset history에는 provider_dataset_id가 필요합니다."
+        )
+    assert entry is not None
     execution_snapshots = await list_dataset_execution_snapshots_scoped(
-        session,
-        provider=provider,
-        dataset_key=dataset_key,
+        session, provider_dataset_id=provider_dataset_id
     )
-    latest_execution, active_execution = _dataset_execution_projection(
-        execution_snapshots,
-        provider=provider,
-        dataset_key=dataset_key,
-        sync_scope=canonical_scope,
+    # ``operation_key``를 주면 membership 정확 일치, 없으면 그 scope의 모든
+    # membership을 가로지르는 **명시적 롤업**이다 — 접기를 없애는 대신 의도된
+    # 롤업임을 이름과 분기로 드러낸다. ``scopes``/``run_history``/``event_history``도
+    # 같은 규칙을 따른다.
+    latest_execution, active_execution = (
+        _dataset_execution_projection(
+            execution_snapshots,
+            provider_dataset_id=provider_dataset_id,
+            sync_scope=canonical_scope,
+            operation_key=operation_key,
+        )
+        if operation_key is not None
+        else _scope_execution_rollup(
+            execution_snapshots,
+            provider_dataset_id=provider_dataset_id,
+            sync_scope=canonical_scope,
+        )
     )
     executions_page = await list_pipeline_executions(
         session,
-        provider=provider,
-        dataset_key=dataset_key,
+        provider_dataset_id=provider_dataset_id,
         dataset_sync_scopes=history_sync_scopes,
         limit=_RECENT_RUNS_LIMIT,
     )
     events_page = await list_ops_import_job_events(
         session,
-        provider=provider,
-        dataset_key=dataset_key,
+        provider_dataset_id=provider_dataset_id,
         sync_scope=event_sync_scope,
         limit=_RECENT_EVENTS_LIMIT,
     )
     issue_counts = await count_open_integrity_issues_by_dataset(
-        session, provider=provider, dataset_key=dataset_key
+        session, provider_dataset_id=provider_dataset_id
     )
     dataset_issues = next(
-        (item for item in issue_counts if item.dataset_key == dataset_key), None
-    )
-    provider_issues = next(
-        (item for item in issue_counts if item.dataset_key is None), None
+        (item for item in issue_counts if item.provider_dataset_id == provider_dataset_id), None
     )
     schedules = await load_dataset_schedule_index(
         settings=settings,
@@ -931,21 +1028,32 @@ async def load_dataset_detail(
         else _orphan_reason(has_state=bool(states), has_policy=policy is not None)
     )
     return OpsDatasetDetailData(
-        provider=provider,
-        dataset_key=dataset_key,
+        provider_dataset_id=provider_dataset_id,
+        provider=entry.provider,
+        dataset_key=entry.dataset_key,
         catalog_state="canonical" if canonical else "orphan",
         orphan_reason=orphan_reason,
         mutable=canonical,
         catalog=(
-            _catalog_info(
-                entry,
-                active_external_systems=active_external_systems,
-            )
+            _catalog_info(entry)
             if entry is not None
             else None
         ),
         scopes=scopes,
-        schedule=_schedule_summary(schedules.for_dataset(provider, dataset_key)),
+        schedule=_schedule_summary(
+            # membership을 지목했으면 그 operation의 schedule만, 아니면 scope 전체의
+            # 롤업이다 — ``latest_execution``/``run_history``와 같은 규칙이다.
+            schedules.for_operation_keys(
+                (operation_key,)
+                if operation_key is not None
+                else tuple(
+                    operation.operation_key
+                    for operation in entry.enabled_refresh_operations
+                )
+                if entry is not None
+                else ()
+            )
+        ),
         schedule_source_status=schedules.source_status,
         schedule_source_errors=list(schedules.errors),
         refresh_policy=(
@@ -957,59 +1065,52 @@ async def load_dataset_detail(
         run_history=OpsDatasetRunHistory(
             items=_run_history_records(
                 executions_page.items,
-                provider=provider,
-                dataset_key=dataset_key,
+                provider_dataset_id=provider_dataset_id,
                 sync_scopes=history_sync_scopes,
             ),
             next_cursor=executions_page.next_cursor,
             canonical_url=_run_history_url(
-                provider,
-                dataset_key,
+                provider_dataset_id,
                 canonical_scope,
+                operation_key,
             ),
         ),
         event_history=OpsDatasetEventHistory(
-            items=[_event_record(item) for item in events_page.items],
+            items=[_event_record(item, sync_scope=event_sync_scope) for item in events_page.items],
             next_cursor=events_page.next_cursor,
             canonical_url=_event_history_url(
-                provider,
-                dataset_key,
+                provider_dataset_id,
                 event_sync_scope,
+                operation_key,
             ),
         ),
         dataset_issues=_issue_summary(dataset_issues),
-        provider_issues=_issue_summary(provider_issues),
     )
 
 
 async def upsert_dataset_refresh_policy(
     session: AsyncSession,
     *,
-    provider: str,
-    dataset_key: str,
+    provider_dataset_id: int,
     body: ProviderRefreshPolicyUpsertRequest,
 ) -> ProviderRefreshPolicy:
     """canonical catalog dataset만 정책 mutation을 허용한다."""
     async with session.begin():
-        if find_catalog_entry(provider, dataset_key) is None:
-            states = await sync_state_repo.list_sync_states(
-                session, provider=provider, dataset_key=dataset_key
-            )
-            existing = await get_provider_refresh_policy(
-                session, provider=provider, dataset_key=dataset_key
-            )
-            if states or existing is not None:
-                reason = _orphan_reason(
-                    has_state=bool(states), has_policy=existing is not None
-                )
-                raise OrphanMutationDisabledError(reason)
+        entry = next(
+            (
+                item
+                for item in await list_provider_dataset_catalog(session)
+                if item.provider_dataset_id == provider_dataset_id
+            ),
+            None,
+        )
+        if entry is None:
             raise DatasetNotFoundError(
-                f"ops dataset 없음: {provider!r}/{dataset_key!r}"
+                f"ops dataset 없음: provider_dataset_id={provider_dataset_id!r}"
             )
         return await upsert_provider_refresh_policy(
             session,
-            provider=provider,
-            dataset_key=dataset_key,
+            provider_dataset_id=entry.provider_dataset_id,
             source_kind=body.source_kind,
             expected_revision=(
                 int(body.expected_revision)

@@ -467,46 +467,76 @@ WHERE f.feature_id LIKE :feature_id_prefix || '%' AND f.kind = 'event'
 # source_entities/records/links — 공개 read가 공유하는 notice 감산
 # 필터(``public_active_notice_filter_sql``의 source_links NOT EXISTS anti-join)와
 # nearby primary-source LATERAL이 실측 planner 선택을 내려면 populated 되어야 한다.
-_SEED_SOURCE_ENTITIES_SQL = """
+_PERF_DATASET_PAIRS_SQL = """
+SELECT * FROM (VALUES
+    (0, 'python-mois-api', 'mois_license_features_bulk'),
+    (1, 'python-datagokr-api', 'standard_tourist_attractions'),
+    (2, 'python-visitkorea-api', 'visitkorea_festival_events'),
+    (3, 'python-opinet-api', 'opinet_stations'),
+    (4, 'python-krheritage-api', 'krheritage_events')
+) AS pair(bucket, provider, dataset_key)
+"""
+
+# fixture는 catalog seed에 의존하지 않고 자기 pair를 만든다. 0089가 심는 목록은
+# provider_catalog.py + 그 DB의 실데이터 legacy sweep에 따라 달라지므로(실측: 이 5쌍
+# 중 2쌍만 존재) catalog를 전제하면 fixture가 DB마다 다르게 깨진다.
+_SEED_PERF_PROVIDER_DATASETS_SQL = f"""
+INSERT INTO provider_sync.provider_datasets (
+    provider, dataset_key, display_name, source_kind, is_active, capabilities
+)
+SELECT
+    pair.provider, pair.dataset_key, pair.provider || ' / ' || pair.dataset_key,
+    'system', true,
+    jsonb_build_object(
+        'schema_version', 1, 'produces', '[]'::jsonb, 'extensions', '{{}}'::jsonb
+    )
+FROM ({_PERF_DATASET_PAIRS_SQL}) AS pair
+ON CONFLICT (provider, dataset_key) DO NOTHING
+"""
+
+_SEED_SOURCE_ENTITIES_SQL = f"""
 INSERT INTO provider_sync.source_entities (
-    source_entity_key, provider, dataset_key,
+    source_entity_key, provider_dataset_id,
     source_entity_type, source_entity_id, first_seen_at, last_seen_at
 )
 SELECT
     'perf:se:' || lpad(g::text, 6, '0'),
-    CASE WHEN g % 5 = 0 THEN 'python-mois-api' WHEN g % 5 = 1 THEN 'python-datagokr-api'
-         WHEN g % 5 = 2 THEN 'python-visitkorea-api' WHEN g % 5 = 3 THEN 'python-opinet-api'
-         ELSE 'python-krheritage-api' END,
-    CASE WHEN g % 5 = 0 THEN 'mois_license_features_bulk'
-         WHEN g % 5 = 1 THEN 'standard_tourist_attractions'
-         WHEN g % 5 = 2 THEN 'visitkorea_festival_events'
-         WHEN g % 5 = 3 THEN 'opinet_stations' ELSE 'krheritage_events' END,
+    dataset.provider_dataset_id,
     'perf_entity', lpad(g::text, 6, '0'),
+    now() - (g::text || ' minutes')::interval,
+    now() - (g::text || ' seconds')::interval
+FROM generate_series(1, :n) AS g
+JOIN ({_PERF_DATASET_PAIRS_SQL}) AS pair ON pair.bucket = g % 5
+JOIN provider_sync.provider_datasets AS dataset
+  ON dataset.provider = pair.provider
+ AND dataset.dataset_key = pair.dataset_key
+"""
+
+# source_record는 provider/dataset을 더 들지 않는다 — entity를 통해 도달한다.
+_SEED_SOURCE_RECORDS_SQL = """
+INSERT INTO provider_sync.source_records (
+    source_record_key, source_entity_key,
+    raw_data, raw_payload_hash, fetched_at, imported_at
+)
+SELECT
+    'perf:sr:' || lpad(g::text, 6, '0'),
+    'perf:se:' || lpad(g::text, 6, '0'),
+    jsonb_build_object('row', g, 'raw_name', '원천명 ' || g::text),
+    md5('perf-hash-' || g::text),
     now() - (g::text || ' minutes')::interval,
     now() - (g::text || ' seconds')::interval
 FROM generate_series(1, :n) AS g
 """
 
-_SEED_SOURCE_RECORDS_SQL = """
-INSERT INTO provider_sync.source_records (
-    source_record_key, source_entity_key, provider, dataset_key,
-    source_entity_type, source_entity_id,
-    raw_name, raw_address, raw_data, raw_payload_hash, fetched_at, imported_at
+# 현재 record 포인터와 계보 정렬축은 head가 갖는다. ``lineage_key``는
+# BEFORE INSERT 트리거가 채우므로 여기서 쓰지 않는다 — 쓰면 파생이 아니게 된다.
+_SEED_SOURCE_ENTITY_HEADS_SQL = """
+INSERT INTO provider_sync.source_entity_heads (
+    source_entity_key, current_source_record_key, observed_at
 )
 SELECT
-    'perf:sr:' || lpad(g::text, 6, '0'),
     'perf:se:' || lpad(g::text, 6, '0'),
-    CASE WHEN g % 5 = 0 THEN 'python-mois-api' WHEN g % 5 = 1 THEN 'python-datagokr-api'
-         WHEN g % 5 = 2 THEN 'python-visitkorea-api' WHEN g % 5 = 3 THEN 'python-opinet-api'
-         ELSE 'python-krheritage-api' END,
-    CASE WHEN g % 5 = 0 THEN 'mois_license_features_bulk'
-         WHEN g % 5 = 1 THEN 'standard_tourist_attractions'
-         WHEN g % 5 = 2 THEN 'visitkorea_festival_events'
-         WHEN g % 5 = 3 THEN 'opinet_stations' ELSE 'krheritage_events' END,
-    'perf_entity', lpad(g::text, 6, '0'),
-    '원천명 ' || g::text, '원천주소 ' || g::text,
-    jsonb_build_object('row', g), 'perf-hash-' || g::text,
-    now() - (g::text || ' minutes')::interval,
+    'perf:sr:' || lpad(g::text, 6, '0'),
     now() - (g::text || ' seconds')::interval
 FROM generate_series(1, :n) AS g
 """
@@ -514,12 +544,12 @@ FROM generate_series(1, :n) AS g
 _SEED_SOURCE_LINKS_SQL = """
 INSERT INTO provider_sync.source_links (
     feature_id, source_entity_key, source_role,
-    match_method, confidence, is_primary_source, created_at
+    match_method, confidence, created_at
 )
 SELECT
     :feature_id_prefix || lpad(g::text, 6, '0'),
     'perf:se:' || lpad(g::text, 6, '0'),
-    'primary', 'natural_key', 100, true, now()
+    'primary', 'natural_key', 100, now()
 FROM generate_series(1, :n) AS g
 """
 
@@ -549,15 +579,10 @@ async def seed_hot_query_features(
         await session.execute(
             text(subtype_sql), {"feature_id_prefix": feature_id_prefix}
         )
+    await session.execute(text(_SEED_PERF_PROVIDER_DATASETS_SQL))
     await session.execute(text(_SEED_SOURCE_ENTITIES_SQL), {"n": n})
     await session.execute(text(_SEED_SOURCE_RECORDS_SQL), {"n": n})
-    await session.execute(
-        text(
-            "UPDATE provider_sync.source_entities AS se "
-            "SET current_source_record_key = 'perf:sr:' || right(se.source_entity_key, 6) "
-            "WHERE se.source_entity_key LIKE 'perf:se:%'"
-        )
-    )
+    await session.execute(text(_SEED_SOURCE_ENTITY_HEADS_SQL), {"n": n})
     await session.execute(
         text(_SEED_SOURCE_LINKS_SQL),
         {"n": n, "feature_id_prefix": feature_id_prefix},

@@ -283,6 +283,18 @@ def _jsonable_raw(value: Any) -> Any:
     return value
 
 
+def _source_raw_or_fallback(
+    value: object,
+    fallback: dict[str, Any],
+) -> dict[str, Any]:
+    """provider raw row가 있으면 그것만 보존하고, 없는 legacy shape만 재구성한다."""
+    if isinstance(value, Mapping):
+        result = _jsonable_raw(value)
+        assert isinstance(result, dict)
+        return result
+    return fallback
+
+
 def _product_code_text(value: Any) -> str:
     enum_value = getattr(value, "value", None)
     if isinstance(enum_value, str):
@@ -482,16 +494,19 @@ async def _station_detail_to_price_bundle_and_values(
     bjd_code = station_feature.address.bjd_code
 
     raw_prices = [_jsonable_raw(getattr(price, "raw", {})) for price in prices]
-    raw_data: dict[str, Any] = {
-        "uni_id": detail.uni_id,
-        "name": detail.name,
-        "brand": _brand_code(detail.brand),
-        "address_road": detail.address_road,
-        "address_jibun": detail.address_jibun,
-        "lon": str(detail.lon) if detail.lon is not None else None,
-        "lat": str(detail.lat) if detail.lat is not None else None,
-        "prices": raw_prices,
-    }
+    raw_data = _source_raw_or_fallback(
+        getattr(detail, "raw", None),
+        {
+            "uni_id": detail.uni_id,
+            "name": detail.name,
+            "brand": _brand_code(detail.brand),
+            "address_road": detail.address_road,
+            "address_jibun": detail.address_jibun,
+            "lon": str(detail.lon) if detail.lon is not None else None,
+            "lat": str(detail.lat) if detail.lat is not None else None,
+            "prices": raw_prices,
+        },
+    )
     payload_hash = make_payload_hash(raw_data)
     source_record_key = make_source_record_key(
         provider=OPINET_PROVIDER_NAME,
@@ -543,14 +558,6 @@ async def _station_detail_to_price_bundle_and_values(
         source_entity_type=_OPINET_PRICE_ENTITY_TYPE,
         source_entity_id=detail.uni_id,
         raw_payload_hash=payload_hash,
-        raw_name=detail.name,
-        raw_address=detail.address_road or detail.address_jibun,
-        raw_longitude=(
-            station_feature.coord.lon if station_feature.coord is not None else None
-        ),
-        raw_latitude=(
-            station_feature.coord.lat if station_feature.coord is not None else None
-        ),
         raw_data=raw_data,
         fetched_at=fetched_at,
         source_record_key=source_record_key,
@@ -561,7 +568,6 @@ async def _station_detail_to_price_bundle_and_values(
         source_role=SourceRole.PRIMARY,
         match_method="natural_key",
         confidence=100,
-        is_primary_source=True,
     )
     return (
         station_bundle,
@@ -659,20 +665,23 @@ async def _station_price_to_bundle_and_value(
     raw = _jsonable_raw(getattr(item, "raw", {}))
     name_normalized = normalize_korean_text(item.name) or item.name
 
-    raw_data: dict[str, Any] = {
-        "uni_id": item.uni_id,
-        "name": item.name,
-        "brand": _brand_code(item.brand),
-        "address_road": item.address_road,
-        "address_jibun": item.address_jibun,
-        "lon": str(item.lon) if item.lon is not None else None,
-        "lat": str(item.lat) if item.lat is not None else None,
-        "prodcd": prodcd,
-        "product_key": product_key,
-        "price": str(raw_price),
-        "observed_at": observed_at.isoformat(),
-        "raw": raw,
-    }
+    raw_data = _source_raw_or_fallback(
+        getattr(item, "raw", None),
+        {
+            "uni_id": item.uni_id,
+            "name": item.name,
+            "brand": _brand_code(item.brand),
+            "address_road": item.address_road,
+            "address_jibun": item.address_jibun,
+            "lon": str(item.lon) if item.lon is not None else None,
+            "lat": str(item.lat) if item.lat is not None else None,
+            "prodcd": prodcd,
+            "product_key": product_key,
+            "price": str(raw_price),
+            "observed_at": observed_at.isoformat(),
+            "raw": raw,
+        },
+    )
     payload_hash = make_payload_hash(raw_data)
     source_record_key = make_source_record_key(
         provider=OPINET_PROVIDER_NAME,
@@ -707,14 +716,6 @@ async def _station_price_to_bundle_and_value(
         source_entity_type=_OPINET_PRICE_ENTITY_TYPE,
         source_entity_id=f"{item.uni_id}:{prodcd}",
         raw_payload_hash=payload_hash,
-        raw_name=item.name,
-        raw_address=item.address_road or item.address_jibun,
-        raw_longitude=(
-            station_feature.coord.lon if station_feature.coord is not None else None
-        ),
-        raw_latitude=(
-            station_feature.coord.lat if station_feature.coord is not None else None
-        ),
         raw_data=raw_data,
         fetched_at=fetched_at,
         source_record_key=source_record_key,
@@ -725,7 +726,6 @@ async def _station_price_to_bundle_and_value(
         source_role=SourceRole.PRIMARY,
         match_method="natural_key",
         confidence=100,
-        is_primary_source=True,
     )
     value = PriceValue(
         feature_id=feature_id,
@@ -860,17 +860,20 @@ async def _station_item_to_bundle(
     )
 
     # 4) Raw payload (canonical JSON 직렬화 가능).
-    raw_data: dict[str, Any] = {
-        "uni_id": item.uni_id,
-        "name": item.name,
-        "brand": brand_code,
-        "address_road": item.address_road,
-        "address_jibun": item.address_jibun,
-        "lon": str(item.lon) if item.lon is not None else None,
-        "lat": str(item.lat) if item.lat is not None else None,
-        "tel": tel,
-        "lpg_yn": _coerce_bool_str(lpg_yn),
-    }
+    raw_data = _source_raw_or_fallback(
+        getattr(item, "raw", None),
+        {
+            "uni_id": item.uni_id,
+            "name": item.name,
+            "brand": brand_code,
+            "address_road": item.address_road,
+            "address_jibun": item.address_jibun,
+            "lon": str(item.lon) if item.lon is not None else None,
+            "lat": str(item.lat) if item.lat is not None else None,
+            "tel": tel,
+            "lpg_yn": _coerce_bool_str(lpg_yn),
+        },
+    )
     payload_hash = make_payload_hash(raw_data)
 
     # 5) source_record_key (ADR-009).
@@ -926,11 +929,6 @@ async def _station_item_to_bundle(
         source_entity_type=_OPINET_STATION_ENTITY_TYPE,
         source_entity_id=item.uni_id,
         raw_payload_hash=payload_hash,
-        source_version=None,
-        raw_name=item.name,
-        raw_address=display_address,
-        raw_longitude=coord.lon if coord is not None else None,
-        raw_latitude=coord.lat if coord is not None else None,
         raw_data=raw_data,
         fetched_at=fetched_at,
         source_record_key=source_record_key,
@@ -943,7 +941,6 @@ async def _station_item_to_bundle(
         source_role=SourceRole.PRIMARY,
         match_method="natural_key",
         confidence=100,
-        is_primary_source=True,
     )
 
     return FeatureBundle(

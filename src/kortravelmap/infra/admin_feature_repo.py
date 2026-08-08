@@ -177,7 +177,7 @@ class AdminFeatureDetailFeature:
 
 @dataclass(frozen=True)
 class AdminFeatureDetailSource:
-    """Feature에 연결된 SourceRecord + SourceLink snapshot."""
+    """Feature에 연결된 현재 SourceEntity head + SourceLink."""
 
     source_entity_key: str
     source_record_key: str
@@ -185,20 +185,14 @@ class AdminFeatureDetailSource:
     dataset_key: str
     source_entity_type: str
     source_entity_id: str
-    source_version: str | None
     source_role: str
     match_method: str
     confidence: int
-    is_primary_source: bool
-    raw_name: str | None
-    raw_address: str | None
-    raw_longitude: float | None
-    raw_latitude: float | None
     raw_payload_hash: str
     raw_data: dict[str, Any]
     fetched_at: datetime
     imported_at: datetime
-    last_seen_at: datetime
+    observed_at: datetime
     expires_at: datetime | None
     linked_at: datetime
 
@@ -457,20 +451,14 @@ class ReviewSourceDetail:
     dataset_key: str
     source_entity_type: str
     source_entity_id: str
-    source_version: str | None
-    raw_name: str | None
-    raw_address: str | None
-    raw_longitude: float | None
-    raw_latitude: float | None
     raw_payload_hash: str
     raw_data: dict[str, Any]
     fetched_at: Any
     imported_at: Any
-    expires_at: Any
+    observed_at: Any | None = None
     source_role: str | None = None
     match_method: str | None = None
     confidence: int | None = None
-    is_primary_source: bool | None = None
     linked_at: datetime | None = None
 
 
@@ -615,11 +603,11 @@ def _admin_bbox_filters_sql(alias: str) -> str:
       FROM provider_sync.source_links AS sl
       JOIN provider_sync.source_entities AS se
         ON se.source_entity_key = sl.source_entity_key
-      JOIN provider_sync.source_records AS sr
-        ON sr.source_record_key = se.current_source_record_key
+      JOIN provider_sync.provider_datasets AS pd
+        ON pd.provider_dataset_id = se.provider_dataset_id
       WHERE sl.feature_id = {alias}.feature_id
-        AND sl.is_primary_source
-        AND sr.provider = ANY(CAST(:providers AS text[]))
+        AND sl.source_role = 'primary'
+        AND pd.provider = ANY(CAST(:providers AS text[]))
     )
   )
 """
@@ -1196,15 +1184,16 @@ _ADMIN_FEATURES_Q_LIKE_CLAUSE: Final = """AND (
             FROM provider_sync.source_links AS qsl
             JOIN provider_sync.source_entities AS qse
               ON qse.source_entity_key = qsl.source_entity_key
+            JOIN provider_sync.source_entity_heads AS qhead
+              ON qhead.source_entity_key = qse.source_entity_key
             JOIN provider_sync.source_records AS qsr
               ON qsr.source_entity_key = qse.source_entity_key
-             AND qsr.source_record_key = qse.current_source_record_key
+             AND qsr.source_record_key = qhead.current_source_record_key
             WHERE qsl.feature_id = f.feature_id
               AND (
                 qsr.source_record_key ILIKE CAST(:q_like AS text)
-                OR qsr.source_entity_id ILIKE CAST(:q_like AS text)
-                OR qsr.raw_name ILIKE CAST(:q_like AS text)
-                OR qsr.raw_address ILIKE CAST(:q_like AS text)
+                OR qse.source_entity_id ILIKE CAST(:q_like AS text)
+                OR qsr.raw_data::text ILIKE CAST(:q_like AS text)
               )
         )
       )"""
@@ -1248,16 +1237,20 @@ WITH base AS (
         f.updated_at
     FROM feature.features AS f
     LEFT JOIN LATERAL (
-        SELECT sr.provider, sr.dataset_key
+        SELECT pd.provider_dataset_id, pd.provider, pd.dataset_key
         FROM provider_sync.source_links AS sl
         JOIN provider_sync.source_entities AS se
           ON se.source_entity_key = sl.source_entity_key
+        JOIN provider_sync.provider_datasets AS pd
+          ON pd.provider_dataset_id = se.provider_dataset_id
+        JOIN provider_sync.source_entity_heads AS head
+          ON head.source_entity_key = se.source_entity_key
         JOIN provider_sync.source_records AS sr
           ON sr.source_entity_key = se.source_entity_key
-         AND sr.source_record_key = se.current_source_record_key
+         AND sr.source_record_key = head.current_source_record_key
         WHERE sl.feature_id = f.feature_id
-          AND sl.is_primary_source
-        ORDER BY sr.imported_at DESC NULLS LAST, sr.source_record_key
+          AND sl.source_role = 'primary'
+        ORDER BY head.observed_at DESC, sr.imported_at DESC, sr.source_record_key
         LIMIT 1
     ) AS ps ON TRUE
     LEFT JOIN LATERAL (
@@ -1306,12 +1299,8 @@ WITH base AS (
         OR f.status = ANY(CAST(:statuses AS text[]))
       )
       AND (
-        CAST(:providers AS text[]) IS NULL
-        OR ps.provider = ANY(CAST(:providers AS text[]))
-      )
-      AND (
-        CAST(:dataset_keys AS text[]) IS NULL
-        OR ps.dataset_key = ANY(CAST(:dataset_keys AS text[]))
+        CAST(:provider_dataset_id AS bigint) IS NULL
+        OR ps.provider_dataset_id = CAST(:provider_dataset_id AS bigint)
       )
       AND (
         CAST(:has_coord AS boolean) IS NULL
@@ -1415,53 +1404,57 @@ _ADMIN_FEATURE_SOURCES_SQL: Final[str] = """
 SELECT
     se.source_entity_key,
     sr.source_record_key,
-    sr.provider,
-    sr.dataset_key,
-    sr.source_entity_type,
-    sr.source_entity_id,
-    sr.source_version,
+    pd.provider,
+    pd.dataset_key,
+    se.source_entity_type,
+    se.source_entity_id,
     sl.source_role,
     sl.match_method,
     sl.confidence,
-    sl.is_primary_source,
-    sr.raw_name,
-    sr.raw_address,
-    sr.raw_longitude,
-    sr.raw_latitude,
     sr.raw_payload_hash,
     sr.raw_data,
     sr.fetched_at,
     sr.imported_at,
-    sr.last_seen_at,
-    sr.expires_at,
+    head.observed_at,
+    head.expires_at,
     sl.created_at AS linked_at
 FROM provider_sync.source_links AS sl
 JOIN provider_sync.source_entities AS se
   ON se.source_entity_key = sl.source_entity_key
+JOIN provider_sync.provider_datasets AS pd
+  ON pd.provider_dataset_id = se.provider_dataset_id
+JOIN provider_sync.source_entity_heads AS head
+  ON head.source_entity_key = se.source_entity_key
 JOIN provider_sync.source_records AS sr
   ON sr.source_entity_key = se.source_entity_key
- AND sr.source_record_key = se.current_source_record_key
+ AND sr.source_record_key = head.current_source_record_key
 WHERE sl.feature_id = :feature_id
-ORDER BY sl.is_primary_source DESC, sr.imported_at DESC NULLS LAST,
+ORDER BY (sl.source_role = 'primary') DESC, head.observed_at DESC,
+         sr.imported_at DESC NULLS LAST,
          sl.created_at DESC, sr.source_record_key
 """
 
 _ADMIN_FEATURE_ISSUES_SQL: Final[str] = """
 SELECT
-    issue_id::text AS issue_id,
-    provider,
-    dataset_key,
-    source_record_key,
-    violation_type,
-    severity,
-    message,
-    payload,
-    status,
-    detected_at,
-    resolved_at
-FROM ops.data_integrity_violations
-WHERE feature_id = :feature_id
-ORDER BY (status = 'open') DESC, detected_at DESC, issue_id DESC
+    violation.issue_id::text AS issue_id,
+    -- provider/dataset_key는 violation 행에서 사라졌다. 표시용 projection이므로
+    -- catalog에서 읽는다 (identity는 provider_dataset_id다).
+    dataset.provider,
+    dataset.dataset_key,
+    violation.source_record_key,
+    violation.violation_type,
+    violation.severity,
+    violation.message,
+    violation.payload,
+    violation.status,
+    violation.detected_at,
+    violation.resolved_at
+FROM ops.data_integrity_violations AS violation
+LEFT JOIN provider_sync.provider_datasets AS dataset
+  ON dataset.provider_dataset_id = violation.provider_dataset_id
+WHERE violation.feature_id = :feature_id
+ORDER BY (violation.status = 'open') DESC, violation.detected_at DESC,
+         violation.issue_id DESC
 LIMIT 100
 """
 
@@ -1608,20 +1601,14 @@ def _admin_feature_detail_source(row: Any) -> AdminFeatureDetailSource:
         dataset_key=str(row["dataset_key"]),
         source_entity_type=str(row["source_entity_type"]),
         source_entity_id=str(row["source_entity_id"]),
-        source_version=row["source_version"],
         source_role=str(row["source_role"]),
         match_method=str(row["match_method"]),
         confidence=int(row["confidence"]),
-        is_primary_source=bool(row["is_primary_source"]),
-        raw_name=row["raw_name"],
-        raw_address=row["raw_address"],
-        raw_longitude=_float_or_none(row["raw_longitude"]),
-        raw_latitude=_float_or_none(row["raw_latitude"]),
         raw_payload_hash=str(row["raw_payload_hash"]),
         raw_data=_json_object(row["raw_data"]),
         fetched_at=row["fetched_at"],
         imported_at=row["imported_at"],
-        last_seen_at=row["last_seen_at"],
+        observed_at=row["observed_at"],
         expires_at=row["expires_at"],
         linked_at=row["linked_at"],
     )
@@ -1777,42 +1764,29 @@ def _review_source_detail(row: AdminFeatureDetailSource) -> ReviewSourceDetail:
         dataset_key=row.dataset_key,
         source_entity_type=row.source_entity_type,
         source_entity_id=row.source_entity_id,
-        source_version=row.source_version,
         source_role=row.source_role,
         match_method=row.match_method,
         confidence=row.confidence,
-        is_primary_source=row.is_primary_source,
-        raw_name=row.raw_name,
-        raw_address=row.raw_address,
-        raw_longitude=row.raw_longitude,
-        raw_latitude=row.raw_latitude,
         raw_payload_hash=row.raw_payload_hash,
         raw_data=row.raw_data,
         fetched_at=row.fetched_at,
         imported_at=row.imported_at,
-        expires_at=row.expires_at,
+        observed_at=row.observed_at,
         linked_at=row.linked_at,
     )
 
 
-def _review_source_from_record(value: Any) -> ReviewSourceDetail:
-    record = _json_object(value)
+def _review_source_from_queued_row(row: Any) -> ReviewSourceDetail:
     return ReviewSourceDetail(
-        source_record_key=str(record.get("source_record_key") or ""),
-        provider=str(record.get("provider") or ""),
-        dataset_key=str(record.get("dataset_key") or ""),
-        source_entity_type=str(record.get("source_entity_type") or ""),
-        source_entity_id=str(record.get("source_entity_id") or ""),
-        source_version=record.get("source_version"),
-        raw_name=record.get("raw_name"),
-        raw_address=record.get("raw_address"),
-        raw_longitude=_float_or_none(record.get("raw_longitude")),
-        raw_latitude=_float_or_none(record.get("raw_latitude")),
-        raw_payload_hash=str(record.get("raw_payload_hash") or ""),
-        raw_data=_json_object(record.get("raw_data")),
-        fetched_at=record.get("fetched_at"),
-        imported_at=record.get("imported_at"),
-        expires_at=record.get("expires_at"),
+        source_record_key=str(row["source_record_key"]),
+        provider=str(row["source_provider"]),
+        dataset_key=str(row["source_dataset_key"]),
+        source_entity_type=str(row["source_entity_type"]),
+        source_entity_id=str(row["source_entity_id"]),
+        raw_payload_hash=str(row["raw_payload_hash"]),
+        raw_data=_json_object(row["raw_data"]),
+        fetched_at=row["fetched_at"],
+        imported_at=row["imported_at"],
     )
 
 
@@ -1945,8 +1919,7 @@ async def list_admin_features(
     kinds: Sequence[str] | None = None,
     categories: Sequence[str] | None = None,
     statuses: Sequence[str] | None = ("active",),
-    providers: Sequence[str] | None = None,
-    dataset_keys: Sequence[str] | None = None,
+    provider_dataset_id: int | None = None,
     has_coord: bool | None = None,
     has_issue: bool | None = None,
     issue_types: Sequence[str] | None = None,
@@ -1981,8 +1954,7 @@ async def list_admin_features(
         "kinds": _normalize_values(kinds),
         "categories": _normalize_values(categories),
         "statuses": _normalize_values(statuses),
-        "providers": _normalize_values(providers),
-        "dataset_keys": _normalize_values(dataset_keys),
+        "provider_dataset_id": provider_dataset_id,
         "has_coord": has_coord,
         "has_issue": has_issue,
         "issue_types": _normalize_values(issue_types),
@@ -2971,29 +2943,37 @@ expanded AS (
     JOIN feature.features AS fa ON fa.feature_id = r.feature_id_a
     JOIN feature.features AS fb ON fb.feature_id = r.feature_id_b
     LEFT JOIN LATERAL (
-        SELECT sr.provider, sr.dataset_key
+        SELECT pd.provider, pd.dataset_key
         FROM provider_sync.source_links AS sl
         JOIN provider_sync.source_entities AS se
           ON se.source_entity_key = sl.source_entity_key
+        JOIN provider_sync.provider_datasets AS pd
+          ON pd.provider_dataset_id = se.provider_dataset_id
+        JOIN provider_sync.source_entity_heads AS head
+          ON head.source_entity_key = se.source_entity_key
         JOIN provider_sync.source_records AS sr
           ON sr.source_entity_key = se.source_entity_key
-         AND sr.source_record_key = se.current_source_record_key
+         AND sr.source_record_key = head.current_source_record_key
         WHERE sl.feature_id = fa.feature_id
-          AND sl.is_primary_source
-        ORDER BY sr.imported_at DESC NULLS LAST, sr.source_record_key
+          AND sl.source_role = 'primary'
+        ORDER BY head.observed_at DESC, sr.imported_at DESC, sr.source_record_key
         LIMIT 1
     ) AS psa ON TRUE
     LEFT JOIN LATERAL (
-        SELECT sr.provider, sr.dataset_key
+        SELECT pd.provider, pd.dataset_key
         FROM provider_sync.source_links AS sl
         JOIN provider_sync.source_entities AS se
           ON se.source_entity_key = sl.source_entity_key
+        JOIN provider_sync.provider_datasets AS pd
+          ON pd.provider_dataset_id = se.provider_dataset_id
+        JOIN provider_sync.source_entity_heads AS head
+          ON head.source_entity_key = se.source_entity_key
         JOIN provider_sync.source_records AS sr
           ON sr.source_entity_key = se.source_entity_key
-         AND sr.source_record_key = se.current_source_record_key
+         AND sr.source_record_key = head.current_source_record_key
         WHERE sl.feature_id = fb.feature_id
-          AND sl.is_primary_source
-        ORDER BY sr.imported_at DESC NULLS LAST, sr.source_record_key
+          AND sl.source_role = 'primary'
+        ORDER BY head.observed_at DESC, sr.imported_at DESC, sr.source_record_key
         LIMIT 1
     ) AS psb ON TRUE
 )
@@ -3065,29 +3045,37 @@ expanded AS (
     JOIN feature.features AS fa ON fa.feature_id = r.feature_id_a
     JOIN feature.features AS fb ON fb.feature_id = r.feature_id_b
     LEFT JOIN LATERAL (
-        SELECT sr.provider, sr.dataset_key
+        SELECT pd.provider, pd.dataset_key
         FROM provider_sync.source_links AS sl
         JOIN provider_sync.source_entities AS se
           ON se.source_entity_key = sl.source_entity_key
+        JOIN provider_sync.provider_datasets AS pd
+          ON pd.provider_dataset_id = se.provider_dataset_id
+        JOIN provider_sync.source_entity_heads AS head
+          ON head.source_entity_key = se.source_entity_key
         JOIN provider_sync.source_records AS sr
           ON sr.source_entity_key = se.source_entity_key
-         AND sr.source_record_key = se.current_source_record_key
+         AND sr.source_record_key = head.current_source_record_key
         WHERE sl.feature_id = fa.feature_id
-          AND sl.is_primary_source
-        ORDER BY sr.imported_at DESC NULLS LAST, sr.source_record_key
+          AND sl.source_role = 'primary'
+        ORDER BY head.observed_at DESC, sr.imported_at DESC, sr.source_record_key
         LIMIT 1
     ) AS psa ON TRUE
     LEFT JOIN LATERAL (
-        SELECT sr.provider, sr.dataset_key
+        SELECT pd.provider, pd.dataset_key
         FROM provider_sync.source_links AS sl
         JOIN provider_sync.source_entities AS se
           ON se.source_entity_key = sl.source_entity_key
+        JOIN provider_sync.provider_datasets AS pd
+          ON pd.provider_dataset_id = se.provider_dataset_id
+        JOIN provider_sync.source_entity_heads AS head
+          ON head.source_entity_key = se.source_entity_key
         JOIN provider_sync.source_records AS sr
           ON sr.source_entity_key = se.source_entity_key
-         AND sr.source_record_key = se.current_source_record_key
+         AND sr.source_record_key = head.current_source_record_key
         WHERE sl.feature_id = fb.feature_id
-          AND sl.is_primary_source
-        ORDER BY sr.imported_at DESC NULLS LAST, sr.source_record_key
+          AND sl.source_role = 'primary'
+        ORDER BY head.observed_at DESC, sr.imported_at DESC, sr.source_record_key
         LIMIT 1
     ) AS psb ON TRUE
 )
@@ -3485,6 +3473,8 @@ class EnrichmentReviewDetail:
     source_dataset_key: str
     source_entity_id: str
     source_name: str
+    source_lon: float | None
+    source_lat: float | None
     target_start_date: str | None
     target_end_date: str | None
     source_start_date: str | None
@@ -3518,16 +3508,16 @@ _ENRICHMENT_REVIEW_SCALAR_STATUS_FILTER: Final[str] = """
 _ENRICHMENT_REVIEW_OPTIONAL_PROVIDER_FILTER: Final[str] = """
       AND (
         CAST(:providers AS text[]) IS NULL
-        OR q.source_provider = ANY(CAST(:providers AS text[]))
+        OR pd.provider = ANY(CAST(:providers AS text[]))
       )
 """
 
 _ENRICHMENT_REVIEW_REQUIRED_PROVIDER_FILTER: Final[str] = """
-      AND q.source_provider = ANY(CAST(:providers AS text[]))
+      AND pd.provider = ANY(CAST(:providers AS text[]))
 """
 
 _ENRICHMENT_REVIEW_SCALAR_PROVIDER_FILTER: Final[str] = """
-      AND q.source_provider = CAST(:provider AS text)
+      AND pd.provider = CAST(:provider AS text)
 """
 
 
@@ -3540,16 +3530,25 @@ WITH reviews AS MATERIALIZED (
         q.name_score,
         q.target_feature_id,
         q.target_name,
-        q.source_provider,
-        q.source_dataset_key,
-        q.source_entity_id,
         q.source_name,
-        q.source_record,
+        q.source_record_key,
+        pd.provider AS source_provider,
+        pd.dataset_key AS source_dataset_key,
+        se.source_entity_type,
+        se.source_entity_id,
+        sr.raw_data AS source_raw_data,
         q.decision_reason,
         q.reviewed_by,
         q.reviewed_at,
         q.created_at
     FROM ops.enrichment_review_queue AS q
+    JOIN provider_sync.source_entities AS se
+      ON se.source_entity_key = q.source_entity_key
+    JOIN provider_sync.provider_datasets AS pd
+      ON pd.provider_dataset_id = se.provider_dataset_id
+    JOIN provider_sync.source_records AS sr
+      ON sr.source_entity_key = q.source_entity_key
+     AND sr.source_record_key = q.source_record_key
 {status_filter.rstrip()}
       AND (
         CAST(:min_score AS numeric) IS NULL
@@ -3565,7 +3564,7 @@ WITH reviews AS MATERIALIZED (
         OR q.target_feature_id ILIKE CAST(:q_like AS text)
         OR q.target_name ILIKE CAST(:q_like AS text)
         OR q.source_name ILIKE CAST(:q_like AS text)
-        OR q.source_entity_id ILIKE CAST(:q_like AS text)
+        OR se.source_entity_id ILIKE CAST(:q_like AS text)
       )
       AND (
         CAST(:cursor_review_id AS uuid) IS NULL
@@ -3627,32 +3626,30 @@ LEFT JOIN LATERAL (
             ELSE NULL
         END AS source_lat,
         COALESCE(
-            q.source_record #>> '{{raw_data,event_start_date}}',
-            q.source_record #>> '{{raw_data,eventstartdate}}',
-            q.source_record #>> '{{raw_data,start_date}}'
+            q.source_raw_data ->> 'event_start_date',
+            q.source_raw_data ->> 'eventstartdate',
+            q.source_raw_data ->> 'start_date'
         ) AS source_start_date,
         COALESCE(
-            q.source_record #>> '{{raw_data,event_end_date}}',
-            q.source_record #>> '{{raw_data,eventenddate}}',
-            q.source_record #>> '{{raw_data,end_date}}'
+            q.source_raw_data ->> 'event_end_date',
+            q.source_raw_data ->> 'eventenddate',
+            q.source_raw_data ->> 'end_date'
         ) AS source_end_date
     FROM (
         SELECT
             NULLIF(
                 COALESCE(
-                    q.source_record ->> 'raw_longitude',
-                    q.source_record #>> '{{raw_data,map_x}}',
-                    q.source_record #>> '{{raw_data,mapx}}',
-                    q.source_record #>> '{{raw_data,longitude}}'
+                    q.source_raw_data ->> 'map_x',
+                    q.source_raw_data ->> 'mapx',
+                    q.source_raw_data ->> 'longitude'
                 ),
                 ''
             ) AS source_lon_text,
             NULLIF(
                 COALESCE(
-                    q.source_record ->> 'raw_latitude',
-                    q.source_record #>> '{{raw_data,map_y}}',
-                    q.source_record #>> '{{raw_data,mapy}}',
-                    q.source_record #>> '{{raw_data,latitude}}'
+                    q.source_raw_data ->> 'map_y',
+                    q.source_raw_data ->> 'mapy',
+                    q.source_raw_data ->> 'latitude'
                 ),
                 ''
             ) AS source_lat_text
@@ -3686,6 +3683,10 @@ def _enrichment_review_count_sql(status_filter: str, provider_filter: str) -> st
     return f"""
 SELECT count(*)::integer AS total_count
 FROM ops.enrichment_review_queue AS q
+JOIN provider_sync.source_entities AS se
+  ON se.source_entity_key = q.source_entity_key
+JOIN provider_sync.provider_datasets AS pd
+  ON pd.provider_dataset_id = se.provider_dataset_id
 {status_filter.rstrip()}
       AND (
         CAST(:min_score AS numeric) IS NULL
@@ -3701,7 +3702,7 @@ FROM ops.enrichment_review_queue AS q
         OR q.target_feature_id ILIKE CAST(:q_like AS text)
         OR q.target_name ILIKE CAST(:q_like AS text)
         OR q.source_name ILIKE CAST(:q_like AS text)
-        OR q.source_entity_id ILIKE CAST(:q_like AS text)
+        OR se.source_entity_id ILIKE CAST(:q_like AS text)
       )
 """
 
@@ -3759,17 +3760,24 @@ SELECT
     q.target_feature_id,
     CAST(f.feature_uuid AS text) AS target_feature_uuid,
     q.target_name,
-    q.source_provider,
-    q.source_dataset_key,
-    q.source_entity_id,
+    q.source_record_key,
+    pd.provider AS source_provider,
+    pd.dataset_key AS source_dataset_key,
+    se.source_entity_type,
+    se.source_entity_id,
     q.source_name,
-    q.source_record,
+    sr.raw_payload_hash,
+    sr.raw_data,
+    sr.fetched_at,
+    sr.imported_at,
     q.decision_reason,
     q.reviewed_by,
     q.reviewed_at,
     q.created_at,
     f.detail ->> 'starts_on' AS target_start_date,
     f.detail ->> 'ends_on' AS target_end_date,
+    src.source_lon,
+    src.source_lat,
     src.source_start_date,
     src.source_end_date,
     dist.distance_m,
@@ -3782,6 +3790,13 @@ SELECT
         )::double precision
     END AS spatial_score
 FROM ops.enrichment_review_queue AS q
+JOIN provider_sync.source_entities AS se
+  ON se.source_entity_key = q.source_entity_key
+JOIN provider_sync.provider_datasets AS pd
+  ON pd.provider_dataset_id = se.provider_dataset_id
+JOIN provider_sync.source_records AS sr
+  ON sr.source_entity_key = q.source_entity_key
+ AND sr.source_record_key = q.source_record_key
 -- T-VN-35(0086): target_start_date/target_end_date는 event subtype
 -- (``feature_events.starts_on``/``ends_on``)에서 나온다. 조립 규칙을 여기서
 -- 복제하지 않도록 ``features_detailed`` 뷰의 ``detail``을 그대로 읽는다.
@@ -3799,32 +3814,30 @@ LEFT JOIN LATERAL (
             ELSE NULL
         END AS source_lat,
         COALESCE(
-            q.source_record #>> '{{raw_data,event_start_date}}',
-            q.source_record #>> '{{raw_data,eventstartdate}}',
-            q.source_record #>> '{{raw_data,start_date}}'
+            sr.raw_data ->> 'event_start_date',
+            sr.raw_data ->> 'eventstartdate',
+            sr.raw_data ->> 'start_date'
         ) AS source_start_date,
         COALESCE(
-            q.source_record #>> '{{raw_data,event_end_date}}',
-            q.source_record #>> '{{raw_data,eventenddate}}',
-            q.source_record #>> '{{raw_data,end_date}}'
+            sr.raw_data ->> 'event_end_date',
+            sr.raw_data ->> 'eventenddate',
+            sr.raw_data ->> 'end_date'
         ) AS source_end_date
     FROM (
         SELECT
             NULLIF(
                 COALESCE(
-                    q.source_record ->> 'raw_longitude',
-                    q.source_record #>> '{{raw_data,map_x}}',
-                    q.source_record #>> '{{raw_data,mapx}}',
-                    q.source_record #>> '{{raw_data,longitude}}'
+                    sr.raw_data ->> 'map_x',
+                    sr.raw_data ->> 'mapx',
+                    sr.raw_data ->> 'longitude'
                 ),
                 ''
             ) AS source_lon_text,
             NULLIF(
                 COALESCE(
-                    q.source_record ->> 'raw_latitude',
-                    q.source_record #>> '{{raw_data,map_y}}',
-                    q.source_record #>> '{{raw_data,mapy}}',
-                    q.source_record #>> '{{raw_data,latitude}}'
+                    sr.raw_data ->> 'map_y',
+                    sr.raw_data ->> 'mapy',
+                    sr.raw_data ->> 'latitude'
                 ),
                 ''
             ) AS source_lat_text
@@ -4024,7 +4037,7 @@ async def get_enrichment_review_detail(
     if target is None:
         return None
 
-    source = _review_source_from_record(row["source_record"])
+    source = _review_source_from_queued_row(row)
     target_detail_available = _has_review_detail(target.detail)
     target_feature_uuid = row["target_feature_uuid"]
     return EnrichmentReviewDetail(
@@ -4040,6 +4053,8 @@ async def get_enrichment_review_detail(
         source_dataset_key=str(row["source_dataset_key"]),
         source_entity_id=str(row["source_entity_id"]),
         source_name=str(row["source_name"]),
+        source_lon=_float_or_none(row["source_lon"]),
+        source_lat=_float_or_none(row["source_lat"]),
         target_start_date=row["target_start_date"],
         target_end_date=row["target_end_date"],
         source_start_date=row["source_start_date"],

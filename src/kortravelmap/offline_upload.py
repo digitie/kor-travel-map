@@ -21,8 +21,8 @@ from pathlib import PurePath
 from typing import TYPE_CHECKING, Final, Protocol
 
 from pydantic import BaseModel
+from sqlalchemy import text
 
-from kortravelmap.core.feature_operation import ProviderDatasetOperationKey
 from kortravelmap.core.ids import (
     make_feature_id,
     make_payload_hash,
@@ -56,6 +56,7 @@ from kortravelmap.infra.advisory_lock import try_advisory_lock
 from kortravelmap.infra.feature_repo import FeatureLoadResult, load_bundles
 from kortravelmap.infra.jobs_repo import (
     ImportJob,
+    ImportJobDatasetTarget,
     bind_import_job_dagster_run,
     finish_import_job,
     get_import_job,
@@ -98,6 +99,29 @@ __all__ = [
 
 OFFLINE_UPLOAD_LOAD_JOB_KIND: Final[str] = "offline_upload_load"
 OFFLINE_UPLOAD_VALIDATE_JOB_KIND: Final[str] = "offline_upload_validate"
+
+
+async def _resolve_provider_dataset_display(
+    session: AsyncSession,
+    provider_dataset_id: int,
+) -> tuple[str, str]:
+    """Canonical dataset ID를 parser에 필요한 display identity로만 해석한다."""
+
+    row = (
+        await session.execute(
+            text(
+                """
+                SELECT provider, dataset_key
+                FROM provider_sync.provider_datasets
+                WHERE provider_dataset_id = :provider_dataset_id
+                """
+            ),
+            {"provider_dataset_id": provider_dataset_id},
+        )
+    ).mappings().one_or_none()
+    if row is None:
+        raise ValueError(f"provider dataset 없음: {provider_dataset_id}")
+    return str(row["provider"]), str(row["dataset_key"])
 
 
 async def _touch_file_registry(
@@ -310,6 +334,9 @@ async def run_offline_upload_validation_job(
             f"offline upload {upload_id!r}는 validation 가능한 상태가 아님: {upload.status!r}"
         )
     mapping = normalize_offline_upload_column_mapping(column_mapping)
+    provider, dataset_key = await _resolve_provider_dataset_display(
+        session, upload.provider_dataset_id
+    )
 
     async with try_advisory_lock(
         session, f"offline-upload-validate:{upload.upload_id}"
@@ -322,8 +349,7 @@ async def run_offline_upload_validation_job(
             kind=OFFLINE_UPLOAD_VALIDATE_JOB_KIND,
             payload={
                 "upload_id": upload.upload_id,
-                "provider": upload.provider,
-                "dataset_key": upload.dataset_key,
+                "provider_dataset_id": upload.provider_dataset_id,
                 "sync_scope": upload.sync_scope,
                 "storage_backend": upload.storage_backend,
                 "storage_key": upload.storage_key,
@@ -332,8 +358,10 @@ async def run_offline_upload_validation_job(
                 "column_mapping": mapping.as_payload(),
             },
             source_checksum=upload.checksum_sha256,
-            provider_dataset=ProviderDatasetOperationKey(
-                upload.provider, upload.dataset_key
+            dataset_membership=ImportJobDatasetTarget(
+                provider_dataset_id=upload.provider_dataset_id,
+                sync_scope=upload.sync_scope,
+                operation_key=upload.operation_key,
             ),
             trigger_kind="manual",
         )
@@ -369,6 +397,8 @@ async def run_offline_upload_validation_job(
             result = await validate_offline_tabular_upload_async(
                 upload,
                 body,
+                provider=provider,
+                dataset_key=dataset_key,
                 column_mapping=mapping,
                 sample_size=sample_size,
                 checksum_sha256=checksum_actual,
@@ -472,6 +502,9 @@ async def run_offline_upload_load_job(
     upload_format = _detected_format(upload.detected_format, upload.original_filename)
     if upload_format in OFFLINE_UPLOAD_TABULAR_FORMATS and upload.validation_job_id is None:
         raise ValueError("CSV/TSV offline upload은 load 전 validation이 필요함.")
+    provider, dataset_key = await _resolve_provider_dataset_display(
+        session, upload.provider_dataset_id
+    )
 
     preclaimed_job: ImportJob | None = None
     if preclaimed:
@@ -522,8 +555,7 @@ async def run_offline_upload_load_job(
                 kind=OFFLINE_UPLOAD_LOAD_JOB_KIND,
                 payload={
                     "upload_id": upload.upload_id,
-                    "provider": upload.provider,
-                    "dataset_key": upload.dataset_key,
+                    "provider_dataset_id": upload.provider_dataset_id,
                     "sync_scope": upload.sync_scope,
                     "storage_backend": upload.storage_backend,
                     "storage_key": upload.storage_key,
@@ -531,8 +563,10 @@ async def run_offline_upload_load_job(
                 },
                 source_checksum=upload.checksum_sha256,
                 dagster_run_id=dagster_run_id,
-                provider_dataset=ProviderDatasetOperationKey(
-                    upload.provider, upload.dataset_key
+                dataset_membership=ImportJobDatasetTarget(
+                    provider_dataset_id=upload.provider_dataset_id,
+                    sync_scope=upload.sync_scope,
+                    operation_key=upload.operation_key,
                 ),
                 trigger_kind="manual",
             )
@@ -584,8 +618,8 @@ async def run_offline_upload_load_job(
                     )
                 bundles = await parse_offline_tabular_feature_bundles_async(
                     body,
-                    provider=upload.provider,
-                    dataset_key=upload.dataset_key,
+                    provider=provider,
+                    dataset_key=dataset_key,
                     column_mapping=column_mapping,
                     detected_format=upload.detected_format,
                     detected_encoding=upload.detected_encoding,
@@ -599,8 +633,8 @@ async def run_offline_upload_load_job(
                     detected_format=upload.detected_format,
                     detected_encoding=upload.detected_encoding,
                     original_filename=upload.original_filename,
-                    provider=upload.provider,
-                    dataset_key=upload.dataset_key,
+                    provider=provider,
+                    dataset_key=dataset_key,
                     column_mapping=column_mapping,
                 )
 
@@ -752,6 +786,8 @@ def validate_offline_tabular_upload(
     upload: OfflineUpload,
     data: bytes,
     *,
+    provider: str,
+    dataset_key: str,
     column_mapping: OfflineUploadColumnMapping | Mapping[str, object],
     sample_size: int = 1000,
     checksum_sha256: str | None = None,
@@ -773,8 +809,8 @@ def validate_offline_tabular_upload(
         try:
             _bundle_from_tabular_row(
                 row,
-                provider=upload.provider,
-                dataset_key=upload.dataset_key,
+                provider=provider,
+                dataset_key=dataset_key,
                 mapping=mapping,
                 row_number=offset,
             )
@@ -814,6 +850,8 @@ async def validate_offline_tabular_upload_async(
     upload: OfflineUpload,
     data: bytes,
     *,
+    provider: str,
+    dataset_key: str,
     column_mapping: OfflineUploadColumnMapping | Mapping[str, object],
     sample_size: int = 1000,
     checksum_sha256: str | None = None,
@@ -837,8 +875,8 @@ async def validate_offline_tabular_upload_async(
         try:
             await _bundle_from_tabular_row_async(
                 row,
-                provider=upload.provider,
-                dataset_key=upload.dataset_key,
+                provider=provider,
+                dataset_key=dataset_key,
                 mapping=mapping,
                 row_number=offset,
                 address_resolver=address_resolver,
@@ -1236,10 +1274,6 @@ def _bundle_from_tabular_row(
         source_entity_type="offline_tabular_row",
         source_entity_id=source_entity_id,
         raw_payload_hash=payload_hash,
-        raw_name=name,
-        raw_address=address_text,
-        raw_longitude=lon,
-        raw_latitude=lat,
         raw_data=raw_payload,
         fetched_at=datetime.now(_KST),
         source_record_key=source_record_key,
@@ -1250,7 +1284,6 @@ def _bundle_from_tabular_row(
         source_role=SourceRole.PRIMARY,
         match_method="offline_upload_column_mapping",
         confidence=100,
-        is_primary_source=True,
     )
     return FeatureBundle(
         feature=feature,
@@ -1468,4 +1501,4 @@ def _verify_checksum(upload: OfflineUpload, checksum_actual: str) -> None:
 
 
 def _advisory_key(upload: OfflineUpload) -> str:
-    return f"import:{upload.provider}:{upload.dataset_key}:{upload.sync_scope}"
+    return f"import:{upload.provider_dataset_id}:{upload.sync_scope}"

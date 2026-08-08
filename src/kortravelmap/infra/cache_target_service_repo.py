@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from sqlalchemy import text
 
@@ -22,10 +22,12 @@ from kortravelmap.infra.feature_update_repo import (
     get_update_request,
     lock_feature_update_request_idempotency,
 )
+from kortravelmap.infra.jobs_repo import ImportJobDatasetTarget
 from kortravelmap.infra.poi_cache_target_repo import poi_cache_target_entity_tag
+from kortravelmap.infra.scope_repo import count_features_matching_scope
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -150,6 +152,45 @@ def _refresh_result(
     )
 
 
+async def _refresh_scope_memberships(
+    session: AsyncSession,
+    *,
+    scope: Mapping[str, Any],
+    external_system: str,
+) -> tuple[ImportJobDatasetTarget, ...]:
+    """refresh scope가 실제로 가리키는 canonical membership을 먼저 확정한다.
+
+    T-VN-33 이후 feature update request는 최소 1개의 exact membership을 요구한다
+    (ADR-088 §결정 2). ``cache_target_keys`` scope의 membership은 target 반경 안
+    feature의 primary source dataset에서 나오므로, 요청한 target이 전부
+    missing/deleted/disabled거나 반경 안에 feature가 없으면 membership이 0개가 된다.
+
+    그 경우를 ``enqueue_feature_update_request``까지 흘려보내면 맨 ``ValueError``가
+    500으로 새어 나간다 — PinVi 대면 경로에서 "서버 결함"으로 보이고 무엇이
+    비었는지도 알려주지 않는다. 여기서 미리 해석해 typed conflict로 바꾸고, 확정한
+    membership을 그대로 enqueue에 넘겨 재해석 사이에 스냅샷이 어긋나지 않게 한다.
+    """
+
+    resolution = await count_features_matching_scope(session, scope)
+    memberships = tuple(
+        ImportJobDatasetTarget(
+            provider_dataset_id=item.provider_dataset_id,
+            sync_scope=item.sync_scope,
+            operation_key=item.operation_key,
+        )
+        for item in resolution.provider_datasets
+    )
+    if memberships:
+        return memberships
+    current: dict[str, Any] = {"external_system": external_system}
+    current.update(resolution.matched_scope())
+    raise CacheTargetStreamConflict(
+        "refresh_scope_empty",
+        "refresh 대상 target 반경 안에 갱신 가능한 feature가 없습니다.",
+        current=current,
+    )
+
+
 async def create_cache_target_refresh_request(
     session: AsyncSession,
     *,
@@ -218,13 +259,20 @@ async def create_cache_target_refresh_request(
             "consumer_mismatch",
             "service principal consumer_id가 stream binding과 다릅니다.",
         )
+    scope: dict[str, Any] = {
+        "type": "cache_target_keys",
+        "external_system": external_system,
+        "target_keys": list(canonical_target_keys),
+    }
+    memberships = await _refresh_scope_memberships(
+        session,
+        scope=scope,
+        external_system=external_system,
+    )
     request = await enqueue_feature_update_request(
         session,
-        scope={
-            "type": "cache_target_keys",
-            "external_system": external_system,
-            "target_keys": list(canonical_target_keys),
-        },
+        scope=scope,
+        dataset_memberships=memberships,
         run_mode="queued",
         operator=actor,
         reason=reason,

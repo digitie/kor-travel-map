@@ -576,10 +576,6 @@ async def _rest_area_item_to_bundle(
         source_entity_type=_REST_AREA_ENTITY_TYPE,
         source_entity_id=natural_key,
         raw_payload_hash=payload_hash,
-        raw_name=item.name,
-        raw_address=None,
-        raw_longitude=lon,
-        raw_latitude=lat,
         raw_data=raw_data,
         fetched_at=fetched_at,
         source_record_key=source_record_key,
@@ -590,7 +586,6 @@ async def _rest_area_item_to_bundle(
         source_role=SourceRole.PRIMARY,
         match_method="natural_key",
         confidence=100,
-        is_primary_source=True,
     )
     return FeatureBundle(
         feature=feature, source_record=source_record, source_link=source_link
@@ -826,19 +821,8 @@ def _fuel_price_record_to_bundle_and_values(
         or record.service_area_name
         or service_area_code
     )
-    raw_data = {
-        "service_area_code": service_area_code,
-        "route_name": record.route_name,
-        "direction": record.direction,
-        "oil_company": record.oil_company,
-        "service_area_name": record.service_area_name,
-        "phone_number": record.phone_number,
-        "address": record.address,
-        "gasoline_price": record.gasoline_price,
-        "diesel_price": record.diesel_price,
-        "lpg_price": record.lpg_price,
-        "raw": _fuel_price_raw(record),
-    }
+    # typed field의 재구성본이 아니라 provider가 보낸 row를 그대로 보존한다.
+    raw_data = _fuel_price_raw(record)
     payload_hash = make_payload_hash(raw_data)
     source_record_key = make_source_record_key(
         provider=KREX_PROVIDER_NAME,
@@ -923,10 +907,6 @@ def _fuel_price_record_to_bundle_and_values(
         source_entity_type=_REST_AREA_PRICE_ENTITY_TYPE,
         source_entity_id=service_area_code,
         raw_payload_hash=payload_hash,
-        raw_name=record.service_area_name,
-        raw_address=road_address,
-        raw_longitude=coord.lon if coord is not None else None,
-        raw_latitude=coord.lat if coord is not None else None,
         raw_data=raw_data,
         fetched_at=fetched_at,
         source_record_key=source_record_key,
@@ -937,7 +917,6 @@ def _fuel_price_record_to_bundle_and_values(
         source_role=SourceRole.PRIMARY,
         match_method="natural_key",
         confidence=100,
-        is_primary_source=True,
     )
     return (
         FeatureBundle(
@@ -1140,10 +1119,6 @@ async def _rest_area_weather_record_to_bundle(
         source_entity_type=_REST_AREA_WEATHER_ENTITY_TYPE,
         source_entity_id=natural_key,
         raw_payload_hash=payload_hash,
-        raw_name=record.unit_name,
-        raw_address=None,
-        raw_longitude=lon,
-        raw_latitude=lat,
         raw_data=raw_data,
         fetched_at=fetched_at,
         source_record_key=source_record_key,
@@ -1154,7 +1129,6 @@ async def _rest_area_weather_record_to_bundle(
         source_role=SourceRole.PRIMARY,
         match_method="natural_key",
         confidence=100,
-        is_primary_source=True,
     )
     return FeatureBundle(
         feature=feature, source_record=source_record, source_link=source_link
@@ -1421,40 +1395,9 @@ async def _traffic_notice_item_to_bundle(
     # realTimeSms에는 종료 시각 컬럼이 없다(#378) — transient feed 만료는 refresh
     # (사라짐) + process_status(payload 보존)가 표현한다(모듈 docstring).
     valid_until: datetime | None = None
-    # coordless row는 좌표·주소 둘 다 없으면 주소 검증이 ``missing_address``
-    # error로 막으므로(validation.py), 노선명/번호·돌발지점명·방향을 위치 단서
-    # (raw_address)로 채워 coordless notice도 적재되게 한다(ADR-044).
-    location_clue = (
-        " ".join(
-            part
-            for part in (
-                (item.route_name or item.route_no or "").strip(),
-                (item.point_name or "").strip(),
-                (item.direction or "").strip(),
-            )
-            if part
-        )
-        or None
-    )
-
-    raw_data: dict[str, Any] = {
-        "natural_key": natural_key,
-        "occurred_date": item.occurred_date,
-        "occurred_time": item.occurred_time,
-        "incident_type": item.incident_type,
-        "incident_type_code": item.incident_type_code,
-        "direction": item.direction,
-        "message": item.message,
-        "point_name": item.point_name,
-        "route_no": item.route_no,
-        "route_name": item.route_name,
-        "process_status": item.process_status,
-        "process_status_code": item.process_status_code,
-        "latitude": str(lat) if lat is not None else None,
-        "longitude": str(lon) if lon is not None else None,
-        "congestion_length": item.congestion_length,
-        "series_no": item.series_no,
-    }
+    # ``Incident.raw``는 EX API의 원 row다. natural key·정규화된 notice 속성은
+    # Feature/lineage에만 두고 immutable source record에는 원 payload만 남긴다.
+    raw_data = dict(item.raw)
     payload_hash = make_payload_hash(raw_data)
     source_record_key = make_source_record_key(
         provider=KREX_PROVIDER_NAME,
@@ -1514,10 +1457,6 @@ async def _traffic_notice_item_to_bundle(
         source_entity_type=_TRAFFIC_NOTICE_ENTITY_TYPE,
         source_entity_id=natural_key,
         raw_payload_hash=payload_hash,
-        raw_name=title,
-        raw_address=location_clue,
-        raw_longitude=lon,
-        raw_latitude=lat,
         raw_data=raw_data,
         fetched_at=fetched_at,
         source_record_key=source_record_key,
@@ -1528,7 +1467,6 @@ async def _traffic_notice_item_to_bundle(
         source_role=SourceRole.PRIMARY,
         match_method="natural_key",
         confidence=100,
-        is_primary_source=True,
     )
     return FeatureBundle(
         feature=feature, source_record=source_record, source_link=source_link
@@ -1550,7 +1488,7 @@ async def traffic_notices_to_bundles(
     ``traffic``), 발생 시각(`_parse_krex_occurrence` → valid_start_time;
     원천 시각이 없거나 파싱 실패하면 fetched_at), source_agency(``한국도로공사`` 고정).
     좌표가 있는 row(실측 36/99)는 Coordinate + reverse geocoding, 없는 row는
-    coordless(global feature_id, 노선/지점/방향이 raw_address 위치 단서)다.
+    coordless(global feature_id, 원 payload의 노선/지점/방향이 위치 단서)다.
 
     **transient feed**: 해소된 incident는 사라지므로 재실행마다 활성 집합으로
     refresh되고, 실행 사이 stale Feature가 남는 건 정상이다(모듈 docstring).

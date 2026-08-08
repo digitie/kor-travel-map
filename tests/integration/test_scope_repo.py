@@ -21,6 +21,55 @@ pytestmark = pytest.mark.integration
 _KST = timezone(timedelta(hours=9))
 _FETCHED = datetime(2026, 6, 3, 12, 0, tzinfo=_KST)
 
+_REFRESH_MEMBERSHIP_SQL = """
+SELECT scope.provider_dataset_id, scope.sync_scope, scope.operation_key
+FROM provider_sync.provider_dataset_operation_scopes AS scope
+JOIN provider_sync.provider_datasets AS dataset
+  ON dataset.provider_dataset_id = scope.provider_dataset_id
+JOIN provider_sync.provider_dataset_operations AS operation
+  ON operation.provider_dataset_id = scope.provider_dataset_id
+ AND operation.operation_key = scope.operation_key
+ AND operation.operation_kind = scope.operation_kind
+WHERE dataset.provider = :provider
+  AND dataset.dataset_key = :dataset_key
+  AND scope.operation_kind = 'refresh'
+  AND (
+      CAST(:sync_scope AS text) IS NULL
+      OR scope.sync_scope = CAST(:sync_scope AS text)
+  )
+  AND dataset.is_active
+  AND operation.is_enabled
+ORDER BY scope.sync_scope, scope.operation_key
+LIMIT 1
+"""
+
+
+async def _refresh_membership(
+    session: AsyncSession,
+    *,
+    provider: str,
+    dataset_key: str,
+    sync_scope: str | None = None,
+) -> tuple[int, str, str]:
+    """catalog에서 활성 refresh membership triple을 읽는다.
+
+    T-VN-33 이후 scope identity는 ``provider_dataset_id + sync_scope +
+    operation_key``다 — 자연키 pair는 표시용 projection일 뿐이라 테스트도
+    catalog(0089 seed)에서 실제 triple을 읽어 쓴다.
+    """
+
+    row = (
+        await session.execute(
+            text(_REFRESH_MEMBERSHIP_SQL),
+            {
+                "provider": provider,
+                "dataset_key": dataset_key,
+                "sync_scope": sync_scope,
+            },
+        )
+    ).one()
+    return int(row.provider_dataset_id), str(row.sync_scope), str(row.operation_key)
+
 
 @dataclass(frozen=True)
 class _Festival:
@@ -166,6 +215,12 @@ async def test_count_feature_ids_excludes_deleted_features_from_provider_counts(
         preview_limit=10,
     )
 
+    provider_dataset_id, sync_scope, operation_key = await _refresh_membership(
+        migrated_session,
+        provider=active.source_record.provider,
+        dataset_key=active.source_record.dataset_key,
+    )
+
     assert result.feature_ids == (active.feature.feature_id,)
     assert result.feature_count == 1
     assert result.provider_datasets == (
@@ -173,6 +228,9 @@ async def test_count_feature_ids_excludes_deleted_features_from_provider_counts(
             provider=active.source_record.provider,
             dataset_key=active.source_record.dataset_key,
             feature_count=1,
+            provider_dataset_id=provider_dataset_id,
+            sync_scope=sync_scope,
+            operation_key=operation_key,
         ),
     )
 
@@ -232,6 +290,12 @@ async def test_count_center_radius_uses_limited_preview_and_full_counts(
         preview_limit=1,
     )
 
+    provider_dataset_id, sync_scope, operation_key = await _refresh_membership(
+        migrated_session,
+        provider=bundles[0].source_record.provider,
+        dataset_key=bundles[0].source_record.dataset_key,
+    )
+
     assert result.feature_count == 3
     assert len(result.feature_ids) == 1
     assert set(result.feature_ids) <= {bundle.feature.feature_id for bundle in bundles}
@@ -240,6 +304,9 @@ async def test_count_center_radius_uses_limited_preview_and_full_counts(
             provider=bundles[0].source_record.provider,
             dataset_key=bundles[0].source_record.dataset_key,
             feature_count=3,
+            provider_dataset_id=provider_dataset_id,
+            sync_scope=sync_scope,
+            operation_key=operation_key,
         ),
     )
     matched = result.matched_scope()
@@ -263,10 +330,16 @@ async def test_resolve_bbox_and_provider_dataset(
     )
     assert bundle.feature.feature_id in bbox.feature_ids
 
-    provider_scope = await scope_repo.resolve_provider_dataset(
+    provider_dataset_id, sync_scope, operation_key = await _refresh_membership(
         migrated_session,
         provider=bundle.source_record.provider,
         dataset_key=bundle.source_record.dataset_key,
+    )
+    provider_scope = await scope_repo.resolve_provider_dataset(
+        migrated_session,
+        provider_dataset_id=provider_dataset_id,
+        sync_scope=sync_scope,
+        operation_key=operation_key,
     )
     assert bundle.feature.feature_id in provider_scope.feature_ids
     assert provider_scope.provider_datasets == (
@@ -274,6 +347,9 @@ async def test_resolve_bbox_and_provider_dataset(
             provider=bundle.source_record.provider,
             dataset_key=bundle.source_record.dataset_key,
             feature_count=1,
+            provider_dataset_id=provider_dataset_id,
+            sync_scope=sync_scope,
+            operation_key=operation_key,
         ),
     )
 
@@ -291,13 +367,19 @@ async def test_count_provider_dataset_uses_limited_preview_and_full_count(
     ]
     provider = bundles[0].source_record.provider
     dataset_key = bundles[0].source_record.dataset_key
+    provider_dataset_id, sync_scope, operation_key = await _refresh_membership(
+        migrated_session,
+        provider=provider,
+        dataset_key=dataset_key,
+    )
 
     result = await scope_repo.count_features_matching_scope(
         migrated_session,
         {
             "type": "provider_dataset",
-            "provider": provider,
-            "dataset_key": dataset_key,
+            "provider_dataset_id": provider_dataset_id,
+            "sync_scope": sync_scope,
+            "operation_key": operation_key,
         },
         preview_limit=1,
     )
@@ -310,6 +392,9 @@ async def test_count_provider_dataset_uses_limited_preview_and_full_count(
             provider=provider,
             dataset_key=dataset_key,
             feature_count=3,
+            provider_dataset_id=provider_dataset_id,
+            sync_scope=sync_scope,
+            operation_key=operation_key,
         ),
     )
     assert result.matched_scope()["feature_preview_truncated"] is True
@@ -318,25 +403,35 @@ async def test_count_provider_dataset_uses_limited_preview_and_full_count(
 async def test_count_provider_dataset_surfaces_requested_pair_at_zero_features(
     migrated_session: AsyncSession,
 ) -> None:
-    """primary-source feature가 0건인 provider/dataset도 preview는 요청 pair를 노출한다.
+    """primary-source feature가 0건인 membership도 preview는 요청 triple을 노출한다.
 
-    executor ``_provider_dataset_scopes``와 동일한 WYSIWYG 계약 — 아직 feature가
-    적재되지 않은 dataset(예: ``kma_ultra_short_nowcast``)을 대상으로 update request를
-    미리보기하면 ``matched_scope.provider_datasets``에 요청 pair가 ``feature_count=0`` +
-    요청 ``sync_scope``와 함께 포함되어야 한다(preview == execute; UI preview 결과가
-    execute 대상 sync_scope를 그대로 노출).
+    executor와 동일한 WYSIWYG 계약 — 아직 feature가 적재되지 않은 dataset(예:
+    ``kma_ultra_short_nowcast``)을 대상으로 update request를 미리보기하면
+    ``matched_scope.provider_datasets``에 요청한 canonical membership
+    (``provider_dataset_id + sync_scope + operation_key``)이 ``feature_count=0``으로
+    포함되어야 한다(preview == execute; UI preview 결과가 execute 대상 membership을
+    그대로 노출). ``dataset_wide``가 아닌 ``target_grids`` scope를 골라 요청한
+    ``sync_scope``가 그대로 반향되는지도 함께 고정한다.
     """
+    provider_dataset_id, sync_scope, operation_key = await _refresh_membership(
+        migrated_session,
+        provider="python-kma-api",
+        dataset_key="kma_ultra_short_nowcast",
+        sync_scope="target_grids",
+    )
+
     result = await scope_repo.count_features_matching_scope(
         migrated_session,
         {
             "type": "provider_dataset",
-            "provider": "python-kma-api",
-            "dataset_key": "kma_ultra_short_nowcast",
-            "sync_scope": "external_system:e2e-preview",
+            "provider_dataset_id": provider_dataset_id,
+            "sync_scope": sync_scope,
+            "operation_key": operation_key,
         },
         preview_limit=5,
     )
 
+    assert sync_scope == "target_grids"
     assert result.feature_count == 0
     assert result.feature_ids == ()
     assert result.provider_datasets == (
@@ -344,15 +439,19 @@ async def test_count_provider_dataset_surfaces_requested_pair_at_zero_features(
             provider="python-kma-api",
             dataset_key="kma_ultra_short_nowcast",
             feature_count=0,
-            sync_scope="external_system:e2e-preview",
+            provider_dataset_id=provider_dataset_id,
+            sync_scope=sync_scope,
+            operation_key=operation_key,
         ),
     )
     assert result.matched_scope()["provider_datasets"] == [
         {
+            "provider_dataset_id": provider_dataset_id,
+            "sync_scope": sync_scope,
+            "operation_key": operation_key,
             "provider": "python-kma-api",
             "dataset_key": "kma_ultra_short_nowcast",
             "feature_count": 0,
-            "sync_scope": "external_system:e2e-preview",
         }
     ]
 

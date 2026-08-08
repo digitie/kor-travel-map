@@ -50,6 +50,8 @@ export type PipelineExecutionsListResponse =
 export type PipelineExecutionRecord = Schemas["PipelineExecutionRecord"];
 export type PipelineExecutionRootRecord =
   Schemas["PipelineExecutionRootRecord"];
+export type PipelineProviderDatasetIdentityRecord =
+  Schemas["PipelineProviderDatasetIdentityRecord"];
 export type PipelineProjectedJobRecord = Schemas["PipelineProjectedJobRecord"];
 export type PipelineDagsterRunDetailResponse =
   Schemas["DagsterRunDetailResponse"];
@@ -127,29 +129,13 @@ export type JobEventLevel = Exclude<EventsQuery["level"], null | undefined>;
 export type PipelineScheduleCommand = PipelineScheduleCommandRequest["command"];
 
 
-export interface PipelineExecutionsParams {
-  kind?: ExecutionKind;
-  status?: ExecutionStatus;
-  provider?: string;
-  dataset_key?: string;
-  sync_scope?: string;
-  load_batch_id?: string;
-  parent_job_id?: string;
-  created_from?: string;
-  created_to?: string;
-  page_size?: number;
+export type PipelineExecutionsParams = Omit<ExecutionsQuery, "cursor"> & {
   cursor?: string | null;
-}
+};
 
-export interface PipelineEventsParams {
-  job_id?: string;
-  level?: JobEventLevel;
-  provider?: string;
-  dataset_key?: string;
-  sync_scope?: string;
-  page_size?: number;
+export type PipelineEventsParams = Omit<EventsQuery, "cursor"> & {
   cursor?: string | null;
-}
+};
 
 export interface PipelineExecutionDetailParams {
   level?: DetailQuery["level"];
@@ -175,9 +161,9 @@ function fetchExecutions(
     pathWithQuery("/v1/ops/pipeline/executions", {
       kind: params.kind,
       status: params.status,
-      provider: params.provider,
-      dataset_key: params.dataset_key,
+      provider_dataset_id: params.provider_dataset_id,
       sync_scope: params.sync_scope,
+      operation_key: params.operation_key,
       load_batch_id: params.load_batch_id,
       parent_job_id: params.parent_job_id,
       created_from: params.created_from,
@@ -216,9 +202,9 @@ function fetchEvents(
     pathWithQuery("/v1/ops/pipeline/events", {
       job_id: params.job_id,
       level: params.level,
-      provider: params.provider,
-      dataset_key: params.dataset_key,
+      provider_dataset_id: params.provider_dataset_id,
       sync_scope: params.sync_scope,
+      operation_key: params.operation_key,
       page_size: params.page_size,
       cursor: params.cursor,
     }),

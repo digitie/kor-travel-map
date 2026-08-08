@@ -181,20 +181,14 @@ def _feature_detail() -> AdminFeatureDetail:
         dataset_key="mois_license_features_bulk",
         source_entity_type="license_place",
         source_entity_id="sr-feature-1",
-        source_version="20260603",
         source_role="primary",
         match_method="natural_key",
         confidence=100,
-        is_primary_source=True,
-        raw_name="광화문",
-        raw_address="서울특별시 종로구 세종대로 1",
-        raw_longitude=126.9769,
-        raw_latitude=37.5759,
         raw_payload_hash="hash-1",
         raw_data={"id": "sr-feature-1"},
         fetched_at=now,
         imported_at=now,
-        last_seen_at=now,
+        observed_at=now,
         expires_at=None,
         linked_at=now,
     )
@@ -473,7 +467,8 @@ def test_list_admin_features_passes_filters(
         assert kwargs["q"] == "광화문"
         assert kwargs["kinds"] == ["place"]
         assert kwargs["statuses"] == ["inactive"]
-        assert kwargs["providers"] == ["python-mois-api"]
+        # ADR-088 — provider 자연키 반복 필터는 삭제됐고 dataset canonical ID다.
+        assert kwargs["provider_dataset_id"] == 7
         assert kwargs["page_size"] == 25
         assert kwargs["sort"] == "issue_count"
         assert kwargs["order"] == "desc"
@@ -487,7 +482,7 @@ def test_list_admin_features_passes_filters(
             "q": "광화문",
             "kind": "place",
             "status": "inactive",
-            "provider": "python-mois-api",
+            "provider_dataset_id": "7",
             "page_size": "25",
             "sort": "issue_count",
         },
@@ -572,6 +567,14 @@ def test_get_admin_feature_detail_returns_linked_operational_data(
     assert body["data"]["feature"]["raw_refs"] == [{"source": "fixture"}]
     assert body["data"]["sources"][0]["source_entity_key"] == "se-feature-1"
     assert body["data"]["sources"][0]["raw_data"] == {"id": "sr-feature-1"}
+    assert body["data"]["sources"][0]["observed_at"] == "2026-06-03T00:00:00Z"
+    assert {
+        "source_version",
+        "raw_name",
+        "raw_address",
+        "raw_longitude",
+        "raw_latitude",
+    }.isdisjoint(body["data"]["sources"][0])
     assert body["data"]["issues"][0]["status"] == "open"
     assert body["data"]["overrides"][0]["field_path"] == "status"
     assert body["data"]["versions"][0]["change_kind"] == "load"

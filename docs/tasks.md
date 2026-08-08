@@ -82,14 +82,9 @@ barrier로 직렬화한다.
   - freeze(Lane A): [x] `T-VN-31A` → [x] `T-VN-31B` → [x] `T-VN-31C`
   - Lane A: [x] `T-VN-32A` → [x] `T-VN-32B` → [x] `T-VN-32C`(prod 배포·값 전환
     라이브 — Map #950/#952/#955/#956·PinVi #430/#432) →
-    [x] `T-VN-35A-D`(typed subtype 분해 — ADR-086, A-D 단일 PR #961 **머지 완료**,
-    상세는 [`tasks-done.md`](tasks-done.md)) →
-    [ ] `T-VN-35-deploy`(alembic `0087` prod 배포 — prod 적용 head는 아직 `0083`) →
-    [/] `T-VN-37`(계보 key 물화 — **PR #968 진행 중**. `tstzrange` 승격은 폐기되고
-    A/B/C가 단일 task로 재정의됐다) → [ ] `T-VN-37D`(empty range 표현 — #968에서
-    보류로 분리)
-  - Lane B shadow: [/] `T-VN-33`(provider dataset 정본 — A/B/C를 **단일 PR로 통합**,
-    **draft PR #966 진행 중**: 사용자 지시로 구현 중단·재개 대기) →
+    [x] `T-VN-35A-D`(typed subtype 분해 — ADR-086, A-D 단일 PR) →
+    [ ] `T-VN-37A` → [ ] `T-VN-37B` → [ ] `T-VN-37C`
+  - Lane B shadow: [~] `T-VN-33`(A/B/C 단일 PR — DB 정본·writer/reader cutover·legacy fence) →
     [ ] `T-VN-38A` → [ ] `T-VN-38B` → [ ] `T-VN-38C` →
     [ ] `T-VN-34A` → [ ] `T-VN-34B` → [ ] `T-VN-34C` →
     [ ] `T-VN-36A` → [ ] `T-VN-36B` → [ ] `T-VN-36C`
@@ -144,6 +139,10 @@ barrier로 직렬화한다.
   바꾸는 PR은 적대 리뷰어 **1명**이 전체 누적 delta를 검토한다. 리뷰 뒤 새 일반 코드 변경이
   누적되면 같은 리뷰어가 재검토한다. 리뷰 지적의 국소 반영, 문서 전용 추가 commit,
   rebase-only, import 정렬·변수명 교정 같은 기계적 변경은 추가 적대 재리뷰 없이 진행한다.
+- **Wave 2 DB 설계 예외(사용자 지시 2026-08-06)**: T-VN-33부터 T-VN-41 이후의
+  schema·migration·API contract 변경은 적대 리뷰어 **2명**이 독립적으로 P0=0을 확인해야
+  한다. 이 규율은 위의 일반 1인 규율보다 우선하며, 두 리뷰의 지적을 반영해 추가한 일반
+  변경도 두 관점 재리뷰 대상이다.
 - pytest와 Playwright를 포함한 모든 검증은 n150 WSL SSH에서 실행한다. mocked e2e도 n150
   Linux가 정본이며, n150에서 실행할 수 없는 브라우저 제약이 확인될 때만 Windows를 fallback으로
   사용한다. live e2e는 항상 n150 파괴적 lane으로 실행한다.
@@ -578,15 +577,41 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 > fixture 생성·소비·종결과 durable 상태는 Map이 소유하고, Manager는 service OpenAPI로
 > transaction ID만 전달한다. PinVi에는 기존 `ops:cancel` 외 권한을 주지 않는다(ADR-084).
 
-- [/] **T-VN-41F1D-D — 최종 격리 리허설·live UI E2E** *(공동, docs-only)*
+- [/] **T-VN-41F1D-D1 — 최종 격리 리허설·provenance attestation** *(공동, docs-only)*
 
-  C3가 결선된 새 generation에서 schema head, canonical `409` receipt, finalize와 관리자 live UI·PinVi
-  mutating E2E 결과를 기록한다. 2026-08-06 n150 rebuild는 committed했고 Map application
-  `0087_route_area_subtypes`, Map Dagster `29b539ebc72a`, PinVi `20260804_0049`와 fixture
-  `finalized`/정확한 `409 PIPELINE_CANCELLATION_UNSAFE`를 확인했다. 로그인과 데이터 비의존 UI smoke는
-  통과했으나, 비어 있는 새 DB에서 고정 curated/feature ID를 요구하는 기존 suite는 ETL 재적재 뒤 별도
-  acceptance로 재실행한다. 서비스 전 단계이므로 중간 DB 데이터 복구는 수행하지 않고 필요 시 source/ETL을
-  새로 적재한다.
+  C3가 결선된 새 generation에서 schema head, canonical `409` receipt, finalize와 **데이터
+  비의존** 관리자 UI smoke(로그인 포함)를 기록한다. 2026-08-06 n150 rebuild는 committed했고
+  Map application `0087_route_area_subtypes`, Map Dagster `29b539ebc72a`, PinVi `20260804_0049`와
+  fixture `finalized`/정확한 `409 PIPELINE_CANCELLATION_UNSAFE`를 확인했다.
+
+  **선행**: T-VN-33 merge. 실행 순서는 `T-VN-33 merge → final Map source/image/OpenAPI
+  provenance pin·attestation → destructive rebuild-pinned(세 DB 재생성+F1J) → final-schema
+  ETL 재적재`까지다. 서비스 전 단계이므로 중간 DB 데이터 복구는 수행하지 않고 final schema에서
+  source/ETL을 새로 적재한다. 이전 C3의 pin·smoke는 새 schema acceptance 증거로 재사용하지
+  않는다. Manager의 tracked Map source가 병합 SHA와 같고, Map API/UI/Dagster/daemon 및 PinVi
+  API/Web/Dagster 일곱 image의 immutable ID·각 schema head·resolved compose/pinset/OpenAPI
+  provenance가 candidate에 attest되어야 한다. v5 active generation과 v7 journal만 실행
+  authority이며 이전 compatible-pair manifest를 재사용하지 않는다.
+
+- [ ] **T-VN-41F1D-D2 — data-dependent admin/PinVi live E2E** *(공동, docs-only)*
+
+  비어 있는 새 DB에서 **고정 curated/feature ID를 요구하는** admin live UI·PinVi mutating E2E를
+  재실행한다. D1이 적재한 final-schema 데이터 위에서 돈다.
+
+  **선행: T-VN-40 완료**(사용자 판단 2026-08-08). T-VN-40B가 admin/public/PinVi consumer를
+  `curation_collections/items` 정본만 읽도록 전환하므로, 그 전에 이 suite를 돌리면 증거가
+  T-VN-40 머지 즉시 낡는다. 이 acceptance의 비용은 파괴적 rebuild + 전량 ETL 재적재 + 일곱
+  image attestation이라 두 번 돌릴 값이 아니다. 반대로 D1은 curation read 경로와 무관하고
+  "rebuild-from-scratch가 실제로 되는가"를 보증하므로 join barrier까지 비워두지 않는다.
+
+- [~] **T-VN-41F1D-E — v4 compatible-pair live runner 퇴역·v5/v7 attestation 전환**
+
+  `run-c7-prod-live-e2e.sh`와 `run-admin-feature-live-acceptance.sh`가 요구하는 v4
+  `E2E_C7_COMPATIBLE_PAIR_MANIFEST`를 제거한다. root-owned snapshot은 v5
+  `PinnedRuntimeManifest.active_generation`, 일곱 immutable image·Map/PinVi revision·세 schema
+  head·pinset을 확인하고 v7 journal/host attestation과 함께 발행한다. v4 manifest를 억지 입력해
+  통과하는 compatibility 경로는 만들지 않는다. final schema merge/재적재와 독립적으로 unit·script
+  contract까지 완료하고, 실제 n150 data-dependent 실행은 위 F1D-D 순서를 따른다.
 
 ## Wave 2 상세 — 구조 전환
 
@@ -609,25 +634,49 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 
   **관측(상시)**: ① `count_features_missing_identity` 4축 0 정기 확인(replica-mode 우회 보상 — 0083 선언적 제약의 방어선) ② 32B 기간 저장된 UUID 표기 scope 레코드는 재실행에서 조용한 no-op(적대 리뷰 L4) ③ curations 격리(quarantine) 재-link 표면은 감사 예외로 legacy 표기 유지 — 프론트 identity 대조 확인 권고(F6).
 
-  **범위 밖 잔여**: legacy ID·FK 물리 제거는 T-VN-39(removal manifest), PinVi service 스냅샷 재핀은 codex `T-VN-41-F` 합류(PinVi resume 상단 인수 패키지), live e2e 라이브 검증은 n150 per-file 저부하 관례.
+  **범위 밖 잔여**: PinVi service 스냅샷 재핀은 codex `T-VN-41-F` 합류(PinVi resume 상단 인수 패키지),
+  live e2e 라이브 검증은 n150 per-file 저부하 관례. legacy ID·FK는 T-VN-33의 final-schema
+  migration에서 이미 물리 제거한다.
 
-### T-VN-33 — provider dataset 정본 전환 (Lane B)
+### T-VN-33 — provider dataset 정본 전환 (Lane B, A/B/C 단일 PR)
 
-- [ ] T-VN-33A — **provider_datasets schema·backfill**
+- [~] T-VN-33 — **DB 소유 dataset·operation 정본, immutable observation/head, 전 참조
+  cutover와 legacy fence**
 
-  provider/dataset 정본 row와 composite identity를 만들고 현재 policy/source/operation 참조를
-  중복·orphan 없이 backfill한다.
+  A/B/C는 분리 PR이 아니다. 하나의 PR이 다음을 모두 완료한다.
 
-- [ ] T-VN-33B — **writer·reader FK cutover**
+  1. versioned dataset/operation seed, `provider_datasets` capability schema, canonical
+     identity 제약과 full reference preflight/backfill,
+  2. source entity → immutable record → validated head 및 dataset FK/membership 기반 writer·reader
+     전환,
+  3. legacy string/boolean/raw-derived 열·제약·index의 물리 삭제, query/EXPLAIN/checksum
+     gate와 final-schema 재적재 검증.
 
-  참조 table과 writer를 canonical dataset FK로 전환하고 전환 중 entity-record identity 불일치를
-  composite FK로 차단한다.
+  **현재 단일 PR 내부 실행 lane (2026-08-06)** — 아래 항목은 PR을 분리하지 않는
+  병렬 구현·검증 단위다. 모두 끝나기 전에는 이 task를 완료로 옮기지 않는다.
 
-- [ ] T-VN-33C — **canonical query cutover·legacy 제거 manifest**
+  - [~] `33-A` — versioned dataset/operation seed, immutable source entity/record/head와
+    legacy source 물리 제거 및 final-schema migration rejection gate
+  - [~] `33-B` — import job·feature-update request의 canonical
+    `(provider_dataset_id, sync_scope, operation_key)` membership, Dagster runner/sensor/API write
+    cutover
+  - [~] `33-C` — offline/file/curation/integrity/POI writer·reader를 exact operation member
+    identity로 전환하고 legacy pair를 물리 삭제
+  - [~] `33-D` — pipeline/ops read model·dataset status/consistency/live topic과 admin
+    feature-update UI를 triple membership projection으로 재작성
+  - [ ] `33-E` — final-schema fresh PostGIS·API/Dagster·OpenAPI/type·admin live E2E,
+    적대 리뷰 2인 P0=0, PR rebase/CI/merge 후 T-VN-41 F1D-D 재개
 
-  read/query를 canonical dataset FK로 전환하고 중복 column을 read-only로 fence한다. EXPLAIN과
-  checksum을 고정하되 column/index의 물리 삭제는 soak 뒤 T-VN-39가 수행하도록 removal manifest에
-  남긴다.
+  설계·P0 해소·검증 matrix 정본은
+  [`reports/t-vn-33-provider-datasets-single-pr-plan-2026-08-06.md`](reports/t-vn-33-provider-datasets-single-pr-plan-2026-08-06.md),
+  구조 결정은 ADR-088이다. typed `notice_states`/weather/price fact는 각각 T-VN-37/T-VN-38의
+  원자 모델 전환에서 처리한다. final-schema 데이터는 ETL로 재생성하므로 intermediate backup·호환
+  shim을 만들지 않는다.
+
+  **중단 스냅샷(2026-08-06)**: 사용자 지시로 구현을 중단했다. 재개 전 P0와 유효·무효 검증,
+  T-VN-41 선행 순서는
+  [`reports/t-vn-33-hold-snapshot-2026-08-06.md`](reports/t-vn-33-hold-snapshot-2026-08-06.md)가
+  정본이다. 이 표의 `[~]` 표시는 완료가 아니라 WIP 보존 상태다.
 
 ### T-VN-34 — 직교 상태 모델 전환 (Lane B)
 
@@ -683,7 +732,7 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 ### T-VN-37 — notice 계보 판정 (Lane A)
 
 > **범위 재정의(2026-08-07)**: 원안은 "두 timestamptz를 `tstzrange`로 승격하고
-> read를 range 연산자·GiST로 전환"이었다. 그 방향은 **폐기했다**(ADR-087):
+> read를 range 연산자·GiST로 전환"이었다. 그 방향은 **폐기했다**(ADR-088):
 > `feature_notices`는 feature당 최대 1행 + PK 단일이라 공개 필터가 언제나 PK 단일
 > probe여서 GiST가 구조적으로 쓰이지 않고, 시작 시각을 보는 술어로 바꾸면 미래
 > 발효 KMA 특보가 발효 전까지 숨어 사전 경고가 사라진다. 실제 병목은 range 표현이
@@ -700,7 +749,7 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   등식만 컬럼으로 바꾼다. reconcile CTE에 `MATERIALIZED` 장벽. 3,045 notice에서
   목록 20.4초 → 0.19초, reconcile 118.4초 → 0.36초(현행 prod 145행에서는
   60.8ms → 5.2ms로 이득이 작다 — 이 변경이 사는 곳은 규모다). 결과 집합·reconcile
-  종료 상태 동일. 마이그레이션 3.1초. alembic `0088`, ADR-087.
+  종료 상태 동일. 마이그레이션 3.1초. alembic `0088`, ADR-088.
 
 - [ ] T-VN-37D — **empty range 표현 (보류)**
 
@@ -748,11 +797,11 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 
 - [ ] T-VN-39 — **KTM·PinVi write-fence cutover**
 
-  보존 분류, restore/PITR 또는 journal 검증, shadow checksum, consumer-first 배포, write fence,
-  순차 전환과 soak를 ADR-075 절차대로 수행한다. held component rollback 창이 닫힌 뒤
-  T-VN-33C·34C·36C·38C·40C removal manifest의 legacy column/index/route/repository/trigger/table과
-  T-VN-38C의 rollback shadow index를 이 task에서만 물리 삭제한다. T-VN-32~38·40 완료 뒤
-  마지막이다.
+  consumer-first 배포, write fence와 순차 전환을 수행한다. **T-VN-33C의 legacy
+  column/index/route/repository/trigger/table은 서비스 전 단계 원칙에 따라 같은 final-schema
+  migration에서 이미 물리 삭제한다.** 따라서 이 task는 T-VN-33 보존·rollback·removal을
+  소유하지 않는다. 이후 task가 만든 held component만 그 task의 manifest와 함께 판단하며,
+  intermediate data는 backup/restore가 아니라 최종 schema ETL로 재생성한다.
 
 ## T-101 — Materialized View 도입 검토 (보류)
 

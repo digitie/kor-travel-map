@@ -23,6 +23,38 @@ _KST = timezone(timedelta(hours=9))
 _FETCHED = datetime(2026, 6, 3, 12, 0, tzinfo=_KST)
 
 
+async def _dataset_id(
+    session: AsyncSession, *, provider: str, dataset_key: str
+) -> int:
+    """catalog에 pair를 확보하고 canonical id를 돌려준다.
+
+    T-VN-33 이후 provider/dataset_key는 ``provider_sync.provider_datasets``에만
+    산다 — source entity/record는 ``provider_dataset_id``만 갖는다.
+    """
+    return int(
+        (
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO provider_sync.provider_datasets (
+                        provider, dataset_key, display_name, source_kind,
+                        is_active, capabilities
+                    )
+                    SELECT :provider, :dataset_key, :provider, 'system', true,
+                           jsonb_build_object('schema_version', 1,
+                                              'produces', '[]'::jsonb,
+                                              'extensions', '{}'::jsonb)
+                    ON CONFLICT (provider, dataset_key) DO UPDATE
+                        SET display_name = EXCLUDED.display_name
+                    RETURNING provider_dataset_id
+                    """
+                ),
+                {"provider": provider, "dataset_key": dataset_key},
+            )
+        ).scalar_one()
+    )
+
+
 async def _insert_feature(
     session: AsyncSession,
     *,
@@ -67,23 +99,25 @@ async def _insert_feature(
             "updated_at": updated_at,
         },
     )
+    provider_dataset_id = await _dataset_id(
+        session, provider=provider, dataset_key=dataset_key
+    )
     await session.execute(
         text(
             """
             INSERT INTO provider_sync.source_entities (
-                source_entity_key, provider, dataset_key, source_entity_type,
+                source_entity_key, provider_dataset_id, source_entity_type,
                 source_entity_id, first_seen_at, last_seen_at
             )
             VALUES (
-                :source_entity_key, :provider, :dataset_key, 'place',
+                :source_entity_key, :provider_dataset_id, 'place',
                 :feature_id, :fetched_at, :fetched_at
             )
             """
         ),
         {
             "source_entity_key": source_entity_key,
-            "provider": provider,
-            "dataset_key": dataset_key,
+            "provider_dataset_id": provider_dataset_id,
             "feature_id": feature_id,
             "fetched_at": _FETCHED,
         },
@@ -92,38 +126,36 @@ async def _insert_feature(
         text(
             """
             INSERT INTO provider_sync.source_records (
-                source_record_key, source_entity_key,
-                provider, dataset_key, source_entity_type,
-                source_entity_id, raw_payload_hash, fetched_at
+                source_record_key, source_entity_key, raw_data,
+                raw_payload_hash, fetched_at
             )
             VALUES (
-                :source_record_key, :source_entity_key,
-                :provider, :dataset_key, 'place',
-                :feature_id, :raw_payload_hash, :fetched_at
+                :source_record_key, :source_entity_key, '{}'::jsonb,
+                md5(:raw_payload_seed), :fetched_at
             )
             """
         ),
         {
             "source_record_key": source_record_key,
             "source_entity_key": source_entity_key,
-            "provider": provider,
-            "dataset_key": dataset_key,
-            "feature_id": feature_id,
-            "raw_payload_hash": f"hash:{feature_id}",
+            "raw_payload_seed": f"hash:{feature_id}",
             "fetched_at": _FETCHED,
         },
     )
+    # 현재 record 포인터는 head가 소유한다(lineage_key는 BEFORE INSERT 트리거가 채운다).
     await session.execute(
         text(
             """
-            UPDATE provider_sync.source_entities
-            SET current_source_record_key = :source_record_key
-            WHERE source_entity_key = :source_entity_key
+            INSERT INTO provider_sync.source_entity_heads (
+                source_entity_key, current_source_record_key, observed_at
+            )
+            VALUES (:source_entity_key, :source_record_key, :fetched_at)
             """
         ),
         {
             "source_record_key": source_record_key,
             "source_entity_key": source_entity_key,
+            "fetched_at": _FETCHED,
         },
     )
     await session.execute(
@@ -131,11 +163,11 @@ async def _insert_feature(
             """
             INSERT INTO provider_sync.source_links (
                 feature_id, source_entity_key, source_role,
-                match_method, confidence, is_primary_source
+                match_method, confidence
             )
             VALUES (
                 :feature_id, :source_entity_key, 'primary',
-                'natural_key', 100, true
+                'natural_key', 100
             )
             """
         ),

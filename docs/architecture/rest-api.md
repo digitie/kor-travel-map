@@ -319,7 +319,7 @@ POST /v1/features/weather/batch         # sparse targets[]/known_at weather snap
 ```
 - 단건과 batch의 각 Feature 상세는 `curations[]`와 `observations[]`를 함께 반환한다.
   `observations[]`는 Feature에 연결된 provider entity별 **현재 immutable payload 전부**이며,
-  여러 `is_primary_source=true` 관측도 버리지 않는다. payload의 과거 version은
+  여러 `source_role='primary'` 관측도 버리지 않는다. payload의 과거 version은
   `/{feature_id}/observations/{source_entity_key}/history`에서 `page_size`(기본 50, 최대 200)+
   `cursor`로 최신순 조회한다.
 - 관측 DTO는 entity/record 식별자, `raw_data`와 hash, 원천 이름·주소·좌표, entity/record

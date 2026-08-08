@@ -121,7 +121,6 @@ from kortravelmap.api.pipeline_cancellation_schema import (
     cancellation_detail_record,
     cancellation_summary_record,
 )
-from kortravelmap.api.provider_catalog import resolve_dataset_history_sync_scopes
 from kortravelmap.api.response import Meta, ProblemDetail, make_meta
 
 __all__ = [
@@ -175,8 +174,7 @@ class PipelineExecutionRecord(BaseModel):
     status: OperationState
     created_at: datetime
     job_kind: str | None
-    provider: str | None
-    dataset_key: str | None
+    provider_datasets: list[PipelineProviderDatasetIdentityRecord]
     progress: int | None
     current_stage: str | None
     scope_type: str | None
@@ -189,7 +187,7 @@ class PipelineExecutionRecord(BaseModel):
     dagster_run_id: str | None
     dagster_run_status: str | None
     trigger_kind: str | None
-    operation_registry_version: str | None
+    operation_key: str | None
     job_id: UUID | None = Field(
         description="update_request 행이 연결된 import job id.",
     )
@@ -218,7 +216,7 @@ class PipelineProjectedJobRecord(BaseModel):
     dagster_run_id: str | None
     dagster_run_status: str | None
     trigger_kind: str | None
-    operation_registry_version: str | None
+    operation_key: str | None
     load_batch_id: UUID | None
     parent_job_id: UUID | None
     depth: int
@@ -226,13 +224,22 @@ class PipelineProjectedJobRecord(BaseModel):
 
 
 class PipelineProviderDatasetIdentityRecord(BaseModel):
-    """canonical root에 귀속된 exact pair 상태."""
+    """canonical root에 귀속된 exact membership 상태.
+
+    membership identity는 triple이다(ADR-088 §결정 2). 아래 계층의
+    ``PipelineProviderDatasetIdentity``가 이미 셋을 non-null로 들고 있으므로 여기서
+    ``operation_key``를 떨어뜨리거나 ``sync_scope``를 nullable로 넓히면 표현할 수
+    있는 사실을 표면에서만 잃는다 — 소비자가 member를 구분하거나 deep link를
+    만들 수 없다.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
+    provider_dataset_id: int = Field(ge=1)
     provider: str
     dataset_key: str
-    sync_scope: str | None
+    sync_scope: str
+    operation_key: str
     operation_member_id: UUID
     status: OperationState
 
@@ -246,10 +253,6 @@ class PipelineExecutionRootRecord(BaseModel):
     id: UUID
     status: OperationState
     created_at: datetime
-    providers: list[str] = Field(description="표시·provider-only 필터용 정렬된 유효 provider 목록.")
-    dataset_keys: list[str] = Field(
-        description="표시·dataset-only 필터용 정렬된 유효 dataset 목록."
-    )
     provider_datasets: list[PipelineProviderDatasetIdentityRecord] = Field(
         description="canonical branch의 exact pair와 pair별 lifecycle 상태.",
     )
@@ -265,7 +268,7 @@ class PipelineExecutionRootRecord(BaseModel):
     dagster_run_id: str | None
     dagster_run_status: str | None
     trigger_kind: str | None
-    operation_registry_version: str | None
+    operation_key: str | None
     requested_job_id: UUID | None = Field(
         description="update request가 원래 가리킨 import job id.",
     )
@@ -311,10 +314,9 @@ class PipelineImportJobRecord(BaseModel):
     source_checksum: str | None
     error_message: str | None
     dagster_run_id: str | None
-    provider: str | None
-    dataset_key: str | None
+    provider_datasets: list[PipelineProviderDatasetIdentityRecord]
     trigger_kind: str | None
-    operation_registry_version: str | None
+    operation_key: str | None
     dagster_run_status: str | None
     created_at: datetime
     started_at: datetime | None
@@ -329,9 +331,13 @@ class PipelineJobEventRecord(BaseModel):
 
     event_id: UUID
     job_id: UUID
-    provider: str | None
-    dataset_key: str | None
+    import_job_dataset_id: UUID | None
+    provider_dataset_id: int | None
+    # membership identity의 나머지 두 축. operation_key로 **필터는 되는데** 반환 행이
+    # 어느 membership 것인지 말하지 않으면 소비자가 결과를 되짚을 수 없다.
+    # member가 없는 job-level event는 둘 다 null이다.
     sync_scope: str | None
+    operation_key: str | None
     feature_id: str | None
     stage: str | None
     level: str
@@ -753,17 +759,23 @@ def _canonical_list_url(
 
 def _canonical_dataset_filter(
     *,
-    provider: str | None,
-    dataset_key: str | None,
+    provider_dataset_id: int | None,
     sync_scope: str | None,
+    operation_key: str | None = None,
 ) -> str | None:
-    """provider-only는 허용하고 불완전한 dataset/scope tuple은 거부한다."""
-    if dataset_key is not None and provider is None:
-        raise ValueError("dataset_key requires provider")
+    """canonical dataset 없이 membership 축으로 필터하는 요청을 거부한다.
+
+    ``sync_scope``/``operation_key``는 membership identity의 일부이므로 dataset을
+    지목하지 않은 채 주면 무엇에 대한 scope/operation인지 정해지지 않는다.
+    """
+    if provider_dataset_id is not None and provider_dataset_id <= 0:
+        raise ValueError("provider_dataset_id must be greater than 0")
+    if operation_key is not None and provider_dataset_id is None:
+        raise ValueError("operation_key requires provider_dataset_id")
     if sync_scope is None:
         return None
-    if provider is None or dataset_key is None:
-        raise ValueError("sync_scope requires both provider and dataset_key")
+    if provider_dataset_id is None:
+        raise ValueError("sync_scope requires provider_dataset_id")
     return parse_canonical_sync_scope(sync_scope).value
 
 
@@ -781,7 +793,7 @@ def _projected_job_record(row: PipelineProjectedJob) -> PipelineProjectedJobReco
         dagster_run_id=row.dagster_run_id,
         dagster_run_status=row.dagster_run_status,
         trigger_kind=row.trigger_kind,
-        operation_registry_version=row.operation_registry_version,
+        operation_key=row.operation_key,
         load_batch_id=row.load_batch_id,
         parent_job_id=row.parent_job_id,
         depth=row.depth,
@@ -793,9 +805,11 @@ def _provider_dataset_record(
     row: PipelineProviderDatasetIdentity,
 ) -> PipelineProviderDatasetIdentityRecord:
     return PipelineProviderDatasetIdentityRecord(
+        provider_dataset_id=row.provider_dataset_id,
         provider=row.provider,
         dataset_key=row.dataset_key,
         sync_scope=row.sync_scope,
+        operation_key=row.operation_key,
         operation_member_id=row.operation_member_id,
         status=row.status,
     )
@@ -807,8 +821,6 @@ def _record_from_execution(row: PipelineExecution) -> PipelineExecutionRootRecor
         id=row.id,
         status=row.status,
         created_at=row.created_at,
-        providers=list(row.providers),
-        dataset_keys=list(row.dataset_keys),
         provider_datasets=[_provider_dataset_record(item) for item in row.provider_datasets],
         progress=row.progress,
         current_stage=row.current_stage,
@@ -822,7 +834,7 @@ def _record_from_execution(row: PipelineExecution) -> PipelineExecutionRootRecor
         dagster_run_id=row.dagster_run_id,
         dagster_run_status=row.dagster_run_status,
         trigger_kind=row.trigger_kind,
-        operation_registry_version=row.operation_registry_version,
+        operation_key=row.operation_key,
         requested_job_id=row.requested_job_id,
         linked_job_count=row.linked_job_count,
         projected_job=_projected_job_record(row.projected_job),
@@ -842,8 +854,18 @@ def _execution_from_job(
         status=job.status,
         created_at=job.created_at,
         job_kind=job.kind,
-        provider=job.provider,
-        dataset_key=job.dataset_key,
+        provider_datasets=[
+            PipelineProviderDatasetIdentityRecord(
+                provider_dataset_id=item.provider_dataset_id,
+                provider=item.provider,
+                dataset_key=item.dataset_key,
+                sync_scope=item.sync_scope,
+                operation_key=item.operation_key,
+                operation_member_id=item.import_job_dataset_id,
+                status=job.status,
+            )
+            for item in job.dataset_memberships
+        ],
         progress=job.progress,
         current_stage=job.current_stage,
         error_message=job.error_message,
@@ -852,7 +874,7 @@ def _execution_from_job(
         dagster_run_id=job.dagster_run_id,
         dagster_run_status=job.dagster_run_status,
         trigger_kind=job.trigger_kind,
-        operation_registry_version=job.operation_registry_version,
+        operation_key=job.operation_key,
         job_id=None,
         request_id=canonical_request_id,
         load_batch_id=job.load_batch_id,
@@ -875,8 +897,18 @@ def _execution_from_request(
         status=row.status,
         created_at=row.created_at,
         job_kind=None,
-        provider=linked_job.provider,
-        dataset_key=linked_job.dataset_key,
+        provider_datasets=[
+            PipelineProviderDatasetIdentityRecord(
+                provider_dataset_id=item.provider_dataset_id,
+                provider=item.provider,
+                dataset_key=item.dataset_key,
+                sync_scope=item.sync_scope,
+                operation_key=item.operation_key,
+                operation_member_id=item.import_job_dataset_id,
+                status=linked_job.status,
+            )
+            for item in linked_job.dataset_memberships
+        ],
         progress=None,
         current_stage=None,
         scope_type=row.scope_type,
@@ -889,7 +921,7 @@ def _execution_from_request(
         dagster_run_id=row.dagster_run_id,
         dagster_run_status=linked_job.dagster_run_status,
         trigger_kind="update_request",
-        operation_registry_version=linked_job.operation_registry_version,
+        operation_key=linked_job.operation_key,
         job_id=row.job_id,
         request_id=None,
         load_batch_id=None,
@@ -911,10 +943,20 @@ def _import_job_record(job: OpsImportJob) -> PipelineImportJobRecord:
         source_checksum=job.source_checksum,
         error_message=job.error_message,
         dagster_run_id=job.dagster_run_id,
-        provider=job.provider,
-        dataset_key=job.dataset_key,
+        provider_datasets=[
+            PipelineProviderDatasetIdentityRecord(
+                provider_dataset_id=item.provider_dataset_id,
+                provider=item.provider,
+                dataset_key=item.dataset_key,
+                sync_scope=item.sync_scope,
+                operation_key=item.operation_key,
+                operation_member_id=item.import_job_dataset_id,
+                status=job.status,
+            )
+            for item in job.dataset_memberships
+        ],
         trigger_kind=job.trigger_kind,
-        operation_registry_version=job.operation_registry_version,
+        operation_key=job.operation_key,
         dagster_run_status=job.dagster_run_status,
         created_at=job.created_at,
         started_at=job.started_at,
@@ -927,9 +969,10 @@ def _event_record(event: OpsImportJobEvent) -> PipelineJobEventRecord:
     return PipelineJobEventRecord(
         event_id=event.event_id,
         job_id=event.job_id,
-        provider=event.provider,
-        dataset_key=event.dataset_key,
+        import_job_dataset_id=event.import_job_dataset_id,
+        provider_dataset_id=event.provider_dataset_id,
         sync_scope=event.sync_scope,
+        operation_key=event.operation_key,
         feature_id=event.feature_id,
         stage=event.stage,
         level=event.level,
@@ -1155,7 +1198,7 @@ def _parse_dagster_overview(
         "import job hierarchy를 job별 nearest request anchor branch와 standalone "
         "partition으로 접어 root만 반환한다. keyset total order는 "
         "`(created_at DESC, id DESC, kind DESC)`이며 Dagster run은 각 root/대표 job의 "
-        "`dagster_run_id`로만 연결한다. `sync_scope`는 `provider`와 `dataset_key`를 "
+        "`dagster_run_id`로만 연결한다. `sync_scope`는 `provider_dataset_id`를 "
         "함께 요구하며 dataset 기본 state의 logical scope alias를 적용한다. "
         "`load_batch_id`와 `parent_job_id`는 root의 전체 component membership에 "
         "대해 cursor/LIMIT 전에 적용한다."
@@ -1165,15 +1208,25 @@ async def list_executions(
     session: Annotated[AsyncSession, Depends(get_session)],
     kind: Annotated[ExecutionKind | None, Query()] = None,
     status_filter: Annotated[ExecutionState | None, Query(alias="status")] = None,
-    provider: Annotated[str | None, Query(min_length=1)] = None,
-    dataset_key: Annotated[str | None, Query(min_length=1)] = None,
+    provider_dataset_id: Annotated[int | None, Query(ge=1)] = None,
     sync_scope: Annotated[
         str | None,
         Query(
             min_length=1,
             description=(
-                "provider+dataset exact pair의 논리 scope. 두 query를 함께 주어야 하며 "
-                "기본 state는 dataset_wide/NULL 저장 표현을 같은 이력으로 조회한다."
+                "canonical provider dataset의 논리 scope. ID query와 함께 주어야 한다."
+            ),
+        ),
+    ] = None,
+    operation_key: Annotated[
+        str | None,
+        Query(
+            min_length=1,
+            description=(
+                "exact membership의 operation. ID query와 함께 주어야 한다. "
+                "생략하면 그 dataset/scope의 모든 operation을 함께 조회한다 — "
+                "membership identity는 triple이므로(ADR-088) 형제 operation을 "
+                "가르려면 이 값이 필요하다."
             ),
         ),
     ] = None,
@@ -1187,26 +1240,21 @@ async def list_executions(
     started_at = perf_counter()
     try:
         canonical_sync_scope = _canonical_dataset_filter(
-            provider=provider,
-            dataset_key=dataset_key,
+            provider_dataset_id=provider_dataset_id,
             sync_scope=sync_scope,
+            operation_key=operation_key,
         )
         dataset_sync_scopes = None
         if canonical_sync_scope is not None:
-            assert provider is not None
-            assert dataset_key is not None
-            dataset_sync_scopes = resolve_dataset_history_sync_scopes(
-                provider,
-                dataset_key,
-                canonical_sync_scope,
-            )
+            assert provider_dataset_id is not None
+            dataset_sync_scopes = (canonical_sync_scope,)
         page = await list_pipeline_executions(
             session,
             kind=kind,
             status=status_filter,
-            provider=provider,
-            dataset_key=dataset_key,
+            provider_dataset_id=provider_dataset_id,
             dataset_sync_scopes=dataset_sync_scopes,
+            dataset_operation_key=operation_key,
             load_batch_id=(str(load_batch_id) if load_batch_id is not None else None),
             parent_job_id=(str(parent_job_id) if parent_job_id is not None else None),
             created_from=created_from,
@@ -1227,9 +1275,12 @@ async def list_executions(
                 (
                     ("kind", kind),
                     ("status", status_filter),
-                    ("provider", provider),
-                    ("dataset_key", dataset_key),
+                    ("provider_dataset_id", provider_dataset_id),
                     ("sync_scope", canonical_sync_scope),
+                    # cursor fingerprint에 들어 있는 filter는 canonical_url에도 있어야
+                    # 한다 — 빠지면 이 URL과 응답의 next_cursor를 합쳤을 때 filter
+                    # mismatch로 422가 난다(자기 응답만으로 페이지네이션이 깨진다).
+                    ("operation_key", operation_key),
                     ("load_batch_id", load_batch_id),
                     ("parent_job_id", parent_job_id),
                     ("created_from", created_from),
@@ -1447,8 +1498,8 @@ async def cancel_update_request_execution(
     summary="전역 job 이벤트 스트림",
     description=(
         "어느 job인지 모르는 상태에서 최근 error를 훑는 전역 "
-        "`ops.import_job_events` 스트림 — level/provider/dataset/scope/job 필터. "
-        "sync_scope는 provider와 dataset_key를 함께 요구하며 canonical "
+        "`ops.import_job_events` 스트림 — level/provider-dataset/scope/job 필터. "
+        "sync_scope는 provider_dataset_id를 함께 요구하며 canonical "
         "feature-update job/request의 effective scope를 조회한다."
     ),
 )
@@ -1456,26 +1507,35 @@ async def list_pipeline_events(
     session: Annotated[AsyncSession, Depends(get_session)],
     job_id: Annotated[UUID | None, Query()] = None,
     level: Annotated[JobEventLevel | None, Query()] = None,
-    provider: Annotated[str | None, Query(min_length=1)] = None,
-    dataset_key: Annotated[str | None, Query(min_length=1)] = None,
+    provider_dataset_id: Annotated[int | None, Query(ge=1)] = None,
     sync_scope: Annotated[str | None, Query(min_length=1)] = None,
+    operation_key: Annotated[
+        str | None,
+        Query(
+            min_length=1,
+            description=(
+                "exact membership의 operation. ID query와 함께 주어야 한다. "
+                "생략하면 그 dataset/scope의 모든 operation event를 함께 본다."
+            ),
+        ),
+    ] = None,
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
     cursor: Annotated[str | None, Query()] = None,
 ) -> PipelineEventsListResponse:
     started_at = perf_counter()
     try:
         canonical_sync_scope = _canonical_dataset_filter(
-            provider=provider,
-            dataset_key=dataset_key,
+            provider_dataset_id=provider_dataset_id,
             sync_scope=sync_scope,
+            operation_key=operation_key,
         )
         page = await list_ops_import_job_events(
             session,
             str(job_id) if job_id is not None else None,
             level=level,
-            provider=provider,
-            dataset_key=dataset_key,
+            provider_dataset_id=provider_dataset_id,
             sync_scope=canonical_sync_scope,
+            operation_key=operation_key,
             limit=page_size,
             cursor=cursor,
         )
@@ -1492,9 +1552,9 @@ async def list_pipeline_events(
                 (
                     ("job_id", job_id),
                     ("level", level),
-                    ("provider", provider),
-                    ("dataset_key", dataset_key),
+                    ("provider_dataset_id", provider_dataset_id),
                     ("sync_scope", canonical_sync_scope),
+                    ("operation_key", operation_key),
                 ),
             ),
         ),
@@ -2029,10 +2089,11 @@ async def create_pipeline_update_request(
     dagster_client = _http_client_from_request(request, api_settings)
 
     async def _resolved_plan_guard(
-        resolved_pairs: frozenset[tuple[str, str]],
+        resolved_memberships: frozenset[tuple[int, str]],
     ) -> None:
-        await mois_source_precheck.ensure_mois_source_sync_for_plan(
-            resolved_pairs,
+        await mois_source_precheck.ensure_mois_source_sync_for_memberships(
+            session,
+            resolved_memberships,
             settings=api_settings,
             client=dagster_client,
         )

@@ -131,7 +131,6 @@ def test_source_record_provider_and_link_primary() -> None:
     link = bundle.source_link
     assert link.source_role == SourceRole.PRIMARY
     assert link.confidence == 100
-    assert link.is_primary_source is True
 
 
 @pytest.mark.unit

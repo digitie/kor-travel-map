@@ -165,6 +165,35 @@ forward journal로 해당 delta를 이전 schema에 적용하고 checksum을 다
 복구 경로가 검증되지 않았거나 어느 쪽 identity/lineage라도 불일치하면 서비스를 read-only로 유지하고
 forward-fix한다. lock acquisition timeout과 실제 중단 시간은 별도로 기록한다.
 
+## T-VN-33 (0084~0091) 배포 — 단발·forward-only
+
+prod alembic head는 `0083`이고 `0084`~`0091`이 한 번에 올라간다. 되돌리는 revision은
+없다(`0090`/`0091`의 `downgrade()`가 `RuntimeError`를 던진다). 아래는 이 구간에만
+해당하는 사항이며, 위 ADR-075 절차와 함께 읽는다.
+
+**중간 커밋 지점이 하나 있다.** `0090`이 concurrent index를 만들려고
+`autocommit_block()`에 들어가는데, 이때 바깥 트랜잭션이 커밋된다. 그 시점의
+`alembic_version`은 아직 `0089`다. 따라서 이후 `0091`이 실패하면 **`0084`~`0090`의
+DDL은 남고 stamp만 `0089`인** 상태가 된다. 재시도는 `0090`부터 다시 도는 것을
+전제로 하며, `0090`의 DDL은 모두 그 재실행에 안전하도록 작성돼 있다
+(constraint는 `DROP ... IF EXISTS` 선행, index는 `DROP INDEX CONCURRENTLY IF EXISTS`
+선행, `ADD COLUMN`은 `IF NOT EXISTS`). **`alembic_version`을 손으로 고치지 말 것** —
+그대로 `alembic upgrade head`를 다시 실행하면 된다.
+
+**`0091`은 중단될 수 있고, 그 경우 통째로 롤백된다.** `0091`은 preflight 4개를 갖고
+있고 어느 하나라도 걸리면 `RAISE`한다. `0091`에는 `autocommit_block`이 없으므로
+그 revision의 작업은 전부 되돌아간다(위의 `0090`까지는 남는다). preflight가 걸리면
+메시지의 `HINT`가 지시하는 데이터를 정리한 뒤 재시도한다. 대표적으로:
+
+- `source_links.is_primary_source`와 `source_role='primary'`가 어긋난 행 → 어느 쪽이
+  옳은지 판단해 `source_role`을 맞춘다(살아남는 열이다).
+- offline upload의 scope가 refresh operation 둘 이상으로 해석되는 경우 → upload에
+  operation을 명시한다.
+
+**긴 lock을 잡는 구간.** `0089`가 `source_entities` 전 행을 UPDATE하고(실측 731k /
+359MB) 조건에 따라 `source_records`(733k / 1.25GB)를 재작성한다. `0090`은 두 테이블에
+non-concurrent UNIQUE를 만든다. 유지보수 창에서 돌린다.
+
 ## 환경변수
 
 루트 `.env`와 API 전용 `packages/kor-travel-map-api/.env`는 배포 환경의 secret store,

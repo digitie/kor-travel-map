@@ -92,8 +92,7 @@ def _bundle(
         source_entity_type="candidate",
         source_entity_id="cand-1",
         raw_payload_hash="a" * 64,
-        raw_name="해동용궁사",
-        raw_address=road,
+        raw_data={"address": road},
         fetched_at=datetime.fromisoformat(_FETCHED_AT),
     )
     link = SourceLink(
@@ -102,7 +101,6 @@ def _bundle(
         source_role=SourceRole.PRIMARY,
         match_method="natural_key",
         confidence=100,
-        is_primary_source=True,
     )
     return FeatureBundle(
         feature=feature,

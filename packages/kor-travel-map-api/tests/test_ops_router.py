@@ -235,6 +235,7 @@ def _report() -> OpsConsistencyReport:
 def _issue() -> OpsIntegrityIssue:
     return OpsIntegrityIssue(
         issue_id="44444444-4444-4444-4444-444444444444",
+        provider_dataset_id=42,
         provider="python-mois-api",
         dataset_key="mois_license_features_bulk",
         source_record_key="src-1",
@@ -1394,6 +1395,10 @@ def test_ops_live_sql_excludes_quarantined_import_jobs() -> None:
     assert "WHERE quarantined_at IS NULL" in live_mod._DAGSTER_RUN_LIVE_SQL
     assert "provider_sync.provider_sync_state" in live_mod._PROVIDER_SYNC_LIVE_SQL
     assert "ops.provider_refresh_policies" in live_mod._PROVIDER_SYNC_LIVE_SQL
+    assert "upload.provider_dataset_id" in live_mod._OFFLINE_UPLOADS_LIVE_SQL
+    assert "upload.provider_dataset_id" in live_mod._OFFLINE_UPLOAD_LIVE_SQL
+    assert "JOIN provider_sync.provider_datasets AS dataset" in live_mod._OFFLINE_UPLOADS_LIVE_SQL
+    assert "JOIN provider_sync.provider_datasets AS dataset" in live_mod._OFFLINE_UPLOAD_LIVE_SQL
     assert "dataset_projection" in live_mod._DATASET_PROJECTION_LIVE_SQL
     assert "ops.dagster_schedule_overrides" in live_mod._DAGSTER_SCHEDULES_LIVE_SQL
     assert (
@@ -1440,7 +1445,7 @@ def test_ops_live_snapshot_sql_uses_total_ordering() -> None:
         "jsonb_agg(to_jsonb(u) ORDER BY u.updated_at DESC, u.upload_id DESC)"
         in uploads_sql
     )
-    assert "ORDER BY updated_at DESC, upload_id DESC LIMIT 20" in uploads_sql
+    assert "ORDER BY upload.updated_at DESC, upload.upload_id DESC LIMIT 20" in uploads_sql
     assert (
         "jsonb_agg(DISTINCT j.run_id ORDER BY j.run_id) "
         "FILTER (WHERE j.run_id IS NOT NULL)"
@@ -1531,6 +1536,45 @@ async def test_ops_live_feature_update_request_revision_tracks_all_mutable_rest_
     assert snapshots[0].data["dispatch_requested_at"] is None
     assert snapshots[3].data["dispatch_requested_at"] == "2026-07-17T00:01:00+00:00"
     assert len({snapshot.revision for snapshot in snapshots}) == 4
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_ops_live_offline_upload_snapshot_uses_canonical_dataset_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import ops_live as live_mod
+
+    upload_id = "22222222-2222-2222-2222-222222222222"
+    updated_at = datetime(2026, 8, 7, 1, 2, tzinfo=UTC)
+
+    async def _row_mapping(
+        _session: Any,
+        sql: str,
+        params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        assert sql == live_mod._OFFLINE_UPLOAD_LIVE_SQL
+        assert params == {"upload_id": upload_id}
+        return {
+            "upload_id": upload_id,
+            "provider_dataset_id": 42,
+            "provider": "python-mois-api",
+            "dataset_key": "mois_license_features_bulk",
+            "sync_scope": "dataset_wide",
+            "status": "loading",
+            "validation_job_id": None,
+            "load_job_id": None,
+            "created_at": updated_at,
+            "updated_at": updated_at,
+        }
+
+    monkeypatch.setattr(live_mod, "_row_mapping", _row_mapping)
+
+    snapshot = await live_mod._offline_upload_snapshot(object(), upload_id)
+
+    assert snapshot["provider_dataset_id"] == 42
+    assert snapshot["provider"] == "python-mois-api"
+    assert snapshot["dataset_key"] == "mois_license_features_bulk"
 
 
 @pytest.mark.unit
@@ -1752,8 +1796,7 @@ def test_consistency_and_issue_lists_pass_filters(
             "status": "open",
             "severity": "error",
             "violation_type": "missing_coordinate",
-            "provider": "python-mois-api",
-            "dataset_key": "mois_license_features_bulk",
+            "provider_dataset_id": 42,
             "feature_id": "feature-1",
             "limit": 5,
             "cursor": None,
@@ -1765,8 +1808,8 @@ def test_consistency_and_issue_lists_pass_filters(
     reports = client.get("/v1/ops/consistency/reports?severity_max=WARN&page_size=5")
     issues = client.get(
         "/v1/ops/consistency/issues?status=open&severity=error&"
-        "violation_type=missing_coordinate&provider=python-mois-api&"
-        "dataset_key=mois_license_features_bulk&feature_id=feature-1&page_size=5"
+        "violation_type=missing_coordinate&provider_dataset_id=42&"
+        "feature_id=feature-1&page_size=5"
     )
 
     assert reports.status_code == 200

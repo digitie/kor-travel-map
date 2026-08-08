@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Final, Literal, cast
@@ -107,12 +108,25 @@ class CurationProvenance:
     rows: tuple[CurationRowProvenance, ...]
 
 
-def requires_lighthouse_provenance(rows: Sequence[CurationImportRow]) -> bool:
-    """저장소 공식 등대 seed identity면 sidecar를 반드시 요구한다."""
+def requires_lighthouse_provenance(
+    rows: Sequence[CurationImportRow],
+    *,
+    lighthouse_dataset_pairs: Collection[tuple[str, str]] = (),
+) -> bool:
+    """저장소 공식 등대 seed이면 sidecar를 반드시 요구한다.
 
+    판정 축은 ``(provider, dataset_key)`` 자연키다. ``provider_dataset_id``는
+    ``GENERATED ALWAYS AS IDENTITY``라 DB마다 값이 다르고, 0089의 legacy sweep은
+    그 DB에 실제로 있던 데이터까지 훑어 seed하므로 순서도 재현되지 않는다. 반면
+    이 CSV는 저장소에 sha로 고정돼 어느 DB에나 그대로 적용되므로, surrogate를
+    파일에 박으면 다른 DB에서 **다른 dataset을 가리킨다**. 호출자가 catalog에서
+    등대 pair를 확인해 넘긴다.
+    """
+
+    lighthouse_pairs = frozenset(lighthouse_dataset_pairs)
     return any(
         row.collection_key.startswith(LIGHTHOUSE_COLLECTION_PREFIX)
-        or row.dataset_key.startswith(LIGHTHOUSE_DATASET_PREFIX)
+        or (row.provider, row.dataset_key) in lighthouse_pairs
         for row in rows
     )
 

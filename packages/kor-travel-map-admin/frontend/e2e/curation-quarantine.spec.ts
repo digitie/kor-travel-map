@@ -66,6 +66,7 @@ function makeQuarantineCollection(
       source: {
         dataset_key: "lighthouse_places",
         provider: "python-khoa-api",
+        provider_dataset_id: 601,
         source_id: "77777777-7777-4777-8777-777777777777",
         source_name: "국립해양조사원",
       },
@@ -83,6 +84,7 @@ function makeQuarantineCollection(
     quarantine_source: {
       dataset_key: "lighthouse_places_legacy",
       provider: "python-khoa-api",
+      provider_dataset_id: 602,
       source_id: "99999999-9999-4999-8999-999999999999",
       source_name: "구 등대 출처",
     },
@@ -156,6 +158,7 @@ function makeAdminCollection(
     item_count: 3,
     metadata: {},
     provider: "python-khoa-api",
+    provider_dataset_id: 601,
     public_item_count: 3,
     source_id: "77777777-7777-4777-8777-777777777777",
     source_name: "국립해양조사원",

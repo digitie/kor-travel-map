@@ -10,16 +10,36 @@ describe("feature update idempotency", () => {
   it.each([
     [
       {
-        providers: ["tourapi", "kma"],
-        dataset_keys: ["spots", "forecast"],
+        dataset_memberships: [
+          {
+            provider_dataset_id: 42,
+            sync_scope: "dataset_wide",
+            operation_key: "refresh_full",
+          },
+          {
+            provider_dataset_id: 7,
+            sync_scope: "target_grids",
+            operation_key: "refresh_targeted",
+          },
+        ],
         scope: {
           type: "feature_ids",
           feature_ids: ["feature-b", "feature-a"],
         },
       },
       {
-        providers: ["kma", "tourapi"],
-        dataset_keys: ["forecast", "spots"],
+        dataset_memberships: [
+          {
+            provider_dataset_id: 7,
+            sync_scope: "target_grids",
+            operation_key: "refresh_targeted",
+          },
+          {
+            provider_dataset_id: 42,
+            sync_scope: "dataset_wide",
+            operation_key: "refresh_full",
+          },
+        ],
         scope: {
           type: "feature_ids",
           feature_ids: ["feature-a", "feature-b"],
@@ -28,47 +48,103 @@ describe("feature update idempotency", () => {
     ],
     [
       {
-        providers: ["tourapi", "kma"],
-        dataset_keys: ["spots", "forecast"],
+        dataset_memberships: [
+          {
+            provider_dataset_id: 42,
+            sync_scope: "dataset_wide",
+            operation_key: "refresh_full",
+          },
+          {
+            provider_dataset_id: 7,
+            sync_scope: "target_grids",
+            operation_key: "refresh_targeted",
+          },
+        ],
         scope: {
           type: "cache_target_keys",
           target_keys: ["target-b", "target-a"],
         },
       },
       {
-        providers: ["kma", "tourapi"],
-        dataset_keys: ["forecast", "spots"],
+        dataset_memberships: [
+          {
+            provider_dataset_id: 7,
+            sync_scope: "target_grids",
+            operation_key: "refresh_targeted",
+          },
+          {
+            provider_dataset_id: 42,
+            sync_scope: "dataset_wide",
+            operation_key: "refresh_full",
+          },
+        ],
         scope: {
           type: "cache_target_keys",
           target_keys: ["target-a", "target-b"],
         },
       },
     ],
-  ])("set 의미 배열 순서가 달라도 같은 operation key다", async (left, right) => {
-    await expect(
-      featureUpdateIdempotencyOperationKey("feature-update:create", left),
-    ).resolves.toBe(
-      await featureUpdateIdempotencyOperationKey("feature-update:create", right),
-    );
-  });
+  ])(
+    "set 의미 배열 순서가 달라도 같은 operation key다",
+    async (left, right) => {
+      await expect(
+        featureUpdateIdempotencyOperationKey("feature-update:create", left),
+      ).resolves.toBe(
+        await featureUpdateIdempotencyOperationKey(
+          "feature-update:create",
+          right,
+        ),
+      );
+    },
+  );
 
   it("정규화 중 원본 body를 변경하지 않는다", () => {
     const body = {
-      providers: ["z", "a"],
-      dataset_keys: ["b", "a"],
+      dataset_memberships: [
+        {
+          provider_dataset_id: 42,
+          sync_scope: "dataset_wide",
+          operation_key: "refresh_full",
+        },
+        {
+          provider_dataset_id: 7,
+          sync_scope: "target_grids",
+          operation_key: "refresh_targeted",
+        },
+      ],
       scope: { type: "feature_ids", feature_ids: ["f2", "f1"] },
     };
 
     const canonical = canonicalFeatureUpdateIdempotencyBody(body);
 
     expect(body).toEqual({
-      providers: ["z", "a"],
-      dataset_keys: ["b", "a"],
+      dataset_memberships: [
+        {
+          provider_dataset_id: 42,
+          sync_scope: "dataset_wide",
+          operation_key: "refresh_full",
+        },
+        {
+          provider_dataset_id: 7,
+          sync_scope: "target_grids",
+          operation_key: "refresh_targeted",
+        },
+      ],
       scope: { type: "feature_ids", feature_ids: ["f2", "f1"] },
     });
     expect(canonical).toEqual({
-      providers: ["a", "z"],
-      dataset_keys: ["a", "b"],
+      dataset_memberships: [
+        {
+          provider_dataset_id: 7,
+          sync_scope: "target_grids",
+          operation_key: "refresh_targeted",
+        },
+        {
+          provider_dataset_id: 42,
+          sync_scope: "dataset_wide",
+          operation_key: "refresh_full",
+        },
+      ],
       scope: { type: "feature_ids", feature_ids: ["f1", "f2"] },
     });
   });

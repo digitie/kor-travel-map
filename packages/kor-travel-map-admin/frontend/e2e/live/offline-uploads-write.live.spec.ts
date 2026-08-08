@@ -384,7 +384,8 @@ test.describe("/admin/offline-uploads live write workflow", () => {
             provider: PROVIDER_MULTI,
           });
           const created = await readWriteResponse(response);
-          expect(created.data.provider).toBe(PROVIDER_MULTI);
+          // provider 컬럼은 OfflineUploadRecord에서 삭제됐다(ADR-088 triple identity).
+          // 업로드 격리는 아래 provider 필터 목록 단언이 계속 검증한다.
           expect(created.data.original_filename).toBe(uploadFilename(tag));
           expect(created.data.status).toBe("uploaded");
           createdIds.push(created.data.upload_id);

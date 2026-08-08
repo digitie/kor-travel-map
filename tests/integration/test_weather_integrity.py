@@ -382,12 +382,14 @@ async def test_source_record_fk_rejects_orphan_and_sets_null_on_delete(
         text(
             """
             INSERT INTO provider_sync.source_entities (
-                source_entity_key, provider, dataset_key, source_entity_type,
+                source_entity_key, provider_dataset_id, source_entity_type,
                 source_entity_id, first_seen_at, last_seen_at
-            ) VALUES (
-                'se_ok', 'python-kma-api', 'kma_short_forecast', 'weather',
-                'grid-1', :ts, :ts
             )
+            SELECT
+                'se_ok', provider_dataset_id, 'weather',
+                'grid-1', :ts, :ts
+            FROM provider_sync.provider_datasets
+            WHERE provider = 'python-kma-api' AND dataset_key = 'kma_short_forecast'
             """
         ),
         {"ts": _T1},
@@ -396,11 +398,9 @@ async def test_source_record_fk_rejects_orphan_and_sets_null_on_delete(
         text(
             """
             INSERT INTO provider_sync.source_records (
-                source_record_key, source_entity_key, provider, dataset_key,
-                source_entity_type, source_entity_id, raw_payload_hash, fetched_at
+                source_record_key, source_entity_key, raw_payload_hash, fetched_at
             ) VALUES (
-                'sr_ok', 'se_ok', 'python-kma-api', 'kma_short_forecast', 'weather',
-                'grid-1', 'hash-1', :ts
+                'sr_ok', 'se_ok', md5('hash-1'), :ts
             )
             """
         ),

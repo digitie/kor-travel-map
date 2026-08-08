@@ -243,21 +243,15 @@ class FeatureObservationView(BaseModel):
     first_seen_at: datetime
     entity_last_seen_at: datetime
     source_record_key: str
-    source_version: str | None
-    raw_name: str | None
-    raw_address: str | None
-    raw_longitude: float | None
-    raw_latitude: float | None
     raw_data: dict[str, Any]
     raw_payload_hash: str
     fetched_at: datetime
     imported_at: datetime
-    record_last_seen_at: datetime
+    observed_at: datetime
     expires_at: datetime | None
     source_role: str
     match_method: str
     confidence: int
-    is_primary_source: bool
     linked_at: datetime
     is_current: bool
 
@@ -970,7 +964,7 @@ async def list_features_in_bbox(
         Query(
             description=(
                 "primary provider(소스) 필터 (반복 가능). 미지정 시 전체. "
-                "primary source(provider_sync.is_primary_source) 기준."
+                "source_role='primary' 기준."
             ),
         ),
     ] = None,

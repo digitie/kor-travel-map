@@ -49,6 +49,7 @@ from kortravelmap.infra.feature_update_repo import (
     feature_update_scope_advisory_key,
     get_update_request,
 )
+from kortravelmap.infra.jobs_repo import ImportJobDatasetTarget
 from kortravelmap.infra.pipeline_cancellation_repo import (
     cancel_queued_pipeline_cancellation_member,
     create_pipeline_cancellation_attempt,
@@ -83,9 +84,15 @@ pytestmark = pytest.mark.integration
 
 _KST = timezone(timedelta(hours=9))
 _FETCHED = datetime(2026, 6, 3, 12, 0, tzinfo=_KST)
+# runner spec registry가 이 operation_key로 KMA grid handler를 dispatch한다.
+KMA_ULTRA_SHORT_NOWCAST_OPERATION_KEY = "feature_weather_kma_ultra_short_nowcast_job"
 _TRUNCATE_SQL = """
 TRUNCATE
     feature.features,
+    -- entity를 빼면 링크 없는 entity가 남아 정합성 F1(orphan)이 다른 테스트에서
+    -- 켜진다. T-VN-33의 head 도입으로 record CASCADE가 entity를 지우지 않는다.
+    provider_sync.source_entities,
+    provider_sync.source_entity_heads,
     provider_sync.source_records,
     provider_sync.source_links,
     provider_sync.provider_sync_state,
@@ -100,6 +107,114 @@ TRUNCATE
     ops.pipeline_cancellations
 RESTART IDENTITY CASCADE
 """
+
+_LOOKUP_MEMBERSHIP_SQL = """
+SELECT scope.provider_dataset_id, scope.sync_scope, scope.operation_key
+FROM provider_sync.provider_dataset_operation_scopes AS scope
+JOIN provider_sync.provider_datasets AS dataset
+  ON dataset.provider_dataset_id = scope.provider_dataset_id
+JOIN provider_sync.provider_dataset_operations AS operation
+  ON operation.provider_dataset_id = scope.provider_dataset_id
+ AND operation.operation_key = scope.operation_key
+ AND operation.operation_kind = scope.operation_kind
+WHERE dataset.provider = :provider
+  AND dataset.dataset_key = :dataset_key
+  AND scope.sync_scope = :sync_scope
+  AND scope.operation_kind = 'refresh'
+  AND dataset.is_active
+  AND operation.is_enabled
+ORDER BY scope.operation_key
+LIMIT 1
+"""
+
+_UPSERT_DATASET_SQL = """
+INSERT INTO provider_sync.provider_datasets (
+    provider, dataset_key, display_name, source_kind, is_active, capabilities
+)
+SELECT :provider, :dataset_key, :provider, 'system', true,
+       jsonb_build_object('schema_version', 1,
+                          'produces', '[]'::jsonb,
+                          'extensions', '{}'::jsonb)
+ON CONFLICT (provider, dataset_key) DO UPDATE
+    SET display_name = EXCLUDED.display_name
+RETURNING provider_dataset_id
+"""
+
+_UPSERT_OPERATION_SQL = """
+INSERT INTO provider_sync.provider_dataset_operations (
+    provider_dataset_id, operation_key, operation_kind, is_enabled, config
+) VALUES (:provider_dataset_id, :operation_key, 'refresh', true, '{}'::jsonb)
+ON CONFLICT (provider_dataset_id, operation_key, operation_kind) DO NOTHING
+"""
+
+_UPSERT_OPERATION_SCOPE_SQL = """
+INSERT INTO provider_sync.provider_dataset_operation_scopes (
+    provider_dataset_id, sync_scope, operation_key, operation_kind
+) VALUES (:provider_dataset_id, :sync_scope, :operation_key, 'refresh')
+ON CONFLICT (provider_dataset_id, sync_scope, operation_key) DO NOTHING
+"""
+
+
+async def _membership(
+    session: AsyncSession,
+    *,
+    provider: str,
+    dataset_key: str,
+    sync_scope: str = "dataset_wide",
+    operation_key: str = "feature_update",
+) -> ImportJobDatasetTarget:
+    """canonical refresh membership triple을 얻는다 (없으면 fixture로 심는다).
+
+    T-VN-33 이후 request/job/sync-state identity는 자연키 pair가 아니라
+    ``provider_dataset_id + sync_scope + operation_key``다. 0089가 seed한 실제
+    dataset은 catalog 값을 그대로 읽고, 테스트 전용 pair만 새로 심는다.
+    """
+    row = (
+        await session.execute(
+            text(_LOOKUP_MEMBERSHIP_SQL),
+            {
+                "provider": provider,
+                "dataset_key": dataset_key,
+                "sync_scope": sync_scope,
+            },
+        )
+    ).one_or_none()
+    if row is not None:
+        return ImportJobDatasetTarget(
+            provider_dataset_id=int(row.provider_dataset_id),
+            sync_scope=str(row.sync_scope),
+            operation_key=str(row.operation_key),
+        )
+    provider_dataset_id = int(
+        (
+            await session.execute(
+                text(_UPSERT_DATASET_SQL),
+                {"provider": provider, "dataset_key": dataset_key},
+            )
+        ).scalar_one()
+    )
+    params = {
+        "provider_dataset_id": provider_dataset_id,
+        "operation_key": operation_key,
+        "sync_scope": sync_scope,
+    }
+    await session.execute(text(_UPSERT_OPERATION_SQL), params)
+    await session.execute(text(_UPSERT_OPERATION_SCOPE_SQL), params)
+    return ImportJobDatasetTarget(
+        provider_dataset_id=provider_dataset_id,
+        sync_scope=sync_scope,
+        operation_key=operation_key,
+    )
+
+
+def _provider_dataset_scope(membership: ImportJobDatasetTarget) -> dict[str, Any]:
+    """canonical membership을 그대로 든 ``provider_dataset`` request scope."""
+    return {
+        "type": "provider_dataset",
+        "provider_dataset_id": membership.provider_dataset_id,
+        "sync_scope": membership.sync_scope,
+        "operation_key": membership.operation_key,
+    }
 
 
 @pytest.fixture(autouse=True)
@@ -242,10 +357,14 @@ async def test_execute_next_request_runs_provider_and_syncs_target_links(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     seed = await _load_seed(execution_session, "EXEC-SEED")
-    await upsert_provider_refresh_policy(
+    membership = await _membership(
         execution_session,
         provider=seed.source_record.provider,
         dataset_key=seed.source_record.dataset_key,
+    )
+    await upsert_provider_refresh_policy(
+        execution_session,
+        provider_dataset_id=membership.provider_dataset_id,
         source_kind="openapi",
         expected_revision=None,
         targeted_policy="allow_targeted",
@@ -273,8 +392,7 @@ async def test_execute_next_request_runs_provider_and_syncs_target_links(
     scope_lock_key = feature_update_scope_advisory_key(
         scope_type=request.scope_type,
         scope=request.scope,
-        providers=request.providers,
-        dataset_keys=request.dataset_keys,
+        dataset_memberships=request.dataset_memberships,
     )
     competing_lock_results: list[bool] = []
     phase_pids: list[int] = []
@@ -358,6 +476,9 @@ async def test_execute_next_request_runs_provider_and_syncs_target_links(
         loaded = await _bundle("EXEC-LOADED")
         await feature_repo.load_bundle(session, loaded)
         return ProviderDatasetRefreshResult(
+            provider_dataset_id=scope.provider_dataset_id,
+            sync_scope=scope.sync_scope,
+            operation_key=scope.operation_key,
             provider=scope.provider,
             dataset_key=scope.dataset_key,
             loaded_feature_ids=(loaded.feature.feature_id,),
@@ -415,10 +536,14 @@ async def test_execute_next_request_applies_follow_system_policy_skip(
     execution_session: AsyncSession,
 ) -> None:
     seed = await _load_seed(execution_session, "EXEC-SKIP")
-    await upsert_provider_refresh_policy(
+    membership = await _membership(
         execution_session,
         provider=seed.source_record.provider,
         dataset_key=seed.source_record.dataset_key,
+    )
+    await upsert_provider_refresh_policy(
+        execution_session,
+        provider_dataset_id=membership.provider_dataset_id,
         source_kind="openapi",
         expected_revision=None,
         targeted_policy="follow_system",
@@ -485,10 +610,14 @@ async def test_runner_level_skip_does_not_mark_cache_target_refreshed(
     execution_session: AsyncSession,
 ) -> None:
     seed = await _load_seed(execution_session, "EXEC-RUNNER-SKIP")
-    await upsert_provider_refresh_policy(
+    membership = await _membership(
         execution_session,
         provider=seed.source_record.provider,
         dataset_key=seed.source_record.dataset_key,
+    )
+    await upsert_provider_refresh_policy(
+        execution_session,
+        provider_dataset_id=membership.provider_dataset_id,
         source_kind="openapi",
         expected_revision=None,
         targeted_policy="allow_targeted",
@@ -516,6 +645,9 @@ async def test_runner_level_skip_does_not_mark_cache_target_refreshed(
         scope: ProviderDatasetRefreshScope,
     ) -> ProviderDatasetRefreshResult:
         return ProviderDatasetRefreshResult(
+            provider_dataset_id=scope.provider_dataset_id,
+            sync_scope=scope.sync_scope,
+            operation_key=scope.operation_key,
             provider=scope.provider,
             dataset_key=scope.dataset_key,
             status="skipped",
@@ -554,10 +686,14 @@ async def test_failed_runner_rolls_back_refresh_writes(
     execution_session: AsyncSession,
 ) -> None:
     seed = await _load_seed(execution_session, "EXEC-ROLLBACK-SEED")
-    await upsert_provider_refresh_policy(
+    membership = await _membership(
         execution_session,
         provider=seed.source_record.provider,
         dataset_key=seed.source_record.dataset_key,
+    )
+    await upsert_provider_refresh_policy(
+        execution_session,
+        provider_dataset_id=membership.provider_dataset_id,
         source_kind="openapi",
         expected_revision=None,
         targeted_policy="allow_targeted",
@@ -654,14 +790,15 @@ async def test_production_asset_runner_rolls_back_load_when_checkpoint_fails(
             fetched_at=_FETCHED,
         )
     )[0]
+    membership = await _membership(
+        execution_session,
+        provider=STANDARD_DATA_PROVIDER_NAME,
+        dataset_key=DATASET_KEY_CULTURAL_FESTIVALS,
+    )
     request = await enqueue_feature_update_request(
         execution_session,
-        scope={
-            "type": "provider_dataset",
-            "provider": STANDARD_DATA_PROVIDER_NAME,
-            "dataset_key": DATASET_KEY_CULTURAL_FESTIVALS,
-        },
-        effective_sync_scope="dataset_wide",
+        scope=_provider_dataset_scope(membership),
+        dataset_memberships=[membership],
     )
     assert isinstance(request, FeatureUpdateRequest)
     await execution_session.commit()
@@ -683,8 +820,7 @@ async def test_production_asset_runner_rolls_back_load_when_checkpoint_fails(
         settings_factory=KorTravelMapSettings.model_construct,
         specs=(
             FeatureUpdateRunnerSpec(
-                provider=STANDARD_DATA_PROVIDER_NAME,
-                dataset_keys=frozenset({DATASET_KEY_CULTURAL_FESTIVALS}),
+                operation_key=membership.operation_key,
                 run=run_feature_event_datagokr_cultural_festivals,
                 resources=resources,
                 asset_key="feature_event_datagokr_cultural_festivals",
@@ -742,12 +878,13 @@ async def test_production_asset_runner_rolls_back_load_when_checkpoint_fails(
         await execution_session.execute(
             text(
                 "SELECT 1 FROM provider_sync.provider_sync_state "
-                "WHERE provider = :provider AND dataset_key = :dataset_key "
-                "AND sync_scope = 'default'"
+                "WHERE provider_dataset_id = :provider_dataset_id "
+                "AND sync_scope = :sync_scope AND operation_key = :operation_key"
             ),
             {
-                "provider": STANDARD_DATA_PROVIDER_NAME,
-                "dataset_key": DATASET_KEY_CULTURAL_FESTIVALS,
+                "provider_dataset_id": membership.provider_dataset_id,
+                "sync_scope": membership.sync_scope,
+                "operation_key": membership.operation_key,
             },
         )
     ).first()
@@ -772,15 +909,17 @@ async def test_bound_kma_failure_records_sync_failure_once_after_rollback(
         lat=37.5665,
         radius_km=1.0,
     )
+    membership = await _membership(
+        execution_session,
+        provider=KMA_PROVIDER_NAME,
+        dataset_key=KMA_ULTRA_SHORT_NOWCAST_DATASET_KEY,
+        sync_scope=sync_scope,
+        operation_key=KMA_ULTRA_SHORT_NOWCAST_OPERATION_KEY,
+    )
     request = await enqueue_feature_update_request(
         execution_session,
-        scope={
-            "type": "provider_dataset",
-            "provider": KMA_PROVIDER_NAME,
-            "dataset_key": KMA_ULTRA_SHORT_NOWCAST_DATASET_KEY,
-            "sync_scope": sync_scope,
-        },
-        effective_sync_scope=sync_scope,
+        scope=_provider_dataset_scope(membership),
+        dataset_memberships=[membership],
     )
     assert isinstance(request, FeatureUpdateRequest)
     await execution_session.commit()
@@ -845,15 +984,15 @@ async def test_bound_kma_failure_records_sync_failure_once_after_rollback(
                 """
                 SELECT cursor, consecutive_failures, last_failure_at, last_success_at
                 FROM provider_sync.provider_sync_state
-                WHERE provider = :provider
-                  AND dataset_key = :dataset_key
+                WHERE provider_dataset_id = :provider_dataset_id
                   AND sync_scope = :sync_scope
+                  AND operation_key = :operation_key
                 """
             ),
             {
-                "provider": KMA_PROVIDER_NAME,
-                "dataset_key": KMA_ULTRA_SHORT_NOWCAST_DATASET_KEY,
-                "sync_scope": sync_scope,
+                "provider_dataset_id": membership.provider_dataset_id,
+                "sync_scope": membership.sync_scope,
+                "operation_key": membership.operation_key,
             },
         )
     ).mappings().one()
@@ -880,18 +1019,25 @@ async def test_bound_kma_empty_target_fails_operation_without_provider_or_state_
     execution_session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    membership = await _membership(
+        execution_session,
+        provider=KMA_PROVIDER_NAME,
+        dataset_key=KMA_ULTRA_SHORT_NOWCAST_DATASET_KEY,
+        sync_scope="target_grids",
+        operation_key=KMA_ULTRA_SHORT_NOWCAST_OPERATION_KEY,
+    )
     state_params = {
-        "provider": KMA_PROVIDER_NAME,
-        "dataset_key": KMA_ULTRA_SHORT_NOWCAST_DATASET_KEY,
-        "sync_scope": "target_grids",
+        "provider_dataset_id": membership.provider_dataset_id,
+        "sync_scope": membership.sync_scope,
+        "operation_key": membership.operation_key,
     }
     await execution_session.execute(
         text(
             """
             INSERT INTO provider_sync.provider_sync_state (
-                provider,
-                dataset_key,
+                provider_dataset_id,
                 sync_scope,
+                operation_key,
                 status,
                 cursor,
                 last_success_at,
@@ -900,9 +1046,9 @@ async def test_bound_kma_empty_target_fails_operation_without_provider_or_state_
                 next_run_after,
                 updated_at
             ) VALUES (
-                :provider,
-                :dataset_key,
+                :provider_dataset_id,
                 :sync_scope,
+                :operation_key,
                 'paused',
                 '{"sentinel":"must-remain-unchanged"}'::jsonb,
                 TIMESTAMPTZ '2026-05-01 01:02:03+00',
@@ -918,9 +1064,9 @@ async def test_bound_kma_empty_target_fails_operation_without_provider_or_state_
     sync_state_sql = text(
         """
         SELECT
-            provider,
-            dataset_key,
+            provider_dataset_id,
             sync_scope,
+            operation_key,
             status,
             cursor,
             last_success_at,
@@ -929,9 +1075,9 @@ async def test_bound_kma_empty_target_fails_operation_without_provider_or_state_
             next_run_after,
             updated_at
         FROM provider_sync.provider_sync_state
-        WHERE provider = :provider
-          AND dataset_key = :dataset_key
+        WHERE provider_dataset_id = :provider_dataset_id
           AND sync_scope = :sync_scope
+          AND operation_key = :operation_key
         """
     )
     before_sync_state = dict(
@@ -939,13 +1085,8 @@ async def test_bound_kma_empty_target_fails_operation_without_provider_or_state_
     )
     request = await enqueue_feature_update_request(
         execution_session,
-        scope={
-            "type": "provider_dataset",
-            "provider": KMA_PROVIDER_NAME,
-            "dataset_key": KMA_ULTRA_SHORT_NOWCAST_DATASET_KEY,
-            "sync_scope": "target_grids",
-        },
-        effective_sync_scope="target_grids",
+        scope=_provider_dataset_scope(membership),
+        dataset_memberships=[membership],
     )
     assert isinstance(request, FeatureUpdateRequest)
     assert request.job_id is not None
@@ -1045,27 +1186,38 @@ async def test_bound_kma_empty_target_fails_operation_without_provider_or_state_
     )
     assert after_replay_sync_state == before_sync_state
 
+    # T-VN-33: request/job membership은 자연키 사본이 아니라 canonical triple
+    # 링크 테이블(``feature_update_request_datasets``/``import_job_datasets``)이다.
     operation_counts = (
         await execution_session.execute(
             text(
                 """
                 SELECT
-                    (SELECT count(*) FROM ops.feature_update_requests
-                     AS request
+                    (SELECT count(*) FROM ops.feature_update_requests AS request
                      JOIN ops.import_jobs AS job ON job.job_id = request.job_id
+                     JOIN ops.feature_update_request_datasets AS member
+                       ON member.request_id = request.request_id
                      WHERE request.scope_type = 'provider_dataset'
-                       AND request.scope ->> 'provider' = :provider
-                       AND request.scope ->> 'dataset_key' = :dataset_key
-                       AND request.scope ->> 'sync_scope' = :sync_scope
+                       AND CAST(request.scope ->> 'provider_dataset_id' AS bigint)
+                           = CAST(:provider_dataset_id AS bigint)
+                       AND request.scope ->> 'sync_scope' = CAST(:sync_scope AS text)
+                       AND request.scope ->> 'operation_key'
+                           = CAST(:operation_key AS text)
                        AND job.kind = 'feature_update_request'
-                       AND job.provider = :provider
-                       AND job.dataset_key = :dataset_key
-                       AND job.sync_scope = :sync_scope) AS requests,
-                    (SELECT count(*) FROM ops.import_jobs
-                     WHERE kind = 'feature_update_request'
-                       AND provider = :provider
-                       AND dataset_key = :dataset_key
-                       AND sync_scope = :sync_scope) AS jobs
+                       AND member.provider_dataset_id
+                           = CAST(:provider_dataset_id AS bigint)
+                       AND member.sync_scope = CAST(:sync_scope AS text)
+                       AND member.operation_key = CAST(:operation_key AS text)
+                    ) AS requests,
+                    (SELECT count(*) FROM ops.import_jobs AS job
+                     JOIN ops.import_job_datasets AS member
+                       ON member.job_id = job.job_id
+                     WHERE job.kind = 'feature_update_request'
+                       AND member.provider_dataset_id
+                           = CAST(:provider_dataset_id AS bigint)
+                       AND member.sync_scope = CAST(:sync_scope AS text)
+                       AND member.operation_key = CAST(:operation_key AS text)
+                    ) AS jobs
                 """
             ),
             state_params,
@@ -1078,12 +1230,17 @@ async def test_bound_kma_empty_target_fails_operation_without_provider_or_state_
         await execution_session.execute(
             text(
                 """
-                SELECT job_id, provider, dataset_key, level, code, message, payload
-                FROM ops.import_job_events
-                WHERE provider = :provider
-                  AND dataset_key = :dataset_key
-                  AND code = 'kma.target_scope_empty'
-                ORDER BY occurred_at, event_id
+                SELECT event.job_id, event.level, event.code, event.message,
+                       event.payload
+                FROM ops.import_job_events AS event
+                JOIN ops.import_jobs AS job ON job.job_id = event.job_id
+                JOIN ops.import_job_datasets AS member ON member.job_id = job.job_id
+                WHERE member.provider_dataset_id
+                      = CAST(:provider_dataset_id AS bigint)
+                  AND member.sync_scope = CAST(:sync_scope AS text)
+                  AND member.operation_key = CAST(:operation_key AS text)
+                  AND event.code = 'kma.target_scope_empty'
+                ORDER BY event.occurred_at, event.event_id
                 """
             ),
             state_params,
@@ -1106,7 +1263,7 @@ async def test_bound_kma_empty_target_fails_operation_without_provider_or_state_
             yield session
 
     async def _empty_schedule_index(**_kwargs: object) -> DatasetScheduleIndex:
-        return DatasetScheduleIndex(source_status="ok", errors=(), by_dataset={})
+        return DatasetScheduleIndex(source_status="ok", errors=(), by_operation_key={})
 
     monkeypatch.setattr(
         dataset_service,
@@ -1152,8 +1309,8 @@ async def test_bound_kma_empty_target_fails_operation_without_provider_or_state_
             f"/v1/ops/pipeline/executions/update_request/{request.request_id}"
         )
         dataset_response = await api_client.get(
-            "/v1/ops/datasets/detail",
-            params=state_params,
+            f"/v1/ops/datasets/{membership.provider_dataset_id}",
+            params={"sync_scope": membership.sync_scope},
         )
 
     assert pipeline_response.status_code == 200, pipeline_response.text
@@ -1174,20 +1331,27 @@ async def test_kma_empty_terminal_event_failure_rolls_back_job_and_preserves_sta
     execution_session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    membership = await _membership(
+        execution_session,
+        provider=KMA_PROVIDER_NAME,
+        dataset_key=KMA_ULTRA_SHORT_NOWCAST_DATASET_KEY,
+        sync_scope="target_grids",
+        operation_key=KMA_ULTRA_SHORT_NOWCAST_OPERATION_KEY,
+    )
     state_params = {
-        "provider": KMA_PROVIDER_NAME,
-        "dataset_key": KMA_ULTRA_SHORT_NOWCAST_DATASET_KEY,
-        "sync_scope": "target_grids",
+        "provider_dataset_id": membership.provider_dataset_id,
+        "sync_scope": membership.sync_scope,
+        "operation_key": membership.operation_key,
     }
     await execution_session.execute(
         text(
             """
             INSERT INTO provider_sync.provider_sync_state (
-                provider, dataset_key, sync_scope, status, cursor,
+                provider_dataset_id, sync_scope, operation_key, status, cursor,
                 last_success_at, last_failure_at, consecutive_failures,
                 next_run_after, updated_at
             ) VALUES (
-                :provider, :dataset_key, :sync_scope, 'disabled',
+                :provider_dataset_id, :sync_scope, :operation_key, 'disabled',
                 '{"atomic":"sentinel"}'::jsonb,
                 TIMESTAMPTZ '2026-05-11 01:02:03+00',
                 TIMESTAMPTZ '2026-05-12 04:05:06+00',
@@ -1201,13 +1365,13 @@ async def test_kma_empty_terminal_event_failure_rolls_back_job_and_preserves_sta
     )
     state_sql = text(
         """
-        SELECT provider, dataset_key, sync_scope, status, cursor,
+        SELECT provider_dataset_id, sync_scope, operation_key, status, cursor,
                last_success_at, last_failure_at, consecutive_failures,
                next_run_after, updated_at
         FROM provider_sync.provider_sync_state
-        WHERE provider = :provider
-          AND dataset_key = :dataset_key
+        WHERE provider_dataset_id = :provider_dataset_id
           AND sync_scope = :sync_scope
+          AND operation_key = :operation_key
         """
     )
     before_state = dict(
@@ -1215,11 +1379,8 @@ async def test_kma_empty_terminal_event_failure_rolls_back_job_and_preserves_sta
     )
     request = await enqueue_feature_update_request(
         execution_session,
-        scope={
-            "type": "provider_dataset",
-            **state_params,
-        },
-        effective_sync_scope="target_grids",
+        scope=_provider_dataset_scope(membership),
+        dataset_memberships=[membership],
     )
     await execution_session.commit()
     client_creations: list[bool] = []
@@ -1325,14 +1486,15 @@ async def test_probe_failure_finishes_committed_prepare_as_failed(
     execution_session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    membership = await _membership(
+        execution_session,
+        provider="python-probe-api",
+        dataset_key="probe-failure",
+    )
     request = await enqueue_feature_update_request(
         execution_session,
-        scope={
-            "type": "provider_dataset",
-            "provider": "python-probe-api",
-            "dataset_key": "probe-failure",
-        },
-        effective_sync_scope="dataset_wide",
+        scope=_provider_dataset_scope(membership),
+        dataset_memberships=[membership],
     )
     assert isinstance(request, FeatureUpdateRequest)
     await execution_session.commit()
@@ -1369,14 +1531,15 @@ async def test_cancellation_marker_wins_before_runner_starts(
     migrated_engine: AsyncEngine,
     execution_session: AsyncSession,
 ) -> None:
+    membership = await _membership(
+        execution_session,
+        provider="python-cancelled-api",
+        dataset_key="cancelled-before-runner",
+    )
     request = await enqueue_feature_update_request(
         execution_session,
-        scope={
-            "type": "provider_dataset",
-            "provider": "python-cancelled-api",
-            "dataset_key": "cancelled-before-runner",
-        },
-        effective_sync_scope="dataset_wide",
+        scope=_provider_dataset_scope(membership),
+        dataset_memberships=[membership],
     )
     assert isinstance(request, FeatureUpdateRequest)
     await execution_session.commit()
@@ -1449,22 +1612,22 @@ async def test_execute_next_lock_busy_keeps_request_queued_and_rerunnable(
     migrated_engine: AsyncEngine,
     execution_session: AsyncSession,
 ) -> None:
+    membership = await _membership(
+        execution_session,
+        provider="python-lock-busy-api",
+        dataset_key="rerunnable",
+    )
     request = await enqueue_feature_update_request(
         execution_session,
-        scope={
-            "type": "provider_dataset",
-            "provider": "python-lock-busy-api",
-            "dataset_key": "rerunnable",
-        },
-        effective_sync_scope="dataset_wide",
+        scope=_provider_dataset_scope(membership),
+        dataset_memberships=[membership],
     )
     assert isinstance(request, FeatureUpdateRequest)
     assert request.job_id is not None
     scope_lock_key = feature_update_scope_advisory_key(
         scope_type=request.scope_type,
         scope=request.scope,
-        providers=request.providers,
-        dataset_keys=request.dataset_keys,
+        dataset_memberships=request.dataset_memberships,
     )
     await execution_session.commit()
     runner_calls = 0
@@ -1476,6 +1639,9 @@ async def test_execute_next_lock_busy_keeps_request_queued_and_rerunnable(
         nonlocal runner_calls
         runner_calls += 1
         return ProviderDatasetRefreshResult(
+            provider_dataset_id=scope.provider_dataset_id,
+            sync_scope=scope.sync_scope,
+            operation_key=scope.operation_key,
             provider=scope.provider,
             dataset_key=scope.dataset_key,
         )
@@ -1519,14 +1685,15 @@ async def test_preclaimed_running_request_requeues_when_scope_lock_is_busy(
     migrated_engine: AsyncEngine,
     execution_session: AsyncSession,
 ) -> None:
+    membership = await _membership(
+        execution_session,
+        provider="python-preclaimed-api",
+        dataset_key="lock-busy",
+    )
     request = await enqueue_feature_update_request(
         execution_session,
-        scope={
-            "type": "provider_dataset",
-            "provider": "python-preclaimed-api",
-            "dataset_key": "lock-busy",
-        },
-        effective_sync_scope="dataset_wide",
+        scope=_provider_dataset_scope(membership),
+        dataset_memberships=[membership],
     )
     assert isinstance(request, FeatureUpdateRequest)
     assert request.job_id is not None
@@ -1561,8 +1728,7 @@ async def test_preclaimed_running_request_requeues_when_scope_lock_is_busy(
     scope_lock_key = feature_update_scope_advisory_key(
         scope_type=request.scope_type,
         scope=request.scope,
-        providers=request.providers,
-        dataset_keys=request.dataset_keys,
+        dataset_memberships=request.dataset_memberships,
     )
 
     async def runner(
@@ -1570,6 +1736,9 @@ async def test_preclaimed_running_request_requeues_when_scope_lock_is_busy(
         scope: ProviderDatasetRefreshScope,
     ) -> ProviderDatasetRefreshResult:
         return ProviderDatasetRefreshResult(
+            provider_dataset_id=scope.provider_dataset_id,
+            sync_scope=scope.sync_scope,
+            operation_key=scope.operation_key,
             provider=scope.provider,
             dataset_key=scope.dataset_key,
         )
@@ -1627,14 +1796,15 @@ async def test_request_lease_loser_touches_only_queued_run_key_and_can_retry(
     migrated_engine: AsyncEngine,
     execution_session: AsyncSession,
 ) -> None:
+    membership = await _membership(
+        execution_session,
+        provider="python-request-lease-api",
+        dataset_key="queued-retry",
+    )
     request = await enqueue_feature_update_request(
         execution_session,
-        scope={
-            "type": "provider_dataset",
-            "provider": "python-request-lease-api",
-            "dataset_key": "queued-retry",
-        },
-        effective_sync_scope="dataset_wide",
+        scope=_provider_dataset_scope(membership),
+        dataset_memberships=[membership],
     )
     assert isinstance(request, FeatureUpdateRequest)
     assert request.job_id is not None
@@ -1654,6 +1824,9 @@ async def test_request_lease_loser_touches_only_queued_run_key_and_can_retry(
         nonlocal runner_calls
         runner_calls += 1
         return ProviderDatasetRefreshResult(
+            provider_dataset_id=scope.provider_dataset_id,
+            sync_scope=scope.sync_scope,
+            operation_key=scope.operation_key,
             provider=scope.provider,
             dataset_key=scope.dataset_key,
         )
@@ -1700,14 +1873,15 @@ async def test_request_lease_loser_does_not_touch_active_running_owner(
     migrated_engine: AsyncEngine,
     execution_session: AsyncSession,
 ) -> None:
+    membership = await _membership(
+        execution_session,
+        provider="python-request-lease-api",
+        dataset_key="active-owner",
+    )
     request = await enqueue_feature_update_request(
         execution_session,
-        scope={
-            "type": "provider_dataset",
-            "provider": "python-request-lease-api",
-            "dataset_key": "active-owner",
-        },
-        effective_sync_scope="dataset_wide",
+        scope=_provider_dataset_scope(membership),
+        dataset_memberships=[membership],
     )
     assert isinstance(request, FeatureUpdateRequest)
     assert request.job_id is not None
@@ -1757,21 +1931,21 @@ async def test_cancelled_error_releases_scope_lock_on_same_connection(
     migrated_engine: AsyncEngine,
     execution_session: AsyncSession,
 ) -> None:
+    membership = await _membership(
+        execution_session,
+        provider="python-interrupted-api",
+        dataset_key="cancelled-error",
+    )
     request = await enqueue_feature_update_request(
         execution_session,
-        scope={
-            "type": "provider_dataset",
-            "provider": "python-interrupted-api",
-            "dataset_key": "cancelled-error",
-        },
-        effective_sync_scope="dataset_wide",
+        scope=_provider_dataset_scope(membership),
+        dataset_memberships=[membership],
     )
     assert isinstance(request, FeatureUpdateRequest)
     scope_lock_key = feature_update_scope_advisory_key(
         scope_type=request.scope_type,
         scope=request.scope,
-        providers=request.providers,
-        dataset_keys=request.dataset_keys,
+        dataset_memberships=request.dataset_memberships,
     )
     await execution_session.commit()
 
@@ -1815,22 +1989,22 @@ async def test_false_exact_unlock_invalidates_connection(
     execution_session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    membership = await _membership(
+        execution_session,
+        provider="python-unlock-api",
+        dataset_key="false-unlock",
+    )
     request = await enqueue_feature_update_request(
         execution_session,
-        scope={
-            "type": "provider_dataset",
-            "provider": "python-unlock-api",
-            "dataset_key": "false-unlock",
-        },
-        effective_sync_scope="dataset_wide",
+        scope=_provider_dataset_scope(membership),
+        dataset_memberships=[membership],
     )
     assert isinstance(request, FeatureUpdateRequest)
     scope_lock_id = advisory_lock_key(
         feature_update_scope_advisory_key(
             scope_type=request.scope_type,
             scope=request.scope,
-            providers=request.providers,
-            dataset_keys=request.dataset_keys,
+            dataset_memberships=request.dataset_memberships,
         )
     )
     request_lock_id = advisory_lock_key(
@@ -1872,6 +2046,9 @@ async def test_false_exact_unlock_invalidates_connection(
         )
         assert unlocked
         return ProviderDatasetRefreshResult(
+            provider_dataset_id=scope.provider_dataset_id,
+            sync_scope=scope.sync_scope,
+            operation_key=scope.operation_key,
             provider=scope.provider,
             dataset_key=scope.dataset_key,
         )
@@ -1962,14 +2139,19 @@ async def test_cancellation_marker_preserves_committed_scope_and_skips_next_runn
     execution_session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    memberships = {
+        dataset_key: await _membership(
+            execution_session,
+            provider="python-phase-api",
+            dataset_key=dataset_key,
+            operation_key=f"feature_place_python_phase_{dataset_key}_job".replace("-", "_"),
+        )
+        for dataset_key in ("phase-a", "phase-b")
+    }
     request = await enqueue_feature_update_request(
         execution_session,
-        scope={
-            "type": "provider_dataset",
-            "provider": "python-phase-api",
-            "dataset_key": "phase-a",
-        },
-        effective_sync_scope="dataset_wide",
+        scope=_provider_dataset_scope(memberships["phase-a"]),
+        dataset_memberships=[memberships["phase-a"]],
     )
     assert isinstance(request, FeatureUpdateRequest)
     await execution_session.commit()
@@ -1986,6 +2168,9 @@ async def test_cancellation_marker_preserves_committed_scope_and_skips_next_runn
         scopes = tuple(
             ProviderDatasetRefreshScope(
                 request_id=current.request_id,
+                provider_dataset_id=memberships[dataset_key].provider_dataset_id,
+                sync_scope=memberships[dataset_key].sync_scope,
+                operation_key=memberships[dataset_key].operation_key,
                 provider="python-phase-api",
                 dataset_key=dataset_key,
                 scope_type=current.scope_type,
@@ -2078,6 +2263,9 @@ async def test_cancellation_marker_preserves_committed_scope_and_skips_next_runn
         cancellation_task = asyncio.create_task(cancel_after_first_scope())
         await asyncio.sleep(0)
         return ProviderDatasetRefreshResult(
+            provider_dataset_id=scope.provider_dataset_id,
+            sync_scope=scope.sync_scope,
+            operation_key=scope.operation_key,
             provider=scope.provider,
             dataset_key=scope.dataset_key,
             loaded_feature_ids=(loaded.feature.feature_id,),
@@ -2127,14 +2315,19 @@ async def test_failure_preserves_prior_scope_checkpoint_and_data(
     execution_session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    memberships = {
+        dataset_key: await _membership(
+            execution_session,
+            provider="python-checkpoint-api",
+            dataset_key=dataset_key,
+            operation_key=f"feature_place_python_checkpoint_{dataset_key}_job".replace("-", "_"),
+        )
+        for dataset_key in ("phase-a", "phase-b")
+    }
     request = await enqueue_feature_update_request(
         execution_session,
-        scope={
-            "type": "provider_dataset",
-            "provider": "python-checkpoint-api",
-            "dataset_key": "phase-a",
-        },
-        effective_sync_scope="dataset_wide",
+        scope=_provider_dataset_scope(memberships["phase-a"]),
+        dataset_memberships=[memberships["phase-a"]],
     )
     assert isinstance(request, FeatureUpdateRequest)
     assert request.job_id is not None
@@ -2151,6 +2344,9 @@ async def test_failure_preserves_prior_scope_checkpoint_and_data(
         scopes = tuple(
             ProviderDatasetRefreshScope(
                 request_id=current.request_id,
+                provider_dataset_id=memberships[dataset_key].provider_dataset_id,
+                sync_scope=memberships[dataset_key].sync_scope,
+                operation_key=memberships[dataset_key].operation_key,
                 provider="python-checkpoint-api",
                 dataset_key=dataset_key,
                 scope_type=current.scope_type,
@@ -2189,6 +2385,9 @@ async def test_failure_preserves_prior_scope_checkpoint_and_data(
         if scope.dataset_key == "phase-b":
             raise RuntimeError("second scope failed")
         return ProviderDatasetRefreshResult(
+            provider_dataset_id=scope.provider_dataset_id,
+            sync_scope=scope.sync_scope,
+            operation_key=scope.operation_key,
             provider=scope.provider,
             dataset_key=scope.dataset_key,
             loaded_feature_ids=(loaded.feature.feature_id,),
@@ -2236,14 +2435,16 @@ async def test_scope_checkpoint_commits_before_real_cancellation_marker_wins(
     execution_session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    membership = await _membership(
+        execution_session,
+        provider="python-marker-race-api",
+        dataset_key="phase-a",
+        operation_key="feature_place_python_marker_race_phase_a_job",
+    )
     request = await enqueue_feature_update_request(
         execution_session,
-        scope={
-            "type": "provider_dataset",
-            "provider": "python-marker-race-api",
-            "dataset_key": "phase-a",
-        },
-        effective_sync_scope="dataset_wide",
+        scope=_provider_dataset_scope(membership),
+        dataset_memberships=[membership],
     )
     assert isinstance(request, FeatureUpdateRequest)
     await execution_session.commit()
@@ -2258,6 +2459,9 @@ async def test_scope_checkpoint_commits_before_real_cancellation_marker_wins(
         del sigungu_resolver
         scope = ProviderDatasetRefreshScope(
             request_id=current.request_id,
+            provider_dataset_id=membership.provider_dataset_id,
+            sync_scope=membership.sync_scope,
+            operation_key=membership.operation_key,
             provider="python-marker-race-api",
             dataset_key="phase-a",
             scope_type=current.scope_type,
@@ -2351,6 +2555,9 @@ async def test_scope_checkpoint_commits_before_real_cancellation_marker_wins(
         await asyncio.sleep(0.05)
         assert not marker_task.done()
         return ProviderDatasetRefreshResult(
+            provider_dataset_id=scope.provider_dataset_id,
+            sync_scope=scope.sync_scope,
+            operation_key=scope.operation_key,
             provider=scope.provider,
             dataset_key=scope.dataset_key,
             loaded_feature_ids=(loaded.feature.feature_id,),

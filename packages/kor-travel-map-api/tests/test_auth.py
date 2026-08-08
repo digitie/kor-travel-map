@@ -31,6 +31,10 @@ from kortravelmap.api.auth import (
     resolve_admin_proxy_context,
 )
 from kortravelmap.api.db import get_session
+from kortravelmap.api.provider_catalog import (
+    ProviderDatasetCatalogEntry,
+    ProviderDatasetOperation,
+)
 from kortravelmap.api.settings import ApiSettings
 
 OPS_READ_TOKEN = "read-token-00000000000000000000000000000000"
@@ -815,11 +819,36 @@ def test_canonical_ops_mutation_is_bff_only_except_exact_cancel(
     from kortravelmap.api.ops_dataset_preview import DatasetPreviewResult
     from kortravelmap.api.routers import ops_datasets as router_module
 
-    monkeypatch.setattr(
-        router_module,
-        "find_catalog_entry",
-        lambda *_args: SimpleNamespace(preview="fixture"),
-    )
+    async def _catalog(*_args: object) -> tuple[ProviderDatasetCatalogEntry, ...]:
+        return (
+            ProviderDatasetCatalogEntry(
+                provider_dataset_id=42,
+                provider="test",
+                dataset_key="fixture",
+                display_name="fixture",
+                source_kind="manual",
+                is_active=True,
+                capabilities={},
+                operations=(
+                    ProviderDatasetOperation(
+                        operation_key="fixture_preview",
+                        operation_kind="preview",
+                        is_enabled=True,
+                        config={"handler": "fixture"},
+                        sync_scopes=(),
+                    ),
+                    ProviderDatasetOperation(
+                        operation_key="fixture_refresh",
+                        operation_kind="refresh",
+                        is_enabled=True,
+                        config={},
+                        sync_scopes=("dataset_wide",),
+                    ),
+                ),
+            ),
+        )
+
+    monkeypatch.setattr(router_module, "list_provider_dataset_catalog", _catalog)
 
     async def _preview(
         provider: str,
@@ -839,10 +868,10 @@ def test_canonical_ops_mutation_is_bff_only_except_exact_cancel(
 
     monkeypatch.setattr(router_module, "run_dataset_fixture_preview", _preview)
     client = _ops_client()
-    params = {"provider": "test", "dataset_key": "fixture"}
+    params = {"sync_scope": "dataset_wide"}
     body = {"source": "fixture", "max_items": 1}
     service = client.post(
-        "/v1/ops/datasets/preview",
+        "/v1/ops/datasets/42/preview",
         params=params,
         json=body,
         headers={
@@ -851,7 +880,7 @@ def test_canonical_ops_mutation_is_bff_only_except_exact_cancel(
         },
     )
     bff = client.post(
-        "/v1/ops/datasets/preview",
+        "/v1/ops/datasets/42/preview",
         params=params,
         json=body,
         headers={

@@ -30,9 +30,9 @@ ADR 참조
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Any, Final, cast
+from typing import TYPE_CHECKING, Any, Final, Literal, TypeAlias, cast
 
 from sqlalchemy import text
 
@@ -42,7 +42,6 @@ from kortravelmap.core.feature_operation import (
     FEATURE_UPDATE_REQUEST_JOB_KIND,
     TRIGGER_KIND_VALUES,
     FeatureOperationInvariantConflict,
-    ProviderDatasetOperationKey,
     TriggerKind,
 )
 from kortravelmap.core.sync_scope import parse_canonical_sync_scope
@@ -59,14 +58,18 @@ if TYPE_CHECKING:
 
 __all__ = [
     "ImportJob",
+    "ImportJobDataset",
+    "ImportJobDatasetTarget",
     "ImportJobEvent",
     "IMPORT_QUEUE_ADVISORY_KEY",
     "DEFAULT_STALE_AFTER",
     "enqueue_unpaired_import_job",
     "enqueue_provider_dataset_import_job",
+    "enqueue_import_job",
     "enqueue_feature_update_request_job",
     "start_unpaired_import_job",
     "start_provider_dataset_import_job",
+    "start_import_job",
     "get_import_job",
     "record_import_job_event",
     "update_import_job_payload",
@@ -94,20 +97,77 @@ _GENERIC_IMPORT_RESERVED_KINDS: Final[frozenset[str]] = FEATURE_OPERATION_RESERV
     C6C_CANCEL_PROBE_JOB_KIND,
 }
 
+ImportJobDatasetMembershipMode: TypeAlias = Literal["root", "single", "multiple"]
+
 _RETURN_COLUMNS: Final[str] = (
     "job_id, kind, load_batch_id, parent_job_id, payload, status, progress, "
-    "current_stage, source_checksum, error_message, dagster_run_id, provider, "
-    "dataset_key, sync_scope, trigger_kind, operation_registry_version, "
+    "current_stage, source_checksum, error_message, dagster_run_id, "
+    "dataset_membership_mode, trigger_kind, operation_key, "
     "dagster_run_status, dispatch_requested_at, "
     "cancellation_id, quarantined_at, quarantine_reason, "
     "cancellation_requested_at, cancellation_requested_by, cancellation_reason, "
     "started_at, finished_at, heartbeat_at, created_at"
 )
+# Membership projection joins add their own lifecycle columns.  Keep the
+# base job projection fully qualified instead of relying on a single prefix
+# before the comma-separated return list.
+_JOB_SELECT_COLUMNS: Final[str] = ", ".join(
+    f"job.{column}" for column in _RETURN_COLUMNS.split(", ")
+)
 
 _EVENT_RETURN_COLUMNS: Final[str] = (
-    "event_id, job_id, provider, dataset_key, sync_scope, feature_id, stage, level, code, "
+    "event_id, job_id, import_job_dataset_id, feature_id, stage, level, code, "
     "message, payload, occurred_at"
 )
+
+_MEMBER_RETURN_COLUMNS: Final[str] = (
+    "import_job_dataset_id, provider_dataset_id, sync_scope, operation_key"
+)
+_MEMBER_SELECT_COLUMNS: Final[str] = (
+    "member.import_job_dataset_id, member.provider_dataset_id, member.sync_scope, "
+    "member.operation_key"
+)
+
+
+@dataclass(frozen=True, order=True)
+class ImportJobDatasetTarget:
+    """새 job이 보유할 canonical dataset+scope 입력.
+
+    모든 dataset member는 immutable operation snapshot을 함께 보관한다.
+    operation이 없는 generic job은 dataset member가 아닌 root job으로 표현한다.
+    """
+
+    provider_dataset_id: int
+    sync_scope: str
+    operation_key: str
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.provider_dataset_id, int)
+            or isinstance(self.provider_dataset_id, bool)
+            or self.provider_dataset_id <= 0
+        ):
+            raise ValueError("provider_dataset_id must be a positive integer")
+        parse_canonical_sync_scope(self.sync_scope)
+        if (
+            not isinstance(self.operation_key, str)
+            or not self.operation_key
+            or self.operation_key != self.operation_key.strip()
+        ):
+            raise ValueError("operation_key must be a trimmed non-empty string")
+
+
+@dataclass(frozen=True, order=True)
+class ImportJobDataset:
+    """이미 job에 결박된 immutable canonical dataset-operation membership.
+
+    모든 dataset member가 exact operation key를 가진다.
+    """
+
+    import_job_dataset_id: str
+    provider_dataset_id: int
+    sync_scope: str
+    operation_key: str
 
 
 @dataclass(frozen=True)
@@ -125,11 +185,10 @@ class ImportJob:
     load_batch_id: str | None = None
     parent_job_id: str | None = None
     dagster_run_id: str | None = None
-    provider: str | None = None
-    dataset_key: str | None = None
-    sync_scope: str | None = None
+    dataset_membership_mode: ImportJobDatasetMembershipMode = "root"
+    dataset_memberships: tuple[ImportJobDataset, ...] = ()
     trigger_kind: TriggerKind | None = None
-    operation_registry_version: str | None = None
+    operation_key: str | None = None
     dagster_run_status: str | None = None
     started_at: datetime | None = None
     finished_at: datetime | None = None
@@ -150,9 +209,7 @@ class ImportJobEvent:
 
     event_id: str
     job_id: str
-    provider: str | None
-    dataset_key: str | None
-    sync_scope: str | None
+    import_job_dataset_id: str | None
     feature_id: str | None
     stage: str | None
     level: str
@@ -178,13 +235,13 @@ def _row_to_job(row: Any) -> ImportJob:
         source_checksum=row.source_checksum,
         error_message=row.error_message,
         dagster_run_id=row.dagster_run_id,
-        provider=row.provider,
-        dataset_key=row.dataset_key,
-        sync_scope=row.sync_scope,
+        dataset_membership_mode=cast(
+            ImportJobDatasetMembershipMode, row.dataset_membership_mode
+        ),
         trigger_kind=(
             cast(TriggerKind, row.trigger_kind) if row.trigger_kind is not None else None
         ),
-        operation_registry_version=row.operation_registry_version,
+        operation_key=row.operation_key,
         dagster_run_status=row.dagster_run_status,
         started_at=row.started_at,
         finished_at=row.finished_at,
@@ -207,9 +264,11 @@ def _row_to_event(row: Any) -> ImportJobEvent:
     return ImportJobEvent(
         event_id=str(row.event_id),
         job_id=str(row.job_id),
-        provider=row.provider,
-        dataset_key=row.dataset_key,
-        sync_scope=row.sync_scope,
+        import_job_dataset_id=(
+            str(row.import_job_dataset_id)
+            if row.import_job_dataset_id is not None
+            else None
+        ),
         feature_id=row.feature_id,
         stage=row.stage,
         level=str(row.level),
@@ -220,80 +279,154 @@ def _row_to_event(row: Any) -> ImportJobEvent:
     )
 
 
+def _row_to_dataset(row: Any) -> ImportJobDataset | None:
+    if row.import_job_dataset_id is None:
+        return None
+    return ImportJobDataset(
+        import_job_dataset_id=str(row.import_job_dataset_id),
+        provider_dataset_id=int(row.provider_dataset_id),
+        sync_scope=str(row.sync_scope),
+        operation_key=str(row.operation_key),
+    )
+
+
+def _rows_to_job(rows: Sequence[Any]) -> ImportJob:
+    if not rows:
+        raise ValueError("expected an import job row")
+    memberships = tuple(
+        member for row in rows if (member := _row_to_dataset(row)) is not None
+    )
+    return replace(_row_to_job(rows[0]), dataset_memberships=memberships)
+
+
+def _rows_to_jobs(rows: Sequence[Any]) -> tuple[ImportJob, ...]:
+    rows_by_job: dict[str, list[Any]] = {}
+    for row in rows:
+        rows_by_job.setdefault(str(row.job_id), []).append(row)
+    return tuple(_rows_to_job(job_rows) for job_rows in rows_by_job.values())
+
+
 _INSERT_JOB_SQL: Final[str] = f"""
-INSERT INTO ops.import_jobs (
-    kind, payload, source_checksum, load_batch_id, parent_job_id, dagster_run_id,
-    provider, dataset_key, sync_scope, trigger_kind, dispatch_requested_at
+WITH inserted_job AS (
+    INSERT INTO ops.import_jobs (
+        kind, payload, source_checksum, load_batch_id, parent_job_id, dagster_run_id,
+        dataset_membership_mode, trigger_kind, dispatch_requested_at
+    )
+    SELECT
+        :kind, CAST(:payload AS jsonb), :source_checksum,
+        CAST(:load_batch_id AS uuid), CAST(:parent_job_id AS uuid),
+        :dagster_run_id, :dataset_membership_mode, :trigger_kind,
+        CASE WHEN CAST(:dispatch_requested AS boolean) THEN clock_timestamp() END
+    WHERE CAST(:parent_job_id AS uuid) IS NULL
+       OR EXISTS (
+          SELECT 1
+          FROM ops.import_jobs AS parent
+          WHERE parent.job_id = CAST(:parent_job_id AS uuid)
+            AND parent.cancellation_id IS NULL
+            AND parent.quarantined_at IS NULL
+       )
+    RETURNING *
+),
+inserted_members AS (
+    INSERT INTO ops.import_job_datasets (
+        job_id, provider_dataset_id, sync_scope, operation_key
+    )
+    SELECT
+        job.job_id, member.provider_dataset_id, member.sync_scope, member.operation_key
+    FROM inserted_job AS job
+    CROSS JOIN LATERAL jsonb_to_recordset(CAST(:dataset_memberships AS jsonb)) AS member(
+        provider_dataset_id bigint,
+        sync_scope text,
+        operation_key text
+    )
+    RETURNING {_MEMBER_RETURN_COLUMNS}
 )
-SELECT
-    :kind, CAST(:payload AS jsonb), :source_checksum,
-    CAST(:load_batch_id AS uuid), CAST(:parent_job_id AS uuid),
-    :dagster_run_id, :provider, :dataset_key, :sync_scope, :trigger_kind,
-    CASE WHEN CAST(:dispatch_requested AS boolean) THEN clock_timestamp() END
-WHERE CAST(:parent_job_id AS uuid) IS NULL
-   OR EXISTS (
-      SELECT 1
-      FROM ops.import_jobs AS parent
-      WHERE parent.job_id = CAST(:parent_job_id AS uuid)
-        AND parent.cancellation_id IS NULL
-        AND parent.quarantined_at IS NULL
-   )
-RETURNING {_RETURN_COLUMNS}
+SELECT {_JOB_SELECT_COLUMNS}, {_MEMBER_SELECT_COLUMNS}
+FROM inserted_job AS job
+LEFT JOIN inserted_members AS member ON TRUE
+ORDER BY member.provider_dataset_id, member.sync_scope, member.operation_key
 """
 
 # self-driven 작업 — queue를 거치지 않고 곧바로 running으로 INSERT (호출자가 직접
 # 수행하는 inline job, 예: advisory lock 보유 중인 단일 워커 적재).
 _START_JOB_SQL: Final[str] = f"""
-INSERT INTO ops.import_jobs (
-    kind, payload, source_checksum, load_batch_id, parent_job_id, dagster_run_id,
-    provider, dataset_key, sync_scope, trigger_kind, status, started_at, heartbeat_at
+WITH inserted_job AS (
+    INSERT INTO ops.import_jobs (
+        kind, payload, source_checksum, load_batch_id, parent_job_id, dagster_run_id,
+        dataset_membership_mode, trigger_kind, status, started_at, heartbeat_at
+    )
+    SELECT
+        :kind, CAST(:payload AS jsonb), :source_checksum,
+        CAST(:load_batch_id AS uuid), CAST(:parent_job_id AS uuid),
+        :dagster_run_id, :dataset_membership_mode, :trigger_kind,
+        'running', now(), now()
+    WHERE CAST(:parent_job_id AS uuid) IS NULL
+       OR EXISTS (
+          SELECT 1
+          FROM ops.import_jobs AS parent
+          WHERE parent.job_id = CAST(:parent_job_id AS uuid)
+            AND parent.cancellation_id IS NULL
+            AND parent.quarantined_at IS NULL
+       )
+    RETURNING *
+),
+inserted_members AS (
+    INSERT INTO ops.import_job_datasets (
+        job_id, provider_dataset_id, sync_scope, operation_key
+    )
+    SELECT
+        job.job_id, member.provider_dataset_id, member.sync_scope, member.operation_key
+    FROM inserted_job AS job
+    CROSS JOIN LATERAL jsonb_to_recordset(CAST(:dataset_memberships AS jsonb)) AS member(
+        provider_dataset_id bigint,
+        sync_scope text,
+        operation_key text
+    )
+    RETURNING {_MEMBER_RETURN_COLUMNS}
 )
-SELECT
-    :kind, CAST(:payload AS jsonb), :source_checksum,
-    CAST(:load_batch_id AS uuid), CAST(:parent_job_id AS uuid),
-    :dagster_run_id, :provider, :dataset_key, :sync_scope, :trigger_kind,
-    'running', now(), now()
-WHERE CAST(:parent_job_id AS uuid) IS NULL
-   OR EXISTS (
-      SELECT 1
-      FROM ops.import_jobs AS parent
-      WHERE parent.job_id = CAST(:parent_job_id AS uuid)
-        AND parent.cancellation_id IS NULL
-        AND parent.quarantined_at IS NULL
-   )
-RETURNING {_RETURN_COLUMNS}
+SELECT {_JOB_SELECT_COLUMNS}, {_MEMBER_SELECT_COLUMNS}
+FROM inserted_job AS job
+LEFT JOIN inserted_members AS member ON TRUE
+ORDER BY member.provider_dataset_id, member.sync_scope, member.operation_key
 """
 
 _GET_JOB_SQL: Final[str] = f"""
-SELECT {_RETURN_COLUMNS}
-FROM ops.import_jobs
-WHERE job_id = CAST(:job_id AS uuid)
-  AND quarantined_at IS NULL
+SELECT {_JOB_SELECT_COLUMNS}, {_MEMBER_SELECT_COLUMNS}
+FROM ops.import_jobs AS job
+LEFT JOIN ops.import_job_datasets AS member ON member.job_id = job.job_id
+WHERE job.job_id = CAST(:job_id AS uuid)
+  AND job.quarantined_at IS NULL
+ORDER BY member.provider_dataset_id, member.sync_scope, member.operation_key
 """
 
 _INSERT_EVENT_SQL: Final[str] = f"""
 INSERT INTO ops.import_job_events (
-    job_id, provider, dataset_key, feature_id, stage, level, code, message, payload
+    job_id, import_job_dataset_id, feature_id, stage, level, code, message, payload
 )
 SELECT
-    job_id,
-    provider,
-    dataset_key,
-    COALESCE(CAST(:feature_id AS text), payload ->> 'feature_id'),
-    COALESCE(CAST(:stage AS text), current_stage),
+    job.job_id,
+    CAST(:import_job_dataset_id AS uuid),
+    COALESCE(CAST(:feature_id AS text), job.payload ->> 'feature_id'),
+    COALESCE(CAST(:stage AS text), job.current_stage),
     :level,
     CAST(:code AS text),
     :message,
     CAST(:event_payload AS jsonb)
-FROM ops.import_jobs
-WHERE job_id = CAST(:job_id AS uuid)
-  AND quarantined_at IS NULL
-  AND kind <> 'c6c_cancel_probe'
+FROM ops.import_jobs AS job
+WHERE job.job_id = CAST(:job_id AS uuid)
+  AND job.quarantined_at IS NULL
+  AND job.kind <> 'c6c_cancel_probe'
   AND (
-    (CAST(:provider AS text) IS NULL AND CAST(:dataset_key AS text) IS NULL)
+    (job.dataset_membership_mode = 'root'
+        AND CAST(:import_job_dataset_id AS uuid) IS NULL)
     OR (
-      provider = CAST(:provider AS text)
-      AND dataset_key = CAST(:dataset_key AS text)
+        job.dataset_membership_mode <> 'root'
+        AND EXISTS (
+            SELECT 1
+            FROM ops.import_job_datasets AS member
+            WHERE member.job_id = job.job_id
+              AND member.import_job_dataset_id = CAST(:import_job_dataset_id AS uuid)
+        )
     )
   )
 RETURNING {_EVENT_RETURN_COLUMNS}
@@ -304,10 +437,13 @@ WITH ids AS (
     SELECT value::uuid AS job_id
     FROM jsonb_array_elements_text(CAST(:job_ids AS jsonb))
 )
-SELECT {_RETURN_COLUMNS}
-FROM ops.import_jobs
-WHERE job_id IN (SELECT job_id FROM ids)
-  AND quarantined_at IS NULL
+SELECT {_JOB_SELECT_COLUMNS}, {_MEMBER_SELECT_COLUMNS}
+FROM ops.import_jobs AS job
+LEFT JOIN ops.import_job_datasets AS member ON member.job_id = job.job_id
+WHERE job.job_id IN (SELECT job_id FROM ids)
+  AND job.quarantined_at IS NULL
+ORDER BY job.created_at, job.job_id, member.provider_dataset_id, member.sync_scope,
+         member.operation_key
 """
 
 _UPDATE_PAYLOAD_SQL: Final[str] = f"""
@@ -510,18 +646,35 @@ def _validate_generic_kind(kind: str) -> None:
         )
 
 
-def _identity_params(
+def _normalized_dataset_memberships(
+    values: Sequence[ImportJobDatasetTarget],
+) -> tuple[ImportJobDatasetTarget, ...]:
+    """입력의 canonical membership을 검증하고 exact 중복을 거부한다."""
+    memberships = tuple(values)
+    if len(set(memberships)) != len(memberships):
+        raise ValueError("dataset memberships must not contain duplicate dataset operations")
+    return memberships
+
+
+def _membership_mode(
+    memberships: Sequence[ImportJobDatasetTarget],
+) -> ImportJobDatasetMembershipMode:
+    if not memberships:
+        return "root"
+    if len(memberships) == 1:
+        return "single"
+    return "multiple"
+
+
+def _job_params(
     *,
-    provider_dataset: ProviderDatasetOperationKey | None,
+    memberships: Sequence[ImportJobDatasetTarget],
     trigger_kind: TriggerKind | None,
-    sync_scope: str | None = None,
 ) -> dict[str, str | None]:
     if trigger_kind is not None and trigger_kind not in TRIGGER_KIND_VALUES:
         raise ValueError(f"invalid trigger_kind: {trigger_kind}")
     return {
-        "provider": provider_dataset.provider if provider_dataset else None,
-        "dataset_key": provider_dataset.dataset_key if provider_dataset else None,
-        "sync_scope": sync_scope,
+        "dataset_membership_mode": _membership_mode(memberships),
         "trigger_kind": trigger_kind,
     }
 
@@ -562,9 +715,8 @@ async def enqueue_unpaired_import_job(
     dagster_run_id: str | None = None,
     trigger_kind: TriggerKind | None = None,
 ) -> ImportJob:
-    """Pair가 없는 orchestration 작업을 ``queued``로 INSERT한다."""
-    _validate_generic_kind(kind)
-    return await _enqueue_import_job(
+    """Dataset membership이 없는 root orchestration 작업을 ``queued``로 만든다."""
+    return await enqueue_import_job(
         session,
         kind=kind,
         payload=payload,
@@ -572,10 +724,9 @@ async def enqueue_unpaired_import_job(
         load_batch_id=load_batch_id,
         parent_job_id=parent_job_id,
         dagster_run_id=dagster_run_id,
-        provider_dataset=None,
         trigger_kind=trigger_kind,
-        sync_scope=None,
         dispatch_requested=False,
+        dataset_memberships=(),
     )
 
 
@@ -583,7 +734,7 @@ async def enqueue_provider_dataset_import_job(
     session: AsyncSession,
     *,
     kind: str,
-    provider_dataset: ProviderDatasetOperationKey,
+    dataset_membership: ImportJobDatasetTarget,
     payload: Mapping[str, Any] | None = None,
     source_checksum: str | None = None,
     load_batch_id: str | None = None,
@@ -591,9 +742,8 @@ async def enqueue_provider_dataset_import_job(
     dagster_run_id: str | None = None,
     trigger_kind: TriggerKind | None = None,
 ) -> ImportJob:
-    """Required typed pair를 가진 작업을 ``queued``로 INSERT한다."""
-    _validate_generic_kind(kind)
-    return await _enqueue_import_job(
+    """하나의 canonical membership을 가진 작업을 ``queued``로 만든다."""
+    return await enqueue_import_job(
         session,
         kind=kind,
         payload=payload,
@@ -601,18 +751,46 @@ async def enqueue_provider_dataset_import_job(
         load_batch_id=load_batch_id,
         parent_job_id=parent_job_id,
         dagster_run_id=dagster_run_id,
-        provider_dataset=provider_dataset,
         trigger_kind=trigger_kind,
-        sync_scope=None,
         dispatch_requested=False,
+        dataset_memberships=(dataset_membership,),
+    )
+
+
+async def enqueue_import_job(
+    session: AsyncSession,
+    *,
+    kind: str,
+    dataset_memberships: Sequence[ImportJobDatasetTarget],
+    payload: Mapping[str, Any] | None = None,
+    source_checksum: str | None = None,
+    load_batch_id: str | None = None,
+    parent_job_id: str | None = None,
+    dagster_run_id: str | None = None,
+    trigger_kind: TriggerKind | None = None,
+    dispatch_requested: bool = False,
+) -> ImportJob:
+    """Canonical membership snapshot과 함께 queued import job을 원자 생성한다."""
+    _validate_generic_kind(kind)
+    return await _insert_import_job(
+        session,
+        sql=_INSERT_JOB_SQL,
+        kind=kind,
+        dataset_memberships=dataset_memberships,
+        payload=payload,
+        source_checksum=source_checksum,
+        load_batch_id=load_batch_id,
+        parent_job_id=parent_job_id,
+        dagster_run_id=dagster_run_id,
+        trigger_kind=trigger_kind,
+        dispatch_requested=dispatch_requested,
     )
 
 
 async def enqueue_feature_update_request_job(
     session: AsyncSession,
     *,
-    provider_dataset: ProviderDatasetOperationKey | None,
-    effective_sync_scope: str | None,
+    dataset_memberships: Sequence[ImportJobDatasetTarget],
     dispatch_requested: bool,
 ) -> ImportJob:
     """전용 request writer가 같은 transaction에서 연결할 canonical job을 만든다.
@@ -620,58 +798,46 @@ async def enqueue_feature_update_request_job(
     이 함수만 reserved ``feature_update_request`` kind를 생성할 수 있다. transaction을
     request INSERT 없이 commit하면 DB의 deferred 양방향 constraint trigger가 거부한다.
     """
-    if provider_dataset is None:
-        if effective_sync_scope is not None:
-            raise ValueError("non-provider_dataset feature update job must not have a sync scope")
-    elif effective_sync_scope is None:
-        raise ValueError("provider_dataset feature update job requires a canonical sync scope")
-    else:
-        try:
-            parse_canonical_sync_scope(effective_sync_scope)
-        except ValueError as exc:
-            raise ValueError(
-                "provider_dataset feature update job requires a canonical sync scope"
-            ) from exc
-    return await _enqueue_import_job(
+    memberships = _normalized_dataset_memberships(dataset_memberships)
+    if not memberships:
+        raise ValueError("feature update job requires at least one canonical dataset membership")
+    return await _insert_import_job(
         session,
+        sql=_INSERT_JOB_SQL,
         kind=FEATURE_UPDATE_REQUEST_JOB_KIND,
+        dataset_memberships=memberships,
         payload={},
         source_checksum=None,
         load_batch_id=None,
         parent_job_id=None,
         dagster_run_id=None,
-        provider_dataset=provider_dataset,
         trigger_kind="update_request",
-        sync_scope=effective_sync_scope,
         dispatch_requested=dispatch_requested,
     )
 
 
-async def _enqueue_import_job(
+async def _insert_import_job(
     session: AsyncSession,
     *,
+    sql: str,
     kind: str,
+    dataset_memberships: Sequence[ImportJobDatasetTarget],
     payload: Mapping[str, Any] | None,
     source_checksum: str | None,
     load_batch_id: str | None,
     parent_job_id: str | None,
     dagster_run_id: str | None,
-    provider_dataset: ProviderDatasetOperationKey | None,
     trigger_kind: TriggerKind | None,
-    sync_scope: str | None,
     dispatch_requested: bool,
 ) -> ImportJob:
+    memberships = _normalized_dataset_memberships(dataset_memberships)
     normalized_run_id = _optional_dagster_run_id(dagster_run_id)
-    identity = _identity_params(
-        provider_dataset=provider_dataset,
-        trigger_kind=trigger_kind,
-        sync_scope=sync_scope,
-    )
+    job_params = _job_params(memberships=memberships, trigger_kind=trigger_kind)
     if parent_job_id is not None:
         await assert_generic_import_job_targets(session, (parent_job_id,))
         await lock_pipeline_hierarchy_for_jobs(session, (parent_job_id,))
     result = await session.execute(
-        text(_INSERT_JOB_SQL),
+        text(sql),
         {
             "kind": kind,
             "payload": json.dumps(dict(payload) if payload else {}),
@@ -680,21 +846,32 @@ async def _enqueue_import_job(
             "parent_job_id": parent_job_id,
             "dagster_run_id": normalized_run_id,
             "dispatch_requested": dispatch_requested,
-            **identity,
+            "dataset_memberships": json.dumps(
+                [
+                    {
+                        "provider_dataset_id": membership.provider_dataset_id,
+                        "sync_scope": membership.sync_scope,
+                        "operation_key": membership.operation_key,
+                    }
+                    for membership in memberships
+                ]
+            ),
+            **job_params,
         },
     )
-    row = result.one_or_none()
-    if row is None:
+    rows = result.all()
+    if not rows:
         raise PipelineCancellationConflict(
             "cancel-marked parent cannot accept a new import job child"
         )
-    job = _row_to_job(row)
-    await record_import_job_event(
+    job = _rows_to_job(rows)
+    await _record_lifecycle_event(
         session,
-        job.job_id,
-        code="job.queued",
-        message="import job queued",
+        job,
+        code="job.queued" if job.status == "queued" else "job.started",
+        message="import job queued" if job.status == "queued" else "import job started",
         payload={"status": job.status, "progress": job.progress},
+        stage=job.current_stage,
     )
     return job
 
@@ -717,7 +894,7 @@ async def start_unpaired_import_job(
     queue-worker 경로는 ``enqueue_unpaired_import_job`` + ``claim_next_import_job`` 사용.
     commit은 호출자 책임.
     """
-    return await _start_import_job(
+    return await start_import_job(
         session,
         kind=kind,
         payload=payload,
@@ -725,8 +902,8 @@ async def start_unpaired_import_job(
         load_batch_id=load_batch_id,
         parent_job_id=parent_job_id,
         dagster_run_id=dagster_run_id,
-        provider_dataset=None,
         trigger_kind=trigger_kind,
+        dataset_memberships=(),
     )
 
 
@@ -734,7 +911,7 @@ async def start_provider_dataset_import_job(
     session: AsyncSession,
     *,
     kind: str,
-    provider_dataset: ProviderDatasetOperationKey,
+    dataset_membership: ImportJobDatasetTarget,
     payload: Mapping[str, Any] | None = None,
     source_checksum: str | None = None,
     load_batch_id: str | None = None,
@@ -742,8 +919,8 @@ async def start_provider_dataset_import_job(
     dagster_run_id: str | None = None,
     trigger_kind: TriggerKind | None = None,
 ) -> ImportJob:
-    """Required typed pair를 가진 작업을 곧바로 ``running``으로 INSERT한다."""
-    return await _start_import_job(
+    """하나의 canonical membership 작업을 곧바로 ``running``으로 만든다."""
+    return await start_import_job(
         session,
         kind=kind,
         payload=payload,
@@ -751,65 +928,44 @@ async def start_provider_dataset_import_job(
         load_batch_id=load_batch_id,
         parent_job_id=parent_job_id,
         dagster_run_id=dagster_run_id,
-        provider_dataset=provider_dataset,
         trigger_kind=trigger_kind,
+        dataset_memberships=(dataset_membership,),
     )
 
 
-async def _start_import_job(
+async def start_import_job(
     session: AsyncSession,
     *,
     kind: str,
+    dataset_memberships: Sequence[ImportJobDatasetTarget],
     payload: Mapping[str, Any] | None,
     source_checksum: str | None,
     load_batch_id: str | None,
     parent_job_id: str | None,
     dagster_run_id: str | None,
-    provider_dataset: ProviderDatasetOperationKey | None,
     trigger_kind: TriggerKind | None,
 ) -> ImportJob:
     _validate_generic_kind(kind)
-    normalized_run_id = _optional_dagster_run_id(dagster_run_id)
-    identity = _identity_params(
-        provider_dataset=provider_dataset, trigger_kind=trigger_kind, sync_scope=None
-    )
-    if parent_job_id is not None:
-        await assert_generic_import_job_targets(session, (parent_job_id,))
-        await lock_pipeline_hierarchy_for_jobs(session, (parent_job_id,))
-    result = await session.execute(
-        text(_START_JOB_SQL),
-        {
-            "kind": kind,
-            "payload": json.dumps(dict(payload) if payload else {}),
-            "source_checksum": source_checksum,
-            "load_batch_id": load_batch_id,
-            "parent_job_id": parent_job_id,
-            "dagster_run_id": normalized_run_id,
-            **identity,
-        },
-    )
-    row = result.one_or_none()
-    if row is None:
-        raise PipelineCancellationConflict(
-            "cancel-marked parent cannot accept a new running import job child"
-        )
-    job = _row_to_job(row)
-    await record_import_job_event(
+    return await _insert_import_job(
         session,
-        job.job_id,
-        code="job.started",
-        message="import job started",
-        payload={"status": job.status, "progress": job.progress},
-        stage=job.current_stage,
+        sql=_START_JOB_SQL,
+        kind=kind,
+        dataset_memberships=dataset_memberships,
+        payload=payload,
+        source_checksum=source_checksum,
+        load_batch_id=load_batch_id,
+        parent_job_id=parent_job_id,
+        dagster_run_id=dagster_run_id,
+        trigger_kind=trigger_kind,
+        dispatch_requested=False,
     )
-    return job
 
 
 async def get_import_job(session: AsyncSession, job_id: str) -> ImportJob | None:
     """``job_id``로 import job을 조회한다."""
     result = await session.execute(text(_GET_JOB_SQL), {"job_id": job_id})
-    row = result.one_or_none()
-    return _row_to_job(row) if row is not None else None
+    rows = result.all()
+    return _rows_to_job(rows) if rows else None
 
 
 async def record_import_job_event(
@@ -820,62 +976,27 @@ async def record_import_job_event(
     code: str | None = None,
     message: str,
     payload: Mapping[str, Any] | None = None,
-    provider: str | None = None,
-    dataset_key: str | None = None,
+    import_job_dataset_id: str | None = None,
     feature_id: str | None = None,
     stage: str | None = None,
 ) -> ImportJobEvent | None:
     """``ops.import_job_events``에 구조화 event 1건을 기록한다.
 
-    provider/dataset은 연결된 ``ops.import_jobs``의 typed identity를 상속한다.
-    명시 pair는 저장된 pair와 정확히 같아야 하며, 저장된 pair가 없는 신규 job에
-    event-only identity를 만드는 것도 거부한다. stage를 생략하면 job의
+    root job은 member 없이, non-root job은 해당 job에 속하는 exact
+    ``import_job_dataset_id``와 함께만 event를 쓴다. stage를 생략하면 job의
     ``current_stage``를 사용한다. 없거나 격리된 ``job_id``면 ``None``을 반환한다.
     commit은 호출자 책임이다.
     """
     if level not in _EVENT_LEVELS:
         raise ValueError(f"level must be one of {sorted(_EVENT_LEVELS)}, got {level!r}.")
     job = await get_import_job(session, job_id)
-    if job is None:
+    if job is None or job.kind == C6C_CANCEL_PROBE_JOB_KIND:
         return None
-    if job.kind == C6C_CANCEL_PROBE_JOB_KIND:
-        return None
-    explicit_pair = None
-    if provider is not None or dataset_key is not None:
-        if provider is None or dataset_key is None:
-            raise ValueError("event provider and dataset_key must be supplied together")
-        explicit_pair = ProviderDatasetOperationKey(provider, dataset_key)
-    stored_pair = (
-        ProviderDatasetOperationKey(job.provider, job.dataset_key)
-        if job.provider is not None and job.dataset_key is not None
-        else None
-    )
-    if explicit_pair is not None and explicit_pair != stored_pair:
-        raise FeatureOperationInvariantConflict(
-            "event pair requires the same typed import job identity",
-            dagster_run_id=job.dagster_run_id or "unknown",
-            root_job_id=job.job_id,
-            details={
-                "expected": (
-                    {
-                        "provider": stored_pair.provider,
-                        "dataset_key": stored_pair.dataset_key,
-                    }
-                    if stored_pair is not None
-                    else None
-                ),
-                "actual": {
-                    "provider": explicit_pair.provider,
-                    "dataset_key": explicit_pair.dataset_key,
-                },
-            },
-        )
     result = await session.execute(
         text(_INSERT_EVENT_SQL),
         {
             "job_id": job_id,
-            "provider": provider,
-            "dataset_key": dataset_key,
+            "import_job_dataset_id": import_job_dataset_id,
             "feature_id": feature_id,
             "stage": stage,
             "level": level,
@@ -887,12 +1008,56 @@ async def record_import_job_event(
     row = result.one_or_none()
     if row is None:
         raise FeatureOperationInvariantConflict(
-            "event insert lost the typed import job identity",
+            "event requires the exact canonical import job membership",
             dagster_run_id=job.dagster_run_id or "unknown",
-            root_job_id=job.job_id,
-            details={"reason": "identity_changed_or_job_removed"},
+            root_job_id=job_id,
+            details={"reason": "missing_or_mismatched_job_membership"},
         )
     return _row_to_event(row)
+
+
+async def _record_lifecycle_event(
+    session: AsyncSession,
+    job: ImportJob,
+    *,
+    code: str,
+    message: str,
+    payload: Mapping[str, Any],
+    stage: str | None = None,
+    level: str = "info",
+) -> None:
+    """Job lifecycle event를 root 또는 각 exact member에 대응시켜 기록한다."""
+    if job.kind == C6C_CANCEL_PROBE_JOB_KIND:
+        return
+    member_ids: tuple[str | None, ...]
+    if job.dataset_membership_mode == "root":
+        member_ids = (None,)
+    else:
+        member_ids = tuple(
+            membership.import_job_dataset_id for membership in job.dataset_memberships
+        )
+    for import_job_dataset_id in member_ids:
+        await record_import_job_event(
+            session,
+            job.job_id,
+            level=level,
+            code=code,
+            message=message,
+            payload=payload,
+            import_job_dataset_id=import_job_dataset_id,
+            stage=stage,
+        )
+
+
+async def _hydrate_job_memberships(session: AsyncSession, job: ImportJob) -> ImportJob:
+    hydrated = await get_import_job(session, job.job_id)
+    if hydrated is None:
+        raise FeatureOperationInvariantConflict(
+            "import job vanished while hydrating canonical memberships",
+            dagster_run_id=job.dagster_run_id or "unknown",
+            root_job_id=job.job_id,
+        )
+    return hydrated
 
 
 async def list_import_jobs_by_ids(
@@ -909,7 +1074,7 @@ async def list_import_jobs_by_ids(
         text(_LIST_JOBS_BY_IDS_SQL),
         {"job_ids": json.dumps(list(job_ids))},
     )
-    return tuple(_row_to_job(row) for row in result)
+    return _rows_to_jobs(result.all())
 
 
 async def update_import_job_payload(
@@ -925,7 +1090,7 @@ async def update_import_job_payload(
         {"job_id": job_id, "payload": json.dumps(dict(payload))},
     )
     row = result.one_or_none()
-    return _row_to_job(row) if row is not None else None
+    return await _hydrate_job_memberships(session, _row_to_job(row)) if row is not None else None
 
 
 async def bind_import_job_dagster_run(
@@ -948,7 +1113,7 @@ async def bind_import_job_dagster_run(
         raise PipelineCancellationConflict(
             "import job Dagster run binding was rejected by marker or frozen run id"
         )
-    return _row_to_job(row)
+    return await _hydrate_job_memberships(session, _row_to_job(row))
 
 
 async def attach_import_jobs_to_batch(
@@ -975,7 +1140,10 @@ async def attach_import_jobs_to_batch(
             "parent_job_id": parent_job_id,
         },
     )
-    return tuple(_row_to_job(row) for row in result)
+    jobs: list[ImportJob] = []
+    for row in result:
+        jobs.append(await _hydrate_job_memberships(session, _row_to_job(row)))
+    return tuple(jobs)
 
 
 async def claim_next_import_job(session: AsyncSession) -> ImportJob | None:
@@ -992,10 +1160,10 @@ async def claim_next_import_job(session: AsyncSession) -> ImportJob | None:
         row = result.one_or_none()
         if row is None:
             return None
-        job = _row_to_job(row)
-        await record_import_job_event(
+        job = await _hydrate_job_memberships(session, _row_to_job(row))
+        await _record_lifecycle_event(
             session,
-            job.job_id,
+            job,
             code="job.claimed",
             message="import job claimed",
             payload={"status": job.status, "progress": job.progress},
@@ -1020,11 +1188,11 @@ async def heartbeat_import_job(
     row = result.one_or_none()
     if row is None:
         return None
-    job = _row_to_job(row)
+    job = await _hydrate_job_memberships(session, _row_to_job(row))
     if progress is not None or current_stage is not None:
-        await record_import_job_event(
+        await _record_lifecycle_event(
             session,
-            job.job_id,
+            job,
             code="job.heartbeat",
             message="import job heartbeat",
             payload={"status": job.status, "progress": job.progress},
@@ -1054,10 +1222,10 @@ async def cancel_import_job(
     row = result.one_or_none()
     if row is None:
         return None
-    job = _row_to_job(row)
-    await record_import_job_event(
+    job = await _hydrate_job_memberships(session, _row_to_job(row))
+    await _record_lifecycle_event(
         session,
-        job.job_id,
+        job,
         code="job.cancelled",
         level="warning",
         message=error_message or reason or "import job cancelled",
@@ -1095,10 +1263,10 @@ async def finish_import_job(
     row = result.one_or_none()
     if row is None:
         return None
-    job = _row_to_job(row)
-    await record_import_job_event(
+    job = await _hydrate_job_memberships(session, _row_to_job(row))
+    await _record_lifecycle_event(
         session,
-        job.job_id,
+        job,
         code=f"job.{status}",
         level="error" if status == "failed" else "info",
         message=error_message or f"import job {status}",

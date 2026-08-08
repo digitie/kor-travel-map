@@ -39,6 +39,7 @@ from kortravelmap.curation_provenance import (
 )
 from kortravelmap.infra import curation_repo, feature_identity
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -87,6 +88,7 @@ class PublicCurationCollectionView(BaseModel):
     theme_name: str
     theme_group: str
     source_id: UUID | None
+    provider_dataset_id: int | None
     provider: str | None
     dataset_key: str | None
     source_name: str | None
@@ -112,6 +114,7 @@ class AdminCurationCollectionView(BaseModel):
     theme_name: str
     theme_group: str
     source_id: UUID | None
+    provider_dataset_id: int | None
     provider: str | None
     dataset_key: str | None
     source_name: str | None
@@ -142,6 +145,7 @@ class PublicCurationItemView(BaseModel):
     theme_slug: str
     theme_name: str
     theme_group: str
+    provider_dataset_id: int | None
     provider: str | None
     dataset_key: str | None
     source_name: str | None
@@ -179,6 +183,7 @@ class AdminCurationItemView(BaseModel):
     theme_slug: str
     theme_name: str
     theme_group: str
+    provider_dataset_id: int | None
     provider: str | None
     dataset_key: str | None
     source_name: str | None
@@ -581,6 +586,7 @@ class CurationQuarantineSourceView(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     source_id: UUID
+    provider_dataset_id: int | None
     provider: str | None
     dataset_key: str | None
     source_name: str | None
@@ -830,6 +836,59 @@ def _group_view(
         curations=[_public_item_view(item) for item in row.curations],
         curation_count=len(row.curations),
     )
+
+
+async def _provider_dataset_ids_by_pair(
+    session: AsyncSession,
+    rows: Sequence[CurationImportRow],
+) -> dict[tuple[str, str], int]:
+    """CSV 자연키 pair를 이 DB의 ``provider_dataset_id``로 해석한다 (질의 1회)."""
+
+    pairs = sorted({(row.provider, row.dataset_key) for row in rows})
+    if not pairs:
+        return {}
+    result = await session.execute(
+        text(
+            "SELECT provider, dataset_key, provider_dataset_id "
+            "FROM provider_sync.provider_datasets "
+            "WHERE (provider, dataset_key) IN ("
+            "  SELECT unnest(CAST(:providers AS text[])), "
+            "         unnest(CAST(:dataset_keys AS text[]))"
+            ")"
+        ),
+        {
+            "providers": [pair[0] for pair in pairs],
+            "dataset_keys": [pair[1] for pair in pairs],
+        },
+    )
+    return {
+        (str(row.provider), str(row.dataset_key)): int(row.provider_dataset_id)
+        for row in result
+    }
+
+
+async def _lighthouse_dataset_pairs(
+    session: AsyncSession,
+    rows: Sequence[CurationImportRow],
+) -> frozenset[tuple[str, str]]:
+    """CSV가 가리킨 dataset 중 등대 공식 pair만 반환한다.
+
+    판정 축은 자연키다 — CSV는 저장소에 sha로 고정돼 어느 DB에나 적용되는데
+    ``provider_dataset_id``는 DB마다 다른 surrogate라 파일에 담길 수 없다.
+    """
+
+    candidates = sorted({row.dataset_key for row in rows})
+    if not candidates:
+        return frozenset()
+    result = await session.execute(
+        text(
+            "SELECT provider, dataset_key FROM provider_sync.provider_datasets "
+            "WHERE dataset_key = ANY(CAST(:dataset_keys AS text[])) "
+            "AND dataset_key LIKE 'lighthouse-stamp-tour-season-%'"
+        ),
+        {"dataset_keys": candidates},
+    )
+    return frozenset((str(row.provider), str(row.dataset_key)) for row in result)
 
 
 def _conflict(exc: IntegrityError) -> HTTPException:
@@ -1294,7 +1353,10 @@ async def import_admin_curations(
             csv_row.row_number: provenance_row_payload(provenance, row)
             for csv_row, row in zip(preview.rows, provenance.rows, strict=True)
         }
-    elif requires_lighthouse_provenance(preview.rows):
+    elif requires_lighthouse_provenance(
+        preview.rows,
+        lighthouse_dataset_pairs=await _lighthouse_dataset_pairs(session, preview.rows),
+    ):
         raise HTTPException(
             status_code=422,
             detail=(
@@ -1354,6 +1416,10 @@ async def import_admin_curations(
         ),
     )
     item_views: list[CurationImportRowView] = []
+    # CSV의 자연키를 이 DB의 surrogate로 해석한다(질의 1회). CSV가 자연키를 들고
+    # 있으므로 해석은 적재 시점 몫이고, 해석 못 한 pair는 조용히 넘기지 않는다 —
+    # 통과시키면 curation이 대상 dataset 없이 적재된다.
+    dataset_ids_by_pair = await _provider_dataset_ids_by_pair(session, preview.rows)
     resolved_rows: list[curation_repo.ResolvedCurationImportRow] = []
 
     for row in preview.rows:
@@ -1394,6 +1460,17 @@ async def import_admin_curations(
             else:
                 row_status = "ambiguous"
             row_issues = [_unlinked_issue(row, matches)]
+        # catalog에 없는 pair는 여기서 끊는다. 이 fail-close가 parser/catalog
+        # drift를 HTTP write까지 전파하지 않는다.
+        dataset_id = dataset_ids_by_pair.get((row.provider, row.dataset_key))
+        if dataset_id is None:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"catalog에 없는 provider/dataset_key입니다: "
+                    f"{row.provider}/{row.dataset_key}"
+                ),
+            )
         resolved_rows.append(
             curation_repo.ResolvedCurationImportRow(
                 row_number=row.row_number,
@@ -1403,8 +1480,7 @@ async def import_admin_curations(
                 theme_group=row.theme_group,
                 title=row.title,
                 edition_key=row.edition_key,
-                provider=row.provider,
-                dataset_key=row.dataset_key,
+                provider_dataset_id=dataset_id,
                 source_name=row.source_name,
                 source_url=row.source_url or None,
                 source_item_key=row.source_item_key,
@@ -1559,7 +1635,7 @@ async def list_public_curation_groups(
     session: Annotated[AsyncSession, Depends(get_session)],
     theme_slug: Annotated[str | None, Query()] = None,
     edition_key: Annotated[str | None, Query()] = None,
-    provider: Annotated[str | None, Query()] = None,
+    provider_dataset_id: Annotated[int | None, Query(gt=0)] = None,
     q: Annotated[str | None, Query()] = None,
     min_lon: Annotated[float | None, Query()] = None,
     min_lat: Annotated[float | None, Query()] = None,
@@ -1575,7 +1651,7 @@ async def list_public_curation_groups(
             public_only=True,
             theme_slug=theme_slug,
             edition_key=edition_key,
-            provider=provider,
+            provider_dataset_id=provider_dataset_id,
             q=q,
             min_lon=min_lon,
             min_lat=min_lat,
@@ -1603,7 +1679,7 @@ async def list_public_curation_collections(
     session: Annotated[AsyncSession, Depends(get_session)],
     theme_slug: Annotated[str | None, Query()] = None,
     edition_key: Annotated[str | None, Query()] = None,
-    provider: Annotated[str | None, Query()] = None,
+    provider_dataset_id: Annotated[int | None, Query(gt=0)] = None,
     q: Annotated[str | None, Query()] = None,
     page_size: Annotated[int, Query(ge=1, le=500)] = 200,
     cursor: Annotated[str | None, Query()] = None,
@@ -1616,7 +1692,7 @@ async def list_public_curation_collections(
             visibility="public",
             theme_slug=theme_slug,
             edition_key=edition_key,
-            provider=provider,
+            provider_dataset_id=provider_dataset_id,
             q=q,
             public_only=True,
             limit=page_size,
@@ -1687,7 +1763,7 @@ async def list_admin_curation_collections(
     visibility: Annotated[CollectionVisibility | None, Query()] = None,
     theme_slug: Annotated[str | None, Query()] = None,
     edition_key: Annotated[str | None, Query()] = None,
-    provider: Annotated[str | None, Query()] = None,
+    provider_dataset_id: Annotated[int | None, Query(gt=0)] = None,
     q: Annotated[str | None, Query()] = None,
     include_archived: Annotated[bool, Query()] = False,
     page_size: Annotated[int, Query(ge=1, le=500)] = 200,
@@ -1701,7 +1777,7 @@ async def list_admin_curation_collections(
             visibility=visibility,
             theme_slug=theme_slug,
             edition_key=edition_key,
-            provider=provider,
+            provider_dataset_id=provider_dataset_id,
             q=q,
             include_archived=include_archived,
             limit=page_size,

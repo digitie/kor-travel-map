@@ -16,21 +16,11 @@ from dagster._core.remote_origin import (
     RemoteRepositoryOrigin,
 )
 from kortravelmap.providers.datagokr_file_data import DATAGOKR_FILEDATA_DATASETS
-from kortravelmap.providers.feature_operation_registry import (
-    FEATURE_OPERATION_DATASET_TAG,
-    FEATURE_OPERATION_IDENTITY_TAG,
-    FEATURE_OPERATION_PROVIDER_TAG,
-    FEATURE_OPERATION_REGISTRY_VERSION_TAG,
-    FEATURE_OPERATION_TRIGGER_TAG,
-    feature_operation_definition_tags,
-)
-from kortravelmap.providers.krex import KREX_PROVIDER_NAME
 
 from kortravelmap.dagster.assets import FEATURE_LOAD_ASSETS, FEATURE_LOAD_RETRY_POLICY
 from kortravelmap.dagster.definitions import defs
 from kortravelmap.dagster.resources import PROVIDER_RECORD_RESOURCE_SPECS
 from kortravelmap.dagster.schedules import (
-    FEATURE_LOAD_IDENTITIES,
     FEATURE_LOAD_SCHEDULE_SPECS,
     FEATURE_LOAD_SCHEDULES,
     KST_TIMEZONE,
@@ -232,17 +222,10 @@ def test_feature_load_provider_guard_resources_registered() -> None:
 
 
 def test_feature_load_schedules_registered_with_kst_cron() -> None:
-    expected = {
-        spec.schedule_name: (spec, identity)
-        for spec, identity in zip(
-            FEATURE_LOAD_SCHEDULE_SPECS,
-            FEATURE_LOAD_IDENTITIES,
-            strict=True,
-        )
-    }
+    expected = {spec.schedule_name: spec for spec in FEATURE_LOAD_SCHEDULE_SPECS}
     assert len(FEATURE_LOAD_SCHEDULES) == len(expected)
 
-    for schedule_name, (spec, identity) in expected.items():
+    for schedule_name, spec in expected.items():
         schedule = defs.resolve_schedule_def(schedule_name)
         job = defs.resolve_job_def(spec.job_name)
         assert schedule.name == schedule_name
@@ -250,24 +233,12 @@ def test_feature_load_schedules_registered_with_kst_cron() -> None:
         assert schedule.execution_timezone == KST_TIMEZONE
         assert schedule.default_status == DefaultScheduleStatus.STOPPED
         assert schedule.job_name == spec.job_name
-        assert schedule.tags[FEATURE_OPERATION_TRIGGER_TAG] == "schedule"
-        assert schedule.tags[FEATURE_OPERATION_IDENTITY_TAG] == identity.canonical_json()
-        assert schedule.tags[FEATURE_OPERATION_REGISTRY_VERSION_TAG] == (
-            identity.registry_version
-        )
-        assert FEATURE_OPERATION_TRIGGER_TAG not in job.tags
+        assert schedule.tags["kor_travel_map.trigger_kind"] == "schedule"
+        assert schedule.tags["kor_travel_map.operation_key"] == spec.job_name
+        assert job.tags["kor_travel_map.operation_key"] == spec.job_name
         assert "kor_travel_map.schedule_scope" not in job.tags
         assert "kor_travel_map.schedule_scope" not in schedule.tags
-        if len({pair.provider for pair in identity.pairs}) == 1:
-            assert schedule.tags[FEATURE_OPERATION_PROVIDER_TAG] == (
-                identity.pairs[0].provider
-            )
-        if len(identity.pairs) == 1:
-            assert schedule.tags[FEATURE_OPERATION_DATASET_TAG] == (
-                identity.pairs[0].dataset_key
-            )
-        else:
-            assert FEATURE_OPERATION_DATASET_TAG not in schedule.tags
+        assert not any("provider" in key or "dataset" in key for key in schedule.tags)
 
 
 def test_krex_traffic_notices_schedule_runs_every_ten_minutes() -> None:
@@ -279,8 +250,8 @@ def test_krex_traffic_notices_schedule_runs_every_ten_minutes() -> None:
     assert schedule.execution_timezone == KST_TIMEZONE
     assert schedule.default_status == DefaultScheduleStatus.STOPPED
     assert schedule.job_name == "feature_notice_krex_traffic_notices_job"
-    assert schedule.tags["kor_travel_map.provider"] == KREX_PROVIDER_NAME
-    assert schedule.tags["kor_travel_map.dataset_key"] == "krex_traffic_notices"
+    assert schedule.tags["kor_travel_map.operation_key"] == schedule.job_name
+    assert schedule.tags["kor_travel_map.trigger_kind"] == "schedule"
 
 
 def test_krex_traffic_notices_schedule_coalesces_non_terminal_run() -> None:
@@ -288,11 +259,6 @@ def test_krex_traffic_notices_schedule_coalesces_non_terminal_run() -> None:
         "feature_notice_krex_traffic_notices_ten_minute_schedule"
     )
     job = defs.resolve_job_def("feature_notice_krex_traffic_notices_job")
-    identity = next(
-        identity
-        for identity in FEATURE_LOAD_IDENTITIES
-        if identity.job_name == job.name
-    )
     remote_origin = RemoteJobOrigin(
         RemoteRepositoryOrigin(
             RegisteredCodeLocationOrigin("test"),
@@ -313,7 +279,7 @@ def test_krex_traffic_notices_schedule_coalesces_non_terminal_run() -> None:
             run = instance.create_run_for_job(
                 job,
                 status=run_status,
-                tags=feature_operation_definition_tags(identity),
+                tags={"kor_travel_map.operation_key": job.name},
                 remote_job_origin=(
                     remote_origin if run_status == DagsterRunStatus.QUEUED else None
                 ),
@@ -328,7 +294,7 @@ def test_krex_traffic_notices_schedule_coalesces_non_terminal_run() -> None:
             instance.delete_run(run.run_id)
 
 
-def test_krex_coalescing_ignores_pair_tag_spoof_without_registry_identity() -> None:
+def test_krex_coalescing_ignores_untagged_run() -> None:
     schedule = defs.resolve_schedule_def(
         "feature_notice_krex_traffic_notices_ten_minute_schedule"
     )
@@ -338,10 +304,7 @@ def test_krex_coalescing_ignores_pair_tag_spoof_without_registry_identity() -> N
         instance.create_run_for_job(
             job,
             status=DagsterRunStatus.STARTED,
-            tags={
-                "kor_travel_map.provider": KREX_PROVIDER_NAME,
-                "kor_travel_map.dataset_key": "krex_traffic_notices",
-            },
+            tags={},
         )
         with build_schedule_context(instance=instance) as context:
             tick = schedule.evaluate_tick(context)
@@ -368,10 +331,7 @@ def test_krex_traffic_notices_schedule_requests_run_without_non_terminal_run() -
             instance.create_run_for_job(
                 job,
                 status=terminal_status,
-                tags={
-                    "kor_travel_map.provider": KREX_PROVIDER_NAME,
-                    "kor_travel_map.dataset_key": "krex_traffic_notices",
-                },
+                tags={"kor_travel_map.operation_key": job.name},
             )
 
         with build_schedule_context(instance=instance) as context:
@@ -380,13 +340,8 @@ def test_krex_traffic_notices_schedule_requests_run_without_non_terminal_run() -
     for tick in (tick_without_runs, tick_with_terminal_runs):
         assert tick.skip_message is None
         assert len(tick.run_requests) == 1
-        assert (
-            tick.run_requests[0].tags["kor_travel_map.provider"]
-            == KREX_PROVIDER_NAME
-        )
-        assert tick.run_requests[0].tags["kor_travel_map.dataset_key"] == (
-            "krex_traffic_notices"
-        )
+        assert tick.run_requests[0].tags["kor_travel_map.operation_key"] == job.name
+        assert tick.run_requests[0].tags["kor_travel_map.trigger_kind"] == "schedule"
 
 
 def test_freshness_sensitive_jobs_have_two_hour_runtime_tag() -> None:
@@ -411,22 +366,22 @@ def test_freshness_sensitive_jobs_have_two_hour_runtime_tag() -> None:
 
 
 def test_datagokr_file_data_schedules_cover_all_curated_datasets() -> None:
-    specs = {
-        identity.pairs[0].dataset_key: spec
-        for spec, identity in zip(
-            FEATURE_LOAD_SCHEDULE_SPECS,
-            FEATURE_LOAD_IDENTITIES,
-            strict=True,
-        )
-        if len(identity.pairs) == 1
-        and identity.pairs[0].dataset_key in DATAGOKR_FILEDATA_DATASETS
-    }
+    specs = {}
+    for spec in FEATURE_LOAD_SCHEDULE_SPECS:
+        run_config = spec.run_config
+        if run_config is None:
+            continue
+        dataset_key = run_config["resources"]["datagokr_file_data_dataset_key"][
+            "config"
+        ]["dataset_key"]
+        if dataset_key in DATAGOKR_FILEDATA_DATASETS:
+            specs[dataset_key] = spec
 
     assert set(specs) == set(DATAGOKR_FILEDATA_DATASETS)
 
     for dataset_key, spec in specs.items():
         schedule = defs.resolve_schedule_def(spec.schedule_name)
-        assert schedule.tags["kor_travel_map.dataset_key"] == dataset_key
+        assert schedule.tags["kor_travel_map.operation_key"] == spec.job_name
         tick = schedule.evaluate_tick(build_schedule_context())
         assert len(tick.run_requests) == 1
         assert tick.run_requests[0].run_config == {

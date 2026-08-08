@@ -757,10 +757,6 @@ async def license_record_to_bundle(
         source_entity_type=_LICENSE_ENTITY_TYPE,
         source_entity_id=natural_key,
         raw_payload_hash=payload_hash,
-        raw_name=record.place_name,
-        raw_address=record.road_address or record.lot_address,
-        raw_longitude=Decimal(str(record.lon)) if record.lon is not None else None,
-        raw_latitude=Decimal(str(record.lat)) if record.lat is not None else None,
         raw_data=raw_data,
         fetched_at=fetched_at,
         source_record_key=source_record_key,
@@ -771,7 +767,6 @@ async def license_record_to_bundle(
         source_role=SourceRole.PRIMARY,
         match_method="natural_key",
         confidence=100,
-        is_primary_source=True,
     )
     return FeatureBundle(
         feature=feature,

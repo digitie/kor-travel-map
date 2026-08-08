@@ -36,15 +36,16 @@ pytestmark = pytest.mark.integration
 _ROOT: Final = Path(__file__).resolve().parents[2]
 _CONTRACTS: Final = _ROOT / "contracts" / "vnext"
 _SCHEMA_SQL: Final = _CONTRACTS / "target-schema-v1.sql"
+_REFERENCE_OWNERSHIP_SQL: Final = _CONTRACTS / "tvn33-reference-ownership-v1.sql"
 _INVARIANTS_SQL: Final = _CONTRACTS / "target-invariants-v1.sql"
 _FINGERPRINTS_JSON: Final = _CONTRACTS / "target-schema-fingerprints-v1.json"
 _VIOLATIONS_SQL: Final = _CONTRACTS / "violation-fixtures-v1.sql"
 _REJECTIONS_JSON: Final = _CONTRACTS / "expected-rejections-v1.json"
 
-_EXPECTED_INVARIANT_COUNT: Final = 43
+_EXPECTED_INVARIANT_COUNT: Final = 48
 _INVARIANT_PHASES: Final = frozenset({"pre-backfill", "post-backfill", "both"})
 
-# fingerprint 대상 — target-schema-v1.sql이 만드는 전체 relation.
+# fingerprint 대상 — target-schema-v1.sql과 T-VN-33 reference ownership DDL의 전체 relation.
 _TARGET_TABLES: Final = (
     "feature.categories",
     "feature.features",
@@ -64,18 +65,69 @@ _TARGET_TABLES: Final = (
     "feature.curation_items",
     "feature.theme_feature_candidates",
     "provider_sync.provider_datasets",
+    "provider_sync.provider_dataset_operations",
+    "provider_sync.provider_dataset_operation_scopes",
     "provider_sync.source_entities",
     "provider_sync.source_records",
     "provider_sync.source_entity_heads",
     "provider_sync.source_links",
     "provider_sync.notice_states",
+    "provider_sync.notice_lifecycle_scopes",
+    "provider_sync.notice_lineage_states",
     "ops.feature_override_field_paths",
     "ops.feature_overrides",
+    "provider_sync.provider_sync_state",
+    "feature.curated_sources",
+    "feature.curated_source_rules",
+    "ops.import_jobs",
+    "ops.import_job_datasets",
+    "ops.import_job_events",
+    "ops.feature_update_requests",
+    "ops.feature_update_request_datasets",
+    "ops.provider_refresh_policies",
+    "ops.offline_uploads",
+    "ops.integrity_observation_scopes",
+    "ops.integrity_observation_runs",
+    "ops.data_integrity_violations",
+    "ops.poi_cache_targets",
+    "ops.poi_cache_target_feature_links",
+    "ops.enrichment_review_queue",
+    "ops.managed_files",
 )
 _TARGET_RELATIONS: Final = (*_TARGET_TABLES, "feature.public_features")
 _TARGET_FUNCTIONS: Final = (
     "feature.force_features_row_revision()",
+    "provider_sync.is_valid_provider_dataset_capabilities(jsonb)",
+    "provider_sync.is_valid_provider_dataset_sync_scope(text)",
+    "provider_sync.reject_provider_dataset_identity_update()",
+    "provider_sync.touch_provider_dataset()",
+    "provider_sync.assert_active_provider_dataset(bigint)",
+    "provider_sync.reject_inactive_provider_dataset()",
+    "provider_sync.assert_active_source_entity_dataset(text)",
+    "provider_sync.reject_inactive_source_entity_dataset()",
+    "provider_sync.touch_provider_dataset_operation()",
     "provider_sync.reject_source_record_update()",
+    "provider_sync.enforce_source_entity_head_freshness()",
+    "provider_sync.enforce_source_entity_identity_and_seen_at()",
+    "provider_sync.assert_source_entity_head_completeness()",
+    "provider_sync.assert_active_provider_dataset_scope(bigint,text)",
+    "provider_sync.reject_inactive_provider_dataset_scope()",
+    "provider_sync.assert_active_notice_lifecycle_scope(bigint)",
+    "provider_sync.reject_inactive_notice_lifecycle_scope()",
+    "provider_sync.assert_active_curated_source_dataset(uuid)",
+    "provider_sync.reject_inactive_curated_source_dataset()",
+    "provider_sync.assert_import_job_members_active(uuid)",
+    "provider_sync.reject_inactive_import_job_members()",
+    "provider_sync.assert_import_job_membership_complete()",
+    "provider_sync.assert_import_job_event_member(uuid,uuid)",
+    "provider_sync.reject_inactive_import_job_dataset()",
+    "provider_sync.assert_feature_update_request_members_active(uuid)",
+    "provider_sync.reject_inactive_feature_update_request_members()",
+    "provider_sync.assert_feature_update_request_membership_complete()",
+    "provider_sync.assert_active_integrity_observation_scope(bigint)",
+    "provider_sync.reject_inactive_integrity_observation_scope()",
+    "provider_sync.assert_active_source_record_dataset(text)",
+    "provider_sync.validate_data_integrity_violation_dataset()",
 )
 
 # =============================================================================
@@ -372,6 +424,7 @@ async def freeze_db(pg_container: Any) -> AsyncIterator[asyncpg.Connection]:
             )
         await connection.execute("SET search_path = public, x_extension")
         await connection.execute(_SCHEMA_SQL.read_text(encoding="utf-8"))
+        await connection.execute(_REFERENCE_OWNERSHIP_SQL.read_text(encoding="utf-8"))
         yield connection
     finally:
         await connection.close()
@@ -406,12 +459,17 @@ async def test_violation_fixtures_rejected_with_expected_sqlstate(
         expected = expectations[name]
         transaction = freeze_db.transaction()
         await transaction.start()
+        error: asyncpg.PostgresError | None = None
         try:
-            with pytest.raises(asyncpg.PostgresError) as excinfo:
+            try:
                 await freeze_db.execute(case_sql)
+            except asyncpg.PostgresError as caught:
+                error = caught
+            else:
+                raise AssertionError(f"case {name}: expected DB rejection was not raised")
         finally:
             await transaction.rollback()
-        error = excinfo.value
+        assert error is not None
         assert getattr(error, "sqlstate", None) == expected["sqlstate"], (
             f"case {name}: SQLSTATE {getattr(error, 'sqlstate', None)!r} != "
             f"{expected['sqlstate']!r} ({error})"
@@ -421,6 +479,234 @@ async def test_violation_fixtures_rejected_with_expected_sqlstate(
             assert constraint == expected["constraint"], f"case {name}: {error}"
         else:
             assert expected["constraint"] in str(error), f"case {name}: {error}"
+
+
+async def test_multiple_records_with_one_head_satisfy_completeness_invariant(
+    freeze_db: asyncpg.Connection,
+) -> None:
+    """정상 history 2건 + head 1건은 INV-069-06a를 위반하지 않는다."""
+    transaction = freeze_db.transaction()
+    await transaction.start()
+    try:
+        dataset_id = await freeze_db.fetchval(
+            """
+            INSERT INTO provider_sync.provider_datasets (
+                provider, dataset_key, display_name, source_kind
+            ) VALUES ('positive-fixture', 'head-history', 'head history', 'manual')
+            RETURNING provider_dataset_id
+            """
+        )
+        await freeze_db.execute(
+            """
+            INSERT INTO provider_sync.source_entities (
+                source_entity_key, provider_dataset_id, source_entity_type,
+                source_entity_id, first_seen_at, last_seen_at
+            ) VALUES ('positive-head-entity', $1, 'place', 'positive-1', now(), now())
+            """,
+            dataset_id,
+        )
+        await freeze_db.execute(
+            """
+            INSERT INTO provider_sync.source_records (
+                source_record_key, source_entity_key, raw_data, raw_payload_hash, fetched_at
+            ) VALUES
+                ('positive-head-record-a', 'positive-head-entity', '{}'::jsonb, 'b1', now()),
+                ('positive-head-record-b', 'positive-head-entity', '{}'::jsonb, 'b2', now())
+            """
+        )
+        await freeze_db.execute(
+            """
+            INSERT INTO provider_sync.source_entity_heads (
+                source_entity_key, current_source_record_key, observed_at
+            ) VALUES ('positive-head-entity', 'positive-head-record-b', now())
+            """
+        )
+        await freeze_db.execute("SET CONSTRAINTS ALL IMMEDIATE")
+        completeness_query = next(
+            query
+            for query, _phase in load_invariant_queries()
+            if "count(DISTINCT head.source_entity_key)" in query
+        )
+        assert await freeze_db.fetchval(completeness_query) == 0
+    finally:
+        await transaction.rollback()
+
+
+async def test_membership_modes_accept_only_a_complete_canonical_shape(
+    freeze_db: asyncpg.Connection,
+) -> None:
+    """root job은 member 0개, single job/request는 member 1개일 때만 정상이다."""
+    transaction = freeze_db.transaction()
+    await transaction.start()
+    try:
+        dataset_id = await freeze_db.fetchval(
+            """
+            INSERT INTO provider_sync.provider_datasets (
+                provider, dataset_key, display_name, source_kind
+            ) VALUES ('positive-fixture', 'membership', 'membership', 'manual')
+            RETURNING provider_dataset_id
+            """
+        )
+        await freeze_db.execute(
+            """
+            INSERT INTO provider_sync.provider_dataset_operations (
+                provider_dataset_id, operation_key, operation_kind
+            ) VALUES ($1, 'refresh', 'refresh')
+            """,
+            dataset_id,
+        )
+        await freeze_db.execute(
+            """
+            INSERT INTO provider_sync.provider_dataset_operation_scopes (
+                provider_dataset_id, sync_scope, operation_key
+            ) VALUES ($1, 'dataset_wide', 'refresh')
+            """,
+            dataset_id,
+        )
+        single_job_id = await freeze_db.fetchval(
+            """
+            INSERT INTO ops.import_jobs (kind, dataset_membership_mode)
+            VALUES ('positive-single-job', 'single')
+            RETURNING job_id
+            """
+        )
+        await freeze_db.execute(
+            """
+            INSERT INTO ops.import_job_datasets (
+                job_id, provider_dataset_id, sync_scope, operation_key
+            ) VALUES ($1, $2, 'dataset_wide', 'refresh')
+            """,
+            single_job_id,
+            dataset_id,
+        )
+        await freeze_db.execute(
+            "INSERT INTO ops.import_jobs (kind, dataset_membership_mode) VALUES ('root', 'root')"
+        )
+        request_id = await freeze_db.fetchval(
+            """
+            INSERT INTO ops.feature_update_requests (dataset_membership_mode)
+            VALUES ('single')
+            RETURNING request_id
+            """
+        )
+        await freeze_db.execute(
+            """
+            INSERT INTO ops.feature_update_request_datasets (
+                request_id, provider_dataset_id, sync_scope, operation_key
+            ) VALUES ($1, $2, 'dataset_wide', 'refresh')
+            """,
+            request_id,
+            dataset_id,
+        )
+        await freeze_db.execute("SET CONSTRAINTS ALL IMMEDIATE")
+    finally:
+        await transaction.rollback()
+
+
+async def test_active_parent_cascades_preserve_indirect_owner_guards(
+    freeze_db: asyncpg.Connection,
+) -> None:
+    """활성 parent의 FK cascade는 indirect active guard에 의해 막히지 않는다."""
+    transaction = freeze_db.transaction()
+    await transaction.start()
+    try:
+        dataset_id = await freeze_db.fetchval(
+            """
+            INSERT INTO provider_sync.provider_datasets (
+                provider, dataset_key, display_name, source_kind
+            ) VALUES ('positive-fixture', 'cascade-guard', 'cascade guard', 'manual')
+            RETURNING provider_dataset_id
+            """
+        )
+        notice_scope_id = await freeze_db.fetchval(
+            """
+            INSERT INTO provider_sync.notice_lifecycle_scopes (
+                provider_dataset_id, source_entity_type, mode, applied_at, state_fingerprint
+            ) VALUES ($1, 'notice', 'snapshot', now(), 'cascade-notice')
+            RETURNING notice_lifecycle_scope_id
+            """,
+            dataset_id,
+        )
+        await freeze_db.execute(
+            """
+            INSERT INTO provider_sync.notice_lineage_states (
+                notice_lifecycle_scope_id, lineage_key, present, changed_at
+            ) VALUES ($1, 'cascade-lineage', true, now())
+            """,
+            notice_scope_id,
+        )
+        integrity_scope_id = await freeze_db.fetchval(
+            """
+            INSERT INTO ops.integrity_observation_scopes (provider_dataset_id)
+            VALUES ($1)
+            RETURNING integrity_observation_scope_id
+            """,
+            dataset_id,
+        )
+        await freeze_db.execute(
+            """
+            INSERT INTO ops.integrity_observation_runs (
+                integrity_observation_scope_id, generation, external_run_id
+            ) VALUES ($1, 1, 'cascade-run')
+            """,
+            integrity_scope_id,
+        )
+        theme_id = await freeze_db.fetchval(
+            """
+            INSERT INTO feature.curated_themes (theme_key, title)
+            VALUES ('cascade-guard', 'cascade guard')
+            RETURNING theme_id
+            """
+        )
+        source_id = await freeze_db.fetchval(
+            """
+            INSERT INTO feature.curated_sources (
+                provider_dataset_id, source_name, source_kind
+            ) VALUES ($1, 'cascade source', 'fixture')
+            RETURNING source_id
+            """,
+            dataset_id,
+        )
+        await freeze_db.execute(
+            """
+            INSERT INTO feature.curated_source_rules (theme_id, source_id)
+            VALUES ($1, $2)
+            """,
+            theme_id,
+            source_id,
+        )
+
+        await freeze_db.execute(
+            "DELETE FROM provider_sync.notice_lifecycle_scopes "
+            "WHERE notice_lifecycle_scope_id = $1",
+            notice_scope_id,
+        )
+        await freeze_db.execute(
+            "DELETE FROM ops.integrity_observation_scopes "
+            "WHERE integrity_observation_scope_id = $1",
+            integrity_scope_id,
+        )
+        await freeze_db.execute(
+            "DELETE FROM feature.curated_sources WHERE source_id = $1",
+            source_id,
+        )
+
+        assert (
+            await freeze_db.fetchval(
+                "SELECT count(*) FROM provider_sync.notice_lineage_states"
+            )
+            == 0
+        )
+        assert (
+            await freeze_db.fetchval("SELECT count(*) FROM ops.integrity_observation_runs")
+            == 0
+        )
+        assert (
+            await freeze_db.fetchval("SELECT count(*) FROM feature.curated_source_rules")
+            == 0
+        )
+    finally:
+        await transaction.rollback()
 
 
 async def test_catalog_fingerprints_match_frozen_artifact(
@@ -448,4 +734,8 @@ async def test_catalog_fingerprints_match_frozen_artifact(
     schema_sha = hashlib.sha256(_SCHEMA_SQL.read_bytes()).hexdigest()
     assert schema_sha == frozen["target_schema_sql_sha256"], (
         f"target-schema-v1.sql bytes drift — 재계산 {schema_sha}"
+    )
+    reference_sha = hashlib.sha256(_REFERENCE_OWNERSHIP_SQL.read_bytes()).hexdigest()
+    assert reference_sha == frozen["tvn33_reference_ownership_sql_sha256"], (
+        "tvn33-reference-ownership-v1.sql bytes drift — 재계산 " + reference_sha
     )

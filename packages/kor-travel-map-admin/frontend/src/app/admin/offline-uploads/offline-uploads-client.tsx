@@ -26,7 +26,7 @@ import {
   useValidateOfflineUploadMutation,
 } from "@/api/offlineUploads";
 import {
-  opsDatasetCatalogOptions,
+  type OpsDatasetGridRow,
   useOpsDatasetCatalog,
 } from "@/api/datasets";
 import { AdminShell } from "@/components/admin-shell";
@@ -107,6 +107,11 @@ function formatBytes(value: number): string {
     return `${byteFormatter.format(Math.round(value / 1024))} KB`;
   }
   return `${byteFormatter.format(Math.round(value / 1024 / 1024))} MB`;
+}
+
+function positiveInteger(value: string): number | undefined {
+  const parsed = Number(value.trim());
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
 }
 
 function uploadFormat(upload: OfflineUploadRecord): string {
@@ -194,8 +199,10 @@ function UploadDetail({ upload }: { upload: OfflineUploadRecord | null }) {
         <StatusBadge status={upload.status} />
       </div>
       <dl className="flex flex-col gap-3">
-        <DetailRow label="provider" value={upload.provider} />
-        <DetailRow label="데이터셋" value={upload.dataset_key} />
+        <DetailRow
+          label="provider dataset ID"
+          value={String(upload.provider_dataset_id)}
+        />
         <DetailRow label="스코프" value={upload.sync_scope} />
         <DetailRow label="storage" value={`${upload.storage_backend}:${upload.storage_key}`} />
         <DetailRow label="size" value={formatBytes(upload.byte_size)} />
@@ -556,40 +563,30 @@ function UploadFormPanel({
   onCreated: (uploadId: string) => void;
 }) {
   const [file, setFile] = useState<File | null>(null);
-  const [provider, setProvider] = useState("offline-test-provider");
-  const [datasetKey, setDatasetKey] = useState("offline_csv");
+  const [providerDatasetId, setProviderDatasetId] = useState("");
   const [syncScope, setSyncScope] = useState("default");
   const createUpload = useCreateOfflineUploadMutation();
   const datasetsQuery = useOpsDatasetCatalog();
-  const catalogOptions = useMemo(
-    () => opsDatasetCatalogOptions(datasetsQuery.data?.data.items ?? []),
-    [datasetsQuery.data?.data.items],
-  );
-  const providerOptions = useMemo(
-    () => catalogOptions.map((item) => item.provider),
-    [catalogOptions],
-  );
-  const datasetOptions = useMemo(
-    () =>
-      provider.trim()
-        ? (catalogOptions.find((item) => item.provider === provider.trim())
-            ?.datasets ?? [])
-        : Array.from(
-            new Set(catalogOptions.flatMap((item) => item.datasets)),
-          ).sort(),
-    [catalogOptions, provider],
-  );
+  const providerDatasetOptions = useMemo(() => {
+    const rowsById = new Map<number, OpsDatasetGridRow>();
+    for (const row of datasetsQuery.data?.data.items ?? []) {
+      rowsById.set(row.provider_dataset_id, row);
+    }
+    return [...rowsById.values()].sort(
+      (left, right) => left.provider_dataset_id - right.provider_dataset_id,
+    );
+  }, [datasetsQuery.data?.data.items]);
+  const parsedProviderDatasetId = positiveInteger(providerDatasetId);
   const uploadMissingFields = [
     file === null ? "파일" : null,
-    provider.trim().length === 0 ? "provider" : null,
-    datasetKey.trim().length === 0 ? "dataset key" : null,
+    parsedProviderDatasetId === undefined ? "provider dataset ID" : null,
     syncScope.trim().length === 0 ? "sync scope" : null,
   ].filter((item): item is string => item !== null);
 
   const submitUpload = () => {
-    if (file === null) return;
+    if (file === null || parsedProviderDatasetId === undefined) return;
     createUpload.mutate(
-      { file, provider, datasetKey, syncScope },
+      { file, providerDatasetId: parsedProviderDatasetId, syncScope },
       { onSuccess: (data) => onCreated(data.data.upload_id) },
     );
   };
@@ -611,27 +608,21 @@ function UploadFormPanel({
           onChange={(event) => setFile(event.target.files?.[0] ?? null)}
         />
         <FormField
-          label="provider"
-          list="offline-upload-provider-options"
-          placeholder="provider"
-          value={provider}
-          onChange={(event) => setProvider(event.target.value)}
+          label="provider dataset ID"
+          list="offline-upload-provider-dataset-options"
+          min="1"
+          placeholder="provider_dataset_id"
+          type="number"
+          value={providerDatasetId}
+          onChange={(event) => setProviderDatasetId(event.target.value)}
         />
-        <datalist id="offline-upload-provider-options">
-          {providerOptions.map((item) => (
-            <option key={item} value={item} />
-          ))}
-        </datalist>
-        <FormField
-          label="dataset key"
-          list="offline-upload-dataset-options"
-          placeholder="dataset_key"
-          value={datasetKey}
-          onChange={(event) => setDatasetKey(event.target.value)}
-        />
-        <datalist id="offline-upload-dataset-options">
-          {datasetOptions.map((item) => (
-            <option key={item} value={item} />
+        <datalist id="offline-upload-provider-dataset-options">
+          {providerDatasetOptions.map((item) => (
+            <option
+              key={item.provider_dataset_id}
+              label={`${item.provider}/${item.dataset_key}`}
+              value={item.provider_dataset_id}
+            />
           ))}
         </datalist>
         <FormField
@@ -677,8 +668,7 @@ function UploadFormPanel({
 
 function useOfflineUploadListController() {
   const [status, setStatus] = useState<OfflineUploadStatus | "all">("uploaded");
-  const [providerFilter, setProviderFilter] = useState("");
-  const [datasetFilter, setDatasetFilter] = useState("");
+  const [providerDatasetIdFilter, setProviderDatasetIdFilter] = useState("");
   const [selectedUploadId, setSelectedUploadId] = useState<string | null>(null);
   const [mapping, setMapping] =
     useState<OfflineUploadColumnMapping>(defaultColumnMapping);
@@ -686,11 +676,10 @@ function useOfflineUploadListController() {
   const uploadsParams = useMemo(
     () => ({
       status: status === "all" ? undefined : status,
-      provider: providerFilter.trim() || undefined,
-      dataset_key: datasetFilter.trim() || undefined,
+      provider_dataset_id: positiveInteger(providerDatasetIdFilter),
       page_size: 100,
     }),
-    [datasetFilter, providerFilter, status],
+    [providerDatasetIdFilter, status],
   );
   const uploads = useOfflineUploads(uploadsParams);
   const selectedUpload = useOfflineUpload(selectedUploadId);
@@ -732,14 +721,16 @@ function useOfflineUploadListController() {
         ),
       },
       {
-        id: "provider/dataset",
-        header: "provider/dataset",
+        id: "provider_dataset",
+        header: "provider dataset",
         enableSorting: false,
         cell: ({ row }) => (
           <>
-            <div className="max-w-64 truncate">{row.original.provider}</div>
+            <div className="max-w-64 truncate font-mono">
+              #{row.original.provider_dataset_id}
+            </div>
             <div className="max-w-64 truncate text-xs text-muted-foreground">
-              {row.original.dataset_key}/{row.original.sync_scope}
+              {row.original.sync_scope}
             </div>
           </>
         ),
@@ -835,17 +826,15 @@ function useOfflineUploadListController() {
   );
 
   return {
-    datasetFilter,
     deleteUpload,
     launchLoad,
     mapping,
-    providerFilter,
+    providerDatasetIdFilter,
     selected,
     selectedUpload,
     selectedUploadId,
-    setDatasetFilter,
     setMapping,
-    setProviderFilter,
+    setProviderDatasetIdFilter,
     setSelectedUploadId,
     setStatus,
     status,
@@ -857,23 +846,21 @@ function useOfflineUploadListController() {
 
 export function OfflineUploadsClient() {
   const {
-  datasetFilter,
-  deleteUpload,
-  launchLoad,
-  mapping,
-  providerFilter,
-  selected,
-  selectedUpload,
-  selectedUploadId,
-  setDatasetFilter,
-  setMapping,
-  setProviderFilter,
-  setSelectedUploadId,
-  setStatus,
-  status,
-  uploadColumns,
-  uploadItems,
-  uploads,
+    deleteUpload,
+    launchLoad,
+    mapping,
+    providerDatasetIdFilter,
+    selected,
+    selectedUpload,
+    selectedUploadId,
+    setMapping,
+    setProviderDatasetIdFilter,
+    setSelectedUploadId,
+    setStatus,
+    status,
+    uploadColumns,
+    uploadItems,
+    uploads,
   } = useOfflineUploadListController();
   return (
     <AdminShell
@@ -954,17 +941,13 @@ export function OfflineUploadsClient() {
             </NativeSelect>
             <Input
               className="w-56"
-              aria-label="provider filter"
-              placeholder="provider 필터"
-              value={providerFilter}
-              onChange={(event) => setProviderFilter(event.target.value)}
-            />
-            <Input
-              className="w-56"
-              aria-label="dataset filter"
-              placeholder="dataset_key 필터"
-              value={datasetFilter}
-              onChange={(event) => setDatasetFilter(event.target.value)}
+              aria-label="provider dataset ID filter"
+              inputMode="numeric"
+              min="1"
+              placeholder="provider_dataset_id 필터"
+              type="number"
+              value={providerDatasetIdFilter}
+              onChange={(event) => setProviderDatasetIdFilter(event.target.value)}
             />
             <Badge variant="outline">
               {uploads.data?.data.items.length ?? 0} rows

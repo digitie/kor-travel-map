@@ -143,6 +143,7 @@ class CuratedSource:
     """``feature.curated_sources`` projection."""
 
     source_id: str
+    provider_dataset_id: int
     provider: str
     dataset_key: str
     source_name: str
@@ -169,6 +170,7 @@ class CuratedSourceRule:
     theme_id: str
     theme_slug: str
     source_id: str
+    provider_dataset_id: int
     provider: str
     dataset_key: str
     place_kind: str | None
@@ -208,6 +210,7 @@ class CuratedFeature:
     address: dict[str, Any]
     detail: dict[str, Any]
     source_id: str
+    provider_dataset_id: int
     provider: str
     dataset_key: str
     source_name: str
@@ -340,14 +343,15 @@ _THEME_COLUMNS: Final[str] = (
     "theme_group, default_curated, visibility, metadata, created_at, updated_at"
 )
 _SOURCE_COLUMNS: Final[str] = (
-    "source_id::text AS source_id, provider, dataset_key, source_name, source_url, "
-    "source_kind, license, update_cycle, last_source_modified_at, last_checked_at, "
-    "next_expected_at, row_count, freshness_note, provider_status, metadata, "
-    "created_at, updated_at"
+    "s.source_id::text AS source_id, s.provider_dataset_id, pd.provider, pd.dataset_key, "
+    "s.source_name, s.source_url, s.source_kind, s.license, s.update_cycle, "
+    "s.last_source_modified_at, s.last_checked_at, s.next_expected_at, s.row_count, "
+    "s.freshness_note, s.provider_status, s.metadata, s.created_at, s.updated_at"
 )
 _RULE_COLUMNS: Final[str] = (
     "r.rule_id::text AS rule_id, r.theme_id::text AS theme_id, t.theme_slug, "
-    "r.source_id::text AS source_id, s.provider, r.dataset_key, r.place_kind, "
+    "r.source_id::text AS source_id, s.provider_dataset_id, pd.provider, pd.dataset_key, "
+    "r.place_kind, "
     "r.category, r.region_scope, r.detail_selector, r.default_action, "
     "r.priority, r.enabled, r.metadata, r.created_at, r.updated_at"
 )
@@ -370,8 +374,9 @@ _FEATURE_COLUMNS: Final[str] = """
     f.address,
     f.detail,
     cf.source_id::text AS source_id,
-    s.provider,
-    s.dataset_key,
+    s.provider_dataset_id,
+    pd.provider,
+    pd.dataset_key,
     s.source_name,
     s.source_url,
     cf.source_record_key,
@@ -404,6 +409,8 @@ _FEATURE_FROM_SQL: Final[str] = """
 FROM feature.curated_features AS cf
 JOIN feature.curated_themes AS t ON t.theme_id = cf.theme_id
 JOIN feature.curated_sources AS s ON s.source_id = cf.source_id
+JOIN provider_sync.provider_datasets AS pd
+  ON pd.provider_dataset_id = s.provider_dataset_id
 JOIN feature.features_detailed AS f ON f.feature_id = cf.feature_id
 """
 
@@ -411,6 +418,8 @@ _PUBLIC_FEATURE_FROM_SQL: Final[str] = """
 FROM feature.curated_features AS cf
 JOIN feature.curated_themes AS t ON t.theme_id = cf.theme_id
 JOIN feature.curated_sources AS s ON s.source_id = cf.source_id
+JOIN provider_sync.provider_datasets AS pd
+  ON pd.provider_dataset_id = s.provider_dataset_id
 JOIN feature.public_features AS f ON f.feature_id = cf.feature_id
 """
 
@@ -435,18 +444,27 @@ LIMIT :limit
 
 _LIST_SOURCES_SQL: Final[str] = f"""
 SELECT {_SOURCE_COLUMNS}
-FROM feature.curated_sources
-WHERE (CAST(:provider AS text) IS NULL OR provider = CAST(:provider AS text))
-  AND (
-    CAST(:dataset_key AS text) IS NULL
-    OR dataset_key = CAST(:dataset_key AS text)
-  )
+FROM feature.curated_sources AS s
+JOIN provider_sync.provider_datasets AS pd
+  ON pd.provider_dataset_id = s.provider_dataset_id
+WHERE (
+    CAST(:provider_dataset_id AS bigint) IS NULL
+    OR s.provider_dataset_id = CAST(:provider_dataset_id AS bigint)
+)
   AND (
     CAST(:provider_status AS text) IS NULL
     OR provider_status = CAST(:provider_status AS text)
   )
-ORDER BY provider, dataset_key
+ORDER BY pd.provider, pd.dataset_key
 LIMIT :limit
+"""
+
+_GET_SOURCE_SQL: Final[str] = f"""
+SELECT {_SOURCE_COLUMNS}
+FROM feature.curated_sources AS s
+JOIN provider_sync.provider_datasets AS pd
+  ON pd.provider_dataset_id = s.provider_dataset_id
+WHERE s.source_id = CAST(:source_id AS uuid)
 """
 
 _LIST_RULES_SQL: Final[str] = f"""
@@ -454,19 +472,20 @@ SELECT {_RULE_COLUMNS}
 FROM feature.curated_source_rules AS r
 JOIN feature.curated_themes AS t ON t.theme_id = r.theme_id
 JOIN feature.curated_sources AS s ON s.source_id = r.source_id
+JOIN provider_sync.provider_datasets AS pd
+  ON pd.provider_dataset_id = s.provider_dataset_id
 WHERE (CAST(:theme_id AS uuid) IS NULL OR r.theme_id = CAST(:theme_id AS uuid))
   AND (
     CAST(:theme_slug AS text) IS NULL
     OR t.theme_slug = CAST(:theme_slug AS text)
   )
   AND (CAST(:source_id AS uuid) IS NULL OR r.source_id = CAST(:source_id AS uuid))
-  AND (CAST(:provider AS text) IS NULL OR s.provider = CAST(:provider AS text))
   AND (
-    CAST(:dataset_key AS text) IS NULL
-    OR r.dataset_key = CAST(:dataset_key AS text)
+    CAST(:provider_dataset_id AS bigint) IS NULL
+    OR s.provider_dataset_id = CAST(:provider_dataset_id AS bigint)
   )
   AND (CAST(:enabled AS boolean) IS NULL OR r.enabled = CAST(:enabled AS boolean))
-ORDER BY t.theme_slug, s.provider, r.dataset_key, r.priority DESC, r.rule_id
+ORDER BY t.theme_slug, pd.provider, pd.dataset_key, r.priority DESC, r.rule_id
 LIMIT :limit
 """
 
@@ -483,10 +502,9 @@ WHERE (CAST(:include_archived AS boolean) OR cf.archived_at IS NULL)
     OR t.theme_slug = CAST(:theme_slug AS text)
   )
   AND (CAST(:source_id AS uuid) IS NULL OR cf.source_id = CAST(:source_id AS uuid))
-  AND (CAST(:provider AS text) IS NULL OR s.provider = CAST(:provider AS text))
   AND (
-    CAST(:dataset_key AS text) IS NULL
-    OR s.dataset_key = CAST(:dataset_key AS text)
+    CAST(:provider_dataset_id AS bigint) IS NULL
+    OR s.provider_dataset_id = CAST(:provider_dataset_id AS bigint)
   )
   AND (
     CAST(:region_code AS text) IS NULL
@@ -638,7 +656,6 @@ WITH rule AS (
         r.rule_id,
         r.theme_id,
         r.source_id,
-        r.dataset_key,
         r.place_kind,
         r.category,
         r.region_scope,
@@ -669,17 +686,20 @@ candidates AS MATERIALIZED (
         rule.reuse_policy,
         f.feature_id,
         f.detail AS feature_detail,
-        s.provider,
-        s.dataset_key,
+        pd.provider,
+        pd.dataset_key,
         sr.source_record_key
     FROM rule
     JOIN feature.curated_sources AS s ON s.source_id = rule.source_id
+    JOIN provider_sync.provider_datasets AS pd
+      ON pd.provider_dataset_id = s.provider_dataset_id
     JOIN provider_sync.source_entities AS se
-      ON se.provider = s.provider
-     AND se.dataset_key = s.dataset_key
+      ON se.provider_dataset_id = s.provider_dataset_id
+    JOIN provider_sync.source_entity_heads AS head
+      ON head.source_entity_key = se.source_entity_key
     JOIN provider_sync.source_records AS sr
       ON sr.source_entity_key = se.source_entity_key
-     AND sr.source_record_key = se.current_source_record_key
+     AND sr.source_record_key = head.current_source_record_key
     JOIN provider_sync.source_links AS sl
       ON sl.source_entity_key = se.source_entity_key
     -- curation source rule은 임의 JSON 경로(``rule.detail_selector``)와
@@ -721,7 +741,8 @@ candidates AS MATERIALIZED (
           AND old_cf.feature_id = f.feature_id
           AND old_cf.curation_status IN ('rejected','archived')
       )
-    ORDER BY f.feature_id, sl.is_primary_source DESC, sr.imported_at DESC
+    ORDER BY f.feature_id, (sl.source_role = 'primary') DESC, head.observed_at DESC,
+             sr.imported_at DESC
 ),
 locked_candidates AS MATERIALIZED (
     SELECT candidate.*
@@ -856,13 +877,12 @@ SELECT count(*)::int AS affected_count FROM upserted
 
 _REFRESH_SOURCE_METADATA_SQL: Final[str] = """
 WITH source_scope AS (
-    SELECT source_id, provider, dataset_key
-    FROM feature.curated_sources
-    WHERE (CAST(:provider AS text) IS NULL OR provider = CAST(:provider AS text))
-      AND (
-        CAST(:dataset_key AS text) IS NULL
-        OR dataset_key = CAST(:dataset_key AS text)
-      )
+    SELECT s.source_id, s.provider_dataset_id
+    FROM feature.curated_sources AS s
+    WHERE (
+        CAST(:provider_dataset_id AS bigint) IS NULL
+        OR s.provider_dataset_id = CAST(:provider_dataset_id AS bigint)
+    )
 ),
 counted AS (
     SELECT
@@ -870,9 +890,12 @@ counted AS (
         count(sr.source_record_key)::int AS record_count,
         max(sr.imported_at) AS last_imported_at
     FROM source_scope AS s
+    LEFT JOIN provider_sync.source_entities AS se
+      ON se.provider_dataset_id = s.provider_dataset_id
+    LEFT JOIN provider_sync.source_entity_heads AS head
+      ON head.source_entity_key = se.source_entity_key
     LEFT JOIN provider_sync.source_records AS sr
-      ON sr.provider = s.provider
-     AND sr.dataset_key = s.dataset_key
+      ON sr.source_record_key = head.current_source_record_key
     GROUP BY s.source_id
 ),
 updated AS (
@@ -1083,6 +1106,7 @@ def _theme(row: Any) -> CuratedTheme:
 def _source(row: Any) -> CuratedSource:
     return CuratedSource(
         source_id=str(row["source_id"]),
+        provider_dataset_id=int(row["provider_dataset_id"]),
         provider=str(row["provider"]),
         dataset_key=str(row["dataset_key"]),
         source_name=str(row["source_name"]),
@@ -1108,6 +1132,7 @@ def _rule(row: Any) -> CuratedSourceRule:
         theme_id=str(row["theme_id"]),
         theme_slug=str(row["theme_slug"]),
         source_id=str(row["source_id"]),
+        provider_dataset_id=int(row["provider_dataset_id"]),
         provider=str(row["provider"]),
         dataset_key=str(row["dataset_key"]),
         place_kind=row["place_kind"],
@@ -1150,6 +1175,7 @@ def _feature(row: Any) -> CuratedFeature:
         address=_json_object(row["address"]),
         detail=_json_object(row["detail"]),
         source_id=str(row["source_id"]),
+        provider_dataset_id=int(row["provider_dataset_id"]),
         provider=str(row["provider"]),
         dataset_key=str(row["dataset_key"]),
         source_name=str(row["source_name"]),
@@ -1380,8 +1406,7 @@ async def list_curated_themes(
 async def list_curated_sources(
     session: AsyncSession,
     *,
-    provider: str | None = None,
-    dataset_key: str | None = None,
+    provider_dataset_id: int | None = None,
     provider_status: str | None = None,
     limit: int = 200,
 ) -> tuple[CuratedSource, ...]:
@@ -1393,8 +1418,7 @@ async def list_curated_sources(
         await session.execute(
             text(_LIST_SOURCES_SQL),
             {
-                "provider": provider,
-                "dataset_key": dataset_key,
+                "provider_dataset_id": provider_dataset_id,
                 "provider_status": provider_status,
                 "limit": _safe_limit(limit),
             },
@@ -1403,14 +1427,20 @@ async def list_curated_sources(
     return tuple(_source(row) for row in rows)
 
 
+async def _get_source(session: AsyncSession, source_id: str) -> CuratedSource | None:
+    row = (
+        await session.execute(text(_GET_SOURCE_SQL), {"source_id": source_id})
+    ).mappings().first()
+    return _source(row) if row is not None else None
+
+
 async def list_curated_source_rules(
     session: AsyncSession,
     *,
     theme_id: str | None = None,
     theme_slug: str | None = None,
     source_id: str | None = None,
-    provider: str | None = None,
-    dataset_key: str | None = None,
+    provider_dataset_id: int | None = None,
     enabled: bool | None = None,
     limit: int = 200,
 ) -> tuple[CuratedSourceRule, ...]:
@@ -1423,8 +1453,7 @@ async def list_curated_source_rules(
                 "theme_id": theme_id,
                 "theme_slug": theme_slug,
                 "source_id": source_id,
-                "provider": provider,
-                "dataset_key": dataset_key,
+                "provider_dataset_id": provider_dataset_id,
                 "enabled": enabled,
                 "limit": _safe_limit(limit),
             },
@@ -1439,8 +1468,7 @@ async def list_curated_features(
     theme_id: str | None = None,
     theme_slug: str | None = None,
     source_id: str | None = None,
-    provider: str | None = None,
-    dataset_key: str | None = None,
+    provider_dataset_id: int | None = None,
     curation_status: str | None = "curated",
     region_code: str | None = None,
     sido_code: str | None = None,
@@ -1487,8 +1515,7 @@ async def list_curated_features(
                 "theme_id": theme_id,
                 "theme_slug": theme_slug,
                 "source_id": source_id,
-                "provider": provider,
-                "dataset_key": dataset_key,
+                "provider_dataset_id": provider_dataset_id,
                 "curation_status": curation_status,
                 "region_code": region_code,
                 "sido_code": sido_code,
@@ -1868,15 +1895,14 @@ async def apply_curated_source_rule(
 async def refresh_curated_source_metadata(
     session: AsyncSession,
     *,
-    provider: str | None = None,
-    dataset_key: str | None = None,
+    provider_dataset_id: int | None = None,
 ) -> CuratedSourceMetadataRefreshResult:
     """source_records 기준으로 curated source metadata를 갱신한다."""
 
     row = (
         await session.execute(
             text(_REFRESH_SOURCE_METADATA_SQL),
-            {"provider": provider, "dataset_key": dataset_key},
+            {"provider_dataset_id": provider_dataset_id},
         )
     ).mappings().one()
     return CuratedSourceMetadataRefreshResult(
@@ -1973,10 +1999,22 @@ async def sync_concierge_themes(
     apply로 후보 feature를 즉시 채운다.
     """
 
+    provider_dataset_id = (
+        await session.execute(
+            text(
+                "SELECT provider_dataset_id FROM provider_sync.provider_datasets "
+                "WHERE provider = :provider AND dataset_key = :dataset_key"
+            ),
+            {"provider": _CONCIERGE_PROVIDER, "dataset_key": _CONCIERGE_DATASET_KEY},
+        )
+    ).scalar_one_or_none()
+    if provider_dataset_id is None:
+        return ConciergeThemeSyncResult(
+            themes_upserted=0, rules_created=0, groupings=0
+        )
     sources = await list_curated_sources(
         session,
-        provider=_CONCIERGE_PROVIDER,
-        dataset_key=_CONCIERGE_DATASET_KEY,
+        provider_dataset_id=int(provider_dataset_id),
         limit=1,
     )
     if not sources:
@@ -2006,11 +2044,14 @@ async def sync_concierge_themes(
                       ON sl.feature_id = f.feature_id
                     JOIN provider_sync.source_entities AS se
                       ON se.source_entity_key = sl.source_entity_key
+                    JOIN provider_sync.provider_datasets AS pd
+                      ON pd.provider_dataset_id = se.provider_dataset_id
+                    JOIN provider_sync.source_entity_heads AS head
+                      ON head.source_entity_key = se.source_entity_key
                     JOIN provider_sync.source_records AS sr
                       ON sr.source_entity_key = se.source_entity_key
-                     AND sr.source_record_key = se.current_source_record_key
-                    WHERE sr.provider = :provider
-                      AND sr.dataset_key = :dataset_key
+                     AND sr.source_record_key = head.current_source_record_key
+                    WHERE pd.provider_dataset_id = :provider_dataset_id
                       AND f.deleted_at IS NULL
                       AND f.status = 'active'
                       AND f.detail #>> CAST(:id_path AS text[]) IS NOT NULL
@@ -2021,8 +2062,7 @@ async def sync_concierge_themes(
                 {
                     "id_path": id_path,
                     "title_path": title_path,
-                    "provider": _CONCIERGE_PROVIDER,
-                    "dataset_key": _CONCIERGE_DATASET_KEY,
+                    "provider_dataset_id": int(provider_dataset_id),
                     "min_features": min_features,
                 },
             )
@@ -2063,7 +2103,6 @@ async def sync_concierge_themes(
                     session,
                     theme_id=theme_id,
                     source_id=source_id,
-                    dataset_key=_CONCIERGE_DATASET_KEY,
                     place_kind="youtube_place_candidate",
                     detail_selector={"path": id_path, "value": gid},
                     default_action="curated",
@@ -2223,8 +2262,7 @@ async def update_curated_theme(
 async def create_curated_source(
     session: AsyncSession,
     *,
-    provider: str,
-    dataset_key: str,
+    provider_dataset_id: int,
     source_name: str,
     source_url: str | None = None,
     source_kind: str,
@@ -2246,24 +2284,23 @@ async def create_curated_source(
     row = (
         await session.execute(
             text(
-                f"""
+                """
                 INSERT INTO feature.curated_sources (
-                    provider, dataset_key, source_name, source_url, source_kind,
+                    provider_dataset_id, source_name, source_url, source_kind,
                     license, update_cycle, last_source_modified_at, last_checked_at,
                     next_expected_at, row_count, freshness_note, provider_status,
                     metadata, updated_at
                 ) VALUES (
-                    :provider, :dataset_key, :source_name, :source_url, :source_kind,
+                    :provider_dataset_id, :source_name, :source_url, :source_kind,
                     :license, :update_cycle, :last_source_modified_at, :last_checked_at,
                     :next_expected_at, :row_count, :freshness_note, :provider_status,
                     CAST(:metadata_json AS jsonb), now()
                 )
-                RETURNING {_SOURCE_COLUMNS}
+                RETURNING source_id::text AS source_id
                 """
             ),
             {
-                "provider": provider,
-                "dataset_key": dataset_key,
+                "provider_dataset_id": provider_dataset_id,
                 "source_name": source_name,
                 "source_url": source_url,
                 "source_kind": source_kind,
@@ -2279,7 +2316,10 @@ async def create_curated_source(
             },
         )
     ).mappings().one()
-    return _source(row)
+    created = await _get_source(session, str(row["source_id"]))
+    if created is None:
+        raise RuntimeError("created curated source could not be read")
+    return created
 
 
 async def update_curated_source(
@@ -2316,9 +2356,9 @@ async def update_curated_source(
             "update_cycle": _UPDATE_CYCLES,
             "provider_status": _PROVIDER_STATUSES,
         },
-        returning=_SOURCE_COLUMNS,
+        returning="source_id::text AS source_id",
     )
-    return _source(row) if row is not None else None
+    return await _get_source(session, str(row["source_id"])) if row is not None else None
 
 
 async def create_curated_source_rule(
@@ -2326,7 +2366,6 @@ async def create_curated_source_rule(
     *,
     theme_id: str,
     source_id: str,
-    dataset_key: str,
     place_kind: str | None = None,
     category: str | None = None,
     region_scope: Mapping[str, Any] | None = None,
@@ -2344,11 +2383,11 @@ async def create_curated_source_rule(
             text(
                 """
                 INSERT INTO feature.curated_source_rules (
-                    theme_id, source_id, dataset_key, place_kind, category,
+                    theme_id, source_id, place_kind, category,
                     region_scope, detail_selector, default_action, priority,
                     enabled, metadata, updated_at
                 ) VALUES (
-                    CAST(:theme_id AS uuid), CAST(:source_id AS uuid), :dataset_key,
+                    CAST(:theme_id AS uuid), CAST(:source_id AS uuid),
                     :place_kind, :category, CAST(:region_scope_json AS jsonb),
                     CAST(:detail_selector_json AS jsonb),
                     :default_action, :priority, :enabled,
@@ -2360,7 +2399,6 @@ async def create_curated_source_rule(
             {
                 "theme_id": theme_id,
                 "source_id": source_id,
-                "dataset_key": dataset_key,
                 "place_kind": place_kind,
                 "category": category,
                 "region_scope_json": _json_dumps(region_scope),
@@ -2396,7 +2434,6 @@ async def update_curated_source_rule(
     """curated source rule을 부분 수정한다."""
 
     allowed = {
-        "dataset_key",
         "place_kind",
         "category",
         "region_scope",
@@ -2430,6 +2467,8 @@ async def _get_rule(session: AsyncSession, rule_id: str) -> CuratedSourceRule | 
                 FROM feature.curated_source_rules AS r
                 JOIN feature.curated_themes AS t ON t.theme_id = r.theme_id
                 JOIN feature.curated_sources AS s ON s.source_id = r.source_id
+                JOIN provider_sync.provider_datasets AS pd
+                  ON pd.provider_dataset_id = s.provider_dataset_id
                 WHERE r.rule_id = CAST(:rule_id AS uuid)
                 """
             ),

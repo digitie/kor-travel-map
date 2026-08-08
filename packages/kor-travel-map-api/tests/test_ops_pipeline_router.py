@@ -16,12 +16,14 @@ from kortravelmap.infra.feature_update_active_repo import FeatureUpdateDispatchC
 from kortravelmap.infra.feature_update_repo import (
     FeatureUpdateLockBusy,
     FeatureUpdateRequest,
+    FeatureUpdateRequestDataset,
     FeatureUpdateRequestIdempotency,
     FeatureUpdateRequestPreview,
 )
 from kortravelmap.infra.ops_repo import (
     OpsCursorFilterMismatch,
     OpsImportJob,
+    OpsImportJobDataset,
     OpsImportJobEvent,
     OpsImportJobEventPage,
 )
@@ -41,12 +43,6 @@ from kortravelmap.infra.pipeline_repo import (
     PipelineStatusCounts,
 )
 from kortravelmap.providers.datagokr_file_data import DATAGOKR_FILEDATA_DATASETS
-from kortravelmap.providers.feature_operation_registry import (
-    ADMIN_MANUAL_TRIGGER_TAG,
-    FEATURE_OPERATION_TRIGGER_TAG,
-    parse_feature_operation_identity_tags,
-    validate_feature_operation_identity,
-)
 from kortravelmap.providers.mois import (
     DATASET_KEY_BULK,
     MOIS_SOURCE_SYNC_COVERAGE_TAG,
@@ -76,6 +72,9 @@ from kortravelmap.api.routers import ops_pipeline as pipeline_mod
 from kortravelmap.api.settings import ApiSettings
 
 _NOW = datetime(2026, 7, 14, 9, 0, tzinfo=UTC)
+# T-VN-33: 실행 membership identity는 (provider_dataset_id, sync_scope, operation_key)
+# triple이다(ADR-088). provider/dataset_key는 표시용 projection일 뿐이다.
+_MOIS_BULK_OPERATION_KEY = "feature_place_mois_licenses_job"
 _OPS_READ_TOKEN = "read-token-00000000000000000000000000000000"
 _OPS_CANCEL_TOKEN = "cancel-token-000000000000000000000000000000"
 _OPS_FIXTURE_TOKEN = "fixture-token-00000000000000000000000000000"
@@ -191,10 +190,64 @@ def client(session: _FakeSession, monkeypatch: pytest.MonkeyPatch) -> TestClient
         return {}
 
     async def _ready_mois_source_sync(
-        _resolved_pairs: frozenset[tuple[str, str]],
+        _session: Any,
+        _resolved_memberships: frozenset[tuple[int, str]],
         **_kwargs: Any,
     ) -> None:
         return None
+
+    async def _preview_provider_dataset(
+        _session: Any,
+        *,
+        scope: dict[str, Any],
+        dataset_memberships: Any,
+        update_policy: dict[str, Any],
+        run_mode: str,
+        priority: int,
+        sigungu_resolver: Any,
+    ) -> FeatureUpdateRequestPreview:
+        del sigungu_resolver
+        # T-VN-33: provider_dataset scope는 (provider_dataset_id, sync_scope,
+        # operation_key) triple 전부를 core로 내려보낸다.
+        if (
+            dataset_memberships is None
+            or len(dataset_memberships) != 1
+            or scope
+            != {
+                "type": "provider_dataset",
+                "provider_dataset_id": dataset_memberships[0].provider_dataset_id,
+                "sync_scope": dataset_memberships[0].sync_scope,
+                "operation_key": dataset_memberships[0].operation_key,
+            }
+            or dataset_memberships[0].provider_dataset_id != 1
+            or dataset_memberships[0].operation_key != _MOIS_BULK_OPERATION_KEY
+        ):
+            raise fur_mod.FeatureUpdateValidationError(
+                "존재하지 않거나 비활성인 provider_dataset_id입니다."
+            )
+        sync_scope = dataset_memberships[0].sync_scope
+        if sync_scope != "dataset_wide":
+            raise fur_mod.FeatureUpdateValidationError(
+                "sync_scope 선택을 지원하지 않습니다"
+            )
+        return FeatureUpdateRequestPreview(
+            scope_type="provider_dataset",
+            scope=scope,
+            dataset_memberships=(
+                FeatureUpdateRequestDataset(
+                    feature_update_request_dataset_id=None,
+                    provider_dataset_id=1,
+                    sync_scope=sync_scope,
+                    provider=MOIS_PROVIDER_NAME,
+                    dataset_key=DATASET_KEY_BULK,
+                    operation_key=_MOIS_BULK_OPERATION_KEY,
+                ),
+            ),
+            update_policy=update_policy,
+            run_mode=run_mode,
+            priority=priority,
+            matched_scope={"feature_count": 1},
+        )
 
     async def _audit_schedule_command(
         audit_session: _FakeSession,
@@ -274,8 +327,13 @@ def client(session: _FakeSession, monkeypatch: pytest.MonkeyPatch) -> TestClient
     )
     monkeypatch.setattr(
         mois_source_precheck,
-        "ensure_mois_source_sync_for_plan",
+        "ensure_mois_source_sync_for_memberships",
         _ready_mois_source_sync,
+    )
+    monkeypatch.setattr(
+        fur_mod,
+        "preview_feature_update_request_repo",
+        _preview_provider_dataset,
     )
     return TestClient(
         app,
@@ -364,8 +422,20 @@ def _job(
         finished_at=None,
         heartbeat_at=_NOW,
         dagster_run_id=dagster_run_id,
-        provider=provider,
-        dataset_key=dataset_key,
+        dataset_memberships=(
+            ()
+            if provider is None or dataset_key is None
+            else (
+                OpsImportJobDataset(
+                    import_job_dataset_id="11111111-1111-1111-1111-111111111111",
+                    provider_dataset_id=1,
+                    provider=provider,
+                    dataset_key=dataset_key,
+                    sync_scope="dataset_wide",
+                    operation_key="feature_place_test_job",
+                ),
+            )
+        ),
     )
 
 
@@ -384,12 +454,21 @@ def _update_request(
         scope_type="provider_dataset",
         scope={
             "type": "provider_dataset",
-            "provider": MOIS_PROVIDER_NAME,
-            "dataset_key": DATASET_KEY_BULK,
+            "provider_dataset_id": 1,
             "sync_scope": "dataset_wide",
+            "operation_key": _MOIS_BULK_OPERATION_KEY,
         },
-        providers=(),
-        dataset_keys=(),
+        dataset_membership_mode="single",
+        dataset_memberships=(
+            FeatureUpdateRequestDataset(
+                feature_update_request_dataset_id="11111111-1111-1111-1111-111111111111",
+                provider_dataset_id=1,
+                sync_scope="dataset_wide",
+                provider=MOIS_PROVIDER_NAME,
+                dataset_key=DATASET_KEY_BULK,
+                operation_key=_MOIS_BULK_OPERATION_KEY,
+            ),
+        ),
         update_policy={},
         run_mode="queued",
         priority=priority,
@@ -404,7 +483,6 @@ def _update_request(
         started_at=None,
         finished_at=None,
         generation=1,
-        effective_sync_scope="dataset_wide",
         dispatch_requested_at=dispatch_requested_at,
     )
 
@@ -510,9 +588,10 @@ def _event(
     return OpsImportJobEvent(
         event_id=event_id,
         job_id="11111111-1111-1111-1111-111111111111",
-        provider=MOIS_PROVIDER_NAME,
-        dataset_key=DATASET_KEY_BULK,
+        import_job_dataset_id="11111111-1111-1111-1111-111111111111",
+        provider_dataset_id=1,
         sync_scope="dataset_wide",
+        operation_key=_MOIS_BULK_OPERATION_KEY,
         feature_id=None,
         stage="loading",
         level="error",
@@ -535,13 +614,13 @@ def _execution(
         id=execution_id,
         status=status,
         created_at=_NOW,
-        providers=(MOIS_PROVIDER_NAME,),
-        dataset_keys=(DATASET_KEY_BULK,),
         provider_datasets=(
             PipelineProviderDatasetIdentity(
+                provider_dataset_id=1,
                 provider=MOIS_PROVIDER_NAME,
                 dataset_key=DATASET_KEY_BULK,
                 sync_scope="dataset_wide",
+                operation_key=_MOIS_BULK_OPERATION_KEY,
                 operation_member_id="11111111-1111-1111-1111-111111111111",
                 status="running",
             ),
@@ -558,7 +637,7 @@ def _execution(
         dagster_run_id="run-1",
         dagster_run_status=None,
         trigger_kind="update_request" if kind == "update_request" else "manual",
-        operation_registry_version=None,
+        operation_key=None,
         requested_job_id=(None if kind == "import_job" else "11111111-1111-1111-1111-111111111111"),
         linked_job_count=1,
         projected_job=PipelineProjectedJob(
@@ -574,7 +653,7 @@ def _execution(
             dagster_run_id="run-1",
             dagster_run_status=None,
             trigger_kind="manual",
-            operation_registry_version=None,
+            operation_key=None,
             load_batch_id=None,
             parent_job_id=None,
             depth=0,
@@ -713,7 +792,8 @@ def test_pipeline_routes_mounted_in_openapi(client: TestClient) -> None:
     event_params = spec["paths"]["/v1/ops/pipeline/events"]["get"]["parameters"]
     assert "sync_scope" in {parameter["name"] for parameter in event_params}
     event_record = spec["components"]["schemas"]["PipelineJobEventRecord"]
-    assert "sync_scope" in event_record["required"]
+    assert "import_job_dataset_id" in event_record["required"]
+    assert "provider_dataset_id" in event_record["required"]
     assert "canonical_url" in spec["components"]["schemas"][
         "PipelineExecutionsData"
     ]["required"]
@@ -767,7 +847,7 @@ def test_pipeline_routes_mounted_in_openapi(client: TestClient) -> None:
         assert {
             "dagster_run_status",
             "trigger_kind",
-            "operation_registry_version",
+            "operation_key",
         } <= set(schema["required"])
     root_schema = schemas["PipelineExecutionRootRecord"]
     assert {"projected_job", "cancellation"} <= set(root_schema["required"])
@@ -782,7 +862,7 @@ def test_pipeline_routes_mounted_in_openapi(client: TestClient) -> None:
     assert set(import_job_schema["properties"]["status"]["enum"]) == operation_states
     assert {
         "trigger_kind",
-        "operation_registry_version",
+        "operation_key",
         "dagster_run_status",
     } <= set(import_job_schema["required"])
     # commands body는 4종 enum이다.
@@ -893,7 +973,7 @@ def test_pipeline_routes_mounted_in_openapi(client: TestClient) -> None:
     assert {"sync_scope", "operation_member_id"} <= set(pair["required"])
     assert pair["properties"]["operation_member_id"]["type"] == "string"
     assert "status_source" not in pair["properties"]
-    assert {"dagster_run_status", "trigger_kind", "operation_registry_version"} <= set(
+    assert {"dagster_run_status", "trigger_kind", "operation_key"} <= set(
         root["properties"]
     )
     overview = spec["components"]["schemas"]["PipelineOverviewData"]
@@ -1253,8 +1333,7 @@ def test_executions_list_passes_filters_and_maps_rows(
         params={
             "kind": "import_job",
             "status": "running",
-            "provider": MOIS_PROVIDER_NAME,
-            "dataset_key": DATASET_KEY_BULK,
+            "provider_dataset_id": 1,
             "sync_scope": "dataset_wide",
             "load_batch_id": "33333333-3333-3333-3333-333333333333",
             "parent_job_id": "44444444-4444-4444-4444-444444444444",
@@ -1266,12 +1345,8 @@ def test_executions_list_passes_filters_and_maps_rows(
     assert response.status_code == 200
     assert captured["kind"] == "import_job"
     assert captured["status"] == "running"
-    assert captured["provider"] == MOIS_PROVIDER_NAME
-    assert captured["dataset_key"] == DATASET_KEY_BULK
-    assert captured["dataset_sync_scopes"] == (
-        "dataset_wide",
-        None,
-    )
+    assert captured["provider_dataset_id"] == 1
+    assert captured["dataset_sync_scopes"] == ("dataset_wide",)
     assert captured["load_batch_id"] == "33333333-3333-3333-3333-333333333333"
     assert captured["parent_job_id"] == "44444444-4444-4444-4444-444444444444"
     assert captured["limit"] == 2
@@ -1279,7 +1354,7 @@ def test_executions_list_passes_filters_and_maps_rows(
     assert body["meta"]["page"]["next_cursor"] == "cursor-next"
     assert body["data"]["canonical_url"] == (
         "/v1/ops/pipeline/executions?kind=import_job&status=running&"
-        f"provider={MOIS_PROVIDER_NAME}&dataset_key={DATASET_KEY_BULK}&"
+        "provider_dataset_id=1&"
         "sync_scope=dataset_wide&"
         "load_batch_id=33333333-3333-3333-3333-333333333333&"
         "parent_job_id=44444444-4444-4444-4444-444444444444&"
@@ -1290,7 +1365,17 @@ def test_executions_list_passes_filters_and_maps_rows(
     assert items[0]["detail_url"] == (
         "/v1/ops/pipeline/executions/import_job/11111111-1111-1111-1111-111111111111"
     )
-    assert items[0]["providers"] == [MOIS_PROVIDER_NAME]
+    assert items[0]["provider_datasets"] == [
+        {
+            "provider_dataset_id": 1,
+            "provider": MOIS_PROVIDER_NAME,
+            "dataset_key": DATASET_KEY_BULK,
+            "sync_scope": "dataset_wide",
+            "operation_key": _MOIS_BULK_OPERATION_KEY,
+            "operation_member_id": "11111111-1111-1111-1111-111111111111",
+            "status": "running",
+        }
+    ]
     assert items[0]["linked_job_count"] == 1
     assert items[0]["status"] == "running"
     assert items[0]["cancellation"]["status"] == "retryable"
@@ -1301,9 +1386,11 @@ def test_executions_list_passes_filters_and_maps_rows(
     assert items[1]["requested_job_id"] == ("11111111-1111-1111-1111-111111111111")
     assert items[1]["provider_datasets"] == [
         {
+            "provider_dataset_id": 1,
             "provider": MOIS_PROVIDER_NAME,
             "dataset_key": DATASET_KEY_BULK,
             "sync_scope": "dataset_wide",
+            "operation_key": _MOIS_BULK_OPERATION_KEY,
             "operation_member_id": "11111111-1111-1111-1111-111111111111",
             "status": "running",
         }
@@ -1328,29 +1415,27 @@ def test_executions_list_invalid_cursor_maps_to_422(
 
 
 @pytest.mark.unit
-def test_executions_list_scope_requires_provider_and_dataset(client: TestClient) -> None:
+def test_executions_list_scope_requires_provider_dataset_id(client: TestClient) -> None:
     response = client.get(
         "/v1/ops/pipeline/executions",
-        params={"provider": MOIS_PROVIDER_NAME, "sync_scope": "dataset_wide"},
+        params={"sync_scope": "dataset_wide"},
     )
 
     assert response.status_code == 422
-    assert "sync_scope requires both provider and dataset_key" in response.text
+    assert "sync_scope requires provider_dataset_id" in response.text
 
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
     "params",
     [
-        {"dataset_key": DATASET_KEY_BULK},
+        {"sync_scope": "dataset_wide"},
         {
-            "provider": MOIS_PROVIDER_NAME,
-            "dataset_key": DATASET_KEY_BULK,
+            "provider_dataset_id": "1",
             "sync_scope": "default",
         },
         {
-            "provider": MOIS_PROVIDER_NAME,
-            "dataset_key": DATASET_KEY_BULK,
+            "provider_dataset_id": "1",
             "sync_scope": " external_system:x",
         },
     ],
@@ -1366,7 +1451,7 @@ def test_executions_list_rejects_incomplete_or_noncanonical_tuple(
 
 
 @pytest.mark.unit
-def test_executions_provider_only_returns_canonical_url(
+def test_executions_provider_dataset_only_returns_canonical_url(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1376,12 +1461,12 @@ def test_executions_provider_only_returns_canonical_url(
     monkeypatch.setattr(pipeline_mod, "list_pipeline_executions", _empty)
     response = client.get(
         "/v1/ops/pipeline/executions",
-        params={"provider": "provider/with slash"},
+        params={"provider_dataset_id": 7},
     )
 
     assert response.status_code == 200
     assert response.json()["data"]["canonical_url"] == (
-        "/v1/ops/pipeline/executions?provider=provider%2Fwith%20slash"
+        "/v1/ops/pipeline/executions?provider_dataset_id=7"
     )
 
 
@@ -1493,8 +1578,7 @@ def test_execution_detail_update_request_links_job(
     assert execution["kind"] == root["kind"] == "update_request"
     assert execution["id"] == root["id"]
     assert execution["status"] == root["status"] == "queued"
-    assert execution["provider"] == root["provider_datasets"][0]["provider"]
-    assert execution["dataset_key"] == root["provider_datasets"][0]["dataset_key"]
+    assert {"provider", "dataset_key"}.isdisjoint(execution)
     assert execution["trigger_kind"] == root["trigger_kind"] == "update_request"
     assert data["import_job"]["status"] == "running"
     assert data["cancellation"] is None
@@ -1509,8 +1593,25 @@ def test_execution_detail_non_exact_request_keeps_arrays_on_root_only(
         _update_request(),
         scope_type="feature_ids",
         scope={"type": "feature_ids", "feature_ids": ["feature-1"]},
-        providers=("provider-a", "provider-b"),
-        dataset_keys=("dataset-a", "dataset-b"),
+        dataset_membership_mode="multiple",
+        dataset_memberships=(
+            FeatureUpdateRequestDataset(
+                feature_update_request_dataset_id="11111111-1111-1111-1111-111111111111",
+                provider_dataset_id=2,
+                sync_scope="dataset_wide",
+                provider="provider-a",
+                dataset_key="dataset-a",
+                operation_key="provider_a_refresh",
+            ),
+            FeatureUpdateRequestDataset(
+                feature_update_request_dataset_id="22222222-2222-2222-2222-222222222222",
+                provider_dataset_id=3,
+                sync_scope="target_grids",
+                provider="provider-b",
+                dataset_key="dataset-b",
+                operation_key="provider_b_refresh",
+            ),
+        ),
     )
     root = replace(
         _execution(
@@ -1518,9 +1619,26 @@ def test_execution_detail_non_exact_request_keeps_arrays_on_root_only(
             execution_id=request.request_id,
             status=request.status,
         ),
-        providers=request.providers,
-        dataset_keys=request.dataset_keys,
-        provider_datasets=(),
+        provider_datasets=(
+            PipelineProviderDatasetIdentity(
+                provider_dataset_id=2,
+                provider="provider-a",
+                dataset_key="dataset-a",
+                sync_scope="dataset_wide",
+                operation_key="provider_a_refresh",
+                operation_member_id="11111111-1111-1111-1111-111111111111",
+                status="running",
+            ),
+            PipelineProviderDatasetIdentity(
+                provider_dataset_id=3,
+                provider="provider-b",
+                dataset_key="dataset-b",
+                sync_scope="target_grids",
+                operation_key="provider_b_refresh",
+                operation_member_id="22222222-2222-2222-2222-222222222222",
+                status="running",
+            ),
+        ),
         scope_type=request.scope_type,
     )
 
@@ -1547,57 +1665,63 @@ def test_execution_detail_non_exact_request_keeps_arrays_on_root_only(
 
     assert response.status_code == 200
     data = response.json()["data"]
-    assert data["execution"]["provider"] is None
-    assert data["execution"]["dataset_key"] is None
+    assert {"provider", "dataset_key"}.isdisjoint(data["execution"])
     assert data["execution"]["trigger_kind"] == "update_request"
-    assert data["root"]["providers"] == ["provider-a", "provider-b"]
-    assert data["root"]["dataset_keys"] == ["dataset-a", "dataset-b"]
-    assert data["root"]["provider_datasets"] == []
+    assert data["root"]["provider_datasets"] == [
+        {
+            "provider_dataset_id": 2,
+            "provider": "provider-a",
+            "dataset_key": "dataset-a",
+            "sync_scope": "dataset_wide",
+            "operation_key": "provider_a_refresh",
+            "operation_member_id": "11111111-1111-1111-1111-111111111111",
+            "status": "running",
+        },
+        {
+            "provider_dataset_id": 3,
+            "provider": "provider-b",
+            "dataset_key": "dataset-b",
+            "sync_scope": "target_grids",
+            "operation_key": "provider_b_refresh",
+            "operation_member_id": "22222222-2222-2222-2222-222222222222",
+            "status": "running",
+        },
+    ]
 
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
-    ("scope_type", "scope", "job_provider", "job_dataset_key"),
+    ("scope_type", "scope"),
     [
         (
             "feature_ids",
             {"type": "feature_ids", "feature_ids": ["feature-1"]},
-            None,
-            None,
         ),
         (
             "provider_dataset",
             {
                 "type": "provider_dataset",
-                "provider": "typed-provider",
-                "dataset_key": "typed-dataset",
+                "provider_dataset_id": 2,
             },
-            "typed-provider",
-            "typed-dataset",
         ),
     ],
 )
-def test_request_execution_scalar_identity_uses_linked_typed_job(
+def test_request_execution_record_omits_scalar_dataset_identity(
     scope_type: str,
     scope: dict[str, Any],
-    job_provider: str | None,
-    job_dataset_key: str | None,
 ) -> None:
     request = replace(
         _update_request(),
         scope_type=scope_type,
         scope=scope,
-        providers=("provider-array",),
-        dataset_keys=("dataset-array",),
     )
 
     execution = pipeline_mod._execution_from_request(
         request,
-        _job(provider=job_provider, dataset_key=job_dataset_key),
+        _job(provider="typed-provider", dataset_key="typed-dataset"),
     )
 
-    assert execution.provider == job_provider
-    assert execution.dataset_key == job_dataset_key
+    assert {"provider", "dataset_key"}.isdisjoint(execution.model_dump())
     assert execution.trigger_kind == "update_request"
 
 
@@ -1825,8 +1949,7 @@ def test_events_global_list_passes_filters(
         "/v1/ops/pipeline/events",
         params={
             "level": "error",
-            "provider": MOIS_PROVIDER_NAME,
-            "dataset_key": DATASET_KEY_BULK,
+            "provider_dataset_id": 1,
             "sync_scope": "dataset_wide",
             "page_size": 10,
         },
@@ -1835,19 +1958,31 @@ def test_events_global_list_passes_filters(
     assert response.status_code == 200
     assert captured["job_id"] is None
     assert captured["level"] == "error"
-    assert captured["provider"] == MOIS_PROVIDER_NAME
-    assert captured["dataset_key"] == DATASET_KEY_BULK
+    assert captured["provider_dataset_id"] == 1
     assert captured["sync_scope"] == "dataset_wide"
     assert captured["limit"] == 10
     body = response.json()
     assert body["meta"]["page"]["next_cursor"] == "ev-next"
     assert body["data"]["canonical_url"] == (
         "/v1/ops/pipeline/events?level=error&"
-        f"provider={MOIS_PROVIDER_NAME}&dataset_key={DATASET_KEY_BULK}&"
+        "provider_dataset_id=1&"
         "sync_scope=dataset_wide"
     )
     assert body["data"]["items"][0]["code"] == "provider.timeout"
-    assert body["data"]["items"][0]["sync_scope"] == "dataset_wide"
+    event = body["data"]["items"][0]
+    assert event["provider_dataset_id"] == 1
+    assert event["import_job_dataset_id"] == "11111111-1111-1111-1111-111111111111"
+    # 이 목록은 **전역**이고 dataset/scope/operation으로 필터할 수 있다. 예전에는
+    # "event는 scope 사본을 들지 않는다"며 `sync_scope`의 부재를 단언했는데, 그러면
+    # `provider_dataset_id`로 "어느 dataset인지"는 말하면서 "어느 membership인지"는
+    # 말하지 않는 절반짜리가 된다 — operation_key로 필터해 놓고 결과 행이 그 축을
+    # 되울리지 않으면 소비자가 응답만으로 결과를 되짚을 수 없다.
+    #
+    # 사본이 아니다: 두 값은 저장 열이 아니라 `import_job_dataset_id`로 member를
+    # join해 뽑는 projection이다. T-VN-33이 없앤 것은 event 테이블에 identity를
+    # **복제해 저장**하던 열이고, 그 규칙은 그대로다.
+    assert event["sync_scope"] == "dataset_wide"
+    assert event["operation_key"] == _MOIS_BULK_OPERATION_KEY
 
 
 @pytest.mark.unit
@@ -1858,7 +1993,7 @@ def test_events_non_uuid_job_id_is_422(client: TestClient) -> None:
 
 
 @pytest.mark.unit
-def test_events_sync_scope_without_provider_dataset_pair_is_422(
+def test_events_sync_scope_without_provider_dataset_id_is_422(
     client: TestClient,
 ) -> None:
     response = client.get(
@@ -1867,22 +2002,20 @@ def test_events_sync_scope_without_provider_dataset_pair_is_422(
     )
 
     assert response.status_code == 422
-    assert "requires both provider and dataset_key" in response.text
+    assert "requires provider_dataset_id" in response.text
 
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
     "params",
     [
-        {"dataset_key": DATASET_KEY_BULK},
+        {"sync_scope": "dataset_wide"},
         {
-            "provider": MOIS_PROVIDER_NAME,
-            "dataset_key": DATASET_KEY_BULK,
+            "provider_dataset_id": "1",
             "sync_scope": "default",
         },
         {
-            "provider": MOIS_PROVIDER_NAME,
-            "dataset_key": DATASET_KEY_BULK,
+            "provider_dataset_id": "1",
             "sync_scope": "external_system:",
         },
     ],
@@ -1908,7 +2041,7 @@ def test_events_filter_bound_cursor_mismatch_is_typed_422(
     monkeypatch.setattr(pipeline_mod, "list_ops_import_job_events", _events)
     response = client.get(
         "/v1/ops/pipeline/events",
-        params={"provider": MOIS_PROVIDER_NAME, "cursor": "different-filter"},
+        params={"provider_dataset_id": 1, "cursor": "different-filter"},
     )
 
     assert response.status_code == 422
@@ -3196,23 +3329,12 @@ def test_schedule_command_run_launches_job(
     assert len(launches) == 1
     execution_params = launches[0]["executionParams"]
     tags = {tag["key"]: tag["value"] for tag in execution_params["executionMetadata"]["tags"]}
-    assert tags[FEATURE_OPERATION_TRIGGER_TAG] == "manual"
-    assert tags[ADMIN_MANUAL_TRIGGER_TAG] == "admin-ui"
+    assert tags["kor_travel_map.admin_manual_trigger"] == "admin-ui"
     assert tags["kor_travel_map.operator"] == "local-dev"
     assert tags["kor_travel_map.reason"] == "재적재"
     assert "kor_travel_map.trigger" not in tags
-    identity = parse_feature_operation_identity_tags(tags)
-    assert identity is not None
-    assert identity.job_name == "feature_weather_kma_short_forecast_job"
-    assert (
-        validate_feature_operation_identity(
-            job_name=identity.job_name,
-            selected_asset_keys=identity.asset_keys,
-            run_config=execution_params["runConfigData"],
-            tags=tags,
-        )
-        == identity
-    )
+    assert "kor_travel_map.operation_key" not in tags
+    assert execution_params["runConfigData"] == {}
 
 
 @pytest.mark.unit
@@ -3253,25 +3375,14 @@ def test_schedule_command_knps_manual_launch_persists_resolved_config_and_tags(
     assert len(launches) == 1
     execution_params = launches[0]["executionParams"]
     run_config = execution_params["runConfigData"]
-    assert run_config == {
-        "resources": {
-            "knps_point_dataset_key": {"config": {"dataset_key": "knps_restrooms"}},
-            "knps_point_records": {"config": {"dataset_key": "knps_restrooms"}},
-        }
-    }
+    assert run_config == {}
     tags = {tag["key"]: tag["value"] for tag in execution_params["executionMetadata"]["tags"]}
-    identity = parse_feature_operation_identity_tags(tags)
-    assert identity is not None
-    assert identity.pairs[0].dataset_key == "knps_restrooms"
-    assert (
-        validate_feature_operation_identity(
-            job_name=job_name,
-            selected_asset_keys=identity.asset_keys,
-            run_config=run_config,
-            tags=tags,
-        )
-        == identity
-    )
+    assert tags == {
+        "kor_travel_map.admin_manual_trigger": "admin-ui",
+        "kor_travel_map.operator": "local-dev",
+        "kor_travel_map.reason": "수동 재적재",
+        "kor_travel_map.schedule_name": schedule_name,
+    }
 
 
 @pytest.mark.unit
@@ -3312,28 +3423,14 @@ def test_schedule_command_filedata_manual_launch_persists_exact_config_and_tags(
     assert len(launches) == 1
     execution_params = launches[0]["executionParams"]
     run_config = execution_params["runConfigData"]
-    assert run_config == {
-        "resources": {
-            "datagokr_file_data_dataset_key": {"config": {"dataset_key": dataset_key}},
-            "datagokr_file_data_records": {"config": {"dataset_key": dataset_key}},
-        }
-    }
+    assert run_config == {}
     tags = {tag["key"]: tag["value"] for tag in execution_params["executionMetadata"]["tags"]}
-    assert tags[FEATURE_OPERATION_TRIGGER_TAG] == "manual"
-    assert tags[ADMIN_MANUAL_TRIGGER_TAG] == "admin-ui"
-    identity = parse_feature_operation_identity_tags(tags)
-    assert identity is not None
-    assert identity.job_name == job_name
-    assert identity.pairs[0].dataset_key == dataset_key
-    assert (
-        validate_feature_operation_identity(
-            job_name=job_name,
-            selected_asset_keys=identity.asset_keys,
-            run_config=run_config,
-            tags=tags,
-        )
-        == identity
-    )
+    assert tags == {
+        "kor_travel_map.admin_manual_trigger": "admin-ui",
+        "kor_travel_map.operator": "local-dev",
+        "kor_travel_map.reason": "manual run",
+        "kor_travel_map.schedule_name": schedule_name,
+    }
 
 
 @pytest.mark.unit
@@ -3347,11 +3444,18 @@ def test_preview_request_returns_preview(
             scope_type="provider_dataset",
             scope={
                 "type": "provider_dataset",
-                "provider": MOIS_PROVIDER_NAME,
-                "dataset_key": DATASET_KEY_BULK,
+                "provider_dataset_id": 1,
             },
-            providers=(),
-            dataset_keys=(),
+            dataset_memberships=(
+                FeatureUpdateRequestDataset(
+                    feature_update_request_dataset_id=None,
+                    provider_dataset_id=1,
+                    sync_scope="dataset_wide",
+                    provider=MOIS_PROVIDER_NAME,
+                    dataset_key=DATASET_KEY_BULK,
+                    operation_key=_MOIS_BULK_OPERATION_KEY,
+                ),
+            ),
             update_policy={},
             run_mode="queued",
             priority=50,
@@ -3365,8 +3469,9 @@ def test_preview_request_returns_preview(
         json={
             "scope": {
                 "type": "provider_dataset",
-                "provider": MOIS_PROVIDER_NAME,
-                "dataset_key": DATASET_KEY_BULK,
+                "provider_dataset_id": 1,
+                "sync_scope": "dataset_wide",
+                "operation_key": _MOIS_BULK_OPERATION_KEY,
             },
         },
     )
@@ -3394,8 +3499,9 @@ def test_create_request_rejects_dry_run_flag(
         json={
             "scope": {
                 "type": "provider_dataset",
-                "provider": MOIS_PROVIDER_NAME,
-                "dataset_key": DATASET_KEY_BULK,
+                "provider_dataset_id": 1,
+                "sync_scope": "dataset_wide",
+                "operation_key": _MOIS_BULK_OPERATION_KEY,
             },
             "dry_run": True,
         },
@@ -3414,8 +3520,9 @@ def test_create_request_requires_uuid_idempotency_key(client: TestClient) -> Non
         json={
             "scope": {
                 "type": "provider_dataset",
-                "provider": MOIS_PROVIDER_NAME,
-                "dataset_key": DATASET_KEY_BULK,
+                "provider_dataset_id": 1,
+                "sync_scope": "dataset_wide",
+                "operation_key": _MOIS_BULK_OPERATION_KEY,
             }
         },
     )
@@ -3464,8 +3571,9 @@ def test_create_request_idempotency_replays_and_rejects_mismatch(
     body = {
         "scope": {
             "type": "provider_dataset",
-            "provider": MOIS_PROVIDER_NAME,
-            "dataset_key": DATASET_KEY_BULK,
+            "provider_dataset_id": 1,
+            "sync_scope": "dataset_wide",
+            "operation_key": _MOIS_BULK_OPERATION_KEY,
         },
         "reason": "same",
     }
@@ -3572,8 +3680,9 @@ def test_create_request_idempotency_replays_and_rejects_mismatch(
             {
                 "scope": {
                     "type": "provider_dataset",
-                    "provider": MOIS_PROVIDER_NAME,
-                    "dataset_key": DATASET_KEY_BULK,
+                    "provider_dataset_id": 1,
+                    "sync_scope": "dataset_wide",
+                    "operation_key": _MOIS_BULK_OPERATION_KEY,
                 },
                 "providers": [MOIS_PROVIDER_NAME],
                 "dataset_keys": [DATASET_KEY_BULK],
@@ -3678,8 +3787,9 @@ def test_create_request_persists_with_new_status_url(
         json={
             "scope": {
                 "type": "provider_dataset",
-                "provider": MOIS_PROVIDER_NAME,
-                "dataset_key": DATASET_KEY_BULK,
+                "provider_dataset_id": 1,
+                "sync_scope": "dataset_wide",
+                "operation_key": _MOIS_BULK_OPERATION_KEY,
             },
             "reason": "stale 복구",
         },
@@ -3699,13 +3809,14 @@ def test_create_request_enforces_mois_precheck_at_canonical_write_boundary(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    guarded_pairs: list[frozenset[tuple[str, str]]] = []
+    guarded_memberships: list[frozenset[tuple[int, str]]] = []
 
     async def _blocked(
-        resolved_pairs: frozenset[tuple[str, str]],
+        _session: Any,
+        resolved_memberships: frozenset[tuple[int, str]],
         **_kwargs: Any,
     ) -> None:
-        guarded_pairs.append(resolved_pairs)
+        guarded_memberships.append(resolved_memberships)
         raise mois_source_precheck.MoisSourceSyncRequired(
             mois_source_precheck.MoisSourceSyncPrecheck(
                 job_name=mois_source_precheck.MOIS_SOURCE_SYNC_JOB_NAME,
@@ -3723,7 +3834,7 @@ def test_create_request_enforces_mois_precheck_at_canonical_write_boundary(
 
     monkeypatch.setattr(
         mois_source_precheck,
-        "ensure_mois_source_sync_for_plan",
+        "ensure_mois_source_sync_for_memberships",
         _blocked,
     )
     monkeypatch.setattr(
@@ -3737,26 +3848,28 @@ def test_create_request_enforces_mois_precheck_at_canonical_write_boundary(
         json={
             "scope": {
                 "type": "provider_dataset",
-                "provider": MOIS_PROVIDER_NAME,
-                "dataset_key": DATASET_KEY_BULK,
+                "provider_dataset_id": 1,
+                "sync_scope": "dataset_wide",
+                "operation_key": _MOIS_BULK_OPERATION_KEY,
             }
         },
     )
 
     assert response.status_code == 409
     assert response.json()["code"] == "MOIS_SOURCE_SYNC_REQUIRED"
-    assert guarded_pairs == [frozenset({(MOIS_PROVIDER_NAME, DATASET_KEY_BULK)})]
+    assert guarded_memberships == [frozenset({(1, "dataset_wide")})]
 
 
 @pytest.mark.unit
-def test_create_request_rejects_non_refreshable_pair(client: TestClient) -> None:
+def test_create_request_rejects_unknown_provider_dataset_id(client: TestClient) -> None:
     response = client.post(
         "/v1/ops/pipeline/requests",
         json={
             "scope": {
                 "type": "provider_dataset",
-                "provider": "not-a-provider",
-                "dataset_key": "nope",
+                "provider_dataset_id": 999_999,
+                "sync_scope": "dataset_wide",
+                "operation_key": _MOIS_BULK_OPERATION_KEY,
             }
         },
     )
@@ -3773,9 +3886,9 @@ def test_create_request_rejects_sync_scope_for_dataset_wide_catalog_entry(
         json={
             "scope": {
                 "type": "provider_dataset",
-                "provider": MOIS_PROVIDER_NAME,
-                "dataset_key": DATASET_KEY_BULK,
+                "provider_dataset_id": 1,
                 "sync_scope": "target_grids",
+                "operation_key": _MOIS_BULK_OPERATION_KEY,
             }
         },
     )
@@ -3792,6 +3905,7 @@ def test_create_request_reuses_same_active_effective_scope(
     existing = _update_request(operator="local-dev", reason="same")
 
     async def _active(*_args: Any, **kwargs: Any) -> FeatureUpdateRequest:
+        assert kwargs["provider_dataset_id"] == 1
         assert kwargs["sync_scope"] == "dataset_wide"
         return existing
 
@@ -3806,8 +3920,9 @@ def test_create_request_reuses_same_active_effective_scope(
         json={
             "scope": {
                 "type": "provider_dataset",
-                "provider": MOIS_PROVIDER_NAME,
-                "dataset_key": DATASET_KEY_BULK,
+                "provider_dataset_id": 1,
+                "sync_scope": "dataset_wide",
+                "operation_key": _MOIS_BULK_OPERATION_KEY,
             },
             "reason": "same",
         },
@@ -3835,8 +3950,9 @@ def test_create_request_rejects_different_plan_on_active_effective_scope(
         json={
             "scope": {
                 "type": "provider_dataset",
-                "provider": MOIS_PROVIDER_NAME,
-                "dataset_key": DATASET_KEY_BULK,
+                "provider_dataset_id": 1,
+                "sync_scope": "dataset_wide",
+                "operation_key": _MOIS_BULK_OPERATION_KEY,
             },
             "priority": 51,
             "reason": "same",
@@ -3862,8 +3978,9 @@ def test_create_request_scope_lock_busy_maps_to_409(
         json={
             "scope": {
                 "type": "provider_dataset",
-                "provider": MOIS_PROVIDER_NAME,
-                "dataset_key": DATASET_KEY_BULK,
+                "provider_dataset_id": 1,
+                "sync_scope": "dataset_wide",
+                "operation_key": _MOIS_BULK_OPERATION_KEY,
             },
             "run_mode": "now",
         },

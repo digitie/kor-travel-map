@@ -1,23 +1,33 @@
 import type {
   ExecutionKind,
   PipelineExecutionRootRecord,
+  PipelineProviderDatasetIdentityRecord,
 } from "@/api/pipeline";
 
 /**
- * root 행의 effective provider/dataset identity 표시 문자열. 독립 배열은 단일
- * provider/dataset 필터와 요약 표시용이고 exact pair는 호출부가
- * `provider_datasets[]`로 별도 표시한다.
+ * canonical provider dataset member의 표시 문자열. ID가 identity이며 provider/dataset은
+ * API join projection으로만 보여 준다.
  */
+export function providerDatasetIdentityLabel(
+  member: PipelineProviderDatasetIdentityRecord,
+): string {
+  const scope = member.sync_scope ? ` · ${member.sync_scope}` : "";
+  const operation = member.operation_key ? ` · ${member.operation_key}` : "";
+  return `${member.provider}/${member.dataset_key} · #${member.provider_dataset_id}${scope}${operation}`;
+}
+
+/** root 행의 exact canonical provider dataset membership 표시 문자열. */
 export function rootIdentityLabel(root: PipelineExecutionRootRecord): {
   primary: string;
   secondary: string;
 } {
-  const providers = root.providers.length > 0 ? root.providers.join(", ") : null;
-  const datasets =
-    root.dataset_keys.length > 0 ? root.dataset_keys.join(", ") : null;
+  const memberships = root.provider_datasets.map(providerDatasetIdentityLabel);
   return {
-    primary: providers ?? root.scope_type ?? root.kind,
-    secondary: datasets ?? root.scope_type ?? "",
+    primary: memberships[0] ?? root.scope_type ?? root.kind,
+    secondary:
+      memberships.length > 1
+        ? `외 ${memberships.length - 1}개 provider dataset`
+        : root.scope_type ?? "",
   };
 }
 

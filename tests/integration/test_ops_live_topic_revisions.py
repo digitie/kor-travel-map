@@ -16,15 +16,98 @@ if TYPE_CHECKING:
 
 pytestmark = pytest.mark.integration
 
+# T-VN-33: dataset 자연키 사본이 사라졌다 — 소유 dataset은 provider_dataset_id 하나뿐.
 _INSERT_INTEGRITY_SQL = """
 INSERT INTO ops.data_integrity_violations (
-  issue_id, dataset_key, violation_type, severity, message
+  issue_id, provider_dataset_id, violation_type, severity, message
 )
 VALUES (
-  CAST(:key AS uuid), 'live-projection', 'live_projection_test',
+  CAST(:key AS uuid), :provider_dataset_id, 'live_projection_test',
   'warning', 'ops-live projection revision 통합 테스트'
 )
 """
+
+_INSERT_REFRESH_POLICY_SQL = """
+INSERT INTO ops.provider_refresh_policies (provider_dataset_id, source_kind)
+VALUES (:provider_dataset_id, 'manual')
+"""
+
+_INSERT_SYNC_STATE_SQL = """
+INSERT INTO provider_sync.provider_sync_state
+  (provider_dataset_id, sync_scope, operation_key)
+VALUES (:provider_dataset_id, :sync_scope, :operation_key)
+"""
+
+# 테스트 전용 catalog 행 — 실행 membership identity는
+# ``provider_dataset_id + sync_scope + operation_key`` triple이다(ADR-088).
+_PROBE_SYNC_SCOPE = "dataset_wide"
+_PROBE_OPERATION_KEY = "live_projection_probe"
+
+_SEED_DATASET_SQL = """
+INSERT INTO provider_sync.provider_datasets (
+  provider, dataset_key, display_name, source_kind, is_active, capabilities
+)
+SELECT :provider, 'dataset', :provider, 'system', true,
+       jsonb_build_object('schema_version', 1, 'produces', '[]'::jsonb,
+                          'extensions', '{}'::jsonb)
+ON CONFLICT (provider, dataset_key) DO UPDATE SET display_name = EXCLUDED.display_name
+RETURNING provider_dataset_id
+"""
+
+_SEED_OPERATION_SQL = """
+INSERT INTO provider_sync.provider_dataset_operations (
+  provider_dataset_id, operation_key, operation_kind, is_enabled, config
+)
+VALUES (:provider_dataset_id, :operation_key, 'refresh', true, '{}'::jsonb)
+ON CONFLICT DO NOTHING
+"""
+
+_SEED_SCOPE_SQL = """
+INSERT INTO provider_sync.provider_dataset_operation_scopes (
+  provider_dataset_id, sync_scope, operation_key, operation_kind
+)
+VALUES (:provider_dataset_id, :sync_scope, :operation_key, 'refresh')
+ON CONFLICT DO NOTHING
+"""
+
+
+async def _seed_operable_dataset(session: AsyncSession, *, provider: str) -> int:
+    """dataset + enabled refresh operation + scope를 한 벌 심고 id를 돌려준다.
+
+    ``provider_datasets``/``provider_dataset_operations``/``..._scopes``에는
+    ops-live revision 트리거가 없다 — seed 자체는 topic revision을 올리지 않는다.
+    """
+    dataset_id = int(
+        (
+            await session.execute(text(_SEED_DATASET_SQL), {"provider": provider})
+        ).scalar_one()
+    )
+    params = {
+        "provider_dataset_id": dataset_id,
+        "operation_key": _PROBE_OPERATION_KEY,
+        "sync_scope": _PROBE_SYNC_SCOPE,
+    }
+    await session.execute(text(_SEED_OPERATION_SQL), params)
+    await session.execute(text(_SEED_SCOPE_SQL), params)
+    return dataset_id
+
+
+async def _drop_seeded_dataset(session: AsyncSession, dataset_id: int) -> None:
+    """seed한 dataset 한 벌을 FK 역순으로 지운다 (모두 ON DELETE RESTRICT)."""
+    params = {"provider_dataset_id": dataset_id}
+    for statement in (
+        "DELETE FROM provider_sync.provider_sync_state "
+        "WHERE provider_dataset_id = :provider_dataset_id",
+        "DELETE FROM ops.provider_refresh_policies "
+        "WHERE provider_dataset_id = :provider_dataset_id",
+        "DELETE FROM provider_sync.provider_dataset_operation_scopes "
+        "WHERE provider_dataset_id = :provider_dataset_id",
+        "DELETE FROM provider_sync.provider_dataset_operations "
+        "WHERE provider_dataset_id = :provider_dataset_id",
+        "DELETE FROM provider_sync.provider_datasets "
+        "WHERE provider_dataset_id = :provider_dataset_id",
+    ):
+        await session.execute(text(statement), params)
 
 _INSERT_POI_SQL = """
 INSERT INTO ops.poi_cache_targets (
@@ -81,13 +164,10 @@ async def test_ops_live_topic_revision_rolls_back_with_source_write(
     async with AsyncSession(migrated_engine) as session:
         baseline = await _revision(session, "provider_sync")
         await session.rollback()
+        dataset_id = await _seed_operable_dataset(session, provider=provider)
         await session.execute(
-            text(
-                "INSERT INTO ops.provider_refresh_policies "
-                "(provider, dataset_key, source_kind) "
-                "VALUES (:provider, 'dataset', 'manual')"
-            ),
-            {"provider": provider},
+            text(_INSERT_REFRESH_POLICY_SQL),
+            {"provider_dataset_id": dataset_id},
         )
         assert await _revision(session, "provider_sync") == baseline + 1
         await session.rollback()
@@ -97,9 +177,9 @@ async def test_ops_live_topic_revision_rolls_back_with_source_write(
         count = await session.scalar(
             text(
                 "SELECT COUNT(*) FROM ops.provider_refresh_policies "
-                "WHERE provider = :provider"
+                "WHERE provider_dataset_id = :provider_dataset_id"
             ),
-            {"provider": provider},
+            {"provider_dataset_id": dataset_id},
         )
         assert count == 0
 
@@ -108,12 +188,14 @@ async def test_dataset_projection_revision_rolls_back_with_source_write(
     migrated_engine: AsyncEngine,
 ) -> None:
     issue_id = str(uuid4())
+    provider = f"rollback-integrity-{uuid4().hex}"
     async with AsyncSession(migrated_engine) as session:
         baseline = await _revision(session, "dataset_projection")
         await session.rollback()
+        dataset_id = await _seed_operable_dataset(session, provider=provider)
         await session.execute(
             text(_INSERT_INTEGRITY_SQL),
-            {"key": issue_id},
+            {"key": issue_id, "provider_dataset_id": dataset_id},
         )
         assert await _revision(session, "dataset_projection") == baseline + 1
         await session.rollback()
@@ -161,35 +243,42 @@ async def test_each_ops_live_source_bumps_its_topic_once(
     migrated_session: AsyncSession,
 ) -> None:
     suffix = uuid4().hex
+    # catalog seed는 revision 트리거가 없는 테이블만 건드린다 — baseline 이전에 심는다.
+    state_dataset_id = await _seed_operable_dataset(
+        migrated_session, provider=f"state-{suffix}"
+    )
+    policy_dataset_id = await _seed_operable_dataset(
+        migrated_session, provider=f"policy-{suffix}"
+    )
+    integrity_dataset_id = await _seed_operable_dataset(
+        migrated_session, provider=f"integrity-{suffix}"
+    )
+
     provider_revision = await _revision(migrated_session, "provider_sync")
     dataset_revision = await _revision(migrated_session, "dataset_projection")
     schedule_revision = await _revision(migrated_session, "dagster_schedules")
 
     await migrated_session.execute(
-        text(
-            "INSERT INTO provider_sync.provider_sync_state "
-            "(provider, dataset_key, sync_scope) "
-            "VALUES (:provider, 'dataset', 'default')"
-        ),
-        {"provider": f"state-{suffix}"},
+        text(_INSERT_SYNC_STATE_SQL),
+        {
+            "provider_dataset_id": state_dataset_id,
+            "sync_scope": _PROBE_SYNC_SCOPE,
+            "operation_key": _PROBE_OPERATION_KEY,
+        },
     )
     provider_revision += 1
     assert await _revision(migrated_session, "provider_sync") == provider_revision
 
     await migrated_session.execute(
-        text(
-            "INSERT INTO ops.provider_refresh_policies "
-            "(provider, dataset_key, source_kind) "
-            "VALUES (:provider, 'dataset', 'manual')"
-        ),
-        {"provider": f"policy-{suffix}"},
+        text(_INSERT_REFRESH_POLICY_SQL),
+        {"provider_dataset_id": policy_dataset_id},
     )
     provider_revision += 1
     assert await _revision(migrated_session, "provider_sync") == provider_revision
 
     await migrated_session.execute(
         text(_INSERT_INTEGRITY_SQL),
-        {"key": str(uuid4())},
+        {"key": str(uuid4()), "provider_dataset_id": integrity_dataset_id},
     )
     dataset_revision += 1
     assert (
@@ -262,6 +351,14 @@ async def test_provider_revision_serializes_late_commit_writers(
     suffix = uuid4().hex
     policy_provider = f"late-policy-{suffix}"
     state_provider = f"late-state-{suffix}"
+    # 두 writer가 서로 다른 transaction에서 보려면 catalog seed는 먼저 commit한다.
+    async with AsyncSession(migrated_engine) as setup:
+        policy_dataset_id = await _seed_operable_dataset(
+            setup, provider=policy_provider
+        )
+        state_dataset_id = await _seed_operable_dataset(setup, provider=state_provider)
+        await setup.commit()
+
     async with AsyncSession(migrated_engine) as session:
         baseline = await _revision(session, "provider_sync")
         await session.rollback()
@@ -276,22 +373,18 @@ async def test_provider_revision_serializes_late_commit_writers(
                 second_pid = await second.scalar(text("SELECT pg_backend_pid()"))
                 assert second_pid is not None
                 await first.execute(
-                    text(
-                        "INSERT INTO ops.provider_refresh_policies "
-                        "(provider, dataset_key, source_kind) "
-                        "VALUES (:provider, 'dataset', 'manual')"
-                    ),
-                    {"provider": policy_provider},
+                    text(_INSERT_REFRESH_POLICY_SQL),
+                    {"provider_dataset_id": policy_dataset_id},
                 )
 
                 async def _second_writer() -> None:
                     await second.execute(
-                        text(
-                            "INSERT INTO provider_sync.provider_sync_state "
-                            "(provider, dataset_key, sync_scope) "
-                            "VALUES (:provider, 'dataset', 'default')"
-                        ),
-                        {"provider": state_provider},
+                        text(_INSERT_SYNC_STATE_SQL),
+                        {
+                            "provider_dataset_id": state_dataset_id,
+                            "sync_scope": _PROBE_SYNC_SCOPE,
+                            "operation_key": _PROBE_OPERATION_KEY,
+                        },
                     )
                     await second.commit()
 
@@ -314,20 +407,8 @@ async def test_provider_revision_serializes_late_commit_writers(
             assert await _revision(session, "provider_sync") == baseline + 2
     finally:
         async with AsyncSession(migrated_engine) as cleanup:
-            await cleanup.execute(
-                text(
-                    "DELETE FROM ops.provider_refresh_policies "
-                    "WHERE provider = :provider"
-                ),
-                {"provider": policy_provider},
-            )
-            await cleanup.execute(
-                text(
-                    "DELETE FROM provider_sync.provider_sync_state "
-                    "WHERE provider = :provider"
-                ),
-                {"provider": state_provider},
-            )
+            await _drop_seeded_dataset(cleanup, policy_dataset_id)
+            await _drop_seeded_dataset(cleanup, state_dataset_id)
             await cleanup.commit()
 
 
@@ -337,6 +418,13 @@ async def test_dataset_projection_revision_serializes_late_commit_writers(
     suffix = uuid4().hex
     issue_id = str(uuid4())
     target_key = f"lock-target-{suffix}"
+    integrity_provider = f"lock-integrity-{suffix}"
+    async with AsyncSession(migrated_engine) as setup:
+        integrity_dataset_id = await _seed_operable_dataset(
+            setup, provider=integrity_provider
+        )
+        await setup.commit()
+
     async with AsyncSession(migrated_engine) as session:
         baseline = await _revision(session, "dataset_projection")
         await session.rollback()
@@ -352,7 +440,7 @@ async def test_dataset_projection_revision_serializes_late_commit_writers(
                 assert second_pid is not None
                 await first.execute(
                     text(_INSERT_INTEGRITY_SQL),
-                    {"key": issue_id},
+                    {"key": issue_id, "provider_dataset_id": integrity_dataset_id},
                 )
 
                 async def _second_writer() -> None:
@@ -398,6 +486,7 @@ async def test_dataset_projection_revision_serializes_late_commit_writers(
                 ),
                 {"target_key": target_key},
             )
+            await _drop_seeded_dataset(cleanup, integrity_dataset_id)
             await cleanup.commit()
 
 

@@ -219,7 +219,7 @@ class CulturalFestivalItem(Protocol):
     """관련정보 (``SourceRecord.raw_data``)."""
 
     rdnmadr: str | None
-    """도로명주소 (``Feature.address.road`` + ``SourceRecord.raw_address``)."""
+    """도로명주소 (``Feature.address.road`` + ``SourceRecord.raw_data``)."""
 
     lnmadr: str | None
     """지번주소 (``Feature.address.legal``)."""
@@ -407,11 +407,6 @@ async def _item_to_bundle(
         source_entity_type=_SOURCE_ENTITY_TYPE,
         source_entity_id=natural_key,
         raw_payload_hash=payload_hash,
-        source_version=None,  # 표준데이터 자체에 schema version은 없음
-        raw_name=item.fstvl_nm,
-        raw_address=item.rdnmadr or item.lnmadr,
-        raw_longitude=coord.lon if coord is not None else None,
-        raw_latitude=coord.lat if coord is not None else None,
         raw_data=raw_data,
         fetched_at=fetched_at,
         source_record_key=source_record_key,
@@ -424,7 +419,6 @@ async def _item_to_bundle(
         source_role=SourceRole.PRIMARY,
         match_method="natural_key",  # name::address 파생키 직접 매핑
         confidence=100,  # 1차 source는 항상 100
-        is_primary_source=True,
     )
 
     return FeatureBundle(
@@ -669,11 +663,6 @@ async def _museum_to_bundle(
         source_entity_type=_MUSEUM_ENTITY_TYPE,
         source_entity_id=natural_key,
         raw_payload_hash=payload_hash,
-        source_version=None,
-        raw_name=item.fclty_nm,
-        raw_address=item.rdnmadr or item.lnmadr,
-        raw_longitude=coord.lon if coord is not None else None,
-        raw_latitude=coord.lat if coord is not None else None,
         raw_data=raw_data,
         fetched_at=fetched_at,
         source_record_key=source_record_key,
@@ -684,7 +673,6 @@ async def _museum_to_bundle(
         source_role=SourceRole.PRIMARY,
         match_method="natural_key",
         confidence=100,
-        is_primary_source=True,
     )
     return FeatureBundle(
         feature=feature,
@@ -736,7 +724,6 @@ async def _standard_place_to_bundle(
     phone_raw: str | None,
     facility_info: dict[str, Any],
     raw_data: dict[str, Any],
-    raw_name: str | None,
     default_icon: str,
     marker_color: str,
     fetched_at: datetime,
@@ -808,11 +795,6 @@ async def _standard_place_to_bundle(
         source_entity_type=entity_type,
         source_entity_id=natural_key,
         raw_payload_hash=payload_hash,
-        source_version=None,
-        raw_name=raw_name,
-        raw_address=road_text or legal_text,
-        raw_longitude=coord.lon if coord is not None else None,
-        raw_latitude=coord.lat if coord is not None else None,
         raw_data=raw_data,
         fetched_at=fetched_at,
         source_record_key=source_record_key,
@@ -823,7 +805,6 @@ async def _standard_place_to_bundle(
         source_role=SourceRole.PRIMARY,
         match_method="natural_key",
         confidence=100,
-        is_primary_source=True,
     )
     return FeatureBundle(feature=feature, source_record=source_record, source_link=source_link)
 
@@ -893,7 +874,6 @@ async def _tourist_to_bundle(
         phone_raw=item.phone_number,
         facility_info={"trrsrt_se": normalize_korean_text(item.trrsrt_se)},
         raw_data=raw_data,
-        raw_name=item.trrsrt_nm,
         default_icon=_DEFAULT_TOURIST_ICON,
         marker_color=TOURIST_MARKER_COLOR,
         fetched_at=fetched_at,
@@ -1004,7 +984,6 @@ async def _parking_to_bundle(
             "parkingchrge_info": normalize_korean_text(item.parkingchrge_info),
         },
         raw_data=raw_data,
-        raw_name=item.prkplce_nm,
         default_icon=_DEFAULT_PARKING_ICON,
         marker_color=PARKING_MARKER_COLOR,
         fetched_at=fetched_at,
@@ -1124,7 +1103,6 @@ async def _special_street_to_bundle(
             "reference_date": raw_data["reference_date"],
         },
         raw_data=raw_data,
-        raw_name=item.stret_nm,
         default_icon=_DEFAULT_SPECIAL_STREET_ICON,
         marker_color=SPECIAL_STREET_MARKER_COLOR,
         fetched_at=fetched_at,

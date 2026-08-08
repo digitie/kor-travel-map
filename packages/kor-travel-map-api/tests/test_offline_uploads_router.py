@@ -263,6 +263,20 @@ def client(
     )
 
 
+# T-VN-33 (ADR-088): offline upload identity는
+# provider_dataset_id + sync_scope + operation_key다. 자연키 사본(provider/
+# dataset_key)은 스키마에서 삭제됐고, operation_key는 scope에서 유도돼 NOT NULL로 든다.
+_PROVIDER_DATASET_ID: int = 7
+_SYNC_SCOPE: str = "dataset_wide"
+_OPERATION_KEY: str = "feature_weather_kma_ultra_short_nowcast_job"
+_PROVIDER_DISPLAY: str = "kma"
+_DATASET_KEY_DISPLAY: str = "ultra_short_nowcast"
+_CREATE_FORM: dict[str, str] = {
+    "provider_dataset_id": str(_PROVIDER_DATASET_ID),
+    "sync_scope": _SYNC_SCOPE,
+}
+
+
 def _upload(
     *,
     upload_id: str = "00000000-0000-0000-0000-000000000001",
@@ -270,7 +284,9 @@ def _upload(
     storage_key: str | None = None,
     original_filename: str = "features.jsonl",
     detected_format: str = "jsonl",
-    dataset_key: str = "offline_jsonl",
+    provider_dataset_id: int = _PROVIDER_DATASET_ID,
+    sync_scope: str = _SYNC_SCOPE,
+    operation_key: str = _OPERATION_KEY,
     byte_size: int = 123,
     checksum_sha256: str = "a" * 64,
     validation_job_id: str | None = None,
@@ -279,9 +295,9 @@ def _upload(
     now = datetime(2026, 6, 3, tzinfo=UTC)
     return OfflineUpload(
         upload_id=upload_id,
-        provider="offline-test-provider",
-        dataset_key=dataset_key,
-        sync_scope="default",
+        provider_dataset_id=provider_dataset_id,
+        sync_scope=sync_scope,
+        operation_key=operation_key,
         original_filename=original_filename,
         storage_backend="rustfs",
         storage_key=storage_key or f"offline-uploads/{upload_id}/{original_filename}",
@@ -346,8 +362,8 @@ def test_create_offline_upload_writes_object_and_metadata(
 
     async def _create(_session: Any, **kwargs: Any) -> OfflineUpload:
         nonlocal reserved
-        assert kwargs["provider"] == "offline-test-provider"
-        assert kwargs["dataset_key"] == "offline_jsonl"
+        assert kwargs["provider_dataset_id"] == _PROVIDER_DATASET_ID
+        assert kwargs["sync_scope"] == _SYNC_SCOPE
         assert kwargs["storage_backend"] == "rustfs"
         assert kwargs["detected_format"] == "jsonl"
         assert kwargs["detected_encoding"] is None
@@ -372,11 +388,7 @@ def test_create_offline_upload_writes_object_and_metadata(
 
     response = client.post(
         "/v1/admin/offline-uploads",
-        data={
-            "provider": "offline-test-provider",
-            "dataset_key": "offline_jsonl",
-            "sync_scope": "default",
-        },
+        data=dict(_CREATE_FORM),
         files={
             "file": (
                 "features.jsonl",
@@ -389,10 +401,13 @@ def test_create_offline_upload_writes_object_and_metadata(
     assert response.status_code == 201
     body = response.json()
     assert body["data"]["status"] == "uploaded"
+    assert body["data"]["provider_dataset_id"] == _PROVIDER_DATASET_ID
+    assert body["data"]["sync_scope"] == _SYNC_SCOPE
     assert body["meta"]["bucket"] == "kor-travel-map-uploads"
     assert body["meta"]["object_key"].startswith("offline-uploads/")
     assert store.calls[0]["body"] == b'{"feature":{"feature_id":"f1"}}\n'
-    assert store.calls[0]["metadata"]["provider"] == "offline-test-provider"
+    assert store.calls[0]["metadata"]["provider-dataset-id"] == str(_PROVIDER_DATASET_ID)
+    assert store.calls[0]["metadata"]["sync-scope"] == _SYNC_SCOPE
     # claim+DB 예약, effect_started, 증명+terminal result, registry hook.
     assert session.begin_count == 4
 
@@ -411,9 +426,11 @@ def test_create_offline_upload_duplicate_checksum_stops_before_object_store(
         return None
 
     async def _duplicate(_session: Any, **kwargs: Any) -> OfflineUpload:
-        assert kwargs["provider"] == "p"
-        assert kwargs["dataset_key"] == "d"
-        assert kwargs["sync_scope"] == "default"
+        assert kwargs["provider_dataset_id"] == _PROVIDER_DATASET_ID
+        assert kwargs["sync_scope"] == _SYNC_SCOPE
+        assert kwargs["checksum_sha256"] == hashlib.sha256(
+            b'{"feature":{"feature_id":"f1"}}\n'
+        ).hexdigest()
         return existing
 
     monkeypatch.setattr(router_mod, "build_offline_upload_store", lambda _settings: store)
@@ -422,7 +439,7 @@ def test_create_offline_upload_duplicate_checksum_stops_before_object_store(
 
     response = client.post(
         "/v1/admin/offline-uploads",
-        data={"provider": "p", "dataset_key": "d"},
+        data=dict(_CREATE_FORM),
         files={
             "file": (
                 "features.jsonl",
@@ -435,7 +452,12 @@ def test_create_offline_upload_duplicate_checksum_stops_before_object_store(
     assert response.status_code == 409
     body = response.json()
     assert body["code"] == "OFFLINE_UPLOAD_DUPLICATE"
+    # T-VN-33 (ADR-088): 409는 가리키는 행의 exact identity(triple) + status를 싣는다.
     assert body["details"]["upload_id"] == existing.upload_id
+    assert body["details"]["provider_dataset_id"] == existing.provider_dataset_id
+    assert body["details"]["sync_scope"] == existing.sync_scope
+    assert body["details"]["operation_key"] == existing.operation_key
+    assert body["details"]["status"] == existing.status
     assert store.calls == []
     assert store.deleted == []
 
@@ -459,7 +481,8 @@ def test_create_offline_upload_accepts_csv(
             storage_key=kwargs["storage_key"],
             original_filename="features.csv",
             detected_format="csv",
-            dataset_key=kwargs["dataset_key"],
+            provider_dataset_id=kwargs["provider_dataset_id"],
+            sync_scope=kwargs["sync_scope"],
             byte_size=kwargs["byte_size"],
             checksum_sha256=kwargs["checksum_sha256"],
         )
@@ -475,7 +498,7 @@ def test_create_offline_upload_accepts_csv(
 
     response = client.post(
         "/v1/admin/offline-uploads",
-        data={"provider": "p", "dataset_key": "d"},
+        data=dict(_CREATE_FORM),
         files={"file": ("features.csv", b"name,lon,lat\nA,126.9,37.5\n", "text/csv")},
     )
 
@@ -517,17 +540,15 @@ def test_create_offline_upload_restarts_exact_put_after_started_crash(
     content_type = "application/x-ndjson"
     metadata = {
         "content-sha256": checksum,
-        "dataset-key": "d",
-        "provider": "p",
-        "sync-scope": "default",
+        "provider-dataset-id": str(_PROVIDER_DATASET_ID),
+        "sync-scope": _SYNC_SCOPE,
         "upload-id": upload_id,
     }
     metadata_digest = canonical_domain_command_fingerprint(metadata)
     fingerprint = canonical_domain_command_fingerprint(
         {
-            "provider": "p",
-            "dataset_key": "d",
-            "sync_scope": "default",
+            "provider_dataset_id": _PROVIDER_DATASET_ID,
+            "sync_scope": _SYNC_SCOPE,
             "filename": "features.jsonl",
             "storage_backend": "rustfs",
             "bucket": settings.offline_upload_bucket,
@@ -572,7 +593,6 @@ def test_create_offline_upload_restarts_exact_put_after_started_crash(
         upload_id=upload_id,
         state="uploading",
         storage_key=storage_key,
-        dataset_key="d",
         byte_size=len(body),
         checksum_sha256=checksum,
     )
@@ -611,7 +631,7 @@ def test_create_offline_upload_restarts_exact_put_after_started_crash(
 
     response = client.post(
         "/v1/admin/offline-uploads",
-        data={"provider": "p", "dataset_key": "d"},
+        data=dict(_CREATE_FORM),
         files={"file": ("features.jsonl", body, content_type)},
     )
 
@@ -643,7 +663,8 @@ def test_offline_upload_store_is_reused_from_app_state(
             upload_id=kwargs["upload_id"],
             state="uploading",
             storage_key=kwargs["storage_key"],
-            dataset_key=kwargs["dataset_key"],
+            provider_dataset_id=kwargs["provider_dataset_id"],
+            sync_scope=kwargs["sync_scope"],
             byte_size=kwargs["byte_size"],
             checksum_sha256=kwargs["checksum_sha256"],
         )
@@ -660,7 +681,7 @@ def test_offline_upload_store_is_reused_from_app_state(
     for filename in ("features-a.jsonl", "features-b.jsonl"):
         response = client.post(
             "/v1/admin/offline-uploads",
-            data={"provider": "p", "dataset_key": "d"},
+            data=dict(_CREATE_FORM),
             files={
                 "file": (filename, b'{"feature":{"feature_id":"f1"}}\n', "application/x-ndjson")
             },
@@ -684,7 +705,6 @@ def test_preview_offline_upload_prefers_app_state_store(
         storage_key=storage_key,
         original_filename="features.csv",
         detected_format="csv",
-        dataset_key="offline_csv",
         byte_size=len(body),
         checksum_sha256=hashlib.sha256(body).hexdigest(),
     )
@@ -721,7 +741,6 @@ def test_validate_offline_upload_prefers_app_state_store(
         storage_key=storage_key,
         original_filename="features.csv",
         detected_format="csv",
-        dataset_key="offline_csv",
         byte_size=len(body),
         checksum_sha256=checksum,
     )
@@ -730,7 +749,6 @@ def test_validate_offline_upload_prefers_app_state_store(
         storage_key=storage_key,
         original_filename="features.csv",
         detected_format="csv",
-        dataset_key="offline_csv",
         byte_size=len(body),
         checksum_sha256=checksum,
         validation_job_id="00000000-0000-0000-0000-000000000101",
@@ -745,9 +763,13 @@ def test_validate_offline_upload_prefers_app_state_store(
     async def _run(_session: Any, upload_id: str, **kwargs: Any) -> Any:
         assert upload_id == upload.upload_id
         assert kwargs["store"] is store
+        # T-VN-33: provider/dataset_key는 upload 행이 아니라 provider_dataset_id에서
+        # 유도한 표시명이다(실제 run_offline_upload_validation_job이 하는 일).
         return validate_offline_tabular_upload(
             validated_upload,
             body,
+            provider=_PROVIDER_DISPLAY,
+            dataset_key=_DATASET_KEY_DISPLAY,
             column_mapping=kwargs["column_mapping"],
             sample_size=kwargs["sample_size"],
             checksum_sha256=checksum,
@@ -817,7 +839,7 @@ def test_create_offline_upload_stops_before_object_when_reservation_fails(
     with pytest.raises(RuntimeError, match="metadata reservation failed"):
         client.post(
             "/v1/admin/offline-uploads",
-            data={"provider": "p", "dataset_key": "d"},
+            data=dict(_CREATE_FORM),
             files={
                 "file": (
                     "features.jsonl",
@@ -847,7 +869,7 @@ def test_create_rejects_file_over_configured_max_bytes(
 
     response = client.post(
         "/v1/admin/offline-uploads",
-        data={"provider": "p", "dataset_key": "d"},
+        data=dict(_CREATE_FORM),
         files={"file": ("features.jsonl", b"123456789", "application/x-ndjson")},
     )
 
@@ -859,7 +881,7 @@ def test_create_rejects_file_over_configured_max_bytes(
 def test_create_rejects_unsupported_format(client: TestClient) -> None:
     response = client.post(
         "/v1/admin/offline-uploads",
-        data={"provider": "p", "dataset_key": "d"},
+        data=dict(_CREATE_FORM),
         files={"file": ("features.xlsx", b"id,name\n1,a\n", "application/octet-stream")},
     )
 
@@ -876,8 +898,7 @@ def test_list_offline_uploads_passes_filters(
 
     async def _list(_session: Any, **kwargs: Any) -> OfflineUploadPage:
         assert kwargs["status"] == "uploaded"
-        assert kwargs["provider"] == "offline-test-provider"
-        assert kwargs["dataset_key"] == "offline_jsonl"
+        assert kwargs["provider_dataset_id"] == _PROVIDER_DATASET_ID
         assert kwargs["limit"] == 25
         return OfflineUploadPage(items=(_upload(),), next_cursor="next")
 
@@ -887,8 +908,7 @@ def test_list_offline_uploads_passes_filters(
         "/v1/admin/offline-uploads",
         params={
             "status": "uploaded",
-            "provider": "offline-test-provider",
-            "dataset_key": "offline_jsonl",
+            "provider_dataset_id": _PROVIDER_DATASET_ID,
             "page_size": 25,
         },
     )
@@ -1155,7 +1175,6 @@ def test_preview_offline_upload_reads_csv_sample(
         storage_key=storage_key,
         original_filename="features.csv",
         detected_format="csv",
-        dataset_key="offline_csv",
         byte_size=len(body),
         checksum_sha256=checksum,
     )
@@ -1191,7 +1210,6 @@ def test_validate_offline_upload_runs_validation_job(
         storage_key=storage_key,
         original_filename="features.csv",
         detected_format="csv",
-        dataset_key="offline_csv",
         byte_size=len(body),
         checksum_sha256=checksum,
     )
@@ -1200,7 +1218,6 @@ def test_validate_offline_upload_runs_validation_job(
         storage_key=storage_key,
         original_filename="features.csv",
         detected_format="csv",
-        dataset_key="offline_csv",
         byte_size=len(body),
         checksum_sha256=checksum,
         validation_job_id="00000000-0000-0000-0000-000000000101",
@@ -1218,9 +1235,13 @@ def test_validate_offline_upload_runs_validation_job(
         assert kwargs["sample_size"] == 100
         # T-VN-20 (ADR-066 D-2): operator는 인증 principal(local-dev)에서만 파생한다.
         assert kwargs["operator"] == "local-dev"
+        # T-VN-33: provider/dataset_key는 upload 행이 아니라 provider_dataset_id에서
+        # 유도한 표시명이다(실제 run_offline_upload_validation_job이 하는 일).
         return validate_offline_tabular_upload(
             validated_upload,
             body,
+            provider=_PROVIDER_DISPLAY,
+            dataset_key=_DATASET_KEY_DISPLAY,
             column_mapping=kwargs["column_mapping"],
             sample_size=kwargs["sample_size"],
             checksum_sha256=checksum,
@@ -1278,7 +1299,6 @@ def test_validate_offline_upload_keeps_typed_geo_problem_code(
     upload = _upload(
         original_filename="features.csv",
         detected_format="csv",
-        dataset_key="offline_csv",
     )
     store = _FakeStore()
 
@@ -1344,7 +1364,6 @@ def test_get_validation_returns_saved_import_job_payload(
     upload = _upload(
         original_filename="features.csv",
         detected_format="csv",
-        dataset_key="offline_csv",
         validation_job_id="00000000-0000-0000-0000-000000000101",
     )
 
@@ -1704,8 +1723,7 @@ def test_load_offline_upload_rejects_csv_without_validation(
             upload_id=upload_id,
             original_filename="features.csv",
             detected_format="csv",
-            dataset_key="offline_csv",
-        )
+            )
 
     monkeypatch.setattr(router_mod, "get_offline_upload", _get)
 

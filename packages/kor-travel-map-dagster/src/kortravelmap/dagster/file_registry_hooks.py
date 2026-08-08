@@ -95,7 +95,8 @@ def record_mois_source_download(
                         location=MANAGED_FILE_LOCATION_MOIS_SOURCE,
                         path=path.name,
                         kind="provider_download",
-                        provider="mois",
+                        # dataset 없는 filesystem provenance의 명시적 provider-only audit.
+                        provider_name="mois",
                         byte_size=byte_size,
                         origin_dagster_run_id=dagster_run_id,
                         downloaded_at=datetime.now(UTC),

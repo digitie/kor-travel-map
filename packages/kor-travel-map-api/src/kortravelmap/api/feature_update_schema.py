@@ -14,6 +14,7 @@ from kortravelmap.core.cache_target_stream import (
     validate_cache_target_external_system,
     validate_cache_target_key,
 )
+from kortravelmap.core.sync_scope import parse_canonical_sync_scope
 from pydantic import (
     AfterValidator,
     BaseModel,
@@ -34,6 +35,7 @@ __all__ = [
     "CacheTargetKeysScope",
     "CenterRadiusScope",
     "FeatureIdsScope",
+    "FeatureUpdateDatasetMembership",
     "FeatureUpdatePolicy",
     "FeatureUpdateRequestCreateRequest",
     "FeatureUpdateRequestCreatedRecord",
@@ -93,8 +95,6 @@ TargetKeyString = Annotated[
     AfterValidator(validate_cache_target_key),
 ]
 AuditReason = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
-MAX_PROVIDER_FILTERS = 32
-MAX_DATASET_FILTERS = 64
 MAX_SCOPE_FEATURE_IDS = 1000
 MAX_SCOPE_TARGET_KEYS = 500
 MAX_RADIUS_KM = 500.0
@@ -129,6 +129,7 @@ RadiusKm = Annotated[
     BeforeValidator(_strict_json_number),
 ]
 RequestPriority = Annotated[int, Field(strict=True, ge=0, le=1000)]
+ProviderDatasetId = Annotated[int, Field(strict=True, ge=1)]
 
 
 class FeatureUpdatePoint(BaseModel):
@@ -198,14 +199,28 @@ class BboxScope(BaseModel):
 
 
 class ProviderDatasetScope(BaseModel):
-    """특정 provider/dataset 자체 갱신 scope."""
+    """특정 영속 dataset membership의 직접 갱신 scope.
+
+    자연키는 API 경계에 다시 노출하지 않는다. ``provider_dataset_id``와 정규
+    ``sync_scope``와 ``operation_key``는 이 요청의 immutable member identity다.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     type: Literal["provider_dataset"]
-    provider: NonEmptyString
-    dataset_key: NonEmptyString
-    sync_scope: NonEmptyString | None = None
+    provider_dataset_id: ProviderDatasetId
+    sync_scope: NonEmptyString
+    operation_key: NonEmptyString
+
+    @model_validator(mode="after")
+    def _validate_sync_scope(self) -> ProviderDatasetScope:
+        try:
+            canonical = parse_canonical_sync_scope(self.sync_scope).value
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
+        if canonical != self.sync_scope:
+            raise ValueError("sync_scope must be canonical")
+        return self
 
 
 class CacheTargetKeysScope(BaseModel):
@@ -258,32 +273,9 @@ class _FeatureUpdateRequestPlan(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     scope: FeatureUpdateScope = Field(description="feature update scope payload.")
-    providers: list[NonEmptyString] = Field(
-        default_factory=list,
-        max_length=MAX_PROVIDER_FILTERS,
-        json_schema_extra={"uniqueItems": True},
-    )
-    dataset_keys: list[NonEmptyString] = Field(
-        default_factory=list,
-        max_length=MAX_DATASET_FILTERS,
-        json_schema_extra={"uniqueItems": True},
-    )
     update_policy: FeatureUpdatePolicy = Field(default_factory=FeatureUpdatePolicy)
     run_mode: RunMode = "queued"
     priority: RequestPriority = 50
-
-    @model_validator(mode="after")
-    def _validate_unique_filters(self) -> _FeatureUpdateRequestPlan:
-        if len(self.providers) != len(set(self.providers)):
-            raise ValueError("providers items must be unique")
-        if len(self.dataset_keys) != len(set(self.dataset_keys)):
-            raise ValueError("dataset_keys items must be unique")
-        if self.scope.type == "provider_dataset" and (self.providers or self.dataset_keys):
-            raise ValueError(
-                "provider_dataset scope must not repeat providers or dataset_keys filters"
-            )
-        return self
-
 
 class FeatureUpdateRequestCreateRequest(_FeatureUpdateRequestPlan):
     """DB와 import job을 반드시 생성하는 feature update 요청."""
@@ -295,6 +287,26 @@ class FeatureUpdateRequestPreviewRequest(_FeatureUpdateRequestPlan):
     """DB write 없이 scope 해석 결과만 계산하는 요청."""
 
 
+class FeatureUpdateDatasetMembership(BaseModel):
+    """요청 생성 시점에 고정된 실행 dataset membership."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider_dataset_id: ProviderDatasetId
+    sync_scope: NonEmptyString
+    operation_key: NonEmptyString
+
+    @model_validator(mode="after")
+    def _validate_sync_scope(self) -> FeatureUpdateDatasetMembership:
+        try:
+            canonical = parse_canonical_sync_scope(self.sync_scope).value
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
+        if canonical != self.sync_scope:
+            raise ValueError("sync_scope must be canonical")
+        return self
+
+
 class FeatureUpdateRequestRecord(BaseModel):
     """DB에 저장된 feature update request의 HTTP 표현."""
 
@@ -303,14 +315,9 @@ class FeatureUpdateRequestRecord(BaseModel):
     request_id: UUID
     scope_type: ScopeType
     scope: FeatureUpdateScope
-    requested_sync_scope: str | None = Field(
-        description="운영자가 provider_dataset 요청에 명시한 원본 sync scope.",
+    dataset_memberships: list[FeatureUpdateDatasetMembership] = Field(
+        description="제출 시점에 고정된 canonical dataset/sync scope/operation snapshot."
     )
-    effective_sync_scope: str | None = Field(
-        description="실행과 활성 작업 유일성에 실제 적용되는 정규화된 sync scope.",
-    )
-    providers: list[str]
-    dataset_keys: list[str]
     update_policy: FeatureUpdatePolicy
     run_mode: RunMode
     priority: int
@@ -351,8 +358,7 @@ class FeatureUpdateRequestPreviewRecord(BaseModel):
     result_kind: Literal["preview"]
     scope_type: ScopeType
     scope: FeatureUpdateScope
-    providers: list[str]
-    dataset_keys: list[str]
+    dataset_memberships: list[FeatureUpdateDatasetMembership]
     update_policy: FeatureUpdatePolicy
     run_mode: RunMode
     priority: int

@@ -150,10 +150,10 @@ rollback 조건은 ADR-075와 [`../deploy.md`](../deploy.md)를 따른다.
 
 | 테이블 | PK | 핵심 컬럼 / 비고 |
 |--------|----|---------------|
-| `source_entities` | `source_entity_key` | UNIQUE (provider,dataset_key,source_entity_type,source_entity_id); current_source_record_key; first/last_seen_at |
-| `source_records` | `source_record_key` | source_entity_key FK; UNIQUE (provider,dataset_key,source_entity_type,source_entity_id,raw_payload_hash); immutable raw_data JSONB 이력; `lineage_key`(nullable, notice scope만 — 트리거 파생, ADR-087) |
-| `source_links` | `(feature_id, source_entity_key)` | Feature↔provider entity N:M; source_role CHECK 8종, confidence 0-100, 여러 primary 허용 |
-| `provider_sync_state` | `(provider, dataset_key, sync_scope)` | status, cursor JSONB, last_success_at, next_run_after |
+| `source_entities` | `source_entity_key` | **legacy(0087 이전)** UNIQUE(provider,dataset_key,type,id), current pointer. T-VN-33 최종형은 provider_dataset_id FK와 head 분리 |
+| `source_records` | `source_record_key` | **legacy(0087 이전)** denormalized pair/raw-derived row. T-VN-33 최종형은 entity FK 아래 immutable payload/hash |
+| `source_links` | `(feature_id, source_entity_key)` | T-VN-33 최종형은 source_role만 primary 정본으로 사용 |
+| `provider_sync_state` | `(provider_dataset_id, sync_scope)` | T-VN-33 target: dataset FK, status/cursor/last success/next run |
 
 ### 3.3 `ops.*`
 
@@ -237,17 +237,16 @@ membership을 batch로 붙여 fan-out이 page 경계를 바꾸지 않게 한다.
 
 | 인덱스 | 컬럼 | 비고 |
 |--------|------|------|
-| `idx_source_entities_current_record` | (current_source_record_key) | partial NOT NULL, 현재 immutable payload 포인터 |
-| `idx_source_records_provider_dataset_entity` | (provider, dataset_key, source_entity_type, source_entity_id) | |
-| `idx_source_records_lineage` | ((COALESCE(lineage_key, source_entity_id)), last_seen_at, source_record_key) | notice 계보 probe (ADR-087). read와 같은 식이어야 쓰인다. 뒤 두 열이 순서 규칙이라 "나보다 나은 행" 판정이 범위로 끊긴다 |
-| `idx_source_records_entity_history` | (source_entity_key, last_seen_at DESC, fetched_at DESC, imported_at DESC, source_record_key DESC) | 재관측 시각 우선 entity payload 이력 cursor |
+| `idx_source_entities_current_record` | (current_source_record_key) | **legacy**; T-VN-33 head 분리로 제거 |
+| `idx_source_records_provider_dataset_entity` | (provider, dataset_key, source_entity_type, source_entity_id) | **legacy**; entity→dataset join으로 교체 |
+| `idx_source_records_entity_history` | (source_entity_key, fetched_at DESC, imported_at DESC, source_record_key DESC) | T-VN-33 immutable payload 이력 cursor |
 | `idx_source_records_imported_at_brin` | BRIN(imported_at) | 시계열 |
 | `idx_source_records_fetched_at_brin` | BRIN(fetched_at) | |
-| `idx_source_records_last_seen_at_brin` | BRIN(last_seen_at) | payload 재관측 시계열 |
-| `idx_source_records_expires_at` | (expires_at) | partial NOT NULL (purge) |
+| `idx_source_records_last_seen_at_brin` | BRIN(last_seen_at) | **legacy**; re-observation은 head.observed_at |
+| `idx_source_records_expires_at` | (expires_at) | **legacy**; expiry는 head 소유 |
 | `idx_source_links_entity` | (source_entity_key) | entity→Feature 역조회 |
 | `idx_source_links_role` | (source_role) | |
-| `idx_source_links_primary` | (feature_id) | partial is_primary_source |
+| `idx_source_links_primary` | (feature_id) | `source_role = 'primary'` partial predicate |
 | `idx_sync_state_next_run` | (next_run_after) | partial status='active' |
 
 ### 4.3 `feature.feature_files`

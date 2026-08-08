@@ -70,7 +70,6 @@ class OpsDatasetCatalogInfo(BaseModel):
     feature_kind: str
     provider_state_default_scope: str
     label: str
-    is_feature_load: bool
     is_refreshable: bool
     scope_refresh: OpsDatasetScopeRefreshCapability
     preview: OpsDatasetPreviewCapability
@@ -95,7 +94,7 @@ class OpsDatasetScheduleSummary(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     source: Literal["dagster_graphql"] = "dagster_graphql"
-    basis: Literal["dagster_definition_tags", "not_scheduled", "unknown"]
+    basis: Literal["dagster_operation_key_tag", "not_scheduled", "unknown"]
     status: str | None
     schedule_names: list[str]
     active_schedule_names: list[str]
@@ -124,7 +123,7 @@ class OpsDatasetProjectedJob(BaseModel):
     dagster_run_id: str | None
     dagster_run_status: str | None
     trigger_kind: str | None
-    operation_registry_version: str | None
+    operation_key: str | None
     depth: int
     detail_url: str
 
@@ -134,9 +133,14 @@ class OpsDatasetProviderDataset(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    provider_dataset_id: int = Field(ge=1)
     provider: str
     dataset_key: str
-    sync_scope: str | None
+    # 실행 membership identity는 triple이다(ADR-088 §결정 2). 셋 다 non-null이라야
+    # UI가 member를 구분해 표시하고 deep link를 만들 수 있다 — nullable로 두면
+    # operation만 다른 두 member가 화면에서 같은 행으로 보인다.
+    sync_scope: str
+    operation_key: str
     operation_member_id: UUID
     status: OperationState
 
@@ -152,9 +156,8 @@ class OpsDatasetExecution(BaseModel):
     status: OperationState
     pair_status: OperationState
     operation_member_id: UUID
-    sync_scope: str | None
-    providers: list[str]
-    dataset_keys: list[str]
+    # 공급원 ``DatasetLatestExecution.sync_scope``가 non-null이고 DB 열도 NOT NULL이다.
+    sync_scope: str
     provider_datasets: list[OpsDatasetProviderDataset]
     created_at: datetime
     started_at: datetime | None
@@ -162,7 +165,12 @@ class OpsDatasetExecution(BaseModel):
     dagster_run_id: str | None
     dagster_run_status: str | None
     trigger_kind: str | None
-    operation_registry_version: str | None
+    # 이 레코드가 **어느 membership을 본 것인지**를 말한다 — 바로 위 ``sync_scope``와
+    # 같은 축이고 같은 non-null이다. 공급원 ``DatasetLatestExecution.operation_key``가
+    # ``str``이므로 여기서 nullable로 넓히면 표면만 거짓말한다. 한 root가 형제
+    # operation 둘을 건드리면 레코드가 둘 나오고 이 값으로만 구분된다. root 자신의
+    # trigger operation은 ``projected_job``이 든다(그쪽은 진짜로 null일 수 있다).
+    operation_key: str
     error_message: str | None
     projected_job: OpsDatasetProjectedJob
     cancellation: PipelineCancellationSummaryRecord | None
@@ -178,14 +186,31 @@ class OpsIssueSummary(BaseModel):
 
 
 class OpsDatasetGridRow(BaseModel):
-    """provider×dataset×sync_scope 그리드 1행."""
+    """exact membership triple 그리드 1행.
+
+    행 identity는 ``provider_dataset_id × sync_scope × operation_key``다
+    (ADR-088 §결정 2). 한 dataset이 refresh operation을 여럿 가질 수 있고 그 둘이
+    같은 ``sync_scope``를 공유할 수 있으므로, pair로 접으면 형제 operation의 상태가
+    무경고로 사라진다 — 실패 중인 operation이 형제에 가려 보이지 않는다.
+
+    ``operation_key``가 null인 행은 **실행 가능한 refresh operation이 없는 catalog
+    행**이다(실측 74개 dataset 중 18개). 그 행에는 결박할 실행 identity가 아예 없으며,
+    운영자에게는 catalog 존재·orphan 사유·issue를 보이기 위해 남긴다.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
+    provider_dataset_id: int = Field(ge=1)
     provider: str
     dataset_key: str
     detail_url: str
     sync_scope: str
+    operation_key: str | None = Field(
+        description=(
+            "이 행이 가리키는 실행 operation. null이면 실행 가능한 refresh "
+            "operation이 없는 catalog 전용 행이다."
+        )
+    )
     status: str
     last_success_at: datetime | None
     last_failure_at: datetime | None
@@ -210,7 +235,6 @@ class OpsDatasetGridRow(BaseModel):
     catalog: OpsDatasetCatalogInfo | None
     refresh_policy: ProviderRefreshPolicyRecord | None
     dataset_issues: OpsIssueSummary
-    provider_issues: OpsIssueSummary
 
 
 class OpsDatasetsGridData(BaseModel):
@@ -234,11 +258,20 @@ class OpsDatasetsGridResponse(BaseModel):
 
 
 class OpsDatasetScopeState(BaseModel):
-    """상세의 sync_scope 상태."""
+    """상세의 membership별 sync state.
+
+    ``pk_provider_sync_state``가 triple이므로 scope 하나에 operation별 state가 여러 개
+    존재할 수 있다. ``operation_key`` 없이 내보내면 클라이언트가 어느 operation의
+    상태인지 가릴 수 없다.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     sync_scope: str
+    # grid 행과 같은 규약이다 — refresh operation이 없는 catalog membership은 null이다.
+    # 여기만 ``""``로 채우면 같은 응답 안에서 표면이 어긋나고, 빈 문자열이 실재하는
+    # operation처럼 보인다.
+    operation_key: str | None
     status: str
     cursor: dict[str, Any]
     last_success_at: datetime | None
@@ -253,7 +286,13 @@ class OpsDatasetEventRecord(BaseModel):
 
     event_id: UUID
     job_id: UUID
-    sync_scope: str
+    import_job_dataset_id: UUID | None
+    provider_dataset_id: int | None
+    # 둘 다 행 자신의 membership 축이다(요청 필터 값이 아니라). member가 없는
+    # job-level event는 둘 다 null이다 — 같은 리소스의 다른 표현
+    # (`PipelineJobEventRecord`)과 nullability를 맞춘다.
+    sync_scope: str | None
+    operation_key: str | None
     stage: str | None
     level: str
     code: str | None
@@ -288,6 +327,7 @@ class OpsDatasetEventHistory(BaseModel):
 class OpsDatasetDetailData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    provider_dataset_id: int = Field(ge=1)
     provider: str
     dataset_key: str
     catalog_state: CatalogState
@@ -311,7 +351,6 @@ class OpsDatasetDetailData(BaseModel):
     run_history: OpsDatasetRunHistory
     event_history: OpsDatasetEventHistory
     dataset_issues: OpsIssueSummary
-    provider_issues: OpsIssueSummary
 
 
 class OpsDatasetDetailResponse(BaseModel):
@@ -348,6 +387,12 @@ class OpsDatasetPreviewBudget(BaseModel):
 class OpsDatasetPreviewData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    provider_dataset_id: int = Field(ge=1)
+    sync_scope: str
+    # 요청이 membership을 지목했으면 응답도 그것을 되울린다. 라우터가 404로 검증까지
+    # 해 놓고 값을 버리면 소비자는 자기가 무엇을 미리보기 했는지 되짚을 수 없다.
+    # fixture preview는 operation과 무관하지만, 그 사실 자체가 응답에 드러나야 한다.
+    operation_key: str | None
     provider: str
     dataset_key: str
     source: Literal["fixture"]

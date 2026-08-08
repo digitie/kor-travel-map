@@ -105,7 +105,11 @@ __all__ = [
     "FeatureAliasRow",
     "WeatherMetricSeriesRow",
     "FeatureVersionRow",
+    "ProviderDatasetRow",
+    "ProviderDatasetOperationRow",
+    "ProviderDatasetOperationScopeRow",
     "SourceEntityRow",
+    "SourceEntityHeadRow",
     "NoticeLifecycleScopeRow",
     "NoticeLineageStateRow",
     "SourceRecordRow",
@@ -124,6 +128,7 @@ __all__ = [
     "DedupReviewQueueRow",
     "EnrichmentReviewQueueRow",
     "ImportJobRow",
+    "ImportJobDatasetRow",
     "C6cCancelProbeFixtureRow",
     "ImportJobEventRow",
     "ImportJobEventClockRow",
@@ -131,6 +136,7 @@ __all__ = [
     "FeatureOverrideRow",
     "FeatureChangeRequestRow",
     "FeatureUpdateRequestRow",
+    "FeatureUpdateRequestDatasetRow",
     "FeatureUpdateRequestIdempotencyRow",
     "PipelineCancellationRow",
     "PipelineCancellationRunRow",
@@ -792,51 +798,236 @@ class FeatureVersionRow(Base):
 
 
 # =============================================================================
-# provider_sync.source_entities / source_records  (ADR-063)
+# provider_sync.provider_datasets / source lineage  (ADR-087)
 # =============================================================================
 
 
+class ProviderDatasetRow(Base):
+    """DB가 소유하는 provider×dataset identity와 산출 capability."""
+
+    __tablename__ = "provider_datasets"
+    __table_args__ = (
+        UniqueConstraint("provider", "dataset_key", name="uq_provider_datasets_identity"),
+        CheckConstraint(
+            "provider <> '' AND provider = btrim(provider) "
+            "AND provider = normalize(provider, NFC) AND length(provider) <= 112",
+            name="ck_provider_datasets_provider_canonical",
+        ),
+        CheckConstraint(
+            "dataset_key <> '' AND dataset_key = btrim(dataset_key) "
+            "AND dataset_key = normalize(dataset_key, NFC) AND length(dataset_key) <= 112",
+            name="ck_provider_datasets_dataset_key_canonical",
+        ),
+        CheckConstraint(
+            "display_name <> '' AND display_name = btrim(display_name) "
+            "AND display_name = normalize(display_name, NFC) AND length(display_name) <= 256",
+            name="ck_provider_datasets_display_name_canonical",
+        ),
+        CheckConstraint(
+            "source_kind IN ('openapi', 'filedata', 'manual', 'system', 'standard', 'internal')",
+            name="ck_provider_datasets_source_kind",
+        ),
+        CheckConstraint(
+            "provider_sync.is_valid_provider_dataset_capabilities(capabilities)",
+            name="ck_provider_datasets_capabilities",
+        ),
+        {"schema": "provider_sync"},
+    )
+
+    provider_dataset_id: Mapped[int] = mapped_column(
+        BigInteger,
+        Identity(always=True),
+        primary_key=True,
+    )
+    provider: Mapped[str] = mapped_column(Text, nullable=False)
+    dataset_key: Mapped[str] = mapped_column(Text, nullable=False)
+    display_name: Mapped[str] = mapped_column(Text, nullable=False)
+    source_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default=text("true"),
+    )
+    capabilities: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+        # NOTE: JSON 리터럴로 쓰면 ``:1``이 SQLAlchemy ``text()`` bind param으로
+        # 잡혀 alembic autogenerate/check가 server-default 비교에서 크래시한다.
+        # jsonb_build_object로 콜론을 없애 같은 기본값을 표현한다.
+        server_default=text(
+            "jsonb_build_object("
+            "'schema_version', 1, "
+            "'produces', jsonb_build_array(), "
+            "'extensions', jsonb_build_object()"
+            ")"
+        ),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+
+
+class ProviderDatasetOperationRow(Base):
+    """Dataset별 enabled operation. scope는 별도 정규 child가 소유한다."""
+
+    __tablename__ = "provider_dataset_operations"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["provider_dataset_id"],
+            ["provider_sync.provider_datasets.provider_dataset_id"],
+            name="fk_provider_dataset_operations_dataset",
+        ),
+        UniqueConstraint(
+            "provider_dataset_id",
+            "operation_key",
+            "operation_kind",
+            name="uq_provider_dataset_operations_kind",
+        ),
+        CheckConstraint(
+            "operation_key <> '' AND operation_key = btrim(operation_key) "
+            "AND operation_key = normalize(operation_key, NFC) AND length(operation_key) <= 128",
+            name="ck_provider_dataset_operations_key_canonical",
+        ),
+        CheckConstraint(
+            "operation_kind IN ('feature_load', 'refresh', 'preview')",
+            name="ck_provider_dataset_operations_kind",
+        ),
+        CheckConstraint(
+            "jsonb_typeof(config) = 'object'",
+            name="ck_provider_dataset_operations_config",
+        ),
+        Index(
+            "idx_provider_dataset_operations_enabled",
+            "provider_dataset_id",
+            "operation_key",
+            postgresql_where=text("is_enabled"),
+        ),
+        {"schema": "provider_sync"},
+    )
+
+    provider_dataset_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    operation_key: Mapped[str] = mapped_column(Text, primary_key=True)
+    operation_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    is_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default=text("true"),
+    )
+    config: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+
+
+class ProviderDatasetOperationScopeRow(Base):
+    """Refresh operation의 canonical scope child."""
+
+    __tablename__ = "provider_dataset_operation_scopes"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["provider_dataset_id", "operation_key", "operation_kind"],
+            [
+                "provider_sync.provider_dataset_operations.provider_dataset_id",
+                "provider_sync.provider_dataset_operations.operation_key",
+                "provider_sync.provider_dataset_operations.operation_kind",
+            ],
+            name="fk_provider_dataset_operation_scopes_operation",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint(
+            "operation_kind = 'refresh'",
+            name="ck_provider_dataset_operation_scopes_refresh_only",
+        ),
+        CheckConstraint(
+            "provider_sync.is_valid_provider_dataset_sync_scope(sync_scope)",
+            name="ck_provider_dataset_operation_scopes_syntax",
+        ),
+        Index(
+            "idx_provider_dataset_operation_scopes_operation",
+            "provider_dataset_id",
+            "operation_key",
+        ),
+        {"schema": "provider_sync"},
+    )
+
+    # DB PK는 triple이다(``pk_provider_dataset_operation_scopes``). 이 모듈은 raw SQL
+    # 저장소의 Alembic ``target_metadata`` 원천이므로(모듈 docstring, ADR-004) 이
+    # class를 ORM 방식으로 쓰는 코드는 없다 — identity map이 행을 접는 시나리오는
+    # 이 저장소에서 도달하지 않는다. 실제 위험은 **아무 게이트도 이 어긋남을 보지
+    # 못한다**는 것이다: alembic autogenerate는 PK 제약을 비교 대상에 넣지 않아
+    # `alembic check`가 통과한다. 그래서 PK 전용 대조 게이트를 따로 세웠다
+    # (``test_alembic_head_primary_keys_match_orm_declarations``).
+    provider_dataset_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    sync_scope: Mapped[str] = mapped_column(Text, primary_key=True)
+    operation_key: Mapped[str] = mapped_column(Text, primary_key=True)
+    operation_kind: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        server_default=text("'refresh'"),
+    )
+
+
 class SourceEntityRow(Base):
-    """Provider 자연 entity와 현재 immutable payload version의 매핑."""
+    """Dataset FK 아래 provider 자연 entity. 현재 관측은 head가 소유한다."""
 
     __tablename__ = "source_entities"
     __table_args__ = (
         UniqueConstraint(
-            "provider",
-            "dataset_key",
+            "provider_dataset_id",
             "source_entity_type",
             "source_entity_id",
-            name="uq_source_entities_identity",
+            name="uq_source_entities_provider_identity",
         ),
         ForeignKeyConstraint(
-            ["source_entity_key", "current_source_record_key"],
-            [
-                "provider_sync.source_records.source_entity_key",
-                "provider_sync.source_records.source_record_key",
-            ],
-            name="fk_source_entities_current_record",
-            ondelete="RESTRICT",
-            deferrable=True,
-            initially="DEFERRED",
+            ["provider_dataset_id"],
+            ["provider_sync.provider_datasets.provider_dataset_id"],
+            name="fk_source_entities_provider_dataset",
         ),
         CheckConstraint(
             "first_seen_at <= last_seen_at",
-            name="seen_order",
+            name="ck_source_entities_seen_order",
+        ),
+        CheckConstraint(
+            "source_entity_type <> '' AND source_entity_type = btrim(source_entity_type) "
+            "AND source_entity_type = normalize(source_entity_type, NFC) "
+            "AND length(source_entity_type) <= 512",
+            name="ck_source_entities_type_canonical",
+        ),
+        CheckConstraint(
+            "source_entity_id <> '' AND source_entity_id = btrim(source_entity_id) "
+            "AND source_entity_id = normalize(source_entity_id, NFC) "
+            "AND length(source_entity_id) <= 512",
+            name="ck_source_entities_id_canonical",
         ),
         Index(
-            "idx_source_entities_current_record",
-            "current_source_record_key",
-            postgresql_where=text("current_source_record_key IS NOT NULL"),
+            "idx_source_entities_provider_dataset",
+            "provider_dataset_id",
         ),
         {"schema": "provider_sync"},
     )
 
     source_entity_key: Mapped[str] = mapped_column(Text, primary_key=True)
-    provider: Mapped[str] = mapped_column(Text, nullable=False)
-    dataset_key: Mapped[str] = mapped_column(Text, nullable=False)
+    provider_dataset_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     source_entity_type: Mapped[str] = mapped_column(Text, nullable=False)
     source_entity_id: Mapped[str] = mapped_column(Text, nullable=False)
-    current_source_record_key: Mapped[str | None] = mapped_column(Text)
     first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
@@ -846,6 +1037,16 @@ class NoticeLifecycleScopeRow(Base):
 
     __tablename__ = "notice_lifecycle_scopes"
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["provider_dataset_id"],
+            ["provider_sync.provider_datasets.provider_dataset_id"],
+            name="fk_notice_lifecycle_scopes_dataset",
+        ),
+        UniqueConstraint(
+            "provider_dataset_id",
+            "source_entity_type",
+            name="uq_notice_lifecycle_scopes_identity",
+        ),
         CheckConstraint(
             "mode IN ('snapshot', 'event')",
             name="ck_notice_lifecycle_scopes_mode",
@@ -853,9 +1054,13 @@ class NoticeLifecycleScopeRow(Base):
         {"schema": "provider_sync"},
     )
 
-    provider: Mapped[str] = mapped_column(Text, primary_key=True)
-    dataset_key: Mapped[str] = mapped_column(Text, primary_key=True)
-    source_entity_type: Mapped[str] = mapped_column(Text, primary_key=True)
+    notice_lifecycle_scope_id: Mapped[int] = mapped_column(
+        BigInteger,
+        Identity(always=True),
+        primary_key=True,
+    )
+    provider_dataset_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    source_entity_type: Mapped[str] = mapped_column(Text, nullable=False)
     mode: Mapped[str] = mapped_column(Text, nullable=False)
     applied_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     state_fingerprint: Mapped[str] = mapped_column(Text, nullable=False)
@@ -867,21 +1072,21 @@ class NoticeLineageStateRow(Base):
     __tablename__ = "notice_lineage_states"
     __table_args__ = (
         ForeignKeyConstraint(
-            ["provider", "dataset_key", "source_entity_type"],
-            [
-                "provider_sync.notice_lifecycle_scopes.provider",
-                "provider_sync.notice_lifecycle_scopes.dataset_key",
-                "provider_sync.notice_lifecycle_scopes.source_entity_type",
-            ],
+            ["notice_lifecycle_scope_id"],
+            ["provider_sync.notice_lifecycle_scopes.notice_lifecycle_scope_id"],
             name="fk_notice_lineage_states_scope",
             ondelete="CASCADE",
+        ),
+        Index(
+            "idx_notice_lineage_states_scope_present",
+            "notice_lifecycle_scope_id",
+            "present",
+            text("changed_at DESC"),
         ),
         {"schema": "provider_sync"},
     )
 
-    provider: Mapped[str] = mapped_column(Text, primary_key=True)
-    dataset_key: Mapped[str] = mapped_column(Text, primary_key=True)
-    source_entity_type: Mapped[str] = mapped_column(Text, primary_key=True)
+    notice_lifecycle_scope_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     lineage_key: Mapped[str] = mapped_column(Text, primary_key=True)
     present: Mapped[bool] = mapped_column(Boolean, nullable=False)
     changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -891,20 +1096,16 @@ class NoticeLineageStateRow(Base):
 class SourceRecordRow(Base):
     """``provider_sync.source_records`` row mapping.
 
-    고유성: ``(provider, dataset_key, source_entity_type, source_entity_id,
-    raw_payload_hash)`` (UNIQUE 제약). PK는 ``source_record_key``
-    (``make_source_record_key(...)`` 결과).
+    raw snapshot은 immutable이며 mutable 관측 시각·만료·current pointer는
+    :class:`SourceEntityHeadRow`가 소유한다.
     """
 
     __tablename__ = "source_records"
     __table_args__ = (
         UniqueConstraint(
-            "provider",
-            "dataset_key",
-            "source_entity_type",
-            "source_entity_id",
+            "source_entity_key",
             "raw_payload_hash",
-            name="uq_source_records",
+            name="uq_source_records_entity_payload",
         ),
         UniqueConstraint(
             "source_entity_key",
@@ -912,11 +1113,11 @@ class SourceRecordRow(Base):
             name="uq_source_records_entity_record",
         ),
         Index(
-            "idx_source_records_provider_dataset_entity",
-            "provider",
-            "dataset_key",
-            "source_entity_type",
-            "source_entity_id",
+            "idx_source_records_entity_history",
+            "source_entity_key",
+            text("fetched_at DESC"),
+            text("imported_at DESC"),
+            text("source_record_key DESC"),
         ),
         Index(
             "idx_source_records_imported_at_brin",
@@ -927,34 +1128,6 @@ class SourceRecordRow(Base):
             "idx_source_records_fetched_at_brin",
             "fetched_at",
             postgresql_using="brin",
-        ),
-        Index(
-            "idx_source_records_last_seen_at_brin",
-            "last_seen_at",
-            postgresql_using="brin",
-        ),
-        Index(
-            "idx_source_records_expires_at",
-            "expires_at",
-            postgresql_where=text("expires_at IS NOT NULL"),
-        ),
-        Index(
-            "idx_source_records_entity_history",
-            "source_entity_key",
-            text("last_seen_at DESC"),
-            text("fetched_at DESC"),
-            text("imported_at DESC"),
-            text("source_record_key DESC"),
-        ),
-        # notice 계보 탐색(read 필터) — ADR-087. read와 **같은 식**이어야 쓰인다
-        # (두 인자가 저장 컬럼이라 IMMUTABLE). 뒤 두 열은 순서 규칙이고 **DESC**다 —
-        # 계보에서 실제로 조인되는 행(현재 record)은 그 계보의 최댓값이라, ASC면
-        # 패자의 스캔 범위 맨 끝에 놓여 이력을 전부 훑는다.
-        Index(
-            "idx_source_records_lineage",
-            text("(COALESCE(lineage_key, source_entity_id))"),
-            text("last_seen_at DESC"),
-            text("source_record_key DESC"),
         ),
         {"schema": "provider_sync"},
     )
@@ -968,22 +1141,6 @@ class SourceRecordRow(Base):
         ),
         nullable=False,
     )
-    provider: Mapped[str] = mapped_column(String, nullable=False)
-    dataset_key: Mapped[str] = mapped_column(String, nullable=False)
-    source_entity_type: Mapped[str] = mapped_column(String, nullable=False)
-    source_entity_id: Mapped[str] = mapped_column(String, nullable=False)
-    source_version: Mapped[str | None] = mapped_column(String)
-    raw_name: Mapped[str | None] = mapped_column(String)
-    raw_address: Mapped[str | None] = mapped_column(String)
-    raw_longitude: Mapped[Any | None] = mapped_column(Numeric(12, 8))
-    raw_latitude: Mapped[Any | None] = mapped_column(Numeric(12, 8))
-
-    # notice 계보 key — ``raw_data``에서 파생되고 record별로 불변이라 저장해도
-    # 낡지 않는다(ADR-087). 값을 넣는 것은 **DB 트리거**이고 애플리케이션은 읽기만
-    # 한다. notice 전용 규칙이 있는 scope에만 채워지고 그 밖은 NULL이며, 유효 계보는
-    # ``COALESCE(lineage_key, source_entity_id)``다 — 73만 행 중 규칙 대상이
-    # 744행(0.10%)뿐이라 전 행에 사본을 물화할 이유가 없다.
-    lineage_key: Mapped[str | None] = mapped_column(String)
     raw_data: Mapped[dict[str, Any]] = mapped_column(
         JSONB,
         nullable=False,
@@ -999,12 +1156,50 @@ class SourceRecordRow(Base):
         nullable=False,
         server_default=text("now()"),
     )
-    last_seen_at: Mapped[datetime] = mapped_column(
+
+
+class SourceEntityHeadRow(Base):
+    """Entity의 검증된 immutable record head와 mutable observation 상태."""
+
+    __tablename__ = "source_entity_heads"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["source_entity_key"],
+            ["provider_sync.source_entities.source_entity_key"],
+            name="fk_source_entity_heads_entity",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["source_entity_key", "current_source_record_key"],
+            [
+                "provider_sync.source_records.source_entity_key",
+                "provider_sync.source_records.source_record_key",
+            ],
+            name="fk_source_entity_heads_record",
+            ondelete="RESTRICT",
+        ),
+        Index(
+            "idx_source_entity_heads_lineage",
+            "lineage_key",
+            text("observed_at DESC"),
+            text("current_source_record_key DESC"),
+        ),
+        {"schema": "provider_sync"},
+    )
+
+    source_entity_key: Mapped[str] = mapped_column(Text, primary_key=True)
+    current_source_record_key: Mapped[str] = mapped_column(Text, nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         server_default=text("now()"),
     )
-    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # T-VN-33(0091)이 notice 계보 물화를 source_records에서 head로 옮겼다.
+    # ``trg_source_entity_head_lineage_key``(ENABLE ALWAYS)가 값을 소유하므로
+    # writer는 채우지 않는다 — metadata는 NOT NULL 물리 컬럼만 선언한다.
+    lineage_key: Mapped[str] = mapped_column(String, nullable=False)
 
 
 # =============================================================================
@@ -1015,8 +1210,8 @@ class SourceRecordRow(Base):
 class SourceLinkRow(Base):
     """``provider_sync.source_links`` row mapping — Feature ↔ SourceEntity N:M.
 
-    PK = ``(feature_id, source_entity_key)``. 한 Feature에 여러 primary entity를
-    연결할 수 있다.
+    PK = ``(feature_id, source_entity_key)``. primary 판정은
+    ``source_role = 'primary'`` 하나만 사용한다.
     """
 
     __tablename__ = "source_links"
@@ -1042,7 +1237,7 @@ class SourceLinkRow(Base):
         Index(
             "idx_source_links_primary",
             "feature_id",
-            postgresql_where=text("is_primary_source"),
+            postgresql_where=text("source_role = 'primary'"),
         ),
         {"schema": "provider_sync"},
     )
@@ -1067,10 +1262,6 @@ class SourceLinkRow(Base):
     )
     match_method: Mapped[str] = mapped_column(String, nullable=False)
     confidence: Mapped[int] = mapped_column(Integer, nullable=False)
-    is_primary_source: Mapped[bool] = mapped_column(
-        nullable=False,
-        server_default=text("false"),
-    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -1153,9 +1344,13 @@ class CuratedSourceRow(Base):
     __tablename__ = "curated_sources"
     __table_args__ = (
         UniqueConstraint(
-            "provider",
-            "dataset_key",
-            name="uq_curated_sources_provider_dataset",
+            "provider_dataset_id",
+            name="uq_curated_sources_dataset",
+        ),
+        ForeignKeyConstraint(
+            ["provider_dataset_id"],
+            ["provider_sync.provider_datasets.provider_dataset_id"],
+            name="fk_curated_sources_dataset",
         ),
         CheckConstraint(
             "source_kind IN ('openapi','filedata','standard','internal','manual')",
@@ -1173,7 +1368,9 @@ class CuratedSourceRow(Base):
             "row_count IS NULL OR row_count >= 0",
             name="ck_curated_sources_row_count",
         ),
-        Index("idx_curated_sources_provider", "provider", "dataset_key"),
+        # ``uq_curated_sources_dataset``(UNIQUE)가 이미 provider_dataset_id 단일
+        # 열 btree를 만든다 — 0090/freeze 계약 어디에도 같은 열의 별도 index는
+        # 없다. 중복 선언은 metadata에만 존재하는 유령이었다.
         Index(
             "idx_curated_sources_status",
             "provider_status",
@@ -1188,8 +1385,7 @@ class CuratedSourceRow(Base):
         primary_key=True,
         server_default=text("x_extension.gen_random_uuid()"),
     )
-    provider: Mapped[str] = mapped_column(Text, nullable=False)
-    dataset_key: Mapped[str] = mapped_column(Text, nullable=False)
+    provider_dataset_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     source_name: Mapped[str] = mapped_column(Text, nullable=False)
     source_url: Mapped[str | None] = mapped_column(Text)
     source_kind: Mapped[str] = mapped_column(Text, nullable=False)
@@ -1274,7 +1470,6 @@ class CuratedSourceRuleRow(Base):
         ForeignKey("feature.curated_sources.source_id", ondelete="CASCADE"),
         nullable=False,
     )
-    dataset_key: Mapped[str] = mapped_column(Text, nullable=False)
     place_kind: Mapped[str | None] = mapped_column(Text)
     category: Mapped[str | None] = mapped_column(Text)
     region_scope: Mapped[dict[str, Any]] = mapped_column(
@@ -2007,25 +2202,35 @@ class CuratedFeatureDetailSnapshotRow(Base):
 
 
 class ProviderSyncStateRow(Base):
-    """``provider_sync.provider_sync_state`` row mapping — provider cursor 추적."""
+    """``provider_sync.provider_sync_state`` row mapping — exact operation cursor 추적."""
 
     __tablename__ = "provider_sync_state"
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["provider_dataset_id", "sync_scope", "operation_key"],
+            [
+                "provider_sync.provider_dataset_operation_scopes.provider_dataset_id",
+                "provider_sync.provider_dataset_operation_scopes.sync_scope",
+                "provider_sync.provider_dataset_operation_scopes.operation_key",
+            ],
+            name="fk_provider_sync_state_exact_operation_scope",
+            ondelete="RESTRICT",
+        ),
         CheckConstraint(
             "status IN ('active','paused','disabled','failed')",
             name="provider_sync_state_status",
         ),
         Index(
-            "idx_sync_state_next_run",
+            "idx_provider_sync_state_next_run",
             "next_run_after",
             postgresql_where=text("status='active'"),
         ),
         {"schema": "provider_sync"},
     )
 
-    provider: Mapped[str] = mapped_column(String, primary_key=True)
-    dataset_key: Mapped[str] = mapped_column(String, primary_key=True)
+    provider_dataset_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     sync_scope: Mapped[str] = mapped_column(String, primary_key=True)
+    operation_key: Mapped[str] = mapped_column(Text, primary_key=True)
     status: Mapped[str] = mapped_column(
         String,
         nullable=False,
@@ -2195,20 +2400,35 @@ class EnrichmentReviewQueueRow(Base):
     raw SQL은 ``infra/enrichment_review_repo.py``의 ``_SQL`` 상수에서 (ADR-004).
 
     dedup_review_queue와 달리 두 번째 feature/병합이 없다 — 기존 1차 feature
-    (``target_feature_id``)에 ``source_record``(직렬화 ``SourceRecord``)를 ENRICHMENT
-    link으로 잇는다. ``status``: pending→accepted/rejected/ignored. ``name_score``는
-    0~100 ``NUMERIC(5,2)``. ``(target_feature_id, source_provider, source_dataset_key,
-    source_entity_id)`` UNIQUE — 재스캔은 pending 행 점수만 갱신.
+    (``target_feature_id``)에 이미 영속한 immutable source record를 ENRICHMENT
+    link으로 잇는다. source의 provider/dataset/entity 식별과 raw payload는 queue에
+    중복 저장하지 않고 canonical source entity/record를 join해 읽는다. ``status``은
+    pending→accepted/rejected/ignored, ``name_score``는 0~100 ``NUMERIC(5,2)``이다.
+    ``(target_feature_id, source_entity_key)``가 재스캔 identity이며 pending 행만
+    점수·표시 이름·후보 record를 최신으로 바꾼다.
     """
 
     __tablename__ = "enrichment_review_queue"
     __table_args__ = (
         UniqueConstraint(
             "target_feature_id",
-            "source_provider",
-            "source_dataset_key",
-            "source_entity_id",
+            "source_entity_key",
             name="uq_enrichment_review_candidate",
+        ),
+        ForeignKeyConstraint(
+            ["source_entity_key"],
+            ["provider_sync.source_entities.source_entity_key"],
+            name="fk_enrichment_review_queue_source_entity",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["source_entity_key", "source_record_key"],
+            [
+                "provider_sync.source_records.source_entity_key",
+                "provider_sync.source_records.source_record_key",
+            ],
+            name="fk_enrichment_review_queue_source_record",
+            ondelete="RESTRICT",
         ),
         CheckConstraint(
             "status IN ('pending','accepted','rejected','ignored')",
@@ -2224,12 +2444,13 @@ class EnrichmentReviewQueueRow(Base):
             text("name_score DESC"),
             text("review_id DESC"),
         ),
+        # 0090이 만든 index는 (source_entity_key, source_record_key) 2열이다 —
+        # ``fk_enrichment_review_queue_source_record``를 그대로 뒷받침하고
+        # source_entity_key 단독 조회는 선행 prefix로 함께 처리한다.
         Index(
-            "idx_enrichment_review_provider_status_score",
-            "source_provider",
-            "status",
-            text("name_score DESC"),
-            text("review_id DESC"),
+            "idx_enrichment_review_queue_source_entity_record",
+            "source_entity_key",
+            "source_record_key",
         ),
         {"schema": "ops"},
     )
@@ -2244,13 +2465,11 @@ class EnrichmentReviewQueueRow(Base):
         ForeignKey("feature.features.feature_id", ondelete="CASCADE"),
         nullable=False,
     )
-    source_provider: Mapped[str] = mapped_column(String, nullable=False)
-    source_dataset_key: Mapped[str] = mapped_column(String, nullable=False)
-    source_entity_id: Mapped[str] = mapped_column(String, nullable=False)
+    source_entity_key: Mapped[str] = mapped_column(Text, nullable=False)
+    source_record_key: Mapped[str] = mapped_column(Text, nullable=False)
     source_name: Mapped[str] = mapped_column(String, nullable=False)
     target_name: Mapped[str] = mapped_column(String, nullable=False)
     name_score: Mapped[Any] = mapped_column(Numeric(5, 2), nullable=False)
-    source_record: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     status: Mapped[str] = mapped_column(
         String,
         nullable=False,
@@ -2443,36 +2662,9 @@ class ImportJobRow(Base):
             name="ck_import_jobs_cancellation_marker",
         ),
         CheckConstraint(
-            "(provider IS NULL AND dataset_key IS NULL) OR "
-            "(provider IS NOT NULL AND provider = btrim(provider) AND provider <> '' "
-            "AND dataset_key IS NOT NULL AND dataset_key = btrim(dataset_key) "
-            "AND dataset_key <> '')",
-            name=conv("ck_import_jobs_provider_dataset_pair"),
-        ),
-        CheckConstraint(
             "trigger_kind IS NULL OR trigger_kind IN "
             "('schedule','manual','sensor','update_request','backfill','system')",
             name="ck_import_jobs_trigger_kind",
-        ),
-        CheckConstraint(
-            "kind <> 'feature_update_request' OR quarantined_at IS NOT NULL OR "
-            "(parent_job_id IS NULL AND load_batch_id IS NULL "
-            "AND trigger_kind = 'update_request' "
-            "AND operation_registry_version IS NULL AND dagster_run_status IS NULL "
-            "AND payload = '{}'::jsonb "
-            "AND (dagster_run_id IS NULL OR (dagster_run_id = btrim(dagster_run_id) "
-            "AND dagster_run_id <> '')) "
-            "AND (status <> 'queued' OR dagster_run_id IS NULL) "
-            "AND (status <> 'running' OR dagster_run_id IS NOT NULL) "
-            "AND ((provider IS NULL AND dataset_key IS NULL AND sync_scope IS NULL) OR "
-            "(provider IS NOT NULL AND dataset_key IS NOT NULL "
-            "AND sync_scope IS NOT NULL "
-            "AND (sync_scope IN ('dataset_wide','target_grids') OR "
-            "(left(sync_scope, 16) = 'external_system:' "
-            "AND char_length(sync_scope) <= 128 AND char_length(sync_scope) > 16 "
-            "AND substring(sync_scope FROM 17) = "
-            f"btrim(substring(sync_scope FROM 17), {_CANONICAL_WHITESPACE_SQL})))))",
-            name=conv("ck_import_jobs_update_request_shape"),
         ),
         CheckConstraint(
             "dispatch_requested_at IS NULL OR kind = 'feature_update_request'",
@@ -2485,8 +2677,11 @@ class ImportJobRow(Base):
             name=conv("ck_import_jobs_quarantine_shape"),
         ),
         CheckConstraint(
-            "operation_registry_version IS NULL OR kind = 'provider_feature_load_run'",
-            name="ck_import_jobs_registry_version_owner",
+            "(kind = 'provider_feature_load_run' "
+            "AND operation_key IS NOT NULL "
+            "AND operation_key = btrim(operation_key) AND operation_key <> '') "
+            "OR (kind <> 'provider_feature_load_run' AND operation_key IS NULL)",
+            name="ck_import_jobs_operation_key_shape",
         ),
         CheckConstraint(
             "dagster_run_status IS NULL OR "
@@ -2496,20 +2691,8 @@ class ImportJobRow(Base):
             name="ck_import_jobs_dagster_run_status",
         ),
         CheckConstraint(
-            "(kind <> 'provider_feature_load_run' OR "
-            "(parent_job_id IS NULL AND provider IS NULL AND dataset_key IS NULL "
-            "AND dagster_run_id IS NOT NULL AND dagster_run_id = btrim(dagster_run_id) "
-            "AND dagster_run_id <> '' AND trigger_kind IS NOT NULL "
-            "AND operation_registry_version IS NOT NULL "
-            "AND operation_registry_version = btrim(operation_registry_version) "
-            "AND operation_registry_version <> '' AND dagster_run_status IS NOT NULL)) "
-            "AND (kind <> 'provider_feature_load' OR "
-            "(parent_job_id IS NOT NULL AND provider IS NOT NULL "
-            "AND dataset_key IS NOT NULL AND dagster_run_id IS NOT NULL "
-            "AND dagster_run_id = btrim(dagster_run_id) AND dagster_run_id <> '' "
-            "AND trigger_kind IS NULL AND operation_registry_version IS NULL "
-            "AND dagster_run_status IS NULL))",
-            name="ck_import_jobs_feature_tracking_shape",
+            "dataset_membership_mode IN ('root','single','multiple')",
+            name="ck_import_jobs_membership_mode",
         ),
         CheckConstraint(
             "kind NOT IN ('provider_feature_load_run','provider_feature_load') OR "
@@ -2533,19 +2716,6 @@ class ImportJobRow(Base):
             "job_id",
             postgresql_where=text(
                 "kind = 'feature_update_request' AND status = 'queued' AND cancellation_id IS NULL"
-            ),
-        ),
-        Index(
-            "uq_import_jobs_active_feature_update_scope",
-            "provider",
-            "dataset_key",
-            "sync_scope",
-            unique=True,
-            postgresql_where=text(
-                "kind = 'feature_update_request' "
-                "AND status IN ('queued','running') "
-                "AND quarantined_at IS NULL "
-                "AND provider IS NOT NULL"
             ),
         ),
         Index(
@@ -2584,36 +2754,6 @@ class ImportJobRow(Base):
             unique=True,
             postgresql_where=text("kind = 'provider_feature_load_run' AND parent_job_id IS NULL"),
         ),
-        Index(
-            "uq_import_jobs_feature_run_pair",
-            "parent_job_id",
-            "provider",
-            "dataset_key",
-            unique=True,
-            postgresql_where=text("kind = 'provider_feature_load' AND parent_job_id IS NOT NULL"),
-        ),
-        Index(
-            "idx_import_jobs_provider_dataset_created",
-            "provider",
-            "dataset_key",
-            text("created_at DESC"),
-            text("job_id DESC"),
-            postgresql_where=text("provider IS NOT NULL AND dataset_key IS NOT NULL"),
-        ),
-        Index(
-            "idx_import_jobs_dataset_created",
-            "dataset_key",
-            text("created_at DESC"),
-            text("job_id DESC"),
-            postgresql_where=text("dataset_key IS NOT NULL"),
-        ),
-        Index(
-            "idx_import_jobs_provider_created",
-            "provider",
-            text("created_at DESC"),
-            text("job_id DESC"),
-            postgresql_where=text("provider IS NOT NULL"),
-        ),
         Index("idx_import_jobs_cancellation_id", "cancellation_id"),
         CheckConstraint(
             "root_kind IN ('import_job','update_request')",
@@ -2637,6 +2777,11 @@ class ImportJobRow(Base):
         # (실제 default 부여는 0020 migration의 컬럼 DEFAULT가 담당).
     )
     kind: Mapped[str] = mapped_column(Text, nullable=False)
+    dataset_membership_mode: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        server_default=text("'root'"),
+    )
     load_batch_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
     parent_job_id: Mapped[str | None] = mapped_column(
         UUID(as_uuid=False),
@@ -2662,15 +2807,12 @@ class ImportJobRow(Base):
     error_message: Mapped[str | None] = mapped_column(Text)
     # Dagster run 연결 실컬럼 (ADR-064/T-ADM-C3) — payload JSONB 조회 hot path 제거.
     dagster_run_id: Mapped[str | None] = mapped_column(Text)
-    provider: Mapped[str | None] = mapped_column(Text)
-    dataset_key: Mapped[str | None] = mapped_column(Text)
-    sync_scope: Mapped[str | None] = mapped_column(Text)
     # root/component 멤버십을 stamp한다(ADR-077) — read-time 재귀 lineage 제거.
     # DB 트리거가 parent에서 파생(자식은 부모의 root 승계, root는 자기 자신).
     root_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
     root_kind: Mapped[str] = mapped_column(Text, nullable=False)
     trigger_kind: Mapped[str | None] = mapped_column(Text)
-    operation_registry_version: Mapped[str | None] = mapped_column(Text)
+    operation_key: Mapped[str | None] = mapped_column(Text)
     dagster_run_status: Mapped[str | None] = mapped_column(Text)
     cancellation_id: Mapped[str | None] = mapped_column(
         UUID(as_uuid=False),
@@ -2758,6 +2900,70 @@ class C6cCancelProbeFixtureRow(Base):
 
 
 # =============================================================================
+# ops.import_job_datasets  (ADR-087)
+# =============================================================================
+
+
+class ImportJobDatasetRow(Base):
+    """단일 import job에 snapshot된 canonical dataset-operation member."""
+
+    __tablename__ = "import_job_datasets"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["job_id"],
+            ["ops.import_jobs.job_id"],
+            name="fk_import_job_datasets_job",
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "job_id",
+            "provider_dataset_id",
+            "sync_scope",
+            "operation_key",
+            name="uq_import_job_datasets_exact_identity",
+        ),
+        ForeignKeyConstraint(
+            ["provider_dataset_id", "sync_scope", "operation_key"],
+            [
+                "provider_sync.provider_dataset_operation_scopes.provider_dataset_id",
+                "provider_sync.provider_dataset_operation_scopes.sync_scope",
+                "provider_sync.provider_dataset_operation_scopes.operation_key",
+            ],
+            name="fk_import_job_datasets_exact_operation_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "job_id",
+            "import_job_dataset_id",
+            name="uq_import_job_datasets_job_member",
+        ),
+        Index(
+            "idx_import_job_datasets_exact_operation_job",
+            "provider_dataset_id",
+            "sync_scope",
+            "operation_key",
+            "job_id",
+        ),
+        {"schema": "ops"},
+    )
+
+    import_job_dataset_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        server_default=text("x_extension.gen_random_uuid()"),
+    )
+    job_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    provider_dataset_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    sync_scope: Mapped[str] = mapped_column(Text, nullable=False)
+    operation_key: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+
+
+# =============================================================================
 # ops.import_job_events  (T-221b)
 # =============================================================================
 
@@ -2771,22 +2977,14 @@ class ImportJobEventRow(Base):
             "level IN ('debug','info','warning','error','critical')",
             name="ck_import_job_events_level",
         ),
-        CheckConstraint(
-            "quarantined_at IS NOT NULL OR "
-            "((provider IS NULL AND dataset_key IS NULL) OR "
-            "(provider IS NOT NULL AND provider = btrim(provider) AND provider <> '' "
-            "AND dataset_key IS NOT NULL AND dataset_key = btrim(dataset_key) "
-            "AND dataset_key <> ''))",
-            name=conv("ck_import_job_events_provider_dataset_pair"),
-        ),
-        CheckConstraint(
-            "sync_scope IS NULL OR (provider IS NOT NULL AND dataset_key IS NOT NULL "
-            "AND (sync_scope IN ('dataset_wide','target_grids') OR "
-            "(left(sync_scope, 16) = 'external_system:' "
-            "AND char_length(sync_scope) <= 128 AND char_length(sync_scope) > 16 "
-            "AND substring(sync_scope FROM 17) = "
-            f"btrim(substring(sync_scope FROM 17), {_CANONICAL_WHITESPACE_SQL}))))",
-            name=conv("ck_import_job_events_sync_scope"),
+        ForeignKeyConstraint(
+            ["job_id", "import_job_dataset_id"],
+            [
+                "ops.import_job_datasets.job_id",
+                "ops.import_job_datasets.import_job_dataset_id",
+            ],
+            name="fk_import_job_events_job_member",
+            ondelete="RESTRICT",
         ),
         Index(
             "idx_import_job_events_time",
@@ -2802,39 +3000,27 @@ class ImportJobEventRow(Base):
             postgresql_where=text("quarantined_at IS NULL"),
         ),
         Index(
-            "idx_import_job_events_provider_time",
-            "provider",
-            text("occurred_at DESC"),
-            text("event_id DESC"),
-            postgresql_where=text("provider IS NOT NULL AND quarantined_at IS NULL"),
-        ),
-        Index(
-            "idx_import_job_events_provider_dataset_time",
-            "provider",
-            "dataset_key",
-            text("occurred_at DESC"),
-            text("event_id DESC"),
-            postgresql_where=text(
-                "provider IS NOT NULL AND dataset_key IS NOT NULL AND quarantined_at IS NULL"
-            ),
-        ),
-        Index(
             "idx_import_job_events_level_time",
             "level",
             text("occurred_at DESC"),
             text("event_id DESC"),
             postgresql_where=text("quarantined_at IS NULL"),
         ),
+        # keyset은 ``(occurred_at, event_id)``다 — tiebreaker가 빠지면 페이지마다
+        # Sort가 붙는다. 부분 술어도 질의의 ``quarantined_at IS NULL``과 같아야
+        # 격리 행을 훑지 않는다 (0057이 갖고 있던 두 보증).
+        # ``level``은 key가 아니라 INCLUDE다: dataset scope 조회는 member 마다
+        # 상위 limit만 뽑아 합치는데, level filter가 heap을 때리면 member 수에
+        # 비례한 random I/O가 살아난다. INCLUDE로 두면 그 scan이 index-only로
+        # 남고 key 순서(=keyset 정렬)는 건드리지 않는다.
         Index(
-            "idx_import_job_events_provider_dataset_scope_time",
-            "provider",
-            "dataset_key",
-            "sync_scope",
+            "idx_import_job_events_member_time",
+            "import_job_dataset_id",
             text("occurred_at DESC"),
             text("event_id DESC"),
+            postgresql_include=["level"],
             postgresql_where=text(
-                "provider IS NOT NULL AND dataset_key IS NOT NULL "
-                "AND sync_scope IS NOT NULL AND quarantined_at IS NULL"
+                "import_job_dataset_id IS NOT NULL AND quarantined_at IS NULL"
             ),
         ),
         {"schema": "ops"},
@@ -2850,9 +3036,7 @@ class ImportJobEventRow(Base):
         ForeignKey("ops.import_jobs.job_id", ondelete="CASCADE"),
         nullable=False,
     )
-    provider: Mapped[str | None] = mapped_column(Text)
-    dataset_key: Mapped[str | None] = mapped_column(Text)
-    sync_scope: Mapped[str | None] = mapped_column(Text)
+    import_job_dataset_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
     feature_id: Mapped[str | None] = mapped_column(Text)
     stage: Mapped[str | None] = mapped_column(Text)
     level: Mapped[str] = mapped_column(Text, nullable=False)
@@ -2929,17 +3113,30 @@ class OfflineUploadRow(Base):
             "(status = 'deleting') = (delete_command_id IS NOT NULL)",
             name="ck_offline_uploads_delete_owner",
         ),
+        # offline upload도 실행 membership이라 scope PK와 같은 triple을 참조한다
+        # (ADR-088 §결정 2). pair FK로 두면 scope PK가 triple인 이상 붙지 않는다.
+        ForeignKeyConstraint(
+            ["provider_dataset_id", "sync_scope", "operation_key"],
+            [
+                "provider_sync.provider_dataset_operation_scopes.provider_dataset_id",
+                "provider_sync.provider_dataset_operation_scopes.sync_scope",
+                "provider_sync.provider_dataset_operation_scopes.operation_key",
+            ],
+            name="fk_offline_uploads_exact_operation_scope",
+            ondelete="RESTRICT",
+        ),
+        # 멱등 키는 freeze 계약(tvn33-reference-ownership-v1.sql)이 선언한 3열
+        # 그대로다. writer의 ``ON CONFLICT``가 이 열 집합을 중재자로 지목하므로
+        # 폭을 바꾸면 42P10으로 죽는다 — operation을 넣을 실제 요구도 없었다.
         UniqueConstraint(
-            "provider",
-            "dataset_key",
+            "provider_dataset_id",
             "sync_scope",
             "checksum_sha256",
-            name="uq_offline_uploads_provider_dataset_scope_checksum",
+            name="uq_offline_uploads_dataset_scope_checksum",
         ),
         Index(
-            "idx_offline_uploads_provider_dataset",
-            "provider",
-            "dataset_key",
+            "idx_offline_uploads_dataset_created",
+            "provider_dataset_id",
             text("created_at DESC"),
         ),
         Index("idx_offline_uploads_status", "status", text("created_at DESC")),
@@ -2951,13 +3148,13 @@ class OfflineUploadRow(Base):
         primary_key=True,
         server_default=text("x_extension.gen_random_uuid()"),
     )
-    provider: Mapped[str] = mapped_column(Text, nullable=False)
-    dataset_key: Mapped[str] = mapped_column(Text, nullable=False)
+    provider_dataset_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     sync_scope: Mapped[str] = mapped_column(
         Text,
         nullable=False,
-        server_default=text("'default'"),
+        server_default=text("'dataset_wide'"),
     )
+    operation_key: Mapped[str] = mapped_column(Text, nullable=False)
     original_filename: Mapped[str] = mapped_column(Text, nullable=False)
     storage_backend: Mapped[str] = mapped_column(Text, nullable=False)
     storage_key: Mapped[str] = mapped_column(Text, nullable=False)
@@ -3025,21 +3222,12 @@ class FeatureUpdateRequestRow(Base):
             name=conv("ck_feature_update_requests_scope_shape"),
         ),
         CheckConstraint(
-            "ops.is_valid_feature_update_filter_array(providers, 32)",
-            name=conv("ck_feature_update_requests_providers_shape"),
-        ),
-        CheckConstraint(
-            "ops.is_valid_feature_update_filter_array(dataset_keys, 64)",
-            name=conv("ck_feature_update_requests_dataset_keys_shape"),
-        ),
-        CheckConstraint(
             "ops.is_valid_feature_update_policy(update_policy)",
             name=conv("ck_feature_update_requests_update_policy_shape"),
         ),
         CheckConstraint(
-            "scope_type <> 'provider_dataset' OR "
-            "(cardinality(providers) = 0 AND cardinality(dataset_keys) = 0)",
-            name=conv("ck_feature_update_requests_direct_filters_empty"),
+            "dataset_membership_mode IN ('single','multiple')",
+            name="ck_feature_update_requests_membership_mode",
         ),
         CheckConstraint(
             "priority BETWEEN 0 AND 1000",
@@ -3074,16 +3262,6 @@ class FeatureUpdateRequestRow(Base):
             text("created_at DESC"),
             text("request_id DESC"),
         ),
-        Index(
-            "idx_feature_update_providers_gin",
-            "providers",
-            postgresql_using="gin",
-        ),
-        Index(
-            "idx_feature_update_dataset_keys_gin",
-            "dataset_keys",
-            postgresql_using="gin",
-        ),
         {"schema": "ops"},
     )
 
@@ -3094,15 +3272,10 @@ class FeatureUpdateRequestRow(Base):
     )
     scope_type: Mapped[str] = mapped_column(Text, nullable=False)
     scope: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
-    providers: Mapped[list[str]] = mapped_column(
-        ARRAY(Text),
+    dataset_membership_mode: Mapped[str] = mapped_column(
+        Text,
         nullable=False,
-        server_default=text("'{}'::text[]"),
-    )
-    dataset_keys: Mapped[list[str]] = mapped_column(
-        ARRAY(Text),
-        nullable=False,
-        server_default=text("'{}'::text[]"),
+        server_default=text("'single'"),
     )
     update_policy: Mapped[dict[str, Any]] = mapped_column(
         JSONB,
@@ -3137,6 +3310,57 @@ class FeatureUpdateRequestRow(Base):
         nullable=False,
         server_default=text("1"),
     )
+
+
+class FeatureUpdateRequestDatasetRow(Base):
+    """feature update request가 생성 시점에 고정한 canonical dataset/scope snapshot."""
+
+    __tablename__ = "feature_update_request_datasets"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["request_id"],
+            ["ops.feature_update_requests.request_id"],
+            name="fk_feature_update_request_datasets_request",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["provider_dataset_id", "sync_scope", "operation_key"],
+            [
+                "provider_sync.provider_dataset_operation_scopes.provider_dataset_id",
+                "provider_sync.provider_dataset_operation_scopes.sync_scope",
+                "provider_sync.provider_dataset_operation_scopes.operation_key",
+            ],
+            name="fk_feature_update_request_datasets_exact_operation_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "request_id",
+            "provider_dataset_id",
+            "sync_scope",
+            "operation_key",
+            name="uq_feature_update_request_datasets_identity",
+        ),
+        # 조회는 ``scoped_request_seeds``(pipeline_repo) 한 곳뿐이고 술어는
+        # provider_dataset_id 하나, 투영은 request_id 하나다 — 0090/freeze 계약이
+        # 정한 2열이 그 경로를 index-only로 덮는다. scope/operation을 중간에
+        # 끼우면 index만 넓어지고 얻는 것이 없다.
+        Index(
+            "idx_feature_update_request_datasets_dataset_request",
+            "provider_dataset_id",
+            "request_id",
+        ),
+        {"schema": "ops"},
+    )
+
+    feature_update_request_dataset_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        server_default=text("x_extension.gen_random_uuid()"),
+    )
+    request_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    provider_dataset_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    sync_scope: Mapped[str] = mapped_column(Text, nullable=False)
+    operation_key: Mapped[str] = mapped_column(Text, nullable=False)
 
 
 class FeatureUpdateRequestIdempotencyRow(Base):
@@ -3892,17 +4116,18 @@ class PipelineCancellationMemberRow(Base):
 
 
 class IntegrityObservationScopeRow(Base):
-    """provider/dataset별 monotonic observation generation fence."""
+    """canonical dataset별 monotonic observation generation fence."""
 
     __tablename__ = "integrity_observation_scopes"
     __table_args__ = (
-        CheckConstraint(
-            "provider = btrim(provider) AND provider <> ''",
-            name=conv("ck_integrity_observation_scopes_provider"),
+        ForeignKeyConstraint(
+            ["provider_dataset_id"],
+            ["provider_sync.provider_datasets.provider_dataset_id"],
+            name="fk_integrity_observation_scopes_dataset",
         ),
-        CheckConstraint(
-            "dataset_key = btrim(dataset_key) AND dataset_key <> ''",
-            name=conv("ck_integrity_observation_scopes_dataset"),
+        UniqueConstraint(
+            "provider_dataset_id",
+            name="uq_integrity_observation_scopes_dataset",
         ),
         CheckConstraint(
             "latest_generation >= 0 "
@@ -3913,8 +4138,12 @@ class IntegrityObservationScopeRow(Base):
         {"schema": "ops"},
     )
 
-    provider: Mapped[str] = mapped_column(Text, primary_key=True)
-    dataset_key: Mapped[str] = mapped_column(Text, primary_key=True)
+    integrity_observation_scope_id: Mapped[int] = mapped_column(
+        BigInteger,
+        Identity(always=True),
+        primary_key=True,
+    )
+    provider_dataset_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     latest_generation: Mapped[int] = mapped_column(
         BigInteger,
         nullable=False,
@@ -3965,30 +4194,24 @@ class IntegrityObservationRunRow(Base):
             name=conv("ck_integrity_observation_runs_completion"),
         ),
         ForeignKeyConstraint(
-            ["provider", "dataset_key"],
-            [
-                "ops.integrity_observation_scopes.provider",
-                "ops.integrity_observation_scopes.dataset_key",
-            ],
+            ["integrity_observation_scope_id"],
+            ["ops.integrity_observation_scopes.integrity_observation_scope_id"],
             name=conv("fk_integrity_observation_runs_scope"),
             ondelete="CASCADE",
         ),
         UniqueConstraint(
-            "provider",
-            "dataset_key",
+            "integrity_observation_scope_id",
             "generation",
-            name=conv("uq_integrity_observation_runs_generation"),
+            name=conv("uq_integrity_observation_runs_generation_v2"),
         ),
         UniqueConstraint(
-            "provider",
-            "dataset_key",
+            "integrity_observation_scope_id",
             "external_run_id",
-            name=conv("uq_integrity_observation_runs_external_run"),
+            name=conv("uq_integrity_observation_runs_external_run_v2"),
         ),
         Index(
             "idx_integrity_observation_runs_scope_status",
-            "provider",
-            "dataset_key",
+            "integrity_observation_scope_id",
             "status",
             text("generation DESC"),
         ),
@@ -4000,8 +4223,7 @@ class IntegrityObservationRunRow(Base):
         Identity(always=True),
         primary_key=True,
     )
-    provider: Mapped[str] = mapped_column(Text, nullable=False)
-    dataset_key: Mapped[str] = mapped_column(Text, nullable=False)
+    integrity_observation_scope_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     generation: Mapped[int] = mapped_column(BigInteger, nullable=False)
     external_run_id: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(
@@ -4074,6 +4296,11 @@ class DataIntegrityViolationRow(Base):
 
     __tablename__ = "data_integrity_violations"
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["provider_dataset_id"],
+            ["provider_sync.provider_datasets.provider_dataset_id"],
+            name="fk_data_integrity_violations_dataset",
+        ),
         CheckConstraint(
             "severity IN ('info','warning','error','critical')",
             name="ck_violations_severity",
@@ -4118,12 +4345,11 @@ class DataIntegrityViolationRow(Base):
             text("issue_id DESC"),
         ),
         Index(
-            "idx_violations_provider_status_seen",
-            "provider",
+            "idx_data_integrity_violations_dataset_status",
+            "provider_dataset_id",
             "status",
             text("last_seen_at DESC"),
-            text("issue_id DESC"),
-            postgresql_where=text("provider IS NOT NULL"),
+            postgresql_where=text("provider_dataset_id IS NOT NULL"),
         ),
         Index(
             "idx_violations_feature_seen",
@@ -4140,8 +4366,7 @@ class DataIntegrityViolationRow(Base):
         primary_key=True,
         server_default=text("x_extension.gen_random_uuid()"),
     )
-    provider: Mapped[str | None] = mapped_column(Text)
-    dataset_key: Mapped[str | None] = mapped_column(Text)
+    provider_dataset_id: Mapped[int | None] = mapped_column(BigInteger)
     source_record_key: Mapped[str | None] = mapped_column(
         String,
         ForeignKey(
@@ -4335,6 +4560,11 @@ class PoiCacheTargetFeatureLinkRow(Base):
 
     __tablename__ = "poi_cache_target_feature_links"
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["provider_dataset_id"],
+            ["provider_sync.provider_datasets.provider_dataset_id"],
+            name="fk_poi_cache_target_feature_links_dataset",
+        ),
         CheckConstraint(
             "relation IN ('within_radius','same_sigungu','manual')",
             name="ck_poi_cache_link_relation",
@@ -4345,10 +4575,9 @@ class PoiCacheTargetFeatureLinkRow(Base):
             postgresql_where=text("active"),
         ),
         Index(
-            "idx_poi_cache_links_provider_dataset",
-            "provider",
-            "dataset_key",
-            postgresql_where=text("active"),
+            "idx_poi_cache_target_feature_links_dataset",
+            "provider_dataset_id",
+            postgresql_where=text("active AND provider_dataset_id IS NOT NULL"),
         ),
         {"schema": "ops"},
     )
@@ -4363,8 +4592,7 @@ class PoiCacheTargetFeatureLinkRow(Base):
         ForeignKey("feature.features.feature_id", ondelete="CASCADE"),
         primary_key=True,
     )
-    provider: Mapped[str | None] = mapped_column(Text)
-    dataset_key: Mapped[str | None] = mapped_column(Text)
+    provider_dataset_id: Mapped[int | None] = mapped_column(BigInteger)
     distance_m: Mapped[Any | None] = mapped_column(Numeric(12, 2))
     relation: Mapped[str] = mapped_column(
         Text,
@@ -5583,6 +5811,11 @@ class ProviderRefreshPolicyRow(Base):
 
     __tablename__ = "provider_refresh_policies"
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["provider_dataset_id"],
+            ["provider_sync.provider_datasets.provider_dataset_id"],
+            name="fk_provider_refresh_policies_dataset",
+        ),
         CheckConstraint(
             "source_kind IN ('openapi','filedata','manual','system')",
             name="ck_provider_refresh_source_kind",
@@ -5634,15 +5867,13 @@ class ProviderRefreshPolicyRow(Base):
         Index(
             "idx_provider_refresh_enabled",
             "enabled",
-            "provider",
-            "dataset_key",
+            "provider_dataset_id",
         ),
         Index("idx_provider_refresh_source_kind", "source_kind"),
         {"schema": "ops"},
     )
 
-    provider: Mapped[str] = mapped_column(Text, primary_key=True)
-    dataset_key: Mapped[str] = mapped_column(Text, primary_key=True)
+    provider_dataset_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     source_kind: Mapped[str] = mapped_column(Text, nullable=False)
     targeted_policy: Mapped[str] = mapped_column(
         Text,
@@ -6022,6 +6253,17 @@ class ManagedFileRow(Base):
             "jsonb_typeof(meta) = 'object'",
             name="ck_managed_files_meta_object",
         ),
+        ForeignKeyConstraint(
+            ["provider_dataset_id"],
+            ["provider_sync.provider_datasets.provider_dataset_id"],
+            name="fk_managed_files_dataset",
+        ),
+        CheckConstraint(
+            "(provider_dataset_id IS NOT NULL AND provider_name IS NULL) OR "
+            "(provider_dataset_id IS NULL AND provider_name IS NOT NULL) OR "
+            "(provider_dataset_id IS NULL AND provider_name IS NULL)",
+            name="ck_managed_files_owner_v2",
+        ),
         UniqueConstraint(
             "storage_backend",
             "location",
@@ -6040,9 +6282,14 @@ class ManagedFileRow(Base):
             text("downloaded_at DESC"),
         ),
         Index(
-            "idx_managed_files_provider",
-            "provider",
-            postgresql_where=text("provider IS NOT NULL"),
+            "idx_managed_files_provider_dataset",
+            "provider_dataset_id",
+            postgresql_where=text("provider_dataset_id IS NOT NULL"),
+        ),
+        Index(
+            "idx_managed_files_provider_name",
+            "provider_name",
+            postgresql_where=text("provider_name IS NOT NULL"),
         ),
         Index(
             "idx_managed_files_origin_job",
@@ -6072,8 +6319,8 @@ class ManagedFileRow(Base):
         server_default=text("false"),
     )
     kind: Mapped[str] = mapped_column(Text, nullable=False)
-    provider: Mapped[str | None] = mapped_column(Text)
-    dataset_key: Mapped[str | None] = mapped_column(Text)
+    provider_dataset_id: Mapped[int | None] = mapped_column(BigInteger)
+    provider_name: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(
         Text,
         nullable=False,

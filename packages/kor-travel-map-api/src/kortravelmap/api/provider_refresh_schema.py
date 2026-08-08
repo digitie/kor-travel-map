@@ -101,8 +101,18 @@ class ProviderRefreshPolicyRecord(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    provider: str
-    dataset_key: str
+    provider_dataset_id: int = Field(
+        ge=1,
+        description="정책 저장·변경의 유일한 canonical provider dataset 식별자.",
+    )
+    provider: str | None = Field(
+        default=None,
+        description="provider_datasets join에서만 얻는 표시용 provider.",
+    )
+    dataset_key: str | None = Field(
+        default=None,
+        description="provider_datasets join에서만 얻는 표시용 dataset key.",
+    )
     source_kind: str
     targeted_policy: str
     system_interval_seconds: int | None = None
@@ -146,6 +156,7 @@ def provider_refresh_policy_record(
 ) -> ProviderRefreshPolicyRecord:
     """repo dataclass를 OpenAPI DTO로 변환한다."""
     return ProviderRefreshPolicyRecord(
+        provider_dataset_id=policy.provider_dataset_id,
         provider=policy.provider,
         dataset_key=policy.dataset_key,
         source_kind=policy.source_kind,

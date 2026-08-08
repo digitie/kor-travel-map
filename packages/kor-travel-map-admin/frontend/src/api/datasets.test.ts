@@ -25,7 +25,10 @@ import {
   type ProviderRefreshPolicyUpsertRequest,
 } from "./datasets";
 
-type FetchMock = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+type FetchMock = (
+  input: RequestInfo | URL,
+  init?: RequestInit,
+) => Promise<Response>;
 
 function stubFetch() {
   const fetchMock = vi.fn<FetchMock>(() =>
@@ -90,24 +93,27 @@ describe("ops datasets current REST contract", () => {
     ]);
   });
 
-  it("detail/preview/refresh-policy가 고정 경로와 query 식별자를 사용한다", async () => {
+  it("detail/preview는 exact triple, refresh-policy는 canonical dataset ID만 사용한다", async () => {
     const fetchMock = stubFetch();
 
-    await fetchOpsDataset("kma grid", "short term", "external_system:concierge");
-    await previewOpsDataset("kma grid", "short term", {
+    await fetchOpsDataset(
+      101,
+      "external_system:concierge",
+      "refresh_targeted",
+    );
+    await previewOpsDataset(101, "external_system:concierge", "refresh_targeted", {
       source: "fixture",
       max_items: 3,
     });
     await upsertOpsDatasetRefreshPolicy(
-      "kma grid",
-      "short term",
+      101,
       {} as ProviderRefreshPolicyUpsertRequest,
     );
 
     expect(fetchMock.mock.calls.map(([input]) => input)).toEqual([
-      "/api/proxy/v1/ops/datasets/detail?provider=kma+grid&dataset_key=short+term&sync_scope=external_system%3Aconcierge",
-      "/api/proxy/v1/ops/datasets/preview?provider=kma+grid&dataset_key=short+term",
-      "/api/proxy/v1/ops/datasets/refresh-policy?provider=kma+grid&dataset_key=short+term",
+      "/api/proxy/v1/ops/datasets/101?sync_scope=external_system%3Aconcierge&operation_key=refresh_targeted",
+      "/api/proxy/v1/ops/datasets/101/preview?sync_scope=external_system%3Aconcierge&operation_key=refresh_targeted",
+      "/api/proxy/v1/ops/datasets/refresh-policy?provider_dataset_id=101",
     ]);
     expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual([
       "GET",
@@ -119,16 +125,16 @@ describe("ops datasets current REST contract", () => {
   it("지금 갱신 body는 중복 filter 없이 run_mode=now를 고정한다", () => {
     expect(
       buildDatasetRefreshNowRequest({
-        provider: "kma",
-        datasetKey: "short_term",
+        providerDatasetId: 101,
         syncScope: "external_system:concierge",
+        operationKey: "refresh_targeted",
       }),
     ).toEqual({
       scope: {
         type: "provider_dataset",
-        provider: "kma",
-        dataset_key: "short_term",
+        provider_dataset_id: 101,
         sync_scope: "external_system:concierge",
+        operation_key: "refresh_targeted",
       },
       run_mode: "now",
       priority: 75,
@@ -136,15 +142,16 @@ describe("ops datasets current REST contract", () => {
     });
     expect(
       buildDatasetRefreshNowRequest({
-        provider: "tourapi",
-        datasetKey: "area_based_list",
-        syncScope: null,
+        providerDatasetId: 202,
+        syncScope: "dataset_wide",
+        operationKey: "refresh_full",
       }),
     ).toEqual({
       scope: {
         type: "provider_dataset",
-        provider: "tourapi",
-        dataset_key: "area_based_list",
+        provider_dataset_id: 202,
+        sync_scope: "dataset_wide",
+        operation_key: "refresh_full",
       },
       run_mode: "now",
       priority: 75,
@@ -171,9 +178,9 @@ describe("ops datasets current REST contract", () => {
 
     await expect(
       createDatasetRefreshNow({
-        provider: "kma",
-        datasetKey: "short_term",
+        providerDatasetId: 101,
         syncScope: "target_grids",
+        operationKey: "refresh_targeted",
       }),
     ).resolves.toEqual(response);
     expect(fetchMock).toHaveBeenCalledWith(
@@ -182,9 +189,9 @@ describe("ops datasets current REST contract", () => {
         method: "POST",
         body: JSON.stringify(
           buildDatasetRefreshNowRequest({
-            provider: "kma",
-            datasetKey: "short_term",
-            syncScope: "target_grids",
+          providerDatasetId: 101,
+          syncScope: "target_grids",
+          operationKey: "refresh_targeted",
           }),
         ),
       }),
@@ -204,13 +211,10 @@ describe("ops datasets current REST contract", () => {
 });
 
 describe("ops datasets scope capability", () => {
-  it("dataset-wide는 nullable scope로 정규화하고 target scope는 allow-list만 허용한다", () => {
+  it("dataset-wide와 target scope 모두 canonical scope를 명시한다", () => {
     expect(
-      resolveDatasetRefreshScope(
-        DATASET_WIDE_CAPABILITY,
-        "dataset_wide",
-      ),
-    ).toEqual({ allowed: true, syncScope: null });
+      resolveDatasetRefreshScope(DATASET_WIDE_CAPABILITY, "dataset_wide"),
+    ).toEqual({ allowed: true, syncScope: "dataset_wide" });
     expect(
       resolveDatasetRefreshScope(
         TARGET_CAPABILITY,
@@ -221,17 +225,13 @@ describe("ops datasets scope capability", () => {
       syncScope: "external_system:concierge",
     });
     expect(
-      resolveDatasetRefreshScope(
-        TARGET_CAPABILITY,
-        "external_system:deleted",
-      ),
+      resolveDatasetRefreshScope(TARGET_CAPABILITY, "external_system:deleted"),
     ).toMatchObject({ allowed: false });
   });
-
   it("누락되거나 모순된 capability는 fail-closed한다", () => {
-    expect(
-      resolveDatasetRefreshScope(null, "target_grids"),
-    ).toMatchObject({ allowed: false });
+    expect(resolveDatasetRefreshScope(null, "target_grids")).toMatchObject({
+      allowed: false,
+    });
     expect(
       resolveDatasetRefreshScope(
         { ...DATASET_WIDE_CAPABILITY, supported: true },
@@ -239,13 +239,9 @@ describe("ops datasets scope capability", () => {
       ),
     ).toMatchObject({ allowed: false });
     expect(
-      resolveDatasetRefreshScope(
-        DATASET_WIDE_CAPABILITY,
-        "stale_scope",
-      ),
+      resolveDatasetRefreshScope(DATASET_WIDE_CAPABILITY, "stale_scope"),
     ).toMatchObject({ allowed: false });
   });
-
 });
 
 describe("dataset refresh status query identity", () => {
@@ -254,7 +250,9 @@ describe("dataset refresh status query identity", () => {
     const requestId = "request-1";
     const pipelineKey = datasetRefreshExecutionQueryKey(requestId);
     const pipelineShape = {
-      data: { execution: { id: requestId, kind: "update_request", status: "running" } },
+      data: {
+        execution: { id: requestId, kind: "update_request", status: "running" },
+      },
     };
     queryClient.setQueryData(pipelineKey, pipelineShape);
 
@@ -291,7 +289,9 @@ describe("ops datasets active polling gate", () => {
 
   it("서버가 exact scope active execution을 투영한 동안만 목록 polling을 유지한다", () => {
     expect(hasActiveDatasetExecution(gridWithActiveExecution(true))).toBe(true);
-    expect(hasActiveDatasetExecution(gridWithActiveExecution(false))).toBe(false);
+    expect(hasActiveDatasetExecution(gridWithActiveExecution(false))).toBe(
+      false,
+    );
     expect(hasActiveDatasetExecution(undefined)).toBe(false);
   });
 
@@ -303,12 +303,12 @@ describe("ops datasets active polling gate", () => {
         },
       }) as OpsDatasetDetailResponse;
 
-    expect(hasActiveDatasetDetailExecution(detailWithActiveExecution(true))).toBe(
-      true,
-    );
-    expect(hasActiveDatasetDetailExecution(detailWithActiveExecution(false))).toBe(
-      false,
-    );
+    expect(
+      hasActiveDatasetDetailExecution(detailWithActiveExecution(true)),
+    ).toBe(true);
+    expect(
+      hasActiveDatasetDetailExecution(detailWithActiveExecution(false)),
+    ).toBe(false);
     expect(hasActiveDatasetDetailExecution(undefined)).toBe(false);
   });
 
@@ -360,19 +360,24 @@ describe("ops datasets live invalidation adapter", () => {
 
 describe("ops datasets refresh conflict", () => {
   it("409 ProblemDetail의 기존 request 정보를 typed 값으로 보존한다", () => {
-    const error = new ApiClientError("conflict", 409, "/v1/ops/pipeline/requests", {
-      code: "ACTIVE_SCOPE_CONFLICT",
-      detail: "다른 계획의 활성 요청이 있습니다.",
-      request_id: "trace-1",
-      status: 409,
-      title: "Conflict",
-      type: "https://kor-travel-map/errors/active-scope-conflict",
-      details: {
-        request_id: "request-1",
-        status: "running",
-        detail_url: "/v1/ops/pipeline/executions/update_request/request-1",
+    const error = new ApiClientError(
+      "conflict",
+      409,
+      "/v1/ops/pipeline/requests",
+      {
+        code: "ACTIVE_SCOPE_CONFLICT",
+        detail: "다른 계획의 활성 요청이 있습니다.",
+        request_id: "trace-1",
+        status: 409,
+        title: "Conflict",
+        type: "https://kor-travel-map/errors/active-scope-conflict",
+        details: {
+          request_id: "request-1",
+          status: "running",
+          detail_url: "/v1/ops/pipeline/executions/update_request/request-1",
+        },
       },
-    });
+    );
 
     expect(datasetRefreshConflict(error)).toEqual({
       code: "ACTIVE_SCOPE_CONFLICT",
@@ -396,15 +401,20 @@ describe("ops datasets refresh conflict", () => {
   });
 
   it("request_id가 있어도 허용하지 않은 409 code는 충돌 링크로 오인하지 않는다", () => {
-    const error = new ApiClientError("conflict", 409, "/v1/ops/pipeline/requests", {
-      code: "SOME_OTHER_CONFLICT",
-      detail: "다른 충돌",
-      request_id: "trace-1",
-      status: 409,
-      title: "Conflict",
-      type: "https://kor-travel-map/errors/some-other-conflict",
-      details: { request_id: "request-1" },
-    });
+    const error = new ApiClientError(
+      "conflict",
+      409,
+      "/v1/ops/pipeline/requests",
+      {
+        code: "SOME_OTHER_CONFLICT",
+        detail: "다른 충돌",
+        request_id: "trace-1",
+        status: 409,
+        title: "Conflict",
+        type: "https://kor-travel-map/errors/some-other-conflict",
+        details: { request_id: "request-1" },
+      },
+    );
 
     expect(datasetRefreshConflict(error)).toBeNull();
   });

@@ -130,6 +130,8 @@ class EnrichmentReviewDetailData(BaseModel):
     source_dataset_key: str
     source_entity_id: str
     source_name: str
+    source_lon: float | None = None
+    source_lat: float | None = None
     target_start_date: str | None = None
     target_end_date: str | None = None
     source_start_date: str | None = None
@@ -285,6 +287,8 @@ def _detail(row: EnrichmentReviewDetail) -> EnrichmentReviewDetailData:
         source_dataset_key=row.source_dataset_key,
         source_entity_id=row.source_entity_id,
         source_name=row.source_name,
+        source_lon=row.source_lon,
+        source_lat=row.source_lat,
         target_start_date=row.target_start_date,
         target_end_date=row.target_end_date,
         source_start_date=row.source_start_date,

@@ -134,8 +134,7 @@ tests/fixtures/
       "source_link": {
         "source_role": "primary",
         "match_method": "natural_key",
-        "confidence": 100,
-        "is_primary_source": true
+        "confidence": 100
       },
       "file_sources": [
         {"source_url": "http://..../image.jpg", "role": "primary", "display_order": 0}

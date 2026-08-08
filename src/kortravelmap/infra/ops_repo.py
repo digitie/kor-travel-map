@@ -25,6 +25,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "OpsImportJob",
+    "OpsImportJobDataset",
     "OpsImportJobEvent",
     "OpsImportJobEventPage",
     "OpsImportJobPage",
@@ -71,10 +72,9 @@ class OpsImportJob:
     finished_at: datetime | None
     heartbeat_at: datetime | None
     dagster_run_id: str | None = None
-    provider: str | None = None
-    dataset_key: str | None = None
+    dataset_memberships: tuple[OpsImportJobDataset, ...] = ()
     trigger_kind: str | None = None
-    operation_registry_version: str | None = None
+    operation_key: str | None = None
     dagster_run_status: str | None = None
 
 
@@ -92,9 +92,12 @@ class OpsImportJobEvent:
 
     event_id: str
     job_id: str
-    provider: str | None
-    dataset_key: str | None
+    import_job_dataset_id: str | None
+    provider_dataset_id: int | None
+    # membership identity의 나머지 두 축. event는 import_job_dataset_id만 들고 있으므로
+    # member join으로 되짚는다 — 사본을 event에 두면 T-VN-33이 없앤 그 모양이 된다.
     sync_scope: str | None
+    operation_key: str | None
     feature_id: str | None
     stage: str | None
     level: str
@@ -102,6 +105,20 @@ class OpsImportJobEvent:
     message: str
     payload: dict[str, Any]
     occurred_at: datetime
+
+
+@dataclass(frozen=True)
+class OpsImportJobDataset:
+    """import job에 속한 canonical provider dataset membership."""
+
+    import_job_dataset_id: str
+    provider_dataset_id: int
+    provider: str
+    dataset_key: str
+    # membership identity는 triple이다(ADR-088 §결정 2). ``provider``/``dataset_key``는
+    # catalog projection일 뿐이므로 셋 중 하나라도 빠지면 member를 되짚을 수 없다.
+    sync_scope: str
+    operation_key: str
 
 
 @dataclass(frozen=True)
@@ -138,6 +155,7 @@ class OpsIntegrityIssue:
     """``ops.data_integrity_violations`` 운영 issue row."""
 
     issue_id: str
+    provider_dataset_id: int | None
     provider: str | None
     dataset_key: str | None
     source_record_key: str | None
@@ -283,15 +301,38 @@ _IMPORT_JOB_COLUMNS: Final[str] = (
     "job.job_id, job.kind, job.load_batch_id, job.parent_job_id, "
     "request.request_id AS update_request_id, job.payload, job.status, job.progress, "
     "job.current_stage, job.source_checksum, job.error_message, job.dagster_run_id, "
-    "job.created_at, job.provider, job.dataset_key, job.trigger_kind, "
-    "job.operation_registry_version, job.dagster_run_status, job.started_at, "
-    "job.finished_at, job.heartbeat_at"
+    "job.created_at, job.trigger_kind, "
+    "job.operation_key, job.dagster_run_status, job.started_at, "
+    "job.finished_at, job.heartbeat_at, memberships.dataset_memberships"
 )
+
+_IMPORT_JOB_MEMBERSHIPS_SQL: Final[str] = """
+LEFT JOIN LATERAL (
+    SELECT COALESCE(
+        jsonb_agg(
+            jsonb_build_object(
+                'import_job_dataset_id', member.import_job_dataset_id,
+                'provider_dataset_id', provider_dataset.provider_dataset_id,
+                'provider', provider_dataset.provider,
+                'dataset_key', provider_dataset.dataset_key,
+                'sync_scope', member.sync_scope,
+                'operation_key', member.operation_key
+            ) ORDER BY member.import_job_dataset_id
+        ),
+        '[]'::jsonb
+    ) AS dataset_memberships
+    FROM ops.import_job_datasets AS member
+    JOIN provider_sync.provider_datasets AS provider_dataset
+      ON provider_dataset.provider_dataset_id = member.provider_dataset_id
+    WHERE member.job_id = job.job_id
+) AS memberships ON true
+"""
 
 _LIST_IMPORT_JOBS_SQL: Final[str] = f"""
 SELECT {_IMPORT_JOB_COLUMNS}
 FROM ops.import_jobs AS job
 LEFT JOIN ops.feature_update_requests AS request ON request.job_id = job.job_id
+{_IMPORT_JOB_MEMBERSHIPS_SQL}
 WHERE (CAST(:status AS text) IS NULL OR job.status = CAST(:status AS text))
   AND job.quarantined_at IS NULL
   AND job.kind <> 'c6c_cancel_probe'
@@ -319,28 +360,128 @@ _GET_IMPORT_JOB_SQL: Final[str] = f"""
 SELECT {_IMPORT_JOB_COLUMNS}
 FROM ops.import_jobs AS job
 LEFT JOIN ops.feature_update_requests AS request ON request.job_id = job.job_id
+{_IMPORT_JOB_MEMBERSHIPS_SQL}
 WHERE job.job_id = CAST(:job_id AS uuid)
   AND job.quarantined_at IS NULL
   AND job.kind <> 'c6c_cancel_probe'
 """
 
 _IMPORT_JOB_EVENT_COLUMNS: Final[str] = (
-    "event.event_id, event.job_id, event.provider, event.dataset_key, "
-    "event.sync_scope, event.feature_id, event.stage, event.level, event.code, "
-    "event.message, event.payload, event.occurred_at"
+    "event.event_id, event.job_id, event.import_job_dataset_id, "
+    "member.provider_dataset_id, member.sync_scope, member.operation_key, "
+    "event.feature_id, event.stage, "
+    "event.level, event.code, event.message, event.payload, event.occurred_at"
 )
+
+_SCOPED_IMPORT_JOB_EVENT_COLUMNS: Final[str] = (
+    "event.event_id, event.job_id, event.import_job_dataset_id, "
+    "scope_page.provider_dataset_id, scope_page.sync_scope, "
+    "scope_page.operation_key, event.feature_id, "
+    "event.stage, event.level, event.code, event.message, event.payload, "
+    "event.occurred_at"
+)
+
+
+def _scoped_import_job_events_sql(
+    *,
+    job_id: str | None,
+    level: str | None,
+    sync_scope: str | None,
+    operation_key: str | None,
+    cursor_occurred_at: datetime | None,
+) -> str:
+    """dataset scope 조회를 membership 축 partial index로 경계 짓는다.
+
+    scope 정본은 ``ops.import_job_datasets``고 event가 갖는 것은
+    ``import_job_dataset_id`` 하나뿐이다(T-VN-33). 그래서 event를 곧장
+    ``(provider_dataset_id, sync_scope, occurred_at DESC)``로 훑는 index는
+    존재할 수 없다 — 그 열들을 event에 사본으로 되돌리는 것이 되기 때문이다.
+
+    남는 경계는 member 하나뿐이다: ``idx_import_job_events_member_time``이
+    member 별로 이미 ``occurred_at DESC, event_id DESC``로 정렬돼 있으므로
+    member 마다 상위 ``:limit``만 뽑아 합치면 전체 상위 ``:limit``이 된다
+    (한 member가 전체 상위 N에 N건 넘게 들어갈 수 없다). 그래서 읽는 양이
+    scope의 총 event 수가 아니라 **member 수 × :limit**으로 묶인다.
+
+    keyset만 뽑는 CTE로 만든 이유는 그 안쪽 scan을 index-only로 유지하기
+    위해서다. payload/message까지 안쪽에서 읽으면 member 마다 heap을 때려
+    member 수에 비례한 random I/O가 그대로 살아난다. ``level`` filter도 같은
+    이유로 index INCLUDE 열을 쓴다.
+    """
+    member_clauses: list[str] = [
+        "member.provider_dataset_id = CAST(:provider_dataset_id AS bigint)"
+    ]
+    if sync_scope is not None:
+        member_clauses.append("member.sync_scope = CAST(:sync_scope AS text)")
+    if operation_key is not None:
+        # membership identity는 triple이다 — scope까지만 좁히면 형제 operation의
+        # event가 섞여 나온다. member 축 index가 이 열도 이미 앞쪽에 들고 있다.
+        member_clauses.append("member.operation_key = CAST(:operation_key AS text)")
+    if job_id is not None:
+        # composite FK ``fk_import_job_events_job_member (job_id,
+        # import_job_dataset_id)`` 때문에 member의 job_id는 그 member에 달린
+        # event의 job_id와 같다. member 쪽에 걸어야 member scan 자체가 좁아진다.
+        member_clauses.append("member.job_id = CAST(:job_id AS uuid)")
+    event_clauses: list[str] = [
+        "event.import_job_dataset_id = scope_member.import_job_dataset_id",
+        "event.quarantined_at IS NULL",
+    ]
+    if level is not None:
+        event_clauses.append("event.level = CAST(:level AS text)")
+    if cursor_occurred_at is not None:
+        event_clauses.append(
+            "(event.occurred_at, event.event_id) < "
+            "(CAST(:cursor_occurred_at AS timestamptz), "
+            "CAST(:cursor_event_id AS uuid))"
+        )
+    member_sql = "\n      AND ".join(member_clauses)
+    event_sql = "\n          AND ".join(event_clauses)
+    return f"""
+WITH scope_member AS (
+    SELECT member.import_job_dataset_id, member.provider_dataset_id,
+           member.sync_scope, member.operation_key
+    FROM ops.import_job_datasets AS member
+    WHERE {member_sql}
+),
+scope_page AS (
+    SELECT ranked.event_id, ranked.occurred_at, scope_member.provider_dataset_id,
+           scope_member.sync_scope, scope_member.operation_key
+    FROM scope_member
+    CROSS JOIN LATERAL (
+        SELECT event.event_id, event.occurred_at
+        FROM ops.import_job_events AS event
+        WHERE {event_sql}
+        ORDER BY event.occurred_at DESC, event.event_id DESC
+        LIMIT :limit
+    ) AS ranked
+    ORDER BY ranked.occurred_at DESC, ranked.event_id DESC
+    LIMIT :limit
+)
+SELECT {_SCOPED_IMPORT_JOB_EVENT_COLUMNS}
+FROM scope_page
+JOIN ops.import_job_events AS event ON event.event_id = scope_page.event_id
+ORDER BY event.occurred_at DESC, event.event_id DESC
+"""
 
 
 def _list_import_job_events_sql(
     *,
     job_id: str | None,
     level: str | None,
-    provider: str | None,
-    dataset_key: str | None,
+    provider_dataset_id: int | None,
     sync_scope: str | None,
+    operation_key: str | None,
     cursor_occurred_at: datetime | None,
 ) -> str:
     """고정 clause만 조합해 각 감사 filter의 B-tree 경로를 보존한다."""
+    if provider_dataset_id is not None:
+        return _scoped_import_job_events_sql(
+            job_id=job_id,
+            level=level,
+            sync_scope=sync_scope,
+            operation_key=operation_key,
+            cursor_occurred_at=cursor_occurred_at,
+        )
     clauses: list[str] = [
         "event.quarantined_at IS NULL",
     ]
@@ -348,27 +489,6 @@ def _list_import_job_events_sql(
         clauses.append("event.job_id = CAST(:job_id AS uuid)")
     if level is not None:
         clauses.append("event.level = CAST(:level AS text)")
-    if provider is not None:
-        clauses.extend(
-            (
-                "event.provider IS NOT NULL",
-                "event.provider = CAST(:provider AS text)",
-            )
-        )
-    if dataset_key is not None:
-        clauses.extend(
-            (
-                "event.dataset_key IS NOT NULL",
-                "event.dataset_key = CAST(:dataset_key AS text)",
-            )
-        )
-    if sync_scope is not None:
-        clauses.extend(
-            (
-                "event.sync_scope IS NOT NULL",
-                "event.sync_scope = CAST(:sync_scope AS text)",
-            )
-        )
     if cursor_occurred_at is not None:
         clauses.append(
             "(event.occurred_at, event.event_id) < "
@@ -379,6 +499,8 @@ def _list_import_job_events_sql(
     return f"""
 SELECT {_IMPORT_JOB_EVENT_COLUMNS}
 FROM ops.import_job_events AS event
+LEFT JOIN ops.import_job_datasets AS member
+  ON member.import_job_dataset_id = event.import_job_dataset_id
 {where_sql}
 ORDER BY event.occurred_at DESC, event.event_id DESC
 LIMIT :limit
@@ -414,35 +536,41 @@ LIMIT 1
 """
 
 _ISSUE_COLUMNS: Final[str] = (
-    "issue_id, provider, dataset_key, source_record_key, feature_id, "
-    "violation_type, severity, message, payload, status, detected_at, "
-    "last_seen_at, resolved_at"
+    "issue.issue_id, issue.provider_dataset_id, provider_dataset.provider, "
+    "provider_dataset.dataset_key, "
+    "issue.source_record_key, issue.feature_id, issue.violation_type, "
+    "issue.severity, issue.message, issue.payload, issue.status, issue.detected_at, "
+    "issue.last_seen_at, issue.resolved_at"
 )
 
 _LIST_ISSUES_SQL: Final[str] = f"""
 SELECT {_ISSUE_COLUMNS}
-FROM ops.data_integrity_violations
-WHERE (CAST(:status AS text) IS NULL OR status = CAST(:status AS text))
-  AND (CAST(:severity AS text) IS NULL OR severity = CAST(:severity AS text))
+FROM ops.data_integrity_violations AS issue
+LEFT JOIN provider_sync.provider_datasets AS provider_dataset
+  ON provider_dataset.provider_dataset_id = issue.provider_dataset_id
+WHERE (CAST(:status AS text) IS NULL OR issue.status = CAST(:status AS text))
+  AND (CAST(:severity AS text) IS NULL OR issue.severity = CAST(:severity AS text))
   AND (
     CAST(:violation_type AS text) IS NULL
-    OR violation_type = CAST(:violation_type AS text)
+    OR issue.violation_type = CAST(:violation_type AS text)
   )
-  AND (CAST(:provider AS text) IS NULL OR provider = CAST(:provider AS text))
-  AND (CAST(:dataset_key AS text) IS NULL OR dataset_key = CAST(:dataset_key AS text))
-  AND (CAST(:feature_id AS text) IS NULL OR feature_id = CAST(:feature_id AS text))
+  AND (
+    CAST(:provider_dataset_id AS bigint) IS NULL
+    OR issue.provider_dataset_id = CAST(:provider_dataset_id AS bigint)
+  )
+  AND (CAST(:feature_id AS text) IS NULL OR issue.feature_id = CAST(:feature_id AS text))
   AND (
     CAST(:q_like AS text) IS NULL
-    OR message ILIKE CAST(:q_like AS text)
-    OR feature_id ILIKE CAST(:q_like AS text)
-    OR source_record_key ILIKE CAST(:q_like AS text)
+    OR issue.message ILIKE CAST(:q_like AS text)
+    OR issue.feature_id ILIKE CAST(:q_like AS text)
+    OR issue.source_record_key ILIKE CAST(:q_like AS text)
   )
   AND (
     CAST(:bbox_min_lon AS double precision) IS NULL
     OR EXISTS (
         SELECT 1
         FROM feature.features AS f
-        WHERE f.feature_id = data_integrity_violations.feature_id
+        WHERE f.feature_id = issue.feature_id
           AND f.coord OPERATOR(x_extension.&&) x_extension.ST_MakeEnvelope(
               CAST(:bbox_min_lon AS double precision),
               CAST(:bbox_min_lat AS double precision),
@@ -452,12 +580,12 @@ WHERE (CAST(:status AS text) IS NULL OR status = CAST(:status AS text))
   )
   AND (
     CAST(:cursor_last_seen_at AS timestamptz) IS NULL
-    OR (last_seen_at, issue_id) < (
+    OR (issue.last_seen_at, issue.issue_id) < (
         CAST(:cursor_last_seen_at AS timestamptz),
         CAST(:cursor_issue_id AS uuid)
     )
   )
-ORDER BY last_seen_at DESC, issue_id DESC
+ORDER BY issue.last_seen_at DESC, issue.issue_id DESC
 LIMIT :limit
 """
 
@@ -498,6 +626,17 @@ SELECT
 
 
 def _row_to_import_job(row: Any) -> OpsImportJob:
+    dataset_memberships = tuple(
+        OpsImportJobDataset(
+            import_job_dataset_id=str(item["import_job_dataset_id"]),
+            provider_dataset_id=int(item["provider_dataset_id"]),
+            provider=str(item["provider"]),
+            dataset_key=str(item["dataset_key"]),
+            sync_scope=str(item["sync_scope"]),
+            operation_key=str(item["operation_key"]),
+        )
+        for item in _json_list(row.dataset_memberships)
+    )
     return OpsImportJob(
         job_id=str(row.job_id),
         kind=str(row.kind),
@@ -517,10 +656,9 @@ def _row_to_import_job(row: Any) -> OpsImportJob:
         finished_at=row.finished_at,
         heartbeat_at=row.heartbeat_at,
         dagster_run_id=row.dagster_run_id,
-        provider=getattr(row, "provider", None),
-        dataset_key=getattr(row, "dataset_key", None),
+        dataset_memberships=dataset_memberships,
         trigger_kind=getattr(row, "trigger_kind", None),
-        operation_registry_version=getattr(row, "operation_registry_version", None),
+        operation_key=getattr(row, "operation_key", None),
         dagster_run_status=getattr(row, "dagster_run_status", None),
     )
 
@@ -529,9 +667,20 @@ def _row_to_import_job_event(row: Any) -> OpsImportJobEvent:
     return OpsImportJobEvent(
         event_id=str(row.event_id),
         job_id=str(row.job_id),
-        provider=row.provider,
-        dataset_key=row.dataset_key,
-        sync_scope=row.sync_scope,
+        import_job_dataset_id=(
+            str(row.import_job_dataset_id)
+            if row.import_job_dataset_id is not None
+            else None
+        ),
+        provider_dataset_id=(
+            int(row.provider_dataset_id)
+            if row.provider_dataset_id is not None
+            else None
+        ),
+        sync_scope=(str(row.sync_scope) if row.sync_scope is not None else None),
+        operation_key=(
+            str(row.operation_key) if row.operation_key is not None else None
+        ),
         feature_id=row.feature_id,
         stage=row.stage,
         level=str(row.level),
@@ -557,6 +706,9 @@ def _row_to_consistency(row: Any) -> OpsConsistencyReport:
 def _row_to_issue(row: Any) -> OpsIntegrityIssue:
     return OpsIntegrityIssue(
         issue_id=str(row.issue_id),
+        provider_dataset_id=(
+            int(row.provider_dataset_id) if row.provider_dataset_id is not None else None
+        ),
         provider=row.provider,
         dataset_key=row.dataset_key,
         source_record_key=row.source_record_key,
@@ -624,30 +776,32 @@ async def list_ops_import_job_events(
     job_id: str | None = None,
     *,
     level: str | None = None,
-    provider: str | None = None,
-    dataset_key: str | None = None,
+    provider_dataset_id: int | None = None,
     sync_scope: str | None = None,
+    operation_key: str | None = None,
     limit: int = 50,
     cursor: str | None = None,
 ) -> OpsImportJobEventPage:
     """event를 시간 역순으로 조회한다.
 
-    ``sync_scope``는 provider/dataset과 함께 준 경우에만 허용한다. 0057의 typed
+    ``sync_scope``는 canonical provider_dataset_id와 함께 준 경우에만 허용한다.
     event identity와 exact-scope partial index에서 cursor/LIMIT 전에 제한한다.
     """
-    if dataset_key is not None and provider is None:
-        raise ValueError("dataset_key event filter requires provider")
-    if sync_scope is not None and (provider is None or dataset_key is None):
-        raise ValueError("sync_scope event filter requires provider and dataset_key")
+    if provider_dataset_id is not None and provider_dataset_id <= 0:
+        raise ValueError("provider_dataset_id must be greater than 0")
+    if sync_scope is not None and provider_dataset_id is None:
+        raise ValueError("sync_scope event filter requires provider_dataset_id")
     if sync_scope is not None:
         parse_canonical_sync_scope(sync_scope)
     page_size = _limit(limit)
     cursor_filters = {
         "job_id": job_id,
         "level": level,
-        "provider": provider,
-        "dataset_key": dataset_key,
+        "provider_dataset_id": str(provider_dataset_id) if provider_dataset_id else None,
         "sync_scope": sync_scope,
+        # cursor는 filter 집합에 묶인다 — operation_key를 빼면 다른 filter로 발급한
+        # cursor를 재사용해 페이지가 조용히 어긋난다.
+        "operation_key": operation_key,
     }
     cursor_occurred_at, cursor_event_id = _decode_bound_cursor(
         cursor,
@@ -657,9 +811,9 @@ async def list_ops_import_job_events(
     sql = _list_import_job_events_sql(
         job_id=job_id,
         level=level,
-        provider=provider,
-        dataset_key=dataset_key,
+        provider_dataset_id=provider_dataset_id,
         sync_scope=sync_scope,
+        operation_key=operation_key,
         cursor_occurred_at=cursor_occurred_at,
     )
     rows = (
@@ -668,9 +822,9 @@ async def list_ops_import_job_events(
             {
                 "job_id": job_id,
                 "level": level,
-                "provider": provider,
-                "dataset_key": dataset_key,
+                "provider_dataset_id": provider_dataset_id,
                 "sync_scope": sync_scope,
+                "operation_key": operation_key,
                 "cursor_occurred_at": cursor_occurred_at,
                 "cursor_event_id": cursor_event_id,
                 "limit": page_size + 1,
@@ -739,8 +893,7 @@ async def list_ops_integrity_issues(
     status: str | None = "open",
     severity: str | None = None,
     violation_type: str | None = None,
-    provider: str | None = None,
-    dataset_key: str | None = None,
+    provider_dataset_id: int | None = None,
     feature_id: str | None = None,
     q: str | None = None,
     bbox: tuple[float, float, float, float] | None = None,
@@ -754,6 +907,8 @@ async def list_ops_integrity_issues(
     안에 드는 이슈만 남긴다(ADR-012: STORED ``coord`` 4326 GiST ``&&``, feature_id가
     없는 이슈는 제외). 둘 다 ``None``이면 필터하지 않는다.
     """
+    if provider_dataset_id is not None and provider_dataset_id <= 0:
+        raise ValueError("provider_dataset_id must be greater than 0")
     page_size = _limit(limit)
     cursor_last_seen_at, cursor_issue_id = _decode_cursor(
         cursor, kind=_INTEGRITY_ISSUES_CURSOR_KIND
@@ -769,8 +924,7 @@ async def list_ops_integrity_issues(
                 "status": status,
                 "severity": severity,
                 "violation_type": violation_type,
-                "provider": provider,
-                "dataset_key": dataset_key,
+                "provider_dataset_id": provider_dataset_id,
                 "feature_id": feature_id,
                 "q_like": q_like,
                 "bbox_min_lon": bbox_min_lon,

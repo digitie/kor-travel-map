@@ -41,14 +41,22 @@ async def test_offline_delete_resource_reservation_rolls_back_competing_claim(
             text(
                 """
                 INSERT INTO ops.offline_uploads (
-                  upload_id, provider, dataset_key, sync_scope,
+                  upload_id, provider_dataset_id, sync_scope, operation_key,
                   original_filename, storage_backend, storage_key, byte_size,
                   checksum_sha256, detected_format, status
-                ) VALUES (
-                  CAST(:upload_id AS uuid), 'integration', 'delete-race',
-                  'default', 'race.jsonl', 'rustfs', 'offline/race.jsonl', 1,
-                  repeat('f', 64), 'jsonl', 'uploaded'
                 )
+                SELECT
+                  CAST(:upload_id AS uuid), scope.provider_dataset_id,
+                  scope.sync_scope, scope.operation_key,
+                  'race.jsonl', 'rustfs', 'offline/race.jsonl', 1,
+                  repeat('f', 64), 'jsonl', 'uploaded'
+                FROM provider_sync.provider_dataset_operation_scopes AS scope
+                JOIN provider_sync.provider_datasets AS dataset
+                  ON dataset.provider_dataset_id = scope.provider_dataset_id
+                WHERE dataset.is_active
+                ORDER BY scope.provider_dataset_id, scope.sync_scope,
+                         scope.operation_key
+                LIMIT 1
                 """
             ),
             {"upload_id": upload_id},

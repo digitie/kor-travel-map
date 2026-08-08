@@ -150,35 +150,56 @@ async def _seed_live_like_perf_data(session: AsyncSession, *, n: int = 3200) -> 
             """
         )
     )
+    # T-VN-33: entity/record는 자연키 사본을 갖지 않는다 — dataset 소유는
+    # ``provider_dataset_id`` 하나뿐이라 provider 분포는 catalog 행으로 만든다.
+    await session.execute(
+        text(
+            """
+            INSERT INTO provider_sync.provider_datasets (
+                provider, dataset_key, display_name, source_kind, is_active,
+                capabilities
+            )
+            SELECT
+                pair.provider, pair.dataset_key, pair.provider, 'system', true,
+                jsonb_build_object('schema_version', 1, 'produces', '[]'::jsonb,
+                                   'extensions', '{}'::jsonb)
+            FROM (VALUES
+                (0, 'python-mois-api', 'mois_license_features_bulk'),
+                (1, 'python-datagokr-api', 'standard_tourist_attractions'),
+                (2, 'python-visitkorea-api', 'visitkorea_festival_events'),
+                (3, 'python-opinet-api', 'opinet_stations'),
+                (4, 'python-krheritage-api', 'krheritage_events')
+            ) AS pair(bucket, provider, dataset_key)
+            ON CONFLICT (provider, dataset_key)
+            DO UPDATE SET display_name = EXCLUDED.display_name
+            """
+        )
+    )
     await session.execute(
         text(
             """
             INSERT INTO provider_sync.source_entities (
-                source_entity_key, provider, dataset_key,
+                source_entity_key, provider_dataset_id,
                 source_entity_type, source_entity_id,
                 first_seen_at, last_seen_at
             )
             SELECT
                 'perf:se:' || lpad(g::text, 6, '0'),
-                CASE
-                  WHEN g % 5 = 0 THEN 'python-mois-api'
-                  WHEN g % 5 = 1 THEN 'python-datagokr-api'
-                  WHEN g % 5 = 2 THEN 'python-visitkorea-api'
-                  WHEN g % 5 = 3 THEN 'python-opinet-api'
-                  ELSE 'python-krheritage-api'
-                END,
-                CASE
-                  WHEN g % 5 = 0 THEN 'mois_license_features_bulk'
-                  WHEN g % 5 = 1 THEN 'standard_tourist_attractions'
-                  WHEN g % 5 = 2 THEN 'visitkorea_festival_events'
-                  WHEN g % 5 = 3 THEN 'opinet_stations'
-                  ELSE 'krheritage_events'
-                END,
+                pd.provider_dataset_id,
                 'perf_entity',
                 lpad(g::text, 6, '0'),
                 now() - (g::text || ' minutes')::interval,
                 now() - (g::text || ' seconds')::interval
             FROM generate_series(1, :n) AS g
+            JOIN (VALUES
+                (0, 'python-mois-api', 'mois_license_features_bulk'),
+                (1, 'python-datagokr-api', 'standard_tourist_attractions'),
+                (2, 'python-visitkorea-api', 'visitkorea_festival_events'),
+                (3, 'python-opinet-api', 'opinet_stations'),
+                (4, 'python-krheritage-api', 'krheritage_events')
+            ) AS pair(bucket, provider, dataset_key) ON pair.bucket = g % 5
+            JOIN provider_sync.provider_datasets AS pd
+              ON pd.provider = pair.provider AND pd.dataset_key = pair.dataset_key
             """
         ),
         {"n": n},
@@ -187,35 +208,32 @@ async def _seed_live_like_perf_data(session: AsyncSession, *, n: int = 3200) -> 
         text(
             """
             INSERT INTO provider_sync.source_records (
-                source_record_key, source_entity_key, provider, dataset_key,
-                source_entity_type, source_entity_id,
-                raw_name, raw_address, raw_data, raw_payload_hash,
+                source_record_key, source_entity_key, raw_data, raw_payload_hash,
                 fetched_at, imported_at
             )
             SELECT
                 'perf:sr:' || lpad(g::text, 6, '0'),
                 'perf:se:' || lpad(g::text, 6, '0'),
-                CASE
-                  WHEN g % 5 = 0 THEN 'python-mois-api'
-                  WHEN g % 5 = 1 THEN 'python-datagokr-api'
-                  WHEN g % 5 = 2 THEN 'python-visitkorea-api'
-                  WHEN g % 5 = 3 THEN 'python-opinet-api'
-                  ELSE 'python-krheritage-api'
-                END,
-                CASE
-                  WHEN g % 5 = 0 THEN 'mois_license_features_bulk'
-                  WHEN g % 5 = 1 THEN 'standard_tourist_attractions'
-                  WHEN g % 5 = 2 THEN 'visitkorea_festival_events'
-                  WHEN g % 5 = 3 THEN 'opinet_stations'
-                  ELSE 'krheritage_events'
-                END,
-                'perf_entity',
-                lpad(g::text, 6, '0'),
-                '원천명 ' || g::text,
-                '원천주소 ' || g::text,
                 jsonb_build_object('row', g),
-                'perf-hash-' || g::text,
+                -- raw_payload_hash는 소문자 hex여야 한다(자유 문자열 아님).
+                md5(g::text),
                 now() - (g::text || ' minutes')::interval,
+                now() - (g::text || ' seconds')::interval
+            FROM generate_series(1, :n) AS g
+            """
+        ),
+        {"n": n},
+    )
+    # 현재 record 포인터는 entity가 아니라 head가 든다(entity당 head 정확히 1개).
+    await session.execute(
+        text(
+            """
+            INSERT INTO provider_sync.source_entity_heads (
+                source_entity_key, current_source_record_key, observed_at
+            )
+            SELECT
+                'perf:se:' || lpad(g::text, 6, '0'),
+                'perf:sr:' || lpad(g::text, 6, '0'),
                 now() - (g::text || ' seconds')::interval
             FROM generate_series(1, :n) AS g
             """
@@ -225,19 +243,9 @@ async def _seed_live_like_perf_data(session: AsyncSession, *, n: int = 3200) -> 
     await session.execute(
         text(
             """
-            UPDATE provider_sync.source_entities AS se
-            SET current_source_record_key =
-                'perf:sr:' || right(se.source_entity_key, 6)
-            WHERE se.source_entity_key LIKE 'perf:se:%'
-            """
-        )
-    )
-    await session.execute(
-        text(
-            """
             INSERT INTO provider_sync.source_links (
                 feature_id, source_entity_key, source_role,
-                match_method, confidence, is_primary_source, created_at
+                match_method, confidence, created_at
             )
             SELECT
                 'perf:f:' || lpad(g::text, 6, '0'),
@@ -245,7 +253,6 @@ async def _seed_live_like_perf_data(session: AsyncSession, *, n: int = 3200) -> 
                 'primary',
                 'natural_key',
                 100,
-                true,
                 now()
             FROM generate_series(1, :n) AS g
             """
@@ -300,13 +307,13 @@ async def _seed_live_like_perf_data(session: AsyncSession, *, n: int = 3200) -> 
         text(
             """
             INSERT INTO ops.data_integrity_violations (
-                provider, dataset_key, source_record_key, feature_id,
+                provider_dataset_id, source_record_key, feature_id,
                 violation_type, severity, message, payload, status, detected_at
             )
             SELECT
-                CASE WHEN g % 2 = 0 THEN 'python-mois-api' ELSE 'python-datagokr-api' END,
-                CASE WHEN g % 2 = 0 THEN 'mois_license_features_bulk'
-                     ELSE 'standard_tourist_attractions' END,
+                -- issue의 dataset은 source record의 dataset과 일치해야 한다
+                -- (``ck_data_integrity_violations_dataset_source_record``).
+                se.provider_dataset_id,
                 'perf:sr:' || lpad(g::text, 6, '0'),
                 'perf:f:' || lpad(g::text, 6, '0'),
                 CASE WHEN g % 3 = 0 THEN 'missing_address'
@@ -317,6 +324,8 @@ async def _seed_live_like_perf_data(session: AsyncSession, *, n: int = 3200) -> 
                 CASE WHEN g % 13 = 0 THEN 'resolved' ELSE 'open' END,
                 now() - (g::text || ' seconds')::interval
             FROM generate_series(1, 900) AS g
+            JOIN provider_sync.source_entities AS se
+              ON se.source_entity_key = 'perf:se:' || lpad(g::text, 6, '0')
             """
         )
     )
@@ -345,31 +354,16 @@ async def _seed_live_like_perf_data(session: AsyncSession, *, n: int = 3200) -> 
         text(
             """
             INSERT INTO ops.enrichment_review_queue (
-                target_feature_id, source_provider, source_dataset_key,
-                source_entity_id, source_name, target_name, name_score,
-                source_record, status, created_at
+                target_feature_id, source_entity_key, source_record_key,
+                source_name, target_name, name_score, status, created_at
             )
             SELECT
                 'perf:f:' || lpad(g::text, 6, '0'),
-                CASE WHEN g % 3 = 0 THEN 'python-datagokr-api'
-                     WHEN g % 3 = 1 THEN 'python-visitkorea-api'
-                     ELSE 'python-krheritage-api' END,
-                CASE WHEN g % 3 = 0 THEN 'standard_tourist_attractions'
-                     WHEN g % 3 = 1 THEN 'visitkorea_festival_events'
-                     ELSE 'krheritage_events' END,
-                'enrich-' || g::text,
+                'perf:se:' || lpad(g::text, 6, '0'),
+                'perf:sr:' || lpad(g::text, 6, '0'),
                 '축제 원천 ' || g::text,
                 '운영 유사 장소 ' || g::text,
                 70 + (g % 250)::numeric / 10,
-                jsonb_build_object(
-                    'provider', CASE WHEN g % 3 = 0 THEN 'python-datagokr-api'
-                                      WHEN g % 3 = 1 THEN 'python-visitkorea-api'
-                                      ELSE 'python-krheritage-api' END,
-                    'dataset_key', CASE WHEN g % 3 = 0 THEN 'standard_tourist_attractions'
-                                        WHEN g % 3 = 1 THEN 'visitkorea_festival_events'
-                                        ELSE 'krheritage_events' END,
-                    'source_entity_id', 'enrich-' || g::text
-                ),
                 CASE WHEN g % 8 = 0 THEN 'ignored' ELSE 'pending' END,
                 now() - (g::text || ' seconds')::interval
             FROM generate_series(1, 500) AS g
@@ -546,6 +540,20 @@ _FEATURES_PK_ACCESS = (
     "features_pkey",
     "uq_features_identity_pair",
     "uq_features_identity_kind",
+)
+
+# enrichment review 목록이 탈 수 있는 **동치** 접근 경로.
+#
+# T-VN-33: queue가 ``source_provider``/``source_dataset_key`` 사본을 잃고
+# ``source_entity_key``/``source_record_key``만 든다. provider 표시값은 이제
+# entity → provider_datasets join에서 나오므로 provider 전용 복합 인덱스
+# (``idx_enrichment_review_provider_status_score``)는 사라졌고, planner는 상황에
+# 따라 status/score keyset 또는 entity/record join 인덱스로 queue에 진입한다.
+# 두 경로 모두 queue full scan이 아니므로 gate는 둘을 동치로 받고, seq scan 부재는
+# 별도로 못박는다.
+_ENRICHMENT_REVIEW_ACCESS = (
+    "idx_enrichment_review_status_score",
+    "idx_enrichment_review_queue_source_entity_record",
 )
 
 
@@ -798,8 +806,7 @@ async def test_t212d_planner_selects_representative_indexes_without_seqscan_hint
             "kinds": None,
             "categories": None,
             "statuses": None,
-            "providers": None,
-            "dataset_keys": None,
+            "provider_dataset_id": None,
             "issue_types": None,
             "has_coord": None,
             "updated_from": None,
@@ -831,8 +838,7 @@ async def test_t212d_ops_and_review_lists_use_expected_indexes(
             "kinds": ["place"],
             "categories": None,
             "statuses": ["active"],
-            "providers": None,
-            "dataset_keys": None,
+            "provider_dataset_id": None,
             "issue_types": None,
             "has_coord": True,
             "updated_from": None,
@@ -865,8 +871,7 @@ async def test_t212d_ops_and_review_lists_use_expected_indexes(
             "kinds": None,
             "categories": None,
             "statuses": None,
-            "providers": None,
-            "dataset_keys": None,
+            "provider_dataset_id": None,
             "issue_types": None,
             "has_coord": None,
             "updated_from": None,
@@ -896,8 +901,7 @@ async def test_t212d_ops_and_review_lists_use_expected_indexes(
             "kinds": None,
             "categories": None,
             "statuses": None,
-            "providers": None,
-            "dataset_keys": None,
+            "provider_dataset_id": None,
             "issue_types": None,
             "has_coord": None,
             "updated_from": None,
@@ -946,6 +950,15 @@ async def test_t212d_ops_and_review_lists_use_expected_indexes(
     )
     _assert_uses_index(reports, "idx_reports_severity_started")
 
+    mois_dataset_id = (
+        await migrated_session.execute(
+            text(
+                "SELECT provider_dataset_id FROM provider_sync.provider_datasets "
+                "WHERE provider = 'python-mois-api' "
+                "  AND dataset_key = 'mois_license_features_bulk'"
+            )
+        )
+    ).scalar_one()
     issues = await _explain_json(
         migrated_session,
         ops_repo._LIST_ISSUES_SQL,
@@ -953,8 +966,7 @@ async def test_t212d_ops_and_review_lists_use_expected_indexes(
             "status": "open",
             "severity": None,
             "violation_type": None,
-            "provider": "python-mois-api",
-            "dataset_key": None,
+            "provider_dataset_id": mois_dataset_id,
             "feature_id": None,
             "q_like": None,
             "bbox_min_lon": None,
@@ -966,9 +978,12 @@ async def test_t212d_ops_and_review_lists_use_expected_indexes(
             "limit": 51,
         },
     )
+    # T-VN-33: provider/dataset_key 사본이 사라지면서 dataset 필터 인덱스가
+    # ``idx_violations_provider_status_seen`` → ``idx_data_integrity_violations_dataset_status``
+    # (provider_dataset_id, status, last_seen_at)로 바뀌었다.
     _assert_uses_index(
         issues,
-        "idx_violations_provider_status_seen",
+        "idx_data_integrity_violations_dataset_status",
         "idx_violations_status_seen",
     )
 
@@ -1040,7 +1055,8 @@ async def test_t212d_ops_and_review_lists_use_expected_indexes(
             "cursor_score": None,
         },
     )
-    _assert_uses_index(enrichment, "idx_enrichment_review_status_score")
+    _assert_uses_index(enrichment, *_ENRICHMENT_REVIEW_ACCESS)
+    _assert_no_seq_scan_on(enrichment, "enrichment_review_queue")
 
     # 적대 리뷰 P3-2: active(비-null) cursor로도 index range 사용을 증명(enrichment).
     enrichment_cursor = await _explain_json(
@@ -1057,7 +1073,7 @@ async def test_t212d_ops_and_review_lists_use_expected_indexes(
             "cursor_score": "0.5",
         },
     )
-    _assert_uses_index(enrichment_cursor, "idx_enrichment_review_status_score")
+    _assert_uses_index(enrichment_cursor, *_ENRICHMENT_REVIEW_ACCESS)
     _assert_no_seq_scan_on(enrichment_cursor, "enrichment_review_queue")
 
     enrichment_provider = await _explain_json(
@@ -1076,11 +1092,8 @@ async def test_t212d_ops_and_review_lists_use_expected_indexes(
             "cursor_score": None,
         },
     )
-    _assert_uses_index(
-        enrichment_provider,
-        "idx_enrichment_review_provider_status_score",
-        "idx_enrichment_review_status_score",
-    )
+    _assert_uses_index(enrichment_provider, *_ENRICHMENT_REVIEW_ACCESS)
+    _assert_no_seq_scan_on(enrichment_provider, "enrichment_review_queue")
 
     enrichment_multi_provider = await _explain_json(
         migrated_session,
@@ -1117,9 +1130,12 @@ async def test_t212d_dedup_refresh_and_consistency_checks_are_index_compatible(
             "limit": 500,
         },
     )
+    # T-VN-33: record가 dataset 자연키 사본을 잃으면서
+    # ``idx_source_records_provider_dataset_entity``가 사라졌다. dataset 한정
+    # 진입 경로의 정본은 entity 쪽 ``idx_source_entities_provider_dataset``다.
     _assert_uses_index(
         dedup_refresh,
-        "idx_source_records_provider_dataset_entity",
+        "idx_source_entities_provider_dataset",
         "idx_features_dedup_refresh_keyset",
     )
 

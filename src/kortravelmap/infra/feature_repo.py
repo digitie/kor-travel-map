@@ -326,180 +326,103 @@ ON CONFLICT (feature_id, version) DO UPDATE SET
     created_at = now()
 """
 
-# provider entity는 payload version과 독립적으로 한 행을 유지한다(ADR-063).
+# provider entity는 DB dataset identity 아래 payload version과 독립적으로 한 행을 유지한다.
 _UPSERT_SOURCE_ENTITY_SQL: Final[str] = """
 INSERT INTO provider_sync.source_entities (
-    source_entity_key, provider, dataset_key,
+    source_entity_key, provider_dataset_id,
     source_entity_type, source_entity_id,
     first_seen_at, last_seen_at
 ) VALUES (
-    :source_entity_key, :provider, :dataset_key,
+    :source_entity_key, :provider_dataset_id,
     :source_entity_type, :source_entity_id,
-    LEAST(
-        CAST(:fetched_at AS timestamptz),
-        CAST(:imported_at AS timestamptz)
-    ),
-    GREATEST(
-        CAST(:fetched_at AS timestamptz),
-        CAST(:imported_at AS timestamptz)
-    )
+    :observed_at, :observed_at
 )
 ON CONFLICT (source_entity_key) DO UPDATE SET
-    first_seen_at = LEAST(
-        provider_sync.source_entities.first_seen_at,
-        EXCLUDED.first_seen_at
-    ),
+    first_seen_at = LEAST(provider_sync.source_entities.first_seen_at, EXCLUDED.first_seen_at),
     last_seen_at = GREATEST(
         provider_sync.source_entities.last_seen_at,
         EXCLUDED.last_seen_at
     )
-RETURNING current_source_record_key
 """
 
-# notice 계보 key 재계산 식 — **H35 고정 세대(0063~0079) replay 전용**이다.
-#
-# 현행 스키마에서 이 값의 정본은 DB에 있다: 0088이 만든
-# ``provider_sync.notice_lineage_key`` 함수와 그것을 호출하는 트리거가
-# ``source_records.lineage_key``를 채우고, 애플리케이션은 그 컬럼을 읽기만 한다.
-# 고정 세대에는 컬럼도 함수도 없으므로 그 세대의 SQL을 여기서 재생한다.
-def _notice_lineage_sql(alias: str) -> str:
-    """``source_records`` 행에서 계보 key를 **재계산**하는 SQL."""
-
-    return f"""
-    CASE
-      WHEN {alias}.provider = 'python-krex-api'
-       AND {alias}.dataset_key = 'krex_traffic_notices'
-       AND {alias}.source_entity_type = 'traffic_notice'
-      THEN COALESCE(
-        NULLIF(
-          concat_ws(
-            '::',
-            NULLIF(lower(btrim({alias}.raw_data->>'occurred_date')), ''),
-            NULLIF(lower(btrim({alias}.raw_data->>'occurred_time')), ''),
-            NULLIF(lower(btrim({alias}.raw_data->>'route_no')), ''),
-            NULLIF(lower(btrim({alias}.raw_data->>'direction')), ''),
-            NULLIF(lower(btrim({alias}.raw_data->>'point_name')), ''),
-            NULLIF(lower(btrim({alias}.raw_data->>'incident_type_code')), '')
-          ),
-          ''
-        ),
-        {alias}.source_entity_id
-      )
-      WHEN {alias}.provider = 'python-kma-api'
-       AND {alias}.dataset_key = 'kma_weather_alerts'
-       AND {alias}.source_entity_type = 'weather_alert'
-      THEN COALESCE(
-        NULLIF(
-          concat_ws(
-            '::',
-            NULLIF(btrim({alias}.raw_data->>'region_code'), ''),
-            NULLIF(
-              btrim(
-                COALESCE(
-                  {alias}.raw_data->>'phenomenon',
-                  {alias}.raw_data->>'alert_type'
-                )
-              ),
-              ''
-            )
-          ),
-          ''
-        ),
-        {alias}.source_entity_id
-      )
-      ELSE {alias}.source_entity_id
-    END
-    """
-
-
-
-# 유효 계보 key — 현행 스키마에서 계보를 읽는 **유일한 방법**이다 (ADR-087).
-#
-# ``lineage_key``는 notice 전용 규칙이 있는 scope에만 채워지고(그 밖은 NULL),
-# 나머지는 ``source_entity_id``가 그대로 계보다. 전 행에 사본을 물화하지 않는
-# 이유는 실측이다: 73만 행 중 계보 규칙이 적용되는 것은 744행(0.10%)뿐인데,
-# 전 행 backfill은 heap을 826MB → 1,700MB로 **영구히** 부풀리고(VACUUM으로도
-# OS에 반환되지 않는다) 그 두 배의 WAL과 2분짜리 ACCESS EXCLUSIVE lock을 낸다.
-#
-# ``COALESCE``가 인덱스를 막지 않는다 — 두 인자가 모두 **저장 컬럼**이라 이 식은
-# IMMUTABLE이고, 같은 식으로 만든 표현식 인덱스가 그대로 받는다. (막히는 것은
-# ``concat_ws``가 든 재계산 CASE 쪽이다. 그 둘을 한동안 혼동했다.)
-def _lineage_sql(alias: str) -> str:
-    """``source_records`` alias의 유효 계보 key SQL."""
-
-    return f"COALESCE({alias}.lineage_key, {alias}.source_entity_id)"
-
-
-# source_records는 payload_hash가 UNIQUE 구성요소 → 이력 보존 (ADR-017).
-# 같은 source_record_key 재적재는 원문을 건드리지 않고 마지막 확인 시각만 갱신한다.
-#
-# ``lineage_key``는 여기 없다 — DB 트리거가 채운다(0088, ADR-087). 파생을 DB에
-# 두면 애플리케이션·테스트 픽스처·수동 SQL 어느 경로로 써도 값이 어긋날 수 없다.
+# source_records는 immutable raw snapshot이다. 재관측은 head만 갱신한다(ADR-087).
 _UPSERT_SOURCE_RECORD_SQL: Final[str] = """
+WITH inserted AS (
 INSERT INTO provider_sync.source_records (
-    source_record_key, source_entity_key, provider, dataset_key,
-    source_entity_type, source_entity_id, source_version,
-    raw_name, raw_address, raw_longitude, raw_latitude,
-    raw_data, raw_payload_hash, fetched_at, imported_at, expires_at
+    source_record_key, source_entity_key, raw_data, raw_payload_hash,
+    fetched_at, imported_at
 ) VALUES (
-    :source_record_key, :source_entity_key, :provider, :dataset_key,
-    :source_entity_type, :source_entity_id, :source_version,
-    :raw_name, :raw_address, :raw_longitude, :raw_latitude,
-    CAST(:raw_data AS jsonb), :raw_payload_hash, :fetched_at, :imported_at,
-    :expires_at
+    :source_record_key, :source_entity_key, CAST(:raw_data AS jsonb), :raw_payload_hash,
+    :fetched_at, :imported_at
 )
-ON CONFLICT (source_record_key) DO UPDATE SET
-    last_seen_at = GREATEST(
-        provider_sync.source_records.last_seen_at,
-        clock_timestamp()
-    )
-RETURNING (xmax = 0) AS inserted
+ON CONFLICT (source_entity_key, raw_payload_hash) DO NOTHING
+RETURNING source_record_key, true AS inserted
+), canonical AS (
+    SELECT source_record_key, inserted FROM inserted
+    UNION ALL
+    SELECT existing.source_record_key, false AS inserted
+    FROM provider_sync.source_records AS existing
+    WHERE existing.source_entity_key = :source_entity_key
+      AND existing.raw_payload_hash = :raw_payload_hash
+      AND NOT EXISTS (SELECT 1 FROM inserted)
+)
+SELECT source_record_key, inserted
+FROM canonical
 """
 
-_REFRESH_SOURCE_ENTITY_CURRENT_SQL: Final[str] = """
-WITH ranked AS (
-    SELECT source_record_key
-    FROM provider_sync.source_records
+_UPSERT_SOURCE_ENTITY_HEAD_SQL: Final[str] = """
+WITH prior AS MATERIALIZED (
+    -- ``FOR UPDATE``를 걸면 **안 된다**. 같은 문장의 ``upserted``가 이 행을
+    -- 갱신하므로 lock 획득이 그 갱신을 따라가며 행을 못 보고, ``prior``가 빈
+    -- 결과가 된다 — 그러면 ``NOT EXISTS (prior)``가 항상 참이라 재관측마다
+    -- ``became_current``가 참이 되어 feature 본문이 매번 재기록된다(실측:
+    -- 같은 record 재적재에서 features_updated>0). 동시성은 ON CONFLICT의 행
+    -- 잠금이 이미 담당한다 — 여기서 필요한 것은 **문장 이전 값**을 읽는 것뿐이다.
+    SELECT current_source_record_key
+    FROM provider_sync.source_entity_heads
     WHERE source_entity_key = :source_entity_key
-    ORDER BY
-        last_seen_at DESC,
-        fetched_at DESC,
-        imported_at DESC,
-        source_record_key DESC
-    LIMIT 1
-), bounds AS (
-    SELECT
-        min(least(fetched_at, last_seen_at, imported_at)) AS first_seen_at,
-        max(greatest(fetched_at, last_seen_at, imported_at)) AS last_seen_at
-    FROM provider_sync.source_records
-    WHERE source_entity_key = :source_entity_key
+), upserted AS (
+    INSERT INTO provider_sync.source_entity_heads (
+        source_entity_key, current_source_record_key, observed_at, expires_at
+    ) VALUES (
+        :source_entity_key, :source_record_key, :observed_at, :expires_at
+    )
+    ON CONFLICT (source_entity_key) DO UPDATE SET
+        current_source_record_key = EXCLUDED.current_source_record_key,
+        observed_at = EXCLUDED.observed_at,
+        expires_at = EXCLUDED.expires_at,
+        updated_at = clock_timestamp()
+    WHERE (EXCLUDED.observed_at, EXCLUDED.current_source_record_key)
+          > (
+              provider_sync.source_entity_heads.observed_at,
+              provider_sync.source_entity_heads.current_source_record_key
+          )
+    RETURNING current_source_record_key
 )
-UPDATE provider_sync.source_entities AS se
-SET current_source_record_key = ranked.source_record_key,
-    first_seen_at = LEAST(se.first_seen_at, bounds.first_seen_at),
-    last_seen_at = GREATEST(se.last_seen_at, bounds.last_seen_at)
-FROM ranked, bounds
-WHERE se.source_entity_key = :source_entity_key
-RETURNING se.current_source_record_key
+SELECT EXISTS (SELECT 1 FROM upserted)
+       AND (
+           NOT EXISTS (SELECT 1 FROM prior)
+           OR (SELECT current_source_record_key FROM prior)
+              IS DISTINCT FROM :source_record_key
+       ) AS became_current
 """
 
 _UPSERT_SOURCE_LINK_SQL: Final[str] = """
 INSERT INTO provider_sync.source_links (
     feature_id, source_entity_key, source_role,
-    match_method, confidence, is_primary_source, created_at
+    match_method, confidence, created_at
 ) VALUES (
     :feature_id,
     (SELECT source_entity_key
      FROM provider_sync.source_records
-     WHERE source_record_key = :source_record_key),
+    WHERE source_record_key = :source_record_key),
     :source_role,
-    :match_method, :confidence, :is_primary_source, :created_at
+    :match_method, :confidence, :created_at
 )
 ON CONFLICT (feature_id, source_entity_key) DO UPDATE SET
     source_role = EXCLUDED.source_role,
     match_method = EXCLUDED.match_method,
-    confidence = EXCLUDED.confidence,
-    is_primary_source = EXCLUDED.is_primary_source
+    confidence = EXCLUDED.confidence
 RETURNING (xmax = 0) AS inserted
 """
 
@@ -579,39 +502,120 @@ LEFT JOIN feature.features AS f
 """
 
 
+def _lineage_sql(head_alias: str, *, entity_alias: str) -> str:
+    """유효 계보 key — ``source_entity_heads``에 물화된 값을 읽는다 (ADR-087/088).
+
+    T-VN-37이 계보 key를 물화했고, T-VN-33이 그 자리를 record에서 **head**로
+    옮겼다. record는 payload **이력 전체**를 담지만 한 계보에서 실제로 경쟁하는
+    것은 entity당 current 하나뿐이라, head에 두면 탐색이 계보 깊이에 무관해진다.
+
+    **유효 계보를 통째로** 저장한다 — out-of-scope도 entity id가 값으로 들어간다.
+    읽는 쪽이 ``COALESCE(head.lineage_key, entity.source_entity_id)``로 물러나면
+    두 테이블에 걸친 식이 되어 어떤 단일 인덱스도 받지 못한다(실측으로 확인했다).
+    ``entity_alias``는 서명 호환을 위해 남기고 쓰지 않는다.
+    """
+
+    del entity_alias
+    return f"{head_alias}.lineage_key"
+
+
+def _notice_lineage_sql(
+    record_alias: str, *, entity_alias: str, dataset_alias: str
+) -> str:
+    """raw payload에서 계보를 **재계산**한다 (backfill·검증 전용).
+
+    현행 read 경로는 ``_lineage_sql``로 물화된 값을 읽는다. 이 재계산은 값이
+    맞는지 대조할 때와 컬럼이 없던 세대를 재생할 때만 쓴다.
+    """
+
+    return f"""
+    CASE
+      WHEN {dataset_alias}.provider = 'python-krex-api'
+       AND {dataset_alias}.dataset_key = 'krex_traffic_notices'
+       AND {entity_alias}.source_entity_type = 'traffic_notice'
+      THEN COALESCE(
+        NULLIF(
+          concat_ws(
+            '::',
+            NULLIF(lower(btrim({record_alias}.raw_data->>'occurred_date')), ''),
+            NULLIF(lower(btrim({record_alias}.raw_data->>'occurred_time')), ''),
+            NULLIF(lower(btrim({record_alias}.raw_data->>'route_no')), ''),
+            NULLIF(lower(btrim({record_alias}.raw_data->>'direction')), ''),
+            NULLIF(lower(btrim({record_alias}.raw_data->>'point_name')), ''),
+            NULLIF(lower(btrim({record_alias}.raw_data->>'incident_type_code')), '')
+          ),
+          ''
+        ),
+        {entity_alias}.source_entity_id
+      )
+      WHEN {dataset_alias}.provider = 'python-kma-api'
+       AND {dataset_alias}.dataset_key = 'kma_weather_alerts'
+       AND {entity_alias}.source_entity_type = 'weather_alert'
+      THEN COALESCE(
+        NULLIF(
+          concat_ws(
+            '::',
+            NULLIF(btrim({record_alias}.raw_data->>'region_code'), ''),
+            NULLIF(
+              btrim(
+                COALESCE(
+                  {record_alias}.raw_data->>'phenomenon',
+                  {record_alias}.raw_data->>'alert_type'
+                )
+              ),
+              ''
+            )
+          ),
+          ''
+        ),
+        {entity_alias}.source_entity_id
+      )
+      ELSE {entity_alias}.source_entity_id
+    END
+    """
+
+
 def _canonical_notice_feature_sql(
-    feature_alias: str, source_alias: str, *, lineage: str | None = None
+    feature_alias: str,
+    record_alias: str,
+    *,
+    entity_alias: str,
+    dataset_alias: str,
+    lineage: str | None = None,
 ) -> str:
     """현재 사건 단위 identity로 만든 notice feature인지 판정하는 SQL.
 
     KREX/KMA의 현 identity는 모두 ``bjd_code=None``과 고정 category를 사용하고,
-    ``source_natural_key``는 계보 key와 같다. 따라서 같은 source record가 구/신
-    feature 양쪽에 연결된 identity 이행 동률에서도 현재 ``make_feature_id`` 결과를
-    정확히 알아낼 수 있다. 그 외 provider는 근거가 없으므로 ``false``로 두고
-    stable ``feature_id`` tie-break에 맡긴다.
-
-    ``lineage``: 계보 key SQL 식. 기본값은 저장 컬럼이고, 컬럼이 없는 H35 고정
-    세대 replay만 재계산 식을 넘긴다.
+    ``source_natural_key``는 ``_notice_lineage_sql`` 결과와 같다. 따라서 같은
+    source record가 구/신 feature 양쪽에 연결된 identity 이행 동률에서도 현재
+    ``make_feature_id`` 결과를 정확히 알아낼 수 있다. 그 외 provider는 근거가
+    없으므로 ``false``로 두고 stable ``feature_id`` tie-break에 맡긴다.
     """
-    lineage = _lineage_sql(source_alias) if lineage is None else lineage
+    # 물화된 계보를 넘기면 그것을 쓴다. 안 넘기면 재계산인데, read 경로에서는
+    # raw_data JSON 추출이 행마다 붙어 T-VN-37이 없앤 비용이 되살아난다.
+    lineage_sql = lineage or _notice_lineage_sql(
+        record_alias,
+        entity_alias=entity_alias,
+        dataset_alias=dataset_alias,
+    )
     return f"""
     CASE
       WHEN (
-        ({source_alias}.provider = 'python-krex-api'
-         AND {source_alias}.dataset_key = 'krex_traffic_notices'
-         AND {source_alias}.source_entity_type = 'traffic_notice')
+        ({dataset_alias}.provider = 'python-krex-api'
+         AND {dataset_alias}.dataset_key = 'krex_traffic_notices'
+         AND {entity_alias}.source_entity_type = 'traffic_notice')
         OR
-        ({source_alias}.provider = 'python-kma-api'
-         AND {source_alias}.dataset_key = 'kma_weather_alerts'
-         AND {source_alias}.source_entity_type = 'weather_alert')
+        ({dataset_alias}.provider = 'python-kma-api'
+         AND {dataset_alias}.dataset_key = 'kma_weather_alerts'
+         AND {entity_alias}.source_entity_type = 'weather_alert')
       )
       THEN {feature_alias}.feature_id = (
         'f_global_n_' || left(
           encode(
             x_extension.digest(
               'global|notice|99000000|'
-              || {source_alias}.provider || ':' || {source_alias}.dataset_key || '|'
-              || {lineage} || '|',
+              || {dataset_alias}.provider || ':' || {dataset_alias}.dataset_key || '|'
+              || {lineage_sql} || '|',
               'sha1'
             ),
             'hex'
@@ -662,93 +666,232 @@ def _ended_notice_hidden_sql(feature_alias: str) -> str:
 # 고른 뒤 **모든 계보에서 밀린 feature만** 숨긴다. 한 계보라도 winner면 feature 전체를
 # 보존하며, current primary source가 없는 notice도 기존처럼 표시한다.
 def _latest_notice_only_sql(feature_alias: str) -> str:
-    """같은 계보에서 밀려난 notice를 숨긴다 (ADR-087).
+    """구버전 notice를 숨기는 SQL fragment를 feature alias에 맞춰 만든다."""
 
-    승자는 계보당 하나다. 판정 자체는 correlated 하나로 충분하다 — feature 하나가
-    자기 계보에서 이겼는지만 보면 되고, 그 계보는 보통 한 자릿수 행이다. 종전
-    구현이 느렸던 이유는 상관성이 아니라 **계보를 찾는 방법**이었다: 계보 key를
-    ``raw_data`` JSON에서 매 행 재계산하니 인덱스가 붙을 수 없었고, 경쟁자 탐색이
-    매번 notice 전수 스캔이 됐다.
-
-    계보 key를 ``source_records.lineage_key``에 물화하고 read와 같은 식으로
-    인덱스를 두면 그 탐색이 **인덱스 range probe**가 된다.
-
-    "나보다 나은 행이 있나"를 **두 EXISTS로 나눈 것**이 핵심이다. 한 술어 안에
-    ``OR``로 두면 Postgres가 순서 조건을 Index Cond로 밀지 못하고 Filter로 남겨,
-    계보의 payload **이력 전체**를 훑는다(50,001 record 계보에서
-    ``Rows Removed by Filter: 50000``). 나뉘면 앞쪽은 순수 행 비교라 인덱스
-    범위가 되고, 뒤쪽은 동률(= 같은 record)일 때만 도는 등식이다.
-
-    ``last_seen_at``은 NOT NULL이므로 종전의
-    ``COALESCE(last_seen_at, imported_at, fetched_at)``는 **죽은 식**이었다.
-    평컬럼으로 바꿔야 인덱스 열과 맞는다 — 값은 증명 가능하게 동일하다.
-
-    실측(단건/목록): 145행 3.5/8.0ms · 3,045 notice 4.1/244ms ·
-    50,001 record 한 계보 20.7/23.4ms. 세 규모 모두 ``origin/main``보다 빠르다.
-    """
-
-    canonical_cur = _canonical_notice_feature_sql(feature_alias, "cur_sr")
-    canonical_other = _canonical_notice_feature_sql("other_f", "other_sr")
-    rivals = f"""
-        FROM provider_sync.source_records AS other_sr
-        JOIN provider_sync.source_entities AS other_se
-          ON other_se.current_source_record_key = other_sr.source_record_key
-        JOIN provider_sync.source_links AS other_sl
-          ON other_sl.source_entity_key = other_se.source_entity_key
-         AND other_sl.is_primary_source
-        JOIN feature.features AS other_f
-          ON other_f.feature_id = other_sl.feature_id
-        WHERE {_lineage_sql('other_sr')} = {_lineage_sql('cur_sr')}
-          AND other_se.provider = cur_sr.provider
-          AND other_se.dataset_key = cur_sr.dataset_key
-          AND other_se.source_entity_type = cur_sr.source_entity_type
-          AND other_f.feature_id <> {feature_alias}.feature_id
-          AND other_f.kind = 'notice'
-          AND other_f.deleted_at IS NULL"""
+    current_lineage_sql = _lineage_sql("cur_head", entity_alias="cur_se")
+    current_canonical_sql = _canonical_notice_feature_sql(
+        feature_alias,
+        "cur_sr",
+        entity_alias="cur_se",
+        dataset_alias="cur_pd",
+        lineage=current_lineage_sql,
+    )
+    other_lineage_sql = _lineage_sql("other_head", entity_alias="other_se")
+    other_canonical_sql = _canonical_notice_feature_sql(
+        "other_f",
+        "other_sr",
+        entity_alias="other_se",
+        dataset_alias="other_pd",
+        lineage=other_lineage_sql,
+    )
+    rivals = f"""            FROM provider_sync.source_entities AS other_se
+            JOIN provider_sync.provider_datasets AS other_pd
+              ON other_pd.provider_dataset_id = other_se.provider_dataset_id
+            JOIN provider_sync.source_entity_heads AS other_head
+              ON other_head.source_entity_key = other_se.source_entity_key
+            JOIN provider_sync.source_records AS other_sr
+              ON other_sr.source_record_key = other_head.current_source_record_key
+            JOIN provider_sync.source_links AS other_sl
+              ON other_sl.source_entity_key = other_se.source_entity_key
+             AND other_sl.source_role = 'primary'
+            JOIN feature.features AS other_f
+              ON other_f.feature_id = other_sl.feature_id
+            WHERE {other_lineage_sql} = current_notice.lineage_key
+              AND other_pd.provider = current_notice.provider
+              AND other_pd.dataset_key = current_notice.dataset_key
+              AND other_se.source_entity_type = current_notice.source_entity_type
+              AND other_f.feature_id <> {feature_alias}.feature_id
+              AND other_f.kind = 'notice'
+              AND other_f.deleted_at IS NULL"""
     return f"""
   AND (
     {feature_alias}.kind <> 'notice'
     OR NOT EXISTS (
-      -- 이 feature의 primary 계보들. 한 계보라도 이기면 feature를 보존하므로
-      -- 패자 조건은 bool_and — 행이 하나도 없으면 NULL이 되어 HAVING이 실패하고,
-      -- current primary source가 없는 notice는 종전처럼 표시된다.
       SELECT 1
-      FROM provider_sync.source_links AS cur_sl
-      JOIN provider_sync.source_entities AS cur_se
-        ON cur_se.source_entity_key = cur_sl.source_entity_key
-      JOIN provider_sync.source_records AS cur_sr
-        ON cur_sr.source_record_key = cur_se.current_source_record_key
-      WHERE cur_sl.feature_id = {feature_alias}.feature_id
-        AND cur_sl.is_primary_source
-      HAVING bool_and(
-        -- ① 나보다 확실히 나은 현재 행. 계보 등식 + 행 비교가 통째로
-        -- idx_source_records_lineage의 Index Cond가 된다.
-        EXISTS (
-          SELECT 1{rivals}
-            AND (other_sr.last_seen_at, other_sr.source_record_key)
-                > (cur_sr.last_seen_at, cur_sr.source_record_key)
-          LIMIT 1
+      FROM (
+        SELECT DISTINCT ON (
+            cur_pd.provider,
+            cur_pd.dataset_key,
+            cur_se.source_entity_type,
+            {current_lineage_sql}
         )
-        -- ② 동률 — (seen, record key)가 같다는 건 **같은 source record**를
-        -- 두 feature가 공유한다는 뜻이다(identity 이행). 현재 identity로 만든
-        -- 쪽을 우선하고, 그것도 같으면 stable feature_id로 가른다.
+            cur_pd.provider,
+            cur_pd.dataset_key,
+            cur_se.source_entity_type,
+            {current_lineage_sql} AS lineage_key,
+            cur_head.observed_at AS seen_at,
+            cur_sr.source_record_key,
+            {current_canonical_sql} AS canonical_identity
+        FROM provider_sync.source_links AS cur_sl
+        JOIN provider_sync.source_entities AS cur_se
+          ON cur_se.source_entity_key = cur_sl.source_entity_key
+        JOIN provider_sync.provider_datasets AS cur_pd
+          ON cur_pd.provider_dataset_id = cur_se.provider_dataset_id
+        JOIN provider_sync.source_entity_heads AS cur_head
+          ON cur_head.source_entity_key = cur_se.source_entity_key
+        JOIN provider_sync.source_records AS cur_sr
+          ON cur_sr.source_record_key = cur_head.current_source_record_key
+        WHERE cur_sl.feature_id = {feature_alias}.feature_id
+          AND cur_sl.source_role = 'primary'
+        ORDER BY
+            cur_pd.provider,
+            cur_pd.dataset_key,
+            cur_se.source_entity_type,
+            {current_lineage_sql},
+            cur_head.observed_at DESC,
+            cur_sr.source_record_key DESC
+      ) AS current_notice
+      LEFT JOIN LATERAL (
+        -- "나보다 나은 현재 head가 있나"를 **두 EXISTS로 나눈다**(ADR-087).
+        -- 한 술어 안에 OR로 두면 Postgres가 순서 조건을 Index Cond로 밀지 못하고
+        -- Filter로 남겨, 계보 전수를 훑는다. 나누면 앞쪽은 순수 행 비교라
+        -- idx_source_entity_heads_lineage의 범위가 되고, 뒤쪽은 동률(= 같은 head를
+        -- 두 feature가 공유하는 identity 이행)일 때만 돈다. 사전식 비교라 값은
+        -- 종전 3분기와 동일하다.
+        SELECT 1 AS better_exists
+        WHERE EXISTS (
+            SELECT 1{rivals}
+              AND (other_head.observed_at, other_sr.source_record_key)
+                  > (current_notice.seen_at, current_notice.source_record_key)
+            LIMIT 1
+        )
         OR EXISTS (
-          SELECT 1{rivals}
-            AND (other_sr.last_seen_at, other_sr.source_record_key)
-                = (cur_sr.last_seen_at, cur_sr.source_record_key)
-            AND (
-              (({canonical_other}) AND NOT ({canonical_cur}))
-              OR (
-                ({canonical_other}) = ({canonical_cur})
-                AND other_f.feature_id < {feature_alias}.feature_id
+            SELECT 1{rivals}
+              AND (other_head.observed_at, other_sr.source_record_key)
+                  = (current_notice.seen_at, current_notice.source_record_key)
+              AND (
+                (
+                  {other_canonical_sql}
+                  AND NOT current_notice.canonical_identity
+                )
+                OR (
+                  {other_canonical_sql}
+                    = current_notice.canonical_identity
+                  AND other_f.feature_id < {feature_alias}.feature_id
+                )
               )
-            )
-          LIMIT 1
+            LIMIT 1
         )
-      )
+      ) AS better ON true
+      HAVING bool_and(better.better_exists IS NOT NULL)
     )
   )
 """
+
+
+# ─── H35 고정 세대(0063~0079) replay 전용 ────────────────────────────────
+# 그 세대에는 provider_datasets도 source_entity_heads도 없다. 현행 필터를
+# 재사용하면 리허설이 존재하지 않는 테이블을 참조한다 — merge에서 실제로
+# 그 상태가 됐다. 당시 SQL을 글자 그대로 보존한다.
+def _frozen_h35_notice_lineage_sql(alias: str) -> str:
+    """``source_records`` 행에서 계보 key를 **재계산**하는 SQL."""
+
+    return f"""
+    CASE
+      WHEN {alias}.provider = 'python-krex-api'
+       AND {alias}.dataset_key = 'krex_traffic_notices'
+       AND {alias}.source_entity_type = 'traffic_notice'
+      THEN COALESCE(
+        NULLIF(
+          concat_ws(
+            '::',
+            NULLIF(lower(btrim({alias}.raw_data->>'occurred_date')), ''),
+            NULLIF(lower(btrim({alias}.raw_data->>'occurred_time')), ''),
+            NULLIF(lower(btrim({alias}.raw_data->>'route_no')), ''),
+            NULLIF(lower(btrim({alias}.raw_data->>'direction')), ''),
+            NULLIF(lower(btrim({alias}.raw_data->>'point_name')), ''),
+            NULLIF(lower(btrim({alias}.raw_data->>'incident_type_code')), '')
+          ),
+          ''
+        ),
+        {alias}.source_entity_id
+      )
+      WHEN {alias}.provider = 'python-kma-api'
+       AND {alias}.dataset_key = 'kma_weather_alerts'
+       AND {alias}.source_entity_type = 'weather_alert'
+      THEN COALESCE(
+        NULLIF(
+          concat_ws(
+            '::',
+            NULLIF(btrim({alias}.raw_data->>'region_code'), ''),
+            NULLIF(
+              btrim(
+                COALESCE(
+                  {alias}.raw_data->>'phenomenon',
+                  {alias}.raw_data->>'alert_type'
+                )
+              ),
+              ''
+            )
+          ),
+          ''
+        ),
+        {alias}.source_entity_id
+      )
+      ELSE {alias}.source_entity_id
+    END
+    """
+
+
+
+# 유효 계보 key — 현행 스키마에서 계보를 읽는 **유일한 방법**이다 (ADR-087).
+#
+# ``lineage_key``는 notice 전용 규칙이 있는 scope에만 채워지고(그 밖은 NULL),
+# 나머지는 ``source_entity_id``가 그대로 계보다. 전 행에 사본을 물화하지 않는
+# 이유는 실측이다: 73만 행 중 계보 규칙이 적용되는 것은 744행(0.10%)뿐인데,
+# 전 행 backfill은 heap을 826MB → 1,700MB로 **영구히** 부풀리고(VACUUM으로도
+# OS에 반환되지 않는다) 그 두 배의 WAL과 2분짜리 ACCESS EXCLUSIVE lock을 낸다.
+#
+# 0079 세대의 유효 계보 — 그 시절엔 source_records가 계보 key를 직접 들고 있었다.
+def _frozen_h35_lineage_sql(alias: str) -> str:
+    """``source_records`` alias의 유효 계보 key SQL (고정 세대 전용)."""
+
+    return f"COALESCE({alias}.lineage_key, {alias}.source_entity_id)"
+
+
+def _frozen_h35_canonical_notice_feature_sql(
+    feature_alias: str, source_alias: str, *, lineage: str | None = None
+) -> str:
+    """현재 사건 단위 identity로 만든 notice feature인지 판정하는 SQL.
+
+    KREX/KMA의 현 identity는 모두 ``bjd_code=None``과 고정 category를 사용하고,
+    ``source_natural_key``는 계보 key와 같다. 따라서 같은 source record가 구/신
+    feature 양쪽에 연결된 identity 이행 동률에서도 현재 ``make_feature_id`` 결과를
+    정확히 알아낼 수 있다. 그 외 provider는 근거가 없으므로 ``false``로 두고
+    stable ``feature_id`` tie-break에 맡긴다.
+
+    ``lineage``: 계보 key SQL 식. 기본값은 저장 컬럼이고, 컬럼이 없는 H35 고정
+    세대 replay만 재계산 식을 넘긴다.
+    """
+    lineage = _frozen_h35_lineage_sql(source_alias) if lineage is None else lineage
+    return f"""
+    CASE
+      WHEN (
+        ({source_alias}.provider = 'python-krex-api'
+         AND {source_alias}.dataset_key = 'krex_traffic_notices'
+         AND {source_alias}.source_entity_type = 'traffic_notice')
+        OR
+        ({source_alias}.provider = 'python-kma-api'
+         AND {source_alias}.dataset_key = 'kma_weather_alerts'
+         AND {source_alias}.source_entity_type = 'weather_alert')
+      )
+      THEN {feature_alias}.feature_id = (
+        'f_global_n_' || left(
+          encode(
+            x_extension.digest(
+              'global|notice|99000000|'
+              || {source_alias}.provider || ':' || {source_alias}.dataset_key || '|'
+              || {lineage} || '|',
+              'sha1'
+            ),
+            'hex'
+          ),
+          16
+        )
+      )
+      ELSE false
+    END
+    """
 
 
 def _frozen_h35_latest_notice_only_sql(feature_alias: str) -> str:
@@ -760,12 +903,12 @@ def _frozen_h35_latest_notice_only_sql(feature_alias: str) -> str:
     현행 코드가 이 형태를 되살리는 것을 막기 위해 이 함수 안에만 존재한다.
     """
 
-    lineage_cur = _notice_lineage_sql("cur_sr")
-    canonical_cur = _canonical_notice_feature_sql(
+    lineage_cur = _frozen_h35_notice_lineage_sql("cur_sr")
+    canonical_cur = _frozen_h35_canonical_notice_feature_sql(
         feature_alias, "cur_sr", lineage=lineage_cur
     )
-    canonical_other = _canonical_notice_feature_sql(
-        "other_f", "other_sr", lineage=_notice_lineage_sql("other_sr")
+    canonical_other = _frozen_h35_canonical_notice_feature_sql(
+        "other_f", "other_sr", lineage=_frozen_h35_notice_lineage_sql("other_sr")
     )
     return f"""
   AND (
@@ -810,7 +953,7 @@ def _frozen_h35_latest_notice_only_sql(feature_alias: str) -> str:
         FROM provider_sync.source_entities AS other_se
         JOIN provider_sync.source_records AS other_sr
           ON other_sr.source_record_key = other_se.current_source_record_key
-         AND {_notice_lineage_sql("other_sr")} = current_notice.lineage_key
+         AND {_frozen_h35_notice_lineage_sql("other_sr")} = current_notice.lineage_key
         JOIN provider_sync.source_links AS other_sl
           ON other_sl.source_entity_key = other_se.source_entity_key
         JOIN feature.features AS other_f
@@ -878,10 +1021,9 @@ def public_active_notice_filter_sql(
     제외한다.
 
     ``frozen_h35_schema``: H35 cutover 리허설 전용. 그 경로는 **0079로 고정된
-    과거 스키마**를 재생하므로 0085가 신설한 ``feature.feature_notices``도,
-    0088이 신설한 ``source_records.lineage_key``도 존재하지 않는다 — 두 판정 모두
-    그 세대의 SQL을 그대로 쓴다. 현행 표면은 typed 비교와 저장 계보 key만 쓴다
-    (T-VN-35/37, ADR-086/087).
+    과거 스키마**를 재생하므로 0085가 신설한 ``feature.feature_notices``가
+    존재하지 않는다 — 그 세대의 판정(``detail`` 문자열 + 방어 cast)을 그대로
+    쓴다. 현행 표면은 typed 비교만 쓴다(T-VN-35, ADR-086).
     """
 
     if not feature_alias.isidentifier():
@@ -1042,7 +1184,7 @@ def _bbox_attribute_filter_sql(feature_alias: str) -> str:
 
     세 변형이 같은 SQL을 재사용해 이중 복제를 제거한다(ADR-073 D-9-4). NULL 배열이면
     술어가 단락(short-circuit)돼 인덱스 기반 조회에 영향이 없다. provider 필터는
-    primary source(``provider_sync.is_primary_source``) 기준 EXISTS다.
+    primary source(``source_role = 'primary'``) 기준 EXISTS다.
     """
     if not feature_alias.isidentifier():
         raise ValueError("feature alias must be a SQL identifier")
@@ -1059,9 +1201,11 @@ def _bbox_attribute_filter_sql(feature_alias: str) -> str:
       FROM provider_sync.source_links AS pl
       JOIN provider_sync.source_entities AS pr
         ON pr.source_entity_key = pl.source_entity_key
+      JOIN provider_sync.provider_datasets AS pd
+        ON pd.provider_dataset_id = pr.provider_dataset_id
       WHERE pl.feature_id = {feature_alias}.feature_id
-        AND pl.is_primary_source
-        AND pr.provider = ANY(CAST(:providers AS text[]))
+        AND pl.source_role = 'primary'
+        AND pd.provider = ANY(CAST(:providers AS text[]))
     )
   )
 """
@@ -1097,23 +1241,26 @@ SELECT
     f.kind, f.name, f.category, f.status,
     x_extension.ST_X(f.coord) AS lon, x_extension.ST_Y(f.coord) AS lat,
     f.address, f.detail,
-    sr.source_record_key, sr.provider, sr.dataset_key,
-    sr.source_entity_type, sr.source_entity_id,
-    sr.raw_name, sr.raw_address, sr.raw_data,
-    sr.fetched_at, sr.imported_at
+    sr.source_record_key, pd.provider, pd.dataset_key,
+    se.source_entity_type, se.source_entity_id,
+    sr.raw_data, sr.fetched_at, sr.imported_at, head.observed_at, head.expires_at
 FROM provider_sync.source_entities AS se
+JOIN provider_sync.provider_datasets AS pd
+  ON pd.provider_dataset_id = se.provider_dataset_id
+JOIN provider_sync.source_entity_heads AS head
+  ON head.source_entity_key = se.source_entity_key
 JOIN provider_sync.source_records AS sr
-  ON sr.source_record_key = se.current_source_record_key
+  ON sr.source_record_key = head.current_source_record_key
 JOIN provider_sync.source_links AS sl
   ON sl.source_entity_key = se.source_entity_key
 JOIN feature.public_features AS f
   ON f.feature_id = sl.feature_id
-WHERE sr.provider = :provider
-  AND sr.dataset_key = :dataset_key
-  AND sr.source_entity_type = :source_entity_type
-  AND sr.source_entity_id = :source_entity_id
-  AND sl.is_primary_source
-ORDER BY sr.imported_at DESC NULLS LAST, f.feature_id
+WHERE pd.provider = :provider
+  AND pd.dataset_key = :dataset_key
+  AND se.source_entity_type = :source_entity_type
+  AND se.source_entity_id = :source_entity_id
+  AND sl.source_role = 'primary'
+ORDER BY head.observed_at DESC, sr.imported_at DESC, f.feature_id
 LIMIT 1
 """
 
@@ -1670,15 +1817,19 @@ candidates AS (
      AND f.coord_5179 IS NOT NULL
      AND x_extension.ST_DWithin(f.coord_5179, t.coord_5179, t.radius_m)
     LEFT JOIN LATERAL (
-        SELECT se.provider, se.dataset_key
+        SELECT pd.provider, pd.dataset_key
         FROM provider_sync.source_links AS sl
         JOIN provider_sync.source_entities AS se
           ON se.source_entity_key = sl.source_entity_key
+        JOIN provider_sync.provider_datasets AS pd
+          ON pd.provider_dataset_id = se.provider_dataset_id
+        JOIN provider_sync.source_entity_heads AS head
+          ON head.source_entity_key = se.source_entity_key
         JOIN provider_sync.source_records AS sr
-          ON sr.source_record_key = se.current_source_record_key
+          ON sr.source_record_key = head.current_source_record_key
         WHERE sl.feature_id = f.feature_id
-          AND sl.is_primary_source
-        ORDER BY sr.imported_at DESC NULLS LAST, sr.source_record_key
+          AND sl.source_role = 'primary'
+        ORDER BY head.observed_at DESC, sr.imported_at DESC, sr.source_record_key
         LIMIT 1
     ) AS ps ON TRUE
     WHERE (CAST(:kinds AS text[]) IS NULL OR f.kind = ANY(CAST(:kinds AS text[])))
@@ -1788,15 +1939,19 @@ candidates AS (
      AND f.coord_5179 IS NOT NULL
      AND x_extension.ST_DWithin(f.coord_5179, o.pt_5179, o.radius_m)
     LEFT JOIN LATERAL (
-        SELECT se.provider, se.dataset_key
+        SELECT pd.provider, pd.dataset_key
         FROM provider_sync.source_links AS sl
         JOIN provider_sync.source_entities AS se
           ON se.source_entity_key = sl.source_entity_key
+        JOIN provider_sync.provider_datasets AS pd
+          ON pd.provider_dataset_id = se.provider_dataset_id
+        JOIN provider_sync.source_entity_heads AS head
+          ON head.source_entity_key = se.source_entity_key
         JOIN provider_sync.source_records AS sr
-          ON sr.source_record_key = se.current_source_record_key
+          ON sr.source_record_key = head.current_source_record_key
         WHERE sl.feature_id = f.feature_id
-          AND sl.is_primary_source
-        ORDER BY sr.imported_at DESC NULLS LAST, sr.source_record_key
+          AND sl.source_role = 'primary'
+        ORDER BY head.observed_at DESC, sr.imported_at DESC, sr.source_record_key
         LIMIT 1
     ) AS ps ON TRUE
     WHERE (CAST(:kinds AS text[]) IS NULL OR f.kind = ANY(CAST(:kinds AS text[])))
@@ -1878,8 +2033,8 @@ _NEARBY_COORD_SQL_BY_SORT: Final[dict[str, str]] = {
 # 것을 soft-delete (status='inactive' + deleted_at). 전체 snapshot 적재 후 호출해
 # "이번 snapshot에서 사라진" feature를 비활성화한다 (Step A bulk, ADR-017 — place는
 # 무기한 유지하되 status만 inactive). 이미 deleted_at IS NOT NULL이면 건너뛴다.
-# source_entity_id 매칭은 BRIN/B-tree 인덱스(idx_source_records_provider_dataset_entity)
-# 사용. ``:keys`` 빈 배열이면 전체 비활성화(snapshot이 비었음을 의미).
+# source entity→dataset natural identity join을 사용한다. ``:keys`` 빈 배열이면 전체
+# 비활성화(snapshot이 비었음을 의미).
 _SOFT_DELETE_NOT_IN_SNAPSHOT_SQL: Final[str] = """
 UPDATE feature.features AS f
 SET status = 'inactive', deleted_at = now(), updated_at = now()
@@ -1888,13 +2043,15 @@ WHERE f.deleted_at IS NULL
   AND f.feature_id IN (
     SELECT sl.feature_id
     FROM provider_sync.source_links AS sl
-    JOIN provider_sync.source_entities AS sr
-      ON sr.source_entity_key = sl.source_entity_key
-    WHERE sl.is_primary_source
-      AND sr.provider = :provider
-      AND sr.dataset_key = :dataset_key
-      AND sr.source_entity_type = :source_entity_type
-      AND NOT (sr.source_entity_id = ANY(CAST(:keys AS text[])))
+    JOIN provider_sync.source_entities AS se
+      ON se.source_entity_key = sl.source_entity_key
+    JOIN provider_sync.provider_datasets AS pd
+      ON pd.provider_dataset_id = se.provider_dataset_id
+    WHERE sl.source_role = 'primary'
+      AND pd.provider = :provider
+      AND pd.dataset_key = :dataset_key
+      AND se.source_entity_type = :source_entity_type
+      AND NOT (se.source_entity_id = ANY(CAST(:keys AS text[])))
   )
 RETURNING f.feature_id
 """
@@ -1912,13 +2069,15 @@ WHERE f.deleted_at IS NULL
   AND f.feature_id IN (
     SELECT sl.feature_id
     FROM provider_sync.source_links AS sl
-    JOIN provider_sync.source_entities AS sr
-      ON sr.source_entity_key = sl.source_entity_key
-    WHERE sl.is_primary_source
-      AND sr.provider = :provider
-      AND sr.dataset_key = :dataset_key
-      AND sr.source_entity_type = :source_entity_type
-      AND sr.source_entity_id = ANY(CAST(:keys AS text[]))
+    JOIN provider_sync.source_entities AS se
+      ON se.source_entity_key = sl.source_entity_key
+    JOIN provider_sync.provider_datasets AS pd
+      ON pd.provider_dataset_id = se.provider_dataset_id
+    WHERE sl.source_role = 'primary'
+      AND pd.provider = :provider
+      AND pd.dataset_key = :dataset_key
+      AND se.source_entity_type = :source_entity_type
+      AND se.source_entity_id = ANY(CAST(:keys AS text[]))
   )
 RETURNING f.feature_id
 """
@@ -1944,12 +2103,14 @@ WHERE f.deleted_at IS NULL
   AND f.feature_id IN (
     SELECT sl.feature_id
     FROM provider_sync.source_links AS sl
-    JOIN provider_sync.source_entities AS sr
-      ON sr.source_entity_key = sl.source_entity_key
-    WHERE sl.is_primary_source
-      AND sr.provider = :provider
-      AND sr.dataset_key = :dataset_key
-      AND sr.source_entity_type = :source_entity_type
+    JOIN provider_sync.source_entities AS se
+      ON se.source_entity_key = sl.source_entity_key
+    JOIN provider_sync.provider_datasets AS pd
+      ON pd.provider_dataset_id = se.provider_dataset_id
+    WHERE sl.source_role = 'primary'
+      AND pd.provider = :provider
+      AND pd.dataset_key = :dataset_key
+      AND se.source_entity_type = :source_entity_type
   )
 RETURNING f.feature_id
 """
@@ -2192,7 +2353,9 @@ def _dump_raw_refs(feature: Feature) -> str:
     )
 
 
-def _source_record_params(record: SourceRecord) -> dict[str, Any]:
+def _source_record_params(
+    record: SourceRecord, *, provider_dataset_id: int
+) -> dict[str, Any]:
     import json
 
     return {
@@ -2203,19 +2366,16 @@ def _source_record_params(record: SourceRecord) -> dict[str, Any]:
             source_entity_type=record.source_entity_type,
             source_entity_id=record.source_entity_id,
         ),
+        "provider_dataset_id": provider_dataset_id,
         "provider": record.provider,
         "dataset_key": record.dataset_key,
         "source_entity_type": record.source_entity_type,
         "source_entity_id": record.source_entity_id,
-        "source_version": record.source_version,
-        "raw_name": record.raw_name,
-        "raw_address": record.raw_address,
-        "raw_longitude": record.raw_longitude,
-        "raw_latitude": record.raw_latitude,
         "raw_data": json.dumps(record.raw_data, ensure_ascii=False, default=str),
         "raw_payload_hash": record.raw_payload_hash,
         "fetched_at": record.fetched_at,
         "imported_at": record.imported_at,
+        "observed_at": record.imported_at,
         "expires_at": record.expires_at,
     }
 
@@ -2240,7 +2400,6 @@ def _source_link_params(link: SourceLink) -> dict[str, Any]:
         "source_role": link.source_role.value,
         "match_method": link.match_method,
         "confidence": link.confidence,
-        "is_primary_source": link.is_primary_source,
         "created_at": link.created_at,
     }
 
@@ -2326,31 +2485,72 @@ class _SourceRecordUpsertState:
     became_current: bool
 
 
+async def resolve_active_provider_dataset_id(
+    session: AsyncSession, *, provider: str, dataset_key: str, lock: bool = False
+) -> int:
+    """활성 ``provider_datasets`` 행의 대리 키를 찾는다 (T-VN-33, ADR-088).
+
+    문자열 pair를 받는 **경계**(공개 facade·admin 입력·provider 변환)에서만 쓴다.
+    내부 경로는 ``provider_dataset_id``를 그대로 들고 다닌다 — 그래야 record마다
+    조회가 붙지 않는다.
+
+    inactive이거나 seed되지 않았으면 ``LookupError``다. 조용히 NULL로 넘기면
+    cutover 뒤 첫 write가 ``ck_provider_dataset_active_write``로 죽는데, 그때는
+    어느 pair가 문제인지 알 수 없다.
+    """
+    lock_clause = "FOR SHARE" if lock else ""
+    provider_dataset_id = (
+        await session.execute(
+            text(
+                f"""
+                SELECT provider_dataset_id
+                FROM provider_sync.provider_datasets
+                WHERE provider = :provider
+                  AND dataset_key = :dataset_key
+                  AND is_active
+                {lock_clause}
+                """
+            ),
+            {"provider": provider, "dataset_key": dataset_key},
+        )
+    ).scalar_one_or_none()
+    if provider_dataset_id is None:
+        raise LookupError(
+            f"no active provider dataset is seeded for {provider!r}/{dataset_key!r}"
+        )
+    return int(provider_dataset_id)
+
+
 async def _upsert_source_record_state(
     session: AsyncSession, record: SourceRecord
 ) -> _SourceRecordUpsertState:
-    params = _source_record_params(record)
-    previous_current = (
-        await session.execute(text(_UPSERT_SOURCE_ENTITY_SQL), params)
-    ).scalar_one()
-    result = await session.execute(text(_UPSERT_SOURCE_RECORD_SQL), params)
-    inserted = bool(result.scalar_one())
-    current = (
-        await session.execute(text(_REFRESH_SOURCE_ENTITY_CURRENT_SQL), params)
-    ).scalar_one()
+    provider_dataset_id = await resolve_active_provider_dataset_id(
+        session, provider=record.provider, dataset_key=record.dataset_key, lock=True
+    )
+
+    params = _source_record_params(record, provider_dataset_id=provider_dataset_id)
+    await session.execute(text(_UPSERT_SOURCE_ENTITY_SQL), params)
+    row = (await session.execute(text(_UPSERT_SOURCE_RECORD_SQL), params)).mappings().one()
+    inserted = bool(row["inserted"])
+    # conflict 경로의 DTO key는 current immutable record key와 다를 수 있다.
+    # head/link writer는 항상 DB가 확정한 canonical key만 사용해야 한다.
+    params["source_record_key"] = str(row["source_record_key"])
+    became_current = bool(
+        (
+            await session.execute(text(_UPSERT_SOURCE_ENTITY_HEAD_SQL), params)
+        ).scalar_one()
+    )
     return _SourceRecordUpsertState(
         inserted=inserted,
-        became_current=(
-            current == record.source_record_key and previous_current != current
-        ),
+        became_current=became_current,
     )
 
 
 async def upsert_source_record(session: AsyncSession, record: SourceRecord) -> bool:
     """``provider_sync.source_records`` insert. 신규면 ``True``, 이미 있으면 ``False``.
 
-    payload_hash가 UNIQUE 구성요소라 payload 변경은 새 row로 이력을 남긴다.
-    동일 key 재적재는 raw payload를 갱신하지 않고 ``last_seen_at``만 갱신한다.
+    payload hash가 entity 안에서 유일하므로 payload 변경은 새 immutable row를 남긴다.
+    재관측은 raw row를 갱신하지 않고 entity head의 ``observed_at``만 전진시킨다.
     """
     return (await _upsert_source_record_state(session, record)).inserted
 
@@ -2385,8 +2585,8 @@ async def upsert_source_link(session: AsyncSession, link: SourceLink) -> bool:
 async def load_bundle(session: AsyncSession, bundle: FeatureBundle) -> FeatureLoadResult:
     """``FeatureBundle`` 하나를 적재 (source_record → feature → source_link 순).
 
-    동일 source_record_key 재수집이면 원문 내용은 이미 같은 payload라는 뜻이므로
-    feature 본문/version은 갱신하지 않고 ``source_records.last_seen_at``만 갱신한다.
+    동일 source record 재수집이면 원문은 immutable로 유지하고 entity head의 관측만
+    전진시킨다. current record가 달라진 경우에만 feature 본문/version을 갱신한다.
     단, source_record만 있고 feature가 없는 비정상 상태는 생성하고, provider가
     다시 보낸 active feature가 과거 정리/비활성화로 ``inactive`` 상태라면 복구한다.
     ``user_request`` feature와 provider 재활성화 방지 override는 복구하지 않는다.
@@ -2559,41 +2759,47 @@ SELECT pg_catalog.pg_advisory_xact_lock(
 """
 
 _GET_NOTICE_SNAPSHOT_SCOPE_SQL: Final[str] = """
-SELECT mode, applied_at, state_fingerprint
-FROM provider_sync.notice_lifecycle_scopes
-WHERE provider = :provider
-  AND dataset_key = :dataset_key
-  AND source_entity_type = :source_entity_type
+SELECT scope.notice_lifecycle_scope_id, scope.mode, scope.applied_at, scope.state_fingerprint
+FROM provider_sync.notice_lifecycle_scopes AS scope
+JOIN provider_sync.provider_datasets AS dataset
+  ON dataset.provider_dataset_id = scope.provider_dataset_id
+WHERE dataset.provider = :provider
+  AND dataset.dataset_key = :dataset_key
+  AND scope.source_entity_type = :source_entity_type
 """
 
 _INSERT_NOTICE_SNAPSHOT_SCOPE_SQL: Final[str] = """
 INSERT INTO provider_sync.notice_lifecycle_scopes (
-    provider, dataset_key, source_entity_type,
+    provider_dataset_id, source_entity_type,
     mode, applied_at, state_fingerprint
-) VALUES (
-    :provider, :dataset_key, :source_entity_type,
+) SELECT dataset.provider_dataset_id, :source_entity_type,
     :mode, CAST(:applied_at AS timestamptz), :state_fingerprint
-)
+FROM provider_sync.provider_datasets AS dataset
+WHERE dataset.provider = :provider
+  AND dataset.dataset_key = :dataset_key
 """
 
 _UPDATE_NOTICE_SNAPSHOT_SCOPE_SQL: Final[str] = """
 UPDATE provider_sync.notice_lifecycle_scopes
 SET applied_at = CAST(:applied_at AS timestamptz),
     state_fingerprint = :state_fingerprint
-WHERE provider = :provider
-  AND dataset_key = :dataset_key
-  AND source_entity_type = :source_entity_type
+FROM provider_sync.provider_datasets AS dataset
+WHERE dataset.provider_dataset_id = provider_sync.notice_lifecycle_scopes.provider_dataset_id
+  AND dataset.provider = :provider
+  AND dataset.dataset_key = :dataset_key
+  AND provider_sync.notice_lifecycle_scopes.source_entity_type = :source_entity_type
 """
 
 _UPSERT_NOTICE_EVENT_SCOPE_SQL: Final[str] = """
 INSERT INTO provider_sync.notice_lifecycle_scopes (
-    provider, dataset_key, source_entity_type,
+    provider_dataset_id, source_entity_type,
     mode, applied_at, state_fingerprint
-) VALUES (
-    :provider, :dataset_key, :source_entity_type,
+) SELECT dataset.provider_dataset_id, :source_entity_type,
     'event', CAST(:applied_at AS timestamptz), :state_fingerprint
-)
-ON CONFLICT (provider, dataset_key, source_entity_type)
+FROM provider_sync.provider_datasets AS dataset
+WHERE dataset.provider = :provider
+  AND dataset.dataset_key = :dataset_key
+ON CONFLICT (provider_dataset_id, source_entity_type)
 DO UPDATE SET
     applied_at = GREATEST(
         provider_sync.notice_lifecycle_scopes.applied_at,
@@ -2610,21 +2816,32 @@ DO UPDATE SET
 
 def _sync_notice_lineage_states_sql() -> str:
     """알려진 scope 계보의 present 전이만 changed_at과 함께 저장한다."""
+    lineage_sql = _notice_lineage_sql(
+        "sr", entity_alias="se", dataset_alias="dataset"
+    )
     return f"""
 WITH known_lineages AS (
-    SELECT DISTINCT {_lineage_sql('sr')} AS lineage_key
+    SELECT DISTINCT {lineage_sql} AS lineage_key
     FROM provider_sync.source_entities AS se
+    JOIN provider_sync.provider_datasets AS dataset
+      ON dataset.provider_dataset_id = se.provider_dataset_id
+    JOIN provider_sync.source_entity_heads AS head
+      ON head.source_entity_key = se.source_entity_key
     JOIN provider_sync.source_records AS sr
-      ON sr.source_record_key = se.current_source_record_key
-    WHERE se.provider = :provider
-      AND se.dataset_key = :dataset_key
+      ON sr.source_record_key = head.current_source_record_key
+    WHERE dataset.provider = :provider
+      AND dataset.dataset_key = :dataset_key
       AND se.source_entity_type = :source_entity_type
     UNION
     SELECT lineage_key
-    FROM provider_sync.notice_lineage_states
-    WHERE provider = :provider
-      AND dataset_key = :dataset_key
-      AND source_entity_type = :source_entity_type
+    FROM provider_sync.notice_lineage_states AS state
+    JOIN provider_sync.notice_lifecycle_scopes AS scope
+      ON scope.notice_lifecycle_scope_id = state.notice_lifecycle_scope_id
+    JOIN provider_sync.provider_datasets AS dataset
+      ON dataset.provider_dataset_id = scope.provider_dataset_id
+    WHERE dataset.provider = :provider
+      AND dataset.dataset_key = :dataset_key
+      AND scope.source_entity_type = :source_entity_type
     UNION
     SELECT unnest(CAST(:active_keys AS text[]))
 ), desired AS (
@@ -2635,14 +2852,19 @@ WITH known_lineages AS (
     FROM known_lineages
 )
 INSERT INTO provider_sync.notice_lineage_states (
-    provider, dataset_key, source_entity_type,
-    lineage_key, present, changed_at, valid_until
+    notice_lifecycle_scope_id, lineage_key, present, changed_at, valid_until
 )
 SELECT
-    :provider, :dataset_key, :source_entity_type,
-    lineage_key, present, CAST(:closed_at AS timestamptz), valid_until
+    scope.notice_lifecycle_scope_id,
+    desired.lineage_key, desired.present, CAST(:closed_at AS timestamptz), desired.valid_until
 FROM desired
-ON CONFLICT (provider, dataset_key, source_entity_type, lineage_key)
+JOIN provider_sync.notice_lifecycle_scopes AS scope
+  ON scope.source_entity_type = :source_entity_type
+JOIN provider_sync.provider_datasets AS dataset
+  ON dataset.provider_dataset_id = scope.provider_dataset_id
+ AND dataset.provider = :provider
+ AND dataset.dataset_key = :dataset_key
+ON CONFLICT (notice_lifecycle_scope_id, lineage_key)
 DO UPDATE SET
     present = EXCLUDED.present,
     changed_at = EXCLUDED.changed_at,
@@ -2748,11 +2970,15 @@ SELECT EXISTS (
     SELECT 1
     FROM incoming
     JOIN provider_sync.notice_lineage_states AS state
-      ON state.provider = :provider
-     AND state.dataset_key = :dataset_key
-     AND state.source_entity_type = :source_entity_type
-     AND state.lineage_key = incoming.lineage_key
-    WHERE state.changed_at = incoming.changed_at
+      ON state.lineage_key = incoming.lineage_key
+    JOIN provider_sync.notice_lifecycle_scopes AS scope
+      ON scope.notice_lifecycle_scope_id = state.notice_lifecycle_scope_id
+    JOIN provider_sync.provider_datasets AS dataset
+      ON dataset.provider_dataset_id = scope.provider_dataset_id
+    WHERE dataset.provider = :provider
+      AND dataset.dataset_key = :dataset_key
+      AND scope.source_entity_type = :source_entity_type
+      AND state.changed_at = incoming.changed_at
       AND (
           state.present IS DISTINCT FROM incoming.present
           OR state.valid_until IS DISTINCT FROM incoming.valid_until
@@ -2771,14 +2997,19 @@ WITH incoming AS (
     )
 )
 INSERT INTO provider_sync.notice_lineage_states (
-    provider, dataset_key, source_entity_type,
-    lineage_key, present, changed_at, valid_until
+    notice_lifecycle_scope_id, lineage_key, present, changed_at, valid_until
 )
 SELECT
-    :provider, :dataset_key, :source_entity_type,
-    lineage_key, present, changed_at, valid_until
+    scope.notice_lifecycle_scope_id,
+    incoming.lineage_key, incoming.present, incoming.changed_at, incoming.valid_until
 FROM incoming
-ON CONFLICT (provider, dataset_key, source_entity_type, lineage_key)
+JOIN provider_sync.notice_lifecycle_scopes AS scope
+  ON scope.source_entity_type = :source_entity_type
+JOIN provider_sync.provider_datasets AS dataset
+  ON dataset.provider_dataset_id = scope.provider_dataset_id
+ AND dataset.provider = :provider
+ AND dataset.dataset_key = :dataset_key
+ON CONFLICT (notice_lifecycle_scope_id, lineage_key)
 DO UPDATE SET
     present = EXCLUDED.present,
     changed_at = EXCLUDED.changed_at,
@@ -2799,11 +3030,15 @@ WITH incoming AS (
 SELECT incoming.lineage_key
 FROM incoming
 JOIN provider_sync.notice_lineage_states AS state
-  ON state.provider = :provider
- AND state.dataset_key = :dataset_key
- AND state.source_entity_type = :source_entity_type
- AND state.lineage_key = incoming.lineage_key
-WHERE incoming.present
+  ON state.lineage_key = incoming.lineage_key
+JOIN provider_sync.notice_lifecycle_scopes AS scope
+  ON scope.notice_lifecycle_scope_id = state.notice_lifecycle_scope_id
+JOIN provider_sync.provider_datasets AS dataset
+  ON dataset.provider_dataset_id = scope.provider_dataset_id
+WHERE dataset.provider = :provider
+  AND dataset.dataset_key = :dataset_key
+  AND scope.source_entity_type = :source_entity_type
+  AND incoming.present
   AND state.present
   AND state.changed_at = incoming.changed_at
   AND state.valid_until IS NOT DISTINCT FROM incoming.valid_until
@@ -2910,6 +3145,11 @@ def _supersede_stale_notice_sql(close_missing: bool) -> str:
     그 계보로 열린 공유 feature를 현재 scope의 snapshot 부재로 닫지 않는다. 호출
     scope 자체의 winner는 ``ranked``에서 이미 계산하므로 cross-scope 보호 CTE에서
     다시 전수 비교하지 않는다.
+
+    ``close_missing=True``는 ``:hidden_before``(적재 이전에 안 보이던 feature_id
+    배열)를 추가로 요구한다 — 같은 statement에서 읽는 상태는 이미 이번 적재가
+    지나간 뒤라 "직전 가시성"을 스스로 관측할 수 없기 때문이다
+    (``_hidden_notice_features``).
     """
     candidate_lifecycle = (
         """
@@ -2921,55 +3161,56 @@ def _supersede_stale_notice_sql(close_missing: bool) -> str:
         if close_missing
         else "      AND f.deleted_at IS NULL\n"
     )
-    # 경쟁자 후보 — 두 EXISTS가 공유한다. record쪽 scope 3열은 걸지 않는다:
-    # 인덱스 선행은 계보 식 하나이고, 그 3열이 자기 entity 행과 일치한다는
-    # **제약 없는 가정**을 정확성의 전제로 만들 뿐이다(read 필터에서도 같은 이유로
-    # 제거했다 — ADR-087 §결과).
-    rival_joins = f"""
-        FROM provider_sync.source_entities AS other_se
-        JOIN provider_sync.source_records AS other_sr
-          ON other_sr.source_record_key = other_se.current_source_record_key
-        JOIN provider_sync.source_links AS other_sl
-          ON other_sl.source_entity_key = other_se.source_entity_key
-         AND other_sl.is_primary_source
-        JOIN feature.features AS other_f
-          ON other_f.feature_id = other_sl.feature_id
-        WHERE {_lineage_sql('other_sr')} = current_notice.lineage_key
-          AND other_se.provider = current_notice.provider
-          AND other_se.dataset_key = current_notice.dataset_key
-          AND other_se.source_entity_type = current_notice.source_entity_type
-          AND other_f.feature_id <> current_notice.feature_id
-          AND other_f.kind = 'notice'
-          AND other_f.deleted_at IS NULL"""
+    lineage_sql = _lineage_sql("head", entity_alias="se")
+    canonical_sql = _canonical_notice_feature_sql(
+        "f",
+        "sr",
+        entity_alias="se",
+        dataset_alias="dataset",
+        lineage=lineage_sql,
+    )
+    other_lineage_sql = _lineage_sql("other_head", entity_alias="other_se")
+    other_canonical_sql = _canonical_notice_feature_sql(
+        "other_f",
+        "other_sr",
+        entity_alias="other_se",
+        dataset_alias="other_dataset",
+        lineage=other_lineage_sql,
+    )
     lineage_cte = f"""
 WITH lineage_candidates AS (
     SELECT
         f.feature_id,
-        {_lineage_sql('sr')} AS lineage_key,
-        sr.last_seen_at AS seen_at,
+        {lineage_sql} AS lineage_key,
+        head.observed_at AS seen_at,
         sr.source_record_key AS tiebreak,
-        {_canonical_notice_feature_sql("f", "sr")} AS canonical_identity,
+        {canonical_sql} AS canonical_identity,
         lineage_state.present AS snapshot_present,
         lineage_state.changed_at AS snapshot_changed_at,
         lineage_state.valid_until AS snapshot_valid_until
     FROM feature.features AS f
     JOIN provider_sync.source_links AS sl
       ON sl.feature_id = f.feature_id
-     AND sl.is_primary_source
+     AND sl.source_role = 'primary'
     JOIN provider_sync.source_entities AS se
       ON se.source_entity_key = sl.source_entity_key
+    JOIN provider_sync.provider_datasets AS dataset
+      ON dataset.provider_dataset_id = se.provider_dataset_id
+    JOIN provider_sync.source_entity_heads AS head
+      ON head.source_entity_key = se.source_entity_key
     JOIN provider_sync.source_records AS sr
-      ON sr.source_record_key = se.current_source_record_key
+      ON sr.source_record_key = head.current_source_record_key
+    LEFT JOIN provider_sync.notice_lifecycle_scopes AS lifecycle_scope
+      ON lifecycle_scope.provider_dataset_id = se.provider_dataset_id
+     AND lifecycle_scope.source_entity_type = se.source_entity_type
     LEFT JOIN provider_sync.notice_lineage_states AS lineage_state
-      ON lineage_state.provider = sr.provider
-     AND lineage_state.dataset_key = sr.dataset_key
-     AND lineage_state.source_entity_type = sr.source_entity_type
-     AND lineage_state.lineage_key = {_lineage_sql('sr')}
+      ON lineage_state.notice_lifecycle_scope_id = lifecycle_scope.notice_lifecycle_scope_id
+     AND lineage_state.lineage_key = {lineage_sql}
     WHERE f.kind = 'notice'
       AND COALESCE(f.data_origin, 'provider') <> 'user_request'
-      AND sr.provider = :provider
-      AND sr.dataset_key = :dataset_key
-      AND sr.source_entity_type = :source_entity_type
+      AND dataset.provider = :provider
+      AND dataset.dataset_key = :dataset_key
+      AND se.source_entity_type = :source_entity_type
 {candidate_lifecycle}
 ),
 lineage AS (
@@ -3008,24 +3249,23 @@ scoped_feature_ids AS (
 ),
 out_of_scope_feature_lineages AS MATERIALIZED (
     -- MATERIALIZED가 없으면 Postgres가 이 CTE를 갱신 대상 feature마다 다시
-    -- 실행한다(실측 3,045 notice에서 loops=2,900 → 124.8초). 계보 승패는 질의당
-    -- 한 번만 계산하면 되는 집합 연산이라 여기서 최적화 장벽을 세운다 — 같은
-    -- 규모에서 0.58초, 갱신 행 수는 동일하다.
+    -- 실행한다(T-VN-37 실측: 3,045 notice에서 loops=2,900 → 87.9초). 계보 승패는
+    -- 질의당 한 번이면 되는 집합 연산이라 여기서 최적화 장벽을 세운다.
     SELECT DISTINCT ON (
         f.feature_id,
-        sr.provider,
-        sr.dataset_key,
-        sr.source_entity_type,
-        {_lineage_sql('sr')}
+        dataset.provider,
+        dataset.dataset_key,
+        se.source_entity_type,
+        {lineage_sql}
     )
         f.feature_id,
-        sr.provider,
-        sr.dataset_key,
-        sr.source_entity_type,
-        {_lineage_sql('sr')} AS lineage_key,
-        sr.last_seen_at AS seen_at,
+        dataset.provider,
+        dataset.dataset_key,
+        se.source_entity_type,
+        {lineage_sql} AS lineage_key,
+        head.observed_at AS seen_at,
         sr.source_record_key AS tiebreak,
-        {_canonical_notice_feature_sql("f", "sr")} AS canonical_identity,
+        {canonical_sql} AS canonical_identity,
         lineage_state.present AS snapshot_present,
         lineage_state.changed_at AS snapshot_changed_at,
         lineage_state.valid_until AS snapshot_valid_until
@@ -3034,29 +3274,34 @@ out_of_scope_feature_lineages AS MATERIALIZED (
       ON f.feature_id = scoped.feature_id
     JOIN provider_sync.source_links AS sl
       ON sl.feature_id = f.feature_id
-     AND sl.is_primary_source
+     AND sl.source_role = 'primary'
     JOIN provider_sync.source_entities AS se
       ON se.source_entity_key = sl.source_entity_key
+    JOIN provider_sync.provider_datasets AS dataset
+      ON dataset.provider_dataset_id = se.provider_dataset_id
+    JOIN provider_sync.source_entity_heads AS head
+      ON head.source_entity_key = se.source_entity_key
     JOIN provider_sync.source_records AS sr
-      ON sr.source_record_key = se.current_source_record_key
+      ON sr.source_record_key = head.current_source_record_key
+    LEFT JOIN provider_sync.notice_lifecycle_scopes AS lifecycle_scope
+      ON lifecycle_scope.provider_dataset_id = se.provider_dataset_id
+     AND lifecycle_scope.source_entity_type = se.source_entity_type
     LEFT JOIN provider_sync.notice_lineage_states AS lineage_state
-      ON lineage_state.provider = sr.provider
-     AND lineage_state.dataset_key = sr.dataset_key
-     AND lineage_state.source_entity_type = sr.source_entity_type
-     AND lineage_state.lineage_key = {_lineage_sql('sr')}
+      ON lineage_state.notice_lifecycle_scope_id = lifecycle_scope.notice_lifecycle_scope_id
+     AND lineage_state.lineage_key = {lineage_sql}
     WHERE f.kind = 'notice'
       AND (
-        sr.provider <> :provider
-        OR sr.dataset_key <> :dataset_key
-        OR sr.source_entity_type <> :source_entity_type
+        dataset.provider <> :provider
+        OR dataset.dataset_key <> :dataset_key
+        OR se.source_entity_type <> :source_entity_type
       )
     ORDER BY
         f.feature_id,
-        sr.provider,
-        sr.dataset_key,
-        sr.source_entity_type,
-        {_lineage_sql('sr')},
-        sr.last_seen_at DESC,
+        dataset.provider,
+        dataset.dataset_key,
+        se.source_entity_type,
+        {lineage_sql},
+        head.observed_at DESC,
         sr.source_record_key DESC
 ),
 global_feature_wins AS MATERIALIZED (
@@ -3114,37 +3359,49 @@ global_feature_wins AS MATERIALIZED (
         ) AS last_inactive_winner_changed_at
     FROM out_of_scope_feature_lineages AS current_notice
     LEFT JOIN LATERAL (
-        -- read 필터와 **같은 형태**다(ADR-087 결정 4·5). 순서 조건을 한 술어 안
-        -- ``OR``로 두면 Postgres가 Index Cond로 밀지 못하고 Filter로 남겨 계보의
-        -- payload 이력 전체를 훑는다. 두 EXISTS로 나누면 앞은 행 비교라
-        -- ``idx_source_records_lineage``의 범위가 되고 뒤는 동률일 때만 돈다.
-        --
-        -- ``last_seen_at``은 NOT NULL이라 종전 ``COALESCE(..., imported_at,
-        -- fetched_at)``는 죽은 식이었다 — 평컬럼이어야 인덱스 열과 맞는다.
         SELECT 1 AS better_exists
-        WHERE EXISTS (
-            SELECT 1{rival_joins}
-              AND (other_sr.last_seen_at, other_sr.source_record_key)
-                  > (current_notice.seen_at, current_notice.tiebreak)
-            LIMIT 1
-        )
-        OR EXISTS (
-            SELECT 1{rival_joins}
-              AND (other_sr.last_seen_at, other_sr.source_record_key)
-                  = (current_notice.seen_at, current_notice.tiebreak)
+        FROM provider_sync.source_entities AS other_se
+        JOIN provider_sync.provider_datasets AS other_dataset
+          ON other_dataset.provider_dataset_id = other_se.provider_dataset_id
+        JOIN provider_sync.source_entity_heads AS other_head
+          ON other_head.source_entity_key = other_se.source_entity_key
+        JOIN provider_sync.source_records AS other_sr
+          ON other_sr.source_record_key = other_head.current_source_record_key
+         AND {other_lineage_sql} = current_notice.lineage_key
+        JOIN provider_sync.source_links AS other_sl
+          ON other_sl.source_entity_key = other_se.source_entity_key
+        JOIN feature.features AS other_f
+          ON other_f.feature_id = other_sl.feature_id
+        WHERE other_dataset.provider = current_notice.provider
+          AND other_dataset.dataset_key = current_notice.dataset_key
+          AND other_se.source_entity_type = current_notice.source_entity_type
+          AND other_sl.source_role = 'primary'
+          AND other_f.feature_id <> current_notice.feature_id
+          AND other_f.kind = 'notice'
+          AND other_f.deleted_at IS NULL
+          AND (
+            other_head.observed_at > current_notice.seen_at
+            OR (
+              other_head.observed_at = current_notice.seen_at
+              AND other_sr.source_record_key > current_notice.tiebreak
+            )
+            OR (
+              other_head.observed_at = current_notice.seen_at
+              AND other_sr.source_record_key = current_notice.tiebreak
               AND (
                 (
-                  {_canonical_notice_feature_sql("other_f", "other_sr")}
+                  {other_canonical_sql}
                   AND NOT current_notice.canonical_identity
                 )
                 OR (
-                  {_canonical_notice_feature_sql("other_f", "other_sr")}
+                  {other_canonical_sql}
                     = current_notice.canonical_identity
                   AND other_f.feature_id < current_notice.feature_id
                 )
               )
-            LIMIT 1
-        )
+            )
+          )
+        LIMIT 1
     ) AS better ON true
     GROUP BY current_notice.feature_id
 )
@@ -3286,7 +3543,17 @@ global_feature_wins AS MATERIALIZED (
             )
         ) AS should_activate,
         (
-            desired.old_status = 'active'
+            -- 이 statement가 읽는 core/subtype 상태는 **이미 이번 적재가 지나간
+            -- 뒤**다. 같은 계보가 다시 나타나면 bundle 적재가 notice subtype을
+            -- 통째로 다시 써서(``valid_end_time = EXCLUDED.valid_end_time``,
+            -- KREX DTO는 NULL) 닫혀 있던 feature가 여기 도달하기 전에 이미
+            -- 열린다. 그러면 "직전에 안 보였다"가 관측 불가라 재등장 집계가
+            -- 구조적으로 항상 0이 된다(실측: 적재 전 valid_end=03:20 → 적재 후
+            -- NULL → reconcile 반환행 0건). 그래서 **적재 이전** 가시성은
+            -- 호출자가 재어 ``:hidden_before``로 넘긴다 — 적재가 없는 경로
+            -- (close/supersede)는 빈 배열이라 종전 판정 그대로다.
+            NOT (desired.feature_id = ANY(CAST(:hidden_before AS text[])))
+            AND desired.old_status = 'active'
             AND desired.old_deleted_at IS NULL
             AND (
                 desired.old_valid_end_time IS NULL
@@ -3352,6 +3619,15 @@ global_feature_wins AS MATERIALIZED (
                   OR target.old_status <> 'active'
               )
           )
+          -- 적재가 먼저 되살린 재등장은 여기 도달했을 때 core/subtype이 이미
+          -- 최종 상태다(갱신할 컬럼이 없다). 그래도 RETURNING에 실어야 재등장
+          -- 집계가 잡히므로 전이 자체를 갱신 조건에 포함한다. ``was_visible``이
+          -- ``:hidden_before``로 고정되는 경로에서만 참이 되므로, 적재가 이미
+          -- 손댄 행 외에는 추가 갱신이 생기지 않는다.
+          OR (
+              NOT target.was_visible
+              AND target.will_be_visible
+          )
       )
     RETURNING
         f.feature_id,
@@ -3394,6 +3670,49 @@ WHERE f.feature_id = r.feature_id
 RETURNING f.feature_id
 """
     )
+
+
+# 적재 **이전** 가시성 관측 — ``was_visible``의 정본 입력.
+#
+# ``_supersede_stale_notice_sql(close_missing=True)``의 판정과 글자 그대로 같은
+# 술어의 부정이다(status/deleted_at/valid_end_time + 같은 ``evaluated_at``).
+# subtype 행이 아직 없는 신규 feature는 LEFT JOIN으로 ``valid_end_time IS NULL``
+# 이 되지만 features 행 자체가 없으므로 결과에 들어오지 않는다 — 처음 적재되는
+# 공고를 "재등장"으로 세지 않기 위해 필요한 성질이다.
+_HIDDEN_NOTICE_FEATURES_SQL: Final[str] = """
+SELECT f.feature_id
+FROM feature.features AS f
+LEFT JOIN feature.feature_notices AS n
+  ON n.feature_id = f.feature_id
+WHERE f.feature_id = ANY(CAST(:feature_ids AS text[]))
+  AND NOT (
+      f.status = 'active'
+      AND f.deleted_at IS NULL
+      AND (
+          n.valid_end_time IS NULL
+          OR n.valid_end_time > CAST(:evaluated_at AS timestamptz)
+      )
+  )
+"""
+
+
+async def _hidden_notice_features(
+    session: AsyncSession,
+    *,
+    feature_ids: Collection[str],
+    evaluated_at: datetime,
+) -> frozenset[str]:
+    """``feature_ids`` 중 지금 시점에 **보이지 않는** feature 집합."""
+    if not feature_ids:
+        return frozenset()
+    rows = await session.execute(
+        text(_HIDDEN_NOTICE_FEATURES_SQL),
+        {
+            "feature_ids": sorted(set(feature_ids)),
+            "evaluated_at": evaluated_at,
+        },
+    )
+    return frozenset(str(row.feature_id) for row in rows)
 
 
 @dataclass(frozen=True)
@@ -3439,6 +3758,15 @@ async def load_authoritative_notice_snapshot(
         checked_at=observed_at,
         fingerprint=fingerprint,
     )
+    # 적재는 notice subtype을 통째로 다시 쓰므로(``valid_end_time``까지) 닫혀
+    # 있던 feature가 여기서 이미 열린다. lifecycle 판정이 "직전에 안 보였다"를
+    # 잃지 않도록 적재 **이전**에 재고, 같은 시각 기준을 lifecycle에도 넘긴다.
+    evaluated_at = datetime.now(UTC)
+    hidden_before = await _hidden_notice_features(
+        session,
+        feature_ids=[bundle.feature.feature_id for bundle in bundles],
+        evaluated_at=evaluated_at,
+    )
     loaded = await load_bundles(session, bundles)
     await _persist_notice_snapshot_state(
         session,
@@ -3454,6 +3782,8 @@ async def load_authoritative_notice_snapshot(
         dataset_key=dataset_key,
         source_entity_type=source_entity_type,
         closed_at=observed_at,
+        evaluated_at=evaluated_at,
+        hidden_before=hidden_before,
     )
     return NoticeFeatureLoadResult(load=loaded, reconcile=reconciled)
 
@@ -3520,6 +3850,12 @@ async def load_notice_event_bundles(
             else expired_bundles
         )
         target.append(bundle)
+    # snapshot 경로와 같은 이유로 적재 이전 가시성을 먼저 잰다.
+    hidden_before = await _hidden_notice_features(
+        session,
+        feature_ids=[bundle.feature.feature_id for bundle in active_bundles],
+        evaluated_at=materialized_at,
+    )
     loaded = await load_bundles(session, active_bundles)
     # 만료된 rolling-window 발표도 SourceRecord 감사 이력은 남긴다. 다만 일반
     # bundle load의 provider reactivation을 거치면 soft-delete/purge된 Feature가
@@ -3544,6 +3880,7 @@ async def load_notice_event_bundles(
             default=observed_at,
         ),
         evaluated_at=materialized_at,
+        hidden_before=hidden_before,
     )
     return NoticeFeatureLoadResult(load=loaded, reconcile=reconciled)
 
@@ -3627,7 +3964,7 @@ async def supersede_stale_notice_features(
 ) -> NoticeReconcileResult:
     """notice 중복/소멸 정리 — 적재 직후 호출하는 write-시점 reconciliation(#632).
 
-    1. **중복 정리**: 같은 계보(``source_records.lineage_key``)에 feature가 2개 이상이면
+    1. **중복 정리**: 같은 계보(``_notice_lineage_sql``)에 feature가 2개 이상이면
        latest(최근 확인 시각) 1개만 남기고 나머지를 soft-delete
        (``status='inactive'`` + ``deleted_at``, ADR-017). identity 스킴 변경으로
        재키잉된 구세대 feature가 신세대에 밀려나는 경로다.
@@ -3677,8 +4014,15 @@ async def _reconcile_persisted_notice_scope(
     source_entity_type: str,
     closed_at: datetime | None,
     evaluated_at: datetime | None = None,
+    hidden_before: Collection[str] = (),
 ) -> NoticeReconcileResult:
-    """영속 lineage state로 scope의 dedup과 Feature lifecycle을 재계산한다."""
+    """영속 lineage state로 scope의 dedup과 Feature lifecycle을 재계산한다.
+
+    ``hidden_before``는 **이번 적재 이전에** 보이지 않던 feature_id다. 이 함수가
+    읽는 상태는 적재가 지나간 뒤라 재등장 feature가 이미 열려 있으므로, 적재를
+    앞세우는 호출자(``load_*_notice_*``)는 ``_hidden_notice_features``로 잰 값을
+    반드시 넘겨야 재등장/종료 집계가 맞는다. 적재가 없는 호출자는 생략한다.
+    """
     lifecycle_evaluated_at = evaluated_at or datetime.now(UTC)
     result = await session.execute(
         text(_supersede_stale_notice_sql(close_missing=False)),
@@ -3700,6 +4044,7 @@ async def _reconcile_persisted_notice_scope(
                 "source_entity_type": source_entity_type,
                 "closed_at": closed_at,
                 "evaluated_at": lifecycle_evaluated_at,
+                "hidden_before": sorted(set(hidden_before)),
             },
         )
         snapshot_updates = result.mappings().all()
@@ -3956,21 +4301,23 @@ async def list_active_place_coords(
 
 _LIST_PRIMARY_PLACE_LOCATOR_SQL: Final[str] = """
 SELECT
-    sr.source_entity_id,
+    se.source_entity_id,
     f.feature_id,
     x_extension.ST_X(f.coord) AS lon,
     x_extension.ST_Y(f.coord) AS lat
 FROM feature.features f
 JOIN provider_sync.source_links sl
-  ON sl.feature_id = f.feature_id AND sl.is_primary_source
-JOIN provider_sync.source_entities sr
-  ON sr.source_entity_key = sl.source_entity_key
+  ON sl.feature_id = f.feature_id AND sl.source_role = 'primary'
+JOIN provider_sync.source_entities se
+  ON se.source_entity_key = sl.source_entity_key
+JOIN provider_sync.provider_datasets dataset
+  ON dataset.provider_dataset_id = se.provider_dataset_id
 WHERE f.deleted_at IS NULL
   AND f.kind = 'place'
   AND f.coord IS NOT NULL
-  AND sr.provider = :provider
-  AND sr.dataset_key = :dataset_key
-  AND sr.source_entity_type = :source_entity_type
+  AND dataset.provider = :provider
+  AND dataset.dataset_key = :dataset_key
+  AND se.source_entity_type = :source_entity_type
 ORDER BY f.feature_id
 """
 
@@ -4050,18 +4397,20 @@ async def get_primary_source_detail(
 # ``feature_places`` 조인이 곧 ``kind = 'place'`` 필터이며, "번호 없음"은
 # jsonb 배열 길이가 아니라 배열 기수로 판정한다.
 _FIND_PLACE_NO_PHONE_SQL: Final[str] = """
-SELECT f.feature_id, f.name, f.address, sr.source_entity_id
+SELECT f.feature_id, f.name, f.address, se.source_entity_id
 FROM feature.features f
 JOIN feature.feature_places p
   ON p.feature_id = f.feature_id
 JOIN provider_sync.source_links sl
-  ON sl.feature_id = f.feature_id AND sl.is_primary_source
-JOIN provider_sync.source_entities sr
-  ON sr.source_entity_key = sl.source_entity_key
+  ON sl.feature_id = f.feature_id AND sl.source_role = 'primary'
+JOIN provider_sync.source_entities se
+  ON se.source_entity_key = sl.source_entity_key
+JOIN provider_sync.provider_datasets dataset
+  ON dataset.provider_dataset_id = se.provider_dataset_id
 WHERE f.deleted_at IS NULL
-  AND sr.provider = :provider
-  AND sr.dataset_key = :dataset_key
-  AND sr.source_entity_type = :source_entity_type
+  AND dataset.provider = :provider
+  AND dataset.dataset_key = :dataset_key
+  AND se.source_entity_type = :source_entity_type
   AND cardinality(p.phones) = 0
 ORDER BY f.feature_id
 LIMIT :limit
@@ -4174,7 +4523,7 @@ async def features_in_bbox(
     ``include_geometry=true``이면 그 후보 중 route/area의 GeoJSON geometry + 면적을
     응답 payload에 **추가로 직렬화**할 뿐, 반환되는 feature id 집합(membership)은
     바꾸지 않는다. ``providers``가 주어지면 primary source
-    provider 기준(``provider_sync.source_links.is_primary_source``)으로 추가 필터한다
+    provider 기준(``source_role = 'primary'``)으로 추가 필터한다
     — ``None``이면 술어가 단락(short-circuit)돼 인덱스 기반 bbox 조회에 영향이 없다.
     ``price_stale_hide_days``보다 오래된 price 관측은 ``price_summary``에서 제외한다
     (로테이션 주기 밖 옛 가격이 현재가 마커로 보이지 않게, ``None``이면 끔).

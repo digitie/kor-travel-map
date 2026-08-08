@@ -54,7 +54,6 @@ async def test_grid_to_weather_bundle_basic() -> None:
 
     # primary source = KMA 초단기 격자 dataset, 안정키 = "{nx}_{ny}"
     assert bundle.source_link.source_role is SourceRole.PRIMARY
-    assert bundle.source_link.is_primary_source is True
     assert bundle.source_record.provider == KMA_PROVIDER_NAME
     assert bundle.source_record.dataset_key == KMA_ULTRA_SHORT_GRID_DATASET_KEY
     assert bundle.source_record.source_entity_id == "60_127"

@@ -28,9 +28,9 @@
     "T-VN-33": {
       "title": "provider dataset 정본 전환",
       "consumer_first_order": [
-        "33A: provider_datasets row·composite identity 생성 + source 계열 참조 backfill (중복·orphan 0). 코드 projection은 역할 고정 — provider_catalog=capability, feature_operation_registry=실행 가능 operation (ADR-069 결정 4, 보고서 §3:380)",
-        "33B: writer·reader를 canonical FK로 전환, 전환 중 entity-record 불일치는 composite FK로 차단. ops.import_jobs 계열 등 유지 기준선의 provider/dataset 참조 수렴 목표형(§3:385 후속 정렬)은 이 단계 소관 — freeze는 DDL 미고정(미정)",
-        "33C: canonical query 전환 + 중복 column read-only fence + EXPLAIN/checksum 고정, /v1/provider-datasets operator 표면 공개"
+        "33A: provider_datasets row·composite identity 생성 + source 계열과 모든 provider/dataset 소유 matrix의 FK/membership backfill (중복·orphan 0). 코드 projection은 역할 고정 — provider_catalog=capability, feature_operation_registry=실행 가능 operation (ADR-088)",
+        "33B: writer·reader를 canonical FK 또는 member join으로 전환한다. entity-record 불일치는 composite FK로, inactive child/member write는 parent lock guard로 차단한다. import job/update request, policy, upload, curation, integrity, POI, enrichment, managed file의 exact target DDL은 tvn33-reference-ownership-v1.sql이 정본이다.",
+        "33C: canonical query 전환 + 중복 column read-only fence + EXPLAIN/checksum 고정, DB projection 기반 /v1/provider-datasets operator 표면 공개"
       ],
       "write_fence": "33C에서 denorm 중복 column의 신규 write를 read-only로 fence",
       "compat_drop": "denorm column/index 물리 삭제는 T-VN-39 removal manifest",
@@ -163,18 +163,8 @@
         "removed_by": "T-VN-39"
       },
       {
-        "object": "provider_sync.source_records denorm 열 — provider, dataset_key, source_entity_type, source_entity_id, raw_name, raw_address, raw_longitude, raw_latitude",
+        "object": "provider_sync.source lineage exact manifest(docs/removal-manifests/t-vn-33-source-lineage.md): source_entities provider/dataset/current pointer 및 FK/index, source_records provider/dataset/type/id/source_version/raw-derived/last_seen/expires 및 constraint/index, source_links is_primary_source 및 boolean predicate index. C fence의 SQLSTATE와 normal reader static allowlist도 이 manifest가 정본이다.",
         "fenced_by": "T-VN-33C",
-        "removed_by": "T-VN-39"
-      },
-      {
-        "object": "provider_sync.source_links.is_primary_source 열과 idx_source_links_primary(boolean 술어판)",
-        "fenced_by": "T-VN-33C",
-        "removed_by": "T-VN-39"
-      },
-      {
-        "object": "provider_sync.source_entities.current_source_record_key(순환 FK) — source_entity_heads로 대체",
-        "fenced_by": "T-VN-33B",
         "removed_by": "T-VN-39"
       },
       {

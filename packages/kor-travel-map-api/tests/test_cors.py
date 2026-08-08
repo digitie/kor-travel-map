@@ -191,7 +191,7 @@ def test_operator_route_gets_no_cors_for_allowed_origin(client: TestClient) -> N
     # admin BFF surface(operator) — same-origin proxy로만 접근하므로 브라우저
     # cross-origin이 아니다. 설정된 public origin이라도 CORS를 광고하지 않는다.
     response = client.options(
-        "/v1/ops/datasets/preview",
+        "/v1/ops/datasets/42/preview",
         headers={
             "Origin": ALLOWED_ORIGIN,
             "Access-Control-Request-Method": "POST",
@@ -206,7 +206,7 @@ def test_operator_route_does_not_broadly_allow_arbitrary_origin(
     client: TestClient,
 ) -> None:
     response = client.options(
-        "/v1/ops/datasets/preview",
+        "/v1/ops/datasets/42/preview",
         headers={
             "Origin": ARBITRARY_ORIGIN,
             "Access-Control-Request-Method": "POST",

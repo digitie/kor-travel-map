@@ -22,24 +22,61 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.integration
 
 
-async def _seed(session: AsyncSession) -> None:
+_PROVIDER = "python-mois-api"
+_DATASET_KEY = "mois_x"
+
+
+async def _dataset_id(session: AsyncSession) -> int:
+    """fixture 전용 catalog 행을 만들고 canonical id를 돌려준다.
+
+    T-VN-33 이후 ``ops.managed_files``는 provider/dataset_key 사본 대신
+    ``provider_dataset_id``(+ 미등록 provider용 ``provider_name``)만 갖는다.
+    """
+    return int(
+        (
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO provider_sync.provider_datasets (
+                        provider, dataset_key, display_name, source_kind,
+                        is_active, capabilities
+                    )
+                    SELECT :provider, :dataset_key, :provider, 'system', true,
+                           jsonb_build_object('schema_version', 1,
+                                              'produces', '[]'::jsonb,
+                                              'extensions', '{}'::jsonb)
+                    ON CONFLICT (provider, dataset_key) DO UPDATE
+                        SET display_name = EXCLUDED.display_name
+                    RETURNING provider_dataset_id
+                    """
+                ),
+                {"provider": _PROVIDER, "dataset_key": _DATASET_KEY},
+            )
+        ).scalar_one()
+    )
+
+
+async def _seed(session: AsyncSession) -> int:
+    dataset_id = await _dataset_id(session)
     await session.execute(
         text(
             """
             INSERT INTO ops.managed_files
-              (storage_backend, location, path, is_directory, kind, provider,
-               dataset_key, status, registered_by, byte_size,
+              (storage_backend, location, path, is_directory, kind,
+               provider_dataset_id, status, registered_by, byte_size,
                downloaded_at, last_seen_at, meta)
             VALUES
               ('filesystem', 'backup_root', 'backups/a.dump', false, 'backup',
-               NULL, NULL, 'active', 'scan', 100,
+               NULL, 'active', 'scan', 100,
                now() - interval '2 days', now(), '{}'::jsonb),
               ('s3', 'object_store', 'uploads/b.csv', false, 'upload',
-               'python-mois-api', 'mois_x', 'active', 'hook', 200,
+               :provider_dataset_id, 'active', 'hook', 200,
                now() - interval '10 days', now(), '{}'::jsonb)
             """
-        )
+        ),
+        {"provider_dataset_id": dataset_id},
     )
+    return dataset_id
 
 
 @pytest.mark.asyncio
@@ -55,7 +92,8 @@ async def test_list_managed_files_default_view_no_filters(
     assert {f.path for f in page.items} == {"backups/a.dump", "uploads/b.csv"}
     # 실 row → ManagedFile 매핑도 함께 검증(meta/시각 필드 포함).
     by_path = {f.path: f for f in page.items}
-    assert by_path["uploads/b.csv"].provider == "python-mois-api"
+    assert by_path["uploads/b.csv"].provider == _PROVIDER
+    assert by_path["uploads/b.csv"].dataset_key == _DATASET_KEY
     assert by_path["backups/a.dump"].meta == {}
 
 
@@ -64,12 +102,12 @@ async def test_list_managed_files_scalar_filters_all_cast(
     migrated_session: AsyncSession,
 ) -> None:
     """각 nullable scalar 필터가 CAST로 asyncpg 타입 추론되는지(개별 경로)."""
-    await _seed(migrated_session)
+    dataset_id = await _seed(migrated_session)
 
-    by_provider = await file_registry.list_managed_files(
-        migrated_session, provider="python-mois-api"
+    by_dataset = await file_registry.list_managed_files(
+        migrated_session, provider_dataset_id=dataset_id
     )
-    assert [f.path for f in by_provider.items] == ["uploads/b.csv"]
+    assert [f.path for f in by_dataset.items] == ["uploads/b.csv"]
 
     by_location = await file_registry.list_managed_files(
         migrated_session, location="backup_root"

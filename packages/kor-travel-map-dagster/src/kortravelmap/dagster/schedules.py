@@ -7,14 +7,6 @@ from dataclasses import dataclass
 from typing import Any, Final
 
 from kortravelmap.providers.datagokr_file_data import DATAGOKR_FILEDATA_DATASETS
-from kortravelmap.providers.feature_operation_registry import (
-    FeatureOperationIdentity,
-    feature_operation_definition_tags,
-    feature_operation_launch_tags,
-    feature_operation_run_config,
-    resolve_feature_operation_identity,
-    resolve_feature_operation_runtime_snapshot,
-)
 
 from dagster import (
     MAX_RUNTIME_SECONDS_TAG,
@@ -360,49 +352,13 @@ FEATURE_LOAD_SCHEDULE_SPECS: Final[tuple[FeatureLoadScheduleSpec, ...]] = (
 """현재 구현된 Feature provider asset의 기본 schedule 사양."""
 
 
-def _asset_keys(spec: FeatureLoadScheduleSpec) -> tuple[str, ...]:
-    return tuple(sorted(key.to_user_string() for key in spec.asset.keys))
+def _resolved_run_config(spec: FeatureLoadScheduleSpec) -> dict[str, object]:
+    """Dagster definition config만 사용한다; runtime identity registry는 없다."""
+    return dict(spec.run_config or {})
 
 
-def compile_feature_load_identities(
-    environment: Mapping[str, str] | None = None,
-) -> tuple[FeatureOperationIdentity, ...]:
-    """KNPS 두 env만 읽어 모든 feature-load definition identity를 compile한다."""
-    runtime_snapshot = resolve_feature_operation_runtime_snapshot(environment)
-    identities: list[FeatureOperationIdentity] = []
-    for spec in FEATURE_LOAD_SCHEDULE_SPECS:
-        identity = resolve_feature_operation_identity(
-            job_name=spec.job_name,
-            selected_asset_keys=_asset_keys(spec),
-            run_config=spec.run_config,
-            runtime_snapshot=runtime_snapshot,
-        )
-        if identity is None:
-            raise RuntimeError(
-                f"Feature load schedule job이 registry에 없음: {spec.job_name!r}"
-            )
-        identities.append(identity)
-    return tuple(identities)
-
-
-FEATURE_LOAD_IDENTITIES: Final[tuple[FeatureOperationIdentity, ...]] = (
-    compile_feature_load_identities()
-)
-
-
-def _resolved_run_config(
-    spec: FeatureLoadScheduleSpec,
-    identity: FeatureOperationIdentity,
-) -> dict[str, object]:
-    registry_config = feature_operation_run_config(identity)
-    return registry_config or dict(spec.run_config or {})
-
-
-def _feature_load_definition_tags(
-    spec: FeatureLoadScheduleSpec,
-    identity: FeatureOperationIdentity,
-) -> dict[str, str]:
-    tags = feature_operation_definition_tags(identity)
+def _feature_load_definition_tags(spec: FeatureLoadScheduleSpec) -> dict[str, str]:
+    tags = {"kor_travel_map.operation_key": spec.job_name}
     if spec.max_runtime_seconds is not None:
         tags[MAX_RUNTIME_SECONDS_TAG] = str(spec.max_runtime_seconds)
     return tags
@@ -410,10 +366,10 @@ def _feature_load_definition_tags(
 
 def _feature_load_schedule_tags(
     spec: FeatureLoadScheduleSpec,
-    identity: FeatureOperationIdentity,
 ) -> dict[str, str]:
     tags = {
-        **feature_operation_launch_tags(identity, trigger_kind="schedule"),
+        "kor_travel_map.operation_key": spec.job_name,
+        "kor_travel_map.trigger_kind": "schedule",
         "kor_travel_map.timezone": KST_TIMEZONE,
     }
     if spec.max_runtime_seconds is not None:
@@ -426,42 +382,34 @@ FEATURE_LOAD_JOBS: Final = [
         spec.job_name,
         selection=[spec.asset],
         description=spec.description,
-        tags=_feature_load_definition_tags(spec, identity),
-        config=_resolved_run_config(spec, identity),
+        tags=_feature_load_definition_tags(spec),
+        config=_resolved_run_config(spec),
     )
-    for spec, identity in zip(
-        FEATURE_LOAD_SCHEDULE_SPECS,
-        FEATURE_LOAD_IDENTITIES,
-        strict=True,
-    )
+    for spec in FEATURE_LOAD_SCHEDULE_SPECS
 ]
 """정기 Feature 적재 schedule이 실행하는 asset job 목록."""
 
 
 def _coalescing_execution_fn(
     spec: FeatureLoadScheduleSpec,
-    identity: FeatureOperationIdentity,
 ) -> Callable[[ScheduleEvaluationContext], RunRequest | SkipReason]:
     """같은 provider/dataset의 미종료 run이 있으면 이번 tick을 합친다."""
-    if len(identity.pairs) != 1:
-        raise RuntimeError(f"coalescing schedule은 exact pair 1개여야 함: {spec.job_name}")
-    pair = identity.pairs[0]
-    schedule_tags = _feature_load_schedule_tags(spec, identity)
-    run_config = _resolved_run_config(spec, identity)
+    schedule_tags = _feature_load_schedule_tags(spec)
+    run_config = _resolved_run_config(spec)
 
     def _evaluate(context: ScheduleEvaluationContext) -> RunRequest | SkipReason:
         active_runs = context.instance.get_runs(
             filters=RunsFilter(
-                job_name=identity.job_name,
+                job_name=spec.job_name,
                 statuses=_COALESCING_RUN_STATUSES,
-                tags=feature_operation_definition_tags(identity),
+                tags={"kor_travel_map.operation_key": spec.job_name},
             ),
             limit=1,
         )
         if active_runs:
             active_run = active_runs[0]
             return SkipReason(
-                f"{pair.provider}/{pair.dataset_key}의 {active_run.status.value} "
+                f"{spec.job_name}의 {active_run.status.value} "
                 f"run({active_run.run_id})이 있어 이번 tick을 생략함"
             )
 
@@ -480,24 +428,15 @@ FEATURE_LOAD_SCHEDULES: Final = [
         cron_schedule=cron_for_schedule(spec.schedule_name, spec.cron_schedule),
         execution_timezone=KST_TIMEZONE,
         default_status=DefaultScheduleStatus.STOPPED,
-        run_config=(
-            None
-            if spec.coalesce_active_runs
-            else _resolved_run_config(spec, identity)
-        ),
+        run_config=None if spec.coalesce_active_runs else _resolved_run_config(spec),
         execution_fn=(
-            _coalescing_execution_fn(spec, identity)
+            _coalescing_execution_fn(spec)
             if spec.coalesce_active_runs
             else None
         ),
-        tags=_feature_load_schedule_tags(spec, identity),
+        tags=_feature_load_schedule_tags(spec),
         description=spec.description,
     )
-    for spec, identity, job in zip(
-        FEATURE_LOAD_SCHEDULE_SPECS,
-        FEATURE_LOAD_IDENTITIES,
-        FEATURE_LOAD_JOBS,
-        strict=True,
-    )
+    for spec, job in zip(FEATURE_LOAD_SCHEDULE_SPECS, FEATURE_LOAD_JOBS, strict=True)
 ]
 """Provider별 KST cron schedule 목록."""

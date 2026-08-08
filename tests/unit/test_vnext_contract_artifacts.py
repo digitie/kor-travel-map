@@ -27,29 +27,32 @@ _CONTRACTS: Final = _ROOT / "contracts" / "vnext"
 # artifact bytes 고정 — 갱신 절차: artifact 수정 → 통합 테스트로 fingerprint 재고정
 # → 여기 sha256 갱신 (한 PR에서 함께).
 ARTIFACT_SHA256: Final[dict[str, str]] = {
-    "target-schema-v1.sql": ("787e2148179e92bd046c4942c7fc8ef6894ab88c4534d49c8fbe86cfa9df9584"),
+    "target-schema-v1.sql": ("e0ffcd25effbbda10d85c10a6a1e150133b062fcaefcd0135d6109c1bc155280"),
     "target-invariants-v1.sql": (
-        "69141aa067bc882ef35bcc2cde7a5d7264cb2f58405c3a9ec84c233a12db595b"
+        "51c99c6ed806f96abaf7e30717bf9ddb893d04eac0862ed1bdc32fbb8611b672"
     ),
     "target-schema-fingerprints-v1.json": (
-        "8e14b96aa973f451012fd0ad22fc0eddbe4a2ff6fc812e79ac4efe6bd4630f52"
+        "887a41334bd4579d906415b513906cc4f7b4f1f929b389d3683a9c8fc39ba09b"
     ),
-    "openapi-diff-v1.json": ("01ad3d690d599020843be4c1f2dad5df9ffaaebeb6d87785e333e8015e942d6a"),
+    "tvn33-reference-ownership-v1.sql": (
+        "1be5cd9370d974a94adb2146947732f79d756ad3411e137d3846b33a5ba8e13a"
+    ),
+    "openapi-diff-v1.json": ("ea05e5c0716bcadb7cd637a9cda353bbe82abe60c9b26f43c64db9f190962ef9"),
     "consumer-rollout-v1.json": (
-        "684ee2b903124ea506bc34e418f26b254cd5c7a18f0332eebfe99fe655e09e3c"
+        "573210a3949d78e3831f9581811f158cef8547328efea44d16cc6afb39b76c88"
     ),
     "violation-fixtures-v1.sql": (
-        "8ac1aa2f6a1f6717f55c016d95997bd9b5df4a094478826e3803e39dfc06158f"
+        "ddb0188e13cc75e4137370d613de83367163ec2893c0d13d97c39b622370af3c"
     ),
     "expected-rejections-v1.json": (
-        "1d647acb4e14d753b2ead737ba7f066649c69fd8f493ba5a7e9ee5ac0e1dec33"
+        "5351124ca55ae4280c0d6309de8c3490580fe3df3ee29b68c4e245fab0620426"
     ),
     "recovery-preflight-v1.json": (
         "0e7e1ea595d034aacda8b4c94b56de6c2a24059f150c8cbd6c0670aebce7dfdd"
     ),
 }
 
-_EXPECTED_INVARIANT_COUNT: Final = 43
+_EXPECTED_INVARIANT_COUNT: Final = 48
 _INVARIANT_PHASES: Final = frozenset({"pre-backfill", "post-backfill", "both"})
 _SURFACES: Final = ("user", "service", "admin")
 _CHANGE_KEYS: Final = (
@@ -213,9 +216,13 @@ def test_recovery_preflight_shape() -> None:
 def test_expected_rejections_consistent_with_fixtures_and_ddl() -> None:
     rejections = _load_json("expected-rejections-v1.json")["cases"]
     assert set(rejections) == _load_violation_case_names()
-    schema_sql = (_CONTRACTS / "target-schema-v1.sql").read_text(encoding="utf-8")
+    schema_sql = (
+        (_CONTRACTS / "target-schema-v1.sql").read_text(encoding="utf-8")
+        + "\n"
+        + (_CONTRACTS / "tvn33-reference-ownership-v1.sql").read_text(encoding="utf-8")
+    )
     for name, case in rejections.items():
-        assert re.fullmatch(r"23(505|514)", case["sqlstate"]), name
+        assert re.fullmatch(r"23(503|505|514)", case["sqlstate"]), name
         assert case["constraint"] in schema_sql, (
             f"case {name}의 제약명 {case['constraint']}이 target DDL에 없다"
         )

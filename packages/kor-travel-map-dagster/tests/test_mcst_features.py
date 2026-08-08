@@ -9,14 +9,11 @@ from typing import Any, cast
 
 import pytest
 from dagster import AssetKey, build_asset_context
-from kortravelmap.client import AsyncKorTravelMapClient, IntegrityFindingSyncResult
+from kortravelmap.client import IntegrityFindingSyncResult
+from kortravelmap.core.feature_operation import ProviderDatasetOperationMembership
 from kortravelmap.dto import Address, Coordinate
 from kortravelmap.infra.feature_repo import FeatureLoadResult
-from kortravelmap.providers.feature_operation_registry import (
-    feature_operation_launch_tags,
-    resolve_feature_operation_identity,
-)
-from kortravelmap.providers.mcst import MCST_FILE_DATASETS, MCST_PROVIDER_NAME
+from kortravelmap.providers.mcst import MCST_FILE_DATASETS
 from kortravelmap.settings import KorTravelMapSettings
 
 from kortravelmap.dagster import mcst_features as mcst_module
@@ -112,9 +109,7 @@ async def test_culture_asset_loads_per_slug_datasets() -> None:
 
 async def test_culture_asset_rejects_unknown_slug() -> None:
     with pytest.raises(KeyError, match="nope"):
-        await run_feature_place_mcst_culture(
-            _context([("nope", _common_row("어딘가"))])
-        )
+        await run_feature_place_mcst_culture(_context([("nope", _common_row("어딘가"))]))
 
 
 async def test_culture_asset_rejects_excluded_slug() -> None:
@@ -139,25 +134,33 @@ async def test_culture_asset_skips_unidentifiable_rows_with_warning() -> None:
     assert result.bundles_total == 1
 
 
-async def test_culture_raw_callback_completes_empty_pairs() -> None:
-    completed: list[tuple[str, str]] = []
+async def test_culture_raw_callback_completes_exact_membership_snapshot() -> None:
+    memberships = tuple(
+        ProviderDatasetOperationMembership(
+            provider_dataset_id=index,
+            sync_scope="dataset_wide",
+            operation_key="feature_place_mcst_culture_job",
+        )
+        for index, _spec in enumerate(MCST_FILE_DATASETS.values(), start=1)
+    )
+    completed: list[ProviderDatasetOperationMembership] = []
 
-    async def _done(provider: str, dataset_key: str) -> None:
-        completed.append((provider, dataset_key))
+    async def _done(
+        completed_memberships: tuple[ProviderDatasetOperationMembership, ...],
+    ) -> None:
+        completed.extend(completed_memberships)
 
     result = await run_feature_place_mcst_culture(
         _context([]),
-        on_pair_done=_done,
+        memberships=memberships,
+        on_memberships_completed=_done,
     )
 
     assert result.results == ()
-    assert completed == [
-        (MCST_PROVIDER_NAME, spec.dataset_key)
-        for spec in MCST_FILE_DATASETS.values()
-    ]
+    assert completed == list(memberships)
 
 
-async def test_culture_raw_callback_preserves_early_success_on_late_failure(
+async def test_culture_raw_callback_emits_no_membership_on_late_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     first_slug, second_slug = tuple(MCST_FILE_DATASETS)[:2]
@@ -180,8 +183,10 @@ async def test_culture_raw_callback_preserves_early_success_on_late_failure(
             raise RuntimeError("late MCST failure")
         return object()
 
-    async def _done(_provider: str, dataset_key: str) -> None:
-        events.append(("done", dataset_key))
+    async def _done(
+        completed_memberships: tuple[ProviderDatasetOperationMembership, ...],
+    ) -> None:
+        events.append(("done", str(len(completed_memberships))))
 
     monkeypatch.setattr(mcst_module, "_load", _load)
     records = [
@@ -192,42 +197,52 @@ async def test_culture_raw_callback_preserves_early_success_on_late_failure(
     with pytest.raises(RuntimeError, match="late MCST failure"):
         await run_feature_place_mcst_culture(
             _context(records),
-            on_pair_done=_done,
+            memberships=(
+                ProviderDatasetOperationMembership(
+                    provider_dataset_id=1,
+                    sync_scope="dataset_wide",
+                    operation_key="feature_place_mcst_culture_job",
+                ),
+            ),
+            on_memberships_completed=_done,
         )
 
     assert events == [
         ("load", first_dataset),
-        ("done", first_dataset),
         ("load", second_dataset),
     ]
 
 
-async def test_culture_public_wrapper_same_run_retry_keeps_done_and_failed_pairs_stable(
+async def test_culture_public_wrapper_retries_canonical_members_stably(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     first_slug, second_slug = tuple(MCST_FILE_DATASETS)[:2]
-    first_dataset = MCST_FILE_DATASETS[first_slug].dataset_key
     second_dataset = MCST_FILE_DATASETS[second_slug].dataset_key
-    identity = resolve_feature_operation_identity(
-        job_name="feature_place_mcst_culture_job"
+    operation_key = "feature_place_mcst_culture_job"
+    memberships = tuple(
+        ProviderDatasetOperationMembership(
+            provider_dataset_id=index,
+            sync_scope="dataset_wide",
+            operation_key=operation_key,
+        )
+        for index, _spec in enumerate(MCST_FILE_DATASETS.values(), start=1)
     )
-    assert identity is not None
 
     class _TrackingClient:
         def __init__(self) -> None:
             self.calls: list[tuple[str, dict[str, Any]]] = []
-            self.done_pairs: set[Any] = set()
+            self.done_memberships: set[Any] = set()
             self.finish_outcomes: list[str] = []
 
         async def ensure_dagster_feature_operation(self, **kwargs: Any) -> Any:
             self.calls.append(("ensure", kwargs))
             return SimpleNamespace(outcome="applied", block_reason=None)
 
-        async def finish_dagster_feature_pair(self, **kwargs: Any) -> Any:
+        async def finish_dagster_feature_membership(self, **kwargs: Any) -> Any:
             self.calls.append(("finish", kwargs))
-            pair = kwargs["pair"]
-            outcome = "noop" if pair in self.done_pairs else "applied"
-            self.done_pairs.add(pair)
+            membership = kwargs["membership"]
+            outcome = "noop" if membership in self.done_memberships else "applied"
+            self.done_memberships.add(membership)
             self.finish_outcomes.append(outcome)
             return SimpleNamespace(outcome=outcome, block_reason=None)
 
@@ -237,10 +252,13 @@ async def test_culture_public_wrapper_same_run_retry_keeps_done_and_failed_pairs
 
     tracking_client = _TrackingClient()
     authoritative_run = SimpleNamespace(
-        job_name=identity.job_name,
+        job_name=operation_key,
         run_id="mcst-run",
         run_config={},
-        tags=feature_operation_launch_tags(identity, trigger_kind="schedule"),
+        tags={
+            "kor_travel_map.operation_key": operation_key,
+            "kor_travel_map.trigger_kind": "schedule",
+        },
         asset_selection=None,
         resolved_op_selection=None,
         status=SimpleNamespace(value="STARTED"),
@@ -255,9 +273,10 @@ async def test_culture_public_wrapper_same_run_retry_keeps_done_and_failed_pairs
         get_run_record_by_id=lambda _run_id: record,
     )
     guard = FeatureOperationExecutionGuard(
-        client=cast(AsyncKorTravelMapClient, tracking_client),
+        client=tracking_client,  # type: ignore[arg-type]
         instance=instance,
-        identity=identity,
+        operation_key=operation_key,
+        memberships=memberships,
         dagster_run_id="mcst-run",
         trigger_kind="schedule",
     )
@@ -310,23 +329,71 @@ async def test_culture_public_wrapper_same_run_retry_keeps_done_and_failed_pairs
     with pytest.raises(RuntimeError, match="late MCST failure"):
         await wrapper(_wrapper_context(1))
 
+    attempts_per_run = len(memberships)
     assert [name for name, _kwargs in tracking_client.calls] == [
         "ensure",
-        "finish",
-        "attempt",
+        *["attempt"] * attempts_per_run,
         "ensure",
-        "finish",
-        "attempt",
+        *["attempt"] * attempts_per_run,
     ]
-    assert tracking_client.calls[0][1]["selected_pairs"] == identity.pairs
-    assert tracking_client.calls[1][1]["pair"].dataset_key == first_dataset
-    assert tracking_client.calls[2][1]["pair"].dataset_key == second_dataset
-    assert tracking_client.calls[4][1]["pair"] == tracking_client.calls[1][1]["pair"]
-    assert tracking_client.calls[5][1]["pair"] == tracking_client.calls[2][1]["pair"]
-    assert [
-        tracking_client.calls[index][1]["attempt_number"] for index in (2, 5)
-    ] == [1, 2]
-    assert tracking_client.finish_outcomes == ["applied", "noop"]
+    assert tracking_client.calls[0][1]["selected_memberships"] == memberships
+    first_attempts = tracking_client.calls[1 : 1 + attempts_per_run]
+    second_ensure_index = 1 + attempts_per_run
+    second_attempts = tracking_client.calls[second_ensure_index + 1 :]
+    assert [call[1]["membership"] for call in first_attempts] == list(memberships)
+    assert [call[1]["membership"] for call in second_attempts] == list(memberships)
+    assert [call[1]["attempt_number"] for call in first_attempts] == [1] * attempts_per_run
+    assert [call[1]["attempt_number"] for call in second_attempts] == [2] * attempts_per_run
+    assert tracking_client.finish_outcomes == []
+
+
+async def test_culture_public_wrapper_finishes_every_exact_member_after_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    memberships = (
+        ProviderDatasetOperationMembership(
+            provider_dataset_id=1,
+            sync_scope="dataset_wide",
+            operation_key="feature_place_mcst_culture_job",
+        ),
+        ProviderDatasetOperationMembership(
+            provider_dataset_id=2,
+            sync_scope="dataset_wide",
+            operation_key="feature_place_mcst_culture_job",
+        ),
+    )
+    guard = SimpleNamespace(memberships=memberships)
+    finished: list[ProviderDatasetOperationMembership] = []
+
+    async def _ensure(_context: object) -> object:
+        return guard
+
+    async def _finish(
+        received_guard: object,
+        membership: ProviderDatasetOperationMembership,
+    ) -> None:
+        assert received_guard is guard
+        finished.append(membership)
+
+    async def _run(
+        _context: object,
+        *,
+        memberships: tuple[ProviderDatasetOperationMembership, ...],
+        on_memberships_completed: Any,
+    ) -> Any:
+        assert on_memberships_completed is not None
+        await on_memberships_completed(memberships)
+        return SimpleNamespace(status="done")
+
+    monkeypatch.setattr(mcst_module, "ensure_tracked_multi_member_asset", _ensure)
+    monkeypatch.setattr(mcst_module, "finish_tracked_feature_membership", _finish)
+    monkeypatch.setattr(mcst_module, "run_feature_place_mcst_culture", _run)
+
+    wrapper = cast(Any, feature_place_mcst_culture.op.compute_fn).decorated_fn
+    result = await wrapper(SimpleNamespace())
+
+    assert result.status == "done"
+    assert finished == list(memberships)
 
 
 # -- fetcher ------------------------------------------------------------------
@@ -394,6 +461,24 @@ def test_fetch_mcst_culture_records_caps_rows_per_dataset(
         assert all(count == 3 for count in per_slug.values())
     finally:
         _FakeFileDataClient.rows_per_dataset = 2
+
+
+def test_fetch_mcst_culture_records_limits_worker_to_explicit_slug(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_mcst(monkeypatch)
+    selected_slug = next(iter(MCST_FILE_DATASETS))
+
+    records = list(
+        fetch_mcst_culture_records(
+            KorTravelMapSettings(mcst_max_items_per_dataset=1),
+            slugs=(selected_slug,),
+        )
+    )
+
+    assert [slug for slug, _row in records] == [selected_slug]
+    [client] = _FakeFileDataClient.instances
+    assert client.calls == [selected_slug]
 
 
 def test_fetch_mcst_culture_records_closes_on_partial_consumption(

@@ -21,7 +21,6 @@ from typing import TYPE_CHECKING, Any, Final
 
 from sqlalchemy import text
 
-from kortravelmap.core.feature_operation import ProviderDatasetOperationKey
 from kortravelmap.core.offline_upload_states import (
     OFFLINE_UPLOAD_DELETABLE_STATES,
     OFFLINE_UPLOAD_LOAD_FINISH_SOURCE_STATES,
@@ -31,12 +30,16 @@ from kortravelmap.core.offline_upload_states import (
     OFFLINE_UPLOAD_VALIDATION_FINISH_SOURCE_STATES,
     OFFLINE_UPLOAD_VALIDATION_FINISH_STATES,
 )
-from kortravelmap.infra.jobs_repo import start_provider_dataset_import_job
+from kortravelmap.infra.jobs_repo import (
+    ImportJobDatasetTarget,
+    start_provider_dataset_import_job,
+)
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
 __all__ = [
+    "OfflineUploadScopeOperationUnresolved",
     "OfflineUpload",
     "OfflineUploadPage",
     "OfflineUploadStatusConflict",
@@ -57,7 +60,7 @@ __all__ = [
 ]
 
 _RETURN_COLUMNS: Final[str] = (
-    "upload_id, provider, dataset_key, sync_scope, original_filename, "
+    "upload_id, provider_dataset_id, sync_scope, operation_key, original_filename, "
     "storage_backend, storage_key, byte_size, checksum_sha256, detected_format, "
     "detected_encoding, status, validation_job_id, load_job_id, created_by, "
     "delete_command_id, created_at, updated_at"
@@ -71,9 +74,9 @@ class OfflineUpload:
     """``ops.offline_uploads`` 행 표현."""
 
     upload_id: str
-    provider: str
-    dataset_key: str
+    provider_dataset_id: int
     sync_scope: str
+    operation_key: str
     original_filename: str
     storage_backend: str
     storage_key: str
@@ -93,9 +96,9 @@ class OfflineUpload:
         """Dagster/OpenAPI metadata로 쓰기 쉬운 축약 표현."""
         return {
             "upload_id": self.upload_id,
-            "provider": self.provider,
-            "dataset_key": self.dataset_key,
+            "provider_dataset_id": self.provider_dataset_id,
             "sync_scope": self.sync_scope,
+            "operation_key": self.operation_key,
             "original_filename": self.original_filename,
             "storage_backend": self.storage_backend,
             "storage_key": self.storage_key,
@@ -116,6 +119,10 @@ class OfflineUploadPage:
 
     items: tuple[OfflineUpload, ...]
     next_cursor: str | None
+
+
+class OfflineUploadScopeOperationUnresolved(ValueError):
+    """scope가 정확히 하나의 operation으로 해석되지 않는다."""
 
 
 class OfflineUploadStatusConflict(ValueError):
@@ -143,9 +150,9 @@ def _row_to_upload(row: Any) -> OfflineUpload:
     data = row._mapping
     return OfflineUpload(
         upload_id=str(data["upload_id"]),
-        provider=str(data["provider"]),
-        dataset_key=str(data["dataset_key"]),
+        provider_dataset_id=int(data["provider_dataset_id"]),
         sync_scope=str(data["sync_scope"]),
+        operation_key=str(data["operation_key"]),
         original_filename=str(data["original_filename"]),
         storage_backend=str(data["storage_backend"]),
         storage_key=str(data["storage_key"]),
@@ -193,12 +200,12 @@ def _decode_cursor(cursor: str | None) -> tuple[datetime | None, str | None]:
 
 _INSERT_SQL: Final[str] = f"""
 INSERT INTO ops.offline_uploads (
-    upload_id, provider, dataset_key, sync_scope, original_filename,
+    upload_id, provider_dataset_id, sync_scope, operation_key, original_filename,
     storage_backend, storage_key, byte_size, checksum_sha256,
     detected_format, detected_encoding, created_by
 ) VALUES (
     COALESCE(CAST(:upload_id AS uuid), x_extension.gen_random_uuid()),
-    :provider, :dataset_key, :sync_scope, :original_filename,
+    :provider_dataset_id, :sync_scope, :operation_key, :original_filename,
     :storage_backend, :storage_key, :byte_size, :checksum_sha256,
     :detected_format, :detected_encoding, :created_by
 )
@@ -207,16 +214,16 @@ RETURNING {_RETURN_COLUMNS}
 
 _RESERVE_SQL: Final[str] = f"""
 INSERT INTO ops.offline_uploads (
-    upload_id, provider, dataset_key, sync_scope, original_filename,
+    upload_id, provider_dataset_id, sync_scope, operation_key, original_filename,
     storage_backend, storage_key, byte_size, checksum_sha256,
     detected_format, detected_encoding, status, created_by
 ) VALUES (
-    CAST(:upload_id AS uuid), :provider, :dataset_key, :sync_scope,
+    CAST(:upload_id AS uuid), :provider_dataset_id, :sync_scope, :operation_key,
     :original_filename, :storage_backend, :storage_key, :byte_size,
     :checksum_sha256, :detected_format, :detected_encoding, 'uploading',
     :created_by
 )
-ON CONFLICT (provider, dataset_key, sync_scope, checksum_sha256) DO NOTHING
+ON CONFLICT (provider_dataset_id, sync_scope, checksum_sha256) DO NOTHING
 RETURNING {_RETURN_COLUMNS}
 """
 
@@ -233,23 +240,27 @@ WHERE upload_id = :upload_id
 FOR UPDATE
 """
 
+# 멱등 키는 계약대로 3열이다 — ``uq_offline_uploads_dataset_scope_checksum``.
+# 그래서 이 read는 "여러 후보 중 최신 하나"가 아니라 **그 unique 제약이 가리키는
+# 정확히 그 행**을 읽는다. ``ORDER BY ... LIMIT 1``을 두면 제약이 바뀌거나 사라져도
+# 임의의 행을 조용히 골라 409가 엉뚱한 upload/operation을 가리키게 된다. 정렬을 빼고
+# ``one_or_none()``으로 받아 그런 상태는 조용히 넘어가지 않고 드러나게 한다.
 _GET_BY_CHECKSUM_SQL: Final[str] = f"""
 SELECT {_RETURN_COLUMNS}
 FROM ops.offline_uploads
-WHERE provider = :provider
-  AND dataset_key = :dataset_key
+WHERE provider_dataset_id = :provider_dataset_id
   AND sync_scope = :sync_scope
   AND checksum_sha256 = :checksum_sha256
-ORDER BY created_at DESC, upload_id DESC
-LIMIT 1
 """
 
 _LIST_SQL: Final[str] = f"""
 SELECT {_RETURN_COLUMNS}
 FROM ops.offline_uploads
 WHERE (CAST(:status AS text) IS NULL OR status = CAST(:status AS text))
-  AND (CAST(:provider AS text) IS NULL OR provider = CAST(:provider AS text))
-  AND (CAST(:dataset_key AS text) IS NULL OR dataset_key = CAST(:dataset_key AS text))
+  AND (
+      CAST(:provider_dataset_id AS bigint) IS NULL
+      OR provider_dataset_id = CAST(:provider_dataset_id AS bigint)
+  )
   AND (
     CAST(:cursor_created_at AS timestamptz) IS NULL
     OR (created_at, upload_id) < (
@@ -369,26 +380,28 @@ async def create_offline_upload(
     session: AsyncSession,
     *,
     upload_id: str | None = None,
-    provider: str,
-    dataset_key: str,
+    provider_dataset_id: int,
     original_filename: str,
     storage_backend: str,
     storage_key: str,
     byte_size: int,
     checksum_sha256: str,
-    sync_scope: str = "default",
+    sync_scope: str = "dataset_wide",
     detected_format: str | None = None,
     detected_encoding: str | None = None,
     created_by: str | None = None,
 ) -> OfflineUpload:
     """업로드 메타데이터를 생성한다. commit은 호출자 책임."""
+    operation_key = await _resolve_scope_operation_key(
+        session, provider_dataset_id=provider_dataset_id, sync_scope=sync_scope
+    )
     result = await session.execute(
         text(_INSERT_SQL),
         {
             "upload_id": upload_id,
-            "provider": provider,
-            "dataset_key": dataset_key,
+            "provider_dataset_id": provider_dataset_id,
             "sync_scope": sync_scope,
+            "operation_key": operation_key,
             "original_filename": original_filename,
             "storage_backend": storage_backend,
             "storage_key": storage_key,
@@ -402,30 +415,73 @@ async def create_offline_upload(
     return _row_to_upload(result.one())
 
 
+_RESOLVE_SCOPE_OPERATION_SQL: Final[str] = """
+SELECT operation_key
+FROM provider_sync.provider_dataset_operation_scopes
+WHERE provider_dataset_id = :provider_dataset_id
+  AND sync_scope = :sync_scope
+ORDER BY operation_key
+"""
+
+
+async def _resolve_scope_operation_key(
+    session: AsyncSession,
+    *,
+    provider_dataset_id: int,
+    sync_scope: str,
+) -> str:
+    """upload가 가리키는 scope의 operation을 유도한다.
+
+    업로드 요청 표면에는 operation이 없다 — 운영자는 dataset과 scope로 파일을
+    올린다. 그런데 ``ops.offline_uploads``는 scope PK와 같은 triple을 참조하므로
+    (ADR-088) 쓰기 시점에 operation이 정해져야 한다.
+
+    유도 규칙은 alembic 0089의 ``_preflight_offline_upload_operation_is_unambiguous``
+    와 같다: scope에 operation이 정확히 하나일 때만 그것을 쓴다. 둘 이상이면 어느
+    것을 골라도 임의 선택이므로 조용히 고르지 않고 실패시킨다 — 잘못 고르면 upload가
+    엉뚱한 실행에 결박된다.
+    """
+
+    keys = (
+        await session.execute(
+            text(_RESOLVE_SCOPE_OPERATION_SQL),
+            {"provider_dataset_id": provider_dataset_id, "sync_scope": sync_scope},
+        )
+    ).scalars().all()
+    if len(keys) != 1:
+        raise OfflineUploadScopeOperationUnresolved(
+            f"offline upload scope resolves to {len(keys)} operations "
+            f"(provider_dataset_id={provider_dataset_id}, sync_scope={sync_scope!r})"
+        )
+    return str(keys[0])
+
+
 async def reserve_offline_upload(
     session: AsyncSession,
     *,
     upload_id: str,
-    provider: str,
-    dataset_key: str,
+    provider_dataset_id: int,
     original_filename: str,
     storage_backend: str,
     storage_key: str,
     byte_size: int,
     checksum_sha256: str,
-    sync_scope: str = "default",
+    sync_scope: str = "dataset_wide",
     detected_format: str | None = None,
     detected_encoding: str | None = None,
     created_by: str | None = None,
 ) -> OfflineUpload | None:
     """외부 저장 전에 ``uploading`` row와 checksum 소유권을 원자적으로 선점한다."""
+    operation_key = await _resolve_scope_operation_key(
+        session, provider_dataset_id=provider_dataset_id, sync_scope=sync_scope
+    )
     result = await session.execute(
         text(_RESERVE_SQL),
         {
             "upload_id": upload_id,
-            "provider": provider,
-            "dataset_key": dataset_key,
+            "provider_dataset_id": provider_dataset_id,
             "sync_scope": sync_scope,
+            "operation_key": operation_key,
             "original_filename": original_filename,
             "storage_backend": storage_backend,
             "storage_key": storage_key,
@@ -536,17 +592,20 @@ async def get_offline_upload(
 async def get_offline_upload_by_checksum(
     session: AsyncSession,
     *,
-    provider: str,
-    dataset_key: str,
+    provider_dataset_id: int,
     sync_scope: str,
     checksum_sha256: str,
 ) -> OfflineUpload | None:
-    """provider/dataset/scope/checksum 조합으로 기존 업로드를 조회한다."""
+    """canonical dataset/scope/checksum 조합으로 기존 업로드를 조회한다.
+
+    반환 행은 ``operation_key``까지 든 exact identity(ADR-088)다. 중복 409를 만드는
+    호출자는 그 값을 응답에 실어 운영자가 어느 operation에 결박된 upload인지
+    구분할 수 있게 해야 한다.
+    """
     result = await session.execute(
         text(_GET_BY_CHECKSUM_SQL),
         {
-            "provider": provider,
-            "dataset_key": dataset_key,
+            "provider_dataset_id": provider_dataset_id,
             "sync_scope": sync_scope,
             "checksum_sha256": checksum_sha256,
         },
@@ -559,8 +618,7 @@ async def list_offline_uploads(
     session: AsyncSession,
     *,
     status: str | None = None,
-    provider: str | None = None,
-    dataset_key: str | None = None,
+    provider_dataset_id: int | None = None,
     limit: int = 50,
     cursor: str | None = None,
 ) -> OfflineUploadPage:
@@ -574,8 +632,7 @@ async def list_offline_uploads(
             text(_LIST_SQL),
             {
                 "status": status,
-                "provider": provider,
-                "dataset_key": dataset_key,
+                "provider_dataset_id": provider_dataset_id,
                 "cursor_created_at": cursor_created_at,
                 "cursor_upload_id": cursor_upload_id,
                 "limit_plus_one": effective_limit + 1,
@@ -630,16 +687,17 @@ async def reserve_offline_upload_load(
         kind=job_kind,
         payload={
             "upload_id": upload.upload_id,
-            "provider": upload.provider,
-            "dataset_key": upload.dataset_key,
+            "provider_dataset_id": upload.provider_dataset_id,
             "sync_scope": upload.sync_scope,
             "storage_backend": upload.storage_backend,
             "storage_key": upload.storage_key,
             "dagster_run_id": None,
         },
         source_checksum=upload.checksum_sha256,
-        provider_dataset=ProviderDatasetOperationKey(
-            upload.provider, upload.dataset_key
+        dataset_membership=ImportJobDatasetTarget(
+            provider_dataset_id=upload.provider_dataset_id,
+            sync_scope=upload.sync_scope,
+            operation_key=upload.operation_key,
         ),
         trigger_kind="manual",
     )

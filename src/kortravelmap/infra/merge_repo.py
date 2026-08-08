@@ -91,15 +91,14 @@ SELECT
     (f.coord IS NOT NULL) AS has_coord,
     f.updated_at AS updated_at,
     (
-        SELECT sr.provider
+        SELECT pd.provider
         FROM provider_sync.source_links sl
         JOIN provider_sync.source_entities se
           ON se.source_entity_key = sl.source_entity_key
-        JOIN provider_sync.source_records sr
-          ON sr.source_entity_key = se.source_entity_key
-         AND sr.source_record_key = se.current_source_record_key
+        JOIN provider_sync.provider_datasets pd
+          ON pd.provider_dataset_id = se.provider_dataset_id
         WHERE sl.feature_id = f.feature_id
-        ORDER BY sl.is_primary_source DESC, sl.confidence DESC
+        ORDER BY (sl.source_role = 'primary') DESC, sl.confidence DESC
         LIMIT 1
     ) AS provider
 FROM feature.features f
@@ -566,8 +565,8 @@ WITH pair_input AS MATERIALIZED (
             'theme_group', theme.theme_group,
             'title', collection.title,
             'edition_key', collection.edition_key,
-            'provider', source.provider,
-            'dataset_key', source.dataset_key,
+            'provider', dataset.provider,
+            'dataset_key', dataset.dataset_key,
             'source_name', source.source_name,
             'source_url', source.source_url,
             'source_item_key', survivor.external_item_id,
@@ -592,6 +591,8 @@ WITH pair_input AS MATERIALIZED (
       ON theme.theme_id = collection.theme_id
     LEFT JOIN feature.curated_sources AS source
       ON source.source_id = collection.source_id
+    LEFT JOIN provider_sync.provider_datasets AS dataset
+      ON dataset.provider_dataset_id = source.provider_dataset_id
     LEFT JOIN feature.curation_link_decisions AS previous_decision
       ON previous_decision.decision_id =
          survivor.accepted_link_decision_id

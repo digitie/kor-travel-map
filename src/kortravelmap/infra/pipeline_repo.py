@@ -63,8 +63,6 @@ class PipelineExecution:
     id: str
     status: str
     created_at: datetime
-    providers: tuple[str, ...]
-    dataset_keys: tuple[str, ...]
     provider_datasets: tuple[PipelineProviderDatasetIdentity, ...]
     progress: int | None
     current_stage: str | None
@@ -78,7 +76,7 @@ class PipelineExecution:
     dagster_run_id: str | None
     dagster_run_status: str | None
     trigger_kind: str | None
-    operation_registry_version: str | None
+    operation_key: str | None
     requested_job_id: str | None
     linked_job_count: int
     projected_job: PipelineProjectedJob
@@ -89,9 +87,12 @@ class PipelineExecution:
 class PipelineProviderDatasetIdentity:
     """canonical root에 귀속된 정확한 provider/dataset pair."""
 
+    provider_dataset_id: int
     provider: str
     dataset_key: str
-    sync_scope: str | None
+    # membership identity는 triple이다(ADR-088 §결정 2) — 셋 다 non-null이다.
+    sync_scope: str
+    operation_key: str
     operation_member_id: str
     status: str
 
@@ -112,7 +113,7 @@ class PipelineProjectedJob:
     dagster_run_id: str | None
     dagster_run_status: str | None
     trigger_kind: str | None
-    operation_registry_version: str | None
+    operation_key: str | None
     load_batch_id: str | None
     parent_job_id: str | None
     depth: int
@@ -141,21 +142,30 @@ class PipelineDatasetLatestExecution:
 
     provider: str
     dataset_key: str
-    sync_scope: str | None
+    sync_scope: str
+    operation_key: str
     execution: PipelineExecution
     operation_member_id: str
     pair_status: str
+    provider_dataset_id: int
 
 
 @dataclass(frozen=True)
 class PipelineDatasetExecutionSnapshot:
-    """동일 DB snapshot에서 읽은 exact scope의 종료/활성 실행."""
+    """동일 DB snapshot에서 읽은 exact membership의 종료/활성 실행.
+
+    identity는 triple이다(ADR-088 §결정 2). 한 dataset이 refresh operation을 여러 개
+    가질 수 있고 그 둘이 같은 ``sync_scope``를 공유할 수 있으므로, pair로 키를 잡으면
+    두 operation의 실행이 한 칸을 두고 다툰다.
+    """
 
     provider: str
     dataset_key: str
-    sync_scope: str | None
+    sync_scope: str
+    operation_key: str
     latest_terminal: PipelineDatasetLatestExecution | None
     active: PipelineDatasetLatestExecution | None
+    provider_dataset_id: int
 
 
 class PipelineCursorFilterMismatch(ValueError):
@@ -166,10 +176,9 @@ def _filter_fingerprint(
     *,
     kind: str | None = None,
     status: str | None = None,
-    provider: str | None = None,
-    dataset_key: str | None = None,
+    provider_dataset_id: int | None = None,
     sync_scopes: tuple[str, ...] = (),
-    include_unscoped_scope: bool = False,
+    operation_key: str | None = None,
     filter_sync_scopes: bool = False,
     load_batch_id: str | None = None,
     parent_job_id: str | None = None,
@@ -179,10 +188,9 @@ def _filter_fingerprint(
     payload = {
         "kind": kind,
         "status": status,
-        "provider": provider,
-        "dataset_key": dataset_key,
+        "provider_dataset_id": provider_dataset_id,
         "sync_scopes": sorted(sync_scopes),
-        "include_unscoped_scope": include_unscoped_scope,
+        "operation_key": operation_key,
         "filter_sync_scopes": filter_sync_scopes,
         "load_batch_id": load_batch_id,
         "parent_job_id": parent_job_id,
@@ -276,10 +284,9 @@ def _decode_cursor(
     return at, key, item_kind
 
 
-# hierarchy/component/anchor 규칙과 exact pair projection은 executions, overview,
-# datasets latest가 같은 CTE를 공유한다. provider와 dataset 배열은 표시·단일 필터용일
-# 뿐 pair 복원에는 절대 사용하지 않는다. 실행 identity의 DB 정본은 import_jobs의
-# typed column이며 import_job_events는 감사·타임라인 전용이라 projection에서 읽지 않는다.
+# hierarchy/component/anchor 규칙과 exact dataset membership projection은 executions,
+# overview, datasets latest가 같은 CTE를 공유한다. 실행 identity의 유일한 DB 정본은
+# request/job membership이며, provider_datasets는 표시 라벨을 위한 join 결과다.
 # projection body는 source CTE 이름만 알며 overview/latest/무필터 목록은 전역 source,
 # identity/detail 조회는 component source를 쓴다.
 _PIPELINE_ROOT_BODY_SQL: Final[str] = """
@@ -321,7 +328,7 @@ request_summaries AS (
         ranked.dagster_run_id AS projected_dagster_run_id,
         ranked.dagster_run_status AS projected_dagster_run_status,
         ranked.trigger_kind AS projected_trigger_kind,
-        ranked.operation_registry_version AS projected_operation_registry_version,
+        ranked.operation_key AS projected_operation_key,
         ranked.load_batch_id AS projected_load_batch_id,
         ranked.parent_job_id AS projected_parent_job_id,
         ranked.depth AS projected_depth
@@ -363,28 +370,12 @@ standalone_summaries AS (
         ranked.dagster_run_id AS projected_dagster_run_id,
         ranked.dagster_run_status AS projected_dagster_run_status,
         ranked.trigger_kind AS projected_trigger_kind,
-        ranked.operation_registry_version AS projected_operation_registry_version,
+        ranked.operation_key AS projected_operation_key,
         ranked.load_batch_id AS projected_load_batch_id,
         ranked.parent_job_id AS projected_parent_job_id,
         ranked.depth AS projected_depth
     FROM ranked_standalone_jobs AS ranked
     WHERE ranked.projection_rank = 1
-),
-direct_request_pairs AS (
-    SELECT
-        'update_request'::text AS root_kind,
-        request.request_id AS root_id,
-        request.scope->>'provider' AS provider,
-        request.scope->>'dataset_key' AS dataset_key,
-        request.effective_sync_scope AS sync_scope
-    FROM pipeline_requests AS request
-    WHERE request.scope_type = 'provider_dataset'
-      AND jsonb_typeof(request.scope->'provider') = 'string'
-      AND jsonb_typeof(request.scope->'dataset_key') = 'string'
-      AND btrim(request.scope->>'provider') = request.scope->>'provider'
-      AND btrim(request.scope->>'dataset_key') = request.scope->>'dataset_key'
-      AND btrim(request.scope->>'provider') <> ''
-      AND btrim(request.scope->>'dataset_key') <> ''
 ),
 request_roots AS (
     SELECT
@@ -392,8 +383,6 @@ request_roots AS (
         request.request_id AS id,
         request.status,
         request.created_at,
-        request.providers,
-        request.dataset_keys,
         NULL::integer AS progress,
         NULL::text AS current_stage,
         request.scope_type,
@@ -406,7 +395,7 @@ request_roots AS (
         request.dagster_run_id,
         NULL::text AS dagster_run_status,
         'update_request'::text AS trigger_kind,
-        NULL::text AS operation_registry_version,
+        NULL::text AS operation_key,
         request.job_id AS requested_job_id,
         summary.linked_job_count,
         summary.projected_job_id,
@@ -421,7 +410,7 @@ request_roots AS (
         summary.projected_dagster_run_id,
         summary.projected_dagster_run_status,
         summary.projected_trigger_kind,
-        summary.projected_operation_registry_version,
+        summary.projected_operation_key,
         summary.projected_load_batch_id,
         summary.projected_parent_job_id,
         summary.projected_depth,
@@ -437,8 +426,6 @@ standalone_roots AS (
         root.job_id AS id,
         root.status,
         root.created_at,
-        '{}'::text[] AS providers,
-        '{}'::text[] AS dataset_keys,
         root.progress,
         root.current_stage,
         NULL::text AS scope_type,
@@ -451,7 +438,7 @@ standalone_roots AS (
         root.dagster_run_id,
         root.dagster_run_status,
         root.trigger_kind,
-        root.operation_registry_version,
+        root.operation_key,
         NULL::uuid AS requested_job_id,
         summary.linked_job_count,
         summary.projected_job_id,
@@ -466,7 +453,7 @@ standalone_roots AS (
         summary.projected_dagster_run_id,
         summary.projected_dagster_run_status,
         summary.projected_trigger_kind,
-        summary.projected_operation_registry_version,
+        summary.projected_operation_key,
         summary.projected_load_batch_id,
         summary.projected_parent_job_id,
         summary.projected_depth,
@@ -487,8 +474,6 @@ root_job_members AS (
         owner.anchor_depth AS depth,
         job.load_batch_id,
         job.parent_job_id,
-        job.provider,
-        job.dataset_key,
         job.status,
         job.created_at
     FROM job_owners AS owner
@@ -503,80 +488,104 @@ root_job_members AS (
         standalone.depth,
         standalone.load_batch_id,
         standalone.parent_job_id,
-        standalone.provider,
-        standalone.dataset_key,
         standalone.status,
         standalone.created_at
     FROM standalone_jobs AS standalone
 ),
-ranked_member_pairs AS (
+request_provider_datasets AS (
+    SELECT
+        'update_request'::text AS root_kind,
+        request.request_id AS root_id,
+        provider_dataset.provider_dataset_id,
+        provider_dataset.provider,
+        provider_dataset.dataset_key,
+        member.sync_scope,
+        member.operation_key,
+        member.feature_update_request_dataset_id AS operation_member_id,
+        request.status
+    FROM ops.feature_update_request_datasets AS member
+    JOIN pipeline_requests AS request ON request.request_id = member.request_id
+    JOIN provider_sync.provider_datasets AS provider_dataset
+      ON provider_dataset.provider_dataset_id = member.provider_dataset_id
+),
+job_provider_datasets AS (
+    SELECT
+        root.root_kind,
+        root.root_id,
+        provider_dataset.provider_dataset_id,
+        provider_dataset.provider,
+        provider_dataset.dataset_key,
+        member.sync_scope,
+        member.operation_key,
+        member.import_job_dataset_id AS operation_member_id,
+        root.status,
+        -- 아래 ranked CTE가 이 세 열로 정렬한다. 투영하지 않으면 CTE 밖의
+        -- 이름을 참조하게 되어 질의가 파스 단계에서 죽는다.
+        root.depth,
+        root.created_at,
+        root.job_id
+    FROM root_job_members AS root
+    JOIN ops.import_job_datasets AS member ON member.job_id = root.job_id
+    JOIN provider_sync.provider_datasets AS provider_dataset
+      ON provider_dataset.provider_dataset_id = member.provider_dataset_id
+),
+ranked_job_provider_datasets AS (
     SELECT
         member.*,
         ROW_NUMBER() OVER (
+            -- 실행 membership identity는 triple이다(ADR-088 §결정 2). scope까지만
+            -- partition하면 **operation만 다른 두 member가 하나로 뭉개진다**.
             PARTITION BY
                 member.root_kind, member.root_id,
-                member.provider, member.dataset_key
+                member.provider_dataset_id, member.sync_scope, member.operation_key
             ORDER BY member.depth DESC, member.created_at DESC, member.job_id DESC
-        ) AS pair_rank
-    FROM root_job_members AS member
-    WHERE NULLIF(member.provider, '') IS NOT NULL
-      AND NULLIF(member.dataset_key, '') IS NOT NULL
+        ) AS membership_rank
+    FROM job_provider_datasets AS member
 ),
 canonical_provider_datasets AS (
     SELECT
-        member.root_kind,
-        member.root_id,
-        member.provider,
-        member.dataset_key,
-        direct.sync_scope,
-        member.job_id AS operation_member_id,
-        member.status
-    FROM ranked_member_pairs AS member
-    LEFT JOIN direct_request_pairs AS direct
-      ON direct.root_kind = member.root_kind
-     AND direct.root_id = member.root_id
-     AND direct.provider = member.provider
-     AND direct.dataset_key = member.dataset_key
-    WHERE member.pair_rank = 1
+        root_kind,
+        root_id,
+        provider_dataset_id,
+        provider,
+        dataset_key,
+        sync_scope,
+        operation_key,
+        operation_member_id,
+        status
+    FROM request_provider_datasets
+
+    UNION ALL
+
+    SELECT
+        root_kind,
+        root_id,
+        provider_dataset_id,
+        provider,
+        dataset_key,
+        sync_scope,
+        operation_key,
+        operation_member_id,
+        status
+    FROM ranked_job_provider_datasets
+    WHERE root_kind = 'import_job' AND membership_rank = 1
 ),
 roots_with_identity AS (
     SELECT
         root.*,
-        ARRAY(
-            SELECT DISTINCT identity.provider
-            FROM (
-                SELECT unnest(root.providers) AS provider
-                UNION ALL
-                SELECT pair.provider
-                FROM canonical_provider_datasets AS pair
-                WHERE pair.root_kind = root.kind AND pair.root_id = root.id
-            ) AS identity
-            WHERE NULLIF(identity.provider, '') IS NOT NULL
-            ORDER BY identity.provider
-        ) AS effective_providers,
-        ARRAY(
-            SELECT DISTINCT identity.dataset_key
-            FROM (
-                SELECT unnest(root.dataset_keys) AS dataset_key
-                UNION ALL
-                SELECT pair.dataset_key
-                FROM canonical_provider_datasets AS pair
-                WHERE pair.root_kind = root.kind AND pair.root_id = root.id
-            ) AS identity
-            WHERE NULLIF(identity.dataset_key, '') IS NOT NULL
-            ORDER BY identity.dataset_key
-        ) AS effective_dataset_keys,
         COALESCE(
             (
                 SELECT jsonb_agg(
                     jsonb_build_object(
+                        'provider_dataset_id', pair.provider_dataset_id,
                         'provider', pair.provider,
                         'dataset_key', pair.dataset_key,
                         'sync_scope', pair.sync_scope,
+                        'operation_key', pair.operation_key,
                         'operation_member_id', pair.operation_member_id,
                         'status', pair.status
                     )
-                    ORDER BY pair.provider, pair.dataset_key
+                    ORDER BY pair.provider_dataset_id, pair.sync_scope, pair.operation_key
                 )
                 FROM canonical_provider_datasets AS pair
                 WHERE pair.root_kind = root.kind AND pair.root_id = root.id
@@ -631,10 +640,8 @@ pipeline_jobs AS MATERIALIZED (
         job.current_stage,
         job.error_message,
         job.dagster_run_id,
-        job.provider,
-        job.dataset_key,
         job.trigger_kind,
-        job.operation_registry_version,
+        job.operation_key,
         job.dagster_run_status,
         job.started_at,
         job.finished_at,
@@ -653,10 +660,8 @@ pipeline_jobs AS MATERIALIZED (
             selected.current_stage,
             selected.error_message,
             selected.dagster_run_id,
-            selected.provider,
-            selected.dataset_key,
             selected.trigger_kind,
-            selected.operation_registry_version,
+            selected.operation_key,
             selected.dagster_run_status,
             selected.started_at,
             selected.finished_at,
@@ -673,13 +678,10 @@ pipeline_requests AS MATERIALIZED (
         request.request_id,
         request.scope_type,
         request.scope,
-        request.providers,
-        request.dataset_keys,
         request.run_mode,
         request.priority,
         identity_job.status,
         request.job_id,
-        identity_job.sync_scope AS effective_sync_scope,
         identity_job.dagster_run_id,
         request.operator,
         identity_job.error_message,
@@ -704,44 +706,16 @@ _IDENTITY_SCOPED_SOURCE_SQL: Final[str] = (
 scoped_request_seeds AS MATERIALIZED (
     SELECT request.request_id, request.job_id
     FROM ops.feature_update_requests AS request
-    WHERE CAST(:provider AS text) IS NOT NULL
-      AND CAST(:dataset_key AS text) IS NULL
-      AND request.providers @> ARRAY[CAST(:provider AS text)]
-
-    UNION
-
-    SELECT request.request_id, request.job_id
-    FROM ops.feature_update_requests AS request
-    WHERE CAST(:provider AS text) IS NULL
-      AND CAST(:dataset_key AS text) IS NOT NULL
-      AND request.dataset_keys @> ARRAY[CAST(:dataset_key AS text)]
+    JOIN ops.feature_update_request_datasets AS member
+      ON member.request_id = request.request_id
+    WHERE member.provider_dataset_id = CAST(:provider_dataset_id AS bigint)
 ),
 scoped_job_seeds AS MATERIALIZED (
     SELECT job.job_id
     FROM ops.import_jobs AS job
-    WHERE CAST(:provider AS text) IS NOT NULL
-      AND CAST(:dataset_key AS text) IS NOT NULL
+    JOIN ops.import_job_datasets AS member ON member.job_id = job.job_id
+    WHERE member.provider_dataset_id = CAST(:provider_dataset_id AS bigint)
       AND job.quarantined_at IS NULL
-      AND job.provider = CAST(:provider AS text)
-      AND job.dataset_key = CAST(:dataset_key AS text)
-
-    UNION
-
-    SELECT job.job_id
-    FROM ops.import_jobs AS job
-    WHERE CAST(:provider AS text) IS NOT NULL
-      AND CAST(:dataset_key AS text) IS NULL
-      AND job.quarantined_at IS NULL
-      AND job.provider = CAST(:provider AS text)
-
-    UNION
-
-    SELECT job.job_id
-    FROM ops.import_jobs AS job
-    WHERE CAST(:provider AS text) IS NULL
-      AND CAST(:dataset_key AS text) IS NOT NULL
-      AND job.quarantined_at IS NULL
-      AND job.dataset_key = CAST(:dataset_key AS text)
 
     UNION
 
@@ -810,54 +784,23 @@ filtered_roots AS (
     WHERE (CAST(:kind AS text) IS NULL OR root.kind = CAST(:kind AS text))
       AND (CAST(:status AS text) IS NULL OR root.status = CAST(:status AS text))
       AND (
-        (CAST(:provider AS text) IS NULL AND CAST(:dataset_key AS text) IS NULL)
-        OR (
-          CAST(:provider AS text) IS NOT NULL
-          AND CAST(:dataset_key AS text) IS NOT NULL
-          AND EXISTS (
-            SELECT 1
-            FROM canonical_provider_datasets AS pair
-            WHERE pair.root_kind = root.kind
-              AND pair.root_id = root.id
-              AND pair.provider = CAST(:provider AS text)
-              AND pair.dataset_key = CAST(:dataset_key AS text)
-              AND (
-                NOT CAST(:filter_sync_scopes AS boolean)
-                OR pair.sync_scope = ANY(CAST(:sync_scopes AS text[]))
-                OR (
-                  CAST(:include_unscoped_scope AS boolean)
-                  AND pair.sync_scope IS NULL
-                )
-              )
-          )
-        )
-        OR (
-          CAST(:provider AS text) IS NOT NULL
-          AND CAST(:dataset_key AS text) IS NULL
-          AND (
-            CAST(:provider AS text) = ANY(root.providers)
-            OR EXISTS (
-              SELECT 1
-              FROM canonical_provider_datasets AS pair
-              WHERE pair.root_kind = root.kind
-                AND pair.root_id = root.id
-                AND pair.provider = CAST(:provider AS text)
+        CAST(:provider_dataset_id AS bigint) IS NULL
+        OR EXISTS (
+          SELECT 1
+          FROM canonical_provider_datasets AS pair
+          WHERE pair.root_kind = root.kind
+            AND pair.root_id = root.id
+            AND pair.provider_dataset_id = CAST(:provider_dataset_id AS bigint)
+            AND (
+              NOT CAST(:filter_sync_scopes AS boolean)
+              OR pair.sync_scope = ANY(CAST(:sync_scopes AS text[]))
             )
-          )
-        )
-        OR (
-          CAST(:provider AS text) IS NULL
-          AND CAST(:dataset_key AS text) IS NOT NULL
-          AND (
-            CAST(:dataset_key AS text) = ANY(root.dataset_keys)
-            OR EXISTS (
-              SELECT 1
-              FROM canonical_provider_datasets AS pair
-              WHERE pair.root_kind = root.kind
-                AND pair.root_id = root.id
-                AND pair.dataset_key = CAST(:dataset_key AS text)
+            -- membership identity는 triple이다. scope까지만 좁히면 형제 operation의
+            -- 실행이 섞여 나온다.
+            AND (
+              CAST(:operation_key AS text) IS NULL
+              OR pair.operation_key = CAST(:operation_key AS text)
             )
-          )
         )
       )
       AND (
@@ -908,8 +851,6 @@ SELECT
     page.id,
     page.status,
     page.created_at,
-    page.effective_providers AS providers,
-    page.effective_dataset_keys AS dataset_keys,
     page.provider_datasets,
     page.progress,
     page.current_stage,
@@ -923,7 +864,7 @@ SELECT
     page.dagster_run_id,
     page.dagster_run_status,
     page.trigger_kind,
-    page.operation_registry_version,
+    page.operation_key,
     page.requested_job_id,
     page.linked_job_count,
     page.projected_job_id,
@@ -938,7 +879,7 @@ SELECT
     page.projected_dagster_run_id,
     page.projected_dagster_run_status,
     page.projected_trigger_kind,
-    page.projected_operation_registry_version,
+    page.projected_operation_key,
     page.projected_load_batch_id,
     page.projected_parent_job_id,
     page.projected_depth,
@@ -1032,24 +973,24 @@ FROM status_counts
 _DATASET_EXECUTION_RESULT_SQL: Final[str] = """
 SELECT
     page.kind, page.id, page.status, page.created_at,
-    page.effective_providers AS providers,
-    page.effective_dataset_keys AS dataset_keys,
     page.provider_datasets,
     page.progress, page.current_stage, page.scope_type, page.priority,
     page.run_mode, page.operator, page.error_message,
     page.started_at, page.finished_at,
     page.dagster_run_id, page.dagster_run_status, page.trigger_kind,
-    page.operation_registry_version, page.requested_job_id,
+    page.operation_key, page.requested_job_id,
     page.linked_job_count,
     page.projected_job_id, page.projected_job_kind, page.projected_status,
     page.projected_progress, page.projected_current_stage,
     page.projected_error_message, page.projected_created_at,
     page.projected_started_at, page.projected_finished_at,
     page.projected_dagster_run_id, page.projected_dagster_run_status,
-    page.projected_trigger_kind, page.projected_operation_registry_version,
+    page.projected_trigger_kind, page.projected_operation_key,
     page.projected_load_batch_id, page.projected_parent_job_id,
     page.projected_depth,
-    page.selected_provider, page.selected_dataset_key, page.selected_sync_scope,
+    page.selected_provider_dataset_id, page.selected_provider,
+    page.selected_dataset_key, page.selected_sync_scope,
+    page.selected_operation_key,
     page.selected_operation_member_id, page.selected_pair_status,
     page.selected_is_active,
     cancellation.cancellation_id,
@@ -1083,10 +1024,13 @@ LEFT JOIN LATERAL (
     LIMIT 1
 ) AS cancellation ON true
 WHERE page.dataset_rank = 1
+-- 정렬 키는 위 ``PARTITION BY``와 같은 triple이라야 총순서가 된다. pair로 두면
+-- 형제 operation 사이 순서가 비결정적이다. ``NULLS FIRST``는 scope가 nullable이던
+-- 시절의 잔재다 — 해당 열은 모두 NOT NULL이다.
 ORDER BY
-    page.selected_provider,
-    page.selected_dataset_key,
-    page.selected_sync_scope NULLS FIRST,
+    page.selected_provider_dataset_id,
+    page.selected_sync_scope,
+    page.selected_operation_key,
     page.selected_is_active
 """
 
@@ -1097,14 +1041,19 @@ _LIST_LATEST_DATASET_EXECUTIONS_SQL: Final[str] = (
 ranked_dataset_roots AS (
     SELECT
         root.*,
+        pair.provider_dataset_id AS selected_provider_dataset_id,
         pair.provider AS selected_provider,
         pair.dataset_key AS selected_dataset_key,
         pair.sync_scope AS selected_sync_scope,
+        pair.operation_key AS selected_operation_key,
         pair.operation_member_id AS selected_operation_member_id,
         pair.status AS selected_pair_status,
         pair.status IN ('queued', 'running') AS selected_is_active,
         ROW_NUMBER() OVER (
-            PARTITION BY pair.provider, pair.dataset_key, pair.sync_scope
+            -- triple 단위로 최신 실행을 고른다. scope까지만 partition하면
+            -- operation만 다른 실행이 서로를 가린다(ADR-088 §결정 2).
+            PARTITION BY
+                pair.provider_dataset_id, pair.sync_scope, pair.operation_key
             ORDER BY root.created_at DESC, root.id DESC, root.kind DESC
         ) AS dataset_rank
     FROM roots_with_identity AS root
@@ -1122,17 +1071,19 @@ _LIST_DATASET_EXECUTION_SNAPSHOTS_SQL: Final[str] = (
 ranked_dataset_roots AS (
     SELECT
         root.*,
+        pair.provider_dataset_id AS selected_provider_dataset_id,
         pair.provider AS selected_provider,
         pair.dataset_key AS selected_dataset_key,
         pair.sync_scope AS selected_sync_scope,
+        pair.operation_key AS selected_operation_key,
         pair.operation_member_id AS selected_operation_member_id,
         pair.status AS selected_pair_status,
         pair.status IN ('queued', 'running') AS selected_is_active,
         ROW_NUMBER() OVER (
             PARTITION BY
-                pair.provider,
-                pair.dataset_key,
+                pair.provider_dataset_id,
                 pair.sync_scope,
+                pair.operation_key,
                 (pair.status IN ('queued', 'running'))
             ORDER BY root.created_at DESC, root.id DESC, root.kind DESC
         ) AS dataset_rank
@@ -1145,9 +1096,9 @@ ranked_dataset_roots AS (
 )
 
 # ``_LIST_DATASET_EXECUTION_SNAPSHOTS_SQL``의 scoped 변형. identity-scoped source(대상
-# (provider, dataset_key)의 root member로 root_id로 좁힘)에 대상 pair로 좁힌
+# provider_dataset_id의 root member로 root_id로 좁힘)에 대상 pair로 좁힌
 # ranked_dataset_roots를 붙여 동일한 per-scope 최신 종료/활성 실행 결과를 만든다
-# (단, 대상 dataset만). :provider/:dataset_key를 bind한다.
+# (단, 대상 dataset만). :provider_dataset_id를 bind한다.
 _LIST_DATASET_EXECUTION_SNAPSHOTS_SCOPED_SQL: Final[str] = (
     "WITH RECURSIVE\n"
     + _IDENTITY_SCOPED_SOURCE_SQL
@@ -1159,25 +1110,26 @@ _LIST_DATASET_EXECUTION_SNAPSHOTS_SCOPED_SQL: Final[str] = (
 ranked_dataset_roots AS (
     SELECT
         root.*,
+        pair.provider_dataset_id AS selected_provider_dataset_id,
         pair.provider AS selected_provider,
         pair.dataset_key AS selected_dataset_key,
         pair.sync_scope AS selected_sync_scope,
+        pair.operation_key AS selected_operation_key,
         pair.operation_member_id AS selected_operation_member_id,
         pair.status AS selected_pair_status,
         pair.status IN ('queued', 'running') AS selected_is_active,
         ROW_NUMBER() OVER (
             PARTITION BY
-                pair.provider,
-                pair.dataset_key,
+                pair.provider_dataset_id,
                 pair.sync_scope,
+                pair.operation_key,
                 (pair.status IN ('queued', 'running'))
             ORDER BY root.created_at DESC, root.id DESC, root.kind DESC
         ) AS dataset_rank
     FROM roots_with_identity AS root
     JOIN canonical_provider_datasets AS pair
       ON pair.root_kind = root.kind AND pair.root_id = root.id
-    WHERE pair.provider = :provider
-      AND pair.dataset_key = :dataset_key
+    WHERE pair.provider_dataset_id = CAST(:provider_dataset_id AS bigint)
 )
 """
     + _DATASET_EXECUTION_RESULT_SQL
@@ -1216,21 +1168,19 @@ matched_root AS (
 )
 SELECT
     root.kind, root.id, root.status, root.created_at,
-    root.effective_providers AS providers,
-    root.effective_dataset_keys AS dataset_keys,
     root.provider_datasets,
     root.progress, root.current_stage, root.scope_type, root.priority,
     root.run_mode, root.operator, root.error_message,
     root.started_at, root.finished_at,
     root.dagster_run_id, root.dagster_run_status, root.trigger_kind,
-    root.operation_registry_version, root.requested_job_id,
+    root.operation_key, root.requested_job_id,
     root.linked_job_count,
     root.projected_job_id, root.projected_job_kind, root.projected_status,
     root.projected_progress, root.projected_current_stage,
     root.projected_error_message, root.projected_created_at,
     root.projected_started_at, root.projected_finished_at,
     root.projected_dagster_run_id, root.projected_dagster_run_status,
-    root.projected_trigger_kind, root.projected_operation_registry_version,
+    root.projected_trigger_kind, root.projected_operation_key,
     root.projected_load_batch_id, root.projected_parent_job_id,
     root.projected_depth,
     cancellation.cancellation_id,
@@ -1270,9 +1220,11 @@ LEFT JOIN LATERAL (
 def _row_to_execution(row: Any) -> PipelineExecution:
     provider_datasets = tuple(
         PipelineProviderDatasetIdentity(
+            provider_dataset_id=int(item["provider_dataset_id"]),
             provider=str(item["provider"]),
             dataset_key=str(item["dataset_key"]),
-            sync_scope=(str(item["sync_scope"]) if item.get("sync_scope") is not None else None),
+            sync_scope=str(item["sync_scope"]),
+            operation_key=str(item["operation_key"]),
             operation_member_id=str(item["operation_member_id"]),
             status=str(item["status"]),
         )
@@ -1293,7 +1245,7 @@ def _row_to_execution(row: Any) -> PipelineExecution:
         dagster_run_id=row.projected_dagster_run_id,
         dagster_run_status=row.projected_dagster_run_status,
         trigger_kind=row.projected_trigger_kind,
-        operation_registry_version=row.projected_operation_registry_version,
+        operation_key=row.projected_operation_key,
         load_batch_id=(
             str(row.projected_load_batch_id) if row.projected_load_batch_id is not None else None
         ),
@@ -1321,8 +1273,6 @@ def _row_to_execution(row: Any) -> PipelineExecution:
         id=str(row.id),
         status=str(row.status),
         created_at=row.created_at,
-        providers=tuple(str(value) for value in row.providers),
-        dataset_keys=tuple(str(value) for value in row.dataset_keys),
         provider_datasets=provider_datasets,
         progress=int(row.progress) if row.progress is not None else None,
         current_stage=row.current_stage,
@@ -1336,7 +1286,7 @@ def _row_to_execution(row: Any) -> PipelineExecution:
         dagster_run_id=row.dagster_run_id,
         dagster_run_status=row.dagster_run_status,
         trigger_kind=row.trigger_kind,
-        operation_registry_version=row.operation_registry_version,
+        operation_key=row.operation_key,
         requested_job_id=(str(row.requested_job_id) if row.requested_job_id is not None else None),
         linked_job_count=int(row.linked_job_count),
         projected_job=projected_job,
@@ -1371,9 +1321,9 @@ async def list_pipeline_executions(
     *,
     kind: str | None = None,
     status: str | None = None,
-    provider: str | None = None,
-    dataset_key: str | None = None,
+    provider_dataset_id: int | None = None,
     dataset_sync_scopes: Collection[str | None] | None = None,
+    dataset_operation_key: str | None = None,
     load_batch_id: str | None = None,
     parent_job_id: str | None = None,
     created_from: datetime | None = None,
@@ -1383,13 +1333,17 @@ async def list_pipeline_executions(
 ) -> PipelineExecutionPage:
     """root 실행 목록 — ``(created_at DESC, id DESC, kind DESC)`` cursor.
 
-    provider+dataset_key가 주어지면 identity-scoped source(root_id로 대상 dataset의
+    provider_dataset_id가 주어지면 identity-scoped source(root_id로 대상 dataset의
     root member만 스캔)를 써 누적 실행 이력과 무관하게 빠르다(ADR-077).
     """
     if kind is not None and kind not in PIPELINE_EXECUTION_KINDS:
         raise ValueError(f"kind must be one of {sorted(PIPELINE_EXECUTION_KINDS)}, got {kind!r}")
-    if dataset_sync_scopes is not None and (provider is None or dataset_key is None):
-        raise ValueError("dataset_sync_scopes requires both provider and dataset_key")
+    if provider_dataset_id is not None and provider_dataset_id <= 0:
+        raise ValueError("provider_dataset_id must be greater than 0")
+    if dataset_sync_scopes is not None and provider_dataset_id is None:
+        raise ValueError("dataset_sync_scopes requires provider_dataset_id")
+    if dataset_operation_key is not None and provider_dataset_id is None:
+        raise ValueError("dataset_operation_key requires provider_dataset_id")
     try:
         normalized_load_batch_id = str(UUID(load_batch_id)) if load_batch_id is not None else None
     except (TypeError, ValueError) as exc:
@@ -1405,16 +1359,14 @@ async def list_pipeline_executions(
             if scope is not None
         )
     )
-    include_unscoped_scope = bool(dataset_sync_scopes is not None and None in dataset_sync_scopes)
     filter_sync_scopes = dataset_sync_scopes is not None
     page_size = _limit(limit)
     filter_fingerprint = _filter_fingerprint(
         kind=kind,
         status=status,
-        provider=provider,
-        dataset_key=dataset_key,
+        provider_dataset_id=provider_dataset_id,
         sync_scopes=sync_scopes,
-        include_unscoped_scope=include_unscoped_scope,
+        operation_key=dataset_operation_key,
         filter_sync_scopes=filter_sync_scopes,
         load_batch_id=normalized_load_batch_id,
         parent_job_id=normalized_parent_job_id,
@@ -1427,20 +1379,19 @@ async def list_pipeline_executions(
     )
     if normalized_load_batch_id is not None or normalized_parent_job_id is not None:
         query = _LIST_MEMBERSHIP_EXECUTIONS_SQL
-    elif provider is None and dataset_key is None:
+    elif provider_dataset_id is None:
         query = _LIST_ALL_EXECUTIONS_SQL
     else:
-        # provider/dataset 단일 dataset 경로: identity-scoped source가 root_id로
+        # 단일 canonical dataset 경로: identity-scoped source가 root_id로
         # 좁힌다(detail 포함).
         query = _LIST_EXECUTIONS_SQL
     params: dict[str, Any] = {
         "kind": kind,
         "status": status,
-        "provider": provider,
-        "dataset_key": dataset_key,
+        "provider_dataset_id": provider_dataset_id,
         "filter_sync_scopes": filter_sync_scopes,
         "sync_scopes": list(sync_scopes),
-        "include_unscoped_scope": include_unscoped_scope,
+        "operation_key": dataset_operation_key,
         "load_batch_id": normalized_load_batch_id,
         "parent_job_id": normalized_parent_job_id,
         "created_from": created_from,
@@ -1489,25 +1440,32 @@ def _row_to_dataset_execution(row: Any) -> PipelineDatasetLatestExecution:
     return PipelineDatasetLatestExecution(
         provider=str(row.selected_provider),
         dataset_key=str(row.selected_dataset_key),
-        sync_scope=(str(row.selected_sync_scope) if row.selected_sync_scope is not None else None),
+        sync_scope=str(row.selected_sync_scope),
+        operation_key=str(row.selected_operation_key),
         execution=_row_to_execution(row),
         operation_member_id=str(row.selected_operation_member_id),
         pair_status=str(row.selected_pair_status),
+        provider_dataset_id=int(row.selected_provider_dataset_id),
     )
 
 
 def _group_dataset_execution_snapshot_rows(
     rows: Collection[Any],
 ) -> tuple[PipelineDatasetExecutionSnapshot, ...]:
-    """dataset execution snapshot row를 (provider, dataset_key, sync_scope)별
-    최신 종료/활성 실행 쌍으로 묶는다. unscoped·scoped 쿼리가 공유한다."""
+    """dataset execution snapshot row를 exact membership triple별 최신 종료/활성
+    실행 쌍으로 묶는다. unscoped·scoped 쿼리가 공유한다.
+
+    키는 SQL의 ``PARTITION BY``와 **같은 triple**이라야 한다. pair로 좁히면 SQL이
+    정확히 분리해 낸 두 행이 같은 칸에 떨어져 아래 RuntimeError로 터진다 — 한
+    dataset에 refresh operation을 하나 더 등록하는 것만으로 재현된다.
+    """
     grouped: dict[
-        tuple[str, str, str | None],
+        tuple[int, str, str],
         dict[bool, PipelineDatasetLatestExecution],
     ] = {}
     for row in rows:
         item = _row_to_dataset_execution(row)
-        key = (item.provider, item.dataset_key, item.sync_scope)
+        key = (item.provider_dataset_id, item.sync_scope, item.operation_key)
         is_active = bool(row.selected_is_active)
         if is_active in grouped.setdefault(key, {}):
             raise RuntimeError("dataset execution snapshot returned duplicate status groups")
@@ -1517,10 +1475,19 @@ def _group_dataset_execution_snapshot_rows(
             provider=provider,
             dataset_key=dataset_key,
             sync_scope=sync_scope,
+            operation_key=operation_key,
             latest_terminal=items.get(False),
             active=items.get(True),
+            provider_dataset_id=provider_dataset_id,
         )
-        for (provider, dataset_key, sync_scope), items in grouped.items()
+        for (provider_dataset_id, sync_scope, operation_key), items in grouped.items()
+        for provider, dataset_key in [
+            next(
+                (entry.provider, entry.dataset_key)
+                for entry in items.values()
+                if entry.provider_dataset_id == provider_dataset_id
+            )
+        ]
     )
 
 
@@ -1535,10 +1502,9 @@ async def list_dataset_pipeline_execution_snapshots(
 async def list_dataset_pipeline_execution_snapshots_scoped(
     session: AsyncSession,
     *,
-    provider: str,
-    dataset_key: str,
+    provider_dataset_id: int,
 ) -> tuple[PipelineDatasetExecutionSnapshot, ...]:
-    """단일 (provider, dataset_key)로 좁힌 snapshot.
+    """단일 canonical provider dataset으로 좁힌 snapshot.
 
     ``load_dataset_detail`` 전용. unscoped 버전은 roots_with_identity per-root
     상관 서브쿼리를 전체 파이프라인 히스토리에 대해 계산해 누적 실행 이력에
@@ -1558,10 +1524,7 @@ async def list_dataset_pipeline_execution_snapshots_scoped(
     rows = (
         await session.execute(
             text(_LIST_DATASET_EXECUTION_SNAPSHOTS_SCOPED_SQL),
-            {
-                "provider": provider,
-                "dataset_key": dataset_key,
-            },
+            {"provider_dataset_id": provider_dataset_id},
         )
     ).all()
     return _group_dataset_execution_snapshot_rows(rows)

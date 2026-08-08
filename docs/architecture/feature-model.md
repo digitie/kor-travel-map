@@ -309,9 +309,10 @@ class SourceLink(BaseModel):
     source_role: SourceRole = SourceRole.ENRICHMENT
     match_method: str                    # 'natural_key', 'reverse_geocode', 'place_phone_search', 'dedup_merge', ...
     confidence: int = Field(ge=0, le=100)
-    is_primary_source: bool = False
     created_at: datetime = Field(default_factory=kst_now)
 ```
+
+primary 판정은 `source_role=SourceRole.PRIMARY` 하나로 표현한다.
 
 ## 13. `FeatureFile` (persisted row) / `FeatureFileSource` (dto)
 

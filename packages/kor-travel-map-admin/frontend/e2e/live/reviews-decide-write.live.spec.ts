@@ -964,17 +964,20 @@ test.describe("dedup + enrichment reviews — 상세 비교 다이얼로그 필�
     if (typeof t.lat === "number") {
       await expect(dialog).toContainText(t.lat.toFixed(6));
     }
-    // 2차 source: provider/entity/dataset/record(+address/좌표).
+    // 2차 source: provider/entity/dataset/record(+좌표).
     await expect(dialog).toContainText(src.provider);
     await expect(dialog).toContainText(src.source_entity_id);
     await expect(dialog).toContainText(src.dataset_key);
     await expect(dialog).toContainText(src.source_record_key);
-    if (src.raw_address) await expect(dialog).toContainText(src.raw_address);
-    if (typeof src.raw_longitude === "number") {
-      await expect(dialog).toContainText(src.raw_longitude.toFixed(6));
+    // T-VN-33(ADR-088): source_records.raw_address/raw_longitude/raw_latitude는
+    // 물리 삭제됐다. 좌표는 review 상세의 source_lon/source_lat이 정본이고
+    // 다이얼로그도 그 값을 toFixed(6)으로 렌더하므로 그쪽으로 옮긴다. 주소는
+    // 대체 열도 없고 다이얼로그가 2차 source 주소를 더는 렌더하지 않아 단언을 제거.
+    if (typeof body.data.source_lon === "number") {
+      await expect(dialog).toContainText(body.data.source_lon.toFixed(6));
     }
-    if (typeof src.raw_latitude === "number") {
-      await expect(dialog).toContainText(src.raw_latitude.toFixed(6));
+    if (typeof body.data.source_lat === "number") {
+      await expect(dialog).toContainText(body.data.source_lat.toFixed(6));
     }
     // 점수(name=toFixed(1), distance score=spatial_score) + 거리 + audit default.
     await expect(dialog).toContainText(body.data.name_score.toFixed(1));

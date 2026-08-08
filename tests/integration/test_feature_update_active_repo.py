@@ -36,6 +36,7 @@ from kortravelmap.infra.feature_update_repo import (
     enqueue_feature_update_request,
     peek_next_update_request,
 )
+from kortravelmap.infra.jobs_repo import ImportJobDatasetTarget
 from kortravelmap.settings import KorTravelMapSettings
 
 if TYPE_CHECKING:
@@ -46,16 +47,98 @@ pytestmark = pytest.mark.integration
 _PROVIDER = "python-kma-api"
 _DATASET = "kma_short_forecast"
 
+#: catalog에서 (dataset, sync_scope, operation) triple 하나를 고르는 SQL.
+#:
+#: T-VN-33 이후 provider_dataset scope의 identity는 자연키 쌍이 아니라
+#: ``provider_dataset_id + sync_scope + operation_key``이고, 세 열 모두
+#: ``provider_dataset_operation_scopes``를 FK로 참조한다 — 임의의 문자열로는
+#: 요청을 만들 수 없다. 0089가 seed한 실제 triple을 읽어 쓴다.
+_OPERATION_SCOPE_SQL = """
+SELECT scope.provider_dataset_id, scope.operation_key
+FROM provider_sync.provider_dataset_operation_scopes AS scope
+JOIN provider_sync.provider_datasets AS dataset
+  ON dataset.provider_dataset_id = scope.provider_dataset_id
+JOIN provider_sync.provider_dataset_operations AS operation
+  ON operation.provider_dataset_id = scope.provider_dataset_id
+ AND operation.operation_key = scope.operation_key
+WHERE dataset.provider = :provider
+  AND dataset.dataset_key = :dataset_key
+  AND scope.sync_scope = :sync_scope
+  AND dataset.is_active
+  AND operation.is_enabled
+ORDER BY scope.operation_key
+LIMIT 1
+"""
 
-def _scope(sync_scope: str | None = None) -> dict[str, object]:
-    scope: dict[str, object] = {
+#: 활성 request가 아직 점유하지 않은 triple 하나 (feature_ids/bbox scope 요청용).
+_FREE_MEMBERSHIP_SQL = """
+SELECT scope.provider_dataset_id, scope.sync_scope, scope.operation_key
+FROM provider_sync.provider_dataset_operation_scopes AS scope
+JOIN provider_sync.provider_datasets AS dataset
+  ON dataset.provider_dataset_id = scope.provider_dataset_id
+JOIN provider_sync.provider_dataset_operations AS operation
+  ON operation.provider_dataset_id = scope.provider_dataset_id
+ AND operation.operation_key = scope.operation_key
+WHERE dataset.is_active AND operation.is_enabled
+  AND NOT EXISTS (
+      SELECT 1
+      FROM ops.feature_update_request_datasets AS member
+      JOIN ops.feature_update_requests AS request
+        ON request.request_id = member.request_id
+      JOIN ops.import_jobs AS job ON job.job_id = request.job_id
+      WHERE member.provider_dataset_id = scope.provider_dataset_id
+        AND member.sync_scope = scope.sync_scope
+        AND member.operation_key = scope.operation_key
+        AND job.status IN ('queued', 'running')
+  )
+ORDER BY scope.provider_dataset_id, scope.sync_scope, scope.operation_key
+LIMIT 1
+"""
+
+
+async def _operation_scope(
+    session: AsyncSession,
+    *,
+    sync_scope: str,
+    provider: str = _PROVIDER,
+    dataset_key: str = _DATASET,
+) -> ImportJobDatasetTarget:
+    """catalog에서 canonical membership 1건을 읽는다."""
+    row = (
+        await session.execute(
+            text(_OPERATION_SCOPE_SQL),
+            {
+                "provider": provider,
+                "dataset_key": dataset_key,
+                "sync_scope": sync_scope,
+            },
+        )
+    ).one()
+    return ImportJobDatasetTarget(
+        provider_dataset_id=int(row.provider_dataset_id),
+        sync_scope=sync_scope,
+        operation_key=str(row.operation_key),
+    )
+
+
+async def _canonical_membership(session: AsyncSession) -> ImportJobDatasetTarget:
+    """활성 request가 점유하지 않은 triple을 골라 membership으로 만든다."""
+    row = (await session.execute(text(_FREE_MEMBERSHIP_SQL))).one()
+    return ImportJobDatasetTarget(
+        provider_dataset_id=int(row.provider_dataset_id),
+        sync_scope=str(row.sync_scope),
+        operation_key=str(row.operation_key),
+    )
+
+
+def _scope(member: ImportJobDatasetTarget) -> dict[str, object]:
+    """membership과 정확히 일치하는 canonical provider_dataset scope."""
+    return {
         "type": "provider_dataset",
-        "provider": _PROVIDER,
-        "dataset_key": _DATASET,
+        "provider_dataset_id": member.provider_dataset_id,
+        "sync_scope": member.sync_scope,
+        "operation_key": member.operation_key,
     }
-    if sync_scope is not None:
-        scope["sync_scope"] = sync_scope
-    return scope
 
 
 def _upgrade_head(dsn: str) -> None:
@@ -83,6 +166,20 @@ async def _create_isolated_migrated_engine(
     return target_dsn, make_async_engine(target_dsn)
 
 
+async def _isolated_membership(dsn: str, *, sync_scope: str) -> ImportJobDatasetTarget:
+    """격리 DB catalog에서 membership 1건을 읽고 연결을 즉시 정리한다.
+
+    테스트 본문이 쓰는 engine을 건드리지 않도록 전용 engine을 쓰고 바로 dispose한다
+    (남은 연결이 있으면 teardown의 ``DROP DATABASE``가 실패한다).
+    """
+    engine = make_async_engine(dsn)
+    try:
+        async with AsyncSession(engine) as session:
+            return await _operation_scope(session, sync_scope=sync_scope)
+    finally:
+        await engine.dispose()
+
+
 async def _drop_isolated_database(pg_container: Any, dsn: str) -> None:
     admin_dsn = normalize_async_dsn(pg_container.get_connection_url())
     database = make_url(dsn).database
@@ -98,19 +195,23 @@ async def _drop_isolated_database(pg_container: Any, dsn: str) -> None:
 async def test_active_identity_uses_job_effective_scope_and_constraint_metadata(
     migrated_session: AsyncSession,
 ) -> None:
+    targeted = await _operation_scope(migrated_session, sync_scope="target_grids")
     first = await enqueue_feature_update_request(
         migrated_session,
-        scope=_scope(),
-        effective_sync_scope="target_grids",
+        scope=_scope(targeted),
+        dataset_memberships=[targeted],
     )
-    assert first.scope.get("sync_scope") is None
-    assert first.effective_sync_scope == "target_grids"
+    # T-VN-33: 실행 scope는 별도 열이 아니라 immutable membership이 든다.
+    assert first.scope["sync_scope"] == "target_grids"
+    assert [member.sync_scope for member in first.dataset_memberships] == [
+        "target_grids"
+    ]
 
     found = await find_active_provider_dataset_request(
         migrated_session,
-        provider=_PROVIDER,
-        dataset_key=_DATASET,
+        provider_dataset_id=targeted.provider_dataset_id,
         sync_scope="target_grids",
+        operation_key=targeted.operation_key,
     )
     assert found is not None
     assert found.request_id == first.request_id
@@ -119,8 +220,8 @@ async def test_active_identity_uses_job_effective_scope_and_constraint_metadata(
         async with migrated_session.begin_nested():
             await enqueue_feature_update_request(
                 migrated_session,
-                scope=_scope(),
-                effective_sync_scope="target_grids",
+                scope=_scope(targeted),
+                dataset_memberships=[targeted],
             )
     assert is_active_provider_dataset_unique_violation(exc_info.value)
 
@@ -151,20 +252,23 @@ async def test_active_identity_uses_job_effective_scope_and_constraint_metadata(
     )
     cancellation_marked = await find_active_provider_dataset_request(
         migrated_session,
-        provider=_PROVIDER,
-        dataset_key=_DATASET,
+        provider_dataset_id=targeted.provider_dataset_id,
         sync_scope="target_grids",
+        operation_key=targeted.operation_key,
     )
     assert cancellation_marked is not None
     assert cancellation_marked.cancellation_id == "68000000-0000-4000-8000-000000000001"
 
+    dataset_wide = await _operation_scope(migrated_session, sync_scope="dataset_wide")
     other = await enqueue_feature_update_request(
         migrated_session,
-        scope=_scope(),
-        effective_sync_scope="dataset_wide",
+        scope=_scope(dataset_wide),
+        dataset_memberships=[dataset_wide],
     )
     assert other.request_id != first.request_id
-    assert other.effective_sync_scope == "dataset_wide"
+    assert [member.sync_scope for member in other.dataset_memberships] == [
+        "dataset_wide"
+    ]
 
 
 async def test_concurrent_service_create_reuses_one_canonical_active_request(
@@ -173,13 +277,10 @@ async def test_concurrent_service_create_reuses_one_canonical_active_request(
 ) -> None:
     dsn, isolated_engine = await _create_isolated_migrated_engine(pg_container)
     try:
+        targeted = await _isolated_membership(dsn, sync_scope="target_grids")
         body = FeatureUpdateRequestCreateRequest.model_validate(
             {
-                "scope": {
-                    "type": "provider_dataset",
-                    "provider": _PROVIDER,
-                    "dataset_key": _DATASET,
-                },
+                "scope": _scope(targeted),
                 "run_mode": "queued",
                 "reason": "c45x-concurrent-create",
             }
@@ -301,13 +402,18 @@ async def test_concurrent_service_create_reuses_one_canonical_active_request(
                             )
                           ) AS unlinked_jobs
                         FROM ops.import_jobs AS job
+                        JOIN ops.import_job_datasets AS member
+                          ON member.job_id = job.job_id
                         WHERE job.kind = 'feature_update_request'
-                          AND job.provider = :provider
-                          AND job.dataset_key = :dataset_key
-                          AND job.sync_scope = 'target_grids'
+                          AND member.provider_dataset_id = :provider_dataset_id
+                          AND member.sync_scope = 'target_grids'
+                          AND member.operation_key = :operation_key
                         """
                     ),
-                    {"provider": _PROVIDER, "dataset_key": _DATASET},
+                    {
+                        "provider_dataset_id": targeted.provider_dataset_id,
+                        "operation_key": targeted.operation_key,
+                    },
                 )
             ).one()
         assert counts.total_jobs == 1
@@ -324,13 +430,10 @@ async def test_service_idempotency_serializes_replay_and_rejects_mismatch(
 ) -> None:
     dsn, isolated_engine = await _create_isolated_migrated_engine(pg_container)
     try:
+        targeted = await _isolated_membership(dsn, sync_scope="target_grids")
         body = FeatureUpdateRequestCreateRequest.model_validate(
             {
-                "scope": {
-                    "type": "provider_dataset",
-                    "provider": _PROVIDER,
-                    "dataset_key": _DATASET,
-                },
+                "scope": _scope(targeted),
                 "run_mode": "queued",
                 "reason": "durable-idempotency",
             }
@@ -641,16 +744,31 @@ async def test_service_idempotency_serializes_replay_and_rejects_mismatch(
 async def test_direct_writer_requires_canonical_effective_scope(
     migrated_session: AsyncSession,
 ) -> None:
-    with pytest.raises(ValueError, match="explicit effective_sync_scope"):
-        await enqueue_feature_update_request(migrated_session, scope=_scope())
+    """direct writer는 exact canonical membership 없이는 요청을 만들 수 없다.
 
-    with pytest.raises(ValueError, match="explicit requested sync_scope"):
+    T-VN-33에서 ``effective_sync_scope`` 인자는 사라졌다 — 실행 scope는 요청
+    시점에 고정하는 immutable membership(``provider_dataset_id + sync_scope +
+    operation_key``)이 든다. 종전 인자가 지키던 계약(정규 scope만 · 요청 scope와
+    실행 scope 불일치 금지 · 자유 alias 금지)은 그대로 membership 축에서 검증한다.
+    """
+    targeted = await _operation_scope(migrated_session, sync_scope="target_grids")
+    dataset_wide = await _operation_scope(migrated_session, sync_scope="dataset_wide")
+
+    # membership 없는 provider_dataset scope — 실행 대상이 확정되지 않는다.
+    with pytest.raises(ValueError, match="exactly one canonical membership"):
         await enqueue_feature_update_request(
-            migrated_session,
-            scope=_scope("target_grids"),
-            effective_sync_scope="dataset_wide",
+            migrated_session, scope=_scope(targeted)
         )
 
+    # 요청 scope와 membership이 다른 scope를 가리키면 거부한다.
+    with pytest.raises(ValueError, match="must match its canonical membership"):
+        await enqueue_feature_update_request(
+            migrated_session,
+            scope=_scope(targeted),
+            dataset_memberships=[dataset_wide],
+        )
+
+    # 자유 alias/blank는 membership 생성 단계에서 막힌다.
     for invalid_scope in (
         "legacy-alias",
         "external_system:",
@@ -658,34 +776,50 @@ async def test_direct_writer_requires_canonical_effective_scope(
         "external_system:\tsystem",
         f"external_system:{'x' * 113}",
     ):
-        with pytest.raises(ValueError, match="effective_sync_scope"):
-            await enqueue_feature_update_request(
-                migrated_session,
-                scope=_scope(),
-                effective_sync_scope=invalid_scope,
+        with pytest.raises(ValueError, match="sync_scope"):
+            ImportJobDatasetTarget(
+                provider_dataset_id=targeted.provider_dataset_id,
+                sync_scope=invalid_scope,
+                operation_key=targeted.operation_key,
             )
 
-    max_length_scope = f"external_system:{'x' * 112}"
+    # 정규형이어도 catalog에 없는 triple은 실행 대상이 아니다.
+    with pytest.raises(ValueError, match="active dataset"):
+        await enqueue_feature_update_request(
+            migrated_session,
+            scope={"type": "feature_ids", "feature_ids": []},
+            dataset_memberships=[
+                ImportJobDatasetTarget(
+                    provider_dataset_id=targeted.provider_dataset_id,
+                    sync_scope=f"external_system:{'x' * 112}",
+                    operation_key=targeted.operation_key,
+                )
+            ],
+        )
+
     accepted = await enqueue_feature_update_request(
         migrated_session,
-        scope=_scope(),
-        effective_sync_scope=max_length_scope,
+        scope=_scope(targeted),
+        dataset_memberships=[targeted],
     )
-    assert accepted.effective_sync_scope == max_length_scope
+    assert [member.sync_scope for member in accepted.dataset_memberships] == [
+        "target_grids"
+    ]
 
     with pytest.raises(ValueError, match="unsupported sync_scope"):
         await find_active_provider_dataset_request(
             migrated_session,
-            provider=_PROVIDER,
-            dataset_key=_DATASET,
+            provider_dataset_id=targeted.provider_dataset_id,
             sync_scope="legacy-alias",
+            operation_key=targeted.operation_key,
         )
 
-    with pytest.raises(ValueError, match="only valid for provider_dataset"):
+    # membership이 아예 없는 요청도 거부한다 (scope 종류와 무관).
+    with pytest.raises(ValueError, match="at least one dataset membership"):
         await enqueue_feature_update_request(
             migrated_session,
             scope={"type": "feature_ids", "feature_ids": []},
-            effective_sync_scope="dataset_wide",
+            dataset_memberships=[],
         )
 
 
@@ -695,11 +829,13 @@ async def test_dispatch_promotion_is_idempotent_and_prioritized(
     ordinary = await enqueue_feature_update_request(
         migrated_session,
         scope={"type": "feature_ids", "feature_ids": []},
+        dataset_memberships=[await _canonical_membership(migrated_session)],
         priority=100,
     )
     promoted_source = await enqueue_feature_update_request(
         migrated_session,
         scope={"type": "bbox", "min_lon": 126, "min_lat": 37, "max_lon": 127, "max_lat": 38},
+        dataset_memberships=[await _canonical_membership(migrated_session)],
         priority=1,
     )
 
@@ -721,6 +857,7 @@ async def test_run_mode_now_sets_dispatch_intent_at_insert(
     request = await enqueue_feature_update_request(
         migrated_session,
         scope={"type": "feature_ids", "feature_ids": []},
+        dataset_memberships=[await _canonical_membership(migrated_session)],
         run_mode="now",
     )
     assert request.dispatch_requested_at is not None
@@ -732,6 +869,7 @@ async def test_dispatch_conflict_exposes_current_lifecycle(
     request = await enqueue_feature_update_request(
         migrated_session,
         scope={"type": "feature_ids", "feature_ids": []},
+        dataset_memberships=[await _canonical_membership(migrated_session)],
     )
     await migrated_session.execute(
         text(
@@ -751,3 +889,70 @@ async def test_dispatch_conflict_exposes_current_lifecycle(
             migrated_session, "00000000-0000-4000-8000-000000000000"
         )
     assert missing_info.value.current_status == "not_found"
+
+
+async def test_active_lookup_does_not_match_sibling_operation_on_same_scope(
+    migrated_session: AsyncSession,
+) -> None:
+    """active 조회는 membership triple로 판정한다 — 형제 operation을 잡으면 안 된다.
+
+    ``ops.feature_update_request_datasets``의 세 열이 모두 NOT NULL이고 DB trigger도
+    triple로 경합을 본다. 조회만 pair로 좁히면 operation A의 active request가
+    operation B의 요청에 걸려, 상위 ``_assert_reusable_active_request``의 triple
+    비교가 불일치를 내며 **정당한 요청에 409**를 준다 — Python 가드가 자기가 흉내
+    내는 DB 가드보다 엄격해지는 상태다.
+    """
+    targeted = await _operation_scope(migrated_session, sync_scope="target_grids")
+    sibling_operation_key = f"{targeted.operation_key}.sibling"
+    await migrated_session.execute(
+        text(
+            "INSERT INTO provider_sync.provider_dataset_operations "
+            "(provider_dataset_id, operation_key, operation_kind) "
+            "VALUES (:provider_dataset_id, :operation_key, 'refresh')"
+        ),
+        {
+            "provider_dataset_id": targeted.provider_dataset_id,
+            "operation_key": sibling_operation_key,
+        },
+    )
+    await migrated_session.execute(
+        text(
+            "INSERT INTO provider_sync.provider_dataset_operation_scopes "
+            "(provider_dataset_id, sync_scope, operation_key, operation_kind) "
+            "VALUES (:provider_dataset_id, 'target_grids', :operation_key, 'refresh')"
+        ),
+        {
+            "provider_dataset_id": targeted.provider_dataset_id,
+            "operation_key": sibling_operation_key,
+        },
+    )
+    sibling = ImportJobDatasetTarget(
+        provider_dataset_id=targeted.provider_dataset_id,
+        sync_scope="target_grids",
+        operation_key=sibling_operation_key,
+    )
+
+    active = await enqueue_feature_update_request(
+        migrated_session,
+        scope=_scope(targeted),
+        dataset_memberships=[targeted],
+    )
+
+    same = await find_active_provider_dataset_request(
+        migrated_session,
+        provider_dataset_id=targeted.provider_dataset_id,
+        sync_scope="target_grids",
+        operation_key=targeted.operation_key,
+    )
+    assert same is not None
+    assert same.request_id == active.request_id
+
+    other = await find_active_provider_dataset_request(
+        migrated_session,
+        provider_dataset_id=sibling.provider_dataset_id,
+        sync_scope="target_grids",
+        operation_key=sibling.operation_key,
+    )
+    assert other is None, (
+        "형제 operation의 active request를 자기 것으로 잡으면 거짓 409가 난다"
+    )

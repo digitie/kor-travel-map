@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 from datetime import UTC, datetime
-from decimal import Decimal
 
 import pytest
 
@@ -29,21 +28,15 @@ def _observation() -> FeatureObservation:
         first_seen_at=_NOW,
         entity_last_seen_at=_NOW,
         source_record_key="sr_record-1",
-        source_version=None,
-        raw_name="관광지",
-        raw_address=None,
-        raw_longitude=Decimal("127.0"),
-        raw_latitude=Decimal("37.0"),
         raw_data={"edition": "2025"},
         raw_payload_hash="payload-1",
         fetched_at=_NOW,
         imported_at=_NOW,
-        record_last_seen_at=_NOW,
+        observed_at=_NOW,
         expires_at=None,
         source_role="primary",
         match_method="natural_key",
         confidence=100,
-        is_primary_source=True,
         linked_at=_NOW,
         is_current=True,
     )
@@ -74,7 +67,6 @@ def test_observation_history_cursor_roundtrip_and_scope_guard() -> None:
         source_entity_key=item.source_entity_key,
     ) == {
         "cursor_fetched_at": _NOW,
-        "cursor_last_seen_at": _NOW,
         "cursor_imported_at": _NOW,
         "cursor_source_record_key": item.source_record_key,
     }

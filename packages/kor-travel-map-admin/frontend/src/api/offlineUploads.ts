@@ -40,8 +40,7 @@ export type OfflineUploadDetailResponse =
 
 export interface OfflineUploadCreateRequest {
   file: File;
-  provider: string;
-  datasetKey: string;
+  providerDatasetId: number;
   syncScope?: string;
 }
 
@@ -78,8 +77,7 @@ function fetchOfflineUploads(
   return getJson<OfflineUploadListResponse>(
     pathWithQuery("/v1/admin/offline-uploads", {
       status: params.status,
-      provider: params.provider,
-      dataset_key: params.dataset_key,
+      provider_dataset_id: params.provider_dataset_id,
       page_size: params.page_size,
       cursor: params.cursor,
     }),
@@ -123,21 +121,18 @@ function fetchOfflineUploadValidation(
 async function createOfflineUpload(
   body: OfflineUploadCreateRequest,
 ): Promise<OfflineUploadWriteResponse> {
-  const provider = body.provider.trim();
-  const datasetKey = body.datasetKey.trim();
+  const providerDatasetId = body.providerDatasetId;
   const syncScope = body.syncScope?.trim() || "default";
   const fileIdentity = await fileIdempotencyFingerprint(body.file);
   const form = new FormData();
   form.append("file", body.file);
-  form.append("provider", provider);
-  form.append("dataset_key", datasetKey);
+  form.append("provider_dataset_id", String(providerDatasetId));
   form.append("sync_scope", syncScope);
   const operation = "admin.offline-upload.create";
   return withDomainIdempotencyFingerprint(
     domainCreateCommandSlot(operation),
     {
-      provider,
-      dataset_key: datasetKey,
+      provider_dataset_id: providerDatasetId,
       sync_scope: syncScope,
       filename: fileIdentity.filename,
       content_type: fileIdentity.contentType,

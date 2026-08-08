@@ -35,6 +35,10 @@ const MOCK_REVIEWED_AT = "2026-06-08T00:10:00.000Z";
 const OFFLINE_UPLOAD_ID = "11111111-1111-4111-8111-111111111111";
 const OFFLINE_VALIDATION_JOB_ID = "22222222-2222-4222-8222-222222222222";
 const OFFLINE_LOAD_JOB_ID = "33333333-3333-4333-8333-333333333333";
+// ADR-088 triple identity: offline upload 행도 provider_dataset_id + sync_scope +
+// operation_key 셋으로 식별된다. operation_key는 화면에 노출되지 않으므로 e2e에서는
+// 고정 mock 값을 쓴다(실서버 값은 API가 scope의 canonical operation에서 유도한다).
+const OFFLINE_OPERATION_KEY = "e2e_offline_upload_job";
 const OFFLINE_DAGSTER_RUN_ID = "dagster-run-offline-upload-001";
 const POI_TARGET_ID = "44444444-4444-4444-8444-444444444444";
 const FEATURE_CHANGE_ID = "55555555-5555-4555-8555-555555555555";
@@ -67,13 +71,13 @@ function makeOfflineUpload(
       "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
     created_at: MOCK_NOW,
     created_by: "local-admin",
-    dataset_key: "offline_csv",
     detected_encoding: "utf-8",
     detected_format: "csv",
     load_job_id: null,
     load_url: `/v1/admin/offline-uploads/${OFFLINE_UPLOAD_ID}/load`,
+    operation_key: OFFLINE_OPERATION_KEY,
     original_filename: "offline.csv",
-    provider: "offline-test-provider",
+    provider_dataset_id: 401,
     status: "uploaded",
     status_url: `/v1/admin/offline-uploads/${OFFLINE_UPLOAD_ID}`,
     storage_backend: "rustfs",
@@ -236,9 +240,13 @@ async function mockOfflineUploadMutations(page: Page) {
 
     if (request.method() === "GET" && apiPath === "/v1/admin/offline-uploads") {
       const status = url.searchParams.get("status");
-      const items = status
-        ? uploads.filter((item) => item.status === status)
-        : uploads;
+      const providerDatasetId = Number(url.searchParams.get("provider_dataset_id"));
+      const items = uploads.filter(
+        (item) =>
+          (!status || item.status === status) &&
+          (!Number.isSafeInteger(providerDatasetId) ||
+            item.provider_dataset_id === providerDatasetId),
+      );
       await fulfillJson(route, {
         data: { items },
         meta: {
@@ -258,6 +266,8 @@ async function mockOfflineUploadMutations(page: Page) {
       expect(request.headers()["content-type"]).toContain(
         "multipart/form-data",
       );
+      expect(request.postData()).toContain('name="provider_dataset_id"');
+      expect(request.postData()).toContain("401");
       uploads = [upload];
       await fulfillJson(route, {
         data: upload,
@@ -1523,8 +1533,7 @@ test.describe("admin/ops pages", () => {
     await expect(page.getByLabel("이슈 심각도 필터")).toBeVisible();
     await expect(page.getByLabel("issue page size")).toBeVisible();
     await expect(page.getByLabel("issue type")).toBeVisible();
-    await expect(page.getByLabel("issue provider")).toBeVisible();
-    await expect(page.getByLabel("issue dataset")).toBeVisible();
+    await expect(page.getByLabel("issue provider dataset ID")).toBeVisible();
     await expect(page.getByLabel("bbox")).toBeVisible();
     for (const column of [
       "이슈",
@@ -1757,19 +1766,18 @@ test.describe("admin/ops pages", () => {
     ).toBeVisible();
     await expect(page.getByText("파일 업로드")).toBeVisible();
     await expect(page.getByTestId("offline-upload-file-input")).toBeVisible();
-    for (const label of ["provider", "dataset key", "sync scope"]) {
+    for (const label of ["provider dataset ID", "sync scope"]) {
       await expect(page.getByLabel(label, { exact: true })).toBeVisible();
     }
     await expect(page.getByRole("button", { name: "업로드" })).toBeDisabled();
     await expect(page.getByText("CSV/TSV 업로드를 선택하면")).toBeVisible();
     await expect(page.getByLabel("offline upload status")).toBeVisible();
-    await expect(page.getByLabel("provider filter")).toBeVisible();
-    await expect(page.getByLabel("dataset filter")).toBeVisible();
+    await expect(page.getByLabel("provider dataset ID filter")).toBeVisible();
     for (const column of [
       "업로드",
       "상태",
       "형식",
-      "provider/dataset",
+      "provider dataset",
       "파일",
       "크기",
       "수정",
@@ -1790,6 +1798,7 @@ test.describe("admin/ops pages", () => {
       mimeType: "text/csv",
       name: "offline.csv",
     });
+    await page.getByLabel("provider dataset ID").fill("401");
     await page.getByRole("button", { name: "업로드" }).click();
 
     await expect.poll(() => requests.create).toBe(1);
@@ -1827,6 +1836,7 @@ test.describe("admin/ops pages", () => {
       mimeType: "text/csv",
       name: "offline.csv",
     });
+    await page.getByLabel("provider dataset ID").fill("401");
     await page.getByRole("button", { name: "업로드" }).click();
     await expect.poll(() => requests.create).toBe(1);
     await expect(page.getByTestId("offline-upload-row")).toBeVisible();
@@ -1842,6 +1852,7 @@ test.describe("admin/ops pages", () => {
       mimeType: "text/csv",
       name: "offline.csv",
     });
+    await page.getByLabel("provider dataset ID").fill("401");
     await page.getByRole("button", { name: "업로드" }).click();
     await expect.poll(() => requests.create).toBe(2);
     await expect(page.getByTestId("offline-upload-row")).toBeVisible();

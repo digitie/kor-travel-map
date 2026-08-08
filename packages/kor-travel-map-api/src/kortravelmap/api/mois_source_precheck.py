@@ -21,6 +21,8 @@ from kortravelmap.providers.mois import (
 from kortravelmap.providers.mois import (
     PROVIDER_NAME as MOIS_PROVIDER_NAME,
 )
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api import dagster_graphql
 from kortravelmap.api.dagster_graphql import DagsterUrlConfigurationError
@@ -34,6 +36,7 @@ __all__ = [
     "MoisSourceSyncPrecheckError",
     "MoisSourceSyncRequired",
     "MOIS_SOURCE_PRECHECK_ERROR_RESPONSES",
+    "ensure_mois_source_sync_for_memberships",
     "ensure_mois_source_sync_for_plan",
     "fetch_mois_source_sync_precheck",
     "to_http_exception",
@@ -239,6 +242,44 @@ async def ensure_mois_source_sync_for_plan(
         settings=settings,
         client=client,
     )
+    if not precheck.ready:
+        raise MoisSourceSyncRequired(precheck)
+
+
+async def ensure_mois_source_sync_for_memberships(
+    session: AsyncSession,
+    memberships: frozenset[tuple[int, str]],
+    *,
+    settings: ApiSettings,
+    client: httpx.AsyncClient,
+) -> None:
+    """canonical dataset membership snapshot에 MOIS가 있을 때만 선행조건을 검사한다.
+
+    HTTP/Dagster 경계가 natural provider/dataset key를 전달하지 않게 하고, 이
+    조회도 provider dataset id만 정본으로 사용한다. ``sync_scope``는 snapshot
+    complete 여부 검증을 위해 입력에 보존하지만 MOIS 판정은 dataset relation이
+    담당한다.
+    """
+    if not memberships:
+        return
+    rows = await session.execute(
+        text(
+            """
+            SELECT 1
+            FROM provider_sync.provider_datasets
+            WHERE provider_dataset_id = ANY(CAST(:provider_dataset_ids AS bigint[]))
+              AND provider = :mois_provider
+            LIMIT 1
+            """
+        ),
+        {
+            "provider_dataset_ids": [dataset_id for dataset_id, _scope in memberships],
+            "mois_provider": MOIS_PROVIDER_NAME,
+        },
+    )
+    if rows.scalar_one_or_none() is None:
+        return
+    precheck = await fetch_mois_source_sync_precheck(settings=settings, client=client)
     if not precheck.ready:
         raise MoisSourceSyncRequired(precheck)
 

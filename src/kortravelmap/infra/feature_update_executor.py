@@ -18,6 +18,8 @@ from typing import TYPE_CHECKING, Any, Final, Protocol, cast
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from kortravelmap.core.feature_operation import ProviderDatasetOperationMembership
+from kortravelmap.core.sync_scope import parse_canonical_sync_scope
 from kortravelmap.infra.advisory_lock import advisory_lock_key
 from kortravelmap.infra.cache_target_event_repo import (
     append_cache_target_links_reconciled_events,
@@ -28,6 +30,7 @@ from kortravelmap.infra.cache_target_event_repo import (
 from kortravelmap.infra.feature_update_repo import (
     FeatureUpdateLockBusy,
     FeatureUpdateRequest,
+    execution_scope_for_request,
     feature_update_scope_advisory_key,
     finish_update_request,
     get_update_request,
@@ -39,7 +42,7 @@ from kortravelmap.infra.feature_update_repo import (
     start_update_request,
     touch_queued_update_request_for_lock_retry,
 )
-from kortravelmap.infra.jobs_repo import record_import_job_event
+from kortravelmap.infra.jobs_repo import get_import_job, record_import_job_event
 from kortravelmap.infra.poi_cache_target_repo import (
     PoiCacheTargetFeatureLinkCandidate,
     mark_poi_cache_targets_refresh_failed,
@@ -53,13 +56,12 @@ from kortravelmap.infra.provider_refresh_policy_repo import (
 )
 from kortravelmap.infra.scope_repo import (
     CacheTargetFeatureMatch,
-    ProviderDatasetScope,
     ScopeResolution,
     SigunguByRadiusResolver,
     count_features_matching_scope,
 )
 from kortravelmap.infra.sync_state_repo import (
-    record_sync_failure as record_provider_sync_failure,
+    record_sync_failure_for_operation_membership,
 )
 
 if TYPE_CHECKING:
@@ -90,11 +92,34 @@ _REQUEST_EXECUTION_LOCK_PREFIX: Final[str] = "kortravelmap:feature-update:reques
 _LOG = logging.getLogger(__name__)
 
 
+def _validate_exact_refresh_membership(
+    *,
+    provider_dataset_id: int,
+    sync_scope: str,
+    operation_key: str,
+) -> None:
+    """refresh 실행 identity가 약한 자연키로 퇴행하지 않게 고정한다."""
+    if (
+        not isinstance(provider_dataset_id, int)
+        or isinstance(provider_dataset_id, bool)
+        or provider_dataset_id <= 0
+    ):
+        raise ValueError("provider_dataset_id must be a positive integer")
+    parse_canonical_sync_scope(sync_scope)
+    if (
+        not isinstance(operation_key, str)
+        or not operation_key
+        or operation_key != operation_key.strip()
+    ):
+        raise ValueError("operation_key must be a trimmed non-empty string")
+
 @dataclass(frozen=True)
 class ProviderDatasetRefreshScope:
     """runner가 실행할 provider/dataset refresh 단위."""
 
     request_id: str
+    provider_dataset_id: int
+    sync_scope: str
     provider: str
     dataset_key: str
     scope_type: str
@@ -103,14 +128,24 @@ class ProviderDatasetRefreshScope:
     feature_ids: tuple[str, ...]
     feature_count: int
     prevent_provider_reactivation: bool
-    sync_scope: str | None = None
+    operation_key: str
     provider_policy: ProviderRefreshPolicy | None = None
     rate_limit: dict[str, Any] | None = None
     target_ids: tuple[str, ...] = ()
     target_matches: tuple[CacheTargetFeatureMatch, ...] = ()
 
+    def __post_init__(self) -> None:
+        _validate_exact_refresh_membership(
+            provider_dataset_id=self.provider_dataset_id,
+            sync_scope=self.sync_scope,
+            operation_key=self.operation_key,
+        )
+
     def as_matched_scope(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
+            "provider_dataset_id": self.provider_dataset_id,
+            "sync_scope": self.sync_scope,
+            "operation_key": self.operation_key,
             "provider": self.provider,
             "dataset_key": self.dataset_key,
             "feature_count": self.feature_count,
@@ -118,8 +153,6 @@ class ProviderDatasetRefreshScope:
         }
         if self.target_ids:
             payload["target_ids"] = list(self.target_ids)
-        if self.sync_scope is not None:
-            payload["sync_scope"] = self.sync_scope
         if self.rate_limit:
             payload["rate_limit"] = dict(self.rate_limit)
         return payload
@@ -129,6 +162,9 @@ class ProviderDatasetRefreshScope:
 class ProviderDatasetRefreshResult:
     """runner 1회 실행 결과."""
 
+    provider_dataset_id: int
+    sync_scope: str
+    operation_key: str
     provider: str
     dataset_key: str
     status: str = "done"
@@ -136,8 +172,18 @@ class ProviderDatasetRefreshResult:
     loaded_count: int = 0
     metadata: dict[str, Any] | None = None
 
+    def __post_init__(self) -> None:
+        _validate_exact_refresh_membership(
+            provider_dataset_id=self.provider_dataset_id,
+            sync_scope=self.sync_scope,
+            operation_key=self.operation_key,
+        )
+
     def as_matched_scope(self) -> dict[str, Any]:
         return {
+            "provider_dataset_id": self.provider_dataset_id,
+            "sync_scope": self.sync_scope,
+            "operation_key": self.operation_key,
             "provider": self.provider,
             "dataset_key": self.dataset_key,
             "status": self.status,
@@ -159,21 +205,19 @@ class ProviderDatasetRefreshFailure(RuntimeError):
     def __init__(
         self,
         *,
-        provider: str,
-        dataset_key: str,
+        provider_dataset_id: int,
         sync_scope: str,
+        operation_key: str,
         message: str,
     ) -> None:
-        for field_name, value in (
-            ("provider", provider),
-            ("dataset_key", dataset_key),
-            ("sync_scope", sync_scope),
-        ):
-            if not value or value != value.strip():
-                raise ValueError(f"{field_name} must be a trimmed non-empty string")
-        self.provider = provider
-        self.dataset_key = dataset_key
+        _validate_exact_refresh_membership(
+            provider_dataset_id=provider_dataset_id,
+            sync_scope=sync_scope,
+            operation_key=operation_key,
+        )
+        self.provider_dataset_id = provider_dataset_id
         self.sync_scope = sync_scope
+        self.operation_key = operation_key
         super().__init__(message)
 
 
@@ -195,13 +239,26 @@ class ProviderDatasetRefreshRunner(Protocol):
 class SkippedProviderDatasetRefresh:
     """정책/필터 때문에 실행하지 않은 provider/dataset."""
 
+    provider_dataset_id: int
+    sync_scope: str
     provider: str
     dataset_key: str
     reason: str
     feature_count: int
+    operation_key: str
+
+    def __post_init__(self) -> None:
+        _validate_exact_refresh_membership(
+            provider_dataset_id=self.provider_dataset_id,
+            sync_scope=self.sync_scope,
+            operation_key=self.operation_key,
+        )
 
     def as_matched_scope(self) -> dict[str, Any]:
         return {
+            "provider_dataset_id": self.provider_dataset_id,
+            "sync_scope": self.sync_scope,
+            "operation_key": self.operation_key,
             "provider": self.provider,
             "dataset_key": self.dataset_key,
             "reason": self.reason,
@@ -260,28 +317,6 @@ def _unresolved_execution_plan(
     )
 
 
-def _provider_dataset_scopes(
-    request: FeatureUpdateRequest,
-    resolution: ScopeResolution,
-) -> tuple[ProviderDatasetScope, ...]:
-    scopes = list(resolution.provider_datasets)
-    if request.scope_type == "provider_dataset":
-        provider = str(request.scope["provider"])
-        dataset_key = str(request.scope["dataset_key"])
-        if not any(
-            item.provider == provider and item.dataset_key == dataset_key
-            for item in scopes
-        ):
-            scopes.append(
-                ProviderDatasetScope(
-                    provider=provider,
-                    dataset_key=dataset_key,
-                    feature_count=resolution.feature_count,
-                )
-            )
-    return tuple(scopes)
-
-
 def _rate_limit(policy: ProviderRefreshPolicy | None) -> dict[str, Any]:
     if policy is None:
         return {}
@@ -330,12 +365,6 @@ def _skip_reason(
     policy: ProviderRefreshPolicy | None,
     resolution: ScopeResolution,
 ) -> str | None:
-    providers = set(request.providers)
-    dataset_keys = set(request.dataset_keys)
-    if providers and provider not in providers:
-        return "provider_filter"
-    if dataset_keys and dataset_key not in dataset_keys:
-        return "dataset_filter"
     override = _override_targeted_policy(
         provider=provider, dataset_key=dataset_key, resolution=resolution
     )
@@ -362,13 +391,12 @@ def _skip_reason(
 def _target_matches_for_provider(
     resolution: ScopeResolution,
     *,
-    provider: str,
-    dataset_key: str,
+    provider_dataset_id: int,
 ) -> tuple[CacheTargetFeatureMatch, ...]:
     return tuple(
         match
         for match in resolution.cache_target_matches
-        if match.provider == provider and match.dataset_key == dataset_key
+        if match.provider_dataset_id == provider_dataset_id
     )
 
 
@@ -405,6 +433,22 @@ def _matched_scope(
     return payload
 
 
+def _require_runner_result_membership(
+    result: ProviderDatasetRefreshResult,
+    scope: ProviderDatasetRefreshScope,
+) -> ProviderDatasetRefreshResult:
+    """runner가 snapshot 밖의 dataset 결과를 request 이력에 섞지 못하게 막는다."""
+    if (
+        result.provider_dataset_id != scope.provider_dataset_id
+        or result.sync_scope != scope.sync_scope
+        or result.operation_key != scope.operation_key
+    ):
+        raise RuntimeError(
+            "provider refresh runner result does not match the request dataset membership"
+        )
+    return result
+
+
 async def build_feature_update_execution_plan(
     session: AsyncSession,
     request: FeatureUpdateRequest,
@@ -413,7 +457,9 @@ async def build_feature_update_execution_plan(
 ) -> FeatureUpdateExecutionPlan:
     """request를 실행 가능한 provider/dataset refresh 단위로 분해한다."""
     resolution = await count_features_matching_scope(
-        session, request.scope, sigungu_resolver=sigungu_resolver
+        session,
+        execution_scope_for_request(request),
+        sigungu_resolver=sigungu_resolver,
     )
     refresh_scopes: list[ProviderDatasetRefreshScope] = []
     skipped_scopes: list[SkippedProviderDatasetRefresh] = []
@@ -421,42 +467,56 @@ async def build_feature_update_execution_plan(
         request.update_policy.get("prevent_provider_reactivation", True)
     )
 
-    for item in _provider_dataset_scopes(request, resolution):
+    feature_counts = {
+        (item.provider_dataset_id, item.sync_scope, item.operation_key): item.feature_count
+        for item in resolution.provider_datasets
+    }
+    for member in request.dataset_memberships:
+        feature_count = feature_counts.get(
+            (member.provider_dataset_id, member.sync_scope, member.operation_key),
+            resolution.feature_count if request.scope_type == "provider_dataset" else 0,
+        )
         policy = await get_provider_refresh_policy(
-            session, provider=item.provider, dataset_key=item.dataset_key
+            session,
+            provider_dataset_id=member.provider_dataset_id,
         )
         reason = _skip_reason(
             request=request,
-            provider=item.provider,
-            dataset_key=item.dataset_key,
+            provider=member.provider,
+            dataset_key=member.dataset_key,
             policy=policy,
             resolution=resolution,
         )
         if reason is not None:
             skipped_scopes.append(
                 SkippedProviderDatasetRefresh(
-                    provider=item.provider,
-                    dataset_key=item.dataset_key,
+                    provider_dataset_id=member.provider_dataset_id,
+                    sync_scope=member.sync_scope,
+                    operation_key=member.operation_key,
+                    provider=member.provider,
+                    dataset_key=member.dataset_key,
                     reason=reason,
-                    feature_count=item.feature_count,
+                    feature_count=feature_count,
                 )
             )
             continue
         target_matches = _target_matches_for_provider(
-            resolution, provider=item.provider, dataset_key=item.dataset_key
+            resolution, provider_dataset_id=member.provider_dataset_id
         )
         refresh_scopes.append(
             ProviderDatasetRefreshScope(
                 request_id=request.request_id,
-                provider=item.provider,
-                dataset_key=item.dataset_key,
+                provider_dataset_id=member.provider_dataset_id,
+                sync_scope=member.sync_scope,
+                operation_key=member.operation_key,
+                provider=member.provider,
+                dataset_key=member.dataset_key,
                 scope_type=request.scope_type,
                 request_scope=request.scope,
                 update_policy=request.update_policy,
                 feature_ids=resolution.feature_ids,
-                feature_count=item.feature_count,
+                feature_count=feature_count,
                 prevent_provider_reactivation=prevent_provider_reactivation,
-                sync_scope=request.effective_sync_scope,
                 provider_policy=policy,
                 rate_limit=_rate_limit(policy),
                 target_ids=_target_ids_for_provider(target_matches),
@@ -493,8 +553,7 @@ async def _sync_cache_target_links(
             PoiCacheTargetFeatureLinkCandidate(
                 target_id=match.target_id,
                 feature_id=match.feature_id,
-                provider=match.provider,
-                dataset_key=match.dataset_key,
+                provider_dataset_id=match.provider_dataset_id,
                 distance_m=match.distance_m,
                 relation=match.relation,
             )
@@ -521,7 +580,9 @@ async def _final_resolution(
     sigungu_resolver: SigunguByRadiusResolver | None,
 ) -> ScopeResolution:
     return await count_features_matching_scope(
-        session, request.scope, sigungu_resolver=sigungu_resolver
+        session,
+        execution_scope_for_request(request),
+        sigungu_resolver=sigungu_resolver,
     )
 
 
@@ -693,6 +754,28 @@ async def _reload_stopped_result(
     )
 
 
+async def _terminal_event_member_ids(
+    session: AsyncSession,
+    job_id: str,
+) -> tuple[str | None, ...]:
+    """terminal event가 붙어야 할 canonical import job membership id를 고른다.
+
+    ``ops.import_job_events``는 root job에만 member 없는 event를 허용하고 그
+    밖의 job에는 해당 job에 속한 exact ``import_job_dataset_id``를 요구한다
+    (``jobs_repo._INSERT_EVENT_SQL``). request job은 memberships가 1건이면
+    ``single``, 여러 건이면 ``multiple``이므로 member id를 반드시 넘겨야 한다.
+    job이 사라졌거나 member가 비어 있으면 ``(None,)``을 돌려 호출자의 insert가
+    실패하게 두고, 조용히 event를 건너뛰지 않는다.
+    """
+    job = await get_import_job(session, job_id)
+    if job is None or job.dataset_membership_mode == "root":
+        return (None,)
+    member_ids = tuple(
+        membership.import_job_dataset_id for membership in job.dataset_memberships
+    )
+    return member_ids or (None,)
+
+
 async def _finish_failed_execution(
     session: AsyncSession,
     request: FeatureUpdateRequest,
@@ -735,18 +818,23 @@ async def _finish_failed_execution(
                 error_code=event_code,
             )
             if event_code is not None:
-                event = await record_import_job_event(
+                for import_job_dataset_id in await _terminal_event_member_ids(
                     session,
                     failed.job_id,
-                    level="error",
-                    code=event_code,
-                    message=error_message,
-                    payload={"status": "failed", "failure_code": event_code},
-                )
-                if event is None:
-                    raise RuntimeError(
-                        "canonical feature update terminal event insert failed"
+                ):
+                    event = await record_import_job_event(
+                        session,
+                        failed.job_id,
+                        level="error",
+                        code=event_code,
+                        message=error_message,
+                        payload={"status": "failed", "failure_code": event_code},
+                        import_job_dataset_id=import_job_dataset_id,
                     )
+                    if event is None:
+                        raise RuntimeError(
+                            "canonical feature update terminal event insert failed"
+                        )
     except _FeatureUpdateExecutionStopped:
         return await _reload_stopped_result(
             session,
@@ -769,11 +857,13 @@ async def _record_provider_refresh_failure(
 ) -> None:
     """실패한 bound refresh transaction과 분리해 sync failure를 먼저 commit한다."""
     async with session.begin():
-        await record_provider_sync_failure(
+        await record_sync_failure_for_operation_membership(
             session,
-            provider=failure.provider,
-            dataset_key=failure.dataset_key,
-            sync_scope=failure.sync_scope,
+            membership=ProviderDatasetOperationMembership(
+                provider_dataset_id=failure.provider_dataset_id,
+                sync_scope=failure.sync_scope,
+                operation_key=failure.operation_key,
+            ),
         )
 
 
@@ -794,8 +884,7 @@ async def execute_feature_update_request(
     scope_lock_key = feature_update_scope_advisory_key(
         scope_type=request.scope_type,
         scope=request.scope,
-        providers=request.providers,
-        dataset_keys=request.dataset_keys,
+        dataset_memberships=request.dataset_memberships,
     )
     request_lock_key = f"{_REQUEST_EXECUTION_LOCK_PREFIX}:{request.request_id}"
     request_lock_id = advisory_lock_key(request_lock_key)
@@ -1003,10 +1092,10 @@ async def _execute_feature_update_request_locked(
                     owner_dagster_run_id=dagster_run_id,
                     progress=10 + int((index - 1) * 80 / total),
                     current_stage=(
-                        f"refreshing:{scope.provider}:{scope.dataset_key}"
+                        f"refreshing:{scope.provider_dataset_id}:{scope.sync_scope}"
                     ),
                 )
-                result = await runner(session, scope)
+                result = _require_runner_result_membership(await runner(session, scope), scope)
                 checkpoint_results = (*results, result)
                 checkpoint = _matched_scope(
                     plan.resolution,

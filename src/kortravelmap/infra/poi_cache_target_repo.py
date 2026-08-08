@@ -162,8 +162,9 @@ _TARGET_COLUMNS: Final[str] = (
 )
 
 _LINK_COLUMNS: Final[str] = (
-    "target_id, feature_id, provider, dataset_key, distance_m, relation, active, "
-    "first_seen_at, last_seen_at, last_refreshed_at"
+    "link.target_id, link.feature_id, link.provider_dataset_id, link.distance_m, "
+    "link.relation, link.active, "
+    "link.first_seen_at, link.last_seen_at, link.last_refreshed_at"
 )
 
 
@@ -231,8 +232,7 @@ class PoiCacheTargetFeatureLink:
 
     target_id: str
     feature_id: str
-    provider: str | None
-    dataset_key: str | None
+    provider_dataset_id: int | None
     distance_m: float | None
     relation: str
     active: bool
@@ -247,8 +247,7 @@ class PoiCacheTargetFeatureLinkCandidate:
 
     target_id: str
     feature_id: str
-    provider: str | None = None
-    dataset_key: str | None = None
+    provider_dataset_id: int | None = None
     distance_m: float | None = None
     relation: str = "within_radius"
 
@@ -338,8 +337,11 @@ def _row_to_link(row: Any) -> PoiCacheTargetFeatureLink:
     return PoiCacheTargetFeatureLink(
         target_id=str(row["target_id"]),
         feature_id=str(row["feature_id"]),
-        provider=row["provider"],
-        dataset_key=row["dataset_key"],
+        provider_dataset_id=(
+            int(row["provider_dataset_id"])
+            if row["provider_dataset_id"] is not None
+            else None
+        ),
         distance_m=float(distance) if distance is not None else None,
         relation=str(row["relation"]),
         active=bool(row["active"]),
@@ -547,48 +549,55 @@ WITH active_target AS (
     WHERE target_id = CAST(:target_id AS uuid)
       AND deleted_at IS NULL
     FOR KEY SHARE
-)
+), ins AS (
 INSERT INTO ops.poi_cache_target_feature_links (
-    target_id, feature_id, provider, dataset_key, distance_m, relation,
+    target_id, feature_id, provider_dataset_id, distance_m, relation,
     active, last_seen_at
 ) SELECT
-    active_target.target_id, :feature_id, :provider, :dataset_key, :distance_m,
+    active_target.target_id, :feature_id, :provider_dataset_id, :distance_m,
     :relation, true, now()
 FROM active_target
 ON CONFLICT (target_id, feature_id) DO UPDATE SET
-    provider = EXCLUDED.provider,
-    dataset_key = EXCLUDED.dataset_key,
+    provider_dataset_id = EXCLUDED.provider_dataset_id,
     distance_m = EXCLUDED.distance_m,
     relation = EXCLUDED.relation,
     active = true,
     last_seen_at = now()
-RETURNING {_LINK_COLUMNS}
+RETURNING target_id, feature_id, provider_dataset_id, distance_m, relation, active,
+          first_seen_at, last_seen_at, last_refreshed_at
+)
+SELECT {_LINK_COLUMNS}
+FROM ins AS link
 """
 
 _UPSERT_LOCKED_LINK_SQL: Final[str] = f"""
+WITH ins AS (
 INSERT INTO ops.poi_cache_target_feature_links (
-    target_id, feature_id, provider, dataset_key, distance_m, relation,
+    target_id, feature_id, provider_dataset_id, distance_m, relation,
     active, last_seen_at
 ) VALUES (
-    CAST(:target_id AS uuid), :feature_id, :provider, :dataset_key, :distance_m,
+    CAST(:target_id AS uuid), :feature_id, :provider_dataset_id, :distance_m,
     :relation, true, now()
 )
 ON CONFLICT (target_id, feature_id) DO UPDATE SET
-    provider = EXCLUDED.provider,
-    dataset_key = EXCLUDED.dataset_key,
+    provider_dataset_id = EXCLUDED.provider_dataset_id,
     distance_m = EXCLUDED.distance_m,
     relation = {_LINK_RELATION_PRESERVE_ACTIVE_MANUAL_SQL},
     active = true,
     last_seen_at = now()
-RETURNING {_LINK_COLUMNS}
+RETURNING target_id, feature_id, provider_dataset_id, distance_m, relation, active,
+          first_seen_at, last_seen_at, last_refreshed_at
+)
+SELECT {_LINK_COLUMNS}
+FROM ins AS link
 """
 
 _LIST_LINKS_SQL: Final[str] = f"""
 SELECT {_LINK_COLUMNS}
-FROM ops.poi_cache_target_feature_links
-WHERE target_id = :target_id
-  AND (CAST(:active_only AS boolean) IS false OR active)
-ORDER BY active DESC, distance_m NULLS LAST, feature_id
+FROM ops.poi_cache_target_feature_links AS link
+WHERE link.target_id = :target_id
+  AND (CAST(:active_only AS boolean) IS false OR link.active)
+ORDER BY link.active DESC, link.distance_m NULLS LAST, link.feature_id
 LIMIT :limit
 """
 
@@ -908,8 +917,7 @@ async def upsert_poi_cache_target_feature_link(
     *,
     target_id: str,
     feature_id: str,
-    provider: str | None = None,
-    dataset_key: str | None = None,
+    provider_dataset_id: int | None = None,
     distance_m: float | None = None,
     relation: str = "within_radius",
 ) -> PoiCacheTargetFeatureLink | None:
@@ -923,8 +931,7 @@ async def upsert_poi_cache_target_feature_link(
                 {
                     "target_id": target_id,
                     "feature_id": feature_id,
-                    "provider": provider,
-                    "dataset_key": dataset_key,
+                    "provider_dataset_id": provider_dataset_id,
                     "distance_m": distance_m,
                     "relation": relation,
                 },
@@ -1002,8 +1009,7 @@ async def sync_poi_cache_target_feature_links(
                     {
                         "target_id": target_id,
                         "feature_id": candidate.feature_id,
-                        "provider": candidate.provider,
-                        "dataset_key": candidate.dataset_key,
+                        "provider_dataset_id": candidate.provider_dataset_id,
                         "distance_m": candidate.distance_m,
                         "relation": candidate.relation,
                     },

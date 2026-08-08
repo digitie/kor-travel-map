@@ -21,6 +21,7 @@ from sqlalchemy import select, text
 from kortravelmap.infra.feature_repo import _make_source_entity_key
 from kortravelmap.infra.models import (
     FeatureRow,
+    SourceEntityHeadRow,
     SourceEntityRow,
     SourceLinkRow,
     SourceRecordRow,
@@ -34,6 +35,34 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.integration
 
 _KST = timezone(timedelta(hours=9))
+
+_CATALOG_ID_SQL = """
+INSERT INTO provider_sync.provider_datasets (
+    provider, dataset_key, display_name, source_kind, is_active, capabilities
+)
+SELECT :provider, :dataset_key, :provider, 'system', true,
+       jsonb_build_object('schema_version', 1,
+                          'produces', '[]'::jsonb,
+                          'extensions', '{}'::jsonb)
+ON CONFLICT (provider, dataset_key) DO UPDATE
+    SET display_name = EXCLUDED.display_name
+RETURNING provider_dataset_id
+"""
+
+
+async def _provider_dataset_id(
+    session: AsyncSession, *, provider: str, dataset_key: str
+) -> int:
+    """T-VN-33: source lineage identity는 catalog FK 하나뿐이다."""
+
+    return int(
+        (
+            await session.execute(
+                text(_CATALOG_ID_SQL),
+                {"provider": provider, "dataset_key": dataset_key},
+            )
+        ).scalar_one()
+    )
 
 
 @dataclass(frozen=True)
@@ -116,25 +145,23 @@ async def test_feature_bundle_persists_and_roundtrips(
         marker_icon=feature.marker_icon,
         marker_color=feature.marker_color,
     )
-    source_entity_row = SourceEntityRow(
-        source_entity_key=source_entity_key,
+    provider_dataset_id = await _provider_dataset_id(
+        migrated_session,
         provider=source_record.provider,
         dataset_key=source_record.dataset_key,
+    )
+    source_entity_row = SourceEntityRow(
+        source_entity_key=source_entity_key,
+        provider_dataset_id=provider_dataset_id,
         source_entity_type=source_record.source_entity_type,
         source_entity_id=source_record.source_entity_id,
-        current_source_record_key=None,
         first_seen_at=source_record.fetched_at,
         last_seen_at=source_record.fetched_at,
     )
     source_record_row = SourceRecordRow(
         source_record_key=source_record.source_record_key,
         source_entity_key=source_entity_key,
-        provider=source_record.provider,
-        dataset_key=source_record.dataset_key,
-        source_entity_type=source_record.source_entity_type,
-        source_entity_id=source_record.source_entity_id,
         raw_payload_hash=source_record.raw_payload_hash,
-        raw_name=source_record.raw_name,
         raw_data=source_record.raw_data,
         fetched_at=source_record.fetched_at,
     )
@@ -149,7 +176,14 @@ async def test_feature_bundle_persists_and_roundtrips(
     )
     migrated_session.add(source_record_row)
     await migrated_session.flush()  # features/source_records INSERT → coord_5179 계산
-    source_entity_row.current_source_record_key = source_record.source_record_key
+    # T-VN-33: 현재 record 포인터는 entity가 아니라 head가 소유한다.
+    migrated_session.add(
+        SourceEntityHeadRow(
+            source_entity_key=source_entity_key,
+            current_source_record_key=source_record.source_record_key,
+            observed_at=source_record.fetched_at,
+        )
+    )
     await migrated_session.flush()
 
     source_link_row = SourceLinkRow(
@@ -158,7 +192,6 @@ async def test_feature_bundle_persists_and_roundtrips(
         source_role=source_link.source_role.value,
         match_method=source_link.match_method,
         confidence=source_link.confidence,
-        is_primary_source=source_link.is_primary_source,
     )
     migrated_session.add(source_link_row)
     await migrated_session.flush()
@@ -211,5 +244,9 @@ async def test_feature_bundle_persists_and_roundtrips(
     assert link.source_entity_key == source_entity_key
     entity = await migrated_session.get(SourceEntityRow, source_entity_key)
     assert entity is not None
-    assert entity.current_source_record_key == source_record.source_record_key
-    assert link.is_primary_source is True
+    assert entity.provider_dataset_id == provider_dataset_id
+    head = await migrated_session.get(SourceEntityHeadRow, source_entity_key)
+    assert head is not None
+    assert head.current_source_record_key == source_record.source_record_key
+    # primary 판정은 ``source_role='primary'`` 하나뿐이다(is_primary_source 삭제).
+    assert link.source_role == "primary"

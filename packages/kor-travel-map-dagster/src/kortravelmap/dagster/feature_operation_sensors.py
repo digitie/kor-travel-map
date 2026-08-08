@@ -10,16 +10,12 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, Final, Protocol, TypeVar, cast
 
 from kortravelmap.core.feature_operation import (
+    TRIGGER_KIND_VALUES,
     DagsterFeatureOperationCursor,
     DagsterFeatureOperationPage,
     FeatureOperationInvariantConflict,
-)
-from kortravelmap.providers.feature_operation_registry import (
-    FEATURE_OPERATION_REGISTRY_BY_JOB,
-    FeatureOperationIdentity,
-    FeatureOperationRegistryError,
-    resolve_feature_operation_trigger,
-    validate_feature_operation_identity,
+    ProviderDatasetOperationMembership,
+    TriggerKind,
 )
 
 from dagster import (
@@ -76,6 +72,9 @@ _EVENT_STATUSES: Final[tuple[DagsterRunStatus, ...]] = (
     DagsterRunStatus.CANCELED,
 )
 _T = TypeVar("_T")
+_OPERATION_KEY_TAG: Final[str] = "kor_travel_map.operation_key"
+_TRIGGER_KIND_TAG: Final[str] = "kor_travel_map.trigger_kind"
+_ADMIN_MANUAL_TRIGGER_TAG: Final[str] = "kor_travel_map.admin_manual_trigger"
 
 
 class _DagsterRun(Protocol):
@@ -190,9 +189,7 @@ class FeatureOperationReconcileCursor:
             }:
                 raise ValueError("dagster reconcile watermark shape is invalid")
             dagster_cursor = DagsterRunWatermark(
-                storage_id=_positive_int(
-                    dagster_raw["storage_id"], name="dagster storage_id"
-                ),
+                storage_id=_positive_int(dagster_raw["storage_id"], name="dagster storage_id"),
                 run_id=_non_empty_string(dagster_raw["run_id"], name="dagster run_id"),
             )
         if database_raw is not None:
@@ -262,9 +259,7 @@ def feature_operation_reconciliation_sensor(
         if kor_travel_map_client is not None
         else context.resources.kor_travel_map_client,
     )
-    return _run_async(
-        _evaluate_reconciliation_sensor(cast(_ReconcileContext, context), client)
-    )
+    return _run_async(_evaluate_reconciliation_sensor(cast(_ReconcileContext, context), client))
 
 
 FEATURE_OPERATION_TRACKING_SENSORS: Final = [
@@ -305,7 +300,7 @@ async def _evaluate_status_event(
         return SkipReason(message)
     try:
         outcome = await _apply_run_record(record, client)
-    except (FeatureOperationObservationError, FeatureOperationRegistryError) as exc:
+    except FeatureOperationObservationError as exc:
         context.log.error("provider feature operation panel-only conflict: %s", exc)
         return SkipReason(str(exc))
     except Exception as exc:
@@ -350,7 +345,7 @@ async def _reconcile_tick(
     for record in dagster_records:
         try:
             outcome = await _apply_run_record(record, client)
-        except (FeatureOperationObservationError, FeatureOperationRegistryError) as exc:
+        except FeatureOperationObservationError as exc:
             context.log.error("provider feature operation panel-only conflict: %s", exc)
             dagster_panel_only += 1
             continue
@@ -396,10 +391,7 @@ async def _evaluate_reconciliation_sensor(
     try:
         return await _reconcile_tick(context, client)
     except Exception as exc:
-        message = (
-            "provider feature operation reconcile 실패: "
-            f"error_type={type(exc).__name__}"
-        )
+        message = f"provider feature operation reconcile 실패: error_type={type(exc).__name__}"
         context.log.error(message)
         return SkipReason(message)
 
@@ -416,8 +408,7 @@ async def _reconcile_database_page(
             record = context.instance.get_run_record_by_id(operation.dagster_run_id)
         except Exception as exc:
             context.log.error(
-                "active feature operation의 Dagster 관측 실패: "
-                "run_id=%s error_type=%s",
+                "active feature operation의 Dagster 관측 실패: run_id=%s error_type=%s",
                 operation.dagster_run_id,
                 type(exc).__name__,
             )
@@ -432,10 +423,9 @@ async def _reconcile_database_page(
             continue
         try:
             outcome = await _apply_run_record(record, client)
-        except (FeatureOperationObservationError, FeatureOperationRegistryError) as exc:
+        except FeatureOperationObservationError as exc:
             context.log.error(
-                "active feature operation의 Dagster identity 관측 실패: "
-                "run_id=%s error=%s",
+                "active feature operation의 Dagster identity 관측 실패: run_id=%s error=%s",
                 operation.dagster_run_id,
                 exc,
             )
@@ -451,17 +441,22 @@ async def _apply_run_record(
     client: AsyncKorTravelMapClient,
 ) -> str:
     run = record.dagster_run
-    identity = _validated_identity(run)
-    if identity is None:
+    operation_key = _operation_key(run.tags)
+    if operation_key is None:
         return "panel_only"
-    trigger_kind = resolve_feature_operation_trigger(identity, run.tags)
+    trigger_kind = _trigger_kind(run.tags)
     if trigger_kind is None:
         raise FeatureOperationObservationError(
-            f"등록 run trigger를 해석할 수 없음: run_id={run.run_id}"
+            f"operation run trigger를 해석할 수 없음: run_id={run.run_id}"
         )
-    created_at = _aware_datetime(
-        record.create_timestamp, name="Dagster create timestamp"
+    memberships = await client.resolve_feature_operation_memberships(
+        operation_key=operation_key,
     )
+    if not memberships:
+        raise FeatureOperationObservationError(
+            f"enabled canonical operation member가 없음: run_id={run.run_id}"
+        )
+    created_at = _aware_datetime(record.create_timestamp, name="Dagster create timestamp")
     started_at = _timestamp_datetime(record.start_time, name="Dagster start timestamp")
     finished_at = _timestamp_datetime(record.end_time, name="Dagster finish timestamp")
     status = run.status
@@ -477,8 +472,8 @@ async def _apply_run_record(
         mutation = await client.ensure_dagster_feature_operation(
             dagster_run_id=run.run_id,
             trigger_kind=trigger_kind,
-            selected_pairs=identity.pairs,
-            registry_version=identity.registry_version,
+            selected_memberships=memberships,
+            operation_key=operation_key,
             engine_created_at=created_at,
             engine_started_at=started_at,
             observed_status=status.value,
@@ -492,7 +487,8 @@ async def _apply_run_record(
     return await _apply_terminal_record(
         record,
         client,
-        identity=identity,
+        operation_key=operation_key,
+        memberships=memberships,
         trigger_kind=trigger_kind,
         created_at=created_at,
         started_at=started_at,
@@ -504,8 +500,9 @@ async def _apply_terminal_record(
     record: _RunRecord,
     client: AsyncKorTravelMapClient,
     *,
-    identity: FeatureOperationIdentity,
-    trigger_kind: str,
+    operation_key: str,
+    memberships: Sequence[ProviderDatasetOperationMembership],
+    trigger_kind: TriggerKind,
     created_at: datetime,
     started_at: datetime | None,
     finished_at: datetime,
@@ -516,8 +513,8 @@ async def _apply_terminal_record(
         await client.ensure_dagster_feature_operation(
             dagster_run_id=run.run_id,
             trigger_kind=trigger_kind,
-            selected_pairs=identity.pairs,
-            registry_version=identity.registry_version,
+            selected_memberships=memberships,
+            operation_key=operation_key,
             engine_created_at=created_at,
             engine_started_at=started_at,
             observed_status=(
@@ -534,8 +531,8 @@ async def _apply_terminal_record(
             dagster_run_id=run.run_id,
             trigger_kind=trigger_kind,
             terminal_status=run.status.value,
-            selected_pairs=identity.pairs,
-            registry_version=identity.registry_version,
+            selected_memberships=memberships,
+            operation_key=operation_key,
             engine_created_at=created_at,
             engine_started_at=started_at,
             engine_finished_at=finished_at,
@@ -548,27 +545,20 @@ async def _apply_terminal_record(
     return mutation.outcome
 
 
-def _validated_identity(run: _DagsterRun) -> FeatureOperationIdentity | None:
-    entry = FEATURE_OPERATION_REGISTRY_BY_JOB.get(run.job_name)
-    if entry is None:
+def _operation_key(tags: Mapping[str, str]) -> str | None:
+    value = tags.get(_OPERATION_KEY_TAG)
+    if not value or value != value.strip():
         return None
-    selection = run.asset_selection
-    selected_asset_keys = (
-        entry.asset_keys
-        if selection is None
-        else tuple(
-            sorted(
-                cast(Any, asset_key).to_user_string()
-                for asset_key in selection
-            )
-        )
-    )
-    return validate_feature_operation_identity(
-        job_name=run.job_name,
-        selected_asset_keys=selected_asset_keys,
-        run_config=run.run_config,
-        tags=run.tags,
-    )
+    return value
+
+
+def _trigger_kind(tags: Mapping[str, str]) -> TriggerKind | None:
+    raw = tags.get(_TRIGGER_KIND_TAG)
+    if raw in TRIGGER_KIND_VALUES:
+        return raw
+    if tags.get(_ADMIN_MANUAL_TRIGGER_TAG) == "admin-ui":
+        return "manual"
+    return "schedule" if _operation_key(tags) is not None else None
 
 
 def _dagster_run_page(
@@ -582,9 +572,7 @@ def _dagster_run_page(
     if watermark is not None:
         anchor = instance.get_run_record_by_id(watermark.run_id)
         if anchor is None:
-            raise FeatureOperationObservationError(
-                "Dagster insertion cursor anchor가 삭제됨"
-            )
+            raise FeatureOperationObservationError("Dagster insertion cursor anchor가 삭제됨")
         if anchor.storage_id != watermark.storage_id:
             raise FeatureOperationObservationError(
                 "Dagster insertion cursor anchor storage ID가 변경됨"
@@ -592,8 +580,7 @@ def _dagster_run_page(
     cutoff = (
         _aware_datetime(settled_before, name="Dagster settled cutoff")
         if settled_before is not None
-        else datetime.now(tz=UTC)
-        - timedelta(seconds=FEATURE_OPERATION_SETTLE_LAG_SECONDS)
+        else datetime.now(tz=UTC) - timedelta(seconds=FEATURE_OPERATION_SETTLE_LAG_SECONDS)
     )
     insertion_page = tuple(
         instance.get_run_records(
@@ -610,14 +597,10 @@ def _dagster_run_page(
     if watermark is not None and any(
         storage_id <= watermark.storage_id for storage_id in page_storage_ids
     ):
-        raise FeatureOperationObservationError(
-            "Dagster insertion cursor가 이전 watermark를 역행함"
-        )
+        raise FeatureOperationObservationError("Dagster insertion cursor가 이전 watermark를 역행함")
     records: list[_RunRecord] = []
     for record in insertion_page:
-        created_at = _aware_datetime(
-            record.create_timestamp, name="Dagster create timestamp"
-        )
+        created_at = _aware_datetime(record.create_timestamp, name="Dagster create timestamp")
         if created_at >= cutoff:
             break
         records.append(record)

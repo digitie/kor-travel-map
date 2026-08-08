@@ -42,6 +42,136 @@
       "sqlstate": "23514",
       "constraint": "ck_weather_value_bitemporal_order",
       "basis": "ADR-072"
+    },
+    "provider_dataset_capability_invalid": {
+      "sqlstate": "23514",
+      "constraint": "ck_provider_datasets_capabilities",
+      "basis": "ADR-087"
+    },
+    "provider_dataset_capability_version_type_invalid": {
+      "sqlstate": "23514",
+      "constraint": "ck_provider_datasets_capabilities",
+      "basis": "ADR-087"
+    },
+    "provider_dataset_operation_scope_invalid": {
+      "sqlstate": "23514",
+      "constraint": "ck_provider_dataset_operation_scopes_syntax",
+      "basis": "ADR-087"
+    },
+    "inactive_dataset_source_entity_write": {
+      "sqlstate": "23514",
+      "constraint": "ck_provider_dataset_active_write",
+      "basis": "ADR-087"
+    },
+    "inactive_dataset_existing_operation_update": {
+      "sqlstate": "23514",
+      "constraint": "ck_provider_dataset_active_write",
+      "basis": "ADR-087"
+    },
+    "inactive_dataset_source_record_write": {
+      "sqlstate": "23514",
+      "constraint": "ck_provider_dataset_active_write",
+      "basis": "ADR-087"
+    },
+    "inactive_dataset_source_head_update": {
+      "sqlstate": "23514",
+      "constraint": "ck_provider_dataset_active_write",
+      "basis": "ADR-087"
+    },
+    "inactive_dataset_source_link_write": {
+      "sqlstate": "23514",
+      "constraint": "ck_provider_dataset_active_write",
+      "basis": "ADR-087"
+    },
+    "inactive_dataset_sync_state_update": {
+      "sqlstate": "23514",
+      "constraint": "ck_provider_dataset_scope_active_write",
+      "basis": "ADR-087"
+    },
+    "dataset_scope_unregistered_write": {
+      "sqlstate": "23514",
+      "constraint": "ck_provider_dataset_scope_active_write",
+      "basis": "ADR-087"
+    },
+    "inactive_dataset_notice_lineage_write": {
+      "sqlstate": "23514",
+      "constraint": "ck_provider_dataset_active_write",
+      "basis": "ADR-087"
+    },
+    "inactive_dataset_curated_rule_write": {
+      "sqlstate": "23514",
+      "constraint": "ck_provider_dataset_active_write",
+      "basis": "ADR-087"
+    },
+    "inactive_dataset_import_event_write": {
+      "sqlstate": "23514",
+      "constraint": "ck_provider_dataset_active_write",
+      "basis": "ADR-087"
+    },
+    "inactive_dataset_import_job_parent_update": {
+      "sqlstate": "23514",
+      "constraint": "ck_provider_dataset_active_write",
+      "basis": "ADR-087"
+    },
+    "inactive_dataset_feature_update_request_parent_update": {
+      "sqlstate": "23514",
+      "constraint": "ck_provider_dataset_active_write",
+      "basis": "ADR-087"
+    },
+    "inactive_dataset_integrity_run_write": {
+      "sqlstate": "23514",
+      "constraint": "ck_provider_dataset_active_write",
+      "basis": "ADR-087"
+    },
+    "inactive_dataset_source_record_derived_violation": {
+      "sqlstate": "23514",
+      "constraint": "ck_provider_dataset_active_write",
+      "basis": "ADR-087"
+    },
+    "inactive_dataset_managed_file_owner_clear": {
+      "sqlstate": "23514",
+      "constraint": "ck_provider_dataset_ownership_immutable",
+      "basis": "ADR-087"
+    },
+    "import_job_single_member_missing": {
+      "sqlstate": "23514",
+      "constraint": "ck_import_job_membership_complete",
+      "basis": "ADR-087"
+    },
+    "feature_update_request_single_member_missing": {
+      "sqlstate": "23514",
+      "constraint": "ck_feature_update_request_membership_complete",
+      "basis": "ADR-087"
+    },
+    "inactive_dataset_source_record_delete": {
+      "sqlstate": "23514",
+      "constraint": "ck_provider_dataset_active_write",
+      "basis": "ADR-087"
+    },
+    "import_event_cross_job_member": {
+      "sqlstate": "23503",
+      "constraint": "fk_import_job_events_job_member",
+      "basis": "ADR-087"
+    },
+    "integrity_violation_cross_dataset": {
+      "sqlstate": "23514",
+      "constraint": "ck_data_integrity_violations_dataset_source_record",
+      "basis": "ADR-087"
+    },
+    "source_record_immutable_update": {
+      "sqlstate": "23514",
+      "constraint": "ck_source_records_immutable",
+      "basis": "ADR-069"
+    },
+    "source_head_cross_entity": {
+      "sqlstate": "23503",
+      "constraint": "fk_source_entity_heads_record",
+      "basis": "ADR-069"
+    },
+    "source_head_missing": {
+      "sqlstate": "23514",
+      "constraint": "ck_source_entity_heads_complete",
+      "basis": "ADR-087"
     }
   }
 }

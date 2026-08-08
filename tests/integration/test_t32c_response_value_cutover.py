@@ -70,8 +70,8 @@ pytestmark = pytest.mark.integration
 _KST = timezone(timedelta(hours=9))
 _FETCHED = datetime(2026, 8, 5, 12, 0, tzinfo=_KST)
 
-_PROVIDER = "python-standard-data-api"
-_DATASET = "cultural_festivals"
+_PROVIDER = "data.go.kr-standard"
+_DATASET = "datagokr_cultural_festivals"
 _ENTITY_TYPE = "festival"
 
 # 다른 테스트의 잔존 commit과 절대 겹치지 않을 외해 bbox (제주 남서 해상).
@@ -141,7 +141,6 @@ def _place_bundle(
         source_entity_type=_ENTITY_TYPE,
         source_entity_id=feature_id,
         raw_payload_hash=raw_payload_hash,
-        raw_name=name,
         raw_data=raw_data,
         fetched_at=_FETCHED,
         imported_at=_FETCHED,
@@ -153,7 +152,6 @@ def _place_bundle(
         source_role=SourceRole.PRIMARY,
         match_method="natural_key",
         confidence=100,
-        is_primary_source=True,
         created_at=_FETCHED,
     )
     return FeatureBundle(
@@ -618,10 +616,6 @@ async def test_create_update_request_resolves_scope_inside_service_transaction(
             # UUID·legacy 혼합 + 같은 feature 이중 표기 → 해석·dedup 결과 고정.
             feature_ids=[first.feature_uuid, first.feature_id, second.feature_id],
         ),
-        # feature_ids scope는 refreshable provider/dataset 필터를 요구한다
-        # (non-direct 검증) — catalog의 non-target 쌍을 지정.
-        providers=["python-khoa-api"],
-        dataset_keys=["khoa_beaches"],
         reason="T32C H1 회귀 검증",
     )
 

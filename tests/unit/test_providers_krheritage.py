@@ -318,7 +318,8 @@ async def test_region_sigungu_fallback_when_location_text_missing() -> None:
     item = _item(name_ko="유산", region="경상북도", sigungu="경주시")
     [bundle] = await heritage_items_to_bundles([item], fetched_at=_FETCHED)
     assert bundle.feature.address.legal == "경상북도 경주시"
-    assert bundle.source_record.raw_address == "경상북도 경주시"
+    assert bundle.source_record.raw_data["region"] == "경상북도"
+    assert bundle.source_record.raw_data["sigungu"] == "경주시"
 
 
 # -- event 변환 ---------------------------------------------------------------

@@ -3,7 +3,7 @@
 본 PR 테스트 범위:
 - ``festival_to_enrichment_links`` happy path (매칭된 item만 enrichment).
 - ``FestivalMatcher.match() -> None``인 item은 결과에서 제외.
-- ``SourceLink``는 enrichment role + is_primary_source=False + 1차 feature_id 매핑.
+- ``SourceLink``는 enrichment role + 1차 feature_id 매핑.
 - ``SourceRecord``는 새 Feature 없이 visitkorea raw 보존 (provider/dataset_key).
 - 결정성 — 같은 입력은 항상 같은 ``source_record_key``.
 - ``FestivalEnrichment`` consistency validator (role/key/primary).
@@ -149,7 +149,6 @@ def test_enrichment_source_link_shape() -> None:
     sl = link.source_link
     assert sl.feature_id == _FEATURE_ID_1
     assert sl.source_role is SourceRole.ENRICHMENT
-    assert sl.is_primary_source is False
     assert sl.match_method == "name_region_match"
     assert sl.confidence == 88
     # link가 record를 가리킴.
@@ -171,13 +170,10 @@ def test_enrichment_source_record_no_feature() -> None:
     assert sr.raw_data["first_image"] == "http://tong.visitkorea.or.kr/img1.jpg"
     assert sr.raw_data["overview"] == "여의도 일대 봄꽃 축제 상세 설명."
     assert sr.raw_data["content_id"] == "2747929"
-    assert str(sr.raw_longitude) == "126.9245"
-    assert str(sr.raw_latitude) == "37.526"
     assert sr.raw_data["map_x"] == 126.9245
     assert sr.raw_data["map_y"] == 37.526
     # datetime modified_time은 원시 TourAPI 표기(YYYYMMDDHHMMSS) 문자열로
-    # 정규화돼 source_version/raw_data 모두에 들어간다 (JSON 직렬화 안전).
-    assert sr.source_version == "20260301120000"
+    # JSON 직렬화 가능한 raw payload에만 보존한다.
     assert sr.raw_data["modified_time"] == "20260301120000"
 
 

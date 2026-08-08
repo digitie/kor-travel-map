@@ -11,8 +11,8 @@ visitkorea(2차)↔datagokr(1차) 축제 이름 유사도가 자동 확정 임�
 - **raw SQL ``text()``만** (ADR-004) — ``_SQL`` 상수로 모음.
 - **commit은 호출자 책임** — transaction 경계는 오케스트레이션(client/admin)이 잡는다.
 - **점수 0~100 변환** — 이름 유사도 0.0~1.0 → ``NUMERIC(5,2)`` 0~100.
-- **재스캔 안전(검토 보존)** — ``(target_feature_id, source_provider, source_dataset_key,
-  source_entity_id)`` 충돌 시 ``status='pending'`` 행만 점수/이름 갱신. 검토 완료 행 보존.
+- **재스캔 안전(검토 보존)** — ``(target_feature_id, source_entity_key)`` 충돌 시
+  ``status='pending'`` 행만 점수/이름/immutable 후보 record를 갱신. 검토 완료 행 보존.
 - **의존 방향(ADR-020)** — infra는 providers를 import하지 않는다. enqueue 입력은
   provider 타입(``FestivalReviewCandidate``)이 아니라 generic ``EnrichmentReviewInput``
   (``SourceRecord`` dto만 사용)이며, client가 매핑한다(``load_source_record_links`` 패턴).
@@ -30,7 +30,8 @@ from sqlalchemy import text
 from kortravelmap.dto import SourceLink, SourceRecord, SourceRole
 from kortravelmap.infra.feature_repo import (
     EnrichmentLoadResult,
-    load_source_record_links,
+    upsert_source_link,
+    upsert_source_record,
 )
 
 if TYPE_CHECKING:
@@ -62,30 +63,36 @@ _MANUAL_MATCH_METHOD: Final[str] = "manual_review"
 
 _UPSERT_SQL: Final[str] = """
 INSERT INTO ops.enrichment_review_queue (
-    target_feature_id, source_provider, source_dataset_key, source_entity_id,
-    source_name, target_name, name_score, source_record, status
+    target_feature_id, source_entity_key, source_record_key,
+    source_name, target_name, name_score, status
 ) VALUES (
-    :target_feature_id, :source_provider, :source_dataset_key, :source_entity_id,
-    :source_name, :target_name, :name_score, CAST(:source_record AS jsonb), 'pending'
+    :target_feature_id, :source_entity_key, :source_record_key,
+    :source_name, :target_name, :name_score, 'pending'
 )
-ON CONFLICT (target_feature_id, source_provider, source_dataset_key, source_entity_id)
+ON CONFLICT (target_feature_id, source_entity_key)
 DO UPDATE SET
     source_name = EXCLUDED.source_name,
     target_name = EXCLUDED.target_name,
     name_score = EXCLUDED.name_score,
-    source_record = EXCLUDED.source_record
+    source_record_key = EXCLUDED.source_record_key
 WHERE ops.enrichment_review_queue.status = 'pending'
 RETURNING (xmax = 0) AS inserted
 """
 
 _PENDING_SQL: Final[str] = """
 SELECT
-    review_id, target_feature_id, source_provider, source_dataset_key,
-    source_entity_id, source_name, target_name, name_score, status,
-    decision_reason, created_at
-FROM ops.enrichment_review_queue
-WHERE status = 'pending'
-ORDER BY name_score DESC, review_id
+    review.review_id, review.target_feature_id,
+    dataset.provider AS source_provider, dataset.dataset_key AS source_dataset_key,
+    entity.source_entity_id, review.source_record_key,
+    review.source_name, review.target_name, review.name_score, review.status,
+    review.decision_reason, review.created_at
+FROM ops.enrichment_review_queue AS review
+JOIN provider_sync.source_entities AS entity
+  ON entity.source_entity_key = review.source_entity_key
+JOIN provider_sync.provider_datasets AS dataset
+  ON dataset.provider_dataset_id = entity.provider_dataset_id
+WHERE review.status = 'pending'
+ORDER BY review.name_score DESC, review.review_id
 LIMIT :limit
 """
 
@@ -95,7 +102,7 @@ LIMIT :limit
 # 이렇게 "상태 점유 → side-effect" 순서를 보장해 accepted link가 새는 것을 막는다.
 _SELECT_ROW_SQL: Final[str] = """
 SELECT
-    review_id, target_feature_id, source_record, name_score, status
+    review_id, target_feature_id, source_record_key, name_score, status
 FROM ops.enrichment_review_queue
 WHERE review_id = :review_id
 FOR UPDATE
@@ -157,17 +164,31 @@ class EnrichmentDecisionResult:
     load: EnrichmentLoadResult | None = None
 
 
-def _input_params(candidate: EnrichmentReviewInput) -> dict[str, Any]:
+async def _input_params(
+    session: AsyncSession, candidate: EnrichmentReviewInput
+) -> dict[str, Any]:
+    """후보 record를 canonical source history에 먼저 적재하고 queue FK를 해석한다."""
     record = candidate.source_record
+    await upsert_source_record(session, record)
+    source_entity_key = (
+        await session.execute(
+            text(
+                """
+                SELECT source_entity_key
+                FROM provider_sync.source_records
+                WHERE source_record_key = :source_record_key
+                """
+            ),
+            {"source_record_key": record.source_record_key},
+        )
+    ).scalar_one()
     return {
         "target_feature_id": candidate.target_feature_id,
-        "source_provider": record.provider,
-        "source_dataset_key": record.dataset_key,
-        "source_entity_id": record.source_entity_id,
+        "source_entity_key": str(source_entity_key),
+        "source_record_key": record.source_record_key,
         "source_name": candidate.source_name,
         "target_name": candidate.target_name,
         "name_score": round(candidate.name_score * 100, 2),
-        "source_record": record.model_dump_json(),
     }
 
 
@@ -178,7 +199,7 @@ async def enqueue_review_candidate(
 
     Returns ``"inserted"`` / ``"updated"`` / ``"skipped"``(이미 검토된 행 보존).
     """
-    result = await session.execute(text(_UPSERT_SQL), _input_params(candidate))
+    result = await session.execute(text(_UPSERT_SQL), await _input_params(session, candidate))
     row = result.first()
     if row is None:
         return "skipped"
@@ -231,30 +252,19 @@ async def pending_enrichment_reviews(
     return result
 
 
-def _rebuild_enrichment(
+def _rebuild_enrichment_link(
     target_feature_id: str,
-    source_record_json: dict[str, Any] | str,
+    source_record_key: str,
     name_score: float,
-) -> tuple[SourceRecord, SourceLink]:
-    """보관된 ``SourceRecord`` JSON → (record, ENRICHMENT link) 복원(accept 적용용).
-
-    JSONB 컬럼은 드라이버(asyncpg)에 따라 ``str`` 또는 ``dict``로 올 수 있어 양쪽을
-    처리한다(raw ``text()`` 쿼리는 SQLAlchemy JSON result processor를 안 거침).
-    """
-    record = (
-        SourceRecord.model_validate_json(source_record_json)
-        if isinstance(source_record_json, str)
-        else SourceRecord.model_validate(source_record_json)
-    )
-    link = SourceLink(
+) -> SourceLink:
+    """이미 canonical history에 있는 후보 record를 enrichment link로 확정한다."""
+    return SourceLink(
         feature_id=target_feature_id,
-        source_record_key=record.source_record_key,
+        source_record_key=source_record_key,
         source_role=SourceRole.ENRICHMENT,
         match_method=_MANUAL_MATCH_METHOD,
         confidence=round(name_score),
-        is_primary_source=False,
     )
-    return record, link
 
 
 async def decide_enrichment_review(
@@ -298,11 +308,17 @@ async def decide_enrichment_review(
 
     load: EnrichmentLoadResult | None = None
     if decision == "accepted":
-        # 보관된 점수(0~100)를 0~100 confidence로 그대로 사용.
-        record, link = _rebuild_enrichment(
-            row["target_feature_id"], row["source_record"], float(row["name_score"])
+        # 보관된 점수(0~100)를 0~100 confidence로 그대로 사용. 후보 record는
+        # enqueue 시점에 이미 immutable history로 영속했고 queue가 FK로 가리킨다.
+        link = _rebuild_enrichment_link(
+            row["target_feature_id"], row["source_record_key"], float(row["name_score"])
         )
-        load = await load_source_record_links(session, [(record, link)])
+        link_inserted = await upsert_source_link(session, link)
+        load = EnrichmentLoadResult(
+            enrichments_total=1,
+            source_links_inserted=int(link_inserted),
+            source_links_updated=int(not link_inserted),
+        )
 
     marked = (
         await session.execute(

@@ -145,8 +145,7 @@ def test_http_exception_uses_error_envelope() -> None:
 def test_request_validation_error_uses_error_envelope() -> None:
     app = create_app(ApiSettings())
     response = TestClient(app).post(
-        "/v1/ops/datasets/preview"
-        "?provider=data.go.kr-standard&dataset_key=datagokr_cultural_festivals",
+        "/v1/ops/datasets/42/preview?sync_scope=dataset_wide",
         json={"source": "live", "max_items": 20},
     )
 

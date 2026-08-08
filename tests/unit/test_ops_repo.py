@@ -70,6 +70,18 @@ def _job_row(job_id: str, *, at: datetime) -> SimpleNamespace:
         finished_at=None,
         heartbeat_at=at,
         dagster_run_id="run-1",
+        dataset_memberships=json.dumps(
+            [
+                {
+                    "import_job_dataset_id": job_id,
+                    "provider_dataset_id": 1,
+                    "provider": "python-mois-api",
+                    "dataset_key": "mois_license_features_bulk",
+                    "sync_scope": "dataset_wide",
+                    "operation_key": "feature_place_mois_licenses_job",
+                }
+            ]
+        ),
     )
 
 
@@ -89,9 +101,10 @@ def _event_row(event_id: str, *, at: datetime) -> SimpleNamespace:
     return SimpleNamespace(
         event_id=event_id,
         job_id="11111111-1111-1111-1111-111111111111",
-        provider="python-mois-api",
-        dataset_key="mois_license_features_bulk",
+        import_job_dataset_id="11111111-1111-1111-1111-111111111111",
+        provider_dataset_id=1,
         sync_scope="dataset_wide",
+        operation_key="feature_place_mois_licenses_job",
         feature_id=None,
         stage="loading",
         level="error",
@@ -105,6 +118,7 @@ def _event_row(event_id: str, *, at: datetime) -> SimpleNamespace:
 def _issue_row(key: str, *, at: datetime) -> SimpleNamespace:
     return SimpleNamespace(
         issue_id=key,
+        provider_dataset_id=42,
         provider="python-mois-api",
         dataset_key="mois_license_features_bulk",
         source_record_key=None,
@@ -133,17 +147,26 @@ def test_import_job_reads_exclude_quarantined_rows() -> None:
     events_sql = ops_repo._list_import_job_events_sql(
         job_id=None,
         level=None,
-        provider=None,
-        dataset_key=None,
+        provider_dataset_id=None,
         sync_scope=None,
+        operation_key=None,
         cursor_occurred_at=None,
     )
     assert "event.quarantined_at IS NULL" in events_sql
-    assert "event.sync_scope" in events_sql
+    assert "event.sync_scope" not in events_sql
     assert "JOIN LATERAL" not in events_sql
     assert "JOIN ops.import_jobs AS job" not in events_sql
     assert "c6c_cancel_probe" not in events_sql
     assert "ops.feature_update_requests" not in events_sql
+
+
+@pytest.mark.unit
+def test_ops_projection_uses_membership_not_dropped_pair_columns() -> None:
+    assert "ops.import_job_datasets AS member" in ops_repo._IMPORT_JOB_MEMBERSHIPS_SQL
+    assert "event.import_job_dataset_id" in ops_repo._IMPORT_JOB_EVENT_COLUMNS
+    assert "event.provider" not in ops_repo._IMPORT_JOB_EVENT_COLUMNS
+    assert "event.dataset_key" not in ops_repo._IMPORT_JOB_EVENT_COLUMNS
+    assert "event.sync_scope" not in ops_repo._IMPORT_JOB_EVENT_COLUMNS
 
 
 @pytest.mark.unit
@@ -237,7 +260,7 @@ async def test_import_job_events_list_and_cursor() -> None:
         limit=1,
     )
     assert isinstance(page.items[0], OpsImportJobEvent)
-    assert page.items[0].sync_scope == "dataset_wide"
+    assert page.items[0].provider_dataset_id == 1
     assert page.items[0].payload == {"attempt": 2}
     assert page.next_cursor is not None
 
@@ -265,16 +288,14 @@ async def test_import_job_events_global_filters() -> None:
     page = await list_ops_import_job_events(
         db,
         level="warning",
-        provider="python-mois-api",
-        dataset_key="mois_license_features_bulk",
+        provider_dataset_id=1,
         limit=50,
     )
 
     assert len(page.items) == 1
     assert session.params[0]["job_id"] is None
     assert session.params[0]["level"] == "warning"
-    assert session.params[0]["provider"] == "python-mois-api"
-    assert session.params[0]["dataset_key"] == "mois_license_features_bulk"
+    assert session.params[0]["provider_dataset_id"] == 1
 
 
 @pytest.mark.unit
@@ -286,8 +307,7 @@ async def test_import_job_events_scope_filter_uses_typed_event_identity() -> Non
 
     page = await list_ops_import_job_events(
         cast(Any, session),
-        provider="python-mois-api",
-        dataset_key="mois_license_features_bulk",
+        provider_dataset_id=1,
         sync_scope="dataset_wide",
         limit=20,
     )
@@ -297,9 +317,9 @@ async def test_import_job_events_scope_filter_uses_typed_event_identity() -> Non
     assert "JOIN ops.import_jobs AS job" not in sql
     assert "c6c_cancel_probe" not in sql
     assert "ops.feature_update_requests" not in sql
-    assert "event.sync_scope = CAST(:sync_scope AS text)" in sql
+    assert "member.sync_scope = CAST(:sync_scope AS text)" in sql
     assert (
-        sql.index("event.sync_scope = CAST(:sync_scope AS text)")
+        sql.index("member.sync_scope = CAST(:sync_scope AS text)")
         < sql.index("ORDER BY")
         < sql.index("LIMIT")
     )
@@ -310,13 +330,13 @@ async def test_import_job_events_scope_filter_uses_typed_event_identity() -> Non
 async def test_import_job_events_scope_filter_requires_typed_pair() -> None:
     session = _Session()
 
-    with pytest.raises(ValueError, match="dataset_key event filter requires provider"):
+    with pytest.raises(ValueError, match="provider_dataset_id must be greater than 0"):
         await list_ops_import_job_events(
             cast(Any, session),
-            dataset_key="mois_license_features_bulk",
+            provider_dataset_id=0,
         )
 
-    with pytest.raises(ValueError, match="requires provider and dataset_key"):
+    with pytest.raises(ValueError, match="requires provider_dataset_id"):
         await list_ops_import_job_events(
             cast(Any, session),
             sync_scope="target_grids",
@@ -378,12 +398,12 @@ async def test_integrity_issues_list_and_counts() -> None:
         status="open",
         severity="error",
         violation_type="missing_coordinate",
-        provider="python-mois-api",
-        dataset_key="mois_license_features_bulk",
+        provider_dataset_id=42,
         feature_id="feature-1",
         limit=1,
     )
     assert isinstance(page.items[0], OpsIntegrityIssue)
+    assert page.items[0].provider_dataset_id == 42
     assert page.items[0].payload == {"source": "unit"}
     assert page.next_cursor is not None
 
@@ -409,4 +429,10 @@ async def test_integrity_issues_rejects_detected_at_cursor_contract() -> None:
         await list_ops_integrity_issues(
             cast(Any, _Session()),
             cursor=legacy_cursor,
+        )
+
+    with pytest.raises(ValueError, match="provider_dataset_id must be greater than 0"):
+        await list_ops_integrity_issues(
+            cast(Any, _Session()),
+            provider_dataset_id=0,
         )

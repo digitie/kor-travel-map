@@ -73,10 +73,149 @@ from kortravelmap.infra.domain_command_repo import (
     create_domain_command_claim,
 )
 from kortravelmap.infra.feature_update_repo import enqueue_feature_update_request
+from kortravelmap.infra.jobs_repo import ImportJobDatasetTarget
 
 _SYSTEM = "pinvi-test"
 _CONSUMER = "pinvi-cache-consumer"
 _TARGET_KEY = "trip-day-poi:1"
+
+
+async def _canonical_membership(session: AsyncSession) -> ImportJobDatasetTarget:
+    """catalog에서 활성 triple 하나를 골라 update request membership으로 만든다.
+
+    T-VN-33 이후 feature update request는 **정확한** membership을 요구한다
+    (ADR-088 §결정 2) — provider/dataset_key 배열 경로는 없다. 0089가 catalog를
+    seed하므로 실제 행을 읽어 쓴다. 활성 request가 이미 점유한 triple은 고르지
+    않는다(member mutex는 여기 검증 대상이 아니다).
+    """
+    row = (
+        await session.execute(
+            text(
+                """
+                SELECT scope.provider_dataset_id, scope.sync_scope, scope.operation_key
+                FROM provider_sync.provider_dataset_operation_scopes AS scope
+                JOIN provider_sync.provider_datasets AS dataset
+                  ON dataset.provider_dataset_id = scope.provider_dataset_id
+                JOIN provider_sync.provider_dataset_operations AS operation
+                  ON operation.provider_dataset_id = scope.provider_dataset_id
+                 AND operation.operation_key = scope.operation_key
+                WHERE dataset.is_active AND operation.is_enabled
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM ops.feature_update_request_datasets AS member
+                      JOIN ops.feature_update_requests AS request
+                        ON request.request_id = member.request_id
+                      JOIN ops.import_jobs AS job ON job.job_id = request.job_id
+                      WHERE member.provider_dataset_id = scope.provider_dataset_id
+                        AND member.sync_scope = scope.sync_scope
+                        AND member.operation_key = scope.operation_key
+                        AND job.status IN ('queued', 'running')
+                  )
+                ORDER BY scope.provider_dataset_id, scope.sync_scope, scope.operation_key
+                LIMIT 1
+                """
+            )
+        )
+    ).one()
+    return ImportJobDatasetTarget(
+        provider_dataset_id=int(row.provider_dataset_id),
+        sync_scope=str(row.sync_scope),
+        operation_key=str(row.operation_key),
+    )
+
+
+async def _seed_scope_feature(
+    session: AsyncSession,
+    *,
+    membership: ImportJobDatasetTarget,
+    feature_id: str,
+    lon: float = 126.978,
+    lat: float = 37.5665,
+) -> None:
+    """cache target 반경 안에 primary source를 가진 feature 1건을 심는다.
+
+    T-VN-33 이후 feature update request는 최소 1개의 canonical membership을
+    요구한다(ADR-088 §결정 2). ``cache_target_keys`` scope의 membership은 target
+    반경 안 feature의 **primary source가 소유한 dataset**에서 나오므로, service
+    refresh 경로(직접 membership을 못 넘긴다)를 태우려면 scope 안에 실제 feature가
+    있어야 한다.
+    """
+    entity_key = f"se_scope_{feature_id}"
+    record_key = f"sr_scope_{feature_id}"
+    params = {
+        "feature_id": feature_id,
+        "provider_dataset_id": membership.provider_dataset_id,
+        "entity_key": entity_key,
+        "record_key": record_key,
+        # raw_payload_hash는 ^[0-9a-f]{1,64}$ 를 만족해야 한다.
+        "record_hash": hashlib.sha256(record_key.encode("utf-8")).hexdigest(),
+        "lon": lon,
+        "lat": lat,
+    }
+    await session.execute(
+        text(
+            """
+            INSERT INTO feature.features (feature_id, kind, name, category, coord)
+            VALUES (
+              :feature_id, 'place', 'cache target scope anchor', '01070100',
+              x_extension.ST_SetSRID(
+                x_extension.ST_MakePoint(CAST(:lon AS double precision),
+                                         CAST(:lat AS double precision)),
+                4326
+              )
+            )
+            """
+        ),
+        params,
+    )
+    await session.execute(
+        text(
+            """
+            INSERT INTO provider_sync.source_entities (
+              source_entity_key, provider_dataset_id, source_entity_type,
+              source_entity_id, first_seen_at, last_seen_at
+            )
+            VALUES (:entity_key, :provider_dataset_id, 'scope_anchor',
+                    :feature_id, now(), now())
+            """
+        ),
+        params,
+    )
+    await session.execute(
+        text(
+            """
+            INSERT INTO provider_sync.source_records (
+              source_record_key, source_entity_key, raw_data, raw_payload_hash,
+              fetched_at, imported_at
+            )
+            VALUES (:record_key, :entity_key, '{}'::jsonb, :record_hash,
+                    now(), now())
+            """
+        ),
+        params,
+    )
+    await session.execute(
+        text(
+            """
+            INSERT INTO provider_sync.source_entity_heads (
+              source_entity_key, current_source_record_key, observed_at
+            )
+            VALUES (:entity_key, :record_key, now())
+            """
+        ),
+        params,
+    )
+    await session.execute(
+        text(
+            """
+            INSERT INTO provider_sync.source_links (
+              feature_id, source_entity_key, source_role, match_method, confidence
+            )
+            VALUES (:feature_id, :entity_key, 'primary', 'natural_key', 100)
+            """
+        ),
+        params,
+    )
 
 
 async def _apply_active(
@@ -1817,6 +1956,7 @@ async def test_refresh_capture_locks_stream_before_head_and_avoids_source_deadlo
                 "external_system": system,
                 "target_keys": ["target-a"],
             },
+            dataset_memberships=[await _canonical_membership(setup)],
         )
     assert initial.target is not None
     assert request is not None
@@ -3231,6 +3371,11 @@ async def test_service_source_read_and_refresh_request_idempotency(
         event_id="97000000-0000-0000-0000-000000000001",
         idempotency_key="98000000-0000-0000-0000-000000000001",
     )
+    await _seed_scope_feature(
+        migrated_session,
+        membership=await _canonical_membership(migrated_session),
+        feature_id="f_cache_target_scope_anchor",
+    )
     source = await get_cache_target_source(
         migrated_session,
         external_system=system,
@@ -3335,6 +3480,7 @@ async def test_refresh_member_result_events_are_idempotent_and_transactional(
             "external_system": _SYSTEM,
             "target_keys": [_TARGET_KEY],
         },
+        dataset_memberships=[await _canonical_membership(migrated_session)],
     )
     assert request is not None
 
