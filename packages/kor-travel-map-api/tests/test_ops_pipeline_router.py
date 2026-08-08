@@ -590,6 +590,7 @@ def _event(
         job_id="11111111-1111-1111-1111-111111111111",
         import_job_dataset_id="11111111-1111-1111-1111-111111111111",
         provider_dataset_id=1,
+        sync_scope="dataset_wide",
         operation_key=_MOIS_BULK_OPERATION_KEY,
         feature_id=None,
         stage="loading",
@@ -1971,7 +1972,17 @@ def test_events_global_list_passes_filters(
     event = body["data"]["items"][0]
     assert event["provider_dataset_id"] == 1
     assert event["import_job_dataset_id"] == "11111111-1111-1111-1111-111111111111"
-    assert "sync_scope" not in event
+    # 이 목록은 **전역**이고 dataset/scope/operation으로 필터할 수 있다. 예전에는
+    # "event는 scope 사본을 들지 않는다"며 `sync_scope`의 부재를 단언했는데, 그러면
+    # `provider_dataset_id`로 "어느 dataset인지"는 말하면서 "어느 membership인지"는
+    # 말하지 않는 절반짜리가 된다 — operation_key로 필터해 놓고 결과 행이 그 축을
+    # 되울리지 않으면 소비자가 응답만으로 결과를 되짚을 수 없다.
+    #
+    # 사본이 아니다: 두 값은 저장 열이 아니라 `import_job_dataset_id`로 member를
+    # join해 뽑는 projection이다. T-VN-33이 없앤 것은 event 테이블에 identity를
+    # **복제해 저장**하던 열이고, 그 규칙은 그대로다.
+    assert event["sync_scope"] == "dataset_wide"
+    assert event["operation_key"] == _MOIS_BULK_OPERATION_KEY
 
 
 @pytest.mark.unit

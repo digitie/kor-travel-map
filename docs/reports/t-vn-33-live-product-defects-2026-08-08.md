@@ -388,3 +388,44 @@ false-pass를 낸다 — 고친 내용이 컨테이너에 반영되지 않으므
 대응: 스크립트 머리말에 명시했다. 근본 해결은 py()가 루트 파일도 복사하거나 이미지를
 다시 빌드하는 것이다 — 후속 태스크로 남긴다.
 ```
+
+### 33. CI 미러링을 고치자 드러난 기능 손실 — MOIS 사전점검이 사라져 있었다
+
+`react-doctor` 게이트(구 스크립트가 안 돌리던 것)가 죽은 export `useMoisSourceSyncPrecheck`를 잡았고, 파고드니 **이 브랜치가 기능을 통째로 잃은 것**이었다.
+
+```
+main의 request-dialog.tsx는 이 훅으로 MOIS 적재 전 Dagster 선행 작업
+(mois_localdata_source_sync) 상태를 경고로 보여 준다. T-VN-33이 provider 이름
+입력을 없애면서, 그 입력으로 MOIS 여부를 판정하던 moisSelected가 함께 사라졌고
+경고·MoisPrecheckNotice 컴포넌트·gating이 전부 없어졌다. 서버 엔드포인트
+(/ops/pipeline/prechecks/mois-source-sync)는 그대로 살아 있었다.
+
+복원하되 판정 근거를 옮겼다: provider 이름 문자열이 아니라 **선택된 catalog 행의
+provider**로 본다 — 같은 사실을 triple 선택에서 읽는 것이라 T-VN-33 모델과
+어긋나지 않는다.
+
+교훈: 게이트 목록을 좁게 잡으면 못 보는 것이 "실패"만이 아니라 **조용히 사라진
+기능**이다. 이 손실은 타입체크도 테스트도 잡지 못했다 — 아무도 안 쓰는 export가
+남았을 뿐이라 컴파일은 통과한다.
+```
+
+### 34. 프론트 게이트 red 2건의 귀속 판정 (선재 vs branch-caused)
+
+`audit:high`와 `admin react-doctor`가 red다. 둘 다 **main에서도 red**임을 실측했다.
+
+```
+audit:high — origin/main의 package-lock.json도 nanoid-3.3.16이다(31번).
+
+react-doctor — origin/main의 프론트 src를 git archive로 떠서 같은 명령을 돌렸다:
+  origin/main : 10 issues (errors 2, warnings 8)
+  이 브랜치   :  7 issues (errors 2, warnings 5)
+이 브랜치가 오히려 3건 줄였다. 남은 7건 중 이 브랜치가 건드린 파일은
+pipeline-client.tsx(ref mutated during render)와 execution-timeline.tsx(large
+component)인데, 전자의 패턴은 main의 같은 위치에도 있다(선재).
+
+branch-caused였던 2건은 이번에 해소했다:
+  - deslop/unused-export useMoisSourceSyncPrecheck → 33번으로 기능 복원
+  - deslop/unused-file combobox-multiple.tsx → 삭제. main에서는 request-dialog가
+    providers[]/dataset_keys[] 다중선택에 썼는데 T-VN-33이 그 배열을 의도적으로
+    없앴으므로 기능 손실이 아니라 진짜 죽은 코드다.
+```

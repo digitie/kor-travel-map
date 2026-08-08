@@ -60,12 +60,18 @@ py() {
   MSYS_NO_PATHCONV=1 wsl -e docker run --rm --network host \
     -v /var/run/docker.sock:/var/run/docker.sock \
     -v "$WSL_ROOT:/src" -e TESTCONTAINERS_RYUK_DISABLED=true "$IMAGE" \
-    sh -c "cd /repo && rm -rf src tests packages contracts alembic \
-      && cp -r /src/src /src/tests /src/packages /src/contracts /src/alembic . \
+    sh -c "cd /repo && rm -rf src tests packages contracts alembic scripts .github \
+      && cp -r /src/src /src/tests /src/packages /src/contracts /src/alembic \
+            /src/scripts /src/.github . \
       && cp /src/alembic.ini . 2>/dev/null; $1"
 }
 
-# 루트 파일(package.json / pyproject.toml / .github / docker-compose*)은 위 복사에
+# `scripts/`와 `.github/`는 위에서 복사한다. 안 하면 test_gate_script_mirrors_ci가
+# 이미지의 낡은 스크립트/워크플로를 읽어, 방금 고쳐도 옛 내용으로 판정한다
+# (실제로 한 번 그렇게 실패했다).
+#
+# 반면 루트 **파일**(package.json / package-lock.json / pyproject.toml /
+# docker-compose*.yml / .env.example)은 위 복사에
 # 포함되지 않아 **이미지에 구워진 사본**이 쓰인다. 그 파일을 읽는 테스트는 로컬에서
 # false-pass/false-fail이 난다 — 루트 파일을 고쳤다면 이미지를 다시 빌드하라.
 
