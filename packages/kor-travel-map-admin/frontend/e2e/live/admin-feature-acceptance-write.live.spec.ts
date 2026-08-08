@@ -47,6 +47,7 @@ const RECOVERY_ONLY =
 const ISOLATED_EVIDENCE = process.env.E2E_ISOLATED_LIVE_EVIDENCE === "1";
 const ARTIFACT_ROOT = process.env.PLAYWRIGHT_ARTIFACT_ROOT;
 let lastBrowserFetchStatus: number | null = null;
+let failureDetail: string | null = null;
 // base 좌표는 고정한다. weather/price/correction/search fixture는 이 base에서 파생되고,
 // weather/price는 orchestrator의 seeding helper(scripts/admin_feature_live_fixture.py의
 // `_LON=127.5`/`_LAT=36.5` 고정)가 물리 seed하며 spec은 API in-bounds/search로 featureId·
@@ -279,7 +280,10 @@ function writeSafeFailureStage(stage: string): void {
   try {
     writeFileSync(
       path.join(ARTIFACT_ROOT, "admin-feature-acceptance-safe-debug.json"),
-      `${JSON.stringify({ last_browser_fetch_status: lastBrowserFetchStatus, stage })}\n`,
+      `${JSON.stringify({
+        last_browser_fetch_status: lastBrowserFetchStatus,
+        stage: failureDetail ?? stage,
+      })}\n`,
       { encoding: "utf8", mode: 0o600 },
     );
   } catch {
@@ -1025,6 +1029,7 @@ async function assertStaleCorrection(page: Page): Promise<void> {
     }
   });
 
+  failureDetail = "stale-etag:load";
   await page.goto("/admin/features/change-requests");
   await page
     .getByLabel("change action", { exact: true })
@@ -1052,6 +1057,7 @@ async function assertStaleCorrection(page: Page): Promise<void> {
   await page.getByLabel("change name", { exact: true }).fill(operatorDraft);
   await page.getByLabel("change reason", { exact: true }).fill(operatorReason);
 
+  failureDetail = "stale-etag:competing-update";
   const competingName = `E2E approved competing update ${RUN_ID}`;
   const competing = await browserFetch<ChangeResponse>(
     page,
@@ -1089,6 +1095,7 @@ async function assertStaleCorrection(page: Page): Promise<void> {
   expect(competingDetail.data.feature.name).toBe(competingName);
   expect(`"${competingDetail.data.feature.row_revision}"`).toBe(competingTag);
 
+  failureDetail = "stale-etag:stale-submit";
   uiPatchRequests.length = 0;
   const revisionsBeforeSubmit = revisionResponses.length;
   const staleResponsePromise = page.waitForResponse(
@@ -1104,6 +1111,7 @@ async function assertStaleCorrection(page: Page): Promise<void> {
   expect(staleResponse.request().headers()["if-match"]).toBe(baselineTag);
   expect(uiPatchRequests).toHaveLength(1);
 
+  failureDetail = "stale-etag:conflict-display";
   const conflict = page
     .getByRole("status")
     .filter({ hasText: "서버의 Feature가 변경되었습니다" });
@@ -1118,6 +1126,7 @@ async function assertStaleCorrection(page: Page): Promise<void> {
   expect(revisionResponses).toHaveLength(revisionsBeforeSubmit);
   expect(uiPatchRequests).toHaveLength(1);
 
+  failureDetail = "stale-etag:reload";
   const reload = conflict.getByRole("button", {
     name: "최신값으로 폼 다시 불러오기",
   });
@@ -1129,6 +1138,7 @@ async function assertStaleCorrection(page: Page): Promise<void> {
     .poll(() => revisionResponses.at(-1)?.entityTag, { timeout: UI_TIMEOUT })
     .toBe(competingTag);
 
+  failureDetail = "stale-etag:reapply";
   const reappliedName = `E2E reapplied after reload ${RUN_ID}`;
   await page.getByLabel("change name", { exact: true }).fill(reappliedName);
   await page
@@ -1165,6 +1175,7 @@ test("@admin-feature-live-acceptance #741/#785 owned production acceptance", asy
   );
   test.setTimeout(20 * 60 * 1000);
   lastBrowserFetchStatus = null;
+  failureDetail = null;
   let stage = "landing";
   await page.goto("/");
   if (RECOVERY_ONLY) {
