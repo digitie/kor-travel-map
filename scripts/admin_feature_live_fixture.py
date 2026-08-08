@@ -843,7 +843,10 @@ async def _inspect_api_owned(
         if value
     }
     if observed_references != expected_references:
-        raise RuntimeError("API-owned Feature에 예상하지 않은 FK reference가 있습니다")
+        raise RuntimeError(
+            "API-owned Feature FK reference 감사가 다릅니다: "
+            f"expected={expected_references!r}, observed={observed_references!r}"
+        )
     return _ApiOwnedInspection(
         feature_ids=feature_ids,
         features=len(rows),
