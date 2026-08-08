@@ -1369,6 +1369,7 @@ def test_executions_list_passes_filters_and_maps_rows(
             "provider": MOIS_PROVIDER_NAME,
             "dataset_key": DATASET_KEY_BULK,
             "sync_scope": "dataset_wide",
+            "operation_key": _MOIS_BULK_OPERATION_KEY,
             "operation_member_id": "11111111-1111-1111-1111-111111111111",
             "status": "running",
         }
@@ -1387,6 +1388,7 @@ def test_executions_list_passes_filters_and_maps_rows(
             "provider": MOIS_PROVIDER_NAME,
             "dataset_key": DATASET_KEY_BULK,
             "sync_scope": "dataset_wide",
+            "operation_key": _MOIS_BULK_OPERATION_KEY,
             "operation_member_id": "11111111-1111-1111-1111-111111111111",
             "status": "running",
         }
@@ -1669,6 +1671,7 @@ def test_execution_detail_non_exact_request_keeps_arrays_on_root_only(
             "provider": "provider-a",
             "dataset_key": "dataset-a",
             "sync_scope": "dataset_wide",
+            "operation_key": "provider_a_refresh",
             "operation_member_id": "11111111-1111-1111-1111-111111111111",
             "status": "running",
         },
@@ -1677,6 +1680,7 @@ def test_execution_detail_non_exact_request_keeps_arrays_on_root_only(
             "provider": "provider-b",
             "dataset_key": "dataset-b",
             "sync_scope": "target_grids",
+            "operation_key": "provider_b_refresh",
             "operation_member_id": "22222222-2222-2222-2222-222222222222",
             "status": "running",
         },

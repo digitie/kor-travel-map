@@ -78,6 +78,7 @@ def _job_row(job_id: str, *, at: datetime) -> SimpleNamespace:
                     "provider": "python-mois-api",
                     "dataset_key": "mois_license_features_bulk",
                     "sync_scope": "dataset_wide",
+                    "operation_key": "feature_place_mois_licenses_job",
                 }
             ]
         ),

@@ -90,7 +90,11 @@ def test_f5_uses_canonical_dataset_identity_for_state_and_policy() -> None:
         assert "p.provider = s.provider" not in sql
         assert "p.dataset_key = s.dataset_key" not in sql
     assert "JOIN provider_sync.provider_datasets dataset" in sample_sql
-    assert "s.provider_dataset_id::text || ':' || s.sync_scope AS id" in sample_sql
+    # sample id는 ``pk_provider_sync_state``와 같은 triple이라야 한다 — pair로 합성하면
+    # operation만 다른 두 stale 상태가 같은 id로 중복 표시된다.
+    assert "s.provider_dataset_id::text || ':' || s.sync_scope " in sample_sql
+    assert "|| ':' || s.operation_key AS id" in sample_sql
+    assert "ORDER BY provider_dataset_id, sync_scope, operation_key" in sample_sql
 
 
 def test_f6_narrows_candidates_by_subtype_columns_before_lateral_expansion() -> None:
