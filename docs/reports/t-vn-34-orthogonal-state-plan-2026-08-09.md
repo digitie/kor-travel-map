@@ -216,16 +216,17 @@ badge·AND filter·명시 state command를 제공한다.
 | writer | lifecycle | publication | quality | reactivation/override 규칙 |
 |---|---|---|---|---|
 | provider sync | 자기 source의 initial·retire만 | 신규 initial만 | 변경 금지 | current record의 DB-derived receipt와 Feature-source link가 증명되고, active `lifecycle_state=retired` override가 없을 때만 재적재 procedure로 `active` 전이 가능 |
-| admin/user request | retire 및 명시 reingest | draft/published/suppressed | 수동 quarantine/복구 | retire/merge는 typed command로 current/직전 audit revision에만 맞는 `lifecycle_state=retired` override를 만들며 provider는 이를 해제할 수 없다 |
+| admin/user request | retire 및 명시 reingest | draft/published/suppressed | 수동 quarantine/복구 | admin/user/merge의 internal state transition은 `active → retired`와 같은 transaction에서 current/직전 audit revision에만 맞는 `lifecycle_state=retired` override를 만들며 provider는 이를 해제할 수 없다 |
 | quality validator | 변경 금지 | 변경 금지 | valid/quarantined | admin quality override가 있으면 validator는 source verdict만 기록하고 effective quality를 덮지 않는다 |
 | merge | loser retire만 | suppressed만 | 보존 | `merge_loser` lifecycle override를 만들며 explicit merge undo 또는 reingest만 revoke 가능 |
 | Dagster tombstone | provider와 같은 retire | 변경 금지 | 변경 금지 | dataset/source membership을 procedure가 검증한다 |
 
 기존 `field_path='status'` override는 T-VN-34A에서 typed `lifecycle_state` override로 옮긴다.
-admin/user retire와 merge retire는 generic upsert가 아닌 Feature lock·expected revision을 요구하는
-typed author command로 그 active override를 원자적으로 만든다. 이 command는 source value를 임의로
-받지 않고 현재 lifecycle 또는 해당 current state를 만든 exact audit revision의 이전 lifecycle과만
-일치시킨다. `retired → active`는
+admin/user retire와 merge retire는 Feature lock·expected revision을 요구하는 internal state transition에서
+그 active override를 원자적으로 만든다. runtime이 직접 generic transition을 호출하더라도 같은
+`admin|user_request|merge` active→retired 분기는 override를 생략할 수 없다. override author는 source
+value를 임의로 받지 않고 현재 lifecycle 또는 해당 current state를 만든 exact audit revision의 이전
+lifecycle과만 일치시킨다. `retired → active`는
 `POST /v1/admin/features/{feature_id}/state/reactivate`가 expected revision, `reason_code`, active current
 source evidence를 받아 typed revoke command로 override를 철회하고 시행하는 경우만 가능하다. provider reappearance는
 override를 revoke하지 못한다. provider와 admin/quality concurrent update, override revoke와 source

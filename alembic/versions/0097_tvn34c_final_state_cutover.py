@@ -405,10 +405,16 @@ AS $$
 DECLARE
     v_raw_payload_hash text;
 BEGIN
-    -- All provider lifecycle operations acquire source evidence before the
-    -- Feature row.  The provider bundle path already owns its head row before
-    -- it reaches the Feature, so this order eliminates head→Feature versus
-    -- Feature→head deadlocks as well as the stale-head TOCTOU window.
+    -- Match the provider bundle writer exactly: dataset/entity/record/head,
+    -- then its Feature source link, then the Feature row taken by the caller.
+    -- In particular, do not lock the link first: a concurrent bundle holds
+    -- the entity head while it later upserts the link, which would form a
+    -- head↔link cycle.
+    v_raw_payload_hash := feature.lock_current_provider_source_evidence(
+        p_provider_dataset_id,
+        p_source_entity_key,
+        p_source_record_key
+    );
     PERFORM 1
       FROM provider_sync.source_links AS link
      WHERE link.feature_id = p_feature_id
@@ -418,11 +424,6 @@ BEGIN
         RAISE EXCEPTION 'provider lifecycle transition requires linked source evidence'
             USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_provider_source_provenance';
     END IF;
-    v_raw_payload_hash := feature.lock_current_provider_source_evidence(
-        p_provider_dataset_id,
-        p_source_entity_key,
-        p_source_record_key
-    );
     RETURN v_raw_payload_hash;
 END;
 $$;
@@ -446,17 +447,18 @@ SET search_path = pg_catalog
 AS $$
 DECLARE
     v_current feature.features%ROWTYPE;
+    v_override_row_revision bigint;
 BEGIN
     IF p_expected_row_revision IS NULL OR p_expected_row_revision < 1 THEN
         RAISE EXCEPTION 'expected feature row revision is required'
             USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_state_expected_revision';
     END IF;
     PERFORM feature.prepare_feature_state_context(p_context, 'transition');
-    -- Provider ingestion first locks its source head, then the Feature.  Do
-    -- the same for every provider transition.  The proof locks the link,
-    -- dataset/entity/record and current head until commit; a head advance can
-    -- therefore either happen before this call (and reject stale evidence) or
-    -- after this transition/audit commit, never between proof and audit.
+    -- Provider ingestion locks dataset/entity/record/current-head, then the
+    -- Feature source link, then the Feature.  Do the same for every provider
+    -- transition. A head advance can therefore either happen before this call
+    -- (and reject stale evidence) or after this transition/audit commit,
+    -- never between proof and audit.
     IF p_context ->> 'transition_kind' = 'provider_sync' THEN
         PERFORM feature.lock_current_provider_feature_source_evidence(
             p_feature_id,
@@ -506,6 +508,27 @@ BEGIN
            updated_at = clock_timestamp()
      WHERE feature_id = p_feature_id
      RETURNING feature_id, row_revision INTO o_feature_id, o_row_revision;
+    -- Any non-provider retirement is an operator/user/merge decision, not a
+    -- provider tombstone.  Make its lifecycle override inseparable from the
+    -- state transition so callers of this generic internal procedure cannot
+    -- create a retired row that a later provider observation can resurrect.
+    IF v_current.lifecycle_state = 'active'
+       AND p_lifecycle_state = 'retired'
+       AND (p_context ->> 'transition_kind') IN ('admin', 'user_request', 'merge') THEN
+        CALL feature.author_lifecycle_override(
+            p_feature_id,
+            v_current.lifecycle_state,
+            'retired',
+            true,
+            btrim(p_context ->> 'reason_code'),
+            btrim(p_context ->> 'principal'),
+            o_row_revision,
+            v_override_row_revision
+        );
+        IF v_override_row_revision <> o_row_revision THEN
+            RAISE EXCEPTION 'non-provider retirement wrote an inconsistent lifecycle override';
+        END IF;
+    END IF;
 END;
 $$;
 """
@@ -534,7 +557,6 @@ DECLARE
     v_lifecycle_state text;
     v_publication_state text;
     v_quality_state text;
-    v_override_row_revision bigint;
 BEGIN
     IF p_action NOT IN ('patch', 'retire')
        OR p_expected_row_revision IS NULL OR p_expected_row_revision < 1
@@ -585,25 +607,6 @@ BEGIN
         ),
         o_feature_id, o_row_revision
     );
-    IF p_action = 'retire' THEN
-        -- Retirement and the typed provider-reactivation fence are one
-        -- command: a later provider observation must not resurrect an
-        -- operator-retired Feature until the explicit reactivation command
-        -- revokes this exact override under the same Feature-row lock.
-        CALL feature.author_lifecycle_override(
-            p_feature_id,
-            v_current.lifecycle_state,
-            'retired',
-            true,
-            btrim(p_reason_code),
-            btrim(p_principal),
-            o_row_revision,
-            v_override_row_revision
-        );
-        IF v_override_row_revision <> o_row_revision THEN
-            RAISE EXCEPTION 'admin retirement wrote an inconsistent lifecycle override';
-        END IF;
-    END IF;
     SELECT transition.transition_id INTO o_transition_id
     FROM feature.feature_state_transitions AS transition
     WHERE transition.feature_id = o_feature_id

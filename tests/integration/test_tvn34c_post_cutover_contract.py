@@ -692,7 +692,9 @@ async def test_tvn34c_provider_evidence_lock_rejects_head_advance_races(
                 {"feature_id": feature_id, "entity_key": entity_key},
             )
 
-    async def _advance_head_while(call: Callable[[], Awaitable[None]]) -> DBAPIError:
+    async def _advance_head_while(
+        call: Callable[[], Awaitable[None]], *, link_feature_id: str
+    ) -> DBAPIError:
         async with AsyncSession(migrated_engine) as head_session:
             await head_session.begin()
             await head_session.execute(
@@ -708,6 +710,22 @@ async def test_tvn34c_provider_evidence_lock_rejects_head_advance_races(
             task = asyncio.create_task(call())
             with pytest.raises(TimeoutError):
                 await asyncio.wait_for(asyncio.shield(task), timeout=0.15)
+            # A bundle advances the entity head and subsequently upserts the
+            # source link.  The state command is deliberately waiting on the
+            # head here, so this UPDATE must not wait on a link lock.  The
+            # former link→head helper order formed a real 40P01 cycle.
+            await head_session.execute(text("SET LOCAL lock_timeout = '300ms'"))
+            await head_session.execute(
+                text(
+                    """
+                    UPDATE provider_sync.source_links
+                    SET confidence = confidence
+                    WHERE feature_id = :feature_id
+                      AND source_entity_key = :entity_key
+                    """
+                ),
+                {"feature_id": link_feature_id, "entity_key": entity_key},
+            )
             await head_session.commit()
             with pytest.raises(DBAPIError) as rejected:
                 await task
@@ -733,7 +751,9 @@ async def test_tvn34c_provider_evidence_lock_rejects_head_advance_races(
                 },
             )
 
-    admin_error = await _advance_head_while(admin_reactivation)
+    admin_error = await _advance_head_while(
+        admin_reactivation, link_feature_id=admin_feature_id
+    )
     assert getattr(admin_error.orig, "sqlstate", None) == "23514"
 
     async with AsyncSession(migrated_engine) as reset_session, reset_session.begin():
@@ -774,7 +794,9 @@ async def test_tvn34c_provider_evidence_lock_rejects_head_advance_races(
                 },
             )
 
-    provider_error = await _advance_head_while(provider_retirement)
+    provider_error = await _advance_head_while(
+        provider_retirement, link_feature_id=provider_feature_id
+    )
     assert getattr(provider_error.orig, "sqlstate", None) == "23514"
 
     async with AsyncSession(migrated_engine) as verify_session:
@@ -795,3 +817,55 @@ async def test_tvn34c_provider_evidence_lock_rejects_head_advance_races(
         admin_feature_id: ("retired", 1),
         provider_feature_id: ("active", 1),
     }
+
+
+@pytest.mark.parametrize("transition_kind", ["admin", "user_request", "merge"])
+async def test_tvn34c_generic_non_provider_retirement_writes_lifecycle_fence(
+    migrated_session: AsyncSession,
+    transition_kind: str,
+) -> None:
+    """Generic internal transitions cannot leave operator/user/merge retire unfenced."""
+
+    feature_id = f"tvn34c-retirement-fence-{transition_kind}"
+    await _create_as_runtime(migrated_session, feature_id=feature_id, kind="place")
+    await migrated_session.execute(text("SET ROLE ktm_feature_runtime"))
+    try:
+        await migrated_session.execute(
+            text(
+                """
+                CALL feature.transition_feature_state(
+                    :feature_id, 'retired', 'suppressed', 'valid', 1,
+                    CAST(:context AS jsonb), NULL, NULL
+                )
+                """
+            ),
+            {
+                "feature_id": feature_id,
+                "context": json.dumps(
+                    {
+                        "transition_kind": transition_kind,
+                        "reason_code": f"{transition_kind}_retire",
+                        "principal": "runtime:tvn34c-fence",
+                    }
+                ),
+            },
+        )
+    finally:
+        with suppress(DBAPIError):
+            await migrated_session.execute(text("RESET ROLE"))
+
+    override = (
+        await migrated_session.execute(
+            text(
+                """
+                SELECT override_value, prevent_provider_reactivation
+                FROM ops.feature_overrides
+                WHERE feature_id = :feature_id
+                  AND field_path = 'lifecycle_state'
+                  AND status = 'active'
+                """
+            ),
+            {"feature_id": feature_id},
+        )
+    ).one()
+    assert tuple(override) == ("retired", True)
