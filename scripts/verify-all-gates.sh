@@ -72,10 +72,13 @@ py() {
     -v /var/run/docker.sock:/var/run/docker.sock \
     -v "$WSL_ROOT:/src" -e TESTCONTAINERS_RYUK_DISABLED=true "$IMAGE" \
     sh -c "{ cd /repo && rm -rf src tests packages contracts alembic scripts .github \
-      && cp -r /src/src /src/tests /src/packages /src/contracts /src/alembic \
-            /src/scripts /src/.github . ; } \
+      && tar -C /src --exclude=node_modules --exclude=.next --exclude=.react-doctor \
+             --exclude=__pycache__ -cf - \
+             src tests packages contracts alembic scripts .github \
+             alembic.ini pyproject.toml \
+         | tar -C /repo -xf - ; } \
       || { echo 'FATAL: 소스 복사 실패 — 아래 결과는 낡은 트리의 것이다'; exit 97; }; \
-      cp /src/alembic.ini /src/pyproject.toml . 2>/dev/null; $1"
+      $1"
 }
 
 # `scripts/`와 `.github/`는 위에서 복사한다. 안 하면 test_gate_script_mirrors_ci가
@@ -84,6 +87,11 @@ py() {
 #
 # `pyproject.toml`도 복사한다 — coverage `fail_under`와 pytest 설정이 거기 있어서,
 # 이미지의 낡은 사본을 읽으면 로컬이 **다른 기준으로** 판정한다.
+#
+# `cp -r`가 아니라 tar인 이유: `next build` 산출물 `.next/standalone`에 끊어진
+# 심링크가 있어 `cp -r`가 non-zero로 끝난다. 예전에는 그 실패를 `;`로 삼켜
+# **일부만 복사된 트리** 위에서 게이트가 돌았고, 복사 실패를 치명으로 바꾸자마자
+# 드러났다. 빌드 산출물과 node_modules는 애초에 복사 대상이 아니다.
 #
 # 반면 나머지 루트 **파일**(package.json / package-lock.json /
 # docker-compose*.yml / .env.example)은 위 복사에
