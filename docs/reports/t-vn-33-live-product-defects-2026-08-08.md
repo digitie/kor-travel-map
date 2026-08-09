@@ -445,3 +445,22 @@ branch-caused였던 2건은 이번에 해소했다:
 검증 못 한 변경을 "고쳤다"고 선언하는 것은 이 브랜치가 다섯 번 REJECT된 바로 그
 패턴이다. 그래서 하지 않고 블로커로 남긴다 — Node 22+ 환경에서 처리해야 한다.
 ```
+
+### 31-해소. `audit:high` 머지 블로커 제거 (Node 22 설치 후)
+
+이 환경에 Node 22.22.2를 설치해 `npm audit fix`를 정상 실행했다. 손으로 lockfile을 짐작해 편집한 것이 아니라 **도구가 만들고 도구가 검증한** 변경이다.
+
+```
+npm audit fix --package-lock-only --omit=dev
+  nanoid 3.3.16 -> 3.3.18   (^3.3.16 범위 내, advisory 요구 >=3.3.17 충족)
+  부수: "dev": true / "peer": true 플래그 정리 — resolver가 postcss 경유 prod
+        의존이라는 실제 분류로 바로잡았다.
+
+검증(직전 커밋이 못 해서 블로커로 남겼던 바로 그것):
+  npm run audit:high                                      -> EXIT=0 (이전 1)
+  npm ci --workspaces --include=optional --no-audit
+     --no-fund --dry-run                                  -> EXIT=0
+     (postinstall의 @redocly/openapi-core vendor patch까지 정상)
+
+교훈: "환경이 없어 검증할 수 없다"는 상태를 방치하면 그 자리에 미검증 주장이 쌓인다.
+환경을 올리는 것이 검증 없는 변경을 넣는 것보다 싸다.
