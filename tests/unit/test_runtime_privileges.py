@@ -30,6 +30,16 @@ def test_runtime_acl_inventory_keeps_state_audit_and_its_sequence_ungranted() ->
                 "relation_kind": b"S",
             },
             {
+                "schema_name": "feature",
+                "relation_name": "public_features",
+                "relation_kind": "v",
+            },
+            {
+                "schema_name": "feature",
+                "relation_name": "features_detailed",
+                "relation_kind": "v",
+            },
+            {
                 "schema_name": "provider_sync",
                 "relation_name": "source_records",
                 "relation_kind": "r",
@@ -59,6 +69,8 @@ def test_runtime_acl_inventory_keeps_state_audit_and_its_sequence_ungranted() ->
     )
     assert 'GRANT SELECT ON TABLE "ops"."feature_overrides"' in rendered
     assert 'GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "ops"."feature_overrides"' not in rendered
+    assert 'GRANT SELECT ON TABLE "feature"."public_features"' in rendered
+    assert 'GRANT SELECT ON TABLE "feature"."features_detailed"' in rendered
 
 
 @pytest.mark.unit
@@ -77,3 +89,21 @@ def test_runtime_acl_inventory_rejects_a_new_feature_table_until_policy_is_revie
 
     assert grants == []
     assert unknown == ["feature.feature_future_state_evidence"]
+
+
+@pytest.mark.unit
+def test_runtime_acl_inventory_rejects_an_unreviewed_feature_view() -> None:
+    """새 view도 table처럼 closed ACL 정책 없이는 기동을 차단한다."""
+
+    grants, unknown = _runtime_relation_grants(
+        [
+            {
+                "schema_name": "feature",
+                "relation_name": "feature_future_read_projection",
+                "relation_kind": "v",
+            }
+        ]
+    )
+
+    assert grants == []
+    assert unknown == ["feature.feature_future_read_projection"]

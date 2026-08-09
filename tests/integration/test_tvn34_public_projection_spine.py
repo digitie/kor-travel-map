@@ -226,7 +226,16 @@ async def test_runtime_subtype_acl_excludes_public_ready(
                     ) AS flag_update,
                     has_column_privilege(
                         'ktm_feature_runtime', :relation, 'geom', 'UPDATE'
-                    ) AS geom_update
+                    ) AS geom_update,
+                    has_column_privilege(
+                        'ktm_feature_runtime', :relation, 'feature_id', 'UPDATE'
+                    ) AS feature_id_update,
+                    has_column_privilege(
+                        'ktm_feature_runtime', :relation, 'feature_uuid', 'UPDATE'
+                    ) AS feature_uuid_update,
+                    has_column_privilege(
+                        'ktm_feature_runtime', :relation, 'kind', 'UPDATE'
+                    ) AS kind_update
                 """
             ),
             {"relation": f"feature.{table}"},
@@ -234,9 +243,12 @@ async def test_runtime_subtype_acl_excludes_public_ready(
     ).mappings().one()
     assert dict(privileges) == {
         "table_update": False,
-        "table_delete": True,
+        "table_delete": False,
         "flag_update": False,
         "geom_update": True,
+        "feature_id_update": False,
+        "feature_uuid_update": False,
+        "kind_update": False,
     }
 
     feature_id = f"tvn34b:acl:{table}:{uuid4().hex}"

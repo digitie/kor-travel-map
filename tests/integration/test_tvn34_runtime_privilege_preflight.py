@@ -144,6 +144,12 @@ async def test_tvn34_api_and_dagster_runtime_logins_pass_actual_catalog_prefligh
                         )
                     )
                 ) is True
+                assert await connection.scalar(
+                    text("SELECT count(*) FROM feature.public_features")
+                ) is not None
+                assert await connection.scalar(
+                    text("SELECT count(*) FROM feature.features_detailed")
+                ) is not None
                 assert (
                     await connection.scalar(
                         text(
@@ -230,10 +236,10 @@ async def test_tvn34_api_and_dagster_runtime_logins_pass_actual_catalog_prefligh
             await runtime_engine.dispose()
 
 
-async def test_tvn34_runtime_preflight_rejects_single_audit_or_legacy_update_leak(
+async def test_tvn34_runtime_preflight_rejects_single_audit_legacy_or_read_view_leak(
     migrated_engine: AsyncEngine,
 ) -> None:
-    """audit DML 한 privilege 또는 legacy surrogate UPDATE 하나도 fail-closed다."""
+    """audit·legacy·필수 read view ACL 하나라도 빠지면 fail-closed다."""
 
     await _provision_runtime_logins(migrated_engine)
     api_engine = await _engine_for_runtime(
@@ -264,6 +270,16 @@ async def test_tvn34_runtime_preflight_rejects_single_audit_or_legacy_update_lea
                 dagster_engine,
                 expected_login="ktm_feature_dagster_runtime",
             )
+
+        async with migrated_engine.begin() as connection:
+            await connection.execute(
+                text("REVOKE SELECT ON feature.public_features FROM ktm_feature_runtime")
+            )
+        with pytest.raises(RuntimeDbPrivilegeBoundaryError, match="public_features"):
+            await assert_runtime_db_privilege_boundary(
+                api_engine,
+                expected_login="ktm_feature_api_runtime",
+            )
     finally:
         async with migrated_engine.begin() as connection:
             await connection.execute(
@@ -274,6 +290,9 @@ async def test_tvn34_runtime_preflight_rejects_single_audit_or_legacy_update_lea
             )
             await connection.execute(
                 text("REVOKE UPDATE (status) ON feature.features FROM ktm_feature_dagster_runtime")
+            )
+            await connection.execute(
+                text("GRANT SELECT ON feature.public_features TO ktm_feature_runtime")
             )
         await api_engine.dispose()
         await dagster_engine.dispose()
@@ -510,11 +529,20 @@ async def test_tvn34_runtime_logins_run_provider_and_admin_dml_but_raw_state_wri
                 "INSERT INTO feature.feature_state_transitions (feature_id) VALUES (:feature_id)",
                 "UPDATE ops.feature_overrides SET status = status WHERE FALSE",
                 "DELETE FROM ops.feature_overrides WHERE FALSE",
+                "DELETE FROM feature.feature_routes WHERE FALSE",
+                "UPDATE feature.feature_routes SET feature_id = feature_id WHERE FALSE",
             ):
                 with pytest.raises(DBAPIError) as rejected:
                     async with runtime_engine.begin() as connection:
                         await connection.execute(text(forbidden_sql), {"feature_id": feature_id})
                 assert getattr(rejected.value.orig, "sqlstate", None) == "42501"
+
+            # Geometry refinement is a normal subtype writer operation, but
+            # the identity and DB-owned cache columns above are not writable.
+            async with runtime_engine.begin() as connection:
+                await connection.execute(
+                    text("UPDATE feature.feature_routes SET geom = geom WHERE FALSE")
+                )
     finally:
         for runtime_engine in runtime_engines:
             await runtime_engine.dispose()

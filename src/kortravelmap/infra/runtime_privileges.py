@@ -63,11 +63,25 @@ _FEATURE_TABLE_PRIVILEGES: Mapping[str, tuple[str, ...]] = {
     "weather_metric_series": ("SELECT", "INSERT", "UPDATE", "DELETE"),
 }
 
+# Views are included in ``REVOKE ALL ON ALL TABLES`` but PostgreSQL does not
+# return them from a table-only catalog inventory.  Keep the two runtime read
+# views in their own closed allowlist: public readers use ``public_features``
+# and admin/curated detail projections use ``features_detailed``.  A new view
+# therefore fails reconciliation until its intended consumer is reviewed.
+_FEATURE_VIEW_PRIVILEGES: Mapping[str, tuple[str, ...]] = {
+    "features_detailed": ("SELECT",),
+    "public_features": ("SELECT",),
+}
+
 # Route/area geometry is the sole cross-relation public index case.  Keep the
 # runtime grant column-scoped so it cannot make the DB-owned ``public_ready``
 # cache stale (T-VN-34B).  These tables intentionally do not use the broad
 # feature table inventory above.
-_ROUTE_AREA_RUNTIME_COLUMNS: Mapping[str, tuple[str, ...]] = {
+# Insert needs the immutable subtype identity, whereas an ordinary runtime
+# update must never reattach or delete a subtype row.  Reattachment changes
+# the 1:1 core/subtype topology and deletion can make a public route/area
+# disappear from geometry readers; neither is a normal provider writer path.
+_ROUTE_AREA_RUNTIME_INSERT_COLUMNS: Mapping[str, tuple[str, ...]] = {
     "feature_routes": (
         "feature_id",
         "feature_uuid",
@@ -100,16 +114,24 @@ _ROUTE_AREA_RUNTIME_COLUMNS: Mapping[str, tuple[str, ...]] = {
     ),
 }
 
+_ROUTE_AREA_RUNTIME_UPDATE_COLUMNS: Mapping[str, tuple[str, ...]] = {
+    relation: tuple(
+        column
+        for column in columns
+        if column not in {"feature_id", "feature_uuid", "kind"}
+    )
+    for relation, columns in _ROUTE_AREA_RUNTIME_INSERT_COLUMNS.items()
+}
+
 _ROUTE_AREA_RUNTIME_GRANTS = tuple(
     statement
-    for relation, columns in _ROUTE_AREA_RUNTIME_COLUMNS.items()
+    for relation, insert_columns in _ROUTE_AREA_RUNTIME_INSERT_COLUMNS.items()
     for statement in (
         f"GRANT SELECT ON feature.{relation} TO ktm_feature_runtime",
-        f"GRANT INSERT ({', '.join(columns)}) ON feature.{relation} "
+        f"GRANT INSERT ({', '.join(insert_columns)}) ON feature.{relation} "
         "TO ktm_feature_runtime",
-        f"GRANT UPDATE ({', '.join(columns)}) ON feature.{relation} "
+        f"GRANT UPDATE ({', '.join(_ROUTE_AREA_RUNTIME_UPDATE_COLUMNS[relation])}) "
         "TO ktm_feature_runtime",
-        f"GRANT DELETE ON feature.{relation} TO ktm_feature_runtime",
         f"GRANT SELECT (feature_id, public_ready), UPDATE (public_ready) "
         f"ON feature.{relation} "
         "TO ktm_feature_state_procedure_owner",
@@ -146,7 +168,7 @@ _APPLICATION_RELATIONS_SQL = text(
     JOIN pg_catalog.pg_namespace AS namespace
       ON namespace.oid = relation.relnamespace
     WHERE namespace.nspname IN ('feature', 'provider_sync', 'ops')
-      AND relation.relkind IN ('r', 'p', 'S')
+      AND relation.relkind IN ('r', 'p', 'v', 'S')
     ORDER BY namespace.nspname, relation.relkind, relation.relname
     """
 )
@@ -256,9 +278,18 @@ def _runtime_relation_grants(
             grants.append(_sequence_grant_sql(schema=schema, relation=relation))
             continue
         if schema == "feature":
+            if relation_kind == "v":
+                privileges = _FEATURE_VIEW_PRIVILEGES.get(relation)
+                if privileges is None:
+                    unknown_feature_relations.append(f"feature.{relation}")
+                    continue
+                grants.append(
+                    _grant_sql(schema=schema, relation=relation, privileges=privileges)
+                )
+                continue
             if relation in _PROTECTED_FEATURE_TABLES:
                 continue
-            if relation in _ROUTE_AREA_RUNTIME_COLUMNS:
+            if relation in _ROUTE_AREA_RUNTIME_INSERT_COLUMNS:
                 continue
             privileges = _FEATURE_TABLE_PRIVILEGES.get(relation)
             if privileges is None:
