@@ -184,10 +184,26 @@ def _is_exempt(command: str) -> bool:
 
     if command.startswith("uses ./"):
         return False
-    # `&&`로 이어 붙인 명령은 **구간마다** 판정한다. 접두만 보면
-    # `pip install ruff && bash scripts/verify-x6.sh`처럼 면제 명령 뒤에 진짜
-    # 게이트를 붙여 통째로 면제받을 수 있다(X6·X7).
-    segments = [segment.strip() for segment in command.split("&&") if segment.strip()]
+    # 제어 흐름 블록(`if … fi`)은 통째로 하나의 명령이다. 단, **`fi` 뒤에 남는 것이
+    # 있으면** 그건 가드와 무관한 별개 명령이므로 면제가 아니다 — 예전에는 가드
+    # 블록 뒤에 한 줄을 덧붙여 통째로 면제받을 수 있었다(9라운드 R16).
+    if command.startswith("if "):
+        stripped = command.rstrip()
+        if not stripped.endswith(" fi"):
+            # `fi` 뒤에 무언가 남았다 = 가드와 무관한 별개 명령이 붙어 있다.
+            return False
+        head = stripped[: -len(" fi")]
+        # `partition(" fi")`를 쓰면 안 된다 — 본문의 " fixture"에도 걸려 블록이
+        # 엉뚱한 데서 잘린다(실측으로 밟았다).
+        return any(head.startswith(marker) for marker in _EXEMPT)
+    # 이어 붙인 명령은 **구간마다** 판정한다. `&&`만 갈랐더니 `;`와 `||`가 그대로
+    # 열려 있었다(9라운드 R14·R15) — `echo start; bash verify.sh`가 `echo ` 접두로
+    # 통째 면제됐다. 세 연결자를 모두 가른다.
+    segments = [
+        segment.strip()
+        for segment in re.split(r"&&|\|\||;", command)
+        if segment.strip()
+    ]
     return bool(segments) and all(
         any(segment.startswith(marker) for marker in _EXEMPT) for segment in segments
     )
@@ -314,10 +330,19 @@ def _gate_lines() -> list[str]:
     함수의 본문만 증거로 인정한다. 아무도 부르지 않는 함수는 죽은 코드다.
     """
 
-    logical = _expanded_script_lines()
+    gate_lines: list[str] = []
+    for line in _expanded_script_lines():
+        if not line.lstrip().startswith('run_gate "'):
+            continue
+        gate_lines.append(line)
+        gate_lines.extend(_helper_bodies_for(line))
+    return gate_lines
+
+
+def _shell_function_bodies() -> dict[str, list[str]]:
     bodies: dict[str, list[str]] = {}
     current: str | None = None
-    for line in logical:
+    for line in _expanded_script_lines():
         define = re.match(r"^(\w+)\(\)\s*\{", line)
         if define is not None:
             current = define.group(1)
@@ -328,27 +353,29 @@ def _gate_lines() -> list[str]:
                 current = None
             else:
                 bodies[current].append(line)
-    gate_lines: list[str] = []
-    for line in logical:
-        if not line.lstrip().startswith("run_gate"):
+    return bodies
+
+
+def _helper_bodies_for(line: str) -> list[str]:
+    """``line``이 **이름으로 부르는** 함수의 본문(간접 호출 포함)."""
+
+    bodies = _shell_function_bodies()
+    collected: list[str] = []
+    seen: set[str] = set()
+    queue = [name for name in bodies if _contains_token(line, name)]
+    while queue:
+        name = queue.pop()
+        if name in seen:
             continue
-        gate_lines.append(line)
-        seen: set[str] = set()
-        queue = [name for name in bodies if _contains_token(line, name)]
-        while queue:
-            name = queue.pop()
-            if name in seen:
-                continue
-            seen.add(name)
-            gate_lines.extend(bodies[name])
-            queue.extend(
-                other
-                for body in [bodies[name]]
-                for entry in body
-                for other in bodies
-                if other not in seen and _contains_token(entry, other)
-            )
-    return gate_lines
+        seen.add(name)
+        collected.extend(bodies[name])
+        queue.extend(
+            other
+            for entry in bodies[name]
+            for other in bodies
+            if other not in seen and _contains_token(entry, other)
+        )
+    return collected
 
 
 def test_gate_script_covers_every_ci_blocking_command() -> None:
@@ -437,6 +464,144 @@ def test_documented_integration_coverage_threshold_matches_pyproject() -> None:
     )
 
 
+def _run_gate_invocations() -> list[str]:
+    """``run_gate`` **호출 줄만** 돌려준다(헬퍼 본문 제외).
+
+    무력화 검사는 호출 줄에 걸어야 한다 — 헬퍼 본문에는 정당한 파이프가 있다
+    (``py()``의 ``tar | tar``). 대상을 좁히지 않으면 검사가 거짓 양성으로 죽고,
+    죽은 검사는 없는 검사다.
+    """
+
+    return [
+        line
+        for line in _expanded_script_lines()
+        # `run_gate() {` 정의 줄은 호출이 아니다.
+        if line.lstrip().startswith('run_gate "')
+    ]
+
+
+def test_gate_commands_do_not_pipe_away_their_exit_code() -> None:
+    """게이트 명령에 파이프를 걸면 종료코드가 마지막 명령의 것이 된다.
+
+    ``py()`` 주석이 이 실패 모드를 적어 두고 있었는데 검사는 없었다 —
+    ``py 'python -m mypy --strict -p kortravelmap | cat'`` 한 번으로 게이트가
+    영원히 통과한다(컨테이너 ``sh``에 pipefail이 없다). 9라운드 적대 리뷰 R5.
+    """
+
+    single_pipe = re.compile(r"(?<!\|)\|(?!\|)")
+    offenders = [
+        line.strip()[:110]
+        for line in _run_gate_invocations()
+        if single_pipe.search(line)
+    ]
+    assert offenders == [], (
+        "게이트 명령에 파이프가 있다 — 종료코드가 파이프 마지막 명령의 것이 된다:\n"
+        + "\n".join(offenders)
+    )
+
+
+def test_gate_runner_is_one_of_the_declared_helpers() -> None:
+    """게이트 실행자를 ``echo`` 같은 것으로 바꿔치기하면 조각은 그대로 남는다.
+
+    ``run_gate "pytest api" py '...'`` -> ``run_gate "pytest api" echo '...'``는
+    조각(경로·플래그)이 전부 줄에 남아 미러링 감사를 통과하면서 아무것도 실행하지
+    않는다(9라운드 R8). 실행자를 **선언된 헬퍼 집합**으로 못 박는다.
+    """
+
+    text = _SCRIPT.read_text(encoding="utf-8")
+    helpers = set(re.findall(r"^(\w+)\(\)\s*\{", text, flags=re.M)) - {"run_gate"}
+    bad: list[str] = []
+    for line in _run_gate_invocations():
+        parts = re.match(r'\s*run_gate\s+"[^"]*"\s+(\S+)', line)
+        if parts is None or parts.group(1) not in helpers:
+            bad.append(line.strip()[:110])
+    assert bad == [], (
+        f"게이트 실행자가 선언된 헬퍼({sorted(helpers)})가 아니다:\n" + "\n".join(bad)
+    )
+
+
+def test_gate_script_accounts_for_failures_and_exits_nonzero() -> None:
+    """실패 회계와 종료코드는 도달성 판정 **밖**이라 아무도 안 보고 있었다.
+
+    ``FAILED+=("$name")`` 한 줄을 지우거나 마지막 ``exit 1``을 ``exit 0``으로
+    바꾸면 게이트 25개가 전부 FAIL을 찍어도 스크립트는 0으로 끝난다(9라운드 R6·R7).
+    """
+
+    text = _SCRIPT.read_text(encoding="utf-8")
+    assert 'FAILED+=("$name")' in text, "run_gate가 실패를 기록하지 않는다"
+    assert "${#FAILED[@]}" in text, "실패 개수를 판정에 쓰지 않는다"
+    tail = text.rsplit("${#FAILED[@]}", 1)[-1]
+    assert re.search(r"^exit 1\s*$", tail, flags=re.M), (
+        "실패가 있는데도 스크립트가 0으로 끝난다"
+    )
+
+
+def test_container_copy_failure_is_fatal() -> None:
+    """소스 복사 실패를 삼키면 **낡은 트리** 위에서 게이트가 통과한다.
+
+    9라운드 R13은 이 브랜치가 방금 고친 그 삼킴을 한 줄로 되돌린다.
+    """
+
+    text = _SCRIPT.read_text(encoding="utf-8")
+    assert "exit 97" in text, "컨테이너 소스 복사 실패가 치명이 아니다"
+
+
+def test_blocking_workflows_do_not_neuter_steps() -> None:
+    """``continue-on-error``는 스텝을 남긴 채 **차단력만** 없앤다.
+
+    ``if: false``만 보던 감사기는 이것을 몰랐다(9라운드 R2).
+    """
+
+    offenders = [
+        path.name
+        for path in _blocking_workflows()
+        if re.search(
+            r"^\s*(?:- )?continue-on-error:\s*true\s*$",
+            path.read_text(encoding="utf-8"),
+            flags=re.M,
+        )
+    ]
+    assert offenders == [], (
+        "차단 워크플로에 continue-on-error가 있다 — 스텝이 있어도 PR을 막지 못한다: "
+        f"{offenders}"
+    )
+
+
+def test_local_gates_all_have_a_ci_counterpart() -> None:
+    """**역방향** 감사: 로컬에 있는 게이트가 CI에도 있는가.
+
+    미러링 감사는 CI -> 로컬 한 방향만 봤다. 그래서 CI에서 스텝을 통째로 지우면
+    (vitest·admin eslint·mypy core 등) 감사기가 침묵했다(9라운드 R1·R3·R4).
+    로컬 게이트가 CI에 없다는 것은 둘 중 하나다 — CI가 약해졌거나, 로컬이 CI에
+    없는 것을 돌고 있거나. 어느 쪽이든 사람이 봐야 한다.
+    """
+
+    ci_fragment_sets = [
+        fragments
+        for commands in _workflow_commands().values()
+        for command in commands
+        if not _is_exempt(command)
+        for fragments in [_identifying_fragments(command)]
+        if fragments is not None
+    ]
+    orphans: list[str] = []
+    for line in _gate_lines():
+        if not line.lstrip().startswith('run_gate "'):
+            continue
+        name = re.search(r'run_gate\s+"([^"]*)"', line)
+        reachable = [line, *_helper_bodies_for(line)]
+        if not any(
+            all(_contains_token(entry, fragment) for fragment in fragments)
+            for fragments in ci_fragment_sets
+            for entry in reachable
+        ):
+            orphans.append(name.group(1) if name else line.strip()[:80])
+    assert orphans == [], (
+        "로컬 게이트에 대응하는 CI 스텝이 없다 — CI에서 지워졌거나 로컬만 돈다:\n"
+        + "\n".join(orphans)
+    )
+
+
 #: 게이트 줄에 있으면 **그 게이트는 실패할 수 없다**. 값과 이유를 함께 둔다.
 _FAILURE_SUPPRESSORS: dict[str, str] = {
     "|| true": "실패해도 0으로 덮는다.",
@@ -446,6 +611,13 @@ _FAILURE_SUPPRESSORS: dict[str, str] = {
     "set +e": "이후 실패가 스크립트 종료코드에 반영되지 않는다.",
     "--exit-zero": "린터가 발견을 하고도 0으로 끝난다.",
     "|| echo": "실패를 출력으로 바꿔 삼킨다.",
+    # pytest는 경로를 그대로 두고 **플래그로** 스위트를 줄일 수 있다. 경로 조각
+    # 감사로는 원리적으로 안 보인다(9라운드 R9·R10) — `--ignore`로 감사기 자신을
+    # 빼도 침묵했다. ruff/mypy에는 없는 축이라 pytest만 열려 있었다.
+    "--ignore": "pytest 스위트를 경로는 남긴 채 줄인다.",
+    "--deselect": "특정 테스트를 빼고 돈다.",
+    " -k ": "이름 필터로 스위트를 줄인다.",
+    " --no-cov": "coverage 게이팅을 끈다.",
 }
 
 
@@ -481,6 +653,33 @@ def test_gate_script_keeps_eslint_warning_budget_at_zero() -> None:
     budgets = re.findall(r"--max-warnings[= ](\d+)", "\n".join(_gate_lines()))
     assert all(value == "0" for value in budgets), (
         f"eslint 경고 예산이 0이 아니다: {budgets}"
+    )
+
+
+def test_geo_live_mode_is_probed_before_and_after() -> None:
+    """live 모드 선언을 **반증할 장치**가 스크립트에 있어야 한다.
+
+    geo 5건은 도달 불가면 조용히 skip된다. 그래서 "터널로 실제 실행"이라는 출력은
+    그 자체로 근거가 되지 못한다 — 실제로 그 출력과 함께 5건이 skip된 실행이 있다.
+    probe를 지우면(9라운드 R11) 그 상태로 되돌아가는데, 조각 감사는 경로
+    (`tests/integration`)만 보므로 원리적으로 못 본다.
+
+    사전 probe만으로도 부족하다. integration은 20~50분이고 probe는 시작 시 한 번만
+    도니, 도중에 ssh가 끊기면 여전히 조용한 skip이다. 사후 단언까지 요구한다.
+    """
+
+    integration = [
+        line for line in _run_gate_invocations() if "tests/integration" in line
+    ]
+    assert integration, "integration 게이트가 없다"
+    joined = "\n".join(integration)
+    # 사전/사후를 **따로** 요구한다. "geo_live_probe.py가 줄에 있는가"만 보면 한쪽만
+    # 지워도 통과한다 — 사후 단언이 남아 있어 문자열이 여전히 존재하기 때문이다.
+    assert "geo_live_probe.py || exit 96" in joined, (
+        "geo live 사전 probe가 없다 — live 모드 선언을 반증할 장치가 사라졌다"
+    )
+    assert "--assert-ran" in joined, (
+        "geo live 사후 단언이 없다 — 실행 도중 터널이 끊겨도 green이 된다"
     )
 
 

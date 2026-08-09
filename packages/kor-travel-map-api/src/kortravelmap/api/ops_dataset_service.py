@@ -236,12 +236,23 @@ def _scope_refresh_capability(
             allowed_sync_scopes=[],
             reason="이 dataset은 전체 dataset 단위로만 갱신합니다.",
         )
+    # 허용 scope는 **카탈로그가 선언한 것**이다(`provider_dataset_operation_scopes`).
+    # 앞 판은 `["target_grids"]`를 박아 두어, 같은 API가 낸 membership 행을 같은
+    # API가 "현재 활성 target에 포함되지 않은 sync scope입니다"라는 **거짓 사유로**
+    # 거부했다. 시드에 실제로 있다 — `0089_tvn33_expand_seed`는 target_grids
+    # dataset에 `dataset_wide` scope 행도 함께 심고(KMA 3종), 그 triple은
+    # `POST /ops/pipeline/requests`가 그대로 받는다. 한 응답 안에서 정본과 투영이
+    # 서로 모순하던 것이고, T-VN-33이 없애려던 pair 시대 투영 그 자체다.
+    #
+    # main에 있던 "활성 POI external system을 allowed에 덧붙인다"도 여기로 수렴한다 —
+    # `external_system:*`는 이제 scope 행으로 선언돼야 허용된다. 카탈로그가 유일한
+    # 정본이라는 규칙이 그 축에도 똑같이 적용된다.
     return OpsDatasetScopeRefreshCapability(
         supported=True,
         selector="poi_cache_targets",
         effect="sync_scope",
-        default_sync_scope="target_grids",
-        allowed_sync_scopes=["target_grids"],
+        default_sync_scope=entry.default_refresh_scope,
+        allowed_sync_scopes=list(entry.refresh_scopes),
         reason=None,
     )
 

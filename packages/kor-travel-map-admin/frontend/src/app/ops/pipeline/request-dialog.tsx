@@ -519,6 +519,10 @@ function useRequestCreateDialogController() {
     scopeType,
     scopeProviderDatasetId,
     effectiveScopeSyncScope,
+    // identity의 세 번째 축. 빼면 형제 operation A로 미리보기를 돌린 뒤 select를
+    // B로 바꿔도 키가 그대로라, **A의 결과가 B의 결과인 것처럼** 계속 렌더된다.
+    // 운영자는 그 화면을 근거로 B에 canonical write를 낸다.
+    scopeForm.effectiveOperationKey,
     scopeForm.lon,
     scopeForm.lat,
     scopeForm.radiusKm,

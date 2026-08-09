@@ -48,7 +48,9 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
-SRC = Path("/src")
+# 저장소 루트를 파일 위치에서 유도한다 — `/src` 하드코딩이면 pytest로 부를 수
+# 없고, 그러면 이 배터리는 **어느 게이트에도 걸리지 않는** 도구로 남는다.
+SRC = Path(__file__).resolve().parents[1]
 WORK = Path("/tmp/ktm-audit-mutation")
 
 _NODE_STEP = "      - name: Set up Node 22.23.1"
@@ -215,7 +217,7 @@ MUTATIONS: dict[str, tuple[str, Callable[[str], str] | None]] = {
     ),
     "X2c integration 무력화(|| true)": (
         "__script__",
-        _append_to_gate_line("tail -25 /tmp/g4.log; exit $rc'", " || true"),
+        _append_to_gate_line("--assert-ran /tmp/g4.log", " || true"),
     ),
     "X9 openapi 무력화(|| true)": (
         "__script__",
@@ -274,6 +276,112 @@ MUTATIONS: dict[str, tuple[str, Callable[[str], str] | None]] = {
     # 부류 4: 차단 워크플로 탐지 회피.
     "X5b 헤더 주석에 jobs:": ("__jobs_comment__", None),
     "X8 merge_group 전용 트리거": ("__merge_group__", None),
+    # --- 9라운드 적대 리뷰가 설계한 변이 (통제군 결함 때문에 전부 "잡음"으로
+    # 보였을 뿐, 하네스를 고치면 3/18만 잡혔다) ---
+    # 부류 A: CI 스텝을 **지우거나 무력화**한다. 감사기가 CI->로컬 한 방향만 봐서
+    # 원리적으로 사각이었다.
+    "R1 CI에서 vitest 스텝 삭제": (
+        "frontend.yml",
+        lambda text: text.replace(
+            "      - name: admin frontend unit tests (vitest)\n", "", 1
+        ).replace(
+            "        run: npx --yes npm@12.0.1 -w "
+            "packages/kor-travel-map-admin/frontend run test\n",
+            "",
+            1,
+        ),
+    ),
+    "R2 integration 스텝에 continue-on-error": (
+        "ci.yml",
+        lambda text: text.replace(
+            "      - name: Run integration tests",
+            "      - continue-on-error: true\n      - name: Run integration tests",
+            1,
+        ),
+    ),
+    "R3 CI에서 admin eslint 스텝 삭제": (
+        "frontend.yml",
+        _drop_script_lines(
+            "        run: npx --yes npm@12.0.1 -w packages/kor-travel-map-admin/frontend run lint"
+        ),
+    ),
+    "R4 CI에서 mypy core 스텝 삭제": (
+        "lint.yml",
+        _drop_script_lines("        run: mypy --strict -p kortravelmap\n"),
+    ),
+    # 부류 B: 로컬 게이트를 **실패 불가**로 만든다.
+    "R5 파이프로 종료코드 삼키기": (
+        "__script__",
+        lambda text: text.replace(
+            "'python -m mypy --strict -p kortravelmap'",
+            "'python -m mypy --strict -p kortravelmap | cat'",
+            1,
+        ),
+    ),
+    "R6 run_gate 실패 회계 제거": (
+        "__script__",
+        _drop_script_lines('FAILED+=("$name")'),
+    ),
+    "R7 최종 exit 1 -> exit 0": (
+        "__script__",
+        lambda text: text.replace("\nexit 1\n", "\nexit 0\n", 1),
+    ),
+    "R8 게이트 실행자 py -> echo": (
+        "__script__",
+        lambda text: text.replace('run_gate "pytest api" py', 'run_gate "pytest api" echo', 1),
+    ),
+    "R13 컨테이너 복사 실패를 다시 삼킴": (
+        "__script__",
+        lambda text: text.replace("exit 97", "exit 0", 1),
+    ),
+    # 부류 C: pytest 스위트를 **경로는 남긴 채** 플래그로 줄인다.
+    "R9 pytest --ignore로 축소": (
+        "__script__",
+        lambda text: text.replace(
+            "python -m pytest tests/unit tests/lint -q",
+            "python -m pytest tests/unit tests/lint -q "
+            "--ignore=tests/unit/test_gate_script_mirrors_ci.py",
+            1,
+        ),
+    ),
+    "R10 pytest -k로 축소": (
+        "__script__",
+        lambda text: text.replace(
+            "python -m pytest tests/unit tests/lint -q",
+            "python -m pytest tests/unit tests/lint -q -k dedup",
+            1,
+        ),
+    ),
+    # 부류 D: geo live 반증 장치 제거.
+    "R11 geo live probe 제거": (
+        "__script__",
+        lambda text: text.replace("python scripts/geo_live_probe.py || exit 96; ", "", 1),
+    ),
+    "R11b geo live 사후 단언 제거": (
+        "__script__",
+        lambda text: text.replace(
+            "python scripts/geo_live_probe.py --assert-ran /tmp/g4.log || exit 95; ", "", 1
+        ),
+    ),
+    # 부류 E: 면제 접두 뒤에 `;`/`||`/블록 끝으로 진짜 게이트를 밀수한다.
+    "R14 밀수(; 로 이어붙임)": (
+        "frontend.yml",
+        _insert_before_node_step(
+            "      - name: fake gate\n        run: echo start; bash scripts/verify-r14.sh"
+        ),
+    ),
+    "R15 밀수(|| 로 이어붙임)": (
+        "frontend.yml",
+        _insert_before_node_step(
+            "      - name: fake gate\n        run: mv a b || bash scripts/verify-r15.sh"
+        ),
+    ),
+    "R16 밀수(fixture 가드 블록 뒤)": (
+        "ci.yml",
+        lambda text: text.replace(
+            _FIXTURE_BLOCK, _FIXTURE_BLOCK + "\n          bash scripts/verify-r16.sh", 1
+        ),
+    ),
     "M5 배열 트리거 워크플로": ("__array_trigger__", None),
     "M6 .yaml 확장자 워크플로": ("__yaml_ext__", None),
     "M8 composite action 스텝": (
@@ -285,13 +393,26 @@ MUTATIONS: dict[str, tuple[str, Callable[[str], str] | None]] = {
 }
 
 
-def _run(label: str, target: str, mutate: Callable[[str], str] | None) -> bool:
+def _run(
+    label: str,
+    target: str,
+    mutate: Callable[[str], str] | None,
+    *,
+    quiet: bool = False,
+) -> bool:
     if WORK.exists():
         shutil.rmtree(WORK)
     for name in ("tests", ".github", "scripts"):
         shutil.copytree(SRC / name, WORK / name)
+    # 감사기가 읽는 **모든 것**을 사본에 넣는다. `pyproject.toml`이 빠져 있어
+    # `test_documented_integration_coverage_threshold_matches_pyproject`가 변이와
+    # 무관하게 FileNotFoundError로 죽었고, `caught = returncode != 0`이 **항상 참**이
+    # 됐다 — 배터리가 출력하던 "32/32"는 측정이 아니라 상수였다(9라운드 적대 리뷰).
+    shutil.copy2(SRC / "pyproject.toml", WORK / "pyproject.toml")
 
-    if target == "__new__":
+    if target == "__control__":
+        pass
+    elif target == "__new__":
         (WORK / ".github/workflows/security.yml").write_text(
             _NEW_WORKFLOW, encoding="utf-8"
         )
@@ -347,11 +468,35 @@ def _run(label: str, target: str, mutate: Callable[[str], str] | None) -> bool:
         check=False,
     )
     caught = result.returncode != 0
-    print(f"{'잡음  ' if caught else '생존!!'} {label}")
+    if not quiet:
+        print(f"{'잡음  ' if caught else '생존!!'} {label}")
     return caught
 
 
+def _control_group_is_clean() -> bool:
+    """변이를 **하나도 심지 않은** 사본에서 감사기가 통과하는지 본다.
+
+    이것이 없으면 배터리는 무의미하다. 하네스가 깨져 있으면 모든 변이가 "잡음"으로
+    보이고, 그 100%는 감사기가 무엇을 하든 나오는 숫자다. 실제로 그 상태의 "32/32"를
+    머지 근거로 인용했다 — 검증 장치 안에, 이 저장소가 여덟 번 반려된 것과 똑같은
+    결함(선언한 검증 범위 != 실제 검증 범위)이 들어 있었다.
+    """
+
+    clean = not _run("[통제군]", "__control__", None, quiet=True)
+    print(
+        "[통제군] 변이 없는 사본에서 감사기: "
+        + ("통과(정상)" if clean else "실패(하네스 고장)")
+    )
+    return clean
+
+
 def main() -> int:
+    if not _control_group_is_clean():
+        print(
+            "\n하네스가 깨졌다 — 변이 없이도 감사기가 실패한다. 이 상태의 검출률은 "
+            "감사기와 무관한 상수이므로 아래 결과는 근거가 되지 못한다."
+        )
+        return 1
     results = [_run(label, *spec) for label, spec in MUTATIONS.items()]
     print(f"\n{sum(results)}/{len(results)} 변이 검출")
     return 0 if all(results) else 1

@@ -791,6 +791,13 @@ async def list_ops_import_job_events(
         raise ValueError("provider_dataset_id must be greater than 0")
     if sync_scope is not None and provider_dataset_id is None:
         raise ValueError("sync_scope event filter requires provider_dataset_id")
+    # ``operation_key``도 같은 규칙이다. 없으면 아래 SQL 조립이 그 축을 **조용히
+    # 버리고** 전체 이벤트를 돌려준다 — cursor 지문에는 들어 있으므로 호출자는
+    # 좁혀진 결과라 믿는다. 축 하나만 fail-open인 것은 규칙이 아니라 누락이다.
+    # HTTP 경계(`_canonical_dataset_filter`)가 오늘은 막지만, 이 함수는 호출자가
+    # 셋인 공유 내부 API이므로 여기서 닫는다.
+    if operation_key is not None and provider_dataset_id is None:
+        raise ValueError("operation_key event filter requires provider_dataset_id")
     if sync_scope is not None:
         parse_canonical_sync_scope(sync_scope)
     page_size = _limit(limit)

@@ -18,7 +18,7 @@
 #   - Playwright e2e — API·DB·admin 서버 기동이 필요해 CI 워크플로에도 없다.
 #     n150에서 돌린다(`docs/dev-environment.md`). **이 스크립트가 green이어도
 #     e2e는 검증되지 않았다.** vitest는 2026-08-09에 CI와 여기 둘 다에 넣었다 —
-#     그 전까지 36파일 285케이스가 어느 게이트에도 걸려 있지 않았다.
+#     그 전까지 36파일 286케이스가 어느 게이트에도 걸려 있지 않았다.
 #
 # **여기서 재현 불가한 것**(로컬 하네스의 한계 — 반드시 인지하고 있어야 한다):
 #   - Python 3.11/3.12 매트릭스: 컨테이너는 3.13 하나다.
@@ -115,10 +115,10 @@ py() {
     -v "$WSL_ROOT:/src" -e TESTCONTAINERS_RYUK_DISABLED=true \
     -e KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY="$GEO_KEY" \
     -e LIVE_KOR_TRAVEL_GEO_BASE_URL="$GEO_BASE" "$IMAGE" \
-    sh -c "{ cd /repo && rm -rf src tests packages contracts alembic scripts .github \
+    sh -c "{ cd /repo && rm -rf src tests packages contracts alembic scripts .github docs \
       && tar -C /src --exclude=node_modules --exclude=.next --exclude=.react-doctor \
              --exclude=__pycache__ -cf - \
-             src tests packages contracts alembic scripts .github \
+             src tests packages contracts alembic scripts .github docs \
              alembic.ini pyproject.toml package.json package-lock.json \
              .env.example docker-compose.yml docker-compose.host.yml \
              docker-compose.external-db.yml docker-compose.external-infra.yml \
@@ -139,6 +139,11 @@ py() {
 # 심링크가 있어 `cp -r`가 non-zero로 끝난다. 예전에는 그 실패를 `;`로 삼켜
 # **일부만 복사된 트리** 위에서 게이트가 돌았고, 복사 실패를 치명으로 바꾸자마자
 # 드러났다. 빌드 산출물과 node_modules는 애초에 복사 대상이 아니다.
+#
+# `docs/`도 넣는다 — unit 테스트 7개가 `docs/runbooks/*`·`docs/deploy.md`·
+# `docs/archive/**`를 읽는데, 빠져 있어 **이미지에 구워진 3일 낡은 사본**을 검사하고
+# 있었다. 이 브랜치는 `docs/journal.md`·`resume.md`를 커밋했고 그 게이트는 그
+# 변경을 보지 않은 채 green을 냈다(9라운드 적대 리뷰 F7).
 #
 # 루트 파일(package.json / package-lock.json / docker-compose*.yml / .env.example)도
 # **이름을 하나씩 적어** 복사한다. 예전에는 빠져 있어 그 파일을 읽는 테스트 6건이
@@ -204,7 +209,7 @@ setup_geo_live
 # live 모드라고 선언했으면 **정말 live여야 한다.** 터널이 끊기면 geo 5건이 조용히
 # skip되고 로그에는 "실제 실행"만 남는다. 그 조용한 skip을 exit 96으로 바꾼다.
 run_gate "pytest integration" py \
-  'python scripts/geo_live_probe.py || exit 96; timeout 3000 python -m pytest tests/integration -q > /tmp/g4.log 2>&1; rc=$?; tail -25 /tmp/g4.log; exit $rc'
+  'python scripts/geo_live_probe.py || exit 96; timeout 3000 python -m pytest tests/integration -q > /tmp/g4.log 2>&1; rc=$?; tail -25 /tmp/g4.log; python scripts/geo_live_probe.py --assert-ran /tmp/g4.log || exit 95; exit $rc'
 if [ -n "$GEO_TUNNEL_PID" ]; then
   kill "$GEO_TUNNEL_PID" 2>/dev/null
   MSYS_NO_PATHCONV=1 wsl -e bash -lc 'pkill -f "N -L 12599" >/dev/null 2>&1' >/dev/null 2>&1

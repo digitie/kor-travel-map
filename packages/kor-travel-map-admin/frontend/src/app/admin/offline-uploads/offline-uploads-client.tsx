@@ -593,11 +593,19 @@ function UploadFormPanel({
     }
     return [...scopes].sort();
   }, [datasetsQuery.data?.data.items, parsedProviderDatasetId]);
-  const effectiveSyncScope = syncScope.trim() || (scopeOptions[0] ?? "");
+  // scope가 **유일할 때만** 자동으로 정한다. 둘 이상이면 운영자가 고른다 —
+  // 정렬 첫 값을 집으면 canonical write 대상이 사전순으로 결정된다. 그건 앞 판의
+  // 고정 기본값(즉시 422)보다 나쁘다: 조용히 다른 membership에 적재된다.
+  const effectiveSyncScope =
+    syncScope.trim() || (scopeOptions.length === 1 ? scopeOptions[0] : "");
   const uploadMissingFields = [
     file === null ? "파일" : null,
     parsedProviderDatasetId === undefined ? "provider dataset ID" : null,
-    effectiveSyncScope.length === 0 ? "sync scope" : null,
+    effectiveSyncScope.length === 0
+      ? scopeOptions.length > 1
+        ? `sync scope(이 dataset은 ${scopeOptions.join(", ")} 중 하나를 골라야 합니다)`
+        : "sync scope"
+      : null,
   ].filter((item): item is string => item !== null);
 
   const submitUpload = () => {
@@ -648,9 +656,11 @@ function UploadFormPanel({
         </datalist>
         <FormField
           hint={
-            scopeOptions.length > 0
-              ? `이 dataset의 canonical scope: ${scopeOptions.join(", ")}`
-              : "provider dataset을 먼저 고르면 canonical scope가 채워집니다."
+            scopeOptions.length > 1
+              ? `이 dataset은 canonical scope가 여러 개입니다 — 직접 고르세요: ${scopeOptions.join(", ")}`
+              : scopeOptions.length === 1
+                ? `이 dataset의 canonical scope: ${scopeOptions[0]}`
+                : "provider dataset을 먼저 고르면 canonical scope가 채워집니다."
           }
           label="sync scope"
           list="offline-upload-sync-scope-options"
