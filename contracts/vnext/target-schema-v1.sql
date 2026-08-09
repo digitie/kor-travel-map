@@ -562,6 +562,9 @@ BEGIN
           FROM provider_sync.source_records AS record
           JOIN provider_sync.source_entities AS entity
             ON entity.source_entity_key = record.source_entity_key
+          JOIN provider_sync.source_entity_heads AS head
+            ON head.source_entity_key = entity.source_entity_key
+           AND head.current_source_record_key = record.source_record_key
          WHERE record.source_record_key = v_source_record_key
            AND record.source_entity_key = v_source_entity_key
            AND entity.provider_dataset_id = v_dataset_id;
@@ -577,6 +580,11 @@ BEGIN
                 USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_state_transition_context';
         END IF;
         v_principal := btrim(p_context ->> 'principal');
+    END IF;
+    IF p_context ? 'causation_ref'
+       AND jsonb_typeof(p_context -> 'causation_ref') NOT IN ('string', 'null') THEN
+        RAISE EXCEPTION 'causation_ref must be a string or null'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_state_transition_context';
     END IF;
     v_context := jsonb_build_object(
         'transition_kind', v_kind,
@@ -804,6 +812,9 @@ BEGIN
               ON entity.source_entity_key = link.source_entity_key
             JOIN provider_sync.source_records AS record
               ON record.source_entity_key = entity.source_entity_key
+            JOIN provider_sync.source_entity_heads AS head
+              ON head.source_entity_key = entity.source_entity_key
+             AND head.current_source_record_key = record.source_record_key
             WHERE link.feature_id = p_feature_id
               AND link.source_entity_key = p_context ->> 'source_entity_key'
               AND entity.provider_dataset_id = (p_context ->> 'provider_dataset_id')::bigint
@@ -1347,7 +1358,7 @@ CREATE INDEX idx_feature_overrides_feature ON ops.feature_overrides (feature_id)
 -- schema remains sectioned by ownership; grant their read dependencies only
 -- after those relations exist.
 GRANT SELECT ON provider_sync.source_entities, provider_sync.source_records,
-    provider_sync.source_links, ops.feature_overrides
+    provider_sync.source_entity_heads, provider_sync.source_links, ops.feature_overrides
     TO ktm_feature_state_procedure_owner;
 
 -- =============================================================================

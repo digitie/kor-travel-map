@@ -70,18 +70,35 @@ legacy backfill audit의 `occurred_at`은 `COALESCE(user_deleted_at, deleted_at,
 
 ## 3. DB 무결성과 전이 감사
 
-`feature.feature_state_transitions`는 Feature별 상태 변경의 append-only 정본이다. 실제 parent
-schema와 같은 `feature_id TEXT`를 보존형 business identifier로 저장하지만 Feature table FK는 두지
-않는다. Feature hard purge 뒤에도 state audit는 남아야 하므로 `ON DELETE CASCADE`는 금지한다.
-final UUID target schema에서는 대응 UUID business identifier를 함께 기록하는 별도 final migration을
-둔다.
+`feature.feature_state_transitions`는 Feature별 상태 변경의 append-only 정본이다. 0095의 현행
+parent schema와 같은 `feature_id TEXT`를 보존형 business identifier로 저장하고, 같은 행에
+`feature_uuid UUID`도 반드시 기록한다. Feature table FK는 두지 않는다. Feature hard purge 뒤에도
+state audit는 남아야 하므로 `ON DELETE CASCADE`는 금지한다. 따라서 T-VN-39가 legacy TEXT PK/FK를
+제거해 final UUID core로 전환할 때도 purge된 audit를 포함해 UUID identity를 잃지 않는다. 0095의
+runtime procedure는 현행 TEXT key를 받고 final target procedure는 UUID key를 받는 전환 경계를
+명시적으로 유지한다.
 
 - 상태 축과 base Feature `INSERT`는 runtime role에 직접 권한을 주지 않고,
   `feature.create_feature_with_initial_state(...)`와 `feature.transition_feature_state(...)`
-  security-definer procedure만 바꾼다. 두 procedure는 dedicated NOLOGIN owner, fixed
-  `search_path`, schema-qualified dependency, `REVOKE EXECUTE FROM PUBLIC`를 사용하며 각 runtime
-  role에 필요한 `EXECUTE`만 grant한다. INSERT와 transition procedure의 세 축 UPDATE를 DB trigger가
-  포착한다. 한 UPDATE에서 여러 축을 바꾸면 한 audit row에 이전/이후 세 tuple 전체를 기록한다.
+  security-definer procedure만 바꾼다. user add/update/delete의 legacy provenance와
+  immutable response-shape version snapshot도 runtime이 직접 쓰지 않고, typed
+  `feature.materialize_user_feature_change_provenance(...)` procedure가 request·Feature·expected
+  revision을 잠가 한 transaction에서 기록한다. 따라서 runtime에는 `feature_versions` INSERT나
+  `features_detailed` SELECT를 주지 않는다. 이는 0095 현행 schema의 전환 bridge이며, final target에는
+  남기지 않는다. T-VN-36이 field-override effective projection/lineage로 대체한 뒤 legacy request와
+  version relation을 물리 제거한다. 이와 마찬가지로 **0095 현행 schema 전환 bridge에서만** provider
+  version `0`은 runtime JSON payload를 받지 않는 `feature.materialize_provider_feature_version(...)`
+  procedure가 잠긴 Feature와 `features_detailed`에서만 조립한다. user whole-row fence가 provider
+  core/subtype 변경을 막은 refresh는 user effective row를 provider baseline snapshot으로 오기록하지
+  않도록 그 snapshot을 재기록하지 않고 immutable raw source observation만 최신화한다. T-VN-36 final
+  effective projection/lineage가 user/provider version bridge를 함께 대체한다. lifecycle override의 작성·철회 역시
+  T-VN-34A의 transitional generic
+  `ops.feature_overrides` DML이 아니라 각각 expected revision으로 Feature row를 잠그는 typed
+  `author_lifecycle_override(...)`/`revoke_lifecycle_override(...)` command만 사용한다. 0095의 이 여섯
+  procedure는 dedicated NOLOGIN owner, fixed `search_path`, schema-qualified dependency,
+  `REVOKE EXECUTE FROM PUBLIC`를 사용하며 각 runtime role에 필요한 `EXECUTE`만 grant한다. INSERT와
+  transition procedure의 세 축 UPDATE를 DB trigger가 포착한다. 한 UPDATE에서 여러 축을 바꾸면 한
+  audit row에 이전/이후 세 tuple 전체를 기록한다.
 - 신규/legacy-backfill 행은 이전 tuple이 NULL인 `initial`/`legacy_backfill` transition만 허용한다.
   일반 transition은 이전/이후 tuple이 모두 유효하고 적어도 한 축이 달라야 한다.
 - audit row에는 `transition_kind`, non-empty `reason_code`, authenticated `principal`, nullable
@@ -90,9 +107,12 @@ final UUID target schema에서는 대응 UUID business identifier를 함께 기�
   `initial|legacy_backfill|provider_sync|admin|user_request|merge|quality_validation|system`만
   허용한다. procedure는 role별 structured transaction-local context를 검증하고, trigger는 missing,
   malformed, unknown kind를 거부한다. provider principal은 procedure가 `provider_dataset_id`에서
-  파생하고, admin/user principal은 인증 경계가 검증한 principal만 전달한다. DB는 end-user identity를
-  독자적으로 증명하지 않으므로 application-authenticated principal과 DB session identity를 함께
-  감사한다.
+  파생한다. provider가 전달하는 dataset/entity/record key는 같은 active dataset과 target Feature의
+  source link 및 `source_entity_heads`의 current observation을 procedure가 잠근 상태에서 검증하며,
+  audit의 authoritative receipt는 caller JSON이
+  아니라 그 `source_records.raw_payload_hash`에서만 파생한다. admin/user principal은 인증 경계가
+  검증한 principal만 전달한다. DB는 end-user identity를 독자적으로 증명하지 않으므로
+  application-authenticated principal과 DB session identity를 함께 감사한다.
 - audit writer trigger function도 procedure와 분리된 dedicated NOLOGIN owner의
   `SECURITY DEFINER`, fixed `search_path`, schema-qualified dependency로 둔다. audit table은
   `REVOKE ALL` 뒤 audit writer owner에만 INSERT를 grant하고 runtime role에는 SELECT만 필요한 범위로
@@ -106,6 +126,21 @@ final UUID target schema에서는 대응 UUID business identifier를 함께 기�
   `audit_writer_definer`로 기록한다. 각 runtime은 독립 login `session_user`로 접속하고 `SET ROLE`
   권한을 갖지 않으며, audit에는 `invoker_role=session_user`도 함께 기록한다. migration/backfill은
   전용 migration role과 `legacy_backfill` context만 허용한다.
+- privilege fence의 runtime은 bootstrap/schema owner가 아니다. `ktm_feature_schema_owner` NOLOGIN group이
+  dedicated DB와 feature/ops/provider_sync object를 소유하고, Alembic은 별도 LOGIN
+  `ktm_feature_migrator`가 `KOR_TRAVEL_MAP_MIGRATOR_PG_DSN`으로만 실행한다. API와 Dagster는 별도
+  LOGIN `ktm_feature_api_runtime`/`ktm_feature_dagster_runtime`가 각각
+  `KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN`/`KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN`으로 접속해 shared
+  NOLOGIN `ktm_feature_runtime`의 최소권한만 얻는다. role membership은 INHERIT·SET FALSE라 runtime
+  session이 owner로 승격하지 못한다. runtime login은 superuser, CREATEROLE, BYPASSRLS,
+  schema-owner membership을 가질 수 없다. role password는 Alembic이 만들지 않으며 ignored deployment
+  secret에서 pre-provision한다. bootstrap ownership transfer는 PostgreSQL system catalog까지 건드리는
+  `REASSIGN OWNED`가 아니라 dedicated application DB의 schema/relation/routine/type만 명시적으로
+  이전한다. startup preflight는 `session_user=current_user` runtime identity, procedure EXECUTE,
+  direct feature/audit/legacy surrogate mutation 거부를 실제 DSN으로 검사하고, runtime login으로
+  실제 `load_bundle` provider lineage·version materialization과 admin request materialization을
+  실행한다. runtime에는 `feature_versions`, audit, state axis, legacy provenance, generic
+  `ops.feature_overrides`의 직접 DML을 grant하지 않는다.
 - `active → retired`는 일반 상태 명령과 provider tombstone에서 허용한다. `retired → active`는
   재적재 전용 명시 transition으로만 허용하며, publication은 자동 복원하지 않는다.
 
@@ -117,6 +152,27 @@ final UUID target schema에서는 대응 UUID business identifier를 함께 기�
 공개 reader(detail, batch, bbox, search, nearby, cluster, collection)는 `feature.public_features`만
 사용한다. 이 view는 명시 열 목록으로 정의하고, `features_detailed` 재생성 순서와 `pg_depend`를
 migration test로 고정한다. `SELECT *`를 통해 새 운영 상태가 public payload에 새어 나가지 않는다.
+
+현재 core의 point `coord`/`coord_5179`와 category/keyset/text index는 3축을 직접 partial predicate로
+표현할 수 있다. 반면 route/area geometry는 typed subtype table에 있고 3축은 core table에 있으므로,
+PostgreSQL partial GiST가 두 relation을 join해 public predicate를 직접 표현할 수 없다. T-VN-34B는
+`feature_routes`와 `feature_areas`에만 `public_ready` DB-owned projection flag를 둔다. core point와
+text/category/keyset index는 `WHERE lifecycle_state='active' AND publication_state='published' AND
+quality_state='valid'`를, route/area GiST는 `WHERE public_ready`를 쓴다.
+
+state create/transition procedure와 route/area subtype INSERT·feature-id reattachment trigger는 모두
+parent Feature row를 먼저 `SELECT ... FOR UPDATE`로 잠그고 same transaction에서 tuple/flag를 계산한다.
+state procedure는 lock을 유지한 채 기존 route/area flag를 갱신하고, subtype trigger는 lock 뒤의
+현재 tuple로 NEW flag를 강제 산출하므로 update×insert의 MVCC stale cache 경쟁을 만들지 않는다.
+subtype trigger는 supplied `public_ready`를 항상 덮어쓰며 runtime에는 `UPDATE(public_ready)`와
+`TRUNCATE`/trigger-disable 권한을 주지 않는다. route/area runtime 권한은 table-level `UPDATE`/`INSERT`가
+아닌 allowed business column의 column-list grant만 사용하고 `public_ready`는 명시적으로 제외한다.
+`has_table_privilege(..., 'UPDATE')`와 `has_column_privilege(..., 'public_ready', 'UPDATE')`가 모두
+false인 catalog gate, direct flag UPDATE의 SQLSTATE `42501`, trigger-controlled insert/reattach/state update
+동등성을 integration test로 고정한다. public query는 cache만 신뢰하지 않고 항상
+`public_features`의 core predicate/join을 최종 visibility fence로 유지한다. core tuple이 유일한
+정본이고, 양방향 `EXCEPT ALL`은 flag·public view·core predicate drift의 regression proof다. full GiST로
+상태 join 비용을 숨기거나, subtype에 독립적인 상태 정본을 만들지 않는다.
 
 public DTO와 query에는 legacy `status`를 두지 않는다. service batch 상태는 다음처럼 DB tuple에서
 계산한다: base 없음=`missing`, `lifecycle=retired`=`retired`, active이지만 public predicate 불만족=
@@ -136,16 +192,19 @@ badge·AND filter·명시 state command를 제공한다.
 
 | writer | lifecycle | publication | quality | reactivation/override 규칙 |
 |---|---|---|---|---|
-| provider sync | 자기 source의 initial·retire만 | 신규 initial만 | 변경 금지 | active `lifecycle_state=retired` override가 없고 current source가 있을 때만 재적재 procedure로 `active` 전이 가능 |
-| admin/user request | retire 및 명시 reingest | draft/published/suppressed | 수동 quarantine/복구 | retire/merge는 active `lifecycle_state` override를 만들며 provider는 이를 해제할 수 없다 |
+| provider sync | 자기 source의 initial·retire만 | 신규 initial만 | 변경 금지 | current record의 DB-derived receipt와 Feature-source link가 증명되고, active `lifecycle_state=retired` override가 없을 때만 재적재 procedure로 `active` 전이 가능 |
+| admin/user request | retire 및 명시 reingest | draft/published/suppressed | 수동 quarantine/복구 | retire/merge는 typed command로 current/직전 audit revision에만 맞는 `lifecycle_state=retired` override를 만들며 provider는 이를 해제할 수 없다 |
 | quality validator | 변경 금지 | 변경 금지 | valid/quarantined | admin quality override가 있으면 validator는 source verdict만 기록하고 effective quality를 덮지 않는다 |
 | merge | loser retire만 | suppressed만 | 보존 | `merge_loser` lifecycle override를 만들며 explicit merge undo 또는 reingest만 revoke 가능 |
 | Dagster tombstone | provider와 같은 retire | 변경 금지 | 변경 금지 | dataset/source membership을 procedure가 검증한다 |
 
 기존 `field_path='status'` override는 T-VN-34A에서 typed `lifecycle_state` override로 옮긴다.
-admin/user retire와 merge retire는 그 active override를 원자적으로 upsert한다. `retired → active`는
+admin/user retire와 merge retire는 generic upsert가 아닌 Feature lock·expected revision을 요구하는
+typed author command로 그 active override를 원자적으로 만든다. 이 command는 source value를 임의로
+받지 않고 현재 lifecycle 또는 해당 current state를 만든 exact audit revision의 이전 lifecycle과만
+일치시킨다. `retired → active`는
 `POST /v1/admin/features/{feature_id}/state/reactivate`가 expected revision, reason, active current
-source evidence를 받아 override를 revoke하고 시행하는 경우만 가능하다. provider reappearance는
+source evidence를 받아 typed revoke command로 override를 철회하고 시행하는 경우만 가능하다. provider reappearance는
 override를 revoke하지 못한다. provider와 admin/quality concurrent update, override revoke와 source
 refresh 경쟁은 feature row lock 아래 하나의 procedure로 직렬화해 revision/audit 한 쌍을 남긴다.
 
@@ -156,8 +215,8 @@ admin-only reader도 public view로 기계 치환하지 않는다. `public`, `se
 
 | task/PR | 책임 | 소유권 | 배포 가능 여부 |
 |---|---|---|---|
-| T-VN-34A | target contract freeze, migration spine, tuple mapping/preflight, transition audit trigger, typed lifecycle override와 core/producer writer 전환 및 DB integration | agent A: Alembic·models·DTO/core/client·infra provider writer·contract SQL/test | stack 내부 전용 |
-| T-VN-34B | `public_features` explicit projection, public/service classifier, point/route/area spatial partial GiST와 category/keyset/text B-tree/GIN index EXPLAIN, reader integration | agent B: public/admin repository reader·service/API read schema·performance tests | stack 내부 전용 |
+| T-VN-34A | target contract freeze, migration spine, tuple mapping/preflight, transition audit trigger, typed lifecycle override와 core/producer writer 전환, runtime/migrator DB principal·startup preflight 및 DB integration | agent A: Alembic·models·DTO/core/client·infra provider writer·runtime bootstrap·contract SQL/test | stack 내부 전용 |
+| T-VN-34B | `public_features` explicit projection, trigger-owned route/area `public_ready` projection flag와 explicit column ACL, public/service classifier, core point `WHERE 3축` 및 route/area `WHERE public_ready` spatial partial GiST와 core category/keyset/text B-tree/GIN index EXPLAIN, reader integration | agent B: public/admin repository reader·service/API read schema·performance tests | stack 내부 전용 |
 | T-VN-34C | admin state command, OpenAPI/type/UI, remaining admin/merge/Dagster writer, fixtures/live runner, final migration에서 legacy status 계열·index 물리 삭제 | 통합 소유: API/frontend/live E2E 및 final migration | C head만 배포·병합 가능 |
 
 agent A/B는 서로의 소유 파일을 되돌리지 않고, 공유된 contract SQL과 generated OpenAPI를 기준으로
@@ -184,10 +243,10 @@ T-VN-39에 오래 보관할 compatibility surface는 남기지 않는다.
 
 | 구간 | 필수 증거 |
 |---|---|
-| contract/DDL | 여덟 허용 tuple과 네 retired illegal tuple 전수, invalid state domain, runtime direct Feature INSERT/axis UPDATE와 direct audit INSERT/UPDATE/DELETE/TRUNCATE가 DB에서 거부됨, create/transition procedure는 정확히 한 audit을 만듦, no-op/missing/malformed context 거부, owner/EXECUTE/table grant catalog assertion; actual/target artifact SHA와 violation fixture 갱신 |
+| contract/DDL | 여덟 허용 tuple과 네 retired illegal tuple 전수, runtime direct Feature INSERT/axis UPDATE와 direct audit INSERT/UPDATE/DELETE/TRUNCATE가 DB에서 거부됨, create/transition procedure는 정확히 한 audit을 만듦, no-op/missing/malformed context 거부, runtime/migrator identity·owner/EXECUTE/table grant catalog assertion; actual/target artifact SHA와 violation fixture 갱신 |
 | mapping/audit | 모든 legacy tuple과 contradictory diagnostic, create/backfill/provider/admin/user-request/merge/Dagster transition의 old/new tuple·principal·invoker/state-procedure/audit-writer DB identity·reason·revision 검증, feature purge 뒤 audit 보존 |
-| public/read | 여덟 tuple × detail/batch/bbox/search/nearby/cluster/category/collection public leak 0, batch 5-state, admin predicate 분리, status reference normal-path gate, view와 base의 양방향 `EXCEPT ALL` |
-| 성능 | point bbox 4326/5179·nearby와 route/area geom partial GiST, category/keyset/text hot predicate가 exact 3축 partial predicate를 사용한다는 `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` gate |
+| public/read | 여덟 tuple × detail/batch/bbox/search/nearby/cluster/category/collection public leak 0, batch 5-state, admin predicate 분리, status reference normal-path gate, view/core/route-area `public_ready`의 양방향 `EXCEPT ALL` regression proof, two-session axis-update×subtype-insert interleaving, direct flag UPDATE `42501`과 table/column privilege catalog gate |
+| 성능 | core point bbox 4326/5179·nearby와 route/area `WHERE public_ready` geom partial GiST, core category/keyset/text hot predicate가 exact 3축 partial predicate를 사용한다는 `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` gate |
 | API/UI | OpenAPI all export/check, Map/PinVi generated client compile, admin state command If-Match conflict, axes filter/badge/timeline browser e2e, provider refresh×admin retire/override revoke×quality validator race |
 | final live | n150 isolated candidate에서 final head fresh PostGIS + provider ETL 재적재, destructive admin/public/PinVi live E2E 메인·recovery, cleanup/physical legacy catalog zero |
 

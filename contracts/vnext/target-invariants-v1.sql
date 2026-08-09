@@ -241,7 +241,10 @@ WHERE btrim(invoker_role) = ''
    OR btrim(audit_writer_definer) = ''; -- expect: 0 -- phase: both
 
 -- [INV-090-05] provider_sync audit은 purge 뒤에도 dataset/entity/record 및
--- authoritative receipt을 한 행에 immutable evidence로 함께 남긴다.
+-- authoritative receipt을 한 행에 immutable evidence로 함께 남긴다. transition
+-- procedure가 write 시 current head·dataset·link·raw hash를 검증한다. audit은 raw
+-- history retention 정책과 독립적으로 purge 뒤에도 남으므로 여기서 live source를
+-- 다시 join해 존재를 요구하지 않는다.
 SELECT count(*)
 FROM feature.feature_state_transitions
 WHERE (
@@ -253,18 +256,6 @@ WHERE (
             OR jsonb_typeof(provider_evidence) <> 'object'
             OR jsonb_typeof(provider_evidence -> 'authoritative_receipt') <> 'string'
             OR btrim(provider_evidence ->> 'authoritative_receipt') = ''
-            OR NOT EXISTS (
-                SELECT 1
-                FROM provider_sync.source_records AS record
-                JOIN provider_sync.source_entities AS entity
-                  ON entity.source_entity_key = record.source_entity_key
-                WHERE record.source_record_key = feature_state_transitions.source_record_key
-                  AND record.source_entity_key = feature_state_transitions.source_entity_key
-                  AND entity.provider_dataset_id = feature_state_transitions.provider_dataset_id
-                  AND record.raw_payload_hash
-                      = feature_state_transitions.provider_evidence
-                          ->> 'authoritative_receipt'
-            )
         )
       ) OR (
         transition_kind <> 'provider_sync'

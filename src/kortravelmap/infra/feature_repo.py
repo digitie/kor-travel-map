@@ -2471,10 +2471,15 @@ async def upsert_feature(
             stored_feature_uuid=stored_feature_uuid,
             geom_wkt=geom_wkt,
         )
-    await session.execute(
-        text(_MATERIALIZE_PROVIDER_VERSION_SQL),
-        {"feature_id": feature.feature_id},
-    )
+        # ``feature_versions.version=0``은 마지막 provider baseline이다. whole-row
+        # user fence가 core/subtype write를 막은 경우 current detailed row는 user
+        # effective payload이므로 provider label의 snapshot으로 다시 쓰면 안 된다.
+        # 새 raw source record는 별도로 immutable 보존되며, baseline/effective
+        # lineage의 재물화는 T-VN-36이 소유한다.
+        await session.execute(
+            text(_MATERIALIZE_PROVIDER_VERSION_SQL),
+            {"feature_id": feature.feature_id},
+        )
     return inserted
 
 

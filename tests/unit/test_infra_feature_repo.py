@@ -235,6 +235,60 @@ async def test_provider_create_uses_procedure_and_omits_legacy_state(
 
 
 @pytest.mark.asyncio
+async def test_user_fenced_provider_refresh_keeps_provider_baseline_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """user effective row를 provider ``version=0`` payload로 오기록하지 않는다."""
+
+    class _Mappings:
+        def __init__(self, row: dict[str, Any]) -> None:
+            self._row = row
+
+        def one(self) -> dict[str, Any]:
+            return self._row
+
+    class _Result:
+        def __init__(self, row: dict[str, Any]) -> None:
+            self._row = row
+
+        def mappings(self) -> _Mappings:
+            return _Mappings(self._row)
+
+    class _Session:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+            self.feature_uuid: str | None = None
+
+        async def execute(self, statement: Any, params: dict[str, Any]) -> _Result:
+            sql = str(statement)
+            self.calls.append(sql)
+            if "create_feature_with_initial_state" in sql:
+                self.feature_uuid = json.loads(params["feature_payload"])["feature_uuid"]
+                return _Result({"o_inserted": False, "o_feature_uuid": self.feature_uuid})
+            if "UPDATE feature.features AS f" in sql:
+                assert self.feature_uuid is not None
+                return _Result({"feature_uuid": self.feature_uuid, "user_fenced": True})
+            raise AssertionError(f"unexpected SQL: {sql}")
+
+    async def _no_subtype(*_args: Any, **_kwargs: Any) -> None:
+        raise AssertionError("user fence must skip subtype write")
+
+    feature = _place(None, None)
+    monkeypatch.setattr(feature_repo, "_upsert_feature_subtype", _no_subtype)
+    session = _Session()
+
+    inserted = await feature_repo.upsert_feature(
+        session,  # type: ignore[arg-type]
+        feature,
+        provider_dataset_id=17,
+        source_membership=_provider_membership(),
+    )
+
+    assert inserted is False
+    assert not any("materialize_provider_feature_version" in call for call in session.calls)
+
+
+@pytest.mark.asyncio
 async def test_provider_reactivation_skips_preexisting_lifecycle_override() -> None:
     class _Session:
         async def execute(self, *_args: Any, **_kwargs: Any) -> None:

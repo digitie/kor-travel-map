@@ -103,6 +103,9 @@ BEGIN
           FROM provider_sync.source_records AS record
           JOIN provider_sync.source_entities AS entity
             ON entity.source_entity_key = record.source_entity_key
+          JOIN provider_sync.source_entity_heads AS head
+            ON head.source_entity_key = entity.source_entity_key
+           AND head.current_source_record_key = record.source_record_key
          WHERE record.source_record_key = v_source_record_key
            AND record.source_entity_key = v_source_entity_key
            AND entity.provider_dataset_id = v_dataset_id;
@@ -437,6 +440,9 @@ BEGIN
               ON entity.source_entity_key = link.source_entity_key
             JOIN provider_sync.source_records AS record
               ON record.source_entity_key = entity.source_entity_key
+            JOIN provider_sync.source_entity_heads AS head
+              ON head.source_entity_key = entity.source_entity_key
+             AND head.current_source_record_key = record.source_record_key
             WHERE link.feature_id = p_feature_id
               AND link.source_entity_key = p_context ->> 'source_entity_key'
               AND entity.provider_dataset_id = (p_context ->> 'provider_dataset_id')::bigint
@@ -1213,7 +1219,7 @@ def upgrade() -> None:
         # 수행하므로 SELECT와 INSERT가 모두 필요하다.
         "GRANT SELECT, INSERT ON feature.feature_aliases TO ktm_feature_state_procedure_owner",
         "GRANT SELECT ON provider_sync.provider_datasets, provider_sync.source_entities, "
-        "provider_sync.source_records, provider_sync.source_links "
+        "provider_sync.source_records, provider_sync.source_entity_heads, provider_sync.source_links "
         "TO ktm_feature_state_procedure_owner",
         "GRANT SELECT, INSERT, UPDATE (source_value, override_value, "
         "prevent_provider_reactivation, status, reason, created_by, created_at) "

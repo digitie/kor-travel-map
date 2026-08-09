@@ -152,7 +152,15 @@ async def test_tvn34_all_legal_tuples_procedure_audit_and_runtime_fence(
             """
         )
     )
-
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO provider_sync.source_entity_heads (
+                source_entity_key, current_source_record_key, observed_at
+            ) VALUES ('tvn34-initial-entity', 'tvn34-initial-record', now())
+            """
+        )
+    )
     privilege_receipt = (
         await migrated_session.execute(
             text(
@@ -444,6 +452,17 @@ async def test_tvn34_provider_reactivation_override_is_db_fenced(
             """
         )
     )
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO provider_sync.source_entity_heads (
+                source_entity_key, current_source_record_key, observed_at
+            ) VALUES (
+                'tvn34-reactivation-entity', 'tvn34-reactivation-record', now()
+            )
+            """
+        )
+    )
 
     await migrated_session.execute(text("SET ROLE ktm_feature_runtime"))
     try:
@@ -496,9 +515,36 @@ async def test_tvn34_provider_reactivation_override_is_db_fenced(
             """
         )
     )
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO provider_sync.source_records (
+                source_record_key, source_entity_key, raw_data, raw_payload_hash, fetched_at
+            ) VALUES ('tvn34-reactivation-record-current', 'tvn34-reactivation-entity',
+                      '{}'::jsonb, 'd341', now() + interval '1 minute')
+            """
+        )
+    )
+    await migrated_session.execute(
+        text(
+            """
+            UPDATE provider_sync.source_entity_heads
+               SET current_source_record_key = 'tvn34-reactivation-record-current',
+                   observed_at = observed_at + interval '1 minute'
+             WHERE source_entity_key = 'tvn34-reactivation-entity'
+            """
+        )
+    )
+    current_provider_context = {
+        "transition_kind": "provider_sync",
+        "provider_dataset_id": provider_dataset_id,
+        "source_entity_key": "tvn34-reactivation-entity",
+        "source_record_key": "tvn34-reactivation-record-current",
+    }
     await migrated_session.execute(text("SET ROLE ktm_feature_runtime"))
     try:
-        with pytest.raises(DBAPIError) as forged_receipt:
+        # source entity의 과거 관측값은 같은 dataset/link여도 lifecycle 근거가 될 수 없다.
+        with pytest.raises(DBAPIError) as stale_source:
             async with migrated_session.begin_nested():
                 await _call_transition(
                     migrated_session,
@@ -507,10 +553,25 @@ async def test_tvn34_provider_reactivation_override_is_db_fenced(
                     expected_revision=1,
                     context={
                         "transition_kind": "provider_sync",
-                        "reason_code": "provider_reappeared",
+                        "reason_code": "stale_provider_reappeared",
                         "provider_dataset_id": provider_dataset_id,
                         "source_entity_key": "tvn34-reactivation-entity",
                         "source_record_key": "tvn34-reactivation-record",
+                    },
+                )
+        assert _sqlstate(stale_source.value) == "23514"
+        assert _constraint_name(stale_source.value) == "ck_feature_provider_source_provenance"
+
+        with pytest.raises(DBAPIError) as forged_receipt:
+            async with migrated_session.begin_nested():
+                await _call_transition(
+                    migrated_session,
+                    feature_id="tvn34-reactivation-feature",
+                    state=("active", "suppressed", "valid"),
+                    expected_revision=1,
+                    context={
+                        **current_provider_context,
+                        "reason_code": "provider_reappeared",
                         "provider_evidence": {
                             "authoritative_receipt": "caller-forged"
                         },
@@ -558,11 +619,8 @@ async def test_tvn34_provider_reactivation_override_is_db_fenced(
                         state=("active", "suppressed", "valid"),
                         expected_revision=1,
                     context={
-                        "transition_kind": "provider_sync",
+                        **current_provider_context,
                         "reason_code": "provider_reappeared",
-                        "provider_dataset_id": provider_dataset_id,
-                        "source_entity_key": "tvn34-reactivation-entity",
-                        "source_record_key": "tvn34-reactivation-record",
                     },
                 )
         assert _sqlstate(fenced.value) == "23514"
@@ -585,11 +643,8 @@ async def test_tvn34_provider_reactivation_override_is_db_fenced(
             state=("active", "suppressed", "valid"),
             expected_revision=1,
             context={
-                "transition_kind": "provider_sync",
+                **current_provider_context,
                 "reason_code": "provider_reappeared",
-                "provider_dataset_id": provider_dataset_id,
-                "source_entity_key": "tvn34-reactivation-entity",
-                "source_record_key": "tvn34-reactivation-record",
             },
         )
         await _call_transition(
@@ -598,11 +653,8 @@ async def test_tvn34_provider_reactivation_override_is_db_fenced(
             state=("retired", "suppressed", "valid"),
             expected_revision=2,
             context={
-                "transition_kind": "provider_sync",
+                **current_provider_context,
                 "reason_code": "provider_retire",
-                "provider_dataset_id": provider_dataset_id,
-                "source_entity_key": "tvn34-reactivation-entity",
-                "source_record_key": "tvn34-reactivation-record",
             },
         )
         await migrated_session.execute(

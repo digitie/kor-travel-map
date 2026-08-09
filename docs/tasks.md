@@ -711,18 +711,25 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 > 배포·main 병합하지 않고 C final head에서 한 번에 forward-only cutover한다. 서비스 전 단계이므로
 > dual-write, shadow/held rollback, old contract 보존은 만들지 않으며 final schema는 ETL로 재적재한다.
 
-- [ ] T-VN-34A — **3축 상태 schema·backfill**
+- [/] T-VN-34A — **3축 상태 schema·backfill**
 
   여덟 legal tuple의 typed axis/DB CHECK와 `feature_state_transitions` append-only trigger를
   target contract·actual migration에 고정한다. legacy tuple diagnostics와 one-shot mapping/backfill
   audit, axis context/principal/reason/revision fence, provider/override canonical writer 전환을 소유한다.
-  A는 stack 내부 checkpoint다.
+  bootstrap owner와 분리된 migrator/API/Dagster runtime role·DSN/preflight까지 함께 전환한다. P0 repair
+  `9f16599f`는 provider receipt DB 파생·typed lifecycle override command·provider version materializer와
+  실제 runtime `load_bundle` 권한 검증까지 반영했다. 후속 보강은 source head currentness, user-fenced
+  provider baseline 보존, Dagster webserver preflight와 target freeze 재동결을 포함한다. 현재 2인 적대
+  재리뷰 중이며 A는 stack 내부 checkpoint다.
 
 - [ ] T-VN-34B — **public projection·partial index cutover**
 
   명시 열 `public_features` projection과 service 5-state classifier를 3축 정본으로 전환한다.
-  point/route/area 공간, category/keyset/text hot path의 exact partial index 및 `EXPLAIN` gate와
-  public reader regression을 소유한다. B도 stack 내부 checkpoint다.
+  route/area subtype-local geometry와 core tuple의 cross-table index 불가를 trigger-owned
+  `public_ready` projection flag·parent `FOR UPDATE` lock protocol로 해소한다. route/area grant는
+  table UPDATE 없이 allowed column-list만 허용한다. core point/category/keyset/text는 exact 3축 partial
+  predicate를, route/area GiST는 `WHERE public_ready`를 사용한다. `EXPLAIN` gate와 public reader,
+  two-session·direct-flag privilege regression을 소유한다. B도 stack 내부 checkpoint다.
 
 - [ ] T-VN-34C — **writer/API/UI cutover·legacy status fence**
 

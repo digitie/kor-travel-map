@@ -1189,3 +1189,11 @@ CALL feature.create_feature_with_initial_state(
     '{"transition_kind":"provider_sync","reason_code":"fixture_forged_receipt","provider_dataset_id":1,"source_entity_key":"fixture","source_record_key":"fixture","provider_evidence":{"authoritative_receipt":"caller-forged"}}'::jsonb,
     NULL, NULL, NULL
 );
+
+-- case: feature_state_causation_ref_non_scalar
+CALL feature.create_feature_with_initial_state(
+    '{"feature_id":"00000000-0000-0000-0000-000000000023","kind":"place","name":"non scalar causation","category_code":"fixture"}'::jsonb,
+    'active', 'draft', 'valid',
+    '{"transition_kind":"initial","reason_code":"fixture_causation_ref","principal":"fixture:admin","causation_ref":{"forged":"object"}}'::jsonb,
+    NULL, NULL, NULL
+);

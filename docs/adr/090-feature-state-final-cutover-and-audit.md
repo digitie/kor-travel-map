@@ -22,22 +22,53 @@ merge tombstone이 섞여 있다. 애플리케이션만 audit event를 쓰면 ra
    `quality_state(valid|quarantined)`만 사용한다. `retired`는 반드시 `suppressed`이고,
    `published + quarantined`는 허용한다. 따라서 active의 여섯 tuple과 retired/suppressed의
    두 tuple만 유효하다.
-2. `feature.feature_state_transitions`는 Feature FK cascade 없이 business identifier를 보존하는
-   append-only 감사 정본이다. runtime은 base Feature INSERT/axis UPDATE 권한을 갖지 않으며
+2. `feature.feature_state_transitions`는 Feature FK cascade 없이 현행 TEXT business identifier와
+   UUID identity를 함께 보존하는 append-only 감사 정본이다. runtime은 base Feature INSERT/axis UPDATE 권한을 갖지 않으며
    dedicated NOLOGIN owner의 `create_feature_with_initial_state`/`transition_feature_state`
-   security-definer procedure만 실행한다. audit writer trigger도 별도 NOLOGIN owner의
+   security-definer procedure만 실행한다. user add/update/delete의 legacy provenance와 immutable
+   version snapshot은 별도 typed `materialize_user_feature_change_provenance` procedure가 request,
+   Feature, expected revision을 잠근 뒤 원자적으로 기록하므로 runtime은 `feature_versions` 또는
+   `features_detailed`의 직접 권한을 갖지 않는다. 이 procedure는 0095 현행 schema 전환 bridge로만
+   남기며 final target에는 두지 않는다. T-VN-36의 field-override effective projection/lineage가
+   이를 대체한 뒤 legacy request/version relation을 제거한다. 같은 0095 bridge에서 provider version은
+   caller payload가 아닌 잠긴 Feature와 canonical detailed projection으로 조립하는
+   `materialize_provider_feature_version` procedure만 기록한다. user whole-row fence가 provider
+   core/subtype 변경을 막은 refresh는 user effective row를 provider `version=0` baseline으로
+   덮지 않고 immutable raw source observation만 최신화한다. T-VN-36의 final effective
+   projection/lineage가 두 version bridge를 함께 대체한다. lifecycle override는 generic
+   `ops.feature_overrides` DML을 닫고 expected revision/Feature lock을 요구하는 typed author/revoke
+   command만 변경한다. audit writer trigger도 별도 NOLOGIN owner의
    security-definer function으로, fixed `search_path`와 schema-qualified dependency를 사용한다.
    이 경계가 한 명령의 여러 축 변경을 하나의 이전/이후 full tuple row로 기록한다. procedure는
-   role별 structured context를 검증하고 provider principal은 dataset에서 파생한다. admin/user
+   role별 structured context를 검증하고 provider principal은 dataset에서 파생한다. provider receipt는
+   caller가 주입하지 않고 검증된 `source_records.raw_payload_hash`에서 파생하며 target Feature의
+   source link와 `source_entity_heads`의 current observation까지 같은 lock 범위에서 확인한다. admin/user
    principal은 application-authenticated 값임을 명시한다. state procedure는 DML 직전에
    allow-listed `state_procedure_definer`를 `SET LOCAL`하고 audit trigger가 이를 검증한다. audit에는
    invoker `session_user`, context의 state procedure definer, audit trigger의 실제 `current_user`
    (audit writer definer)를 각각 기록하며, runtime에 audit INSERT/UPDATE/DELETE/TRUNCATE 또는
    writer-function direct EXECUTE 권한을 주지 않는다.
+   이 privilege boundary는 bootstrap owner로 접속한 service에는 적용되지 않으므로,
+   `KOR_TRAVEL_MAP_MIGRATOR_PG_DSN`, `KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN`,
+   `KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN`의 schema/migrator·API/Dagster runtime LOGIN role을
+   분리한다. runtime login은 superuser/CREATEROLE/BYPASSRLS와 schema-owner membership을 갖지 않고
+   INHERIT·SET FALSE group 권한만 받으며, startup이 procedure-only privilege를 실제 세션으로 preflight한다.
+   runtime에는 state/audit/version/legacy provenance/generic override 직접 DML을 grant하지 않으며,
+   API와 Dagster login의 실제 provider bundle 적재와 admin command로 이를 검증한다.
+   0095의 transitional procedure는 TEXT key를 받고 T-VN-39 final target procedure는 audit에 보존한 UUID key를
+   받는다. audit의 두 identity가 hard purge 뒤에도 이 final conversion 근거를 보존한다.
 3. public은 `(active,published,valid)` 단 하나이며 모든 public reader는 명시 열
    `feature.public_features` view를 사용한다. public DTO는 운영 축을 노출하지 않고 admin DTO/API는
    세 축과 audit timeline을 독립적으로 노출한다. admin state command는 If-Match와 reason을
-   요구하는 단일 atomic PATCH이고, 기존 deactivate endpoint는 retire action으로 대체한다.
+   요구하는 단일 atomic PATCH이고, 기존 deactivate endpoint는 retire action으로 대체한다. geometry가
+   route/area geometry가 subtype table에 분리돼 core predicate를 직접 partial GiST로 만들 수 없으므로,
+   그 두 subtype에만 core tuple trigger가 갱신하는 `public_ready` projection flag를 둔다. state procedure와
+   subtype insert/reattachment trigger는 Feature row를 `FOR UPDATE`로 잠근 뒤 flag를 강제 산출한다.
+   `WHERE public_ready` GiST는 performance cache일 뿐 state 정본이 아니며 public query는 core/view를
+   최종 visibility fence로 유지한다. core point와 text/category/keyset index는 3축 partial predicate를
+   직접 사용한다. route/area runtime grant는 allowed business column의 column-list만 부여하고
+   `public_ready` table/column UPDATE를 모두 거부한다. core/view/flag 양방향 invariant는 cache
+   동등성의 regression proof다.
 4. legacy `status`와 soft-delete/user-change core metadata는 T-VN-34C의 한 final migration에서
    모든 reader/writer/API/UI/OpenAPI/PinVi/live fixture를 전환한 뒤 물리 삭제한다.
    `data_origin`/`data_version`/whole-row freeze는 T-VN-36의 field-override materialization 입력이므로

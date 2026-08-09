@@ -970,6 +970,52 @@ async def test_uuid_state_procedure_derives_provider_receipt_and_fences_retired_
         )
         await freeze_db.execute(
             """
+            INSERT INTO provider_sync.source_records (
+                source_record_key, source_entity_key, raw_data, raw_payload_hash, fetched_at
+            ) VALUES (
+                'target-tvn34-record-current', 'target-tvn34-entity', '{}'::jsonb,
+                '0000000000000000000000000000000000000000000000000000000000003491',
+                now() + interval '1 minute'
+            )
+            """
+        )
+        await freeze_db.execute(
+            """
+            UPDATE provider_sync.source_entity_heads
+               SET current_source_record_key = 'target-tvn34-record-current',
+                   observed_at = observed_at + interval '1 minute'
+             WHERE source_entity_key = 'target-tvn34-entity'
+            """
+        )
+        current_provider_context = {
+            **provider_context,
+            "source_record_key": "target-tvn34-record-current",
+        }
+
+        await freeze_db.execute("SET ROLE ktm_feature_runtime")
+        try:
+            stale_savepoint = freeze_db.transaction()
+            await stale_savepoint.start()
+            try:
+                with pytest.raises(asyncpg.PostgresError) as stale:
+                    await freeze_db.fetchrow(
+                        """
+                        CALL feature.transition_feature_state(
+                            $1::uuid, 'retired', 'suppressed', 'valid', 1, $2::jsonb, NULL, NULL
+                        )
+                        """,
+                        feature_id,
+                        {**provider_context, "reason_code": "stale_provider_retire"},
+                    )
+            finally:
+                await stale_savepoint.rollback()
+            assert stale.value.sqlstate == "23514"
+            assert stale.value.constraint_name == "ck_feature_provider_source_provenance"
+        finally:
+            await freeze_db.execute("RESET ROLE")
+
+        await freeze_db.execute(
+            """
             INSERT INTO ops.feature_override_field_paths (field_path, value_type)
             VALUES ('lifecycle_state', 'string')
             """
@@ -994,7 +1040,7 @@ async def test_uuid_state_procedure_derives_provider_receipt_and_fences_retired_
                 )
                 """,
                 feature_id,
-                {**provider_context, "reason_code": "provider_retire"},
+                {**current_provider_context, "reason_code": "provider_retire"},
             )
             # ``override_value='active'``는 provider reactivation을 막지 않는다.
             reactivated = await freeze_db.fetchrow(
@@ -1004,7 +1050,7 @@ async def test_uuid_state_procedure_derives_provider_receipt_and_fences_retired_
                 )
                 """,
                 feature_id,
-                {**provider_context, "reason_code": "provider_reingest"},
+                {**current_provider_context, "reason_code": "provider_reingest"},
             )
             assert reactivated["o_row_revision"] == 3
             await freeze_db.fetchrow(
@@ -1014,7 +1060,7 @@ async def test_uuid_state_procedure_derives_provider_receipt_and_fences_retired_
                 )
                 """,
                 feature_id,
-                {**provider_context, "reason_code": "provider_retire"},
+                {**current_provider_context, "reason_code": "provider_retire"},
             )
         finally:
             await freeze_db.execute("RESET ROLE")
@@ -1040,7 +1086,7 @@ async def test_uuid_state_procedure_derives_provider_receipt_and_fences_retired_
                         )
                         """,
                         feature_id,
-                        {**provider_context, "reason_code": "provider_reingest"},
+                        {**current_provider_context, "reason_code": "provider_reingest"},
                     )
             finally:
                 await fenced_savepoint.rollback()

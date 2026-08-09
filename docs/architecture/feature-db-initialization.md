@@ -38,8 +38,12 @@ role·ownership·membership 정본은 `docker/postgres-role-bootstrap.sh`다. �
 `ktm_feature_api_runtime`와 `ktm_feature_dagster_runtime`은 `ktm_feature_runtime`의
 권한만 inherit하며 `SET ROLE`하지 못한다. 0095 이후 runtime이 `EXECUTE`할 수 있는
 feature procedure는 `create_feature_with_initial_state`, `transition_feature_state`,
-`materialize_user_feature_change_provenance` 세 개뿐이고, base Feature axis/audit direct
-DML은 허용하지 않는다.
+`materialize_user_feature_change_provenance`, `materialize_provider_feature_version`,
+`author_lifecycle_override`, `revoke_lifecycle_override` 여섯 개뿐이고, base Feature
+axis/audit direct DML은 허용하지 않는다. provider version `0`은 마지막으로 반영된
+provider baseline만 가리킨다. user whole-row fence가 provider core/subtype 변경을 막은
+refresh는 raw source observation만 최신화하고 user effective row를 provider snapshot으로
+재기록하지 않는다. 이 임시 snapshot bridge는 T-VN-36 effective lineage가 대체한다.
 bootstrap은 `REASSIGN OWNED`를 쓰지 않는다. 초기 dedicated superuser가 PostgreSQL
 system object도 소유할 수 있으므로, map DB·`feature`/`provider_sync`/`ops`/`x_extension`
 object만 명시적으로 transfer한다. 이어지는 ACL 재조정은 `feature.features`,

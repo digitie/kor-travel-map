@@ -252,6 +252,11 @@
       "sqlstate": "23514",
       "constraint": "ck_feature_state_transition_context",
       "basis": "ADR-090"
+    },
+    "feature_state_causation_ref_non_scalar": {
+      "sqlstate": "23514",
+      "constraint": "ck_feature_state_transition_context",
+      "basis": "ADR-090"
     }
   }
 }

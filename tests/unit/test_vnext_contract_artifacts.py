@@ -23,36 +23,39 @@ from kortravelmap.core.cache_target_stream import SnapshotMerkleRowV1
 
 _ROOT: Final = Path(__file__).resolve().parents[2]
 _CONTRACTS: Final = _ROOT / "contracts" / "vnext"
+_TVN34_CURRENT_MIGRATION: Final = (
+    _ROOT / "alembic" / "versions" / "0095_feature_orthogonal_state_spine.py"
+)
 
 # artifact bytes 고정 — 갱신 절차: artifact 수정 → 통합 테스트로 fingerprint 재고정
 # → 여기 sha256 갱신 (한 PR에서 함께).
 ARTIFACT_SHA256: Final[dict[str, str]] = {
-    "target-schema-v1.sql": ("87048b3caaabf60b9f3f0d03d06057f53706417ca99773e2013e4dda85fbdf03"),
+    "target-schema-v1.sql": ("a434e9ce072e64e7ca332c864ac0e441e35608fec2549928b822ca55fd5ebd8a"),
     "target-invariants-v1.sql": (
-        "7fbe90daf7f6f48386ce96877189b444e57d18f5d2897fd81a09cbadb2aee200"
+        "8c26758167a35a1ce6c154f006e7d890c71ddcd0b6326c812fa8243118138e2f"
     ),
     "target-schema-fingerprints-v1.json": (
-        "6a1984b682fff902560c217820a02d16b94c4b7c88f66153d13f9a3e01ee685b"
+        "9549631cd3dfef9031caf936f70996938deea38da50af604182d373ef11aab85"
     ),
     "tvn33-reference-ownership-v1.sql": (
-        "9f434b50440c7463b86a5cf61abeb30bf6fe8d74a5760aa256374c76e4c9328a"
+        "e9a342f7c227f25643f3c1360b081abafac1e89bfb4c52339b89e985401b1604"
     ),
-    "openapi-diff-v1.json": ("0de7474cfa9c25650078e0633b211b37a61c6e517e56712004a2ef901223b543"),
+    "openapi-diff-v1.json": ("e20a0cf00af4a5d973b5495e3bf9e113375e85548c9d17d79398901ad0338fd2"),
     "consumer-rollout-v1.json": (
-        "f2a50d24de77ea6001276dedd17862d5c6a5d15652e861c0c7d5dbae41d3918c"
+        "9842c71901071b8ab0e897d1c7c5ea47cc8a54cfd18bb0cbb36ac7d96be5660d"
     ),
     "violation-fixtures-v1.sql": (
-        "d7d254b2bf01c6c2ec9c06ac6f862d652b1833051f6cf0f5ab0135f91255ac9d"
+        "e4539a29fea9a127d514ef72a3e9372a521df0ff274a24ce2172304be8e80258"
     ),
     "expected-rejections-v1.json": (
-        "d67e82a6b5db680bc5d2c4a6fa26b8bf31502b547dcf39ca97130e26c91883b3"
+        "01af7355c7f3001feeb0e5aee6f9884ab50494199c791b8aacc660f34ef8ef5d"
     ),
     "recovery-preflight-v1.json": (
         "0e7e1ea595d034aacda8b4c94b56de6c2a24059f150c8cbd6c0670aebce7dfdd"
     ),
 }
 
-_EXPECTED_INVARIANT_COUNT: Final = 53
+_EXPECTED_INVARIANT_COUNT: Final = 58
 _INVARIANT_PHASES: Final = frozenset({"pre-backfill", "post-backfill", "both"})
 _SURFACES: Final = ("user", "service", "admin")
 _CHANGE_KEYS: Final = (
@@ -123,7 +126,6 @@ def test_frozen_artifacts_have_no_crlf() -> None:
         assert b"\r\n" not in (_CONTRACTS / name).read_bytes(), (
             f"{name} contains CRLF — frozen artifact는 LF bytes로만 저장해야 한다"
         )
-
 
 def test_openapi_diff_baseline_matches_current_specs() -> None:
     diff = _load_json("openapi-diff-v1.json")
@@ -235,7 +237,7 @@ def test_expected_rejections_consistent_with_fixtures_and_ddl() -> None:
         + (_CONTRACTS / "tvn33-reference-ownership-v1.sql").read_text(encoding="utf-8")
     )
     for name, case in rejections.items():
-        assert re.fullmatch(r"23(502|503|505|514)", case["sqlstate"]), name
+        assert re.fullmatch(r"(?:23(502|503|505|514)|42501)", case["sqlstate"]), name
         if "column" in case:
             assert set(case) >= {"sqlstate", "column", "basis"}, name
             assert f"{case['column']} text NOT NULL" in schema_sql, (
@@ -254,3 +256,24 @@ def test_invariants_are_parseable_zero_assertions() -> None:
     for query, phase in queries:
         assert phase in _INVARIANT_PHASES, phase
         assert query.lstrip().upper().startswith("SELECT COUNT(*)"), query[:80]
+
+
+def test_tvn34_current_text_and_final_uuid_procedure_bridge_is_explicit() -> None:
+    """0095의 legacy/text writer API를 final UUID freeze와 혼동하지 않는다."""
+
+    current_sql = _TVN34_CURRENT_MIGRATION.read_text(encoding="utf-8")
+    target_sql = (_CONTRACTS / "target-schema-v1.sql").read_text(encoding="utf-8")
+
+    assert "feature_id text NOT NULL," in current_sql
+    assert "feature_uuid uuid NOT NULL," in current_sql
+    assert "IN p_feature_id text," in current_sql
+    assert (
+        "ALTER PROCEDURE feature.transition_feature_state("
+        "text, text, text, text, bigint, jsonb)" in current_sql
+    )
+    assert "feature_id uuid NOT NULL," in target_sql
+    assert "IN p_feature_id uuid," in target_sql
+    assert (
+        "ALTER PROCEDURE feature.transition_feature_state("
+        "uuid, text, text, text, bigint, jsonb)" in target_sql
+    )
