@@ -23,6 +23,10 @@
 # **여기서 재현 불가한 것**(로컬 하네스의 한계 — 반드시 인지하고 있어야 한다):
 #   - Python 3.11/3.12 매트릭스: 컨테이너는 3.13 하나다.
 #
+# `docker` CLI와 compose 플러그인은 호스트 것을 read-only로 마운트한다. 이미지에
+# CLI가 없어 `docker compose config`를 부르는 테스트 5건이 `FileNotFoundError`로
+# 죽었고, 그것을 "환경 노이즈"로 부르며 넘겼다. 안 도는 테스트는 없는 것과 같다.
+#
 # coverage: api/dagster 게이트는 CI와 같은 `--cov-fail-under`를 건다.
 #
 # **integration 합산 게이트는 여기서 재현하지 않는다.** CI는 unit job의 coverage
@@ -70,12 +74,17 @@ run_gate() {
 py() {
   MSYS_NO_PATHCONV=1 wsl -e docker run --rm --network host \
     -v /var/run/docker.sock:/var/run/docker.sock \
+    -v /usr/bin/docker:/usr/bin/docker:ro \
+    -v /usr/libexec/docker/cli-plugins:/usr/libexec/docker/cli-plugins:ro \
     -v "$WSL_ROOT:/src" -e TESTCONTAINERS_RYUK_DISABLED=true "$IMAGE" \
     sh -c "{ cd /repo && rm -rf src tests packages contracts alembic scripts .github \
       && tar -C /src --exclude=node_modules --exclude=.next --exclude=.react-doctor \
              --exclude=__pycache__ -cf - \
              src tests packages contracts alembic scripts .github \
-             alembic.ini pyproject.toml \
+             alembic.ini pyproject.toml package.json package-lock.json \
+             .env.example docker-compose.yml docker-compose.host.yml \
+             docker-compose.external-db.yml docker-compose.external-infra.yml \
+             docker-compose.external-object-store.yml \
          | tar -C /repo -xf - ; } \
       || { echo 'FATAL: 소스 복사 실패 — 아래 결과는 낡은 트리의 것이다'; exit 97; }; \
       $1"
@@ -93,10 +102,12 @@ py() {
 # **일부만 복사된 트리** 위에서 게이트가 돌았고, 복사 실패를 치명으로 바꾸자마자
 # 드러났다. 빌드 산출물과 node_modules는 애초에 복사 대상이 아니다.
 #
-# 반면 나머지 루트 **파일**(package.json / package-lock.json /
-# docker-compose*.yml / .env.example)은 위 복사에
-# 포함되지 않아 **이미지에 구워진 사본**이 쓰인다. 그 파일을 읽는 테스트는 로컬에서
-# false-pass/false-fail이 난다 — 그 파일을 고쳤다면 이미지를 다시 빌드하라.
+# 루트 파일(package.json / package-lock.json / docker-compose*.yml / .env.example)도
+# **이름을 하나씩 적어** 복사한다. 예전에는 빠져 있어 그 파일을 읽는 테스트 6건이
+# 이미지에 구워진 낡은 사본을 보고 실패했고, 그걸 "환경 노이즈"로 부르며 넘겼다.
+# 낡은 사본을 읽는 것은 노이즈가 아니라 **틀린 것을 검사하는 것**이다.
+# glob(`docker-compose*.yml`)을 쓰지 않는 이유: `sh -c` 안에서 glob은 tar의
+# `-C`가 아니라 셸의 cwd(/repo)에 대해 펼쳐진다 — 조용히 다른 파일을 집는다.
 
 repo() { MSYS_NO_PATHCONV=1 wsl -e bash -lc "cd $WSL_ROOT && $1"; }
 
