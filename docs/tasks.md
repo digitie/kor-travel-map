@@ -87,6 +87,11 @@ barrier로 직렬화한다.
   - Lane B shadow: [~] `T-VN-33`(A/B/C 단일 PR — DB 정본·writer/reader cutover·legacy fence) →
     [x] `T-VN-38A` → [x] `T-VN-38B` → [x] `T-VN-38C` →
     [ ] `T-VN-34A` → [ ] `T-VN-34B` → [ ] `T-VN-34C` →
+    [/] `T-VN-38A`(PR #971: 0092·weather immutable response lineage·receipt summary writer
+    ·KMA/AirKorea/KREX call-site cutover 구현) → [/] `T-VN-38B`(0093·price immutable fact
+    ·receipt summary·Dagster producer lineage 구현) → [/] `T-VN-38C`(0094 summary-only reader/API/UI
+    ·snapshot 분리·OpenAPI/type 재생성 완료, 2인 재리뷰·n150 live 검증 대기) →
+    [/] `T-VN-34A` → [ ] `T-VN-34B` → [ ] `T-VN-34C` →
     [ ] `T-VN-36A` → [ ] `T-VN-36B` → [ ] `T-VN-36C`
   - 32~38 join barrier 뒤 Lane B: [ ] `T-VN-40A` → [ ] `T-VN-40B` →
     [ ] `T-VN-40C`
@@ -700,20 +705,32 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 
 ### T-VN-34 — 직교 상태 모델 전환 (Lane B)
 
+> 정본 계획·상태 진리표·writer ownership·검증 matrix는
+> [`reports/t-vn-34-orthogonal-state-plan-2026-08-09.md`](reports/t-vn-34-orthogonal-state-plan-2026-08-09.md),
+> 구조 결정은 ADR-090이다. A/B/C는 T-VN-38 parent 위의 stacked draft다. A/B는 단독으로
+> 배포·main 병합하지 않고 C final head에서 한 번에 forward-only cutover한다. 서비스 전 단계이므로
+> dual-write, shadow/held rollback, old contract 보존은 만들지 않으며 final schema는 ETL로 재적재한다.
+
 - [ ] T-VN-34A — **3축 상태 schema·backfill**
 
-  lifecycle/publication/quality를 별도 typed column으로 추가하고 기존 status를 무손실 매핑한다.
-  허용되지 않는 결합을 DB CHECK로 거부한다.
+  여덟 legal tuple의 typed axis/DB CHECK와 `feature_state_transitions` append-only trigger를
+  target contract·actual migration에 고정한다. legacy tuple diagnostics와 one-shot mapping/backfill
+  audit, axis context/principal/reason/revision fence, provider/override canonical writer 전환을 소유한다.
+  A는 stack 내부 checkpoint다.
 
 - [ ] T-VN-34B — **public projection·partial index cutover**
 
-  `public_features` view를 3축 predicate 정본으로 바꾸고 실제 hot predicate와 일치하는 partial
-  index를 추가한다.
+  명시 열 `public_features` projection과 service 5-state classifier를 3축 정본으로 전환한다.
+  point/route/area 공간, category/keyset/text hot path의 exact partial index 및 `EXPLAIN` gate와
+  public reader regression을 소유한다. B도 stack 내부 checkpoint다.
 
 - [ ] T-VN-34C — **writer/API/UI cutover·legacy status fence**
 
-  provider/admin writer와 admin/user DTO/UI를 3축으로 전환하고 old status 신규 write를 차단한다.
-  legacy column/index는 held component rollback을 위해 유지하고 T-VN-39 removal manifest에 넣는다.
+  admin state command·OpenAPI/generated type·Map/PinVi/admin UI·merge/Dagster/fixture/live runner의
+  모든 남은 writer를 cutover한다. 같은 final migration에서 legacy `status`, delete/user-change metadata와
+  관련 CHECK/index/trigger/query를 물리 삭제하고 static normal-path gate와 n150 destructive fresh-reload
+  live E2E를 통과한다. `data_origin`/`data_version`/whole-row freeze는 T-VN-36의 materialization 입력으로
+  남기며 T-VN-36C가 제거한다. C만 배포·병합 가능하다.
 
 ### T-VN-35 — kind별 typed subtype 분해 (Lane A) — 배포 잔여
 
@@ -746,8 +763,8 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 - [ ] T-VN-36C — **effective projection 단일화·legacy freeze fence**
 
   read model을 한 effective projection으로 통일하고 repository별 중복 `CASE` write/read 분기를
-  비활성화한다. whole-row freeze column/trigger는 rollback shadow로 유지하고 물리 삭제 목록을
-  T-VN-39에 넘긴다.
+  비활성화한다. 서비스 전 final migration에서 whole-row freeze column/trigger와 `data_origin`/
+  `data_version`을 물리 삭제한다. rollback shadow와 T-VN-39 이관은 만들지 않는다.
 
 ### T-VN-37 — notice 계보 판정 (Lane A)
 
@@ -779,23 +796,42 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   여전히 가치가 있으나, 위 성능 문제와 무관하고 read 술어 변경(=제품 결정)이
   선행돼야 하므로 분리한다. notice_type별 "미래 발효를 보일 것인가" 결정이 먼저다.
 
-### T-VN-38 — weather·price current summary (Lane B)
+### T-VN-38A/B/C — weather·price current summary와 set-based cutover (Lane B, 단일 PR)
+
+> **PR 단위**: T-VN-38A/B/C는 한 개의 stacked draft PR로만 진행한다. base는 T-VN-33
+> PR #966이며 migration은 `0091 → 0092 → 0093 → 0094` 단일 head다. #966 병합 때 즉시
+> main 위로 rebase/retarget한다. 중간 DB 보존·provider 문자열 호환·dual write는 만들지
+> 않고 final schema empty rebuild 뒤 provider ETL로 재적재한다.
+>
+> **사전 승인**: 코드 전 ADR-089와
+> [`reports/t-vn-38-current-summary-plan-2026-08-08.md`](reports/t-vn-38-current-summary-plan-2026-08-08.md)를
+> 적대 리뷰어 2명이 P0=0으로 승인해야 한다.
 
 - [x] T-VN-38A — **weather current summary**
+- [/] T-VN-38A — **weather immutable-fact current summary**
 
-  bitemporal 원본 이력을 보존하면서 identity당 current weather를 원자 유지하는 summary와
-  reconciliation을 추가한다.
+  `current_summary_runs`부터 만들고 `provider_dataset_id + source entity/record + fetched known_at`
+  복합 provenance, immutable fact, selected `weather_value_key` 참조 summary를 추가한다. KMA grid
+  source와 forecast response source는 exact producing dataset의 별도 record로 분리한다. same
+  transaction의 fact+summary write, deterministic bitemporal winner, refresh deadline Dagster
+  materializer 및 set-based reconciliation을 추가한다.
 
 - [x] T-VN-38B — **price current summary**
+- [/] T-VN-38B — **price immutable-fact current summary**
 
-  `provider + price_domain + product_key` identity당 current price summary와 reconciliation을
-  추가하고 restore/backfill generation을 구분한다.
+  price의 `provider` 저장 identity를 `provider_dataset_id`와 immutable source provenance로 clean
+  cut하고 selected `price_value_key` 참조 summary와 restore/backfill safe reconciliation을 추가한다.
 
 - [x] T-VN-38C — **bbox/detail set-based cutover**
+- [/] T-VN-38C — **normal reader set-based cutover**
 
-  per-row LATERAL을 weather/price summary set join으로 바꾸고 old query를 normal path에서
-  비활성화한다. rollback shadow index는 보존해 T-VN-39 removal manifest로 넘기고,
-  cardinality·freshness·EXPLAIN을 실데이터로 고정한다.
+  own/nearest/KMA tier anchor를 window-ranked CTE로 먼저 선택한 뒤 card/bbox/detail normal path를
+  weather/price summary set join으로 바꾸고 per-row LATERAL reader를 제거한다. current endpoint와
+  explicit `(target_at, known_at)` snapshot endpoint를 분리한다. cardinality, freshness,
+  reconciliation set-diff, EXPLAIN과 n150 final-head destructive rebuild/live UI E2E를 통과시킨다.
+  구현은 complete이며 완료 표시는 final cumulative adversarial review 2인 P0=0, #966 병합 뒤
+  최신 main rebase, GitHub Actions CI·required approval이 모두 끝난 merge commit에서만
+  `tasks-done.md`로 옮긴다.
 
   **2026-08-08 final-review 보강 checkpoint**: weather global projection을 transaction advisory
   lock으로 직렬화하고 same-winner reconcile의 row rewrite를 제거했다. deadline-only Dagster
@@ -820,6 +856,9 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   JSON 경계, H35 index fingerprint, tier-2 bbox page-limit count를 final canonical
   dataset/source revision schema로 함께 고정한다. 이 보강 SHA의 CI·live·적대 재승인까지
   병합 조건으로 삼는다.
+  fallback으로 재선정하지 않도록 고쳤다. 재리뷰 2인 P0=0과 n150 destructive rebuild/live UI E2E
+  (메인·복구 각 2/2)는 완료했다. stacked base #966 병합 뒤 최신 main rebase, CI와 required
+  approval이 남았다.
 
 ### T-VN-40 — curation write model 단일화 (Lane B)
 

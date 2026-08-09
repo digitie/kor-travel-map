@@ -43,12 +43,12 @@
     "T-VN-34": {
       "title": "직교 상태 모델 전환",
       "consumer_first_order": [
-        "34A: 3축 typed column 추가 + legacy status 무손실 매핑 backfill + 결합 CHECK(불가능 조합 집합 확정 포함) + soft-delete 시각(deleted_at/user_deleted_at)의 feature_state_transitions 감사 이력 흡수(ADR-067 결정 5)",
-        "34B: public_features view를 3축 정본으로 교체 + 동일 술어 partial index",
-        "34C: provider/admin writer와 admin/user DTO/UI 3축 전환 — user spec의 status enum 노출도 3축으로 교체되므로 PinVi user snapshot 선-재-vendor 후 Map 응답 교체"
+        "34A: ADR-090의 8 legal tuple과 DB 전이 감사 contract, contradiction receipt, provider/override canonical writer를 stack draft로 만든다. A만의 배포/병합은 금지한다.",
+        "34B: 명시 열 public_features, service 5-state classifier, exact partial spatial/text index와 EXPLAIN을 stack draft로 만든다. B만의 배포/병합은 금지한다.",
+        "34C: provider/admin/merge/Dagster writer와 admin/user DTO/API/UI/OpenAPI/PinVi snapshot/live fixture를 one-shot final cutover한다. PinVi snapshot은 C exact Map head를 재-vendor한 뒤 함께 검증한다."
       ],
-      "write_fence": "34C에서 legacy status 신규 write 차단",
-      "compat_drop": "legacy status column/index는 held-component rollback용으로 유지, 삭제는 T-VN-39 removal manifest",
+      "write_fence": "34C final migration에서 legacy status/delete/user-change core metadata와 그 dependent query/trigger/index를 물리 삭제해 DB fence를 완성한다. data_origin/data_version/whole-row freeze는 T-VN-36C가 소유한다.",
+      "compat_drop": "서비스 전 forward-only cutover다. dual-write, shadow column/trigger, held-component rollback은 금지하며 T-VN-39로 이관하지 않는다.",
       "pinvi_snapshot_revendor": {
         "user": "yes",
         "service": "no",
@@ -74,12 +74,12 @@
     "T-VN-36": {
       "title": "field override 단일화",
       "consumer_first_order": [
-        "36A: override 정본 schema + whole-row freeze의 동일 effective projection backfill·대조",
+        "36A: override 정본 schema + data_origin/data_version과 whole-row freeze의 동일 effective projection backfill·대조",
         "36B: provider/admin writer가 같은 transaction에서 override 갱신",
-        "36C: effective projection 단일화 + repository CASE 분기 비활성화"
+        "36C: effective projection 단일화 + repository CASE 분기 비활성화 + legacy data-origin/version/freeze 물리 삭제"
       ],
-      "write_fence": "36C에서 whole-row freeze 신규 write 차단 (column/trigger는 rollback shadow로 유지)",
-      "compat_drop": "freeze column/trigger 삭제는 T-VN-39 removal manifest. rollback 시에도 생성된 override 행은 삭제하지 않는다 (ADR-071)",
+      "write_fence": "36C final migration에서 whole-row freeze와 data_origin/data_version 신규 write를 막고 dependent column/trigger/index를 물리 삭제한다.",
+      "compat_drop": "서비스 전 forward-only cutover다. rollback shadow를 만들지 않고 generated override 행을 정본으로 유지한다 (ADR-071은 T-VN-36C에서 destructive 규율로 갱신한다).",
       "pinvi_snapshot_revendor": {
         "user": "no",
         "service": "no",
@@ -150,12 +150,12 @@
     }
   },
   "removal_manifest": {
-    "description": "T-VN-39가 물리 삭제하는 legacy 객체의 freeze 시점 목록. 각 fence task(33C/34C/36C/38C/40C)가 구현 시 exact 목록(컬럼·인덱스·트리거 명 세부)을 갱신·인계한다.",
+    "description": "각 fence task가 물리 삭제하는 legacy 객체의 freeze 시점 목록. task별 final migration이 exact 목록(컬럼·인덱스·트리거 명 세부)을 갱신·소유한다. T-VN-39만의 제거 목록이 아니다.",
     "entries": [
       {
-        "object": "feature.features legacy 열 — status, data_origin, data_version, user_change_kind, user_change_status, user_change_request_id, user_deleted_at, user_deleted_by, user_change_reason, deleted_at. soft-delete 시각(deleted_at/user_deleted_at)은 제거 전에 feature.feature_state_transitions 감사 이력으로 흡수한다(ADR-067 결정 5, T-VN-34A)",
+        "object": "feature.features legacy 열 — status, user_change_kind, user_change_status, user_change_request_id, user_deleted_at, user_deleted_by, user_change_reason, deleted_at. soft-delete 시각(deleted_at/user_deleted_at)은 제거 전에 feature.feature_state_transitions DB 감사 이력으로 흡수한다(ADR-090, T-VN-34C)",
         "fenced_by": "T-VN-34C",
-        "removed_by": "T-VN-39"
+        "removed_by": "T-VN-34C"
       },
       {
         "object": "feature.features legacy 문자열 feature_id PK 및 f_* 참조 FK 체인 (alias 유지, PK 열 제거)",
@@ -168,9 +168,9 @@
         "removed_by": "T-VN-39"
       },
       {
-        "object": "whole-row freeze 판정 열·trigger(data_origin='user_request' CASE 계열)",
+        "object": "data_origin/data_version과 whole-row freeze 판정 열·trigger(data_origin='user_request' CASE 계열)",
         "fenced_by": "T-VN-36C",
-        "removed_by": "T-VN-39"
+        "removed_by": "T-VN-36C"
       },
       {
         "object": "provider_sync.notice_lineage_states·notice_lifecycle_scopes(문자열 시각 판정) — notice_states로 대체",

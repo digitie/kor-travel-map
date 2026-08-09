@@ -39,7 +39,7 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     ),
     "openapi-diff-v1.json": ("0de7474cfa9c25650078e0633b211b37a61c6e517e56712004a2ef901223b543"),
     "consumer-rollout-v1.json": (
-        "d9983dbe96094c9439b575e8ff8e5f1e4bca0656fa4b8166f2449010ad2b8d38"
+        "f2a50d24de77ea6001276dedd17862d5c6a5d15652e861c0c7d5dbae41d3918c"
     ),
     "violation-fixtures-v1.sql": (
         "d7d254b2bf01c6c2ec9c06ac6f862d652b1833051f6cf0f5ab0135f91255ac9d"
@@ -186,7 +186,12 @@ def test_consumer_rollout_shape() -> None:
     entries = rollout["removal_manifest"]["entries"]
     assert entries, "removal manifest가 비어 있다"
     for entry in entries:
-        assert entry["removed_by"] == "T-VN-39"
+        removed_by = entry["removed_by"]
+        task_match = re.fullmatch(r"(T-VN-\d+)(?:[A-Z][A-Z0-9-]*)?", removed_by)
+        assert task_match, f"제거 task 형식 불일치: {removed_by}"
+        assert task_match.group(1) in rollout["tasks"], (
+            f"제거 task가 rollout task가 아님: {removed_by}"
+        )
         assert entry["fenced_by"].startswith("T-VN-")
         assert isinstance(entry["object"], str)
         assert entry["object"]

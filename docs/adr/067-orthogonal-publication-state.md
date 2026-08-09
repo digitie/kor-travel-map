@@ -35,10 +35,11 @@ draft·broken feature가 노출되는 양방향 오분류가 발생한다.
 
 - **긍정**: 공개 여부와 운영 상태를 독립적으로 바꿀 수 있고 모든 표면이 동일하게 판정한다.
 - **부정**: 기존 네 상태 축의 의미를 명시적으로 매핑하는 데이터 이관이 필요하다.
-- **전환/rollback**: 먼저 현행 컬럼 위에 view를 도입하고 공개 SQL을 전환한 뒤 shadow 3축을
-  검증한다. 3축 전환 rollback은 view를 검증된 이전 projection으로 돌리고 shadow 컬럼은 보존한다.
+- **전환**: 상태 의미와 공개 projection의 원칙은 유지한다. 서비스 전 final cutover의 정확한
+  tuple 진리표, DB 소유 전이 감사, legacy 열의 물리 삭제와 rollback 비보존은 ADR-090을 따른다.
 
 ## 기존 결정과의 관계
 
 ADR-017의 보관 기간과 purge 원칙은 유지한다. 공개 상태와 보관 상태를 같은 필드로 표현하던
-부분만 이 ADR이 대체한다.
+부분만 이 ADR이 대체한다. 이 ADR의 3축·단일 공개 projection은 ADR-090에도 유지되며, 기존
+shadow 보존 rollback 경로만 ADR-090으로 대체됐다.
