@@ -307,6 +307,17 @@ BEGIN
     END IF;
 
     PERFORM feature.prepare_feature_state_context(p_context, 'create');
+    -- Provider source writers advance an entity head before they create/update
+    -- the Feature in the same transaction.  Take the identical locked proof
+    -- before this INSERT, so the initial audit can never claim a record that
+    -- stopped being current before this transaction commits.
+    IF p_context ->> 'transition_kind' = 'provider_sync' THEN
+        PERFORM feature.lock_current_provider_source_evidence(
+            (p_context ->> 'provider_dataset_id')::bigint,
+            p_context ->> 'source_entity_key',
+            p_context ->> 'source_record_key'
+        );
+    END IF;
     INSERT INTO feature.features (
         feature_id, feature_uuid, kind, name, category,
         coord, coord_precision_digits,
@@ -342,6 +353,82 @@ $$;
 """
 
 
+_LOCK_PROVIDER_SOURCE_EVIDENCE_FUNCTION_SQL = r"""
+CREATE OR REPLACE FUNCTION feature.lock_current_provider_source_evidence(
+    p_provider_dataset_id bigint,
+    p_source_entity_key text,
+    p_source_record_key text
+) RETURNS text
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $$
+DECLARE
+    v_raw_payload_hash text;
+BEGIN
+    SELECT record.raw_payload_hash
+      INTO v_raw_payload_hash
+      FROM provider_sync.provider_datasets AS dataset
+      JOIN provider_sync.source_entities AS entity
+        ON entity.provider_dataset_id = dataset.provider_dataset_id
+      JOIN provider_sync.source_records AS record
+        ON record.source_entity_key = entity.source_entity_key
+      JOIN provider_sync.source_entity_heads AS head
+        ON head.source_entity_key = entity.source_entity_key
+       AND head.current_source_record_key = record.source_record_key
+     WHERE dataset.provider_dataset_id = p_provider_dataset_id
+       AND dataset.is_active
+       AND entity.source_entity_key = p_source_entity_key
+       AND record.source_record_key = p_source_record_key
+     FOR SHARE OF dataset, entity, record, head;
+    IF v_raw_payload_hash IS NULL OR btrim(v_raw_payload_hash) = '' THEN
+        RAISE EXCEPTION 'provider state transition requires current active source evidence'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_provider_source_provenance';
+    END IF;
+    RETURN v_raw_payload_hash;
+END;
+$$;
+"""
+
+
+_LOCK_PROVIDER_FEATURE_SOURCE_EVIDENCE_FUNCTION_SQL = r"""
+CREATE OR REPLACE FUNCTION feature.lock_current_provider_feature_source_evidence(
+    p_feature_id text,
+    p_provider_dataset_id bigint,
+    p_source_entity_key text,
+    p_source_record_key text
+) RETURNS text
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $$
+DECLARE
+    v_raw_payload_hash text;
+BEGIN
+    -- All provider lifecycle operations acquire source evidence before the
+    -- Feature row.  The provider bundle path already owns its head row before
+    -- it reaches the Feature, so this order eliminates head→Feature versus
+    -- Feature→head deadlocks as well as the stale-head TOCTOU window.
+    PERFORM 1
+      FROM provider_sync.source_links AS link
+     WHERE link.feature_id = p_feature_id
+       AND link.source_entity_key = p_source_entity_key
+     FOR SHARE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'provider lifecycle transition requires linked source evidence'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_provider_source_provenance';
+    END IF;
+    v_raw_payload_hash := feature.lock_current_provider_source_evidence(
+        p_provider_dataset_id,
+        p_source_entity_key,
+        p_source_record_key
+    );
+    RETURN v_raw_payload_hash;
+END;
+$$;
+"""
+
+
 _TRANSITION_PROCEDURE_SQL = r"""
 CREATE OR REPLACE PROCEDURE feature.transition_feature_state(
     IN p_feature_id text,
@@ -365,6 +452,19 @@ BEGIN
             USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_state_expected_revision';
     END IF;
     PERFORM feature.prepare_feature_state_context(p_context, 'transition');
+    -- Provider ingestion first locks its source head, then the Feature.  Do
+    -- the same for every provider transition.  The proof locks the link,
+    -- dataset/entity/record and current head until commit; a head advance can
+    -- therefore either happen before this call (and reject stale evidence) or
+    -- after this transition/audit commit, never between proof and audit.
+    IF p_context ->> 'transition_kind' = 'provider_sync' THEN
+        PERFORM feature.lock_current_provider_feature_source_evidence(
+            p_feature_id,
+            (p_context ->> 'provider_dataset_id')::bigint,
+            p_context ->> 'source_entity_key',
+            p_context ->> 'source_record_key'
+        );
+    END IF;
     SELECT * INTO v_current
       FROM feature.features
      WHERE feature_id = p_feature_id
@@ -379,29 +479,6 @@ BEGIN
        IS NOT DISTINCT FROM (p_lifecycle_state, p_publication_state, p_quality_state) THEN
         RAISE EXCEPTION 'feature state transition must change at least one axis'
             USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_state_transition_non_noop';
-    END IF;
-    IF p_context ->> 'transition_kind' = 'provider_sync'
-       AND (
-            (v_current.lifecycle_state = 'active' AND p_lifecycle_state = 'retired')
-            OR (v_current.lifecycle_state = 'retired' AND p_lifecycle_state = 'active')
-       )
-       AND NOT EXISTS (
-            SELECT 1
-            FROM provider_sync.source_links AS link
-            JOIN provider_sync.source_entities AS entity
-              ON entity.source_entity_key = link.source_entity_key
-            JOIN provider_sync.source_records AS record
-              ON record.source_entity_key = entity.source_entity_key
-            JOIN provider_sync.source_entity_heads AS head
-              ON head.source_entity_key = entity.source_entity_key
-             AND head.current_source_record_key = record.source_record_key
-            WHERE link.feature_id = p_feature_id
-              AND link.source_entity_key = p_context ->> 'source_entity_key'
-              AND entity.provider_dataset_id = (p_context ->> 'provider_dataset_id')::bigint
-              AND record.source_record_key = p_context ->> 'source_record_key'
-       ) THEN
-        RAISE EXCEPTION 'provider lifecycle transition requires linked authoritative source evidence'
-            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_provider_source_provenance';
     END IF;
     IF v_current.lifecycle_state = 'retired' AND p_lifecycle_state = 'active' THEN
         IF p_context ->> 'transition_kind' <> 'provider_sync'
@@ -457,6 +534,7 @@ DECLARE
     v_lifecycle_state text;
     v_publication_state text;
     v_quality_state text;
+    v_override_row_revision bigint;
 BEGIN
     IF p_action NOT IN ('patch', 'retire')
        OR p_expected_row_revision IS NULL OR p_expected_row_revision < 1
@@ -507,6 +585,25 @@ BEGIN
         ),
         o_feature_id, o_row_revision
     );
+    IF p_action = 'retire' THEN
+        -- Retirement and the typed provider-reactivation fence are one
+        -- command: a later provider observation must not resurrect an
+        -- operator-retired Feature until the explicit reactivation command
+        -- revokes this exact override under the same Feature-row lock.
+        CALL feature.author_lifecycle_override(
+            p_feature_id,
+            v_current.lifecycle_state,
+            'retired',
+            true,
+            btrim(p_reason_code),
+            btrim(p_principal),
+            o_row_revision,
+            v_override_row_revision
+        );
+        IF v_override_row_revision <> o_row_revision THEN
+            RAISE EXCEPTION 'admin retirement wrote an inconsistent lifecycle override';
+        END IF;
+    END IF;
     SELECT transition.transition_id INTO o_transition_id
     FROM feature.feature_state_transitions AS transition
     WHERE transition.feature_id = o_feature_id
@@ -555,6 +652,14 @@ BEGIN
         RAISE EXCEPTION 'admin reactivation has invalid arguments'
             USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_admin_reactivation';
     END IF;
+    -- Match provider ingestion's source→Feature lock order.  This proof stays
+    -- locked through the override revocation, state transition and audit.
+    v_raw_payload_hash := feature.lock_current_provider_feature_source_evidence(
+        p_feature_id,
+        p_provider_dataset_id,
+        p_source_entity_key,
+        p_source_record_key
+    );
     SELECT * INTO v_current FROM feature.features
      WHERE feature_id = p_feature_id FOR UPDATE;
     IF NOT FOUND THEN
@@ -566,26 +671,6 @@ BEGIN
     IF v_current.lifecycle_state <> 'retired' THEN
         RAISE EXCEPTION 'admin reactivation requires a retired feature'
             USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_admin_reactivation';
-    END IF;
-    SELECT record.raw_payload_hash INTO v_raw_payload_hash
-    FROM provider_sync.source_links AS link
-    JOIN provider_sync.source_entities AS entity
-      ON entity.source_entity_key = link.source_entity_key
-    JOIN provider_sync.provider_datasets AS dataset
-      ON dataset.provider_dataset_id = entity.provider_dataset_id
-     AND dataset.is_active
-    JOIN provider_sync.source_records AS record
-      ON record.source_entity_key = entity.source_entity_key
-     AND record.source_record_key = p_source_record_key
-    JOIN provider_sync.source_entity_heads AS head
-      ON head.source_entity_key = entity.source_entity_key
-     AND head.current_source_record_key = record.source_record_key
-    WHERE link.feature_id = p_feature_id
-      AND link.source_entity_key = p_source_entity_key
-      AND entity.provider_dataset_id = p_provider_dataset_id;
-    IF v_raw_payload_hash IS NULL OR btrim(v_raw_payload_hash) = '' THEN
-        RAISE EXCEPTION 'admin reactivation requires current linked active source evidence'
-            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_provider_source_provenance';
     END IF;
     IF EXISTS (
         SELECT 1 FROM ops.feature_overrides AS override
@@ -682,6 +767,32 @@ $$;
 """
 
 
+_REQUEST_RECEIPT_GUARD_SQL = r"""
+CREATE OR REPLACE FUNCTION feature.reject_feature_change_request_receipt_mutation()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $$
+BEGIN
+    -- A durable user receipt is the immutable applied-request binding during
+    -- the T-VN-34C→T-VN-36 bridge.  Changing or deleting its request would
+    -- make the receipt's feature/action/applied provenance lie.
+    IF EXISTS (
+        SELECT 1
+        FROM feature.feature_versions AS version
+        WHERE version.origin = 'user_request'
+          AND version.request_id = OLD.request_id
+    ) THEN
+        RAISE EXCEPTION 'feature change request with a durable receipt is immutable'
+            USING ERRCODE = '42501', CONSTRAINT = 'ck_feature_change_request_receipt_immutable';
+    END IF;
+    RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
+END;
+$$;
+"""
+
+
 _USER_PROVENANCE_PROCEDURE_SQL = f"""
 CREATE OR REPLACE PROCEDURE feature.materialize_user_feature_change_provenance(
     IN p_feature_id text,
@@ -699,6 +810,7 @@ SET search_path = pg_catalog
 AS $$
 DECLARE
     v_current feature.features%ROWTYPE;
+    v_request ops.feature_change_requests%ROWTYPE;
     v_receipt_revision bigint;
     v_next_version integer;
 BEGIN
@@ -710,13 +822,17 @@ BEGIN
         RAISE EXCEPTION 'user feature provenance has invalid typed arguments'
             USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_user_provenance';
     END IF;
-    IF NOT EXISTS (
-        SELECT 1 FROM ops.feature_change_requests AS request
-        WHERE request.request_id = p_request_id
-          AND request.feature_id = p_feature_id
-          AND request.action = p_change_kind
-          AND request.state = 'applied'
-    ) THEN
+    -- Lock request before checking a durable receipt.  It serializes the
+    -- mutable request counterpart against the first immutable receipt and
+    -- makes a retry read exactly the same applied binding.
+    SELECT * INTO v_request
+      FROM ops.feature_change_requests AS request
+     WHERE request.request_id = p_request_id
+     FOR UPDATE;
+    IF NOT FOUND
+       OR v_request.feature_id IS DISTINCT FROM p_feature_id
+       OR v_request.action IS DISTINCT FROM p_change_kind
+       OR v_request.state IS DISTINCT FROM 'applied' THEN
         RAISE EXCEPTION 'user feature provenance needs an applied request for this feature/action'
             USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_user_provenance_request';
     END IF;
@@ -855,9 +971,12 @@ def upgrade() -> None:
     # reach the bridge drop.
     op.execute("SET ROLE ktm_feature_state_procedure_owner")
     for statement in (
+        _LOCK_PROVIDER_SOURCE_EVIDENCE_FUNCTION_SQL,
+        _LOCK_PROVIDER_FEATURE_SOURCE_EVIDENCE_FUNCTION_SQL,
         _CREATE_PROCEDURE_SQL,
         _TRANSITION_PROCEDURE_SQL,
         _USER_RECEIPT_GUARD_SQL,
+        _REQUEST_RECEIPT_GUARD_SQL,
         _USER_PROVENANCE_PROCEDURE_SQL,
         _PROVIDER_VERSION_PROCEDURE_SQL,
         _ADMIN_TRANSITION_PROCEDURE_SQL,
@@ -876,6 +995,10 @@ def upgrade() -> None:
         "GRANT EXECUTE ON FUNCTION feature.reject_user_feature_version_mutation() "
         "TO ktm_feature_schema_owner",
         "REVOKE ALL ON FUNCTION feature.reject_user_feature_version_mutation() "
+        "FROM PUBLIC, ktm_feature_runtime",
+        "GRANT EXECUTE ON FUNCTION feature.reject_feature_change_request_receipt_mutation() "
+        "TO ktm_feature_schema_owner",
+        "REVOKE ALL ON FUNCTION feature.reject_feature_change_request_receipt_mutation() "
         "FROM PUBLIC, ktm_feature_runtime",
     ):
         op.execute(statement)
@@ -898,6 +1021,9 @@ def upgrade() -> None:
         "CREATE TRIGGER trg_feature_versions_user_request_immutable "
         "BEFORE INSERT OR UPDATE OR DELETE ON feature.feature_versions "
         "FOR EACH ROW EXECUTE FUNCTION feature.reject_user_feature_version_mutation()",
+        "CREATE TRIGGER trg_feature_change_requests_receipt_immutable "
+        "BEFORE UPDATE OR DELETE ON ops.feature_change_requests "
+        "FOR EACH ROW EXECUTE FUNCTION feature.reject_feature_change_request_receipt_mutation()",
         "GRANT SELECT ON feature.features, feature.feature_places, feature.feature_events, "
         "feature.feature_notices, feature.feature_routes, feature.feature_areas "
         "TO ktm_feature_state_procedure_owner",
@@ -910,6 +1036,16 @@ def upgrade() -> None:
         "GRANT UPDATE (lifecycle_state, publication_state, quality_state, data_origin, "
         "data_version, updated_at) ON feature.features TO ktm_feature_state_procedure_owner",
         "GRANT SELECT, INSERT, UPDATE ON feature.feature_versions "
+        "TO ktm_feature_state_procedure_owner",
+        # Evidence is locked with `FOR SHARE`; PostgreSQL requires UPDATE
+        # privilege even though these SECURITY DEFINER helpers never mutate a
+        # source row.  Runtime is deliberately not granted these columns.
+        "GRANT UPDATE (provider_dataset_id) ON provider_sync.provider_datasets "
+        "TO ktm_feature_state_procedure_owner",
+        "GRANT UPDATE (source_entity_key) ON provider_sync.source_entities, "
+        "provider_sync.source_records, provider_sync.source_entity_heads, "
+        "provider_sync.source_links TO ktm_feature_state_procedure_owner",
+        "GRANT UPDATE (request_id) ON ops.feature_change_requests "
         "TO ktm_feature_state_procedure_owner",
         "REVOKE SELECT ON feature.features_detailed "
         "FROM ktm_feature_runtime, ktm_feature_state_procedure_owner",

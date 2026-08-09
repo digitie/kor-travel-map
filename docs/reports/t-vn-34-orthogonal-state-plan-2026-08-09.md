@@ -64,9 +64,12 @@ preflight receipt에 남긴 뒤 final schema를 ETL로 재생성할 수 있으�
 재작성한 뒤 core metadata를 물리 삭제한다. 정확한 DDL은 partial unique
 `feature.uq_feature_versions_user_request_receipt(feature_id, request_id) WHERE request_id IS NOT NULL AND
 origin='user_request'`, request receipt의 `UPDATE`/`DELETE`를 거부하는
-`feature.reject_user_feature_version_mutation()`/`trg_feature_versions_user_request_immutable`이다.
-materializer는 Feature와 request를 고정 순서로 잠가 feature/action을 검증하고, receipt lookup을 먼저
-한 뒤 없는 경우에만 expected revision을 검사·삽입한다. unique conflict는 기존 immutable receipt를
+`feature.reject_user_feature_version_mutation()`/`trg_feature_versions_user_request_immutable`와 receipt가
+존재하는 request 자체의 역방향 `UPDATE`/`DELETE`를 거부하는
+`feature.reject_feature_change_request_receipt_mutation()`/
+`trg_feature_change_requests_receipt_immutable`이다. materializer는 **request → receipt → Feature**의 고정
+순서로 잠가 feature/action을 검증하고, receipt lookup을 먼저 한 뒤 없는 경우에만 expected revision을
+검사·삽입한다. unique conflict는 기존 immutable receipt를
 반환하며 user-request receipt가 provider version `0` upsert의 mutation 대상이 될 수 없다.
 반면 `data_origin`과 `data_version`은 T-VN-36이 whole-row freeze를 field override로 물화하고
 provider/user ownership을 대조할 입력이다. T-VN-34는 이를 읽거나 삭제하지 않으며, T-VN-36C가
@@ -223,7 +226,7 @@ admin/user retire와 merge retire는 generic upsert가 아닌 Feature lock·expe
 typed author command로 그 active override를 원자적으로 만든다. 이 command는 source value를 임의로
 받지 않고 현재 lifecycle 또는 해당 current state를 만든 exact audit revision의 이전 lifecycle과만
 일치시킨다. `retired → active`는
-`POST /v1/admin/features/{feature_id}/state/reactivate`가 expected revision, reason, active current
+`POST /v1/admin/features/{feature_id}/state/reactivate`가 expected revision, `reason_code`, active current
 source evidence를 받아 typed revoke command로 override를 철회하고 시행하는 경우만 가능하다. provider reappearance는
 override를 revoke하지 못한다. provider와 admin/quality concurrent update, override revoke와 source
 refresh 경쟁은 feature row lock 아래 하나의 procedure로 직렬화해 revision/audit 한 쌍을 남긴다.
@@ -268,7 +271,7 @@ admin 상태 변경은 다음 HTTP union contract 하나만 사용한다.
   빈 axis patch, action+axis 혼합, lifecycle 입력, 불가능 tuple/no-op은 `422`다.
 - retire는 `(retired, suppressed, current_quality)`를 한 revision·한 audit transition으로 기록한다.
   reactivation은 `POST /v1/admin/features/{feature_id}/state/reactivate`의 별도 typed command다. strong
-  If-Match·reason과 `provider_dataset_id`/`source_entity_key`/`source_record_key`의 current-source evidence를
+  If-Match·`reason_code`와 `provider_dataset_id`/`source_entity_key`/`source_record_key`의 current-source evidence를
   요구하고, 같은 Feature lock에서 active dataset·Feature source link·current head를 검증하고 retired
   override를 revoke한다. lifecycle만 `active`로 돌리고 publication은 suppressed, quality는 기존 값을 보존한다.
 - 성공 응답은 세 axes, `row_revision`, strong ETag, audit transition identity를 반환한다. 없는 Feature는

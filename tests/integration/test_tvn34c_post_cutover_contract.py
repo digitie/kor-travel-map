@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import re
+from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from pathlib import Path
 from uuid import uuid4
@@ -382,6 +383,88 @@ async def test_tvn34c_user_receipt_is_request_bound_immutable_and_concurrent(
                     {"feature_id": feature_id, "request_id": str(request_id)},
                 )
         assert getattr(mutate.value.orig, "sqlstate", None) == "42501"
+        await verify_session.execute(text("SET LOCAL ROLE ktm_feature_runtime"))
+        for statement in (
+            "UPDATE ops.feature_change_requests SET state = 'rejected' "
+            "WHERE request_id = CAST(:request_id AS uuid)",
+            "DELETE FROM ops.feature_change_requests "
+            "WHERE request_id = CAST(:request_id AS uuid)",
+        ):
+            with pytest.raises(DBAPIError) as request_mutation:
+                async with verify_session.begin_nested():
+                    await verify_session.execute(text(statement), {"request_id": str(request_id)})
+            assert getattr(request_mutation.value.orig, "sqlstate", None) == "42501"
+
+
+async def test_tvn34c_request_lock_serializes_first_receipt_against_request_mutation(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """first receipt는 locked applied request만 받아 immutable binding을 만든다."""
+
+    feature_id = f"tvn34c-receipt-race-{uuid4().hex}"
+    request_id = uuid4()
+    async with AsyncSession(migrated_engine) as setup_session, setup_session.begin():
+        await _create_as_runtime(setup_session, feature_id=feature_id, kind="place")
+        await setup_session.execute(
+            text(
+                """
+                INSERT INTO ops.feature_change_requests (
+                    request_id, feature_id, action, state, review_mode,
+                    base_row_revision, payload, reason, requested_by
+                ) VALUES (
+                    CAST(:request_id AS uuid), :feature_id, 'update', 'applied', 'immediate',
+                    1, '{}'::jsonb, 'receipt race fixture', 'admin:tvn34c-contract'
+                )
+                """
+            ),
+            {"request_id": str(request_id), "feature_id": feature_id},
+        )
+
+    async with AsyncSession(migrated_engine) as mutator_session:
+        await mutator_session.begin()
+        await mutator_session.execute(
+            text(
+                "UPDATE ops.feature_change_requests SET state = 'rejected' "
+                "WHERE request_id = CAST(:request_id AS uuid)"
+            ),
+            {"request_id": str(request_id)},
+        )
+
+        async def materialize() -> None:
+            async with AsyncSession(migrated_engine) as session, session.begin():
+                await session.execute(text("SET LOCAL ROLE ktm_feature_runtime"))
+                await session.execute(
+                    text(
+                        """
+                        CALL feature.materialize_user_feature_change_provenance(
+                            :feature_id, 'update', CAST(:request_id AS uuid),
+                            'receipt race fixture', 'admin:tvn34c-contract', 1, NULL, NULL
+                        )
+                        """
+                    ),
+                    {"feature_id": feature_id, "request_id": str(request_id)},
+                )
+
+        materialization = asyncio.create_task(materialize())
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(asyncio.shield(materialization), timeout=0.15)
+        await mutator_session.commit()
+        with pytest.raises(DBAPIError) as rejected:
+            await materialization
+        assert getattr(rejected.value.orig, "sqlstate", None) == "23514"
+
+    async with AsyncSession(migrated_engine) as verify_session:
+        receipt_count = await verify_session.scalar(
+            text(
+                """
+                SELECT count(*) FROM feature.feature_versions
+                WHERE feature_id = :feature_id
+                  AND request_id = CAST(:request_id AS uuid)
+                """
+            ),
+            {"feature_id": feature_id, "request_id": str(request_id)},
+        )
+    assert receipt_count == 0
 
 
 async def test_tvn34c_admin_reactivation_derives_exact_current_source_evidence(
@@ -524,3 +607,191 @@ async def test_tvn34c_admin_reactivation_derives_exact_current_source_evidence(
         "raw_payload_hash": raw_payload_hash,
     }
     assert tuple(audit[2:]) == ("active", "suppressed", "valid")
+
+
+async def test_tvn34c_provider_evidence_lock_rejects_head_advance_races(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """admin/provider lifecycle 모두 locked current head만 audit evidence로 쓴다."""
+
+    suffix = uuid4().hex
+    dataset_key = f"tvn34c-race-{suffix}"
+    entity_key = f"tvn34c-race-entity-{suffix}"
+    record_one = f"tvn34c-race-record-one-{suffix}"
+    record_two = f"tvn34c-race-record-two-{suffix}"
+    admin_feature_id = f"tvn34c-race-admin-{suffix}"
+    provider_feature_id = f"tvn34c-race-provider-{suffix}"
+    async with AsyncSession(migrated_engine) as setup_session, setup_session.begin():
+        dataset_id = int(
+            (
+                await setup_session.execute(
+                    text(
+                        """
+                        INSERT INTO provider_sync.provider_datasets (
+                            provider, dataset_key, display_name, source_kind
+                        ) VALUES ('tvn34c-race', :dataset_key, 'T-VN-34C race', 'manual')
+                        RETURNING provider_dataset_id
+                        """
+                    ),
+                    {"dataset_key": dataset_key},
+                )
+            ).scalar_one()
+        )
+        await setup_session.execute(
+            text(
+                """
+                INSERT INTO provider_sync.source_entities (
+                    source_entity_key, provider_dataset_id, source_entity_type, source_entity_id,
+                    first_seen_at, last_seen_at
+                ) VALUES (:entity_key, :dataset_id, 'place', :source_entity_id, now(), now())
+                """
+            ),
+            {"entity_key": entity_key, "dataset_id": dataset_id, "source_entity_id": suffix},
+        )
+        for record_key, payload_hash in ((record_one, f"{suffix}a"), (record_two, f"{suffix}b")):
+            await setup_session.execute(
+                text(
+                    """
+                    INSERT INTO provider_sync.source_records (
+                        source_record_key, source_entity_key, raw_data, raw_payload_hash, fetched_at
+                    ) VALUES (:record_key, :entity_key, '{}'::jsonb, :payload_hash, now())
+                    """
+                ),
+                {
+                    "record_key": record_key,
+                    "entity_key": entity_key,
+                    "payload_hash": payload_hash,
+                },
+            )
+        await setup_session.execute(
+            text(
+                """
+                INSERT INTO provider_sync.source_entity_heads (
+                    source_entity_key, current_source_record_key, observed_at
+                ) VALUES (:entity_key, :record_key, now())
+                """
+            ),
+            {"entity_key": entity_key, "record_key": record_one},
+        )
+        await _create_as_runtime(
+            setup_session,
+            feature_id=admin_feature_id,
+            kind="place",
+            state=("retired", "suppressed", "valid"),
+        )
+        await _create_as_runtime(setup_session, feature_id=provider_feature_id, kind="place")
+        for feature_id in (admin_feature_id, provider_feature_id):
+            await setup_session.execute(
+                text(
+                    """
+                    INSERT INTO provider_sync.source_links (
+                        feature_id, source_entity_key, source_role, match_method, confidence
+                    ) VALUES (:feature_id, :entity_key, 'primary', 'fixture', 100)
+                    """
+                ),
+                {"feature_id": feature_id, "entity_key": entity_key},
+            )
+
+    async def _advance_head_while(call: Callable[[], Awaitable[None]]) -> DBAPIError:
+        async with AsyncSession(migrated_engine) as head_session:
+            await head_session.begin()
+            await head_session.execute(
+                text(
+                    """
+                    UPDATE provider_sync.source_entity_heads
+                    SET current_source_record_key = :record_two, observed_at = now()
+                    WHERE source_entity_key = :entity_key
+                    """
+                ),
+                {"record_two": record_two, "entity_key": entity_key},
+            )
+            task = asyncio.create_task(call())
+            with pytest.raises(TimeoutError):
+                await asyncio.wait_for(asyncio.shield(task), timeout=0.15)
+            await head_session.commit()
+            with pytest.raises(DBAPIError) as rejected:
+                await task
+            return rejected.value
+
+    async def admin_reactivation() -> None:
+        async with AsyncSession(migrated_engine) as session, session.begin():
+            await session.execute(text("SET LOCAL ROLE ktm_feature_runtime"))
+            await session.execute(
+                text(
+                    """
+                    CALL feature.reactivate_admin_feature_state(
+                        :feature_id, :dataset_id, :entity_key, :record_key, 1,
+                        'current_source_required', 'admin:tvn34c-race', NULL, NULL, NULL
+                    )
+                    """
+                ),
+                {
+                    "feature_id": admin_feature_id,
+                    "dataset_id": dataset_id,
+                    "entity_key": entity_key,
+                    "record_key": record_one,
+                },
+            )
+
+    admin_error = await _advance_head_while(admin_reactivation)
+    assert getattr(admin_error.orig, "sqlstate", None) == "23514"
+
+    async with AsyncSession(migrated_engine) as reset_session, reset_session.begin():
+        await reset_session.execute(
+            text(
+                """
+                UPDATE provider_sync.source_entity_heads
+                SET current_source_record_key = :record_one, observed_at = now()
+                WHERE source_entity_key = :entity_key
+                """
+            ),
+            {"record_one": record_one, "entity_key": entity_key},
+        )
+
+    async def provider_retirement() -> None:
+        async with AsyncSession(migrated_engine) as session, session.begin():
+            await session.execute(text("SET LOCAL ROLE ktm_feature_runtime"))
+            await session.execute(
+                text(
+                    """
+                    CALL feature.transition_feature_state(
+                        :feature_id, 'retired', 'suppressed', 'valid', 1,
+                        CAST(:context AS jsonb), NULL, NULL
+                    )
+                    """
+                ),
+                {
+                    "feature_id": provider_feature_id,
+                    "context": json.dumps(
+                        {
+                            "transition_kind": "provider_sync",
+                            "reason_code": "provider_retire",
+                            "provider_dataset_id": dataset_id,
+                            "source_entity_key": entity_key,
+                            "source_record_key": record_one,
+                        }
+                    ),
+                },
+            )
+
+    provider_error = await _advance_head_while(provider_retirement)
+    assert getattr(provider_error.orig, "sqlstate", None) == "23514"
+
+    async with AsyncSession(migrated_engine) as verify_session:
+        states = (
+            await verify_session.execute(
+                text(
+                    """
+                    SELECT feature_id, lifecycle_state, row_revision
+                    FROM feature.features
+                    WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
+                    ORDER BY feature_id
+                    """
+                ),
+                {"feature_ids": [admin_feature_id, provider_feature_id]},
+            )
+        ).all()
+    assert {str(row.feature_id): (row.lifecycle_state, row.row_revision) for row in states} == {
+        admin_feature_id: ("retired", 1),
+        provider_feature_id: ("active", 1),
+    }

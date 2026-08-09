@@ -9,7 +9,7 @@ from typing import Final
 
 _ROOT: Final = Path(__file__).resolve().parents[2]
 _CONTRACT: Final = _ROOT / "contracts" / "vnext" / "tvn34c-post-cutover-invariants-v1.sql"
-_EXPECTED_SHA256: Final = "5a401b3fe35f16d56ec188966a6221570ee8baef09dafbd4cbf4ec369611323e"
+_EXPECTED_SHA256: Final = "b9f2c5c8bbeb6dd42101ccc80eec5231bb8fc1d2a8f13743efc4769b86e5a1e7"
 _EXPECTED_ASSERTION_COUNT: Final = 11
 
 
@@ -38,3 +38,4 @@ def test_tvn34c_contract_freezes_the_direct_typed_assembly_boundary() -> None:
     assert "feature.feature_routes" in content
     assert "feature.feature_areas" in content
     assert "uq_feature_versions_user_request_receipt" in content
+    assert "trg_feature_change_requests_receipt_immutable" in content

@@ -626,7 +626,9 @@ async def test_primary_source_detail_round_trip(
     assert detail is not None
     assert detail["name"] == "한식당 가나다"
     assert detail["category"] == "02010100"
-    assert detail["status"] == "active"
+    assert detail["lifecycle_state"] == "active"
+    assert detail["publication_state"] == "published"
+    assert detail["quality_state"] == "valid"
     # 원본 provider payload(raw_data) 보존 — dict로 디시리얼라이즈.
     assert isinstance(detail["raw_data"], dict)
     assert detail["raw_data"].get("mng_no") == "d1"

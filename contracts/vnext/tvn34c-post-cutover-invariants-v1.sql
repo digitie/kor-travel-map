@@ -119,11 +119,19 @@ FROM (
               AND pg_get_expr(index_meta.indpred, index_meta.indrelid) LIKE '%origin = ''user_request''%'
         )),
         (to_regprocedure('feature.reject_user_feature_version_mutation()') IS NULL),
+        (to_regprocedure('feature.reject_feature_change_request_receipt_mutation()') IS NULL),
         (NOT EXISTS (
             SELECT 1
             FROM pg_trigger AS trigger
             WHERE trigger.tgrelid = 'feature.feature_versions'::regclass
               AND trigger.tgname = 'trg_feature_versions_user_request_immutable'
+              AND NOT trigger.tgisinternal
+        )),
+        (NOT EXISTS (
+            SELECT 1
+            FROM pg_trigger AS trigger
+            WHERE trigger.tgrelid = 'ops.feature_change_requests'::regclass
+              AND trigger.tgname = 'trg_feature_change_requests_receipt_immutable'
               AND NOT trigger.tgisinternal
         ))
     ) AS required(is_violation)

@@ -740,11 +740,13 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 
   admin state command·OpenAPI/generated type·Map/PinVi/admin UI·merge/Dagster/fixture/live runner의
   모든 남은 writer를 cutover한다. admin state HTTP union(`retire` 또는 axis patch)은 strong If-Match,
-  reason, 422/404/409/412/428 semantics와 audit/ETag response를 OpenAPI/UI/E2E로 고정한다. legacy
+  `reason_code`, 422/404/409/412/428 semantics와 audit/ETag response를 OpenAPI/UI/E2E로 고정한다. legacy
   deactivate/status default filter는 제거하고 admin axis filter는 AND로 결합한다. `features_detailed`는 leaf view가 아니므로 먼저 public view를 typed
   core+subtype assembly로 재구성하고, non-public reader와 두 security-definer materializer도 같은 typed
-  table assembly로 재배선한다. user request retry receipt는 `feature_versions`의 immutable request receipt로
-  옮겨 exactly-once를 보장한다. 그 뒤에만 current private `features_detailed`와 runtime SELECT grant·closed
+  table assembly로 재배선한다. user request retry receipt는 request→receipt→Feature lock order와 request
+  역방향 UPDATE/DELETE trigger를 가진 `feature_versions` immutable receipt로 옮겨 exactly-once를 보장한다.
+  provider/admin reactivation evidence는 source link/current head를 source→Feature lock order로 고정한다.
+  그 뒤에만 current private `features_detailed`와 runtime SELECT grant·closed
   ACL allowlist·startup preflight assertion을 제거한다. 이어 legacy `status`, delete/user-change metadata와
   관련 CHECK/index/trigger/query를 물리 삭제하고 static normal-path gate와 n150 destructive fresh-reload
   live E2E를 통과한다. `data_origin`/`data_version`, `feature_versions`와 materializer bridge는 T-VN-36의

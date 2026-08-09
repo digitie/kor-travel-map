@@ -26,8 +26,8 @@ merge tombstone이 섞여 있다. 애플리케이션만 audit event를 쓰면 ra
    UUID identity를 함께 보존하는 append-only 감사 정본이다. runtime은 base Feature INSERT/axis UPDATE 권한을 갖지 않으며
    dedicated NOLOGIN owner의 `create_feature_with_initial_state`/`transition_feature_state`
    security-definer procedure만 실행한다. user add/update/delete의 legacy provenance와 immutable
-   version snapshot은 별도 typed `materialize_user_feature_change_provenance` procedure가 request,
-   Feature, expected revision을 잠근 뒤 원자적으로 기록하므로 runtime은 `feature_versions`의 직접 DML
+   version snapshot은 별도 typed `materialize_user_feature_change_provenance` procedure가 **request → receipt →
+   Feature** 순서로 잠근 뒤 원자적으로 기록하므로 runtime은 `feature_versions`의 직접 DML
    권한을 갖지 않는다. 다만 0095/0096 current schema에서 `feature.features_detailed`는 subtype detail을
    조립하는 private read bridge이므로 `feature_repo` non-public detail, admin detail, curated detail과
    두 materializer에 한해 runtime/owner read를 준다. 이는 public 권한이 아니며 final target에는 이 view가
@@ -35,7 +35,8 @@ merge tombstone이 섞여 있다. 애플리케이션만 audit event를 쓰면 ra
    재배선한 뒤 같은 migration에서 `features_detailed`·grant·ACL allowlist·runtime preflight 요구를 제거한다.
    이름만 바꾼 private view/shim은 만들지 않는다. user request retry는 core `user_change_*`가 아니라
    `feature_versions`의 immutable `(feature_id, request_id)` receipt가 stale retry에도 기존 result를
-   반환하도록 대체한 뒤 삭제한다. user/provider version snapshot은 typed detail과 materialization 시점의
+   반환하도록 대체한 뒤 삭제한다. receipt가 생긴 request 자체도 UPDATE/DELETE trigger로 동결해 역방향
+   provenance 변조를 막는다. user/provider version snapshot은 typed detail과 materialization 시점의
    세 axes·`data_origin`/`data_version`을 보존하고 legacy state/provenance key를 담지 않는다.
    `data_origin`/`data_version`, version/materializer bridge는 T-VN-36의
    field-override effective projection/lineage가 대체할 때까지 유지하며, T‑VN‑34C의 post-cutover contract와
@@ -51,7 +52,8 @@ merge tombstone이 섞여 있다. 애플리케이션만 audit event를 쓰면 ra
    이 경계가 한 명령의 여러 축 변경을 하나의 이전/이후 full tuple row로 기록한다. procedure는
    role별 structured context를 검증하고 provider principal은 dataset에서 파생한다. provider receipt는
    caller가 주입하지 않고 검증된 `source_records.raw_payload_hash`에서 파생하며 target Feature의
-   source link와 `source_entity_heads`의 current observation까지 같은 lock 범위에서 확인한다. admin/user
+   source link와 `source_entity_heads`의 current observation까지 **source evidence → Feature** 순서의 같은
+   lock 범위에서 확인한다. admin/user
    principal은 application-authenticated 값임을 명시한다. state procedure는 DML 직전에
    allow-listed `state_procedure_definer`를 `SET LOCAL`하고 audit trigger가 이를 검증한다. audit에는
    invoker `session_user`, context의 state procedure definer, audit trigger의 실제 `current_user`
@@ -69,7 +71,7 @@ merge tombstone이 섞여 있다. 애플리케이션만 audit event를 쓰면 ra
 3. public은 `(active,published,valid)` 단 하나이며 모든 public reader는 typed core+subtype table을 직접
    조립하는 명시 열 `feature.public_features` view를 사용한다. `features_detailed` 또는 `SELECT *` private
    shim은 C 이후 남기지 않는다. public DTO는 운영 축을 노출하지 않고 admin DTO/API는 세 축과 audit
-   timeline을 독립적으로 노출한다. admin state command는 strong If-Match와 reason을 요구하는 단일 atomic
+   timeline을 독립적으로 노출한다. admin state command는 strong If-Match와 `reason_code`를 요구하는 단일 atomic
    PATCH이며 retire action과 publication/quality patch를 같은 body에 섞지 않고 lifecycle 입력은 거부한다.
    reactivation은 current source evidence를 받아 active dataset·Feature source link·current head 검증과
    retired override revoke를 같은 lock에서 수행하는 별도 typed command다. 성공 응답은 axes·revision·ETag·audit
