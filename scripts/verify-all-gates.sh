@@ -19,9 +19,15 @@
 # **여기서 재현 불가한 것**(로컬 하네스의 한계 — 반드시 인지하고 있어야 한다):
 #   - Python 3.11/3.12 매트릭스: 컨테이너는 3.13 하나다.
 #
-# coverage는 재현한다 — 아래 api/dagster 게이트가 CI와 같은 `--cov-fail-under`를
-# 건다. (통합 job의 합산 `fail_under=80`은 `pyproject.toml`이 들고 있어
-# integration 게이트가 그대로 적용받는다.)
+# coverage: api/dagster 게이트는 CI와 같은 `--cov-fail-under`를 건다.
+#
+# **integration 합산 게이트는 여기서 재현하지 않는다.** CI는 unit job의 coverage
+# 아티팩트를 내려받아 `.coverage`로 복원한 뒤 integration을 `--cov-append`로 얹어
+# `pyproject.toml`의 `fail_under=80`을 평가한다 — job 간 아티팩트 전달이라 단일
+# 실행으로는 같은 숫자가 나오지 않는다. 그리고 `--cov` 없이 돌리면 coverage 자체가
+# 측정되지 않아 `fail_under`가 **평가조차 되지 않는다**(적대 리뷰 실증).
+# 손으로 재현한 실측은 unit 68% → unit+integration 합산 87.33%로 임계 대비 여유가
+# 있으나, 이 스크립트가 그것을 보증하지는 않는다.
 #
 # 사용:  bash scripts/verify-all-gates.sh [worktree-절대경로]
 
