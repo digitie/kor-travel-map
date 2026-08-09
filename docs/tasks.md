@@ -723,7 +723,7 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   DB/ACL·contract/runtime 적대 리뷰 2명이 P0/P1 없이 GO를 판정했다. A는 완료됐지만 B/C와 함께만
   final cutover로 배포·병합하는 stack 내부 checkpoint다.
 
-- [~] T-VN-34B — **public projection·partial index cutover**
+- [x] T-VN-34B — **public projection·partial index cutover**
 
   명시 열 `public_features` projection과 service 5-state classifier를 3축 정본으로 전환한다.
   route/area subtype-local geometry와 core tuple의 cross-table index 불가를 trigger-owned
@@ -732,7 +732,9 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   없앤다. route/area grant는 table UPDATE 없이 mutable business column만 허용하며 identity UPDATE와
   DELETE를 거부한다. core point/category/keyset/text는 exact 3축 partial predicate를, route/area GiST는
   `WHERE public_ready`를 사용한다. `EXPLAIN` gate와 public reader, two-session·direct-flag privilege
-  regression을 소유한다. B도 stack 내부 checkpoint다.
+  regression을 소유한다. `c54e1807`과 `3a0155e2` 기준 fresh public projection/target freeze 36건,
+  runtime API·Dagster LOGIN ACL 3건, artifact/target freeze 18건을 통과했고 DB/동시성·contract/security
+  적대 리뷰 2명이 P0/P1 없이 GO를 판정했다. B도 stack 내부 checkpoint다.
 
 - [ ] T-VN-34C — **writer/API/UI cutover·legacy status fence**
 
