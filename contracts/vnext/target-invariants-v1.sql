@@ -190,9 +190,7 @@ FROM provider_sync.source_records
 WHERE raw_payload_hash !~ '^[0-9a-f]{1,64}$'; -- expect: 0 -- phase: both
 
 -- -----------------------------------------------------------------------------
--- ADR-067 — 직교 3축 상태 + 단일 공개 정본 (T-VN-34)
--- (불가능 조합의 집합은 정본이 열거하지 않아 미정 — T-VN-34A 무손실 매핑
--- 소관이므로 여기에는 조합 assertion을 두지 않는다.)
+-- ADR-090 — 직교 3축 상태 + full-tuple append-only audit (T-VN-34A)
 -- -----------------------------------------------------------------------------
 
 -- [INV-067-01] 3축 값 domain 위반 없음 (CHECK VALIDATE 전 preflight).
@@ -201,6 +199,46 @@ FROM feature.features
 WHERE lifecycle_state NOT IN ('active', 'retired')
    OR publication_state NOT IN ('draft', 'published', 'suppressed')
    OR quality_state NOT IN ('valid', 'quarantined'); -- expect: 0 -- phase: both
+
+-- [INV-090-01] retired는 반드시 suppressed다. active의 여섯 tuple과
+-- retired/suppressed의 두 tuple만 남는다.
+SELECT count(*)
+FROM feature.features
+WHERE lifecycle_state = 'retired'
+  AND publication_state <> 'suppressed'; -- expect: 0 -- phase: both
+
+-- [INV-090-02] state audit의 old/new full tuple, reason/principal/revision은
+-- 모두 유효하다. old tuple NULL은 initial/legacy/provider initial만 허용한다.
+SELECT count(*)
+FROM feature.feature_state_transitions
+WHERE btrim(reason_code) = ''
+   OR btrim(principal) = ''
+   OR row_revision < 1
+   OR to_lifecycle_state NOT IN ('active', 'retired')
+   OR to_publication_state NOT IN ('draft', 'published', 'suppressed')
+   OR to_quality_state NOT IN ('valid', 'quarantined')
+   OR (to_lifecycle_state = 'retired' AND to_publication_state <> 'suppressed')
+   OR (
+       from_lifecycle_state IS NULL
+       AND transition_kind NOT IN ('initial', 'legacy_backfill', 'provider_sync')
+   )
+   OR (
+       from_lifecycle_state IS NOT NULL
+       AND transition_kind IN ('initial', 'legacy_backfill')
+   ); -- expect: 0 -- phase: both
+
+-- [INV-090-03] purge-preserving audit에는 Feature FK/cascade가 없어야 한다.
+SELECT count(*)
+FROM pg_catalog.pg_constraint AS constraint_row
+WHERE constraint_row.conrelid = 'feature.feature_state_transitions'::regclass
+  AND constraint_row.contype = 'f'; -- expect: 0 -- phase: both
+
+-- [INV-090-04] 한 transition의 audit identity 세 축은 비어 있지 않다.
+SELECT count(*)
+FROM feature.feature_state_transitions
+WHERE btrim(invoker_role) = ''
+   OR btrim(state_procedure_definer) = ''
+   OR btrim(audit_writer_definer) = ''; -- expect: 0 -- phase: both
 
 -- [INV-067-02] 공개 view와 base 술어의 일치 — view 밖 술어 만족 행 없음.
 SELECT count(*)

@@ -323,6 +323,9 @@ CREATE TRIGGER trg_provider_dataset_operations_touch
 -- =============================================================================
 -- core에는 UUID·kind·name·category FK·직교 3상태·row_revision만 남는다
 -- (ADR-070 결정 1). 좌표/geometry/detail/주소/URL 등은 subtype 소관이다.
+-- 0095 current head는 아직 text business ``feature_id``와 ``feature_uuid`` shadow를
+-- 병행한다. 이 target UUID key와 UUID procedure signature는 T39 physical re-key 뒤의
+-- final shape이며, current writer의 text procedure signature를 이 target에 섞지 않는다.
 CREATE TABLE feature.features (
     -- 애플리케이션 생성 UUID surrogate (ADR-068 결정 1). UUIDv7 채택 여부와
     -- generator 정본은 미정(T-VN-32A 구현 소관) — 따라서 DB server default를
@@ -355,10 +358,11 @@ CREATE TABLE feature.features (
         publication_state IN ('draft', 'published', 'suppressed')
     ),
     CONSTRAINT ck_features_quality_state CHECK (quality_state IN ('valid', 'quarantined')),
-    -- 불가능 조합 CHECK (ADR-067 결정 5 "불가능한 조합은 DB CHECK로 거부"):
-    -- 정본은 조합을 열거하지 않는다. 0059 view는 교집합 술어만 정본화했고 결합
-    -- 불변식은 스스로 "미보장"이라 명시하므로 여기서 특정 조합을 도출할 수 없다.
-    -- 불가능 조합의 집합과 CHECK 정의: 미정(T-VN-34A 무손실 매핑 구현 소관)
+    -- T-VN-34A: active 3×2 여섯 tuple과 retired/suppressed 2 tuple만 유효하다.
+    -- published + quarantined는 의도적으로 유효하다(quality 복구만으로 재공개).
+    CONSTRAINT ck_features_state_tuple CHECK (
+        lifecycle_state = 'active' OR publication_state = 'suppressed'
+    ),
     CONSTRAINT ck_features_row_revision CHECK (row_revision >= 1),
     CONSTRAINT fk_features_category FOREIGN KEY (kind, category_code)
         REFERENCES feature.categories (kind, code)
@@ -389,32 +393,381 @@ CREATE TRIGGER trg_features_row_revision
     BEFORE UPDATE ON feature.features
     FOR EACH ROW EXECUTE FUNCTION feature.force_features_row_revision();
 
--- 3.1 lifecycle 전이 감사 이력 — soft-delete 시각의 흡수처 (ADR-067 결정 5
--- "soft-delete 시각은 lifecycle 전이 감사 이력으로 흡수한다"). legacy
--- deleted_at/user_deleted_at 계열은 이 이력으로 흡수된 뒤 제거된다
--- (consumer-rollout removal manifest 참조). 최소형만 고정한다.
+-- 3.1 full-tuple 전이 감사 이력 (ADR-090). Feature purge 뒤에도 business
+-- identifier/audit evidence는 남아야 하므로 Feature FK나 cascade를 두지 않는다.
+-- current 0095 audit은 purge 보존을 위해 text legacy key와 ``feature_uuid``를 함께
+-- 기록하고, T39가 legacy key를 제거한 뒤 이 final UUID identity 열로 수렴한다.
 CREATE TABLE feature.feature_state_transitions (
     transition_id bigint GENERATED ALWAYS AS IDENTITY,
     feature_id uuid NOT NULL,
-    -- 직교 3축 중 어느 축의 전이인가
-    state_axis text NOT NULL,
-    from_state text NOT NULL,
-    to_state text NOT NULL,
-    occurred_at timestamptz NOT NULL,
+    from_lifecycle_state text,
+    from_publication_state text,
+    from_quality_state text,
+    to_lifecycle_state text NOT NULL,
+    to_publication_state text NOT NULL,
+    to_quality_state text NOT NULL,
+    transition_kind text NOT NULL,
+    reason_code text NOT NULL,
+    principal text NOT NULL,
+    causation_ref text,
+    occurred_at timestamptz NOT NULL DEFAULT now(),
+    row_revision bigint NOT NULL,
+    invoker_role text NOT NULL,
+    state_procedure_definer text NOT NULL,
+    audit_writer_definer text NOT NULL,
     CONSTRAINT pk_feature_state_transitions PRIMARY KEY (transition_id),
-    CONSTRAINT fk_feature_state_transitions_feature FOREIGN KEY (feature_id)
-        REFERENCES feature.features (feature_id) ON DELETE CASCADE,
-    CONSTRAINT ck_feature_state_transitions_axis CHECK (
-        state_axis IN ('lifecycle', 'publication', 'quality')
+    CONSTRAINT ck_feature_state_transitions_kind CHECK (
+        transition_kind IN (
+            'initial', 'legacy_backfill', 'provider_sync', 'admin',
+            'user_request', 'merge', 'quality_validation', 'system'
+        )
     ),
-    CONSTRAINT ck_feature_state_transitions_from CHECK (btrim(from_state) <> ''),
-    CONSTRAINT ck_feature_state_transitions_to CHECK (btrim(to_state) <> '')
-    -- 축별 상태값 결합 CHECK·actor principal·전이 사유 등 나머지 컬럼:
-    -- 미정(T-VN-34A 구현 소관)
+    CONSTRAINT ck_feature_state_transitions_reason CHECK (btrim(reason_code) <> ''),
+    CONSTRAINT ck_feature_state_transitions_principal CHECK (btrim(principal) <> ''),
+    CONSTRAINT ck_feature_state_transitions_old_tuple CHECK (
+        (from_lifecycle_state IS NULL AND from_publication_state IS NULL AND from_quality_state IS NULL)
+        OR (
+            from_lifecycle_state IN ('active', 'retired')
+            AND from_publication_state IN ('draft', 'published', 'suppressed')
+            AND from_quality_state IN ('valid', 'quarantined')
+            AND (from_lifecycle_state = 'active' OR from_publication_state = 'suppressed')
+        )
+    ),
+    CONSTRAINT ck_feature_state_transitions_new_tuple CHECK (
+        to_lifecycle_state IN ('active', 'retired')
+        AND to_publication_state IN ('draft', 'published', 'suppressed')
+        AND to_quality_state IN ('valid', 'quarantined')
+        AND (to_lifecycle_state = 'active' OR to_publication_state = 'suppressed')
+    ),
+    CONSTRAINT ck_feature_state_transitions_initial_old_tuple CHECK (
+        (
+            from_lifecycle_state IS NULL
+            AND transition_kind IN ('initial', 'legacy_backfill', 'provider_sync')
+        ) OR (
+            from_lifecycle_state IS NOT NULL
+            AND transition_kind NOT IN ('initial', 'legacy_backfill')
+        )
+    ),
+    CONSTRAINT ck_feature_state_transitions_row_revision CHECK (row_revision >= 1)
 );
 
-CREATE INDEX idx_feature_state_transitions_feature
-    ON feature.feature_state_transitions (feature_id, occurred_at);
+CREATE INDEX idx_feature_state_transitions_feature_occurred
+    ON feature.feature_state_transitions (feature_id, occurred_at, transition_id);
+
+-- T-VN-34A privilege boundary. LOGIN runtime/migrator provisioning and DSN activation
+-- are deployment-owned; these NOLOGIN roles are the schema-level grant targets.
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'ktm_feature_state_procedure_owner') THEN
+        CREATE ROLE ktm_feature_state_procedure_owner NOLOGIN NOINHERIT;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'ktm_feature_audit_writer') THEN
+        CREATE ROLE ktm_feature_audit_writer NOLOGIN NOINHERIT;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'ktm_feature_runtime') THEN
+        CREATE ROLE ktm_feature_runtime NOLOGIN NOINHERIT;
+    END IF;
+END;
+$$;
+
+CREATE FUNCTION feature.prepare_feature_state_context(p_context jsonb, p_mode text)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $$
+DECLARE
+    v_kind text;
+    v_reason text;
+    v_principal text;
+    v_dataset_id bigint;
+    v_context jsonb;
+BEGIN
+    IF jsonb_typeof(p_context) IS DISTINCT FROM 'object' THEN
+        RAISE EXCEPTION 'feature state context must be an object'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_state_transition_context';
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM jsonb_object_keys(p_context) AS key_name(key_name)
+        WHERE key_name NOT IN (
+            'transition_kind', 'reason_code', 'principal', 'causation_ref',
+            'provider_dataset_id', 'source_record_key', 'reactivation_evidence'
+        )
+    ) THEN
+        RAISE EXCEPTION 'feature state context contains an unknown key'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_state_transition_context';
+    END IF;
+    v_kind := p_context ->> 'transition_kind';
+    v_reason := p_context ->> 'reason_code';
+    IF v_kind NOT IN (
+        'initial', 'legacy_backfill', 'provider_sync', 'admin', 'user_request',
+        'merge', 'quality_validation', 'system'
+    ) OR v_reason IS NULL OR btrim(v_reason) = ''
+       OR (p_mode = 'create' AND v_kind NOT IN ('initial', 'legacy_backfill', 'provider_sync'))
+       OR (p_mode = 'transition' AND v_kind IN ('initial', 'legacy_backfill')) THEN
+        RAISE EXCEPTION 'feature state context has invalid kind, reason, or mode'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_state_transition_context';
+    END IF;
+    IF v_kind = 'provider_sync' THEN
+        IF (p_context ->> 'provider_dataset_id') !~ '^[1-9][0-9]*$'
+           OR p_context ? 'principal' THEN
+            RAISE EXCEPTION 'provider state principal must derive from an active dataset'
+                USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_state_transition_context';
+        END IF;
+        v_dataset_id := (p_context ->> 'provider_dataset_id')::bigint;
+        SELECT 'provider:' || provider || '/' || dataset_key INTO v_principal
+        FROM provider_sync.provider_datasets
+        WHERE provider_dataset_id = v_dataset_id AND is_active;
+        IF v_principal IS NULL THEN
+            RAISE EXCEPTION 'provider dataset must be active'
+                USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_state_transition_context';
+        END IF;
+    ELSE
+        IF p_context ? 'provider_dataset_id'
+           OR jsonb_typeof(p_context -> 'principal') IS DISTINCT FROM 'string'
+           OR btrim(p_context ->> 'principal') = '' THEN
+            RAISE EXCEPTION 'non-provider state context requires authenticated principal'
+                USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_state_transition_context';
+        END IF;
+        v_principal := btrim(p_context ->> 'principal');
+    END IF;
+    v_context := jsonb_build_object(
+        'transition_kind', v_kind,
+        'reason_code', btrim(v_reason),
+        'principal', v_principal,
+        'causation_ref', p_context -> 'causation_ref'
+    );
+    IF v_dataset_id IS NOT NULL THEN
+        v_context := v_context || jsonb_build_object('provider_dataset_id', v_dataset_id);
+    END IF;
+    IF p_context ? 'source_record_key' THEN
+        v_context := v_context || jsonb_build_object('source_record_key', p_context -> 'source_record_key');
+    END IF;
+    IF p_context ? 'reactivation_evidence' THEN
+        v_context := v_context || jsonb_build_object('reactivation_evidence', p_context -> 'reactivation_evidence');
+    END IF;
+    PERFORM set_config('feature.state_transition_context', v_context::text, true);
+    PERFORM set_config('feature.state_procedure_definer', current_user::text, true);
+END;
+$$;
+
+CREATE FUNCTION feature.write_feature_state_transition()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $$
+DECLARE
+    v_context jsonb;
+    v_context_text text;
+    v_definer text;
+BEGIN
+    IF TG_OP = 'UPDATE'
+       AND OLD.lifecycle_state IS NOT DISTINCT FROM NEW.lifecycle_state
+       AND OLD.publication_state IS NOT DISTINCT FROM NEW.publication_state
+       AND OLD.quality_state IS NOT DISTINCT FROM NEW.quality_state THEN
+        RETURN NULL;
+    END IF;
+    v_context_text := current_setting('feature.state_transition_context', true);
+    v_definer := current_setting('feature.state_procedure_definer', true);
+    IF v_context_text IS NULL OR v_definer <> 'ktm_feature_state_procedure_owner'
+       OR current_user <> 'ktm_feature_audit_writer' THEN
+        -- migration/schema owner is outside the runtime trust boundary; fixture and
+        -- fresh target seeding use that privileged identity. Runtime grants deny DML.
+        IF EXISTS (
+            SELECT 1 FROM pg_catalog.pg_roles
+            WHERE rolname = session_user AND rolsuper
+        ) THEN
+            RETURN NULL;
+        END IF;
+        RAISE EXCEPTION 'feature state mutation requires state procedure context'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_state_transition_context';
+    END IF;
+    v_context := v_context_text::jsonb;
+    IF (v_context ->> 'transition_kind') NOT IN (
+            'initial', 'legacy_backfill', 'provider_sync', 'admin', 'user_request',
+            'merge', 'quality_validation', 'system'
+       ) OR coalesce(btrim(v_context ->> 'reason_code'), '') = ''
+       OR coalesce(btrim(v_context ->> 'principal'), '') = '' THEN
+        RAISE EXCEPTION 'feature state context is malformed'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_state_transition_context';
+    END IF;
+    IF TG_OP = 'INSERT' AND (v_context ->> 'transition_kind') NOT IN (
+        'initial', 'legacy_backfill', 'provider_sync'
+    ) THEN
+        RAISE EXCEPTION 'feature insert has invalid transition kind'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_state_transition_kind';
+    END IF;
+    IF TG_OP = 'UPDATE' AND (v_context ->> 'transition_kind') IN ('initial', 'legacy_backfill') THEN
+        RAISE EXCEPTION 'feature update has invalid transition kind'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_state_transition_kind';
+    END IF;
+    INSERT INTO feature.feature_state_transitions (
+        feature_id,
+        from_lifecycle_state, from_publication_state, from_quality_state,
+        to_lifecycle_state, to_publication_state, to_quality_state,
+        transition_kind, reason_code, principal, causation_ref, occurred_at,
+        row_revision, invoker_role, state_procedure_definer, audit_writer_definer
+    ) VALUES (
+        NEW.feature_id,
+        CASE WHEN TG_OP = 'INSERT' THEN NULL ELSE OLD.lifecycle_state END,
+        CASE WHEN TG_OP = 'INSERT' THEN NULL ELSE OLD.publication_state END,
+        CASE WHEN TG_OP = 'INSERT' THEN NULL ELSE OLD.quality_state END,
+        NEW.lifecycle_state, NEW.publication_state, NEW.quality_state,
+        v_context ->> 'transition_kind', v_context ->> 'reason_code',
+        v_context ->> 'principal', v_context ->> 'causation_ref', clock_timestamp(),
+        NEW.row_revision, session_user::text, v_definer, current_user::text
+    );
+    RETURN NULL;
+END;
+$$;
+
+CREATE FUNCTION feature.reject_feature_state_transition_mutation()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $$
+BEGIN
+    RAISE EXCEPTION 'feature state transitions are append-only'
+        USING ERRCODE = '42501', CONSTRAINT = 'ck_feature_state_transitions_append_only';
+END;
+$$;
+
+CREATE PROCEDURE feature.create_feature_with_initial_state(
+    IN p_feature jsonb,
+    IN p_lifecycle_state text,
+    IN p_publication_state text,
+    IN p_quality_state text,
+    IN p_context jsonb,
+    OUT o_feature_id uuid,
+    OUT o_row_revision bigint,
+    OUT o_inserted boolean
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $$
+DECLARE
+    v_feature feature.features%ROWTYPE;
+BEGIN
+    IF jsonb_typeof(p_feature) IS DISTINCT FROM 'object' THEN
+        RAISE EXCEPTION 'feature payload must be an object'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_create_payload';
+    END IF;
+    v_feature := jsonb_populate_record(
+        NULL::feature.features,
+        p_feature - 'lifecycle_state' - 'publication_state' - 'quality_state'
+    );
+    IF v_feature.feature_id IS NULL OR v_feature.kind IS NULL OR v_feature.name IS NULL
+       OR v_feature.category_code IS NULL THEN
+        RAISE EXCEPTION 'feature payload lacks required core fields'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_create_payload';
+    END IF;
+    PERFORM feature.prepare_feature_state_context(p_context, 'create');
+    INSERT INTO feature.features (
+        feature_id, kind, name, category_code,
+        lifecycle_state, publication_state, quality_state
+    ) VALUES (
+        v_feature.feature_id, v_feature.kind, v_feature.name, v_feature.category_code,
+        p_lifecycle_state, p_publication_state, p_quality_state
+    ) ON CONFLICT (feature_id) DO NOTHING
+    RETURNING feature_id, row_revision INTO o_feature_id, o_row_revision;
+    o_inserted := FOUND;
+    IF NOT o_inserted THEN
+        SELECT feature_id, row_revision INTO o_feature_id, o_row_revision
+        FROM feature.features WHERE feature_id = v_feature.feature_id;
+    END IF;
+END;
+$$;
+
+CREATE PROCEDURE feature.transition_feature_state(
+    IN p_feature_id uuid,
+    IN p_lifecycle_state text,
+    IN p_publication_state text,
+    IN p_quality_state text,
+    IN p_expected_row_revision bigint,
+    IN p_context jsonb,
+    OUT o_feature_id uuid,
+    OUT o_row_revision bigint
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $$
+DECLARE
+    v_current feature.features%ROWTYPE;
+BEGIN
+    IF p_expected_row_revision IS NULL OR p_expected_row_revision < 1 THEN
+        RAISE EXCEPTION 'expected row revision is required'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_state_expected_revision';
+    END IF;
+    PERFORM feature.prepare_feature_state_context(p_context, 'transition');
+    SELECT * INTO v_current FROM feature.features
+    WHERE feature_id = p_feature_id FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'feature does not exist' USING ERRCODE = 'P0002';
+    END IF;
+    IF v_current.row_revision <> p_expected_row_revision THEN
+        RAISE EXCEPTION 'feature revision changed' USING ERRCODE = '40001';
+    END IF;
+    IF (v_current.lifecycle_state, v_current.publication_state, v_current.quality_state)
+       IS NOT DISTINCT FROM (p_lifecycle_state, p_publication_state, p_quality_state) THEN
+        RAISE EXCEPTION 'feature state transition must change an axis'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_state_transition_non_noop';
+    END IF;
+    UPDATE feature.features
+       SET lifecycle_state = p_lifecycle_state,
+           publication_state = p_publication_state,
+           quality_state = p_quality_state,
+           updated_at = clock_timestamp()
+     WHERE feature_id = p_feature_id
+     RETURNING feature_id, row_revision INTO o_feature_id, o_row_revision;
+END;
+$$;
+
+ALTER FUNCTION feature.prepare_feature_state_context(jsonb, text)
+    OWNER TO ktm_feature_state_procedure_owner;
+ALTER PROCEDURE feature.create_feature_with_initial_state(jsonb, text, text, text, jsonb)
+    OWNER TO ktm_feature_state_procedure_owner;
+ALTER PROCEDURE feature.transition_feature_state(uuid, text, text, text, bigint, jsonb)
+    OWNER TO ktm_feature_state_procedure_owner;
+ALTER FUNCTION feature.write_feature_state_transition()
+    OWNER TO ktm_feature_audit_writer;
+ALTER FUNCTION feature.reject_feature_state_transition_mutation()
+    OWNER TO ktm_feature_audit_writer;
+
+CREATE TRIGGER trg_features_state_transition_audit
+    AFTER INSERT OR UPDATE OF lifecycle_state, publication_state, quality_state
+    ON feature.features FOR EACH ROW EXECUTE FUNCTION feature.write_feature_state_transition();
+CREATE TRIGGER trg_feature_state_transitions_append_only_row
+    BEFORE UPDATE OR DELETE ON feature.feature_state_transitions
+    FOR EACH ROW EXECUTE FUNCTION feature.reject_feature_state_transition_mutation();
+CREATE TRIGGER trg_feature_state_transitions_append_only_truncate
+    BEFORE TRUNCATE ON feature.feature_state_transitions
+    FOR EACH STATEMENT EXECUTE FUNCTION feature.reject_feature_state_transition_mutation();
+
+GRANT USAGE ON SCHEMA feature, provider_sync, ops
+    TO ktm_feature_state_procedure_owner, ktm_feature_audit_writer, ktm_feature_runtime;
+GRANT SELECT, INSERT ON feature.features TO ktm_feature_state_procedure_owner;
+GRANT UPDATE (lifecycle_state, publication_state, quality_state, updated_at)
+    ON feature.features TO ktm_feature_state_procedure_owner;
+GRANT SELECT ON provider_sync.provider_datasets TO ktm_feature_state_procedure_owner;
+GRANT INSERT ON feature.feature_state_transitions TO ktm_feature_audit_writer;
+GRANT USAGE, SELECT ON SEQUENCE feature.feature_state_transitions_transition_id_seq
+    TO ktm_feature_audit_writer;
+GRANT EXECUTE ON PROCEDURE feature.create_feature_with_initial_state(jsonb, text, text, text, jsonb)
+    TO ktm_feature_runtime;
+GRANT EXECUTE ON PROCEDURE feature.transition_feature_state(uuid, text, text, text, bigint, jsonb)
+    TO ktm_feature_runtime;
+GRANT SELECT ON feature.feature_state_transitions TO ktm_feature_runtime;
+REVOKE ALL ON feature.feature_state_transitions FROM PUBLIC, ktm_feature_runtime;
+GRANT SELECT ON feature.feature_state_transitions TO ktm_feature_runtime;
+REVOKE ALL ON FUNCTION feature.prepare_feature_state_context(jsonb, text) FROM PUBLIC, ktm_feature_runtime;
+REVOKE ALL ON FUNCTION feature.write_feature_state_transition() FROM PUBLIC, ktm_feature_runtime;
+REVOKE ALL ON FUNCTION feature.reject_feature_state_transition_mutation() FROM PUBLIC, ktm_feature_runtime;
+REVOKE ALL ON PROCEDURE feature.create_feature_with_initial_state(jsonb, text, text, text, jsonb) FROM PUBLIC;
+REVOKE ALL ON PROCEDURE feature.transition_feature_state(uuid, text, text, text, bigint, jsonb) FROM PUBLIC;
 
 -- =============================================================================
 -- 4. feature.feature_aliases — legacy `f_*` alias (ADR-068 결정 3)
@@ -438,6 +791,10 @@ CREATE TABLE feature.feature_aliases (
 
 -- lookup index (보고서 §3) — feature → alias 역방향.
 CREATE INDEX idx_feature_aliases_feature ON feature.feature_aliases (feature_id);
+
+-- ``create_feature_with_initial_state``가 만든 core row의 alias trigger도 state
+-- procedure owner로 실행된다. alias direct DML은 runtime에 grant하지 않는다.
+GRANT SELECT, INSERT ON feature.feature_aliases TO ktm_feature_state_procedure_owner;
 
 -- =============================================================================
 -- 5. kind별 typed subtype 테이블 (ADR-070)

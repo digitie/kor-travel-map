@@ -102,6 +102,7 @@ __all__ = [
     "metadata",
     "Base",
     "FeatureRow",
+    "FeatureStateTransitionRow",
     "FeatureAliasRow",
     "FeatureVersionRow",
     "ProviderDatasetRow",
@@ -220,6 +221,22 @@ class FeatureRow(Base):
         CheckConstraint(
             "status IN ('draft','active','inactive','hidden','broken','deleted')",
             name="features_status",
+        ),
+        CheckConstraint(
+            "lifecycle_state IN ('active','retired')",
+            name="lifecycle_state",
+        ),
+        CheckConstraint(
+            "publication_state IN ('draft','published','suppressed')",
+            name="publication_state",
+        ),
+        CheckConstraint(
+            "quality_state IN ('valid','quarantined')",
+            name="quality_state",
+        ),
+        CheckConstraint(
+            "lifecycle_state = 'active' OR publication_state = 'suppressed'",
+            name="state_tuple",
         ),
         CheckConstraint(
             "data_origin IN ('provider','user_request')",
@@ -399,6 +416,23 @@ class FeatureRow(Base):
         nullable=False,
         server_default=text("'active'"),
     )
+    # T-VN-34A(ADR-090) 직교 상태 정본. legacy ``status``/soft-delete 계열은
+    # final cutover(T-VN-34C) 전까지 mapping 입력으로만 남고 새 writer가 쓰지 않는다.
+    lifecycle_state: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        server_default=text("'active'"),
+    )
+    publication_state: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        server_default=text("'published'"),
+    )
+    quality_state: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        server_default=text("'valid'"),
+    )
     data_origin: Mapped[str] = mapped_column(
         Text,
         nullable=False,
@@ -436,6 +470,93 @@ class FeatureRow(Base):
         server_default=text("now()"),
     )
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class FeatureStateTransitionRow(Base):
+    """``feature.feature_state_transitions`` append-only full-tuple audit (ADR-090).
+
+    ``feature_id``(현행 text business key)와 ``feature_uuid``(T39 final identity)에
+    의도적으로 Feature FK가 없다. Feature hard purge 뒤에도 두 식별자와 state
+    evidence가 남아야 하므로 cascade를 금지한다.
+    """
+
+    __tablename__ = "feature_state_transitions"
+    __table_args__ = (
+        CheckConstraint(
+            "transition_kind IN ("
+            "'initial','legacy_backfill','provider_sync','admin','user_request',"
+            "'merge','quality_validation','system'"
+            ")",
+            name="kind",
+        ),
+        CheckConstraint(
+            "btrim(reason_code) <> ''",
+            name="reason",
+        ),
+        CheckConstraint(
+            "btrim(principal) <> ''",
+            name="principal",
+        ),
+        CheckConstraint(
+            "(from_lifecycle_state IS NULL AND from_publication_state IS NULL "
+            "AND from_quality_state IS NULL) OR ("
+            "from_lifecycle_state IN ('active','retired') "
+            "AND from_publication_state IN ('draft','published','suppressed') "
+            "AND from_quality_state IN ('valid','quarantined') "
+            "AND (from_lifecycle_state = 'active' OR from_publication_state = 'suppressed')"
+            ")",
+            name="old_tuple",
+        ),
+        CheckConstraint(
+            "to_lifecycle_state IN ('active','retired') "
+            "AND to_publication_state IN ('draft','published','suppressed') "
+            "AND to_quality_state IN ('valid','quarantined') "
+            "AND (to_lifecycle_state = 'active' OR to_publication_state = 'suppressed')",
+            name="new_tuple",
+        ),
+        CheckConstraint(
+            "(from_lifecycle_state IS NULL AND transition_kind IN ("
+            "'initial','legacy_backfill','provider_sync'"
+            ")) OR (from_lifecycle_state IS NOT NULL AND transition_kind NOT IN ("
+            "'initial','legacy_backfill'"
+            "))",
+            name="initial_old_tuple",
+        ),
+        CheckConstraint(
+            "row_revision >= 1",
+            name="row_revision",
+        ),
+        Index(
+            "idx_feature_state_transitions_feature_occurred",
+            "feature_id",
+            "occurred_at",
+            "transition_id",
+        ),
+        {"schema": "feature"},
+    )
+
+    transition_id: Mapped[int] = mapped_column(
+        BigInteger,
+        Identity(always=True),
+        primary_key=True,
+    )
+    feature_id: Mapped[str] = mapped_column(Text, nullable=False)
+    feature_uuid: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    from_lifecycle_state: Mapped[str | None] = mapped_column(Text)
+    from_publication_state: Mapped[str | None] = mapped_column(Text)
+    from_quality_state: Mapped[str | None] = mapped_column(Text)
+    to_lifecycle_state: Mapped[str] = mapped_column(Text, nullable=False)
+    to_publication_state: Mapped[str] = mapped_column(Text, nullable=False)
+    to_quality_state: Mapped[str] = mapped_column(Text, nullable=False)
+    transition_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    reason_code: Mapped[str] = mapped_column(Text, nullable=False)
+    principal: Mapped[str] = mapped_column(Text, nullable=False)
+    causation_ref: Mapped[str | None] = mapped_column(Text)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    row_revision: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    invoker_role: Mapped[str] = mapped_column(Text, nullable=False)
+    state_procedure_definer: Mapped[str] = mapped_column(Text, nullable=False)
+    audit_writer_definer: Mapped[str] = mapped_column(Text, nullable=False)
 
 
 # =============================================================================
@@ -2490,6 +2611,13 @@ class FeatureOverrideRow(Base):
         CheckConstraint(
             "status IN ('active','inactive','superseded')",
             name="ck_overrides_status",
+        ),
+        CheckConstraint(
+            "field_path <> 'lifecycle_state' OR ("
+            "jsonb_typeof(override_value) = 'string' "
+            "AND override_value #>> '{}' IN ('active','retired')"
+            ")",
+            name="lifecycle_state_value",
         ),
         Index("idx_overrides_feature", "feature_id", "status"),
         Index("idx_overrides_field", "field_path"),

@@ -51,7 +51,7 @@ _FINGERPRINTS_JSON: Final = _CONTRACTS / "target-schema-fingerprints-v1.json"
 _VIOLATIONS_SQL: Final = _CONTRACTS / "violation-fixtures-v1.sql"
 _REJECTIONS_JSON: Final = _CONTRACTS / "expected-rejections-v1.json"
 
-_EXPECTED_INVARIANT_COUNT: Final = 53
+_EXPECTED_INVARIANT_COUNT: Final = 57
 _INVARIANT_PHASES: Final = frozenset({"pre-backfill", "post-backfill", "both"})
 
 # fingerprint 대상 — target-schema-v1.sql과 T-VN-33 reference ownership DDL의 전체 relation.
@@ -107,6 +107,11 @@ _TARGET_TABLES: Final = (
 _TARGET_RELATIONS: Final = (*_TARGET_TABLES, "feature.public_features")
 _TARGET_FUNCTIONS: Final = (
     "feature.force_features_row_revision()",
+    "feature.prepare_feature_state_context(jsonb,text)",
+    "feature.write_feature_state_transition()",
+    "feature.reject_feature_state_transition_mutation()",
+    "feature.create_feature_with_initial_state(jsonb,text,text,text,jsonb)",
+    "feature.transition_feature_state(uuid,text,text,text,bigint,jsonb)",
     "provider_sync.is_valid_provider_dataset_capabilities(jsonb)",
     "provider_sync.is_valid_provider_dataset_sync_scope(text)",
     "provider_sync.reject_provider_dataset_identity_update()",

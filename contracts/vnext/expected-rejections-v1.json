@@ -212,6 +212,36 @@
       "sqlstate": "23514",
       "constraint": "ck_current_weather_summary_refresh_after",
       "basis": "ADR-089"
+    },
+    "feature_state_retired_draft_valid": {
+      "sqlstate": "23514",
+      "constraint": "ck_features_state_tuple",
+      "basis": "ADR-090"
+    },
+    "feature_state_retired_draft_quarantined": {
+      "sqlstate": "23514",
+      "constraint": "ck_features_state_tuple",
+      "basis": "ADR-090"
+    },
+    "feature_state_retired_published_valid": {
+      "sqlstate": "23514",
+      "constraint": "ck_features_state_tuple",
+      "basis": "ADR-090"
+    },
+    "feature_state_retired_published_quarantined": {
+      "sqlstate": "23514",
+      "constraint": "ck_features_state_tuple",
+      "basis": "ADR-090"
+    },
+    "feature_state_invalid_lifecycle_domain": {
+      "sqlstate": "23514",
+      "constraint": "ck_features_lifecycle_state",
+      "basis": "ADR-090"
+    },
+    "feature_state_audit_append_only": {
+      "sqlstate": "42501",
+      "constraint": "ck_feature_state_transitions_append_only",
+      "basis": "ADR-090"
     }
   }
 }
