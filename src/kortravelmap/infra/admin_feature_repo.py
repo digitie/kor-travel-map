@@ -2273,8 +2273,8 @@ CALL feature.create_feature_with_initial_state(
 # ``detail = CAST(:detail AS jsonb)`` 통교체는 **shape 미검증 구멍**이었다 —
 # 운영자가 보낸 임의 JSONB가 그대로 정본이 됐다. 이제 kind별 값은 subtype
 # 컬럼(typed)으로 들어가므로 컬럼·타입이 DB에서 강제된다.
-# ``kind``/``feature_uuid``를 RETURNING에 실어 subtype UPSERT가 별도 조회 없이
-# 같은 트랜잭션에서 이어진다.
+# ``kind``/``feature_uuid``/``row_revision``을 RETURNING에 실어 subtype UPSERT와
+# 좁은 provenance procedure가 별도 조회 없이 같은 transaction에서 이어진다.
 _APPLY_FEATURE_UPDATE_SQL: Final[str] = """
 UPDATE feature.features AS f
 SET
@@ -2343,49 +2343,26 @@ SET
         WHEN CAST(:sibling_group_id_set AS boolean) THEN CAST(:sibling_group_id AS uuid)
         ELSE f.sibling_group_id
     END,
-    data_origin = 'user_request',
-    data_version = GREATEST(f.data_version, 1),
-    user_change_kind = 'update',
-    user_change_status = 'applied',
-    user_change_request_id = CAST(:request_id AS uuid),
-    user_change_reason = :reason,
     updated_at = now()
 WHERE f.feature_id = :feature_id
   AND f.kind IN ('place','event')
   AND f.lifecycle_state = 'active'
 RETURNING f.feature_id, CAST(f.feature_uuid AS text) AS feature_uuid,
-          f.kind
+          f.kind, f.row_revision
 """
 
-# lifecycle/publication/quality는 직전 procedure가 이미 전이한다. 이 문장은
-# request provenance만 materialize하므로 state audit/privilege fence를 우회하지
-# 않는다. legacy ``status``/``deleted_at``는 T-VN-34A에서 더 이상 쓰지 않는다.
-_APPLY_FEATURE_DELETE_PROVENANCE_SQL: Final[str] = """
-UPDATE feature.features AS f
-SET
-    data_origin = 'user_request',
-    data_version = GREATEST(f.data_version, 1),
-    user_change_kind = 'delete',
-    user_change_status = 'applied',
-    user_change_request_id = CAST(:request_id AS uuid),
-    user_deleted_at = now(),
-    user_deleted_by = :operator,
-    user_change_reason = :reason,
-    updated_at = now()
-WHERE f.feature_id = :feature_id
-"""
-
-_NEXT_USER_VERSION_SQL: Final[str] = """
-SELECT COALESCE(MAX(version), 0) + 1
-FROM feature.feature_versions
-WHERE feature_id = :feature_id
-"""
-
-_SET_FEATURE_DATA_VERSION_SQL: Final[str] = """
-UPDATE feature.features
-SET data_version = :version,
-    updated_at = now()
-WHERE feature_id = :feature_id
+# runtime은 legacy user-change provenance 열 UPDATE 권한을 받지 않는다. T36의
+# 일반 core/subtype 입력 소유권은 그대로 두고, 이 routine만 좁게 materialize한다.
+_MATERIALIZE_USER_FEATURE_PROVENANCE_SQL: Final[str] = """
+CALL feature.materialize_user_feature_change_provenance(
+    CAST(:feature_id AS text),
+    CAST(:change_kind AS text),
+    CAST(:request_id AS uuid),
+    CAST(:reason AS text),
+    CAST(:operator AS text),
+    CAST(:expected_row_revision AS bigint),
+    NULL, NULL
+)
 """
 
 _GET_FEATURE_ROW_REVISION_SQL: Final[str] = """
@@ -2410,53 +2387,6 @@ SELECT row_revision
 FROM feature.features
 WHERE feature_id = :feature_id
 FOR UPDATE
-"""
-
-_INSERT_USER_VERSION_FROM_FEATURE_SQL: Final[str] = """
-INSERT INTO feature.feature_versions (
-    feature_id, version, origin, change_kind, payload, request_id, created_by
-)
-SELECT
-    f.feature_id,
-    CAST(:version AS integer),
-    'user_request',
-    :change_kind,
-    jsonb_build_object(
-        'feature_id', f.feature_id,
-        'kind', f.kind,
-        'name', f.name,
-        'category', f.category,
-        'lon', x_extension.ST_X(f.coord),
-        'lat', x_extension.ST_Y(f.coord),
-        'coord_precision_digits', f.coord_precision_digits,
-        'address', f.address,
-        'legal_dong_code', f.legal_dong_code,
-        'road_name_code', f.road_name_code,
-        'road_address_management_no', f.road_address_management_no,
-        'admin_dong_code', f.admin_dong_code,
-        'sido_code', f.sido_code,
-        'sigungu_code', f.sigungu_code,
-        'urls', f.urls,
-        'marker_icon', f.marker_icon,
-        'marker_color', f.marker_color,
-        'parent_feature_id', f.parent_feature_id,
-        'sibling_group_id', f.sibling_group_id,
-        'detail', f.detail,
-        'status', f.status,
-        'data_origin', f.data_origin,
-        'data_version', f.data_version,
-        'user_change_kind', f.user_change_kind,
-        'user_change_status', f.user_change_status,
-        'user_deleted_at', f.user_deleted_at,
-        'deleted_at', f.deleted_at,
-        'updated_at', f.updated_at
-    ),
-    CAST(:request_id AS uuid),
-    :operator
--- T-VN-35(0086): version snapshot의 ``detail``은 subtype 조립 결과다.
--- ``features_detailed``를 쓰면 snapshot이 응답 shape과 같은 정본을 남긴다.
-FROM feature.features_detailed AS f
-WHERE f.feature_id = :feature_id
 """
 
 _MARK_CHANGE_APPLIED_SQL: Final[str] = """
@@ -2556,15 +2486,6 @@ def _add_params(
         "parent_feature_id": payload.get("parent_feature_id"),
         "sibling_group_id": payload.get("sibling_group_id"),
         "status": payload.get("status") or "active",
-        # T-VN-36의 field materialization 전까지 유지되는 non-state provenance.
-        # 3축 state와 soft-delete 시각은 create procedure의 명시 axis 인자로만 쓴다.
-        "data_origin": "user_request",
-        "data_version": 1,
-        "user_change_kind": "add",
-        "user_change_status": "applied",
-        "user_change_request_id": request_id,
-        "user_change_reason": reason,
-        "reason": reason,
     }
 
 
@@ -2582,7 +2503,7 @@ def _state_axes_from_legacy_status(status: str) -> tuple[str, str, str]:
 
 
 def _admin_feature_create_payload(params: Mapping[str, Any]) -> str:
-    """Admin create procedure payload에서 legacy state input을 제거한다."""
+    """Admin create payload는 core-only이며 typed procedure가 provenance를 쓴다."""
     payload = {
         key: (
             json.loads(value)
@@ -2590,7 +2511,20 @@ def _admin_feature_create_payload(params: Mapping[str, Any]) -> str:
             else value
         )
         for key, value in params.items()
-        if key not in {"request_id", "reason", "status"}
+        if key
+        not in {
+            "request_id",
+            "reason",
+            "status",
+            "data_origin",
+            "data_version",
+            "user_change_kind",
+            "user_change_status",
+            "user_change_request_id",
+            "user_change_reason",
+            "user_deleted_at",
+            "user_deleted_by",
+        }
     }
     return json.dumps(payload, ensure_ascii=False, default=str)
 
@@ -2665,9 +2599,17 @@ async def _apply_change(
     operator: str | None,
 ) -> None:
     payload = request.payload
+    if (
+        operator is None
+        or not operator.strip()
+        or request.reason is None
+        or not request.reason.strip()
+    ):
+        raise ValueError(
+            "user add/update/delete provenance에는 authenticated operator와 "
+            "non-empty reason이 필요합니다."
+        )
     if request.action == "add":
-        if not operator:
-            raise ValueError("user state transition에는 authenticated operator가 필요합니다.")
         add_params = _add_params(
             request_id=request.request_id,
             feature_id=request.feature_id,
@@ -2724,6 +2666,17 @@ async def _apply_change(
                 kind=str(row["kind"]),
                 detail=payload.get("detail"),
             )
+            await session.execute(
+                text(_MATERIALIZE_USER_FEATURE_PROVENANCE_SQL),
+                {
+                    "feature_id": request.feature_id,
+                    "change_kind": "add",
+                    "request_id": request.request_id,
+                    "reason": request.reason,
+                    "operator": operator,
+                    "expected_row_revision": int(create_row["o_row_revision"]),
+                },
+            )
     elif request.action == "update":
         row = (
             await session.execute(
@@ -2747,9 +2700,19 @@ async def _apply_change(
                 kind=str(row["kind"]),
                 detail=payload.get("detail"),
             )
+        if row is not None:
+            await session.execute(
+                text(_MATERIALIZE_USER_FEATURE_PROVENANCE_SQL),
+                {
+                    "feature_id": request.feature_id,
+                    "change_kind": "update",
+                    "request_id": request.request_id,
+                    "reason": request.reason,
+                    "operator": operator,
+                    "expected_row_revision": int(row["row_revision"]),
+                },
+            )
     else:
-        if not operator:
-            raise ValueError("user state transition에는 authenticated operator가 필요합니다.")
         state = await _state_for_conflict(session, request.feature_id)
         if (
             state is None
@@ -2758,25 +2721,27 @@ async def _apply_change(
         ):
             row = None
         else:
-            await session.execute(
-                text(_TRANSITION_FEATURE_STATE_SQL),
-                {
-                    "feature_id": request.feature_id,
-                    "lifecycle_state": "retired",
-                    "publication_state": "suppressed",
-                    "quality_state": state["quality_state"],
-                    "expected_row_revision": int(state["row_revision"]),
-                    "state_context": json.dumps(
-                        {
-                            "transition_kind": "user_request",
-                            "reason_code": "user_request_delete",
-                            "principal": operator,
-                            "causation_ref": request.request_id,
-                        },
-                        ensure_ascii=False,
-                    ),
-                },
-            )
+            transition = (
+                await session.execute(
+                    text(_TRANSITION_FEATURE_STATE_SQL),
+                    {
+                        "feature_id": request.feature_id,
+                        "lifecycle_state": "retired",
+                        "publication_state": "suppressed",
+                        "quality_state": state["quality_state"],
+                        "expected_row_revision": int(state["row_revision"]),
+                        "state_context": json.dumps(
+                            {
+                                "transition_kind": "user_request",
+                                "reason_code": "user_request_delete",
+                                "principal": operator,
+                                "causation_ref": request.request_id,
+                            },
+                            ensure_ascii=False,
+                        ),
+                    },
+                )
+            ).mappings().one()
             await session.execute(
                 text(_UPSERT_LIFECYCLE_STATE_OVERRIDE_SQL),
                 {
@@ -2788,12 +2753,14 @@ async def _apply_change(
                 },
             )
             await session.execute(
-                text(_APPLY_FEATURE_DELETE_PROVENANCE_SQL),
+                text(_MATERIALIZE_USER_FEATURE_PROVENANCE_SQL),
                 {
                     "feature_id": request.feature_id,
+                    "change_kind": "delete",
                     "request_id": request.request_id,
                     "reason": request.reason,
                     "operator": operator,
+                    "expected_row_revision": int(transition["o_row_revision"]),
                 },
             )
             row = {"feature_id": request.feature_id}
@@ -2816,30 +2783,6 @@ async def _apply_change(
             ),
             user_deleted_at=None,
         )
-
-    next_version = int(
-        (
-            await session.execute(
-                text(_NEXT_USER_VERSION_SQL),
-                {"feature_id": request.feature_id},
-            )
-        ).scalar_one()
-    )
-    await session.execute(
-        text(_SET_FEATURE_DATA_VERSION_SQL),
-        {"feature_id": request.feature_id, "version": next_version},
-    )
-    await session.execute(
-        text(_INSERT_USER_VERSION_FROM_FEATURE_SQL),
-        {
-            "feature_id": request.feature_id,
-            "version": next_version,
-            "request_id": request.request_id,
-            "change_kind": request.action,
-            "operator": operator,
-        },
-    )
-
 
 async def get_feature_row_revision(
     session: AsyncSession, feature_id: str

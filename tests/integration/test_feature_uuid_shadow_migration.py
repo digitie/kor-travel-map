@@ -635,6 +635,16 @@ async def test_provider_upsert_creates_uuid_and_alias_and_is_idempotent(
             provider=bundle.source_record.provider,
             dataset_key=bundle.source_record.dataset_key,
         ),
+        source_membership=feature_repo._ProviderSourceMembership(
+            source_entity_key=feature_repo._make_source_entity_key(
+                provider=bundle.source_record.provider,
+                dataset_key=bundle.source_record.dataset_key,
+                source_entity_type=bundle.source_record.source_entity_type,
+                source_entity_id=bundle.source_record.source_entity_id,
+            ),
+            source_record_key=bundle.source_record.source_record_key,
+            authoritative_receipt=bundle.source_record.raw_payload_hash,
+        ),
     )
     assert inserted_again is False
     feature_uuid_after, alias_count_after = await _pair()

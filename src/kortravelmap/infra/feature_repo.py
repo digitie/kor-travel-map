@@ -2299,21 +2299,23 @@ def _provider_state_context(
     *,
     provider_dataset_id: int,
     reason_code: str,
+    source_membership: _ProviderSourceMembership,
     transition_kind: Literal["provider_sync"] = "provider_sync",
-    source_record_key: str | None = None,
-    reactivation_evidence: str | None = None,
 ) -> str:
-    """DB가 provider principal을 dataset에서 파생하게 하는 audit context."""
-    context: dict[str, Any] = {
-        "transition_kind": transition_kind,
-        "reason_code": reason_code,
-        "provider_dataset_id": provider_dataset_id,
-    }
-    if source_record_key is not None:
-        context["source_record_key"] = source_record_key
-    if reactivation_evidence is not None:
-        context["reactivation_evidence"] = reactivation_evidence
-    return json.dumps(context, ensure_ascii=False)
+    """DB가 검증할 provider source membership을 포함한 audit context를 만든다."""
+    return json.dumps(
+        {
+            "transition_kind": transition_kind,
+            "reason_code": reason_code,
+            "provider_dataset_id": provider_dataset_id,
+            "source_entity_key": source_membership.source_entity_key,
+            "source_record_key": source_membership.source_record_key,
+            "provider_evidence": {
+                "authoritative_receipt": source_membership.authoritative_receipt,
+            },
+        },
+        ensure_ascii=False,
+    )
 
 
 def _feature_snapshot(feature: Feature) -> str:
@@ -2410,6 +2412,7 @@ async def upsert_feature(
     feature: Feature,
     *,
     provider_dataset_id: int,
+    source_membership: _ProviderSourceMembership,
 ) -> bool:
     """provider Feature를 procedure와 typed subtype으로 적재한다.
 
@@ -2453,6 +2456,7 @@ async def upsert_feature(
                 "state_context": _provider_state_context(
                     provider_dataset_id=provider_dataset_id,
                     reason_code="provider_initial",
+                    source_membership=source_membership,
                 ),
             },
         )
@@ -2491,7 +2495,72 @@ class _SourceRecordUpsertState:
     inserted: bool
     became_current: bool
     provider_dataset_id: int
+    source_entity_key: str
     source_record_key: str
+    authoritative_receipt: str
+
+
+@dataclass(frozen=True)
+class _ProviderSourceMembership:
+    """Provider procedure가 검증할 immutable source record membership proof."""
+
+    source_entity_key: str
+    source_record_key: str
+    authoritative_receipt: str
+
+
+async def _provider_source_membership_for_feature(
+    session: AsyncSession,
+    *,
+    feature_id: str,
+    provider_dataset_id: int,
+) -> _ProviderSourceMembership:
+    """현재 primary source link에서 procedure proof를 fail-close로 만든다.
+
+    snapshot tombstone/notice reconcile처럼 SourceRecord DTO를 다시 갖고 있지 않은
+    provider retire 경로도 있다. 이 경우에는 연결된 entity의 current immutable
+    record만 proof로 택한다. link가 없거나 다른 dataset이면 procedure 호출 자체를
+    만들지 않는다.
+    """
+    row = (
+        await session.execute(
+            text(
+                """
+                SELECT
+                    entity.source_entity_key,
+                    record.source_record_key,
+                    record.raw_payload_hash
+                FROM provider_sync.source_links AS link
+                JOIN provider_sync.source_entities AS entity
+                  ON entity.source_entity_key = link.source_entity_key
+                JOIN provider_sync.source_entity_heads AS head
+                  ON head.source_entity_key = entity.source_entity_key
+                JOIN provider_sync.source_records AS record
+                  ON record.source_record_key = head.current_source_record_key
+                WHERE link.feature_id = :feature_id
+                  AND link.source_role = 'primary'
+                  AND entity.provider_dataset_id = :provider_dataset_id
+                ORDER BY head.observed_at DESC, record.imported_at DESC,
+                         entity.source_entity_key, record.source_record_key
+                LIMIT 1
+                """
+            ),
+            {
+                "feature_id": feature_id,
+                "provider_dataset_id": provider_dataset_id,
+            },
+        )
+    ).mappings().one_or_none()
+    if row is None:
+        raise RuntimeError(
+            "provider state transition requires a current primary source membership: "
+            f"feature={feature_id!r}, dataset_id={provider_dataset_id}"
+        )
+    return _ProviderSourceMembership(
+        source_entity_key=str(row["source_entity_key"]),
+        source_record_key=str(row["source_record_key"]),
+        authoritative_receipt=str(row["raw_payload_hash"]),
+    )
 
 
 async def resolve_active_provider_dataset_id(
@@ -2553,7 +2622,9 @@ async def _upsert_source_record_state(
         inserted=inserted,
         became_current=became_current,
         provider_dataset_id=provider_dataset_id,
+        source_entity_key=str(params["source_entity_key"]),
         source_record_key=str(params["source_record_key"]),
+        authoritative_receipt=str(params["raw_payload_hash"]),
     )
 
 
@@ -2609,7 +2680,7 @@ async def _transition_provider_lifecycle_if_needed(
     feature_id: str,
     desired_state: ProviderFeatureState,
     provider_dataset_id: int,
-    source_record_key: str | None,
+    source_membership: _ProviderSourceMembership | None,
 ) -> bool:
     """provider retire/reingest만 procedure로 직렬화한다.
 
@@ -2624,7 +2695,7 @@ async def _transition_provider_lifecycle_if_needed(
         feature_id=feature_id,
         desired_state=desired_state,
         provider_dataset_id=provider_dataset_id,
-        source_record_key=source_record_key,
+        source_membership=source_membership,
         current=current,
         retry_on_serialization=True,
     )
@@ -2636,7 +2707,7 @@ async def _transition_provider_lifecycle_from_state(
     feature_id: str,
     desired_state: ProviderFeatureState,
     provider_dataset_id: int,
-    source_record_key: str | None,
+    source_membership: _ProviderSourceMembership | None,
     current: _FeatureLoadState,
     retry_on_serialization: bool,
 ) -> bool:
@@ -2650,7 +2721,6 @@ async def _transition_provider_lifecycle_from_state(
     target_lifecycle: str | None = None
     target_publication: str | None = None
     reason_code: str | None = None
-    reactivation_evidence: str | None = None
     if desired_state.lifecycle_state == "retired" and current.lifecycle_state == "active":
         target_lifecycle = "retired"
         target_publication = "suppressed"
@@ -2663,9 +2733,14 @@ async def _transition_provider_lifecycle_from_state(
         target_lifecycle = "active"
         target_publication = current.publication_state
         reason_code = "provider_reingest"
-        reactivation_evidence = source_record_key
     if target_lifecycle is None or target_publication is None or reason_code is None:
         return False
+    if source_membership is None:
+        source_membership = await _provider_source_membership_for_feature(
+            session,
+            feature_id=feature_id,
+            provider_dataset_id=provider_dataset_id,
+        )
 
     params = {
         "feature_id": feature_id,
@@ -2676,8 +2751,7 @@ async def _transition_provider_lifecycle_from_state(
         "state_context": _provider_state_context(
             provider_dataset_id=provider_dataset_id,
             reason_code=reason_code,
-            source_record_key=source_record_key,
-            reactivation_evidence=reactivation_evidence,
+            source_membership=source_membership,
         ),
     }
     try:
@@ -2710,7 +2784,7 @@ async def _transition_provider_lifecycle_from_state(
             feature_id=feature_id,
             desired_state=desired_state,
             provider_dataset_id=provider_dataset_id,
-            source_record_key=source_record_key,
+            source_membership=source_membership,
             current=refreshed,
             retry_on_serialization=False,
         )
@@ -2736,7 +2810,7 @@ async def _retire_provider_candidates(
             feature_id=str(row["feature_id"]),
             desired_state=desired_state,
             provider_dataset_id=int(row["provider_dataset_id"]),
-            source_record_key=None,
+            source_membership=None,
         )
         retired += int(changed)
     return retired
@@ -2767,6 +2841,11 @@ async def load_bundle(session: AsyncSession, bundle: FeatureBundle) -> FeatureLo
             session,
             bundle.feature,
             provider_dataset_id=record_state.provider_dataset_id,
+            source_membership=_ProviderSourceMembership(
+                source_entity_key=record_state.source_entity_key,
+                source_record_key=record_state.source_record_key,
+                authoritative_receipt=record_state.authoritative_receipt,
+            ),
         )
         feature_updated = not feature_inserted
     link_inserted = await upsert_source_link(session, bundle.source_link)
@@ -2775,7 +2854,11 @@ async def load_bundle(session: AsyncSession, bundle: FeatureBundle) -> FeatureLo
         feature_id=bundle.feature.feature_id,
         desired_state=_provider_feature_state(bundle.feature),
         provider_dataset_id=record_state.provider_dataset_id,
-        source_record_key=record_state.source_record_key,
+        source_membership=_ProviderSourceMembership(
+            source_entity_key=record_state.source_entity_key,
+            source_record_key=record_state.source_record_key,
+            authoritative_receipt=record_state.authoritative_receipt,
+        ),
     )
     return FeatureLoadResult(
         bundles_total=1,
@@ -4225,11 +4308,6 @@ async def _reconcile_persisted_notice_scope(
         for row in snapshot_updates:
             if not bool(row["reactivate"]):
                 continue
-            source_record_key = row["source_record_key"]
-            if source_record_key is None:
-                raise RuntimeError(
-                    "notice reactivation candidate has no current source record"
-                )
             await _transition_provider_lifecycle_if_needed(
                 session,
                 feature_id=str(row["feature_id"]),
@@ -4239,7 +4317,7 @@ async def _reconcile_persisted_notice_scope(
                     quality_state="valid",
                 ),
                 provider_dataset_id=int(row["provider_dataset_id"]),
-                source_record_key=str(source_record_key),
+                source_membership=None,
             )
         reopened = sum(bool(row["reopened"]) for row in snapshot_updates)
         closed = sum(bool(row["closed"]) for row in snapshot_updates)

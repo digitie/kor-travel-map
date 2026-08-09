@@ -72,6 +72,19 @@ def _place(coord: Coordinate | None, detail: PlaceDetail | None) -> Feature:
     )
 
 
+def _provider_membership(
+    *,
+    entity_key: str = "entity:17",
+    record_key: str = "record:17",
+    receipt: str = "receipt:17",
+) -> feature_repo._ProviderSourceMembership:
+    return feature_repo._ProviderSourceMembership(
+        source_entity_key=entity_key,
+        source_record_key=record_key,
+        authoritative_receipt=receipt,
+    )
+
+
 def test_feature_params_with_coord_and_detail() -> None:
     feature = _place(
         Coordinate(lon=Decimal("126.92"), lat=Decimal("37.55")),
@@ -144,8 +157,7 @@ def test_provider_state_context_is_dataset_derived_and_never_sends_principal() -
         feature_repo._provider_state_context(
             provider_dataset_id=17,
             reason_code="provider_reingest",
-            source_record_key="record:17",
-            reactivation_evidence="record:17",
+            source_membership=_provider_membership(),
         )
     )
 
@@ -153,8 +165,9 @@ def test_provider_state_context_is_dataset_derived_and_never_sends_principal() -
         "transition_kind": "provider_sync",
         "reason_code": "provider_reingest",
         "provider_dataset_id": 17,
+        "source_entity_key": "entity:17",
         "source_record_key": "record:17",
-        "reactivation_evidence": "record:17",
+        "provider_evidence": {"authoritative_receipt": "receipt:17"},
     }
 
 
@@ -188,7 +201,14 @@ async def test_provider_create_uses_procedure_and_omits_legacy_state(
                 payload = json.loads(params["feature_payload"])
                 assert "status" not in payload
                 assert "deleted_at" not in payload
-                assert json.loads(params["state_context"])["transition_kind"] == "provider_sync"
+                assert json.loads(params["state_context"]) == {
+                    "transition_kind": "provider_sync",
+                    "reason_code": "provider_initial",
+                    "provider_dataset_id": 17,
+                    "source_entity_key": "entity:17",
+                    "source_record_key": "record:17",
+                    "provider_evidence": {"authoritative_receipt": "receipt:17"},
+                }
                 return _Result(
                     {
                         "o_inserted": True,
@@ -207,6 +227,7 @@ async def test_provider_create_uses_procedure_and_omits_legacy_state(
         session,  # type: ignore[arg-type]
         _place(None, None),
         provider_dataset_id=17,
+        source_membership=_provider_membership(),
     )
 
     assert inserted is True
@@ -228,7 +249,7 @@ async def test_provider_reactivation_skips_preexisting_lifecycle_override() -> N
             quality_state="valid",
         ),
         provider_dataset_id=17,
-        source_record_key="record:17",
+        source_membership=_provider_membership(),
         current=feature_repo._FeatureLoadState(
             exists=True,
             lifecycle_state="retired",
@@ -280,7 +301,7 @@ async def test_provider_reactivation_fence_sqlstate_is_a_noop() -> None:
             quality_state="valid",
         ),
         provider_dataset_id=17,
-        source_record_key="record:17",
+        source_membership=_provider_membership(),
         current=feature_repo._FeatureLoadState(
             exists=True,
             lifecycle_state="retired",
@@ -344,7 +365,7 @@ async def test_provider_reactivation_conflict_rereads_without_second_transition(
             quality_state="valid",
         ),
         provider_dataset_id=17,
-        source_record_key="record:17",
+        source_membership=_provider_membership(),
         current=feature_repo._FeatureLoadState(
             exists=True,
             lifecycle_state="retired",
@@ -412,7 +433,7 @@ async def test_provider_reactivation_conflict_retries_once_when_still_retired(
             quality_state="valid",
         ),
         provider_dataset_id=17,
-        source_record_key="record:17",
+        source_membership=_provider_membership(),
         current=feature_repo._FeatureLoadState(
             exists=True,
             lifecycle_state="retired",

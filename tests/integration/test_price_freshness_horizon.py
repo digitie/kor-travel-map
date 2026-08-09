@@ -307,6 +307,16 @@ async def test_stale_price_excluded_from_bbox_price_summary(
             provider=bundles[0].source_record.provider,
             dataset_key=bundles[0].source_record.dataset_key,
         ),
+        source_membership=feature_repo._ProviderSourceMembership(
+            source_entity_key=feature_repo._make_source_entity_key(
+                provider=bundles[0].source_record.provider,
+                dataset_key=bundles[0].source_record.dataset_key,
+                source_entity_type=bundles[0].source_record.source_entity_type,
+                source_entity_id=bundles[0].source_record.source_entity_id,
+            ),
+            source_record_key=bundles[0].source_record.source_record_key,
+            authoritative_receipt=bundles[0].source_record.raw_payload_hash,
+        ),
     )
 
     await _append_price_response(

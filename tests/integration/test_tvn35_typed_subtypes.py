@@ -641,14 +641,9 @@ async def test_user_request_fence_skips_subtype_write(
     provider_retry = _place_feature(
         "tvn35:fence", place_kind="restaurant", phones=["02-3333-4444"]
     )
-    await feature_repo.upsert_feature(
+    await feature_repo.load_bundle(
         migrated_session,
-        provider_retry,
-        provider_dataset_id=await feature_repo.resolve_active_provider_dataset_id(
-            migrated_session,
-            provider="python-krex-api",
-            dataset_key="krex_traffic_notices",
-        ),
+        _bundle(provider_retry, source_entity_id="F-1", raw_data={"v": 2}),
     )
     await migrated_session.flush()
 
@@ -770,14 +765,9 @@ async def test_route_and_area_with_geometry_land_in_subtype(
         created_at=_NOW,
         updated_at=_NOW,
     )
-    await feature_repo.upsert_feature(
+    await feature_repo.load_bundle(
         migrated_session,
-        feature,
-        provider_dataset_id=await feature_repo.resolve_active_provider_dataset_id(
-            migrated_session,
-            provider="python-krex-api",
-            dataset_key="krex_traffic_notices",
-        ),
+        _bundle(feature, source_entity_id=f"GEOM-{kind.value}"),
     )
     await migrated_session.flush()
 

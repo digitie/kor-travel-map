@@ -499,10 +499,14 @@ async def test_user_delete_change_uses_transition_and_typed_override() -> None:
                     }
                 ]
             ),
-            _Result(),
-            _Result(),
-            _Result(),
-            _Result([{"version": 1}]),
+            _Result(
+                [
+                    {
+                        "o_feature_id": request.feature_id,
+                        "o_row_revision": 12,
+                    }
+                ]
+            ),
             _Result(),
             _Result(),
         ]
@@ -525,8 +529,181 @@ async def test_user_delete_change_uses_transition_and_typed_override() -> None:
         "causation_ref": request.request_id,
     }
     assert "'lifecycle_state'" in session.calls[2]["statement"]
-    assert "\n    status =" not in session.calls[3]["statement"]
-    assert "\n    deleted_at =" not in session.calls[3]["statement"]
+    provenance = session.calls[3]
+    assert "feature.materialize_user_feature_change_provenance" in provenance["statement"]
+    assert provenance["params"] == {
+        "feature_id": request.feature_id,
+        "change_kind": "delete",
+        "request_id": request.request_id,
+        "reason": request.reason,
+        "operator": "admin",
+        "expected_row_revision": 12,
+    }
+
+
+@pytest.mark.asyncio
+async def test_user_add_writes_subtype_before_typed_provenance_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = repo.FeatureChangeRequest(
+        request_id="00000000-0000-0000-0000-000000000004",
+        feature_id="feature-user-add",
+        action="add",
+        state="pending",
+        review_mode="require_review",
+        base_row_revision=None,
+        payload={
+            "kind": "place",
+            "name": "사용자 추가 장소",
+            "category": "01070300",
+            "coord": {"lon": 126.9769, "lat": 37.5759},
+            "marker_icon": "marker",
+            "marker_color": "P-01",
+            "detail": {"place_kind": "attraction"},
+        },
+        reason="사용자 추가 요청",
+        requested_by="requester",
+        reviewed_by="admin",
+        reviewed_at=_NOW,
+        applied_at=None,
+        created_at=_NOW,
+    )
+    feature_uuid = "00000000-0000-4000-8000-000000000004"
+    monkeypatch.setattr(repo, "candidate_feature_uuid", lambda: feature_uuid)
+    session = _Session(
+        [
+            _Result(
+                [
+                    {
+                        "o_feature_id": request.feature_id,
+                        "o_feature_uuid": feature_uuid,
+                        "o_row_revision": 1,
+                        "o_inserted": True,
+                    }
+                ]
+            ),
+            _Result(),
+            _Result(),
+        ]
+    )
+
+    await repo._apply_change(
+        session,  # type: ignore[arg-type]
+        request,
+        operator="admin",
+    )
+
+    assert "feature.create_feature_with_initial_state" in session.calls[0]["statement"]
+    create_payload = json.loads(session.calls[0]["params"]["feature_payload"])
+    assert not (
+        {
+            "status",
+            "data_origin",
+            "data_version",
+            "user_change_kind",
+            "user_change_status",
+            "user_change_request_id",
+            "user_change_reason",
+            "user_deleted_at",
+            "user_deleted_by",
+        }
+        & create_payload.keys()
+    )
+    assert "INSERT INTO feature.feature_places" in session.calls[1]["statement"]
+    provenance = session.calls[2]
+    assert "feature.materialize_user_feature_change_provenance" in provenance["statement"]
+    assert provenance["params"] == {
+        "feature_id": request.feature_id,
+        "change_kind": "add",
+        "request_id": request.request_id,
+        "reason": request.reason,
+        "operator": "admin",
+        "expected_row_revision": 1,
+    }
+
+
+@pytest.mark.asyncio
+async def test_user_update_keeps_t36_input_write_and_calls_narrow_provenance_writer() -> None:
+    request = repo.FeatureChangeRequest(
+        request_id="00000000-0000-0000-0000-000000000004",
+        feature_id="feature-user-update",
+        action="update",
+        state="approved",
+        review_mode="immediate",
+        base_row_revision=11,
+        payload={"name": "사용자 수정 이름"},
+        reason="사용자 제보 반영",
+        requested_by="requester",
+        reviewed_by="admin",
+        reviewed_at=_NOW,
+        applied_at=None,
+        created_at=_NOW,
+    )
+    session = _Session(
+        [
+            _Result(
+                [
+                    {
+                        "feature_id": request.feature_id,
+                        "feature_uuid": "00000000-0000-4000-8000-000000000004",
+                        "kind": "place",
+                        "row_revision": 12,
+                    }
+                ]
+            ),
+            _Result(),
+        ]
+    )
+
+    await repo._apply_change(
+        session,  # type: ignore[arg-type]
+        request,
+        operator="admin",
+    )
+
+    ordinary_update = session.calls[0]
+    assert "UPDATE feature.features" in ordinary_update["statement"]
+    assert "user_change_" not in ordinary_update["statement"]
+    assert "user_deleted_" not in ordinary_update["statement"]
+    provenance = session.calls[1]
+    assert "feature.materialize_user_feature_change_provenance" in provenance["statement"]
+    assert provenance["params"] == {
+        "feature_id": request.feature_id,
+        "change_kind": "update",
+        "request_id": request.request_id,
+        "reason": request.reason,
+        "operator": "admin",
+        "expected_row_revision": 12,
+    }
+
+
+@pytest.mark.asyncio
+async def test_user_update_requires_typed_provenance_receipt_before_any_write() -> None:
+    request = repo.FeatureChangeRequest(
+        request_id="00000000-0000-0000-0000-000000000005",
+        feature_id="feature-user-update-receipt",
+        action="update",
+        state="approved",
+        review_mode="immediate",
+        base_row_revision=11,
+        payload={"name": "사용자 수정 이름"},
+        reason=None,
+        requested_by="requester",
+        reviewed_by="admin",
+        reviewed_at=_NOW,
+        applied_at=None,
+        created_at=_NOW,
+    )
+    session = _Session([])
+
+    with pytest.raises(ValueError, match="provenance"):
+        await repo._apply_change(
+            session,  # type: ignore[arg-type]
+            request,
+            operator="admin",
+        )
+
+    assert session.calls == []
 
 
 def test_dedup_row_mapping() -> None:
