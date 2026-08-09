@@ -770,14 +770,14 @@ stale basis의 PATCH/DELETE는 `412 Precondition Failed`다. consumer는 draft�
   package API `env_file`은 compose opt-in 근거가 아니다. 승인된 Manager production 형상은
   별도 canonical literal `true`와 raw/resolved/runtime attestation을 소유한다(T-VN-H02R, #796).
 - **admin 공간·카드 read**: admin 지도는 공개 `/v1/features*`를 재사용하지 않는다.
-  `/v1/admin/features/in-bounds`는 `feature.features` base row에서 삭제 전 운영 상태를
-  직접 조회하며, `status` 미지정 시 `draft|active|inactive|hidden|broken` 전체를 대상으로 한다.
-  반복 `status`를 지정하면 item과 cluster에 동일하게 적용한다. 응답의 `items`와 `clusters`는
+  `/v1/admin/features/in-bounds`는 typed core/subtype row를 직접 조회한다. lifecycle,
+  publication, quality 반복 filter는 각 축 안에서는 OR, 축 사이는 AND로 item과 cluster에
+  동일하게 적용한다. 응답의 `items`와 `clusters`는
   양 mode에서 모두 필수 배열이며 사용하지 않는 쪽을 `[]`로 반환한다. bbox 후보는 point의 `coord`와
   route/area의 exact geometry 교차를 함께 사용하고, cluster 귀속은 저장 canonical 행정코드로
-  feature당 한 번만 계산한다. `/weather`와 `/price` admin subresource도 삭제 전 base Feature
-  존재 여부를 검사하므로 비공개 Feature를 404로 오분류하지 않되, `deleted_at`·
-  `user_deleted_at`·`status=deleted` target은 fail-closed 404로 처리한다. public endpoint와
+  feature당 한 번만 계산한다. `/weather`와 `/price` admin subresource도 public visibility와
+  무관한 admin-any 대상만 명시적으로 읽는다. legacy `status`/삭제 timestamp는 상태 판단에 쓰지
+  않는다. public endpoint와
   `feature.public_features`의 공개 술어는 변경하지 않는다(T-VN-04A, #741).
 - **Feature update 감사 actor**: create와 run-now body는 `operator`/`actor` override를
   받지 않으며 포함하면 422다. 저장 `operator`는 인증된 admin proxy의
@@ -1258,8 +1258,9 @@ codegraph impact 선행). raw `text()` SQL이 물리명을 써서 ORM attr만으
   결정적 feature_id 생성(같은 key 재시도 = 같은 feature_id), 출처 태깅은 전용 필드 없이
   `operator` 고정 + `reason` 머리에 `[suggestion:<ref_id>]` prefix(D-11 익명 — 불투명 참조 ID만
   저장, 개인정보 비저장), admin 인증은 12701 `/v1/admin/*`의 `admin_destructive_enabled`
-  kill-switch + 인프라 SSO/IP allowlist(§1.3), closure는 영구 폐업/사용자 삭제 = soft `DELETE`
-  (provider 재적재 부활 차단, #332) / 일시 중단 = `POST .../deactivate`(§2.5)다. 거절/반려는
+  kill-switch + 인프라 SSO/IP allowlist(§1.3), closure는 사용자 삭제 요청의 retired/suppressed
+  상태 전이와 immutable receipt로 남기며 provider 재활성을 막는다. 일시 노출 중단은
+  `PATCH .../state`의 publication/quality patch로 표현한다. 거절/반려는
   change-request `request_id`/`status`로 노출되어 외부 소비자가 폴링 조회한다.
 
 ---

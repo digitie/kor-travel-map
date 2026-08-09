@@ -210,8 +210,9 @@ kor-travel-geo REST v2 적용 중 발생한 주소/좌표 이슈를 admin UI에�
 `ops.feature_overrides`에 같은 값을 기록해 provider 재적재가 덮어쓰지 않게 한다.
 `apply_kor_travel_geo_address`는 좌표 기준 kor-travel-geo reverse 결과를 정본 주소로 채택한다.
 
-T-207c 구현분은 `/admin/features` 목록, deactivate status override, `/admin/features/dedup-reviews`
-목록/결정/merge다. 2026-06-08 추가 구현으로 `/admin/features` 아래에 place/event
+T-VN-34C 이후 `/admin/features`는 세 상태 축 AND filter와 `/state` patch/retire,
+`/state/reactivate`, `/state/transitions`를 정본으로 둔다. 과거 deactivate status override는
+폐기됐다. `/admin/features/dedup-reviews` 목록/결정/merge와 place/event
 사용자 요청 추가·수정·soft delete API가 붙었다. 이 API는 영구 삭제가 아니라
 `ops.feature_change_requests`와 `feature.feature_versions`에 audit 가능한 version 1
 변경을 남긴다.
@@ -263,9 +264,9 @@ stale basis는 RFC7807 `412 Precondition Failed`로 거부한다. admin UI는 �
   `feature.feature_versions(version=1)`에 저장한다.
 - provider 재적재가 같은 `feature_id`를 다시 upsert해도 기존 version 1의 유효 필드는
   덮지 않는다. provider payload는 version 0 snapshot으로만 갱신한다.
-- 사용자 요청 삭제는 `status='deleted'`, `deleted_at`, `user_deleted_at`,
-  `user_deleted_by`, `user_change_request_id`를 기록하는 soft delete다. 이후 provider
-  재적재나 snapshot 미포함 정리 작업은 이 row를 되살리지 않는다.
+- 사용자 요청 삭제는 lifecycle=`retired`, publication=`suppressed` 상태 전이와 immutable
+  request/version receipt를 남긴다. 이후 provider 재적재나 snapshot 미포함 정리 작업은 이 row를
+  되살리지 않는다.
 
 ## 4.2 Offline uploads
 
