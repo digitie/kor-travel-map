@@ -13,20 +13,31 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { useMemo, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 
 import {
+  FEATURE_PUBLICATION_STATES,
+  FEATURE_QUALITY_STATES,
+  useAdminFeatureCorrectionBasis,
   useAdminFeatureDetail,
+  useAdminFeatureStateTransitions,
   useNearbyFeatures,
+  usePatchAdminFeatureStateMutation,
+  useReactivateAdminFeatureStateMutation,
   type AdminFeatureDetailData,
   type NearbyFeatureSummary,
 } from "@/api/features";
 import { EntityLink } from "@/components/entity-link";
 import { FeatureKindDetailPanel } from "@/components/feature-kind-detail-panel";
+import { FeatureStateBadges } from "@/components/feature-state-badges";
 import { StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { DataTable } from "@/components/ui/data-table";
+import { Input } from "@/components/ui/input";
+import { NativeSelect } from "@/components/ui/native-select";
+import { NativeSelectOption } from "@/components/ui/native-select-option";
 import { Skeleton } from "@/components/ui/skeleton";
 import { VWorldMapView, VWorldMarker } from "@/components/vworld-map-view";
 import { formatDateTime, shortId } from "@/lib/format";
@@ -38,6 +49,7 @@ type OverrideRow = AdminFeatureDetailData["overrides"][number];
 type FileRow = AdminFeatureDetailData["files"][number];
 type VersionRow = AdminFeatureDetailData["versions"][number];
 type ChangeRequestRow = AdminFeatureDetailData["change_requests"][number];
+type StateTransitionRow = AdminFeatureDetailData["state_transitions"][number];
 
 const EMPTY_MESSAGE = "데이터가 없습니다.";
 const VWORLD_KEY = process.env.NEXT_PUBLIC_VWORLD_API_KEY;
@@ -46,7 +58,10 @@ function featureHref(featureId: string): string {
   return `/features/${encodeURIComponent(featureId)}`;
 }
 
-function coordLabel(lon: number | null | undefined, lat: number | null | undefined) {
+function coordLabel(
+  lon: number | null | undefined,
+  lat: number | null | undefined,
+) {
   if (typeof lon === "number" && typeof lat === "number") {
     return `${lon.toFixed(5)}, ${lat.toFixed(5)}`;
   }
@@ -86,7 +101,9 @@ function Section({
           <Icon className="size-4 text-muted-foreground" />
           <span>{title}</span>
         </div>
-        {typeof count === "number" ? <Badge variant="secondary">{count}</Badge> : null}
+        {typeof count === "number" ? (
+          <Badge variant="secondary">{count}</Badge>
+        ) : null}
       </div>
       <div className="p-4">{children}</div>
     </section>
@@ -236,7 +253,7 @@ function CurationsTable({ data }: { data: AdminFeatureDetailData }) {
                     {item.source_name ?? item.source_url}
                   </a>
                 ) : (
-                  item.source_name ?? "-"
+                  (item.source_name ?? "-")
                 )}
               </div>
               <div className="font-mono text-xs text-muted-foreground">
@@ -283,7 +300,9 @@ function CurationsTable({ data }: { data: AdminFeatureDetailData }) {
         enableSorting: false,
         cell: ({ row }) => (
           <details>
-            <summary className="cursor-pointer text-xs font-medium">전체 정보</summary>
+            <summary className="cursor-pointer text-xs font-medium">
+              전체 정보
+            </summary>
             <div className="mt-2 min-w-80">
               <JsonBlock value={row.original} />
             </div>
@@ -334,7 +353,9 @@ function noticeHistoryState(source: SourceRow): string {
 
 function NoticeHistoryPanel({ data }: { data: AdminFeatureDetailData }) {
   const rows = useMemo(() => {
-    const primary = data.sources.filter((source) => source.source_role === "primary");
+    const primary = data.sources.filter(
+      (source) => source.source_role === "primary",
+    );
     return (primary.length > 0 ? primary : data.sources).toSorted(
       (a, b) =>
         Date.parse(b.observed_at) - Date.parse(a.observed_at) ||
@@ -555,7 +576,11 @@ function OverridesTable({ data }: { data: AdminFeatureDetailData }) {
   );
 
   return (
-    <Section count={data.overrides.length} icon={GitBranchIcon} title="Overrides">
+    <Section
+      count={data.overrides.length}
+      icon={GitBranchIcon}
+      title="Overrides"
+    >
       <DataTable
         columns={columns}
         data={data.overrides}
@@ -594,7 +619,9 @@ function FilesTable({ data }: { data: AdminFeatureDetailData }) {
           const file = row.original;
           return (
             <>
-              <div className="break-all font-mono text-xs">{file.object_key}</div>
+              <div className="break-all font-mono text-xs">
+                {file.object_key}
+              </div>
               {file.public_url ? (
                 <Link
                   className="mt-1 inline-flex text-xs text-primary underline-offset-4 hover:underline"
@@ -629,7 +656,9 @@ function FilesTable({ data }: { data: AdminFeatureDetailData }) {
         accessorKey: "byte_size",
         header: "size",
         cell: ({ row }) => (
-          <span className="font-mono text-xs">{row.original.byte_size ?? "-"}</span>
+          <span className="font-mono text-xs">
+            {row.original.byte_size ?? "-"}
+          </span>
         ),
       },
     ],
@@ -656,7 +685,9 @@ function HistoryPanel({ data }: { data: AdminFeatureDetailData }) {
       {
         accessorKey: "version",
         header: "version",
-        cell: ({ row }) => <span className="font-mono">{row.original.version}</span>,
+        cell: ({ row }) => (
+          <span className="font-mono">{row.original.version}</span>
+        ),
       },
       { accessorKey: "origin", header: "origin" },
       { accessorKey: "change_kind", header: "change" },
@@ -743,7 +774,8 @@ function NearbyPanel({
   featureId: string;
   feature: AdminFeatureDetailData["feature"];
 }) {
-  const hasCoord = typeof feature.lon === "number" && typeof feature.lat === "number";
+  const hasCoord =
+    typeof feature.lon === "number" && typeof feature.lat === "number";
   const nearby = useNearbyFeatures(
     hasCoord
       ? {
@@ -752,7 +784,6 @@ function NearbyPanel({
           radius_m: 3000,
           page_size: 12,
           sort: "distance",
-          status: ["active"],
         }
       : null,
   );
@@ -823,8 +854,13 @@ function NearbyPanel({
           containerClassName="overflow-auto"
         />
       ) : null}
-      {hasCoord && !nearby.isLoading && !nearby.isError && items.length === 0 ? (
-        <div className="text-sm text-muted-foreground">주변 feature가 없습니다.</div>
+      {hasCoord &&
+      !nearby.isLoading &&
+      !nearby.isError &&
+      items.length === 0 ? (
+        <div className="text-sm text-muted-foreground">
+          주변 feature가 없습니다.
+        </div>
       ) : null}
     </Section>
   );
@@ -835,7 +871,8 @@ function FeatureMapPanel({
 }: {
   feature: AdminFeatureDetailData["feature"];
 }) {
-  const hasCoord = typeof feature.lon === "number" && typeof feature.lat === "number";
+  const hasCoord =
+    typeof feature.lon === "number" && typeof feature.lat === "number";
 
   return (
     <Section icon={MapPinIcon} title="Map">
@@ -872,13 +909,17 @@ function RawPanels({ data }: { data: AdminFeatureDetailData }) {
     <Section icon={LinkIcon} title="Raw">
       <div className="flex flex-col gap-3">
         <details open>
-          <summary className="cursor-pointer text-sm font-medium">detail</summary>
+          <summary className="cursor-pointer text-sm font-medium">
+            detail
+          </summary>
           <div className="mt-2">
             <JsonBlock value={data.feature.detail} />
           </div>
         </details>
         <details>
-          <summary className="cursor-pointer text-sm font-medium">raw_refs</summary>
+          <summary className="cursor-pointer text-sm font-medium">
+            raw_refs
+          </summary>
           <div className="mt-2">
             <JsonBlock value={data.feature.raw_refs} />
           </div>
@@ -890,11 +931,280 @@ function RawPanels({ data }: { data: AdminFeatureDetailData }) {
           </div>
         </details>
         <details>
-          <summary className="cursor-pointer text-sm font-medium">address</summary>
+          <summary className="cursor-pointer text-sm font-medium">
+            address
+          </summary>
           <div className="mt-2">
             <JsonBlock value={data.feature.address} />
           </div>
         </details>
+      </div>
+    </Section>
+  );
+}
+
+function FeatureStatePanel({
+  feature,
+}: {
+  feature: AdminFeatureDetailData["feature"];
+}) {
+  const basis = useAdminFeatureCorrectionBasis(feature.feature_id);
+  const transitions = useAdminFeatureStateTransitions(feature.feature_id);
+  const patchState = usePatchAdminFeatureStateMutation();
+  const reactivate = useReactivateAdminFeatureStateMutation();
+  const [publicationState, setPublicationState] = useState(
+    feature.publication_state,
+  );
+  const [qualityState, setQualityState] = useState(feature.quality_state);
+  const [reasonCode, setReasonCode] = useState("admin_ui_state_patch");
+  const [providerDatasetId, setProviderDatasetId] = useState("");
+  const [sourceEntityKey, setSourceEntityKey] = useState("");
+  const [sourceRecordKey, setSourceRecordKey] = useState("");
+
+  const submitPatch = () => {
+    if (!basis.data) return;
+    const publicationChanged = publicationState !== feature.publication_state;
+    const qualityChanged = qualityState !== feature.quality_state;
+    if (!publicationChanged && !qualityChanged) return;
+    patchState.mutate({
+      featureId: basis.data.featureId,
+      entityTag: basis.data.entityTag,
+      body: {
+        action: "patch",
+        publication_state: publicationChanged ? publicationState : undefined,
+        quality_state: qualityChanged ? qualityState : undefined,
+        reason_code: reasonCode.trim() || "admin_ui_state_patch",
+      },
+    });
+  };
+
+  const retire = () => {
+    if (!basis.data || feature.lifecycle_state === "retired") return;
+    patchState.mutate({
+      featureId: basis.data.featureId,
+      entityTag: basis.data.entityTag,
+      body: {
+        action: "retire",
+        reason_code: reasonCode.trim() || "admin_ui_retire",
+      },
+    });
+  };
+
+  const submitReactivate = () => {
+    const parsedDatasetId = Number(providerDatasetId);
+    if (
+      !basis.data ||
+      !Number.isSafeInteger(parsedDatasetId) ||
+      parsedDatasetId < 1 ||
+      sourceEntityKey.trim().length === 0 ||
+      sourceRecordKey.trim().length === 0
+    ) {
+      return;
+    }
+    reactivate.mutate({
+      featureId: basis.data.featureId,
+      entityTag: basis.data.entityTag,
+      body: {
+        provider_dataset_id: parsedDatasetId,
+        source_entity_key: sourceEntityKey.trim(),
+        source_record_key: sourceRecordKey.trim(),
+        reason_code: reasonCode.trim() || "admin_ui_reactivate",
+      },
+    });
+  };
+
+  const transitionRows = transitions.data?.data.items ?? [];
+  const transitionColumns = useMemo<ColumnDef<StateTransitionRow, unknown>[]>(
+    () => [
+      {
+        id: "transition",
+        header: "전이",
+        cell: ({ row }) => (
+          <div className="flex flex-col gap-1">
+            <span className="font-mono text-xs">
+              #{row.original.transition_id}
+            </span>
+            <span>{row.original.transition_kind}</span>
+          </div>
+        ),
+      },
+      {
+        id: "states",
+        header: "상태 축",
+        cell: ({ row }) => (
+          <div className="text-xs">
+            <div>
+              {row.original.from_lifecycle_state ?? "-"} /{" "}
+              {row.original.from_publication_state ?? "-"} /{" "}
+              {row.original.from_quality_state ?? "-"}
+            </div>
+            <div>
+              → {row.original.to_lifecycle_state} /{" "}
+              {row.original.to_publication_state} /{" "}
+              {row.original.to_quality_state}
+            </div>
+          </div>
+        ),
+      },
+      {
+        id: "receipt",
+        header: "감사",
+        cell: ({ row }) => (
+          <div className="text-xs">
+            <div>{row.original.reason_code}</div>
+            <div className="text-muted-foreground">
+              {row.original.principal} · r{row.original.row_revision}
+            </div>
+            <div className="text-muted-foreground">
+              {formatDateTime(row.original.occurred_at)}
+            </div>
+          </div>
+        ),
+      },
+    ],
+    [],
+  );
+
+  return (
+    <Section
+      count={transitionRows.length}
+      icon={GitBranchIcon}
+      title="상태 축과 감사 이력"
+    >
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-wrap gap-1">
+          <FeatureStateBadges
+            lifecycleState={feature.lifecycle_state}
+            publicationState={feature.publication_state}
+            qualityState={feature.quality_state}
+          />
+        </div>
+        <div className="grid gap-2 md:grid-cols-3">
+          <NativeSelect
+            aria-label="공개 상태 변경"
+            value={publicationState}
+            onChange={(event) =>
+              setPublicationState(
+                event.target.value as typeof feature.publication_state,
+              )
+            }
+          >
+            {FEATURE_PUBLICATION_STATES.map((state) => (
+              <NativeSelectOption key={state} value={state}>
+                {state}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
+          <NativeSelect
+            aria-label="품질 상태 변경"
+            value={qualityState}
+            onChange={(event) =>
+              setQualityState(
+                event.target.value as typeof feature.quality_state,
+              )
+            }
+          >
+            {FEATURE_QUALITY_STATES.map((state) => (
+              <NativeSelectOption key={state} value={state}>
+                {state}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
+          <Input
+            aria-label="상태 변경 사유 코드"
+            value={reasonCode}
+            onChange={(event) => setReasonCode(event.target.value)}
+          />
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            disabled={
+              basis.isLoading ||
+              patchState.isPending ||
+              (publicationState === feature.publication_state &&
+                qualityState === feature.quality_state)
+            }
+            size="sm"
+            type="button"
+            variant="outline"
+            onClick={submitPatch}
+          >
+            공개·품질 적용
+          </Button>
+          <Button
+            disabled={
+              basis.isLoading ||
+              patchState.isPending ||
+              feature.lifecycle_state === "retired"
+            }
+            size="sm"
+            type="button"
+            variant="destructive"
+            onClick={retire}
+          >
+            종료
+          </Button>
+        </div>
+        {feature.lifecycle_state === "retired" ? (
+          <div className="grid gap-2 rounded-md border p-3 md:grid-cols-4">
+            <Input
+              aria-label="재활성 provider dataset ID"
+              inputMode="numeric"
+              min={1}
+              placeholder="provider dataset ID"
+              value={providerDatasetId}
+              onChange={(event) => setProviderDatasetId(event.target.value)}
+            />
+            <Input
+              aria-label="재활성 source entity key"
+              placeholder="source entity key"
+              value={sourceEntityKey}
+              onChange={(event) => setSourceEntityKey(event.target.value)}
+            />
+            <Input
+              aria-label="재활성 source record key"
+              placeholder="current source record key"
+              value={sourceRecordKey}
+              onChange={(event) => setSourceRecordKey(event.target.value)}
+            />
+            <Button
+              disabled={basis.isLoading || reactivate.isPending}
+              size="sm"
+              type="button"
+              variant="outline"
+              onClick={submitReactivate}
+            >
+              현재 source로 재활성화
+            </Button>
+          </div>
+        ) : null}
+        {basis.isError || patchState.isError || reactivate.isError ? (
+          <Alert variant="destructive">
+            <AlertTitle>상태 명령 실패</AlertTitle>
+            <AlertDescription>
+              {basis.error?.message ??
+                patchState.error?.message ??
+                reactivate.error?.message}
+            </AlertDescription>
+          </Alert>
+        ) : null}
+        {transitions.isLoading ? <Skeleton className="h-28" /> : null}
+        {transitions.isError ? (
+          <Alert variant="destructive">
+            <AlertTitle>상태 감사 이력 조회 실패</AlertTitle>
+            <AlertDescription>{transitions.error.message}</AlertDescription>
+          </Alert>
+        ) : null}
+        {transitionRows.length > 0 ? (
+          <DataTable
+            columns={transitionColumns}
+            data={transitionRows}
+            getRowId={(row) => String(row.transition_id)}
+            emptyMessage={EMPTY_MESSAGE}
+            manualSorting={false}
+            containerClassName="overflow-auto"
+          />
+        ) : null}
       </div>
     </Section>
   );
@@ -922,7 +1232,9 @@ export function FeatureDetailView({ featureId }: { featureId: string }) {
     return null;
   }
 
-  const primarySource = data.sources.find((source) => source.source_role === "primary");
+  const primarySource = data.sources.find(
+    (source) => source.source_role === "primary",
+  );
 
   return (
     <div className="flex flex-col gap-4" data-testid="feature-detail-view">
@@ -930,19 +1242,27 @@ export function FeatureDetailView({ featureId }: { featureId: string }) {
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_auto]">
           <div className="min-w-0">
             <div className="flex flex-wrap gap-2">
-              <StatusBadge status={feature.status} />
+              <FeatureStateBadges
+                lifecycleState={feature.lifecycle_state}
+                publicationState={feature.publication_state}
+                qualityState={feature.quality_state}
+              />
               <Badge variant="outline">{feature.kind}</Badge>
               <Badge variant="outline">{feature.category}</Badge>
               <Badge variant="secondary">{feature.data_origin}</Badge>
             </div>
-            <h2 className="mt-3 break-keep text-xl font-semibold">{feature.name}</h2>
+            <h2 className="mt-3 break-keep text-xl font-semibold">
+              {feature.name}
+            </h2>
             <div className="mt-1 break-all font-mono text-xs text-muted-foreground">
               {feature.feature_id}
             </div>
           </div>
           <dl className="grid min-w-64 grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-sm">
             <dt className="text-muted-foreground">coord</dt>
-            <dd className="font-mono">{coordLabel(feature.lon, feature.lat)}</dd>
+            <dd className="font-mono">
+              {coordLabel(feature.lon, feature.lat)}
+            </dd>
             <dt className="text-muted-foreground">sigungu</dt>
             <dd>{feature.sigungu_code ?? "-"}</dd>
             <dt className="text-muted-foreground">updated</dt>
@@ -961,6 +1281,7 @@ export function FeatureDetailView({ featureId }: { featureId: string }) {
           <IssuesTable data={data} />
           <OverridesTable data={data} />
           <HistoryPanel data={data} />
+          <FeatureStatePanel feature={feature} />
           <FilesTable data={data} />
         </div>
         <aside className="flex min-w-0 flex-col gap-4">

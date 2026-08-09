@@ -11,8 +11,7 @@ import type { components } from "../src/api/types";
 // 백엔드 DTO가 바뀌면 mock factory가 타입 불일치로 컴파일 실패 → mock-실계약 drift 감지.
 type DedupFeatureRecord = components["schemas"]["DedupFeatureRecord"];
 type DedupReviewRecord = components["schemas"]["DedupReviewRecord"];
-type DedupReviewListResponse =
-  components["schemas"]["DedupReviewListResponse"];
+type DedupReviewListResponse = components["schemas"]["DedupReviewListResponse"];
 type DedupReviewListMeta = DedupReviewListResponse["meta"];
 type DedupReviewDetailResponse =
   components["schemas"]["DedupReviewDetailResponse"];
@@ -20,8 +19,7 @@ type DedupReviewDecisionRequest =
   components["schemas"]["DedupReviewDecisionRequest"];
 type DedupReviewDecisionResponse =
   components["schemas"]["DedupReviewDecisionResponse"];
-type DedupReviewDecisionData =
-  components["schemas"]["DedupReviewDecisionData"];
+type DedupReviewDecisionData = components["schemas"]["DedupReviewDecisionData"];
 type ReviewFeatureDetailRecord =
   components["schemas"]["ReviewFeatureDetailRecord"];
 type ReviewSourceDetailRecord =
@@ -95,7 +93,11 @@ function makeDedupReview(
 
 function listResponse(
   items: DedupReviewRecord[],
-  options: { pageSize?: number; total?: number; nextCursor?: string | null } = {},
+  options: {
+    pageSize?: number;
+    total?: number;
+    nextCursor?: string | null;
+  } = {},
 ): DedupReviewListResponse {
   const meta: DedupReviewListMeta = {
     duration_ms: 1,
@@ -187,7 +189,9 @@ function makeReviewFeatureDetail(
     name: feature.name,
     raw_refs: [],
     sources: [makeReviewSource(feature)],
-    status: "active",
+    lifecycle_state: "active",
+    publication_state: "published",
+    quality_state: "valid",
     updated_at: MOCK_NOW,
     urls: { homepage: "https://example.invalid" },
   };
@@ -215,13 +219,15 @@ function detailResponse(review: DedupReviewRecord): DedupReviewDetailResponse {
 }
 
 // PATCH decision → review.status로 매핑 (refetch가 '완료' 상태를 반영하도록).
-const DECISION_TO_STATUS: Record<DedupReviewDecisionRequest["decision"], string> =
-  {
-    accepted: "accepted",
-    rejected: "rejected",
-    merged: "merged",
-    ignored: "ignored",
-  };
+const DECISION_TO_STATUS: Record<
+  DedupReviewDecisionRequest["decision"],
+  string
+> = {
+  accepted: "accepted",
+  rejected: "rejected",
+  merged: "merged",
+  ignored: "ignored",
+};
 
 interface DedupMockHandle {
   requests: {
@@ -302,9 +308,13 @@ async function mockDedupReviews(
       return (
         (!q || text.includes(q)) &&
         (providers.length === 0 ||
-          features.some((feature) => providers.includes(feature.provider ?? ""))) &&
+          features.some((feature) =>
+            providers.includes(feature.provider ?? ""),
+          )) &&
         (datasets.length === 0 ||
-          features.some((feature) => datasets.includes(feature.dataset_key ?? ""))) &&
+          features.some((feature) =>
+            datasets.includes(feature.dataset_key ?? ""),
+          )) &&
         (kinds.length === 0 ||
           features.some((feature) => kinds.includes(feature.kind))) &&
         (categories.length === 0 ||
@@ -390,7 +400,9 @@ async function mockDedupReviews(
       return;
     }
 
-    throw new Error(`Unhandled dedup-reviews route: ${request.method()} ${url}`);
+    throw new Error(
+      `Unhandled dedup-reviews route: ${request.method()} ${url}`,
+    );
   });
 
   return handle;
@@ -678,7 +690,9 @@ test.describe("admin/dedup-reviews actions", () => {
     });
 
     await page.goto("/admin/features/dedup-reviews");
-    await expect(page.getByRole("row", { name: /DEDUP_A_alpha/ })).toBeVisible();
+    await expect(
+      page.getByRole("row", { name: /DEDUP_A_alpha/ }),
+    ).toBeVisible();
     await expect(
       page.getByRole("columnheader", { name: "후보 A" }),
     ).toBeVisible();
@@ -692,7 +706,9 @@ test.describe("admin/dedup-reviews actions", () => {
 
     // 'all' → status: undefined → 마지막 GET에 status param 없음(센티넬은 param 미전송).
     await page.getByLabel("dedup status").selectOption("all");
-    await expect(page.getByRole("row", { name: /DEDUP_A_alpha/ })).toBeVisible();
+    await expect(
+      page.getByRole("row", { name: /DEDUP_A_alpha/ }),
+    ).toBeVisible();
     await expect
       .poll(() => handle.requests.lastListUrl?.searchParams.has("status"))
       .toBe(false);
@@ -741,8 +757,12 @@ test.describe("admin/dedup-reviews actions", () => {
     await page.getByLabel("dedup score filter").selectOption("high");
     await page.getByLabel("dedup page size").selectOption("25");
 
-    await expect(page.getByRole("row", { name: /DEDUP_A_filter/ })).toBeVisible();
-    await expect(page.getByRole("row", { name: /DEDUP_A_other/ })).toHaveCount(0);
+    await expect(
+      page.getByRole("row", { name: /DEDUP_A_filter/ }),
+    ).toBeVisible();
+    await expect(page.getByRole("row", { name: /DEDUP_A_other/ })).toHaveCount(
+      0,
+    );
 
     await expect
       .poll(() => {
@@ -770,7 +790,9 @@ test.describe("admin/dedup-reviews actions", () => {
       });
   });
 
-  test("page-size select drives cursor pagination controls", async ({ page }) => {
+  test("page-size select drives cursor pagination controls", async ({
+    page,
+  }) => {
     const rows = Array.from({ length: 26 }, (_value, index) =>
       makeDedupReview({
         feature_a: makeDedupFeature({
@@ -803,7 +825,9 @@ test.describe("admin/dedup-reviews actions", () => {
     await expect(
       page.getByText(/page 2\s*·\s*총 26건\s*·\s*이 페이지 1개/),
     ).toHaveCount(2);
-    await expect(page.getByRole("row", { name: /DEDUP_A_page_25/ })).toBeVisible();
+    await expect(
+      page.getByRole("row", { name: /DEDUP_A_page_25/ }),
+    ).toBeVisible();
     await expect(page.getByLabel("dedup 다음 페이지").first()).toBeDisabled();
     await expect(page.getByLabel("dedup 첫 페이지").first()).toBeEnabled();
 
@@ -812,13 +836,15 @@ test.describe("admin/dedup-reviews actions", () => {
     // [cursor=null, pageSize=25] 조합은 초기 로드에서 이미 페치돼 React Query 캐시에서
     // 서빙되므로 새 HTTP 요청이 없다(lastListUrl는 page-2 cursor=25로 stale). 따라서
     // lastListUrl HTTP 단언 대신 렌더 상태(page-1 데이터·요약)로 복귀를 검증한다.
-    await expect(page.getByText(/page 1\s*·\s*총 26건\s*·\s*이 페이지 25개/)).toHaveCount(
-      2,
-    );
+    await expect(
+      page.getByText(/page 1\s*·\s*총 26건\s*·\s*이 페이지 25개/),
+    ).toHaveCount(2);
     await expect(
       page.getByRole("row", { name: /DEDUP_A_page_0(?!\d)/ }),
     ).toBeVisible();
-    await expect(page.getByRole("row", { name: /DEDUP_A_page_25/ })).toHaveCount(0);
+    await expect(
+      page.getByRole("row", { name: /DEDUP_A_page_25/ }),
+    ).toHaveCount(0);
   });
 
   test("empty list renders the dedup empty message", async ({ page }) => {
@@ -873,9 +899,7 @@ test.describe("admin/dedup-reviews actions", () => {
     await expect(
       page.getByRole("heading", { level: 1, name: "중복 검토" }),
     ).toBeVisible();
-    await expect(
-      page.getByRole("button", { name: "새로고침" }),
-    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "새로고침" })).toBeVisible();
   });
 
   test("bulk accept on selected pending rows fires one PATCH per row", async ({

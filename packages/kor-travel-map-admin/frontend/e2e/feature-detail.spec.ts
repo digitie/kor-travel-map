@@ -47,7 +47,9 @@ function makeFeature(
     row_revision: 3,
     sido_code: "11",
     sigungu_code: "11560",
-    status: "active",
+    lifecycle_state: "active",
+    publication_state: "published",
+    quality_state: "valid",
     updated_at: "2026-06-08T00:00:00.000Z",
     urls: { homepage: "https://example.test" },
     ...overrides,
@@ -66,6 +68,7 @@ function makeDetailResponse(
       issues: [],
       overrides: [],
       sources: [],
+      state_transitions: [],
       versions: [],
     },
     meta,
@@ -109,10 +112,15 @@ async function mockFeatureDetail(
     }
     if (
       request.method() === "GET" &&
-      (url.pathname === DETAIL_PATH || url.pathname === `/api/proxy${DETAIL_PATH}`)
+      (url.pathname === DETAIL_PATH ||
+        url.pathname === `/api/proxy${DETAIL_PATH}`)
     ) {
       if (options.detailStatus && options.detailStatus >= 400) {
-        await fulfillJson(route, { detail: "feature 없음" }, options.detailStatus);
+        await fulfillJson(
+          route,
+          { detail: "feature 없음" },
+          options.detailStatus,
+        );
         return;
       }
       await fulfillJson(route, makeDetailResponse(feature));
@@ -129,7 +137,10 @@ async function mockFeatureDetail(
       url.pathname === "/api/proxy/v1/features/nearby"
     ) {
       const body: FeaturesNearbyResponse = {
-        data: { items: nearby, origin: { lat: 37.5263, lon: 126.9239, radius_m: 3000 } },
+        data: {
+          items: nearby,
+          origin: { lat: 37.5263, lon: 126.9239, radius_m: 3000 },
+        },
         meta,
       };
       await fulfillJson(route, body);
@@ -162,7 +173,9 @@ test.describe("/features/[featureId]", () => {
       "Files",
       "Map",
     ]) {
-      await expect(detailView.getByText(section, { exact: true })).toBeVisible();
+      await expect(
+        detailView.getByText(section, { exact: true }),
+      ).toBeVisible();
     }
     // Raw <details> disclosure.
     await expect(page.getByText("raw_refs", { exact: true })).toBeVisible();
@@ -179,20 +192,19 @@ test.describe("/features/[featureId]", () => {
           lat: 37.527,
           lon: 126.924,
           name: "인근 카페",
-          status: "active",
         },
       ],
     });
     await page.goto(`/features/${FEATURE_ID}`);
 
     await expect(page.getByText("Nearby", { exact: true })).toBeVisible();
-    await expect(
-      page.getByRole("link", { name: /인근 카페/ }),
-    ).toBeVisible();
+    await expect(page.getByRole("link", { name: /인근 카페/ })).toBeVisible();
   });
 
   test("weather metric 없음 — empty state", async ({ page }) => {
-    await mockFeatureDetail(page, { feature: makeFeature({ kind: "weather" }) });
+    await mockFeatureDetail(page, {
+      feature: makeFeature({ kind: "weather" }),
+    });
     await page.goto(`/features/${FEATURE_ID}`);
 
     await expect(page.getByText("weather metric이 없습니다.")).toBeVisible();

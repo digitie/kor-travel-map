@@ -20,13 +20,20 @@ import { useCallback, useDeferredValue, useMemo, useState } from "react";
 
 import {
   FEATURE_KINDS,
+  FEATURE_LIFECYCLE_STATES,
+  FEATURE_PUBLICATION_STATES,
+  FEATURE_QUALITY_STATES,
+  fetchAdminFeatureCorrectionBasis,
   useAdminFeatures,
   useAdminFeatureDetail,
-  useDeactivateAdminFeatureMutation,
+  usePatchAdminFeatureStateMutation,
   type AdminFeatureDetailData,
   type AdminFeatureRecord,
   type AdminFeatureSort,
   type FeatureKind,
+  type FeatureLifecycleState,
+  type FeaturePublicationState,
+  type FeatureQualityState,
   type SortOrder,
 } from "@/api/features";
 import { AdminShell } from "@/components/admin-shell";
@@ -35,7 +42,7 @@ import { useConfirm } from "@/components/confirm-dialog";
 import { EntityLink } from "@/components/entity-link";
 import { FeatureAssociations } from "@/components/feature-associations";
 import { FeatureKindDetailPanel } from "@/components/feature-kind-detail-panel";
-import { StatusBadge } from "@/components/status-badge";
+import { FeatureStateBadges } from "@/components/feature-state-badges";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -49,27 +56,19 @@ import { VWorldMapView, VWorldMarker } from "@/components/vworld-map-view";
 import { formatCount, formatDateTime, shortId } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
-const FEATURE_STATUSES = [
-  "active",
-  "inactive",
-  "hidden",
-  "broken",
-  "deleted",
-] as const;
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 200, 500] as const;
 const SORT_OPTIONS: AdminFeatureSort[] = [
   "name",
   "updated_at",
   "created_at",
   "kind",
-  "status",
   "provider",
   "issue_count",
 ];
 const VWORLD_KEY = process.env.NEXT_PUBLIC_VWORLD_API_KEY;
 
-type FeatureStatusFilter = (typeof FEATURE_STATUSES)[number] | "all";
 type HasIssueFilter = "all" | "yes" | "no";
+type AxisFilter<T extends string> = T | "all";
 
 function parseProviderDatasetId(value: string | undefined): number | null {
   if (!value || !/^\d+$/.test(value)) return null;
@@ -167,13 +166,19 @@ function FeatureDetailInspector({ featureId }: { featureId: string | null }) {
                   {featureId}
                 </div>
                 <div className="mt-2 flex flex-wrap gap-2">
-                  <StatusBadge status={feature.status} />
+                  <FeatureStateBadges
+                    lifecycleState={feature.lifecycle_state}
+                    publicationState={feature.publication_state}
+                    qualityState={feature.quality_state}
+                  />
                   <Badge variant="outline">{feature.kind}</Badge>
                   <Badge variant="outline">{feature.category}</Badge>
                 </div>
               </div>
               <Link
-                className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
+                className={cn(
+                  buttonVariants({ variant: "outline", size: "sm" }),
+                )}
                 href={`/admin/features/change-requests?action=update&feature_id=${encodeURIComponent(featureId)}`}
               >
                 <PencilIcon data-icon="inline-start" />
@@ -184,7 +189,8 @@ function FeatureDetailInspector({ featureId }: { featureId: string | null }) {
             <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-sm">
               <dt className="text-muted-foreground">coord</dt>
               <dd className="font-mono">
-                {typeof feature.lon === "number" && typeof feature.lat === "number"
+                {typeof feature.lon === "number" &&
+                typeof feature.lat === "number"
                   ? `${feature.lon.toFixed(5)}, ${feature.lat.toFixed(5)}`
                   : "없음"}
               </dd>
@@ -192,11 +198,15 @@ function FeatureDetailInspector({ featureId }: { featureId: string | null }) {
               <dd>{feature.sigungu_code ?? "없음"}</dd>
             </dl>
             <details>
-              <summary className="cursor-pointer text-sm font-medium">address</summary>
+              <summary className="cursor-pointer text-sm font-medium">
+                address
+              </summary>
               <JsonBlock value={feature.address} />
             </details>
             <details>
-              <summary className="cursor-pointer text-sm font-medium">detail</summary>
+              <summary className="cursor-pointer text-sm font-medium">
+                detail
+              </summary>
               <JsonBlock value={feature.detail} />
             </details>
             <FeatureAssociations
@@ -207,11 +217,7 @@ function FeatureDetailInspector({ featureId }: { featureId: string | null }) {
           </div>
         ) : null}
       </div>
-      <FeatureKindDetailPanel
-        compact
-        feature={feature}
-        featureId={featureId}
-      />
+      <FeatureKindDetailPanel compact feature={feature} featureId={featureId} />
     </div>
   );
 }
@@ -219,13 +225,17 @@ function FeatureDetailInspector({ featureId }: { featureId: string | null }) {
 function useAdminFeaturesClientController({
   initialQ,
   initialKind,
-  initialStatus,
+  initialLifecycleState,
+  initialPublicationState,
+  initialQualityState,
   initialProviderDatasetId,
   initialHasIssue,
 }: {
   initialQ?: string;
   initialKind?: string;
-  initialStatus?: string;
+  initialLifecycleState?: string;
+  initialPublicationState?: string;
+  initialQualityState?: string;
   initialProviderDatasetId?: string;
   initialHasIssue?: string;
 } = {}) {
@@ -236,11 +246,35 @@ function useAdminFeaturesClientController({
       ? (initialKind as FeatureKind)
       : "all",
   );
-  const [status, setStatus] = useState<FeatureStatusFilter>(() =>
-    initialStatus &&
-    ([...FEATURE_STATUSES, "all"] as string[]).includes(initialStatus)
-      ? (initialStatus as FeatureStatusFilter)
-      : "active",
+  const [lifecycleState, setLifecycleState] = useState<
+    AxisFilter<FeatureLifecycleState>
+  >(() =>
+    initialLifecycleState &&
+    ([...FEATURE_LIFECYCLE_STATES, "all"] as string[]).includes(
+      initialLifecycleState,
+    )
+      ? (initialLifecycleState as AxisFilter<FeatureLifecycleState>)
+      : "all",
+  );
+  const [publicationState, setPublicationState] = useState<
+    AxisFilter<FeaturePublicationState>
+  >(() =>
+    initialPublicationState &&
+    ([...FEATURE_PUBLICATION_STATES, "all"] as string[]).includes(
+      initialPublicationState,
+    )
+      ? (initialPublicationState as AxisFilter<FeaturePublicationState>)
+      : "all",
+  );
+  const [qualityState, setQualityState] = useState<
+    AxisFilter<FeatureQualityState>
+  >(() =>
+    initialQualityState &&
+    ([...FEATURE_QUALITY_STATES, "all"] as string[]).includes(
+      initialQualityState,
+    )
+      ? (initialQualityState as AxisFilter<FeatureQualityState>)
+      : "all",
   );
   const [hasIssue, setHasIssue] = useState<HasIssueFilter>(() =>
     initialHasIssue === "yes" || initialHasIssue === "no"
@@ -252,19 +286,23 @@ function useAdminFeaturesClientController({
   );
   const [sort, setSort] = useState<AdminFeatureSort>("name");
   const [order, setOrder] = useState<SortOrder>("asc");
-  const [pageSize, setPageSize] = useState<(typeof PAGE_SIZE_OPTIONS)[number]>(50);
+  const [pageSize, setPageSize] =
+    useState<(typeof PAGE_SIZE_OPTIONS)[number]>(50);
   const [cursor, setCursor] = useState<string | null>(null);
   const [pageIndex, setPageIndex] = useState(1);
-  const [selectedFeatureId, setSelectedFeatureId] = useState<string | null>(null);
+  const [selectedFeatureId, setSelectedFeatureId] = useState<string | null>(
+    null,
+  );
 
   const params = useMemo(
     () => ({
       q: deferredQ.length > 0 ? deferredQ : undefined,
       kind: kind === "all" ? undefined : [kind],
-      status:
-        status === "all" ? Array.from(FEATURE_STATUSES) : [status],
-      has_issue:
-        hasIssue === "all" ? undefined : hasIssue === "yes",
+      lifecycle_state: lifecycleState === "all" ? undefined : [lifecycleState],
+      publication_state:
+        publicationState === "all" ? undefined : [publicationState],
+      quality_state: qualityState === "all" ? undefined : [qualityState],
+      has_issue: hasIssue === "all" ? undefined : hasIssue === "yes",
       provider_dataset_id: providerDatasetId ?? undefined,
       page_size: pageSize,
       cursor: cursor ?? undefined,
@@ -280,11 +318,13 @@ function useAdminFeaturesClientController({
       pageSize,
       providerDatasetId,
       sort,
-      status,
+      lifecycleState,
+      publicationState,
+      qualityState,
     ],
   );
   const features = useAdminFeatures(params);
-  const deactivate = useDeactivateAdminFeatureMutation();
+  const stateMutation = usePatchAdminFeatureStateMutation();
   const confirm = useConfirm();
   const items = features.data?.data.items ?? [];
   const nextCursor = features.data?.meta.page?.next_cursor ?? null;
@@ -307,25 +347,24 @@ function useAdminFeaturesClientController({
     void features.refetch();
   };
 
-  const deactivateFeature = useCallback(
+  const retireFeature = useCallback(
     async (feature: AdminFeatureRecord) => {
-      if (feature.status === "deleted") return;
+      if (feature.lifecycle_state === "retired") return;
       const ok = await confirm({
-        title: `${feature.name} feature를 비활성화할까요?`,
+        title: `${feature.name} feature를 종료할까요?`,
         description: "provider 재적재로 다시 활성화되지 않도록 잠급니다.",
-        confirmLabel: "비활성화",
+        confirmLabel: "종료",
         destructive: true,
       });
       if (!ok) return;
-      deactivate.mutate({
-        featureId: feature.feature_id,
-        body: {
-          prevent_provider_reactivation: true,
-          reason: "admin-ui deactivate",
-        },
+      const basis = await fetchAdminFeatureCorrectionBasis(feature.feature_id);
+      stateMutation.mutate({
+        featureId: basis.featureId,
+        entityTag: basis.entityTag,
+        body: { action: "retire", reason_code: "admin_ui_retire" },
       });
     },
-    [confirm, deactivate],
+    [confirm, stateMutation],
   );
 
   // 서버 정렬(keyset cursor)이므로 sort/order state를 react-table SortingState로
@@ -361,8 +400,8 @@ function useAdminFeaturesClientController({
         },
       },
       {
-        id: "kind_status",
-        header: "종류/상태",
+        id: "kind_state",
+        header: "종류/상태 축",
         enableSorting: false,
         cell: ({ row }) => {
           const feature = row.original;
@@ -370,7 +409,11 @@ function useAdminFeaturesClientController({
             <>
               <div className="flex flex-wrap gap-1">
                 <Badge variant="outline">{feature.kind}</Badge>
-                <StatusBadge status={feature.status} />
+                <FeatureStateBadges
+                  lifecycleState={feature.lifecycle_state}
+                  publicationState={feature.publication_state}
+                  qualityState={feature.quality_state}
+                />
               </div>
               <div className="mt-1 font-mono text-xs text-muted-foreground">
                 {feature.category}
@@ -458,7 +501,9 @@ function useAdminFeaturesClientController({
           return (
             <div className="flex flex-wrap gap-1">
               <Link
-                className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
+                className={cn(
+                  buttonVariants({ variant: "outline", size: "sm" }),
+                )}
                 href={featureDetailHref(feature.feature_id)}
                 onClick={(event) => {
                   event.stopPropagation();
@@ -481,33 +526,32 @@ function useAdminFeaturesClientController({
               </Button>
               <Button
                 disabled={
-                  deactivate.isPending ||
-                  feature.status === "inactive" ||
-                  feature.status === "deleted"
+                  stateMutation.isPending ||
+                  feature.lifecycle_state === "retired"
                 }
                 size="sm"
                 type="button"
                 variant="ghost"
                 onClick={(event) => {
                   event.stopPropagation();
-                  void deactivateFeature(feature);
+                  void retireFeature(feature);
                 }}
               >
                 <XCircleIcon data-icon="inline-start" />
-                deactivate
+                retire
               </Button>
             </div>
           );
         },
       },
     ],
-    [deactivate.isPending, deactivateFeature],
+    [retireFeature, stateMutation.isPending],
   );
 
   return {
     columns,
     cursor,
-    deactivate,
+    stateMutation,
     durationMs,
     features,
     goFirstPage,
@@ -533,17 +577,21 @@ function useAdminFeaturesClientController({
     setQ,
     setSelectedFeatureId,
     setSort,
-    setStatus,
+    setLifecycleState,
+    setPublicationState,
+    setQualityState,
     sort,
     sorting,
-    status,
+    lifecycleState,
+    publicationState,
+    qualityState,
   };
 }
 
 function AdminFeaturesClientView({
   columns,
   cursor,
-  deactivate,
+  stateMutation,
   durationMs,
   features,
   goFirstPage,
@@ -569,10 +617,14 @@ function AdminFeaturesClientView({
   setQ,
   setSelectedFeatureId,
   setSort,
-  setStatus,
+  setLifecycleState,
+  setPublicationState,
+  setQualityState,
   sort,
   sorting,
-  status,
+  lifecycleState,
+  publicationState,
+  qualityState,
 }: ReturnType<typeof useAdminFeaturesClientController>) {
   return (
     <AdminShell
@@ -582,8 +634,7 @@ function AdminFeaturesClientView({
             className={cn(buttonVariants({ variant: "outline" }))}
             href="/admin/features/new"
           >
-            <PlusIcon data-icon="inline-start" />
-            새 작성
+            <PlusIcon data-icon="inline-start" />새 작성
           </Link>
           <Button
             disabled={features.isFetching}
@@ -599,12 +650,12 @@ function AdminFeaturesClientView({
       title="Feature 목록"
     >
       <div className="flex flex-col gap-4">
-        {(features.isError || deactivate.isError) && (
+        {(features.isError || stateMutation.isError) && (
           <Alert variant="destructive">
             <AlertTriangleIcon data-icon="inline-start" />
             <AlertTitle>admin feature 처리 실패</AlertTitle>
             <AlertDescription>
-              {features.error?.message ?? deactivate.error?.message}
+              {features.error?.message ?? stateMutation.error?.message}
             </AlertDescription>
           </Alert>
         )}
@@ -641,16 +692,54 @@ function AdminFeaturesClientView({
               ))}
             </NativeSelect>
             <NativeSelect
-              aria-label="feature status"
+              aria-label="feature lifecycle state"
               className="w-36 shrink-0"
-              value={status}
+              value={lifecycleState}
               onChange={(event) => {
-                setStatus(event.target.value as FeatureStatusFilter);
+                setLifecycleState(
+                  event.target.value as AxisFilter<FeatureLifecycleState>,
+                );
                 resetCursor();
               }}
             >
-              <NativeSelectOption value="all">all status</NativeSelectOption>
-              {FEATURE_STATUSES.map((item) => (
+              <NativeSelectOption value="all">모든 수명</NativeSelectOption>
+              {FEATURE_LIFECYCLE_STATES.map((item) => (
+                <NativeSelectOption key={item} value={item}>
+                  {item}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+            <NativeSelect
+              aria-label="feature publication state"
+              className="w-36 shrink-0"
+              value={publicationState}
+              onChange={(event) => {
+                setPublicationState(
+                  event.target.value as AxisFilter<FeaturePublicationState>,
+                );
+                resetCursor();
+              }}
+            >
+              <NativeSelectOption value="all">모든 공개</NativeSelectOption>
+              {FEATURE_PUBLICATION_STATES.map((item) => (
+                <NativeSelectOption key={item} value={item}>
+                  {item}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+            <NativeSelect
+              aria-label="feature quality state"
+              className="w-36 shrink-0"
+              value={qualityState}
+              onChange={(event) => {
+                setQualityState(
+                  event.target.value as AxisFilter<FeatureQualityState>,
+                );
+                resetCursor();
+              }}
+            >
+              <NativeSelectOption value="all">모든 품질</NativeSelectOption>
+              {FEATURE_QUALITY_STATES.map((item) => (
                 <NativeSelectOption key={item} value={item}>
                   {item}
                 </NativeSelectOption>
@@ -678,7 +767,9 @@ function AdminFeaturesClientView({
               type="number"
               value={providerDatasetId ?? ""}
               onChange={(event) => {
-                setProviderDatasetId(parseProviderDatasetId(event.target.value));
+                setProviderDatasetId(
+                  parseProviderDatasetId(event.target.value),
+                );
                 resetCursor();
               }}
             />
@@ -754,9 +845,13 @@ function AdminFeaturesClientView({
             <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
               <div className="flex min-w-0 flex-wrap items-center gap-2">
                 <div className="font-medium">Feature 목록</div>
-                <Badge variant="outline">{formatCount(items.length)} rows</Badge>
+                <Badge variant="outline">
+                  {formatCount(items.length)} rows
+                </Badge>
                 <Badge variant="outline">page {formatCount(pageIndex)}</Badge>
-                <Badge variant="outline">page size {formatCount(pageSize)}</Badge>
+                <Badge variant="outline">
+                  page size {formatCount(pageSize)}
+                </Badge>
                 <Badge variant="outline">{durationMs}ms</Badge>
               </div>
               <CursorPager
@@ -795,20 +890,26 @@ function AdminFeaturesClientView({
 export function AdminFeaturesClient({
   initialQ,
   initialKind,
-  initialStatus,
+  initialLifecycleState,
+  initialPublicationState,
+  initialQualityState,
   initialProviderDatasetId,
   initialHasIssue,
 }: {
   initialQ?: string;
   initialKind?: string;
-  initialStatus?: string;
+  initialLifecycleState?: string;
+  initialPublicationState?: string;
+  initialQualityState?: string;
   initialProviderDatasetId?: string;
   initialHasIssue?: string;
 } = {}) {
   const controller = useAdminFeaturesClientController({
     initialQ,
     initialKind,
-    initialStatus,
+    initialLifecycleState,
+    initialPublicationState,
+    initialQualityState,
     initialProviderDatasetId,
     initialHasIssue,
   });

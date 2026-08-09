@@ -61,7 +61,9 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function params(overrides: Partial<AdminFeaturesInBoundsParams> = {}): AdminFeaturesInBoundsParams {
+function params(
+  overrides: Partial<AdminFeaturesInBoundsParams> = {},
+): AdminFeaturesInBoundsParams {
   return {
     min_lon: 126.97,
     min_lat: 37.55,
@@ -73,20 +75,23 @@ function params(overrides: Partial<AdminFeaturesInBoundsParams> = {}): AdminFeat
 }
 
 describe("feature map tile selection", () => {
-  it("admin viewport는 status 반복 필터와 admin 경로를 사용한다", () => {
+  it("admin viewport는 세 상태 축 반복 필터와 admin 경로를 사용한다", () => {
     const path = adminFeaturesInBoundsPath(
       {
         ...params(),
         zoom: 14,
-        statuses: ["inactive", "hidden"],
+        lifecycleStates: ["retired"],
+        publicationStates: ["suppressed"],
+        qualityStates: ["quarantined"],
         includeGeometry: true,
       },
       { clustered: false },
     );
 
     expect(path).toContain("/v1/admin/features/in-bounds?");
-    expect(path).toContain("status=inactive");
-    expect(path).toContain("status=hidden");
+    expect(path).toContain("lifecycle_state=retired");
+    expect(path).toContain("publication_state=suppressed");
+    expect(path).toContain("quality_state=quarantined");
     expect(path).toContain("include_geometry=true");
     // items 모드에서도 zoom을 항상 전송한다(서버는 zoom>=14를 items로 해석 —
     // _resolve_admin_cluster_unit). 소비자가 요청의 zoom 문맥을 관측 가능해야 한다.
@@ -144,17 +149,19 @@ describe("feature map tile selection", () => {
 
   it("admin cluster viewport는 zoom을 보내고 geometry payload는 요청하지 않는다", () => {
     const path = adminFeaturesInBoundsPath(
-      { ...params({ zoom: 7 }), zoom: 7, statuses: ["draft"] },
+      {
+        ...params({ zoom: 7 }),
+        zoom: 7,
+        publicationStates: ["draft"],
+      },
       { clustered: true },
     );
 
-    expect(path).toContain("status=draft");
+    expect(path).toContain("publication_state=draft");
     expect(path).toContain("zoom=7");
     expect(path).not.toContain("include_geometry");
   });
-
 });
-
 
 describe("admin feature correction basis", () => {
   it("revision과 detail이 같은 시점일 때 raw ETag를 그대로 고정한다", async () => {
@@ -235,9 +242,9 @@ describe("admin feature correction basis", () => {
       .mockResolvedValueOnce(detailResponse(4));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(
-      fetchAdminFeatureCorrectionBasis("feature-1"),
-    ).rejects.toThrow("3회 연속 일치하지 않았습니다");
+    await expect(fetchAdminFeatureCorrectionBasis("feature-1")).rejects.toThrow(
+      "3회 연속 일치하지 않았습니다",
+    );
     expect(fetchMock).toHaveBeenCalledTimes(6);
   });
 
@@ -245,7 +252,10 @@ describe("admin feature correction basis", () => {
     const fetchMock = vi
       .fn<typeof fetch>()
       .mockImplementation(async () =>
-        jsonResponse({ data: { request: { feature_id: "feature-1" } }, meta: {} }),
+        jsonResponse({
+          data: { request: { feature_id: "feature-1" } },
+          meta: {},
+        }),
       );
     vi.stubGlobal("fetch", fetchMock);
 
@@ -272,14 +282,15 @@ describe("admin feature correction basis", () => {
   });
 
   it("불명확한 PATCH 뒤 body가 바뀐 재시도는 새 side effect를 보내지 않는다", async () => {
-    const randomUUID = stubRandomUUID([
-      "89898989-8989-4989-8989-898989898989",
-    ]);
+    const randomUUID = stubRandomUUID(["89898989-8989-4989-8989-898989898989"]);
     const fetchMock = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(new Response("{}", { status: 503 }))
       .mockImplementation(async () =>
-        jsonResponse({ data: { request: { feature_id: "feature-1" } }, meta: {} }),
+        jsonResponse({
+          data: { request: { feature_id: "feature-1" } },
+          meta: {},
+        }),
       );
     vi.stubGlobal("fetch", fetchMock);
 

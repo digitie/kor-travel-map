@@ -33,8 +33,6 @@ type AdminFeaturesInBoundsResponse =
 
 export const FEATURE_CLUSTER_MAX_ZOOM = 13;
 
-
-
 // ── 저zoom region 클러스터 (`GET /v1/features/in-bounds`, zoom 유도) ─────────────
 //
 // zoom ≤13에선 개별 feature를 tile로 대량 조회(4코어 박스 포화)하지 않고, 서버가
@@ -51,17 +49,40 @@ export interface FeatureClustersParams {
   zoom: number;
 }
 
-export const ADMIN_FEATURE_STATUSES = [
-  "draft",
+export const FEATURE_LIFECYCLE_STATES = [
   "active",
-  "inactive",
-  "hidden",
-  "broken",
-] as const satisfies readonly AdminFeatureMapItem["status"][];
-export type AdminFeatureStatus = AdminFeatureMapItem["status"];
+  "retired",
+] as const satisfies readonly AdminFeatureMapItem["lifecycle_state"][];
+export const FEATURE_PUBLICATION_STATES = [
+  "draft",
+  "published",
+  "suppressed",
+] as const satisfies readonly AdminFeatureMapItem["publication_state"][];
+export const FEATURE_QUALITY_STATES = [
+  "valid",
+  "quarantined",
+] as const satisfies readonly AdminFeatureMapItem["quality_state"][];
+
+export type FeatureLifecycleState = AdminFeatureMapItem["lifecycle_state"];
+export type FeaturePublicationState = AdminFeatureMapItem["publication_state"];
+export type FeatureQualityState = AdminFeatureMapItem["quality_state"];
+
+export function featureStateLabel(
+  axis: "lifecycle" | "publication" | "quality",
+  value: FeatureLifecycleState | FeaturePublicationState | FeatureQualityState,
+): string {
+  const labels = {
+    lifecycle: { active: "운영", retired: "종료" },
+    publication: { draft: "초안", published: "공개", suppressed: "비공개" },
+    quality: { valid: "유효", quarantined: "격리" },
+  } as const;
+  return (labels[axis] as Record<string, string>)[value] ?? value;
+}
 
 export interface AdminFeaturesInBoundsParams extends FeatureClustersParams {
-  statuses?: AdminFeatureStatus[];
+  lifecycleStates?: FeatureLifecycleState[];
+  publicationStates?: FeaturePublicationState[];
+  qualityStates?: FeatureQualityState[];
   includeGeometry?: boolean;
 }
 
@@ -84,7 +105,9 @@ export function adminFeaturesInBoundsPath(
     max_lat: params.max_lat,
     kind: params.kinds,
     provider: params.provider,
-    status: params.statuses,
+    lifecycle_state: params.lifecycleStates,
+    publication_state: params.publicationStates,
+    quality_state: params.qualityStates,
     // zoom은 cluster/items 모드 공통으로 항상 전송한다(계약 대칭 + 서버 관측).
     // items 모드에서 zoom을 생략하면 소비자(예: live acceptance의 in-bounds
     // predicate)가 요청의 zoom 문맥을 알 수 없다 — cluster 모드에서만 보내던
@@ -120,7 +143,9 @@ export function adminFeaturesInBboxQueryKey(
     adminFeatureRequestZoom(params.zoom),
     params.kinds ?? [],
     params.provider ?? [],
-    params.statuses ?? [],
+    params.lifecycleStates ?? [],
+    params.publicationStates ?? [],
+    params.qualityStates ?? [],
     options.clustered ? false : (params.includeGeometry ?? false),
   ] as const;
 }
@@ -155,7 +180,6 @@ export function useAdminFeatureClustersInBbox(
   });
 }
 
-
 // ── feature 단건 상세 (`GET /v1/features/{feature_id}`) ────────────────────────
 
 export type FeatureDetail = FeatureSchemas["FeatureDetailResponse"];
@@ -176,14 +200,12 @@ type FeaturesNearbyQuery = NonNullable<
 export type FeaturesNearbySort = NonNullable<FeaturesNearbyQuery["sort"]>;
 export type FeaturesNearbyParams = Omit<
   FeaturesNearbyQuery,
-  "category" | "kind" | "provider" | "status"
+  "category" | "kind" | "provider"
 > & {
   category?: string[];
   kind?: string[];
   provider?: string[];
-  status?: string[];
 };
-
 
 async function fetchAdminFeatureWeather(
   featureId: string,
@@ -195,9 +217,7 @@ async function fetchAdminFeatureWeather(
   );
 }
 
-export function useAdminFeatureWeather(
-  featureId: string | null,
-) {
+export function useAdminFeatureWeather(featureId: string | null) {
   return useQuery<FeatureWeatherResponse, Error>({
     queryKey: ["admin-feature-card", featureId, "weather"] as const,
     queryFn: ({ signal }) =>
@@ -271,9 +291,7 @@ export function useAreaContainedFeatures(
     queryFn: ({ signal }) =>
       fetchAreaContainedFeatures(featureId as string, params, signal),
     enabled:
-      (options?.enabled ?? true) &&
-      featureId !== null &&
-      featureId.length > 0,
+      (options?.enabled ?? true) && featureId !== null && featureId.length > 0,
     staleTime: 60_000,
   });
 }
@@ -289,7 +307,6 @@ async function fetchNearbyFeatures(
       radius_m: params.radius_m,
       kind: params.kind,
       category: params.category,
-      status: params.status,
       provider: params.provider,
       page_size: params.page_size,
       cursor: params.cursor,
@@ -361,11 +378,17 @@ export type AdminFeaturesListParams = Omit<
   updated_from?: string | Date;
   updated_to?: string | Date;
 };
-export type AdminFeatureDeactivateRequest =
-  FeatureSchemas["AdminFeatureDeactivateRequest"];
-export type AdminFeatureOverride = FeatureSchemas["AdminFeatureOverrideRecord"];
-export type AdminFeatureDeactivateResponse =
-  FeatureSchemas["AdminFeatureDeactivateResponse"];
+export type AdminFeatureStatePatchRequest =
+  | FeatureSchemas["AdminFeatureStatePatchRequest"]
+  | FeatureSchemas["AdminFeatureStateRetireRequest"];
+export type AdminFeatureReactivateRequest =
+  FeatureSchemas["AdminFeatureReactivateRequest"];
+export type AdminFeatureStateResponse =
+  FeatureSchemas["AdminFeatureStateResponse"];
+export type AdminFeatureStateTransitionAuditRecord =
+  FeatureSchemas["AdminFeatureStateTransitionAuditRecord"];
+export type AdminFeatureStateTransitionsResponse =
+  FeatureSchemas["AdminFeatureStateTransitionsResponse"];
 
 type AdminFeatureChangeListQuery = NonNullable<
   paths["/v1/admin/features/change-requests"]["get"]["parameters"]["query"]
@@ -418,9 +441,12 @@ export async function fetchAdminFeatureCorrectionBasis(
   featureId: string,
   signal?: AbortSignal,
 ): Promise<CorrectionBasis> {
-  const revisionPath =
-    `/v1/admin/features/${encodeURIComponent(featureId)}/revision`;
-  for (let attempt = 0; attempt < CORRECTION_BASIS_FETCH_ATTEMPTS; attempt += 1) {
+  const revisionPath = `/v1/admin/features/${encodeURIComponent(featureId)}/revision`;
+  for (
+    let attempt = 0;
+    attempt < CORRECTION_BASIS_FETCH_ATTEMPTS;
+    attempt += 1
+  ) {
     const { body: revision, response } = await getJsonWithResponse<
       FeatureSchemas["AdminFeatureRevisionResponse"]
     >(revisionPath, { signal });
@@ -486,7 +512,9 @@ function fetchAdminFeatures(
       q: params.q,
       kind: params.kind,
       category: params.category,
-      status: params.status,
+      lifecycle_state: params.lifecycle_state,
+      publication_state: params.publication_state,
+      quality_state: params.quality_state,
       provider_dataset_id: params.provider_dataset_id,
       has_coord: params.has_coord,
       has_issue: params.has_issue,
@@ -502,21 +530,62 @@ function fetchAdminFeatures(
   );
 }
 
-function deactivateAdminFeature(
+export function patchAdminFeatureState(
   featureId: string,
-  body: AdminFeatureDeactivateRequest,
-): Promise<AdminFeatureDeactivateResponse> {
+  entityTag: string,
+  body: AdminFeatureStatePatchRequest,
+): Promise<AdminFeatureStateResponse> {
   return withDomainIdempotencySubmission(
-    domainCommandSlot("admin.feature.deactivate", featureId),
-    { featureId, body },
+    domainCommandSlot("admin.feature.state", featureId),
+    { featureId, entityTag, body },
     (submission, idempotencyKey) =>
-      postJson<AdminFeatureDeactivateResponse>(
+      patchJson<AdminFeatureStateResponse>(
+        `/v1/admin/features/${encodeURIComponent(submission.featureId)}/state`,
+        submission.body,
+        {
+          headers: {
+            "Idempotency-Key": idempotencyKey,
+            "If-Match": submission.entityTag,
+          },
+        },
+      ),
+  );
+}
+
+export function reactivateAdminFeatureState(
+  featureId: string,
+  entityTag: string,
+  body: AdminFeatureReactivateRequest,
+): Promise<AdminFeatureStateResponse> {
+  return withDomainIdempotencySubmission(
+    domainCommandSlot("admin.feature.reactivate", featureId),
+    { featureId, entityTag, body },
+    (submission, idempotencyKey) =>
+      postJson<AdminFeatureStateResponse>(
         `/v1/admin/features/${encodeURIComponent(
           submission.featureId,
-        )}/deactivate`,
+        )}/state/reactivate`,
         submission.body,
-        { headers: { "Idempotency-Key": idempotencyKey } },
+        {
+          headers: {
+            "Idempotency-Key": idempotencyKey,
+            "If-Match": submission.entityTag,
+          },
+        },
       ),
+  );
+}
+
+function fetchAdminFeatureStateTransitions(
+  featureId: string,
+  signal?: AbortSignal,
+): Promise<AdminFeatureStateTransitionsResponse> {
+  return getJson<AdminFeatureStateTransitionsResponse>(
+    pathWithQuery(
+      `/v1/admin/features/${encodeURIComponent(featureId)}/state/transitions`,
+      { page_size: 50 },
+    ),
+    { signal },
   );
 }
 
@@ -638,24 +707,66 @@ export function useAdminFeatures(params: AdminFeaturesListParams = {}) {
   });
 }
 
-export function useDeactivateAdminFeatureMutation() {
+function invalidateFeatureStateQueries(
+  queryClient: ReturnType<typeof useQueryClient>,
+  featureId: string,
+) {
+  void queryClient.invalidateQueries({ queryKey: ["admin-features"] });
+  void queryClient.invalidateQueries({ queryKey: ["features"] });
+  void queryClient.invalidateQueries({ queryKey: ["feature", featureId] });
+  void queryClient.invalidateQueries({
+    queryKey: ["admin-feature-detail", featureId],
+  });
+  void queryClient.invalidateQueries({
+    queryKey: ["admin-feature-state-transitions", featureId],
+  });
+}
+
+export function usePatchAdminFeatureStateMutation() {
   const queryClient = useQueryClient();
   return useMutation<
-    AdminFeatureDeactivateResponse,
+    AdminFeatureStateResponse,
     Error,
-    { featureId: string; body: AdminFeatureDeactivateRequest }
+    {
+      featureId: string;
+      entityTag: string;
+      body: AdminFeatureStatePatchRequest;
+    }
   >({
-    mutationFn: ({ featureId, body }) => deactivateAdminFeature(featureId, body),
+    mutationFn: ({ featureId, entityTag, body }) =>
+      patchAdminFeatureState(featureId, entityTag, body),
     onSuccess: (_data, variables) => {
-      void queryClient.invalidateQueries({ queryKey: ["admin-features"] });
-      void queryClient.invalidateQueries({ queryKey: ["features"] });
-      void queryClient.invalidateQueries({
-        queryKey: ["feature", variables.featureId],
-      });
-      void queryClient.invalidateQueries({
-        queryKey: ["admin-feature-detail", variables.featureId],
-      });
+      invalidateFeatureStateQueries(queryClient, variables.featureId);
     },
+  });
+}
+
+export function useReactivateAdminFeatureStateMutation() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    AdminFeatureStateResponse,
+    Error,
+    {
+      featureId: string;
+      entityTag: string;
+      body: AdminFeatureReactivateRequest;
+    }
+  >({
+    mutationFn: ({ featureId, entityTag, body }) =>
+      reactivateAdminFeatureState(featureId, entityTag, body),
+    onSuccess: (_data, variables) => {
+      invalidateFeatureStateQueries(queryClient, variables.featureId);
+    },
+  });
+}
+
+export function useAdminFeatureStateTransitions(featureId: string | null) {
+  return useQuery<AdminFeatureStateTransitionsResponse, Error>({
+    queryKey: ["admin-feature-state-transitions", featureId] as const,
+    queryFn: ({ signal }) =>
+      fetchAdminFeatureStateTransitions(featureId as string, signal),
+    enabled: featureId !== null && featureId.length > 0,
+    staleTime: 30_000,
   });
 }
 
@@ -686,13 +797,14 @@ function invalidateFeatureChangeQueries(
 
 export function useCreateAdminFeatureMutation() {
   const queryClient = useQueryClient();
-  return useMutation<AdminFeatureChangeResponse, Error, AdminFeatureCreateRequest>({
+  return useMutation<
+    AdminFeatureChangeResponse,
+    Error,
+    AdminFeatureCreateRequest
+  >({
     mutationFn: createAdminFeature,
     onSuccess: (data) =>
-      invalidateFeatureChangeQueries(
-        queryClient,
-        data.data.request.feature_id,
-      ),
+      invalidateFeatureChangeQueries(queryClient, data.data.request.feature_id),
   });
 }
 
@@ -748,10 +860,7 @@ export function useApproveAdminFeatureChangeMutation() {
     mutationFn: ({ requestId, body }) =>
       approveAdminFeatureChangeRequest(requestId, body),
     onSuccess: (data) =>
-      invalidateFeatureChangeQueries(
-        queryClient,
-        data.data.request.feature_id,
-      ),
+      invalidateFeatureChangeQueries(queryClient, data.data.request.feature_id),
   });
 }
 
@@ -765,9 +874,6 @@ export function useRejectAdminFeatureChangeMutation() {
     mutationFn: ({ requestId, body }) =>
       rejectAdminFeatureChangeRequest(requestId, body),
     onSuccess: (data) =>
-      invalidateFeatureChangeQueries(
-        queryClient,
-        data.data.request.feature_id,
-      ),
+      invalidateFeatureChangeQueries(queryClient, data.data.request.feature_id),
   });
 }

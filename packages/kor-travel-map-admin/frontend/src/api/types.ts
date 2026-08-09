@@ -791,23 +791,6 @@ export interface paths {
         patch: operations["patch_feature_route_v1_admin_features__feature_id__patch"];
         trace?: never;
     };
-    "/v1/admin/features/{feature_id}/deactivate": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Deactivate Feature Route */
-        post: operations["deactivate_feature_route_v1_admin_features__feature_id__deactivate_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/admin/features/{feature_id}/price": {
         parameters: {
             query?: never;
@@ -834,6 +817,66 @@ export interface paths {
         };
         /** Get Feature Revision Route */
         get: operations["get_feature_revision_route_v1_admin_features__feature_id__revision_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/features/{feature_id}/state": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Patch Feature State Route
+         * @description retire 또는 publication/quality patch를 한 axis transition으로 commit한다.
+         */
+        patch: operations["patch_feature_state_route_v1_admin_features__feature_id__state_patch"];
+        trace?: never;
+    };
+    "/v1/admin/features/{feature_id}/state/reactivate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reactivate Feature State Route
+         * @description 검증된 current provider observation으로만 lifecycle retire를 해제한다.
+         */
+        post: operations["reactivate_feature_state_route_v1_admin_features__feature_id__state_reactivate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/features/{feature_id}/state/transitions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Admin feature state audit timeline
+         * @description append-only state transition을 newest-first identity keyset으로 읽는다.
+         */
+        get: operations["list_feature_state_transitions_route_v1_admin_features__feature_id__state_transitions_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3431,6 +3474,12 @@ export interface components {
             kind: "place" | "event";
             /** Legal Dong Code */
             legal_dong_code?: string | null;
+            /**
+             * Lifecycle State
+             * @default active
+             * @enum {string}
+             */
+            lifecycle_state: "active" | "retired";
             /** Marker Color */
             marker_color: string;
             /** Marker Icon */
@@ -3445,6 +3494,18 @@ export interface components {
             operator?: string | null;
             /** Parent Feature Id */
             parent_feature_id?: string | null;
+            /**
+             * Publication State
+             * @default published
+             * @enum {string}
+             */
+            publication_state: "draft" | "published" | "suppressed";
+            /**
+             * Quality State
+             * @default valid
+             * @enum {string}
+             */
+            quality_state: "valid" | "quarantined";
             /** Reason */
             reason: string;
             /** Road Address Management No */
@@ -3457,58 +3518,10 @@ export interface components {
             sido_code?: string | null;
             /** Sigungu Code */
             sigungu_code?: string | null;
-            /**
-             * Status
-             * @default active
-             * @enum {string}
-             */
-            status: "draft" | "active" | "inactive" | "hidden";
             /** Urls */
             urls?: {
                 [key: string]: unknown;
             } | null;
-        };
-        /**
-         * AdminFeatureDeactivateData
-         * @description Feature deactivate 결과 data.
-         */
-        AdminFeatureDeactivateData: {
-            /** Feature Id */
-            feature_id: string;
-            override?: components["schemas"]["AdminFeatureOverrideRecord"] | null;
-            /** Override Created */
-            override_created: boolean;
-            /** Previous Status */
-            previous_status: string;
-            /** Status */
-            status: string;
-        };
-        /**
-         * AdminFeatureDeactivateRequest
-         * @description ``POST /admin/features/{feature_id}/deactivate`` body.
-         */
-        AdminFeatureDeactivateRequest: {
-            /**
-             * Operator
-             * @deprecated
-             * @description [deprecated·ignored] 감사 actor는 인증 principal에서만 파생한다 (ADR-066 D-2, T-VN-20). PinVi 호환을 위해 수용하되 값은 무시하며, PinVi는 전송 중단 예정 (docs/integration-map.md).
-             */
-            operator?: string | null;
-            /**
-             * Prevent Provider Reactivation
-             * @default true
-             */
-            prevent_provider_reactivation: boolean;
-            /** Reason */
-            reason: string;
-        };
-        /**
-         * AdminFeatureDeactivateResponse
-         * @description ``POST /admin/features/{feature_id}/deactivate`` 응답.
-         */
-        AdminFeatureDeactivateResponse: {
-            data: components["schemas"]["AdminFeatureDeactivateData"];
-            meta: components["schemas"]["Meta"];
         };
         /**
          * AdminFeatureDeleteRequest
@@ -3542,6 +3555,8 @@ export interface components {
             overrides: components["schemas"]["AdminFeatureDetailOverrideRecord"][];
             /** Sources */
             sources: components["schemas"]["AdminFeatureDetailSourceRecord"][];
+            /** State Transitions */
+            state_transitions: components["schemas"]["AdminFeatureStateTransitionAuditRecord"][];
             /** Versions */
             versions: components["schemas"]["AdminFeatureDetailVersionRecord"][];
         };
@@ -3571,8 +3586,6 @@ export interface components {
             data_origin: string;
             /** Data Version */
             data_version: number;
-            /** Deleted At */
-            deleted_at?: string | null;
             /** Detail */
             detail: {
                 [key: string]: unknown;
@@ -3593,6 +3606,11 @@ export interface components {
             lat?: number | null;
             /** Legal Dong Code */
             legal_dong_code?: string | null;
+            /**
+             * Lifecycle State
+             * @enum {string}
+             */
+            lifecycle_state: "active" | "retired";
             /** Lon */
             lon?: number | null;
             /** Marker Color */
@@ -3603,6 +3621,16 @@ export interface components {
             name: string;
             /** Parent Feature Id */
             parent_feature_id?: string | null;
+            /**
+             * Publication State
+             * @enum {string}
+             */
+            publication_state: "draft" | "published" | "suppressed";
+            /**
+             * Quality State
+             * @enum {string}
+             */
+            quality_state: "valid" | "quarantined";
             /** Raw Refs */
             raw_refs: {
                 [key: string]: unknown;
@@ -3622,8 +3650,6 @@ export interface components {
             sido_code?: string | null;
             /** Sigungu Code */
             sigungu_code?: string | null;
-            /** Status */
-            status: string;
             /**
              * Updated At
              * Format: date-time
@@ -3633,18 +3659,6 @@ export interface components {
             urls: {
                 [key: string]: unknown;
             };
-            /** User Change Kind */
-            user_change_kind?: string | null;
-            /** User Change Reason */
-            user_change_reason?: string | null;
-            /** User Change Request Id */
-            user_change_request_id?: string | null;
-            /** User Change Status */
-            user_change_status?: string | null;
-            /** User Deleted At */
-            user_deleted_at?: string | null;
-            /** User Deleted By */
-            user_deleted_by?: string | null;
         };
         /**
          * AdminFeatureDetailFileRecord
@@ -3886,6 +3900,11 @@ export interface components {
             kind: string;
             /** Lat */
             lat: number | null;
+            /**
+             * Lifecycle State
+             * @enum {string}
+             */
+            lifecycle_state: "active" | "retired";
             /** Lon */
             lon: number | null;
             /** Marker Color */
@@ -3897,36 +3916,16 @@ export interface components {
             /** Price Summary */
             price_summary?: components["schemas"]["PricePointOut"][] | null;
             /**
-             * Status
+             * Publication State
              * @enum {string}
              */
-            status: "draft" | "active" | "inactive" | "hidden" | "broken";
-            weather_summary?: components["schemas"]["WeatherSummaryOut"] | null;
-        };
-        /**
-         * AdminFeatureOverrideRecord
-         * @description 생성/갱신된 feature override.
-         */
-        AdminFeatureOverrideRecord: {
+            publication_state: "draft" | "published" | "suppressed";
             /**
-             * Created At
-             * Format: date-time
+             * Quality State
+             * @enum {string}
              */
-            created_at: string;
-            /** Created By */
-            created_by?: string | null;
-            /** Feature Id */
-            feature_id: string;
-            /** Field Path */
-            field_path: string;
-            /** Override Id */
-            override_id: string;
-            /** Override Value */
-            override_value: unknown;
-            /** Prevent Provider Reactivation */
-            prevent_provider_reactivation: boolean;
-            /** Reason */
-            reason?: string | null;
+            quality_state: "valid" | "quarantined";
+            weather_summary?: components["schemas"]["WeatherSummaryOut"] | null;
         };
         /**
          * AdminFeaturePatchRequest
@@ -3982,6 +3981,23 @@ export interface components {
             } | null;
         };
         /**
+         * AdminFeatureReactivateRequest
+         * @description retired lifecycle override를 해제할 현재 provider evidence.
+         *
+         *     재활성화는 임의의 ``active`` patch가 아니다. provider dataset/head/link를 모두
+         *     검증한 단일 명령만 lifecycle를 active로 되돌릴 수 있다.
+         */
+        AdminFeatureReactivateRequest: {
+            /** Provider Dataset Id */
+            provider_dataset_id: number;
+            /** Reason Code */
+            reason_code: string;
+            /** Source Entity Key */
+            source_entity_key: string;
+            /** Source Record Key */
+            source_record_key: string;
+        };
+        /**
          * AdminFeatureRecord
          * @description ``GET /admin/features`` item.
          */
@@ -4013,6 +4029,11 @@ export interface components {
             kind: string;
             /** Lat */
             lat?: number | null;
+            /**
+             * Lifecycle State
+             * @enum {string}
+             */
+            lifecycle_state: "active" | "retired";
             /** Lon */
             lon?: number | null;
             /** Name */
@@ -4021,8 +4042,16 @@ export interface components {
             primary_dataset_key?: string | null;
             /** Primary Provider */
             primary_provider?: string | null;
-            /** Status */
-            status: string;
+            /**
+             * Publication State
+             * @enum {string}
+             */
+            publication_state: "draft" | "published" | "suppressed";
+            /**
+             * Quality State
+             * @enum {string}
+             */
+            quality_state: "valid" | "quarantined";
             /**
              * Updated At
              * Format: date-time
@@ -4059,6 +4088,144 @@ export interface components {
          */
         AdminFeatureRevisionResponse: {
             data: components["schemas"]["AdminFeatureRevisionData"];
+        };
+        /**
+         * AdminFeatureStateData
+         * @description 한 상태 명령의 commit 후 full tuple + immutable audit identity.
+         */
+        AdminFeatureStateData: {
+            /** Audit Transition Id */
+            audit_transition_id: number;
+            /** Feature Id */
+            feature_id: string;
+            /**
+             * Lifecycle State
+             * @enum {string}
+             */
+            lifecycle_state: "active" | "retired";
+            /**
+             * Publication State
+             * @enum {string}
+             */
+            publication_state: "draft" | "published" | "suppressed";
+            /**
+             * Quality State
+             * @enum {string}
+             */
+            quality_state: "valid" | "quarantined";
+            /** Row Revision */
+            row_revision: number;
+        };
+        /**
+         * AdminFeatureStatePatchRequest
+         * @description 공개 의도·품질을 원자적으로 바꾸는 상태 command.
+         *
+         *     lifecycle는 provider 재등장과 typed override가 얽힌 별도 재활성 command만
+         *     바꿀 수 있다. retire와 축 patch를 한 요청에 섞으면 audit tuple의 의미가
+         *     불명확해지므로 discriminated union으로 물리적으로 막는다.
+         */
+        AdminFeatureStatePatchRequest: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            action: "patch";
+            /** Publication State */
+            publication_state?: ("draft" | "published" | "suppressed") | null;
+            /** Quality State */
+            quality_state?: ("valid" | "quarantined") | null;
+            /** Reason Code */
+            reason_code: string;
+        };
+        /**
+         * AdminFeatureStateResponse
+         * @description ``PATCH /admin/features/{feature_id}/state`` 응답.
+         */
+        AdminFeatureStateResponse: {
+            data: components["schemas"]["AdminFeatureStateData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * AdminFeatureStateRetireRequest
+         * @description lifecycle retire와 publication suppress를 한 DB command로 묶는 요청.
+         */
+        AdminFeatureStateRetireRequest: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            action: "retire";
+            /** Reason Code */
+            reason_code: string;
+        };
+        /**
+         * AdminFeatureStateTransitionAuditRecord
+         * @description DB append-only Feature 상태 전이 감사 1건.
+         *
+         *     admin detail은 현재 tuple과 이 timeline을 함께 주므로 운영 화면이 합성된
+         *     legacy status를 추론할 필요가 없다.
+         */
+        AdminFeatureStateTransitionAuditRecord: {
+            /** Causation Ref */
+            causation_ref?: string | null;
+            /** From Lifecycle State */
+            from_lifecycle_state?: ("active" | "retired") | null;
+            /** From Publication State */
+            from_publication_state?: ("draft" | "published" | "suppressed") | null;
+            /** From Quality State */
+            from_quality_state?: ("valid" | "quarantined") | null;
+            /**
+             * Occurred At
+             * Format: date-time
+             */
+            occurred_at: string;
+            /** Principal */
+            principal: string;
+            /** Provider Dataset Id */
+            provider_dataset_id?: number | null;
+            /** Reason Code */
+            reason_code: string;
+            /** Row Revision */
+            row_revision: number;
+            /** Source Entity Key */
+            source_entity_key?: string | null;
+            /** Source Record Key */
+            source_record_key?: string | null;
+            /**
+             * To Lifecycle State
+             * @enum {string}
+             */
+            to_lifecycle_state: "active" | "retired";
+            /**
+             * To Publication State
+             * @enum {string}
+             */
+            to_publication_state: "draft" | "published" | "suppressed";
+            /**
+             * To Quality State
+             * @enum {string}
+             */
+            to_quality_state: "valid" | "quarantined";
+            /** Transition Id */
+            transition_id: number;
+            /** Transition Kind */
+            transition_kind: string;
+        };
+        /**
+         * AdminFeatureStateTransitionsData
+         * @description feature별 append-only state audit keyset page.
+         */
+        AdminFeatureStateTransitionsData: {
+            /** Items */
+            items: components["schemas"]["AdminFeatureStateTransitionAuditRecord"][];
+        };
+        /**
+         * AdminFeatureStateTransitionsResponse
+         * @description ``GET /admin/features/{feature_id}/state/transitions`` 응답.
+         */
+        AdminFeatureStateTransitionsResponse: {
+            data: components["schemas"]["AdminFeatureStateTransitionsData"];
+            meta: components["schemas"]["Meta"];
         };
         /**
          * AdminFeaturesInBoundsData
@@ -4163,16 +4330,29 @@ export interface components {
             lat?: number | null;
             /** Legal Dong Code */
             legal_dong_code?: string | null;
+            /**
+             * Lifecycle State
+             * @enum {string}
+             */
+            lifecycle_state: "active" | "retired";
             /** Lon */
             lon?: number | null;
+            /**
+             * Publication State
+             * @enum {string}
+             */
+            publication_state: "draft" | "published" | "suppressed";
+            /**
+             * Quality State
+             * @enum {string}
+             */
+            quality_state: "valid" | "quarantined";
             /** Road Address Management No */
             road_address_management_no?: string | null;
             /** Sido Code */
             sido_code?: string | null;
             /** Sigungu Code */
             sigungu_code?: string | null;
-            /** Status */
-            status: string;
         };
         /**
          * AdminIssueListData
@@ -6804,8 +6984,6 @@ export interface components {
             lon: number | null;
             /** Name */
             name: string;
-            /** Status */
-            status: string;
         };
         /** CurationImportBatchResponse */
         CurationImportBatchResponse: {
@@ -8085,8 +8263,6 @@ export interface components {
             sido_code?: string | null;
             /** Sigungu Code */
             sigungu_code?: string | null;
-            /** Status */
-            status: string;
             /**
              * Updated At
              * Format: date-time
@@ -8334,8 +8510,6 @@ export interface components {
              * @description kind=price일 때 provider/domain/product series별 최신 가격 요약.
              */
             price_summary?: components["schemas"]["PricePointOut"][] | null;
-            /** Status */
-            status: string;
             /** @description kind=weather일 때 현재/예보 marker 요약. */
             weather_summary?: components["schemas"]["WeatherSummaryOut"] | null;
         };
@@ -9068,8 +9242,6 @@ export interface components {
             lon: number;
             /** Name */
             name: string;
-            /** Status */
-            status: string;
         };
         /**
          * NearbyOriginSummary
@@ -13008,6 +13180,11 @@ export interface components {
             kind: string;
             /** Lat */
             lat?: number | null;
+            /**
+             * Lifecycle State
+             * @enum {string}
+             */
+            lifecycle_state: "active" | "retired";
             /** Lon */
             lon?: number | null;
             /** Marker Color */
@@ -13016,14 +13193,22 @@ export interface components {
             marker_icon?: string | null;
             /** Name */
             name: string;
+            /**
+             * Publication State
+             * @enum {string}
+             */
+            publication_state: "draft" | "published" | "suppressed";
+            /**
+             * Quality State
+             * @enum {string}
+             */
+            quality_state: "valid" | "quarantined";
             /** Raw Refs */
             raw_refs: {
                 [key: string]: unknown;
             }[];
             /** Sources */
             sources: components["schemas"]["ReviewSourceDetailRecord"][];
-            /** Status */
-            status: string;
             /**
              * Updated At
              * Format: date-time
@@ -15057,8 +15242,12 @@ export interface operations {
                 kind?: string[] | null;
                 /** @description category code 반복 필터 */
                 category?: string[] | null;
-                /** @description feature status 반복 필터. 기본 active. */
-                status?: string[] | null;
+                /** @description lifecycle 축 반복 필터. */
+                lifecycle_state?: ("active" | "retired")[] | null;
+                /** @description publication 축 반복 필터. */
+                publication_state?: ("draft" | "published" | "suppressed")[] | null;
+                /** @description quality 축 반복 필터. */
+                quality_state?: ("valid" | "quarantined")[] | null;
                 /** @description primary provider dataset canonical ID 필터 */
                 provider_dataset_id?: number | null;
                 has_coord?: boolean | null;
@@ -15070,7 +15259,7 @@ export interface operations {
                 include_ended?: boolean;
                 page_size?: number;
                 cursor?: string | null;
-                sort?: "name" | "updated_at" | "created_at" | "kind" | "status" | "provider" | "issue_count";
+                sort?: "name" | "updated_at" | "created_at" | "kind" | "provider" | "issue_count";
                 order?: ("asc" | "desc") | null;
             };
             header?: never;
@@ -16065,8 +16254,12 @@ export interface operations {
                 max_lon: number;
                 /** @description bbox 최대 위도. */
                 max_lat: number;
-                /** @description 운영 상태 반복 필터. 미지정 시 삭제 전 draft/active/inactive/hidden/broken 전체. */
-                status?: ("draft" | "active" | "inactive" | "hidden" | "broken")[] | null;
+                /** @description lifecycle 축 반복 필터. */
+                lifecycle_state?: ("active" | "retired")[] | null;
+                /** @description publication 축 반복 필터. */
+                publication_state?: ("draft" | "published" | "suppressed")[] | null;
+                /** @description quality 축 반복 필터. */
+                quality_state?: ("valid" | "quarantined")[] | null;
                 /** @description feature kind 반복 필터. */
                 kind?: string[] | null;
                 /** @description category code 반복 필터. */
@@ -16388,80 +16581,6 @@ export interface operations {
             };
         };
     };
-    deactivate_feature_route_v1_admin_features__feature_id__deactivate_post: {
-        parameters: {
-            query?: never;
-            header: {
-                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
-                "Idempotency-Key": string;
-            };
-            path: {
-                feature_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["AdminFeatureDeactivateRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AdminFeatureDeactivateResponse"];
-                };
-            };
-            /** @description 파괴적 admin 작업 비활성 */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            /** @description feature 없음 */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            /** @description feature 상태 전이 불가 */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-        };
-    };
     get_admin_feature_price_v1_admin_features__feature_id__price_get: {
         parameters: {
             query?: {
@@ -16545,6 +16664,232 @@ export interface operations {
                 };
             };
             /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    patch_feature_state_route_v1_admin_features__feature_id__state_patch: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
+                "Idempotency-Key": string;
+                /** @description 직전 GET body/ETag의 row_revision strong ETag (correction 낙관적 동시성). */
+                "If-Match": string;
+            };
+            path: {
+                feature_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminFeatureStatePatchRequest"] | components["schemas"]["AdminFeatureStateRetireRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    /** @description 현재 feature의 server-owned row_revision strong entity tag. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminFeatureStateResponse"];
+                };
+            };
+            /** @description feature 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description 현재 tuple/source override가 요청 전이를 허용하지 않음 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description If-Match row_revision 불일치 */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description state action/body 또는 If-Match strong ETag 오류 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description If-Match 누락 */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    reactivate_feature_state_route_v1_admin_features__feature_id__state_reactivate_post: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
+                "Idempotency-Key": string;
+                /** @description 직전 GET body/ETag의 row_revision strong ETag (correction 낙관적 동시성). */
+                "If-Match": string;
+            };
+            path: {
+                feature_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminFeatureReactivateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    /** @description 현재 feature의 server-owned row_revision strong entity tag. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminFeatureStateResponse"];
+                };
+            };
+            /** @description feature 또는 current source evidence 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description retired override/source evidence가 재활성화를 허용하지 않음 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description If-Match row_revision 불일치 */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description body 또는 If-Match strong ETag 오류 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description If-Match 누락 */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    list_feature_state_transitions_route_v1_admin_features__feature_id__state_transitions_get: {
+        parameters: {
+            query?: {
+                page_size?: number;
+                before_transition_id?: number | null;
+            };
+            header?: never;
+            path: {
+                feature_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminFeatureStateTransitionsResponse"];
+                };
+            };
+            /** @description feature 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description audit cursor/page_size 오류 */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -18615,8 +18960,6 @@ export interface operations {
                 kind?: string[] | null;
                 /** @description category code 반복 필터. */
                 category?: string[] | null;
-                /** @description feature status 반복 필터. 기본 active. 공개 projection(feature.public_features)과 교집합으로만 동작하므로 active 외 값은 빈 결과를 반환한다 (T-VN-04; 파라미터 정리는 T-VN-11/34). */
-                status?: string[] | null;
                 /** @description primary provider 반복 필터. */
                 provider?: string[] | null;
                 page_size?: number;
@@ -18671,8 +19014,6 @@ export interface operations {
                 kind?: string[] | null;
                 /** @description category code 반복 필터. */
                 category?: string[] | null;
-                /** @description feature status 반복 필터. 기본 active. 공개 projection(feature.public_features)과 교집합으로만 동작하므로 active 외 값은 빈 결과를 반환한다 (T-VN-04; 파라미터 정리는 T-VN-11/34). */
-                status?: string[] | null;
                 /** @description primary provider 반복 필터. */
                 provider?: string[] | null;
                 page_size?: number;

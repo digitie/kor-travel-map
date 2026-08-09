@@ -219,16 +219,15 @@ async function responseFeatureId(
   if (cached !== undefined) return cached;
 
   const detail = requireBody(
-    await browserFetch<DetailResponse>(
-      page,
-      adminFeaturePath(legacyFeatureId),
-    ),
+    await browserFetch<DetailResponse>(page, adminFeaturePath(legacyFeatureId)),
     `${label} detail`,
   ).data.feature;
   const featureId = detail.feature_id;
   expect(detail.feature_uuid).toBe(featureId);
   if (featureId === legacyFeatureId) {
-    throw new Error(`${label} 응답 feature_id가 UUID 정본으로 치환되지 않았습니다`);
+    throw new Error(
+      `${label} 응답 feature_id가 UUID 정본으로 치환되지 않았습니다`,
+    );
   }
   responseFeatureIds.set(legacyFeatureId, featureId);
   return featureId;
@@ -506,7 +505,7 @@ async function cleanupApiOwnedFeatures(page: Page): Promise<void> {
     const responseId = current.feature_id;
     expect(current.feature_uuid).toBe(responseId);
     responseFeatureIds.set(featureId, responseId);
-    if (current.status !== "deleted") {
+    if (current.lifecycle_state !== "retired") {
       const revision = await browserFetch<RevisionResponse>(
         page,
         revisionPath(responseId),
@@ -521,7 +520,8 @@ async function cleanupApiOwnedFeatures(page: Page): Promise<void> {
           method: "DELETE",
         },
       );
-      const deleteRequest = requireBody(deletion, "cleanup DELETE").data.request;
+      const deleteRequest = requireBody(deletion, "cleanup DELETE").data
+        .request;
       if (deleteRequest.status === "pending") {
         const approved = await approveOrReject(
           page,
@@ -544,11 +544,13 @@ async function cleanupApiOwnedFeatures(page: Page): Promise<void> {
             page,
             adminFeaturePath(responseId),
           );
-          return latest.body?.data.feature.status ?? `http:${latest.status}`;
+          return (
+            latest.body?.data.feature.lifecycle_state ?? `http:${latest.status}`
+          );
         },
         { timeout: UI_TIMEOUT },
       )
-      .toBe("deleted");
+      .toBe("retired");
     expect(
       (await browserFetch(page, publicFeaturePath(responseId))).status,
     ).toBe(404);
@@ -624,7 +626,9 @@ function tamperCursorPayload(cursor: string): string {
     segments[0].length === 0 ||
     segments[1].length === 0
   ) {
-    throw new Error("search cursor wire shape이 올바르지 않습니다 (value redacted)");
+    throw new Error(
+      "search cursor wire shape이 올바르지 않습니다 (value redacted)",
+    );
   }
   const first = segments[0][0];
   const replacement = first === "A" ? "B" : "A";
@@ -644,7 +648,9 @@ async function assertSearchProblem(
   expect(result.status).toBe(422);
   expect(result.contentType?.startsWith("application/problem+json")).toBe(true);
   if (result.body === null) {
-    throw new Error("feature search problem body가 없습니다 (response redacted)");
+    throw new Error(
+      "feature search problem body가 없습니다 (response redacted)",
+    );
   }
   expect(result.body.code).toBe(code);
   const serialized = JSON.stringify(result.body);
@@ -874,20 +880,23 @@ async function recenterMapTo(
   await expect
     .poll(
       () =>
-        page.getByTestId("map-canvas-container").evaluate((node, coord) => {
-          const map = (
-            node as HTMLDivElement & {
-              _maplibreMap?: {
-                jumpTo(options: { center: [number, number] }): void;
-              };
+        page.getByTestId("map-canvas-container").evaluate(
+          (node, coord) => {
+            const map = (
+              node as HTMLDivElement & {
+                _maplibreMap?: {
+                  jumpTo(options: { center: [number, number] }): void;
+                };
+              }
+            )._maplibreMap;
+            if (map === undefined) {
+              return false;
             }
-          )._maplibreMap;
-          if (map === undefined) {
-            return false;
-          }
-          map.jumpTo({ center: [coord.lon, coord.lat] });
-          return true;
-        }, { lon, lat }),
+            map.jumpTo({ center: [coord.lon, coord.lat] });
+            return true;
+          },
+          { lon, lat },
+        ),
       { timeout: UI_TIMEOUT },
     )
     .toBe(true);
@@ -947,9 +956,7 @@ async function assertStatusMarker(
         return false;
       }
       const body = (await response.json()) as InBoundsResponse;
-      return body.data.items.some(
-        (item) => item.feature_id === responseId,
-      );
+      return body.data.items.some((item) => item.feature_id === responseId);
     },
     { timeout: FLOW_TIMEOUT },
   );
@@ -972,9 +979,9 @@ async function assertStatusMarker(
   );
   await expectDetailPanelAboveScaleControl(page, "feature-detail-panel");
 
-  expect(
-    (await browserFetch(page, publicFeaturePath(responseId))).status,
-  ).toBe(404);
+  expect((await browserFetch(page, publicFeaturePath(responseId))).status).toBe(
+    404,
+  );
   await assertPublicInBoundsExcludes(
     page,
     responseId,
@@ -1001,17 +1008,12 @@ async function assertNonpublicKindCards(page: Page): Promise<void> {
   expect(weather.data.metrics).toHaveLength(1);
   expect(weather.data.metrics[0]).toMatchObject({ metric_key: "TMP" });
   expect(
-    (
-      await browserFetch(
-        page,
-        `${publicFeaturePath(weatherId)}/weather`,
-      )
-    ).status,
-  ).toBe(404);
-  expect(
-    (await browserFetch(page, publicFeaturePath(weatherId)))
+    (await browserFetch(page, `${publicFeaturePath(weatherId)}/weather`))
       .status,
   ).toBe(404);
+  expect((await browserFetch(page, publicFeaturePath(weatherId))).status).toBe(
+    404,
+  );
   await assertPublicInBoundsExcludes(
     page,
     weatherId,
@@ -1044,17 +1046,11 @@ async function assertNonpublicKindCards(page: Page): Promise<void> {
   expect(price.data.history).toHaveLength(1);
   expect(price.data.current[0]).toMatchObject({ product_key: "gasoline" });
   expect(
-    (
-      await browserFetch(
-        page,
-        `${publicFeaturePath(priceId)}/price`,
-      )
-    ).status,
+    (await browserFetch(page, `${publicFeaturePath(priceId)}/price`)).status,
   ).toBe(404);
-  expect(
-    (await browserFetch(page, publicFeaturePath(priceId)))
-      .status,
-  ).toBe(404);
+  expect((await browserFetch(page, publicFeaturePath(priceId))).status).toBe(
+    404,
+  );
   await assertPublicInBoundsExcludes(
     page,
     priceId,
@@ -1150,10 +1146,7 @@ async function assertStaleCorrection(page: Page): Promise<void> {
   const baselineTag = revisionResponses.at(-1)?.entityTag ?? null;
   expect(baselineTag).toMatch(/^"[1-9][0-9]*"$/);
   const baselineDetail = requireBody(
-    await browserFetch<DetailResponse>(
-      page,
-      adminFeaturePath(correctionId),
-    ),
+    await browserFetch<DetailResponse>(page, adminFeaturePath(correctionId)),
     "correction baseline detail",
   );
   expect(`"${baselineDetail.data.feature.row_revision}"`).toBe(baselineTag);
@@ -1192,10 +1185,7 @@ async function assertStaleCorrection(page: Page): Promise<void> {
   );
   expect(competingTag).not.toBe(baselineTag);
   const competingDetail = requireBody(
-    await browserFetch<DetailResponse>(
-      page,
-      adminFeaturePath(correctionId),
-    ),
+    await browserFetch<DetailResponse>(page, adminFeaturePath(correctionId)),
     "competing detail",
   );
   expect(competingDetail.data.feature.name).toBe(competingName);

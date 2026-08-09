@@ -21,9 +21,11 @@ export default async function AdminFeaturesPage({
     <AdminFeaturesClient
       initialHasIssue={firstParam(params.has_issue)}
       initialKind={firstParam(params.kind)}
+      initialLifecycleState={firstParam(params.lifecycle_state)}
       initialProviderDatasetId={firstParam(params.provider_dataset_id)}
+      initialPublicationState={firstParam(params.publication_state)}
       initialQ={firstParam(params.q)}
-      initialStatus={firstParam(params.status)}
+      initialQualityState={firstParam(params.quality_state)}
     />
   );
 }

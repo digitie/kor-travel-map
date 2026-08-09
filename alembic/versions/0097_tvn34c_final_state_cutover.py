@@ -508,13 +508,13 @@ BEGIN
            updated_at = clock_timestamp()
      WHERE feature_id = p_feature_id
      RETURNING feature_id, row_revision INTO o_feature_id, o_row_revision;
-    -- Any non-provider retirement is an operator/user/merge decision, not a
-    -- provider tombstone.  Make its lifecycle override inseparable from the
-    -- state transition so callers of this generic internal procedure cannot
-    -- create a retired row that a later provider observation can resurrect.
+    -- Any non-provider retirement is not a provider tombstone. Make its
+    -- lifecycle override inseparable from the state transition so callers of
+    -- this generic internal procedure cannot create a retired row that a
+    -- later provider observation can resurrect.
     IF v_current.lifecycle_state = 'active'
        AND p_lifecycle_state = 'retired'
-       AND (p_context ->> 'transition_kind') IN ('admin', 'user_request', 'merge') THEN
+       AND (p_context ->> 'transition_kind') <> 'provider_sync' THEN
         CALL feature.author_lifecycle_override(
             p_feature_id,
             v_current.lifecycle_state,

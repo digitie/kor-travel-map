@@ -819,12 +819,15 @@ async def test_tvn34c_provider_evidence_lock_rejects_head_advance_races(
     }
 
 
-@pytest.mark.parametrize("transition_kind", ["admin", "user_request", "merge"])
+@pytest.mark.parametrize(
+    "transition_kind",
+    ["admin", "user_request", "merge", "system", "quality_validation"],
+)
 async def test_tvn34c_generic_non_provider_retirement_writes_lifecycle_fence(
     migrated_session: AsyncSession,
     transition_kind: str,
 ) -> None:
-    """Generic internal transitions cannot leave operator/user/merge retire unfenced."""
+    """Generic non-provider transitions cannot leave a retirement unfenced."""
 
     feature_id = f"tvn34c-retirement-fence-{transition_kind}"
     await _create_as_runtime(migrated_session, feature_id=feature_id, kind="place")

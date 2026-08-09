@@ -31,6 +31,7 @@ import {
   type AdminIssueSeverity,
   type AdminIssueStatus,
 } from "@/api/issues";
+import { featureStateLabel } from "@/api/features";
 import { AdminShell } from "@/components/admin-shell";
 import { CursorPager } from "@/components/pagination-bar";
 import { EntityLink } from "@/components/entity-link";
@@ -122,7 +123,8 @@ function IssueDetailPanel({ issueId }: { issueId: string | null }) {
   if (!issueId) {
     return (
       <div className="rounded-lg border bg-background p-5 text-sm text-muted-foreground">
-        table에서 issue를 선택하면 상세 payload와 조치 버튼을 확인할 수 있습니다.
+        table에서 issue를 선택하면 상세 payload와 조치 버튼을 확인할 수
+        있습니다.
       </div>
     );
   }
@@ -140,10 +142,7 @@ function IssueDetailPanel({ issueId }: { issueId: string | null }) {
     });
   };
 
-  const failManualOverride = (
-    field: "address" | "lon",
-    message: string,
-  ) => {
+  const failManualOverride = (field: "address" | "lon", message: string) => {
     setManualError(message);
     setManualErrorField(field);
     if (field === "address") {
@@ -161,7 +160,10 @@ function IssueDetailPanel({ issueId }: { issueId: string | null }) {
       try {
         address = JSON.parse(manualAddress) as Record<string, unknown>;
       } catch {
-        failManualOverride("address", "주소 보정값을 JSON 형식으로 입력하세요.");
+        failManualOverride(
+          "address",
+          "주소 보정값을 JSON 형식으로 입력하세요.",
+        );
         return;
       }
     }
@@ -178,7 +180,11 @@ function IssueDetailPanel({ issueId }: { issueId: string | null }) {
       failManualOverride("lon", "경도와 위도는 함께 입력하세요.");
       return;
     }
-    if (lon !== undefined && lat !== undefined && !isKoreaCoordinate(lon, lat)) {
+    if (
+      lon !== undefined &&
+      lat !== undefined &&
+      !isKoreaCoordinate(lon, lat)
+    ) {
       failManualOverride("lon", KOREA_COORD_MESSAGE);
       return;
     }
@@ -262,7 +268,7 @@ function IssueDetailPanel({ issueId }: { issueId: string | null }) {
                 onClick={() => runAction("resolve")}
               >
                 <CheckIcon data-icon="inline-start" />
-                  해결
+                해결
               </Button>
               <Button
                 disabled={action.isPending}
@@ -319,8 +325,15 @@ function IssueDetailPanel({ issueId }: { issueId: string | null }) {
                   Feature 스냅샷
                 </summary>
                 <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-sm">
-                  <dt className="text-muted-foreground">status</dt>
-                  <dd>{statusLabel(feature.status)}</dd>
+                  <dt className="text-muted-foreground">상태 축</dt>
+                  <dd>
+                    {featureStateLabel("lifecycle", feature.lifecycle_state)} ·{" "}
+                    {featureStateLabel(
+                      "publication",
+                      feature.publication_state,
+                    )}{" "}
+                    · {featureStateLabel("quality", feature.quality_state)}
+                  </dd>
                   <dt className="text-muted-foreground">coord</dt>
                   <dd className="font-mono">
                     {typeof feature.lon === "number" &&
@@ -338,7 +351,9 @@ function IssueDetailPanel({ issueId }: { issueId: string | null }) {
             ) : null}
 
             <details>
-              <summary className="cursor-pointer text-sm font-medium">payload</summary>
+              <summary className="cursor-pointer text-sm font-medium">
+                payload
+              </summary>
               <JsonBlock value={issue.payload} />
             </details>
           </div>
@@ -579,9 +594,7 @@ function useAdminIssuesClientController({
           const issue = row.original;
           return (
             <>
-              <div className="font-mono text-xs">
-                {shortId(issue.issue_id)}
-              </div>
+              <div className="font-mono text-xs">{shortId(issue.issue_id)}</div>
               <div className="mt-1 text-xs text-muted-foreground">
                 {issue.violation_type}
               </div>
@@ -869,13 +882,15 @@ function AdminIssuesClientView({
             />
             <Input
               aria-invalid={
-                bbox.trim().length > 0 && Object.keys(parseBbox(bbox)).length === 0
+                bbox.trim().length > 0 &&
+                Object.keys(parseBbox(bbox)).length === 0
               }
               aria-label="bbox"
               className="w-72 shrink-0"
               placeholder="min_lon,min_lat,max_lon,max_lat"
               title={
-                bbox.trim().length > 0 && Object.keys(parseBbox(bbox)).length === 0
+                bbox.trim().length > 0 &&
+                Object.keys(parseBbox(bbox)).length === 0
                   ? "형식: minLon,minLat,maxLon,maxLat"
                   : undefined
               }

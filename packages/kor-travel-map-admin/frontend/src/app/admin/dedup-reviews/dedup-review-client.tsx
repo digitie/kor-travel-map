@@ -28,11 +28,11 @@ import {
 } from "@/api/dedup";
 import { AdminShell } from "@/components/admin-shell";
 import { EntityLink } from "@/components/entity-link";
+import { FeatureStateBadges } from "@/components/feature-state-badges";
 import { MultiFilterCombobox } from "@/components/multi-filter-combobox";
 import { uniqueSorted } from "@/lib/string-list";
 import { CursorPager } from "@/components/pagination-bar";
 import { StatusBadge } from "@/components/status-badge";
-import { statusLabel } from "@/lib/status-label";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { DataTable } from "@/components/ui/data-table";
@@ -82,7 +82,11 @@ type MapPoint = [number, number];
 function fitMapToPoints(map: MapLibreMap, points: readonly MapPoint[]) {
   if (points.length === 0) return;
   if (points.length === 1) {
-    map.easeTo({ center: points[0], zoom: Math.max(map.getZoom(), 15), duration: 0 });
+    map.easeTo({
+      center: points[0],
+      zoom: Math.max(map.getZoom(), 15),
+      duration: 0,
+    });
     return;
   }
   const lons = points.map((point) => point[0]);
@@ -92,7 +96,11 @@ function fitMapToPoints(map: MapLibreMap, points: readonly MapPoint[]) {
   const minLat = Math.min(...lats);
   const maxLat = Math.max(...lats);
   if (minLon === maxLon && minLat === maxLat) {
-    map.easeTo({ center: points[0], zoom: Math.max(map.getZoom(), 15), duration: 0 });
+    map.easeTo({
+      center: points[0],
+      zoom: Math.max(map.getZoom(), 15),
+      duration: 0,
+    });
     return;
   }
   map.fitBounds(
@@ -136,7 +144,8 @@ type DetailFeature = DedupReviewDetail["feature_a"];
 
 function formatMaybe(value: unknown): string {
   if (value === null || value === undefined || value === "") return "-";
-  if (typeof value === "string" || typeof value === "number") return String(value);
+  if (typeof value === "string" || typeof value === "number")
+    return String(value);
   return JSON.stringify(value);
 }
 
@@ -166,7 +175,9 @@ function FeatureDetailPanel({
   feature: DetailFeature;
   label: string;
 }) {
-  const primarySource = feature.sources.find((source) => source.source_role === "primary");
+  const primarySource = feature.sources.find(
+    (source) => source.source_role === "primary",
+  );
   return (
     <section className="min-w-0 rounded-lg border bg-background p-4">
       <div className="mb-3">
@@ -184,24 +195,45 @@ function FeatureDetailPanel({
       <dl className="grid gap-3 sm:grid-cols-2">
         <DetailMetric label="종류" value={feature.kind} />
         <DetailMetric label="카테고리" value={feature.category} />
-        <DetailMetric label="상태" value={statusLabel(feature.status)} />
+        <div>
+          <dt className="text-xs text-muted-foreground">상태 축</dt>
+          <dd className="mt-1">
+            <FeatureStateBadges
+              lifecycleState={feature.lifecycle_state}
+              publicationState={feature.publication_state}
+              qualityState={feature.quality_state}
+            />
+          </dd>
+        </div>
         <DetailMetric label="출처" value={feature.data_origin} />
         <DetailMetric label="경도" value={feature.lon?.toFixed(6)} />
         <DetailMetric label="위도" value={feature.lat?.toFixed(6)} />
-        <DetailMetric label="primary provider" value={primarySource?.provider} />
-        <DetailMetric label="primary entity" value={primarySource?.source_entity_id} />
+        <DetailMetric
+          label="primary provider"
+          value={primarySource?.provider}
+        />
+        <DetailMetric
+          label="primary entity"
+          value={primarySource?.source_entity_id}
+        />
       </dl>
       <div className="mt-4 space-y-3">
         <div>
-          <div className="mb-1 text-xs font-medium text-muted-foreground">detail</div>
+          <div className="mb-1 text-xs font-medium text-muted-foreground">
+            detail
+          </div>
           <JsonBlock value={feature.detail} />
         </div>
         <div>
-          <div className="mb-1 text-xs font-medium text-muted-foreground">address</div>
+          <div className="mb-1 text-xs font-medium text-muted-foreground">
+            address
+          </div>
           <JsonBlock value={feature.address} />
         </div>
         <div>
-          <div className="mb-1 text-xs font-medium text-muted-foreground">sources</div>
+          <div className="mb-1 text-xs font-medium text-muted-foreground">
+            sources
+          </div>
           <JsonBlock value={feature.sources} />
         </div>
       </div>
@@ -239,7 +271,9 @@ function DedupDetailDialog({
           <div>
             <DialogTitle>중복 상세 비교</DialogTitle>
             <DialogDescription>
-              {detail ? `${shortId(detail.review_id)} · ${formatDistance(detail.distance_m)}` : "loading"}
+              {detail
+                ? `${shortId(detail.review_id)} · ${formatDistance(detail.distance_m)}`
+                : "loading"}
             </DialogDescription>
           </div>
           <Button size="sm" type="button" variant="ghost" onClick={onClose}>
@@ -258,11 +292,26 @@ function DedupDetailDialog({
             <>
               <div className="flex flex-col gap-3 rounded-lg border bg-muted/40 p-3 lg:flex-row lg:items-center lg:justify-between">
                 <dl className="grid flex-1 gap-3 sm:grid-cols-5">
-                  <DetailMetric label="total" value={formatScore(detail.total_score)} />
-                  <DetailMetric label="이름" value={formatScore(detail.name_score)} />
-                  <DetailMetric label="distance score" value={formatScore(detail.spatial_score)} />
-                  <DetailMetric label="카테고리" value={formatScore(detail.category_score)} />
-                  <DetailMetric label="거리" value={formatDistance(detail.distance_m)} />
+                  <DetailMetric
+                    label="total"
+                    value={formatScore(detail.total_score)}
+                  />
+                  <DetailMetric
+                    label="이름"
+                    value={formatScore(detail.name_score)}
+                  />
+                  <DetailMetric
+                    label="distance score"
+                    value={formatScore(detail.spatial_score)}
+                  />
+                  <DetailMetric
+                    label="카테고리"
+                    value={formatScore(detail.category_score)}
+                  />
+                  <DetailMetric
+                    label="거리"
+                    value={formatDistance(detail.distance_m)}
+                  />
                 </dl>
               </div>
               {hasMap ? (
@@ -820,14 +869,7 @@ function useDedupReviewColumns({
         },
       },
     ],
-    [
-      decisionPending,
-      mergeKey,
-      onDecide,
-      onMerge,
-      onOpenDetail,
-      onSelectMerge,
-    ],
+    [decisionPending, mergeKey, onDecide, onMerge, onOpenDetail, onSelectMerge],
   );
 }
 
@@ -1016,8 +1058,7 @@ export function DedupReviewClient() {
           },
         },
         {
-          onSettled: () =>
-            dispatch({ type: "select-merge", reviewId: null }),
+          onSettled: () => dispatch({ type: "select-merge", reviewId: null }),
         },
       );
     },

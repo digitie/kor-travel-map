@@ -44,7 +44,9 @@ function makeWeatherFeature(
     marker_color: "P-01",
     marker_icon: "marker",
     name: "기상청 초단기 서울",
-    status: "active",
+    lifecycle_state: "active",
+    publication_state: "published",
+    quality_state: "valid",
     weather_summary: {
       provider_dataset_id: 101,
       dataset_key: "kma_nowcast",
@@ -117,7 +119,9 @@ function makeAdminFeatureDetail(
     name: "기상청 초단기 서울",
     row_revision: 1,
     raw_refs: [],
-    status: "active",
+    lifecycle_state: "active",
+    publication_state: "published",
+    quality_state: "valid",
     updated_at: "2026-06-29T00:00:00.000Z",
     urls: {},
     ...overrides,
@@ -136,6 +140,7 @@ function makeAdminFeatureDetailResponse(
       issues: [],
       overrides: [],
       sources: [],
+      state_transitions: [],
       versions: [],
     },
     meta: makeMeta({ request_id: "e2e-session-kma-detail" }),
@@ -164,23 +169,28 @@ async function setMapZoom(page: Page, zoom: number) {
         page.evaluate(() => {
           const container = document.querySelector(
             '[data-testid="map-canvas-container"]',
-          ) as (HTMLElement & {
-            _maplibreMap?: import("maplibre-gl").Map;
-          }) | null;
+          ) as
+            | (HTMLElement & {
+                _maplibreMap?: import("maplibre-gl").Map;
+              })
+            | null;
           return Boolean(container?._maplibreMap);
         }),
       { timeout: 20_000 },
     )
     .toBe(true);
-  await page.evaluate(({ nextZoom, nextCenter }) => {
-    const container = document.querySelector(
-      '[data-testid="map-canvas-container"]',
-    ) as (HTMLElement & { _maplibreMap?: import("maplibre-gl").Map }) | null;
-    container?._maplibreMap?.jumpTo({
-      center: nextCenter,
-      zoom: nextZoom,
-    });
-  }, { nextCenter: [SEOUL_LON, SEOUL_LAT] as [number, number], nextZoom: zoom });
+  await page.evaluate(
+    ({ nextZoom, nextCenter }) => {
+      const container = document.querySelector(
+        '[data-testid="map-canvas-container"]',
+      ) as (HTMLElement & { _maplibreMap?: import("maplibre-gl").Map }) | null;
+      container?._maplibreMap?.jumpTo({
+        center: nextCenter,
+        zoom: nextZoom,
+      });
+    },
+    { nextCenter: [SEOUL_LON, SEOUL_LAT] as [number, number], nextZoom: zoom },
+  );
 }
 
 async function mockFeatureRoutes(
@@ -228,7 +238,8 @@ async function mockFeatureRoutes(
       url.pathname.startsWith("/api/proxy/v1/admin/features/")
     ) {
       const id = decodeURIComponent(url.pathname.split("/").pop() ?? "");
-      const detail = detailById[id] ?? makeAdminFeatureDetail({ feature_id: id });
+      const detail =
+        detailById[id] ?? makeAdminFeatureDetail({ feature_id: id });
       await fulfillJson(route, makeAdminFeatureDetailResponse(detail));
       return;
     }

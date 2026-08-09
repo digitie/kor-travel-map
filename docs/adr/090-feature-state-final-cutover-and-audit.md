@@ -46,9 +46,9 @@ merge tombstone이 섞여 있다. 애플리케이션만 audit event를 쓰면 ra
    core/subtype 변경을 막은 refresh는 user effective row를 provider `version=0` baseline으로
    덮지 않고 immutable raw source observation만 최신화한다. T-VN-36의 final effective
    projection/lineage가 두 version bridge를 함께 대체한다. internal generic state transition도
-   `admin|user_request|merge`의 `active → retired`를 기록할 때 같은 transaction에서 retired
-   lifecycle override를 반드시 author하므로 runtime caller가 provider 재활성화 fence 없는 retirement를
-   만들 수 없다. lifecycle override는 generic
+   provider 이외 context의 `active → retired`를 기록할 때 같은 transaction에서 retired lifecycle
+   override를 반드시 author하므로 runtime caller가 provider 재활성화 fence 없는 retirement를 만들 수
+   없다. lifecycle override는 generic
    `ops.feature_overrides` DML을 닫고 expected revision/Feature lock을 요구하는 typed author/revoke
    command만 변경한다. audit writer trigger도 별도 NOLOGIN owner의
    security-definer function으로, fixed `search_path`와 schema-qualified dependency를 사용한다.

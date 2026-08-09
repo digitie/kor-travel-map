@@ -22,12 +22,12 @@ import {
 } from "@/api/enrichment";
 import { AdminShell } from "@/components/admin-shell";
 import { EntityLink } from "@/components/entity-link";
+import { FeatureStateBadges } from "@/components/feature-state-badges";
 import { JsonViewer } from "@/components/json-viewer";
 import { MultiFilterCombobox } from "@/components/multi-filter-combobox";
 import { uniqueSorted } from "@/lib/string-list";
 import { CursorPager } from "@/components/pagination-bar";
 import { StatusBadge } from "@/components/status-badge";
-import { statusLabel } from "@/lib/status-label";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { DataTable } from "@/components/ui/data-table";
@@ -67,7 +67,11 @@ type MapPoint = [number, number];
 function fitMapToPoints(map: MapLibreMap, points: readonly MapPoint[]) {
   if (points.length === 0) return;
   if (points.length === 1) {
-    map.easeTo({ center: points[0], zoom: Math.max(map.getZoom(), 15), duration: 0 });
+    map.easeTo({
+      center: points[0],
+      zoom: Math.max(map.getZoom(), 15),
+      duration: 0,
+    });
     return;
   }
   const lons = points.map((point) => point[0]);
@@ -77,7 +81,11 @@ function fitMapToPoints(map: MapLibreMap, points: readonly MapPoint[]) {
   const minLat = Math.min(...lats);
   const maxLat = Math.max(...lats);
   if (minLon === maxLon && minLat === maxLat) {
-    map.easeTo({ center: points[0], zoom: Math.max(map.getZoom(), 15), duration: 0 });
+    map.easeTo({
+      center: points[0],
+      zoom: Math.max(map.getZoom(), 15),
+      duration: 0,
+    });
     return;
   }
   map.fitBounds(
@@ -130,7 +138,8 @@ type EnrichmentDetailSource = EnrichmentReviewDetail["default_detail_source"];
 
 function formatMaybe(value: unknown): string {
   if (value === null || value === undefined || value === "") return "-";
-  if (typeof value === "string" || typeof value === "number") return String(value);
+  if (typeof value === "string" || typeof value === "number")
+    return String(value);
   return JSON.stringify(value);
 }
 
@@ -180,12 +189,17 @@ function EnrichmentDetailDialog({
         if (!open) onClose();
       }}
     >
-      <DialogContent aria-label="enrichment review detail" className="max-w-6xl">
+      <DialogContent
+        aria-label="enrichment review detail"
+        className="max-w-6xl"
+      >
         <DialogHeader>
           <div>
             <DialogTitle>보강 상세 비교</DialogTitle>
             <DialogDescription>
-              {detail ? `${shortId(detail.review_id)} · ${formatDistance(detail.distance_m)}` : "loading"}
+              {detail
+                ? `${shortId(detail.review_id)} · ${formatDistance(detail.distance_m)}`
+                : "loading"}
             </DialogDescription>
           </div>
           <Button size="sm" type="button" variant="ghost" onClick={onClose}>
@@ -204,9 +218,18 @@ function EnrichmentDetailDialog({
             <>
               <div className="flex flex-col gap-3 rounded-lg border bg-muted/40 p-3 lg:flex-row lg:items-center lg:justify-between">
                 <dl className="grid flex-1 gap-3 sm:grid-cols-4">
-                  <DetailMetric label="이름" value={formatScore(detail.name_score)} />
-                  <DetailMetric label="distance score" value={formatScore(detail.spatial_score)} />
-                  <DetailMetric label="거리" value={formatDistance(detail.distance_m)} />
+                  <DetailMetric
+                    label="이름"
+                    value={formatScore(detail.name_score)}
+                  />
+                  <DetailMetric
+                    label="distance score"
+                    value={formatScore(detail.spatial_score)}
+                  />
+                  <DetailMetric
+                    label="거리"
+                    value={formatDistance(detail.distance_m)}
+                  />
                   <DetailMetric
                     label="audit default"
                     value={detail.default_detail_source}
@@ -214,7 +237,8 @@ function EnrichmentDetailDialog({
                 </dl>
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="sr-only" id="enrichment-detail-source-note">
-                    선택값은 accept 적용 데이터 변경 없이 decision reason에 기록됩니다.
+                    선택값은 accept 적용 데이터 변경 없이 decision reason에
+                    기록됩니다.
                   </span>
                   <NativeSelect
                     aria-describedby="enrichment-detail-source-note"
@@ -281,7 +305,10 @@ function EnrichmentDetailDialog({
                         title={`datagokr: ${target.name}`}
                       />
                       <VWorldMarker
-                        lngLat={[detail.source_lon ?? 0, detail.source_lat ?? 0]}
+                        lngLat={[
+                          detail.source_lon ?? 0,
+                          detail.source_lat ?? 0,
+                        ]}
                         markerColor="#dc2626"
                         title={`visitkorea: ${detail.source_name}`}
                       />
@@ -317,7 +344,16 @@ function EnrichmentDetailDialog({
                         detail.target_end_date,
                       )}
                     />
-                    <DetailMetric label="상태" value={statusLabel(target.status)} />
+                    <div>
+                      <dt className="text-xs text-muted-foreground">상태 축</dt>
+                      <dd className="mt-1">
+                        <FeatureStateBadges
+                          lifecycleState={target.lifecycle_state}
+                          publicationState={target.publication_state}
+                          qualityState={target.quality_state}
+                        />
+                      </dd>
+                    </div>
                     <DetailMetric label="경도" value={target.lon?.toFixed(6)} />
                     <DetailMetric label="위도" value={target.lat?.toFixed(6)} />
                   </dl>
@@ -365,7 +401,10 @@ function EnrichmentDetailDialog({
                       label="위도"
                       value={detail.source_lat?.toFixed(6)}
                     />
-                    <DetailMetric label="레코드" value={source.source_record_key} />
+                    <DetailMetric
+                      label="레코드"
+                      value={source.source_record_key}
+                    />
                   </dl>
                   <div className="mt-4">
                     <div className="mb-1 text-xs font-medium text-muted-foreground">
