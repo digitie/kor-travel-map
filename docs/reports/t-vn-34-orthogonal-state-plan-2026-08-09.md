@@ -58,6 +58,16 @@ preflight receipt에 남긴 뒤 final schema를 ETL로 재생성할 수 있으�
 
 `user_change_*`는 Feature 공개 상태가 아니다. 요청의 provenance는
 `ops.feature_change_requests`와 version/audit 계열에 남기고 T-VN-34C에서 Feature core에서 제거한다.
+단, 현행 core 열은 user materializer의 stale retry idempotency receipt로도 쓰이므로 열을 먼저 지우지
+않는다. C는 `(feature_id, request_id)` immutable receipt를 `feature_versions`에 DB unique로 고정하고,
+같은 request 재호출은 row revision과 snapshot을 바꾸지 않고 기존 receipt를 반환하도록 procedure를
+재작성한 뒤 core metadata를 물리 삭제한다. 정확한 DDL은 partial unique
+`feature.uq_feature_versions_user_request_receipt(feature_id, request_id) WHERE request_id IS NOT NULL AND
+origin='user_request'`, request receipt의 `UPDATE`/`DELETE`를 거부하는
+`feature.reject_user_feature_version_mutation()`/`trg_feature_versions_user_request_immutable`이다.
+materializer는 Feature와 request를 고정 순서로 잠가 feature/action을 검증하고, receipt lookup을 먼저
+한 뒤 없는 경우에만 expected revision을 검사·삽입한다. unique conflict는 기존 immutable receipt를
+반환하며 user-request receipt가 provider version `0` upsert의 mutation 대상이 될 수 없다.
 반면 `data_origin`과 `data_version`은 T-VN-36이 whole-row freeze를 field override로 물화하고
 provider/user ownership을 대조할 입력이다. T-VN-34는 이를 읽거나 삭제하지 않으며, T-VN-36C가
 그 대체 정본·effective projection을 검증한 final migration에서 물리 삭제한다.
@@ -85,11 +95,15 @@ runtime procedure는 현행 TEXT key를 받고 final target procedure는 UUID ke
   `feature.materialize_user_feature_change_provenance(...)` procedure가 request·Feature·expected
   revision을 잠가 한 transaction에서 기록한다. 따라서 runtime에는 `feature_versions` INSERT를 주지
   않는다. 단, 0095/0096 current schema에서 subtype detail을 조립하는 private
-  `features_detailed`는 `feature_repo` non-public detail, admin detail, curated detail reader에만 필요한
-  read bridge이므로 runtime `SELECT`를 closed allowlist로 준다. final target에는 이 view가 없으므로
-  T-VN-34C가 해당 reader를 final typed projection으로 재배선하고 같은 migration에서 view grant,
-  allowlist, startup preflight의 required-read 항목을 모두 제거한다. T-VN-36이 field-override effective projection/lineage로 대체한 뒤 legacy request와
-  version relation을 물리 제거한다. 이와 마찬가지로 **0095 현행 schema 전환 bridge에서만** provider
+  `features_detailed`는 `feature_repo` non-public detail, admin detail, curated detail reader와 두
+  materializer가 함께 쓰는 transitional bridge다. C는 이름만 바꾼 private view/shim을 남기지 않는다.
+  public은 core alias에 exact 3축 predicate를 둔 명시 열 `public_features`가 typed core+subtype을 직접
+  조립하고, non-public reader는 code-level typed core+subtype projection을, materializer는 procedure
+  내부 typed-table assembly를 사용한다. 그 다음 같은 migration에서 `features_detailed` view와 view grant,
+  allowlist, startup preflight required-read를 제거한다. materializer owner에만 필요한 core/subtype 최소
+  SELECT를 주며 runtime에 broad detail read는 주지 않는다. T-VN-36이 field-override effective
+  projection/lineage로 대체한 뒤 legacy request와 version relation을 물리 제거한다. 이와 마찬가지로
+  **0095 현행 schema 전환 bridge에서만** provider
   version `0`은 runtime JSON payload를 받지 않는 `feature.materialize_provider_feature_version(...)`
   procedure가 잠긴 Feature와 `features_detailed`에서만 조립한다. user whole-row fence가 provider
   core/subtype 변경을 막은 refresh는 user effective row를 provider baseline snapshot으로 오기록하지
@@ -153,8 +167,9 @@ runtime procedure는 현행 TEXT key를 받고 final target procedure는 UUID ke
 ## 4. reader·writer·REST 계약
 
 공개 reader(detail, batch, bbox, search, nearby, cluster, collection)는 `feature.public_features`만
-사용한다. 이 view는 명시 열 목록으로 정의하고, `features_detailed` 재생성 순서와 `pg_depend`를
-migration test로 고정한다. `SELECT *`를 통해 새 운영 상태가 public payload에 새어 나가지 않는다.
+사용한다. C의 view는 typed core+subtype table을 직접 조립하는 명시 열 목록이며 core alias 자신에
+3축 predicate를 둔다. 따라서 B의 core partial index implication을 보전하면서
+`features_detailed`를 의존하거나 `SELECT *`로 새 운영 상태를 public payload에 새어 나가지 않는다.
 
 현재 core의 point `coord`/`coord_5179`와 category/keyset/text index는 3축을 직접 partial predicate로
 표현할 수 있다. 반면 route/area geometry는 typed subtype table에 있고 3축은 core table에 있으므로,
@@ -216,13 +231,61 @@ refresh 경쟁은 feature row lock 아래 하나의 procedure로 직렬화해 re
 admin-only reader도 public view로 기계 치환하지 않는다. `public`, `selectable(active+valid)`,
 `admin_any` 세 predicate를 이름과 SQL로 분리해 draft/suppressed 검토 대상이 사라지지 않게 한다.
 
+### C typed assembly와 admin wire contract
+
+T-VN-34C는 private view를 다른 이름으로 재도입하지 않는다. assembly 소유자는 아래처럼 고정한다.
+
+| 소비자 | final assembly | 소유자 | 금지 사항 |
+|---|---|---|---|
+| public detail/list/batch/bbox/search/nearby/cluster/collection | `feature.features` core alias와 typed point/event/route/area/notice subtype의 명시 `LEFT JOIN`/`CASE` | `feature.public_features` | `features_detailed`, `SELECT *`, legacy/axis/provenance public 열 |
+| non-public feature detail | repository SQL fragment의 typed core+subtype 명시 projection | `feature_repo` | private view, public predicate의 기계 재사용 |
+| admin detail/list/map | repository SQL fragment의 typed core+subtype 명시 projection과 `admin_any`/axis filter | `admin_feature_repo` | legacy `status` 기본 filter |
+| curated/dedup preview·source rule | 필요한 typed projection을 직접 join | `curated_repo`/`curation_repo` | `deleted_at IS NULL`의 의미 없는 치환 |
+| user/provider version materializer | 잠긴 core와 typed subtype의 procedure 내부 명시 JSON assembly | state procedure owner | view SELECT, caller JSON snapshot, legacy payload key |
+
+각 assembly는 명시 열 목록을 unit/integration test에서 고정한다. public assembly는 `status`, 세 axes,
+`deleted_at`, `user_change_*`, `data_origin`, `data_version`을 노출하지 않는다. non-public/admin
+assembly가 axes를 표시할 수는 있지만 legacy state 열을 노출하지 않는다. C migration은
+`pg_depend`와 static consumer inventory가 `features_detailed` 0건임을 증명한 뒤만 `DROP VIEW RESTRICT`를
+실행한다. public ordered allowlist는 `feature_id`, `feature_uuid`, `kind`, `name`, `category`, 좌표/주소/
+행정코드/URL/marker/parent/raw ref, `created_at`, `updated_at`, `row_revision`, `geom`, `detail`의 26개
+열로 고정한다. 모든 여덟 tuple을 seed해 `public_features`가 `(active,published,valid)`와 정확히 양방향
+`EXCEPT ALL`이 되는 것을 C integration에서 검증하고 B의 actual-reader EXPLAIN을 다시 실행한다.
+
+user immutable receipt와 provider `version=0` materializer payload는 모두 typed subtype `detail`,
+`lifecycle_state`/`publication_state`/`quality_state`, `data_origin`, `data_version`을 반드시 보존하고
+`status`, delete/user-change key는 하나도 담지 않는다. seeded procedure integration은 각 materializer를
+실행한 직후 snapshot axes가 그 materialization 시점의 locked core tuple과 같음을, provider version `0`
+upsert와 user immutable receipt 모두에서 확인한다. 이 snapshot contract는 T-VN-36의 final effective
+lineage가 대체할 때까지 유지한다.
+
+admin 상태 변경은 다음 HTTP union contract 하나만 사용한다.
+
+- `PATCH /v1/admin/features/{feature_id}/state`는 strong `If-Match`와 non-empty `reason_code`를 필수로
+  받으며 body actor/principal을 받지 않는다. 인증 boundary가 principal을 정한다.
+- body는 `{ "action": "retire", "reason_code": "..." }` **또는** `{ "reason_code": "...",
+  "lifecycle_state"?: ..., "publication_state"?: ..., "quality_state"?: ... }` 중 하나다. 빈 axis patch,
+  action+axis 혼합, 불가능 tuple/no-op은 `422`다.
+- retire는 `(retired, suppressed, current_quality)`를 한 revision·한 audit transition으로 기록한다.
+  reactivation은 별도 typed command이며 current source evidence와 lifecycle override revoke를 같은 Feature
+  lock에서 수행한다.
+- 성공 응답은 세 axes, `row_revision`, strong ETag, audit transition identity를 반환한다. 없는 Feature는
+  `404`, 누락 If-Match는 `428`, stale revision은 `412`, source/override 경쟁 충돌은 `409`다. UI는 `412`에
+  detail/audit timeline을 refetch한 뒤 사용자에게 재시도를 요구한다.
+- admin list/detail/map의 기본값은 여덟 legal tuple 전부이며 lifecycle/publication/quality 반복 filter는
+  AND로 결합한다. legacy `POST /deactivate`와 `status=active` 기본 filter는 없다.
+
+Map OpenAPI export 뒤 clean PinVi worktree에서 user/admin-detail snapshot과 generated client를 C exact Map
+head로 re-vendor한다. paired Map/PinVi commit·OpenAPI SHA·generated source SHA·compile·Feature-scope
+no-legacy-status gate를 cutover receipt에 남긴다.
+
 ## 5. 작업·PR 분할과 병렬 소유권
 
 | task/PR | 책임 | 소유권 | 배포 가능 여부 |
 |---|---|---|---|
 | T-VN-34A | target contract freeze, migration spine, tuple mapping/preflight, transition audit trigger, typed lifecycle override와 core/producer writer 전환, runtime/migrator DB principal·startup preflight 및 DB integration | agent A: Alembic·models·DTO/core/client·infra provider writer·runtime bootstrap·contract SQL/test | stack 내부 전용 |
 | T-VN-34B | `public_features` explicit projection, trigger-owned route/area `public_ready` projection flag와 explicit column ACL, public/service classifier, core point `WHERE 3축` 및 route/area `WHERE public_ready` spatial partial GiST와 core category/keyset/text B-tree/GIN index EXPLAIN, reader integration | agent B: public/admin repository reader·service/API read schema·performance tests | stack 내부 전용 |
-| T-VN-34C | admin state command, OpenAPI/type/UI, remaining admin/merge/Dagster writer, fixtures/live runner, current private `features_detailed` reader의 final typed projection 재배선 및 grant/allowlist/preflight 제거, final migration에서 legacy status 계열·index 물리 삭제 | 통합 소유: API/frontend/live E2E 및 final migration | C head만 배포·병합 가능 |
+| T-VN-34C | admin state command, OpenAPI/type/UI, remaining admin/merge/Dagster writer, fixtures/live runner, typed public/materializer assembly와 durable user request receipt, `features_detailed` 제거 및 grant/allowlist/preflight 제거, final migration에서 legacy status 계열·index 물리 삭제 | 통합 소유: API/frontend/live E2E 및 final migration | C head만 배포·병합 가능 |
 
 agent A/B는 서로의 소유 파일을 되돌리지 않고, 공유된 contract SQL과 generated OpenAPI를 기준으로
 자주 rebase한다. migration-bearing changes는 전역 순서를 지킨다. C가 아닌 PR은 review-ready
@@ -230,30 +293,50 @@ draft이며 실행 환경에 적용하지 않는다.
 
 ## 6. 최종 migration과 제거 manifest
 
-C의 final migration은 같은 deployment unit에서 다음을 실행한다.
+C의 final migration은 같은 deployment unit에서 다음 순서를 지킨다. 이 결과는 post-T36/T39
+`target-schema-v1.sql`과 다른 post-34/pre-36 중간 상태이며, 그 target을 C에서 약화하거나 억지로
+앞당기지 않는다.
 
-1. 새 3축·tuple CHECK·transition table/trigger를 만들고 mapping diagnostic과 backfill audit를 수행한다.
-2. 모든 writer/readers가 axes와 public view만 사용함을 static inventory 및 focused integration으로
-   증명한다.
-3. current private `features_detailed`의 runtime consumer를 final typed projection으로 바꾸고 runtime
-   `SELECT` grant, closed ACL allowlist, startup preflight의 required-read assertion을 함께 제거한다.
-   final target에 이 bridge view를 되살리지 않는다.
-4. legacy `status`, `deleted_at`, `user_deleted_at`, `user_change_kind`, `user_change_status`,
+1. OpenAPI/generated type/PinVi/UI/fixture와 모든 writer를 axes contract로 전환하고, old binary가
+   cutover 중 실행되지 않게 한다.
+2. `public_features`를 typed core+subtype direct assembly로 `DROP VIEW ... RESTRICT` 뒤 재생성한다.
+   public view의 exact 3축 core alias와 B partial-index implication을 검증한다.
+3. transition·user/provider materializer를 먼저 typed-table assembly로 `CREATE OR REPLACE`한다. state
+   procedure owner에는 core와 모든 typed subtype의 direct `SELECT`, materializer가 실제 갱신하는 최소
+   column만 grant하고 runtime에는 private projection/view의 broad `SELECT`를 주지 않는다. user
+   request receipt는 `(feature_id, request_id)` immutable unique로 옮기며, retry는 stale revision이어도
+   기존 receipt만 반환한다. 이 단계에서 `data_origin`/`data_version`, `feature_versions`, 두 materializer는
+   유지한다.
+4. non-public `feature_repo`/admin/curated reader를 code-level typed projection으로 바꾸고 normal
+   provider/merge/Dagster tombstone/user writer를 새 schema에서 실행 검증한다. visibility predicate는
+   public=public view, lineage competitor=lifecycle active, admin=admin_any처럼 용도별로 명시하며
+   `deleted_at IS NULL` 기계 치환을 금지한다.
+5. view/procedure/reader/static inventory가 legacy를 참조하지 않는 증거 뒤 `features_detailed`를
+   삭제한다. runtime privilege reconciler allowlist와 startup preflight required-read도 object 삭제 뒤
+   제거하고 API/Dagster LOGIN을 재검증한다.
+6. legacy `status`, `deleted_at`, `user_deleted_at`, `user_change_kind`, `user_change_status`,
    `user_change_request_id`, `user_deleted_by`, `user_change_reason`와 그것에 의존하는
    CHECK/index/trigger/query를 물리 제거한다. `data_origin`/`data_version`/whole-row freeze는
    T-VN-36A-C가 field override provenance와 effective projection으로 대체한 뒤 T-VN-36C에서
    별도로 제거한다.
 
-`consumer-rollout-v1.json`과 T-VN-39의 removal manifest에는 위 객체가 이미 제거됐음을 기록한다.
+`contracts/vnext/tvn34c-post-cutover-invariants-v1.sql`은 legacy object zero, retained
+`data_origin`/`data_version`·version/materializer bridge, public view column allowlist·3축 predicate,
+runtime grant를 실행 가능한 중간 contract로 고정한다. `tests/integration/test_tvn34c_post_cutover_contract.py`
+는 fresh `0096 → C` migration 뒤 이 file의 `post-cutover` trailer parser와 모든 SQL assertion을 실행하고,
+seeded tuple visibility·receipt retry/concurrency·catalog definition/static gate를 함께 검사한다.
+`tests/unit/test_tvn34c_post_cutover_contract_artifact.py`는 file byte SHA·trailer parser/phase를
+fail-close한다. 이 두 gate와 C migration fingerprint를 같은 PR에서 갱신한다. `consumer-rollout-v1.json`과
+T-VN-39의 removal manifest에는 위 객체가 이미 제거됐음을 기록한다.
 T-VN-39에 오래 보관할 compatibility surface는 남기지 않는다.
 
 ## 7. 검증 matrix
 
 | 구간 | 필수 증거 |
 |---|---|
-| contract/DDL | 여덟 허용 tuple과 네 retired illegal tuple 전수, runtime direct Feature INSERT/axis UPDATE와 direct audit INSERT/UPDATE/DELETE/TRUNCATE가 DB에서 거부됨, create/transition procedure는 정확히 한 audit을 만듦, no-op/missing/malformed context 거부, runtime/migrator identity·owner/EXECUTE/table grant catalog assertion; actual/target artifact SHA와 violation fixture 갱신 |
-| mapping/audit | 모든 legacy tuple과 contradictory diagnostic, create/backfill/provider/admin/user-request/merge/Dagster transition의 old/new tuple·principal·invoker/state-procedure/audit-writer DB identity·reason·revision 검증, feature purge 뒤 audit 보존 |
-| public/read | 여덟 tuple × detail/batch/bbox/search/nearby/cluster/category/collection public leak 0, batch 5-state, admin predicate 분리, status reference normal-path gate, current runtime의 두 closed read view 실제 SELECT와 C final에서 `features_detailed` grant/preflight/view 부재, view/core/route-area `public_ready`의 양방향 `EXCEPT ALL` regression proof, two-session axis-update×subtype-insert 및 subtype payload-update×state-transition interleaving, direct flag/identity UPDATE와 subtype DELETE `42501` 및 table/column privilege catalog gate |
+| contract/DDL | 여덟 허용 tuple과 네 retired illegal tuple 전수, runtime direct Feature INSERT/axis UPDATE와 direct audit INSERT/UPDATE/DELETE/TRUNCATE가 DB에서 거부됨, create/transition procedure는 정확히 한 audit을 만듦, no-op/missing/malformed context 거부, runtime/migrator identity·owner/EXECUTE/table grant catalog assertion; post-34/pre-36 contract와 post-T36 target artifact를 분리해 각각 SHA·fixture를 갱신 |
+| mapping/audit | 모든 legacy tuple과 contradictory diagnostic, create/backfill/provider/admin/user-request/merge/Dagster transition의 old/new tuple·principal·invoker/state-procedure/audit-writer DB identity·reason·revision 검증, 동일 request의 동시/반복 retry가 Feature/request lock·partial unique·immutable trigger 아래 하나의 receipt와 stable revision만 남김, user receipt/provider version=0 snapshot이 materialization 시점 axes·typed detail·retained ownership을 보존하고 legacy key 0임, feature purge 뒤 audit 보존 |
+| public/read | public ordered allowlist와 typed core+five subtype direct `pg_depend`, 여덟 tuple × detail/batch/bbox/search/nearby/cluster/category/collection public leak 0 및 public/core 양방향 `EXCEPT ALL`, batch 5-state, admin predicate 분리, Feature-scope status reference normal-path gate, C final에서 `features_detailed`/grant/preflight 부재와 public-only runtime SELECT, view/function/trigger/index predicate/constraint catalog legacy-zero, route-area `public_ready` 양방향 proof, two-session axis-update×subtype-insert 및 subtype payload-update×state-transition interleaving, direct flag/identity UPDATE와 subtype DELETE `42501` 및 table/column privilege catalog gate |
 | 성능 | core point bbox 4326/5179·nearby와 route/area `WHERE public_ready` geom partial GiST, core category/keyset/text hot predicate가 exact 3축 partial predicate를 사용한다는 `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` gate |
 | API/UI | OpenAPI all export/check, Map/PinVi generated client compile, admin state command If-Match conflict, axes filter/badge/timeline browser e2e, provider refresh×admin retire/override revoke×quality validator race |
 | final live | n150 isolated candidate에서 final head fresh PostGIS + provider ETL 재적재, destructive admin/public/PinVi live E2E 메인·recovery, cleanup/physical legacy catalog zero |

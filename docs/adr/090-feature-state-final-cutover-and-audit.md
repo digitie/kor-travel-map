@@ -29,12 +29,17 @@ merge tombstone이 섞여 있다. 애플리케이션만 audit event를 쓰면 ra
    version snapshot은 별도 typed `materialize_user_feature_change_provenance` procedure가 request,
    Feature, expected revision을 잠근 뒤 원자적으로 기록하므로 runtime은 `feature_versions`의 직접 DML
    권한을 갖지 않는다. 다만 0095/0096 current schema에서 `feature.features_detailed`는 subtype detail을
-   조립하는 private read bridge이므로 `feature_repo` non-public detail, admin detail 및 curated detail
-   reader에 한해 runtime `SELECT`를 closed allowlist로 준다. 이는 public 권한이 아니며 final target에는
-   이 view가 없다. T-VN-34C는 해당 reader를 final typed projection으로 재배선하고 같은 migration에서
-   `features_detailed` grant·ACL allowlist·runtime preflight 요구를 제거한다. 이 procedure는 0095 현행
-   schema 전환 bridge로만 남기며 final target에는 두지 않는다. T-VN-36의 field-override effective projection/lineage가
-   이를 대체한 뒤 legacy request/version relation을 제거한다. 같은 0095 bridge에서 provider version은
+   조립하는 private read bridge이므로 `feature_repo` non-public detail, admin detail, curated detail과
+   두 materializer에 한해 runtime/owner read를 준다. 이는 public 권한이 아니며 final target에는 이 view가
+   없다. T-VN-34C는 public view·non-public reader·materializer를 typed core+subtype direct assembly로
+   재배선한 뒤 같은 migration에서 `features_detailed`·grant·ACL allowlist·runtime preflight 요구를 제거한다.
+   이름만 바꾼 private view/shim은 만들지 않는다. user request retry는 core `user_change_*`가 아니라
+   `feature_versions`의 immutable `(feature_id, request_id)` receipt가 stale retry에도 기존 result를
+   반환하도록 대체한 뒤 삭제한다. user/provider version snapshot은 typed detail과 materialization 시점의
+   세 axes·`data_origin`/`data_version`을 보존하고 legacy state/provenance key를 담지 않는다.
+   `data_origin`/`data_version`, version/materializer bridge는 T-VN-36의
+   field-override effective projection/lineage가 대체할 때까지 유지하며, T‑VN‑34C의 post-cutover contract와
+   post‑T36 final target contract를 혼동하지 않는다. 같은 0095 bridge에서 provider version은
    caller payload가 아닌 잠긴 Feature와 canonical detailed projection으로 조립하는
    `materialize_provider_feature_version` procedure만 기록한다. user whole-row fence가 provider
    core/subtype 변경을 막은 refresh는 user effective row를 provider `version=0` baseline으로
@@ -61,10 +66,13 @@ merge tombstone이 섞여 있다. 애플리케이션만 audit event를 쓰면 ra
    API와 Dagster login의 실제 provider bundle 적재와 admin command로 이를 검증한다.
    0095의 transitional procedure는 TEXT key를 받고 T-VN-39 final target procedure는 audit에 보존한 UUID key를
    받는다. audit의 두 identity가 hard purge 뒤에도 이 final conversion 근거를 보존한다.
-3. public은 `(active,published,valid)` 단 하나이며 모든 public reader는 명시 열
-   `feature.public_features` view를 사용한다. public DTO는 운영 축을 노출하지 않고 admin DTO/API는
-   세 축과 audit timeline을 독립적으로 노출한다. admin state command는 If-Match와 reason을
-   요구하는 단일 atomic PATCH이고, 기존 deactivate endpoint는 retire action으로 대체한다. geometry가
+3. public은 `(active,published,valid)` 단 하나이며 모든 public reader는 typed core+subtype table을 직접
+   조립하는 명시 열 `feature.public_features` view를 사용한다. `features_detailed` 또는 `SELECT *` private
+   shim은 C 이후 남기지 않는다. public DTO는 운영 축을 노출하지 않고 admin DTO/API는 세 축과 audit
+   timeline을 독립적으로 노출한다. admin state command는 strong If-Match와 reason을 요구하는 단일 atomic
+   PATCH이며 retire action과 axis patch를 같은 body에 섞지 않는다. 성공 응답은 axes·revision·ETag·audit
+   transition identity를, 오류는 422/404/409/412/428의 명시 semantics를 준다. 기존 deactivate endpoint는
+   retire action으로 대체한다. geometry가
    route/area geometry가 subtype table에 분리돼 core predicate를 직접 partial GiST로 만들 수 없으므로,
    그 두 subtype에만 core tuple trigger가 갱신하는 `public_ready` projection flag를 둔다. 새 subtype
    attach만 Feature row를 `FOR UPDATE`로 잠가 current tuple에서 flag를 산출한다. 이미 연결된 subtype은
@@ -77,7 +85,9 @@ merge tombstone이 섞여 있다. 애플리케이션만 audit event를 쓰면 ra
    `public_ready` table/column UPDATE를 모두 거부한다. core/view/flag 양방향 invariant는 cache
    동등성의 regression proof다.
 4. legacy `status`와 soft-delete/user-change core metadata는 T-VN-34C의 한 final migration에서
-   모든 reader/writer/API/UI/OpenAPI/PinVi/live fixture를 전환한 뒤 물리 삭제한다.
+   모든 reader/writer/API/UI/OpenAPI/PinVi/live fixture를 전환하고 typed assembly·durable retry receipt를
+   실행 검증한 뒤 물리 삭제한다. `features_detailed` 및 runtime detail ACL/preflight도 같은 deployment
+   unit에서 제거한다.
    `data_origin`/`data_version`/whole-row freeze는 T-VN-36의 field-override materialization 입력이므로
    T-VN-36C가 대체 정본을 검증한 뒤 삭제한다. dual-write, shadow column, legacy trigger, old-binary
    rollback은 만들지 않는다.
