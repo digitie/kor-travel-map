@@ -1,5 +1,19 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-10 — T-VN-34C: fresh live gate 실행 대기
+
+**다음 한 작업**: root-owned T-VN-34C fresh snapshot을 n150에 설치하고 fresh final
+PostGIS → actual Dagster runtime ETL → isolated Playwright destructive admin main/recovery
+→ PinVi public probe를 한 번에 실행한다. 실패하면 generic clone DB를 재사용하지 않고
+`BLOCKED.json`의 exact isolated project만 `recover`한다.
+
+- T-VN-34 state spine은 upstream T-VN-38 migration head에 선형으로 연결돼야 하며,
+  Map OpenAPI artifact와 PinVi vendor pair는 base가 바뀔 때마다 bytes와 provenance를
+  다시 고정한다.
+- installer/runner는 committed pair를 `git archive`로만 가져오고, private detail view
+  부재·final migration·runtime principal·exact executor hash를 fail-closed로 확인한다.
+- n150 destructive main/recovery 및 cleanup evidence는 아직 없다.
+
 ## 2026-08-12 — T-VN-38 완료 후보: current-summary CI 계약 수리 후 final green 대기
 
 **다음 한 작업**: #971의 T-VN-38 fact/current-summary 계약 수리 전체 integration gate와

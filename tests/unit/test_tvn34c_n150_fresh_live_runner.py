@@ -1,0 +1,69 @@
+"""T-VN-34C n150 fresh-live 실행기 정적 안전 계약."""
+
+from __future__ import annotations
+
+import subprocess
+from pathlib import Path
+
+_ROOT = Path(__file__).resolve().parents[2]
+_RUNNER = _ROOT / "scripts" / "run-tvn34c-n150-fresh-live-e2e.sh"
+_INSTALLER = _ROOT / "scripts" / "install-tvn34c-n150-fresh-live-e2e.sh"
+_SEEDER = _ROOT / "scripts" / "tvn34c_fresh_live_etl_seed.py"
+
+
+def _text(path: Path) -> str:
+    return path.read_text(encoding="utf-8")
+
+
+def test_fresh_live_shell_scripts_are_syntax_valid() -> None:
+    result = subprocess.run(
+        ["bash", "-n", str(_RUNNER), str(_INSTALLER)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_runner_uses_receipt_pinned_archives_not_its_checkout() -> None:
+    runner = _text(_RUNNER)
+
+    assert 'readonly RECEIPT="$INSTALL_DIR/consumer-rollout-v1.json"' in runner
+    assert (
+        'python3 - "$RECEIPT" "$MAP_DIR" "$PINVI_DIR" "$MAP_COMMIT" "$PINVI_COMMIT"'
+        in runner
+    )
+    assert 'safe_extract "$MAP_ARCHIVE" "$RUN_DIR"' in runner
+    assert 'safe_extract "$PINVI_ARCHIVE" "$RUN_DIR"' in runner
+    assert '"version"] != 3' in runner
+    assert "0097_tvn34c_final_cutover" in runner
+    assert "feature.features_detailed') IS NULL" in runner
+    assert "mcr.microsoft.com/playwright:v1.60.0-noble" in _text(
+        _ROOT / "docker" / "c7-playwright.Dockerfile"
+    )
+
+
+def test_installer_archives_exact_pair_and_installs_immutable_inputs() -> None:
+    installer = _text(_INSTALLER)
+
+    assert (
+        'git -C "$MAP_REPOSITORY" archive --format=tar.gz --prefix=map/ "$MAP_COMMIT"'
+        in installer
+    )
+    assert (
+        'git -C "$PINVI_REPOSITORY" archive --format=tar.gz --prefix=pinvi/ "$PINVI_COMMIT"'
+        in installer
+    )
+    assert '"version":3' in installer
+    assert 'install -o root -g root -m 0500' in installer
+    assert 'install -o root -g root -m 0600' in installer
+    assert 'sudo /bin/bash -s' in installer
+
+
+def test_seed_helper_requires_dagster_runtime_preflight() -> None:
+    seeder = _text(_SEEDER)
+
+    assert 'expected_login="ktm_feature_dagster_runtime"' in seeder
+    assert "AsyncKorTravelMapClient" in seeder
+    assert "FeatureKind.PLACE" in seeder

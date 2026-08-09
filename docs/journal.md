@@ -105,6 +105,30 @@ rebase에서 드러났다. 빈 `0095_tvn33_tvn38_head_merge`가 두 선행 revis
 **최종 게이트 25/25 GREEN**: unit+lint 2192 · api 1101(cov 77.64%) · dagster 530/3skip
 (85.23%) · integration **1049 passed / 0 skipped**(geo live 실제 실행) · vitest 37파일 302 ·
 frontend 9종.
+## 2026-08-10 — T-VN-34: T-VN-38 위 rebase와 fresh live 실행 경계 재고정
+
+T-VN-34의 state cutover는 T-VN-38 base 위에서만 재배치한다. Map OpenAPI full bytes가
+달라지면 artifact gate가 즉시 재동결을 요구하며, Map/PinVi의 user/admin-detail vendor
+pair도 source revision·vendor hash·deterministic admin subset으로 다시 대조한다.
+
+n150 live gate는 기존 clone DB runner를 재사용하지 않는다. final migration보다 앞선
+DB나 호스트 browser runtime을 사용하지 않고, root-owned snapshot의 fresh DB·Dagster
+runtime ETL·Playwright executor·PinVi probe를 같은 isolated compose run으로 묶는다.
+실패하면 `BLOCKED.json`을 보존하고 `recover`만 허용한다. 이 경계의 로컬 static gate는
+통과했지만 destructive n150 실행과 recovery evidence는 별도 완료 조건이다.
+
+## 2026-08-11 — T-VN-38: 최신 T-VN-33 위 rebase와 Alembic head 수렴
+
+T-VN-33의 `0092_tvn33_offline_cleanup`가 T-VN-38A의
+`0092_weather_current_summary`와 같은 `0091`에서 분기한 사실이 rebase 뒤 fresh
+upgrade에서 드러났다. 둘 중 하나를 생략하면 정리 또는 immutable summary schema가
+빠지고, 그대로 두면 Alembic `head`가 두 개가 된다. 빈
+`0095_tvn33_tvn38_head_merge`가 두 선행 revision을 함께 요구하도록 수렴시켰다.
+
+영향도는 T-VN-33의 provider lineage/OpenAPI·Dagster·모델 파일과 T-VN-38의 현재
+weather/price projection 계약이 겹치는 지점으로 한정했다. target catalog와 OpenAPI
+baseline은 이 결선 결과로 다시 동결하며, 이후 T-VN-34는 이 merge revision을
+`down_revision`으로 삼아 선형 stack을 계속한다.
 
 ## 2026-08-11 (2) — T-VN-33 33-E: 격리 fresh 재적재 + n150 live 확인
 
