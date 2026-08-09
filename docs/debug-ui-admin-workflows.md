@@ -182,7 +182,7 @@ T-221 종료 기준으로 admin UI/UX 시나리오 연결성의 핵심 gap은 �
 Feature 검토 화면은 항상 지도 뷰와 테이블 뷰를 전환할 수 있어야 한다.
 
 - 뷰 전환 상태는 URL query와 Zustand에 동시에 반영한다.
-  - 예: `/features?view=map&status=active&kind=place`
+  - 예: `/features?view=map&lifecycle_state=active&publication_state=published&quality_state=valid&kind=place`
   - 예: `/features?view=table&q=국립공원&page_size=100`
 - 지도 뷰에서는 현재 지도 중심점과 bbox가 1차 기준이다.
 - 테이블 뷰에서는 `name asc`가 기본 정렬이다.
@@ -210,7 +210,9 @@ Feature 검토 화면은 항상 지도 뷰와 테이블 뷰를 전환할 수 있
 | `q` | 이름, 주소, feature_id, source id 부분 검색 |
 | `kind` | 반복 가능. `place`, `event`, `notice`, `price`, `weather`, `route`, `area` |
 | `category` | 8자리 category code. 반복 가능 |
-| `status` | `draft`, `active`, `inactive`, `hidden`, `broken`, `deleted` |
+| `lifecycle_state` | `active`, `retired` |
+| `publication_state` | `draft`, `published`, `suppressed` |
+| `quality_state` | `valid`, `quarantined` |
 | `provider` | canonical provider name |
 | `dataset_key` | provider dataset key |
 | `issue_type` | 결측/중복/정합성 이슈 타입 |
@@ -227,7 +229,9 @@ offset pagination은 초기 구현에서는 허용할 수 있으나 MOIS bulk �
 
 목록과 상세에는 다음 badge를 공통으로 노출한다.
 
-- `status`: active, inactive, hidden, broken, deleted.
+- `lifecycle_state`: active, retired.
+- `publication_state`: draft, published, suppressed.
+- `quality_state`: valid, quarantined.
 - `kind`: place, event, notice, price, weather, route, area.
 - `provider`: primary source provider.
 - `issues`: duplicate pending, missing coordinate, missing address, consistency
@@ -253,7 +257,9 @@ Query:
 | `q` | string | 없음 | `name`, 주소 JSON, `feature_id`, source id 검색 |
 | `kind` | string[] | 전체 | feature kind 반복 파라미터 |
 | `category` | string[] | 전체 | category code 반복 파라미터 |
-| `status` | string[] | `active` | status 반복 파라미터 |
+| `lifecycle_state` | string[] | 전체 | lifecycle 반복 파라미터 |
+| `publication_state` | string[] | 전체 | publication 반복 파라미터 |
+| `quality_state` | string[] | 전체 | quality 반복 파라미터 |
 | `provider` | string[] | 전체 | primary source provider |
 | `dataset_key` | string[] | 전체 | source dataset |
 | `has_coord` | boolean | 없음 | 좌표 보유 여부 |
@@ -263,7 +269,7 @@ Query:
 | `updated_to` | datetime | 없음 | KST aware |
 | `page_size` | int | 50 | 25/50/100/200/500 |
 | `cursor` | string | 없음 | keyset cursor |
-| `sort` | string | `name` | `name`, `updated_at`, `created_at`, `kind`, `status`, `provider`, `issue_count` |
+| `sort` | string | `name` | `name`, `updated_at`, `created_at`, `kind`, `provider`, `issue_count` |
 | `order` | string | `asc` | `asc`, `desc` |
 
 응답:
@@ -277,7 +283,9 @@ Query:
         "kind": "place",
         "name": "광화문",
         "category": "01070300",
-        "status": "active",
+        "lifecycle_state": "active",
+        "publication_state": "published",
+        "quality_state": "valid",
         "lon": 126.9769,
         "lat": 37.5759,
         "address_label": "서울특별시 종로구 ...",
@@ -362,7 +370,7 @@ Row actions:
 
 - `kind` 반복 파라미터
 - `limit`
-- 후속 확장: `status`, `category`, `issue_type`
+- 후속 확장: `lifecycle_state`, `publication_state`, `quality_state`, `category`, `issue_type`
 
 지도 뷰는 bbox 이동/zoom 변화 시 TanStack Query로 refetch한다. frontend는 좌표를
 소수 4자리 정도로 양자화해 지나친 refetch를 줄인다.
@@ -381,7 +389,6 @@ Query:
 | `lat` | number | 필수 | WGS84 latitude |
 | `radius_m` | int | 500 | 50, 100, 250, 500, 1000, 3000 |
 | `kind` | string[] | 전체 | 반복 가능 |
-| `status` | string[] | `active` | 반복 가능 |
 | `exclude_feature_id` | string | 없음 | 현재 feature 제외 |
 | `limit` | int | 200 | 최대 500 |
 | `sort` | string | `distance` | `distance`, `name`, `updated_at` |
@@ -404,7 +411,7 @@ Route: `/admin/features/new`
    - kind
    - name
    - category
-   - status: 기본 `draft`, 운영자가 바로 노출하려면 `active`
+   - lifecycle/publication/quality: 기본 `active`/`published`/`valid`, 운영자가 각 축을 독립 제어
 2. 위치
    - lon/lat 직접 입력
    - 지도 클릭으로 좌표 지정
@@ -434,7 +441,9 @@ Route: `/admin/features/new`
   "kind": "place",
   "name": "수동 등록 장소",
   "category": "01070300",
-  "status": "draft",
+  "lifecycle_state": "active",
+  "publication_state": "published",
+  "quality_state": "valid",
   "coord": {"lon": 126.978, "lat": 37.5665},
   "address": {},
   "detail": {},
@@ -479,35 +488,17 @@ Route: `/admin/features/new`
 
 ## 9. Feature 비활성화와 영구 삭제
 
-### 9.1 비활성화
+### 9.1 상태 전이
 
-#### `POST /admin/features/{feature_id}/deactivate`
+`PATCH /admin/features/{feature_id}/state`는 strong `If-Match`와 `reason_code`를 요구한다.
+`action='patch'`는 publication/quality 중 하나 이상을 원자적으로 바꾸고, `action='retire'`는
+lifecycle을 retired와 publication을 suppressed로 전환한다. retire는 provider 재활성을 막는 typed
+`lifecycle_state='retired'` override를 같은 transaction에 남긴다.
 
-구현됨(T-207c): backend는 status 비활성화와 `status` override 생성까지 제공한다.
-`prevent_provider_reactivation=true`이면 provider `upsert_feature`가 이 feature의
-status/deleted_at을 덮지 않는다.
-
-요청:
-
-```json
-{
-  "reason": "운영상 노출 제외",
-  "operator": "local-admin",
-  "prevent_provider_reactivation": true
-}
-```
-
-처리 규칙:
-
-- `feature.features.status='inactive'`로 변경한다.
-- `deleted_at`은 설정하지 않는다.
-- source records, source links, files, history는 유지한다.
-- `prevent_provider_reactivation=true`이면 `ops.feature_overrides`에
-  `field_path='status'`, `override_value='"inactive"'`를 active 상태로 남긴다.
-  후속 provider 재적재가 status를 다시 active로 덮지 못해야 한다.
-- reason은 필수다.
-
-응답에는 변경 전/후 status와 override 생성 여부를 포함한다.
+재활성은 `POST /admin/features/{feature_id}/state/reactivate` 전용 command다. 현재 dataset·source
+entity·current source record 증거와 strong `If-Match`를 요구하며, 성공 시 retired override를 원자적으로
+해제한다. 상세 화면은 `GET /admin/features/{feature_id}/state/transitions`의 append-only timeline을
+독립적으로 표시한다.
 
 ### 9.2 사용자 요청 soft delete
 
@@ -536,10 +527,8 @@ UI는 실수 방지를 위해 삭제 사유와 `feature_id` 확인을 요구한�
 처리 규칙:
 
 - 요청은 `ops.feature_change_requests(action='delete')`에 저장된다.
-- 적용 시 `feature.features.status='deleted'`, `deleted_at`, `user_deleted_at`,
-  `user_deleted_by`, `user_change_request_id`, `user_change_reason`을 기록한다.
-- `feature.feature_versions(version=1, origin='user_request', change_kind='delete')`에
-  삭제 후 effective snapshot을 남긴다.
+- 적용 시 상태 command가 lifecycle을 retired, publication을 suppressed로 전환하고,
+  immutable user-request receipt와 typed feature snapshot을 남긴다.
 - provider 재적재와 snapshot 누락 정리는 이 row를 되살리지 않는다.
 - `provider_sync.source_records`, `source_links`, `feature_files`는 hard delete하지 않는다.
 
@@ -555,7 +544,7 @@ Route: `/features/[feature_id]`
 ### 10.1 필수 섹션
 
 1. Header
-   - name, feature_id, kind, category, status, primary provider, updated_at.
+   - name, feature_id, kind, category, lifecycle/publication/quality badge, primary provider, updated_at.
 2. 위치
    - MapLibre GL + VWorld 지도.
    - 선택 feature marker.
@@ -585,7 +574,7 @@ Route: `/features/[feature_id]`
    - 처리 action.
 8. 변경/운영 이력
    - manual override.
-   - deactivate/delete audit.
+   - 상태 전이 및 delete audit.
    - provider job references.
 
 ### 10.2 주변 feature 검토
@@ -607,7 +596,7 @@ Route: `/features/[feature_id]`
 
 - 기본 정렬은 `name asc`.
 - 검색 가능.
-- sort: `name`, `distance`, `kind`, `category`, `status`, `provider`, `updated_at`.
+- sort: `name`, `distance`, `kind`, `category`, `provider`, `updated_at`.
 - row action: 상세 열기, dedup 후보로 추가, keep separate 표시.
 
 ## 11. Provider 상태와 refresh policy
@@ -1764,10 +1753,10 @@ tradeoff 근거를 PR 설명이나 `docs/journal.md`에 남긴다.
    - `GET /features/{feature_id}`.
    - 일반 좌표 기준 `/features/nearby`는 아직 REST 계약이 없다.
    - 외부 POI/cache target 기준 주변 feature는 `GET /features/nearby/by-target` 사용.
-3. **Manual feature create + deactivate**
+3. **Manual feature create + 상태 전이**
    - `POST /admin/features`
-   - `POST /admin/features/{id}/deactivate`
-   - audit log는 최소 구조라도 먼저 둔다.
+   - `PATCH /admin/features/{id}/state`, `POST /admin/features/{id}/state/reactivate`
+   - `GET /admin/features/{id}/state/transitions`의 append-only audit timeline을 표시한다.
 4. **Delete dry-run + hard delete**
    - `DELETE /admin/features/{id}?dry_run=true`
    - 실제 delete는 확인 UI와 함께.

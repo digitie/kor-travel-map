@@ -56,7 +56,7 @@
       },
       "pinvi_snapshot_receipt": {
         "map_commit": "f426c7b78c493035952ded5c2a13f61a2a351793",
-        "pinvi_commit": "73a3e6f76930b1b3deff79b641db1269cee4b39b",
+        "pinvi_commit": "040868bc2cb879e04d164ef014c8d2486d39994e",
         "map_user_openapi_sha256": "eca7eea1dff7aa1848e50428fb8da5507e4d636c3a979b04859ef43c7f7410e7",
         "map_full_openapi_sha256": "ed20c9af2537bd330132c49c8c3dad13ca03f627c713cef896119b1366c2d7ff",
         "pinvi_user_vendor_sha256": "eca7eea1dff7aa1848e50428fb8da5507e4d636c3a979b04859ef43c7f7410e7",

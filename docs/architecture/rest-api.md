@@ -532,7 +532,7 @@ provenance-less/legacy item을 `(collection_id, curation_item_id)` stable cursor
 ### 2.5 `/v1/admin/*` — 운영자 (인프라 SSO + kill-switch)
 ```
 GET    /v1/admin/features                              # 목록(page_size+cursor)
-GET    /v1/admin/features/in-bounds                    # raw bbox items/cluster(status 반복 필터)
+GET    /v1/admin/features/in-bounds                    # raw bbox items/cluster(3축 AND 반복 필터)
 GET    /v1/admin/features/{feature_id}                 # 상세
 GET    /v1/admin/features/{feature_id}/revision        # row_revision + raw strong ETag 편집 기준
 GET    /v1/admin/features/{feature_id}/weather         # 비공개 포함 admin weather card
@@ -540,7 +540,9 @@ GET    /v1/admin/features/{feature_id}/price           # 비공개 포함 admin 
 POST   /v1/admin/features                              # ✅#317 단건 생성(K-15)
 PATCH  /v1/admin/features/{feature_id}                 # ✅#317 수정
 DELETE /v1/admin/features/{feature_id}                 # ✅#317 soft delete
-POST   /v1/admin/features/{feature_id}/deactivate      # 비활성(kill-switch)
+PATCH  /v1/admin/features/{feature_id}/state            # publication/quality patch 또는 retire(If-Match)
+POST   /v1/admin/features/{feature_id}/state/reactivate # 현재 source 증거를 요구하는 재활성
+GET    /v1/admin/features/{feature_id}/state/transitions # append-only 상태 전이 이력
 POST   /v1/admin/features/change-requests/{request_id}/approve   # ✅#317
 POST   /v1/admin/features/change-requests/{request_id}/reject    # ✅#317
 GET    /v1/admin/features/change-requests              # 변경요청 큐(T-215b UI 대상)

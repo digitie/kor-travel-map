@@ -40,9 +40,9 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     "tvn33-reference-ownership-v1.sql": (
         "e9a342f7c227f25643f3c1360b081abafac1e89bfb4c52339b89e985401b1604"
     ),
-    "openapi-diff-v1.json": ("e20a0cf00af4a5d973b5495e3bf9e113375e85548c9d17d79398901ad0338fd2"),
+    "openapi-diff-v1.json": ("3291293fd926e7c1dc0cc933ade50a3775d5aa43becfd17711c21c33d7d620ae"),
     "consumer-rollout-v1.json": (
-        "9842c71901071b8ab0e897d1c7c5ea47cc8a54cfd18bb0cbb36ac7d96be5660d"
+        "dacd86ee842c6c8d11c006a1c4bdab9eb9430b84fe37c51b5d7431cdddf8c7f4"
     ),
     "violation-fixtures-v1.sql": (
         "dba1ad0e640e4ee0e2c6904ab880f7548cf073d859f221840b6fad873e3a8df6"
@@ -185,6 +185,34 @@ def test_consumer_rollout_shape() -> None:
         revendor = task["pinvi_snapshot_revendor"]
         assert set(revendor) == {"user", "service", "admin-detail"}, task_id
         assert set(revendor.values()) <= _REVENDOR_VALUES, task_id
+    receipt = rollout["tasks"]["T-VN-34"]["pinvi_snapshot_receipt"]
+    assert set(receipt) == {
+        "map_commit",
+        "pinvi_commit",
+        "map_user_openapi_sha256",
+        "map_full_openapi_sha256",
+        "pinvi_user_vendor_sha256",
+        "pinvi_admin_detail_vendor_sha256",
+        "pinvi_feature_schema_sha256",
+        "verification",
+    }
+    assert re.fullmatch(r"[0-9a-f]{40}", receipt["map_commit"])
+    assert re.fullmatch(r"[0-9a-f]{40}", receipt["pinvi_commit"])
+    for key in (
+        "map_user_openapi_sha256",
+        "map_full_openapi_sha256",
+        "pinvi_user_vendor_sha256",
+        "pinvi_admin_detail_vendor_sha256",
+        "pinvi_feature_schema_sha256",
+    ):
+        assert re.fullmatch(r"[0-9a-f]{64}", receipt[key]), key
+    assert receipt["map_user_openapi_sha256"] == receipt["pinvi_user_vendor_sha256"]
+    assert receipt["verification"] == [
+        "admin-detail deterministic re-extraction",
+        "PinVi contract pin consistency",
+        "Node 22 Linux workspace typecheck",
+        "public Feature no legacy status or internal state axes",
+    ]
     entries = rollout["removal_manifest"]["entries"]
     assert entries, "removal manifest가 비어 있다"
     for entry in entries:
