@@ -2665,6 +2665,68 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     await expect(rowButton).toBeFocused();
   });
 
+  // 실행 가능한 refresh operation이 없는 catalog 전용 dataset(실측 74개 중 17~18개).
+  // 서버는 이 행에 `operation_key: null`을 낸다. UI는 그것을 `""`로 정규화해 들고
+  // 다니는데, 한 곳이라도 raw 값과 직접 비교하면 `null === ""`가 false가 되어
+  // **상세가 통째로 렌더되지 않았다**(적대 리뷰 8라운드, 리뷰어 두 명이 독립 지목).
+  // 픽스처에 이 축이 하나도 없어 어떤 게이트도 잡지 못했다 — 그래서 여기 박는다.
+  test("refresh operation이 없는 catalog 전용 행도 상세가 열린다", async ({
+    page,
+  }) => {
+    const catalogOnly = makeGridRow({
+      provider: KREX_PROVIDER,
+      dataset_key: KREX_DATASET,
+      sync_scope: "dataset_wide",
+      operation_key: null,
+      status: "never_run",
+      last_success_at: null,
+      catalog: makeCatalog({
+        label: "휴게소(카탈로그 전용)",
+        is_refreshable: false,
+      }),
+    });
+    await mockOpsDatasets(page, {
+      items: [catalogOnly],
+      details: {
+        [`${KREX_PROVIDER}/${KREX_DATASET}`]: makeDetail({
+          provider: KREX_PROVIDER,
+          dataset_key: KREX_DATASET,
+          catalog: makeCatalog({
+            label: "휴게소(카탈로그 전용)",
+            is_refreshable: false,
+          }),
+          scopes: [
+            {
+              sync_scope: "dataset_wide",
+              operation_key: null,
+              status: "never_run",
+              cursor: {},
+              last_success_at: null,
+              last_failure_at: null,
+              eligible_after: null,
+              freshness: makeFreshness(),
+              consecutive_failures: 0,
+            },
+          ],
+        }),
+      },
+    });
+
+    // `operation_key` 없이 진입한다 — 축이 덜 적힌 링크는 유일하게 결정되면 열린다.
+    await page.goto(
+      `/ops/datasets?provider_dataset_id=${KREX_PROVIDER_DATASET_ID}` +
+        "&sync_scope=dataset_wide",
+    );
+
+    await expect(page.getByTestId("invalid-dataset-deep-link")).toHaveCount(0);
+    await expect(page.getByText("데이터셋 상세")).toBeVisible();
+    // catalog_state는 canonical이다 — 화면이 서버와 반대로 말하면 안 된다.
+    await expect(
+      page.getByText("ETL 카탈로그에 없는 잔존 행입니다", { exact: false }),
+    ).toHaveCount(0);
+    await expect(page.getByRole("tab", { name: "상태·이력" })).toBeVisible();
+  });
+
   test("legacy 자연키 딥링크는 canonical ID로 대체하지 않고 차단한다", async ({
     page,
   }) => {

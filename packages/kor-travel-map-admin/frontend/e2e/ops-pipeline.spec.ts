@@ -27,6 +27,7 @@ import { installInertOpsLiveWebSocket } from "./ws-isolation";
 type Schemas = components["schemas"];
 type PipelineOverviewResponse = Schemas["PipelineOverviewResponse"];
 type PipelineExecutionRecord = Schemas["PipelineExecutionRecord"];
+type PipelineJobPrecheckResponse = Schemas["PipelineJobPrecheckResponse"];
 type PipelineExecutionRootRecord = Schemas["PipelineExecutionRootRecord"];
 type PipelineDagsterRunDetailResponse = Schemas["DagsterRunDetailResponse"];
 type PipelineExecutionsListResponse = Schemas["PipelineExecutionsListResponse"];
@@ -204,6 +205,32 @@ function makeCatalogResponse(
       schedule_source_status: "ok",
       schedule_source_errors: [],
       execution_coverage: "db_recorded_canonical_operations",
+    },
+    meta: META,
+  };
+}
+
+function makeMoisPrecheckResponse(
+  overrides: Partial<PipelineJobPrecheckResponse["data"]> = {},
+): PipelineJobPrecheckResponse {
+  return {
+    data: {
+      job_name: "mois_localdata_source_sync",
+      ready: true,
+      checked_at: "2026-07-17T09:00:00.000Z",
+      max_age_hours: 24,
+      age_hours: 1,
+      latest_run: {
+        run_id: "mois-source-run-1",
+        job_name: "mois_localdata_source_sync",
+        status: "SUCCESS",
+        start_time: Date.parse("2026-07-17T07:55:00.000Z") / 1000,
+        end_time: Date.parse("2026-07-17T08:00:00.000Z") / 1000,
+        update_time: Date.parse("2026-07-17T08:00:00.000Z") / 1000,
+        tags: {},
+      },
+      disabled_reason: null,
+      ...overrides,
     },
     meta: META,
   };
@@ -856,6 +883,8 @@ interface MockOptions {
     headers?: Record<string, string>;
     body: unknown;
   };
+  moisPrecheckResponse?: { status: number; body: unknown };
+  moisPrecheckResponses?: Array<{ status: number; body: unknown }>;
   catalogResponse?: { status: number; body: unknown };
   catalogResponses?: Array<{ status: number; body: unknown }>;
 }
@@ -887,6 +916,7 @@ interface MockCounters {
   runNowBodies: Array<string | null>;
   detailQueries: Array<{ executionId: string; query: URLSearchParams }>;
   cancelBodies: unknown[];
+  moisPrecheckCalls: number;
   catalogCalls: number;
 }
 
@@ -912,6 +942,7 @@ async function installPipelineMocks(
     runNowBodies: [],
     detailQueries: [],
     cancelBodies: [],
+    moisPrecheckCalls: 0,
     catalogCalls: 0,
   };
   const claimResolutionLedger = new Map<
@@ -931,6 +962,22 @@ async function installPipelineMocks(
     const pathname = url.pathname;
     counters.observedApiContracts.push(observedApiContract(request));
 
+    if (pathname.endsWith("/v1/ops/pipeline/prechecks/mois-source-sync")) {
+      const response =
+        options.moisPrecheckResponses?.[
+          Math.min(
+            counters.moisPrecheckCalls,
+            options.moisPrecheckResponses.length - 1,
+          )
+        ] ?? options.moisPrecheckResponse;
+      counters.moisPrecheckCalls += 1;
+      if (response) {
+        await fulfillJson(route, response.body, response.status);
+        return;
+      }
+      await fulfillJson(route, makeMoisPrecheckResponse());
+      return;
+    }
     if (pathname.endsWith("/v1/ops/pipeline/overview")) {
       await fulfillJson(route, options.overview ?? makeOverview({}));
       return;
@@ -3872,6 +3919,142 @@ test.describe("/ops/pipeline", () => {
       dialog.getByText("현재 canonical catalog에 없는 데이터셋입니다."),
     ).toBeVisible();
     expect(counters.previewBodies).toHaveLength(0);
+  });
+
+  // T-VN-33이 provider 이름 입력을 없애면서 MOIS 사전점검이 **표시도 차단도** 통째로
+  // 사라졌고, 그것을 잡아낸 것은 테스트가 아니라 react-doctor의 죽은 export 규칙이었다.
+  // 그 뒤 표시만 복구되고 제출 차단은 여전히 없었다(적대 리뷰 8라운드 B4).
+  // 아래 넷이 그 회귀를 다시 잡는다 — 이제 판정은 provider 입력이 아니라 **고른
+  // catalog 행의 provider**에서 온다.
+  test("요청 dialog — MOIS 초기 precheck 성공 후 제출 직전 장애를 차단", async ({
+    page,
+  }) => {
+    const counters = await installPipelineMocks(page, {
+      moisPrecheckResponses: [
+        { status: 200, body: makeMoisPrecheckResponse() },
+        {
+          status: 503,
+          body: {
+            type: "https://kor-travel-map/errors/dagster-unavailable",
+            title: "Dagster unavailable",
+            status: 503,
+            detail: "Dagster unavailable",
+            code: "DAGSTER_UNAVAILABLE",
+            request_id: "e2e",
+            errors: [],
+          },
+        },
+      ],
+    });
+    await page.goto("/ops/pipeline");
+    await page.getByRole("button", { name: "갱신 요청 생성" }).click();
+    const dialog = page.getByRole("dialog", { name: "갱신 요청 생성" });
+    await dialog
+      .getByLabel("대상 데이터셋")
+      .selectOption(String(PROVIDER_DATASET_IDS["python-mois-api/mois_licenses"]));
+    await expect(dialog.getByTestId("mois-precheck-notice")).toContainText(
+      "정상",
+    );
+    await dialog.getByRole("button", { name: "dry-run 실행" }).click();
+
+    await expect(
+      dialog.getByText("MOIS 선행 source sync 최신 상태를 조회할 수 없어"),
+    ).toBeVisible();
+    expect(counters.moisPrecheckCalls).toBeGreaterThanOrEqual(2);
+    expect(counters.observedApiContracts).toContain(
+      "GET /v1/ops/pipeline/prechecks/mois-source-sync",
+    );
+    expect(counters.previewBodies).toHaveLength(0);
+  });
+
+  test("요청 dialog — MOIS precheck 조회 실패는 fail-closed", async ({
+    page,
+  }) => {
+    const counters = await installPipelineMocks(page, {
+      moisPrecheckResponse: {
+        status: 503,
+        body: {
+          type: "https://kor-travel-map/errors/dagster-unavailable",
+          title: "Dagster unavailable",
+          status: 503,
+          detail: "Dagster unavailable",
+          code: "DAGSTER_UNAVAILABLE",
+          request_id: "e2e",
+          errors: [],
+        },
+      },
+    });
+    await page.goto("/ops/pipeline");
+    await page.getByRole("button", { name: "갱신 요청 생성" }).click();
+    const dialog = page.getByRole("dialog", { name: "갱신 요청 생성" });
+    await dialog
+      .getByLabel("대상 데이터셋")
+      .selectOption(String(PROVIDER_DATASET_IDS["python-mois-api/mois_licenses"]));
+
+    const notice = dialog.getByTestId("mois-precheck-notice");
+    await expect(notice).toBeVisible();
+    await expect(notice).toContainText("Dagster run 조회 실패");
+    await dialog.getByRole("button", { name: "dry-run 실행" }).click();
+    await expect(
+      dialog.getByText("MOIS 선행 source sync 최신 상태를 조회할 수 없어"),
+    ).toBeVisible();
+    expect(counters.previewBodies).toHaveLength(0);
+  });
+
+  test("요청 dialog — MOIS 최근 run이 TTL을 넘으면 차단", async ({ page }) => {
+    const stalePrecheck = makeMoisPrecheckResponse({
+      ready: false,
+      age_hours: 48,
+      latest_run: {
+        run_id: "mois-source-run-stale",
+        job_name: "mois_localdata_source_sync",
+        status: "SUCCESS",
+        start_time: Date.parse("2026-07-15T08:55:00.000Z") / 1000,
+        end_time: Date.parse("2026-07-15T09:00:00.000Z") / 1000,
+        update_time: Date.parse("2026-07-15T09:00:00.000Z") / 1000,
+        tags: {},
+      },
+      disabled_reason: "MOIS source sync 최신 성공이 TTL(24시간)을 넘었습니다.",
+    });
+    const counters = await installPipelineMocks(page, {
+      moisPrecheckResponse: { status: 200, body: stalePrecheck },
+    });
+    await page.goto("/ops/pipeline");
+    await page.getByRole("button", { name: "갱신 요청 생성" }).click();
+    const dialog = page.getByRole("dialog", { name: "갱신 요청 생성" });
+    await dialog
+      .getByLabel("대상 데이터셋")
+      .selectOption(String(PROVIDER_DATASET_IDS["python-mois-api/mois_licenses"]));
+
+    await expect(dialog.getByTestId("mois-precheck-notice")).toContainText(
+      "TTL(24시간)을 넘었습니다",
+    );
+    await dialog.getByRole("button", { name: "dry-run 실행" }).click();
+    await expect(
+      dialog.getByText(
+        "MOIS source sync 최신 성공이 TTL(24시간)을 넘었습니다.",
+        { exact: true },
+      ),
+    ).toBeVisible();
+    expect(counters.previewBodies).toHaveLength(0);
+  });
+
+  test("요청 dialog — MOIS dataset을 고른 뒤 scope 유형을 바꾸면 경고가 사라진다", async ({
+    page,
+  }) => {
+    await installPipelineMocks(page);
+    await page.goto("/ops/pipeline");
+    await page.getByRole("button", { name: "갱신 요청 생성" }).click();
+    const dialog = page.getByRole("dialog", { name: "갱신 요청 생성" });
+    await dialog
+      .getByLabel("대상 데이터셋")
+      .selectOption(String(PROVIDER_DATASET_IDS["python-mois-api/mois_licenses"]));
+    await expect(dialog.getByTestId("mois-precheck-notice")).toBeVisible();
+
+    // `scopeProviderDatasetId` state는 scope 유형을 바꿔도 남는다. provider가
+    // 실려 나가지도 않는 요청에 MOIS 경고가 따라붙으면 안 된다.
+    await dialog.getByLabel("scope 유형").selectOption("center_radius");
+    await expect(dialog.getByTestId("mois-precheck-notice")).toHaveCount(0);
   });
 
   test("요청 생성 409는 Retry-After 안내로 표시", async ({ page }) => {

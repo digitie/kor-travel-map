@@ -3,7 +3,7 @@
 import { PlayIcon } from "lucide-react";
 import { memo, useCallback, useMemo, useRef, useState } from "react";
 
-import { ApiClientError } from "@/api/client";
+import { ApiClientError, getJson } from "@/api/client";
 import {
   type ExecutionKind,
   type FeatureUpdateScope,
@@ -619,6 +619,36 @@ function useRequestCreateDialogController() {
       if (catalogError) {
         setFormError(catalogError);
         return;
+      }
+      // MOIS 적재는 Dagster 선행 sync가 최근에 성공해 있어야 한다. 화면의 경고만으로는
+      // 부족하다 — **제출 직전에 다시 확인**해야 dialog를 연 뒤 상태가 뒤집힌 경우를
+      // 막는다. T-VN-33이 provider 이름 입력을 없애면서 이 가드가 통째로 사라졌고,
+      // 표시용 경고만 복구돼 있었다(적대 리뷰 8라운드 B4). 조회 실패도 차단이다
+      // (fail-closed) — 모르는 상태로 canonical write를 내보내지 않는다.
+      if (moisSelected !== null) {
+        let precheck: PipelineJobPrecheckResponse;
+        try {
+          precheck = await getJson<PipelineJobPrecheckResponse>(
+            "/v1/ops/pipeline/prechecks/mois-source-sync",
+          );
+        } catch {
+          if (isCurrentDialogSession()) {
+            setFormError(
+              "MOIS 선행 source sync 최신 상태를 조회할 수 없어 요청을 진행할 수 없습니다.",
+            );
+          }
+          return;
+        }
+        if (!isCurrentDialogSession()) {
+          return;
+        }
+        if (!precheck.data.ready) {
+          setFormError(
+            precheck.data.disabled_reason ??
+              "MOIS 선행 source sync가 유효한 최근 성공으로 확인되지 않아 요청을 진행할 수 없습니다.",
+          );
+          return;
+        }
       }
 
       const plan = {
