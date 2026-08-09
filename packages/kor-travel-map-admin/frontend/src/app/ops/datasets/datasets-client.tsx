@@ -1584,6 +1584,17 @@ const recentRunColumns: ColumnDef<OpsDatasetExecution, unknown>[] = [
     ),
   },
   {
+    // 같은 root가 형제 operation 둘을 건드리면 여기 두 줄이 나온다. 이 열이
+    // 없으면 운영자에게는 같은 실행이 두 번 찍힌 것으로만 보인다 — 무엇이
+    // 다른지 말해주는 유일한 값이다(scope 롤업 화면에서 실제로 일어난다).
+    accessorKey: "operation_key",
+    header: "operation",
+    enableSorting: false,
+    cell: ({ row }) => (
+      <span className="font-mono text-xs">{row.original.operation_key}</span>
+    ),
+  },
+  {
     accessorKey: "created_at",
     header: "생성",
     enableSorting: true,
@@ -1770,7 +1781,12 @@ function HistoryPanel({
           ariaLabel="최근 실행"
           columns={recentRunColumns}
           data={recentRuns}
-          getRowId={(run) => `${run.kind}:${run.id}`}
+          // 행의 identity는 실행이 아니라 **membership**이다 — root 하나가 형제
+          // operation 둘을 건드리면 `kind:id`가 같은 두 줄이 나와 row id가
+          // 충돌한다(React key 중복, 선택 상태 뒤섞임).
+          getRowId={(run) =>
+            `${run.kind}:${run.id}:${run.sync_scope}:${run.operation_key}`
+          }
           emptyMessage="최근 실행 기록이 없습니다."
           manualSorting={false}
           containerClassName="overflow-auto rounded-md bg-card"

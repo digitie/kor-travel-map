@@ -664,6 +664,7 @@ def test_run_history_emits_one_record_per_membership() -> None:
         (execution,),
         provider_dataset_id=42,
         sync_scopes=("dataset_wide",),
+        operation_keys=None,
     )
 
     # 요청한 scope의 member 둘 다 나온다. 정렬은 (sync_scope, operation_key)로
@@ -678,6 +679,18 @@ def test_run_history_emits_one_record_per_membership() -> None:
         "22222222-2222-4222-8222-222222222222",
         "33333333-3333-4333-8333-333333333333",
     }
+
+    # 반대 방향도 못이 박혀야 한다. exact triple을 지목하면 **그 operation만**
+    # 나온다 — query는 `dataset_operation_key`로 root를 고르지만 고른 root의
+    # membership 목록에는 형제가 그대로 들어 있어, 안 거르면 상세 화면이 옆
+    # operation의 실행을 섞어 보여준다(화면 안내문과도 어긋난다).
+    narrowed = service._run_history_records(
+        (execution,),
+        provider_dataset_id=42,
+        sync_scopes=("dataset_wide",),
+        operation_keys=("mois_sibling_refresh",),
+    )
+    assert [record.operation_key for record in narrowed] == ["mois_sibling_refresh"]
 
 
 @pytest.mark.unit

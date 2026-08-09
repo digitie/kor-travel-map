@@ -505,6 +505,7 @@ def _run_history_records(
     *,
     provider_dataset_id: int,
     sync_scopes: tuple[str, ...],
+    operation_keys: tuple[str, ...] | None,
 ) -> list[OpsDatasetExecution]:
     """root가 건드린 **membership마다** 한 줄을 낸다.
 
@@ -516,6 +517,12 @@ def _run_history_records(
     같은 root가 두 membership을 건드렸다면 그건 중복이 아니라 **서로 다른 두
     사실**이다. 행이 늘어나 보이는 것은 identity가 triple이기 때문이고,
     ``operation_key``가 함께 실리므로 화면에서 구분된다.
+
+    ``operation_keys``는 그 확장이 **요청한 축을 넘지 않게** 막는다. query는
+    ``dataset_operation_key``로 root를 고르지만, 고른 root의 membership 목록에는
+    형제 operation이 그대로 들어 있다 — 걸러내지 않으면 exact triple을 지목한
+    상세 화면이 옆 operation의 실행까지 섞어 보여준다(화면 안내문과도 어긋난다).
+    scope 롤업(``operation_keys=None``)일 때만 전부 싣는다.
     """
     records: list[OpsDatasetExecution] = []
     for execution in executions:
@@ -525,6 +532,7 @@ def _run_history_records(
                 for member in execution.provider_datasets
                 if member.provider_dataset_id == provider_dataset_id
                 and member.sync_scope in sync_scopes
+                and (operation_keys is None or member.operation_key in operation_keys)
             ),
             key=lambda item: (item.sync_scope, item.operation_key),
         )
@@ -1074,6 +1082,7 @@ async def load_dataset_detail(
                 executions_page.items,
                 provider_dataset_id=provider_dataset_id,
                 sync_scopes=history_sync_scopes,
+                operation_keys=(operation_key,) if operation_key is not None else None,
             ),
             next_cursor=executions_page.next_cursor,
             canonical_url=_run_history_url(

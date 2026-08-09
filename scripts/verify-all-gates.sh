@@ -67,10 +67,11 @@ py() {
   MSYS_NO_PATHCONV=1 wsl -e docker run --rm --network host \
     -v /var/run/docker.sock:/var/run/docker.sock \
     -v "$WSL_ROOT:/src" -e TESTCONTAINERS_RYUK_DISABLED=true "$IMAGE" \
-    sh -c "cd /repo && rm -rf src tests packages contracts alembic scripts .github \
+    sh -c "{ cd /repo && rm -rf src tests packages contracts alembic scripts .github \
       && cp -r /src/src /src/tests /src/packages /src/contracts /src/alembic \
-            /src/scripts /src/.github . \
-      && cp /src/alembic.ini . 2>/dev/null; $1"
+            /src/scripts /src/.github . ; } \
+      || { echo 'FATAL: 소스 복사 실패 — 아래 결과는 낡은 트리의 것이다'; exit 97; }; \
+      cp /src/alembic.ini . 2>/dev/null; $1"
 }
 
 # `scripts/`와 `.github/`는 위에서 복사한다. 안 하면 test_gate_script_mirrors_ci가
