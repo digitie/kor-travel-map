@@ -108,7 +108,6 @@ def _nearby_row() -> NearbyFeatureRow:
         kind="place",
         name="주변 주유소",
         category="06020000",
-        status="active",
         lon=126.98,
         lat=37.56,
         distance_m=320.5,
@@ -616,7 +615,6 @@ def test_features_nearby_by_target_passes_filters(
         assert kwargs["radius_km"] == 3.0
         assert kwargs["kinds"] == ["place"]
         assert kwargs["categories"] == ["06020000"]
-        assert kwargs["statuses"] == ["active"]
         assert kwargs["providers"] == ["python-opinet-api"]
         assert kwargs["sort"] == "distance"
         assert kwargs["limit"] == 10
@@ -637,7 +635,6 @@ def test_features_nearby_by_target_passes_filters(
             ("radius_km", "3.0"),
             ("kind", "place"),
             ("category", "06020000"),
-            ("status", "active"),
             ("provider", "python-opinet-api"),
             ("page_size", "10"),
         ],
