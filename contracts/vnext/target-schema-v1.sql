@@ -958,12 +958,11 @@ GRANT SELECT, INSERT ON feature.feature_aliases TO ktm_feature_state_procedure_o
 --   * geometry CHECK 3종: GeometryType(typmod)·ST_IsValid·NOT ST_IsEmpty +
 --     anchor 일치 (ADR-070 결정 2)
 --   * 공간 인덱스: 정본은 "공개 술어 partial GiST만"이다(보고서 §3:379, D-12
---     결정 3 — full GiST는 write 1.6× 실측 근거로 금지). 그런데 상태 컬럼이
---     core로 분리된 목표 구조에서는 공개 술어를 subtype-local partial index로
---     표현할 수 없다(설계 공백). 따라서 본 freeze는 **어떤 공간 인덱스도 고정하지
---     않는다** — 무술어 full GiST는 정본 위반이라 넣지 않고, partial 표현 수단
---     (denorm flag vs join 유지)과 4326/5179 축 채택은
---     미정(T-VN-35D·ADR-075 결정 7 실측 소관)
+--     결정 3 — full GiST는 write 1.6× 실측 근거로 금지). point의 core geometry는
+--     3축 exact predicate를 직접 쓴다. route/area처럼 geometry가 subtype에 있는
+--     경우에는 core 정본을 복제하지 않는 DB-owned `public_ready` cache를 써
+--     subtype-local `WHERE public_ready` GiST를 고정한다. 아래 T-VN-34B DDL이
+--     그 cache, lock/identity fence, 4326 route/area index를 실행 가능하게 정의한다.
 
 -- 5.1 point subtype — place/price/weather (T-VN-35A)
 CREATE TABLE feature.feature_points (

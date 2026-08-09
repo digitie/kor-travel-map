@@ -1131,6 +1131,10 @@ async def test_target_runtime_geometry_acl_has_extension_and_public_view_boundar
     transaction = freeze_db.transaction()
     await transaction.start()
     try:
+        # 0095/0096 current schema의 private detail assembly bridge는 final
+        # target에 없다. T-VN-34C는 모든 consumer/ACL/preflight를 함께 제거해야
+        # 하며, final schema가 이 view를 되살리는 것은 허용하지 않는다.
+        assert await freeze_db.fetchval("SELECT to_regclass('feature.features_detailed')") is None
         feature_id = uuid4()
         await freeze_db.execute(
             "INSERT INTO feature.categories (kind, code) VALUES ('route', 'target-runtime')"

@@ -30,12 +30,12 @@ _TVN34_CURRENT_MIGRATION: Final = (
 # artifact bytes 고정 — 갱신 절차: artifact 수정 → 통합 테스트로 fingerprint 재고정
 # → 여기 sha256 갱신 (한 PR에서 함께).
 ARTIFACT_SHA256: Final[dict[str, str]] = {
-    "target-schema-v1.sql": ("7550ae0d4a9c80aaa44a72228e208a12356f7e9f894d42b9cde6fe479ae5cddc"),
+    "target-schema-v1.sql": ("bb57b6defe3010ea9b014db77abfd08de9dd2c24ad1a607b8084b6df6be209da"),
     "target-invariants-v1.sql": (
         "94d959fa4004d717b10f0ffec6c44010da21b6749e03721a6813776c043aa1c6"
     ),
     "target-schema-fingerprints-v1.json": (
-        "8fd127613cab8ae097c319e96d898753aeecbf63a217286054f26c0946aefb03"
+        "a570b67f4fa84a23fe27e3169c24f34b5a234c93461c3913ed693b1becd25bba"
     ),
     "tvn33-reference-ownership-v1.sql": (
         "e9a342f7c227f25643f3c1360b081abafac1e89bfb4c52339b89e985401b1604"

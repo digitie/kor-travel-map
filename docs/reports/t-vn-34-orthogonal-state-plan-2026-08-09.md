@@ -83,9 +83,12 @@ runtime procedure는 현행 TEXT key를 받고 final target procedure는 UUID ke
   security-definer procedure만 바꾼다. user add/update/delete의 legacy provenance와
   immutable response-shape version snapshot도 runtime이 직접 쓰지 않고, typed
   `feature.materialize_user_feature_change_provenance(...)` procedure가 request·Feature·expected
-  revision을 잠가 한 transaction에서 기록한다. 따라서 runtime에는 `feature_versions` INSERT나
-  `features_detailed` SELECT를 주지 않는다. 이는 0095 현행 schema의 전환 bridge이며, final target에는
-  남기지 않는다. T-VN-36이 field-override effective projection/lineage로 대체한 뒤 legacy request와
+  revision을 잠가 한 transaction에서 기록한다. 따라서 runtime에는 `feature_versions` INSERT를 주지
+  않는다. 단, 0095/0096 current schema에서 subtype detail을 조립하는 private
+  `features_detailed`는 `feature_repo` non-public detail, admin detail, curated detail reader에만 필요한
+  read bridge이므로 runtime `SELECT`를 closed allowlist로 준다. final target에는 이 view가 없으므로
+  T-VN-34C가 해당 reader를 final typed projection으로 재배선하고 같은 migration에서 view grant,
+  allowlist, startup preflight의 required-read 항목을 모두 제거한다. T-VN-36이 field-override effective projection/lineage로 대체한 뒤 legacy request와
   version relation을 물리 제거한다. 이와 마찬가지로 **0095 현행 schema 전환 bridge에서만** provider
   version `0`은 runtime JSON payload를 받지 않는 `feature.materialize_provider_feature_version(...)`
   procedure가 잠긴 Feature와 `features_detailed`에서만 조립한다. user whole-row fence가 provider
@@ -160,16 +163,18 @@ PostgreSQL partial GiST가 두 relation을 join해 public predicate를 직접 �
 text/category/keyset index는 `WHERE lifecycle_state='active' AND publication_state='published' AND
 quality_state='valid'`를, route/area GiST는 `WHERE public_ready`를 쓴다.
 
-state create/transition procedure와 route/area subtype INSERT·feature-id reattachment trigger는 모두
-parent Feature row를 먼저 `SELECT ... FOR UPDATE`로 잠그고 same transaction에서 tuple/flag를 계산한다.
-state procedure는 lock을 유지한 채 기존 route/area flag를 갱신하고, subtype trigger는 lock 뒤의
-현재 tuple로 NEW flag를 강제 산출하므로 update×insert의 MVCC stale cache 경쟁을 만들지 않는다.
+state create/transition procedure와 새 route/area subtype INSERT만 parent Feature row를
+`SELECT ... FOR UPDATE`로 잠그고 same transaction에서 tuple/flag를 계산한다. state procedure는 lock을
+유지한 채 기존 route/area flag를 갱신한다. 이미 연결된 subtype은 `feature_id`/`feature_uuid`/`kind`를
+DB에서 immutable로 거부하고 payload·geometry update는 parent lock 없이 cache를 보존한다. 따라서
+update×insert의 MVCC stale cache 경쟁과 subtype tuple→parent tuple 역순 `40P01`을 함께 만들지 않는다.
 subtype trigger는 supplied `public_ready`를 항상 덮어쓰며 runtime에는 `UPDATE(public_ready)`와
 `TRUNCATE`/trigger-disable 권한을 주지 않는다. route/area runtime 권한은 table-level `UPDATE`/`INSERT`가
-아닌 allowed business column의 column-list grant만 사용하고 `public_ready`는 명시적으로 제외한다.
-`has_table_privilege(..., 'UPDATE')`와 `has_column_privilege(..., 'public_ready', 'UPDATE')`가 모두
-false인 catalog gate, direct flag UPDATE의 SQLSTATE `42501`, trigger-controlled insert/reattach/state update
-동등성을 integration test로 고정한다. public query는 cache만 신뢰하지 않고 항상
+아닌 allowed business column의 column-list grant만 사용하고 `public_ready`, identity UPDATE, DELETE를
+명시적으로 제외한다. `has_table_privilege(..., 'UPDATE')`와
+`has_column_privilege(..., 'public_ready', 'UPDATE')`가 모두 false인 catalog gate, direct flag/identity
+UPDATE와 subtype DELETE의 SQLSTATE `42501`, trigger-controlled insert/state update 동등성을 integration
+test로 고정한다. public query는 cache만 신뢰하지 않고 항상
 `public_features`의 core predicate/join을 최종 visibility fence로 유지한다. core tuple이 유일한
 정본이고, 양방향 `EXCEPT ALL`은 flag·public view·core predicate drift의 regression proof다. full GiST로
 상태 join 비용을 숨기거나, subtype에 독립적인 상태 정본을 만들지 않는다.
@@ -217,7 +222,7 @@ admin-only reader도 public view로 기계 치환하지 않는다. `public`, `se
 |---|---|---|---|
 | T-VN-34A | target contract freeze, migration spine, tuple mapping/preflight, transition audit trigger, typed lifecycle override와 core/producer writer 전환, runtime/migrator DB principal·startup preflight 및 DB integration | agent A: Alembic·models·DTO/core/client·infra provider writer·runtime bootstrap·contract SQL/test | stack 내부 전용 |
 | T-VN-34B | `public_features` explicit projection, trigger-owned route/area `public_ready` projection flag와 explicit column ACL, public/service classifier, core point `WHERE 3축` 및 route/area `WHERE public_ready` spatial partial GiST와 core category/keyset/text B-tree/GIN index EXPLAIN, reader integration | agent B: public/admin repository reader·service/API read schema·performance tests | stack 내부 전용 |
-| T-VN-34C | admin state command, OpenAPI/type/UI, remaining admin/merge/Dagster writer, fixtures/live runner, final migration에서 legacy status 계열·index 물리 삭제 | 통합 소유: API/frontend/live E2E 및 final migration | C head만 배포·병합 가능 |
+| T-VN-34C | admin state command, OpenAPI/type/UI, remaining admin/merge/Dagster writer, fixtures/live runner, current private `features_detailed` reader의 final typed projection 재배선 및 grant/allowlist/preflight 제거, final migration에서 legacy status 계열·index 물리 삭제 | 통합 소유: API/frontend/live E2E 및 final migration | C head만 배포·병합 가능 |
 
 agent A/B는 서로의 소유 파일을 되돌리지 않고, 공유된 contract SQL과 generated OpenAPI를 기준으로
 자주 rebase한다. migration-bearing changes는 전역 순서를 지킨다. C가 아닌 PR은 review-ready
@@ -230,7 +235,10 @@ C의 final migration은 같은 deployment unit에서 다음을 실행한다.
 1. 새 3축·tuple CHECK·transition table/trigger를 만들고 mapping diagnostic과 backfill audit를 수행한다.
 2. 모든 writer/readers가 axes와 public view만 사용함을 static inventory 및 focused integration으로
    증명한다.
-3. legacy `status`, `deleted_at`, `user_deleted_at`, `user_change_kind`, `user_change_status`,
+3. current private `features_detailed`의 runtime consumer를 final typed projection으로 바꾸고 runtime
+   `SELECT` grant, closed ACL allowlist, startup preflight의 required-read assertion을 함께 제거한다.
+   final target에 이 bridge view를 되살리지 않는다.
+4. legacy `status`, `deleted_at`, `user_deleted_at`, `user_change_kind`, `user_change_status`,
    `user_change_request_id`, `user_deleted_by`, `user_change_reason`와 그것에 의존하는
    CHECK/index/trigger/query를 물리 제거한다. `data_origin`/`data_version`/whole-row freeze는
    T-VN-36A-C가 field override provenance와 effective projection으로 대체한 뒤 T-VN-36C에서
@@ -245,7 +253,7 @@ T-VN-39에 오래 보관할 compatibility surface는 남기지 않는다.
 |---|---|
 | contract/DDL | 여덟 허용 tuple과 네 retired illegal tuple 전수, runtime direct Feature INSERT/axis UPDATE와 direct audit INSERT/UPDATE/DELETE/TRUNCATE가 DB에서 거부됨, create/transition procedure는 정확히 한 audit을 만듦, no-op/missing/malformed context 거부, runtime/migrator identity·owner/EXECUTE/table grant catalog assertion; actual/target artifact SHA와 violation fixture 갱신 |
 | mapping/audit | 모든 legacy tuple과 contradictory diagnostic, create/backfill/provider/admin/user-request/merge/Dagster transition의 old/new tuple·principal·invoker/state-procedure/audit-writer DB identity·reason·revision 검증, feature purge 뒤 audit 보존 |
-| public/read | 여덟 tuple × detail/batch/bbox/search/nearby/cluster/category/collection public leak 0, batch 5-state, admin predicate 분리, status reference normal-path gate, view/core/route-area `public_ready`의 양방향 `EXCEPT ALL` regression proof, two-session axis-update×subtype-insert interleaving, direct flag UPDATE `42501`과 table/column privilege catalog gate |
+| public/read | 여덟 tuple × detail/batch/bbox/search/nearby/cluster/category/collection public leak 0, batch 5-state, admin predicate 분리, status reference normal-path gate, current runtime의 두 closed read view 실제 SELECT와 C final에서 `features_detailed` grant/preflight/view 부재, view/core/route-area `public_ready`의 양방향 `EXCEPT ALL` regression proof, two-session axis-update×subtype-insert 및 subtype payload-update×state-transition interleaving, direct flag/identity UPDATE와 subtype DELETE `42501` 및 table/column privilege catalog gate |
 | 성능 | core point bbox 4326/5179·nearby와 route/area `WHERE public_ready` geom partial GiST, core category/keyset/text hot predicate가 exact 3축 partial predicate를 사용한다는 `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` gate |
 | API/UI | OpenAPI all export/check, Map/PinVi generated client compile, admin state command If-Match conflict, axes filter/badge/timeline browser e2e, provider refresh×admin retire/override revoke×quality validator race |
 | final live | n150 isolated candidate에서 final head fresh PostGIS + provider ETL 재적재, destructive admin/public/PinVi live E2E 메인·recovery, cleanup/physical legacy catalog zero |

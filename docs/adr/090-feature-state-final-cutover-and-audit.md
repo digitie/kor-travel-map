@@ -27,9 +27,13 @@ merge tombstone이 섞여 있다. 애플리케이션만 audit event를 쓰면 ra
    dedicated NOLOGIN owner의 `create_feature_with_initial_state`/`transition_feature_state`
    security-definer procedure만 실행한다. user add/update/delete의 legacy provenance와 immutable
    version snapshot은 별도 typed `materialize_user_feature_change_provenance` procedure가 request,
-   Feature, expected revision을 잠근 뒤 원자적으로 기록하므로 runtime은 `feature_versions` 또는
-   `features_detailed`의 직접 권한을 갖지 않는다. 이 procedure는 0095 현행 schema 전환 bridge로만
-   남기며 final target에는 두지 않는다. T-VN-36의 field-override effective projection/lineage가
+   Feature, expected revision을 잠근 뒤 원자적으로 기록하므로 runtime은 `feature_versions`의 직접 DML
+   권한을 갖지 않는다. 다만 0095/0096 current schema에서 `feature.features_detailed`는 subtype detail을
+   조립하는 private read bridge이므로 `feature_repo` non-public detail, admin detail 및 curated detail
+   reader에 한해 runtime `SELECT`를 closed allowlist로 준다. 이는 public 권한이 아니며 final target에는
+   이 view가 없다. T-VN-34C는 해당 reader를 final typed projection으로 재배선하고 같은 migration에서
+   `features_detailed` grant·ACL allowlist·runtime preflight 요구를 제거한다. 이 procedure는 0095 현행
+   schema 전환 bridge로만 남기며 final target에는 두지 않는다. T-VN-36의 field-override effective projection/lineage가
    이를 대체한 뒤 legacy request/version relation을 제거한다. 같은 0095 bridge에서 provider version은
    caller payload가 아닌 잠긴 Feature와 canonical detailed projection으로 조립하는
    `materialize_provider_feature_version` procedure만 기록한다. user whole-row fence가 provider

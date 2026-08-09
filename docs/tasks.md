@@ -727,15 +727,19 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 
   명시 열 `public_features` projection과 service 5-state classifier를 3축 정본으로 전환한다.
   route/area subtype-local geometry와 core tuple의 cross-table index 불가를 trigger-owned
-  `public_ready` projection flag·parent `FOR UPDATE` lock protocol로 해소한다. route/area grant는
-  table UPDATE 없이 allowed column-list만 허용한다. core point/category/keyset/text는 exact 3축 partial
-  predicate를, route/area GiST는 `WHERE public_ready`를 사용한다. `EXPLAIN` gate와 public reader,
-  two-session·direct-flag privilege regression을 소유한다. B도 stack 내부 checkpoint다.
+  `public_ready` projection flag로 해소한다. 새 subtype attach만 parent `FOR UPDATE`로 current flag를
+  산출하고 existing subtype identity는 DB 불변으로 막아 payload UPDATE와 state transition의 역순 lock을
+  없앤다. route/area grant는 table UPDATE 없이 mutable business column만 허용하며 identity UPDATE와
+  DELETE를 거부한다. core point/category/keyset/text는 exact 3축 partial predicate를, route/area GiST는
+  `WHERE public_ready`를 사용한다. `EXPLAIN` gate와 public reader, two-session·direct-flag privilege
+  regression을 소유한다. B도 stack 내부 checkpoint다.
 
 - [ ] T-VN-34C — **writer/API/UI cutover·legacy status fence**
 
   admin state command·OpenAPI/generated type·Map/PinVi/admin UI·merge/Dagster/fixture/live runner의
-  모든 남은 writer를 cutover한다. 같은 final migration에서 legacy `status`, delete/user-change metadata와
+  모든 남은 writer를 cutover한다. current private `features_detailed` consumer를 final typed projection으로
+  재배선하고 같은 migration에서 그 runtime SELECT grant·closed ACL allowlist·startup preflight assertion을
+  제거한다. 이어 legacy `status`, delete/user-change metadata와
   관련 CHECK/index/trigger/query를 물리 삭제하고 static normal-path gate와 n150 destructive fresh-reload
   live E2E를 통과한다. `data_origin`/`data_version`/whole-row freeze는 T-VN-36의 materialization 입력으로
   남기며 T-VN-36C가 제거한다. C만 배포·병합 가능하다.
