@@ -405,7 +405,8 @@ SELECT f.feature_id, f.sigungu_code
 FROM requested AS r
 JOIN feature.features AS f
   ON f.feature_id = r.feature_id
-WHERE f.deleted_at IS NULL
+WHERE f.lifecycle_state = 'active'
+  AND f.quality_state = 'valid'
 ORDER BY r.ord
 LIMIT CAST(:limit AS integer)
 """
@@ -419,7 +420,8 @@ SELECT count(*)::int
 FROM requested AS r
 JOIN feature.features AS f
   ON f.feature_id = r.feature_id
-WHERE f.deleted_at IS NULL
+WHERE f.lifecycle_state = 'active'
+  AND f.quality_state = 'valid'
 """
 
 _MATCHED_SIGUNGU_FEATURE_IDS_SQL: Final[str] = """
@@ -431,7 +433,8 @@ SELECT DISTINCT f.sigungu_code
 FROM requested AS r
 JOIN feature.features AS f
   ON f.feature_id = r.feature_id
-WHERE f.deleted_at IS NULL
+WHERE f.lifecycle_state = 'active'
+  AND f.quality_state = 'valid'
   AND f.sigungu_code IS NOT NULL
 ORDER BY f.sigungu_code
 """
@@ -451,7 +454,8 @@ WITH input AS (
 )
 SELECT f.feature_id, f.sigungu_code
 FROM feature.features AS f, input AS i
-WHERE f.deleted_at IS NULL
+WHERE f.lifecycle_state = 'active'
+  AND f.quality_state = 'valid'
   AND f.coord_5179 IS NOT NULL
   AND x_extension.ST_DWithin(
         f.coord_5179,
@@ -477,7 +481,8 @@ WITH input AS (
 )
 SELECT count(*)::int
 FROM feature.features AS f, input AS i
-WHERE f.deleted_at IS NULL
+WHERE f.lifecycle_state = 'active'
+  AND f.quality_state = 'valid'
   AND f.coord_5179 IS NOT NULL
   AND x_extension.ST_DWithin(
         f.coord_5179,
@@ -502,7 +507,8 @@ WITH input AS (
 matched AS (
     SELECT f.feature_id
     FROM feature.features AS f, input AS i
-    WHERE f.deleted_at IS NULL
+    WHERE f.lifecycle_state = 'active'
+      AND f.quality_state = 'valid'
       AND f.coord_5179 IS NOT NULL
       AND x_extension.ST_DWithin(
             f.coord_5179,
@@ -553,7 +559,8 @@ WITH input AS (
 )
 SELECT DISTINCT f.sigungu_code
 FROM feature.features AS f, input AS i
-WHERE f.deleted_at IS NULL
+WHERE f.lifecycle_state = 'active'
+  AND f.quality_state = 'valid'
   AND f.coord_5179 IS NOT NULL
   AND f.sigungu_code IS NOT NULL
   AND x_extension.ST_DWithin(
@@ -567,7 +574,8 @@ ORDER BY f.sigungu_code
 _RESOLVE_BBOX_SQL: Final[str] = """
 SELECT f.feature_id, f.sigungu_code
 FROM feature.features AS f
-WHERE f.deleted_at IS NULL
+WHERE f.lifecycle_state = 'active'
+  AND f.quality_state = 'valid'
   AND f.coord IS NOT NULL
   AND f.coord OPERATOR(x_extension.&&) x_extension.ST_MakeEnvelope(
         CAST(:min_lon AS double precision),
@@ -583,7 +591,8 @@ LIMIT CAST(:limit AS integer)
 _COUNT_BBOX_SQL: Final[str] = """
 SELECT count(*)::int
 FROM feature.features AS f
-WHERE f.deleted_at IS NULL
+WHERE f.lifecycle_state = 'active'
+  AND f.quality_state = 'valid'
   AND f.coord IS NOT NULL
   AND f.coord OPERATOR(x_extension.&&) x_extension.ST_MakeEnvelope(
         CAST(:min_lon AS double precision),
@@ -598,7 +607,8 @@ _PROVIDER_DATASETS_BBOX_SQL: Final[str] = """
 WITH matched AS (
     SELECT f.feature_id
     FROM feature.features AS f
-    WHERE f.deleted_at IS NULL
+    WHERE f.lifecycle_state = 'active'
+      AND f.quality_state = 'valid'
       AND f.coord IS NOT NULL
       AND f.coord OPERATOR(x_extension.&&) x_extension.ST_MakeEnvelope(
             CAST(:min_lon AS double precision),
@@ -639,7 +649,8 @@ ORDER BY pd.provider_dataset_id, operation_scope.sync_scope, operation_scope.ope
 _MATCHED_SIGUNGU_BBOX_SQL: Final[str] = """
 SELECT DISTINCT f.sigungu_code
 FROM feature.features AS f
-WHERE f.deleted_at IS NULL
+WHERE f.lifecycle_state = 'active'
+  AND f.quality_state = 'valid'
   AND f.coord IS NOT NULL
   AND f.sigungu_code IS NOT NULL
   AND f.coord OPERATOR(x_extension.&&) x_extension.ST_MakeEnvelope(
@@ -655,7 +666,8 @@ ORDER BY f.sigungu_code
 _RESOLVE_SIGUNGU_CODES_SQL: Final[str] = """
 SELECT f.feature_id, f.sigungu_code
 FROM feature.features AS f
-WHERE f.deleted_at IS NULL
+WHERE f.lifecycle_state = 'active'
+  AND f.quality_state = 'valid'
   AND f.sigungu_code = ANY(CAST(:sigungu_codes AS text[]))
 ORDER BY f.feature_id
 LIMIT CAST(:limit AS integer)
@@ -664,14 +676,16 @@ LIMIT CAST(:limit AS integer)
 _COUNT_SIGUNGU_CODES_SQL: Final[str] = """
 SELECT count(*)::int
 FROM feature.features AS f
-WHERE f.deleted_at IS NULL
+WHERE f.lifecycle_state = 'active'
+  AND f.quality_state = 'valid'
   AND f.sigungu_code = ANY(CAST(:sigungu_codes AS text[]))
 """
 
 _MATCHED_SIGUNGU_CODES_SQL: Final[str] = """
 SELECT DISTINCT f.sigungu_code
 FROM feature.features AS f
-WHERE f.deleted_at IS NULL
+WHERE f.lifecycle_state = 'active'
+  AND f.quality_state = 'valid'
   AND f.sigungu_code = ANY(CAST(:sigungu_codes AS text[]))
   AND f.sigungu_code IS NOT NULL
 ORDER BY f.sigungu_code
@@ -681,7 +695,8 @@ _PROVIDER_DATASETS_SIGUNGU_CODES_SQL: Final[str] = """
 WITH matched AS (
     SELECT f.feature_id
     FROM feature.features AS f
-    WHERE f.deleted_at IS NULL
+    WHERE f.lifecycle_state = 'active'
+      AND f.quality_state = 'valid'
       AND f.sigungu_code = ANY(CAST(:sigungu_codes AS text[]))
 )
 SELECT
@@ -721,7 +736,8 @@ JOIN provider_sync.source_entities AS se
   ON se.source_entity_key = sl.source_entity_key
 JOIN provider_sync.provider_datasets AS pd
   ON pd.provider_dataset_id = se.provider_dataset_id
-WHERE f.deleted_at IS NULL
+WHERE f.lifecycle_state = 'active'
+  AND f.quality_state = 'valid'
   AND sl.source_role = 'primary'
   AND pd.provider_dataset_id = CAST(:provider_dataset_id AS bigint)
   AND EXISTS (
@@ -751,7 +767,8 @@ JOIN provider_sync.source_entities AS se
   ON se.source_entity_key = sl.source_entity_key
 JOIN provider_sync.provider_datasets AS pd
   ON pd.provider_dataset_id = se.provider_dataset_id
-WHERE f.deleted_at IS NULL
+WHERE f.lifecycle_state = 'active'
+  AND f.quality_state = 'valid'
   AND sl.source_role = 'primary'
   AND pd.provider_dataset_id = CAST(:provider_dataset_id AS bigint)
   AND EXISTS (
@@ -779,7 +796,8 @@ JOIN provider_sync.source_entities AS se
   ON se.source_entity_key = sl.source_entity_key
 JOIN provider_sync.provider_datasets AS pd
   ON pd.provider_dataset_id = se.provider_dataset_id
-WHERE f.deleted_at IS NULL
+WHERE f.lifecycle_state = 'active'
+  AND f.quality_state = 'valid'
   AND f.sigungu_code IS NOT NULL
   AND sl.source_role = 'primary'
   AND pd.provider_dataset_id = CAST(:provider_dataset_id AS bigint)
@@ -811,7 +829,8 @@ SELECT
 FROM provider_sync.source_links AS sl
 JOIN feature.features AS f
   ON f.feature_id = sl.feature_id
- AND f.deleted_at IS NULL
+ AND f.lifecycle_state = 'active'
+ AND f.quality_state = 'valid'
 JOIN provider_sync.source_entities AS se
   ON se.source_entity_key = sl.source_entity_key
 JOIN provider_sync.provider_datasets AS pd
@@ -918,7 +937,8 @@ SELECT
     'within_radius' AS relation
 FROM selected_targets AS t
 JOIN feature.features AS f
-  ON f.deleted_at IS NULL
+  ON f.lifecycle_state = 'active'
+ AND f.quality_state = 'valid'
  AND f.coord_5179 IS NOT NULL
  AND t.coord_5179 IS NOT NULL
  AND x_extension.ST_DWithin(f.coord_5179, t.coord_5179, t.radius_m)
@@ -947,7 +967,8 @@ SELECT
     'same_sigungu' AS relation
 FROM ops.poi_cache_targets AS t
 JOIN feature.features AS f
-  ON f.deleted_at IS NULL
+  ON f.lifecycle_state = 'active'
+ AND f.quality_state = 'valid'
  AND f.sigungu_code = ANY(CAST(:sigungu_codes AS text[]))
 LEFT JOIN provider_sync.source_links AS sl
   ON sl.feature_id = f.feature_id

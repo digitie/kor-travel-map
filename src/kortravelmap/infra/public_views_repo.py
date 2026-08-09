@@ -175,7 +175,7 @@ LEFT JOIN LATERAL (
 # 옮긴다. kind 판정이 술어가 아니라 구조(어느 subtype에 행이 있는가)로 바뀌므로
 # ``f.kind = 'place'`` 중복 술어는 사라진다 — subtype의 kind 상수 CHECK +
 # ``(feature_id, kind)`` 복합 FK가 같은 것을 DB에서 강제한다. 응답 ``detail``은
-# 종전대로 ``public_features``(0086 ``features_detailed`` 기반)가 조립한다.
+# ``public_features``가 typed subtype 정본에서 조립한다.
 _PUBLIC_BEACH_JOIN_SQL: Final[str] = """
 JOIN feature.feature_places AS fp ON fp.feature_id = f.feature_id
 """

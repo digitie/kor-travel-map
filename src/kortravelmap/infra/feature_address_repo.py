@@ -41,7 +41,9 @@ class FeatureAddressSnapshot:
     sido_code: str | None
     sigungu_code: str | None
     road_address_management_no: str | None
-    status: str
+    lifecycle_state: str
+    publication_state: str
+    quality_state: str
 
 
 @dataclass(frozen=True)
@@ -56,7 +58,7 @@ _SNAPSHOT_COLUMNS: Final[str] = (
     "feature_id, "
     "x_extension.ST_X(coord) AS lon, x_extension.ST_Y(coord) AS lat, "
     "address, legal_dong_code, sido_code, sigungu_code, "
-    "road_address_management_no, status"
+    "road_address_management_no, lifecycle_state, publication_state, quality_state"
 )
 
 _GET_SNAPSHOT_SQL: Final[str] = f"""
@@ -101,7 +103,9 @@ def _row_to_snapshot(row: Any) -> FeatureAddressSnapshot:
         sido_code=row.sido_code,
         sigungu_code=row.sigungu_code,
         road_address_management_no=row.road_address_management_no,
-        status=str(row.status),
+        lifecycle_state=str(row.lifecycle_state),
+        publication_state=str(row.publication_state),
+        quality_state=str(row.quality_state),
     )
 
 

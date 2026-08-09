@@ -119,8 +119,8 @@ WITH ranked AS (
     ON head.source_entity_key = se.source_entity_key
   JOIN provider_sync.source_records AS sr
     ON sr.source_record_key = head.current_source_record_key
-  WHERE f.deleted_at IS NULL
-    AND f.status = 'active'
+  WHERE f.lifecycle_state = 'active'
+    AND f.quality_state = 'valid'
     AND f.coord IS NOT NULL
     AND pd.provider = :provider
     AND (

@@ -1384,7 +1384,7 @@ _HISTORICAL_NEAREST_OBSERVED_TEMP_SQL: Final[str] = _historical_nearest_anchor_s
 def _admin_nearest_anchor_sql(
     exists_predicate: str, *, exclude_target: bool = False
 ) -> str:
-    """삭제 전 base Feature에서 admin weather anchor를 찾는 SQL."""
+    """선택 가능한 base Feature에서 admin weather anchor를 찾는 SQL."""
 
     target_exclusion = "AND f.feature_id <> :feature_id" if exclude_target else ""
     return f"""
@@ -1392,16 +1392,14 @@ WITH target AS (
     SELECT coord_5179
     FROM feature.features
     WHERE feature_id = :feature_id
-      AND deleted_at IS NULL
-      AND user_deleted_at IS NULL
-      AND status <> 'deleted'
+      AND lifecycle_state = 'active'
+      AND quality_state = 'valid'
       AND coord_5179 IS NOT NULL
 )
 SELECT f.feature_id
 FROM feature.features AS f, target AS t
-WHERE f.deleted_at IS NULL
-  AND f.user_deleted_at IS NULL
-  AND f.status <> 'deleted'
+WHERE f.lifecycle_state = 'active'
+  AND f.quality_state = 'valid'
   AND f.kind = 'weather'
   AND f.coord_5179 IS NOT NULL
   {target_exclusion}
@@ -2140,6 +2138,9 @@ def _weather_metric(row: RowMapping) -> WeatherMetric:
     effective_at = row.get("effective_at")
     if effective_at is None:
         effective_at = valid_at or observed_at or valid_from or issued_at
+    known_at = row.get("known_at")
+    if not isinstance(known_at, datetime):
+        raise AssertionError("weather metric row is missing known_at")
     return WeatherMetric(
         forecast_style=str(row["forecast_style"]),
         metric_key=str(row["metric_key"]),
@@ -2152,7 +2153,7 @@ def _weather_metric(row: RowMapping) -> WeatherMetric:
         issued_at=issued_at,
         valid_at=valid_at,
         observed_at=observed_at,
-        known_at=cast(datetime, row["known_at"]),
+        known_at=known_at,
         provider=row["provider"],
         weather_domain=row["weather_domain"],
         valid_from=valid_from,

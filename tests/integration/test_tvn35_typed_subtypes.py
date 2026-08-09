@@ -1,13 +1,15 @@
-"""T-VN-35 / ADR-086 — kind별 typed subtype 계약 통합 테스트 (testcontainers).
+"""T-VN-35 / T-VN-34C — kind별 typed subtype 최종 계약 통합 테스트.
 
-alembic 0084~0086이 만든 배타 arc와 "subtype이 kind별 값의 유일한 정본"이라는
-계약을 **DB 수준에서** 고정한다. 여기서 검증하는 축은 다섯이다:
+core와 subtype의 배타 arc, writer의 subtype 정본, non-public reader의 직접 조립,
+route/area geometry, 공개 projection을 DB 수준에서 고정한다. 이전 migration
+왕복이나 private detail view의 호환성은 서비스 전 cutover 정책에 따라 검증 대상이
+아니다. 여기서 검증하는 축은 다섯이다:
 
 1. **배타 arc** — subtype 행이 있는 동안 core ``kind``가 못 바뀌고, 한 feature는
    최대 하나의 subtype에만 있으며, 고아 subtype과 identity 사본 불일치가
    FK로 막힌다. 코드 규율이 아니라 DB 계약이라는 것이 요점이다.
-2. **upsert 왕복** — writer가 subtype에만 쓰고, ``feature.features_detailed``가
-   조립한 ``detail``이 DTO 왕복과 동등하다(응답 shape 무변경).
+2. **upsert 왕복** — writer가 subtype에만 쓰고, non-public repository reader가
+   명시 LEFT JOIN으로 조립한 ``detail``이 DTO 왕복과 동등하다.
 3. **geometry 필수 kind** — geometry 없는 route/area는 write 시점에 거부되고
    core 행도 남지 않는다(``feature_routes``/``feature_areas``의 ``geom``이
    NOT NULL이므로 사후 보정이 아니라 fail-close).
@@ -16,28 +18,18 @@ alembic 0084~0086이 만든 배타 arc와 "subtype이 kind별 값의 유일한 �
 5. **merge cross-kind 거부** — kind가 subtype 소속을 결정하므로 이종 병합은
    무결성을 직접 깬다(``MergeConflictError``).
 
-추가로 0086 ``downgrade``/``upgrade`` 왕복이 ``detail`` 역조립을 무손실로
-수행하는지 소량 시드 md5 대조로 고정한다(ADR-086 근거절의 731k행 전수 대조를
-회귀 가드 크기로 축소한 것).
 """
 
 from __future__ import annotations
 
-import asyncio
-import json
 from datetime import date, datetime, timedelta, timezone
-from decimal import Decimal
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 import pytest
-from alembic.config import Config
 from sqlalchemy import text
-from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError
 
-from alembic import command
 from kortravelmap.core.ids import make_payload_hash, make_source_record_key
 from kortravelmap.dto import (
     Address,
@@ -55,10 +47,8 @@ from kortravelmap.dto import (
     SourceRole,
 )
 from kortravelmap.infra import feature_repo, merge_repo
-from kortravelmap.infra.db import make_async_engine, normalize_async_dsn
 from kortravelmap.infra.feature_subtype import (
     SUBTYPE_TABLES,
-    count_subtype_drift,
     subtype_params,
     subtype_upsert_sql,
 )
@@ -93,7 +83,9 @@ async def _insert_core(
     category: str = "01070100",
     lon: float | None = 127.0,
     lat: float | None = 37.5,
-    status: str = "active",
+    lifecycle_state: str = "active",
+    publication_state: str = "published",
+    quality_state: str = "valid",
 ) -> str:
     """core 행만 INSERT하고 저장된 ``feature_uuid``를 돌려준다."""
     stored_uuid = (
@@ -101,7 +93,8 @@ async def _insert_core(
             text(
                 """
                 INSERT INTO feature.features (
-                    feature_id, kind, name, category, coord, status, updated_at
+                    feature_id, kind, name, category, coord,
+                    lifecycle_state, publication_state, quality_state, updated_at
                 )
                 VALUES (
                     :feature_id, :kind, :name, :category,
@@ -111,7 +104,8 @@ async def _insert_core(
                                  CAST(:lon AS double precision),
                                  CAST(:lat AS double precision)
                              ), 4326) END,
-                    :status, CAST(:updated_at AS timestamptz)
+                    :lifecycle_state, :publication_state, :quality_state,
+                    CAST(:updated_at AS timestamptz)
                 )
                 RETURNING CAST(feature_uuid AS text)
                 """
@@ -123,7 +117,9 @@ async def _insert_core(
                 "category": category,
                 "lon": lon,
                 "lat": lat,
-                "status": status,
+                "lifecycle_state": lifecycle_state,
+                "publication_state": publication_state,
+                "quality_state": quality_state,
                 "updated_at": _NOW,
             },
         )
@@ -212,18 +208,11 @@ def _bundle(
     )
 
 
-async def _detail_from_view(session: AsyncSession, feature_id: str) -> dict[str, Any]:
-    """``features_detailed``가 subtype에서 조립한 ``detail``(응답 정본)."""
-    raw = (
-        await session.execute(
-            text(
-                "SELECT detail FROM feature.features_detailed "
-                "WHERE feature_id = :feature_id"
-            ),
-            {"feature_id": feature_id},
-        )
-    ).scalar_one()
-    return json.loads(raw) if isinstance(raw, str) else dict(raw)
+async def _detail_from_reader(session: AsyncSession, feature_id: str) -> dict[str, Any]:
+    """non-public reader의 직접 subtype 조립 결과를 반환한다."""
+    row = await feature_repo.get_feature_row(session, feature_id)
+    assert row is not None
+    return dict(row["detail"])
 
 
 async def _subtype_row(
@@ -465,7 +454,7 @@ async def test_place_bundle_upsert_round_trips_through_subtype(
     assert str(row["feature_uuid"]) == str(core_uuid)
 
     # 뷰가 조립한 detail이 DTO 왕복과 동등하다(응답 shape 무변경).
-    assembled = await _detail_from_view(migrated_session, "tvn35:rt:place")
+    assembled = await _detail_from_reader(migrated_session, "tvn35:rt:place")
     assert PlaceDetail.model_validate(assembled) == feature.detail
 
     # 재upsert가 subtype을 **갱신**한다(행 증식 없음).
@@ -486,7 +475,6 @@ async def test_place_bundle_upsert_round_trips_through_subtype(
             {"fid": "tvn35:rt:place"},
         )
     ).scalar_one() == 1
-    assert await count_subtype_drift(migrated_session) == (0, 0, 0)
 
 
 async def test_event_and_notice_bundles_round_trip_through_subtype(
@@ -514,9 +502,9 @@ async def test_event_and_notice_bundles_round_trip_through_subtype(
     assert notice_row["valid_end_time"] == notice.detail.valid_end_time  # type: ignore[union-attr]
     assert notice_row["severity"] == 2
 
-    assembled_event = await _detail_from_view(migrated_session, "tvn35:rt:event")
+    assembled_event = await _detail_from_reader(migrated_session, "tvn35:rt:event")
     assert EventDetail.model_validate(assembled_event) == event.detail
-    assembled_notice = await _detail_from_view(migrated_session, "tvn35:rt:notice")
+    assembled_notice = await _detail_from_reader(migrated_session, "tvn35:rt:notice")
     assert NoticeDetail.model_validate(assembled_notice) == notice.detail
 
     # 재upsert로 종료 시각이 typed 컬럼에서 갱신된다.
@@ -564,7 +552,7 @@ async def test_assembled_notice_times_do_not_depend_on_session_timezone(
                 ).scalar_one()
             )
         )
-        assembled = await _detail_from_view(migrated_session, feature_id)
+        assembled = await _detail_from_reader(migrated_session, feature_id)
         rendered.append(
             (assembled["valid_start_time"], assembled["valid_end_time"])
         )
@@ -579,7 +567,7 @@ async def test_assembled_notice_times_do_not_depend_on_session_timezone(
         "2026-08-06T01:02:03.823154+09:00",
     )
     # 같은 순간을 가리키는지도 확인한다(표기만 고정한 것이지 값이 아니다).
-    assembled = await _detail_from_view(migrated_session, feature_id)
+    assembled = await _detail_from_reader(migrated_session, feature_id)
     assert NoticeDetail.model_validate(assembled).valid_start_time == start
     assert NoticeDetail.model_validate(assembled).valid_end_time == end
 
@@ -614,8 +602,60 @@ async def test_event_sigungu_code_survives_subtype_round_trip(
     )
     await migrated_session.flush()
 
-    assembled = await _detail_from_view(migrated_session, feature_id)
+    assembled = await _detail_from_reader(migrated_session, feature_id)
     assert EventDetail.model_validate(assembled) == feature.detail
+
+
+async def test_public_projection_requires_the_final_visible_state_tuple(
+    migrated_session: AsyncSession,
+) -> None:
+    """공개 reader는 active/published/valid 조합만 반환한다.
+
+    비공개 reader는 동일 행을 직접 subtype 조립으로 계속 읽는다. 이 경계가
+    lifecycle, publication, quality의 어느 한 축에도 묻힌 legacy 상태값을 두지
+    않도록 고정한다.
+    """
+    feature_id = "tvn35:public:axes"
+    feature = _place_feature(feature_id, place_kind="cafe", phones=[])
+    await feature_repo.load_bundle(
+        migrated_session, _bundle(feature, source_entity_id="PUBLIC-AXES")
+    )
+    await migrated_session.flush()
+
+    assert await feature_repo.get_public_feature_row(migrated_session, feature_id)
+    await migrated_session.execute(
+        text(
+            "UPDATE feature.features SET publication_state = 'suppressed' "
+            "WHERE feature_id = :feature_id"
+        ),
+        {"feature_id": feature_id},
+    )
+    assert await feature_repo.get_public_feature_row(migrated_session, feature_id) is None
+    internal = await feature_repo.get_feature_row(migrated_session, feature_id)
+    assert internal is not None
+    assert internal["detail"]["place_kind"] == "cafe"
+
+
+async def test_core_has_no_derived_detail_or_geometry_and_no_private_detail_view(
+    migrated_session: AsyncSession,
+) -> None:
+    """detail/geometry는 subtype과 reader 조립에만 존재한다."""
+    columns = set(
+        (
+            await migrated_session.execute(
+                text(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_schema = 'feature' AND table_name = 'features'"
+                )
+            )
+        ).scalars()
+    )
+    assert {"detail", "geom"}.isdisjoint(columns)
+    assert (
+        await migrated_session.execute(
+            text("SELECT to_regclass('feature.features_detailed')")
+        )
+    ).scalar_one() is None
 
 
 async def test_user_request_fence_skips_subtype_write(
@@ -672,7 +712,7 @@ async def test_geometryless_route_and_area_are_rejected_at_construction(
 ) -> None:
     """geometry 없는 route/area는 ``Feature`` 구성 시점에 거부된다.
 
-    종전에는 적재 후 ``inactivate_geometryless_area_features_by_source``가 보정하던
+    종전에는 적재 후 geometry 결측 Feature를 retirement 처리하던
     상태다. subtype ``geom``이 NOT NULL이 되면서 그 보정이 DTO 계약으로 앞당겨졌다
     (ADR-086 결정 5) — write까지 갈 것도 없다. 반대 방향(route/area가 아닌 kind의
     geometry)도 같은 validator가 막는다: 담을 곳이 없으므로 조용히 버려지느니
@@ -784,21 +824,26 @@ async def test_route_and_area_with_geometry_land_in_subtype(
         "ST_MultiLineString" if kind is FeatureKind.ROUTE else "ST_MultiPolygon"
     )
 
-    assembled = await _detail_from_view(migrated_session, feature_id)
+    assembled = await _detail_from_reader(migrated_session, feature_id)
     model = RouteDetail if kind is FeatureKind.ROUTE else AreaDetail
     assert model.model_validate(assembled) == feature.detail
 
-    # core에는 geometry가 없다 — 뷰가 subtype에서 제공한다.
-    view_geom = (
+    # core에는 geometry가 없다 — 직접 조립 reader가 subtype geometry를 제공한다.
+    assembled_row = await feature_repo.get_feature_row(migrated_session, feature_id)
+    assert assembled_row is not None
+    direct_geom = (
         await migrated_session.execute(
             text(
-                "SELECT x_extension.ST_GeometryType(geom) "
-                "FROM feature.features_detailed WHERE feature_id = :feature_id"
+                "SELECT x_extension.ST_GeometryType(COALESCE(r.geom, a.geom)) "
+                "FROM feature.features AS f "
+                "LEFT JOIN feature.feature_routes AS r ON r.feature_id = f.feature_id "
+                "LEFT JOIN feature.feature_areas AS a ON a.feature_id = f.feature_id "
+                "WHERE f.feature_id = :feature_id"
             ),
             {"feature_id": feature_id},
         )
     ).scalar_one()
-    assert view_geom == geometry_type
+    assert direct_geom == geometry_type
 
 
 # ---------------------------------------------------------------------------
@@ -852,7 +897,7 @@ async def test_supersede_writes_typed_valid_end_time_and_read_filter_hides_it(
     assert row["valid_end_time"] == closed_at
 
     # 조립 뷰의 detail도 같은 값을 돌려준다(조립 규칙이 한 곳이라 갈라지지 않는다).
-    assembled = await _detail_from_view(migrated_session, "tvn35:lifecycle:notice")
+    assembled = await _detail_from_reader(migrated_session, "tvn35:lifecycle:notice")
     assert NoticeDetail.model_validate(assembled).valid_end_time == closed_at
 
     # typed 비교 read 필터가 종료된 notice를 감산한다.
@@ -877,39 +922,36 @@ async def test_purge_expired_notices_reads_typed_columns(
         (fresh_id, _NOW - timedelta(days=1), _NOW - timedelta(days=2)),
         (start_only_id, None, _NOW - timedelta(days=800)),
     ):
-        feature_uuid = await _insert_core(
-            migrated_session, feature_id=feature_id, kind="notice", category="99000000"
-        )
-        await _insert_subtype(
+        await feature_repo.load_bundle(
             migrated_session,
-            feature_id=feature_id,
-            feature_uuid=feature_uuid,
-            kind="notice",
-            detail={
-                "notice_type": "traffic",
-                "valid_start_time": start_time.isoformat(),
-                "valid_end_time": end_time.isoformat() if end_time else None,
-            },
+            _bundle(
+                _notice_feature(
+                    feature_id,
+                    valid_start_time=start_time,
+                    valid_end_time=end_time,
+                ),
+                source_entity_id=feature_id,
+            ),
         )
 
     purged = await feature_repo.purge_expired_notices(migrated_session)
     await migrated_session.flush()
     assert purged == 2
 
-    statuses = dict(
+    lifecycles = dict(
         (
             await migrated_session.execute(
                 text(
-                    "SELECT feature_id, status FROM feature.features "
+                    "SELECT feature_id, lifecycle_state FROM feature.features "
                     "WHERE feature_id = ANY(CAST(:ids AS text[]))"
                 ),
                 {"ids": [expired_id, fresh_id, start_only_id]},
             )
         ).all()
     )
-    assert statuses[expired_id] == "inactive"
-    assert statuses[start_only_id] == "inactive"
-    assert statuses[fresh_id] == "active"
+    assert lifecycles[expired_id] == "retired"
+    assert lifecycles[start_only_id] == "retired"
+    assert lifecycles[fresh_id] == "active"
 
 
 # ---------------------------------------------------------------------------
@@ -959,14 +1001,17 @@ async def test_same_kind_merge_keeps_master_subtype_and_preserves_loser(
     )
     await migrated_session.flush()
 
-    loser_status = (
+    loser_lifecycle = (
         await migrated_session.execute(
-            text("SELECT status FROM feature.features WHERE feature_id = :feature_id"),
+            text(
+                "SELECT lifecycle_state FROM feature.features "
+                "WHERE feature_id = :feature_id"
+            ),
             {"feature_id": "tvn35:merge:loser"},
         )
     ).scalar_one()
-    assert loser_status == "deleted"
-    # soft-delete는 core-only라 CASCADE가 발동하지 않는다 — typed 값이 보존된다.
+    assert loser_lifecycle == "retired"
+    # retirement은 core-only라 CASCADE가 발동하지 않는다 — typed 값이 보존된다.
     assert (
         await _subtype_row(migrated_session, "feature_places", "tvn35:merge:loser")
     ) is not None
@@ -975,368 +1020,6 @@ async def test_same_kind_merge_keeps_master_subtype_and_preserves_loser(
     )
     assert master_row is not None
     assert master_row["place_kind"] == "cafe"
-
-
-# ---------------------------------------------------------------------------
-# ⑥ migration 왕복 — downgrade 0083 → typed-subtype head 무손실 (md5 대조)
-# ---------------------------------------------------------------------------
-
-_ROUNDTRIP_PRE_REVISION = "0083_nonderived_uuid_generator"
-# T-VN-33의 final-schema cutover(0090)는 의도적으로 forward-only다. 이 검증의
-# 대상은 0084~0087 typed subtype migration의 역조립/재전개이므로, 그 계열의 마지막
-# revision에서 왕복을 닫는다. 이후 migration을 포함한 전역 ``head``에서 downgrade를
-# 시도하면 unrelated forward-only fence를 검증 자체가 우회하게 된다.
-_ROUNDTRIP_TYPED_SUBTYPE_REVISION = "0087_route_area_subtypes"
-
-_ROUNDTRIP_SEED_SQL = """
-INSERT INTO feature.features (feature_id, kind, name, category, status, updated_at)
-VALUES
-    ('tvn35:mig:place', 'place', '왕복 장소', '01070100', 'active', now()),
-    ('tvn35:mig:event', 'event', '왕복 축제', '01010100', 'active', now()),
-    ('tvn35:mig:notice', 'notice', '왕복 공지', '99000000', 'active', now()),
-    ('tvn35:mig:route', 'route', '왕복 경로', '03000000', 'active', now()),
-    ('tvn35:mig:area', 'area', '왕복 구역', '03000000', 'active', now())
-"""
-
-# 조립 detail의 정본 대조값 — feature_id 순 md5. core 컬럼(0083 이하)과 뷰
-# (0086 이상) 어느 쪽에서 읽어도 같아야 무손실이다.
-_DETAIL_DIGEST_SQL = """
-SELECT feature_id, md5(detail::text) AS digest
-FROM {relation}
-WHERE feature_id LIKE 'tvn35:mig:%'
-ORDER BY feature_id
-"""
-
-
-def _run_alembic(dsn: str, revision: str, *, downgrade: bool = False) -> None:
-    root = Path(__file__).resolve().parents[2]
-    config = Config(str(root / "alembic.ini"))
-    config.set_main_option("script_location", str(root / "alembic"))
-    config.set_main_option("sqlalchemy.url", dsn)
-    if downgrade:
-        command.downgrade(config, revision)
-    else:
-        command.upgrade(config, revision)
-
-
-async def _fresh_database(pg_container: Any) -> str:
-    admin_dsn = normalize_async_dsn(pg_container.get_connection_url())
-    database = f"tvn35_subtypes_{uuid4().hex}"
-    admin_engine = make_async_engine(admin_dsn)
-    try:
-        async with admin_engine.connect() as connection:
-            autocommit = await connection.execution_options(isolation_level="AUTOCOMMIT")
-            await autocommit.execute(text(f'CREATE DATABASE "{database}"'))
-    finally:
-        await admin_engine.dispose()
-    return make_url(admin_dsn).set(database=database).render_as_string(hide_password=False)
-
-
-async def _seed_subtypes_at_head(dsn: str) -> None:
-    """head 상태에서 core + subtype 5종을 심는다(값 정본은 subtype)."""
-    engine = make_async_engine(dsn)
-    try:
-        async with engine.begin() as conn:
-            await conn.execute(text("SET search_path = public, x_extension"))
-            await conn.execute(text(_ROUNDTRIP_SEED_SQL))
-            uuids = dict(
-                (
-                    await conn.execute(
-                        text(
-                            "SELECT feature_id, CAST(feature_uuid AS text) "
-                            "FROM feature.features WHERE feature_id LIKE 'tvn35:mig:%'"
-                        )
-                    )
-                ).all()
-            )
-            seeds: tuple[tuple[str, str, dict[str, Any], str | None], ...] = (
-                (
-                    "tvn35:mig:place",
-                    "place",
-                    {
-                        "place_kind": "cafe",
-                        "phones": ["02-1234-5678"],
-                        "biz_number": "123-45-67890",
-                        "license_date": "2024-03-01",
-                        "facility_info": {"seats": 40, "wifi": None},
-                        "payload": {"origin": "tvn35"},
-                    },
-                    None,
-                ),
-                (
-                    "tvn35:mig:event",
-                    "event",
-                    {
-                        "event_kind": "festival",
-                        "starts_on": "2026-08-01",
-                        "ends_on": "2026-08-10",
-                        "venue_name": "여의도공원",
-                        "payload": {"origin": "tvn35"},
-                    },
-                    None,
-                ),
-                (
-                    "tvn35:mig:notice",
-                    "notice",
-                    {
-                        "notice_type": "traffic",
-                        "severity": 2,
-                        "valid_start_time": "2026-08-05T10:00:00+09:00",
-                        "valid_end_time": "2026-08-09T10:00:00+09:00",
-                        "payload": {"domain": "highway"},
-                    },
-                    None,
-                ),
-                (
-                    "tvn35:mig:route",
-                    "route",
-                    {"route_type": "trail", "geometry_source": "knps", "payload": {}},
-                    _ROUTE_WKT,
-                ),
-                (
-                    "tvn35:mig:area",
-                    "area",
-                    {"area_kind": "protected_area", "payload": {}},
-                    _AREA_WKT,
-                ),
-            )
-            for feature_id, kind, detail, geom_wkt in seeds:
-                sql = subtype_upsert_sql(kind)
-                assert sql is not None
-                params = subtype_params(
-                    feature_id=feature_id,
-                    feature_uuid=str(uuids[feature_id]),
-                    kind=kind,
-                    detail=detail,
-                )
-                assert params is not None
-                if geom_wkt is not None:
-                    params["geom_wkt"] = geom_wkt
-                await conn.execute(text(sql), params)
-    finally:
-        await engine.dispose()
-
-
-async def _detail_digests(dsn: str, relation: str) -> dict[str, str]:
-    engine = make_async_engine(dsn)
-    try:
-        async with engine.connect() as conn:
-            await conn.execute(text("SET search_path = public, x_extension"))
-            rows = (
-                await conn.execute(text(_DETAIL_DIGEST_SQL.format(relation=relation)))
-            ).all()
-    finally:
-        await engine.dispose()
-    return {str(feature_id): str(digest) for feature_id, digest in rows}
-
-
-async def test_subtype_migration_round_trip_is_lossless(pg_container: Any) -> None:
-    """typed-subtype head → ``0083`` → typed-subtype head 왕복은 무손실이다.
-
-    0086 downgrade는 뷰와 **같은 식**으로 core ``detail``/``geom``을 역조립한다.
-    무손실이 아니면 롤백 가능성이 사라지므로, ADR-086 근거절의 731k행 전수 대조를
-    회귀 가드 크기로 축소해 상시 고정한다.
-    """
-    dsn = await _fresh_database(pg_container)
-    await asyncio.to_thread(_run_alembic, dsn, _ROUNDTRIP_TYPED_SUBTYPE_REVISION)
-    await _seed_subtypes_at_head(dsn)
-
-    at_head = await _detail_digests(dsn, "feature.features_detailed")
-    assert set(at_head) == {
-        "tvn35:mig:area",
-        "tvn35:mig:event",
-        "tvn35:mig:notice",
-        "tvn35:mig:place",
-        "tvn35:mig:route",
-    }
-
-    # downgrade — core detail/geom 역조립.
-    await asyncio.to_thread(_run_alembic, dsn, _ROUNDTRIP_PRE_REVISION, downgrade=True)
-    at_pre = await _detail_digests(dsn, "feature.features")
-    assert at_pre == at_head
-
-    geometry_kinds = await _geometry_types_on_core(dsn)
-    assert geometry_kinds == {
-        "tvn35:mig:route": "ST_MultiLineString",
-        "tvn35:mig:area": "ST_MultiPolygon",
-    }
-
-    # typed-subtype head로 다시 전개 — backfill이 같은 값을 typed 컬럼으로 되돌린다.
-    await asyncio.to_thread(_run_alembic, dsn, _ROUNDTRIP_TYPED_SUBTYPE_REVISION)
-    assert await _detail_digests(dsn, "feature.features_detailed") == at_head
-
-
-#: 0084 이전 세대가 실제로 저장하던 detail — ``Feature.detail.model_dump(mode="json")``
-#: 그대로다. 값은 DTO에서 만들어 "옛 writer가 쓴 바이트"와 어긋날 수 없게 한다.
-def _legacy_detail_seeds() -> dict[str, tuple[str, dict[str, Any], str | None]]:
-    return {
-        "tvn35:legacy:place": (
-            "place",
-            PlaceDetail(
-                feature_id="tvn35:legacy:place",
-                place_kind="cafe",
-                phones=["02-1234-5678", "02-2222-3333"],
-                biz_number="123-45-67890",
-                license_date=date(2024, 3, 1),
-                # 중첩 null은 provider 원문의 일부다 — 조립이 지우면 안 된다
-                # (``jsonb_strip_nulls`` 결함이 여기서 잡혔다).
-                facility_info={"seats": 40, "wifi": None, "nested": {"a": None}},
-                reviews_link={"naver": "https://map.naver.com/v5/entry/place/1"},
-                payload={"origin": "legacy", "raw": {"memo": None}},
-            ).model_dump(mode="json"),
-            None,
-        ),
-        "tvn35:legacy:event": (
-            "event",
-            EventDetail(
-                feature_id="tvn35:legacy:event",
-                event_kind="cultural_festival",
-                starts_on=date(2026, 8, 1),
-                ends_on=date(2026, 8, 10),
-                venue_name="여의도공원",
-                area_code="1",
-                # 이 필드가 subtype 컬럼에서 빠져 있던 것이 전수 대조로 드러났다.
-                sigungu_code="11140",
-                payload={"origin": "legacy"},
-            ).model_dump(mode="json"),
-            None,
-        ),
-        "tvn35:legacy:notice": (
-            "notice",
-            NoticeDetail(
-                feature_id="tvn35:legacy:notice",
-                notice_type="traffic",
-                severity=3,
-                valid_start_time=datetime(2026, 8, 5, 17, 35, 24, tzinfo=_KST),
-                valid_end_time=datetime(2026, 8, 9, 10, 0, tzinfo=_KST),
-                source_agency="한국도로공사",
-                payload={"domain": "highway", "krex_grade": None},
-            ).model_dump(mode="json"),
-            None,
-        ),
-        "tvn35:legacy:route": (
-            "route",
-            RouteDetail(
-                feature_id="tvn35:legacy:route",
-                route_type="trail",
-                geometry_source="knps",
-                total_distance_meters=Decimal("1234.567"),
-                expected_duration_minutes=90,
-                payload={"origin": "legacy"},
-            ).model_dump(mode="json"),
-            _ROUTE_WKT,
-        ),
-        "tvn35:legacy:area": (
-            "area",
-            AreaDetail(
-                feature_id="tvn35:legacy:area",
-                area_kind="protected_area",
-                area_square_meters=Decimal("98765.43"),
-                administrative_office="국립공원공단",
-                payload={"origin": "legacy"},
-            ).model_dump(mode="json"),
-            _AREA_WKT,
-        ),
-    }
-
-
-async def _seed_legacy_detail_at_pre_revision(dsn: str) -> None:
-    """0083 세대의 core ``detail``/``geom``에 옛 writer가 쓰던 그대로 심는다."""
-    engine = make_async_engine(dsn)
-    try:
-        async with engine.begin() as conn:
-            await conn.execute(text("SET search_path = public, x_extension"))
-            for index, (feature_id, (kind, detail, wkt)) in enumerate(
-                sorted(_legacy_detail_seeds().items())
-            ):
-                await conn.execute(
-                    text(
-                        "INSERT INTO feature.features ("
-                        " feature_id, kind, name, category, status, updated_at,"
-                        " detail, geom) VALUES ("
-                        " :feature_id, :kind, :name, :category, 'active', now(),"
-                        " CAST(:detail AS jsonb),"
-                        " CASE WHEN CAST(:wkt AS text) IS NULL THEN NULL"
-                        "      ELSE x_extension.ST_GeomFromText(CAST(:wkt AS text), 4326)"
-                        " END)"
-                    ),
-                    {
-                        "feature_id": feature_id,
-                        "kind": kind,
-                        "name": f"legacy fixture {index}",
-                        "category": "01070100" if kind != "notice" else "99000000",
-                        "detail": json.dumps(detail, ensure_ascii=False),
-                        "wkt": wkt,
-                    },
-                )
-    finally:
-        await engine.dispose()
-
-
-async def test_legacy_detail_survives_forward_migration_byte_for_byte(
-    pg_container: Any,
-) -> None:
-    """0083의 실제 ``detail`` JSONB가 조립 결과와 **바이트까지** 같아야 한다.
-
-    ``test_subtype_migration_round_trip_is_lossless``는 head에서 심어 head로
-    돌아오는 닫힌 고리라, "옛 detail엔 있는데 subtype 컬럼과 뷰 **양쪽에** 없는
-    필드"를 원리상 볼 수 없다 — ``EventDetail.sigungu_code`` 결함이 정확히 그
-    모양이었다. 이 테스트는 반대 방향, 즉 마이그레이션이 실제로 통과시켜야 하는
-    입력에서 출발한다.
-
-    notice 시각만 예외다: 종전 저장 표기가 writer마다 갈렸고(ADR-086 결정 4)
-    KST 고정 렌더로 통일했다. 그래도 Python ``isoformat()`` 표기와는 같으므로
-    DTO가 만든 위 시드는 바이트까지 보존된다.
-    """
-    dsn = await _fresh_database(pg_container)
-    await asyncio.to_thread(_run_alembic, dsn, _ROUNDTRIP_PRE_REVISION)
-    await _seed_legacy_detail_at_pre_revision(dsn)
-
-    before = await _detail_json(dsn, "feature.features", "tvn35:legacy:%")
-    await asyncio.to_thread(_run_alembic, dsn, "head")
-    after = await _detail_json(dsn, "feature.features_detailed", "tvn35:legacy:%")
-
-    assert set(after) == set(_legacy_detail_seeds())
-    for feature_id, expected in sorted(before.items()):
-        assert after[feature_id] == expected, feature_id
-
-
-async def _detail_json(dsn: str, relation: str, pattern: str) -> dict[str, Any]:
-    engine = make_async_engine(dsn)
-    try:
-        async with engine.connect() as conn:
-            await conn.execute(text("SET search_path = public, x_extension"))
-            rows = (
-                await conn.execute(
-                    text(
-                        f"SELECT feature_id, detail::text FROM {relation} "
-                        "WHERE feature_id LIKE :pattern ORDER BY feature_id"
-                    ),
-                    {"pattern": pattern},
-                )
-            ).all()
-    finally:
-        await engine.dispose()
-    return {str(feature_id): json.loads(detail) for feature_id, detail in rows}
-
-
-async def _geometry_types_on_core(dsn: str) -> dict[str, str]:
-    engine = make_async_engine(dsn)
-    try:
-        async with engine.connect() as conn:
-            await conn.execute(text("SET search_path = public, x_extension"))
-            rows = (
-                await conn.execute(
-                    text(
-                        "SELECT feature_id, x_extension.ST_GeometryType(geom) "
-                        "FROM feature.features "
-                        "WHERE feature_id LIKE 'tvn35:mig:%' AND geom IS NOT NULL"
-                    )
-                )
-            ).all()
-    finally:
-        await engine.dispose()
-    return {str(feature_id): str(geometry_type) for feature_id, geometry_type in rows}
 
 
 def test_subtype_table_map_covers_every_geometry_and_detail_kind() -> None:

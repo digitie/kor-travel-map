@@ -168,7 +168,9 @@ def _feature_row(**overrides: Any) -> dict[str, Any]:
         "lon": 126.98,
         "lat": 37.56,
         "address": {"road": "서울"},
-        "status": "active",
+        "lifecycle_state": "active",
+        "publication_state": "published",
+        "quality_state": "valid",
     }
     row.update(overrides)
     return row

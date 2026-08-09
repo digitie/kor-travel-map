@@ -51,7 +51,9 @@ def _snap_row(**over: Any) -> dict[str, Any]:
         "sido_code": "11",
         "sigungu_code": "11110",
         "road_address_management_no": None,
-        "status": "active",
+        "lifecycle_state": "active",
+        "publication_state": "published",
+        "quality_state": "valid",
     }
     base.update(over)
     return base

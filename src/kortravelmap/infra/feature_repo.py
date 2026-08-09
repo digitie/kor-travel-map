@@ -13,9 +13,8 @@ core ``feature.features``에는 ``detail`` JSONB도 ``geom``도 없다(alembic 0
 
 - **write**: ``upsert_feature``가 core upsert 직후 같은 트랜잭션에서
   ``feature_subtype.subtype_upsert_sql``을 실행한다. 파생 detail 쓰기는 없다.
-- **read**: ``detail``/``geom``이 필요한 조회는 조립 view를 본다 —
-  전체는 ``feature.features_detailed``, 공개면 ``feature.public_features``
-  (같은 조립 위에 ADR-067 공개 술어를 얹은 view). 응답 shape은 종전과 같다.
+- **read**: 공개 조회는 ``feature.public_features``, 비공개 상세는 code-level
+  typed core+subtype 명시 조립을 사용한다. private read view는 없다.
 - **공간 술어만 예외**: view의 ``geom``은 조인 산출 컬럼이라 인덱스가 없으므로
   bbox 후보 판정은 GiST가 있는 subtype 테이블을 직접 참조한다
   (``_bbox_candidate_predicate_sql``).
@@ -72,6 +71,10 @@ from kortravelmap.infra.feature_identity import (
     candidate_feature_uuid,
     verify_feature_uuid,
 )
+from kortravelmap.infra.feature_projection import (
+    TYPED_FEATURE_DETAIL_COLUMNS_SQL,
+    typed_feature_detail_joins_sql,
+)
 from kortravelmap.infra.feature_subtype import write_subtype
 
 if TYPE_CHECKING:
@@ -100,9 +103,9 @@ __all__ = [
     "load_bundles",
     "load_authoritative_notice_snapshot",
     "load_notice_event_bundles",
-    "soft_delete_features_not_in_snapshot",
-    "inactivate_features_by_source_entity_ids",
-    "inactivate_geometryless_area_features_by_source",
+    "retire_features_absent_from_snapshot",
+    "retire_features_by_source_entity_ids",
+    "retire_geometryless_area_features_by_source",
     "NoticeReconcileResult",
     "NoticeFeatureLoadResult",
     "close_notice_features",
@@ -131,12 +134,7 @@ __all__ = [
 
 @dataclass(frozen=True)
 class ProviderFeatureState:
-    """Provider ingest input을 procedure 전용 3축 상태로 정규화한 값.
-
-    ``Feature.status``는 T-VN-34A 동안 기존 provider 변환기를 유지하기 위한
-    **ingest 입력**일 뿐이다. 이 경계를 지난 뒤에는 legacy status를 저장하거나
-    procedure에 전달하지 않는다. 최종 DTO/API surface 제거는 T-VN-34C 소관이다.
-    """
+    """Provider conversion이 확정한 procedure 전용 3축 상태."""
 
     lifecycle_state: Literal["active", "retired"]
     publication_state: Literal["draft", "published", "suppressed"]
@@ -144,35 +142,13 @@ class ProviderFeatureState:
 
 
 def _provider_feature_state(feature: Feature) -> ProviderFeatureState:
-    """기존 provider ``Feature.status``를 ADR-090 tuple로 한 번만 매핑한다.
-
-    기존 backfill 표의 provider 관측 부분과 같게 ``broken``은 quality만
-    ``quarantined``으로, ``inactive``/``deleted`` 또는 삭제 시각은 lifecycle
-    ``retired``로 흡수한다. retired는 항상 suppressed이며, provider가 재적재해도
-    재활성화 허용 여부는 DB procedure가 source/override와 함께 판단한다.
-    """
-    status = feature.status.value
-    lifecycle_state: Literal["active", "retired"] = (
-        "retired"
-        if feature.deleted_at is not None or status in {"inactive", "deleted"}
-        else "active"
-    )
-    quality_state: Literal["valid", "quarantined"] = (
-        "quarantined" if status == "broken" else "valid"
-    )
-    publication_state: Literal["draft", "published", "suppressed"]
-    if lifecycle_state == "retired":
-        publication_state = "suppressed"
-    elif status == "draft":
-        publication_state = "draft"
-    elif status == "hidden":
-        publication_state = "suppressed"
-    else:
-        publication_state = "published"
+    """Provider conversion가 명시한 3축을 state procedure에 전달한다."""
     return ProviderFeatureState(
-        lifecycle_state=lifecycle_state,
-        publication_state=publication_state,
-        quality_state=quality_state,
+        lifecycle_state=cast(Literal["active", "retired"], feature.lifecycle_state),
+        publication_state=cast(
+            Literal["draft", "published", "suppressed"], feature.publication_state
+        ),
+        quality_state=cast(Literal["valid", "quarantined"], feature.quality_state),
     )
 
 
@@ -201,8 +177,7 @@ env ``KOR_TRAVEL_MAP_PRICE_STALE_HIDE_DAYS`` (기본 4 = OpiNet 로테이션 1�
 
 # ─── SQL 상수 (EXPLAIN 검증 대상, test-strategy §4.2) ────────────────────────
 
-# T-VN-34A: base INSERT와 세 상태축 쓰기는 procedure만 수행한다. provider DTO의
-# legacy status/deleted_at는 tuple mapper의 입력일 뿐 이 payload에는 넣지 않는다.
+# T-VN-34: base INSERT와 세 상태축 쓰기는 procedure만 수행한다.
 _CREATE_FEATURE_WITH_INITIAL_STATE_SQL: Final[str] = """
 CALL feature.create_feature_with_initial_state(
     CAST(:feature_payload AS jsonb),
@@ -233,52 +208,33 @@ CALL feature.transition_feature_state(
 _UPDATE_PROVIDER_FEATURE_CORE_SQL: Final[str] = """
 UPDATE feature.features AS f
 SET
-    kind = CASE WHEN f.data_origin = 'user_request' AND f.data_version > 0
-        THEN f.kind ELSE :kind END,
-    name = CASE WHEN f.data_origin = 'user_request' AND f.data_version > 0
-        THEN f.name ELSE :name END,
-    category = CASE WHEN f.data_origin = 'user_request' AND f.data_version > 0
-        THEN f.category ELSE :category END,
-    coord = CASE WHEN f.data_origin = 'user_request' AND f.data_version > 0 THEN f.coord
-        WHEN CAST(:lon AS double precision) IS NULL THEN NULL
+    kind = :kind,
+    name = :name,
+    category = :category,
+    coord = CASE WHEN CAST(:lon AS double precision) IS NULL THEN NULL
         ELSE x_extension.ST_SetSRID(
             x_extension.ST_MakePoint(CAST(:lon AS double precision),
                 CAST(:lat AS double precision)), 4326)
         END,
-    coord_precision_digits = CASE WHEN f.data_origin = 'user_request' AND f.data_version > 0
-        THEN f.coord_precision_digits ELSE :coord_precision_digits END,
-    address = CASE WHEN f.data_origin = 'user_request' AND f.data_version > 0
-        THEN f.address ELSE CAST(:address AS jsonb) END,
-    legal_dong_code = CASE WHEN f.data_origin = 'user_request' AND f.data_version > 0
-        THEN f.legal_dong_code ELSE :legal_dong_code END,
-    road_name_code = CASE WHEN f.data_origin = 'user_request' AND f.data_version > 0
-        THEN f.road_name_code ELSE :road_name_code END,
-    road_address_management_no = CASE WHEN f.data_origin = 'user_request' AND f.data_version > 0
-        THEN f.road_address_management_no ELSE :road_address_management_no END,
-    admin_dong_code = CASE WHEN f.data_origin = 'user_request' AND f.data_version > 0
-        THEN f.admin_dong_code ELSE :admin_dong_code END,
-    sido_code = CASE WHEN f.data_origin = 'user_request' AND f.data_version > 0
-        THEN f.sido_code ELSE :sido_code END,
-    sigungu_code = CASE WHEN f.data_origin = 'user_request' AND f.data_version > 0
-        THEN f.sigungu_code ELSE :sigungu_code END,
-    urls = CASE WHEN f.data_origin = 'user_request' AND f.data_version > 0
-        THEN f.urls ELSE CAST(:urls AS jsonb) END,
-    marker_icon = CASE WHEN f.data_origin = 'user_request' AND f.data_version > 0
-        THEN f.marker_icon ELSE :marker_icon END,
-    marker_color = CASE WHEN f.data_origin = 'user_request' AND f.data_version > 0
-        THEN f.marker_color ELSE :marker_color END,
-    parent_feature_id = CASE WHEN f.data_origin = 'user_request' AND f.data_version > 0
-        THEN f.parent_feature_id ELSE :parent_feature_id END,
-    sibling_group_id = CASE WHEN f.data_origin = 'user_request' AND f.data_version > 0
-        THEN f.sibling_group_id ELSE :sibling_group_id END,
-    raw_refs = CASE WHEN f.data_origin = 'user_request' AND f.data_version > 0
-        THEN f.raw_refs ELSE CAST(:raw_refs AS jsonb) END,
-    updated_at = CASE WHEN f.data_origin = 'user_request' AND f.data_version > 0
-        THEN f.updated_at ELSE :updated_at END
+    coord_precision_digits = :coord_precision_digits,
+    address = CAST(:address AS jsonb),
+    legal_dong_code = :legal_dong_code,
+    road_name_code = :road_name_code,
+    road_address_management_no = :road_address_management_no,
+    admin_dong_code = :admin_dong_code,
+    sido_code = :sido_code,
+    sigungu_code = :sigungu_code,
+    urls = CAST(:urls AS jsonb),
+    marker_icon = :marker_icon,
+    marker_color = :marker_color,
+    parent_feature_id = :parent_feature_id,
+    sibling_group_id = :sibling_group_id,
+    raw_refs = CAST(:raw_refs AS jsonb),
+    updated_at = :updated_at
 WHERE f.feature_id = :feature_id
+  AND NOT (f.data_origin = 'user_request' AND f.data_version > 0)
 RETURNING
-    CAST(f.feature_uuid AS text) AS feature_uuid,
-    (f.data_origin = 'user_request' AND f.data_version > 0) AS user_fenced
+    CAST(f.feature_uuid AS text) AS feature_uuid
 """
 
 
@@ -397,16 +353,7 @@ ON CONFLICT (feature_id, source_entity_key) DO UPDATE SET
 RETURNING (xmax = 0) AS inserted
 """
 
-# feature 상세 row projection — raw read(``feature.features_detailed``)와 공개
-# read(``feature.public_features``, ADR-067)가 같은 컬럼 목록을 공유한다.
-# ``feature_uuid``는 T-VN-32B dual read의 UUID 정본 병행 노출(additive) —
-# 공개 view는 alembic 0080이 재고정해 같은 컬럼을 가진다.
-#
-# T-VN-35D(ADR-086) — ``detail``/``geom``은 core 컬럼이 아니라 **view가 subtype
-# 5종에서 조립한 결과**다. 따라서 이 projection을 쓰는 read는 base table이 아니라
-# ``features_detailed``(전체) / ``public_features``(공개 gate = 같은 조립 위에
-# lifecycle/publication/quality 술어)를 조회한다. 응답 shape은 종전과 동일하다.
-_FEATURE_ROW_COLUMNS_SQL: Final[str] = """
+_PUBLIC_FEATURE_ROW_COLUMNS_SQL: Final[str] = """
     feature_id, CAST(feature_uuid AS text) AS feature_uuid, kind, name, category,
     x_extension.ST_X(coord) AS lon, x_extension.ST_Y(coord) AS lat,
     coord_precision_digits,
@@ -418,35 +365,57 @@ _FEATURE_ROW_COLUMNS_SQL: Final[str] = """
     x_extension.ST_SRID(coord_5179) AS coord_5179_srid,
     address, detail, urls, raw_refs,
     legal_dong_code, sido_code, sigungu_code,
-    marker_icon, marker_color, status,
+    marker_icon, marker_color,
     parent_feature_id, sibling_group_id,
-    created_at, updated_at, deleted_at,
+    created_at, updated_at,
     row_revision
 """
 
+_NONPUBLIC_FEATURE_ROW_COLUMNS_SQL: Final[str] = f"""
+    f.feature_id, CAST(f.feature_uuid AS text) AS feature_uuid,
+    f.kind, f.name, f.category,
+    f.lifecycle_state, f.publication_state, f.quality_state,
+    x_extension.ST_X(f.coord) AS lon, x_extension.ST_Y(f.coord) AS lat,
+    f.coord_precision_digits,
+    CASE
+      WHEN f.kind = 'area' AND a.geom IS NOT NULL
+      THEN x_extension.ST_Area(CAST(a.geom AS x_extension.geography))
+      ELSE NULL
+    END AS area_square_meters,
+    x_extension.ST_SRID(f.coord_5179) AS coord_5179_srid,
+    f.address, {TYPED_FEATURE_DETAIL_COLUMNS_SQL}, f.urls, f.raw_refs,
+    f.legal_dong_code, f.road_name_code, f.road_address_management_no,
+    f.admin_dong_code, f.sido_code, f.sigungu_code,
+    f.marker_icon, f.marker_color,
+    f.parent_feature_id, f.sibling_group_id,
+    f.created_at, f.updated_at, f.row_revision
+"""
+
 _GET_FEATURE_SQL: Final[str] = f"""
-SELECT {_FEATURE_ROW_COLUMNS_SQL}
-FROM feature.features_detailed
-WHERE feature_id = :feature_id
+SELECT {_NONPUBLIC_FEATURE_ROW_COLUMNS_SQL}
+FROM feature.features AS f
+{typed_feature_detail_joins_sql("f")}
+WHERE f.feature_id = :feature_id
 """
 
 _GET_FEATURES_BY_IDS_SQL: Final[str] = f"""
-SELECT {_FEATURE_ROW_COLUMNS_SQL}
-FROM feature.features_detailed
-WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
+SELECT {_NONPUBLIC_FEATURE_ROW_COLUMNS_SQL}
+FROM feature.features AS f
+{typed_feature_detail_joins_sql("f")}
+WHERE f.feature_id = ANY(CAST(:feature_ids AS text[]))
 """
 
 # 공개 단건/batch — ADR-067 단일 공개 projection(``feature.public_features``,
 # alembic 0096)만 조회한다. 3축 공개 술어(active/published/valid)는 VIEW 한 곳에만
 # 정의되어 있고 여기서는 재구현하지 않는다.
 _GET_PUBLIC_FEATURE_SQL: Final[str] = f"""
-SELECT {_FEATURE_ROW_COLUMNS_SQL}
+SELECT {_PUBLIC_FEATURE_ROW_COLUMNS_SQL}
 FROM feature.public_features
 WHERE feature_id = :feature_id
 """
 
 _GET_PUBLIC_FEATURES_BY_IDS_SQL: Final[str] = f"""
-SELECT {_FEATURE_ROW_COLUMNS_SQL}
+SELECT {_PUBLIC_FEATURE_ROW_COLUMNS_SQL}
 FROM feature.public_features
 WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
 """
@@ -458,6 +427,8 @@ SELECT
     f.publication_state,
     f.quality_state,
     f.row_revision,
+    f.data_origin,
+    f.data_version,
     COALESCE(EXISTS (
         SELECT 1
         FROM ops.feature_overrides AS fo
@@ -673,7 +644,7 @@ def _latest_notice_only_sql(feature_alias: str) -> str:
               AND other_se.source_entity_type = current_notice.source_entity_type
               AND other_f.feature_id <> {feature_alias}.feature_id
               AND other_f.kind = 'notice'
-              AND other_f.deleted_at IS NULL"""
+              AND other_f.lifecycle_state = 'active'"""
     return f"""
   AND (
     {feature_alias}.kind <> 'notice'
@@ -935,7 +906,7 @@ def _frozen_h35_latest_notice_only_sql(feature_alias: str) -> str:
           AND other_sl.is_primary_source
           AND other_f.feature_id <> {feature_alias}.feature_id
           AND other_f.kind = 'notice'
-          AND other_f.deleted_at IS NULL
+          AND other_f.lifecycle_state = 'active'
           AND (
             COALESCE(
                 other_sr.last_seen_at, other_sr.imported_at, other_sr.fetched_at
@@ -979,7 +950,7 @@ def _frozen_h35_latest_notice_only_sql(feature_alias: str) -> str:
 #
 # 공개 여부 자체는 ADR-067 ``feature.public_features`` projection이 정본이고, 이
 # 필터는 그 위에 겹치는 notice 전용 **추가 감산**이다(노출 확대 불가). 경쟁자 후보
-# 판정(``_LATEST_NOTICE_ONLY_SQL``의 ``other_f.deleted_at IS NULL``)은 reconcile
+# 판정(``_LATEST_NOTICE_ONLY_SQL``의 active lifecycle competitor)은 reconcile
 # 의미론(T-VN-06/37 소유)이라 T-VN-04에서 view로 바꾸지 않았다 — 비공개 신규
 # feature가 구 feature를 계속 밀어내는 현행 동작 유지.
 def public_active_notice_filter_sql(
@@ -1109,7 +1080,7 @@ def _bbox_candidate_predicate_sql(feature_alias: str) -> str:
       ``ST_Transform``을 술어에 넣지 않는다(ADR-012).
 
     T-VN-35D(ADR-086) 재작성 — geometry 정본이 subtype으로 옮겨졌다. **공간 술어만은
-    조립 view(``features_detailed``/``public_features``)를 쓸 수 없다**: view의
+    조립 projection을 쓸 수 없다**: projection의
     ``geom``은 ``COALESCE(routes.geom, areas.geom)`` 산출 컬럼이라 인덱스가 없고,
     그대로 술어에 넣으면 features 730k행 seq scan이 된다(T-VN-21 tier-1 gate 위반).
     그래서 GiST가 붙어 있는 subtype 테이블을 직접 참조하되, 두 arm이 모두
@@ -1202,10 +1173,8 @@ WHERE f.feature_id = ANY(CAST(:feature_ids AS text[]))
 # 매칭(provider/dataset/entity_type 한정). primary link 1개만(LIMIT 1).
 #
 # 공개 표면(`/v1/mois/licenses/...`)이 소비하므로 ADR-067 공개 projection
-# (``feature.public_features``)만 조인한다 — 과거에는 ``deleted_at IS NULL``만
-# 요구하고 ``ORDER BY (status='active') DESC``로 active를 우선했을 뿐이라, active
-# 후보가 없으면 draft/inactive feature가 그대로 노출됐다(F-1). caller(mois_detail)는
-# 원래 active-only를 기대한다(test_mois_loader가 status='active' 단언).
+# (``feature.public_features``)만 조인한다. caller(mois_detail)는 public-only를
+# 기대하므로 suppression/retirement/quality 판정을 따로 재구현하지 않는다.
 #
 # 정합성(issue #509 Problem B): 같은 안정 식별자에 구/신 feature가 둘 다 primary
 # link로 남을 수 있다(re-key 정리 직전/직후). view가 non-active를 제거한 뒤에도
@@ -1214,7 +1183,8 @@ WHERE f.feature_id = ANY(CAST(:feature_ids AS text[]))
 _GET_PRIMARY_SOURCE_DETAIL_SQL: Final[str] = """
 SELECT
     f.feature_id, CAST(f.feature_uuid AS text) AS feature_uuid,
-    f.kind, f.name, f.category, f.status,
+    f.kind, f.name, f.category,
+    core.lifecycle_state, core.publication_state, core.quality_state,
     x_extension.ST_X(f.coord) AS lon, x_extension.ST_Y(f.coord) AS lat,
     f.address, f.detail,
     sr.source_record_key, pd.provider, pd.dataset_key,
@@ -1231,6 +1201,8 @@ JOIN provider_sync.source_links AS sl
   ON sl.source_entity_key = se.source_entity_key
 JOIN feature.public_features AS f
   ON f.feature_id = sl.feature_id
+JOIN feature.features AS core
+  ON core.feature_id = f.feature_id
 WHERE pd.provider = :provider
   AND pd.dataset_key = :dataset_key
   AND se.source_entity_type = :source_entity_type
@@ -1399,7 +1371,7 @@ WITH candidates AS MATERIALIZED (
         f.feature_id, CAST(f.feature_uuid AS text) AS feature_uuid,
         f.kind, f.name, f.category,
         x_extension.ST_X(f.coord) AS lon, x_extension.ST_Y(f.coord) AS lat,
-        f.marker_icon, f.marker_color, f.status
+        f.marker_icon, f.marker_color
     FROM feature.public_features AS f
     WHERE {_bbox_candidate_predicate_sql("f")}
     {_bbox_attribute_filter_sql("f")}
@@ -1416,7 +1388,7 @@ SELECT
     candidate.feature_id, candidate.feature_uuid,
     candidate.kind, candidate.name, candidate.category,
     candidate.lon, candidate.lat,
-    candidate.marker_icon, candidate.marker_color, candidate.status,
+    candidate.marker_icon, candidate.marker_color,
     price_summaries.price_summary,
     weather_summaries.weather_summary
 FROM candidates AS candidate
@@ -1432,7 +1404,7 @@ WITH candidates AS MATERIALIZED (
         f.kind, f.name, f.category,
         x_extension.ST_X(f.coord) AS lon,
         x_extension.ST_Y(f.coord) AS lat,
-        f.marker_icon, f.marker_color, f.status,
+        f.marker_icon, f.marker_color,
         CASE
           WHEN f.kind = 'route' AND f.geom IS NOT NULL
           THEN CAST(x_extension.ST_AsGeoJSON(x_extension.ST_Simplify(f.geom, 0.0001), 6) AS jsonb)
@@ -1464,7 +1436,7 @@ SELECT
     candidate.feature_id, candidate.feature_uuid,
     candidate.kind, candidate.name, candidate.category,
     candidate.lon, candidate.lat,
-    candidate.marker_icon, candidate.marker_color, candidate.status,
+    candidate.marker_icon, candidate.marker_color,
     price_summaries.price_summary,
     weather_summaries.weather_summary,
     candidate.geometry,
@@ -1597,7 +1569,6 @@ WITH candidates AS (
         x_extension.ST_Y(f.coord) AS lat,
         f.marker_icon,
         f.marker_color,
-        f.status,
         CASE
             WHEN CAST(:q AS text) IS NULL THEN NULL
             ELSE x_extension.similarity(f.name, CAST(:q AS text))
@@ -1640,7 +1611,6 @@ WITH name_candidates AS MATERIALIZED (
         f.coord,
         f.marker_icon,
         f.marker_color,
-        f.status,
         x_extension.similarity(f.name, CAST(:q AS text)) AS score
     FROM feature.public_features AS f
     WHERE f.name OPERATOR(x_extension.%) CAST(:q AS text)
@@ -1657,7 +1627,6 @@ candidates AS (
         x_extension.ST_Y(coord) AS lat,
         marker_icon,
         marker_color,
-        status,
         score
     FROM name_candidates
     WHERE (
@@ -1749,7 +1718,6 @@ candidates AS (
         f.kind,
         f.name,
         f.category,
-        f.status,
         x_extension.ST_X(f.coord) AS lon,
         x_extension.ST_Y(f.coord) AS lat,
         x_extension.ST_Distance(f.coord_5179, t.coord_5179)::double precision
@@ -1867,7 +1835,6 @@ candidates AS (
         f.kind,
         f.name,
         f.category,
-        f.status,
         x_extension.ST_X(f.coord) AS lon,
         x_extension.ST_Y(f.coord) AS lat,
         x_extension.ST_Distance(f.coord_5179, o.pt_5179)::double precision
@@ -1989,7 +1956,7 @@ WHERE f.lifecycle_state = 'active'
 """
 
 
-# Step C 폐업/취소 — soft_delete_not_in_snapshot의 inverse. 주어진 source_entity_id
+# Step C 폐업/취소 — snapshot 부재 retirement의 inverse. 주어진 source_entity_id
 # 집합에 **속하는** primary-source feature를 retired/suppressed로 전이(폐업/취소된
 # 인허가). ADR-017 — place는 무기한 유지, 이미 retired이면 건너뛴다.
 # ``:keys`` 빈 배열이면 아무 것도 비활성화하지 않는다(폐업 목록이 비었음).
@@ -2169,7 +2136,6 @@ class NearbyFeatureRow:
     kind: str
     name: str
     category: str
-    status: str
     lon: float
     lat: float
     distance_m: float
@@ -2194,7 +2160,6 @@ class FeatureSearchRow:
     lat: float | None
     marker_icon: str | None
     marker_color: str | None
-    status: str
     score: float | None = None
     score_cursor: str | None = None
     feature_uuid: str | None = None
@@ -2252,19 +2217,16 @@ def _feature_params(feature: Feature) -> dict[str, Any]:
         "parent_feature_id": feature.parent_feature_id,
         "sibling_group_id": feature.sibling_group_id,
         "raw_refs": _dump_raw_refs(feature),
-        "status": feature.status.value,
         "created_at": feature.created_at,
         "updated_at": feature.updated_at,
-        "deleted_at": feature.deleted_at,
     }
 
 
 def _provider_feature_payload(params: Mapping[str, Any]) -> str:
     """Create procedure에 넘길 provider core payload JSON을 만든다.
 
-    legacy ``status``/``deleted_at``은 오직 ``_provider_feature_state``의 ingest
-    입력이다. 둘을 payload에 함께 넣으면 축과 legacy 열을 dual-write하게 되므로
-    절대 전달하지 않는다. ``geom_wkt``도 typed subtype 전용 바인딩이라 core
+    세 축은 state procedure의 별도 인자이며 core payload에 넣지 않는다.
+    ``geom_wkt``도 typed subtype 전용 바인딩이라 core
     procedure payload가 아니다.
     """
     payload = {
@@ -2277,8 +2239,6 @@ def _provider_feature_payload(params: Mapping[str, Any]) -> str:
         if key
         not in {
             "geom_wkt",
-            "status",
-            "deleted_at",
             "data_origin",
             "data_version",
             "created_at",
@@ -2420,9 +2380,8 @@ async def upsert_feature(
     확보한 ``load_bundle``이 뒤에서 procedure로 수행한다.
 
     **geometry 없는 route/area는 여기 오지 않는다** — ``Feature`` DTO가 구성
-    시점에 거부한다(ADR-086). 종전에는
-    ``inactivate_geometryless_area_features_by_source``가 적재 뒤에 보정하던
-    상태다.
+    시점에 거부한다(ADR-086). 종전 geometryless-area retirement 보정은 더 이상
+    필요한 상태를 만들 수 없다.
     """
     if provider_dataset_id <= 0:
         raise ValueError("provider_dataset_id는 양의 정수여야 합니다.")
@@ -2452,9 +2411,11 @@ async def upsert_feature(
     if not inserted:
         updated = (
             await session.execute(text(_UPDATE_PROVIDER_FEATURE_CORE_SQL), params)
-        ).mappings().one()
-        stored_feature_uuid = str(updated["feature_uuid"])
-        user_fenced = bool(updated["user_fenced"])
+        ).mappings().one_or_none()
+        if updated is None:
+            user_fenced = True
+        else:
+            stored_feature_uuid = str(updated["feature_uuid"])
     verify_feature_uuid(
         feature.feature_id,
         stored_feature_uuid,
@@ -2630,6 +2591,14 @@ class _FeatureLoadState:
     quality_state: str | None
     row_revision: int | None
     has_provider_reactivation_override: bool
+    data_origin: str | None = None
+    data_version: int | None = None
+
+    @property
+    def provider_write_fenced(self) -> bool:
+        """현재 row가 immutable user-request version인지 여부."""
+
+        return self.data_origin == "user_request" and (self.data_version or 0) > 0
 
 
 async def _feature_load_state(
@@ -2647,6 +2616,8 @@ async def _feature_load_state(
         publication_state=row["publication_state"],
         quality_state=row["quality_state"],
         row_revision=(int(row["row_revision"]) if row["row_revision"] is not None else None),
+        data_origin=(str(row["data_origin"]) if row["data_origin"] is not None else None),
+        data_version=(int(row["data_version"]) if row["data_version"] is not None else None),
         has_provider_reactivation_override=bool(
             row["has_provider_reactivation_override"]
         ),
@@ -2698,6 +2669,8 @@ async def _transition_provider_lifecycle_from_state(
 ) -> bool:
     """한 optimistic revision에서 provider lifecycle procedure를 실행한다."""
     if not current.exists:
+        return False
+    if current.provider_write_fenced:
         return False
     assert current.row_revision is not None
     assert current.publication_state is not None
@@ -2807,7 +2780,7 @@ async def load_bundle(session: AsyncSession, bundle: FeatureBundle) -> FeatureLo
     동일 source record 재수집이면 원문은 immutable로 유지하고 entity head의 관측만
     전진시킨다. current record가 달라진 경우에만 feature 본문/version을 갱신한다.
     단, source_record만 있고 feature가 없는 비정상 상태는 생성하고, provider가
-    다시 보낸 active feature가 과거 정리/비활성화로 ``inactive`` 상태라면 복구한다.
+    다시 보낸 active feature가 과거 retirement 상태라면 복구한다.
     ``user_request`` feature와 provider 재활성화 방지 override는 복구하지 않는다.
     commit은 호출자 책임.
     """
@@ -2817,10 +2790,8 @@ async def load_bundle(session: AsyncSession, bundle: FeatureBundle) -> FeatureLo
     record_inserted = record_state.inserted
     feature_inserted = False
     feature_updated = False
-    feature_missing = False
-    if not record_inserted:
-        feature_state = await _feature_load_state(session, bundle.feature.feature_id)
-        feature_missing = not feature_state.exists
+    feature_state = await _feature_load_state(session, bundle.feature.feature_id)
+    feature_missing = not feature_state.exists
     if record_state.became_current or feature_missing:
         feature_inserted = await upsert_feature(
             session,
@@ -2831,7 +2802,7 @@ async def load_bundle(session: AsyncSession, bundle: FeatureBundle) -> FeatureLo
                 source_record_key=record_state.source_record_key,
             ),
         )
-        feature_updated = not feature_inserted
+        feature_updated = not feature_inserted and not feature_state.provider_write_fenced
     link_inserted = await upsert_source_link(session, bundle.source_link)
     state_updated = await _transition_provider_lifecycle_if_needed(
         session,
@@ -2867,7 +2838,7 @@ async def load_bundles(
     return total
 
 
-async def soft_delete_features_not_in_snapshot(
+async def retire_features_absent_from_snapshot(
     session: AsyncSession,
     *,
     provider: str,
@@ -2889,7 +2860,7 @@ async def soft_delete_features_not_in_snapshot(
         ``mois_license_features_bulk`` / ``license_place``).
     snapshot_source_entity_ids
         이번 snapshot에 포함된 ``source_entity_id`` 집합. 비어 있으면 해당
-        source의 모든 활성 feature가 비활성화된다.
+        source의 모든 선택 가능 feature가 retired 전이된다.
 
     Returns
     -------
@@ -2914,7 +2885,7 @@ async def soft_delete_features_not_in_snapshot(
     )
 
 
-async def inactivate_features_by_source_entity_ids(
+async def retire_features_by_source_entity_ids(
     session: AsyncSession,
     *,
     provider: str,
@@ -2922,11 +2893,11 @@ async def inactivate_features_by_source_entity_ids(
     source_entity_type: str,
     source_entity_ids: set[str],
 ) -> int:
-    """주어진 ``source_entity_id`` 집합에 **속하는** primary-source feature를 비활성화.
+    """주어진 ``source_entity_id`` 집합에 **속하는** primary-source feature를 retired 전이.
 
     Step C 폐업/취소 — provider가 ``closed``/``cancelled``로 통지한 인허가에 대응하는
     feature를 lifecycle ``retired`` + publication ``suppressed``로 전이한다
-    (ADR-017 — place는 무기한 유지). ``soft_delete_features_not_in_snapshot``의
+    (ADR-017 — place는 무기한 유지). snapshot 부재 retirement의
     inverse (snapshot 부재분이 아니라 명시 폐업분)다. 이미 retired인 feature·집합
     밖 feature는 건드리지 않는다. 빈 집합이면 no-op(0). commit은 호출자 책임.
 
@@ -2964,14 +2935,14 @@ async def inactivate_features_by_source_entity_ids(
     )
 
 
-async def inactivate_geometryless_area_features_by_source(
+async def retire_geometryless_area_features_by_source(
     session: AsyncSession,
     *,
     provider: str,
     dataset_key: str,
     source_entity_type: str,
 ) -> int:
-    """provider source에 연결된 ``area`` 중 경계 geometry가 없는 feature를 비활성화.
+    """provider source에 연결된 ``area`` 중 경계 geometry가 없는 feature를 retired 전이.
 
     기존에 좌표만 있는 record를 ``Feature.kind='area'``로 적재했던 provider를
     재정렬할 때 쓰는 one-way 보정이다. 같은 source entity가 새 ``place`` feature로
@@ -3477,6 +3448,7 @@ ranked AS (
         feature_id,
         provider_dataset_id,
         lineage_key,
+        tiebreak,
         snapshot_present,
         snapshot_changed_at,
         snapshot_valid_until,
@@ -4202,8 +4174,7 @@ async def supersede_stale_notice_features(
     """notice 중복/소멸 정리 — 적재 직후 호출하는 write-시점 reconciliation(#632).
 
     1. **중복 정리**: 같은 계보(``_notice_lineage_sql``)에 feature가 2개 이상이면
-       latest(최근 확인 시각) 1개만 남기고 나머지를 soft-delete
-       (``status='inactive'`` + ``deleted_at``, ADR-017). identity 스킴 변경으로
+       latest(최근 확인 시각) 1개만 남기고 나머지를 lifecycle retire한다. identity 스킴 변경으로
        재키잉된 구세대 feature가 신세대에 밀려나는 경로다.
     2. **snapshot 상태 동기화** (``active_lineage_keys``/``closed_at`` 제공 시):
        현재 feed에 없는 latest 계보는 ``valid_end_time=closed_at``으로 닫고,
@@ -4419,7 +4390,7 @@ async def get_feature_rows_by_ids(
 
     ``feature_ids`` 순서는 반환 dict에서 보장하지 않는다. 호출자는 입력 순서와
     key 존재 여부를 비교해 missing 목록을 만든다. **admin/감사·내부 파이프라인용
-    raw read** — soft-deleted/inactive feature도 status와 함께 반환한다(단건
+    raw read** — retired/suppressed feature도 세 상태축과 함께 반환한다(단건
     ``get_feature_row``와 동일 정책). 공개/서비스 read는 ADR-067 projection을 쓰는
     ``get_public_feature_rows_by_ids``를 사용한다.
     """
@@ -4555,7 +4526,8 @@ SELECT
     x_extension.ST_Y(coord) AS lat
 FROM feature.features
 WHERE kind = 'place'
-  AND deleted_at IS NULL
+  AND lifecycle_state = 'active'
+  AND quality_state = 'valid'
   AND coord IS NOT NULL
 ORDER BY feature_id
 """
@@ -4588,7 +4560,8 @@ JOIN provider_sync.source_entities se
   ON se.source_entity_key = sl.source_entity_key
 JOIN provider_sync.provider_datasets dataset
   ON dataset.provider_dataset_id = se.provider_dataset_id
-WHERE f.deleted_at IS NULL
+WHERE f.lifecycle_state = 'active'
+  AND f.quality_state = 'valid'
   AND f.kind = 'place'
   AND f.coord IS NOT NULL
   AND dataset.provider = :provider
@@ -4683,7 +4656,8 @@ JOIN provider_sync.source_entities se
   ON se.source_entity_key = sl.source_entity_key
 JOIN provider_sync.provider_datasets dataset
   ON dataset.provider_dataset_id = se.provider_dataset_id
-WHERE f.deleted_at IS NULL
+WHERE f.lifecycle_state = 'active'
+  AND f.quality_state = 'valid'
   AND dataset.provider = :provider
   AND dataset.dataset_key = :dataset_key
   AND se.source_entity_type = :source_entity_type
@@ -4840,8 +4814,7 @@ SELECT
     x_extension.ST_X(f.coord) AS lon,
     x_extension.ST_Y(f.coord) AS lat,
     f.marker_icon,
-    f.marker_color,
-    f.status
+    f.marker_color
 FROM area_feature AS a
 JOIN feature.public_features AS f
   ON f.feature_id <> a.feature_id
@@ -5204,7 +5177,6 @@ def _search_row(row: Any) -> FeatureSearchRow:
         lat=float(lat) if lat is not None else None,
         marker_icon=row["marker_icon"],
         marker_color=row["marker_color"],
-        status=str(row["status"]),
         score=float(score) if score is not None else None,
         score_cursor=str(score_cursor) if score_cursor is not None else None,
         feature_uuid=str(feature_uuid) if feature_uuid is not None else None,
@@ -5394,7 +5366,6 @@ def _nearby_row(row: Any) -> NearbyFeatureRow:
         kind=str(row["kind"]),
         name=str(row["name"]),
         category=str(row["category"]),
-        status=str(row["status"]),
         lon=float(row["lon"]),
         lat=float(row["lat"]),
         distance_m=float(row["distance_m"]),
@@ -5419,7 +5390,6 @@ async def features_nearby_poi_cache_target(
     radius_km: float | None = None,
     kinds: Sequence[str] | None = None,
     categories: Sequence[str] | None = None,
-    statuses: Sequence[str] | None = ("active",),
     providers: Sequence[str] | None = None,
     sort: str = "distance",
     limit: int = 100,
@@ -5431,8 +5401,7 @@ async def features_nearby_poi_cache_target(
     적용한다. 입력 좌표 변환이나 ``ST_Transform``은 WHERE 술어에 두지 않는다.
 
     공개 read이므로 ADR-067 ``feature.public_features`` projection 안에서만
-    조회한다. ``statuses``는 T-VN-34C가 public API 계약에서 제거할 때까지 받는
-    폐기 예정 C 소유 인자이며, T-VN-34B부터 공개 membership에는 영향을 주지 않는다.
+    조회한다.
     """
     if sort not in _NEARBY_SQL_BY_SORT:
         raise ValueError("sort must be one of distance, name, last_updated_at")
@@ -5440,9 +5409,6 @@ async def features_nearby_poi_cache_target(
         raise ValueError("radius_km must be greater than 0")
     if limit <= 0:
         raise ValueError("limit must be greater than 0")
-    # T-VN-34C가 signature/DTO를 제거할 때까지 폐기 예정 input을 의도적으로 무시한다.
-    del statuses
-
     effective_limit = min(limit, 500)
     rows = (
         (
@@ -5479,7 +5445,6 @@ async def features_nearby(
     radius_m: float,
     kinds: Sequence[str] | None = None,
     categories: Sequence[str] | None = None,
-    statuses: Sequence[str] | None = ("active",),
     providers: Sequence[str] | None = None,
     sort: str = "distance",
     limit: int = 100,
@@ -5493,7 +5458,7 @@ async def features_nearby(
     cursor/정렬/응답 shape는 ``features_nearby_poi_cache_target``과 동일
     (``NearbyFeaturePage``). ``sort`` ∈ {distance, name, last_updated_at}.
     공개 read이므로 ADR-067 ``feature.public_features`` projection 안에서만
-    조회한다. ``statuses``는 T-VN-34C가 제거할 때까지 남는 폐기 예정 no-op이다.
+    조회한다.
     """
     if sort not in _NEARBY_COORD_SQL_BY_SORT:
         raise ValueError("sort must be one of distance, name, last_updated_at")
@@ -5501,9 +5466,6 @@ async def features_nearby(
         raise ValueError("radius_m must be greater than 0")
     if limit <= 0:
         raise ValueError("limit must be greater than 0")
-    # T-VN-34C가 signature/DTO를 제거할 때까지 폐기 예정 input을 의도적으로 무시한다.
-    del statuses
-
     effective_limit = min(limit, 500)
     rows = (
         (

@@ -204,7 +204,9 @@ class FeatureCurationGroup:
     lon: float | None
     lat: float | None
     address: dict[str, Any]
-    status: str
+    lifecycle_state: str
+    publication_state: str
+    quality_state: str
     curations: tuple[CurationItem, ...]
     # T-VN-32C UUID 정본 병행 노출(additive).
     feature_uuid: str | None = None
@@ -773,8 +775,8 @@ ORDER BY i.feature_id, c.edition_key DESC, c.title, i.sort_order,
 
 # 공개 큐레이션 group read — feature 공개 여부는 ADR-067
 # ``feature.public_features`` projection이 정본이다(T-VN-04, F-1). 과거의
-# ``status NOT IN ('deleted','hidden')`` 재구현은 draft/broken/inactive를
-# 노출했다. ``:public_only``는 collection/item 상태 필터에만 관여한다.
+# 과거 core visibility 술어 재구현은 공개되지 않아야 할 행을 노출했다.
+# ``:public_only``는 collection/item 상태 필터에만 관여한다.
 _LIST_GROUP_KEYS_SQL: Final[str] = f"""
 SELECT f.feature_id
 FROM feature.public_features AS f
@@ -848,7 +850,9 @@ SELECT
     x_extension.ST_X(f.coord) AS lon,
     x_extension.ST_Y(f.coord) AS lat,
     f.address,
-    f.status
+    f.lifecycle_state,
+    f.publication_state,
+    f.quality_state
 FROM feature.public_features AS f
 WHERE f.feature_id = :feature_id
 {public_active_notice_filter_sql("f")}
@@ -864,7 +868,9 @@ SELECT
     x_extension.ST_X(f.coord) AS lon,
     x_extension.ST_Y(f.coord) AS lat,
     f.address,
-    f.status
+    f.lifecycle_state,
+    f.publication_state,
+    f.quality_state
 FROM feature.public_features AS f
 WHERE f.feature_id = ANY(CAST(:feature_ids AS text[]))
 {public_active_notice_filter_sql("f")}
@@ -2062,8 +2068,8 @@ CROSS JOIN LATERAL (
         FROM feature.features AS f
         WHERE requested.feature_id IS NOT NULL
           AND f.feature_id = requested.feature_id
-          AND f.deleted_at IS NULL
-          AND f.status NOT IN ('deleted', 'hidden')
+          AND f.lifecycle_state = 'active'
+          AND f.quality_state = 'valid'
     )
     UNION ALL
     (
@@ -2079,8 +2085,8 @@ CROSS JOIN LATERAL (
         WHERE requested.feature_id IS NULL
           AND requested.place_name IS NOT NULL
           AND lower(f.name) = lower(requested.place_name)
-          AND f.deleted_at IS NULL
-          AND f.status NOT IN ('deleted', 'hidden')
+          AND f.lifecycle_state = 'active'
+          AND f.quality_state = 'valid'
         ORDER BY f.feature_id
         LIMIT 101
     )
@@ -2951,8 +2957,9 @@ async def add_curation_item(
             await session.execute(
                 text(
                     "SELECT name FROM feature.features "
-                    "WHERE feature_id = :id AND deleted_at IS NULL "
-                    "AND status NOT IN ('deleted','hidden') "
+                    "WHERE feature_id = :id "
+                    "AND lifecycle_state = 'active' "
+                    "AND quality_state = 'valid' "
                     "FOR KEY SHARE"
                 ),
                 {"id": feature_id},
@@ -3181,8 +3188,9 @@ async def update_curation_item(
             await session.execute(
                 text(
                     "SELECT 1 FROM feature.features "
-                    "WHERE feature_id = :feature_id AND deleted_at IS NULL "
-                    "AND status NOT IN ('deleted','hidden') "
+                    "WHERE feature_id = :feature_id "
+                    "AND lifecycle_state = 'active' "
+                    "AND quality_state = 'valid' "
                     "FOR KEY SHARE"
                 ),
                 {"feature_id": target_feature_id},
@@ -3464,7 +3472,9 @@ async def get_feature_curation_group(
         lon=float(feature["lon"]) if feature["lon"] is not None else None,
         lat=float(feature["lat"]) if feature["lat"] is not None else None,
         address=_object(feature["address"]),
-        status=str(feature["status"]),
+        lifecycle_state=str(feature["lifecycle_state"]),
+        publication_state=str(feature["publication_state"]),
+        quality_state=str(feature["quality_state"]),
         curations=tuple(_item(row) for row in item_rows),
         feature_uuid=(str(value) if (value := feature.get("feature_uuid")) else None),
     )
@@ -3986,7 +3996,9 @@ async def list_feature_curation_groups(
                 lon=float(feature["lon"]) if feature["lon"] is not None else None,
                 lat=float(feature["lat"]) if feature["lat"] is not None else None,
                 address=_object(feature["address"]),
-                status=str(feature["status"]),
+                lifecycle_state=str(feature["lifecycle_state"]),
+                publication_state=str(feature["publication_state"]),
+                quality_state=str(feature["quality_state"]),
                 curations=grouped_items.get(feature_id, ()),
                 feature_uuid=(str(value) if (value := feature.get("feature_uuid")) else None),
             )
@@ -4585,8 +4597,8 @@ async def import_curation_rows(
                         text(
                             "SELECT feature_id FROM feature.features "
                             "WHERE feature_id = ANY(CAST(:feature_ids AS text[])) "
-                            "AND deleted_at IS NULL "
-                            "AND status NOT IN ('deleted', 'hidden') "
+                            "AND lifecycle_state = 'active' "
+                            "AND quality_state = 'valid' "
                             "ORDER BY feature_id FOR UPDATE"
                         ),
                         {"feature_ids": feature_ids},

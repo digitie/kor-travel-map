@@ -39,7 +39,13 @@ from kortravelmap.dto import (
     SourceLink,
     SourceRecord,
 )
-from kortravelmap.dto._enums import FeatureKind, FeatureStatus, SourceRole
+from kortravelmap.dto._enums import (
+    FeatureKind,
+    FeatureLifecycleState,
+    FeaturePublicationState,
+    FeatureQualityState,
+    SourceRole,
+)
 from kortravelmap.infra import feature_repo
 from kortravelmap.infra.feature_repo import (
     FeatureLoadResult,
@@ -97,33 +103,44 @@ def test_feature_params_with_coord_and_detail() -> None:
     # address/urls/raw_refs는 JSON 문자열 (CAST AS jsonb)
     assert isinstance(params["address"], str)
     assert json.loads(params["raw_refs"]) == []
-    assert params["status"] == "active"
+    assert "lifecycle_state" not in params
+    assert "publication_state" not in params
+    assert "quality_state" not in params
     # T-VN-35: core에 detail 컬럼이 없으므로 core bind에도 없다.
     assert "detail" not in params
 
 
 @pytest.mark.parametrize(
-    ("status", "deleted", "expected"),
+    ("lifecycle_state", "publication_state", "quality_state"),
     [
-        ("active", False, ("active", "published", "valid")),
-        ("draft", False, ("active", "draft", "valid")),
-        ("hidden", False, ("active", "suppressed", "valid")),
-        ("broken", False, ("active", "published", "quarantined")),
-        ("inactive", False, ("retired", "suppressed", "valid")),
-        ("deleted", False, ("retired", "suppressed", "valid")),
-        ("active", True, ("retired", "suppressed", "valid")),
+        (
+            FeatureLifecycleState.ACTIVE,
+            FeaturePublicationState.PUBLISHED,
+            FeatureQualityState.VALID,
+        ),
+        (
+            FeatureLifecycleState.ACTIVE,
+            FeaturePublicationState.DRAFT,
+            FeatureQualityState.QUARANTINED,
+        ),
+        (
+            FeatureLifecycleState.RETIRED,
+            FeaturePublicationState.SUPPRESSED,
+            FeatureQualityState.VALID,
+        ),
     ],
 )
-def test_provider_status_is_mapped_once_to_tvn34_axes(
-    status: str,
-    deleted: bool,
-    expected: tuple[str, str, str],
+def test_provider_state_is_passed_once_to_tvn34_axes(
+    lifecycle_state: FeatureLifecycleState,
+    publication_state: FeaturePublicationState,
+    quality_state: FeatureQualityState,
 ) -> None:
-    """Provider legacy status is an ingest-only input at the repository boundary."""
+    """Provider conversion이 만든 3축은 repository에서 재해석하지 않는다."""
     feature = _place(None, None).model_copy(
         update={
-            "status": FeatureStatus(status),
-            "deleted_at": _NOW if deleted else None,
+            "lifecycle_state": lifecycle_state,
+            "publication_state": publication_state,
+            "quality_state": quality_state,
         }
     )
 
@@ -133,7 +150,7 @@ def test_provider_status_is_mapped_once_to_tvn34_axes(
         actual.lifecycle_state,
         actual.publication_state,
         actual.quality_state,
-    ) == expected
+    ) == (lifecycle_state, publication_state, quality_state)
 
 
 def test_provider_procedure_payload_excludes_legacy_state_columns() -> None:
@@ -241,14 +258,18 @@ async def test_user_fenced_provider_refresh_keeps_provider_baseline_snapshot(
     """user effective row를 provider ``version=0`` payload로 오기록하지 않는다."""
 
     class _Mappings:
-        def __init__(self, row: dict[str, Any]) -> None:
+        def __init__(self, row: dict[str, Any] | None) -> None:
             self._row = row
 
         def one(self) -> dict[str, Any]:
+            assert self._row is not None
+            return self._row
+
+        def one_or_none(self) -> dict[str, Any] | None:
             return self._row
 
     class _Result:
-        def __init__(self, row: dict[str, Any]) -> None:
+        def __init__(self, row: dict[str, Any] | None) -> None:
             self._row = row
 
         def mappings(self) -> _Mappings:
@@ -266,8 +287,7 @@ async def test_user_fenced_provider_refresh_keeps_provider_baseline_snapshot(
                 self.feature_uuid = json.loads(params["feature_payload"])["feature_uuid"]
                 return _Result({"o_inserted": False, "o_feature_uuid": self.feature_uuid})
             if "UPDATE feature.features AS f" in sql:
-                assert self.feature_uuid is not None
-                return _Result({"feature_uuid": self.feature_uuid, "user_fenced": True})
+                return _Result(None)
             raise AssertionError(f"unexpected SQL: {sql}")
 
     async def _no_subtype(*_args: Any, **_kwargs: Any) -> None:
@@ -850,7 +870,6 @@ def test_nearby_cursor_round_trips_distance_name_and_updated_at() -> None:
         kind="place",
         name="A first",
         category="06020000",
-        status="active",
         lon=126.978,
         lat=37.5665,
         distance_m=12.5,
@@ -884,7 +903,6 @@ def test_nearby_cursor_rejects_malformed_or_wrong_sort() -> None:
         kind="place",
         name="A first",
         category="06020000",
-        status="active",
         lon=126.978,
         lat=37.5665,
         distance_m=12.5,
@@ -910,7 +928,6 @@ def test_feature_search_cursor_round_trips_score_and_id_modes() -> None:
         lat=37.5796,
         marker_icon="monument",
         marker_color="P-01",
-        status="active",
         score=0.95,
         score_cursor="0.9500000476837158",
     )
@@ -996,7 +1013,6 @@ def test_feature_search_cursor_fingerprint_uses_normalized_repository_contract()
             lat=37.5796,
             marker_icon="monument",
             marker_color="P-01",
-            status="active",
             score=0.95,
             score_cursor="0.9500000476837158",
         ),
@@ -1028,7 +1044,6 @@ def test_feature_search_cursor_rejects_tamper_unknown_version_and_query_reuse() 
         lat=37.5796,
         marker_icon="monument",
         marker_color="P-01",
-        status="active",
         score=0.95,
         score_cursor="0.9500000476837158",
     )
@@ -1221,7 +1236,6 @@ async def test_search_features_validates_before_db_call() -> None:
             lat=37.5796,
             marker_icon="monument",
             marker_color="P-01",
-            status="active",
             score=0.95,
             score_cursor="0.9500000476837158",
         ),

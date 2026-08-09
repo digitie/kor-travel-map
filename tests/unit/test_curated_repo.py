@@ -560,7 +560,7 @@ async def test_curated_repo_validation_and_empty_paths() -> None:
             source_id=_SOURCE_ID,
             selection_origin="bad",
         )
-    with pytest.raises(ValueError, match="active Feature"):
+    with pytest.raises(ValueError, match="selectable Feature"):
         await curated_repo.create_curated_feature(
             _FakeSession([]),
             theme_id=_THEME_ID,
