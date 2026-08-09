@@ -91,7 +91,7 @@ barrier로 직렬화한다.
     ·KMA/AirKorea/KREX call-site cutover 구현) → [/] `T-VN-38B`(0093·price immutable fact
     ·receipt summary·Dagster producer lineage 구현) → [/] `T-VN-38C`(0094 summary-only reader/API/UI
     ·snapshot 분리·OpenAPI/type 재생성 완료, 2인 재리뷰·n150 live 검증 대기) →
-    [x] `T-VN-34A` → [ ] `T-VN-34B` → [ ] `T-VN-34C` →
+    [x] `T-VN-34A` → [~] `T-VN-34B` → [ ] `T-VN-34C` →
     [ ] `T-VN-36A` → [ ] `T-VN-36B` → [ ] `T-VN-36C`
   - 32~38 join barrier 뒤 Lane B: [ ] `T-VN-40A` → [ ] `T-VN-40B` →
     [ ] `T-VN-40C`
@@ -723,7 +723,7 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   DB/ACL·contract/runtime 적대 리뷰 2명이 P0/P1 없이 GO를 판정했다. A는 완료됐지만 B/C와 함께만
   final cutover로 배포·병합하는 stack 내부 checkpoint다.
 
-- [ ] T-VN-34B — **public projection·partial index cutover**
+- [~] T-VN-34B — **public projection·partial index cutover**
 
   명시 열 `public_features` projection과 service 5-state classifier를 3축 정본으로 전환한다.
   route/area subtype-local geometry와 core tuple의 cross-table index 불가를 trigger-owned
