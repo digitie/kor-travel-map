@@ -370,8 +370,8 @@ async def test_deactivate_feature_with_and_without_override() -> None:
     override_row = {
         "override_id": "override-1",
         "feature_id": "feature-1",
-        "field_path": "status",
-        "override_value": '"inactive"',
+        "field_path": "lifecycle_state",
+        "override_value": '"retired"',
         "prevent_provider_reactivation": True,
         "reason": "운영상 제외",
         "created_by": "local-admin",
@@ -383,11 +383,14 @@ async def test_deactivate_feature_with_and_without_override() -> None:
                 [
                     {
                         "feature_id": "feature-1",
-                        "previous_status": "active",
-                        "status": "inactive",
+                        "lifecycle_state": "active",
+                        "publication_state": "published",
+                        "quality_state": "valid",
+                        "row_revision": 7,
                     }
                 ]
             ),
+            _Result(),
             _Result([override_row]),
         ]
     )
@@ -402,8 +405,10 @@ async def test_deactivate_feature_with_and_without_override() -> None:
 
     assert result is not None
     assert result.override is not None
-    assert result.override.override_value == "inactive"
+    assert result.override.override_value == "retired"
     assert result.override_created is True
+    assert "feature.transition_feature_state" in session.calls[1]["statement"]
+    assert session.calls[2]["params"]["source_value"] == "active"
 
     no_override = await repo.deactivate_feature(
         _Session(
@@ -412,24 +417,29 @@ async def test_deactivate_feature_with_and_without_override() -> None:
                     [
                         {
                             "feature_id": "feature-2",
-                            "previous_status": "hidden",
-                            "status": "inactive",
+                            "lifecycle_state": "active",
+                            "publication_state": "suppressed",
+                            "quality_state": "valid",
+                            "row_revision": 3,
                         }
                     ]
-                )
+                ),
+                _Result(),
             ]
         ),  # type: ignore[arg-type]
         "feature-2",
         reason="운영상 제외",
+        operator="local-admin",
         prevent_provider_reactivation=False,
     )
     assert no_override is not None
     assert no_override.override_created is False
 
     missing = await repo.deactivate_feature(
-        _Session([_Result([]), _Result([])]),  # type: ignore[arg-type]
+        _Session([_Result([])]),  # type: ignore[arg-type]
         "missing",
         reason="없음",
+        operator="local-admin",
     )
     assert missing is None
 
@@ -437,13 +447,14 @@ async def test_deactivate_feature_with_and_without_override() -> None:
         await repo.deactivate_feature(
             _Session(
                 [
-                    _Result([]),
                     _Result(
                         [
                             {
                                 "feature_id": "feature-deleted",
-                                "status": "deleted",
-                                "deleted_at": _NOW,
+                                "lifecycle_state": "retired",
+                                "publication_state": "suppressed",
+                                "quality_state": "valid",
+                                "row_revision": 5,
                             }
                         ]
                     ),
@@ -451,9 +462,71 @@ async def test_deactivate_feature_with_and_without_override() -> None:
             ),  # type: ignore[arg-type]
             "feature-deleted",
             reason="삭제됨",
+            operator="local-admin",
         )
-    assert exc_info.value.current_status == "deleted"
+    assert exc_info.value.current_status == "inactive"
     assert exc_info.value.target_status == "inactive"
+
+
+@pytest.mark.asyncio
+async def test_user_delete_change_uses_transition_and_typed_override() -> None:
+    request = repo.FeatureChangeRequest(
+        request_id="00000000-0000-0000-0000-000000000003",
+        feature_id="feature-user-delete",
+        action="delete",
+        state="approved",
+        review_mode="immediate",
+        base_row_revision=11,
+        payload={},
+        reason="사용자 삭제 요청",
+        requested_by="requester",
+        reviewed_by="admin",
+        reviewed_at=_NOW,
+        applied_at=None,
+        created_at=_NOW,
+    )
+    session = _Session(
+        [
+            _Result(
+                [
+                    {
+                        "feature_id": request.feature_id,
+                        "kind": "place",
+                        "lifecycle_state": "active",
+                        "publication_state": "published",
+                        "quality_state": "valid",
+                        "row_revision": 11,
+                    }
+                ]
+            ),
+            _Result(),
+            _Result(),
+            _Result(),
+            _Result([{"version": 1}]),
+            _Result(),
+            _Result(),
+        ]
+    )
+
+    await repo._apply_change(
+        session,  # type: ignore[arg-type]
+        request,
+        operator="admin",
+    )
+
+    transition = session.calls[1]
+    assert "feature.transition_feature_state" in transition["statement"]
+    assert transition["params"]["lifecycle_state"] == "retired"
+    assert transition["params"]["publication_state"] == "suppressed"
+    assert json.loads(transition["params"]["state_context"]) == {
+        "transition_kind": "user_request",
+        "reason_code": "user_request_delete",
+        "principal": "admin",
+        "causation_ref": request.request_id,
+    }
+    assert "'lifecycle_state'" in session.calls[2]["statement"]
+    assert "\n    status =" not in session.calls[3]["statement"]
+    assert "\n    deleted_at =" not in session.calls[3]["statement"]
 
 
 def test_dedup_row_mapping() -> None:

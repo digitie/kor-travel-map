@@ -59,6 +59,8 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Final, Literal, cast
 
 from sqlalchemy import text
+from sqlalchemy.engine import RowMapping
+from sqlalchemy.exc import DBAPIError
 
 from kortravelmap.core.exceptions import (
     FeatureSearchCursorInvalidError,
@@ -89,6 +91,7 @@ __all__ = [
     "FeatureSearchRow",
     "NearbyFeaturePage",
     "NearbyFeatureRow",
+    "ProviderFeatureState",
     "load_source_record_links",
     "upsert_feature",
     "upsert_source_record",
@@ -126,6 +129,53 @@ __all__ = [
 ]
 
 
+@dataclass(frozen=True)
+class ProviderFeatureState:
+    """Provider ingest input을 procedure 전용 3축 상태로 정규화한 값.
+
+    ``Feature.status``는 T-VN-34A 동안 기존 provider 변환기를 유지하기 위한
+    **ingest 입력**일 뿐이다. 이 경계를 지난 뒤에는 legacy status를 저장하거나
+    procedure에 전달하지 않는다. 최종 DTO/API surface 제거는 T-VN-34C 소관이다.
+    """
+
+    lifecycle_state: Literal["active", "retired"]
+    publication_state: Literal["draft", "published", "suppressed"]
+    quality_state: Literal["valid", "quarantined"]
+
+
+def _provider_feature_state(feature: Feature) -> ProviderFeatureState:
+    """기존 provider ``Feature.status``를 ADR-090 tuple로 한 번만 매핑한다.
+
+    기존 backfill 표의 provider 관측 부분과 같게 ``broken``은 quality만
+    ``quarantined``으로, ``inactive``/``deleted`` 또는 삭제 시각은 lifecycle
+    ``retired``로 흡수한다. retired는 항상 suppressed이며, provider가 재적재해도
+    재활성화 허용 여부는 DB procedure가 source/override와 함께 판단한다.
+    """
+    status = feature.status.value
+    lifecycle_state: Literal["active", "retired"] = (
+        "retired"
+        if feature.deleted_at is not None or status in {"inactive", "deleted"}
+        else "active"
+    )
+    quality_state: Literal["valid", "quarantined"] = (
+        "quarantined" if status == "broken" else "valid"
+    )
+    publication_state: Literal["draft", "published", "suppressed"]
+    if lifecycle_state == "retired":
+        publication_state = "suppressed"
+    elif status == "draft":
+        publication_state = "draft"
+    elif status == "hidden":
+        publication_state = "suppressed"
+    else:
+        publication_state = "published"
+    return ProviderFeatureState(
+        lifecycle_state=lifecycle_state,
+        publication_state=publication_state,
+        quality_state=quality_state,
+    )
+
+
 def _price_stale_hide_days_default() -> int:
     """현재가 표시 제외 지평선(일) 기본값 — env 우선, 최소 1일.
 
@@ -151,153 +201,88 @@ env ``KOR_TRAVEL_MAP_PRICE_STALE_HIDE_DAYS`` (기본 4 = OpiNet 로테이션 1�
 
 # ─── SQL 상수 (EXPLAIN 검증 대상, test-strategy §4.2) ────────────────────────
 
-# coord_5179는 STORED generated (ADR-012) — INSERT 컬럼에서 제외.
-# feature_uuid는 T-VN-32C(0083) 정본 generator — 비파생 UUIDv7 후보
-# (``feature_identity.candidate_feature_uuid``)를 명시 INSERT하고, fill 트리거는
-# raw SQL 경로용 안전망으로 유지한다. ON CONFLICT 갱신 대상이 아니다(불변 키 —
-# conflict-update면 후보는 버려지고 기존 저장값이 정본).
-#
-# T-VN-35(ADR-086) — ``geom``/``detail``은 **core 컬럼이 아니다**. geometry 정본은
-# ``feature_routes``/``feature_areas``, kind별 상세 정본은 subtype 5종이고 core는
-# kind 공통 축만 갖는다. writer는 core upsert 직후 같은 트랜잭션에서
-# ``feature_subtype.subtype_upsert_sql``을 실행한다(``upsert_feature``).
-#
-# RETURNING:
-# - ``(xmax = 0, feature_uuid)`` — legacy-only·generator 이원화 fail-close(0083).
-# - ``user_fenced`` — user_request fence가 이 문장에서 core 갱신을 막았는지. fence가
-#   걸리면 ``data_origin``/``data_version``이 그대로 보존되므로 **문장 실행 후의**
-#   이 술어가 곧 fence 판정이다(insert 경로는 항상 'provider'/0 → false). subtype도
-#   같은 fence를 따라야 하므로 호출자는 이 값으로 subtype 쓰기를 건너뛴다 —
-#   fence를 파생 계산하지 않고 DB가 실제로 남긴 상태에서 읽는다.
-_UPSERT_FEATURE_SQL: Final[str] = """
-INSERT INTO feature.features (
-    feature_id, feature_uuid, kind, name, category,
-    coord, coord_precision_digits,
-    address, legal_dong_code, road_name_code, road_address_management_no,
-    admin_dong_code, sido_code, sigungu_code,
-    urls, marker_icon, marker_color,
-    parent_feature_id, sibling_group_id,
-    raw_refs, status,
-    data_origin, data_version, user_change_kind, user_change_status,
-    user_change_request_id, user_deleted_at, user_deleted_by, user_change_reason,
-    created_at, updated_at, deleted_at
-) VALUES (
-    :feature_id, CAST(:feature_uuid AS uuid), :kind, :name, :category,
-    CASE WHEN CAST(:lon AS double precision) IS NULL THEN NULL
-         ELSE x_extension.ST_SetSRID(
-             x_extension.ST_MakePoint(CAST(:lon AS double precision),
-                          CAST(:lat AS double precision)), 4326) END,
-    :coord_precision_digits,
-    CAST(:address AS jsonb), :legal_dong_code, :road_name_code,
-    :road_address_management_no, :admin_dong_code, :sido_code, :sigungu_code,
-    CAST(:urls AS jsonb), :marker_icon, :marker_color,
-    :parent_feature_id, :sibling_group_id,
-    CAST(:raw_refs AS jsonb), :status,
-    'provider', 0, NULL, NULL, NULL, NULL, NULL, NULL,
-    :created_at, :updated_at, :deleted_at
+# T-VN-34A: base INSERT와 세 상태축 쓰기는 procedure만 수행한다. provider DTO의
+# legacy status/deleted_at는 tuple mapper의 입력일 뿐 이 payload에는 넣지 않는다.
+_CREATE_FEATURE_WITH_INITIAL_STATE_SQL: Final[str] = """
+CALL feature.create_feature_with_initial_state(
+    CAST(:feature_payload AS jsonb),
+    CAST(:lifecycle_state AS text),
+    CAST(:publication_state AS text),
+    CAST(:quality_state AS text),
+    CAST(:state_context AS jsonb),
+    NULL, NULL, NULL, NULL
 )
-ON CONFLICT (feature_id) DO UPDATE SET
-    kind = CASE
-        WHEN features.data_origin = 'user_request' AND features.data_version > 0
-        THEN features.kind ELSE EXCLUDED.kind END,
-    name = CASE
-        WHEN features.data_origin = 'user_request' AND features.data_version > 0
-        THEN features.name ELSE EXCLUDED.name END,
-    category = CASE
-        WHEN features.data_origin = 'user_request' AND features.data_version > 0
-        THEN features.category ELSE EXCLUDED.category END,
-    coord = CASE
-        WHEN features.data_origin = 'user_request' AND features.data_version > 0
-        THEN features.coord ELSE EXCLUDED.coord END,
-    coord_precision_digits = CASE
-        WHEN features.data_origin = 'user_request' AND features.data_version > 0
-        THEN features.coord_precision_digits ELSE EXCLUDED.coord_precision_digits END,
-    address = CASE
-        WHEN features.data_origin = 'user_request' AND features.data_version > 0
-        THEN features.address ELSE EXCLUDED.address END,
-    legal_dong_code = CASE
-        WHEN features.data_origin = 'user_request' AND features.data_version > 0
-        THEN features.legal_dong_code ELSE EXCLUDED.legal_dong_code END,
-    road_name_code = CASE
-        WHEN features.data_origin = 'user_request' AND features.data_version > 0
-        THEN features.road_name_code ELSE EXCLUDED.road_name_code END,
-    road_address_management_no = CASE
-        WHEN features.data_origin = 'user_request' AND features.data_version > 0
-        THEN features.road_address_management_no ELSE EXCLUDED.road_address_management_no END,
-    admin_dong_code = CASE
-        WHEN features.data_origin = 'user_request' AND features.data_version > 0
-        THEN features.admin_dong_code ELSE EXCLUDED.admin_dong_code END,
-    sido_code = CASE
-        WHEN features.data_origin = 'user_request' AND features.data_version > 0
-        THEN features.sido_code ELSE EXCLUDED.sido_code END,
-    sigungu_code = CASE
-        WHEN features.data_origin = 'user_request' AND features.data_version > 0
-        THEN features.sigungu_code ELSE EXCLUDED.sigungu_code END,
-    urls = CASE
-        WHEN features.data_origin = 'user_request' AND features.data_version > 0
-        THEN features.urls ELSE EXCLUDED.urls END,
-    marker_icon = CASE
-        WHEN features.data_origin = 'user_request' AND features.data_version > 0
-        THEN features.marker_icon ELSE EXCLUDED.marker_icon END,
-    marker_color = CASE
-        WHEN features.data_origin = 'user_request' AND features.data_version > 0
-        THEN features.marker_color ELSE EXCLUDED.marker_color END,
-    parent_feature_id = CASE
-        WHEN features.data_origin = 'user_request' AND features.data_version > 0
-        THEN features.parent_feature_id ELSE EXCLUDED.parent_feature_id END,
-    sibling_group_id = CASE
-        WHEN features.data_origin = 'user_request' AND features.data_version > 0
-        THEN features.sibling_group_id ELSE EXCLUDED.sibling_group_id END,
-    raw_refs = CASE
-        WHEN features.data_origin = 'user_request' AND features.data_version > 0
-        THEN features.raw_refs ELSE EXCLUDED.raw_refs END,
-    status = CASE
-        WHEN features.data_origin = 'user_request' AND features.data_version > 0
-        THEN features.status
-        WHEN EXISTS (
-            SELECT 1
-            FROM ops.feature_overrides AS fo
-            WHERE fo.feature_id = EXCLUDED.feature_id
-              AND fo.field_path = 'status'
-              AND fo.status = 'active'
-              AND fo.prevent_provider_reactivation
-        )
-        THEN features.status
-        ELSE EXCLUDED.status
-    END,
-    data_origin = CASE
-        WHEN features.data_origin = 'user_request' AND features.data_version > 0
-        THEN features.data_origin ELSE 'provider' END,
-    data_version = CASE
-        WHEN features.data_origin = 'user_request' AND features.data_version > 0
-        THEN features.data_version ELSE 0 END,
-    user_change_kind = features.user_change_kind,
-    user_change_status = features.user_change_status,
-    user_change_request_id = features.user_change_request_id,
-    user_deleted_at = features.user_deleted_at,
-    user_deleted_by = features.user_deleted_by,
-    user_change_reason = features.user_change_reason,
-    updated_at = CASE
-        WHEN features.data_origin = 'user_request' AND features.data_version > 0
-        THEN features.updated_at ELSE EXCLUDED.updated_at END,
-    deleted_at = CASE
-        WHEN features.data_origin = 'user_request' AND features.data_version > 0
-        THEN features.deleted_at
-        WHEN EXISTS (
-            SELECT 1
-            FROM ops.feature_overrides AS fo
-            WHERE fo.feature_id = EXCLUDED.feature_id
-              AND fo.field_path = 'status'
-              AND fo.status = 'active'
-              AND fo.prevent_provider_reactivation
-        )
-        THEN features.deleted_at
-        ELSE EXCLUDED.deleted_at
-    END
+"""
+
+_TRANSITION_FEATURE_STATE_SQL: Final[str] = """
+CALL feature.transition_feature_state(
+    CAST(:feature_id AS text),
+    CAST(:lifecycle_state AS text),
+    CAST(:publication_state AS text),
+    CAST(:quality_state AS text),
+    CAST(:expected_row_revision AS bigint),
+    CAST(:state_context AS jsonb),
+    NULL, NULL
+)
+"""
+
+# procedure의 existing-row branch는 상태를 절대 바꾸지 않는다. provider 본문 갱신은
+# state 축이 아닌 core 컬럼만 갱신하며, user-request whole-row fence와 subtype fence
+# 판단은 실제 저장값으로 유지한다. final T-VN-34C는 이 legacy provenance 열을 별도
+# materialization 뒤 제거한다.
+_UPDATE_PROVIDER_FEATURE_CORE_SQL: Final[str] = """
+UPDATE feature.features AS f
+SET
+    kind = CASE WHEN f.data_origin = 'user_request' AND f.data_version > 0
+        THEN f.kind ELSE :kind END,
+    name = CASE WHEN f.data_origin = 'user_request' AND f.data_version > 0
+        THEN f.name ELSE :name END,
+    category = CASE WHEN f.data_origin = 'user_request' AND f.data_version > 0
+        THEN f.category ELSE :category END,
+    coord = CASE WHEN f.data_origin = 'user_request' AND f.data_version > 0 THEN f.coord
+        WHEN CAST(:lon AS double precision) IS NULL THEN NULL
+        ELSE x_extension.ST_SetSRID(
+            x_extension.ST_MakePoint(CAST(:lon AS double precision),
+                CAST(:lat AS double precision)), 4326)
+        END,
+    coord_precision_digits = CASE WHEN f.data_origin = 'user_request' AND f.data_version > 0
+        THEN f.coord_precision_digits ELSE :coord_precision_digits END,
+    address = CASE WHEN f.data_origin = 'user_request' AND f.data_version > 0
+        THEN f.address ELSE CAST(:address AS jsonb) END,
+    legal_dong_code = CASE WHEN f.data_origin = 'user_request' AND f.data_version > 0
+        THEN f.legal_dong_code ELSE :legal_dong_code END,
+    road_name_code = CASE WHEN f.data_origin = 'user_request' AND f.data_version > 0
+        THEN f.road_name_code ELSE :road_name_code END,
+    road_address_management_no = CASE WHEN f.data_origin = 'user_request' AND f.data_version > 0
+        THEN f.road_address_management_no ELSE :road_address_management_no END,
+    admin_dong_code = CASE WHEN f.data_origin = 'user_request' AND f.data_version > 0
+        THEN f.admin_dong_code ELSE :admin_dong_code END,
+    sido_code = CASE WHEN f.data_origin = 'user_request' AND f.data_version > 0
+        THEN f.sido_code ELSE :sido_code END,
+    sigungu_code = CASE WHEN f.data_origin = 'user_request' AND f.data_version > 0
+        THEN f.sigungu_code ELSE :sigungu_code END,
+    urls = CASE WHEN f.data_origin = 'user_request' AND f.data_version > 0
+        THEN f.urls ELSE CAST(:urls AS jsonb) END,
+    marker_icon = CASE WHEN f.data_origin = 'user_request' AND f.data_version > 0
+        THEN f.marker_icon ELSE :marker_icon END,
+    marker_color = CASE WHEN f.data_origin = 'user_request' AND f.data_version > 0
+        THEN f.marker_color ELSE :marker_color END,
+    parent_feature_id = CASE WHEN f.data_origin = 'user_request' AND f.data_version > 0
+        THEN f.parent_feature_id ELSE :parent_feature_id END,
+    sibling_group_id = CASE WHEN f.data_origin = 'user_request' AND f.data_version > 0
+        THEN f.sibling_group_id ELSE :sibling_group_id END,
+    raw_refs = CASE WHEN f.data_origin = 'user_request' AND f.data_version > 0
+        THEN f.raw_refs ELSE CAST(:raw_refs AS jsonb) END,
+    data_origin = CASE WHEN f.data_origin = 'user_request' AND f.data_version > 0
+        THEN f.data_origin ELSE 'provider' END,
+    data_version = CASE WHEN f.data_origin = 'user_request' AND f.data_version > 0
+        THEN f.data_version ELSE 0 END,
+    updated_at = CASE WHEN f.data_origin = 'user_request' AND f.data_version > 0
+        THEN f.updated_at ELSE :updated_at END
+WHERE f.feature_id = :feature_id
 RETURNING
-    (xmax = 0) AS inserted,
-    CAST(feature_uuid AS text) AS feature_uuid,
-    (data_origin = 'user_request' AND data_version > 0) AS user_fenced
+    CAST(f.feature_uuid AS text) AS feature_uuid,
+    (f.data_origin = 'user_request' AND f.data_version > 0) AS user_fenced
 """
 
 
@@ -483,19 +468,18 @@ WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
 _FEATURE_LOAD_STATE_SQL: Final[str] = """
 SELECT
     f.feature_id IS NOT NULL AS feature_exists,
-    COALESCE(
-        f.status = 'inactive'
-        AND COALESCE(f.data_origin, 'provider') <> 'user_request'
-        AND NOT EXISTS (
-            SELECT 1
-            FROM ops.feature_overrides AS fo
-            WHERE fo.feature_id = f.feature_id
-              AND fo.field_path = 'status'
-              AND fo.status = 'active'
-              AND fo.prevent_provider_reactivation
-        ),
-        false
-    ) AS needs_provider_reactivation
+    f.lifecycle_state,
+    f.publication_state,
+    f.quality_state,
+    f.row_revision,
+    COALESCE(EXISTS (
+        SELECT 1
+        FROM ops.feature_overrides AS fo
+        WHERE fo.feature_id = f.feature_id
+          AND fo.field_path = 'lifecycle_state'
+          AND fo.status = 'active'
+          AND fo.prevent_provider_reactivation
+    ), false) AS has_provider_reactivation_override
 FROM (VALUES (CAST(:feature_id AS text))) AS wanted(feature_id)
 LEFT JOIN feature.features AS f
   ON f.feature_id = wanted.feature_id
@@ -1998,62 +1982,51 @@ _NEARBY_COORD_SQL_BY_SORT: Final[dict[str, str]] = {
     "last_updated_at": _NEARBY_COORD_UPDATED_SQL,
 }
 
-# snapshot soft-delete — 주어진 (provider, dataset_key, source_entity_type)의
+# snapshot retirement — 주어진 (provider, dataset_key, source_entity_type)의
 # **primary source**로 적재된 feature 중, snapshot source_entity_id 집합에 없는
-# 것을 soft-delete (status='inactive' + deleted_at). 전체 snapshot 적재 후 호출해
-# "이번 snapshot에서 사라진" feature를 비활성화한다 (Step A bulk, ADR-017 — place는
-# 무기한 유지하되 status만 inactive). 이미 deleted_at IS NOT NULL이면 건너뛴다.
+# 것을 lifecycle ``retired`` + publication ``suppressed``로 전이한다. 전체 snapshot
+# 적재 후 호출해 "이번 snapshot에서 사라진" feature를 비활성화한다 (Step A bulk,
+# ADR-017 — place는 무기한 유지). 이미 retired이면 건너뛴다.
 # source entity→dataset natural identity join을 사용한다. ``:keys`` 빈 배열이면 전체
 # 비활성화(snapshot이 비었음을 의미).
 _SOFT_DELETE_NOT_IN_SNAPSHOT_SQL: Final[str] = """
-UPDATE feature.features AS f
-SET status = 'inactive', deleted_at = now(), updated_at = now()
-WHERE f.deleted_at IS NULL
+SELECT DISTINCT f.feature_id, pd.provider_dataset_id
+FROM feature.features AS f
+JOIN provider_sync.source_links AS sl ON sl.feature_id = f.feature_id
+JOIN provider_sync.source_entities AS se ON se.source_entity_key = sl.source_entity_key
+JOIN provider_sync.provider_datasets AS pd ON pd.provider_dataset_id = se.provider_dataset_id
+WHERE f.lifecycle_state = 'active'
   AND COALESCE(f.data_origin, 'provider') <> 'user_request'
-  AND f.feature_id IN (
-    SELECT sl.feature_id
-    FROM provider_sync.source_links AS sl
-    JOIN provider_sync.source_entities AS se
-      ON se.source_entity_key = sl.source_entity_key
-    JOIN provider_sync.provider_datasets AS pd
-      ON pd.provider_dataset_id = se.provider_dataset_id
-    WHERE sl.source_role = 'primary'
-      AND pd.provider = :provider
-      AND pd.dataset_key = :dataset_key
-      AND se.source_entity_type = :source_entity_type
-      AND NOT (se.source_entity_id = ANY(CAST(:keys AS text[])))
-  )
-RETURNING f.feature_id
+  AND sl.source_role = 'primary'
+  AND pd.provider = :provider
+  AND pd.dataset_key = :dataset_key
+  AND se.source_entity_type = :source_entity_type
+  AND NOT (se.source_entity_id = ANY(CAST(:keys AS text[])))
 """
 
 
 # Step C 폐업/취소 — soft_delete_not_in_snapshot의 inverse. 주어진 source_entity_id
-# 집합에 **속하는** primary-source feature를 inactive로 전환(폐업/취소된 인허가).
-# ADR-017 — place는 무기한 유지, status만 inactive. 이미 비활성이면 건너뛴다.
+# 집합에 **속하는** primary-source feature를 retired/suppressed로 전이(폐업/취소된
+# 인허가). ADR-017 — place는 무기한 유지, 이미 retired이면 건너뛴다.
 # ``:keys`` 빈 배열이면 아무 것도 비활성화하지 않는다(폐업 목록이 비었음).
 _INACTIVATE_BY_ENTITY_IDS_SQL: Final[str] = """
-UPDATE feature.features AS f
-SET status = 'inactive', deleted_at = now(), updated_at = now()
-WHERE f.deleted_at IS NULL
+SELECT DISTINCT f.feature_id, pd.provider_dataset_id
+FROM feature.features AS f
+JOIN provider_sync.source_links AS sl ON sl.feature_id = f.feature_id
+JOIN provider_sync.source_entities AS se ON se.source_entity_key = sl.source_entity_key
+JOIN provider_sync.provider_datasets AS pd ON pd.provider_dataset_id = se.provider_dataset_id
+WHERE f.lifecycle_state = 'active'
   AND COALESCE(f.data_origin, 'provider') <> 'user_request'
-  AND f.feature_id IN (
-    SELECT sl.feature_id
-    FROM provider_sync.source_links AS sl
-    JOIN provider_sync.source_entities AS se
-      ON se.source_entity_key = sl.source_entity_key
-    JOIN provider_sync.provider_datasets AS pd
-      ON pd.provider_dataset_id = se.provider_dataset_id
-    WHERE sl.source_role = 'primary'
-      AND pd.provider = :provider
-      AND pd.dataset_key = :dataset_key
-      AND se.source_entity_type = :source_entity_type
-      AND se.source_entity_id = ANY(CAST(:keys AS text[]))
-  )
-RETURNING f.feature_id
+  AND sl.source_role = 'primary'
+  AND pd.provider = :provider
+  AND pd.dataset_key = :dataset_key
+  AND se.source_entity_type = :source_entity_type
+  AND se.source_entity_id = ANY(CAST(:keys AS text[]))
 """
 
 
-# 과거 보정 — kind='area'인데 경계 geometry가 없는 provider feature만 inactive 전환.
+# 과거 보정 — kind='area'인데 경계 geometry가 없는 provider feature만
+# retired/suppressed 전이.
 # 새 place row와 같은 source_entity_id를 공유할 수 있으므로 entity-id 기반 폐업 메서드를
 # 재사용하지 않고 feature kind/geometry 조건을 직접 건다.
 #
@@ -2062,27 +2035,21 @@ RETURNING f.feature_id
 # 남은 역할은 0086 이전에 적재된 잔재를 한 번 정리하는 것뿐이며, "geometry 없음"은
 # 이제 ``features.geom IS NULL``이 아니라 **``feature_areas`` 행 부재**로 판정한다.
 _INACTIVATE_GEOMETRYLESS_AREA_BY_SOURCE_SQL: Final[str] = """
-UPDATE feature.features AS f
-SET status = 'inactive', deleted_at = now(), updated_at = now()
-WHERE f.deleted_at IS NULL
+SELECT DISTINCT f.feature_id, pd.provider_dataset_id
+FROM feature.features AS f
+JOIN provider_sync.source_links AS sl ON sl.feature_id = f.feature_id
+JOIN provider_sync.source_entities AS se ON se.source_entity_key = sl.source_entity_key
+JOIN provider_sync.provider_datasets AS pd ON pd.provider_dataset_id = se.provider_dataset_id
+WHERE f.lifecycle_state = 'active'
   AND f.kind = 'area'
   AND NOT EXISTS (
     SELECT 1 FROM feature.feature_areas AS a WHERE a.feature_id = f.feature_id
   )
   AND COALESCE(f.data_origin, 'provider') <> 'user_request'
-  AND f.feature_id IN (
-    SELECT sl.feature_id
-    FROM provider_sync.source_links AS sl
-    JOIN provider_sync.source_entities AS se
-      ON se.source_entity_key = sl.source_entity_key
-    JOIN provider_sync.provider_datasets AS pd
-      ON pd.provider_dataset_id = se.provider_dataset_id
-    WHERE sl.source_role = 'primary'
-      AND pd.provider = :provider
-      AND pd.dataset_key = :dataset_key
-      AND se.source_entity_type = :source_entity_type
-  )
-RETURNING f.feature_id
+  AND sl.source_role = 'primary'
+  AND pd.provider = :provider
+  AND pd.dataset_key = :dataset_key
+  AND se.source_entity_type = :source_entity_type
 """
 
 
@@ -2269,7 +2236,7 @@ class NearbyFeaturePage:
 #: geometry가 필수인 kind — subtype ``geom``이 NOT NULL이라 WKT 없이는 행을
 #: 만들 수 없다(0086). ``feature_subtype._GEOM_EXPR``와 같은 집합이다.
 def _feature_params(feature: Feature) -> dict[str, Any]:
-    """``Feature`` DTO → ``_UPSERT_FEATURE_SQL`` bind params.
+    """``Feature`` DTO → procedure/non-axis core bind params.
 
     ``geom_wkt``은 core 컬럼이 아니라 route/area **subtype** upsert의 바인딩이다
     (``feature_subtype.subtype_upsert_sql``이 같은 이름의 파라미터를 쓴다).
@@ -2306,6 +2273,47 @@ def _feature_params(feature: Feature) -> dict[str, Any]:
         "updated_at": feature.updated_at,
         "deleted_at": feature.deleted_at,
     }
+
+
+def _provider_feature_payload(params: Mapping[str, Any]) -> str:
+    """Create procedure에 넘길 provider core payload JSON을 만든다.
+
+    legacy ``status``/``deleted_at``은 오직 ``_provider_feature_state``의 ingest
+    입력이다. 둘을 payload에 함께 넣으면 축과 legacy 열을 dual-write하게 되므로
+    절대 전달하지 않는다. ``geom_wkt``도 typed subtype 전용 바인딩이라 core
+    procedure payload가 아니다.
+    """
+    payload = {
+        key: (
+            json.loads(value)
+            if key in {"address", "urls", "raw_refs"} and isinstance(value, str)
+            else value
+        )
+        for key, value in params.items()
+        if key not in {"geom_wkt", "status", "deleted_at"}
+    }
+    return json.dumps(payload, ensure_ascii=False, default=str)
+
+
+def _provider_state_context(
+    *,
+    provider_dataset_id: int,
+    reason_code: str,
+    transition_kind: Literal["provider_sync"] = "provider_sync",
+    source_record_key: str | None = None,
+    reactivation_evidence: str | None = None,
+) -> str:
+    """DB가 provider principal을 dataset에서 파생하게 하는 audit context."""
+    context: dict[str, Any] = {
+        "transition_kind": transition_kind,
+        "reason_code": reason_code,
+        "provider_dataset_id": provider_dataset_id,
+    }
+    if source_record_key is not None:
+        context["source_record_key"] = source_record_key
+    if reactivation_evidence is not None:
+        context["reactivation_evidence"] = reactivation_evidence
+    return json.dumps(context, ensure_ascii=False)
 
 
 def _feature_snapshot(feature: Feature) -> str:
@@ -2397,8 +2405,13 @@ async def _upsert_feature_subtype(
     )
 
 
-async def upsert_feature(session: AsyncSession, feature: Feature) -> bool:
-    """``feature.features`` + kind별 subtype upsert. 신규 INSERT면 ``True``.
+async def upsert_feature(
+    session: AsyncSession,
+    feature: Feature,
+    *,
+    provider_dataset_id: int,
+) -> bool:
+    """provider Feature를 procedure와 typed subtype으로 적재한다.
 
     ``coord_5179``는 STORED generated이라 INSERT/UPDATE 대상에서 제외 (ADR-012).
 
@@ -2413,29 +2426,53 @@ async def upsert_feature(session: AsyncSession, feature: Feature) -> bool:
     ``(feature_id, kind)``/``(feature_id, feature_uuid)`` FK가 core 행을 먼저
     요구하기 때문이다(commit 경계는 종전처럼 호출자 책임).
 
-    **user_request fence**: provider 재적재가 사용자 편집을 덮지 않는 규칙은 core
-    ``ON CONFLICT`` CASE가 강제한다. core가 fence로 갱신되지 않았으면 subtype도
-    갱신하지 않아야 상세/geometry가 core와 어긋나지 않으므로, core RETURNING이
-    남긴 ``user_fenced``를 기준으로 subtype 쓰기를 통째로 건너뛴다.
+    base INSERT와 3축 initial state는 ``create_feature_with_initial_state``만
+    수행한다. existing row의 provider 본문 갱신은 상태 축을 전혀 건드리지 않는
+    별도 UPDATE이며, provider의 retire/reingest state transition은 source evidence를
+    확보한 ``load_bundle``이 뒤에서 procedure로 수행한다.
 
     **geometry 없는 route/area는 여기 오지 않는다** — ``Feature`` DTO가 구성
     시점에 거부한다(ADR-086). 종전에는
     ``inactivate_geometryless_area_features_by_source``가 적재 뒤에 보정하던
     상태다.
     """
+    if provider_dataset_id <= 0:
+        raise ValueError("provider_dataset_id는 양의 정수여야 합니다.")
+
     params = _feature_params(feature)
     geom_wkt = cast("str | None", params.pop("geom_wkt"))
-    result = await session.execute(text(_UPSERT_FEATURE_SQL), params)
-    row = result.mappings().one()
-    inserted = bool(row["inserted"])
-    stored_feature_uuid = str(row["feature_uuid"])
+    initial_state = _provider_feature_state(feature)
+    create_row = (
+        await session.execute(
+            text(_CREATE_FEATURE_WITH_INITIAL_STATE_SQL),
+            {
+                "feature_payload": _provider_feature_payload(params),
+                "lifecycle_state": initial_state.lifecycle_state,
+                "publication_state": initial_state.publication_state,
+                "quality_state": initial_state.quality_state,
+                "state_context": _provider_state_context(
+                    provider_dataset_id=provider_dataset_id,
+                    reason_code="provider_initial",
+                ),
+            },
+        )
+    ).mappings().one()
+    inserted = bool(create_row["o_inserted"])
+    stored_feature_uuid = str(create_row["o_feature_uuid"])
+    user_fenced = False
+    if not inserted:
+        updated = (
+            await session.execute(text(_UPDATE_PROVIDER_FEATURE_CORE_SQL), params)
+        ).mappings().one()
+        stored_feature_uuid = str(updated["feature_uuid"])
+        user_fenced = bool(updated["user_fenced"])
     verify_feature_uuid(
         feature.feature_id,
         stored_feature_uuid,
         sent_feature_uuid=params["feature_uuid"],
         inserted=inserted,
     )
-    if not bool(row["user_fenced"]):
+    if not user_fenced:
         await _upsert_feature_subtype(
             session,
             feature,
@@ -2453,6 +2490,8 @@ async def upsert_feature(session: AsyncSession, feature: Feature) -> bool:
 class _SourceRecordUpsertState:
     inserted: bool
     became_current: bool
+    provider_dataset_id: int
+    source_record_key: str
 
 
 async def resolve_active_provider_dataset_id(
@@ -2513,6 +2552,8 @@ async def _upsert_source_record_state(
     return _SourceRecordUpsertState(
         inserted=inserted,
         became_current=became_current,
+        provider_dataset_id=provider_dataset_id,
+        source_record_key=str(params["source_record_key"]),
     )
 
 
@@ -2528,7 +2569,11 @@ async def upsert_source_record(session: AsyncSession, record: SourceRecord) -> b
 @dataclass(frozen=True)
 class _FeatureLoadState:
     exists: bool
-    needs_provider_reactivation: bool
+    lifecycle_state: str | None
+    publication_state: str | None
+    quality_state: str | None
+    row_revision: int | None
+    has_provider_reactivation_override: bool
 
 
 async def _feature_load_state(
@@ -2542,7 +2587,13 @@ async def _feature_load_state(
     ).mappings().one()
     return _FeatureLoadState(
         exists=bool(row["feature_exists"]),
-        needs_provider_reactivation=bool(row["needs_provider_reactivation"]),
+        lifecycle_state=row["lifecycle_state"],
+        publication_state=row["publication_state"],
+        quality_state=row["quality_state"],
+        row_revision=(int(row["row_revision"]) if row["row_revision"] is not None else None),
+        has_provider_reactivation_override=bool(
+            row["has_provider_reactivation_override"]
+        ),
     )
 
 
@@ -2550,6 +2601,145 @@ async def upsert_source_link(session: AsyncSession, link: SourceLink) -> bool:
     """``provider_sync.source_links`` upsert. 신규 INSERT면 ``True``, 갱신이면 ``False``."""
     result = await session.execute(text(_UPSERT_SOURCE_LINK_SQL), _source_link_params(link))
     return bool(result.scalar_one())
+
+
+async def _transition_provider_lifecycle_if_needed(
+    session: AsyncSession,
+    *,
+    feature_id: str,
+    desired_state: ProviderFeatureState,
+    provider_dataset_id: int,
+    source_record_key: str | None,
+) -> bool:
+    """provider retire/reingest만 procedure로 직렬화한다.
+
+    Provider는 publication/quality를 existing feature에서 바꾸지 않는다. retire는
+    publication을 suppressed로 만들고, reingest는 현재 publication을 자동 복원하지
+    않는다. active lifecycle override가 있으면 호출 전에도 피하고, procedure가
+    경합 시에도 같은 fence를 재검증한다.
+    """
+    current = await _feature_load_state(session, feature_id)
+    return await _transition_provider_lifecycle_from_state(
+        session,
+        feature_id=feature_id,
+        desired_state=desired_state,
+        provider_dataset_id=provider_dataset_id,
+        source_record_key=source_record_key,
+        current=current,
+        retry_on_serialization=True,
+    )
+
+
+async def _transition_provider_lifecycle_from_state(
+    session: AsyncSession,
+    *,
+    feature_id: str,
+    desired_state: ProviderFeatureState,
+    provider_dataset_id: int,
+    source_record_key: str | None,
+    current: _FeatureLoadState,
+    retry_on_serialization: bool,
+) -> bool:
+    """한 optimistic revision에서 provider lifecycle procedure를 실행한다."""
+    if not current.exists:
+        return False
+    assert current.row_revision is not None
+    assert current.publication_state is not None
+    assert current.quality_state is not None
+
+    target_lifecycle: str | None = None
+    target_publication: str | None = None
+    reason_code: str | None = None
+    reactivation_evidence: str | None = None
+    if desired_state.lifecycle_state == "retired" and current.lifecycle_state == "active":
+        target_lifecycle = "retired"
+        target_publication = "suppressed"
+        reason_code = "provider_retire"
+    elif (
+        desired_state.lifecycle_state == "active"
+        and current.lifecycle_state == "retired"
+        and not current.has_provider_reactivation_override
+    ):
+        target_lifecycle = "active"
+        target_publication = current.publication_state
+        reason_code = "provider_reingest"
+        reactivation_evidence = source_record_key
+    if target_lifecycle is None or target_publication is None or reason_code is None:
+        return False
+
+    params = {
+        "feature_id": feature_id,
+        "lifecycle_state": target_lifecycle,
+        "publication_state": target_publication,
+        "quality_state": current.quality_state,
+        "expected_row_revision": current.row_revision,
+        "state_context": _provider_state_context(
+            provider_dataset_id=provider_dataset_id,
+            reason_code=reason_code,
+            source_record_key=source_record_key,
+            reactivation_evidence=reactivation_evidence,
+        ),
+    }
+    try:
+        # procedure는 expected revision 불일치를 SQLSTATE 40001로 fail-close한다.
+        # PostgreSQL error 뒤에도 같은 outer load transaction에서 현재 tuple을 다시
+        # 읽어 한 번만 재시도하려면 procedure call을 savepoint로 감싸야 한다.
+        async with session.begin_nested():
+            await session.execute(text(_TRANSITION_FEATURE_STATE_SQL), params)
+    except DBAPIError as exc:
+        sqlstate = getattr(exc.orig, "sqlstate", None)
+        error_text = str(exc.orig)
+        if (
+            sqlstate == "23514"
+            and (
+                "ck_feature_provider_reactivation_override" in error_text
+                # SQLAlchemy asyncpg adapter가 native constraint_name을 문자열에서
+                # 누락시키는 경우에도, procedure의 단일 고정 violation 문구는
+                # 보존한다. 같은 SQLSTATE의 다른 validation error는 삼키지 않는다.
+                or "provider reactivation is fenced by lifecycle override" in error_text
+            )
+        ):
+            # Override 작성과 provider reingest가 맞물린 경우다. procedure가 audit
+            # 없는 no-op을 거부한 뒤 repository가 provider load를 정상 완료시킨다.
+            return False
+        if sqlstate != "40001" or not retry_on_serialization:
+            raise
+        refreshed = await _feature_load_state(session, feature_id)
+        return await _transition_provider_lifecycle_from_state(
+            session,
+            feature_id=feature_id,
+            desired_state=desired_state,
+            provider_dataset_id=provider_dataset_id,
+            source_record_key=source_record_key,
+            current=refreshed,
+            retry_on_serialization=False,
+        )
+    return True
+
+
+async def _retire_provider_candidates(
+    session: AsyncSession,
+    rows: Sequence[RowMapping],
+    *,
+    reason_code: str,
+) -> int:
+    """candidate SELECT 결과를 provider retirement procedure로 전환한다."""
+    retired = 0
+    desired_state = ProviderFeatureState(
+        lifecycle_state="retired",
+        publication_state="suppressed",
+        quality_state="valid",
+    )
+    for row in rows:
+        changed = await _transition_provider_lifecycle_if_needed(
+            session,
+            feature_id=str(row["feature_id"]),
+            desired_state=desired_state,
+            provider_dataset_id=int(row["provider_dataset_id"]),
+            source_record_key=None,
+        )
+        retired += int(changed)
+    return retired
 
 
 async def load_bundle(session: AsyncSession, bundle: FeatureBundle) -> FeatureLoadResult:
@@ -2569,27 +2759,28 @@ async def load_bundle(session: AsyncSession, bundle: FeatureBundle) -> FeatureLo
     feature_inserted = False
     feature_updated = False
     feature_missing = False
-    needs_provider_reactivation = False
     if not record_inserted:
         feature_state = await _feature_load_state(session, bundle.feature.feature_id)
         feature_missing = not feature_state.exists
-        needs_provider_reactivation = (
-            feature_state.needs_provider_reactivation
-            and bundle.feature.status.value == "active"
-            and bundle.feature.deleted_at is None
+    if record_state.became_current or feature_missing:
+        feature_inserted = await upsert_feature(
+            session,
+            bundle.feature,
+            provider_dataset_id=record_state.provider_dataset_id,
         )
-    if (
-        record_state.became_current
-        or feature_missing
-        or needs_provider_reactivation
-    ):
-        feature_inserted = await upsert_feature(session, bundle.feature)
         feature_updated = not feature_inserted
     link_inserted = await upsert_source_link(session, bundle.source_link)
+    state_updated = await _transition_provider_lifecycle_if_needed(
+        session,
+        feature_id=bundle.feature.feature_id,
+        desired_state=_provider_feature_state(bundle.feature),
+        provider_dataset_id=record_state.provider_dataset_id,
+        source_record_key=record_state.source_record_key,
+    )
     return FeatureLoadResult(
         bundles_total=1,
         features_inserted=int(feature_inserted),
-        features_updated=int(feature_updated),
+        features_updated=int(feature_updated or state_updated),
         source_records_inserted=int(record_inserted),
         source_links_inserted=int(link_inserted),
         source_links_updated=int(not link_inserted),
@@ -2618,12 +2809,12 @@ async def soft_delete_features_not_in_snapshot(
     source_entity_type: str,
     snapshot_source_entity_ids: set[str],
 ) -> int:
-    """주어진 primary source의 feature 중 snapshot에 없는 것을 soft-delete.
+    """주어진 primary source의 feature 중 snapshot에 없는 것을 retired 전이.
 
     전체 snapshot 적재 후 호출 — 이번 snapshot에서 사라진(폐업/제외) feature를
-    ``status='inactive'`` + ``deleted_at``으로 비활성화한다 (Step A bulk,
-    ADR-017 — place는 무기한 유지, status만 inactive). 이미 비활성(deleted_at IS
-    NOT NULL)인 feature는 건드리지 않는다. commit은 호출자 책임.
+    lifecycle ``retired`` + publication ``suppressed``로 전이한다 (Step A bulk,
+    ADR-017 — place는 무기한 유지). 이미 retired인 feature는 건드리지 않는다.
+    commit은 호출자 책임.
 
     Parameters
     ----------
@@ -2637,18 +2828,24 @@ async def soft_delete_features_not_in_snapshot(
     Returns
     -------
     int
-        soft-delete된 feature 수.
+        retired 전이된 feature 수.
     """
-    result = await session.execute(
-        text(_SOFT_DELETE_NOT_IN_SNAPSHOT_SQL),
-        {
-            "provider": provider,
-            "dataset_key": dataset_key,
-            "source_entity_type": source_entity_type,
-            "keys": sorted(snapshot_source_entity_ids),
-        },
+    candidates = (
+        await session.execute(
+            text(_SOFT_DELETE_NOT_IN_SNAPSHOT_SQL),
+            {
+                "provider": provider,
+                "dataset_key": dataset_key,
+                "source_entity_type": source_entity_type,
+                "keys": sorted(snapshot_source_entity_ids),
+            },
+        )
+    ).mappings().all()
+    return await _retire_provider_candidates(
+        session,
+        candidates,
+        reason_code="provider_snapshot_absent",
     )
-    return len(result.fetchall())
 
 
 async def inactivate_features_by_source_entity_ids(
@@ -2662,10 +2859,10 @@ async def inactivate_features_by_source_entity_ids(
     """주어진 ``source_entity_id`` 집합에 **속하는** primary-source feature를 비활성화.
 
     Step C 폐업/취소 — provider가 ``closed``/``cancelled``로 통지한 인허가에 대응하는
-    feature를 ``status='inactive'`` + ``deleted_at``으로 전환한다 (ADR-017 — place는
-    무기한 유지, status만 inactive). ``soft_delete_features_not_in_snapshot``의 inverse
-    (snapshot 부재분이 아니라 명시 폐업분). 이미 비활성인 feature·집합 밖 feature는
-    건드리지 않는다. 빈 집합이면 no-op(0). commit은 호출자 책임.
+    feature를 lifecycle ``retired`` + publication ``suppressed``로 전이한다
+    (ADR-017 — place는 무기한 유지). ``soft_delete_features_not_in_snapshot``의
+    inverse (snapshot 부재분이 아니라 명시 폐업분)다. 이미 retired인 feature·집합
+    밖 feature는 건드리지 않는다. 빈 집합이면 no-op(0). commit은 호출자 책임.
 
     Parameters
     ----------
@@ -2679,20 +2876,26 @@ async def inactivate_features_by_source_entity_ids(
     Returns
     -------
     int
-        inactive로 전환된 feature 수.
+        retired 전이된 feature 수.
     """
     if not source_entity_ids:
         return 0
-    result = await session.execute(
-        text(_INACTIVATE_BY_ENTITY_IDS_SQL),
-        {
-            "provider": provider,
-            "dataset_key": dataset_key,
-            "source_entity_type": source_entity_type,
-            "keys": sorted(source_entity_ids),
-        },
+    candidates = (
+        await session.execute(
+            text(_INACTIVATE_BY_ENTITY_IDS_SQL),
+            {
+                "provider": provider,
+                "dataset_key": dataset_key,
+                "source_entity_type": source_entity_type,
+                "keys": sorted(source_entity_ids),
+            },
+        )
+    ).mappings().all()
+    return await _retire_provider_candidates(
+        session,
+        candidates,
+        reason_code="provider_tombstone",
     )
-    return len(result.fetchall())
 
 
 async def inactivate_geometryless_area_features_by_source(
@@ -2709,15 +2912,21 @@ async def inactivate_geometryless_area_features_by_source(
     재적재될 수 있으므로 source_entity_id 집합 기반 전환은 쓰지 않는다.
     commit은 호출자 책임.
     """
-    result = await session.execute(
-        text(_INACTIVATE_GEOMETRYLESS_AREA_BY_SOURCE_SQL),
-        {
-            "provider": provider,
-            "dataset_key": dataset_key,
-            "source_entity_type": source_entity_type,
-        },
+    candidates = (
+        await session.execute(
+            text(_INACTIVATE_GEOMETRYLESS_AREA_BY_SOURCE_SQL),
+            {
+                "provider": provider,
+                "dataset_key": dataset_key,
+                "source_entity_type": source_entity_type,
+            },
+        )
+    ).mappings().all()
+    return await _retire_provider_candidates(
+        session,
+        candidates,
+        reason_code="provider_invalid_geometry",
     )
-    return len(result.fetchall())
 
 
 # ── notice 라이프사이클 (#632 — 사건 단위 identity + 중복 정리) ─────────────
@@ -3103,10 +3312,10 @@ async def _persist_notice_lineage_events(
 
 
 def _supersede_stale_notice_sql(close_missing: bool) -> str:
-    """notice 정리 SQL 2종 — 계보별 latest 아닌 feature soft-delete(+snapshot 동기화).
+    """notice 정리 SQL 2종 — 계보별 latest 아닌 feature retire 후보(+snapshot 동기화).
 
     ``_PUBLIC_ACTIVE_NOTICE_FILTER_SQL``(read 필터)과 동일 계보/최신 판정을
-    write 시점에 set 기반으로 적용한다. ``close_missing=True``면 soft-delete 대신
+    write 시점에 set 기반으로 적용한다. ``close_missing=True``면 retire 대신
     현재 feed에 없는 latest 계보를 닫고, 다시 나타난 latest 계보는 이전
     ``valid_end_time``을 지워 활성 상태로 복구한다. feature·계보별 후보는
     ``seen_at``/``source_record_key``를 따로 집계하지 않고 실제 최신 row 하나를
@@ -3124,12 +3333,11 @@ def _supersede_stale_notice_sql(close_missing: bool) -> str:
     candidate_lifecycle = (
         """
       AND (
-        f.deleted_at IS NULL
-        OR f.status = 'inactive'
+        f.lifecycle_state IN ('active', 'retired')
       )
 """
         if close_missing
-        else "      AND f.deleted_at IS NULL\n"
+        else "      AND f.lifecycle_state = 'active'\n"
     )
     lineage_sql = _lineage_sql("head", entity_alias="se")
     canonical_sql = _canonical_notice_feature_sql(
@@ -3151,6 +3359,7 @@ def _supersede_stale_notice_sql(close_missing: bool) -> str:
 WITH lineage_candidates AS (
     SELECT
         f.feature_id,
+        dataset.provider_dataset_id,
         {lineage_sql} AS lineage_key,
         head.observed_at AS seen_at,
         sr.source_record_key AS tiebreak,
@@ -3186,6 +3395,7 @@ WITH lineage_candidates AS (
 lineage AS (
     SELECT DISTINCT ON (feature_id, lineage_key)
         feature_id,
+        provider_dataset_id,
         lineage_key,
         seen_at,
         tiebreak,
@@ -3199,6 +3409,7 @@ lineage AS (
 ranked AS (
     SELECT
         feature_id,
+        provider_dataset_id,
         lineage_key,
         snapshot_present,
         snapshot_changed_at,
@@ -3348,7 +3559,7 @@ global_feature_wins AS MATERIALIZED (
           AND other_sl.source_role = 'primary'
           AND other_f.feature_id <> current_notice.feature_id
           AND other_f.kind = 'notice'
-          AND other_f.deleted_at IS NULL
+          AND other_f.lifecycle_state = 'active'
           AND (
             other_head.observed_at > current_notice.seen_at
             OR (
@@ -3383,6 +3594,8 @@ global_feature_wins AS MATERIALIZED (
 , feature_snapshot AS (
     SELECT
         feature_id,
+        min(provider_dataset_id) AS provider_dataset_id,
+        max(tiebreak) FILTER (WHERE rn = 1) AS source_record_key,
         bool_or(rn = 1) AS wins_any_lineage,
         bool_or(
             rn = 1 AND snapshot_present IS TRUE
@@ -3406,6 +3619,8 @@ global_feature_wins AS MATERIALIZED (
 ), feature_lifecycle AS (
     SELECT
         s.feature_id,
+        s.provider_dataset_id,
+        s.source_record_key,
         (
             s.has_present_winning_lineage
             OR COALESCE(
@@ -3452,8 +3667,9 @@ global_feature_wins AS MATERIALIZED (
 ), lifecycle_desired AS (
     SELECT
         f.feature_id,
-        f.status AS old_status,
-        f.deleted_at AS old_deleted_at,
+        lifecycle.provider_dataset_id,
+        lifecycle.source_record_key,
+        f.lifecycle_state AS old_lifecycle_state,
         n.valid_end_time AS old_valid_end_time,
         lifecycle.has_present_winning_lineage,
         lifecycle.has_unknown_winning_lineage,
@@ -3465,8 +3681,7 @@ global_feature_wins AS MATERIALIZED (
           THEN CASE
             WHEN lifecycle.has_present_winning_lineage
             THEN CASE
-              WHEN f.status = 'active'
-               AND f.deleted_at IS NULL
+              WHEN f.lifecycle_state = 'active'
                AND (
                    n.valid_end_time IS NULL
                    OR n.valid_end_time > CAST(:evaluated_at AS timestamptz)
@@ -3491,7 +3706,7 @@ global_feature_wins AS MATERIALIZED (
             SELECT 1
             FROM ops.feature_overrides AS fo
             WHERE fo.feature_id = f.feature_id
-              AND fo.field_path = 'status'
+              AND fo.field_path = 'lifecycle_state'
               AND fo.status = 'active'
               AND fo.prevent_provider_reactivation
         ) AS reactivation_blocked
@@ -3523,8 +3738,7 @@ global_feature_wins AS MATERIALIZED (
             -- 호출자가 재어 ``:hidden_before``로 넘긴다 — 적재가 없는 경로
             -- (close/supersede)는 빈 배열이라 종전 판정 그대로다.
             NOT (desired.feature_id = ANY(CAST(:hidden_before AS text[])))
-            AND desired.old_status = 'active'
-            AND desired.old_deleted_at IS NULL
+            AND desired.old_lifecycle_state = 'active'
             AND (
                 desired.old_valid_end_time IS NULL
                 OR desired.old_valid_end_time
@@ -3539,8 +3753,7 @@ global_feature_wins AS MATERIALIZED (
             (
                 target.should_activate
                 OR (
-                    target.old_status = 'active'
-                    AND target.old_deleted_at IS NULL
+                    target.old_lifecycle_state = 'active'
                 )
             )
             AND (
@@ -3552,11 +3765,11 @@ global_feature_wins AS MATERIALIZED (
     FROM lifecycle_targets AS target
 )
 -- T-VN-35(ADR-086): 효력 종료 시각의 정본은 ``feature_notices.valid_end_time``
--- (timestamptz)이다. core는 status/deleted_at/updated_at만 옮기고, 시각 갱신은
--- 같은 문장의 두 번째 data-modifying CTE가 typed 컬럼에 직접 쓴다 — 종전
+-- (timestamptz)이다. lifecycle 전이는 procedure 호출자가 처리하고, 시각 갱신은
+-- 같은 문장의 data-modifying CTE가 typed 컬럼에 직접 쓴다 — 종전
 -- ``jsonb_set(detail, '{valid_end_time}', to_jsonb(text))`` 왕복(문자열화 →
--- 재파싱)이 사라진다. CTE 두 개는 **한 statement·한 snapshot**이므로 core 상태와
--- 시각이 갈라질 창이 없다. 마지막 SELECT는 core CTE만 읽지만 data-modifying CTE는
+-- 재파싱)이 사라진다. CTE는 **한 statement·한 snapshot**으로 notice 후보와 시각을
+-- 함께 확정한다. 마지막 SELECT는 outcome CTE만 읽지만 data-modifying CTE는
 -- 참조 여부와 무관하게 항상 완주하므로(PostgreSQL 계약) notice 갱신이 누락되지
 -- 않고, subtype 행이 없는 feature도 RETURNING 집계에서 빠지지 않는다.
 --
@@ -3564,30 +3777,23 @@ global_feature_wins AS MATERIALIZED (
 -- ``valid_start_time``보다 이르다 — "발효 전 철회"라는 정당한 상태이므로 0085는
 -- 순서 CHECK를 두지 않는다(KREX notice ETL에서 실측). read 필터는
 -- ``valid_end_time <= now()``라 이 공고는 즉시 숨겨진다.
-, core_update AS (
-    UPDATE feature.features AS f
-    SET status = CASE
-          WHEN target.should_activate
-          THEN 'active'
-          ELSE f.status
-        END,
-        deleted_at = CASE
-          WHEN target.should_activate
-          THEN NULL
-          ELSE f.deleted_at
-        END,
-        updated_at = now()
+, lifecycle_outcomes AS (
+    SELECT
+        target.feature_id,
+        target.provider_dataset_id,
+        target.source_record_key,
+        target.desired_valid_end_time,
+        target.should_activate
+          AND target.old_lifecycle_state = 'retired' AS reactivate,
+        (NOT target.was_visible AND target.will_be_visible) AS reopened,
+        (target.was_visible AND NOT target.will_be_visible) AS closed
     FROM lifecycle_changes AS target
-    WHERE f.feature_id = target.feature_id
-      AND (
+    WHERE (
           target.old_valid_end_time
             IS DISTINCT FROM target.desired_valid_end_time
           OR (
               target.should_activate
-              AND (
-                  target.old_deleted_at IS NOT NULL
-                  OR target.old_status <> 'active'
-              )
+              AND target.old_lifecycle_state = 'retired'
           )
           -- 적재가 먼저 되살린 재등장은 여기 도달했을 때 core/subtype이 이미
           -- 최종 상태다(갱신할 컬럼이 없다). 그래도 RETURNING에 실어야 재등장
@@ -3599,21 +3805,16 @@ global_feature_wins AS MATERIALIZED (
               AND target.will_be_visible
           )
       )
-    RETURNING
-        f.feature_id,
-        target.desired_valid_end_time AS desired_valid_end_time,
-        (NOT target.was_visible AND target.will_be_visible) AS reopened,
-        (target.was_visible AND NOT target.will_be_visible) AS closed
 ), notice_update AS (
     UPDATE feature.feature_notices AS n
-    SET valid_end_time = core_update.desired_valid_end_time
-    FROM core_update
-    WHERE n.feature_id = core_update.feature_id
-      AND n.valid_end_time IS DISTINCT FROM core_update.desired_valid_end_time
+    SET valid_end_time = lifecycle_outcomes.desired_valid_end_time
+    FROM lifecycle_outcomes
+    WHERE n.feature_id = lifecycle_outcomes.feature_id
+      AND n.valid_end_time IS DISTINCT FROM lifecycle_outcomes.desired_valid_end_time
     RETURNING n.feature_id
 )
-SELECT feature_id, reopened, closed
-FROM core_update
+SELECT feature_id, provider_dataset_id, source_record_key, reactivate, reopened, closed
+FROM lifecycle_outcomes
 """
         )
     return (
@@ -3622,22 +3823,22 @@ FROM core_update
 , feature_rank AS (
     SELECT
         feature_id,
+        min(provider_dataset_id) AS provider_dataset_id,
         bool_or(rn = 1) AS wins_any_lineage,
         bool_or(rn > 1) AS loses_any_lineage
     FROM ranked
     GROUP BY feature_id
 )
-UPDATE feature.features AS f
-SET status = 'inactive', deleted_at = now(), updated_at = now()
+SELECT r.feature_id, r.provider_dataset_id
 FROM feature_rank AS r
+JOIN feature.features AS f
+  ON f.feature_id = r.feature_id
 LEFT JOIN global_feature_wins AS global_wins
   ON global_wins.feature_id = r.feature_id
-WHERE f.feature_id = r.feature_id
-  AND r.loses_any_lineage
+WHERE r.loses_any_lineage
   AND NOT r.wins_any_lineage
   AND NOT COALESCE(global_wins.wins_any_lineage, false)
-  AND f.deleted_at IS NULL
-RETURNING f.feature_id
+  AND f.lifecycle_state = 'active'
 """
     )
 
@@ -3645,7 +3846,7 @@ RETURNING f.feature_id
 # 적재 **이전** 가시성 관측 — ``was_visible``의 정본 입력.
 #
 # ``_supersede_stale_notice_sql(close_missing=True)``의 판정과 글자 그대로 같은
-# 술어의 부정이다(status/deleted_at/valid_end_time + 같은 ``evaluated_at``).
+# 술어의 부정이다(lifecycle_state/valid_end_time + 같은 ``evaluated_at``).
 # subtype 행이 아직 없는 신규 feature는 LEFT JOIN으로 ``valid_end_time IS NULL``
 # 이 되지만 features 행 자체가 없으므로 결과에 들어오지 않는다 — 처음 적재되는
 # 공고를 "재등장"으로 세지 않기 위해 필요한 성질이다.
@@ -3656,8 +3857,7 @@ LEFT JOIN feature.feature_notices AS n
   ON n.feature_id = f.feature_id
 WHERE f.feature_id = ANY(CAST(:feature_ids AS text[]))
   AND NOT (
-      f.status = 'active'
-      AND f.deleted_at IS NULL
+      f.lifecycle_state = 'active'
       AND (
           n.valid_end_time IS NULL
           OR n.valid_end_time > CAST(:evaluated_at AS timestamptz)
@@ -4002,7 +4202,11 @@ async def _reconcile_persisted_notice_scope(
             "source_entity_type": source_entity_type,
         },
     )
-    superseded = len(result.fetchall())
+    superseded = await _retire_provider_candidates(
+        session,
+        result.mappings().all(),
+        reason_code="provider_notice_superseded",
+    )
     closed = 0
     reopened = 0
     if closed_at is not None:
@@ -4018,6 +4222,25 @@ async def _reconcile_persisted_notice_scope(
             },
         )
         snapshot_updates = result.mappings().all()
+        for row in snapshot_updates:
+            if not bool(row["reactivate"]):
+                continue
+            source_record_key = row["source_record_key"]
+            if source_record_key is None:
+                raise RuntimeError(
+                    "notice reactivation candidate has no current source record"
+                )
+            await _transition_provider_lifecycle_if_needed(
+                session,
+                feature_id=str(row["feature_id"]),
+                desired_state=ProviderFeatureState(
+                    lifecycle_state="active",
+                    publication_state="published",
+                    quality_state="valid",
+                ),
+                provider_dataset_id=int(row["provider_dataset_id"]),
+                source_record_key=str(source_record_key),
+            )
         reopened = sum(bool(row["reopened"]) for row in snapshot_updates)
         closed = sum(bool(row["closed"]) for row in snapshot_updates)
         # soft-delete됐던 winner를 복구하면서 같은 계보의 legacy active feature와
@@ -4032,7 +4255,11 @@ async def _reconcile_persisted_notice_scope(
                     "source_entity_type": source_entity_type,
                 },
             )
-            superseded += len(result.fetchall())
+            superseded += await _retire_provider_candidates(
+                session,
+                result.mappings().all(),
+                reason_code="provider_notice_superseded",
+            )
     return NoticeReconcileResult(
         superseded=superseded,
         closed=closed,
@@ -4041,33 +4268,49 @@ async def _reconcile_persisted_notice_scope(
 
 
 # 만료 notice purge (docs/etl/notice-feature-etl.md §9) — 종료일(없으면 발표일)
-# +1년 지난 notice를 soft-delete. maintenance job에서 주기 실행(#632).
+# +1년 지난 notice를 retired/suppressed 전이. maintenance job에서 주기 실행(#632).
 #
 # T-VN-35D(ADR-086): 효력 기간을 typed 컬럼에서 읽는다. ``kind = 'notice'`` 술어도
 # 따로 걸지 않는다 — ``feature_notices`` 조인 자체가 kind 필터다(kind 상수 CHECK +
 # ``(feature_id, kind)`` FK). 종전에는 free-form ``detail`` 문자열을 무방비로
 # CAST해서, 파싱 불가 값 한 행이면 purge job 전체가 실패했다.
 _PURGE_EXPIRED_NOTICES_SQL: Final[str] = """
-UPDATE feature.features AS f
-SET status = 'inactive', deleted_at = now(), updated_at = now()
-FROM feature.feature_notices AS n
-WHERE n.feature_id = f.feature_id
-  AND f.deleted_at IS NULL
+SELECT DISTINCT ON (f.feature_id)
+    f.feature_id,
+    entity.provider_dataset_id
+FROM feature.features AS f
+JOIN feature.feature_notices AS n
+  ON n.feature_id = f.feature_id
+JOIN provider_sync.source_links AS link
+  ON link.feature_id = f.feature_id
+ AND link.source_role = 'primary'
+JOIN provider_sync.source_entities AS entity
+  ON entity.source_entity_key = link.source_entity_key
+JOIN provider_sync.provider_datasets AS dataset
+  ON dataset.provider_dataset_id = entity.provider_dataset_id
+ AND dataset.is_active
+WHERE f.lifecycle_state = 'active'
   AND COALESCE(f.data_origin, 'provider') <> 'user_request'
   AND COALESCE(n.valid_end_time, n.valid_start_time)
       < now() - CAST(CAST(:retention AS text) AS interval)
-RETURNING f.feature_id
+ORDER BY f.feature_id, entity.provider_dataset_id
 """
 
 
 async def purge_expired_notices(session: AsyncSession, *, retention: str = "1 year") -> int:
-    """보존 기간이 지난 notice를 soft-delete한다 (§9 보관 정책, #632).
+    """보존 기간이 지난 notice를 retired/suppressed 전이한다 (§9 보관 정책, #632).
 
     ``valid_end_time``(없으면 ``valid_start_time``) + ``retention`` 경과분.
     commit은 호출자 책임.
     """
-    result = await session.execute(text(_PURGE_EXPIRED_NOTICES_SQL), {"retention": retention})
-    return len(result.fetchall())
+    result = await session.execute(
+        text(_PURGE_EXPIRED_NOTICES_SQL), {"retention": retention}
+    )
+    return await _retire_provider_candidates(
+        session,
+        result.mappings().all(),
+        reason_code="provider_notice_retention_expired",
+    )
 
 
 # JSONB 컬럼 — raw ``text()`` 쿼리는 driver에 따라 str(asyncpg)로 돌려줄 수 있어

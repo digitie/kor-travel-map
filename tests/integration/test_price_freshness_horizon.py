@@ -299,7 +299,15 @@ async def test_stale_price_excluded_from_bbox_price_summary(
             "detail": None,  # price kind는 place detail을 갖지 않는다.
         }
     )
-    await feature_repo.upsert_feature(migrated_session, price_feature)
+    await feature_repo.upsert_feature(
+        migrated_session,
+        price_feature,
+        provider_dataset_id=await feature_repo.resolve_active_provider_dataset_id(
+            migrated_session,
+            provider=bundles[0].source_record.provider,
+            dataset_key=bundles[0].source_record.dataset_key,
+        ),
+    )
 
     await _append_price_response(
         migrated_session,

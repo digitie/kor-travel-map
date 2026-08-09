@@ -627,7 +627,15 @@ async def test_provider_upsert_creates_uuid_and_alias_and_is_idempotent(
     # 변형하지 않고 같은 feature를 다시 upsert해도 UPDATE 분기가 실행된다
     # (upsert SQL은 feature_uuid를 SET 목록에 두지 않으므로 **버려진 새 후보**가
     # 아니라 기존 저장값이 정본으로 남는다 — 32C verify의 inserted=False 축).
-    inserted_again = await feature_repo.upsert_feature(migrated_session, bundle.feature)
+    inserted_again = await feature_repo.upsert_feature(
+        migrated_session,
+        bundle.feature,
+        provider_dataset_id=await feature_repo.resolve_active_provider_dataset_id(
+            migrated_session,
+            provider=bundle.source_record.provider,
+            dataset_key=bundle.source_record.dataset_key,
+        ),
+    )
     assert inserted_again is False
     feature_uuid_after, alias_count_after = await _pair()
     assert feature_uuid_after == stored

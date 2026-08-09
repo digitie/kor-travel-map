@@ -2023,42 +2023,34 @@ async def list_admin_features(
     return AdminFeaturePage(items=items, next_cursor=next_cursor)
 
 
-_DEACTIVATE_FEATURE_SQL: Final[str] = """
-WITH locked AS (
-    SELECT feature_id, status, deleted_at
-    FROM feature.features
-    WHERE feature_id = :feature_id
-    FOR UPDATE
-),
-updated AS (
-    UPDATE feature.features AS f
-    SET status = 'inactive', updated_at = now()
-    FROM locked
-    WHERE f.feature_id = locked.feature_id
-      AND locked.deleted_at IS NULL
-      AND locked.status <> 'deleted'
-    RETURNING f.feature_id, locked.status AS previous_status, f.status
-)
-SELECT feature_id, previous_status, status
-FROM updated
-"""
-
 _DEACTIVATE_FEATURE_STATE_SQL: Final[str] = """
-SELECT feature_id, status, deleted_at
+SELECT feature_id, lifecycle_state, publication_state, quality_state, row_revision
 FROM feature.features
 WHERE feature_id = :feature_id
 FOR UPDATE
 """
 
-_UPSERT_STATUS_OVERRIDE_SQL: Final[str] = """
+_TRANSITION_FEATURE_STATE_SQL: Final[str] = """
+CALL feature.transition_feature_state(
+    CAST(:feature_id AS text),
+    CAST(:lifecycle_state AS text),
+    CAST(:publication_state AS text),
+    CAST(:quality_state AS text),
+    CAST(:expected_row_revision AS bigint),
+    CAST(:state_context AS jsonb),
+    NULL, NULL
+)
+"""
+
+_UPSERT_LIFECYCLE_STATE_OVERRIDE_SQL: Final[str] = """
 INSERT INTO ops.feature_overrides (
     feature_id, source_record_key, field_path,
     source_value, override_value, prevent_provider_reactivation,
     status, reason, created_by
 ) VALUES (
-    :feature_id, NULL, 'status',
+    :feature_id, NULL, 'lifecycle_state',
     to_jsonb(CAST(:source_value AS text)),
-    to_jsonb('inactive'::text),
+    to_jsonb('retired'::text),
     :prevent_provider_reactivation,
     'active', :reason, :operator
 )
@@ -2080,6 +2072,28 @@ RETURNING
     created_by,
     created_at
 """
+
+
+def _legacy_status_from_axes(
+    *,
+    lifecycle_state: str,
+    publication_state: str,
+    quality_state: str,
+) -> str:
+    """A draft의 구 deactivate 응답에만 쓰는 일시적 표시값.
+
+    이 값은 DB에 쓰거나 procedure에 전달하지 않는다. T-VN-34C가 old endpoint와
+    response status를 제거할 때 함께 제거된다.
+    """
+    if lifecycle_state == "retired":
+        return "inactive"
+    if quality_state == "quarantined":
+        return "broken"
+    if publication_state == "draft":
+        return "draft"
+    if publication_state == "suppressed":
+        return "hidden"
+    return "active"
 
 
 def _feature_override(row: Any) -> FeatureOverride:
@@ -2107,37 +2121,63 @@ async def deactivate_feature(
     operator: str | None = None,
     prevent_provider_reactivation: bool = True,
 ) -> FeatureDeactivateResult | None:
-    """feature를 inactive로 전환하고, 필요 시 active status override를 남긴다."""
-    row = (
+    """feature를 retire하고 typed lifecycle override를 같은 transaction에 남긴다."""
+    if not operator:
+        raise ValueError("admin state transition에는 authenticated operator가 필요합니다.")
+    if not reason.strip():
+        raise ValueError("admin state transition에는 reason이 필요합니다.")
+
+    state_row = (
         await session.execute(
-            text(_DEACTIVATE_FEATURE_SQL),
+            text(_DEACTIVATE_FEATURE_STATE_SQL),
             {"feature_id": feature_id},
         )
     ).mappings().first()
-    if row is None:
-        state_row = (
-            await session.execute(
-                text(_DEACTIVATE_FEATURE_STATE_SQL),
-                {"feature_id": feature_id},
-            )
-        ).mappings().first()
-        if state_row is not None:
-            raise FeatureStateConflict(
-                feature_id=str(state_row["feature_id"]),
-                current_status=str(state_row["status"]),
-                deleted_at=state_row["deleted_at"],
-                target_status="inactive",
-            )
+    if state_row is None:
         return None
+
+    current_lifecycle = str(state_row["lifecycle_state"])
+    current_publication = str(state_row["publication_state"])
+    current_quality = str(state_row["quality_state"])
+    if current_lifecycle == "retired":
+        raise FeatureStateConflict(
+            feature_id=str(state_row["feature_id"]),
+            current_status=_legacy_status_from_axes(
+                lifecycle_state=current_lifecycle,
+                publication_state=current_publication,
+                quality_state=current_quality,
+            ),
+            deleted_at=None,
+            target_status="inactive",
+        )
+
+    await session.execute(
+        text(_TRANSITION_FEATURE_STATE_SQL),
+        {
+            "feature_id": feature_id,
+            "lifecycle_state": "retired",
+            "publication_state": "suppressed",
+            "quality_state": current_quality,
+            "expected_row_revision": int(state_row["row_revision"]),
+            "state_context": json.dumps(
+                {
+                    "transition_kind": "admin",
+                    "reason_code": "admin_retire",
+                    "principal": operator,
+                },
+                ensure_ascii=False,
+            ),
+        },
+    )
 
     override = None
     if prevent_provider_reactivation:
         override_row = (
             await session.execute(
-                text(_UPSERT_STATUS_OVERRIDE_SQL),
+                text(_UPSERT_LIFECYCLE_STATE_OVERRIDE_SQL),
                 {
                     "feature_id": feature_id,
-                    "source_value": row["previous_status"],
+                    "source_value": current_lifecycle,
                     "prevent_provider_reactivation": prevent_provider_reactivation,
                     "reason": reason,
                     "operator": operator,
@@ -2147,9 +2187,13 @@ async def deactivate_feature(
         override = _feature_override(override_row)
 
     return FeatureDeactivateResult(
-        feature_id=str(row["feature_id"]),
-        previous_status=str(row["previous_status"]),
-        status=str(row["status"]),
+        feature_id=str(state_row["feature_id"]),
+        previous_status=_legacy_status_from_axes(
+            lifecycle_state=current_lifecycle,
+            publication_state=current_publication,
+            quality_state=current_quality,
+        ),
+        status="inactive",
         override_created=override is not None,
         override=override,
     )
@@ -2198,7 +2242,7 @@ LIMIT :limit
 """
 
 _FEATURE_CHANGE_STATE_SQL: Final[str] = """
-SELECT feature_id, kind, status, user_deleted_at
+SELECT feature_id, kind, lifecycle_state, publication_state, quality_state, row_revision
 FROM feature.features
 WHERE feature_id = :feature_id
 FOR UPDATE
@@ -2214,41 +2258,15 @@ FOR UPDATE
 # ``kind IN ('place','event')``(API Literal)이라 geometry는 애초에 대상이
 # 아니다 — geometry가 필수인 kind는 route/area뿐이고 그 값은 subtype 컬럼에
 # NOT NULL로 산다.
-_APPLY_FEATURE_ADD_SQL: Final[str] = """
-INSERT INTO feature.features (
-    feature_id, feature_uuid, kind, name, category,
-    coord, coord_precision_digits,
-    address, legal_dong_code, road_name_code, road_address_management_no,
-    admin_dong_code, sido_code, sigungu_code,
-    urls, marker_icon, marker_color,
-    parent_feature_id, sibling_group_id,
-    raw_refs, status,
-    data_origin, data_version, user_change_kind, user_change_status,
-    user_change_request_id, user_deleted_at, user_deleted_by, user_change_reason,
-    created_at, updated_at, deleted_at
-) VALUES (
-    :feature_id, CAST(:feature_uuid AS uuid), :kind, :name, :category,
-    CASE WHEN CAST(:lon AS double precision) IS NULL THEN NULL
-         ELSE x_extension.ST_SetSRID(
-             x_extension.ST_MakePoint(
-                 CAST(:lon AS double precision),
-                 CAST(:lat AS double precision)
-             ),
-             4326
-         ) END,
-    :coord_precision_digits,
-    CAST(:address AS jsonb), :legal_dong_code, :road_name_code,
-    :road_address_management_no, :admin_dong_code, :sido_code, :sigungu_code,
-    CAST(:urls AS jsonb), :marker_icon, :marker_color,
-    :parent_feature_id, :sibling_group_id,
-    '[]'::jsonb, :status,
-    'user_request', 1, 'add', 'applied',
-    CAST(:request_id AS uuid), NULL, NULL, :reason,
-    now(), now(), NULL
+_CREATE_FEATURE_WITH_INITIAL_STATE_SQL: Final[str] = """
+CALL feature.create_feature_with_initial_state(
+    CAST(:feature_payload AS jsonb),
+    CAST(:lifecycle_state AS text),
+    CAST(:publication_state AS text),
+    CAST(:quality_state AS text),
+    CAST(:state_context AS jsonb),
+    NULL, NULL, NULL, NULL
 )
-ON CONFLICT (feature_id) DO NOTHING
-RETURNING feature_id, CAST(feature_uuid AS text) AS feature_uuid,
-          kind, status, user_deleted_at
 """
 
 # T-VN-35(0086): ``detail``/``geom``은 core SET 목록에서 사라졌다. 종전의
@@ -2334,20 +2352,17 @@ SET
     updated_at = now()
 WHERE f.feature_id = :feature_id
   AND f.kind IN ('place','event')
-  AND f.status <> 'deleted'
-  AND f.user_deleted_at IS NULL
+  AND f.lifecycle_state = 'active'
 RETURNING f.feature_id, CAST(f.feature_uuid AS text) AS feature_uuid,
-          f.kind, f.status, f.user_deleted_at
+          f.kind
 """
 
-# soft-delete는 core-only다 — subtype 행은 남는다. ``status='deleted'``는
-# 행을 지우지 않으므로 CASCADE 대상이 아니고, 되살릴 때 kind별 값이 그대로
-# 있어야 한다(ADR-017 무기한 보관과 같은 규약).
-_APPLY_FEATURE_DELETE_SQL: Final[str] = """
+# lifecycle/publication/quality는 직전 procedure가 이미 전이한다. 이 문장은
+# request provenance만 materialize하므로 state audit/privilege fence를 우회하지
+# 않는다. legacy ``status``/``deleted_at``는 T-VN-34A에서 더 이상 쓰지 않는다.
+_APPLY_FEATURE_DELETE_PROVENANCE_SQL: Final[str] = """
 UPDATE feature.features AS f
 SET
-    status = 'deleted',
-    deleted_at = now(),
     data_origin = 'user_request',
     data_version = GREATEST(f.data_version, 1),
     user_change_kind = 'delete',
@@ -2358,10 +2373,6 @@ SET
     user_change_reason = :reason,
     updated_at = now()
 WHERE f.feature_id = :feature_id
-  AND f.kind IN ('place','event')
-  AND f.status <> 'deleted'
-  AND f.user_deleted_at IS NULL
-RETURNING f.feature_id, f.status, f.user_deleted_at
 """
 
 _NEXT_USER_VERSION_SQL: Final[str] = """
@@ -2545,8 +2556,43 @@ def _add_params(
         "parent_feature_id": payload.get("parent_feature_id"),
         "sibling_group_id": payload.get("sibling_group_id"),
         "status": payload.get("status") or "active",
+        # T-VN-36의 field materialization 전까지 유지되는 non-state provenance.
+        # 3축 state와 soft-delete 시각은 create procedure의 명시 axis 인자로만 쓴다.
+        "data_origin": "user_request",
+        "data_version": 1,
+        "user_change_kind": "add",
+        "user_change_status": "applied",
+        "user_change_request_id": request_id,
+        "user_change_reason": reason,
         "reason": reason,
     }
+
+
+def _state_axes_from_legacy_status(status: str) -> tuple[str, str, str]:
+    """A draft의 admin add input을 3축 procedure 인자로만 정규화한다."""
+    if status in {"inactive", "deleted"}:
+        return "retired", "suppressed", "valid"
+    if status == "draft":
+        return "active", "draft", "valid"
+    if status == "hidden":
+        return "active", "suppressed", "valid"
+    if status == "broken":
+        return "active", "published", "quarantined"
+    return "active", "published", "valid"
+
+
+def _admin_feature_create_payload(params: Mapping[str, Any]) -> str:
+    """Admin create procedure payload에서 legacy state input을 제거한다."""
+    payload = {
+        key: (
+            json.loads(value)
+            if key in {"address", "urls"} and isinstance(value, str)
+            else value
+        )
+        for key, value in params.items()
+        if key not in {"request_id", "reason", "status"}
+    }
+    return json.dumps(payload, ensure_ascii=False, default=str)
 
 
 def _update_params(
@@ -2620,17 +2666,46 @@ async def _apply_change(
 ) -> None:
     payload = request.payload
     if request.action == "add":
-        row = (
+        if not operator:
+            raise ValueError("user state transition에는 authenticated operator가 필요합니다.")
+        add_params = _add_params(
+            request_id=request.request_id,
+            feature_id=request.feature_id,
+            payload=payload,
+            reason=request.reason,
+        )
+        lifecycle_state, publication_state, quality_state = _state_axes_from_legacy_status(
+            str(add_params["status"])
+        )
+        create_row = (
             await session.execute(
-                text(_APPLY_FEATURE_ADD_SQL),
-                add_params := _add_params(
-                    request_id=request.request_id,
-                    feature_id=request.feature_id,
-                    payload=payload,
-                    reason=request.reason,
-                ),
+                text(_CREATE_FEATURE_WITH_INITIAL_STATE_SQL),
+                {
+                    "feature_payload": _admin_feature_create_payload(add_params),
+                    "lifecycle_state": lifecycle_state,
+                    "publication_state": publication_state,
+                    "quality_state": quality_state,
+                    "state_context": json.dumps(
+                        {
+                            "transition_kind": "initial",
+                            "reason_code": "user_request_add",
+                            "principal": operator,
+                            "causation_ref": request.request_id,
+                        },
+                        ensure_ascii=False,
+                    ),
+                },
             )
-        ).mappings().first()
+        ).mappings().one()
+        row: Any = (
+            {
+                "feature_id": str(create_row["o_feature_id"]),
+                "feature_uuid": str(create_row["o_feature_uuid"]),
+                "kind": str(add_params["kind"]),
+            }
+            if bool(create_row["o_inserted"])
+            else None
+        )
         if row is not None:
             # T-VN-32C fail-close — ON CONFLICT DO NOTHING이라 RETURNING 행
             # 존재 자체가 신규 insert 증거다: 관측값은 보낸 후보와 같아야
@@ -2673,17 +2748,55 @@ async def _apply_change(
                 detail=payload.get("detail"),
             )
     else:
-        row = (
+        if not operator:
+            raise ValueError("user state transition에는 authenticated operator가 필요합니다.")
+        state = await _state_for_conflict(session, request.feature_id)
+        if (
+            state is None
+            or state["kind"] not in {"place", "event"}
+            or state["lifecycle_state"] != "active"
+        ):
+            row = None
+        else:
             await session.execute(
-                text(_APPLY_FEATURE_DELETE_SQL),
+                text(_TRANSITION_FEATURE_STATE_SQL),
                 {
-                    "request_id": request.request_id,
                     "feature_id": request.feature_id,
-                    "operator": operator,
-                    "reason": request.reason,
+                    "lifecycle_state": "retired",
+                    "publication_state": "suppressed",
+                    "quality_state": state["quality_state"],
+                    "expected_row_revision": int(state["row_revision"]),
+                    "state_context": json.dumps(
+                        {
+                            "transition_kind": "user_request",
+                            "reason_code": "user_request_delete",
+                            "principal": operator,
+                            "causation_ref": request.request_id,
+                        },
+                        ensure_ascii=False,
+                    ),
                 },
             )
-        ).mappings().first()
+            await session.execute(
+                text(_UPSERT_LIFECYCLE_STATE_OVERRIDE_SQL),
+                {
+                    "feature_id": request.feature_id,
+                    "source_value": "active",
+                    "prevent_provider_reactivation": True,
+                    "reason": request.reason,
+                    "operator": operator,
+                },
+            )
+            await session.execute(
+                text(_APPLY_FEATURE_DELETE_PROVENANCE_SQL),
+                {
+                    "feature_id": request.feature_id,
+                    "request_id": request.request_id,
+                    "reason": request.reason,
+                    "operator": operator,
+                },
+            )
+            row = {"feature_id": request.feature_id}
 
     if row is None:
         state = await _state_for_conflict(session, request.feature_id)
@@ -2696,8 +2809,12 @@ async def _apply_change(
         raise FeatureChangeConflict(
             feature_id=str(state["feature_id"]),
             action=request.action,
-            current_status=str(state["status"]),
-            user_deleted_at=state["user_deleted_at"],
+            current_status=_legacy_status_from_axes(
+                lifecycle_state=str(state["lifecycle_state"]),
+                publication_state=str(state["publication_state"]),
+                quality_state=str(state["quality_state"]),
+            ),
+            user_deleted_at=None,
         )
 
     next_version = int(

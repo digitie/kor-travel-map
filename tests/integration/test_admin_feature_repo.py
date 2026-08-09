@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from hashlib import md5
@@ -14,6 +15,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.dto import Address, Coordinate, Feature, PlaceDetail
+from kortravelmap.infra import feature_repo
 from kortravelmap.infra.admin_feature_repo import (
     FeatureStateConflict,
     apply_feature_change_request,
@@ -179,7 +181,7 @@ async def _merge_dedup_review_with_short_lock_timeout(
     )
 
 
-async def test_deactivate_creates_override_and_provider_upsert_preserves_status(
+async def test_deactivate_creates_typed_override_and_provider_upsert_preserves_retirement(
     migrated_session: AsyncSession,
 ) -> None:
     feature_id = "feature-admin-reactivation"
@@ -196,20 +198,85 @@ async def test_deactivate_creates_override_and_provider_upsert_preserves_status(
     assert result.previous_status == "active"
     assert result.status == "inactive"
     assert result.override is not None
-    assert result.override.field_path == "status"
+    assert result.override.field_path == "lifecycle_state"
 
-    inserted = await upsert_feature(migrated_session, _dto(feature_id, status="active"))
+    inserted = await upsert_feature(
+        migrated_session,
+        _dto(feature_id, status="active"),
+        provider_dataset_id=await _provider_dataset_id(migrated_session),
+    )
     assert inserted is False
 
     row = (
         await migrated_session.execute(
-            select(FeatureRow.status, FeatureRow.deleted_at).where(
-                FeatureRow.feature_id == feature_id
-            )
+            text(
+                "SELECT lifecycle_state, publication_state "
+                "FROM feature.features WHERE feature_id = :feature_id"
+            ),
+            {"feature_id": feature_id},
         )
-    ).one()
-    assert row.status == "inactive"
-    assert row.deleted_at is None
+    ).mappings().one()
+    assert row["lifecycle_state"] == "retired"
+    assert row["publication_state"] == "suppressed"
+
+    state = (
+        await migrated_session.execute(
+            text(
+                "SELECT lifecycle_state, publication_state, quality_state, row_revision "
+                "FROM feature.features WHERE feature_id = :feature_id"
+            ),
+            {"feature_id": feature_id},
+        )
+    ).mappings().one()
+    audit_count_before = int(
+        (
+            await migrated_session.execute(
+                text(
+                    "SELECT count(*) FROM feature.feature_state_transitions "
+                    "WHERE feature_id = :feature_id"
+                ),
+                {"feature_id": feature_id},
+            )
+        ).scalar_one()
+    )
+    with pytest.raises(DBAPIError) as exc_info:
+        async with migrated_session.begin_nested():
+            await migrated_session.execute(
+                text(feature_repo._TRANSITION_FEATURE_STATE_SQL),
+                {
+                    "feature_id": feature_id,
+                    "lifecycle_state": "active",
+                    "publication_state": state["publication_state"],
+                    "quality_state": state["quality_state"],
+                    "expected_row_revision": int(state["row_revision"]),
+                    "state_context": json.dumps(
+                        {
+                            "transition_kind": "provider_sync",
+                            "reason_code": "provider_reingest",
+                            "provider_dataset_id": await _provider_dataset_id(
+                                migrated_session
+                            ),
+                            "source_record_key": f"sr-{feature_id}",
+                            "reactivation_evidence": f"sr-{feature_id}",
+                        },
+                        ensure_ascii=False,
+                    ),
+                },
+    )
+    assert getattr(exc_info.value.orig, "sqlstate", None) == "23514"
+    assert "provider reactivation is fenced by lifecycle override" in str(exc_info.value.orig)
+    audit_count_after = int(
+        (
+            await migrated_session.execute(
+                text(
+                    "SELECT count(*) FROM feature.feature_state_transitions "
+                    "WHERE feature_id = :feature_id"
+                ),
+                {"feature_id": feature_id},
+            )
+        ).scalar_one()
+    )
+    assert audit_count_after == audit_count_before
 
     override_count = (
         await migrated_session.execute(
@@ -309,7 +376,11 @@ async def test_user_update_version_overrides_provider_reload(
     )
     assert second_request.state == "applied"
 
-    inserted = await upsert_feature(migrated_session, _dto(feature_id, status="active"))
+    inserted = await upsert_feature(
+        migrated_session,
+        _dto(feature_id, status="active"),
+        provider_dataset_id=await _provider_dataset_id(migrated_session),
+    )
     assert inserted is False
 
     row = (
@@ -373,7 +444,7 @@ async def test_user_update_version_overrides_provider_reload(
     assert version_payloads[1]["payload"]["data_version"] == 2
 
 
-async def test_user_delete_soft_delete_prevents_provider_resurrection(
+async def test_user_delete_retirement_prevents_provider_resurrection(
     migrated_session: AsyncSession,
 ) -> None:
     feature_id = "feature-admin-user-delete"
@@ -393,13 +464,18 @@ async def test_user_delete_soft_delete_prevents_provider_resurrection(
     )
     assert request.state == "applied"
 
-    await upsert_feature(migrated_session, _dto(feature_id, status="active"))
+    await upsert_feature(
+        migrated_session,
+        _dto(feature_id, status="active"),
+        provider_dataset_id=await _provider_dataset_id(migrated_session),
+    )
 
     row = (
         await migrated_session.execute(
             text(
                 """
-                SELECT status, data_origin, data_version, user_deleted_at, user_deleted_by
+                SELECT lifecycle_state, publication_state,
+                    data_origin, data_version, user_deleted_at, user_deleted_by
                 FROM feature.features
                 WHERE feature_id = :feature_id
                 """
@@ -407,7 +483,8 @@ async def test_user_delete_soft_delete_prevents_provider_resurrection(
             {"feature_id": feature_id},
         )
     ).mappings().one()
-    assert row["status"] == "deleted"
+    assert row["lifecycle_state"] == "retired"
+    assert row["publication_state"] == "suppressed"
     assert row["data_origin"] == "user_request"
     assert row["data_version"] == 1
     assert row["user_deleted_at"] is not None
