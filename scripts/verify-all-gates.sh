@@ -54,6 +54,29 @@ case "$WSL_ROOT" in
 esac
 
 IMAGE="${KTM_BATTERY_IMAGE:-ktm-battery:t37}"
+# geo live 5건(`tests/integration/test_dedup_with_kraddr_geo_live.py`)의 조건을
+# 맞춘다. CI에서는 geo가 도달 불가라 **skip**된다. 그런데 개발 머신에는 로컬 geo가
+# 12501에 떠 있어 테스트가 진행하다 "public API key 거부"로 **실패**한다 — CI가
+# 절대 보지 않는 red다. 그 red를 "환경 노이즈"라 부르며 넘기는 것이 이 저장소가
+# 반복해 온 실패다.
+#
+# 그래서 둘 중 하나로 확정한다: n150이 닿으면 정본 키로 터널을 뚫어 **진짜로**
+# 돌리고(§10.7 절차), 안 닿으면 도달 불가 주소를 줘서 CI와 **똑같이** skip시킨다.
+# 어느 쪽이든 판정 근거가 분명하고, 키는 변수에만 담아 출력하지 않는다.
+GEO_KEY=""
+GEO_BASE="http://127.0.0.1:1"
+if MSYS_NO_PATHCONV=1 wsl -e bash -lc 'ssh -o BatchMode=yes -o ConnectTimeout=5 n150 true' >/dev/null 2>&1; then
+  MSYS_NO_PATHCONV=1 wsl -e bash -lc 'pkill -f "N -L 12599" >/dev/null 2>&1; ssh -f -N -L 12599:127.0.0.1:12501 n150' >/dev/null 2>&1
+  GEO_KEY="$(MSYS_NO_PATHCONV=1 wsl -e bash -lc 'ssh n150 "cat ~/.secrets/kor-travel-map-public-api-key"' | tr -d '\r\n')"
+  if [ -n "$GEO_KEY" ]; then
+    GEO_BASE="http://127.0.0.1:12599"
+    echo "geo live: n150 터널로 실제 실행(키 길이 ${#GEO_KEY})"
+  else
+    echo "geo live: n150은 닿으나 키를 못 읽었다 — CI와 같이 skip시킨다"
+  fi
+else
+  echo "geo live: n150 미도달 — CI와 같이 skip시킨다(로컬 geo로 흘러가 키 거부 red가 나지 않게)"
+fi
 NPM="npx --yes npm@12.0.1"
 ADMIN="packages/kor-travel-map-admin/frontend"
 FAILED=()
@@ -76,7 +99,9 @@ py() {
     -v /var/run/docker.sock:/var/run/docker.sock \
     -v /usr/bin/docker:/usr/bin/docker:ro \
     -v /usr/libexec/docker/cli-plugins:/usr/libexec/docker/cli-plugins:ro \
-    -v "$WSL_ROOT:/src" -e TESTCONTAINERS_RYUK_DISABLED=true "$IMAGE" \
+    -v "$WSL_ROOT:/src" -e TESTCONTAINERS_RYUK_DISABLED=true \
+    -e KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY="$GEO_KEY" \
+    -e LIVE_KOR_TRAVEL_GEO_BASE_URL="$GEO_BASE" "$IMAGE" \
     sh -c "{ cd /repo && rm -rf src tests packages contracts alembic scripts .github \
       && tar -C /src --exclude=node_modules --exclude=.next --exclude=.react-doctor \
              --exclude=__pycache__ -cf - \
