@@ -25,4 +25,10 @@ if [ -n "$api_ops_name" ]; then
   exit 1
 fi
 
+case "${1:-}" in
+  dagster-webserver | dagster-daemon)
+    python -m kortravelmap.dagster.runtime_preflight
+    ;;
+esac
+
 exec "$@"

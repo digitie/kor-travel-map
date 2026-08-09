@@ -12,10 +12,9 @@ ADR 참조
 - ADR-030 — in-memory 캐시 금지 (``functools.cache`` 한정 narrow 예외)
 
 외부 호출자 측 사용:
-    >>> from kortravelmap.settings import KorTravelMapSettings
-    >>> settings = KorTravelMapSettings()  # 환경변수에서 로딩
-    >>> settings.pg_dsn.get_secret_value()
-    'postgresql+asyncpg://kor_travel_map:***@localhost:5432/kor_travel_map'
+    >>> settings = KorTravelMapSettings(pg_dsn='postgresql+asyncpg://runtime:...@db/kor_travel_map')
+    >>> settings.pg_dsn is not None
+    True
 
 Sprint 1 (본 PR#17) — minimum settings만. Provider key 등은 후속 sprint에
 필요한 시점에 점진 추가.
@@ -52,13 +51,20 @@ class KorTravelMapSettings(BaseSettings):
     )
 
     # ── PostgreSQL (ADR-007) ─────────────────────────────────────────────
-    pg_dsn: SecretStr = Field(
-        default=SecretStr(
-            "postgresql+asyncpg://kor_travel_map:changeme@localhost:5432/kor_travel_map"
-        ),
+    pg_dsn: SecretStr | None = Field(
+        default=None,
         description=(
-            "SQLAlchemy 2 async DSN. ``postgresql+asyncpg://...`` 권장. "
-            "운영 환경에서는 systemd EnvironmentFile 또는 vault에서 주입."
+            "SQLAlchemy 2 async DSN. 기본 DSN은 제공하지 않는다. API/Dagster "
+            "운영 process에는 bootstrap/schema owner가 아닌 전용 runtime login DSN을 "
+            "ignored EnvironmentFile 또는 vault에서 반드시 주입."
+        ),
+    )
+    runtime_db_preflight_required: bool = Field(
+        default=False,
+        description=(
+            "True면 API/Dagster runtime 기동 시 ADR-090의 실제 DB privilege "
+            "boundary를 fail-closed로 검증한다. 배포 compose는 반드시 True를 주입하며, "
+            "라이브러리 단위 테스트·명시적 engine 주입에는 기본 False를 유지한다."
         ),
     )
 

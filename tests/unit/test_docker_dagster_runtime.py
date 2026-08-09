@@ -73,20 +73,78 @@ def test_docker_compose_uses_persistent_dagster_storage_and_daemon() -> None:
 
     assert dagster["environment"]["KOR_TRAVEL_MAP_DAGSTER_PG_URL"]
     assert daemon["environment"]["KOR_TRAVEL_MAP_DAGSTER_PG_URL"]
-    assert (
-        dagster["environment"][
-            "KOR_TRAVEL_MAP_DAGSTER_SCHEDULE_OVERRIDES_REQUIRED"
-        ]
-        == "true"
-    )
-    assert (
-        daemon["environment"][
-            "KOR_TRAVEL_MAP_DAGSTER_SCHEDULE_OVERRIDES_REQUIRED"
-        ]
-        == "true"
-    )
+    assert dagster["environment"]["KOR_TRAVEL_MAP_DAGSTER_SCHEDULE_OVERRIDES_REQUIRED"] == "true"
+    assert daemon["environment"]["KOR_TRAVEL_MAP_DAGSTER_SCHEDULE_OVERRIDES_REQUIRED"] == "true"
     assert "dagster-db-init" in dagster["depends_on"]
     assert "dagster-db-init" in daemon["depends_on"]
+    for service in (dagster, daemon):
+        assert service["depends_on"]["db-role-bootstrap"] == {
+            "condition": "service_completed_successfully"
+        }
+
+
+@pytest.mark.unit
+def test_tvn34_compose_never_derives_runtime_or_metadata_credentials_from_bootstrap(
+    tmp_path: Path,
+) -> None:
+    """ADR-090 principal DSN은 ignored env 입력이며 bootstrap fallback이 아니다."""
+
+    compose = _compose()["services"]
+    assert compose["api"]["environment"]["KOR_TRAVEL_MAP_MIGRATOR_PG_DSN"].endswith("is required}")
+    assert compose["api"]["environment"]["KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN"].endswith(
+        "is required}"
+    )
+    for service_name in ("dagster", "dagster-daemon"):
+        assert compose[service_name]["environment"]["KOR_TRAVEL_MAP_PG_DSN"].endswith(
+            "is required}"
+        )
+        assert compose[service_name]["depends_on"]["db-role-bootstrap"] == {
+            "condition": "service_completed_successfully"
+        }
+
+    load_env = _script("scripts/load-env.sh")
+    assert "KOR_TRAVEL_MAP_PG_DSN:-postgresql" not in load_env
+    assert "KOR_TRAVEL_MAP_PG_DSN_SYNC:-postgresql" not in load_env
+    assert "KOR_TRAVEL_MAP_POSTGRES_PASSWORD:-kor_travel_map" not in load_env
+
+    for compose_path in (
+        "docker-compose.yml",
+        "docker-compose.host.yml",
+        "docker-compose.external-db.yml",
+        "docker-compose.external-infra.yml",
+    ):
+        raw = _script(compose_path)
+        assert "kor_travel_map:kor_travel_map" not in raw, compose_path
+        assert "KOR_TRAVEL_MAP_POSTGRES_PASSWORD:-kor_travel_map" not in raw, compose_path
+
+    bootstrap = _script("docker/postgres-role-bootstrap.sh")
+    assert not any(line.strip().startswith("REASSIGN OWNED") for line in bootstrap.splitlines())
+    assert "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES" not in bootstrap
+    assert "GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ktm_feature_runtime" not in bootstrap
+    assert "REVOKE ALL ON TABLES FROM ktm_feature_runtime" in bootstrap
+
+    # wrong target confirmation must fail before a network/psql side effect.
+    result = subprocess.run(
+        ["sh", "docker/postgres-role-bootstrap.sh"],
+        cwd=ROOT,
+        env={
+            "PATH": os.environ["PATH"],
+            "KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_ENABLED": "true",
+            "KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN": "postgresql://unused.invalid/ktm",
+            "KOR_TRAVEL_MAP_MIGRATOR_PASSWORD": "test-only",
+            "KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD": "test-only",
+            "KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD": "test-only",
+            "KOR_TRAVEL_MAP_POSTGRES_DB": "dedicated_map",
+            "KOR_TRAVEL_MAP_POSTGRES_USER": "bootstrap",
+            "KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_CONFIRM_DATABASE": "other_database",
+        },
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "must equal KOR_TRAVEL_MAP_POSTGRES_DB" in result.stderr
+    assert "psql" not in result.stderr
 
 
 @pytest.mark.unit
@@ -191,6 +249,7 @@ def test_docker_compose_isolates_provider_credentials_from_api() -> None:
         # ADR-066 결정 4 (T-VN-02) — /metrics scrape identity token도 같은
         # hard-require 패턴이다.
         "KOR_TRAVEL_MAP_API_METRICS_TOKEN",
+        "KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN",
     }
     assert "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET" in api["environment"]
     # admin secret과 같은 hard-require 패턴 — host env 누락 시 compose 평가 실패.
@@ -1042,6 +1101,10 @@ _MIGRATION_BASE_ENV: Final = {
     "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN": "",
     "KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN": "",
     "KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED": "false",
+    # Alembic와 API runtime은 같은 DB에도 서로 다른 LOGIN DSN을 반드시 쓴다.
+    # Entrypoint unit stub은 접속하지 않으므로 식별자만 있는 dummy를 준다.
+    "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN": "postgresql://migrator@example.invalid/ktm",
+    "KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN": "postgresql://api@example.invalid/ktm",
 }
 
 
@@ -1286,10 +1349,9 @@ def test_api_container_allows_empty_ops_tokens_when_not_required(
         cwd=ROOT,
         env={
             "PATH": _entrypoint_stub_path(tmp_path),
+            **_MIGRATION_BASE_ENV,
             "KOR_TRAVEL_MAP_API_PROFILE": "local-dev",
-            "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET": (
-                "shared-secret-at-least-32-characters"
-            ),
+            "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET": ("shared-secret-at-least-32-characters"),
             "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN": "",
             "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN": "",
             "KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN": "",
@@ -1364,9 +1426,8 @@ def test_api_container_production_allows_empty_ops_pair_when_ops_surface_off(
         cwd=ROOT,
         env={
             "PATH": _entrypoint_stub_path(tmp_path),
-            "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET": (
-                "shared-secret-at-least-32-characters"
-            ),
+            **_MIGRATION_BASE_ENV,
+            "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET": ("shared-secret-at-least-32-characters"),
             "KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED": "false",
             "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN": "",
             "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN": "",
@@ -1487,9 +1548,8 @@ def test_api_container_production_ops_surface_follows_features_flag(
         cwd=ROOT,
         env={
             "PATH": _entrypoint_stub_path(tmp_path),
-            "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET": (
-                "shared-secret-at-least-32-characters"
-            ),
+            **_MIGRATION_BASE_ENV,
+            "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET": ("shared-secret-at-least-32-characters"),
             "KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED": "false",
         },
         check=False,
@@ -1808,6 +1868,15 @@ def test_external_overlays_keep_candidate_storage_migration_ordering(
         "KOR_TRAVEL_MAP_API_SERVICE_TOKEN": "resolver-dummy",
         "KOR_TRAVEL_MAP_UI_ADMIN_PASSWORD_HASH": "resolver-dummy",
         "KOR_TRAVEL_MAP_UI_SESSION_SECRET": "resolver-dummy",
+        "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN": "postgresql://migrator@example.invalid/ktm",
+        "KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN": "postgresql://api@example.invalid/ktm",
+        "KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN": "postgresql://dagster@example.invalid/ktm",
+        "KOR_TRAVEL_MAP_EXTERNAL_DOCKER_DAGSTER_PG_URL": (
+            "postgresql://metadata@example.invalid/ktm_dagster"
+        ),
+        "KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL": (
+            "postgresql://metadata@example.invalid/ktm_dagster"
+        ),
     }
     resolved = subprocess.run(
         [
@@ -1841,6 +1910,10 @@ def test_external_overlays_keep_candidate_storage_migration_ordering(
         assert "host.docker.internal=host-gateway" in migration["extra_hosts"]
     for name in ("dagster", "dagster-daemon"):
         depends = services[name].get("depends_on") or {}
+        # external DB/infra overlay는 ownership transfer bootstrap을 profile로
+        # 비활성화한다. 따라서 runtime은 운영자가 사전 provision한 전용 DB에만
+        # 연결하며, profile-disabled service를 readiness edge로 참조하지 않는다.
+        assert "db-role-bootstrap" not in depends, (overlay, name, depends)
         assert depends.get("dagster-storage-migrate", {}).get("condition") == (
             "service_completed_successfully"
         ), (overlay, name, depends)

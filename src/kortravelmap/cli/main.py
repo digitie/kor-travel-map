@@ -308,7 +308,10 @@ def _format_status(counts: StatusCounts) -> str:
 def _resolve_dsn(args: argparse.Namespace) -> str:
     if args.dsn:
         return str(args.dsn)
-    return KorTravelMapSettings().pg_dsn.get_secret_value()
+    dsn = KorTravelMapSettings().pg_dsn
+    if dsn is None:
+        raise ValueError("--dsn or KOR_TRAVEL_MAP_PG_DSN is required")
+    return dsn.get_secret_value()
 
 
 async def _cmd_status(args: argparse.Namespace) -> int:

@@ -78,13 +78,34 @@ host/browser 공개 URL은 `KOR_TRAVEL_MAP_OBJECT_STORE_PUBLIC_BASE_URL`(기본
 `KOR_TRAVEL_MAP_OFFLINE_UPLOAD_BUCKET`(기본 `kor-travel-map-uploads`)이다.
 로컬 venv stack도 Docker compose와 같은 RustFS 개발 credential 기본값
 `kor-travel-map-dev-access` / `kor-travel-map-dev-secret`을 사용한다.
-Postgres host 포트 기본값은 `KOR_TRAVEL_MAP_POSTGRES_HOST_PORT=5432`이며,
-`scripts/load-env.sh`는 `KOR_TRAVEL_MAP_PG_DSN` 미설정 시
-`postgresql+asyncpg://kor_travel_map:kor_travel_map@127.0.0.1:5432/kor_travel_map`을 쓴다.
+Postgres host 포트 기본값은 `KOR_TRAVEL_MAP_POSTGRES_HOST_PORT=5432`이다.
+T-VN-34A부터 bootstrap owner DSN을 API/Dagster application DSN으로 재사용하지 않는다.
+권한 600의 ignored deployment env 또는 vault에 아래를 서로 다른 credential로 둔다.
+
+| 용도 | 필수 환경변수 | DB login |
+| --- | --- | --- |
+| ownership bootstrap | `KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN` | deployment bootstrap owner |
+| Alembic | `KOR_TRAVEL_MAP_MIGRATOR_PG_DSN` | `ktm_feature_migrator` |
+| API runtime | `KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN` | `ktm_feature_api_runtime` |
+| Dagster runtime | `KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN` | `ktm_feature_dagster_runtime` |
+| Dagster metadata | `KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL` | 별도 metadata login |
+
+로컬 dedicated DB compose는 `db-role-bootstrap` one-shot service가 먼저 완료되어야 한다.
+이 service는 `KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_CONFIRM_DATABASE`가 실제
+`KOR_TRAVEL_MAP_POSTGRES_DB`와 완전히 같을 때만 역할을 만들고 기존 object/DB ownership을
+`ktm_feature_schema_owner`로 forward transfer한다. 비밀번호는
+`KOR_TRAVEL_MAP_{MIGRATOR,API_RUNTIME,DAGSTER_RUNTIME}_PASSWORD`로 ignored env에만 두며
+Alembic revision에는 만들거나 기록하지 않는다. API entrypoint는 migration 뒤
+`kortravelmap.infra.runtime_privileges`로 closed ACL inventory를 재조정한 뒤에만 migrator
+DSN을 쓰며, Uvicorn exec 직전에 제거한다. 이 재조정은 `ALTER DEFAULT PRIVILEGES`를 쓰지
+않아 state/audit future table이 runtime DML을 자동 상속할 수 없다.
+
 Dagster metadata는 같은 Postgres container 안의 별도 DB `kor_travel_map_dagster`를 쓴다.
 `dagster-db-init` 서비스가 기동 때마다 DB 존재를 보장하고, Dagster webserver/daemon은
 `KOR_TRAVEL_MAP_DAGSTER_PG_URL`(`KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL`)을 통해
-`dagster-postgres` storage에 연결한다.
+`dagster-postgres` storage에 연결한다. 이 login도 bootstrap owner와 재사용하지 않으며
+ignored deployment env/vault에만 둔다. host network overlay는 같은 값을
+`KOR_TRAVEL_MAP_HOST_DAGSTER_PG_URL`로 요구한다.
 
 공유 DB 모드는 `kor-travel-docker-manager`가 이미 `kor-travel-geo-postgres:5432`를
 띄운 상태에서 사용한다. 이때 kor-travel-map compose는 local Postgres를 띄우지 않고,
@@ -102,17 +123,20 @@ frontend, Dagster webserver/daemon만 띄운다.
 KOR_TRAVEL_MAP_INFRA_EXTERNAL=true bash scripts/docker-up.sh
 ```
 
-공유 DB 비밀번호가 기본값과 다르면 `.env`에 `KOR_TRAVEL_MAP_POSTGRES_PASSWORD`를 두거나
-컨테이너 관점 DSN을 직접 지정한다. 공유 Postgres에는 `kor_travel_map`과
-`kor_travel_map_dagster` DB가 미리 있어야 한다.
+공유 DB에서는 `db-role-bootstrap`이 profile로 비활성화되며 ownership transfer를 절대
+자동 실행하지 않는다. 운영자가 dedicated `kor_travel_map` DB에 위 NOLOGIN/LOGIN 역할,
+ownership transfer와 runtime DSN을 사전 provision해야 한다. 공유 Postgres에는
+`kor_travel_map`과 `kor_travel_map_dagster` DB가 미리 있어야 한다.
 공유 DB host 포트는 `KOR_TRAVEL_MAP_EXTERNAL_POSTGRES_HOST_PORT`로 override하며,
 기본값은 `5432`다. 이 값은 standalone local Postgres publish 포트인
 `KOR_TRAVEL_MAP_POSTGRES_HOST_PORT`와 분리되어 있다.
 
 ```bash
 KOR_TRAVEL_MAP_EXTERNAL_POSTGRES_HOST_PORT=5432
-KOR_TRAVEL_MAP_EXTERNAL_DOCKER_PG_DSN=postgresql+asyncpg://kor_travel_map:...@host.docker.internal:5432/kor_travel_map
-KOR_TRAVEL_MAP_EXTERNAL_DOCKER_DAGSTER_PG_URL=postgresql://kor_travel_map:...@host.docker.internal:5432/kor_travel_map_dagster
+KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN=<ignored API runtime DSN>
+KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN=<ignored Dagster runtime DSN>
+KOR_TRAVEL_MAP_MIGRATOR_PG_DSN=<ignored migrator DSN>
+KOR_TRAVEL_MAP_EXTERNAL_DOCKER_DAGSTER_PG_URL=<ignored Dagster metadata DSN>
 KOR_TRAVEL_MAP_EXTERNAL_DOCKER_OBJECT_STORE_ENDPOINT_URL=http://host.docker.internal:12101
 ```
 

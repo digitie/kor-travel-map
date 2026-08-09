@@ -19,6 +19,7 @@ ADR 참조
 
 from __future__ import annotations
 
+import os
 from collections.abc import AsyncIterator, Iterator
 from typing import TYPE_CHECKING, Any
 
@@ -36,6 +37,100 @@ _EXTENSIONS: tuple[str, ...] = ("postgis", "pg_trgm", "pgcrypto")
 
 # Docker image (docs/test-strategy.md §4.1)
 _POSTGIS_IMAGE: str = "postgis/postgis:16-3.5-alpine"
+_TVN34_TEST_MIGRATOR_PASSWORD = "tvn34-test-only-migrator-password"
+
+
+async def _bootstrap_tvn34_migration_roles(engine: AsyncEngine) -> str:
+    """실 bootstrap와 같은 principal graph를 fresh test DB에 먼저 만든다.
+
+    0095는 restricted migrator가 state/audit routine owner membership을 스스로
+    부여하지 않는다는 것을 검증한다. 따라서 일반 ``alembic upgrade`` fixture도
+    deployment bootstrap와 같은 선행조건을 명시적으로 재현해야 한다. 이 helper는
+    disposable PostGIS DB에서만 호출되며 LOGIN password는 testcontainer 전용이다.
+    """
+    from sqlalchemy import text
+
+    async with engine.begin() as connection:
+        await connection.execute(
+            text(
+                """
+                DO $roles$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM pg_catalog.pg_roles
+                        WHERE rolname = 'ktm_feature_schema_owner'
+                    ) THEN
+                        CREATE ROLE ktm_feature_schema_owner NOLOGIN NOINHERIT;
+                    END IF;
+                    IF NOT EXISTS (
+                        SELECT 1 FROM pg_catalog.pg_roles
+                        WHERE rolname = 'ktm_feature_state_procedure_owner'
+                    ) THEN
+                        CREATE ROLE ktm_feature_state_procedure_owner NOLOGIN NOINHERIT;
+                    END IF;
+                    IF NOT EXISTS (
+                        SELECT 1 FROM pg_catalog.pg_roles
+                        WHERE rolname = 'ktm_feature_audit_writer'
+                    ) THEN
+                        CREATE ROLE ktm_feature_audit_writer NOLOGIN NOINHERIT;
+                    END IF;
+                    IF NOT EXISTS (
+                        SELECT 1 FROM pg_catalog.pg_roles
+                        WHERE rolname = 'ktm_feature_runtime'
+                    ) THEN
+                        CREATE ROLE ktm_feature_runtime NOLOGIN NOINHERIT;
+                    END IF;
+                    IF NOT EXISTS (
+                        SELECT 1 FROM pg_catalog.pg_roles
+                        WHERE rolname = 'ktm_feature_migrator'
+                    ) THEN
+                        CREATE ROLE ktm_feature_migrator LOGIN NOINHERIT
+                            NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS
+                            NOREPLICATION PASSWORD 'tvn34-test-only-migrator-password';
+                    END IF;
+                END
+                $roles$;
+                """
+            )
+        )
+        for statement in (
+            "ALTER ROLE ktm_feature_migrator LOGIN NOINHERIT "
+            "NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION "
+            "PASSWORD 'tvn34-test-only-migrator-password'",
+            "GRANT ktm_feature_schema_owner TO ktm_feature_migrator "
+            "WITH ADMIN FALSE, INHERIT FALSE, SET TRUE",
+            "GRANT ktm_feature_state_procedure_owner TO ktm_feature_schema_owner "
+            "WITH ADMIN FALSE, INHERIT FALSE, SET TRUE",
+            "GRANT ktm_feature_audit_writer TO ktm_feature_schema_owner "
+            "WITH ADMIN FALSE, INHERIT FALSE, SET TRUE",
+            "CREATE SCHEMA IF NOT EXISTS feature AUTHORIZATION ktm_feature_schema_owner",
+            "CREATE SCHEMA IF NOT EXISTS provider_sync AUTHORIZATION ktm_feature_schema_owner",
+            "CREATE SCHEMA IF NOT EXISTS ops AUTHORIZATION ktm_feature_schema_owner",
+            "CREATE SCHEMA IF NOT EXISTS x_extension AUTHORIZATION ktm_feature_schema_owner",
+            "GRANT USAGE, CREATE ON SCHEMA feature "
+            "TO ktm_feature_state_procedure_owner, ktm_feature_audit_writer",
+        ):
+            await connection.execute(text(statement))
+        # PostGIS image가 initdb에서 public에 둔 non-relocatable extension은
+        # application relation이 없는 fresh DB에서만 다시 만든다. 이것은 production
+        # bootstrap의 destructive-operation guard와 같은 fresh-only branch다.
+        await connection.execute(text("DROP EXTENSION IF EXISTS postgis_topology CASCADE"))
+        await connection.execute(text("DROP EXTENSION IF EXISTS postgis CASCADE"))
+        await connection.execute(text("CREATE EXTENSION postgis WITH SCHEMA x_extension"))
+        await connection.execute(
+            text("CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA x_extension")
+        )
+        await connection.execute(
+            text("CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA x_extension")
+        )
+        database_name = str(
+            (await connection.execute(text("SELECT current_database()"))).scalar_one()
+        )
+        quoted_database_name = '"' + database_name.replace('"', '""') + '"'
+        await connection.execute(
+            text(f"ALTER DATABASE {quoted_database_name} OWNER TO ktm_feature_schema_owner")
+        )
+    return _TVN34_TEST_MIGRATOR_PASSWORD
 
 
 def _import_testcontainers() -> Any | None:
@@ -172,18 +267,51 @@ async def migrated_engine(pg_container: Any) -> AsyncIterator[AsyncEngine]:
 
     from alembic.config import Config
     from sqlalchemy import event
+    from sqlalchemy.engine import make_url
 
     from alembic import command
     from kortravelmap.infra.db import make_async_engine, normalize_async_dsn
 
     raw_dsn = pg_container.get_connection_url()  # type: ignore[attr-defined]
     async_dsn = normalize_async_dsn(raw_dsn)
+    bootstrap_engine = make_async_engine(async_dsn, pool_size=1)
+    try:
+        migrator_password = await _bootstrap_tvn34_migration_roles(bootstrap_engine)
+    finally:
+        await bootstrap_engine.dispose()
+    migrator_dsn = make_url(async_dsn).set(
+        username="ktm_feature_migrator",
+        password=migrator_password,
+    )
 
     root = Path(__file__).resolve().parents[2]  # noqa: ASYNC240  # sync path-arith
     cfg = Config(str(root / "alembic.ini"))
     cfg.set_main_option("script_location", str(root / "alembic"))
-    cfg.set_main_option("sqlalchemy.url", async_dsn)
-    await asyncio.to_thread(command.upgrade, cfg, "head")
+    cfg.set_main_option("sqlalchemy.url", migrator_dsn.render_as_string(hide_password=False))
+    previous_role_mode = os.environ.get("KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE")
+    os.environ["KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE"] = "true"
+    try:
+        await asyncio.to_thread(command.upgrade, cfg, "head")
+    finally:
+        if previous_role_mode is None:
+            os.environ.pop("KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE", None)
+        else:
+            os.environ["KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE"] = previous_role_mode
+
+    # Production API entrypoint performs this immediately after Alembic while
+    # only the migrator DSN exists.  Keep the shared fixture on that executable
+    # path so runtime integration tests never obtain old bootstrap-owner ACLs.
+    from kortravelmap.infra.runtime_privileges import reconcile_runtime_privileges
+
+    previous_pg_dsn = os.environ.get("KOR_TRAVEL_MAP_PG_DSN")
+    os.environ["KOR_TRAVEL_MAP_PG_DSN"] = migrator_dsn.render_as_string(hide_password=False)
+    try:
+        await reconcile_runtime_privileges()
+    finally:
+        if previous_pg_dsn is None:
+            os.environ.pop("KOR_TRAVEL_MAP_PG_DSN", None)
+        else:
+            os.environ["KOR_TRAVEL_MAP_PG_DSN"] = previous_pg_dsn
 
     engine = make_async_engine(async_dsn)
 

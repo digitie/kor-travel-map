@@ -15,6 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 import kortravelmap.infra.db as db_module
 from kortravelmap.infra.db import (
+    _RUNTIME_DB_PRIVILEGE_SQL,
+    _runtime_db_privilege_problems,
     make_async_engine,
     make_async_session_factory,
     normalize_async_dsn,
@@ -130,6 +132,96 @@ def test_make_async_engine_passes_copied_server_settings(
 
     assert engine is sentinel
     assert captured["connect_args"] == {"server_settings": {"jit": "off"}}
+
+
+# -- ADR-090 runtime privilege preflight -----------------------------------
+
+
+def _runtime_privilege_row() -> dict[str, object]:
+    """정상 API runtime catalog receipt의 최소 모형."""
+
+    return {
+        "session_user": "ktm_feature_api_runtime",
+        "current_user": "ktm_feature_api_runtime",
+        "is_superuser": False,
+        "can_create_role": False,
+        "bypasses_rls": False,
+        "has_schema_owner_membership": False,
+        "can_set_schema_owner_role": False,
+        "can_set_runtime_group_role": False,
+        "can_create_in_feature_schema": False,
+        "can_execute_create_procedure": True,
+        "can_execute_transition_procedure": True,
+        "can_execute_provenance_procedure": True,
+        "can_execute_author_lifecycle_override_procedure": True,
+        "can_execute_revoke_lifecycle_override_procedure": True,
+        "can_execute_provider_version_procedure": True,
+        "can_execute_unintended_feature_procedure": False,
+        "can_insert_feature_directly": False,
+        "can_update_lifecycle_directly": False,
+        "can_update_publication_directly": False,
+        "can_update_quality_directly": False,
+        "can_mutate_transition_audit_directly": False,
+        "can_mutate_feature_overrides_directly": False,
+        "can_update_legacy_state_surrogate_directly": False,
+        "can_execute_audit_writer_directly": False,
+    }
+
+
+@pytest.mark.unit
+def test_runtime_privilege_preflight_requires_procedures_but_denies_direct_dml() -> None:
+    row = _runtime_privilege_row()
+
+    assert _runtime_db_privilege_problems(
+        row,
+        expected_login="ktm_feature_api_runtime",
+    ) == []
+
+    row["can_update_quality_directly"] = True
+    row["can_mutate_transition_audit_directly"] = True
+    row["can_mutate_feature_overrides_directly"] = True
+    row["can_update_legacy_state_surrogate_directly"] = True
+    row["can_execute_transition_procedure"] = False
+    row["can_execute_author_lifecycle_override_procedure"] = False
+    row["can_execute_provider_version_procedure"] = False
+    row["can_execute_unintended_feature_procedure"] = True
+    problems = _runtime_db_privilege_problems(
+        row,
+        expected_login="ktm_feature_api_runtime",
+    )
+
+    assert "runtime login must not UPDATE feature.features.quality_state directly" in problems
+    assert "runtime login must not mutate feature.feature_state_transitions directly" in problems
+    assert "runtime login must not mutate ops.feature_overrides directly" in problems
+    assert "runtime login must not UPDATE a legacy feature state surrogate directly" in problems
+    assert "runtime login must EXECUTE transition_feature_state" in problems
+    assert "runtime login must EXECUTE author_lifecycle_override" in problems
+    assert "runtime login must EXECUTE materialize_provider_feature_version" in problems
+    assert "runtime login must not EXECUTE an unintended feature procedure" in problems
+
+
+@pytest.mark.unit
+def test_runtime_privilege_query_uses_postgres_function_privilege_for_procedures() -> None:
+    """PG 16은 procedure도 ``has_function_privilege(...::regprocedure)``로 조회한다."""
+
+    rendered = str(_RUNTIME_DB_PRIVILEGE_SQL)
+    assert "has_function_privilege" in rendered
+    assert "has_procedure_privilege" not in rendered
+    assert "materialize_user_feature_change_provenance" in rendered
+    assert "author_lifecycle_override" in rendered
+    assert "revoke_lifecycle_override" in rendered
+    assert "materialize_provider_feature_version" in rendered
+    assert "can_execute_unintended_feature_procedure" in rendered
+    # audit INSERT/UPDATE/DELETE/TRUNCATE 중 어느 하나라도 새면 preflight가 막는다.
+    assert "'feature.feature_state_transitions', 'INSERT'" in rendered
+    assert "'feature.feature_state_transitions', 'UPDATE'" in rendered
+    assert "'feature.feature_state_transitions', 'DELETE'" in rendered
+    assert "'feature.feature_state_transitions', 'TRUNCATE'" in rendered
+    assert "'ops.feature_overrides', 'UPDATE'" in rendered
+    assert "'ops.feature_overrides', 'DELETE'" in rendered
+    # C final migration 뒤 legacy columns가 제거돼도 EXISTS가 false가 되어 같은
+    # preflight SQL을 유지한다. 남아 있을 때는 status/delete surrogate UPDATE를 막는다.
+    assert "can_update_legacy_state_surrogate_directly" in rendered
 
 
 # -- make_async_session_factory -------------------------------------------

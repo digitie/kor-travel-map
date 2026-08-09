@@ -45,6 +45,10 @@ def _get_engine() -> AsyncEngine:
     global _engine
     if _engine is None:
         settings = KorTravelMapSettings()
+        if settings.pg_dsn is None:
+            raise RuntimeError(
+                "KOR_TRAVEL_MAP_PG_DSN runtime DSN is required; no application DSN fallback exists"
+            )
         # bbox 지도 조회는 결과 50건을 찾는 실행은 수십 ms이지만, notice
         # 계보·weather 상관 subplan의 높은 추정 cost가 JIT를 켜 요청당
         # 수 초의 컴파일을 발생시켰다. 짧은 OLTP 요청만 수행하는 API

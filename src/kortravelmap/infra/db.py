@@ -28,8 +28,9 @@ Sprint 1 scope
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -41,6 +42,8 @@ if TYPE_CHECKING:
     from pydantic import SecretStr
 
 __all__ = [
+    "RuntimeDbPrivilegeBoundaryError",
+    "assert_runtime_db_privilege_boundary",
     "make_async_engine",
     "make_async_session_factory",
     "normalize_async_dsn",
@@ -49,6 +52,258 @@ __all__ = [
 
 _ASYNCPG_PREFIX: str = "postgresql+asyncpg://"
 """SQLAlchemy 2 async DSN scheme — asyncpg driver 강제."""
+
+
+class RuntimeDbPrivilegeBoundaryError(RuntimeError):
+    """실제 runtime DB session이 ADR-090 권한 경계를 벗어났을 때의 기동 오류."""
+
+
+_RUNTIME_DB_PRIVILEGE_SQL = text(
+    """
+    SELECT
+        session_user::text AS session_user,
+        current_user::text AS current_user,
+        runtime_role.rolsuper AS is_superuser,
+        runtime_role.rolcreaterole AS can_create_role,
+        runtime_role.rolbypassrls AS bypasses_rls,
+        pg_has_role(session_user, 'ktm_feature_schema_owner', 'member')
+            AS has_schema_owner_membership,
+        pg_has_role(session_user, 'ktm_feature_schema_owner', 'SET')
+            AS can_set_schema_owner_role,
+        pg_has_role(session_user, 'ktm_feature_runtime', 'SET')
+            AS can_set_runtime_group_role,
+        has_schema_privilege(session_user, 'feature', 'CREATE')
+            AS can_create_in_feature_schema,
+        -- PostgreSQL stores functions and procedures in pg_proc; the public
+        -- privilege inquiry is has_function_privilege even for a regprocedure.
+        has_function_privilege(
+            session_user,
+            'feature.create_feature_with_initial_state(jsonb,text,text,text,jsonb)'::regprocedure,
+            'EXECUTE'
+        ) AS can_execute_create_procedure,
+        has_function_privilege(
+            session_user,
+            'feature.transition_feature_state(text,text,text,text,bigint,jsonb)'::regprocedure,
+            'EXECUTE'
+        ) AS can_execute_transition_procedure,
+        has_function_privilege(
+            session_user,
+            'feature.materialize_user_feature_change_provenance(text,text,uuid,text,text,bigint)'::regprocedure,
+            'EXECUTE'
+        ) AS can_execute_provenance_procedure,
+        has_function_privilege(
+            session_user,
+            'feature.author_lifecycle_override(text,text,text,boolean,text,text,bigint)'::regprocedure,
+            'EXECUTE'
+        ) AS can_execute_author_lifecycle_override_procedure,
+        has_function_privilege(
+            session_user,
+            'feature.revoke_lifecycle_override(text,text,bigint)'::regprocedure,
+            'EXECUTE'
+        ) AS can_execute_revoke_lifecycle_override_procedure,
+        has_function_privilege(
+            session_user,
+            'feature.materialize_provider_feature_version(text)'::regprocedure,
+            'EXECUTE'
+        ) AS can_execute_provider_version_procedure,
+        EXISTS (
+            SELECT 1
+            FROM pg_catalog.pg_proc AS candidate_procedure
+            JOIN pg_catalog.pg_namespace AS candidate_schema
+              ON candidate_schema.oid = candidate_procedure.pronamespace
+            WHERE candidate_schema.nspname = 'feature'
+              AND candidate_procedure.prokind = 'p'
+              AND has_function_privilege(
+                    session_user,
+                    candidate_procedure.oid,
+                    'EXECUTE'
+              )
+              AND candidate_procedure.oid NOT IN (
+                    'feature.create_feature_with_initial_state(jsonb,text,text,text,jsonb)'::regprocedure,
+                    'feature.transition_feature_state(text,text,text,text,bigint,jsonb)'::regprocedure,
+                    'feature.materialize_user_feature_change_provenance(text,text,uuid,text,text,bigint)'::regprocedure,
+                    'feature.author_lifecycle_override(text,text,text,boolean,text,text,bigint)'::regprocedure,
+                    'feature.revoke_lifecycle_override(text,text,bigint)'::regprocedure,
+                    'feature.materialize_provider_feature_version(text)'::regprocedure
+              )
+        ) AS can_execute_unintended_feature_procedure,
+        has_table_privilege(session_user, 'feature.features', 'INSERT')
+            AS can_insert_feature_directly,
+        has_column_privilege(session_user, 'feature.features', 'lifecycle_state', 'UPDATE')
+            AS can_update_lifecycle_directly,
+        has_column_privilege(session_user, 'feature.features', 'publication_state', 'UPDATE')
+            AS can_update_publication_directly,
+        has_column_privilege(session_user, 'feature.features', 'quality_state', 'UPDATE')
+            AS can_update_quality_directly,
+        (
+            has_table_privilege(session_user, 'feature.feature_state_transitions', 'INSERT')
+            OR has_table_privilege(session_user, 'feature.feature_state_transitions', 'UPDATE')
+            OR has_table_privilege(session_user, 'feature.feature_state_transitions', 'DELETE')
+            OR has_table_privilege(session_user, 'feature.feature_state_transitions', 'TRUNCATE')
+        ) AS can_mutate_transition_audit_directly,
+        (
+            has_table_privilege(session_user, 'ops.feature_overrides', 'INSERT')
+            OR has_table_privilege(session_user, 'ops.feature_overrides', 'UPDATE')
+            OR has_table_privilege(session_user, 'ops.feature_overrides', 'DELETE')
+            OR has_table_privilege(session_user, 'ops.feature_overrides', 'TRUNCATE')
+        ) AS can_mutate_feature_overrides_directly,
+        EXISTS (
+            SELECT 1
+            FROM pg_catalog.pg_attribute AS legacy_column
+            JOIN pg_catalog.pg_class AS legacy_table
+                ON legacy_table.oid = legacy_column.attrelid
+            JOIN pg_catalog.pg_namespace AS legacy_schema
+                ON legacy_schema.oid = legacy_table.relnamespace
+            WHERE legacy_schema.nspname = 'feature'
+              AND legacy_table.relname = 'features'
+              AND legacy_column.attnum > 0
+              AND NOT legacy_column.attisdropped
+              AND legacy_column.attname IN (
+                    'status',
+                    'deleted_at',
+                    'user_deleted_at',
+                    'user_change_kind',
+                    'user_change_status',
+                    'user_change_request_id',
+                    'user_deleted_by',
+                    'user_change_reason'
+              )
+              AND has_column_privilege(
+                    session_user,
+                    legacy_column.attrelid,
+                    legacy_column.attname,
+                    'UPDATE'
+              )
+        ) AS can_update_legacy_state_surrogate_directly,
+        has_function_privilege(
+            session_user,
+            'feature.write_feature_state_transition()'::regprocedure,
+            'EXECUTE'
+        ) AS can_execute_audit_writer_directly
+    FROM pg_catalog.pg_roles AS runtime_role
+    WHERE runtime_role.rolname = session_user
+    """
+)
+
+
+def _runtime_db_privilege_problems(
+    row: Mapping[str, object],
+    *,
+    expected_login: str,
+) -> list[str]:
+    """catalog receipt 한 행을 사람이 읽을 수 있는 fail-closed 원인으로 바꾼다."""
+
+    problems: list[str] = []
+    if row.get("session_user") != expected_login:
+        problems.append(f"session_user must be {expected_login!r}")
+    if row.get("current_user") != row.get("session_user"):
+        problems.append("session_user and current_user must be identical")
+
+    forbidden_true_fields = {
+        "is_superuser": "runtime login must not be SUPERUSER",
+        "can_create_role": "runtime login must not have CREATEROLE",
+        "bypasses_rls": "runtime login must not have BYPASSRLS",
+        "has_schema_owner_membership": (
+            "runtime login must not be a ktm_feature_schema_owner member"
+        ),
+        "can_set_schema_owner_role": (
+            "runtime login must not SET ROLE ktm_feature_schema_owner"
+        ),
+        "can_set_runtime_group_role": (
+            "runtime login must not SET ROLE ktm_feature_runtime"
+        ),
+        "can_create_in_feature_schema": "runtime login must not CREATE in feature schema",
+        "can_execute_unintended_feature_procedure": (
+            "runtime login must not EXECUTE an unintended feature procedure"
+        ),
+        "can_insert_feature_directly": "runtime login must not INSERT feature.features directly",
+        "can_update_lifecycle_directly": (
+            "runtime login must not UPDATE feature.features.lifecycle_state directly"
+        ),
+        "can_update_publication_directly": (
+            "runtime login must not UPDATE feature.features.publication_state directly"
+        ),
+        "can_update_quality_directly": (
+            "runtime login must not UPDATE feature.features.quality_state directly"
+        ),
+        "can_mutate_transition_audit_directly": (
+            "runtime login must not mutate feature.feature_state_transitions directly"
+        ),
+        "can_mutate_feature_overrides_directly": (
+            "runtime login must not mutate ops.feature_overrides directly"
+        ),
+        "can_update_legacy_state_surrogate_directly": (
+            "runtime login must not UPDATE a legacy feature state surrogate directly"
+        ),
+        "can_execute_audit_writer_directly": (
+            "runtime login must not EXECUTE the audit writer function directly"
+        ),
+    }
+    for field_name, message in forbidden_true_fields.items():
+        if row.get(field_name) is not False:
+            problems.append(message)
+
+    required_true_fields = {
+        "can_execute_create_procedure": (
+            "runtime login must EXECUTE create_feature_with_initial_state"
+        ),
+        "can_execute_transition_procedure": (
+            "runtime login must EXECUTE transition_feature_state"
+        ),
+        "can_execute_provenance_procedure": (
+            "runtime login must EXECUTE materialize_user_feature_change_provenance"
+        ),
+        "can_execute_author_lifecycle_override_procedure": (
+            "runtime login must EXECUTE author_lifecycle_override"
+        ),
+        "can_execute_revoke_lifecycle_override_procedure": (
+            "runtime login must EXECUTE revoke_lifecycle_override"
+        ),
+        "can_execute_provider_version_procedure": (
+            "runtime login must EXECUTE materialize_provider_feature_version"
+        ),
+    }
+    for field_name, message in required_true_fields.items():
+        if row.get(field_name) is not True:
+            problems.append(message)
+    return problems
+
+
+async def assert_runtime_db_privilege_boundary(
+    engine: AsyncEngine,
+    *,
+    expected_login: str,
+) -> None:
+    """runtime DSN으로 ADR-090 procedure-only DB 권한 경계를 실제로 검증한다.
+
+    이 검사는 migration/bootstrap role이 아닌 API·Dagster runtime login에서만 호출한다.
+    catalog object나 state procedure가 누락된 DB도 안전한 "실패"로 다뤄 기동을 막는다.
+    """
+
+    try:
+        async with engine.connect() as connection:
+            row = (await connection.execute(_RUNTIME_DB_PRIVILEGE_SQL)).mappings().one_or_none()
+    except Exception as exc:  # noqa: BLE001 - catalog/preflight 실패는 원인과 함께 기동 차단
+        raise RuntimeDbPrivilegeBoundaryError(
+            "runtime DB privilege preflight could not read the ADR-090 catalog boundary"
+        ) from exc
+
+    if row is None:
+        raise RuntimeDbPrivilegeBoundaryError(
+            "runtime DB privilege preflight could not resolve session_user in pg_roles"
+        )
+
+    # ``mappings()`` has string aliases in the query above; SQLAlchemy exposes
+    # them as the wider ``RowMapping`` protocol, so retain that catalog contract
+    # explicitly at this boundary.
+    problems = _runtime_db_privilege_problems(
+        cast(Mapping[str, object], row),
+        expected_login=expected_login,
+    )
+    if problems:
+        raise RuntimeDbPrivilegeBoundaryError(
+            "runtime DB privilege preflight failed: " + "; ".join(problems)
+        )
 
 
 def normalize_async_dsn(dsn: str) -> str:

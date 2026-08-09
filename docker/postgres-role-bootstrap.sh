@@ -1,0 +1,301 @@
+#!/usr/bin/env sh
+# T-VN-34A / ADR-090 — dedicated kor-travel-map DB principal bootstrap.
+#
+# This script deliberately runs only with an explicitly confirmed *dedicated*
+# database admin connection.  It is never part of normal API/Dagster startup
+# and it never accepts a shared server as an implicit target.
+set -eu
+
+require_value() {
+  name="$1"
+  eval "value=\${$name:-}"
+  if [ -z "$value" ]; then
+    echo "$name is required" >&2
+    exit 1
+  fi
+}
+
+require_identifier() {
+  name="$1"
+  eval "value=\${$name:-}"
+  case "$value" in
+    [A-Za-z_]* ) ;;
+    *)
+      echo "$name must be a PostgreSQL identifier" >&2
+      exit 1
+      ;;
+  esac
+  case "$value" in
+    *[!A-Za-z0-9_]* )
+      echo "$name must be a PostgreSQL identifier" >&2
+      exit 1
+      ;;
+  esac
+}
+
+if [ "${KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_ENABLED:-false}" != "true" ]; then
+  echo "KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_ENABLED=true is required" >&2
+  exit 1
+fi
+require_value KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN
+require_value KOR_TRAVEL_MAP_MIGRATOR_PASSWORD
+require_value KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD
+require_value KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD
+require_identifier KOR_TRAVEL_MAP_POSTGRES_DB
+require_identifier KOR_TRAVEL_MAP_POSTGRES_USER
+
+# An operator must repeat the exact target name.  This stops an accidental
+# `docker compose up` from transferring ownership on an arbitrary server DB.
+if [ "${KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_CONFIRM_DATABASE:-}" \
+  != "$KOR_TRAVEL_MAP_POSTGRES_DB" ]; then
+  echo "KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_CONFIRM_DATABASE must equal KOR_TRAVEL_MAP_POSTGRES_DB" >&2
+  exit 1
+fi
+
+actual_database="$(psql "$KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN" -Atqc 'SELECT current_database()')"
+actual_role="$(psql "$KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN" -Atqc 'SELECT current_user')"
+is_superuser="$(psql "$KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN" -Atqc 'SELECT rolsuper FROM pg_catalog.pg_roles WHERE rolname = current_user')"
+if [ "$actual_database" != "$KOR_TRAVEL_MAP_POSTGRES_DB" ]; then
+  echo "bootstrap DSN database does not match KOR_TRAVEL_MAP_POSTGRES_DB" >&2
+  exit 1
+fi
+if [ "$actual_role" != "$KOR_TRAVEL_MAP_POSTGRES_USER" ]; then
+  echo "bootstrap DSN role does not match KOR_TRAVEL_MAP_POSTGRES_USER" >&2
+  exit 1
+fi
+if [ "$is_superuser" != "t" ]; then
+  echo "bootstrap DSN must use the dedicated DB superuser" >&2
+  exit 1
+fi
+
+# psql variables keep passwords out of SQL source and repo files.  PostgreSQL
+# stores only its password verifier; Alembic revisions never create a LOGIN or
+# password.
+psql "$KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN" \
+  -v ON_ERROR_STOP=1 \
+  -v bootstrap_role="$KOR_TRAVEL_MAP_POSTGRES_USER" \
+  -v migrator_password="$KOR_TRAVEL_MAP_MIGRATOR_PASSWORD" \
+  -v api_runtime_password="$KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD" \
+  -v dagster_runtime_password="$KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD" <<'SQL'
+DO $roles$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'ktm_feature_schema_owner') THEN
+        CREATE ROLE ktm_feature_schema_owner NOLOGIN NOINHERIT;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'ktm_feature_state_procedure_owner') THEN
+        CREATE ROLE ktm_feature_state_procedure_owner NOLOGIN NOINHERIT;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'ktm_feature_audit_writer') THEN
+        CREATE ROLE ktm_feature_audit_writer NOLOGIN NOINHERIT;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'ktm_feature_runtime') THEN
+        CREATE ROLE ktm_feature_runtime NOLOGIN NOINHERIT;
+    END IF;
+END
+$roles$;
+
+-- ``ktm_feature_migrator``는 superuser가 아니다. PostgreSQL 16/PostGIS extension
+-- 설치와 application schema 준비는 dedicated bootstrap connection에서만 한다.
+-- fresh postgis image가 public에 자동 설치한 non-relocatable extension은 relocation을
+-- 지원하지 않는다. application relation이 하나도 없는 fresh DB에서만 다시 만들 수 있고,
+-- populated DB가 그런 상태면 destructive drop 없이 fail-closed 한다.
+CREATE SCHEMA IF NOT EXISTS feature AUTHORIZATION ktm_feature_schema_owner;
+CREATE SCHEMA IF NOT EXISTS provider_sync AUTHORIZATION ktm_feature_schema_owner;
+CREATE SCHEMA IF NOT EXISTS ops AUTHORIZATION ktm_feature_schema_owner;
+CREATE SCHEMA IF NOT EXISTS x_extension AUTHORIZATION ktm_feature_schema_owner;
+DO $postgis_schema$
+DECLARE
+    v_postgis_schema text;
+    v_has_application_relation boolean;
+BEGIN
+    SELECT n.nspname
+      INTO v_postgis_schema
+      FROM pg_catalog.pg_extension AS e
+      JOIN pg_catalog.pg_namespace AS n ON n.oid = e.extnamespace
+     WHERE e.extname = 'postgis';
+    SELECT EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_class AS c
+        JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace
+        WHERE n.nspname IN ('feature', 'provider_sync', 'ops')
+          AND c.relkind IN ('r', 'p', 'v', 'm', 'S', 'f')
+    ) INTO v_has_application_relation;
+    IF v_postgis_schema IS NOT NULL
+       AND v_postgis_schema <> 'x_extension' THEN
+        IF v_has_application_relation THEN
+            RAISE EXCEPTION
+                'bootstrap refuses to replace postgis in schema % on a populated application DB',
+                v_postgis_schema
+                USING ERRCODE = '55000',
+                      HINT = 'Move/rebuild the extension during a dedicated maintenance migration before role bootstrap.';
+        END IF;
+        EXECUTE 'DROP EXTENSION IF EXISTS postgis_topology CASCADE';
+        EXECUTE 'DROP EXTENSION postgis CASCADE';
+    END IF;
+END
+$postgis_schema$;
+CREATE EXTENSION IF NOT EXISTS postgis WITH SCHEMA x_extension;
+CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA x_extension;
+CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA x_extension;
+
+SELECT format(
+    'CREATE ROLE %I LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION',
+    'ktm_feature_migrator'
+)
+WHERE NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'ktm_feature_migrator')
+\gexec
+SELECT format(
+    'CREATE ROLE %I LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION',
+    'ktm_feature_api_runtime'
+)
+WHERE NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'ktm_feature_api_runtime')
+\gexec
+SELECT format(
+    'CREATE ROLE %I LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION',
+    'ktm_feature_dagster_runtime'
+)
+WHERE NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'ktm_feature_dagster_runtime')
+\gexec
+
+SELECT format(
+    'ALTER ROLE %I LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION PASSWORD %L',
+    'ktm_feature_migrator',
+    :'migrator_password'
+)
+\gexec
+SELECT format(
+    'ALTER ROLE %I LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION PASSWORD %L',
+    'ktm_feature_api_runtime',
+    :'api_runtime_password'
+)
+\gexec
+SELECT format(
+    'ALTER ROLE %I LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION PASSWORD %L',
+    'ktm_feature_dagster_runtime',
+    :'dagster_runtime_password'
+)
+\gexec
+
+-- PostgreSQL 16 membership options are part of the trust boundary: runtime
+-- principals inherit table/procedure grants but may not SET ROLE into groups.
+GRANT ktm_feature_schema_owner TO ktm_feature_migrator
+    WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
+GRANT ktm_feature_runtime TO ktm_feature_api_runtime
+    WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
+GRANT ktm_feature_runtime TO ktm_feature_dagster_runtime
+    WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
+GRANT ktm_feature_state_procedure_owner TO ktm_feature_schema_owner
+    WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
+GRANT ktm_feature_audit_writer TO ktm_feature_schema_owner
+    WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
+-- 0095 transfers SECURITY DEFINER routines to these NOLOGIN owners. PostgreSQL
+-- requires the target owner to hold CREATE on the containing schema during
+-- ``ALTER FUNCTION/PROCEDURE ... OWNER``; neither role can authenticate and
+-- runtime memberships never allow SET ROLE into either owner group.
+GRANT USAGE, CREATE ON SCHEMA feature
+    TO ktm_feature_state_procedure_owner, ktm_feature_audit_writer;
+
+DO $assert_roles$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_roles
+        WHERE rolname IN ('ktm_feature_api_runtime', 'ktm_feature_dagster_runtime')
+          AND (NOT rolcanlogin OR rolsuper OR rolcreaterole OR rolbypassrls)
+    ) THEN
+        RAISE EXCEPTION 'runtime login has an unsafe role attribute';
+    END IF;
+    IF EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_roles
+        WHERE rolname = 'ktm_feature_migrator'
+          AND (NOT rolcanlogin OR rolsuper OR rolcreaterole OR rolbypassrls)
+    ) THEN
+        RAISE EXCEPTION 'migrator login has an unsafe role attribute';
+    END IF;
+    IF pg_has_role('ktm_feature_api_runtime', 'ktm_feature_schema_owner', 'member')
+       OR pg_has_role('ktm_feature_dagster_runtime', 'ktm_feature_schema_owner', 'member') THEN
+        RAISE EXCEPTION 'runtime login must not belong to ktm_feature_schema_owner';
+    END IF;
+END
+$assert_roles$;
+
+-- ``REASSIGN OWNED BY`` cannot be used for the initial PostgreSQL superuser:
+-- it owns required pg_catalog/information_schema objects. Transfer *only* the
+-- application DB/object namespace instead, never cluster-wide system ownership.
+-- This script is never enabled by external/shared compose overlays.
+ALTER DATABASE :"DBNAME" OWNER TO ktm_feature_schema_owner;
+
+SELECT format('ALTER SCHEMA %I OWNER TO ktm_feature_schema_owner', nspname)
+FROM pg_catalog.pg_namespace
+WHERE nspname IN ('feature', 'provider_sync', 'ops', 'x_extension')
+\gexec
+
+SELECT format(
+    'ALTER %s %I.%I OWNER TO ktm_feature_schema_owner',
+    CASE relkind
+        WHEN 'r' THEN 'TABLE'
+        WHEN 'p' THEN 'TABLE'
+        WHEN 'v' THEN 'VIEW'
+        WHEN 'm' THEN 'MATERIALIZED VIEW'
+        WHEN 'S' THEN 'SEQUENCE'
+        WHEN 'f' THEN 'FOREIGN TABLE'
+    END,
+    nspname,
+    relname
+)
+FROM pg_catalog.pg_class
+JOIN pg_catalog.pg_namespace ON pg_namespace.oid = pg_class.relnamespace
+WHERE nspname IN ('feature', 'provider_sync', 'ops')
+  AND relkind IN ('r', 'p', 'v', 'm', 'S', 'f')
+\gexec
+
+SELECT format(
+    'ALTER %s %I.%I(%s) OWNER TO ktm_feature_schema_owner',
+    CASE prokind
+        WHEN 'p' THEN 'PROCEDURE'
+        WHEN 'a' THEN 'AGGREGATE'
+        ELSE 'FUNCTION'
+    END,
+    nspname,
+    proname,
+    pg_get_function_identity_arguments(pg_proc.oid)
+)
+FROM pg_catalog.pg_proc
+JOIN pg_catalog.pg_namespace ON pg_namespace.oid = pg_proc.pronamespace
+WHERE nspname IN ('feature', 'provider_sync', 'ops')
+\gexec
+
+SELECT format('ALTER TYPE %I.%I OWNER TO ktm_feature_schema_owner', nspname, typname)
+FROM pg_catalog.pg_type
+JOIN pg_catalog.pg_namespace ON pg_namespace.oid = pg_type.typnamespace
+WHERE nspname IN ('feature', 'provider_sync', 'ops')
+  AND typtype IN ('b', 'c', 'd', 'e', 'r')
+  AND typelem = 0
+  AND typrelid = 0
+\gexec
+
+-- Ownership transfer removes old table ACLs. Do not restore them with
+-- ``ON ALL TABLES`` or default privileges: feature contains the procedure-only
+-- state/audit fence, and a later relation must never silently become mutable by
+-- API/Dagster. The migrator runs an explicit inventory reconciler post-Alembic.
+GRANT USAGE ON SCHEMA feature, provider_sync, ops TO ktm_feature_runtime;
+REVOKE ALL ON ALL TABLES IN SCHEMA feature, provider_sync, ops
+    FROM ktm_feature_runtime;
+REVOKE ALL ON ALL SEQUENCES IN SCHEMA feature, provider_sync, ops
+    FROM ktm_feature_runtime;
+ALTER DEFAULT PRIVILEGES FOR ROLE ktm_feature_schema_owner IN SCHEMA feature
+    REVOKE ALL ON TABLES FROM ktm_feature_runtime;
+ALTER DEFAULT PRIVILEGES FOR ROLE ktm_feature_schema_owner IN SCHEMA provider_sync
+    REVOKE ALL ON TABLES FROM ktm_feature_runtime;
+ALTER DEFAULT PRIVILEGES FOR ROLE ktm_feature_schema_owner IN SCHEMA ops
+    REVOKE ALL ON TABLES FROM ktm_feature_runtime;
+ALTER DEFAULT PRIVILEGES FOR ROLE ktm_feature_schema_owner IN SCHEMA feature
+    REVOKE ALL ON SEQUENCES FROM ktm_feature_runtime;
+ALTER DEFAULT PRIVILEGES FOR ROLE ktm_feature_schema_owner IN SCHEMA provider_sync
+    REVOKE ALL ON SEQUENCES FROM ktm_feature_runtime;
+ALTER DEFAULT PRIVILEGES FOR ROLE ktm_feature_schema_owner IN SCHEMA ops
+    REVOKE ALL ON SEQUENCES FROM ktm_feature_runtime;
+SQL
+
+echo "kor-travel-map dedicated DB role bootstrap completed for $KOR_TRAVEL_MAP_POSTGRES_DB"

@@ -254,6 +254,14 @@ if [ "${KOR_TRAVEL_MAP_MIGRATION_MODE+x}" = "x" ]; then
   exit 1
 fi
 
+# T-VN-34A (ADR-090) — Alembic은 migrator LOGIN으로만 접속한 뒤 NOLOGIN schema
+# owner role을 migration connection 수명 동안 활성화한다. API process에는 같은 DSN을 남기지 않고 runtime
+# LOGIN DSN만 전달한다. 두 DSN을 한 값으로 대체하는 fallback은 권한 경계를 지운다.
+migrator_dsn="${KOR_TRAVEL_MAP_MIGRATOR_PG_DSN:?KOR_TRAVEL_MAP_MIGRATOR_PG_DSN is required}"
+runtime_dsn="${KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN:?KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN is required}"
+export KOR_TRAVEL_MAP_PG_DSN="$migrator_dsn"
+export KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE=true
+
 # set-but-empty는 거부한다 — 위 profile 검사와 같은 규약이다. compose `${HOST:-}`
 # 패턴에서 host env 누락이 조용한 게이트 해제가 되면 안 된다.
 if [ "${KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD+x}" = "x" ]; then
@@ -323,6 +331,19 @@ while ! alembic upgrade head; do
   attempt=$((attempt + 1))
   sleep "$sleep_seconds"
 done
+
+# Ownership transfer strips legacy bootstrap ACLs.  Rebuild the closed runtime
+# inventory with the migrator-only SET ROLE path before this shell discards its
+# credential; default privileges are intentionally not used for feature state
+# or audit objects.
+python -m kortravelmap.infra.runtime_privileges
+
+# Uvicorn과 그 자식에는 runtime credential만 남긴다. migration credential은
+# application code·request handler가 읽을 수 없게 exec 직전에 제거한다.
+export KOR_TRAVEL_MAP_PG_DSN="$runtime_dsn"
+unset KOR_TRAVEL_MAP_MIGRATOR_PG_DSN
+unset KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN
+unset KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE
 
 exec python -m uvicorn kortravelmap.api.app:app \
   --host 0.0.0.0 \
