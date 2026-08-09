@@ -42,6 +42,7 @@ from kortravelmap.core.offline_upload_states import (
     OFFLINE_UPLOAD_WRITEABLE_FORMATS,
     OfflineUploadState,
 )
+from kortravelmap.core.sync_scope import parse_canonical_sync_scope
 from kortravelmap.geocoding import (
     KorTravelGeoRestClient,
     kor_travel_geo_address_resolver,
@@ -66,6 +67,7 @@ from kortravelmap.infra.jobs_repo import get_import_job
 from kortravelmap.infra.offline_upload_repo import (
     OfflineUpload,
     OfflineUploadPage,
+    OfflineUploadScopeOperationUnresolved,
     OfflineUploadStatusConflict,
     delete_offline_upload,
     finalize_offline_upload_reservation,
@@ -820,6 +822,13 @@ async def create_offline_upload_request(
     settings = _kor_travel_map_settings_from_request(request)
     max_bytes = settings.offline_upload_max_bytes
     _guard_upload_content_length(request, max_bytes=max_bytes)
+    # `sync_scope`가 canonical인지 먼저 본다. 관리 UI 폼 기본값이 한동안
+    # `"default"`였는데 그건 canonical scope가 아니라, 아래 operation 해석이
+    # `0 operations`로 죽고 catch-all이 500을 냈다. 형식 오류는 형식 오류로 답한다.
+    try:
+        parse_canonical_sync_scope(sync_scope)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     filename = _safe_filename(file.filename)
     detected_format = _detected_format(filename)
     if detected_format not in OFFLINE_UPLOAD_WRITEABLE_FORMATS:
@@ -916,6 +925,20 @@ async def create_offline_upload_request(
                     )
                 raise _duplicate_upload_conflict(duplicate)
             write_object = True
+        except OfflineUploadScopeOperationUnresolved as exc:
+            # 실행 identity는 triple인데 업로드 표면에는 operation 입력이 없다.
+            # 그래서 scope가 정확히 하나의 operation으로 풀리지 않으면 서버가 결박할
+            # 대상을 정할 수 없다 — 운영자가 손쓸 수 있도록 무엇이 문제인지 말한다.
+            # 실측: 74개 dataset 중 18개가 refresh operation scope를 하나도 갖지 않아
+            # 이 경로로 온다(2개 이상인 경우는 현재 0건).
+            detail = (
+                "이 dataset/scope에는 실행 가능한 refresh operation이 없어 업로드를 "
+                "결박할 수 없습니다. 카탈로그에 operation scope를 먼저 등록하세요."
+                if exc.resolved == 0
+                else "이 dataset/scope에 operation이 여러 개라 업로드가 어느 실행에 "
+                "결박될지 정할 수 없습니다."
+            )
+            raise HTTPException(status_code=409, detail=detail) from exc
         except domain_command_service.DomainCommandPending as pending:
             command = domain_command_service.DomainCommandHandle(
                 command_id=pending.claim.command_id,

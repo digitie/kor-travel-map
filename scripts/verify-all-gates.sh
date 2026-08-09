@@ -92,12 +92,14 @@ host_py() { ( cd "$ROOT" && eval "$1" ); }
 doctor_on_native_fs() {
   MSYS_NO_PATHCONV=1 wsl -e bash -lc "
     set -e
-    rm -rf /tmp/ktm-doctor && mkdir -p /tmp/ktm-doctor
+    rm -rf /tmp/ktm-gate && mkdir -p /tmp/ktm-gate/frontend
     cd $WSL_ROOT/$ADMIN
-    tar -cf - --exclude=node_modules --exclude=.next --exclude=.react-doctor .       | (cd /tmp/ktm-doctor && tar -xf -)
-    ln -sfn $WSL_ROOT/node_modules /tmp/ktm-doctor/node_modules
-    cd /tmp/ktm-doctor
-    $WSL_ROOT/node_modules/.bin/react-doctor --scope full --no-score --no-telemetry       --no-respect-inline-disables --blocking warning .
+    tar -cf - --exclude=node_modules --exclude=.next --exclude=.react-doctor .       | (cd /tmp/ktm-gate/frontend && tar -xf -)
+    ln -sfn $WSL_ROOT/node_modules /tmp/ktm-gate/frontend/node_modules
+    # CI와 **같은 npm script**를 돌린다(플래그가 갈라지지 않게). 사본 경로가
+    # `frontend`로 끝나므로 감사기가 이 실행문을 그대로 식별한다 — 주석으로
+    # 식별시키던 앞 판은 실행문을 지워도 감사기가 침묵하는 구멍이었다.
+    cd /tmp/ktm-gate/frontend && $NPM run doctor
   "
 }
 
@@ -136,9 +138,6 @@ run_gate "verify:react-doctor-config" repo "$NPM run verify:react-doctor-config"
 # WSL 네이티브 fs 사본 = "No issues found!" 2분 3초. CI는 네이티브 Linux fs다.
 # 그래서 네이티브 fs로 복사해 돌린다 — 안 그러면 이 게이트가 로컬에서 늘 red라
 # 사람이 무시하게 되고, 그러면 게이트가 없는 것과 같다.
-# 감사기(test_gate_script_mirrors_ci)가 이 게이트를 식별할 수 있도록 CI의
-# `-w <admin> run doctor` 형태를 주석으로 남긴다 — 실행은 아래 헬퍼가 한다.
-#   CI 원본: $NPM -w $ADMIN run doctor
 run_gate "admin react-doctor" doctor_on_native_fs
 run_gate "verify:next-sharp"       repo "$NPM run verify:next-sharp"
 run_gate "admin gen:types:check"   repo "$NPM -w $ADMIN run gen:types:check"

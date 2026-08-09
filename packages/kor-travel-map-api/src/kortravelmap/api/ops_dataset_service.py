@@ -999,16 +999,23 @@ async def load_dataset_detail(
             sync_scope=canonical_scope,
         )
     )
+    # `canonical_url`이 `operation_key`를 실으므로 **이 page도 같은 filter로** 만들어야
+    # 한다. 축이 어긋나면 클라이언트가 embedded 첫 page의 `next_cursor`를
+    # `canonical_url`에 붙였을 때 cursor fingerprint 불일치로 422가 난다 —
+    # `_run_history_url` docstring이 금지한 바로 그것이다. 그리고 첫 page와 "전체
+    # 목록"의 내용이 달라진다.
     executions_page = await list_pipeline_executions(
         session,
         provider_dataset_id=provider_dataset_id,
         dataset_sync_scopes=history_sync_scopes,
+        dataset_operation_key=operation_key,
         limit=_RECENT_RUNS_LIMIT,
     )
     events_page = await list_ops_import_job_events(
         session,
         provider_dataset_id=provider_dataset_id,
         sync_scope=event_sync_scope,
+        operation_key=operation_key,
         limit=_RECENT_EVENTS_LIMIT,
     )
     issue_counts = await count_open_integrity_issues_by_dataset(

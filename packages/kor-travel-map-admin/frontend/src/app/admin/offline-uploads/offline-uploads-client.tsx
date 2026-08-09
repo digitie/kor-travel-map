@@ -564,7 +564,9 @@ function UploadFormPanel({
 }) {
   const [file, setFile] = useState<File | null>(null);
   const [providerDatasetId, setProviderDatasetId] = useState("");
-  const [syncScope, setSyncScope] = useState("default");
+  // canonical scope만 서버가 받는다. `"default"`는 canonical이 아니라 422다
+  // (예전 기본값이었고, 그 상태로 올리면 operation 해석이 실패해 500이 났다).
+  const [syncScope, setSyncScope] = useState("dataset_wide");
   const createUpload = useCreateOfflineUploadMutation();
   const datasetsQuery = useOpsDatasetCatalog();
   const providerDatasetOptions = useMemo(() => {

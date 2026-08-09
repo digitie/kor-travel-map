@@ -64,11 +64,28 @@ def _blocking_workflows() -> list[Path]:
     (적대 리뷰 변이 G).
     """
 
+    candidates = sorted(
+        [*_WORKFLOW_DIR.glob("*.yml"), *_WORKFLOW_DIR.glob("*.yaml")]
+    )
     found: list[Path] = []
-    for path in sorted(_WORKFLOW_DIR.glob("*.yml")):
-        header = path.read_text(encoding="utf-8").split("jobs:", 1)[0]
-        if any(f"{trigger}:" in header for trigger in _BLOCKING_TRIGGERS):
+    reusable: set[str] = set()
+    for path in candidates:
+        text = path.read_text(encoding="utf-8")
+        header = text.split("jobs:", 1)[0]
+        # `on: pull_request:` 뿐 아니라 `on: [push, pull_request]` 배열도 차단이다.
+        if any(
+            re.search(rf"(?<![A-Za-z_]){trigger}(?![A-Za-z_])", header)
+            for trigger in _BLOCKING_TRIGGERS
+        ):
             found.append(path)
+            # 차단 워크플로가 job-level `uses:`로 부르는 재사용 워크플로도 차단이다.
+            reusable.update(
+                re.findall(r"uses:\s*\./\.github/workflows/([\w.-]+)", text)
+            )
+    for name in sorted(reusable):
+        target = _WORKFLOW_DIR / name
+        if target.exists() and target not in found:
+            found.append(target)
     return found
 
 
@@ -83,6 +100,11 @@ def _step_commands(lines: list[str], begin: int, stop: int) -> list[str]:
     if any(re.match(r"^\s*if:\s*false\s*$", entry) for entry in block):
         return []
     commands: list[str] = []
+    for entry in block:
+        # 로컬 composite action은 임의의 명령을 돌린다 — `run:`만 보면 안 보인다.
+        local_action = re.match(r"^\s*(?:- )?uses:\s*(\./[\w./-]+)\s*$", entry)
+        if local_action is not None:
+            commands.append(f"uses {local_action.group(1)}")
     for offset, entry in enumerate(block):
         run = re.match(r"^(\s*)(?:- )?run: (.*)$", entry)
         if run is None:
@@ -140,6 +162,11 @@ def _workflow_commands() -> dict[str, list[str]]:
 
 
 def _is_exempt(command: str) -> bool:
+    if command.startswith("uses ./"):
+        # 로컬 composite action은 저장소 안의 임의 명령을 돌린다 — 게이트다.
+        # 마켓플레이스 액션 면제 키(`actions/`)가 `./.github/actions/...` 경로에도
+        # 부분문자열로 걸려 함께 면제되던 구멍을 막는다(변이 M8).
+        return False
     return any(marker in command for marker in _EXEMPT)
 
 
@@ -157,6 +184,17 @@ def _identifying_fragments(command: str) -> list[str] | None:
         if workspace is not None:
             fragments.append(workspace.group(1).rsplit("/", 1)[-1])
         return fragments
+    if command.startswith("uses "):
+        return [command.split(maxsplit=1)[1]]
+    if "export_openapi.py" in command:
+        # `--check`가 빠지면 검사가 아니라 재작성이 된다 — 로컬이 drift를 만들고도
+        # 통과한다. **이 분기는 아래 일반 script 분기보다 먼저 와야 한다** —
+        # 순서가 뒤바뀌면 경로만 조각이 되어 플래그 drift를 놓친다(변이 N6).
+        fragments = ["export_openapi.py"]
+        fragments.extend(
+            flag for flag in ("--check", "--profile all") if flag in command
+        )
+        return fragments
     script_call = re.search(r"(scripts/[\w./-]+\.py)", command)
     if script_call is not None:
         return [script_call.group(1)]
@@ -169,15 +207,36 @@ def _identifying_fragments(command: str) -> list[str] | None:
             fragments.append(f"--cov-fail-under={gate.group(1)}")
         return fragments
     if command.startswith("ruff check"):
-        return ["ruff check"]
+        # 경로를 전부 요구한다. `ruff check` 하나만 보면 로컬이 7경로 중 1개로
+        # 좁혀도 통과한다(적대 리뷰 7라운드 변이 N3).
+        return ["ruff check", *command.split()[2:]]
     mypy = re.search(r"mypy --strict -p ([\w.]+)", command)
     if mypy is not None:
-        return [f"-p {mypy.group(1)}"]
+        # `--strict`를 조각에 넣는다. 빼면 로컬이 느슨한 mypy로 통과한다(변이 N4).
+        return ["--strict", f"-p {mypy.group(1)}"]
     if "lint_imports_command" in command:
         return ["lint_imports_command"]
-    if "export_openapi.py" in command:
-        return ["export_openapi.py"]
     return None
+
+
+def _contains_token(line: str, fragment: str) -> str | None:
+    """조각이 **토큰 경계에서** 나타나는지 본다.
+
+    단순 부분문자열이면 조각을 서로 빌려준다 — `-p kortravelmap`이
+    `-p kortravelmap.api` 줄에도 매치돼 `mypy core` 게이트를 지워도 감사기가
+    침묵했다(적대 리뷰 7라운드). 조각 뒤에 식별자 문자가 이어지면 다른 대상이다.
+    """
+
+    start = 0
+    while True:
+        index = line.find(fragment, start)
+        if index < 0:
+            return None
+        after = index + len(fragment)
+        trailing = line[after : after + 1]
+        if trailing not in {".", "-", "_", "/", ":"} and not trailing.isalnum():
+            return line
+        start = after
 
 
 def _expanded_script_lines() -> list[str]:
@@ -189,16 +248,76 @@ def _expanded_script_lines() -> list[str]:
     """
 
     text = _SCRIPT.read_text(encoding="utf-8")
-    assignments = dict(
-        re.findall(r'^([A-Z_]+)="([^"]*)"$', text, flags=re.M)
-    )
-    lines = text.splitlines()
-    expanded: list[str] = []
-    for line in lines:
+    assignments = dict(re.findall(r'^([A-Z_]+)="([^"]*)"$', text, flags=re.M))
+    logical: list[str] = []
+    pending: list[str] = []
+    for line in text.splitlines():
+        # **주석은 증거가 아니다.** 실행문을 지우고 같은 문자열을 주석으로 남기면
+        # 게이트가 사라져도 감사기가 침묵한다 — 실제로 커밋 5235c910이 그렇게 해서
+        # react-doctor 게이트를 주석만으로 통과시켰고, 적대 리뷰 7라운드가 잡았다.
+        if line.lstrip().startswith("#"):
+            continue
         for name, value in assignments.items():
             line = line.replace(f"${name}", value)
-        expanded.append(line)
-    return expanded
+        # 줄바꿈 이어쓰기(`\`)는 한 논리 줄이다. 안 이으면 이어진 쪽 조각이
+        # `run_gate` 호출과 떨어져, 아래 도달성 판정에서 사라진다.
+        if line.rstrip().endswith("\\"):
+            pending.append(line.rstrip()[:-1])
+            continue
+        logical.append(" ".join([*pending, line]) if pending else line)
+        pending = []
+    if pending:
+        logical.append(" ".join(pending))
+    return logical
+
+
+def _gate_lines() -> list[str]:
+    """**``run_gate``로 실제 실행되는** 줄만 돌려준다.
+
+    스크립트 어딘가에 조각이 있기만 하면 되는 판정은 약하다 — 실행문을 지워도
+    헬퍼 함수 본문이나 주석에 같은 문자열이 남아 감사기가 침묵한다(변이 M7:
+    ``run_gate "admin react-doctor" doctor_on_native_fs``를 지워도
+    ``doctor_on_native_fs`` 본문의 ``run doctor``가 조각을 대신 만족시켰다).
+
+    그래서 도달성을 본다: ``run_gate`` 호출 줄, 그리고 그 줄이 **이름으로 부르는**
+    함수의 본문만 증거로 인정한다. 아무도 부르지 않는 함수는 죽은 코드다.
+    """
+
+    logical = _expanded_script_lines()
+    bodies: dict[str, list[str]] = {}
+    current: str | None = None
+    for line in logical:
+        define = re.match(r"^(\w+)\(\)\s*\{", line)
+        if define is not None:
+            current = define.group(1)
+            bodies[current] = []
+            continue
+        if current is not None:
+            if line.startswith("}"):
+                current = None
+            else:
+                bodies[current].append(line)
+    gate_lines: list[str] = []
+    for line in logical:
+        if not line.lstrip().startswith("run_gate"):
+            continue
+        gate_lines.append(line)
+        seen: set[str] = set()
+        queue = [name for name in bodies if _contains_token(line, name)]
+        while queue:
+            name = queue.pop()
+            if name in seen:
+                continue
+            seen.add(name)
+            gate_lines.extend(bodies[name])
+            queue.extend(
+                other
+                for body in [bodies[name]]
+                for entry in body
+                for other in bodies
+                if other not in seen and _contains_token(entry, other)
+            )
+    return gate_lines
 
 
 def test_gate_script_covers_every_ci_blocking_command() -> None:
@@ -211,7 +330,7 @@ def test_gate_script_covers_every_ci_blocking_command() -> None:
     # 조각을 파일 전체에서 따로 찾으면 안 된다 — admin과 user-client의 게이트가
     # 서로의 조각을 빌려줘, 스크립트가 둘 중 하나를 지워도 통과한다(변이 J·K).
     # **한 줄에 모두** 있어야 그 게이트가 실재하는 것이다.
-    script_lines = _expanded_script_lines()
+    script_lines = _gate_lines()
     missing: list[str] = []
     unrecognized: list[str] = []
     for workflow, commands in _workflow_commands().items():
@@ -225,7 +344,7 @@ def test_gate_script_covers_every_ci_blocking_command() -> None:
                 unrecognized.append(f"{workflow}: {command[:90]}")
                 continue
             if not any(
-                all(fragment in line for fragment in fragments)
+                all(_contains_token(line, fragment) for fragment in fragments)
                 for line in script_lines
             ):
                 missing.append(f"{workflow}: {command[:80]} (조각 {fragments})")
@@ -248,6 +367,24 @@ def test_blocking_workflows_are_discovered_not_hardcoded() -> None:
     assert {"ci.yml", "lint.yml", "openapi.yml", "frontend.yml"} <= names
     # workflow_dispatch 전용은 PR을 막지 않으므로 미러링 대상이 아니다.
     assert "postgis-only.yml" not in names
+
+
+def test_gate_sources_have_no_invisible_control_characters() -> None:
+    """감사기·게이트 스크립트에 보이지 않는 제어문자가 없어야 한다.
+
+    2026-08-09에 같은 사고를 두 번 냈다 — 셸 헤어독으로 파일을 고치면서 정규식
+    `\b`(단어 경계)가 **백스페이스 문자(0x08)로 들어갔다**. 눈으로도 diff로도
+    보이지 않고 패턴만 조용히 무력화된다. 첫 번째는 제어 흐름 감지를, 두 번째는
+    차단 워크플로 판정을 통째로 죽였다(둘 다 "잡아야 할 것을 안 잡는" 방향이다).
+
+    탭과 개행만 허용한다.
+    """
+
+    allowed = {0x09, 0x0A, 0x0D}
+    for path in (Path(__file__), _SCRIPT, _ROOT / "scripts" / "audit-mutation-battery.py"):
+        raw = path.read_bytes()
+        bad = sorted({byte for byte in raw if byte < 0x20 and byte not in allowed})
+        assert bad == [], f"{path.name}에 제어문자 {[hex(b) for b in bad]}"
 
 
 def test_exempt_entries_state_a_reason() -> None:

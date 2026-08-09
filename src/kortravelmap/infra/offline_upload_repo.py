@@ -122,7 +122,19 @@ class OfflineUploadPage:
 
 
 class OfflineUploadScopeOperationUnresolved(ValueError):
-    """scope가 정확히 하나의 operation으로 해석되지 않는다."""
+    """scope가 정확히 하나의 operation으로 해석되지 않는다.
+
+    도달하는 경우는 두 가지이고 **0개 쪽이 흔하다**: 실측 74개 dataset 중 18개가
+    ``provider_dataset_operation_scopes`` 행을 하나도 갖지 않는다(refresh operation이
+    없는 dataset). 2개 이상인 경우는 현재 카탈로그에 0건이다.
+
+    호출자가 운영자에게 무엇을 고쳐야 하는지 말할 수 있도록 개수를 들고 간다 —
+    이 값이 없으면 라우터가 "알 수 없는 오류"밖에 못 낸다.
+    """
+
+    def __init__(self, message: str, *, resolved: int) -> None:
+        super().__init__(message)
+        self.resolved = resolved
 
 
 class OfflineUploadStatusConflict(ValueError):
@@ -451,7 +463,8 @@ async def _resolve_scope_operation_key(
     if len(keys) != 1:
         raise OfflineUploadScopeOperationUnresolved(
             f"offline upload scope resolves to {len(keys)} operations "
-            f"(provider_dataset_id={provider_dataset_id}, sync_scope={sync_scope!r})"
+            f"(provider_dataset_id={provider_dataset_id}, sync_scope={sync_scope!r})",
+            resolved=len(keys),
         )
     return str(keys[0])
 

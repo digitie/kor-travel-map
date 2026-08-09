@@ -24,11 +24,24 @@ H   스텝의 자기 가드(``if [ -d … ]``) 제거
 I   coverage 임계 drift
 J·K 게이트 스크립트가 자기 게이트를 삭제
 L   게이트 스크립트가 integration 게이트를 삭제
+M5  ``on: [push, pull_request]`` 배열 트리거 워크플로
+M6  ``.yaml`` 확장자 워크플로
+M7  실행문을 지우고 같은 문자열을 **주석으로만** 남김
+M8  ``uses: ./.github/actions/…`` 로컬 composite action 스텝
+M9  게이트를 **아무도 부르지 않는 함수**로 옮김
+N1  다른 게이트에 조각을 빌려주는 게이트 삭제(``mypy core``)
+N3  ``ruff check`` 경로 축소
+N4  ``mypy --strict``에서 ``--strict`` 제거
+N6  ``export_openapi.py``에서 ``--check`` 제거
 ==  ====================================================
+
+M5~N6은 7라운드 적대 리뷰가 설계한 것으로 **전부 생존했었다** — 감사기가 통과하는
+것과 감사기가 유효한 것은 다른 문제다.
 """
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 import sys
@@ -133,6 +146,57 @@ MUTATIONS: dict[str, tuple[str, Callable[[str], str] | None]] = {
         "__script__",
         _drop_script_lines("tests/integration", "pytest integration"),
     ),
+    # --- 7라운드 적대 리뷰가 설계한 변이 (전부 생존했었다) ---
+    "M7 실행문 지우고 주석만 남기기": (
+        "__script__",
+        lambda text: text.replace(
+            'run_gate "admin react-doctor" doctor_on_native_fs',
+            '#   CI 원본: $NPM -w $ADMIN run doctor',
+            1,
+        ),
+    ),
+    "N1 mypy core 게이트 삭제(조각 빌려주기)": (
+        "__script__",
+        _drop_script_lines('run_gate "mypy core"'),
+    ),
+    "N3 ruff 경로 축소": (
+        "__script__",
+        lambda text: re.sub(
+            r"python -m ruff check src tests [^']*", "python -m ruff check src", text, count=1
+        ),
+    ),
+    "N4 mypy --strict 제거": (
+        "__script__",
+        lambda text: text.replace(
+            "python -m mypy --strict -p kortravelmap.api",
+            "python -m mypy -p kortravelmap.api",
+            1,
+        ),
+    ),
+    "N6 openapi --check 제거": (
+        "__script__",
+        lambda text: text.replace(
+            "export_openapi.py --profile all --check", "export_openapi.py --profile all", 1
+        ),
+    ),
+    # 도달성 판정 자체를 겨냥한다 — 게이트를 아무도 부르지 않는 함수로 옮기면
+    # 조각은 파일에 남지만 실행되지 않는다.
+    "M9 죽은 함수로 게이트 이동": (
+        "__script__",
+        lambda text: text.replace(
+            'run_gate "verify:next-sharp"       repo "$NPM run verify:next-sharp"',
+            'dead_helper() {\n  repo "$NPM run verify:next-sharp"\n}',
+            1,
+        ),
+    ),
+    "M5 배열 트리거 워크플로": ("__array_trigger__", None),
+    "M6 .yaml 확장자 워크플로": ("__yaml_ext__", None),
+    "M8 composite action 스텝": (
+        "frontend.yml",
+        _insert_before_node_step(
+            "      - name: fake gate\n        uses: ./.github/actions/fake-gate-m8"
+        ),
+    ),
 }
 
 
@@ -144,6 +208,17 @@ def _run(label: str, target: str, mutate: Callable[[str], str] | None) -> bool:
 
     if target == "__new__":
         (WORK / ".github/workflows/security.yml").write_text(
+            _NEW_WORKFLOW, encoding="utf-8"
+        )
+    elif target == "__array_trigger__":
+        (WORK / ".github/workflows/security2.yml").write_text(
+            _NEW_WORKFLOW.replace(
+                "on:\n  pull_request:\n", "on: [push, pull_request]\n"
+            ),
+            encoding="utf-8",
+        )
+    elif target == "__yaml_ext__":
+        (WORK / ".github/workflows/security3.yaml").write_text(
             _NEW_WORKFLOW, encoding="utf-8"
         )
     else:
