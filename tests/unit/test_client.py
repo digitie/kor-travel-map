@@ -229,7 +229,7 @@ async def test_features_nearby_target_delegates_to_repo(
     assert recorded["radius_km"] == 2.0
     assert recorded["sort"] == "name"
     assert recorded["limit"] == 20
-    assert recorded["statuses"] == ("active",)
+    assert "statuses" not in recorded
 
 
 async def test_features_nearby_coord_delegates_to_repo(
@@ -252,7 +252,7 @@ async def test_features_nearby_coord_delegates_to_repo(
     assert recorded["lat"] == 37.5
     assert recorded["radius_m"] == 1500.0
     assert recorded["sort"] == "distance"
-    assert recorded["statuses"] == ("active",)
+    assert "statuses" not in recorded
 
 
 async def test_list_poi_cache_target_coords_delegates_exact_system_filter(
