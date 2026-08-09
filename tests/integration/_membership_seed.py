@@ -53,3 +53,21 @@ async def memberships_for_operation(
             f"시드에 operation_key={operation_key!r}의 refresh scope가 없다"
         )
     return memberships if limit is None else memberships[:limit]
+
+
+#: Dagster run tag key. 프로덕션 상수를 그대로 읽는다 — 테스트가 자기 사본을 들면
+#: 태그 이름이 갈려도 조용히 통과한다.
+def launch_tags(*, operation_key: str, trigger_kind: str = "schedule") -> dict[str, str]:
+    """예전 ``feature_operation_launch_tags``의 대체.
+
+    T-VN-33 전에는 registry가 job 이름에서 identity와 tag를 만들었다. 지금은 DB의
+    ``operation_key``가 정본이고 Dagster tag는 그 key만 나른다 — 그래서 이 헬퍼는
+    registry를 부르지 않고 key를 그대로 싣는다.
+    """
+
+    from kortravelmap.dagster.feature_operation_sensors import (
+        _OPERATION_KEY_TAG,
+        _TRIGGER_KIND_TAG,
+    )
+
+    return {_OPERATION_KEY_TAG: operation_key, _TRIGGER_KIND_TAG: trigger_kind}

@@ -758,3 +758,98 @@ frontend         9종 OK                 (audit·eslint·react-doctor·gen:types
 integration 합산 coverage(job 간 아티팩트 전달), Playwright e2e(n150 전용).
 셋 다 게이트 스크립트 머리말에 적혀 있다.
 ```
+
+## 적대 리뷰 9라운드 (2026-08-09) — 리뷰어 2명 모두 REJECT
+
+### 51. (BLOCKER) "32/32 변이 검출"은 측정이 아니라 상수였다
+
+`scripts/audit-mutation-battery.py`가 `/tmp` 사본에 `pyproject.toml`을 넣지 않아,
+8라운드에 추가한 `test_documented_integration_coverage_threshold_matches_pyproject`가
+**변이와 무관하게** FileNotFoundError로 죽었다. `caught = returncode != 0`이므로
+모든 변이가 무조건 "잡음"이었다.
+
+```
+통제군(변이 없음) 실행:
+  FAILED test_documented_integration_coverage_threshold_matches_pyproject
+  1 failed, 6 passed
+
+즉 내가 머지 근거로 인용한 32/32는 감사기가 무엇을 하든 나오는 숫자였다.
+이 저장소가 여덟 번 반려된 결함(선언한 검증 범위 != 실제 검증 범위)이 그 결함을
+막으려고 만든 장치 안에 있었다.
+
+고침 두 겹: (1) 통제군을 배터리 안에 넣어 하네스가 깨지면 스스로 죽게 하고,
+(2) 배터리를 `tests/unit/test_gate_mutation_battery.py`로 게이트에 걸었다 —
+아무도 안 돌리는 도구의 출력은 검증이 아니다.
+```
+
+하네스를 고치고 다시 재니 리뷰어가 설계한 18종 중 **15종이 생존**했다. 부류와 고침:
+
+```
+실패 불가화   파이프로 exit code 삼키기 / `FAILED+=` 회계 제거 / 최종 exit 1->0 /
+              실행자 py->echo 치환 / 복사 실패 삼킴 되돌리기
+              => run_gate 호출 줄 전용 검사 + 실행자 화이트리스트 + 회계/종료 단언
+CI 스텝 삭제  vitest·eslint·mypy 스텝 제거, continue-on-error
+              => 역방향 감사(로컬 게이트에 CI 대응물이 있는가) + continue-on-error 금지
+pytest 축소   --ignore / -k (경로 조각은 남으므로 원리적으로 안 보였다)
+면제 밀수     `;` / `||` / 가드 블록 뒤 (`&&`만 갈라 놓고 "닫았다"고 적었다)
+geo probe     제거해도 침묵 => 사전 probe와 사후 단언을 **따로** 요구
+최종 48/48, 통제군 통과.
+```
+
+### 52. (HIGH) capability가 카탈로그를 무시하고 pair 시대 값을 박고 있었다
+
+`_scope_refresh_capability`가 `allowed_sync_scopes=["target_grids"]`를 하드코딩해,
+시드가 만든 `dataset_wide` membership(KMA 3종)을 같은 API가 "현재 활성 target에
+포함되지 않은 sync scope입니다"라는 **거짓 사유로** 거부했다. 같은 triple을
+`POST /ops/pipeline/requests`는 그대로 받는다 — 한 응답 안에서 정본과 투영이
+모순한다. `entry.refresh_scopes`(DB 선언)에서 유도하도록 고쳤다.
+
+### 53. (HIGH) offline upload이 canonical write 축을 사전순으로 골랐다
+
+8라운드에 "고정 기본값 `dataset_wide` -> 422"를 고치면서 `scopeOptions[0]`으로
+바꿨는데, 그건 422를 **조용한 오적재**로 바꾼 것이다(방향이 반대다). scope가
+유일할 때만 자동, 둘 이상이면 운영자가 고르게 했다.
+
+### 54. (HIGH) 미리보기 신선도 지문에 operation 축이 빠졌다
+
+8라운드에 넣은 request-dialog operation select가 `formInputKey`에 없어, A로
+미리보기를 돌린 뒤 B로 바꿔도 **A의 결과가 B의 것처럼** 계속 렌더됐다. 축을
+하나 늘리면서 그 축을 읽는 파생 상태를 갱신하지 않은 것이다.
+
+### 55. (HIGH) 실행 타임라인 fail-open 필터 / (MEDIUM) 이벤트 repo fail-open
+
+타임라인은 세 축이 다 차지 않으면 `provider_dataset_id`까지 버려 **전 시스템의
+모든 실행**을 보여줬다(좁히는 실패가 아니라 넓히는 실패). `list_ops_import_job_events`도
+`operation_key`를 cursor 지문에는 넣고 WHERE에는 안 넣는 분기가 있었다 — `sync_scope`는
+fail-close하는데 축 하나만 규칙이 달랐다. 둘 다 닫았다.
+
+### 56. (BLOCKER, 부분 해소) WIP 커밋이 지운 통합 회귀 47건
+
+`2e76b80c`(커밋 메시지 자체가 "do not merge")가 세 파일에서 5,038줄을 지웠고
+복원되지 않았다. 삭제된 test 함수를 저장소 전수 grep해 **0 hit**임을 확인했다 —
+이관이 아니라 소멸이다.
+
+```
+해소:
+  test_pipeline_cancellation_phase2.py   94줄 2건 -> 26 passed (복원 24 + 기존 2)
+    identity를 triple로 이식. 지어낸 자연키 `("provider","done")`는 이제 만들 수
+    없으므로(FK가 provider_dataset_operation_scopes를 참조) 시드에서 고른다
+    (`tests/integration/_membership_seed.py`, 13 membership을 묶는
+    feature_place_mcst_culture_job).
+
+  test_ops_datasets_api_projection.py    거짓 표면 제거
+    남아 있던 25줄은 DB를 전혀 건드리지 않으면서 `@pytest.mark.integration`과
+    "membership을 넘긴다는 회귀" docstring을 달고 있었다 — projection이 전부
+    틀려도 초록이다. 이름·위치·마커를 실제로 하는 일에 맞춰
+    `tests/unit/test_ops_dataset_service_signature_contract.py`로 옮겼다.
+
+미해소(추적 대상):
+  test_canonical_provider_operations.py  121줄 2건 <- main 2227줄 27건
+    27건 중 18건은 이름 치환 + 시드 membership으로 이식 가능함을 확인했고(수집
+    22건 성공), 9건은 registry tag/identity 메커니즘 자체가 교체돼(
+    `feature_operation_definition_tags`/`resolve_feature_operation_identity`/
+    `resolve_feature_operation_launch` 삭제, DB operation_key 태그로 대체)
+    **주제를 다시 정의해야** 한다. 남은 작업은 25곳의
+    `ProviderDatasetOperationMembership(...)` 생성부를 DB 유도로 바꾸는 것이다.
+  test_ops_datasets_api_projection.py    main 992줄 1건(REST 교차 통합)
+```
