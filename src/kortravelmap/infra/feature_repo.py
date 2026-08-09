@@ -405,7 +405,7 @@ RETURNING (xmax = 0) AS inserted
 # T-VN-35D(ADR-086) — ``detail``/``geom``은 core 컬럼이 아니라 **view가 subtype
 # 5종에서 조립한 결과**다. 따라서 이 projection을 쓰는 read는 base table이 아니라
 # ``features_detailed``(전체) / ``public_features``(공개 gate = 같은 조립 위에
-# status·deleted_at 술어)를 조회한다. 응답 shape은 종전과 동일하다.
+# lifecycle/publication/quality 술어)를 조회한다. 응답 shape은 종전과 동일하다.
 _FEATURE_ROW_COLUMNS_SQL: Final[str] = """
     feature_id, CAST(feature_uuid AS text) AS feature_uuid, kind, name, category,
     x_extension.ST_X(coord) AS lon, x_extension.ST_Y(coord) AS lat,
@@ -437,8 +437,8 @@ WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
 """
 
 # 공개 단건/batch — ADR-067 단일 공개 projection(``feature.public_features``,
-# alembic 0059)만 조회한다. 술어(status='active' AND deleted_at IS NULL)는
-# VIEW 한 곳에만 정의되어 있고 여기서는 재구현하지 않는다.
+# alembic 0096)만 조회한다. 3축 공개 술어(active/published/valid)는 VIEW 한 곳에만
+# 정의되어 있고 여기서는 재구현하지 않는다.
 _GET_PUBLIC_FEATURE_SQL: Final[str] = f"""
 SELECT {_FEATURE_ROW_COLUMNS_SQL}
 FROM feature.public_features
@@ -1033,10 +1033,10 @@ def _frozen_h35_ended_notice_hidden_sql(feature_alias: str) -> str:
 _PUBLIC_ACTIVE_NOTICE_FILTER_SQL: Final[str] = public_active_notice_filter_sql("f")
 
 
-# service batch는 공개 payload와 base-table 상태 판정을 한 snapshot에서 읽는다.
-# ``feature.public_features``가 payload의 유일한 출처이고 base row는 state와
-# ``row_revision``만 제공한다(ADR-067). notice 종료/계보 감산도 다른 공개 read와
-# 같은 fragment를 사용한다.
+# service batch는 공개 payload와 base-table lifecycle 판정을 한 snapshot에서 읽는다.
+# ``feature.public_features``가 payload의 유일한 출처이고 base row는 존재·lifecycle
+# state와 ``row_revision``만 제공한다(ADR-067). notice 종료/계보 감산도 다른 공개
+# read와 같은 fragment를 사용한다.
 _SERVICE_FEATURE_BATCH_SQL: Final[str] = f"""
 WITH requested AS (
     SELECT
@@ -1053,7 +1053,7 @@ SELECT
     CAST(base.feature_uuid AS text) AS feature_uuid,
     CASE
       WHEN base.feature_id IS NULL THEN 'missing'
-      WHEN base.deleted_at IS NOT NULL OR base.status = 'deleted' THEN 'retired'
+      WHEN base.lifecycle_state = 'retired' THEN 'retired'
       WHEN visible.feature_id IS NULL THEN 'suppressed'
       WHEN requested.known_row_revision = visible.row_revision THEN 'unchanged'
       ELSE 'found'
@@ -1237,8 +1237,8 @@ LIMIT 1
 
 # bbox 조회 — ADR-012: 입력 bbox는 4326, GIST(coord) 인덱스 사용. 공개 여부는
 # ADR-067 단일 projection(``feature.public_features``)이 결정한다 — 이 파일의
-# 공개 read SQL은 술어를 재구현하지 않는다. view 술어가 ``deleted_at IS NULL``을
-# 함의하므로 partial GiST 인덱스는 그대로 사용된다.
+# 공개 read SQL은 술어를 재구현하지 않는다. view의 3축 공개 predicate와 일치하는
+# partial index가 이 hot path를 받는다.
 # kinds 필터는 NULL이면 전체 (asyncpg ARRAY 바인딩). 경량 표현(좌표 + 표시 메타).
 _CURRENT_MAP_SUMMARY_CTES: Final[str] = """
 price_points AS (
@@ -1779,10 +1779,6 @@ candidates AS (
         OR f.category = ANY(CAST(:categories AS text[]))
       )
       AND (
-        CAST(:statuses AS text[]) IS NULL
-        OR f.status = ANY(CAST(:statuses AS text[]))
-      )
-      AND (
         CAST(:providers AS text[]) IS NULL
         OR ps.provider = ANY(CAST(:providers AS text[]))
       )
@@ -1899,10 +1895,6 @@ candidates AS (
       AND (
         CAST(:categories AS text[]) IS NULL
         OR f.category = ANY(CAST(:categories AS text[]))
-      )
-      AND (
-        CAST(:statuses AS text[]) IS NULL
-        OR f.status = ANY(CAST(:statuses AS text[]))
       )
       AND (
         CAST(:providers AS text[]) IS NULL
@@ -4439,9 +4431,10 @@ async def get_public_feature_row(
 ) -> dict[str, Any] | None:
     """공개 feature 단건 조회 — ADR-067 ``feature.public_features`` projection.
 
-    공개 API 단건 상세가 사용한다. 비공개(draft/broken/hidden/inactive/soft-deleted)
-    row는 존재하지 않는 것으로 취급되어 ``None``을 반환한다 — 공개 술어는 VIEW
-    (alembic 0059) 한 곳에만 정의되어 있고 여기서 재구현하지 않는다(F-1 재발 방지).
+    공개 API 단건 상세가 사용한다. public view 밖(비공개 publication 또는
+    quarantined quality, retired lifecycle) row는 존재하지 않는 것으로 취급되어
+    ``None``을 반환한다 — 공개 술어는 VIEW(alembic 0096) 한 곳에만 정의되어 있고
+    여기서 재구현하지 않는다(F-1 재발 방지).
     row shape은 ``get_feature_row``와 동일하다. admin/감사용 raw read는 기존
     ``get_feature_row``를 그대로 사용한다.
     """
@@ -4792,7 +4785,7 @@ async def features_in_bbox(
 
     ADR-012 — 입력 bbox는 4326, ``coord``의 GIST 인덱스(``idx_features_coord_gist``)를
     사용하는 ``&&`` 연산. 공개 여부는 ADR-067 ``feature.public_features`` projection
-    (``status='active' AND deleted_at IS NULL``)이 결정한다. ``kinds``가
+    (active lifecycle + published publication + valid quality)이 결정한다. ``kinds``가
     ``None``이면 전체 kind. DTO 매핑은 상위(client) 책임 — 본 repo는 raw row만.
 
     **``include_geometry``는 직렬화(serialization)만 제어한다** (F-8 / ADR-073 D-9-3):
@@ -5433,9 +5426,8 @@ async def features_nearby_poi_cache_target(
     적용한다. 입력 좌표 변환이나 ``ST_Transform``은 WHERE 술어에 두지 않는다.
 
     공개 read이므로 ADR-067 ``feature.public_features`` projection 안에서만
-    조회한다. ``statuses``는 그 projection과 **교집합**으로만 동작한다 —
-    projection에는 ``status='active'`` row만 있으므로 active 외 값을 넘기면
-    빈 결과가 된다(비공개 status 노출 금지, F-1).
+    조회한다. ``statuses``는 T-VN-34C가 public API 계약에서 제거할 때까지 받는
+    폐기 예정 C 소유 인자이며, T-VN-34B부터 공개 membership에는 영향을 주지 않는다.
     """
     if sort not in _NEARBY_SQL_BY_SORT:
         raise ValueError("sort must be one of distance, name, last_updated_at")
@@ -5443,6 +5435,8 @@ async def features_nearby_poi_cache_target(
         raise ValueError("radius_km must be greater than 0")
     if limit <= 0:
         raise ValueError("limit must be greater than 0")
+    # T-VN-34C가 signature/DTO를 제거할 때까지 폐기 예정 input을 의도적으로 무시한다.
+    del statuses
 
     effective_limit = min(limit, 500)
     rows = (
@@ -5454,7 +5448,6 @@ async def features_nearby_poi_cache_target(
                     "radius_km": radius_km,
                     "kinds": _normalized_filter(kinds),
                     "categories": _normalized_filter(categories),
-                    "statuses": _normalized_filter(statuses),
                     "providers": _normalized_filter(providers),
                     "limit_plus_one": effective_limit + 1,
                     **_nearby_cursor_params(cursor, sort=sort),
@@ -5495,7 +5488,7 @@ async def features_nearby(
     cursor/정렬/응답 shape는 ``features_nearby_poi_cache_target``과 동일
     (``NearbyFeaturePage``). ``sort`` ∈ {distance, name, last_updated_at}.
     공개 read이므로 ADR-067 ``feature.public_features`` projection 안에서만
-    조회하고, ``statuses``는 projection과 교집합으로만 동작한다(위 함수와 동일).
+    조회한다. ``statuses``는 T-VN-34C가 제거할 때까지 남는 폐기 예정 no-op이다.
     """
     if sort not in _NEARBY_COORD_SQL_BY_SORT:
         raise ValueError("sort must be one of distance, name, last_updated_at")
@@ -5503,6 +5496,8 @@ async def features_nearby(
         raise ValueError("radius_m must be greater than 0")
     if limit <= 0:
         raise ValueError("limit must be greater than 0")
+    # T-VN-34C가 signature/DTO를 제거할 때까지 폐기 예정 input을 의도적으로 무시한다.
+    del statuses
 
     effective_limit = min(limit, 500)
     rows = (
@@ -5515,7 +5510,6 @@ async def features_nearby(
                     "radius_m": radius_m,
                     "kinds": _normalized_filter(kinds),
                     "categories": _normalized_filter(categories),
-                    "statuses": _normalized_filter(statuses),
                     "providers": _normalized_filter(providers),
                     "limit_plus_one": effective_limit + 1,
                     **_nearby_cursor_params(cursor, sort=sort),
@@ -5547,11 +5541,9 @@ async def category_feature_counts(session: AsyncSession) -> dict[str, int]:
     """category code → 공개 feature 수 (ADR-067 ``public_features`` projection).
 
     ``GET /categories?include_counts``(T-213f)에서 정적 카탈로그(144건)에 현재 DB
-    분포를 합쳐 보여주기 위한 집계. 공개 표면이므로 비공개(draft/broken/hidden/
-    inactive/soft-deleted) feature는 집계에 포함하지 않는다 — 과거의
-    ``active_only`` 스위치는 비공개 분포를 공개 counts로 노출했기에 제거됐다
-    (T-VN-04, F-1). 카탈로그에 없는(미지정/legacy) category code도 그대로
-    반환하므로 호출자가 카탈로그와 교차한다.
+    분포를 합쳐 보여주기 위한 집계. 공개 표면이므로 active/published/valid 이외의
+    3축 tuple은 집계에 포함하지 않는다. 카탈로그에 없는(미지정/legacy) category
+    code도 그대로 반환하므로 호출자가 카탈로그와 교차한다.
     """
     rows = (await session.execute(text(_CATEGORY_FEATURE_COUNTS_SQL))).all()
     return {str(row[0]): int(row[1]) for row in rows}
