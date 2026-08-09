@@ -1197,3 +1197,43 @@ CALL feature.create_feature_with_initial_state(
     '{"transition_kind":"initial","reason_code":"fixture_causation_ref","principal":"fixture:admin","causation_ref":{"forged":"object"}}'::jsonb,
     NULL, NULL, NULL
 );
+
+-- case: feature_route_public_ready_direct_update
+INSERT INTO feature.categories (kind, code) VALUES ('route', 'public-ready-fixture');
+INSERT INTO feature.features (
+    feature_id, kind, name, category_code,
+    lifecycle_state, publication_state, quality_state
+) VALUES (
+    '00000000-0000-0000-0000-000000000024', 'route', 'route public-ready 부모',
+    'public-ready-fixture', 'active', 'published', 'valid'
+);
+INSERT INTO feature.feature_routes (feature_id, kind, geom, anchor)
+VALUES (
+    '00000000-0000-0000-0000-000000000024', 'route',
+    x_extension.st_geomfromtext('MULTILINESTRING((126.97 37.56,126.98 37.57))', 4326),
+    x_extension.st_setsrid(x_extension.st_makepoint(126.975, 37.565), 4326)
+);
+SET ROLE ktm_feature_runtime;
+UPDATE feature.feature_routes
+SET public_ready = false
+WHERE feature_id = '00000000-0000-0000-0000-000000000024';
+
+-- case: feature_area_public_ready_direct_update
+INSERT INTO feature.categories (kind, code) VALUES ('area', 'public-ready-fixture');
+INSERT INTO feature.features (
+    feature_id, kind, name, category_code,
+    lifecycle_state, publication_state, quality_state
+) VALUES (
+    '00000000-0000-0000-0000-000000000025', 'area', 'area public-ready 부모',
+    'public-ready-fixture', 'active', 'published', 'valid'
+);
+INSERT INTO feature.feature_areas (feature_id, kind, geom, anchor)
+VALUES (
+    '00000000-0000-0000-0000-000000000025', 'area',
+    x_extension.st_geomfromtext('MULTIPOLYGON(((126.97 37.56,126.98 37.56,126.98 37.57,126.97 37.56)))', 4326),
+    x_extension.st_setsrid(x_extension.st_makepoint(126.975, 37.565), 4326)
+);
+SET ROLE ktm_feature_runtime;
+UPDATE feature.feature_areas
+SET public_ready = false
+WHERE feature_id = '00000000-0000-0000-0000-000000000025';

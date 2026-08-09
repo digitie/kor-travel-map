@@ -55,15 +55,66 @@ _FEATURE_TABLE_PRIVILEGES: Mapping[str, tuple[str, ...]] = {
     "current_price_summary": ("SELECT", "INSERT", "UPDATE", "DELETE"),
     "current_weather_summary": ("SELECT", "INSERT", "UPDATE", "DELETE"),
     "feature_aliases": ("SELECT",),
-    "feature_areas": ("SELECT", "INSERT", "UPDATE", "DELETE"),
     "feature_events": ("SELECT", "INSERT", "UPDATE", "DELETE"),
     "feature_notices": ("SELECT", "INSERT", "UPDATE", "DELETE"),
     "feature_places": ("SELECT", "INSERT", "UPDATE", "DELETE"),
     "feature_price_values": ("SELECT", "INSERT"),
-    "feature_routes": ("SELECT", "INSERT", "UPDATE", "DELETE"),
     "feature_weather_values": ("SELECT", "INSERT"),
     "weather_metric_series": ("SELECT", "INSERT", "UPDATE", "DELETE"),
 }
+
+# Route/area geometry is the sole cross-relation public index case.  Keep the
+# runtime grant column-scoped so it cannot make the DB-owned ``public_ready``
+# cache stale (T-VN-34B).  These tables intentionally do not use the broad
+# feature table inventory above.
+_ROUTE_AREA_RUNTIME_COLUMNS: Mapping[str, tuple[str, ...]] = {
+    "feature_routes": (
+        "feature_id",
+        "feature_uuid",
+        "kind",
+        "geom",
+        "route_type",
+        "geometry_source",
+        "geometry_status",
+        "total_distance_meters",
+        "expected_duration_minutes",
+        "difficulty",
+        "begin_name",
+        "begin_address",
+        "end_name",
+        "end_address",
+        "payload",
+    ),
+    "feature_areas": (
+        "feature_id",
+        "feature_uuid",
+        "kind",
+        "geom",
+        "area_kind",
+        "boundary_source",
+        "area_square_meters",
+        "regulation_scope",
+        "administrative_office",
+        "description",
+        "payload",
+    ),
+}
+
+_ROUTE_AREA_RUNTIME_GRANTS = tuple(
+    statement
+    for relation, columns in _ROUTE_AREA_RUNTIME_COLUMNS.items()
+    for statement in (
+        f"GRANT SELECT ON feature.{relation} TO ktm_feature_runtime",
+        f"GRANT INSERT ({', '.join(columns)}) ON feature.{relation} "
+        "TO ktm_feature_runtime",
+        f"GRANT UPDATE ({', '.join(columns)}) ON feature.{relation} "
+        "TO ktm_feature_runtime",
+        f"GRANT DELETE ON feature.{relation} TO ktm_feature_runtime",
+        f"GRANT SELECT (feature_id, public_ready), UPDATE (public_ready) "
+        f"ON feature.{relation} "
+        "TO ktm_feature_state_procedure_owner",
+    )
+)
 
 # Provider/ops schemas contain ordinary application data, not state/audit
 # evidence.  Existing repositories use their complete current table surface;
@@ -147,6 +198,13 @@ _AUDIT_WRITER_FUNCTION_ACL = (
     "FROM PUBLIC, ktm_feature_runtime",
 )
 
+_SUBTYPE_READY_FUNCTION_ACL = (
+    "REVOKE ALL ON FUNCTION feature.derive_subtype_public_ready() "
+    "FROM PUBLIC, ktm_feature_runtime",
+    "REVOKE ALL ON FUNCTION feature.sync_subtype_public_ready() "
+    "FROM PUBLIC, ktm_feature_runtime",
+)
+
 
 def _quote_identifier(value: str) -> str:
     """closed inventory name을 PostgreSQL identifier로 rendering한다."""
@@ -199,6 +257,8 @@ def _runtime_relation_grants(
             continue
         if schema == "feature":
             if relation in _PROTECTED_FEATURE_TABLES:
+                continue
+            if relation in _ROUTE_AREA_RUNTIME_COLUMNS:
                 continue
             privileges = _FEATURE_TABLE_PRIVILEGES.get(relation)
             if privileges is None:
@@ -259,12 +319,16 @@ async def reconcile_runtime_privileges() -> None:
                 await connection.execute(text(statement))
             for statement in _CORE_FEATURE_GRANTS:
                 await connection.execute(text(statement))
+            for statement in _ROUTE_AREA_RUNTIME_GRANTS:
+                await connection.execute(text(statement))
 
             # Routine ownership is deliberately split from table ownership.
             # The schema owner has SET-only membership in each NOLOGIN routine
             # owner; runtime identities never receive this path.
             await connection.execute(text("SET ROLE ktm_feature_state_procedure_owner"))
             for statement in _STATE_OWNER_FUNCTION_ACL:
+                await connection.execute(text(statement))
+            for statement in _SUBTYPE_READY_FUNCTION_ACL:
                 await connection.execute(text(statement))
             await connection.execute(text("SET ROLE ktm_feature_audit_writer"))
             for statement in _AUDIT_WRITER_FUNCTION_ACL:

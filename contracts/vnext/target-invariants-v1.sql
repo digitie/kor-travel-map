@@ -277,6 +277,32 @@ WHERE f.lifecycle_state = 'active'
       SELECT 1 FROM feature.public_features AS p WHERE p.feature_id = f.feature_id
   ); -- expect: 0 -- phase: both
 
+-- [INV-067-03] view가 core 3축을 만족하지 않는 행을 노출하지 않는다.
+SELECT count(*)
+FROM feature.public_features AS p
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM feature.features AS f
+    WHERE f.feature_id = p.feature_id
+      AND f.lifecycle_state = 'active'
+      AND f.publication_state = 'published'
+      AND f.quality_state = 'valid'
+); -- expect: 0 -- phase: both
+
+-- [INV-067-04] route/area의 public_ready cache는 core 정본 3축과 양방향 일치한다.
+SELECT count(*)
+FROM (
+    SELECT feature_id, public_ready FROM feature.feature_routes
+    UNION ALL
+    SELECT feature_id, public_ready FROM feature.feature_areas
+) AS subtype
+JOIN feature.features AS f ON f.feature_id = subtype.feature_id
+WHERE subtype.public_ready IS DISTINCT FROM (
+    f.lifecycle_state = 'active'
+    AND f.publication_state = 'published'
+    AND f.quality_state = 'valid'
+); -- expect: 0 -- phase: both
+
 -- -----------------------------------------------------------------------------
 -- ADR-070 — typed subtype (T-VN-35)
 -- -----------------------------------------------------------------------------

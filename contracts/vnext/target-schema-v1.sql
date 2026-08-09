@@ -381,6 +381,29 @@ CREATE INDEX idx_features_public_state
       AND publication_state = 'published'
       AND quality_state = 'valid';
 
+-- T-VN-34B: category/keyset/text hot paths도 공개 정본의 정확한 3축을 partial
+-- predicate로 직접 가진다. status/deleted_at 같은 legacy surrogate는 섞지 않는다.
+CREATE INDEX idx_features_public_kind_category
+    ON feature.features (kind, category_code)
+    WHERE lifecycle_state = 'active'
+      AND publication_state = 'published'
+      AND quality_state = 'valid';
+CREATE INDEX idx_features_public_updated_keyset
+    ON feature.features (updated_at DESC, feature_id DESC)
+    WHERE lifecycle_state = 'active'
+      AND publication_state = 'published'
+      AND quality_state = 'valid';
+CREATE INDEX idx_features_public_lower_name_keyset
+    ON feature.features (lower(name), feature_id)
+    WHERE lifecycle_state = 'active'
+      AND publication_state = 'published'
+      AND quality_state = 'valid';
+CREATE INDEX idx_features_public_name_trgm
+    ON feature.features USING gin (name x_extension.gin_trgm_ops)
+    WHERE lifecycle_state = 'active'
+      AND publication_state = 'published'
+      AND quality_state = 'valid';
+
 -- server-owned row_revision 강제 트리거 (현행 0062 정본 의미를 목표 상태에 유지).
 CREATE FUNCTION feature.force_features_row_revision()
 RETURNS trigger
@@ -995,6 +1018,9 @@ CREATE TABLE feature.feature_routes (
         GENERATED ALWAYS AS (x_extension.st_transform(geom, 5179)) STORED,
     -- 대표 좌표(anchor) — core 좌표와 geometry의 anchor 일치 CHECK 대상(ADR-070 결정 2)
     anchor x_extension.geometry(Point, 4326) NOT NULL,
+    -- 3축 core 상태에서만 계산되는 partial-GiST bridge. route/area 이외의
+    -- relation에는 이것과 같은 독립 공개 상태를 두지 않는다.
+    public_ready boolean NOT NULL DEFAULT false,
     CONSTRAINT pk_feature_routes PRIMARY KEY (feature_id),
     CONSTRAINT fk_feature_routes_feature FOREIGN KEY (feature_id, kind)
         REFERENCES feature.features (feature_id, kind) ON DELETE CASCADE,
@@ -1017,6 +1043,8 @@ CREATE TABLE feature.feature_areas (
     geom_5179 x_extension.geometry(MultiPolygon, 5179)
         GENERATED ALWAYS AS (x_extension.st_transform(geom, 5179)) STORED,
     anchor x_extension.geometry(Point, 4326) NOT NULL,
+    -- route와 같은 DB-owned projection cache (visibility 정본은 core 3축).
+    public_ready boolean NOT NULL DEFAULT false,
     CONSTRAINT pk_feature_areas PRIMARY KEY (feature_id),
     CONSTRAINT fk_feature_areas_feature FOREIGN KEY (feature_id, kind)
         REFERENCES feature.features (feature_id, kind) ON DELETE CASCADE,
@@ -1027,6 +1055,114 @@ CREATE TABLE feature.feature_areas (
         x_extension.st_intersects(x_extension.st_envelope(geom), anchor)
     )
 );
+
+-- route/area geometry와 core state는 서로 다른 relation에 있으므로 partial
+-- GiST는 join predicate를 직접 표현할 수 없다. subtype write는 parent row를
+-- 먼저 잠가 cache를 다시 계산하고, core axis update도 같은 lock을 유지한 채
+-- cache를 동기화한다. supplied public_ready는 항상 무시한다.
+CREATE FUNCTION feature.derive_subtype_public_ready()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $$
+DECLARE
+    v_lifecycle_state text;
+    v_publication_state text;
+    v_quality_state text;
+BEGIN
+    SELECT lifecycle_state, publication_state, quality_state
+      INTO v_lifecycle_state, v_publication_state, v_quality_state
+      FROM feature.features
+     WHERE feature_id = NEW.feature_id
+     FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'route/area public projection requires a parent feature'
+            USING ERRCODE = '23503', CONSTRAINT = 'fk_feature_subtype_public_ready_parent';
+    END IF;
+    NEW.public_ready := v_lifecycle_state = 'active'
+        AND v_publication_state = 'published'
+        AND v_quality_state = 'valid';
+    RETURN NEW;
+END;
+$$;
+
+CREATE FUNCTION feature.sync_subtype_public_ready()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $$
+DECLARE
+    v_public_ready boolean;
+BEGIN
+    v_public_ready := NEW.lifecycle_state = 'active'
+        AND NEW.publication_state = 'published'
+        AND NEW.quality_state = 'valid';
+    UPDATE feature.feature_routes
+       SET public_ready = v_public_ready
+     WHERE feature_id = NEW.feature_id
+       AND public_ready IS DISTINCT FROM v_public_ready;
+    UPDATE feature.feature_areas
+       SET public_ready = v_public_ready
+     WHERE feature_id = NEW.feature_id
+       AND public_ready IS DISTINCT FROM v_public_ready;
+    RETURN NULL;
+END;
+$$;
+
+ALTER FUNCTION feature.derive_subtype_public_ready()
+    OWNER TO ktm_feature_state_procedure_owner;
+ALTER FUNCTION feature.sync_subtype_public_ready()
+    OWNER TO ktm_feature_state_procedure_owner;
+
+CREATE TRIGGER trg_feature_routes_public_ready
+    BEFORE INSERT OR UPDATE ON feature.feature_routes
+    FOR EACH ROW EXECUTE FUNCTION feature.derive_subtype_public_ready();
+CREATE TRIGGER trg_feature_areas_public_ready
+    BEFORE INSERT OR UPDATE ON feature.feature_areas
+    FOR EACH ROW EXECUTE FUNCTION feature.derive_subtype_public_ready();
+CREATE TRIGGER trg_features_sync_subtype_public_ready
+    AFTER UPDATE OF lifecycle_state, publication_state, quality_state
+    ON feature.features FOR EACH ROW
+    WHEN (
+        OLD.lifecycle_state IS DISTINCT FROM NEW.lifecycle_state
+        OR OLD.publication_state IS DISTINCT FROM NEW.publication_state
+        OR OLD.quality_state IS DISTINCT FROM NEW.quality_state
+    )
+    EXECUTE FUNCTION feature.sync_subtype_public_ready();
+
+CREATE INDEX idx_feature_routes_geom_gist
+    ON feature.feature_routes USING gist (geom)
+    WHERE public_ready;
+CREATE INDEX idx_feature_areas_geom_gist
+    ON feature.feature_areas USING gist (geom)
+    WHERE public_ready;
+
+-- Runtime gets exactly the subtype business columns. Column-list grants keep
+-- table-level UPDATE false and never expose the DB-owned public_ready flag.
+REVOKE ALL ON feature.feature_routes, feature.feature_areas FROM PUBLIC, ktm_feature_runtime;
+GRANT SELECT ON feature.feature_routes, feature.feature_areas TO ktm_feature_runtime;
+GRANT INSERT (
+    feature_id, kind, geom, anchor
+) ON feature.feature_routes TO ktm_feature_runtime;
+GRANT UPDATE (
+    feature_id, kind, geom, anchor
+) ON feature.feature_routes TO ktm_feature_runtime;
+GRANT INSERT (
+    feature_id, kind, geom, anchor
+) ON feature.feature_areas TO ktm_feature_runtime;
+GRANT UPDATE (
+    feature_id, kind, geom, anchor
+) ON feature.feature_areas TO ktm_feature_runtime;
+GRANT DELETE ON feature.feature_routes, feature.feature_areas TO ktm_feature_runtime;
+GRANT SELECT (feature_id, public_ready), UPDATE (public_ready)
+    ON feature.feature_routes, feature.feature_areas
+    TO ktm_feature_state_procedure_owner;
+REVOKE ALL ON FUNCTION feature.derive_subtype_public_ready()
+    FROM PUBLIC, ktm_feature_runtime;
+REVOKE ALL ON FUNCTION feature.sync_subtype_public_ready()
+    FROM PUBLIC, ktm_feature_runtime;
 
 -- =============================================================================
 -- 6. 공개 정본 projection (ADR-067 결정 2·3)

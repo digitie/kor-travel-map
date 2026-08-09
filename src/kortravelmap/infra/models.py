@@ -270,21 +270,30 @@ class FeatureRow(Base):
             "idx_features_coord_gist",
             "coord",
             postgresql_using="gist",
-            postgresql_where=text("deleted_at IS NULL"),
+            postgresql_where=text(
+                "lifecycle_state = 'active' "
+                "AND publication_state = 'published' "
+                "AND quality_state = 'valid'"
+            ),
         ),
         Index(
             "idx_features_coord_5179_gist",
             "coord_5179",
             postgresql_using="gist",
-            postgresql_where=text("deleted_at IS NULL"),
+            postgresql_where=text(
+                "lifecycle_state = 'active' "
+                "AND publication_state = 'published' "
+                "AND quality_state = 'valid'"
+            ),
         ),
         Index(
             "idx_features_public_weather_coord_5179_gist",
             "coord_5179",
             postgresql_using="gist",
             postgresql_where=text(
-                "status = 'active' "
-                "AND deleted_at IS NULL "
+                "lifecycle_state = 'active' "
+                "AND publication_state = 'published' "
+                "AND quality_state = 'valid' "
                 "AND kind = 'weather' "
                 "AND coord_5179 IS NOT NULL"
             ),
@@ -293,12 +302,21 @@ class FeatureRow(Base):
             "idx_features_kind_category",
             "kind",
             "category",
-            postgresql_where=text("deleted_at IS NULL"),
+            postgresql_where=text(
+                "lifecycle_state = 'active' "
+                "AND publication_state = 'published' "
+                "AND quality_state = 'valid'"
+            ),
         ),
         Index(
             "idx_features_updated_keyset",
             text("updated_at DESC"),
             text("feature_id DESC"),
+            postgresql_where=text(
+                "lifecycle_state = 'active' "
+                "AND publication_state = 'published' "
+                "AND quality_state = 'valid'"
+            ),
         ),
         Index(
             "idx_features_status_updated",
@@ -306,13 +324,27 @@ class FeatureRow(Base):
             text("updated_at DESC"),
             text("feature_id DESC"),
         ),
-        Index("idx_features_lower_name_keyset", text("lower(name)"), "feature_id"),
+        Index(
+            "idx_features_lower_name_keyset",
+            text("lower(name)"),
+            "feature_id",
+            postgresql_where=text(
+                "lifecycle_state = 'active' "
+                "AND publication_state = 'published' "
+                "AND quality_state = 'valid'"
+            ),
+        ),
         Index("idx_features_legal_dong_code", "legal_dong_code"),
         Index(
             "idx_features_sigungu",
             "sigungu_code",
             "kind",
-            postgresql_where=text("deleted_at IS NULL"),
+            postgresql_where=text(
+                "lifecycle_state = 'active' "
+                "AND publication_state = 'published' "
+                "AND quality_state = 'valid' "
+                "AND sigungu_code IS NOT NULL"
+            ),
         ),
         Index(
             "idx_features_parent",
@@ -329,6 +361,11 @@ class FeatureRow(Base):
             "name",
             postgresql_using="gin",
             postgresql_ops={"name": "x_extension.gin_trgm_ops"},
+            postgresql_where=text(
+                "lifecycle_state = 'active' "
+                "AND publication_state = 'published' "
+                "AND quality_state = 'valid'"
+            ),
         ),
         Index("idx_features_data_origin", "data_origin", "data_version"),
         Index(
@@ -363,7 +400,7 @@ class FeatureRow(Base):
 
     # 좌표 (ADR-012 — 양 좌표계 보유, coord_5179는 STORED generated).
     # T-VN-18(F-8/D-12-3): geoalchemy2 자동 full GiST를 끈다(spatial_index=False).
-    # 공개 술어 partial GiST(idx_features_*_gist, WHERE deleted_at IS NULL)만
+    # 공개 술어 partial GiST(idx_features_*_gist, WHERE 3축 public predicate)만
     # __table_args__에 명시적으로 유지한다 — 자동 full은 write 비용만 늘리고 공개
     # 조회는 partial로 충분하다. 0061이 DB의 자동 full 3개를 drop한다.
     coord: Mapped[Any | None] = mapped_column(Geometry("POINT", srid=4326, spatial_index=False))
@@ -738,6 +775,7 @@ class FeatureRouteRow(_FeatureSubtypeBase):
             "idx_feature_routes_geom_gist",
             "geom",
             postgresql_using="gist",
+            postgresql_where=text("public_ready"),
         ),
     )
 
@@ -745,6 +783,10 @@ class FeatureRouteRow(_FeatureSubtypeBase):
     # (core의 GEOMETRY 느슨한 타입이 여기서 정확해진다).
     geom: Mapped[Any] = mapped_column(
         Geometry("MULTILINESTRING", srid=4326, spatial_index=False), nullable=False
+    )
+    # Core 3축의 DB-owned derived projection. Runtime은 이 열을 직접 쓸 수 없다.
+    public_ready: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
     )
     route_type: Mapped[str] = mapped_column(String, nullable=False)
     geometry_source: Mapped[str | None] = mapped_column(String)
@@ -771,11 +813,16 @@ class FeatureAreaRow(_FeatureSubtypeBase):
             "idx_feature_areas_geom_gist",
             "geom",
             postgresql_using="gist",
+            postgresql_where=text("public_ready"),
         ),
     )
 
     geom: Mapped[Any] = mapped_column(
         Geometry("MULTIPOLYGON", srid=4326, spatial_index=False), nullable=False
+    )
+    # Route와 같은 cross-relation index bridge; 독립 상태 정본이 아니다.
+    public_ready: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
     )
     area_kind: Mapped[str] = mapped_column(String, nullable=False)
     boundary_source: Mapped[str | None] = mapped_column(String)

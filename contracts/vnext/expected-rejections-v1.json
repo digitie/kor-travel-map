@@ -257,6 +257,16 @@
       "sqlstate": "23514",
       "constraint": "ck_feature_state_transition_context",
       "basis": "ADR-090"
+    },
+    "feature_route_public_ready_direct_update": {
+      "sqlstate": "42501",
+      "constraint": "feature_routes",
+      "basis": "ADR-090"
+    },
+    "feature_area_public_ready_direct_update": {
+      "sqlstate": "42501",
+      "constraint": "feature_areas",
+      "basis": "ADR-090"
     }
   }
 }

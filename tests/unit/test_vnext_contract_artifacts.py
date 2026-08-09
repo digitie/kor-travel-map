@@ -30,12 +30,12 @@ _TVN34_CURRENT_MIGRATION: Final = (
 # artifact bytes 고정 — 갱신 절차: artifact 수정 → 통합 테스트로 fingerprint 재고정
 # → 여기 sha256 갱신 (한 PR에서 함께).
 ARTIFACT_SHA256: Final[dict[str, str]] = {
-    "target-schema-v1.sql": ("a434e9ce072e64e7ca332c864ac0e441e35608fec2549928b822ca55fd5ebd8a"),
+    "target-schema-v1.sql": ("a0c2d85c46a9cc5de3a27fa74fd884d178c60637f0117c3b664abda07de5e7c9"),
     "target-invariants-v1.sql": (
-        "8c26758167a35a1ce6c154f006e7d890c71ddcd0b6326c812fa8243118138e2f"
+        "94d959fa4004d717b10f0ffec6c44010da21b6749e03721a6813776c043aa1c6"
     ),
     "target-schema-fingerprints-v1.json": (
-        "9549631cd3dfef9031caf936f70996938deea38da50af604182d373ef11aab85"
+        "60200240fd8235338209f225e02de854ace08533841729dc23316f359277b1c0"
     ),
     "tvn33-reference-ownership-v1.sql": (
         "e9a342f7c227f25643f3c1360b081abafac1e89bfb4c52339b89e985401b1604"
@@ -45,17 +45,17 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
         "9842c71901071b8ab0e897d1c7c5ea47cc8a54cfd18bb0cbb36ac7d96be5660d"
     ),
     "violation-fixtures-v1.sql": (
-        "e4539a29fea9a127d514ef72a3e9372a521df0ff274a24ce2172304be8e80258"
+        "dba1ad0e640e4ee0e2c6904ab880f7548cf073d859f221840b6fad873e3a8df6"
     ),
     "expected-rejections-v1.json": (
-        "01af7355c7f3001feeb0e5aee6f9884ab50494199c791b8aacc660f34ef8ef5d"
+        "37140077c1ae3d6b3c1043fd160a0b1afb2590f0f3c3943721e9435ebb03cb98"
     ),
     "recovery-preflight-v1.json": (
         "0e7e1ea595d034aacda8b4c94b56de6c2a24059f150c8cbd6c0670aebce7dfdd"
     ),
 }
 
-_EXPECTED_INVARIANT_COUNT: Final = 58
+_EXPECTED_INVARIANT_COUNT: Final = 60
 _INVARIANT_PHASES: Final = frozenset({"pre-backfill", "post-backfill", "both"})
 _SURFACES: Final = ("user", "service", "admin")
 _CHANGE_KEYS: Final = (
