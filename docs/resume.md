@@ -20,6 +20,12 @@ Playwright e2e(로컬·CI 어디에도 없다 — 이번에 그 사실을 명시
   fail-open 필터, 요청 dialog 형제 operation 임의 선택, MOIS **제출 차단** 복구
   (표시만 복구돼 있었다), 비활성 dataset 정책 PUT 500 → 409, run history 축 확장,
   row id 충돌, offline upload 고정 기본 scope.
+- **로컬 게이트 25종 전부 GREEN**(실측): unit+lint 2099 passed · api 1080 passed ·
+  dagster 458 passed/3 skipped · integration **913 passed / 0 skipped**(geo live가
+  n150 터널로 실제 실행) · vitest 36파일 286 tests · frontend 9종 전부 OK.
+  하네스 자체의 거짓 3건도 함께 닫았다 — 루트 파일 미복사(낡은 사본을 읽었다),
+  docker CLI 부재, `.next` 끊어진 심링크로 **일부만 복사된 트리** 위에서 실행.
+  "환경 노이즈"라 부르며 넘기던 6건은 전부 하네스 결함이었다.
 - 근거는 `docs/reports/t-vn-33-live-product-defects-2026-08-08.md` 35~49번,
   경과는 `docs/journal.md` 2026-08-09.
 

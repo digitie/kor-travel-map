@@ -718,3 +718,43 @@ canonical scope가 다른 dataset에서 그대로 422였다(고른 dataset의 sc
 이 항목의 요점은 수정 자체가 아니라 순서다 — "실패를 삼키지 않게" 만들자마자
 숨어 있던 실제 결함이 즉시 드러났다. 삼키는 코드는 결함을 없애지 않고 미룬다.
 ```
+
+### 50. 게이트가 "터널로 실제 실행"이라 적고 5건이 조용히 skip됐다
+
+8라운드 수정을 끝내고 돌린 실행이 로그 첫 줄에 `geo live: n150 터널로 실제
+실행(키 길이 32)`이라 적고, integration 결과는 `908 passed, 5 skipped`였다.
+25종 전부 OK로 끝났으므로, 프로브가 없었다면 그대로 "전부 GREEN"이라 보고했을 것이다.
+
+```
+원인: 터널을 스크립트 시작 시점에 뚫는데 integration 게이트까지 20분 넘게 걸려
+그 사이 ssh가 끊겼다. `ssh -f`도 `setsid -f`도 소용없다 — `wsl -e` 호출이 끝나면
+WSL이 그 세션에 딸린 프로세스를 함께 정리한다(둘 다 실측 확인).
+
+고침 두 겹:
+ 1. `scripts/geo_live_probe.py` — live 모드라고 선언했는데 포트가 닫혀 있으면
+    exit 96. 조용한 skip을 시끄러운 실패로 바꾼다. skip 모드일 때는 아무것도
+    하지 않는다(그때는 CI와 같은 판정이 의도된 것이다).
+ 2. 터널을 Windows 셸의 백그라운드 job으로 띄워 **WSL 세션 자체를 붙잡는다.**
+    컨테이너가 같은 netns에서 12599를 본다.
+
+이 항목이 여기 있는 이유: 프로브를 넣은 **직후** 실행에서 프로브가 실제로 잡았다.
+"검증했다"는 주장에 그 주장을 반증할 장치를 함께 넣지 않으면, 주장만 남는다.
+```
+
+## 최종 게이트 실측 (2026-08-09)
+
+로컬 25종 전부 GREEN. 숫자를 남기는 이유는 다음 사람이 "몇 개가 돌았는지"를
+추측하지 않게 하기 위해서다.
+
+```
+unit+lint      2099 passed              (이전 2093 passed / 6 failed — 전부 하네스 결함이었다)
+api            1080 passed
+dagster         458 passed, 3 skipped
+integration     913 passed, 0 skipped   (geo live 5건이 n150 터널로 실제 실행)
+vitest           36 files / 286 tests   (이번에 게이트에 처음 편입)
+frontend         9종 OK                 (audit·eslint·react-doctor·gen:types·type-check·next build)
+
+재현 불가로 남는 것: Python 3.11/3.12 매트릭스(컨테이너는 3.13 하나),
+integration 합산 coverage(job 간 아티팩트 전달), Playwright e2e(n150 전용).
+셋 다 게이트 스크립트 머리말에 적혀 있다.
+```
