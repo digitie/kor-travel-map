@@ -264,11 +264,13 @@ admin 상태 변경은 다음 HTTP union contract 하나만 사용한다.
 - `PATCH /v1/admin/features/{feature_id}/state`는 strong `If-Match`와 non-empty `reason_code`를 필수로
   받으며 body actor/principal을 받지 않는다. 인증 boundary가 principal을 정한다.
 - body는 `{ "action": "retire", "reason_code": "..." }` **또는** `{ "reason_code": "...",
-  "lifecycle_state"?: ..., "publication_state"?: ..., "quality_state"?: ... }` 중 하나다. 빈 axis patch,
-  action+axis 혼합, 불가능 tuple/no-op은 `422`다.
+  "publication_state"?: ..., "quality_state"?: ... }` 중 하나다. lifecycle은 이 PATCH에서 받을 수 없다.
+  빈 axis patch, action+axis 혼합, lifecycle 입력, 불가능 tuple/no-op은 `422`다.
 - retire는 `(retired, suppressed, current_quality)`를 한 revision·한 audit transition으로 기록한다.
-  reactivation은 별도 typed command이며 current source evidence와 lifecycle override revoke를 같은 Feature
-  lock에서 수행한다.
+  reactivation은 `POST /v1/admin/features/{feature_id}/state/reactivate`의 별도 typed command다. strong
+  If-Match·reason과 `provider_dataset_id`/`source_entity_key`/`source_record_key`의 current-source evidence를
+  요구하고, 같은 Feature lock에서 active dataset·Feature source link·current head를 검증하고 retired
+  override를 revoke한다. lifecycle만 `active`로 돌리고 publication은 suppressed, quality는 기존 값을 보존한다.
 - 성공 응답은 세 axes, `row_revision`, strong ETag, audit transition identity를 반환한다. 없는 Feature는
   `404`, 누락 If-Match는 `428`, stale revision은 `412`, source/override 경쟁 충돌은 `409`다. UI는 `412`에
   detail/audit timeline을 refetch한 뒤 사용자에게 재시도를 요구한다.

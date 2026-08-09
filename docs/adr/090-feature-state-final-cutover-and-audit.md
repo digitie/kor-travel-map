@@ -70,7 +70,9 @@ merge tombstone이 섞여 있다. 애플리케이션만 audit event를 쓰면 ra
    조립하는 명시 열 `feature.public_features` view를 사용한다. `features_detailed` 또는 `SELECT *` private
    shim은 C 이후 남기지 않는다. public DTO는 운영 축을 노출하지 않고 admin DTO/API는 세 축과 audit
    timeline을 독립적으로 노출한다. admin state command는 strong If-Match와 reason을 요구하는 단일 atomic
-   PATCH이며 retire action과 axis patch를 같은 body에 섞지 않는다. 성공 응답은 axes·revision·ETag·audit
+   PATCH이며 retire action과 publication/quality patch를 같은 body에 섞지 않고 lifecycle 입력은 거부한다.
+   reactivation은 current source evidence를 받아 active dataset·Feature source link·current head 검증과
+   retired override revoke를 같은 lock에서 수행하는 별도 typed command다. 성공 응답은 axes·revision·ETag·audit
    transition identity를, 오류는 422/404/409/412/428의 명시 semantics를 준다. 기존 deactivate endpoint는
    retire action으로 대체한다. geometry가
    route/area geometry가 subtype table에 분리돼 core predicate를 직접 partial GiST로 만들 수 없으므로,
