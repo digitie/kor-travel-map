@@ -182,11 +182,11 @@ from kortravelmap.infra.feature_repo import (
     features_in_bbox,
     get_feature_row,
     get_feature_rows_by_ids,
-    inactivate_features_by_source_entity_ids,
-    inactivate_geometryless_area_features_by_source,
     load_bundles,
     load_source_record_links,
     resolve_active_provider_dataset_id,
+    retire_features_by_source_entity_ids,
+    retire_geometryless_area_features_by_source,
     supersede_stale_notice_features,
 )
 from kortravelmap.infra.feature_repo import (
@@ -1048,7 +1048,7 @@ class AsyncKorTravelMapClient:
                 observed_at=observed_at,
             )
 
-    async def inactivate_features_by_source(
+    async def retire_features_by_source(
         self,
         *,
         provider: str,
@@ -1056,16 +1056,17 @@ class AsyncKorTravelMapClient:
         source_entity_type: str,
         source_entity_ids: set[str],
     ) -> int:
-        """명시 철회/폐기된 source entity의 대응 feature를 inactive로 전환.
+        """명시 철회/폐기된 source entity의 대응 feature를 retired 전이.
 
         provider가 ``reject``/``tombstone``/폐업으로 통지한 ``source_entity_id``
-        집합에 속하는 primary-source feature를 ``status='inactive'``로 전환한다
-        (``infra.inactivate_features_by_source_entity_ids``, ADR-017 — place 무기한
-        유지·status만 전환, ADR-050 #4). 빈 집합이면 no-op(0). 한 transaction.
+        집합에 속하는 primary-source feature를 lifecycle ``retired``와 publication
+        ``suppressed``로 전이한다
+        (``infra.retire_features_by_source_entity_ids``, ADR-017 — place 무기한
+        유지, ADR-050 #4). 빈 집합이면 no-op(0). 한 transaction.
         D-12: 전환된 feature는 batch/단건 read의 ``found``에 status와 함께 남는다.
         """
         async with self._session_factory() as session, session.begin():
-            return await inactivate_features_by_source_entity_ids(
+            return await retire_features_by_source_entity_ids(
                 session,
                 provider=provider,
                 dataset_key=dataset_key,
@@ -1073,14 +1074,14 @@ class AsyncKorTravelMapClient:
                 source_entity_ids=source_entity_ids,
             )
 
-    async def inactivate_geometryless_area_features_by_source(
+    async def retire_geometryless_area_features_by_source(
         self,
         *,
         provider: str,
         dataset_key: str,
         source_entity_type: str,
     ) -> int:
-        """경계 geometry 없이 적재된 provider ``area`` feature를 inactive로 전환.
+        """경계 geometry 없이 적재된 provider ``area`` feature를 retired 전이.
 
         기존 변환 정책 보정용 메서드다. ``provider``/``dataset_key``/
         ``source_entity_type``으로 primary source를 한정하고, 실제 feature 조건은
@@ -1089,7 +1090,7 @@ class AsyncKorTravelMapClient:
         한 transaction.
         """
         async with self._session_factory() as session, session.begin():
-            return await inactivate_geometryless_area_features_by_source(
+            return await retire_geometryless_area_features_by_source(
                 session,
                 provider=provider,
                 dataset_key=dataset_key,
@@ -1374,13 +1375,14 @@ class AsyncKorTravelMapClient:
         address_resolver: AddressResolver | None = None,
         batch_size: int = MOIS_DEFAULT_BATCH_SIZE,
     ) -> MoisBulkSyncResult:
-        """MOIS 인허가 전체 snapshot 적재 + 부재 feature soft-delete (한 transaction).
+        """MOIS 인허가 전체 snapshot 적재 + 부재 feature retirement (한 transaction).
 
         ``records``는 **이번 전체 snapshot**(영업중 PROMOTED record)이어야 한다 —
         ``batch_size``개씩 streaming 변환·upsert(메모리 바운드) → snapshot에 없는
-        기존 feature를 ``status='inactive'``로 비활성화(ADR-017)까지 한 단위 of
-        work로 수행한다. 하나라도 실패하면 전체 rollback. ``records``로 mois source
-        DB의 ``iter_open_place_records(...)``를 그대로 넘기면 Step A가 완성된다.
+        기존 feature를 lifecycle ``retired``와 publication ``suppressed``로
+        전이(ADR-017)까지 한 단위 of work로 수행한다. 하나라도 실패하면 전체 rollback.
+        ``records``로 mois source DB의 ``iter_open_place_records(...)``를 그대로 넘기면
+        Step A가 완성된다.
         """
         async with self._session_factory() as session, session.begin():
             return await sync_mois_license_features_bulk(
@@ -1442,7 +1444,7 @@ class AsyncKorTravelMapClient:
         """MOIS Step B 증분 적재를 advisory lock + import_jobs + cursor 전진으로 실행.
 
         ``records``는 "지난 cursor 이후 변경된" record만(호출자/provider가 필터링).
-        전체 snapshot이 아니므로 soft-delete(prune)하지 않는다. 성공 시
+        전체 snapshot이 아니므로 snapshot retirement(prune)를 하지 않는다. 성공 시
         ``provider_sync_state``의 cursor를 ``new_cursor``로 전진시킨다. 단일 워커
         직렬화(``acquired=False``면 skip). 한 transaction — 실패 시 데이터·cursor·
         작업 기록이 함께 rollback된다.
@@ -1470,13 +1472,13 @@ class AsyncKorTravelMapClient:
         sync_scope: str = DATASET_WIDE_SYNC_SCOPE,
         source_checksum: str | None = None,
     ) -> MoisClosedJobResult:
-        """MOIS Step C 폐업/취소 — 대응 feature를 inactive로 전환(ADR-017).
+        """MOIS Step C 폐업/취소 — 대응 feature를 retired 전이(ADR-017).
 
         ``records``는 provider가 closed/cancelled로 통지한 인허가. 각 record의
         ``source_entity_id``로 ``target_dataset_key``(보통 bulk)의 feature를
-        ``status='inactive'``로 전환하고, closed dataset cursor를 ``new_cursor``로
-        전진시킨다. advisory lock 단일 워커 직렬화(``acquired=False``면 skip). 한
-        transaction.
+        lifecycle ``retired``와 publication ``suppressed``로 전이하고, closed dataset
+        cursor를 ``new_cursor``로 전진시킨다. advisory lock 단일 워커 직렬화
+        (``acquired=False``면 skip). 한 transaction.
         """
         async with self._session_factory() as session, session.begin():
             return await run_mois_license_closed_job(
@@ -2398,11 +2400,11 @@ class AsyncKorTravelMapClient:
             )
 
     async def list_active_place_coords(self) -> list[tuple[str, float, float]]:
-        """미삭제 place feature의 ``(feature_id, lon, lat)`` 전량 (read).
+        """active·valid place feature의 ``(feature_id, lon, lat)`` 전량 (read).
 
-        ``deleted_at IS NULL`` 기준 — ``status='inactive'``여도 미삭제면 날씨를
-        붙일 수 있다(D-12 read 정합). 호출자(Dagster asset)가 좌표를 KMA 격자로
-        변환해 대상 격자와 일치하는 feature에 ``WeatherValue``를 적재한다.
+        publication은 weather 적재 대상의 접근 제어 축이 아니므로 draft/suppressed도
+        포함한다. 호출자(Dagster asset)가 좌표를 KMA 격자로 변환해 대상 격자와
+        일치하는 feature에 ``WeatherValue``를 적재한다.
         """
         async with self._session_factory() as session:
             return await repo_list_active_place_coords(session)

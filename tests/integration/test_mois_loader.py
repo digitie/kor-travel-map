@@ -21,8 +21,8 @@ from kortravelmap.infra.models import FeatureRow, SourceLinkRow
 from kortravelmap.infra.sync_state_repo import get_sync_state
 from kortravelmap.mois import (
     close_mois_license_features,
-    delete_mois_license_features_not_in,
     load_mois_license_features_bulk,
+    retire_mois_license_features_absent_from_snapshot,
     run_mois_license_bulk_job,
     run_mois_license_closed_job,
     run_mois_license_incremental_job,
@@ -221,14 +221,14 @@ async def _active_entity_ids(session: AsyncSession) -> set[str]:
                 "JOIN provider_sync.source_links sl ON sl.feature_id = f.feature_id "
                 "JOIN provider_sync.source_entities se "
                 "  ON se.source_entity_key = sl.source_entity_key "
-                "WHERE f.deleted_at IS NULL AND sl.source_role = 'primary'"
+                "WHERE f.lifecycle_state = 'active' AND sl.source_role = 'primary'"
             )
         )
     ).scalars().all()
     return set(rows)
 
 
-async def test_delete_not_in_snapshot_soft_deletes_missing(
+async def test_snapshot_absence_retires_missing_features(
     migrated_session: AsyncSession,
 ) -> None:
     # 1차 적재 — 3건.
@@ -245,26 +245,32 @@ async def test_delete_not_in_snapshot_soft_deletes_missing(
         "public_baths::gone-3",
     }
 
-    # snapshot에 keep-1/keep-2만 → gone-3 soft-delete.
+    # snapshot에 keep-1/keep-2만 → gone-3 retirement.
     snapshot = {"general_restaurants::keep-1", "bakeries::keep-2"}
-    deleted = await delete_mois_license_features_not_in(migrated_session, snapshot)
+    retired = await retire_mois_license_features_absent_from_snapshot(
+        migrated_session, snapshot
+    )
     await migrated_session.flush()
-    assert deleted == 1
+    assert retired == 1
     assert await _active_entity_ids(migrated_session) == snapshot
 
-    # 재호출 idempotent — 이미 비활성이므로 0건.
-    again = await delete_mois_license_features_not_in(migrated_session, snapshot)
+    # 재호출 idempotent — 이미 retired이므로 0건.
+    again = await retire_mois_license_features_absent_from_snapshot(
+        migrated_session, snapshot
+    )
     assert again == 0
 
-    # deleted_at + status='inactive' 확인 (비활성 1건).
-    statuses = (
+    # legacy timestamp/status 없이 retired/suppressed tuple만 확인한다.
+    states = (
         await migrated_session.execute(
-            text("SELECT status, deleted_at IS NOT NULL AS gone FROM feature.features")
+            text(
+                "SELECT lifecycle_state, publication_state FROM feature.features"
+            )
         )
     ).all()
-    inactive = [s for s in statuses if s.status == "inactive"]
-    assert len(inactive) == 1
-    assert inactive[0].gone is True
+    retired_rows = [row for row in states if row.lifecycle_state == "retired"]
+    assert len(retired_rows) == 1
+    assert retired_rows[0].publication_state == "suppressed"
 
 
 async def test_sync_bulk_loads_and_prunes_in_one_call(
@@ -297,14 +303,14 @@ async def test_sync_bulk_loads_and_prunes_in_one_call(
     )
     await migrated_session.flush()
     assert result.load.bundles_total == 2  # a(update) + c(insert)
-    assert result.deactivated == 1  # b
+    assert result.retired == 1  # b
     assert await _active_entity_ids(migrated_session) == {
         "general_restaurants::a",
         "public_baths::c",
     }
 
 
-async def test_sync_bulk_empty_snapshot_deactivates_all(
+async def test_sync_bulk_empty_snapshot_retires_all(
     migrated_session: AsyncSession,
 ) -> None:
     await sync_mois_license_features_bulk(
@@ -315,13 +321,13 @@ async def test_sync_bulk_empty_snapshot_deactivates_all(
     await migrated_session.flush()
     assert await _active_entity_ids(migrated_session) == {"bakeries::solo"}
 
-    # 빈 snapshot(전부 폐업) → 모두 비활성화.
+    # 빈 snapshot(전부 폐업) → 모두 retired 전이.
     result = await sync_mois_license_features_bulk(
         migrated_session, [], fetched_at=_FETCHED
     )
     await migrated_session.flush()
     assert result.load.bundles_total == 0
-    assert result.deactivated == 1
+    assert result.retired == 1
     assert await _active_entity_ids(migrated_session) == set()
 
 
@@ -418,7 +424,7 @@ async def test_sync_bulk_streaming_batches_equivalent(
         batch_size=2,
     )
     await migrated_session.flush()
-    assert result2.deactivated == 4
+    assert result2.retired == 4
     assert await _active_entity_ids(migrated_session) == {"general_restaurants::b0"}
 
 
@@ -433,8 +439,7 @@ async def _active_count(session: AsyncSession) -> int:
             await session.execute(
                 select(func.count())
                 .select_from(FeatureRow)
-                .where(FeatureRow.status != "deleted")
-                .where(FeatureRow.deleted_at.is_(None))
+                .where(FeatureRow.lifecycle_state == "active")
             )
         ).scalar_one()
     )
@@ -487,7 +492,7 @@ async def test_incremental_does_not_prune_existing(
     await migrated_session.flush()
     assert await _active_count(migrated_session) == 1
 
-    # 증분으로 다른 record 적재 — 기존 record는 batch에 없지만 soft-delete 금지.
+    # 증분으로 다른 record 적재 — 기존 record는 batch에 없지만 retirement 금지.
     await run_mois_license_incremental_job(
         migrated_session,
         [_Record(service_slug="bakeries", mng_no="new-1")],
@@ -501,10 +506,10 @@ async def test_incremental_does_not_prune_existing(
     assert await _active_count(migrated_session) == 2
 
 
-# ── Step C: 폐업/취소 feature 비활성화 ───────────────────────────────────
+# ── Step C: 폐업/취소 feature retirement ─────────────────────────────────
 
 
-async def test_close_inactivates_matching_features(
+async def test_close_retires_matching_features(
     migrated_session: AsyncSession,
 ) -> None:
     # bulk 2건 적재.
@@ -522,13 +527,13 @@ async def test_close_inactivates_matching_features(
         "bakeries::keep-2",
     }
 
-    # 한 건 폐업 통지 → 해당 feature만 inactive.
-    deactivated = await close_mois_license_features(
+    # 한 건 폐업 통지 → 해당 feature만 retired 전이.
+    retired = await close_mois_license_features(
         migrated_session,
         [_Record(service_slug="general_restaurants", mng_no="keep-1")],
     )
     await migrated_session.flush()
-    assert deactivated == 1
+    assert retired == 1
     assert await _active_entity_ids(migrated_session) == {"bakeries::keep-2"}
 
 
@@ -542,12 +547,12 @@ async def test_close_ignores_unmatched_records(
     )
     await migrated_session.flush()
     # 미적재 mng_no 폐업 통지 — no-op.
-    deactivated = await close_mois_license_features(
+    retired = await close_mois_license_features(
         migrated_session,
         [_Record(service_slug="bakeries", mng_no="never-loaded")],
     )
     await migrated_session.flush()
-    assert deactivated == 0
+    assert retired == 0
     assert await _active_entity_ids(migrated_session) == {"bakeries::b1"}
 
 
@@ -570,7 +575,7 @@ async def test_run_closed_job_tracks_and_advances_cursor(
     assert result.acquired is True
     assert result.job is not None
     assert result.job.status == "done"
-    assert result.deactivated == 1
+    assert result.retired == 1
     assert result.sync_state is not None
     assert result.sync_state.cursor == {"last_modified_date": "2026-06-03"}
 

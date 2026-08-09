@@ -257,7 +257,7 @@ def test_format_closed_result_done() -> None:
                 source_checksum=None,
                 error_message=None,
             ),
-            deactivated=3,
+            retired=3,
             sync_state=SyncState(
                 provider_dataset_id=43,
                 provider="python-mois-api",
@@ -274,7 +274,7 @@ def test_format_closed_result_done() -> None:
         )
     )
     assert "closed): done (job_id=job-c)" in out
-    assert "deactivated (inactive 전환): 3" in out
+    assert "retired (lifecycle 전이): 3" in out
     assert "2026-06-03" in out
 
 
@@ -340,7 +340,7 @@ def _job_result(*, acquired: bool) -> MoisBulkJobResult:
             source_links_inserted=5,
             source_links_updated=0,
         ),
-        deactivated=2,
+        retired=2,
     )
     return MoisBulkJobResult(acquired=True, job=job, sync=sync)
 
@@ -350,7 +350,7 @@ def test_format_bulk_result_done() -> None:
     assert "done (job_id=job-1)" in out
     assert "inserted=4 updated=1" in out
     assert "source_records: inserted=5" in out
-    assert "deactivated (snapshot prune): 2" in out
+    assert "retired (snapshot prune): 2" in out
 
 
 def test_format_bulk_result_skipped() -> None:

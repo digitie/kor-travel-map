@@ -431,7 +431,7 @@ def _format_bulk_result(result: MoisBulkJobResult) -> str:
             f"  source_records: inserted={load.source_records_inserted}",
             f"  source_links: inserted={load.source_links_inserted} "
             f"updated={load.source_links_updated}",
-            f"  deactivated (snapshot prune): {result.sync.deactivated}",
+            f"  retired (snapshot prune): {result.sync.retired}",
         ]
     )
 
@@ -466,7 +466,7 @@ def _format_closed_result(result: MoisClosedJobResult) -> str:
     return "\n".join(
         [
             f"import (closed): done (job_id={job_id})",
-            f"  deactivated (inactive 전환): {result.deactivated}",
+            f"  retired (lifecycle 전이): {result.retired}",
             f"  cursor: {result.sync_state.cursor}",
         ]
     )
