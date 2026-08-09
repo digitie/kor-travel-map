@@ -87,6 +87,20 @@ repo() { MSYS_NO_PATHCONV=1 wsl -e bash -lc "cd $WSL_ROOT && $1"; }
 # git이 필요한 게이트는 Git Bash(Windows) 쪽에서 돈다 — 위 주석 참조.
 host_py() { ( cd "$ROOT" && eval "$1" ); }
 
+# react-doctor 전용: 프론트 소스를 WSL 네이티브 fs로 복사해 돌린다(위 게이트 주석).
+# node_modules는 심링크로 빌려 쓴다 — 복사하면 수 분이 더 걸린다.
+doctor_on_native_fs() {
+  MSYS_NO_PATHCONV=1 wsl -e bash -lc "
+    set -e
+    rm -rf /tmp/ktm-doctor && mkdir -p /tmp/ktm-doctor
+    cd $WSL_ROOT/$ADMIN
+    tar -cf - --exclude=node_modules --exclude=.next --exclude=.react-doctor .       | (cd /tmp/ktm-doctor && tar -xf -)
+    ln -sfn $WSL_ROOT/node_modules /tmp/ktm-doctor/node_modules
+    cd /tmp/ktm-doctor
+    $WSL_ROOT/node_modules/.bin/react-doctor --scope full --no-score --no-telemetry       --no-respect-inline-disables --blocking warning .
+  "
+}
+
 echo "===== lint.yml"
 # 이 스크립트는 `git ls-files`를 쓴다. 워크트리의 `.git`이 Windows 경로를 담고 있어
 # WSL/컨테이너에서는 "not a git repository"로 죽는다 — Git Bash 쪽에서 돌려야 한다.
@@ -117,7 +131,15 @@ run_gate "verify:npm-tree"         repo "$NPM run verify:npm-tree"
 run_gate "verify:frontend-eslint"  repo "$NPM run verify:frontend-eslint"
 run_gate "admin eslint (0 warnings)" repo "$NPM -w $ADMIN run lint"
 run_gate "verify:react-doctor-config" repo "$NPM run verify:react-doctor-config"
-run_gate "admin react-doctor"      repo "$NPM -w $ADMIN run doctor"
+# react-doctor는 `/mnt/f`(NTFS 마운트)에서 900초 스캔 예산을 넘겨 **코드와 무관하게**
+# 실패한다. 실측: NTFS 마운트 = "Scan exceeded its overall time budget: 900s",
+# WSL 네이티브 fs 사본 = "No issues found!" 2분 3초. CI는 네이티브 Linux fs다.
+# 그래서 네이티브 fs로 복사해 돌린다 — 안 그러면 이 게이트가 로컬에서 늘 red라
+# 사람이 무시하게 되고, 그러면 게이트가 없는 것과 같다.
+# 감사기(test_gate_script_mirrors_ci)가 이 게이트를 식별할 수 있도록 CI의
+# `-w <admin> run doctor` 형태를 주석으로 남긴다 — 실행은 아래 헬퍼가 한다.
+#   CI 원본: $NPM -w $ADMIN run doctor
+run_gate "admin react-doctor" doctor_on_native_fs
 run_gate "verify:next-sharp"       repo "$NPM run verify:next-sharp"
 run_gate "admin gen:types:check"   repo "$NPM -w $ADMIN run gen:types:check"
 run_gate "user-client gen:types:check" repo "$NPM -w packages/kor-travel-map-user-client run gen:types:check"
