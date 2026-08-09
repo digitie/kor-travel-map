@@ -42,14 +42,44 @@ DECLARE
     v_publication_state text;
     v_quality_state text;
 BEGIN
-    -- parent lock ordering is always feature row → subtype row.  This makes a
-    -- state transition racing a subtype insert/reattachment serialize before
-    -- the cached flag is derived.
-    SELECT lifecycle_state, publication_state, quality_state
-      INTO v_lifecycle_state, v_publication_state, v_quality_state
-      FROM feature.features
-     WHERE feature_id = NEW.feature_id
-     FOR UPDATE;
+    IF TG_OP = 'UPDATE' THEN
+        -- Reattachment would make one UPDATE hold a subtype tuple before it
+        -- waits on a different parent.  No normal writer supports it, so make
+        -- the 1:1 subtype identity immutable instead of inventing a broad
+        -- relation lock or a retry protocol.
+        IF NEW.feature_id IS DISTINCT FROM OLD.feature_id
+           OR NEW.feature_uuid IS DISTINCT FROM OLD.feature_uuid
+           OR NEW.kind IS DISTINCT FROM OLD.kind THEN
+            RAISE EXCEPTION 'route/area subtype identity is immutable'
+                USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_subtype_identity_immutable';
+        END IF;
+
+        -- Payload/geometry updates need no parent read: a core axis transition
+        -- is the sole writer that changes an existing cache row.  This removes
+        -- the former subtype tuple → parent tuple edge.  A direct privileged
+        -- public_ready attempt is still overwritten below when it differs.
+        IF NEW.public_ready IS NOT DISTINCT FROM OLD.public_ready THEN
+            RETURN NEW;
+        END IF;
+    END IF;
+
+    -- INSERT must serialize with a concurrent parent state transition so a
+    -- newly attached route/area gets the current tuple.  An existing subtype
+    -- update reaches here only for a supplied cache mutation; its lock-free
+    -- parent read recomputes the DB-owned value, while core sync sees its own
+    -- updated parent row in the same transaction.
+    IF TG_OP = 'INSERT' THEN
+        SELECT lifecycle_state, publication_state, quality_state
+          INTO v_lifecycle_state, v_publication_state, v_quality_state
+          FROM feature.features
+         WHERE feature_id = NEW.feature_id
+         FOR UPDATE;
+    ELSE
+        SELECT lifecycle_state, publication_state, quality_state
+          INTO v_lifecycle_state, v_publication_state, v_quality_state
+          FROM feature.features
+         WHERE feature_id = NEW.feature_id;
+    END IF;
     IF NOT FOUND THEN
         RAISE EXCEPTION 'route/area public projection requires parent feature %', NEW.feature_id
             USING ERRCODE = '23503', CONSTRAINT = 'fk_feature_subtype_public_ready_parent';
@@ -97,53 +127,59 @@ $$;
 
 
 def upgrade() -> None:
-    # ``features_detailed`` is the typed-subtype assembly surface.  Do not use
-    # SELECT * here: state/provenance columns must never silently become public.
+    # Keep the core alias that has the three-axis predicate as the alias that
+    # supplies coord/text/category/keyset columns.  Joining ``features_detailed``
+    # to a second state alias made actual public reader predicates non-implying
+    # for the core partial indexes.  Detail/geom still come from the one typed
+    # assembly view, but all core output is selected from the predicate alias.
+    # Do not use SELECT *: state/provenance columns must never silently become
+    # public.
     op.execute(
         """
         CREATE OR REPLACE VIEW feature.public_features AS
         SELECT
-            f.feature_id,
-            f.feature_uuid,
-            f.kind,
-            f.name,
-            f.category,
-            f.coord,
-            f.coord_5179,
-            f.coord_precision_digits,
-            f.address,
-            f.legal_dong_code,
-            f.road_name_code,
-            f.road_address_management_no,
-            f.admin_dong_code,
-            f.sido_code,
-            f.sigungu_code,
-            f.urls,
-            f.marker_icon,
-            f.marker_color,
-            f.parent_feature_id,
-            f.sibling_group_id,
-            f.raw_refs,
-            f.status,
-            f.created_at,
-            f.updated_at,
-            f.deleted_at,
-            f.data_origin,
-            f.data_version,
-            f.user_change_kind,
-            f.user_change_status,
-            f.user_change_request_id,
-            f.user_deleted_at,
-            f.user_deleted_by,
-            f.user_change_reason,
-            f.row_revision,
-            f.geom,
-            f.detail
-        FROM feature.features_detailed AS f
-        JOIN feature.features AS state ON state.feature_id = f.feature_id
-        WHERE state.lifecycle_state = 'active'
-          AND state.publication_state = 'published'
-          AND state.quality_state = 'valid'
+            core.feature_id,
+            core.feature_uuid,
+            core.kind,
+            core.name,
+            core.category,
+            core.coord,
+            core.coord_5179,
+            core.coord_precision_digits,
+            core.address,
+            core.legal_dong_code,
+            core.road_name_code,
+            core.road_address_management_no,
+            core.admin_dong_code,
+            core.sido_code,
+            core.sigungu_code,
+            core.urls,
+            core.marker_icon,
+            core.marker_color,
+            core.parent_feature_id,
+            core.sibling_group_id,
+            core.raw_refs,
+            core.status,
+            core.created_at,
+            core.updated_at,
+            core.deleted_at,
+            core.data_origin,
+            core.data_version,
+            core.user_change_kind,
+            core.user_change_status,
+            core.user_change_request_id,
+            core.user_deleted_at,
+            core.user_deleted_by,
+            core.user_change_reason,
+            core.row_revision,
+            detailed.geom,
+            detailed.detail
+        FROM feature.features AS core
+        JOIN feature.features_detailed AS detailed
+          ON detailed.feature_id = core.feature_id
+        WHERE core.lifecycle_state = 'active'
+          AND core.publication_state = 'published'
+          AND core.quality_state = 'valid'
         """
     )
 
@@ -287,24 +323,42 @@ def upgrade() -> None:
         "EXECUTE FUNCTION feature.sync_subtype_public_ready()"
     )
 
-    # Runtime gets only business columns.  A column grant deliberately does
-    # not make table-level UPDATE true, and the DB-owned projection flag is not
-    # in either list.
-    route_columns = (
+    # Runtime gets only business columns.  INSERT needs the immutable subtype
+    # identity, but ordinary UPDATE must not reattach/delete a subtype row.  A
+    # column grant deliberately does not make table-level UPDATE true, and the
+    # DB-owned projection flag is not in either list.
+    route_insert_columns = (
         "feature_id, feature_uuid, kind, geom, route_type, geometry_source, "
         "geometry_status, total_distance_meters, expected_duration_minutes, "
         "difficulty, begin_name, begin_address, end_name, end_address, payload"
     )
-    area_columns = (
+    route_update_columns = (
+        "geom, route_type, geometry_source, geometry_status, total_distance_meters, "
+        "expected_duration_minutes, difficulty, begin_name, begin_address, end_name, "
+        "end_address, payload"
+    )
+    area_insert_columns = (
         "feature_id, feature_uuid, kind, geom, area_kind, boundary_source, "
         "area_square_meters, regulation_scope, administrative_office, description, payload"
     )
-    for table_name, columns in (("feature_routes", route_columns), ("feature_areas", area_columns)):
+    area_update_columns = (
+        "geom, area_kind, boundary_source, area_square_meters, regulation_scope, "
+        "administrative_office, description, payload"
+    )
+    for table_name, insert_columns, update_columns in (
+        ("feature_routes", route_insert_columns, route_update_columns),
+        ("feature_areas", area_insert_columns, area_update_columns),
+    ):
         op.execute(f"REVOKE ALL ON feature.{table_name} FROM PUBLIC, ktm_feature_runtime")
         op.execute(f"GRANT SELECT ON feature.{table_name} TO ktm_feature_runtime")
-        op.execute(f"GRANT INSERT ({columns}) ON feature.{table_name} TO ktm_feature_runtime")
-        op.execute(f"GRANT UPDATE ({columns}) ON feature.{table_name} TO ktm_feature_runtime")
-        op.execute(f"GRANT DELETE ON feature.{table_name} TO ktm_feature_runtime")
+        op.execute(
+            f"GRANT INSERT ({insert_columns}) ON feature.{table_name} "
+            "TO ktm_feature_runtime"
+        )
+        op.execute(
+            f"GRANT UPDATE ({update_columns}) ON feature.{table_name} "
+            "TO ktm_feature_runtime"
+        )
         op.execute(
             f"GRANT SELECT (feature_id, public_ready), UPDATE (public_ready) "
             f"ON feature.{table_name} "
@@ -317,6 +371,13 @@ def upgrade() -> None:
     op.execute(
         "REVOKE ALL ON FUNCTION feature.sync_subtype_public_ready() "
         "FROM PUBLIC, ktm_feature_runtime"
+    )
+    # Reconciliation revokes all feature relations after every migration.
+    # These two views are the only reader boundary and must be regranted here
+    # as well as in the closed runtime inventory.
+    op.execute(
+        "GRANT SELECT ON feature.public_features, feature.features_detailed "
+        "TO ktm_feature_runtime"
     )
 
 

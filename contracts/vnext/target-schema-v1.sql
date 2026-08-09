@@ -898,6 +898,10 @@ CREATE TRIGGER trg_feature_state_transitions_append_only_truncate
 
 GRANT USAGE ON SCHEMA feature, provider_sync, ops
     TO ktm_feature_state_procedure_owner, ktm_feature_audit_writer, ktm_feature_runtime;
+-- Runtime subtype geometry DML and qualified PostGIS reads must resolve the
+-- x_extension type/functions without inheriting an ambient search_path.
+GRANT USAGE ON SCHEMA x_extension
+    TO ktm_feature_state_procedure_owner, ktm_feature_runtime;
 GRANT SELECT, INSERT ON feature.features TO ktm_feature_state_procedure_owner;
 GRANT UPDATE (lifecycle_state, publication_state, quality_state, updated_at)
     ON feature.features TO ktm_feature_state_procedure_owner;
@@ -1057,9 +1061,12 @@ CREATE TABLE feature.feature_areas (
 );
 
 -- route/area geometry와 core state는 서로 다른 relation에 있으므로 partial
--- GiST는 join predicate를 직접 표현할 수 없다. subtype write는 parent row를
--- 먼저 잠가 cache를 다시 계산하고, core axis update도 같은 lock을 유지한 채
--- cache를 동기화한다. supplied public_ready는 항상 무시한다.
+-- GiST는 join predicate를 직접 표현할 수 없다. 기존 subtype UPDATE가 parent를
+-- `FOR UPDATE`로 잠그면 state transition(parent → subtype)과 역순 40P01이 된다.
+-- 새 subtype attach만 parent를 잠가 current cache를 만든다. 이미 연결된 subtype은
+-- identity를 DB에서 immutable로 막고, payload/geometry UPDATE는 cache를 보존한다.
+-- core axis trigger만 existing cache를 변경하므로 서로 교차하는 tuple lock이 없다.
+-- supplied public_ready는 항상 DB가 재계산하거나 보존한다.
 CREATE FUNCTION feature.derive_subtype_public_ready()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -1071,11 +1078,29 @@ DECLARE
     v_publication_state text;
     v_quality_state text;
 BEGIN
-    SELECT lifecycle_state, publication_state, quality_state
-      INTO v_lifecycle_state, v_publication_state, v_quality_state
-      FROM feature.features
-     WHERE feature_id = NEW.feature_id
-     FOR UPDATE;
+    IF TG_OP = 'UPDATE' THEN
+        IF NEW.feature_id IS DISTINCT FROM OLD.feature_id
+           OR NEW.kind IS DISTINCT FROM OLD.kind THEN
+            RAISE EXCEPTION 'route/area subtype identity is immutable'
+                USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_subtype_identity_immutable';
+        END IF;
+        IF NEW.public_ready IS NOT DISTINCT FROM OLD.public_ready THEN
+            RETURN NEW;
+        END IF;
+    END IF;
+
+    IF TG_OP = 'INSERT' THEN
+        SELECT lifecycle_state, publication_state, quality_state
+          INTO v_lifecycle_state, v_publication_state, v_quality_state
+          FROM feature.features
+         WHERE feature_id = NEW.feature_id
+         FOR UPDATE;
+    ELSE
+        SELECT lifecycle_state, publication_state, quality_state
+          INTO v_lifecycle_state, v_publication_state, v_quality_state
+          FROM feature.features
+         WHERE feature_id = NEW.feature_id;
+    END IF;
     IF NOT FOUND THEN
         RAISE EXCEPTION 'route/area public projection requires a parent feature'
             USING ERRCODE = '23503', CONSTRAINT = 'fk_feature_subtype_public_ready_parent';
@@ -1139,23 +1164,24 @@ CREATE INDEX idx_feature_areas_geom_gist
     ON feature.feature_areas USING gist (geom)
     WHERE public_ready;
 
--- Runtime gets exactly the subtype business columns. Column-list grants keep
--- table-level UPDATE false and never expose the DB-owned public_ready flag.
+-- Runtime gets exactly the subtype business columns. INSERT creates the fixed
+-- subtype identity; UPDATE cannot reattach it or delete a geometry relation.
+-- Column-list grants keep table-level UPDATE false and never expose the
+-- DB-owned public_ready flag.
 REVOKE ALL ON feature.feature_routes, feature.feature_areas FROM PUBLIC, ktm_feature_runtime;
 GRANT SELECT ON feature.feature_routes, feature.feature_areas TO ktm_feature_runtime;
 GRANT INSERT (
     feature_id, kind, geom, anchor
 ) ON feature.feature_routes TO ktm_feature_runtime;
 GRANT UPDATE (
-    feature_id, kind, geom, anchor
+    geom, anchor
 ) ON feature.feature_routes TO ktm_feature_runtime;
 GRANT INSERT (
     feature_id, kind, geom, anchor
 ) ON feature.feature_areas TO ktm_feature_runtime;
 GRANT UPDATE (
-    feature_id, kind, geom, anchor
+    geom, anchor
 ) ON feature.feature_areas TO ktm_feature_runtime;
-GRANT DELETE ON feature.feature_routes, feature.feature_areas TO ktm_feature_runtime;
 GRANT SELECT (feature_id, public_ready), UPDATE (public_ready)
     ON feature.feature_routes, feature.feature_areas
     TO ktm_feature_state_procedure_owner;
@@ -1183,6 +1209,7 @@ FROM feature.features AS f
 WHERE f.lifecycle_state = 'active'
   AND f.publication_state = 'published'
   AND f.quality_state = 'valid';
+GRANT SELECT ON feature.public_features TO ktm_feature_runtime;
 
 -- =============================================================================
 -- 7. source lineage 정본 (ADR-068 결정 2, ADR-069)

@@ -137,7 +137,7 @@ async def test_route_area_public_ready_is_trigger_owned_and_tracks_core_state(
     ) is False
 
     # Even a privileged direct attempt cannot make the cache diverge: the
-    # subtype BEFORE trigger recomputes it from the locked parent row.
+    # subtype BEFORE trigger recomputes it from the core state axes.
     await migrated_session.execute(
         text(f"UPDATE feature.{table} SET public_ready = true WHERE feature_id = :feature_id"),
         {"feature_id": feature_id},
@@ -146,6 +146,24 @@ async def test_route_area_public_ready_is_trigger_owned_and_tracks_core_state(
         text(f"SELECT public_ready FROM feature.{table} WHERE feature_id = :feature_id"),
         {"feature_id": feature_id},
     ) is False
+
+    # Subtype rows are 1:1 extensions of their core row, never attachments
+    # that a generic UPDATE may retarget.  This is the lock-order boundary
+    # that keeps ordinary subtype payload updates parent-lock-free.
+    with pytest.raises(DBAPIError) as caught:
+        async with migrated_session.begin_nested():
+            await migrated_session.execute(
+                text(
+                    f"UPDATE feature.{table} SET feature_id = :replacement "
+                    "WHERE feature_id = :feature_id"
+                ),
+                {
+                    "feature_id": feature_id,
+                    "replacement": f"{feature_id}:reattached",
+                },
+            )
+    assert getattr(caught.value.orig, "sqlstate", None) == "23514"
+    assert "route/area subtype identity is immutable" in str(caught.value.orig)
 
 
 async def test_subtype_insert_waits_for_parent_state_lock_and_derives_fresh_flag(
@@ -199,6 +217,115 @@ async def test_subtype_insert_waits_for_parent_state_lock_and_derives_fresh_flag
                     "SELECT public_ready FROM feature.feature_routes "
                     "WHERE feature_id = :feature_id"
                 ),
+                {"feature_id": feature_id},
+            ) is False
+    finally:
+        async with migrated_engine.begin() as connection:
+            await connection.execute(
+                text("DELETE FROM feature.features WHERE feature_id = :feature_id"),
+                {"feature_id": feature_id},
+            )
+
+
+@pytest.mark.parametrize(
+    ("table", "kind", "category"),
+    [
+        ("feature_routes", "route", "06070000"),
+        ("feature_areas", "area", "06050000"),
+    ],
+)
+async def test_subtype_update_and_state_transition_serialize_before_tuple_locks(
+    migrated_engine: AsyncEngine,
+    table: str,
+    kind: str,
+    category: str,
+) -> None:
+    """route/area UPDATE × state procedure은 40P01 없이 core→subtype으로 끝난다.
+
+    state session이 parent tuple을 먼저 잡은 상태에서 subtype payload UPDATE를
+    완료시킨 뒤, state transition이 subtype cache tuple을 기다리게 한다. 구 구현은
+    subtype UPDATE가 parent를 다시 기다려 이 순서를 만들지 못했으며, transition을
+    동시에 시작하면 parent ↔ subtype 역순 `40P01`으로 끝났다. 0096은 stable
+    subtype UPDATE의 parent lock을 제거하고 identity reattachment를 금지한다.
+    """
+
+    feature_id = f"tvn34b:deadlock:{table}:{uuid4().hex}"
+    async with AsyncSession(migrated_engine, expire_on_commit=False) as seed, seed.begin():
+        await _insert_feature(seed, feature_id=feature_id, kind=kind, category=category)
+        await _insert_subtype(seed, table=table, feature_id=feature_id)
+
+    try:
+        async with (
+            AsyncSession(migrated_engine, expire_on_commit=False) as state_session,
+            AsyncSession(migrated_engine, expire_on_commit=False) as subtype_session,
+        ):
+            await state_session.begin()
+            await subtype_session.begin()
+            try:
+                await state_session.execute(text("SET LOCAL deadlock_timeout = '100ms'"))
+                await subtype_session.execute(text("SET LOCAL deadlock_timeout = '100ms'"))
+                await state_session.execute(
+                    text(
+                        "SELECT feature_id FROM feature.features "
+                        "WHERE feature_id = :feature_id FOR UPDATE"
+                    ),
+                    {"feature_id": feature_id},
+                )
+
+                subtype_update = asyncio.create_task(
+                    subtype_session.execute(
+                        text(
+                            f"UPDATE feature.{table} "
+                            "SET payload = jsonb_build_object('tvn34b_deadlock_probe', true) "
+                            "WHERE feature_id = :feature_id"
+                        ),
+                        {"feature_id": feature_id},
+                    )
+                )
+                await asyncio.wait_for(subtype_update, timeout=3)
+
+                state_transition = asyncio.create_task(
+                    state_session.execute(
+                        text(
+                            """
+                            CALL feature.transition_feature_state(
+                                :feature_id, 'active', 'suppressed', 'valid', 1,
+                                jsonb_build_object(
+                                    'transition_kind', 'admin',
+                                    'reason_code', 'tvn34b_deadlock_regression',
+                                    'principal', 'admin:tvn34b-deadlock'
+                                ),
+                                NULL, NULL
+                            )
+                            """
+                        ),
+                        {"feature_id": feature_id},
+                    )
+                )
+                await asyncio.sleep(0.05)
+                assert not state_transition.done(), (
+                    "state transition did not wait for the subtype cache row"
+                )
+                await subtype_session.commit()
+                await asyncio.wait_for(state_transition, timeout=3)
+                await state_session.commit()
+            finally:
+                if state_session.in_transaction():
+                    await state_session.rollback()
+                if subtype_session.in_transaction():
+                    await subtype_session.rollback()
+
+        async with AsyncSession(migrated_engine, expire_on_commit=False) as verify:
+            state = await verify.execute(
+                text(
+                    "SELECT publication_state FROM feature.features "
+                    "WHERE feature_id = :feature_id"
+                ),
+                {"feature_id": feature_id},
+            )
+            assert state.scalar_one() == "suppressed"
+            assert await verify.scalar(
+                text(f"SELECT public_ready FROM feature.{table} WHERE feature_id = :feature_id"),
                 {"feature_id": feature_id},
             ) is False
     finally:

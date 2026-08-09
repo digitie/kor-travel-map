@@ -1123,6 +1123,96 @@ async def test_uuid_state_procedure_derives_provider_receipt_and_fences_retired_
         await transaction.rollback()
 
 
+async def test_target_runtime_geometry_acl_has_extension_and_public_view_boundary(
+    freeze_db: asyncpg.Connection,
+) -> None:
+    """final target runtime은 qualified geometry DML과 public projection만 읽는다."""
+
+    transaction = freeze_db.transaction()
+    await transaction.start()
+    try:
+        feature_id = uuid4()
+        await freeze_db.execute(
+            "INSERT INTO feature.categories (kind, code) VALUES ('route', 'target-runtime')"
+        )
+        await freeze_db.execute(
+            """
+            INSERT INTO feature.features (
+                feature_id, kind, name, category_code,
+                lifecycle_state, publication_state, quality_state
+            ) VALUES ($1, 'route', 'target runtime route', 'target-runtime',
+                      'active', 'published', 'valid')
+            """,
+            feature_id,
+        )
+
+        await freeze_db.execute("SET ROLE ktm_feature_runtime")
+        try:
+            assert await freeze_db.fetchval(
+                "SELECT has_schema_privilege(current_user, 'x_extension', 'USAGE')"
+            ) is True
+            await freeze_db.execute(
+                """
+                INSERT INTO feature.feature_routes (feature_id, kind, geom, anchor)
+                VALUES (
+                    $1, 'route',
+                    x_extension.st_geomfromtext(
+                        'MULTILINESTRING((126.97 37.56,126.98 37.57))', 4326
+                    ),
+                    x_extension.st_setsrid(x_extension.st_makepoint(126.975, 37.565), 4326)
+                )
+                """,
+                feature_id,
+            )
+            await freeze_db.execute(
+                "UPDATE feature.feature_routes SET geom = geom WHERE feature_id = $1",
+                feature_id,
+            )
+            assert await freeze_db.fetchval(
+                "SELECT count(*) FROM feature.public_features WHERE feature_id = $1",
+                feature_id,
+            ) == 1
+
+            privileges = await freeze_db.fetchrow(
+                """
+                SELECT
+                    has_column_privilege(
+                        current_user, 'feature.feature_routes', 'geom', 'UPDATE'
+                    ) AS can_update_geom,
+                    has_column_privilege(
+                        current_user, 'feature.feature_routes', 'feature_id', 'UPDATE'
+                    ) AS can_update_feature_id,
+                    has_column_privilege(
+                        current_user, 'feature.feature_routes', 'kind', 'UPDATE'
+                    ) AS can_update_kind,
+                    has_column_privilege(
+                        current_user, 'feature.feature_routes', 'public_ready', 'UPDATE'
+                    ) AS can_update_public_ready,
+                    has_table_privilege(
+                        current_user, 'feature.feature_routes', 'DELETE'
+                    ) AS can_delete
+                """
+            )
+            assert dict(privileges) == {
+                "can_update_geom": True,
+                "can_update_feature_id": False,
+                "can_update_kind": False,
+                "can_update_public_ready": False,
+                "can_delete": False,
+            }
+        finally:
+            await freeze_db.execute("RESET ROLE")
+
+        with pytest.raises(asyncpg.CheckViolationError) as caught:
+            await freeze_db.execute(
+                "UPDATE feature.feature_routes SET kind = 'area' WHERE feature_id = $1",
+                feature_id,
+            )
+        assert caught.value.constraint_name == "ck_feature_subtype_identity_immutable"
+    finally:
+        await transaction.rollback()
+
+
 async def test_final_target_excludes_current_user_provenance_snapshot_bridge(
     freeze_db: asyncpg.Connection,
 ) -> None:

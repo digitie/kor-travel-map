@@ -421,7 +421,39 @@ async def test_public_beach_views_use_projection(migrated_session: AsyncSession)
 async def test_public_bbox_geometry_arms_use_ready_partial_indexes(
     migrated_session: AsyncSession,
 ) -> None:
-    """실제 공개 bbox SQL의 route/area arm이 ready partial GiST를 쓴다."""
+    """실제 공개 bbox SQL이 core·route·area partial GiST를 모두 사용한다."""
+
+    await _ins_feature(
+        migrated_session,
+        feature_id="pfv:bbox:place",
+        name="bbox 장소",
+        kind="place",
+        category="06020000",
+    )
+    # The generated public reader must be measured at a selective cardinality.
+    # A three-row relation makes PostgreSQL pick an arbitrary public partial
+    # index once seq scans are disabled for the route/area eligibility proof;
+    # it does not prove the 4326 bbox access path.  These core-only place rows
+    # are valid detailed-view inputs and keep the one in-bounds point highly
+    # selective without coupling this planner test to any subtype payload.
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO feature.features (
+                feature_id, kind, name, category, coord,
+                lifecycle_state, publication_state, quality_state
+            )
+            SELECT
+                'pfv:bbox:bulk:' || g::text,
+                'place', 'bbox planner noncandidate', '06020000',
+                x_extension.st_setsrid(
+                    x_extension.st_makepoint(128.0 + g * 0.00001, 35.0), 4326
+                ),
+                'active', 'published', 'valid'
+            FROM generate_series(1, 3200) AS g
+            """
+        )
+    )
 
     await _ins_feature(
         migrated_session,
@@ -444,6 +476,7 @@ async def test_public_bbox_geometry_arms_use_ready_partial_indexes(
     )
     await migrated_session.execute(text("ANALYZE feature.feature_routes"))
     await migrated_session.execute(text("ANALYZE feature.feature_areas"))
+    await migrated_session.execute(text("ANALYZE feature.features"))
 
     plan = await explain_plan(
         migrated_session,
@@ -466,6 +499,29 @@ async def test_public_bbox_geometry_arms_use_ready_partial_indexes(
         "idx_feature_routes_geom_gist",
         "idx_feature_areas_geom_gist",
     } <= index_names(plan)
+
+    # The route/area proof deliberately disables seq scans to verify partial
+    # index eligibility.  Restore the production planner before asserting the
+    # generated point reader's actual 4326 GiST choice.
+    await migrated_session.execute(text("SET LOCAL enable_seqscan = on"))
+    point_plan = await explain_plan(
+        migrated_session,
+        feature_repo._FEATURES_IN_BBOX_SQL,  # noqa: PLC2701 - generated public SQL gate
+        {
+            "min_lon": 126.95,
+            "min_lat": 37.54,
+            "max_lon": 127.00,
+            "max_lat": 37.59,
+            "kinds": ["place"],
+            "categories": None,
+            "providers": None,
+            "cursor_feature_id": None,
+            "limit": 100,
+            "price_stale_hide_days": 4,
+        },
+        planner_default=True,
+    )
+    assert "idx_features_coord_gist" in index_names(point_plan), index_names(point_plan)
 
 
 async def test_public_festival_views_use_projection(migrated_session: AsyncSession) -> None:

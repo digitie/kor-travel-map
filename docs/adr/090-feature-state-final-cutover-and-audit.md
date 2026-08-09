@@ -62,8 +62,11 @@ merge tombstone이 섞여 있다. 애플리케이션만 audit event를 쓰면 ra
    세 축과 audit timeline을 독립적으로 노출한다. admin state command는 If-Match와 reason을
    요구하는 단일 atomic PATCH이고, 기존 deactivate endpoint는 retire action으로 대체한다. geometry가
    route/area geometry가 subtype table에 분리돼 core predicate를 직접 partial GiST로 만들 수 없으므로,
-   그 두 subtype에만 core tuple trigger가 갱신하는 `public_ready` projection flag를 둔다. state procedure와
-   subtype insert/reattachment trigger는 Feature row를 `FOR UPDATE`로 잠근 뒤 flag를 강제 산출한다.
+   그 두 subtype에만 core tuple trigger가 갱신하는 `public_ready` projection flag를 둔다. 새 subtype
+   attach만 Feature row를 `FOR UPDATE`로 잠가 current tuple에서 flag를 산출한다. 이미 연결된 subtype은
+   `feature_id`/identity를 DB에서 immutable로 막고 payload·geometry update는 cache를 보존하며, core
+   axis trigger만 existing cache를 바꾼다. 그러므로 route/area UPDATE가 parent lock을 기다리고 state
+   transition이 subtype lock을 기다리는 역순 tuple cycle(`40P01`)이 구조적으로 사라진다.
    `WHERE public_ready` GiST는 performance cache일 뿐 state 정본이 아니며 public query는 core/view를
    최종 visibility fence로 유지한다. core point와 text/category/keyset index는 3축 partial predicate를
    직접 사용한다. route/area runtime grant는 allowed business column의 column-list만 부여하고
