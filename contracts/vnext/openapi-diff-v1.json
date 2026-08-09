@@ -5,11 +5,11 @@
   "baseline": {
     "admin": {
       "file": "packages/kor-travel-map-api/openapi.json",
-      "sha256": "86bb3a85f85c3258cbdb1f7289ba65c2006c35eb8485b9dee6e80c57279bf47a"
+      "sha256": "74bea5ecf10b91029fa44754af0cb443a873afe0c5fb8c7ddea0a5d621e7e1b4"
     },
     "user": {
       "file": "packages/kor-travel-map-api/openapi.user.json",
-      "sha256": "81f33430acfd7a8ac9d2f1f35e1cb035f2230c5844ef294640c88cb1ae9d6a58"
+      "sha256": "eca7eea1dff7aa1848e50428fb8da5507e4d636c3a979b04859ef43c7f7410e7"
     },
     "service": {
       "file": "packages/kor-travel-map-api/openapi.service.json",
@@ -17,11 +17,6 @@
     }
   },
   "revisions": [
-    {
-      "date": "2026-08-11",
-      "task": "T-VN-38 rebase",
-      "change": "최신 T-VN-33 provider-dataset 정본 위 rebase에 따라 admin baseline SHA를 재고정한다. user/service 바이트와 Wave 2 목표 diff 항목·counts는 변하지 않는다. target ownership reference의 catalog fingerprint 재동결은 target-schema-fingerprints-v1.json이 담당한다."
-    },
     {
       "date": "2026-08-08",
       "task": "T-VN-38C",
