@@ -30,8 +30,8 @@ from kortravelmap.api.ops_dataset_schema import (
     OpsDatasetsGridResponse,
 )
 from kortravelmap.api.ops_dataset_service import (
+    DatasetMutationDisabledError,
     DatasetNotFoundError,
-    OrphanMutationDisabledError,
     ProviderRefreshPolicyRevisionConflict,
     ProviderRefreshPolicyRevisionExhausted,
     ProviderRefreshPolicySourceKindImmutable,
@@ -169,7 +169,7 @@ async def put_dataset_refresh_policy(
         )
     except DatasetNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except OrphanMutationDisabledError as exc:
+    except DatasetMutationDisabledError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={

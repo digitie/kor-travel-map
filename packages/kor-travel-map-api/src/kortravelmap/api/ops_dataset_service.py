@@ -82,7 +82,9 @@ from kortravelmap.api.provider_refresh_schema import (
 from kortravelmap.api.settings import ApiSettings
 
 __all__ = [
+    "DatasetMutationDisabledError",
     "DatasetNotFoundError",
+    "InactiveDatasetMutationDisabledError",
     "OrphanMutationDisabledError",
     "ProviderRefreshPolicyRevisionConflict",
     "ProviderRefreshPolicyRevisionExhausted",
@@ -172,12 +174,31 @@ class DatasetNotFoundError(LookupError):
     """카탈로그·sync state·policy 어디에도 dataset이 없음."""
 
 
-class OrphanMutationDisabledError(RuntimeError):
-    """카탈로그에서 제거된 잔존 row의 mutation 금지."""
+class DatasetMutationDisabledError(RuntimeError):
+    """서버가 조작 불가로 판정한 dataset row의 mutation 금지."""
 
     def __init__(self, reason: str) -> None:
         super().__init__(reason)
         self.mutation_disabled_reason = reason
+
+
+class OrphanMutationDisabledError(DatasetMutationDisabledError):
+    """카탈로그에서 제거된 잔존 row의 mutation 금지."""
+
+
+class InactiveDatasetMutationDisabledError(DatasetMutationDisabledError):
+    """``is_active=false`` dataset의 mutation 금지.
+
+    DB가 이미 같은 규칙을 강제한다 — ``provider_sync.reject_inactive_provider_dataset``
+    트리거가 ``ops.provider_refresh_policies``를 포함한 여러 테이블의 write를
+    ``ERRCODE 23514 / ck_provider_dataset_active_write``로 거부한다. 그런데 API에는
+    대응 분기가 없어 catch-all이 **500 INTERNAL_ERROR**로 만들었다. 상태 오류는
+    상태 오류로 답한다 — offline upload 500을 typed 4xx로 바꿀 때 세운 것과 같은 규칙.
+
+    도달 경로: 카탈로그 조회가 ``active_only=False``라 비활성 dataset도 canonical
+    entry로 통과한다(실측 seed에 1건). refresh 요청은 ``is_refreshable``이 이미
+    ``is_active``를 보므로 막히지만, 정책 PUT에는 그 가드가 없었다.
+    """
 
 
 def _preview_capability(
@@ -239,13 +260,20 @@ def _catalog_state_memberships(
     """
     if not entry.is_refreshable:
         return ((DATASET_WIDE_SYNC_SCOPE, None),)
-    return tuple(
+    memberships = tuple(
         dict.fromkeys(
             (sync_scope, operation.operation_key)
             for operation in entry.enabled_refresh_operations
             for sync_scope in operation.sync_scopes
         )
     )
+    # operation은 있는데 scope 행이 하나도 없으면 위 표현식은 **빈 튜플**이다.
+    # 그 상태로 두면 state까지 없는 dataset이 그리드에서 행 자체가 사라져,
+    # catalog 존재도 integrity issue도 정책도 보이지 않는다. DB는 이 상태를
+    # 허용한다 — ``provider_dataset_operation_scopes``에 "operation당 최소 1행"
+    # 제약이 없어 scope 행을 지우기만 하면 도달한다. 바로 위 분기가 같은 상황에
+    # 자리표시자를 내주므로 이쪽만 fail-open인 것은 설계 누락이다.
+    return memberships or ((DATASET_WIDE_SYNC_SCOPE, None),)
 
 
 def _logical_state_scope(
@@ -635,7 +663,9 @@ def _grid_row(
                 has_policy=policy is not None,
             )
         ),
-        mutable=canonical,
+        # `is_active=false`면 DB 트리거가 write를 거부한다 — 그 사실을 표면에
+        # 반영하지 않으면 UI가 "조작 가능"이라 말한 뒤 서버가 거절한다.
+        mutable=canonical and entry is not None and entry.is_active,
         catalog=(
             _catalog_info(entry)
             if entry is not None
@@ -1048,7 +1078,9 @@ async def load_dataset_detail(
         dataset_key=entry.dataset_key,
         catalog_state="canonical" if canonical else "orphan",
         orphan_reason=orphan_reason,
-        mutable=canonical,
+        # `is_active=false`면 DB 트리거가 write를 거부한다 — 그 사실을 표면에
+        # 반영하지 않으면 UI가 "조작 가능"이라 말한 뒤 서버가 거절한다.
+        mutable=canonical and entry is not None and entry.is_active,
         catalog=(
             _catalog_info(entry)
             if entry is not None
@@ -1124,6 +1156,8 @@ async def upsert_dataset_refresh_policy(
             raise DatasetNotFoundError(
                 f"ops dataset 없음: provider_dataset_id={provider_dataset_id!r}"
             )
+        if not entry.is_active:
+            raise InactiveDatasetMutationDisabledError("provider_dataset_inactive")
         return await upsert_provider_refresh_policy(
             session,
             provider_dataset_id=entry.provider_dataset_id,

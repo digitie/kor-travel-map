@@ -121,7 +121,7 @@ function splitList(value: string): string[] {
 function canonicalCatalogRows(
   response: PipelineDatasetsCatalogResponse | undefined,
 ): CanonicalCatalogRow[] {
-  const rows = new Map<number, CanonicalCatalogRow>();
+  const rows: CanonicalCatalogRow[] = [];
   for (const row of response?.data.items ?? []) {
     const providerDatasetId = (
       row as CatalogRow & { provider_dataset_id?: unknown }
@@ -136,13 +136,17 @@ function canonicalCatalogRows(
     ) {
       continue;
     }
-    rows.set(providerDatasetId, {
-      ...row,
-      provider_dataset_id: providerDatasetId,
-    });
+    rows.push({ ...row, provider_dataset_id: providerDatasetId });
   }
-  return [...rows.values()].sort(
-    (left, right) => left.provider_dataset_id - right.provider_dataset_id,
+  // **membership마다 한 행**이다. 예전에는 `Map<number, row>`로 dataset당 하나만
+  // 남겼는데, 그러면 (a) 남는 행의 `sync_scope`가 임의로 정해지고 (b) 운영자가
+  // 기본이 아닌 allowed scope를 고르면 membership 조회가 실패해 "실행 가능한
+  // refresh operation이 없습니다"라는 **거짓 사유**로 요청이 막혔다.
+  return rows.sort(
+    (left, right) =>
+      left.provider_dataset_id - right.provider_dataset_id ||
+      left.sync_scope.localeCompare(right.sync_scope) ||
+      (left.operation_key ?? "").localeCompare(right.operation_key ?? ""),
   );
 }
 
@@ -185,6 +189,9 @@ function useRequestScopeForm(catalogRows: CanonicalCatalogRow[]) {
   const [scopeType, setScopeType] = useState<ScopeType>("provider_dataset");
   const [scopeProviderDatasetId, setScopeProviderDatasetId] = useState("");
   const [scopeSyncScope, setScopeSyncScope] = useState("");
+  // identity의 세 번째 축. 후보가 하나면 비워 둔 채로 그것이 쓰이고, 형제
+  // operation이 둘 이상일 때만 운영자가 명시한다 — 임의로 고르지 않는다.
+  const [scopeOperationKey, setScopeOperationKey] = useState("");
   const [lon, setLon] = useState("126.9780");
   const [lat, setLat] = useState("37.5665");
   const [radiusKm, setRadiusKm] = useState("5");
@@ -225,6 +232,25 @@ function useRequestScopeForm(catalogRows: CanonicalCatalogRow[]) {
   );
   const effectiveScopeSyncScope =
     scopeSyncScope.trim() || selectedScopeCapability?.default_sync_scope || "";
+  // 고른 (dataset, scope)에 걸린 membership 전부. 형제 operation은 여기서 갈린다 —
+  // `.find()`로 하나를 집으면 운영자가 고르지 않은 operation에 canonical write가
+  // 나간다(그 위험이 이 목록이 존재하는 이유다).
+  const membershipCandidates = useMemo(
+    () =>
+      catalogRows.filter(
+        (row) =>
+          row.provider_dataset_id === Number(scopeProviderDatasetId) &&
+          row.sync_scope === effectiveScopeSyncScope &&
+          typeof row.operation_key === "string" &&
+          row.operation_key.length > 0,
+      ),
+    [catalogRows, effectiveScopeSyncScope, scopeProviderDatasetId],
+  );
+  const effectiveOperationKey =
+    scopeOperationKey.trim() ||
+    (membershipCandidates.length === 1
+      ? (membershipCandidates[0].operation_key ?? "")
+      : "");
 
   const buildScope = useCallback((): RequestScope | string => {
     if (scopeType === "provider_dataset") {
@@ -241,19 +267,17 @@ function useRequestScopeForm(catalogRows: CanonicalCatalogRow[]) {
       }
       // grid 행은 membership 단위다(ADR-088 triple) — dataset만으로 고르면 형제
       // operation 중 아무거나 집는다. 고른 scope에 해당하는 행에서 operation을 읽는다.
-      const membershipRow = catalogRows.find(
-        (row) =>
-          row.provider_dataset_id === providerDatasetId &&
-          row.sync_scope === effectiveScopeSyncScope,
-      );
-      if (!membershipRow?.operation_key) {
+      if (membershipCandidates.length === 0) {
         return "이 dataset/scope에는 실행 가능한 refresh operation이 없습니다.";
+      }
+      if (!effectiveOperationKey) {
+        return "이 dataset/scope에 refresh operation이 둘 이상입니다. operation을 선택하세요.";
       }
       return {
         type: "provider_dataset",
         provider_dataset_id: providerDatasetId,
         sync_scope: effectiveScopeSyncScope,
-        operation_key: membershipRow.operation_key,
+        operation_key: effectiveOperationKey,
       };
     }
     if (scopeType === "center_radius" || scopeType === "sigungu_by_radius") {
@@ -304,8 +328,9 @@ function useRequestScopeForm(catalogRows: CanonicalCatalogRow[]) {
     }
     return "cache target scope 입력을 확인하세요.";
   }, [
-    // `buildScope`가 membership 행을 찾을 때 읽는다(triple로 operation을 고른다).
-    catalogRows,
+    // `buildScope`가 membership을 고를 때 읽는다(triple의 세 번째 축).
+    effectiveOperationKey,
+    membershipCandidates,
     effectiveScopeSyncScope,
     featureIdsText,
     lat,
@@ -323,15 +348,18 @@ function useRequestScopeForm(catalogRows: CanonicalCatalogRow[]) {
   return useMemo(
     () => ({
       buildScope,
+      effectiveOperationKey,
       effectiveScopeSyncScope,
       featureIdsText,
       lat,
       lon,
       maxLat,
       maxLon,
+      membershipCandidates,
       minLat,
       minLon,
       radiusKm,
+      scopeOperationKey,
       scopeProviderDatasetId,
       scopeType,
       moisSelected,
@@ -339,6 +367,7 @@ function useRequestScopeForm(catalogRows: CanonicalCatalogRow[]) {
       selectedScopeCapability,
       syncScopeOptions,
       setFeatureIdsText,
+      setScopeOperationKey,
       setLat,
       setLon,
       setMaxLat,
@@ -352,6 +381,7 @@ function useRequestScopeForm(catalogRows: CanonicalCatalogRow[]) {
     }),
     [
       buildScope,
+      effectiveOperationKey,
       effectiveScopeSyncScope,
       featureIdsText,
       lat,
@@ -359,9 +389,11 @@ function useRequestScopeForm(catalogRows: CanonicalCatalogRow[]) {
       lon,
       maxLat,
       maxLon,
+      membershipCandidates,
       minLat,
       minLon,
       radiusKm,
+      scopeOperationKey,
       scopeProviderDatasetId,
       scopeType,
       selectedCatalogRow,
@@ -704,11 +736,22 @@ const RequestIdentityFields = memo(function RequestIdentityFields({
     setMinLat,
     setMinLon,
     setRadiusKm,
+    setScopeOperationKey,
     setScopeProviderDatasetId,
     setScopeSyncScope,
     setScopeType,
     syncScopeOptions,
+    membershipCandidates,
+    scopeOperationKey,
   } = scopeForm;
+  // 선택 목록은 dataset 단위다 — `catalogRows`는 membership마다 한 행이라 그대로
+  // 쓰면 같은 dataset이 여러 번 나오고 React key가 중복된다.
+  const datasetOptions = catalogRows.filter(
+    (row, index) =>
+      catalogRows.findIndex(
+        (other) => other.provider_dataset_id === row.provider_dataset_id,
+      ) === index,
+  );
   const availableSyncScopes = [
     ...syncScopeOptions,
     ...(selectedScopeCapability?.default_sync_scope
@@ -740,12 +783,13 @@ const RequestIdentityFields = memo(function RequestIdentityFields({
             onChange={(event) => {
               setScopeProviderDatasetId(event.target.value);
               setScopeSyncScope("");
+              setScopeOperationKey("");
             }}
           >
             <NativeSelectOption value="">
               canonical 데이터셋 선택
             </NativeSelectOption>
-            {catalogRows.map((row) => (
+            {datasetOptions.map((row) => (
               <NativeSelectOption
                 key={row.provider_dataset_id}
                 value={String(row.provider_dataset_id)}
@@ -763,7 +807,10 @@ const RequestIdentityFields = memo(function RequestIdentityFields({
             }
             label="sync_scope"
             value={scopeSyncScope}
-            onChange={(event) => setScopeSyncScope(event.target.value)}
+            onChange={(event) => {
+              setScopeSyncScope(event.target.value);
+              setScopeOperationKey("");
+            }}
           >
             {availableSyncScopes.length === 0 ? (
               <NativeSelectOption value="">
@@ -777,6 +824,26 @@ const RequestIdentityFields = memo(function RequestIdentityFields({
               ))
             )}
           </FormSelect>
+          {membershipCandidates.length > 1 ? (
+            // 형제 operation이 있을 때만 뜬다. 평소에는 축이 하나로 결정되므로
+            // 화면을 늘리지 않고, 갈릴 때는 **운영자가 고르게** 한다.
+            <FormSelect
+              hint="이 dataset/scope에 refresh operation이 둘 이상입니다. 어느 operation에 요청할지 고르세요."
+              label="operation_key"
+              value={scopeOperationKey}
+              onChange={(event) => setScopeOperationKey(event.target.value)}
+            >
+              <NativeSelectOption value="">operation 선택</NativeSelectOption>
+              {membershipCandidates.map((row) => (
+                <NativeSelectOption
+                  key={row.operation_key ?? ""}
+                  value={row.operation_key ?? ""}
+                >
+                  {row.operation_key}
+                </NativeSelectOption>
+              ))}
+            </FormSelect>
+          ) : null}
           {selectedCatalogRow ? (
             <p className="text-xs text-muted-foreground">
               canonical membership: {selectedCatalogRow.provider_dataset_id}

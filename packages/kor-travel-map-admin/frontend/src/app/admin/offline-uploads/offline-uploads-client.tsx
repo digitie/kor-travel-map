@@ -566,7 +566,10 @@ function UploadFormPanel({
   const [providerDatasetId, setProviderDatasetId] = useState("");
   // canonical scope만 서버가 받는다. `"default"`는 canonical이 아니라 422다
   // (예전 기본값이었고, 그 상태로 올리면 operation 해석이 실패해 500이 났다).
-  const [syncScope, setSyncScope] = useState("dataset_wide");
+  // 빈 값은 "고른 dataset의 canonical scope를 따른다"는 뜻이다 — 아래
+  // `effectiveSyncScope` 참조. 고정 기본값을 박으면 canonical scope가
+  // `target_grids`/`external_system:*`인 dataset에서 그대로 422가 난다.
+  const [syncScope, setSyncScope] = useState("");
   const createUpload = useCreateOfflineUploadMutation();
   const datasetsQuery = useOpsDatasetCatalog();
   const providerDatasetOptions = useMemo(() => {
@@ -579,16 +582,32 @@ function UploadFormPanel({
     );
   }, [datasetsQuery.data?.data.items]);
   const parsedProviderDatasetId = positiveInteger(providerDatasetId);
+  // 고른 dataset이 실제로 갖고 있는 canonical scope들. grid 행은 membership마다
+  // 하나이므로 여기서 그 dataset의 scope 집합이 그대로 나온다.
+  const scopeOptions = useMemo(() => {
+    const scopes = new Set<string>();
+    for (const row of datasetsQuery.data?.data.items ?? []) {
+      if (row.provider_dataset_id === parsedProviderDatasetId) {
+        scopes.add(row.sync_scope);
+      }
+    }
+    return [...scopes].sort();
+  }, [datasetsQuery.data?.data.items, parsedProviderDatasetId]);
+  const effectiveSyncScope = syncScope.trim() || (scopeOptions[0] ?? "");
   const uploadMissingFields = [
     file === null ? "파일" : null,
     parsedProviderDatasetId === undefined ? "provider dataset ID" : null,
-    syncScope.trim().length === 0 ? "sync scope" : null,
+    effectiveSyncScope.length === 0 ? "sync scope" : null,
   ].filter((item): item is string => item !== null);
 
   const submitUpload = () => {
     if (file === null || parsedProviderDatasetId === undefined) return;
     createUpload.mutate(
-      { file, providerDatasetId: parsedProviderDatasetId, syncScope },
+      {
+        file,
+        providerDatasetId: parsedProviderDatasetId,
+        syncScope: effectiveSyncScope,
+      },
       { onSuccess: (data) => onCreated(data.data.upload_id) },
     );
   };
@@ -628,11 +647,22 @@ function UploadFormPanel({
           ))}
         </datalist>
         <FormField
+          hint={
+            scopeOptions.length > 0
+              ? `이 dataset의 canonical scope: ${scopeOptions.join(", ")}`
+              : "provider dataset을 먼저 고르면 canonical scope가 채워집니다."
+          }
           label="sync scope"
-          placeholder="sync_scope"
+          list="offline-upload-sync-scope-options"
+          placeholder={effectiveSyncScope || "sync_scope"}
           value={syncScope}
           onChange={(event) => setSyncScope(event.target.value)}
         />
+        <datalist id="offline-upload-sync-scope-options">
+          {scopeOptions.map((scope) => (
+            <option key={scope} value={scope} />
+          ))}
+        </datalist>
         <Button
           data-testid="offline-upload-submit"
           disabled={createUpload.isPending || uploadMissingFields.length > 0}

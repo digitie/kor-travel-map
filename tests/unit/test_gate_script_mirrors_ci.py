@@ -33,7 +33,7 @@ _WORKFLOW_DIR = _ROOT / ".github" / "workflows"
 
 #: 이 트리거 중 하나라도 있으면 PR을 막는 워크플로다. ``workflow_dispatch`` 전용은
 #: 수동 실행이라 로컬 미러링 대상이 아니다.
-_BLOCKING_TRIGGERS = ("pull_request", "push")
+_BLOCKING_TRIGGERS = ("pull_request", "push", "merge_group")
 
 #: CI에 있으나 로컬에서 **의도적으로** 돌리지 않는 명령과 그 이유.
 #: 새 항목을 넣을 때는 반드시 이유를 적는다 — 이유 없는 면제가 곧 다음 사각이다.
@@ -42,11 +42,10 @@ _EXEMPT: dict[str, str] = {
         "lint.yml에서 `if: false`다. 이 저장소는 자동 format을 쓰지 않으며 286개 "
         "파일이 재포맷 대상이라 켜면 즉시 red가 된다."
     ),
-    "actions/": "GitHub Action 자체(체크아웃/캐시/업로드)는 게이트가 아니다.",
     "python -m pip install": "의존성 설치는 컨테이너 이미지가 대신한다.",
     "pip install": "의존성 설치는 컨테이너 이미지가 대신한다(위 항목과 같은 이유).",
     "mv ": "coverage 데이터 이동은 job 간 전달용이라 로컬에 대응물이 없다.",
-    "npm@12.0.1 ci": "의존성 설치. 로컬은 이미 설치된 node_modules를 쓴다.",
+    "npx --yes npm@12.0.1 ci": "의존성 설치. 로컬은 이미 설치된 node_modules를 쓴다.",
     "if [ -d tests/fixtures ]": (
         "fixture-replay 스텝은 `if [ -d tests/fixtures ]`로 **자기 자신을 가드**한다. "
         "이 저장소에 tests/fixtures가 없어 CI에서도 echo만 하고 끝난다. 면제 키가 그 "
@@ -71,7 +70,16 @@ def _blocking_workflows() -> list[Path]:
     reusable: set[str] = set()
     for path in candidates:
         text = path.read_text(encoding="utf-8")
-        header = text.split("jobs:", 1)[0]
+        # 헤더는 **열 0의 ``jobs:``**까지다. `text.split("jobs:")`는 주석이나 문자열
+        # 안의 `jobs:` 한 조각에도 잘려, 그 앞에 트리거가 없으면 워크플로가 통째로
+        # 안 보인다(적대 리뷰 8라운드 X5b). 주석 줄은 트리거 근거가 아니다.
+        header_lines: list[str] = []
+        for line in text.splitlines():
+            if re.match(r"^jobs:\s*$", line):
+                break
+            if not line.lstrip().startswith("#"):
+                header_lines.append(line)
+        header = "\n".join(header_lines)
         # `on: pull_request:` 뿐 아니라 `on: [push, pull_request]` 배열도 차단이다.
         if any(
             re.search(rf"(?<![A-Za-z_]){trigger}(?![A-Za-z_])", header)
@@ -162,12 +170,27 @@ def _workflow_commands() -> dict[str, list[str]]:
 
 
 def _is_exempt(command: str) -> bool:
+    """면제는 **명령의 접두**로만 판정한다.
+
+    부분문자열 면제는 밀수 토큰이 된다 — 진짜 차단 스텝을
+    ``bash scripts/verify-x.sh && echo done``이나
+    ``pip install ruff && bash scripts/verify-x.sh``로 적으면 ``echo ``/``pip install``
+    이 명령 **어딘가에** 있다는 이유로 통째로 면제됐다(적대 리뷰 8라운드 X3·X4·X6·X7).
+    면제표의 "echo는 실패를 만들 수 없다"는 서술도 그래서 거짓이었다 — 코드가 하던
+    일은 "echo인 명령"이 아니라 "echo를 포함한 명령"의 면제였다.
+
+    로컬 composite action(``uses ./…``)은 저장소 안의 임의 명령을 돌리므로 게이트다.
+    """
+
     if command.startswith("uses ./"):
-        # 로컬 composite action은 저장소 안의 임의 명령을 돌린다 — 게이트다.
-        # 마켓플레이스 액션 면제 키(`actions/`)가 `./.github/actions/...` 경로에도
-        # 부분문자열로 걸려 함께 면제되던 구멍을 막는다(변이 M8).
         return False
-    return any(marker in command for marker in _EXEMPT)
+    # `&&`로 이어 붙인 명령은 **구간마다** 판정한다. 접두만 보면
+    # `pip install ruff && bash scripts/verify-x6.sh`처럼 면제 명령 뒤에 진짜
+    # 게이트를 붙여 통째로 면제받을 수 있다(X6·X7).
+    segments = [segment.strip() for segment in command.split("&&") if segment.strip()]
+    return bool(segments) and all(
+        any(segment.startswith(marker) for marker in _EXEMPT) for segment in segments
+    )
 
 
 def _identifying_fragments(command: str) -> list[str] | None:
@@ -199,9 +222,17 @@ def _identifying_fragments(command: str) -> list[str] | None:
     if script_call is not None:
         return [script_call.group(1)]
     if command.startswith("pytest "):
-        # coverage 게이팅 플래그도 미러링 대상이다 — 임계가 바뀌면 로컬이 다른
-        # 기준으로 판정한다(변이 I).
-        fragments = [command.split()[1]]
+        # 경로를 **전부** 요구한다. 첫 경로 하나만 보면 로컬이
+        # `pytest tests/unit tests/lint` -> `pytest tests/unit`으로 줄여도 통과한다
+        # (적대 리뷰 8라운드 X1). 같은 축소를 ruff/mypy에는 이미 막아 놓고 pytest만
+        # 빠져 있었다.
+        fragments = [
+            token
+            for token in command.split()[1:]
+            if not token.startswith("-") and "/" in token
+        ]
+        if not fragments:
+            fragments = [command.split()[1]]
         gate = re.search(r"--cov-fail-under=(\d+)", command)
         if gate is not None and gate.group(1) != "0":
             fragments.append(f"--cov-fail-under={gate.group(1)}")
@@ -385,6 +416,72 @@ def test_gate_sources_have_no_invisible_control_characters() -> None:
         raw = path.read_bytes()
         bad = sorted({byte for byte in raw if byte < 0x20 and byte not in allowed})
         assert bad == [], f"{path.name}에 제어문자 {[hex(b) for b in bad]}"
+
+
+def test_documented_integration_coverage_threshold_matches_pyproject() -> None:
+    """스크립트가 적어 둔 integration 합산 임계가 실제 설정과 같아야 한다.
+
+    CI의 integration 스텝은 ``--cov-fail-under``를 주지 않는다 — 임계는
+    ``pyproject.toml``의 ``fail_under``에서 **암묵적으로** 온다. 그래서 조각 감사로는
+    이 축의 drift가 보이지 않는다(적대 리뷰 8라운드 A6). 로컬이 그 합산 게이트를
+    재현하지 못한다는 사실은 스크립트 머리말에 적혀 있고, 여기서는 **적어 둔 숫자가
+    거짓이 되지 않게** 못을 박는다.
+    """
+
+    pyproject = (_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    match = re.search(r"^fail_under\s*=\s*(\d+)", pyproject, flags=re.M)
+    assert match is not None, "pyproject.toml에 fail_under가 없다"
+    header = _SCRIPT.read_text(encoding="utf-8")
+    assert f"fail_under={match.group(1)}" in header, (
+        f"스크립트 머리말의 임계가 pyproject({match.group(1)})와 다르다"
+    )
+
+
+#: 게이트 줄에 있으면 **그 게이트는 실패할 수 없다**. 값과 이유를 함께 둔다.
+_FAILURE_SUPPRESSORS: dict[str, str] = {
+    "|| true": "실패해도 0으로 덮는다.",
+    "|| :": "`:`는 no-op이라 `|| true`와 같다.",
+    "|| exit 0": "실패를 성공 종료로 바꾼다.",
+    "; true": "종료코드가 마지막 명령(`true`)의 것이 된다.",
+    "set +e": "이후 실패가 스크립트 종료코드에 반영되지 않는다.",
+    "--exit-zero": "린터가 발견을 하고도 0으로 끝난다.",
+    "|| echo": "실패를 출력으로 바꿔 삼킨다.",
+}
+
+
+def test_gate_script_does_not_suppress_failures() -> None:
+    """게이트가 **실패할 수 있는지**를 본다.
+
+    미러링 감사는 "CI의 명령이 스크립트에 있는가"만 봤다. 그래서 어떤 게이트든
+    `|| true`를 붙여 무력화해도 조각은 그대로라 침묵했다(적대 리뷰 8라운드
+    X2a·X2c·X9·X10 — mypy/integration/openapi/next build 전부 생존).
+
+    스크립트 자신은 이 실패 모드를 알고 있었다 — `py()` 주석이 "파이프를 걸지 마라,
+    exit code가 마지막 명령의 것이 되어 게이트가 늘 통과한다"고 적어 두었다.
+    아는 것과 검사하는 것은 다르다.
+    """
+
+    offenders: list[str] = []
+    for line in _gate_lines():
+        for marker, reason in _FAILURE_SUPPRESSORS.items():
+            if marker in line:
+                offenders.append(f"{marker} ({reason}): {line.strip()[:100]}")
+    assert offenders == [], (
+        "게이트가 실패를 삼킨다 — 통과해도 근거가 되지 못한다:\n" + "\n".join(offenders)
+    )
+
+
+def test_gate_script_keeps_eslint_warning_budget_at_zero() -> None:
+    """eslint 게이트의 경고 예산이 0에서 벗어나지 않는다.
+
+    로컬이 `--max-warnings=9999`를 덧붙이면 CI와 같은 npm script를 부르면서도
+    판정만 느슨해진다. 조각 일치로는 보이지 않는다(변이 X2b).
+    """
+
+    budgets = re.findall(r"--max-warnings[= ](\d+)", "\n".join(_gate_lines()))
+    assert all(value == "0" for value in budgets), (
+        f"eslint 경고 예산이 0이 아니다: {budgets}"
+    )
 
 
 def test_exempt_entries_state_a_reason() -> None:

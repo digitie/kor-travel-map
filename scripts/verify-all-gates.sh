@@ -15,6 +15,10 @@
 # **의도적으로 제외한 것**(CI에서도 안 돈다):
 #   - `lint.yml` `ruff format --check` — `if: false`. 이 저장소는 자동 format을
 #     쓰지 않는다(286 파일이 재포맷 대상). 켜지면 여기에도 넣어야 한다.
+#   - Playwright e2e — API·DB·admin 서버 기동이 필요해 CI 워크플로에도 없다.
+#     n150에서 돌린다(`docs/dev-environment.md`). **이 스크립트가 green이어도
+#     e2e는 검증되지 않았다.** vitest는 2026-08-09에 CI와 여기 둘 다에 넣었다 —
+#     그 전까지 36파일 285케이스가 어느 게이트에도 걸려 있지 않았다.
 #
 # **여기서 재현 불가한 것**(로컬 하네스의 한계 — 반드시 인지하고 있어야 한다):
 #   - Python 3.11/3.12 매트릭스: 컨테이너는 3.13 하나다.
@@ -71,17 +75,20 @@ py() {
       && cp -r /src/src /src/tests /src/packages /src/contracts /src/alembic \
             /src/scripts /src/.github . ; } \
       || { echo 'FATAL: 소스 복사 실패 — 아래 결과는 낡은 트리의 것이다'; exit 97; }; \
-      cp /src/alembic.ini . 2>/dev/null; $1"
+      cp /src/alembic.ini /src/pyproject.toml . 2>/dev/null; $1"
 }
 
 # `scripts/`와 `.github/`는 위에서 복사한다. 안 하면 test_gate_script_mirrors_ci가
 # 이미지의 낡은 스크립트/워크플로를 읽어, 방금 고쳐도 옛 내용으로 판정한다
 # (실제로 한 번 그렇게 실패했다).
 #
-# 반면 루트 **파일**(package.json / package-lock.json / pyproject.toml /
+# `pyproject.toml`도 복사한다 — coverage `fail_under`와 pytest 설정이 거기 있어서,
+# 이미지의 낡은 사본을 읽으면 로컬이 **다른 기준으로** 판정한다.
+#
+# 반면 나머지 루트 **파일**(package.json / package-lock.json /
 # docker-compose*.yml / .env.example)은 위 복사에
 # 포함되지 않아 **이미지에 구워진 사본**이 쓰인다. 그 파일을 읽는 테스트는 로컬에서
-# false-pass/false-fail이 난다 — 루트 파일을 고쳤다면 이미지를 다시 빌드하라.
+# false-pass/false-fail이 난다 — 그 파일을 고쳤다면 이미지를 다시 빌드하라.
 
 repo() { MSYS_NO_PATHCONV=1 wsl -e bash -lc "cd $WSL_ROOT && $1"; }
 
@@ -101,6 +108,18 @@ doctor_on_native_fs() {
     # `frontend`로 끝나므로 감사기가 이 실행문을 그대로 식별한다 — 주석으로
     # 식별시키던 앞 판은 실행문을 지워도 감사기가 침묵하는 구멍이었다.
     cd /tmp/ktm-gate/frontend && $NPM run doctor
+  "
+}
+
+# vitest 전용: react-doctor와 같은 이유로 네이티브 fs 사본에서 돌린다.
+vitest_on_native_fs() {
+  MSYS_NO_PATHCONV=1 wsl -e bash -lc "
+    set -e
+    rm -rf /tmp/ktm-vitest && mkdir -p /tmp/ktm-vitest/frontend
+    cd $WSL_ROOT/$ADMIN
+    tar -cf - --exclude=node_modules --exclude=.next --exclude=.react-doctor .       | (cd /tmp/ktm-vitest/frontend && tar -xf -)
+    ln -sfn $WSL_ROOT/node_modules /tmp/ktm-vitest/frontend/node_modules
+    cd /tmp/ktm-vitest/frontend && $NPM run test
   "
 }
 
@@ -141,6 +160,8 @@ run_gate "verify:react-doctor-config" repo "$NPM run verify:react-doctor-config"
 # 사람이 무시하게 되고, 그러면 게이트가 없는 것과 같다.
 run_gate "admin react-doctor" doctor_on_native_fs
 run_gate "verify:next-sharp"       repo "$NPM run verify:next-sharp"
+# vitest도 NTFS 마운트에서 느리다(react-doctor와 같은 이유). 네이티브 fs 사본에서 돌린다.
+run_gate "admin vitest" vitest_on_native_fs
 run_gate "admin gen:types:check"   repo "$NPM -w $ADMIN run gen:types:check"
 run_gate "user-client gen:types:check" repo "$NPM -w packages/kor-travel-map-user-client run gen:types:check"
 run_gate "user-client type-check"  repo "$NPM -w packages/kor-travel-map-user-client run type-check"

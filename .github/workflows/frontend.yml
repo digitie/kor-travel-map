@@ -64,6 +64,13 @@ jobs:
       - name: Next/Sharp optimizer ABI smoke
         run: npx --yes npm@12.0.1 run verify:next-sharp
 
+      - name: admin frontend unit tests (vitest)
+        # 이 저장소에는 vitest 스위트 36파일 285케이스가 있는데 **어떤 워크플로도
+        # 돌리지 않았다**(적대 리뷰 8라운드 A5). 테스트가 저장소에 있는 것과
+        # 게이트에 걸려 있는 것은 다른 문제다 — 안 도는 테스트는 없는 것과 같다.
+        # Playwright e2e는 서비스 기동이 필요해 여기 넣지 않는다(n150에서 돈다).
+        run: npx --yes npm@12.0.1 -w packages/kor-travel-map-admin/frontend run test
+
       - name: openapi-typescript drift check
         # T-RV-30: admin frontend가 사용하는 generated OpenAPI 타입 산출물이
         # packages/kor-travel-map-api/openapi.json과 drift 나지 않게 고정한다.

@@ -89,6 +89,24 @@ def _drop_script_lines(*markers: str) -> Callable[[str], str]:
     return mutate
 
 
+def _append_to_gate_line(marker: str, suffix: str) -> Callable[[str], str]:
+    """``marker``를 담은 줄 끝에 ``suffix``를 붙인다(게이트 무력화 변이용)."""
+
+    def mutate(text: str) -> str:
+        out: list[str] = []
+        done = False
+        for line in text.splitlines(keepends=True):
+            if not done and marker in line:
+                stripped = line.rstrip("\r\n")
+                out.append(stripped + suffix + line[len(stripped) :])
+                done = True
+            else:
+                out.append(line)
+        return "".join(out)
+
+    return mutate
+
+
 MUTATIONS: dict[str, tuple[str, Callable[[str], str] | None]] = {
     "A 이름있는 새 스텝": (
         "frontend.yml",
@@ -189,6 +207,73 @@ MUTATIONS: dict[str, tuple[str, Callable[[str], str] | None]] = {
             1,
         ),
     ),
+    # --- 8라운드 적대 리뷰가 설계한 변이 (전부 생존했었다) ---
+    # 부류 1: 게이트가 **실패할 수 없게** 만든다. 조각은 그대로라 미러링 감사는 침묵했다.
+    "X2a mypy core 무력화(|| true)": (
+        "__script__",
+        _append_to_gate_line('run_gate "mypy core"', " || true"),
+    ),
+    "X2c integration 무력화(|| true)": (
+        "__script__",
+        _append_to_gate_line("tail -25 /tmp/g4.log; exit $rc'", " || true"),
+    ),
+    "X9 openapi 무력화(|| true)": (
+        "__script__",
+        _append_to_gate_line('run_gate "OpenAPI drift"', " || true"),
+    ),
+    "X10 next build 무력화(|| true)": (
+        "__script__",
+        _append_to_gate_line('run_gate "admin next build"', " || true"),
+    ),
+    "X2b eslint 경고 예산 완화": (
+        "__script__",
+        lambda text: text.replace(
+            '"$NPM -w $ADMIN run lint"',
+            '"$NPM -w $ADMIN run lint -- --max-warnings=9999"',
+            1,
+        ),
+    ),
+    # 부류 2: 로컬 pytest 경로 축소. ruff/mypy에는 막아 놓고 pytest만 빠져 있었다.
+    "X1 pytest 스위트 축소(tests/lint 제거)": (
+        "__script__",
+        lambda text: text.replace(
+            "python -m pytest tests/unit tests/lint -q",
+            "python -m pytest tests/unit -q",
+            1,
+        ),
+    ),
+    # 부류 3: 면제 키를 부분문자열로 끼워 넣어 **새 차단 스텝을 밀수**한다.
+    "X3 밀수(echo 포함)": (
+        "frontend.yml",
+        _insert_before_node_step(
+            "      - name: fake gate\n"
+            "        run: bash scripts/verify-x3.sh && echo done"
+        ),
+    ),
+    "X4 밀수(.github/actions/ 경로)": (
+        "frontend.yml",
+        _insert_before_node_step(
+            "      - name: fake gate\n"
+            "        run: bash .github/actions/verify-x4.sh"
+        ),
+    ),
+    "X6 밀수(pip install 포함)": (
+        "frontend.yml",
+        _insert_before_node_step(
+            "      - name: fake gate\n"
+            "        run: pip install ruff && bash scripts/verify-x6.sh"
+        ),
+    ),
+    "X7 밀수(mv 포함)": (
+        "frontend.yml",
+        _insert_before_node_step(
+            "      - name: fake gate\n"
+            "        run: mv dist out && bash scripts/verify-x7.sh"
+        ),
+    ),
+    # 부류 4: 차단 워크플로 탐지 회피.
+    "X5b 헤더 주석에 jobs:": ("__jobs_comment__", None),
+    "X8 merge_group 전용 트리거": ("__merge_group__", None),
     "M5 배열 트리거 워크플로": ("__array_trigger__", None),
     "M6 .yaml 확장자 워크플로": ("__yaml_ext__", None),
     "M8 composite action 스텝": (
@@ -215,6 +300,16 @@ def _run(label: str, target: str, mutate: Callable[[str], str] | None) -> bool:
             _NEW_WORKFLOW.replace(
                 "on:\n  pull_request:\n", "on: [push, pull_request]\n"
             ),
+            encoding="utf-8",
+        )
+    elif target == "__jobs_comment__":
+        (WORK / ".github/workflows/security4.yml").write_text(
+            "# 이 워크플로의 jobs: 구성은 아래와 같다\n" + _NEW_WORKFLOW,
+            encoding="utf-8",
+        )
+    elif target == "__merge_group__":
+        (WORK / ".github/workflows/security5.yml").write_text(
+            _NEW_WORKFLOW.replace("  pull_request:\n", "  merge_group:\n"),
             encoding="utf-8",
         )
     elif target == "__yaml_ext__":

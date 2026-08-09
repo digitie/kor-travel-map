@@ -114,21 +114,50 @@ type DatasetSelection = {
    * membership의 operation. API는 refresh operation이 없는 catalog 전용 행에
    * null을 내지만(스키마 참조), UI 내부에서는 빈 문자열로 정규화해 들고 다닌다 —
    * 선택/비교/URL 경로마다 null 분기를 퍼뜨리지 않기 위해서다. 정규화는
-   * `rowOperationKey` 한 곳에서만 한다.
+   * `operationKeyOf` 한 곳에서만 한다.
    */
   operationKey: string;
 };
 
-/** API 경계에서 null을 없앤다 — 이 함수 밖에서는 operation_key를 직접 읽지 않는다. */
-function rowOperationKey(row: OpsDatasetGridRow): string {
-  return row.operation_key ?? "";
+/** API 경계에서 null을 없앤다 — 이 함수 밖에서는 operation_key를 직접 읽지 않는다.
+ *
+ * grid row와 scope state는 **같은 축**이므로 정규화도 같아야 한다. 한쪽만 정규화하면
+ * `null === ""`이 조용히 false가 된다 — 그 상태로 refresh operation이 없는 catalog
+ * 전용 dataset(실측 74개 중 17~18개)의 상세가 통째로 렌더되지 않았다(리뷰 8라운드).
+ * TypeScript는 `string | null === string` 비교를 막지 않으므로 타입 검사도 못 잡는다.
+ */
+function operationKeyOf(value: { operation_key: string | null }): string {
+  return value.operation_key ?? "";
 }
 
-/** text-safe stable tuple key — NUL 문자는 diff를 binary로 만들었다(리뷰 검출). */
+/** membership 동일성 판정을 한 곳에 모은다.
+ *
+ * 조작 가드·scope 표·detail 검증 세 화면이 같은 규칙을 써야 한다. 갈라지면 한
+ * 화면만 조용히 다르게 판정하고, 그 차이는 catalog 전용 행에서만 드러나 눈에
+ * 띄지 않는다.
+ */
+function scopeMatchesSelection(
+  scope: { sync_scope: string; operation_key: string | null },
+  selection: DatasetSelection,
+): boolean {
+  return (
+    scope.sync_scope === selection.syncScope &&
+    operationKeyOf(scope) === selection.operationKey
+  );
+}
+
+/** text-safe stable tuple key — NUL 문자는 diff를 binary로 만들었다(리뷰 검출).
+ *
+ * 구분자 없는 `:` 연결은 못 쓴다 — `external_system:concierge`처럼 scope 값 자체가
+ * `:`를 담으므로 `(scope="external_system:a", op="b")`와
+ * `(scope="external_system", op="a:b")`가 같은 key가 된다. 인코딩 후 `|`로 잇는다.
+ */
+function tupleKey(parts: (string | number)[]): string {
+  return parts.map((part) => encodeURIComponent(String(part))).join("|");
+}
+
 function rowKey(row: OpsDatasetGridRow): string {
-  return [String(row.provider_dataset_id), row.sync_scope, rowOperationKey(row)]
-    .map(encodeURIComponent)
-    .join("|");
+  return tupleKey([row.provider_dataset_id, row.sync_scope, operationKeyOf(row)]);
 }
 
 function selectionFromRow(row: OpsDatasetGridRow): DatasetSelection {
@@ -137,7 +166,7 @@ function selectionFromRow(row: OpsDatasetGridRow): DatasetSelection {
     provider: row.provider,
     datasetKey: row.dataset_key,
     syncScope: row.sync_scope,
-    operationKey: rowOperationKey(row),
+    operationKey: operationKeyOf(row),
   };
 }
 
@@ -145,7 +174,7 @@ function sameRow(row: OpsDatasetGridRow, selection: DatasetSelection): boolean {
   return (
     row.provider_dataset_id === selection.providerDatasetId &&
     row.sync_scope === selection.syncScope &&
-    rowOperationKey(row) === selection.operationKey
+    operationKeyOf(row) === selection.operationKey
   );
 }
 
@@ -1223,10 +1252,8 @@ function RefreshNowSection({
       ? "상세 조회에 실패해 조작을 차단했습니다(fail-closed)."
       : !detail
         ? "상세 정보가 없어 조작을 차단했습니다."
-        : !detail.scopes.some(
-              (scope) =>
-                scope.sync_scope === selection.syncScope &&
-                scope.operation_key === selection.operationKey,
+        : !detail.scopes.some((scope) =>
+              scopeMatchesSelection(scope, selection),
             )
           ? "선택한 exact operation membership이 상세 응답에 없어 조작을 차단했습니다."
           : detail.catalog_state === "orphan"
@@ -1658,10 +1685,8 @@ function HistoryPanel({
   detail: OpsDatasetDetailData | null;
 }) {
   const selectedScope =
-    detail?.scopes.find(
-      (scope) =>
-        scope.sync_scope === selection.syncScope &&
-        scope.operation_key === selection.operationKey,
+    detail?.scopes.find((scope) =>
+      scopeMatchesSelection(scope, selection),
     ) ?? null;
   // C7B 서버가 exact tuple을 cursor/LIMIT 전에 적용한다. 이 페이지에서 다시
   // scope를 거르면 page가 비거나 다음 cursor 의미가 깨지므로 응답을 그대로 쓴다.
@@ -1674,7 +1699,9 @@ function HistoryPanel({
         ariaLabel="sync scope 상태"
         columns={scopeColumns}
         data={detail?.scopes ?? []}
-        getRowId={(scope) => `${scope.sync_scope}:${scope.operation_key}`}
+        getRowId={(scope) =>
+          tupleKey([scope.sync_scope, operationKeyOf(scope)])
+        }
         emptyMessage="sync scope 상태가 없습니다."
         manualSorting={false}
         containerClassName="overflow-auto rounded-xl bg-surface-subtle"
@@ -1785,7 +1812,7 @@ function HistoryPanel({
           // operation 둘을 건드리면 `kind:id`가 같은 두 줄이 나와 row id가
           // 충돌한다(React key 중복, 선택 상태 뒤섞임).
           getRowId={(run) =>
-            `${run.kind}:${run.id}:${run.sync_scope}:${run.operation_key}`
+            tupleKey([run.kind, run.id, run.sync_scope, run.operation_key])
           }
           emptyMessage="최근 실행 기록이 없습니다."
           manualSorting={false}
@@ -1851,11 +1878,7 @@ function DatasetDrawer({
 }) {
   const detailMatchesSelection = Boolean(
     detail &&
-      detail.scopes.some(
-        (scope) =>
-          scope.sync_scope === selection.syncScope &&
-          scope.operation_key === selection.operationKey,
-      ),
+      detail.scopes.some((scope) => scopeMatchesSelection(scope, selection)),
   );
   const verifiedDetail = detailMatchesSelection ? detail : null;
   const [policyDetail, setPolicyDetail] = useState<OpsDatasetDetailData | null>(
@@ -2125,36 +2148,42 @@ function useDatasetsClientController({
         hasLegacySelectionParams,
     );
     if (hasLegacySelectionParams) {
-      return {
-        selection: null,
-        invalid: true,
-      };
+      return { selection: null, invalid: true, ambiguous: false };
     }
-    if (!urlProviderDatasetId || !urlSyncScope || urlOperationKey === null) {
-      return { selection: null, invalid: hasSelectionParams };
+    if (!urlProviderDatasetId || !urlSyncScope) {
+      return { selection: null, invalid: hasSelectionParams, ambiguous: false };
     }
     if (items.length === 0) {
       return {
         selection: null,
         invalid: hasSelectionParams && datasets.data !== undefined,
+        ambiguous: false,
       };
     }
-    const requested = items.find(
+    // ``operation_key``가 **없는** 링크는 축이 덜 적힌 것이지 틀린 것이 아니다.
+    // 유일하게 결정되면 받아들이고, 형제 operation 때문에 둘 이상 남을 때만
+    // 거부한다 — 임의로 하나를 고르지 않는다. 3축을 전부 요구하면 사람이 손으로
+    // 만든 링크와 다른 화면이 남긴 링크가 전부 무효가 된다.
+    const candidates = items.filter(
       (row) =>
         row.provider_dataset_id === urlProviderDatasetId &&
         row.sync_scope === urlSyncScope &&
         // 경계 규약대로 정규화를 거친다 — raw ``operation_key``를 직접 비교하면
         // catalog 행의 null이 URL의 빈 문자열과 어긋난다.
-        rowOperationKey(row) === urlOperationKey,
+        (urlOperationKey === null || operationKeyOf(row) === urlOperationKey),
     );
-    if (!requested) {
+    if (candidates.length === 0) {
       // 잘못된 ID/scope는 같은 provider의 대표 행으로 대체하지 않는다. 잘못된
       // 조작 대상이 열리는 것보다 명시 실패가 안전하다.
-      return { selection: null, invalid: true };
+      return { selection: null, invalid: true, ambiguous: false };
+    }
+    if (candidates.length > 1) {
+      return { selection: null, invalid: true, ambiguous: true };
     }
     return {
-      selection: selectionFromRow(requested),
+      selection: selectionFromRow(candidates[0]),
       invalid: false,
+      ambiguous: false,
     };
   }, [
     datasets.data,
@@ -2554,8 +2583,9 @@ function DatasetsClientView({
           <Alert data-testid="invalid-dataset-deep-link" variant="destructive">
             <AlertTitle>유효하지 않은 데이터셋 링크</AlertTitle>
             <AlertDescription>
-              URL의 provider_dataset_id/sync_scope 조합과 정확히 일치하는 행이 없어
-              상세와 조작을 열지 않았습니다. 목록에서 올바른 행을 선택하세요.
+              {selectionResolution.ambiguous
+                ? "URL의 provider_dataset_id/sync_scope에 해당하는 membership이 둘 이상이라 어느 operation인지 결정할 수 없습니다. operation_key를 함께 지정하거나 목록에서 행을 선택하세요."
+                : "URL의 provider_dataset_id/sync_scope 조합과 정확히 일치하는 행이 없어 상세와 조작을 열지 않았습니다. 목록에서 올바른 행을 선택하세요."}
             </AlertDescription>
           </Alert>
         ) : null}

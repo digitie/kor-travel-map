@@ -161,17 +161,18 @@ function useExecutionTimelineController({
   const loadBatchId = initialLoadBatchId ?? "";
   const parentJobId = initialParentJobId ?? "";
   const providerDatasetIdFilter = positiveInteger(providerDatasetId);
-  const hasExactOperationFilter = Boolean(
-    providerDatasetIdFilter && syncScope.trim() && operationKey.trim(),
-  );
-  const exactProviderDatasetIdFilter = hasExactOperationFilter
-    ? providerDatasetIdFilter
+  // 세 축을 **전부** 요구하면 안 된다. 서버 `_canonical_dataset_filter`는
+  // provider_dataset_id 단독, +sync_scope, +operation_key를 모두 받는다. 예전
+  // 판은 셋이 다 차지 않으면 `provider_dataset_id`까지 버려서, 화면에는 ID가
+  // 적혀 있는데 목록은 **전 시스템의 모든 실행**이었다 — 좁히는 실패가 아니라
+  // 넓히는 실패(fail-open)라 운영자가 남의 실행을 열고 취소할 수 있었다.
+  // 형제 패널 `events-panel.tsx`는 처음부터 이 규칙이었다.
+  const exactProviderDatasetIdFilter = providerDatasetIdFilter;
+  const syncScopeFilter = providerDatasetIdFilter
+    ? syncScope.trim() || undefined
     : undefined;
-  const syncScopeFilter = hasExactOperationFilter
-    ? syncScope.trim()
-    : undefined;
-  const operationKeyFilter = hasExactOperationFilter
-    ? operationKey.trim()
+  const operationKeyFilter = providerDatasetIdFilter
+    ? operationKey.trim() || undefined
     : undefined;
   const filterSignature = JSON.stringify([
     kind,
