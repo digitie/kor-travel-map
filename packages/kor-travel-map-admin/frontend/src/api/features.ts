@@ -718,6 +718,9 @@ function invalidateFeatureStateQueries(
     queryKey: ["admin-feature-detail", featureId],
   });
   void queryClient.invalidateQueries({
+    queryKey: ["admin-feature-correction-basis", featureId],
+  });
+  void queryClient.invalidateQueries({
     queryKey: ["admin-feature-state-transitions", featureId],
   });
 }

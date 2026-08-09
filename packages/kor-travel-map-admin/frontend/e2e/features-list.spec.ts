@@ -288,6 +288,21 @@ async function mockFeaturesList(
       return;
     }
 
+    if (request.method() === "GET" && pathname.endsWith("/revision")) {
+      const featureId = decodeURIComponent(
+        pathname
+          .replace(/^\/v1\/admin\/features\//, "")
+          .replace(/\/revision$/, ""),
+      );
+      await route.fulfill({
+        body: JSON.stringify({ data: { feature_id: featureId, row_revision: 1 } }),
+        contentType: "application/json",
+        headers: { ETag: '"1"' },
+        status: 200,
+      });
+      return;
+    }
+
     // GET list (정확한 pathname). change-requests 등은 매칭하지 않음.
     if (request.method() === "GET" && pathname === LIST_PATH) {
       listSearches.push(url.searchParams);
@@ -532,6 +547,7 @@ test.describe("admin/features list depth", () => {
     });
     const mocks = await mockFeaturesList(page, {
       handler: () => listResponse([activeFeature, retiredFeature]),
+      detail: makeAdminFeatureDetailResponse(activeFeature),
     });
 
     await page.goto("/admin/features");

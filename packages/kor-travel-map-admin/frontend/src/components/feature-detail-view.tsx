@@ -13,7 +13,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import {
   FEATURE_PUBLICATION_STATES,
@@ -960,6 +960,11 @@ function FeatureStatePanel({
   const [providerDatasetId, setProviderDatasetId] = useState("");
   const [sourceEntityKey, setSourceEntityKey] = useState("");
   const [sourceRecordKey, setSourceRecordKey] = useState("");
+
+  useEffect(() => {
+    setPublicationState(feature.publication_state);
+    setQualityState(feature.quality_state);
+  }, [feature.publication_state, feature.quality_state]);
 
   const submitPatch = () => {
     if (!basis.data) return;
