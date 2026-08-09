@@ -6,9 +6,8 @@
    보유하므로 drop).
 2. loser의 ``feature.curation_items``와 전환기 legacy ``curated_features``를 master로
    재지정(같은 collection item 충돌은 master membership을 남긴다).
-3. loser ``feature.features``를 soft-delete(``status='deleted'`` + ``deleted_at``,
-   ADR-017 — place는 하드 삭제 안 함).
-4. loser에 ``ops.feature_overrides`` status 가드를 남겨 provider 재적재 부활을 차단.
+3. loser ``feature.features``를 typed lifecycle procedure로 retire/suppress한다.
+4. loser에 typed lifecycle override를 남겨 provider 재적재 부활을 차단한다.
 5. ``ops.feature_merge_history`` 1행 INSERT(ADR-016 이력 보존).
 6. (``review_id`` 주어지면) ``ops.dedup_review_queue`` 행을 ``status='merged'``로
    전이(pending 행만).
@@ -133,11 +132,11 @@ DELETE FROM provider_sync.source_links WHERE feature_id = :loser
 RETURNING source_entity_key
 """
 
-# master/loser를 잠그면서 **kind까지 같이 읽는다** — cross-kind 병합 fail-close의
-# 입력이다(T-VN-35). 잠금과 같은 문에서 읽으므로 판정과 실행 사이에 kind가
-# 바뀔 수 없다.
+# master/loser를 잠그면서 kind와 lifecycle tuple/revision까지 같이 읽는다.
+# cross-kind 판정과 T-VN-34 transition의 expected revision이 같은 lock snapshot을
+# 쓰므로 실행 사이에 kind/state가 바뀔 수 없다.
 _LOCK_FEATURES_SQL: Final[str] = """
-SELECT feature_id, kind
+SELECT feature_id, kind, lifecycle_state, publication_state, quality_state, row_revision
 FROM feature.features
 WHERE feature_id IN (:master, :loser)
 ORDER BY feature_id
@@ -854,53 +853,29 @@ WHERE feature_id = :loser
 RETURNING curated_feature_id
 """
 
-# loser feature soft-delete (ADR-017).
-#
-# T-VN-35(ADR-086): core-only다 — **loser의 subtype 행은 남는다**. subtype FK는
-# ``ON DELETE CASCADE``지만 여기서 지우는 것은 행이 아니라 ``status``뿐이므로
-# CASCADE가 발동하지 않는다. 이는 의도된 상태다: ADR-017의 무기한 보관(place는
-# 하드 삭제 안 함)이 kind별 typed 값에도 그대로 적용돼야 병합 취소·감사가
-# 가능하다. 위 ``_reject_cross_kind_merge``가 master/loser kind 동일성을
-# 보장하므로 남은 subtype 행이 master의 subtype과 다른 계약을 가리킬 일도 없다.
-_SOFT_DELETE_LOSER_SQL: Final[str] = """
-WITH locked AS (
-    SELECT feature_id, status AS previous_status
-    FROM feature.features
-    WHERE feature_id = :loser
-    FOR UPDATE
-),
-updated AS (
-    UPDATE feature.features AS f
-    SET status = 'deleted', deleted_at = now(), updated_at = now()
-    FROM locked
-    WHERE f.feature_id = locked.feature_id
-      AND locked.previous_status <> 'deleted'
-    RETURNING f.feature_id, locked.previous_status
+_TRANSITION_LOSER_LIFECYCLE_SQL: Final[str] = """
+CALL feature.transition_feature_state(
+    CAST(:feature_id AS text),
+    'retired',
+    'suppressed',
+    CAST(:quality_state AS text),
+    CAST(:expected_row_revision AS bigint),
+    CAST(:state_context AS jsonb),
+    NULL, NULL
 )
-SELECT feature_id, previous_status
-FROM updated
 """
 
-_UPSERT_LOSER_STATUS_OVERRIDE_SQL: Final[str] = """
-INSERT INTO ops.feature_overrides (
-    feature_id, source_record_key, field_path,
-    source_value, override_value, prevent_provider_reactivation,
-    status, reason, created_by
-) VALUES (
-    :loser, NULL, 'status',
-    to_jsonb(CAST(:source_value AS text)),
-    to_jsonb('deleted'::text),
+_AUTHOR_LOSER_LIFECYCLE_OVERRIDE_SQL: Final[str] = """
+CALL feature.author_lifecycle_override(
+    CAST(:feature_id AS text),
+    CAST(:source_lifecycle_state AS text),
+    'retired',
     true,
-    'active', :reason, :merged_by
+    CAST(:reason AS text),
+    CAST(:principal AS text),
+    CAST(:expected_row_revision AS bigint),
+    NULL
 )
-ON CONFLICT (feature_id, field_path) WHERE status = 'active'
-DO UPDATE SET
-    source_value = EXCLUDED.source_value,
-    override_value = EXCLUDED.override_value,
-    prevent_provider_reactivation = true,
-    reason = EXCLUDED.reason,
-    created_by = EXCLUDED.created_by,
-    created_at = now()
 """
 
 _INSERT_HISTORY_SQL: Final[str] = """
@@ -980,16 +955,19 @@ async def apply_feature_merge(
     if master_id == loser_id:
         raise MergeConflictError(f"master와 loser가 같음 — {master_id!r}")
 
-    locked_kinds = {
-        str(row.feature_id): str(row.kind)
-        for row in (
-            await session.execute(
-                text(_LOCK_FEATURES_SQL),
-                {"master": master_id, "loser": loser_id},
-            )
-        ).fetchall()
-    }
+    locked_rows = (
+        await session.execute(
+            text(_LOCK_FEATURES_SQL),
+            {"master": master_id, "loser": loser_id},
+        )
+    ).mappings().all()
+    locked_kinds = {str(row["feature_id"]): str(row["kind"]) for row in locked_rows}
     _reject_cross_kind_merge(locked_kinds, master_id=master_id, loser_id=loser_id)
+    loser_state = next(
+        (row for row in locked_rows if str(row["feature_id"]) == loser_id), None
+    )
+    if loser_state is None:
+        raise MergeConflictError(f"loser feature 없음 — {loser_id!r}")
     (
         await session.execute(
             text(_LOCK_CURATION_LEGACY_PROJECTIONS_SQL),
@@ -1110,21 +1088,40 @@ async def apply_feature_merge(
         text(_MOVE_LEGACY_CURATED_FEATURES_SQL),
         {"master": master_id, "loser": loser_id},
     )
-    soft_deleted = (
-        (await session.execute(text(_SOFT_DELETE_LOSER_SQL), {"loser": loser_id}))
-        .mappings()
-        .first()
+    merge_reason = (reason or "feature merge").strip() or "feature merge"
+    lifecycle_revision = int(loser_state["row_revision"])
+    source_lifecycle = str(loser_state["lifecycle_state"])
+    if source_lifecycle != "retired":
+        transition = (
+            await session.execute(
+                text(_TRANSITION_LOSER_LIFECYCLE_SQL),
+                {
+                    "feature_id": loser_id,
+                    "quality_state": loser_state["quality_state"],
+                    "expected_row_revision": lifecycle_revision,
+                    "state_context": json.dumps(
+                        {
+                            "transition_kind": "merge",
+                            "reason_code": "merge_loser",
+                            "principal": merge_actor,
+                            "causation_ref": review_id,
+                        },
+                        ensure_ascii=False,
+                    ),
+                },
+            )
+        ).mappings().one()
+        lifecycle_revision = int(transition["o_row_revision"])
+    await session.execute(
+        text(_AUTHOR_LOSER_LIFECYCLE_OVERRIDE_SQL),
+        {
+            "feature_id": loser_id,
+            "source_lifecycle_state": source_lifecycle,
+            "reason": merge_reason,
+            "principal": merge_actor,
+            "expected_row_revision": lifecycle_revision,
+        },
     )
-    if soft_deleted is not None:
-        await session.execute(
-            text(_UPSERT_LOSER_STATUS_OVERRIDE_SQL),
-            {
-                "loser": loser_id,
-                "source_value": soft_deleted["previous_status"],
-                "reason": reason,
-                "merged_by": merged_by,
-            },
-        )
     merge_id = (
         await session.execute(
             text(_INSERT_HISTORY_SQL),

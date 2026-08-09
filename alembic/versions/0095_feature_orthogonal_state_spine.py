@@ -37,7 +37,7 @@ DECLARE
     v_dataset_id bigint;
     v_source_entity_key text;
     v_source_record_key text;
-    v_provider_evidence jsonb;
+    v_provider_receipt text;
     v_context jsonb;
 BEGIN
     IF jsonb_typeof(p_context) IS DISTINCT FROM 'object' THEN
@@ -51,7 +51,7 @@ BEGIN
         WHERE key_name NOT IN (
             'transition_kind', 'reason_code', 'principal', 'causation_ref',
             'provider_dataset_id', 'source_entity_key', 'source_record_key',
-            'provider_evidence', 'reactivation_evidence'
+            'reactivation_evidence'
         )
     ) THEN
         RAISE EXCEPTION 'feature state context contains an unknown key'
@@ -82,18 +82,13 @@ BEGIN
            OR jsonb_typeof(p_context -> 'source_entity_key') IS DISTINCT FROM 'string'
            OR btrim(p_context ->> 'source_entity_key') = ''
            OR jsonb_typeof(p_context -> 'source_record_key') IS DISTINCT FROM 'string'
-           OR btrim(p_context ->> 'source_record_key') = ''
-           OR jsonb_typeof(p_context -> 'provider_evidence') IS DISTINCT FROM 'object'
-           OR jsonb_typeof(p_context -> 'provider_evidence' -> 'authoritative_receipt')
-                IS DISTINCT FROM 'string'
-           OR btrim(p_context -> 'provider_evidence' ->> 'authoritative_receipt') = '' THEN
+           OR btrim(p_context ->> 'source_record_key') = '' THEN
                 RAISE EXCEPTION 'provider state context must derive its principal from a dataset'
                 USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_state_transition_context';
         END IF;
         v_dataset_id := (p_context ->> 'provider_dataset_id')::bigint;
         v_source_entity_key := btrim(p_context ->> 'source_entity_key');
         v_source_record_key := btrim(p_context ->> 'source_record_key');
-        v_provider_evidence := p_context -> 'provider_evidence';
         SELECT 'provider:' || dataset.provider || '/' || dataset.dataset_key
           INTO v_principal
           FROM provider_sync.provider_datasets AS dataset
@@ -103,15 +98,15 @@ BEGIN
             RAISE EXCEPTION 'active provider dataset % is required for state transition', v_dataset_id
                 USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_state_transition_context';
         END IF;
-        IF NOT EXISTS (
-            SELECT 1
-            FROM provider_sync.source_records AS record
-            JOIN provider_sync.source_entities AS entity
-              ON entity.source_entity_key = record.source_entity_key
-            WHERE record.source_record_key = v_source_record_key
-              AND record.source_entity_key = v_source_entity_key
-              AND entity.provider_dataset_id = v_dataset_id
-        ) THEN
+        SELECT record.raw_payload_hash
+          INTO v_provider_receipt
+          FROM provider_sync.source_records AS record
+          JOIN provider_sync.source_entities AS entity
+            ON entity.source_entity_key = record.source_entity_key
+         WHERE record.source_record_key = v_source_record_key
+           AND record.source_entity_key = v_source_entity_key
+           AND entity.provider_dataset_id = v_dataset_id;
+        IF v_provider_receipt IS NULL OR btrim(v_provider_receipt) = '' THEN
             RAISE EXCEPTION 'provider state context source does not belong to the active dataset'
                 USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_provider_source_provenance';
         END IF;
@@ -142,7 +137,9 @@ BEGIN
             'provider_dataset_id', v_dataset_id,
             'source_entity_key', v_source_entity_key,
             'source_record_key', v_source_record_key,
-            'provider_evidence', v_provider_evidence
+            'provider_evidence', jsonb_build_object(
+                'authoritative_receipt', v_provider_receipt
+            )
         );
     END IF;
     IF p_context ? 'reactivation_evidence' THEN
@@ -306,7 +303,7 @@ BEGIN
             'legal_dong_code', 'road_name_code', 'road_address_management_no',
             'admin_dong_code', 'sido_code', 'sigungu_code', 'urls',
             'marker_icon', 'marker_color', 'parent_feature_id', 'sibling_group_id',
-            'raw_refs', 'data_origin', 'data_version', 'created_at', 'updated_at'
+            'raw_refs'
         )
     ) OR p_feature ?| ARRAY[
         'status', 'deleted_at', 'user_deleted_at', 'user_deleted_by',
@@ -368,11 +365,9 @@ BEGIN
         p_feature ->> 'parent_feature_id', nullif(p_feature ->> 'sibling_group_id', '')::uuid,
         coalesce(p_feature -> 'raw_refs', '[]'::jsonb), p_lifecycle_state,
         p_publication_state, p_quality_state,
-        coalesce(nullif(btrim(p_feature ->> 'data_origin'), ''), 'provider'),
-        coalesce((p_feature ->> 'data_version')::integer, 0),
+        'provider', 0,
         NULL, NULL, NULL, NULL, NULL, NULL,
-        coalesce((p_feature ->> 'created_at')::timestamptz, clock_timestamp()),
-        coalesce((p_feature ->> 'updated_at')::timestamptz, clock_timestamp())
+        clock_timestamp(), clock_timestamp()
     ) ON CONFLICT (feature_id) DO NOTHING
     RETURNING feature_id, feature_uuid, row_revision
          INTO o_feature_id, o_feature_uuid, o_row_revision;
@@ -476,6 +471,14 @@ BEGIN
        SET lifecycle_state = p_lifecycle_state,
            publication_state = p_publication_state,
            quality_state = p_quality_state,
+           -- T-VN-34C가 legacy status를 제거하기 전까지 merge loser의
+           -- terminal projection은 typed ``merge`` operation에서만 파생한다.
+           -- Runtime caller는 여전히 feature row status를 직접 쓰지 못한다.
+           status = CASE WHEN p_context ->> 'transition_kind' = 'merge'
+                         THEN 'deleted' ELSE status END,
+           deleted_at = CASE WHEN p_context ->> 'transition_kind' = 'merge'
+                             THEN COALESCE(deleted_at, clock_timestamp())
+                             ELSE deleted_at END,
            updated_at = clock_timestamp()
      WHERE feature_id = p_feature_id
      RETURNING feature_id, row_revision INTO o_feature_id, o_row_revision;
@@ -622,6 +625,222 @@ BEGIN
         btrim(p_operator)
     FROM feature.features_detailed AS detailed
     WHERE detailed.feature_id = p_feature_id;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'feature % has no detailed snapshot', p_feature_id
+            USING ERRCODE = 'P0002';
+    END IF;
+END;
+$$;
+"""
+
+
+_LIFECYCLE_OVERRIDE_AUTHOR_PROCEDURE_SQL = r"""
+CREATE PROCEDURE feature.author_lifecycle_override(
+    IN p_feature_id text,
+    IN p_source_lifecycle_state text,
+    IN p_override_lifecycle_state text,
+    IN p_prevent_provider_reactivation boolean,
+    IN p_reason text,
+    IN p_principal text,
+    IN p_expected_row_revision bigint,
+    OUT o_row_revision bigint
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $$
+DECLARE
+    v_current feature.features%ROWTYPE;
+BEGIN
+    IF p_source_lifecycle_state NOT IN ('active', 'retired')
+       OR p_override_lifecycle_state NOT IN ('active', 'retired')
+       OR p_prevent_provider_reactivation IS NULL
+       OR p_expected_row_revision IS NULL OR p_expected_row_revision < 1
+       OR coalesce(btrim(p_reason), '') = ''
+       OR coalesce(btrim(p_principal), '') = '' THEN
+        RAISE EXCEPTION 'lifecycle override has invalid typed arguments'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_lifecycle_override_command';
+    END IF;
+
+    SELECT * INTO v_current
+      FROM feature.features
+     WHERE feature_id = p_feature_id
+     FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'feature % does not exist', p_feature_id USING ERRCODE = 'P0002';
+    END IF;
+    IF v_current.row_revision <> p_expected_row_revision THEN
+        RAISE EXCEPTION 'feature % revision changed', p_feature_id USING ERRCODE = '40001';
+    END IF;
+    -- A lifecycle override can only describe the tuple that is currently
+    -- authoritative.  In particular a caller cannot pre-authorize a future
+    -- provider reactivation by choosing an arbitrary override value.
+    IF v_current.lifecycle_state <> p_override_lifecycle_state THEN
+        RAISE EXCEPTION 'lifecycle override value must equal the current lifecycle state'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_lifecycle_override_command';
+    END IF;
+
+    -- ``source_value`` is evidence, never caller-authored history.  It is
+    -- either the currently observed lifecycle (for an existing retired
+    -- feature) or the ``from`` side of the exact audited state transition
+    -- which produced ``p_expected_row_revision``.  The latter is what allows
+    -- an active -> retired lifecycle command to retain its authoritative
+    -- source state without opening a generic override write boundary.
+    IF p_source_lifecycle_state <> v_current.lifecycle_state
+       AND NOT EXISTS (
+            SELECT 1
+            FROM feature.feature_state_transitions AS transition
+            WHERE transition.feature_id = p_feature_id
+              AND transition.row_revision = p_expected_row_revision
+              AND transition.from_lifecycle_state = p_source_lifecycle_state
+              AND transition.to_lifecycle_state = v_current.lifecycle_state
+       ) THEN
+        RAISE EXCEPTION 'lifecycle override source must match current state or exact audited transition'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_lifecycle_override_command';
+    END IF;
+
+    INSERT INTO ops.feature_overrides (
+        feature_id, source_record_key, field_path,
+        source_value, override_value, prevent_provider_reactivation,
+        status, reason, created_by
+    ) VALUES (
+        p_feature_id, NULL, 'lifecycle_state',
+        to_jsonb(p_source_lifecycle_state), to_jsonb(p_override_lifecycle_state),
+        p_prevent_provider_reactivation,
+        'active', btrim(p_reason), btrim(p_principal)
+    ) ON CONFLICT (feature_id, field_path) WHERE status = 'active'
+    DO UPDATE SET
+        source_value = EXCLUDED.source_value,
+        override_value = EXCLUDED.override_value,
+        prevent_provider_reactivation = EXCLUDED.prevent_provider_reactivation,
+        reason = EXCLUDED.reason,
+        created_by = EXCLUDED.created_by,
+        created_at = clock_timestamp();
+
+    o_row_revision := v_current.row_revision;
+END;
+$$;
+"""
+
+
+_LIFECYCLE_OVERRIDE_REVOKE_PROCEDURE_SQL = r"""
+CREATE PROCEDURE feature.revoke_lifecycle_override(
+    IN p_feature_id text,
+    IN p_principal text,
+    IN p_expected_row_revision bigint,
+    OUT o_row_revision bigint
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $$
+DECLARE
+    v_current feature.features%ROWTYPE;
+BEGIN
+    IF coalesce(btrim(p_principal), '') = ''
+       OR p_expected_row_revision IS NULL OR p_expected_row_revision < 1 THEN
+        RAISE EXCEPTION 'lifecycle override revoke has invalid typed arguments'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_lifecycle_override_command';
+    END IF;
+
+    SELECT * INTO v_current
+      FROM feature.features
+     WHERE feature_id = p_feature_id
+     FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'feature % does not exist', p_feature_id USING ERRCODE = 'P0002';
+    END IF;
+    IF v_current.row_revision <> p_expected_row_revision THEN
+        RAISE EXCEPTION 'feature % revision changed', p_feature_id USING ERRCODE = '40001';
+    END IF;
+
+    UPDATE ops.feature_overrides
+       SET status = 'superseded',
+           created_by = btrim(p_principal),
+           created_at = clock_timestamp()
+     WHERE feature_id = p_feature_id
+       AND field_path = 'lifecycle_state'
+       AND status = 'active';
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'feature % has no active lifecycle override', p_feature_id
+            USING ERRCODE = 'P0002';
+    END IF;
+    o_row_revision := v_current.row_revision;
+END;
+$$;
+"""
+
+
+_PROVIDER_VERSION_PROCEDURE_SQL = r"""
+CREATE PROCEDURE feature.materialize_provider_feature_version(
+    IN p_feature_id text
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $$
+DECLARE
+    v_current feature.features%ROWTYPE;
+BEGIN
+    SELECT * INTO v_current
+      FROM feature.features
+     WHERE feature_id = p_feature_id
+     FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'feature % does not exist', p_feature_id USING ERRCODE = 'P0002';
+    END IF;
+
+    -- The runtime supplies only a Feature identifier.  The immutable provider
+    -- version is assembled from the locked DB row and the canonical detailed
+    -- projection, never from a caller-controlled JSON snapshot.
+    INSERT INTO feature.feature_versions (
+        feature_id, version, origin, change_kind, payload, request_id, created_by
+    )
+    SELECT
+        detailed.feature_id,
+        0,
+        'provider',
+        'load',
+        jsonb_build_object(
+            'feature_id', detailed.feature_id,
+            'feature_uuid', detailed.feature_uuid,
+            'kind', detailed.kind,
+            'name', detailed.name,
+            'category', detailed.category,
+            'lon', x_extension.ST_X(detailed.coord),
+            'lat', x_extension.ST_Y(detailed.coord),
+            'coord_precision_digits', detailed.coord_precision_digits,
+            'address', detailed.address,
+            'legal_dong_code', detailed.legal_dong_code,
+            'road_name_code', detailed.road_name_code,
+            'road_address_management_no', detailed.road_address_management_no,
+            'admin_dong_code', detailed.admin_dong_code,
+            'sido_code', detailed.sido_code,
+            'sigungu_code', detailed.sigungu_code,
+            'urls', detailed.urls,
+            'marker_icon', detailed.marker_icon,
+            'marker_color', detailed.marker_color,
+            'parent_feature_id', detailed.parent_feature_id,
+            'sibling_group_id', detailed.sibling_group_id,
+            'raw_refs', detailed.raw_refs,
+            'detail', detailed.detail,
+            'status', detailed.status,
+            'data_origin', detailed.data_origin,
+            'data_version', detailed.data_version,
+            'created_at', detailed.created_at,
+            'updated_at', detailed.updated_at
+        ),
+        NULL,
+        'provider'
+    FROM feature.features_detailed AS detailed
+    WHERE detailed.feature_id = p_feature_id
+    ON CONFLICT (feature_id, version) DO UPDATE SET
+        payload = EXCLUDED.payload,
+        origin = EXCLUDED.origin,
+        change_kind = EXCLUDED.change_kind,
+        request_id = EXCLUDED.request_id,
+        created_by = EXCLUDED.created_by,
+        created_at = clock_timestamp();
     IF NOT FOUND THEN
         RAISE EXCEPTION 'feature % has no detailed snapshot', p_feature_id
             USING ERRCODE = 'P0002';
@@ -931,12 +1150,28 @@ def upgrade() -> None:
     op.execute(_CREATE_PROCEDURE_SQL)
     op.execute(_TRANSITION_PROCEDURE_SQL)
     op.execute(_USER_PROVENANCE_PROCEDURE_SQL)
+    op.execute(_LIFECYCLE_OVERRIDE_AUTHOR_PROCEDURE_SQL)
+    op.execute(_LIFECYCLE_OVERRIDE_REVOKE_PROCEDURE_SQL)
+    op.execute(_PROVIDER_VERSION_PROCEDURE_SQL)
     op.execute("ALTER FUNCTION feature.prepare_feature_state_context(jsonb, text) OWNER TO ktm_feature_state_procedure_owner")
     op.execute("ALTER PROCEDURE feature.create_feature_with_initial_state(jsonb, text, text, text, jsonb) OWNER TO ktm_feature_state_procedure_owner")
     op.execute("ALTER PROCEDURE feature.transition_feature_state(text, text, text, text, bigint, jsonb) OWNER TO ktm_feature_state_procedure_owner")
     op.execute(
         "ALTER PROCEDURE feature.materialize_user_feature_change_provenance("
         "text, text, uuid, text, text, bigint) OWNER TO ktm_feature_state_procedure_owner"
+    )
+    op.execute(
+        "ALTER PROCEDURE feature.author_lifecycle_override("
+        "text, text, text, boolean, text, text, bigint) "
+        "OWNER TO ktm_feature_state_procedure_owner"
+    )
+    op.execute(
+        "ALTER PROCEDURE feature.revoke_lifecycle_override(text, text, bigint) "
+        "OWNER TO ktm_feature_state_procedure_owner"
+    )
+    op.execute(
+        "ALTER PROCEDURE feature.materialize_provider_feature_version(text) "
+        "OWNER TO ktm_feature_state_procedure_owner"
     )
     op.execute("ALTER FUNCTION feature.write_feature_state_transition() OWNER TO ktm_feature_audit_writer")
     op.execute("ALTER FUNCTION feature.reject_feature_state_transition_mutation() OWNER TO ktm_feature_audit_writer")
@@ -969,17 +1204,23 @@ def upgrade() -> None:
         # 준다(Feature/provenance DML이나 helper EXECUTE 권한은 주지 않는다).
         "GRANT USAGE ON SCHEMA x_extension TO ktm_feature_state_procedure_owner, ktm_feature_runtime",
         "GRANT SELECT, INSERT ON feature.features TO ktm_feature_state_procedure_owner",
+        "GRANT SELECT ON feature.feature_state_transitions TO ktm_feature_state_procedure_owner",
         # 전이 procedure는 세 축과 server-owned `updated_at` timestamp만 쓴다.
-        "GRANT UPDATE (lifecycle_state, publication_state, quality_state, updated_at) "
+        "GRANT UPDATE (lifecycle_state, publication_state, quality_state, "
+        "status, deleted_at, updated_at) "
         "ON feature.features TO ktm_feature_state_procedure_owner",
         # 0080 alias trigger의 INSERT .. ON CONFLICT DO NOTHING은 alias probe를
         # 수행하므로 SELECT와 INSERT가 모두 필요하다.
         "GRANT SELECT, INSERT ON feature.feature_aliases TO ktm_feature_state_procedure_owner",
         "GRANT SELECT ON provider_sync.provider_datasets, provider_sync.source_entities, "
-        "provider_sync.source_records, provider_sync.source_links, ops.feature_overrides "
+        "provider_sync.source_records, provider_sync.source_links "
         "TO ktm_feature_state_procedure_owner",
+        "GRANT SELECT, INSERT, UPDATE (source_value, override_value, "
+        "prevent_provider_reactivation, status, reason, created_by, created_at) "
+        "ON ops.feature_overrides TO ktm_feature_state_procedure_owner",
         "GRANT SELECT ON ops.feature_change_requests TO ktm_feature_state_procedure_owner",
-        "GRANT SELECT, INSERT ON feature.feature_versions TO ktm_feature_state_procedure_owner",
+        "GRANT SELECT, INSERT, UPDATE ON feature.feature_versions "
+        "TO ktm_feature_state_procedure_owner",
         "GRANT SELECT ON feature.features_detailed TO ktm_feature_state_procedure_owner",
         "GRANT UPDATE (data_origin, data_version, user_change_kind, user_change_status, "
         "user_change_request_id, user_deleted_at, user_deleted_by, user_change_reason, updated_at) "
@@ -1003,6 +1244,12 @@ def upgrade() -> None:
         "TO ktm_feature_runtime",
         "GRANT EXECUTE ON PROCEDURE feature.materialize_user_feature_change_provenance("
         "text, text, uuid, text, text, bigint) TO ktm_feature_runtime",
+        "GRANT EXECUTE ON PROCEDURE feature.author_lifecycle_override("
+        "text, text, text, boolean, text, text, bigint) TO ktm_feature_runtime",
+        "GRANT EXECUTE ON PROCEDURE feature.revoke_lifecycle_override(text, text, bigint) "
+        "TO ktm_feature_runtime",
+        "GRANT EXECUTE ON PROCEDURE feature.materialize_provider_feature_version(text) "
+        "TO ktm_feature_runtime",
         "REVOKE INSERT, DELETE, TRUNCATE ON feature.features FROM ktm_feature_runtime",
         "REVOKE ALL ON feature.feature_versions FROM ktm_feature_runtime",
         "REVOKE UPDATE (lifecycle_state, publication_state, quality_state, status, deleted_at, "
@@ -1022,6 +1269,11 @@ def upgrade() -> None:
         "FROM PUBLIC",
         "REVOKE ALL ON PROCEDURE feature.materialize_user_feature_change_provenance("
         "text, text, uuid, text, text, bigint) FROM PUBLIC",
+        "REVOKE ALL ON PROCEDURE feature.author_lifecycle_override("
+        "text, text, text, boolean, text, text, bigint) FROM PUBLIC",
+        "REVOKE ALL ON PROCEDURE feature.revoke_lifecycle_override(text, text, bigint) "
+        "FROM PUBLIC",
+        "REVOKE ALL ON PROCEDURE feature.materialize_provider_feature_version(text) FROM PUBLIC",
     ):
         op.execute(statement)
 

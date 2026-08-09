@@ -76,12 +76,10 @@ def _provider_membership(
     *,
     entity_key: str = "entity:17",
     record_key: str = "record:17",
-    receipt: str = "receipt:17",
 ) -> feature_repo._ProviderSourceMembership:
     return feature_repo._ProviderSourceMembership(
         source_entity_key=entity_key,
         source_record_key=record_key,
-        authoritative_receipt=receipt,
     )
 
 
@@ -146,6 +144,10 @@ def test_provider_procedure_payload_excludes_legacy_state_columns() -> None:
     assert "status" not in payload
     assert "deleted_at" not in payload
     assert "geom_wkt" not in payload
+    assert "data_origin" not in payload
+    assert "data_version" not in payload
+    assert "created_at" not in payload
+    assert "updated_at" not in payload
     assert payload["feature_id"] == "place:abc123"
     assert payload["address"] == json.loads(params["address"])
     assert payload["urls"] == json.loads(params["urls"])
@@ -167,7 +169,6 @@ def test_provider_state_context_is_dataset_derived_and_never_sends_principal() -
         "provider_dataset_id": 17,
         "source_entity_key": "entity:17",
         "source_record_key": "record:17",
-        "provider_evidence": {"authoritative_receipt": "receipt:17"},
     }
 
 
@@ -207,7 +208,6 @@ async def test_provider_create_uses_procedure_and_omits_legacy_state(
                     "provider_dataset_id": 17,
                     "source_entity_key": "entity:17",
                     "source_record_key": "record:17",
-                    "provider_evidence": {"authoritative_receipt": "receipt:17"},
                 }
                 return _Result(
                     {

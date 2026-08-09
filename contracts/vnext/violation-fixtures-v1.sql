@@ -1181,3 +1181,11 @@ INSERT INTO feature.feature_state_transitions (
     'provider_sync', 'fixture_provider_initial', 'provider:fixture/state', now(), 1,
     session_user::text, 'fixture', 'fixture'
 );
+
+-- case: feature_state_provider_receipt_caller_supplied
+CALL feature.create_feature_with_initial_state(
+    '{"feature_id":"00000000-0000-0000-0000-000000000022","kind":"place","name":"forged receipt","category_code":"fixture"}'::jsonb,
+    'active', 'draft', 'valid',
+    '{"transition_kind":"provider_sync","reason_code":"fixture_forged_receipt","provider_dataset_id":1,"source_entity_key":"fixture","source_record_key":"fixture","provider_evidence":{"authoritative_receipt":"caller-forged"}}'::jsonb,
+    NULL, NULL, NULL
+);

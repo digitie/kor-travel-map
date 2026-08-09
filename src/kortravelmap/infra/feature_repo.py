@@ -273,10 +273,6 @@ SET
         THEN f.sibling_group_id ELSE :sibling_group_id END,
     raw_refs = CASE WHEN f.data_origin = 'user_request' AND f.data_version > 0
         THEN f.raw_refs ELSE CAST(:raw_refs AS jsonb) END,
-    data_origin = CASE WHEN f.data_origin = 'user_request' AND f.data_version > 0
-        THEN f.data_origin ELSE 'provider' END,
-    data_version = CASE WHEN f.data_origin = 'user_request' AND f.data_version > 0
-        THEN f.data_version ELSE 0 END,
     updated_at = CASE WHEN f.data_origin = 'user_request' AND f.data_version > 0
         THEN f.updated_at ELSE :updated_at END
 WHERE f.feature_id = :feature_id
@@ -297,18 +293,8 @@ RETURNING
 # 넣지 않고, **같은 트랜잭션에서 행 잠금을 잡고 직전 값을 읽어** 파라미터로 넘긴다.
 # ``FOR UPDATE``가 동시 writer를 직렬화하므로 read-then-write 경합이 없다(행이
 # 없으면 잠글 것도 없고 뒤이은 INSERT의 유니크 인덱스가 직렬화한다).
-_UPSERT_PROVIDER_VERSION_SQL: Final[str] = """
-INSERT INTO feature.feature_versions (
-    feature_id, version, origin, change_kind, payload, request_id, created_by
-) VALUES (
-    :feature_id, 0, 'provider', 'load', CAST(:payload AS jsonb), NULL, 'provider'
-)
-ON CONFLICT (feature_id, version) DO UPDATE SET
-    payload = EXCLUDED.payload,
-    origin = EXCLUDED.origin,
-    change_kind = EXCLUDED.change_kind,
-    created_by = EXCLUDED.created_by,
-    created_at = now()
+_MATERIALIZE_PROVIDER_VERSION_SQL: Final[str] = """
+CALL feature.materialize_provider_feature_version(CAST(:feature_id AS text))
 """
 
 # provider entity는 DB dataset identity 아래 payload version과 독립적으로 한 행을 유지한다.
@@ -478,6 +464,7 @@ SELECT
         WHERE fo.feature_id = f.feature_id
           AND fo.field_path = 'lifecycle_state'
           AND fo.status = 'active'
+          AND fo.override_value = '"retired"'::jsonb
           AND fo.prevent_provider_reactivation
     ), false) AS has_provider_reactivation_override
 FROM (VALUES (CAST(:feature_id AS text))) AS wanted(feature_id)
@@ -2290,7 +2277,16 @@ def _provider_feature_payload(params: Mapping[str, Any]) -> str:
             else value
         )
         for key, value in params.items()
-        if key not in {"geom_wkt", "status", "deleted_at"}
+        if key
+        not in {
+            "geom_wkt",
+            "status",
+            "deleted_at",
+            "data_origin",
+            "data_version",
+            "created_at",
+            "updated_at",
+        }
     }
     return json.dumps(payload, ensure_ascii=False, default=str)
 
@@ -2310,17 +2306,9 @@ def _provider_state_context(
             "provider_dataset_id": provider_dataset_id,
             "source_entity_key": source_membership.source_entity_key,
             "source_record_key": source_membership.source_record_key,
-            "provider_evidence": {
-                "authoritative_receipt": source_membership.authoritative_receipt,
-            },
         },
         ensure_ascii=False,
     )
-
-
-def _feature_snapshot(feature: Feature) -> str:
-    """``feature.feature_versions`` version 0 payload용 canonical JSON."""
-    return json.dumps(feature.model_dump(mode="json"), ensure_ascii=False, default=str)
 
 
 def _dump_raw_refs(feature: Feature) -> str:
@@ -2484,8 +2472,8 @@ async def upsert_feature(
             geom_wkt=geom_wkt,
         )
     await session.execute(
-        text(_UPSERT_PROVIDER_VERSION_SQL),
-        {"feature_id": feature.feature_id, "payload": _feature_snapshot(feature)},
+        text(_MATERIALIZE_PROVIDER_VERSION_SQL),
+        {"feature_id": feature.feature_id},
     )
     return inserted
 
@@ -2497,7 +2485,6 @@ class _SourceRecordUpsertState:
     provider_dataset_id: int
     source_entity_key: str
     source_record_key: str
-    authoritative_receipt: str
 
 
 @dataclass(frozen=True)
@@ -2506,7 +2493,6 @@ class _ProviderSourceMembership:
 
     source_entity_key: str
     source_record_key: str
-    authoritative_receipt: str
 
 
 async def _provider_source_membership_for_feature(
@@ -2528,8 +2514,7 @@ async def _provider_source_membership_for_feature(
                 """
                 SELECT
                     entity.source_entity_key,
-                    record.source_record_key,
-                    record.raw_payload_hash
+                    record.source_record_key
                 FROM provider_sync.source_links AS link
                 JOIN provider_sync.source_entities AS entity
                   ON entity.source_entity_key = link.source_entity_key
@@ -2559,7 +2544,6 @@ async def _provider_source_membership_for_feature(
     return _ProviderSourceMembership(
         source_entity_key=str(row["source_entity_key"]),
         source_record_key=str(row["source_record_key"]),
-        authoritative_receipt=str(row["raw_payload_hash"]),
     )
 
 
@@ -2624,7 +2608,6 @@ async def _upsert_source_record_state(
         provider_dataset_id=provider_dataset_id,
         source_entity_key=str(params["source_entity_key"]),
         source_record_key=str(params["source_record_key"]),
-        authoritative_receipt=str(params["raw_payload_hash"]),
     )
 
 
@@ -2844,7 +2827,6 @@ async def load_bundle(session: AsyncSession, bundle: FeatureBundle) -> FeatureLo
             source_membership=_ProviderSourceMembership(
                 source_entity_key=record_state.source_entity_key,
                 source_record_key=record_state.source_record_key,
-                authoritative_receipt=record_state.authoritative_receipt,
             ),
         )
         feature_updated = not feature_inserted
@@ -2857,7 +2839,6 @@ async def load_bundle(session: AsyncSession, bundle: FeatureBundle) -> FeatureLo
         source_membership=_ProviderSourceMembership(
             source_entity_key=record_state.source_entity_key,
             source_record_key=record_state.source_record_key,
-            authoritative_receipt=record_state.authoritative_receipt,
         ),
     )
     return FeatureLoadResult(
@@ -3791,6 +3772,7 @@ global_feature_wins AS MATERIALIZED (
             WHERE fo.feature_id = f.feature_id
               AND fo.field_path = 'lifecycle_state'
               AND fo.status = 'active'
+              AND fo.override_value = '"retired"'::jsonb
               AND fo.prevent_provider_reactivation
         ) AS reactivation_blocked
     FROM feature.features AS f

@@ -2024,7 +2024,9 @@ async def list_admin_features(
 
 
 _DEACTIVATE_FEATURE_STATE_SQL: Final[str] = """
-SELECT feature_id, lifecycle_state, publication_state, quality_state, row_revision
+SELECT
+    feature_id, lifecycle_state, publication_state, quality_state, row_revision,
+    status, deleted_at
 FROM feature.features
 WHERE feature_id = :feature_id
 FOR UPDATE
@@ -2042,27 +2044,21 @@ CALL feature.transition_feature_state(
 )
 """
 
-_UPSERT_LIFECYCLE_STATE_OVERRIDE_SQL: Final[str] = """
-INSERT INTO ops.feature_overrides (
-    feature_id, source_record_key, field_path,
-    source_value, override_value, prevent_provider_reactivation,
-    status, reason, created_by
-) VALUES (
-    :feature_id, NULL, 'lifecycle_state',
-    to_jsonb(CAST(:source_value AS text)),
-    to_jsonb('retired'::text),
-    :prevent_provider_reactivation,
-    'active', :reason, :operator
+_AUTHOR_LIFECYCLE_OVERRIDE_SQL: Final[str] = """
+CALL feature.author_lifecycle_override(
+    CAST(:feature_id AS text),
+    CAST(:source_lifecycle_state AS text),
+    CAST(:override_lifecycle_state AS text),
+    CAST(:prevent_provider_reactivation AS boolean),
+    CAST(:reason AS text),
+    CAST(:operator AS text),
+    CAST(:expected_row_revision AS bigint),
+    NULL
 )
-ON CONFLICT (feature_id, field_path) WHERE status = 'active'
-DO UPDATE SET
-    source_value = EXCLUDED.source_value,
-    override_value = EXCLUDED.override_value,
-    prevent_provider_reactivation = EXCLUDED.prevent_provider_reactivation,
-    reason = EXCLUDED.reason,
-    created_by = EXCLUDED.created_by,
-    created_at = now()
-RETURNING
+"""
+
+_GET_ACTIVE_LIFECYCLE_OVERRIDE_SQL: Final[str] = """
+SELECT
     override_id::text,
     feature_id,
     field_path,
@@ -2071,6 +2067,10 @@ RETURNING
     reason,
     created_by,
     created_at
+FROM ops.feature_overrides
+WHERE feature_id = :feature_id
+  AND field_path = 'lifecycle_state'
+  AND status = 'active'
 """
 
 
@@ -2136,6 +2136,16 @@ async def deactivate_feature(
     if state_row is None:
         return None
 
+    # T-VN-34는 lifecycle state의 새로운 writer이지만, dual-period legacy
+    # tombstone은 admin reactivation/deactivation path에서도 여전히 terminal이다.
+    if state_row["status"] == "deleted" or state_row["deleted_at"] is not None:
+        raise FeatureStateConflict(
+            feature_id=str(state_row["feature_id"]),
+            current_status="deleted",
+            deleted_at=state_row["deleted_at"],
+            target_status="inactive",
+        )
+
     current_lifecycle = str(state_row["lifecycle_state"])
     current_publication = str(state_row["publication_state"])
     current_quality = str(state_row["quality_state"])
@@ -2151,7 +2161,8 @@ async def deactivate_feature(
             target_status="inactive",
         )
 
-    await session.execute(
+    transition = (
+        await session.execute(
         text(_TRANSITION_FEATURE_STATE_SQL),
         {
             "feature_id": feature_id,
@@ -2168,20 +2179,26 @@ async def deactivate_feature(
                 ensure_ascii=False,
             ),
         },
-    )
+        )
+    ).mappings().one()
 
     override = None
     if prevent_provider_reactivation:
+        await session.execute(
+            text(_AUTHOR_LIFECYCLE_OVERRIDE_SQL),
+            {
+                "feature_id": feature_id,
+                "source_lifecycle_state": current_lifecycle,
+                "override_lifecycle_state": "retired",
+                "prevent_provider_reactivation": prevent_provider_reactivation,
+                "reason": reason,
+                "operator": operator,
+                "expected_row_revision": int(transition["o_row_revision"]),
+            },
+        )
         override_row = (
             await session.execute(
-                text(_UPSERT_LIFECYCLE_STATE_OVERRIDE_SQL),
-                {
-                    "feature_id": feature_id,
-                    "source_value": current_lifecycle,
-                    "prevent_provider_reactivation": prevent_provider_reactivation,
-                    "reason": reason,
-                    "operator": operator,
-                },
+                text(_GET_ACTIVE_LIFECYCLE_OVERRIDE_SQL), {"feature_id": feature_id}
             )
         ).mappings().one()
         override = _feature_override(override_row)
@@ -2743,13 +2760,15 @@ async def _apply_change(
                 )
             ).mappings().one()
             await session.execute(
-                text(_UPSERT_LIFECYCLE_STATE_OVERRIDE_SQL),
+                text(_AUTHOR_LIFECYCLE_OVERRIDE_SQL),
                 {
                     "feature_id": request.feature_id,
-                    "source_value": "active",
+                    "source_lifecycle_state": "active",
+                    "override_lifecycle_state": "retired",
                     "prevent_provider_reactivation": True,
                     "reason": request.reason,
                     "operator": operator,
+                    "expected_row_revision": int(transition["o_row_revision"]),
                 },
             )
             await session.execute(

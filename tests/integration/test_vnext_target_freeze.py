@@ -845,7 +845,7 @@ async def test_violation_fixtures_rejected_with_expected_sqlstate(
                 assert expected["constraint"] in str(error), f"case {name}: {error}"
 
 
-async def test_uuid_state_procedure_requires_linked_provider_evidence_and_retired_override(
+async def test_uuid_state_procedure_derives_provider_receipt_and_fences_retired_override(
     freeze_db: asyncpg.Connection,
 ) -> None:
     """final UUID procedure도 current 0095와 같은 provider proof/fence를 강제한다."""
@@ -899,7 +899,6 @@ async def test_uuid_state_procedure_requires_linked_provider_evidence_and_retire
             "provider_dataset_id": dataset_id,
             "source_entity_key": "target-tvn34-entity",
             "source_record_key": "target-tvn34-record",
-            "provider_evidence": {"authoritative_receipt": "target-receipt"},
         }
         await freeze_db.execute("SET ROLE ktm_feature_runtime")
         try:
@@ -934,6 +933,30 @@ async def test_uuid_state_procedure_requires_linked_provider_evidence_and_retire
                 await unlinked_savepoint.rollback()
             assert unlinked.value.sqlstate == "23514"
             assert unlinked.value.constraint_name == "ck_feature_provider_source_provenance"
+
+            forged_savepoint = freeze_db.transaction()
+            await forged_savepoint.start()
+            try:
+                with pytest.raises(asyncpg.PostgresError) as forged:
+                    await freeze_db.fetchrow(
+                        """
+                        CALL feature.transition_feature_state(
+                            $1::uuid, 'retired', 'suppressed', 'valid', 1, $2::jsonb, NULL, NULL
+                        )
+                        """,
+                        feature_id,
+                        {
+                            **provider_context,
+                            "reason_code": "provider_retire",
+                            "provider_evidence": {
+                                "authoritative_receipt": "caller-forged"
+                            },
+                        },
+                    )
+            finally:
+                await forged_savepoint.rollback()
+            assert forged.value.sqlstate == "23514"
+            assert forged.value.constraint_name == "ck_feature_state_transition_context"
         finally:
             await freeze_db.execute("RESET ROLE")
 
@@ -1041,7 +1064,12 @@ async def test_uuid_state_procedure_requires_linked_provider_evidence_and_retire
             "provider_dataset_id": dataset_id,
             "source_entity_key": "target-tvn34-entity",
             "source_record_key": "target-tvn34-record",
-            "provider_evidence": {"authoritative_receipt": "target-receipt"},
+            "provider_evidence": {
+                "authoritative_receipt": (
+                    "00000000000000000000000000000000"
+                    "00000000000000000000000000003490"
+                )
+            },
         }
     finally:
         await transaction.rollback()

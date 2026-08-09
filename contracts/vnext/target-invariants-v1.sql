@@ -253,6 +253,18 @@ WHERE (
             OR jsonb_typeof(provider_evidence) <> 'object'
             OR jsonb_typeof(provider_evidence -> 'authoritative_receipt') <> 'string'
             OR btrim(provider_evidence ->> 'authoritative_receipt') = ''
+            OR NOT EXISTS (
+                SELECT 1
+                FROM provider_sync.source_records AS record
+                JOIN provider_sync.source_entities AS entity
+                  ON entity.source_entity_key = record.source_entity_key
+                WHERE record.source_record_key = feature_state_transitions.source_record_key
+                  AND record.source_entity_key = feature_state_transitions.source_entity_key
+                  AND entity.provider_dataset_id = feature_state_transitions.provider_dataset_id
+                  AND record.raw_payload_hash
+                      = feature_state_transitions.provider_evidence
+                          ->> 'authoritative_receipt'
+            )
         )
       ) OR (
         transition_kind <> 'provider_sync'

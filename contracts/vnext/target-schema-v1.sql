@@ -508,7 +508,7 @@ DECLARE
     v_dataset_id bigint;
     v_source_entity_key text;
     v_source_record_key text;
-    v_provider_evidence jsonb;
+    v_provider_receipt text;
     v_context jsonb;
 BEGIN
     IF jsonb_typeof(p_context) IS DISTINCT FROM 'object' THEN
@@ -520,7 +520,7 @@ BEGIN
         WHERE key_name NOT IN (
             'transition_kind', 'reason_code', 'principal', 'causation_ref',
             'provider_dataset_id', 'source_entity_key', 'source_record_key',
-            'provider_evidence', 'reactivation_evidence'
+            'reactivation_evidence'
         )
     ) THEN
         RAISE EXCEPTION 'feature state context contains an unknown key'
@@ -543,18 +543,13 @@ BEGIN
            OR jsonb_typeof(p_context -> 'source_entity_key') IS DISTINCT FROM 'string'
            OR btrim(p_context ->> 'source_entity_key') = ''
            OR jsonb_typeof(p_context -> 'source_record_key') IS DISTINCT FROM 'string'
-           OR btrim(p_context ->> 'source_record_key') = ''
-           OR jsonb_typeof(p_context -> 'provider_evidence') IS DISTINCT FROM 'object'
-           OR jsonb_typeof(p_context -> 'provider_evidence' -> 'authoritative_receipt')
-                IS DISTINCT FROM 'string'
-           OR btrim(p_context -> 'provider_evidence' ->> 'authoritative_receipt') = '' THEN
+           OR btrim(p_context ->> 'source_record_key') = '' THEN
             RAISE EXCEPTION 'provider state principal must derive from an active dataset'
                 USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_state_transition_context';
         END IF;
         v_dataset_id := (p_context ->> 'provider_dataset_id')::bigint;
         v_source_entity_key := btrim(p_context ->> 'source_entity_key');
         v_source_record_key := btrim(p_context ->> 'source_record_key');
-        v_provider_evidence := p_context -> 'provider_evidence';
         SELECT 'provider:' || provider || '/' || dataset_key INTO v_principal
         FROM provider_sync.provider_datasets
         WHERE provider_dataset_id = v_dataset_id AND is_active;
@@ -562,15 +557,15 @@ BEGIN
             RAISE EXCEPTION 'provider dataset must be active'
                 USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_state_transition_context';
         END IF;
-        IF NOT EXISTS (
-            SELECT 1
-            FROM provider_sync.source_records AS record
-            JOIN provider_sync.source_entities AS entity
-              ON entity.source_entity_key = record.source_entity_key
-            WHERE record.source_record_key = v_source_record_key
-              AND record.source_entity_key = v_source_entity_key
-              AND entity.provider_dataset_id = v_dataset_id
-        ) THEN
+        SELECT record.raw_payload_hash
+          INTO v_provider_receipt
+          FROM provider_sync.source_records AS record
+          JOIN provider_sync.source_entities AS entity
+            ON entity.source_entity_key = record.source_entity_key
+         WHERE record.source_record_key = v_source_record_key
+           AND record.source_entity_key = v_source_entity_key
+           AND entity.provider_dataset_id = v_dataset_id;
+        IF v_provider_receipt IS NULL OR btrim(v_provider_receipt) = '' THEN
             RAISE EXCEPTION 'provider state context source does not belong to the active dataset'
                 USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_provider_source_provenance';
         END IF;
@@ -594,7 +589,9 @@ BEGIN
             'provider_dataset_id', v_dataset_id,
             'source_entity_key', v_source_entity_key,
             'source_record_key', v_source_record_key,
-            'provider_evidence', v_provider_evidence
+            'provider_evidence', jsonb_build_object(
+                'authoritative_receipt', v_provider_receipt
+            )
         );
     END IF;
     IF p_context ? 'reactivation_evidence' THEN

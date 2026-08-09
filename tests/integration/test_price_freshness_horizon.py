@@ -315,7 +315,6 @@ async def test_stale_price_excluded_from_bbox_price_summary(
                 source_entity_id=bundles[0].source_record.source_entity_id,
             ),
             source_record_key=bundles[0].source_record.source_record_key,
-            authoritative_receipt=bundles[0].source_record.raw_payload_hash,
         ),
     )
 

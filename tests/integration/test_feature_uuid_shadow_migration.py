@@ -643,7 +643,6 @@ async def test_provider_upsert_creates_uuid_and_alias_and_is_idempotent(
                 source_entity_id=bundle.source_record.source_entity_id,
             ),
             source_record_key=bundle.source_record.source_record_key,
-            authoritative_receipt=bundle.source_record.raw_payload_hash,
         ),
     )
     assert inserted_again is False

@@ -247,6 +247,11 @@
       "sqlstate": "23514",
       "constraint": "ck_feature_state_transitions_provider_provenance",
       "basis": "ADR-090"
+    },
+    "feature_state_provider_receipt_caller_supplied": {
+      "sqlstate": "23514",
+      "constraint": "ck_feature_state_transition_context",
+      "basis": "ADR-090"
     }
   }
 }

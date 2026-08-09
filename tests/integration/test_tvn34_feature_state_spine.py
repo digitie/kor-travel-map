@@ -233,7 +233,6 @@ async def test_tvn34_all_legal_tuples_procedure_audit_and_runtime_fence(
                     "provider_dataset_id": provider_dataset_id,
                     "source_entity_key": "tvn34-initial-entity",
                     "source_record_key": "tvn34-initial-record",
-                    "provider_evidence": {"authoritative_receipt": "tvn34-initial"},
                 }
             else:
                 context = {
@@ -284,7 +283,7 @@ async def test_tvn34_all_legal_tuples_procedure_audit_and_runtime_fence(
         assert audit_rows[0]["provider_dataset_id"] == provider_dataset_id
         assert audit_rows[0]["source_entity_key"] == "tvn34-initial-entity"
         assert audit_rows[0]["source_record_key"] == "tvn34-initial-record"
-        assert audit_rows[0]["provider_evidence"] == {"authoritative_receipt": "tvn34-initial"}
+        assert audit_rows[0]["provider_evidence"] == {"authoritative_receipt": "d340"}
         assert all(row["feature_uuid"] is not None for row in audit_rows)
         assert all(row["from_lifecycle_state"] is None for row in audit_rows)
         assert all(row["from_publication_state"] is None for row in audit_rows)
@@ -403,7 +402,7 @@ async def test_tvn34_all_legal_tuples_procedure_audit_and_runtime_fence(
     assert audit_identity.provider_dataset_id == provider_dataset_id
     assert audit_identity.source_entity_key == "tvn34-initial-entity"
     assert audit_identity.source_record_key == "tvn34-initial-record"
-    assert audit_identity.provider_evidence == {"authoritative_receipt": "tvn34-initial"}
+    assert audit_identity.provider_evidence == {"authoritative_receipt": "d340"}
 
 
 async def test_tvn34_provider_reactivation_override_is_db_fenced(
@@ -458,7 +457,6 @@ async def test_tvn34_provider_reactivation_override_is_db_fenced(
                 "provider_dataset_id": provider_dataset_id,
                 "source_entity_key": "tvn34-reactivation-entity",
                 "source_record_key": "tvn34-reactivation-record",
-                "provider_evidence": {"authoritative_receipt": "initial-retired"},
             },
         )
     finally:
@@ -479,7 +477,6 @@ async def test_tvn34_provider_reactivation_override_is_db_fenced(
                         "provider_dataset_id": provider_dataset_id,
                         "source_entity_key": "tvn34-reactivation-entity",
                         "source_record_key": "tvn34-reactivation-record",
-                        "provider_evidence": {"authoritative_receipt": "unlinked"},
                     },
                 )
         assert _sqlstate(unlinked.value) == "23514"
@@ -499,23 +496,89 @@ async def test_tvn34_provider_reactivation_override_is_db_fenced(
             """
         )
     )
-    await migrated_session.execute(
-        text(
-            """
-            INSERT INTO ops.feature_overrides (
-                feature_id, field_path, override_value, prevent_provider_reactivation,
-                status, created_by
-            ) VALUES (
-                'tvn34-reactivation-feature', 'lifecycle_state', '"active"'::jsonb,
-                true, 'active', 'admin:tvn34-test'
-            )
-            """
-        )
-    )
-
     await migrated_session.execute(text("SET ROLE ktm_feature_runtime"))
     try:
-        # active value override는 provider reingest를 막지 않는다.
+        with pytest.raises(DBAPIError) as forged_receipt:
+            async with migrated_session.begin_nested():
+                await _call_transition(
+                    migrated_session,
+                    feature_id="tvn34-reactivation-feature",
+                    state=("active", "suppressed", "valid"),
+                    expected_revision=1,
+                    context={
+                        "transition_kind": "provider_sync",
+                        "reason_code": "provider_reappeared",
+                        "provider_dataset_id": provider_dataset_id,
+                        "source_entity_key": "tvn34-reactivation-entity",
+                        "source_record_key": "tvn34-reactivation-record",
+                        "provider_evidence": {
+                            "authoritative_receipt": "caller-forged"
+                        },
+                    },
+                )
+        assert _sqlstate(forged_receipt.value) == "23514"
+        assert _constraint_name(forged_receipt.value) == "ck_feature_state_transition_context"
+
+        # lifecycle override의 source_value도 caller history가 아니다. Initial
+        # retired row에는 active -> retired audit가 없으므로 임의 active source를
+        # 기록하려는 command는 거부한다.
+        with pytest.raises(DBAPIError) as forged_override_source:
+            async with migrated_session.begin_nested():
+                await migrated_session.execute(
+                    text(
+                        """
+                        CALL feature.author_lifecycle_override(
+                            'tvn34-reactivation-feature', 'active', 'retired', true,
+                            'forged source history', 'admin:tvn34-test', 1, NULL
+                        )
+                        """
+                    )
+                )
+        assert _sqlstate(forged_override_source.value) == "23514"
+        assert (
+            _constraint_name(forged_override_source.value)
+            == "ck_feature_lifecycle_override_command"
+        )
+
+        await migrated_session.execute(
+            text(
+                """
+                CALL feature.author_lifecycle_override(
+                    'tvn34-reactivation-feature', 'retired', 'retired', true,
+                    'fixture provider fence', 'admin:tvn34-test', 1, NULL
+                )
+                """
+            )
+        )
+        with pytest.raises(DBAPIError) as fenced:
+            async with migrated_session.begin_nested():
+                    await _call_transition(
+                        migrated_session,
+                        feature_id="tvn34-reactivation-feature",
+                        state=("active", "suppressed", "valid"),
+                        expected_revision=1,
+                    context={
+                        "transition_kind": "provider_sync",
+                        "reason_code": "provider_reappeared",
+                        "provider_dataset_id": provider_dataset_id,
+                        "source_entity_key": "tvn34-reactivation-entity",
+                        "source_record_key": "tvn34-reactivation-record",
+                    },
+                )
+        assert _sqlstate(fenced.value) == "23514"
+        assert _constraint_name(fenced.value) == "ck_feature_provider_reactivation_override"
+
+        # override revoke는 current feature lock/revision을 확인하고 provider가
+        # override를 직접 해제할 수 없는 경계를 유지한다.
+        await migrated_session.execute(
+            text(
+                """
+                CALL feature.revoke_lifecycle_override(
+                    'tvn34-reactivation-feature', 'admin:tvn34-test', 1, NULL
+                )
+                """
+            )
+        )
         await _call_transition(
             migrated_session,
             feature_id="tvn34-reactivation-feature",
@@ -527,10 +590,8 @@ async def test_tvn34_provider_reactivation_override_is_db_fenced(
                 "provider_dataset_id": provider_dataset_id,
                 "source_entity_key": "tvn34-reactivation-entity",
                 "source_record_key": "tvn34-reactivation-record",
-                "provider_evidence": {"authoritative_receipt": "reappeared"},
             },
         )
-        # provider tombstone도 same feature→link→entity→record receipt 없이는 못 간다.
         await _call_transition(
             migrated_session,
             feature_id="tvn34-reactivation-feature",
@@ -542,44 +603,18 @@ async def test_tvn34_provider_reactivation_override_is_db_fenced(
                 "provider_dataset_id": provider_dataset_id,
                 "source_entity_key": "tvn34-reactivation-entity",
                 "source_record_key": "tvn34-reactivation-record",
-                "provider_evidence": {"authoritative_receipt": "tombstone-receipt"},
             },
         )
-    finally:
-        with suppress(DBAPIError):
-            await migrated_session.execute(text("RESET ROLE"))
-
-    await migrated_session.execute(
-        text(
-            """
-            UPDATE ops.feature_overrides
-            SET override_value = '"retired"'::jsonb
-            WHERE feature_id = 'tvn34-reactivation-feature'
-              AND field_path = 'lifecycle_state'
-              AND status = 'active'
-            """
-        )
-    )
-    await migrated_session.execute(text("SET ROLE ktm_feature_runtime"))
-    try:
-        with pytest.raises(DBAPIError) as fenced:
-            async with migrated_session.begin_nested():
-                await _call_transition(
-                    migrated_session,
-                    feature_id="tvn34-reactivation-feature",
-                    state=("active", "suppressed", "valid"),
-                    expected_revision=3,
-                    context={
-                        "transition_kind": "provider_sync",
-                        "reason_code": "provider_reappeared",
-                        "provider_dataset_id": provider_dataset_id,
-                        "source_entity_key": "tvn34-reactivation-entity",
-                        "source_record_key": "tvn34-reactivation-record",
-                        "provider_evidence": {"authoritative_receipt": "reappeared"},
-                    },
+        await migrated_session.execute(
+            text(
+                """
+                CALL feature.author_lifecycle_override(
+                    'tvn34-reactivation-feature', 'active', 'retired', true,
+                    'fixture provider fence restored', 'admin:tvn34-test', 3, NULL
                 )
-        assert _sqlstate(fenced.value) == "23514"
-        assert _constraint_name(fenced.value) == "ck_feature_provider_reactivation_override"
+                """
+            )
+        )
     finally:
         with suppress(DBAPIError):
             await migrated_session.execute(text("RESET ROLE"))
@@ -606,6 +641,10 @@ async def test_tvn34_provider_reactivation_override_is_db_fenced(
         ("user_change_status", "applied"),
         ("user_change_request_id", "00000000-0000-0000-0000-000000003495"),
         ("user_change_reason", "forbidden runtime input"),
+        ("data_origin", "user_request"),
+        ("data_version", "999999"),
+        ("created_at", "2000-01-01T00:00:00Z"),
+        ("updated_at", "2000-01-01T00:00:00Z"),
     ],
 )
 async def test_tvn34_runtime_create_rejects_legacy_and_user_provenance_payload_keys(

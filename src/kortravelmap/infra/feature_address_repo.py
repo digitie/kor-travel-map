@@ -81,32 +81,6 @@ _COORD_SET_FRAGMENT: Final[str] = (
     "), 4326)"
 )
 
-# admin_feature_repo._UPSERT_STATUS_OVERRIDE_SQL과 동일한 ON CONFLICT 규칙
-# (feature_id, field_path) WHERE status='active'. source_value/override_value는
-# jsonb로 직렬화해 보존한다.
-_UPSERT_OVERRIDE_SQL: Final[str] = """
-INSERT INTO ops.feature_overrides (
-    feature_id, source_record_key, field_path,
-    source_value, override_value, prevent_provider_reactivation,
-    status, reason, created_by
-) VALUES (
-    :feature_id, NULL, :field_path,
-    CAST(:source_value AS jsonb),
-    CAST(:override_value AS jsonb),
-    :prevent_provider_reactivation,
-    'active', :reason, :operator
-)
-ON CONFLICT (feature_id, field_path) WHERE status = 'active'
-DO UPDATE SET
-    source_value = EXCLUDED.source_value,
-    override_value = EXCLUDED.override_value,
-    prevent_provider_reactivation = EXCLUDED.prevent_provider_reactivation,
-    reason = EXCLUDED.reason,
-    created_by = EXCLUDED.created_by,
-    created_at = now()
-"""
-
-
 def _json_dict(value: Any) -> dict[str, Any]:
     if isinstance(value, str):
         value = json.loads(value)
@@ -160,12 +134,13 @@ async def apply_feature_address_override(
     operator: str | None = None,
     prevent_provider_reactivation: bool = True,
 ) -> FeatureAddressOverrideResult | None:
-    """feature 주소/좌표를 덮어쓰고 ``ops.feature_overrides`` active row를 남긴다.
+    """feature 주소/좌표를 덮어쓴다.
 
     제공된(``None``이 아닌) 필드만 갱신한다. 좌표는 ``lon``/``lat`` 둘 다 주어야
-    하며, 변경된 field_path마다 override row(``source_value`` = 직전 값)를 upsert한다.
-    feature가 없으면 ``None``(라우터에서 404). 변경할 필드가 하나도 없으면
-    ``ValueError``. commit은 호출자 책임.
+    한다. T-VN-34A는 runtime의 범용 ``ops.feature_overrides`` DML을 폐쇄한다.
+    lifecycle 외 field override는 T-VN-36 effective projection writer가 단일화할
+    때까지 이 경로에서 새로 만들지 않는다. feature가 없으면 ``None``(라우터에서
+    404). 변경할 필드가 하나도 없으면 ``ValueError``. commit은 호출자 책임.
     """
     if lon is None and lat is None:
         coord_update = False
@@ -185,7 +160,8 @@ async def apply_feature_address_override(
     if not has_mutation:
         raise ValueError("덮어쓸 주소/좌표 필드가 최소 1개 필요함")
 
-    # 직전 값 보존을 위해 row를 잠그고 현재 스냅샷을 읽는다.
+    # Feature 행 lock은 core write의 TOCTOU를 막는다. generic override write는
+    # T-VN-36 소유라 여기서 재도입하지 않는다.
     locked = (
         await session.execute(
             text(_LOCK_SNAPSHOT_SQL),
@@ -194,53 +170,37 @@ async def apply_feature_address_override(
     ).one_or_none()
     if locked is None:
         return None
-    previous = _row_to_snapshot(locked)
-
     set_fragments: list[str] = ["updated_at = now()"]
     params: dict[str, Any] = {"feature_id": feature_id}
-    # field_path → (직전 값, 새 값) — override row 보존용.
-    overrides: list[tuple[str, Any, Any]] = []
+    overridden_fields: list[str] = []
 
     if address is not None:
         set_fragments.append("address = CAST(:address AS jsonb)")
         params["address"] = _dumps(dict(address))
-        overrides.append(("address", previous.address or None, dict(address)))
+        overridden_fields.append("address")
     if coord_update:
         set_fragments.append(_COORD_SET_FRAGMENT)
         params["lon"] = lon
         params["lat"] = lat
-        prev_coord = (
-            {"lon": previous.lon, "lat": previous.lat}
-            if previous.lon is not None and previous.lat is not None
-            else None
-        )
-        overrides.append(("coord", prev_coord, {"lon": lon, "lat": lat}))
+        overridden_fields.append("coord")
     if legal_dong_code is not None:
         set_fragments.append("legal_dong_code = :legal_dong_code")
         params["legal_dong_code"] = legal_dong_code
-        overrides.append(
-            ("legal_dong_code", previous.legal_dong_code, legal_dong_code)
-        )
+        overridden_fields.append("legal_dong_code")
     if sido_code is not None:
         set_fragments.append("sido_code = :sido_code")
         params["sido_code"] = sido_code
-        overrides.append(("sido_code", previous.sido_code, sido_code))
+        overridden_fields.append("sido_code")
     if sigungu_code is not None:
         set_fragments.append("sigungu_code = :sigungu_code")
         params["sigungu_code"] = sigungu_code
-        overrides.append(("sigungu_code", previous.sigungu_code, sigungu_code))
+        overridden_fields.append("sigungu_code")
     if road_address_management_no is not None:
         set_fragments.append(
             "road_address_management_no = :road_address_management_no"
         )
         params["road_address_management_no"] = road_address_management_no
-        overrides.append(
-            (
-                "road_address_management_no",
-                previous.road_address_management_no,
-                road_address_management_no,
-            )
-        )
+        overridden_fields.append("road_address_management_no")
 
     update_sql = (
         "UPDATE feature.features SET "
@@ -251,21 +211,7 @@ async def apply_feature_address_override(
     updated_row = (await session.execute(text(update_sql), params)).one()
     snapshot = _row_to_snapshot(updated_row)
 
-    for field_path, source_value, override_value in overrides:
-        await session.execute(
-            text(_UPSERT_OVERRIDE_SQL),
-            {
-                "feature_id": feature_id,
-                "field_path": field_path,
-                "source_value": _dumps(source_value),
-                "override_value": _dumps(override_value),
-                "prevent_provider_reactivation": prevent_provider_reactivation,
-                "reason": reason,
-                "operator": operator,
-            },
-        )
-
     return FeatureAddressOverrideResult(
         snapshot=snapshot,
-        overridden_fields=tuple(field_path for field_path, _, _ in overrides),
+        overridden_fields=tuple(overridden_fields),
     )

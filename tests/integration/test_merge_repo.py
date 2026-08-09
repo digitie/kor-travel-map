@@ -698,9 +698,20 @@ async def test_merge_from_review_full_flow(seeded: str, migrated_engine: AsyncEn
         ("legacy 충돌 master", "f_master", True),
     ]
     assert loser_memberships == 0
-    # loser soft-delete.
-    assert await _feature_status(migrated_engine, "f_loser") == ("deleted", True)
-    # master는 그대로 active.
+    # loser는 T-VN-34 typed lifecycle transition으로 retire/suppress된다.
+    async with AsyncSession(migrated_engine) as session:
+        loser_axes = (
+            await session.execute(
+                text(
+                    """
+                    SELECT lifecycle_state, publication_state, quality_state
+                    FROM feature.features WHERE feature_id = 'f_loser'
+                    """
+                )
+            )
+        ).one()
+    assert tuple(loser_axes) == ("retired", "suppressed", "valid")
+    # master legacy status는 transition writer가 건드리지 않는다.
     status, _ = await _feature_status(migrated_engine, "f_master")
     assert status == "active"
 
@@ -734,13 +745,13 @@ async def test_merge_from_review_full_flow(seeded: str, migrated_engine: AsyncEn
                     SELECT override_value, prevent_provider_reactivation, reason, created_by
                     FROM ops.feature_overrides
                     WHERE feature_id = 'f_loser'
-                      AND field_path = 'status'
+                      AND field_path = 'lifecycle_state'
                       AND status = 'active'
                     """
                 )
             )
         ).one()
-        assert override[0] == "deleted"
+        assert override[0] == "retired"
         assert override[1] is True
         assert override[2] == "dup"
         assert override[3] == "op-1"

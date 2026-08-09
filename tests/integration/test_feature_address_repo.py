@@ -86,7 +86,8 @@ async def test_snapshot_and_apply_override(migrated_session: AsyncSession) -> No
     assert refreshed is not None
     assert refreshed.sigungu_code == "11140"
 
-    # ops.feature_overrides active row가 field_path별로 남았는지 확인.
+    # T-VN-34A runtime은 generic feature override DML을 폐쇄한다. address core
+    # write는 유지하지만 T-VN-36 writer가 오기 전 새 override는 만들지 않는다.
     rows = (
         await migrated_session.execute(
             text(
@@ -98,15 +99,9 @@ async def test_snapshot_and_apply_override(migrated_session: AsyncSession) -> No
             {"fid": fid},
         )
     ).all()
-    by_path = {row.field_path: row for row in rows}
-    assert {"address", "coord", "legal_dong_code", "sido_code", "sigungu_code"} <= set(
-        by_path
-    )
-    assert by_path["coord"].override_value == {"lon": 126.9784, "lat": 37.5663}
-    assert by_path["legal_dong_code"].source_value == "1111010100"
-    assert by_path["address"].created_by == "tester"
+    assert rows == []
 
-    # 같은 field_path 재적용 — ON CONFLICT 갱신(중복 없음).
+    # 같은 field 재적용도 runtime의 generic override 권한을 되살리지 않는다.
     again = await apply_feature_address_override(
         migrated_session,
         fid,
@@ -125,7 +120,7 @@ async def test_snapshot_and_apply_override(migrated_session: AsyncSession) -> No
             {"fid": fid},
         )
     ).scalar_one()
-    assert active == 1
+    assert active == 0
 
 
 async def test_apply_override_missing_feature_returns_none(

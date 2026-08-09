@@ -176,7 +176,6 @@ def _provider_source_membership(
     return feature_repo._ProviderSourceMembership(
         source_entity_key=f"se-{source_record_key}",
         source_record_key=source_record_key,
-        authoritative_receipt=md5(source_record_key.encode("utf-8")).hexdigest(),
     )
 
 
@@ -314,11 +313,6 @@ async def test_deactivate_creates_typed_override_and_provider_upsert_preserves_r
                             ),
                             "source_entity_key": f"se-sr-{feature_id}",
                             "source_record_key": f"sr-{feature_id}",
-                            "provider_evidence": {
-                                "authoritative_receipt": md5(
-                                    f"sr-{feature_id}".encode()
-                                ).hexdigest()
-                            },
                         },
                         ensure_ascii=False,
                     ),
@@ -578,11 +572,6 @@ async def test_admin_runtime_login_uses_procedures_for_add_update_delete_and_pro
                     "provider_dataset_id": provider_dataset_id,
                     "source_entity_key": f"se-sr-{feature_id}",
                     "source_record_key": f"sr-{feature_id}",
-                    "provider_evidence": {
-                        "authoritative_receipt": md5(
-                            f"sr-{feature_id}".encode()
-                        ).hexdigest()
-                    },
                 },
                 ensure_ascii=False,
             )
