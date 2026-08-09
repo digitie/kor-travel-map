@@ -232,7 +232,6 @@ class CurationFeatureView(BaseModel):
     lon: float | None
     lat: float | None
     address: dict[str, Any]
-    status: str
 
 
 class FeatureCurationGroupView(BaseModel):
@@ -831,7 +830,6 @@ def _group_view(
             lon=row.lon,
             lat=row.lat,
             address=row.address,
-            status=row.status,
         ),
         curations=[_public_item_view(item) for item in row.curations],
         curation_count=len(row.curations),

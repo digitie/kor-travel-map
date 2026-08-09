@@ -146,7 +146,9 @@ class ReviewFeatureDetailRecord(BaseModel):
     kind: str
     name: str
     category: str
-    status: str
+    lifecycle_state: Literal["active", "retired"]
+    publication_state: Literal["draft", "published", "suppressed"]
+    quality_state: Literal["valid", "quarantined"]
     lon: float | None = None
     lat: float | None = None
     address: dict[str, Any]
@@ -278,7 +280,9 @@ def _feature_detail(row: ReviewFeatureDetail) -> ReviewFeatureDetailRecord:
         kind=row.kind,
         name=row.name,
         category=row.category,
-        status=row.status,
+        lifecycle_state=row.lifecycle_state,
+        publication_state=row.publication_state,
+        quality_state=row.quality_state,
         lon=row.lon,
         lat=row.lat,
         address=row.address,

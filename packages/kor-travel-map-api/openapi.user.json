@@ -950,10 +950,6 @@
           "name": {
             "title": "Name",
             "type": "string"
-          },
-          "status": {
-            "title": "Status",
-            "type": "string"
           }
         },
         "required": [
@@ -963,8 +959,7 @@
           "category",
           "lon",
           "lat",
-          "address",
-          "status"
+          "address"
         ],
         "title": "CurationFeatureView",
         "type": "object"
@@ -1210,10 +1205,6 @@
             ],
             "title": "Sigungu Code"
           },
-          "status": {
-            "title": "Status",
-            "type": "string"
-          },
           "updated_at": {
             "format": "date-time",
             "title": "Updated At",
@@ -1233,7 +1224,6 @@
           "address",
           "detail",
           "urls",
-          "status",
           "row_revision",
           "updated_at"
         ],
@@ -1490,10 +1480,6 @@
             "description": "kind=price일 때 provider/domain/product series별 최신 가격 요약.",
             "title": "Price Summary"
           },
-          "status": {
-            "title": "Status",
-            "type": "string"
-          },
           "weather_summary": {
             "anyOf": [
               {
@@ -1512,8 +1498,7 @@
           "name",
           "category",
           "lon",
-          "lat",
-          "status"
+          "lat"
         ],
         "title": "FeatureSummary",
         "type": "object"
@@ -2073,10 +2058,6 @@
           "name": {
             "title": "Name",
             "type": "string"
-          },
-          "status": {
-            "title": "Status",
-            "type": "string"
           }
         },
         "required": [
@@ -2084,7 +2065,6 @@
           "kind",
           "name",
           "category",
-          "status",
           "lon",
           "lat",
           "distance_m"
@@ -8648,27 +8628,6 @@
             }
           },
           {
-            "description": "feature status 반복 필터. 기본 active. 공개 projection(feature.public_features)과 교집합으로만 동작하므로 active 외 값은 빈 결과를 반환한다 (T-VN-04; 파라미터 정리는 T-VN-11/34).",
-            "in": "query",
-            "name": "status",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "items": {
-                    "type": "string"
-                  },
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "feature status 반복 필터. 기본 active. 공개 projection(feature.public_features)과 교집합으로만 동작하므로 active 외 값은 빈 결과를 반환한다 (T-VN-04; 파라미터 정리는 T-VN-11/34).",
-              "title": "Status"
-            }
-          },
-          {
             "description": "primary provider 반복 필터.",
             "in": "query",
             "name": "provider",
@@ -8867,27 +8826,6 @@
               ],
               "description": "category code 반복 필터.",
               "title": "Category"
-            }
-          },
-          {
-            "description": "feature status 반복 필터. 기본 active. 공개 projection(feature.public_features)과 교집합으로만 동작하므로 active 외 값은 빈 결과를 반환한다 (T-VN-04; 파라미터 정리는 T-VN-11/34).",
-            "in": "query",
-            "name": "status",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "items": {
-                    "type": "string"
-                  },
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "feature status 반복 필터. 기본 active. 공개 projection(feature.public_features)과 교집합으로만 동작하므로 active 외 값은 빈 결과를 반환한다 (T-VN-04; 파라미터 정리는 T-VN-11/34).",
-              "title": "Status"
             }
           },
           {

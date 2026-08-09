@@ -33,6 +33,21 @@ def client() -> TestClient:
     return TestClient(create_app(ApiSettings(public_api_key_required=False, vworld_api_key=None)))
 
 
+@pytest.fixture
+def dbless_client(client: TestClient) -> TestClient:
+    """요청 검증 테스트가 runtime DSN에 의존하지 않도록 빈 세션만 주입한다."""
+    from kortravelmap.api.db import get_session
+
+    async def _fake_session() -> AsyncIterator[Any]:
+        yield object()
+
+    client.app.dependency_overrides[get_session] = _fake_session
+    try:
+        yield client
+    finally:
+        client.app.dependency_overrides.clear()
+
+
 def _expected_uuid(feature_id: str) -> str:
     """mock resolver가 돌려줄 결정적 uuid — **테스트 편의 규약**이지 계약이 아니다.
 
@@ -88,6 +103,19 @@ def test_features_routes_mounted_in_openapi(client: TestClient) -> None:
     assert "WeatherBatchResponse" in schemas
     assert "FeatureSearchResponse" in schemas
     assert "FeaturesNearbyResponse" in schemas
+    # T-VN-34C: 공개 projection은 공개 가능 여부를 이미 보장한다. 구 단일
+    # ``status``와 그것을 받아도 아무 효과 없는 filter는 표면에 남기지 않는다.
+    assert "status" not in schemas["FeatureSummary"]["properties"]
+    assert "status" not in schemas["FeatureDetailResponse"]["properties"]
+    assert "status" not in schemas["NearbyFeatureSummary"]["properties"]
+    nearby_parameters = spec["paths"]["/v1/features/nearby"]["get"].get(
+        "parameters", []
+    )
+    target_parameters = spec["paths"]["/v1/features/nearby/by-target"]["get"].get(
+        "parameters", []
+    )
+    assert "status" not in {item["name"] for item in nearby_parameters}
+    assert "status" not in {item["name"] for item in target_parameters}
     batch_responses = spec["paths"]["/v1/features/batch"]["post"]["responses"]
     assert "503" in batch_responses
     assert (
@@ -108,26 +136,31 @@ def test_features_in_bbox_exposes_provider_filter(client: TestClient) -> None:
 
 
 @pytest.mark.unit
-def test_features_nearby_validation(client: TestClient) -> None:
+def test_features_nearby_validation(dbless_client: TestClient) -> None:
     # radius_m 필수 — 누락 시 DB 도달 전 422.
-    assert client.get("/v1/features/nearby", params={"lon": 127.0, "lat": 37.5}).status_code == 422
+    assert (
+        dbless_client.get(
+            "/v1/features/nearby", params={"lon": 127.0, "lat": 37.5}
+        ).status_code
+        == 422
+    )
     # lon 범위 초과 → 422.
     assert (
-        client.get(
+        dbless_client.get(
             "/v1/features/nearby", params={"lon": 200.0, "lat": 37.5, "radius_m": 1000}
         ).status_code
         == 422
     )
     # radius_m must be > 0 → 422.
     assert (
-        client.get(
+        dbless_client.get(
             "/v1/features/nearby", params={"lon": 127.0, "lat": 37.5, "radius_m": 0}
         ).status_code
         == 422
     )
     # invalid sort → 422.
     assert (
-        client.get(
+        dbless_client.get(
             "/v1/features/nearby",
             params={"lon": 127.0, "lat": 37.5, "radius_m": 1000, "sort": "bogus"},
         ).status_code
@@ -221,7 +254,6 @@ def test_get_feature_404_when_notice_is_ended_or_non_latest(
     row = {
         "feature_id": "notice-old",
         "kind": "notice",
-        "status": "active",
         "row_revision": 7,
         "deleted_at": None,
     }
@@ -270,7 +302,6 @@ def test_list_features_maps_bbox_rows(client: TestClient, monkeypatch: pytest.Mo
             "lat": 37.56,
             "marker_icon": "star",
             "marker_color": "P-03",
-            "status": "active",
             "price_summary": None,
         },
         {
@@ -283,7 +314,6 @@ def test_list_features_maps_bbox_rows(client: TestClient, monkeypatch: pytest.Mo
             "lat": 37.57,
             "marker_icon": "star",
             "marker_color": "P-03",
-            "status": "active",
             "price_summary": None,
         },
     ]
@@ -366,7 +396,6 @@ def test_list_features_include_geometry_maps_route_area_rows(
             "lat": 37.5,
             "marker_icon": "park",
             "marker_color": "P-06",
-            "status": "active",
             "geometry": {
                 "type": "LineString",
                 "coordinates": [[127.0, 37.5], [127.1, 37.6]],
@@ -383,7 +412,6 @@ def test_list_features_include_geometry_maps_route_area_rows(
             "lat": 37.7,
             "marker_icon": "park",
             "marker_color": "P-06",
-            "status": "active",
             "geometry": {
                 "type": "Polygon",
                 "coordinates": [
@@ -452,7 +480,6 @@ def test_list_features_default_omits_geometry(
             "lat": 37.56,
             "marker_icon": "star",
             "marker_color": "P-03",
-            "status": "active",
         }
     ]
 
@@ -504,7 +531,6 @@ def test_list_public_features_in_bounds_include_geometry(
             "lat": 37.5,
             "marker_icon": "park",
             "marker_color": "P-06",
-            "status": "active",
             "geometry": {
                 "type": "LineString",
                 "coordinates": [[127.0, 37.5], [127.1, 37.6]],
@@ -562,7 +588,6 @@ def test_list_public_features_in_bounds_uses_envelope(
             "lat": 37.56,
             "marker_icon": "star",
             "marker_color": "P-03",
-            "status": "active",
         }
     ]
 
@@ -620,7 +645,6 @@ def test_get_feature_detail_maps_row(client: TestClient, monkeypatch: pytest.Mon
         "sigungu_code": "11560",
         "marker_icon": "star",
         "marker_color": "P-11",
-        "status": "active",
         "row_revision": 7,
         "parent_feature_id": None,
         "sibling_group_id": None,
@@ -727,7 +751,6 @@ def test_get_feature_accepts_uuid_ref_via_boundary_resolution(
         "sigungu_code": None,
         "marker_icon": None,
         "marker_color": None,
-        "status": "active",
         "row_revision": 3,
         "updated_at": "2026-08-04T00:00:00+09:00",
         "deleted_at": None,
@@ -838,7 +861,6 @@ def test_mois_place_detail_strips_raw_provider_payload(
         "sigungu_code": "11110",
         "marker_icon": "restaurant",
         "marker_color": "P-07",
-        "status": "active",
         "row_revision": 3,
         "updated_at": "2026-05-29T00:00:00+09:00",
         "deleted_at": None,
@@ -911,7 +933,6 @@ def test_get_area_contained_features_maps_rows(
         "sigungu_code": None,
         "marker_icon": None,
         "marker_color": None,
-        "status": "active",
         "updated_at": "2026-05-29T00:00:00+09:00",
         "deleted_at": None,
     }
@@ -926,7 +947,6 @@ def test_get_area_contained_features_maps_rows(
             "lat": 37.51,
             "marker_icon": "star",
             "marker_color": "P-03",
-            "status": "active",
         }
     ]
 
@@ -1153,9 +1173,9 @@ def test_features_batch_returns_exhaustive_typed_items(
 
 @pytest.mark.unit
 def test_features_batch_rejects_duplicate_ids_before_db(
-    client: TestClient,
+    dbless_client: TestClient,
 ) -> None:
-    r = client.post(
+    r = dbless_client.post(
         "/v1/features/batch",
         json={"items": [{"feature_id": "same"}, {"feature_id": "same"}]},
     )
@@ -1284,7 +1304,6 @@ def test_search_features_maps_page_and_requires_scope(
                     lat=37.5796,
                     marker_icon="monument",
                     marker_color="P-01",
-                    status="active",
                     score=1.0,
                     feature_uuid=_expected_uuid("f1"),
                 ),
@@ -1309,6 +1328,7 @@ def test_search_features_maps_page_and_requires_scope(
         # T-VN-32C 값 전환 — 검색 item feature_id 값은 UUID 정본.
         assert body["data"]["items"][0]["feature_id"] == _expected_uuid("f1")
         assert body["data"]["items"][0]["feature_uuid"] == _expected_uuid("f1")
+        assert "status" not in body["data"]["items"][0]
         assert body["meta"]["page"] == {
             "page_size": 50,
             "next_cursor": None,
@@ -1399,10 +1419,10 @@ def test_search_features_maps_typed_cursor_errors(
 
 @pytest.mark.unit
 def test_search_features_rejects_partial_bbox(
-    client: TestClient,
+    dbless_client: TestClient,
 ) -> None:
     # bbox는 4개(min_lon/min_lat/max_lon/max_lat) 모두 지정해야 한다 (T-214e).
-    r = client.get(
+    r = dbless_client.get(
         "/v1/features/search",
         params={"min_lon": 127, "min_lat": 37, "max_lon": 126},
     )

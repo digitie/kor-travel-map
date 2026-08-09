@@ -19,11 +19,14 @@ from kortravelmap.infra.admin_feature_repo import (
     AdminFeatureDetailVersion,
     AdminFeaturePage,
     AdminFeatureRow,
+    AdminFeatureStateConflict,
+    AdminFeatureStateNotFound,
+    AdminFeatureStatePreconditionFailed,
+    AdminFeatureStateTransition,
+    AdminFeatureStateTransitionAudit,
+    AdminFeatureStateTransitionAuditPage,
     FeatureChangeRequest,
-    FeatureDeactivateResult,
-    FeatureOverride,
     FeaturePreconditionFailed,
-    FeatureStateConflict,
 )
 
 from kortravelmap.api.app import create_app
@@ -113,7 +116,9 @@ def _feature_row() -> AdminFeatureRow:
         kind="place",
         name="광화문",
         category="01070300",
-        status="active",
+        lifecycle_state="active",
+        publication_state="published",
+        quality_state="valid",
         lon=126.9769,
         lat=37.5759,
         address_label="서울특별시 종로구",
@@ -142,7 +147,9 @@ def _feature_detail() -> AdminFeatureDetail:
         kind="place",
         name="광화문",
         category="01070300",
-        status="active",
+        lifecycle_state="active",
+        publication_state="published",
+        quality_state="valid",
         lon=126.9769,
         lat=37.5759,
         coord_precision_digits=5,
@@ -164,15 +171,8 @@ def _feature_detail() -> AdminFeatureDetail:
         data_origin="provider",
         data_version=0,
         row_revision=7,
-        user_change_kind=None,
-        user_change_status=None,
-        user_change_request_id=None,
-        user_deleted_at=None,
-        user_deleted_by=None,
-        user_change_reason=None,
         created_at=now,
         updated_at=now,
-        deleted_at=None,
     )
     source = AdminFeatureDetailSource(
         source_entity_key="se-feature-1",
@@ -208,9 +208,9 @@ def _feature_detail() -> AdminFeatureDetail:
     override = AdminFeatureDetailOverride(
         override_id="override-1",
         source_record_key=None,
-        field_path="status",
+        field_path="lifecycle_state",
         source_value="active",
-        override_value="inactive",
+        override_value="retired",
         prevent_provider_reactivation=True,
         status="active",
         reason="운영상 제외",
@@ -258,6 +258,26 @@ def _feature_detail() -> AdminFeatureDetail:
         versions=(version,),
         change_requests=(_change_request(action="update", state="applied"),),
         files=(file,),
+        state_transitions=(
+            AdminFeatureStateTransitionAudit(
+                transition_id=101,
+                from_lifecycle_state="active",
+                from_publication_state="published",
+                from_quality_state="valid",
+                to_lifecycle_state="active",
+                to_publication_state="suppressed",
+                to_quality_state="valid",
+                transition_kind="admin",
+                reason_code="admin_suppress",
+                principal="local-admin",
+                causation_ref="admin:feature-1",
+                provider_dataset_id=None,
+                source_entity_key=None,
+                source_record_key=None,
+                occurred_at=now,
+                row_revision=8,
+            ),
+        ),
     )
 
 
@@ -308,7 +328,10 @@ def test_admin_features_routes_mounted_in_openapi(client: TestClient) -> None:
     assert "/v1/admin/features/change-requests" in spec["paths"]
     assert "/v1/admin/features/change-requests/{request_id}/approve" in spec["paths"]
     assert "/v1/admin/features/change-requests/{request_id}/reject" in spec["paths"]
-    assert "/v1/admin/features/{feature_id}/deactivate" in spec["paths"]
+    assert "/v1/admin/features/{feature_id}/state" in spec["paths"]
+    assert "/v1/admin/features/{feature_id}/state/reactivate" in spec["paths"]
+    assert "/v1/admin/features/{feature_id}/state/transitions" in spec["paths"]
+    assert "/v1/admin/features/{feature_id}/deactivate" not in spec["paths"]
     assert "/v1/admin/features/in-bounds" in spec["paths"]
     assert "/v1/admin/features/{feature_id}/weather" in spec["paths"]
     assert "/v1/admin/features/{feature_id}/price" in spec["paths"]
@@ -316,6 +339,14 @@ def test_admin_features_routes_mounted_in_openapi(client: TestClient) -> None:
     assert "AdminFeatureCreateRequest" in spec["components"]["schemas"]
     assert "AdminFeaturePatchRequest" in spec["components"]["schemas"]
     assert "AdminFeatureChangeResponse" in spec["components"]["schemas"]
+    assert "AdminFeatureStatePatchRequest" in spec["components"]["schemas"]
+    assert "AdminFeatureStateRetireRequest" in spec["components"]["schemas"]
+    assert "AdminFeatureReactivateRequest" in spec["components"]["schemas"]
+    assert "status" not in spec["components"]["schemas"]["AdminFeatureRecord"]["properties"]
+    assert "status" not in spec["components"]["schemas"]["AdminFeatureMapItem"]["properties"]
+    assert "status" not in spec["components"]["schemas"][
+        "AdminFeatureDetailFeatureRecord"
+    ]["properties"]
     assert (
         spec["components"]["schemas"]["AdminFeatureIssueRecord"][
             "additionalProperties"
@@ -325,14 +356,16 @@ def test_admin_features_routes_mounted_in_openapi(client: TestClient) -> None:
 
 
 @pytest.mark.unit
-def test_admin_in_bounds_passes_nonpublic_status_to_items_and_clusters(
+def test_admin_in_bounds_combines_state_axes_with_and_for_items_and_clusters(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from kortravelmap.api.routers import admin_features as router_mod
 
     async def _items(_session: Any, **kwargs: Any) -> list[dict[str, Any]]:
-        assert kwargs["statuses"] == ["inactive", "hidden"]
+        assert kwargs["lifecycle_states"] == ["active"]
+        assert kwargs["publication_states"] == ["draft", "suppressed"]
+        assert kwargs["quality_states"] == ["quarantined"]
         assert kwargs["include_geometry"] is True
         return [
             {
@@ -345,12 +378,16 @@ def test_admin_in_bounds_passes_nonpublic_status_to_items_and_clusters(
                 "lat": 37.57,
                 "marker_icon": "place",
                 "marker_color": "P-01",
-                "status": "inactive",
+                "lifecycle_state": "active",
+                "publication_state": "suppressed",
+                "quality_state": "quarantined",
             }
         ]
 
     async def _clusters(_session: Any, **kwargs: Any) -> list[dict[str, Any]]:
-        assert kwargs["statuses"] == ["draft"]
+        assert kwargs["lifecycle_states"] == ["retired"]
+        assert kwargs["publication_states"] == ["suppressed"]
+        assert kwargs["quality_states"] == ["valid"]
         assert kwargs["cluster_unit"] == "sido"
         return [
             {
@@ -371,7 +408,9 @@ def test_admin_in_bounds_passes_nonpublic_status_to_items_and_clusters(
             "min_lat": 37.5,
             "max_lon": 127.0,
             "max_lat": 37.6,
-            "status": ["inactive", "hidden"],
+            "lifecycle_state": "active",
+            "publication_state": ["draft", "suppressed"],
+            "quality_state": "quarantined",
             "zoom": 14,
             "include_geometry": "true",
         },
@@ -382,7 +421,10 @@ def test_admin_in_bounds_passes_nonpublic_status_to_items_and_clusters(
         item_response.json()["data"]["items"][0]["feature_id"]
         == _expected_uuid("inactive-1")
     )
-    assert item_response.json()["data"]["items"][0]["status"] == "inactive"
+    item = item_response.json()["data"]["items"][0]
+    assert item["lifecycle_state"] == "active"
+    assert item["publication_state"] == "suppressed"
+    assert item["quality_state"] == "quarantined"
     assert item_response.json()["data"]["clusters"] == []
 
     cluster_response = client.get(
@@ -392,7 +434,9 @@ def test_admin_in_bounds_passes_nonpublic_status_to_items_and_clusters(
             "min_lat": 37.5,
             "max_lon": 127.0,
             "max_lat": 37.6,
-            "status": "draft",
+            "lifecycle_state": "retired",
+            "publication_state": "suppressed",
+            "quality_state": "valid",
             "zoom": 7,
         },
     )
@@ -464,7 +508,9 @@ def test_list_admin_features_passes_filters(
     async def _list(_session: Any, **kwargs: Any) -> AdminFeaturePage:
         assert kwargs["q"] == "광화문"
         assert kwargs["kinds"] == ["place"]
-        assert kwargs["statuses"] == ["inactive"]
+        assert kwargs["lifecycle_states"] == ["retired"]
+        assert kwargs["publication_states"] == ["suppressed"]
+        assert kwargs["quality_states"] == ["quarantined"]
         # ADR-088 — provider 자연키 반복 필터는 삭제됐고 dataset canonical ID다.
         assert kwargs["provider_dataset_id"] == 7
         assert kwargs["page_size"] == 25
@@ -479,7 +525,9 @@ def test_list_admin_features_passes_filters(
         params={
             "q": "광화문",
             "kind": "place",
-            "status": "inactive",
+            "lifecycle_state": "retired",
+            "publication_state": "suppressed",
+            "quality_state": "quarantined",
             "provider_dataset_id": "7",
             "page_size": "25",
             "sort": "issue_count",
@@ -492,6 +540,9 @@ def test_list_admin_features_passes_filters(
     # next_cursor는 repo가 치환 전 legacy 축으로 encode한 값 그대로다.
     assert body["data"]["items"][0]["feature_id"] == _expected_uuid("feature-1")
     assert body["data"]["items"][0]["feature_uuid"] == _expected_uuid("feature-1")
+    assert body["data"]["items"][0]["lifecycle_state"] == "active"
+    assert body["data"]["items"][0]["publication_state"] == "published"
+    assert body["data"]["items"][0]["quality_state"] == "valid"
     assert body["data"]["items"][0]["issues"][0]["issue_id"] == "issue-1"
     assert body["meta"]["page"] == {
         "page_size": 25,
@@ -574,7 +625,25 @@ def test_get_admin_feature_detail_returns_linked_operational_data(
         "raw_latitude",
     }.isdisjoint(body["data"]["sources"][0])
     assert body["data"]["issues"][0]["status"] == "open"
-    assert body["data"]["overrides"][0]["field_path"] == "status"
+    assert body["data"]["overrides"][0]["field_path"] == "lifecycle_state"
+    assert body["data"]["state_transitions"][0] == {
+        "transition_id": 101,
+        "from_lifecycle_state": "active",
+        "from_publication_state": "published",
+        "from_quality_state": "valid",
+        "to_lifecycle_state": "active",
+        "to_publication_state": "suppressed",
+        "to_quality_state": "valid",
+        "transition_kind": "admin",
+        "reason_code": "admin_suppress",
+        "principal": "local-admin",
+        "causation_ref": "admin:feature-1",
+        "provider_dataset_id": None,
+        "source_entity_key": None,
+        "source_record_key": None,
+        "occurred_at": "2026-06-03T00:00:00Z",
+        "row_revision": 8,
+    }
     assert body["data"]["versions"][0]["change_kind"] == "load"
     assert body["data"]["change_requests"][0]["status"] == "applied"
     assert body["data"]["files"][0]["role"] == "primary"
@@ -661,6 +730,84 @@ def test_get_feature_revision_returns_stable_etag(
 
 
 @pytest.mark.unit
+def test_list_feature_state_transitions_is_newest_first_keyset_page(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import admin_features as router_mod
+
+    _patch_admin_resolved_identity(monkeypatch)
+
+    async def _revision(_session: Any, feature_id: str) -> int:
+        assert feature_id == "feature-1"
+        return 9
+
+    async def _transitions(_session: Any, feature_id: str, **kwargs: Any) -> Any:
+        assert feature_id == "feature-1"
+        assert kwargs == {"limit": 2, "before_transition_id": 102}
+        return AdminFeatureStateTransitionAuditPage(
+            items=(
+                AdminFeatureStateTransitionAudit(
+                    transition_id=101,
+                    from_lifecycle_state="active",
+                    from_publication_state="published",
+                    from_quality_state="valid",
+                    to_lifecycle_state="active",
+                    to_publication_state="suppressed",
+                    to_quality_state="valid",
+                    transition_kind="admin",
+                    reason_code="admin_suppress",
+                    principal="local-admin",
+                    causation_ref="admin:feature-1",
+                    provider_dataset_id=None,
+                    source_entity_key=None,
+                    source_record_key=None,
+                    occurred_at=datetime(2026, 6, 3, tzinfo=UTC),
+                    row_revision=8,
+                ),
+            ),
+            next_cursor=101,
+        )
+
+    monkeypatch.setattr(router_mod, "get_feature_row_revision", _revision)
+    monkeypatch.setattr(
+        router_mod,
+        "list_admin_feature_state_transitions",
+        _transitions,
+    )
+    response = client.get(
+        "/v1/admin/features/feature-1/state/transitions",
+        params={"page_size": 2, "before_transition_id": 102},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["items"][0]["transition_id"] == 101
+    assert response.json()["data"]["items"][0]["causation_ref"] == "admin:feature-1"
+    assert response.json()["meta"]["page"] == {
+        "page_size": 2,
+        "next_cursor": "101",
+        "total": None,
+    }
+
+
+@pytest.mark.unit
+def test_list_feature_state_transitions_returns_404_before_audit_query(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import admin_features as router_mod
+
+    _patch_admin_resolved_identity(monkeypatch)
+
+    async def _missing(_session: Any, _feature_id: str) -> None:
+        return None
+
+    monkeypatch.setattr(router_mod, "get_feature_row_revision", _missing)
+    response = client.get("/v1/admin/features/missing/state/transitions")
+    assert response.status_code == 404
+
+
+@pytest.mark.unit
 def test_list_feature_change_requests_returns_current_review_mode(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
@@ -716,6 +863,9 @@ def test_create_feature_request_uses_review_required_by_default(
         assert kwargs["payload"]["kind"] == "place"
         assert kwargs["payload"]["name"] == "사용자 장소"
         assert kwargs["payload"]["coord"] == {"lon": 126.98, "lat": 37.57}
+        assert kwargs["payload"]["lifecycle_state"] == "active"
+        assert kwargs["payload"]["publication_state"] == "published"
+        assert kwargs["payload"]["quality_state"] == "valid"
         assert kwargs["payload"]["feature_id"] == kwargs["feature_id"]
         assert kwargs["reason"] == "사용자 제보"
         assert kwargs["requested_by"] == "local-dev"  # T-VN-20: principal, not body operator
@@ -1031,94 +1181,216 @@ def test_get_feature_detail_does_not_use_row_revision_as_aggregate_validator(
 
 
 @pytest.mark.unit
-def test_deactivate_feature_uses_transaction(
+def test_feature_state_retire_is_atomic_and_returns_audited_etag(
     client: TestClient,
     session: _FakeSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from kortravelmap.api.routers import admin_features as router_mod
 
-    now = datetime(2026, 6, 3, tzinfo=UTC)
-
-    async def _deactivate(_session: Any, feature_id: str, **kwargs: Any) -> Any:
+    async def _transition(_session: Any, feature_id: str, **kwargs: Any) -> Any:
         assert feature_id == "feature-1"
-        assert kwargs["reason"] == "운영상 제외"
-        assert kwargs["operator"] == "local-dev"  # T-VN-20: principal, not body operator
-        assert kwargs["prevent_provider_reactivation"] is True
-        return FeatureDeactivateResult(
+        assert kwargs == {
+            "action": "retire",
+            "publication_state": None,
+            "quality_state": None,
+            "expected_row_revision": 7,
+            "reason_code": "admin_retire",
+            "operator": "local-dev",
+        }
+        return AdminFeatureStateTransition(
             feature_id="feature-1",
-            previous_status="active",
-            status="inactive",
-            override_created=True,
-            override=FeatureOverride(
-                override_id="override-1",
-                feature_id="feature-1",
-                field_path="status",
-                override_value="inactive",
-                prevent_provider_reactivation=True,
-                reason="운영상 제외",
-                created_by="local-admin",
-                created_at=now,
-            ),
+            lifecycle_state="retired",
+            publication_state="suppressed",
+            quality_state="valid",
+            row_revision=8,
+            audit_transition_id=101,
         )
 
-    monkeypatch.setattr(router_mod, "deactivate_feature", _deactivate)
-
-    response = client.post(
-        "/v1/admin/features/feature-1/deactivate",
-        json={
-            "reason": "운영상 제외",
-            "operator": "local-admin",
-            "prevent_provider_reactivation": True,
-        },
+    monkeypatch.setattr(router_mod, "transition_admin_feature_state", _transition)
+    response = client.patch(
+        "/v1/admin/features/feature-1/state",
+        headers={"If-Match": '"7"'},
+        json={"action": "retire", "reason_code": "admin_retire"},
     )
 
     assert response.status_code == 200
-    assert response.json()["data"]["override_created"] is True
+    assert response.headers["ETag"] == '"8"'
+    assert response.json()["data"] == {
+        "feature_id": _expected_uuid("feature-1"),
+        "lifecycle_state": "retired",
+        "publication_state": "suppressed",
+        "quality_state": "valid",
+        "row_revision": 8,
+        "audit_transition_id": 101,
+    }
     assert session.begin_count == 1
 
 
 @pytest.mark.unit
-def test_deactivate_missing_feature_returns_404(
+def test_feature_state_patch_accepts_only_publication_and_quality_axes(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import admin_features as router_mod
+
+    async def _transition(_session: Any, _feature_id: str, **kwargs: Any) -> Any:
+        assert kwargs["action"] == "patch"
+        assert kwargs["publication_state"] == "draft"
+        assert kwargs["quality_state"] == "quarantined"
+        return AdminFeatureStateTransition(
+            feature_id="feature-1",
+            lifecycle_state="active",
+            publication_state="draft",
+            quality_state="quarantined",
+            row_revision=8,
+            audit_transition_id=102,
+        )
+
+    monkeypatch.setattr(router_mod, "transition_admin_feature_state", _transition)
+    response = client.patch(
+        "/v1/admin/features/feature-1/state",
+        headers={"If-Match": '"7"'},
+        json={
+            "action": "patch",
+            "publication_state": "draft",
+            "quality_state": "quarantined",
+            "reason_code": "admin_state_patch",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["data"]["publication_state"] == "draft"
+    assert response.json()["data"]["quality_state"] == "quarantined"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"action": "patch", "reason_code": "empty_axes"},
+        {"action": "retire", "publication_state": "published", "reason_code": "mixed"},
+        {"action": "patch", "lifecycle_state": "active", "reason_code": "bypass"},
+    ],
+)
+def test_feature_state_rejects_empty_or_mixed_or_lifecycle_patch(
+    client: TestClient,
+    body: dict[str, Any],
+) -> None:
+    response = client.patch(
+        "/v1/admin/features/feature-1/state",
+        headers={"If-Match": '"7"'},
+        json=body,
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.unit
+def test_feature_state_missing_or_stale_or_conflict_has_explicit_semantics(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from kortravelmap.api.routers import admin_features as router_mod
 
     async def _missing(_session: Any, _feature_id: str, **_kwargs: Any) -> None:
-        return None
+        raise AdminFeatureStateNotFound("feature 없음")
 
-    monkeypatch.setattr(router_mod, "deactivate_feature", _missing)
-
-    response = client.post(
-        "/v1/admin/features/missing/deactivate",
-        json={"reason": "없음"},
+    monkeypatch.setattr(router_mod, "transition_admin_feature_state", _missing)
+    missing = client.patch(
+        "/v1/admin/features/missing/state",
+        headers={"If-Match": '"7"'},
+        json={"action": "retire", "reason_code": "missing"},
     )
+    assert missing.status_code == 404
 
-    assert response.status_code == 404
+    async def _stale(_session: Any, feature_id: str, **kwargs: Any) -> None:
+        raise AdminFeatureStatePreconditionFailed(
+            feature_id=feature_id,
+            expected=kwargs["expected_row_revision"],
+        )
+
+    monkeypatch.setattr(router_mod, "transition_admin_feature_state", _stale)
+    stale = client.patch(
+        "/v1/admin/features/feature-1/state",
+        headers={"If-Match": '"7"'},
+        json={"action": "retire", "reason_code": "stale"},
+    )
+    assert stale.status_code == 412
+
+    async def _conflict(_session: Any, _feature_id: str, **_kwargs: Any) -> None:
+        raise AdminFeatureStateConflict("이미 retired입니다.")
+
+    monkeypatch.setattr(router_mod, "transition_admin_feature_state", _conflict)
+    conflict = client.patch(
+        "/v1/admin/features/feature-1/state",
+        headers={"If-Match": '"7"'},
+        json={"action": "retire", "reason_code": "already_retired"},
+    )
+    assert conflict.status_code == 409
 
 
 @pytest.mark.unit
-def test_deactivate_state_conflict_returns_409(
+@pytest.mark.parametrize("entity_tag", ["7", 'W/"7"', "*", '"0"', '"007"'])
+def test_feature_state_requires_canonical_strong_if_match(
+    client: TestClient,
+    entity_tag: str,
+) -> None:
+    response = client.patch(
+        "/v1/admin/features/feature-1/state",
+        headers={"If-Match": entity_tag},
+        json={"action": "retire", "reason_code": "test"},
+    )
+    assert response.status_code == 422
+    missing = client.patch(
+        "/v1/admin/features/feature-1/state",
+        json={"action": "retire", "reason_code": "test"},
+    )
+    assert missing.status_code == 428
+
+
+@pytest.mark.unit
+def test_feature_state_reactivation_requires_current_source_evidence(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from kortravelmap.api.routers import admin_features as router_mod
 
-    async def _conflict(_session: Any, _feature_id: str, **_kwargs: Any) -> None:
-        raise FeatureStateConflict(
-            feature_id="feature-deleted",
-            current_status="deleted",
-            deleted_at=datetime(2026, 6, 3, tzinfo=UTC),
-            target_status="inactive",
+    async def _reactivate(_session: Any, feature_id: str, **kwargs: Any) -> Any:
+        assert feature_id == "feature-1"
+        assert kwargs == {
+            "expected_row_revision": 8,
+            "reason_code": "source_revalidated",
+            "operator": "local-dev",
+            "provider_dataset_id": 7,
+            "source_entity_key": "entity-1",
+            "source_record_key": "record-1",
+        }
+        return AdminFeatureStateTransition(
+            feature_id="feature-1",
+            lifecycle_state="active",
+            publication_state="suppressed",
+            quality_state="valid",
+            row_revision=9,
+            audit_transition_id=103,
         )
 
-    monkeypatch.setattr(router_mod, "deactivate_feature", _conflict)
-
+    monkeypatch.setattr(router_mod, "reactivate_admin_feature_state", _reactivate)
     response = client.post(
-        "/v1/admin/features/feature-deleted/deactivate",
-        json={"reason": "삭제됨"},
+        "/v1/admin/features/feature-1/state/reactivate",
+        headers={"If-Match": '"8"'},
+        json={
+            "reason_code": "source_revalidated",
+            "provider_dataset_id": 7,
+            "source_entity_key": "entity-1",
+            "source_record_key": "record-1",
+        },
     )
+    assert response.status_code == 200
+    assert response.headers["ETag"] == '"9"'
+    assert response.json()["data"]["lifecycle_state"] == "active"
 
-    assert response.status_code == 409
-    assert "deleted" in response.json()["detail"]
+    malformed = client.post(
+        "/v1/admin/features/feature-1/state/reactivate",
+        headers={"If-Match": '"8"'},
+        json={"reason_code": "missing_evidence"},
+    )
+    assert malformed.status_code == 422

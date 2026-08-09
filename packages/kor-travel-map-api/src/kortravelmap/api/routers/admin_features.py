@@ -7,7 +7,7 @@ from datetime import datetime
 from time import perf_counter
 from typing import Annotated, Any, Literal, cast
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response, status
 from kortravelmap.core import make_feature_id
 from kortravelmap.dto import EventDetail, PlaceDetail
 from kortravelmap.infra import curation_repo, feature_identity, price_repo, weather_repo
@@ -21,23 +21,29 @@ from kortravelmap.infra.admin_feature_repo import (
     AdminFeatureDetailVersion,
     AdminFeaturePage,
     AdminFeatureRow,
+    AdminFeatureStateConflict,
+    AdminFeatureStateNotFound,
+    AdminFeatureStatePreconditionFailed,
+    AdminFeatureStateTransition,
+    AdminFeatureStateTransitionAudit,
+    AdminFeatureStateTransitionAuditPage,
+    AdminFeatureStateValidationError,
     FeatureChangeConflict,
     FeatureChangeRequest,
-    FeatureDeactivateResult,
-    FeatureOverride,
     FeaturePreconditionFailed,
-    FeatureStateConflict,
     admin_feature_card_target_exists,
     admin_features_in_bbox,
     apply_feature_change_request,
     cluster_admin_features_in_bbox,
-    deactivate_feature,
     get_admin_feature_detail,
     get_feature_row_revision,
+    list_admin_feature_state_transitions,
     list_admin_features,
     list_feature_change_requests,
+    reactivate_admin_feature_state,
     reject_feature_change_request,
     submit_feature_change_request,
+    transition_admin_feature_state,
 )
 from pydantic import (
     BaseModel,
@@ -51,7 +57,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api.auth import (
     AdminProxyContext,
-    require_admin_destructive_enabled,
     require_admin_frontend,
 )
 from kortravelmap.api.db import get_session
@@ -82,8 +87,11 @@ __all__ = [
     "router",
     "AdminFeatureRecord",
     "AdminFeaturesListResponse",
-    "AdminFeatureDeactivateRequest",
-    "AdminFeatureDeactivateResponse",
+    "AdminFeatureStatePatchRequest",
+    "AdminFeatureStateRetireRequest",
+    "AdminFeatureReactivateRequest",
+    "AdminFeatureStateResponse",
+    "AdminFeatureStateTransitionsResponse",
     "AdminFeatureCreateRequest",
     "AdminFeaturePatchRequest",
     "AdminFeatureChangeResponse",
@@ -106,7 +114,6 @@ AdminFeatureSort = Literal[
     "updated_at",
     "created_at",
     "kind",
-    "status",
     "provider",
     "issue_count",
 ]
@@ -147,7 +154,9 @@ class AdminFeatureRecord(BaseModel):
     kind: str
     name: str
     category: str
-    status: str
+    lifecycle_state: Literal["active", "retired"]
+    publication_state: Literal["draft", "published", "suppressed"]
+    quality_state: Literal["valid", "quarantined"]
     lon: float | None = None
     lat: float | None = None
     address_label: str
@@ -176,15 +185,6 @@ class AdminFeaturesListResponse(BaseModel):
     meta: Meta
 
 
-AdminFeatureOperationalStatus = Literal[
-    "draft",
-    "active",
-    "inactive",
-    "hidden",
-    "broken",
-]
-
-
 class AdminFeatureMapItem(BaseModel):
     """Admin 지도용 base Feature 경량 표현."""
 
@@ -198,7 +198,9 @@ class AdminFeatureMapItem(BaseModel):
     lat: float | None
     marker_icon: str | None = None
     marker_color: str | None = None
-    status: AdminFeatureOperationalStatus
+    lifecycle_state: Literal["active", "retired"]
+    publication_state: Literal["draft", "published", "suppressed"]
+    quality_state: Literal["valid", "quarantined"]
     geometry: dict[str, Any] | None = None
     area_square_meters: float | None = None
     price_summary: list[PricePointOut] | None = None
@@ -246,57 +248,77 @@ class AdminFeaturesInBoundsResponse(BaseModel):
     meta: Meta
 
 
-class AdminFeatureOverrideRecord(BaseModel):
-    """생성/갱신된 feature override."""
+class AdminFeatureStatePatchRequest(BaseModel):
+    """공개 의도·품질을 원자적으로 바꾸는 상태 command.
+
+    lifecycle는 provider 재등장과 typed override가 얽힌 별도 재활성 command만
+    바꿀 수 있다. retire와 축 patch를 한 요청에 섞으면 audit tuple의 의미가
+    불명확해지므로 discriminated union으로 물리적으로 막는다.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
-    override_id: str
+    action: Literal["patch"]
+    publication_state: Literal["draft", "published", "suppressed"] | None = None
+    quality_state: Literal["valid", "quarantined"] | None = None
+    reason_code: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _requires_axis(self) -> AdminFeatureStatePatchRequest:
+        if self.publication_state is None and self.quality_state is None:
+            raise ValueError("state patch에는 publication_state 또는 quality_state가 필요합니다.")
+        return self
+
+
+class AdminFeatureStateRetireRequest(BaseModel):
+    """lifecycle retire와 publication suppress를 한 DB command로 묶는 요청."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    action: Literal["retire"]
+    reason_code: str = Field(min_length=1)
+
+
+class AdminFeatureReactivateRequest(BaseModel):
+    """retired lifecycle override를 해제할 현재 provider evidence.
+
+    재활성화는 임의의 ``active`` patch가 아니다. provider dataset/head/link를 모두
+    검증한 단일 명령만 lifecycle를 active로 되돌릴 수 있다.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    reason_code: str = Field(min_length=1)
+    provider_dataset_id: int = Field(ge=1)
+    source_entity_key: str = Field(min_length=1)
+    source_record_key: str = Field(min_length=1)
+
+
+AdminFeatureStateRequest = Annotated[
+    AdminFeatureStatePatchRequest | AdminFeatureStateRetireRequest,
+    Body(discriminator="action"),
+]
+
+
+class AdminFeatureStateData(BaseModel):
+    """한 상태 명령의 commit 후 full tuple + immutable audit identity."""
+
+    model_config = ConfigDict(extra="forbid")
+
     feature_id: str
-    field_path: str
-    override_value: Any
-    prevent_provider_reactivation: bool
-    reason: str | None = None
-    created_by: str | None = None
-    created_at: datetime
+    lifecycle_state: Literal["active", "retired"]
+    publication_state: Literal["draft", "published", "suppressed"]
+    quality_state: Literal["valid", "quarantined"]
+    row_revision: int = Field(ge=1)
+    audit_transition_id: int
 
 
-class AdminFeatureDeactivateRequest(BaseModel):
-    """``POST /admin/features/{feature_id}/deactivate`` body."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    reason: str = Field(min_length=1)
-    operator: str | None = Field(
-        default=None,
-        deprecated=True,
-        description=(
-            "[deprecated·ignored] 감사 actor는 인증 principal에서만 파생한다 "
-            "(ADR-066 D-2, T-VN-20). PinVi 호환을 위해 수용하되 값은 무시하며, "
-            "PinVi는 전송 중단 예정 (docs/integration-map.md)."
-        ),
-    )
-    prevent_provider_reactivation: bool = True
-
-
-class AdminFeatureDeactivateData(BaseModel):
-    """Feature deactivate 결과 data."""
+class AdminFeatureStateResponse(BaseModel):
+    """``PATCH /admin/features/{feature_id}/state`` 응답."""
 
     model_config = ConfigDict(extra="forbid")
 
-    feature_id: str
-    previous_status: str
-    status: str
-    override_created: bool
-    override: AdminFeatureOverrideRecord | None = None
-
-
-class AdminFeatureDeactivateResponse(BaseModel):
-    """``POST /admin/features/{feature_id}/deactivate`` 응답."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    data: AdminFeatureDeactivateData
+    data: AdminFeatureStateData
     meta: Meta
 
 
@@ -427,7 +449,9 @@ class AdminFeatureCreateRequest(AdminFeatureBaseMutation):
     category: str = Field(pattern=r"^\d{8}$")
     marker_icon: str = Field(min_length=1)
     marker_color: str = Field(pattern=r"^P-(0[1-9]|1[0-6])$")
-    status: Literal["draft", "active", "inactive", "hidden"] = "active"
+    lifecycle_state: Literal["active", "retired"] = "active"
+    publication_state: Literal["draft", "published", "suppressed"] = "published"
+    quality_state: Literal["valid", "quarantined"] = "valid"
     reason: str = Field(min_length=1)
     operator: str | None = Field(
         default=None,
@@ -568,7 +592,9 @@ class AdminFeatureDetailFeatureRecord(BaseModel):
     kind: str
     name: str
     category: str
-    status: str
+    lifecycle_state: Literal["active", "retired"]
+    publication_state: Literal["draft", "published", "suppressed"]
+    quality_state: Literal["valid", "quarantined"]
     lon: float | None = None
     lat: float | None = None
     coord_precision_digits: int | None = None
@@ -593,15 +619,8 @@ class AdminFeatureDetailFeatureRecord(BaseModel):
         ge=1,
         description="correction If-Match에 사용할 server-owned revision.",
     )
-    user_change_kind: str | None = None
-    user_change_status: str | None = None
-    user_change_request_id: str | None = None
-    user_deleted_at: datetime | None = None
-    user_deleted_by: str | None = None
-    user_change_reason: str | None = None
     created_at: datetime
     updated_at: datetime
-    deleted_at: datetime | None = None
 
 
 class AdminFeatureDetailSourceRecord(BaseModel):
@@ -677,6 +696,50 @@ class AdminFeatureDetailVersionRecord(BaseModel):
     created_at: datetime
 
 
+class AdminFeatureStateTransitionAuditRecord(BaseModel):
+    """DB append-only Feature 상태 전이 감사 1건.
+
+    admin detail은 현재 tuple과 이 timeline을 함께 주므로 운영 화면이 합성된
+    legacy status를 추론할 필요가 없다.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    transition_id: int
+    from_lifecycle_state: Literal["active", "retired"] | None = None
+    from_publication_state: Literal["draft", "published", "suppressed"] | None = None
+    from_quality_state: Literal["valid", "quarantined"] | None = None
+    to_lifecycle_state: Literal["active", "retired"]
+    to_publication_state: Literal["draft", "published", "suppressed"]
+    to_quality_state: Literal["valid", "quarantined"]
+    transition_kind: str
+    reason_code: str
+    principal: str
+    causation_ref: str | None = None
+    provider_dataset_id: int | None = None
+    source_entity_key: str | None = None
+    source_record_key: str | None = None
+    occurred_at: datetime
+    row_revision: int = Field(ge=1)
+
+
+class AdminFeatureStateTransitionsData(BaseModel):
+    """feature별 append-only state audit keyset page."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[AdminFeatureStateTransitionAuditRecord]
+
+
+class AdminFeatureStateTransitionsResponse(BaseModel):
+    """``GET /admin/features/{feature_id}/state/transitions`` 응답."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    data: AdminFeatureStateTransitionsData
+    meta: Meta
+
+
 class AdminFeatureDetailFileRecord(BaseModel):
     """Admin feature 상세 file metadata row."""
 
@@ -714,6 +777,7 @@ class AdminFeatureDetailData(BaseModel):
     sources: list[AdminFeatureDetailSourceRecord]
     issues: list[AdminFeatureDetailIssueRecord]
     overrides: list[AdminFeatureDetailOverrideRecord]
+    state_transitions: list[AdminFeatureStateTransitionAuditRecord]
     versions: list[AdminFeatureDetailVersionRecord]
     change_requests: list[AdminFeatureChangeRequestRecord]
     files: list[AdminFeatureDetailFileRecord]
@@ -786,7 +850,9 @@ def _record(row: AdminFeatureRow) -> AdminFeatureRecord:
         kind=row.kind,
         name=row.name,
         category=row.category,
-        status=row.status,
+        lifecycle_state=row.lifecycle_state,
+        publication_state=row.publication_state,
+        quality_state=row.quality_state,
         lon=row.lon,
         lat=row.lat,
         address_label=row.address_label,
@@ -808,40 +874,6 @@ def _map_item(row: dict[str, Any]) -> AdminFeatureMapItem:
     substituted = uuid_substituted_row(row)
     substituted.pop("feature_uuid", None)
     return AdminFeatureMapItem(**substituted)
-
-
-def _override(row: FeatureOverride | None) -> AdminFeatureOverrideRecord | None:
-    if row is None:
-        return None
-    # T-VN-32C 치환 제외 — override는 감사 레코드라 내부 DB 참조(legacy) 유지.
-    return AdminFeatureOverrideRecord(
-        override_id=row.override_id,
-        feature_id=row.feature_id,
-        field_path=row.field_path,
-        override_value=row.override_value,
-        prevent_provider_reactivation=row.prevent_provider_reactivation,
-        reason=row.reason,
-        created_by=row.created_by,
-        created_at=row.created_at,
-    )
-
-
-def _deactivate_response(
-    row: FeatureDeactivateResult,
-    *,
-    started_at: float,
-) -> AdminFeatureDeactivateResponse:
-    return AdminFeatureDeactivateResponse(
-        data=AdminFeatureDeactivateData(
-            # T-VN-32C 치환 제외 — write 결과 레코드의 대상 참조(legacy 정본 키) 유지.
-            feature_id=row.feature_id,
-            previous_status=row.previous_status,
-            status=row.status,
-            override_created=row.override_created,
-            override=_override(row.override),
-        ),
-        meta=make_meta(started_at=started_at),
-    )
 
 
 def _change_record(row: FeatureChangeRequest) -> AdminFeatureChangeRequestRecord:
@@ -893,6 +925,15 @@ def _detail_version(
     return AdminFeatureDetailVersionRecord.model_validate(row, from_attributes=True)
 
 
+def _state_transition_audit(
+    row: AdminFeatureStateTransitionAudit,
+) -> AdminFeatureStateTransitionAuditRecord:
+    return AdminFeatureStateTransitionAuditRecord.model_validate(
+        row,
+        from_attributes=True,
+    )
+
+
 def _detail_file(row: AdminFeatureDetailFile) -> AdminFeatureDetailFileRecord:
     return AdminFeatureDetailFileRecord.model_validate(row, from_attributes=True)
 
@@ -912,6 +953,9 @@ def _detail_response(
             sources=[_detail_source(item) for item in row.sources],
             issues=[_detail_issue(item) for item in row.issues],
             overrides=[_detail_override(item) for item in row.overrides],
+            state_transitions=[
+                _state_transition_audit(item) for item in row.state_transitions
+            ],
             versions=[_detail_version(item) for item in row.versions],
             change_requests=[_change_record(item) for item in row.change_requests],
             files=[_detail_file(item) for item in row.files],
@@ -948,6 +992,15 @@ def _review_mode(settings: ApiSettings) -> FeatureMutationReviewMode:
 
 def _payload(body: AdminFeatureBaseMutation) -> dict[str, Any]:
     raw = body.model_dump(exclude={"reason", "operator"}, exclude_unset=True)
+    if isinstance(body, AdminFeatureCreateRequest):
+        # 생성 요청의 axis 기본값은 review payload에도 명시적으로 보존한다. 그렇지
+        # 않으면 ``exclude_unset``이 기본값을 지워 승인 시 저장 경계가 의도와 다른
+        # 기본값을 선택할 여지를 만든다.
+        raw.update(
+            lifecycle_state=body.lifecycle_state,
+            publication_state=body.publication_state,
+            quality_state=body.quality_state,
+        )
     coord = raw.get("coord")
     if isinstance(coord, dict):
         raw["coord"] = {"lon": coord["lon"], "lat": coord["lat"]}
@@ -1030,6 +1083,26 @@ def _set_feature_etag(response: Response, revision: int) -> None:
     response.headers["ETag"] = revision_etag(revision)
 
 
+def _state_response(
+    row: AdminFeatureStateTransition,
+    *,
+    feature_id: str,
+    started_at: float,
+) -> AdminFeatureStateResponse:
+    """DB procedure 결과를 HTTP state command receipt로 고정한다."""
+    return AdminFeatureStateResponse(
+        data=AdminFeatureStateData(
+            feature_id=feature_id,
+            lifecycle_state=row.lifecycle_state,
+            publication_state=row.publication_state,
+            quality_state=row.quality_state,
+            row_revision=row.row_revision,
+            audit_transition_id=row.audit_transition_id,
+        ),
+        meta=make_meta(started_at=started_at),
+    )
+
+
 def _require_if_match_revision(request: Request) -> int:
     """correction 요청의 ``If-Match``를 row_revision으로 파싱한다.
 
@@ -1049,6 +1122,21 @@ def _precondition_failed(exc: FeaturePreconditionFailed) -> HTTPException:
             "message": (
                 "If-Match row_revision이 현재 feature 행과 다릅니다: "
                 f"current={exc.current}."
+            ),
+        },
+    )
+
+
+def _state_precondition_failed(
+    exc: AdminFeatureStatePreconditionFailed,
+) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_412_PRECONDITION_FAILED,
+        detail={
+            "code": "PRECONDITION_FAILED",
+            "message": (
+                "If-Match row_revision이 현재 feature 행과 다릅니다: "
+                f"expected={exc.expected}."
             ),
         },
     )
@@ -1112,15 +1200,17 @@ async def list_admin_features_in_bounds(
     min_lat: Annotated[float, Query(description="bbox 최소 위도.")],
     max_lon: Annotated[float, Query(description="bbox 최대 경도.")],
     max_lat: Annotated[float, Query(description="bbox 최대 위도.")],
-    feature_status: Annotated[
-        list[AdminFeatureOperationalStatus] | None,
-        Query(
-            alias="status",
-            description=(
-                "운영 상태 반복 필터. 미지정 시 삭제 전 draft/active/inactive/hidden/"
-                "broken 전체."
-            ),
-        ),
+    lifecycle_filter: Annotated[
+        list[Literal["active", "retired"]] | None,
+        Query(alias="lifecycle_state", description="lifecycle 축 반복 필터."),
+    ] = None,
+    publication_filter: Annotated[
+        list[Literal["draft", "published", "suppressed"]] | None,
+        Query(alias="publication_state", description="publication 축 반복 필터."),
+    ] = None,
+    quality_filter: Annotated[
+        list[Literal["valid", "quarantined"]] | None,
+        Query(alias="quality_state", description="quality 축 반복 필터."),
     ] = None,
     kind: Annotated[list[str] | None, Query(description="feature kind 반복 필터.")] = None,
     category: Annotated[
@@ -1155,7 +1245,9 @@ async def list_admin_features_in_bounds(
                 max_lon=max_lon,
                 max_lat=max_lat,
                 cluster_unit=resolved_unit,
-                statuses=feature_status,
+                lifecycle_states=lifecycle_filter,
+                publication_states=publication_filter,
+                quality_states=quality_filter,
                 kinds=kind,
                 categories=category,
                 providers=provider,
@@ -1190,7 +1282,9 @@ async def list_admin_features_in_bounds(
             min_lat=min_lat,
             max_lon=max_lon,
             max_lat=max_lat,
-            statuses=feature_status,
+            lifecycle_states=lifecycle_filter,
+            publication_states=publication_filter,
+            quality_states=quality_filter,
             kinds=kind,
             categories=category,
             providers=provider,
@@ -1299,9 +1393,17 @@ async def list_features(
         list[str] | None,
         Query(description="category code 반복 필터"),
     ] = None,
-    feature_status: Annotated[
-        list[str] | None,
-        Query(alias="status", description="feature status 반복 필터. 기본 active."),
+    lifecycle_filter: Annotated[
+        list[Literal["active", "retired"]] | None,
+        Query(alias="lifecycle_state", description="lifecycle 축 반복 필터."),
+    ] = None,
+    publication_filter: Annotated[
+        list[Literal["draft", "published", "suppressed"]] | None,
+        Query(alias="publication_state", description="publication 축 반복 필터."),
+    ] = None,
+    quality_filter: Annotated[
+        list[Literal["valid", "quarantined"]] | None,
+        Query(alias="quality_state", description="quality 축 반복 필터."),
     ] = None,
     provider_dataset_id: Annotated[
         int | None,
@@ -1334,7 +1436,9 @@ async def list_features(
             q=q,
             kinds=kind,
             categories=category,
-            statuses=feature_status if feature_status is not None else ("active",),
+            lifecycle_states=lifecycle_filter,
+            publication_states=publication_filter,
+            quality_states=quality_filter,
             provider_dataset_id=provider_dataset_id,
             has_coord=has_coord,
             has_issue=has_issue,
@@ -1432,6 +1536,58 @@ async def get_feature_revision_route(
 
 
 @router.get(
+    "/{feature_id}/state/transitions",
+    response_model=AdminFeatureStateTransitionsResponse,
+    summary="Admin feature state audit timeline",
+    responses={
+        404: {"description": "feature 없음"},
+        422: {"description": "audit cursor/page_size 오류"},
+    },
+)
+async def list_feature_state_transitions_route(
+    feature_id: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    page_size: Annotated[int, Query(ge=1, le=500)] = 50,
+    before_transition_id: Annotated[int | None, Query(gt=0)] = None,
+) -> AdminFeatureStateTransitionsResponse:
+    """append-only state transition을 newest-first identity keyset으로 읽는다."""
+    started_at = perf_counter()
+    identity = await resolve_feature_ref_or_error(session, feature_id)
+    canonical_id = identity.feature_id
+    if await get_feature_row_revision(session, canonical_id) is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"feature 없음: {feature_id!r}",
+        )
+    try:
+        page: AdminFeatureStateTransitionAuditPage = (
+            await list_admin_feature_state_transitions(
+                session,
+                canonical_id,
+                limit=page_size,
+                before_transition_id=before_transition_id,
+            )
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+    return AdminFeatureStateTransitionsResponse(
+        data=AdminFeatureStateTransitionsData(
+            items=[_state_transition_audit(item) for item in page.items],
+        ),
+        meta=make_meta(
+            started_at=started_at,
+            page_size=page_size,
+            next_cursor=(
+                str(page.next_cursor) if page.next_cursor is not None else None
+            ),
+        ),
+    )
+
+
+@router.get(
     "/{feature_id}",
     response_model=AdminFeatureDetailResponse,
     description=(
@@ -1495,6 +1651,152 @@ async def create_feature_route(
         except FeatureChangeConflict as exc:
             raise _change_error(exc) from exc
     return _change_response(result, started_at=started_at)
+
+
+@router.patch(
+    "/{feature_id}/state",
+    response_model=AdminFeatureStateResponse,
+    responses={
+        404: {"description": "feature 없음"},
+        409: {"description": "현재 tuple/source override가 요청 전이를 허용하지 않음"},
+        412: {"description": "If-Match row_revision 불일치"},
+        422: {"description": "state action/body 또는 If-Match strong ETag 오류"},
+        428: {"description": "If-Match 누락"},
+        200: {"headers": _ETAG_RESPONSE_HEADER},
+    },
+    openapi_extra={"parameters": [_IF_MATCH_OPENAPI_PARAMETER]},
+)
+@idempotent_domain_command("admin.feature.state")
+async def patch_feature_state_route(
+    feature_id: str,
+    body: AdminFeatureStateRequest,
+    request: Request,
+    response: Response,
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> AdminFeatureStateResponse:
+    """retire 또는 publication/quality patch를 한 axis transition으로 commit한다."""
+    started_at = perf_counter()
+    identity = await resolve_feature_ref_or_error(session, feature_id)
+    canonical_id = identity.feature_id
+    expected_revision = _require_if_match_revision(request)
+    async with domain_command_transaction(session):
+        try:
+            transition = await transition_admin_feature_state(
+                session,
+                canonical_id,
+                action=body.action,
+                publication_state=(
+                    body.publication_state
+                    if isinstance(body, AdminFeatureStatePatchRequest)
+                    else None
+                ),
+                quality_state=(
+                    body.quality_state
+                    if isinstance(body, AdminFeatureStatePatchRequest)
+                    else None
+                ),
+                expected_row_revision=expected_revision,
+                reason_code=body.reason_code,
+                operator=context.actor,
+            )
+        except AdminFeatureStatePreconditionFailed as exc:
+            raise _state_precondition_failed(exc) from exc
+        except AdminFeatureStateNotFound as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=str(exc),
+            ) from exc
+        except AdminFeatureStateConflict as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=str(exc),
+            ) from exc
+        except (AdminFeatureStateValidationError, ValueError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=str(exc),
+            ) from exc
+    if transition is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"feature 없음: {feature_id!r}",
+        )
+    _set_feature_etag(response, transition.row_revision)
+    return _state_response(
+        transition,
+        feature_id=identity.feature_uuid,
+        started_at=started_at,
+    )
+
+
+@router.post(
+    "/{feature_id}/state/reactivate",
+    response_model=AdminFeatureStateResponse,
+    responses={
+        404: {"description": "feature 또는 current source evidence 없음"},
+        409: {"description": "retired override/source evidence가 재활성화를 허용하지 않음"},
+        412: {"description": "If-Match row_revision 불일치"},
+        422: {"description": "body 또는 If-Match strong ETag 오류"},
+        428: {"description": "If-Match 누락"},
+        200: {"headers": _ETAG_RESPONSE_HEADER},
+    },
+    openapi_extra={"parameters": [_IF_MATCH_OPENAPI_PARAMETER]},
+)
+@idempotent_domain_command("admin.feature.state.reactivate")
+async def reactivate_feature_state_route(
+    feature_id: str,
+    body: AdminFeatureReactivateRequest,
+    request: Request,
+    response: Response,
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> AdminFeatureStateResponse:
+    """검증된 current provider observation으로만 lifecycle retire를 해제한다."""
+    started_at = perf_counter()
+    identity = await resolve_feature_ref_or_error(session, feature_id)
+    canonical_id = identity.feature_id
+    expected_revision = _require_if_match_revision(request)
+    async with domain_command_transaction(session):
+        try:
+            transition = await reactivate_admin_feature_state(
+                session,
+                canonical_id,
+                expected_row_revision=expected_revision,
+                reason_code=body.reason_code,
+                operator=context.actor,
+                provider_dataset_id=body.provider_dataset_id,
+                source_entity_key=body.source_entity_key,
+                source_record_key=body.source_record_key,
+            )
+        except AdminFeatureStatePreconditionFailed as exc:
+            raise _state_precondition_failed(exc) from exc
+        except AdminFeatureStateNotFound as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=str(exc),
+            ) from exc
+        except AdminFeatureStateConflict as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=str(exc),
+            ) from exc
+        except (AdminFeatureStateValidationError, ValueError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=str(exc),
+            ) from exc
+    if transition is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"feature 또는 current source evidence 없음: {feature_id!r}",
+        )
+    _set_feature_etag(response, transition.row_revision)
+    return _state_response(
+        transition,
+        feature_id=identity.feature_uuid,
+        started_at=started_at,
+    )
 
 
 @router.patch(
@@ -1664,45 +1966,3 @@ async def reject_feature_change_request_route(
             detail=f"pending feature change request 없음: {request_id!r}",
         )
     return _change_response(result, started_at=started_at)
-
-
-@router.post(
-    "/{feature_id}/deactivate",
-    response_model=AdminFeatureDeactivateResponse,
-    dependencies=[Depends(require_admin_destructive_enabled)],
-    responses={
-        404: {"description": "feature 없음"},
-        409: {"description": "feature 상태 전이 불가"},
-        403: {"description": "파괴적 admin 작업 비활성"},
-    },
-)
-@idempotent_domain_command("admin.feature.deactivate")
-async def deactivate_feature_route(
-    feature_id: str,
-    body: AdminFeatureDeactivateRequest,
-    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> AdminFeatureDeactivateResponse:
-    started_at = perf_counter()
-    identity = await resolve_feature_ref_or_error(session, feature_id)
-    canonical_id = identity.feature_id
-    async with domain_command_transaction(session):
-        try:
-            result = await deactivate_feature(
-                session,
-                canonical_id,
-                reason=body.reason,
-                operator=context.actor,
-                prevent_provider_reactivation=body.prevent_provider_reactivation,
-            )
-        except FeatureStateConflict as exc:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=str(exc),
-            ) from exc
-    if result is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"feature 없음: {feature_id!r}",
-        )
-    return _deactivate_response(result, started_at=started_at)

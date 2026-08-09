@@ -137,7 +137,9 @@ def _target_detail(detail: dict[str, Any] | None = None) -> ReviewFeatureDetail:
         kind="event",
         name="서울 봄꽃 축제",
         category="01010100",
-        status="active",
+        lifecycle_state="active",
+        publication_state="published",
+        quality_state="valid",
         lon=126.9,
         lat=37.5,
         address={"legal": "서울"},
@@ -301,6 +303,10 @@ def test_get_enrichment_review_detail_returns_compare_payload(
     # T-VN-32C 값 전환 — target/비교 snapshot의 feature 참조는 UUID 정본.
     assert data["target_feature_id"] == _expected_uuid("f_festival")
     assert data["target"]["feature_id"] == _expected_uuid("f_festival")
+    assert data["target"]["lifecycle_state"] == "active"
+    assert data["target"]["publication_state"] == "published"
+    assert data["target"]["quality_state"] == "valid"
+    assert "status" not in data["target"]
     assert data["source_name"] == "서울 봄꽃"
     assert data["source_lon"] == 126.9001
     assert data["source_lat"] == 37.5001
