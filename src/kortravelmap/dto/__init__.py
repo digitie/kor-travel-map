@@ -26,7 +26,9 @@ from __future__ import annotations
 
 from ._enums import (
     FeatureKind,
-    FeatureStatus,
+    FeatureLifecycleState,
+    FeaturePublicationState,
+    FeatureQualityState,
     ForecastStyle,
     PriceDomain,
     SourceRole,
@@ -91,7 +93,9 @@ from .weather import WeatherValue
 __all__ = [
     # enums
     "FeatureKind",
-    "FeatureStatus",
+    "FeatureLifecycleState",
+    "FeaturePublicationState",
+    "FeatureQualityState",
     "SourceRole",
     # 기본 모델
     "Coordinate",

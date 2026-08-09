@@ -23,7 +23,12 @@ from pydantic import (
     model_validator,
 )
 
-from ._enums import FeatureKind, FeatureStatus
+from ._enums import (
+    FeatureKind,
+    FeatureLifecycleState,
+    FeaturePublicationState,
+    FeatureQualityState,
+)
 from ._time import check_aware_datetime, kst_now
 from .address import Address
 from .area import AreaDetail
@@ -69,6 +74,8 @@ class Feature(BaseModel):
 
     ``coord``는 ``None`` 가능 (예: VisitKorea 축제 좌표 nullable). ``detail``은
     ``kind``에 맞는 모델만 허용 (ADR-018) — dict 입력은 ``ValidationError``.
+    Provider 변환은 별도의 legacy status를 전달하지 않고 새 feature의 초기
+    ``active/published/valid`` 3축을 이 DTO 기본값으로 명시한다 (ADR-090).
 
     예시:
         >>> from kortravelmap.dto import Feature, Coordinate, PlaceDetail
@@ -126,10 +133,20 @@ class Feature(BaseModel):
         PlaceDetail | EventDetail | NoticeDetail | RouteDetail | AreaDetail | None
     ) = None
     raw_refs: list[RawDataRef] = Field(default_factory=list)
-    status: FeatureStatus = FeatureStatus.ACTIVE
+    lifecycle_state: FeatureLifecycleState = Field(
+        default=FeatureLifecycleState.ACTIVE,
+        description="생명주기 축 (active|retired, ADR-090).",
+    )
+    publication_state: FeaturePublicationState = Field(
+        default=FeaturePublicationState.PUBLISHED,
+        description="공개 의도 축 (draft|published|suppressed, ADR-090).",
+    )
+    quality_state: FeatureQualityState = Field(
+        default=FeatureQualityState.VALID,
+        description="품질 축 (valid|quarantined, ADR-090).",
+    )
     created_at: datetime = Field(default_factory=kst_now)
     updated_at: datetime = Field(default_factory=kst_now)
-    deleted_at: datetime | None = None
 
     # ── validators ───────────────────────────────────────────────────────
 
@@ -177,7 +194,7 @@ class Feature(BaseModel):
             )
         return value
 
-    @field_validator("created_at", "updated_at", "deleted_at")
+    @field_validator("created_at", "updated_at")
     @classmethod
     def _check_kst_aware(cls, value: datetime | None) -> datetime | None:
         """ADR-019 — naive datetime 입력은 ValidationError."""
@@ -186,6 +203,13 @@ class Feature(BaseModel):
     @model_validator(mode="after")
     def _check_detail_matches_kind(self) -> Feature:
         """ADR-018 — ``detail``은 ``kind``에 맞는 모델만 허용."""
+        if (
+            self.lifecycle_state is FeatureLifecycleState.RETIRED
+            and self.publication_state is not FeaturePublicationState.SUPPRESSED
+        ):
+            raise ValueError(
+                "retired lifecycle_state는 publication_state='suppressed'여야 한다."
+            )
         if self.coord is None:
             if self.coord_precision_digits is not None:
                 raise ValueError("coord가 없으면 coord_precision_digits도 None이어야 한다.")
