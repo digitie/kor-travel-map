@@ -91,7 +91,7 @@ barrier로 직렬화한다.
     ·KMA/AirKorea/KREX call-site cutover 구현) → [/] `T-VN-38B`(0093·price immutable fact
     ·receipt summary·Dagster producer lineage 구현) → [/] `T-VN-38C`(0094 summary-only reader/API/UI
     ·snapshot 분리·OpenAPI/type 재생성 완료, 2인 재리뷰·n150 live 검증 대기) →
-    [/] `T-VN-34A` → [ ] `T-VN-34B` → [ ] `T-VN-34C` →
+    [x] `T-VN-34A` → [ ] `T-VN-34B` → [ ] `T-VN-34C` →
     [ ] `T-VN-36A` → [ ] `T-VN-36B` → [ ] `T-VN-36C`
   - 32~38 join barrier 뒤 Lane B: [ ] `T-VN-40A` → [ ] `T-VN-40B` →
     [ ] `T-VN-40C`
@@ -711,7 +711,7 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 > 배포·main 병합하지 않고 C final head에서 한 번에 forward-only cutover한다. 서비스 전 단계이므로
 > dual-write, shadow/held rollback, old contract 보존은 만들지 않으며 final schema는 ETL로 재적재한다.
 
-- [/] T-VN-34A — **3축 상태 schema·backfill**
+- [x] T-VN-34A — **3축 상태 schema·backfill**
 
   여덟 legal tuple의 typed axis/DB CHECK와 `feature_state_transitions` append-only trigger를
   target contract·actual migration에 고정한다. legacy tuple diagnostics와 one-shot mapping/backfill
@@ -719,8 +719,9 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   bootstrap owner와 분리된 migrator/API/Dagster runtime role·DSN/preflight까지 함께 전환한다. P0 repair
   `9f16599f`는 provider receipt DB 파생·typed lifecycle override command·provider version materializer와
   실제 runtime `load_bundle` 권한 검증까지 반영했다. 후속 보강은 source head currentness, user-fenced
-  provider baseline 보존, Dagster webserver preflight와 target freeze 재동결을 포함한다. 현재 2인 적대
-  재리뷰 중이며 A는 stack 내부 checkpoint다.
+  provider baseline 보존, Dagster webserver preflight와 target freeze 재동결을 포함한다. `81d04024` 기준
+  DB/ACL·contract/runtime 적대 리뷰 2명이 P0/P1 없이 GO를 판정했다. A는 완료됐지만 B/C와 함께만
+  final cutover로 배포·병합하는 stack 내부 checkpoint다.
 
 - [ ] T-VN-34B — **public projection·partial index cutover**
 
