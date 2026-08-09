@@ -285,6 +285,15 @@ Map OpenAPI export 뒤 clean PinVi worktree에서 user/admin-detail snapshot과 
 head로 re-vendor한다. paired Map/PinVi commit·OpenAPI SHA·generated source SHA·compile·Feature-scope
 no-legacy-status gate를 cutover receipt에 남긴다.
 
+**C 소비자 영수증(2026-08-09)**: Map `f426c7b78c493035952ded5c2a13f61a2a351793`의 user/full OpenAPI
+SHA-256은 각각 `eca7eea1dff7aa1848e50428fb8da5507e4d636c3a979b04859ef43c7f7410e7`,
+`ed20c9af2537bd330132c49c8c3dad13ca03f627c713cef896119b1366c2d7ff`다. clean PinVi branch의
+`73a3e6f76930b1b3deff79b641db1269cee4b39b`는 user vendor를 같은 bytes로, admin-detail vendor를
+`ea4adb6392a61d0df309e9cf3cf2ef0cdbb605784adc7812fe45cfdc3517b00a`로 고정했다. shared Feature schema
+SHA-256 `beccb3ce02d77d3e4d19dda14c7514abd9b095b7cec3bd379326f2f8069d5b57`와 Linux Node 22 workspace
+typecheck는 public Feature의 `status`와 세 내부 상태 축 재도입이 없음을 함께 검증한다. 이는 consumer
+cutover proof일 뿐, n150 destructive fresh-ETL/live E2E gate를 대체하지 않는다.
+
 ## 5. 작업·PR 분할과 병렬 소유권
 
 | task/PR | 책임 | 소유권 | 배포 가능 여부 |

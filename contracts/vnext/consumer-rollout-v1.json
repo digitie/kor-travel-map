@@ -53,6 +53,21 @@
         "user": "yes",
         "service": "no",
         "admin-detail": "yes"
+      },
+      "pinvi_snapshot_receipt": {
+        "map_commit": "f426c7b78c493035952ded5c2a13f61a2a351793",
+        "pinvi_commit": "73a3e6f76930b1b3deff79b641db1269cee4b39b",
+        "map_user_openapi_sha256": "eca7eea1dff7aa1848e50428fb8da5507e4d636c3a979b04859ef43c7f7410e7",
+        "map_full_openapi_sha256": "ed20c9af2537bd330132c49c8c3dad13ca03f627c713cef896119b1366c2d7ff",
+        "pinvi_user_vendor_sha256": "eca7eea1dff7aa1848e50428fb8da5507e4d636c3a979b04859ef43c7f7410e7",
+        "pinvi_admin_detail_vendor_sha256": "ea4adb6392a61d0df309e9cf3cf2ef0cdbb605784adc7812fe45cfdc3517b00a",
+        "pinvi_feature_schema_sha256": "beccb3ce02d77d3e4d19dda14c7514abd9b095b7cec3bd379326f2f8069d5b57",
+        "verification": [
+          "admin-detail deterministic re-extraction",
+          "PinVi contract pin consistency",
+          "Node 22 Linux workspace typecheck",
+          "public Feature no legacy status or internal state axes"
+        ]
       }
     },
     "T-VN-35": {
