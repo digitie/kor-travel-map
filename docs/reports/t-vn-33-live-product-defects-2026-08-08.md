@@ -843,8 +843,30 @@ fail-close하는데 축 하나만 규칙이 달랐다. 둘 다 닫았다.
     틀려도 초록이다. 이름·위치·마커를 실제로 하는 일에 맞춰
     `tests/unit/test_ops_dataset_service_signature_contract.py`로 옮겼다.
 
+해소(2026-08-10, 워크플로 8-agent):
+  test_canonical_provider_operations.py  121줄 2건 -> **35 passed**
+    main 27건 전부 이식(누락 0). parametrize 4종도 원본과 문자 단위로 동일.
+    전제가 표현 불가가 된 것들은 다시 정의했다 — `ensure_dagster_feature_operation`이
+    모든 membership에 **같은 operation_key**를 요구하므로 "한 run에 kma+mcst"는
+    이제 만들 수 없다. 같은 operation의 서로 다른 dataset membership으로 옮겼고,
+    불변식(멱등/역행금지/재정렬 무영향)이 provider 다양성이 아니라 member 다수성에
+    걸려 있어 축은 유지된다.
+
+    적대 검증 3명 중 2명 APPROVE, 1명 REJECT. REJECT 근거는 **살아남은 mutant 1건**:
+    `feature_operation_tracking._trigger_kind()`의 fallback을 `return None`으로
+    바꿔도 34 passed였다. trigger tag가 없는 run을 operation tag만 보고
+    "schedule"로 추론하는 경로인데, schedule launch가 trigger tag를 안 찍으므로
+    프로덕션에서 실재한다 — 그 fallback이 사라지면 **모든 schedule run이 guard에서
+    죽는다**. 복원된 27건이 전부 trigger tag를 함께 싣는 helper 기본값을 써서 이
+    축을 밟지 않았다. 회귀 1건을 추가했고, mutant를 다시 심어 실제로 죽는 것까지
+    확인했다(`trigger_mismatch`로 실패).
+
+    정정: 이식 보고의 "원본 단언은 한 줄도 삭제하지 않았다"는 부정확하다 —
+    `assert launch is not None` 2줄이 빠졌다. 대상 헬퍼
+    (`resolve_feature_operation_launch`)가 cutover로 소멸했고 대체 경로가 같은
+    전제를 강제하므로 행동 커버리지 손실은 없으나, 서술은 사실과 달랐다.
+
 미해소(추적 대상):
-  test_canonical_provider_operations.py  121줄 2건 <- main 2227줄 27건
     27건 중 18건은 이름 치환 + 시드 membership으로 이식 가능함을 확인했고(수집
     22건 성공), 9건은 registry tag/identity 메커니즘 자체가 교체돼(
     `feature_operation_definition_tags`/`resolve_feature_operation_identity`/
@@ -852,4 +874,5 @@ fail-close하는데 축 하나만 규칙이 달랐다. 둘 다 닫았다.
     **주제를 다시 정의해야** 한다. 남은 작업은 25곳의
     `ProviderDatasetOperationMembership(...)` 생성부를 DB 유도로 바꾸는 것이다.
   test_ops_datasets_api_projection.py    main 992줄 1건(REST 교차 통합)
+    datasets/pipeline REST를 실제 app으로 띄워 교차 검증하던 회귀. 아직 복원 안 됨.
 ```

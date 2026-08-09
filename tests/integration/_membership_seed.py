@@ -20,6 +20,11 @@ from kortravelmap.core.feature_operation import ProviderDatasetOperationMembersh
 #: dataset 여러 개를 한 operation으로 묶는 시드 operation(실측 13 membership).
 MULTI_MEMBER_OPERATION = "feature_place_mcst_culture_job"
 
+#: dataset 1개 = membership 1개인 시드 operation(실측: provider_dataset_id=30,
+#: sync_scope='dataset_wide'). single-member wrapper 경로가 요구하는 전제
+#: (``_single_membership_for_asset``)를 우회 없이 그대로 표현한다.
+SINGLE_MEMBER_OPERATION = "feature_place_mois_licenses_job"
+
 _SCOPES_SQL = """
 SELECT provider_dataset_id, sync_scope, operation_key
 FROM provider_sync.provider_dataset_operation_scopes
@@ -57,7 +62,9 @@ async def memberships_for_operation(
 
 #: Dagster run tag key. 프로덕션 상수를 그대로 읽는다 — 테스트가 자기 사본을 들면
 #: 태그 이름이 갈려도 조용히 통과한다.
-def launch_tags(*, operation_key: str, trigger_kind: str = "schedule") -> dict[str, str]:
+def launch_tags(
+    *, operation_key: str, trigger_kind: str | None = "schedule"
+) -> dict[str, str]:
     """예전 ``feature_operation_launch_tags``의 대체.
 
     T-VN-33 전에는 registry가 job 이름에서 identity와 tag를 만들었다. 지금은 DB의
@@ -70,4 +77,11 @@ def launch_tags(*, operation_key: str, trigger_kind: str = "schedule") -> dict[s
         _TRIGGER_KIND_TAG,
     )
 
-    return {_OPERATION_KEY_TAG: operation_key, _TRIGGER_KIND_TAG: trigger_kind}
+    tags = {_OPERATION_KEY_TAG: operation_key}
+    if trigger_kind is not None:
+        tags[_TRIGGER_KIND_TAG] = trigger_kind
+    # ``trigger_kind=None``은 **trigger tag가 아예 없는 run**을 만든다. 프로덕션에서
+    # 실제로 있는 모양이고(`_trigger_kind()`가 operation tag만 보고 "schedule"로
+    # 추론한다), 그 fallback을 아무 테스트도 잡지 않고 있었다 — mutant로 실증됐다
+    # (fallback을 `return None`으로 바꿔도 34 passed).
+    return tags
