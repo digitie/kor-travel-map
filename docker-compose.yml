@@ -280,9 +280,13 @@ services:
       secrets:
         - github_token
     command:
-      - /bin/sh
-      - -c
-      - dagster-webserver -m kortravelmap.dagster.definitions -h 0.0.0.0 -p "$${KOR_TRAVEL_MAP_DAGSTER_PORT:-12702}"
+      - dagster-webserver
+      - -m
+      - kortravelmap.dagster.definitions
+      - -h
+      - 0.0.0.0
+      - -p
+      - "${KOR_TRAVEL_MAP_DAGSTER_PORT:-12702}"
     env_file:
       - path: .env
         required: false

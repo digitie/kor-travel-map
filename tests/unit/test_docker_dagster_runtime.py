@@ -64,7 +64,15 @@ def test_docker_compose_uses_persistent_dagster_storage_and_daemon() -> None:
     dagster = services["dagster"]
     daemon = services["dagster-daemon"]
 
-    assert "dagster-webserver" in _command_text(dagster["command"])
+    assert dagster["command"] == [
+        "dagster-webserver",
+        "-m",
+        "kortravelmap.dagster.definitions",
+        "-h",
+        "0.0.0.0",
+        "-p",
+        "${KOR_TRAVEL_MAP_DAGSTER_PORT:-12702}",
+    ]
     assert "dagster dev" not in _command_text(dagster["command"])
     assert "dagster-daemon run" in _command_text(daemon["command"])
     for service in (dagster, daemon):
@@ -1713,6 +1721,72 @@ def test_dagster_entrypoint_executes_command_without_api_ops_keys() -> None:
 
     assert result.returncode == 0, result.stderr
     assert "dagster-started" in result.stdout
+
+
+def _dagster_runtime_command_stub_path(tmp_path: Path) -> str:
+    """runtime preflight 호출과 exec target을 구분하는 disposable PATH를 만든다."""
+
+    bin_dir = tmp_path / "dagster-runtime-bin"
+    bin_dir.mkdir()
+    (bin_dir / "python").write_text(
+        "#!/bin/sh\n"
+        "if [ \"${1:-}\" = \"-m\" ] "
+        "&& [ \"${2:-}\" = \"kortravelmap.dagster.runtime_preflight\" ]; then\n"
+        "  echo runtime-preflight\n"
+        "  exit 0\n"
+        "fi\n"
+        "if [ \"${1:-}\" = \"-c\" ]; then\n"
+        "  exit 0\n"
+        "fi\n"
+        "exit 70\n",
+        encoding="utf-8",
+    )
+    for command in ("dagster-webserver", "dagster-daemon", "ktm-dagster-storage"):
+        target = bin_dir / command
+        target.write_text(f"#!/bin/sh\necho {command}-started\n", encoding="utf-8")
+        target.chmod(0o755)
+    (bin_dir / "python").chmod(0o755)
+    return f"{bin_dir}:{os.environ['PATH']}"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("command", "requires_preflight"),
+    [
+        (
+            ["dagster-webserver", "-m", "kortravelmap.dagster.definitions"],
+            True,
+        ),
+        (
+            ["dagster-daemon", "run", "-m", "kortravelmap.dagster.definitions"],
+            True,
+        ),
+        (
+            ["sh", "-c", "dagster-webserver -m kortravelmap.dagster.definitions"],
+            True,
+        ),
+        (["dagster-daemon", "--help"], False),
+        (["ktm-dagster-storage", "migrate"], False),
+        (["sh", "-c", "echo dagster-webserver"], False),
+    ],
+)
+def test_dagster_entrypoint_preflights_only_actual_runtime_commands(
+    tmp_path: Path,
+    command: list[str],
+    *,
+    requires_preflight: bool,
+) -> None:
+    result = subprocess.run(
+        ["sh", "docker/dagster-entrypoint.sh", *command],
+        cwd=ROOT,
+        env={"PATH": _dagster_runtime_command_stub_path(tmp_path)},
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert ("runtime-preflight" in result.stdout) is requires_preflight
 
 
 @pytest.mark.unit
