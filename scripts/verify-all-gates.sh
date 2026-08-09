@@ -65,18 +65,23 @@ IMAGE="${KTM_BATTERY_IMAGE:-ktm-battery:t37}"
 # 어느 쪽이든 판정 근거가 분명하고, 키는 변수에만 담아 출력하지 않는다.
 GEO_KEY=""
 GEO_BASE="http://127.0.0.1:1"
-if MSYS_NO_PATHCONV=1 wsl -e bash -lc 'ssh -o BatchMode=yes -o ConnectTimeout=5 n150 true' >/dev/null 2>&1; then
-  MSYS_NO_PATHCONV=1 wsl -e bash -lc 'pkill -f "N -L 12599" >/dev/null 2>&1; ssh -f -N -L 12599:127.0.0.1:12501 n150' >/dev/null 2>&1
-  GEO_KEY="$(MSYS_NO_PATHCONV=1 wsl -e bash -lc 'ssh n150 "cat ~/.secrets/kor-travel-map-public-api-key"' | tr -d '\r\n')"
-  if [ -n "$GEO_KEY" ]; then
-    GEO_BASE="http://127.0.0.1:12599"
-    echo "geo live: n150 터널로 실제 실행(키 길이 ${#GEO_KEY})"
-  else
-    echo "geo live: n150은 닿으나 키를 못 읽었다 — CI와 같이 skip시킨다"
+# integration 게이트 **직전에** 부른다. 스크립트 시작 시점에 터널을 뚫으면 앞선
+# 게이트들을 지나는 동안(실측 20분 이상) ssh가 끊겨, "터널로 실제 실행"이라 적어
+# 놓고 결과는 5 skipped가 된다 — 실제로 한 번 그렇게 거짓을 적었다.
+setup_geo_live() {
+  if ! MSYS_NO_PATHCONV=1 wsl -e bash -lc 'ssh -o BatchMode=yes -o ConnectTimeout=5 n150 true' >/dev/null 2>&1; then
+    echo "geo live: n150 미도달 — CI와 같이 skip시킨다(로컬 geo로 흘러가 키 거부 red가 나지 않게)"
+    return
   fi
-else
-  echo "geo live: n150 미도달 — CI와 같이 skip시킨다(로컬 geo로 흘러가 키 거부 red가 나지 않게)"
-fi
+  MSYS_NO_PATHCONV=1 wsl -e bash -lc 'pkill -f "N -L 12599" >/dev/null 2>&1; ssh -f -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=6 -L 12599:127.0.0.1:12501 n150' >/dev/null 2>&1
+  GEO_KEY="$(MSYS_NO_PATHCONV=1 wsl -e bash -lc 'ssh n150 "cat ~/.secrets/kor-travel-map-public-api-key"' | tr -d '\r\n')"
+  if [ -z "$GEO_KEY" ]; then
+    echo "geo live: n150은 닿으나 키를 못 읽었다 — CI와 같이 skip시킨다"
+    return
+  fi
+  GEO_BASE="http://127.0.0.1:12599"
+  echo "geo live: n150 터널로 실제 실행(키 길이 ${#GEO_KEY})"
+}
 NPM="npx --yes npm@12.0.1"
 ADMIN="packages/kor-travel-map-admin/frontend"
 FAILED=()
@@ -187,8 +192,11 @@ run_gate "pytest api" py \
   'timeout 1800 python -m pytest packages/kor-travel-map-api/tests/ -q --cov=packages/kor-travel-map-api/src/kortravelmap/api --cov-report=term-missing --cov-fail-under=70 > /tmp/g2.log 2>&1; rc=$?; tail -20 /tmp/g2.log; exit $rc'
 run_gate "pytest dagster" py \
   'timeout 1800 python -m pytest packages/kor-travel-map-dagster/tests/ -q --cov=packages/kor-travel-map-dagster/src/kortravelmap/dagster --cov-report=term-missing --cov-fail-under=80 > /tmp/g3.log 2>&1; rc=$?; tail -20 /tmp/g3.log; exit $rc'
+setup_geo_live
+# live 모드라고 선언했으면 **정말 live여야 한다.** 터널이 끊기면 geo 5건이 조용히
+# skip되고 로그에는 "실제 실행"만 남는다. 그 조용한 skip을 exit 96으로 바꾼다.
 run_gate "pytest integration" py \
-  'timeout 3000 python -m pytest tests/integration -q > /tmp/g4.log 2>&1; rc=$?; tail -25 /tmp/g4.log; exit $rc'
+  'python scripts/geo_live_probe.py || exit 96; timeout 3000 python -m pytest tests/integration -q > /tmp/g4.log 2>&1; rc=$?; tail -25 /tmp/g4.log; exit $rc'
 
 echo "===== frontend.yml"
 run_gate "audit:high"              repo "$NPM run audit:high"
