@@ -1119,6 +1119,9 @@ def _bbox_candidate_predicate_sql(feature_alias: str) -> str:
       평가, bbox로 이미 좁혀진 작은 집합)로 뽑아 ``feature_id = ANY(...)``로 건다.
       PK 인덱스를 타므로 planner가 coord GiST arm과 **BitmapOr**로 결합할 수 있다
       (상관 서브쿼리를 OR 아래 두면 semi-join으로 승격되지 않아 seq scan이 된다).
+      route/area의 state는 parent에 있으므로, 여기서는 DB 소유 cache ``public_ready``를
+      명시해 subtype partial GiST의 predicate를 만족시킨다. outer public view는 여전히
+      3축 membership의 최종 fence다.
     - coord arm은 route/area를 **kind로** 배제한다. 0086 이후 geometry 없는
       route/area는 표현 불가능하고(subtype geom이 NOT NULL, 마이그레이션 preflight가
       기존 행을 fail-close로 거른다) DTO도 구성 시점에 막으므로, 종전의
@@ -1138,12 +1141,14 @@ def _bbox_candidate_predicate_sql(feature_alias: str) -> str:
       ARRAY(
         SELECT bbox_hit_route.feature_id
         FROM feature.feature_routes AS bbox_hit_route
-        WHERE bbox_hit_route.geom OPERATOR(x_extension.&&) {env}
+        WHERE bbox_hit_route.public_ready
+          AND bbox_hit_route.geom OPERATOR(x_extension.&&) {env}
           AND x_extension.ST_Intersects(bbox_hit_route.geom, {env})
         UNION ALL
         SELECT bbox_hit_area.feature_id
         FROM feature.feature_areas AS bbox_hit_area
-        WHERE bbox_hit_area.geom OPERATOR(x_extension.&&) {env}
+        WHERE bbox_hit_area.public_ready
+          AND bbox_hit_area.geom OPERATOR(x_extension.&&) {env}
           AND x_extension.ST_Intersects(bbox_hit_area.geom, {env})
       )
     )

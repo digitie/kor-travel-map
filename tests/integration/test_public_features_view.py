@@ -35,6 +35,7 @@ from kortravelmap.infra import (
 )
 from kortravelmap.infra.poi_cache_target_repo import upsert_poi_cache_target
 from tests.integration._subtype_seed import seed_feature_subtype
+from tests.integration.perf_gate import explain_plan, index_names
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -62,6 +63,7 @@ async def _ins_feature(
     lon: float = 126.978,
     lat: float = 37.5665,
     detail: str = "{}",
+    geom_wkt: str | None = None,
     sido: str = "11",
     sigungu: str = "11140",
     bjd: str = "1114010100",
@@ -107,7 +109,11 @@ async def _ins_feature(
     # T-VN-35(ADR-086): kind별 값의 정본은 subtype이다 — core INSERT만으로는
     # 조립 뷰가 돌려주는 detail이 비어 있다.
     await seed_feature_subtype(
-        session, feature_id=feature_id, kind=kind, detail=json.loads(detail)
+        session,
+        feature_id=feature_id,
+        kind=kind,
+        detail=json.loads(detail),
+        geom_wkt=geom_wkt,
     )
     await session.flush()
 
@@ -410,6 +416,56 @@ async def test_public_beach_views_use_projection(migrated_session: AsyncSession)
     for suffix, _lifecycle, _publication, _quality, public in _STATE_MATRIX:
         row = await public_views_repo.get_public_beach(migrated_session, feature_id=ids[suffix])
         assert (row is not None) is public, f"beach detail mismatch for {suffix}"
+
+
+async def test_public_bbox_geometry_arms_use_ready_partial_indexes(
+    migrated_session: AsyncSession,
+) -> None:
+    """실제 공개 bbox SQL의 route/area arm이 ready partial GiST를 쓴다."""
+
+    await _ins_feature(
+        migrated_session,
+        feature_id="pfv:bbox:route",
+        name="bbox 경로",
+        kind="route",
+        category="06070000",
+        geom_wkt="MULTILINESTRING((126.96 37.55,126.99 37.58))",
+    )
+    await _ins_feature(
+        migrated_session,
+        feature_id="pfv:bbox:area",
+        name="bbox 구역",
+        kind="area",
+        category="06050000",
+        geom_wkt=(
+            "MULTIPOLYGON(((126.96 37.55,126.99 37.55,126.99 37.58,"
+            "126.96 37.55)))"
+        ),
+    )
+    await migrated_session.execute(text("ANALYZE feature.feature_routes"))
+    await migrated_session.execute(text("ANALYZE feature.feature_areas"))
+
+    plan = await explain_plan(
+        migrated_session,
+        feature_repo._FEATURES_IN_BBOX_SQL,  # noqa: PLC2701 - generated public SQL gate
+        {
+            "min_lon": 126.95,
+            "min_lat": 37.54,
+            "max_lon": 127.00,
+            "max_lat": 37.59,
+            "kinds": ["route", "area"],
+            "categories": None,
+            "providers": None,
+            "cursor_feature_id": None,
+            "limit": 100,
+            "price_stale_hide_days": 4,
+        },
+        planner_default=False,
+    )
+    assert {
+        "idx_feature_routes_geom_gist",
+        "idx_feature_areas_geom_gist",
+    } <= index_names(plan)
 
 
 async def test_public_festival_views_use_projection(migrated_session: AsyncSession) -> None:
