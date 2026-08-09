@@ -464,3 +464,84 @@ npm audit fix --package-lock-only --omit=dev
 
 교훈: "환경이 없어 검증할 수 없다"는 상태를 방치하면 그 자리에 미검증 주장이 쌓인다.
 환경을 올리는 것이 검증 없는 변경을 넣는 것보다 싸다.
+
+### 29-해소. offline upload 500 → typed 4xx (커밋 이후 `6c4ac6de` 이전)
+
+후속으로 미루려던 것을 이번 브랜치에서 닫았다. 21번이 맞다는 판단을 유지한 채로,
+그 조합에서 죽던 표면을 고쳤다.
+
+```
+OfflineUploadScopeOperationUnresolved에 `resolved: int`를 실어, 라우터가
+  resolved == 0  -> "이 scope에 refresh operation이 없다"
+  resolved  > 1  -> "형제 operation이 둘 이상이라 지목이 필요하다"
+로 갈라 409를 낸다. 둘은 운영자가 취할 조치가 정반대라 같은 메시지로 뭉치면 안 된다.
+그리고 처리 **전에** parse_canonical_sync_scope로 422 가드를 세웠다 — 비정규
+scope 문자열이 리졸버까지 내려가 다른 이유로 터지는 경로를 없앤다.
+프론트 기본값도 "default" -> "dataset_wide"로 고쳤다(T-VN-33 정규 scope 이름).
+```
+
+## 적대 리뷰 7라운드가 드러낸 것 (2026-08-09)
+
+### 35. run history가 요청한 축을 넘었다 (exact triple 상세에 형제 operation 혼입)
+
+`load_dataset_detail`은 `dataset_operation_key`로 **root를** 고르지만, 고른 root의
+`provider_datasets` membership 목록에는 형제 operation이 그대로 들어 있다.
+`_run_history_records`가 `sync_scope`만 보고 membership마다 행을 내니, exact triple을
+지목한 상세 화면이 옆 operation의 실행을 섞어 보여줬다. 화면 안내문("서버가 cursor와
+page limit 전에 선택한 exact scope를 적용한 canonical operation만 표시합니다")과도
+정면으로 어긋난다.
+
+```
+고침: _run_history_records(operation_keys=...)로 걸러내고, scope 롤업(None)일 때만
+전부 싣는다. 양방향 단언을 박았다 — 롤업은 형제 둘 다, exact는 하나만.
+
+이 결함은 "형제 operation을 접지 말자"는 이번 작업의 방향 자체에서 나왔다. 확장을
+하면 그 확장이 **어디서 멈추는지**도 같이 정해야 한다.
+```
+
+### 36. 그 확장의 프론트 쪽 대가 — row id 충돌 + 구분 불가
+
+행이 membership마다 나오는데 `datasets-client.tsx`의 `getRowId`는 `${kind}:${id}`였다.
+형제 둘이 같은 row id를 갖는다 — React key 중복이고, DataTable의 선택/확장 상태가
+뒤섞인다. 게다가 `operation_key` 열이 없어 운영자에게는 **같은 실행이 두 번 찍힌
+것으로만** 보인다.
+
+```
+고침: row id를 `kind:id:sync_scope:operation_key`로, `operation` 열 추가.
+서버 스키마는 이미 operation_key: str(non-null)였다 — 데이터는 있었고 표면이 없었다.
+```
+
+### 37. 게이트 스크립트가 소스 복사 실패를 삼켰다
+
+`py()`의 컨테이너 명령이 `... && cp -r ... . && cp alembic.ini 2>/dev/null; $1`이었다.
+`;` 앞이 실패해도 `$1`이 그대로 돌고, 종료코드는 `$1`의 것이다 — **이미지에 구워진 낡은
+트리 위에서** 게이트가 통과할 수 있다.
+
+```
+고침: 복사 실패를 exit 97로 만든다. 게이트 스크립트의 존재 이유가 "무엇을 검사했는지
+거짓말하지 않는 것"인데, 그 자리에 조용한 거짓이 있었다.
+```
+
+### 38. (BLOCKER) 감사기가 로컬 게이트의 **약화**를 원리적으로 못 잡았다
+
+리뷰어의 지적: 이 브랜치가 여섯 번 REJECT된 실패 모드(더 좁은 집합을 돌리고 green
+선언)가 그대로 감사 사각이다. 실증으로 변이 3종이 생존했다.
+
+```
+M7  실행문을 지우고 같은 문자열을 주석으로만 남김
+    원인: 조각을 파일 어디서든 찾았다. 헬퍼 함수 본문에 문자열이 남으면 통과.
+    고침: run_gate 호출 줄 + **그 줄이 이름으로 부르는 함수 본문**만 증거로 인정
+          (도달성 판정). 줄바꿈 이어쓰기는 한 논리 줄로 합친다.
+N6  export_openapi.py에서 --check 제거(검사가 아니라 재작성이 된다)
+    원인: 일반 `scripts/*.py` 분기가 먼저 걸려 경로만 조각이 됐다.
+    고침: 분기 순서를 뒤집고, 순서가 곧 계약임을 주석에 박았다.
+M8  uses: ./.github/actions/... 로컬 composite action 스텝
+    원인: 마켓플레이스 액션 면제 키 "actions/"가 로컬 경로에도 부분문자열로 걸렸다.
+    고침: `uses ./`로 시작하는 명령은 면제에서 제외.
+
+도달성 판정 자체를 겨냥한 M9(게이트를 아무도 안 부르는 함수로 이동)를 추가했다.
+scripts/audit-mutation-battery.py = 20/20.
+```
+
+교훈은 앞의 것과 같은데 한 겹 위다: 감사기가 **통과하는 것**과 감사기가 **유효한
+것**은 다른 문제다. 변이를 심어 확인하지 않은 감사는 그 위의 green을 지탱하지 못한다.
