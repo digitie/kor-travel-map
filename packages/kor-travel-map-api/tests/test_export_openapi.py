@@ -100,6 +100,7 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
         "/v1/features/{feature_id}/weather",
         "/v1/features/{feature_id}/weather/snapshot",
         "/v1/features/{feature_id}/weather/forecast",
+        "/v1/features/{feature_id}/weather/snapshot",
         "/v1/features/weather/forecast",
         "/v1/features/weather/alerts",
         "/v1/public/beaches",
@@ -267,6 +268,17 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
         "primary_provider",
         "primary_dataset_key",
     }.isdisjoint(_schema_properties(user, "NearbyFeatureSummary"))
+    # T-VN-34C: public visibility는 fence로만 표현한다. Feature 상태 원문과
+    # 내부 3축은 admin projection에만 있으며 어떤 public feature schema에도 없다.
+    for schema_name in (
+        "FeatureSummary",
+        "FeatureDetailResponse",
+        "NearbyFeatureSummary",
+        "CurationFeatureView",
+    ):
+        assert {"status", "lifecycle_state", "publication_state", "quality_state"}.isdisjoint(
+            _schema_properties(user, schema_name)
+        )
     assert {
         "source_record_key",
         "metadata",
@@ -1187,7 +1199,6 @@ def test_public_curation_collection_item_group_pin_required_types_and_enums() ->
             "lon",
             "lat",
             "address",
-            "status",
         },
         types={
             "feature_id": "string",
@@ -1197,7 +1208,6 @@ def test_public_curation_collection_item_group_pin_required_types_and_enums() ->
             "lon": "number",
             "lat": "number",
             "address": "object",
-            "status": "string",
         },
     )
 
