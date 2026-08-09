@@ -55,10 +55,10 @@
         "admin-detail": "yes"
       },
       "pinvi_snapshot_receipt": {
-        "map_commit": "f426c7b78c493035952ded5c2a13f61a2a351793",
-        "pinvi_commit": "5144d6722e6f026bb3e472f5286fa46fe25bf07a",
+        "map_commit": "56d98fe4a07d143386be089cd1beac12b75342eb",
+        "pinvi_commit": "0a67a09adbdf54ec202c60899bbbfeb43d1f446e",
         "map_user_openapi_sha256": "eca7eea1dff7aa1848e50428fb8da5507e4d636c3a979b04859ef43c7f7410e7",
-        "map_full_openapi_sha256": "ed20c9af2537bd330132c49c8c3dad13ca03f627c713cef896119b1366c2d7ff",
+        "map_full_openapi_sha256": "95ab7935c10cc19e8480527ef6ec54a2829f317a129c6b3dff313a15979505d0",
         "pinvi_user_vendor_sha256": "eca7eea1dff7aa1848e50428fb8da5507e4d636c3a979b04859ef43c7f7410e7",
         "pinvi_admin_detail_vendor_sha256": "ea4adb6392a61d0df309e9cf3cf2ef0cdbb605784adc7812fe45cfdc3517b00a",
         "pinvi_feature_schema_sha256": "beccb3ce02d77d3e4d19dda14c7514abd9b095b7cec3bd379326f2f8069d5b57",
