@@ -76,8 +76,6 @@ _RUNTIME_DB_PRIVILEGE_SQL = text(
             AS can_create_in_feature_schema,
         has_table_privilege(session_user, 'feature.public_features', 'SELECT')
             AS can_read_public_features,
-        has_table_privilege(session_user, 'feature.features_detailed', 'SELECT')
-            AS can_read_features_detailed,
         -- PostgreSQL stores functions and procedures in pg_proc; the public
         -- privilege inquiry is has_function_privilege even for a regprocedure.
         has_function_privilege(
@@ -110,6 +108,18 @@ _RUNTIME_DB_PRIVILEGE_SQL = text(
             'feature.materialize_provider_feature_version(text)'::regprocedure,
             'EXECUTE'
         ) AS can_execute_provider_version_procedure,
+        has_function_privilege(
+            session_user,
+            'feature.transition_admin_feature_state('
+            'text,text,text,text,bigint,text,text,text)'::regprocedure,
+            'EXECUTE'
+        ) AS can_execute_admin_transition_procedure,
+        has_function_privilege(
+            session_user,
+            'feature.reactivate_admin_feature_state('
+            'text,bigint,text,text,bigint,text,text)'::regprocedure,
+            'EXECUTE'
+        ) AS can_execute_admin_reactivation_procedure,
         EXISTS (
             SELECT 1
             FROM pg_catalog.pg_proc AS candidate_procedure
@@ -128,7 +138,11 @@ _RUNTIME_DB_PRIVILEGE_SQL = text(
                     'feature.materialize_user_feature_change_provenance(text,text,uuid,text,text,bigint)'::regprocedure,
                     'feature.author_lifecycle_override(text,text,text,boolean,text,text,bigint)'::regprocedure,
                     'feature.revoke_lifecycle_override(text,text,bigint)'::regprocedure,
-                    'feature.materialize_provider_feature_version(text)'::regprocedure
+                    'feature.materialize_provider_feature_version(text)'::regprocedure,
+                    'feature.transition_admin_feature_state('
+                    'text,text,text,text,bigint,text,text,text)'::regprocedure,
+                    'feature.reactivate_admin_feature_state('
+                    'text,bigint,text,text,bigint,text,text)'::regprocedure
               )
         ) AS can_execute_unintended_feature_procedure,
         has_table_privilege(session_user, 'feature.features', 'INSERT')
@@ -151,34 +165,6 @@ _RUNTIME_DB_PRIVILEGE_SQL = text(
             OR has_table_privilege(session_user, 'ops.feature_overrides', 'DELETE')
             OR has_table_privilege(session_user, 'ops.feature_overrides', 'TRUNCATE')
         ) AS can_mutate_feature_overrides_directly,
-        EXISTS (
-            SELECT 1
-            FROM pg_catalog.pg_attribute AS legacy_column
-            JOIN pg_catalog.pg_class AS legacy_table
-                ON legacy_table.oid = legacy_column.attrelid
-            JOIN pg_catalog.pg_namespace AS legacy_schema
-                ON legacy_schema.oid = legacy_table.relnamespace
-            WHERE legacy_schema.nspname = 'feature'
-              AND legacy_table.relname = 'features'
-              AND legacy_column.attnum > 0
-              AND NOT legacy_column.attisdropped
-              AND legacy_column.attname IN (
-                    'status',
-                    'deleted_at',
-                    'user_deleted_at',
-                    'user_change_kind',
-                    'user_change_status',
-                    'user_change_request_id',
-                    'user_deleted_by',
-                    'user_change_reason'
-              )
-              AND has_column_privilege(
-                    session_user,
-                    legacy_column.attrelid,
-                    legacy_column.attname,
-                    'UPDATE'
-              )
-        ) AS can_update_legacy_state_surrogate_directly,
         has_function_privilege(
             session_user,
             'feature.write_feature_state_transition()'::regprocedure,
@@ -236,9 +222,6 @@ def _runtime_db_privilege_problems(
         "can_mutate_feature_overrides_directly": (
             "runtime login must not mutate ops.feature_overrides directly"
         ),
-        "can_update_legacy_state_surrogate_directly": (
-            "runtime login must not UPDATE a legacy feature state surrogate directly"
-        ),
         "can_execute_audit_writer_directly": (
             "runtime login must not EXECUTE the audit writer function directly"
         ),
@@ -250,9 +233,6 @@ def _runtime_db_privilege_problems(
     required_true_fields = {
         "can_read_public_features": (
             "runtime login must SELECT feature.public_features"
-        ),
-        "can_read_features_detailed": (
-            "runtime login must SELECT feature.features_detailed"
         ),
         "can_execute_create_procedure": (
             "runtime login must EXECUTE create_feature_with_initial_state"
@@ -271,6 +251,12 @@ def _runtime_db_privilege_problems(
         ),
         "can_execute_provider_version_procedure": (
             "runtime login must EXECUTE materialize_provider_feature_version"
+        ),
+        "can_execute_admin_transition_procedure": (
+            "runtime login must EXECUTE transition_admin_feature_state"
+        ),
+        "can_execute_admin_reactivation_procedure": (
+            "runtime login must EXECUTE reactivate_admin_feature_state"
         ),
     }
     for field_name, message in required_true_fields.items():

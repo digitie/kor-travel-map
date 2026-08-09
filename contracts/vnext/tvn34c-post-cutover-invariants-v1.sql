@@ -37,7 +37,7 @@ WHERE is_violation; -- expect: 0 -- phase: post-cutover
 -- 확인하면 새 internal 열이 public API로 누출될 수 있으므로 순서까지 고정한다.
 SELECT count(*)
 FROM (
-    SELECT array_agg(attribute.attname ORDER BY attribute.attnum) AS actual_columns
+    SELECT array_agg(attribute.attname::text ORDER BY attribute.attnum) AS actual_columns
     FROM pg_attribute AS attribute
     WHERE attribute.attrelid = 'feature.public_features'::regclass
       AND attribute.attnum > 0
@@ -57,7 +57,7 @@ WHERE actual.actual_columns IS DISTINCT FROM ARRAY[
 SELECT count(*)
 FROM (VALUES
     ('feature.features'),
-    ('feature.feature_points'),
+    ('feature.feature_places'),
     ('feature.feature_events'),
     ('feature.feature_notices'),
     ('feature.feature_routes'),
@@ -198,9 +198,9 @@ FROM (
     JOIN pg_class AS index_relation ON index_relation.oid = index_meta.indexrelid
     WHERE index_meta.indrelid = 'feature.features'::regclass
     UNION ALL
-    SELECT pg_get_constraintdef(constraint.oid, true)
-    FROM pg_constraint AS constraint
-    WHERE constraint.conrelid = 'feature.features'::regclass
+    SELECT pg_get_constraintdef(constraint_row.oid, true)
+    FROM pg_constraint AS constraint_row
+    WHERE constraint_row.conrelid = 'feature.features'::regclass
 ) AS definitions
 WHERE definitions.definition ~
     E'\\m(status|deleted_at|user_deleted_at|user_deleted_by|user_change_kind|user_change_status|user_change_request_id|user_change_reason)\\M'; -- expect: 0 -- phase: post-cutover

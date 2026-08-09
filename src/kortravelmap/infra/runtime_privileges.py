@@ -64,12 +64,11 @@ _FEATURE_TABLE_PRIVILEGES: Mapping[str, tuple[str, ...]] = {
 }
 
 # Views are included in ``REVOKE ALL ON ALL TABLES`` but PostgreSQL does not
-# return them from a table-only catalog inventory.  Keep the two runtime read
-# views in their own closed allowlist: public readers use ``public_features``
-# and admin/curated detail projections use ``features_detailed``.  A new view
-# therefore fails reconciliation until its intended consumer is reviewed.
+# return them from a table-only catalog inventory.  T-VN-34C leaves exactly
+# one runtime view: public readers use ``public_features`` while non-public
+# assembly is explicit repository SQL.  A new view therefore fails
+# reconciliation until its intended consumer is reviewed.
 _FEATURE_VIEW_PRIVILEGES: Mapping[str, tuple[str, ...]] = {
-    "features_detailed": ("SELECT",),
     "public_features": ("SELECT",),
 }
 
@@ -199,6 +198,10 @@ _STATE_OWNER_FUNCTION_ACL = (
     "text, text, bigint) FROM PUBLIC",
     "REVOKE ALL ON PROCEDURE feature.materialize_provider_feature_version("
     "text) FROM PUBLIC",
+    "REVOKE ALL ON PROCEDURE feature.transition_admin_feature_state("
+    "text, text, text, text, bigint, text, text, text) FROM PUBLIC",
+    "REVOKE ALL ON PROCEDURE feature.reactivate_admin_feature_state("
+    "text, bigint, text, text, bigint, text, text) FROM PUBLIC",
     "GRANT EXECUTE ON PROCEDURE feature.create_feature_with_initial_state("
     "jsonb, text, text, text, jsonb) TO ktm_feature_runtime",
     "GRANT EXECUTE ON PROCEDURE feature.transition_feature_state("
@@ -211,6 +214,10 @@ _STATE_OWNER_FUNCTION_ACL = (
     "text, text, bigint) TO ktm_feature_runtime",
     "GRANT EXECUTE ON PROCEDURE feature.materialize_provider_feature_version("
     "text) TO ktm_feature_runtime",
+    "GRANT EXECUTE ON PROCEDURE feature.transition_admin_feature_state("
+    "text, text, text, text, bigint, text, text, text) TO ktm_feature_runtime",
+    "GRANT EXECUTE ON PROCEDURE feature.reactivate_admin_feature_state("
+    "text, bigint, text, text, bigint, text, text) TO ktm_feature_runtime",
 )
 
 _AUDIT_WRITER_FUNCTION_ACL = (

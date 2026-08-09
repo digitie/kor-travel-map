@@ -193,15 +193,28 @@ async def test_tvn34_all_legal_tuples_procedure_audit_and_runtime_fence(
                     ) AS state_owner_alias_probe_and_insert,
                     has_table_privilege(
                         'ktm_feature_state_procedure_owner',
-                        'feature.features_detailed', 'SELECT'
-                    ) AS state_owner_detailed_snapshot_select,
+                        'feature.feature_places', 'SELECT'
+                    )
+                    AND has_table_privilege(
+                        'ktm_feature_state_procedure_owner',
+                        'feature.feature_events', 'SELECT'
+                    )
+                    AND has_table_privilege(
+                        'ktm_feature_state_procedure_owner',
+                        'feature.feature_notices', 'SELECT'
+                    )
+                    AND has_table_privilege(
+                        'ktm_feature_state_procedure_owner',
+                        'feature.feature_routes', 'SELECT'
+                    )
+                    AND has_table_privilege(
+                        'ktm_feature_state_procedure_owner',
+                        'feature.feature_areas', 'SELECT'
+                    ) AS state_owner_typed_snapshot_select,
                     has_table_privilege(
                         'ktm_feature_state_procedure_owner',
                         'feature.feature_versions', 'SELECT, INSERT'
                     ) AS state_owner_version_snapshot_write,
-                    has_table_privilege(
-                        'ktm_feature_runtime', 'feature.features_detailed', 'SELECT'
-                    ) AS runtime_detailed_snapshot_select,
                     has_table_privilege(
                         'ktm_feature_runtime', 'feature.feature_versions', 'SELECT, INSERT'
                     ) AS runtime_version_snapshot_write,
@@ -223,9 +236,8 @@ async def test_tvn34_all_legal_tuples_procedure_audit_and_runtime_fence(
         "state_owner_axis_update": True,
         "state_owner_transition_timestamp_update": True,
         "state_owner_alias_probe_and_insert": True,
-        "state_owner_detailed_snapshot_select": True,
+        "state_owner_typed_snapshot_select": True,
         "state_owner_version_snapshot_write": True,
-        "runtime_detailed_snapshot_select": False,
         "runtime_version_snapshot_write": False,
         "procedure_security_definer": True,
         "procedure_owner": "ktm_feature_state_procedure_owner",
@@ -685,14 +697,6 @@ async def test_tvn34_provider_reactivation_override_is_db_fenced(
 @pytest.mark.parametrize(
     ("forbidden_key", "forbidden_value"),
     [
-        ("status", "active"),
-        ("deleted_at", "2026-08-09T00:00:00Z"),
-        ("user_deleted_at", "2026-08-09T00:00:00Z"),
-        ("user_deleted_by", "admin:tvn34"),
-        ("user_change_kind", "update"),
-        ("user_change_status", "applied"),
-        ("user_change_request_id", "00000000-0000-0000-0000-000000003495"),
-        ("user_change_reason", "forbidden runtime input"),
         ("data_origin", "user_request"),
         ("data_version", "999999"),
         ("created_at", "2000-01-01T00:00:00Z"),
@@ -704,7 +708,7 @@ async def test_tvn34_runtime_create_rejects_legacy_and_user_provenance_payload_k
     forbidden_key: str,
     forbidden_value: str,
 ) -> None:
-    """SECDEF create는 legacy/user state surrogate를 절대 payload에서 받지 않는다."""
+    """SECDEF create는 DB-owned provenance/timestamp를 절대 payload에서 받지 않는다."""
 
     payload = json.loads(_payload(f"tvn34-forbidden-{forbidden_key}", name="forbidden"))
     payload[forbidden_key] = forbidden_value
@@ -743,7 +747,7 @@ async def test_tvn34_runtime_create_rejects_legacy_and_user_provenance_payload_k
 async def test_tvn34_runtime_materializes_typed_user_change_provenance(
     migrated_session: AsyncSession,
 ) -> None:
-    """runtime은 direct legacy provenance UPDATE 없이 typed SECDEF routine만 호출한다."""
+    """runtime은 direct provenance UPDATE 없이 typed SECDEF routine만 호출한다."""
 
     feature_id = "tvn34-user-provenance"
     request_id = "00000000-0000-0000-0000-000000003496"
@@ -785,7 +789,7 @@ async def test_tvn34_runtime_materializes_typed_user_change_provenance(
                 await migrated_session.execute(
                     text(
                         "UPDATE feature.features "
-                        "SET user_change_kind = 'update' WHERE feature_id = :feature_id"
+                        "SET data_origin = 'user_request' WHERE feature_id = :feature_id"
                     ),
                     {"feature_id": feature_id},
                 )
@@ -814,8 +818,7 @@ async def test_tvn34_runtime_materializes_typed_user_change_provenance(
         await migrated_session.execute(
             text(
                 """
-                SELECT data_origin, data_version, user_change_kind, user_change_status,
-                       user_change_request_id::text, user_change_reason
+                SELECT data_origin, data_version
                 FROM feature.features WHERE feature_id = :feature_id
                 """
             ),
@@ -823,12 +826,7 @@ async def test_tvn34_runtime_materializes_typed_user_change_provenance(
         )
     ).one()
     assert tuple(materialized) == (
-        "user_request",
-        1,
-        "update",
-        "applied",
-        request_id,
-        "typed provenance fixture",
+        "user_request", 1
     )
     snapshot = (
         await migrated_session.execute(
@@ -1014,8 +1012,7 @@ async def test_tvn34_typed_provenance_snapshots_add_after_subtype_and_delete(
         await migrated_session.execute(
             text(
                 """
-                SELECT lifecycle_state, publication_state, user_deleted_at IS NOT NULL,
-                       user_deleted_by, user_change_kind, user_change_status
+                SELECT lifecycle_state, publication_state, data_origin, data_version
                 FROM feature.features WHERE feature_id = :feature_id
                 """
             ),
@@ -1023,10 +1020,5 @@ async def test_tvn34_typed_provenance_snapshots_add_after_subtype_and_delete(
         )
     ).one()
     assert tuple(deleted) == (
-        "retired",
-        "suppressed",
-        True,
-        "admin:tvn34-test",
-        "delete",
-        "applied",
+        "retired", "suppressed", "user_request", 1
     )

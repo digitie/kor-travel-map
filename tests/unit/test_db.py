@@ -151,13 +151,14 @@ def _runtime_privilege_row() -> dict[str, object]:
         "can_set_runtime_group_role": False,
         "can_create_in_feature_schema": False,
         "can_read_public_features": True,
-        "can_read_features_detailed": True,
         "can_execute_create_procedure": True,
         "can_execute_transition_procedure": True,
         "can_execute_provenance_procedure": True,
         "can_execute_author_lifecycle_override_procedure": True,
         "can_execute_revoke_lifecycle_override_procedure": True,
         "can_execute_provider_version_procedure": True,
+        "can_execute_admin_transition_procedure": True,
+        "can_execute_admin_reactivation_procedure": True,
         "can_execute_unintended_feature_procedure": False,
         "can_insert_feature_directly": False,
         "can_update_lifecycle_directly": False,
@@ -165,7 +166,6 @@ def _runtime_privilege_row() -> dict[str, object]:
         "can_update_quality_directly": False,
         "can_mutate_transition_audit_directly": False,
         "can_mutate_feature_overrides_directly": False,
-        "can_update_legacy_state_surrogate_directly": False,
         "can_execute_audit_writer_directly": False,
     }
 
@@ -182,12 +182,12 @@ def test_runtime_privilege_preflight_requires_procedures_but_denies_direct_dml()
     row["can_update_quality_directly"] = True
     row["can_mutate_transition_audit_directly"] = True
     row["can_mutate_feature_overrides_directly"] = True
-    row["can_update_legacy_state_surrogate_directly"] = True
     row["can_execute_transition_procedure"] = False
     row["can_read_public_features"] = False
-    row["can_read_features_detailed"] = False
     row["can_execute_author_lifecycle_override_procedure"] = False
     row["can_execute_provider_version_procedure"] = False
+    row["can_execute_admin_transition_procedure"] = False
+    row["can_execute_admin_reactivation_procedure"] = False
     row["can_execute_unintended_feature_procedure"] = True
     problems = _runtime_db_privilege_problems(
         row,
@@ -197,12 +197,12 @@ def test_runtime_privilege_preflight_requires_procedures_but_denies_direct_dml()
     assert "runtime login must not UPDATE feature.features.quality_state directly" in problems
     assert "runtime login must not mutate feature.feature_state_transitions directly" in problems
     assert "runtime login must not mutate ops.feature_overrides directly" in problems
-    assert "runtime login must not UPDATE a legacy feature state surrogate directly" in problems
     assert "runtime login must EXECUTE transition_feature_state" in problems
     assert "runtime login must SELECT feature.public_features" in problems
-    assert "runtime login must SELECT feature.features_detailed" in problems
     assert "runtime login must EXECUTE author_lifecycle_override" in problems
     assert "runtime login must EXECUTE materialize_provider_feature_version" in problems
+    assert "runtime login must EXECUTE transition_admin_feature_state" in problems
+    assert "runtime login must EXECUTE reactivate_admin_feature_state" in problems
     assert "runtime login must not EXECUTE an unintended feature procedure" in problems
 
 
@@ -217,6 +217,8 @@ def test_runtime_privilege_query_uses_postgres_function_privilege_for_procedures
     assert "author_lifecycle_override" in rendered
     assert "revoke_lifecycle_override" in rendered
     assert "materialize_provider_feature_version" in rendered
+    assert "transition_admin_feature_state" in rendered
+    assert "reactivate_admin_feature_state" in rendered
     assert "can_execute_unintended_feature_procedure" in rendered
     # audit INSERT/UPDATE/DELETE/TRUNCATE 중 어느 하나라도 새면 preflight가 막는다.
     assert "'feature.feature_state_transitions', 'INSERT'" in rendered
@@ -225,11 +227,7 @@ def test_runtime_privilege_query_uses_postgres_function_privilege_for_procedures
     assert "'feature.feature_state_transitions', 'TRUNCATE'" in rendered
     assert "'ops.feature_overrides', 'UPDATE'" in rendered
     assert "'ops.feature_overrides', 'DELETE'" in rendered
-    # C final migration 뒤 legacy columns가 제거돼도 EXISTS가 false가 되어 같은
-    # preflight SQL을 유지한다. 남아 있을 때는 status/delete surrogate UPDATE를 막는다.
-    assert "can_update_legacy_state_surrogate_directly" in rendered
     assert "can_read_public_features" in rendered
-    assert "can_read_features_detailed" in rendered
 
 
 # -- make_async_session_factory -------------------------------------------

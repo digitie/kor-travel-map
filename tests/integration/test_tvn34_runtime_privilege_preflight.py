@@ -148,8 +148,8 @@ async def test_tvn34_api_and_dagster_runtime_logins_pass_actual_catalog_prefligh
                     text("SELECT count(*) FROM feature.public_features")
                 ) is not None
                 assert await connection.scalar(
-                    text("SELECT count(*) FROM feature.features_detailed")
-                ) is not None
+                    text("SELECT to_regclass('feature.features_detailed') IS NULL")
+                ) is True
                 assert (
                     await connection.scalar(
                         text(
@@ -215,14 +215,6 @@ async def test_tvn34_api_and_dagster_runtime_logins_pass_actual_catalog_prefligh
                 assert (
                     await connection.scalar(
                         text(
-                            "SELECT has_column_privilege("
-                            "session_user, 'feature.features', 'status', 'UPDATE')"
-                        )
-                    )
-                ) is False
-                assert (
-                    await connection.scalar(
-                        text(
                             "SELECT has_function_privilege("
                             "session_user, "
                             "'feature.transition_feature_state("
@@ -236,10 +228,10 @@ async def test_tvn34_api_and_dagster_runtime_logins_pass_actual_catalog_prefligh
             await runtime_engine.dispose()
 
 
-async def test_tvn34_runtime_preflight_rejects_single_audit_legacy_or_read_view_leak(
+async def test_tvn34_runtime_preflight_rejects_single_audit_or_read_view_leak(
     migrated_engine: AsyncEngine,
 ) -> None:
-    """audit·legacy·필수 read view ACL 하나라도 빠지면 fail-closed다."""
+    """audit·필수 read view ACL 하나라도 빠지면 fail-closed다."""
 
     await _provision_runtime_logins(migrated_engine)
     api_engine = await _engine_for_runtime(
@@ -263,9 +255,12 @@ async def test_tvn34_runtime_preflight_rejects_single_audit_legacy_or_read_view_
 
         async with migrated_engine.begin() as connection:
             await connection.execute(
-                text("GRANT UPDATE (status) ON feature.features TO ktm_feature_dagster_runtime")
+                text(
+                    "GRANT EXECUTE ON FUNCTION feature.write_feature_state_transition() "
+                    "TO ktm_feature_dagster_runtime"
+                )
             )
-        with pytest.raises(RuntimeDbPrivilegeBoundaryError, match="legacy feature state"):
+        with pytest.raises(RuntimeDbPrivilegeBoundaryError, match="audit writer"):
             await assert_runtime_db_privilege_boundary(
                 dagster_engine,
                 expected_login="ktm_feature_dagster_runtime",
@@ -289,7 +284,10 @@ async def test_tvn34_runtime_preflight_rejects_single_audit_legacy_or_read_view_
                 )
             )
             await connection.execute(
-                text("REVOKE UPDATE (status) ON feature.features FROM ktm_feature_dagster_runtime")
+                text(
+                    "REVOKE EXECUTE ON FUNCTION feature.write_feature_state_transition() "
+                    "FROM ktm_feature_dagster_runtime"
+                )
             )
             await connection.execute(
                 text("GRANT SELECT ON feature.public_features TO ktm_feature_runtime")
@@ -449,7 +447,7 @@ async def test_tvn34_runtime_logins_run_provider_and_admin_dml_but_raw_state_wri
                             request_id, feature_id, action, state, review_mode,
                             base_row_revision, payload, reason, requested_by
                         ) VALUES (
-                            CAST(:request_id AS uuid), :feature_id, 'update', 'pending',
+                            CAST(:request_id AS uuid), :feature_id, 'update', 'applied',
                             'immediate', 1, '{}'::jsonb, 'runtime admin DML', :requested_by
                         )
                         """
@@ -514,7 +512,6 @@ async def test_tvn34_runtime_logins_run_provider_and_admin_dml_but_raw_state_wri
                 )
 
             for forbidden_sql in (
-                "UPDATE feature.features SET status = status WHERE feature_id = :feature_id",
                 "UPDATE feature.features SET lifecycle_state = 'retired' "
                 "WHERE feature_id = :feature_id",
                 "UPDATE feature.features SET data_origin = 'provider' "

@@ -1,0 +1,462 @@
+"""T-VN-34C final typed assembly, receipt, and cutover contract proof."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import re
+from contextlib import suppress
+from pathlib import Path
+from uuid import uuid4
+
+import pytest
+from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+
+pytestmark = pytest.mark.integration
+
+_ROOT = Path(__file__).resolve().parents[2]
+_CONTRACT = _ROOT / "contracts" / "vnext" / "tvn34c-post-cutover-invariants-v1.sql"
+_LEGAL_TUPLES = (
+    ("active", "draft", "valid"),
+    ("active", "draft", "quarantined"),
+    ("active", "published", "valid"),
+    ("active", "published", "quarantined"),
+    ("active", "suppressed", "valid"),
+    ("active", "suppressed", "quarantined"),
+    ("retired", "suppressed", "valid"),
+    ("retired", "suppressed", "quarantined"),
+)
+
+
+def _contract_queries() -> list[str]:
+    content = _CONTRACT.read_text(encoding="utf-8")
+    parsed = re.findall(
+        r"(?ms)^(SELECT .*?); -- expect: 0 -- phase: post-cutover$",
+        content,
+    )
+    markers = re.findall(r"(?m); -- expect: 0 -- phase: post-cutover$", content)
+    assert len(markers) == len(parsed)
+    return parsed
+
+
+def _feature_payload(feature_id: str, kind: str) -> str:
+    return json.dumps(
+        {
+            "feature_id": feature_id,
+            "kind": kind,
+            "name": f"T-VN-34C {kind}",
+            "category": "tvn34c-contract",
+            "address": {},
+            "urls": {},
+            "raw_refs": [],
+        }
+    )
+
+
+async def _create_as_runtime(
+    session: AsyncSession,
+    *,
+    feature_id: str,
+    kind: str,
+    state: tuple[str, str, str] = ("active", "published", "valid"),
+) -> None:
+    await session.execute(text("SET ROLE ktm_feature_runtime"))
+    try:
+        await session.execute(
+            text(
+                """
+                CALL feature.create_feature_with_initial_state(
+                    CAST(:payload AS jsonb), :lifecycle_state, :publication_state,
+                    :quality_state, CAST(:context AS jsonb), NULL, NULL, NULL, NULL
+                )
+                """
+            ),
+            {
+                "payload": _feature_payload(feature_id, kind),
+                "lifecycle_state": state[0],
+                "publication_state": state[1],
+                "quality_state": state[2],
+                "context": json.dumps(
+                    {
+                        "transition_kind": "initial",
+                        "reason_code": "tvn34c_fixture_initial",
+                        "principal": "system:tvn34c-contract",
+                    }
+                ),
+            },
+        )
+    finally:
+        with suppress(DBAPIError):
+            await session.execute(text("RESET ROLE"))
+
+
+async def _materialize_provider_as_runtime(session: AsyncSession, feature_id: str) -> None:
+    await session.execute(text("SET ROLE ktm_feature_runtime"))
+    try:
+        await session.execute(
+            text("CALL feature.materialize_provider_feature_version(:feature_id)"),
+            {"feature_id": feature_id},
+        )
+    finally:
+        with suppress(DBAPIError):
+            await session.execute(text("RESET ROLE"))
+
+
+async def test_tvn34c_contract_queries_hold_after_final_migration(
+    migrated_session: AsyncSession,
+) -> None:
+    """전용 0096→C artifact의 모든 catalog/data assertion은 fresh head에서 0이다."""
+
+    for query in _contract_queries():
+        assert await migrated_session.scalar(text(query)) == 0, query
+
+
+async def test_tvn34c_direct_typed_assembly_covers_eight_tuples_and_subtypes(
+    migrated_session: AsyncSession,
+) -> None:
+    """public/materializer는 private bridge 없이 모든 legal axis/subtype을 조립한다."""
+
+    tuple_ids: list[str] = []
+    for number, state in enumerate(_LEGAL_TUPLES, start=1):
+        feature_id = f"tvn34c-tuple-{number}-{uuid4().hex}"
+        tuple_ids.append(feature_id)
+        await _create_as_runtime(
+            migrated_session,
+            feature_id=feature_id,
+            kind="place",
+            state=state,
+        )
+
+    observed_tuples = {
+        tuple(row)
+        for row in (
+            await migrated_session.execute(
+                text(
+                    """
+                    SELECT lifecycle_state, publication_state, quality_state
+                    FROM feature.features
+                    WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
+                    """
+                ),
+                {"feature_ids": tuple_ids},
+            )
+        ).all()
+    }
+    assert observed_tuples == set(_LEGAL_TUPLES)
+
+    subtype_rows = (
+        (
+            "place",
+            "INSERT INTO feature.feature_places (feature_id, feature_uuid, kind, place_kind) "
+            "SELECT feature_id, feature_uuid, kind, 'cafe' FROM feature.features "
+            "WHERE feature_id = :feature_id",
+            "place_kind",
+            "cafe",
+        ),
+        (
+            "event",
+            "INSERT INTO feature.feature_events (feature_id, feature_uuid, kind, event_kind) "
+            "SELECT feature_id, feature_uuid, kind, 'festival' FROM feature.features "
+            "WHERE feature_id = :feature_id",
+            "event_kind",
+            "festival",
+        ),
+        (
+            "notice",
+            "INSERT INTO feature.feature_notices (feature_id, feature_uuid, kind, notice_type) "
+            "SELECT feature_id, feature_uuid, kind, 'alert' FROM feature.features "
+            "WHERE feature_id = :feature_id",
+            "notice_type",
+            "alert",
+        ),
+        (
+            "route",
+            "INSERT INTO feature.feature_routes "
+            "(feature_id, feature_uuid, kind, geom, route_type) "
+            "SELECT feature_id, feature_uuid, kind, "
+            "x_extension.ST_GeomFromText('MULTILINESTRING((127 37,127.1 37.1))', 4326), "
+            "'walk' FROM feature.features WHERE feature_id = :feature_id",
+            "route_type",
+            "walk",
+        ),
+        (
+            "area",
+            "INSERT INTO feature.feature_areas "
+            "(feature_id, feature_uuid, kind, geom, area_kind) "
+            "SELECT feature_id, feature_uuid, kind, "
+            "x_extension.ST_GeomFromText('POLYGON((127 37,127.1 37,127.1 37.1,127 37))', 4326), "
+            "'district' FROM feature.features WHERE feature_id = :feature_id",
+            "area_kind",
+            "district",
+        ),
+    )
+    feature_ids: list[str] = []
+    expected_detail: dict[str, tuple[str, str]] = {}
+    for kind, insert_sql, detail_key, detail_value in subtype_rows:
+        feature_id = f"tvn34c-subtype-{kind}-{uuid4().hex}"
+        feature_ids.append(feature_id)
+        expected_detail[feature_id] = (detail_key, detail_value)
+        await _create_as_runtime(migrated_session, feature_id=feature_id, kind=kind)
+        await migrated_session.execute(text(insert_sql), {"feature_id": feature_id})
+        await _materialize_provider_as_runtime(migrated_session, feature_id)
+
+    public_rows = (
+        await migrated_session.execute(
+            text(
+                """
+                SELECT feature_id, kind, detail, geom
+                FROM feature.public_features
+                WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
+                ORDER BY feature_id
+                """
+            ),
+            {"feature_ids": feature_ids},
+        )
+    ).mappings().all()
+    assert len(public_rows) == len(subtype_rows)
+    for row in public_rows:
+        detail_key, detail_value = expected_detail[row["feature_id"]]
+        assert row["detail"][detail_key] == detail_value
+        if row["kind"] in {"route", "area"}:
+            assert row["geom"] is not None
+        else:
+            assert row["geom"] is None
+
+    snapshot_rows = (
+        await migrated_session.execute(
+            text(
+                """
+                SELECT payload
+                FROM feature.feature_versions
+                WHERE feature_id = ANY(CAST(:feature_ids AS text[])) AND version = 0
+                """
+            ),
+            {"feature_ids": feature_ids},
+        )
+    ).scalars().all()
+    assert len(snapshot_rows) == len(subtype_rows)
+    for payload in snapshot_rows:
+        assert {"lifecycle_state", "publication_state", "quality_state"} <= set(payload)
+        assert {"data_origin", "data_version", "detail"} <= set(payload)
+        assert not {
+            "status",
+            "deleted_at",
+            "user_change_kind",
+            "user_change_request_id",
+        } & set(payload)
+
+
+async def test_tvn34c_user_receipt_is_request_bound_immutable_and_concurrent(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """동시 같은 request materialization은 하나의 durable receipt만 남긴다."""
+
+    feature_id = f"tvn34c-receipt-{uuid4().hex}"
+    request_id = uuid4()
+    async with AsyncSession(migrated_engine) as setup_session, setup_session.begin():
+        await _create_as_runtime(setup_session, feature_id=feature_id, kind="place")
+        await setup_session.execute(
+            text(
+                """
+                INSERT INTO ops.feature_change_requests (
+                    request_id, feature_id, action, state, review_mode,
+                    base_row_revision, payload, reason, requested_by
+                ) VALUES (
+                    CAST(:request_id AS uuid), :feature_id, 'update', 'applied', 'immediate',
+                    1, '{}'::jsonb, 'concurrent receipt fixture', 'admin:tvn34c-contract'
+                )
+                """
+            ),
+            {"request_id": str(request_id), "feature_id": feature_id},
+        )
+
+    async def materialize_once() -> tuple[str, int]:
+        async with AsyncSession(migrated_engine) as session, session.begin():
+            await session.execute(text("SET LOCAL ROLE ktm_feature_runtime"))
+            row = (
+                await session.execute(
+                    text(
+                        """
+                        CALL feature.materialize_user_feature_change_provenance(
+                            :feature_id, 'update', CAST(:request_id AS uuid),
+                            'concurrent receipt fixture', 'admin:tvn34c-contract', 1, NULL, NULL
+                        )
+                        """
+                    ),
+                    {"feature_id": feature_id, "request_id": str(request_id)},
+                )
+            ).one()
+            return row.o_feature_id, row.o_row_revision
+
+    receipts = await asyncio.gather(materialize_once(), materialize_once())
+    assert receipts == [(feature_id, 2), (feature_id, 2)]
+
+    async with AsyncSession(migrated_engine) as verify_session:
+        receipt = (
+            await verify_session.execute(
+                text(
+                    """
+                    SELECT feature_id, request_id::text, origin, change_kind,
+                           payload ->> 'row_revision'
+                    FROM feature.feature_versions
+                    WHERE feature_id = :feature_id AND request_id = CAST(:request_id AS uuid)
+                    """
+                ),
+                {"feature_id": feature_id, "request_id": str(request_id)},
+            )
+        ).one()
+        assert tuple(receipt) == (feature_id, str(request_id), "user_request", "update", "2")
+        with pytest.raises(DBAPIError) as mutate:
+            async with verify_session.begin_nested():
+                await verify_session.execute(
+                    text(
+                        "UPDATE feature.feature_versions SET created_by = 'forged' "
+                        "WHERE feature_id = :feature_id AND request_id = CAST(:request_id AS uuid)"
+                    ),
+                    {"feature_id": feature_id, "request_id": str(request_id)},
+                )
+        assert getattr(mutate.value.orig, "sqlstate", None) == "42501"
+
+
+async def test_tvn34c_admin_reactivation_derives_exact_current_source_evidence(
+    migrated_session: AsyncSession,
+) -> None:
+    """관리자 재활성화는 링크·current head를 검증하고 DB 산출 causation만 감사한다."""
+
+    suffix = uuid4().hex
+    feature_id = f"tvn34c-reactivate-{suffix}"
+    entity_key = f"tvn34c-entity-{suffix}"
+    record_key = f"tvn34c-record-{suffix}"
+    raw_payload_hash = suffix * 2
+    dataset_id = int(
+        (
+            await migrated_session.execute(
+                text(
+                    """
+                    INSERT INTO provider_sync.provider_datasets (
+                        provider, dataset_key, display_name, source_kind
+                    ) VALUES ('tvn34c', :dataset_key, 'T-VN-34C contract', 'manual')
+                    RETURNING provider_dataset_id
+                    """
+                ),
+                {"dataset_key": suffix},
+            )
+        ).scalar_one()
+    )
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO provider_sync.source_entities (
+                source_entity_key, provider_dataset_id, source_entity_type, source_entity_id,
+                first_seen_at, last_seen_at
+            ) VALUES (:entity_key, :dataset_id, 'place', :source_entity_id, now(), now())
+            """
+        ),
+        {"entity_key": entity_key, "dataset_id": dataset_id, "source_entity_id": suffix},
+    )
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO provider_sync.source_records (
+                source_record_key, source_entity_key, raw_data, raw_payload_hash, fetched_at
+            ) VALUES (:record_key, :entity_key, '{}'::jsonb, :raw_payload_hash, now())
+            """
+        ),
+        {
+            "record_key": record_key,
+            "entity_key": entity_key,
+            "raw_payload_hash": raw_payload_hash,
+        },
+    )
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO provider_sync.source_entity_heads (
+                source_entity_key, current_source_record_key, observed_at
+            ) VALUES (:entity_key, :record_key, now())
+            """
+        ),
+        {"entity_key": entity_key, "record_key": record_key},
+    )
+    await _create_as_runtime(
+        migrated_session,
+        feature_id=feature_id,
+        kind="place",
+        state=("retired", "suppressed", "valid"),
+    )
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO provider_sync.source_links (
+                feature_id, source_entity_key, source_role, match_method, confidence
+            ) VALUES (:feature_id, :entity_key, 'primary', 'fixture', 100)
+            """
+        ),
+        {"feature_id": feature_id, "entity_key": entity_key},
+    )
+
+    await migrated_session.execute(text("SET ROLE ktm_feature_runtime"))
+    try:
+        with pytest.raises(DBAPIError) as mismatch:
+            async with migrated_session.begin_nested():
+                await migrated_session.execute(
+                    text(
+                        """
+                        CALL feature.reactivate_admin_feature_state(
+                            :feature_id, :dataset_id, :entity_key, 'wrong-record', 1,
+                            'reactivate_after_evidence', 'admin:tvn34c-contract', NULL, NULL, NULL
+                        )
+                        """
+                    ),
+                    {"feature_id": feature_id, "dataset_id": dataset_id, "entity_key": entity_key},
+                )
+        assert getattr(mismatch.value.orig, "sqlstate", None) == "23514"
+
+        result = (
+            await migrated_session.execute(
+                text(
+                    """
+                    CALL feature.reactivate_admin_feature_state(
+                        :feature_id, :dataset_id, :entity_key, :record_key, 1,
+                        'reactivate_after_evidence', 'admin:tvn34c-contract', NULL, NULL, NULL
+                    )
+                    """
+                ),
+                {
+                    "feature_id": feature_id,
+                    "dataset_id": dataset_id,
+                    "entity_key": entity_key,
+                    "record_key": record_key,
+                },
+            )
+        ).one()
+        assert result.o_feature_id == feature_id
+        assert result.o_row_revision == 2
+        assert result.o_transition_id is not None
+    finally:
+        with suppress(DBAPIError):
+            await migrated_session.execute(text("RESET ROLE"))
+
+    audit = (
+        await migrated_session.execute(
+            text(
+                """
+                SELECT principal, causation_ref, to_lifecycle_state, to_publication_state,
+                       to_quality_state
+                FROM feature.feature_state_transitions
+                WHERE feature_id = :feature_id AND row_revision = 2
+                """
+            ),
+            {"feature_id": feature_id},
+        )
+    ).one()
+    assert audit.principal == "admin:tvn34c-contract"
+    assert json.loads(audit.causation_ref) == {
+        "provider_dataset_id": dataset_id,
+        "source_entity_key": entity_key,
+        "source_record_key": record_key,
+        "raw_payload_hash": raw_payload_hash,
+    }
+    assert tuple(audit[2:]) == ("active", "suppressed", "valid")

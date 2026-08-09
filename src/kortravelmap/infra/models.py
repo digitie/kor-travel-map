@@ -20,8 +20,9 @@ ORM 인스턴스 read mapping 용도로도 사용 가능.
 아직 없는 테이블: ``feature_opening_periods`` / ``feature_special_days``
 (0002의 후속 PR 항목 — 영업시간은 현재 subtype JSONB가 갖는다).
 
-뷰는 매핑하지 않는다 — ``feature.features_detailed``(조립)와
-``feature.public_features``는 alembic이 소유하고 repo가 raw SQL로 읽는다.
+뷰는 매핑하지 않는다 — ``feature.public_features``는 alembic이 소유하고 repo가
+raw SQL로 읽는다. typed detail 조립은 public projection·materializer·reader가
+각각 명시적으로 소유하며 private bridge view는 없다.
 
 ADR 참조
 --------
@@ -219,10 +220,6 @@ class FeatureRow(Base):
             name="features_kind",
         ),
         CheckConstraint(
-            "status IN ('draft','active','inactive','hidden','broken','deleted')",
-            name="features_status",
-        ),
-        CheckConstraint(
             "lifecycle_state IN ('active','retired')",
             name="lifecycle_state",
         ),
@@ -244,14 +241,6 @@ class FeatureRow(Base):
         ),
         CheckConstraint("data_version >= 0", name="ck_features_data_version"),
         CheckConstraint("row_revision >= 1", name="ck_features_row_revision"),
-        CheckConstraint(
-            "user_change_kind IS NULL OR user_change_kind IN ('add','update','delete')",
-            name="ck_features_user_change_kind",
-        ),
-        CheckConstraint(
-            "user_change_status IS NULL OR user_change_status IN ('pending','applied','rejected')",
-            name="ck_features_user_change_status",
-        ),
         CheckConstraint(
             "coord IS NULL OR ("
             "ST_X(coord) BETWEEN 124.0 AND 132.0 AND "
@@ -319,12 +308,6 @@ class FeatureRow(Base):
             ),
         ),
         Index(
-            "idx_features_status_updated",
-            "status",
-            text("updated_at DESC"),
-            text("feature_id DESC"),
-        ),
-        Index(
             "idx_features_lower_name_keyset",
             text("lower(name)"),
             "feature_id",
@@ -368,11 +351,6 @@ class FeatureRow(Base):
             ),
         ),
         Index("idx_features_data_origin", "data_origin", "data_version"),
-        Index(
-            "idx_features_user_deleted",
-            "user_deleted_at",
-            postgresql_where=text("user_deleted_at IS NOT NULL"),
-        ),
         UniqueConstraint("feature_uuid", name=conv("uq_features_feature_uuid")),
         # T-VN-32C(0083) — 파생 CHECK는 해제됐고(비파생 UUIDv7 generator),
         # 복합 UNIQUE가 alias 사본 일치 FK의 참조 대상이 된다.
@@ -448,13 +426,9 @@ class FeatureRow(Base):
         nullable=False,
         server_default=text("'[]'::jsonb"),
     )
-    status: Mapped[str] = mapped_column(
-        String,
-        nullable=False,
-        server_default=text("'active'"),
-    )
-    # T-VN-34A(ADR-090) 직교 상태 정본. legacy ``status``/soft-delete 계열은
-    # final cutover(T-VN-34C) 전까지 mapping 입력으로만 남고 새 writer가 쓰지 않는다.
+    # T-VN-34C(ADR-090) 직교 상태 정본. legacy status/soft-delete/user-change
+    # surrogate는 final migration에서 물리 제거했고, 재시도 receipt는
+    # ``feature_versions``의 immutable request binding이 맡는다.
     lifecycle_state: Mapped[str] = mapped_column(
         Text,
         nullable=False,
@@ -489,13 +463,6 @@ class FeatureRow(Base):
         server_default=text("1"),
     )
 
-    user_change_kind: Mapped[str | None] = mapped_column(Text)
-    user_change_status: Mapped[str | None] = mapped_column(Text)
-    user_change_request_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
-    user_deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    user_deleted_by: Mapped[str | None] = mapped_column(Text)
-    user_change_reason: Mapped[str | None] = mapped_column(Text)
-
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -506,7 +473,6 @@ class FeatureRow(Base):
         nullable=False,
         server_default=text("now()"),
     )
-    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class FeatureStateTransitionRow(Base):
@@ -625,8 +591,8 @@ class FeatureStateTransitionRow(Base):
 #
 # T-VN-35(ADR-086 결정 4): core ``detail``/``geom``은 0086에서 **제거됐다**.
 # kind별 값의 정본은 subtype 테이블이고, 응답용 ``detail``/``geom``은
-# ``feature.features_detailed`` 뷰가 조립한다 — 이 ORM 매핑은 core 컬럼만
-# 반영한다(뷰는 read 전용이라 매핑하지 않는다).
+# public projection과 snapshot materializer가 core+subtype을 명시적으로 직접
+# 조립한다. 별도 detail bridge view는 T-VN-34C에서 제거됐다.
 
 
 def _subtype_table_args(kind: str, *extra: Any) -> tuple[Any, ...]:
@@ -918,8 +884,9 @@ class FeatureAliasRow(Base):
 class FeatureVersionRow(Base):
     """``feature.feature_versions`` row mapping.
 
-    provider 적재 snapshot은 version 0, 사용자/admin 요청으로 적용된 effective
-    snapshot은 version 1에 저장한다. ``feature.features``는 조회용 effective row다.
+    provider 적재 snapshot은 version 0이고, user request receipt는 feature별
+    증가 version이다. ``(feature_id, request_id)`` partial UNIQUE와 trigger가
+    applied request의 immutable replay receipt를 보장한다.
     """
 
     __tablename__ = "feature_versions"
@@ -934,6 +901,15 @@ class FeatureVersionRow(Base):
             name="ck_feature_versions_change_kind",
         ),
         Index("idx_feature_versions_request", "request_id"),
+        Index(
+            "uq_feature_versions_user_request_receipt",
+            "feature_id",
+            "request_id",
+            unique=True,
+            postgresql_where=text(
+                "origin = 'user_request' AND request_id IS NOT NULL"
+            ),
+        ),
         {"schema": "feature"},
     )
 
