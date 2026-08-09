@@ -240,6 +240,30 @@ WHERE btrim(invoker_role) = ''
    OR btrim(state_procedure_definer) = ''
    OR btrim(audit_writer_definer) = ''; -- expect: 0 -- phase: both
 
+-- [INV-090-05] provider_sync audit은 purge 뒤에도 dataset/entity/record 및
+-- authoritative receipt을 한 행에 immutable evidence로 함께 남긴다.
+SELECT count(*)
+FROM feature.feature_state_transitions
+WHERE (
+        transition_kind = 'provider_sync'
+        AND (
+            provider_dataset_id IS NULL
+            OR btrim(source_entity_key) = ''
+            OR btrim(source_record_key) = ''
+            OR jsonb_typeof(provider_evidence) <> 'object'
+            OR jsonb_typeof(provider_evidence -> 'authoritative_receipt') <> 'string'
+            OR btrim(provider_evidence ->> 'authoritative_receipt') = ''
+        )
+      ) OR (
+        transition_kind <> 'provider_sync'
+        AND (
+            provider_dataset_id IS NOT NULL
+            OR source_entity_key IS NOT NULL
+            OR source_record_key IS NOT NULL
+            OR provider_evidence IS NOT NULL
+        )
+      ); -- expect: 0 -- phase: both
+
 -- [INV-067-02] 공개 view와 base 술어의 일치 — view 밖 술어 만족 행 없음.
 SELECT count(*)
 FROM feature.features AS f
@@ -340,7 +364,7 @@ SELECT count(*)
 FROM (
     SELECT feature_id, field_path
     FROM ops.feature_overrides
-    WHERE revoked_at IS NULL
+    WHERE status = 'active'
     GROUP BY feature_id, field_path
     HAVING count(*) > 1
 ) AS duplicated; -- expect: 0 -- phase: both
@@ -351,10 +375,12 @@ FROM ops.feature_overrides AS o
 LEFT JOIN ops.feature_override_field_paths AS r ON r.field_path = o.field_path
 WHERE r.field_path IS NULL; -- expect: 0 -- phase: both
 
--- [INV-071-03] tombstone 결합 위반 없음 (revoked_at ↔ revoked_by 쌍).
+-- [INV-071-03] tombstone 결합 위반 없음 (status와 revoked_at/by 쌍).
 SELECT count(*)
 FROM ops.feature_overrides
-WHERE (revoked_at IS NULL) <> (revoked_by IS NULL); -- expect: 0 -- phase: both
+WHERE status NOT IN ('active', 'revoked')
+   OR (status = 'active' AND (revoked_at IS NOT NULL OR revoked_by IS NOT NULL))
+   OR (status = 'revoked' AND (revoked_at IS NULL OR revoked_by IS NULL)); -- expect: 0 -- phase: both
 
 -- -----------------------------------------------------------------------------
 -- T-VN-37 — typed notice state

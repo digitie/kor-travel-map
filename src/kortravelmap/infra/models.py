@@ -523,6 +523,19 @@ class FeatureStateTransitionRow(Base):
             name="initial_old_tuple",
         ),
         CheckConstraint(
+            "(transition_kind = 'provider_sync' "
+            "AND provider_dataset_id IS NOT NULL "
+            "AND btrim(source_entity_key) <> '' "
+            "AND btrim(source_record_key) <> '' "
+            "AND jsonb_typeof(provider_evidence) = 'object' "
+            "AND jsonb_typeof(provider_evidence -> 'authoritative_receipt') = 'string' "
+            "AND btrim(provider_evidence ->> 'authoritative_receipt') <> '') "
+            "OR (transition_kind <> 'provider_sync' "
+            "AND provider_dataset_id IS NULL AND source_entity_key IS NULL "
+            "AND source_record_key IS NULL AND provider_evidence IS NULL)",
+            name="provider_provenance",
+        ),
+        CheckConstraint(
             "row_revision >= 1",
             name="row_revision",
         ),
@@ -552,6 +565,10 @@ class FeatureStateTransitionRow(Base):
     reason_code: Mapped[str] = mapped_column(Text, nullable=False)
     principal: Mapped[str] = mapped_column(Text, nullable=False)
     causation_ref: Mapped[str | None] = mapped_column(Text)
+    provider_dataset_id: Mapped[int | None] = mapped_column(BigInteger)
+    source_entity_key: Mapped[str | None] = mapped_column(Text)
+    source_record_key: Mapped[str | None] = mapped_column(Text)
+    provider_evidence: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     row_revision: Mapped[int] = mapped_column(BigInteger, nullable=False)
     invoker_role: Mapped[str] = mapped_column(Text, nullable=False)

@@ -27,6 +27,10 @@
 --     features의 legacy status/user_change_* 열 등)은 목표 상태에 **존재하지
 --     않으므로** 이 파일에 없다. 물리 삭제 순서는 consumer-rollout-v1.json과
 --     T-VN-39 removal manifest가 소유한다.
+--   * 현행 0095의 `materialize_user_feature_change_provenance`와
+--     `feature_versions` whole-row snapshot은 T-VN-36 effective projection/field
+--     override lineage가 대체할 때까지만 쓰는 bridge다. 따라서 post-T36C/T39
+--     final target에는 이 procedure·legacy request/version relation을 두지 않는다.
 --
 -- 미정 표기 원칙(freeze 정직성):
 --   ADR·보고서·task 정의가 침묵하는 세부는 발명하지 않고
@@ -410,6 +414,10 @@ CREATE TABLE feature.feature_state_transitions (
     reason_code text NOT NULL,
     principal text NOT NULL,
     causation_ref text,
+    provider_dataset_id bigint,
+    source_entity_key text,
+    source_record_key text,
+    provider_evidence jsonb,
     occurred_at timestamptz NOT NULL DEFAULT now(),
     row_revision bigint NOT NULL,
     invoker_role text NOT NULL,
@@ -448,6 +456,23 @@ CREATE TABLE feature.feature_state_transitions (
             AND transition_kind NOT IN ('initial', 'legacy_backfill')
         )
     ),
+    CONSTRAINT ck_feature_state_transitions_provider_provenance CHECK (
+        (
+            transition_kind = 'provider_sync'
+            AND provider_dataset_id IS NOT NULL
+            AND btrim(source_entity_key) <> ''
+            AND btrim(source_record_key) <> ''
+            AND jsonb_typeof(provider_evidence) = 'object'
+            AND jsonb_typeof(provider_evidence -> 'authoritative_receipt') = 'string'
+            AND btrim(provider_evidence ->> 'authoritative_receipt') <> ''
+        ) OR (
+            transition_kind <> 'provider_sync'
+            AND provider_dataset_id IS NULL
+            AND source_entity_key IS NULL
+            AND source_record_key IS NULL
+            AND provider_evidence IS NULL
+        )
+    ),
     CONSTRAINT ck_feature_state_transitions_row_revision CHECK (row_revision >= 1)
 );
 
@@ -481,6 +506,9 @@ DECLARE
     v_reason text;
     v_principal text;
     v_dataset_id bigint;
+    v_source_entity_key text;
+    v_source_record_key text;
+    v_provider_evidence jsonb;
     v_context jsonb;
 BEGIN
     IF jsonb_typeof(p_context) IS DISTINCT FROM 'object' THEN
@@ -491,7 +519,8 @@ BEGIN
         SELECT 1 FROM jsonb_object_keys(p_context) AS key_name(key_name)
         WHERE key_name NOT IN (
             'transition_kind', 'reason_code', 'principal', 'causation_ref',
-            'provider_dataset_id', 'source_record_key', 'reactivation_evidence'
+            'provider_dataset_id', 'source_entity_key', 'source_record_key',
+            'provider_evidence', 'reactivation_evidence'
         )
     ) THEN
         RAISE EXCEPTION 'feature state context contains an unknown key'
@@ -510,17 +539,40 @@ BEGIN
     END IF;
     IF v_kind = 'provider_sync' THEN
         IF (p_context ->> 'provider_dataset_id') !~ '^[1-9][0-9]*$'
-           OR p_context ? 'principal' THEN
+           OR p_context ? 'principal'
+           OR jsonb_typeof(p_context -> 'source_entity_key') IS DISTINCT FROM 'string'
+           OR btrim(p_context ->> 'source_entity_key') = ''
+           OR jsonb_typeof(p_context -> 'source_record_key') IS DISTINCT FROM 'string'
+           OR btrim(p_context ->> 'source_record_key') = ''
+           OR jsonb_typeof(p_context -> 'provider_evidence') IS DISTINCT FROM 'object'
+           OR jsonb_typeof(p_context -> 'provider_evidence' -> 'authoritative_receipt')
+                IS DISTINCT FROM 'string'
+           OR btrim(p_context -> 'provider_evidence' ->> 'authoritative_receipt') = '' THEN
             RAISE EXCEPTION 'provider state principal must derive from an active dataset'
                 USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_state_transition_context';
         END IF;
         v_dataset_id := (p_context ->> 'provider_dataset_id')::bigint;
+        v_source_entity_key := btrim(p_context ->> 'source_entity_key');
+        v_source_record_key := btrim(p_context ->> 'source_record_key');
+        v_provider_evidence := p_context -> 'provider_evidence';
         SELECT 'provider:' || provider || '/' || dataset_key INTO v_principal
         FROM provider_sync.provider_datasets
         WHERE provider_dataset_id = v_dataset_id AND is_active;
         IF v_principal IS NULL THEN
             RAISE EXCEPTION 'provider dataset must be active'
                 USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_state_transition_context';
+        END IF;
+        IF NOT EXISTS (
+            SELECT 1
+            FROM provider_sync.source_records AS record
+            JOIN provider_sync.source_entities AS entity
+              ON entity.source_entity_key = record.source_entity_key
+            WHERE record.source_record_key = v_source_record_key
+              AND record.source_entity_key = v_source_entity_key
+              AND entity.provider_dataset_id = v_dataset_id
+        ) THEN
+            RAISE EXCEPTION 'provider state context source does not belong to the active dataset'
+                USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_provider_source_provenance';
         END IF;
     ELSE
         IF p_context ? 'provider_dataset_id'
@@ -538,10 +590,12 @@ BEGIN
         'causation_ref', p_context -> 'causation_ref'
     );
     IF v_dataset_id IS NOT NULL THEN
-        v_context := v_context || jsonb_build_object('provider_dataset_id', v_dataset_id);
-    END IF;
-    IF p_context ? 'source_record_key' THEN
-        v_context := v_context || jsonb_build_object('source_record_key', p_context -> 'source_record_key');
+        v_context := v_context || jsonb_build_object(
+            'provider_dataset_id', v_dataset_id,
+            'source_entity_key', v_source_entity_key,
+            'source_record_key', v_source_record_key,
+            'provider_evidence', v_provider_evidence
+        );
     END IF;
     IF p_context ? 'reactivation_evidence' THEN
         v_context := v_context || jsonb_build_object('reactivation_evidence', p_context -> 'reactivation_evidence');
@@ -606,7 +660,9 @@ BEGIN
         feature_id,
         from_lifecycle_state, from_publication_state, from_quality_state,
         to_lifecycle_state, to_publication_state, to_quality_state,
-        transition_kind, reason_code, principal, causation_ref, occurred_at,
+        transition_kind, reason_code, principal, causation_ref,
+        provider_dataset_id, source_entity_key, source_record_key, provider_evidence,
+        occurred_at,
         row_revision, invoker_role, state_procedure_definer, audit_writer_definer
     ) VALUES (
         NEW.feature_id,
@@ -615,7 +671,16 @@ BEGIN
         CASE WHEN TG_OP = 'INSERT' THEN NULL ELSE OLD.quality_state END,
         NEW.lifecycle_state, NEW.publication_state, NEW.quality_state,
         v_context ->> 'transition_kind', v_context ->> 'reason_code',
-        v_context ->> 'principal', v_context ->> 'causation_ref', clock_timestamp(),
+        v_context ->> 'principal', v_context ->> 'causation_ref',
+        CASE WHEN v_context ->> 'transition_kind' = 'provider_sync'
+             THEN (v_context ->> 'provider_dataset_id')::bigint END,
+        CASE WHEN v_context ->> 'transition_kind' = 'provider_sync'
+             THEN v_context ->> 'source_entity_key' END,
+        CASE WHEN v_context ->> 'transition_kind' = 'provider_sync'
+             THEN v_context ->> 'source_record_key' END,
+        CASE WHEN v_context ->> 'transition_kind' = 'provider_sync'
+             THEN v_context -> 'provider_evidence' END,
+        clock_timestamp(),
         NEW.row_revision, session_user::text, v_definer, current_user::text
     );
     RETURN NULL;
@@ -649,18 +714,32 @@ SECURITY DEFINER
 SET search_path = pg_catalog
 AS $$
 DECLARE
-    v_feature feature.features%ROWTYPE;
+    v_feature_id uuid;
+    v_kind text;
+    v_name text;
+    v_category_code text;
 BEGIN
     IF jsonb_typeof(p_feature) IS DISTINCT FROM 'object' THEN
         RAISE EXCEPTION 'feature payload must be an object'
             USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_create_payload';
     END IF;
-    v_feature := jsonb_populate_record(
-        NULL::feature.features,
-        p_feature - 'lifecycle_state' - 'publication_state' - 'quality_state'
-    );
-    IF v_feature.feature_id IS NULL OR v_feature.kind IS NULL OR v_feature.name IS NULL
-       OR v_feature.category_code IS NULL THEN
+    IF EXISTS (
+        SELECT 1 FROM jsonb_object_keys(p_feature) AS key_name(key_name)
+        WHERE key_name NOT IN ('feature_id', 'kind', 'name', 'category_code')
+    ) OR p_feature ?| ARRAY[
+        'status', 'deleted_at', 'user_deleted_at', 'user_deleted_by',
+        'user_change_kind', 'user_change_status', 'user_change_request_id',
+        'user_change_reason', 'lifecycle_state', 'publication_state', 'quality_state'
+    ] THEN
+        RAISE EXCEPTION 'feature create payload contains a forbidden or unknown field'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_create_payload';
+    END IF;
+    v_feature_id := nullif(btrim(p_feature ->> 'feature_id'), '')::uuid;
+    v_kind := nullif(btrim(p_feature ->> 'kind'), '');
+    v_name := nullif(btrim(p_feature ->> 'name'), '');
+    v_category_code := nullif(btrim(p_feature ->> 'category_code'), '');
+    IF v_feature_id IS NULL OR v_kind IS NULL OR v_name IS NULL
+       OR v_category_code IS NULL THEN
         RAISE EXCEPTION 'feature payload lacks required core fields'
             USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_create_payload';
     END IF;
@@ -669,14 +748,14 @@ BEGIN
         feature_id, kind, name, category_code,
         lifecycle_state, publication_state, quality_state
     ) VALUES (
-        v_feature.feature_id, v_feature.kind, v_feature.name, v_feature.category_code,
+        v_feature_id, v_kind, v_name, v_category_code,
         p_lifecycle_state, p_publication_state, p_quality_state
     ) ON CONFLICT (feature_id) DO NOTHING
     RETURNING feature_id, row_revision INTO o_feature_id, o_row_revision;
     o_inserted := FOUND;
     IF NOT o_inserted THEN
         SELECT feature_id, row_revision INTO o_feature_id, o_row_revision
-        FROM feature.features WHERE feature_id = v_feature.feature_id;
+        FROM feature.features WHERE feature_id = v_feature_id;
     END IF;
 END;
 $$;
@@ -715,6 +794,45 @@ BEGIN
        IS NOT DISTINCT FROM (p_lifecycle_state, p_publication_state, p_quality_state) THEN
         RAISE EXCEPTION 'feature state transition must change an axis'
             USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_state_transition_non_noop';
+    END IF;
+    IF p_context ->> 'transition_kind' = 'provider_sync'
+       AND (
+            (v_current.lifecycle_state = 'active' AND p_lifecycle_state = 'retired')
+            OR (v_current.lifecycle_state = 'retired' AND p_lifecycle_state = 'active')
+       )
+       AND NOT EXISTS (
+            SELECT 1
+            FROM provider_sync.source_links AS link
+            JOIN provider_sync.source_entities AS entity
+              ON entity.source_entity_key = link.source_entity_key
+            JOIN provider_sync.source_records AS record
+              ON record.source_entity_key = entity.source_entity_key
+            WHERE link.feature_id = p_feature_id
+              AND link.source_entity_key = p_context ->> 'source_entity_key'
+              AND entity.provider_dataset_id = (p_context ->> 'provider_dataset_id')::bigint
+              AND record.source_record_key = p_context ->> 'source_record_key'
+       ) THEN
+        RAISE EXCEPTION 'provider lifecycle transition requires linked authoritative source evidence'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_provider_source_provenance';
+    END IF;
+    IF v_current.lifecycle_state = 'retired' AND p_lifecycle_state = 'active' THEN
+        IF p_context ->> 'transition_kind' <> 'provider_sync'
+           AND (p_context ->> 'transition_kind' NOT IN ('admin', 'user_request', 'system')
+           OR coalesce(btrim(p_context ->> 'reactivation_evidence'), '') = '') THEN
+            RAISE EXCEPTION 'retired feature may be reactivated only by explicit reingest'
+                USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_reactivation_explicit';
+        END IF;
+        IF p_context ->> 'transition_kind' = 'provider_sync' AND EXISTS (
+            SELECT 1 FROM ops.feature_overrides AS override
+            WHERE override.feature_id = p_feature_id
+              AND override.field_path = 'lifecycle_state'
+              AND override.status = 'active'
+              AND override.override_value = '"retired"'::jsonb
+              AND override.prevent_provider_reactivation
+        ) THEN
+            RAISE EXCEPTION 'provider reactivation is fenced by lifecycle override'
+                USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_provider_reactivation_override';
+        END IF;
     END IF;
     UPDATE feature.features
        SET lifecycle_state = p_lifecycle_state,
@@ -1198,6 +1316,8 @@ CREATE TABLE ops.feature_overrides (
     -- override 값 (ADR-071 결정 2 — provider base value와 분리 저장).
     -- value_type과의 결합 검증 방식: 미정(T-VN-36B 구현 소관)
     override_value jsonb,
+    prevent_provider_reactivation boolean NOT NULL DEFAULT false,
+    status text NOT NULL DEFAULT 'active',
     -- provenance (ADR-071 결정 2) — 생성 시점 base revision과 인증 principal
     -- (ADR-066 결정 5). provenance 세부 컬럼 확장: 미정(T-VN-36A 구현 소관)
     base_row_revision bigint,
@@ -1212,17 +1332,26 @@ CREATE TABLE ops.feature_overrides (
     CONSTRAINT fk_feature_overrides_field_path FOREIGN KEY (field_path)
         REFERENCES ops.feature_override_field_paths (field_path),
     CONSTRAINT ck_feature_overrides_created_by CHECK (btrim(created_by) <> ''),
+    CONSTRAINT ck_feature_overrides_status CHECK (status IN ('active', 'revoked')),
     CONSTRAINT ck_feature_overrides_tombstone_pair CHECK (
-        (revoked_at IS NULL) = (revoked_by IS NULL)
+        (status = 'active' AND revoked_at IS NULL AND revoked_by IS NULL)
+        OR (status = 'revoked' AND revoked_at IS NOT NULL AND revoked_by IS NOT NULL)
     )
 );
 
 -- `(feature_id, field_path)` active UNIQUE (ADR-071 결정 1)
 CREATE UNIQUE INDEX uq_feature_overrides_active
     ON ops.feature_overrides (feature_id, field_path)
-    WHERE revoked_at IS NULL;
+    WHERE status = 'active';
 
 CREATE INDEX idx_feature_overrides_feature ON ops.feature_overrides (feature_id);
+
+-- State procedures are declared before lineage/override tables so the frozen
+-- schema remains sectioned by ownership; grant their read dependencies only
+-- after those relations exist.
+GRANT SELECT ON provider_sync.source_entities, provider_sync.source_records,
+    provider_sync.source_links, ops.feature_overrides
+    TO ktm_feature_state_procedure_owner;
 
 -- =============================================================================
 -- 8A. current summary projection receipt (ADR-089, T-VN-38)

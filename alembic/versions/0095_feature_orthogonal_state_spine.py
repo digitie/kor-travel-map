@@ -35,6 +35,9 @@ DECLARE
     v_reason text;
     v_principal text;
     v_dataset_id bigint;
+    v_source_entity_key text;
+    v_source_record_key text;
+    v_provider_evidence jsonb;
     v_context jsonb;
 BEGIN
     IF jsonb_typeof(p_context) IS DISTINCT FROM 'object' THEN
@@ -47,7 +50,8 @@ BEGIN
         FROM jsonb_object_keys(p_context) AS key_name(key_name)
         WHERE key_name NOT IN (
             'transition_kind', 'reason_code', 'principal', 'causation_ref',
-            'provider_dataset_id', 'source_record_key', 'reactivation_evidence'
+            'provider_dataset_id', 'source_entity_key', 'source_record_key',
+            'provider_evidence', 'reactivation_evidence'
         )
     ) THEN
         RAISE EXCEPTION 'feature state context contains an unknown key'
@@ -74,11 +78,22 @@ BEGIN
     -- principal은 dataset에서만 파생하고 old tuple은 NULL이다.
     IF v_kind = 'provider_sync' THEN
         IF (p_context ->> 'provider_dataset_id') !~ '^[1-9][0-9]*$'
-           OR p_context ? 'principal' THEN
+           OR p_context ? 'principal'
+           OR jsonb_typeof(p_context -> 'source_entity_key') IS DISTINCT FROM 'string'
+           OR btrim(p_context ->> 'source_entity_key') = ''
+           OR jsonb_typeof(p_context -> 'source_record_key') IS DISTINCT FROM 'string'
+           OR btrim(p_context ->> 'source_record_key') = ''
+           OR jsonb_typeof(p_context -> 'provider_evidence') IS DISTINCT FROM 'object'
+           OR jsonb_typeof(p_context -> 'provider_evidence' -> 'authoritative_receipt')
+                IS DISTINCT FROM 'string'
+           OR btrim(p_context -> 'provider_evidence' ->> 'authoritative_receipt') = '' THEN
                 RAISE EXCEPTION 'provider state context must derive its principal from a dataset'
                 USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_state_transition_context';
         END IF;
         v_dataset_id := (p_context ->> 'provider_dataset_id')::bigint;
+        v_source_entity_key := btrim(p_context ->> 'source_entity_key');
+        v_source_record_key := btrim(p_context ->> 'source_record_key');
+        v_provider_evidence := p_context -> 'provider_evidence';
         SELECT 'provider:' || dataset.provider || '/' || dataset.dataset_key
           INTO v_principal
           FROM provider_sync.provider_datasets AS dataset
@@ -87,6 +102,18 @@ BEGIN
         IF v_principal IS NULL THEN
             RAISE EXCEPTION 'active provider dataset % is required for state transition', v_dataset_id
                 USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_state_transition_context';
+        END IF;
+        IF NOT EXISTS (
+            SELECT 1
+            FROM provider_sync.source_records AS record
+            JOIN provider_sync.source_entities AS entity
+              ON entity.source_entity_key = record.source_entity_key
+            WHERE record.source_record_key = v_source_record_key
+              AND record.source_entity_key = v_source_entity_key
+              AND entity.provider_dataset_id = v_dataset_id
+        ) THEN
+            RAISE EXCEPTION 'provider state context source does not belong to the active dataset'
+                USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_provider_source_provenance';
         END IF;
     ELSE
         IF p_context ? 'provider_dataset_id'
@@ -111,11 +138,11 @@ BEGIN
         'causation_ref', p_context -> 'causation_ref'
     );
     IF v_dataset_id IS NOT NULL THEN
-        v_context := v_context || jsonb_build_object('provider_dataset_id', v_dataset_id);
-    END IF;
-    IF p_context ? 'source_record_key' THEN
         v_context := v_context || jsonb_build_object(
-            'source_record_key', p_context -> 'source_record_key'
+            'provider_dataset_id', v_dataset_id,
+            'source_entity_key', v_source_entity_key,
+            'source_record_key', v_source_record_key,
+            'provider_evidence', v_provider_evidence
         );
     END IF;
     IF p_context ? 'reactivation_evidence' THEN
@@ -197,7 +224,9 @@ BEGIN
         feature_id, feature_uuid,
         from_lifecycle_state, from_publication_state, from_quality_state,
         to_lifecycle_state, to_publication_state, to_quality_state,
-        transition_kind, reason_code, principal, causation_ref, occurred_at,
+        transition_kind, reason_code, principal, causation_ref,
+        provider_dataset_id, source_entity_key, source_record_key, provider_evidence,
+        occurred_at,
         row_revision, invoker_role, state_procedure_definer, audit_writer_definer
     ) VALUES (
         NEW.feature_id, NEW.feature_uuid,
@@ -206,7 +235,16 @@ BEGIN
         CASE WHEN TG_OP = 'INSERT' THEN NULL ELSE OLD.quality_state END,
         NEW.lifecycle_state, NEW.publication_state, NEW.quality_state,
         v_context ->> 'transition_kind', v_context ->> 'reason_code',
-        v_context ->> 'principal', v_context ->> 'causation_ref', clock_timestamp(),
+        v_context ->> 'principal', v_context ->> 'causation_ref',
+        CASE WHEN v_context ->> 'transition_kind' = 'provider_sync'
+             THEN (v_context ->> 'provider_dataset_id')::bigint END,
+        CASE WHEN v_context ->> 'transition_kind' = 'provider_sync'
+             THEN v_context ->> 'source_entity_key' END,
+        CASE WHEN v_context ->> 'transition_kind' = 'provider_sync'
+             THEN v_context ->> 'source_record_key' END,
+        CASE WHEN v_context ->> 'transition_kind' = 'provider_sync'
+             THEN v_context -> 'provider_evidence' END,
+        clock_timestamp(),
         NEW.row_revision, session_user::text, v_state_definer, current_user::text
     );
     RETURN NULL;
@@ -247,29 +285,60 @@ SECURITY DEFINER
 SET search_path = pg_catalog
 AS $$
 DECLARE
-    v_feature feature.features%ROWTYPE;
+    v_feature_id text;
+    v_feature_uuid uuid;
+    v_kind text;
+    v_name text;
+    v_category text;
+    v_coord feature.features.coord%TYPE;
 BEGIN
     IF jsonb_typeof(p_feature) IS DISTINCT FROM 'object' THEN
         RAISE EXCEPTION 'feature payload must be an object'
             USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_create_payload';
     END IF;
-    -- Legacy status는 의도적으로 읽지도 쓰지도 않는다. 34A producer는 in-process
-    -- status를 세 축으로 map한 뒤 여기에는 axes만 전달한다.
-    v_feature := jsonb_populate_record(
-        NULL::feature.features,
-        p_feature - 'status' - 'lifecycle_state' - 'publication_state' - 'quality_state'
-    );
-    IF v_feature.feature_id IS NULL OR v_feature.kind IS NULL OR v_feature.name IS NULL
-       OR v_feature.category IS NULL THEN
+    -- 허용 목록 밖의 key는 무시하지 않는다. 특히 legacy state/deletion 및 user
+    -- provenance key를 받으면 runtime이 procedure 경계를 우회하게 되므로 fail-close다.
+    IF EXISTS (
+        SELECT 1 FROM jsonb_object_keys(p_feature) AS key_name(key_name)
+        WHERE key_name NOT IN (
+            'feature_id', 'feature_uuid', 'kind', 'name', 'category',
+            'lon', 'lat', 'coord_precision_digits', 'address',
+            'legal_dong_code', 'road_name_code', 'road_address_management_no',
+            'admin_dong_code', 'sido_code', 'sigungu_code', 'urls',
+            'marker_icon', 'marker_color', 'parent_feature_id', 'sibling_group_id',
+            'raw_refs', 'data_origin', 'data_version', 'created_at', 'updated_at'
+        )
+    ) OR p_feature ?| ARRAY[
+        'status', 'deleted_at', 'user_deleted_at', 'user_deleted_by',
+        'user_change_kind', 'user_change_status', 'user_change_request_id',
+        'user_change_reason', 'lifecycle_state', 'publication_state', 'quality_state'
+    ] THEN
+        RAISE EXCEPTION 'feature create payload contains a forbidden or unknown field'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_create_payload';
+    END IF;
+    IF (p_feature ? 'address' AND jsonb_typeof(p_feature -> 'address') IS DISTINCT FROM 'object')
+       OR (p_feature ? 'urls' AND jsonb_typeof(p_feature -> 'urls') IS DISTINCT FROM 'object')
+       OR (p_feature ? 'raw_refs' AND jsonb_typeof(p_feature -> 'raw_refs') IS DISTINCT FROM 'array') THEN
+        RAISE EXCEPTION 'feature create payload has an invalid JSON field shape'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_create_payload';
+    END IF;
+    v_feature_id := nullif(btrim(p_feature ->> 'feature_id'), '');
+    v_kind := nullif(btrim(p_feature ->> 'kind'), '');
+    v_name := nullif(btrim(p_feature ->> 'name'), '');
+    v_category := nullif(btrim(p_feature ->> 'category'), '');
+    IF v_feature_id IS NULL OR v_kind IS NULL OR v_name IS NULL OR v_category IS NULL THEN
         RAISE EXCEPTION 'feature create payload lacks required core fields'
             USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_create_payload';
+    END IF;
+    IF p_feature ? 'feature_uuid' THEN
+        v_feature_uuid := nullif(btrim(p_feature ->> 'feature_uuid'), '')::uuid;
     END IF;
     IF (p_feature ? 'lon') <> (p_feature ? 'lat') THEN
         RAISE EXCEPTION 'feature coordinate requires both lon and lat'
             USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_create_payload';
     END IF;
     IF p_feature ? 'lon' THEN
-        v_feature.coord := x_extension.st_setsrid(
+        v_coord := x_extension.st_setsrid(
             x_extension.st_makepoint(
                 (p_feature ->> 'lon')::double precision,
                 (p_feature ->> 'lat')::double precision
@@ -290,21 +359,20 @@ BEGIN
         user_change_request_id, user_deleted_at, user_deleted_by, user_change_reason,
         created_at, updated_at
     ) VALUES (
-        v_feature.feature_id, v_feature.feature_uuid, v_feature.kind, v_feature.name,
-        v_feature.category, v_feature.coord, v_feature.coord_precision_digits,
-        coalesce(v_feature.address, '{}'::jsonb), v_feature.legal_dong_code,
-        v_feature.road_name_code, v_feature.road_address_management_no,
-        v_feature.admin_dong_code, v_feature.sido_code, v_feature.sigungu_code,
-        coalesce(v_feature.urls, '{}'::jsonb), v_feature.marker_icon, v_feature.marker_color,
-        v_feature.parent_feature_id, v_feature.sibling_group_id,
-        coalesce(v_feature.raw_refs, '[]'::jsonb), p_lifecycle_state,
+        v_feature_id, v_feature_uuid, v_kind, v_name,
+        v_category, v_coord, (p_feature ->> 'coord_precision_digits')::smallint,
+        coalesce(p_feature -> 'address', '{}'::jsonb), p_feature ->> 'legal_dong_code',
+        p_feature ->> 'road_name_code', p_feature ->> 'road_address_management_no',
+        p_feature ->> 'admin_dong_code', p_feature ->> 'sido_code', p_feature ->> 'sigungu_code',
+        coalesce(p_feature -> 'urls', '{}'::jsonb), p_feature ->> 'marker_icon', p_feature ->> 'marker_color',
+        p_feature ->> 'parent_feature_id', nullif(p_feature ->> 'sibling_group_id', '')::uuid,
+        coalesce(p_feature -> 'raw_refs', '[]'::jsonb), p_lifecycle_state,
         p_publication_state, p_quality_state,
-        coalesce(v_feature.data_origin, 'provider'), coalesce(v_feature.data_version, 0),
-        v_feature.user_change_kind, v_feature.user_change_status,
-        v_feature.user_change_request_id, v_feature.user_deleted_at,
-        v_feature.user_deleted_by, v_feature.user_change_reason,
-        coalesce(v_feature.created_at, clock_timestamp()),
-        coalesce(v_feature.updated_at, clock_timestamp())
+        coalesce(nullif(btrim(p_feature ->> 'data_origin'), ''), 'provider'),
+        coalesce((p_feature ->> 'data_version')::integer, 0),
+        NULL, NULL, NULL, NULL, NULL, NULL,
+        coalesce((p_feature ->> 'created_at')::timestamptz, clock_timestamp()),
+        coalesce((p_feature ->> 'updated_at')::timestamptz, clock_timestamp())
     ) ON CONFLICT (feature_id) DO NOTHING
     RETURNING feature_id, feature_uuid, row_revision
          INTO o_feature_id, o_feature_uuid, o_row_revision;
@@ -314,7 +382,7 @@ BEGIN
         SELECT feature_id, feature_uuid, row_revision
           INTO o_feature_id, o_feature_uuid, o_row_revision
           FROM feature.features
-         WHERE feature_id = v_feature.feature_id;
+         WHERE feature_id = v_feature_id;
     END IF;
 END;
 $$;
@@ -338,7 +406,6 @@ SET search_path = pg_catalog
 AS $$
 DECLARE
     v_current feature.features%ROWTYPE;
-    v_dataset_id bigint;
 BEGIN
     IF p_expected_row_revision IS NULL OR p_expected_row_revision < 1 THEN
         RAISE EXCEPTION 'expected feature row revision is required'
@@ -363,27 +430,31 @@ BEGIN
             USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_state_transition_non_noop';
     END IF;
 
+    IF p_context ->> 'transition_kind' = 'provider_sync'
+       AND (
+            (v_current.lifecycle_state = 'active' AND p_lifecycle_state = 'retired')
+            OR (v_current.lifecycle_state = 'retired' AND p_lifecycle_state = 'active')
+       )
+       AND NOT EXISTS (
+            SELECT 1
+            FROM provider_sync.source_links AS link
+            JOIN provider_sync.source_entities AS entity
+              ON entity.source_entity_key = link.source_entity_key
+            JOIN provider_sync.source_records AS record
+              ON record.source_entity_key = entity.source_entity_key
+            WHERE link.feature_id = p_feature_id
+              AND link.source_entity_key = p_context ->> 'source_entity_key'
+              AND entity.provider_dataset_id = (p_context ->> 'provider_dataset_id')::bigint
+              AND record.source_record_key = p_context ->> 'source_record_key'
+       ) THEN
+        RAISE EXCEPTION 'provider lifecycle transition requires linked authoritative source evidence'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_provider_source_provenance';
+    END IF;
+
     IF v_current.lifecycle_state = 'retired' AND p_lifecycle_state = 'active' THEN
-        IF p_context ->> 'transition_kind' = 'provider_sync' THEN
-            IF coalesce(btrim(p_context ->> 'reactivation_evidence'), '') = ''
-               OR coalesce(btrim(p_context ->> 'source_record_key'), '') = '' THEN
-                RAISE EXCEPTION 'provider reactivation requires source evidence'
-                    USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_provider_reactivation_evidence';
-            END IF;
-            v_dataset_id := (p_context ->> 'provider_dataset_id')::bigint;
-            IF NOT EXISTS (
-                SELECT 1
-                FROM provider_sync.source_records AS record
-                JOIN provider_sync.source_entities AS entity
-                  ON entity.source_entity_key = record.source_entity_key
-                WHERE record.source_record_key = p_context ->> 'source_record_key'
-                  AND entity.provider_dataset_id = v_dataset_id
-            ) THEN
-                RAISE EXCEPTION 'provider reactivation source does not belong to dataset'
-                    USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_provider_reactivation_evidence';
-            END IF;
-        ELSIF p_context ->> 'transition_kind' NOT IN ('admin', 'user_request', 'system')
-           OR coalesce(btrim(p_context ->> 'reactivation_evidence'), '') = '' THEN
+        IF p_context ->> 'transition_kind' <> 'provider_sync'
+           AND (p_context ->> 'transition_kind' NOT IN ('admin', 'user_request', 'system')
+           OR coalesce(btrim(p_context ->> 'reactivation_evidence'), '') = '') THEN
             RAISE EXCEPTION 'retired feature may be reactivated only by explicit reingest'
                 USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_reactivation_explicit';
         END IF;
@@ -393,6 +464,7 @@ BEGIN
             WHERE override.feature_id = p_feature_id
               AND override.field_path = 'lifecycle_state'
               AND override.status = 'active'
+              AND override.override_value = '"retired"'::jsonb
               AND override.prevent_provider_reactivation
         ) AND p_context ->> 'transition_kind' = 'provider_sync' THEN
             RAISE EXCEPTION 'provider reactivation is fenced by lifecycle override'
@@ -407,6 +479,153 @@ BEGIN
            updated_at = clock_timestamp()
      WHERE feature_id = p_feature_id
      RETURNING feature_id, row_revision INTO o_feature_id, o_row_revision;
+END;
+$$;
+"""
+
+
+_USER_PROVENANCE_PROCEDURE_SQL = r"""
+CREATE PROCEDURE feature.materialize_user_feature_change_provenance(
+    IN p_feature_id text,
+    IN p_change_kind text,
+    IN p_request_id uuid,
+    IN p_reason text,
+    IN p_operator text,
+    IN p_expected_row_revision bigint,
+    OUT o_feature_id text,
+    OUT o_row_revision bigint
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $$
+DECLARE
+    v_current feature.features%ROWTYPE;
+    v_request_state text;
+    v_next_version integer;
+BEGIN
+    IF p_change_kind NOT IN ('add', 'update', 'delete')
+       OR p_request_id IS NULL
+       OR p_expected_row_revision IS NULL OR p_expected_row_revision < 1
+       OR coalesce(btrim(p_reason), '') = ''
+       OR coalesce(btrim(p_operator), '') = '' THEN
+        RAISE EXCEPTION 'user feature provenance has invalid typed arguments'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_user_provenance';
+    END IF;
+
+    SELECT * INTO v_current
+      FROM feature.features
+     WHERE feature_id = p_feature_id
+     FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'feature % does not exist', p_feature_id USING ERRCODE = 'P0002';
+    END IF;
+    SELECT request.state INTO v_request_state
+      FROM ops.feature_change_requests AS request
+     WHERE request.request_id = p_request_id
+       AND request.feature_id = p_feature_id
+       AND request.action = p_change_kind;
+    IF NOT FOUND OR v_request_state NOT IN ('pending', 'applied') THEN
+        RAISE EXCEPTION 'user feature provenance request is not pending or applied for this feature/action'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_user_provenance_request';
+    END IF;
+    -- immediate request는 state='applied'로 먼저 표시된다. 이미 이 exact request의
+    -- provenance/snapshot을 materialize한 재호출은 stale expected revision에도
+    -- 안전한 receipt를 반환한다.
+    IF v_request_state = 'applied'
+       AND v_current.user_change_request_id = p_request_id
+       AND v_current.user_change_kind = p_change_kind
+       AND v_current.user_change_status = 'applied' THEN
+        o_feature_id := v_current.feature_id;
+        o_row_revision := v_current.row_revision;
+        RETURN;
+    END IF;
+    IF v_current.row_revision <> p_expected_row_revision THEN
+        RAISE EXCEPTION 'feature % revision changed', p_feature_id USING ERRCODE = '40001';
+    END IF;
+    -- ``review_mode=immediate`` marks the request applied before its core write
+    -- and this typed provenance materialization run.  ``pending`` and
+    -- ``applied`` therefore both identify an authorized request here; row-lock
+    -- plus expected revision makes a stale second materialization conflict.
+    IF p_change_kind = 'delete'
+       AND (v_current.lifecycle_state <> 'retired'
+            OR v_current.publication_state <> 'suppressed') THEN
+        RAISE EXCEPTION 'delete provenance requires a retired suppressed feature'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_user_provenance_delete_state';
+    END IF;
+
+    SELECT greatest(
+        v_current.data_version,
+        coalesce((SELECT max(version) + 1
+                  FROM feature.feature_versions
+                 WHERE feature_id = p_feature_id), 1)
+    )::integer
+      INTO v_next_version;
+
+    UPDATE feature.features
+       SET data_origin = 'user_request',
+           data_version = v_next_version,
+           user_change_kind = p_change_kind,
+           user_change_status = 'applied',
+           user_change_request_id = p_request_id,
+           user_deleted_at = CASE WHEN p_change_kind = 'delete' THEN clock_timestamp()
+                                  ELSE user_deleted_at END,
+           user_deleted_by = CASE WHEN p_change_kind = 'delete' THEN btrim(p_operator)
+                                  ELSE user_deleted_by END,
+           user_change_reason = btrim(p_reason),
+           updated_at = clock_timestamp()
+     WHERE feature_id = p_feature_id
+     RETURNING feature_id, row_revision INTO o_feature_id, o_row_revision;
+
+    -- Runtime에는 detailed view/version table의 직접 권한을 주지 않는다. Typed
+    -- provenance write 이후의 동일 row lock에서 immutable response-shape snapshot을
+    -- 남겨 core/subtype 변경과 version evidence가 분리되지 않게 한다.
+    INSERT INTO feature.feature_versions (
+        feature_id, version, origin, change_kind, payload, request_id, created_by
+    )
+    SELECT
+        detailed.feature_id,
+        v_next_version,
+        'user_request',
+        p_change_kind,
+        jsonb_build_object(
+            'feature_id', detailed.feature_id,
+            'kind', detailed.kind,
+            'name', detailed.name,
+            'category', detailed.category,
+            'lon', x_extension.ST_X(detailed.coord),
+            'lat', x_extension.ST_Y(detailed.coord),
+            'coord_precision_digits', detailed.coord_precision_digits,
+            'address', detailed.address,
+            'legal_dong_code', detailed.legal_dong_code,
+            'road_name_code', detailed.road_name_code,
+            'road_address_management_no', detailed.road_address_management_no,
+            'admin_dong_code', detailed.admin_dong_code,
+            'sido_code', detailed.sido_code,
+            'sigungu_code', detailed.sigungu_code,
+            'urls', detailed.urls,
+            'marker_icon', detailed.marker_icon,
+            'marker_color', detailed.marker_color,
+            'parent_feature_id', detailed.parent_feature_id,
+            'sibling_group_id', detailed.sibling_group_id,
+            'detail', detailed.detail,
+            'status', detailed.status,
+            'data_origin', detailed.data_origin,
+            'data_version', detailed.data_version,
+            'user_change_kind', detailed.user_change_kind,
+            'user_change_status', detailed.user_change_status,
+            'user_deleted_at', detailed.user_deleted_at,
+            'deleted_at', detailed.deleted_at,
+            'updated_at', detailed.updated_at
+        ),
+        p_request_id,
+        btrim(p_operator)
+    FROM feature.features_detailed AS detailed
+    WHERE detailed.feature_id = p_feature_id;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'feature % has no detailed snapshot', p_feature_id
+            USING ERRCODE = 'P0002';
+    END IF;
 END;
 $$;
 """
@@ -442,17 +661,35 @@ def upgrade() -> None:
             IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'ktm_feature_runtime') THEN
                 CREATE ROLE ktm_feature_runtime NOLOGIN NOINHERIT;
             END IF;
+            -- Dedicated migrator runs ``SET LOCAL ROLE ktm_feature_schema_owner``.
+            -- That restricted role has no ADMIN OPTION over routine owners. Bootstrap
+            -- must establish membership before Alembic; 0095 never self-grants it.
+            IF NOT EXISTS (
+                SELECT 1
+                FROM pg_catalog.pg_auth_members AS membership
+                JOIN pg_catalog.pg_roles AS granted_role ON granted_role.oid = membership.roleid
+                JOIN pg_catalog.pg_roles AS member_role ON member_role.oid = membership.member
+                WHERE granted_role.rolname = 'ktm_feature_state_procedure_owner'
+                  AND member_role.rolname = 'ktm_feature_schema_owner'
+            ) OR NOT EXISTS (
+                SELECT 1
+                FROM pg_catalog.pg_auth_members AS membership
+                JOIN pg_catalog.pg_roles AS granted_role ON granted_role.oid = membership.roleid
+                JOIN pg_catalog.pg_roles AS member_role ON member_role.oid = membership.member
+                WHERE granted_role.rolname = 'ktm_feature_audit_writer'
+                  AND member_role.rolname = 'ktm_feature_schema_owner'
+            ) THEN
+                RAISE EXCEPTION
+                    '0095 requires bootstrap membership of schema owner in state/audit owners'
+                    USING ERRCODE = '42501';
+            END IF;
         END;
         $$
         """
     )
-    # LOGIN migrator/runtime identities는 deployment bootstrap가 password 없이 이
-    # migration에 남지 않도록 만든다. schema owner는 state/audit NOLOGIN owner의
-    # member여야 final ownership transfer와 ALTER OWNER를 수행할 수 있다.
-    op.execute(
-        "GRANT ktm_feature_state_procedure_owner, ktm_feature_audit_writer "
-        "TO ktm_feature_schema_owner"
-    )
+    # LOGIN migrator/runtime identities와 schema-owner membership은 deployment
+    # bootstrap가 pre-provision한다. 위 DO block은 CREATEROLE bootstrap만 보완하고,
+    # restricted migrator는 membership을 검증만 한다.
     op.execute(
         """
         ALTER TABLE feature.features
@@ -511,6 +748,10 @@ def upgrade() -> None:
             reason_code text NOT NULL,
             principal text NOT NULL,
             causation_ref text,
+            provider_dataset_id bigint,
+            source_entity_key text,
+            source_record_key text,
+            provider_evidence jsonb,
             occurred_at timestamptz NOT NULL,
             row_revision bigint NOT NULL,
             invoker_role text NOT NULL,
@@ -546,6 +787,23 @@ def upgrade() -> None:
                 ) OR (
                     from_lifecycle_state IS NOT NULL
                     AND transition_kind NOT IN ('initial', 'legacy_backfill')
+                )
+            ),
+            CONSTRAINT ck_feature_state_transitions_provider_provenance CHECK (
+                (
+                    transition_kind = 'provider_sync'
+                    AND provider_dataset_id IS NOT NULL
+                    AND btrim(source_entity_key) <> ''
+                    AND btrim(source_record_key) <> ''
+                    AND jsonb_typeof(provider_evidence) = 'object'
+                    AND jsonb_typeof(provider_evidence -> 'authoritative_receipt') = 'string'
+                    AND btrim(provider_evidence ->> 'authoritative_receipt') <> ''
+                ) OR (
+                    transition_kind <> 'provider_sync'
+                    AND provider_dataset_id IS NULL
+                    AND source_entity_key IS NULL
+                    AND source_record_key IS NULL
+                    AND provider_evidence IS NULL
                 )
             ),
             CONSTRAINT ck_feature_state_transitions_row_revision CHECK (row_revision >= 1)
@@ -672,9 +930,14 @@ def upgrade() -> None:
     op.execute(_AUDIT_GUARD_FUNCTION_SQL)
     op.execute(_CREATE_PROCEDURE_SQL)
     op.execute(_TRANSITION_PROCEDURE_SQL)
+    op.execute(_USER_PROVENANCE_PROCEDURE_SQL)
     op.execute("ALTER FUNCTION feature.prepare_feature_state_context(jsonb, text) OWNER TO ktm_feature_state_procedure_owner")
     op.execute("ALTER PROCEDURE feature.create_feature_with_initial_state(jsonb, text, text, text, jsonb) OWNER TO ktm_feature_state_procedure_owner")
     op.execute("ALTER PROCEDURE feature.transition_feature_state(text, text, text, text, bigint, jsonb) OWNER TO ktm_feature_state_procedure_owner")
+    op.execute(
+        "ALTER PROCEDURE feature.materialize_user_feature_change_provenance("
+        "text, text, uuid, text, text, bigint) OWNER TO ktm_feature_state_procedure_owner"
+    )
     op.execute("ALTER FUNCTION feature.write_feature_state_transition() OWNER TO ktm_feature_audit_writer")
     op.execute("ALTER FUNCTION feature.reject_feature_state_transition_mutation() OWNER TO ktm_feature_audit_writer")
 
@@ -701,9 +964,10 @@ def upgrade() -> None:
     for statement in (
         "GRANT USAGE ON SCHEMA feature, provider_sync, ops "
         "TO ktm_feature_state_procedure_owner, ktm_feature_audit_writer, ktm_feature_runtime",
-        # 0080 UUID fill trigger가 feature INSERT 경로에서 x_extension UUID
-        # generator를 호출한다. runtime에는 주지 않고 SECURITY DEFINER owner만 쓴다.
-        "GRANT USAGE ON SCHEMA x_extension TO ktm_feature_state_procedure_owner",
+        # 0080 UUID fill trigger는 procedure owner가 호출한다. Runtime의 normal
+        # core update SQL도 typed coordinate expression을 parse하므로 schema USAGE만
+        # 준다(Feature/provenance DML이나 helper EXECUTE 권한은 주지 않는다).
+        "GRANT USAGE ON SCHEMA x_extension TO ktm_feature_state_procedure_owner, ktm_feature_runtime",
         "GRANT SELECT, INSERT ON feature.features TO ktm_feature_state_procedure_owner",
         # 전이 procedure는 세 축과 server-owned `updated_at` timestamp만 쓴다.
         "GRANT UPDATE (lifecycle_state, publication_state, quality_state, updated_at) "
@@ -712,8 +976,14 @@ def upgrade() -> None:
         # 수행하므로 SELECT와 INSERT가 모두 필요하다.
         "GRANT SELECT, INSERT ON feature.feature_aliases TO ktm_feature_state_procedure_owner",
         "GRANT SELECT ON provider_sync.provider_datasets, provider_sync.source_entities, "
-        "provider_sync.source_records, ops.feature_overrides "
+        "provider_sync.source_records, provider_sync.source_links, ops.feature_overrides "
         "TO ktm_feature_state_procedure_owner",
+        "GRANT SELECT ON ops.feature_change_requests TO ktm_feature_state_procedure_owner",
+        "GRANT SELECT, INSERT ON feature.feature_versions TO ktm_feature_state_procedure_owner",
+        "GRANT SELECT ON feature.features_detailed TO ktm_feature_state_procedure_owner",
+        "GRANT UPDATE (data_origin, data_version, user_change_kind, user_change_status, "
+        "user_change_request_id, user_deleted_at, user_deleted_by, user_change_reason, updated_at) "
+        "ON feature.features TO ktm_feature_state_procedure_owner",
         "GRANT INSERT ON feature.feature_state_transitions TO ktm_feature_audit_writer",
         "GRANT USAGE, SELECT ON SEQUENCE feature.feature_state_transitions_transition_id_seq "
         "TO ktm_feature_audit_writer",
@@ -723,14 +993,18 @@ def upgrade() -> None:
         "kind, name, category, coord, coord_precision_digits, address, legal_dong_code, "
         "road_name_code, road_address_management_no, admin_dong_code, sido_code, sigungu_code, "
         "urls, marker_icon, marker_color, parent_feature_id, sibling_group_id, raw_refs, "
-        "data_origin, data_version, created_at, updated_at"
+        "created_at, updated_at"
         ") ON feature.features TO ktm_feature_runtime",
+        "GRANT SELECT, INSERT, UPDATE ON ops.feature_change_requests TO ktm_feature_runtime",
         "GRANT SELECT ON feature.feature_state_transitions TO ktm_feature_runtime",
         "GRANT EXECUTE ON PROCEDURE feature.create_feature_with_initial_state(jsonb, text, text, text, jsonb) "
         "TO ktm_feature_runtime",
         "GRANT EXECUTE ON PROCEDURE feature.transition_feature_state(text, text, text, text, bigint, jsonb) "
         "TO ktm_feature_runtime",
+        "GRANT EXECUTE ON PROCEDURE feature.materialize_user_feature_change_provenance("
+        "text, text, uuid, text, text, bigint) TO ktm_feature_runtime",
         "REVOKE INSERT, DELETE, TRUNCATE ON feature.features FROM ktm_feature_runtime",
+        "REVOKE ALL ON feature.feature_versions FROM ktm_feature_runtime",
         "REVOKE UPDATE (lifecycle_state, publication_state, quality_state, status, deleted_at, "
         "user_deleted_at, user_deleted_by, user_change_kind, user_change_status, user_change_request_id) "
         "ON feature.features FROM ktm_feature_runtime",
@@ -746,6 +1020,8 @@ def upgrade() -> None:
         "FROM PUBLIC",
         "REVOKE ALL ON PROCEDURE feature.transition_feature_state(text, text, text, text, bigint, jsonb) "
         "FROM PUBLIC",
+        "REVOKE ALL ON PROCEDURE feature.materialize_user_feature_change_provenance("
+        "text, text, uuid, text, text, bigint) FROM PUBLIC",
     ):
         op.execute(statement)
 

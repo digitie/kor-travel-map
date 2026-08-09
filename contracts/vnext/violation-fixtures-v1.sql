@@ -1166,3 +1166,18 @@ INSERT INTO feature.feature_state_transitions (
 UPDATE feature.feature_state_transitions
 SET reason_code = 'mutated'
 WHERE feature_id = '00000000-0000-0000-0000-000000000020';
+
+-- case: feature_state_provider_provenance_missing
+INSERT INTO feature.feature_state_transitions (
+    feature_id,
+    from_lifecycle_state, from_publication_state, from_quality_state,
+    to_lifecycle_state, to_publication_state, to_quality_state,
+    transition_kind, reason_code, principal, occurred_at, row_revision,
+    invoker_role, state_procedure_definer, audit_writer_definer
+) VALUES (
+    '00000000-0000-0000-0000-000000000021',
+    NULL, NULL, NULL,
+    'active', 'draft', 'valid',
+    'provider_sync', 'fixture_provider_initial', 'provider:fixture/state', now(), 1,
+    session_user::text, 'fixture', 'fixture'
+);
