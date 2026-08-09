@@ -131,7 +131,7 @@ _ROUTE_AREA_RUNTIME_GRANTS = tuple(
         f"GRANT INSERT ({', '.join(insert_columns)}) ON feature.{relation} "
         "TO ktm_feature_runtime",
         f"GRANT UPDATE ({', '.join(_ROUTE_AREA_RUNTIME_UPDATE_COLUMNS[relation])}) "
-        "TO ktm_feature_runtime",
+        f"ON feature.{relation} TO ktm_feature_runtime",
         f"GRANT SELECT (feature_id, public_ready), UPDATE (public_ready) "
         f"ON feature.{relation} "
         "TO ktm_feature_state_procedure_owner",

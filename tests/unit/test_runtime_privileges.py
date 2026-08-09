@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import pytest
 
-from kortravelmap.infra.runtime_privileges import _runtime_relation_grants
+from kortravelmap.infra.runtime_privileges import (
+    _ROUTE_AREA_RUNTIME_GRANTS,
+    _runtime_relation_grants,
+)
 
 
 @pytest.mark.unit
@@ -107,3 +110,21 @@ def test_runtime_acl_inventory_rejects_an_unreviewed_feature_view() -> None:
 
     assert grants == []
     assert unknown == ["feature.feature_future_read_projection"]
+
+
+@pytest.mark.unit
+def test_runtime_subtype_column_grants_name_the_target_relation() -> None:
+    """column-list UPDATE는 대상 table을 명시해 fresh migration에서도 실행된다."""
+
+    rendered = "\n".join(_ROUTE_AREA_RUNTIME_GRANTS)
+    assert (
+        "GRANT UPDATE (geom, route_type, geometry_source, geometry_status, "
+        "total_distance_meters, expected_duration_minutes, difficulty, begin_name, "
+        "begin_address, end_name, end_address, payload) ON feature.feature_routes "
+        "TO ktm_feature_runtime"
+    ) in rendered
+    assert (
+        "GRANT UPDATE (geom, area_kind, boundary_source, area_square_meters, "
+        "regulation_scope, administrative_office, description, payload) "
+        "ON feature.feature_areas TO ktm_feature_runtime"
+    ) in rendered
