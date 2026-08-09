@@ -545,3 +545,176 @@ scripts/audit-mutation-battery.py = 20/20.
 
 교훈은 앞의 것과 같은데 한 겹 위다: 감사기가 **통과하는 것**과 감사기가 **유효한
 것**은 다른 문제다. 변이를 심어 확인하지 않은 감사는 그 위의 green을 지탱하지 못한다.
+
+## 적대 리뷰 8라운드 (2026-08-09) — 리뷰어 2명 모두 REJECT
+
+두 리뷰어가 **독립으로 같은 BLOCKER**를 찍었다(39번). 서로 다른 경로로 도달했다는
+점이 근거의 강도다.
+
+### 39. (BLOCKER) catalog 전용 행의 상세가 통째로 렌더되지 않는다
+
+`datasets-client.tsx`의 세 곳이 `scope.operation_key === selection.operationKey`를
+직접 비교했다. 왼쪽은 API 원본 `string | null`, 오른쪽은 UI가 `null → ""`로
+정규화한 값이다. `null === ""`는 항상 false다.
+
+```
+트리거: catalog.is_refreshable === false인 행(실측 74개 중 17~18개).
+서버는 `_catalog_state_memberships`에서 ((dataset_wide, None),)을 내므로
+scopes[0].operation_key가 null이고, 응답은 200에 catalog_state="canonical"이다.
+
+깨지는 것:
+  detailMatchesSelection=false -> verifiedDetail=null -> canRenderPanels=false
+    => 상태·이력 / 정책 / 미리보기 탭이 **하나도** 렌더되지 않는다
+  catalog=null  => "ETL 카탈로그에 없는 잔존 행입니다" — 서버와 정반대를 말한다
+  "선택한 exact operation membership이 상세 응답에 없어 조작을 차단했습니다" — 거짓
+
+TypeScript는 `string | null === string` 비교를 막지 않는다. 그리고 e2e 픽스처에
+`operation_key: null` 행이 **하나도 없어** 어떤 게이트도 잡지 못했다.
+
+고침: `operationKeyOf` / `scopeMatchesSelection`으로 정규화를 한 곳에 모았다.
+파일 자신이 `:122`에서 "이 함수 밖에서는 operation_key를 직접 읽지 않는다"고
+정해 놓고 세 곳에서 어겼다 — 규약을 적는 것과 지키는 것은 다른 일이다.
+그 축을 e2e 픽스처에 넣고 딥링크 진입까지 단언한다.
+```
+
+### 40. (BLOCKER) 딥링크가 3축을 전부 요구해 자기 e2e 23개가 통과 불가
+
+`selectionResolution`이 `searchParams.get("operation_key") !== null`을 **필수**로
+요구했다. `KMA_DEEP_LINK`를 비롯해 이 저장소의 딥링크는 2축이다.
+
+```
+판단: 축이 덜 적힌 링크는 "틀린 링크"가 아니라 "덜 적힌 링크"다. 유일하게
+결정되면 받아들이고, 형제 operation 때문에 둘 이상이면 그때만 거부한다 —
+임의로 고르지 않는다는 원칙은 그대로 지킨다. 모호할 때는 이유를 말한다
+(`ambiguous` 분기).
+
+부수: `entity-href.ts`도 `!operationKey`가 빈 값을 걸러 catalog 전용 dataset이
+**어떤 entity 링크로도 도달 불가**였다. 같은 규칙으로 고쳤다.
+```
+
+### 41. (BLOCKER) vitest 36파일 285케이스가 어느 게이트에도 없었다
+
+`grep -rn "vitest\|playwright" .github/workflows/` 무매치. 이 브랜치가 추가한
+프론트 테스트 ~900줄을 포함해 **머지 게이트에서 한 번도 실행되지 않았다.**
+
+```
+감사기는 이 사각을 구조적으로 볼 수 없다 — CI→로컬 방향만 감사하고, "저장소에
+있는 테스트가 어느 게이트에도 안 걸려 있다"는 반대 방향 검사가 없다. 그래서
+verify-all-gates.sh는 이 누락을 **충실히 미러링**하며 green을 냈다.
+
+고침: CI와 로컬 둘 다에 넣었다. 넣자마자 옛 계약을 못 박은 테스트 1건이 잡혔다
+(entity-href의 "triple 일부가 없으면 링크를 만들지 않는다"). 게이트에 넣는 것이
+곧 검증이라는 실증이다.
+
+Playwright e2e는 서비스 기동이 필요해 CI에도 로컬에도 없다 — n150에서 돈다.
+그 사실을 게이트 스크립트 머리말에 명시했다. 모르는 것을 모른다고 적는다.
+```
+
+### 42. (BLOCKER) 감사기가 "게이트가 실패할 수 있는가"를 전혀 보지 않았다
+
+`|| true` 하나로 어떤 게이트든 무력화해도 조각은 그대로라 침묵했다. 리뷰어가
+설계한 변이 14종 중 12종이 생존했다.
+
+```
+생존한 부류 4개와 원인:
+ 1. 실패 억제(X2a·X2c·X9·X10) — 조각 일치만 보고 종료코드 경로를 안 봤다.
+    스크립트 자신이 `py()` 주석에 "파이프를 걸지 마라, exit code가 마지막
+    명령의 것이 된다"고 적어 두고도 그 검사가 없었다. 아는 것과 검사하는 것은
+    다르다. => 억제 토큰 검사 + eslint 경고 예산 검사.
+ 2. pytest 경로 축소(X1) — ruff·mypy에는 막아 놓고 pytest만 첫 경로 하나만
+    조각으로 삼았다. => 경로를 전부 요구.
+ 3. 면제 밀수(X3·X4·X6·X7) — `_EXEMPT`가 **부분문자열** 매칭이라
+    `echo `/`pip install`/`mv `/`.github/actions/`가 밀수 토큰이었다.
+    면제표의 "echo는 실패를 만들 수 없다"는 서술도 그래서 거짓이다 — 코드가
+    하던 일은 "echo인 명령"이 아니라 "echo를 포함한 명령"의 면제였다.
+    => 접두 일치 + `&&` 구간별 판정.
+ 4. 워크플로 탐지(X5b·X8) — 헤더를 `split("jobs:")`로 잘라 **주석 한 줄로**
+    워크플로가 통째로 사라졌다. merge_group 트리거도 목록에 없었다.
+    => 열 0의 `jobs:`까지를 헤더로, 주석 제외, merge_group 추가.
+
+변이 배터리 20 -> 32/32.
+```
+
+### 43. (HIGH) 실행 타임라인이 provider_dataset_id 필터를 조용히 버렸다
+
+`hasExactOperationFilter`가 세 축을 모두 요구하고, 아니면 `provider_dataset_id`까지
+`undefined`로 만들었다. 화면에는 ID가 남아 있는데 목록은 전 시스템의 모든 실행이다.
+
+```
+좁히는 실패가 아니라 **넓히는 실패**(fail-open)다 — 운영자가 남의 실행을 열고
+취소할 수 있다. 서버 `_canonical_dataset_filter`는 ID 단독도 받는다. 같은 URL
+상태를 공유하는 형제 패널 `events-panel.tsx`는 처음부터 옳았다(같은 PR 안의 반증).
+main 대비 회귀이기도 하다.
+```
+
+### 44. (HIGH) 요청 dialog가 형제 operation을 임의로 골랐다 — 그리고 더 나빴다
+
+`canonicalCatalogRows`가 `Map<number, row>`로 dataset당 한 행만 남겼다.
+
+```
+그래서 (a) 남는 행의 sync_scope가 임의로 정해지고, (b) 운영자가 기본이 아닌
+allowed scope를 고르면 membership 조회가 실패해 "이 dataset/scope에는 실행 가능한
+refresh operation이 없습니다"라는 **거짓 사유**로 요청이 막혔다. 주석은 이미
+고쳤다고 주장하고 있었다.
+
+고침: 접지 않는다. dataset 선택지만 표시용으로 dedupe하고, (dataset, scope)에
+걸린 membership이 둘 이상일 때만 operation 선택 UI가 뜬다 — 평소에는 화면을
+늘리지 않고, 갈릴 때는 운영자가 고른다.
+```
+
+### 45. (HIGH) MOIS 사전점검은 표시만 복구돼 있었고 제출 차단은 없었다
+
+T-VN-33이 provider 이름 입력을 없앨 때 사전점검이 표시·차단 함께 사라졌고,
+앞 라운드에서 복구한 것은 표시뿐이었다.
+
+```
+즉 선행 sync가 낡았거나 조회 불가여도 canonical write가 그대로 나갔다.
+제출 직전 재확인 가드를 되살렸다 — 조회 실패도 차단(fail-closed)이다.
+
+이 기능이 처음 사라졌을 때 그것을 잡은 것은 테스트가 아니라 react-doctor의
+죽은 export 규칙이었고, 이번에는 그 규칙조차 작동하지 않았다(새 판정자
+`isMoisProvider`가 export가 아니다). e2e mock 배관까지 함께 지워져 있어 다시
+넣고, 판정 축을 provider 입력이 아닌 고른 catalog 행의 provider로 바꿔 4건을
+다시 썼다.
+```
+
+### 46. (HIGH) 비활성 dataset의 정책 PUT이 500
+
+카탈로그 조회가 `active_only=False`라 비활성 dataset도 canonical entry로 통과하는데,
+DB 트리거 `reject_inactive_provider_dataset`가 write를 `23514`로 거부한다. API에
+대응 분기가 없어 catch-all이 500을 냈다(선언한 응답은 404/409/422뿐).
+
+```
+실측 seed에 도달 가능한 행이 1건 있다(python-visitkorea-api / place_phone_enrichment).
+39번이 고쳐지면 UI에서도 곧바로 열리는 경로다 — 지금은 39번 버그가 우연히 가려
+주고 있었을 뿐이다.
+
+고침: `InactiveDatasetMutationDisabledError` -> 409, `mutable`도 `is_active`를
+본다(UI가 "조작 가능"이라 말한 뒤 서버가 거절하는 상태를 없앤다).
+```
+
+### 47. (MEDIUM) operation은 있는데 scope 행이 없으면 dataset이 그리드에서 사라진다
+
+`_catalog_state_memberships`가 빈 튜플을 낼 수 있었다. state까지 없으면 행 자체가
+없어 catalog 존재도 integrity issue도 정책도 보이지 않는다. DB는 이 상태를 허용한다
+(`provider_dataset_operation_scopes`에 "operation당 최소 1행" 제약이 없다).
+바로 위 분기는 같은 상황에 자리표시자를 내주므로 이쪽만 fail-open인 것은 설계 누락이다.
+
+### 48. (MEDIUM) row id `:` 연결 충돌 / offline upload 고정 기본 scope
+
+`external_system:concierge`처럼 scope 값 자체가 `:`를 담으므로
+`(scope="external_system:a", op="b")`와 `(scope="external_system", op="a:b")`가 같은
+key가 된다. 같은 파일의 `rowKey`는 정확히 이 이유로 인코딩 조인을 쓰고 있었다 —
+두 표만 안 쓰고 있었다. offline upload는 `dataset_wide`를 고정 기본값으로 박아
+canonical scope가 다른 dataset에서 그대로 422였다(고른 dataset의 scope를 따르게 함).
+
+### 49. 게이트 스크립트: 복사 실패를 삼키던 자리에서 실제 결함이 나왔다
+
+복사 실패를 치명(exit 97)으로 바꾸자마자 `next build` 산출물 `.next/standalone`의
+끊어진 심링크 때문에 `cp -r`가 non-zero로 끝난다는 것이 드러났다. 그전까지는
+**일부만 복사된 트리** 위에서 파이썬 게이트가 돌고 있었다. tar + 산출물 제외로 바꿨다.
+
+```
+이 항목의 요점은 수정 자체가 아니라 순서다 — "실패를 삼키지 않게" 만들자마자
+숨어 있던 실제 결함이 즉시 드러났다. 삼키는 코드는 결함을 없애지 않고 미룬다.
+```
