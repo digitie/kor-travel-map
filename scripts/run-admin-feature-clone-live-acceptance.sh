@@ -767,7 +767,7 @@ ids = [
     make_id("price", "00000000", "e2e-live-acceptance", f"{run_id}:price"),
 ]
 ids.extend(admin_id(role) for role in (
-    "marker::draft", "marker::inactive", "marker::hidden",
+    "marker::draft", "marker::retired", "marker::suppressed",
     "correction", "search::alpha", "search::beta",
 ))
 print(",".join(repr(value) for value in ids))
@@ -1364,8 +1364,8 @@ write_snapshot() {
   migration_head="$(psql_value "SELECT string_agg(version_num, ',' ORDER BY version_num) FROM alembic_version")"
   relation_count="$(psql_value "SELECT count(*) FROM pg_class WHERE relnamespace IN (SELECT oid FROM pg_namespace WHERE nspname IN ('feature','ops','provider_sync')) AND relkind IN ('r','p','v','m')")"
   feature_total="$(psql_value "SELECT count(*) FROM feature.features")"
-  feature_non_deleted="$(psql_value "SELECT count(*) FROM feature.features WHERE status <> 'deleted'")"
-  active_owned="$(psql_value "SELECT count(*) FROM feature.features WHERE feature_id = ANY (ARRAY[${owned_feature_ids}]::text[]) AND status <> 'deleted'")"
+  feature_non_deleted="$(psql_value "SELECT count(*) FROM feature.features WHERE lifecycle_state <> 'retired'")"
+  active_owned="$(psql_value "SELECT count(*) FROM feature.features WHERE feature_id = ANY (ARRAY[${owned_feature_ids}]::text[]) AND lifecycle_state <> 'retired'")"
   nonterminal_owned="$(psql_value "SELECT count(*) FROM ops.feature_change_requests WHERE feature_id = ANY (ARRAY[${owned_feature_ids}]::text[]) AND state = 'pending'")"
   schema_digest="$(schema_sha256)"
   database_digest="$(database_sha256)"
@@ -2895,8 +2895,8 @@ print(value)
   start_checkpoint_quiescence
   assert_checkpoint_quiescence
   write_snapshot "$CHECKPOINT_SNAPSHOT" "$RUN_ID"
-  [[ "$(psql_value "SELECT count(*) FROM feature.features WHERE status <> 'deleted' AND (user_change_reason LIKE 'admin feature live acceptance clone-%' OR name LIKE 'E2E hidden weather clone-%' OR name LIKE 'E2E hidden price clone-%')")" == "0" ]] ||
-    die "clone checkpoint has active acceptance Feature residue"
+  [[ "$(psql_value "SELECT count(*) FROM feature.features WHERE lifecycle_state <> 'retired' AND (user_change_reason LIKE 'admin feature live acceptance clone-%' OR name LIKE 'E2E hidden weather clone-%' OR name LIKE 'E2E hidden price clone-%')")" == "0" ]] ||
+    die "clone checkpoint has non-retired acceptance Feature residue"
   [[ "$(psql_value "SELECT count(*) FROM ops.feature_change_requests WHERE state = 'pending' AND reason LIKE 'admin feature live acceptance clone-%'")" == "0" ]] ||
     die "clone checkpoint has pending acceptance change request residue"
   assert_checkpoint_quiescence

@@ -103,8 +103,8 @@
       "determinism": "deterministic",
       "tests": [
         {
-          "line": 486,
-          "title": "admin/features list depth › deactivate kill-switch fires mutation with correct body"
+          "line": 536,
+          "title": "admin/features list depth › retire command fires an atomic state transition"
         }
       ]
     },

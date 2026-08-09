@@ -220,8 +220,8 @@ function reviewRow(page: Page, reviewId: string): Locator {
 /**
  * `status-badge.tsx`의 `statusLabel` 미러. #600에서 status 뱃지/`statusLabel(...)`로
  * 렌더되는 상태 텍스트가 한글화됐다 — 큐 행의 status 뱃지(`<StatusBadge>`)와 상세
- * 다이얼로그의 feature status(`statusLabel(feature.status)`)는 이제 한글로 노출되므로
- * "렌더된 텍스트"를 단언할 때 이 변환을 거친다. (API/DTO enum 값은 여전히 영문이라
+ * 다이얼로그의 Feature 상태 축은 별도 상태 패널에서 렌더한다. 이 helper는 review
+ * 뱃지의 "렌더된 텍스트"만 단언할 때 쓴다. (API/DTO enum 값은 여전히 영문이라
  * 응답 body·쿼리·selectOption 단언에는 쓰지 않는다 — 화면 텍스트 단언 전용.)
  */
 function koStatus(status: string): string {

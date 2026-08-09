@@ -258,7 +258,7 @@ PID를 종료한 뒤 WSL frontend를 다시 띄운다. 정상은 `wslrelay`다.
 |-------|-----------|------|
 | `/` | `/v1/ops/metrics`, `/v1/ops/pipeline/overview`, `/v1/ops/pipeline/executions`, `/v1/admin/features/dedup-reviews` | 구현됨. 운영 홈: Feature·canonical pipeline root·중복 검수·이슈·Dagster 상태 요약 |
 | `/features` | `/v1/features`, `/v1/features/{id}` | 구현됨. 지도/테이블/상세 panel + 운영 quick link |
-| `/admin/features` | `/v1/admin/features`, `/v1/admin/features/{id}/deactivate`, `/v1/features/{id}`, `/v1/features/{id}/weather` | 구현됨. 운영자용 table 목록, 상세/weather panel, 단건 비활성화 |
+| `/admin/features` | `/v1/admin/features`, `/v1/admin/features/{id}/state`, `/v1/admin/features/{id}/state/reactivate`, `/v1/features/{id}`, `/v1/features/{id}/weather` | 구현됨. 운영자용 table 목록, 상세/weather panel, 3축 상태 전이·재활성화 |
 | `/admin/features/change-requests` | `/v1/admin/features`, `/v1/admin/features/change-requests*` | 구현됨. feature add/update/delete 요청 생성, 검토 큐, approve/reject |
 | `/admin/features/curated` | `/v1/admin/features/curated*`, `/v1/admin/curated-source-rules*`, `/v1/admin/curated-sources`, `/v1/admin/curated-themes`, `/v1/curated-features/{id}/pinvi-copy` | 구현됨. curated 후보 목록, select/unselect/archive, source rule 편집/apply, PinVi copy preview |
 | `/admin/issues` | `/v1/admin/issues`, `/v1/admin/issues/{issue_id}` | 구현됨. 이슈 목록/상세, resolve/ignore/reopen/retry/apply/manual override |

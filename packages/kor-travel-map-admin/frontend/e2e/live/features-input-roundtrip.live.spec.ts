@@ -271,7 +271,7 @@ test.describe("admin/features live — input → query param → data → UI rou
           page,
           `${ADMIN_FEATURES_PATH}?kind=${encodeURIComponent(
             KIND,
-          )}&status=active&page_size=25&sort=name&order=asc`,
+          )}&lifecycle_state=active&publication_state=published&quality_state=valid&page_size=25&sort=name&order=asc`,
         );
         const items = res.body?.data.items ?? [];
         return items.length > 0 && items.every((item) => item.kind === KIND);
