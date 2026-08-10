@@ -200,7 +200,11 @@ function DatasetDetailToggleCell({
     : false;
   return (
     <Button
-      aria-label={`${row.original.provider} ${row.original.dataset_key} ${row.original.sync_scope} 상세 열기`}
+      // 접근성 이름도 행 identity와 같은 축이어야 한다. 형제 operation 두 행이
+      // 같은 이름을 가지면 버튼 목록만 훑는 스크린리더 사용자에게는 구분 자체가
+      // 불가능하다 — 시각 사용자에게는 operation 열이 생겼는데 그쪽만 남겨 두면
+      // 접근성이 한 단계 낮은 정보를 받는다.
+      aria-label={`${row.original.provider} ${row.original.dataset_key} ${row.original.sync_scope} ${operationKeyOf(row.original) || "operation 없음"} 상세 열기`}
       aria-controls={`dataset-detail-region-${rowKey(row.original)}`}
       aria-expanded={active}
       aria-pressed={active}
@@ -2380,6 +2384,21 @@ function useDatasetsClientController({
         header: "범위",
         enableSorting: true,
         cell: ({ row }) => row.original.sync_scope,
+      },
+      {
+        // 행 identity는 triple인데(`rowKey`) 표시 열에 operation이 없어서, 한
+        // dataset/scope에 형제 operation이 둘 있으면 두 행이 **픽셀 단위로 동일**
+        // 했다. 운영자는 어느 operation의 "지금 갱신"을 누르는지 열어보기 전에는
+        // 알 수 없었다. 같은 파일의 최근 실행 표는 이미 이 이유로 operation 열을
+        // 갖고 있다 — 정본 그리드에만 그 규칙이 빠져 있었다.
+        accessorKey: "operation_key",
+        header: "operation",
+        enableSorting: true,
+        cell: ({ row }) => (
+          <span className="font-mono text-xs">
+            {row.original.operation_key ?? "-"}
+          </span>
+        ),
       },
       {
         accessorKey: "status",

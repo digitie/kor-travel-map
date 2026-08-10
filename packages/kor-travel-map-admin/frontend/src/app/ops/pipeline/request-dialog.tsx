@@ -111,6 +111,34 @@ function MoisPrecheckNotice({
   );
 }
 
+type DatasetMembershipView = {
+  provider_dataset_id: number;
+  sync_scope: string;
+  operation_key?: string | null;
+};
+
+/** membership 목록의 React key. identity가 triple이므로 pair로 만들면 형제
+ *  operation 두 건이 **같은 key**가 된다(중복 key + 화면에 완전히 같은 두 줄).
+ *  이 화면은 canonical write 직전/직후의 유일한 대상 확인면이다 — 무엇이
+ *  실행되는지 구분할 정보를 스스로 버리면 안 된다. `:` 연결을 쓰지 않는 이유는
+ *  scope 값 자체가 `external_system:concierge`처럼 `:`를 담기 때문이다. */
+function membershipKey(membership: DatasetMembershipView): string {
+  return [
+    String(membership.provider_dataset_id),
+    membership.sync_scope,
+    membership.operation_key ?? "",
+  ]
+    .map(encodeURIComponent)
+    .join("|");
+}
+
+function membershipLabel(membership: DatasetMembershipView): string {
+  const operation = membership.operation_key;
+  return operation
+    ? `${membership.provider_dataset_id} · ${membership.sync_scope} · ${operation}`
+    : `${membership.provider_dataset_id} · ${membership.sync_scope}`;
+}
+
 function splitList(value: string): string[] {
   return value
     .split(/[\n,]/)
@@ -1176,10 +1204,8 @@ function RequestResultFeedback({
             <p>실행 membership: {preview.dataset_memberships.length}개</p>
             <ul className="font-mono text-xs">
               {preview.dataset_memberships.map((membership) => (
-                <li
-                  key={`${membership.provider_dataset_id}:${membership.sync_scope}`}
-                >
-                  {membership.provider_dataset_id} · {membership.sync_scope}
+                <li key={membershipKey(membership)}>
+                  {membershipLabel(membership)}
                 </li>
               ))}
             </ul>
@@ -1205,10 +1231,8 @@ function RequestResultFeedback({
             <p>실행 membership: {created.dataset_memberships.length}개</p>
             <ul className="font-mono text-xs">
               {created.dataset_memberships.map((membership) => (
-                <li
-                  key={`${membership.provider_dataset_id}:${membership.sync_scope}`}
-                >
-                  {membership.provider_dataset_id} · {membership.sync_scope}
+                <li key={membershipKey(membership)}>
+                  {membershipLabel(membership)}
                 </li>
               ))}
             </ul>

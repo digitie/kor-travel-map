@@ -1612,7 +1612,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     try {
       await page
         .getByRole("button", {
-          name: `${KMA_PROVIDER} ${KMA_DATASET} ${ACTIVE_EXTERNAL_SCOPE} 상세 열기`,
+          name: `${KMA_PROVIDER} ${KMA_DATASET} ${ACTIVE_EXTERNAL_SCOPE} ${KMA_OPERATION_KEY} 상세 열기`,
         })
         .click();
       await activeScopeDetailStarted;
@@ -2630,7 +2630,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     // KREX 행 선택 → URL query 반영.
     await page
       .getByRole("button", {
-        name: `${KREX_PROVIDER} ${KREX_DATASET} dataset_wide 상세 열기`,
+        name: `${KREX_PROVIDER} ${KREX_DATASET} dataset_wide ${KMA_OPERATION_KEY} 상세 열기`,
       })
       .click();
     await expect(page).toHaveURL(/provider_dataset_id=103/);
@@ -2656,7 +2656,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
 
     await page.goto("/ops/datasets");
     const rowButton = page.getByRole("button", {
-      name: `${KMA_PROVIDER} ${KMA_DATASET} ${KMA_SCOPE} 상세 열기`,
+      name: `${KMA_PROVIDER} ${KMA_DATASET} ${KMA_SCOPE} ${KMA_OPERATION_KEY} 상세 열기`,
     });
     await rowButton.click();
     await expect(page.getByText("데이터셋 상세")).toBeVisible();
@@ -2812,7 +2812,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     await expect(page.getByText("데이터셋 상세")).toHaveCount(0);
     await expect(
       page.getByRole("button", {
-        name: `${KREX_PROVIDER} ${KREX_DATASET} dataset_wide 상세 열기`,
+        name: `${KREX_PROVIDER} ${KREX_DATASET} dataset_wide ${KMA_OPERATION_KEY} 상세 열기`,
       }),
     ).toBeFocused();
   });
@@ -2833,7 +2833,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     // 행 선택 → 상세 → Escape로 닫힘 → 다시 빈 상태(딥링크와 일관).
     await page
       .getByRole("button", {
-        name: `${KMA_PROVIDER} ${KMA_DATASET} ${KMA_SCOPE} 상세 열기`,
+        name: `${KMA_PROVIDER} ${KMA_DATASET} ${KMA_SCOPE} ${KMA_OPERATION_KEY} 상세 열기`,
       })
       .click();
     await expect(page.getByText("데이터셋 상세")).toBeVisible();
@@ -2850,7 +2850,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     ).toBeVisible();
     await expect(
       page.getByRole("button", {
-        name: `${KMA_PROVIDER} ${KMA_DATASET} ${KMA_SCOPE} 상세 열기`,
+        name: `${KMA_PROVIDER} ${KMA_DATASET} ${KMA_SCOPE} ${KMA_OPERATION_KEY} 상세 열기`,
       }),
     ).toBeFocused();
   });

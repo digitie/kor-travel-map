@@ -143,6 +143,17 @@ export function PipelineEventsPanel({
         ),
       },
       {
+        // scope와 같은 이유다 — 여러 operation의 이벤트가 뒤섞인 전역 스트림에서
+        // 각 행이 어느 membership 것인지 판별할 열이 하나도 없었다.
+        id: "operation_key",
+        header: "operation",
+        cell: ({ row }) => (
+          <span className="font-mono text-xs">
+            {row.original.operation_key ?? "-"}
+          </span>
+        ),
+      },
+      {
         id: "message",
         header: "메시지",
         cell: ({ row }) => (
@@ -228,6 +239,25 @@ export function PipelineEventsPanel({
                 resetPage();
                 onUrlChange(
                   { sync_scope: event.target.value.trim() || null },
+                  "replace",
+                );
+              }}
+            />
+          </FilterField>
+          <FilterField label="operation">
+            {/* 이 값은 URL에서 읽어 **쿼리에 그대로 적용**되는데 보여 주거나 지울
+                컨트롤이 없었다. 딥링크로 들어온 운영자는 목록이 특정 operation으로
+                좁혀져 있다는 사실을 모른 채 빈 목록을 "이벤트 없음"으로 오독한다.
+                적용되는 필터는 화면에 있어야 한다. */}
+            <Input
+              aria-label="이벤트 operation 필터"
+              disabled={!providerDatasetIdFilter}
+              placeholder="operation_key"
+              value={operationKey}
+              onChange={(event) => {
+                resetPage();
+                onUrlChange(
+                  { operation_key: event.target.value.trim() || null },
                   "replace",
                 );
               }}

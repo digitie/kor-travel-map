@@ -54,7 +54,12 @@ const COUNT_FORMATTER = new Intl.NumberFormat("ko-KR");
 
 type CanonicalDatasetRow = {
   datasetKey: string;
+  // 행 identity는 triple이다(ADR-088). 접근성 이름·딥링크·URL 복원이 모두 같은 축을
+  // 쓴다. provider/dataset_key는 표시용 projection이고 딥링크 축이 아니다 —
+  // `provider=`/`dataset=` 형태는 이제 legacy로 **거부**된다.
+  operationKey: string;
   provider: string;
+  providerDatasetId: number;
   syncScope: string;
 };
 
@@ -65,7 +70,9 @@ type LiveDatasetRow = {
   datasetKey: string;
   datasetOpenIssues: number;
   freshnessState: string;
+  operationKey: string;
   provider: string;
+  providerDatasetId: number;
   providerOpenIssues: number;
   status: string;
   syncScope: string;
@@ -143,22 +150,37 @@ test.describe("C7 datasets read + ops live auth (actual browser, live)", () => {
     await expectDatasetSummary(page, rows);
     const canonical = canonicalRepresentative(rows);
 
+    // 존재하지 않는 scope로 진입해도 canonical 행으로 **대체되지 않는다**(명시 실패).
+    // 아래에서 정상 triple 딥링크로 다시 들어가 그 행이 열리는지 본다.
     const staleProviderOnlyScope = `external_system:c7-stale-${Date.now()}`;
     await page.goto(
-      `/ops/datasets?provider=${encodeURIComponent(canonical.provider)}` +
-        `&sync_scope=${encodeURIComponent(staleProviderOnlyScope)}`,
+      `/ops/datasets?provider_dataset_id=${canonical.providerDatasetId}` +
+        `&sync_scope=${encodeURIComponent(staleProviderOnlyScope)}` +
+        `&operation_key=${encodeURIComponent(canonical.operationKey)}`,
+    );
+    await expect(page.getByTestId("invalid-dataset-deep-link")).toBeVisible(READY);
+
+    await page.goto(
+      `/ops/datasets?provider_dataset_id=${canonical.providerDatasetId}` +
+        `&sync_scope=${encodeURIComponent(canonical.syncScope)}` +
+        `&operation_key=${encodeURIComponent(canonical.operationKey)}`,
     );
 
-    await expect
-      .poll(() => selectedTupleFromUrl(page), READY)
-      .toEqual(canonical);
+    await expect.poll(() => selectedTupleFromUrl(page), READY).toEqual({
+      operationKey: canonical.operationKey,
+      providerDatasetId: canonical.providerDatasetId,
+      syncScope: canonical.syncScope,
+    });
     await expect(
       page.getByText("데이터셋 상세", { exact: true }),
     ).toBeVisible(READY);
     await expect(page.getByTestId("invalid-dataset-deep-link")).toHaveCount(0);
     await expect(
       page.getByRole("button", {
-        name: `${canonical.provider} ${canonical.datasetKey} ${canonical.syncScope} 상세 열기`,
+        name:
+          `${canonical.provider} ${canonical.datasetKey} ` +
+          `${canonical.syncScope} ` +
+          `${canonical.operationKey || "operation 없음"} 상세 열기`,
         exact: true,
       }),
     ).toHaveAttribute("aria-expanded", "true");
@@ -166,9 +188,9 @@ test.describe("C7 datasets read + ops live auth (actual browser, live)", () => {
     const invalidScope = `external_system:c7-missing-${Date.now()}`;
     expect(rows.some((row) => row.syncScope === invalidScope)).toBe(false);
     await page.goto(
-      `/ops/datasets?provider=${encodeURIComponent(canonical.provider)}` +
-        `&dataset=${encodeURIComponent(canonical.datasetKey)}` +
-        `&sync_scope=${encodeURIComponent(invalidScope)}`,
+      `/ops/datasets?provider_dataset_id=${canonical.providerDatasetId}` +
+        `&sync_scope=${encodeURIComponent(invalidScope)}` +
+        `&operation_key=${encodeURIComponent(canonical.operationKey)}`,
     );
 
     await expect(page.getByTestId("invalid-dataset-deep-link")).toBeVisible(READY);
@@ -758,6 +780,7 @@ function datasetRows(payload: unknown): LiveDatasetRow[] {
       !isRecord(item) ||
       typeof item.provider !== "string" ||
       typeof item.dataset_key !== "string" ||
+      typeof item.provider_dataset_id !== "number" ||
       typeof item.sync_scope !== "string" ||
       typeof item.catalog_state !== "string" ||
       typeof item.consecutive_failures !== "number" ||
@@ -779,7 +802,10 @@ function datasetRows(payload: unknown): LiveDatasetRow[] {
       datasetKey: item.dataset_key,
       datasetOpenIssues: item.dataset_issues.open_count,
       freshnessState: item.freshness.state,
+      operationKey:
+        typeof item.operation_key === "string" ? item.operation_key : "",
       provider: item.provider,
+      providerDatasetId: item.provider_dataset_id,
       providerOpenIssues: item.provider_issues.open_count,
       status: item.status,
       syncScope: item.sync_scope,
@@ -806,7 +832,9 @@ function canonicalRepresentative(
     seenProviders.add(item.provider);
     representatives.push({
       datasetKey: item.datasetKey,
+      operationKey: item.operationKey,
       provider: item.provider,
+      providerDatasetId: item.providerDatasetId,
       syncScope: item.syncScope,
     });
   }
@@ -1172,11 +1200,15 @@ function formatCount(value: number): string {
   return COUNT_FORMATTER.format(value);
 }
 
-function selectedTupleFromUrl(page: Page): CanonicalDatasetRow {
+function selectedTupleFromUrl(page: Page): {
+  operationKey: string;
+  providerDatasetId: number;
+  syncScope: string;
+} {
   const url = new URL(page.url());
   return {
-    datasetKey: url.searchParams.get("dataset") ?? "",
-    provider: url.searchParams.get("provider") ?? "",
+    operationKey: url.searchParams.get("operation_key") ?? "",
+    providerDatasetId: Number(url.searchParams.get("provider_dataset_id") ?? 0),
     syncScope: url.searchParams.get("sync_scope") ?? "",
   };
 }
