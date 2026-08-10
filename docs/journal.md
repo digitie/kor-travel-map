@@ -105,6 +105,17 @@ rebase에서 드러났다. 빈 `0095_tvn33_tvn38_head_merge`가 두 선행 revis
 **최종 게이트 25/25 GREEN**: unit+lint 2192 · api 1101(cov 77.64%) · dagster 530/3skip
 (85.23%) · integration **1049 passed / 0 skipped**(geo live 실제 실행) · vitest 37파일 302 ·
 frontend 9종.
+## 2026-08-10 — T-VN-34C: n150 fresh destructive live gate 통과
+
+immutable snapshot은 Map 실행 source `fe12e8da`와 PinVi `e37eda94`를 `git archive`로만 넣어
+fresh `0097` PostGIS를 만들고, 실제 Dagster runtime ETL 후 Noble Playwright destructive
+admin main/recovery를 실행했다. C7은 계획한 두 시나리오 모두 통과했고 PinVi public probe까지
+성공했다. run/seed 식별자는 해시로만 결과에 남겼다.
+
+성공 뒤 runner의 자동 recovery cleanup을 독립 확인했다. `BLOCKED.json`, 해당 compose
+container, volume이 모두 없으며 이전 실패 snapshot도 각각 recover 완료 상태다. 따라서
+기존 clone DB·host browser를 쓰지 않는 T-VN-34C final-live acceptance가 충족됐다.
+
 ## 2026-08-10 — T-VN-34: T-VN-38 위 rebase와 fresh live 실행 경계 재고정
 
 T-VN-34의 state cutover는 T-VN-38 base 위에서만 재배치한다. Map OpenAPI full bytes가

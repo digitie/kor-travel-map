@@ -91,7 +91,7 @@ barrier로 직렬화한다.
     ·KMA/AirKorea/KREX call-site cutover 구현) → [/] `T-VN-38B`(0093·price immutable fact
     ·receipt summary·Dagster producer lineage 구현) → [/] `T-VN-38C`(0094 summary-only reader/API/UI
     ·snapshot 분리·OpenAPI/type 재생성 완료, 2인 재리뷰·n150 live 검증 대기) →
-    [x] `T-VN-34A` → [~] `T-VN-34B` → [ ] `T-VN-34C` →
+    [x] `T-VN-34A` → [x] `T-VN-34B` → [x] `T-VN-34C` →
     [ ] `T-VN-36A` → [ ] `T-VN-36B` → [ ] `T-VN-36C`
   - 32~38 join barrier 뒤 Lane B: [ ] `T-VN-40A` → [ ] `T-VN-40B` →
     [ ] `T-VN-40C`
@@ -736,7 +736,7 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   runtime API·Dagster LOGIN ACL 3건, artifact/target freeze 18건을 통과했고 DB/동시성·contract/security
   적대 리뷰 2명이 P0/P1 없이 GO를 판정했다. B도 stack 내부 checkpoint다.
 
-- [ ] T-VN-34C — **writer/API/UI cutover·legacy status fence**
+- [x] T-VN-34C — **writer/API/UI cutover·legacy status fence**
 
   admin state command·OpenAPI/generated type·Map/PinVi/admin UI·merge/Dagster/fixture/live runner의
   모든 남은 writer를 cutover한다. admin state HTTP union(`retire` 또는 axis patch)은 strong If-Match,
@@ -756,6 +756,10 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   약화하거나 앞당기지 않는다. Map OpenAPI export 뒤
   clean PinVi worktree에서 C exact Map head를 re-vendor하고 paired SHA/compile/no-legacy gate를 남긴다.
   C만 배포·병합 가능하다.
+
+  Map `fe12e8da` / PinVi `e37eda94` immutable source pair의 n150 fresh `0097` PostGIS·actual
+  Dagster runtime ETL·Noble Playwright destructive main/recovery(2/2)·PinVi public probe가 통과했다.
+  runner 자동 cleanup 뒤 `BLOCKED.json`, 해당 compose container와 volume이 모두 없음도 확인했다.
 
 ### T-VN-35 — kind별 typed subtype 분해 (Lane A) — 배포 잔여
 
