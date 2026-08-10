@@ -34,6 +34,11 @@ def test_runtime_acl_inventory_keeps_state_audit_and_its_sequence_ungranted() ->
             },
             {
                 "schema_name": "feature",
+                "relation_name": "feature_base_field_values",
+                "relation_kind": "r",
+            },
+            {
+                "schema_name": "feature",
                 "relation_name": "feature_state_transitions_transition_id_seq",
                 # asyncpg returns pg_class.relkind (PostgreSQL "char") as bytes.
                 "relation_kind": b"S",
@@ -55,6 +60,11 @@ def test_runtime_acl_inventory_keeps_state_audit_and_its_sequence_ungranted() ->
             },
             {
                 "schema_name": "ops",
+                "relation_name": "feature_override_field_paths",
+                "relation_kind": "r",
+            },
+            {
+                "schema_name": "ops",
                 "relation_name": "feature_overrides",
                 "relation_kind": "r",
             },
@@ -64,6 +74,7 @@ def test_runtime_acl_inventory_keeps_state_audit_and_its_sequence_ungranted() ->
     assert unknown == []
     rendered = "\n".join(grants)
     assert "feature_state_transitions" not in rendered
+    assert "feature_base_field_values" not in rendered
     core_grants = "\n".join(_CORE_FEATURE_GRANTS)
     assert "GRANT SELECT ON feature.feature_versions TO ktm_feature_runtime" in core_grants
     assert "GRANT SELECT, INSERT, UPDATE, DELETE ON feature.feature_versions" not in core_grants
@@ -75,6 +86,11 @@ def test_runtime_acl_inventory_keeps_state_audit_and_its_sequence_ungranted() ->
     )
     assert 'GRANT SELECT ON TABLE "ops"."feature_overrides"' in rendered
     assert 'GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "ops"."feature_overrides"' not in rendered
+    assert 'GRANT SELECT ON TABLE "ops"."feature_override_field_paths"' in rendered
+    assert (
+        'GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE '
+        '"ops"."feature_override_field_paths"'
+    ) not in rendered
     assert 'GRANT SELECT ON TABLE "feature"."public_features"' in rendered
 
 

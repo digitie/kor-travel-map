@@ -80,6 +80,8 @@ _RUNTIME_DB_PRIVILEGE_SQL = text(
             AS can_read_public_features,
         has_table_privilege(session_user, 'feature.feature_versions', 'SELECT')
             AS can_read_feature_versions,
+        has_table_privilege(session_user, 'ops.feature_override_field_paths', 'SELECT')
+            AS can_read_feature_override_field_paths,
         -- PostgreSQL stores functions and procedures in pg_proc; the public
         -- privilege inquiry is has_function_privilege even for a regprocedure.
         has_function_privilege(
@@ -169,6 +171,18 @@ _RUNTIME_DB_PRIVILEGE_SQL = text(
             OR has_table_privilege(session_user, 'ops.feature_overrides', 'DELETE')
             OR has_table_privilege(session_user, 'ops.feature_overrides', 'TRUNCATE')
         ) AS can_mutate_feature_overrides_directly,
+        (
+            has_table_privilege(session_user, 'feature.feature_base_field_values', 'INSERT')
+            OR has_table_privilege(session_user, 'feature.feature_base_field_values', 'UPDATE')
+            OR has_table_privilege(session_user, 'feature.feature_base_field_values', 'DELETE')
+            OR has_table_privilege(session_user, 'feature.feature_base_field_values', 'TRUNCATE')
+        ) AS can_mutate_feature_base_values_directly,
+        (
+            has_table_privilege(session_user, 'ops.feature_override_field_paths', 'INSERT')
+            OR has_table_privilege(session_user, 'ops.feature_override_field_paths', 'UPDATE')
+            OR has_table_privilege(session_user, 'ops.feature_override_field_paths', 'DELETE')
+            OR has_table_privilege(session_user, 'ops.feature_override_field_paths', 'TRUNCATE')
+        ) AS can_mutate_feature_override_registry_directly,
         has_function_privilege(
             session_user,
             'feature.write_feature_state_transition()'::regprocedure,
@@ -226,6 +240,12 @@ def _runtime_db_privilege_problems(
         "can_mutate_feature_overrides_directly": (
             "runtime login must not mutate ops.feature_overrides directly"
         ),
+        "can_mutate_feature_base_values_directly": (
+            "runtime login must not mutate feature.feature_base_field_values directly"
+        ),
+        "can_mutate_feature_override_registry_directly": (
+            "runtime login must not mutate ops.feature_override_field_paths directly"
+        ),
         "can_execute_audit_writer_directly": (
             "runtime login must not EXECUTE the audit writer function directly"
         ),
@@ -240,6 +260,9 @@ def _runtime_db_privilege_problems(
         ),
         "can_read_feature_versions": (
             "runtime login must SELECT retained feature.feature_versions"
+        ),
+        "can_read_feature_override_field_paths": (
+            "runtime login must SELECT ops.feature_override_field_paths"
         ),
         "can_execute_create_procedure": (
             "runtime login must EXECUTE create_feature_with_initial_state"

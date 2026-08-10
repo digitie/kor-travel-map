@@ -134,6 +134,8 @@ __all__ = [
     "ImportJobEventRow",
     "ImportJobEventClockRow",
     "OfflineUploadRow",
+    "FeatureOverrideFieldPathRow",
+    "FeatureBaseFieldValueRow",
     "FeatureOverrideRow",
     "FeatureChangeRequestRow",
     "FeatureUpdateRequestRow",
@@ -2655,21 +2657,160 @@ class EnrichmentReviewQueueRow(Base):
 
 
 # =============================================================================
-# ops.feature_overrides  (ADR-045 D-8 / T-207c)
+# T-VN-36 field override lineage (ADR-091)
 # =============================================================================
+
+
+class FeatureOverrideFieldPathRow(Base):
+    """``ops.feature_override_field_paths``의 고정 typed field registry.
+
+    registry 문자열은 SQL 식별자로 실행되지 않는다. T-VN-36 command procedure가
+    이 행을 allow-list로 읽은 뒤, path별 정적 assignment만 수행한다.
+    """
+
+    __tablename__ = "feature_override_field_paths"
+    __table_args__ = (
+        CheckConstraint(
+            "field_path <> '' AND field_path = btrim(field_path)",
+            name="ck_feature_override_field_paths_canonical",
+        ),
+        CheckConstraint(
+            "feature_kind IN ('*','place','event','notice','route','area')",
+            name="ck_feature_override_field_paths_kind",
+        ),
+        CheckConstraint(
+            "target_relation IN ('features','feature_places','feature_events',"
+            "'feature_notices','feature_routes','feature_areas')",
+            name="ck_feature_override_field_paths_relation",
+        ),
+        CheckConstraint(
+            "value_kind IN ('text','integer','numeric','boolean','json_object',"
+            "'json_array','text_array','date','timestamptz','uuid','geometry')",
+            name="ck_feature_override_field_paths_value_kind",
+        ),
+        CheckConstraint(
+            "geometry_type IS NULL OR geometry_type IN "
+            "('POINT','MULTILINESTRING','MULTIPOLYGON')",
+            name="ck_feature_override_field_paths_geometry_type",
+        ),
+        CheckConstraint(
+            "(value_kind = 'geometry' AND geometry_type IS NOT NULL) OR "
+            "(value_kind <> 'geometry' AND geometry_type IS NULL)",
+            name="ck_feature_override_field_paths_geometry_kind",
+        ),
+        UniqueConstraint(
+            "feature_kind",
+            "target_relation",
+            "target_column",
+            name="uq_feature_override_field_paths_target",
+        ),
+        {"schema": "ops"},
+    )
+
+    field_path: Mapped[str] = mapped_column(Text, primary_key=True)
+    feature_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    target_relation: Mapped[str] = mapped_column(Text, nullable=False)
+    target_column: Mapped[str] = mapped_column(Text, nullable=False)
+    value_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    geometry_type: Mapped[str | None] = mapped_column(Text)
+    allows_null: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    requires_source: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    provider_writable: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    operator_writable: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    sort_order: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+
+
+class FeatureBaseFieldValueRow(Base):
+    """``feature.feature_base_field_values``의 최신 canonical provider base.
+
+    행 부재는 원천이 아직 해당 field를 관측하지 않았음을 뜻하며 JSON ``null``과
+    다르다. geometry는 JSON으로 다운캐스트하지 않고 별도 PostGIS 열에 보존한다.
+    """
+
+    __tablename__ = "feature_base_field_values"
+    __table_args__ = (
+        CheckConstraint(
+            "base_revision >= 1",
+            name="ck_feature_base_field_values_revision",
+        ),
+        CheckConstraint(
+            "(value_json IS NULL) <> (value_geometry IS NULL)",
+            name="ck_feature_base_field_values_single_value",
+        ),
+        CheckConstraint(
+            "btrim(source_raw_payload_hash) <> ''",
+            name="ck_feature_base_field_values_source_hash",
+        ),
+        ForeignKeyConstraint(
+            ["feature_id", "feature_uuid"],
+            ["feature.features.feature_id", "feature.features.feature_uuid"],
+            name="fk_feature_base_field_values_feature_identity",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["field_path"],
+            ["ops.feature_override_field_paths.field_path"],
+            name="fk_feature_base_field_values_field_path",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["provider_dataset_id"],
+            ["provider_sync.provider_datasets.provider_dataset_id"],
+            name="fk_feature_base_field_values_dataset",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["source_entity_key"],
+            ["provider_sync.source_entities.source_entity_key"],
+            name="fk_feature_base_field_values_entity",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["source_record_key"],
+            ["provider_sync.source_records.source_record_key"],
+            name="fk_feature_base_field_values_record",
+            ondelete="RESTRICT",
+        ),
+        Index(
+            "idx_feature_base_field_values_source",
+            "provider_dataset_id",
+            "source_entity_key",
+            "source_record_key",
+        ),
+        {"schema": "feature"},
+    )
+
+    feature_id: Mapped[str] = mapped_column(String, primary_key=True)
+    field_path: Mapped[str] = mapped_column(Text, primary_key=True)
+    feature_uuid: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    provider_dataset_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    source_entity_key: Mapped[str] = mapped_column(String, nullable=False)
+    source_record_key: Mapped[str] = mapped_column(String, nullable=False)
+    source_raw_payload_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    value_json: Mapped[dict[str, Any] | str | int | float | bool | None] = mapped_column(JSONB)
+    value_geometry: Mapped[Any | None] = mapped_column(
+        Geometry("GEOMETRY", srid=4326, spatial_index=False)
+    )
+    base_revision: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
 
 
 class FeatureOverrideRow(Base):
     """``ops.feature_overrides`` row mapping.
 
-    운영자가 비활성화/수동 보정한 field를 provider 재적재가 되살리지 않도록 보존한다.
-    raw SQL은 ``infra/admin_feature_repo.py``와 ``infra/feature_repo.py``에서 사용한다.
+    active operator intent와 revoke tombstone을 보존한다. T-VN-36에서는
+    ``feature_base_field_values``의 canonical provider base와 분리되고, generic
+    field path는 registry/typed command를 거쳐서만 materialize된다. lifecycle path는
+    ADR-090의 별도 state command가 계속 소유한다.
     """
 
     __tablename__ = "feature_overrides"
     __table_args__ = (
         CheckConstraint(
-            "status IN ('active','inactive','superseded')",
+            "status IN ('active','inactive','superseded','revoked')",
             name="ck_overrides_status",
         ),
         CheckConstraint(
@@ -2714,9 +2855,25 @@ class FeatureOverrideRow(Base):
             ondelete="SET NULL",
         ),
     )
+    source_provider_dataset_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey(
+            "provider_sync.provider_datasets.provider_dataset_id", ondelete="SET NULL"
+        ),
+    )
+    source_entity_key: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey(
+            "provider_sync.source_entities.source_entity_key", ondelete="SET NULL"
+        ),
+    )
+    source_raw_payload_hash: Mapped[str | None] = mapped_column(Text)
     field_path: Mapped[str] = mapped_column(Text, nullable=False)
     source_value: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     override_value: Mapped[dict[str, Any] | str | int | float | bool | None] = mapped_column(JSONB)
+    value_geometry: Mapped[Any | None] = mapped_column(
+        Geometry("GEOMETRY", srid=4326, spatial_index=False)
+    )
     prevent_provider_reactivation: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
@@ -2728,12 +2885,24 @@ class FeatureOverrideRow(Base):
         server_default=text("'active'"),
     )
     reason: Mapped[str | None] = mapped_column(Text)
+    command_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("ops.domain_commands.command_id", ondelete="RESTRICT"),
+    )
+    request_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("ops.feature_change_requests.request_id", ondelete="RESTRICT"),
+    )
+    base_revision: Mapped[int | None] = mapped_column(BigInteger)
     created_by: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         server_default=text("now()"),
     )
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_by: Mapped[str | None] = mapped_column(Text)
+    revoked_reason: Mapped[str | None] = mapped_column(Text)
 
 
 # =============================================================================
