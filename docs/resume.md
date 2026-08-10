@@ -78,9 +78,10 @@ consumer receipt 영향도를 다시 확인한다. 새 T-VN-34 consumer pair는 
   pin-consistency로 검증했고, full admin OpenAPI digest만 receipt에서 갱신했다.
 ## 2026-08-10 — T-VN-36 A–D 단일 PR: field override 설계 착수
 
-**다음 한 작업**: provider와 admin/user request writer는 typed field command로 전환했다.
-이제 legacy whole-row freeze를 field override로 fail-closed backfill하고, effective/provenance
-read API·UI를 전환한 뒤 legacy columns/bridge를 물리 제거한다.
+**다음 한 작업**: provider와 admin/user/address writer는 typed field command로 전환했고,
+legacy whole-row freeze의 fail-closed field replay를 만들었다. 이제 phone/merge/notice 등
+남은 normal writer와 effective/provenance read API·UI를 전환한 뒤 legacy columns/bridge를
+물리 제거한다.
 
 - base는 T-VN-34C 완료 head `b03d5a4f`이다. `data_origin`/`data_version`, `feature_versions`,
   whole-row request receipt는 T-VN-36D가 제거하며 T-VN-34 C head에는 남아 있다.
@@ -105,6 +106,10 @@ read API·UI를 전환한 뒤 legacy columns/bridge를 물리 제거한다.
   `author_feature_field_overrides` procedure로만 effective path를 바꾼다. raw core UPDATE와
   legacy user version materializer는 새 쓰기 흐름에서 제거했고, provider-owned detail source
   path는 fail-closed로 거부한다. delete는 ADR-090 lifecycle override만 계속 사용한다.
+- `0103_tvn36_freeze_replay`는 retained applied request/version을 정확한 historical
+  payload와 request 순서로 override history에 이관한다. preflight manifest가 unmapped 또는
+  비정상 row를 발견하면 migration head를 전진시키지 않는다. address/좌표 writer도
+  `author_feature_field_overrides`만 호출하며 raw effective UPDATE를 하지 않는다.
 
 ## 2026-08-10 — T-VN-34C: n150 fresh destructive live gate 통과
 

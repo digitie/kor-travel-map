@@ -2,7 +2,7 @@
 
 ``apply_feature_address_override``의 raw SQL이 실제 PostGIS에서 동작하는지
 검증한다 — 라우터 단위 테스트는 repo를 monkeypatch하므로 SQL 경로가 여기서만
-실측된다(feature.features UPDATE + ops.feature_overrides upsert).
+실측된다(typed field override author procedure + effective projection).
 """
 
 from __future__ import annotations
@@ -89,17 +89,17 @@ async def test_snapshot_and_apply_override(migrated_session: AsyncSession) -> No
     assert result.snapshot.legal_dong_code == "1114010300"
     assert result.snapshot.lat == pytest.approx(37.5663)
 
-    # feature.features 실제 갱신 확인.
+    # effective projection 실제 갱신 확인.
     refreshed = await get_feature_address_snapshot(migrated_session, fid)
     assert refreshed is not None
     assert refreshed.sigungu_code == "11140"
 
-    # T-VN-34A runtime은 generic feature override DML을 폐쇄한다. address core
-    # write는 유지하지만 T-VN-36 writer가 오기 전 새 override는 만들지 않는다.
+    # 주소 writer는 generic override DML 없이 registry field path를 author한다.
     rows = (
         await migrated_session.execute(
             text(
-                "SELECT field_path, override_value, source_value, created_by "
+                "SELECT field_path, override_value, source_value, created_by, "
+                "x_extension.ST_AsText(value_geometry) AS value_geometry "
                 "FROM ops.feature_overrides "
                 "WHERE feature_id = :fid AND status = 'active' "
                 "ORDER BY field_path"
@@ -107,9 +107,20 @@ async def test_snapshot_and_apply_override(migrated_session: AsyncSession) -> No
             {"fid": fid},
         )
     ).all()
-    assert rows == []
+    actual_overrides = [
+        (row.field_path, row.override_value, row.value_geometry, row.created_by)
+        for row in rows
+    ]
+    assert actual_overrides == [
+        ("core.address", {"road": "서울특별시 중구 세종대로 110"}, None, "tester"),
+        ("core.coord", None, "POINT(126.9784 37.5663)", "tester"),
+        ("core.coord_precision_digits", 6, None, "tester"),
+        ("core.legal_dong_code", "1114010300", None, "tester"),
+        ("core.sido_code", "11", None, "tester"),
+        ("core.sigungu_code", "11140", None, "tester"),
+    ]
 
-    # 같은 field 재적용도 runtime의 generic override 권한을 되살리지 않는다.
+    # 같은 field 재적용은 기존 active receipt를 supersede하고 하나만 남긴다.
     again = await apply_feature_address_override(
         migrated_session,
         fid,
@@ -122,13 +133,13 @@ async def test_snapshot_and_apply_override(migrated_session: AsyncSession) -> No
         await migrated_session.execute(
             text(
                 "SELECT count(*) FROM ops.feature_overrides "
-                "WHERE feature_id = :fid AND field_path = 'legal_dong_code' "
+                "WHERE feature_id = :fid AND field_path = 'core.legal_dong_code' "
                 "AND status = 'active'"
             ),
             {"fid": fid},
         )
     ).scalar_one()
-    assert active == 0
+    assert active == 1
 
 
 async def test_apply_override_missing_feature_returns_none(
