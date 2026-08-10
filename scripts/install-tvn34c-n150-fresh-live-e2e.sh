@@ -111,7 +111,7 @@ printf '{"map":{"archive_sha256":"%s","commit":"%s"},"pinvi":{"archive_sha256":"
   "$MAP_ARCHIVE_SHA256" "$MAP_COMMIT" "$PINVI_ARCHIVE_SHA256" "$PINVI_COMMIT" \
   "$RECEIPT_SHA256" "$RUNNER_SHA256" "$HELPER_SHA256" >"$local_stage/manifest.json"
 
-readonly snapshot_name="${MAP_COMMIT}-${PINVI_COMMIT}"
+readonly snapshot_name="${MAP_COMMIT}-${PINVI_COMMIT}-${RUNNER_COMMIT}"
 readonly install_directory="$DEFAULT_INSTALL_ROOT/$snapshot_name"
 remote_stage="$(ssh "$N150_HOST" 'umask 077; mktemp -d /tmp/tvn34c-fresh-live.XXXXXX')" || die "cannot allocate n150 staging directory"
 [[ "$remote_stage" =~ ^/tmp/tvn34c-fresh-live\.[A-Za-z0-9]+$ ]] || die "n150 staging directory is unsafe"
@@ -136,6 +136,7 @@ parent="$(dirname "$install_directory")"
 install -d -o root -g root -m 0700 "$root"
 temporary="$parent/.install-$(basename "$install_directory").$$"
 trap 'rm -rf -- "$temporary"' EXIT
+install -d -o root -g root -m 0700 "$temporary"
 install -d -o root -g root -m 0700 "$temporary/scripts"
 install -o root -g root -m 0600 "$stage/map-source.tar.gz" "$temporary/map-source.tar.gz"
 install -o root -g root -m 0600 "$stage/pinvi-source.tar.gz" "$temporary/pinvi-source.tar.gz"

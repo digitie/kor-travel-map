@@ -56,7 +56,9 @@ def test_installer_archives_exact_pair_and_installs_immutable_inputs() -> None:
         in installer
     )
     assert '"version":3' in installer
+    assert 'readonly snapshot_name="${MAP_COMMIT}-${PINVI_COMMIT}-${RUNNER_COMMIT}"' in installer
     assert 'install -o root -g root -m 0500' in installer
+    assert 'install -d -o root -g root -m 0700 "$temporary"' in installer
     assert 'install -o root -g root -m 0600' in installer
     assert 'sudo /bin/bash -s' in installer
 
