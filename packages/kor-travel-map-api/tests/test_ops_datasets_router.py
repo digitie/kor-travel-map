@@ -143,6 +143,7 @@ def _preview_catalog_entry(
     provider: str,
     dataset_key: str,
     has_fixture_preview: bool = True,
+    has_refresh_operation: bool = True,
 ) -> ProviderDatasetCatalogEntry:
     operations: list[ProviderDatasetOperation] = []
     if has_fixture_preview:
@@ -155,15 +156,16 @@ def _preview_catalog_entry(
                 sync_scopes=(),
             )
         )
-    operations.append(
-        ProviderDatasetOperation(
-            operation_key="fixture_refresh",
-            operation_kind="refresh",
-            is_enabled=True,
-            config={},
-            sync_scopes=("dataset_wide",),
+    if has_refresh_operation:
+        operations.append(
+            ProviderDatasetOperation(
+                operation_key="fixture_refresh",
+                operation_kind="refresh",
+                is_enabled=True,
+                config={},
+                sync_scopes=("dataset_wide",),
+            )
         )
-    )
     return ProviderDatasetCatalogEntry(
         provider_dataset_id=42,
         provider=provider,
@@ -1110,6 +1112,73 @@ def test_preview_passes_slash_identity_to_service_exactly(
     assert response.status_code == 200
     assert response.json()["data"]["provider"] == provider
     assert response.json()["data"]["dataset_key"] == dataset_key
+
+
+@pytest.mark.unit
+async def test_preview_only_dataset_is_not_gated_by_refresh_scopes(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """refresh operation이 없는 preview 전용 dataset도 preview가 열려야 한다.
+
+    ``provider_dataset_operation_scopes``에는 CHECK ``operation_kind='refresh'``가
+    있어 **preview operation은 scope 행을 가질 수 없다**. 그런데 라우트가
+    ``entry.refresh_scopes``로 승인 여부를 정해서, 같은 API가
+    ``catalog.preview.supported=true``라 말해 놓고 영구 404를 냈다
+    (실측 대상: python-airkorea-api/airkorea_stations. 적대 리뷰 10라운드).
+
+    통합 회귀가 refresh scope를 가진 합성 seed만 써서 이 조합을 전혀 밟지 않았다.
+    """
+    from kortravelmap.api.routers import ops_datasets as router_module
+
+    provider = "python-airkorea-api"
+    dataset_key = "airkorea_stations"
+
+    async def _catalog(*_args: object) -> tuple[ProviderDatasetCatalogEntry, ...]:
+        return (
+            _preview_catalog_entry(
+                provider=provider,
+                dataset_key=dataset_key,
+                has_refresh_operation=False,
+            ),
+        )
+
+    async def _preview(
+        actual_provider: str,
+        actual_dataset_key: str,
+        *,
+        max_items: int,
+    ) -> object:
+        return SimpleNamespace(
+            provider=actual_provider,
+            dataset=actual_dataset_key,
+            variant="fixture",
+            description="preview-only dataset",
+            items=(),
+            total_items=0,
+            truncated=False,
+            max_items=max_items,
+        )
+
+    monkeypatch.setattr(router_module, "list_provider_dataset_catalog", _catalog)
+    monkeypatch.setattr(router_module, "run_dataset_fixture_preview", _preview)
+
+    response = client.post(
+        "/v1/ops/datasets/42/preview",
+        params={"sync_scope": "dataset_wide"},
+        json={"source": "fixture", "max_items": 1},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["provider"] == provider
+
+    # 그렇다고 아무 scope나 열리는 것은 아니다 — dataset 단위 preview만 허용한다.
+    narrowed = client.post(
+        "/v1/ops/datasets/42/preview",
+        params={"sync_scope": "target_grids"},
+        json={"source": "fixture", "max_items": 1},
+    )
+    assert narrowed.status_code == 404
 
 
 @pytest.mark.unit

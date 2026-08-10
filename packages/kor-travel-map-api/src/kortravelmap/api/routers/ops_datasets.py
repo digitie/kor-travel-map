@@ -10,7 +10,10 @@ from time import perf_counter
 from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request, status
-from kortravelmap.core.sync_scope import parse_canonical_sync_scope
+from kortravelmap.core.sync_scope import (
+    DATASET_WIDE_SYNC_SCOPE,
+    parse_canonical_sync_scope,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api.auth import OPS_AUTH_ERROR_RESPONSES
@@ -301,7 +304,18 @@ async def post_dataset_preview(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"등록되지 않은 dataset: provider_dataset_id={provider_dataset_id!r}",
         )
-    if canonical_scope not in entry.refresh_scopes:
+    # preview는 refresh와 **별개 operation_kind**다. 그런데 이 게이트가
+    # `entry.refresh_scopes`만 봐서, refresh operation이 없는 preview 전용 dataset은
+    # 같은 API가 `catalog.preview.supported=true`라 말해 놓고 영구 404였다
+    # (실측: python-airkorea-api/airkorea_stations. 적대 리뷰 10라운드).
+    #
+    # `provider_dataset_operation_scopes`에는 CHECK `operation_kind='refresh'`가 있어
+    # **preview operation은 scope 행을 가질 수 없다.** 그러므로 preview 승인을 scope
+    # 행으로 판정하는 것 자체가 축이 어긋난 것이다. refresh scope를 가진 dataset은
+    # 그 목록으로 좁히고(대상 scope preview가 의미를 갖는다), 없는 dataset은
+    # dataset 단위 preview만 허용한다.
+    allowed_preview_scopes = entry.refresh_scopes or (DATASET_WIDE_SYNC_SCOPE,)
+    if canonical_scope not in allowed_preview_scopes:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=(

@@ -1001,55 +1001,50 @@ def _create_dataset_guard_functions() -> None:
         END;
         $$;
 
-        CREATE FUNCTION provider_sync.assert_active_provider_dataset_scope(
-            dataset_id bigint, scope_value text
-        ) RETURNS void
-        LANGUAGE plpgsql
-        SET search_path = pg_catalog
-        AS $$
+        CREATE FUNCTION provider_sync.reject_inactive_offline_upload_membership()
+        RETURNS trigger LANGUAGE plpgsql SET search_path = pg_catalog AS $$
+        DECLARE target_dataset_id bigint :=
+            COALESCE(NEW.provider_dataset_id, OLD.provider_dataset_id);
+            target_scope text := COALESCE(NEW.sync_scope, OLD.sync_scope);
+            target_operation_key text := COALESCE(NEW.operation_key, OLD.operation_key);
         BEGIN
-            PERFORM 1
-            FROM provider_sync.provider_dataset_operation_scopes AS scope
-            JOIN provider_sync.provider_dataset_operations AS operation
-              ON operation.provider_dataset_id = scope.provider_dataset_id
-             AND operation.operation_key = scope.operation_key
-             AND operation.operation_kind = scope.operation_kind
-            JOIN provider_sync.provider_datasets AS dataset
-              ON dataset.provider_dataset_id = scope.provider_dataset_id
-            WHERE scope.provider_dataset_id = dataset_id
-              AND scope.sync_scope = scope_value
-              AND operation.is_enabled AND dataset.is_active
-            FOR SHARE OF dataset, operation;
-            IF NOT FOUND THEN
-                RAISE EXCEPTION 'dataset scope is absent or disabled for normal writes'
-                    USING ERRCODE = '23514',
-                        CONSTRAINT = 'ck_provider_dataset_scope_active_write';
-            END IF;
-        END;
-        $$;
-
-        CREATE FUNCTION provider_sync.reject_inactive_provider_dataset_scope()
-        RETURNS trigger
-        LANGUAGE plpgsql
-        SET search_path = pg_catalog
-        AS $$
-        BEGIN
+            -- offline upload의 identity도 triple이다(operation_key NOT NULL +
+            -- fk_offline_uploads_exact_operation_scope). 그런데 활성 가드만
+            -- pair 시절 `assert_active_provider_dataset_scope(dataset, scope)`에
+            -- 남아 있어, 형제 중 **하나라도 enabled면** disabled operation에 결박된
+            -- upload가 통과했다. 같은 migration이 나머지 세 membership 테이블
+            -- (sync_state / import_job_datasets / feature_update_request_datasets)은
+            -- 이미 행 자신의 operation_key까지 보는 triple 가드로 승격해 두었다 —
+            -- 여기만 빠져 있었고, 그래서 head 안에서 동급 테이블의 강제 의미가
+            -- 갈렸다(적대 리뷰 10라운드, migrated head DB에서 재현).
             IF TG_OP = 'UPDATE'
-               AND (OLD.provider_dataset_id, OLD.sync_scope)
-                   IS DISTINCT FROM (NEW.provider_dataset_id, NEW.sync_scope) THEN
-                RAISE EXCEPTION 'provider dataset scope ownership is immutable'
+               AND (OLD.provider_dataset_id, OLD.sync_scope, OLD.operation_key)
+                   IS DISTINCT FROM
+                   (NEW.provider_dataset_id, NEW.sync_scope, NEW.operation_key) THEN
+                -- 소유권 비교도 triple이다. pair로 비교하면 operation_key만 바꿔
+                -- **어느 실행에 결박됐는지**를 조용히 갈아끼울 수 있었다.
+                RAISE EXCEPTION 'offline upload membership ownership is immutable'
                     USING ERRCODE = '23514',
                         CONSTRAINT = 'ck_provider_dataset_scope_ownership_immutable';
             END IF;
-            IF TG_OP <> 'INSERT' THEN
-                PERFORM provider_sync.assert_active_provider_dataset_scope(
-                    OLD.provider_dataset_id, OLD.sync_scope
-                );
-            END IF;
-            IF TG_OP <> 'DELETE' THEN
-                PERFORM provider_sync.assert_active_provider_dataset_scope(
-                    NEW.provider_dataset_id, NEW.sync_scope
-                );
+            IF NOT EXISTS (
+                SELECT 1
+                FROM provider_sync.provider_dataset_operation_scopes AS scope
+                JOIN provider_sync.provider_dataset_operations AS operation
+                  ON operation.provider_dataset_id = scope.provider_dataset_id
+                 AND operation.operation_key = scope.operation_key
+                 AND operation.operation_kind = scope.operation_kind
+                JOIN provider_sync.provider_datasets AS dataset
+                  ON dataset.provider_dataset_id = scope.provider_dataset_id
+                WHERE scope.provider_dataset_id = target_dataset_id
+                  AND scope.sync_scope = target_scope
+                  AND scope.operation_key = target_operation_key
+                  AND dataset.is_active
+                  AND operation.is_enabled
+            ) THEN
+                RAISE EXCEPTION 'dataset scope is absent or disabled for normal writes'
+                    USING ERRCODE = '23514',
+                        CONSTRAINT = 'ck_provider_dataset_scope_active_write';
             END IF;
             IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
             RETURN NEW;
@@ -1957,7 +1952,8 @@ def _create_triggers() -> None:
             FOR EACH ROW EXECUTE FUNCTION provider_sync.reject_inactive_provider_dataset();
         CREATE TRIGGER trg_offline_uploads_active_dataset_write
             BEFORE INSERT OR UPDATE OR DELETE ON ops.offline_uploads
-            FOR EACH ROW EXECUTE FUNCTION provider_sync.reject_inactive_provider_dataset_scope();
+            FOR EACH ROW EXECUTE FUNCTION
+                provider_sync.reject_inactive_offline_upload_membership();
         CREATE TRIGGER trg_integrity_observation_scopes_active_dataset_write
             BEFORE INSERT OR UPDATE OR DELETE ON ops.integrity_observation_scopes
             FOR EACH ROW EXECUTE FUNCTION provider_sync.reject_inactive_provider_dataset();

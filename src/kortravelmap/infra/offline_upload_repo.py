@@ -428,11 +428,19 @@ async def create_offline_upload(
 
 
 _RESOLVE_SCOPE_OPERATION_SQL: Final[str] = """
-SELECT operation_key
-FROM provider_sync.provider_dataset_operation_scopes
-WHERE provider_dataset_id = :provider_dataset_id
-  AND sync_scope = :sync_scope
-ORDER BY operation_key
+SELECT scope.operation_key
+FROM provider_sync.provider_dataset_operation_scopes AS scope
+JOIN provider_sync.provider_dataset_operations AS operation
+  ON operation.provider_dataset_id = scope.provider_dataset_id
+ AND operation.operation_key = scope.operation_key
+ AND operation.operation_kind = scope.operation_kind
+JOIN provider_sync.provider_datasets AS dataset
+  ON dataset.provider_dataset_id = scope.provider_dataset_id
+WHERE scope.provider_dataset_id = :provider_dataset_id
+  AND scope.sync_scope = :sync_scope
+  AND operation.is_enabled
+  AND dataset.is_active
+ORDER BY scope.operation_key
 """
 
 
@@ -452,6 +460,12 @@ async def _resolve_scope_operation_key(
     와 같다: scope에 operation이 정확히 하나일 때만 그것을 쓴다. 둘 이상이면 어느
     것을 골라도 임의 선택이므로 조용히 고르지 않고 실패시킨다 — 잘못 고르면 upload가
     엉뚱한 실행에 결박된다.
+
+    **후보는 활성인 것만 센다.** ``is_enabled``/``is_active``를 안 보면 (a) 유일한
+    operation이 disabled일 때 typed 오류 대신 DB 트리거가 23514로 터져 500이 되고,
+    (b) disabled 형제가 후보 수를 부풀려 멀쩡한 scope를 "둘 이상"으로 오판한다.
+    DB 가드(``reject_inactive_offline_upload_membership``)와 같은 조건을 쓴다 —
+    두 판정이 갈리면 하나가 반드시 거짓말을 한다.
     """
 
     keys = (
