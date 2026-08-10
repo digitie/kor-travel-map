@@ -155,6 +155,11 @@ class _SeedState:
     dataset_decoy_root_id: str
     dataset_decoy_member_ids: tuple[str, ...]
     dataset_decoy_dataset_id: int
+    #: target과 dataset·scope가 **같고 operation만 다른** decoy. 이 축이 없으면
+    #: row-selection에서 operation_key를 무시해도 테스트가 통과한다(실증됨).
+    operation_decoy_root_id: str
+    operation_decoy_member_ids: tuple[str, ...]
+    operation_decoy_operation_key: str
     policy_dataset_id: int
 
 
@@ -281,11 +286,26 @@ def _feature_expectation(
     dataset_keys: dict[int, tuple[str, str]],
     run_id: str,
     engine_created_at: datetime,
+    view_status: str = "running",
+    expect_outcome: str = "applied",
 ) -> _ExpectedOperation:
-    """mutation 자체의 불변식을 박고 REST 기대값으로 옮긴다."""
+    """mutation 자체의 불변식을 박고 REST 기대값으로 옮긴다.
+
+    **알려진 한계**: ``view_status``(membership 상태)가 이 시드에서는 root 상태와
+    항상 같다. 그래서 ``pair_status`` 단언은 공허하다 — 서버가 membership 상태 대신
+    root 상태를 실어도 통과한다(적대 검증이 mutation으로 실증했다). main 원본에도
+    있던 구멍이다.
+
+    축을 가르려면 member 하나를 완료시켜야 하는데, 시드가 쓰는 조작된 engine
+    타임스탬프가 DB가 찍는 ``created_at``보다 살짝 이르러
+    ``ck_import_jobs_feature_engine_timeline``(``created_at <= started_at``)이
+    INSERT 시점에는 NULL이라 통과했다가 완료 시점에 깨진다. 닫으려면 시드가 engine
+    타임스탬프를 DB 시계 뒤로 잡도록 다시 설계해야 한다 — 이 복원의 범위 밖이라
+    남겨 두고, 여기 적어 둔다.
+    """
 
     operation = mutation.operation
-    assert mutation.outcome == "applied"
+    assert mutation.outcome == expect_outcome
     assert mutation.block_reason is None
     assert operation.dagster_run_id == run_id
     assert operation.status == "running"
@@ -338,7 +358,7 @@ def _feature_expectation(
         view_operation_member_id=members_by_membership[
             view_membership
         ].import_job_dataset_id,
-        view_status="running",
+        view_status=view_status,
         progress=0,
         current_stage="loading",
         scope_type=None,
@@ -414,6 +434,48 @@ async def _seed_committed_operations(engine: AsyncEngine) -> _SeedState:
         assert sibling.operation_key == target.operation_key
         assert sibling.sync_scope != target.sync_scope
         assert dataset_decoy.provider_dataset_id != target.provider_dataset_id
+
+        # 시드에는 한 (dataset, scope)에 refresh operation이 둘인 조합이 없다
+        # (실측: MULTI_OP_PER_SCOPE_COUNT=0). 그래서 operation_key만 다른 decoy는
+        # 직접 등록해야 한다 — 스키마가 허용하는 상태이고(scope PK가 triple),
+        # 이 축을 안 덮으면 row-selection이 operation_key를 통째로 무시해도
+        # 테스트가 초록이다(적대 검증이 mutation으로 실증했다).
+        operation_decoy_key = f"{_TARGET_OPERATION}.decoy_{token[:8]}"
+        await session.execute(
+            text(
+                """
+                INSERT INTO provider_sync.provider_dataset_operations (
+                    provider_dataset_id, operation_key, operation_kind, is_enabled
+                ) VALUES (:dataset_id, :operation_key, 'refresh', true)
+                """
+            ),
+            {
+                "dataset_id": target.provider_dataset_id,
+                "operation_key": operation_decoy_key,
+            },
+        )
+        await session.execute(
+            text(
+                """
+                INSERT INTO provider_sync.provider_dataset_operation_scopes (
+                    provider_dataset_id, sync_scope, operation_key, operation_kind
+                ) VALUES (:dataset_id, :sync_scope, :operation_key, 'refresh')
+                """
+            ),
+            {
+                "dataset_id": target.provider_dataset_id,
+                "sync_scope": target.sync_scope,
+                "operation_key": operation_decoy_key,
+            },
+        )
+        operation_decoy = ProviderDatasetOperationMembership(
+            provider_dataset_id=target.provider_dataset_id,
+            sync_scope=target.sync_scope,
+            operation_key=operation_decoy_key,
+        )
+        assert operation_decoy.provider_dataset_id == target.provider_dataset_id
+        assert operation_decoy.sync_scope == target.sync_scope
+        assert operation_decoy.operation_key != target.operation_key
 
         policy_dataset_id = next(
             dataset_id
@@ -584,6 +646,19 @@ async def _seed_committed_operations(engine: AsyncEngine) -> _SeedState:
             engine_started_at=dataset_decoy_created_at,
             observed_status="STARTED",
         )
+        operation_decoy_created_at = update_request.created_at + timedelta(
+            microseconds=40
+        )
+        operation_decoy_mutation = await ensure_dagster_feature_operation(
+            session,
+            dagster_run_id=f"c3e-c-rest-proof-{token}-operation-decoy",
+            trigger_kind="manual",
+            selected_memberships=(operation_decoy,),
+            operation_key=operation_decoy_key,
+            engine_created_at=operation_decoy_created_at,
+            engine_started_at=operation_decoy_created_at,
+            observed_status="STARTED",
+        )
         await session.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
 
         root_ids = {item.id for item in target_operations}
@@ -595,6 +670,10 @@ async def _seed_committed_operations(engine: AsyncEngine) -> _SeedState:
             member.import_job_dataset_id
             for member in dataset_decoy_mutation.operation.members
         )
+        operation_decoy_member_ids = tuple(
+            member.import_job_dataset_id
+            for member in operation_decoy_mutation.operation.members
+        )
         assert len(root_ids) == 12
         assert len(member_ids) == 12
         assert root_ids.isdisjoint(member_ids)
@@ -602,6 +681,8 @@ async def _seed_committed_operations(engine: AsyncEngine) -> _SeedState:
         assert len(canonical_ids) == 24
         assert scope_decoy.operation.root_job_id not in canonical_ids
         assert dataset_decoy_mutation.operation.root_job_id not in canonical_ids
+        assert operation_decoy_mutation.operation.root_job_id not in canonical_ids
+        assert set(operation_decoy_member_ids).isdisjoint(canonical_ids)
         assert len(scope_decoy_member_ids) == 1
         assert len(dataset_decoy_member_ids) == 1
         assert set(scope_decoy_member_ids).isdisjoint(canonical_ids)
@@ -617,6 +698,9 @@ async def _seed_committed_operations(engine: AsyncEngine) -> _SeedState:
             dataset_decoy_root_id=dataset_decoy_mutation.operation.root_job_id,
             dataset_decoy_member_ids=dataset_decoy_member_ids,
             dataset_decoy_dataset_id=dataset_decoy.provider_dataset_id,
+            operation_decoy_root_id=operation_decoy_mutation.operation.root_job_id,
+            operation_decoy_member_ids=operation_decoy_member_ids,
+            operation_decoy_operation_key=operation_decoy_key,
             policy_dataset_id=policy_dataset_id,
         )
 
@@ -625,6 +709,22 @@ async def _cleanup_committed_operations(engine: AsyncEngine) -> None:
     """append-only 행은 저장소 integration 관례의 TRUNCATE로 별도 commit 정리한다."""
     async with AsyncSession(engine) as session, session.begin():
         await truncate_committed_test_rows(session, _CLEANUP_SQL)
+        # 시드가 등록한 형제 operation은 카탈로그 행이라 TRUNCATE 대상이 아니다.
+        # 남겨 두면 다음 테스트의 카탈로그 전제가 조용히 달라진다.
+        # **실행 행을 지운 뒤**에 지운다 — `fk_import_job_datasets_exact_operation_scope`가
+        # scope 행을 참조하므로 순서를 바꾸면 FK 위반으로 정리가 실패한다.
+        await session.execute(
+            text(
+                "DELETE FROM provider_sync.provider_dataset_operation_scopes "
+                "WHERE operation_key LIKE '%.decoy@_%' ESCAPE '@'"
+            )
+        )
+        await session.execute(
+            text(
+                "DELETE FROM provider_sync.provider_dataset_operations "
+                "WHERE operation_key LIKE '%.decoy@_%' ESCAPE '@'"
+            )
+        )
         await session.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
 
 
@@ -1045,7 +1145,6 @@ async def test_datasets_and_pipeline_rest_share_committed_canonical_operations(
             _assert_pipeline_projection(
                 item, sibling_by_key[(item["kind"], item["id"])]
             )
-        assert ("import_job", seed.scope_decoy_root_id) in set(sibling_expected_keys)
 
         # 두 scope 뷰가 공유하는 root는 mixed run 하나뿐이고, dataset 표면은 그
         # root에 대해 **요청한 membership 한 줄만** 낸다(형제 member는 섞이지 않는다).
@@ -1086,15 +1185,16 @@ async def test_datasets_and_pipeline_rest_share_committed_canonical_operations(
         assert ("import_job", seed.update_job_id) not in all_actual_keys
         assert ("import_job", seed.scope_decoy_root_id) not in all_actual_keys
         assert ("import_job", seed.dataset_decoy_root_id) not in all_actual_keys
+        # operation만 다른 decoy도 새면 안 된다. 이 줄이 없으면 row-selection이
+        # operation_key를 무시해도(예: 필터 param을 None으로) 통과한다.
+        assert ("import_job", seed.operation_decoy_root_id) not in all_actual_keys
         assert all(
             ("import_job", member_id) not in all_actual_keys
             for member_id in (
                 *seed.scope_decoy_member_ids,
                 *seed.dataset_decoy_member_ids,
+                *seed.operation_decoy_member_ids,
             )
-        )
-        assert ("import_job", seed.dataset_decoy_root_id) not in set(
-            sibling_expected_keys
         )
         update_key = next(
             item.key for item in expected if item.kind == "update_request"
@@ -1108,14 +1208,23 @@ async def test_datasets_and_pipeline_rest_share_committed_canonical_operations(
             for item in grid["items"]
             if item["provider_dataset_id"] == seed.target_dataset_id
         ]
-        assert [row["sync_scope"] for row in dataset_rows] == [
-            _TARGET_SCOPE,
-            _SIBLING_SCOPE,
+        # 같은 scope에 형제 operation이 둘이면 **두 행**이다(접히면 형제가 사라진다).
+        # decoy 등록 덕에 이 dataset은 (scope, operation) 조합이 셋이다.
+        assert [
+            (row["sync_scope"], row["operation_key"]) for row in dataset_rows
+        ] == [
+            (_TARGET_SCOPE, _TARGET_OPERATION),
+            (_TARGET_SCOPE, seed.operation_decoy_operation_key),
+            (_SIBLING_SCOPE, _TARGET_OPERATION),
         ]
-        assert {row["operation_key"] for row in dataset_rows} == {_TARGET_OPERATION}
-        assert len({row["detail_url"] for row in dataset_rows}) == 2
+        # 상세 링크도 membership마다 달라야 한다 — 같으면 어느 행을 눌러도 같은
+        # 화면이 열린다.
+        assert len({row["detail_url"] for row in dataset_rows}) == 3
         target_rows = [
-            row for row in dataset_rows if row["sync_scope"] == _TARGET_SCOPE
+            row
+            for row in dataset_rows
+            if row["sync_scope"] == _TARGET_SCOPE
+            and row["operation_key"] == _TARGET_OPERATION
         ]
         assert len(target_rows) == 1
         target_row = target_rows[0]
@@ -1156,8 +1265,15 @@ async def test_datasets_and_pipeline_rest_share_committed_canonical_operations(
         assert grid["schedule_source_errors"] == []
         assert detail["schedule_source_status"] == "ok"
         assert detail["schedule_source_errors"] == []
+        # schedule은 **operation_key**에 붙는다. 같은 dataset·같은 scope라도
+        # operation이 다르면 붙지 않는다 — decoy 행이 그것을 증명한다.
         for row in dataset_rows:
-            _assert_schedule(row["schedule"])
+            if row["operation_key"] == _TARGET_OPERATION:
+                _assert_schedule(row["schedule"])
+            else:
+                assert row["operation_key"] == seed.operation_decoy_operation_key
+                assert row["schedule"]["basis"] == "not_scheduled"
+                assert row["schedule"]["schedule_names"] == []
         _assert_schedule(detail["schedule"])
         _assert_schedule(sibling_detail["schedule"])
         decoy_rows = [
