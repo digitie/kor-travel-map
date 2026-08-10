@@ -53,6 +53,7 @@ import hmac
 import json
 import math
 import os
+import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Final, Literal, cast
@@ -66,6 +67,12 @@ from kortravelmap.core.exceptions import (
     FeatureSearchCursorQueryMismatchError,
     FeatureSearchCursorTamperedError,
     FeatureSearchCursorVersionUnsupportedError,
+)
+from kortravelmap.infra.domain_command_repo import (
+    canonical_domain_command_fingerprint,
+    create_domain_command_claim,
+    create_domain_command_record,
+    lock_domain_command,
 )
 from kortravelmap.infra.feature_identity import (
     candidate_feature_uuid,
@@ -4881,24 +4888,20 @@ ORDER BY f.feature_id
 LIMIT :limit
 """
 
-# phones 쓰기는 subtype 한 곳이고, core는 표시 캐시 무효화용 ``updated_at``만
-# 따라 움직인다(한 statement — 두 CTE는 같은 snapshot). place subtype 행이 없으면
-# 아무것도 쓰지 않고 ``False``를 돌려준다(종전에는 kind와 무관하게 detail에
-# ``phones``를 밀어넣을 수 있었다).
-_SET_FEATURE_PHONES_SQL: Final[str] = """
-WITH place AS (
-    UPDATE feature.feature_places AS p
-    SET phones = ARRAY(SELECT jsonb_array_elements_text(CAST(:phones AS jsonb)))
-    WHERE p.feature_id = :feature_id
-    RETURNING p.feature_id
-), core AS (
-    UPDATE feature.features AS f
-    SET updated_at = now()
-    FROM place
-    WHERE f.feature_id = place.feature_id
-    RETURNING f.feature_id
+_LOCK_FEATURE_PHONE_OVERRIDE_SQL: Final[str] = """
+SELECT row_revision
+FROM feature.features
+WHERE feature_id = :feature_id
+  AND kind = 'place'
+FOR UPDATE
+"""
+
+_AUTHOR_PHONE_OVERRIDE_SQL: Final[str] = """
+CALL feature.author_feature_field_overrides(
+    CAST(:feature_id AS text), CAST(:expected_row_revision AS bigint),
+    CAST(:principal AS text), 'phone_enrichment', CAST(:command_id AS bigint),
+    NULL, CAST(:values AS jsonb), '{}'::jsonb, NULL, NULL, NULL, NULL
 )
-SELECT feature_id FROM place
 """
 
 
@@ -4945,19 +4948,69 @@ async def find_place_features_without_phone(
 
 
 async def set_feature_phones(session: AsyncSession, feature_id: str, phones: list[str]) -> bool:
-    """place feature의 ``feature_places.phones`` 배열을 통째로 교체. 갱신되면 ``True``.
+    """phone enrichment의 최종 배열을 system field override로 author한다.
 
-    phone enrichment가 정규화·dedup·max3을 적용한 최종 배열을 넘긴다. place가 아닌
-    feature(또는 subtype 행이 없는 feature)는 아무것도 쓰지 않고 ``False``.
-    commit은 호출자 책임.
+    ``place.phones``를 직접 UPDATE하지 않는다. provider refresh가 새 base를 기록해도
+    enrichment receipt가 author한 effective 값은 유지되고, 그 명령·actor·reason은
+    domain-command ledger와 override provenance에서 모두 추적된다.
     """
-    import json
+    locked = (
+        await session.execute(
+            text(_LOCK_FEATURE_PHONE_OVERRIDE_SQL), {"feature_id": feature_id}
+        )
+    ).one_or_none()
+    if locked is None:
+        return False
 
-    result = await session.execute(
-        text(_SET_FEATURE_PHONES_SQL),
-        {"feature_id": feature_id, "phones": json.dumps(phones)},
+    principal = "system:phone-enrichment"
+    operation = "admin.feature.override.author"
+    command_key = str(uuid.uuid4())
+    values = {"place.phones": phones}
+    await lock_domain_command(
+        session,
+        actor=principal,
+        operation=operation,
+        idempotency_key=command_key,
     )
-    return result.first() is not None
+    claim = await create_domain_command_claim(
+        session,
+        actor=principal,
+        operation=operation,
+        idempotency_key=command_key,
+        request_fingerprint=canonical_domain_command_fingerprint(
+            {
+                "feature_id": feature_id,
+                "values": values,
+                "reason_code": "phone_enrichment",
+            }
+        ),
+    )
+    result = (
+        await session.execute(
+            text(_AUTHOR_PHONE_OVERRIDE_SQL),
+            {
+                "feature_id": feature_id,
+                "expected_row_revision": int(locked.row_revision),
+                "principal": principal,
+                "command_id": claim.command_id,
+                "values": json.dumps(values, ensure_ascii=False),
+            },
+        )
+    ).mappings().one()
+    if str(result["o_feature_id"]) != feature_id:
+        raise RuntimeError("phone enrichment override returned a different Feature")
+    await create_domain_command_record(
+        session,
+        command_id=claim.command_id,
+        response_status=200,
+        response_body={
+            "feature_id": feature_id,
+            "row_revision": int(result["o_row_revision"]),
+            "overridden_fields": ["place.phones"],
+        },
+        response_headers={},
+    )
+    return True
 
 
 async def features_in_bbox(

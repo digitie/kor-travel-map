@@ -110,6 +110,9 @@ legacy whole-row freeze의 fail-closed field replay를 만들었다. 이제 phon
   payload와 request 순서로 override history에 이관한다. preflight manifest가 unmapped 또는
   비정상 row를 발견하면 migration head를 전진시키지 않는다. address/좌표 writer도
   `author_feature_field_overrides`만 호출하며 raw effective UPDATE를 하지 않는다.
+- phone enrichment의 `place.phones`도 system domain-command receipt와 typed override로
+  author한다. 남은 direct effective writer는 notice lifecycle reconciliation뿐이며,
+  이를 provider base patch와 lifecycle transition으로 분해해야 한다.
 
 ## 2026-08-10 — T-VN-34C: n150 fresh destructive live gate 통과
 
