@@ -47,6 +47,7 @@ __all__ = [
     "begin_domain_command",
     "commit_domain_command_transaction",
     "complete_domain_command",
+    "current_domain_command",
     "domain_command_transaction",
     "idempotent_domain_command",
 ]
@@ -60,6 +61,10 @@ _DOMAIN_OPERATIONS = frozenset(_DOMAIN_POLICIES)
 _RouteResult = TypeVar("_RouteResult", bound=BaseModel)
 _ACTIVE_DOMAIN_SESSION: ContextVar[AsyncSession | None] = ContextVar(
     "kor_travel_map_domain_command_session",
+    default=None,
+)
+_ACTIVE_DOMAIN_COMMAND: ContextVar[DomainCommandHandle | None] = ContextVar(
+    "kor_travel_map_active_domain_command",
     default=None,
 )
 class DomainCommandError(Exception):
@@ -99,6 +104,20 @@ class DomainCommandHandle:
     operation: str
     idempotency_key: str
     request_fingerprint: str
+
+
+def current_domain_command() -> DomainCommandHandle:
+    """현재 idempotent HTTP command의 immutable identity를 반환한다.
+
+    domain command를 요구하는 DB procedure는 route가 새 claim을 중첩 생성하지 않고
+    이 handle의 ``command_id``를 receipt로 사용해야 한다. 직접 Python 호출에는 HTTP
+    command 경계가 없으므로 명시적으로 실패시킨다.
+    """
+
+    command = _ACTIVE_DOMAIN_COMMAND.get()
+    if command is None:
+        raise RuntimeError("활성 domain command transaction이 없습니다.")
+    return command
 
 
 def _response_body(response: BaseModel | dict[str, Any]) -> dict[str, Any]:
@@ -342,6 +361,7 @@ def idempotent_domain_command(
                         idempotency_key=idempotency_key,
                         payload=payload,
                     )
+                    command_token = _ACTIVE_DOMAIN_COMMAND.set(command)
                     result = await function(*args, **kwargs)
                     route_response = kwargs.get("response")
                     await complete_domain_command(
@@ -355,6 +375,8 @@ def idempotent_domain_command(
                         ),
                     )
                 finally:
+                    if "command_token" in locals():
+                        _ACTIVE_DOMAIN_COMMAND.reset(command_token)
                     _ACTIVE_DOMAIN_SESSION.reset(token)
             return result
 

@@ -78,11 +78,17 @@ __all__ = [
     "ReviewSourceDetail",
     "AdminFeatureStateTransition",
     "FeatureOverride",
+    "FeatureFieldOverrideCommand",
     "FeatureChangeConflict",
     "FeaturePreconditionFailed",
+    "FeatureFieldOverrideNotFound",
+    "FeatureFieldOverridePreconditionFailed",
+    "FeatureFieldOverrideValidationError",
     "FeatureChangeRequest",
     "transition_admin_feature_state",
     "reactivate_admin_feature_state",
+    "author_admin_feature_field_overrides",
+    "revoke_admin_feature_field_overrides",
     "submit_feature_change_request",
     "apply_feature_change_request",
     "reject_feature_change_request",
@@ -320,6 +326,16 @@ class FeatureOverride:
 
 
 @dataclass(frozen=True)
+class FeatureFieldOverrideCommand:
+    """typed field override procedure의 exact commit receipt."""
+
+    feature_id: str
+    row_revision: int
+    command_id: int
+    applied_field_count: int
+
+
+@dataclass(frozen=True)
 class AdminFeatureStateTransition:
     """Admin state command가 원자적으로 남긴 상태·revision·감사 식별자."""
 
@@ -427,6 +443,26 @@ class FeaturePreconditionFailed(Exception):
             f"feature {feature_id!r} If-Match 불일치: "
             f"expected row_revision={expected}, current={current}"
         )
+
+
+class FeatureFieldOverrideNotFound(ValueError):
+    """field override command의 Feature 또는 active override가 없을 때 발생."""
+
+
+class FeatureFieldOverridePreconditionFailed(ValueError):
+    """field override command의 expected revision이 stale일 때 발생."""
+
+    def __init__(self, *, feature_id: str, expected: int) -> None:
+        self.feature_id = feature_id
+        self.expected = expected
+        super().__init__(
+            f"feature {feature_id!r} If-Match revision이 변경되었습니다: "
+            f"expected={expected}"
+        )
+
+
+class FeatureFieldOverrideValidationError(ValueError):
+    """registry/receipt/값 contract를 만족하지 않는 field override command."""
 
 
 @dataclass(frozen=True)
@@ -2503,6 +2539,154 @@ async def reactivate_admin_feature_state(
             expected_row_revision=expected_row_revision,
         )
     return await _admin_state_transition_result(session, transition=transition)
+
+
+_AUTHOR_ADMIN_FEATURE_FIELD_OVERRIDES_SQL: Final[str] = """
+CALL feature.author_feature_field_overrides(
+    CAST(:feature_id AS text),
+    CAST(:expected_row_revision AS bigint),
+    CAST(:principal AS text),
+    CAST(:reason_code AS text),
+    CAST(:command_id AS bigint),
+    NULL,
+    CAST(:values AS jsonb),
+    CAST(:geometry_wkt AS jsonb),
+    NULL, NULL, NULL, NULL
+)
+"""
+
+_REVOKE_ADMIN_FEATURE_FIELD_OVERRIDES_SQL: Final[str] = """
+CALL feature.revoke_feature_field_overrides(
+    CAST(:feature_id AS text),
+    CAST(:expected_row_revision AS bigint),
+    CAST(:principal AS text),
+    CAST(:reason_code AS text),
+    CAST(:command_id AS bigint),
+    NULL,
+    CAST(:field_paths AS text[]),
+    NULL, NULL, NULL, NULL
+)
+"""
+
+
+def _raise_field_override_procedure_error(
+    error: DBAPIError,
+    *,
+    feature_id: str,
+    expected_row_revision: int,
+) -> NoReturn:
+    """typed field override procedure 오류를 route-level contract로 보존한다."""
+
+    sqlstate = _pg_error_attribute(error, "sqlstate")
+    if sqlstate == "P0002":
+        raise FeatureFieldOverrideNotFound(
+            f"feature 또는 active field override 없음: {feature_id!r}"
+        ) from error
+    if sqlstate == "40001":
+        raise FeatureFieldOverridePreconditionFailed(
+            feature_id=feature_id,
+            expected=expected_row_revision,
+        ) from error
+    if sqlstate == "23514":
+        raise FeatureFieldOverrideValidationError(str(error.orig)) from error
+    raise error
+
+
+async def author_admin_feature_field_overrides(
+    session: AsyncSession,
+    feature_id: str,
+    *,
+    expected_row_revision: int,
+    reason_code: str,
+    operator: str,
+    command_id: int,
+    values: Mapping[str, Any],
+    geometry_wkt: Mapping[str, str],
+) -> FeatureFieldOverrideCommand:
+    """admin ledger command으로 registry-typed override를 원자 author한다."""
+
+    _validated_operator_and_reason_code(operator=operator, reason_code=reason_code)
+    if command_id < 1:
+        raise ValueError("field override에는 open domain command receipt가 필요합니다.")
+    if not values and not geometry_wkt:
+        raise ValueError("field override에는 적어도 하나의 field 값이 필요합니다.")
+    if set(values) & set(geometry_wkt):
+        raise ValueError("scalar와 geometry field path는 겹칠 수 없습니다.")
+    try:
+        row = (
+            await session.execute(
+                text(_AUTHOR_ADMIN_FEATURE_FIELD_OVERRIDES_SQL),
+                {
+                    "feature_id": feature_id,
+                    "expected_row_revision": expected_row_revision,
+                    "principal": operator,
+                    "reason_code": reason_code,
+                    "command_id": command_id,
+                    "values": json.dumps(values, ensure_ascii=False, default=str),
+                    "geometry_wkt": json.dumps(
+                        geometry_wkt, ensure_ascii=False, default=str
+                    ),
+                },
+            )
+        ).mappings().one()
+    except DBAPIError as error:
+        _raise_field_override_procedure_error(
+            error,
+            feature_id=feature_id,
+            expected_row_revision=expected_row_revision,
+        )
+    return FeatureFieldOverrideCommand(
+        feature_id=str(row["o_feature_id"]),
+        row_revision=int(row["o_row_revision"]),
+        command_id=int(row["o_command_id"]),
+        applied_field_count=int(row["o_applied_field_count"]),
+    )
+
+
+async def revoke_admin_feature_field_overrides(
+    session: AsyncSession,
+    feature_id: str,
+    *,
+    expected_row_revision: int,
+    reason_code: str,
+    operator: str,
+    command_id: int,
+    field_paths: Sequence[str],
+) -> FeatureFieldOverrideCommand:
+    """admin ledger command으로 active override를 base 값으로 되돌린다."""
+
+    _validated_operator_and_reason_code(operator=operator, reason_code=reason_code)
+    normalized_paths = tuple(path.strip() for path in field_paths if path.strip())
+    if command_id < 1:
+        raise ValueError("field override에는 open domain command receipt가 필요합니다.")
+    if not normalized_paths or len(normalized_paths) != len(set(normalized_paths)):
+        raise ValueError("revoke에는 중복 없는 하나 이상의 field_path가 필요합니다.")
+    try:
+        row = (
+            await session.execute(
+                text(_REVOKE_ADMIN_FEATURE_FIELD_OVERRIDES_SQL),
+                {
+                    "feature_id": feature_id,
+                    "expected_row_revision": expected_row_revision,
+                    "principal": operator,
+                    "reason_code": reason_code,
+                    "command_id": command_id,
+                    "field_paths": list(normalized_paths),
+                },
+            )
+        ).mappings().one()
+    except DBAPIError as error:
+        _raise_field_override_procedure_error(
+            error,
+            feature_id=feature_id,
+            expected_row_revision=expected_row_revision,
+        )
+    return FeatureFieldOverrideCommand(
+        feature_id=str(row["o_feature_id"]),
+        row_revision=int(row["o_row_revision"]),
+        command_id=int(row["o_command_id"]),
+        applied_field_count=int(row["o_applied_field_count"]),
+    )
 
 
 _INSERT_FEATURE_CHANGE_REQUEST_SQL: Final[str] = """

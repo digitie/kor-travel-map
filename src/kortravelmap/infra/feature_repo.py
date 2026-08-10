@@ -1948,7 +1948,6 @@ JOIN provider_sync.source_links AS sl ON sl.feature_id = f.feature_id
 JOIN provider_sync.source_entities AS se ON se.source_entity_key = sl.source_entity_key
 JOIN provider_sync.provider_datasets AS pd ON pd.provider_dataset_id = se.provider_dataset_id
 WHERE f.lifecycle_state = 'active'
-  AND COALESCE(f.data_origin, 'provider') <> 'user_request'
   AND sl.source_role = 'primary'
   AND pd.provider = :provider
   AND pd.dataset_key = :dataset_key
@@ -1968,7 +1967,6 @@ JOIN provider_sync.source_links AS sl ON sl.feature_id = f.feature_id
 JOIN provider_sync.source_entities AS se ON se.source_entity_key = sl.source_entity_key
 JOIN provider_sync.provider_datasets AS pd ON pd.provider_dataset_id = se.provider_dataset_id
 WHERE f.lifecycle_state = 'active'
-  AND COALESCE(f.data_origin, 'provider') <> 'user_request'
   AND sl.source_role = 'primary'
   AND pd.provider = :provider
   AND pd.dataset_key = :dataset_key
@@ -1997,7 +1995,6 @@ WHERE f.lifecycle_state = 'active'
   AND NOT EXISTS (
     SELECT 1 FROM feature.feature_areas AS a WHERE a.feature_id = f.feature_id
   )
-  AND COALESCE(f.data_origin, 'provider') <> 'user_request'
   AND sl.source_role = 'primary'
   AND pd.provider = :provider
   AND pd.dataset_key = :dataset_key
@@ -3668,7 +3665,6 @@ WITH lineage_candidates AS (
       ON lineage_state.notice_lifecycle_scope_id = lifecycle_scope.notice_lifecycle_scope_id
      AND lineage_state.lineage_key = {lineage_sql}
     WHERE f.kind = 'notice'
-      AND COALESCE(f.data_origin, 'provider') <> 'user_request'
       AND dataset.provider = :provider
       AND dataset.dataset_key = :dataset_key
       AND se.source_entity_type = :source_entity_type
@@ -4581,7 +4577,6 @@ JOIN provider_sync.provider_datasets AS dataset
   ON dataset.provider_dataset_id = entity.provider_dataset_id
  AND dataset.is_active
 WHERE f.lifecycle_state = 'active'
-  AND COALESCE(f.data_origin, 'provider') <> 'user_request'
   AND COALESCE(n.valid_end_time, n.valid_start_time)
       < now() - CAST(CAST(:retention AS text) AS interval)
 ORDER BY f.feature_id, entity.provider_dataset_id

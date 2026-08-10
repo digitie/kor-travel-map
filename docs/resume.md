@@ -78,10 +78,9 @@ consumer receipt 영향도를 다시 확인한다. 새 T-VN-34 consumer pair는 
   pin-consistency로 검증했고, full admin OpenAPI digest만 receipt에서 갱신했다.
 ## 2026-08-10 — T-VN-36 A–D 단일 PR: field override 설계 착수
 
-**다음 한 작업**: provider와 admin/user/address writer는 typed field command로 전환했고,
-legacy whole-row freeze의 fail-closed field replay를 만들었다. 이제 phone/merge/notice 등
-남은 normal writer와 effective/provenance read API·UI를 전환한 뒤 legacy columns/bridge를
-물리 제거한다.
+**다음 한 작업**: provider/admin/user/address/phone/notice normal writer와 admin typed
+field override HTTP command를 registry receipt로 전환했다. 이제 detail/read/frontend를
+effective override provenance로 교체하고 whole-row request/version bridge를 물리 제거한다.
 
 - base는 T-VN-34C 완료 head `b03d5a4f`이다. `data_origin`/`data_version`, `feature_versions`,
   whole-row request receipt는 T-VN-36D가 제거하며 T-VN-34 C head에는 남아 있다.
@@ -114,6 +113,10 @@ legacy whole-row freeze의 fail-closed field replay를 만들었다. 이제 phon
   author한다. notice lifecycle reconciliation도 `notice.valid_end_time`을 current
   provider source와 Feature revision을 다시 확인한 base patch로만 물화한다. Python
   normal writer의 direct effective core/subtype UPDATE는 0건이다.
+- admin field override author/revoke endpoint는 existing HTTP domain-command claim의 exact
+  `command_id`를 DB procedure에 전달한다. `If-Match`/ETag, registry validation, operator
+  route policy와 idempotent replay를 한 contract로 묶었으며, snapshot retirement·notice
+  candidate/purge의 `data_origin` predicate도 source-link/lifecycle semantics로 제거했다.
 
 ## 2026-08-10 — T-VN-34C: n150 fresh destructive live gate 통과
 

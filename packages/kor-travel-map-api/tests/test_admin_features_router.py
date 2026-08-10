@@ -331,6 +331,8 @@ def test_admin_features_routes_mounted_in_openapi(client: TestClient) -> None:
     assert "/v1/admin/features/{feature_id}/state" in spec["paths"]
     assert "/v1/admin/features/{feature_id}/state/reactivate" in spec["paths"]
     assert "/v1/admin/features/{feature_id}/state/transitions" in spec["paths"]
+    assert "/v1/admin/features/{feature_id}/field-overrides" in spec["paths"]
+    assert "/v1/admin/features/{feature_id}/field-overrides/revoke" in spec["paths"]
     assert "/v1/admin/features/{feature_id}/deactivate" not in spec["paths"]
     assert "/v1/admin/features/in-bounds" in spec["paths"]
     assert "/v1/admin/features/{feature_id}/weather" in spec["paths"]
@@ -342,6 +344,8 @@ def test_admin_features_routes_mounted_in_openapi(client: TestClient) -> None:
     assert "AdminFeatureStatePatchRequest" in spec["components"]["schemas"]
     assert "AdminFeatureStateRetireRequest" in spec["components"]["schemas"]
     assert "AdminFeatureReactivateRequest" in spec["components"]["schemas"]
+    assert "AdminFeatureFieldOverrideAuthorRequest" in spec["components"]["schemas"]
+    assert "AdminFeatureFieldOverrideRevokeRequest" in spec["components"]["schemas"]
     assert "status" not in spec["components"]["schemas"]["AdminFeatureRecord"]["properties"]
     assert "status" not in spec["components"]["schemas"]["AdminFeatureMapItem"]["properties"]
     assert "status" not in spec["components"]["schemas"][
@@ -1394,3 +1398,78 @@ def test_feature_state_reactivation_requires_current_source_evidence(
         json={"reason_code": "missing_evidence"},
     )
     assert malformed.status_code == 422
+
+
+@pytest.mark.unit
+def test_feature_field_override_author_uses_open_domain_command_and_etag(
+    client: TestClient,
+    session: _FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import admin_features as router_mod
+
+    async def _author(_session: Any, feature_id: str, **kwargs: Any) -> Any:
+        assert feature_id == "feature-1"
+        assert kwargs == {
+            "expected_row_revision": 8,
+            "reason_code": "correct_address",
+            "operator": "local-dev",
+            "command_id": 1,
+            "values": {"core.address": {"road": "새 주소"}},
+            "geometry_wkt": {},
+        }
+        return router_mod.FeatureFieldOverrideCommand(
+            feature_id="feature-1",
+            row_revision=9,
+            command_id=1,
+            applied_field_count=1,
+        )
+
+    monkeypatch.setattr(router_mod, "author_admin_feature_field_overrides", _author)
+    response = client.post(
+        "/v1/admin/features/feature-1/field-overrides",
+        headers={"If-Match": '"8"'},
+        json={
+            "reason_code": "correct_address",
+            "values": {"core.address": {"road": "새 주소"}},
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["ETag"] == '"9"'
+    assert response.json()["data"] == {
+        "feature_id": _expected_uuid("feature-1"),
+        "row_revision": 9,
+        "command_id": 1,
+        "applied_field_count": 1,
+    }
+    assert session.begin_count == 1
+
+
+@pytest.mark.unit
+def test_feature_field_override_revoke_rejects_bad_paths_and_maps_stale_revision(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import admin_features as router_mod
+
+    malformed = client.post(
+        "/v1/admin/features/feature-1/field-overrides/revoke",
+        headers={"If-Match": '"8"'},
+        json={"reason_code": "restore", "field_paths": ["core.name", "core.name"]},
+    )
+    assert malformed.status_code == 422
+
+    async def _stale(_session: Any, feature_id: str, **kwargs: Any) -> Any:
+        raise router_mod.FeatureFieldOverridePreconditionFailed(
+            feature_id=feature_id,
+            expected=kwargs["expected_row_revision"],
+        )
+
+    monkeypatch.setattr(router_mod, "revoke_admin_feature_field_overrides", _stale)
+    stale = client.post(
+        "/v1/admin/features/feature-1/field-overrides/revoke",
+        headers={"If-Match": '"8"'},
+        json={"reason_code": "restore", "field_paths": ["core.name"]},
+    )
+    assert stale.status_code == 412

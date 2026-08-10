@@ -2927,6 +2927,110 @@
         "title": "AdminFeatureDetailVersionRecord",
         "type": "object"
       },
+      "AdminFeatureFieldOverrideAuthorRequest": {
+        "additionalProperties": false,
+        "description": "registry allow-list에 등록된 scalar/geometry effective field 변경.\n\npath별 value kind·Feature kind·nullability는 runtime dictionary가 아니라 DB\nregistry가 검증한다. API는 JSON transport 형태만 검증하고 임의 SQL 식별자나\nlegacy whole-row payload를 받지 않는다.",
+        "properties": {
+          "geometry_wkt": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Geometry Wkt",
+            "type": "object"
+          },
+          "reason_code": {
+            "minLength": 1,
+            "title": "Reason Code",
+            "type": "string"
+          },
+          "values": {
+            "additionalProperties": true,
+            "title": "Values",
+            "type": "object"
+          }
+        },
+        "required": [
+          "reason_code"
+        ],
+        "title": "AdminFeatureFieldOverrideAuthorRequest",
+        "type": "object"
+      },
+      "AdminFeatureFieldOverrideData": {
+        "additionalProperties": false,
+        "description": "author/revoke typed procedure의 commit receipt.",
+        "properties": {
+          "applied_field_count": {
+            "minimum": 1.0,
+            "title": "Applied Field Count",
+            "type": "integer"
+          },
+          "command_id": {
+            "minimum": 1.0,
+            "title": "Command Id",
+            "type": "integer"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "row_revision": {
+            "minimum": 1.0,
+            "title": "Row Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "feature_id",
+          "row_revision",
+          "command_id",
+          "applied_field_count"
+        ],
+        "title": "AdminFeatureFieldOverrideData",
+        "type": "object"
+      },
+      "AdminFeatureFieldOverrideResponse": {
+        "additionalProperties": false,
+        "description": "``POST /admin/features/{feature_id}/field-overrides*`` 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AdminFeatureFieldOverrideData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "AdminFeatureFieldOverrideResponse",
+        "type": "object"
+      },
+      "AdminFeatureFieldOverrideRevokeRequest": {
+        "additionalProperties": false,
+        "description": "active override를 latest typed provider base로 복원하는 command.",
+        "properties": {
+          "field_paths": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Field Paths",
+            "type": "array"
+          },
+          "reason_code": {
+            "minLength": 1,
+            "title": "Reason Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason_code",
+          "field_paths"
+        ],
+        "title": "AdminFeatureFieldOverrideRevokeRequest",
+        "type": "object"
+      },
       "AdminFeatureIssueRecord": {
         "additionalProperties": false,
         "description": "Admin feature 목록 issue summary.",
@@ -36179,6 +36283,260 @@
           }
         ],
         "summary": "Patch Feature Route",
+        "tags": [
+          "admin-features"
+        ]
+      }
+    },
+    "/v1/admin/features/{feature_id}/field-overrides": {
+      "post": {
+        "description": "registry typed effective field를 author하고 exact command receipt를 돌려준다.",
+        "operationId": "author_feature_field_overrides_route_v1_admin_features__feature_id__field_overrides_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "feature_id",
+            "required": true,
+            "schema": {
+              "title": "Feature Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
+          {
+            "description": "직전 GET body/ETag의 row_revision strong ETag (correction 낙관적 동시성).",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminFeatureFieldOverrideAuthorRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminFeatureFieldOverrideResponse"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "현재 feature의 server-owned row_revision strong entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "feature 없음"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "If-Match row_revision 불일치"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "registry field/value 또는 request 오류"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "If-Match 누락"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
+        "summary": "Author Feature Field Overrides Route",
+        "tags": [
+          "admin-features"
+        ]
+      }
+    },
+    "/v1/admin/features/{feature_id}/field-overrides/revoke": {
+      "post": {
+        "description": "active field override를 provider base value로 원자 복원한다.",
+        "operationId": "revoke_feature_field_overrides_route_v1_admin_features__feature_id__field_overrides_revoke_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "feature_id",
+            "required": true,
+            "schema": {
+              "title": "Feature Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
+          {
+            "description": "직전 GET body/ETag의 row_revision strong ETag (correction 낙관적 동시성).",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminFeatureFieldOverrideRevokeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminFeatureFieldOverrideResponse"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "현재 feature의 server-owned row_revision strong entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "feature 또는 active override 없음"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "If-Match row_revision 불일치"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "registry field/base 또는 request 오류"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "If-Match 누락"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
+        "summary": "Revoke Feature Field Overrides Route",
         "tags": [
           "admin-features"
         ]

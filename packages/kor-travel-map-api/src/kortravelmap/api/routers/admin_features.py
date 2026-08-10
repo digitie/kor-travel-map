@@ -30,10 +30,15 @@ from kortravelmap.infra.admin_feature_repo import (
     AdminFeatureStateValidationError,
     FeatureChangeConflict,
     FeatureChangeRequest,
+    FeatureFieldOverrideCommand,
+    FeatureFieldOverrideNotFound,
+    FeatureFieldOverridePreconditionFailed,
+    FeatureFieldOverrideValidationError,
     FeaturePreconditionFailed,
     admin_feature_card_target_exists,
     admin_features_in_bbox,
     apply_feature_change_request,
+    author_admin_feature_field_overrides,
     cluster_admin_features_in_bbox,
     get_admin_feature_detail,
     get_feature_row_revision,
@@ -42,6 +47,7 @@ from kortravelmap.infra.admin_feature_repo import (
     list_feature_change_requests,
     reactivate_admin_feature_state,
     reject_feature_change_request,
+    revoke_admin_feature_field_overrides,
     submit_feature_change_request,
     transition_admin_feature_state,
 )
@@ -62,6 +68,7 @@ from kortravelmap.api.auth import (
 )
 from kortravelmap.api.db import get_session
 from kortravelmap.api.domain_command_service import (
+    current_domain_command,
     domain_command_transaction,
     idempotent_domain_command,
 )
@@ -342,6 +349,72 @@ class AdminFeatureStateResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     data: AdminFeatureStateData
+    meta: Meta
+
+
+class AdminFeatureFieldOverrideAuthorRequest(BaseModel):
+    """registry allow-list에 등록된 scalar/geometry effective field 변경.
+
+    path별 value kind·Feature kind·nullability는 runtime dictionary가 아니라 DB
+    registry가 검증한다. API는 JSON transport 형태만 검증하고 임의 SQL 식별자나
+    legacy whole-row payload를 받지 않는다.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    reason_code: str = Field(min_length=1)
+    values: dict[str, Any] = Field(default_factory=dict)
+    geometry_wkt: dict[str, str] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _requires_distinct_paths(self) -> AdminFeatureFieldOverrideAuthorRequest:
+        if not self.values and not self.geometry_wkt:
+            raise ValueError("field override에는 적어도 하나의 field 값이 필요합니다.")
+        overlap = set(self.values) & set(self.geometry_wkt)
+        if overlap:
+            raise ValueError(
+                "scalar와 geometry field path는 겹칠 수 없습니다: "
+                + ", ".join(sorted(overlap))
+            )
+        if any(not path.strip() for path in {*self.values, *self.geometry_wkt}):
+            raise ValueError("field_path는 비어 있을 수 없습니다.")
+        return self
+
+
+class AdminFeatureFieldOverrideRevokeRequest(BaseModel):
+    """active override를 latest typed provider base로 복원하는 command."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    reason_code: str = Field(min_length=1)
+    field_paths: list[str] = Field(min_length=1)
+
+    @field_validator("field_paths")
+    @classmethod
+    def _validate_field_paths(cls, value: list[str]) -> list[str]:
+        normalized = [item.strip() for item in value]
+        if any(not item for item in normalized) or len(set(normalized)) != len(normalized):
+            raise ValueError("field_paths는 중복 없는 비어 있지 않은 path 목록이어야 합니다.")
+        return normalized
+
+
+class AdminFeatureFieldOverrideData(BaseModel):
+    """author/revoke typed procedure의 commit receipt."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    feature_id: str
+    row_revision: int = Field(ge=1)
+    command_id: int = Field(ge=1)
+    applied_field_count: int = Field(ge=1)
+
+
+class AdminFeatureFieldOverrideResponse(BaseModel):
+    """``POST /admin/features/{feature_id}/field-overrides*`` 응답."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    data: AdminFeatureFieldOverrideData
     meta: Meta
 
 
@@ -1126,6 +1199,25 @@ def _state_response(
     )
 
 
+def _field_override_response(
+    row: FeatureFieldOverrideCommand,
+    *,
+    feature_id: str,
+    started_at: float,
+) -> AdminFeatureFieldOverrideResponse:
+    """typed override procedure receipt를 public command response로 고정한다."""
+
+    return AdminFeatureFieldOverrideResponse(
+        data=AdminFeatureFieldOverrideData(
+            feature_id=feature_id,
+            row_revision=row.row_revision,
+            command_id=row.command_id,
+            applied_field_count=row.applied_field_count,
+        ),
+        meta=make_meta(started_at=started_at),
+    )
+
+
 def _require_if_match_revision(request: Request) -> int:
     """correction 요청의 ``If-Match``를 row_revision으로 파싱한다.
 
@@ -1819,6 +1911,121 @@ async def reactivate_feature_state_route(
     _set_feature_etag(response, transition.row_revision)
     return _state_response(
         transition,
+        feature_id=identity.feature_uuid,
+        started_at=started_at,
+    )
+
+
+@router.post(
+    "/{feature_id}/field-overrides",
+    response_model=AdminFeatureFieldOverrideResponse,
+    responses={
+        404: {"description": "feature 없음"},
+        412: {"description": "If-Match row_revision 불일치"},
+        422: {"description": "registry field/value 또는 request 오류"},
+        428: {"description": "If-Match 누락"},
+        200: {"headers": _ETAG_RESPONSE_HEADER},
+    },
+    openapi_extra={"parameters": [_IF_MATCH_OPENAPI_PARAMETER]},
+)
+@idempotent_domain_command("admin.feature.override.author")
+async def author_feature_field_overrides_route(
+    feature_id: str,
+    body: AdminFeatureFieldOverrideAuthorRequest,
+    request: Request,
+    response: Response,
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> AdminFeatureFieldOverrideResponse:
+    """registry typed effective field를 author하고 exact command receipt를 돌려준다."""
+
+    started_at = perf_counter()
+    identity = await resolve_feature_ref_or_error(session, feature_id)
+    expected_revision = _require_if_match_revision(request)
+    async with domain_command_transaction(session):
+        try:
+            result = await author_admin_feature_field_overrides(
+                session,
+                identity.feature_id,
+                expected_row_revision=expected_revision,
+                reason_code=body.reason_code,
+                operator=context.actor,
+                command_id=current_domain_command().command_id,
+                values=body.values,
+                geometry_wkt=body.geometry_wkt,
+            )
+        except FeatureFieldOverridePreconditionFailed as exc:
+            raise HTTPException(
+                status_code=status.HTTP_412_PRECONDITION_FAILED,
+                detail={"code": "PRECONDITION_FAILED", "message": str(exc)},
+            ) from exc
+        except FeatureFieldOverrideNotFound as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        except (FeatureFieldOverrideValidationError, ValueError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=str(exc),
+            ) from exc
+    _set_feature_etag(response, result.row_revision)
+    return _field_override_response(
+        result,
+        feature_id=identity.feature_uuid,
+        started_at=started_at,
+    )
+
+
+@router.post(
+    "/{feature_id}/field-overrides/revoke",
+    response_model=AdminFeatureFieldOverrideResponse,
+    responses={
+        404: {"description": "feature 또는 active override 없음"},
+        412: {"description": "If-Match row_revision 불일치"},
+        422: {"description": "registry field/base 또는 request 오류"},
+        428: {"description": "If-Match 누락"},
+        200: {"headers": _ETAG_RESPONSE_HEADER},
+    },
+    openapi_extra={"parameters": [_IF_MATCH_OPENAPI_PARAMETER]},
+)
+@idempotent_domain_command("admin.feature.override.revoke")
+async def revoke_feature_field_overrides_route(
+    feature_id: str,
+    body: AdminFeatureFieldOverrideRevokeRequest,
+    request: Request,
+    response: Response,
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> AdminFeatureFieldOverrideResponse:
+    """active field override를 provider base value로 원자 복원한다."""
+
+    started_at = perf_counter()
+    identity = await resolve_feature_ref_or_error(session, feature_id)
+    expected_revision = _require_if_match_revision(request)
+    async with domain_command_transaction(session):
+        try:
+            result = await revoke_admin_feature_field_overrides(
+                session,
+                identity.feature_id,
+                expected_row_revision=expected_revision,
+                reason_code=body.reason_code,
+                operator=context.actor,
+                command_id=current_domain_command().command_id,
+                field_paths=body.field_paths,
+            )
+        except FeatureFieldOverridePreconditionFailed as exc:
+            raise HTTPException(
+                status_code=status.HTTP_412_PRECONDITION_FAILED,
+                detail={"code": "PRECONDITION_FAILED", "message": str(exc)},
+            ) from exc
+        except FeatureFieldOverrideNotFound as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        except (FeatureFieldOverrideValidationError, ValueError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=str(exc),
+            ) from exc
+    _set_feature_etag(response, result.row_revision)
+    return _field_override_response(
+        result,
         feature_id=identity.feature_uuid,
         started_at=started_at,
     )

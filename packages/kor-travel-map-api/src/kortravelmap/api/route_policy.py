@@ -272,6 +272,8 @@ ROUTE_POLICIES: dict[str, RoutePolicy] = {
     "/v1/admin/features/{feature_id}/state": RoutePolicy.OPERATOR,
     "/v1/admin/features/{feature_id}/state/reactivate": RoutePolicy.OPERATOR,
     "/v1/admin/features/{feature_id}/state/transitions": RoutePolicy.OPERATOR,
+    "/v1/admin/features/{feature_id}/field-overrides": RoutePolicy.OPERATOR,
+    "/v1/admin/features/{feature_id}/field-overrides/revoke": RoutePolicy.OPERATOR,
     "/v1/admin/features/{feature_id}/price": RoutePolicy.OPERATOR,
     "/v1/admin/features/{feature_id}/weather": RoutePolicy.OPERATOR,
     "/v1/admin/files": RoutePolicy.OPERATOR,

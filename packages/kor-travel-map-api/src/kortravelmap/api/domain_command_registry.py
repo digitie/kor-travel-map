@@ -151,6 +151,18 @@ _COMMAND_REGISTRY: Final[dict[OperationKey, CommandPolicy]] = {
         "admin.feature.create",
         _MUTATION_RESULT,
     ),
+    ("POST", "/v1/admin/features/{feature_id}/field-overrides"): _domain(
+        "admin.feature.override.author",
+        _MUTATION_RESULT,
+        replay_headers=("ETag",),
+        fingerprint_headers=("If-Match",),
+    ),
+    ("POST", "/v1/admin/features/{feature_id}/field-overrides/revoke"): _domain(
+        "admin.feature.override.revoke",
+        _MUTATION_RESULT,
+        replay_headers=("ETag",),
+        fingerprint_headers=("If-Match",),
+    ),
     ("PATCH", "/v1/admin/features/{feature_id}"): _domain(
         "admin.feature.patch",
         _MUTATION_RESULT,
