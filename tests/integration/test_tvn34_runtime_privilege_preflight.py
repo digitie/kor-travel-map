@@ -144,6 +144,17 @@ async def test_tvn34_api_and_dagster_runtime_logins_pass_actual_catalog_prefligh
                         )
                     )
                 ) is True
+                assert (
+                    await connection.scalar(
+                        text(
+                            "SELECT has_function_privilege("
+                            "session_user, "
+                            "'feature.apply_provider_feature_field_patch("
+                            "text,bigint,text,text,bigint,jsonb,jsonb)'::regprocedure, "
+                            "'EXECUTE')"
+                        )
+                    )
+                ) is True
                 assert await connection.scalar(
                     text("SELECT count(*) FROM feature.public_features")
                 ) is not None
@@ -439,6 +450,31 @@ async def test_tvn34_runtime_logins_run_provider_and_admin_dml_but_raw_state_wri
                     ),
                     {"feature_id": feature_id},
                 )
+                provider_patch = (
+                    await connection.execute(
+                        text(
+                            """
+                            CALL feature.apply_provider_feature_field_patch(
+                                :feature_id, :dataset_id, :entity_key, :record_key, 1,
+                                CAST(:values AS jsonb), '{}'::jsonb,
+                                NULL, NULL, NULL
+                            )
+                            """
+                        ),
+                        {
+                            "feature_id": feature_id,
+                            "dataset_id": dataset_id,
+                            "entity_key": entity_key,
+                            "record_key": record_key,
+                            "values": json.dumps({"core.name": "runtime patched name"}),
+                        },
+                    )
+                ).mappings().one()
+                assert dict(provider_patch) == {
+                    "o_feature_id": feature_id,
+                    "o_row_revision": 2,
+                    "o_applied_field_count": 1,
+                }
                 request_id = str(uuid4())
                 await connection.execute(
                     text(
@@ -448,7 +484,7 @@ async def test_tvn34_runtime_logins_run_provider_and_admin_dml_but_raw_state_wri
                             base_row_revision, payload, reason, requested_by
                         ) VALUES (
                             CAST(:request_id AS uuid), :feature_id, 'update', 'applied',
-                            'immediate', 1, '{}'::jsonb, 'runtime admin DML', :requested_by
+                            'immediate', 2, '{}'::jsonb, 'runtime admin DML', :requested_by
                         )
                         """
                     ),
@@ -463,7 +499,7 @@ async def test_tvn34_runtime_logins_run_provider_and_admin_dml_but_raw_state_wri
                         """
                         CALL feature.materialize_user_feature_change_provenance(
                             :feature_id, 'update', CAST(:request_id AS uuid),
-                            'runtime admin DML', :operator, 1, NULL, NULL
+                            'runtime admin DML', :operator, 2, NULL, NULL
                         )
                         """
                     ),
@@ -477,7 +513,7 @@ async def test_tvn34_runtime_logins_run_provider_and_admin_dml_but_raw_state_wri
                     text(
                         """
                         CALL feature.transition_feature_state(
-                            :feature_id, 'retired', 'suppressed', 'valid', 2,
+                            :feature_id, 'retired', 'suppressed', 'valid', 3,
                             jsonb_build_object(
                                 'transition_kind', 'admin',
                                 'reason_code', 'runtime_lifecycle_override_fixture',
@@ -506,7 +542,7 @@ async def test_tvn34_runtime_logins_run_provider_and_admin_dml_but_raw_state_wri
                         """
                         CALL feature.author_lifecycle_override(
                             :feature_id, 'active', 'retired', true,
-                            'runtime lifecycle override', :principal, 3, NULL
+                            'runtime lifecycle override', :principal, 4, NULL
                         )
                         """
                     ),
@@ -516,7 +552,7 @@ async def test_tvn34_runtime_logins_run_provider_and_admin_dml_but_raw_state_wri
                     text(
                         """
                         CALL feature.revoke_lifecycle_override(
-                            :feature_id, :principal, 3, NULL
+                            :feature_id, :principal, 4, NULL
                         )
                         """
                     ),

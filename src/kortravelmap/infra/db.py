@@ -116,6 +116,12 @@ _RUNTIME_DB_PRIVILEGE_SQL = text(
         ) AS can_execute_provider_version_procedure,
         has_function_privilege(
             session_user,
+            'feature.apply_provider_feature_field_patch('
+            'text,bigint,text,text,bigint,jsonb,jsonb)'::regprocedure,
+            'EXECUTE'
+        ) AS can_execute_provider_field_patch_procedure,
+        has_function_privilege(
+            session_user,
             'feature.transition_admin_feature_state('
             'text,text,text,text,bigint,text,text,text)'::regprocedure,
             'EXECUTE'
@@ -145,6 +151,8 @@ _RUNTIME_DB_PRIVILEGE_SQL = text(
                     'feature.author_lifecycle_override(text,text,text,boolean,text,text,bigint)'::regprocedure,
                     'feature.revoke_lifecycle_override(text,text,bigint)'::regprocedure,
                     'feature.materialize_provider_feature_version(text)'::regprocedure,
+                    'feature.apply_provider_feature_field_patch('
+                    'text,bigint,text,text,bigint,jsonb,jsonb)'::regprocedure,
                     'feature.transition_admin_feature_state('
                     'text,text,text,text,bigint,text,text,text)'::regprocedure,
                     'feature.reactivate_admin_feature_state('
@@ -281,6 +289,9 @@ def _runtime_db_privilege_problems(
         ),
         "can_execute_provider_version_procedure": (
             "runtime login must EXECUTE materialize_provider_feature_version"
+        ),
+        "can_execute_provider_field_patch_procedure": (
+            "runtime login must EXECUTE apply_provider_feature_field_patch"
         ),
         "can_execute_admin_transition_procedure": (
             "runtime login must EXECUTE transition_admin_feature_state"

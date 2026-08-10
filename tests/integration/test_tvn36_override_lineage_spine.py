@@ -71,6 +71,19 @@ async def _seed_feature_source(session: AsyncSession) -> tuple[str, int]:
             '01010100', 'active', 'published', 'valid'
         )
         """,
+        """
+        INSERT INTO feature.feature_places (feature_id, feature_uuid, kind, place_kind)
+        SELECT feature_id, feature_uuid, kind, 'tourism'
+        FROM feature.features
+        WHERE feature_id = :feature_id
+        """,
+        """
+        INSERT INTO provider_sync.source_links (
+            feature_id, source_entity_key, source_role, match_method, confidence
+        ) VALUES (
+            :feature_id, 'tvn36-lineage-entity', 'primary', 'fixture', 100
+        )
+        """,
     ):
         await session.execute(
             text(statement),
@@ -136,6 +149,73 @@ async def test_tvn36_registry_base_lineage_and_override_type_fence(
         "source_raw_payload_hash": _SOURCE_HASH,
     }
 
+    await migrated_session.execute(text("SET ROLE ktm_feature_runtime"))
+    try:
+        async with migrated_session.begin_nested():
+            applied = (
+                await migrated_session.execute(
+                    text(
+                        """
+                        CALL feature.apply_provider_feature_field_patch(
+                            :feature_id, :dataset_id, 'tvn36-lineage-entity',
+                            'tvn36-lineage-record', 1,
+                            CAST(:values AS jsonb), CAST(:geometry_wkt AS jsonb),
+                            NULL, NULL, NULL
+                        )
+                        """
+                    ),
+                    {
+                        "feature_id": feature_id,
+                        "dataset_id": dataset_id,
+                        "values": '{"core.name":"fresh provider name","place.biz_number":"123"}',
+                        "geometry_wkt": "{}",
+                    },
+                )
+            ).mappings().one()
+    finally:
+        await migrated_session.execute(text("RESET ROLE"))
+    assert dict(applied) == {
+        "o_feature_id": feature_id,
+        "o_row_revision": 2,
+        "o_applied_field_count": 2,
+    }
+    effective = (
+        await migrated_session.execute(
+            text(
+                """
+                SELECT core.name, place.biz_number
+                FROM feature.features AS core
+                JOIN feature.feature_places AS place USING (feature_id)
+                WHERE core.feature_id = :feature_id
+                """
+            ),
+            {"feature_id": feature_id},
+        )
+    ).mappings().one()
+    assert dict(effective) == {"name": "fresh provider name", "biz_number": "123"}
+
+    await migrated_session.execute(text("SET ROLE ktm_feature_runtime"))
+    try:
+        with pytest.raises(DBAPIError) as wrong_feature_kind:
+            async with migrated_session.begin_nested():
+                await migrated_session.execute(
+                    text(
+                        """
+                        CALL feature.apply_provider_feature_field_patch(
+                            :feature_id, :dataset_id, 'tvn36-lineage-entity',
+                            'tvn36-lineage-record', 2,
+                            '{"route.route_type":"trail"}'::jsonb, '{}'::jsonb,
+                            NULL, NULL, NULL
+                        )
+                        """
+                    ),
+                    {"feature_id": feature_id, "dataset_id": dataset_id},
+                )
+    finally:
+        await migrated_session.execute(text("RESET ROLE"))
+    assert _sqlstate(wrong_feature_kind.value) == "23514"
+    assert _constraint_name(wrong_feature_kind.value) == "ck_feature_provider_field_path"
+
     with pytest.raises(DBAPIError) as wrong_base_type:
         async with migrated_session.begin_nested():
             await migrated_session.execute(
@@ -175,6 +255,57 @@ async def test_tvn36_registry_base_lineage_and_override_type_fence(
         ),
         {"feature_id": feature_id},
     )
+    await migrated_session.execute(text("SET ROLE ktm_feature_runtime"))
+    try:
+        async with migrated_session.begin_nested():
+            masked = (
+                await migrated_session.execute(
+                    text(
+                        """
+                        CALL feature.apply_provider_feature_field_patch(
+                            :feature_id, :dataset_id, 'tvn36-lineage-entity',
+                            'tvn36-lineage-record', 2,
+                            CAST(:values AS jsonb), CAST(:geometry_wkt AS jsonb),
+                            NULL, NULL, NULL
+                        )
+                        """
+                    ),
+                    {
+                        "feature_id": feature_id,
+                        "dataset_id": dataset_id,
+                        "values": '{"core.name":"masked provider name","place.biz_number":"456"}',
+                        "geometry_wkt": "{}",
+                    },
+                )
+            ).mappings().one()
+    finally:
+        await migrated_session.execute(text("RESET ROLE"))
+    assert dict(masked) == {
+        "o_feature_id": feature_id,
+        "o_row_revision": 3,
+        "o_applied_field_count": 2,
+    }
+    masked_effective = (
+        await migrated_session.execute(
+            text(
+                """
+                SELECT core.name, place.biz_number, base.value_json
+                FROM feature.features AS core
+                JOIN feature.feature_places AS place USING (feature_id)
+                JOIN feature.feature_base_field_values AS base
+                  ON base.feature_id = core.feature_id
+                 AND base.field_path = 'core.name'
+                WHERE core.feature_id = :feature_id
+                """
+            ),
+            {"feature_id": feature_id},
+        )
+    ).mappings().one()
+    assert dict(masked_effective) == {
+        "name": "fresh provider name",
+        "biz_number": "456",
+        "value_json": "masked provider name",
+    }
     with pytest.raises(DBAPIError) as mismatched_target:
         async with migrated_session.begin_nested():
             await migrated_session.execute(

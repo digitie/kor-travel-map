@@ -159,6 +159,7 @@ def _runtime_privilege_row() -> dict[str, object]:
         "can_execute_author_lifecycle_override_procedure": True,
         "can_execute_revoke_lifecycle_override_procedure": True,
         "can_execute_provider_version_procedure": True,
+        "can_execute_provider_field_patch_procedure": True,
         "can_execute_admin_transition_procedure": True,
         "can_execute_admin_reactivation_procedure": True,
         "can_execute_unintended_feature_procedure": False,
@@ -193,6 +194,7 @@ def test_runtime_privilege_preflight_requires_procedures_but_denies_direct_dml()
     row["can_read_feature_override_field_paths"] = False
     row["can_execute_author_lifecycle_override_procedure"] = False
     row["can_execute_provider_version_procedure"] = False
+    row["can_execute_provider_field_patch_procedure"] = False
     row["can_execute_admin_transition_procedure"] = False
     row["can_execute_admin_reactivation_procedure"] = False
     row["can_execute_unintended_feature_procedure"] = True
@@ -217,6 +219,7 @@ def test_runtime_privilege_preflight_requires_procedures_but_denies_direct_dml()
     assert "runtime login must SELECT ops.feature_override_field_paths" in problems
     assert "runtime login must EXECUTE author_lifecycle_override" in problems
     assert "runtime login must EXECUTE materialize_provider_feature_version" in problems
+    assert "runtime login must EXECUTE apply_provider_feature_field_patch" in problems
     assert "runtime login must EXECUTE transition_admin_feature_state" in problems
     assert "runtime login must EXECUTE reactivate_admin_feature_state" in problems
     assert "runtime login must not EXECUTE an unintended feature procedure" in problems
@@ -233,6 +236,7 @@ def test_runtime_privilege_query_uses_postgres_function_privilege_for_procedures
     assert "author_lifecycle_override" in rendered
     assert "revoke_lifecycle_override" in rendered
     assert "materialize_provider_feature_version" in rendered
+    assert "apply_provider_feature_field_patch" in rendered
     assert "transition_admin_feature_state" in rendered
     assert "reactivate_admin_feature_state" in rendered
     assert "can_execute_unintended_feature_procedure" in rendered

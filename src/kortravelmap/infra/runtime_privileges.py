@@ -209,6 +209,8 @@ _STATE_OWNER_FUNCTION_ACL = (
     "text, text, bigint) FROM PUBLIC",
     "REVOKE ALL ON PROCEDURE feature.materialize_provider_feature_version("
     "text) FROM PUBLIC",
+    "REVOKE ALL ON PROCEDURE feature.apply_provider_feature_field_patch("
+    "text, bigint, text, text, bigint, jsonb, jsonb) FROM PUBLIC",
     "REVOKE ALL ON PROCEDURE feature.transition_admin_feature_state("
     "text, text, text, text, bigint, text, text, text) FROM PUBLIC",
     "REVOKE ALL ON PROCEDURE feature.reactivate_admin_feature_state("
@@ -225,6 +227,8 @@ _STATE_OWNER_FUNCTION_ACL = (
     "text, text, bigint) TO ktm_feature_runtime",
     "GRANT EXECUTE ON PROCEDURE feature.materialize_provider_feature_version("
     "text) TO ktm_feature_runtime",
+    "GRANT EXECUTE ON PROCEDURE feature.apply_provider_feature_field_patch("
+    "text, bigint, text, text, bigint, jsonb, jsonb) TO ktm_feature_runtime",
     "GRANT EXECUTE ON PROCEDURE feature.transition_admin_feature_state("
     "text, text, text, text, bigint, text, text, text) TO ktm_feature_runtime",
     "GRANT EXECUTE ON PROCEDURE feature.reactivate_admin_feature_state("
