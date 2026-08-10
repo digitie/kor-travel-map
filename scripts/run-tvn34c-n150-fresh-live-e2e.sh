@@ -521,6 +521,7 @@ build_playwright_image() {
 
 run_map_browser() {
   local evidence="$RUN_DIR/map-playwright"
+  local log="$evidence/playwright.log"
   mkdir -m 0700 "$evidence"
   docker run --rm --read-only --security-opt no-new-privileges --cap-drop ALL \
     --ipc private --network "$MAP_NETWORK" \
@@ -540,7 +541,9 @@ run_map_browser() {
     --env PLAYWRIGHT_ARTIFACT_ROOT=/evidence \
     --env E2E_STORAGE_STATE=/tmp/tvn34c-admin-state.json \
     "$MAP_PLAYWRIGHT_IMAGE" npm run e2e:live -- \
-      e2e/live/admin-feature-acceptance-write.live.spec.ts --workers=1 --retries=0
+      e2e/live/admin-feature-acceptance-write.live.spec.ts --workers=1 --retries=0 \
+    2>&1 | tee "$log"
+  chmod 0600 "$log"
 }
 
 run_pinvi_probe() {
