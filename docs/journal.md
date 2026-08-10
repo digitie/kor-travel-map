@@ -119,80 +119,10 @@ dagster/daemon 두 컨테이너가 VWorld 키를 든 채 남았다. fail-open이
 docker-manager의 compose.
 ## 2026-08-14 — alembic squash(0200) + prod 지오코딩 복구
 
-### 체인 109개 → `0200_schema_baseline` 하나
-
-`0001~0104`는 앞으로 **어떤 DB에서도 실행되지 않는다.** prod는 2026-08-13 in-place
-cutover로 이미 `0104`를 지나왔고 새 DB는 baseline에서 시작한다. 남아 있던 것은
-부채였다 — migration이 서로를 sha로 잠그고 import하며(`0104`→`0102`→`0098/0099/0100`),
-존재하지 않을 데이터를 위한 backfill·fence·replay가 전부 살아 있었다. 2026-08-13
-하루에 나온 P1 3건이 전부 그 구조에서 나왔다.
-
-sidecar SQL은 `scripts/build-baseline.sh`가 체인 DB에서 뽑아 결정론적으로 정규화한다.
-`0200`이 두 파일을 byte sha로 잠그므로 손으로 고치면 선다. 빈 DB 적용 **4초**(체인
-45초, prod in-place 1시간 32분).
-
-동등성은 `scripts/compare-schema-catalogs.sh`로 증명했다 — **오라클을 먼저 증명했다**
-(변조 7종 주입 7/7 검출). 결과 카탈로그 2486행 전부 일치.
-
-**중간에 나온 결함이 이 작업의 본론이었다.** 오라클이 18행 차이를 잡았는데 표기 차이가
-아니라 **권한 차이**였다: GRANT/REVOKE는 객체 소유자만 할 수 있는데 baseline은 전
-구간을 `ktm_feature_schema_owner`로 돌린다. ADR-090의 role은 `NOINHERIT`이라 membership이
-있어도 권한이 승계되지 않고, 소유자가 아닌 GRANT는 **오류가 아니라 경고 후 무시**다 —
-`exit 0`으로 조용히 통과하면서 routine 10개가 PUBLIC EXECUTE로 남았다(102 → 112).
-
-고친 뒤 같은 함정을 하나 더 만들지 않으려고, 적용 성공이 ACL 적용의 증거가 되지 못한다는
-사실 자체를 `schema.sql` 끝의 digest 자기검증으로 막았다. 그리고 그 검증이 실제로 무는지
-role 전환을 제거한 변조본으로 확인했다(`exit 1`, `alembic_version` 미기록).
-
-체인 파일은 `alembic/legacy_versions/`로 옮겼다. 지우지 않은 이유는 이들이 여전히
-정본인 사실이 있기 때문이다 — **"무엇이 지워졌는가."** 현행 스키마에는 지워진 것이
-*없다*는 사실만 남고 이름은 남지 않는다. 다만 차단선을 아카이브에만 매달면 목록이
-낡아도 알 길이 없어서, baseline 대조를 붙였다(금지 컬럼이 head에 되살아나면 선다).
-
-검증: unit + lint 2260 passed.
-
-### 검증 절차가 낡은 산출물을 다시 쟀다
-
-ACL 수정 뒤에도 오라클 차이가 **글자 그대로 같았다.** 원인은 `scp -r`이 이미 있는
-원격 디렉터리 *안으로* 복사해 이전 트리가 그대로 쓰인 것이었다. tar 전송 + 양쪽 sha
-대조로 바꿨다. 이 부류(검사기가 자기가 검사한다고 말하는 것을 실제로 보지 않으면서
-green)를 오늘도 두 번 만났다.
-
-### `docs/backup-restore.md` §10 절차 5 재작성
-
-절차 5가 낡은 이유는 relation 이름이 아니었다 — 이름은 `0104`에도 대부분 살아 있었다.
-낡은 것은 **주입 대상의 타당성**이다. 옛 절차는 alias를 지우고 replay로 메워지는지
-봤는데, alias는 identity 파생물이지 provider replay 대상이 아니다.
-
-replay 가능/불가 경계를 먼저 긋고(가능: features 본문·typed subtype 5종·base field
-values / 불가: 운영자 행위 기록·발급물·append-only 관측 이력) 주입 단위를
-`feature.features` 행 DELETE로, 관측 축을 F1(orphan source entity)로 바꿨다.
-subtype만 지우는 변형은 `_UPSERT_SOURCE_ENTITY_HEAD_SQL`의 head 전진 게이트 때문에
-replay로 메워지지 않는다.
-
-절차 5 자체는 **여전히 미검증**이다(3회차 소관). 되먹임 경로의 round-trip 여부와
-현행 세대 ANALYZE 회귀 폭도 미측정으로 표시했다.
-
-### prod 지오코딩이 절반만 고쳐져 있었다 (복구 완료)
-
-2026-08-13 22:28에 `.env`의 geo 키를 올바른 값으로 바꾸고 **api만** 재생성했다.
-dagster / dagster-daemon은 20:31 세대 그대로여서 VWorld 상류 키를 들고 있었다 —
-geo가 401(`E0401`)로 거부하는 값이다.
-
-fail-open은 아니다. `preflight()`는 존재·길이만 보므로 리소스 초기화는 통과하고,
-첫 요청에서 `GeoAuthNotConfiguredError`가 나며 이를 삼키는 `except`가 없다. 즉 asset
-step이 통째로 실패한다. `reverse_geocoder`는 사실상 모든 feature asset의 필수
-리소스다. **아직 안 터진 이유는 무결이 아니라 미실행이다** — 최신 Dagster run이
-2026-08-07이고 현 컨테이너 세대는 08-13 20:31 기동이라, 잘못된 키를 들고 ETL이 한
-번도 돌지 않았다.
-
-compose는 결백했다(세 서비스 모두 fallback 없는 같은 변수). 두 컨테이너만
-`up -d --no-deps --force-recreate` 했고 이미지는 동일하다. 재생성 후 세 컨테이너
-전부에서 `POST /v2/reverse` **HTTP 200**을 확인했다.
-
-재발 통로는 아직 열려 있다 — `docker-compose.yml`과 `scripts/load-env.sh`의
-`${...:-${NEXT_PUBLIC_VWORLD_API_KEY:-...}}` fallback 사슬이 정확히 401을 받는 값으로
-떨어진다. 별도 처리 대상.
+T-VN-36 PR #973이 `c76ceb7a`로 병합된 최신 `main` 위에 T-VN-40 설계 커밋만
+재배치했다. ADR-092는 source-rule 자동 결과를 admin-only 후보 lifecycle로,
+공식·수동 공개 membership을 `curation_collections/items`의 단일 정본으로 분리한다.
+사용자 승인에 따라 A/B/C는 하나의 forward-only implementation PR/release로 이어서 구현한다.
 
 ## 2026-08-12 — T-VN-38 병합과 완료 task 아카이브 정리
 
