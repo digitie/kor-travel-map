@@ -29,6 +29,19 @@ _RUNTIME_LOGINS = (
 )
 
 
+async def _require_tvn34_provenance_bridge(engine: AsyncEngine) -> None:
+    """T-VN-36D 이후에는 T-VN-34의 materializer DML contract를 실행하지 않는다."""
+
+    async with engine.connect() as connection:
+        if await connection.scalar(
+            text("SELECT to_regclass('feature.feature_versions') IS NULL")
+        ):
+            pytest.skip(
+                "T-VN-36D final fence 이후에는 T-VN-34 provenance materializer가 없다; "
+                "T-VN-36 runtime gate가 final procedure-only DML을 검증한다."
+            )
+
+
 async def _runtime_provider_bundle(suffix: str):
     """실 provider 변환 결과를 runtime ``load_bundle`` 검증에 사용한다."""
 
@@ -161,7 +174,7 @@ async def test_tvn34_api_and_dagster_runtime_logins_pass_actual_catalog_prefligh
                             "SELECT has_function_privilege("
                             "session_user, "
                             "'feature.author_feature_field_overrides("
-                            "text,bigint,text,text,bigint,uuid,jsonb,jsonb)'::regprocedure, "
+                            "text,bigint,text,text,bigint,jsonb,jsonb)'::regprocedure, "
                             "'EXECUTE')"
                         )
                     )
@@ -172,7 +185,7 @@ async def test_tvn34_api_and_dagster_runtime_logins_pass_actual_catalog_prefligh
                             "SELECT has_function_privilege("
                             "session_user, "
                             "'feature.revoke_feature_field_overrides("
-                            "text,bigint,text,text,bigint,uuid,text[])'::regprocedure, "
+                            "text,bigint,text,text,bigint,text[])'::regprocedure, "
                             "'EXECUTE')"
                         )
                     )
@@ -188,8 +201,8 @@ async def test_tvn34_api_and_dagster_runtime_logins_pass_actual_catalog_prefligh
                         text(
                             "SELECT has_function_privilege("
                             "session_user, "
-                            "'feature.materialize_provider_feature_version("
-                            "text)'::regprocedure, "
+                            "'feature.transition_admin_feature_state("
+                            "text,text,text,text,bigint,text,text,text)'::regprocedure, "
                             "'EXECUTE')"
                         )
                     )
@@ -221,8 +234,8 @@ async def test_tvn34_api_and_dagster_runtime_logins_pass_actual_catalog_prefligh
                         text(
                             "SELECT has_function_privilege("
                             "session_user, "
-                            "'feature.materialize_user_feature_change_provenance("
-                            "text,text,uuid,text,text,bigint)'::regprocedure, "
+                            "'feature.reactivate_admin_feature_state("
+                            "text,bigint,text,text,bigint,text,text)'::regprocedure, "
                             "'EXECUTE')"
                         )
                     )
@@ -334,6 +347,7 @@ async def test_tvn34_runtime_logins_run_provider_and_admin_dml_but_raw_state_wri
 ) -> None:
     """실 LOGIN으로 source lineage/admin provenance 성공과 raw state 차단을 함께 증명한다."""
 
+    await _require_tvn34_provenance_bridge(migrated_engine)
     await _provision_runtime_logins(migrated_engine)
     runtime_engines: list[AsyncEngine] = []
     try:

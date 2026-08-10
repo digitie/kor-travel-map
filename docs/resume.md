@@ -84,12 +84,13 @@ effective override provenance로 교체하고 whole-row request/version bridge�
 ## 2026-08-10 — T-VN-36 A–D 단일 PR: final destructive fence 구현·n150 gate 준비
 ## 2026-08-10 — T-VN-36 A–D 단일 PR: final destructive fence·n150 fresh live 완료
 
-**다음 한 작업**: T-VN-36 A–D의 destructive completion gate를 통과했다. Map
-`f7e2e04e` / PinVi `6ab4eaf` immutable source pair의 n150 fresh PostGIS migration,
-Dagster ETL, browser 생성→suppress→retire→audit timeline→cleanup, PinVi public probe를
-통과했고 `BLOCKED.json`/격리 container/volume도 남지 않았다. 요청된
-`T-VN-33 → T-VN-38 → T-VN-34 → T-VN-36` 순서 rebase와 fixed-base 영향성 검증·필요 수정만
-남았다.
+**다음 한 작업**: T-VN-36 A–D의 destructive completion gate와 요청된
+`T-VN-33 → T-VN-38 → T-VN-34 → T-VN-36` rebase chain을 완료했다. 현재 체인은
+T-VN-33 `5f2e1c85` → T-VN-38 `acfb6ed2` → T-VN-34 `73ced83a` → T-VN-36
+`48cb08ac`(functional Map source)이며, n150 실행 source `f7e2e04e`와
+`48cb08ac`은 동일 patch-id다. PinVi `6ab4eaf`와 새 Map SHA를 receipt에 재고정했고,
+fixed-base integration은 TVN34C bridge를 전용 `0096→0097` gate로, TVN36D final fence를
+head gate로 분리해 검증한다.
 
 - `0104_tvn36_final_fence`는 `data_origin`/`data_version`, `feature_versions`,
   `feature_change_requests`, replay/materializer procedure와 request receipt/index를 forward-only로

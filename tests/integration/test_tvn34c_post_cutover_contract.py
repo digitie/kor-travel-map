@@ -105,11 +105,37 @@ async def _materialize_provider_as_runtime(session: AsyncSession, feature_id: st
             await session.execute(text("RESET ROLE"))
 
 
+async def _require_tvn34c_provenance_bridge(
+    session: AsyncSession,
+) -> None:
+    """T-VN-36D가 제거한 임시 provenance bridge의 head 오용을 막는다."""
+
+    if await session.scalar(text("SELECT to_regclass('feature.feature_versions') IS NULL")):
+        pytest.skip(
+            "T-VN-36D final fence 이후에는 T-VN-34C provenance bridge가 없다; "
+            "0096→0097 전용 gate가 이 contract를 보존한다."
+        )
+
+
+async def _require_tvn34c_provenance_bridge_engine(
+    engine: AsyncEngine,
+) -> None:
+    async with engine.connect() as connection:
+        if await connection.scalar(
+            text("SELECT to_regclass('feature.feature_versions') IS NULL")
+        ):
+            pytest.skip(
+                "T-VN-36D final fence 이후에는 T-VN-34C provenance bridge가 없다; "
+                "0096→0097 전용 gate가 이 contract를 보존한다."
+            )
+
+
 async def test_tvn34c_contract_queries_hold_after_final_migration(
     migrated_session: AsyncSession,
 ) -> None:
     """전용 0096→C artifact의 모든 catalog/data assertion은 fresh head에서 0이다."""
 
+    await _require_tvn34c_provenance_bridge(migrated_session)
     for query in _contract_queries():
         assert await migrated_session.scalar(text(query)) == 0, query
 
@@ -185,6 +211,7 @@ async def test_tvn34c_direct_typed_assembly_covers_eight_tuples_and_subtypes(
 ) -> None:
     """public/materializer는 private bridge 없이 모든 legal axis/subtype을 조립한다."""
 
+    await _require_tvn34c_provenance_bridge(migrated_session)
     tuple_ids: list[str] = []
     for number, state in enumerate(_LEGAL_TUPLES, start=1):
         feature_id = f"tvn34c-tuple-{number}-{uuid4().hex}"
@@ -320,6 +347,7 @@ async def test_tvn34c_user_receipt_is_request_bound_immutable_and_concurrent(
 ) -> None:
     """동시 같은 request materialization은 하나의 durable receipt만 남긴다."""
 
+    await _require_tvn34c_provenance_bridge_engine(migrated_engine)
     feature_id = f"tvn34c-receipt-{uuid4().hex}"
     request_id = uuid4()
     async with AsyncSession(migrated_engine) as setup_session, setup_session.begin():
@@ -403,6 +431,7 @@ async def test_tvn34c_request_lock_serializes_first_receipt_against_request_muta
 ) -> None:
     """first receipt는 locked applied request만 받아 immutable binding을 만든다."""
 
+    await _require_tvn34c_provenance_bridge_engine(migrated_engine)
     feature_id = f"tvn34c-receipt-race-{uuid4().hex}"
     request_id = uuid4()
     async with AsyncSession(migrated_engine) as setup_session, setup_session.begin():
