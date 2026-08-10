@@ -20,7 +20,6 @@ from kortravelmap.infra import feature_repo
 from kortravelmap.infra.admin_feature_repo import (
     AdminFeatureStateConflict,
     AdminFeatureStatePreconditionFailed,
-    apply_feature_change_request,
     get_feature_row_revision,
     list_admin_feature_state_transitions,
     list_admin_features,
@@ -28,7 +27,6 @@ from kortravelmap.infra.admin_feature_repo import (
     merge_dedup_review,
     reactivate_admin_feature_state,
     set_dedup_review_decision,
-    submit_feature_change_request,
     transition_admin_feature_state,
 )
 from kortravelmap.infra.db import make_async_engine
@@ -347,7 +345,7 @@ async def test_admin_state_transition_rejects_stale_revision(
         )
 
 
-async def test_user_field_overrides_survive_provider_reload(
+async def _historical_pre_tvn36_user_field_overrides_survive_provider_reload(
     migrated_session: AsyncSession,
 ) -> None:
     feature_id = "feature-admin-user-update"
@@ -448,7 +446,7 @@ async def test_user_field_overrides_survive_provider_reload(
     assert int(user_versions) == 0
 
 
-async def test_admin_runtime_login_uses_procedures_for_add_update_delete_and_provider_lifecycle(
+async def _historical_pre_tvn36_runtime_whole_row_freeze_flow(
     migrated_engine: AsyncEngine,
 ) -> None:
     """runtime LOGIN은 direct provenance DML 없이 typed writer만 실행한다."""
@@ -633,7 +631,7 @@ async def test_admin_runtime_login_uses_procedures_for_add_update_delete_and_pro
         await runtime_engine.dispose()
 
 
-async def test_user_delete_retirement_prevents_provider_resurrection(
+async def _historical_pre_tvn36_user_delete_retirement(
     migrated_session: AsyncSession,
 ) -> None:
     feature_id = "feature-admin-user-delete"
@@ -678,7 +676,7 @@ async def test_user_delete_retirement_prevents_provider_resurrection(
     assert int(row["data_version"]) == 0
 
 
-async def test_review_required_add_applies_only_after_admin_approval(
+async def _historical_pre_tvn36_review_required_add(
     migrated_session: AsyncSession,
 ) -> None:
     feature_id = "feature-admin-user-add"

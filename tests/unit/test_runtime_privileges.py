@@ -29,11 +29,6 @@ def test_runtime_acl_inventory_keeps_state_audit_and_its_sequence_ungranted() ->
             },
             {
                 "schema_name": "feature",
-                "relation_name": "feature_versions",
-                "relation_kind": "r",
-            },
-            {
-                "schema_name": "feature",
                 "relation_name": "feature_base_field_values",
                 "relation_kind": "r",
             },
@@ -55,11 +50,6 @@ def test_runtime_acl_inventory_keeps_state_audit_and_its_sequence_ungranted() ->
             },
             {
                 "schema_name": "ops",
-                "relation_name": "feature_change_requests",
-                "relation_kind": "r",
-            },
-            {
-                "schema_name": "ops",
                 "relation_name": "feature_override_field_paths",
                 "relation_kind": "r",
             },
@@ -76,14 +66,11 @@ def test_runtime_acl_inventory_keeps_state_audit_and_its_sequence_ungranted() ->
     assert "feature_state_transitions" not in rendered
     assert "feature_base_field_values" not in rendered
     core_grants = "\n".join(_CORE_FEATURE_GRANTS)
-    assert "GRANT SELECT ON feature.feature_versions TO ktm_feature_runtime" in core_grants
-    assert "GRANT SELECT, INSERT, UPDATE, DELETE ON feature.feature_versions" not in core_grants
+    assert "feature_versions" not in core_grants
     assert (
         'GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "provider_sync"."source_records"' in rendered
     )
-    assert (
-        'GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "ops"."feature_change_requests"' in rendered
-    )
+    assert "feature_change_requests" not in rendered
     assert 'GRANT SELECT ON TABLE "ops"."feature_overrides"' in rendered
     assert 'GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "ops"."feature_overrides"' not in rendered
     assert 'GRANT SELECT ON TABLE "ops"."feature_override_field_paths"' in rendered

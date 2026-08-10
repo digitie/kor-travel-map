@@ -205,7 +205,6 @@ function FeatureDetailPanel({
             />
           </dd>
         </div>
-        <DetailMetric label="출처" value={feature.data_origin} />
         <DetailMetric label="경도" value={feature.lon?.toFixed(6)} />
         <DetailMetric label="위도" value={feature.lat?.toFixed(6)} />
         <DetailMetric

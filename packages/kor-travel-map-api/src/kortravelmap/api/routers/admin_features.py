@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from datetime import datetime
 from time import perf_counter
-from typing import Annotated, Any, Literal, cast
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response, status
 from kortravelmap.core import make_feature_id
@@ -18,7 +18,6 @@ from kortravelmap.infra.admin_feature_repo import (
     AdminFeatureDetailIssue,
     AdminFeatureDetailOverride,
     AdminFeatureDetailSource,
-    AdminFeatureDetailVersion,
     AdminFeaturePage,
     AdminFeatureRow,
     AdminFeatureStateConflict,
@@ -28,27 +27,22 @@ from kortravelmap.infra.admin_feature_repo import (
     AdminFeatureStateTransitionAudit,
     AdminFeatureStateTransitionAuditPage,
     AdminFeatureStateValidationError,
-    FeatureChangeConflict,
-    FeatureChangeRequest,
     FeatureFieldOverrideCommand,
     FeatureFieldOverrideNotFound,
     FeatureFieldOverridePreconditionFailed,
     FeatureFieldOverrideValidationError,
-    FeaturePreconditionFailed,
     admin_feature_card_target_exists,
     admin_features_in_bbox,
-    apply_feature_change_request,
     author_admin_feature_field_overrides,
     cluster_admin_features_in_bbox,
+    create_admin_feature_with_field_overrides,
     get_admin_feature_detail,
     get_feature_row_revision,
     list_admin_feature_state_transitions,
     list_admin_features,
-    list_feature_change_requests,
+    patch_admin_feature_with_field_overrides,
     reactivate_admin_feature_state,
-    reject_feature_change_request,
     revoke_admin_feature_field_overrides,
-    submit_feature_change_request,
     transition_admin_feature_state,
 )
 from pydantic import (
@@ -89,7 +83,6 @@ from kortravelmap.api.routers.features import (
     WeatherMetricOut,
     WeatherSummaryOut,
 )
-from kortravelmap.api.settings import ApiSettings
 
 __all__ = [
     "router",
@@ -102,7 +95,6 @@ __all__ = [
     "AdminFeatureStateTransitionsResponse",
     "AdminFeatureCreateRequest",
     "AdminFeaturePatchRequest",
-    "AdminFeatureChangeResponse",
 ]
 
 
@@ -126,7 +118,6 @@ AdminFeatureSort = Literal[
     "issue_count",
 ]
 SortOrder = Literal["asc", "desc"]
-FeatureMutationReviewMode = Literal["require_review", "immediate"]
 
 
 class AdminFeatureIssueRecord(BaseModel):
@@ -609,64 +600,6 @@ class AdminFeatureDeleteRequest(BaseModel):
     )
 
 
-class AdminFeatureChangeRequestRecord(BaseModel):
-    """feature add/update/delete request 응답 data."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    request_id: str
-    feature_id: str
-    action: Literal["add", "update", "delete"]
-    status: Literal["pending", "applied", "rejected"]
-    review_mode: FeatureMutationReviewMode
-    base_row_revision: int | None = Field(
-        default=None,
-        description="update/delete 요청 제출 시 확인한 feature row_revision.",
-    )
-    payload: dict[str, Any]
-    reason: str | None = None
-    requested_by: str | None = None
-    reviewed_by: str | None = None
-    reviewed_at: datetime | None = None
-    applied_at: datetime | None = None
-    created_at: datetime
-
-
-class AdminFeatureChangeData(BaseModel):
-    """단건 feature change response data."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    request: AdminFeatureChangeRequestRecord
-
-
-class AdminFeatureChangeResponse(BaseModel):
-    """feature add/update/delete/approve/reject 응답."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    data: AdminFeatureChangeData
-    meta: Meta
-
-
-class AdminFeatureChangeListData(BaseModel):
-    """feature change request list data."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    items: list[AdminFeatureChangeRequestRecord]
-    review_mode: FeatureMutationReviewMode
-
-
-class AdminFeatureChangeListResponse(BaseModel):
-    """``GET /admin/features/change-requests`` 응답."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    data: AdminFeatureChangeListData
-    meta: Meta
-
-
 class AdminFeatureDetailFeatureRecord(BaseModel):
     """Admin feature 상세 core snapshot."""
 
@@ -709,8 +642,6 @@ class AdminFeatureDetailFeatureRecord(BaseModel):
     marker_color: str | None = None
     parent_feature_id: str | None = None
     sibling_group_id: str | None = None
-    data_origin: str
-    data_version: int
     row_revision: int = Field(
         ge=1,
         description="correction If-Match에 사용할 server-owned revision.",
@@ -773,21 +704,6 @@ class AdminFeatureDetailOverrideRecord(BaseModel):
     prevent_provider_reactivation: bool
     status: str
     reason: str | None = None
-    created_by: str | None = None
-    created_at: datetime
-
-
-class AdminFeatureDetailVersionRecord(BaseModel):
-    """Admin feature 상세 version row."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    feature_id: str
-    version: int
-    origin: str
-    change_kind: str
-    payload: dict[str, Any]
-    request_id: str | None = None
     created_by: str | None = None
     created_at: datetime
 
@@ -874,8 +790,6 @@ class AdminFeatureDetailData(BaseModel):
     issues: list[AdminFeatureDetailIssueRecord]
     overrides: list[AdminFeatureDetailOverrideRecord]
     state_transitions: list[AdminFeatureStateTransitionAuditRecord]
-    versions: list[AdminFeatureDetailVersionRecord]
-    change_requests: list[AdminFeatureChangeRequestRecord]
     files: list[AdminFeatureDetailFileRecord]
     curations: list[AdminCurationItemView]
 
@@ -904,27 +818,6 @@ class AdminFeatureRevisionResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     data: AdminFeatureRevisionData
-
-
-class AdminFeatureReviewActionRequest(BaseModel):
-    """approve/reject body."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    operator: str | None = Field(
-        default=None,
-        deprecated=True,
-        description=(
-            "[deprecated·ignored] 감사 actor는 인증 principal에서만 파생한다 "
-            "(ADR-066 D-2, T-VN-20). PinVi 호환을 위해 수용하되 값은 무시하며, "
-            "PinVi는 전송 중단 예정 (docs/integration-map.md)."
-        ),
-    )
-    reason: str | None = None
-
-
-def _settings() -> ApiSettings:
-    return ApiSettings()
 
 
 def _issue_record(issue: dict[str, Any]) -> AdminFeatureIssueRecord:
@@ -972,26 +865,6 @@ def _map_item(row: dict[str, Any]) -> AdminFeatureMapItem:
     return AdminFeatureMapItem(**substituted)
 
 
-def _change_record(row: FeatureChangeRequest) -> AdminFeatureChangeRequestRecord:
-    # T-VN-32C 치환 제외 — change request의 feature_id는 요청·감사 레코드에 기록된
-    # 내부 DB 참조(legacy 정본 키)를 그대로 보여준다.
-    return AdminFeatureChangeRequestRecord(
-        request_id=row.request_id,
-        feature_id=row.feature_id,
-        action=row.action,
-        status=row.state,
-        review_mode=row.review_mode,
-        base_row_revision=row.base_row_revision,
-        payload=row.payload,
-        reason=row.reason,
-        requested_by=row.requested_by,
-        reviewed_by=row.reviewed_by,
-        reviewed_at=row.reviewed_at,
-        applied_at=row.applied_at,
-        created_at=row.created_at,
-    )
-
-
 def _detail_feature(
     row: AdminFeatureDetailFeature,
 ) -> AdminFeatureDetailFeatureRecord:
@@ -1015,12 +888,6 @@ def _detail_override(
     return AdminFeatureDetailOverrideRecord.model_validate(row, from_attributes=True)
 
 
-def _detail_version(
-    row: AdminFeatureDetailVersion,
-) -> AdminFeatureDetailVersionRecord:
-    return AdminFeatureDetailVersionRecord.model_validate(row, from_attributes=True)
-
-
 def _state_transition_audit(
     row: AdminFeatureStateTransitionAudit,
 ) -> AdminFeatureStateTransitionAuditRecord:
@@ -1041,7 +908,7 @@ def _detail_response(
     curations: tuple[curation_repo.CurationItem, ...] = (),
 ) -> AdminFeatureDetailResponse:
     # T-VN-32C — feature record·curation item의 응답 feature 참조만 UUID 치환.
-    # sources/issues/overrides/versions/files/change_requests 레코드의 feature_id는
+    # sources/issues/overrides/files/state transition 레코드의 feature_id는
     # 내부 DB 참조(감사·lineage 레코드)라 legacy 유지.
     return AdminFeatureDetailResponse(
         data=AdminFeatureDetailData(
@@ -1052,8 +919,6 @@ def _detail_response(
             state_transitions=[
                 _state_transition_audit(item) for item in row.state_transitions
             ],
-            versions=[_detail_version(item) for item in row.versions],
-            change_requests=[_change_record(item) for item in row.change_requests],
             files=[_detail_file(item) for item in row.files],
             curations=[
                 AdminCurationItemView.model_validate(
@@ -1068,26 +933,11 @@ def _detail_response(
     )
 
 
-def _change_response(
-    row: FeatureChangeRequest,
-    *,
-    started_at: float,
-) -> AdminFeatureChangeResponse:
-    return AdminFeatureChangeResponse(
-        data=AdminFeatureChangeData(request=_change_record(row)),
-        meta=make_meta(started_at=started_at),
-    )
-
-
-def _review_mode(settings: ApiSettings) -> FeatureMutationReviewMode:
-    mode = settings.feature_change_review_mode
-    if mode not in {"require_review", "immediate"}:
-        return "require_review"
-    return cast(FeatureMutationReviewMode, mode)
-
-
 def _payload(body: AdminFeatureBaseMutation) -> dict[str, Any]:
-    raw = body.model_dump(exclude={"reason", "operator"}, exclude_unset=True)
+    raw = body.model_dump(
+        exclude={"reason", "operator", "idempotency_key"},
+        exclude_unset=True,
+    )
     if isinstance(body, AdminFeatureCreateRequest):
         # 생성 요청의 axis 기본값은 review payload에도 명시적으로 보존한다. 그렇지
         # 않으면 ``exclude_unset``이 기본값을 지워 승인 시 저장 경계가 의도와 다른
@@ -1165,15 +1015,6 @@ def _create_feature_id(body: AdminFeatureCreateRequest) -> str:
     )
 
 
-def _change_error(exc: FeatureChangeConflict) -> HTTPException:
-    status_code = (
-        status.HTTP_404_NOT_FOUND
-        if "feature 없음" in str(exc)
-        else status.HTTP_409_CONFLICT
-    )
-    return HTTPException(status_code=status_code, detail=str(exc))
-
-
 # ── If-Match row-revision 낙관적 동시성 (T-VN-13, D-10-3) ─────────────────────
 def _set_feature_etag(response: Response, revision: int) -> None:
     response.headers["ETag"] = revision_etag(revision)
@@ -1227,19 +1068,6 @@ def _require_if_match_revision(request: Request) -> int:
     revision = parse_revision_header(request, "If-Match", required=True)
     assert revision is not None
     return revision
-
-
-def _precondition_failed(exc: FeaturePreconditionFailed) -> HTTPException:
-    return HTTPException(
-        status_code=status.HTTP_412_PRECONDITION_FAILED,
-        detail={
-            "code": "PRECONDITION_FAILED",
-            "message": (
-                "If-Match row_revision이 현재 feature 행과 다릅니다: "
-                f"current={exc.current}."
-            ),
-        },
-    )
 
 
 def _state_precondition_failed(
@@ -1579,46 +1407,6 @@ async def list_features(
 
 
 @router.get(
-    "/change-requests",
-    response_model=AdminFeatureChangeListResponse,
-)
-async def list_feature_change_request_route(
-    session: Annotated[AsyncSession, Depends(get_session)],
-    settings: Annotated[ApiSettings, Depends(_settings)],
-    status_filter: Annotated[
-        list[Literal["pending", "applied", "rejected"]] | None,
-        Query(alias="status"),
-    ] = None,
-    action: Annotated[
-        list[Literal["add", "update", "delete"]] | None,
-        Query(),
-    ] = None,
-    q: Annotated[str | None, Query()] = None,
-    page_size: Annotated[int, Query(ge=1, le=500)] = 100,
-) -> AdminFeatureChangeListResponse:
-    started_at = perf_counter()
-    rows = await list_feature_change_requests(
-        session,
-        states=status_filter,
-        actions=action,
-        # T-VN-32C PR-2 (S8) — UUID 표기 검색어를 legacy 정본 키로 정규화.
-        q=await feature_identity.legacy_id_for_filter(session, q),
-        limit=page_size,
-    )
-    return AdminFeatureChangeListResponse(
-        data=AdminFeatureChangeListData(
-            items=[_change_record(row) for row in rows],
-            review_mode=_review_mode(settings),
-        ),
-        meta=make_meta(
-            started_at=started_at,
-            page_size=page_size,
-            next_cursor=None,
-        ),
-    )
-
-
-@router.get(
     "/{feature_id}/revision",
     response_model=AdminFeatureRevisionResponse,
     responses={
@@ -1739,14 +1527,23 @@ async def get_feature_detail_route(
     )
 
 
-@router.post("", response_model=AdminFeatureChangeResponse)
-@idempotent_domain_command("admin.feature.create")
+@router.post(
+    "",
+    response_model=AdminFeatureFieldOverrideResponse,
+    responses={
+        409: {"description": "feature identity가 이미 존재함"},
+        422: {"description": "typed field registry 또는 create input 오류"},
+        200: {"headers": _ETAG_RESPONSE_HEADER},
+    },
+)
+@idempotent_domain_command("admin.feature.override.author")
 async def create_feature_route(
     body: AdminFeatureCreateRequest,
+    request: Request,
+    response: Response,
     context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
     session: Annotated[AsyncSession, Depends(get_session)],
-    settings: Annotated[ApiSettings, Depends(_settings)],
-) -> AdminFeatureChangeResponse:
+) -> AdminFeatureFieldOverrideResponse:
     started_at = perf_counter()
     feature_id = _create_feature_id(body)
     payload = _payload(body)
@@ -1754,18 +1551,33 @@ async def create_feature_route(
     await _resolve_mutation_identity_refs(session, payload)
     async with domain_command_transaction(session):
         try:
-            result = await submit_feature_change_request(
+            result = await create_admin_feature_with_field_overrides(
                 session,
-                action="add",
                 feature_id=feature_id,
                 payload=payload,
-                review_mode=_review_mode(settings),
-                reason=body.reason,
-                requested_by=context.actor,
+                lifecycle_state=body.lifecycle_state,
+                publication_state=body.publication_state,
+                quality_state=body.quality_state,
+                reason_code=body.reason,
+                operator=context.actor,
+                command_id=current_domain_command().command_id,
             )
-        except FeatureChangeConflict as exc:
-            raise _change_error(exc) from exc
-    return _change_response(result, started_at=started_at)
+        except FeatureFieldOverrideValidationError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=str(exc),
+            ) from exc
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=str(exc),
+            ) from exc
+    _set_feature_etag(response, result.row_revision)
+    return _field_override_response(
+        result,
+        feature_id=result.feature_uuid or result.feature_id,
+        started_at=started_at,
+    )
 
 
 @router.patch(
@@ -1845,7 +1657,6 @@ async def patch_feature_state_route(
         feature_id=identity.feature_uuid,
         started_at=started_at,
     )
-
 
 @router.post(
     "/{feature_id}/state/reactivate",
@@ -2033,7 +1844,7 @@ async def revoke_feature_field_overrides_route(
 
 @router.patch(
     "/{feature_id}",
-    response_model=AdminFeatureChangeResponse,
+    response_model=AdminFeatureFieldOverrideResponse,
     responses={
         404: {"description": "feature 없음"},
         409: {"description": "변경 불가"},
@@ -2044,7 +1855,7 @@ async def revoke_feature_field_overrides_route(
     },
     openapi_extra={"parameters": [_IF_MATCH_OPENAPI_PARAMETER]},
 )
-@idempotent_domain_command("admin.feature.patch")
+@idempotent_domain_command("admin.feature.override.author")
 async def patch_feature_route(
     feature_id: str,
     body: AdminFeaturePatchRequest,
@@ -2052,8 +1863,7 @@ async def patch_feature_route(
     response: Response,
     context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
     session: Annotated[AsyncSession, Depends(get_session)],
-    settings: Annotated[ApiSettings, Depends(_settings)],
-) -> AdminFeatureChangeResponse:
+) -> AdminFeatureFieldOverrideResponse:
     started_at = perf_counter()
     identity = await resolve_feature_ref_or_error(session, feature_id)
     canonical_id = identity.feature_id
@@ -2062,29 +1872,38 @@ async def patch_feature_route(
     await _resolve_mutation_identity_refs(session, patch_payload)
     async with domain_command_transaction(session):
         try:
-            result = await submit_feature_change_request(
+            result = await patch_admin_feature_with_field_overrides(
                 session,
-                action="update",
                 feature_id=canonical_id,
                 payload=patch_payload,
-                review_mode=_review_mode(settings),
-                reason=body.reason,
-                requested_by=context.actor,
                 expected_row_revision=expected_revision,
+                reason_code=body.reason,
+                operator=context.actor,
+                command_id=current_domain_command().command_id,
             )
-        except FeaturePreconditionFailed as exc:
-            raise _precondition_failed(exc) from exc
-        except FeatureChangeConflict as exc:
-            raise _change_error(exc) from exc
-        new_revision = await get_feature_row_revision(session, canonical_id)
-    if new_revision is not None:
-        _set_feature_etag(response, new_revision)
-    return _change_response(result, started_at=started_at)
+        except FeatureFieldOverridePreconditionFailed as exc:
+            raise HTTPException(
+                status_code=status.HTTP_412_PRECONDITION_FAILED,
+                detail={"code": "PRECONDITION_FAILED", "message": str(exc)},
+            ) from exc
+        except FeatureFieldOverrideNotFound as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        except (FeatureFieldOverrideValidationError, ValueError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=str(exc),
+            ) from exc
+    _set_feature_etag(response, result.row_revision)
+    return _field_override_response(
+        result,
+        feature_id=identity.feature_uuid,
+        started_at=started_at,
+    )
 
 
 @router.delete(
     "/{feature_id}",
-    response_model=AdminFeatureChangeResponse,
+    response_model=AdminFeatureStateResponse,
     responses={
         404: {"description": "feature 없음"},
         409: {"description": "삭제 불가"},
@@ -2103,98 +1922,37 @@ async def delete_feature_route(
     response: Response,
     context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
     session: Annotated[AsyncSession, Depends(get_session)],
-    settings: Annotated[ApiSettings, Depends(_settings)],
-) -> AdminFeatureChangeResponse:
+) -> AdminFeatureStateResponse:
     started_at = perf_counter()
     identity = await resolve_feature_ref_or_error(session, feature_id)
     canonical_id = identity.feature_id
     expected_revision = _require_if_match_revision(request)
     async with domain_command_transaction(session):
         try:
-            result = await submit_feature_change_request(
+            transition = await transition_admin_feature_state(
                 session,
-                action="delete",
-                feature_id=canonical_id,
-                payload={},
-                review_mode=_review_mode(settings),
-                reason=body.reason,
-                requested_by=context.actor,
+                canonical_id,
+                action="retire",
+                publication_state=None,
+                quality_state=None,
                 expected_row_revision=expected_revision,
-            )
-        except FeaturePreconditionFailed as exc:
-            raise _precondition_failed(exc) from exc
-        except FeatureChangeConflict as exc:
-            raise _change_error(exc) from exc
-        new_revision = await get_feature_row_revision(session, canonical_id)
-    if new_revision is not None:
-        _set_feature_etag(response, new_revision)
-    return _change_response(result, started_at=started_at)
-
-
-@router.post(
-    "/change-requests/{request_id}/approve",
-    response_model=AdminFeatureChangeResponse,
-    responses={
-        404: {"description": "request 없음"},
-        409: {"description": "승인 불가"},
-        412: {"description": "If-Match row_revision 불일치"},
-        200: {"headers": _ETAG_RESPONSE_HEADER},
-    },
-)
-@idempotent_domain_command("admin.feature-change.approve")
-async def approve_feature_change_request_route(
-    request_id: str,
-    body: AdminFeatureReviewActionRequest,
-    response: Response,
-    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> AdminFeatureChangeResponse:
-    started_at = perf_counter()
-    async with domain_command_transaction(session):
-        try:
-            result = await apply_feature_change_request(
-                session,
-                request_id,
+                reason_code=body.reason,
                 operator=context.actor,
             )
-        except FeaturePreconditionFailed as exc:
-            raise _precondition_failed(exc) from exc
-        except FeatureChangeConflict as exc:
-            raise _change_error(exc) from exc
-        if result is None:
+        except AdminFeatureStatePreconditionFailed as exc:
+            raise _state_precondition_failed(exc) from exc
+        except AdminFeatureStateNotFound as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        except AdminFeatureStateConflict as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        except (AdminFeatureStateValidationError, ValueError) as exc:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"feature change request 없음: {request_id!r}",
-            )
-        new_revision = await get_feature_row_revision(session, result.feature_id)
-    if new_revision is not None:
-        _set_feature_etag(response, new_revision)
-    return _change_response(result, started_at=started_at)
-
-
-@router.post(
-    "/change-requests/{request_id}/reject",
-    response_model=AdminFeatureChangeResponse,
-    responses={404: {"description": "request 없음"}},
-)
-@idempotent_domain_command("admin.feature-change.reject")
-async def reject_feature_change_request_route(
-    request_id: str,
-    body: AdminFeatureReviewActionRequest,
-    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> AdminFeatureChangeResponse:
-    started_at = perf_counter()
-    async with domain_command_transaction(session):
-        result = await reject_feature_change_request(
-            session,
-            request_id,
-            operator=context.actor,
-            reason=body.reason,
-        )
-    if result is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"pending feature change request 없음: {request_id!r}",
-        )
-    return _change_response(result, started_at=started_at)
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=str(exc),
+            ) from exc
+    _set_feature_etag(response, transition.row_revision)
+    return _state_response(
+        transition,
+        feature_id=identity.feature_uuid,
+        started_at=started_at,
+    )

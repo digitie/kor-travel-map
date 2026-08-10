@@ -33,8 +33,6 @@ function makeFeature(
     address: { road: "서울특별시 영등포구 여의공원로 120" },
     category: "01070300",
     created_at: "2026-06-01T00:00:00.000Z",
-    data_origin: "provider",
-    data_version: 3,
     detail: { place_kind: "park" },
     feature_id: FEATURE_ID,
     kind: "place",
@@ -61,7 +59,6 @@ function makeDetailResponse(
 ): AdminFeatureDetailResponse {
   return {
     data: {
-      change_requests: [],
       curations: [],
       feature,
       files: [],
@@ -69,7 +66,6 @@ function makeDetailResponse(
       overrides: [],
       sources: [],
       state_transitions: [],
-      versions: [],
     },
     meta,
   };

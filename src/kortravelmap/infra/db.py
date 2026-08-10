@@ -78,8 +78,6 @@ _RUNTIME_DB_PRIVILEGE_SQL = text(
             AS can_create_in_feature_schema,
         has_table_privilege(session_user, 'feature.public_features', 'SELECT')
             AS can_read_public_features,
-        has_table_privilege(session_user, 'feature.feature_versions', 'SELECT')
-            AS can_read_feature_versions,
         has_table_privilege(session_user, 'ops.feature_override_field_paths', 'SELECT')
             AS can_read_feature_override_field_paths,
         -- PostgreSQL stores functions and procedures in pg_proc; the public
@@ -96,11 +94,6 @@ _RUNTIME_DB_PRIVILEGE_SQL = text(
         ) AS can_execute_transition_procedure,
         has_function_privilege(
             session_user,
-            'feature.materialize_user_feature_change_provenance(text,text,uuid,text,text,bigint)'::regprocedure,
-            'EXECUTE'
-        ) AS can_execute_provenance_procedure,
-        has_function_privilege(
-            session_user,
             'feature.author_lifecycle_override(text,text,text,boolean,text,text,bigint)'::regprocedure,
             'EXECUTE'
         ) AS can_execute_author_lifecycle_override_procedure,
@@ -111,11 +104,6 @@ _RUNTIME_DB_PRIVILEGE_SQL = text(
         ) AS can_execute_revoke_lifecycle_override_procedure,
         has_function_privilege(
             session_user,
-            'feature.materialize_provider_feature_version(text)'::regprocedure,
-            'EXECUTE'
-        ) AS can_execute_provider_version_procedure,
-        has_function_privilege(
-            session_user,
             'feature.apply_provider_feature_field_patch('
             'text,bigint,text,text,bigint,jsonb,jsonb)'::regprocedure,
             'EXECUTE'
@@ -123,13 +111,13 @@ _RUNTIME_DB_PRIVILEGE_SQL = text(
         has_function_privilege(
             session_user,
             'feature.author_feature_field_overrides('
-            'text,bigint,text,text,bigint,uuid,jsonb,jsonb)'::regprocedure,
+            'text,bigint,text,text,bigint,jsonb,jsonb)'::regprocedure,
             'EXECUTE'
         ) AS can_execute_field_override_author_procedure,
         has_function_privilege(
             session_user,
             'feature.revoke_feature_field_overrides('
-            'text,bigint,text,text,bigint,uuid,text[])'::regprocedure,
+            'text,bigint,text,text,bigint,text[])'::regprocedure,
             'EXECUTE'
         ) AS can_execute_field_override_revoke_procedure,
         has_function_privilege(
@@ -159,16 +147,14 @@ _RUNTIME_DB_PRIVILEGE_SQL = text(
               AND candidate_procedure.oid NOT IN (
                     'feature.create_feature_with_initial_state(jsonb,text,text,text,jsonb)'::regprocedure,
                     'feature.transition_feature_state(text,text,text,text,bigint,jsonb)'::regprocedure,
-                    'feature.materialize_user_feature_change_provenance(text,text,uuid,text,text,bigint)'::regprocedure,
                     'feature.author_lifecycle_override(text,text,text,boolean,text,text,bigint)'::regprocedure,
                     'feature.revoke_lifecycle_override(text,text,bigint)'::regprocedure,
-                    'feature.materialize_provider_feature_version(text)'::regprocedure,
                     'feature.apply_provider_feature_field_patch('
                     'text,bigint,text,text,bigint,jsonb,jsonb)'::regprocedure,
                     'feature.author_feature_field_overrides('
-                    'text,bigint,text,text,bigint,uuid,jsonb,jsonb)'::regprocedure,
+                    'text,bigint,text,text,bigint,jsonb,jsonb)'::regprocedure,
                     'feature.revoke_feature_field_overrides('
-                    'text,bigint,text,text,bigint,uuid,text[])'::regprocedure,
+                    'text,bigint,text,text,bigint,text[])'::regprocedure,
                     'feature.transition_admin_feature_state('
                     'text,text,text,text,bigint,text,text,text)'::regprocedure,
                     'feature.reactivate_admin_feature_state('
@@ -282,9 +268,6 @@ def _runtime_db_privilege_problems(
         "can_read_public_features": (
             "runtime login must SELECT feature.public_features"
         ),
-        "can_read_feature_versions": (
-            "runtime login must SELECT retained feature.feature_versions"
-        ),
         "can_read_feature_override_field_paths": (
             "runtime login must SELECT ops.feature_override_field_paths"
         ),
@@ -294,17 +277,11 @@ def _runtime_db_privilege_problems(
         "can_execute_transition_procedure": (
             "runtime login must EXECUTE transition_feature_state"
         ),
-        "can_execute_provenance_procedure": (
-            "runtime login must EXECUTE materialize_user_feature_change_provenance"
-        ),
         "can_execute_author_lifecycle_override_procedure": (
             "runtime login must EXECUTE author_lifecycle_override"
         ),
         "can_execute_revoke_lifecycle_override_procedure": (
             "runtime login must EXECUTE revoke_lifecycle_override"
-        ),
-        "can_execute_provider_version_procedure": (
-            "runtime login must EXECUTE materialize_provider_feature_version"
         ),
         "can_execute_provider_field_patch_procedure": (
             "runtime login must EXECUTE apply_provider_feature_field_patch"

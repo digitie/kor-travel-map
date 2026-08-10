@@ -233,10 +233,6 @@ CALL feature.apply_provider_feature_field_patch(
 # 넣지 않고, **같은 트랜잭션에서 행 잠금을 잡고 직전 값을 읽어** 파라미터로 넘긴다.
 # ``FOR UPDATE``가 동시 writer를 직렬화하므로 read-then-write 경합이 없다(행이
 # 없으면 잠글 것도 없고 뒤이은 INSERT의 유니크 인덱스가 직렬화한다).
-_MATERIALIZE_PROVIDER_VERSION_SQL: Final[str] = """
-CALL feature.materialize_provider_feature_version(CAST(:feature_id AS text))
-"""
-
 # provider entity는 DB dataset identity 아래 payload version과 독립적으로 한 행을 유지한다.
 _UPSERT_SOURCE_ENTITY_SQL: Final[str] = """
 INSERT INTO provider_sync.source_entities (
@@ -2237,8 +2233,6 @@ def _provider_feature_payload(params: Mapping[str, Any]) -> str:
         if key
         not in {
             "geom_wkt",
-            "data_origin",
-            "data_version",
             "created_at",
             "updated_at",
         }
@@ -2562,10 +2556,6 @@ async def upsert_feature(
             feature,
             stored_feature_uuid=stored_feature_uuid,
             geom_wkt=geom_wkt,
-        )
-        await session.execute(
-            text(_MATERIALIZE_PROVIDER_VERSION_SQL),
-            {"feature_id": feature.feature_id},
         )
     else:
         await _apply_provider_feature_field_patch(

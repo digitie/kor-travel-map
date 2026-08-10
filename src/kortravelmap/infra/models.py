@@ -105,7 +105,6 @@ __all__ = [
     "FeatureRow",
     "FeatureStateTransitionRow",
     "FeatureAliasRow",
-    "FeatureVersionRow",
     "ProviderDatasetRow",
     "ProviderDatasetOperationRow",
     "ProviderDatasetOperationScopeRow",
@@ -137,7 +136,6 @@ __all__ = [
     "FeatureOverrideFieldPathRow",
     "FeatureBaseFieldValueRow",
     "FeatureOverrideRow",
-    "FeatureChangeRequestRow",
     "FeatureUpdateRequestRow",
     "FeatureUpdateRequestDatasetRow",
     "FeatureUpdateRequestIdempotencyRow",
@@ -237,11 +235,6 @@ class FeatureRow(Base):
             "lifecycle_state = 'active' OR publication_state = 'suppressed'",
             name="state_tuple",
         ),
-        CheckConstraint(
-            "data_origin IN ('provider','user_request')",
-            name="ck_features_data_origin",
-        ),
-        CheckConstraint("data_version >= 0", name="ck_features_data_version"),
         CheckConstraint("row_revision >= 1", name="ck_features_row_revision"),
         CheckConstraint(
             "coord IS NULL OR ("
@@ -372,7 +365,6 @@ class FeatureRow(Base):
                 "AND quality_state = 'valid'"
             ),
         ),
-        Index("idx_features_data_origin", "data_origin", "data_version"),
         UniqueConstraint("feature_uuid", name=conv("uq_features_feature_uuid")),
         # T-VN-32C(0083) — 파생 CHECK는 해제됐고(비파생 UUIDv7 generator),
         # 복합 UNIQUE가 alias 사본 일치 FK의 참조 대상이 된다.
@@ -449,8 +441,7 @@ class FeatureRow(Base):
         server_default=text("'[]'::jsonb"),
     )
     # T-VN-34C(ADR-090) 직교 상태 정본. legacy status/soft-delete/user-change
-    # surrogate는 final migration에서 물리 제거했고, 재시도 receipt는
-    # ``feature_versions``의 immutable request binding이 맡는다.
+    # surrogate는 final migration에서 물리 제거했다.
     lifecycle_state: Mapped[str] = mapped_column(
         Text,
         nullable=False,
@@ -466,19 +457,9 @@ class FeatureRow(Base):
         nullable=False,
         server_default=text("'valid'"),
     )
-    data_origin: Mapped[str] = mapped_column(
-        Text,
-        nullable=False,
-        server_default=text("'provider'"),
-    )
-    data_version: Mapped[int] = mapped_column(
-        Integer,
-        nullable=False,
-        server_default=text("0"),
-    )
     # T-VN-13(D-10-3): server-owned monotonic row revision. 모든 UPDATE에서
     # feature.force_features_row_revision() 트리거가 +1 강제 — If-Match/ETag 낙관적
-    # 동시성 validator. provider-owned data_version(위)과 별개다.
+    # 동시성 validator.
     row_revision: Mapped[int] = mapped_column(
         BigInteger,
         nullable=False,
@@ -896,60 +877,6 @@ class FeatureAliasRow(Base):
     )
     feature_uuid: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
     alias_kind: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        server_default=text("now()"),
-    )
-
-
-class FeatureVersionRow(Base):
-    """``feature.feature_versions`` row mapping.
-
-    provider 적재 snapshot은 version 0이고, user request receipt는 feature별
-    증가 version이다. ``(feature_id, request_id)`` partial UNIQUE와 trigger가
-    applied request의 immutable replay receipt를 보장한다.
-    """
-
-    __tablename__ = "feature_versions"
-    __table_args__ = (
-        CheckConstraint("version >= 0", name="ck_feature_versions_version"),
-        CheckConstraint(
-            "origin IN ('provider','user_request')",
-            name="ck_feature_versions_origin",
-        ),
-        CheckConstraint(
-            "change_kind IN ('load','add','update','delete')",
-            name="ck_feature_versions_change_kind",
-        ),
-        Index("idx_feature_versions_request", "request_id"),
-        Index(
-            "uq_feature_versions_user_request_receipt",
-            "feature_id",
-            "request_id",
-            unique=True,
-            postgresql_where=text(
-                "origin = 'user_request' AND request_id IS NOT NULL"
-            ),
-        ),
-        {"schema": "feature"},
-    )
-
-    feature_id: Mapped[str] = mapped_column(
-        String,
-        ForeignKey("feature.features.feature_id", ondelete="CASCADE"),
-        primary_key=True,
-    )
-    version: Mapped[int] = mapped_column(Integer, primary_key=True)
-    origin: Mapped[str] = mapped_column(Text, nullable=False)
-    change_kind: Mapped[str] = mapped_column(Text, nullable=False)
-    payload: Mapped[dict[str, Any]] = mapped_column(
-        JSONB,
-        nullable=False,
-        server_default=text("'{}'::jsonb"),
-    )
-    request_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
-    created_by: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -2889,10 +2816,6 @@ class FeatureOverrideRow(Base):
         BigInteger,
         ForeignKey("ops.domain_commands.command_id", ondelete="RESTRICT"),
     )
-    request_id: Mapped[str | None] = mapped_column(
-        UUID(as_uuid=False),
-        ForeignKey("ops.feature_change_requests.request_id", ondelete="RESTRICT"),
-    )
     base_revision: Mapped[int | None] = mapped_column(BigInteger)
     created_by: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
@@ -2903,73 +2826,6 @@ class FeatureOverrideRow(Base):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     revoked_by: Mapped[str | None] = mapped_column(Text)
     revoked_reason: Mapped[str | None] = mapped_column(Text)
-
-
-# =============================================================================
-# ops.feature_change_requests  (user/admin feature add/update/delete)
-# =============================================================================
-
-
-class FeatureChangeRequestRow(Base):
-    """``ops.feature_change_requests`` row mapping.
-
-    place/event feature 추가·수정·삭제 요청을 보존한다. admin 설정에 따라
-    ``pending``으로 남거나 즉시 ``applied``된다.
-    """
-
-    __tablename__ = "feature_change_requests"
-    __table_args__ = (
-        CheckConstraint(
-            "action IN ('add','update','delete')",
-            name="ck_feature_change_action",
-        ),
-        CheckConstraint(
-            "state IN ('pending','applied','rejected')",
-            name="ck_feature_change_state",
-        ),
-        CheckConstraint(
-            "review_mode IN ('require_review','immediate')",
-            name="ck_feature_change_review_mode",
-        ),
-        Index(
-            "idx_feature_change_state_created",
-            "state",
-            text("created_at DESC"),
-            text("request_id DESC"),
-        ),
-        Index("idx_feature_change_feature", "feature_id"),
-        {"schema": "ops"},
-    )
-
-    request_id: Mapped[str] = mapped_column(
-        UUID(as_uuid=False),
-        primary_key=True,
-        server_default=text("x_extension.gen_random_uuid()"),
-    )
-    feature_id: Mapped[str] = mapped_column(String, nullable=False)
-    action: Mapped[str] = mapped_column(Text, nullable=False)
-    state: Mapped[str] = mapped_column(
-        Text,
-        nullable=False,
-        server_default=text("'pending'"),
-    )
-    review_mode: Mapped[str] = mapped_column(Text, nullable=False)
-    base_row_revision: Mapped[int | None] = mapped_column(BigInteger)
-    payload: Mapped[dict[str, Any]] = mapped_column(
-        JSONB,
-        nullable=False,
-        server_default=text("'{}'::jsonb"),
-    )
-    reason: Mapped[str | None] = mapped_column(Text)
-    requested_by: Mapped[str | None] = mapped_column(Text)
-    reviewed_by: Mapped[str | None] = mapped_column(Text)
-    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        server_default=text("now()"),
-    )
 
 
 # =============================================================================

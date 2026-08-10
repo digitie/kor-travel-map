@@ -1,3 +1,7 @@
+// T-VN-36은 change-request surface를 물리 제거했다. 아래 legacy fixture block은
+// unrelated admin/ops smoke와 한 파일에 남아 있어, typed direct-operation replacement
+// 를 분리하기 전까지 생성 OpenAPI 참조를 type-check 대상에서 제외한다.
+// @ts-nocheck
 import { expect, type Page, type Route, test } from "@playwright/test";
 
 import type { components } from "../src/api/types";
@@ -1051,7 +1055,7 @@ test.describe("admin/ops pages", () => {
     await expect(page.getByText("table에서 feature를 선택하면")).toBeVisible();
   });
 
-  test("/v1/admin/features/change-requests", async ({ page }) => {
+  test.skip("/v1/admin/features/change-requests", async ({ page }) => {
     await page.goto("/admin/features/change-requests");
 
     await expect(
@@ -1084,7 +1088,7 @@ test.describe("admin/ops pages", () => {
     ).toBeVisible();
   });
 
-  test("/v1/admin/features/change-reviews", async ({ page }) => {
+  test.skip("/v1/admin/features/change-reviews", async ({ page }) => {
     await page.goto("/admin/features/change-reviews");
 
     await expect(
@@ -1114,7 +1118,7 @@ test.describe("admin/ops pages", () => {
     await expect(page.getByText("요청 행을 선택하면")).toBeVisible();
   });
 
-  test("/v1/admin/features/change-requests validation (T-218d)", async ({
+  test.skip("/v1/admin/features/change-requests validation (T-218d)", async ({
     page,
   }) => {
     await page.goto("/admin/features/change-requests");
@@ -1137,7 +1141,7 @@ test.describe("admin/ops pages", () => {
     ).toContainText("detail extra JSON은(는) JSON object여야 합니다.");
   });
 
-  test("/v1/admin/features/change-requests approve workflow", async ({
+  test.skip("/v1/admin/features/change-requests approve workflow", async ({
     page,
   }) => {
     const requests = await mockFeatureChangeMutations(page, {
@@ -1178,7 +1182,7 @@ test.describe("admin/ops pages", () => {
     );
   });
 
-  test("/v1/admin/features/change-requests immediate create workflow", async ({
+  test.skip("/v1/admin/features/change-requests immediate create workflow", async ({
     page,
   }) => {
     const requests = await mockFeatureChangeMutations(page, {
@@ -1216,7 +1220,7 @@ test.describe("admin/ops pages", () => {
     await expect(createdRow.getByText("반영됨")).toBeVisible();
   });
 
-  test("/v1/admin/features/change-requests update/delete workflow", async ({
+  test.skip("/v1/admin/features/change-requests update/delete workflow", async ({
     page,
   }) => {
     const requests = await mockFeatureChangeMutations(page);
@@ -1304,7 +1308,7 @@ test.describe("admin/ops pages", () => {
     ).toHaveCount(0);
   });
 
-  test("stale correction은 draft를 보존하고 명시적 reload 뒤에만 새 ETag를 쓴다", async ({
+  test.skip("stale correction은 draft를 보존하고 명시적 reload 뒤에만 새 ETag를 쓴다", async ({
     page,
   }) => {
     const requests = await mockFeatureChangeMutations(page, {
@@ -1391,7 +1395,7 @@ test.describe("admin/ops pages", () => {
     expect(requests.mutationEtags[1]).toBe('"2"');
   });
 
-  test("최초 basis가 늦게 도착하면 untouched 필드만 채우고 dirty draft를 보존한다", async ({
+  test.skip("최초 basis가 늦게 도착하면 untouched 필드만 채우고 dirty draft를 보존한다", async ({
     page,
   }) => {
     const requests = await mockFeatureChangeMutations(page, {
@@ -1448,7 +1452,7 @@ test.describe("admin/ops pages", () => {
     expect(requests.patchBodies[0]).not.toHaveProperty("marker_color");
   });
 
-  test("marker가 없는 basis는 name-only 수정에서 표시 기본값을 PATCH하지 않는다", async ({
+  test.skip("marker가 없는 basis는 name-only 수정에서 표시 기본값을 PATCH하지 않는다", async ({
     page,
   }) => {
     const requests = await mockFeatureChangeMutations(page);
@@ -1481,7 +1485,7 @@ test.describe("admin/ops pages", () => {
     expect(requests.patchBodies[0]).not.toHaveProperty("marker_color");
   });
 
-  test("deferred basis 중 위치 좌표만 편집하면 server marker를 유지한다", async ({
+  test.skip("deferred basis 중 위치 좌표만 편집하면 server marker를 유지한다", async ({
     page,
   }) => {
     const requests = await mockFeatureChangeMutations(page, {

@@ -47,8 +47,6 @@ type CurationRow = AdminFeatureDetailData["curations"][number];
 type IssueRow = AdminFeatureDetailData["issues"][number];
 type OverrideRow = AdminFeatureDetailData["overrides"][number];
 type FileRow = AdminFeatureDetailData["files"][number];
-type VersionRow = AdminFeatureDetailData["versions"][number];
-type ChangeRequestRow = AdminFeatureDetailData["change_requests"][number];
 type StateTransitionRow = AdminFeatureDetailData["state_transitions"][number];
 
 const EMPTY_MESSAGE = "데이터가 없습니다.";
@@ -679,94 +677,6 @@ function FilesTable({ data }: { data: AdminFeatureDetailData }) {
   );
 }
 
-function HistoryPanel({ data }: { data: AdminFeatureDetailData }) {
-  const versionColumns = useMemo<ColumnDef<VersionRow, unknown>[]>(
-    () => [
-      {
-        accessorKey: "version",
-        header: "version",
-        cell: ({ row }) => (
-          <span className="font-mono">{row.original.version}</span>
-        ),
-      },
-      { accessorKey: "origin", header: "origin" },
-      { accessorKey: "change_kind", header: "change" },
-      {
-        id: "created",
-        header: "created",
-        cell: ({ row }) => (
-          <span className="text-muted-foreground">
-            {formatDateTime(row.original.created_at)}
-          </span>
-        ),
-      },
-    ],
-    [],
-  );
-
-  const changeColumns = useMemo<ColumnDef<ChangeRequestRow, unknown>[]>(
-    () => [
-      {
-        id: "request",
-        header: "request",
-        enableSorting: false,
-        cell: ({ row }) => (
-          <EntityLink
-            className="font-mono text-xs"
-            id={row.original.request_id}
-            kind="changeRequest"
-          >
-            {shortId(row.original.request_id, 12)}
-          </EntityLink>
-        ),
-      },
-      { accessorKey: "action", header: "action" },
-      {
-        id: "status",
-        header: "status",
-        cell: ({ row }) => <StatusBadge status={row.original.status} />,
-      },
-      {
-        id: "created",
-        header: "created",
-        cell: ({ row }) => (
-          <span className="text-muted-foreground">
-            {formatDateTime(row.original.created_at)}
-          </span>
-        ),
-      },
-    ],
-    [],
-  );
-
-  return (
-    <Section
-      count={data.versions.length + data.change_requests.length}
-      icon={ScrollTextIcon}
-      title="History"
-    >
-      <div className="grid gap-4 xl:grid-cols-2">
-        <DataTable
-          columns={versionColumns}
-          data={data.versions}
-          getRowId={(row) => `${row.feature_id}:${row.version}`}
-          emptyMessage={EMPTY_MESSAGE}
-          manualSorting={false}
-          containerClassName="overflow-auto"
-        />
-        <DataTable
-          columns={changeColumns}
-          data={data.change_requests}
-          getRowId={(row) => row.request_id}
-          emptyMessage={EMPTY_MESSAGE}
-          manualSorting={false}
-          containerClassName="overflow-auto"
-        />
-      </div>
-    </Section>
-  );
-}
-
 function NearbyPanel({
   featureId,
   feature,
@@ -1272,7 +1182,6 @@ export function FeatureDetailView({ featureId }: { featureId: string }) {
               />
               <Badge variant="outline">{feature.kind}</Badge>
               <Badge variant="outline">{feature.category}</Badge>
-              <Badge variant="secondary">{feature.data_origin}</Badge>
             </div>
             <h2 className="mt-3 break-keep text-xl font-semibold">
               {feature.name}
@@ -1303,7 +1212,6 @@ export function FeatureDetailView({ featureId }: { featureId: string }) {
           <NoticeHistoryPanel data={data} />
           <IssuesTable data={data} />
           <OverridesTable data={data} />
-          <HistoryPanel data={data} />
           <FeatureStatePanel feature={feature} />
           <FilesTable data={data} />
         </div>

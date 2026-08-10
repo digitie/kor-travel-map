@@ -4,6 +4,12 @@
 CHECK constraint가 여기에 박혀 있고, Alembic migration 작성 시 본 문서를 기준으로
 한다. 인덱스 설계 근거는 `docs/architecture/performance.md`와 ADR을 참고한다.
 
+> **T-VN-36D final schema**: historical bridge 절은 migration lineage를 설명하기 위해 남아
+> 있으나 current head의 `feature.features`에는 `data_origin`/`data_version`이 없고,
+> `feature.feature_versions` 및 `ops.feature_change_requests`도 존재하지 않는다. provider base와
+> active field override의 effective projection이 정본이며, physical fence는 Alembic `0104`와
+> `contracts/vnext/tvn36-post-cutover-invariants-v1.sql`로 검증한다.
+
 ## 0. 공통
 
 - **DB**: PostgreSQL 16

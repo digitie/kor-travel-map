@@ -148,7 +148,7 @@ _COMMAND_REGISTRY: Final[dict[OperationKey, CommandPolicy]] = {
         _DESTRUCTIVE_RESULT,
     ),
     ("POST", "/v1/admin/features"): _domain(
-        "admin.feature.create",
+        "admin.feature.override.author",
         _MUTATION_RESULT,
     ),
     ("POST", "/v1/admin/features/{feature_id}/field-overrides"): _domain(
@@ -164,7 +164,7 @@ _COMMAND_REGISTRY: Final[dict[OperationKey, CommandPolicy]] = {
         fingerprint_headers=("If-Match",),
     ),
     ("PATCH", "/v1/admin/features/{feature_id}"): _domain(
-        "admin.feature.patch",
+        "admin.feature.override.author",
         _MUTATION_RESULT,
         replay_headers=("ETag",),
         fingerprint_headers=("If-Match",),
@@ -187,18 +187,6 @@ _COMMAND_REGISTRY: Final[dict[OperationKey, CommandPolicy]] = {
         replay_headers=("ETag",),
         fingerprint_headers=("If-Match",),
     ),
-    (
-        "POST",
-        "/v1/admin/features/change-requests/{request_id}/approve",
-    ): _domain(
-        "admin.feature-change.approve",
-        _MUTATION_RESULT,
-        replay_headers=("ETag",),
-    ),
-    (
-        "POST",
-        "/v1/admin/features/change-requests/{request_id}/reject",
-    ): _domain("admin.feature-change.reject", _MUTATION_RESULT),
     ("POST", "/v1/admin/features/curated"): _domain(
         "admin.curated-feature.create",
         _MUTATION_RESULT,

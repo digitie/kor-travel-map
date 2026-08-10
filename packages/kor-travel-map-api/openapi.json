@@ -1474,213 +1474,6 @@
         "title": "AdminCurationQuarantineReclassifyResponse",
         "type": "object"
       },
-      "AdminFeatureChangeData": {
-        "additionalProperties": false,
-        "description": "단건 feature change response data.",
-        "properties": {
-          "request": {
-            "$ref": "#/components/schemas/AdminFeatureChangeRequestRecord"
-          }
-        },
-        "required": [
-          "request"
-        ],
-        "title": "AdminFeatureChangeData",
-        "type": "object"
-      },
-      "AdminFeatureChangeListData": {
-        "additionalProperties": false,
-        "description": "feature change request list data.",
-        "properties": {
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/AdminFeatureChangeRequestRecord"
-            },
-            "title": "Items",
-            "type": "array"
-          },
-          "review_mode": {
-            "enum": [
-              "require_review",
-              "immediate"
-            ],
-            "title": "Review Mode",
-            "type": "string"
-          }
-        },
-        "required": [
-          "items",
-          "review_mode"
-        ],
-        "title": "AdminFeatureChangeListData",
-        "type": "object"
-      },
-      "AdminFeatureChangeListResponse": {
-        "additionalProperties": false,
-        "description": "``GET /admin/features/change-requests`` 응답.",
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/AdminFeatureChangeListData"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/Meta"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "title": "AdminFeatureChangeListResponse",
-        "type": "object"
-      },
-      "AdminFeatureChangeRequestRecord": {
-        "additionalProperties": false,
-        "description": "feature add/update/delete request 응답 data.",
-        "properties": {
-          "action": {
-            "enum": [
-              "add",
-              "update",
-              "delete"
-            ],
-            "title": "Action",
-            "type": "string"
-          },
-          "applied_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Applied At"
-          },
-          "base_row_revision": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "update/delete 요청 제출 시 확인한 feature row_revision.",
-            "title": "Base Row Revision"
-          },
-          "created_at": {
-            "format": "date-time",
-            "title": "Created At",
-            "type": "string"
-          },
-          "feature_id": {
-            "title": "Feature Id",
-            "type": "string"
-          },
-          "payload": {
-            "additionalProperties": true,
-            "title": "Payload",
-            "type": "object"
-          },
-          "reason": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reason"
-          },
-          "request_id": {
-            "title": "Request Id",
-            "type": "string"
-          },
-          "requested_by": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Requested By"
-          },
-          "review_mode": {
-            "enum": [
-              "require_review",
-              "immediate"
-            ],
-            "title": "Review Mode",
-            "type": "string"
-          },
-          "reviewed_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reviewed At"
-          },
-          "reviewed_by": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reviewed By"
-          },
-          "status": {
-            "enum": [
-              "pending",
-              "applied",
-              "rejected"
-            ],
-            "title": "Status",
-            "type": "string"
-          }
-        },
-        "required": [
-          "request_id",
-          "feature_id",
-          "action",
-          "status",
-          "review_mode",
-          "payload",
-          "created_at"
-        ],
-        "title": "AdminFeatureChangeRequestRecord",
-        "type": "object"
-      },
-      "AdminFeatureChangeResponse": {
-        "additionalProperties": false,
-        "description": "feature add/update/delete/approve/reject 응답.",
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/AdminFeatureChangeData"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/Meta"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "title": "AdminFeatureChangeResponse",
-        "type": "object"
-      },
       "AdminFeatureCluster": {
         "additionalProperties": false,
         "description": "Admin base Feature의 canonical 행정구역 rollup.",
@@ -2035,13 +1828,6 @@
         "additionalProperties": false,
         "description": "``GET /admin/features/{feature_id}`` data.",
         "properties": {
-          "change_requests": {
-            "items": {
-              "$ref": "#/components/schemas/AdminFeatureChangeRequestRecord"
-            },
-            "title": "Change Requests",
-            "type": "array"
-          },
           "curations": {
             "items": {
               "$ref": "#/components/schemas/AdminCurationItemView"
@@ -2086,13 +1872,6 @@
             },
             "title": "State Transitions",
             "type": "array"
-          },
-          "versions": {
-            "items": {
-              "$ref": "#/components/schemas/AdminFeatureDetailVersionRecord"
-            },
-            "title": "Versions",
-            "type": "array"
           }
         },
         "required": [
@@ -2101,8 +1880,6 @@
           "issues",
           "overrides",
           "state_transitions",
-          "versions",
-          "change_requests",
           "files",
           "curations"
         ],
@@ -2159,14 +1936,6 @@
             "format": "date-time",
             "title": "Created At",
             "type": "string"
-          },
-          "data_origin": {
-            "title": "Data Origin",
-            "type": "string"
-          },
-          "data_version": {
-            "title": "Data Version",
-            "type": "integer"
           },
           "detail": {
             "additionalProperties": true,
@@ -2381,8 +2150,6 @@
           "detail",
           "urls",
           "raw_refs",
-          "data_origin",
-          "data_version",
           "row_revision",
           "created_at",
           "updated_at"
@@ -2861,70 +2628,6 @@
           "linked_at"
         ],
         "title": "AdminFeatureDetailSourceRecord",
-        "type": "object"
-      },
-      "AdminFeatureDetailVersionRecord": {
-        "additionalProperties": false,
-        "description": "Admin feature 상세 version row.",
-        "properties": {
-          "change_kind": {
-            "title": "Change Kind",
-            "type": "string"
-          },
-          "created_at": {
-            "format": "date-time",
-            "title": "Created At",
-            "type": "string"
-          },
-          "created_by": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Created By"
-          },
-          "feature_id": {
-            "title": "Feature Id",
-            "type": "string"
-          },
-          "origin": {
-            "title": "Origin",
-            "type": "string"
-          },
-          "payload": {
-            "additionalProperties": true,
-            "title": "Payload",
-            "type": "object"
-          },
-          "request_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Request Id"
-          },
-          "version": {
-            "title": "Version",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "feature_id",
-          "version",
-          "origin",
-          "change_kind",
-          "payload",
-          "created_at"
-        ],
-        "title": "AdminFeatureDetailVersionRecord",
         "type": "object"
       },
       "AdminFeatureFieldOverrideAuthorRequest": {
@@ -3653,38 +3356,6 @@
           "updated_at"
         ],
         "title": "AdminFeatureRecord",
-        "type": "object"
-      },
-      "AdminFeatureReviewActionRequest": {
-        "additionalProperties": false,
-        "description": "approve/reject body.",
-        "properties": {
-          "operator": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "deprecated": true,
-            "description": "[deprecated·ignored] 감사 actor는 인증 principal에서만 파생한다 (ADR-066 D-2, T-VN-20). PinVi 호환을 위해 수용하되 값은 무시하며, PinVi는 전송 중단 예정 (docs/integration-map.md).",
-            "title": "Operator"
-          },
-          "reason": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reason"
-          }
-        },
-        "title": "AdminFeatureReviewActionRequest",
         "type": "object"
       },
       "AdminFeatureRevisionData": {
@@ -28792,14 +28463,6 @@
             "title": "Created At",
             "type": "string"
           },
-          "data_origin": {
-            "title": "Data Origin",
-            "type": "string"
-          },
-          "data_version": {
-            "title": "Data Version",
-            "type": "integer"
-          },
           "detail": {
             "additionalProperties": true,
             "title": "Detail",
@@ -28924,8 +28587,6 @@
           "detail",
           "urls",
           "raw_refs",
-          "data_origin",
-          "data_version",
           "created_at",
           "updated_at",
           "sources"
@@ -33482,11 +33143,29 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminFeatureChangeResponse"
+                  "$ref": "#/components/schemas/AdminFeatureFieldOverrideResponse"
                 }
               }
             },
-            "description": "Successful Response"
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "현재 feature의 server-owned row_revision strong entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "feature identity가 이미 존재함"
           },
           "422": {
             "content": {
@@ -33496,7 +33175,7 @@
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "typed field registry 또는 create input 오류"
           },
           "default": {
             "content": {
@@ -33515,336 +33194,6 @@
           }
         ],
         "summary": "Create Feature Route",
-        "tags": [
-          "admin-features"
-        ]
-      }
-    },
-    "/v1/admin/features/change-requests": {
-      "get": {
-        "operationId": "list_feature_change_request_route_v1_admin_features_change_requests_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "status",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "items": {
-                    "enum": [
-                      "pending",
-                      "applied",
-                      "rejected"
-                    ],
-                    "type": "string"
-                  },
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Status"
-            }
-          },
-          {
-            "in": "query",
-            "name": "action",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "items": {
-                    "enum": [
-                      "add",
-                      "update",
-                      "delete"
-                    ],
-                    "type": "string"
-                  },
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Action"
-            }
-          },
-          {
-            "in": "query",
-            "name": "q",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Q"
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_size",
-            "required": false,
-            "schema": {
-              "default": 100,
-              "maximum": 500,
-              "minimum": 1,
-              "title": "Page Size",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AdminFeatureChangeListResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "Validation Error"
-          },
-          "default": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
-          }
-        },
-        "security": [
-          {
-            "AdminBFF": []
-          }
-        ],
-        "summary": "List Feature Change Request Route",
-        "tags": [
-          "admin-features"
-        ]
-      }
-    },
-    "/v1/admin/features/change-requests/{request_id}/approve": {
-      "post": {
-        "operationId": "approve_feature_change_request_route_v1_admin_features_change_requests__request_id__approve_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "request_id",
-            "required": true,
-            "schema": {
-              "title": "Request Id",
-              "type": "string"
-            }
-          },
-          {
-            "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
-            "in": "header",
-            "name": "Idempotency-Key",
-            "required": true,
-            "schema": {
-              "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
-              "format": "uuid",
-              "title": "Idempotency-Key",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AdminFeatureReviewActionRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AdminFeatureChangeResponse"
-                }
-              }
-            },
-            "description": "Successful Response",
-            "headers": {
-              "ETag": {
-                "description": "현재 feature의 server-owned row_revision strong entity tag.",
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "404": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "request 없음"
-          },
-          "409": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "승인 불가"
-          },
-          "412": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "If-Match row_revision 불일치"
-          },
-          "422": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "Validation Error"
-          },
-          "default": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
-          }
-        },
-        "security": [
-          {
-            "AdminBFF": []
-          }
-        ],
-        "summary": "Approve Feature Change Request Route",
-        "tags": [
-          "admin-features"
-        ]
-      }
-    },
-    "/v1/admin/features/change-requests/{request_id}/reject": {
-      "post": {
-        "operationId": "reject_feature_change_request_route_v1_admin_features_change_requests__request_id__reject_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "request_id",
-            "required": true,
-            "schema": {
-              "title": "Request Id",
-              "type": "string"
-            }
-          },
-          {
-            "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
-            "in": "header",
-            "name": "Idempotency-Key",
-            "required": true,
-            "schema": {
-              "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
-              "format": "uuid",
-              "title": "Idempotency-Key",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AdminFeatureReviewActionRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AdminFeatureChangeResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "404": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "request 없음"
-          },
-          "422": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "Validation Error"
-          },
-          "default": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
-          }
-        },
-        "security": [
-          {
-            "AdminBFF": []
-          }
-        ],
-        "summary": "Reject Feature Change Request Route",
         "tags": [
           "admin-features"
         ]
@@ -36002,7 +35351,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminFeatureChangeResponse"
+                  "$ref": "#/components/schemas/AdminFeatureStateResponse"
                 }
               }
             },
@@ -36202,7 +35551,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminFeatureChangeResponse"
+                  "$ref": "#/components/schemas/AdminFeatureFieldOverrideResponse"
                 }
               }
             },

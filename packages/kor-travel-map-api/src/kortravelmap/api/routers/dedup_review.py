@@ -157,8 +157,6 @@ class ReviewFeatureDetailRecord(BaseModel):
     raw_refs: list[dict[str, Any]]
     marker_icon: str | None = None
     marker_color: str | None = None
-    data_origin: str
-    data_version: int
     created_at: datetime
     updated_at: datetime
     sources: list[ReviewSourceDetailRecord]
@@ -291,8 +289,6 @@ def _feature_detail(row: ReviewFeatureDetail) -> ReviewFeatureDetailRecord:
         raw_refs=row.raw_refs,
         marker_icon=row.marker_icon,
         marker_color=row.marker_color,
-        data_origin=row.data_origin,
-        data_version=row.data_version,
         created_at=row.created_at,
         updated_at=row.updated_at,
         sources=[_source_detail(source) for source in row.sources],

@@ -29,10 +29,6 @@ type AdminFeatureDetailOverrideRecord =
   components["schemas"]["AdminFeatureDetailOverrideRecord"];
 type AdminFeatureDetailFileRecord =
   components["schemas"]["AdminFeatureDetailFileRecord"];
-type AdminFeatureDetailVersionRecord =
-  components["schemas"]["AdminFeatureDetailVersionRecord"];
-type AdminFeatureChangeRequestRecord =
-  components["schemas"]["AdminFeatureChangeRequestRecord"];
 type CurationItemView = components["schemas"]["AdminCurationItemView"];
 type FeaturesNearbyResponse = components["schemas"]["FeaturesNearbyResponse"];
 type NearbyFeatureSummary = components["schemas"]["NearbyFeatureSummary"];
@@ -62,8 +58,6 @@ function makeFeature(
     address: { road: "서울특별시 영등포구 여의공원로 120" },
     category: "01070300",
     created_at: "2026-06-01T00:00:00.000Z",
-    data_origin: "provider",
-    data_version: 3,
     detail: { place_kind: "park", marker: RAW_DETAIL_MARKER },
     feature_id: FEATURE_ID,
     kind: "place",
@@ -228,42 +222,6 @@ function makeFile(
   };
 }
 
-function makeVersion(
-  overrides: Partial<AdminFeatureDetailVersionRecord> = {},
-): AdminFeatureDetailVersionRecord {
-  return {
-    change_kind: "provider_merge",
-    created_at: "2026-06-08T05:00:00.000Z",
-    created_by: "dagster",
-    feature_id: FEATURE_ID,
-    origin: "provider",
-    payload: { name: "여의도공원" },
-    request_id: null,
-    version: 3,
-    ...overrides,
-  };
-}
-
-function makeChangeRequest(
-  overrides: Partial<AdminFeatureChangeRequestRecord> = {},
-): AdminFeatureChangeRequestRecord {
-  return {
-    action: "update",
-    applied_at: "2026-06-08T06:10:00.000Z",
-    created_at: "2026-06-08T06:00:00.000Z",
-    feature_id: FEATURE_ID,
-    payload: { name: "여의도 한강공원" },
-    reason: "운영 변경",
-    request_id: "creq-section-depth-0001",
-    requested_by: "local-admin",
-    review_mode: "require_review",
-    reviewed_at: "2026-06-08T06:10:00.000Z",
-    reviewed_by: "local-admin",
-    status: "applied",
-    ...overrides,
-  };
-}
-
 function makeNearby(
   overrides: Partial<NearbyFeatureSummary> = {},
 ): NearbyFeatureSummary {
@@ -306,7 +264,6 @@ function makeDetailData(
   partial: Partial<AdminFeatureDetailData> = {},
 ): AdminFeatureDetailData {
   return {
-    change_requests: [],
     curations: [],
     feature: makeFeature(),
     files: [],
@@ -314,7 +271,6 @@ function makeDetailData(
     overrides: [],
     sources: [],
     state_transitions: [],
-    versions: [],
     ...partial,
   };
 }
@@ -458,10 +414,6 @@ test.describe("/features/[featureId] 섹션 깊이", () => {
         issues: [makeIssue()],
         overrides: [makeOverride()],
         files: [makeFile()],
-        // History의 versions/change_requests 두 테이블도 채워 EMPTY_MESSAGE 0건을 보장
-        // (안 채우면 그 둘이 '데이터가 없습니다.'로 렌더돼 toHaveCount(0)가 깨진다).
-        versions: [makeVersion()],
-        change_requests: [makeChangeRequest()],
       }),
     });
     await page.goto(`/features/${FEATURE_ID}`);
@@ -544,49 +496,6 @@ test.describe("/features/[featureId] 섹션 깊이", () => {
 
     // 모든 표가 비어있지 않으므로 EMPTY_MESSAGE는 0건.
     await expect(detailView.getByText("데이터가 없습니다.")).toHaveCount(0);
-  });
-
-  test("History 섹션 — versions + change_requests 두 테이블 동시 render", async ({
-    page,
-  }) => {
-    await mockFeatureDetail(page, {
-      data: makeDetailData({
-        versions: [makeVersion()],
-        change_requests: [makeChangeRequest()],
-      }),
-    });
-    await page.goto(`/features/${FEATURE_ID}`);
-
-    const detailView = page.getByTestId("feature-detail-view");
-    await expect(
-      detailView.getByText("History", { exact: true }),
-    ).toBeVisible();
-
-    // version 테이블 고유 헤더 + change-request 테이블 고유 헤더.
-    for (const column of ["version", "origin", "change", "request", "action"]) {
-      await expect(
-        detailView.getByRole("columnheader", { name: column, exact: true }),
-      ).toBeVisible();
-    }
-
-    // version row: version 번호(font-mono) + origin 값.
-    await expect(
-      detailView.getByText("3", { exact: true }).first(),
-    ).toBeVisible();
-    await expect(
-      detailView.getByText("provider", { exact: true }).first(),
-    ).toBeVisible();
-
-    // change_requests row: shortId(request_id, 12) — "creq-section" (12자) + action.
-    await expect(detailView.getByText("creq-section")).toBeVisible();
-    await expect(
-      detailView.getByText("update", { exact: true }).first(),
-    ).toBeVisible();
-
-    // Section 카운트 배지 = versions.length(1) + change_requests.length(1) = 2.
-    await expect(
-      detailView.getByText("2", { exact: true }).first(),
-    ).toBeVisible();
   });
 
   test("Nearby — self 제외 + distance 라벨 km/m 포맷 + 카운트 배지", async ({
@@ -796,7 +705,7 @@ test.describe("/features/[featureId] 섹션 깊이", () => {
     await expect(detailView.getByText(FEATURE_ID)).toBeVisible();
     await expect(page.getByRole("link", { name: "수정" })).toHaveAttribute(
       "href",
-      `/admin/features/change-requests?action=update&feature_id=${encodeURIComponent(FEATURE_ID)}`,
+      `/admin/features?feature_id=${encodeURIComponent(FEATURE_ID)}`,
     );
 
     // GET /v1/admin/features/{FEATURE_ID} 정확히 1회 + 그 path만 수신.

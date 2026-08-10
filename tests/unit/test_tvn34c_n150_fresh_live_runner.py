@@ -37,9 +37,10 @@ def test_runner_uses_receipt_pinned_archives_not_its_checkout() -> None:
     assert 'safe_extract "$MAP_ARCHIVE" "$RUN_DIR"' in runner
     assert 'safe_extract "$PINVI_ARCHIVE" "$RUN_DIR"' in runner
     assert '"version"] != 3' in runner
-    assert "0097_tvn34c_final_cutover" in runner
+    assert "0104_tvn36_final_fence" in runner
     assert "feature.features_detailed') IS NULL" in runner
-    assert "T-VN-34C legacy feature state columns remain" in runner
+    assert "T-VN-36 final legacy Feature columns remain" in runner
+    assert "T-VN-36 final request/version bridge remains" in runner
     assert 'local log="$evidence/playwright.log"' in runner
     assert '2>&1 | tee "$log"' in runner
     assert 'compose_map up --detach --wait postgres' in runner

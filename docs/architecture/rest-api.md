@@ -13,6 +13,11 @@
 > **전환 정책(ADR-048)**: 호환성 미고려 — `/v1` clean cut, 구 경로/alias 없음.
 > **표기**: 🆕 신규 · 🔁 변경 · ⚠️ 제거 · ✅#317 = #317로 이미 구현.
 
+> **T-VN-36 final cutover**: admin Feature create/patch/delete는 review request가 아니라 direct
+> typed field override/state command로 commit한다. `/v1/admin/features/change-requests*`와
+> `/change-reviews`는 제거됐으며 `data_origin`/`data_version`/version receipt는 어떤 HTTP DTO에도
+> 노출하지 않는다. 세 축 상태와 audit timeline의 기계 정본은 current OpenAPI다.
+
 ---
 
 ## vNext 단계적 전환 표면 (ADR-066·067·072~074, 부분 구현)

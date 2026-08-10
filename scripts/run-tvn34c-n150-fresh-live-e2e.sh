@@ -16,7 +16,7 @@ readonly PINVI_ARCHIVE="$INSTALL_DIR/pinvi-source.tar.gz"
 readonly SEED_HELPER="$INSTALL_DIR/scripts/tvn34c_fresh_live_etl_seed.py"
 readonly STATE_ROOT="$INSTALL_DIR/runs"
 readonly BLOCKED_FILE="$INSTALL_DIR/BLOCKED.json"
-readonly EXPECTED_HEAD="0097_tvn34c_final_cutover"
+readonly EXPECTED_HEAD="0104_tvn36_final_fence"
 
 MODE="${1:-run}"
 RUN_ID=""
@@ -516,9 +516,13 @@ verify_map_schema() {
         AND column_name = ANY (ARRAY[
           'status', 'deleted_at', 'user_deleted_at', 'user_change_kind',
           'user_change_status', 'user_change_request_id', 'user_deleted_by',
-          'user_change_reason'
+          'user_change_reason', 'data_origin', 'data_version'
         ])" | grep -Fx t >/dev/null ||
-    die "T-VN-34C legacy feature state columns remain"
+    die "T-VN-36 final legacy Feature columns remain"
+  docker exec "$db_container" psql -U kor_travel_map -d kor_travel_map -Atqc \
+    "SELECT to_regclass('feature.feature_versions') IS NULL
+          AND to_regclass('ops.feature_change_requests') IS NULL" | grep -Fx t >/dev/null ||
+    die "T-VN-36 final request/version bridge remains"
 }
 
 build_playwright_image() {

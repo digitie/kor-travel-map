@@ -16,7 +16,6 @@ from kortravelmap.infra.admin_feature_repo import (
     AdminFeatureDetailIssue,
     AdminFeatureDetailOverride,
     AdminFeatureDetailSource,
-    AdminFeatureDetailVersion,
     AdminFeaturePage,
     AdminFeatureRow,
     AdminFeatureStateConflict,
@@ -25,8 +24,6 @@ from kortravelmap.infra.admin_feature_repo import (
     AdminFeatureStateTransition,
     AdminFeatureStateTransitionAudit,
     AdminFeatureStateTransitionAuditPage,
-    FeatureChangeRequest,
-    FeaturePreconditionFailed,
 )
 
 from kortravelmap.api.app import create_app
@@ -168,8 +165,6 @@ def _feature_detail() -> AdminFeatureDetail:
         marker_color="P-01",
         parent_feature_id=None,
         sibling_group_id=None,
-        data_origin="provider",
-        data_version=0,
         row_revision=7,
         created_at=now,
         updated_at=now,
@@ -217,16 +212,6 @@ def _feature_detail() -> AdminFeatureDetail:
         created_by="local-admin",
         created_at=now,
     )
-    version = AdminFeatureDetailVersion(
-        feature_id="feature-1",
-        version=0,
-        origin="provider",
-        change_kind="load",
-        payload={"name": "광화문"},
-        request_id=None,
-        created_by="provider",
-        created_at=now,
-    )
     file = AdminFeatureDetailFile(
         file_id="file-1",
         file_type="image",
@@ -255,8 +240,6 @@ def _feature_detail() -> AdminFeatureDetail:
         sources=(source,),
         issues=(issue,),
         overrides=(override,),
-        versions=(version,),
-        change_requests=(_change_request(action="update", state="applied"),),
         files=(file,),
         state_transitions=(
             AdminFeatureStateTransitionAudit(
@@ -281,38 +264,6 @@ def _feature_detail() -> AdminFeatureDetail:
     )
 
 
-def _change_request(
-    *,
-    request_id: str = "change-1",
-    feature_id: str = "feature-1",
-    action: str = "add",
-    state: str = "pending",
-    review_mode: str = "require_review",
-    base_row_revision: int | None = None,
-    payload: dict[str, Any] | None = None,
-    reason: str | None = "사용자 제보",
-    requested_by: str | None = "local-admin",
-    reviewed_by: str | None = None,
-    applied_at: datetime | None = None,
-) -> FeatureChangeRequest:
-    now = datetime(2026, 6, 3, tzinfo=UTC)
-    return FeatureChangeRequest(
-        request_id=request_id,
-        feature_id=feature_id,
-        action=action,
-        state=state,
-        review_mode=review_mode,
-        base_row_revision=base_row_revision,
-        payload=payload or {},
-        reason=reason,
-        requested_by=requested_by,
-        reviewed_by=reviewed_by,
-        reviewed_at=now if reviewed_by is not None else None,
-        applied_at=applied_at,
-        created_at=now,
-    )
-
-
 @pytest.mark.unit
 def test_admin_features_routes_mounted_in_openapi(client: TestClient) -> None:
     spec = client.get("/openapi.json").json()
@@ -325,9 +276,7 @@ def test_admin_features_routes_mounted_in_openapi(client: TestClient) -> None:
         "patch",
         "delete",
     }
-    assert "/v1/admin/features/change-requests" in spec["paths"]
-    assert "/v1/admin/features/change-requests/{request_id}/approve" in spec["paths"]
-    assert "/v1/admin/features/change-requests/{request_id}/reject" in spec["paths"]
+    assert "/v1/admin/features/change-requests" not in spec["paths"]
     assert "/v1/admin/features/{feature_id}/state" in spec["paths"]
     assert "/v1/admin/features/{feature_id}/state/reactivate" in spec["paths"]
     assert "/v1/admin/features/{feature_id}/state/transitions" in spec["paths"]
@@ -340,7 +289,7 @@ def test_admin_features_routes_mounted_in_openapi(client: TestClient) -> None:
     assert "AdminFeatureRecord" in spec["components"]["schemas"]
     assert "AdminFeatureCreateRequest" in spec["components"]["schemas"]
     assert "AdminFeaturePatchRequest" in spec["components"]["schemas"]
-    assert "AdminFeatureChangeResponse" in spec["components"]["schemas"]
+    assert "AdminFeatureFieldOverrideResponse" in spec["components"]["schemas"]
     assert "AdminFeatureStatePatchRequest" in spec["components"]["schemas"]
     assert "AdminFeatureStateRetireRequest" in spec["components"]["schemas"]
     assert "AdminFeatureReactivateRequest" in spec["components"]["schemas"]
@@ -648,8 +597,8 @@ def test_get_admin_feature_detail_returns_linked_operational_data(
         "occurred_at": "2026-06-03T00:00:00Z",
         "row_revision": 8,
     }
-    assert body["data"]["versions"][0]["change_kind"] == "load"
-    assert body["data"]["change_requests"][0]["status"] == "applied"
+    assert body["data"]["overrides"][0]["field_path"] == "lifecycle_state"
+    assert body["data"]["state_transitions"][0]["transition_kind"] == "admin"
     assert body["data"]["files"][0]["role"] == "primary"
     assert body["data"]["curations"] == []
 
@@ -812,78 +761,32 @@ def test_list_feature_state_transitions_returns_404_before_audit_query(
 
 
 @pytest.mark.unit
-def test_list_feature_change_requests_returns_current_review_mode(
-    client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from kortravelmap.api.routers import admin_features as router_mod
-
-    client.app.dependency_overrides[router_mod._settings] = lambda: ApiSettings(
-        feature_change_review_mode="immediate"
-    )
-
-    async def _list(_session: Any, **kwargs: Any) -> tuple[FeatureChangeRequest, ...]:
-        assert kwargs["states"] == ["pending"]
-        assert kwargs["actions"] == ["add"]
-        assert kwargs["q"] == "광화문"
-        assert kwargs["limit"] == 25
-        return (_change_request(review_mode="immediate", state="applied"),)
-
-    monkeypatch.setattr(router_mod, "list_feature_change_requests", _list)
-
-    response = client.get(
-        "/v1/admin/features/change-requests",
-        params={
-            "status": "pending",
-            "action": "add",
-            "q": "광화문",
-            "page_size": "25",
-        },
-    )
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["data"]["items"][0]["review_mode"] == "immediate"
-    assert body["data"]["items"][0]["status"] == "applied"
-    assert body["data"]["review_mode"] == "immediate"
-    assert body["meta"]["page"] == {
-        "page_size": 25,
-        "next_cursor": None,
-        "total": None,
-    }
-
-
-@pytest.mark.unit
-def test_create_feature_request_uses_review_required_by_default(
+def test_create_feature_authors_typed_override_receipt(
     client: TestClient,
     session: _FakeSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from kortravelmap.api.routers import admin_features as router_mod
 
-    async def _submit(_session: Any, **kwargs: Any) -> FeatureChangeRequest:
-        assert kwargs["action"] == "add"
-        assert kwargs["review_mode"] == "require_review"
+    async def _create(_session: Any, **kwargs: Any) -> Any:
         assert kwargs["payload"]["kind"] == "place"
         assert kwargs["payload"]["name"] == "사용자 장소"
         assert kwargs["payload"]["coord"] == {"lon": 126.98, "lat": 37.57}
         assert kwargs["payload"]["lifecycle_state"] == "active"
         assert kwargs["payload"]["publication_state"] == "published"
         assert kwargs["payload"]["quality_state"] == "valid"
-        assert kwargs["payload"]["feature_id"] == kwargs["feature_id"]
-        assert kwargs["reason"] == "사용자 제보"
-        assert kwargs["requested_by"] == "local-dev"  # T-VN-20: principal, not body operator
-        return _change_request(
+        assert kwargs["reason_code"] == "사용자 제보"
+        assert kwargs["operator"] == "local-dev"
+        assert kwargs["command_id"] == 1
+        return router_mod.FeatureFieldOverrideCommand(
             feature_id=kwargs["feature_id"],
-            action=kwargs["action"],
-            state="pending",
-            review_mode=kwargs["review_mode"],
-            payload=kwargs["payload"],
-            reason=kwargs["reason"],
-            requested_by=kwargs["requested_by"],
+            feature_uuid=_expected_uuid(kwargs["feature_id"]),
+            row_revision=2,
+            command_id=1,
+            applied_field_count=7,
         )
 
-    monkeypatch.setattr(router_mod, "submit_feature_change_request", _submit)
+    monkeypatch.setattr(router_mod, "create_admin_feature_with_field_overrides", _create)
 
     response = client.post(
         "/v1/admin/features",
@@ -901,8 +804,9 @@ def test_create_feature_request_uses_review_required_by_default(
 
     assert response.status_code == 200
     body = response.json()
-    assert body["data"]["request"]["status"] == "pending"
-    assert body["data"]["request"]["review_mode"] == "require_review"
+    assert response.headers["ETag"] == '"2"'
+    assert body["data"]["command_id"] == 1
+    assert body["data"]["applied_field_count"] == 7
     assert session.begin_count == 1
 
     # T-VN-32C 회귀 (W1) — 응답에서 복사한 UUID 형식 feature_id를 신규 legacy
@@ -925,38 +829,28 @@ def test_create_feature_request_uses_review_required_by_default(
 
 
 @pytest.mark.unit
-def test_patch_feature_request_can_apply_immediately(
+def test_patch_feature_authors_typed_override_receipt(
     client: TestClient,
     session: _FakeSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from kortravelmap.api.routers import admin_features as router_mod
 
-    client.app.dependency_overrides[router_mod._settings] = lambda: ApiSettings(
-        feature_change_review_mode="immediate"
-    )
-
-    async def _submit(_session: Any, **kwargs: Any) -> FeatureChangeRequest:
-        assert kwargs["action"] == "update"
+    async def _patch(_session: Any, **kwargs: Any) -> Any:
         assert kwargs["feature_id"] == "feature-1"
         assert kwargs["payload"] == {"name": "수정된 장소"}
-        assert kwargs["review_mode"] == "immediate"
         assert kwargs["expected_row_revision"] == 4  # If-Match row_revision
-        return _change_request(
-            feature_id=kwargs["feature_id"],
-            action=kwargs["action"],
-            state="applied",
-            review_mode=kwargs["review_mode"],
-            payload=kwargs["payload"],
-            applied_at=datetime(2026, 6, 3, tzinfo=UTC),
+        assert kwargs["reason_code"] == "사용자 수정"
+        assert kwargs["operator"] == "local-dev"
+        assert kwargs["command_id"] == 1
+        return router_mod.FeatureFieldOverrideCommand(
+            feature_id="feature-1",
+            row_revision=5,
+            command_id=1,
+            applied_field_count=1,
         )
 
-    async def _revision(_session: Any, feature_id: str) -> int:
-        assert feature_id == "feature-1"
-        return 5  # 적용 후 trigger가 4→5로 증가
-
-    monkeypatch.setattr(router_mod, "submit_feature_change_request", _submit)
-    monkeypatch.setattr(router_mod, "get_feature_row_revision", _revision)
+    monkeypatch.setattr(router_mod, "patch_admin_feature_with_field_overrides", _patch)
 
     response = client.patch(
         "/v1/admin/features/feature-1",
@@ -969,37 +863,33 @@ def test_patch_feature_request_can_apply_immediately(
 
     assert response.status_code == 200
     assert response.headers["ETag"] == '"5"'
-    assert response.json()["data"]["request"]["status"] == "applied"
+    assert response.json()["data"]["applied_field_count"] == 1
     assert session.begin_count == 1
 
 
 @pytest.mark.unit
-def test_delete_feature_request_submits_soft_delete(
+def test_delete_feature_retires_with_typed_state_command(
     client: TestClient,
     session: _FakeSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from kortravelmap.api.routers import admin_features as router_mod
 
-    async def _submit(_session: Any, **kwargs: Any) -> FeatureChangeRequest:
-        assert kwargs["action"] == "delete"
-        assert kwargs["feature_id"] == "feature-1"
-        assert kwargs["payload"] == {}
-        assert kwargs["reason"] == "사용자 삭제 요청"
+    async def _retire(_session: Any, feature_id: str, **kwargs: Any) -> Any:
+        assert feature_id == "feature-1"
+        assert kwargs["action"] == "retire"
         assert kwargs["expected_row_revision"] == 9
-        return _change_request(
-            feature_id=kwargs["feature_id"],
-            action=kwargs["action"],
-            payload=kwargs["payload"],
-            reason=kwargs["reason"],
+        assert kwargs["reason_code"] == "사용자 삭제 요청"
+        return AdminFeatureStateTransition(
+            feature_id="feature-1",
+            lifecycle_state="retired",
+            publication_state="suppressed",
+            quality_state="valid",
+            row_revision=10,
+            audit_transition_id=201,
         )
 
-    async def _revision(_session: Any, feature_id: str) -> int:
-        assert feature_id == "feature-1"
-        return 10
-
-    monkeypatch.setattr(router_mod, "submit_feature_change_request", _submit)
-    monkeypatch.setattr(router_mod, "get_feature_row_revision", _revision)
+    monkeypatch.setattr(router_mod, "transition_admin_feature_state", _retire)
 
     response = client.request(
         "DELETE",
@@ -1010,71 +900,8 @@ def test_delete_feature_request_submits_soft_delete(
 
     assert response.status_code == 200
     assert response.headers["ETag"] == '"10"'
-    assert response.json()["data"]["request"]["action"] == "delete"
+    assert response.json()["data"]["lifecycle_state"] == "retired"
     assert session.begin_count == 1
-
-
-@pytest.mark.unit
-def test_approve_and_reject_feature_change_requests(
-    client: TestClient,
-    session: _FakeSession,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from kortravelmap.api.routers import admin_features as router_mod
-
-    async def _apply(
-        _session: Any,
-        request_id: str,
-        **kwargs: Any,
-    ) -> FeatureChangeRequest:
-        assert request_id == "change-1"
-        assert kwargs["operator"] == "local-dev"  # T-VN-20: principal, not body operator
-        assert "expected_row_revision" not in kwargs
-        return _change_request(
-            request_id=request_id,
-            state="applied",
-            reviewed_by=kwargs["operator"],
-            applied_at=datetime(2026, 6, 3, tzinfo=UTC),
-        )
-
-    async def _revision(_session: Any, feature_id: str) -> int:
-        assert feature_id == "feature-1"
-        return 3
-
-    async def _reject(
-        _session: Any,
-        request_id: str,
-        **kwargs: Any,
-    ) -> FeatureChangeRequest:
-        assert request_id == "change-2"
-        assert kwargs["operator"] == "local-dev"  # T-VN-20: principal, not body operator
-        assert kwargs["reason"] == "중복"
-        return _change_request(
-            request_id=request_id,
-            state="rejected",
-            reviewed_by=kwargs["operator"],
-            reason=kwargs["reason"],
-        )
-
-    monkeypatch.setattr(router_mod, "apply_feature_change_request", _apply)
-    monkeypatch.setattr(router_mod, "reject_feature_change_request", _reject)
-    monkeypatch.setattr(router_mod, "get_feature_row_revision", _revision)
-
-    approve = client.post(
-        "/v1/admin/features/change-requests/change-1/approve",
-        json={"operator": "reviewer"},
-    )
-    reject = client.post(
-        "/v1/admin/features/change-requests/change-2/reject",
-        json={"operator": "reviewer", "reason": "중복"},
-    )
-
-    assert approve.status_code == 200
-    assert approve.headers["ETag"] == '"3"'
-    assert approve.json()["data"]["request"]["status"] == "applied"
-    assert reject.status_code == 200
-    assert reject.json()["data"]["request"]["status"] == "rejected"
-    assert session.begin_count == 2
 
 
 @pytest.mark.unit
@@ -1133,12 +960,13 @@ def test_patch_feature_stale_if_match_returns_412(
 ) -> None:
     from kortravelmap.api.routers import admin_features as router_mod
 
-    async def _submit(_session: Any, **kwargs: Any) -> FeatureChangeRequest:
-        raise FeaturePreconditionFailed(
-            feature_id=kwargs["feature_id"], expected=3, current=8
+    async def _patch(_session: Any, feature_id: str, **kwargs: Any) -> Any:
+        raise router_mod.FeatureFieldOverridePreconditionFailed(
+            feature_id=feature_id,
+            expected=kwargs["expected_row_revision"],
         )
 
-    monkeypatch.setattr(router_mod, "submit_feature_change_request", _submit)
+    monkeypatch.setattr(router_mod, "patch_admin_feature_with_field_overrides", _patch)
 
     response = client.patch(
         "/v1/admin/features/feature-1",
@@ -1148,7 +976,6 @@ def test_patch_feature_stale_if_match_returns_412(
     assert response.status_code == 412
     body = response.json()
     assert body["code"] == "PRECONDITION_FAILED"
-    assert "current=8" in body["detail"]
 
 
 @pytest.mark.unit

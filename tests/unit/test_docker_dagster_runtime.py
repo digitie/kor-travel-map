@@ -268,6 +268,13 @@ def test_docker_compose_isolates_provider_credentials_from_api() -> None:
         # ADR-066 결정 4 (T-VN-02) — /metrics scrape identity token도 같은
         # hard-require 패턴이다.
         "KOR_TRAVEL_MAP_API_METRICS_TOKEN",
+        # n150 isolated run은 run-local map.env의 세 principal과 enabled boundary를
+        # compose environment에서 API에만 명시 전달한다. 빈 기본값은 external
+        # overlay의 profile-disabled API를 compose interpolation에서 막지 않는다.
+        "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN",
+        "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN",
+        "KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN",
+        "KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED",
         "KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN",
     }
     assert "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET" in api["environment"]
@@ -280,6 +287,18 @@ def test_docker_compose_isolates_provider_credentials_from_api() -> None:
     )
     assert "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET is required" in str(
         api["environment"]["KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET"]
+    )
+    assert api["environment"]["KOR_TRAVEL_MAP_API_OPS_READ_TOKEN"] == (
+        "${KOR_TRAVEL_MAP_API_OPS_READ_TOKEN:-}"
+    )
+    assert api["environment"]["KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN"] == (
+        "${KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN:-}"
+    )
+    assert api["environment"]["KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN"] == (
+        "${KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN:-}"
+    )
+    assert api["environment"]["KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED"] == (
+        "${KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED:-false}"
     )
     assert api["environment"]["KOR_TRAVEL_MAP_API_DESTRUCTIVE_ENABLED"] == (
         "${KOR_TRAVEL_MAP_API_DESTRUCTIVE_ENABLED:-false}"
@@ -328,10 +347,12 @@ def test_docker_compose_isolates_provider_credentials_from_api() -> None:
     ops_keys = {
         "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN",
         "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN",
+        "KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN",
         "KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED",
         "KOR_TRAVEL_MAP_API_OPS_ACTOR",
     }
-    assert ops_keys.isdisjoint(api["environment"])
+    assert ops_keys - {"KOR_TRAVEL_MAP_API_OPS_ACTOR"} <= set(api["environment"])
+    assert "KOR_TRAVEL_MAP_API_OPS_ACTOR" not in api["environment"]
     assert all(
         all(key not in services[name]["environment"] for key in ops_keys)
         for name in ("frontend", "dagster", "dagster-daemon")

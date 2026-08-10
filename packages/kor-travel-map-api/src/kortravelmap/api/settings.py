@@ -361,15 +361,6 @@ class ApiSettings(BaseSettings):
             "env ``KOR_TRAVEL_MAP_API_METRICS_TOKEN``."
         ),
     )
-    feature_change_review_mode: str = Field(
-        default="require_review",
-        pattern="^(require_review|immediate)$",
-        description=(
-            "place/event feature 추가·수정·삭제 요청 처리 모드. require_review면 "
-            "ops.feature_change_requests에 pending으로 남기고 admin 승인 후 적용한다. "
-            "immediate면 요청 transaction에서 바로 version 1로 적용한다."
-        ),
-    )
     cors_allow_origins: list[str] = Field(
         default=[
             "http://localhost:12705",

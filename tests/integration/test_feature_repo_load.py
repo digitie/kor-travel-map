@@ -380,39 +380,6 @@ async def test_identical_provider_bundle_reactivates_retired_once(
     assert repeated.source_records_inserted == 0
 
 
-async def test_legacy_data_origin_marker_is_not_a_provider_write_fence(
-    migrated_session: AsyncSession,
-) -> None:
-    bundle = await _bundle("FEST-REPO-USER-DELETED")
-    await feature_repo.load_bundle(migrated_session, bundle)
-    await migrated_session.execute(
-        text(
-            "UPDATE feature.features"
-            " SET lifecycle_state = 'retired', publication_state = 'suppressed',"
-            " data_origin = 'user_request', data_version = 1, updated_at = now()"
-            " WHERE feature_id = :feature_id"
-        ),
-        {"feature_id": bundle.feature.feature_id},
-    )
-
-    # T-VN-36의 정본은 field override다. legacy data_origin marker만 새
-    # whole-row fence로 해석하면 provider field materializer가 다시 막힌다.
-    refreshed = await feature_repo.load_bundle(migrated_session, bundle)
-    assert refreshed.features_updated == 1
-    row = (
-        await migrated_session.execute(
-            text(
-                "SELECT lifecycle_state, publication_state, data_origin FROM feature.features"
-                " WHERE feature_id = :feature_id"
-            ),
-            {"feature_id": bundle.feature.feature_id},
-        )
-    ).one()
-    assert row.lifecycle_state == "active"
-    assert row.publication_state == "suppressed"
-    assert row.data_origin == "user_request"
-
-
 async def test_identical_bundle_respects_prevent_reactivation_override(
     migrated_session: AsyncSession,
 ) -> None:

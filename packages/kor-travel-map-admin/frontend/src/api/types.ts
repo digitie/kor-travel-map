@@ -509,57 +509,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/admin/features/change-requests": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Feature Change Request Route */
-        get: operations["list_feature_change_request_route_v1_admin_features_change_requests_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/admin/features/change-requests/{request_id}/approve": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Approve Feature Change Request Route */
-        post: operations["approve_feature_change_request_route_v1_admin_features_change_requests__request_id__approve_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/admin/features/change-requests/{request_id}/reject": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Reject Feature Change Request Route */
-        post: operations["reject_feature_change_request_route_v1_admin_features_change_requests__request_id__reject_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/admin/features/curated": {
         parameters: {
             query?: never;
@@ -789,6 +738,46 @@ export interface paths {
         head?: never;
         /** Patch Feature Route */
         patch: operations["patch_feature_route_v1_admin_features__feature_id__patch"];
+        trace?: never;
+    };
+    "/v1/admin/features/{feature_id}/field-overrides": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Author Feature Field Overrides Route
+         * @description registry typed effective field를 author하고 exact command receipt를 돌려준다.
+         */
+        post: operations["author_feature_field_overrides_route_v1_admin_features__feature_id__field_overrides_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/features/{feature_id}/field-overrides/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revoke Feature Field Overrides Route
+         * @description active field override를 provider base value로 원자 복원한다.
+         */
+        post: operations["revoke_feature_field_overrides_route_v1_admin_features__feature_id__field_overrides_revoke_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/v1/admin/features/{feature_id}/price": {
@@ -3325,91 +3314,6 @@ export interface components {
             meta: components["schemas"]["Meta"];
         };
         /**
-         * AdminFeatureChangeData
-         * @description 단건 feature change response data.
-         */
-        AdminFeatureChangeData: {
-            request: components["schemas"]["AdminFeatureChangeRequestRecord"];
-        };
-        /**
-         * AdminFeatureChangeListData
-         * @description feature change request list data.
-         */
-        AdminFeatureChangeListData: {
-            /** Items */
-            items: components["schemas"]["AdminFeatureChangeRequestRecord"][];
-            /**
-             * Review Mode
-             * @enum {string}
-             */
-            review_mode: "require_review" | "immediate";
-        };
-        /**
-         * AdminFeatureChangeListResponse
-         * @description ``GET /admin/features/change-requests`` 응답.
-         */
-        AdminFeatureChangeListResponse: {
-            data: components["schemas"]["AdminFeatureChangeListData"];
-            meta: components["schemas"]["Meta"];
-        };
-        /**
-         * AdminFeatureChangeRequestRecord
-         * @description feature add/update/delete request 응답 data.
-         */
-        AdminFeatureChangeRequestRecord: {
-            /**
-             * Action
-             * @enum {string}
-             */
-            action: "add" | "update" | "delete";
-            /** Applied At */
-            applied_at?: string | null;
-            /**
-             * Base Row Revision
-             * @description update/delete 요청 제출 시 확인한 feature row_revision.
-             */
-            base_row_revision?: number | null;
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-            /** Feature Id */
-            feature_id: string;
-            /** Payload */
-            payload: {
-                [key: string]: unknown;
-            };
-            /** Reason */
-            reason?: string | null;
-            /** Request Id */
-            request_id: string;
-            /** Requested By */
-            requested_by?: string | null;
-            /**
-             * Review Mode
-             * @enum {string}
-             */
-            review_mode: "require_review" | "immediate";
-            /** Reviewed At */
-            reviewed_at?: string | null;
-            /** Reviewed By */
-            reviewed_by?: string | null;
-            /**
-             * Status
-             * @enum {string}
-             */
-            status: "pending" | "applied" | "rejected";
-        };
-        /**
-         * AdminFeatureChangeResponse
-         * @description feature add/update/delete/approve/reject 응답.
-         */
-        AdminFeatureChangeResponse: {
-            data: components["schemas"]["AdminFeatureChangeData"];
-            meta: components["schemas"]["Meta"];
-        };
-        /**
          * AdminFeatureCluster
          * @description Admin base Feature의 canonical 행정구역 rollup.
          */
@@ -3542,8 +3446,6 @@ export interface components {
          * @description ``GET /admin/features/{feature_id}`` data.
          */
         AdminFeatureDetailData: {
-            /** Change Requests */
-            change_requests: components["schemas"]["AdminFeatureChangeRequestRecord"][];
             /** Curations */
             curations: components["schemas"]["AdminCurationItemView"][];
             feature: components["schemas"]["AdminFeatureDetailFeatureRecord"];
@@ -3557,8 +3459,6 @@ export interface components {
             sources: components["schemas"]["AdminFeatureDetailSourceRecord"][];
             /** State Transitions */
             state_transitions: components["schemas"]["AdminFeatureStateTransitionAuditRecord"][];
-            /** Versions */
-            versions: components["schemas"]["AdminFeatureDetailVersionRecord"][];
         };
         /**
          * AdminFeatureDetailFeatureRecord
@@ -3582,10 +3482,6 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
-            /** Data Origin */
-            data_origin: string;
-            /** Data Version */
-            data_version: number;
             /** Detail */
             detail: {
                 [key: string]: unknown;
@@ -3839,31 +3735,56 @@ export interface components {
             source_role: string;
         };
         /**
-         * AdminFeatureDetailVersionRecord
-         * @description Admin feature 상세 version row.
+         * AdminFeatureFieldOverrideAuthorRequest
+         * @description registry allow-list에 등록된 scalar/geometry effective field 변경.
+         *
+         *     path별 value kind·Feature kind·nullability는 runtime dictionary가 아니라 DB
+         *     registry가 검증한다. API는 JSON transport 형태만 검증하고 임의 SQL 식별자나
+         *     legacy whole-row payload를 받지 않는다.
          */
-        AdminFeatureDetailVersionRecord: {
-            /** Change Kind */
-            change_kind: string;
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-            /** Created By */
-            created_by?: string | null;
-            /** Feature Id */
-            feature_id: string;
-            /** Origin */
-            origin: string;
-            /** Payload */
-            payload: {
+        AdminFeatureFieldOverrideAuthorRequest: {
+            /** Geometry Wkt */
+            geometry_wkt?: {
+                [key: string]: string;
+            };
+            /** Reason Code */
+            reason_code: string;
+            /** Values */
+            values?: {
                 [key: string]: unknown;
             };
-            /** Request Id */
-            request_id?: string | null;
-            /** Version */
-            version: number;
+        };
+        /**
+         * AdminFeatureFieldOverrideData
+         * @description author/revoke typed procedure의 commit receipt.
+         */
+        AdminFeatureFieldOverrideData: {
+            /** Applied Field Count */
+            applied_field_count: number;
+            /** Command Id */
+            command_id: number;
+            /** Feature Id */
+            feature_id: string;
+            /** Row Revision */
+            row_revision: number;
+        };
+        /**
+         * AdminFeatureFieldOverrideResponse
+         * @description ``POST /admin/features/{feature_id}/field-overrides*`` 응답.
+         */
+        AdminFeatureFieldOverrideResponse: {
+            data: components["schemas"]["AdminFeatureFieldOverrideData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * AdminFeatureFieldOverrideRevokeRequest
+         * @description active override를 latest typed provider base로 복원하는 command.
+         */
+        AdminFeatureFieldOverrideRevokeRequest: {
+            /** Field Paths */
+            field_paths: string[];
+            /** Reason Code */
+            reason_code: string;
         };
         /**
          * AdminFeatureIssueRecord
@@ -4057,20 +3978,6 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
-        };
-        /**
-         * AdminFeatureReviewActionRequest
-         * @description approve/reject body.
-         */
-        AdminFeatureReviewActionRequest: {
-            /**
-             * Operator
-             * @deprecated
-             * @description [deprecated·ignored] 감사 actor는 인증 principal에서만 파생한다 (ADR-066 D-2, T-VN-20). PinVi 호환을 위해 수용하되 값은 무시하며, PinVi는 전송 중단 예정 (docs/integration-map.md).
-             */
-            operator?: string | null;
-            /** Reason */
-            reason?: string | null;
         };
         /**
          * AdminFeatureRevisionData
@@ -13166,10 +13073,6 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
-            /** Data Origin */
-            data_origin: string;
-            /** Data Version */
-            data_version: number;
             /** Detail */
             detail: {
                 [key: string]: unknown;
@@ -15316,114 +15219,15 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AdminFeatureChangeResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-        };
-    };
-    list_feature_change_request_route_v1_admin_features_change_requests_get: {
-        parameters: {
-            query?: {
-                status?: ("pending" | "applied" | "rejected")[] | null;
-                action?: ("add" | "update" | "delete")[] | null;
-                q?: string | null;
-                page_size?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AdminFeatureChangeListResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-        };
-    };
-    approve_feature_change_request_route_v1_admin_features_change_requests__request_id__approve_post: {
-        parameters: {
-            query?: never;
-            header: {
-                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
-                "Idempotency-Key": string;
-            };
-            path: {
-                request_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["AdminFeatureReviewActionRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
                     /** @description 현재 feature의 server-owned row_revision strong entity tag. */
                     ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AdminFeatureChangeResponse"];
+                    "application/json": components["schemas"]["AdminFeatureFieldOverrideResponse"];
                 };
             };
-            /** @description request 없음 */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            /** @description 승인 불가 */
+            /** @description feature identity가 이미 존재함 */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -15432,72 +15236,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description If-Match row_revision 불일치 */
-            412: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-        };
-    };
-    reject_feature_change_request_route_v1_admin_features_change_requests__request_id__reject_post: {
-        parameters: {
-            query?: never;
-            header: {
-                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
-                "Idempotency-Key": string;
-            };
-            path: {
-                request_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["AdminFeatureReviewActionRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AdminFeatureChangeResponse"];
-                };
-            };
-            /** @description request 없음 */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            /** @description Validation Error */
+            /** @description typed field registry 또는 create input 오류 */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -16435,7 +16174,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AdminFeatureChangeResponse"];
+                    "application/json": components["schemas"]["AdminFeatureStateResponse"];
                 };
             };
             /** @description feature 없음 */
@@ -16522,7 +16261,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AdminFeatureChangeResponse"];
+                    "application/json": components["schemas"]["AdminFeatureFieldOverrideResponse"];
                 };
             };
             /** @description feature 없음 */
@@ -16553,6 +16292,162 @@ export interface operations {
                 };
             };
             /** @description If-Match가 row_revision strong ETag가 아님 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description If-Match 누락 */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    author_feature_field_overrides_route_v1_admin_features__feature_id__field_overrides_post: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
+                "Idempotency-Key": string;
+                /** @description 직전 GET body/ETag의 row_revision strong ETag (correction 낙관적 동시성). */
+                "If-Match": string;
+            };
+            path: {
+                feature_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminFeatureFieldOverrideAuthorRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    /** @description 현재 feature의 server-owned row_revision strong entity tag. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminFeatureFieldOverrideResponse"];
+                };
+            };
+            /** @description feature 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description If-Match row_revision 불일치 */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description registry field/value 또는 request 오류 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description If-Match 누락 */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    revoke_feature_field_overrides_route_v1_admin_features__feature_id__field_overrides_revoke_post: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
+                "Idempotency-Key": string;
+                /** @description 직전 GET body/ETag의 row_revision strong ETag (correction 낙관적 동시성). */
+                "If-Match": string;
+            };
+            path: {
+                feature_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminFeatureFieldOverrideRevokeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    /** @description 현재 feature의 server-owned row_revision strong entity tag. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminFeatureFieldOverrideResponse"];
+                };
+            };
+            /** @description feature 또는 active override 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description If-Match row_revision 불일치 */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description registry field/base 또는 request 오류 */
             422: {
                 headers: {
                     [name: string]: unknown;

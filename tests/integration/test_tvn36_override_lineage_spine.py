@@ -323,7 +323,7 @@ async def test_tvn36_registry_base_lineage_and_override_type_fence(
                         """
                         CALL feature.author_feature_field_overrides(
                             :feature_id, 3, 'admin:tvn36', 'operator_correction',
-                            :command_id, NULL,
+                            :command_id,
                             '{"core.name":"operator name"}'::jsonb, '{}'::jsonb,
                             NULL, NULL, NULL, NULL
                         )
@@ -419,7 +419,7 @@ async def test_tvn36_registry_base_lineage_and_override_type_fence(
                         """
                         CALL feature.revoke_feature_field_overrides(
                             :feature_id, 5, 'admin:tvn36', 'operator_revoke',
-                            :command_id, NULL, ARRAY['core.name'],
+                            :command_id, ARRAY['core.name'],
                             NULL, NULL, NULL, NULL
                         )
                         """
@@ -474,123 +474,6 @@ async def test_tvn36_registry_base_lineage_and_override_type_fence(
             )
     assert _sqlstate(mismatched_target.value) == "23514"
     assert _constraint_name(mismatched_target.value) == "ck_feature_override_field_target"
-
-
-async def test_tvn36_legacy_whole_row_freeze_replays_ordered_field_history(
-    migrated_session: AsyncSession,
-) -> None:
-    """legacy request snapshot은 path별 superseded/active override history가 된다."""
-
-    feature_id = "tvn36-legacy-freeze"
-    request_one = "00000000-0000-0000-0000-000000003601"
-    request_two = "00000000-0000-0000-0000-000000003602"
-    await migrated_session.execute(
-        text(
-            """
-            INSERT INTO feature.features (
-                feature_id, feature_uuid, kind, name, category, data_origin,
-                data_version, lifecycle_state, publication_state, quality_state
-            ) VALUES (
-                :feature_id, x_extension.gen_random_uuid(), 'place', '두번째 사용자 이름',
-                '01010100', 'user_request', 2, 'active', 'published', 'valid'
-            )
-            """
-        ),
-        {"feature_id": feature_id},
-    )
-    await migrated_session.execute(
-        text(
-            """
-            INSERT INTO feature.feature_places (feature_id, feature_uuid, kind, place_kind)
-            SELECT feature_id, feature_uuid, kind, 'tourism'
-            FROM feature.features WHERE feature_id = :feature_id
-            """
-        ),
-        {"feature_id": feature_id},
-    )
-    for request_id, version, payload in (
-        (request_one, 1, '{"name":"첫번째 사용자 이름","address":{"road":"첫 주소"}}'),
-        (request_two, 2, '{"name":"두번째 사용자 이름"}'),
-    ):
-        await migrated_session.execute(
-            text(
-                """
-                INSERT INTO ops.feature_change_requests (
-                    request_id, feature_id, action, state, review_mode, payload,
-                    reason, requested_by
-                ) VALUES (
-                    CAST(:request_id AS uuid), :feature_id, 'update', 'applied',
-                    'immediate', CAST(:payload AS jsonb), 'legacy replay', 'legacy:operator'
-                )
-                """
-            ),
-            {"request_id": request_id, "feature_id": feature_id, "payload": payload},
-        )
-        await migrated_session.execute(
-            text(
-                """
-                INSERT INTO feature.feature_versions (
-                    feature_id, version, origin, change_kind, payload, request_id, created_by
-                ) VALUES (
-                    :feature_id, :version, 'user_request', 'update',
-                    CAST(:payload AS jsonb), CAST(:request_id AS uuid), 'legacy:operator'
-                )
-                """
-            ),
-            {
-                "request_id": request_id,
-                "feature_id": feature_id,
-                "version": version,
-                "payload": payload,
-            },
-        )
-
-    await migrated_session.execute(text("SET ROLE ktm_feature_state_procedure_owner"))
-    try:
-        await migrated_session.execute(text("CALL feature.replay_legacy_whole_row_freezes(true)"))
-    finally:
-        await migrated_session.execute(text("RESET ROLE"))
-
-    rows = (
-        await migrated_session.execute(
-            text(
-                """
-                SELECT field_path, override_value, status, request_id::text
-                FROM ops.feature_overrides
-                WHERE feature_id = :feature_id
-                ORDER BY field_path, status, request_id
-                """
-            ),
-            {"feature_id": feature_id},
-        )
-    ).mappings().all()
-    assert [dict(row) for row in rows] == [
-        {
-            "field_path": "core.address",
-            "override_value": {"road": "첫 주소"},
-            "status": "active",
-            "request_id": request_one,
-        },
-        {
-            "field_path": "core.name",
-            "override_value": "두번째 사용자 이름",
-            "status": "active",
-            "request_id": request_two,
-        },
-        {
-            "field_path": "core.name",
-            "override_value": "첫번째 사용자 이름",
-            "status": "superseded",
-            "request_id": request_one,
-        },
-    ]
-    assert int(
-        (
-            await migrated_session.execute(
-                text("SELECT count(*) FROM ops.tvn36_legacy_freeze_preflight_manifest")
-            )
-        ).scalar_one()
-    ) == 0
 
 
 async def test_tvn36_runtime_cannot_mutate_lineage_relations(

@@ -618,65 +618,40 @@ def test_direct_cleanup_locks_owned_parents_before_fk_audit_and_delete() -> None
     assert 'result["summary_run_ids"] = list(summary_run_ids)' in fixture
 
 
-def test_browser_lane_covers_nonpublic_bbox_and_stale_raw_etag() -> None:
+def test_browser_lane_uses_direct_typed_state_commands_and_bff() -> None:
     spec = _SPEC.read_text()
-    assert 'max_lat: String(lat + 0.00001)' in spec
-    assert 'expect(result.data.mode).toBe("items")' in spec
-    assert "expect(result.data.truncated).toBe(false)" in spec
-    assert "result.data.coverage.returned).toBeLessThan" in spec
-    assert 'expect(staleResponse.status()).toBe(412)' in spec
-    assert 'headers()["if-match"]' in spec
-    assert "revisionResponses).toHaveLength(revisionsBeforeSubmit" in spec
-    assert "최신값으로 폼 다시 불러오기" in spec
-    assert 'expect(secondResponse.request().headers()["if-match"]).toBe(competingTag)' in spec
-    assert "await cleanupApiOwnedFeatures(page)" in spec
-    assert "owned pending change request가 cleanup 뒤 남았습니다" in spec
+    assert '"/v1/admin/features"' in spec
+    assert '`${adminFeaturePath(featureId)}/state`' in spec
+    assert 'action: "patch"' in spec
+    assert 'action: "retire"' in spec
+    assert 'reason_code:' in spec
+    assert 'headers: { "If-Match": patchTag }' in spec
+    assert 'headers: { "If-Match": retireTag }' in spec
+    assert 'state/transitions?page_size=20' in spec
+    assert "await cleanupOwnedFeatures(page)" in spec
     assert "response redacted" in spec
     assert "result.text" not in spec
     assert "annotations.push" not in spec
 
 
-def test_browser_lane_covers_t_vn_15_search_contract_only_through_bff() -> None:
+def test_browser_lane_is_a_browser_bff_contract() -> None:
     spec = _SPEC.read_text()
-    assert 'const SEARCH_FEATURES = ["alpha", "beta"]' in spec
-    assert 'lifecycleState: "active" as const' in spec
-    assert 'publicationState: "published" as const' in spec
-    assert 'qualityState: "valid" as const' in spec
     assert 'createHash("sha256")' in spec
-    assert '.update(fixture.featureId, "utf8")' in spec
     assert 'fetch(`/api/proxy${path}`' in spec
-    assert "/v1/features/search?${" in spec
-    assert "include_total: \"false\"" in spec
-    assert "include_total: \"true\"" in spec
-    assert "firstWithoutTotal.meta.page?.total).toBeNull()" in spec
-    assert "firstWithTotal.meta.page?.total).toBe(2)" in spec
-    assert "CURSOR_QUERY_MISMATCH" in spec
-    assert "FEATURE_SEARCH_CURSOR_TAMPERED" in spec
-    assert "tamperCursorPayload" in spec
-    assert "expect(serialized).not.toContain(cursor)" in spec
-    assert '"owned search fixture cleanup"' in spec
-    assert "searchAfterCleanup.data.items).toEqual([])" in spec
-    assert "searchAfterCleanup.meta.page?.total).toBe(0)" in spec
-    assert "searchAfterCleanup.meta.page?.next_cursor ?? null).toBeNull()" in spec
+    assert 'credentials: "same-origin"' in spec
+    assert '"Idempotency-Key"' in spec
     assert '?key=' not in spec
     assert 'searchParams.set("key"' not in spec
     assert "X-API-Key" not in spec
 
 
-def test_browser_lane_covers_all_nonpublic_markers_and_cards() -> None:
+def test_browser_lane_covers_public_to_suppressed_to_retired_state_flow() -> None:
     spec = _SPEC.read_text()
-    for state_label in ("draft", "retired", "suppressed"):
-        assert f'"{state_label}"' in spec
-    assert 'getByLabel("수명주기 필터")' in spec
-    assert 'getByLabel("공개 상태 필터")' in spec
-    assert 'getByLabel("품질 상태 필터")' in spec
-    assert '/v1/admin/features/in-bounds"' in spec
-    assert 'page.getByLabel(`${fixture.name} (place)`' in spec
-    assert 'page.getByTestId("feature-weather-panel")' in spec
-    assert 'page.getByTestId("feature-price-panel")' in spec
-    assert "weather.data.metrics).toHaveLength(1)" in spec
-    assert "price.data.history).toHaveLength(1)" in spec
-    assert "assertPublicInBoundsExcludes(" in spec
+    assert 'publication_state: "published"' in spec
+    assert 'publication_state: "suppressed"' in spec
+    assert 'lifecycle_state: "retired"' in spec
+    assert 'publicFeaturePath(featureId)' in spec
+    assert 'getByTestId("feature-detail-view")' in spec
 
 
 def test_clone_content_digest_excludes_only_exact_run_bound_receipts() -> None:

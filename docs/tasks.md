@@ -621,17 +621,17 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 > ADR-091이다. A–D는 `feat/tvn36-abcd-field-overrides` 하나의 forward-only PR/release로만
 > 병합한다. intermediate migration head나 old binary를 배포하지 않는다.
 
-- [ ] T-VN-36A — **override schema·whole-row freeze backfill**
+- [x] T-VN-36A — **override schema·whole-row freeze backfill**
 
   field별 value/provenance/revision/tombstone을 저장하는 정본을 만들고 기존 whole-row freeze를
   동일 effective projection으로 backfill한다.
 
-- [ ] T-VN-36B — **provider/admin writer cutover**
+- [x] T-VN-36B — **provider/admin writer cutover**
 
   provider upsert와 admin patch가 field override를 같은 transaction에서 갱신하도록 전환하고
   concurrency/merge precedence를 DB 제약과 회귀 테스트로 고정한다.
 
-- [ ] T-VN-36C — **effective projection 단일화·consumer cutover**
+- [x] T-VN-36C — **effective projection 단일화·consumer cutover**
 
   read model을 한 effective projection으로 통일하고 repository별 중복 `CASE` write/read 분기를
   비활성화한다. typed admin override API/UI·OpenAPI·PinVi admin-detail consumer를 exact Map head로
@@ -643,6 +643,10 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   `data_version`, `feature_versions`와 dependent request receipt/trigger/index를 물리 삭제한다.
   post-36/pre-T39 executable contract, fresh migration, PinVi pair, n150 destructive main/recovery와
   cleanup이 통과해야 한다.
+
+  `0104_tvn36_final_fence`와 final contract/browser direct-state rewrite는 구현됐다. 남은 완료
+  조건은 n150 immutable fresh main/recovery와 PinVi exact-head live receipt, 이어지는 requested
+  rebase chain 및 fixed-base 영향성 gate다.
 
 ### T-VN-37D — notice empty range 표현 (보류)
 
