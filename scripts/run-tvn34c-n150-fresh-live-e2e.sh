@@ -188,7 +188,7 @@ random_secret() {
 write_env_files() {
   local postgres_password migrator_password api_password dagster_password
   local admin_proxy_secret service_token cursor_secret metrics_token
-  local ops_read ops_cancel ops_fixture ui_session ui_password_hash object_secret
+  local ops_read ops_cancel ops_fixture ui_session ui_password_hash compose_ui_password_hash object_secret
   postgres_password="$(random_secret)"
   migrator_password="$(random_secret)"
   api_password="$(random_secret)"
@@ -218,6 +218,9 @@ digest = hashlib.pbkdf2_hmac(
 print(f"pbkdf2_sha256$310000${encode(salt)}${encode(digest)}")
 PY
 )"
+  # Compose의 env-file parser는 `$NAME`을 보간한다. PBKDF2 format의 `$`는 `$$`로
+  # escape해야 frontend container가 원래 hash를 받는다.
+  compose_ui_password_hash="${ui_password_hash//\$/\$\$}"
   object_secret="$(random_secret)"
   local port_seed
   port_seed="$((16#${RUN_KEY:0:4}))"
@@ -267,7 +270,7 @@ KOR_TRAVEL_MAP_API_VWORLD_API_KEY=$(random_secret)
 KOR_TRAVEL_MAP_OBJECT_STORE_ACCESS_KEY_ID=tvn34c$RUN_KEY
 KOR_TRAVEL_MAP_OBJECT_STORE_SECRET_ACCESS_KEY=$object_secret
 KOR_TRAVEL_MAP_UI_ADMIN_USERNAME=admin
-KOR_TRAVEL_MAP_UI_ADMIN_PASSWORD_HASH=$ui_password_hash
+KOR_TRAVEL_MAP_UI_ADMIN_PASSWORD_HASH=$compose_ui_password_hash
 KOR_TRAVEL_MAP_UI_SESSION_SECRET=$ui_session
 KOR_TRAVEL_MAP_API_PUBLIC_API_KEY_REQUIRED=true
 EOF

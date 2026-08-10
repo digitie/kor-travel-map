@@ -39,6 +39,7 @@ def test_runner_uses_receipt_pinned_archives_not_its_checkout() -> None:
     assert '"version"] != 3' in runner
     assert "0097_tvn34c_final_cutover" in runner
     assert "feature.features_detailed') IS NULL" in runner
+    assert 'compose_ui_password_hash="${ui_password_hash//\\$/\\$\\$}"' in runner
     assert "mcr.microsoft.com/playwright:v1.60.0-noble" in _text(
         _ROOT / "docker" / "c7-playwright.Dockerfile"
     )
