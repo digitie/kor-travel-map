@@ -68,7 +68,7 @@ require_root_snapshot() {
     die "PinVi archive metadata is unsafe"
   [[ "$(stat -c '%u:%g:%a' -- "$0")" == "0:0:500" ]] ||
     die "runner metadata is unsafe"
-  [[ "$(stat -c '%u:%g:%a' -- "$SEED_HELPER")" == "0:0:500" ]] ||
+  [[ "$(stat -c '%u:%g:%a' -- "$SEED_HELPER")" == "0:0:544" ]] ||
     die "fresh ETL helper metadata is unsafe"
 }
 

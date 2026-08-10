@@ -143,7 +143,7 @@ install -o root -g root -m 0600 "$stage/pinvi-source.tar.gz" "$temporary/pinvi-s
 install -o root -g root -m 0600 "$stage/consumer-rollout-v1.json" "$temporary/consumer-rollout-v1.json"
 install -o root -g root -m 0600 "$stage/manifest.json" "$temporary/manifest.json"
 install -o root -g root -m 0500 "$stage/scripts/run-tvn34c-n150-fresh-live-e2e.sh" "$temporary/run-tvn34c-n150-fresh-live-e2e.sh"
-install -o root -g root -m 0500 "$stage/scripts/tvn34c_fresh_live_etl_seed.py" "$temporary/scripts/tvn34c_fresh_live_etl_seed.py"
+install -o root -g root -m 0544 "$stage/scripts/tvn34c_fresh_live_etl_seed.py" "$temporary/scripts/tvn34c_fresh_live_etl_seed.py"
 [[ "$(sha256sum "$temporary/map-source.tar.gz" | awk '{print $1}')" == "$map_hash" ]]
 [[ "$(sha256sum "$temporary/pinvi-source.tar.gz" | awk '{print $1}')" == "$pinvi_hash" ]]
 [[ "$(sha256sum "$temporary/consumer-rollout-v1.json" | awk '{print $1}')" == "$receipt_hash" ]]
