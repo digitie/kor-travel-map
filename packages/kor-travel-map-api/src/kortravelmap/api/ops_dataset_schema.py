@@ -70,6 +70,10 @@ class OpsDatasetCatalogInfo(BaseModel):
     feature_kind: str
     provider_state_default_scope: str
     label: str
+    # ``mutable=false``의 **이유**를 표면에 남긴다. canonical인데 비활성인 dataset은
+    # orphan이 아니므로 ``orphan_reason``이 null인데, 이 필드가 없으면 응답 어디에도
+    # 왜 조작 불가인지가 없었다 — 화면은 "조작 불가"만 말하고 근거를 못 댄다.
+    is_active: bool
     is_refreshable: bool
     scope_refresh: OpsDatasetScopeRefreshCapability
     preview: OpsDatasetPreviewCapability

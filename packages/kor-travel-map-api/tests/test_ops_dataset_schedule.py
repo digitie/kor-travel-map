@@ -65,7 +65,19 @@ def test_schedule_projection_uses_operation_key_and_earliest_running_tick() -> N
 
 
 @pytest.mark.unit
-def test_schedule_projection_rejects_missing_or_mismatched_operation_key() -> None:
+def test_schedule_projection_reports_identity_drift_instead_of_swallowing_it() -> None:
+    """tag 누락·job 불일치는 **관측 가능한 오류**여야 한다.
+
+    앞 판은 둘 다 조용히 `continue`로 버리고 `source_status="ok"`를 무조건 냈다.
+    그러면 실재하는 schedule이 붙은 dataset이 `basis="not_scheduled"`와
+    "소스는 건강하다"를 **동시에** 단언한다 — 둘 다 거짓이고, 운영자가 멈춘 적재를
+    알아챌 축이 사라진다(적대 리뷰 10라운드). 응답 모델은 error 상태와 errors
+    배열을 계속 선언하고 있었으므로, 계약이 표현할 수 있다고 말하는 사실을 구현이
+    만들지 못하는 상태이기도 했다.
+
+    드리프트로 셀 대상은 **code handler가 있는 feature 적재 job**뿐이다 — 무관한
+    schedule의 tag 부재까지 오류로 세면 그 채널이 노이즈로 죽는다.
+    """
     index = _parse(
         _payload(
             [
@@ -87,9 +99,16 @@ def test_schedule_projection_rejects_missing_or_mismatched_operation_key() -> No
         )
     )
 
+    assert index.source_status == "error"
+    assert len(index.errors) == 2
+    assert any("tag가 없다" in message for message in index.errors)
+    assert any("job은 'different_job'이다" in message for message in index.errors)
+
+    # 잘못 붙은 schedule을 operation에 귀속시키지 않는 것은 그대로다.
     state = index.for_operation_keys(("feature_place_mois_licenses_job",))
-    assert state.basis == "not_scheduled"
     assert state.schedule_names == ()
+    # 소스가 error인데 "not_scheduled"라 단정하지 않는다 — 모르는 것은 모른다고 한다.
+    assert state.basis == "unknown"
 
 
 @pytest.mark.unit

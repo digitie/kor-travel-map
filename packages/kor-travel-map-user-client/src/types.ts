@@ -779,8 +779,6 @@ export interface components {
             next_expected_at?: string | null;
             /** Provider */
             provider: string;
-            /** Provider Dataset Id */
-            provider_dataset_id: number;
             /** Provider Status */
             provider_status: string;
             /** Row Count */
@@ -1500,8 +1498,6 @@ export interface components {
             last_failure_at: string | null;
             /** Last Success At */
             last_success_at: string | null;
-            /** Operation Key */
-            operation_key: string;
             /** Provider */
             provider: string;
             /** Status */
@@ -2249,8 +2245,6 @@ export interface components {
             item_count: number;
             /** Provider */
             provider: string | null;
-            /** Provider Dataset Id */
-            provider_dataset_id: number | null;
             /** Source Id */
             source_id: string | null;
             /** Source Name */
@@ -2346,8 +2340,6 @@ export interface components {
             place_name: string;
             /** Provider */
             provider: string | null;
-            /** Provider Dataset Id */
-            provider_dataset_id: number | null;
             /**
              * Reuse Policy
              * @enum {string}
@@ -2652,8 +2644,6 @@ export interface components {
             last_failure_at: string | null;
             /** Last Success At */
             last_success_at: string | null;
-            /** Operation Key */
-            operation_key: string;
             /** Status */
             status: string;
             /** Sync Scope */
@@ -2944,7 +2934,8 @@ export interface operations {
     list_curated_sources_route_v1_curated_sources_get: {
         parameters: {
             query?: {
-                provider_dataset_id?: number | null;
+                provider?: string | null;
+                dataset_key?: string | null;
                 provider_status?: ("implemented" | "provider_needed" | "manual_only" | "deprecated") | null;
                 limit?: number;
             };
@@ -3029,7 +3020,7 @@ export interface operations {
             query?: {
                 theme_slug?: string | null;
                 edition_key?: string | null;
-                provider_dataset_id?: number | null;
+                provider?: string | null;
                 q?: string | null;
                 min_lon?: number | null;
                 min_lat?: number | null;
@@ -3078,7 +3069,7 @@ export interface operations {
             query?: {
                 theme_slug?: string | null;
                 edition_key?: string | null;
-                provider_dataset_id?: number | null;
+                provider?: string | null;
                 q?: string | null;
                 page_size?: number;
                 cursor?: string | null;
@@ -3213,7 +3204,7 @@ export interface operations {
                 kind?: string[] | null;
                 /** @description category code 필터 (반복 가능). 미지정 시 전체. */
                 category?: string[] | null;
-                /** @description primary provider(소스) 필터 (반복 가능). 미지정 시 전체. source_role='primary' 기준. */
+                /** @description primary provider(소스) 필터 (반복 가능). 미지정 시 전체. primary source(provider_sync.is_primary_source) 기준. */
                 provider?: string[] | null;
                 /** @description 페이지 크기. */
                 page_size?: number;
@@ -3935,8 +3926,6 @@ export interface operations {
                 dataset_key?: string | null;
                 /** @description sync_scope 필터 */
                 sync_scope?: string | null;
-                /** @description operation_key 필터 */
-                operation_key?: string | null;
             };
             header?: never;
             path: {

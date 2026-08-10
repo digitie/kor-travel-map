@@ -341,6 +341,7 @@ def _catalog_info(entry: ProviderDatasetCatalogEntry) -> OpsDatasetCatalogInfo:
             entry.default_refresh_scope if entry.is_refreshable else DATASET_WIDE_SYNC_SCOPE
         ),
         label=entry.display_name,
+        is_active=entry.is_active,
         is_refreshable=entry.is_refreshable,
         scope_refresh=_scope_refresh_capability(entry),
         preview=_preview_capability(entry),

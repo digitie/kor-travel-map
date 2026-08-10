@@ -35,6 +35,7 @@ from kortravelmap.api.ops_dataset_schema import (
 from kortravelmap.api.ops_dataset_service import (
     DatasetMutationDisabledError,
     DatasetNotFoundError,
+    InactiveDatasetMutationDisabledError,
     ProviderRefreshPolicyRevisionConflict,
     ProviderRefreshPolicyRevisionExhausted,
     ProviderRefreshPolicySourceKindImmutable,
@@ -151,9 +152,9 @@ async def get_dataset_detail(
         409: {
             "model": ProviderRefreshPolicyConflictProblem,
             "description": (
-                "revision CAS 불일치·소진, source_kind 변경 또는 카탈로그에서 "
-                "제거된 orphan row. 현재 record/revision 또는 "
-                "mutation_disabled_reason 포함."
+                "revision CAS 불일치·소진, source_kind 변경, 카탈로그에서 제거된 "
+                "orphan row, 또는 비활성(is_active=false) dataset. 현재 "
+                "record/revision 또는 mutation_disabled_reason 포함."
             )
         },
     },
@@ -172,6 +173,23 @@ async def put_dataset_refresh_policy(
         )
     except DatasetNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except InactiveDatasetMutationDisabledError as exc:
+        # orphan과 **다른 상태**다. 하나로 뭉치면 code로 분기하는 소비자가
+        # "카탈로그에서 사라진 행"이라는 거짓 상태를 듣는다 — 운영자가 취할 조치도
+        # 정반대다(orphan은 복구 불가, 비활성은 dataset을 다시 켜면 된다).
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "INACTIVE_DATASET_MUTATION_DISABLED",
+                "message": "inactive dataset refresh policy mutation is disabled",
+                "details": {
+                    "expected_revision": body.expected_revision,
+                    "current_revision": None,
+                    "current_record": None,
+                    "mutation_disabled_reason": exc.mutation_disabled_reason,
+                },
+            },
+        ) from exc
     except DatasetMutationDisabledError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

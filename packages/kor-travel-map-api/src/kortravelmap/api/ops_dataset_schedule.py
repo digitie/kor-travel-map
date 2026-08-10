@@ -11,6 +11,10 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 
 import httpx
+from kortravelmap.providers.feature_operation_registry import (
+    feature_operation_handler_keys,
+    resolve_feature_operation_handler,
+)
 
 from kortravelmap.api import dagster_graphql
 from kortravelmap.api.settings import ApiSettings
@@ -152,6 +156,14 @@ def _parse(payload: dict[str, Any]) -> DatasetScheduleIndex:
         )
 
     grouped: dict[str, list[tuple[str, str | None, datetime | None]]] = {}
+    # code handler가 있는 operation의 job 이름. 이 집합에 드는 schedule은 **feature
+    # 적재 schedule**이므로, tag가 없거나 job과 어긋나면 그건 무관한 schedule이
+    # 아니라 **드리프트**다.
+    feature_job_names = {
+        resolve_feature_operation_handler(key).job_name
+        for key in feature_operation_handler_keys()
+    }
+    identity_errors: list[str] = []
     for node in _list(connection.get("nodes")):
         for raw_schedule in _list(_dict(node).get("schedules")):
             schedule = _dict(raw_schedule)
@@ -165,10 +177,24 @@ def _parse(payload: dict[str, Any]) -> DatasetScheduleIndex:
             if name is None:
                 continue
             operation_key = tags.get(OPERATION_KEY_TAG)
-            if operation_key is None:
-                continue
             pipeline_name = _text(schedule.get("pipelineName"))
+            # 조용히 버리면 안 되는 두 상태. 예전 판은 둘 다 `continue`로 넘겨,
+            # 실재하는 schedule이 붙은 dataset이 `basis="not_scheduled"`와
+            # `source_status="ok"`를 **동시에** 단언했다 — "schedule이 없다,
+            # 그리고 소스는 건강하다"는 두 개의 거짓 진술이고, 운영자가 멈춘 적재를
+            # 알아챌 관측 축이 사라진다(적대 리뷰 10라운드).
+            if operation_key is None:
+                if pipeline_name in feature_job_names:
+                    identity_errors.append(
+                        f"schedule {name!r}: feature 적재 job "
+                        f"{pipeline_name!r}인데 {OPERATION_KEY_TAG} tag가 없다"
+                    )
+                continue
             if pipeline_name != operation_key:
+                identity_errors.append(
+                    f"schedule {name!r}: {OPERATION_KEY_TAG}={operation_key!r}인데 "
+                    f"job은 {pipeline_name!r}이다"
+                )
                 continue
             status = _text(_dict(schedule.get("scheduleState")).get("status"))
             next_tick: datetime | None = None
@@ -208,8 +234,8 @@ def _parse(payload: dict[str, Any]) -> DatasetScheduleIndex:
             next_scheduled_at=min(next_ticks) if next_ticks else None,
         )
     return DatasetScheduleIndex(
-        source_status="ok",
-        errors=(),
+        source_status="error" if identity_errors else "ok",
+        errors=tuple(identity_errors),
         by_operation_key=by_operation_key,
     )
 
