@@ -634,6 +634,10 @@
             "title": "Provider",
             "type": "string"
           },
+          "provider_dataset_id": {
+            "title": "Provider Dataset Id",
+            "type": "integer"
+          },
           "provider_status": {
             "title": "Provider Status",
             "type": "string"
@@ -684,6 +688,7 @@
         },
         "required": [
           "source_id",
+          "provider_dataset_id",
           "provider",
           "dataset_key",
           "source_name",
@@ -2443,6 +2448,10 @@
             ],
             "title": "Last Success At"
           },
+          "operation_key": {
+            "title": "Operation Key",
+            "type": "string"
+          },
           "provider": {
             "title": "Provider",
             "type": "string"
@@ -2459,6 +2468,7 @@
         "required": [
           "dataset_key",
           "sync_scope",
+          "operation_key",
           "status",
           "last_success_at",
           "last_failure_at",
@@ -5099,6 +5109,17 @@
             ],
             "title": "Provider"
           },
+          "provider_dataset_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Dataset Id"
+          },
           "source_id": {
             "anyOf": [
               {
@@ -5185,6 +5206,7 @@
           "theme_name",
           "theme_group",
           "source_id",
+          "provider_dataset_id",
           "provider",
           "dataset_key",
           "source_name",
@@ -5393,6 +5415,17 @@
             ],
             "title": "Provider"
           },
+          "provider_dataset_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Dataset Id"
+          },
           "reuse_policy": {
             "enum": [
               "allowed",
@@ -5469,6 +5502,7 @@
           "theme_slug",
           "theme_name",
           "theme_group",
+          "provider_dataset_id",
           "provider",
           "dataset_key",
           "source_name",
@@ -6271,6 +6305,10 @@
             ],
             "title": "Last Success At"
           },
+          "operation_key": {
+            "title": "Operation Key",
+            "type": "string"
+          },
           "status": {
             "title": "Status",
             "type": "string"
@@ -6283,6 +6321,7 @@
         "required": [
           "dataset_key",
           "sync_scope",
+          "operation_key",
           "status",
           "last_success_at",
           "last_failure_at",
@@ -7187,34 +7226,19 @@
         "parameters": [
           {
             "in": "query",
-            "name": "provider",
+            "name": "provider_dataset_id",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "exclusiveMinimum": 0,
+                  "type": "integer"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "title": "Provider"
-            }
-          },
-          {
-            "in": "query",
-            "name": "dataset_key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Dataset Key"
+              "title": "Provider Dataset Id"
             }
           },
           {
@@ -7415,18 +7439,19 @@
           },
           {
             "in": "query",
-            "name": "provider",
+            "name": "provider_dataset_id",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "exclusiveMinimum": 0,
+                  "type": "integer"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "title": "Provider"
+              "title": "Provider Dataset Id"
             }
           },
           {
@@ -7622,18 +7647,19 @@
           },
           {
             "in": "query",
-            "name": "provider",
+            "name": "provider_dataset_id",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "exclusiveMinimum": 0,
+                  "type": "integer"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "title": "Provider"
+              "title": "Provider Dataset Id"
             }
           },
           {
@@ -7940,7 +7966,7 @@
             }
           },
           {
-            "description": "primary provider(소스) 필터 (반복 가능). 미지정 시 전체. primary source(provider_sync.is_primary_source) 기준.",
+            "description": "primary provider(소스) 필터 (반복 가능). 미지정 시 전체. source_role='primary' 기준.",
             "in": "query",
             "name": "provider",
             "required": false,
@@ -7956,7 +7982,7 @@
                   "type": "null"
                 }
               ],
-              "description": "primary provider(소스) 필터 (반복 가능). 미지정 시 전체. primary source(provider_sync.is_primary_source) 기준.",
+              "description": "primary provider(소스) 필터 (반복 가능). 미지정 시 전체. source_role='primary' 기준.",
               "title": "Provider"
             }
           },
@@ -10088,6 +10114,24 @@
               ],
               "description": "sync_scope 필터",
               "title": "Sync Scope"
+            }
+          },
+          {
+            "description": "operation_key 필터",
+            "in": "query",
+            "name": "operation_key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "operation_key 필터",
+              "title": "Operation Key"
             }
           }
         ],
