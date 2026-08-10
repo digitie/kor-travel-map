@@ -2352,11 +2352,34 @@ async def _apply_provider_feature_field_patch(
     values, geometry_wkt = _provider_field_patch_payload(
         feature, feature_uuid=feature_uuid
     )
+    return await _apply_provider_field_values(
+        session,
+        feature_id=feature.feature_id,
+        provider_dataset_id=provider_dataset_id,
+        source_membership=source_membership,
+        expected_row_revision=expected_row_revision,
+        values=values,
+        geometry_wkt=geometry_wkt,
+    )
+
+
+async def _apply_provider_field_values(
+    session: AsyncSession,
+    *,
+    feature_id: str,
+    provider_dataset_id: int,
+    source_membership: _ProviderSourceMembership,
+    expected_row_revision: int,
+    values: str,
+    geometry_wkt: str,
+) -> int:
+    """정규 provider observation에서 만든 registry JSON을 한 번 물화한다."""
+
     row = (
         await session.execute(
             text(_APPLY_PROVIDER_FIELD_PATCH_SQL),
             {
-                "feature_id": feature.feature_id,
+                "feature_id": feature_id,
                 "provider_dataset_id": provider_dataset_id,
                 "source_entity_key": source_membership.source_entity_key,
                 "source_record_key": source_membership.source_record_key,
@@ -2366,7 +2389,7 @@ async def _apply_provider_feature_field_patch(
             },
         )
     ).mappings().one()
-    if str(row["o_feature_id"]) != feature.feature_id:
+    if str(row["o_feature_id"]) != feature_id:
         raise RuntimeError("provider field patch returned a different Feature identity")
     return int(row["o_row_revision"])
 
@@ -4025,19 +4048,10 @@ global_feature_wins AS MATERIALIZED (
         ) AS will_be_visible
     FROM lifecycle_targets AS target
 )
--- T-VN-35(ADR-086): 효력 종료 시각의 정본은 ``feature_notices.valid_end_time``
--- (timestamptz)이다. lifecycle 전이는 procedure 호출자가 처리하고, 시각 갱신은
--- 같은 문장의 data-modifying CTE가 typed 컬럼에 직접 쓴다 — 종전
--- ``jsonb_set(detail, '{valid_end_time}', to_jsonb(text))`` 왕복(문자열화 →
--- 재파싱)이 사라진다. CTE는 **한 statement·한 snapshot**으로 notice 후보와 시각을
--- 함께 확정한다. 마지막 SELECT는 outcome CTE만 읽지만 data-modifying CTE는
--- 참조 여부와 무관하게 항상 완주하므로(PostgreSQL 계약) notice 갱신이 누락되지
--- 않고, subtype 행이 없는 feature도 RETURNING 집계에서 빠지지 않는다.
---
--- 미래 발효 공고가 발효 전에 feed에서 사라지면 ``valid_end_time``(철회시각)이
--- ``valid_start_time``보다 이르다 — "발효 전 철회"라는 정당한 상태이므로 0085는
--- 순서 CHECK를 두지 않는다(KREX notice ETL에서 실측). read 필터는
--- ``valid_end_time <= now()``라 이 공고는 즉시 숨겨진다.
+-- T-VN-36: notice 효력 종료도 provider base/effective field patch에서만 바꾼다.
+-- lifecycle 후보 집합은 여기서 결정하되, 반환행을 읽은 caller가 current source
+-- evidence와 Feature revision을 다시 잠가 ``notice.valid_end_time`` path를 물화한다.
+-- 미래 발효 전 철회(valid_end < valid_start)는 여전히 허용되는 정상 상태다.
 , lifecycle_outcomes AS (
     SELECT
         target.feature_id,
@@ -4066,15 +4080,10 @@ global_feature_wins AS MATERIALIZED (
               AND target.will_be_visible
           )
       )
-), notice_update AS (
-    UPDATE feature.feature_notices AS n
-    SET valid_end_time = lifecycle_outcomes.desired_valid_end_time
-    FROM lifecycle_outcomes
-    WHERE n.feature_id = lifecycle_outcomes.feature_id
-      AND n.valid_end_time IS DISTINCT FROM lifecycle_outcomes.desired_valid_end_time
-    RETURNING n.feature_id
 )
-SELECT feature_id, provider_dataset_id, source_record_key, reactivate, reopened, closed
+SELECT feature_id, provider_dataset_id, source_record_key, old_valid_end_time,
+       desired_valid_end_time,
+       reactivate, reopened, closed
 FROM lifecycle_outcomes
 """
         )
@@ -4483,6 +4492,33 @@ async def _reconcile_persisted_notice_scope(
         )
         snapshot_updates = result.mappings().all()
         for row in snapshot_updates:
+            if row["old_valid_end_time"] != row["desired_valid_end_time"]:
+                current = await _feature_load_state(session, str(row["feature_id"]))
+                if not current.exists or current.row_revision is None:
+                    raise RuntimeError("notice lifecycle outcome lost its Feature")
+                membership = await _provider_source_membership_for_feature(
+                    session,
+                    feature_id=str(row["feature_id"]),
+                    provider_dataset_id=int(row["provider_dataset_id"]),
+                )
+                await _apply_provider_field_values(
+                    session,
+                    feature_id=str(row["feature_id"]),
+                    provider_dataset_id=int(row["provider_dataset_id"]),
+                    source_membership=membership,
+                    expected_row_revision=current.row_revision,
+                    values=json.dumps(
+                        {
+                            "notice.valid_end_time": (
+                                row["desired_valid_end_time"].isoformat()
+                                if row["desired_valid_end_time"] is not None
+                                else None
+                            )
+                        },
+                        ensure_ascii=False,
+                    ),
+                    geometry_wkt="{}",
+                )
             if not bool(row["reactivate"]):
                 continue
             await _transition_provider_lifecycle_if_needed(
