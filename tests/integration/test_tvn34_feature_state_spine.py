@@ -216,8 +216,11 @@ async def test_tvn34_all_legal_tuples_procedure_audit_and_runtime_fence(
                         'feature.feature_versions', 'SELECT, INSERT'
                     ) AS state_owner_version_snapshot_write,
                     has_table_privilege(
-                        'ktm_feature_runtime', 'feature.feature_versions', 'SELECT, INSERT'
-                    ) AS runtime_version_snapshot_write,
+                        'ktm_feature_runtime', 'feature.feature_versions', 'SELECT'
+                    ) AS runtime_version_snapshot_read,
+                    has_table_privilege(
+                        'ktm_feature_runtime', 'feature.feature_versions', 'INSERT'
+                    ) AS runtime_version_snapshot_insert,
                     procedure_row.prosecdef AS procedure_security_definer,
                     owner_role.rolname AS procedure_owner
                 FROM pg_catalog.pg_proc AS procedure_row
@@ -238,7 +241,8 @@ async def test_tvn34_all_legal_tuples_procedure_audit_and_runtime_fence(
         "state_owner_alias_probe_and_insert": True,
         "state_owner_typed_snapshot_select": True,
         "state_owner_version_snapshot_write": True,
-        "runtime_version_snapshot_write": False,
+        "runtime_version_snapshot_read": True,
+        "runtime_version_snapshot_insert": False,
         "procedure_security_definer": True,
         "procedure_owner": "ktm_feature_state_procedure_owner",
     }
