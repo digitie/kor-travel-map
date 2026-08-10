@@ -1,5 +1,12 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-13 — T-VN-40 A/B/C 단일 PR 구현 시작
+
+**다음 한 작업**: PR #977 head 위에서 ADR-092의 canonical membership·candidate 분리를
+40A schema/writer부터 구현한다. A/B/C는 하나의 forward-only PR/release로 유지하며,
+누적 구현은 DB/동시성과 API·consumer/ACL 관점의 독립 적대 리뷰어 2명이 같은 고정 SHA에서
+검증한다.
+
 ## 2026-08-13 — T-VN-36 prod cutover 완료
 
 **prod가 `0104_tvn36_final_fence`다.** 백업 없는 in-place 마이그레이션(사용자 지시),
@@ -50,6 +57,7 @@ transitions 3 / commands 3). 상세와 아홉 건의 발견은 `docs/tasks.md`
   배포 경로는 `KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE=true`가 켠다
   (`docker/api-entrypoint.sh:262`).
 
+## 2026-08-13 — T-VN-34 머지 대기: 적대 검토 3라운드 반영 완료
 ## 2026-08-13 — T-VN-36: 새 T-VN-34 base 재배치 완료, 영향성 gate 재실행
 
 **다음 한 작업**: `feat/tvn36-abcd-field-overrides`를 이 재배치 head로 force-push한 뒤,

@@ -2,6 +2,13 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-13 — T-VN-40: T-VN-36 병합 main 기준 설계 재배치
+
+T-VN-36 PR #973이 `c76ceb7a`로 병합된 최신 `main` 위에 T-VN-40 설계 커밋만
+재배치했다. ADR-092는 source-rule 자동 결과를 admin-only 후보 lifecycle로,
+공식·수동 공개 membership을 `curation_collections/items`의 단일 정본으로 분리한다.
+사용자 승인에 따라 A/B/C는 하나의 forward-only implementation PR/release로 이어서 구현한다.
+
 ## 2026-08-12 — T-VN-38 병합과 완료 task 아카이브 정리
 
 PR [#971](https://github.com/digitie/kor-travel-map/pull/971)이 `8dc2b24a`로 머지됐다.

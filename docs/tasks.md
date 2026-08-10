@@ -29,6 +29,12 @@ barrier로 직렬화한다.
     [x] `T-VN-36-live`(격리 clone 인수 완주 — 2026-08-13)
   - 32~38 join barrier 뒤 Lane B: [ ] `T-VN-40A` → [ ] `T-VN-40B` →
     [ ] `T-VN-40C`
+    - A/B/C는 logical phase이며 **하나의 forward-only implementation PR/release**로만 구현·병합한다.
+      phase별 writer/migration/consumer PR 또는 중간 배포는 금지한다.
+    - 2026-08-11 사용자 지시로 T-VN-36 head에서 ADR-092와 설계 초안은 작성할 수 있다.
+      이는 barrier 해제가 아니며 40A/B/C migration·writer·consumer 구현은 join barrier와
+      ADR acceptance 전까지 시작 금지다. 설계 정본은
+      [`t-vn-40-curation-write-model-plan-2026-08-11.md`](reports/t-vn-40-curation-write-model-plan-2026-08-11.md)다.
   - 최종 단일 cutover: [ ] `T-VN-39`
 - **보류/외부 추적**
   - [ ] `T-VN-H27` — #819 HAProxy WebSocket tunnel timeout(**보류: 운영자 환경 필요**,
@@ -936,9 +942,10 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 
 - [ ] T-VN-40C — **legacy surface fence·removal manifest**
 
-  checksum과 consumer cutover 뒤 overlay 신규 write와 normal routing을 차단한다. held component
-  rollback에 필요한 repository/trigger/table은 soak 동안 보존하고 exact removal manifest를
-  T-VN-39에 넘긴다. 신규 호환 shim은 만들지 않는다.
+  checksum과 consumer cutover 뒤 overlay 신규 write와 normal routing을 차단한다. exact removal
+  manifest로 legacy repository/trigger/table/API/ACL을 같은 forward-only release에서 물리 삭제하고
+  T-VN-39에 catalog-zero receipt를 넘긴다. held component·old binary rollback·신규 호환 shim은
+  만들지 않으며 recovery는 fresh clone/reload만 허용한다.
 
 - [ ] T-VN-39 — **KTM·PinVi write-fence cutover**
 
