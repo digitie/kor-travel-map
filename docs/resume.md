@@ -82,12 +82,14 @@ consumer receipt 영향도를 다시 확인한다. 새 T-VN-34 consumer pair는 
 field override HTTP command를 registry receipt로 전환했다. 이제 detail/read/frontend를
 effective override provenance로 교체하고 whole-row request/version bridge를 물리 제거한다.
 ## 2026-08-10 — T-VN-36 A–D 단일 PR: final destructive fence 구현·n150 gate 준비
+## 2026-08-10 — T-VN-36 A–D 단일 PR: final destructive fence·n150 fresh live 완료
 
-**다음 한 작업**: `0104_tvn36_final_fence`가 final effective field projection으로
-대체된 whole-row bridge를 물리 제거했다. frontend/OpenAPI/Playwright를 direct typed command로
-전환했다. Map `6bd0f176` / PinVi `6ab4eaf` exact-head pair를 재vendor·고정했고, n150 fresh
-main/recovery를 끝낸 뒤 요청된
-`T-VN-33 → 38 → 34 → 36` 순서 rebase와 영향성 수정을 수행한다.
+**다음 한 작업**: T-VN-36 A–D의 destructive completion gate를 통과했다. Map
+`f7e2e04e` / PinVi `6ab4eaf` immutable source pair의 n150 fresh PostGIS migration,
+Dagster ETL, browser 생성→suppress→retire→audit timeline→cleanup, PinVi public probe를
+통과했고 `BLOCKED.json`/격리 container/volume도 남지 않았다. 요청된
+`T-VN-33 → T-VN-38 → T-VN-34 → T-VN-36` 순서 rebase와 fixed-base 영향성 검증·필요 수정만
+남았다.
 
 - `0104_tvn36_final_fence`는 `data_origin`/`data_version`, `feature_versions`,
   `feature_change_requests`, replay/materializer procedure와 request receipt/index를 forward-only로
@@ -95,9 +97,10 @@ main/recovery를 끝낸 뒤 요청된
 - `contracts/vnext/tvn36-post-cutover-invariants-v1.sql`과 dedicated head integration이 final
   relation/column/catalog zero를 검사한다. 0096→0097 bridge와 혼동하지 않는다.
 - n150에서 Playwright가 실행되지 않았던 직접 원인은 browser image가 아니라, isolated runner가
-  생성한 ops read/cancel/fixture token을 production API container environment에 전달하지 않아 API가
-  startup validation에서 종료된 것이었다. compose가 API service에만 run-local token/principal 값을
-  명시 전달하도록 보정했고, external profile은 빈 default로 compose interpolation을 통과한다.
+  생성한 ops read/cancel/fixture token을 API container environment에 전달하지 않아 API가 startup
+  validation에서 종료된 것이었다. 이후 create request의 `coord` object를 DB procedure allowlist의
+  `lon`/`lat`로 평탄화했고, final fresh Playwright는 auth setup과 destructive state scenario 2/2를
+  통과했다.
 - final live spec은 더 이상 change-request 승인/버전 snapshot에 의존하지 않고 browser BFF를 통해
   Feature 생성 → publication suppress → retire → audit timeline → cleanup을 실제 strong ETag로 검증한다.
 - `consumer-rollout-v1.json`의 T-VN-36 receipt는 user vendor와 admin detail subset의 SHA-256을

@@ -25,7 +25,7 @@ barrier로 직렬화한다.
 - **Wave 2 barrier 이후**
   - Lane A: [ ] `T-VN-35-deploy` → [ ] `T-VN-37D`
   - Lane B: [x] `T-VN-34A` → [x] `T-VN-34B` → [x] `T-VN-34C` →
-    [ ] `T-VN-36A` → [ ] `T-VN-36B` → [ ] `T-VN-36C` → [ ] `T-VN-36D`
+    [x] `T-VN-36A` → [x] `T-VN-36B` → [x] `T-VN-36C` → [x] `T-VN-36D`
   - 32~38 join barrier 뒤 Lane B: [ ] `T-VN-40A` → [ ] `T-VN-40B` →
     [ ] `T-VN-40C`
   - 최종 단일 cutover: [ ] `T-VN-39`
@@ -637,16 +637,19 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   비활성화한다. typed admin override API/UI·OpenAPI·PinVi admin-detail consumer를 exact Map head로
   전환한다.
 
-- [ ] T-VN-36D — **destructive freeze fence·final live**
+- [x] T-VN-36D — **destructive freeze fence·final live**
 
   base/effective checksum과 runtime ACL을 검증한 뒤에만 whole-row freeze, `data_origin`,
   `data_version`, `feature_versions`와 dependent request receipt/trigger/index를 물리 삭제한다.
   post-36/pre-T39 executable contract, fresh migration, PinVi pair, n150 destructive main/recovery와
   cleanup이 통과해야 한다.
 
-  `0104_tvn36_final_fence`와 final contract/browser direct-state rewrite는 구현됐다. 남은 완료
-  조건은 n150 immutable fresh main/recovery, 이어지는 requested rebase chain 및 fixed-base 영향성
-  gate다. Map `6bd0f176` / PinVi `6ab4eaf` exact-head receipt는 이미 고정됐다.
+  `0104_tvn36_final_fence`와 final contract/browser direct-state rewrite를 구현했다. n150의
+  immutable fresh run은 Map `f7e2e04e` / PinVi `6ab4eaf` pair에서 fresh migration·Dagster
+  ETL(Feature/source-link 3건, weather/price 1건씩)·Noble Playwright(2/2)·PinVi public probe와
+  자동 cleanup을 통과했다. 앞선 실패 run은 같은 격리 snapshot에서 `recover`로 정리해
+  `BLOCKED.json`/container/volume 잔재가 없음을 확인했다. 다음 작업은 요청된
+  T-VN-33 → T-VN-38 → T-VN-34 → T-VN-36 rebase와 fixed-base 영향성 gate다.
 
 ### T-VN-37D — notice empty range 표현 (보류)
 
