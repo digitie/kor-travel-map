@@ -247,6 +247,99 @@ function OverviewStrip({
   );
 }
 
+/** URL이 정본인 canonical dataset 필터 축(triple)과 그 fail-closed 정리.
+ *
+ * `PipelineClient` 본문에서 떼어낸다 — 컴포넌트가 300줄을 넘으면 react-doctor가
+ * 막고, 무엇보다 이 규칙 자체가 한 덩어리로 읽혀야 한다.
+ */
+function useCanonicalDatasetFilters(
+  searchParams: ReturnType<typeof useSearchParams>,
+  updateUrl: (
+    updates: Record<string, string | null>,
+    mode?: "push" | "replace",
+  ) => void,
+): {
+  hasProviderDatasetFilter: boolean;
+  urlOperationKey: string;
+  urlProviderDatasetId: string;
+  urlProviderDatasetIdValue: number | undefined;
+  urlSyncScope: string;
+} {
+  const urlProviderDatasetId =
+    searchParams.get("provider_dataset_id")?.trim() ?? "";
+  const urlProviderDatasetIdValue = positiveInteger(urlProviderDatasetId);
+  const urlSyncScope = searchParams.get("sync_scope")?.trim() ?? "";
+  const urlOperationKey = searchParams.get("operation_key")?.trim() ?? "";
+  // scope/operation은 provider_dataset_id에 매달린 **추가** 축이다. 셋을 모두
+  // 요구하면 (id, scope)만 담은 딥링크에서 입력값이 화면에서 사라지고 REST에도
+  // 실리지 않아, scope로 좁힌 event/execution 딥링크가 통째로 무력화된다.
+  // 게이트 축은 provider_dataset_id 하나다(자연키 시절 provider×dataset pair가
+  // 하던 역할). 불완전 tuple의 fail-closed는 아래 정리 effect가 맡는다.
+  const hasProviderDatasetFilter = urlProviderDatasetIdValue !== undefined;
+  const hasLegacyDatasetFilters = Boolean(
+    searchParams.get("provider") ||
+      searchParams.get("dataset") ||
+      searchParams.get("dataset_key"),
+  );
+  const hasOrphanScopeFilters = Boolean(
+    urlProviderDatasetIdValue === undefined &&
+      (urlSyncScope || urlOperationKey),
+  );
+
+  // 외부 deep link나 browser history가 이전 자연키 filter를 복원해도 fail-closed한다.
+  // provider_dataset_id 없이 남은 scope/operation은 어떤 membership도 가리키지
+  // 못하므로 cursor와 함께 폐기한다.
+  useEffect(() => {
+    if (hasLegacyDatasetFilters || hasOrphanScopeFilters) {
+      updateUrl({ sync_scope: null, operation_key: null }, "replace");
+    }
+  }, [hasLegacyDatasetFilters, hasOrphanScopeFilters, updateUrl]);
+
+  return {
+    hasProviderDatasetFilter,
+    urlOperationKey,
+    urlProviderDatasetId,
+    urlProviderDatasetIdValue,
+    urlSyncScope,
+  };
+}
+
+function useTimelineFilters({
+  hasProviderDatasetFilter,
+  searchParams,
+  urlOperationKey,
+  urlProviderDatasetIdValue,
+  urlSyncScope,
+}: {
+  hasProviderDatasetFilter: boolean;
+  searchParams: ReturnType<typeof useSearchParams>;
+  urlOperationKey: string;
+  urlProviderDatasetIdValue: number | undefined;
+  urlSyncScope: string;
+}): ReturnType<typeof normalizeTimelineFilters> {
+  return useMemo(
+    () =>
+      normalizeTimelineFilters({
+        kind: searchParams.get("kind") ?? undefined,
+        status: searchParams.get("status") ?? undefined,
+        providerDatasetId: urlProviderDatasetIdValue,
+        syncScope: hasProviderDatasetFilter ? urlSyncScope || undefined : undefined,
+        operationKey: hasProviderDatasetFilter
+          ? urlOperationKey || undefined
+          : undefined,
+        createdFrom: searchParams.get("created_from") ?? undefined,
+        createdTo: searchParams.get("created_to") ?? undefined,
+      }),
+    [
+      hasProviderDatasetFilter,
+      searchParams,
+      urlProviderDatasetIdValue,
+      urlOperationKey,
+      urlSyncScope,
+    ],
+  );
+}
+
 export function PipelineClient() {
   const pathname = usePathname();
   const queryClient = useQueryClient();
@@ -350,39 +443,13 @@ export function PipelineClient() {
     urlStateRef.current = searchParams.toString();
   }, [searchParams]);
 
-  const urlProviderDatasetId =
-    searchParams.get("provider_dataset_id")?.trim() ?? "";
-  const urlProviderDatasetIdValue = positiveInteger(urlProviderDatasetId);
-  const urlSyncScope = searchParams.get("sync_scope")?.trim() ?? "";
-  const urlOperationKey = searchParams.get("operation_key")?.trim() ?? "";
-  // scope/operation은 provider_dataset_id에 매달린 **추가** 축이다. 셋을 모두
-  // 요구하면 (id, scope)만 담은 딥링크에서 입력값이 화면에서 사라지고 REST에도
-  // 실리지 않아, scope로 좁힌 event/execution 딥링크가 통째로 무력화된다.
-  // 게이트 축은 provider_dataset_id 하나다(자연키 시절 provider×dataset pair가
-  // 하던 역할). 불완전 tuple의 fail-closed는 아래 정리 effect가 맡는다.
-  const hasProviderDatasetFilter = urlProviderDatasetIdValue !== undefined;
-  const hasLegacyDatasetFilters = Boolean(
-    searchParams.get("provider") ||
-      searchParams.get("dataset") ||
-      searchParams.get("dataset_key"),
-  );
-  const hasOrphanScopeFilters = Boolean(
-    urlProviderDatasetIdValue === undefined &&
-      (urlSyncScope || urlOperationKey),
-  );
-
-  // 외부 deep link나 browser history가 이전 자연키 filter를 복원해도 fail-closed한다.
-  // provider_dataset_id 없이 남은 scope/operation은 어떤 membership도 가리키지
-  // 못하므로 cursor와 함께 폐기한다.
-  useEffect(() => {
-    if (hasLegacyDatasetFilters || hasOrphanScopeFilters) {
-      updateUrl({ sync_scope: null, operation_key: null }, "replace");
-    }
-  }, [
-    hasLegacyDatasetFilters,
-    hasOrphanScopeFilters,
-    updateUrl,
-  ]);
+  const {
+    hasProviderDatasetFilter,
+    urlOperationKey,
+    urlProviderDatasetId,
+    urlProviderDatasetIdValue,
+    urlSyncScope,
+  } = useCanonicalDatasetFilters(searchParams, updateUrl);
 
   const selectExecution = (
     kind: ExecutionKind,
@@ -398,27 +465,13 @@ export function PipelineClient() {
     updateUrl({ execution: `${kind}:${id}`, tab: "executions" });
   };
 
-  const timelineFilters = useMemo(
-    () =>
-      normalizeTimelineFilters({
-        kind: searchParams.get("kind") ?? undefined,
-        status: searchParams.get("status") ?? undefined,
-        providerDatasetId: urlProviderDatasetIdValue,
-        syncScope: hasProviderDatasetFilter ? urlSyncScope || undefined : undefined,
-        operationKey: hasProviderDatasetFilter
-          ? urlOperationKey || undefined
-          : undefined,
-        createdFrom: searchParams.get("created_from") ?? undefined,
-        createdTo: searchParams.get("created_to") ?? undefined,
-      }),
-    [
-      hasProviderDatasetFilter,
-      searchParams,
-      urlProviderDatasetIdValue,
-      urlOperationKey,
-      urlSyncScope,
-    ],
-  );
+  const timelineFilters = useTimelineFilters({
+    hasProviderDatasetFilter,
+    searchParams,
+    urlOperationKey,
+    urlProviderDatasetIdValue,
+    urlSyncScope,
+  });
   const timelineLoadBatchId = searchParams.get("load_batch_id") ?? undefined;
   const timelineParentJobId = searchParams.get("parent_job_id") ?? undefined;
 
