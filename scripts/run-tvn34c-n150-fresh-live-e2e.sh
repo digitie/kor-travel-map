@@ -538,7 +538,7 @@ run_map_browser() {
     --tmpfs /root/.config:rw,nosuid,nodev,noexec,mode=700 \
     --tmpfs /root/.npm:rw,nosuid,nodev,noexec,mode=700 \
     --mount "type=bind,src=$evidence,dst=/evidence" \
-    --env "E2E_BASE_URL=http://candidate-ui:12705" \
+    --env "E2E_BASE_URL=http://localhost:12705" \
     --env E2E_ADMIN_USERNAME=admin \
     --env E2E_ADMIN_PASSWORD \
     --env E2E_ADMIN_FEATURE_ACCEPTANCE_WRITE=1 \
