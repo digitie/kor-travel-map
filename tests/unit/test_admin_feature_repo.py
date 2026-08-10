@@ -275,6 +275,9 @@ async def test_create_initial_payload_uses_typed_state_arguments(
         "quality_state",
     }.isdisjoint(initial_payload)
     assert initial_payload["feature_uuid"] == candidate_uuid
+    assert initial_payload["lon"] == 127.5
+    assert initial_payload["lat"] == 36.5
+    assert "coord" not in initial_payload
 
 
 @pytest.mark.asyncio

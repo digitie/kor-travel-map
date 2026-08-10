@@ -2561,6 +2561,20 @@ async def create_admin_feature_with_field_overrides(
             "quality_state",
         }
     }
+    # HTTP/admin DTO는 좌표를 ``coord: {lon, lat}``로 표현하지만, initial
+    # create procedure는 untrusted JSON을 최소 allow-list로 제한하고 PostGIS
+    # point를 만들기 위해 ``lon``/``lat``만 받는다. 이후 field override에는
+    # 원래 typed ``coord`` payload를 계속 사용한다.
+    initial_coord = initial_payload.pop("coord", None)
+    if initial_coord is not None:
+        if not isinstance(initial_coord, Mapping):
+            raise ValueError("admin create coord는 object 또는 null이어야 합니다.")
+        lon = initial_coord.get("lon")
+        lat = initial_coord.get("lat")
+        if lon is None or lat is None:
+            raise ValueError("admin create coord에는 lon과 lat이 모두 필요합니다.")
+        initial_payload["lon"] = lon
+        initial_payload["lat"] = lat
     initial_payload["feature_id"] = feature_id
     initial_payload["feature_uuid"] = candidate_feature_uuid()
     try:
