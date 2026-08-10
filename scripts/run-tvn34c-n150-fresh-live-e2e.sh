@@ -293,7 +293,11 @@ PINVI_KOR_TRAVEL_MAP_ADMIN_BASE_URL=http://map-api:$api_port
 PINVI_KOR_TRAVEL_MAP_CACHE_TARGET_SYNC_ENABLED=false
 EOF
   chmod 0600 "$MAP_ENV" "$PINVI_ENV"
-  : >"$MAP_DIR/packages/kor-travel-map-api/.env"
+  cat >"$MAP_DIR/packages/kor-travel-map-api/.env" <<EOF
+KOR_TRAVEL_MAP_API_OPS_READ_TOKEN=$ops_read
+KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN=$ops_cancel
+KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN=$ops_fixture
+EOF
   : >"$MAP_DIR/.env"
   chmod 0600 "$MAP_DIR/packages/kor-travel-map-api/.env" "$MAP_DIR/.env"
   export E2E_ADMIN_PASSWORD="$UI_ADMIN_PASSWORD"
