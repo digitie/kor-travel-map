@@ -48,7 +48,10 @@ from kortravelmap.core.feature_operation import (
     DagsterFeatureOperationMutation,
     ProviderDatasetOperationMembership,
 )
-from kortravelmap.infra.feature_operation_repo import ensure_dagster_feature_operation
+from kortravelmap.infra.feature_operation_repo import (
+    ensure_dagster_feature_operation,
+    finish_dagster_feature_membership,
+)
 from kortravelmap.infra.feature_update_repo import enqueue_feature_update_request
 from kortravelmap.infra.jobs_repo import ImportJobDatasetTarget
 from kortravelmap.infra.provider_refresh_policy_repo import (
@@ -288,29 +291,23 @@ def _feature_expectation(
     engine_created_at: datetime,
     view_status: str = "running",
     expect_outcome: str = "applied",
+    finished_memberships: tuple[ProviderDatasetOperationMembership, ...] = (),
 ) -> _ExpectedOperation:
     """mutation 자체의 불변식을 박고 REST 기대값으로 옮긴다.
 
-    **알려진 한계**: ``view_status``(membership 상태)가 이 시드에서는 root 상태와
-    항상 같다. 그래서 ``pair_status`` 단언은 공허하다 — 서버가 membership 상태 대신
-    root 상태를 실어도 통과한다(적대 검증이 mutation으로 실증했다). main 원본에도
-    있던 구멍이다.
-
-    축을 가르려면 member 하나를 완료시켜야 하는데, 시드가 쓰는 조작된 engine
-    타임스탬프가 DB가 찍는 ``created_at``보다 살짝 이르러
-    ``ck_import_jobs_feature_engine_timeline``(``created_at <= started_at``)이
-    INSERT 시점에는 NULL이라 통과했다가 완료 시점에 깨진다. 닫으려면 시드가 engine
-    타임스탬프를 DB 시계 뒤로 잡도록 다시 설계해야 한다 — 이 복원의 범위 밖이라
-    남겨 두고, 여기 적어 둔다.
+    ``view_status``는 **membership의 상태**이고 root 상태와 같을 필요가 없다.
+    둘이 항상 같은 시드만 쓰면 ``pair_status`` 단언이 공허해진다 — 서버가 membership
+    상태 대신 root 상태를 실어도 통과한다(적대 검증이 mutation으로 실증했고, main
+    원본에도 있던 구멍이다). 그래서 mixed run의 sibling member를 완료시켜 축을 가른다.
     """
 
     operation = mutation.operation
     assert mutation.outcome == expect_outcome
     assert mutation.block_reason is None
     assert operation.dagster_run_id == run_id
+    # member 하나가 끝나도 root는 running이다 — terminal 전이는 Dagster handoff만 한다.
     assert operation.status == "running"
     assert operation.dagster_run_status == "STARTED"
-    assert operation.progress == 0
     assert operation.current_stage == "loading"
     assert operation.created_at == engine_created_at
     assert operation.started_at == engine_created_at
@@ -322,12 +319,21 @@ def _feature_expectation(
         member.membership: member for member in operation.members
     }
     assert set(members_by_membership) == set(memberships)
+    done_memberships = {
+        member.membership for member in operation.members if member.status == "done"
+    }
+    assert done_memberships == set(finished_memberships)
+    # root progress는 완료한 member 비율이다. 이 값이 0으로 고정된 시드만 쓰면
+    # 진행률 전파가 검증되지 않는다.
+    expected_progress = round(100 * len(done_memberships) / len(memberships))
+    assert operation.progress == expected_progress
     for member in operation.members:
-        assert member.status == "running"
-        assert member.progress == 0
-        assert member.current_stage == "loading"
+        is_done = member.membership in done_memberships
+        assert member.status == ("done" if is_done else "running")
+        assert member.progress == (100 if is_done else 0)
+        assert member.current_stage == ("completed" if is_done else "loading")
         assert member.started_at == engine_created_at
-        assert member.finished_at is None
+        assert (member.finished_at is not None) is is_done
 
     projection = tuple(
         _member_projection(
@@ -337,7 +343,7 @@ def _feature_expectation(
             operation_member_id=members_by_membership[
                 membership
             ].import_job_dataset_id,
-            status="running",
+            status="done" if membership in done_memberships else "running",
         )
         # REST는 ``(provider_dataset_id, sync_scope, operation_key)`` 순으로 낸다.
         for membership in sorted(memberships)
@@ -359,7 +365,7 @@ def _feature_expectation(
             view_membership
         ].import_job_dataset_id,
         view_status=view_status,
-        progress=0,
+        progress=expected_progress,
         current_stage="loading",
         scope_type=None,
         priority=None,
@@ -370,7 +376,7 @@ def _feature_expectation(
         projected_id=operation.root_job_id,
         projected_kind="provider_feature_load_run",
         projected_status="running",
-        projected_progress=0,
+        projected_progress=expected_progress,
         projected_stage="loading",
         projected_created_at=engine_created_at,
         projected_started_at=engine_created_at,
@@ -568,10 +574,18 @@ async def _seed_committed_operations(engine: AsyncEngine) -> _SeedState:
 
         # 같은 created_at 동률을 포함해 detail 고정 10개보다 많은 11개 root를 만든다.
         offsets_us = (4, 4, 3, 3, 2, 1, -1, -1, -2, -3, -4)
-        #: index 5는 target과 sibling scope를 **한 run에** 묶는다. 같은
-        #: operation_key라 표현 가능하고, dataset 표면이 요청한 membership 하나만
-        #: 레코드로 내는지(형제 scope를 섞지 않는지) 여기서 갈린다.
-        mixed_index = 5
+        #: target과 sibling scope를 **한 run에** 묶는 index. 같은 operation_key라
+        #: 표현 가능하고, dataset 표면이 요청한 membership 하나만 레코드로 내는지
+        #: (형제 scope를 섞지 않는지) 여기서 갈린다.
+        #:
+        #: offset이 **음수인** index를 고른다. 시드는 한 트랜잭션에서 돌고
+        #: `finish_dagster_feature_membership`은 `finished_at = now()`(트랜잭션 시작
+        #: 시각)를 쓴다. 양수 offset이면 engine `started_at`이 `now()`보다 뒤라
+        #: `ck_import_jobs_feature_engine_timeline`의 `started_at <= finished_at`이
+        #: 깨진다 — 아래에서 member 하나를 완료시켜 pair_status 축을 가르려면
+        #: 이 조건이 필요하다.
+        mixed_index = 6
+        assert offsets_us[mixed_index] < 0
         for index, offset_us in enumerate(offsets_us):
             created_at = update_request.created_at + timedelta(microseconds=offset_us)
             run_id = f"c3e-c-rest-proof-{token}-{index}"
@@ -588,6 +602,18 @@ async def _seed_committed_operations(engine: AsyncEngine) -> _SeedState:
                 engine_started_at=created_at,
                 observed_status="STARTED",
             )
+            if index == mixed_index:
+                # sibling member만 완료시켜 **member 상태 != root 상태**를 만든다.
+                # 이게 없으면 `pair_status` 단언이 공허하다 — 서버가 membership
+                # 상태 대신 root 상태를 실어도 통과한다(적대 검증이 실증했다).
+                # root는 running으로 남는다(terminal 전이는 Dagster handoff만 한다).
+                mutation = await finish_dagster_feature_membership(
+                    session,
+                    dagster_run_id=run_id,
+                    membership=sibling,
+                )
+                assert mutation.operation.status == "running"
+            finished_memberships = (sibling,) if index == mixed_index else ()
             target_operations.append(
                 _feature_expectation(
                     mutation,
@@ -596,6 +622,7 @@ async def _seed_committed_operations(engine: AsyncEngine) -> _SeedState:
                     dataset_keys=dataset_keys,
                     run_id=run_id,
                     engine_created_at=created_at,
+                    finished_memberships=finished_memberships,
                 )
             )
             if index == mixed_index:
@@ -607,6 +634,8 @@ async def _seed_committed_operations(engine: AsyncEngine) -> _SeedState:
                         dataset_keys=dataset_keys,
                         run_id=run_id,
                         engine_created_at=created_at,
+                        view_status="done",
+                        finished_memberships=finished_memberships,
                     )
                 )
 
