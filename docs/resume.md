@@ -53,6 +53,8 @@ PR [#979](https://github.com/digitie/kor-travel-map/pull/979).
 40A schema/writer부터 구현한다. A/B/C는 하나의 forward-only PR/release로 유지하며,
 누적 구현은 DB/동시성과 API·consumer/ACL 관점의 독립 적대 리뷰어 2명이 같은 고정 SHA에서
 검증한다.
+상세 계약은
+[`t-vn-40-curation-write-model-detailed-design-2026-08-11.md`](reports/t-vn-40-curation-write-model-detailed-design-2026-08-11.md)가 정본이다.
 
 ## 2026-08-13 — T-VN-36 prod cutover 완료
 
@@ -103,7 +105,6 @@ transitions 3 / commands 3). 상세와 아홉 건의 발견은 `docs/tasks.md`
 - 러너가 alembic을 직접 부르면 `SET ROLE`이 빠져 `alembic_version` 42501이 난다.
   배포 경로는 `KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE=true`가 켠다
   (`docker/api-entrypoint.sh:262`).
-
 ## 2026-08-13 — T-VN-34 머지 대기: 적대 검토 3라운드 반영 완료
 ## 2026-08-13 — T-VN-36: 새 T-VN-34 base 재배치 완료, 영향성 gate 재실행
 
