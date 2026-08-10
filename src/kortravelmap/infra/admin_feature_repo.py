@@ -2788,7 +2788,12 @@ def _override_payload_for_change(
         for payload_key in ("name", "category", "marker_icon", "marker_color"):
             values[_CORE_OVERRIDE_PATHS[payload_key]] = payload[payload_key]
 
-    if "detail" in payload or include_required_create_fields:
+    # 생성 때 detail을 생략하면 ``write_subtype``가 kind DTO의 안전한 기본값만
+    # materialize한다. 그 기본값까지 operator override로 만들면 (특히 nullable
+    # subtype field의 JSON ``null``) registry type fence를 통과하지 못하고, 이후
+    # provider가 실제 base를 제공할 길도 막는다. 명시된 detail만 ownership receipt로
+    # 남긴다.
+    if "detail" in payload:
         detail_input = payload.get("detail")
         if isinstance(detail_input, Mapping):
             forbidden = sorted(

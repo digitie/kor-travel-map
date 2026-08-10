@@ -170,6 +170,33 @@ def test_user_override_payload_rejects_provider_owned_detail_and_keeps_null_coor
     assert values == {"core.coord_precision_digits": None}
     assert geometry_wkt == {"core.coord": None}
     assert repo._normalize_query("  Ａ  ") == "A"
+
+
+def test_create_override_payload_does_not_claim_omitted_subtype_defaults() -> None:
+    """detail 없는 admin 생성은 subtype 기본값을 operator intent로 만들지 않는다."""
+
+    values, geometry_wkt = repo._override_payload_for_change(
+        feature_id="feature-create-no-detail",
+        feature_uuid="00000000-0000-4000-8000-000000000100",
+        kind="place",
+        payload={
+            "name": "사용자 장소",
+            "category": "01070300",
+            "marker_icon": "marker",
+            "marker_color": "P-02",
+            "coord": {"lon": 126.978, "lat": 37.5665},
+        },
+        include_required_create_fields=True,
+    )
+
+    assert values == {
+        "core.name": "사용자 장소",
+        "core.category": "01070300",
+        "core.marker_icon": "marker",
+        "core.marker_color": "P-02",
+        "core.coord_precision_digits": 6,
+    }
+    assert geometry_wkt == {"core.coord": "POINT(126.978 37.5665)"}
     assert repo._json_array('[{"a": 1}, 2]') == ({"a": 1},)
 
     row = repo._admin_feature_row(_feature_row())
