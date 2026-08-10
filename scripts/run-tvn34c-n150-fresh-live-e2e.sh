@@ -480,7 +480,12 @@ value = json.load(open(sys.argv[1], encoding="utf-8"))
 feature_id = value.get("feature_id")
 if not isinstance(feature_id, str) or not re.fullmatch(r"tvn34c::fresh-live::[a-z0-9-]{15,79}::beach", feature_id):
     raise SystemExit(1)
-if value.get("features_inserted") != 1 or value.get("source_links_inserted") != 1:
+if (
+    value.get("features_inserted") != 3
+    or value.get("source_links_inserted") != 3
+    or value.get("weather_values_inserted") != 1
+    or value.get("price_values_inserted") != 1
+):
     raise SystemExit(2)
 print(feature_id)
 PY

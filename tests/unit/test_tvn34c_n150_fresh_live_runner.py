@@ -82,5 +82,9 @@ def test_seed_helper_requires_dagster_runtime_preflight() -> None:
     assert 'expected_login="ktm_feature_dagster_runtime"' in seeder
     assert "AsyncKorTravelMapClient" in seeder
     assert "FeatureKind.PLACE" in seeder
+    assert "FeatureKind.WEATHER" in seeder
+    assert "FeatureKind.PRICE" in seeder
+    assert "weather_values_inserted" in seeder
+    assert "price_values_inserted" in seeder
     assert '_PROVIDER: Final[str] = "python-khoa-api"' in seeder
     assert '_DATASET_KEY: Final[str] = "khoa_beaches"' in seeder
