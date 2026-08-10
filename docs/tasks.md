@@ -645,8 +645,8 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   cleanup이 통과해야 한다.
 
   `0104_tvn36_final_fence`와 final contract/browser direct-state rewrite는 구현됐다. 남은 완료
-  조건은 n150 immutable fresh main/recovery와 PinVi exact-head live receipt, 이어지는 requested
-  rebase chain 및 fixed-base 영향성 gate다.
+  조건은 n150 immutable fresh main/recovery, 이어지는 requested rebase chain 및 fixed-base 영향성
+  gate다. Map `6bd0f176` / PinVi `6ab4eaf` exact-head receipt는 이미 고정됐다.
 
 ### T-VN-37D — notice empty range 표현 (보류)
 

@@ -85,7 +85,8 @@ effective override provenance로 교체하고 whole-row request/version bridge�
 
 **다음 한 작업**: `0104_tvn36_final_fence`가 final effective field projection으로
 대체된 whole-row bridge를 물리 제거했다. frontend/OpenAPI/Playwright를 direct typed command로
-전환했고, n150 fresh main/recovery 실행과 PinVi exact-head pair 검증을 끝낸 뒤 요청된
+전환했다. Map `6bd0f176` / PinVi `6ab4eaf` exact-head pair를 재vendor·고정했고, n150 fresh
+main/recovery를 끝낸 뒤 요청된
 `T-VN-33 → 38 → 34 → 36` 순서 rebase와 영향성 수정을 수행한다.
 
 - `0104_tvn36_final_fence`는 `data_origin`/`data_version`, `feature_versions`,
@@ -99,6 +100,8 @@ effective override provenance로 교체하고 whole-row request/version bridge�
   명시 전달하도록 보정했고, external profile은 빈 default로 compose interpolation을 통과한다.
 - final live spec은 더 이상 change-request 승인/버전 snapshot에 의존하지 않고 browser BFF를 통해
   Feature 생성 → publication suppress → retire → audit timeline → cleanup을 실제 strong ETag로 검증한다.
+- `consumer-rollout-v1.json`의 T-VN-36 receipt는 user vendor와 admin detail subset의 SHA-256을
+  source archive와 대조한다. user/service 표면은 무변경이며 admin-detail subset은 재추출했다.
 
 - base는 T-VN-34C 완료 head `b03d5a4f`이다. `data_origin`/`data_version`, `feature_versions`,
   whole-row request receipt는 T-VN-36D가 제거하며 T-VN-34 C head에는 남아 있다.

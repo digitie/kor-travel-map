@@ -42,9 +42,9 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     "tvn33-reference-ownership-v1.sql": (
         "9f434b50440c7463b86a5cf61abeb30bf6fe8d74a5760aa256374c76e4c9328a"
     ),
-    "openapi-diff-v1.json": ("e193d2262e7c2903d67d0605ecd91c67a3ebaff1e33675f17b028cf8b253d20d"),
+    "openapi-diff-v1.json": ("85ae737f5c92f36aed9c540836f40511e8a9a3a39a8f554e36524ef73fea6c0c"),
     "consumer-rollout-v1.json": (
-        "c801ae32cf4ee1922fc775ae89c97220d6447a34c357a3e45681a53ef52e7777"
+        "e091a196b43f660a383b3f06d044a931187439665ae06dfce36c3aebb5ff0df0"
     ),
     "violation-fixtures-v1.sql": (
         "dba1ad0e640e4ee0e2c6904ab880f7548cf073d859f221840b6fad873e3a8df6"
@@ -214,6 +214,31 @@ def test_consumer_rollout_shape() -> None:
         "PinVi contract pin consistency",
         "Node 22 Linux workspace typecheck",
         "public Feature no legacy status or internal state axes",
+    ]
+    final_receipt = rollout["tasks"]["T-VN-36"]["pinvi_snapshot_receipt"]
+    assert set(final_receipt) == {
+        "map_commit",
+        "pinvi_commit",
+        "map_user_openapi_sha256",
+        "map_full_openapi_sha256",
+        "pinvi_user_vendor_sha256",
+        "pinvi_admin_detail_vendor_sha256",
+        "verification",
+    }
+    assert re.fullmatch(r"[0-9a-f]{40}", final_receipt["map_commit"])
+    assert re.fullmatch(r"[0-9a-f]{40}", final_receipt["pinvi_commit"])
+    for key in (
+        "map_user_openapi_sha256",
+        "map_full_openapi_sha256",
+        "pinvi_user_vendor_sha256",
+        "pinvi_admin_detail_vendor_sha256",
+    ):
+        assert re.fullmatch(r"[0-9a-f]{64}", final_receipt[key]), key
+    assert final_receipt["map_user_openapi_sha256"] == final_receipt["pinvi_user_vendor_sha256"]
+    assert final_receipt["verification"] == [
+        "admin-detail deterministic re-extraction",
+        "PinVi contract pin consistency",
+        "T-VN-36 exact Map/PinVi source pair",
     ]
     entries = rollout["removal_manifest"]["entries"]
     assert entries, "removal manifest가 비어 있다"

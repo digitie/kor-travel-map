@@ -158,7 +158,7 @@ pinvi_root = Path(sys.argv[3])
 map_commit = sys.argv[4]
 pinvi_commit = sys.argv[5]
 data = json.loads(path.read_text(encoding="utf-8"))
-receipt = data["tasks"]["T-VN-34"]["pinvi_snapshot_receipt"]
+receipt = data["tasks"]["T-VN-36"]["pinvi_snapshot_receipt"]
 if receipt["map_commit"] != map_commit or receipt["pinvi_commit"] != pinvi_commit:
     raise SystemExit(1)
 for name in ("openapi.user.json", "openapi.json"):

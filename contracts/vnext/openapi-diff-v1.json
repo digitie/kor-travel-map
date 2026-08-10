@@ -5,7 +5,7 @@
   "baseline": {
     "admin": {
       "file": "packages/kor-travel-map-api/openapi.json",
-      "sha256": "5a73a2919d29436e7beb6a702ed8e79fbf3266de33b3cf77c2e8667401c7b838"
+      "sha256": "f84290dbdff4b1dceb6cceedc47d70327280074387664a81fb234d0cdcda0b8e"
     },
     "user": {
       "file": "packages/kor-travel-map-api/openapi.user.json",
@@ -26,6 +26,11 @@
       "date": "2026-08-11",
       "task": "T-VN-34 rebase",
       "change": "최신 T-VN-33/T-VN-38 migration chain 위 rebase에 따라 admin baseline SHA를 재고정한다. user/service bytes와 Wave 2 목표 diff 항목·counts는 변하지 않는다. T-VN-33 ownership reference에 따른 target catalog 재동결은 target-schema-fingerprints-v1.json이 담당한다."
+    },
+    {
+      "date": "2026-08-10",
+      "task": "T-VN-36D",
+      "change": "admin baseline sha256 재고정 — final destructive fence가 whole-row feature change request/version bridge를 물리 삭제하면서 해당 admin change-request HTTP 표면도 함께 제거했다. typed field override와 state command가 유일한 admin write 정본이며, 공개·service 표면은 무변경이다."
     },
     {
       "date": "2026-08-08",
