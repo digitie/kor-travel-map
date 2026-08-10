@@ -23,8 +23,12 @@ if TYPE_CHECKING:
 
 pytestmark = pytest.mark.integration
 
-_BASE = datetime(2026, 8, 8, 3, 0, tzinfo=UTC)
-_TARGET = _BASE + timedelta(hours=3)
+# ``build_weather_card`` deliberately reads the *current* receipt projection
+# and rejects rows past ``refresh_after``.  Keep its receipt fresh relative to
+# the test run, while snapshot assertions below still establish ordering via
+# the fixed offset between these two instants.
+_BASE = datetime.now(UTC).replace(microsecond=0) - timedelta(hours=2)
+_TARGET = _BASE + timedelta(hours=1)
 _KMA = "python-kma-api"
 _KREX = "python-krex-api"
 
@@ -203,7 +207,7 @@ async def test_current_card_uses_receipt_summary_and_snapshot_uses_raw_facts(
     snapshot = await weather_repo.build_weather_snapshot(
         migrated_session,
         feature_id="weather-current",
-        target_at=_BASE + timedelta(hours=1),
+        target_at=_BASE + timedelta(minutes=30),
         known_at=_TARGET,
     )
     snapshot_by_key = {(item.forecast_style, item.metric_key): item for item in snapshot.metrics}
