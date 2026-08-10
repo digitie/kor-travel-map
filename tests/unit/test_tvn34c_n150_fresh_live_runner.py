@@ -41,6 +41,7 @@ def test_runner_uses_receipt_pinned_archives_not_its_checkout() -> None:
     assert "feature.features_detailed') IS NULL" in runner
     assert 'compose_ui_password_hash="${ui_password_hash//\\$/\\$\\$}"' in runner
     assert "KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN=$ops_fixture" in runner
+    assert "docker image inspect --format '{{.Id}}' \"$dagster_image_reference\"" in runner
     assert "mcr.microsoft.com/playwright:v1.60.0-noble" in _text(
         _ROOT / "docker" / "c7-playwright.Dockerfile"
     )

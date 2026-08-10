@@ -454,7 +454,9 @@ recover() {
 }
 
 seed_fresh_etl() {
-  MAP_DAGSTER_IMAGE="$(compose_map images -q dagster)"
+  local dagster_image_reference
+  dagster_image_reference="$(compose_map images -q dagster)"
+  MAP_DAGSTER_IMAGE="$(docker image inspect --format '{{.Id}}' "$dagster_image_reference")"
   [[ "$MAP_DAGSTER_IMAGE" =~ ^sha256:[0-9a-f]{64}$ ]] || die "Dagster image is not immutable"
   MAP_NETWORK="${MAP_PROJECT}_default"
   local seed_output="$RUN_DIR/fresh-etl.json"
