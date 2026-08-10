@@ -86,5 +86,7 @@ def test_seed_helper_requires_dagster_runtime_preflight() -> None:
     assert "FeatureKind.PRICE" in seeder
     assert "weather_values_inserted" in seeder
     assert "price_values_inserted" in seeder
+    assert "upsert_provider_refresh_policy" in seeder
+    assert "stale_after_minutes=24 * 60" in seeder
     assert '_PROVIDER: Final[str] = "python-khoa-api"' in seeder
     assert '_DATASET_KEY: Final[str] = "khoa_beaches"' in seeder

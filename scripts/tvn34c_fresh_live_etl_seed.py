@@ -38,6 +38,10 @@ from kortravelmap.infra.db import (
     assert_runtime_db_privilege_boundary,
     make_async_engine,
 )
+from kortravelmap.infra.provider_refresh_policy_repo import (
+    get_provider_refresh_policy,
+    upsert_provider_refresh_policy,
+)
 from kortravelmap.settings import KorTravelMapSettings
 
 _RUN_ID_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9][a-z0-9-]{15,79}$")
@@ -209,6 +213,23 @@ async def _run(run_id: str) -> dict[str, object]:
             )
             if dataset_id is None:
                 raise RuntimeError("canonical fresh ETL dataset을 찾을 수 없습니다")
+            # Weather current-summary materialization is policy-driven.  The
+            # canonical KHOA dataset exists in a fresh database, but it does
+            # not own a refresh policy until an operator creates one.  Seed
+            # the explicit policy through the restricted Dagster runtime so
+            # the live card proves the real summary path rather than merely
+            # inserting a raw weather fact.
+            policy = await get_provider_refresh_policy(
+                session,
+                provider_dataset_id=int(dataset_id),
+            )
+            await upsert_provider_refresh_policy(
+                session,
+                provider_dataset_id=int(dataset_id),
+                source_kind="manual",
+                expected_revision=(policy.revision if policy is not None else None),
+                stale_after_minutes=24 * 60,
+            )
             weather_values_inserted = await weather_repo.load_weather_values(
                 session,
                 [
