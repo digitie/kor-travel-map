@@ -437,7 +437,46 @@ unmapped cause를 보전한다. “0건이면 무시” 같은 fallback은 없�
 
 ## 7. HTTP/OpenAPI/consumer contract
 
-### 7.1 public
+### 7.1 legacy detail snapshot의 canonical replacement
+
+PinVi가 실제로 소비하는 legacy admin
+`GET /v1/admin/features/curated/{curated_feature_id}/detail-snapshot`는 overlay의 단건 wrapper다.
+legacy snapshot은 항상 item 하나만 담으므로 `curated_feature_id`를 canonical identity로 보존할
+근거가 없다. T-VN-40은 `feature.curated_feature_detail_snapshots`와 trip-copy snapshot cache를
+물리 삭제하고, 다음 typed admin endpoint로 바꾼다.
+
+```
+GET /v1/admin/curation-items/{curation_item_id}/detail-snapshot
+```
+
+이 endpoint는 cache table을 새로 만들지 않고 one repeatable-read query에서
+`curation_items → curation_collections → typed Feature/subtype → source record`를 직접 조립한다.
+측정 전 materialized cache를 재도입하지 않는다. response는 closed
+`CurationItemDetailSnapshot`이며 다음 exact top-level key만 갖는다.
+
+```json
+{
+  "curation_item_id": "UUID",
+  "collection_id": "UUID",
+  "row_revision": 7,
+  "etag": "sha256:<canonical-json>",
+  "updated_at": "RFC3339",
+  "collection": {"theme_slug": "…", "theme_name": "…", "title": "…", "edition_key": "…"},
+  "item": {"feature_id": "…", "relation": "…", "sort_order": 0, "title": null, "summary": null},
+  "feature": {"feature_id": "…", "name": "…", "category": "…", "kind": "…", "lon": 0, "lat": 0,
+              "address": {}, "detail": {}, "source_record_key": "…"}
+}
+```
+
+`collection`/`item`/`feature`의 exact property·nullable/type은 Map OpenAPI와 PinVi typed consumer
+test가 freeze한다. endpoint는 `source_present`, `item.status='included'`, linked Feature, required
+source record가 없으면 404를 반환하며 candidate/archived item을 PinVi snapshot으로 만들지 않는다.
+collection visibility와 Feature public predicate는 PinVi import policy가 요구하는 projection에서
+명시한다. legacy `curation_status`, `curated_feature_id`, `items[]`, `day_index`, `memo`는 response에
+남기지 않는다. PinVi는 same Map head의 new item id/path/schema로 re-vendor하고 old snapshot path와
+types를 compile/static gate에서 0으로 만든다.
+
+### 7.2 public
 
 - public `/v1/curations*`, Feature `curations[]`, PinVi curation consumer는 canonical collection/item
   projection만 쓴다.
@@ -445,7 +484,7 @@ unmapped cause를 보전한다. “0건이면 무시” 같은 fallback은 없�
   response/query field는 제거한다. redirect와 no-op parameter는 없다.
 - public response에는 candidate id/state/rank/evidence/rejection/actor/audit을 노출하지 않는다.
 
-### 7.2 admin candidate API
+### 7.3 admin candidate API
 
 | method/path | command/query | required contract |
 |---|---|---|
@@ -454,6 +493,7 @@ unmapped cause를 보전한다. “0건이면 무시” 같은 fallback은 없�
 | `GET /v1/admin/theme-feature-candidates/{id}/transitions` | audit timeline | descending `transition_id` keyset; actor/evidence only admin |
 | `POST /v1/admin/theme-feature-candidates/{id}/promote` | typed promotion | `If-Match`, `Idempotency-Key`, target collection and typed item identity/body, reason code |
 | `POST /v1/admin/theme-feature-candidates/{id}/reject` | typed rejection | `If-Match`, `Idempotency-Key`, non-empty reason code |
+| `GET /v1/admin/curation-items/{id}/detail-snapshot` | PinVi typed import snapshot | canonical item id only; closed direct projection, no legacy overlay/cache |
 
 `If-Match` mismatch는 412, missing candidate/collection is 404, stale source/current-head or identity
 conflict is 409, malformed typed input is 422, denied actor is 403이다. successful command response에는
@@ -488,14 +528,16 @@ T-VN-40 final gate has three tiers.
 
 The implementation PR must replace this minimum list with actual catalog OIDs/signatures before drop.
 
-- relation: `feature.curated_features`, legacy-only detail/tripmate snapshot relations;
+- relation: `feature.curated_features`, `feature.curated_feature_detail_snapshots`,
+  `feature.curated_tripmate_copy_snapshots` and every legacy-only snapshot relation;
 - curation item bridge: `legacy_projection_id`, its FK and
   `uq_curation_items_legacy_projection_id`;
 - sync: `feature.sync_curated_feature_collection`,
   `trg_sync_curated_feature_collection`, every reverse-sync function/trigger;
 - code: `curated_repo` overlay writer/read models, client exports, curated refresh Dagster asset/schedule,
   legacy merge branches, legacy router/DTO/cursor/frontend/e2e fixture;
-- contract: public `/v1/curated-features`, legacy admin curated route/OpenAPI/generated types/PinVi vendor;
+- contract: public `/v1/curated-features`, legacy admin curated route/detail-snapshot/OpenAPI/generated
+  types/PinVi vendor; replacement is canonical `curation-items/{id}/detail-snapshot` only;
 - security: runtime privilege map, preflight allowlist, procedure grants, sequences, views/functions/index
   predicates containing `curated_features`.
 
@@ -510,6 +552,7 @@ relation is a fail-closed manifest expansion requiring PR review, not an ad-hoc 
 - [ ] candidate current source proof, immutable transition audit, raw-DML fence, promotion idempotency and
   lock order have integration regressions.
 - [ ] collection/item is the only public/PinVi membership read path; public candidate response is zero.
+- [ ] PinVi/admin detail snapshot uses only canonical curation item identity and has no legacy cache/path/type.
 - [ ] Map OpenAPI/user/admin generated output and PinVi exact pair compile/check pass.
 - [ ] legacy relation/object/API/catalog/static references are zero after final migration.
 - [ ] n150 destructive fresh E2E and recovery cleanup evidence are stored only as redacted immutable receipt.

@@ -121,7 +121,10 @@ physical removal은 같은 PR의 ordered migration과 final acceptance에 함께
 4. Feature aggregate, public `/v1/curations*`, collection admin, user client, frontend, PinVi는
    canonical collection/item만 읽도록 전환한다. `/v1/curated-features`와 legacy admin surface는
    같은 release에서 제거하며 redirect/no-op parameter를 두지 않는다.
-5. Map OpenAPI exact export 뒤 PinVi user와 admin-detail subset을 같은 Map head로 re-vendor하고,
+5. legacy curated detail/trip-copy snapshot cache와 admin snapshot path는 새
+   `curation-items/{id}/detail-snapshot` direct typed projection으로 대체한다. 새 cache는 만들지
+   않으며 PinVi는 canonical item identity만 사용한다.
+6. Map OpenAPI exact export 뒤 PinVi user와 admin-detail subset을 같은 Map head로 re-vendor하고,
    compile/no-legacy contract receipt를 consumer rollout manifest에 pin한다.
 
 ### 40C — legacy surface fence·제거
