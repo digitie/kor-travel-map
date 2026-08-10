@@ -494,6 +494,17 @@ verify_map_schema() {
   docker exec "$db_container" psql -U kor_travel_map -d kor_travel_map -Atqc \
     "SELECT to_regclass('feature.features_detailed') IS NULL" | grep -Fx t >/dev/null ||
     die "T-VN-34C private detail bridge remains"
+  docker exec "$db_container" psql -U kor_travel_map -d kor_travel_map -Atqc \
+    "SELECT count(*) = 0
+       FROM information_schema.columns
+      WHERE table_schema = 'feature'
+        AND table_name = 'features'
+        AND column_name = ANY (ARRAY[
+          'status', 'deleted_at', 'user_deleted_at', 'user_change_kind',
+          'user_change_status', 'user_change_request_id', 'user_deleted_by',
+          'user_change_reason'
+        ])" | grep -Fx t >/dev/null ||
+    die "T-VN-34C legacy feature state columns remain"
 }
 
 build_playwright_image() {

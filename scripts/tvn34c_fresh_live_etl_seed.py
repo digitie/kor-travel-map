@@ -34,7 +34,14 @@ from kortravelmap.infra.db import (
 from kortravelmap.settings import KorTravelMapSettings
 
 _RUN_ID_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9][a-z0-9-]{15,79}$")
-_PROVIDER: Final[str] = "tvn34c-fresh-live"
+# Fresh 0097 databases own only the canonical provider-dataset catalog from
+# 0089.  Use the active KHOA beach dataset rather than creating a fixture-only
+# catalog row under the restricted Dagster runtime login: this exercises the
+# same provider-dataset authority path as a real beach ingestion.
+_PROVIDER: Final[str] = "python-khoa-api"
+_DATASET_KEY: Final[str] = "khoa_beaches"
+_BEACH_CATEGORY: Final[str] = "01050100"
+_BEACH_MARKER_COLOR: Final[str] = "P-07"
 
 
 def _parse_args() -> argparse.Namespace:
@@ -61,6 +68,8 @@ async def _run(run_id: str) -> dict[str, object]:
         fetched_at = datetime.now(UTC)
         raw_data = {
             "fixture": "tvn34c-fresh-live",
+            "provider": _PROVIDER,
+            "dataset_key": _DATASET_KEY,
             "kind": "beach",
             "run_id": run_id,
             "source_entity_id": source_entity_id,
@@ -68,7 +77,7 @@ async def _run(run_id: str) -> dict[str, object]:
         payload_hash = make_payload_hash(raw_data)
         source_record_key = make_source_record_key(
             provider=_PROVIDER,
-            dataset_key="fresh-live-beaches",
+            dataset_key=_DATASET_KEY,
             source_entity_type="beach",
             source_entity_id=source_entity_id,
             raw_payload_hash=payload_hash,
@@ -79,16 +88,16 @@ async def _run(run_id: str) -> dict[str, object]:
                 kind=FeatureKind.PLACE,
                 name=f"T-VN-34C fresh beach {run_id}",
                 coord=Coordinate(lon=127.5, lat=36.5),
-                category="01070300",
+                category=_BEACH_CATEGORY,
                 marker_icon="beach",
-                marker_color="P-06",
+                marker_color=_BEACH_MARKER_COLOR,
                 detail=PlaceDetail(feature_id=feature_id, place_kind="beach"),
                 created_at=fetched_at,
                 updated_at=fetched_at,
             ),
             source_record=SourceRecord(
                 provider=_PROVIDER,
-                dataset_key="fresh-live-beaches",
+                dataset_key=_DATASET_KEY,
                 source_entity_type="beach",
                 source_entity_id=source_entity_id,
                 raw_payload_hash=payload_hash,

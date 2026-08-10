@@ -39,6 +39,7 @@ def test_runner_uses_receipt_pinned_archives_not_its_checkout() -> None:
     assert '"version"] != 3' in runner
     assert "0097_tvn34c_final_cutover" in runner
     assert "feature.features_detailed') IS NULL" in runner
+    assert "T-VN-34C legacy feature state columns remain" in runner
     assert 'compose_ui_password_hash="${ui_password_hash//\\$/\\$\\$}"' in runner
     assert "KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN=$ops_fixture" in runner
     assert "docker image inspect --format '{{.Id}}' \"$dagster_image_reference\"" in runner
@@ -76,3 +77,5 @@ def test_seed_helper_requires_dagster_runtime_preflight() -> None:
     assert 'expected_login="ktm_feature_dagster_runtime"' in seeder
     assert "AsyncKorTravelMapClient" in seeder
     assert "FeatureKind.PLACE" in seeder
+    assert '_PROVIDER: Final[str] = "python-khoa-api"' in seeder
+    assert '_DATASET_KEY: Final[str] = "khoa_beaches"' in seeder
