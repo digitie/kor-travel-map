@@ -102,7 +102,7 @@
         "admin-detail": "yes"
       },
       "pinvi_snapshot_receipt": {
-        "map_commit": "dc13693060affb57306730319e44f196d54ade33",
+        "map_commit": "f7e2e04e12adba97a22750b01ef89c0495f031ef",
         "pinvi_commit": "6ab4eafc837351e8cb3eb96cd60f59df8ca40993",
         "map_user_openapi_sha256": "eca7eea1dff7aa1848e50428fb8da5507e4d636c3a979b04859ef43c7f7410e7",
         "map_full_openapi_sha256": "f84290dbdff4b1dceb6cceedc47d70327280074387664a81fb234d0cdcda0b8e",
