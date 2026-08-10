@@ -1018,6 +1018,10 @@ def upgrade() -> None:
         _PUBLIC_FEATURES_VIEW_SQL.replace("CREATE OR REPLACE VIEW", "CREATE VIEW"),
         "REVOKE ALL ON feature.public_features FROM PUBLIC",
         "GRANT SELECT ON feature.public_features TO ktm_feature_runtime",
+        # T-VN-36가 lineage/effective projection으로 바꾸기 전 admin detail은
+        # immutable version receipt를 읽는다.  Runtime direct DML은 계속 0095
+        # revoke 및 0097 immutable trigger boundary 밖이다.
+        "GRANT SELECT ON feature.feature_versions TO ktm_feature_runtime",
         "CREATE UNIQUE INDEX uq_feature_versions_user_request_receipt "
         "ON feature.feature_versions (feature_id, request_id) "
         "WHERE origin = 'user_request' AND request_id IS NOT NULL",

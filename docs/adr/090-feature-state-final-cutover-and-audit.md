@@ -28,7 +28,8 @@ merge tombstone이 섞여 있다. 애플리케이션만 audit event를 쓰면 ra
    security-definer procedure만 실행한다. user add/update/delete의 legacy provenance와 immutable
    version snapshot은 별도 typed `materialize_user_feature_change_provenance` procedure가 **request → receipt →
    Feature** 순서로 잠근 뒤 원자적으로 기록하므로 runtime은 `feature_versions`의 직접 DML
-   권한을 갖지 않는다. 다만 0095/0096 current schema에서 `feature.features_detailed`는 subtype detail을
+   권한을 갖지 않는다. T-VN-36 전 bridge 동안 admin detail/revision reader에는 immutable snapshot
+   `SELECT`만 준다. 다만 0095/0096 current schema에서 `feature.features_detailed`는 subtype detail을
    조립하는 private read bridge이므로 `feature_repo` non-public detail, admin detail, curated detail과
    두 materializer에 한해 runtime/owner read를 준다. 이는 public 권한이 아니며 final target에는 이 view가
    없다. T-VN-34C는 public view·non-public reader·materializer를 typed core+subtype direct assembly로

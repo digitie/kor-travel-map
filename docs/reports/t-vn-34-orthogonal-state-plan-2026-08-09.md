@@ -157,7 +157,7 @@ runtime procedure는 현행 TEXT key를 받고 final target procedure는 UUID ke
   secret에서 pre-provision한다. bootstrap ownership transfer는 PostgreSQL system catalog까지 건드리는
   `REASSIGN OWNED`가 아니라 dedicated application DB의 schema/relation/routine/type만 명시적으로
   이전한다. startup preflight는 `session_user=current_user` runtime identity, procedure EXECUTE,
-  direct feature/audit/legacy surrogate mutation 거부를 실제 DSN으로 검사하고, runtime login으로
+  direct feature/audit/legacy surrogate mutation 거부와 retained `feature_versions` read-only grant를 실제 DSN으로 검사하고, runtime login으로
   실제 `load_bundle` provider lineage·version materialization과 admin request materialization을
   실행한다. runtime에는 `feature_versions`, audit, state axis, legacy provenance, generic
   `ops.feature_overrides`의 직접 DML을 grant하지 않는다.

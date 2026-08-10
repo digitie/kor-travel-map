@@ -149,12 +149,14 @@ FROM (
            OR request.state <> 'applied')
 ) AS violation_counts; -- expect: 0 -- phase: post-cutover
 
--- [INV-34C-08] C 동안 필요한 version/materializer bridge는 남고 runtime은 직접 DML을 받지 않는다.
+-- [INV-34C-08] C 동안 필요한 version/materializer bridge는 남고 runtime은 admin
+-- revision reader를 위한 SELECT만 받는다. 직접 DML은 받지 않는다.
 SELECT count(*)
 FROM (VALUES
     (to_regclass('feature.feature_versions') IS NULL),
     (to_regprocedure('feature.materialize_user_feature_change_provenance(text,text,uuid,text,text,bigint)') IS NULL),
     (to_regprocedure('feature.materialize_provider_feature_version(text)') IS NULL),
+    (NOT has_table_privilege('ktm_feature_runtime', 'feature.feature_versions', 'SELECT')),
     (has_table_privilege('ktm_feature_runtime', 'feature.feature_versions', 'INSERT')),
     (has_table_privilege('ktm_feature_runtime', 'feature.feature_versions', 'UPDATE')),
     (has_table_privilege('ktm_feature_runtime', 'feature.feature_versions', 'DELETE'))

@@ -181,6 +181,9 @@ _CORE_FEATURE_GRANTS = (
     "parent_feature_id, sibling_group_id, raw_refs, created_at, updated_at"
     ") ON feature.features TO ktm_feature_runtime",
     "GRANT SELECT ON feature.feature_state_transitions TO ktm_feature_runtime",
+    # T-VN-36가 version bridge를 대체하기 전 admin detail/revision readers need
+    # the immutable snapshots.  Runtime never receives version DML.
+    "GRANT SELECT ON feature.feature_versions TO ktm_feature_runtime",
 )
 
 _STATE_OWNER_FUNCTION_ACL = (

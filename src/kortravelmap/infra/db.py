@@ -76,6 +76,8 @@ _RUNTIME_DB_PRIVILEGE_SQL = text(
             AS can_create_in_feature_schema,
         has_table_privilege(session_user, 'feature.public_features', 'SELECT')
             AS can_read_public_features,
+        has_table_privilege(session_user, 'feature.feature_versions', 'SELECT')
+            AS can_read_feature_versions,
         -- PostgreSQL stores functions and procedures in pg_proc; the public
         -- privilege inquiry is has_function_privilege even for a regprocedure.
         has_function_privilege(
@@ -233,6 +235,9 @@ def _runtime_db_privilege_problems(
     required_true_fields = {
         "can_read_public_features": (
             "runtime login must SELECT feature.public_features"
+        ),
+        "can_read_feature_versions": (
+            "runtime login must SELECT retained feature.feature_versions"
         ),
         "can_execute_create_procedure": (
             "runtime login must EXECUTE create_feature_with_initial_state"

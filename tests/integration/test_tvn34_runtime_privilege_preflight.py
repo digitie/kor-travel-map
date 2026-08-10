@@ -489,6 +489,18 @@ async def test_tvn34_runtime_logins_run_provider_and_admin_dml_but_raw_state_wri
                     ),
                     {"feature_id": feature_id, "principal": login},
                 )
+                version_count = int(
+                    (
+                        await connection.execute(
+                            text(
+                                "SELECT count(*) FROM feature.feature_versions "
+                                "WHERE feature_id = :feature_id"
+                            ),
+                            {"feature_id": feature_id},
+                        )
+                    ).scalar_one()
+                )
+                assert version_count >= 1
                 await connection.execute(
                     text(
                         """
