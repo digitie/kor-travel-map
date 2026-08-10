@@ -70,8 +70,8 @@ API live 12/12 → n150 브라우저 admin UI live 10/10 + 라운드12 수정 li
 **다음 한 작업**: T-VN-34C의 구현 게이트는 완료했다. PR CI와 승인 뒤 forward-only C head를
 병합하고, 다음 Lane B 작업인 T-VN-36A를 시작한다.
 
-- T-VN-34 전용 38 commit은 T-VN-38 `faf1a68e` 위로 rebase했고, Map OpenAPI artifact는 새 full
-spec hash로 재freeze했다. merge는 하지 않았다.
+- T-VN-34 전용 63 commit은 최신 T-VN-33 `21b1758b` → T-VN-38 `2e78d623` 순서의
+체인 위로 재base했고, Map OpenAPI artifact는 현재 spec hash로 재freeze했다. merge는 하지 않았다.
 - Map execution source `fe12e8da` ↔ PinVi `e37eda94` consumer pair를 다시 vendor했다. receipt의
 Map commit은 runtime source pin이며, runner를 담는 후속 문서 commit과 의도적으로 다르다.
 - 새 installer/runner는 committed pair를 `git archive`로만 가져오며, `features_detailed` 부재,

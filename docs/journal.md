@@ -105,6 +105,18 @@ rebase에서 드러났다. 빈 `0095_tvn33_tvn38_head_merge`가 두 선행 revis
 **최종 게이트 25/25 GREEN**: unit+lint 2192 · api 1101(cov 77.64%) · dagster 530/3skip
 (85.23%) · integration **1049 passed / 0 skipped**(geo live 실제 실행) · vitest 37파일 302 ·
 frontend 9종.
+## 2026-08-10 — T-VN-34: 최신 T-VN-33 → T-VN-38 체인 재base 재검증
+
+신규 T-VN-33 head `21b1758b`를 기준으로 T-VN-38을 `2e78d623`까지 먼저 재base하고,
+T-VN-34의 전용 63개 commit을 그 위로 재base했다. 중간 merge는 만들지 않았다. T-VN-33의
+provider dataset/source 정본 강화와 T-VN-38의 current summary가 함께 적용된 fresh migration에서
+target freeze·공개 projection·상태 spine·runtime ACL을 검증했다.
+
+재base가 드러낸 두 drift도 같이 바로잡았다. 날씨 current-summary 검증은 실행 시각보다
+과거인 receipt를 만드므로 테스트 fixture의 freshness 시각을 상대 시각으로 고정했고,
+runtime의 `feature_versions` ACL은 read 허용과 insert 거부를 별도 catalog probe로 검증하도록
+바꿨다. OpenAPI freeze hash도 현재 생성 spec에 맞춰 재고정했다.
+
 ## 2026-08-10 — T-VN-34C: n150 fresh destructive live gate 통과
 
 immutable snapshot은 Map 실행 source `fe12e8da`와 PinVi `e37eda94`를 `git archive`로만 넣어
