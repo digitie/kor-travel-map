@@ -347,7 +347,7 @@ async def test_admin_state_transition_rejects_stale_revision(
         )
 
 
-async def test_user_update_version_overrides_provider_reload(
+async def test_user_field_overrides_survive_provider_reload(
     migrated_session: AsyncSession,
 ) -> None:
     feature_id = "feature-admin-user-update"
@@ -364,7 +364,10 @@ async def test_user_update_version_overrides_provider_reload(
             "urls": {"homepage": "https://example.test/user-feature"},
             # T-VN-35(ADR-086): admin detail도 kind별 typed 컬럼으로 들어가므로
             # 필수 필드(place_kind)를 갖춘 shape이어야 한다. 자유 키는 payload로.
-            "detail": {"place_kind": "attraction", "payload": {"note": "사용자 수정"}},
+            "detail": {
+                "place_kind": "attraction",
+                "facility_info": {"note": "사용자 수정"},
+            },
         },
         review_mode="immediate",
         reason="사용자 제보 반영",
@@ -383,7 +386,7 @@ async def test_user_update_version_overrides_provider_reload(
             "name": "사용자 수정 이름 2",
             "detail": {
                 "place_kind": "attraction",
-                "payload": {"note": "사용자 수정 2"},
+                "facility_info": {"note": "사용자 수정 2"},
             },
         },
         review_mode="immediate",
@@ -405,58 +408,44 @@ async def test_user_update_version_overrides_provider_reload(
 
     row = await feature_repo.get_feature_row(migrated_session, feature_id)
     assert row is not None
-    provenance = (
-        await migrated_session.execute(
-            text(
-                "SELECT data_origin, data_version "
-                "FROM feature.features WHERE feature_id = :feature_id"
-            ),
-            {"feature_id": feature_id},
-        )
-    ).mappings().one()
     assert row["name"] == "사용자 수정 이름 2"
     assert row["road_name_code"] == "111104100001"
     assert row["admin_dong_code"] == "1111051500"
     assert row["urls"]["homepage"] == "https://example.test/user-feature"
-    assert row["detail"]["payload"]["note"] == "사용자 수정 2"
-    assert provenance["data_origin"] == "user_request"
-    assert provenance["data_version"] == 2
-
-    versions = (
+    assert row["detail"]["facility_info"]["note"] == "사용자 수정 2"
+    overrides = (
         await migrated_session.execute(
             text(
                 """
-                SELECT version, origin, change_kind
-                FROM feature.feature_versions
+                SELECT field_path, override_value
+                FROM ops.feature_overrides
                 WHERE feature_id = :feature_id
-                ORDER BY version
+                  AND status = 'active'
+                ORDER BY field_path
                 """
             ),
             {"feature_id": feature_id},
         )
     ).mappings().all()
-    assert [(v["version"], v["origin"], v["change_kind"]) for v in versions] == [
-        (1, "user_request", "update"),
-        (2, "user_request", "update"),
-    ]
-    version_payloads = (
+    override_values = {row["field_path"]: row["override_value"] for row in overrides}
+    assert override_values["core.name"] == "사용자 수정 이름 2"
+    assert override_values["core.road_name_code"] == "111104100001"
+    assert override_values["core.admin_dong_code"] == "1111051500"
+    assert override_values["place.facility_info"] == {"note": "사용자 수정 2"}
+    user_versions = (
         await migrated_session.execute(
             text(
                 """
-                SELECT version, payload
+                SELECT count(*)
                 FROM feature.feature_versions
                 WHERE feature_id = :feature_id
-                  AND version IN (1, 2)
-                ORDER BY version
+                  AND origin = 'user_request'
                 """
             ),
             {"feature_id": feature_id},
         )
-    ).mappings().all()
-    assert version_payloads[0]["payload"]["name"] == "사용자 수정 이름"
-    assert version_payloads[0]["payload"]["data_version"] == 1
-    assert version_payloads[1]["payload"]["name"] == "사용자 수정 이름 2"
-    assert version_payloads[1]["payload"]["data_version"] == 2
+    ).scalar_one()
+    assert int(user_versions) == 0
 
 
 async def test_admin_runtime_login_uses_procedures_for_add_update_delete_and_provider_lifecycle(
@@ -504,11 +493,9 @@ async def test_admin_runtime_login_uses_procedures_for_add_update_delete_and_pro
                     {"feature_id": feature_id},
                 )
             ).mappings().one()
-            assert dict(row) == {
-                "name": "runtime provenance writer",
-                "data_origin": "user_request",
-                "data_version": 1,
-            }
+            assert row["name"] == "runtime provenance writer"
+            assert row["data_origin"] != "user_request"
+            assert int(row["data_version"]) == 0
             provider_context = json.dumps(
                 {
                     "transition_kind": "provider_sync",
@@ -582,12 +569,10 @@ async def test_admin_runtime_login_uses_procedures_for_add_update_delete_and_pro
                     {"feature_id": feature_id},
                 )
             ).mappings().one()
-            assert dict(deleted) == {
-                "lifecycle_state": "retired",
-                "publication_state": "suppressed",
-                "data_origin": "user_request",
-                "data_version": 2,
-            }
+            assert deleted["lifecycle_state"] == "retired"
+            assert deleted["publication_state"] == "suppressed"
+            assert deleted["data_origin"] != "user_request"
+            assert int(deleted["data_version"]) == 0
 
             added_feature_id = f"feature-admin-runtime-add-{uuid4().hex}"
             add_request = await submit_feature_change_request(
@@ -619,10 +604,8 @@ async def test_admin_runtime_login_uses_procedures_for_add_update_delete_and_pro
                     {"feature_id": added_feature_id},
                 )
             ).mappings().one()
-            assert dict(added) == {
-                "data_origin": "user_request",
-                "data_version": 1,
-            }
+            assert added["data_origin"] != "user_request"
+            assert int(added["data_version"]) == 0
             # 0095는 runtime에서 feature_versions를 통째로 REVOKE했지만, 0097이
             # features_detailed를 DROP하면서 admin detail 화면이 version receipt를
             # 직접 읽게 됐다(`_ADMIN_FEATURE_VERSIONS_SQL`). 그래서 0097은 runtime에
@@ -691,8 +674,8 @@ async def test_user_delete_retirement_prevents_provider_resurrection(
     ).mappings().one()
     assert row["lifecycle_state"] == "retired"
     assert row["publication_state"] == "suppressed"
-    assert row["data_origin"] == "user_request"
-    assert row["data_version"] == 1
+    assert row["data_origin"] != "user_request"
+    assert int(row["data_version"]) == 0
 
 
 async def test_review_required_add_applies_only_after_admin_approval(
@@ -747,25 +730,22 @@ async def test_review_required_add_applies_only_after_admin_approval(
         )
     ).mappings().one()
     assert row["name"] == "사용자 추가 장소"
-    assert row["data_origin"] == "user_request"
-    assert row["data_version"] == 1
-    versions = (
+    assert row["data_origin"] != "user_request"
+    assert int(row["data_version"]) == 0
+    user_versions = (
         await migrated_session.execute(
             text(
                 """
-                SELECT version, origin, change_kind, payload
+                SELECT count(*)
                 FROM feature.feature_versions
                 WHERE feature_id = :feature_id
+                  AND origin = 'user_request'
                 """
             ),
             {"feature_id": feature_id},
         )
-    ).mappings().all()
-    assert [
-        (version["version"], version["origin"], version["change_kind"])
-        for version in versions
-    ] == [(1, "user_request", "add")]
-    assert versions[0]["payload"]["detail"]["place_kind"] == "attraction"
+    ).scalar_one()
+    assert int(user_versions) == 0
 
 
 async def test_list_admin_features_filters_issue_and_primary_source(

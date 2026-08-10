@@ -148,6 +148,27 @@ def test_admin_feature_cursor_round_trip_all_sorts() -> None:
 def test_admin_feature_row_and_json_helpers() -> None:
     assert repo._normalize_values(["a", "", "b"]) == ["a", "b"]
     assert repo._normalize_values([]) is None
+
+
+def test_user_override_payload_rejects_provider_owned_detail_and_keeps_null_coord() -> None:
+    with pytest.raises(ValueError, match="provider-owned detail field"):
+        repo._override_payload_for_change(
+            feature_id="feature-user-override",
+            feature_uuid="00000000-0000-4000-8000-000000000099",
+            kind="place",
+            payload={"detail": {"payload": {"provider_raw": "cannot-edit"}}},
+            include_required_create_fields=False,
+        )
+
+    values, geometry_wkt = repo._override_payload_for_change(
+        feature_id="feature-user-override",
+        feature_uuid="00000000-0000-4000-8000-000000000099",
+        kind="place",
+        payload={"coord": None},
+        include_required_create_fields=False,
+    )
+    assert values == {"core.coord_precision_digits": None}
+    assert geometry_wkt == {"core.coord": None}
     assert repo._normalize_query("  Ａ  ") == "A"
     assert repo._json_array('[{"a": 1}, 2]') == ({"a": 1},)
 
@@ -513,7 +534,6 @@ async def test_user_delete_change_uses_transition_and_typed_override() -> None:
                 ]
             ),
             _Result(),
-            _Result(),
         ]
     )
 
@@ -534,20 +554,11 @@ async def test_user_delete_change_uses_transition_and_typed_override() -> None:
         "causation_ref": request.request_id,
     }
     assert "feature.author_lifecycle_override" in session.calls[2]["statement"]
-    provenance = session.calls[3]
-    assert "feature.materialize_user_feature_change_provenance" in provenance["statement"]
-    assert provenance["params"] == {
-        "feature_id": request.feature_id,
-        "change_kind": "delete",
-        "request_id": request.request_id,
-        "reason": request.reason,
-        "operator": "admin",
-        "expected_row_revision": 12,
-    }
+    assert len(session.calls) == 3
 
 
 @pytest.mark.asyncio
-async def test_user_add_writes_subtype_before_typed_provenance_snapshot(
+async def test_user_add_writes_subtype_before_typed_field_override(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     request = repo.FeatureChangeRequest(
@@ -575,6 +586,13 @@ async def test_user_add_writes_subtype_before_typed_provenance_snapshot(
     )
     feature_uuid = "00000000-0000-4000-8000-000000000004"
     monkeypatch.setattr(repo, "candidate_feature_uuid", lambda: feature_uuid)
+    authored: dict[str, Any] = {}
+
+    async def author_overrides(_session: Any, **kwargs: Any) -> int:
+        authored.update(kwargs)
+        return 2
+
+    monkeypatch.setattr(repo, "_author_user_change_field_overrides", author_overrides)
     session = _Session(
         [
             _Result(
@@ -587,7 +605,6 @@ async def test_user_add_writes_subtype_before_typed_provenance_snapshot(
                     }
                 ]
             ),
-            _Result(),
             _Result(),
         ]
     )
@@ -615,20 +632,19 @@ async def test_user_add_writes_subtype_before_typed_provenance_snapshot(
         & create_payload.keys()
     )
     assert "INSERT INTO feature.feature_places" in session.calls[1]["statement"]
-    provenance = session.calls[2]
-    assert "feature.materialize_user_feature_change_provenance" in provenance["statement"]
-    assert provenance["params"] == {
-        "feature_id": request.feature_id,
-        "change_kind": "add",
-        "request_id": request.request_id,
-        "reason": request.reason,
-        "operator": "admin",
-        "expected_row_revision": 1,
-    }
+    assert len(session.calls) == 2
+    assert authored["request"] is request
+    assert authored["operator"] == "admin"
+    assert authored["feature_uuid"] == feature_uuid
+    assert authored["kind"] == "place"
+    assert authored["expected_row_revision"] == 1
+    assert authored["include_required_create_fields"] is True
 
 
 @pytest.mark.asyncio
-async def test_user_update_keeps_t36_input_write_and_calls_narrow_provenance_writer() -> None:
+async def test_user_update_calls_typed_field_override_without_raw_core_update(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     request = repo.FeatureChangeRequest(
         request_id="00000000-0000-0000-0000-000000000004",
         feature_id="feature-user-update",
@@ -644,6 +660,13 @@ async def test_user_update_keeps_t36_input_write_and_calls_narrow_provenance_wri
         applied_at=None,
         created_at=_NOW,
     )
+    authored: dict[str, Any] = {}
+
+    async def author_overrides(_session: Any, **kwargs: Any) -> int:
+        authored.update(kwargs)
+        return 13
+
+    monkeypatch.setattr(repo, "_author_user_change_field_overrides", author_overrides)
     session = _Session(
         [
             _Result(
@@ -652,11 +675,13 @@ async def test_user_update_keeps_t36_input_write_and_calls_narrow_provenance_wri
                         "feature_id": request.feature_id,
                         "feature_uuid": "00000000-0000-4000-8000-000000000004",
                         "kind": "place",
+                        "lifecycle_state": "active",
+                        "publication_state": "published",
+                        "quality_state": "valid",
                         "row_revision": 12,
                     }
                 ]
             ),
-            _Result(),
         ]
     )
 
@@ -666,20 +691,14 @@ async def test_user_update_keeps_t36_input_write_and_calls_narrow_provenance_wri
         operator="admin",
     )
 
-    ordinary_update = session.calls[0]
-    assert "UPDATE feature.features" in ordinary_update["statement"]
-    assert "user_change_" not in ordinary_update["statement"]
-    assert "user_deleted_" not in ordinary_update["statement"]
-    provenance = session.calls[1]
-    assert "feature.materialize_user_feature_change_provenance" in provenance["statement"]
-    assert provenance["params"] == {
-        "feature_id": request.feature_id,
-        "change_kind": "update",
-        "request_id": request.request_id,
-        "reason": request.reason,
-        "operator": "admin",
-        "expected_row_revision": 12,
-    }
+    assert len(session.calls) == 1
+    assert "FOR UPDATE" in session.calls[0]["statement"]
+    assert authored["request"] is request
+    assert authored["operator"] == "admin"
+    assert authored["feature_uuid"] == "00000000-0000-4000-8000-000000000004"
+    assert authored["kind"] == "place"
+    assert authored["expected_row_revision"] == 12
+    assert authored["include_required_create_fields"] is False
 
 
 @pytest.mark.asyncio

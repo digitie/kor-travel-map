@@ -12,6 +12,7 @@ import json
 import re
 import unicodedata
 import uuid
+from collections.abc import Mapping
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime
@@ -21,6 +22,12 @@ from typing import TYPE_CHECKING, Any, Final, Literal, NoReturn
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
+from kortravelmap.infra.domain_command_repo import (
+    canonical_domain_command_fingerprint,
+    create_domain_command_claim,
+    create_domain_command_record,
+    lock_domain_command,
+)
 from kortravelmap.infra.feature_identity import (
     candidate_feature_uuid,
     verify_feature_uuid,
@@ -29,7 +36,7 @@ from kortravelmap.infra.feature_projection import (
     TYPED_FEATURE_DETAIL_COLUMNS_SQL,
     typed_feature_detail_joins_sql,
 )
-from kortravelmap.infra.feature_subtype import write_subtype
+from kortravelmap.infra.feature_subtype import subtype_params, write_subtype
 from kortravelmap.infra.feature_update_active_repo import _driver_constraint_identity
 from kortravelmap.infra.merge_repo import (
     MergeConflictError,
@@ -40,7 +47,7 @@ from kortravelmap.infra.merge_repo import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Sequence
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -2541,7 +2548,8 @@ LIMIT :limit
 """
 
 _FEATURE_CHANGE_STATE_SQL: Final[str] = """
-SELECT feature_id, kind, lifecycle_state, publication_state, quality_state, row_revision
+SELECT feature_id, CAST(feature_uuid AS text) AS feature_uuid, kind,
+       lifecycle_state, publication_state, quality_state, row_revision
 FROM feature.features
 WHERE feature_id = :feature_id
 FOR UPDATE
@@ -2568,99 +2576,22 @@ CALL feature.create_feature_with_initial_state(
 )
 """
 
-# T-VN-35(0086): ``detail``/``geom``은 core SET 목록에서 사라졌다. 종전의
-# ``detail = CAST(:detail AS jsonb)`` 통교체는 **shape 미검증 구멍**이었다 —
-# 운영자가 보낸 임의 JSONB가 그대로 정본이 됐다. 이제 kind별 값은 subtype
-# 컬럼(typed)으로 들어가므로 컬럼·타입이 DB에서 강제된다.
-# ``kind``/``feature_uuid``/``row_revision``을 RETURNING에 실어 subtype UPSERT와
-# 좁은 provenance procedure가 별도 조회 없이 같은 transaction에서 이어진다.
-_APPLY_FEATURE_UPDATE_SQL: Final[str] = """
-UPDATE feature.features AS f
-SET
-    name = CASE WHEN CAST(:name_set AS boolean) THEN CAST(:name AS text) ELSE f.name END,
-    category = CASE
-        WHEN CAST(:category_set AS boolean) THEN CAST(:category AS text)
-        ELSE f.category
-    END,
-    coord = CASE
-        WHEN CAST(:coord_set AS boolean) THEN x_extension.ST_SetSRID(
-            x_extension.ST_MakePoint(
-                CAST(:lon AS double precision),
-                CAST(:lat AS double precision)
-            ),
-            4326
-        )
-        ELSE f.coord
-    END,
-    coord_precision_digits = CASE
-        WHEN CAST(:coord_set AS boolean) THEN CAST(:coord_precision_digits AS smallint)
-        ELSE f.coord_precision_digits
-    END,
-    address = CASE
-        WHEN CAST(:address_set AS boolean) THEN CAST(:address AS jsonb)
-        ELSE f.address
-    END,
-    legal_dong_code = CASE
-        WHEN CAST(:legal_dong_code_set AS boolean) THEN CAST(:legal_dong_code AS text)
-        ELSE f.legal_dong_code
-    END,
-    road_name_code = CASE
-        WHEN CAST(:road_name_code_set AS boolean) THEN CAST(:road_name_code AS text)
-        ELSE f.road_name_code
-    END,
-    road_address_management_no = CASE
-        WHEN CAST(:road_address_management_no_set AS boolean) THEN
-            CAST(:road_address_management_no AS text)
-        ELSE f.road_address_management_no
-    END,
-    admin_dong_code = CASE
-        WHEN CAST(:admin_dong_code_set AS boolean) THEN CAST(:admin_dong_code AS text)
-        ELSE f.admin_dong_code
-    END,
-    sido_code = CASE
-        WHEN CAST(:sido_code_set AS boolean) THEN CAST(:sido_code AS text)
-        ELSE f.sido_code
-    END,
-    sigungu_code = CASE
-        WHEN CAST(:sigungu_code_set AS boolean) THEN CAST(:sigungu_code AS text)
-        ELSE f.sigungu_code
-    END,
-    urls = CASE WHEN CAST(:urls_set AS boolean) THEN CAST(:urls AS jsonb) ELSE f.urls END,
-    marker_icon = CASE
-        WHEN CAST(:marker_icon_set AS boolean) THEN CAST(:marker_icon AS text)
-        ELSE f.marker_icon
-    END,
-    marker_color = CASE
-        WHEN CAST(:marker_color_set AS boolean) THEN CAST(:marker_color AS text)
-        ELSE f.marker_color
-    END,
-    parent_feature_id = CASE
-        WHEN CAST(:parent_feature_id_set AS boolean) THEN CAST(:parent_feature_id AS text)
-        ELSE f.parent_feature_id
-    END,
-    sibling_group_id = CASE
-        WHEN CAST(:sibling_group_id_set AS boolean) THEN CAST(:sibling_group_id AS uuid)
-        ELSE f.sibling_group_id
-    END,
-    updated_at = now()
-WHERE f.feature_id = :feature_id
-  AND f.kind IN ('place','event')
-  AND f.lifecycle_state = 'active'
-RETURNING f.feature_id, CAST(f.feature_uuid AS text) AS feature_uuid,
-          f.kind, f.row_revision
-"""
-
-# runtime은 legacy user-change provenance 열 UPDATE 권한을 받지 않는다. T36의
-# 일반 core/subtype 입력 소유권은 그대로 두고, 이 routine만 좁게 materialize한다.
-_MATERIALIZE_USER_FEATURE_PROVENANCE_SQL: Final[str] = """
-CALL feature.materialize_user_feature_change_provenance(
+# T-VN-36B: admin/user field mutation은 raw core/subtype UPDATE가 아니라 typed
+# override procedure만 통과한다. ``ops.domain_commands``는 HTTP command ledger와
+# 별개로, 승인된 change request가 만든 per-field audit command를 한 transaction
+# 안에서 증명한다. request UUID를 idempotency key로 쓰므로 같은 request가 두
+# override command를 만들 수 없다.
+_AUTHOR_FEATURE_FIELD_OVERRIDES_SQL: Final[str] = """
+CALL feature.author_feature_field_overrides(
     CAST(:feature_id AS text),
-    CAST(:change_kind AS text),
-    CAST(:request_id AS uuid),
-    CAST(:reason AS text),
-    CAST(:operator AS text),
     CAST(:expected_row_revision AS bigint),
-    NULL, NULL
+    CAST(:principal AS text),
+    CAST(:reason_code AS text),
+    CAST(:command_id AS bigint),
+    CAST(:request_id AS uuid),
+    CAST(:values AS jsonb),
+    CAST(:geometry_wkt AS jsonb),
+    NULL, NULL, NULL, NULL
 )
 """
 
@@ -2810,55 +2741,202 @@ def _admin_feature_create_payload(params: Mapping[str, Any]) -> str:
     return json.dumps(payload, ensure_ascii=False, default=str)
 
 
-def _update_params(
-    *,
-    request_id: str,
-    feature_id: str,
-    payload: dict[str, Any],
-    reason: str | None,
-) -> dict[str, Any]:
-    coord = payload.get("coord") if "coord" in payload else None
-    return {
-        "request_id": request_id,
-        "feature_id": feature_id,
-        "name_set": "name" in payload,
-        "name": payload.get("name"),
-        "category_set": "category" in payload,
-        "category": payload.get("category"),
-        "coord_set": coord is not None,
-        "lon": coord.get("lon") if isinstance(coord, dict) else None,
-        "lat": coord.get("lat") if isinstance(coord, dict) else None,
-        "coord_precision_digits": payload.get("coord_precision_digits") or (
-            6 if coord is not None else None
-        ),
-        # ``geom``/``detail``은 core SET 대상이 아니다(T-VN-35) — subtype 갱신은
-        # ``_apply_change``가 ``"detail" in payload``일 때만 수행한다.
-        "address_set": "address" in payload,
-        "address": _json_param(payload.get("address")),
-        "legal_dong_code_set": "legal_dong_code" in payload,
-        "legal_dong_code": payload.get("legal_dong_code"),
-        "road_name_code_set": "road_name_code" in payload,
-        "road_name_code": payload.get("road_name_code"),
-        "road_address_management_no_set": "road_address_management_no" in payload,
-        "road_address_management_no": payload.get("road_address_management_no"),
-        "admin_dong_code_set": "admin_dong_code" in payload,
-        "admin_dong_code": payload.get("admin_dong_code"),
-        "sido_code_set": "sido_code" in payload,
-        "sido_code": payload.get("sido_code"),
-        "sigungu_code_set": "sigungu_code" in payload,
-        "sigungu_code": payload.get("sigungu_code"),
-        "urls_set": "urls" in payload,
-        "urls": _json_param(payload.get("urls")),
-        "marker_icon_set": "marker_icon" in payload,
-        "marker_icon": payload.get("marker_icon"),
-        "marker_color_set": "marker_color" in payload,
-        "marker_color": payload.get("marker_color"),
-        "parent_feature_id_set": "parent_feature_id" in payload,
-        "parent_feature_id": payload.get("parent_feature_id"),
-        "sibling_group_id_set": "sibling_group_id" in payload,
-        "sibling_group_id": payload.get("sibling_group_id"),
-        "reason": reason,
+_CORE_OVERRIDE_PATHS: Final[dict[str, str]] = {
+    "name": "core.name",
+    "category": "core.category",
+    "address": "core.address",
+    "legal_dong_code": "core.legal_dong_code",
+    "road_name_code": "core.road_name_code",
+    "road_address_management_no": "core.road_address_management_no",
+    "admin_dong_code": "core.admin_dong_code",
+    "sido_code": "core.sido_code",
+    "sigungu_code": "core.sigungu_code",
+    "urls": "core.urls",
+    "marker_icon": "core.marker_icon",
+    "marker_color": "core.marker_color",
+    "parent_feature_id": "core.parent_feature_id",
+    "sibling_group_id": "core.sibling_group_id",
+    "raw_refs": "core.raw_refs",
+}
+_SUBTYPE_IDENTITY_FIELDS: Final[frozenset[str]] = frozenset(
+    {"feature_id", "feature_uuid", "kind"}
+)
+_SUBTYPE_JSON_FIELDS: Final[frozenset[str]] = frozenset(
+    {
+        "business_hours",
+        "facility_info",
+        "reviews_link",
+        "payload",
+        "opening_hours",
     }
+)
+_NON_OPERATOR_WRITABLE_SUBTYPE_FIELDS: Final[dict[str, frozenset[str]]] = {
+    # registry의 ``operator_writable=false``와 같은 allow-list를 writer에서도
+    # 명시한다. provider raw/source identity를 admin detail 통교체에 섞어
+    # 조용히 덮는 것은 허용하지 않는다.
+    "place": frozenset({"payload"}),
+    "event": frozenset({"content_id", "content_type_id", "payload"}),
+    "notice": frozenset({"payload"}),
+    "route": frozenset({"geometry_source", "payload"}),
+    "area": frozenset({"boundary_source", "payload"}),
+}
+
+
+def _override_payload_for_change(
+    *,
+    feature_id: str,
+    feature_uuid: str,
+    kind: str,
+    payload: Mapping[str, Any],
+    include_required_create_fields: bool,
+) -> tuple[dict[str, Any], dict[str, str | None]]:
+    """승인된 user request를 registry-keyed field input으로 바꾼다.
+
+    ``detail``은 부분 JSON merge가 아니라 typed subtype 전체 교체다. 따라서
+    detail이 들어온 경우 subtype의 모든 column을 override로 남겨, 이후 provider
+    patch가 운영자가 명시하지 않은 path만 materialize할 수 있다.
+    """
+
+    values: dict[str, Any] = {}
+    geometry_wkt: dict[str, str | None] = {}
+    for payload_key, field_path in _CORE_OVERRIDE_PATHS.items():
+        if payload_key in payload:
+            values[field_path] = payload[payload_key]
+
+    if "coord" in payload:
+        coord = payload["coord"]
+        if coord is None:
+            geometry_wkt["core.coord"] = None
+            values["core.coord_precision_digits"] = None
+        elif isinstance(coord, Mapping):
+            lon = coord.get("lon")
+            lat = coord.get("lat")
+            if lon is None or lat is None:
+                raise ValueError("coord override에는 lon과 lat이 모두 필요합니다.")
+            geometry_wkt["core.coord"] = f"POINT({lon} {lat})"
+            values["core.coord_precision_digits"] = payload.get(
+                "coord_precision_digits", 6
+            )
+        else:
+            raise ValueError("coord override는 object 또는 null이어야 합니다.")
+    elif "coord_precision_digits" in payload:
+        raise ValueError("coord_precision_digits는 coord와 함께만 바꿀 수 있습니다.")
+
+    if include_required_create_fields:
+        # create boundary는 네 core field의 존재를 이미 검증한다. user-created
+        # Feature에도 provider base와 독립적인 per-field ownership을 남긴다.
+        for payload_key in ("name", "category", "marker_icon", "marker_color"):
+            values[_CORE_OVERRIDE_PATHS[payload_key]] = payload[payload_key]
+
+    if "detail" in payload or include_required_create_fields:
+        detail_input = payload.get("detail")
+        if isinstance(detail_input, Mapping):
+            forbidden = sorted(
+                set(detail_input)
+                & _NON_OPERATOR_WRITABLE_SUBTYPE_FIELDS.get(kind, frozenset())
+            )
+            if forbidden:
+                raise ValueError(
+                    "operator가 provider-owned detail field를 바꿀 수 없습니다: "
+                    + ", ".join(forbidden)
+                )
+        params = subtype_params(
+            feature_id=feature_id,
+            feature_uuid=feature_uuid,
+            kind=kind,
+            detail=payload.get("detail"),
+        )
+        if params is not None:
+            for column, raw_value in params.items():
+                if column in _SUBTYPE_IDENTITY_FIELDS:
+                    continue
+                if column in _NON_OPERATOR_WRITABLE_SUBTYPE_FIELDS.get(
+                    kind, frozenset()
+                ):
+                    continue
+                value = raw_value
+                if column in _SUBTYPE_JSON_FIELDS and isinstance(value, str):
+                    value = json.loads(value)
+                values[f"{kind}.{column}"] = value
+
+    if not values and not geometry_wkt:
+        raise ValueError("field override에는 최소 하나의 실제 변경 field가 필요합니다.")
+    return values, geometry_wkt
+
+
+async def _author_user_change_field_overrides(
+    session: AsyncSession,
+    *,
+    request: FeatureChangeRequest,
+    operator: str,
+    feature_uuid: str,
+    kind: str,
+    expected_row_revision: int,
+    include_required_create_fields: bool,
+) -> int:
+    """한 applied request를 immutable user field overrides로 materialize한다."""
+
+    values, geometry_wkt = _override_payload_for_change(
+        feature_id=request.feature_id,
+        feature_uuid=feature_uuid,
+        kind=kind,
+        payload=request.payload,
+        include_required_create_fields=include_required_create_fields,
+    )
+    operation = "user.feature.override.author"
+    command_payload = {
+        "request_id": request.request_id,
+        "feature_id": request.feature_id,
+        "action": request.action,
+        "values": values,
+        "geometry_wkt": geometry_wkt,
+        "reason": request.reason,
+    }
+    command_key = str(uuid.UUID(request.request_id))
+    await lock_domain_command(
+        session,
+        actor=operator,
+        operation=operation,
+        idempotency_key=command_key,
+    )
+    claim = await create_domain_command_claim(
+        session,
+        actor=operator,
+        operation=operation,
+        idempotency_key=command_key,
+        request_fingerprint=canonical_domain_command_fingerprint(command_payload),
+    )
+    result = (
+        await session.execute(
+            text(_AUTHOR_FEATURE_FIELD_OVERRIDES_SQL),
+            {
+                "feature_id": request.feature_id,
+                "expected_row_revision": expected_row_revision,
+                "principal": operator,
+                "reason_code": request.reason,
+                "command_id": claim.command_id,
+                "request_id": request.request_id,
+                "values": json.dumps(values, ensure_ascii=False, default=str),
+                "geometry_wkt": json.dumps(
+                    geometry_wkt, ensure_ascii=False, default=str
+                ),
+            },
+        )
+    ).mappings().one()
+    row_revision = int(result["o_row_revision"])
+    await create_domain_command_record(
+        session,
+        command_id=claim.command_id,
+        response_status=200,
+        response_body={
+            "feature_id": str(result["o_feature_id"]),
+            "row_revision": row_revision,
+            "request_id": request.request_id,
+            "applied_field_count": int(result["o_applied_field_count"]),
+        },
+        response_headers={},
+    )
+    return row_revision
 
 
 async def _state_for_conflict(
@@ -2944,52 +3022,34 @@ async def _apply_change(
                 kind=str(row["kind"]),
                 detail=payload.get("detail"),
             )
-            await session.execute(
-                text(_MATERIALIZE_USER_FEATURE_PROVENANCE_SQL),
-                {
-                    "feature_id": request.feature_id,
-                    "change_kind": "add",
-                    "request_id": request.request_id,
-                    "reason": request.reason,
-                    "operator": operator,
-                    "expected_row_revision": int(create_row["o_row_revision"]),
-                },
-            )
-    elif request.action == "update":
-        row = (
-            await session.execute(
-                text(_APPLY_FEATURE_UPDATE_SQL),
-                _update_params(
-                    request_id=request.request_id,
-                    feature_id=request.feature_id,
-                    payload=payload,
-                    reason=request.reason,
-                ),
-            )
-        ).mappings().first()
-        if row is not None and "detail" in payload:
-            # admin update의 detail은 **통교체** 계약이다(부분 병합 아님).
-            # subtype UPSERT가 전 컬럼을 EXCLUDED로 덮으므로 계약이 그대로
-            # 보존되고, 이제 컬럼·타입은 DB가 검증한다.
-            await write_subtype(
+            await _author_user_change_field_overrides(
                 session,
-                feature_id=str(row["feature_id"]),
+                request=request,
+                operator=operator,
                 feature_uuid=str(row["feature_uuid"]),
                 kind=str(row["kind"]),
-                detail=payload.get("detail"),
+                expected_row_revision=int(create_row["o_row_revision"]),
+                include_required_create_fields=True,
             )
-        if row is not None:
-            await session.execute(
-                text(_MATERIALIZE_USER_FEATURE_PROVENANCE_SQL),
-                {
-                    "feature_id": request.feature_id,
-                    "change_kind": "update",
-                    "request_id": request.request_id,
-                    "reason": request.reason,
-                    "operator": operator,
-                    "expected_row_revision": int(row["row_revision"]),
-                },
+    elif request.action == "update":
+        state = await _state_for_conflict(session, request.feature_id)
+        if (
+            state is None
+            or state["kind"] not in {"place", "event"}
+            or state["lifecycle_state"] != "active"
+        ):
+            row = None
+        else:
+            await _author_user_change_field_overrides(
+                session,
+                request=request,
+                operator=operator,
+                feature_uuid=str(state["feature_uuid"]),
+                kind=str(state["kind"]),
+                expected_row_revision=int(state["row_revision"]),
+                include_required_create_fields=False,
             )
+            row = {"feature_id": request.feature_id}
     else:
         state = await _state_for_conflict(session, request.feature_id)
         if (
@@ -3027,17 +3087,6 @@ async def _apply_change(
                     "source_lifecycle_state": "active",
                     "override_lifecycle_state": "retired",
                     "prevent_provider_reactivation": True,
-                    "reason": request.reason,
-                    "operator": operator,
-                    "expected_row_revision": int(transition["o_row_revision"]),
-                },
-            )
-            await session.execute(
-                text(_MATERIALIZE_USER_FEATURE_PROVENANCE_SQL),
-                {
-                    "feature_id": request.feature_id,
-                    "change_kind": "delete",
-                    "request_id": request.request_id,
                     "reason": request.reason,
                     "operator": operator,
                     "expected_row_revision": int(transition["o_row_revision"]),
