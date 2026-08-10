@@ -5,6 +5,10 @@
 - 관련: ADR-063, ADR-069, ADR-071, ADR-092(proposed), T-VN-40A~C
 - 작성일: 2026-08-11
 
+상세 relation/command/ACL/API/migration 계약은
+[`t-vn-40-curation-write-model-detailed-design-2026-08-11.md`](t-vn-40-curation-write-model-detailed-design-2026-08-11.md)를
+따른다. 두 문서는 barrier 전 설계 산출물이며 DDL 실행 권한을 뜻하지 않는다.
+
 ## 1. 범위와 시작 조건
 
 이 문서는 사용자가 T-VN-36을 기준으로 허용한 **설계 전용** 초안이다. `docs/tasks.md`의
