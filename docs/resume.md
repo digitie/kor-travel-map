@@ -78,10 +78,9 @@ consumer receipt 영향도를 다시 확인한다. 새 T-VN-34 consumer pair는 
   pin-consistency로 검증했고, full admin OpenAPI digest만 receipt에서 갱신했다.
 ## 2026-08-10 — T-VN-36 A–D 단일 PR: field override 설계 착수
 
-**다음 한 작업**: provider patch와 admin/user override author/revoke procedure까지 구현했다.
-이어서 provider/admin/user repository writer를 typed field patch·domain-command procedure로
-실제 전환하고, legacy whole-row `data_origin` fence가 더 이상 새 write의 정본이 아님을
-integration으로 고정한다.
+**다음 한 작업**: provider repository는 typed field patch로 전환했다. 이어 admin/user/merge
+writer를 author/revoke command로 실제 전환하고, legacy whole-row freeze를 field override로
+fail-closed backfill한다.
 
 - base는 T-VN-34C 완료 head `b03d5a4f`이다. `data_origin`/`data_version`, `feature_versions`,
   whole-row request receipt는 T-VN-36D가 제거하며 T-VN-34 C head에는 남아 있다.
@@ -98,6 +97,10 @@ integration으로 고정한다.
   author/revoke command를 추가했다. author는 superseded override를 revoke tombstone으로
   보전하고 operator typed 값을 materialize하며, revoke는 locked provider base로만 복원한다.
   runtime은 두 procedure 실행만 허용되고 direct override/base DML은 계속 금지된다.
+- provider writer는 더 이상 raw core/subtype UPDATE나 `data_origin` whole-row CASE를 쓰지
+  않는다. 새/기존 bundle 모두 source link와 typed subtype을 확보한 뒤
+  `apply_provider_feature_field_patch`가 base/effective 값을 한 transaction에서 물화한다.
+  nullable 좌표, area/route multi geometry, first-probe notice 시각도 이 경계에서 검증했다.
 
 ## 2026-08-10 — T-VN-34C: n150 fresh destructive live gate 통과
 

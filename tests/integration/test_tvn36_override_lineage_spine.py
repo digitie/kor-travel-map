@@ -194,6 +194,60 @@ async def test_tvn36_registry_base_lineage_and_override_type_fence(
     ).mappings().one()
     assert dict(effective) == {"name": "fresh provider name", "biz_number": "123"}
 
+    # JSON ``null``은 field omission이 아니다. nullable core coordinate의 provider
+    # observation은 base ledger와 typed effective column을 함께 명시적으로 비운다.
+    await migrated_session.execute(text("SET ROLE ktm_feature_runtime"))
+    try:
+        async with migrated_session.begin_nested():
+            cleared_coordinate = (
+                await migrated_session.execute(
+                    text(
+                        """
+                        CALL feature.apply_provider_feature_field_patch(
+                            :feature_id, :dataset_id, 'tvn36-lineage-entity',
+                            'tvn36-lineage-record', 2,
+                            '{"core.name":"fresh provider name"}'::jsonb,
+                            CAST(:cleared_geometry AS jsonb),
+                            NULL, NULL, NULL
+                        )
+                        """
+                    ),
+                    {
+                        "feature_id": feature_id,
+                        "dataset_id": dataset_id,
+                        "cleared_geometry": '{"core.coord":null}',
+                    },
+                )
+            ).mappings().one()
+    finally:
+        await migrated_session.execute(text("RESET ROLE"))
+    assert dict(cleared_coordinate) == {
+        "o_feature_id": feature_id,
+        "o_row_revision": 3,
+        "o_applied_field_count": 2,
+    }
+    coordinate_state = (
+        await migrated_session.execute(
+            text(
+                """
+                SELECT core.coord IS NULL AS coord_is_null, base.value_json,
+                       base.value_geometry IS NULL AS geometry_is_null
+                FROM feature.features AS core
+                JOIN feature.feature_base_field_values AS base
+                  ON base.feature_id = core.feature_id
+                 AND base.field_path = 'core.coord'
+                WHERE core.feature_id = :feature_id
+                """
+            ),
+            {"feature_id": feature_id},
+        )
+    ).mappings().one()
+    assert dict(coordinate_state) == {
+        "coord_is_null": True,
+        "value_json": None,
+        "geometry_is_null": True,
+    }
+
     await migrated_session.execute(text("SET ROLE ktm_feature_runtime"))
     try:
         with pytest.raises(DBAPIError) as wrong_feature_kind:
@@ -203,7 +257,7 @@ async def test_tvn36_registry_base_lineage_and_override_type_fence(
                         """
                         CALL feature.apply_provider_feature_field_patch(
                             :feature_id, :dataset_id, 'tvn36-lineage-entity',
-                            'tvn36-lineage-record', 2,
+                            'tvn36-lineage-record', 3,
                             '{"route.route_type":"trail"}'::jsonb, '{}'::jsonb,
                             NULL, NULL, NULL
                         )
@@ -268,7 +322,7 @@ async def test_tvn36_registry_base_lineage_and_override_type_fence(
                     text(
                         """
                         CALL feature.author_feature_field_overrides(
-                            :feature_id, 2, 'admin:tvn36', 'operator_correction',
+                            :feature_id, 3, 'admin:tvn36', 'operator_correction',
                             :command_id, NULL,
                             '{"core.name":"operator name"}'::jsonb, '{}'::jsonb,
                             NULL, NULL, NULL, NULL
@@ -282,7 +336,7 @@ async def test_tvn36_registry_base_lineage_and_override_type_fence(
         await migrated_session.execute(text("RESET ROLE"))
     assert dict(authored) == {
         "o_feature_id": feature_id,
-        "o_row_revision": 3,
+        "o_row_revision": 4,
         "o_command_id": author_command_id,
         "o_applied_field_count": 1,
     }
@@ -295,7 +349,7 @@ async def test_tvn36_registry_base_lineage_and_override_type_fence(
                         """
                         CALL feature.apply_provider_feature_field_patch(
                             :feature_id, :dataset_id, 'tvn36-lineage-entity',
-                            'tvn36-lineage-record', 3,
+                            'tvn36-lineage-record', 4,
                             CAST(:values AS jsonb), CAST(:geometry_wkt AS jsonb),
                             NULL, NULL, NULL
                         )
@@ -313,7 +367,7 @@ async def test_tvn36_registry_base_lineage_and_override_type_fence(
         await migrated_session.execute(text("RESET ROLE"))
     assert dict(masked) == {
         "o_feature_id": feature_id,
-        "o_row_revision": 4,
+        "o_row_revision": 5,
         "o_applied_field_count": 2,
     }
     masked_effective = (
@@ -364,7 +418,7 @@ async def test_tvn36_registry_base_lineage_and_override_type_fence(
                     text(
                         """
                         CALL feature.revoke_feature_field_overrides(
-                            :feature_id, 4, 'admin:tvn36', 'operator_revoke',
+                            :feature_id, 5, 'admin:tvn36', 'operator_revoke',
                             :command_id, NULL, ARRAY['core.name'],
                             NULL, NULL, NULL, NULL
                         )
@@ -377,7 +431,7 @@ async def test_tvn36_registry_base_lineage_and_override_type_fence(
         await migrated_session.execute(text("RESET ROLE"))
     assert dict(revoked) == {
         "o_feature_id": feature_id,
-        "o_row_revision": 5,
+        "o_row_revision": 6,
         "o_command_id": revoke_command_id,
         "o_applied_field_count": 1,
     }

@@ -75,7 +75,7 @@ from kortravelmap.infra.feature_projection import (
     TYPED_FEATURE_DETAIL_COLUMNS_SQL,
     typed_feature_detail_joins_sql,
 )
-from kortravelmap.infra.feature_subtype import write_subtype
+from kortravelmap.infra.feature_subtype import subtype_params, write_subtype
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Iterable, Mapping, Sequence
@@ -201,40 +201,17 @@ CALL feature.transition_feature_state(
 )
 """
 
-# procedure의 existing-row branch는 상태를 절대 바꾸지 않는다. provider 본문 갱신은
-# state 축이 아닌 core 컬럼만 갱신하며, user-request whole-row fence와 subtype fence
-# 판단은 실제 저장값으로 유지한다. final T-VN-34C는 이 legacy provenance 열을 별도
-# materialization 뒤 제거한다.
-_UPDATE_PROVIDER_FEATURE_CORE_SQL: Final[str] = """
-UPDATE feature.features AS f
-SET
-    kind = :kind,
-    name = :name,
-    category = :category,
-    coord = CASE WHEN CAST(:lon AS double precision) IS NULL THEN NULL
-        ELSE x_extension.ST_SetSRID(
-            x_extension.ST_MakePoint(CAST(:lon AS double precision),
-                CAST(:lat AS double precision)), 4326)
-        END,
-    coord_precision_digits = :coord_precision_digits,
-    address = CAST(:address AS jsonb),
-    legal_dong_code = :legal_dong_code,
-    road_name_code = :road_name_code,
-    road_address_management_no = :road_address_management_no,
-    admin_dong_code = :admin_dong_code,
-    sido_code = :sido_code,
-    sigungu_code = :sigungu_code,
-    urls = CAST(:urls AS jsonb),
-    marker_icon = :marker_icon,
-    marker_color = :marker_color,
-    parent_feature_id = :parent_feature_id,
-    sibling_group_id = :sibling_group_id,
-    raw_refs = CAST(:raw_refs AS jsonb),
-    updated_at = :updated_at
-WHERE f.feature_id = :feature_id
-  AND NOT (f.data_origin = 'user_request' AND f.data_version > 0)
-RETURNING
-    CAST(f.feature_uuid AS text) AS feature_uuid
+_APPLY_PROVIDER_FIELD_PATCH_SQL: Final[str] = """
+CALL feature.apply_provider_feature_field_patch(
+    CAST(:feature_id AS text),
+    CAST(:provider_dataset_id AS bigint),
+    CAST(:source_entity_key AS text),
+    CAST(:source_record_key AS text),
+    CAST(:expected_row_revision AS bigint),
+    CAST(:values AS jsonb),
+    CAST(:geometry_wkt AS jsonb),
+    NULL, NULL, NULL
+)
 """
 
 
@@ -427,8 +404,6 @@ SELECT
     f.publication_state,
     f.quality_state,
     f.row_revision,
-    f.data_origin,
-    f.data_version,
     COALESCE(EXISTS (
         SELECT 1
         FROM ops.feature_overrides AS fo
@@ -2267,6 +2242,128 @@ def _provider_feature_payload(params: Mapping[str, Any]) -> str:
     return json.dumps(payload, ensure_ascii=False, default=str)
 
 
+_PATCH_JSON_COLUMNS: Final[frozenset[str]] = frozenset(
+    {
+        "address",
+        "urls",
+        "raw_refs",
+        "business_hours",
+        "facility_info",
+        "reviews_link",
+        "payload",
+        "opening_hours",
+    }
+)
+
+
+def _provider_field_patch_payload(
+    feature: Feature,
+    *,
+    feature_uuid: str,
+) -> tuple[str, str]:
+    """Provider DTO를 registry의 고정 field path 입력으로 낮춘다.
+
+    이 함수는 registry를 읽어 SQL을 조립하지 않는다. 물리 column/path의 대응은
+    0099 migration의 static assignment와 같은 고정 목록이며, runtime JSON은 오직
+    value container다. 신규 insert의 subtype은 FK 순서상 먼저 생성하지만 existing
+    provider refresh는 이 payload를 provider materializer만 거쳐 갱신한다.
+    """
+
+    params = _feature_params(feature)
+    values: dict[str, Any] = {
+        f"core.{key}": (
+            json.loads(value)
+            if key in _PATCH_JSON_COLUMNS and isinstance(value, str)
+            else value
+        )
+        for key, value in params.items()
+        if key
+        in {
+            "name",
+            "category",
+            "coord_precision_digits",
+            "address",
+            "legal_dong_code",
+            "road_name_code",
+            "road_address_management_no",
+            "admin_dong_code",
+            "sido_code",
+            "sigungu_code",
+            "urls",
+            "marker_icon",
+            "marker_color",
+            "parent_feature_id",
+            "sibling_group_id",
+            "raw_refs",
+        }
+    }
+    # ``null``은 관측에서 field를 빼는 뜻이 아니다. provider가 좌표를 제거한
+    # observation도 base ledger와 effective core에 명시적으로 물화해야 한다.
+    geometry_wkt: dict[str, str | None] = {
+        "core.coord": (
+            f"POINT({float(feature.coord.lon)} {float(feature.coord.lat)})"
+            if feature.coord is not None
+            else None
+        )
+    }
+
+    subtype = subtype_params(
+        feature_id=feature.feature_id,
+        feature_uuid=feature_uuid,
+        kind=feature.kind.value,
+        detail=feature.detail,
+    )
+    if subtype is not None:
+        for column, value in subtype.items():
+            if column in {"feature_id", "feature_uuid", "kind"}:
+                continue
+            values[f"{feature.kind.value}.{column}"] = (
+                json.loads(value)
+                if column in _PATCH_JSON_COLUMNS and isinstance(value, str)
+                else value
+            )
+    if feature.kind.value in {"route", "area"}:
+        assert feature.geom is not None
+        geometry_wkt[f"{feature.kind.value}.geom"] = feature.geom
+    return (
+        json.dumps(values, ensure_ascii=False, default=str),
+        json.dumps(geometry_wkt, ensure_ascii=False),
+    )
+
+
+async def _apply_provider_feature_field_patch(
+    session: AsyncSession,
+    feature: Feature,
+    *,
+    feature_uuid: str,
+    provider_dataset_id: int,
+    source_membership: _ProviderSourceMembership,
+    expected_row_revision: int,
+) -> int:
+    """Existing provider Feature를 field-level base/effective procedure로 갱신한다."""
+
+    values, geometry_wkt = _provider_field_patch_payload(
+        feature, feature_uuid=feature_uuid
+    )
+    row = (
+        await session.execute(
+            text(_APPLY_PROVIDER_FIELD_PATCH_SQL),
+            {
+                "feature_id": feature.feature_id,
+                "provider_dataset_id": provider_dataset_id,
+                "source_entity_key": source_membership.source_entity_key,
+                "source_record_key": source_membership.source_record_key,
+                "expected_row_revision": expected_row_revision,
+                "values": values,
+                "geometry_wkt": geometry_wkt,
+            },
+        )
+    ).mappings().one()
+    if str(row["o_feature_id"]) != feature.feature_id:
+        raise RuntimeError("provider field patch returned a different Feature identity")
+    return int(row["o_row_revision"])
+
+
 def _provider_state_context(
     *,
     provider_dataset_id: int,
@@ -2426,36 +2523,31 @@ async def upsert_feature(
     ).mappings().one()
     inserted = bool(create_row["o_inserted"])
     stored_feature_uuid = str(create_row["o_feature_uuid"])
-    user_fenced = False
-    if not inserted:
-        updated = (
-            await session.execute(text(_UPDATE_PROVIDER_FEATURE_CORE_SQL), params)
-        ).mappings().one_or_none()
-        if updated is None:
-            user_fenced = True
-        else:
-            stored_feature_uuid = str(updated["feature_uuid"])
     verify_feature_uuid(
         feature.feature_id,
         stored_feature_uuid,
         sent_feature_uuid=params["feature_uuid"],
         inserted=inserted,
     )
-    if not user_fenced:
+    if inserted:
         await _upsert_feature_subtype(
             session,
             feature,
             stored_feature_uuid=stored_feature_uuid,
             geom_wkt=geom_wkt,
         )
-        # ``feature_versions.version=0``은 마지막 provider baseline이다. whole-row
-        # user fence가 core/subtype write를 막은 경우 current detailed row는 user
-        # effective payload이므로 provider label의 snapshot으로 다시 쓰면 안 된다.
-        # 새 raw source record는 별도로 immutable 보존되며, baseline/effective
-        # lineage의 재물화는 T-VN-36이 소유한다.
         await session.execute(
             text(_MATERIALIZE_PROVIDER_VERSION_SQL),
             {"feature_id": feature.feature_id},
+        )
+    else:
+        await _apply_provider_feature_field_patch(
+            session,
+            feature,
+            feature_uuid=stored_feature_uuid,
+            provider_dataset_id=provider_dataset_id,
+            source_membership=source_membership,
+            expected_row_revision=int(create_row["o_row_revision"]),
         )
     return inserted
 
@@ -2610,16 +2702,8 @@ class _FeatureLoadState:
     quality_state: str | None
     row_revision: int | None
     has_provider_reactivation_override: bool
-    data_origin: str | None = None
-    data_version: int | None = None
     last_publication_reason_code: str | None = None
     last_publication_from_state: str | None = None
-
-    @property
-    def provider_write_fenced(self) -> bool:
-        """현재 row가 immutable user-request version인지 여부."""
-
-        return self.data_origin == "user_request" and (self.data_version or 0) > 0
 
 
 async def _feature_load_state(
@@ -2637,8 +2721,6 @@ async def _feature_load_state(
         publication_state=row["publication_state"],
         quality_state=row["quality_state"],
         row_revision=(int(row["row_revision"]) if row["row_revision"] is not None else None),
-        data_origin=(str(row["data_origin"]) if row["data_origin"] is not None else None),
-        data_version=(int(row["data_version"]) if row["data_version"] is not None else None),
         has_provider_reactivation_override=bool(
             row["has_provider_reactivation_override"]
         ),
@@ -2756,8 +2838,6 @@ async def _transition_provider_lifecycle_from_state(
 ) -> bool:
     """한 optimistic revision에서 provider lifecycle procedure를 실행한다."""
     if not current.exists:
-        return False
-    if current.provider_write_fenced:
         return False
     assert current.row_revision is not None
     assert current.publication_state is not None
@@ -2892,6 +2972,12 @@ async def load_bundle(session: AsyncSession, bundle: FeatureBundle) -> FeatureLo
     feature_updated = False
     feature_state = await _feature_load_state(session, bundle.feature.feature_id)
     feature_missing = not feature_state.exists
+    link_inserted = False
+    # Existing Feature refresh must prove the same primary link inside the
+    # provider field-patch procedure. New Feature has no FK target until the
+    # create procedure returns, so it creates this link immediately afterward.
+    if not feature_missing:
+        link_inserted = await upsert_source_link(session, bundle.source_link)
     if record_state.became_current or feature_missing:
         feature_inserted = await upsert_feature(
             session,
@@ -2902,8 +2988,37 @@ async def load_bundle(session: AsyncSession, bundle: FeatureBundle) -> FeatureLo
                 source_record_key=record_state.source_record_key,
             ),
         )
-        feature_updated = not feature_inserted and not feature_state.provider_write_fenced
-    link_inserted = await upsert_source_link(session, bundle.source_link)
+        feature_updated = not feature_inserted
+    if feature_missing:
+        link_inserted = await upsert_source_link(session, bundle.source_link)
+    if feature_inserted:
+        # Create procedure는 core identity/state를, subtype FK는 typed detail 행을
+        # 먼저 만든다. 그 다음 같은 transaction에서 field patch를 실행해 신규
+        # provider Feature도 base ledger와 effective materializer를 반드시 거치게
+        # 한다. intermediate head는 배포하지 않는 single-release 규율이라 외부
+        # reader가 direct-create 값을 볼 경계는 없다.
+        created = await _feature_load_state(session, bundle.feature.feature_id)
+        assert created.row_revision is not None
+        stored_feature_uuid = (
+            await session.execute(
+                text(
+                    "SELECT feature_uuid::text FROM feature.features "
+                    "WHERE feature_id = :feature_id"
+                ),
+                {"feature_id": bundle.feature.feature_id},
+            )
+        ).scalar_one()
+        await _apply_provider_feature_field_patch(
+            session,
+            bundle.feature,
+            feature_uuid=str(stored_feature_uuid),
+            provider_dataset_id=record_state.provider_dataset_id,
+            source_membership=_ProviderSourceMembership(
+                source_entity_key=record_state.source_entity_key,
+                source_record_key=record_state.source_record_key,
+            ),
+            expected_row_revision=created.row_revision,
+        )
     state_updated = await _transition_provider_lifecycle_if_needed(
         session,
         feature_id=bundle.feature.feature_id,

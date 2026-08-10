@@ -221,6 +221,8 @@ async def _seed_feature(
     feature_id: str = "feature-admin-1",
 ) -> None:
     session.add(_feature_row(feature_id, name="광화문"))
+    await session.flush()
+    await seed_feature_subtype(session, feature_id=feature_id, kind="place")
     entity = _source_entity(f"sr-{feature_id}", await _provider_dataset_id(session))
     session.add(entity)
     await session.flush()
