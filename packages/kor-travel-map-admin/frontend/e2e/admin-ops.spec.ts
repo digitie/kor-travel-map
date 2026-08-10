@@ -240,12 +240,19 @@ async function mockOfflineUploadMutations(page: Page) {
 
     if (request.method() === "GET" && apiPath === "/v1/admin/offline-uploads") {
       const status = url.searchParams.get("status");
-      const providerDatasetId = Number(url.searchParams.get("provider_dataset_id"));
+      // 파라미터가 없으면 필터를 걸지 않는다. `Number(null)`은 0이고 0도
+      // safe integer라, 예전 코드는 필터 미지정 시 provider_dataset_id===0인
+      // 행만 남겨 목록을 항상 비웠다.
+      const providerDatasetIdParam = url.searchParams.get(
+        "provider_dataset_id",
+      );
+      const providerDatasetIdFilter =
+        providerDatasetIdParam === null ? null : Number(providerDatasetIdParam);
       const items = uploads.filter(
         (item) =>
           (!status || item.status === status) &&
-          (!Number.isSafeInteger(providerDatasetId) ||
-            item.provider_dataset_id === providerDatasetId),
+          (providerDatasetIdFilter === null ||
+            item.provider_dataset_id === providerDatasetIdFilter),
       );
       await fulfillJson(route, {
         data: { items },
@@ -1798,7 +1805,10 @@ test.describe("admin/ops pages", () => {
       mimeType: "text/csv",
       name: "offline.csv",
     });
-    await page.getByLabel("provider dataset ID").fill("401");
+    // exact가 없으면 "provider dataset ID filter"(목록 필터)까지 잡혀 strict
+    // mode 위반이 난다. 업로드 대상은 triple이므로 scope도 함께 고른다.
+    await page.getByLabel("provider dataset ID", { exact: true }).fill("401");
+    await page.getByLabel("sync scope", { exact: true }).fill("default");
     await page.getByRole("button", { name: "업로드" }).click();
 
     await expect.poll(() => requests.create).toBe(1);
@@ -1836,7 +1846,10 @@ test.describe("admin/ops pages", () => {
       mimeType: "text/csv",
       name: "offline.csv",
     });
-    await page.getByLabel("provider dataset ID").fill("401");
+    // exact가 없으면 "provider dataset ID filter"(목록 필터)까지 잡혀 strict
+    // mode 위반이 난다. 업로드 대상은 triple이므로 scope도 함께 고른다.
+    await page.getByLabel("provider dataset ID", { exact: true }).fill("401");
+    await page.getByLabel("sync scope", { exact: true }).fill("default");
     await page.getByRole("button", { name: "업로드" }).click();
     await expect.poll(() => requests.create).toBe(1);
     await expect(page.getByTestId("offline-upload-row")).toBeVisible();
@@ -1852,7 +1865,10 @@ test.describe("admin/ops pages", () => {
       mimeType: "text/csv",
       name: "offline.csv",
     });
-    await page.getByLabel("provider dataset ID").fill("401");
+    // exact가 없으면 "provider dataset ID filter"(목록 필터)까지 잡혀 strict
+    // mode 위반이 난다. 업로드 대상은 triple이므로 scope도 함께 고른다.
+    await page.getByLabel("provider dataset ID", { exact: true }).fill("401");
+    await page.getByLabel("sync scope", { exact: true }).fill("default");
     await page.getByRole("button", { name: "업로드" }).click();
     await expect.poll(() => requests.create).toBe(2);
     await expect(page.getByTestId("offline-upload-row")).toBeVisible();

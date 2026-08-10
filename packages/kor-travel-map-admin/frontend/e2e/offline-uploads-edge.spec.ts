@@ -368,6 +368,10 @@ test.describe("admin/offline-uploads edge depth", () => {
 
     await page.goto("/admin/offline-uploads");
     await page.getByTestId("offline-upload-file-input").setInputFiles(csvFile);
+    // ADR-088: 업로드 대상은 provider_dataset_id + sync_scope로 지정한다.
+    // (catalog mock이 비어 있어 canonical scope 자동 채움이 없으므로 직접 고른다.)
+    await page.getByLabel("provider dataset ID", { exact: true }).fill("401");
+    await page.getByLabel("sync scope", { exact: true }).fill("default");
     await page.getByRole("button", { name: "업로드" }).click();
 
     // preview가 떠서 sample_rows의 POI가 보여야 한다.
@@ -458,6 +462,10 @@ test.describe("admin/offline-uploads edge depth", () => {
 
     await page.goto("/admin/offline-uploads");
     await page.getByTestId("offline-upload-file-input").setInputFiles(csvFile);
+    // ADR-088: 업로드 대상은 provider_dataset_id + sync_scope로 지정한다.
+    // (catalog mock이 비어 있어 canonical scope 자동 채움이 없으므로 직접 고른다.)
+    await page.getByLabel("provider dataset ID", { exact: true }).fill("401");
+    await page.getByLabel("sync scope", { exact: true }).fill("default");
     await page.getByRole("button", { name: "업로드" }).click();
 
     await expect.poll(() => createCount).toBe(1);
@@ -540,6 +548,10 @@ test.describe("admin/offline-uploads edge depth", () => {
       mimeType: "application/json",
       name: "bundle.json",
     });
+    // ADR-088: 업로드 대상은 provider_dataset_id + sync_scope로 지정한다.
+    // (catalog mock이 비어 있어 canonical scope 자동 채움이 없으므로 직접 고른다.)
+    await page.getByLabel("provider dataset ID", { exact: true }).fill("401");
+    await page.getByLabel("sync scope", { exact: true }).fill("default");
     await page.getByRole("button", { name: "업로드" }).click();
 
     const row = page.getByTestId("offline-upload-row");
@@ -573,6 +585,10 @@ test.describe("admin/offline-uploads edge depth", () => {
       mimeType: "application/x-ndjson",
       name: "bundle.jsonl",
     });
+    // ADR-088: 업로드 대상은 provider_dataset_id + sync_scope로 지정한다.
+    // (catalog mock이 비어 있어 canonical scope 자동 채움이 없으므로 직접 고른다.)
+    await page.getByLabel("provider dataset ID", { exact: true }).fill("401");
+    await page.getByLabel("sync scope", { exact: true }).fill("default");
     await page.getByRole("button", { name: "업로드" }).click();
 
     await expect(row.getByText("jsonl", { exact: true })).toBeVisible();
@@ -639,6 +655,10 @@ test.describe("admin/offline-uploads edge depth", () => {
       mimeType: "text/tab-separated-values",
       name: "offline.tsv",
     });
+    // ADR-088: 업로드 대상은 provider_dataset_id + sync_scope로 지정한다.
+    // (catalog mock이 비어 있어 canonical scope 자동 채움이 없으므로 직접 고른다.)
+    await page.getByLabel("provider dataset ID", { exact: true }).fill("401");
+    await page.getByLabel("sync scope", { exact: true }).fill("default");
     await page.getByRole("button", { name: "업로드" }).click();
 
     const row = page.getByTestId("offline-upload-row");
@@ -795,6 +815,10 @@ test.describe("admin/offline-uploads edge depth", () => {
 
     await page.goto("/admin/offline-uploads");
     await page.getByTestId("offline-upload-file-input").setInputFiles(csvFile);
+    // ADR-088: 업로드 대상은 provider_dataset_id + sync_scope로 지정한다.
+    // (catalog mock이 비어 있어 canonical scope 자동 채움이 없으므로 직접 고른다.)
+    await page.getByLabel("provider dataset ID", { exact: true }).fill("401");
+    await page.getByLabel("sync scope", { exact: true }).fill("default");
     await page.getByRole("button", { name: "업로드" }).click();
 
     // CP949로 디코드된 한글 POI가 preview 테이블에 mojibake 없이 렌더된다.

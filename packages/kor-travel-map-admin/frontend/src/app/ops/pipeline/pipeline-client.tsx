@@ -355,25 +355,32 @@ export function PipelineClient() {
   const urlProviderDatasetIdValue = positiveInteger(urlProviderDatasetId);
   const urlSyncScope = searchParams.get("sync_scope")?.trim() ?? "";
   const urlOperationKey = searchParams.get("operation_key")?.trim() ?? "";
-  const hasProviderDatasetFilter = Boolean(
-    urlProviderDatasetIdValue !== undefined && urlSyncScope && urlOperationKey,
-  );
+  // scope/operation은 provider_dataset_id에 매달린 **추가** 축이다. 셋을 모두
+  // 요구하면 (id, scope)만 담은 딥링크에서 입력값이 화면에서 사라지고 REST에도
+  // 실리지 않아, scope로 좁힌 event/execution 딥링크가 통째로 무력화된다.
+  // 게이트 축은 provider_dataset_id 하나다(자연키 시절 provider×dataset pair가
+  // 하던 역할). 불완전 tuple의 fail-closed는 아래 정리 effect가 맡는다.
+  const hasProviderDatasetFilter = urlProviderDatasetIdValue !== undefined;
   const hasLegacyDatasetFilters = Boolean(
     searchParams.get("provider") ||
       searchParams.get("dataset") ||
       searchParams.get("dataset_key"),
   );
+  const hasOrphanScopeFilters = Boolean(
+    urlProviderDatasetIdValue === undefined &&
+      (urlSyncScope || urlOperationKey),
+  );
 
   // 외부 deep link나 browser history가 이전 자연키 filter를 복원해도 fail-closed한다.
-  // triple 일부만 입력 중인 URL은 유지하되 `hasProviderDatasetFilter=false`로
-  // API 호출에 넣지 않는다. 입력 도중 이전 operation 일부가 재사용되는 대신
-  // 사용자가 세 필드를 순차 입력할 수 있어야 한다.
+  // provider_dataset_id 없이 남은 scope/operation은 어떤 membership도 가리키지
+  // 못하므로 cursor와 함께 폐기한다.
   useEffect(() => {
-    if (hasLegacyDatasetFilters) {
+    if (hasLegacyDatasetFilters || hasOrphanScopeFilters) {
       updateUrl({ sync_scope: null, operation_key: null }, "replace");
     }
   }, [
     hasLegacyDatasetFilters,
+    hasOrphanScopeFilters,
     updateUrl,
   ]);
 

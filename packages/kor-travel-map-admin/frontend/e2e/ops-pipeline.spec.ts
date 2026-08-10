@@ -52,6 +52,9 @@ type OpsDatasetsGridResponse = Schemas["OpsDatasetsGridResponse"];
 
 const REQUEST_ID = "22222222-2222-2222-2222-222222222222";
 const KMA_OPERATION_KEY = "kma_refresh";
+// catalog grid(`makeCatalogRow`)가 투영하는 canonical operation_key. 요청 dialog는
+// 고른 catalog 행의 이 값을 그대로 실어 보내므로 단언도 여기에 묶는다.
+const CATALOG_OPERATION_KEY = "e2e_refresh";
 const TWIN_JOB_ID = "11111111-1111-1111-1111-111111111111";
 const SOLO_JOB_ID = "99999999-9999-4999-8999-999999999999";
 const NEW_REQUEST_ID = "33333333-3333-4333-8333-333333333333";
@@ -130,7 +133,7 @@ function makeCatalogRow(
       `/v1/ops/datasets/${providerDatasetId(provider, datasetKey)}` +
       `?sync_scope=${encodeURIComponent(syncScope)}`,
     sync_scope: syncScope,
-    operation_key: "e2e_refresh",
+    operation_key: CATALOG_OPERATION_KEY,
     status: "active",
     last_success_at: "2026-07-14T09:00:00.000Z",
     last_failure_at: null,
@@ -161,6 +164,7 @@ function makeCatalogRow(
       feature_kind: "place",
       provider_state_default_scope: syncScope,
       label: datasetKey,
+      is_active: true,
       is_refreshable: true,
       scope_refresh: scopeRefresh,
       preview: {
@@ -612,8 +616,11 @@ function makeDetail(): PipelineExecutionDetailResponse {
           import_job_dataset_id: null,
           provider_dataset_id:
             PROVIDER_DATASET_IDS["python-kma-api/kma_short_forecast"],
-          sync_scope: null,
-          operation_key: null,
+          // 이 이벤트는 TWIN_JOB_ID의 canonical membership에서 나온다 —
+          // 그 job의 membership과 같은 두 축을 갖는다. 축을 null로 두면
+          // exact scope 딥링크가 무엇을 걸러 보여주는지 화면에서 확인할 수 없다.
+          sync_scope: "target_grids",
+          operation_key: CATALOG_OPERATION_KEY,
           feature_id: null,
           stage: "loading",
           level: "error",
@@ -1746,17 +1753,23 @@ test.describe("/ops/pipeline", () => {
     const requestRow = page.getByTestId(`pipeline-execution-row-${REQUEST_ID}`);
     await expect(requestRow).toBeVisible();
     await expect(requestRow.getByText("작업 2")).toBeVisible();
-    // C3b (b): effective provider_datasets exact pair로 대상 표시.
+    // C3b (b): effective provider_datasets exact triple로 대상 표시.
+    // T-VN-33이 root의 `providers`/`dataset_keys` 배열을 계약에서 없앴으므로
+    // 대상 표시는 canonical membership 하나에서만 나온다 — provider/dataset만
+    // 따로 exact match하던 이전 단언은 이제 존재하지 않는 노드를 찾았다.
     await expect(
-      requestRow.getByText("python-kma-api", { exact: true }),
+      requestRow.getByText(
+        `python-kma-api/kma_short_forecast · #${
+          PROVIDER_DATASET_IDS["python-kma-api/kma_short_forecast"]
+        } · target_grids · e2e_refresh`,
+        { exact: true },
+      ),
     ).toBeVisible();
     await expect(
-      requestRow.getByText("kma_short_forecast", { exact: true }),
-    ).toBeVisible();
-    await expect(
-      requestRow.getByText("python-kma-api/kma_short_forecast · target_grids", {
-        exact: true,
-      }),
+      requestRow.getByText(
+        "python-kma-api/kma_short_forecast · target_grids · e2e_refresh",
+        { exact: true },
+      ),
     ).toBeVisible();
     // C3b (c): request 상태와 projected_job 진행률·단계 분리 표시.
     await expect(requestRow.getByText("40% · loading")).toBeVisible();
@@ -3633,7 +3646,9 @@ test.describe("/ops/pipeline", () => {
         provider_dataset_id:
           PROVIDER_DATASET_IDS["python-mois-api/mois_licenses"],
         sync_scope: "dataset_wide",
-        operation_key: KMA_OPERATION_KEY,
+        // dialog는 고른 catalog 행의 operation_key를 그대로 싣는다 —
+        // KMA 행 상수를 기대하던 이전 단언은 fixture와 어긋나 있었다.
+        operation_key: CATALOG_OPERATION_KEY,
       },
     });
     expect(counters.previewBodies.at(0)).not.toHaveProperty("providers");

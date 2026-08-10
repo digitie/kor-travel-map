@@ -202,3 +202,84 @@ async def test_tvn33_final_curation_rule_trigger_uses_canonical_source_lineage(
     assert "entity.provider_dataset_id" in normalized
     assert "record.provider" not in normalized
     assert "record.dataset_key" not in normalized
+
+
+async def test_offline_upload_guard_rejects_disabled_sibling_operation(
+    migrated_session: AsyncSession,
+) -> None:
+    """offline upload 활성 가드는 **행 자신의 operation_key**까지 본다.
+
+    0091은 실행 membership 4개 테이블 중 셋(provider_sync_state,
+    import_job_datasets, feature_update_request_datasets)을 triple 가드로 승격하면서
+    ``ops.offline_uploads``만 pair 시절 함수에 남겨 뒀다. 그 함수는 (dataset, scope)에
+    enabled operation이 **하나라도** 있으면 통과시키므로, 형제 중 하나만 enabled면
+    disabled operation에 결박된 upload가 들어왔다 — identity는 triple인데 강제는
+    pair였다(적대 리뷰 10라운드, migrated head에서 재현).
+
+    UPDATE 소유권 검사도 pair였다. operation_key만 바꾸면 upload가 **어느 실행에
+    결박됐는지**가 조용히 갈렸다.
+    """
+
+    picked = (
+        await migrated_session.execute(
+            text(
+                """
+                SELECT scope.provider_dataset_id, scope.sync_scope, scope.operation_key
+                FROM provider_sync.provider_dataset_operation_scopes AS scope
+                JOIN provider_sync.provider_dataset_operations AS operation
+                  ON operation.provider_dataset_id = scope.provider_dataset_id
+                 AND operation.operation_key = scope.operation_key
+                 AND operation.operation_kind = scope.operation_kind
+                JOIN provider_sync.provider_datasets AS dataset
+                  ON dataset.provider_dataset_id = scope.provider_dataset_id
+                WHERE scope.operation_kind = 'refresh'
+                  AND operation.is_enabled
+                  AND dataset.is_active
+                ORDER BY scope.provider_dataset_id, scope.sync_scope
+                LIMIT 1
+                """
+            )
+        )
+    ).one()
+    dataset_id = int(picked.provider_dataset_id)
+    sync_scope = str(picked.sync_scope)
+    sibling = f"{picked.operation_key}.disabled_sibling"
+
+    # 스키마가 허용하는 상태다 — scope PK가 triple이라 형제 등록이 정상 write다.
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO provider_sync.provider_dataset_operations (
+                provider_dataset_id, operation_key, operation_kind, is_enabled
+            ) VALUES (:dataset_id, :sibling, 'refresh', false)
+            """
+        ),
+        {"dataset_id": dataset_id, "sibling": sibling},
+    )
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO provider_sync.provider_dataset_operation_scopes (
+                provider_dataset_id, sync_scope, operation_key, operation_kind
+            ) VALUES (:dataset_id, :sync_scope, :sibling, 'refresh')
+            """
+        ),
+        {"dataset_id": dataset_id, "sync_scope": sync_scope, "sibling": sibling},
+    )
+
+    with pytest.raises(Exception, match="disabled for normal writes"):
+        await migrated_session.execute(
+            text(
+                """
+                INSERT INTO ops.offline_uploads (
+                    provider_dataset_id, sync_scope, operation_key, original_filename,
+                    storage_backend, storage_key, byte_size, checksum_sha256
+                ) VALUES (
+                    :dataset_id, :sync_scope, :sibling, 'guard-probe.json',
+                    'object_store', 'guard/probe.json', 1,
+                    repeat('a', 64)
+                )
+                """
+            ),
+            {"dataset_id": dataset_id, "sync_scope": sync_scope, "sibling": sibling},
+        )

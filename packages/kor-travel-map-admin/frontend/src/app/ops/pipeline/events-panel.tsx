@@ -131,6 +131,18 @@ export function PipelineEventsPanel({
         ),
       },
       {
+        // provider/dataset 자연키 컬럼은 T-VN-33에서 ID로 접혔지만 sync_scope는
+        // ID가 아니라 membership identity의 **다른 축**이다. 이 컬럼이 없으면
+        // scope로 좁힌 이벤트 화면에서 각 행이 어느 scope 것인지 알 수 없다.
+        id: "sync_scope",
+        header: "scope",
+        cell: ({ row }) => (
+          <span className="font-mono text-xs">
+            {row.original.sync_scope ?? "-"}
+          </span>
+        ),
+      },
+      {
         id: "message",
         header: "메시지",
         cell: ({ row }) => (

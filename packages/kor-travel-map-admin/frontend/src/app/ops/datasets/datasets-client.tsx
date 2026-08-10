@@ -2705,7 +2705,13 @@ function DatasetsClientView({
                   detail={detail.data?.data ?? null}
                   isError={detail.isError}
                   isLoading={detail.isLoading}
-                  key={`${activeSelection.providerDatasetId}/${activeSelection.syncScope}/${activeSelection.operationKey}`}
+                  // drawer는 **dataset** 단위로만 remount한다. 여기에 scope나
+                  // operation_key를 넣으면 같은 dataset 안에서 exact scope를
+                  // 옮기는 것만으로 drawer 전체가 새로 마운트돼 PolicyEditor의
+                  // 저장 전 초안이 사라진다(정책은 provider_dataset 리소스다).
+                  // scope별로 리셋돼야 하는 상태는 내부 패널이 각자 triple key로
+                  // 이미 분리한다(RefreshNowSection/HistoryPanel/PreviewPanel).
+                  key={String(activeSelection.providerDatasetId)}
                   onClose={closeDetail}
                   onPanelChange={(panel) =>
                     applySelection(activeSelection, panel)

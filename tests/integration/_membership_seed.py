@@ -60,6 +60,52 @@ async def memberships_for_operation(
     return memberships if limit is None else memberships[:limit]
 
 
+_DATASET_SCOPE_SQL = """
+SELECT scope.provider_dataset_id, scope.sync_scope, scope.operation_key
+FROM provider_sync.provider_dataset_operation_scopes AS scope
+JOIN provider_sync.provider_datasets AS dataset
+  ON dataset.provider_dataset_id = scope.provider_dataset_id
+WHERE dataset.provider = :provider
+  AND dataset.dataset_key = :dataset_key
+  AND scope.operation_key = :operation_key
+  AND scope.sync_scope = :sync_scope
+  AND scope.operation_kind = 'refresh'
+"""
+
+
+async def membership_for_dataset(
+    session: AsyncSession,
+    *,
+    provider: str,
+    dataset_key: str,
+    operation_key: str,
+    sync_scope: str,
+) -> ProviderDatasetOperationMembership:
+    """exact triple 하나를 시드에서 고른다.
+
+    ``memberships_for_operation``은 operation을 축으로 고르지만, REST 계약 회귀는
+    "이 dataset의 이 scope의 이 operation"이라는 **한 점**을 지목해야 한다. 없는
+    조합이면 ``.one()``이 죽는다 — 지어낸 triple로 조용히 진행하지 않는다.
+    """
+
+    row = (
+        await session.execute(
+            text(_DATASET_SCOPE_SQL),
+            {
+                "provider": provider,
+                "dataset_key": dataset_key,
+                "operation_key": operation_key,
+                "sync_scope": sync_scope,
+            },
+        )
+    ).one()
+    return ProviderDatasetOperationMembership(
+        provider_dataset_id=int(row.provider_dataset_id),
+        sync_scope=str(row.sync_scope),
+        operation_key=str(row.operation_key),
+    )
+
+
 #: Dagster run tag key. 프로덕션 상수를 그대로 읽는다 — 테스트가 자기 사본을 들면
 #: 태그 이름이 갈려도 조용히 통과한다.
 def launch_tags(

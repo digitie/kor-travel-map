@@ -129,6 +129,7 @@ function makeCatalog(
     feature_kind: "weather",
     provider_state_default_scope: "target_grids",
     label: "KMA 단기예보",
+    is_active: true,
     is_refreshable: true,
     scope_refresh: {
       allowed_sync_scopes: ["target_grids", ACTIVE_EXTERNAL_SCOPE],
@@ -157,9 +158,13 @@ function makeGridRow(
   const provider = overrides.provider ?? KMA_PROVIDER;
   const datasetKey = overrides.dataset_key ?? KMA_DATASET;
   const syncScope = overrides.sync_scope ?? KMA_SCOPE;
+  // ID는 **한 번만** 정한다. 아래 detail_url이 다시 `providerDatasetId(...)`를
+  // 부르면 명시 override를 준 합성 fixture(`retired-provider` 등)에서도 등록표
+  // 조회가 돌아 throw했다.
+  const resolvedProviderDatasetId =
+    overrides.provider_dataset_id ?? providerDatasetId(provider, datasetKey);
   return {
-    provider_dataset_id:
-      overrides.provider_dataset_id ?? providerDatasetId(provider, datasetKey),
+    provider_dataset_id: resolvedProviderDatasetId,
     provider,
     dataset_key: datasetKey,
     sync_scope: syncScope,
@@ -182,7 +187,7 @@ function makeGridRow(
     active_execution: null,
     latest_execution: null,
     detail_url:
-      `/v1/ops/datasets/${providerDatasetId(provider, datasetKey)}` +
+      `/v1/ops/datasets/${resolvedProviderDatasetId}` +
       `?sync_scope=${encodeURIComponent(syncScope)}`,
     ...overrides,
   };
@@ -293,32 +298,28 @@ function makeExactExecution(
   };
 }
 
+// canonical history URL은 provider_dataset_id로 만든다(ADR-088). 자연키를 다시
+// 등록표로 되돌리면 명시 ID를 준 합성 fixture에서 조회가 실패했다.
 function exactScopeHistoryUrl(
   resource: "events" | "executions",
-  provider: string,
-  datasetKey: string,
+  providerDatasetIdValue: number,
   syncScope: string,
 ): string {
   return (
-    `/v1/ops/pipeline/${resource}?provider_dataset_id=${providerDatasetId(
-      provider,
-      datasetKey,
-    )}` +
+    `/v1/ops/pipeline/${resource}?provider_dataset_id=${providerDatasetIdValue}` +
     `&sync_scope=${encodeURIComponent(syncScope)}`
   );
 }
 
 function makeRunHistory(
-  provider: string,
-  datasetKey: string,
+  providerDatasetIdValue: number,
   syncScope: string,
   overrides: Partial<OpsDatasetRunHistory> = {},
 ): OpsDatasetRunHistory {
   return {
     canonical_url: exactScopeHistoryUrl(
       "executions",
-      provider,
-      datasetKey,
+      providerDatasetIdValue,
       syncScope,
     ),
     items: [],
@@ -328,16 +329,14 @@ function makeRunHistory(
 }
 
 function makeEventHistory(
-  provider: string,
-  datasetKey: string,
+  providerDatasetIdValue: number,
   syncScope: string,
   overrides: Partial<OpsDatasetEventHistory> = {},
 ): OpsDatasetEventHistory {
   return {
     canonical_url: exactScopeHistoryUrl(
       "events",
-      provider,
-      datasetKey,
+      providerDatasetIdValue,
       syncScope,
     ),
     items: [],
@@ -352,18 +351,23 @@ function makeDetail(
   const provider = overrides.provider ?? KMA_PROVIDER;
   const datasetKey = overrides.dataset_key ?? KMA_DATASET;
   const syncScope = overrides.scopes?.[0]?.sync_scope ?? KMA_SCOPE;
+  const resolvedProviderDatasetId =
+    overrides.provider_dataset_id ?? providerDatasetId(provider, datasetKey);
   return {
     provider,
     dataset_key: datasetKey,
     // detail은 grid 행과 같은 provider_dataset_id를 가리켜야 한다(mock router가
     // /v1/ops/datasets/{id}로 조회하므로).
-    provider_dataset_id:
-      overrides.provider_dataset_id ?? providerDatasetId(provider, datasetKey),
+    provider_dataset_id: resolvedProviderDatasetId,
     catalog: makeCatalog(),
     scopes: [
       {
         sync_scope: KMA_SCOPE,
-        operation_key: "e2e_refresh",
+        // grid 행(`makeGridRow`)이 내는 operation_key와 **같아야** 한다.
+        // ADR-088 triple identity에서 선택은 (provider_dataset_id, sync_scope,
+        // operation_key)이고 drawer는 detail.scopes에서 그 셋이 정확히 일치하는
+        // scope를 못 찾으면 패널을 아예 렌더하지 않는다.
+        operation_key: KMA_OPERATION_KEY,
         status: "active",
         cursor: { base_date: "20260714", base_time: "0500" },
         last_success_at: FRESH_AT,
@@ -380,8 +384,8 @@ function makeDetail(
     active_execution: null,
     latest_execution: null,
     execution_coverage: "db_recorded_canonical_operations",
-    run_history: makeRunHistory(provider, datasetKey, syncScope),
-    event_history: makeEventHistory(provider, datasetKey, syncScope),
+    run_history: makeRunHistory(resolvedProviderDatasetId, syncScope),
+    event_history: makeEventHistory(resolvedProviderDatasetId, syncScope),
     schedule: makeScheduleSummary(),
     schedule_source_status: "ok",
     schedule_source_errors: [],
@@ -680,14 +684,12 @@ async function mockOpsDatasets(
     if (!options.allowInvalidDetailContract) {
       const expectedRunUrl = exactScopeHistoryUrl(
         "executions",
-        row!.provider,
-        row!.dataset_key,
+        row!.provider_dataset_id,
         syncScope,
       );
       const expectedEventUrl = exactScopeHistoryUrl(
         "events",
-        row!.provider,
-        row!.dataset_key,
+        row!.provider_dataset_id,
         syncScope,
       );
       if (
@@ -1060,10 +1062,14 @@ function defaultGrid(): {
           stale_after_minutes: null,
         }),
         latest_execution: makeExecution(),
-        run_history: makeRunHistory(KMA_PROVIDER, KMA_DATASET, KMA_SCOPE, {
+        run_history: makeRunHistory(
+      KMA_PROVIDER_DATASET_ID,
+      KMA_SCOPE, {
           items: [makeExecution()],
         }),
-        event_history: makeEventHistory(KMA_PROVIDER, KMA_DATASET, KMA_SCOPE, {
+        event_history: makeEventHistory(
+      KMA_PROVIDER_DATASET_ID,
+      KMA_SCOPE, {
           items: [
             {
               event_id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
@@ -1109,7 +1115,7 @@ function defaultGrid(): {
         scopes: [
           {
             sync_scope: "dataset_wide",
-            operation_key: "e2e_refresh",
+            operation_key: KMA_OPERATION_KEY,
             status: "never_run",
             cursor: {},
             last_success_at: null,
@@ -1232,6 +1238,8 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     page,
   }) => {
     const contaminatedRow = makeGridRow({
+      // 합성 provider/dataset이라 fixture 등록표에 없다 — canonical ID를 명시한다.
+      provider_dataset_id: 901,
       provider: "행 3",
       dataset_key: "실패 1",
       sync_scope: "오래됨(SLA 초과) 1",
@@ -1583,11 +1591,12 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
               targeted_policy: "follow_system",
             }),
             scopes,
-            run_history: makeRunHistory(KMA_PROVIDER, KMA_DATASET, syncScope),
+            run_history: makeRunHistory(
+      KMA_PROVIDER_DATASET_ID,
+      syncScope),
             event_history: makeEventHistory(
-              KMA_PROVIDER,
-              KMA_DATASET,
-              syncScope,
+      KMA_PROVIDER_DATASET_ID,
+      syncScope,
             ),
           }),
       },
@@ -1882,9 +1891,11 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     await page.getByRole("button", { name: "fixture 실행" }).click();
 
     await expect.poll(() => mocks.previewPosts.length).toBe(1);
+    // preview도 ADR-088 triple로 나간다 — operation_key가 빠지면 서버가 어떤
+    // canonical operation을 미리보는지 알 수 없다.
     expect(mocks.previewPosts[0].path).toBe(
       `/v1/ops/datasets/${KMA_PROVIDER_DATASET_ID}/preview` +
-        `?sync_scope=${KMA_SCOPE}`,
+        `?sync_scope=${KMA_SCOPE}&operation_key=${KMA_OPERATION_KEY}`,
     );
     expect(mocks.previewPosts[0].source).toBe("fixture");
     await expect(page.getByText("WeatherValue")).toBeVisible();
@@ -2113,7 +2124,9 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
         [`${KMA_PROVIDER}/${KMA_DATASET}`]: makeDetail({
           active_execution: activeExecution,
           latest_execution: terminalExecution,
-          run_history: makeRunHistory(KMA_PROVIDER, KMA_DATASET, KMA_SCOPE, {
+          run_history: makeRunHistory(
+      KMA_PROVIDER_DATASET_ID,
+      KMA_SCOPE, {
             items: [activeExecution, terminalExecution],
           }),
         }),
@@ -2161,7 +2174,9 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
           makeDetail({
             active_execution: detailCount === 1 ? activeExecution : null,
             latest_execution: detailCount === 1 ? null : terminalExecution,
-            run_history: makeRunHistory(KMA_PROVIDER, KMA_DATASET, KMA_SCOPE, {
+            run_history: makeRunHistory(
+      KMA_PROVIDER_DATASET_ID,
+      KMA_SCOPE, {
               items: [detailCount === 1 ? activeExecution : terminalExecution],
             }),
           }),
@@ -2250,7 +2265,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
         ...makeDetail().scopes,
         {
           sync_scope: ACTIVE_EXTERNAL_SCOPE,
-          operation_key: "e2e_refresh",
+          operation_key: KMA_OPERATION_KEY,
           status: "never_run",
           cursor: {},
           last_success_at: null,
@@ -2267,17 +2282,15 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
       ],
       // 다른 target scope의 이력만 존재 — external 첫 실행에는 섞이면 안 된다.
       run_history: makeRunHistory(
-        KMA_PROVIDER,
-        KMA_DATASET,
-        ACTIVE_EXTERNAL_SCOPE,
+      KMA_PROVIDER_DATASET_ID,
+      ACTIVE_EXTERNAL_SCOPE,
         {
           items: [],
         },
       ),
       event_history: makeEventHistory(
-        KMA_PROVIDER,
-        KMA_DATASET,
-        ACTIVE_EXTERNAL_SCOPE,
+      KMA_PROVIDER_DATASET_ID,
+      ACTIVE_EXTERNAL_SCOPE,
       ),
     });
     await mockOpsDatasets(page, {
@@ -2319,14 +2332,12 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
           // capability allow-list에는 남아 있지만 exact state가 응답에서 사라진 경합.
           scopes: makeDetail().scopes,
           run_history: makeRunHistory(
-            KMA_PROVIDER,
-            KMA_DATASET,
-            ACTIVE_EXTERNAL_SCOPE,
+      KMA_PROVIDER_DATASET_ID,
+      ACTIVE_EXTERNAL_SCOPE,
           ),
           event_history: makeEventHistory(
-            KMA_PROVIDER,
-            KMA_DATASET,
-            ACTIVE_EXTERNAL_SCOPE,
+      KMA_PROVIDER_DATASET_ID,
+      ACTIVE_EXTERNAL_SCOPE,
           ),
         }),
       },
@@ -2342,7 +2353,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
       page.getByRole("button", { name: "지금 갱신" }),
     ).toBeDisabled();
     await expect(
-      page.getByText(/exact sync scope가 상세 응답에 없어/),
+      page.getByText(/exact operation membership이 상세 응답에 없어/),
     ).toBeVisible();
     await expect.poll(() => pipeline.posts.length).toBe(0);
   });
@@ -2379,17 +2390,15 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
       ],
       latest_execution: externalExecution,
       run_history: makeRunHistory(
-        KMA_PROVIDER,
-        KMA_DATASET,
-        ACTIVE_EXTERNAL_SCOPE,
+      KMA_PROVIDER_DATASET_ID,
+      ACTIVE_EXTERNAL_SCOPE,
         {
           items: [externalExecution],
         },
       ),
       event_history: makeEventHistory(
-        KMA_PROVIDER,
-        KMA_DATASET,
-        ACTIVE_EXTERNAL_SCOPE,
+      KMA_PROVIDER_DATASET_ID,
+      ACTIVE_EXTERNAL_SCOPE,
       ),
     });
     await mockOpsDatasets(page, {
@@ -2435,7 +2444,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
         ...makeDetail().scopes,
         {
           sync_scope: STALE_EXTERNAL_SCOPE,
-          operation_key: "e2e_refresh",
+          operation_key: KMA_OPERATION_KEY,
           status: "active",
           cursor: {},
           last_success_at: MOCK_OLD,
@@ -2447,17 +2456,15 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
       ],
       latest_execution: staleExecution,
       run_history: makeRunHistory(
-        KMA_PROVIDER,
-        KMA_DATASET,
-        STALE_EXTERNAL_SCOPE,
+      KMA_PROVIDER_DATASET_ID,
+      STALE_EXTERNAL_SCOPE,
         {
           items: [staleExecution],
         },
       ),
       event_history: makeEventHistory(
-        KMA_PROVIDER,
-        KMA_DATASET,
-        STALE_EXTERNAL_SCOPE,
+      KMA_PROVIDER_DATASET_ID,
+      STALE_EXTERNAL_SCOPE,
       ),
     });
     await mockOpsDatasets(page, {
@@ -2555,8 +2562,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
             ...moisDetail.run_history,
             canonical_url: exactScopeHistoryUrl(
               "executions",
-              MOIS_PROVIDER,
-              MOIS_DATASET,
+              MOIS_PROVIDER_DATASET_ID,
               staleScope,
             ),
           },
@@ -2564,8 +2570,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
             ...moisDetail.event_history,
             canonical_url: exactScopeHistoryUrl(
               "events",
-              MOIS_PROVIDER,
-              MOIS_DATASET,
+              MOIS_PROVIDER_DATASET_ID,
               staleScope,
             ),
           },
