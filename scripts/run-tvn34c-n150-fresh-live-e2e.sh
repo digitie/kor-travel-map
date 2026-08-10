@@ -188,6 +188,7 @@ random_secret() {
 write_env_files() {
   local postgres_password migrator_password api_password dagster_password
   local admin_proxy_secret service_token cursor_secret metrics_token
+  local cache_target_command_token cache_target_consumer_token
   local ops_read ops_cancel ops_fixture ui_session ui_password_hash compose_ui_password_hash object_secret
   postgres_password="$(random_secret)"
   migrator_password="$(random_secret)"
@@ -197,6 +198,8 @@ write_env_files() {
   service_token="$(random_secret)"
   cursor_secret="$(random_secret)"
   metrics_token="$(random_secret)"
+  cache_target_command_token="$(random_secret)"
+  cache_target_consumer_token="$(random_secret)"
   ops_read="$(random_secret)"
   ops_cancel="$(random_secret)"
   ops_fixture="$(random_secret)"
@@ -291,6 +294,8 @@ PINVI_KOR_TRAVEL_MAP_API_BASE_URL=http://map-api:$api_port
 PINVI_KOR_TRAVEL_MAP_SERVICE_TOKEN=$service_token
 PINVI_KOR_TRAVEL_MAP_ADMIN_BASE_URL=http://map-api:$api_port
 PINVI_KOR_TRAVEL_MAP_CACHE_TARGET_SYNC_ENABLED=false
+PINVI_KOR_TRAVEL_MAP_CACHE_TARGET_COMMAND_TOKEN=$cache_target_command_token
+PINVI_KOR_TRAVEL_MAP_CACHE_TARGET_CONSUMER_TOKEN=$cache_target_consumer_token
 PINVI_KOR_TRAVEL_MAP_CACHE_TARGET_EXPECTED_CONTRACT_GENERATION=7
 EOF
   chmod 0600 "$MAP_ENV" "$PINVI_ENV"
