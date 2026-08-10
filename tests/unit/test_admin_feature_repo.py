@@ -207,6 +207,77 @@ def test_create_override_payload_does_not_claim_omitted_subtype_defaults() -> No
 
 
 @pytest.mark.asyncio
+async def test_create_initial_payload_uses_typed_state_arguments(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """review payload의 축은 state procedure JSON input으로 새지 않는다."""
+
+    async def _write_subtype(_session: object, **_: Any) -> None:
+        return None
+
+    async def _author(
+        _session: object,
+        feature_id: str,
+        **_: Any,
+    ) -> repo.FeatureFieldOverrideCommand:
+        return repo.FeatureFieldOverrideCommand(
+            feature_id=feature_id,
+            row_revision=2,
+            command_id=71,
+            applied_field_count=5,
+        )
+
+    candidate_uuid = "00000000-0000-4000-8000-000000000101"
+    monkeypatch.setattr(repo, "candidate_feature_uuid", lambda: candidate_uuid)
+    monkeypatch.setattr(repo, "write_subtype", _write_subtype)
+    monkeypatch.setattr(repo, "author_admin_feature_field_overrides", _author)
+    session = _Session(
+        [
+            _Result(
+                [
+                    {
+                        "o_feature_id": "user:live-create",
+                        "o_feature_uuid": candidate_uuid,
+                        "o_row_revision": 1,
+                        "o_inserted": True,
+                    }
+                ]
+            )
+        ]
+    )
+
+    await repo.create_admin_feature_with_field_overrides(
+        session,  # type: ignore[arg-type]
+        feature_id="user:live-create",
+        payload={
+            "kind": "place",
+            "name": "n150 생성",
+            "category": "01070300",
+            "coord": {"lon": 127.5, "lat": 36.5},
+            "marker_icon": "marker",
+            "marker_color": "P-02",
+            "lifecycle_state": "active",
+            "publication_state": "published",
+            "quality_state": "valid",
+        },
+        lifecycle_state="active",
+        publication_state="published",
+        quality_state="valid",
+        reason_code="tvn36-create",
+        operator="admin:n150",
+        command_id=71,
+    )
+
+    initial_payload = json.loads(session.calls[0]["params"]["feature_payload"])
+    assert {
+        "lifecycle_state",
+        "publication_state",
+        "quality_state",
+    }.isdisjoint(initial_payload)
+    assert initial_payload["feature_uuid"] == candidate_uuid
+
+
+@pytest.mark.asyncio
 async def test_list_admin_features_builds_params_and_next_cursor() -> None:
     session = _Session([_Result([_feature_row("feature-1"), _feature_row("feature-2")])])
 

@@ -2550,7 +2550,16 @@ async def create_admin_feature_with_field_overrides(
     initial_payload = {
         key: value
         for key, value in payload.items()
-        if key != "detail"
+        # 상태 tuple은 create procedure의 별도 typed argument다. review payload에는
+        # axis 기본값을 보존하지만, JSON payload에 함께 넘기면 procedure의 runtime
+        # state-injection fence가 정확히 이를 거부한다.
+        if key
+        not in {
+            "detail",
+            "lifecycle_state",
+            "publication_state",
+            "quality_state",
+        }
     }
     initial_payload["feature_id"] = feature_id
     initial_payload["feature_uuid"] = candidate_feature_uuid()
