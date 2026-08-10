@@ -8,6 +8,8 @@
 검증한다.
 상세 계약은
 [`t-vn-40-curation-write-model-detailed-design-2026-08-11.md`](reports/t-vn-40-curation-write-model-detailed-design-2026-08-11.md)가 정본이다.
+PinVi legacy curated detail snapshot도 canonical `curation_item_id` 기반 projection으로
+같은 release에서 이관한다.
 
 ## 2026-08-13 — T-VN-36 prod cutover 완료
 

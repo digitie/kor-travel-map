@@ -11,6 +11,8 @@ T-VN-36 PR #973이 `c76ceb7a`로 병합된 최신 `main` 위에 T-VN-40 설계 �
 상세 설계는 candidate stable identity `(rule_id, source_entity_key, feature_id)`, immutable
 transition audit, source-head proof, typed promotion/reject command, 전용 procedure owner,
 legacy 물리 제거와 Map/PinVi/n150 acceptance를 고정한다.
+PinVi가 소비하는 legacy curated detail snapshot은 canonical `curation_item_id` 기반의
+typed direct projection으로 같은 release에서 이관하고, legacy cache/path/type를 함께 제거한다.
 
 ## 2026-08-12 — T-VN-38 병합과 완료 task 아카이브 정리
 
