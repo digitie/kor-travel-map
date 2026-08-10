@@ -4,7 +4,7 @@
 가벼운 집계. raw SQL ``text()``(ADR-004), 읽기 전용.
 
 집계 대상:
-- ``feature.features`` — 활성/비활성/전체 + kind별.
+- ``feature.features`` — lifecycle 활성/은퇴/전체 + 활성 kind별.
 - ``provider_sync.source_records`` — provider별 row 수.
 - ``ops.import_jobs`` — status별.
 - ``ops.dedup_review_queue`` — status별.
@@ -30,7 +30,12 @@ __all__ = [
 
 @dataclass(frozen=True)
 class StatusCounts:
-    """운영 현황 카운트 스냅샷 (``gather_status_counts`` 결과)."""
+    """운영 현황 카운트 스냅샷 (``gather_status_counts`` 결과).
+
+    ``features_active``/``features_inactive``는 호환용 출력 이름을 유지하지만 각각
+    ``lifecycle_state='active'``/``'retired'``를 뜻한다. legacy soft-delete
+    timestamp는 T-VN-36D에서 물리 제거됐으므로 이 집계에 사용하지 않는다.
+    """
 
     features_total: int = 0
     features_active: int = 0

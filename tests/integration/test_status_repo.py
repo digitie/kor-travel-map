@@ -30,6 +30,13 @@ def test_import_job_status_count_excludes_quarantined_rows() -> None:
     assert "WHERE quarantined_at IS NULL" in status_repo._IMPORT_JOBS_SQL
 
 
+def test_feature_status_counts_use_lifecycle_not_removed_soft_delete_columns() -> None:
+    assert "lifecycle_state = 'active'" in status_repo._FEATURES_SQL
+    assert "lifecycle_state = 'retired'" in status_repo._FEATURES_SQL
+    assert "deleted_at" not in status_repo._FEATURES_SQL
+    assert "deleted_at" not in status_repo._FEATURES_BY_KIND_SQL
+
+
 def test_source_record_provider_count_uses_canonical_lineage_join() -> None:
     sql = status_repo._SOURCE_RECORDS_SQL
 
