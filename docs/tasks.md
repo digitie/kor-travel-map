@@ -25,7 +25,7 @@ barrier로 직렬화한다.
 - **Wave 2 barrier 이후**
   - Lane A: [ ] `T-VN-35-deploy` → [ ] `T-VN-37D`
   - Lane B: [x] `T-VN-34A` → [x] `T-VN-34B` → [x] `T-VN-34C` →
-    [ ] `T-VN-36A` → [ ] `T-VN-36B` → [ ] `T-VN-36C`
+    [ ] `T-VN-36A` → [ ] `T-VN-36B` → [ ] `T-VN-36C` → [ ] `T-VN-36D`
   - 32~38 join barrier 뒤 Lane B: [ ] `T-VN-40A` → [ ] `T-VN-40B` →
     [ ] `T-VN-40C`
   - 최종 단일 cutover: [ ] `T-VN-39`
@@ -570,7 +570,7 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   ACL allowlist·startup preflight assertion을 제거한다. 이어 legacy `status`, delete/user-change metadata와
   관련 CHECK/index/trigger/query를 물리 삭제하고 static normal-path gate와 n150 destructive fresh-reload
   live E2E를 통과한다. `data_origin`/`data_version`, `feature_versions`와 materializer bridge는 T-VN-36의
-  materialization 입력으로 남기며 T-VN-36C가 제거한다. post-34/pre-36 executable contract와 dedicated
+  materialization 입력으로 남기며 T-VN-36D가 제거한다. post-34/pre-36 executable contract와 dedicated
   `0096→C` integration/artifact runner가 legacy catalog zero·ordered public allowlist·typed direct
   dependency·receipt unique/immutability·runtime ACL을 fail-close하고, post-T36 final target contract를
   약화하거나 앞당기지 않는다. Map OpenAPI export 뒤
@@ -614,7 +614,12 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   `T-VN-41F1D-C3`의 격리 generation이며 prod 배포가 아니다. 배포 직전 write-fence
   기준점 dump는 `T-VN-H43` runbook §9 관례를 따른다.
 
-### T-VN-36 — field override 단일화 (Lane B)
+### T-VN-36 — field override 단일화 (Lane B, A–D 단일 PR)
+
+> 정본 설계는
+> [`reports/t-vn-36-field-override-plan-2026-08-10.md`](reports/t-vn-36-field-override-plan-2026-08-10.md)와
+> ADR-091이다. A–D는 `feat/tvn36-abcd-field-overrides` 하나의 forward-only PR/release로만
+> 병합한다. intermediate migration head나 old binary를 배포하지 않는다.
 
 - [ ] T-VN-36A — **override schema·whole-row freeze backfill**
 
@@ -626,11 +631,18 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   provider upsert와 admin patch가 field override를 같은 transaction에서 갱신하도록 전환하고
   concurrency/merge precedence를 DB 제약과 회귀 테스트로 고정한다.
 
-- [ ] T-VN-36C — **effective projection 단일화·legacy freeze fence**
+- [ ] T-VN-36C — **effective projection 단일화·consumer cutover**
 
   read model을 한 effective projection으로 통일하고 repository별 중복 `CASE` write/read 분기를
-  비활성화한다. 서비스 전 final migration에서 whole-row freeze column/trigger와 `data_origin`/
-  `data_version`을 물리 삭제한다. rollback shadow와 T-VN-39 이관은 만들지 않는다.
+  비활성화한다. typed admin override API/UI·OpenAPI·PinVi admin-detail consumer를 exact Map head로
+  전환한다.
+
+- [ ] T-VN-36D — **destructive freeze fence·final live**
+
+  base/effective checksum과 runtime ACL을 검증한 뒤에만 whole-row freeze, `data_origin`,
+  `data_version`, `feature_versions`와 dependent request receipt/trigger/index를 물리 삭제한다.
+  post-36/pre-T39 executable contract, fresh migration, PinVi pair, n150 destructive main/recovery와
+  cleanup이 통과해야 한다.
 
 ### T-VN-37D — notice empty range 표현 (보류)
 

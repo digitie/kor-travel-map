@@ -144,6 +144,17 @@ target freeze·공개 projection·상태 spine·runtime ACL을 검증했다.
 runtime의 `feature_versions` ACL은 read 허용과 insert 거부를 별도 catalog probe로 검증하도록
 바꿨다. OpenAPI freeze hash도 현재 생성 spec에 맞춰 재고정했다.
 
+## 2026-08-10 — T-VN-36 A–D 단일 PR: 설계 착수
+
+T-VN-34C 완료 head `b03d5a4f` 위에서 `feat/tvn36-abcd-field-overrides`를 만들었다. 기존
+T-VN-36C에 섞여 있던 destructive freeze fence와 live acceptance는 36D로 명시 분리하지만,
+A–D는 하나의 forward-only Draft PR/release로만 병합한다.
+
+ADR-091은 provider base ledger, field override intent, typed effective storage를 같은 정본의
+세 층으로 고정한다. whole-row `data_origin` fence와 `feature_versions` bridge는 36D에서만
+제거하며, source 재적재와 immutable request replay로 mapping할 수 없는 legacy 행은 추정하지
+않고 fail-closed한다.
+
 ## 2026-08-10 — T-VN-34C: n150 fresh destructive live gate 통과
 
 immutable snapshot은 Map 실행 source `fe12e8da`와 PinVi `e37eda94`를 `git archive`로만 넣어

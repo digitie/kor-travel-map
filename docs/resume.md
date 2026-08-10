@@ -76,6 +76,15 @@ consumer receipt 영향도를 다시 확인한다. 새 T-VN-34 consumer pair는 
   rebase tree에서 재동결·재실행했다.
 - user/admin-detail vendor bytes는 같은 Map source에서 deterministic 재추출·PinVi contract
   pin-consistency로 검증했고, full admin OpenAPI digest만 receipt에서 갱신했다.
+## 2026-08-10 — T-VN-36 A–D 단일 PR: field override 설계 착수
+
+**다음 한 작업**: ADR-091과 T-VN-36 A–D 통합 설계의 registry/base/effective/command contract를
+적대 검토로 고정한 뒤 36A executable DDL·invariant·preflight를 구현한다.
+
+- base는 T-VN-34C 완료 head `b03d5a4f`이다. `data_origin`/`data_version`, `feature_versions`,
+  whole-row request receipt는 T-VN-36D가 제거하며 T-VN-34 C head에는 남아 있다.
+- logical A–D는 하나의 forward-only Draft PR/release로만 병합한다. base ledger와 typed effective
+  storage는 compatibility dual-write가 아니라 하나의 field-level 정본이다.
 
 ## 2026-08-10 — T-VN-34C: n150 fresh destructive live gate 통과
 

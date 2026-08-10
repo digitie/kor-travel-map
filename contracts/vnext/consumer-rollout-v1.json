@@ -47,7 +47,7 @@
         "34B: 명시 열 public_features, parent FOR UPDATE 아래 core tuple에서 trigger로만 갱신되고 table-level UPDATE 없는 route/area public_ready projection과 column ACL, service 5-state classifier, core 3축 partial point/text index와 route/area WHERE public_ready GiST/EXPLAIN을 stack draft로 만든다. B만의 배포/병합은 금지한다.",
         "34C: provider/admin/merge/Dagster writer와 admin/user DTO/API/UI/OpenAPI/PinVi snapshot/live fixture를 one-shot final cutover한다. public view와 materializer/non-public reader를 typed core+subtype assembly로 전환하고 durable user-request receipt를 만든 뒤 features_detailed·runtime detail grant/allowlist/preflight와 legacy status 계열을 같은 deployment unit에서 제거한다. post-34/pre-36 contract는 data_origin/data_version·feature_versions/materializer bridge를 유지하며 post-T36 target을 앞당기지 않는다. PinVi snapshot은 C exact Map head를 재-vendor한 뒤 함께 검증한다."
       ],
-      "write_fence": "34C final migration에서 durable user-request receipt와 typed public/materializer assembly를 먼저 검증한 뒤 features_detailed·runtime detail grant/allowlist/preflight와 legacy status/delete/user-change core metadata 및 dependent query/trigger/index를 물리 삭제해 DB fence를 완성한다. data_origin/data_version/feature_versions/materializer bridge는 T-VN-36C가 소유한다.",
+      "write_fence": "34C final migration에서 durable user-request receipt와 typed public/materializer assembly를 먼저 검증한 뒤 features_detailed·runtime detail grant/allowlist/preflight와 legacy status/delete/user-change core metadata 및 dependent query/trigger/index를 물리 삭제해 DB fence를 완성한다. data_origin/data_version/feature_versions/materializer bridge는 T-VN-36D가 소유한다.",
       "compat_drop": "서비스 전 forward-only cutover다. dual-write, shadow column/trigger, held-component rollback은 금지하며 T-VN-39로 이관하지 않는다.",
       "pinvi_snapshot_revendor": {
         "user": "yes",
@@ -89,12 +89,13 @@
     "T-VN-36": {
       "title": "field override 단일화",
       "consumer_first_order": [
-        "36A: override 정본 schema + data_origin/data_version과 whole-row freeze의 동일 effective projection backfill·대조",
-        "36B: provider/admin writer가 같은 transaction에서 override 갱신",
-        "36C: effective projection 단일화 + repository CASE 분기 비활성화 + legacy data-origin/version/freeze 물리 삭제"
+        "36A: registry·provider base ledger·field override 정본 schema와 data_origin/data_version whole-row freeze의 field mapping/backfill·effective 대조",
+        "36B: provider/admin/user writer가 source evidence와 Feature lock 아래 base·override·typed effective 값을 한 transaction에서 materialize",
+        "36C: effective projection 단일화 + repository CASE 분기 비활성화 + typed admin override API/UI/OpenAPI/PinVi admin-detail consumer 전환",
+        "36D: checksum·ACL·consumer 검증 뒤 legacy data-origin/version/freeze·feature_versions/request receipt를 final migration에서 물리 삭제하고 n150 destructive main/recovery를 실행"
       ],
-      "write_fence": "36C final migration에서 whole-row freeze와 data_origin/data_version 신규 write를 막고 dependent column/trigger/index를 물리 삭제한다.",
-      "compat_drop": "서비스 전 forward-only cutover다. rollback shadow를 만들지 않고 generated override 행을 정본으로 유지한다 (ADR-071은 T-VN-36C에서 destructive 규율로 갱신한다).",
+      "write_fence": "36D final migration에서 whole-row freeze와 data_origin/data_version·feature_versions 신규 write를 막고 dependent column/trigger/index와 legacy request receipt를 물리 삭제한다.",
+      "compat_drop": "서비스 전 forward-only cutover다. rollback shadow를 만들지 않고 generated override 행을 정본으로 유지한다 (ADR-071은 T-VN-36D에서 destructive 규율로 갱신한다).",
       "pinvi_snapshot_revendor": {
         "user": "no",
         "service": "no",
@@ -184,8 +185,8 @@
       },
       {
         "object": "data_origin/data_version과 whole-row freeze 판정 열·trigger(data_origin='user_request' CASE 계열)",
-        "fenced_by": "T-VN-36C",
-        "removed_by": "T-VN-36C"
+        "fenced_by": "T-VN-36D",
+        "removed_by": "T-VN-36D"
       },
       {
         "object": "provider_sync.notice_lineage_states·notice_lifecycle_scopes(문자열 시각 판정) — notice_states로 대체",

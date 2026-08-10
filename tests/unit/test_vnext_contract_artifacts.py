@@ -30,27 +30,27 @@ _TVN34_CURRENT_MIGRATION: Final = (
 # artifact bytes 고정 — 갱신 절차: artifact 수정 → 통합 테스트로 fingerprint 재고정
 # → 여기 sha256 갱신 (한 PR에서 함께).
 ARTIFACT_SHA256: Final[dict[str, str]] = {
-    "target-schema-v1.sql": ("bb57b6defe3010ea9b014db77abfd08de9dd2c24ad1a607b8084b6df6be209da"),
+    "target-schema-v1.sql": ("f9b4e997913d6f1f44a6748277fdc510805d8991281dfba79ec07bbe7971187d"),
     "target-invariants-v1.sql": (
         "94d959fa4004d717b10f0ffec6c44010da21b6749e03721a6813776c043aa1c6"
     ),
     # 2026-08-12 재고정 — 계약 SQL은 그대로고(위 bb57b6de… / 아래 9f434b50… 불변)
     # 재현 불가였던 columns/functions/indexes 파생 해시만 실측값으로 바뀌었다.
     "target-schema-fingerprints-v1.json": (
-        "0f54989701b83f9a41a78adadac7d0acd660cc81655f62086cc37a7412df1898"
+        "c30e00ad329fe72b3d9f6c0ab37e261e38132de67ccda31ea7ec4e9fa0d5e096"
     ),
     "tvn33-reference-ownership-v1.sql": (
         "9f434b50440c7463b86a5cf61abeb30bf6fe8d74a5760aa256374c76e4c9328a"
     ),
-    "openapi-diff-v1.json": ("ede090ef86eb91a2cae54f83c82af77f167380bb52350c4a0ffafda4a6475c21"),
+    "openapi-diff-v1.json": ("e193d2262e7c2903d67d0605ecd91c67a3ebaff1e33675f17b028cf8b253d20d"),
     "consumer-rollout-v1.json": (
-        "e1925b2c9fa13f2d7b013ea402e6d1ddda23b1ac7059ed937eed6c221d2edbdc"
+        "c801ae32cf4ee1922fc775ae89c97220d6447a34c357a3e45681a53ef52e7777"
     ),
     "violation-fixtures-v1.sql": (
         "dba1ad0e640e4ee0e2c6904ab880f7548cf073d859f221840b6fad873e3a8df6"
     ),
     "expected-rejections-v1.json": (
-        "9123b16dba0adb27c5da2207ad8bef51225a780e37b28d04a94a8b0e8435f5ed"
+        "37140077c1ae3d6b3c1043fd160a0b1afb2590f0f3c3943721e9435ebb03cb98"
     ),
     "recovery-preflight-v1.json": (
         "0e7e1ea595d034aacda8b4c94b56de6c2a24059f150c8cbd6c0670aebce7dfdd"
