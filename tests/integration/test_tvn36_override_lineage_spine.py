@@ -241,20 +241,51 @@ async def test_tvn36_registry_base_lineage_and_override_type_fence(
     assert _sqlstate(wrong_base_type.value) == "23514"
     assert _constraint_name(wrong_base_type.value) == "ck_feature_base_field_value"
 
-    await migrated_session.execute(
-        text(
-            """
-            INSERT INTO ops.feature_overrides (
-                feature_id, field_path, override_value, status, reason, created_by,
-                base_revision
-            ) VALUES (
-                :feature_id, 'core.name', '"operator name"'::jsonb, 'active',
-                'T-VN-36 typed override fixture', 'admin:tvn36', 1
+    author_command_id = int(
+        (
+            await migrated_session.execute(
+                text(
+                    """
+                    INSERT INTO ops.domain_commands (
+                        actor, operation, idempotency_key, fingerprint_version,
+                        request_fingerprint
+                    ) VALUES (
+                        'admin:tvn36', 'admin.feature.override.author',
+                        x_extension.gen_random_uuid(), 1, :fingerprint
+                    )
+                    RETURNING command_id
+                    """
+                ),
+                {"fingerprint": "b" * 64},
             )
-            """
-        ),
-        {"feature_id": feature_id},
+        ).scalar_one()
     )
+    await migrated_session.execute(text("SET ROLE ktm_feature_runtime"))
+    try:
+        async with migrated_session.begin_nested():
+            authored = (
+                await migrated_session.execute(
+                    text(
+                        """
+                        CALL feature.author_feature_field_overrides(
+                            :feature_id, 2, 'admin:tvn36', 'operator_correction',
+                            :command_id, NULL,
+                            '{"core.name":"operator name"}'::jsonb, '{}'::jsonb,
+                            NULL, NULL, NULL, NULL
+                        )
+                        """
+                    ),
+                    {"feature_id": feature_id, "command_id": author_command_id},
+                )
+            ).mappings().one()
+    finally:
+        await migrated_session.execute(text("RESET ROLE"))
+    assert dict(authored) == {
+        "o_feature_id": feature_id,
+        "o_row_revision": 3,
+        "o_command_id": author_command_id,
+        "o_applied_field_count": 1,
+    }
     await migrated_session.execute(text("SET ROLE ktm_feature_runtime"))
     try:
         async with migrated_session.begin_nested():
@@ -264,7 +295,7 @@ async def test_tvn36_registry_base_lineage_and_override_type_fence(
                         """
                         CALL feature.apply_provider_feature_field_patch(
                             :feature_id, :dataset_id, 'tvn36-lineage-entity',
-                            'tvn36-lineage-record', 2,
+                            'tvn36-lineage-record', 3,
                             CAST(:values AS jsonb), CAST(:geometry_wkt AS jsonb),
                             NULL, NULL, NULL
                         )
@@ -282,7 +313,7 @@ async def test_tvn36_registry_base_lineage_and_override_type_fence(
         await migrated_session.execute(text("RESET ROLE"))
     assert dict(masked) == {
         "o_feature_id": feature_id,
-        "o_row_revision": 3,
+        "o_row_revision": 4,
         "o_applied_field_count": 2,
     }
     masked_effective = (
@@ -302,9 +333,74 @@ async def test_tvn36_registry_base_lineage_and_override_type_fence(
         )
     ).mappings().one()
     assert dict(masked_effective) == {
-        "name": "fresh provider name",
+        "name": "operator name",
         "biz_number": "456",
         "value_json": "masked provider name",
+    }
+    revoke_command_id = int(
+        (
+            await migrated_session.execute(
+                text(
+                    """
+                    INSERT INTO ops.domain_commands (
+                        actor, operation, idempotency_key, fingerprint_version,
+                        request_fingerprint
+                    ) VALUES (
+                        'admin:tvn36', 'admin.feature.override.revoke',
+                        x_extension.gen_random_uuid(), 1, :fingerprint
+                    )
+                    RETURNING command_id
+                    """
+                ),
+                {"fingerprint": "c" * 64},
+            )
+        ).scalar_one()
+    )
+    await migrated_session.execute(text("SET ROLE ktm_feature_runtime"))
+    try:
+        async with migrated_session.begin_nested():
+            revoked = (
+                await migrated_session.execute(
+                    text(
+                        """
+                        CALL feature.revoke_feature_field_overrides(
+                            :feature_id, 4, 'admin:tvn36', 'operator_revoke',
+                            :command_id, NULL, ARRAY['core.name'],
+                            NULL, NULL, NULL, NULL
+                        )
+                        """
+                    ),
+                    {"feature_id": feature_id, "command_id": revoke_command_id},
+                )
+            ).mappings().one()
+    finally:
+        await migrated_session.execute(text("RESET ROLE"))
+    assert dict(revoked) == {
+        "o_feature_id": feature_id,
+        "o_row_revision": 5,
+        "o_command_id": revoke_command_id,
+        "o_applied_field_count": 1,
+    }
+    restored = (
+        await migrated_session.execute(
+            text(
+                """
+                SELECT core.name, count(override.override_id) AS active_override_count
+                FROM feature.features AS core
+                LEFT JOIN ops.feature_overrides AS override
+                  ON override.feature_id = core.feature_id
+                 AND override.field_path = 'core.name'
+                 AND override.status = 'active'
+                WHERE core.feature_id = :feature_id
+                GROUP BY core.name
+                """
+            ),
+            {"feature_id": feature_id},
+        )
+    ).mappings().one()
+    assert dict(restored) == {
+        "name": "masked provider name",
+        "active_override_count": 0,
     }
     with pytest.raises(DBAPIError) as mismatched_target:
         async with migrated_session.begin_nested():

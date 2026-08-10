@@ -78,10 +78,10 @@ consumer receipt 영향도를 다시 확인한다. 새 T-VN-34 consumer pair는 
   pin-consistency로 검증했고, full admin OpenAPI digest만 receipt에서 갱신했다.
 ## 2026-08-10 — T-VN-36 A–D 단일 PR: field override 설계 착수
 
-**다음 한 작업**: provider typed patch/effective materializer까지 구현했다. 이어서 admin/user
-field command를 domain-command receipt와 override author/revoke에 묶고, 같은 static
-effective materializer로 operator override와 provider base 복원을 수렴한다. command는 source
-evidence → Feature → subtype의 잠금 순서와 expected revision을 함께 강제해야 한다.
+**다음 한 작업**: provider patch와 admin/user override author/revoke procedure까지 구현했다.
+이어서 provider/admin/user repository writer를 typed field patch·domain-command procedure로
+실제 전환하고, legacy whole-row `data_origin` fence가 더 이상 새 write의 정본이 아님을
+integration으로 고정한다.
 
 - base는 T-VN-34C 완료 head `b03d5a4f`이다. `data_origin`/`data_version`, `feature_versions`,
   whole-row request receipt는 T-VN-36D가 제거하며 T-VN-34 C head에는 남아 있다.
@@ -94,6 +94,10 @@ evidence → Feature → subtype의 잠금 순서와 expected revision을 함께
   effective core/subtype을 한 transaction에서 갱신한다. active field override는 새 base만
   남기고 effective 값을 유지하며, runtime LOGIN에서 raw DML 없이 procedure를 실행하는
   catalog receipt까지 통과했다.
+- `0100_tvn36_override_cmds`는 open domain-command claim과 expected revision을 확인하는
+  author/revoke command를 추가했다. author는 superseded override를 revoke tombstone으로
+  보전하고 operator typed 값을 materialize하며, revoke는 locked provider base로만 복원한다.
+  runtime은 두 procedure 실행만 허용되고 direct override/base DML은 계속 금지된다.
 
 ## 2026-08-10 — T-VN-34C: n150 fresh destructive live gate 통과
 

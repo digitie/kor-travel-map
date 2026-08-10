@@ -155,6 +155,28 @@ async def test_tvn34_api_and_dagster_runtime_logins_pass_actual_catalog_prefligh
                         )
                     )
                 ) is True
+                assert (
+                    await connection.scalar(
+                        text(
+                            "SELECT has_function_privilege("
+                            "session_user, "
+                            "'feature.author_feature_field_overrides("
+                            "text,bigint,text,text,bigint,uuid,jsonb,jsonb)'::regprocedure, "
+                            "'EXECUTE')"
+                        )
+                    )
+                ) is True
+                assert (
+                    await connection.scalar(
+                        text(
+                            "SELECT has_function_privilege("
+                            "session_user, "
+                            "'feature.revoke_feature_field_overrides("
+                            "text,bigint,text,text,bigint,uuid,text[])'::regprocedure, "
+                            "'EXECUTE')"
+                        )
+                    )
+                ) is True
                 assert await connection.scalar(
                     text("SELECT count(*) FROM feature.public_features")
                 ) is not None

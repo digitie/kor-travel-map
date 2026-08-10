@@ -122,6 +122,18 @@ _RUNTIME_DB_PRIVILEGE_SQL = text(
         ) AS can_execute_provider_field_patch_procedure,
         has_function_privilege(
             session_user,
+            'feature.author_feature_field_overrides('
+            'text,bigint,text,text,bigint,uuid,jsonb,jsonb)'::regprocedure,
+            'EXECUTE'
+        ) AS can_execute_field_override_author_procedure,
+        has_function_privilege(
+            session_user,
+            'feature.revoke_feature_field_overrides('
+            'text,bigint,text,text,bigint,uuid,text[])'::regprocedure,
+            'EXECUTE'
+        ) AS can_execute_field_override_revoke_procedure,
+        has_function_privilege(
+            session_user,
             'feature.transition_admin_feature_state('
             'text,text,text,text,bigint,text,text,text)'::regprocedure,
             'EXECUTE'
@@ -153,6 +165,10 @@ _RUNTIME_DB_PRIVILEGE_SQL = text(
                     'feature.materialize_provider_feature_version(text)'::regprocedure,
                     'feature.apply_provider_feature_field_patch('
                     'text,bigint,text,text,bigint,jsonb,jsonb)'::regprocedure,
+                    'feature.author_feature_field_overrides('
+                    'text,bigint,text,text,bigint,uuid,jsonb,jsonb)'::regprocedure,
+                    'feature.revoke_feature_field_overrides('
+                    'text,bigint,text,text,bigint,uuid,text[])'::regprocedure,
                     'feature.transition_admin_feature_state('
                     'text,text,text,text,bigint,text,text,text)'::regprocedure,
                     'feature.reactivate_admin_feature_state('
@@ -292,6 +308,12 @@ def _runtime_db_privilege_problems(
         ),
         "can_execute_provider_field_patch_procedure": (
             "runtime login must EXECUTE apply_provider_feature_field_patch"
+        ),
+        "can_execute_field_override_author_procedure": (
+            "runtime login must EXECUTE author_feature_field_overrides"
+        ),
+        "can_execute_field_override_revoke_procedure": (
+            "runtime login must EXECUTE revoke_feature_field_overrides"
         ),
         "can_execute_admin_transition_procedure": (
             "runtime login must EXECUTE transition_admin_feature_state"
