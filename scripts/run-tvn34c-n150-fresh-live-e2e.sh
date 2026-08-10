@@ -606,8 +606,12 @@ run() {
   configure_map_network_isolation
   write_blocked
   trap on_exit EXIT
+  # `docker compose up`가 의존 service의 health condition을 병렬 target 기동에서
+  # 앞질러 bootstrap one-shot이 connection-refused로 끝난 n150 재현을 막는다.
+  # 먼저 fresh PostgreSQL만 healthy까지 대기한 다음 나머지 boot path를 기동한다.
+  compose_map up --detach --wait postgres
   compose_map up --detach --build --wait \
-    postgres db-role-bootstrap dagster-db-init rustfs rustfs-init dagster-storage-migrate api frontend dagster
+    db-role-bootstrap dagster-db-init rustfs rustfs-init dagster-storage-migrate api frontend dagster
   verify_map_schema
   seed_fresh_etl
   build_playwright_image
