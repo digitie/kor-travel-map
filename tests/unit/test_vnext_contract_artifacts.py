@@ -37,7 +37,7 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     "tvn33-reference-ownership-v1.sql": (
         "af0034829c90572d96f4184349b7374d8e38a12b5556a9dd7142c6582411c986"
     ),
-    "openapi-diff-v1.json": ("e83484886e8c3fe79470155b5cf04f206f18e25fb538d5d0c402514314d574d0"),
+    "openapi-diff-v1.json": ("fb546ac8e80060d817c2c1f5ac48f6f3a1f0c125c740884b1550f55f56647678"),
     "consumer-rollout-v1.json": (
         "573210a3949d78e3831f9581811f158cef8547328efea44d16cc6afb39b76c88"
     ),
@@ -114,6 +114,27 @@ def test_artifact_bytes_are_frozen() -> None:
         observed = hashlib.sha256((_CONTRACTS / name).read_bytes()).hexdigest()
         assert observed == expected, (
             f"{name} bytes drift — freeze 개정이면 상수를 {observed}로 갱신하라"
+        )
+
+
+def test_frozen_artifacts_have_no_crlf() -> None:
+    """동결 artifact에 CRLF가 섞이면 로컬 green이 CI green을 뜻하지 않는다.
+
+    ``.gitattributes``가 ``* text=auto eol=lf``라 git은 LF로 저장하고 CI는 LF를
+    checkout한다. 그런데 Windows에서 파일을 재생성하면 작업본에 CRLF가 남을 수 있고,
+    로컬 게이트 하네스는 **작업본을 그대로 tar로 복사**하므로 그 CRLF 바이트를 잰다.
+    그래서 상수를 작업본 기준으로 갱신하면 로컬은 통과하고 CI만 red가 된다 —
+    2026-08-11에 ``openapi-diff-v1.json``이 정확히 그렇게 통과했고(로컬 25/25 green)
+    CI의 unit 게이트가 세 파이썬 버전에서 모두 실패했다.
+
+    바이트를 동결하는 이상 그 바이트는 **커밋되는 바이트**여야 한다. CRLF 금지가
+    그 조건을 로컬에서 강제하는 가장 싼 방법이다.
+    """
+
+    for name in ARTIFACT_SHA256:
+        data = (_CONTRACTS / name).read_bytes()
+        assert b"\r\n" not in data, (
+            f"{name}에 CRLF가 있다 — git은 LF로 저장하므로 동결 sha가 CI와 갈린다"
         )
 
 

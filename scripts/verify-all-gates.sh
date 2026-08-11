@@ -22,6 +22,13 @@
 #
 # **여기서 재현 불가한 것**(로컬 하네스의 한계 — 반드시 인지하고 있어야 한다):
 #   - Python 3.11/3.12 매트릭스: 컨테이너는 3.13 하나다.
+#   - **작업본 바이트 ≠ 커밋 바이트**: 이 스크립트는 워크트리를 tar로 복사한다. CI는
+#     git checkout이다. `.gitattributes`가 `* text=auto eol=lf`라 git은 LF로 저장하는데
+#     Windows에서 파일을 재생성하면 작업본에 CRLF가 남고, 그 상태로 바이트 해시를
+#     동결하면 **로컬만 green**이 된다. 2026-08-11에 `openapi-diff-v1.json`이 정확히
+#     그렇게 통과했고 CI unit 게이트가 세 파이썬 버전에서 모두 red였다.
+#     `tests/unit/test_vnext_contract_artifacts.py::test_frozen_artifacts_have_no_crlf`가
+#     동결 artifact 축을 막지만, 바이트를 새로 동결할 때는 커밋될 바이트인지 직접 확인하라.
 #
 # `docker` CLI와 compose 플러그인은 호스트 것을 read-only로 마운트한다. 이미지에
 # CLI가 없어 `docker compose config`를 부르는 테스트 5건이 `FileNotFoundError`로
