@@ -564,6 +564,31 @@
         "0091_tvn33_cutover_fence"
       ],
       "revision": "0092_tvn33_offline_cleanup"
+    },
+    {
+      "down_revision": [
+        "0091_tvn33_cutover_fence"
+      ],
+      "revision": "0092_weather_current_summary"
+    },
+    {
+      "down_revision": [
+        "0092_weather_current_summary"
+      ],
+      "revision": "0093_price_current_summary"
+    },
+    {
+      "down_revision": [
+        "0093_price_current_summary"
+      ],
+      "revision": "0094_drop_weather_metric_series"
+    },
+    {
+      "down_revision": [
+        "0092_tvn33_offline_cleanup",
+        "0094_drop_weather_metric_series"
+      ],
+      "revision": "0095_tvn33_tvn38_head_merge"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

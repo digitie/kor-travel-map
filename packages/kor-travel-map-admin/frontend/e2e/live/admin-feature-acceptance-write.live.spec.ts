@@ -359,6 +359,10 @@ async function createOwnedPlace(
   if (RECOVERY_ONLY) {
     throw new Error("recovery-only는 Feature를 생성할 수 없습니다");
   }
+  // Browser 실패 증적은 의도적으로 HTTP body를 보존하지 않는다. 대신 create와
+  // review 승인을 분리해 기록하면, 안전한 4xx 코드만으로도 어느 DB command
+  // 경계가 실패했는지 재현 가능하다.
+  failureDetail = `create-${fixture.status}:submit`;
   const create = await browserFetch<ChangeResponse>(
     page,
     "/v1/admin/features",
@@ -384,6 +388,7 @@ async function createOwnedPlace(
   if (created.status !== "pending") {
     throw new Error("production review mode가 require_review가 아닙니다");
   }
+  failureDetail = `create-${fixture.status}:approve`;
   const approved = await approveOrReject(
     page,
     created.request_id,
@@ -393,6 +398,7 @@ async function createOwnedPlace(
   if (approved.data.request.status !== "applied") {
     throw new Error(`create ${fixture.status} 승인이 applied가 아닙니다`);
   }
+  failureDetail = `create-${fixture.status}:detail`;
   const detail = requireBody(
     await browserFetch<DetailResponse>(
       page,
