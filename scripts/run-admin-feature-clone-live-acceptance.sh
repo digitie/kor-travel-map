@@ -2974,6 +2974,13 @@ if [[ "$MODE" == "abort" ]]; then
   )"
   verify_checkpoint_dump "$RUNTIME_DIR/clone-checkpoint.json"
   remove_unreferenced_checkpoint_dumps
+  BASE_CLONE_CONTAINER_SHA256="$(
+    printf '%s' "$BASE_CLONE_CONTAINER_ID" | sha256sum | awk '{print $1}'
+  )"
+  BASE_CLONE_SYSTEM_SHA256="$(
+    printf '%s' "$(psql_value "SELECT system_identifier::text FROM pg_control_system()")" |
+      sha256sum | awk '{print $1}'
+  )"
   recover_checkpoint_quiescence
   recover_verification_database
   start_acceptance_login_fence

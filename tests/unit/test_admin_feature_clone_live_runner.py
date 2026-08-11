@@ -560,6 +560,22 @@ def test_runner_bootstraps_requested_snapshot_before_validating_mode() -> None:
     assert '"$MODE" == "abort"' in source
 
 
+def test_failed_run_abort_recreates_clone_identity_before_login_fence() -> None:
+    source = _RUNNER.read_text(encoding="utf-8")
+    abort_source = source.split('if [[ "$MODE" == "abort" ]]; then', maxsplit=1)[1]
+    abort_source = abort_source.split('if [[ "$MODE" == "recover" ]]; then', maxsplit=1)[0]
+
+    assert abort_source.index("BASE_CLONE_CONTAINER_SHA256") < abort_source.index(
+        "start_acceptance_login_fence"
+    )
+    assert abort_source.index("BASE_CLONE_SYSTEM_SHA256") < abort_source.index(
+        "start_acceptance_login_fence"
+    )
+    assert abort_source.index("finalize_resources") < abort_source.index(
+        "abandon-failed-run"
+    )
+
+
 def test_complete_accepts_bound_runtime_topic_revision_normalization(
     tmp_path: Path,
 ) -> None:
