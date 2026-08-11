@@ -651,6 +651,7 @@ def test_failed_run_abort_recreates_clone_identity_before_login_fence() -> None:
     assert abort_source.index("finalize_resources") < abort_source.index(
         "abandon-failed-run"
     )
+    assert '"direct-cleanup-running"' in abort_source
 
 
 def test_complete_accepts_bound_runtime_topic_revision_normalization(

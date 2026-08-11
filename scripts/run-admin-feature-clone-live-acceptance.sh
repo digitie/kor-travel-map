@@ -2981,6 +2981,8 @@ if [[ "$MODE" == "abort" ]]; then
   load_blocked
   blocked_source="$(state_helper read-blocked --path "$BLOCKED_FILE" --field source_commit)"
   [[ "$(state_helper read-blocked --path "$BLOCKED_FILE" --field phase)" == \
+      "direct-cleanup-running" ||
+     "$(state_helper read-blocked --path "$BLOCKED_FILE" --field phase)" == \
       "test-failed-restored" ||
      "$(state_helper read-blocked --path "$BLOCKED_FILE" --field phase)" == \
       "failed-resource-finalizing" ]] ||
