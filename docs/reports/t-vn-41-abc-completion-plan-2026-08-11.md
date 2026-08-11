@@ -48,19 +48,21 @@ enable한다.
 3. **C — paired pull relay/reconciliation**
    - Map service API의 exact `cache-target:command`, `read`, `claim`, `ack`, `nack`, `snapshot`,
      `restore-fence`, `recovery` scope와 OpenAPI generation 7을 재export한다.
-   - PinVi PR #444 (`458f396b16fe61c7d03430e2bf4cc249c36f9f72`)는 immutable inbox dedupe + target
+   - PinVi PR #444 (`3cadca75b7dda5badcbae49f05b5e91055149e5f`)는 immutable inbox dedupe + target
      tuple CAS + consumer checkpoint를 한 PinVi DB transaction으로 만들고, 그 성공 뒤에만 ACK한다.
      같은 PR은 sync disabled 상태에서 raw ETag/expected epoch/Idempotency-Key CAS를 수행하는
      `pinvi-cache-target-restore-fence` one-shot command를 추가한다. command는 POST 전 raw ETag/control
      tuple을 immutable local receipt에 기록해 Map commit 뒤 응답 유실에도 같은 key/body의 exact replay `200`을
-     완료하고, receipt와 재조회 stream의 `fenced` tuple을 대조하지만 ordinary writer를 열지 않는다.
+     완료한다. 동일 key의 병렬 실행이 Map `201`과 `200`을 각각 받아도 terminal payload·ETag가 같으면 먼저
+     기록된 durable receipt로 수렴하고, receipt와 재조회 stream의 `fenced` tuple을 대조하지만 ordinary writer를
+     열지 않는다.
      이 Map PR은 해당 구현을 중복하지 않고 clean PinVi worktree에서 command publisher, event consumer,
      sync worker 및 restore-fence regression을 실행해 Map contract compatibility를 확인한다. nack/dead-letter/
      replay와 strict per-stream prefix도 그 consumer의 불변식으로 유지한다.
    - fixed snapshot/Merkle reconciliation은 begin → writer backfill → seal → consumer completion
      순서를 지키며 checksum mismatch, duplicate, gap, stale restore epoch을 fail-closed한다.
    - Map `56f00e072a433bbe219909f5289d479ec16586d9`와 PinVi
-     `458f396b16fe61c7d03430e2bf4cc249c36f9f72`는 service OpenAPI SHA-256
+     `3cadca75b7dda5badcbae49f05b5e91055149e5f`는 service OpenAPI SHA-256
      `53da6a3a1194b9de715e80ed69e016ae15885b81d2909bf2d128773d64f8b2f7`로 paired receipt를
      고정한다. consumer enable은 config default off로 두며, n150 isolated evidence가 통과할 때만
      별도 operation으로 켠다.
