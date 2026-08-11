@@ -1147,11 +1147,11 @@ prepare_loopback_proxy_helper() {
   local proxy_path="$RUNTIME_DIR/c7-loopback-ui-proxy.mjs"
   if [[ -e "$proxy_path" || -L "$proxy_path" ]]; then
     [[ -f "$proxy_path" && ! -L "$proxy_path" ]] &&
-      [[ "$(stat -c '%u:%g:%a' -- "$proxy_path")" == "0:0:444" ]] &&
-      [[ "$(sha256sum "$proxy_path" | awk '{print $1}')" == "$(tar -xOf "$SOURCE_ARCHIVE" "$archive_member" | sha256sum | awk '{print $1}')" ]] ||
+      [[ "$(stat -c '%u:%g:%a' -- "$proxy_path")" == "0:0:444" ]] ||
       die "existing runtime loopback proxy is unsafe"
-    LOOPBACK_PROXY_HELPER="$proxy_path"
-    return
+    # 이전 recover tool이 남긴 root-owned helper는 실행하지 않는다. 현재 immutable
+    # archive의 동일 member로 교체해 source commit 간 retry도 fail-closed로 수렴한다.
+    rm -f -- "$proxy_path"
   fi
   local temporary_path
   temporary_path="$(mktemp "$RUNTIME_DIR/.c7-loopback-ui-proxy.XXXXXX")"
