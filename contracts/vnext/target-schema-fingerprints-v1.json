@@ -1,17 +1,17 @@
 {
   "artifact": "target-schema-fingerprints-v1",
   "owner": "T-VN-31A",
-  "description": "target-schema-v1.sql을 빈 PostGIS DB(x_extension 확장 사전 생성)에 적용한 뒤 H35 7 카테고리 catalog 질의(출처: src/kortravelmap/cli/_h35_catalog.py — schema-qualified relation 목록으로 적응)로 산출한 category별 canonical SHA-256. tests/integration/test_vnext_target_freeze.py가 실제 적용 직후 재계산해 drift를 fail-close한다.",
+  "description": "target-schema-v1.sql과 tvn33-reference-ownership-v1.sql을 이 순서로 빈 PostGIS DB(x_extension 확장 사전 생성)에 적용한 뒤 H35 7 카테고리 catalog 질의(출처: src/kortravelmap/cli/_h35_catalog.py — schema-qualified relation 목록으로 적응)로 산출한 category별 canonical SHA-256. tests/integration/test_vnext_target_freeze.py가 실제 적용 직후 재계산해 drift를 fail-close한다.",
   "environment": "postgis/postgis:16-3.5-alpine (PostgreSQL 16 / PostGIS 3.5)",
   "target_schema_sql_sha256": "e0ffcd25effbbda10d85c10a6a1e150133b062fcaefcd0135d6109c1bc155280",
-  "tvn33_reference_ownership_sql_sha256": "1be5cd9370d974a94adb2146947732f79d756ad3411e137d3846b33a5ba8e13a",
+  "tvn33_reference_ownership_sql_sha256": "377f6309adb602a481ab509b21d5ca8719e9deff8193c4af069c9fe9051ca3e5",
   "fingerprints": {
-    "columns": "9da11b67dc45b9b266a9394db33b0505d30d70d4ef6953fec4e015149713aba2",
-    "constraints": "54e465b3458472e3a02a6cc41069824a53169e6fd002dc2a1b2539b5c5ad1a18",
-    "functions": "139469bee0331ff88c216a66868a48650a9318f3594a7ce22dacbf3e5c3290e7",
-    "indexes": "8b47bcaa3cf7bfbe59dd552297625f85c894385a31b06984245e1aa6e6b1299a",
+    "columns": "459f31e95a023f4c37dadcc49a925ecd849664a90c586b142ea6daa6688c9075",
+    "constraints": "ba4e9ab74d2f5d5adcaab2a51fcb6ed350a552ebb0f8307446f103de7f3dcc79",
+    "functions": "8dc020990f02b4b1044de99648c85f9d2490be674322641a0ae04196ce577507",
+    "indexes": "84ed1c54118f64b407cb34a478082c74138756bdedb41dee2fbaee863cea9475",
     "relations": "4982e090cf1dc833303dc15d6c5607bd1539de293b145b34b25e0b24bb3db461",
-    "sequence": "7bc70df37bf9099f5804124715ca3c87d06fde7acf75a4ec8a834a295ca66ee0",
-    "triggers": "979ecc82be267cb569a26be5e9f965addbd17d167ffc24d5935359a84eaa64c7"
+    "sequence": "2cc57ba276ec60c030dd8ef8b0c3791d2942964ed589ad5f66125b9d3e083b1b",
+    "triggers": "9b470d8f28eb37b9058dcec2e65393d858bcdcfd04f0a9ea25d9118b0debff8f"
   }
 }

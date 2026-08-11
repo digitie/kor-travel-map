@@ -7,17 +7,20 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Final, cast
 
+import pytest
 from dagster import build_asset_context
 from kortravelmap.client import AsyncKorTravelMapClient
 from kortravelmap.core.feature_operation import ProviderDatasetOperationMembership
 
 from kortravelmap.dagster.assets import (
+    _exact_sync_membership,
     _record_batches,
     _record_feature_sync_success,
 )
 from kortravelmap.dagster.etl import AddressFindingObservationReceipt
 from kortravelmap.dagster.feature_operation_tracking import (
     FeatureOperationExecutionGuard,
+    FeatureOperationGuardUnavailable,
 )
 
 # T-VN-33: sync state 행은 provider/dataset label이 아니라
@@ -200,3 +203,76 @@ async def test_complete_nonempty_snapshot_receipt_closes_findings_once() -> None
     assert close_call["dataset_key"] == "places"
     assert close_call["run_id"] == "run-1"
     assert close_call["receipt"].permits_stale_close is True
+
+
+async def test_sync_membership_rejects_a_guard_without_operation_key() -> None:
+    """operation_key 없는 guard로는 sync-state 행을 고르지 않는다.
+
+    trigger/operation tag가 없는 run은 guard가 ``operation_key=None``으로 만들어진다
+    (``_guard_from_context_async``의 panel-only 경로). 그 guard로 계속 가면 남은
+    선택지가 provider/dataset label 역산뿐인데, 이 함수는 그 fallback을 두지 않기로
+    한 자리다 — 그러므로 조용히 진행하지 않고 죽어야 한다.
+    """
+    client = _SyncClient()
+    context = _context(client)
+    context.resources.feature_operation_guard = FeatureOperationExecutionGuard(
+        client=cast("AsyncKorTravelMapClient", client),
+        instance=None,
+        operation_key=None,
+        memberships=(),
+        dagster_run_id="run-1",
+        trigger_kind=None,
+    )
+
+    with pytest.raises(FeatureOperationGuardUnavailable) as excinfo:
+        await _exact_sync_membership(
+            context,  # type: ignore[arg-type]
+            client,  # type: ignore[arg-type]
+            boundary="feature_sync_state",
+            provider="demo",
+            dataset_key="places",
+        )
+
+    assert excinfo.value.reason == "operation_key_missing"
+    assert excinfo.value.boundary == "feature_sync_state"
+    assert client.sync_calls == []
+
+
+async def test_sync_membership_rejects_an_untyped_membership_resource() -> None:
+    """queue worker가 넘긴 membership resource는 **typed**여야 한다.
+
+    이 resource는 guard를 완전히 대체해 곧바로 cursor 대상 행이 된다. duck-typed
+    대역이 통과하면 triple이 아닌 값이 sync-state 기록 경로로 그대로 흘러간다 —
+    그래서 존재가 아니라 타입을 본다.
+    """
+    client = _SyncClient()
+    context = _context(client)
+    context.resources.feature_update_membership = SimpleNamespace(
+        provider_dataset_id=_MEMBERSHIP.provider_dataset_id,
+        sync_scope=_MEMBERSHIP.sync_scope,
+        operation_key=_MEMBERSHIP.operation_key,
+    )
+
+    with pytest.raises(FeatureOperationGuardUnavailable) as excinfo:
+        await _exact_sync_membership(
+            context,  # type: ignore[arg-type]
+            client,  # type: ignore[arg-type]
+            boundary="feature_sync_state",
+            provider="demo",
+            dataset_key="places",
+        )
+
+    assert excinfo.value.reason == "feature_update_membership_wrong_type"
+    # 대조: 같은 자리에 typed membership을 넣으면 그대로 통과한다 — 거부 사유가
+    # "타입"임을 못 박는다.
+    context.resources.feature_update_membership = _MEMBERSHIP
+    assert (
+        await _exact_sync_membership(
+            context,  # type: ignore[arg-type]
+            client,  # type: ignore[arg-type]
+            boundary="feature_sync_state",
+            provider="demo",
+            dataset_key="places",
+        )
+        == _MEMBERSHIP
+    )

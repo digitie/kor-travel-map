@@ -603,6 +603,68 @@ def test_canonicalize_feature_update_scope_rejects_noncanonical_contract(
         canonicalize_feature_update_scope(scope)
 
 
+@pytest.mark.parametrize(
+    "provider_dataset_id",
+    [0, -1, True, False, "17", 17.0],
+)
+def test_provider_dataset_scope_requires_positive_integer_surrogate(
+    provider_dataset_id: object,
+) -> None:
+    """surrogate 축이 0·음수·bool·문자열로 새면 canonicalize에서 죽어야 한다.
+
+    위 ``..._rejects_noncanonical_contract`` 표는 ``extra`` 키(=exact key set)만
+    지목하므로 이 검사 블록을 통째로 지워도 통과한다 — 그래서 별도로 고정한다.
+    """
+    with pytest.raises(ValueError, match="provider_dataset_id must be a positive integer"):
+        canonicalize_feature_update_scope(
+            {
+                "type": "provider_dataset",
+                "provider_dataset_id": provider_dataset_id,
+                "sync_scope": "dataset_wide",
+                "operation_key": "refresh_dataset_a",
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    "operation_key",
+    [" refresh_dataset_a", "refresh_dataset_a ", "\trefresh_dataset_a"],
+)
+def test_provider_dataset_scope_row_rejects_noncanonical_operation_key(
+    operation_key: str,
+) -> None:
+    """``ProviderDatasetScope``는 trim만 하고 넘어가지 않는다 — 원문이 canonical이어야 한다.
+
+    resolver가 돌려준 ``operation_key``가 그대로 request snapshot과 sync-state
+    write에 실린다. 여기서 조용히 정규화하면 DB의 canonical key와 저장된 key가
+    갈린다.
+    """
+    with pytest.raises(ValueError, match="operation_key must be canonical"):
+        ProviderDatasetScope(
+            "python-a-api",
+            "dataset-a",
+            1,
+            17,
+            "dataset_wide",
+            operation_key,
+        )
+
+
+@pytest.mark.parametrize("provider_dataset_id", [0, -1, True])
+def test_provider_dataset_scope_row_requires_positive_integer_surrogate(
+    provider_dataset_id: object,
+) -> None:
+    with pytest.raises(ValueError, match="provider_dataset_id must be a positive integer"):
+        ProviderDatasetScope(
+            "python-a-api",
+            "dataset-a",
+            1,
+            provider_dataset_id,  # type: ignore[arg-type]
+            "dataset_wide",
+            "refresh_dataset_a",
+        )
+
+
 def test_cache_target_scope_accepts_full_root_identity_length() -> None:
     target_key = "x" * 512
 

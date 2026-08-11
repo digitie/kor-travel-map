@@ -30,6 +30,12 @@ from dagster import (
     sensor,
 )
 
+from .feature_operation_tracking import (
+    FeatureOperationGuardUnavailable,
+    declared_execution_scopes,
+    resolve_run_execution_manifest,
+)
+
 if TYPE_CHECKING:
     from kortravelmap.client import AsyncKorTravelMapClient
 
@@ -449,13 +455,21 @@ async def _apply_run_record(
         raise FeatureOperationObservationError(
             f"operation run trigger를 해석할 수 없음: run_id={run.run_id}"
         )
-    memberships = await client.resolve_feature_operation_memberships(
-        operation_key=operation_key,
-    )
-    if not memberships:
-        raise FeatureOperationObservationError(
-            f"enabled canonical operation member가 없음: run_id={run.run_id}"
+    # selection은 run이 선언한 실행 manifest다 — operation의 실행 가능 scope 전체가
+    # 아니다. guard(실행 중)와 이 sensor(실행 밖)가 같은 tag에서 같은 함수로
+    # 유도해야 두 쪽이 서로 다른 selection을 ensure/reconcile에 넘겨 identity
+    # conflict를 내지 않는다.
+    try:
+        memberships = await resolve_run_execution_manifest(
+            client,
+            operation_key=operation_key,
+            declared=declared_execution_scopes(run.tags, boundary="reconcile_sensor"),
+            boundary="reconcile_sensor",
         )
+    except FeatureOperationGuardUnavailable as exc:
+        raise FeatureOperationObservationError(
+            f"run 실행 manifest를 해석할 수 없음: run_id={run.run_id} reason={exc.reason}"
+        ) from exc
     created_at = _aware_datetime(record.create_timestamp, name="Dagster create timestamp")
     started_at = _timestamp_datetime(record.start_time, name="Dagster start timestamp")
     finished_at = _timestamp_datetime(record.end_time, name="Dagster finish timestamp")

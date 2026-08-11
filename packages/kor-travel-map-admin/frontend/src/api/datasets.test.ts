@@ -61,6 +61,33 @@ const TARGET_CAPABILITY: OpsDatasetScopeRefreshCapability = {
   reason: null,
 };
 
+/**
+ * 서버가 "제출할 수 있는 sync scope가 없다"고 판정한 dataset의 payload.
+ *
+ * `ops_dataset_service._scope_refresh_capability`의 `not is_refreshable` 분기가
+ * 내는 값과 같다(enabled refresh operation은 있는데 `provider_dataset_operation_scopes`
+ * 행이 0개인 상태 — 스키마가 허용한다).
+ */
+const NO_SUBMITTABLE_SCOPE_CAPABILITY: OpsDatasetScopeRefreshCapability = {
+  supported: false,
+  selector: "none",
+  effect: "none",
+  default_sync_scope: "dataset_wide",
+  allowed_sync_scopes: [],
+  reason: "이 dataset의 refresh operation에 sync scope 선언이 없어 걸 대상이 없습니다.",
+};
+
+/** 같은 판정이지만 선언된 scope가 canonical이 아닌 경우(`external_system:*` 전용). */
+const EXTERNAL_ONLY_CAPABILITY: OpsDatasetScopeRefreshCapability = {
+  supported: false,
+  selector: "none",
+  effect: "none",
+  default_sync_scope: "dataset_wide",
+  allowed_sync_scopes: ["external_system:pinvi"],
+  reason:
+    "이 dataset의 refresh operation에 canonical sync scope(dataset_wide/target_grids) 선언이 없습니다.",
+};
+
 describe("ops datasets current REST contract", () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -241,6 +268,67 @@ describe("ops datasets scope capability", () => {
     expect(
       resolveDatasetRefreshScope(DATASET_WIDE_CAPABILITY, "stale_scope"),
     ).toMatchObject({ allowed: false });
+  });
+  it("제출 가능한 scope가 없는 dataset은 갱신을 허용하지 않는다", () => {
+    // 반환값 전체를 단언한다 — `reason` 문자열이 어딘가에 존재하는지가 아니라,
+    // **이 함수가 무엇을 돌려주는지**가 버튼 활성화를 결정한다.
+    expect(
+      resolveDatasetRefreshScope(NO_SUBMITTABLE_SCOPE_CAPABILITY, "dataset_wide"),
+    ).toEqual({
+      allowed: false,
+      reason: NO_SUBMITTABLE_SCOPE_CAPABILITY.reason,
+    });
+    expect(
+      resolveDatasetRefreshScope(EXTERNAL_ONLY_CAPABILITY, "external_system:pinvi"),
+    ).toEqual({ allowed: false, reason: EXTERNAL_ONLY_CAPABILITY.reason });
+    // scope를 무엇으로 고르든 결과가 같다 — 고를 수 있는 것이 없기 때문이다.
+    expect(
+      resolveDatasetRefreshScope(NO_SUBMITTABLE_SCOPE_CAPABILITY, "target_grids"),
+    ).toMatchObject({ allowed: false });
+    // `supported: true`가 함께 와도 fail-closed다(모순 payload).
+    expect(
+      resolveDatasetRefreshScope(
+        { ...NO_SUBMITTABLE_SCOPE_CAPABILITY, supported: true },
+        "dataset_wide",
+      ),
+    ).toMatchObject({ allowed: false });
+    // reason이 없으면 이 함수가 사유를 채운다 — 화면이 사유 없는 비활성 버튼을
+    // 보이지 않게 한다.
+    expect(
+      resolveDatasetRefreshScope(
+        { ...NO_SUBMITTABLE_SCOPE_CAPABILITY, reason: null },
+        "dataset_wide",
+      ),
+    ).toEqual({
+      allowed: false,
+      reason: "이 dataset에 걸 수 있는 갱신 범위가 없습니다.",
+    });
+  });
+  it("effect 축이 없으면 갱신 불가 상태를 구분할 수단이 없다", () => {
+    // `effect`를 뺀 나머지 필드는 정상 dataset-wide 계약과 **완전히 같다**. 서버가
+    // `is_refreshable=false`만 내려도 이 함수는 그것을 읽지 않으므로 허용으로
+    // 판정한다 — 아래가 그 사실의 실측이고, `effect: "none"`을 계약에 넣은 이유다.
+    const withoutEffectAxis: OpsDatasetScopeRefreshCapability = {
+      ...NO_SUBMITTABLE_SCOPE_CAPABILITY,
+      effect: "dataset_wide",
+    };
+    expect(resolveDatasetRefreshScope(withoutEffectAxis, "dataset_wide")).toEqual({
+      allowed: true,
+      syncScope: "dataset_wide",
+    });
+    // 이 함수가 허용 판정에 읽는 필드는 `effect`를 빼면 네 개다. 두 상태가 그 네 개를
+    // 모두 같은 값으로 낸다는 것이 위 판정의 원인이다.
+    const gateInputsWithoutEffect = (
+      capability: OpsDatasetScopeRefreshCapability,
+    ) => ({
+      supported: capability.supported,
+      selector: capability.selector,
+      default_sync_scope: capability.default_sync_scope,
+      allowed_sync_scopes: capability.allowed_sync_scopes,
+    });
+    expect(gateInputsWithoutEffect(NO_SUBMITTABLE_SCOPE_CAPABILITY)).toEqual(
+      gateInputsWithoutEffect(DATASET_WIDE_CAPABILITY),
+    );
   });
 });
 

@@ -1380,3 +1380,50 @@ async def test_area_feature_geom_persists(migrated_session: AsyncSession) -> Non
     assert got is not None
     assert got["kind"] == "area"
     assert got["lon"] is not None  # centroid
+
+
+async def test_resolve_active_provider_dataset_id_refuses_inactive_catalog_rows(
+    migrated_session: AsyncSession,
+) -> None:
+    """비활성 dataset은 surrogate를 내주지 않고 ``LookupError``다.
+
+    이 해석기는 문자열 pair 경계(공개 facade·admin 입력·provider 변환)에서 쓰는
+    유일한 진입점이다. ``AND is_active``가 빠지면 비활성 dataset의 surrogate가
+    그대로 write 경로로 흘러가고, 첫 write가 ``ck_provider_dataset_active_write``
+    로 죽을 때는 어느 pair가 문제인지 알 수 없다 — 이 함수 docstring이 방지 목적
+    으로 명시한 시나리오다.
+    """
+    bundle = await _bundle("FEST-REPO-ACTIVE-GUARD")
+    provider = bundle.source_record.provider
+    dataset_key = bundle.source_record.dataset_key
+
+    provider_dataset_id = await feature_repo.resolve_active_provider_dataset_id(
+        migrated_session, provider=provider, dataset_key=dataset_key
+    )
+    assert provider_dataset_id > 0
+    # ``lock=True`` 분기도 같은 술어를 쓴다.
+    assert (
+        await feature_repo.resolve_active_provider_dataset_id(
+            migrated_session, provider=provider, dataset_key=dataset_key, lock=True
+        )
+        == provider_dataset_id
+    )
+
+    result = await migrated_session.execute(
+        text(
+            """
+            UPDATE provider_sync.provider_datasets
+            SET is_active = false
+            WHERE provider_dataset_id = :provider_dataset_id
+            """
+        ),
+        {"provider_dataset_id": provider_dataset_id},
+    )
+    assert result.rowcount == 1
+    await migrated_session.flush()
+
+    for lock in (False, True):
+        with pytest.raises(LookupError, match="no active provider dataset is seeded"):
+            await feature_repo.resolve_active_provider_dataset_id(
+                migrated_session, provider=provider, dataset_key=dataset_key, lock=lock
+            )

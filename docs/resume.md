@@ -7,7 +7,7 @@
 Playwright e2e(로컬·CI 어디에도 없다 — 이번에 그 사실을 명시했다).
 
 - **8라운드는 리뷰어 둘이 독립으로 같은 BLOCKER를 찍었다**: `null === ""`로
-  catalog 전용 dataset 17~18개의 상세가 통째로 렌더되지 않았고, 화면이 서버와
+  catalog 전용 dataset의 상세가 통째로 렌더되지 않았고, 화면이 서버와
   정반대(`canonical`인데 "잔존 행")를 말했다. TypeScript도 e2e 픽스처도 못 잡는
   자리였다 — 픽스처에 `operation_key: null` 축을 넣어 못 박았다.
 - **vitest 36파일 285케이스가 어느 게이트에도 없었다.** CI·로컬 둘 다에 넣었고,
@@ -84,7 +84,7 @@ Playwright e2e(로컬·CI 어디에도 없다 — 이번에 그 사실을 명시
 
 **게이트 재작성이 실제로 잡은 것**(구 스크립트는 하나도 못 봤다):
 - branch-caused ESLint red 2건
-- `operation_key=null` 행 상세가 **422**가 되는 신규 회귀(74개 dataset 중 17개).
+- `operation_key=null` 행 상세가 **422**가 되는 신규 회귀(그 행은 seed에 실재한다).
   직전 커밋이 프론트에서 고친 것을 그 다음 커밋이 서버 `min_length=1`로 다시 깨뜨렸다.
 - **기능 손실 하나** — MOIS 사전점검 경고가 통째로 사라져 있었다. 타입체크도
   테스트도 못 잡는다(아무도 안 쓰는 export가 남을 뿐이라 컴파일은 통과한다).

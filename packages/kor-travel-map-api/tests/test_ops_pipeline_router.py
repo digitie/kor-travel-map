@@ -1427,6 +1427,72 @@ def test_executions_list_scope_requires_provider_dataset_id(client: TestClient) 
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
+    "path",
+    ["/v1/ops/pipeline/executions", "/v1/ops/pipeline/events"],
+)
+def test_membership_filter_rejects_operation_key_without_provider_dataset_id(
+    client: TestClient,
+    path: str,
+) -> None:
+    """``operation_key``만 준 필터는 무엇의 operation인지 정해지지 않는다.
+
+    감사 변이 스윕(A-5)은 이 raise를 ``pass``로 바꿔도 api 게이트가 통과한다고 보고했다 —
+    dataset 없이 operation만 준 필터가 조용히 통과해 **전체 목록**을 그 필터의 결과라고
+    답했다. 같은 변이를 다시 심어 이 테스트가 잡는 것을 확인했다. 두 목록 라우트가 같은
+    헬퍼를 공유하므로 둘 다 건다.
+    """
+    response = client.get(
+        path, params={"operation_key": "feature_place_mcst_culture_job"}
+    )
+
+    assert response.status_code == 422
+    assert response.headers["content-type"].startswith("application/problem+json")
+    assert "operation_key requires provider_dataset_id" in response.text
+
+
+@pytest.mark.unit
+def test_membership_filter_rejects_nonpositive_provider_dataset_id() -> None:
+    """0·음수 dataset id 거부 축.
+
+    라우트 쪽 ``Query(ge=1)``이 HTTP 경계에서 먼저 막으므로 이 분기는 직접 호출로만
+    닿는다 — 그래서 두 층을 각각 단언한다(헬퍼를 다른 곳에서 부르면 Query 검증이 없다).
+    """
+    from kortravelmap.api.routers.ops_pipeline import _canonical_dataset_filter
+
+    with pytest.raises(ValueError, match="provider_dataset_id must be greater than 0"):
+        _canonical_dataset_filter(
+            provider_dataset_id=0,
+            sync_scope="dataset_wide",
+            operation_key=None,
+        )
+    # 정상 입력은 canonical scope를 그대로 돌려준다(대조군).
+    assert (
+        _canonical_dataset_filter(
+            provider_dataset_id=1,
+            sync_scope="dataset_wide",
+            operation_key="feature_place_mcst_culture_job",
+        )
+        == "dataset_wide"
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "path",
+    ["/v1/ops/pipeline/executions", "/v1/ops/pipeline/events"],
+)
+def test_membership_filter_rejects_nonpositive_dataset_id_at_http_boundary(
+    client: TestClient,
+    path: str,
+) -> None:
+    response = client.get(path, params={"provider_dataset_id": 0})
+
+    assert response.status_code == 422
+    assert response.headers["content-type"].startswith("application/problem+json")
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
     "params",
     [
         {"sync_scope": "dataset_wide"},

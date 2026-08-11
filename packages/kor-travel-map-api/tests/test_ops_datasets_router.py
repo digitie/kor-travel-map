@@ -1793,3 +1793,227 @@ def test_freshness_unknown_without_explicit_sla_and_disabled_precedes_never_run(
     assert due.state == "overdue"
     assert due.is_overdue is True
     assert due.overdue_by_seconds == 0
+
+
+def _membership_catalog_entry(
+    *,
+    provider_dataset_id: int = 42,
+    provider: str = "python-kma-api",
+    dataset_key: str = "kma_short_forecast",
+    is_active: bool = True,
+) -> ProviderDatasetCatalogEntry:
+    """형제 refresh operation을 가진 dataset.
+
+    ``pk_provider_dataset_operation_scopes``가 triple이므로 한 dataset의 한 scope에
+    operation이 여럿 결박될 수 있다(0091이 pair PK를 승격한 명시 목적). 그 모양을 만드는
+    fixture가 이 파일에 없어서 membership 게이트 축이 무방비였다.
+    """
+    return ProviderDatasetCatalogEntry(
+        provider_dataset_id=provider_dataset_id,
+        provider=provider,
+        dataset_key=dataset_key,
+        display_name=dataset_key,
+        source_kind="openapi",
+        is_active=is_active,
+        capabilities={},
+        operations=(
+            ProviderDatasetOperation(
+                operation_key="fixture_preview",
+                operation_kind="preview",
+                is_enabled=True,
+                config={"handler": "fixture"},
+                sync_scopes=(),
+            ),
+            ProviderDatasetOperation(
+                operation_key="op_alpha",
+                operation_kind="refresh",
+                is_enabled=True,
+                config={},
+                sync_scopes=("dataset_wide",),
+            ),
+            ProviderDatasetOperation(
+                operation_key="op_beta",
+                operation_kind="refresh",
+                is_enabled=True,
+                config={},
+                sync_scopes=("target_grids",),
+            ),
+            ProviderDatasetOperation(
+                operation_key="op_disabled",
+                operation_kind="refresh",
+                is_enabled=False,
+                config={},
+                sync_scopes=("dataset_wide",),
+            ),
+        ),
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("operation_key", "expected_status"),
+    [
+        # 실재하는 membership triple — 통과한다.
+        ("op_alpha", 200),
+        # 같은 dataset의 형제 operation이지만 이 scope에는 결박돼 있지 않다.
+        ("op_beta", 404),
+        # 비활성 operation은 실행 membership이 아니다.
+        ("op_disabled", 404),
+        # 카탈로그에 없는 operation.
+        ("op_missing", 404),
+    ],
+)
+def test_preview_operation_key_must_name_a_catalog_membership(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    operation_key: str,
+    expected_status: int,
+) -> None:
+    """``operation_key`` 축이 실제로 좁히는지 고정한다.
+
+    감사 변이 스윕(A-4)은 이 게이트를 ``if False:``로 바꿔도 api 게이트가 통과한다고
+    보고했다 — 바로 위 ``allowed_preview_scopes`` 게이트(scope 축)만 회귀가 있었고
+    operation 축은 무방비였다. 콘솔이 형제 operation을 지목해도 서버가 조용히 무시하던
+    상태다. 같은 변이를 다시 심어 이 테스트가 잡는 것을 확인했다.
+    """
+    from kortravelmap.api.routers import ops_datasets as router_module
+
+    async def _catalog(*_args: object) -> tuple[ProviderDatasetCatalogEntry, ...]:
+        return (_membership_catalog_entry(),)
+
+    async def _preview(
+        actual_provider: str,
+        actual_dataset_key: str,
+        *,
+        max_items: int,
+    ) -> object:
+        return SimpleNamespace(
+            provider=actual_provider,
+            dataset=actual_dataset_key,
+            variant="fixture",
+            description="membership gate proof",
+            items=(),
+            total_items=0,
+            truncated=False,
+            max_items=max_items,
+        )
+
+    monkeypatch.setattr(router_module, "list_provider_dataset_catalog", _catalog)
+    monkeypatch.setattr(router_module, "run_dataset_fixture_preview", _preview)
+
+    response = client.post(
+        "/v1/ops/datasets/42/preview",
+        params={"sync_scope": "dataset_wide", "operation_key": operation_key},
+        json={"source": "fixture", "max_items": 1},
+    )
+
+    assert response.status_code == expected_status, response.text
+    if expected_status == 404:
+        assert "등록되지 않은 dataset membership" in response.json()["detail"]
+    else:
+        assert response.json()["data"]["operation_key"] == operation_key
+
+
+@pytest.mark.unit
+def test_inactive_dataset_policy_mutation_is_409_before_any_write(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """비활성 dataset의 정책 PUT은 typed 409이고 write까지 가지 않는다.
+
+    DB 트리거(``ck_provider_dataset_active_write``)가 이미 같은 규칙을 강제하므로,
+    가드가 없으면 catch-all이 이 상태를 **500 INTERNAL_ERROR**로 바꾼다. 이 브랜치가
+    넣은 가드인데 서비스·라우터 양쪽 분기가 한 번도 실행되지 않았다.
+    """
+    from kortravelmap.api import ops_dataset_service as service
+
+    async def _catalog(*_args: object, **_kwargs: object) -> tuple[
+        ProviderDatasetCatalogEntry, ...
+    ]:
+        return (_membership_catalog_entry(is_active=False),)
+
+    async def _must_not_write(*_args: object, **_kwargs: object) -> ProviderRefreshPolicy:
+        raise AssertionError("비활성 dataset에는 정책 write가 시도되면 안 된다")
+
+    monkeypatch.setattr(service, "list_provider_dataset_catalog", _catalog)
+    monkeypatch.setattr(service, "upsert_provider_refresh_policy", _must_not_write)
+
+    response = client.put(
+        "/v1/ops/datasets/refresh-policy",
+        params={"provider_dataset_id": 42},
+        json={
+            "expected_revision": "1",
+            "source_kind": "openapi",
+            "stale_after_minutes": 60,
+        },
+    )
+
+    assert response.status_code == 409, response.text
+    body = response.json()
+    # orphan과 **다른 code**여야 한다 — 운영자가 취할 조치가 정반대다.
+    assert body["code"] == "INACTIVE_DATASET_MUTATION_DISABLED"
+    assert body["details"]["mutation_disabled_reason"] == "provider_dataset_inactive"
+
+
+@pytest.mark.unit
+def test_active_dataset_policy_mutation_reaches_the_repo(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """위 가드의 대조군 — 활성 dataset은 그대로 write까지 간다.
+
+    이것이 없으면 ``if not entry.is_active``를 ``if True``로 바꿔도 통과한다.
+    """
+    from kortravelmap.api import ops_dataset_service as service
+
+    calls: list[int] = []
+
+    async def _catalog(*_args: object, **_kwargs: object) -> tuple[
+        ProviderDatasetCatalogEntry, ...
+    ]:
+        return (_membership_catalog_entry(is_active=True),)
+
+    async def _upsert(*_args: object, **kwargs: object) -> ProviderRefreshPolicy:
+        calls.append(int(kwargs["provider_dataset_id"]))
+        return _policy(provider_dataset_id=42)
+
+    monkeypatch.setattr(service, "list_provider_dataset_catalog", _catalog)
+    monkeypatch.setattr(service, "upsert_provider_refresh_policy", _upsert)
+
+    response = client.put(
+        "/v1/ops/datasets/refresh-policy",
+        params={"provider_dataset_id": 42},
+        json={
+            "expected_revision": "1",
+            "source_kind": "openapi",
+            "stale_after_minutes": 60,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert calls == [42]
+
+
+@pytest.mark.unit
+def test_unknown_dataset_policy_mutation_is_404(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """카탈로그에 없는 id는 409가 아니라 404다(활성 가드보다 앞선 분기)."""
+    from kortravelmap.api import ops_dataset_service as service
+
+    async def _catalog(*_args: object, **_kwargs: object) -> tuple[
+        ProviderDatasetCatalogEntry, ...
+    ]:
+        return (_membership_catalog_entry(provider_dataset_id=41),)
+
+    monkeypatch.setattr(service, "list_provider_dataset_catalog", _catalog)
+
+    response = client.put(
+        "/v1/ops/datasets/refresh-policy",
+        params={"provider_dataset_id": 42},
+        json={
+            "expected_revision": "1",
+            "source_kind": "openapi",
+            "stale_after_minutes": 60,
+        },
+    )
+
+    assert response.status_code == 404, response.text

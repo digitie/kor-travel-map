@@ -215,17 +215,56 @@ def _preview_capability(
     )
 
 
+def _unrefreshable_reason(entry: ProviderDatasetCatalogEntry) -> str:
+    """``is_refreshable=false``의 **실제 원인**을 그대로 문장으로 만든다.
+
+    세 원인이 각각 다른 조치를 요구한다(dataset 활성화 / operation 등록 / scope 행
+    등록). 한 문장으로 뭉치면 화면은 틀린 조치를 안내한다.
+    """
+    if not entry.is_active:
+        return "비활성 dataset이라 갱신할 수 없습니다."
+    if not entry.enabled_refresh_operations:
+        return "이 dataset에는 실행 가능한 refresh runner가 없습니다."
+    return "이 dataset의 refresh operation에 sync scope 선언이 없어 걸 대상이 없습니다."
+
+
 def _scope_refresh_capability(
     entry: ProviderDatasetCatalogEntry,
 ) -> OpsDatasetScopeRefreshCapability:
+    # ``effect="none"``은 "이 capability로는 어떤 sync scope도 제출할 수 없다"는 뜻이다.
+    # 앞 판은 이 상태에도 ``effect="dataset_wide"``를 냈고, 그러면 payload가 **정상
+    # dataset-wide capability와 ``reason`` 문자열 하나만** 달라진다. 프론트 게이트
+    # (`frontend/src/api/datasets.ts` `resolveDatasetRefreshScope`)는 허용 경로에서
+    # ``reason``을 읽지 않으므로 두 상태를 구분할 수단이 아예 없었다 — 갱신 불가
+    # dataset에도 ``{allowed: true}``를 돌려줬다.
     if not entry.is_refreshable:
         return OpsDatasetScopeRefreshCapability(
             supported=False,
             selector="none",
-            effect="dataset_wide",
-            default_sync_scope="dataset_wide",
-            allowed_sync_scopes=[],
-            reason="이 dataset에는 실행 가능한 refresh runner가 없습니다.",
+            effect="none",
+            default_sync_scope=DATASET_WIDE_SYNC_SCOPE,
+            # 선언된 것이 있다면(예: 비활성 dataset의 잔존 scope) 그대로 보여 준다.
+            # 운영자가 "왜 갱신이 막혔는지"를 이 목록으로 판단한다.
+            allowed_sync_scopes=list(entry.refresh_scopes),
+            reason=_unrefreshable_reason(entry),
+        )
+    if not entry.declares_default_refresh_scope:
+        # enabled refresh operation이 scope를 선언하긴 했는데 그것이 canonical scope가
+        # 아닌 상태다(``external_system:*`` 뿐). 스키마가 허용하고
+        # ``ProviderDatasetCatalogEntry.default_refresh_scope``가 표시용으로
+        # ``dataset_wide``로 degrade하는 상태이므로, 그 degrade를 **행 단위로 드러낸다** —
+        # 아래 분기의 "전체 dataset 단위로만 갱신합니다"를 그대로 내면 화면은 선언되지도
+        # 않은 dataset_wide 갱신이 가능하다고 읽는다.
+        return OpsDatasetScopeRefreshCapability(
+            supported=False,
+            selector="none",
+            effect="none",
+            default_sync_scope=DATASET_WIDE_SYNC_SCOPE,
+            allowed_sync_scopes=list(entry.refresh_scopes),
+            reason=(
+                "이 dataset의 refresh operation에 canonical sync scope"
+                "(dataset_wide/target_grids) 선언이 없습니다."
+            ),
         )
     if not entry.supports_targeted_refresh:
         return OpsDatasetScopeRefreshCapability(
@@ -266,8 +305,11 @@ def _catalog_state_memberships(
     행을 만들면 같은 scope를 공유하는 형제 operation이 한 행으로 접힌다. 여기서는
     접지 않고 operation별로 편다.
 
-    refresh operation이 하나도 없는 dataset(실측 74개 중 18개)은 결박할 실행
-    identity가 없으므로 ``operation_key=None``인 catalog 전용 행 하나를 낸다.
+    refresh operation이 하나도 없는 dataset은 결박할 실행 identity가 없으므로
+    ``operation_key=None``인 catalog 전용 행 하나를 낸다. 그런 dataset은 seed에 실재하며
+    (``tests/integration/test_provider_catalog.py``가 alembic head DB에서 단언한다),
+    개수는 DB마다 다르다 — 0089가 legacy pair를 harvest하므로 개발/프로덕션 DB가
+    seed-only DB보다 많다. 그래서 여기에는 개수를 박지 않는다.
     """
     if not entry.is_refreshable:
         return ((DATASET_WIDE_SYNC_SCOPE, None),)
@@ -278,12 +320,11 @@ def _catalog_state_memberships(
             for sync_scope in operation.sync_scopes
         )
     )
-    # operation은 있는데 scope 행이 하나도 없으면 위 표현식은 **빈 튜플**이다.
-    # 그 상태로 두면 state까지 없는 dataset이 그리드에서 행 자체가 사라져,
-    # catalog 존재도 integrity issue도 정책도 보이지 않는다. DB는 이 상태를
-    # 허용한다 — ``provider_dataset_operation_scopes``에 "operation당 최소 1행"
-    # 제약이 없어 scope 행을 지우기만 하면 도달한다. 바로 위 분기가 같은 상황에
-    # 자리표시자를 내주므로 이쪽만 fail-open인 것은 설계 누락이다.
+    # ``is_refreshable``이 이미 "enabled refresh operation이 scope를 하나 이상 선언"을
+    # 요구하므로 여기서 ``memberships``가 비는 경로는 지금 없다. 그래도 자리표시자를
+    # 남긴다 — 두 판정이 갈라지면 그리드에서 **행 자체가 사라져** catalog 존재도
+    # integrity issue도 정책도 보이지 않게 되고, 그 실패는 화면에 아무 흔적을 남기지
+    # 않는다.
     return memberships or ((DATASET_WIDE_SYNC_SCOPE, None),)
 
 

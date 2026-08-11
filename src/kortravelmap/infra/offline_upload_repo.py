@@ -20,6 +20,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, Final
 
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 
 from kortravelmap.core.offline_upload_states import (
     OFFLINE_UPLOAD_DELETABLE_STATES,
@@ -30,6 +31,7 @@ from kortravelmap.core.offline_upload_states import (
     OFFLINE_UPLOAD_VALIDATION_FINISH_SOURCE_STATES,
     OFFLINE_UPLOAD_VALIDATION_FINISH_STATES,
 )
+from kortravelmap.infra.feature_update_active_repo import _driver_constraint_identity
 from kortravelmap.infra.jobs_repo import (
     ImportJobDatasetTarget,
     start_provider_dataset_import_job,
@@ -39,6 +41,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
 __all__ = [
+    "INACTIVE_DATASET_MEMBERSHIP_CONSTRAINTS",
     "OfflineUploadScopeOperationUnresolved",
     "OfflineUpload",
     "OfflineUploadPage",
@@ -50,6 +53,7 @@ __all__ = [
     "finish_offline_upload_validation",
     "get_offline_upload",
     "get_offline_upload_by_checksum",
+    "is_inactive_dataset_membership_violation",
     "list_offline_uploads",
     "mark_offline_upload_loading",
     "mark_offline_upload_validating",
@@ -57,7 +61,44 @@ __all__ = [
     "reserve_offline_upload",
     "reserve_offline_upload_delete",
     "reserve_offline_upload_load",
+    "resolve_offline_upload_operation_key",
 ]
+
+# 0091이 만든 활성 가드가 비활성 dataset/disabled operation 앞에서 쓰는 두
+# constraint 이름. offline upload 한 요청이 두 이름을 모두 볼 수 있다:
+# ``ops.offline_uploads`` 자신의 가드는 ``ck_provider_dataset_scope_active_write``를,
+# 같은 요청이 만드는 ``ops.import_job_datasets`` membership 행의 가드
+# (``reject_inactive_import_job_dataset_membership``)는
+# ``ck_provider_dataset_active_write``를 쓴다. 후자가 먼저 터지므로 둘 다 봐야 한다.
+INACTIVE_DATASET_MEMBERSHIP_CONSTRAINTS: Final[frozenset[str]] = frozenset(
+    {
+        "ck_provider_dataset_active_write",
+        "ck_provider_dataset_scope_active_write",
+    }
+)
+
+
+def is_inactive_dataset_membership_violation(exc: BaseException) -> bool:
+    """비활성 membership 가드의 ``23514``만 driver metadata로 판정한다.
+
+    문자열 매칭이 아니라 SQLSTATE + constraint 이름으로 좁힌다 — 같은 예외 타입에
+    실려 오는 다른 CHECK 위반(예: ``ck_offline_uploads_status``)을 상태 오류로
+    오분류하면 진짜 버그가 4xx로 숨는다.
+    """
+
+    current: BaseException | None = exc
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, IntegrityError):
+            sqlstate, constraint_name = _driver_constraint_identity(current)
+            if (
+                sqlstate == "23514"
+                and constraint_name in INACTIVE_DATASET_MEMBERSHIP_CONSTRAINTS
+            ):
+                return True
+        current = current.__cause__ or current.__context__
+    return False
 
 _RETURN_COLUMNS: Final[str] = (
     "upload_id, provider_dataset_id, sync_scope, operation_key, original_filename, "
@@ -124,9 +165,10 @@ class OfflineUploadPage:
 class OfflineUploadScopeOperationUnresolved(ValueError):
     """scope가 정확히 하나의 operation으로 해석되지 않는다.
 
-    도달하는 경우는 두 가지이고 **0개 쪽이 흔하다**: 실측 74개 dataset 중 18개가
-    ``provider_dataset_operation_scopes`` 행을 하나도 갖지 않는다(refresh operation이
-    없는 dataset). 2개 이상인 경우는 현재 카탈로그에 0건이다.
+    도달하는 경우는 두 가지다: 활성 후보가 **0개**(scope 행이 없거나, 있어도
+    operation이 disabled·dataset이 inactive라 후보에서 빠짐)이거나 **2개 이상**이다.
+    어느 쪽이 얼마나 흔한지는 카탈로그 상태에 달렸고 배포된 DB마다 다르다 — 그래서
+    이 파일에는 그 분포를 수치로 박지 않는다.
 
     호출자가 운영자에게 무엇을 고쳐야 하는지 말할 수 있도록 개수를 들고 간다 —
     이 값이 없으면 라우터가 "알 수 없는 오류"밖에 못 낸다.
@@ -235,7 +277,7 @@ INSERT INTO ops.offline_uploads (
     :checksum_sha256, :detected_format, :detected_encoding, 'uploading',
     :created_by
 )
-ON CONFLICT (provider_dataset_id, sync_scope, checksum_sha256) DO NOTHING
+ON CONFLICT (provider_dataset_id, sync_scope, operation_key, checksum_sha256) DO NOTHING
 RETURNING {_RETURN_COLUMNS}
 """
 
@@ -252,16 +294,19 @@ WHERE upload_id = :upload_id
 FOR UPDATE
 """
 
-# 멱등 키는 계약대로 3열이다 — ``uq_offline_uploads_dataset_scope_checksum``.
-# 그래서 이 read는 "여러 후보 중 최신 하나"가 아니라 **그 unique 제약이 가리키는
-# 정확히 그 행**을 읽는다. ``ORDER BY ... LIMIT 1``을 두면 제약이 바뀌거나 사라져도
-# 임의의 행을 조용히 골라 409가 엉뚱한 upload/operation을 가리키게 된다. 정렬을 빼고
-# ``one_or_none()``으로 받아 그런 상태는 조용히 넘어가지 않고 드러나게 한다.
+# 멱등 키는 identity triple + checksum 4열이다 —
+# ``uq_offline_uploads_dataset_scope_checksum``(alembic 0092). 이 read는 "여러 후보 중
+# 최신 하나"가 아니라 **그 unique 제약이 가리키는 정확히 그 행**을 읽는다. 그래서
+# ``operation_key``까지 술어에 든다: 빼면 형제 operation에 결박된 행까지 걸려
+# ``one_or_none()``이 터지거나(중복) 409가 엉뚱한 upload를 가리킨다.
+# ``ORDER BY ... LIMIT 1``을 두면 제약이 바뀌거나 사라져도 임의의 행을 조용히 골라
+# 같은 오작동을 숨긴다. 정렬을 빼고 ``one_or_none()``으로 받아 드러나게 한다.
 _GET_BY_CHECKSUM_SQL: Final[str] = f"""
 SELECT {_RETURN_COLUMNS}
 FROM ops.offline_uploads
 WHERE provider_dataset_id = :provider_dataset_id
   AND sync_scope = :sync_scope
+  AND operation_key = :operation_key
   AND checksum_sha256 = :checksum_sha256
 """
 
@@ -404,7 +449,7 @@ async def create_offline_upload(
     created_by: str | None = None,
 ) -> OfflineUpload:
     """업로드 메타데이터를 생성한다. commit은 호출자 책임."""
-    operation_key = await _resolve_scope_operation_key(
+    operation_key = await resolve_offline_upload_operation_key(
         session, provider_dataset_id=provider_dataset_id, sync_scope=sync_scope
     )
     result = await session.execute(
@@ -444,7 +489,7 @@ ORDER BY scope.operation_key
 """
 
 
-async def _resolve_scope_operation_key(
+async def resolve_offline_upload_operation_key(
     session: AsyncSession,
     *,
     provider_dataset_id: int,
@@ -456,16 +501,27 @@ async def _resolve_scope_operation_key(
     올린다. 그런데 ``ops.offline_uploads``는 scope PK와 같은 triple을 참조하므로
     (ADR-088) 쓰기 시점에 operation이 정해져야 한다.
 
-    유도 규칙은 alembic 0089의 ``_preflight_offline_upload_operation_is_unambiguous``
-    와 같다: scope에 operation이 정확히 하나일 때만 그것을 쓴다. 둘 이상이면 어느
-    것을 골라도 임의 선택이므로 조용히 고르지 않고 실패시킨다 — 잘못 고르면 upload가
-    엉뚱한 실행에 결박된다.
+    "scope에 operation이 정확히 하나일 때만 그것을 쓴다"는 모호성 규칙은 alembic
+    0089의 ``_preflight_offline_upload_operation_is_unambiguous``와 같다. 둘 이상이면
+    어느 것을 골라도 임의 선택이므로 조용히 고르지 않고 실패시킨다 — 잘못 고르면
+    upload가 엉뚱한 실행에 결박된다.
 
-    **후보는 활성인 것만 센다.** ``is_enabled``/``is_active``를 안 보면 (a) 유일한
-    operation이 disabled일 때 typed 오류 대신 DB 트리거가 23514로 터져 500이 되고,
-    (b) disabled 형제가 후보 수를 부풀려 멀쩡한 scope를 "둘 이상"으로 오판한다.
-    DB 가드(``reject_inactive_offline_upload_membership``)와 같은 조건을 쓴다 —
-    두 판정이 갈리면 하나가 반드시 거짓말을 한다.
+    다만 **후보 집합은 그 preflight보다 좁다.** 여기서는 ``is_enabled``/``is_active``
+    까지 보고 활성인 것만 센다. 0089 preflight의 SQL은 ``offline_uploads``와
+    ``provider_dataset_operation_scopes``만 조인하고 ``provider_dataset_operations``·
+    ``provider_datasets``는 아예 조인하지 않아 활성 여부를 보지 않는다. 두 판정이
+    갈리는 입력은 두 가지다: (1) scope의 유일한 operation이 ``is_enabled=false`` —
+    preflight는 count=1로 통과하지만 여기서는 ``resolved=0``으로 거부한다,
+    (2) operation이 둘인데 하나가 disabled — preflight는 "모호"로 보지만 여기서는
+    유일한 활성 operation을 고른다.
+
+    활성까지 보는 이유: 안 보면 (a) 유일한 operation이 disabled일 때 typed 오류 대신
+    DB 트리거가 23514로 터져 500이 되고, (b) disabled 형제가 후보 수를 부풀려 멀쩡한
+    scope를 "둘 이상"으로 오판한다. 활성 술어 자체는 DB 가드
+    (``reject_inactive_offline_upload_membership``)의 ``NOT EXISTS`` 술어와 같은
+    조건이다 — 두 판정이 갈리면 하나가 반드시 거짓말을 한다. (가드는 이 술어를
+    INSERT와 ``validating``/``loading``으로 가는 UPDATE에만 적용하고 정리 write는
+    면제한다 — alembic 0092. 유도는 INSERT 경로에서만 쓰이므로 그 면제와 무관하다.)
     """
 
     keys = (
@@ -499,7 +555,7 @@ async def reserve_offline_upload(
     created_by: str | None = None,
 ) -> OfflineUpload | None:
     """외부 저장 전에 ``uploading`` row와 checksum 소유권을 원자적으로 선점한다."""
-    operation_key = await _resolve_scope_operation_key(
+    operation_key = await resolve_offline_upload_operation_key(
         session, provider_dataset_id=provider_dataset_id, sync_scope=sync_scope
     )
     result = await session.execute(
@@ -621,19 +677,22 @@ async def get_offline_upload_by_checksum(
     *,
     provider_dataset_id: int,
     sync_scope: str,
+    operation_key: str,
     checksum_sha256: str,
 ) -> OfflineUpload | None:
-    """canonical dataset/scope/checksum 조합으로 기존 업로드를 조회한다.
+    """canonical identity triple + checksum으로 기존 업로드를 조회한다.
 
-    반환 행은 ``operation_key``까지 든 exact identity(ADR-088)다. 중복 409를 만드는
-    호출자는 그 값을 응답에 실어 운영자가 어느 operation에 결박된 upload인지
-    구분할 수 있게 해야 한다.
+    ``operation_key``가 필수인 이유: 멱등 UNIQUE가 4열이라(alembic 0092) 같은
+    (dataset, scope, checksum)에 형제 operation 행이 **동시에 존재할 수 있다**.
+    triple을 지정하지 않으면 어느 행이 ``ON CONFLICT``를 일으켰는지 알 수 없고,
+    중복 409가 엉뚱한 operation에 결박된 upload를 가리키게 된다.
     """
     result = await session.execute(
         text(_GET_BY_CHECKSUM_SQL),
         {
             "provider_dataset_id": provider_dataset_id,
             "sync_scope": sync_scope,
+            "operation_key": operation_key,
             "checksum_sha256": checksum_sha256,
         },
     )

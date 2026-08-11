@@ -27,6 +27,7 @@ import {
 import { ApiClientError } from "@/api/client";
 import {
   type OpsDatasetCatalogInfo,
+  type DatasetRefreshScopeDecision,
   type OpsDatasetDetailData,
   type OpsDatasetEventRecord,
   type OpsDatasetFreshness,
@@ -122,8 +123,8 @@ type DatasetSelection = {
 /** API 경계에서 null을 없앤다 — 이 함수 밖에서는 operation_key를 직접 읽지 않는다.
  *
  * grid row와 scope state는 **같은 축**이므로 정규화도 같아야 한다. 한쪽만 정규화하면
- * `null === ""`이 조용히 false가 된다 — 그 상태로 refresh operation이 없는 catalog
- * 전용 dataset(실측 74개 중 17~18개)의 상세가 통째로 렌더되지 않았다(리뷰 8라운드).
+ * `null === ""`이 조용히 false가 된다 — 그 상태로 refresh membership이 없는 catalog
+ * 전용 dataset의 상세가 통째로 렌더되지 않았다(리뷰 8라운드).
  * TypeScript는 `string | null === string` 비교를 막지 않으므로 타입 검사도 못 잡는다.
  */
 function operationKeyOf(value: { operation_key: string | null }): string {
@@ -1195,6 +1196,72 @@ function PreviewPanel({
 // ({"done","failed","cancelled"}) — "succeeded"는 존재하지 않는 상태다(리뷰 검출).
 const TERMINAL_REQUEST_STATUSES = ["done", "failed", "cancelled"];
 
+/** "지금 갱신"이 막힌 사유. `null`이면 실행 가능하다.
+ *
+ * action capability는 fail-closed(#684) — 상세 로딩/오류·orphan·비가변·
+ * 비-refreshable이면 활성화하지 않고 사유를 보여준다. 컴포넌트 밖에 둔 이유는
+ * 렌더 상태에 의존하지 않는 순수 판정이기 때문이다(react-doctor 300줄 규칙).
+ */
+function refreshDisabledReason({
+  detail,
+  detailLoading,
+  detailError,
+  selection,
+  scopeDecision,
+}: {
+  detail: OpsDatasetDetailData | null;
+  detailLoading: boolean;
+  detailError: boolean;
+  selection: DatasetSelection;
+  scopeDecision: DatasetRefreshScopeDecision;
+}): string | null {
+  if (detailLoading) return "상세를 불러오는 중입니다 — 확인 후 활성화됩니다.";
+  if (detailError) return "상세 조회에 실패해 조작을 차단했습니다(fail-closed).";
+  if (!detail) return "상세 정보가 없어 조작을 차단했습니다.";
+  if (!detail.scopes.some((scope) => scopeMatchesSelection(scope, selection))) {
+    return "선택한 exact operation membership이 상세 응답에 없어 조작을 차단했습니다.";
+  }
+  if (detail.catalog_state === "orphan") {
+    return `카탈로그에 없는 잔존 행이라 갱신할 수 없습니다${
+      detail.orphan_reason ? ` (${detail.orphan_reason})` : ""
+    }.`;
+  }
+  if (!detail.mutable) {
+    return "이 행은 서버가 조작 불가(mutable=false)로 표시했습니다.";
+  }
+  if (detail.refresh_policy?.enabled === false) {
+    return "서버 갱신 정책이 enabled=false라 수동 갱신도 차단됩니다. 정책 탭에서 활성화한 뒤 다시 시도하세요.";
+  }
+  if (detail.refresh_policy?.targeted_policy === "disabled") {
+    return "서버 갱신 정책이 targeted_policy=disabled라 이 데이터셋 갱신을 차단합니다. 정책 탭에서 허용 정책으로 변경하세요.";
+  }
+  const catalog = detail.catalog;
+  if (!catalog) return "카탈로그 계약이 없어 갱신 범위를 검증할 수 없습니다.";
+  const scopeRefresh = catalog.scope_refresh;
+  if (!catalog.is_refreshable) {
+    return (
+      scopeRefresh?.reason ?? "이 데이터셋은 실행 가능한 refresh runner가 없습니다."
+    );
+  }
+  if (scopeDecision.allowed) return null;
+  if (
+    scopeRefresh?.effect === "dataset_wide" &&
+    selection.syncScope !== scopeRefresh.default_sync_scope
+  ) {
+    return "dataset 전체 갱신은 provider의 기본 state scope 행에서만 실행할 수 있습니다. 이 행은 잔존 비기본 scope입니다.";
+  }
+  // `effect === "none"`이면 서버가 낸 사유가 정본이다 — 아래 external scope 문장은
+  // 활성 target 목록에서 빠진 경우(`effect === "sync_scope"`)의 사유이고, 카탈로그가
+  // 그 scope를 선언한 상태에는 해당하지 않는다.
+  if (
+    scopeRefresh?.effect === "sync_scope" &&
+    selection.syncScope.startsWith("external_system:")
+  ) {
+    return "현재 활성 POI target에 없는 잔존 external scope라 갱신할 수 없습니다.";
+  }
+  return scopeDecision.reason;
+}
+
 function RefreshNowSection({
   selection,
   detail,
@@ -1248,42 +1315,13 @@ function RefreshNowSection({
     }
   }, [currentStatus, queryClient]);
 
-  // action capability는 fail-closed(#684) — 상세 로딩/오류·orphan·비가변·
-  // 비-refreshable이면 활성화하지 않고 사유를 보여준다.
-  const disabledReason = detailLoading
-    ? "상세를 불러오는 중입니다 — 확인 후 활성화됩니다."
-    : detailError
-      ? "상세 조회에 실패해 조작을 차단했습니다(fail-closed)."
-      : !detail
-        ? "상세 정보가 없어 조작을 차단했습니다."
-        : !detail.scopes.some((scope) =>
-              scopeMatchesSelection(scope, selection),
-            )
-          ? "선택한 exact operation membership이 상세 응답에 없어 조작을 차단했습니다."
-          : detail.catalog_state === "orphan"
-              ? `카탈로그에 없는 잔존 행이라 갱신할 수 없습니다${
-                  detail.orphan_reason ? ` (${detail.orphan_reason})` : ""
-                }.`
-              : !detail.mutable
-                ? "이 행은 서버가 조작 불가(mutable=false)로 표시했습니다."
-                : detail.refresh_policy?.enabled === false
-                  ? "서버 갱신 정책이 enabled=false라 수동 갱신도 차단됩니다. 정책 탭에서 활성화한 뒤 다시 시도하세요."
-                  : detail.refresh_policy?.targeted_policy === "disabled"
-                    ? "서버 갱신 정책이 targeted_policy=disabled라 이 데이터셋 갱신을 차단합니다. 정책 탭에서 허용 정책으로 변경하세요."
-                    : !catalog
-                      ? "카탈로그 계약이 없어 갱신 범위를 검증할 수 없습니다."
-                      : !catalog.is_refreshable
-                        ? (scopeRefresh?.reason ??
-                          "이 데이터셋은 실행 가능한 refresh runner가 없습니다.")
-                        : !scopeDecision.allowed
-                          ? scopeRefresh?.effect === "dataset_wide" &&
-                            selection.syncScope !==
-                              scopeRefresh.default_sync_scope
-                            ? "dataset 전체 갱신은 provider의 기본 state scope 행에서만 실행할 수 있습니다. 이 행은 잔존 비기본 scope입니다."
-                            : selection.syncScope.startsWith("external_system:")
-                              ? "현재 활성 POI target에 없는 잔존 external scope라 갱신할 수 없습니다."
-                              : scopeDecision.reason
-                          : null;
+  const disabledReason = refreshDisabledReason({
+    detail,
+    detailLoading,
+    detailError,
+    selection,
+    scopeDecision,
+  });
   const existingConflict = datasetRefreshConflict(refreshNow.error);
   const conflict =
     refreshNow.error instanceof ApiClientError &&
@@ -1299,9 +1337,9 @@ function RefreshNowSection({
     if (!scopeDecision.allowed) {
       return;
     }
-    // 실행 가능한 refresh operation이 없는 catalog 행(74개 dataset 중 17개)은
-    // 돌릴 대상 자체가 없다. 빈 operation_key를 보내면 서버 스키마
-    // (`minLength: 1`)가 422로 거부하므로, 여기서 명시적으로 막는다.
+    // 실행 가능한 refresh operation이 없는 catalog 행은 돌릴 대상 자체가 없다.
+    // 빈 operation_key를 보내면 서버 스키마(`minLength: 1`)가 422로 거부하므로,
+    // 여기서 명시적으로 막는다.
     if (!selection.operationKey) {
       return;
     }
@@ -2141,8 +2179,8 @@ function useDatasetsClientController({
   ]);
 
   const selectionResolution = useMemo(() => {
-    // ``operation_key``는 **비어 있는 값이 유효하다** — refresh operation이 없는
-    // catalog 행(실측 74개 dataset 중 17개)과 orphan/policy 자리표시자 행이 그렇다.
+    // ``operation_key``는 **비어 있는 값이 유효하다** — refresh membership이 없는
+    // catalog 행과 orphan/policy 자리표시자 행이 그렇다.
     // 그래서 "없음"(null)과 "빈 값"("")을 갈라야 한다. Boolean()으로 접으면 그
     // 행들이 영영 선택되지 않아 drawer가 열리지 않는다.
     const hasSelectionParams = Boolean(

@@ -1,8 +1,11 @@
 """C3e-A1 canonical provider operation lifecycle 통합 회귀.
 
-T-VN-33 cutover WIP 커밋(``2e76b80c``, 메시지 자체가 "do not merge")이 이 파일에서
-2227줄 27건을 지웠고 복원되지 않았다. 삭제된 test 함수는 저장소 전수 grep으로 0 hit —
-이관이 아니라 소멸이었다. 그 회귀가 덮던 코드는 지금도 살아 있다:
+T-VN-33 cutover WIP 커밋(``2e76b80c``, 메시지 자체가 "do not merge")이 2,227줄 27건
+짜리였던 이 파일에서 2,178줄을 지워 115줄만 남겼고, 복원되지 않았다
+(``git show --numstat 2e76b80c -- <이 파일>`` → ``66  2178``). 삭제된 27개 test
+함수명을 그 커밋 트리에 전수 ``git grep``하면 **코드 hit은 0**이고, 2건만
+``docs/reports/admin-ops-c3e-canonical-operations-2026-07-15.md``의 서술 언급으로
+남아 있었다 — 이관이 아니라 소멸이었다. 그 회귀가 덮던 코드는 지금도 살아 있다:
 ``feature_operation_sensors`` / ``feature_operation_tracking`` /
 ``feature_operation_repo``.
 
@@ -17,6 +20,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import AsyncIterator, Mapping
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
@@ -24,6 +29,7 @@ from uuid import uuid4
 
 import pytest
 from dagster import AssetKey, DagsterRunStatus
+from kortravelmap.dagster.assets import _exact_sync_membership
 from kortravelmap.dagster.feature_operation_sensors import (
     _OPERATION_KEY_TAG,
     _TRIGGER_KIND_TAG,
@@ -32,12 +38,23 @@ from kortravelmap.dagster.feature_operation_sensors import (
     _reconcile_tick,
 )
 from kortravelmap.dagster.feature_operation_tracking import (
+    _ADMIN_MANUAL_TRIGGER_TAG,
+    EXECUTION_SCOPES_TAG,
     FeatureOperationExecutionGuard,
+    FeatureOperationGuardUnavailable,
+    _guard_from_context_async,
     append_failed_multi_member_attempt,
     ensure_authoritative_feature_operation_guard,
     ensure_tracked_multi_member_asset,
     finish_tracked_feature_membership,
     run_tracked_feature_asset,
+)
+from kortravelmap.dagster.kma_weather import _exact_kma_sync_membership
+from kortravelmap.dagster.schedules import (
+    FEATURE_LOAD_SCHEDULE_SPECS,
+    FeatureLoadScheduleSpec,
+    _feature_load_definition_tags,
+    _feature_load_schedule_tags,
 )
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
@@ -77,6 +94,13 @@ from kortravelmap.infra.pipeline_cancellation_types import (
 from kortravelmap.providers.feature_operation_registry import (
     resolve_feature_operation_handler,
 )
+from kortravelmap.providers.kma import (
+    KMA_SHORT_FORECAST_DATASET_KEY,
+    KMA_ULTRA_SHORT_FORECAST_DATASET_KEY,
+    KMA_ULTRA_SHORT_NOWCAST_DATASET_KEY,
+)
+from kortravelmap.providers.knps import KNPS_PLACE_DATASETS
+from kortravelmap.providers.knps import PROVIDER_NAME as KNPS_PROVIDER_NAME
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
@@ -85,6 +109,7 @@ from tests.integration._membership_seed import (
     MULTI_MEMBER_OPERATION,
     SINGLE_MEMBER_OPERATION,
     launch_tags,
+    membership_for_dataset,
     memberships_for_operation,
 )
 
@@ -206,18 +231,22 @@ def _tracking_guard(
     memberships: tuple[ProviderDatasetOperationMembership, ...],
     run_id: str,
     trigger_kind: TriggerKind = "manual",
-    include_trigger_tag: bool = True,
+    extra_tags: Mapping[str, str] | None = None,
 ) -> FeatureOperationExecutionGuard:
     """frozen membership snapshot을 든 실행 guard를 실제 dataclass로 만든다.
 
-    기본은 trigger tag를 함께 싣는다 — ``_trigger_kind()``가 trigger tag 없으면
+    trigger tag를 항상 함께 싣는다 — ``_trigger_kind()``가 trigger tag 없으면
     ``"schedule"``로 추론하므로, ``trigger_kind="manual"``인 guard에 operation tag만
     실으면 ``ensure_authoritative_feature_operation_guard``가 ``trigger_mismatch``로
     죽는다.
 
-    ``include_trigger_tag=False``는 그 추론 경로 자체를 시험한다. 프로덕션에서 실재
-    하는 모양이고(schedule launch가 trigger tag를 안 찍는다), fallback이 사라지면
-    schedule run이 전부 guard에서 죽는다.
+    이 helper는 guard dataclass를 **이미 만들어진 상태로** 조립한다. 그래서 어떤
+    selection이 frozen되는가(=resource init의 결정)는 여기서 검증되지 않는다 —
+    그 축은 ``_resource_init_context``로 ``_guard_from_context_async``를 그대로
+    태우는 회귀가 맡는다.
+
+    ``extra_tags``는 guard가 든 값과 run tag를 어긋나게 만들어 I/O 직전 재검증
+    경로를 시험할 때 쓴다.
     """
 
     created_at = datetime(2026, 7, 16, 1, tzinfo=UTC)
@@ -227,10 +256,10 @@ def _tracking_guard(
         job_name=binding.job_name,
         run_id=run_id,
         run_config={},
-        tags=launch_tags(
-            operation_key=operation_key,
-            trigger_kind=trigger_kind if include_trigger_tag else None,
-        ),
+        tags={
+            **launch_tags(operation_key=operation_key, trigger_kind=trigger_kind),
+            **dict(extra_tags or {}),
+        },
         asset_selection=None,
         resolved_op_selection=None,
         status=SimpleNamespace(value="STARTED"),
@@ -251,6 +280,47 @@ def _tracking_guard(
         memberships=memberships,
         dagster_run_id=run_id,
         trigger_kind=trigger_kind,
+    )
+
+
+def _schedule_spec(job_name: str) -> FeatureLoadScheduleSpec:
+    """프로덕션 schedule spec을 이름으로 집는다 — 없으면 죽는다."""
+    for spec in FEATURE_LOAD_SCHEDULE_SPECS:
+        if spec.job_name == job_name:
+            return spec
+    raise AssertionError(f"feature-load schedule spec이 없다: {job_name!r}")
+
+
+def _resource_init_context(
+    client: AsyncKorTravelMapClient,
+    *,
+    run_id: str,
+    tags: Mapping[str, str],
+) -> Any:
+    """``feature_operation_guard_resource``가 받는 ``InitResourceContext`` 모양.
+
+    guard가 실제로 어떤 selection을 frozen하는지는 resource init에서 결정되므로,
+    여기서만 그 경로를 정확히 재현할 수 있다. 이미 만들어진 guard dataclass를
+    손으로 조립하면(``_tracking_guard``) 그 결정 자체가 검증 밖으로 빠진다.
+    """
+    created_at = datetime(2026, 7, 16, 1, tzinfo=UTC)
+    run = SimpleNamespace(
+        run_id=run_id,
+        job_name="integration-run",
+        run_config={},
+        asset_selection=None,
+        tags=dict(tags),
+        status=SimpleNamespace(value="STARTED"),
+    )
+    record = SimpleNamespace(
+        dagster_run=run,
+        create_timestamp=created_at,
+        start_time=(created_at + timedelta(seconds=1)).timestamp(),
+    )
+    return SimpleNamespace(
+        run=run,
+        instance=SimpleNamespace(run=run, get_run_record_by_id=lambda _run_id: record),
+        resources=SimpleNamespace(kor_travel_map_client=client),
     )
 
 
@@ -2605,20 +2675,89 @@ async def test_success_preserves_terminal_non_done_child_and_fails_root_tracking
     assert int(non_done_log_count or 0) == 1
 
 
-async def test_schedule_run_without_trigger_tag_is_accepted_by_guard(
+def test_feature_load_schedule_tags_carry_trigger_kind() -> None:
+    """schedule launch는 trigger tag를 **찍는다** — 안 찍는다는 진술은 거짓이다.
+
+    ``_feature_load_schedule_tags``가 만드는 dict는 ScheduleDefinition의 ``tags``와
+    coalescing schedule의 ``RunRequest(tags=...)`` 양쪽에 그대로 실린다. 그래서
+    schedule로 뜬 run에는 ``kor_travel_map.trigger_kind``가 항상 있다.
+
+    trigger tag가 없는 실재 모양은 job 정의 tag만 상속하는 job 단위 수동 launch다 —
+    ``_feature_load_definition_tags``는 operation_key(+ 런타임 상한)만 찍는다.
+    """
+    specs = {spec.job_name: spec for spec in FEATURE_LOAD_SCHEDULE_SPECS}
+    assert specs, "feature-load schedule spec이 비었다"
+    for spec in specs.values():
+        assert _feature_load_schedule_tags(spec)[_TRIGGER_KIND_TAG] == "schedule"
+        assert _TRIGGER_KIND_TAG not in _feature_load_definition_tags(spec)
+        assert _feature_load_definition_tags(spec)[_OPERATION_KEY_TAG] == spec.job_name
+
+
+async def test_run_without_trigger_tag_is_tracked_not_silently_dropped(
     migrated_engine: AsyncEngine,
 ) -> None:
-    """trigger tag가 **없는** run은 schedule로 추론돼 guard를 통과해야 한다.
+    """trigger tag 없는 run(job 단위 수동 launch)도 **추적된다**.
 
-    ``feature_operation_tracking._trigger_kind()``는 trigger tag가 없으면
-    operation tag만 보고 ``"schedule"``을 돌려준다. schedule launch가 trigger tag를
-    찍지 않으므로 이건 프로덕션에서 실재하는 모양이고, 그 fallback이 사라지면
-    ``ensure_authoritative_feature_operation_guard``가 모든 schedule run을
-    ``trigger_mismatch``로 죽인다.
+    ``_trigger_kind()``는 trigger tag가 없으면 operation tag만 보고 ``"schedule"``을
+    돌려준다. 그 fallback이 사라지면 ``_guard_from_context_async``가
+    ``operation_key=None`` 인 guard를 만들고, ``ensure``와
+    ``ensure_authoritative_feature_operation_guard``는 그 guard에서 아무것도 쓰지 않고
+    그대로 돌아온다. 그러면 **추적 레코드가 하나도 생기지 않는다** — root도 member도.
+    (run이 통째로 조용히 지나가는 것은 아니다. sync state를 쓰는 asset은
+    ``assets._exact_sync_membership``과 ``kma_weather._exact_kma_sync_membership``에서
+    ``operation_key_missing``으로 죽는다. 하지만 그 raise는 추적 행을 만들어 주지
+    않으므로, 어느 쪽이든 이 run의 추적은 사라진다.)
 
-    이 회귀가 없어서 그 fallback을 ``return None``으로 바꿔도 스위트가 34 passed로
-    통과했다(9라운드 워크플로 적대 검증 M6). 복원된 27건 어느 것도 이 축을 밟지
-    않았다 — 전부 trigger tag를 함께 싣는 helper 기본값을 썼기 때문이다.
+    그래서 여기서는 guard 하나를 검증하는 게 아니라 resource init 경로를 그대로
+    태우고 **DB에 행이 생겼는지**를 본다. fallback을 ``return None``으로 바꾸면
+    root 조회가 0건이 되어 이 단언이 깨진다(mutation으로 실증).
+    """
+    client = AsyncKorTravelMapClient(migrated_engine)
+    run_id = f"run-c3e-no-trigger-tag-{uuid4()}"
+    tags = {_OPERATION_KEY_TAG: SINGLE_MEMBER_OPERATION}
+    assert _TRIGGER_KIND_TAG not in tags
+
+    guard = await _guard_from_context_async(
+        _resource_init_context(client, run_id=run_id, tags=tags)
+    )
+
+    assert guard.operation_key == SINGLE_MEMBER_OPERATION, (
+        "trigger tag가 없다는 이유로 guard가 추적을 포기했다"
+    )
+    assert guard.trigger_kind == "schedule"
+    await guard.ensure()
+
+    async with AsyncSession(migrated_engine) as check:
+        root_id = await check.scalar(
+            text(
+                "SELECT job_id FROM ops.import_jobs "
+                "WHERE kind = 'provider_feature_load_run' AND dagster_run_id = :run_id"
+            ),
+            {"run_id": run_id},
+        )
+        assert root_id is not None, "추적 root가 만들어지지 않았다 — run이 통째로 미추적이다"
+        members = (
+            await check.execute(text(_CHILD_MEMBERS_SQL), {"root_id": str(root_id)})
+        ).all()
+    assert [
+        ProviderDatasetOperationMembership(
+            provider_dataset_id=int(row.provider_dataset_id),
+            sync_scope=str(row.sync_scope),
+            operation_key=str(row.operation_key),
+        )
+        for row in members
+    ] == list(guard.memberships)
+
+
+async def test_guard_rejects_run_whose_live_manifest_tag_moved(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """I/O 직전 재검증은 실행 manifest 선언이 바뀐 run을 거부한다.
+
+    guard는 resource init에서 manifest를 frozen하고, provider I/O 직전에 실제 run
+    tag를 다시 읽어 대조한다. operation_key/trigger_kind만 대조하고 manifest 선언을
+    빼면, 선언이 바뀐 run이 frozen selection 그대로 진행해 실행 대상과 DB member가
+    갈린다.
     """
     base_client = AsyncKorTravelMapClient(migrated_engine)
     async with AsyncSession(migrated_engine) as setup:
@@ -2630,21 +2769,544 @@ async def test_schedule_run_without_trigger_tag_is_accepted_by_guard(
         probe,
         operation_key=SINGLE_MEMBER_OPERATION,
         memberships=memberships,
-        run_id=f"run-c3e-schedule-inferred-{uuid4()}",
-        trigger_kind="schedule",
-        include_trigger_tag=False,
+        run_id=f"run-c3e-manifest-moved-{uuid4()}",
+        extra_tags={
+            EXECUTION_SCOPES_TAG: json.dumps(
+                [
+                    {
+                        "provider": "python-mois-api",
+                        "dataset_key": "mois_license_features_bulk",
+                        "sync_scope": "dataset_wide",
+                    }
+                ]
+            )
+        },
     )
-    # 전제를 단언으로 박는다 — tag에 trigger가 정말 없어야 이 테스트가 의미를 갖는다.
-    assert _TRIGGER_KIND_TAG not in guard.instance.run.tags
-    assert _OPERATION_KEY_TAG in guard.instance.run.tags
+    # guard 자신은 선언 없이(=operation 전체) frozen된 상태다.
+    assert guard.declared_scopes is None
 
-    verified = await ensure_authoritative_feature_operation_guard(
+    with pytest.raises(FeatureOperationGuardUnavailable) as excinfo:
+        await ensure_authoritative_feature_operation_guard(
+            _tracking_context(guard, retry_number=0),
+            boundary="test_manifest_moved",
+        )
+
+    assert excinfo.value.reason == "execution_scopes_mismatch"
+    assert not probe.ensure_mutations, "거부해야 할 run이 operation을 전진시켰다"
+
+
+async def test_multi_dataset_operation_run_freezes_only_its_declared_dataset(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """dataset 5개를 묶은 operation의 run이 자기 dataset 1개만 frozen한다(KNPS).
+
+    ``feature_place_knps_points_job``은 dataset 5개에 걸쳐 있지만 asset은 run 1회에
+    ``knps_point_dataset_key`` 하나만 적재한다. run이 실행 manifest를 선언하지 않으면
+    guard가 member 5개를 running으로 만들어 놓고 4개가 끝나지 않아, terminal
+    reconcile이 operation을 ``tracking_invariant``로 떨어뜨린다.
+
+    그래서 schedule spec이 실행 scope를 선언하고 guard가 그 선언만 frozen한다.
+    이 테스트는 프로덕션 schedule tag를 그대로 써서 그 경로를 밟는다 — 테스트가
+    자기 tag를 지어내면 선언이 사라져도 조용히 통과한다.
+    """
+    client = AsyncKorTravelMapClient(migrated_engine)
+    spec = _schedule_spec("feature_place_knps_points_job")
+    tags = _feature_load_schedule_tags(spec)
+    assert EXECUTION_SCOPES_TAG in tags, "schedule이 실행 manifest를 선언하지 않았다"
+
+    async with AsyncSession(migrated_engine) as setup:
+        executable = await memberships_for_operation(
+            setup, operation_key="feature_place_knps_points_job"
+        )
+        declared = await membership_for_dataset(
+            setup,
+            provider=KNPS_PROVIDER_NAME,
+            # dataset key는 운영자 설정에서 오므로(``knps_schedule_binding``) 테스트가
+            # 사본을 들지 않고 spec이 선언한 값을 그대로 쓴다.
+            dataset_key=spec.execution_scopes[0].dataset_key,
+            operation_key="feature_place_knps_points_job",
+            sync_scope="dataset_wide",
+        )
+    # 전제: 이 operation은 정말로 dataset 여러 개를 묶는다.
+    assert len(executable) == 5
+
+    run_id = f"run-c3e-knps-manifest-{uuid4()}"
+    guard = await _guard_from_context_async(
+        _resource_init_context(client, run_id=run_id, tags=tags)
+    )
+
+    assert guard.memberships == (declared,)
+    await guard.ensure()
+
+    # guard를 통과해 asset 본문까지 간다 — 예전에는 여기서
+    # ``operation_requires_exactly_one_membership``으로 죽었다.
+    body_calls: list[str] = []
+
+    async def _body(ctx: Any) -> str:
+        body_calls.append(ctx.job_name)
+        return "loaded"
+
+    result = await run_tracked_feature_asset(
+        _tracking_context(guard, retry_number=0), _body
+    )
+    assert result == "loaded"
+    assert body_calls == ["feature_place_knps_points_job"]
+
+    async with AsyncSession(migrated_engine) as check:
+        root_id = str(
+            await check.scalar(
+                text(
+                    "SELECT job_id FROM ops.import_jobs "
+                    "WHERE kind = 'provider_feature_load_run' "
+                    "AND dagster_run_id = :run_id"
+                ),
+                {"run_id": run_id},
+            )
+        )
+        members = (
+            await check.execute(text(_CHILD_MEMBERS_SQL), {"root_id": root_id})
+        ).all()
+        root_status = await check.scalar(
+            text("SELECT status FROM ops.import_jobs WHERE job_id = CAST(:id AS uuid)"),
+            {"id": root_id},
+        )
+    # 실행하지 않을 dataset 4개는 애초에 running으로 만들어지지 않았다.
+    assert len(members) == 1
+    assert int(members[0].provider_dataset_id) == declared.provider_dataset_id
+    # asset이 끝난 시점에 미완료 member는 0이다 — 고아 running member가 없다.
+    assert [row.status for row in members] == ["done"]
+    # root는 아직 running이다. 이건 고아가 아니라 설계다 — root의 terminal 전이는
+    # Dagster run이 끝난 뒤 reconcile sensor가 소유한다
+    # (``test_reconcile_sensor_uses_the_same_manifest_as_the_run``이 그 마무리를 건다).
+    assert root_status == "running"
+
+
+async def test_asset_sync_state_accepts_a_narrowed_manifest_but_not_a_foreign_dataset(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """``_exact_sync_membership``의 drift 검사는 부분집합이다 — 그리고 거기까지다.
+
+    이 게이트는 sync-state cursor를 쓸 exact member를 고르는 자리다. 검사를
+    "manifest == 실행 가능 집합"으로 두면, dataset 5개를 묶은 KNPS operation의 run은
+    manifest가 1건이므로 **모든 적재가 여기서** ``membership_snapshot_changed``로
+    죽는다(``_load`` → ``_record_feature_sync_success`` → 이 함수).
+
+    부분집합으로 완화한 대신 좁히기는 그대로여야 한다. 그래서 두 축을 함께 건다:
+    선언한 dataset은 통과하고, 같은 operation의 **다른** dataset은 manifest 밖으로
+    거부된다. 뒤 단언이 없으면 완화가 "아무 dataset이나 통과"로 미끄러져도 앞
+    단언만으로는 잡히지 않는다.
+    """
+    client = AsyncKorTravelMapClient(migrated_engine)
+    spec = _schedule_spec("feature_place_knps_points_job")
+    tags = _feature_load_schedule_tags(spec)
+    declared_key = spec.execution_scopes[0].dataset_key
+
+    async with AsyncSession(migrated_engine) as setup:
+        executable = await memberships_for_operation(
+            setup, operation_key="feature_place_knps_points_job"
+        )
+        declared = await membership_for_dataset(
+            setup,
+            provider=KNPS_PROVIDER_NAME,
+            dataset_key=declared_key,
+            operation_key="feature_place_knps_points_job",
+            sync_scope="dataset_wide",
+        )
+    # 전제: manifest(1건)와 실행 가능 집합(5건)이 정말로 다르다.
+    assert len(executable) > 1
+
+    guard = await _guard_from_context_async(
+        _resource_init_context(
+            client, run_id=f"run-c3e-knps-sync-state-{uuid4()}", tags=tags
+        )
+    )
+    assert guard.memberships == (declared,)
+    context = _tracking_context(guard, retry_number=0)
+
+    resolved = await _exact_sync_membership(
+        context,
+        client,
+        boundary="feature_sync_state",
+        provider=KNPS_PROVIDER_NAME,
+        dataset_key=declared_key,
+    )
+    assert resolved == declared
+
+    foreign_key = next(
+        key for key in sorted(KNPS_PLACE_DATASETS) if key != declared_key
+    )
+    with pytest.raises(FeatureOperationGuardUnavailable) as excinfo:
+        await _exact_sync_membership(
+            context,
+            client,
+            boundary="feature_sync_state",
+            provider=KNPS_PROVIDER_NAME,
+            dataset_key=foreign_key,
+        )
+    assert excinfo.value.reason == "membership_outside_guard_snapshot"
+
+
+@asynccontextmanager
+async def _operation_disabled_in_catalog(
+    engine: AsyncEngine,
+    *,
+    operation_key: str,
+) -> AsyncIterator[None]:
+    """운영자 토글과 같은 경로로 operation을 잠시 disable한다.
+
+    ``provider_dataset_operations.is_enabled``는 canonical resolver 2종
+    (``_OPERATION_MEMBERSHIPS_SQL`` / ``_OPERATION_DATASET_MEMBERSHIP_SQL``)의 술어에
+    직접 들어간다 — 즉 이 한 줄이 카탈로그 drift의 실제 채널이다. 진입 시 전부
+    enabled임을 확인하고 나갈 때 그대로 되돌린다(단정 실패로 빠져나가도 복구된다).
+    """
+    disable = text(
+        "UPDATE provider_sync.provider_dataset_operations SET is_enabled = :value "
+        "WHERE operation_key = :operation_key AND operation_kind = 'refresh'"
+    )
+    async with AsyncSession(engine) as setup, setup.begin():
+        already_disabled = await setup.scalar(
+            text(
+                "SELECT count(*) FROM provider_sync.provider_dataset_operations "
+                "WHERE operation_key = :operation_key AND operation_kind = 'refresh' "
+                "AND NOT is_enabled"
+            ),
+            {"operation_key": operation_key},
+        )
+        assert already_disabled == 0, (
+            f"시드 전제가 깨졌다: {operation_key!r}에 이미 disabled refresh operation이 있다"
+        )
+        await setup.execute(disable, {"value": False, "operation_key": operation_key})
+    try:
+        yield
+    finally:
+        async with AsyncSession(engine) as cleanup, cleanup.begin():
+            await cleanup.execute(
+                disable, {"value": True, "operation_key": operation_key}
+            )
+
+
+async def test_catalog_drift_after_freezing_stops_the_sync_state_write(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """guard가 manifest를 frozen한 뒤 카탈로그가 바뀌면 cursor를 쓰지 않는다.
+
+    운영자가 operation을 disable하거나 dataset을 ``is_active=false``로 내리면 canonical
+    resolver가 그 member를 더 이상 돌려주지 않는다. 이미 실행 중인 run은 frozen
+    manifest를 들고 있으므로, 그 상태로 진행하면 **카탈로그가 더 이상 인정하지 않는
+    행에 sync cursor가 적힌다** — 다음 run이 그 cursor를 근거로 적재를 건너뛴다.
+
+    이 회귀는 그 drift를 실제 DB에서 만든다. stub으로 executable 집합만 비워도 같은
+    분기를 밟지만, 그러면 "무엇이 그 집합을 비우는가"(=``is_enabled`` 술어)가 검증
+    밖으로 빠진다.
+
+    같은 drift의 두 번째 결과도 함께 건다: 그 뒤에 뜨는 새 run은 애초에 guard를 만들지
+    못하고 ``operation_has_no_enabled_memberships``로 죽는다. 이 검사가 없으면 새 run이
+    **빈 manifest**로 조용히 진행해 아무 member도 추적하지 않은 채 성공으로 닫힌다.
+    """
+    operation_key = "feature_place_knps_points_job"
+    client = AsyncKorTravelMapClient(migrated_engine)
+    spec = _schedule_spec(operation_key)
+    tags = _feature_load_schedule_tags(spec)
+    declared_key = spec.execution_scopes[0].dataset_key
+
+    guard = await _guard_from_context_async(
+        _resource_init_context(
+            client, run_id=f"run-c3e-knps-drift-{uuid4()}", tags=tags
+        )
+    )
+    context = _tracking_context(guard, retry_number=0)
+
+    async def _resolve() -> ProviderDatasetOperationMembership:
+        return await _exact_sync_membership(
+            context,
+            client,
+            boundary="feature_sync_state",
+            provider=KNPS_PROVIDER_NAME,
+            dataset_key=declared_key,
+        )
+
+    # 통제군: drift 전에는 같은 호출이 통과한다.
+    assert await _resolve() == guard.memberships[0]
+
+    async with _operation_disabled_in_catalog(
+        migrated_engine, operation_key=operation_key
+    ):
+        with pytest.raises(FeatureOperationGuardUnavailable) as excinfo:
+            await _resolve()
+        assert excinfo.value.reason == "membership_snapshot_changed"
+
+        with pytest.raises(FeatureOperationGuardUnavailable) as init_excinfo:
+            await _guard_from_context_async(
+                _resource_init_context(
+                    client,
+                    run_id=f"run-c3e-knps-drift-after-{uuid4()}",
+                    tags=tags,
+                )
+            )
+        assert init_excinfo.value.reason == "operation_has_no_enabled_memberships"
+
+    # 카탈로그가 복구되면 같은 호출이 다시 통과한다 — 거부 사유가 drift 그 자체였고,
+    # 이 테스트가 시드를 disabled인 채로 남기지 않았음을 함께 못 박는다.
+    assert await _resolve() == guard.memberships[0]
+
+
+async def test_manual_job_launch_inherits_the_manifest_from_definition_tags(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """job 정의 tag만 물려받는 run도 좁혀진 manifest를 갖는다.
+
+    admin UI "지금 실행"은 schedule을 거치지 않고 job을 launch하며 schedule tag를
+    받지 않는다(``kor_travel_map.trigger_kind``도 없고
+    ``kor_travel_map.admin_manual_trigger=admin-ui``가 붙는다 — API 회귀
+    ``test_schedule_command_knps_manual_launch_persists_resolved_config_and_tags``).
+    그 run의 실행 manifest 선언은 job 정의 tag에서만 올 수 있다.
+
+    선언이 정의 tag에 없으면 이 run만 manifest가 operation 전체(5건)로 넓어져,
+    guard가 실행하지도 않을 member 4개를 running으로 만들고 terminal reconcile이
+    operation을 ``tracking_invariant``로 떨어뜨린다. 그래서 여기서는 schedule tag를
+    쓰지 않고 **정의 tag만** 실어 그 채널 하나를 직접 건다.
+    """
+    client = AsyncKorTravelMapClient(migrated_engine)
+    spec = _schedule_spec("feature_place_knps_points_job")
+    tags = {
+        **_feature_load_definition_tags(spec),
+        _ADMIN_MANUAL_TRIGGER_TAG: "admin-ui",
+    }
+    assert _TRIGGER_KIND_TAG not in tags
+
+    async with AsyncSession(migrated_engine) as setup:
+        executable = await memberships_for_operation(
+            setup, operation_key="feature_place_knps_points_job"
+        )
+        declared = await membership_for_dataset(
+            setup,
+            provider=KNPS_PROVIDER_NAME,
+            dataset_key=spec.execution_scopes[0].dataset_key,
+            operation_key="feature_place_knps_points_job",
+            sync_scope="dataset_wide",
+        )
+    assert len(executable) > 1
+
+    run_id = f"run-c3e-knps-manual-{uuid4()}"
+    guard = await _guard_from_context_async(
+        _resource_init_context(client, run_id=run_id, tags=tags)
+    )
+
+    assert guard.trigger_kind == "manual"
+    assert guard.memberships == (declared,), (
+        "정의 tag에 실행 manifest 선언이 없어 수동 run이 operation 전체를 잡았다"
+    )
+    await guard.ensure()
+
+    async with AsyncSession(migrated_engine) as check:
+        root_id = str(
+            await check.scalar(
+                text(
+                    "SELECT job_id FROM ops.import_jobs "
+                    "WHERE kind = 'provider_feature_load_run' "
+                    "AND dagster_run_id = :run_id"
+                ),
+                {"run_id": run_id},
+            )
+        )
+        members = (
+            await check.execute(text(_CHILD_MEMBERS_SQL), {"root_id": root_id})
+        ).all()
+    assert [int(row.provider_dataset_id) for row in members] == [
+        declared.provider_dataset_id
+    ]
+
+
+async def test_declaration_absent_from_the_catalog_is_rejected_at_resource_init(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """선언은 좁히기만 할 수 있다 — 카탈로그에 없는 대상을 만들어낼 수 없다.
+
+    ``knps_trails``는 실재하는 dataset이지만 ``feature_geometry_knps_records_job``에
+    결박돼 있다(``0089_tvn33_expand_seed``). point operation 아래에서 그것을 선언하면
+    canonical resolver가 행을 하나도 찾지 못한다. 그때 조용히 무시하거나 operation
+    전체로 넓히면, run이 실행할 대상과 DB member가 갈린다.
+    """
+    client = AsyncKorTravelMapClient(migrated_engine)
+    tags = {
+        _OPERATION_KEY_TAG: "feature_place_knps_points_job",
+        _TRIGGER_KIND_TAG: "schedule",
+        EXECUTION_SCOPES_TAG: json.dumps(
+            [
+                {
+                    "provider": KNPS_PROVIDER_NAME,
+                    "dataset_key": "knps_trails",
+                    "sync_scope": "dataset_wide",
+                }
+            ]
+        ),
+    }
+    run_id = f"run-c3e-knps-foreign-decl-{uuid4()}"
+
+    with pytest.raises(FeatureOperationGuardUnavailable) as excinfo:
+        await _guard_from_context_async(
+            _resource_init_context(client, run_id=run_id, tags=tags)
+        )
+
+    assert excinfo.value.reason == "execution_scope_not_in_catalog"
+    async with AsyncSession(migrated_engine) as check:
+        root_id = await check.scalar(
+            text(
+                "SELECT job_id FROM ops.import_jobs "
+                "WHERE kind = 'provider_feature_load_run' AND dagster_run_id = :run_id"
+            ),
+            {"run_id": run_id},
+        )
+    assert root_id is None, "거부해야 할 run이 추적 root를 만들었다"
+
+
+@pytest.mark.parametrize(
+    ("job_name", "dataset_key"),
+    [
+        (
+            "feature_weather_kma_ultra_short_nowcast_job",
+            KMA_ULTRA_SHORT_NOWCAST_DATASET_KEY,
+        ),
+        (
+            "feature_weather_kma_ultra_short_forecast_job",
+            KMA_ULTRA_SHORT_FORECAST_DATASET_KEY,
+        ),
+        ("feature_weather_kma_short_forecast_job", KMA_SHORT_FORECAST_DATASET_KEY),
+    ],
+)
+async def test_multi_scope_dataset_run_freezes_only_the_executable_scope(
+    job_name: str,
+    dataset_key: str,
+    migrated_engine: AsyncEngine,
+) -> None:
+    """scope가 둘인 dataset의 run이 실행 가능한 scope 하나만 frozen한다(KMA 격자).
+
+    ``0089_tvn33_expand_seed``는 refreshable dataset 전부에 ``dataset_wide``를 넣고
+    격자 dataset에만 ``target_grids``를 더 넣는다. 그런데 ``dataset_wide``는
+    ``_run_kma_weather_asset``과 queue runner ``_kma_grid_sync_scope``가 둘 다
+    ``ValueError``로 거부한다 — 실행 경로가 없다. 그래서 run은 ``target_grids``만
+    선언하고, ``_exact_kma_sync_membership``의 "manifest 1건" 게이트가 그 선언 위에서
+    성립한다.
+
+    격자 3종을 **모두** 태운다. 예전에는 단기예보 job 하나만 태워서, 다른 두 schedule
+    선언이 엉뚱한 dataset을 가리켜도(예: 초단기실황 schedule이 초단기예보 dataset을
+    선언) 3단 게이트 전부가 통과했다. 그 상태로 실행하면 manifest가 남의 dataset
+    member로 frozen되고, ``_exact_kma_sync_membership``이 그 member를 그대로 써서
+    **다른 dataset의 sync cursor에 기록**한다 — dataset_key 역산 fallback이 없으므로
+    조용히 어긋난다.
+
+    그래서 기대 dataset key는 spec에서 읽지 않고 provider 상수로 못 박는다. spec에서
+    읽으면 선언이 바뀌어도 기대값이 같이 따라가 이 회귀가 아무것도 검증하지 않는다.
+    """
+    client = AsyncKorTravelMapClient(migrated_engine)
+    spec = _schedule_spec(job_name)
+    tags = _feature_load_schedule_tags(spec)
+    assert [scope.dataset_key for scope in spec.execution_scopes] == [dataset_key], (
+        "KMA schedule 선언이 자기 dataset을 가리키지 않는다"
+    )
+
+    async with AsyncSession(migrated_engine) as setup:
+        executable = await memberships_for_operation(setup, operation_key=job_name)
+        target_grids = await membership_for_dataset(
+            setup,
+            provider="python-kma-api",
+            dataset_key=dataset_key,
+            operation_key=job_name,
+            sync_scope="target_grids",
+        )
+    # 전제: 같은 dataset에 scope가 2개다(그래서 dataset만으로는 지목되지 않는다).
+    assert len(executable) == 2
+    assert {member.sync_scope for member in executable} == {
+        "dataset_wide",
+        "target_grids",
+    }
+    assert len({member.provider_dataset_id for member in executable}) == 1
+
+    run_id = f"run-c3e-kma-manifest-{uuid4()}"
+    guard = await _guard_from_context_async(
+        _resource_init_context(client, run_id=run_id, tags=tags)
+    )
+    assert guard.memberships == (target_grids,), (
+        "frozen manifest가 이 job의 dataset이 아니다 — 남의 dataset cursor에 기록된다"
+    )
+    await guard.ensure()
+
+    resolved = await _exact_kma_sync_membership(
         _tracking_context(guard, retry_number=0),
-        boundary="test_schedule_inference",
+        client,
+        expected_sync_scope="target_grids",
+    )
+    assert resolved == target_grids
+
+    async with AsyncSession(migrated_engine) as check:
+        root_id = str(
+            await check.scalar(
+                text(
+                    "SELECT job_id FROM ops.import_jobs "
+                    "WHERE kind = 'provider_feature_load_run' "
+                    "AND dagster_run_id = :run_id"
+                ),
+                {"run_id": run_id},
+            )
+        )
+        members = (
+            await check.execute(text(_CHILD_MEMBERS_SQL), {"root_id": root_id})
+        ).all()
+    assert [str(row.sync_scope) for row in members] == ["target_grids"]
+
+
+async def test_reconcile_sensor_uses_the_same_manifest_as_the_run(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """sensor가 run과 같은 manifest를 쓴다 — 아니면 terminal에서 selection이 갈린다.
+
+    sensor는 run 밖에서 관측하므로 guard가 frozen한 selection을 알 방법이 run tag
+    뿐이다. sensor가 operation의 실행 가능 scope 전체를 넘기면
+    ``reconcile_dagster_feature_run``이 stored selection과 다르다고 판정해 성공한
+    run을 ``failed``/``tracking_invariant``로 뒤집는다.
+    """
+    client = AsyncKorTravelMapClient(migrated_engine)
+    spec = _schedule_spec("feature_place_knps_points_job")
+    tags = _feature_load_schedule_tags(spec)
+    run_id = f"run-c3e-knps-sensor-{uuid4()}"
+
+    guard = await _guard_from_context_async(
+        _resource_init_context(client, run_id=run_id, tags=tags)
+    )
+    await guard.ensure()
+    async def _body(_ctx: Any) -> str:
+        return "loaded"
+
+    await run_tracked_feature_asset(_tracking_context(guard, retry_number=0), _body)
+
+    created_at = datetime(2026, 7, 16, 1, tzinfo=UTC)
+    record = SimpleNamespace(
+        storage_id=1,
+        dagster_run=SimpleNamespace(
+            run_id=run_id,
+            job_name=spec.job_name,
+            run_config={},
+            asset_selection=None,
+            status=DagsterRunStatus.SUCCESS,
+            tags=tags,
+        ),
+        create_timestamp=created_at,
+        start_time=(created_at + timedelta(seconds=1)).timestamp(),
+        end_time=(created_at + timedelta(seconds=5)).timestamp(),
     )
 
-    assert verified is guard
-    assert probe.ensure_mutations, "guard가 operation을 만들지 않았다"
-    operation = probe.ensure_mutations[0].operation
-    assert operation.trigger_kind == "schedule"
-    assert tuple(member.membership for member in operation.members) == memberships
+    outcome = await _apply_run_record(record, client)
+
+    assert outcome == "applied"
+    async with AsyncSession(migrated_engine) as check:
+        row = (
+            await check.execute(
+                text(
+                    "SELECT status, current_stage FROM ops.import_jobs "
+                    "WHERE kind = 'provider_feature_load_run' "
+                    "AND dagster_run_id = :run_id"
+                ),
+                {"run_id": run_id},
+            )
+        ).one()
+    assert (row.status, row.current_stage) == ("done", "completed")

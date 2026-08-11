@@ -6,7 +6,19 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Final
 
+from kortravelmap.core.sync_scope import (
+    DATASET_WIDE_SYNC_SCOPE,
+    TARGET_GRIDS_SYNC_SCOPE,
+)
 from kortravelmap.providers.datagokr_file_data import DATAGOKR_FILEDATA_DATASETS
+from kortravelmap.providers.kma import (
+    KMA_PROVIDER_NAME,
+    KMA_SHORT_FORECAST_DATASET_KEY,
+    KMA_ULTRA_SHORT_FORECAST_DATASET_KEY,
+    KMA_ULTRA_SHORT_NOWCAST_DATASET_KEY,
+)
+from kortravelmap.providers.knps import PROVIDER_NAME as KNPS_PROVIDER_NAME
+from kortravelmap.settings import KorTravelMapSettings
 
 from dagster import (
     MAX_RUNTIME_SECONDS_TAG,
@@ -47,6 +59,11 @@ from .assets import (
     feature_weather_airkorea_air_quality,
     feature_weather_krex_rest_areas,
 )
+from .feature_operation_tracking import (
+    EXECUTION_SCOPES_TAG,
+    DeclaredExecutionScope,
+    encode_execution_scopes,
+)
 from .kma_weather import (
     feature_notice_kma_weather_alerts,
     feature_weather_kma_mid_forecast,
@@ -86,6 +103,14 @@ class FeatureLoadScheduleSpec:
     run_config: Mapping[str, Any] | None = None
     coalesce_active_runs: bool = False
     max_runtime_seconds: int | None = None
+    execution_scopes: tuple[DeclaredExecutionScope, ...] = ()
+    """이 job의 run이 실행하는 scope 선언 (비면 operation의 실행 가능 scope 전체).
+
+    operation의 실행 가능 scope가 여러 개인데 run이 그 일부만 실행하면 반드시
+    선언해야 한다. 선언이 없으면 guard가 실행하지도 않을 member까지 running으로
+    만들고, terminal reconcile이 그 미완료 member 때문에 operation을
+    ``tracking_invariant`` 실패로 떨어뜨린다.
+    """
 
 
 _DATAGOKR_FILEDATA_MONTHLY_CRONS: Final[tuple[str, ...]] = (
@@ -108,6 +133,88 @@ def _datagokr_file_data_run_config(dataset_key: str) -> dict[str, Any]:
             },
         }
     }
+
+
+@dataclass(frozen=True)
+class KnpsScheduleBinding:
+    """KNPS schedule 1개가 적재할 dataset — run_config와 실행 manifest의 공통 출처."""
+
+    dataset_key: str
+    run_config: dict[str, Any]
+    execution_scopes: tuple[DeclaredExecutionScope, ...]
+
+
+def knps_schedule_binding(
+    *,
+    setting_name: str,
+    dataset_key_resource: str,
+    records_resource: str,
+) -> KnpsScheduleBinding:
+    """운영자 설정에서 KNPS schedule dataset을 읽어 run_config와 선언을 함께 만든다.
+
+    ``KOR_TRAVEL_MAP_KNPS_POINT_DATASET_KEY`` / ``..._GEOMETRY_DATASET_KEY``는
+    schedule이 run_config를 갖기 전부터 있던 운영자 노브다. 그 값은
+    ``definitions._settings_value_resource``(``knps_*_dataset_key``)와
+    ``resources._build_knps_record_resource``(``knps_*_records``)의
+    ``configured or getattr(settings, setting_name)`` fallback에서 읽힌다. schedule이
+    run_config로 dataset을 상수에 못 박으면 두 resource 모두 ``configured`` 쪽을
+    타서 그 fallback이 영영 선택되지 않는다 — 노브가 조용히 죽는다.
+
+    그래서 dataset key를 상수로 두지 않고 여기서 **한 번** 읽어 run_config와 실행
+    manifest 선언을 같은 값에서 만든다. 노브를 눌러도 선언과 실행이 갈라질 수 없고,
+    ``schedules``의 사본과 ``settings`` 기본값이 따로 놀 여지도 없다.
+
+    읽는 시점은 module import(= Dagster code location 로드)다. job/schedule 정의와
+    그 tag가 그때 고정되므로 dataset key도 같은 시점이어야 한다 — cron override를
+    import 시점에 읽는 ``schedule_overrides.cron_for_schedule``과 같은 계약이다.
+    """
+    dataset_key = str(getattr(KorTravelMapSettings(), setting_name))
+    return KnpsScheduleBinding(
+        dataset_key=dataset_key,
+        run_config={
+            "resources": {
+                dataset_key_resource: {"config": {"dataset_key": dataset_key}},
+                records_resource: {"config": {"dataset_key": dataset_key}},
+            }
+        },
+        execution_scopes=(
+            DeclaredExecutionScope(
+                provider=KNPS_PROVIDER_NAME,
+                dataset_key=dataset_key,
+                sync_scope=DATASET_WIDE_SYNC_SCOPE,
+            ),
+        ),
+    )
+
+
+_KNPS_POINT_SCHEDULE: Final[KnpsScheduleBinding] = knps_schedule_binding(
+    setting_name="knps_point_dataset_key",
+    dataset_key_resource="knps_point_dataset_key",
+    records_resource="knps_point_records",
+)
+_KNPS_GEOMETRY_SCHEDULE: Final[KnpsScheduleBinding] = knps_schedule_binding(
+    setting_name="knps_geometry_dataset_key",
+    dataset_key_resource="knps_geometry_dataset_key",
+    records_resource="knps_geometry_records",
+)
+
+
+def _kma_grid_execution_scopes(dataset_key: str) -> tuple[DeclaredExecutionScope, ...]:
+    """KMA 격자 dataset의 실행 manifest.
+
+    seed는 refreshable dataset 전부에 ``dataset_wide``를 넣고 격자 dataset에만
+    ``target_grids``를 더 넣는다. 그래서 이 3종은 dataset당 scope가 2개지만,
+    ``dataset_wide``는 asset(``_run_kma_weather_asset``)과 queue
+    runner(``_kma_grid_sync_scope``)가 둘 다 ``ValueError``로 거부한다 — 실행 경로가
+    없다. run이 실행하는 것은 ``target_grids`` 하나뿐이므로 그것만 선언한다.
+    """
+    return (
+        DeclaredExecutionScope(
+            provider=KMA_PROVIDER_NAME,
+            dataset_key=dataset_key,
+            sync_scope=TARGET_GRIDS_SYNC_SCOPE,
+        ),
+    )
 
 
 def _datagokr_file_data_schedule_specs() -> tuple[FeatureLoadScheduleSpec, ...]:
@@ -209,12 +316,19 @@ FEATURE_LOAD_SCHEDULE_SPECS: Final[tuple[FeatureLoadScheduleSpec, ...]] = (
         cron_schedule="35 4 2 * *",
         description="MOIS 인허가 place Feature 월 1회 bulk 적재.",
     ),
+    # KNPS: ``0089_tvn33_expand_seed``가 이 두 operation에 각각 dataset 5개를
+    # 결박하지만 asset은 run 1회에 ``knps_*_dataset_key`` resource가 가리키는 1개만
+    # 적재한다. 그래서 실행 manifest와 run_config를 한 값에서 함께 만들어 선언과
+    # 실행이 갈라질 수 없게 한다. 나머지 4개 dataset은 이 schedule이 적재하지
+    # 않는다 — feature update request 경로로만 갱신된다.
     FeatureLoadScheduleSpec(
         asset=feature_place_knps_points,
         job_name="feature_place_knps_points_job",
         schedule_name="feature_place_knps_points_monthly_schedule",
         cron_schedule="45 3 3 * *",
         description="국립공원 point/place Feature 월 1회 적재.",
+        run_config=_KNPS_POINT_SCHEDULE.run_config,
+        execution_scopes=_KNPS_POINT_SCHEDULE.execution_scopes,
     ),
     FeatureLoadScheduleSpec(
         asset=feature_geometry_knps_records,
@@ -222,6 +336,8 @@ FEATURE_LOAD_SCHEDULE_SPECS: Final[tuple[FeatureLoadScheduleSpec, ...]] = (
         schedule_name="feature_geometry_knps_records_monthly_schedule",
         cron_schedule="15 4 3 * *",
         description="국립공원 route/area geometry Feature 월 1회 적재.",
+        run_config=_KNPS_GEOMETRY_SCHEDULE.run_config,
+        execution_scopes=_KNPS_GEOMETRY_SCHEDULE.execution_scopes,
     ),
     FeatureLoadScheduleSpec(
         asset=feature_place_krforest_recreation_forests,
@@ -309,6 +425,7 @@ FEATURE_LOAD_SCHEDULE_SPECS: Final[tuple[FeatureLoadScheduleSpec, ...]] = (
         schedule_name="feature_weather_kma_ultra_short_nowcast_hourly_schedule",
         cron_schedule="45 * * * *",
         description="KMA 초단기실황 WeatherValue 매시 적재(발표 HH:00 + 40분 지연 후).",
+        execution_scopes=_kma_grid_execution_scopes(KMA_ULTRA_SHORT_NOWCAST_DATASET_KEY),
     ),
     FeatureLoadScheduleSpec(
         asset=feature_weather_kma_ultra_short_forecast,
@@ -316,6 +433,7 @@ FEATURE_LOAD_SCHEDULE_SPECS: Final[tuple[FeatureLoadScheduleSpec, ...]] = (
         schedule_name="feature_weather_kma_ultra_short_forecast_hourly_schedule",
         cron_schedule="50 * * * *",
         description="KMA 초단기예보 WeatherValue 매시 적재(발표 HH:30 + 15분 지연 후).",
+        execution_scopes=_kma_grid_execution_scopes(KMA_ULTRA_SHORT_FORECAST_DATASET_KEY),
     ),
     FeatureLoadScheduleSpec(
         asset=feature_weather_kma_short_forecast,
@@ -325,6 +443,7 @@ FEATURE_LOAD_SCHEDULE_SPECS: Final[tuple[FeatureLoadScheduleSpec, ...]] = (
         description=(
             "KMA 단기예보 WeatherValue 매시 적재(발표 02~23시 3시간 간격 + 지연 후)."
         ),
+        execution_scopes=_kma_grid_execution_scopes(KMA_SHORT_FORECAST_DATASET_KEY),
     ),
     FeatureLoadScheduleSpec(
         asset=feature_weather_kma_mid_forecast,
@@ -357,8 +476,27 @@ def _resolved_run_config(spec: FeatureLoadScheduleSpec) -> dict[str, object]:
     return dict(spec.run_config or {})
 
 
+def _execution_scope_tags(spec: FeatureLoadScheduleSpec) -> dict[str, str]:
+    """실행 manifest 선언 tag. job 정의와 schedule 양쪽에 같은 값으로 실린다.
+
+    job 정의에도 싣는 이유: schedule을 거치지 않는 수동 launch(admin UI의 "지금
+    실행")는 schedule tag를 받지 않는다. 이 저장소가 그때 쏘는 GraphQL mutation은
+    ``launchRun``이다(``kortravelmap.api.dagster_schedule_service``의
+    ``KorTravelMapLaunchRun``). 그 경로의 run tag는 ``dagster_graphql``
+    ``create_valid_pipeline_run``의
+    ``merge_dicts(remote_job.tags, execution_metadata.tags)``라서 **job 정의
+    tag만** 물려받는다(pinned dagster_graphql 소스 실측). 선언이 정의 tag에 없으면
+    그 수동 run만 manifest가 operation 전체로 넓어져 schedule run과 다른 selection을
+    DB에 쓴다.
+    """
+    if not spec.execution_scopes:
+        return {}
+    return {EXECUTION_SCOPES_TAG: encode_execution_scopes(spec.execution_scopes)}
+
+
 def _feature_load_definition_tags(spec: FeatureLoadScheduleSpec) -> dict[str, str]:
     tags = {"kor_travel_map.operation_key": spec.job_name}
+    tags.update(_execution_scope_tags(spec))
     if spec.max_runtime_seconds is not None:
         tags[MAX_RUNTIME_SECONDS_TAG] = str(spec.max_runtime_seconds)
     return tags
@@ -372,6 +510,7 @@ def _feature_load_schedule_tags(
         "kor_travel_map.trigger_kind": "schedule",
         "kor_travel_map.timezone": KST_TIMEZONE,
     }
+    tags.update(_execution_scope_tags(spec))
     if spec.max_runtime_seconds is not None:
         tags[MAX_RUNTIME_SECONDS_TAG] = str(spec.max_runtime_seconds)
     return tags

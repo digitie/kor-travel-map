@@ -29,6 +29,8 @@ from kortravelmap.dagster.feature_operation_tracking import (
 from kortravelmap.dagster.kma_weather import (
     KmaForecastRow,
     KmaNowcastRow,
+    _assert_failure_membership,
+    _exact_kma_sync_membership,
     feature_weather_kma_short_forecast,
     feature_weather_kma_ultra_short_forecast,
     feature_weather_kma_ultra_short_nowcast,
@@ -1857,3 +1859,133 @@ def test_kma_datagokr_client_resource_guard_without_credential(
     message = str(exc_info.value)
     assert "kma_datagokr_client" in message
     assert "KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY" in message
+
+
+# -- KMA exact membership 게이트 -------------------------------------------
+
+_GRID_OPERATION_KEY = "feature_weather_kma_ultra_short_nowcast_job"
+
+
+def _grid_membership(sync_scope: str) -> ProviderDatasetOperationMembership:
+    return ProviderDatasetOperationMembership(
+        provider_dataset_id=101,
+        sync_scope=sync_scope,
+        operation_key=_GRID_OPERATION_KEY,
+    )
+
+
+def _grid_guard(
+    client: object,
+    memberships: tuple[ProviderDatasetOperationMembership, ...],
+) -> FeatureOperationExecutionGuard:
+    return FeatureOperationExecutionGuard(
+        client=cast(Any, client),
+        instance=object(),
+        operation_key=_GRID_OPERATION_KEY,
+        memberships=memberships,
+        dagster_run_id=_DIRECT_INVOCATION_RUN_ID,
+        trigger_kind="schedule",
+    )
+
+
+async def test_kma_sync_membership_rejects_a_scope_other_than_the_declared_one() -> None:
+    """asset이 요구한 scope와 다른 member는 cursor 대상이 될 수 없다.
+
+    격자 dataset은 카탈로그에 scope가 둘이다(``dataset_wide`` + ``target_grids``).
+    실행 경로가 있는 것은 ``target_grids``뿐인데, manifest가 ``dataset_wide``로 frozen된
+    채 통과하면 실행하지도 않은 scope 행에 cursor가 적히고 다음 run이 그 값을 근거로
+    적재를 skip한다.
+    """
+    dataset_wide = _grid_membership("dataset_wide")
+    client = _FakeKrtourClient(resolved_memberships=(dataset_wide,))
+    context = build_asset_context(
+        resources={"feature_operation_guard": _grid_guard(client, (dataset_wide,))}
+    )
+
+    with pytest.raises(kma_weather.FeatureOperationGuardUnavailable) as excinfo:
+        await _exact_kma_sync_membership(
+            context,
+            cast(Any, client),
+            expected_sync_scope="target_grids",
+        )
+
+    assert excinfo.value.reason == "membership_sync_scope_mismatch"
+    assert client.get_state_calls == []
+    # 대조: 요구한 scope와 같으면 같은 member가 그대로 통과한다 — 거부 사유가
+    # "scope 불일치"임을 못 박는다(전부 거부로 미끄러져도 앞 단언만으로는 안 잡힌다).
+    assert (
+        await _exact_kma_sync_membership(
+            context,
+            cast(Any, client),
+            expected_sync_scope="dataset_wide",
+        )
+        == dataset_wide
+    )
+
+
+async def test_kma_sync_membership_requires_exactly_one_frozen_member() -> None:
+    """manifest가 1건이 아니면 KMA asset은 cursor 대상을 고르지 않는다.
+
+    이 게이트가 없으면 정렬된 manifest의 **첫 member**가 조용히 선택된다. 격자
+    dataset의 첫 member는 실행 경로가 없는 ``dataset_wide``이므로, 실행 결과가 엉뚱한
+    scope 행에 기록된다.
+    """
+    memberships = (_grid_membership("dataset_wide"), _grid_membership("target_grids"))
+    client = _FakeKrtourClient(resolved_memberships=memberships)
+    context = build_asset_context(
+        resources={"feature_operation_guard": _grid_guard(client, memberships)}
+    )
+
+    with pytest.raises(kma_weather.FeatureOperationGuardUnavailable) as excinfo:
+        await _exact_kma_sync_membership(context, cast(Any, client), expected_sync_scope=None)
+
+    assert excinfo.value.reason == "operation_requires_exactly_one_membership"
+
+
+async def test_kma_sync_membership_rejects_an_untyped_membership_resource() -> None:
+    """queue worker가 넘긴 membership resource는 typed여야 한다(duck-typing 불가)."""
+    impostor = SimpleNamespace(
+        provider_dataset_id=101,
+        sync_scope="target_grids",
+        operation_key=_GRID_OPERATION_KEY,
+    )
+    context = build_asset_context(resources={"feature_update_membership": impostor})
+
+    with pytest.raises(kma_weather.FeatureOperationGuardUnavailable) as excinfo:
+        await _exact_kma_sync_membership(
+            context,
+            cast(Any, _FakeKrtourClient()),
+            expected_sync_scope=None,
+        )
+
+    assert excinfo.value.reason == "feature_update_membership_wrong_type"
+
+
+def test_kma_refresh_failure_identity_must_match_the_resolved_membership() -> None:
+    """typed failure는 resolved membership과 **같은 행**을 가리켜야 한다.
+
+    이 단언이 사라지면 sync failure가 다른 dataset/scope 행에 기록된다 —
+    ``_raise_kma_refresh_failure``가 failure의 identity가 아니라 membership으로
+    기록하므로, 둘이 갈라진 채 진행하면 실패 사실이 엉뚱한 곳에 남는다.
+    """
+    membership = _grid_membership("target_grids")
+    foreign = ProviderDatasetRefreshFailure(
+        provider_dataset_id=membership.provider_dataset_id + 1,
+        sync_scope=membership.sync_scope,
+        operation_key=membership.operation_key,
+        message="boom",
+    )
+
+    with pytest.raises(RuntimeError, match="resolved membership과 일치하지 않음"):
+        _assert_failure_membership(foreign, membership)
+
+    # 대조: 같은 triple이면 통과한다.
+    _assert_failure_membership(
+        ProviderDatasetRefreshFailure(
+            provider_dataset_id=membership.provider_dataset_id,
+            sync_scope=membership.sync_scope,
+            operation_key=membership.operation_key,
+            message="boom",
+        ),
+        membership,
+    )

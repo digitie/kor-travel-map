@@ -377,6 +377,58 @@ async def test_list_rejects_cursor_from_different_filter_set_before_query() -> N
         )
 
 
+@pytest.mark.parametrize(
+    ("issued", "reused"),
+    [
+        (
+            {"dataset_sync_scopes": ("dataset_wide",)},
+            {"dataset_sync_scopes": ("target_grids",)},
+        ),
+        (
+            {"dataset_sync_scopes": ("dataset_wide",)},
+            {"dataset_sync_scopes": ("dataset_wide", "target_grids")},
+        ),
+        (
+            {"dataset_operation_key": "refresh_dataset_a"},
+            {"dataset_operation_key": "refresh_dataset_b"},
+        ),
+        (
+            {"dataset_operation_key": "refresh_dataset_a"},
+            {},
+        ),
+    ],
+)
+async def test_list_rejects_cursor_across_triple_filter_axes(
+    issued: dict[str, object],
+    reused: dict[str, object],
+) -> None:
+    """cursor fingerprint는 T-VN-33이 새로 넣은 두 축까지 덮어야 한다.
+
+    ``sync_scopes``/``operation_key``가 fingerprint payload에서 빠지면 필터를
+    바꾼 뒤에도 옛 keyset cursor가 유효한 것으로 받아들여져, 다른 필터 집합의
+    위치에서 페이지가 이어진다.
+    """
+    cursor = pipeline_repo._encode_cursor(
+        at=datetime(2026, 7, 15, tzinfo=UTC),
+        key="11111111-1111-1111-1111-111111111111",
+        item_kind="import_job",
+        filter_fingerprint=pipeline_repo._filter_fingerprint(
+            provider_dataset_id=1,
+            sync_scopes=tuple(issued.get("dataset_sync_scopes", ())),  # type: ignore[arg-type]
+            operation_key=issued.get("dataset_operation_key"),  # type: ignore[arg-type]
+            filter_sync_scopes="dataset_sync_scopes" in issued,
+        ),
+    )
+
+    with pytest.raises(PipelineCursorFilterMismatch, match="current filters"):
+        await list_pipeline_executions(
+            _NoQuerySession(),  # type: ignore[arg-type]
+            provider_dataset_id=1,
+            cursor=cursor,
+            **reused,  # type: ignore[arg-type]
+        )
+
+
 async def test_list_rejects_noncanonical_dataset_scope_before_query() -> None:
     with pytest.raises(ValueError, match="unsupported sync_scope"):
         await list_pipeline_executions(

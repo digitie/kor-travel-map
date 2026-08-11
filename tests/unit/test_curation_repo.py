@@ -1241,3 +1241,59 @@ async def test_import_rows_empty_changed_and_no_change(monkeypatch: pytest.Monke
     assert no_change["inserted"] == no_change["updated"] == no_change["removed"] == 0
     assert no_change["import_batch_id"] == "00000000-0000-4000-8000-000000000092"
     assert len(unchanged.calls) == 9
+
+
+@pytest.mark.parametrize(
+    ("frozen_h35_schema", "overrides", "message"),
+    [
+        # 현행 스키마: surrogate만 들어야 한다.
+        (False, {"provider_dataset_id": None}, "surrogate만"),
+        (
+            False,
+            {"provider_dataset_id": 101, "frozen_h35_dataset": ("p", "d")},
+            "surrogate만",
+        ),
+        (False, {"provider_dataset_id": None, "frozen_h35_dataset": ("p", "d")}, "surrogate만"),
+        # 0063~0079 고정 세대: 자연키만 들어야 한다.
+        (True, {"provider_dataset_id": 101, "frozen_h35_dataset": None}, "자연키만"),
+        (
+            True,
+            {"provider_dataset_id": 101, "frozen_h35_dataset": ("p", "d")},
+            "자연키만",
+        ),
+        (True, {"provider_dataset_id": None, "frozen_h35_dataset": None}, "자연키만"),
+    ],
+)
+def test_curation_dataset_identity_requires_exactly_one_generation_key(
+    frozen_h35_schema: bool,
+    overrides: dict[str, Any],
+    message: str,
+) -> None:
+    """세대별 dataset identity는 **정확히 한 쪽만** 채워야 한다.
+
+    ``provider_dataset_id``를 ``int | None``으로 푼 것은 고정 세대에 그 열이 없기
+    때문일 뿐이다. 현행 스키마 분기(``elif``)를 무르게 하면 NOT NULL surrogate
+    자리에 NULL이, 또는 삭제된 자연키 사본이 함께 흘러간다.
+    """
+    with pytest.raises(ValueError, match=message):
+        repo._ensure_curation_dataset_identity(
+            (_resolved_row(**overrides),),
+            frozen_h35_schema=frozen_h35_schema,
+        )
+
+
+@pytest.mark.parametrize(
+    ("frozen_h35_schema", "overrides"),
+    [
+        (False, {"provider_dataset_id": 101, "frozen_h35_dataset": None}),
+        (True, {"provider_dataset_id": None, "frozen_h35_dataset": ("p", "d")}),
+    ],
+)
+def test_curation_dataset_identity_accepts_the_matching_generation_key(
+    frozen_h35_schema: bool,
+    overrides: dict[str, Any],
+) -> None:
+    repo._ensure_curation_dataset_identity(
+        (_resolved_row(**overrides),),
+        frozen_h35_schema=frozen_h35_schema,
+    )

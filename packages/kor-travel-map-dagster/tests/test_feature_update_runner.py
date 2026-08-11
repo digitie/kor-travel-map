@@ -966,3 +966,116 @@ async def test_opinet_missing_key_is_typed_before_provider_client_auth_error() -
     assert str(failure) == "provider refresh resource initialization failed"
     assert isinstance(failure.__cause__, ProviderCredentialMissing)
     assert "KOR_TRAVEL_MAP_OPINET_API_KEY" in str(failure.__cause__)
+
+
+# -- spec 카탈로그 무결성 --------------------------------------------------
+
+
+async def _unused_run(_context: object) -> object:
+    raise AssertionError("spec 무결성 검사 전에 asset이 실행되면 안 된다")
+
+
+def _empty_resources(
+    _settings: KorTravelMapSettings,
+    _scope_value: ProviderDatasetRefreshScope,
+) -> RunnerResources:
+    return RunnerResources({})
+
+
+def test_runner_rejects_two_specs_claiming_the_same_operation_key() -> None:
+    """operation_key가 겹치는 spec은 조립 시점에 거부된다.
+
+    ``self._specs``는 ``{spec.operation_key: spec}`` dict라 중복이 있으면 나중 것이
+    앞의 것을 조용히 덮는다. 그러면 dispatch가 어느 asset으로 가는지가 선언 순서에
+    달리고, 같은 operation의 request가 등록된 것과 다른 asset을 탄다.
+    """
+    duplicated = tuple(
+        FeatureUpdateRunnerSpec(
+            operation_key="feature_place_opinet_stations_job",
+            run=_unused_run,
+            resources=_empty_resources,
+            asset_key=asset_key,
+        )
+        for asset_key in ("feature_place_opinet_stations", "feature_price_opinet_stations")
+    )
+
+    with pytest.raises(ValueError, match="operation_key must be unique"):
+        FeatureUpdateAssetRunner(
+            common_resources={
+                "kor_travel_map_client": object(),
+                "reverse_geocoder": None,
+                "fetched_at": None,
+                "strict_address": "off",
+            },
+            log=_Log(),
+            settings_factory=lambda: cast(KorTravelMapSettings, object()),
+            specs=duplicated,
+        )
+
+
+async def test_runner_rejects_a_spec_whose_asset_key_is_not_the_handler_asset() -> None:
+    """spec의 asset_key는 canonical operation handler가 선언한 asset이어야 한다.
+
+    이 대조가 없으면 request가 자기 operation의 asset이 아닌 코드로 dispatch되어,
+    frozen membership 그대로 **다른 dataset을 적재**한다. 정상 dispatch 경로는
+    ``test_feature_update_asset_runner_dispatches_asset_spec``이 덮는다.
+    """
+    runner = FeatureUpdateAssetRunner(
+        common_resources={
+            "kor_travel_map_client": object(),
+            "reverse_geocoder": None,
+            "fetched_at": None,
+            "strict_address": "off",
+        },
+        log=_Log(),
+        settings_factory=lambda: cast(KorTravelMapSettings, object()),
+        specs=(
+            FeatureUpdateRunnerSpec(
+                operation_key="feature_place_opinet_stations_job",
+                run=_unused_run,
+                resources=_empty_resources,
+                # 실재하는 asset이지만 이 operation의 handler asset은 아니다.
+                asset_key="feature_price_opinet_stations",
+            ),
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="asset_key가 canonical operation handler와 다름"):
+        await runner(object(), _scope(operation_key="feature_place_opinet_stations_job"))
+
+
+def test_mcst_runner_rejects_a_member_that_maps_to_no_registered_slug(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """MCST member는 등록 slug **정확히 하나**로 해석돼야 한다.
+
+    해석이 0건인데 그대로 진행하면 fetch가 slug 없이 돌아 빈 결과를 적재하고,
+    ``authoritative_snapshot_complete``인 MCST 적재 경로에서 그 dataset의 feature가
+    통째로 사라진다. 성공 경로는
+    ``test_mcst_runner_scopes_fetch_to_the_claimed_exact_member``가 덮는다.
+    """
+    fetch_calls: list[tuple[str, ...]] = []
+
+    def _fetch(
+        _settings: KorTravelMapSettings,
+        *,
+        slugs: tuple[str, ...],
+    ) -> tuple[object, ...]:
+        fetch_calls.append(slugs)
+        return ()
+
+    monkeypatch.setattr(runner_mod, "fetch_mcst_culture_records", _fetch)
+    registered = {spec.dataset_key for spec in runner_mod.MCST_FILE_DATASETS.values()}
+    unregistered = "mcst_dataset_key_that_is_not_registered"
+    assert unregistered not in registered
+
+    with pytest.raises(ValueError, match="정확히 하나의 registered source slug"):
+        runner_mod._mcst_resources(  # noqa: SLF001 - worker source boundary
+            cast(KorTravelMapSettings, object()),
+            _scope(
+                dataset_key=unregistered,
+                operation_key="feature_place_mcst_culture_job",
+            ),
+        )
+
+    assert fetch_calls == [], "거부해야 할 member가 provider fetch까지 갔다"

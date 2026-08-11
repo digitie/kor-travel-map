@@ -1,9 +1,25 @@
-"""Dagster Feature asset의 DB operation-key 기반 실행 추적 경계."""
+"""Dagster Feature asset의 DB operation-key 기반 실행 추적 경계.
+
+**실행 manifest 불변식** — run root에 frozen되는 member 집합은 "이 operation이
+실행할 수 있는 scope 전부"가 아니라 **이 run이 실제로 실행하는 scope 전부**다.
+두 집합은 다르다: ``provider_dataset_operation_scopes``는 operation의 *실행 가능*
+scope child(ADR-088 §결정 2)이고, ``ops.import_job_datasets``는 *이 run의 작업
+목록*이다. DB가 이미 후자를 요구한다 — ``reconcile_dagster_feature_run``은
+terminal ``SUCCESS``인데 frozen member 중 ``done``이 아닌 게 하나라도 있으면
+operation 전체를 ``failed``/``tracking_invariant``로 떨어뜨린다.
+
+그래서 manifest는 run 자신이 선언한다(``kor_travel_map.execution_scopes`` tag).
+tag가 있으면 그 자연키를 canonical resolver로 triple로 바꾸고, 없으면 operation의
+실행 가능 scope 전체가 manifest다. run tag는 guard(실행 중)와 reconcile
+sensor(실행 밖)가 **같은 값을 보는 유일한 채널**이므로, 둘이 서로 다른 selection을
+DB에 들이밀어 identity conflict를 내는 일이 없다.
+"""
 
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Mapping
+import json
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, TypeVar, cast
@@ -24,6 +40,8 @@ _MISSING = object()
 _OPERATION_KEY_TAG = "kor_travel_map.operation_key"
 _TRIGGER_KIND_TAG = "kor_travel_map.trigger_kind"
 _ADMIN_MANUAL_TRIGGER_TAG = "kor_travel_map.admin_manual_trigger"
+EXECUTION_SCOPES_TAG = "kor_travel_map.execution_scopes"
+"""run이 실행할 scope를 자연키로 선언하는 tag. 없으면 operation 전체가 manifest다."""
 
 
 class FeatureOperationExecutionBlocked(RuntimeError):
@@ -51,9 +69,27 @@ class FeatureOperationGuardUnavailable(RuntimeError):
         self.reason = reason
 
 
+@dataclass(frozen=True, slots=True, order=True)
+class DeclaredExecutionScope:
+    """run tag가 자연키로 선언한 실행 대상 1건.
+
+    자연키는 여기서 **해석 입력으로만** 쓰인다. DB에 저장되는 identity는 언제나
+    resolver가 돌려준 triple이다(ADR-088 §결정 2).
+    """
+
+    provider: str
+    dataset_key: str
+    sync_scope: str
+
+
 @dataclass(frozen=True, slots=True)
 class FeatureOperationExecutionGuard:
-    """실행 시작 시 DB에서 snapshot한 operation key와 canonical member."""
+    """실행 시작 시 DB에서 snapshot한 operation key와 canonical member.
+
+    ``memberships``는 이 run의 **실행 manifest**다 — operation이 실행 가능한 scope
+    전체가 아니라 이 run이 완료시킬 member 전부. ``declared_scopes``는 그 manifest를
+    만든 tag 선언이며, I/O 직전 재검증에서 run tag가 그대로인지 대조하는 데 쓴다.
+    """
 
     client: AsyncKorTravelMapClient
     instance: Any
@@ -61,6 +97,7 @@ class FeatureOperationExecutionGuard:
     memberships: tuple[ProviderDatasetOperationMembership, ...]
     dagster_run_id: str
     trigger_kind: TriggerKind | None
+    declared_scopes: tuple[DeclaredExecutionScope, ...] | None = None
 
     async def ensure(self) -> DagsterFeatureOperationMutation | None:
         """frozen member snapshot으로 authoritative lifecycle을 전진한다."""
@@ -111,6 +148,135 @@ def _trigger_kind(tags: Mapping[str, object]) -> TriggerKind | None:
     return "schedule" if _operation_key(tags) is not None else None
 
 
+def declared_execution_scopes(
+    tags: Mapping[str, object],
+    *,
+    boundary: str,
+) -> tuple[DeclaredExecutionScope, ...] | None:
+    """run tag의 실행 manifest 선언을 parse한다.
+
+    tag가 없으면 ``None``(= operation의 실행 가능 scope 전체가 manifest). tag가
+    있는데 모양이 틀리면 조용히 전체로 넓히지 않고 죽는다 — 넓히면 실행하지 않을
+    member까지 running으로 만들어 놓고 run이 끝나 tracking invariant가 깨진다.
+    """
+    raw = tags.get(EXECUTION_SCOPES_TAG)
+    if raw is None:
+        return None
+    if not isinstance(raw, str) or not raw.strip():
+        raise FeatureOperationGuardUnavailable(
+            boundary=boundary,
+            reason="execution_scopes_tag_malformed",
+        )
+    try:
+        payload = json.loads(raw)
+    except ValueError as exc:
+        raise FeatureOperationGuardUnavailable(
+            boundary=boundary,
+            reason="execution_scopes_tag_malformed",
+        ) from exc
+    if not isinstance(payload, list) or not payload:
+        raise FeatureOperationGuardUnavailable(
+            boundary=boundary,
+            reason="execution_scopes_tag_malformed",
+        )
+    scopes: list[DeclaredExecutionScope] = []
+    for entry in payload:
+        if not isinstance(entry, dict):
+            raise FeatureOperationGuardUnavailable(
+                boundary=boundary,
+                reason="execution_scopes_tag_malformed",
+            )
+        values = [entry.get("provider"), entry.get("dataset_key"), entry.get("sync_scope")]
+        if any(
+            not isinstance(value, str) or not value or value != value.strip()
+            for value in values
+        ):
+            raise FeatureOperationGuardUnavailable(
+                boundary=boundary,
+                reason="execution_scopes_tag_malformed",
+            )
+        provider, dataset_key, sync_scope = cast(list[str], values)
+        scopes.append(
+            DeclaredExecutionScope(
+                provider=provider,
+                dataset_key=dataset_key,
+                sync_scope=sync_scope,
+            )
+        )
+    if len(set(scopes)) != len(scopes):
+        raise FeatureOperationGuardUnavailable(
+            boundary=boundary,
+            reason="execution_scopes_tag_duplicated",
+        )
+    return tuple(scopes)
+
+
+def encode_execution_scopes(scopes: Sequence[DeclaredExecutionScope]) -> str:
+    """실행 manifest 선언을 run tag 값으로 직렬화한다."""
+    return json.dumps(
+        [
+            {
+                "provider": scope.provider,
+                "dataset_key": scope.dataset_key,
+                "sync_scope": scope.sync_scope,
+            }
+            for scope in scopes
+        ],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+
+async def resolve_run_execution_manifest(
+    client: AsyncKorTravelMapClient,
+    *,
+    operation_key: str,
+    declared: Sequence[DeclaredExecutionScope] | None,
+    boundary: str,
+) -> tuple[ProviderDatasetOperationMembership, ...]:
+    """run이 실행할 member를 확정한다 — guard와 sensor가 공유하는 단일 해석.
+
+    선언이 없으면 operation의 실행 가능 scope 전체가 manifest다(1:1 operation은
+    이 경로로 그대로 남는다). 선언이 있으면 각 자연키를 canonical resolver로 triple
+    로 바꾸고 실행 가능 집합 안에 있는지 확인한다 — 선언은 좁히기만 할 수 있고
+    카탈로그에 없는 대상을 만들어낼 수 없다.
+    """
+    executable = await client.resolve_feature_operation_memberships(
+        operation_key=operation_key,
+    )
+    if not executable:
+        raise FeatureOperationGuardUnavailable(
+            boundary=boundary,
+            reason="operation_has_no_enabled_memberships",
+        )
+    if declared is None:
+        return executable
+    resolved: list[ProviderDatasetOperationMembership] = []
+    for scope in declared:
+        try:
+            membership = await client.resolve_feature_operation_dataset_membership(
+                operation_key=operation_key,
+                provider=scope.provider,
+                dataset_key=scope.dataset_key,
+                sync_scope=scope.sync_scope,
+            )
+        except Exception as exc:
+            raise FeatureOperationGuardUnavailable(
+                boundary=boundary,
+                reason="execution_scope_not_in_catalog",
+            ) from exc
+        if membership not in executable:
+            raise FeatureOperationGuardUnavailable(
+                boundary=boundary,
+                reason="execution_scope_not_executable",
+            )
+        resolved.append(membership)
+    # ensure/reconcile은 selection을 정렬·중복제거한 형태로 비교한다
+    # (`_memberships`). guard가 같은 형태를 들고 있어야 두 번째 ensure에서
+    # identity conflict가 나지 않는다.
+    return tuple(sorted(set(resolved)))
+
+
 def _context_job_name(context: Any) -> str | None:
     job_name = getattr(context, "job_name", None)
     if not isinstance(job_name, str):
@@ -121,9 +287,17 @@ def _context_job_name(context: Any) -> str | None:
 def _context_run_id(context: Any) -> str | None:
     """run id를 얻되, 없으면 ``None``.
 
-    직접 호출된 asset context에서 ``.run``/``.run_id``는 ``AttributeError``가 아니라
-    ``DagsterInvalidPropertyError``를 던진다. ``getattr`` 기본값으로는 잡히지 않아
-    "없으면 None"이라는 이 함수의 계약이 깨졌다 — 예외도 부재로 본다.
+    예외를 부재로 접는 이유는 ``.run`` 때문이다. 직접 호출된 asset
+    context(``build_asset_context()``)에서 ``.run``은 ``AttributeError``가 아니라
+    ``DagsterInvalidPropertyError``를 던지므로 ``getattr`` 기본값으로는 잡히지 않고,
+    "없으면 None"이라는 이 함수의 계약이 깨진다.
+
+    ``.run_id``는 다르다 — 같은 context에서 예외 없이 문자열 ``"EPHEMERAL"``을
+    돌려준다(pinned dagster 실측). 그래서 이 함수는 직접 호출 context에서 ``None``이
+    아니라 ``"EPHEMERAL"``을 돌려주며, ``require_feature_operation_guard``의
+    run 일치 검사도 그 값으로 성립한다. 패키지 테스트가 그 계약을 상수로 들고 있다
+    (``test_kma_weather._DIRECT_INVOCATION_RUN_ID``,
+    ``test_notice_assets._DIRECT_INVOCATION_RUN_ID``).
     """
 
     def _probe(target: Any, name: str) -> Any:
@@ -218,6 +392,11 @@ async def ensure_authoritative_feature_operation_guard(
         raise FeatureOperationGuardUnavailable(boundary=boundary, reason="operation_key_mismatch")
     if _trigger_kind(tags) != guard.trigger_kind:
         raise FeatureOperationGuardUnavailable(boundary=boundary, reason="trigger_mismatch")
+    if declared_execution_scopes(tags, boundary=boundary) != guard.declared_scopes:
+        raise FeatureOperationGuardUnavailable(
+            boundary=boundary,
+            reason="execution_scopes_mismatch",
+        )
     await guard.ensure()
     return guard
 
@@ -264,14 +443,13 @@ async def _guard_from_context_async(
             dagster_run_id=run.run_id,
             trigger_kind=None,
         )
-    memberships = await client.resolve_feature_operation_memberships(
+    declared = declared_execution_scopes(tags, boundary="resource_init")
+    memberships = await resolve_run_execution_manifest(
+        client,
         operation_key=operation_key,
+        declared=declared,
+        boundary="resource_init",
     )
-    if not memberships:
-        raise FeatureOperationGuardUnavailable(
-            boundary="resource_init",
-            reason="operation_has_no_enabled_memberships",
-        )
     return FeatureOperationExecutionGuard(
         client=client,
         instance=context.instance,
@@ -279,6 +457,7 @@ async def _guard_from_context_async(
         memberships=memberships,
         dagster_run_id=run.run_id,
         trigger_kind=trigger_kind,
+        declared_scopes=declared,
     )
 
 
@@ -301,6 +480,15 @@ def feature_operation_guard_resource(
 def _single_membership_for_asset(
     guard: FeatureOperationExecutionGuard,
 ) -> ProviderDatasetOperationMembership:
+    """run 1회에 dataset 1개를 적재하는 asset의 member를 고른다.
+
+    여기서 요구하는 "1개"는 **operation이 실행 가능한 scope가 1개**라는 뜻이 아니라
+    **이 run의 manifest가 1개**라는 뜻이다. 그래서 dataset 여러 개를 묶은
+    operation(KNPS point 5, KNPS geometry 5)도 run이 manifest를 1건으로 선언하면
+    이 경로를 그대로 쓴다. asset 본문이 선언과 다른 dataset을 적재하면
+    ``_load`` 안의 ``_exact_sync_membership``이 manifest 밖 member로 판정해 죽는다 —
+    선언과 실행의 일치는 그쪽에서 검증된다.
+    """
     if len(guard.memberships) != 1:
         raise FeatureOperationGuardUnavailable(
             boundary="single_asset",
@@ -391,10 +579,15 @@ async def append_failed_multi_member_attempt(
 
 
 __all__ = [
+    "EXECUTION_SCOPES_TAG",
+    "DeclaredExecutionScope",
     "FeatureOperationExecutionBlocked",
     "FeatureOperationExecutionGuard",
     "FeatureOperationGuardUnavailable",
     "append_failed_multi_member_attempt",
+    "declared_execution_scopes",
+    "encode_execution_scopes",
+    "resolve_run_execution_manifest",
     "ensure_authoritative_feature_operation_guard",
     "ensure_feature_operation_guard_for_provider",
     "ensure_tracked_multi_member_asset",

@@ -9591,9 +9591,10 @@ export interface components {
          *     같은 ``sync_scope``를 공유할 수 있으므로, pair로 접으면 형제 operation의 상태가
          *     무경고로 사라진다 — 실패 중인 operation이 형제에 가려 보이지 않는다.
          *
-         *     ``operation_key``가 null인 행은 **실행 가능한 refresh operation이 없는 catalog
-         *     행**이다(실측 74개 dataset 중 18개). 그 행에는 결박할 실행 identity가 아예 없으며,
-         *     운영자에게는 catalog 존재·orphan 사유·issue를 보이기 위해 남긴다.
+         *     ``operation_key``가 null인 행은 **결박할 refresh membership이 없는 catalog 행**이다.
+         *     그 행에는 실행 identity가 아예 없으며, 운영자에게는 catalog 존재·orphan 사유·issue를
+         *     보이기 위해 남긴다. 개수는 DB마다 다르다 — ``0089_tvn33_expand_seed``가 legacy pair를
+         *     harvest하므로 개발/프로덕션 DB가 seed-only DB보다 많다.
          */
         OpsDatasetGridRow: {
             /** @description 같은 provider/dataset/sync_scope의 queued/running canonical operation. 더 최신 terminal 실행과 독립적으로 조회한다. */
@@ -9877,9 +9878,10 @@ export interface components {
             default_sync_scope: string;
             /**
              * Effect
+             * @description 이 capability로 제출할 수 있는 갱신 범위. `dataset_wide`는 기본 scope 행에서 전체 갱신만, `sync_scope`는 `allowed_sync_scopes` 중 선택, `none`은 **제출 가능한 scope가 없다**는 뜻이다. `none`은 갱신 불가 상태를 정상 `dataset_wide` 계약과 구분하기 위한 축이다 — 두 상태가 같은 값을 내면 소비자는 `reason` 문자열을 파싱하지 않는 한 구분할 수 없다.
              * @enum {string}
              */
-            effect: "dataset_wide" | "sync_scope";
+            effect: "dataset_wide" | "sync_scope" | "none";
             /** Reason */
             reason?: string | null;
             /**

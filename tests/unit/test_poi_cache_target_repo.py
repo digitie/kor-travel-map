@@ -477,6 +477,54 @@ async def test_link_upsert_skips_inactive_parent() -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("relation", ["", "nearby", "WITHIN_RADIUS", " manual"])
+async def test_link_upsert_rejects_relations_outside_the_whitelist(
+    relation: str,
+) -> None:
+    """``relation``은 DB CHECK와 같은 좁은 집합이다 — SQL에 닿기 전에 거부한다.
+
+    이 검사가 사라지면 화이트리스트 밖 값이 ``ON CONFLICT ... DO UPDATE SET
+    relation = EXCLUDED.relation``까지 흘러가 CHECK 위반 IntegrityError로 바뀌고,
+    ``relation = 'manual'`` 보존 규칙(운영자 link)이 어느 값에 적용되는지도
+    불분명해진다.
+    """
+    session = _Session(_Result([]))
+
+    with pytest.raises(ValueError, match="relation must be one of"):
+        await upsert_poi_cache_target_feature_link(
+            cast(Any, session),
+            target_id="11111111-1111-4111-8111-111111111111",
+            feature_id="feature-1",
+            relation=relation,
+        )
+
+    assert session.statements == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("relation", ["", "nearby", "WITHIN_RADIUS"])
+async def test_link_sync_rejects_candidate_relations_outside_the_whitelist(
+    relation: str,
+) -> None:
+    session = _Session(_Result([]))
+
+    with pytest.raises(ValueError, match="relation must be one of"):
+        await sync_poi_cache_target_feature_links(
+            cast(Any, session),
+            target_ids=("11111111-1111-4111-8111-111111111111",),
+            candidates=(
+                PoiCacheTargetFeatureLinkCandidate(
+                    target_id="11111111-1111-4111-8111-111111111111",
+                    feature_id="feature-a",
+                    provider_dataset_id=101,
+                    distance_m=12.5,
+                    relation=relation,
+                ),
+            ),
+        )
+
+
+@pytest.mark.unit
 async def test_link_sync_locks_all_parents_before_link_writes_in_uuid_order() -> None:
     at = datetime(2026, 7, 18, 12, 0, tzinfo=UTC)
     first_id = "11111111-1111-4111-8111-111111111111"

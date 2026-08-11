@@ -157,7 +157,7 @@ function datasetDetailPath(
     // 빈 문자열은 **보내지 않는다**. UI 내부에서 ""는 "실행 가능한 operation이
     // 없는 catalog 행"을 뜻하는 정규화 값인데(rowOperationKey), 서버의
     // `operation_key`는 `min_length=1`이라 `operation_key=`를 받으면 422다.
-    // 74개 dataset 중 17개가 그 행이라 빼먹으면 상세가 아예 열리지 않는다.
+    // 그 행은 seed에 실재하므로(개수는 DB마다 다르다) 빼먹으면 상세가 열리지 않는다.
     operation_key: operationKey || null,
   });
 }
@@ -172,7 +172,7 @@ function datasetPreviewPath(
     // 빈 문자열은 **보내지 않는다**. UI 내부에서 ""는 "실행 가능한 operation이
     // 없는 catalog 행"을 뜻하는 정규화 값인데(rowOperationKey), 서버의
     // `operation_key`는 `min_length=1`이라 `operation_key=`를 받으면 422다.
-    // 74개 dataset 중 17개가 그 행이라 빼먹으면 상세가 아예 열리지 않는다.
+    // 그 행은 seed에 실재하므로(개수는 DB마다 다르다) 빼먹으면 상세가 열리지 않는다.
     operation_key: operationKey || null,
   });
 }
@@ -207,6 +207,13 @@ export function fetchOpsDataset(
  * 조합이 모순되거나 target scope가 현재 allow-list에서 빠졌으면 fail-closed한다.
  * 일반 dataset도 canonical `dataset_wide` scope를 명시한다. 요청 경계는
  * provider/dataset 자연키나 nullable scope를 다시 받지 않는다.
+ *
+ * `effect: "none"`은 **제출 가능한 scope가 하나도 없다**는 서버 판정이다. 이 축이
+ * 없던 앞 판에서는 갱신 불가 dataset의 payload가 정상 dataset-wide capability와
+ * `reason` 문자열 하나만 달랐고, 이 함수는 허용 경로에서 `reason`을 읽지 않아
+ * `{allowed: true, syncScope: "dataset_wide"}`를 돌려줬다. 그 판정으로 '지금 갱신'
+ * 버튼이 켜졌고, 눌러도 `datasets-client`가 빈 `operationKey`에서 되돌아가 요청도
+ * 오류도 없이 아무 일이 일어나지 않았다.
  */
 export function resolveDatasetRefreshScope(
   capability: OpsDatasetScopeRefreshCapability | null | undefined,
@@ -214,6 +221,12 @@ export function resolveDatasetRefreshScope(
 ): DatasetRefreshScopeDecision {
   if (!capability) {
     return { allowed: false, reason: "갱신 scope capability가 없습니다." };
+  }
+  if (capability.effect === "none") {
+    return {
+      allowed: false,
+      reason: capability.reason ?? "이 dataset에 걸 수 있는 갱신 범위가 없습니다.",
+    };
   }
   if (capability.effect === "dataset_wide") {
     if (

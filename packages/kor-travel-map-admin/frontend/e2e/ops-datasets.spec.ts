@@ -122,6 +122,18 @@ function makeScheduleSummary(
   };
 }
 
+// 서버가 `is_refreshable=false`인 행에 내는 capability. `effect: "none"`은 "제출할 수
+// 있는 sync scope가 없다"는 뜻이고, 정상 dataset-wide 계약과 구분되는 유일한 축이다
+// (`ops_dataset_service._scope_refresh_capability`).
+const CATALOG_ONLY_SCOPE_REFRESH: OpsDatasetCatalogInfo["scope_refresh"] = {
+  allowed_sync_scopes: [],
+  default_sync_scope: "dataset_wide",
+  effect: "none",
+  reason: "이 dataset에는 실행 가능한 refresh runner가 없습니다.",
+  selector: "none",
+  supported: false,
+};
+
 function makeCatalog(
   overrides: Partial<OpsDatasetCatalogInfo> = {},
 ): OpsDatasetCatalogInfo {
@@ -2670,7 +2682,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     await expect(rowButton).toBeFocused();
   });
 
-  // 실행 가능한 refresh operation이 없는 catalog 전용 dataset(실측 74개 중 17~18개).
+  // 실행 가능한 refresh membership이 없는 catalog 전용 dataset(개수는 DB마다 다르다).
   // 서버는 이 행에 `operation_key: null`을 낸다. UI는 그것을 `""`로 정규화해 들고
   // 다니는데, 한 곳이라도 raw 값과 직접 비교하면 `null === ""`가 false가 되어
   // **상세가 통째로 렌더되지 않았다**(적대 리뷰 8라운드, 리뷰어 두 명이 독립 지목).
@@ -2688,6 +2700,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
       catalog: makeCatalog({
         label: "휴게소(카탈로그 전용)",
         is_refreshable: false,
+        scope_refresh: CATALOG_ONLY_SCOPE_REFRESH,
       }),
     });
     await mockOpsDatasets(page, {
@@ -2699,6 +2712,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
           catalog: makeCatalog({
             label: "휴게소(카탈로그 전용)",
             is_refreshable: false,
+            scope_refresh: CATALOG_ONLY_SCOPE_REFRESH,
           }),
           scopes: [
             {

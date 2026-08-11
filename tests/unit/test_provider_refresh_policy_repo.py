@@ -123,3 +123,36 @@ async def test_upsert_distinguishes_omitted_and_explicit_provenance() -> None:
     assert omitted_params["rate_limit_source_provided"] is False
     assert explicit_params["rate_limit_source"] == "{}"
     assert explicit_params["rate_limit_source_provided"] is True
+
+
+class _RefusingSession:
+    """검증 실패 경로가 SQL에 닿으면 안 된다."""
+
+    async def execute(self, *_args: Any, **_kwargs: Any) -> Any:
+        raise AssertionError("검증 실패 경로는 SQL을 실행하면 안 된다")
+
+
+_BIGINT_MAX = 9_223_372_036_854_775_807
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "provider_dataset_id",
+    [0, -1, _BIGINT_MAX + 1, True, False],
+)
+async def test_upsert_rejects_out_of_range_dataset_surrogate(
+    provider_dataset_id: object,
+) -> None:
+    """surrogate 범위 검사는 SQL에 닿기 전에 죽어야 한다.
+
+    ``provider_dataset_id``는 BIGINT PK다 — 0·음수는 어떤 행도 가리키지 않고
+    범위를 넘는 값은 드라이버 단에서 터진다. 이 절이 사라지면 잘못된 값이 그대로
+    ON CONFLICT upsert 파라미터로 흘러간다.
+    """
+    with pytest.raises(ValueError, match="provider_dataset_id must be a positive BIGINT"):
+        await upsert_provider_refresh_policy(
+            cast(Any, _RefusingSession()),
+            provider_dataset_id=cast(Any, provider_dataset_id),
+            source_kind="openapi",
+            expected_revision=None,
+        )

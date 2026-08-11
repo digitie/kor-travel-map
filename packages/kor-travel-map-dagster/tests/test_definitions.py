@@ -16,14 +16,24 @@ from dagster._core.remote_origin import (
     RemoteRepositoryOrigin,
 )
 from kortravelmap.providers.datagokr_file_data import DATAGOKR_FILEDATA_DATASETS
+from kortravelmap.providers.knps import PROVIDER_NAME as KNPS_PROVIDER_NAME
+from kortravelmap.settings import KorTravelMapSettings
 
 from kortravelmap.dagster.assets import FEATURE_LOAD_ASSETS, FEATURE_LOAD_RETRY_POLICY
 from kortravelmap.dagster.definitions import defs
+from kortravelmap.dagster.feature_operation_tracking import (
+    EXECUTION_SCOPES_TAG,
+    DeclaredExecutionScope,
+    declared_execution_scopes,
+)
 from kortravelmap.dagster.resources import PROVIDER_RECORD_RESOURCE_SPECS
 from kortravelmap.dagster.schedules import (
+    _KNPS_GEOMETRY_SCHEDULE,
+    _KNPS_POINT_SCHEDULE,
     FEATURE_LOAD_SCHEDULE_SPECS,
     FEATURE_LOAD_SCHEDULES,
     KST_TIMEZONE,
+    knps_schedule_binding,
 )
 
 pytestmark = pytest.mark.filterwarnings(
@@ -344,6 +354,107 @@ def test_krex_traffic_notices_schedule_requests_run_without_non_terminal_run() -
         assert tick.run_requests[0].tags["kor_travel_map.trigger_kind"] == "schedule"
 
 
+def test_job_definition_tags_carry_the_execution_manifest_declaration() -> None:
+    """실행 manifest 선언은 **job 정의 tag**에도 실려야 한다.
+
+    schedule tag는 schedule이 띄운 run에만 붙는다. schedule을 거치지 않는 job 단위
+    launch(admin UI "지금 실행" → GraphQL)의 run tag는 job 정의 tag에서 온다. 선언이
+    정의 tag에 없으면 그 run만 manifest가 operation 전체로 넓어져, guard가 실행하지도
+    않을 member까지 running으로 만든다.
+
+    그래서 여기서는 helper가 아니라 **빌드된 job 정의 객체**(``defs.resolve_job_def``)
+    의 tag를 본다 — helper만 보면 ``define_asset_job(tags=...)`` 연결이 끊겨도 통과한다.
+    """
+    declaring = [spec for spec in FEATURE_LOAD_SCHEDULE_SPECS if spec.execution_scopes]
+    # 선언하는 spec이 하나도 없으면 아래 루프가 공회전한다 — 전제를 단언으로 박는다.
+    assert {spec.job_name for spec in declaring} == {
+        "feature_place_knps_points_job",
+        "feature_geometry_knps_records_job",
+        "feature_weather_kma_ultra_short_nowcast_job",
+        "feature_weather_kma_ultra_short_forecast_job",
+        "feature_weather_kma_short_forecast_job",
+    }
+    for spec in declaring:
+        job_tags = defs.resolve_job_def(spec.job_name).tags
+        schedule_tags = defs.resolve_schedule_def(spec.schedule_name).tags
+        assert EXECUTION_SCOPES_TAG in job_tags, (
+            f"{spec.job_name} 정의 tag에 실행 manifest 선언이 없다 — "
+            "수동 launch가 operation 전체를 manifest로 잡는다"
+        )
+        assert job_tags[EXECUTION_SCOPES_TAG] == schedule_tags[EXECUTION_SCOPES_TAG]
+        assert (
+            declared_execution_scopes(job_tags, boundary="test") == spec.execution_scopes
+        )
+
+
+def test_specs_without_declaration_leave_the_manifest_tag_off() -> None:
+    """선언이 없는 spec은 tag를 붙이지 않는다 — 빈 선언으로 죽이지 않는다.
+
+    ``declared_execution_scopes``는 tag 부재를 "operation 전체가 manifest"로 읽고,
+    빈 리스트는 ``execution_scopes_tag_malformed``로 거부한다. 1:1 operation이 빈
+    tag를 달면 전부 그 자리에서 죽는다.
+    """
+    for spec in FEATURE_LOAD_SCHEDULE_SPECS:
+        if spec.execution_scopes:
+            continue
+        assert EXECUTION_SCOPES_TAG not in defs.resolve_job_def(spec.job_name).tags
+        assert EXECUTION_SCOPES_TAG not in defs.resolve_schedule_def(spec.schedule_name).tags
+
+
+def test_knps_schedule_binding_follows_the_operator_dataset_key_setting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``KOR_TRAVEL_MAP_KNPS_*_DATASET_KEY`` 노브가 살아 있고, 한 값만 낳는다.
+
+    schedule이 run_config로 dataset을 고정하면서 이 노브는 죽을 수 있었다 —
+    ``knps_*_dataset_key``·``knps_*_records`` resource가 둘 다 run_config를 먼저
+    보기 때문이다. 그래서 run_config와 실행 manifest 선언을 같은 읽기에서 만든다.
+    이 테스트는 노브를 눌렀을 때 (1) run_config가 따라오고 (2) 선언이 **같은**
+    dataset을 가리키는지를 함께 본다.
+    """
+    monkeypatch.setenv("KOR_TRAVEL_MAP_KNPS_POINT_DATASET_KEY", "knps_campgrounds")
+
+    binding = knps_schedule_binding(
+        setting_name="knps_point_dataset_key",
+        dataset_key_resource="knps_point_dataset_key",
+        records_resource="knps_point_records",
+    )
+
+    assert binding.dataset_key == "knps_campgrounds"
+    assert binding.run_config == {
+        "resources": {
+            "knps_point_dataset_key": {"config": {"dataset_key": "knps_campgrounds"}},
+            "knps_point_records": {"config": {"dataset_key": "knps_campgrounds"}},
+        }
+    }
+    assert binding.execution_scopes == (
+        DeclaredExecutionScope(
+            provider=KNPS_PROVIDER_NAME,
+            dataset_key="knps_campgrounds",
+            sync_scope="dataset_wide",
+        ),
+    )
+
+
+def test_knps_schedule_specs_use_the_settings_dataset_key() -> None:
+    """schedule이 쓰는 KNPS dataset key는 settings 값과 **같은 객체에서** 나온다.
+
+    예전에는 ``schedules``에 상수 사본이 있어 ``settings`` 기본값과 갈라질 수 있었다.
+    지금은 사본이 없다는 것을 여기서 못 박는다.
+    """
+    settings = KorTravelMapSettings()
+    assert _KNPS_POINT_SCHEDULE.dataset_key == settings.knps_point_dataset_key
+    assert _KNPS_GEOMETRY_SCHEDULE.dataset_key == settings.knps_geometry_dataset_key
+
+    specs = {spec.job_name: spec for spec in FEATURE_LOAD_SCHEDULE_SPECS}
+    point = specs["feature_place_knps_points_job"]
+    geometry = specs["feature_geometry_knps_records_job"]
+    assert point.run_config == _KNPS_POINT_SCHEDULE.run_config
+    assert point.execution_scopes == _KNPS_POINT_SCHEDULE.execution_scopes
+    assert geometry.run_config == _KNPS_GEOMETRY_SCHEDULE.run_config
+    assert geometry.execution_scopes == _KNPS_GEOMETRY_SCHEDULE.execution_scopes
+
+
 def test_freshness_sensitive_jobs_have_two_hour_runtime_tag() -> None:
     assert MAX_RUNTIME_SECONDS_TAG == "dagster/max_runtime"
 
@@ -371,9 +482,12 @@ def test_datagokr_file_data_schedules_cover_all_curated_datasets() -> None:
         run_config = spec.run_config
         if run_config is None:
             continue
-        dataset_key = run_config["resources"]["datagokr_file_data_dataset_key"][
-            "config"
-        ]["dataset_key"]
+        # run_config를 가진 spec이 datagokr뿐이라고 가정하지 않는다 — KNPS schedule도
+        # 실행 dataset을 run_config로 고정한다.
+        datagokr_config = run_config["resources"].get("datagokr_file_data_dataset_key")
+        if datagokr_config is None:
+            continue
+        dataset_key = datagokr_config["config"]["dataset_key"]
         if dataset_key in DATAGOKR_FILEDATA_DATASETS:
             specs[dataset_key] = spec
 

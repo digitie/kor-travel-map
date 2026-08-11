@@ -397,9 +397,14 @@ async def _exact_kma_sync_membership(
     """scheduled/queue 실행 모두에서 DB exact membership만 sync-state에 쓴다.
 
     queue worker는 request를 claim할 때 고정한 typed membership resource를 넘긴다.
-    scheduled run은 feature-operation guard의 operation key로 core resolver를 다시
-    조회해, guard snapshot과 동일한 enabled membership 하나만 허용한다. provider나
-    dataset label에서 membership을 역산하는 fallback은 두지 않는다.
+    scheduled run은 guard가 고정한 **실행 manifest**를 쓴다. provider나 dataset
+    label에서 membership을 역산하는 fallback은 두지 않는다.
+
+    KMA 격자 dataset은 카탈로그에 scope가 둘이다(``dataset_wide`` +
+    ``target_grids``, ``0089_tvn33_expand_seed``). 그중 ``dataset_wide``는 이 asset과
+    queue runner 양쪽이 명시적으로 거부하므로 실행 경로가 없다. 따라서 run은
+    ``target_grids``만 실행 manifest로 선언하고, 여기서 요구하는 "manifest 1건"은 그
+    선언을 확인하는 것이지 카탈로그 scope가 1개라는 주장이 아니다.
     """
     resource_membership = await _resource_value(
         context,
@@ -420,20 +425,20 @@ async def _exact_kma_sync_membership(
                 boundary="kma_sync_state",
                 reason="operation_key_missing",
             )
-        memberships = await client.resolve_feature_operation_memberships(
+        executable = await client.resolve_feature_operation_memberships(
             operation_key=guard.operation_key,
         )
-        if memberships != guard.memberships:
+        if not set(guard.memberships) <= set(executable):
             raise FeatureOperationGuardUnavailable(
                 boundary="kma_sync_state",
                 reason="membership_snapshot_changed",
             )
-        if len(memberships) != 1:
+        if len(guard.memberships) != 1:
             raise FeatureOperationGuardUnavailable(
                 boundary="kma_sync_state",
                 reason="operation_requires_exactly_one_membership",
             )
-        membership = memberships[0]
+        membership = guard.memberships[0]
     if expected_sync_scope is not None and membership.sync_scope != expected_sync_scope:
         raise FeatureOperationGuardUnavailable(
             boundary="kma_sync_state",

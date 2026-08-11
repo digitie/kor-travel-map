@@ -1606,10 +1606,21 @@ async def _exact_sync_membership(
 
     획득 경로는 ``kma_weather._exact_kma_sync_membership``과 같은 계약이다:
     queue worker가 request를 claim할 때 고정한 typed membership resource가 있으면
-    그것을 쓰고, 없으면 feature-operation guard의 operation key로 다시 조회해
-    guard snapshot과 동일한 enabled membership 하나만 허용한다.
+    그것을 쓰고, 없으면 guard가 고정한 **실행 manifest** 안에서 고른다.
     **provider나 dataset label에서 membership을 역산하는 fallback은 두지 않는다** —
     그렇게 하면 guard가 고정한 실행 대상과 다른 행에 cursor를 쓸 수 있다.
+
+    카탈로그 drift 검사는 "manifest == 실행 가능 집합"이 아니라 **"manifest ⊆ 실행
+    가능 집합"**이다. run은 operation의 실행 가능 scope 중 일부만 실행 manifest로
+    선언할 수 있고(``EXECUTION_SCOPES_TAG``), 그때 두 집합은 같지 않다. 같기를
+    요구하면 dataset을 여러 개 묶은 operation의 적재가 여기서 죽는다 —
+    ``0089_tvn33_expand_seed``는 ``feature_place_knps_points_job``과
+    ``feature_geometry_knps_records_job``에 각각 dataset 5개를 결박하는데 asset은
+    run 1회에 1개만 적재한다.
+
+    KMA 격자 dataset은 이 함수를 타지 않는다. 같은 계약의 게이트가
+    ``kma_weather._exact_kma_sync_membership``에 따로 있고, KMA weather asset은
+    그쪽만 호출한다.
     """
 
     resource_membership = await _resource_value(
@@ -1631,10 +1642,10 @@ async def _exact_sync_membership(
             boundary=boundary,
             reason="operation_key_missing",
         )
-    memberships = await client.resolve_feature_operation_memberships(
+    executable = await client.resolve_feature_operation_memberships(
         operation_key=guard.operation_key,
     )
-    if memberships != guard.memberships:
+    if not set(guard.memberships) <= set(executable):
         raise FeatureOperationGuardUnavailable(
             boundary=boundary,
             reason="membership_snapshot_changed",
@@ -1642,13 +1653,13 @@ async def _exact_sync_membership(
     # 한 operation이 여러 dataset을 다루는 경우가 있다(예: KNPS point는 5개).
     # 그래서 "정확히 하나"로는 고를 수 없고, **이번 호출이 적재한 dataset**으로
     # 좁힌다. operation은 여전히 guard가 준 것이므로 label에서 역산하는 것이
-    # 아니다 — guard가 고정한 membership 집합 안에서 고르기만 한다.
+    # 아니다 — guard가 고정한 manifest 안에서 고르기만 한다.
     membership = await client.resolve_feature_operation_dataset_membership(
         operation_key=guard.operation_key,
         provider=provider,
         dataset_key=dataset_key,
     )
-    if membership not in memberships:
+    if membership not in guard.memberships:
         raise FeatureOperationGuardUnavailable(
             boundary=boundary,
             reason="membership_outside_guard_snapshot",

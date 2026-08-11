@@ -5,10 +5,18 @@ scope는 PostgreSQL이 소유한다. 이 모듈은 그 relation을 읽어 API/Da
 불변 projection으로 조립할 뿐 provider 상수나 fixture 목록을 들고 있지 않다.
 
 ``operation_key``의 실행 handler는 main package의
-``feature_operation_registry``가 소유한다. DB의 활성 refresh operation key 집합과
-그 handler key 집합은 배포 전 exact-set으로 대조한다. 따라서 seed에 새 operation을
-넣고 handler를 빼먹거나, 제거한 operation의 handler를 남기는 어느 경우도
-fail-closed 한다.
+``feature_operation_registry``가 소유한다. ``assert_active_operation_handler_exact_set``
+이 DB의 활성 refresh operation key 집합과 handler key 집합을 exact-set으로 대조하고,
+seed에 새 operation을 넣고 handler를 빼먹는 경우(missing)와 제거한 operation의
+handler를 남기는 경우(stale)를 각각 fail-closed 한다.
+
+**이 함수를 부르는 프로덕션 경로는 없다** — 앱 startup·배포 스크립트·Dagster 어디에도
+호출자가 없다. 지금 이 대조를 강제하는 곳은 ``tests/integration/test_provider_catalog.py``
+하나이고, alembic head를 적용한 DB에 대고 CI의 pytest integration 게이트에서 돈다.
+seed에는 Dagster handler가 없는 활성 refresh operation이 있어서(그 테스트가 명시
+목록으로 제외하고, 목록이 실제 차집합과 정확히 같은지도 함께 단언한다) 제외 없이
+그대로 호출하면 오늘의 seed에서 drift로 실패한다. 배포 게이트로 결선하려면 그 제외
+축을 먼저 프로덕션 쪽으로 옮겨야 한다.
 """
 
 from __future__ import annotations
@@ -167,7 +175,26 @@ class ProviderDatasetCatalogEntry:
 
     @property
     def is_refreshable(self) -> bool:
-        return self.is_active and bool(self.enabled_refresh_operations)
+        """이 dataset에 갱신 요청을 걸 수 있는 membership이 있는가.
+
+        활성 dataset이면서 enabled refresh operation이 sync scope를 **하나 이상
+        선언**해야 한다. operation은 enabled인데 ``provider_dataset_operation_scopes``
+        행이 하나도 없으면 요청에 실을 ``(dataset, sync_scope, operation)`` triple이
+        아예 없다 — 그 상태는 스키마가 허용한다(그 테이블에 "operation당 최소 1행"
+        제약이 없다). enabled operation의 존재만 보던 앞 판은 그 dataset을
+        ``is_refreshable=true``로 투영했고, 화면은 걸 수 없는 갱신을 걸 수 있다고 읽었다.
+        """
+        return self.is_active and bool(self.refresh_scopes)
+
+    @property
+    def declares_default_refresh_scope(self) -> bool:
+        """DB가 이 dataset에 기본 refresh scope를 선언했는가.
+
+        ``default_refresh_scope``가 degrade한 값을 돌려준 것인지 DB가 실제로 선언한
+        값인지 caller가 구분할 수 있어야 한다. 이 값이 ``False``인데
+        ``is_refreshable``이 ``True``면 카탈로그가 불완전한 상태다.
+        """
+        return "target_grids" in self.refresh_scopes or "dataset_wide" in self.refresh_scopes
 
     @property
     def default_refresh_scope(self) -> str:
@@ -175,14 +202,28 @@ class ProviderDatasetCatalogEntry:
 
         target grid dataset은 전체 dataset 갱신과 별개로 운영자가 target scope를
         선택하는 것이 유용하므로 target_grids를 우선한다. 나머지는 dataset_wide다.
+
+        선언이 아예 없으면 ``dataset_wide``로 degrade한다. 이 property는 읽기
+        projection이고, **스키마가 허용하는 상태에서 죽으면 안 된다** — 앞 판은 여기서
+        ``ValueError``를 던졌고 ``_catalog_info``가 ``is_refreshable``인 행마다 무조건
+        이 값을 읽으므로 ``/ops/datasets`` 그리드 루프 전체가 500이 됐다. 도달 상태 두
+        가지가 모두 스키마 허용이다.
+
+        1. enabled refresh operation은 있는데 scope 행이 0개 —
+           ``provider_dataset_operation_scopes``에 "operation당 최소 1행" 제약이 없다.
+        2. 유일한 scope가 ``external_system:*`` —
+           ``is_valid_provider_dataset_sync_scope``가 그 형태를 허용한다.
+
+        degrade한 값은 **표시 기본값**에만 쓰인다. 실행 허용 목록은 별도로
+        ``refresh_scopes``(=API의 ``allowed_sync_scopes``)이고 두 상태 모두 거기에
+        ``dataset_wide``가 없으므로, degrade가 없는 membership을 실행 대상으로
+        넓히지 않는다. 선언 유무는 ``declares_default_refresh_scope``로 구분하고,
+        갱신 제출 가능 여부는 ``is_refreshable``(상태 1을 배제한다)과
+        ``OpsDatasetScopeRefreshCapability.effect``(``"none"``)가 따로 낸다.
         """
         if "target_grids" in self.refresh_scopes:
             return "target_grids"
-        if "dataset_wide" in self.refresh_scopes:
-            return "dataset_wide"
-        raise ValueError(
-            "refresh operation must declare dataset_wide or target_grids default scope"
-        )
+        return "dataset_wide"
 
     @property
     def supports_targeted_refresh(self) -> bool:

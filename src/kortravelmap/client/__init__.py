@@ -975,14 +975,20 @@ class AsyncKorTravelMapClient:
         operation_key: str,
         provider: str,
         dataset_key: str,
+        sync_scope: str | None = None,
     ) -> ProviderDatasetOperationMembership:
-        """provider callback의 runtime dataset을 exact canonical member로 바꾼다."""
+        """provider callback의 runtime dataset을 exact canonical member로 바꾼다.
+
+        dataset이 한 operation 아래 scope를 여러 개 갖는 경우(KMA 격자 dataset)는
+        ``sync_scope``까지 주어야 exact 해석이 된다.
+        """
         async with self._session_factory() as session, session.begin():
             return await repo_resolve_operation_dataset_member(
                 session,
                 operation_key=operation_key,
                 provider=provider,
                 dataset_key=dataset_key,
+                sync_scope=sync_scope,
             )
 
     async def load_feature_bundles(self, bundles: Iterable[FeatureBundle]) -> FeatureLoadResult:

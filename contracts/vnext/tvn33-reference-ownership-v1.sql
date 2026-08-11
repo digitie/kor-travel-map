@@ -33,61 +33,204 @@ CREATE TRIGGER trg_provider_dataset_operation_scopes_active_dataset_write
     BEFORE INSERT OR UPDATE OR DELETE ON provider_sync.provider_dataset_operation_scopes
     FOR EACH ROW EXECUTE FUNCTION provider_sync.reject_inactive_provider_dataset();
 
-CREATE FUNCTION provider_sync.assert_active_provider_dataset_scope(
-    dataset_id bigint,
-    scope_value text
-)
-RETURNS void
-LANGUAGE plpgsql
-SET search_path = pg_catalog
-AS $$
-BEGIN
-    PERFORM 1
-    FROM provider_sync.provider_dataset_operation_scopes AS scope
-    JOIN provider_sync.provider_dataset_operations AS operation
-      ON operation.provider_dataset_id = scope.provider_dataset_id
-     AND operation.operation_key = scope.operation_key
-     AND operation.operation_kind = scope.operation_kind
-    JOIN provider_sync.provider_datasets AS dataset
-      ON dataset.provider_dataset_id = scope.provider_dataset_id
-    WHERE scope.provider_dataset_id = dataset_id
-      AND scope.sync_scope = scope_value
-      AND operation.is_enabled
-      AND dataset.is_active
-    FOR SHARE OF dataset, operation;
-    IF NOT FOUND THEN
-        RAISE EXCEPTION 'dataset scope is absent or disabled for normal writes'
-            USING ERRCODE = '23514', CONSTRAINT = 'ck_provider_dataset_scope_active_write';
-    END IF;
-END;
-$$;
-
-CREATE FUNCTION provider_sync.reject_inactive_provider_dataset_scope()
+-- dataset 활성 가드의 DELETE 면제 — alembic 0092가 같은 본문으로 재정의한다.
+-- target-schema-v1.sql 판은 `IF TG_OP <> 'INSERT'`로 UPDATE와 DELETE 양쪽에서 OLD쪽
+-- 활성 검사를 돌았다. 그래서 dataset을 비활성화하면 이 가드가 붙은 테이블들의 행을
+-- **지울 수도** 없었고, 위 scope 행이 그 대표다(FK ON DELETE RESTRICT 사슬의 위쪽).
+-- DELETE는 새 실행을 거는 write가 아니라 정리이므로 OLD쪽 검사를 건너뛴다. UPDATE의
+-- OLD쪽 검사는 그대로다 — violation-fixtures-v1.sql의
+-- `inactive_dataset_existing_operation_update`가 그 거부를 못박고 있다.
+CREATE OR REPLACE FUNCTION provider_sync.reject_inactive_provider_dataset()
 RETURNS trigger
 LANGUAGE plpgsql
 SET search_path = pg_catalog
 AS $$
 BEGIN
     IF TG_OP = 'UPDATE'
-       AND (OLD.provider_dataset_id, OLD.sync_scope)
-           IS DISTINCT FROM (NEW.provider_dataset_id, NEW.sync_scope)
+       AND OLD.provider_dataset_id IS DISTINCT FROM NEW.provider_dataset_id
     THEN
-        RAISE EXCEPTION 'provider dataset scope ownership is immutable'
-            USING ERRCODE = '23514', CONSTRAINT = 'ck_provider_dataset_scope_ownership_immutable';
+        RAISE EXCEPTION 'provider dataset ownership is immutable'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_provider_dataset_ownership_immutable';
     END IF;
-    IF TG_OP <> 'INSERT' THEN
-        PERFORM provider_sync.assert_active_provider_dataset_scope(
-            OLD.provider_dataset_id, OLD.sync_scope
-        );
+    IF TG_OP = 'UPDATE' THEN
+        PERFORM provider_sync.assert_active_provider_dataset(OLD.provider_dataset_id);
     END IF;
     IF TG_OP <> 'DELETE' THEN
-        PERFORM provider_sync.assert_active_provider_dataset_scope(
-            NEW.provider_dataset_id, NEW.sync_scope
-        );
+        PERFORM provider_sync.assert_active_provider_dataset(NEW.provider_dataset_id);
     END IF;
     IF TG_OP = 'DELETE' THEN
         RETURN OLD;
     END IF;
+    RETURN NEW;
+END;
+$$;
+
+-- 실행 membership 4테이블(provider_sync_state / import_job_datasets /
+-- feature_update_request_datasets / offline_uploads)의 활성 가드.
+--
+-- 이 자리에는 원래 pair 시절 guard 한 쌍
+-- (`assert_active_provider_dataset_scope(bigint,text)` /
+--  `reject_inactive_provider_dataset_scope()`)이 있었고 4테이블이 그것을 공유했다.
+-- 그 술어는 행의 `operation_key`를 보지 않아서, 같은 (dataset, scope)에 형제
+-- operation이 있으면 **하나라도 enabled면** disabled operation에 결박된 행이
+-- 통과했다. T-VN-33이 identity를 triple로 올린 이상 가드도 triple이어야 하므로
+-- alembic 0091이 테이블마다 자기 축을 보는 가드로 분리했다(0092가 offline upload
+-- 정리 write 예외를 덧붙였다). 계약은 그 head 정의를 그대로 옮긴다 —
+-- `test_frozen_contract_matches_alembic_head`가 두 정의를 기계 대조한다.
+
+CREATE FUNCTION provider_sync.reject_inactive_sync_state_operation()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = pg_catalog
+AS $$
+DECLARE target_dataset_id bigint :=
+    COALESCE(NEW.provider_dataset_id, OLD.provider_dataset_id);
+    target_scope text := COALESCE(NEW.sync_scope, OLD.sync_scope);
+    target_operation_key text := COALESCE(NEW.operation_key, OLD.operation_key);
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM provider_sync.provider_dataset_operation_scopes AS scope
+        JOIN provider_sync.provider_dataset_operations AS operation
+          ON operation.provider_dataset_id = scope.provider_dataset_id
+         AND operation.operation_key = scope.operation_key
+         AND operation.operation_kind = scope.operation_kind
+        JOIN provider_sync.provider_datasets AS dataset
+          ON dataset.provider_dataset_id = scope.provider_dataset_id
+        WHERE scope.provider_dataset_id = target_dataset_id
+          AND scope.sync_scope = target_scope
+          AND scope.operation_key = target_operation_key
+          AND scope.operation_kind = 'refresh'
+          AND dataset.is_active
+          AND operation.is_enabled
+    ) THEN
+        RAISE EXCEPTION 'inactive refresh operation cannot receive sync state writes'
+            USING ERRCODE = '23514',
+                CONSTRAINT = 'ck_provider_dataset_active_write';
+    END IF;
+    IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE FUNCTION provider_sync.reject_inactive_import_job_dataset_membership()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = pg_catalog
+AS $$
+DECLARE target_dataset_id bigint :=
+    COALESCE(NEW.provider_dataset_id, OLD.provider_dataset_id);
+    target_scope text := COALESCE(NEW.sync_scope, OLD.sync_scope);
+    target_operation_key text := COALESCE(NEW.operation_key, OLD.operation_key);
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM provider_sync.provider_dataset_operation_scopes AS scope
+        JOIN provider_sync.provider_dataset_operations AS operation
+          ON operation.provider_dataset_id = scope.provider_dataset_id
+         AND operation.operation_key = scope.operation_key
+         AND operation.operation_kind = scope.operation_kind
+        JOIN provider_sync.provider_datasets AS dataset
+          ON dataset.provider_dataset_id = scope.provider_dataset_id
+        WHERE scope.provider_dataset_id = target_dataset_id
+          AND scope.sync_scope = target_scope
+          AND scope.operation_key = target_operation_key
+          AND dataset.is_active
+          AND operation.is_enabled
+    ) THEN
+        RAISE EXCEPTION 'inactive dataset member cannot receive import job writes'
+            USING ERRCODE = '23514',
+                CONSTRAINT = 'ck_provider_dataset_active_write';
+    END IF;
+    IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE FUNCTION provider_sync.reject_inactive_feature_update_request_dataset_membership()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = pg_catalog
+AS $$
+DECLARE target_dataset_id bigint :=
+    COALESCE(NEW.provider_dataset_id, OLD.provider_dataset_id);
+    target_scope text := COALESCE(NEW.sync_scope, OLD.sync_scope);
+    target_operation_key text := COALESCE(NEW.operation_key, OLD.operation_key);
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM provider_sync.provider_dataset_operation_scopes AS scope
+        JOIN provider_sync.provider_dataset_operations AS operation
+          ON operation.provider_dataset_id = scope.provider_dataset_id
+         AND operation.operation_key = scope.operation_key
+         AND operation.operation_kind = scope.operation_kind
+        JOIN provider_sync.provider_datasets AS dataset
+          ON dataset.provider_dataset_id = scope.provider_dataset_id
+        WHERE scope.provider_dataset_id = target_dataset_id
+          AND scope.sync_scope = target_scope
+          AND scope.operation_key = target_operation_key
+          AND dataset.is_active
+          AND operation.is_enabled
+    ) THEN
+        RAISE EXCEPTION 'inactive dataset member cannot receive update request writes'
+            USING ERRCODE = '23514',
+                CONSTRAINT = 'ck_provider_dataset_active_write';
+    END IF;
+    IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE FUNCTION provider_sync.reject_inactive_offline_upload_membership()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = pg_catalog
+AS $$
+DECLARE target_dataset_id bigint :=
+    COALESCE(NEW.provider_dataset_id, OLD.provider_dataset_id);
+    target_scope text := COALESCE(NEW.sync_scope, OLD.sync_scope);
+    target_operation_key text := COALESCE(NEW.operation_key, OLD.operation_key);
+    requires_active boolean;
+BEGIN
+    -- 소유권 비교는 triple이다 — operation_key만 갈아끼워 어느 실행에 결박됐는지를
+    -- 바꾸는 write는 정리 경로에서도 허용하지 않는다.
+    IF TG_OP = 'UPDATE'
+       AND (OLD.provider_dataset_id, OLD.sync_scope, OLD.operation_key)
+           IS DISTINCT FROM
+           (NEW.provider_dataset_id, NEW.sync_scope, NEW.operation_key) THEN
+        RAISE EXCEPTION 'offline upload membership ownership is immutable'
+            USING ERRCODE = '23514',
+                CONSTRAINT = 'ck_provider_dataset_scope_ownership_immutable';
+    END IF;
+    -- 활성 검사는 새 작업을 여는 write에만 건다 — 정리(DELETE·종료 상태로의 UPDATE)는
+    -- 비활성 membership에서도 빠져나갈 수 있어야 한다(alembic 0092).
+    IF TG_OP = 'INSERT' THEN
+        requires_active := true;
+    ELSIF TG_OP = 'UPDATE' THEN
+        requires_active := NEW.status IN ('validating', 'loading');
+    ELSE
+        requires_active := false;
+    END IF;
+    IF requires_active AND NOT EXISTS (
+        SELECT 1
+        FROM provider_sync.provider_dataset_operation_scopes AS scope
+        JOIN provider_sync.provider_dataset_operations AS operation
+          ON operation.provider_dataset_id = scope.provider_dataset_id
+         AND operation.operation_key = scope.operation_key
+         AND operation.operation_kind = scope.operation_kind
+        JOIN provider_sync.provider_datasets AS dataset
+          ON dataset.provider_dataset_id = scope.provider_dataset_id
+        WHERE scope.provider_dataset_id = target_dataset_id
+          AND scope.sync_scope = target_scope
+          AND scope.operation_key = target_operation_key
+          AND dataset.is_active
+          AND operation.is_enabled
+    ) THEN
+        RAISE EXCEPTION 'dataset scope is absent or disabled for normal writes'
+            USING ERRCODE = '23514',
+                CONSTRAINT = 'ck_provider_dataset_scope_active_write';
+    END IF;
+    IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
     RETURN NEW;
 END;
 $$;
@@ -108,7 +251,7 @@ CREATE TABLE provider_sync.provider_sync_state (
         provider_dataset_id, sync_scope, operation_key
     ) REFERENCES provider_sync.provider_dataset_operation_scopes (
         provider_dataset_id, sync_scope, operation_key
-    ),
+    ) ON DELETE RESTRICT,
     CONSTRAINT ck_provider_sync_state_status CHECK (
         status IN ('active', 'paused', 'disabled', 'failed')
     ),
@@ -119,7 +262,7 @@ CREATE INDEX idx_provider_sync_state_next_run
     WHERE status = 'active';
 CREATE TRIGGER trg_provider_sync_state_active_dataset_write
     BEFORE INSERT OR UPDATE OR DELETE ON provider_sync.provider_sync_state
-    FOR EACH ROW EXECUTE FUNCTION provider_sync.reject_inactive_provider_dataset_scope();
+    FOR EACH ROW EXECUTE FUNCTION provider_sync.reject_inactive_sync_state_operation();
 
 CREATE TABLE provider_sync.notice_lifecycle_scopes (
     notice_lifecycle_scope_id bigint GENERATED ALWAYS AS IDENTITY,
@@ -341,13 +484,14 @@ CREATE TABLE ops.import_job_datasets (
         provider_dataset_id, sync_scope, operation_key
     ) REFERENCES provider_sync.provider_dataset_operation_scopes (
         provider_dataset_id, sync_scope, operation_key
-    )
+    ) ON DELETE RESTRICT
 );
 CREATE INDEX idx_import_job_datasets_dataset_job
     ON ops.import_job_datasets (provider_dataset_id, job_id);
 CREATE TRIGGER trg_import_job_datasets_active_dataset_write
     BEFORE INSERT OR UPDATE OR DELETE ON ops.import_job_datasets
-    FOR EACH ROW EXECUTE FUNCTION provider_sync.reject_inactive_provider_dataset_scope();
+    FOR EACH ROW EXECUTE FUNCTION
+        provider_sync.reject_inactive_import_job_dataset_membership();
 
 CREATE FUNCTION provider_sync.assert_import_job_members_active(target_job_id uuid)
 RETURNS void
@@ -557,13 +701,14 @@ CREATE TABLE ops.feature_update_request_datasets (
         provider_dataset_id, sync_scope, operation_key
     ) REFERENCES provider_sync.provider_dataset_operation_scopes (
         provider_dataset_id, sync_scope, operation_key
-    )
+    ) ON DELETE RESTRICT
 );
 CREATE INDEX idx_feature_update_request_datasets_dataset_request
     ON ops.feature_update_request_datasets (provider_dataset_id, request_id);
 CREATE TRIGGER trg_feature_update_request_datasets_active_dataset_write
     BEFORE INSERT OR UPDATE OR DELETE ON ops.feature_update_request_datasets
-    FOR EACH ROW EXECUTE FUNCTION provider_sync.reject_inactive_provider_dataset_scope();
+    FOR EACH ROW EXECUTE FUNCTION
+        provider_sync.reject_inactive_feature_update_request_dataset_membership();
 
 CREATE FUNCTION provider_sync.assert_feature_update_request_members_active(target_request_id uuid)
 RETURNS void
@@ -687,23 +832,25 @@ CREATE TABLE ops.offline_uploads (
     status text NOT NULL DEFAULT 'registered',
     created_at timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT pk_offline_uploads PRIMARY KEY (upload_id),
-    -- 멱등 키는 operation을 포함하지 않는다: 같은 (dataset, scope)에 같은 파일은
-    -- 한 번만 올린다. 반면 FK는 scope PK와 같은 triple이어야 한다.
+    -- 멱등 키도 identity triple이다 — operation을 교체(A disable → B enable)한 뒤
+    -- 같은 파일을 다시 올릴 때 없어진 operation에 결박된 옛 행이 UNIQUE를 막지
+    -- 않는다. 형제 membership 테이블도 4열이다(alembic 0092).
     CONSTRAINT uq_offline_uploads_dataset_scope_checksum UNIQUE (
-        provider_dataset_id, sync_scope, checksum_sha256
+        provider_dataset_id, sync_scope, operation_key, checksum_sha256
     ),
     CONSTRAINT fk_offline_uploads_exact_operation_scope FOREIGN KEY (
         provider_dataset_id, sync_scope, operation_key
     ) REFERENCES provider_sync.provider_dataset_operation_scopes (
         provider_dataset_id, sync_scope, operation_key
-    ),
+    ) ON DELETE RESTRICT,
     CONSTRAINT ck_offline_uploads_checksum CHECK (checksum_sha256 ~ '^[0-9a-f]{64}$')
 );
 CREATE INDEX idx_offline_uploads_dataset_created
     ON ops.offline_uploads (provider_dataset_id, created_at DESC);
 CREATE TRIGGER trg_offline_uploads_active_dataset_write
     BEFORE INSERT OR UPDATE OR DELETE ON ops.offline_uploads
-    FOR EACH ROW EXECUTE FUNCTION provider_sync.reject_inactive_provider_dataset_scope();
+    FOR EACH ROW EXECUTE FUNCTION
+        provider_sync.reject_inactive_offline_upload_membership();
 
 CREATE TABLE ops.integrity_observation_scopes (
     integrity_observation_scope_id bigint GENERATED ALWAYS AS IDENTITY,
@@ -782,12 +929,12 @@ END;
 $$;
 
 CREATE TABLE ops.integrity_observation_runs (
-    integrity_observation_run_id bigint GENERATED ALWAYS AS IDENTITY,
+    observation_run_id bigint GENERATED ALWAYS AS IDENTITY,
     integrity_observation_scope_id bigint NOT NULL,
     generation bigint NOT NULL,
     external_run_id text NOT NULL,
     status text NOT NULL DEFAULT 'collecting',
-    CONSTRAINT pk_integrity_observation_runs PRIMARY KEY (integrity_observation_run_id),
+    CONSTRAINT pk_integrity_observation_runs PRIMARY KEY (observation_run_id),
     CONSTRAINT uq_integrity_observation_runs_generation UNIQUE (
         integrity_observation_scope_id, generation
     ),
@@ -956,6 +1103,33 @@ CREATE TABLE ops.managed_files (
         OR (provider_dataset_id IS NULL AND provider_name IS NULL)
     )
 );
-CREATE TRIGGER trg_managed_files_active_dataset_write
+-- registry는 storage 객체의 거울이다. dataset을 비활성화해도 그 dataset이 남긴
+-- 파일은 그대로 있고, 삭제·orphan·missing 기록은 새 실행이 아니라 정리와 감사다.
+-- alembic 0091은 이 테이블에도 `reject_inactive_provider_dataset`을 걸어 비활성
+-- dataset의 파일 상태 변화를 INSERT/UPDATE/DELETE 어느 쪽으로도 적을 수 없게 했고,
+-- 호출부가 `file_registry.registry_guard`(`except Exception`)로 감싸므로 그 실패는
+-- 로그 한 줄만 남기고 사라진다. 0092가 활성 검사를 떼고 소유권 immutable만 남겼다 —
+-- violation-fixtures-v1.sql의 `inactive_dataset_managed_file_owner_clear`가 그
+-- 거부를 계속 못박는다.
+CREATE FUNCTION provider_sync.reject_managed_file_dataset_rebinding()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = pg_catalog
+AS $$
+BEGIN
+    IF TG_OP = 'UPDATE'
+       AND OLD.provider_dataset_id IS DISTINCT FROM NEW.provider_dataset_id
+    THEN
+        RAISE EXCEPTION 'provider dataset ownership is immutable'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_provider_dataset_ownership_immutable';
+    END IF;
+    IF TG_OP = 'DELETE' THEN
+        RETURN OLD;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_managed_files_dataset_ownership
     BEFORE INSERT OR UPDATE OR DELETE ON ops.managed_files
-    FOR EACH ROW EXECUTE FUNCTION provider_sync.reject_inactive_provider_dataset();
+    FOR EACH ROW EXECUTE FUNCTION provider_sync.reject_managed_file_dataset_rebinding();

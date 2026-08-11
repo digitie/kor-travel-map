@@ -297,6 +297,10 @@ WHERE operation.operation_key = :operation_key
   AND dataset.is_active
   AND dataset.provider = :provider
   AND dataset.dataset_key = :dataset_key
+  AND (
+    CAST(:sync_scope AS text) IS NULL
+    OR scope.sync_scope = CAST(:sync_scope AS text)
+  )
 ORDER BY scope.sync_scope
 """
 
@@ -458,12 +462,19 @@ async def resolve_feature_operation_dataset_membership(
     operation_key: str,
     provider: str,
     dataset_key: str,
+    sync_scope: str | None = None,
 ) -> ProviderDatasetOperationMembership:
     """runtime source key를 frozen canonical member로 해석한다.
 
     이 lookup은 provider callback 경계에서만 사용하며, 자연키를 operation event나
-    root/child identity에 저장하지 않는다. 하나의 runtime dataset에는 하나의 enabled
-    scope만 허용한다.
+    root/child identity에 저장하지 않는다.
+
+    ``sync_scope``를 주지 않으면 ``(operation_key, provider, dataset_key)``가 정확히
+    한 scope 행으로 떨어져야 한다. 그 전제는 카탈로그의 일반 성질이 아니다 —
+    ``0089_tvn33_expand_seed``는 ``target_grids`` dataset에 ``dataset_wide``까지
+    함께 seed하므로 KMA 격자 dataset 3종은 dataset당 scope가 2개다. 그런 dataset을
+    지목하려면 triple의 남은 축인 ``sync_scope``까지 넘겨야 하며, 그때만 exact
+    lookup이 성립한다.
     """
     rows = (
         await session.execute(
@@ -472,6 +483,7 @@ async def resolve_feature_operation_dataset_membership(
                 "operation_key": _operation_key(operation_key),
                 "provider": provider,
                 "dataset_key": dataset_key,
+                "sync_scope": sync_scope,
             },
         )
     ).all()
@@ -481,6 +493,7 @@ async def resolve_feature_operation_dataset_membership(
             dagster_run_id="unknown",
             details={
                 "operation_key": operation_key,
+                "sync_scope": sync_scope,
                 "match_count": len(rows),
             },
         )

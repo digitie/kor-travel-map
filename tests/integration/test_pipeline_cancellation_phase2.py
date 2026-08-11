@@ -1,10 +1,11 @@
 """Termination reservation과 application coordinator Postgres 통합 계약.
 
 T-VN-33 cutover WIP 커밋(``2e76b80c``, 메시지에 "do not merge")이 이 파일에서
-1801줄을 지웠고 복원되지 않았다. 지워진 회귀가 덮던 코드는 지금도 살아 있다 —
+1,792줄짜리 회귀 중 1,761줄을 지워 71줄만 남겼고 복원되지 않았다(``git show
+--numstat 2e76b80c``: ``40 1761``). 지워진 회귀가 덮던 코드는 지금도 살아 있다 —
 취소 coordinator의 lock 순서·CAS 예약, terminal sensor의 identity mismatch 처리,
-run-backed queued 취소의 freeze 범위. 9라운드 적대 리뷰가 저장소 전수 grep으로
-0 hit임을 실증했다.
+run-backed queued 취소의 freeze 범위. 삭제된 19개 test 함수명은 그 커밋 시점
+트리 전수 ``git grep``에서 0 hit이다.
 
 identity를 triple로 옮겨 되살렸다. 지어낸 자연키(``("provider", "done")``)는
 이제 만들 수 없으므로(실행 레코드가 ``provider_dataset_operation_scopes``를 FK로

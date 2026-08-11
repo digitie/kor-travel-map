@@ -572,3 +572,158 @@ async def test_resolve_cache_target_keys_uses_active_targets(
     assert result.matched_scope()["active_target_count"] == 1
     assert result.matched_scope()["skipped_missing_keys"] == ["missing"]
     assert result.matched_scope()["skipped_disabled_keys"] == ["poi-disabled"]
+
+
+# --------------------------------------------------------------------------- #
+# active dataset / enabled operation 가드 (T-VN-33)
+#
+# scope resolver는 feature를 찾는 일과 "그 feature를 어느 refresh membership이
+# 갱신할 수 있는가"를 분리한다. 후자의 활성 술어가 사라지면 비활성 dataset이나
+# disabled operation이 request의 실행 대상 목록에 그대로 실린다 — 아래 회귀가
+# 없으면 그 술어를 전부 지워도 이 파일은 통과한다.
+# --------------------------------------------------------------------------- #
+
+
+async def _deactivate_membership(
+    session: AsyncSession,
+    *,
+    provider_dataset_id: int,
+    operation_key: str,
+    axis: str,
+) -> None:
+    if axis == "dataset":
+        statement = """
+            UPDATE provider_sync.provider_datasets
+            SET is_active = false
+            WHERE provider_dataset_id = :provider_dataset_id
+        """
+        params: dict[str, object] = {"provider_dataset_id": provider_dataset_id}
+    else:
+        statement = """
+            UPDATE provider_sync.provider_dataset_operations
+            SET is_enabled = false
+            WHERE provider_dataset_id = :provider_dataset_id
+              AND operation_key = :operation_key
+              AND operation_kind = 'refresh'
+        """
+        params = {
+            "provider_dataset_id": provider_dataset_id,
+            "operation_key": operation_key,
+        }
+    result = await session.execute(text(statement), params)
+    assert result.rowcount == 1
+    await session.flush()
+
+
+@pytest.mark.parametrize("axis", ["dataset", "operation"])
+async def test_matched_provider_datasets_exclude_deactivated_membership(
+    migrated_session: AsyncSession,
+    axis: str,
+) -> None:
+    """feature는 그대로 잡히되 refresh membership 목록에서만 빠진다.
+
+    네 갈래 projection SQL(feature_ids / center_radius / bbox / sigungu_codes)이
+    같은 술어를 각자 들고 있어 한 갈래만 검증하면 나머지 셋이 무방비다.
+    """
+    bundle = await _load(migrated_session, f"SCOPE-GUARD-{axis}", sigungu_code="11560")
+    feature_id = bundle.feature.feature_id
+    provider_dataset_id, _sync_scope, operation_key = await _refresh_membership(
+        migrated_session,
+        provider=bundle.source_record.provider,
+        dataset_key=bundle.source_record.dataset_key,
+    )
+
+    before = await scope_repo.resolve_feature_ids(migrated_session, [feature_id])
+    assert [scope.provider_dataset_id for scope in before.provider_datasets] == [
+        provider_dataset_id
+    ]
+
+    await _deactivate_membership(
+        migrated_session,
+        provider_dataset_id=provider_dataset_id,
+        operation_key=operation_key,
+        axis=axis,
+    )
+
+    by_ids = await scope_repo.resolve_feature_ids(migrated_session, [feature_id])
+    assert by_ids.feature_ids == (feature_id,)
+    assert by_ids.provider_datasets == ()
+
+    async def _sigungu_resolver(*, lon: float, lat: float, radius_km: float) -> tuple[str, ...]:
+        del lon, lat, radius_km
+        return ("11560",)
+
+    for scope_payload in (
+        {
+            "type": "center_radius",
+            "center": {"lon": 126.9239, "lat": 37.5263},
+            "radius_km": 1.0,
+        },
+        {
+            "type": "bbox",
+            "min_lon": 126.8,
+            "min_lat": 37.4,
+            "max_lon": 127.0,
+            "max_lat": 37.7,
+        },
+        {
+            "type": "sigungu_by_radius",
+            "center": {"lon": 126.9239, "lat": 37.5263},
+            "radius_km": 1.0,
+        },
+        {"type": "feature_ids", "feature_ids": [feature_id]},
+    ):
+        counted = await scope_repo.count_features_matching_scope(
+            migrated_session,
+            scope_payload,
+            sigungu_resolver=_sigungu_resolver,
+        )
+        assert counted.feature_count >= 1, scope_payload["type"]
+        assert counted.provider_datasets == (), scope_payload["type"]
+        # 빈 목록은 payload에서 키 자체가 빠진다(``ScopeResolution.matched_scope``).
+        assert "provider_datasets" not in counted.matched_scope(), scope_payload["type"]
+
+
+@pytest.mark.parametrize("axis", ["dataset", "operation"])
+async def test_provider_dataset_scope_rejects_deactivated_membership(
+    migrated_session: AsyncSession,
+    axis: str,
+) -> None:
+    """direct scope는 비활성 membership을 조용히 빈 결과로 넘기지 않고 거부한다."""
+    bundle = await _load(
+        migrated_session, f"SCOPE-GUARD-DIRECT-{axis}", sigungu_code="11560"
+    )
+    provider_dataset_id, sync_scope, operation_key = await _refresh_membership(
+        migrated_session,
+        provider=bundle.source_record.provider,
+        dataset_key=bundle.source_record.dataset_key,
+    )
+    await _deactivate_membership(
+        migrated_session,
+        provider_dataset_id=provider_dataset_id,
+        operation_key=operation_key,
+        axis=axis,
+    )
+
+    with pytest.raises(
+        ValueError, match="provider_dataset scope does not resolve an active refresh membership"
+    ):
+        await scope_repo.resolve_provider_dataset(
+            migrated_session,
+            provider_dataset_id=provider_dataset_id,
+            sync_scope=sync_scope,
+            operation_key=operation_key,
+        )
+
+    with pytest.raises(
+        ValueError, match="provider_dataset scope does not resolve an active refresh membership"
+    ):
+        await scope_repo.count_features_matching_scope(
+            migrated_session,
+            {
+                "type": "provider_dataset",
+                "provider_dataset_id": provider_dataset_id,
+                "sync_scope": sync_scope,
+                "operation_key": operation_key,
+            },
+        )

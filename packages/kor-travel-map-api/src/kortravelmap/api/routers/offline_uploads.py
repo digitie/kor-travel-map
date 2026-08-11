@@ -73,10 +73,12 @@ from kortravelmap.infra.offline_upload_repo import (
     finalize_offline_upload_reservation,
     get_offline_upload,
     get_offline_upload_by_checksum,
+    is_inactive_dataset_membership_violation,
     list_offline_uploads,
     reserve_offline_upload,
     reserve_offline_upload_delete,
     reserve_offline_upload_load,
+    resolve_offline_upload_operation_key,
 )
 from kortravelmap.offline_upload import (
     preview_offline_tabular_upload,
@@ -84,6 +86,7 @@ from kortravelmap.offline_upload import (
 )
 from kortravelmap.settings import KorTravelMapSettings
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api import dagster_graphql, domain_command_service
@@ -626,17 +629,18 @@ def _storage_key(settings: KorTravelMapSettings, upload_id: str, filename: str) 
 def _duplicate_upload_conflict(upload: OfflineUpload) -> HTTPException:
     """중복 409는 **가리키는 행의 exact identity**를 그대로 실어 보낸다.
 
-    멱등 키는 계약대로 dataset/scope/checksum 3열이지만, upload 행의 identity는
-    ``provider_dataset_id + sync_scope + operation_key``다(ADR-088). ``operation_key``를
-    빼면 운영자는 409가 가리키는 upload가 어느 operation 실행에 결박돼 있는지 알 수
-    없어 재시도/삭제 판단을 못 한다. status까지 함께 실어 "이미 적재된 건인지"도
-    본문만으로 판정되게 한다.
+    멱등 키는 upload 행의 identity triple + checksum 4열이다(ADR-088, alembic 0092).
+    ``operation_key``를 응답에서 빼면 운영자는 409가 가리키는 upload가 어느 operation
+    실행에 결박돼 있는지 알 수 없어 재시도/삭제 판단을 못 한다. status까지 함께 실어
+    "이미 적재된 건인지"도 본문만으로 판정되게 한다.
     """
     return HTTPException(
         status_code=status.HTTP_409_CONFLICT,
         detail={
             "code": "OFFLINE_UPLOAD_DUPLICATE",
-            "message": "동일 dataset/scope/checksum offline upload가 이미 있습니다.",
+            "message": (
+                "동일 dataset/scope/operation/checksum offline upload가 이미 있습니다."
+            ),
             "details": {
                 "upload_id": upload.upload_id,
                 "provider_dataset_id": upload.provider_dataset_id,
@@ -646,6 +650,27 @@ def _duplicate_upload_conflict(upload: OfflineUpload) -> HTTPException:
                 "status": upload.status,
             },
         },
+    )
+
+
+def _inactive_membership_conflict() -> HTTPException:
+    """비활성 membership 앞에서 DB 가드가 낸 ``23514``를 상태 오류(409)로 옮긴다.
+
+    이 분기가 없으면 catch-all이 **500 INTERNAL_ERROR**를 만들어 운영자가 원인을
+    보지 못한다(같은 규칙을 ``ops_dataset_service``의
+    ``InactiveDatasetMutationDisabledError``가 정책 PUT에 적용한다).
+
+    이 409가 나는 요청은 **새 실행을 여는 것**뿐이다 — validate/load. 정리 경로
+    (DELETE, 종료 상태 기록)는 alembic 0092가 가드에서 면제했으므로 비활성
+    membership에서도 그대로 성공한다.
+    """
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail=(
+            "이 업로드가 결박된 dataset/operation이 비활성이라 새 실행을 시작할 수 "
+            "없습니다. dataset(is_active)·operation(is_enabled)을 다시 활성화하거나 "
+            "업로드를 삭제하세요."
+        ),
     )
 
 
@@ -913,10 +938,21 @@ async def create_offline_upload_request(
                 created_by=context.actor,
             )
             if upload is None:
+                # 멱등 UNIQUE는 4열(identity triple + checksum)이라
+                # ``ON CONFLICT``를 일으킨 행을 특정하려면 writer가 방금 쓴 것과
+                # 같은 operation_key로 읽어야 한다. (dataset, scope, checksum)만으로
+                # 읽으면 형제 operation에 결박된 행까지 걸려 409가 엉뚱한 upload를
+                # 가리킨다. 유도는 같은 트랜잭션·같은 규칙이라 위 reserve가 쓴 값과
+                # 같은 값이 나온다.
                 duplicate = await get_offline_upload_by_checksum(
                     session,
                     provider_dataset_id=provider_dataset_id,
                     sync_scope=sync_scope,
+                    operation_key=await resolve_offline_upload_operation_key(
+                        session,
+                        provider_dataset_id=provider_dataset_id,
+                        sync_scope=sync_scope,
+                    ),
                     checksum_sha256=checksum_sha256,
                 )
                 if duplicate is None:
@@ -929,14 +965,19 @@ async def create_offline_upload_request(
             # 실행 identity는 triple인데 업로드 표면에는 operation 입력이 없다.
             # 그래서 scope가 정확히 하나의 operation으로 풀리지 않으면 서버가 결박할
             # 대상을 정할 수 없다 — 운영자가 손쓸 수 있도록 무엇이 문제인지 말한다.
-            # 실측: 74개 dataset 중 18개가 refresh operation scope를 하나도 갖지 않아
-            # 이 경로로 온다(2개 이상인 경우는 현재 0건).
+            #
+            # resolved==0의 원인은 **둘**이다: scope 행 자체가 없거나, 있어도
+            # operation이 disabled이거나 dataset이 inactive라 후보에서 빠진 것이다
+            # (유도는 DB 활성 가드와 같은 조건을 본다). "먼저 등록하세요"만 말하면
+            # 후자에 처방이 어긋나 운영자가 이미 있는 scope를 다시 등록하려 든다.
             detail = (
-                "이 dataset/scope에는 실행 가능한 refresh operation이 없어 업로드를 "
-                "결박할 수 없습니다. 카탈로그에 operation scope를 먼저 등록하세요."
+                "이 dataset/scope에는 활성 refresh operation이 없어 업로드를 결박할 "
+                "수 없습니다. operation scope가 카탈로그에 등록돼 있는지, 그리고 "
+                "dataset(is_active)·operation(is_enabled)이 비활성은 아닌지 "
+                "확인하세요."
                 if exc.resolved == 0
-                else "이 dataset/scope에 operation이 여러 개라 업로드가 어느 실행에 "
-                "결박될지 정할 수 없습니다."
+                else "이 dataset/scope에 활성 operation이 여러 개라 업로드가 어느 "
+                "실행에 결박될지 정할 수 없습니다."
             )
             raise HTTPException(status_code=409, detail=detail) from exc
         except domain_command_service.DomainCommandPending as pending:
@@ -1481,6 +1522,12 @@ async def validate_offline_upload_request(
                 )
     except HTTPException:
         raise
+    except IntegrityError as exc:
+        # validation은 ``ops.import_job_datasets`` membership 행을 새로 만든다 —
+        # 비활성 membership이면 그 INSERT가 0091 가드에 23514로 걸린다.
+        if not is_inactive_dataset_membership_violation(exc):
+            raise
+        raise _inactive_membership_conflict() from exc
     except FileStoreError as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -1636,6 +1683,13 @@ async def load_offline_upload_request(
             status_code=status.HTTP_409_CONFLICT,
             detail=str(exc),
         ) from exc
+    except IntegrityError as exc:
+        # load 예약은 ``ops.import_job_datasets`` membership 행과
+        # ``ops.offline_uploads`` status 전이를 같은 트랜잭션에서 쓴다 — 비활성
+        # membership이면 둘 중 먼저 닿는 쪽이 23514로 걸린다.
+        if not is_inactive_dataset_membership_violation(exc):
+            raise
+        raise _inactive_membership_conflict() from exc
     if (
         execution.effect_kind != "load"
         or execution.upload_id != upload_id

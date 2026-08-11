@@ -43,10 +43,9 @@ describe("hrefFor", () => {
   });
 
   it("operation_key가 없으면 그 축을 빼고 링크를 만든다", () => {
-    // 앞 판은 이것도 null이었다. 그러면 **refresh operation이 없는 catalog 전용
-    // dataset**(실측 74개 중 17~18개, `operation_key`가 빈 값)이 어떤 entity
-    // 링크로도 도달할 수 없었다 — 축이 하나 덜 적힌 것을 "틀린 링크"로 다뤘기
-    // 때문이다. 대상 페이지는 (id, scope)로 유일하게 결정하고, 형제 operation
+    // 앞 판은 이것도 null이었다. 그러면 **refresh membership이 없는 catalog 전용
+    // dataset**(`operation_key`가 빈 값)이 어떤 entity 링크로도 도달할 수 없었다 —
+    // 축이 하나 덜 적힌 것을 "틀린 링크"로 다뤘기 때문이다. 대상 페이지는 (id, scope)로 유일하게 결정하고, 형제 operation
     // 때문에 둘 이상이면 그쪽이 명시 거부한다.
     expect(hrefFor("providerDataset", 101, { sync_scope: "target_grids" })).toBe(
       "/ops/datasets?provider_dataset_id=101&sync_scope=target_grids",

@@ -558,6 +558,12 @@
         "0090_tvn33_constraints"
       ],
       "revision": "0091_tvn33_cutover_fence"
+    },
+    {
+      "down_revision": [
+        "0091_tvn33_cutover_fence"
+      ],
+      "revision": "0092_tvn33_offline_cleanup"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

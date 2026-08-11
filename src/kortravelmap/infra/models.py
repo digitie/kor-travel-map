@@ -3125,12 +3125,21 @@ class OfflineUploadRow(Base):
             name="fk_offline_uploads_exact_operation_scope",
             ondelete="RESTRICT",
         ),
-        # 멱등 키는 freeze 계약(tvn33-reference-ownership-v1.sql)이 선언한 3열
-        # 그대로다. writer의 ``ON CONFLICT``가 이 열 집합을 중재자로 지목하므로
-        # 폭을 바꾸면 42P10으로 죽는다 — operation을 넣을 실제 요구도 없었다.
+        # 멱등 키는 identity triple + checksum 4열이다(alembic 0092). writer의
+        # ``ON CONFLICT``가 이 열 집합을 중재자로 지목하므로 여기와
+        # ``offline_upload_repo._RESERVE_SQL``이 어긋나면 42P10으로 죽는다.
+        #
+        # 3열(0090~0091)로 두면 identity와 모순이었다: 같은 (dataset, scope)에
+        # 형제 refresh operation을 등록하는 것은 scope PK가 triple이 된 뒤로 정상
+        # write인데, 멱등 키가 operation을 안 보면 operation을 교체한 뒤 같은 파일을
+        # 다시 올릴 때 **없어진 operation에 결박된 옛 행**이 UNIQUE 위반을 냈다.
+        # 형제 membership 테이블의 identity UNIQUE도 ``operation_key``를 포함한다
+        # (uq_import_job_datasets_exact_identity = job_id + triple,
+        # uq_feature_update_request_datasets_identity = request_id + triple).
         UniqueConstraint(
             "provider_dataset_id",
             "sync_scope",
+            "operation_key",
             "checksum_sha256",
             name="uq_offline_uploads_dataset_scope_checksum",
         ),

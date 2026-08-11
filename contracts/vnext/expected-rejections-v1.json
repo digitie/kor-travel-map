@@ -85,12 +85,12 @@
     },
     "inactive_dataset_sync_state_update": {
       "sqlstate": "23514",
-      "constraint": "ck_provider_dataset_scope_active_write",
+      "constraint": "ck_provider_dataset_active_write",
       "basis": "ADR-087"
     },
     "dataset_scope_unregistered_write": {
       "sqlstate": "23514",
-      "constraint": "ck_provider_dataset_scope_active_write",
+      "constraint": "ck_provider_dataset_active_write",
       "basis": "ADR-087"
     },
     "inactive_dataset_notice_lineage_write": {

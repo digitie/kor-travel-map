@@ -916,3 +916,62 @@ async def test_empty_storage_cutover_keeps_dagster_cursor_null() -> None:
     assert [call["dagster_run_id"] for call in client.ensure_calls] == ["first-visible-run"]
     resumed = FeatureOperationReconcileCursor.from_json(context.updated_cursors[-1])
     assert resumed.dagster == DagsterRunWatermark(1, "first-visible-run")
+
+
+# -- guard 예외 변환 / admin 수동 run 분류 ----------------------------------
+
+
+@dataclass
+class _NoEnabledMembershipClient(_Client):
+    """카탈로그가 실행 가능 member를 0건으로 돌려주는 상태(operation disable 등)."""
+
+    async def resolve_feature_operation_memberships(self, **kwargs: Any) -> object:
+        self.membership_calls.append(kwargs)
+        return ()
+
+
+async def test_unresolvable_manifest_becomes_an_observation_error_not_a_dead_tick() -> None:
+    """manifest 해석 실패는 **관측 실패로 번역**된다 — tick 밖으로 새지 않는다.
+
+    ``_reconcile_tick``은 ``FeatureOperationObservationError``만 run 단위로 집계하고
+    다음 run으로 넘어간다. guard 예외가 그대로 새면 그 tick 전체가 죽어, 문제 run
+    하나 때문에 나머지 active operation의 reconcile이 모두 멈춘다.
+    """
+    client = _NoEnabledMembershipClient()
+
+    with pytest.raises(
+        FeatureOperationObservationError,
+        match="operation_has_no_enabled_memberships",
+    ):
+        await _apply_run_record(_record(DagsterRunStatus.SUCCESS), client)
+
+    assert client.ensure_calls == []
+    assert client.reconcile_calls == []
+
+
+async def test_admin_manual_run_is_recorded_as_manual_not_schedule() -> None:
+    """admin UI "지금 실행" run은 ``trigger_kind="manual"``로 기록된다.
+
+    그 run은 schedule을 거치지 않아 ``kor_travel_map.trigger_kind`` tag가 없고,
+    admin 전용 tag만 붙는다. 그 분기가 사라지면 fallback이 ``"schedule"``을 돌려주어
+    수동 실행이 DB에 예약 실행으로 남는다 — 운영자 화면의 실행 이력이 조용히 거짓이
+    된다.
+    """
+    client = _Client()
+    record = _record(DagsterRunStatus.STARTED)
+    record.dagster_run.tags = {
+        "kor_travel_map.operation_key": _JOB_NAME,
+        "kor_travel_map.admin_manual_trigger": "admin-ui",
+    }
+
+    await _apply_run_record(record, client)
+
+    assert client.ensure_calls[0]["trigger_kind"] == "manual"
+    # 대조: admin tag가 없으면 같은 tag 모양이 ``schedule``로 떨어진다.
+    schedule_client = _Client()
+    schedule_record = _record(DagsterRunStatus.STARTED)
+    schedule_record.dagster_run.tags = {"kor_travel_map.operation_key": _JOB_NAME}
+
+    await _apply_run_record(schedule_record, schedule_client)
+
+    assert schedule_client.ensure_calls[0]["trigger_kind"] == "schedule"

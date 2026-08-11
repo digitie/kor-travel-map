@@ -10,13 +10,17 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 
 from kortravelmap.infra import feature_update_active_repo as active_repo
+from kortravelmap.infra import feature_update_executor as executor
 from kortravelmap.infra import feature_update_repo as repo
 from kortravelmap.infra.feature_update_executor import (
+    ProviderDatasetRefreshFailure,
     ProviderDatasetRefreshResult,
     ProviderDatasetRefreshScope,
+    SkippedProviderDatasetRefresh,
     _require_runner_result_membership,
 )
 from kortravelmap.infra.jobs_repo import ImportJobDatasetTarget
+from kortravelmap.infra.scope_repo import CacheTargetFeatureMatch, ScopeResolution
 
 
 def _membership(
@@ -237,3 +241,200 @@ def test_runner_cannot_report_a_membership_outside_the_request_snapshot() -> Non
             ),
             scope,
         )
+
+
+@pytest.mark.parametrize(
+    ("sync_scope", "operation_key"),
+    [
+        ("target_grids", "refresh_test_dataset"),
+        ("dataset_wide", "refresh_other_dataset"),
+        ("target_grids", "refresh_other_dataset"),
+    ],
+)
+def test_runner_result_membership_checks_every_triple_axis(
+    sync_scope: str,
+    operation_key: str,
+) -> None:
+    """``provider_dataset_id``만 맞으면 통과하는 대조가 아니어야 한다.
+
+    같은 dataset이라도 scope/operation이 다르면 다른 실행 단위다. 위 테스트는
+    dataset 축만 어긋뜨려 나머지 두 항을 지워도 통과했다.
+    """
+    with pytest.raises(RuntimeError, match="does not match"):
+        _require_runner_result_membership(
+            ProviderDatasetRefreshResult(
+                provider_dataset_id=17,
+                sync_scope=sync_scope,
+                operation_key=operation_key,
+                provider="python-test-api",
+                dataset_key="test-dataset",
+            ),
+            _scope(),
+        )
+
+
+@pytest.mark.parametrize(
+    ("sync_scope", "operation_key", "provider_dataset_id", "message"),
+    [
+        ("legacy_all", "refresh_test_dataset", 17, "unsupported sync_scope"),
+        (" dataset_wide", "refresh_test_dataset", 17, "trimmed, non-empty"),
+        ("external_system: pinvi", "refresh_test_dataset", 17, "exact non-empty"),
+        ("dataset_wide", " refresh_test_dataset", 17, "trimmed non-empty"),
+        ("dataset_wide", "", 17, "trimmed non-empty"),
+        ("dataset_wide", "refresh_test_dataset", 0, "positive integer"),
+        ("dataset_wide", "refresh_test_dataset", True, "positive integer"),
+    ],
+)
+@pytest.mark.parametrize(
+    "carrier",
+    ["scope", "result", "failure", "skipped"],
+)
+def test_exact_refresh_membership_validator_guards_every_carrier(
+    carrier: str,
+    sync_scope: str,
+    operation_key: str,
+    provider_dataset_id: object,
+    message: str,
+) -> None:
+    """네 운반체가 공유하는 유일한 검증기 — 본문을 비우면 전부 무르게 된다.
+
+    ``ProviderDatasetRefreshScope``/``Result``/``Failure``/``SkippedProviderDatasetRefresh``는
+    실행 identity를 request 이력·sync-state write까지 그대로 나른다.
+    """
+    def _build() -> object:
+        if carrier == "scope":
+            return ProviderDatasetRefreshScope(
+                request_id="90000000-0000-4000-8000-000000000001",
+                provider_dataset_id=provider_dataset_id,  # type: ignore[arg-type]
+                sync_scope=sync_scope,
+                provider="python-test-api",
+                dataset_key="test-dataset",
+                scope_type="provider_dataset",
+                request_scope={},
+                update_policy={},
+                feature_ids=(),
+                feature_count=0,
+                prevent_provider_reactivation=True,
+                operation_key=operation_key,
+            )
+        if carrier == "result":
+            return ProviderDatasetRefreshResult(
+                provider_dataset_id=provider_dataset_id,  # type: ignore[arg-type]
+                sync_scope=sync_scope,
+                operation_key=operation_key,
+                provider="python-test-api",
+                dataset_key="test-dataset",
+            )
+        if carrier == "failure":
+            return ProviderDatasetRefreshFailure(
+                provider_dataset_id=provider_dataset_id,  # type: ignore[arg-type]
+                sync_scope=sync_scope,
+                operation_key=operation_key,
+                message="unit",
+            )
+        return SkippedProviderDatasetRefresh(
+            provider_dataset_id=provider_dataset_id,  # type: ignore[arg-type]
+            sync_scope=sync_scope,
+            provider="python-test-api",
+            dataset_key="test-dataset",
+            reason="policy_disabled",
+            feature_count=0,
+            operation_key=operation_key,
+        )
+
+    with pytest.raises(ValueError, match=message):
+        _build()
+
+
+def test_direct_execution_scope_requires_exactly_one_membership() -> None:
+    """direct request가 membership 2건이면 첫 건을 임의로 고르지 않고 죽는다."""
+    request = repo._rows_to_request([_row(membership=_membership())])
+    ambiguous = repo.FeatureUpdateRequest(
+        **{
+            **request.__dict__,
+            "dataset_membership_mode": "multiple",
+            "dataset_memberships": (
+                _membership(),
+                _membership(provider_dataset_id=18),
+            ),
+        }
+    )
+
+    with pytest.raises(RuntimeError, match="requires exactly one membership"):
+        repo.execution_scope_for_request(ambiguous)
+
+    empty = repo.FeatureUpdateRequest(
+        **{**request.__dict__, "dataset_memberships": ()}
+    )
+    with pytest.raises(RuntimeError, match="requires exactly one membership"):
+        repo.execution_scope_for_request(empty)
+
+
+def _match(provider_dataset_id: int, feature_id: str) -> CacheTargetFeatureMatch:
+    return CacheTargetFeatureMatch(
+        target_id="target-1",
+        feature_id=feature_id,
+        provider_dataset_id=provider_dataset_id,
+        provider="python-test-api",
+        dataset_key="test-dataset",
+        distance_m=1.0,
+        relation="within_radius",
+    )
+
+
+def test_cache_target_matches_stay_inside_their_own_dataset() -> None:
+    """POI cache target link 재작성 대상은 그 dataset의 match만 받아야 한다.
+
+    필터가 사라지면 A dataset의 refresh scope가 B dataset의 target match까지
+    target_ids/link 재작성 목록에 싣는다.
+    """
+    resolution = ScopeResolution(
+        scope_type="cache_target_keys",
+        features=(),
+        cache_target_matches=(
+            _match(17, "feature-own"),
+            _match(18, "feature-foreign"),
+            _match(None, "feature-unlinked"),  # type: ignore[arg-type]
+        ),
+    )
+
+    own = executor._target_matches_for_provider(resolution, provider_dataset_id=17)
+
+    assert [match.feature_id for match in own] == ["feature-own"]
+
+
+def _stub_job(mode: str, member_ids: tuple[str, ...]) -> SimpleNamespace:
+    return SimpleNamespace(
+        dataset_membership_mode=mode,
+        dataset_memberships=tuple(
+            SimpleNamespace(import_job_dataset_id=member_id) for member_id in member_ids
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    ("job", "expected"),
+    [
+        (None, (None,)),
+        (_stub_job("root", ()), (None,)),
+        # docstring이 명시적으로 부정하는 fail-open: member가 비었는데 조용히
+        # 건너뛰면 terminal event가 통째로 사라진다.
+        (_stub_job("single", ()), (None,)),
+        (_stub_job("multiple", ()), (None,)),
+        (_stub_job("single", ("member-1",)), ("member-1",)),
+        (_stub_job("multiple", ("member-1", "member-2")), ("member-1", "member-2")),
+    ],
+)
+def test_terminal_event_member_ids_never_silently_skips(
+    monkeypatch: pytest.MonkeyPatch,
+    job: object,
+    expected: tuple[str | None, ...],
+) -> None:
+    async def _fake_get_import_job(_session: object, _job_id: str) -> object:
+        return job
+
+    monkeypatch.setattr(executor, "get_import_job", _fake_get_import_job)
+
+    assert (
+        asyncio.run(executor._terminal_event_member_ids(object(), "job-1")) == expected
+    )
