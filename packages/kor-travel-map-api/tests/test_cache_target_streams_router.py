@@ -789,6 +789,9 @@ def test_restore_fence_openapi_encodes_receipt_correlation_invariant() -> None:
     ]["post"]
     assert {"200", "201"} <= set(operation["responses"])
     assert operation["responses"]["200"]["description"] == "exact Idempotency-Key replay"
+    assert operation["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/CacheTargetRestoreFenceResponse"
+    }
 
     schema = client.app.openapi()["components"]["schemas"]["CacheTargetRestoreFenceRecord"]
 
