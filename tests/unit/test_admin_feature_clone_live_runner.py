@@ -206,6 +206,48 @@ def _write_report(directory: Path) -> None:
     )
 
 
+def _write_failed_main_report(directory: Path) -> None:
+    for path in directory.iterdir():
+        path.unlink()
+    directory.rmdir()
+    _write_report(directory)
+    (directory / "c7-results.xml").write_text(
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<testsuite tests="2">'
+        '<testcase classname="c7-redacted" name="auth.setup.ts#1" time="0.100">'
+        "</testcase>"
+        '<testcase classname="c7-redacted" '
+        'name="admin-feature-acceptance-write.live.spec.ts#2" time="0.200">'
+        "<failure/></testcase>"
+        "</testsuite>",
+        encoding="utf-8",
+    )
+    (directory / "c7-summary.html").write_text(
+        '<!doctype html><html lang="ko"><meta charset="utf-8">'
+        "<title>C7 redacted result</title><body><h1>C7 redacted result</h1>"
+        "<p>result=failed planned=2 observed=2</p><table><thead><tr>"
+        "<th>#</th><th>spec</th><th>status</th><th>duration_ms</th>"
+        "</tr></thead><tbody>"
+        "<tr><td>1</td><td>auth.setup.ts</td><td>passed</td><td>100</td></tr>"
+        "<tr><td>2</td><td>admin-feature-acceptance-write.live.spec.ts</td>"
+        "<td>failed</td><td>200</td></tr>"
+        "</tbody></table></body></html>",
+        encoding="utf-8",
+    )
+    (directory / "c7-summary.json").write_text(
+        json.dumps(
+            {
+                "counts": {"failed": 1, "passed": 1},
+                "result": "failed",
+                "testsObserved": 2,
+                "testsPlanned": 2,
+                "version": 1,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
 def _prepare_runtime(tmp_path: Path) -> tuple[Path, Path]:
     runtime = tmp_path / "runtime"
     runtime.mkdir()
@@ -472,6 +514,41 @@ def test_complete_recovers_without_rerunning_valid_evidence(tmp_path: Path) -> N
     assert not blocked.exists()
     assert payload["phase"] == "recovered"
     assert payload["recovery_tool_source_commit"] == _RECOVERY_COMMIT
+
+
+def test_abandon_failed_run_requires_cleaned_failure_evidence(tmp_path: Path) -> None:
+    runtime, blocked = _prepare_runtime(tmp_path)
+    _write_failed_main_report(runtime / "playwright-main")
+    for phase in (
+        "candidate-startup-running",
+        "fixture-seed-running",
+        "browser-main-running",
+        "browser-recovery-running",
+        "direct-cleanup-running",
+        "test-failed-restored",
+        "failed-resource-finalizing",
+    ):
+        _run_helper("update-blocked", "--path", str(blocked), "--phase", phase)
+
+    _run_helper(
+        "abandon-failed-run",
+        "--blocked-path",
+        str(blocked),
+        "--result-path",
+        str(runtime / "failed-restored.json"),
+        "--runtime",
+        str(runtime),
+    )
+
+    payload = json.loads(
+        (runtime / "failed-restored.json").read_text(encoding="utf-8")
+    )
+    assert not blocked.exists()
+    assert payload["status"] == "failed-restored"
+    assert payload["tests"] == {
+        "main": {"failed": 1, "passed": 1},
+        "recovery": {"passed": 2},
+    }
 
 
 def test_complete_accepts_bound_runtime_topic_revision_normalization(
@@ -1430,7 +1507,10 @@ def test_runner_closes_reviewed_trust_boundaries() -> None:
     assert "existing runtime loopback proxy is unsafe" in source
     assert "source commit 간 retry도 fail-closed로 수렴한다" in source
     assert "api_audit_status=0" in source
-    assert 'run_helper api-audit "$RUNTIME_DIR/api-owned-audit.json" || api_audit_status=$?' in source
+    assert (
+        'run_helper api-audit "$RUNTIME_DIR/api-owned-audit.json" '
+        "|| api_audit_status=$?" in source
+    )
     assert "Playwright or fixture acceptance failed after cleanup" in source
     assert 'E2E_BASE_URL=http://127.0.0.1:$LOOPBACK_UI_PORT' in source
     assert 'KTM_C7_LOOPBACK_UI_PROXY_TARGET=http://candidate-ui:$UI_PORT' in source

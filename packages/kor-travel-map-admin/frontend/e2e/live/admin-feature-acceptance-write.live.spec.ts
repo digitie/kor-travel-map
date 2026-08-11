@@ -28,6 +28,8 @@ type FetchResult<T> = {
   body: T | null;
   contentType: string | null;
   entityTag: string | null;
+  failureClass: "api-problem" | "json" | "non-json";
+  problemCode: string | null;
   status: number;
 };
 
@@ -47,6 +49,9 @@ const RECOVERY_ONLY =
 const ISOLATED_EVIDENCE = process.env.E2E_ISOLATED_LIVE_EVIDENCE === "1";
 const ARTIFACT_ROOT = process.env.PLAYWRIGHT_ARTIFACT_ROOT;
 let lastBrowserFetchStatus: number | null = null;
+let lastBrowserFetchFailureClass: "api-problem" | "json" | "non-json" | null =
+  null;
+let lastBrowserFetchProblemCode: string | null = null;
 let failureDetail: string | null = null;
 // base 좌표는 고정한다. weather/price/correction/search fixture는 이 base에서 파생되고,
 // weather/price는 orchestrator의 seeding helper(scripts/admin_feature_live_fixture.py의
@@ -256,10 +261,25 @@ async function browserFetch<T>(
       } catch {
         parsed = null;
       }
+      const contentType = response.headers.get("Content-Type");
+      const problemCode =
+        parsed !== null &&
+        typeof parsed === "object" &&
+        "code" in parsed &&
+        typeof parsed.code === "string" &&
+        /^[A-Z_]{3,64}$/.test(parsed.code)
+          ? parsed.code
+          : null;
       return {
         body: parsed as T | null,
-        contentType: response.headers.get("Content-Type"),
+        contentType,
         entityTag: response.headers.get("ETag"),
+        failureClass: contentType?.startsWith("application/problem+json")
+          ? "api-problem"
+          : contentType?.startsWith("application/json")
+            ? "json"
+            : "non-json",
+        problemCode,
         status: response.status,
       };
     },
@@ -272,6 +292,8 @@ async function browserFetch<T>(
     },
   );
   lastBrowserFetchStatus = result.status;
+  lastBrowserFetchFailureClass = result.failureClass;
+  lastBrowserFetchProblemCode = result.problemCode;
   return result;
 }
 
@@ -281,6 +303,8 @@ function writeSafeFailureStage(stage: string): void {
     writeFileSync(
       path.join(ARTIFACT_ROOT, "admin-feature-acceptance-safe-debug.json"),
       `${JSON.stringify({
+        last_browser_fetch_failure_class: lastBrowserFetchFailureClass,
+        last_browser_fetch_problem_code: lastBrowserFetchProblemCode,
         last_browser_fetch_status: lastBrowserFetchStatus,
         stage: failureDetail ?? stage,
       })}\n`,
@@ -1276,6 +1300,8 @@ test("@admin-feature-live-acceptance #741/#785 owned production acceptance", asy
   );
   test.setTimeout(20 * 60 * 1000);
   lastBrowserFetchStatus = null;
+  lastBrowserFetchFailureClass = null;
+  lastBrowserFetchProblemCode = null;
   failureDetail = null;
   let stage = "landing";
   await page.goto("/");

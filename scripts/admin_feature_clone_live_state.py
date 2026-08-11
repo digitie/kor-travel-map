@@ -71,6 +71,18 @@ _HTML_REPORT_RE: Final[re.Pattern[str]] = re.compile(
     r"<td>passed</td><td>([0-9]+)</td></tr>"
     r"</tbody></table></body></html>\n?"
 )
+_HTML_FAILED_MAIN_REPORT_RE: Final[re.Pattern[str]] = re.compile(
+    r'<!doctype html><html lang="ko"><meta charset="utf-8">'
+    r"<title>C7 redacted result</title><body><h1>C7 redacted result</h1>"
+    r"<p>result=failed planned=2 observed=2</p><table><thead><tr>"
+    r"<th>#</th><th>spec</th><th>status</th><th>duration_ms</th>"
+    r"</tr></thead><tbody>"
+    r"<tr><td>1</td><td>auth\.setup\.ts</td><td>passed</td>"
+    r"<td>([0-9]+)</td></tr>"
+    r"<tr><td>2</td><td>admin-feature-acceptance-write\.live\.spec\.ts</td>"
+    r"<td>failed</td><td>([0-9]+)</td></tr>"
+    r"</tbody></table></body></html>\n?"
+)
 
 
 def _sha256(value: str) -> str:
@@ -1196,7 +1208,11 @@ def _auth_audit_counts(path: Path, action: str) -> dict[str, int]:
     return counts
 
 
-def _report_counts(path: Path) -> dict[str, int]:
+def _report_counts(
+    path: Path,
+    *,
+    allow_failed_main: bool = False,
+) -> dict[str, int]:
     if path.is_symlink() or not path.is_dir():
         raise RuntimeError(f"Playwright evidence directory가 아닙니다: {path.name}")
     items = tuple(path.iterdir())
@@ -1207,10 +1223,12 @@ def _report_counts(path: Path) -> dict[str, int]:
     summary = _load_object(path / "c7-summary.json")
     if (
         summary.get("version") != 1
-        or summary.get("result") != "passed"
+        or summary.get("result")
+        != ("failed" if allow_failed_main else "passed")
         or summary.get("testsObserved") != 2
         or summary.get("testsPlanned") != 2
-        or summary.get("counts") != {"passed": 2}
+        or summary.get("counts")
+        != ({"failed": 1, "passed": 1} if allow_failed_main else {"passed": 2})
         or set(summary)
         != {"counts", "result", "testsObserved", "testsPlanned", "version"}
     ):
@@ -1231,12 +1249,21 @@ def _report_counts(path: Path) -> dict[str, int]:
     for index, (case, expected_spec) in enumerate(
         zip(cases, _EXPECTED_TESTS, strict=True), start=1
     ):
+        expected_failed_case = allow_failed_main and index == 2
+        children = list(case)
+        valid_failure = (
+            len(children) == 1
+            and children[0].tag == "failure"
+            and children[0].attrib == {}
+            and children[0].text in {None, ""}
+            and children[0].tail in {None, ""}
+        )
         if (
             case.tag != "testcase"
             or case.attrib.get("classname") != "c7-redacted"
             or case.attrib.get("name") != f"{expected_spec}#{index}"
             or set(case.attrib) != {"classname", "name", "time"}
-            or list(case)
+            or (not valid_failure if expected_failed_case else bool(children))
             or (case.text not in {None, ""})
             or (case.tail not in {None, ""})
         ):
@@ -1252,13 +1279,15 @@ def _report_counts(path: Path) -> dict[str, int]:
         xml_durations.append(duration_ms)
 
     html = (path / "c7-summary.html").read_text(encoding="utf-8")
-    html_match = _HTML_REPORT_RE.fullmatch(html)
+    html_match = (
+        _HTML_FAILED_MAIN_REPORT_RE if allow_failed_main else _HTML_REPORT_RE
+    ).fullmatch(html)
     if html_match is None:
         raise RuntimeError(f"Playwright HTML summary가 예상과 다릅니다: {path.name}")
     html_durations = [int(value) for value in html_match.groups()]
     if html_durations != xml_durations:
         raise RuntimeError(f"Playwright XML/HTML duration이 다릅니다: {path.name}")
-    return {"passed": 2}
+    return {"failed": 1, "passed": 1} if allow_failed_main else {"passed": 2}
 
 
 def _same_snapshot(left: dict[str, Any], right: dict[str, Any]) -> bool:
@@ -1572,6 +1601,131 @@ def complete(args: argparse.Namespace) -> None:
         os.close(directory)
 
 
+def abandon_failed_run(args: argparse.Namespace) -> None:
+    """실패했지만 cleanup까지 끝난 live run을 성공으로 위장하지 않고 종료한다."""
+
+    blocked_path = Path(args.blocked_path)
+    runtime = Path(args.runtime)
+    blocked = _load_object(blocked_path)
+    if blocked.get("status") != "blocked" or blocked.get("version") != 2:
+        raise RuntimeError("BLOCKED state 계약이 올바르지 않습니다")
+    identity = _validated_blocked_identity(blocked)
+    phase_history = blocked.get("phase_history")
+    required_phases = {
+        "candidate-startup-pending",
+        "candidate-startup-running",
+        "fixture-seed-running",
+        "browser-main-running",
+        "browser-recovery-running",
+        "direct-cleanup-running",
+        "test-failed-restored",
+    }
+    if (
+        not isinstance(phase_history, list)
+        or not phase_history
+        or not all(isinstance(item, str) and item for item in phase_history)
+        or blocked.get("phase") not in {
+            "test-failed-restored",
+            "failed-resource-finalizing",
+        }
+        or phase_history[-1] != blocked.get("phase")
+        or not required_phases.issubset(phase_history)
+    ):
+        raise RuntimeError("실패 run을 종료할 수 있는 BLOCKED phase가 아닙니다")
+
+    checkpoint = _validated_checkpoint(runtime / "clone-checkpoint.json")
+    if checkpoint["checkpoint_sha256"] != identity["clone_checkpoint_sha256"]:
+        raise RuntimeError("BLOCKED clone checkpoint가 runtime checkpoint와 다릅니다")
+    startup_before = _validated_snapshot(runtime / "clone-startup-before.json")
+    startup_after = _validated_snapshot(runtime / "clone-startup-after.json")
+    final = _validated_snapshot(runtime / "clone-final.json")
+    if checkpoint["baseline"] != startup_before:
+        raise RuntimeError("startup clone DB가 trusted checkpoint와 다릅니다")
+    if not _same_snapshot(startup_before, startup_after):
+        raise RuntimeError("candidate startup이 clone DB identity/schema/data를 변경했습니다")
+    clone_identity = (
+        f"{startup_before['clone_container_sha256']}\n"
+        f"{startup_before['clone_system_identifier_sha256']}\n"
+        f"{startup_before['host_port']}\n"
+        f"{startup_before['migration_head']}\n"
+        f"{startup_before['database_sha256']}\n"
+        f"{startup_before['extension_sha256']}\n"
+        f"{startup_before['schema_sha256']}\n"
+        f"{startup_before['content_sha256']}\n"
+    )
+    if identity["clone_identity_sha256"] != _sha256(clone_identity):
+        raise RuntimeError("BLOCKED clone identity가 DB snapshot과 다릅니다")
+    for key in (
+        "clone_container_sha256",
+        "clone_system_identifier_sha256",
+        "content_sha256",
+        "database_sha256",
+        "extension_sha256",
+        "host_port",
+        "migration_head",
+        "relation_count",
+        "schema_sha256",
+        "version",
+    ):
+        if final[key] != startup_before[key]:
+            raise RuntimeError(
+                "실패 run 최종 clone DB identity/schema/content가 시작 기준과 다릅니다"
+            )
+    if (
+        final["feature_non_deleted"] != startup_before["feature_non_deleted"]
+        or final["feature_total"] != startup_before["feature_total"] + 6
+        or final["active_owned_features"] != 0
+        or final["nonterminal_owned_change_requests"] != 0
+    ):
+        raise RuntimeError("실패 run cleanup 뒤 Feature/change request residue가 있습니다")
+
+    _fixture_counts(
+        runtime / "direct-seed.json",
+        "seed",
+        {"features": 2, "price_values": 1, "weather_values": 1},
+        expected_foreign_key_references=6,
+    )
+    _fixture_counts(
+        runtime / "direct-cleanup.json",
+        "cleanup",
+        {"features": 0, "price_values": 0, "weather_values": 0},
+        expected_foreign_key_references=0,
+    )
+    _fixture_counts(
+        runtime / "direct-audit.json",
+        "audit",
+        {"features": 0, "price_values": 0, "weather_values": 0},
+        expected_foreign_key_references=0,
+    )
+    _api_owned_audit_counts(runtime / "api-owned-audit.json")
+    _auth_audit_counts(runtime / "auth-audit.json", "auth-verify")
+    main = _report_counts(runtime / "playwright-main", allow_failed_main=True)
+    recovery = _report_counts(runtime / "playwright-recovery")
+    _validate_image_evidence(runtime / "image-evidence.json", identity)
+    _validate_resources(runtime / "resource-final.json")
+
+    canonical_identity = json.dumps(identity, sort_keys=True, separators=(",", ":"))
+    _atomic_json(
+        Path(args.result_path),
+        {
+            "execution_identity_sha256": _sha256(canonical_identity),
+            "phase_history": phase_history,
+            "source_commit": identity["source_commit"],
+            "status": "failed-restored",
+            "tests": {"main": main, "recovery": recovery},
+            "version": 1,
+        },
+    )
+    blocked_path.unlink()
+    directory = os.open(
+        blocked_path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC
+    )
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+
+
 def _add_identity_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--api-image-id", required=True)
     parser.add_argument("--clone-checkpoint-sha256", required=True)
@@ -1818,6 +1972,12 @@ def main() -> None:
     _add_completion_arguments(finish)
     finish.add_argument("--result-path", required=True)
     finish.set_defaults(handler=complete)
+
+    abandon = subparsers.add_parser("abandon-failed-run")
+    abandon.add_argument("--blocked-path", required=True)
+    abandon.add_argument("--result-path", required=True)
+    abandon.add_argument("--runtime", required=True)
+    abandon.set_defaults(handler=abandon_failed_run)
 
     args = parser.parse_args()
     args.handler(args)

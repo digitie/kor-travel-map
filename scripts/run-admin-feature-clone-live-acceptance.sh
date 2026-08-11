@@ -204,8 +204,8 @@ validate_snapshot() {
 }
 
 [[ "$MODE" == "baseline" || "$MODE" == "checkpoint" ||
-   "$MODE" == "recover" || "$MODE" == "run" ]] ||
-  die "usage: runner baseline|checkpoint|recover|run"
+   "$MODE" == "recover" || "$MODE" == "run" || "$MODE" == "abort" ]] ||
+  die "usage: runner baseline|checkpoint|recover|run|abort"
 require_env E2E_SOURCE_COMMIT
 if [[ "$SCRIPT_DIR" != "$INSTALL_BASE/$SOURCE_COMMIT" ]]; then
   bootstrap_snapshot
@@ -2718,6 +2718,9 @@ start_candidate_services() {
   docker exec "$API_CONTAINER" python -I -B -c \
     "import urllib.request; urllib.request.urlopen('http://127.0.0.1:$API_PORT/health', timeout=2).read()" \
     >/dev/null || die "candidate API health check failed"
+  docker exec "$API_CONTAINER" python -I -B -c \
+    "import json, urllib.request; spec=json.load(urllib.request.urlopen('http://127.0.0.1:$API_PORT/openapi.json', timeout=2)); assert 'post' in spec.get('paths', {}).get('/v1/admin/features', {})" \
+    >/dev/null || die "candidate API admin feature create route is not mounted"
 
   export KOR_TRAVEL_MAP_UI_ADMIN_PASSWORD_HASH="$password_hash"
   export KOR_TRAVEL_MAP_UI_SESSION_SECRET="$session_secret"
@@ -2754,6 +2757,9 @@ start_candidate_services() {
   docker exec "$UI_CONTAINER" node -e \
     "fetch('http://127.0.0.1:$UI_PORT/login').then(r=>{if(!r.ok)process.exit(1)})" \
     >/dev/null || die "candidate UI health check failed"
+  docker exec "$UI_CONTAINER" node -e \
+    "fetch('http://127.0.0.1:$UI_PORT/api/proxy/v1/admin/features',{method:'POST'}).then(r=>{if(r.status!==401)process.exit(1)})" \
+    >/dev/null || die "candidate UI admin proxy route is not mounted"
   build_revision="$(
     docker exec "$UI_CONTAINER" node -e \
       "fetch('http://127.0.0.1:$UI_PORT/api/build-info').then(r=>r.json()).then(v=>process.stdout.write(v.revision))"
@@ -2943,6 +2949,49 @@ load_blocked() {
   [[ "$(stat -c '%u:%g:%a' -- "$RUNTIME_DIR")" == "0:0:700" ]] ||
     die "BLOCKED runtime metadata is unsafe"
 }
+
+if [[ "$MODE" == "abort" ]]; then
+  [[ -f "$BLOCKED_FILE" && ! -L "$BLOCKED_FILE" ]] ||
+    die "failed-run BLOCKED state is missing"
+  [[ "$(stat -c '%u:%g:%a' -- "$BLOCKED_FILE")" == "0:0:600" ]] ||
+    die "BLOCKED state metadata is unsafe"
+  BLOCKED_WRITTEN=1
+  load_blocked
+  blocked_source="$(state_helper read-blocked --path "$BLOCKED_FILE" --field source_commit)"
+  [[ "$(state_helper read-blocked --path "$BLOCKED_FILE" --field phase)" == \
+      "test-failed-restored" ||
+     "$(state_helper read-blocked --path "$BLOCKED_FILE" --field phase)" == \
+      "failed-resource-finalizing" ]] ||
+    die "only a cleaned failed browser run can be abandoned"
+  API_IMAGE_TAG="kor-travel-map-clone-live-api:${blocked_source:0:12}-${RUN_KEY:0:12}"
+  UI_IMAGE_TAG="kor-travel-map-clone-live-ui:${blocked_source:0:12}-${RUN_KEY:0:12}"
+  PLAYWRIGHT_IMAGE_TAG="kor-travel-map-clone-live-playwright:${blocked_source:0:12}-${RUN_KEY:0:12}"
+  validate_snapshot "$blocked_source" "$INSTALL_BASE/$blocked_source"
+  CONTENT_CUTOFF="$(
+    state_helper read-checkpoint \
+      --checkpoint "$RUNTIME_DIR/clone-checkpoint.json" \
+      --field content_cutoff
+  )"
+  verify_checkpoint_dump "$RUNTIME_DIR/clone-checkpoint.json"
+  remove_unreferenced_checkpoint_dumps
+  recover_checkpoint_quiescence
+  recover_verification_database
+  start_acceptance_login_fence
+  state_helper update-blocked --path "$BLOCKED_FILE" --phase failed-resource-finalizing
+  finalize_resources
+  assert_acceptance_login_fence_after_resources
+  stop_checkpoint_quiescence ||
+    die "clone DB login fence restoration failed after failed-run cleanup"
+  state_helper abandon-failed-run \
+    --blocked-path "$BLOCKED_FILE" \
+    --result-path "$RUNTIME_DIR/failed-restored.json" \
+    --runtime "$RUNTIME_DIR"
+  COMPLETE=1
+  BLOCKED_WRITTEN=0
+  printf 'admin feature clone live acceptance failed run restored: source=%s result=%s\n' \
+    "$blocked_source" "$RUNTIME_DIR/failed-restored.json"
+  exit 0
+fi
 
 if [[ "$MODE" == "recover" ]]; then
   [[ -f "$BLOCKED_FILE" && ! -L "$BLOCKED_FILE" ]] ||
