@@ -745,6 +745,7 @@ content_sha256() {
   local run_id="$1"
   local dataset_projection_revision="${2-}"
   local dataset_projection_updated_at="${3-}"
+  local digest_revision="${4-current}"
   [[ "$run_id" =~ ^[a-z0-9][a-z0-9-]{15,79}$ ]] ||
     die "content digest run ID is invalid"
   [[ "$CONTENT_CUTOFF" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{6}Z$ ]] ||
@@ -756,9 +757,10 @@ content_sha256() {
     [[ "$dataset_projection_updated_at" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{6}Z$ ]] ||
       die "dataset projection baseline timestamp is invalid"
   fi
-  local statement_query statements
-  statement_query="$(cat <<SQL
-SELECT CASE
+  local sequence_identity_case=""
+  case "$digest_revision" in
+    current)
+      sequence_identity_case="$(cat <<'SQL'
   WHEN relation.relkind = 'S'
     AND namespace.nspname = 'ops'
     AND relation.relname = 'domain_commands_command_id_seq'
@@ -766,6 +768,19 @@ SELECT CASE
     'SELECT %L || chr(31) || ''run-owned identity sequence excluded'';',
     namespace.nspname || '.' || relation.relname
   )
+SQL
+)"
+      ;;
+    legacy-v1)
+      ;;
+    *)
+      die "content digest revision is invalid"
+      ;;
+  esac
+  local statement_query statements
+  statement_query="$(cat <<SQL
+SELECT CASE
+${sequence_identity_case}
   WHEN relation.relkind = 'S' THEN format(
     'SELECT %L || chr(31) || ''1'' || chr(31) || last_value::text || ' ||
     'chr(31) || is_called::text FROM %I.%I;',
@@ -1058,6 +1073,7 @@ write_snapshot() {
   local run_id="$2"
   local dataset_projection_revision="${3-}"
   local dataset_projection_updated_at="${4-}"
+  local digest_revision="${5-current}"
   [[ "$run_id" =~ ^[a-z0-9][a-z0-9-]{15,79}$ ]] ||
     die "snapshot run ID is invalid"
   verify_clone_container
@@ -1085,7 +1101,8 @@ write_snapshot() {
     content_sha256 \
       "$run_id" \
       "$dataset_projection_revision" \
-      "$dataset_projection_updated_at"
+      "$dataset_projection_updated_at" \
+      "$digest_revision"
   )"
   verify_clone_container
   [[ "$(docker inspect --format '{{.Id}}' "$DB_CONTAINER")" == "$before_id" ]] ||
@@ -1140,6 +1157,8 @@ NEW_CHECKPOINT_DUMP=""
 CHECKPOINT_SNAPSHOT=""
 RESTORED_CHECKPOINT_SNAPSHOT=""
 FINAL_CHECKPOINT_SNAPSHOT=""
+CURRENT_CHECKPOINT_SNAPSHOT=""
+LEGACY_CHECKPOINT_SNAPSHOT=""
 OLD_CHECKPOINT_DUMP=""
 OLD_CHECKPOINT_DUMP_SHA256=""
 OLD_CHECKPOINT_DUMP_SIZE=""
@@ -2524,31 +2543,55 @@ print(value)
         state_helper read-checkpoint \
           --checkpoint "$CHECKPOINT_FILE" --field content_cutoff
       )"
-      FINAL_CHECKPOINT_SNAPSHOT="$STATE_ROOT/.clone-checkpoint-final-$$.json"
+      CURRENT_CHECKPOINT_SNAPSHOT="$STATE_ROOT/.clone-checkpoint-current-$$.json"
       start_checkpoint_quiescence
       assert_checkpoint_quiescence
-      write_snapshot "$FINAL_CHECKPOINT_SNAPSHOT" "$RUN_ID"
-      state_helper verify-checkpoint \
-        --checkpoint "$CHECKPOINT_FILE" \
-        --snapshot "$FINAL_CHECKPOINT_SNAPSHOT" >/dev/null
+      write_snapshot "$CURRENT_CHECKPOINT_SNAPSHOT" "$RUN_ID"
+      CHECKPOINT_CONTENT_REBASE=0
+      if ! state_helper verify-checkpoint \
+          --checkpoint "$CHECKPOINT_FILE" \
+          --snapshot "$CURRENT_CHECKPOINT_SNAPSHOT" >/dev/null; then
+        # e462에서 run-owned domain-command sequence를 content digest에서 제외했다.
+        # checkpoint mode에서만 직전 규칙으로 기존 서명과 먼저 정확히 대조해,
+        # 이 분류 변경 외 DB drift를 checkpoint 재인증 경로에 넣지 않는다.
+        [[ "$MODE" == "checkpoint" && "$existing_checkpoint_version" == "4" ]] ||
+          die "existing checkpoint differs from the current clone"
+        LEGACY_CHECKPOINT_SNAPSHOT="$STATE_ROOT/.clone-checkpoint-legacy-$$.json"
+        write_snapshot "$LEGACY_CHECKPOINT_SNAPSHOT" "$RUN_ID" "" "" legacy-v1
+        state_helper verify-checkpoint \
+          --checkpoint "$CHECKPOINT_FILE" \
+          --snapshot "$LEGACY_CHECKPOINT_SNAPSHOT" >/dev/null ||
+          die "existing checkpoint differs outside the recognized content digest revision"
+        CHECKPOINT_CONTENT_REBASE=1
+      fi
       if [[ "$existing_checkpoint_version" == "2" ||
             "$existing_checkpoint_version" == "3" ]]; then
         state_helper promote-checkpoint \
           --checkpoint "$CHECKPOINT_FILE" \
-          --final-snapshot "$FINAL_CHECKPOINT_SNAPSHOT" \
+          --final-snapshot "$CURRENT_CHECKPOINT_SNAPSHOT" \
           --path "$CHECKPOINT_FILE"
         existing_checkpoint_version="4"
+      fi
+      if (( CHECKPOINT_CONTENT_REBASE == 1 )); then
+        rm -- "$CURRENT_CHECKPOINT_SNAPSHOT" "$LEGACY_CHECKPOINT_SNAPSHOT"
+        CURRENT_CHECKPOINT_SNAPSHOT=""
+        LEGACY_CHECKPOINT_SNAPSHOT=""
+      else
+        rm -- "$CURRENT_CHECKPOINT_SNAPSHOT"
+        CURRENT_CHECKPOINT_SNAPSHOT=""
+        assert_checkpoint_quiescence
+        verify_checkpoint_dump "$CHECKPOINT_FILE"
+        remove_unreferenced_checkpoint_dumps
+        COMPLETE=1
+        stop_checkpoint_quiescence
+        remove_owned_images
+        printf 'admin feature clone live checkpoint reused: source=%s version=%s checkpoint=%s\n' \
+          "$SOURCE_COMMIT" "$existing_checkpoint_version" "$CHECKPOINT_FILE"
+        exit 0
       fi
       assert_checkpoint_quiescence
       verify_checkpoint_dump "$CHECKPOINT_FILE"
       remove_unreferenced_checkpoint_dumps
-      COMPLETE=1
-      rm -- "$FINAL_CHECKPOINT_SNAPSHOT"
-      stop_checkpoint_quiescence
-      remove_owned_images
-      printf 'admin feature clone live checkpoint reused: source=%s version=%s checkpoint=%s\n' \
-        "$SOURCE_COMMIT" "$existing_checkpoint_version" "$CHECKPOINT_FILE"
-      exit 0
     else
       die "existing checkpoint version is unsupported"
     fi

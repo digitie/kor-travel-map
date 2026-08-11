@@ -672,6 +672,8 @@ def test_runner_bootstraps_requested_snapshot_before_validating_mode() -> None:
 def test_content_digest_excludes_only_run_bound_auth_domain_receipts() -> None:
     source = _RUNNER.read_text(encoding="utf-8")
 
+    assert 'local digest_revision="${4-current}"' in source
+    assert "legacy-v1)" in source
     assert "'domain_commands', 'domain_command_results'" in source
     assert "relation.relname = 'domain_commands_command_id_seq'" in source
     assert "run-owned identity sequence excluded" in source
@@ -680,6 +682,27 @@ def test_content_digest_excludes_only_run_bound_auth_domain_receipts() -> None:
     assert "result.response_body #>> ''{data,item,request_id}''" in source
     assert "e2e_live_acceptance::${run_id}::auth::main" in source
     assert "e2e_live_acceptance::${run_id}::auth::recovery" in source
+
+
+def test_checkpoint_content_digest_rebase_requires_exact_legacy_checkpoint_match() -> None:
+    source = _RUNNER.read_text(encoding="utf-8")
+    checkpoint_source = source.split(
+        'if [[ "$MODE" == "baseline" || "$MODE" == "checkpoint" ]]; then',
+        maxsplit=1,
+    )[1].split("readonly_candidate_secrets() {", maxsplit=1)[0]
+
+    assert '[[ "$MODE" == "checkpoint" && "$existing_checkpoint_version" == "4" ]]' in (
+        checkpoint_source
+    )
+    assert 'write_snapshot "$LEGACY_CHECKPOINT_SNAPSHOT" "$RUN_ID" "" "" legacy-v1' in (
+        checkpoint_source
+    )
+    assert checkpoint_source.index("legacy-v1") < checkpoint_source.index(
+        "CHECKPOINT_CONTENT_REBASE=1"
+    )
+    assert checkpoint_source.index("CHECKPOINT_CONTENT_REBASE=1") < checkpoint_source.index(
+        'rm -- "$CURRENT_CHECKPOINT_SNAPSHOT" "$LEGACY_CHECKPOINT_SNAPSHOT"'
+    )
 
 
 def test_failed_run_abort_recreates_clone_identity_before_login_fence() -> None:
