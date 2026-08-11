@@ -1911,6 +1911,9 @@ def test_runner_closes_reviewed_trust_boundaries() -> None:
         '[[ ! -e "$BLOCKED_FILE" && ! -L "$BLOCKED_FILE" ]]',
         maxsplit=1,
     )[1]
+    assert normal_source.index("restore_clone_checkpoint") < normal_source.index(
+        "start_acceptance_login_fence"
+    )
     assert normal_source.index("start_acceptance_login_fence") < normal_source.index(
         'write_snapshot "$RUNTIME_DIR/clone-startup-before.json"'
     )

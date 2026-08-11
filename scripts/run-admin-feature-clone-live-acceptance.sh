@@ -3590,6 +3590,11 @@ BASE_CLONE_SYSTEM_SHA256="$(
 )"
 recover_checkpoint_quiescence
 recover_verification_database
+# 성공한 이전 acceptance는 UI soft-delete 이력 6건을 증거로 남긴다. 다음 실행이
+# 그 이력을 새 baseline으로 오인하거나 fail-closed checkpoint 비교에서 멈추지 않게,
+# 신뢰한 custom dump를 candidate 시작 전에 항상 다시 적용한다. 대상은 위에서
+# label/port를 검증한 전용 clone뿐이며 dump 서명은 이미 검증했다.
+restore_clone_checkpoint "$CHECKPOINT_FILE"
 start_acceptance_login_fence
 write_snapshot "$RUNTIME_DIR/clone-startup-before.json" "$RUN_ID"
 install -o root -g root -m 0600 "$CHECKPOINT_FILE" "$RUNTIME_DIR/clone-checkpoint.json"
