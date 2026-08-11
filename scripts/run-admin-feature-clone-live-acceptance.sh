@@ -808,6 +808,8 @@ content_sha256() {
   local dataset_projection_revision="${2-}"
   local dataset_projection_updated_at="${3-}"
   local digest_revision="${4-current}"
+  local provider_sync_revision="${5-}"
+  local provider_sync_updated_at="${6-}"
   [[ "$run_id" =~ ^[a-z0-9][a-z0-9-]{15,79}$ ]] ||
     die "content digest run ID is invalid"
   [[ "$CONTENT_CUTOFF" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{6}Z$ ]] ||
@@ -819,6 +821,15 @@ content_sha256() {
     [[ "$dataset_projection_updated_at" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{6}Z$ ]] ||
       die "dataset projection baseline timestamp is invalid"
   fi
+  if [[ -n "$provider_sync_revision" || -n "$provider_sync_updated_at" ]]; then
+    [[ "$provider_sync_revision" =~ ^[0-9]+$ ]] ||
+      die "provider sync baseline revision is invalid"
+    [[ "$provider_sync_updated_at" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{6}Z$ ]] ||
+      die "provider sync baseline timestamp is invalid"
+  fi
+  [[ -z "$dataset_projection_revision" && -z "$provider_sync_revision" ]] ||
+    [[ -n "$dataset_projection_revision" && -n "$provider_sync_revision" ]] ||
+    die "normalized topic baseline is incomplete"
   local sequence_identity_case=""
   local domain_command_filter_case=""
   local owned_feature_ids owned_summary_run_ids
@@ -867,7 +878,7 @@ SQL
       ;;
   esac
   if [[ -n "$domain_command_filter_case" ]]; then
-    domain_command_filter_case="$(cat <<'SQL'
+    domain_command_filter_case="$(cat <<SQL
   WHEN namespace.nspname = 'ops'
     AND relation.relname IN ('domain_commands', 'domain_command_results')
   THEN format(
@@ -884,7 +895,10 @@ SQL
       || 'command.actor = ''ui-auth'' '
       || 'AND command.operation = ''admin.auth-event.create'' '
       || 'AND result.response_body #>> ''{data,item,request_id}'' IN (%L, %L)'
-    ') OR result.response_body::text LIKE %L)' ||
+    ') OR result.response_body::text LIKE %L '
+      || 'OR EXISTS (SELECT 1 FROM unnest(ARRAY[${owned_feature_ids}]::text[]) '
+      || 'AS owned(feature_id) WHERE result.response_body::text LIKE '
+      || '''%%'' || owned.feature_id || ''%%''))' ||
     ');',
     namespace.nspname || '.' || relation.relname,
     namespace.nspname,
@@ -917,14 +931,17 @@ ${sequence_identity_case}
     '9223372036854775807))::text, ''null'') ' ||
     'FROM (' ||
     'SELECT topic, revision, updated_at FROM %I.%I ' ||
-    'WHERE topic <> ''dataset_projection'' ' ||
+    'WHERE topic NOT IN (''dataset_projection'', ''provider_sync'') ' ||
     'UNION ALL SELECT ''dataset_projection'', %s::bigint, %L::timestamptz' ||
+    'UNION ALL SELECT ''provider_sync'', %s::bigint, %L::timestamptz' ||
     ') AS row_value;',
     namespace.nspname || '.' || relation.relname,
     namespace.nspname,
     relation.relname,
     '${dataset_projection_revision}',
-    '${dataset_projection_updated_at}'
+    '${dataset_projection_updated_at}',
+    '${provider_sync_revision}',
+    '${provider_sync_updated_at}'
   )
   WHEN namespace.nspname = 'ops'
     AND relation.relname = 'current_summary_runs'
@@ -999,6 +1016,11 @@ CONTENT_CUTOFF=""
 DATASET_PROJECTION_START_REVISION=""
 DATASET_PROJECTION_START_UPDATED_AT=""
 DATASET_PROJECTION_START_SOURCE=""
+PROVIDER_SYNC_CURRENT_REVISION=""
+PROVIDER_SYNC_CURRENT_UPDATED_AT=""
+PROVIDER_SYNC_START_REVISION=""
+PROVIDER_SYNC_START_UPDATED_AT=""
+PROVIDER_SYNC_START_SOURCE=""
 
 read_current_dataset_projection() {
   local row
@@ -1017,6 +1039,25 @@ read_current_dataset_projection() {
     die "dataset projection current row is invalid"
   DATASET_PROJECTION_CURRENT_REVISION="${BASH_REMATCH[1]}"
   DATASET_PROJECTION_CURRENT_UPDATED_AT="${BASH_REMATCH[2]}"
+}
+
+read_current_provider_sync() {
+  local row
+  row="$(
+    psql_value "
+      SELECT revision::text || chr(9) ||
+        to_char(
+          updated_at AT TIME ZONE 'UTC',
+          'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"'
+        )
+      FROM ops.ops_live_topic_revisions
+      WHERE topic = 'provider_sync'
+    "
+  )"
+  [[ "$row" =~ ^([0-9]+)$'\t'([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{6}Z)$ ]] ||
+    die "provider sync current row is invalid"
+  PROVIDER_SYNC_CURRENT_REVISION="${BASH_REMATCH[1]}"
+  PROVIDER_SYNC_CURRENT_UPDATED_AT="${BASH_REMATCH[2]}"
 }
 
 load_dataset_projection_start_from_dump() {
@@ -1097,6 +1138,84 @@ load_dataset_projection_start_from_runtime() {
   DATASET_PROJECTION_START_SOURCE="runtime-start"
 }
 
+load_provider_sync_start_from_dump() {
+  local checkpoint_path="$1"
+  local filename dump_path restore_output row raw_updated_at
+  filename="$(
+    state_helper read-checkpoint \
+      --checkpoint "$checkpoint_path" --field dump_filename
+  )"
+  dump_path="$STATE_ROOT/$filename"
+  [[ "$dump_path" == "$STATE_ROOT"/clone-checkpoint-*.dump &&
+     -f "$dump_path" && ! -L "$dump_path" ]] ||
+    die "provider sync checkpoint dump path is unsafe"
+  restore_output="$(
+    docker run --rm \
+      --network none \
+      --read-only \
+      --security-opt no-new-privileges \
+      --cap-drop ALL \
+      --mount "type=bind,src=$dump_path,dst=/checkpoint.dump,readonly" \
+      --entrypoint pg_restore \
+      "$BASE_CLONE_IMAGE_ID" \
+      --data-only \
+      --schema=ops \
+      --table=ops_live_topic_revisions \
+      -f - \
+      /checkpoint.dump
+  )"
+  row="$(
+    awk -F $'\t' '
+      $1 == "provider_sync" {
+        if (NF != 3) {
+          exit 2
+        }
+        value = $2 FS $3
+        count += 1
+      }
+      END {
+        if (count != 1) {
+          exit 3
+        }
+        print value
+      }
+    ' <<<"$restore_output"
+  )"
+  unset restore_output
+  [[ "$row" =~ ^([0-9]+)$'\t'([0-9]{4}-[0-9]{2}-[0-9]{2}\ [0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{6}\+00)$ ]] ||
+    die "provider sync checkpoint row is invalid"
+  PROVIDER_SYNC_START_REVISION="${BASH_REMATCH[1]}"
+  raw_updated_at="${BASH_REMATCH[2]}"
+  PROVIDER_SYNC_START_UPDATED_AT="${raw_updated_at/ /T}"
+  PROVIDER_SYNC_START_UPDATED_AT="${PROVIDER_SYNC_START_UPDATED_AT%+00}Z"
+  PROVIDER_SYNC_START_SOURCE="checkpoint-dump"
+}
+
+load_provider_sync_start_from_runtime() {
+  local path="$RUNTIME_DIR/provider-sync-topic-revision-start.json"
+  [[ -f "$path" && ! -L "$path" ]] ||
+    die "provider sync runtime start evidence is missing"
+  PROVIDER_SYNC_START_REVISION="$(
+    state_helper read-topic-revision-start \
+      --field revision --path "$path" --topic provider_sync
+  )"
+  PROVIDER_SYNC_START_UPDATED_AT="$(
+    state_helper read-topic-revision-start \
+      --field updated_at --path "$path" --topic provider_sync
+  )"
+  [[ "$(
+    state_helper read-topic-revision-start \
+      --field checkpoint_sha256 --path "$path" --topic provider_sync
+  )" == "$(state_helper read-blocked \
+    --path "$BLOCKED_FILE" --field clone_checkpoint_sha256
+  )" ]] || die "provider sync runtime checkpoint binding differs"
+  [[ "$(
+    state_helper read-topic-revision-start \
+      --field run_id --path "$path" --topic provider_sync
+  )" == "$RUN_ID" ]] || die "provider sync runtime run ID differs"
+  PROVIDER_SYNC_START_SOURCE="runtime-start"
+}
+
 snapshot_content_sha256() {
   local path="$1"
   local digest
@@ -1128,18 +1247,33 @@ write_dataset_projection_snapshots() {
   [[ "$DATASET_PROJECTION_START_SOURCE" == "runtime-start" ||
      "$DATASET_PROJECTION_START_SOURCE" == "checkpoint-dump" ]] ||
     die "dataset projection start source is unavailable"
+  [[ "$PROVIDER_SYNC_START_REVISION" =~ ^[0-9]+$ ]] ||
+    die "provider sync start revision is unavailable"
+  [[ "$PROVIDER_SYNC_START_UPDATED_AT" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{6}Z$ ]] ||
+    die "provider sync start timestamp is unavailable"
+  [[ "$PROVIDER_SYNC_START_SOURCE" == "runtime-start" ||
+     "$PROVIDER_SYNC_START_SOURCE" == "checkpoint-dump" ]] ||
+    die "provider sync start source is unavailable"
   write_snapshot "$observed_path" "$RUN_ID"
   read_current_dataset_projection
+  read_current_provider_sync
   (( DATASET_PROJECTION_CURRENT_REVISION >
      DATASET_PROJECTION_START_REVISION )) ||
     die "dataset projection revision did not advance"
   [[ "$DATASET_PROJECTION_CURRENT_UPDATED_AT" > "$DATASET_PROJECTION_START_UPDATED_AT" ]] ||
     die "dataset projection revision timestamp did not advance"
+  (( PROVIDER_SYNC_CURRENT_REVISION > PROVIDER_SYNC_START_REVISION )) ||
+    die "provider sync revision did not advance"
+  [[ "$PROVIDER_SYNC_CURRENT_UPDATED_AT" > "$PROVIDER_SYNC_START_UPDATED_AT" ]] ||
+    die "provider sync revision timestamp did not advance"
   write_snapshot \
     "$normalized_path" \
     "$RUN_ID" \
     "$DATASET_PROJECTION_START_REVISION" \
-    "$DATASET_PROJECTION_START_UPDATED_AT"
+    "$DATASET_PROJECTION_START_UPDATED_AT" \
+    current \
+    "$PROVIDER_SYNC_START_REVISION" \
+    "$PROVIDER_SYNC_START_UPDATED_AT"
   checkpoint_sha256="$(
     state_helper read-blocked \
       --path "$BLOCKED_FILE" --field clone_checkpoint_sha256
@@ -1157,6 +1291,18 @@ write_dataset_projection_snapshots() {
     --source "$DATASET_PROJECTION_START_SOURCE" \
     --start-revision "$DATASET_PROJECTION_START_REVISION" \
     --start-updated-at "$DATASET_PROJECTION_START_UPDATED_AT"
+  state_helper write-topic-revision-proof \
+    --checkpoint-sha256 "$checkpoint_sha256" \
+    --current-revision "$PROVIDER_SYNC_CURRENT_REVISION" \
+    --current-updated-at "$PROVIDER_SYNC_CURRENT_UPDATED_AT" \
+    --normalized-content-sha256 "$normalized_content" \
+    --observed-content-sha256 "$observed_content" \
+    --path "$RUNTIME_DIR/provider-sync-topic-revision-proof.json" \
+    --run-id "$RUN_ID" \
+    --source "$PROVIDER_SYNC_START_SOURCE" \
+    --start-revision "$PROVIDER_SYNC_START_REVISION" \
+    --start-updated-at "$PROVIDER_SYNC_START_UPDATED_AT" \
+    --topic provider_sync
 }
 
 read_image_migration_head() {
@@ -1184,6 +1330,8 @@ write_snapshot() {
   local dataset_projection_revision="${3-}"
   local dataset_projection_updated_at="${4-}"
   local digest_revision="${5-current}"
+  local provider_sync_revision="${6-}"
+  local provider_sync_updated_at="${7-}"
   [[ "$run_id" =~ ^[a-z0-9][a-z0-9-]{15,79}$ ]] ||
     die "snapshot run ID is invalid"
   verify_clone_container
@@ -1214,7 +1362,9 @@ write_snapshot() {
       "$run_id" \
       "$dataset_projection_revision" \
       "$dataset_projection_updated_at" \
-      "$digest_revision"
+      "$digest_revision" \
+      "$provider_sync_revision" \
+      "$provider_sync_updated_at"
   )"
   verify_clone_container
   [[ "$(docker inspect --format '{{.Id}}' "$DB_CONTAINER")" == "$before_id" ]] ||
@@ -3107,12 +3257,18 @@ set_completion_args() {
     --blocked-path "$BLOCKED_FILE"
     --observed-snapshot "$RUNTIME_DIR/clone-final-observed.json"
     --phase "$phase"
+    --provider-sync-topic-revision-proof "$RUNTIME_DIR/provider-sync-topic-revision-proof.json"
     --runtime "$RUNTIME_DIR"
     --topic-revision-proof "$RUNTIME_DIR/topic-revision-proof.json"
   )
   if [[ "$DATASET_PROJECTION_START_SOURCE" == "runtime-start" ]]; then
     completion_args+=(
       --topic-revision-start "$RUNTIME_DIR/topic-revision-start.json"
+    )
+  fi
+  if [[ "$PROVIDER_SYNC_START_SOURCE" == "runtime-start" ]]; then
+    completion_args+=(
+      --provider-sync-topic-revision-start "$RUNTIME_DIR/provider-sync-topic-revision-start.json"
     )
   fi
   if [[ "$phase" == "recovered" ]]; then
@@ -3263,8 +3419,11 @@ if [[ "$MODE" == "recover" ]]; then
   recover_verification_database
   start_acceptance_login_fence
   if [[ -f "$RUNTIME_DIR/topic-revision-start.json" &&
-        ! -L "$RUNTIME_DIR/topic-revision-start.json" ]]; then
+        ! -L "$RUNTIME_DIR/topic-revision-start.json" &&
+        -f "$RUNTIME_DIR/provider-sync-topic-revision-start.json" &&
+        ! -L "$RUNTIME_DIR/provider-sync-topic-revision-start.json" ]]; then
     load_dataset_projection_start_from_runtime
+    load_provider_sync_start_from_runtime
   else
     [[ "$blocked_source" != "$SOURCE_COMMIT" ]] ||
       die "legacy dataset projection recovery requires a newer tool revision"
@@ -3277,11 +3436,14 @@ if [[ "$MODE" == "recover" ]]; then
       die "legacy dataset projection recovery phase is not eligible"
     load_dataset_projection_start_from_dump \
       "$RUNTIME_DIR/clone-checkpoint.json"
+    load_provider_sync_start_from_dump \
+      "$RUNTIME_DIR/clone-checkpoint.json"
   fi
   write_dataset_projection_snapshots \
     "$RUNTIME_DIR/clone-recovery-observed.json" \
     "$RUNTIME_DIR/clone-recovery-current.json"
-  if [[ "$DATASET_PROJECTION_START_SOURCE" == "checkpoint-dump" ]]; then
+  if [[ "$DATASET_PROJECTION_START_SOURCE" == "checkpoint-dump" &&
+        "$PROVIDER_SYNC_START_SOURCE" == "checkpoint-dump" ]]; then
     install -o root -g root -m 0600 \
       "$RUNTIME_DIR/clone-recovery-observed.json" \
       "$RUNTIME_DIR/clone-final-observed.json"
@@ -3424,15 +3586,26 @@ clone_checkpoint_sha256="$(
     --snapshot "$RUNTIME_DIR/clone-startup-before.json"
 )"
 read_current_dataset_projection
+read_current_provider_sync
 DATASET_PROJECTION_START_REVISION="$DATASET_PROJECTION_CURRENT_REVISION"
 DATASET_PROJECTION_START_UPDATED_AT="$DATASET_PROJECTION_CURRENT_UPDATED_AT"
 DATASET_PROJECTION_START_SOURCE="runtime-start"
+PROVIDER_SYNC_START_REVISION="$PROVIDER_SYNC_CURRENT_REVISION"
+PROVIDER_SYNC_START_UPDATED_AT="$PROVIDER_SYNC_CURRENT_UPDATED_AT"
+PROVIDER_SYNC_START_SOURCE="runtime-start"
 state_helper write-topic-revision-start \
   --checkpoint-sha256 "$clone_checkpoint_sha256" \
   --path "$RUNTIME_DIR/topic-revision-start.json" \
   --revision "$DATASET_PROJECTION_START_REVISION" \
   --run-id "$RUN_ID" \
   --updated-at "$DATASET_PROJECTION_START_UPDATED_AT"
+state_helper write-topic-revision-start \
+  --checkpoint-sha256 "$clone_checkpoint_sha256" \
+  --path "$RUNTIME_DIR/provider-sync-topic-revision-start.json" \
+  --revision "$PROVIDER_SYNC_START_REVISION" \
+  --run-id "$RUN_ID" \
+  --updated-at "$PROVIDER_SYNC_START_UPDATED_AT" \
+  --topic provider_sync
 startup_schema="$(
   python3 -I -B -c \
     'import json,sys; print(json.load(open(sys.argv[1]))["schema_sha256"])' \

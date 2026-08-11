@@ -413,6 +413,19 @@ def _complete(
         topic_start = runtime / "topic-revision-start.json"
         if topic_start.exists():
             arguments.extend(["--topic-revision-start", str(topic_start)])
+    provider_sync_proof = runtime / "provider-sync-topic-revision-proof.json"
+    if provider_sync_proof.exists():
+        arguments.extend(
+            ["--provider-sync-topic-revision-proof", str(provider_sync_proof)]
+        )
+        provider_sync_start = runtime / "provider-sync-topic-revision-start.json"
+        if provider_sync_start.exists():
+            arguments.extend(
+                [
+                    "--provider-sync-topic-revision-start",
+                    str(provider_sync_start),
+                ]
+            )
     return _run_helper(*arguments, check=check)
 
 
@@ -424,10 +437,12 @@ def _write_topic_revision_evidence(
     source: str = "checkpoint-dump",
     start_revision: int = 100,
     current_revision: int = 101,
+    topic: str = "dataset_projection",
 ) -> None:
     checkpoint_sha256 = json.loads(
         (runtime / "clone-checkpoint.json").read_text(encoding="utf-8")
     )["checkpoint_sha256"]
+    prefix = "topic-revision" if topic == "dataset_projection" else "provider-sync-topic-revision"
     _write_snapshot(
         runtime / "clone-final-observed.json",
         total=126,
@@ -439,13 +454,15 @@ def _write_topic_revision_evidence(
             "--checkpoint-sha256",
             checkpoint_sha256,
             "--path",
-            str(runtime / "topic-revision-start.json"),
+            str(runtime / f"{prefix}-start.json"),
             "--revision",
             str(start_revision),
             "--run-id",
             _RUN_ID,
             "--updated-at",
             "2026-07-29T00:00:00.000000Z",
+            "--topic",
+            topic,
         )
     _run_helper(
         "write-topic-revision-proof",
@@ -460,7 +477,7 @@ def _write_topic_revision_evidence(
         "--observed-content-sha256",
         observed_content_sha256,
         "--path",
-        str(runtime / "topic-revision-proof.json"),
+        str(runtime / f"{prefix}-proof.json"),
         "--run-id",
         _RUN_ID,
         "--source",
@@ -469,6 +486,8 @@ def _write_topic_revision_evidence(
         str(start_revision),
         "--start-updated-at",
         "2026-07-29T00:00:00.000000Z",
+        "--topic",
+        topic,
     )
 
 
@@ -684,6 +703,8 @@ def test_content_digest_excludes_only_run_bound_auth_domain_receipts() -> None:
     assert "command.operation = ''admin.auth-event.create''" in source
     assert "result.response_body #>> ''{data,item,request_id}''" in source
     assert "e2e_live_acceptance::${run_id}::auth::main" in source
+    assert "unnest(ARRAY[${owned_feature_ids}]::text[])" in source
+    assert "owned.feature_id" in source
     assert "e2e_live_acceptance::${run_id}::auth::recovery" in source
 
 
@@ -755,6 +776,29 @@ def test_complete_accepts_bound_runtime_topic_revision_normalization(
     assert payload["phase"] == "passed"
     assert payload["isolation"]["dataset_projection_revision_delta"] == 1
     assert payload["isolation"]["dataset_projection_start_source"] == "runtime-start"
+
+
+def test_complete_binds_provider_sync_normalization_to_the_same_snapshot(
+    tmp_path: Path,
+) -> None:
+    runtime, blocked = _prepare_runtime(tmp_path)
+    _write_topic_revision_evidence(
+        runtime,
+        observed_content_sha256="7" * 64,
+        source="runtime-start",
+    )
+    _write_topic_revision_evidence(
+        runtime,
+        observed_content_sha256="7" * 64,
+        source="runtime-start",
+        topic="provider_sync",
+    )
+
+    _complete(runtime, blocked)
+
+    payload = json.loads((runtime / "result.json").read_text(encoding="utf-8"))
+    assert payload["isolation"]["provider_sync_revision_delta"] == 1
+    assert payload["isolation"]["provider_sync_start_source"] == "runtime-start"
 
 
 def test_recovery_revalidates_only_legacy_content_digest_drift(
@@ -1683,6 +1727,9 @@ def test_runner_closes_reviewed_trust_boundaries() -> None:
     assert "content_sha256" in source
     assert "ops_live_topic_revisions" in source
     assert "dataset projection revision did not advance" in source
+    assert "provider sync revision did not advance" in source
+    assert "provider-sync-topic-revision-proof.json" in source
+    assert "--provider-sync-topic-revision-proof" in source
     assert "--table=ops_live_topic_revisions" in source
     assert "write-topic-revision-proof" in source
     assert "c7-loopback-ui-proxy.mjs" in source

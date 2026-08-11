@@ -33,6 +33,9 @@ _CHECKPOINT_APP_RE: Final[re.Pattern[str]] = re.compile(
 _UTC_TIMESTAMP_RE: Final[re.Pattern[str]] = re.compile(
     r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{6}Z$"
 )
+_NORMALIZED_TOPIC_NAMES: Final[frozenset[str]] = frozenset(
+    {"dataset_projection", "provider_sync"}
+)
 _REPORT_FILES: Final[set[str]] = {
     "c7-results.xml",
     "c7-summary.html",
@@ -352,7 +355,11 @@ def write_snapshot(args: argparse.Namespace) -> None:
     )
 
 
-def _validated_topic_revision_start(path: Path) -> dict[str, Any]:
+def _validated_topic_revision_start(
+    path: Path,
+    *,
+    expected_topic: str = "dataset_projection",
+) -> dict[str, Any]:
     value = _load_object(path)
     if set(value) != {
         "checkpoint_sha256",
@@ -378,8 +385,8 @@ def _validated_topic_revision_start(path: Path) -> dict[str, Any]:
     revision = value["revision"]
     if not isinstance(revision, int) or isinstance(revision, bool) or revision < 0:
         raise RuntimeError("dataset projection 시작 revision이 올바르지 않습니다")
-    if value["topic"] != "dataset_projection":
-        raise RuntimeError("dataset projection 시작 topic이 올바르지 않습니다")
+    if expected_topic not in _NORMALIZED_TOPIC_NAMES or value["topic"] != expected_topic:
+        raise RuntimeError("정규화 topic 시작 증거가 올바르지 않습니다")
     return value
 
 
@@ -394,7 +401,7 @@ def write_topic_revision_start(args: argparse.Namespace) -> None:
             ),
             "revision": args.revision,
             "run_id": _require_pattern(args.run_id, _RUN_ID_RE, "run ID"),
-            "topic": "dataset_projection",
+            "topic": args.topic,
             "updated_at": _require_pattern(
                 args.updated_at,
                 _UTC_TIMESTAMP_RE,
@@ -403,15 +410,21 @@ def write_topic_revision_start(args: argparse.Namespace) -> None:
             "version": 1,
         },
     )
-    _validated_topic_revision_start(Path(args.path))
+    _validated_topic_revision_start(Path(args.path), expected_topic=args.topic)
 
 
 def read_topic_revision_start(args: argparse.Namespace) -> None:
-    value = _validated_topic_revision_start(Path(args.path))
+    value = _validated_topic_revision_start(
+        Path(args.path), expected_topic=args.topic
+    )
     print(value[args.field])
 
 
-def _validated_topic_revision_proof(path: Path) -> dict[str, Any]:
+def _validated_topic_revision_proof(
+    path: Path,
+    *,
+    expected_topic: str = "dataset_projection",
+) -> dict[str, Any]:
     value = _load_object(path)
     if set(value) != {
         "checkpoint_sha256",
@@ -457,8 +470,8 @@ def _validated_topic_revision_proof(path: Path) -> dict[str, Any]:
         raise RuntimeError("dataset projection revision이 증가하지 않았습니다")
     if value["current_updated_at"] <= value["start_updated_at"]:
         raise RuntimeError("dataset projection revision 시각이 증가하지 않았습니다")
-    if value["topic"] != "dataset_projection":
-        raise RuntimeError("dataset projection revision topic이 올바르지 않습니다")
+    if expected_topic not in _NORMALIZED_TOPIC_NAMES or value["topic"] != expected_topic:
+        raise RuntimeError("정규화 topic revision 증거가 올바르지 않습니다")
     if value["source"] not in {"checkpoint-dump", "runtime-start"}:
         raise RuntimeError("dataset projection 시작 증거 출처가 올바르지 않습니다")
     return value
@@ -497,11 +510,11 @@ def write_topic_revision_proof(args: argparse.Namespace) -> None:
                 _UTC_TIMESTAMP_RE,
                 "dataset projection 시작 시각",
             ),
-            "topic": "dataset_projection",
+            "topic": args.topic,
             "version": 1,
         },
     )
-    _validated_topic_revision_proof(Path(args.path))
+    _validated_topic_revision_proof(Path(args.path), expected_topic=args.topic)
 
 
 def write_checkpoint(args: argparse.Namespace) -> None:
@@ -1473,7 +1486,7 @@ def _build_result(
             raise RuntimeError("dataset projection revision 증거 인자가 완전하지 않습니다")
         observed = _validated_snapshot(Path(args.observed_snapshot))
         topic_revision_proof = _validated_topic_revision_proof(
-            Path(args.topic_revision_proof)
+            Path(args.topic_revision_proof), expected_topic="dataset_projection"
         )
         changed_fields = {
             key for key in observed if observed[key] != effective_final.get(key)
@@ -1496,7 +1509,7 @@ def _build_result(
             if args.topic_revision_start is None:
                 raise RuntimeError("dataset projection 시작 증거가 없습니다")
             topic_start = _validated_topic_revision_start(
-                Path(args.topic_revision_start)
+                Path(args.topic_revision_start), expected_topic="dataset_projection"
             )
             if {
                 "checkpoint_sha256": topic_start["checkpoint_sha256"],
@@ -1526,6 +1539,77 @@ def _build_result(
         ):
             raise RuntimeError(
                 "recovery dataset projection raw snapshot이 실패 증거와 다릅니다"
+            )
+    provider_sync_topic_revision_proof: dict[str, Any] | None = None
+    provider_sync_arguments = (
+        args.provider_sync_topic_revision_proof,
+        args.provider_sync_topic_revision_start,
+    )
+    if any(value is not None for value in provider_sync_arguments):
+        if (
+            args.observed_snapshot is None
+            or args.provider_sync_topic_revision_proof is None
+        ):
+            raise RuntimeError("provider sync revision 증거 인자가 완전하지 않습니다")
+        observed = _validated_snapshot(Path(args.observed_snapshot))
+        provider_sync_topic_revision_proof = _validated_topic_revision_proof(
+            Path(args.provider_sync_topic_revision_proof),
+            expected_topic="provider_sync",
+        )
+        changed_fields = {
+            key for key in observed if observed[key] != effective_final.get(key)
+        } | {key for key in effective_final if key not in observed}
+        if changed_fields != {"content_sha256"}:
+            raise RuntimeError(
+                "provider sync observed/normalized snapshot 차이가 예상과 다릅니다"
+            )
+        if (
+            provider_sync_topic_revision_proof["checkpoint_sha256"]
+            != checkpoint["checkpoint_sha256"]
+            or provider_sync_topic_revision_proof["run_id"] != blocked.get("run_id")
+            or provider_sync_topic_revision_proof["observed_content_sha256"]
+            != observed["content_sha256"]
+            or provider_sync_topic_revision_proof["normalized_content_sha256"]
+            != effective_final["content_sha256"]
+        ):
+            raise RuntimeError("provider sync revision 증거 binding이 다릅니다")
+        if provider_sync_topic_revision_proof["source"] == "runtime-start":
+            if args.provider_sync_topic_revision_start is None:
+                raise RuntimeError("provider sync 시작 증거가 없습니다")
+            provider_sync_start = _validated_topic_revision_start(
+                Path(args.provider_sync_topic_revision_start),
+                expected_topic="provider_sync",
+            )
+            if {
+                "checkpoint_sha256": provider_sync_start["checkpoint_sha256"],
+                "revision": provider_sync_start["revision"],
+                "run_id": provider_sync_start["run_id"],
+                "updated_at": provider_sync_start["updated_at"],
+            } != {
+                "checkpoint_sha256": provider_sync_topic_revision_proof[
+                    "checkpoint_sha256"
+                ],
+                "revision": provider_sync_topic_revision_proof["start_revision"],
+                "run_id": provider_sync_topic_revision_proof["run_id"],
+                "updated_at": provider_sync_topic_revision_proof["start_updated_at"],
+            }:
+                raise RuntimeError("provider sync 시작/revision 증거가 다릅니다")
+        elif (
+            args.provider_sync_topic_revision_start is not None
+            or args.phase != "recovered"
+            or recovery_tool_source_commit == identity["source_commit"]
+            or "direct-cleanup-running" not in phase_history
+            or phase_history[-1]
+            not in {"direct-cleanup-running", "recovery-resource-finalizing"}
+        ):
+            raise RuntimeError(
+                "checkpoint dump provider sync 복구 증거를 사용할 수 없습니다"
+            )
+        if not _same_snapshot(final, effective_final) and not _same_snapshot(
+            final, observed
+        ):
+            raise RuntimeError(
+                "recovery provider sync raw snapshot이 실패 증거와 다릅니다"
             )
     if checkpoint["baseline"] != startup_before:
         raise RuntimeError("startup clone DB가 trusted checkpoint와 다릅니다")
@@ -1645,6 +1729,14 @@ def _build_result(
             "dataset_projection_start_source": (
                 topic_revision_proof["source"]
                 if topic_revision_proof is not None
+                else None
+            ),
+            "provider_sync_revision_delta": (
+                1 if provider_sync_topic_revision_proof is not None else None
+            ),
+            "provider_sync_start_source": (
+                provider_sync_topic_revision_proof["source"]
+                if provider_sync_topic_revision_proof is not None
                 else None
             ),
         },
@@ -1878,6 +1970,8 @@ def _add_completion_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--phase", choices=("passed", "recovered"), required=True)
     parser.add_argument("--recovery-tool-source-commit")
     parser.add_argument("--runtime", required=True)
+    parser.add_argument("--provider-sync-topic-revision-proof")
+    parser.add_argument("--provider-sync-topic-revision-start")
     parser.add_argument("--topic-revision-proof")
     parser.add_argument("--topic-revision-start")
 
@@ -1944,6 +2038,11 @@ def main() -> None:
     topic_start.add_argument("--path", required=True)
     topic_start.add_argument("--revision", required=True, type=int)
     topic_start.add_argument("--run-id", required=True)
+    topic_start.add_argument(
+        "--topic",
+        choices=tuple(sorted(_NORMALIZED_TOPIC_NAMES)),
+        default="dataset_projection",
+    )
     topic_start.add_argument("--updated-at", required=True)
     topic_start.set_defaults(handler=write_topic_revision_start)
 
@@ -1954,6 +2053,11 @@ def main() -> None:
         required=True,
     )
     topic_start_read.add_argument("--path", required=True)
+    topic_start_read.add_argument(
+        "--topic",
+        choices=tuple(sorted(_NORMALIZED_TOPIC_NAMES)),
+        default="dataset_projection",
+    )
     topic_start_read.set_defaults(handler=read_topic_revision_start)
 
     topic_proof = subparsers.add_parser("write-topic-revision-proof")
@@ -1971,6 +2075,11 @@ def main() -> None:
     )
     topic_proof.add_argument("--start-revision", required=True, type=int)
     topic_proof.add_argument("--start-updated-at", required=True)
+    topic_proof.add_argument(
+        "--topic",
+        choices=tuple(sorted(_NORMALIZED_TOPIC_NAMES)),
+        default="dataset_projection",
+    )
     topic_proof.set_defaults(handler=write_topic_revision_proof)
 
     checkpoint = subparsers.add_parser("write-checkpoint")
