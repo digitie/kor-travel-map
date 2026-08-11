@@ -2,7 +2,7 @@
 """T-VN-34A Feature 직교 상태·전이 감사 DB spine.
 
 Revision ID: 0095_tvn34_state_spine
-Revises: 0094_drop_weather_metric_series
+Revises: 0095_tvn33_tvn38_head_merge
 
 서비스 전 단계의 stacked draft다. legacy ``status``/soft-delete 열의 물리 제거는
 T-VN-34C final cutover가 맡는다. 이 revision은 새 세 축과 DB 강제 write/audit
@@ -16,7 +16,7 @@ from collections.abc import Sequence
 from alembic import op
 
 revision: str = "0095_tvn34_state_spine"
-down_revision: str | Sequence[str] | None = "0094_drop_weather_metric_series"
+down_revision: str | Sequence[str] | None = "0095_tvn33_tvn38_head_merge"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

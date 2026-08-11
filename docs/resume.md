@@ -65,6 +65,19 @@ API live 12/12 → n150 브라우저 admin UI live 10/10 + 라운드12 수정 li
 - 무방비 축 회귀: MOIS precheck fail-open(실 DB 7건), `_advisory_key` sync_scope,
   주소 clue 우선순위, MCST slug — 전부 변이로 KILLED 실증.
 - 경과는 `docs/journal.md` 2026-08-11.
+## 2026-08-11 — T-VN-34: 최신 T-VN-33/T-VN-38 rebase 반영
+
+**다음 한 작업**: current Map commit에서 PinVi user/admin-detail snapshot을 재-vendor하고
+paired receipt를 갱신한다. 그 뒤 n150 fresh-live 증적의 source pin을 새 pair로 대조한다.
+
+- T-VN-34A `down_revision`은 upstream
+  `0095_tvn33_tvn38_head_merge`를 가리킨다. 따라서 fresh Alembic head는 T-VN-33
+  cleanup과 T-VN-38 current summaries를 누락하지 않는다.
+- target catalog/OpenAPI artifact 및 state/runtime/post-cutover contract gate를 현재
+  rebase tree에서 재동결·재실행했다.
+- user/service API bytes가 동일하더라도 admin full spec은 변했으므로, PinVi admin-detail
+  deterministic subset과 provenance를 새 Map source에서 재검증해야 한다.
+
 ## 2026-08-10 — T-VN-34C: n150 fresh destructive live gate 통과
 
 **다음 한 작업**: T-VN-34C의 구현 게이트는 완료했다. PR CI와 승인 뒤 forward-only C head를

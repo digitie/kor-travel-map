@@ -105,6 +105,19 @@ rebase에서 드러났다. 빈 `0095_tvn33_tvn38_head_merge`가 두 선행 revis
 **최종 게이트 25/25 GREEN**: unit+lint 2192 · api 1101(cov 77.64%) · dagster 530/3skip
 (85.23%) · integration **1049 passed / 0 skipped**(geo live 실제 실행) · vitest 37파일 302 ·
 frontend 9종.
+## 2026-08-11 — T-VN-34: 최신 T-VN-33/T-VN-38 rebase와 migration 선형화
+
+T-VN-33의 `0092_tvn33_offline_cleanup`와 T-VN-38 weather/price chain은 공통
+`0091`에서 갈라져 있었다. upstream T-VN-38이 두 branch를
+`0095_tvn33_tvn38_head_merge`로 수렴시킨 뒤, T-VN-34A state spine의
+`down_revision`도 그 merge revision으로 옮겼다. fresh upgrade는 T-VN-33 cleanup,
+T-VN-38 summaries, T-VN-34 state/public/final cutover를 하나의 head로 적용한다.
+
+T-VN-33 ownership reference와 admin OpenAPI의 bytes 변동은 target catalog와 OpenAPI
+baseline freeze가 fail-close로 검출했다. 실제 PostGIS 적용값으로 동결을 다시 만들고,
+state/runtime/post-cutover contract를 재실행했다. PinVi user/admin-detail vendor receipt는
+새 Map source commit을 기준으로 별도 재-vendor한다.
+
 ## 2026-08-10 — T-VN-34: 최신 T-VN-33 → T-VN-38 체인 재base 재검증
 
 신규 T-VN-33 head `21b1758b`를 기준으로 T-VN-38을 `2e78d623`까지 먼저 재base하고,
