@@ -2901,7 +2901,8 @@ run_acceptance_from_fixture() {
   state_helper update-blocked --path "$BLOCKED_FILE" --phase fixture-seed-running
   run_helper seed "$RUNTIME_DIR/direct-seed.json"
   state_helper update-blocked --path "$BLOCKED_FILE" --phase browser-main-running
-  local main_status=0 recovery_status=0
+  local main_status=0 recovery_status=0 cleanup_status=0 audit_status=0
+  local api_audit_status=0 auth_status=0
   run_executor \
     "ktm-afcla-${RUN_KEY:0:12}-executor-main" \
     "$RUNTIME_DIR/playwright-main" 0 || main_status=$?
@@ -2910,17 +2911,21 @@ run_acceptance_from_fixture() {
     "ktm-afcla-${RUN_KEY:0:12}-executor-recovery" \
     "$RUNTIME_DIR/playwright-recovery" 1 || recovery_status=$?
   state_helper update-blocked --path "$BLOCKED_FILE" --phase direct-cleanup-running
-  run_helper cleanup "$RUNTIME_DIR/direct-cleanup.json"
-  run_helper audit "$RUNTIME_DIR/direct-audit.json"
-  run_helper api-audit "$RUNTIME_DIR/api-owned-audit.json"
-  run_helper auth-verify "$RUNTIME_DIR/auth-audit.json"
+  # UI failure 뒤에도 fixture cleanup과 모든 audit receipt를 끝까지 수집해야 다음
+  # recover가 trusted checkpoint로 돌아갈 수 있다. 각 실패는 아래 단일 terminal
+  # branch에서 합산해 acceptance를 통과시키지 않는다.
+  run_helper cleanup "$RUNTIME_DIR/direct-cleanup.json" || cleanup_status=$?
+  run_helper audit "$RUNTIME_DIR/direct-audit.json" || audit_status=$?
+  run_helper api-audit "$RUNTIME_DIR/api-owned-audit.json" || api_audit_status=$?
+  run_helper auth-verify "$RUNTIME_DIR/auth-audit.json" || auth_status=$?
   assert_database_login_fence
   write_dataset_projection_snapshots \
     "$RUNTIME_DIR/clone-final-observed.json" \
     "$RUNTIME_DIR/clone-final.json"
-  (( main_status == 0 && recovery_status == 0 )) || {
+  (( main_status == 0 && recovery_status == 0 && cleanup_status == 0 &&
+    audit_status == 0 && api_audit_status == 0 && auth_status == 0 )) || {
     state_helper update-blocked --path "$BLOCKED_FILE" --phase test-failed-restored
-    die "Playwright acceptance failed after cleanup"
+    die "Playwright or fixture acceptance failed after cleanup"
   }
 }
 
