@@ -622,6 +622,44 @@ def test_abandon_failed_run_requires_cleaned_failure_evidence(
     }
 
 
+def test_abandon_failed_run_allows_interrupted_direct_cleanup_finalization(
+    tmp_path: Path,
+) -> None:
+    runtime, blocked = _prepare_runtime(tmp_path)
+    _write_failed_main_report(runtime / "playwright-main")
+    for phase in (
+        "candidate-startup-running",
+        "fixture-seed-running",
+        "browser-main-running",
+        "browser-recovery-running",
+        "direct-cleanup-running",
+        "failed-resource-finalizing",
+    ):
+        _run_helper("update-blocked", "--path", str(blocked), "--phase", phase)
+
+    _run_helper(
+        "abandon-failed-run",
+        "--blocked-path",
+        str(blocked),
+        "--result-path",
+        str(runtime / "failed-restored.json"),
+        "--restored-snapshot",
+        str(runtime / "clone-startup-before.json"),
+        "--runtime",
+        str(runtime),
+    )
+
+    payload = json.loads(
+        (runtime / "failed-restored.json").read_text(encoding="utf-8")
+    )
+    assert not blocked.exists()
+    assert payload["status"] == "failed-restored"
+    assert payload["phase_history"][-2:] == [
+        "direct-cleanup-running",
+        "failed-resource-finalizing",
+    ]
+
+
 def test_runner_bootstraps_requested_snapshot_before_validating_mode() -> None:
     source = _RUNNER.read_text(encoding="utf-8")
     bootstrap_gate = 'if [[ "$SCRIPT_DIR" != "$INSTALL_BASE/$SOURCE_COMMIT" ]]; then'

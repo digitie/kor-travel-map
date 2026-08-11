@@ -1663,6 +1663,14 @@ def abandon_failed_run(args: argparse.Namespace) -> None:
         raise RuntimeError("BLOCKED state 계약이 올바르지 않습니다")
     identity = _validated_blocked_identity(blocked)
     phase_history = blocked.get("phase_history")
+    if (
+        not isinstance(phase_history, list)
+        or not phase_history
+        or not all(isinstance(item, str) and item for item in phase_history)
+    ):
+        raise RuntimeError("실패 run을 종료할 수 있는 BLOCKED phase가 아닙니다")
+
+    terminal_phase = blocked.get("phase")
     required_phases = {
         "candidate-startup-pending",
         "candidate-startup-running",
@@ -1671,18 +1679,23 @@ def abandon_failed_run(args: argparse.Namespace) -> None:
         "browser-recovery-running",
         "direct-cleanup-running",
     }
-    if blocked.get("phase") != "direct-cleanup-running":
+    # abort가 strict checkpoint restore와 resource finalization까지 끝낸 뒤 helper
+    # 호출 직전에 중단될 수 있다. 그 경우 phase는 failed-resource-finalizing이지만
+    # test-failed-restored 단계는 아직 만들지 않았다. 반대로 기존 browser-failure
+    # 경로는 그 단계를 반드시 거친다.
+    requires_test_failed_restoration = terminal_phase == "test-failed-restored" or (
+        terminal_phase == "failed-resource-finalizing"
+        and "test-failed-restored" in phase_history
+    )
+    if requires_test_failed_restoration:
         required_phases.add("test-failed-restored")
     if (
-        not isinstance(phase_history, list)
-        or not phase_history
-        or not all(isinstance(item, str) and item for item in phase_history)
-        or blocked.get("phase") not in {
+        terminal_phase not in {
             "direct-cleanup-running",
             "test-failed-restored",
             "failed-resource-finalizing",
         }
-        or phase_history[-1] != blocked.get("phase")
+        or phase_history[-1] != terminal_phase
         or not required_phases.issubset(phase_history)
     ):
         raise RuntimeError("실패 run을 종료할 수 있는 BLOCKED phase가 아닙니다")
