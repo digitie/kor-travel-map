@@ -534,7 +534,7 @@ def test_recovery_revalidates_only_legacy_content_digest_drift(
     )
 
 
-def test_topic_revision_proof_rejects_non_unit_delta(tmp_path: Path) -> None:
+def test_topic_revision_proof_rejects_non_advancing_revision(tmp_path: Path) -> None:
     runtime, _blocked = _prepare_runtime(tmp_path)
     checkpoint_sha256 = json.loads(
         (runtime / "clone-checkpoint.json").read_text(encoding="utf-8")
@@ -545,7 +545,7 @@ def test_topic_revision_proof_rejects_non_unit_delta(tmp_path: Path) -> None:
         "--checkpoint-sha256",
         checkpoint_sha256,
         "--current-revision",
-        "102",
+        "100",
         "--current-updated-at",
         "2026-07-29T00:00:01.000000Z",
         "--normalized-content-sha256",
@@ -566,7 +566,21 @@ def test_topic_revision_proof_rejects_non_unit_delta(tmp_path: Path) -> None:
     )
 
     assert completed.returncode != 0
-    assert "revision delta" in completed.stderr
+    assert "revision" in completed.stderr
+
+
+def test_topic_revision_proof_accepts_multiple_fixture_changes(
+    tmp_path: Path,
+) -> None:
+    runtime, _blocked = _prepare_runtime(tmp_path)
+
+    _write_topic_revision_evidence(
+        runtime,
+        observed_content_sha256="7" * 64,
+        current_revision=102,
+    )
+
+    assert (runtime / "topic-revision-proof.json").exists()
 
 
 def test_checkpoint_dump_topic_proof_rejects_unrelated_final_phase(
@@ -1404,9 +1418,12 @@ def test_runner_closes_reviewed_trust_boundaries() -> None:
     assert "schema_sha256" in source
     assert "content_sha256" in source
     assert "ops_live_topic_revisions" in source
-    assert "dataset projection revision delta is not one" in source
+    assert "dataset projection revision did not advance" in source
     assert "--table=ops_live_topic_revisions" in source
     assert "write-topic-revision-proof" in source
+    assert "c7-loopback-ui-proxy.mjs" in source
+    assert 'E2E_BASE_URL=http://127.0.0.1:$LOOPBACK_UI_PORT' in source
+    assert 'KTM_C7_LOOPBACK_UI_PROXY_TARGET=http://candidate-ui:$UI_PORT' in source
     assert "hashtextextended(row_value::text" in source
     assert "attribute.attidentity" in source
     assert "attribute.attgenerated" in source

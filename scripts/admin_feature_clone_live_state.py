@@ -430,8 +430,8 @@ def _validated_topic_revision_proof(path: Path) -> dict[str, Any]:
             or field_value < 0
         ):
             raise RuntimeError(f"dataset projection {field}이 올바르지 않습니다")
-    if value["current_revision"] != value["start_revision"] + 1:
-        raise RuntimeError("dataset projection revision delta가 1이 아닙니다")
+    if value["current_revision"] <= value["start_revision"]:
+        raise RuntimeError("dataset projection revision이 증가하지 않았습니다")
     if value["current_updated_at"] <= value["start_updated_at"]:
         raise RuntimeError("dataset projection revision 시각이 증가하지 않았습니다")
     if value["topic"] != "dataset_projection":

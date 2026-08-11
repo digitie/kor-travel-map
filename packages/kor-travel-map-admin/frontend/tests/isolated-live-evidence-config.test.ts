@@ -54,33 +54,20 @@ describe("isolated Live evidence config", () => {
     );
   });
 
-  it("trusted runner의 exact Docker service origin만 허용한다", async () => {
-    process.env.E2E_BASE_URL = "http://candidate-ui:18705";
+  it("격리 Docker executor는 loopback proxy origin만 허용한다", async () => {
+    process.env.E2E_BASE_URL = "http://127.0.0.1:18706";
     process.env.E2E_ISOLATED_LIVE_EVIDENCE = "1";
     process.env.E2E_ISOLATED_LIVE_DOCKER_NETWORK = "1";
 
     const config = await loadConfig();
 
-    expect(config.use?.baseURL).toBe("http://candidate-ui:18705");
+    expect(config.use?.baseURL).toBe("http://127.0.0.1:18706");
     expect(config.use?.trace).toBe("off");
-    expect(config.use?.launchOptions).toEqual({
-      args: [
-        "--unsafely-treat-insecure-origin-as-secure=http://candidate-ui:18705",
-      ],
-    });
-  });
-
-  it("일반 HTTP origin에는 secure-context 승격 옵션을 넣지 않는다", async () => {
-    process.env.E2E_BASE_URL = "http://127.0.0.1:18705";
-    process.env.E2E_ISOLATED_LIVE_EVIDENCE = "1";
-
-    const config = await loadConfig();
-
     expect(config.use?.launchOptions).toBeUndefined();
   });
 
-  it("Docker 격리 opt-in으로 임의 hostname을 허용하지 않는다", async () => {
-    process.env.E2E_BASE_URL = "http://candidate-ui.invalid:18705";
+  it("격리 Docker opt-in도 direct candidate HTTP origin은 거부한다", async () => {
+    process.env.E2E_BASE_URL = "http://candidate-ui:18705";
     process.env.E2E_ISOLATED_LIVE_EVIDENCE = "1";
     process.env.E2E_ISOLATED_LIVE_DOCKER_NETWORK = "1";
 
@@ -88,7 +75,7 @@ describe("isolated Live evidence config", () => {
   });
 
   it("Docker 격리 opt-in은 evidence mode 없이 사용할 수 없다", async () => {
-    process.env.E2E_BASE_URL = "http://candidate-ui:18705";
+    process.env.E2E_BASE_URL = "http://127.0.0.1:18706";
     process.env.E2E_ISOLATED_LIVE_DOCKER_NETWORK = "1";
 
     await expect(loadConfig()).rejects.toThrow(
@@ -98,7 +85,7 @@ describe("isolated Live evidence config", () => {
 
   it("격리 Admin Feature 인증 감사를 run과 phase에 결합한다", async () => {
     const runId = "clone-20260729000000-abcdef123456";
-    process.env.E2E_BASE_URL = "http://candidate-ui:18705";
+    process.env.E2E_BASE_URL = "http://127.0.0.1:18706";
     process.env.E2E_ISOLATED_LIVE_EVIDENCE = "1";
     process.env.E2E_ISOLATED_LIVE_DOCKER_NETWORK = "1";
     process.env.E2E_ADMIN_FEATURE_ACCEPTANCE_RUN_ID = runId;

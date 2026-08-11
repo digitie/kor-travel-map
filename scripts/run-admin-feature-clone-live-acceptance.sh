@@ -23,6 +23,7 @@ readonly DB_CONTAINER="${E2E_CLONE_DB_CONTAINER-}"
 readonly DB_HOST_PORT="${E2E_CLONE_DB_PORT-}"
 readonly API_PORT="${E2E_CLONE_API_PORT:-18701}"
 readonly UI_PORT="${E2E_CLONE_UI_PORT:-18705}"
+readonly LOOPBACK_UI_PORT=18706
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 readonly SOURCE_ARCHIVE="$SCRIPT_DIR/source.tar.gz"
 readonly ARCHIVE_PREFIX="kor-travel-map-$SOURCE_COMMIT"
@@ -955,9 +956,9 @@ write_dataset_projection_snapshots() {
     die "dataset projection start source is unavailable"
   write_snapshot "$observed_path" "$RUN_ID"
   read_current_dataset_projection
-  (( DATASET_PROJECTION_CURRENT_REVISION ==
-     DATASET_PROJECTION_START_REVISION + 1 )) ||
-    die "dataset projection revision delta is not one"
+  (( DATASET_PROJECTION_CURRENT_REVISION >
+     DATASET_PROJECTION_START_REVISION )) ||
+    die "dataset projection revision did not advance"
   [[ "$DATASET_PROJECTION_CURRENT_UPDATED_AT" > "$DATASET_PROJECTION_START_UPDATED_AT" ]] ||
     die "dataset projection revision timestamp did not advance"
   write_snapshot \
@@ -2756,7 +2757,9 @@ run_executor() {
     --tmpfs /root/.config:rw,nosuid,nodev,noexec,mode=700 \
     --tmpfs /root/.npm:rw,nosuid,nodev,noexec,mode=700 \
     --mount "type=bind,src=$artifact_dir,dst=/evidence" \
-    --env "E2E_BASE_URL=http://candidate-ui:$UI_PORT" \
+    --env "E2E_BASE_URL=http://127.0.0.1:$LOOPBACK_UI_PORT" \
+    --env "KTM_C7_LOOPBACK_UI_PROXY_PORT=$LOOPBACK_UI_PORT" \
+    --env "KTM_C7_LOOPBACK_UI_PROXY_TARGET=http://candidate-ui:$UI_PORT" \
     --env E2E_ADMIN_USERNAME=admin \
     --env E2E_ADMIN_PASSWORD \
     --env E2E_ADMIN_FEATURE_ACCEPTANCE_WRITE=1 \
@@ -2767,10 +2770,23 @@ run_executor() {
     --env PLAYWRIGHT_ARTIFACT_ROOT=/evidence \
     --env E2E_STORAGE_STATE=/tmp/admin-feature-clone-state.json \
     "${recovery_env[@]}" \
+    --entrypoint /bin/sh \
     "$PLAYWRIGHT_IMAGE_ID" \
-    npm run e2e:live -- \
-    e2e/live/admin-feature-acceptance-write.live.spec.ts \
-    --workers=1 --retries=0
+    -ec '
+      node /work/scripts/c7-loopback-ui-proxy.mjs &
+      proxy_pid=$!
+      cleanup_proxy() {
+        kill "$proxy_pid" 2>/dev/null || true
+        wait "$proxy_pid" 2>/dev/null || true
+      }
+      trap cleanup_proxy EXIT INT TERM
+      for _ in $(seq 1 30); do
+        node -e "fetch(process.env.E2E_BASE_URL + \"/login\").then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))" && break
+        sleep 1
+      done
+      node -e "fetch(process.env.E2E_BASE_URL + \"/login\").then((response) => process.exit(response.ok ? 0 : 1))"
+      npm run e2e:live -- e2e/live/admin-feature-acceptance-write.live.spec.ts --workers=1 --retries=0
+    '
 }
 
 reset_evidence_path() {
