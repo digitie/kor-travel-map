@@ -1489,8 +1489,10 @@ def test_runner_closes_reviewed_trust_boundaries() -> None:
     assert recovery_source.index("BLOCKED_WRITTEN=1") < recovery_source.index(
         "load_blocked"
     )
-    assert recovery_source.index(
-        "if state_helper validate-evidence"
+    assert "if state_helper verify-checkpoint \\" in recovery_source
+    assert "--allow-owned-drift" in recovery_source
+    assert recovery_source.index("if state_helper verify-checkpoint") < recovery_source.index(
+        "state_helper validate-evidence"
     ) < recovery_source.index('for image in "$API_IMAGE_ID"')
     assert recovery_source.index("remove_owned_containers") < recovery_source.index(
         "recover_checkpoint_quiescence"

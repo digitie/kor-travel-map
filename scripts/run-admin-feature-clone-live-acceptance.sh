@@ -2991,12 +2991,15 @@ if [[ "$MODE" == "recover" ]]; then
       "$RUNTIME_DIR/clone-recovery-observed.json" \
       "$RUNTIME_DIR/clone-final-observed.json"
   fi
-  state_helper verify-checkpoint \
-    --allow-owned-drift \
-    --checkpoint "$RUNTIME_DIR/clone-checkpoint.json" \
-    --snapshot "$RUNTIME_DIR/clone-recovery-current.json" >/dev/null
   set_completion_args recovered
-  if state_helper validate-evidence "${completion_args[@]}" >/dev/null 2>&1; then
+  # 빠른 완료는 이미 checkpoint에 복귀한 경우만 허용한다. browser 중단 직후의
+  # owned mutation은 정상적인 recovery 대상이므로, mismatch 자체로 fallback을
+  # 막아서는 안 된다.
+  if state_helper verify-checkpoint \
+      --allow-owned-drift \
+      --checkpoint "$RUNTIME_DIR/clone-checkpoint.json" \
+      --snapshot "$RUNTIME_DIR/clone-recovery-current.json" >/dev/null 2>&1 &&
+    state_helper validate-evidence "${completion_args[@]}" >/dev/null 2>&1; then
     state_helper update-blocked --path "$BLOCKED_FILE" --phase recovery-resource-finalizing
     finalize_resources
     assert_acceptance_login_fence_after_resources
