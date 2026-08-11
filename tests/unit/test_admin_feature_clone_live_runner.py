@@ -517,11 +517,29 @@ def test_complete_recovers_without_rerunning_valid_evidence(tmp_path: Path) -> N
 
 
 @pytest.mark.parametrize(
-    ("final_total", "empty_api_audit", "empty_auth_audit", "historical_audit"),
+    (
+        "final_total",
+        "empty_api_audit",
+        "empty_auth_audit",
+        "historical_audit",
+        "terminal_phase",
+    ),
     [
-        (120, True, True, "api-checkpoint-restored-auth-checkpoint-restored"),
-        (120, False, True, "api-recorded-auth-checkpoint-restored"),
-        (126, False, False, "recorded"),
+        (
+            120,
+            True,
+            True,
+            "api-checkpoint-restored-auth-checkpoint-restored",
+            "direct-cleanup-running",
+        ),
+        (
+            120,
+            False,
+            True,
+            "api-recorded-auth-checkpoint-restored",
+            "failed-resource-finalizing",
+        ),
+        (126, False, False, "recorded", "failed-resource-finalizing"),
     ],
 )
 def test_abandon_failed_run_requires_cleaned_failure_evidence(
@@ -530,6 +548,7 @@ def test_abandon_failed_run_requires_cleaned_failure_evidence(
     empty_api_audit: bool,
     empty_auth_audit: bool,
     historical_audit: str,
+    terminal_phase: str,
 ) -> None:
     runtime, blocked = _prepare_runtime(tmp_path)
     _write_snapshot(
@@ -552,15 +571,16 @@ def test_abandon_failed_run_requires_cleaned_failure_evidence(
             ),
             encoding="utf-8",
         )
-    for phase in (
+    phases = [
         "candidate-startup-running",
         "fixture-seed-running",
         "browser-main-running",
         "browser-recovery-running",
         "direct-cleanup-running",
-        "test-failed-restored",
-        "failed-resource-finalizing",
-    ):
+    ]
+    if terminal_phase != "direct-cleanup-running":
+        phases.extend(("test-failed-restored", "failed-resource-finalizing"))
+    for phase in phases:
         _run_helper("update-blocked", "--path", str(blocked), "--phase", phase)
 
     not_restored = _run_helper(

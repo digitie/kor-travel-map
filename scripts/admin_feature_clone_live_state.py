@@ -1670,13 +1670,15 @@ def abandon_failed_run(args: argparse.Namespace) -> None:
         "browser-main-running",
         "browser-recovery-running",
         "direct-cleanup-running",
-        "test-failed-restored",
     }
+    if blocked.get("phase") != "direct-cleanup-running":
+        required_phases.add("test-failed-restored")
     if (
         not isinstance(phase_history, list)
         or not phase_history
         or not all(isinstance(item, str) and item for item in phase_history)
         or blocked.get("phase") not in {
+            "direct-cleanup-running",
             "test-failed-restored",
             "failed-resource-finalizing",
         }
