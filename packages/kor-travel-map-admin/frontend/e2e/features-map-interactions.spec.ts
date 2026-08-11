@@ -905,7 +905,7 @@ test.describe("/features map interactions", () => {
     const row = page
       .getByRole("table", { name: "이름순 feature" })
       .getByRole("row", { name: new RegExp(MOCK_NAME) });
-    await row.getByRole("cell", { name: "활성" }).click();
+    await row.getByRole("cell", { name: "수명: 활성 공개: 공개 품질: 유효" }).click();
     await page.getByRole("tab", { name: "지도" }).click();
 
     const panel = page.getByTestId("feature-detail-panel");
@@ -1019,9 +1019,12 @@ test.describe("/features map interactions", () => {
     await expect(
       panel
         .getByTestId("feature-price-panel")
-        .getByText("휘발유 · python-opinet-api/opinet_gas_station 1,820", {
-          exact: true,
-        }),
+        .getByText(
+          "휘발유 · OpiNet 유가 · opinet_gas_station · #201 · python-opinet-api/opinet_gas_station 1,820",
+          {
+            exact: true,
+          },
+        ),
     ).toBeVisible();
     await expect(panel.getByText("History")).toBeVisible();
     const graph = panel.getByRole("img", { name: "price history graph" });
@@ -1109,7 +1112,9 @@ test.describe("/features map interactions", () => {
     const row = page
       .getByRole("table", { name: "이름순 feature" })
       .getByRole("row", { name: new RegExp(MOCK_NAME) });
-    await expect(row.getByRole("cell", { name: /retired/ })).toBeVisible();
+    await expect(
+      row.getByRole("cell", { name: "수명: 종료 공개: 비공개 품질: 유효" }),
+    ).toBeVisible();
   });
 
   test("초기 저zoom bbox fetch 1회 + 기본 kind 필터가 cluster 요청에 적용", async ({

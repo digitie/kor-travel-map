@@ -7,20 +7,6 @@
   "allowedSkipped": [],
   "groups": [
     {
-      "spec": "e2e/change-requests-lifecycle.spec.ts",
-      "fixedIn": "B",
-      "firstFailureStage": "request.assertion",
-      "difference": "actor",
-      "errorPattern": "operator",
-      "determinism": "deterministic",
-      "tests": [
-        {
-          "line": 272,
-          "title": "admin feature change-requests lifecycle › reject flips a pending row to rejected and clears its action buttons"
-        }
-      ]
-    },
-    {
       "spec": "e2e/consistency-drilldown.spec.ts",
       "fixedIn": "C",
       "firstFailureStage": "render.assertion",
@@ -75,8 +61,8 @@
       "determinism": "deterministic",
       "tests": [
         {
-          "line": 214,
-          "title": "/admin/features/new (mocked routes) › 제출 성공 — POST /v1/admin/features → 변경 요청 생성 알림 + 생성 요청 섹션"
+          "line": 209,
+          "title": "/admin/features/new (mocked routes) › 제출 성공 — POST /v1/admin/features → Feature 생성 알림"
         }
       ]
     },
@@ -251,8 +237,8 @@
           "title": "/ops/pipeline › 필터가 executions 쿼리 파라미터로 전달된다"
         },
         {
-          "line": 1807,
-          "title": "/ops/pipeline › 타임라인 exact pair는 prerequisite를 강제하고 provider 변경 시 종속 필터를 원자 제거한다"
+          "line": 1894,
+          "title": "/ops/pipeline › 타임라인 provider dataset ID는 scope prerequisite를 강제하고 ID 변경 시 scope를 원자 제거한다"
         },
         {
           "line": 1829,
@@ -267,8 +253,8 @@
           "title": "/ops/pipeline › 실행·event 12건 주입 cursor가 exact scope와 전체 DOM total-order를 보존한다"
         },
         {
-          "line": 2067,
-          "title": "/ops/pipeline › 텍스트 필터는 여러 글자를 입력해도 focus와 URL 상태를 유지한다"
+          "line": 2141,
+          "title": "/ops/pipeline › provider dataset ID 필터는 focus와 URL 상태를 유지한다"
         },
         {
           "line": 2081,
@@ -427,8 +413,8 @@
           "title": "/ops/pipeline › claim 해제 422는 frozen body를 해제해 사유를 수정할 수 있다"
         },
         {
-          "line": 3410,
-          "title": "/ops/pipeline › 요청 dialog — scope 전환·MOIS 경고·별도 preview"
+          "line": 3619,
+          "title": "/ops/pipeline › 요청 dialog — scope 전환·canonical membership·별도 preview"
         },
         {
           "line": 3452,
@@ -467,16 +453,16 @@
           "title": "/ops/pipeline › 요청 dialog — 열린 후 catalog 장애도 제출 직전 재확인으로 차단"
         },
         {
-          "line": 3710,
-          "title": "/ops/pipeline › 요청 dialog — 제출 직전 catalog에서 사라진 exact pair를 차단"
+          "line": 3913,
+          "title": "/ops/pipeline › 요청 dialog — 제출 직전 catalog에서 사라진 membership을 차단"
         },
         {
-          "line": 3739,
-          "title": "/ops/pipeline › 요청 dialog — 초기 MOIS precheck 성공 후 제출 직전 장애를 차단"
+          "line": 3944,
+          "title": "/ops/pipeline › 요청 dialog — MOIS 초기 precheck 성공 후 제출 직전 장애를 차단"
         },
         {
-          "line": 3779,
-          "title": "/ops/pipeline › 요청 dialog — dataset-only MOIS와 Dagster precheck 장애를 fail-closed"
+          "line": 3985,
+          "title": "/ops/pipeline › 요청 dialog — MOIS precheck 조회 실패는 fail-closed"
         },
         {
           "line": 3812,
