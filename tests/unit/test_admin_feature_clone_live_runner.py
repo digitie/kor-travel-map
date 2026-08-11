@@ -1733,6 +1733,15 @@ def test_runner_closes_reviewed_trust_boundaries() -> None:
     assert "--provider-sync-topic-revision-proof" in source
     assert "--table=ops_live_topic_revisions" in source
     assert "write-topic-revision-proof" in source
+    assert (
+        "'UNION ALL SELECT ''dataset_projection'', %s::bigint, %L::timestamptz '"
+        in source
+    )
+    assert (
+        "'UNION ALL SELECT ''provider_sync'', %s::bigint, %L::timestamptz '"
+        in source
+    )
+    assert "::timestamptz' ||" not in source
     assert "c7-loopback-ui-proxy.mjs" in source
     assert '"$ARCHIVE_PREFIX/scripts/c7-loopback-ui-proxy.mjs"' in source
     assert 'src=$LOOPBACK_PROXY_HELPER,dst=/opt/c7-loopback-ui-proxy.mjs,readonly' in source

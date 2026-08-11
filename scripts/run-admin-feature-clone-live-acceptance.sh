@@ -945,8 +945,8 @@ ${sequence_identity_case}
     'FROM (' ||
     'SELECT topic, revision, updated_at FROM %I.%I ' ||
     'WHERE topic NOT IN (''dataset_projection'', ''provider_sync'') ' ||
-    'UNION ALL SELECT ''dataset_projection'', %s::bigint, %L::timestamptz' ||
-    'UNION ALL SELECT ''provider_sync'', %s::bigint, %L::timestamptz' ||
+    'UNION ALL SELECT ''dataset_projection'', %s::bigint, %L::timestamptz ' ||
+    'UNION ALL SELECT ''provider_sync'', %s::bigint, %L::timestamptz ' ||
     ') AS row_value;',
     namespace.nspname || '.' || relation.relname,
     namespace.nspname,
