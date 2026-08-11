@@ -116,7 +116,9 @@ T-VN-38 summaries, T-VN-34 state/public/final cutover를 하나의 head로 적�
 T-VN-33 ownership reference와 admin OpenAPI의 bytes 변동은 target catalog와 OpenAPI
 baseline freeze가 fail-close로 검출했다. 실제 PostGIS 적용값으로 동결을 다시 만들고,
 state/runtime/post-cutover contract를 재실행했다. PinVi user/admin-detail vendor receipt는
-새 Map source commit을 기준으로 별도 재-vendor한다.
+새 Map source commit을 기준으로 다시 대조했다. user/admin-detail 바이트는 각각
+`eca7ee…`/`ea4adb…`로 유지됐고, PinVi `197bcee`의 핀만 실행 source
+`901939bf`로 갱신했다. full admin OpenAPI는 `d2e0add…`로 receipt에 고정했다.
 
 ## 2026-08-10 — T-VN-34: 최신 T-VN-33 → T-VN-38 체인 재base 재검증
 

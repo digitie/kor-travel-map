@@ -42,7 +42,7 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     ),
     "openapi-diff-v1.json": ("f7cd30d211799b9fbd89ca3be5561dce42efed7b202d9a2b2b54110ef5b328dd"),
     "consumer-rollout-v1.json": (
-        "89cd511a00b4073e2e1d5ca157efef738434e51536c85d22ba35d9fe79189652"
+        "e1925b2c9fa13f2d7b013ea402e6d1ddda23b1ac7059ed937eed6c221d2edbdc"
     ),
     "violation-fixtures-v1.sql": (
         "dba1ad0e640e4ee0e2c6904ab880f7548cf073d859f221840b6fad873e3a8df6"
