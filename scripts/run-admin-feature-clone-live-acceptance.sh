@@ -2599,6 +2599,10 @@ print(value)
         rm -- "$CURRENT_CHECKPOINT_SNAPSHOT" "$LEGACY_CHECKPOINT_SNAPSHOT"
         CURRENT_CHECKPOINT_SNAPSHOT=""
         LEGACY_CHECKPOINT_SNAPSHOT=""
+        assert_checkpoint_quiescence
+        verify_checkpoint_dump "$CHECKPOINT_FILE"
+        remove_unreferenced_checkpoint_dumps
+        stop_checkpoint_quiescence
       else
         rm -- "$CURRENT_CHECKPOINT_SNAPSHOT"
         CURRENT_CHECKPOINT_SNAPSHOT=""
@@ -2612,9 +2616,6 @@ print(value)
           "$SOURCE_COMMIT" "$existing_checkpoint_version" "$CHECKPOINT_FILE"
         exit 0
       fi
-      assert_checkpoint_quiescence
-      verify_checkpoint_dump "$CHECKPOINT_FILE"
-      remove_unreferenced_checkpoint_dumps
     else
       die "existing checkpoint version is unsupported"
     fi

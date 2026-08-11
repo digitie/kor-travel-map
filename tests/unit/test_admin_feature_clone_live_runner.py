@@ -702,6 +702,9 @@ def test_checkpoint_content_digest_rebase_requires_exact_legacy_checkpoint_match
     assert checkpoint_source.index("CHECKPOINT_CONTENT_REBASE=1") < checkpoint_source.index(
         'rm -- "$CURRENT_CHECKPOINT_SNAPSHOT" "$LEGACY_CHECKPOINT_SNAPSHOT"'
     )
+    assert checkpoint_source.index("CHECKPOINT_CONTENT_REBASE == 1") < checkpoint_source.index(
+        "stop_checkpoint_quiescence"
+    ) < checkpoint_source.index('CONTENT_CUTOFF="$(\n    psql_value')
 
 
 def test_failed_run_abort_recreates_clone_identity_before_login_fence() -> None:
