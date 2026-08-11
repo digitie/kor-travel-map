@@ -703,7 +703,8 @@ def test_content_digest_excludes_only_run_bound_auth_domain_receipts() -> None:
     assert "command.operation = ''admin.auth-event.create''" in source
     assert "result.response_body #>> ''{data,item,request_id}''" in source
     assert "e2e_live_acceptance::${run_id}::auth::main" in source
-    assert "unnest(ARRAY[${owned_feature_ids}]::text[])" in source
+    assert "KTM_OWNED_FEATURE_IDS" in source
+    assert "jsonb_array_elements_text(%L::jsonb)" in source
     assert "owned.feature_id" in source
     assert "e2e_live_acceptance::${run_id}::auth::recovery" in source
 

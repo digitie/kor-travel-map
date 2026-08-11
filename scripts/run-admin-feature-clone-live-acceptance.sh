@@ -832,8 +832,20 @@ content_sha256() {
     die "normalized topic baseline is incomplete"
   local sequence_identity_case=""
   local domain_command_filter_case=""
-  local owned_feature_ids owned_summary_run_ids
+  local owned_feature_ids owned_feature_ids_json owned_summary_run_ids
   owned_feature_ids="$(owned_feature_ids_sql "$run_id")"
+  owned_feature_ids_json="$(
+    KTM_OWNED_FEATURE_IDS="$owned_feature_ids" python3 -I -B -c '
+import ast
+import json
+import os
+
+values = ast.literal_eval("[" + os.environ["KTM_OWNED_FEATURE_IDS"] + "]")
+if not isinstance(values, list) or not all(isinstance(value, str) for value in values):
+    raise SystemExit("invalid owned feature identities")
+print(json.dumps(values, separators=(",", ":")))
+'
+  )"
   owned_summary_run_ids="$(owned_summary_run_ids_sql)"
   case "$digest_revision" in
     current)
@@ -896,7 +908,7 @@ SQL
       || 'AND command.operation = ''admin.auth-event.create'' '
       || 'AND result.response_body #>> ''{data,item,request_id}'' IN (%L, %L)'
     ') OR result.response_body::text LIKE %L '
-      || 'OR EXISTS (SELECT 1 FROM unnest(ARRAY[${owned_feature_ids}]::text[]) '
+      || 'OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(%L::jsonb) '
       || 'AS owned(feature_id) WHERE result.response_body::text LIKE '
       || '''%%'' || owned.feature_id || ''%%''))' ||
     ');',
@@ -905,7 +917,8 @@ SQL
     relation.relname,
     'e2e_live_acceptance::${run_id}::auth::main',
     'e2e_live_acceptance::${run_id}::auth::recovery',
-    '%e2e_live_acceptance::${run_id}::%'
+    '%e2e_live_acceptance::${run_id}::%',
+    '${owned_feature_ids_json}'
   )
 SQL
 )"
