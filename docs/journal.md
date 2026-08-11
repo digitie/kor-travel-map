@@ -2,6 +2,58 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-11 — T-VN-33 라운드11~12: "좁게 돌려서 green"을 구조로 막았다
+
+11라운드까지의 근인은 하나로 수렴한다. **게이트 green의 의미가 주장보다 작았다.**
+12라운드는 그 층을 닫는 데 썼고, 전수 감사 57건 중 적대 검증이 반려한 15건을 처리했다.
+
+**BLOCKER 1 — catalog exact-set 게이트가 CI 경로에서 red였다.** 단독 실행은
+`14 passed`, `pytest tests/integration` 통째 실행은 `4 failed`. session-scoped 공유
+`migrated_engine`에 형제 fixture가 handler 없는 활성 refresh operation을 commit하는데,
+게이트는 **카탈로그 전역 성질**을 단언했다. 다섯 갈래가 전부 CI 스텝보다 좁은 범위에서
+green을 봐서 아무도 못 봤다. 게이트를 전용 database + alembic head로 옮겨 순서 독립으로
+만들었고, "공유 DB가 오염돼도 결과 불변" + "진짜 drift에는 여전히 red"를 한 테스트에서
+둘 다 단언한다 — 오염 회피가 fail-open으로 가면 고친 게 아니다.
+→ **규칙: 카탈로그 전역 성질을 단언하는 테스트는 공유 DB에 쓰지 않는다.**
+
+**BLOCKER 2 — 0092의 docstring이 거짓이었고 downgrade가 실제로 실패했다.** "제약/함수
+정의만 건드리므로 되돌릴 수 있다"고 적었지만 UNIQUE를 4열→3열로 **좁히는** 것은 데이터
+의존이고, 실패를 유발하는 상태를 만드는 것이 하필 같은 revision의 upgrade다.
+0090/0091 관례대로 forward-only로 되돌렸다. 저장소에 downgrade 경로를 도는 테스트가 한
+건도 없어서 그 진술이 적대 검증 전까지 살아남았다 — `tests/unit/test_migration_forward_only.py`로
+게이트를 세웠다.
+
+**비활성 dataset의 정리 경로가 막혀 있었다.** `reject_inactive_provider_dataset`이
+DELETE에서도 OLD쪽 활성 검사를 돌아 카탈로그 행을 지울 수 없었다. DELETE는 새 실행을
+거는 write가 아니라 정리이므로 면제했다(참조 무결성은 FK RESTRICT가 계속 지킨다 —
+양방향 실측 단언). 감사 기록 누락의 원인은 OLD쪽이 아니라 **NEW쪽** assert였다 —
+registry hook이 UPSERT라 INSERT/UPDATE로 걸린다. `ops.managed_files`를 활성 가드에서
+빼고 소유권 immutable 전용 가드로 교체했다. registry는 storage의 거울이지 실행 축이
+아니다. (넓은 면제는 불가능했다 — `expected-rejections-v1.json`의
+`inactive_dataset_existing_operation_update`가 executable contract로 못박고 있다.)
+
+**계약↔head 대조 게이트가 `CREATE OR REPLACE` 본문 변경을 못 잡았다.** 대조 범위가
+`after − before` 차집합이라 `target-schema-v1.sql`이 이미 만든 함수의 본문 교체는 통과했고,
+하필 이번에 바꾼 함수가 정확히 그 경우였다. fixture를 확장해 닫고 fail-open 하한을
+실측값(제약 76 · 트리거 23 · 함수 22)으로 올렸다 — 옛 하한 19는 `CREATE CONSTRAINT
+TRIGGER` 4문을 누락해, 그 4개가 계약에서 통째로 사라져도 통과하는 값이었다.
+
+**선언된 실행 scope가 없는 dataset을 '갱신 가능'으로 투영하던 것을 고쳤다.** 화면에서
+'지금 갱신'이 활성이었고, 누르면 요청도 오류도 없이 아무 일도 일어나지 않았다. 원인은
+degrade payload가 정상 dataset-wide capability와 **다섯 필드 중 넷이 같고 `reason`만
+달랐던** 것이다 — 프론트 게이트는 허용 경로에서 `reason`을 읽지 않는다. 계약에
+`effect: "none"`을 추가하고 `is_refreshable`을 `refresh_scopes` 기준으로 좁혔다.
+요청 dialog도 같은 필드로 막는다(`catalog-selection.ts` — 그 축은 테스트가 0건이었다).
+
+**무방비 축을 회귀로 덮었다.** MOIS source precheck fail-open(모듈 전체를 monkeypatch한
+테스트뿐이라 fail-open이 전 게이트에 안 보였다 — 실 DB 회귀 7건으로 대체),
+`_advisory_key`의 sync_scope 성분, 주소 clue 우선순위 3건, MCST slug 미지 키 거부.
+전부 변이를 심어 KILLED를 실증했다.
+
+**주석에 박힌 실측 수치를 지웠다.** `74개 dataset 중 17/18개`가 8곳 이상에 서로 다른
+값으로 남아 있었고, 그중 하나는 Pydantic docstring이라 `openapi.json`/`types.ts`로
+공개 계약에 실려 나갔다. 개수는 DB마다 다르다(0089 legacy harvest) — 성질만 남겼다.
+
 ## 2026-08-09 — T-VN-33 적대 리뷰 7·8라운드: 감사기를 감사했다
 
 두 라운드 모두 REJECT였고, 8라운드는 리뷰어 둘이 **독립으로 같은 BLOCKER**를 찍었다.

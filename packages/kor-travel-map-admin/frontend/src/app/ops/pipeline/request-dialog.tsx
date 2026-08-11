@@ -7,13 +7,18 @@ import { ApiClientError, getJson } from "@/api/client";
 import {
   type ExecutionKind,
   type FeatureUpdateScope,
-  type PipelineDatasetsCatalogResponse,
   type PipelineJobPrecheckResponse,
   useCreateUpdateRequestMutation,
   useMoisSourceSyncPrecheck,
   usePipelineDatasetsCatalog,
   usePreviewUpdateRequestMutation,
 } from "@/api/pipeline";
+import {
+  type CanonicalCatalogRow,
+  type RequestScope,
+  canonicalCatalogRows,
+  validateCatalogSelection,
+} from "./catalog-selection";
 import { statusLabel } from "@/lib/status-label";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -29,22 +34,7 @@ import { FormField, FormSelect } from "@/components/ui/form-field";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
 import { formatDateTime, shortId } from "@/lib/format";
 
-type CatalogRow = PipelineDatasetsCatalogResponse["data"]["items"][number];
-type CanonicalCatalogRow = CatalogRow & { provider_dataset_id: number };
-
 type ScopeType = FeatureUpdateScope["type"];
-
-type ProviderDatasetScope = {
-  type: "provider_dataset";
-  provider_dataset_id: number;
-  // membership identity는 triple이다(ADR-088) — 서버 스키마가 셋을 모두 요구한다.
-  sync_scope: string;
-  operation_key: string;
-};
-
-type RequestScope =
-  | Exclude<FeatureUpdateScope, { type: "provider_dataset" }>
-  | ProviderDatasetScope;
 
 const SCOPE_TYPE_LABELS: Record<ScopeType, string> = {
   provider_dataset: "provider/dataset 전체",
@@ -144,61 +134,6 @@ function splitList(value: string): string[] {
     .split(/[\n,]/)
     .map((item) => item.trim())
     .filter((item) => item.length > 0);
-}
-
-function canonicalCatalogRows(
-  response: PipelineDatasetsCatalogResponse | undefined,
-): CanonicalCatalogRow[] {
-  const rows: CanonicalCatalogRow[] = [];
-  for (const row of response?.data.items ?? []) {
-    const providerDatasetId = (
-      row as CatalogRow & { provider_dataset_id?: unknown }
-    ).provider_dataset_id;
-    if (
-      row.catalog_state !== "canonical" ||
-      !row.mutable ||
-      row.catalog?.is_refreshable !== true ||
-      typeof providerDatasetId !== "number" ||
-      !Number.isInteger(providerDatasetId) ||
-      providerDatasetId < 1
-    ) {
-      continue;
-    }
-    rows.push({ ...row, provider_dataset_id: providerDatasetId });
-  }
-  // **membership마다 한 행**이다. 예전에는 `Map<number, row>`로 dataset당 하나만
-  // 남겼는데, 그러면 (a) 남는 행의 `sync_scope`가 임의로 정해지고 (b) 운영자가
-  // 기본이 아닌 allowed scope를 고르면 membership 조회가 실패해 "실행 가능한
-  // refresh operation이 없습니다"라는 **거짓 사유**로 요청이 막혔다.
-  return rows.sort(
-    (left, right) =>
-      left.provider_dataset_id - right.provider_dataset_id ||
-      left.sync_scope.localeCompare(right.sync_scope) ||
-      (left.operation_key ?? "").localeCompare(right.operation_key ?? ""),
-  );
-}
-
-function validateCatalogSelection(
-  scope: RequestScope,
-  rows: CanonicalCatalogRow[],
-): string | null {
-  if (scope.type !== "provider_dataset") {
-    return null;
-  }
-  const row = rows.find(
-    (item) => item.provider_dataset_id === scope.provider_dataset_id,
-  );
-  if (!row) {
-    return "현재 canonical catalog에 없는 데이터셋입니다.";
-  }
-  const capability = row.catalog?.scope_refresh;
-  if (
-    capability?.default_sync_scope !== scope.sync_scope &&
-    !capability?.allowed_sync_scopes.includes(scope.sync_scope)
-  ) {
-    return "현재 catalog capability가 허용하지 않는 sync_scope입니다.";
-  }
-  return null;
 }
 
 function activeConflictRequestId(error: Error | null): string | null {

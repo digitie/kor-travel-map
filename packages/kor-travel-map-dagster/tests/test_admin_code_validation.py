@@ -40,6 +40,7 @@ from kortravelmap.providers.kor_travel_concierge import (
 )
 
 from kortravelmap.dagster.validation import (
+    _RAW_ADDRESS_KEYS,
     DROPPABLE_ISSUE_CODES,
     _provider_address,
     validate_feature_bundle_address,
@@ -606,6 +607,56 @@ def test_standard_data_payload_prefers_rdnmadr_over_lnmadr() -> None:
         },
     )
     assert _provider_address(bundle) == "서울특별시 영등포구 여의공원로 120"
+
+
+@pytest.mark.parametrize(
+    ("road_key", "jibun_key"),
+    [
+        ("address_road", "address_jibun"),  # opinet
+        ("road_address", "lot_address"),  # mois
+        ("rdnmadr", "lnmadr"),  # standard_data
+    ],
+)
+def test_each_provider_family_prefers_its_road_key(
+    road_key: str, jibun_key: str
+) -> None:
+    """``_RAW_ADDRESS_KEYS``의 "도로명이 지번보다 앞선다"를 **계열별로** 못박는다.
+
+    평탄 튜플만 보면 지번 계열(``address_jibun``/``lot_address``)이 표준데이터
+    도로명(``rdnmadr``)보다 앞서므로, 배열 순서 자체는 그 진술의 근거가 되지 못한다.
+    실제 보증은 "한 payload에 두 계열이 섞이지 않는다"에 기대고 있고, 그 전제 아래
+    계열마다 도로명이 앞선다. 계열이 섞이는 provider가 생기면 이 테스트가 아니라
+    ``_RAW_ADDRESS_KEYS`` 배열을 계열 무관하게 고쳐야 한다.
+    """
+    bundle = _bundle(
+        road=None,
+        raw_data={
+            jibun_key: "서울특별시 영등포구 여의도동 8",
+            road_key: "서울특별시 영등포구 여의공원로 120",
+        },
+    )
+    assert _provider_address(bundle) == "서울특별시 영등포구 여의공원로 120"
+
+
+def test_raw_address_key_families_do_not_overlap() -> None:
+    """계열이 섞이지 않는다는 전제 자체를 고정한다.
+
+    위 테스트가 기대는 전제이고, docstring이 실측이라 진술하는 사실이다. 한 provider가
+    두 계열을 함께 실으면 튜플 순서상 지번이 이기는 경우가 생긴다 — 그때는 이 단언이
+    먼저 깨져 배열을 고치게 만든다.
+    """
+    families = {
+        "opinet": ("address_road", "address_jibun"),
+        "mois": ("road_address", "lot_address"),
+        "standard_data": ("rdnmadr", "lnmadr"),
+    }
+    keys = list(_RAW_ADDRESS_KEYS)
+    for name, (road_key, jibun_key) in families.items():
+        assert road_key in keys, name
+        assert jibun_key in keys, name
+
+    all_keys = [key for pair in families.values() for key in pair]
+    assert len(set(all_keys)) == len(all_keys)
 
 
 def test_folded_view_keeps_the_first_spelling_when_two_keys_fold_alike() -> None:

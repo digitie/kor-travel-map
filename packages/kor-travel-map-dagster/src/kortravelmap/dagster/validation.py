@@ -349,7 +349,15 @@ _RAW_ADDRESS_KEYS: Final[tuple[str, ...]] = (
     "location_text",
     "region_name",
 )
-"""provider 원 payload에서 단일 주소 문자열로 인정하는 키. 도로명이 지번보다 앞선다.
+"""provider 원 payload에서 단일 주소 문자열로 인정하는 키.
+
+**도로명이 지번보다 앞선다 — 단, 그 보증은 provider 계열 안에서 성립한다.** 평탄
+튜플만 보면 지번 계열(``address_jibun``/``lot_address``)이 표준데이터 도로명
+(``rdnmadr``)보다 앞서지만, 세 계열의 키는 서로 겹치지 않아 한 payload에 두 계열이
+같이 오지 않는다(2026-08-11 실측: ``address_road``/``address_jibun`` = opinet,
+``road_address``/``lot_address`` = mois, ``rdnmadr``/``lnmadr`` = standard_data).
+계열이 섞이는 provider가 생기면 이 배열을 계열 무관하게 재정렬해야 한다 —
+``test_admin_code_validation.py``가 계열별 우선순위를 못박는다.
 
 ``road_address``/``lot_address``는 mois 실측 payload 키다(``providers/mois._raw_data``).
 정규화 패스가 없어도 맞아야 977k 레코드가 매번 정규화 dict를 만들지 않는다.

@@ -619,10 +619,8 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 > ADR-066~075가 목표 스펙 정본이다. 각 migration task는 forward-only 격리 clone에서 검증하고,
 > 명시적 downgrade 수용 조건이 없는 한 전진 뒤 rollback하지 않는다.
 
-> **인덱스↔본문 불일치 (`T-VN-33`만 잔여)**: `### T-VN-37` 절 본문은 이 PR(#968)이
-> 재정의판으로 바꿨다. `### T-VN-33` 절 본문은 아직 구 A/B/C 분해판이고, 그 재작성은
-> 열린 draft PR **#966**(`feat/tvn33-provider-datasets`)이 자기 브랜치에서 이미
-> 소유하고 있어 여기서 건드리지 않는다. #966이 머지되면 해소된다.
+> 인덱스↔본문 불일치는 해소됐다 — `### T-VN-37` 절은 #968이, `### T-VN-33` 절은
+> #966(`feat/tvn33-provider-datasets`)이 각자 자기 브랜치에서 재작성했다(2026-08-11).
 
 ### T-VN-32 — UUID identity shadow 전환 (Lane A)
 
@@ -652,20 +650,33 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   3. legacy string/boolean/raw-derived 열·제약·index의 물리 삭제, query/EXPLAIN/checksum
      gate와 final-schema 재적재 검증.
 
-  **현재 단일 PR 내부 실행 lane (2026-08-06)** — 아래 항목은 PR을 분리하지 않는
-  병렬 구현·검증 단위다. 모두 끝나기 전에는 이 task를 완료로 옮기지 않는다.
+  **현재 단일 PR 내부 실행 lane** — 아래 항목은 PR을 분리하지 않는 병렬 구현·검증
+  단위다. 모두 끝나기 전에는 이 task를 완료로 옮기지 않는다.
 
-  - [~] `33-A` — versioned dataset/operation seed, immutable source entity/record/head와
+  - [x] `33-A` — versioned dataset/operation seed, immutable source entity/record/head와
     legacy source 물리 제거 및 final-schema migration rejection gate
-  - [~] `33-B` — import job·feature-update request의 canonical
+  - [x] `33-B` — import job·feature-update request의 canonical
     `(provider_dataset_id, sync_scope, operation_key)` membership, Dagster runner/sensor/API write
     cutover
-  - [~] `33-C` — offline/file/curation/integrity/POI writer·reader를 exact operation member
+  - [x] `33-C` — offline/file/curation/integrity/POI writer·reader를 exact operation member
     identity로 전환하고 legacy pair를 물리 삭제
-  - [~] `33-D` — pipeline/ops read model·dataset status/consistency/live topic과 admin
+  - [x] `33-D` — pipeline/ops read model·dataset status/consistency/live topic과 admin
     feature-update UI를 triple membership projection으로 재작성
   - [ ] `33-E` — final-schema fresh PostGIS·API/Dagster·OpenAPI/type·admin live E2E,
     적대 리뷰 2인 P0=0, PR rebase/CI/merge 후 T-VN-41 F1D-D 재개
+
+  **검증 상태(2026-08-11, 라운드12)**: 적대 리뷰 12라운드를 돌았고 매 라운드가 실결함을
+  냈다. 반복된 근인은 하나다 — **검증 하네스 자체가 신뢰 대상이 아니었다.** 그래서 층을
+  쌓아 닫았다: 게이트 스크립트가 CI를 1:1 미러 → 감사기가 워크플로를 파싱해 미러 누락을
+  검사(`tests/unit/test_gate_script_mirrors_ci.py`) → 변이 배터리가 감사기를 증명
+  (`scripts/audit-mutation-battery.py`, 48종) → 통제군이 배터리를 증명 → 배터리를 CI에 게이트.
+  라운드12가 닫은 두 BLOCKER는 둘 다 "CI 스텝보다 좁은 범위에서 green을 봤다"는 같은
+  실패 모드였다(단독 실행 green · 디렉터리 실행 red / downgrade 경로 테스트 0건).
+  경과는 `docs/journal.md` 2026-08-11, 남은 항목은 아래 §T-VN-33 후속.
+
+  **T-VN-33 후속(머지 후 별도 처리 가능)**: 요청 dialog의 external-scope 전용 dataset
+  축은 회귀를 넣었으나 실 DB e2e는 없다. `docs/dev-environment.md`의 n150 live e2e는
+  33-E에서 수행한다.
 
   설계·P0 해소·검증 matrix 정본은
   [`reports/t-vn-33-provider-datasets-single-pr-plan-2026-08-06.md`](reports/t-vn-33-provider-datasets-single-pr-plan-2026-08-06.md),
@@ -673,10 +684,11 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   원자 모델 전환에서 처리한다. final-schema 데이터는 ETL로 재생성하므로 intermediate backup·호환
   shim을 만들지 않는다.
 
-  **중단 스냅샷(2026-08-06)**: 사용자 지시로 구현을 중단했다. 재개 전 P0와 유효·무효 검증,
-  T-VN-41 선행 순서는
-  [`reports/t-vn-33-hold-snapshot-2026-08-06.md`](reports/t-vn-33-hold-snapshot-2026-08-06.md)가
-  정본이다. 이 표의 `[~]` 표시는 완료가 아니라 WIP 보존 상태다.
+  **중단 스냅샷(2026-08-06)**: 그 시점에 사용자 지시로 한 번 중단했고, 당시의 P0·유효/무효
+  검증과 T-VN-41 선행 순서는
+  [`reports/t-vn-33-hold-snapshot-2026-08-06.md`](reports/t-vn-33-hold-snapshot-2026-08-06.md)에
+  남아 있다. 구현은 2026-08-08에 재개해 33-A~D를 완료했다 — 그 문서는 현재 상태의 정본이
+  아니라 중단 시점의 기록이다.
 
 ### T-VN-34 — 직교 상태 모델 전환 (Lane B)
 

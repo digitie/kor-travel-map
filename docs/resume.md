@@ -1,5 +1,31 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-11 — T-VN-33: 라운드11~12, CI 경로 red BLOCKER 2건 해소
+
+**다음 한 작업**: `T-VN-33` #966 — **33-E**(최종 스키마로 fresh PostGIS 재적재 →
+API/Dagster/OpenAPI/type/admin **live E2E**(n150) → rebase/CI/머지). 머지 전에
+적대 리뷰어 2명 승인이 필요하다.
+
+- **CI 경로에서 red였던 BLOCKER 2건을 닫았다.** (1) catalog exact-set 게이트가
+  공유 `migrated_engine`의 전역 성질을 단언해 `pytest tests/integration` 통째
+  실행에서만 4건 실패했다(단독 실행은 green) — 전용 DB로 옮겨 순서 독립으로
+  만들고 오염 면역 + 진짜 drift 검출을 함께 단언한다. (2) 0092의 downgrade가
+  "되돌릴 수 있다"는 거짓 진술과 함께 실제로 실패했다 — forward-only로 되돌리고
+  `tests/unit/test_migration_forward_only.py`로 게이트를 세웠다(저장소에 downgrade
+  경로 테스트가 0건이었다).
+- **비활성 dataset 정리 경로**: DELETE는 새 실행이 아니라 정리이므로 활성 검사에서
+  면제했고(FK RESTRICT는 유지), `ops.managed_files`는 활성 가드 대신 소유권
+  immutable 전용 가드로 갈랐다 — 감사 기록이 조용히 누락되던 원인이 NEW쪽
+  assert였다.
+- **계약↔head 대조 게이트가 `CREATE OR REPLACE` 본문 변경을 못 잡았다.** 닫았고
+  fail-open 하한을 실측값(제약 76 · 트리거 23 · 함수 22)으로 올렸다.
+- **실행 가능한 scope가 없는 dataset의 '지금 갱신'이 활성이었고 눌러도 아무 일도
+  일어나지 않았다.** 계약에 `effect: "none"`을 추가해 그리드·요청 dialog 양쪽에서
+  막는다.
+- 무방비 축 회귀: MOIS precheck fail-open(실 DB 7건), `_advisory_key` sync_scope,
+  주소 clue 우선순위, MCST slug — 전부 변이로 KILLED 실증.
+- 경과는 `docs/journal.md` 2026-08-11.
+
 ## 2026-08-09 (3) — T-VN-33: 적대 리뷰 7·8라운드 REJECT 전건 처리, 변이 배터리 32/32
 
 **다음 한 작업**: `T-VN-33` #966 — 9라운드 적대 리뷰 2명 승인 확보 후 머지.
