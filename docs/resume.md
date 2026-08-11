@@ -84,13 +84,14 @@ effective override provenance로 교체하고 whole-row request/version bridge�
 ## 2026-08-10 — T-VN-36 A–D 단일 PR: final destructive fence 구현·n150 gate 준비
 ## 2026-08-11 — T-VN-36: T-VN-34 rebase 반영
 
-**다음 한 작업**: 이 rebase source commit에서 PinVi admin-detail snapshot의 deterministic
-재추출과 contract pin-consistency를 실행하고, T-VN-36 paired receipt를 갱신한다.
+**다음 한 작업**: T-VN-40·T-VN-41을 이 rebase head 위로 각각 재base하고, schema/OpenAPI/
+PinVi pair와 Docker manager contract 영향도를 점검한다. T-VN-36 paired receipt는 Map
+`c1fa5a4d` ↔ PinVi `8f7fef1`로 갱신했다.
 
 - Alembic graph는 T-VN-33/T-VN-38 merge revision 뒤 T-VN-34 `0095`~`0097`, T-VN-36
   `0098`~`0104` 순으로 단일 head다.
 - target catalog와 admin OpenAPI freeze는 current final-fence schema에서 다시 계산했고,
-  final-fence 통합과 target freeze를 재실행했다.
+  final-fence 통합·target freeze·PinVi user/admin-detail contract gate를 재실행했다.
 
 ## 2026-08-10 — T-VN-36 A–D 단일 PR: final destructive fence·n150 fresh live 완료
 

@@ -125,8 +125,9 @@ T-VN-36A~D를 T-VN-33 cleanup·T-VN-38 current summary·T-VN-34 final state cuto
 
 T-VN-33 ownership reference, final target catalog, admin OpenAPI baseline은 이전 base의
 digest를 그대로 신뢰하지 않고 fresh PostGIS 적용값과 현재 generated spec에서 다시 동결했다.
-T-VN-36 final fence와 target freeze 게이트가 통과했으며, PinVi admin-detail source pin은
-이 rebase source commit을 기준으로 다음 receipt에서 다시 고정한다.
+T-VN-36 final fence와 target freeze 게이트가 통과했다. PinVi `8f7fef1`의 user/admin-detail
+contract pin-consistency를 rebase source `c1fa5a4d`에서 다시 검증하고, vendor 바이트와
+admin-detail deterministic subset은 그대로인 paired receipt로 고정했다.
 
 ## 2026-08-11 — T-VN-34: 최신 T-VN-33/T-VN-38 rebase와 migration 선형화
 

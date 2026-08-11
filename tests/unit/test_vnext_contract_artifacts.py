@@ -44,7 +44,7 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     ),
     "openapi-diff-v1.json": ("5f0d3ed49cb49146f49126f5dcf58e6a341501e35c4f81c12b303f3bd8016dcf"),
     "consumer-rollout-v1.json": (
-        "642c3a5b12706ee6d20afe1ae7f5ccaf29243bd54eeffaf8e962b4a0263366c2"
+        "d22f1ba91ccc70cad09e25a8815cb164452193e98bdaf5b4a2f2f11378cf1f0b"
     ),
     "violation-fixtures-v1.sql": (
         "dba1ad0e640e4ee0e2c6904ab880f7548cf073d859f221840b6fad873e3a8df6"
