@@ -88,28 +88,70 @@ if (EXECUTE && !RUN_ID_PATTERN.test(RUN_ID)) {
 }
 
 const PREFIX = `e2e_live_acceptance::${RUN_ID}`;
+
+function makeLegacyFeatureId(
+  kind: string,
+  category: string,
+  sourceType: string,
+  sourceNaturalKey: string,
+): string {
+  const digest = createHash("sha1")
+    .update(
+      `global|${kind}|${category}|${sourceType}|${sourceNaturalKey}|`,
+      "utf8",
+    )
+    .digest("hex")
+    .slice(0, 16);
+  return `f_global_${kind[0]}_${digest}`;
+}
+
+// live fixture는 arbitrary text primary key를 만들지 않는다. API의 legacy-ref
+// resolver도 production writer와 같은 ``f_*`` identity만 재해석하므로, browser와
+// direct fixture 모두 이 deterministic source identity를 공유해야 한다.
+function adminFixtureFeatureId(role: string): string {
+  const logicalId = `${PREFIX}::${role}`;
+  const idempotencyKey = createHash("sha256")
+    .update(logicalId, "utf8")
+    .digest("hex");
+  return makeLegacyFeatureId(
+    "place",
+    "01070300",
+    "user_request",
+    idempotencyKey,
+  );
+}
+
+function providerFixtureFeatureId(kind: "weather" | "price"): string {
+  return makeLegacyFeatureId(
+    kind,
+    "00000000",
+    "e2e-live-acceptance",
+    `${RUN_ID}:${kind}`,
+  );
+}
+
 const STATUS_FIXTURES = ["draft", "inactive", "hidden"] as const;
 const STATUS_FEATURES = STATUS_FIXTURES.map((status, index) => ({
-  featureId: `${PREFIX}::marker::${status}`,
+  featureId: adminFixtureFeatureId(`marker::${status}`),
   lat: STATUS_MARKER_LAT + index * 0.001,
   lon: STATUS_MARKER_LON + index * 0.001,
   name: `E2E ${status} marker ${RUN_ID}`,
   status,
 }));
 const CORRECTION_FEATURE = {
-  featureId: `${PREFIX}::correction`,
+  featureId: adminFixtureFeatureId("correction"),
   lat: LAT - 0.002,
   lon: LON,
   name: `E2E correction baseline ${RUN_ID}`,
 };
 const WEATHER_FEATURE = {
-  featureId: `${PREFIX}::weather`,
+  featureId: providerFixtureFeatureId("weather"),
   lat: LAT,
   lon: LON + 0.002,
   name: `E2E hidden weather ${RUN_ID}`,
 };
 const PRICE_FEATURE = {
-  featureId: `${PREFIX}::price`,
+  featureId: providerFixtureFeatureId("price"),
   lat: LAT,
   lon: LON - 0.002,
   name: `E2E hidden price ${RUN_ID}`,
@@ -130,10 +172,11 @@ const SEARCH_TOKEN = createHash("sha256")
   .slice(0, 32);
 const SEARCH_QUERY = `e2esrch ${SEARCH_TOKEN}`;
 const SEARCH_FEATURES = ["alpha", "beta"].map((suffix, index) => ({
-  featureId: `${PREFIX}::search::${suffix}`,
+  featureId: adminFixtureFeatureId(`search::${suffix}`),
   lat: LAT + 0.004 + index * 0.001,
   lon: LON + 0.004 + index * 0.001,
   name: `${SEARCH_QUERY} ${suffix}`,
+  suffix,
   status: "active" as const,
 }));
 const API_OWNED_FEATURE_IDS = [
@@ -1332,7 +1375,7 @@ test("@admin-feature-live-acceptance #741/#785 owned production acceptance", asy
     });
     for (const fixture of SEARCH_FEATURES) {
       stage = `create-search-${
-        fixture.featureId.endsWith("::alpha") ? "alpha" : "beta"
+        fixture.suffix
       }`;
       await createOwnedPlace(page, fixture);
     }

@@ -741,6 +741,39 @@ extension_sha256() {
   " | sha256sum | awk '{print $1}'
 }
 
+owned_feature_ids_sql() {
+  local run_id="$1"
+  [[ "$run_id" =~ ^[a-z0-9][a-z0-9-]{15,79}$ ]] ||
+    die "API-owned feature ID run ID is invalid"
+  python3 -I -B - "$run_id" <<'PY'
+import hashlib
+import sys
+
+run_id = sys.argv[1]
+
+def make_id(kind: str, category: str, source_type: str, source_natural_key: str) -> str:
+    raw = f"global|{kind}|{category}|{source_type}|{source_natural_key}|"
+    return f"f_global_{kind[0]}_{hashlib.sha1(raw.encode()).hexdigest()[:16]}"
+
+def admin_id(role: str) -> str:
+    logical_id = f"e2e_live_acceptance::{run_id}::{role}"
+    return make_id(
+        "place", "01070300", "user_request",
+        hashlib.sha256(logical_id.encode()).hexdigest(),
+    )
+
+ids = [
+    make_id("weather", "00000000", "e2e-live-acceptance", f"{run_id}:weather"),
+    make_id("price", "00000000", "e2e-live-acceptance", f"{run_id}:price"),
+]
+ids.extend(admin_id(role) for role in (
+    "marker::draft", "marker::inactive", "marker::hidden",
+    "correction", "search::alpha", "search::beta",
+))
+print(",".join(repr(value) for value in ids))
+PY
+}
+
 content_sha256() {
   local run_id="$1"
   local dataset_projection_revision="${2-}"
@@ -759,6 +792,8 @@ content_sha256() {
   fi
   local sequence_identity_case=""
   local domain_command_filter_case=""
+  local owned_feature_ids
+  owned_feature_ids="$(owned_feature_ids_sql "$run_id")"
   case "$digest_revision" in
     current)
       sequence_identity_case="$(cat <<'SQL'
@@ -861,9 +896,7 @@ ${domain_command_filter_case}
           AND attribute.attnum > 0
           AND NOT attribute.attisdropped
       ) THEN format(
-        ' WHERE row_value.feature_id NOT LIKE %L ESCAPE %L',
-        'e2e_live_acceptance::${run_id}::%',
-        chr(92)
+        ' WHERE NOT (row_value.feature_id = ANY (ARRAY[${owned_feature_ids}]::text[]))'
       )
       WHEN namespace.nspname = 'ops'
         AND relation.relname = 'admin_auth_events'
@@ -1098,6 +1131,8 @@ write_snapshot() {
   local migration_head relation_count feature_total feature_non_deleted
   local active_owned nonterminal_owned schema_digest content_digest
   local database_digest extension_digest
+  local owned_feature_ids
+  owned_feature_ids="$(owned_feature_ids_sql "$run_id")"
   container_sha="$(printf '%s' "$before_id" | sha256sum | awk '{print $1}')"
   system_identifier="$(psql_value "SELECT system_identifier::text FROM pg_control_system()")"
   system_sha="$(printf '%s' "$system_identifier" | sha256sum | awk '{print $1}')"
@@ -1106,8 +1141,8 @@ write_snapshot() {
   relation_count="$(psql_value "SELECT count(*) FROM pg_class WHERE relnamespace IN (SELECT oid FROM pg_namespace WHERE nspname IN ('feature','ops','provider_sync')) AND relkind IN ('r','p','v','m')")"
   feature_total="$(psql_value "SELECT count(*) FROM feature.features")"
   feature_non_deleted="$(psql_value "SELECT count(*) FROM feature.features WHERE status <> 'deleted'")"
-  active_owned="$(psql_value "SELECT count(*) FROM feature.features WHERE feature_id LIKE 'e2e\\_live\\_acceptance::${run_id}::%' ESCAPE '\\' AND status <> 'deleted'")"
-  nonterminal_owned="$(psql_value "SELECT count(*) FROM ops.feature_change_requests WHERE feature_id LIKE 'e2e\\_live\\_acceptance::${run_id}::%' ESCAPE '\\' AND state = 'pending'")"
+  active_owned="$(psql_value "SELECT count(*) FROM feature.features WHERE feature_id = ANY (ARRAY[${owned_feature_ids}]::text[]) AND status <> 'deleted'")"
+  nonterminal_owned="$(psql_value "SELECT count(*) FROM ops.feature_change_requests WHERE feature_id = ANY (ARRAY[${owned_feature_ids}]::text[]) AND state = 'pending'")"
   schema_digest="$(schema_sha256)"
   database_digest="$(database_sha256)"
   extension_digest="$(extension_sha256)"
@@ -2633,9 +2668,9 @@ print(value)
   start_checkpoint_quiescence
   assert_checkpoint_quiescence
   write_snapshot "$CHECKPOINT_SNAPSHOT" "$RUN_ID"
-  [[ "$(psql_value "SELECT count(*) FROM feature.features WHERE feature_id LIKE 'e2e\\_live\\_acceptance::%' ESCAPE '\\' AND status <> 'deleted'")" == "0" ]] ||
+  [[ "$(psql_value "SELECT count(*) FROM feature.features WHERE status <> 'deleted' AND (user_change_reason LIKE 'admin feature live acceptance clone-%' OR name LIKE 'E2E hidden weather clone-%' OR name LIKE 'E2E hidden price clone-%')")" == "0" ]] ||
     die "clone checkpoint has active acceptance Feature residue"
-  [[ "$(psql_value "SELECT count(*) FROM ops.feature_change_requests WHERE feature_id LIKE 'e2e\\_live\\_acceptance::%' ESCAPE '\\' AND state = 'pending'")" == "0" ]] ||
+  [[ "$(psql_value "SELECT count(*) FROM ops.feature_change_requests WHERE state = 'pending' AND reason LIKE 'admin feature live acceptance clone-%'")" == "0" ]] ||
     die "clone checkpoint has pending acceptance change request residue"
   assert_checkpoint_quiescence
   NEW_CHECKPOINT_DUMP="$(

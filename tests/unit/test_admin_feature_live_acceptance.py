@@ -76,14 +76,24 @@ def test_clone_recovery_purge_uses_exact_api_owned_fingerprints() -> None:
     fingerprints = _FIXTURE_MODULE._api_feature_fingerprints(run_id)  # noqa: SLF001
 
     assert set(fingerprints) == {
-        f"e2e_live_acceptance::{run_id}::marker::draft",
-        f"e2e_live_acceptance::{run_id}::marker::inactive",
-        f"e2e_live_acceptance::{run_id}::marker::hidden",
-        f"e2e_live_acceptance::{run_id}::correction",
-        f"e2e_live_acceptance::{run_id}::search::alpha",
-        f"e2e_live_acceptance::{run_id}::search::beta",
+        _FIXTURE_MODULE._admin_fixture_feature_id(run_id, "marker::draft"),  # noqa: SLF001
+        _FIXTURE_MODULE._admin_fixture_feature_id(run_id, "marker::inactive"),  # noqa: SLF001
+        _FIXTURE_MODULE._admin_fixture_feature_id(run_id, "marker::hidden"),  # noqa: SLF001
+        _FIXTURE_MODULE._admin_fixture_feature_id(run_id, "correction"),  # noqa: SLF001
+        _FIXTURE_MODULE._admin_fixture_feature_id(run_id, "search::alpha"),  # noqa: SLF001
+        _FIXTURE_MODULE._admin_fixture_feature_id(run_id, "search::beta"),  # noqa: SLF001
     }
-    assert fingerprints[f"e2e_live_acceptance::{run_id}::correction"][2] == {
+    correction_id = _FIXTURE_MODULE._admin_fixture_feature_id(  # noqa: SLF001
+        run_id, "correction"
+    )
+    assert correction_id.startswith("f_global_p_")
+    assert _FIXTURE_MODULE._provider_fixture_feature_id(  # noqa: SLF001
+        run_id, "weather"
+    ).startswith("f_global_w_")
+    assert _FIXTURE_MODULE._provider_fixture_feature_id(  # noqa: SLF001
+        run_id, "price"
+    ).startswith("f_global_p_")
+    assert fingerprints[correction_id][2] == {
         f"E2E correction baseline {run_id}",
         f"E2E approved competing update {run_id}",
     }
@@ -665,6 +675,8 @@ def test_clone_content_digest_excludes_only_run_bound_domain_receipts() -> None:
     assert "result.response_body #>> ''{data,item,request_id}''" in runner
     assert "result.response_body::text LIKE %L" in runner
     assert "'%e2e_live_acceptance::${run_id}::%'" in runner
+    assert "owned_feature_ids_sql()" in runner
+    assert "ARRAY[${owned_feature_ids}]::text[]" in runner
 
 
 def test_evidence_validator_requires_exact_schema_phase_counts_and_fsync() -> None:

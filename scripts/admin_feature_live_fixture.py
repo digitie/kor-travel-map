@@ -24,7 +24,11 @@ from sqlalchemy import text
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kortravelmap.core.ids import make_payload_hash, make_source_record_key
+from kortravelmap.core.ids import (
+    make_feature_id,
+    make_payload_hash,
+    make_source_record_key,
+)
 from kortravelmap.dto import SourceRecord
 from kortravelmap.dto._time import kst_now
 from kortravelmap.dto.price import PriceValue
@@ -108,14 +112,48 @@ def _response_record(
 
 
 def _feature_ids(run_id: str) -> tuple[str, str]:
-    prefix = f"e2e_live_acceptance::{run_id}"
-    return f"{prefix}::weather", f"{prefix}::price"
+    """API resolver가 재해석할 수 있는 live weather/price legacy ID 두 건."""
+
+    return (
+        _provider_fixture_feature_id(run_id, "weather"),
+        _provider_fixture_feature_id(run_id, "price"),
+    )
+
+
+def _provider_fixture_feature_id(run_id: str, kind: str) -> str:
+    return make_feature_id(
+        bjd_code=None,
+        kind=kind,
+        category="00000000",
+        source_type=_E2E_PROVIDER,
+        source_natural_key=f"{run_id}:{kind}",
+    )
+
+
+def _admin_fixture_feature_id(run_id: str, role: str) -> str:
+    """Browser의 admin create body와 같은 deterministic ``f_*`` identity."""
+
+    logical_id = f"e2e_live_acceptance::{run_id}::{role}"
+    idempotency_key = hashlib.sha256(logical_id.encode()).hexdigest()
+    return make_feature_id(
+        bjd_code=None,
+        kind="place",
+        category="01070300",
+        source_type="user_request",
+        source_natural_key=idempotency_key,
+    )
+
+
+def _admin_marker_feature_ids(run_id: str) -> dict[str, str]:
+    return {
+        _admin_fixture_feature_id(run_id, f"marker::{status}"): status
+        for status in ("draft", "inactive", "hidden")
+    }
 
 
 def _api_feature_fingerprints(
     run_id: str,
 ) -> dict[str, tuple[float, float, frozenset[str]]]:
-    prefix = f"e2e_live_acceptance::{run_id}"
     jitter = hashlib.sha256(f"acceptance-coord:{run_id}".encode()).digest()
 
     def coord_jitter(offset: int) -> float:
@@ -127,12 +165,12 @@ def _api_feature_fingerprints(
     marker_lat = _LAT + coord_jitter(4)
     expected: dict[str, tuple[float, float, frozenset[str]]] = {}
     for index, status in enumerate(("draft", "inactive", "hidden")):
-        expected[f"{prefix}::marker::{status}"] = (
+        expected[_admin_fixture_feature_id(run_id, f"marker::{status}")] = (
             marker_lon + index * 0.001,
             marker_lat + index * 0.001,
             frozenset({f"E2E {status} marker {run_id}"}),
         )
-    expected[f"{prefix}::correction"] = (
+    expected[_admin_fixture_feature_id(run_id, "correction")] = (
         _LON,
         _LAT - 0.002,
         frozenset(
@@ -146,7 +184,7 @@ def _api_feature_fingerprints(
         f"acceptance-search:{run_id}".encode()
     ).hexdigest()[:32]
     for index, suffix in enumerate(("alpha", "beta")):
-        expected[f"{prefix}::search::{suffix}"] = (
+        expected[_admin_fixture_feature_id(run_id, f"search::{suffix}")] = (
             _LON + 0.004 + index * 0.001,
             _LAT + 0.004 + index * 0.001,
             frozenset({f"e2esrch {search_token} {suffix}"}),
@@ -656,12 +694,12 @@ async def _inspect_api_owned(
                   x_extension.ST_X(coord) AS lon,
                   x_extension.ST_Y(coord) AS lat
                 FROM feature.features
-                WHERE feature_id LIKE :prefix ESCAPE '\\'
+                WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
                 ORDER BY feature_id
                 FOR UPDATE
                 """
             ),
-            {"prefix": f"e2e_live_acceptance::{run_id}::%"},
+            {"feature_ids": list(feature_ids)},
         )
     ).mappings().all()
     for row in rows:
@@ -787,10 +825,9 @@ async def _inspect_api_owned(
         if change_kind == "delete":
             expected_status = "deleted"
         elif change_kind == "add":
-            for marker_status in ("draft", "inactive", "hidden"):
-                if feature_id.endswith(f"::marker::{marker_status}"):
-                    expected_status = marker_status
-                    break
+            expected_status = _admin_marker_feature_ids(run_id).get(
+                feature_id, expected_status
+            )
         if (
             payload.get("feature_id") != feature_id
             or payload.get("kind") != "place"
@@ -818,7 +855,10 @@ async def _inspect_api_owned(
 
     for feature_id, changes in changes_by_feature.items():
         expected_sequence = ["add", "delete"]
-        if feature_id.endswith("::correction") and "update" in changes:
+        if (
+            feature_id == _admin_fixture_feature_id(run_id, "correction")
+            and "update" in changes
+        ):
             expected_sequence = ["add", "update", "delete"]
         versions = [
             int(row["version"])
