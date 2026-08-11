@@ -759,6 +759,13 @@ content_sha256() {
   local statement_query statements
   statement_query="$(cat <<SQL
 SELECT CASE
+  WHEN relation.relkind = 'S'
+    AND namespace.nspname = 'ops'
+    AND relation.relname = 'domain_commands_command_id_seq'
+  THEN format(
+    'SELECT %L || chr(31) || ''run-owned identity sequence excluded'';',
+    namespace.nspname || '.' || relation.relname
+  )
   WHEN relation.relkind = 'S' THEN format(
     'SELECT %L || chr(31) || ''1'' || chr(31) || last_value::text || ' ||
     'chr(31) || is_called::text FROM %I.%I;',

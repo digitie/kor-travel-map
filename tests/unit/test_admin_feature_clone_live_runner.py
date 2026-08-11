@@ -673,6 +673,8 @@ def test_content_digest_excludes_only_run_bound_auth_domain_receipts() -> None:
     source = _RUNNER.read_text(encoding="utf-8")
 
     assert "'domain_commands', 'domain_command_results'" in source
+    assert "relation.relname = 'domain_commands_command_id_seq'" in source
+    assert "run-owned identity sequence excluded" in source
     assert "command.actor = ''ui-auth''" in source
     assert "command.operation = ''admin.auth-event.create''" in source
     assert "result.response_body #>> ''{data,item,request_id}''" in source
