@@ -203,9 +203,6 @@ validate_snapshot() {
   done
 }
 
-[[ "$MODE" == "baseline" || "$MODE" == "checkpoint" ||
-   "$MODE" == "recover" || "$MODE" == "run" || "$MODE" == "abort" ]] ||
-  die "usage: runner baseline|checkpoint|recover|run|abort"
 require_env E2E_SOURCE_COMMIT
 if [[ "$SCRIPT_DIR" != "$INSTALL_BASE/$SOURCE_COMMIT" ]]; then
   bootstrap_snapshot
@@ -213,6 +210,9 @@ fi
 
 (( EUID == 0 )) || die "trusted installed runner requires root"
 validate_snapshot
+[[ "$MODE" == "baseline" || "$MODE" == "checkpoint" ||
+   "$MODE" == "recover" || "$MODE" == "run" || "$MODE" == "abort" ]] ||
+  die "usage: runner baseline|checkpoint|recover|run|abort"
 require_command docker
 require_command find
 require_command flock

@@ -551,6 +551,15 @@ def test_abandon_failed_run_requires_cleaned_failure_evidence(tmp_path: Path) ->
     }
 
 
+def test_runner_bootstraps_requested_snapshot_before_validating_mode() -> None:
+    source = _RUNNER.read_text(encoding="utf-8")
+    bootstrap_gate = 'if [[ "$SCRIPT_DIR" != "$INSTALL_BASE/$SOURCE_COMMIT" ]]; then'
+    mode_gate = '[[ "$MODE" == "baseline" || "$MODE" == "checkpoint" ||'
+
+    assert source.index(bootstrap_gate) < source.index(mode_gate)
+    assert '"$MODE" == "abort"' in source
+
+
 def test_complete_accepts_bound_runtime_topic_revision_normalization(
     tmp_path: Path,
 ) -> None:
