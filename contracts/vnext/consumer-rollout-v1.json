@@ -187,14 +187,14 @@
         "admin-detail": "no"
       },
       "pinvi_snapshot_receipt": {
-        "map_commit": "63a5713deabec00ecbc9eb4e8513ca1d2f4cf8ad",
-        "pinvi_commit": "d71ae509ff76f3abd521d41e1063857683435fb9",
-        "map_service_openapi_sha256": "b442414471c97bcdb746b49d2d24c9ec2b319290084d971df524db87b3994cfd",
-        "pinvi_service_vendor_sha256": "b442414471c97bcdb746b49d2d24c9ec2b319290084d971df524db87b3994cfd",
+        "map_commit": "56f00e072a433bbe219909f5289d479ec16586d9",
+        "pinvi_commit": "458f396b16fe61c7d03430e2bf4cc249c36f9f72",
+        "map_service_openapi_sha256": "53da6a3a1194b9de715e80ed69e016ae15885b81d2909bf2d128773d64f8b2f7",
+        "pinvi_service_vendor_sha256": "53da6a3a1194b9de715e80ed69e016ae15885b81d2909bf2d128773d64f8b2f7",
         "verification": [
           "Map service OpenAPI export and restore replay response contract",
           "PinVi service vendor SHA and contract-pin consistency",
-          "PinVi cache-target transport and restore-fence runner regression",
+          "PinVi cache-target transport, durable response-loss exact-replay, and restore-fence runner regression",
           "two independent adversarial reviews before n150 isolated live gate"
         ]
       }
