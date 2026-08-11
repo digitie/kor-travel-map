@@ -2561,7 +2561,7 @@ print(value)
       CHECKPOINT_CONTENT_REBASE=0
       if ! state_helper verify-checkpoint \
           --checkpoint "$CHECKPOINT_FILE" \
-          --snapshot "$CURRENT_CHECKPOINT_SNAPSHOT" >/dev/null; then
+          --snapshot "$CURRENT_CHECKPOINT_SNAPSHOT" >/dev/null 2>&1; then
         # e462은 run-owned domain-command sequence를, 789는 run-owned receipt를
         # content digest에서 제외했다. checkpoint mode에서만 알려진 두 직전 규칙으로
         # 기존 서명과 먼저 정확히 대조해, 이 분류 변경 외 DB drift를 재인증하지 않는다.
@@ -2578,7 +2578,7 @@ print(value)
             "$candidate_digest_revision"
           if state_helper verify-checkpoint \
               --checkpoint "$CHECKPOINT_FILE" \
-              --snapshot "$LEGACY_CHECKPOINT_SNAPSHOT" >/dev/null; then
+              --snapshot "$LEGACY_CHECKPOINT_SNAPSHOT" >/dev/null 2>&1; then
             LEGACY_DIGEST_REVISION="$candidate_digest_revision"
             break
           fi
