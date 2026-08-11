@@ -21,6 +21,12 @@ async function loadConfig() {
   return (await import("../playwright.live.config")).default;
 }
 
+async function loadCacheTargetStreamsConfig() {
+  vi.resetModules();
+  return (await import("../playwright.cache-target-streams.live.config"))
+    .default;
+}
+
 describe("isolated Live evidence config", () => {
   it("loopback 격리 실행은 redacted reporter를 쓰고 raw artifact를 끈다", async () => {
     process.env.E2E_BASE_URL = "http://127.0.0.1:18705";
@@ -72,6 +78,16 @@ describe("isolated Live evidence config", () => {
     process.env.E2E_ISOLATED_LIVE_DOCKER_NETWORK = "1";
 
     await expect(loadConfig()).rejects.toThrow("검증된 격리 대상만 허용");
+  });
+
+  it("cache-target 격리 config도 insecure-origin secure 우회 옵션을 주지 않는다", async () => {
+    process.env.E2E_BASE_URL = "http://candidate-ui:18705";
+    process.env.E2E_ISOLATED_LIVE_DOCKER_NETWORK = "1";
+
+    const config = await loadCacheTargetStreamsConfig();
+
+    expect(config.use?.baseURL).toBe("http://candidate-ui:18705");
+    expect(config.use?.launchOptions).toBeUndefined();
   });
 
   it("Docker 격리 opt-in은 evidence mode 없이 사용할 수 없다", async () => {

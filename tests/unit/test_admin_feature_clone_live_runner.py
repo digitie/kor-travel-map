@@ -1422,6 +1422,9 @@ def test_runner_closes_reviewed_trust_boundaries() -> None:
     assert "--table=ops_live_topic_revisions" in source
     assert "write-topic-revision-proof" in source
     assert "c7-loopback-ui-proxy.mjs" in source
+    assert '"$ARCHIVE_PREFIX/scripts/c7-loopback-ui-proxy.mjs"' in source
+    assert 'src=$SCRIPT_DIR/c7-loopback-ui-proxy.mjs,dst=/opt/c7-loopback-ui-proxy.mjs,readonly' in source
+    assert "node /opt/c7-loopback-ui-proxy.mjs" in source
     assert 'E2E_BASE_URL=http://127.0.0.1:$LOOPBACK_UI_PORT' in source
     assert 'KTM_C7_LOOPBACK_UI_PROXY_TARGET=http://candidate-ui:$UI_PORT' in source
     assert "hashtextextended(row_value::text" in source

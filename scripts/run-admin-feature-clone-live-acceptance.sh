@@ -103,16 +103,19 @@ bootstrap_snapshot() {
       --directory "$incoming" --strip-components=2 \
       "$ARCHIVE_PREFIX/scripts/admin_feature_clone_live_state.py" \
       "$ARCHIVE_PREFIX/scripts/admin_feature_live_fixture.py" \
+      "$ARCHIVE_PREFIX/scripts/c7-loopback-ui-proxy.mjs" \
       "$ARCHIVE_PREFIX/scripts/run-admin-feature-clone-live-acceptance.sh"
     sudo -n chown root:root \
       "$incoming/source.tar.gz" \
       "$incoming/admin_feature_clone_live_state.py" \
       "$incoming/admin_feature_live_fixture.py" \
+      "$incoming/c7-loopback-ui-proxy.mjs" \
       "$incoming/run-admin-feature-clone-live-acceptance.sh"
     sudo -n chmod 0444 \
       "$incoming/source.tar.gz" \
       "$incoming/admin_feature_clone_live_state.py" \
-      "$incoming/admin_feature_live_fixture.py"
+      "$incoming/admin_feature_live_fixture.py" \
+      "$incoming/c7-loopback-ui-proxy.mjs"
     sudo -n chmod 0555 "$incoming/run-admin-feature-clone-live-acceptance.sh"
     sudo -n chmod 0555 "$incoming"
     if ! sudo -n mv -T --no-clobber -- "$incoming" "$expected_root"; then
@@ -148,7 +151,7 @@ validate_snapshot() {
   [[ "$(stat -c '%u:%g:%a' -- "$snapshot_root")" == "0:0:555" ]] ||
     die "snapshot root metadata is unsafe"
   local expected_names actual_names
-  expected_names=$'admin_feature_clone_live_state.py\nadmin_feature_live_fixture.py\nrun-admin-feature-clone-live-acceptance.sh\nsource.tar.gz'
+  expected_names=$'admin_feature_clone_live_state.py\nadmin_feature_live_fixture.py\nc7-loopback-ui-proxy.mjs\nrun-admin-feature-clone-live-acceptance.sh\nsource.tar.gz'
   actual_names="$(
     find "$snapshot_root" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort
   )"
@@ -159,6 +162,7 @@ validate_snapshot() {
   for name in \
     admin_feature_clone_live_state.py \
     admin_feature_live_fixture.py \
+    c7-loopback-ui-proxy.mjs \
     run-admin-feature-clone-live-acceptance.sh; do
     expected_mode=444
     [[ "$name" != run-admin-feature-clone-live-acceptance.sh ]] || expected_mode=555
@@ -2757,6 +2761,7 @@ run_executor() {
     --tmpfs /root/.config:rw,nosuid,nodev,noexec,mode=700 \
     --tmpfs /root/.npm:rw,nosuid,nodev,noexec,mode=700 \
     --mount "type=bind,src=$artifact_dir,dst=/evidence" \
+    --mount "type=bind,src=$SCRIPT_DIR/c7-loopback-ui-proxy.mjs,dst=/opt/c7-loopback-ui-proxy.mjs,readonly" \
     --env "E2E_BASE_URL=http://127.0.0.1:$LOOPBACK_UI_PORT" \
     --env "KTM_C7_LOOPBACK_UI_PROXY_PORT=$LOOPBACK_UI_PORT" \
     --env "KTM_C7_LOOPBACK_UI_PROXY_TARGET=http://candidate-ui:$UI_PORT" \
@@ -2773,7 +2778,7 @@ run_executor() {
     --entrypoint /bin/sh \
     "$PLAYWRIGHT_IMAGE_ID" \
     -ec '
-      node /work/scripts/c7-loopback-ui-proxy.mjs &
+      node /opt/c7-loopback-ui-proxy.mjs &
       proxy_pid=$!
       cleanup_proxy() {
         kill "$proxy_pid" 2>/dev/null || true
