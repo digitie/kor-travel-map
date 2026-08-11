@@ -174,8 +174,23 @@ def _assert_bounded_event_audit_plan(
     plan: Any,
     *,
     expected_index: str,
-    allow_bounded_sort: bool = False,
 ) -> None:
+    """감사 조회 계획이 **유계**인지 못박는다 — 정렬 노드의 유무가 아니라.
+
+    앞 판은 세 케이스 중 둘에 ``assert not sort_nodes``(절대 금지)를 걸었다. 그 규칙은
+    실측으로 비결정적이다: 같은 트리·같은 명령(``pytest tests/integration -q``)으로
+    2026-08-11에 한 번은 이 단언에서 red, 한 번은 green이었고 파일 단독 실행은
+    ``8 passed``였다. 테스트가 ``ANALYZE`` + ``force_generic_plan``을 이미 걸고 있으므로
+    통계 최신화 누락이 아니라, 공유 DB에 형제 테스트가 커밋해 둔 행 위에서 top-N 정렬과
+    index-ordered 경로의 비용이 팽팽해 표본에 따라 갈리는 것이다.
+
+    유계성이 실제 보증이다. 정렬이 끼더라도 그것이 LIMIT에 묶인 top-N이면 — 정렬이 훑는
+    행이 64 이하 — 비용은 index-ordered 경로와 같은 자릿수다. 반대로 index가 사라지면
+    이 시드(12,000행) 위에서 ``touches``/``removed``/정렬 행 수가 함께 폭발하고
+    ``expected_index`` 단언도 깨진다. 그래서 세 축(정렬 행·훑은 행·필터로 버린 행)에
+    같은 상한을 걸고, Seq Scan 금지와 index 이름을 함께 못박는다.
+    """
+
     nodes = _plan_nodes(plan)
     event_nodes = [
         node for node in nodes if node.get("Relation Name") == "import_job_events"
@@ -185,13 +200,11 @@ def _assert_bounded_event_audit_plan(
     sort_nodes = [
         node for node in nodes if "Sort" in str(node.get("Node Type"))
     ]
-    if allow_bounded_sort:
-        assert sum(
-            float(node.get("Actual Rows", 0)) * float(node.get("Actual Loops", 0))
-            for node in sort_nodes
-        ) <= 64
-    else:
-        assert not sort_nodes
+    sorted_rows = sum(
+        float(node.get("Actual Rows", 0)) * float(node.get("Actual Loops", 0))
+        for node in sort_nodes
+    )
+    assert sorted_rows <= 64, f"정렬이 유계가 아니다: {sorted_rows}행"
     assert any(node.get("Index Name") == expected_index for node in nodes)
     touches = sum(
         float(node.get("Actual Rows", 0)) * float(node.get("Actual Loops", 0))
@@ -736,18 +749,12 @@ async def test_event_audit_filters_use_bounded_natural_plans(
     # 축은 현재 bounded 계획이 없어(``test_exact_scope_event_history_filters_on_
     # canonical_membership`` docstring 참조) 여기서 계획을 못박지 않는다.
     cases = (
-        (None, None, None, "idx_import_job_events_time", False),
-        (
-            target_job.job_id,
-            None,
-            None,
-            "idx_import_job_events_job_time",
-            True,
-        ),
-        (None, "info", None, "idx_import_job_events_level_time", False),
+        (None, None, None, "idx_import_job_events_time"),
+        (target_job.job_id, None, None, "idx_import_job_events_job_time"),
+        (None, "info", None, "idx_import_job_events_level_time"),
     )
     for cursor_at in (None, datetime(2026, 7, 1, 2, 0, tzinfo=_KST)):
-        for job_id, level, provider_dataset_id, expected_index, bounded_sort in cases:
+        for job_id, level, provider_dataset_id, expected_index in cases:
             sql = ops_repo._list_import_job_events_sql(
                 job_id=job_id,
                 level=level,
@@ -773,7 +780,6 @@ async def test_event_audit_filters_use_bounded_natural_plans(
             _assert_bounded_event_audit_plan(
                 plan,
                 expected_index=expected_index,
-                allow_bounded_sort=bounded_sort,
             )
 
     live_cases = (
