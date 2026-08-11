@@ -196,7 +196,8 @@ def test_exact_triple_api_preflight_blocks_before_destructive_state() -> None:
     assert '"$ACTIVE_CID_FILE" \\' in script
     assert 'operation_key: operationKey' in contract_preflight
     assert 'expect([404, 422]).toContain(foreign.status)' in contract_preflight
-    assert 'canonical.data.operation_key).toBe(KMA_NOWCAST_OPERATION_KEY)' in contract_preflight
+    assert 'canonical.data.scopes[0]?.operation_key).toBe(' in contract_preflight
+    assert 'KMA_NOWCAST_OPERATION_KEY,' in contract_preflight
     assert 'canonical.data.scopes[0]?.sync_scope).toBe(syncScope)' in contract_preflight
     assert 'expect([404, 422]).toContain(wrongScope.status)' in contract_preflight
 
@@ -206,7 +207,7 @@ def test_dataset_ui_wait_and_direct_helper_bind_the_same_provider_dataset_id() -
     active = _read(LIVE_DIR / "ops-c7-kma-active-write.live.spec.ts")
 
     assert "exactDatasetUiPathForProviderDatasetId" in helper
-    assert "result.body?.data.provider_dataset_id !== providerDatasetId" in helper
+    assert "result.body?.data.provider_dataset_id !== identity.providerDatasetId" in helper
     assert "url.pathname === `/api/proxy/v1/ops/datasets/${providerDatasetId}`" in active
     assert "data?.provider_dataset_id).toBe(providerDatasetId)" in active
 
@@ -408,8 +409,10 @@ def test_kma_preview_terminal_and_metadata_are_exact_kma_only() -> None:
     assert "assertOnlyExpectedKmaProviderObjects(\n    matched" in helper
     assert "FORBIDDEN_PROVIDER_PATTERN" in helper
     assert "assertOnlyExpectedKmaProviderObjects(" in helper
-    assert "provider_dataset_id: expected.scope.provider_dataset_id" in helper
-    assert "!exactJson(data.dataset_memberships, expectedMembership)" in helper
+    assert "!exactJson(data.dataset_memberships, [" in helper
+    assert "operation_key: identity.operationKey" in helper
+    assert "provider_dataset_id: identity.providerDatasetId" in helper
+    assert "sync_scope: expectedEffectiveSyncScope" in helper
     assert "updateRequest.dataset_memberships.length !== 1" in helper
     assert "updateRequest.dataset_memberships[0]?.provider_dataset_id" in helper
     assert "updateRequest.dataset_memberships[0]?.sync_scope" in helper

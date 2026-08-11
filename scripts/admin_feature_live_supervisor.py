@@ -5,18 +5,14 @@ from __future__ import annotations
 
 import argparse
 import fcntl
-import json
 import os
 import re
 import stat
 import subprocess
 import sys
-from collections.abc import Mapping
 from pathlib import Path
 
 _CONTAINER_ID_RE = re.compile(r"^[0-9a-f]{64}$")
-_NETWORK_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
-_ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _PROBE_MESSAGE = (
     "production profile is fail-closed (ADR-066): "
     "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET must be configured while "
@@ -28,12 +24,10 @@ def _run(
     command: list[str],
     *,
     capture: bool = False,
-    env: Mapping[str, str] | None = None,
 ) -> subprocess.CompletedProcess[bytes]:
     return subprocess.run(
         command,
         check=False,
-        env=env,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE if capture else subprocess.DEVNULL,
         stderr=subprocess.PIPE if capture else subprocess.DEVNULL,
@@ -51,26 +45,6 @@ def _start_ticks() -> int:
     if len(fields) < 22:
         raise RuntimeError("process stat shape mismatch")
     return int(fields[21])
-
-
-def _write_all(descriptor: int, body: bytes) -> None:
-    offset = 0
-    while offset < len(body):
-        offset += os.write(descriptor, body[offset:])
-
-
-def _unique_environment(items: object) -> dict[str, str]:
-    if not isinstance(items, list):
-        raise RuntimeError("API runtime environment shape is unsafe")
-    environment: dict[str, str] = {}
-    for item in items:
-        if not isinstance(item, str) or "=" not in item or "\0" in item:
-            raise RuntimeError("API runtime environment shape is unsafe")
-        name, value = item.split("=", 1)
-        if _ENV_NAME_RE.fullmatch(name) is None or name in environment:
-            raise RuntimeError("API runtime environment shape is unsafe")
-        environment[name] = value
-    return environment
 
 
 class Supervisor:
@@ -172,13 +146,11 @@ class Supervisor:
         self,
         command: list[str],
         kind: str,
-        *,
-        process_environment: Mapping[str, str] | None = None,
     ) -> None:
         self.lifecycle("claim-pending", kind)
         self.active("create-pending", "active")
         self.ensure_name_absent()
-        completed = _run(command, capture=True, env=process_environment)
+        completed = _run(command, capture=True)
         if completed.returncode != 0:
             raise RuntimeError("docker create failed")
         container_id = completed.stdout.decode("ascii", errors="strict").strip()
@@ -238,113 +210,6 @@ class Supervisor:
             "--label",
             f"io.kortravelmap.admin-feature-acceptance.operation={self.args.operation}",
         ]
-
-    def helper(self) -> int:
-        inspected = _run(
-            ["docker", "inspect", "--", self.args.api_container], capture=True
-        )
-        if inspected.returncode != 0:
-            raise RuntimeError("API runtime inspection failed")
-        records = json.loads(inspected.stdout)
-        if not isinstance(records, list) or len(records) != 1:
-            raise RuntimeError("API runtime inspection shape")
-        record = records[0]
-        config = record.get("Config")
-        networks = record.get("NetworkSettings", {}).get("Networks")
-        network_mode = record.get("HostConfig", {}).get("NetworkMode")
-        environment = config.get("Env") if isinstance(config, dict) else None
-        # host-network API runtime(n150 production compose): docker는
-        # `network connect host`를 거부하므로 helper를 host network로 직접
-        # create한다. loopback DB 도달성이 API runtime과 정확히 일치하고
-        # post-create attachment 창 자체가 없어진다. host mode에서 Networks가
-        # {"host"} 외의 조합이면 clone 대상이 아니므로 fail-closed한다.
-        #
-        # 비-host runtime도 create 시 첫 network에 직접 붙인다: 기존
-        # none+connect 흐름은 docker가 none(private) 모드 컨테이너에 어떤
-        # network connect도 거부하므로 도달 불가능한 죽은 경로였다(적대 리뷰
-        # 실증). 첫 network로 create한 stopped 컨테이너에 나머지 network를
-        # connect하는 것은 지원된다.
-        host_networked = network_mode == "host"
-        if host_networked:
-            if not isinstance(networks, dict) or set(networks) != {"host"}:
-                raise RuntimeError("API runtime clone inputs are unsafe")
-        elif (
-            not isinstance(networks, dict)
-            or not networks
-            or not all(_NETWORK_RE.fullmatch(value) for value in networks)
-        ):
-            raise RuntimeError("API runtime clone inputs are unsafe")
-        ordered_networks = [] if host_networked else sorted(networks)
-        runtime_environment = _unique_environment(environment)
-        process_environment = dict(os.environ)
-        process_environment.update(runtime_environment)
-        environment_arguments = [
-            value
-            for name in sorted(runtime_environment)
-            for value in ("--env", name)
-        ]
-        command = [
-            "docker",
-            "create",
-            "--pull=never",
-            "--name",
-            self.args.container_name,
-            *self.labels(),
-            "--network",
-            "host" if host_networked else ordered_networks[0],
-            "--read-only",
-            "--security-opt",
-            "no-new-privileges",
-            "--cap-drop",
-            "ALL",
-            "--tmpfs",
-            "/tmp:rw,nosuid,nodev,noexec,mode=1777",
-            *environment_arguments,
-            "--volumes-from",
-            f"{self.args.api_container}:ro",
-            "--mount",
-            f"type=bind,src={self.args.fixture},dst=/opt/admin-feature-live-fixture.py,readonly",
-            "--entrypoint",
-            "python",
-            self.args.image,
-            "/opt/admin-feature-live-fixture.py",
-            self.args.helper_action,
-            "--run-id",
-            self.args.run_id,
-        ]
-        self.create(
-            command,
-            "helper",
-            process_environment=process_environment,
-        )
-        if not host_networked:
-            for network in ordered_networks[1:]:
-                if (
-                    _run(
-                        ["docker", "network", "connect", "--", network, self.container_id]
-                    ).returncode
-                    != 0
-                ):
-                    raise RuntimeError("helper network attachment failed")
-        self.lifecycle("prepared", "helper")
-        self.active("prepared", "active")
-        status = self.start_wait("helper")
-        log = _run(["docker", "logs", "--", self.container_id], capture=True)
-        if log.returncode != 0:
-            raise RuntimeError("helper output capture failed")
-        descriptor = os.open(
-            self.args.output,
-            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW,
-            0o600,
-        )
-        try:
-            os.fchown(descriptor, 0, 0)
-            _write_all(descriptor, log.stdout)
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
-        self.remove("helper")
-        return status
 
     def executor(self) -> int:
         command = [
@@ -474,8 +339,6 @@ class Supervisor:
     def execute(self) -> int:
         self.verify_barrier()
         self.active("intent", "active")
-        if self.args.mode == "helper":
-            return self.helper()
         if self.args.mode == "executor":
             return self.executor()
         return self.probe()
@@ -483,7 +346,7 @@ class Supervisor:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", choices=("helper", "executor", "probe"), required=True)
+    parser.add_argument("--mode", choices=("executor", "probe"), required=True)
     parser.add_argument("--actor", choices=("main", "recovery"), required=True)
     parser.add_argument("--attempt", type=int, required=True)
     parser.add_argument("--operation", required=True)
@@ -496,9 +359,6 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--runtime-dir", type=Path, required=True)
     parser.add_argument("--container-name", required=True)
     parser.add_argument("--image", required=True)
-    parser.add_argument("--api-container", default="")
-    parser.add_argument("--fixture", type=Path)
-    parser.add_argument("--helper-action", choices=("seed", "cleanup", "audit"))
     parser.add_argument("--output", type=Path)
     parser.add_argument("--artifact-dir", type=Path)
     parser.add_argument("--recovery-only", action="store_true")
@@ -513,7 +373,7 @@ def main() -> int:
     try:
         status = supervisor.execute()
         succeeded = status == 0
-    except (OSError, RuntimeError, TypeError, ValueError, json.JSONDecodeError):
+    except (OSError, RuntimeError, TypeError, ValueError):
         succeeded = False
         status = 1
         if supervisor.container_id:

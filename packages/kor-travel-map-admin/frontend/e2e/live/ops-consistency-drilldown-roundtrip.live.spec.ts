@@ -111,7 +111,7 @@ async function waitForIssuesResponse(
   );
 }
 
-// gold-standard(admin-features-change-requests-write.live.spec.ts)에서 verbatim 차용.
+// 다른 live write spec과 같은 browser fetch 경계다.
 async function browserFetch<T>(
   page: Page,
   path: string,

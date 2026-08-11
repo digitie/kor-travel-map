@@ -1,10 +1,10 @@
 import { expect, test } from "@playwright/test";
 
 import {
-  buildKmaRequest,
   cancellationCandidateForScenarioOwnedActiveRequest,
   hasExactC7RequestOwnershipBinding,
   isC7OrchestratorBootstrapPlaceholder,
+  type FeatureUpdateRequestCreateRequest,
   KMA_DATASET_KEY,
   KMA_NOWCAST_OPERATION_KEY,
   KMA_PROVIDER,
@@ -73,12 +73,23 @@ const ownership: KmaRequestOwnership = {
   providerDatasetId: PROVIDER_DATASET_ID,
   syncScope: SYNC_SCOPE,
 };
-const idempotencyEntry = {
-  body: buildKmaRequest(
-    PROVIDER_DATASET_ID,
-    "c7-cleanup-ownership",
-    "C7 cleanup ownership regression",
-  ),
+const idempotencyEntry: {
+  body: FeatureUpdateRequestCreateRequest;
+  requestId: string;
+} = {
+  // 이 unit fixture는 browser bootstrap을 거치지 않는다. canonical live helper를
+  // 호출하지 않고 검증 대상인 KMA triple을 body에 명시한다.
+  body: {
+    priority: 50,
+    reason: "C7 cleanup ownership regression",
+    run_mode: "queued",
+    scope: {
+      operation_key: KMA_NOWCAST_OPERATION_KEY,
+      provider_dataset_id: PROVIDER_DATASET_ID,
+      sync_scope: SYNC_SCOPE,
+      type: "provider_dataset",
+    },
+  },
   requestId: OWNED_REQUEST_ID,
 };
 
@@ -149,7 +160,11 @@ test("C7 cleanup never selects an operation-mismatched active, detail, or member
     },
     () => {
       const detail = requestDetail(OWNED_REQUEST_ID);
-      detail.data.update_request!.scope.operation_key = foreignOperation;
+      const scope = detail.data.update_request!.scope;
+      if (scope.type !== "provider_dataset") {
+        throw new Error("C7 fixture provider_dataset scope가 아닙니다");
+      }
+      scope.operation_key = foreignOperation;
       return [datasetDetail(OWNED_REQUEST_ID), detail] as const;
     },
     () => {
@@ -175,7 +190,9 @@ test("C7 cleanup never selects an operation-mismatched active, detail, or member
 
 test("C7 v5 journal requires one-to-one request/idempotency/scope/operation ownership", () => {
   const journal = durableV5Journal() as {
-    idempotency_entries: Array<{ body: { scope: { provider_dataset_id: number } } }>;
+    idempotency_entries: Array<{
+      body: { scope: { provider_dataset_id: number; type: string } };
+    }>;
     request_ownership: unknown[];
   };
   expect(hasExactC7RequestOwnershipBinding(journal)).toBe(true);
@@ -192,7 +209,11 @@ test("C7 v5 journal requires one-to-one request/idempotency/scope/operation owne
       sync_scope: SYNC_SCOPE,
     },
   ];
-  journal.idempotency_entries[0]!.body.scope.provider_dataset_id += 1;
+  const journalScope = journal.idempotency_entries[0]!.body.scope;
+  if (journalScope.type !== "provider_dataset") {
+    throw new Error("C7 journal fixture provider_dataset scope가 아닙니다");
+  }
+  journalScope.provider_dataset_id += 1;
   expect(hasExactC7RequestOwnershipBinding(journal)).toBe(false);
 
   const missingOperation = durableV5Journal() as {

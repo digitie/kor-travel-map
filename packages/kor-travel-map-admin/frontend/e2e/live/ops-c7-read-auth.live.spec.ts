@@ -790,6 +790,8 @@ function datasetRows(payload: unknown): LiveDatasetRow[] {
       typeof item.status !== "string" ||
       !isRecord(item.freshness) ||
       typeof item.freshness.state !== "string" ||
+      !isRecord(item.provider_issues) ||
+      typeof item.provider_issues.open_count !== "number" ||
       !(item.catalog === null || isRecord(item.catalog))
     ) {
       throw new Error("datasets grid row 계약이 올바르지 않습니다");

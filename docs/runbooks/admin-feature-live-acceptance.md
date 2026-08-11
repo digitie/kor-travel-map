@@ -9,25 +9,23 @@ final-schema reload receipt v1을 그대로
 ## 1. 불변식
 
 - 실행은 root, 단일 orchestrator, Playwright worker 1개로 제한한다.
-- 운영 기존 row를 fixture로 빌리지 않는다. `run_id`에서 파생한 Feature ID 8개만 소유한다.
-  place 6개는 admin API로 생성·승인·soft-delete하고, weather/price 2개만 전용 helper가
-  transaction으로 만들고 물리 삭제한다.
+- 운영 기존 row를 fixture로 빌리지 않는다. `run_id`에서 파생한 Feature ID 6개만 소유하고,
+  모두 browser BFF의 typed admin command로 생성·상태 전이·retire 한다. final runtime role은
+  raw DB DML을 받지 않으므로 별도 Python fixture나 물리 delete lane을 두지 않는다.
 - browser의 모든 API 호출은 same-origin `/api/proxy` BFF를 통한다. public API key를 URL이나
   browser state에 넣지 않는다.
 - `BLOCKED.json`과 `ACTIVE.json`은 고정 root state에만 원문 identity를 저장한다. 보존
   evidence와 이슈 코멘트에는 run/Feature/container/cursor/secret 원문을 남기지 않는다.
-- 정상·실패·복구 종료 모두 API-owned pending request 0건, API-owned Feature `deleted`,
-  direct Feature/value 0/0/0, 모든 `feature.features(feature_id)` FK reference 0건,
-  label/name 기반 Docker container 0건을 확인한다.
+- 정상·실패·복구 종료 모두 API-owned pending request 0건, API-owned Feature `retired`와
+  public projection 0건, label/name 기반 Docker container 0건을 확인한다.
 
 ## 2. 신뢰 snapshot 설치
 
-대상 commit을 먼저 확정한다. 다음 네 파일을 Git archive에서 추출해 commit별 immutable
+대상 commit을 먼저 확정한다. 다음 세 파일을 Git archive에서 추출해 commit별 immutable
 directory에 basename으로 설치한다.
 
 ```text
 /usr/local/lib/kor-travel-map/admin-feature-live-acceptance/<40-hex>/
-  admin_feature_live_fixture.py
   admin_feature_live_state.py
   admin_feature_live_supervisor.py
   run-admin-feature-live-acceptance.sh
@@ -40,13 +38,12 @@ directory에 basename으로 설치한다.
 - 기존 snapshot은 in-place 수정하지 않는다. 별도 임시 directory에서 파일·manifest·mode를
   완성한 뒤 원자적으로 배치한다.
 
-`source-manifest.json`은 다음 exact schema다. `files`는 네 source만 포함하며 manifest
+`source-manifest.json`은 다음 exact schema다. `files`는 세 source만 포함하며 manifest
 자신은 포함하지 않는다.
 
 ```json
 {
   "files": {
-    "admin_feature_live_fixture.py": "<sha256>",
     "admin_feature_live_state.py": "<sha256>",
     "admin_feature_live_supervisor.py": "<sha256>",
     "run-admin-feature-live-acceptance.sh": "<sha256>"
@@ -56,7 +53,7 @@ directory에 basename으로 설치한다.
 }
 ```
 
-runner는 `/`부터 snapshot까지 root 소유·비쓰기 ancestor, exact directory 경로, exact 5-file
+runner는 `/`부터 snapshot까지 root 소유·비쓰기 ancestor, exact directory 경로, exact 4-file
 set, mode, commit, SHA256을 state 생성 전에 검증한다. 같은 commit의 strict C7 snapshot에는
 `scripts/lib/c7_prod_attestation.py`가 root-owned 상태로 있어야 하며, host attestation
 `/etc/kor-travel-map/c7-prod-live-e2e-attestation.json`의 orchestrator hash와 일치해야 한다.
@@ -121,30 +118,25 @@ sudo --preserve-env=E2E_BASE_URL,NEXT_PUBLIC_KOR_TRAVEL_MAP_API,E2E_DAGSTER_URL,
 `/var/lib/kor-travel-map/admin-feature-live-acceptance`의 orchestrator lock과 Docker lifecycle
 barrier를 잡은 뒤 다음 순서로 실행한다.
 
-1. `BLOCKED.json`에 run identity·owned ID 8개·phase를 durable 기록한다.
+1. `BLOCKED.json`에 run identity·owned ID 6개·phase를 durable 기록한다.
 2. exact API image를 `network=none`, read-only, capability 0으로 띄우되 cursor secret을 빼고
    dummy credential·production profile·features=true를 넣는다. Alembic 전에 exit 1과 generic
    cursor-secret 누락 문구가 정확히 나오는지 확인한다.
-3. exact API image의 env/volume/network를 복제한 standalone labeled helper가 hidden
-   weather/price Feature와 value 각 1건을 seed한다. inspect한 environment는 중복 없는
-   name/value map으로 memory에서만 보유하고, Docker child process env와 `--env NAME`으로
-   전달한다. 값이 argv·journal·파일에 기록되는 env snapshot은 만들지 않으며
-   `docker compose exec`도 사용하지 않는다.
-4. browser가 draft/inactive/hidden marker, correction, 같은 검색 이름을 공유하는 active
-   search alpha/beta를 admin change request로 만들고 승인한다. idempotency key는 Feature ID의
-   SHA256이라 각 생성이 충돌하지 않는다.
-5. #741은 admin bbox/marker/detail/weather·price card/UI panel과 public 404를 확인한다.
-   public bbox는 owned 좌표 주위의 좁은 범위에서 `mode=items`, `truncated=false`,
-   `coverage.returned < coverage.limit`를 먼저 확인한 뒤 hidden ID 미포함을 단언한다.
-6. `T-VN-15`는 BFF search `q + page_size=1`에서 `include_total=false`의 `total=null`과 서로
+3. browser가 draft/inactive/hidden marker, correction, 같은 검색 이름을 공유하는 active
+   search alpha/beta를 typed admin command로 만들고 상태를 전이한다. idempotency key는 Feature
+   ID의 SHA256이라 각 생성이 충돌하지 않는다.
+4. #741은 admin bbox/marker/detail과 public 404를 확인한다. public bbox는 owned 좌표 주위의
+   좁은 범위에서 `mode=items`, `truncated=false`, `coverage.returned < coverage.limit`를 먼저
+   확인한 뒤 hidden ID 미포함을 단언한다.
+5. `T-VN-15`는 BFF search `q + page_size=1`에서 `include_total=false`의 `total=null`과 서로
    다른 두 ID continuation, `include_total=true`의 `total=2`와 continuation을 확인한다.
    query/include_total mismatch는 `CURSOR_QUERY_MISMATCH`, payload 한 글자 변조는
    `FEATURE_SEARCH_CURSOR_TAMPERED`인 `application/problem+json` 422여야 한다.
-7. #785는 승인된 competing update로 revision을 전진시키고, UI의 최초 raw `If-Match`가 412를
+6. #785는 승인된 competing update로 revision을 전진시키고, UI의 최초 raw `If-Match`가 412를
    받으며 dirty draft를 유지하는지 확인한다. 명시적 reload 뒤에만 새 basis를 사용한다.
-8. browser recovery-only cleanup, direct cleanup, FK audit, Docker residue audit, exact evidence
-   schema·phase·count·root metadata 검증을 수행한다.
-9. 모든 evidence file과 directory를 `fsync`하고 result를 durable 기록한 뒤에만
+7. browser recovery-only cleanup, Docker residue audit, exact evidence schema·phase·count·root
+   metadata 검증을 수행한다.
+8. 모든 evidence file과 directory를 `fsync`하고 result를 durable 기록한 뒤에만
    `BLOCKED.json`을 지우고 state directory를 `fsync`한다.
 
 Playwright main/recovery report directory는 top-level regular file
@@ -156,7 +148,7 @@ container 제거와 함께 사라진다. trace, screenshot, video, URL, response
 
 ## 5. SIGKILL-safe Docker lifecycle
 
-runner는 barrier flock의 열린 FD를 `setsid` supervisor에 상속한다. 각 helper/executor/probe마다
+runner는 barrier flock의 열린 FD를 `setsid` supervisor에 상속한다. 각 executor/probe마다
 supervisor가 다음 순서를 단독 소유한다.
 
 1. PID·PGID·SID·`/proc` start ticks와 deterministic name을 `ACTIVE.json`에 `intent`로 fsync
@@ -197,27 +189,24 @@ sudo --preserve-env=E2E_BASE_URL,NEXT_PUBLIC_KOR_TRAVEL_MAP_API,E2E_DAGSTER_URL,
 recovery attempt는 BLOCKED에서 원자적으로 증가한다. 새 fixture를 만들지 않고 다음만 한다.
 
 - terminal ACTIVE drain과 exact owned container removal
-- API-owned pending request reject 또는 delete approve, 모든 API-owned Feature `deleted`·public 404,
+- API-owned pending request reject 또는 delete approve, 모든 API-owned Feature `retired`·public 404,
   exact search query의 `items=[]`, `total=0`, cursor null/absent
-- direct weather/price parent와 기존 weather/price child row를 모두 `SELECT ... FOR UPDATE`로 잠근
-  같은 transaction 안에서 child value fingerprint·모든 FK reference를 audit하고 두 parent를 삭제
-- 삭제 후 direct 0/0/0·FK reference 0, label/name container 0, ACTIVE 없음 확인
+- typed admin command로 만든 모든 Feature `retired`·public 404, label/name container 0, ACTIVE 없음 확인
 - recovery report/evidence exact 검증·fsync, recovered result 기록, 마지막 BLOCKED unlink
 
-`FOR UPDATE` parent lock은 concurrent child insert가 얻는 `KEY SHARE`와 충돌하고 기존 child
-row lock은 fingerprint 검사 중 동시 변경을 막으므로 audit와 delete 사이의 창을 닫는다.
-fingerprint가 다르면 다른 운영 row일 수 있으므로 아무 것도 삭제하지 않고 BLOCKED를 유지한다.
+browser cleanup이 하나라도 실패하면 `BLOCKED.json`을 유지한다. recovery는 같은 exact
+browser contract로만 다시 cleanup하며 raw SQL delete나 독립 DB credential을 사용하지 않는다.
 
 ## 7. 완료 판정
 
 - runner exit 0, `BLOCKED.json`·`ACTIVE.json` 없음
 - latest result가 `status=complete`, `phase=passed|recovered`, recovery attempt와 manifest·journal·reload receipt·attestation
   hash를 포함하고 원문 identity를 포함하지 않음
-- normal은 probe/direct seed·cleanup·audit, main/recovery report, 6개 operation × 8개 exact
-  lifecycle phase가 있음; recovery는 3개 operation × 8개 phase가 있음
+- normal은 probe/main/recovery executor, main/recovery report, 3개 operation × 8개 exact
+  lifecycle phase가 있음; recovery는 executor 1개 × 8개 phase가 있음
 - 모든 evidence directory `root:root 0700`, file `root:root 0600`
 - 각 Playwright directory의 exact 3-file redacted report 외 directory·symlink·extra file 없음
-- direct audit 0/0/0, FK reference 0, API-owned pending 0, public projection 0
+- API-owned pending 0, owned Feature retired, public projection 0
 - exact search query의 items 0, total 0, next cursor null/absent
 - run label container 0 및 가능한 모든 actor/attempt/operation deterministic name container 0
 - 같은 exact tree의 PostgreSQL regression 증거에서 search `include_total=false` COUNT 0회,

@@ -83,9 +83,11 @@ test.describe("C7 KMA exact-triple API preflight (read-only, live)", () => {
       200,
     );
     expect(canonical.data.provider_dataset_id).toBe(providerDatasetId);
-    expect(canonical.data.operation_key).toBe(KMA_NOWCAST_OPERATION_KEY);
     expect(canonical.data.scopes).toHaveLength(1);
     expect(canonical.data.scopes[0]?.sync_scope).toBe(syncScope);
+    expect(canonical.data.scopes[0]?.operation_key).toBe(
+      KMA_NOWCAST_OPERATION_KEY,
+    );
 
     const foreign = await browserFetch<unknown>(
       page,

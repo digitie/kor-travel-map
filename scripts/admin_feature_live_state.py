@@ -48,8 +48,6 @@ def _owned_ids(run_id: str) -> list[str]:
         f"{prefix}::marker::inactive",
         f"{prefix}::marker::hidden",
         f"{prefix}::correction",
-        f"{prefix}::weather",
-        f"{prefix}::price",
         f"{prefix}::search::alpha",
         f"{prefix}::search::beta",
     ]
@@ -610,28 +608,6 @@ def _validate_c7_module(args: argparse.Namespace) -> None:
         raise ValueError("C7 module bootstrap mismatch")
 
 
-def _validate_direct(path: Path, action: str, counts: dict[str, int], references: int) -> int:
-    payload = _read_root_json(path)
-    if (
-        set(payload)
-        != {
-            "action",
-            "counts",
-            "foreign_key_constraints_checked",
-            "foreign_key_references",
-            "version",
-        }
-        or payload.get("version") != 1
-        or payload.get("action") != action
-        or payload.get("counts") != counts
-        or payload.get("foreign_key_references") != references
-        or type(payload.get("foreign_key_constraints_checked")) is not int
-        or payload["foreign_key_constraints_checked"] < 2
-    ):
-        raise ValueError("direct evidence mismatch")
-    return int(payload["foreign_key_constraints_checked"])
-
-
 def _read_report_text(path: Path, limit: int) -> str:
     try:
         return _read_regular(path, 0o600, limit).decode("utf-8", errors="strict")
@@ -750,25 +726,13 @@ def _validate_evidence(args: argparse.Namespace) -> None:
     if args.mode == "normal":
         expected_names = {
             "cursor-probe.json",
-            "direct-audit.json",
-            "direct-cleanup.json",
-            "direct-seed.json",
             "lifecycle",
             "playwright-main",
             "playwright-recovery",
         }
-        _validate_direct(
-            runtime / "direct-seed.json",
-            "seed",
-            {"features": 2, "price_values": 1, "weather_values": 1},
-            2,
-        )
         required_operations = {
             "executor-main",
             "executor-recovery",
-            "helper-audit",
-            "helper-cleanup",
-            "helper-seed",
             "probe-cursor-missing",
         }
         if _read_root_json(runtime / "cursor-probe.json") != {
@@ -782,27 +746,13 @@ def _validate_evidence(args: argparse.Namespace) -> None:
         actor = "main"
     else:
         expected_names = {
-            "direct-audit.json",
-            "direct-cleanup.json",
             "lifecycle",
             "playwright-recovery",
         }
-        required_operations = {"executor-recovery", "helper-audit", "helper-cleanup"}
+        required_operations = {"executor-recovery"}
         actor = "recovery"
     if {path.name for path in runtime.iterdir()} != expected_names:
         raise ValueError("evidence exact file set mismatch")
-    _validate_direct(
-        runtime / "direct-cleanup.json",
-        "cleanup",
-        {"features": 0, "price_values": 0, "weather_values": 0},
-        0,
-    )
-    constraints = _validate_direct(
-        runtime / "direct-audit.json",
-        "audit",
-        {"features": 0, "price_values": 0, "weather_values": 0},
-        0,
-    )
     _validate_report(runtime / "playwright-recovery")
     phases: dict[str, set[str]] = {}
     expected_phase_order = (
@@ -843,7 +793,7 @@ def _validate_evidence(args: argparse.Namespace) -> None:
             or not isinstance(event.get("actor"), str)
             or not isinstance(event.get("operation"), str)
             or not isinstance(event.get("phase"), str)
-            or event.get("kind") not in {"executor", "helper", "probe"}
+            or event.get("kind") not in {"executor", "probe"}
             or type(event.get("attempt")) is not int
             or not isinstance(event.get("recorded_at"), str)
             or (
@@ -870,13 +820,7 @@ def _validate_evidence(args: argparse.Namespace) -> None:
             or event["operation"] not in required_operations
         ):
             raise ValueError("lifecycle identity mismatch")
-        expected_kind = (
-            "executor"
-            if event["operation"].startswith("executor-")
-            else "helper"
-            if event["operation"].startswith("helper-")
-            else "probe"
-        )
+        expected_kind = "executor" if event["operation"].startswith("executor-") else "probe"
         expected_exit = 1 if expected_kind == "probe" else 0
         before_exit = event["phase"] in {
             "claim-pending",
@@ -909,7 +853,6 @@ def _validate_evidence(args: argparse.Namespace) -> None:
     _atomic_write(
         validation_path,
         {
-            "direct_foreign_key_constraints_checked": constraints,
             "lifecycle_files": len(lifecycle_files),
             "mode": args.mode,
             "phase": "evidence-validated",
@@ -919,7 +862,6 @@ def _validate_evidence(args: argparse.Namespace) -> None:
         },
     )
     if _read_root_json(validation_path) != {
-        "direct_foreign_key_constraints_checked": constraints,
         "lifecycle_files": len(lifecycle_files),
         "mode": args.mode,
         "phase": "evidence-validated",

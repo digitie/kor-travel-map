@@ -54,7 +54,7 @@ function statusKo(value: string): string {
 
 test.describe.configure({ mode: "serial" });
 
-// ── gold-standard 헬퍼 그대로 복사 (admin-features-change-requests-write.live.spec.ts) ──
+// ── live write spec의 공통 응답 경로 헬퍼 ──
 
 function apiPath(response: Response): string {
   const pathname = new URL(response.url()).pathname;

@@ -2,66 +2,10 @@
   "schemaVersion": 3,
   "baselineMainRevision": "6bf4c10f99742a5c563d1c648f71ab6f5444b1e9",
   "baselineRevision": "31edfe0cab1213be57dce7a5bddd4a3108adffb3",
-  "discoveredTests": 284,
-  "testInventorySha256": "57a9e1d80b99d192f32cac125e303bfa13bc70325c482d25a6357394418a27ee",
+  "discoveredTests": 261,
+  "testInventorySha256": "7328bd2aa6a630f95bf8da793e87f69f7797ed4b1e5e2c7ea88c9b5a7e4d606a",
   "allowedSkipped": [],
   "groups": [
-    {
-      "spec": "e2e/admin-ops.spec.ts",
-      "fixedIn": "B",
-      "firstFailureStage": "render.assertion",
-      "difference": "accessible-name",
-      "errorPattern": "change operator",
-      "determinism": "deterministic",
-      "tests": [
-        {
-          "line": 1022,
-          "title": "admin/ops pages › /v1/admin/features/change-requests"
-        }
-      ]
-    },
-    {
-      "spec": "e2e/admin-ops.spec.ts",
-      "fixedIn": "B",
-      "firstFailureStage": "request.assertion",
-      "difference": "actor",
-      "errorPattern": "operator",
-      "determinism": "deterministic",
-      "tests": [
-        {
-          "line": 1107,
-          "title": "admin/ops pages › /v1/admin/features/change-requests approve workflow"
-        }
-      ]
-    },
-    {
-      "spec": "e2e/admin-ops.spec.ts",
-      "fixedIn": "B",
-      "firstFailureStage": "render.assertion",
-      "difference": "pagination",
-      "errorPattern": "다음 페이지",
-      "determinism": "deterministic",
-      "tests": [
-        {
-          "line": 1578,
-          "title": "admin/ops pages › /v1/admin/features/enrichment-reviews"
-        }
-      ]
-    },
-    {
-      "spec": "e2e/admin-ops.spec.ts",
-      "fixedIn": "D",
-      "firstFailureStage": "render.assertion",
-      "difference": "accessible-name",
-      "errorPattern": "provider|dataset key|sync scope|created by|offline upload status|provider filter|dataset filter",
-      "determinism": "deterministic",
-      "tests": [
-        {
-          "line": 1676,
-          "title": "admin/ops pages › /v1/admin/offline-uploads"
-        }
-      ]
-    },
     {
       "spec": "e2e/change-requests-lifecycle.spec.ts",
       "fixedIn": "B",

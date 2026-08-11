@@ -4,7 +4,7 @@ import type { components } from "../src/api/types";
 
 // 손으로 쓴 record shape 대신 **생성된 OpenAPI 스키마**에 바인딩한다(#308 리뷰).
 // 백엔드 DTO가 바뀌면 mock factory가 타입 불일치로 컴파일 실패 → mock-실계약 drift 감지.
-// 본 spec은 admin-ops.spec.ts의 `/v1/ops/consistency` 스모크가 라우트 mock 없이
+// 본 spec은 `/v1/ops/consistency` 전용 스모크가 라우트 mock 없이
 // 검증하는 표면(heading/카드 라벨/필터 라벨) **이후의 data-loaded depth**만 더한다.
 type OpsMetricsResponse = components["schemas"]["OpsMetricsResponse"];
 type OpsMetricsData = components["schemas"]["OpsMetricsData"];

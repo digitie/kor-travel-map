@@ -1694,14 +1694,21 @@ function kmaExternalSystem(
 function kmaScopeExpectationFromRequestBody(
   body: FeatureUpdateRequestCreateRequest,
 ): KmaScopeExpectation {
-  assertKmaOnlyPlan(body);
-  if (body.scope.type !== "provider_dataset") {
-    throw new Error("KMA request scope discriminator 계약 불일치");
+  // Cleanup은 이미 durable journal에 기록된 body를 검사하는 순수 경로다. 여기서
+  // browser bootstrap 전역 상태를 읽으면 journal 무결성 unit test 자체를 수집할 수
+  // 없고, 반대로 runtime에서는 아래 exact triple 비교가 충분한 fail-closed fence다.
+  const scope = body.scope;
+  if (
+    scope.type !== "provider_dataset" ||
+    scope.operation_key !== KMA_NOWCAST_OPERATION_KEY ||
+    !scope.sync_scope.startsWith("external_system:")
+  ) {
+    throw new Error("KMA request scope canonical triple 계약 불일치");
   }
   return {
-    operationKey: KMA_NOWCAST_OPERATION_KEY,
-    providerDatasetId: body.scope.provider_dataset_id,
-    syncScope: body.scope.sync_scope,
+    operationKey: scope.operation_key,
+    providerDatasetId: scope.provider_dataset_id,
+    syncScope: scope.sync_scope,
   };
 }
 
