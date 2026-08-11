@@ -147,22 +147,24 @@ def _write_fixture(
     weather: int,
     price: int,
     foreign_key_references: int = 0,
+    summary_run_ids: tuple[int, int] = (101, 102),
 ) -> None:
     action = path.stem.removeprefix("direct-")
+    payload: dict[str, object] = {
+        "action": action,
+        "counts": {
+            "features": features,
+            "price_values": price,
+            "weather_values": weather,
+        },
+        "foreign_key_constraints_checked": 12,
+        "foreign_key_references": foreign_key_references,
+        "version": 1,
+    }
+    if action == "seed":
+        payload["summary_run_ids"] = list(summary_run_ids)
     path.write_text(
-        json.dumps(
-            {
-                "action": action,
-                "counts": {
-                    "features": features,
-                    "price_values": price,
-                    "weather_values": weather,
-                },
-                "foreign_key_constraints_checked": 12,
-                "foreign_key_references": foreign_key_references,
-                "version": 1,
-            }
-        ),
+        json.dumps(payload),
         encoding="utf-8",
     )
 
@@ -695,8 +697,8 @@ def test_checkpoint_content_digest_rebase_requires_exact_legacy_checkpoint_match
     assert '[[ "$MODE" == "checkpoint" && "$existing_checkpoint_version" == "4" ]]' in (
         checkpoint_source
     )
-    assert "for candidate_digest_revision in legacy-v1 legacy-v0; do" in checkpoint_source
-    assert checkpoint_source.index("legacy-v1 legacy-v0") < checkpoint_source.index(
+    assert "for candidate_digest_revision in legacy-v2 legacy-v1 legacy-v0; do" in checkpoint_source
+    assert checkpoint_source.index("legacy-v2 legacy-v1 legacy-v0") < checkpoint_source.index(
         "CHECKPOINT_CONTENT_REBASE=1"
     )
     assert checkpoint_source.index("CHECKPOINT_CONTENT_REBASE=1") < checkpoint_source.index(
