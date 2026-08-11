@@ -516,10 +516,14 @@ def test_complete_recovers_without_rerunning_valid_evidence(tmp_path: Path) -> N
     assert payload["recovery_tool_source_commit"] == _RECOVERY_COMMIT
 
 
-@pytest.mark.parametrize("final_total", [120, 126])
+@pytest.mark.parametrize(
+    ("final_total", "blank_historical_audits"),
+    [(120, True), (126, False)],
+)
 def test_abandon_failed_run_requires_cleaned_failure_evidence(
     tmp_path: Path,
     final_total: int,
+    blank_historical_audits: bool,
 ) -> None:
     runtime, blocked = _prepare_runtime(tmp_path)
     _write_snapshot(
@@ -528,6 +532,9 @@ def test_abandon_failed_run_requires_cleaned_failure_evidence(
         content_sha256="7" * 64,
     )
     _write_failed_main_report(runtime / "playwright-main")
+    if blank_historical_audits:
+        (runtime / "api-owned-audit.json").write_bytes(b"")
+        (runtime / "auth-audit.json").write_bytes(b"")
     for phase in (
         "candidate-startup-running",
         "fixture-seed-running",
@@ -571,6 +578,9 @@ def test_abandon_failed_run_requires_cleaned_failure_evidence(
     )
     assert not blocked.exists()
     assert payload["status"] == "failed-restored"
+    assert payload["historical_audit"] == (
+        "checkpoint-restored" if blank_historical_audits else "recorded"
+    )
     assert payload["tests"] == {
         "main": {"failed": 1, "passed": 1},
         "recovery": {"passed": 2},

@@ -1208,6 +1208,15 @@ def _auth_audit_counts(path: Path, action: str) -> dict[str, int]:
     return counts
 
 
+def _empty_historical_audits(*paths: Path) -> bool:
+    """구 버전 runner가 남긴 정확히 비어 있는 audit placeholder만 식별한다."""
+
+    return all(
+        path.is_file() and not path.is_symlink() and path.read_bytes() == b""
+        for path in paths
+    )
+
+
 def _report_counts(
     path: Path,
     *,
@@ -1700,8 +1709,21 @@ def abandon_failed_run(args: argparse.Namespace) -> None:
         {"features": 0, "price_values": 0, "weather_values": 0},
         expected_foreign_key_references=0,
     )
-    _api_owned_audit_counts(runtime / "api-owned-audit.json")
-    _auth_audit_counts(runtime / "auth-audit.json", "auth-verify")
+    api_audit_path = runtime / "api-owned-audit.json"
+    auth_audit_path = runtime / "auth-audit.json"
+    try:
+        _api_owned_audit_counts(api_audit_path)
+        _auth_audit_counts(auth_audit_path, "auth-verify")
+    except json.JSONDecodeError:
+        # 구 runner의 browser-failure branch는 두 audit action의 stdout을 빈
+        # placeholder로 남겼다. 이 호환 경로는 candidate 결과를 성공으로
+        # 인정하지 않으며, 바로 앞의 strict dump restore가 clone 전체를
+        # checkpoint baseline으로 되돌린 경우에만 허용한다.
+        if not _empty_historical_audits(api_audit_path, auth_audit_path):
+            raise
+        historical_audit = "checkpoint-restored"
+    else:
+        historical_audit = "recorded"
     main = _report_counts(runtime / "playwright-main", allow_failed_main=True)
     recovery = _report_counts(runtime / "playwright-recovery")
     _validate_image_evidence(runtime / "image-evidence.json", identity)
@@ -1712,11 +1734,12 @@ def abandon_failed_run(args: argparse.Namespace) -> None:
         Path(args.result_path),
         {
             "execution_identity_sha256": _sha256(canonical_identity),
+            "historical_audit": historical_audit,
             "phase_history": phase_history,
             "source_commit": identity["source_commit"],
             "status": "failed-restored",
             "tests": {"main": main, "recovery": recovery},
-            "version": 1,
+            "version": 2,
         },
     )
     blocked_path.unlink()
