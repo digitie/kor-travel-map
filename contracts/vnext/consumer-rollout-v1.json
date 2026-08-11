@@ -187,8 +187,8 @@
         "admin-detail": "no"
       },
       "pinvi_snapshot_receipt": {
-        "map_commit": "56f00e072a433bbe219909f5289d479ec16586d9",
-        "pinvi_commit": "88fb428c4ecc480e22dd3601783ce6bd13df7574",
+        "map_commit": "9c5332bb7ede81ed199f7ad29bb0976a13eb8e5a",
+        "pinvi_commit": "5eacfdc938ac6fcb1ceadb905870a55d4598a4fa",
         "map_service_openapi_sha256": "53da6a3a1194b9de715e80ed69e016ae15885b81d2909bf2d128773d64f8b2f7",
         "pinvi_service_vendor_sha256": "53da6a3a1194b9de715e80ed69e016ae15885b81d2909bf2d128773d64f8b2f7",
         "verification": [
