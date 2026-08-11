@@ -1823,7 +1823,18 @@ def abandon_failed_run(args: argparse.Namespace) -> None:
         raise RuntimeError("실패 run 종료 전 clone DB가 trusted checkpoint로 복원되지 않았습니다")
     startup_before = _validated_snapshot(runtime / "clone-startup-before.json")
     startup_after = _validated_snapshot(runtime / "clone-startup-after.json")
-    final = _validated_snapshot(runtime / "clone-final.json")
+    final_path = runtime / "clone-final.json"
+    # content digest를 포함한 final snapshot 생성 자체가 실패하면 browser/fixture
+    # cleanup 이후에도 이 파일은 없을 수 있다. direct-cleanup 단계에서만, 바로
+    # 위의 strict checkpoint restore가 검증된 경우 그 실패 영수증을 남긴다.
+    # 그 외 terminal phase에서 final snapshot이 없으면 state machine 훼손이다.
+    final = (
+        _validated_snapshot(final_path)
+        if final_path.exists() or final_path.is_symlink()
+        else None
+    )
+    if final is None and terminal_phase != "direct-cleanup-running":
+        raise RuntimeError("실패 run 최종 clone snapshot이 없습니다")
     if checkpoint["baseline"] != startup_before:
         raise RuntimeError("startup clone DB가 trusted checkpoint와 다릅니다")
     if not _same_snapshot(startup_before, startup_after):
@@ -1840,29 +1851,30 @@ def abandon_failed_run(args: argparse.Namespace) -> None:
     )
     if identity["clone_identity_sha256"] != _sha256(clone_identity):
         raise RuntimeError("BLOCKED clone identity가 DB snapshot과 다릅니다")
-    for key in (
-        "clone_container_sha256",
-        "clone_system_identifier_sha256",
-        "database_sha256",
-        "extension_sha256",
-        "host_port",
-        "migration_head",
-        "relation_count",
-        "schema_sha256",
-        "version",
-    ):
-        if final[key] != startup_before[key]:
-            raise RuntimeError(
-                "실패 run 최종 clone DB identity/schema가 시작 기준과 다릅니다"
-            )
-    if (
-        final["feature_non_deleted"] != startup_before["feature_non_deleted"]
-        or final["feature_total"]
-        not in {startup_before["feature_total"], startup_before["feature_total"] + 6}
-        or final["active_owned_features"] != 0
-        or final["nonterminal_owned_change_requests"] != 0
-    ):
-        raise RuntimeError("실패 run cleanup 뒤 Feature/change request residue가 있습니다")
+    if final is not None:
+        for key in (
+            "clone_container_sha256",
+            "clone_system_identifier_sha256",
+            "database_sha256",
+            "extension_sha256",
+            "host_port",
+            "migration_head",
+            "relation_count",
+            "schema_sha256",
+            "version",
+        ):
+            if final[key] != startup_before[key]:
+                raise RuntimeError(
+                    "실패 run 최종 clone DB identity/schema가 시작 기준과 다릅니다"
+                )
+        if (
+            final["feature_non_deleted"] != startup_before["feature_non_deleted"]
+            or final["feature_total"]
+            not in {startup_before["feature_total"], startup_before["feature_total"] + 6}
+            or final["active_owned_features"] != 0
+            or final["nonterminal_owned_change_requests"] != 0
+        ):
+            raise RuntimeError("실패 run cleanup 뒤 Feature/change request residue가 있습니다")
 
     _fixture_counts(
         runtime / "direct-seed.json",
