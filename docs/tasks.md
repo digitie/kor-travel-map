@@ -662,8 +662,16 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
     identity로 전환하고 legacy pair를 물리 삭제
   - [x] `33-D` — pipeline/ops read model·dataset status/consistency/live topic과 admin
     feature-update UI를 triple membership projection으로 재작성
-  - [ ] `33-E` — final-schema fresh PostGIS·API/Dagster·OpenAPI/type·admin live E2E,
+  - [~] `33-E` — final-schema fresh PostGIS·API/Dagster·OpenAPI/type·admin live E2E,
     적대 리뷰 2인 P0=0, PR rebase/CI/merge 후 T-VN-41 F1D-D 재개
+
+    **2026-08-11 완료분**: n150 격리 컨테이너에 빈 PostGIS → `alembic upgrade head`
+    (0092, `alembic check` drift 0) → 그 DB에 대고 API live 12/12(삼중 강제 404/404/200,
+    비활성 dataset 409 `INACTIVE_DATASET_MUTATION_DISABLED`) → n150 브라우저로 admin UI
+    live 10/10(그리드 67행·operation 열·aria-label 삼중·console error 0) +
+    라운드12 수정 live 확인(실행 가능 scope 없는 dataset의 '지금 갱신' disabled,
+    정상 dataset은 활성). 경과·수치는 `docs/journal.md` 2026-08-11 (2).
+    **잔여**: Dagster 축(격리 환경에 Dagster 없음), 적대 리뷰 2인 승인, rebase/CI/merge.
 
   **검증 상태(2026-08-11, 라운드12)**: 적대 리뷰 12라운드를 돌았고 매 라운드가 실결함을
   냈다. 반복된 근인은 하나다 — **검증 하네스 자체가 신뢰 대상이 아니었다.** 그래서 층을

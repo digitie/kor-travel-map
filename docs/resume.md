@@ -2,9 +2,13 @@
 
 ## 2026-08-11 — T-VN-33: 라운드11~12, CI 경로 red BLOCKER 2건 해소
 
-**다음 한 작업**: `T-VN-33` #966 — **33-E**(최종 스키마로 fresh PostGIS 재적재 →
-API/Dagster/OpenAPI/type/admin **live E2E**(n150) → rebase/CI/머지). 머지 전에
-적대 리뷰어 2명 승인이 필요하다.
+**다음 한 작업**: `T-VN-33` #966 — 적대 리뷰어 2명 승인 확보 후 rebase/CI/머지.
+
+33-E의 **fresh 재적재 + API/admin live 확인은 2026-08-11에 끝났다**(n150 격리
+컨테이너, prod 스택 무접촉): 빈 PostGIS → 0092 head, `alembic check` drift 0 →
+API live 12/12 → n150 브라우저 admin UI live 10/10 + 라운드12 수정 live 확인.
+남은 33-E 잔여는 Dagster 축(격리 환경에 Dagster가 없다)과 머지 절차다.
+상세는 `docs/journal.md` 2026-08-11 (2).
 
 - **CI 경로에서 red였던 BLOCKER 2건을 닫았다.** (1) catalog exact-set 게이트가
   공유 `migrated_engine`의 전역 성질을 단언해 `pytest tests/integration` 통째

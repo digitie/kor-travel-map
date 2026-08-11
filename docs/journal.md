@@ -2,6 +2,38 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-11 (2) — T-VN-33 33-E: 격리 fresh 재적재 + n150 live 확인
+
+전체 25게이트 GREEN 위에서, **비어 있는 PostGIS에 최종 스키마만으로 다시 세운 DB**에
+대고 API와 admin UI를 실제로 태웠다. n150에 격리 컨테이너를 띄웠고(prod 스택은 건드리지
+않는다) 브라우저는 정책대로 n150에서 돌렸다.
+
+**① fresh 재적재** — 빈 PostGIS 16.9/3.5 → `alembic upgrade head` → `0092_tvn33_offline_cleanup`.
+`alembic current == heads`, `alembic check` = "No new upgrade operations detected"
+(모델과 스키마 사이 drift 0). 시드 실측: dataset 64 · 활성 63 · operation 79 ·
+활성 refresh operation 56 · scope 행 59 · refresh operation이 없는 dataset 8.
+
+**② API live 12/12** — 삼중이 실제로 강제된다: 없는 `operation_key` → 404, 없는
+`sync_scope` → 404, exact triple → 200. `detail_url`은 67/67 행이 세 축을 담는다.
+preview(fixture) 200, refresh-policy PUT 200. 비활성 dataset 정책 PUT은
+**409 `INACTIVE_DATASET_MUTATION_DISABLED`** — 라운드11이 orphan 오분류에서 갈라낸
+typed 오류가 live에서 그대로 나온다.
+
+**③ admin UI live 10/10 (n150 브라우저)** — 그리드 67행, `operation` 열 존재,
+operation_key 값이 화면에 56회 렌더. 상세 토글 aria-label이 삼중을 담는다
+(`… dataset_wide feature_event_datagokr_cultural_festivals_job 상세 열기`).
+console error 0. 서버가 `canonical`이라 답한 행을 화면이 "잔존 행"이라 말하는 8라운드
+BLOCKER 회귀도 live에서 0건이다.
+
+**④ 라운드12 수정의 live 확인** — 실행 가능한 refresh scope가 없는 dataset(#12
+`google-places-api-new/place_phone_enrichment`, `operation_key` 없음)에서 '지금 갱신'이
+**disabled**이고 사유가 "이 dataset에는 실행 가능한 refresh runner가 없습니다."로 뜬다.
+같은 화면의 정상 dataset(#1)은 **활성**이다 — 과잉 차단이 아님을 대조군으로 확인했다.
+고치기 전에는 이 버튼이 활성이었고 눌러도 요청도 오류도 없이 아무 일도 일어나지 않았다.
+
+**남은 것**: Dagster는 이 격리 환경에 없으므로 schedule/run 축은 확인하지 않았다
+(화면은 "Dagster 스케줄 소스 연결 불가"를 정직하게 표시한다 — 조용히 삼키지 않는다).
+
 ## 2026-08-11 — T-VN-33 라운드11~12: "좁게 돌려서 green"을 구조로 막았다
 
 11라운드까지의 근인은 하나로 수렴한다. **게이트 green의 의미가 주장보다 작았다.**
