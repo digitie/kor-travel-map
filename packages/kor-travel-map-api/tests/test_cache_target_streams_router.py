@@ -784,6 +784,12 @@ def test_restore_fence_receipt_accepts_correlated_reconciliation_fields(
 def test_restore_fence_openapi_encodes_receipt_correlation_invariant() -> None:
     client = _client(_FakeCacheTargetService())
 
+    operation = client.app.openapi()["paths"][
+        "/v1/service/cache-target-streams/{external_system}/restore-fences"
+    ]["post"]
+    assert {"200", "201"} <= set(operation["responses"])
+    assert operation["responses"]["200"]["description"] == "exact Idempotency-Key replay"
+
     schema = client.app.openapi()["components"]["schemas"]["CacheTargetRestoreFenceRecord"]
 
     assert schema["oneOf"] == [
