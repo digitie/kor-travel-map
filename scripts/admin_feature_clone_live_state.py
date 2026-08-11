@@ -1636,6 +1636,9 @@ def abandon_failed_run(args: argparse.Namespace) -> None:
     checkpoint = _validated_checkpoint(runtime / "clone-checkpoint.json")
     if checkpoint["checkpoint_sha256"] != identity["clone_checkpoint_sha256"]:
         raise RuntimeError("BLOCKED clone checkpoint가 runtime checkpoint와 다릅니다")
+    restored = _validated_snapshot(Path(args.restored_snapshot))
+    if checkpoint["baseline"] != restored:
+        raise RuntimeError("실패 run 종료 전 clone DB가 trusted checkpoint로 복원되지 않았습니다")
     startup_before = _validated_snapshot(runtime / "clone-startup-before.json")
     startup_after = _validated_snapshot(runtime / "clone-startup-after.json")
     final = _validated_snapshot(runtime / "clone-final.json")
@@ -1976,6 +1979,7 @@ def main() -> None:
     abandon = subparsers.add_parser("abandon-failed-run")
     abandon.add_argument("--blocked-path", required=True)
     abandon.add_argument("--result-path", required=True)
+    abandon.add_argument("--restored-snapshot", required=True)
     abandon.add_argument("--runtime", required=True)
     abandon.set_defaults(handler=abandon_failed_run)
 

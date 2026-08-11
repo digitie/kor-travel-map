@@ -530,12 +530,29 @@ def test_abandon_failed_run_requires_cleaned_failure_evidence(tmp_path: Path) ->
     ):
         _run_helper("update-blocked", "--path", str(blocked), "--phase", phase)
 
+    not_restored = _run_helper(
+        "abandon-failed-run",
+        "--blocked-path",
+        str(blocked),
+        "--result-path",
+        str(runtime / "failed-restored.json"),
+        "--restored-snapshot",
+        str(runtime / "clone-final.json"),
+        "--runtime",
+        str(runtime),
+        check=False,
+    )
+    assert not_restored.returncode != 0
+    assert "trusted checkpoint" in not_restored.stderr
+
     _run_helper(
         "abandon-failed-run",
         "--blocked-path",
         str(blocked),
         "--result-path",
         str(runtime / "failed-restored.json"),
+        "--restored-snapshot",
+        str(runtime / "clone-startup-before.json"),
         "--runtime",
         str(runtime),
     )
@@ -569,6 +586,12 @@ def test_failed_run_abort_recreates_clone_identity_before_login_fence() -> None:
         "start_acceptance_login_fence"
     )
     assert abort_source.index("BASE_CLONE_SYSTEM_SHA256") < abort_source.index(
+        "start_acceptance_login_fence"
+    )
+    assert abort_source.index("restore_clone_checkpoint") < abort_source.index(
+        "start_acceptance_login_fence"
+    )
+    assert abort_source.index("verify-checkpoint") < abort_source.index(
         "start_acceptance_login_fence"
     )
     assert abort_source.index("finalize_resources") < abort_source.index(

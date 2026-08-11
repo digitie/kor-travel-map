@@ -2340,6 +2340,28 @@ verify_checkpoint_dump() {
   verify_dump_archive "$dump_path"
 }
 
+restore_clone_checkpoint() {
+  local checkpoint_path="$1"
+  local filename dump_path
+  filename="$(
+    state_helper read-checkpoint --checkpoint "$checkpoint_path" --field dump_filename
+  )"
+  dump_path="$STATE_ROOT/$filename"
+  [[ "$dump_path" == "$STATE_ROOT"/clone-checkpoint-*.dump &&
+     -f "$dump_path" && ! -L "$dump_path" ]] ||
+    die "clone checkpoint restore dump path is unsafe"
+  [[ "$(stat -c '%u:%g:%a' -- "$dump_path")" == "0:0:600" ]] ||
+    die "clone checkpoint restore dump metadata is unsafe"
+  # 이 함수는 prod DB가 아닌 label/port를 이미 검증한 dedicated clone에만 쓴다.
+  # custom dump restore는 단일 transaction으로 실행하므로 restore 자체가 실패하면
+  # clone schema/data는 그대로 남고 BLOCKED도 해제되지 않는다.
+  PGPASSWORD="$db_password" \
+    PGAPPNAME="$PSQL_APP_NAME" \
+    docker exec -i -e PGPASSWORD -e PGAPPNAME "$DB_CONTAINER" \
+    pg_restore --clean --if-exists --exit-on-error --single-transaction \
+      -U "$db_user" -d "$db_name" <"$dump_path"
+}
+
 refresh_blocked_written_from_durable_state() {
   (( COMPLETE == 0 && BLOCKED_WRITTEN == 0 )) || return 0
   [[ -n "$RUN_KEY" && -f "$BLOCKED_FILE" && ! -L "$BLOCKED_FILE" ]] || return 0
@@ -2983,6 +3005,11 @@ if [[ "$MODE" == "abort" ]]; then
   )"
   recover_checkpoint_quiescence
   recover_verification_database
+  restore_clone_checkpoint "$RUNTIME_DIR/clone-checkpoint.json"
+  write_snapshot "$RUNTIME_DIR/clone-failed-restored.json" "$RUN_ID"
+  state_helper verify-checkpoint \
+    --checkpoint "$RUNTIME_DIR/clone-checkpoint.json" \
+    --snapshot "$RUNTIME_DIR/clone-failed-restored.json" >/dev/null
   start_acceptance_login_fence
   state_helper update-blocked --path "$BLOCKED_FILE" --phase failed-resource-finalizing
   finalize_resources
@@ -2992,6 +3019,7 @@ if [[ "$MODE" == "abort" ]]; then
   state_helper abandon-failed-run \
     --blocked-path "$BLOCKED_FILE" \
     --result-path "$RUNTIME_DIR/failed-restored.json" \
+    --restored-snapshot "$RUNTIME_DIR/clone-failed-restored.json" \
     --runtime "$RUNTIME_DIR"
   COMPLETE=1
   BLOCKED_WRITTEN=0
