@@ -217,6 +217,44 @@ async def _counts(session: AsyncSession, feature_ids: tuple[str, str]) -> dict[s
     return {key: int(row[key]) for key in ("features", "weather_values", "price_values")}
 
 
+async def _owned_summary_run_ids(
+    session: AsyncSession,
+    feature_ids: tuple[str, str],
+) -> tuple[int, int]:
+    """fixture weather/price current-summary receipt 두 건을 정확히 식별한다.
+
+    terminal receipt는 의도적으로 불변이라 Feature cascade 뒤에도 남는다. 따라서
+    clone digest는 이 exact two IDs만 run-owned 변화로 정규화해야 하며, broad
+    ``run_kind``/시간 범위 필터로 다른 receipt를 숨기면 안 된다.
+    """
+
+    rows = (
+        await session.execute(
+            text(
+                """
+                SELECT summary_run_id
+                FROM feature.current_weather_summary
+                WHERE feature_id = :weather_id
+                UNION ALL
+                SELECT summary_run_id
+                FROM feature.current_price_summary
+                WHERE feature_id = :price_id
+                ORDER BY summary_run_id
+                """
+            ),
+            {"weather_id": feature_ids[0], "price_id": feature_ids[1]},
+        )
+    ).scalars().all()
+    summary_run_ids = tuple(int(value) for value in rows)
+    if (
+        len(summary_run_ids) != 2
+        or len(set(summary_run_ids)) != 2
+        or any(value <= 0 for value in summary_run_ids)
+    ):
+        raise RuntimeError("owned weather/price current-summary receipt가 정확하지 않습니다")
+    return summary_run_ids[0], summary_run_ids[1]
+
+
 async def _assert_owned_or_absent(
     session: AsyncSession,
     run_id: str,
@@ -484,7 +522,7 @@ async def _assert_owned_state(
 async def _seed(
     session: AsyncSession,
     run_id: str,
-) -> tuple[dict[str, int], dict[str, int]]:
+) -> tuple[dict[str, int], dict[str, int], tuple[int, int]]:
     feature_ids = _feature_ids(run_id)
     before = await _counts(session, feature_ids)
     if before != {"features": 0, "weather_values": 0, "price_values": 0}:
@@ -573,7 +611,7 @@ async def _seed(
     observed, foreign_keys = await _assert_owned_state(session, run_id, feature_ids)
     if observed != {"features": 2, "weather_values": 1, "price_values": 1}:
         raise RuntimeError("owned weather/price fixture cardinality가 예상과 다릅니다")
-    return observed, foreign_keys
+    return observed, foreign_keys, await _owned_summary_run_ids(session, feature_ids)
 
 
 async def _cleanup(
@@ -1112,8 +1150,9 @@ async def _run(
     engine = make_async_engine(settings.pg_dsn)
     try:
         async with AsyncSession(engine) as session, session.begin():
+            summary_run_ids: tuple[int, int] | None = None
             if action == "seed":
-                counts, foreign_keys = await _seed(session, run_id)
+                counts, foreign_keys, summary_run_ids = await _seed(session, run_id)
             elif action == "cleanup":
                 counts, foreign_keys = await _cleanup(session, run_id)
             elif action == "purge":
@@ -1151,6 +1190,10 @@ async def _run(
         "foreign_key_references": sum(foreign_keys.values()),
         "version": 1,
     }
+    if action == "seed":
+        if summary_run_ids is None:
+            raise AssertionError("seed summary receipt result disappeared")
+        result["summary_run_ids"] = list(summary_run_ids)
     if action == "purge":
         result["purged"] = purged
     return result

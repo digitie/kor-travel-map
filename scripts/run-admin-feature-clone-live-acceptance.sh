@@ -774,6 +774,35 @@ print(",".join(repr(value) for value in ids))
 PY
 }
 
+owned_summary_run_ids_sql() {
+  local seed_path="${RUNTIME_DIR-}/direct-seed.json"
+  if [[ -z "${RUNTIME_DIR-}" || ! -e "$seed_path" ]]; then
+    printf 'NULL'
+    return
+  fi
+  [[ -f "$seed_path" && ! -L "$seed_path" ]] ||
+    die "current-summary receipt evidence is unsafe"
+  [[ "$(stat -c '%u:%g:%a' -- "$seed_path")" == "0:0:600" ]] ||
+    die "current-summary receipt evidence metadata is unsafe"
+  KTM_SUMMARY_RECEIPT_PATH="$seed_path" python3 -I -B -c '
+import json
+import os
+from pathlib import Path
+
+payload = json.loads(Path(os.environ["KTM_SUMMARY_RECEIPT_PATH"]).read_text())
+values = payload.get("summary_run_ids")
+if (
+    payload.get("action") != "seed"
+    or not isinstance(values, list)
+    or len(values) != 2
+    or len(set(values)) != 2
+    or not all(isinstance(value, int) and not isinstance(value, bool) and value > 0 for value in values)
+):
+    raise SystemExit("invalid current-summary receipt evidence")
+print(",".join(str(value) for value in sorted(values)))
+'
+}
+
 content_sha256() {
   local run_id="$1"
   local dataset_projection_revision="${2-}"
@@ -792,10 +821,30 @@ content_sha256() {
   fi
   local sequence_identity_case=""
   local domain_command_filter_case=""
-  local owned_feature_ids
+  local owned_feature_ids owned_summary_run_ids
   owned_feature_ids="$(owned_feature_ids_sql "$run_id")"
+  owned_summary_run_ids="$(owned_summary_run_ids_sql)"
   case "$digest_revision" in
     current)
+      sequence_identity_case="$(cat <<'SQL'
+  WHEN relation.relkind = 'S'
+    AND (
+      (namespace.nspname = 'ops' AND relation.relname IN (
+        'domain_commands_command_id_seq',
+        'current_summary_runs_summary_run_id_seq'
+      ))
+      OR (namespace.nspname = 'provider_sync'
+          AND relation.relname = 'provider_datasets_provider_dataset_id_seq')
+    )
+  THEN format(
+    'SELECT %L || chr(31) || ''run-owned identity sequence excluded'';',
+    namespace.nspname || '.' || relation.relname
+  )
+SQL
+)"
+      domain_command_filter_case="current"
+      ;;
+    legacy-v2)
       sequence_identity_case="$(cat <<'SQL'
   WHEN relation.relkind = 'S'
     AND namespace.nspname = 'ops'
@@ -806,7 +855,7 @@ content_sha256() {
   )
 SQL
 )"
-      domain_command_filter_case="current"
+      domain_command_filter_case="legacy-v1"
       ;;
     legacy-v1)
       domain_command_filter_case="legacy-v1"
@@ -876,6 +925,20 @@ ${sequence_identity_case}
     relation.relname,
     '${dataset_projection_revision}',
     '${dataset_projection_updated_at}'
+  )
+  WHEN namespace.nspname = 'ops'
+    AND relation.relname = 'current_summary_runs'
+    AND '${owned_summary_run_ids}' <> 'NULL'
+  THEN format(
+    'SELECT %L || chr(31) || count(*)::text || chr(31) || ' ||
+    'COALESCE(bit_xor(hashtextextended(row_value::text, 0))::text, ''null'') || ' ||
+    'chr(31) || COALESCE(bit_xor(hashtextextended(row_value::text, ' ||
+    '9223372036854775807))::text, ''null'') ' ||
+    'FROM %I.%I AS row_value ' ||
+    'WHERE row_value.summary_run_id <> ALL (ARRAY[${owned_summary_run_ids}]::bigint[]);',
+    namespace.nspname || '.' || relation.relname,
+    namespace.nspname,
+    relation.relname
   )
 ${domain_command_filter_case}
   ELSE format(
@@ -2600,14 +2663,15 @@ print(value)
       if ! state_helper verify-checkpoint \
           --checkpoint "$CHECKPOINT_FILE" \
           --snapshot "$CURRENT_CHECKPOINT_SNAPSHOT" >/dev/null 2>&1; then
-        # e462은 run-owned domain-command sequence를, 789는 run-owned receipt를
-        # content digest에서 제외했다. checkpoint mode에서만 알려진 두 직전 규칙으로
-        # 기존 서명과 먼저 정확히 대조해, 이 분류 변경 외 DB drift를 재인증하지 않는다.
+        # e462은 run-owned domain-command sequence를, 789는 run-owned receipt를,
+        # 741 후속은 fixture summary/provider sequence를 content digest에서 제외했다.
+        # checkpoint mode에서만 알려진 직전 규칙으로 기존 서명을 먼저 정확히
+        # 대조해, 이 분류 변경 외 DB drift를 재인증하지 않는다.
         [[ "$MODE" == "checkpoint" && "$existing_checkpoint_version" == "4" ]] ||
           die "existing checkpoint differs from the current clone"
         LEGACY_CHECKPOINT_SNAPSHOT="$STATE_ROOT/.clone-checkpoint-legacy-$$.json"
         LEGACY_DIGEST_REVISION=""
-        for candidate_digest_revision in legacy-v1 legacy-v0; do
+        for candidate_digest_revision in legacy-v2 legacy-v1 legacy-v0; do
           write_snapshot \
             "$LEGACY_CHECKPOINT_SNAPSHOT" \
             "$RUN_ID" \

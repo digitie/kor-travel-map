@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import subprocess
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -14,6 +15,7 @@ _RUNNER = _ROOT / "scripts" / "run-admin-feature-live-acceptance.sh"
 _CLONE_RUNNER = _ROOT / "scripts" / "run-admin-feature-clone-live-acceptance.sh"
 _FIXTURE = _ROOT / "scripts" / "admin_feature_live_fixture.py"
 _STATE = _ROOT / "scripts" / "admin_feature_live_state.py"
+_CLONE_STATE = _ROOT / "scripts" / "admin_feature_clone_live_state.py"
 _SUPERVISOR = _ROOT / "scripts" / "admin_feature_live_supervisor.py"
 _ATTESTATION = _ROOT / "scripts" / "lib" / "c7_prod_attestation.py"
 _LIVE_CONFIG = (
@@ -63,6 +65,9 @@ def _load_script_module(name: str, path: Path) -> ModuleType:
 
 
 _STATE_MODULE = _load_script_module("admin_feature_live_state", _STATE)
+_CLONE_STATE_MODULE = _load_script_module(
+    "admin_feature_clone_live_state", _CLONE_STATE
+)
 _FIXTURE_MODULE = _load_script_module("admin_feature_live_fixture", _FIXTURE)
 _SUPERVISOR_MODULE = _load_script_module(
     "admin_feature_live_supervisor",
@@ -608,6 +613,9 @@ def test_direct_cleanup_locks_owned_parents_before_fk_audit_and_delete() -> None
     assert "API-owned Feature version payload가 다릅니다" in inspection
     assert "feature_versions" in purge
     assert "inspection.versions" in purge
+    assert "async def _owned_summary_run_ids(" in fixture
+    assert "owned weather/price current-summary receipt가 정확하지 않습니다" in fixture
+    assert 'result["summary_run_ids"] = list(summary_run_ids)' in fixture
 
 
 def test_browser_lane_covers_nonpublic_bbox_and_stale_raw_etag() -> None:
@@ -666,8 +674,8 @@ def test_browser_lane_covers_all_nonpublic_markers_and_cards() -> None:
     assert "assertPublicInBoundsExcludes(" in spec
 
 
-def test_clone_content_digest_excludes_only_run_bound_domain_receipts() -> None:
-    """browser admin 명령 원장은 응답의 fixture feature ID로만 digest에서 뺀다."""
+def test_clone_content_digest_excludes_only_exact_run_bound_receipts() -> None:
+    """admin command와 immutable summary receipt는 exact 실행 소유권으로만 제외한다."""
     runner = _CLONE_RUNNER.read_text(encoding="utf-8")
 
     assert "'domain_commands', 'domain_command_results'" in runner
@@ -678,6 +686,43 @@ def test_clone_content_digest_excludes_only_run_bound_domain_receipts() -> None:
     assert "owned_feature_ids_sql()" in runner
     assert "ARRAY[${owned_feature_ids}]::text[]" in runner
     assert "\\$fmt\\$ WHERE NOT (row_value.feature_id" in runner
+    assert "owned_summary_run_ids_sql()" in runner
+    assert '"summary_run_ids"' in runner
+    assert "row_value.summary_run_id <> ALL (ARRAY[${owned_summary_run_ids}]::bigint[])" in runner
+    assert "current_summary_runs_summary_run_id_seq" in runner
+    assert "provider_datasets_provider_dataset_id_seq" in runner
+    assert "legacy-v2 legacy-v1 legacy-v0" in runner
+
+
+def test_clone_seed_receipt_evidence_requires_two_distinct_positive_ids(
+    tmp_path: Path,
+) -> None:
+    evidence_path = tmp_path / "direct-seed.json"
+    payload = {
+        "action": "seed",
+        "counts": {"features": 2, "price_values": 1, "weather_values": 1},
+        "foreign_key_constraints_checked": 18,
+        "foreign_key_references": 6,
+        "summary_run_ids": [101, 102],
+        "version": 1,
+    }
+    evidence_path.write_text(json.dumps(payload), encoding="utf-8")
+    assert _CLONE_STATE_MODULE._fixture_counts(  # noqa: SLF001
+        evidence_path,
+        "seed",
+        {"features": 2, "price_values": 1, "weather_values": 1},
+        expected_foreign_key_references=6,
+    ) == payload
+
+    payload["summary_run_ids"] = [101, 101]
+    evidence_path.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(RuntimeError, match="current-summary receipt"):
+        _CLONE_STATE_MODULE._fixture_counts(  # noqa: SLF001
+            evidence_path,
+            "seed",
+            {"features": 2, "price_values": 1, "weather_values": 1},
+            expected_foreign_key_references=6,
+        )
 
 
 def test_evidence_validator_requires_exact_schema_phase_counts_and_fsync() -> None:

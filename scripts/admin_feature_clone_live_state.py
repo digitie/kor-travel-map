@@ -1124,12 +1124,35 @@ def _fixture_counts(
     expected_foreign_key_references: int,
 ) -> dict[str, Any]:
     evidence = _load_object(path)
+    expected_fields = {
+        "action",
+        "counts",
+        "foreign_key_constraints_checked",
+        "foreign_key_references",
+        "version",
+    }
+    if expected_action == "seed":
+        expected_fields.add("summary_run_ids")
     if (
+        set(evidence) != expected_fields
+        or
         evidence.get("version") != 1
         or evidence.get("action") != expected_action
         or evidence.get("counts") != expected
     ):
         raise RuntimeError(f"fixture evidence가 예상과 다릅니다: {path.name}")
+    if expected_action == "seed":
+        summary_run_ids = evidence.get("summary_run_ids")
+        if (
+            not isinstance(summary_run_ids, list)
+            or len(summary_run_ids) != 2
+            or len(set(summary_run_ids)) != 2
+            or not all(
+                isinstance(value, int) and not isinstance(value, bool) and value > 0
+                for value in summary_run_ids
+            )
+        ):
+            raise RuntimeError("fixture current-summary receipt evidence가 예상과 다릅니다")
     if evidence.get("foreign_key_references") != expected_foreign_key_references:
         raise RuntimeError(f"fixture FK reference가 예상과 다릅니다: {path.name}")
     checked = evidence.get("foreign_key_constraints_checked")
