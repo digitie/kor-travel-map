@@ -1219,13 +1219,10 @@ def _auth_audit_counts(path: Path, action: str) -> dict[str, int]:
     return counts
 
 
-def _empty_historical_audits(*paths: Path) -> bool:
+def _empty_historical_audit(path: Path) -> bool:
     """구 버전 runner가 남긴 정확히 비어 있는 audit placeholder만 식별한다."""
 
-    return all(
-        path.is_file() and not path.is_symlink() and path.read_bytes() == b""
-        for path in paths
-    )
+    return path.is_file() and not path.is_symlink() and path.read_bytes() == b""
 
 
 def _validate_safe_main_debug(path: Path) -> None:
@@ -1759,17 +1756,29 @@ def abandon_failed_run(args: argparse.Namespace) -> None:
     auth_audit_path = runtime / "auth-audit.json"
     try:
         _api_owned_audit_counts(api_audit_path)
+    except json.JSONDecodeError:
+        if not _empty_historical_audit(api_audit_path):
+            raise
+        api_audit = "checkpoint-restored"
+    else:
+        api_audit = "recorded"
+    try:
         _auth_audit_counts(auth_audit_path, "auth-verify")
     except json.JSONDecodeError:
-        # 구 runner의 browser-failure branch는 두 audit action의 stdout을 빈
+        # 구 runner의 browser-failure branch는 일부 audit action의 stdout을 빈
         # placeholder로 남겼다. 이 호환 경로는 candidate 결과를 성공으로
         # 인정하지 않으며, 바로 앞의 strict dump restore가 clone 전체를
         # checkpoint baseline으로 되돌린 경우에만 허용한다.
-        if not _empty_historical_audits(api_audit_path, auth_audit_path):
+        if not _empty_historical_audit(auth_audit_path):
             raise
-        historical_audit = "checkpoint-restored"
+        auth_audit = "checkpoint-restored"
     else:
-        historical_audit = "recorded"
+        auth_audit = "recorded"
+    historical_audit = (
+        "recorded"
+        if api_audit == "recorded" and auth_audit == "recorded"
+        else f"api-{api_audit}-auth-{auth_audit}"
+    )
     main = _report_counts(runtime / "playwright-main", allow_failed_main=True)
     recovery = _report_counts(runtime / "playwright-recovery")
     _validate_image_evidence(runtime / "image-evidence.json", identity)

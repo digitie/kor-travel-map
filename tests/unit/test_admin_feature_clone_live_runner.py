@@ -517,13 +517,19 @@ def test_complete_recovers_without_rerunning_valid_evidence(tmp_path: Path) -> N
 
 
 @pytest.mark.parametrize(
-    ("final_total", "blank_historical_audits"),
-    [(120, True), (126, False)],
+    ("final_total", "empty_api_audit", "empty_auth_audit", "historical_audit"),
+    [
+        (120, True, True, "api-checkpoint-restored-auth-checkpoint-restored"),
+        (120, False, True, "api-recorded-auth-checkpoint-restored"),
+        (126, False, False, "recorded"),
+    ],
 )
 def test_abandon_failed_run_requires_cleaned_failure_evidence(
     tmp_path: Path,
     final_total: int,
-    blank_historical_audits: bool,
+    empty_api_audit: bool,
+    empty_auth_audit: bool,
+    historical_audit: str,
 ) -> None:
     runtime, blocked = _prepare_runtime(tmp_path)
     _write_snapshot(
@@ -532,9 +538,11 @@ def test_abandon_failed_run_requires_cleaned_failure_evidence(
         content_sha256="7" * 64,
     )
     _write_failed_main_report(runtime / "playwright-main")
-    if blank_historical_audits:
+    if empty_api_audit:
         (runtime / "api-owned-audit.json").write_bytes(b"")
+    if empty_auth_audit:
         (runtime / "auth-audit.json").write_bytes(b"")
+    if empty_api_audit or empty_auth_audit:
         (runtime / "playwright-main" / "admin-feature-acceptance-safe-debug.json").write_text(
             json.dumps(
                 {
@@ -587,9 +595,7 @@ def test_abandon_failed_run_requires_cleaned_failure_evidence(
     )
     assert not blocked.exists()
     assert payload["status"] == "failed-restored"
-    assert payload["historical_audit"] == (
-        "checkpoint-restored" if blank_historical_audits else "recorded"
-    )
+    assert payload["historical_audit"] == historical_audit
     assert payload["tests"] == {
         "main": {"failed": 1, "passed": 1},
         "recovery": {"passed": 2},

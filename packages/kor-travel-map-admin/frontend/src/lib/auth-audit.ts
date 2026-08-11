@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { randomUUID } from "node:crypto";
 
 const INTERNAL_BASE =
   process.env.KOR_TRAVEL_MAP_API_INTERNAL_URL ?? "http://127.0.0.1:12701";
@@ -20,6 +21,7 @@ export async function recordAuthAuditEvent(
 ): Promise<void> {
   const headers = new Headers({
     "content-type": "application/json",
+    "idempotency-key": randomUUID(),
     "x-kor-travel-map-actor": AUTH_AUDIT_ACTOR,
   });
   const proxySecret = process.env[ADMIN_PROXY_SECRET_ENV]?.trim();
