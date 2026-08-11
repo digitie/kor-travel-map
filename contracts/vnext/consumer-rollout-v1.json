@@ -172,6 +172,33 @@
         "blocking_reason": "T-VN-40 canonical curation service snapshot과 maintenance-only identity mapping export를 PinVi UUID import consumer가 paired vendor·receipt로 수용하기 전이다. 이 receipt가 complete가 되기 전에는 n150 installer가 fail-close한다."
       }
     },
+    "T-VN-41": {
+      "title": "cache-target generation·transactional outbox·paired relay",
+      "consumer_first_order": [
+        "41A: source generation과 restore epoch·stream control·immutable fence receipt를 Map 정본으로 고정한다.",
+        "41B: source target/link/refresh 상태 전이와 generation-bearing event/delivery를 같은 Map transaction으로 기록한다.",
+        "41C: PinVi command/consumer/reconciliation을 service OpenAPI로만 결선하고, restore clone은 sync disabled restore-fence CAS와 post-fence tuple 검증 뒤에만 별도 cutover를 진행한다."
+      ],
+      "write_fence": "PinVi ordinary runtime에는 command/consumer principal만 주입한다. restore-fence principal은 sync disabled one-shot job에만 주입하며, 이 job은 writer를 열지 않는다.",
+      "compat_drop": "Map source protocol과 PinVi service consumer는 forward-only generation 7 계약을 사용한다. consumer enable/live recovery는 paired isolated evidence 뒤의 별도 operation이다.",
+      "pinvi_snapshot_revendor": {
+        "user": "no",
+        "service": "yes",
+        "admin-detail": "no"
+      },
+      "pinvi_snapshot_receipt": {
+        "map_commit": "63a5713deabec00ecbc9eb4e8513ca1d2f4cf8ad",
+        "pinvi_commit": "d71ae509ff76f3abd521d41e1063857683435fb9",
+        "map_service_openapi_sha256": "b442414471c97bcdb746b49d2d24c9ec2b319290084d971df524db87b3994cfd",
+        "pinvi_service_vendor_sha256": "b442414471c97bcdb746b49d2d24c9ec2b319290084d971df524db87b3994cfd",
+        "verification": [
+          "Map service OpenAPI export and restore replay response contract",
+          "PinVi service vendor SHA and contract-pin consistency",
+          "PinVi cache-target transport and restore-fence runner regression",
+          "two independent adversarial reviews before n150 isolated live gate"
+        ]
+      }
+    },
     "T-VN-39": {
       "title": "KTM·PinVi write-fence cutover + removal manifest 물리 삭제",
       "consumer_first_order": [

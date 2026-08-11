@@ -48,15 +48,21 @@ enable한다.
 3. **C — paired pull relay/reconciliation**
    - Map service API의 exact `cache-target:command`, `read`, `claim`, `ack`, `nack`, `snapshot`,
      `restore-fence`, `recovery` scope와 OpenAPI generation 7을 재export한다.
-   - PinVi의 merged PR #434 (`5c9fa94b5f95e22470ec6470a208a0b5a21aa349`)가 immutable inbox dedupe +
-     target tuple CAS + consumer checkpoint를 한 PinVi DB transaction으로 만들고, 그 성공 뒤에만
-     ACK한다. 이 Map PR은 해당 구현을 중복하지 않고 clean PinVi worktree에서 command publisher,
-     event consumer, sync worker의 paired regression을 실행해 Map contract compatibility를 확인한다.
-     nack/dead-letter/replay와 strict per-stream prefix도 그 consumer의 불변식으로 유지한다.
+   - PinVi PR #444 (`d71ae509ff76f3abd521d41e1063857683435fb9`)는 immutable inbox dedupe + target
+     tuple CAS + consumer checkpoint를 한 PinVi DB transaction으로 만들고, 그 성공 뒤에만 ACK한다.
+     같은 PR은 sync disabled 상태에서 raw ETag/expected epoch/Idempotency-Key CAS를 수행하는
+     `pinvi-cache-target-restore-fence` one-shot command를 추가한다. command는 최초 `201` 또는 exact
+     replay `200` receipt와 재조회 stream의 `fenced` tuple을 대조하지만 ordinary writer를 열지 않는다.
+     이 Map PR은 해당 구현을 중복하지 않고 clean PinVi worktree에서 command publisher, event consumer,
+     sync worker 및 restore-fence regression을 실행해 Map contract compatibility를 확인한다. nack/dead-letter/
+     replay와 strict per-stream prefix도 그 consumer의 불변식으로 유지한다.
    - fixed snapshot/Merkle reconciliation은 begin → writer backfill → seal → consumer completion
      순서를 지키며 checksum mismatch, duplicate, gap, stale restore epoch을 fail-closed한다.
-   - Map/PinVi OpenAPI SHA와 golden vector를 paired receipt로 pin한다. consumer enable은 config default
-     off로 두며, n150 isolated evidence가 통과할 때만 별도 operation으로 켠다.
+   - Map `63a5713deabec00ecbc9eb4e8513ca1d2f4cf8ad`와 PinVi
+     `d71ae509ff76f3abd521d41e1063857683435fb9`는 service OpenAPI SHA-256
+     `b442414471c97bcdb746b49d2d24c9ec2b319290084d971df524db87b3994cfd`로 paired receipt를
+     고정한다. consumer enable은 config default off로 두며, n150 isolated evidence가 통과할 때만
+     별도 operation으로 켠다.
 
 ## 필수 검증
 
