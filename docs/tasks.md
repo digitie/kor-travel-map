@@ -714,8 +714,10 @@ AC: 세 항목 처리 + `docs/sprints/README.md`와 각 SPRINT 헤더 일치.
     exact 4-role binding과 consumer ID 단일 canonical system owner 검증, public API key digest 분리,
     17 operation의 machine-readable/runtime scope와 wrong-role zero-call 계약, service OpenAPI 재export를
     완료한다.
-  - [ ] PinVi command writer가 CAS source GET과 refresh `Location` polling에서 consumer credential로
-    전환하도록 구현하고 새 service OpenAPI SHA를 compatible pair contract generation 7에 재핀한다.
+  - [/] PinVi command writer가 CAS source GET과 refresh `Location` polling에서 consumer credential로
+    전환하고, restore clone은 sync disabled 상태에서 restore-fence CAS receipt를 재조회한 뒤에만
+    후속 reconciliation/cutover로 진행한다. Map `63a5713…` / PinVi `d71ae50…` service SHA
+    `b442414…`의 paired receipt와 두 적대 리뷰, n150 isolated evidence가 남았다.
   - [x] 일반 snapshot first page를 route transaction으로 durable commit하고 실제 만료 시각을 노출한다.
   - [x] source-material watermark reuse와 75분 server handoff/1시간 client receipt gate를 구현한다.
   - [x] stream share barrier와 snapshot 내부 exact material watermark로 lock-wait stale MVCC 누락을 막는다.
