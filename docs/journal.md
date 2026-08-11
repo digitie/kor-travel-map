@@ -2,6 +2,55 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-11 (3) — T-VN-33 최종 적대 리뷰 APPROVE, 잔여 P2 처리, 게이트 25/25
+
+**리뷰 3렌즈 전원 APPROVE · P0/P1 0건.** 세 렌즈 모두 실측으로 판정했다 — 검증 신뢰성
+렌즈는 변이 26건을 심어 25건 KILLED를 확인했고, API 렌즈는 `openapi-typescript` 재생성
+결과가 체크인된 `types.ts`와 **0바이트 차이**임을 확인했다. 데이터·스키마 렌즈는 triple
+세 열을 가진 5개 테이블 전부가 삼중(또는 4열)으로 수렴해 pair 모양 유일성이 하나도
+남지 않았음을 전수 확인했고, `ops.managed_files` 가드 분리가 안전한 근거도 실측으로
+확인했다(registry는 관측 전용이고 물리 객체를 지우는 경로가 없다).
+
+승인 뒤에도 P2 8건 중 6건을 처리했다. 이 브랜치가 **스스로 세운 규칙을 자기 코드가
+어기는 자리**들이었다.
+
+- **0092의 새 트리거가 writer와 정면으로 충돌했다.** `NULL → dataset_id`(최초 귀속)까지
+  "ownership is immutable"로 거부하는데 `file_registry._UPSERT_SQL`은 재등록 시 소유자를
+  붙이는 CASE를 구현한다. `scan_s3_location`은 그 호출을 `registry_guard`로 감싸지 않아
+  예외가 그 pass 등록분을 통째로 롤백시킨다. 귀속은 rebinding이 아니므로 NULL→값만
+  허용하고 값→다른 값·값→NULL은 계속 거부한다.
+- **계약↔head 대조 게이트에 index 축이 없었다.** 축을 켜자 4건이 나왔고 셋은 계약이
+  낡은 것(그중 하나는 pair 시대 index 이름), 하나는 계약이 옳았다(varchar/text 표기
+  차이 — allowlist로 기록). 하한과 allowlist 양방향 `==`로 fail-open도 막았다.
+- **`allowed_sync_scopes=[]`로 접는 분기**가 같은 응답이 낸 membership 행을 같은 응답의
+  capability가 거짓 사유로 거부했다. `target_grids` 축에서만 닫혀 있던 것을 전 scope로
+  넓혔다.
+- **제출 직전 fail-closed 가드가 3축 중 2축만 봤다.** dataset만 남아 있으면 통과했다 —
+  형제 operation이 disable된 뒤의 제출을 그대로 흘려보낸다. 삼중으로 좁히고 어느 축이
+  사라졌는지 사유로 구분한다.
+- **selector와 "scope를 고를 수 있는가"를 갈랐다.** `effect="sync_scope"` 분기를
+  `target_grids` 선언 밖으로 넓히면서 `selector="poi_cache_targets"`를 상수로 남겨,
+  POI target이 하나도 없는 dataset에 "범위 계약: 활성 POI target"이 그려졌다. 서버는
+  selector를 `target_grids` 선언과 동치로 내고 프론트 게이트는 selector를 보지 않는다.
+- 병렬 갈래가 서로의 변경을 못 봐서 생긴 **낡은 서술 4건**도 정정했다(주석이 서버가 더는
+  내지 않는 상태를 기술하거나 존재하지 않는 분기 수를 셌다).
+
+**flake 2건을 없앴다** — 둘 다 "부하 탓"으로 넘길 수 있었던 red다.
+- 감사 계획 테스트의 `assert not sort_nodes`가 비결정적이었다(같은 트리·같은 명령으로
+  한 번 red 한 번 green, 단독 8 passed). ANALYZE·`force_generic_plan`을 이미 걸고 있으니
+  통계 문제가 아니라 top-N 정렬과 index-ordered 경로의 비용이 팽팽한 것이다. 단언을
+  정렬 유무가 아니라 **유계성**(정렬 행·훑은 행·버린 행 각각 ≤64)으로 바꿨고, 약화가
+  아님을 `DROP INDEX` 회귀로 확인했다.
+- write-cost 실측이 40k INSERT를 상태별 **한 번씩** 재고 2% 마진으로 비교했다. 벽시계
+  측정에서 부하는 시간을 늘리기만 하므로 최솟값이 간섭 없는 비용에 가장 가깝다 —
+  batch는 40k 그대로 두고 회차를 3회로 늘렸다. 20k×3 안은 효과 크기가 함께 줄어
+  ratio 1.02x로 임계에 붙어 기각했다(색인 유지 비용은 행 수에 비례한다).
+  이 테스트는 T-VN-33 범위 밖이지만 머지 게이트를 비결정적으로 만들어 함께 고쳤다.
+
+**최종 게이트 25/25 GREEN**: unit+lint 2192 · api 1101(cov 77.64%) · dagster 530/3skip
+(85.23%) · integration **1049 passed / 0 skipped**(geo live 실제 실행) · vitest 37파일 302 ·
+frontend 9종.
+
 ## 2026-08-11 (2) — T-VN-33 33-E: 격리 fresh 재적재 + n150 live 확인
 
 전체 25게이트 GREEN 위에서, **비어 있는 PostGIS에 최종 스키마만으로 다시 세운 DB**에

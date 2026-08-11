@@ -2,7 +2,9 @@
 
 ## 2026-08-11 — T-VN-33: 라운드11~12, CI 경로 red BLOCKER 2건 해소
 
-**다음 한 작업**: `T-VN-33` #966 — 적대 리뷰어 2명 승인 확보 후 rebase/CI/머지.
+**다음 한 작업**: `T-VN-33` #966 — **머지**. 적대 리뷰 3렌즈 전원 APPROVE(P0/P1 0건),
+로컬 게이트 25/25 GREEN, 33-E의 fresh 재적재·API/admin live 확인 완료. 남은 절차는
+PR ready 전환 → GitHub CI green → merge다. 머지 뒤 T-VN-41 F1D-D를 재개한다.
 
 33-E의 **fresh 재적재 + API/admin live 확인은 2026-08-11에 끝났다**(n150 격리
 컨테이너, prod 스택 무접촉): 빈 PostGIS → 0092 head, `alembic check` drift 0 →
