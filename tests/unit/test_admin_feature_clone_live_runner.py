@@ -715,6 +715,41 @@ def test_abandon_failed_run_allows_pre_final_digest_failure_after_cleanup(
     assert payload["tests"]["main"] == {"passed": 2}
 
 
+def test_abandon_failed_run_retries_pre_final_digest_failure_after_finalization(
+    tmp_path: Path,
+) -> None:
+    runtime, blocked = _prepare_runtime(tmp_path)
+    (runtime / "clone-final.json").unlink()
+    for phase in (
+        "candidate-startup-running",
+        "fixture-seed-running",
+        "browser-main-running",
+        "browser-recovery-running",
+        "direct-cleanup-running",
+        "failed-resource-finalizing",
+    ):
+        _run_helper("update-blocked", "--path", str(blocked), "--phase", phase)
+
+    _run_helper(
+        "abandon-failed-run",
+        "--blocked-path",
+        str(blocked),
+        "--result-path",
+        str(runtime / "failed-restored.json"),
+        "--restored-snapshot",
+        str(runtime / "clone-startup-before.json"),
+        "--runtime",
+        str(runtime),
+    )
+
+    assert not blocked.exists()
+    payload = json.loads(
+        (runtime / "failed-restored.json").read_text(encoding="utf-8")
+    )
+    assert payload["status"] == "failed-restored"
+    assert payload["phase_history"][-1] == "failed-resource-finalizing"
+
+
 def test_runner_bootstraps_requested_snapshot_before_validating_mode() -> None:
     source = _RUNNER.read_text(encoding="utf-8")
     bootstrap_gate = 'if [[ "$SCRIPT_DIR" != "$INSTALL_BASE/$SOURCE_COMMIT" ]]; then'

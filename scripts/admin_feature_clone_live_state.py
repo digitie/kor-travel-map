@@ -1825,15 +1825,20 @@ def abandon_failed_run(args: argparse.Namespace) -> None:
     startup_after = _validated_snapshot(runtime / "clone-startup-after.json")
     final_path = runtime / "clone-final.json"
     # content digest를 포함한 final snapshot 생성 자체가 실패하면 browser/fixture
-    # cleanup 이후에도 이 파일은 없을 수 있다. direct-cleanup 단계에서만, 바로
-    # 위의 strict checkpoint restore가 검증된 경우 그 실패 영수증을 남긴다.
-    # 그 외 terminal phase에서 final snapshot이 없으면 state machine 훼손이다.
+    # cleanup 이후에도 이 파일은 없을 수 있다. 첫 abort는 이 경우 resource
+    # finalization phase까지 기록한 뒤 helper 호출에서 중단될 수 있으므로, retry도
+    # 같은 missing-final 상태를 인식해야 한다. browser failure 표식이 있는 일반
+    # 실패에는 final snapshot을 계속 필수로 둔다.
     final = (
         _validated_snapshot(final_path)
         if final_path.exists() or final_path.is_symlink()
         else None
     )
-    if final is None and terminal_phase != "direct-cleanup-running":
+    missing_final_is_recoverable = terminal_phase == "direct-cleanup-running" or (
+        terminal_phase == "failed-resource-finalizing"
+        and "test-failed-restored" not in phase_history
+    )
+    if final is None and not missing_final_is_recoverable:
         raise RuntimeError("실패 run 최종 clone snapshot이 없습니다")
     if checkpoint["baseline"] != startup_before:
         raise RuntimeError("startup clone DB가 trusted checkpoint와 다릅니다")
