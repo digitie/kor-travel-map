@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterable
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, timezone
 from decimal import Decimal
 from types import SimpleNamespace
@@ -46,6 +47,13 @@ _PROVIDER_DATASET_IDS: Final[dict[str, int]] = {
     OPINET_STATION_DATASET_KEY: 9101,
     OPINET_PRICE_DATASET_KEY: 9102,
 }
+
+
+@dataclass(frozen=True)
+class _StationPriceDetail:
+    """source record에도 그대로 보존 가능한 OpiNet 상세 응답 test double."""
+
+    prices: tuple[object, ...] = ()
 
 
 class _Client:
@@ -159,10 +167,10 @@ class _Client:
         )
 
     async def record_address_validation_findings(
-        self, findings: object, **kwargs: object
+        self, findings: Iterable[object], **kwargs: object
     ) -> IntegrityFindingSyncResult:
         """T-VN-H30A: durable finding 기록 (테스트 double은 보관만 한다)."""
-        self.recorded_findings = list(findings)  # type: ignore[arg-type]
+        self.recorded_findings = list(findings)
         count = len(self.recorded_findings)
         return IntegrityFindingSyncResult(count, count, count)
 
@@ -213,7 +221,7 @@ async def test_price_asset_rejects_nonempty_records_normalized_to_zero(
             "feature_operation_guard": client.guard_for(
                 _PRICE_OPERATION_KEY, OPINET_PRICE_DATASET_KEY
             ),
-            "opinet_station_price_details": [SimpleNamespace(prices=())],
+            "opinet_station_price_details": [_StationPriceDetail()],
         }
     )
 
@@ -277,7 +285,7 @@ async def test_price_asset_records_kst_observation_freshness_metadata(
             "feature_operation_guard": client.guard_for(
                 _PRICE_OPERATION_KEY, OPINET_PRICE_DATASET_KEY
             ),
-            "opinet_station_price_details": [SimpleNamespace(prices=())],
+            "opinet_station_price_details": [_StationPriceDetail()],
         }
     )
 
@@ -302,6 +310,9 @@ async def test_price_asset_records_kst_observation_freshness_metadata(
     assert cursor["today_values_count"] == 2
     assert output_metadata["latest_observed_at"] == "2026-07-13T23:00:00+09:00"
     assert output_metadata["today_values_count"] == 2
+    assert client.price_write_context is not None
+    source_record = client.price_write_context["source_record"]
+    assert source_record.raw_data["records"] == [{"prices": ()}]
 
 
 async def test_place_asset_holds_same_provider_lock_through_sync_success() -> None:
