@@ -1000,8 +1000,9 @@ async def create_service_restore_fence(
             session,
             command=command,
             response=response_body,
-            # 최초 route 응답은 decorator의 201이다. ledger replay는 ADR-081의
-            # immutable receipt status 200으로 복원한다.
+            # 최초 REST response는 decorator의 201을 그대로 반환한다. 단, ADR-081은
+            # immutable receipt를 재생할 때 200을 요구한다. ledger에는 replay status만
+            # 200으로 고정해야 global DomainCommandReplay handler가 이를 복원한다.
             status_code=status.HTTP_200_OK,
             response_headers={"ETag": record.entity_tag},
         )

@@ -573,9 +573,12 @@ DB 규칙:
 
 ### 11.1 vNext generation/outbox producer foundation (ADR-081, T-VN-41)
 
-기존 admin target resource는 운영자 수동 관리와 ETag CAS를 유지한다. PinVi 전파는 admin route를
-재사용하지 않고 ServiceToken 전용 `/v1/service/cache-targets/*`, refresh operation, stream
-control, pull claim/ACK/NACK, dead/replay, fixed snapshot resource를 사용한다.
+기존 admin target resource는 **PinVi 이외 수동 소유 external system**의 운영자 관리와 ETag CAS를
+유지한다. `external_system='pinvi'`의 admin PUT/DELETE는 `409
+CACHE_TARGET_SOURCE_PROTOCOL_REQUIRED`로 거부한다. PinVi 전파는 admin route를 재사용하지 않고
+ServiceToken 전용 `/v1/service/cache-targets/*`, refresh operation, stream control, pull
+claim/ACK/NACK, dead/replay, fixed snapshot resource를 사용한다. 따라서 활성 relay stream의
+source head/outbox를 우회하는 writer는 없다.
 
 `feature_update_requests.generation`, target `lock_version`, Map `restore_epoch`, PinVi
 `source_generation`, result `target_sequence`, delivery `relay_order`는 서로 다른 값이다. 특히

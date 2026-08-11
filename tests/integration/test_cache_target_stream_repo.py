@@ -3431,6 +3431,23 @@ async def test_service_source_read_and_refresh_request_idempotency(
     )
     assert request.status == "queued"
     assert not request.idempotent_replay
+    queued_events = (
+        await migrated_session.execute(
+            text(
+                "SELECT event_type, payload, restore_epoch, source_generation "
+                "FROM ops.poi_cache_target_outbox_events "
+                "WHERE refresh_request_id = CAST(:request_id AS uuid)"
+            ),
+            {"request_id": request.request_id},
+        )
+    ).all()
+    assert len(queued_events) == 1
+    queued_event = queued_events[0]
+    assert queued_event.event_type == "refresh_request.status_changed"
+    assert queued_event.payload["status"] == "queued"
+    assert queued_event.payload["request_id"] == request.request_id
+    assert queued_event.restore_epoch == 1
+    assert queued_event.source_generation == 1
     replay = await create_cache_target_refresh_request(
         migrated_session,
         principal_id="pinvi-service",

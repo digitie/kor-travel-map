@@ -40,13 +40,19 @@ enable한다.
      테스트한다.
    - event immutable ledger와 mutable delivery/lease/dead-letter를 분리하고, restore supersession이
      과거 epoch의 nonterminal delivery만 terminal로 바꾸는지를 검증한다.
+   - `queued`를 포함한 refresh 상태 전이는 request/member snapshot/outbox를 같은 transaction에
+     기록한다. executor가 시작되기 전 취소·정지돼도 consumer가 상태와 exact tuple을 관측할 수 있어야 한다.
+   - 기존 admin target resource는 PinVi relay writer가 아니다. `pinvi`의 admin PUT/DELETE는
+     source protocol required로 거부하고, 수동 소유 external system만 그 ETag CAS 경로를 사용한다.
 
 3. **C — paired pull relay/reconciliation**
    - Map service API의 exact `cache-target:command`, `read`, `claim`, `ack`, `nack`, `snapshot`,
      `restore-fence`, `recovery` scope와 OpenAPI generation 7을 재export한다.
-   - PinVi PR에서 immutable inbox dedupe + target tuple CAS + consumer checkpoint를 한 PinVi DB
-     transaction으로 만들고, 그 성공 뒤에만 ACK한다. nack/dead-letter/replay와 strict per-stream
-     prefix를 구현한다.
+   - PinVi의 merged PR #434 (`5c9fa94b5f95e22470ec6470a208a0b5a21aa349`)가 immutable inbox dedupe +
+     target tuple CAS + consumer checkpoint를 한 PinVi DB transaction으로 만들고, 그 성공 뒤에만
+     ACK한다. 이 Map PR은 해당 구현을 중복하지 않고 clean PinVi worktree에서 command publisher,
+     event consumer, sync worker의 paired regression을 실행해 Map contract compatibility를 확인한다.
+     nack/dead-letter/replay와 strict per-stream prefix도 그 consumer의 불변식으로 유지한다.
    - fixed snapshot/Merkle reconciliation은 begin → writer backfill → seal → consumer completion
      순서를 지키며 checksum mismatch, duplicate, gap, stale restore epoch을 fail-closed한다.
    - Map/PinVi OpenAPI SHA와 golden vector를 paired receipt로 pin한다. consumer enable은 config default
