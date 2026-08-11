@@ -1,4 +1,16 @@
-"""Termination reservation과 application coordinator Postgres 통합 계약."""
+"""Termination reservation과 application coordinator Postgres 통합 계약.
+
+T-VN-33 cutover WIP 커밋(``2e76b80c``, 메시지에 "do not merge")이 이 파일에서
+1,792줄짜리 회귀 중 1,761줄을 지워 71줄만 남겼고 복원되지 않았다(``git show
+--numstat 2e76b80c``: ``40 1761``). 지워진 회귀가 덮던 코드는 지금도 살아 있다 —
+취소 coordinator의 lock 순서·CAS 예약, terminal sensor의 identity mismatch 처리,
+run-backed queued 취소의 freeze 범위. 삭제된 19개 test 함수명은 그 커밋 시점
+트리 전수 ``git grep``에서 0 hit이다.
+
+identity를 triple로 옮겨 되살렸다. 지어낸 자연키(``("provider", "done")``)는
+이제 만들 수 없으므로(실행 레코드가 ``provider_dataset_operation_scopes``를 FK로
+참조한다) 시드에서 고른다 — ``tests/integration/_membership_seed.py``.
+"""
 
 from __future__ import annotations
 
@@ -18,12 +30,12 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kortravelmap.core.feature_operation import ProviderDatasetOperationKey
 from kortravelmap.infra.advisory_lock import advisory_lock_key
 from kortravelmap.infra.feature_operation_repo import (
     ensure_dagster_feature_operation,
-    finish_dagster_feature_pair,
+    finish_dagster_feature_membership,
 )
+from kortravelmap.infra.jobs_repo import enqueue_unpaired_import_job
 from kortravelmap.infra.pipeline_cancellation_repo import (
     create_pipeline_cancellation_attempt,
     finish_pipeline_cancellation_attempt,
@@ -43,6 +55,11 @@ from kortravelmap.infra.pipeline_cancellation_types import (
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
+
+from tests.integration._membership_seed import (
+    MULTI_MEMBER_OPERATION,
+    memberships_for_operation,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -175,36 +192,35 @@ async def test_canonical_same_marker_terminal_reconciles_authoritative_state(
     created_at = datetime(2026, 7, 15, 1, tzinfo=UTC)
     started_at = created_at + timedelta(seconds=1)
     finished_at = created_at + timedelta(seconds=5)
-    done_pair = ProviderDatasetOperationKey("provider", "done")
-    active_pair = ProviderDatasetOperationKey("provider", "active")
     cancellation_id: str | None = None
     root_id: str | None = None
     async with AsyncSession(migrated_engine) as setup, setup.begin():
+        done_pair, active_pair = await memberships_for_operation(setup, limit=2)
         ensured = await ensure_dagster_feature_operation(
             setup,
             dagster_run_id=run_id,
             trigger_kind="manual",
-            selected_pairs=(done_pair, active_pair),
-            registry_version="registry-v1",
+            selected_memberships=(done_pair, active_pair),
+            operation_key=MULTI_MEMBER_OPERATION,
             engine_created_at=created_at,
             engine_started_at=None if all_pairs_done else started_at,
             observed_status="QUEUED" if all_pairs_done else "STARTED",
         )
         root_id = ensured.operation.root_job_id
-        completed_done = await finish_dagster_feature_pair(
-            setup, dagster_run_id=run_id, pair=done_pair
+        completed_done = await finish_dagster_feature_membership(
+            setup, dagster_run_id=run_id, membership=done_pair
         )
         done_finished_at = next(
             member.finished_at
             for member in completed_done.operation.members
-            if member.pair == done_pair
+            if member.membership == done_pair
         )
         assert done_finished_at is not None
         if incoming_start_missing:
             done_id = next(
                 member.job_id
                 for member in completed_done.operation.members
-                if member.pair == done_pair
+                if member.membership == done_pair
             )
             await setup.execute(
                 text(
@@ -214,8 +230,8 @@ async def test_canonical_same_marker_terminal_reconciles_authoritative_state(
                 {"job_id": done_id},
             )
         if all_pairs_done:
-            await finish_dagster_feature_pair(
-                setup, dagster_run_id=run_id, pair=active_pair
+            await finish_dagster_feature_membership(
+                setup, dagster_run_id=run_id, membership=active_pair
             )
         attempt = await _create_attempt(setup, job_id=root_id)
         cancellation_id = attempt.attempt.cancellation_id
@@ -293,21 +309,37 @@ async def test_canonical_same_marker_terminal_reconciles_authoritative_state(
                 await probe.execute(
                     text(
                         """
-                        SELECT kind, provider, dataset_key, status, progress,
-                               current_stage, error_message, dagster_run_status,
-                               cancellation_id, started_at, finished_at, heartbeat_at
-                        FROM ops.import_jobs
-                        WHERE job_id = CAST(:root_id AS uuid)
-                           OR parent_job_id = CAST(:root_id AS uuid)
-                        ORDER BY kind DESC, provider NULLS FIRST, dataset_key NULLS FIRST
+                        SELECT job.kind, job.status, job.progress,
+                               job.current_stage, job.error_message,
+                               job.dagster_run_status, job.cancellation_id,
+                               job.started_at, job.finished_at, job.heartbeat_at,
+                               member.provider_dataset_id, member.sync_scope,
+                               member.operation_key
+                        FROM ops.import_jobs AS job
+                        LEFT JOIN ops.import_job_datasets AS member
+                          ON member.job_id = job.job_id
+                        WHERE job.job_id = CAST(:root_id AS uuid)
+                           OR job.parent_job_id = CAST(:root_id AS uuid)
+                        ORDER BY job.kind DESC,
+                                 member.provider_dataset_id NULLS FIRST
                         """
                     ),
                     {"root_id": root_id},
                 )
             ).all()
             root = next(row for row in rows if row.kind == "provider_feature_load_run")
-            done = next(row for row in rows if row.dataset_key == "done")
-            active = next(row for row in rows if row.dataset_key == "active")
+            # identity가 triple로 바뀌어 `ops.import_jobs`에 provider/dataset_key
+            # 열이 없다. member 행이 정본이므로 그쪽 축으로 고른다.
+            done = next(
+                row
+                for row in rows
+                if row.provider_dataset_id == done_pair.provider_dataset_id
+            )
+            active = next(
+                row
+                for row in rows
+                if row.provider_dataset_id == active_pair.provider_dataset_id
+            )
             tracking_logs = await probe.scalar(
                 text(
                     "SELECT count(*) FROM ops.system_log "
@@ -405,17 +437,14 @@ async def test_canonical_cancellation_rejects_divergent_frozen_start_times(
     created_at = datetime(2026, 7, 15, 2, tzinfo=UTC)
     started_at = created_at + timedelta(seconds=1)
     finished_at = created_at + timedelta(seconds=5)
-    pairs = (
-        ProviderDatasetOperationKey("provider", "first"),
-        ProviderDatasetOperationKey("provider", "second"),
-    )
     async with AsyncSession(migrated_engine) as setup, setup.begin():
+        pairs = await memberships_for_operation(setup, limit=2)
         ensured = await ensure_dagster_feature_operation(
             setup,
             dagster_run_id=run_id,
             trigger_kind="manual",
-            selected_pairs=pairs,
-            registry_version="registry-v1",
+            selected_memberships=pairs,
+            operation_key=MULTI_MEMBER_OPERATION,
             engine_created_at=created_at,
             engine_started_at=started_at,
             observed_status="STARTED",
@@ -1135,17 +1164,14 @@ async def test_queued_canonical_terminate_failure_retries_same_frozen_scope(
     created_at = datetime(2026, 7, 15, 4, tzinfo=UTC)
     started_at = created_at + timedelta(seconds=1)
     finished_at = created_at + timedelta(seconds=5)
-    pairs = (
-        ProviderDatasetOperationKey("provider", "first"),
-        ProviderDatasetOperationKey("provider", "second"),
-    )
     async with AsyncSession(migrated_engine) as setup, setup.begin():
+        pairs = await memberships_for_operation(setup, limit=2)
         ensured = await ensure_dagster_feature_operation(
             setup,
             dagster_run_id=run_id,
             trigger_kind="manual",
-            selected_pairs=pairs,
-            registry_version="registry-v1",
+            selected_memberships=pairs,
+            operation_key=MULTI_MEMBER_OPERATION,
             engine_created_at=created_at,
             engine_started_at=None,
             observed_status="QUEUED",
@@ -1790,3 +1816,78 @@ async def test_different_roots_coordinate_independently(
                     ),
                     {"ids": cancellation_ids},
                 )
+
+async def test_cancellation_reserves_one_generic_import_root(
+    migrated_session: AsyncSession,
+) -> None:
+    job = await enqueue_unpaired_import_job(
+        migrated_session,
+        kind="cancellation-integration-fixture",
+        payload={"fixture": str(uuid4())},
+        source_checksum=None,
+    )
+    scope = await resolve_pipeline_cancellation_scope(
+        migrated_session,
+        kind="import_job",
+        execution_id=job.job_id,
+    )
+
+    assert scope is not None
+    attempt = await create_pipeline_cancellation_attempt(
+        migrated_session,
+        scope=scope,
+        requested_by="admin:integration-test",
+        reason="canonical cancellation reservation",
+    )
+    detail = await get_pipeline_cancellation_detail(
+        migrated_session,
+        attempt.attempt.cancellation_id,
+    )
+
+    assert detail is not None
+    assert detail.attempt.root_id == job.job_id
+    assert detail.attempt.root_kind == "import_job"
+    assert len(detail.members) == 1
+    assert detail.members[0].job_id == job.job_id
+
+
+async def test_cancellation_scope_does_not_synthesize_provider_dataset_identity(
+    migrated_session: AsyncSession,
+) -> None:
+    job = await enqueue_unpaired_import_job(
+        migrated_session,
+        kind="cancellation-integration-fixture",
+        payload={"fixture": str(uuid4())},
+        source_checksum=None,
+    )
+
+    scope = await resolve_pipeline_cancellation_scope(
+        migrated_session,
+        kind="import_job",
+        execution_id=job.job_id,
+    )
+
+    assert scope is not None
+    assert scope.root_kind == "import_job"
+    assert scope.root_id == job.job_id
+    assert tuple(member.job_id for member in scope.members) == (job.job_id,)
+    # T-VN-33: unpaired root는 dataset membership을 만들지 않는다. 자연키 사본이
+    # 사라졌으므로 합성 provider/dataset identity가 끼어들 자리도 없다 —
+    # membership 정본인 ``ops.import_job_datasets``가 비어 있어야 한다.
+    memberships = (
+        (
+            await migrated_session.execute(
+                text(
+                    """
+                    SELECT provider_dataset_id, sync_scope, operation_key
+                    FROM ops.import_job_datasets
+                    WHERE job_id = CAST(:job_id AS uuid)
+                    """
+                ),
+                {"job_id": job.job_id},
+            )
+        )
+        .mappings()
+        .all()
+    )
+    assert memberships == []

@@ -11,7 +11,7 @@ import json
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from time import perf_counter
-from typing import Any, NoReturn, TypeVar
+from typing import Any, TypeVar
 from uuid import UUID
 
 import httpx
@@ -27,6 +27,7 @@ from kortravelmap.infra.feature_update_active_repo import (
 from kortravelmap.infra.feature_update_repo import (
     FeatureUpdateLockBusy,
     FeatureUpdateRequest,
+    FeatureUpdateRequestDataset,
     FeatureUpdateRequestPreview,
     create_feature_update_request_idempotency,
     enqueue_feature_update_request,
@@ -37,9 +38,7 @@ from kortravelmap.infra.feature_update_repo import (
 from kortravelmap.infra.feature_update_repo import (
     preview_feature_update_request as preview_feature_update_request_repo,
 )
-from kortravelmap.infra.poi_cache_target_repo import (
-    has_active_poi_cache_targets_for_external_system,
-)
+from kortravelmap.infra.jobs_repo import ImportJobDatasetTarget
 from kortravelmap.infra.scope_repo import SigunguByRadiusResolver
 from kortravelmap.settings import KorTravelMapSettings
 from sqlalchemy.exc import IntegrityError
@@ -48,6 +47,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from kortravelmap.api.feature_ref import resolve_write_feature_refs_or_error
 from kortravelmap.api.feature_update_schema import (
     FeatureIdsScope,
+    FeatureUpdateDatasetMembership,
     FeatureUpdatePolicy,
     FeatureUpdateRequestCreatedRecord,
     FeatureUpdateRequestCreateRequest,
@@ -58,10 +58,6 @@ from kortravelmap.api.feature_update_schema import (
     FeatureUpdateRequestPreviewResponse,
     FeatureUpdateRequestRecord,
     FeatureUpdateScope,
-)
-from kortravelmap.api.provider_catalog import (
-    catalog_refreshable_entries,
-    find_catalog_entry,
 )
 from kortravelmap.api.response import make_meta
 
@@ -107,10 +103,10 @@ class FeatureUpdateValidationError(ValueError, FeatureUpdateServiceError):
 
 
 ResolvedPlanGuard = Callable[
-    [frozenset[tuple[str, str]]],
+    [frozenset[tuple[int, str]]],
     Awaitable[None],
 ]
-"""영속 전 canonical provider/dataset exact pair 선행조건 검사."""
+"""영속 전 immutable canonical dataset membership 선행조건 검사."""
 
 
 class FeatureUpdateLockConflict(RuntimeError, FeatureUpdateServiceError):
@@ -177,13 +173,149 @@ def _update_policy_payload(policy: FeatureUpdatePolicy) -> dict[str, Any]:
     return dict(policy)
 
 
+def _membership_records(
+    memberships: Sequence[FeatureUpdateRequestDataset],
+) -> list[FeatureUpdateDatasetMembership]:
+    return [
+        FeatureUpdateDatasetMembership(
+            provider_dataset_id=membership.provider_dataset_id,
+            sync_scope=membership.sync_scope,
+            operation_key=membership.operation_key,
+        )
+        for membership in memberships
+    ]
+
+
+def _public_scope(
+    scope: Mapping[str, Any],
+    memberships: Sequence[FeatureUpdateRequestDataset],
+) -> dict[str, Any]:
+    """DB 내부 direct scope를 API의 complete canonical scope로 복원한다."""
+    public_scope = dict(scope)
+    if public_scope.get("type") != "provider_dataset":
+        return public_scope
+    if len(memberships) != 1:
+        raise FeatureUpdateEnqueueError(
+            "provider_dataset request requires exactly one dataset membership"
+        )
+    member = memberships[0]
+    if public_scope.get("provider_dataset_id") != member.provider_dataset_id:
+        raise FeatureUpdateEnqueueError(
+            "provider_dataset request scope and membership disagree"
+        )
+    return {
+        "type": "provider_dataset",
+        "provider_dataset_id": member.provider_dataset_id,
+        "sync_scope": member.sync_scope,
+        "operation_key": member.operation_key,
+    }
+
+
+_NATURAL_IDENTITY_RESPONSE_KEYS = frozenset(
+    {"provider", "dataset_key", "providers", "dataset_keys"}
+)
+
+
+def _public_matched_scope(value: Mapping[str, Any]) -> dict[str, Any]:
+    """실행 진단에서 legacy natural identity projection을 유출하지 않는다."""
+
+    def sanitize(item: Any) -> Any:
+        if isinstance(item, Mapping):
+            return {
+                str(key): sanitize(nested)
+                for key, nested in item.items()
+                if str(key) not in _NATURAL_IDENTITY_RESPONSE_KEYS
+            }
+        if isinstance(item, list | tuple):
+            return [sanitize(nested) for nested in item]
+        return item
+
+    sanitized = sanitize(value)
+    if not isinstance(sanitized, dict):  # pragma: no cover - core invariant.
+        raise FeatureUpdateEnqueueError("feature update matched_scope must be an object")
+    return sanitized
+
+
+def _core_scope_and_memberships(
+    scope: Mapping[str, Any],
+) -> tuple[dict[str, Any], tuple[ImportJobDatasetTarget, ...] | None]:
+    """HTTP direct scope를 core persistence shape으로 좁힌다."""
+    if scope.get("type") != "provider_dataset":
+        return dict(scope), None
+    provider_dataset_id = scope.get("provider_dataset_id")
+    sync_scope = scope.get("sync_scope")
+    operation_key = scope.get("operation_key")
+    if (
+        not isinstance(provider_dataset_id, int)
+        or isinstance(provider_dataset_id, bool)
+        or provider_dataset_id <= 0
+        or not isinstance(sync_scope, str)
+        or not isinstance(operation_key, str)
+    ):
+        raise FeatureUpdateValidationError(
+            "provider_dataset scope requires provider_dataset_id, sync_scope, and operation_key"
+        )
+    try:
+        canonical_scope = parse_canonical_sync_scope(sync_scope).value
+    except ValueError as exc:
+        raise FeatureUpdateValidationError(str(exc)) from exc
+    if canonical_scope != sync_scope:
+        raise FeatureUpdateValidationError("sync_scope must be canonical")
+    if not operation_key or operation_key != operation_key.strip():
+        raise FeatureUpdateValidationError("operation_key must be a trimmed non-empty string")
+    return (
+        {
+            "type": "provider_dataset",
+            "provider_dataset_id": provider_dataset_id,
+            "sync_scope": canonical_scope,
+            "operation_key": operation_key,
+        },
+        (
+            ImportJobDatasetTarget(
+                provider_dataset_id=provider_dataset_id,
+                sync_scope=canonical_scope,
+                operation_key=operation_key,
+            ),
+        ),
+    )
+
+
+def _membership_targets(
+    memberships: Sequence[FeatureUpdateRequestDataset],
+) -> tuple[ImportJobDatasetTarget, ...]:
+    return tuple(
+        ImportJobDatasetTarget(
+            provider_dataset_id=membership.provider_dataset_id,
+            sync_scope=membership.sync_scope,
+            operation_key=membership.operation_key,
+        )
+        for membership in memberships
+    )
+
+
 def _canonical_feature_update_request_body(
     body: FeatureUpdateRequestCreateRequest,
+    *,
+    dataset_memberships: Sequence[FeatureUpdateRequestDataset],
 ) -> dict[str, Any]:
-    """Fingerprint와 실행 plan이 함께 쓰는 validated canonical body."""
+    """Idempotency에 쓸 입력 scope+제출 시점 membership snapshot.
+
+    geo scope는 자연키 filter가 아니라 DB가 해석한 active refresh membership이
+    실행 의미다. 따라서 snapshot이 달라지면 같은 Idempotency-Key도 다른 본문으로
+    취급한다. 이후 live catalog 변경은 과거 요청을 바꾸지 않는다.
+    """
     canonical_body = body.model_dump(mode="json", exclude_none=False)
-    canonical_body["providers"] = sorted(canonical_body["providers"])
-    canonical_body["dataset_keys"] = sorted(canonical_body["dataset_keys"])
+    canonical_body["dataset_memberships"] = [
+        {
+            "provider_dataset_id": membership.provider_dataset_id,
+            "sync_scope": membership.sync_scope,
+            "operation_key": membership.operation_key,
+        }
+        for membership in sorted(
+            dataset_memberships,
+            key=lambda item: (item.provider_dataset_id, item.sync_scope, item.operation_key),
+        )
+    ]
     scope = canonical_body["scope"]
     if scope["type"] == "feature_ids":
         scope["feature_ids"] = sorted(scope["feature_ids"])
@@ -214,25 +346,18 @@ def record_from_request(
 ) -> FeatureUpdateRequestRecord:
     """저장 행을 persisted HTTP 표현으로 변환한다."""
 
-    requested_sync_scope = (
-        row.scope.get("sync_scope")
-        if row.scope_type == "provider_dataset" and isinstance(row.scope.get("sync_scope"), str)
-        else None
-    )
+    scope = _public_scope(row.scope, row.dataset_memberships)
 
     return FeatureUpdateRequestRecord(
         request_id=row.request_id,
         scope_type=row.scope_type,
-        scope=row.scope,
-        requested_sync_scope=requested_sync_scope,
-        effective_sync_scope=row.effective_sync_scope,
-        providers=list(row.providers),
-        dataset_keys=list(row.dataset_keys),
+        scope=scope,
+        dataset_memberships=_membership_records(row.dataset_memberships),
         update_policy=row.update_policy,
         run_mode=row.run_mode,
         priority=row.priority,
         status=row.status,
-        matched_scope=row.matched_scope,
+        matched_scope=_public_matched_scope(row.matched_scope),
         job_id=row.job_id,
         dagster_run_id=row.dagster_run_id,
         dispatch_requested_at=row.dispatch_requested_at,
@@ -253,13 +378,12 @@ def _record_from_preview(
     return FeatureUpdateRequestPreviewRecord(
         result_kind="preview",
         scope_type=preview.scope_type,
-        scope=preview.scope,
-        providers=list(preview.providers),
-        dataset_keys=list(preview.dataset_keys),
+        scope=_public_scope(preview.scope, preview.dataset_memberships),
+        dataset_memberships=_membership_records(preview.dataset_memberships),
         update_policy=preview.update_policy,
         run_mode=preview.run_mode,
         priority=preview.priority,
-        matched_scope=preview.matched_scope,
+        matched_scope=_public_matched_scope(preview.matched_scope),
     )
 
 
@@ -320,142 +444,6 @@ def _scope_explicitly_needs_sigungu(scope: Mapping[str, Any]) -> bool:
     )
 
 
-def _refreshable_pairs() -> frozenset[tuple[str, str]]:
-    return frozenset((entry.provider, entry.dataset_key) for entry in catalog_refreshable_entries())
-
-
-def _resolved_refreshable_pairs(
-    *,
-    scope: Mapping[str, Any],
-    providers: Sequence[str],
-    dataset_keys: Sequence[str],
-) -> frozenset[tuple[str, str]]:
-    """검증된 request filter를 실제 실행될 canonical exact pair로 확장한다."""
-
-    refreshable_pairs = _refreshable_pairs()
-    if scope.get("type") == "provider_dataset":
-        return frozenset(
-            {
-                (
-                    str(scope.get("provider", "")),
-                    str(scope.get("dataset_key", "")),
-                )
-            }
-        )
-    if providers and dataset_keys:
-        return frozenset(
-            (provider, dataset_key) for provider in providers for dataset_key in dataset_keys
-        )
-    if providers:
-        return frozenset(pair for pair in refreshable_pairs if pair[0] in providers)
-    return frozenset(pair for pair in refreshable_pairs if pair[1] in dataset_keys)
-
-
-async def _validate_refreshable_request(
-    session: AsyncSession,
-    *,
-    scope: Mapping[str, Any],
-    providers: Sequence[str],
-    dataset_keys: Sequence[str],
-) -> str | None:
-    refreshable_pairs = _refreshable_pairs()
-    target_scope_pairs = frozenset(
-        (entry.provider, entry.dataset_key)
-        for entry in catalog_refreshable_entries()
-        if entry.scope_refresh_selector != "none"
-    )
-    refreshable_providers = {provider for provider, _dataset in refreshable_pairs}
-    refreshable_datasets = {dataset for _provider, dataset in refreshable_pairs}
-
-    def reject(provider: str | None, dataset_key: str | None) -> NoReturn:
-        subject = (
-            f"{provider}/{dataset_key}"
-            if provider is not None and dataset_key is not None
-            else provider
-            if provider is not None
-            else dataset_key
-        )
-        raise FeatureUpdateValidationError(
-            "feature update request는 refresh 가능한 provider/dataset만 "
-            f"요청할 수 있습니다: {subject}"
-        )
-
-    if scope.get("type") == "provider_dataset":
-        provider = str(scope.get("provider", ""))
-        dataset_key = str(scope.get("dataset_key", ""))
-        if (provider, dataset_key) not in refreshable_pairs:
-            reject(provider, dataset_key)
-        entry = find_catalog_entry(provider, dataset_key)
-        if entry is None:
-            reject(provider, dataset_key)
-        requested = scope.get("sync_scope")
-        if entry.scope_refresh_selector == "none":
-            if requested is not None:
-                raise FeatureUpdateValidationError(
-                    f"{provider}/{dataset_key}는 sync_scope 선택을 지원하지 않습니다."
-                )
-            return "dataset_wide"
-        raw_scope = entry.sync_scope if requested is None else requested
-        if not isinstance(raw_scope, str):
-            raise FeatureUpdateValidationError("sync_scope는 문자열이어야 합니다.")
-        try:
-            canonical = parse_canonical_sync_scope(raw_scope)
-        except ValueError as exc:
-            raise FeatureUpdateValidationError(str(exc)) from exc
-        if canonical.kind not in {"target_grids", "external_system"}:
-            raise FeatureUpdateValidationError(
-                f"{provider}/{dataset_key}는 target 기반 sync_scope만 지원합니다."
-            )
-        if (
-            canonical.external_system is not None
-            and not await has_active_poi_cache_targets_for_external_system(
-                session,
-                external_system=canonical.external_system,
-            )
-        ):
-            raise FeatureUpdateValidationError(
-                f"활성 POI cache target이 없는 external_system입니다: {canonical.external_system}"
-            )
-        return canonical.value
-
-    if providers and dataset_keys:
-        selected_pairs = {
-            (provider, dataset_key) for provider in providers for dataset_key in dataset_keys
-        }
-    elif providers:
-        selected_pairs = {pair for pair in refreshable_pairs if pair[0] in providers}
-    elif dataset_keys:
-        selected_pairs = {pair for pair in refreshable_pairs if pair[1] in dataset_keys}
-    else:
-        raise FeatureUpdateValidationError(
-            "non-direct feature update request는 provider 또는 dataset_key "
-            "filter를 하나 이상 지정해야 합니다."
-        )
-    unsupported_target_pairs = sorted(selected_pairs & target_scope_pairs)
-    if unsupported_target_pairs:
-        subjects = ", ".join(
-            f"{provider}/{dataset_key}" for provider, dataset_key in unsupported_target_pairs
-        )
-        raise FeatureUpdateValidationError(
-            f"target 선택형 dataset은 provider_dataset scope로만 요청할 수 있습니다: {subjects}"
-        )
-
-    if providers and dataset_keys:
-        for provider in providers:
-            for dataset_key in dataset_keys:
-                if (provider, dataset_key) not in refreshable_pairs:
-                    reject(provider, dataset_key)
-        return None
-
-    for provider in providers:
-        if provider not in refreshable_providers:
-            reject(provider, None)
-    for dataset_key in dataset_keys:
-        if dataset_key not in refreshable_datasets:
-            reject(None, dataset_key)
-    return None
-
-
 @asynccontextmanager
 async def _sigungu_resolver_for_scope(
     scope: Mapping[str, Any],
@@ -509,8 +497,6 @@ async def enqueue_update_request(
     session: AsyncSession,
     *,
     scope: Mapping[str, Any],
-    providers: Sequence[str],
-    dataset_keys: Sequence[str],
     update_policy: Mapping[str, Any],
     run_mode: str,
     priority: int,
@@ -518,20 +504,21 @@ async def enqueue_update_request(
     reason: str | None,
     settings: KorTravelMapSettings,
 ) -> FeatureUpdateRequest:
-    """검증과 geo resolver를 적용해 영속 갱신 요청을 큐에 넣는다."""
-
-    effective_sync_scope = await _validate_refreshable_request(
+    """HTTP scope를 DB-validated canonical snapshot으로 적재한다."""
+    core_scope, direct_memberships = _core_scope_and_memberships(scope)
+    preview = await _preview_resolved_update_request(
         session,
-        scope=scope,
-        providers=providers,
-        dataset_keys=dataset_keys,
+        scope=core_scope,
+        dataset_memberships=direct_memberships,
+        update_policy=update_policy,
+        run_mode=run_mode,
+        priority=priority,
+        settings=settings,
     )
-    return await _enqueue_validated_update_request(
+    return await _enqueue_resolved_update_request(
         session,
-        scope=scope,
-        effective_sync_scope=effective_sync_scope,
-        providers=providers,
-        dataset_keys=dataset_keys,
+        scope=core_scope,
+        dataset_memberships=_membership_targets(preview.dataset_memberships),
         update_policy=update_policy,
         run_mode=run_mode,
         priority=priority,
@@ -541,13 +528,11 @@ async def enqueue_update_request(
     )
 
 
-async def _enqueue_validated_update_request(
+async def _enqueue_resolved_update_request(
     session: AsyncSession,
     *,
     scope: Mapping[str, Any],
-    effective_sync_scope: str | None,
-    providers: Sequence[str],
-    dataset_keys: Sequence[str],
+    dataset_memberships: Sequence[ImportJobDatasetTarget],
     update_policy: Mapping[str, Any],
     run_mode: str,
     priority: int,
@@ -555,21 +540,19 @@ async def _enqueue_validated_update_request(
     reason: str | None,
     settings: KorTravelMapSettings,
 ) -> FeatureUpdateRequest:
-    """검증이 끝난 계획을 scope resolver와 canonical queue writer에 전달한다."""
+    """이미 제출 시점에 고정한 membership으로 canonical queue writer를 호출한다."""
 
     try:
         async with _sigungu_resolver_for_scope(scope, settings=settings) as sigungu_resolver:
             return await enqueue_feature_update_request(
                 session,
                 scope=scope,
-                providers=providers,
-                dataset_keys=dataset_keys,
+                dataset_memberships=dataset_memberships,
                 update_policy=update_policy,
                 run_mode=run_mode,
                 priority=priority,
                 operator=operator,
                 reason=reason,
-                effective_sync_scope=effective_sync_scope,
                 sigungu_resolver=sigungu_resolver,
             )
     except (
@@ -590,28 +573,41 @@ async def preview_update_request(
     session: AsyncSession,
     *,
     scope: Mapping[str, Any],
-    providers: Sequence[str],
-    dataset_keys: Sequence[str],
     update_policy: Mapping[str, Any],
     run_mode: str,
     priority: int,
     settings: KorTravelMapSettings,
 ) -> FeatureUpdateRequestPreview:
-    """검증과 geo resolver를 적용하되 어떤 영속 행도 만들지 않는다."""
-
-    await _validate_refreshable_request(
+    """HTTP scope의 canonical membership snapshot을 비영속적으로 계산한다."""
+    core_scope, direct_memberships = _core_scope_and_memberships(scope)
+    return await _preview_resolved_update_request(
         session,
-        scope=scope,
-        providers=providers,
-        dataset_keys=dataset_keys,
+        scope=core_scope,
+        dataset_memberships=direct_memberships,
+        update_policy=update_policy,
+        run_mode=run_mode,
+        priority=priority,
+        settings=settings,
     )
+
+
+async def _preview_resolved_update_request(
+    session: AsyncSession,
+    *,
+    scope: Mapping[str, Any],
+    dataset_memberships: Sequence[ImportJobDatasetTarget] | None,
+    update_policy: Mapping[str, Any],
+    run_mode: str,
+    priority: int,
+    settings: KorTravelMapSettings,
+) -> FeatureUpdateRequestPreview:
+    """core resolver가 현재 DB catalog에서 exact member를 결정하게 한다."""
     try:
         async with _sigungu_resolver_for_scope(scope, settings=settings) as sigungu_resolver:
             return await preview_feature_update_request_repo(
                 session,
                 scope=scope,
-                providers=providers,
-                dataset_keys=dataset_keys,
+                dataset_memberships=dataset_memberships,
                 update_policy=update_policy,
                 run_mode=run_mode,
                 priority=priority,
@@ -633,8 +629,7 @@ def _assert_reusable_active_request(
     existing: FeatureUpdateRequest,
     *,
     scope: Mapping[str, Any],
-    providers: Sequence[str],
-    dataset_keys: Sequence[str],
+    dataset_memberships: Sequence[ImportJobDatasetTarget],
     update_policy: Mapping[str, Any],
     priority: int,
     operator: str,
@@ -647,13 +642,16 @@ def _assert_reusable_active_request(
 
     existing_scope = dict(existing.scope)
     requested_scope = dict(scope)
-    if existing.scope_type == "provider_dataset":
-        existing_scope.pop("sync_scope", None)
-        requested_scope.pop("sync_scope", None)
     same_plan = (
         existing_scope == requested_scope
-        and existing.providers == tuple(providers)
-        and existing.dataset_keys == tuple(dataset_keys)
+        and {
+            (member.provider_dataset_id, member.sync_scope, member.operation_key)
+            for member in existing.dataset_memberships
+        }
+        == {
+            (member.provider_dataset_id, member.sync_scope, member.operation_key)
+            for member in dataset_memberships
+        }
         and existing.update_policy == dict(update_policy)
         and existing.priority == priority
         and existing.operator == operator
@@ -689,40 +687,37 @@ async def _reuse_active_request(
         ) from exc
 
 
-async def _find_reusable_provider_dataset_request(
+async def _find_reusable_active_request(
     session: AsyncSession,
     *,
     scope: Mapping[str, Any],
-    effective_sync_scope: str | None,
-    providers: Sequence[str],
-    dataset_keys: Sequence[str],
+    dataset_memberships: Sequence[ImportJobDatasetTarget],
     update_policy: Mapping[str, Any],
     run_mode: str,
     priority: int,
     operator: str,
     reason: str | None,
 ) -> FeatureUpdateRequest | None:
-    if scope.get("type") != "provider_dataset" or effective_sync_scope is None:
-        return None
-    provider = scope.get("provider")
-    dataset_key = scope.get("dataset_key")
-    if not isinstance(provider, str) or not isinstance(dataset_key, str):
-        raise FeatureUpdateValidationError(
-            "provider_dataset scope에는 provider와 dataset_key가 필요합니다."
+    """snapshot member와 겹치는 request는 같은 완전한 plan일 때만 재사용한다."""
+    existing_by_id: dict[str, FeatureUpdateRequest] = {}
+    for membership in dataset_memberships:
+        existing = await find_active_provider_dataset_request(
+            session,
+            provider_dataset_id=membership.provider_dataset_id,
+            sync_scope=membership.sync_scope,
+            operation_key=membership.operation_key,
         )
-    existing = await find_active_provider_dataset_request(
-        session,
-        provider=provider,
-        dataset_key=dataset_key,
-        sync_scope=effective_sync_scope,
-    )
-    if existing is None:
+        if existing is not None:
+            existing_by_id[existing.request_id] = existing
+    if not existing_by_id:
         return None
+    if len(existing_by_id) != 1:
+        raise FeatureUpdateActiveScopeConflict(next(iter(existing_by_id.values())))
+    existing = next(iter(existing_by_id.values()))
     _assert_reusable_active_request(
         existing,
         scope=scope,
-        providers=providers,
-        dataset_keys=dataset_keys,
+        dataset_memberships=dataset_memberships,
         update_policy=update_policy,
         priority=priority,
         operator=operator,
@@ -813,21 +808,27 @@ async def create_feature_update_request(
             actor=operator,
         )
         body = await resolve_feature_ids_scope_refs(body, session)
-        canonical_body = _canonical_feature_update_request_body(body)
-        scope = dict(canonical_body["scope"])
-        providers = tuple(canonical_body["providers"])
-        dataset_keys = tuple(canonical_body["dataset_keys"])
-        update_policy = dict(canonical_body["update_policy"])
-        request_fingerprint = _feature_update_request_fingerprint(
-            canonical_body,
-            operator=operator,
-        )
+        scope, direct_memberships = _core_scope_and_memberships(_scope_payload(body.scope))
+        update_policy = _update_policy_payload(body.update_policy)
         mapping = await get_feature_update_request_idempotency(
             session,
             normalized_key,
             actor=operator,
         )
         if mapping is not None:
+            result = await get_update_request(session, mapping.request_id)
+            if result is None:
+                raise FeatureUpdateEnqueueError(
+                    "idempotency ledger가 존재하지 않는 request를 참조합니다."
+                )
+            canonical_body = _canonical_feature_update_request_body(
+                body,
+                dataset_memberships=result.dataset_memberships,
+            )
+            request_fingerprint = _feature_update_request_fingerprint(
+                canonical_body,
+                operator=operator,
+            )
             if (
                 mapping.fingerprint_version != 1
                 or mapping.actor != operator
@@ -837,33 +838,37 @@ async def create_feature_update_request(
                     idempotency_key=normalized_key,
                     request_id=mapping.request_id,
                 )
-            result = await get_update_request(session, mapping.request_id)
-            if result is None:
-                raise FeatureUpdateEnqueueError(
-                    "idempotency ledger가 존재하지 않는 request를 참조합니다."
-                )
             replayed = True
             reused = mapping.reused_active_request
         else:
-            effective_sync_scope = await _validate_refreshable_request(
+            preview = await _preview_resolved_update_request(
                 session,
                 scope=scope,
-                providers=providers,
-                dataset_keys=dataset_keys,
+                dataset_memberships=direct_memberships,
+                update_policy=update_policy,
+                run_mode=body.run_mode,
+                priority=body.priority,
+                settings=settings,
+            )
+            dataset_memberships = _membership_targets(preview.dataset_memberships)
+            canonical_body = _canonical_feature_update_request_body(
+                body,
+                dataset_memberships=preview.dataset_memberships,
+            )
+            request_fingerprint = _feature_update_request_fingerprint(
+                canonical_body,
+                operator=operator,
             )
             await resolved_plan_guard(
-                _resolved_refreshable_pairs(
-                    scope=scope,
-                    providers=providers,
-                    dataset_keys=dataset_keys,
+                frozenset(
+                    (membership.provider_dataset_id, membership.sync_scope)
+                    for membership in preview.dataset_memberships
                 )
             )
-            result = await _find_reusable_provider_dataset_request(
+            result = await _find_reusable_active_request(
                 session,
                 scope=scope,
-                effective_sync_scope=effective_sync_scope,
-                providers=providers,
-                dataset_keys=dataset_keys,
+                dataset_memberships=dataset_memberships,
                 update_policy=update_policy,
                 run_mode=body.run_mode,
                 priority=body.priority,
@@ -876,12 +881,10 @@ async def create_feature_update_request(
                     break
                 try:
                     async with session.begin_nested():
-                        result = await _enqueue_validated_update_request(
+                        result = await _enqueue_resolved_update_request(
                             session,
                             scope=scope,
-                            effective_sync_scope=effective_sync_scope,
-                            providers=providers,
-                            dataset_keys=dataset_keys,
+                            dataset_memberships=dataset_memberships,
                             update_policy=update_policy,
                             run_mode=body.run_mode,
                             priority=body.priority,
@@ -894,12 +897,10 @@ async def create_feature_update_request(
                         raise FeatureUpdateEnqueueError(
                             "feature update request enqueue failed"
                         ) from exc
-                    result = await _find_reusable_provider_dataset_request(
+                    result = await _find_reusable_active_request(
                         session,
                         scope=scope,
-                        effective_sync_scope=effective_sync_scope,
-                        providers=providers,
-                        dataset_keys=dataset_keys,
+                        dataset_memberships=dataset_memberships,
                         update_policy=update_policy,
                         run_mode=body.run_mode,
                         priority=body.priority,
@@ -984,8 +985,6 @@ async def preview_feature_update_request(
     result = await preview_update_request(
         session,
         scope=_scope_payload(body.scope),
-        providers=body.providers,
-        dataset_keys=body.dataset_keys,
         update_policy=_update_policy_payload(body.update_policy),
         run_mode=body.run_mode,
         priority=body.priority,

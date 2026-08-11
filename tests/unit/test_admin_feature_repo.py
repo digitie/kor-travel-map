@@ -164,7 +164,7 @@ async def test_list_admin_features_builds_params_and_next_cursor() -> None:
     page = await repo.list_admin_features(
         session,  # type: ignore[arg-type]
         q=" 광화문 ",
-        providers=["python-mois-api"],
+        provider_dataset_id=42,
         has_issue=True,
         page_size=1,
         sort="issue_count",
@@ -176,7 +176,7 @@ async def test_list_admin_features_builds_params_and_next_cursor() -> None:
     params = session.calls[0]["params"]
     assert params["q_like"] == "%광화문%"
     assert params["q_exact"] is None
-    assert params["providers"] == ["python-mois-api"]
+    assert params["provider_dataset_id"] == 42
     assert params["has_issue"] is True
     # 일반 검색어는 q-필터 상관 서브쿼리(source_records AS qsr, ILIKE 경로)를 그대로 탄다.
     assert "AS qsr" in session.calls[0]["statement"]
@@ -281,7 +281,7 @@ async def test_get_admin_feature_detail_aggregates_rows_without_feature_files_ta
         "raw_data": '{"id": "sr-feature-1"}',
         "fetched_at": _NOW,
         "imported_at": _NOW,
-        "last_seen_at": _NOW,
+        "observed_at": _NOW,
         "expires_at": None,
         "linked_at": _NOW,
     }

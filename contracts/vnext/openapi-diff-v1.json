@@ -5,11 +5,11 @@
   "baseline": {
     "admin": {
       "file": "packages/kor-travel-map-api/openapi.json",
-      "sha256": "9e09ad81c2f2a5a4131266597030bf97ed2ad8772241d9004492b8c8a5c10aaa"
+      "sha256": "ae706a2a2dc82edb4793ad3f6372861e64566d653bebec0ae4a75f9f65f70932"
     },
     "user": {
       "file": "packages/kor-travel-map-api/openapi.user.json",
-      "sha256": "66fc83b3ae918b2f82ae9cf02bea162d8fa84967567e2a450493d93b1953e801"
+      "sha256": "353cd01b7953de4b44a926bd1bf926d36a08fe1c9feaacce042c731727827c70"
     },
     "service": {
       "file": "packages/kor-travel-map-api/openapi.service.json",
@@ -51,6 +51,11 @@
       "date": "2026-08-05",
       "task": "T-VN-32C",
       "change": "baseline sha256 재고정(admin/user — service 무변경): PR-2 값 전환으로 read 응답 feature_id 값이 UUID 정본이 됨(구조 무변경 — description 개정만). echo 예외(batch found/missing 키·item, weather batch target, path echo)는 요청 표기 보존 — kortravelmap.api.identity_projection docstring이 코드 정본."
+    },
+    {
+      "date": "2026-08-07",
+      "task": "T-VN-33",
+      "change": "baseline sha256 재고정(admin/user). 실행 membership identity가 provider_dataset_id+sync_scope+operation_key triple이 되면서(ADR-088) OpsDatasetProviderDataset에 operation_key가 추가되고 sync_scope가 non-null이 됐다. 공개 /v1/providers/{provider}/last-sync의 SyncStateSummary에도 operation_key를 노출하고 동명 query 필터를 더했다 — 없으면 operation만 다른 두 state가 같은 항목으로 보인다. service spec은 무변경."
     }
   ],
   "surfaces": {

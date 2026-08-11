@@ -86,6 +86,11 @@ export default defineConfig({
   use: {
     baseURL,
     proxy: mockedProxy(),
+    // 타임스탬프 단언들이 UTC 호스트를 **암묵 전제**한다. 박아 두지 않으면 이
+    // suite는 Asia/Seoul 같은 머신에서 재현되지 않는다 — 실측: TZ를 로컬로 두면
+    // 57 failed, UTC로 두면 54 failed로 결과가 갈렸다(2026-08-10 최초 실행).
+    // 재현 불가한 테스트는 통과해도 근거가 되지 못한다.
+    timezoneId: "UTC",
     trace: "on-first-retry",
     screenshot: "only-on-failure",
   },

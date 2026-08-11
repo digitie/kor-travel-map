@@ -91,6 +91,7 @@ def _ops_issue(issue_id: str = _VIOLATION_KEY) -> OpsIntegrityIssue:
     now = datetime(2026, 6, 3, tzinfo=UTC)
     return OpsIntegrityIssue(
         issue_id=issue_id,
+        provider_dataset_id=42,
         provider="python-mois-api",
         dataset_key="mois_license_features_bulk",
         source_record_key="src-1",
@@ -115,6 +116,7 @@ def _violation(
     now = datetime(2026, 6, 3, tzinfo=UTC)
     return DataIntegrityViolation(
         issue_id=_VIOLATION_KEY,
+        provider_dataset_id=42,
         provider="python-mois-api",
         dataset_key="mois_license_features_bulk",
         source_record_key="src-1",
@@ -166,8 +168,7 @@ def test_list_issues_passes_filters_and_envelope(
     async def _list(_session: Any, **kwargs: Any) -> OpsIntegrityIssuePage:
         assert kwargs["status"] == "open"
         assert kwargs["violation_type"] == "address_mismatch"
-        assert kwargs["provider"] == "python-mois-api"
-        assert kwargs["dataset_key"] == "mois_license_features_bulk"
+        assert kwargs["provider_dataset_id"] == 42
         assert kwargs["severity"] == "error"
         assert kwargs["feature_id"] == "feature-1"
         assert kwargs["q"] == "종로"
@@ -183,8 +184,7 @@ def test_list_issues_passes_filters_and_envelope(
         params={
             "status": "open",
             "issue_type": "address_mismatch",
-            "provider": "python-mois-api",
-            "dataset_key": "mois_license_features_bulk",
+            "provider_dataset_id": "42",
             "severity": "error",
             "feature_id": "feature-1",
             "q": "종로",

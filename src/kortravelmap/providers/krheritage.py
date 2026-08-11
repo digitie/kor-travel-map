@@ -642,10 +642,6 @@ async def _heritage_item_to_bundle(
         source_entity_type=_HERITAGE_ENTITY_TYPE,
         source_entity_id=natural_key,
         raw_payload_hash=payload_hash,
-        raw_name=item.name_ko,
-        raw_address=location_text,
-        raw_longitude=Decimal(str(item.longitude)) if item.longitude is not None else None,
-        raw_latitude=Decimal(str(item.latitude)) if item.latitude is not None else None,
         raw_data=raw_data,
         fetched_at=fetched_at,
         source_record_key=source_record_key,
@@ -656,7 +652,6 @@ async def _heritage_item_to_bundle(
         source_role=SourceRole.PRIMARY,
         match_method="natural_key",
         confidence=100,
-        is_primary_source=True,
     )
     file_sources = _image_file_sources(
         feature_id=feature_id,
@@ -820,12 +815,6 @@ async def _event_to_bundle(
         source_entity_type=_EVENT_ENTITY_TYPE,
         source_entity_id=natural_key,
         raw_payload_hash=payload_hash,
-        raw_name=event.title,
-        raw_address=event.address,
-        raw_longitude=Decimal(str(event.longitude))
-        if event.longitude is not None
-        else None,
-        raw_latitude=Decimal(str(event.latitude)) if event.latitude is not None else None,
         raw_data=raw_data,
         fetched_at=fetched_at,
         source_record_key=source_record_key,
@@ -836,7 +825,6 @@ async def _event_to_bundle(
         source_role=SourceRole.PRIMARY,
         match_method="natural_key",
         confidence=100,
-        is_primary_source=True,
     )
     file_sources = _image_file_sources(
         feature_id=feature_id,

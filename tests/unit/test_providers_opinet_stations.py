@@ -212,8 +212,8 @@ def test_source_record_provider_dataset() -> None:
     assert src.source_entity_type == "fuel_station"
     assert src.source_entity_id == "A0000001"
     assert len(src.raw_payload_hash) == 32
-    assert src.raw_name == "SK주유소 강남점"
-    assert src.raw_address is not None
+    assert src.raw_data["name"] == "SK주유소 강남점"
+    assert src.raw_data["address_road"] == "서울특별시 강남구 테헤란로 100"
     assert src.fetched_at == _NOW
 
 
@@ -224,7 +224,6 @@ def test_source_link_primary() -> None:
     assert link.source_role == SourceRole.PRIMARY
     assert link.match_method == "natural_key"
     assert link.confidence == 100
-    assert link.is_primary_source is True
 
 
 @pytest.mark.unit

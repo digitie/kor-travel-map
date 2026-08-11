@@ -729,13 +729,14 @@ async def test_kma_weather_alert_history_reads_source_records(
         text(
             """
             INSERT INTO provider_sync.source_entities (
-                source_entity_key, provider, dataset_key, source_entity_type,
+                source_entity_key, provider_dataset_id, source_entity_type,
                 source_entity_id, first_seen_at, last_seen_at
             )
-            VALUES (
-                'se_kma_alert_1', 'python-kma-api', 'kma_weather_alerts',
+            SELECT
+                'se_kma_alert_1', provider_dataset_id,
                 'weather_alert', '11B10101::호우', :fetched_at, :fetched_at
-            )
+            FROM provider_sync.provider_datasets
+            WHERE provider = 'python-kma-api' AND dataset_key = 'kma_weather_alerts'
             """
         ),
         {"fetched_at": _T1},
@@ -744,16 +745,12 @@ async def test_kma_weather_alert_history_reads_source_records(
         text(
             """
             INSERT INTO provider_sync.source_records (
-                source_record_key, source_entity_key,
-                provider, dataset_key, source_entity_type,
-                source_entity_id, raw_name, raw_address, raw_data,
+                source_record_key, source_entity_key, raw_data,
                 raw_payload_hash, fetched_at
             )
             VALUES (
                 'sr_kma_alert_1', 'se_kma_alert_1',
-                'python-kma-api', 'kma_weather_alerts',
-                'weather_alert', '11B10101::호우', '호우주의보', '서울특별시',
-                CAST(:raw_data AS jsonb), 'hash-alert-1', :fetched_at
+                CAST(:raw_data AS jsonb), md5('hash-alert-1'), :fetched_at
             )
             """
         ),
@@ -762,9 +759,9 @@ async def test_kma_weather_alert_history_reads_source_records(
     await migrated_session.execute(
         text(
             """
-            UPDATE provider_sync.source_entities
-            SET current_source_record_key = 'sr_kma_alert_1'
-            WHERE source_entity_key = 'se_kma_alert_1'
+            INSERT INTO provider_sync.source_entity_heads (
+                source_entity_key, current_source_record_key, observed_at
+            ) VALUES ('se_kma_alert_1', 'sr_kma_alert_1', now())
             """
         )
     )
@@ -773,11 +770,11 @@ async def test_kma_weather_alert_history_reads_source_records(
             """
             INSERT INTO provider_sync.source_links (
                 feature_id, source_entity_key, source_role, match_method,
-                confidence, is_primary_source
+                confidence
             )
             VALUES (
                 'f_notice_weather', 'se_kma_alert_1', 'primary',
-                'natural_key', 100, true
+                'natural_key', 100
             )
             """
         )

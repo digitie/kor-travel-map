@@ -12,7 +12,7 @@ import { cn } from "@/lib/utils";
 
 type EntityLinkProps = {
   kind: EntityKind;
-  id: string;
+  id: string | number;
   params?: EntityParams;
   /** 새 탭에서 열기(비교 작업 흐름용). 외부 링크는 항상 새 탭. */
   newTab?: boolean;
@@ -30,7 +30,7 @@ function EntityLink({
   children,
 }: EntityLinkProps) {
   const href = hrefFor(kind, id, params);
-  const label = children ?? id;
+  const label = children ?? String(id);
   if (href === null) {
     return <span className={cn("font-mono", className)}>{label}</span>;
   }

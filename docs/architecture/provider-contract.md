@@ -284,7 +284,6 @@ def <entity>_to_bundle(item: <ProviderTypedModel>, *, fetched_at: datetime) -> F
         source_role=SourceRole.PRIMARY,
         match_method="natural_key",
         confidence=100,
-        is_primary_source=True,
     )
     return FeatureBundle(
         feature=feature,

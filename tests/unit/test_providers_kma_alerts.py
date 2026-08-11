@@ -168,9 +168,8 @@ def test_alert_source_record_metadata() -> None:
     assert src.dataset_key == KMA_WEATHER_ALERT_DATASET_KEY
     assert src.source_entity_type == "weather_alert"
     assert src.fetched_at == _NOW
-    # T-219c — region명이 유일한 위치 단서: Dagster 주소 검증(missing_address,
-    # ADR-046)이 raw_address를 인정한다.
-    assert src.raw_address == "서울특별시"
+    # T-219c — region명이 유일한 위치 단서: Dagster 주소 검증이 원 payload를 읽는다.
+    assert src.raw_data["region_name"] == "서울특별시"
 
 
 @pytest.mark.unit
@@ -179,7 +178,6 @@ def test_alert_source_link_primary() -> None:
     link = bundles[0].source_link
     assert link.source_role == SourceRole.PRIMARY
     assert link.confidence == 100
-    assert link.is_primary_source is True
 
 
 @pytest.mark.unit

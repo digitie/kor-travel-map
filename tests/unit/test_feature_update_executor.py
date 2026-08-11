@@ -1,4 +1,4 @@
-"""``feature_update_executor`` 순수 planning/helper 경로 단위 테스트."""
+"""``feature_update_executor``의 canonical membership 실행 계획 단위 테스트."""
 
 from __future__ import annotations
 
@@ -13,7 +13,10 @@ from kortravelmap.infra.feature_update_executor import (
     SkippedProviderDatasetRefresh,
     build_feature_update_execution_plan,
 )
-from kortravelmap.infra.feature_update_repo import FeatureUpdateRequest
+from kortravelmap.infra.feature_update_repo import (
+    FeatureUpdateRequest,
+    FeatureUpdateRequestDataset,
+)
 from kortravelmap.infra.provider_refresh_policy_repo import ProviderRefreshPolicy
 from kortravelmap.infra.scope_repo import (
     CacheTargetFeatureMatch,
@@ -31,15 +34,35 @@ class _IdleConnection:
         return False
 
 
+def _member(
+    provider_dataset_id: int,
+    provider: str,
+    dataset_key: str,
+    *,
+    sync_scope: str = "dataset_wide",
+    operation_key: str = "refresh_test_dataset",
+) -> FeatureUpdateRequestDataset:
+    return FeatureUpdateRequestDataset(
+        feature_update_request_dataset_id=None,
+        provider_dataset_id=provider_dataset_id,
+        sync_scope=sync_scope,
+        provider=provider,
+        dataset_key=dataset_key,
+        operation_key=operation_key,
+    )
+
+
 def _request(
     *,
     scope_type: str = "cache_target_keys",
     scope: dict[str, object] | None = None,
-    providers: tuple[str, ...] = (),
-    dataset_keys: tuple[str, ...] = (),
+    dataset_memberships: tuple[FeatureUpdateRequestDataset, ...] | None = None,
     update_policy: dict[str, object] | None = None,
 ) -> FeatureUpdateRequest:
-    now = datetime(2026, 6, 3, tzinfo=UTC)
+    now = datetime(2026, 8, 7, tzinfo=UTC)
+    members = dataset_memberships or (
+        _member(11, "python-a-api", "dataset-a"),
+    )
     return FeatureUpdateRequest(
         request_id="req-1",
         scope_type=scope_type,
@@ -50,8 +73,8 @@ def _request(
             "target_keys": [],
             "scope_mode": "center_radius",
         },
-        providers=providers,
-        dataset_keys=dataset_keys,
+        dataset_membership_mode="single" if len(members) == 1 else "multiple",
+        dataset_memberships=members,
         update_policy=update_policy or {},
         run_mode="queued",
         priority=100,
@@ -98,14 +121,16 @@ async def test_execution_entrypoints_reject_missing_or_untrimmed_owner(
 
 def _policy(
     *,
+    provider_dataset_id: int = 11,
     provider: str = "python-a-api",
     dataset_key: str = "dataset-a",
     source_kind: str = "openapi",
     targeted_policy: str = "allow_targeted",
     enabled: bool = True,
 ) -> ProviderRefreshPolicy:
-    now = datetime(2026, 6, 3, tzinfo=UTC)
+    now = datetime(2026, 8, 7, tzinfo=UTC)
     return ProviderRefreshPolicy(
+        provider_dataset_id=provider_dataset_id,
         provider=provider,
         dataset_key=dataset_key,
         source_kind=source_kind,
@@ -144,10 +169,11 @@ def _target() -> CacheTargetScopeTarget:
     )
 
 
-def test_matched_scope_helpers_include_optional_payloads() -> None:
+def test_matched_scope_helpers_include_canonical_membership() -> None:
     match = CacheTargetFeatureMatch(
         target_id="target-1",
         feature_id="feature-1",
+        provider_dataset_id=11,
         provider="python-a-api",
         dataset_key="dataset-a",
         distance_m=12.5,
@@ -155,6 +181,8 @@ def test_matched_scope_helpers_include_optional_payloads() -> None:
     )
     refresh = ProviderDatasetRefreshScope(
         request_id="req-1",
+        provider_dataset_id=11,
+        sync_scope="dataset_wide",
         provider="python-a-api",
         dataset_key="dataset-a",
         scope_type="cache_target_keys",
@@ -168,11 +196,15 @@ def test_matched_scope_helpers_include_optional_payloads() -> None:
         feature_ids=("feature-1",),
         feature_count=1,
         prevent_provider_reactivation=True,
+        operation_key="refresh_dataset_a",
         rate_limit={"max_requests_per_minute": 10},
         target_ids=("target-1",),
         target_matches=(match,),
     )
     result = ProviderDatasetRefreshResult(
+        provider_dataset_id=11,
+        sync_scope="dataset_wide",
+        operation_key="refresh_dataset_a",
         provider="python-a-api",
         dataset_key="dataset-a",
         loaded_feature_ids=("feature-2",),
@@ -180,46 +212,31 @@ def test_matched_scope_helpers_include_optional_payloads() -> None:
         metadata={"cursor": "abc"},
     )
     skipped = SkippedProviderDatasetRefresh(
+        provider_dataset_id=12,
+        sync_scope="dataset_wide",
         provider="python-b-api",
         dataset_key="dataset-b",
         reason="follow_system_skipped",
         feature_count=2,
+        operation_key="refresh_dataset_b",
     )
 
+    assert refresh.as_matched_scope()["provider_dataset_id"] == 11
     assert refresh.as_matched_scope()["target_ids"] == ["target-1"]
     assert refresh.as_matched_scope()["rate_limit"]["max_requests_per_minute"] == 10
     assert result.as_matched_scope()["loaded_feature_ids"] == ["feature-2"]
     assert result.as_matched_scope()["metadata"] == {"cursor": "abc"}
+    assert skipped.as_matched_scope()["sync_scope"] == "dataset_wide"
     assert skipped.as_matched_scope()["reason"] == "follow_system_skipped"
 
 
-def test_skip_reason_covers_policy_and_filter_branches() -> None:
+def test_skip_reason_covers_policy_and_override_branches() -> None:
     resolution = ScopeResolution(
         scope_type="cache_target_keys",
         features=(FeatureScopeRow("feature-1", "11110"),),
         cache_targets=(_target(),),
     )
 
-    assert (
-        executor._skip_reason(
-            request=_request(providers=("python-a-api",)),
-            provider="python-x-api",
-            dataset_key="dataset-a",
-            policy=None,
-            resolution=resolution,
-        )
-        == "provider_filter"
-    )
-    assert (
-        executor._skip_reason(
-            request=_request(dataset_keys=("dataset-a",)),
-            provider="python-a-api",
-            dataset_key="dataset-x",
-            policy=None,
-            resolution=resolution,
-        )
-        == "dataset_filter"
-    )
     assert (
         executor._skip_reason(
             request=_request(),
@@ -257,19 +274,6 @@ def test_skip_reason_covers_policy_and_filter_branches() -> None:
     assert (
         executor._skip_reason(
             request=_request(),
-            provider="python-a-api",
-            dataset_key="dataset-a",
-            policy=_policy(source_kind="filedata", targeted_policy="disabled"),
-            resolution=ScopeResolution(
-                scope_type="cache_target_keys",
-                features=(FeatureScopeRow("feature-1", "11110"),),
-            ),
-        )
-        == "targeted_policy_disabled"
-    )
-    assert (
-        executor._skip_reason(
-            request=_request(),
             provider="python-b-api",
             dataset_key="dataset-b",
             policy=_policy(
@@ -283,7 +287,7 @@ def test_skip_reason_covers_policy_and_filter_branches() -> None:
     )
 
 
-async def test_build_plan_applies_filters_overrides_and_rate_limits(
+async def test_build_plan_uses_request_snapshot_after_catalog_changes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     request = _request(
@@ -293,109 +297,120 @@ async def test_build_plan_applies_filters_overrides_and_rate_limits(
             "target_keys": ["poi-1"],
             "scope_mode": "center_radius",
         },
-        providers=(
-            "python-a-api",
-            "python-b-api",
-            "python-c-api",
-            "python-d-api",
+        dataset_memberships=(
+            _member(11, "python-a-api", "dataset-a"),
+            _member(12, "python-b-api", "dataset-b"),
+            _member(13, "python-c-api", "dataset-c"),
         ),
-        dataset_keys=("dataset-a", "dataset-b", "dataset-c"),
         update_policy={"prevent_provider_reactivation": False},
     )
     target_match = CacheTargetFeatureMatch(
         target_id="target-1",
         feature_id="feature-1",
+        provider_dataset_id=11,
         provider="python-a-api",
         dataset_key="dataset-a",
         distance_m=10.0,
         relation="within_radius",
     )
+    # 실행 시점 catalog에는 새 dataset만 남아도 request가 저장한 membership은 바뀌지 않는다.
     resolution = ScopeResolution(
         scope_type="cache_target_keys",
-        features=(
-            FeatureScopeRow("feature-1", "11110"),
-            FeatureScopeRow("feature-2", "11110"),
-        ),
+        features=(FeatureScopeRow("feature-1", "11110"),),
         provider_datasets=(
-            ProviderDatasetScope("python-a-api", "dataset-a", 1),
-            ProviderDatasetScope("python-b-api", "dataset-b", 1),
-            ProviderDatasetScope("python-c-api", "dataset-c", 1),
-            ProviderDatasetScope("python-d-api", "dataset-d", 1),
-            ProviderDatasetScope("python-e-api", "dataset-e", 1),
+            ProviderDatasetScope(
+                "python-new-api",
+                "new-dataset",
+                1,
+                99,
+                "dataset_wide",
+                "refresh_new_dataset",
+            ),
         ),
         sigungu_codes=("11110",),
         cache_targets=(_target(),),
-        cache_target_matches=(target_match, target_match),
+        cache_target_matches=(target_match,),
         extra_matched_scope={"target_count": 1, "active_target_count": 1},
     )
     policies = {
-        ("python-a-api", "dataset-a"): _policy(),
-        ("python-b-api", "dataset-b"): _policy(
+        11: _policy(provider_dataset_id=11),
+        12: _policy(
+            provider_dataset_id=12,
             provider="python-b-api",
             dataset_key="dataset-b",
             targeted_policy="follow_system",
         ),
-        ("python-c-api", "dataset-c"): _policy(
+        13: _policy(
+            provider_dataset_id=13,
             provider="python-c-api",
             dataset_key="dataset-c",
             enabled=False,
         ),
     }
+    policy_lookups: list[int] = []
 
     async def fake_count(*_args: object, **_kwargs: object) -> ScopeResolution:
         return resolution
 
     async def fake_policy(
-        _session: object, *, provider: str, dataset_key: str
+        _session: object, *, provider_dataset_id: int
     ) -> ProviderRefreshPolicy | None:
-        return policies.get((provider, dataset_key))
+        policy_lookups.append(provider_dataset_id)
+        return policies.get(provider_dataset_id)
 
     monkeypatch.setattr(executor, "count_features_matching_scope", fake_count)
     monkeypatch.setattr(executor, "get_provider_refresh_policy", fake_policy)
 
     plan = await build_feature_update_execution_plan(object(), request)
 
-    assert [(s.provider, s.dataset_key) for s in plan.refresh_scopes] == [
-        ("python-a-api", "dataset-a"),
-        ("python-b-api", "dataset-b"),
-    ]
+    assert [
+        (scope.provider_dataset_id, scope.sync_scope)
+        for scope in plan.refresh_scopes
+    ] == [(11, "dataset_wide"), (12, "dataset_wide")]
+    assert policy_lookups == [11, 12, 13]
     assert plan.refresh_scopes[0].target_ids == ("target-1",)
     assert plan.refresh_scopes[0].prevent_provider_reactivation is False
     assert plan.refresh_scopes[0].rate_limit["max_requests_per_hour"] == 100
     assert {
-        (s.provider, s.dataset_key): s.reason for s in plan.skipped_scopes
-    } == {
-        ("python-c-api", "dataset-c"): "policy_disabled",
-        ("python-d-api", "dataset-d"): "dataset_filter",
-        ("python-e-api", "dataset-e"): "provider_filter",
-    }
+        (scope.provider_dataset_id, scope.sync_scope): scope.reason
+        for scope in plan.skipped_scopes
+    } == {(13, "dataset_wide"): "policy_disabled"}
     assert plan.matched_scope["target_count"] == 1
     assert len(plan.matched_scope["eligible_provider_scopes"]) == 2
-    assert len(plan.matched_scope["skipped_provider_scopes"]) == 3
+    assert len(plan.matched_scope["skipped_provider_scopes"]) == 1
 
 
-async def test_build_plan_adds_provider_dataset_scope_when_resolution_has_none(
+async def test_direct_plan_rebuilds_transient_read_scope_from_membership(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     request = _request(
         scope_type="provider_dataset",
         scope={
             "type": "provider_dataset",
-            "provider": "python-a-api",
-            "dataset_key": "dataset-a",
+            "provider_dataset_id": 11,
+            "sync_scope": "dataset_wide",
+            "operation_key": "refresh_test_dataset",
         },
+        dataset_memberships=(_member(11, "python-a-api", "dataset-a"),),
     )
     resolution = ScopeResolution(
         scope_type="provider_dataset",
         features=(FeatureScopeRow("feature-1", "11110"),),
     )
+    resolved_scopes: list[dict[str, object]] = []
 
-    async def fake_count(*_args: object, **_kwargs: object) -> ScopeResolution:
+    async def fake_count(
+        _session: object,
+        scope: dict[str, object],
+        **_kwargs: object,
+    ) -> ScopeResolution:
+        resolved_scopes.append(scope)
         return resolution
 
     async def fake_policy(
-        _session: object, *, provider: str, dataset_key: str
+        _session: object, *, provider_dataset_id: int
     ) -> ProviderRefreshPolicy | None:
+        assert provider_dataset_id == 11
         return None
 
     monkeypatch.setattr(executor, "count_features_matching_scope", fake_count)
@@ -403,7 +418,14 @@ async def test_build_plan_adds_provider_dataset_scope_when_resolution_has_none(
 
     plan = await build_feature_update_execution_plan(object(), request)
 
+    assert resolved_scopes == [
+        {
+            "type": "provider_dataset",
+            "provider_dataset_id": 11,
+            "sync_scope": "dataset_wide",
+            "operation_key": "refresh_test_dataset",
+        }
+    ]
     assert len(plan.refresh_scopes) == 1
-    assert plan.refresh_scopes[0].provider == "python-a-api"
-    assert plan.refresh_scopes[0].dataset_key == "dataset-a"
+    assert plan.refresh_scopes[0].provider_dataset_id == 11
     assert plan.refresh_scopes[0].feature_count == 1

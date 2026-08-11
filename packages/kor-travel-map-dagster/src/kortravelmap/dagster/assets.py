@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Final, cast
 
 from kortravelmap.client import FestivalEnrichmentReviewRefreshResult
+from kortravelmap.core.feature_operation import ProviderDatasetOperationMembership
 from kortravelmap.geocoding import ReverseGeocoder
 from kortravelmap.infra.feature_repo import (
     AirQualityLoadResult,
@@ -141,7 +142,11 @@ from .etl import (
     _dagster_run_id,
     load_feature_bundles_for_dagster,
 )
-from .feature_operation_tracking import run_tracked_feature_asset
+from .feature_operation_tracking import (
+    FeatureOperationGuardUnavailable,
+    require_feature_operation_guard,
+    run_tracked_feature_asset,
+)
 
 if TYPE_CHECKING:
     from kortravelmap.client import AsyncKorTravelMapClient
@@ -386,10 +391,14 @@ async def _skip_opinet_if_already_succeeded_today(
     persisted sync state로 합쳐, place/price의 불필요한 당일 중복 호출을 줄인다.
     실패 run은 success 시각을 전진시키지 않아 같은 날 재시도할 수 있다.
     """
-    state = await client.get_sync_state(
+    membership = await _exact_sync_membership(
+        context,
+        client,
+        boundary="opinet_sync_state",
         provider=OPINET_PROVIDER_NAME,
         dataset_key=dataset_key,
     )
+    state = await client.get_sync_state_for_operation_membership(membership=membership)
     last_success_at = state.last_success_at if state is not None else None
     if last_success_at is None:
         return False
@@ -689,12 +698,18 @@ async def _guard_notice_snapshot_watermark(
     Dagster pool이 정상 경로를 직렬화하지만, 배포 이전 queued run이나 pool 설정이
     반영되지 않은 실행까지 방어하도록 persisted sync cursor를 watermark로 쓴다.
     """
-    get_sync_state = getattr(client, "get_sync_state", None)
+    get_sync_state = getattr(client, "get_sync_state_for_operation_membership", None)
     if not callable(get_sync_state):
-        raise RuntimeError("KREX notice snapshot은 get_sync_state를 제공하는 client가 필요하다.")
-    if not callable(getattr(client, "record_sync_success", None)):
         raise RuntimeError(
-            "KREX notice snapshot은 record_sync_success를 제공하는 client가 필요하다."
+            "KREX notice snapshot은 get_sync_state_for_operation_membership을 "
+            "제공하는 client가 필요하다."
+        )
+    if not callable(
+        getattr(client, "record_sync_success_for_operation_membership", None)
+    ):
+        raise RuntimeError(
+            "KREX notice snapshot은 record_sync_success_for_operation_membership을 "
+            "제공하는 client가 필요하다."
         )
     watermarks: list[datetime] = []
     get_scope_watermark = getattr(client, "get_notice_snapshot_watermark", None)
@@ -712,7 +727,14 @@ async def _guard_notice_snapshot_watermark(
                 raise RuntimeError("notice scope watermark는 timezone-aware datetime이어야 한다.")
             watermarks.append(scope_watermark)
 
-    state = await get_sync_state(provider=provider, dataset_key=dataset_key)
+    membership = await _exact_sync_membership(
+        context,
+        client,
+        boundary="notice_snapshot_watermark",
+        provider=provider,
+        dataset_key=dataset_key,
+    )
+    state = await get_sync_state(membership=membership)
     if state is not None:
         cursor = getattr(state, "cursor", None)
         if not isinstance(cursor, dict):
@@ -1567,6 +1589,84 @@ def _feature_result_cursor_extra(result: DagsterFeatureLoadResult) -> dict[str, 
     }
 
 
+
+async def _exact_sync_membership(
+    context: AssetExecutionContext,
+    client: "AsyncKorTravelMapClient",
+    *,
+    boundary: str,
+    provider: str,
+    dataset_key: str,
+) -> ProviderDatasetOperationMembership:
+    """sync-state 읽기·쓰기에 쓸 **exact** membership을 얻는다.
+
+    T-VN-33 이후 sync state의 정체성은 ``provider_dataset_id + sync_scope +
+    operation_key``다(ADR-088 §결정 2). provider/dataset label로는 어느 행을
+    가리키는지 결정되지 않는다.
+
+    획득 경로는 ``kma_weather._exact_kma_sync_membership``과 같은 계약이다:
+    queue worker가 request를 claim할 때 고정한 typed membership resource가 있으면
+    그것을 쓰고, 없으면 guard가 고정한 **실행 manifest** 안에서 고른다.
+    **provider나 dataset label에서 membership을 역산하는 fallback은 두지 않는다** —
+    그렇게 하면 guard가 고정한 실행 대상과 다른 행에 cursor를 쓸 수 있다.
+
+    카탈로그 drift 검사는 "manifest == 실행 가능 집합"이 아니라 **"manifest ⊆ 실행
+    가능 집합"**이다. run은 operation의 실행 가능 scope 중 일부만 실행 manifest로
+    선언할 수 있고(``EXECUTION_SCOPES_TAG``), 그때 두 집합은 같지 않다. 같기를
+    요구하면 dataset을 여러 개 묶은 operation의 적재가 여기서 죽는다 —
+    ``0089_tvn33_expand_seed``는 ``feature_place_knps_points_job``과
+    ``feature_geometry_knps_records_job``에 각각 dataset 5개를 결박하는데 asset은
+    run 1회에 1개만 적재한다.
+
+    KMA 격자 dataset은 이 함수를 타지 않는다. 같은 계약의 게이트가
+    ``kma_weather._exact_kma_sync_membership``에 따로 있고, KMA weather asset은
+    그쪽만 호출한다.
+    """
+
+    resource_membership = await _resource_value(
+        context,
+        "feature_update_membership",
+        default=None,
+    )
+    if resource_membership is not None:
+        if not isinstance(resource_membership, ProviderDatasetOperationMembership):
+            raise FeatureOperationGuardUnavailable(
+                boundary=boundary,
+                reason="feature_update_membership_wrong_type",
+            )
+        return resource_membership
+
+    guard = require_feature_operation_guard(context, boundary=boundary)
+    if guard.operation_key is None:
+        raise FeatureOperationGuardUnavailable(
+            boundary=boundary,
+            reason="operation_key_missing",
+        )
+    executable = await client.resolve_feature_operation_memberships(
+        operation_key=guard.operation_key,
+    )
+    if not set(guard.memberships) <= set(executable):
+        raise FeatureOperationGuardUnavailable(
+            boundary=boundary,
+            reason="membership_snapshot_changed",
+        )
+    # 한 operation이 여러 dataset을 다루는 경우가 있다(예: KNPS point는 5개).
+    # 그래서 "정확히 하나"로는 고를 수 없고, **이번 호출이 적재한 dataset**으로
+    # 좁힌다. operation은 여전히 guard가 준 것이므로 label에서 역산하는 것이
+    # 아니다 — guard가 고정한 manifest 안에서 고르기만 한다.
+    membership = await client.resolve_feature_operation_dataset_membership(
+        operation_key=guard.operation_key,
+        provider=provider,
+        dataset_key=dataset_key,
+    )
+    if membership not in guard.memberships:
+        raise FeatureOperationGuardUnavailable(
+            boundary=boundary,
+            reason="membership_outside_guard_snapshot",
+        )
+    return membership
+
+
 async def _record_feature_sync_success(
     context: AssetExecutionContext,
     client: "AsyncKorTravelMapClient",
@@ -1592,9 +1692,15 @@ async def _record_feature_sync_success(
         "asset_key": asset_key,
         **cursor_extra,
     }
-    await record_sync_success(
+    membership = await _exact_sync_membership(
+        context,
+        client,
+        boundary="feature_sync_state",
         provider=provider,
         dataset_key=dataset_key,
+    )
+    await client.record_sync_success_for_operation_membership(
+        membership=membership,
         cursor=cursor,
     )
 

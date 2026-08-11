@@ -8,6 +8,7 @@ source_link)을 실 PostGIS에서 검증한다.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from hashlib import md5
 from typing import TYPE_CHECKING
 
 import pytest
@@ -18,9 +19,13 @@ from kortravelmap.enrichment import (
     apply_place_phone_enrichment,
     find_place_phone_candidates,
 )
-from kortravelmap.infra.feature_repo import get_feature_row
+from kortravelmap.infra.feature_repo import (
+    get_feature_row,
+    resolve_active_provider_dataset_id,
+)
 from kortravelmap.infra.models import (
     FeatureRow,
+    SourceEntityHeadRow,
     SourceEntityRow,
     SourceLinkRow,
     SourceRecordRow,
@@ -59,14 +64,17 @@ async def _seed_place(
         kind="place",
         detail={"place_kind": "restaurant", "phones": phones},
     )
+    # T-VN-33: entity 소유는 canonical ``provider_dataset_id`` 하나로 표현되고,
+    # 현재 record 포인터는 ``source_entity_heads``가 소유한다.
+    provider_dataset_id = await resolve_active_provider_dataset_id(
+        session, provider=PROVIDER_NAME, dataset_key=DATASET_KEY_BULK
+    )
     session.add(
         SourceEntityRow(
             source_entity_key=source_entity_key,
-            provider=PROVIDER_NAME,
-            dataset_key=DATASET_KEY_BULK,
+            provider_dataset_id=provider_dataset_id,
             source_entity_type=_ENTITY,
             source_entity_id=entity_id,
-            current_source_record_key=None,
             first_seen_at=_FETCHED,
             last_seen_at=_FETCHED,
         )
@@ -76,19 +84,20 @@ async def _seed_place(
         SourceRecordRow(
             source_record_key=source_record_key,
             source_entity_key=source_entity_key,
-            provider=PROVIDER_NAME,
-            dataset_key=DATASET_KEY_BULK,
-            source_entity_type=_ENTITY,
-            source_entity_id=entity_id,
-            raw_payload_hash="h",
+            raw_payload_hash=md5(feature_id.encode()).hexdigest(),
             raw_data={},
             fetched_at=_FETCHED,
+            imported_at=_FETCHED,
         )
     )
     await session.flush()
-    entity = await session.get(SourceEntityRow, source_entity_key)
-    assert entity is not None
-    entity.current_source_record_key = source_record_key
+    session.add(
+        SourceEntityHeadRow(
+            source_entity_key=source_entity_key,
+            current_source_record_key=source_record_key,
+            observed_at=_FETCHED,
+        )
+    )
     await session.flush()
     session.add(
         SourceLinkRow(
@@ -97,7 +106,6 @@ async def _seed_place(
             source_role="primary",
             match_method="natural_key",
             confidence=100,
-            is_primary_source=True,
         )
     )
     await session.flush()

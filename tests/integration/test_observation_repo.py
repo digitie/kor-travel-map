@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import pytest
+from sqlalchemy import text
 
 from kortravelmap.core.ids import make_payload_hash, make_source_record_key
 from kortravelmap.dto import (
@@ -31,6 +32,26 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.integration
 
 _FEATURE_ID = "feature:multi-observation-test"
+
+
+async def _seed_active_provider_dataset(
+    session: AsyncSession, *, provider: str, dataset_key: str
+) -> None:
+    """관측 fixture가 쓰는 동적 provider/dataset 정본을 준비한다."""
+    await session.execute(
+        text(
+            """
+            INSERT INTO provider_sync.provider_datasets (
+                provider, dataset_key, display_name, source_kind, is_active
+            ) VALUES (
+                :provider, :dataset_key, 'observation integration fixture', 'manual', true
+            )
+            ON CONFLICT (provider, dataset_key) DO UPDATE
+            SET is_active = true
+            """
+        ),
+        {"provider": provider, "dataset_key": dataset_key},
+    )
 
 
 def _bundle(
@@ -69,7 +90,6 @@ def _bundle(
         source_entity_type="place",
         source_entity_id=entity_id,
         raw_payload_hash=payload_hash,
-        raw_name=feature.name,
         raw_data=raw_data,
         fetched_at=fetched_at,
         imported_at=fetched_at,
@@ -80,7 +100,6 @@ def _bundle(
         source_role=SourceRole.PRIMARY,
         match_method="natural_key",
         confidence=100,
-        is_primary_source=True,
         created_at=fetched_at,
     )
     return FeatureBundle(feature=feature, source_record=record, source_link=link)
@@ -113,6 +132,12 @@ async def test_current_observations_keep_multiple_primary_entities_and_history(
         fetched_at=second_at,
     )
 
+    await _seed_active_provider_dataset(
+        migrated_session, provider=provider_a, dataset_key="observation-test"
+    )
+    await _seed_active_provider_dataset(
+        migrated_session, provider=provider_b, dataset_key="observation-test"
+    )
     await load_bundle(migrated_session, old)
     second_result = await load_bundle(migrated_session, current)
     await load_bundle(migrated_session, other)
@@ -123,14 +148,14 @@ async def test_current_observations_keep_multiple_primary_entities_and_history(
     assert second_result.source_links_inserted == 0
     assert second_result.source_links_updated == 1
     assert reappeared_result.source_records_inserted == 0
-    assert reappeared_result.features_updated == 1
+    assert reappeared_result.features_updated == 0
 
     observations = await get_current_observations(migrated_session, _FEATURE_ID)
     assert len(observations) == 2
-    assert all(item.is_primary_source for item in observations)
+    assert all(item.source_role == SourceRole.PRIMARY for item in observations)
     by_provider = {item.provider: item for item in observations}
-    assert by_provider[provider_a].source_record_key == old.source_record.source_record_key
-    assert by_provider[provider_a].raw_data["edition"] == "2023"
+    assert by_provider[provider_a].source_record_key == current.source_record.source_record_key
+    assert by_provider[provider_a].raw_data["edition"] == "2025"
     assert by_provider[provider_b].raw_data["edition"] == "current"
 
     batch = await get_current_observations_by_feature_ids(
@@ -151,7 +176,7 @@ async def test_current_observations_keep_multiple_primary_entities_and_history(
         source_entity_key=entity_key,
         limit=1,
     )
-    assert [item.raw_data["edition"] for item in first_page.items] == ["2023"]
+    assert [item.raw_data["edition"] for item in first_page.items] == ["2025"]
     assert first_page.items[0].is_current
     assert first_page.next_cursor is not None
 
@@ -162,6 +187,6 @@ async def test_current_observations_keep_multiple_primary_entities_and_history(
         cursor=first_page.next_cursor,
         limit=1,
     )
-    assert [item.raw_data["edition"] for item in second_page.items] == ["2025"]
+    assert [item.raw_data["edition"] for item in second_page.items] == ["2023"]
     assert not second_page.items[0].is_current
     assert second_page.next_cursor is None

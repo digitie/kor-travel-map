@@ -88,7 +88,11 @@ def kor_travel_geo_base_url() -> str:
 
 
 _TRUNCATE_SQL = (
-    "TRUNCATE feature.features, provider_sync.source_records, "
+    # ``source_entities``를 빼면 entity가 링크 없이 남아 정합성 F1(orphan)이
+    # 다른 테스트에서 켜진다 — T-VN-33의 head 도입으로 record CASCADE가
+    # 더 이상 entity를 지우지 않는다.
+    "TRUNCATE feature.features, provider_sync.source_entities, "
+    "provider_sync.source_entity_heads, provider_sync.source_records, "
     "provider_sync.source_links, ops.dedup_review_queue RESTART IDENTITY CASCADE"
 )
 

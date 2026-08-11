@@ -82,6 +82,7 @@ class OpsIntegrityIssueRecord(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     issue_id: str
+    provider_dataset_id: int | None = None
     provider: str | None = None
     dataset_key: str | None = None
     source_record_key: str | None = None
@@ -182,6 +183,7 @@ def _report(row: OpsConsistencyReport | None) -> OpsConsistencyReportRecord | No
 def _issue(row: OpsIntegrityIssue) -> OpsIntegrityIssueRecord:
     return OpsIntegrityIssueRecord(
         issue_id=row.issue_id,
+        provider_dataset_id=row.provider_dataset_id,
         provider=row.provider,
         dataset_key=row.dataset_key,
         source_record_key=row.source_record_key,
@@ -400,8 +402,7 @@ async def list_integrity_issues(
     issue_status: Annotated[IssueStatus | None, Query(alias="status")] = "open",
     severity: Annotated[IssueSeverity | None, Query()] = None,
     violation_type: Annotated[str | None, Query()] = None,
-    provider: Annotated[str | None, Query()] = None,
-    dataset_key: Annotated[str | None, Query()] = None,
+    provider_dataset_id: Annotated[int | None, Query(gt=0)] = None,
     feature_id: Annotated[str | None, Query()] = None,
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
     cursor: Annotated[str | None, Query()] = None,
@@ -414,8 +415,7 @@ async def list_integrity_issues(
             status=issue_status,
             severity=severity,
             violation_type=violation_type,
-            provider=provider,
-            dataset_key=dataset_key,
+            provider_dataset_id=provider_dataset_id,
             # T-VN-32C PR-2 — UUID 표기 필터를 legacy 정본 키로 정규화 (S7).
             feature_id=await feature_identity.legacy_id_for_filter(session, feature_id),
             limit=page_size,

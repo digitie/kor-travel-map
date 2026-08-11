@@ -126,20 +126,14 @@ class ReviewSourceDetailRecord(BaseModel):
     dataset_key: str
     source_entity_type: str
     source_entity_id: str
-    source_version: str | None = None
-    raw_name: str | None = None
-    raw_address: str | None = None
-    raw_longitude: float | None = None
-    raw_latitude: float | None = None
     raw_payload_hash: str
     raw_data: dict[str, Any]
     fetched_at: datetime | None = None
     imported_at: datetime | None = None
-    expires_at: datetime | None = None
+    observed_at: datetime | None = None
     source_role: str | None = None
     match_method: str | None = None
     confidence: int | None = None
-    is_primary_source: bool | None = None
     linked_at: datetime | None = None
 
 

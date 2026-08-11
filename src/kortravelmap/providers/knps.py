@@ -314,13 +314,6 @@ async def _point_record_to_bundle(
         source_entity_type=_SOURCE_ENTITY_TYPE,
         source_entity_id=record.source_id,
         raw_payload_hash=payload_hash,
-        raw_name=record.name,
-        raw_longitude=Decimal(str(record.longitude))
-        if record.longitude is not None
-        else None,
-        raw_latitude=Decimal(str(record.latitude))
-        if record.latitude is not None
-        else None,
         raw_data=raw_data,
         fetched_at=fetched_at,
         source_record_key=source_record_key,
@@ -331,7 +324,6 @@ async def _point_record_to_bundle(
         source_role=SourceRole.PRIMARY,  # KNPS는 해당 시설의 1차 source
         match_method="natural_key",
         confidence=100,
-        is_primary_source=True,
     )
     return FeatureBundle(
         feature=feature, source_record=source_record, source_link=source_link
@@ -750,50 +742,6 @@ def _geometry_record_name(
     return None
 
 
-def _geometry_record_raw_name(
-    record: KnpsGeometryRecord, spec: KnpsGeometryDatasetSpec
-) -> str | None:
-    """``raw_name``(verbatim 원천 문자열)을 결정한다 (#546).
-
-    point path(``raw_name=record.name``)와 다른 provider에 맞춰, 번역/합성/복구 이전의
-    **원천 그대로**를 저장한다. ``record.name``이 비어 있을 때만 이름을 끌어온 raw
-    source column을 verbatim으로 fallback한다 (``_geometry_record_name``과 같은 우선순위,
-    단 ``국립공원`` 합성·영문→한글 번역은 적용하지 않음). ``Feature.name``에는 여전히
-    normalized 이름을 쓴다.
-    """
-    if record.name is not None and record.name.strip():
-        return record.name
-    raw = record.raw
-    if spec.dataset_key == "knps_protected_areas":
-        return _first_raw_str(
-            raw,
-            "ORIG_NAME",
-            "KOR_NM",
-            "NAME_KOR",
-            "국문명",
-            "명칭",
-            "이름",
-            "NAME",
-            "DESIG_ENG",
-            "DESIG",
-        )
-    if spec.dataset_key == "knps_park_boundaries":
-        return _first_raw_str(raw, "NPK_NM", "국립공원명", "PARK_NM", "name", "NAME")
-    return None
-
-
-def _first_raw_str(raw: Mapping[str, Any], *keys: str) -> str | None:
-    """raw dict에서 첫 번째 비어 있지 않은 값을 normalize 없이 verbatim으로 꺼낸다."""
-    for key in keys:
-        value = raw.get(key)
-        if value is None:
-            continue
-        text = str(value)
-        if text.strip():
-            return text
-    return None
-
-
 def _geometry_detail(
     spec: KnpsGeometryDatasetSpec, feature_id: str, raw: dict[str, Any]
 ) -> RouteDetail | AreaDetail:
@@ -832,9 +780,6 @@ async def _geometry_record_to_bundle(
     normalized_name = _geometry_record_name(record, spec)
     if normalized_name is None:  # None/빈/공백-only 이름 모두 skip
         return None
-    # raw_name은 normalized가 아니라 verbatim 원천 문자열 (#546 — point path와 정합).
-    raw_name = _geometry_record_raw_name(record, spec)
-
     try:
         canonical_wkt, centroid = normalize_geometry(
             record.geom_wkt, allowed_types=spec.allowed_geom_types
@@ -885,7 +830,6 @@ async def _geometry_record_to_bundle(
         source_entity_type=_SOURCE_ENTITY_TYPE,
         source_entity_id=record.source_id,
         raw_payload_hash=payload_hash,
-        raw_name=raw_name,
         raw_data=raw_data,
         fetched_at=fetched_at,
         source_record_key=source_record_key,
@@ -896,7 +840,6 @@ async def _geometry_record_to_bundle(
         source_role=SourceRole.PRIMARY,
         match_method="natural_key",
         confidence=100,
-        is_primary_source=True,
     )
     return FeatureBundle(
         feature=feature, source_record=source_record, source_link=source_link

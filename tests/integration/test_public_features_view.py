@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import re
 from datetime import datetime, timedelta, timezone
+from hashlib import md5
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -447,6 +448,37 @@ async def test_weather_anchor_skips_non_public_features(
     assert hidden_target is None
 
 
+async def _dataset_id(session: AsyncSession, provider: str, dataset_key: str) -> int:
+    """fixture 전용 catalog 행을 만들고 canonical id를 돌려준다 (T-VN-33).
+
+    provider/dataset_key 자연키 사본이 사라져 curated source·source entity는
+    ``provider_dataset_id``만으로 dataset을 가리킨다.
+    """
+
+    return int(
+        (
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO provider_sync.provider_datasets (
+                        provider, dataset_key, display_name, source_kind,
+                        is_active, capabilities
+                    )
+                    SELECT :provider, :dataset_key, :provider, 'system', true,
+                           jsonb_build_object('schema_version', 1,
+                                              'produces', '[]'::jsonb,
+                                              'extensions', '{}'::jsonb)
+                    ON CONFLICT (provider, dataset_key) DO UPDATE
+                        SET display_name = EXCLUDED.display_name
+                    RETURNING provider_dataset_id
+                    """
+                ),
+                {"provider": provider, "dataset_key": dataset_key},
+            )
+        ).scalar_one()
+    )
+
+
 async def _seed_curation_foundation(session: AsyncSession) -> tuple[str, str]:
     theme_id = str(
         (
@@ -466,21 +498,23 @@ async def _seed_curation_foundation(session: AsyncSession) -> tuple[str, str]:
             )
         ).scalar_one()
     )
+    dataset_id = await _dataset_id(session, "python-mcst-api", "pfv-matrix-source")
     source_id = str(
         (
             await session.execute(
                 text(
                     """
                     INSERT INTO feature.curated_sources (
-                        provider, dataset_key, source_name, source_kind,
+                        provider_dataset_id, source_name, source_kind,
                         update_cycle, provider_status, metadata
                     ) VALUES (
-                        'python-mcst-api', 'pfv-matrix-source', '테스트 출처',
+                        :dataset_id, '테스트 출처',
                         'manual', 'unknown', 'manual_only', '{}'::jsonb
                     )
                     RETURNING source_id::text
                     """
-                )
+                ),
+                {"dataset_id": dataset_id},
             )
         ).scalar_one()
     )
@@ -886,6 +920,7 @@ async def test_weather_alert_history_hides_non_public_anchor(
         await _ins_feature(
             migrated_session, feature_id=fid, name=f"특보 {status}", status=status, kind="notice"
         )
+    dataset_id = await _dataset_id(migrated_session, "python-kma-api", "kma_weather_alerts")
     for i, fid in enumerate(["pfv:alert:active", "pfv:alert:hidden"]):
         entity_key = f"se_pfv_alert_{i}"
         raw_data = {
@@ -901,30 +936,31 @@ async def test_weather_alert_history_hides_non_public_anchor(
             text(
                 """
                 INSERT INTO provider_sync.source_entities (
-                    source_entity_key, provider, dataset_key, source_entity_type,
+                    source_entity_key, provider_dataset_id, source_entity_type,
                     source_entity_id, first_seen_at, last_seen_at
                 )
                 VALUES (
-                    :entity_key, 'python-kma-api', 'kma_weather_alerts',
+                    :entity_key, :dataset_id,
                     'weather_alert', :entity_id, :ts, :ts
                 )
                 """
             ),
-            {"entity_key": entity_key, "entity_id": f"99Z99999::호우::{i}", "ts": _NOW},
+            {
+                "entity_key": entity_key,
+                "dataset_id": dataset_id,
+                "entity_id": f"99Z99999::호우::{i}",
+                "ts": _NOW,
+            },
         )
         await migrated_session.execute(
             text(
                 """
                 INSERT INTO provider_sync.source_records (
-                    source_record_key, source_entity_key,
-                    provider, dataset_key, source_entity_type,
-                    source_entity_id, raw_name, raw_data,
+                    source_record_key, source_entity_key, raw_data,
                     raw_payload_hash, fetched_at
                 )
                 VALUES (
                     :record_key, :entity_key,
-                    'python-kma-api', 'kma_weather_alerts',
-                    'weather_alert', :entity_id, '호우주의보',
                     CAST(:raw_data AS jsonb), :payload_hash, :ts
                 )
                 """
@@ -932,9 +968,24 @@ async def test_weather_alert_history_hides_non_public_anchor(
             {
                 "record_key": f"sr_pfv_alert_{i}",
                 "entity_key": entity_key,
-                "entity_id": f"99Z99999::호우::{i}",
                 "raw_data": json.dumps(raw_data),
-                "payload_hash": f"hash-pfv-alert-{i}",
+                # ck_source_records_payload_hash_canonical = ^[0-9a-f]{1,64}$
+                "payload_hash": md5(f"pfv-alert-{i}".encode()).hexdigest(),
+                "ts": _NOW,
+            },
+        )
+        await migrated_session.execute(
+            text(
+                """
+                INSERT INTO provider_sync.source_entity_heads (
+                    source_entity_key, current_source_record_key, observed_at
+                )
+                VALUES (:entity_key, :record_key, :ts)
+                """
+            ),
+            {
+                "entity_key": entity_key,
+                "record_key": f"sr_pfv_alert_{i}",
                 "ts": _NOW,
             },
         )
@@ -943,9 +994,9 @@ async def test_weather_alert_history_hides_non_public_anchor(
                 """
                 INSERT INTO provider_sync.source_links (
                     feature_id, source_entity_key, source_role, match_method,
-                    confidence, is_primary_source
+                    confidence
                 )
-                VALUES (:fid, :entity_key, 'primary', 'natural_key', 100, true)
+                VALUES (:fid, :entity_key, 'primary', 'natural_key', 100)
                 """
             ),
             {"fid": fid, "entity_key": entity_key},

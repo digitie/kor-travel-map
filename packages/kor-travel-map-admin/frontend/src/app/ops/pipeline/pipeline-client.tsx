@@ -32,9 +32,9 @@ const QUEUE_SENSOR_NAME = "feature_update_request_queue_sensor";
 interface InitialFilters {
   kind?: string;
   status?: string;
-  provider?: string;
-  datasetKey?: string;
+  providerDatasetId?: number;
   syncScope?: string;
+  operationKey?: string;
   createdFrom?: string;
   createdTo?: string;
   loadBatchId?: string;
@@ -55,12 +55,17 @@ function normalizeTimelineFilters(initial: InitialFilters): TimelineFilters {
       initial.status === "cancelled"
         ? initial.status
         : undefined,
-    provider: initial.provider,
-    datasetKey: initial.datasetKey,
+    providerDatasetId: initial.providerDatasetId,
     syncScope: initial.syncScope,
+    operationKey: initial.operationKey,
     createdFrom: initial.createdFrom,
     createdTo: initial.createdTo,
   };
+}
+
+function positiveInteger(value: string): number | undefined {
+  const parsed = Number(value.trim());
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
 }
 
 interface QueueSensorState {
@@ -242,6 +247,99 @@ function OverviewStrip({
   );
 }
 
+/** URL이 정본인 canonical dataset 필터 축(triple)과 그 fail-closed 정리.
+ *
+ * `PipelineClient` 본문에서 떼어낸다 — 컴포넌트가 300줄을 넘으면 react-doctor가
+ * 막고, 무엇보다 이 규칙 자체가 한 덩어리로 읽혀야 한다.
+ */
+function useCanonicalDatasetFilters(
+  searchParams: ReturnType<typeof useSearchParams>,
+  updateUrl: (
+    updates: Record<string, string | null>,
+    mode?: "push" | "replace",
+  ) => void,
+): {
+  hasProviderDatasetFilter: boolean;
+  urlOperationKey: string;
+  urlProviderDatasetId: string;
+  urlProviderDatasetIdValue: number | undefined;
+  urlSyncScope: string;
+} {
+  const urlProviderDatasetId =
+    searchParams.get("provider_dataset_id")?.trim() ?? "";
+  const urlProviderDatasetIdValue = positiveInteger(urlProviderDatasetId);
+  const urlSyncScope = searchParams.get("sync_scope")?.trim() ?? "";
+  const urlOperationKey = searchParams.get("operation_key")?.trim() ?? "";
+  // scope/operation은 provider_dataset_id에 매달린 **추가** 축이다. 셋을 모두
+  // 요구하면 (id, scope)만 담은 딥링크에서 입력값이 화면에서 사라지고 REST에도
+  // 실리지 않아, scope로 좁힌 event/execution 딥링크가 통째로 무력화된다.
+  // 게이트 축은 provider_dataset_id 하나다(자연키 시절 provider×dataset pair가
+  // 하던 역할). 불완전 tuple의 fail-closed는 아래 정리 effect가 맡는다.
+  const hasProviderDatasetFilter = urlProviderDatasetIdValue !== undefined;
+  const hasLegacyDatasetFilters = Boolean(
+    searchParams.get("provider") ||
+      searchParams.get("dataset") ||
+      searchParams.get("dataset_key"),
+  );
+  const hasOrphanScopeFilters = Boolean(
+    urlProviderDatasetIdValue === undefined &&
+      (urlSyncScope || urlOperationKey),
+  );
+
+  // 외부 deep link나 browser history가 이전 자연키 filter를 복원해도 fail-closed한다.
+  // provider_dataset_id 없이 남은 scope/operation은 어떤 membership도 가리키지
+  // 못하므로 cursor와 함께 폐기한다.
+  useEffect(() => {
+    if (hasLegacyDatasetFilters || hasOrphanScopeFilters) {
+      updateUrl({ sync_scope: null, operation_key: null }, "replace");
+    }
+  }, [hasLegacyDatasetFilters, hasOrphanScopeFilters, updateUrl]);
+
+  return {
+    hasProviderDatasetFilter,
+    urlOperationKey,
+    urlProviderDatasetId,
+    urlProviderDatasetIdValue,
+    urlSyncScope,
+  };
+}
+
+function useTimelineFilters({
+  hasProviderDatasetFilter,
+  searchParams,
+  urlOperationKey,
+  urlProviderDatasetIdValue,
+  urlSyncScope,
+}: {
+  hasProviderDatasetFilter: boolean;
+  searchParams: ReturnType<typeof useSearchParams>;
+  urlOperationKey: string;
+  urlProviderDatasetIdValue: number | undefined;
+  urlSyncScope: string;
+}): ReturnType<typeof normalizeTimelineFilters> {
+  return useMemo(
+    () =>
+      normalizeTimelineFilters({
+        kind: searchParams.get("kind") ?? undefined,
+        status: searchParams.get("status") ?? undefined,
+        providerDatasetId: urlProviderDatasetIdValue,
+        syncScope: hasProviderDatasetFilter ? urlSyncScope || undefined : undefined,
+        operationKey: hasProviderDatasetFilter
+          ? urlOperationKey || undefined
+          : undefined,
+        createdFrom: searchParams.get("created_from") ?? undefined,
+        createdTo: searchParams.get("created_to") ?? undefined,
+      }),
+    [
+      hasProviderDatasetFilter,
+      searchParams,
+      urlProviderDatasetIdValue,
+      urlOperationKey,
+      urlSyncScope,
+    ],
+  );
+}
+
 export function PipelineClient() {
   const pathname = usePathname();
   const queryClient = useQueryClient();
@@ -295,31 +393,35 @@ export function PipelineClient() {
           next.set(key, value);
         }
       }
-      const provider = next.get("provider")?.trim() ?? "";
-      const datasetKey = next.get("dataset_key")?.trim() ?? "";
-      const providerChanged =
-        Object.hasOwn(updates, "provider") &&
-        provider !== (previous.get("provider")?.trim() ?? "");
-      const datasetChanged =
-        Object.hasOwn(updates, "dataset_key") &&
-        datasetKey !== (previous.get("dataset_key")?.trim() ?? "");
-      const datasetExplicitlyUpdated = Object.hasOwn(updates, "dataset_key");
+      const providerDatasetId = next.get("provider_dataset_id")?.trim() ?? "";
+      const providerDatasetChanged =
+        Object.hasOwn(updates, "provider_dataset_id") &&
+        providerDatasetId !==
+          (previous.get("provider_dataset_id")?.trim() ?? "");
       const scopeExplicitlyUpdated = Object.hasOwn(updates, "sync_scope");
-      // provider가 없으면 dataset/scope 모두 invalid다. exact pair의 어느 축이
-      // 바뀌어도 같은 전이에 새 scope를 명시하지 않았다면 이전 pair scope를
-      // cursor와 함께 폐기한다.
-      if (!provider) {
-        next.delete("dataset_key");
+      const operationExplicitlyUpdated = Object.hasOwn(
+        updates,
+        "operation_key",
+      );
+      // dataset operation filter는 triple만 유효하다. ID 변경 때 scope와
+      // operation을 같이 주지 않았거나 scope 변경 때 operation을 같이 주지
+      // 않으면 이전 member 일부를 절대 재사용하지 않는다.
+      if (!positiveInteger(providerDatasetId)) {
         next.delete("sync_scope");
-      } else if (providerChanged && !datasetExplicitlyUpdated) {
-        next.delete("dataset_key");
-        next.delete("sync_scope");
+        next.delete("operation_key");
       } else if (
-        !datasetKey ||
-        ((providerChanged || datasetChanged) && !scopeExplicitlyUpdated)
+        providerDatasetChanged &&
+        (!scopeExplicitlyUpdated || !operationExplicitlyUpdated)
       ) {
         next.delete("sync_scope");
+        next.delete("operation_key");
+      } else if (scopeExplicitlyUpdated && !operationExplicitlyUpdated) {
+        next.delete("operation_key");
       }
+      // provider/dataset 자연키 filter는 T-VN-33에서 제거됐다.
+      next.delete("provider");
+      next.delete("dataset");
+      next.delete("dataset_key");
       const query = next.toString();
       const href = query ? `${pathname}?${query}` : pathname;
       const currentQuery = urlStateRef.current ?? "";
@@ -341,20 +443,13 @@ export function PipelineClient() {
     urlStateRef.current = searchParams.toString();
   }, [searchParams]);
 
-  const urlProvider = searchParams.get("provider")?.trim() ?? "";
-  const urlDatasetKey = searchParams.get("dataset_key")?.trim() ?? "";
-  const urlSyncScope = searchParams.get("sync_scope")?.trim() ?? "";
-  const hasExactScopeTuple = Boolean(urlProvider && urlDatasetKey);
-
-  // 외부 deep link나 browser history가 불완전 tuple을 복원해도 scope를
-  // fail-closed한다. 하위 목록은 정규화된 props를 받아 cursor를 함께 비운다.
-  useEffect(() => {
-    if (!urlProvider && (urlDatasetKey || urlSyncScope)) {
-      updateUrl({ dataset_key: null, sync_scope: null }, "replace");
-    } else if (urlSyncScope && !hasExactScopeTuple) {
-      updateUrl({ sync_scope: null }, "replace");
-    }
-  }, [hasExactScopeTuple, updateUrl, urlDatasetKey, urlProvider, urlSyncScope]);
+  const {
+    hasProviderDatasetFilter,
+    urlOperationKey,
+    urlProviderDatasetId,
+    urlProviderDatasetIdValue,
+    urlSyncScope,
+  } = useCanonicalDatasetFilters(searchParams, updateUrl);
 
   const selectExecution = (
     kind: ExecutionKind,
@@ -370,25 +465,13 @@ export function PipelineClient() {
     updateUrl({ execution: `${kind}:${id}`, tab: "executions" });
   };
 
-  const timelineFilters = useMemo(
-    () =>
-      normalizeTimelineFilters({
-        kind: searchParams.get("kind") ?? undefined,
-        status: searchParams.get("status") ?? undefined,
-        provider: urlProvider || undefined,
-        datasetKey: urlProvider ? urlDatasetKey || undefined : undefined,
-        syncScope: hasExactScopeTuple ? urlSyncScope || undefined : undefined,
-        createdFrom: searchParams.get("created_from") ?? undefined,
-        createdTo: searchParams.get("created_to") ?? undefined,
-      }),
-    [
-      hasExactScopeTuple,
-      searchParams,
-      urlDatasetKey,
-      urlProvider,
-      urlSyncScope,
-    ],
-  );
+  const timelineFilters = useTimelineFilters({
+    hasProviderDatasetFilter,
+    searchParams,
+    urlOperationKey,
+    urlProviderDatasetIdValue,
+    urlSyncScope,
+  });
   const timelineLoadBatchId = searchParams.get("load_batch_id") ?? undefined;
   const timelineParentJobId = searchParams.get("parent_job_id") ?? undefined;
 
@@ -498,9 +581,9 @@ export function PipelineClient() {
           </TabsContent>
           <TabsContent className="mt-4" value="events">
             <PipelineEventsPanel
-              datasetKey={urlProvider ? urlDatasetKey : ""}
-              provider={urlProvider}
-              syncScope={hasExactScopeTuple ? urlSyncScope : ""}
+              providerDatasetId={urlProviderDatasetId}
+              syncScope={hasProviderDatasetFilter ? urlSyncScope : ""}
+              operationKey={hasProviderDatasetFilter ? urlOperationKey : ""}
               onSelectExecution={selectExecution}
               onUrlChange={updateUrl}
             />

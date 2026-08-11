@@ -29,7 +29,11 @@ from kortravelmap.infra.batch_dag import (
 )
 from kortravelmap.infra.consistency import ConsistencyReport
 from kortravelmap.infra.jobs_repo import finish_import_job, start_unpaired_import_job
-from kortravelmap.infra.models import SourceEntityRow, SourceRecordRow
+from kortravelmap.infra.models import (
+    SourceEntityHeadRow,
+    SourceEntityRow,
+    SourceRecordRow,
+)
 from kortravelmap.infra.pipeline_cancellation_repo import (
     create_pipeline_cancellation_attempt,
     lock_pipeline_lineage_mutation,
@@ -45,6 +49,36 @@ pytestmark = pytest.mark.integration
 
 _KST = timezone(timedelta(hours=9))
 _FETCHED = datetime(2026, 6, 4, 12, 0, tzinfo=_KST)
+
+_ORPHAN_PROVIDER = "test-provider-batch-gate"
+_ORPHAN_DATASET = "batch_gate"
+
+
+async def _orphan_dataset_id(session: AsyncSession) -> int:
+    """orphan fixture 전용 catalog 행을 만들고 canonical id를 돌려준다 (T-VN-33)."""
+
+    return int(
+        (
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO provider_sync.provider_datasets (
+                        provider, dataset_key, display_name, source_kind,
+                        is_active, capabilities
+                    )
+                    SELECT :provider, :dataset_key, :provider, 'system', true,
+                           jsonb_build_object('schema_version', 1,
+                                              'produces', '[]'::jsonb,
+                                              'extensions', '{}'::jsonb)
+                    ON CONFLICT (provider, dataset_key) DO UPDATE
+                        SET display_name = EXCLUDED.display_name
+                    RETURNING provider_dataset_id
+                    """
+                ),
+                {"provider": _ORPHAN_PROVIDER, "dataset_key": _ORPHAN_DATASET},
+            )
+        ).scalar_one()
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -122,10 +156,10 @@ async def _cleanup_committed_batch_state(
                 ),
                 {"ids": list(system_log_ids)},
             )
+            # T-VN-33 — 현재 record 포인터는 source_entity_heads가 소유한다.
             await cleanup.execute(
                 text(
-                    "UPDATE provider_sync.source_entities "
-                    "SET current_source_record_key = NULL "
+                    "DELETE FROM provider_sync.source_entity_heads "
                     "WHERE source_entity_key = 'batch-gate-orphan-entity'"
                 )
             )
@@ -140,6 +174,13 @@ async def _cleanup_committed_batch_state(
                     "DELETE FROM provider_sync.source_entities "
                     "WHERE source_entity_key = 'batch-gate-orphan-entity'"
                 )
+            )
+            await cleanup.execute(
+                text(
+                    "DELETE FROM provider_sync.provider_datasets "
+                    "WHERE provider = :provider AND dataset_key = :dataset_key"
+                ),
+                {"provider": _ORPHAN_PROVIDER, "dataset_key": _ORPHAN_DATASET},
             )
 
 
@@ -190,14 +231,13 @@ async def test_batch_dag_gate_blocks_mv_refresh_on_error(
     async with AsyncSession(migrated_engine) as setup, setup.begin():
         child = await start_unpaired_import_job(setup, kind="feature_event_source_load")
         child = await finish_import_job(setup, child.job_id, status="done") or child
+        dataset_id = await _orphan_dataset_id(setup)
         setup.add(
             SourceEntityRow(
                 source_entity_key="batch-gate-orphan-entity",
-                provider="pytest",
-                dataset_key="batch_gate",
+                provider_dataset_id=dataset_id,
                 source_entity_type="fixture",
                 source_entity_id="orphan-1",
-                current_source_record_key=None,
                 first_seen_at=_FETCHED,
                 last_seen_at=_FETCHED,
             )
@@ -207,18 +247,19 @@ async def test_batch_dag_gate_blocks_mv_refresh_on_error(
             SourceRecordRow(
                 source_record_key="batch-gate-orphan",
                 source_entity_key="batch-gate-orphan-entity",
-                provider="pytest",
-                dataset_key="batch_gate",
-                source_entity_type="fixture",
-                source_entity_id="orphan-1",
+                raw_data={},
                 raw_payload_hash="deadbeef",
                 fetched_at=_FETCHED,
             )
         )
         await setup.flush()
-        entity = await setup.get(SourceEntityRow, "batch-gate-orphan-entity")
-        assert entity is not None
-        entity.current_source_record_key = "batch-gate-orphan"
+        setup.add(
+            SourceEntityHeadRow(
+                source_entity_key="batch-gate-orphan-entity",
+                current_source_record_key="batch-gate-orphan",
+                observed_at=_FETCHED,
+            )
+        )
         await setup.flush()
     result = await AsyncKorTravelMapClient(migrated_engine).run_batch_dag_consistency_gate(
         child_job_ids=[child.job_id],

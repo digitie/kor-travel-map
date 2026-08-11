@@ -11,6 +11,7 @@ from typing import Any, cast
 import pytest
 from dagster import build_asset_context, materialize
 from kortravelmap.client import IntegrityFindingSyncResult
+from kortravelmap.core.feature_operation import ProviderDatasetOperationMembership
 from kortravelmap.dto import ForecastStyle, WeatherDomain
 from kortravelmap.infra.feature_repo import (
     FeatureLoadResult,
@@ -28,6 +29,8 @@ from kortravelmap.dagster.feature_operation_tracking import (
 from kortravelmap.dagster.kma_weather import (
     KmaForecastRow,
     KmaNowcastRow,
+    _assert_failure_membership,
+    _exact_kma_sync_membership,
     feature_weather_kma_short_forecast,
     feature_weather_kma_ultra_short_forecast,
     feature_weather_kma_ultra_short_nowcast,
@@ -56,10 +59,15 @@ pytestmark = pytest.mark.filterwarnings(
 _PANEL_CLIENT = object()
 _PANEL_INSTANCE = object()
 _PANEL_RUN_ID = "panel-test"
+# ``build_asset_context``로 직접 호출한 asset이 보고하는 Dagster run id.
+# ``require_feature_operation_guard``는 guard가 다른 run에서 온 snapshot이면
+# ``run_id_mismatch``로 거부하므로, 직접 호출 테스트의 guard도 이 run id를 쓴다.
+_DIRECT_INVOCATION_RUN_ID = "EPHEMERAL"
 _PANEL_GUARD = FeatureOperationExecutionGuard(
     client=cast(Any, _PANEL_CLIENT),
     instance=_PANEL_INSTANCE,
-    identity=None,
+    operation_key=None,
+    memberships=(),
     dagster_run_id=_PANEL_RUN_ID,
     trigger_kind=None,
 )
@@ -190,6 +198,7 @@ class _FakeKrtourClient:
         target_coords_by_external_system: (dict[str, list[tuple[float, float]]] | None) = None,
         place_coords: list[tuple[str, float, float]] | None = None,
         load_error: BaseException | None = None,
+        resolved_memberships: tuple[ProviderDatasetOperationMembership, ...] = (),
     ) -> None:
         self.sync_state = sync_state
         self.sync_states = sync_states
@@ -197,6 +206,7 @@ class _FakeKrtourClient:
         self.target_coords_by_external_system = target_coords_by_external_system or {}
         self.place_coords = place_coords or []
         self.load_error = load_error
+        self.resolved_memberships = resolved_memberships
         self.loaded_values: list[Any] = []
         self.loaded_bundles: list[Any] = []
         self.get_state_calls: list[dict[str, Any]] = []
@@ -205,19 +215,41 @@ class _FakeKrtourClient:
         self.success_scope_calls: list[dict[str, Any]] = []
         self.failure_calls: list[dict[str, Any]] = []
         self.failure_scope_calls: list[dict[str, Any]] = []
+        self.resolve_membership_calls: list[dict[str, Any]] = []
+        self.operation_calls: list[tuple[str, dict[str, Any]]] = []
 
-    async def get_sync_state(
-        self, *, provider: str, dataset_key: str, sync_scope: str = "default"
+    async def ensure_dagster_feature_operation(self, **kwargs: Any) -> Any:
+        """scheduled run에서 guard resource가 여는 canonical operation lifecycle."""
+        self.operation_calls.append(("ensure", kwargs))
+        return SimpleNamespace(outcome="applied", block_reason=None)
+
+    async def finish_dagster_feature_membership(self, **kwargs: Any) -> Any:
+        self.operation_calls.append(("finish", kwargs))
+        return SimpleNamespace(outcome="applied", block_reason=None)
+
+    async def append_dagster_feature_attempt_event(self, **kwargs: Any) -> None:
+        self.operation_calls.append(("attempt", kwargs))
+
+    async def resolve_feature_operation_memberships(
+        self,
+        *,
+        operation_key: str,
+    ) -> tuple[ProviderDatasetOperationMembership, ...]:
+        self.resolve_membership_calls.append({"operation_key": operation_key})
+        return self.resolved_memberships
+
+    async def get_sync_state_for_operation_membership(
+        self,
+        *,
+        membership: ProviderDatasetOperationMembership,
     ) -> Any | None:
         self.get_state_calls.append(
             {
-                "provider": provider,
-                "dataset_key": dataset_key,
-                "sync_scope": sync_scope,
+                "membership": membership,
             }
         )
         if self.sync_states is not None:
-            return self.sync_states.get(sync_scope)
+            return self.sync_states.get(membership.sync_scope)
         return self.sync_state
 
     async def list_poi_cache_target_coords(
@@ -247,43 +279,33 @@ class _FakeKrtourClient:
         self.loaded_values.extend(materialized)
         return len(materialized)
 
-    async def record_sync_success(
+    async def record_sync_success_for_operation_membership(
         self,
         *,
-        provider: str,
-        dataset_key: str,
+        membership: ProviderDatasetOperationMembership,
         cursor: dict[str, Any],
-        sync_scope: str = "default",
-        next_run_after: Any = None,
     ) -> None:
-        self.success_calls.append(
-            {"provider": provider, "dataset_key": dataset_key, "cursor": cursor}
-        )
+        self.success_calls.append({"membership": membership, "cursor": cursor})
         self.success_scope_calls.append(
             {
-                "provider": provider,
-                "dataset_key": dataset_key,
+                "membership": membership,
                 "cursor": cursor,
-                "sync_scope": sync_scope,
+                "sync_scope": membership.sync_scope,
             }
         )
         if self.sync_states is not None:
-            self.sync_states[sync_scope] = SimpleNamespace(cursor=dict(cursor))
+            self.sync_states[membership.sync_scope] = SimpleNamespace(cursor=dict(cursor))
 
-    async def record_sync_failure(
+    async def record_sync_failure_for_operation_membership(
         self,
         *,
-        provider: str,
-        dataset_key: str,
-        sync_scope: str = "default",
-        next_run_after: Any = None,
+        membership: ProviderDatasetOperationMembership,
     ) -> None:
-        self.failure_calls.append({"provider": provider, "dataset_key": dataset_key})
+        self.failure_calls.append({"membership": membership})
         self.failure_scope_calls.append(
             {
-                "provider": provider,
-                "dataset_key": dataset_key,
-                "sync_scope": sync_scope,
+                "membership": membership,
+                "sync_scope": membership.sync_scope,
             }
         )
 
@@ -362,7 +384,11 @@ def _context(
     max_grids: int = 50,
     failure_managed_by_executor: bool | None = None,
     client_factory: Any | None = None,
+    provider_dataset_id: int = 101,
+    operation_key: str = "feature_weather_kma_ultra_short_nowcast_job",
+    feature_operation_guard: FeatureOperationExecutionGuard | None = None,
 ) -> Any:
+    resolved_sync_scope = sync_scope or "target_grids"
     resource_values: dict[str, object] = {
         "kor_travel_map_client": kor_travel_map_client,
         "kma_weather_client_factory": (
@@ -375,6 +401,14 @@ def _context(
         # 격자 중심 좌표 reverse geocoding은 best-effort — None이면 이름 fallback.
         "reverse_geocoder": None,
     }
+    if feature_operation_guard is None:
+        resource_values["feature_update_membership"] = ProviderDatasetOperationMembership(
+            provider_dataset_id=provider_dataset_id,
+            sync_scope=resolved_sync_scope,
+            operation_key=operation_key,
+        )
+    else:
+        resource_values["feature_operation_guard"] = feature_operation_guard
     if sync_scope is not None:
         resource_values["kma_weather_sync_scope"] = sync_scope
     if failure_managed_by_executor is not None:
@@ -388,20 +422,14 @@ def _patch_grid_and_bases(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(kma_weather, "_kma_grid", _int_grid)
     # 격자 중심 좌표(kma.grid.to_latlon)는 python-kma-api 미설치 환경에서 import
     # 실패하므로 결정적 stub으로 대체한다(격자 → 고정 중심).
-    monkeypatch.setattr(
-        kma_weather, "_grid_center", lambda nx, ny: (float(ny), float(nx))
-    )
-    monkeypatch.setattr(
-        kma_weather, "_latest_nowcast_base", lambda: ("20260611", "0500")
-    )
+    monkeypatch.setattr(kma_weather, "_grid_center", lambda nx, ny: (float(ny), float(nx)))
+    monkeypatch.setattr(kma_weather, "_latest_nowcast_base", lambda: ("20260611", "0500"))
     monkeypatch.setattr(
         kma_weather,
         "_latest_ultra_short_forecast_base",
         lambda: ("20260611", "0530"),
     )
-    monkeypatch.setattr(
-        kma_weather, "_latest_short_forecast_base", lambda: ("20260611", "0200")
-    )
+    monkeypatch.setattr(kma_weather, "_latest_short_forecast_base", lambda: ("20260611", "0200"))
 
 
 # -- asset runner ----------------------------------------------------------
@@ -447,8 +475,11 @@ async def test_nowcast_asset_loads_values_per_feature_and_advances_cursor(
     assert sample.weather_domain == WeatherDomain.KMA_ULTRA_SHORT_NOWCAST
     assert kor_travel_map_client.success_calls == [
         {
-            "provider": "python-kma-api",
-            "dataset_key": "kma_ultra_short_nowcast",
+            "membership": ProviderDatasetOperationMembership(
+                provider_dataset_id=101,
+                sync_scope="target_grids",
+                operation_key="feature_weather_kma_ultra_short_nowcast_job",
+            ),
             "cursor": {
                 "base_datetime": "202606110500",
                 "membership_fingerprint": result.membership_fingerprint,
@@ -494,9 +525,7 @@ async def test_nowcast_asset_retries_transient_grid_failure(
     async def _instant_sleep(seconds: float) -> None:
         delays.append(seconds)
 
-    monkeypatch.setattr(
-        upstream_retry, "asyncio", SimpleNamespace(sleep=_instant_sleep)
-    )
+    monkeypatch.setattr(upstream_retry, "asyncio", SimpleNamespace(sleep=_instant_sleep))
     kor_travel_map_client = _FakeKrtourClient(
         target_coords=[(126.978, 37.5665)],
         place_coords=[("f1", 126.978, 37.5665)],
@@ -539,9 +568,7 @@ async def test_nowcast_asset_nonretryable_grid_failure_fails_step(
     forecast = _FatalForecastService(snapshot=_NOWCAST_SNAPSHOT)
 
     with pytest.raises(ProviderDatasetRefreshFailure):
-        await run_feature_weather_kma_ultra_short_nowcast(
-            _context(kor_travel_map_client, forecast)
-        )
+        await run_feature_weather_kma_ultra_short_nowcast(_context(kor_travel_map_client, forecast))
 
     # 재시도 없이 1회 — 비재시도 예외는 즉시 실패로 분류된다.
     assert forecast.calls == [("now-fatal", 126, 37)]
@@ -577,6 +604,89 @@ async def test_asset_skips_when_cursor_matches_base(
     assert result.values_loaded == 0
     assert forecast.calls == []
     assert kor_travel_map_client.success_calls == []
+
+
+async def test_scheduled_grid_resolves_guard_operation_to_exact_membership(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_grid_and_bases(monkeypatch)
+    membership = ProviderDatasetOperationMembership(
+        provider_dataset_id=101,
+        sync_scope="target_grids",
+        operation_key="feature_weather_kma_ultra_short_nowcast_job",
+    )
+    kor_travel_map_client = _FakeKrtourClient(
+        target_coords=[(126.978, 37.5665)],
+        resolved_memberships=(membership,),
+    )
+    guard = FeatureOperationExecutionGuard(
+        client=cast(Any, kor_travel_map_client),
+        instance=object(),
+        operation_key=membership.operation_key,
+        memberships=(membership,),
+        dagster_run_id=_DIRECT_INVOCATION_RUN_ID,
+        trigger_kind="schedule",
+    )
+    forecast = _FakeForecastService(snapshot=_NOWCAST_SNAPSHOT)
+
+    result = await run_feature_weather_kma_ultra_short_nowcast(
+        _context(
+            kor_travel_map_client,
+            forecast,
+            feature_operation_guard=guard,
+        )
+    )
+
+    assert result.skipped is False
+    assert kor_travel_map_client.resolve_membership_calls == [
+        {"operation_key": "feature_weather_kma_ultra_short_nowcast_job"}
+    ]
+    assert kor_travel_map_client.get_state_calls == [{"membership": membership}]
+    assert kor_travel_map_client.success_calls[0]["membership"] == membership
+
+
+async def test_scheduled_grid_rejects_membership_changed_since_guard_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_grid_and_bases(monkeypatch)
+    frozen = ProviderDatasetOperationMembership(
+        provider_dataset_id=101,
+        sync_scope="target_grids",
+        operation_key="feature_weather_kma_ultra_short_nowcast_job",
+    )
+    current = ProviderDatasetOperationMembership(
+        provider_dataset_id=102,
+        sync_scope="target_grids",
+        operation_key="feature_weather_kma_ultra_short_nowcast_job",
+    )
+    kor_travel_map_client = _FakeKrtourClient(
+        target_coords=[(126.978, 37.5665)],
+        resolved_memberships=(current,),
+    )
+    guard = FeatureOperationExecutionGuard(
+        client=cast(Any, kor_travel_map_client),
+        instance=object(),
+        operation_key=frozen.operation_key,
+        memberships=(frozen,),
+        dagster_run_id=_DIRECT_INVOCATION_RUN_ID,
+        trigger_kind="schedule",
+    )
+
+    with pytest.raises(
+        kma_weather.FeatureOperationGuardUnavailable,
+        match="membership_snapshot_changed",
+    ):
+        await run_feature_weather_kma_ultra_short_nowcast(
+            _context(
+                kor_travel_map_client,
+                _FakeForecastService(snapshot=_NOWCAST_SNAPSHOT),
+                feature_operation_guard=guard,
+            )
+        )
+
+    assert kor_travel_map_client.get_state_calls == []
+    assert kor_travel_map_client.success_calls == []
+    assert kor_travel_map_client.failure_calls == []
 
 
 async def test_external_system_scopes_isolate_targets_and_sync_state(
@@ -627,7 +737,7 @@ async def test_external_system_scopes_isolate_targets_and_sync_state(
     assert result_b.sync_scope == "external_system:system-b"
     assert forecast.calls == [("now", 126, 37), ("now", 129, 35)]
     assert kor_travel_map_client.target_coord_calls == ["system-a", "system-b"]
-    assert [call["sync_scope"] for call in kor_travel_map_client.get_state_calls] == [
+    assert [call["membership"].sync_scope for call in kor_travel_map_client.get_state_calls] == [
         "external_system:system-a",
         "external_system:system-b",
     ]
@@ -832,9 +942,7 @@ async def test_grid_limit_max_plus_one_fails_before_provider_or_cursor_io(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _patch_grid_and_bases(monkeypatch)
-    kor_travel_map_client = _FakeKrtourClient(
-        target_coords=[(126.9, 37.5), (129.1, 35.2)]
-    )
+    kor_travel_map_client = _FakeKrtourClient(target_coords=[(126.9, 37.5), (129.1, 35.2)])
     forecast = _FakeForecastService(snapshot=_NOWCAST_SNAPSHOT)
 
     with pytest.raises(kma_weather.KmaWeatherGridLimitExceeded) as exc_info:
@@ -842,17 +950,20 @@ async def test_grid_limit_max_plus_one_fails_before_provider_or_cursor_io(
             _context(kor_travel_map_client, forecast, max_grids=1)
         )
 
-    assert exc_info.value.provider == "python-kma-api"
-    assert exc_info.value.dataset_key == "kma_ultra_short_nowcast"
+    assert exc_info.value.provider_dataset_id == 101
     assert exc_info.value.sync_scope == "target_grids"
+    assert exc_info.value.operation_key == "feature_weather_kma_ultra_short_nowcast_job"
     assert exc_info.value.event_code is None
     assert forecast.calls == []
     assert kor_travel_map_client.get_state_calls == []
     assert kor_travel_map_client.success_calls == []
     assert kor_travel_map_client.failure_scope_calls == [
         {
-            "provider": "python-kma-api",
-            "dataset_key": "kma_ultra_short_nowcast",
+            "membership": ProviderDatasetOperationMembership(
+                provider_dataset_id=101,
+                sync_scope="target_grids",
+                operation_key="feature_weather_kma_ultra_short_nowcast_job",
+            ),
             "sync_scope": "target_grids",
         }
     ]
@@ -891,9 +1002,7 @@ async def test_same_base_refreshes_when_target_membership_is_added_or_removed(
     assert first.membership_fingerprint != second.membership_fingerprint
     assert unchanged.membership_fingerprint == second.membership_fingerprint
     assert removed.membership_fingerprint != second.membership_fingerprint
-    assert second.as_metadata()["membership_fingerprint"] == (
-        second.membership_fingerprint
-    )
+    assert second.as_metadata()["membership_fingerprint"] == (second.membership_fingerprint)
     assert forecast.calls == [
         ("now", 126, 37),
         ("now", 126, 37),
@@ -932,8 +1041,11 @@ async def test_asset_creates_grid_feature_without_place_features(
     # 호출이 있었으므로 cursor 전진.
     assert kor_travel_map_client.success_calls == [
         {
-            "provider": "python-kma-api",
-            "dataset_key": "kma_ultra_short_nowcast",
+            "membership": ProviderDatasetOperationMembership(
+                provider_dataset_id=101,
+                sync_scope="target_grids",
+                operation_key="feature_weather_kma_ultra_short_nowcast_job",
+            ),
             "cursor": {
                 "base_datetime": "202606110500",
                 "membership_fingerprint": result.membership_fingerprint,
@@ -955,13 +1067,17 @@ async def test_asset_records_sync_failure_when_load_raises(
     forecast = _FakeForecastService(snapshot=_NOWCAST_SNAPSHOT)
 
     with pytest.raises(RuntimeError, match="boom"):
-        await run_feature_weather_kma_ultra_short_nowcast(
-            _context(kor_travel_map_client, forecast)
-        )
+        await run_feature_weather_kma_ultra_short_nowcast(_context(kor_travel_map_client, forecast))
 
     assert kor_travel_map_client.success_calls == []
     assert kor_travel_map_client.failure_calls == [
-        {"provider": "python-kma-api", "dataset_key": "kma_ultra_short_nowcast"}
+        {
+            "membership": ProviderDatasetOperationMembership(
+                provider_dataset_id=101,
+                sync_scope="target_grids",
+                operation_key="feature_weather_kma_ultra_short_nowcast_job",
+            )
+        }
     ]
 
 
@@ -978,7 +1094,11 @@ async def test_ultra_short_forecast_asset_uses_short_endpoint(
     )
 
     result = await run_feature_weather_kma_ultra_short_forecast(
-        _context(kor_travel_map_client, forecast)
+        _context(
+            kor_travel_map_client,
+            forecast,
+            operation_key="feature_weather_kma_ultra_short_forecast_job",
+        )
     )
 
     assert result.base_datetime == "202606110530"
@@ -988,7 +1108,10 @@ async def test_ultra_short_forecast_asset_uses_short_endpoint(
         value.forecast_style == ForecastStyle.ULTRA_SHORT
         for value in kor_travel_map_client.loaded_values
     )
-    assert kor_travel_map_client.success_calls[0]["dataset_key"] == "kma_ultra_short_forecast"
+    assert (
+        kor_travel_map_client.success_calls[0]["membership"].operation_key
+        == "feature_weather_kma_ultra_short_forecast_job"
+    )
 
 
 async def test_short_forecast_asset_uses_vilage_endpoint(
@@ -1004,17 +1127,23 @@ async def test_short_forecast_asset_uses_vilage_endpoint(
     )
 
     result = await run_feature_weather_kma_short_forecast(
-        _context(kor_travel_map_client, forecast)
+        _context(
+            kor_travel_map_client,
+            forecast,
+            operation_key="feature_weather_kma_short_forecast_job",
+        )
     )
 
     assert result.base_datetime == "202606110200"
     assert result.values_loaded == 2
     assert forecast.calls == [("vilage", 126, 37)]
     assert all(
-        value.forecast_style == ForecastStyle.SHORT
-        for value in kor_travel_map_client.loaded_values
+        value.forecast_style == ForecastStyle.SHORT for value in kor_travel_map_client.loaded_values
     )
-    assert kor_travel_map_client.success_calls[0]["dataset_key"] == "kma_short_forecast"
+    assert (
+        kor_travel_map_client.success_calls[0]["membership"].operation_key
+        == "feature_weather_kma_short_forecast_job"
+    )
 
 
 # -- lazy provider helper ----------------------------------------------------
@@ -1080,9 +1209,7 @@ def test_kma_weather_client_factory_resource_defers_credential_import_and_client
         ),
     )
 
-    resource_fn = cast(
-        "Any", resources.kma_weather_client_factory_resource.resource_fn
-    )
+    resource_fn = cast("Any", resources.kma_weather_client_factory_resource.resource_fn)
     factory = resource_fn(_guarded_init_resource_context())
 
     assert callable(factory)
@@ -1113,9 +1240,7 @@ def test_kma_weather_client_factory_resource_allows_missing_credential_until_use
         lambda name: import_calls.append(name),
     )
 
-    resource_fn = cast(
-        "Any", resources.kma_weather_client_factory_resource.resource_fn
-    )
+    resource_fn = cast("Any", resources.kma_weather_client_factory_resource.resource_fn)
     factory = resource_fn(_guarded_init_resource_context())
 
     assert callable(factory)
@@ -1131,11 +1256,23 @@ def test_kma_weather_client_factory_resource_allows_missing_credential_until_use
 
 
 @pytest.mark.parametrize(
-    ("asset", "base_key"),
+    ("asset", "base_key", "operation_key"),
     [
-        (feature_weather_kma_ultra_short_nowcast, "202606110500"),
-        (feature_weather_kma_ultra_short_forecast, "202606110530"),
-        (feature_weather_kma_short_forecast, "202606110200"),
+        (
+            feature_weather_kma_ultra_short_nowcast,
+            "202606110500",
+            "feature_weather_kma_ultra_short_nowcast_job",
+        ),
+        (
+            feature_weather_kma_ultra_short_forecast,
+            "202606110530",
+            "feature_weather_kma_ultra_short_forecast_job",
+        ),
+        (
+            feature_weather_kma_short_forecast,
+            "202606110200",
+            "feature_weather_kma_short_forecast_job",
+        ),
     ],
     ids=["nowcast", "ultra-short-forecast", "short-forecast"],
 )
@@ -1149,6 +1286,7 @@ def test_scheduled_kma_materialization_defers_public_client_until_after_prefligh
     monkeypatch: pytest.MonkeyPatch,
     asset: Any,
     base_key: str,
+    operation_key: str,
     preflight: str,
     service_key: SecretStr | None,
 ) -> None:
@@ -1177,9 +1315,19 @@ def test_scheduled_kma_materialization_defers_public_client_until_after_prefligh
         if preflight == "cursor_same"
         else None
     )
+    # scheduled run은 queue worker의 typed membership resource가 없다. sync-state
+    # 정체성이 triple이 된 뒤(T-VN-33/ADR-088) asset은 run tag의 operation key로
+    # guard resource가 DB에서 고정한 exact membership만 쓴다 — provider/dataset
+    # label에서 역산하는 fallback은 없다.
+    scheduled_membership = ProviderDatasetOperationMembership(
+        provider_dataset_id=101,
+        sync_scope="target_grids",
+        operation_key=operation_key,
+    )
     kor_travel_map_client = _FakeKrtourClient(
         target_coords=target_coords,
         sync_state=sync_state,
+        resolved_memberships=(scheduled_membership,),
     )
     constructor_calls: list[str] = []
     import_calls: list[str] = []
@@ -1212,12 +1360,14 @@ def test_scheduled_kma_materialization_defers_public_client_until_after_prefligh
         resources={
             "kor_travel_map_client": kor_travel_map_client,
             "feature_operation_guard": resources.feature_operation_guard_resource,
-            "kma_weather_client_factory": (
-                resources.kma_weather_client_factory_resource
-            ),
+            "kma_weather_client_factory": (resources.kma_weather_client_factory_resource),
             "kma_weather_extra_points": None,
             "kma_weather_max_grids_per_run": 50,
             "reverse_geocoder": None,
+        },
+        tags={
+            "kor_travel_map.operation_key": operation_key,
+            "kor_travel_map.trigger_kind": "schedule",
         },
         raise_on_error=False,
     )
@@ -1225,6 +1375,16 @@ def test_scheduled_kma_materialization_defers_public_client_until_after_prefligh
     assert result.success is (preflight == "cursor_same")
     assert import_calls == []
     assert constructor_calls == []
+    # guard는 run tag의 operation key로만 membership을 확정한다(label 역산 없음).
+    assert {call["operation_key"] for call in kor_travel_map_client.resolve_membership_calls} == {
+        operation_key
+    }
+    # target scope가 비면 cursor를 읽기도 전에 거부되고, 그 외에는 preflight
+    # 판정이 guard가 고정한 exact membership 위에서만 일어난다.
+    expected_state_calls = [scheduled_membership] if preflight == "cursor_same" else []
+    assert [
+        call["membership"] for call in kor_travel_map_client.get_state_calls
+    ] == expected_state_calls
 
 
 # -- T-219c: 중기예보 -------------------------------------------------------
@@ -1294,8 +1454,7 @@ class _FakeDataGoKrClient:
 
 
 _MID_REGION_JSON = (
-    '[{"land_reg_id": "11B00000", "ta_reg_id": "11B10101",'
-    ' "feature_ids": ["f1", "f2"]}]'
+    '[{"land_reg_id": "11B00000", "ta_reg_id": "11B10101", "feature_ids": ["f1", "f2"]}]'
 )
 
 
@@ -1310,6 +1469,11 @@ def _mid_context(
             "kor_travel_map_client": kor_travel_map_client,
             "kma_datagokr_client": datagokr,
             "kma_mid_region_features": region_json,
+            "feature_update_membership": ProviderDatasetOperationMembership(
+                provider_dataset_id=104,
+                sync_scope="dataset_wide",
+                operation_key="feature_weather_kma_mid_forecast_job",
+            ),
         }
     )
 
@@ -1319,9 +1483,7 @@ async def test_mid_forecast_asset_loads_values_per_region_feature(
 ) -> None:
     monkeypatch.setattr(kma_weather, "_latest_mid_base", lambda: "202606110600")
     kor_travel_map_client = _FakeKrtourClient()
-    datagokr = _FakeDataGoKrClient(
-        land_items=[_MID_LAND_ITEM], temp_items=[_MID_TEMP_ITEM]
-    )
+    datagokr = _FakeDataGoKrClient(land_items=[_MID_LAND_ITEM], temp_items=[_MID_TEMP_ITEM])
 
     result = await run_feature_weather_kma_mid_forecast(
         _mid_context(kor_travel_map_client, datagokr)
@@ -1337,8 +1499,11 @@ async def test_mid_forecast_asset_loads_values_per_region_feature(
     assert datagokr.calls == [("land", "11B00000"), ("ta", "11B10101")]
     assert kor_travel_map_client.success_calls == [
         {
-            "provider": "python-kma-api",
-            "dataset_key": "kma_mid_forecast",
+            "membership": ProviderDatasetOperationMembership(
+                provider_dataset_id=104,
+                sync_scope="dataset_wide",
+                operation_key="feature_weather_kma_mid_forecast_job",
+            ),
             "cursor": {"base_datetime": "202606110600"},
         }
     ]
@@ -1385,18 +1550,20 @@ async def test_mid_forecast_asset_records_failure_when_load_raises(
 ) -> None:
     monkeypatch.setattr(kma_weather, "_latest_mid_base", lambda: "202606110600")
     kor_travel_map_client = _FakeKrtourClient(load_error=RuntimeError("boom"))
-    datagokr = _FakeDataGoKrClient(
-        land_items=[_MID_LAND_ITEM], temp_items=[_MID_TEMP_ITEM]
-    )
+    datagokr = _FakeDataGoKrClient(land_items=[_MID_LAND_ITEM], temp_items=[_MID_TEMP_ITEM])
 
     with pytest.raises(RuntimeError, match="boom"):
-        await run_feature_weather_kma_mid_forecast(
-            _mid_context(kor_travel_map_client, datagokr)
-        )
+        await run_feature_weather_kma_mid_forecast(_mid_context(kor_travel_map_client, datagokr))
 
     assert kor_travel_map_client.success_calls == []
     assert kor_travel_map_client.failure_calls == [
-        {"provider": "python-kma-api", "dataset_key": "kma_mid_forecast"}
+        {
+            "membership": ProviderDatasetOperationMembership(
+                provider_dataset_id=104,
+                sync_scope="dataset_wide",
+                operation_key="feature_weather_kma_mid_forecast_job",
+            )
+        }
     ]
 
 
@@ -1563,8 +1730,8 @@ async def test_weather_alerts_asset_loads_notice_bundles() -> None:
     [bundle] = client.loaded_bundles
     assert bundle.feature.kind.value == "notice"
     assert bundle.feature.detail.notice_type == "heavy_rain_warning"
-    # region명이 위치 단서(raw_address) — strict 주소 검증 통과의 핵심.
-    assert bundle.source_record.raw_address == "전국"
+    # region명이 raw payload 위치 단서 — strict 주소 검증 통과의 핵심.
+    assert bundle.source_record.raw_data["region_name"] == "전국"
     assert result.address_validation.error_count == 0
     [event_call] = client.notice_event_calls
     assert event_call["provider"] == "python-kma-api"
@@ -1692,3 +1859,133 @@ def test_kma_datagokr_client_resource_guard_without_credential(
     message = str(exc_info.value)
     assert "kma_datagokr_client" in message
     assert "KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY" in message
+
+
+# -- KMA exact membership 게이트 -------------------------------------------
+
+_GRID_OPERATION_KEY = "feature_weather_kma_ultra_short_nowcast_job"
+
+
+def _grid_membership(sync_scope: str) -> ProviderDatasetOperationMembership:
+    return ProviderDatasetOperationMembership(
+        provider_dataset_id=101,
+        sync_scope=sync_scope,
+        operation_key=_GRID_OPERATION_KEY,
+    )
+
+
+def _grid_guard(
+    client: object,
+    memberships: tuple[ProviderDatasetOperationMembership, ...],
+) -> FeatureOperationExecutionGuard:
+    return FeatureOperationExecutionGuard(
+        client=cast(Any, client),
+        instance=object(),
+        operation_key=_GRID_OPERATION_KEY,
+        memberships=memberships,
+        dagster_run_id=_DIRECT_INVOCATION_RUN_ID,
+        trigger_kind="schedule",
+    )
+
+
+async def test_kma_sync_membership_rejects_a_scope_other_than_the_declared_one() -> None:
+    """asset이 요구한 scope와 다른 member는 cursor 대상이 될 수 없다.
+
+    격자 dataset은 카탈로그에 scope가 둘이다(``dataset_wide`` + ``target_grids``).
+    실행 경로가 있는 것은 ``target_grids``뿐인데, manifest가 ``dataset_wide``로 frozen된
+    채 통과하면 실행하지도 않은 scope 행에 cursor가 적히고 다음 run이 그 값을 근거로
+    적재를 skip한다.
+    """
+    dataset_wide = _grid_membership("dataset_wide")
+    client = _FakeKrtourClient(resolved_memberships=(dataset_wide,))
+    context = build_asset_context(
+        resources={"feature_operation_guard": _grid_guard(client, (dataset_wide,))}
+    )
+
+    with pytest.raises(kma_weather.FeatureOperationGuardUnavailable) as excinfo:
+        await _exact_kma_sync_membership(
+            context,
+            cast(Any, client),
+            expected_sync_scope="target_grids",
+        )
+
+    assert excinfo.value.reason == "membership_sync_scope_mismatch"
+    assert client.get_state_calls == []
+    # 대조: 요구한 scope와 같으면 같은 member가 그대로 통과한다 — 거부 사유가
+    # "scope 불일치"임을 못 박는다(전부 거부로 미끄러져도 앞 단언만으로는 안 잡힌다).
+    assert (
+        await _exact_kma_sync_membership(
+            context,
+            cast(Any, client),
+            expected_sync_scope="dataset_wide",
+        )
+        == dataset_wide
+    )
+
+
+async def test_kma_sync_membership_requires_exactly_one_frozen_member() -> None:
+    """manifest가 1건이 아니면 KMA asset은 cursor 대상을 고르지 않는다.
+
+    이 게이트가 없으면 정렬된 manifest의 **첫 member**가 조용히 선택된다. 격자
+    dataset의 첫 member는 실행 경로가 없는 ``dataset_wide``이므로, 실행 결과가 엉뚱한
+    scope 행에 기록된다.
+    """
+    memberships = (_grid_membership("dataset_wide"), _grid_membership("target_grids"))
+    client = _FakeKrtourClient(resolved_memberships=memberships)
+    context = build_asset_context(
+        resources={"feature_operation_guard": _grid_guard(client, memberships)}
+    )
+
+    with pytest.raises(kma_weather.FeatureOperationGuardUnavailable) as excinfo:
+        await _exact_kma_sync_membership(context, cast(Any, client), expected_sync_scope=None)
+
+    assert excinfo.value.reason == "operation_requires_exactly_one_membership"
+
+
+async def test_kma_sync_membership_rejects_an_untyped_membership_resource() -> None:
+    """queue worker가 넘긴 membership resource는 typed여야 한다(duck-typing 불가)."""
+    impostor = SimpleNamespace(
+        provider_dataset_id=101,
+        sync_scope="target_grids",
+        operation_key=_GRID_OPERATION_KEY,
+    )
+    context = build_asset_context(resources={"feature_update_membership": impostor})
+
+    with pytest.raises(kma_weather.FeatureOperationGuardUnavailable) as excinfo:
+        await _exact_kma_sync_membership(
+            context,
+            cast(Any, _FakeKrtourClient()),
+            expected_sync_scope=None,
+        )
+
+    assert excinfo.value.reason == "feature_update_membership_wrong_type"
+
+
+def test_kma_refresh_failure_identity_must_match_the_resolved_membership() -> None:
+    """typed failure는 resolved membership과 **같은 행**을 가리켜야 한다.
+
+    이 단언이 사라지면 sync failure가 다른 dataset/scope 행에 기록된다 —
+    ``_raise_kma_refresh_failure``가 failure의 identity가 아니라 membership으로
+    기록하므로, 둘이 갈라진 채 진행하면 실패 사실이 엉뚱한 곳에 남는다.
+    """
+    membership = _grid_membership("target_grids")
+    foreign = ProviderDatasetRefreshFailure(
+        provider_dataset_id=membership.provider_dataset_id + 1,
+        sync_scope=membership.sync_scope,
+        operation_key=membership.operation_key,
+        message="boom",
+    )
+
+    with pytest.raises(RuntimeError, match="resolved membership과 일치하지 않음"):
+        _assert_failure_membership(foreign, membership)
+
+    # 대조: 같은 triple이면 통과한다.
+    _assert_failure_membership(
+        ProviderDatasetRefreshFailure(
+            provider_dataset_id=membership.provider_dataset_id,
+            sync_scope=membership.sync_scope,
+            operation_key=membership.operation_key,
+            message="boom",
+        ),
+        membership,
+    )

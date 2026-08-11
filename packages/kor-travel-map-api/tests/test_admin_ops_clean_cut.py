@@ -53,9 +53,9 @@ def test_canonical_admin_ops_and_public_provider_contracts_remain() -> None:
     spec = create_app(ApiSettings()).openapi()
     required_paths = {
         "/v1/ops/datasets",
-        "/v1/ops/datasets/detail",
+        "/v1/ops/datasets/{provider_dataset_id}",
         "/v1/ops/datasets/refresh-policy",
-        "/v1/ops/datasets/preview",
+        "/v1/ops/datasets/{provider_dataset_id}/preview",
         "/v1/ops/pipeline/overview",
         "/v1/ops/pipeline/executions",
         "/v1/ops/pipeline/events",

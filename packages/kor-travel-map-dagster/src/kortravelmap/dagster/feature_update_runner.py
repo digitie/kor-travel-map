@@ -13,76 +13,29 @@ import importlib
 import inspect
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
-from types import SimpleNamespace
+from types import MappingProxyType, SimpleNamespace
 from typing import Any, Final, cast
 
 from kortravelmap.client import AsyncKorTravelMapClient
+from kortravelmap.core.feature_operation import ProviderDatasetOperationMembership
 from kortravelmap.core.sync_scope import parse_canonical_sync_scope
 from kortravelmap.infra.feature_update_executor import (
     ProviderDatasetRefreshFailure,
     ProviderDatasetRefreshResult,
     ProviderDatasetRefreshScope,
 )
-from kortravelmap.providers.airkorea import (
-    AIRKOREA_PROVIDER_NAME,
-    DATASET_KEY_AIR_QUALITY,
-    DATASET_KEY_STATIONS,
+from kortravelmap.providers.feature_operation_registry import (
+    UnknownFeatureOperationHandlerError,
+    feature_operation_handler_keys,
+    resolve_feature_operation_handler,
 )
-from kortravelmap.providers.datagokr_file_data import (
-    DATAGOKR_FILEDATA_DATASETS,
-    DATAGOKR_FILEDATA_PROVIDER_NAME,
-)
-from kortravelmap.providers.khoa import DATASET_KEY_BEACHES, KHOA_PROVIDER_NAME
 from kortravelmap.providers.kma import (
-    KMA_MID_FORECAST_DATASET_KEY,
-    KMA_PROVIDER_NAME,
     KMA_SHORT_FORECAST_DATASET_KEY,
     KMA_ULTRA_SHORT_FORECAST_DATASET_KEY,
     KMA_ULTRA_SHORT_NOWCAST_DATASET_KEY,
-    KMA_WEATHER_ALERT_DATASET_KEY,
 )
-from kortravelmap.providers.knps import KNPS_GEOMETRY_DATASETS, KNPS_PLACE_DATASETS
-from kortravelmap.providers.knps import PROVIDER_NAME as KNPS_PROVIDER_NAME
-from kortravelmap.providers.kor_travel_concierge import (
-    DATASET_KEY_YOUTUBE_PLACE_CANDIDATES,
-    KOR_TRAVEL_CONCIERGE_PROVIDER_NAME,
-)
-from kortravelmap.providers.krairport import DATASET_KEY_AIRPORTS, KRAIRPORT_PROVIDER_NAME
-from kortravelmap.providers.krex import (
-    KREX_PROVIDER_NAME,
-    REST_AREA_DATASET_KEY,
-    REST_AREA_PRICES_DATASET_KEY,
-    REST_AREA_WEATHER_DATASET_KEY,
-    TRAFFIC_NOTICES_DATASET_KEY,
-)
-from kortravelmap.providers.krforest import (
-    DATASET_KEY_ARBORETUMS as KRFOREST_ARBORETUMS_DATASET_KEY,
-)
-from kortravelmap.providers.krforest import (
-    DATASET_KEY_RECREATION_FORESTS as KRFOREST_RECREATION_FORESTS_DATASET_KEY,
-)
-from kortravelmap.providers.krforest import KRFOREST_PROVIDER_NAME
-from kortravelmap.providers.krheritage import (
-    DATASET_KEY_EVENT as KRHERITAGE_EVENT_DATASET_KEY,
-)
-from kortravelmap.providers.krheritage import DATASET_KEY_HERITAGE as KRHERITAGE_DATASET_KEY
-from kortravelmap.providers.krheritage import PROVIDER_NAME as KRHERITAGE_PROVIDER_NAME
-from kortravelmap.providers.mcst import MCST_FILE_DATASETS, MCST_PROVIDER_NAME
+from kortravelmap.providers.mcst import MCST_FILE_DATASETS
 from kortravelmap.providers.mois import DATASET_KEY_BULK as MOIS_BULK_DATASET_KEY
-from kortravelmap.providers.mois import PROVIDER_NAME as MOIS_PROVIDER_NAME
-from kortravelmap.providers.opinet import (
-    OPINET_PRICE_DATASET_KEY,
-    OPINET_PROVIDER_NAME,
-    OPINET_STATION_DATASET_KEY,
-)
-from kortravelmap.providers.standard_data import (
-    DATASET_KEY_CULTURAL_FESTIVALS,
-    DATASET_KEY_MUSEUMS,
-    DATASET_KEY_PARKING_LOTS,
-    DATASET_KEY_SPECIAL_STREETS,
-    DATASET_KEY_TOURIST_ATTRACTIONS,
-    STANDARD_DATA_PROVIDER_NAME,
-)
 from kortravelmap.settings import KorTravelMapSettings
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
@@ -90,7 +43,6 @@ from dagster import InitResourceContext, resource
 
 from . import upstream_retry
 from .assets import (
-    DATAGOKR_STANDARD_PROVIDER_NAME,
     run_feature_event_datagokr_cultural_festivals,
     run_feature_event_krheritage_events,
     run_feature_event_visitkorea_enrichment,
@@ -168,8 +120,6 @@ ResourceFactory = Callable[
     "RunnerResources",
 ]
 Teardown = Callable[[], object]
-SyncStateFailureScope = str | Callable[[ProviderDatasetRefreshScope], str]
-
 _COMMON_RESOURCE_KEYS: Final[set[str]] = {
     "kor_travel_map_client",
     "reverse_geocoder",
@@ -190,30 +140,17 @@ class RunnerResources:
 
 @dataclass(frozen=True, slots=True)
 class FeatureUpdateRunnerSpec:
-    """provider/dataset → 기존 Dagster asset runner 연결 사양."""
+    """DB operation key → 기존 Dagster asset runner 연결 사양.
 
-    provider: str
-    dataset_keys: frozenset[str]
+    provider/dataset 자연키와 dataset 목록은 이 실행 경계에 존재하지 않는다.
+    ``operation_key``는 DB가 request membership에 고정한 값이며, catalog label은
+    ``ProviderDatasetRefreshScope``에 표시용으로만 전달된다.
+    """
+
+    operation_key: str
     run: AssetRun
     resources: ResourceFactory
     asset_key: str
-    sync_state_failure_scope: SyncStateFailureScope = "default"
-
-    def matches(self, scope: ProviderDatasetRefreshScope) -> bool:
-        return (
-            scope.provider == self.provider
-            and scope.dataset_key in self.dataset_keys
-        )
-
-    def resolve_sync_state_failure_scope(
-        self,
-        scope: ProviderDatasetRefreshScope,
-    ) -> str:
-        resolver = self.sync_state_failure_scope
-        value = resolver(scope) if callable(resolver) else resolver
-        if not value or value != value.strip():
-            raise ValueError("sync-state failure scope must be a trimmed non-empty string")
-        return value
 
 
 class _DirectAssetContext:
@@ -242,7 +179,7 @@ class _DirectAssetKey:
 
 
 class FeatureUpdateAssetRunner:
-    """Feature update queue의 provider/dataset scope를 asset 실행으로 dispatch한다."""
+    """Feature update queue의 DB membership을 operation handler로 dispatch한다."""
 
     def __init__(
         self,
@@ -255,7 +192,11 @@ class FeatureUpdateAssetRunner:
         self._common_resources = dict(common_resources)
         self._log = log
         self._settings_factory = settings_factory
-        self._specs = specs or _DEFAULT_SPECS
+        selected_specs = tuple(specs if specs is not None else _OPERATION_RUNNER_SPECS.values())
+        by_operation_key = {spec.operation_key: spec for spec in selected_specs}
+        if len(by_operation_key) != len(selected_specs):
+            raise ValueError("feature update runner operation_key must be unique")
+        self._specs = MappingProxyType(by_operation_key)
 
     async def __call__(
         self,
@@ -263,12 +204,22 @@ class FeatureUpdateAssetRunner:
         scope: ProviderDatasetRefreshScope,
     ) -> ProviderDatasetRefreshResult:
         spec = self._spec_for_scope(scope)
-        failure_sync_scope = spec.resolve_sync_state_failure_scope(scope)
-        if scope.provider == OPINET_PROVIDER_NAME and scope.scope_type != "provider_dataset":
+        failure_sync_scope = scope.sync_scope
+        if (
+            scope.operation_key
+            in {
+                "feature_place_opinet_stations_job",
+                "feature_price_opinet_stations_job",
+            }
+            and scope.scope_type != "provider_dataset"
+        ):
             # OpiNet lowTop fetcher는 개별 feature/bbox/cache-target request scope를
             # 소비하지 않고 현재 설정의 전국 회전 window를 다시 조회한다. targeted
             # request마다 같은 무료키 quota를 소진하는 대신 system schedule에 맡긴다.
             metadata: dict[str, object] = {
+                "provider_dataset_id": scope.provider_dataset_id,
+                "sync_scope": scope.sync_scope,
+                "operation_key": scope.operation_key,
                 "provider": scope.provider,
                 "dataset_key": scope.dataset_key,
                 "skipped": True,
@@ -284,6 +235,9 @@ class FeatureUpdateAssetRunner:
                     scope.scope_type,
                 )
             return ProviderDatasetRefreshResult(
+                provider_dataset_id=scope.provider_dataset_id,
+                sync_scope=scope.sync_scope,
+                operation_key=scope.operation_key,
                 provider=scope.provider,
                 dataset_key=scope.dataset_key,
                 status="skipped",
@@ -298,14 +252,22 @@ class FeatureUpdateAssetRunner:
                 # 포함할 수 있으므로 이벤트 루프를 막지 않게 스레드로
                 # 보낸다(#617 리뷰).
                 extra = await asyncio.to_thread(spec.resources, settings, scope)
-                resources = {**self._common_resources, **dict(extra.values)}
+                resources = {
+                    **self._common_resources,
+                    **dict(extra.values),
+                    "feature_update_membership": ProviderDatasetOperationMembership(
+                        provider_dataset_id=scope.provider_dataset_id,
+                        sync_scope=scope.sync_scope,
+                        operation_key=scope.operation_key,
+                    ),
+                }
             except ProviderDatasetRefreshFailure:
                 raise
             except Exception as exc:
                 raise ProviderDatasetRefreshFailure(
-                    provider=scope.provider,
-                    dataset_key=scope.dataset_key,
+                    provider_dataset_id=scope.provider_dataset_id,
                     sync_scope=failure_sync_scope,
+                    operation_key=scope.operation_key,
                     message="provider refresh resource initialization failed",
                 ) from exc
             client = resources.get("kor_travel_map_client")
@@ -319,9 +281,9 @@ class FeatureUpdateAssetRunner:
                     raise
                 except Exception as exc:
                     raise ProviderDatasetRefreshFailure(
-                        provider=scope.provider,
-                        dataset_key=scope.dataset_key,
+                        provider_dataset_id=scope.provider_dataset_id,
                         sync_scope=failure_sync_scope,
+                        operation_key=scope.operation_key,
                         message="provider refresh transaction binding failed",
                     ) from exc
             try:
@@ -340,9 +302,9 @@ class FeatureUpdateAssetRunner:
                 raise
             except Exception as exc:
                 raise ProviderDatasetRefreshFailure(
-                    provider=scope.provider,
-                    dataset_key=scope.dataset_key,
+                    provider_dataset_id=scope.provider_dataset_id,
                     sync_scope=failure_sync_scope,
+                    operation_key=scope.operation_key,
                     message="provider refresh asset execution failed",
                 ) from exc
         except ProviderDatasetRefreshFailure as exc:
@@ -355,9 +317,9 @@ class FeatureUpdateAssetRunner:
                 except Exception as exc:
                     if refresh_failure is None:
                         raise ProviderDatasetRefreshFailure(
-                            provider=scope.provider,
-                            dataset_key=scope.dataset_key,
+                            provider_dataset_id=scope.provider_dataset_id,
                             sync_scope=failure_sync_scope,
+                            operation_key=scope.operation_key,
                             message=(
                                 "provider refresh resource teardown failed after the "
                                 "bound transaction"
@@ -371,21 +333,26 @@ class FeatureUpdateAssetRunner:
                             exc_info=True,
                         )
 
-    def _spec_for_scope(
-        self, scope: ProviderDatasetRefreshScope
-    ) -> FeatureUpdateRunnerSpec:
-        for spec in self._specs:
-            if spec.matches(scope):
-                return spec
-        supported = ", ".join(
-            f"{spec.provider}:{dataset_key}"
-            for spec in self._specs
-            for dataset_key in sorted(spec.dataset_keys)
-        )
-        raise RuntimeError(
-            "feature update runner가 지원하지 않는 provider/dataset: "
-            f"{scope.provider}:{scope.dataset_key}. supported={supported}"
-        )
+    def _spec_for_scope(self, scope: ProviderDatasetRefreshScope) -> FeatureUpdateRunnerSpec:
+        try:
+            handler = resolve_feature_operation_handler(scope.operation_key)
+        except UnknownFeatureOperationHandlerError as exc:
+            raise RuntimeError(
+                f"feature update runner가 지원하지 않는 operation_key: {scope.operation_key!r}"
+            ) from exc
+        try:
+            spec = self._specs[handler.operation_key]
+        except KeyError as exc:
+            raise RuntimeError(
+                "feature update runner에 canonical operation handler가 없음: "
+                f"{handler.operation_key!r}"
+            ) from exc
+        if spec.asset_key not in handler.asset_keys:
+            raise RuntimeError(
+                "feature update runner asset_key가 canonical operation handler와 다름: "
+                f"operation_key={handler.operation_key!r} asset_key={spec.asset_key!r}"
+            )
+        return spec
 
 
 async def _bind_client_to_session(
@@ -480,14 +447,14 @@ def _loaded_count(
     )
     if updated:
         return updated
-    price_updated = _int_metadata(
-        metadata, "price_features_inserted"
-    ) + _int_metadata(metadata, "price_features_updated")
+    price_updated = _int_metadata(metadata, "price_features_inserted") + _int_metadata(
+        metadata, "price_features_updated"
+    )
     if price_updated:
         return price_updated
-    station_updated = _int_metadata(
-        metadata, "stations_features_inserted"
-    ) + _int_metadata(metadata, "stations_features_updated")
+    station_updated = _int_metadata(metadata, "stations_features_inserted") + _int_metadata(
+        metadata, "stations_features_updated"
+    )
     if station_updated:
         return station_updated
     return len(loaded_feature_ids)
@@ -506,6 +473,9 @@ def _as_refresh_result(
         metadata.update(item)
     loaded_feature_ids = _loaded_feature_ids(result, metadata)
     return ProviderDatasetRefreshResult(
+        provider_dataset_id=scope.provider_dataset_id,
+        sync_scope=scope.sync_scope,
+        operation_key=scope.operation_key,
         provider=str(metadata.get("provider") or scope.provider),
         dataset_key=str(metadata.get("dataset_key") or scope.dataset_key),
         status="skipped" if metadata.get("skipped") is True else "done",
@@ -562,9 +532,7 @@ def _knps_point_resources(
     settings: KorTravelMapSettings,
     scope: ProviderDatasetRefreshScope,
 ) -> RunnerResources:
-    resolved_settings = settings.model_copy(
-        update={"knps_point_dataset_key": scope.dataset_key}
-    )
+    resolved_settings = settings.model_copy(update={"knps_point_dataset_key": scope.dataset_key})
     return RunnerResources(
         {
             "knps_point_records": fetch_knps_point_records(resolved_settings),
@@ -577,9 +545,7 @@ def _knps_geometry_resources(
     settings: KorTravelMapSettings,
     scope: ProviderDatasetRefreshScope,
 ) -> RunnerResources:
-    resolved_settings = settings.model_copy(
-        update={"knps_geometry_dataset_key": scope.dataset_key}
-    )
+    resolved_settings = settings.model_copy(update={"knps_geometry_dataset_key": scope.dataset_key})
     return RunnerResources(
         {
             "knps_geometry_records": fetch_knps_geometry_records(resolved_settings),
@@ -616,9 +582,7 @@ def _datagokr_file_data_resources(
     )
 
 
-def _kma_service_key(
-    settings: KorTravelMapSettings, *, resource_key: str, dataset: str
-) -> str:
+def _kma_service_key(settings: KorTravelMapSettings, *, resource_key: str, dataset: str) -> str:
     service_key = settings.data_go_kr_service_key
     if service_key is None:
         raise RuntimeError(
@@ -705,16 +669,24 @@ def _kma_alert_resources(
     settings: KorTravelMapSettings,
     _scope: ProviderDatasetRefreshScope,
 ) -> RunnerResources:
-    return RunnerResources(
-        {"kma_weather_alert_records": fetch_kma_weather_alerts(settings)}
-    )
+    return RunnerResources({"kma_weather_alert_records": fetch_kma_weather_alerts(settings)})
 
 
 def _mcst_resources(
     settings: KorTravelMapSettings,
-    _scope: ProviderDatasetRefreshScope,
+    scope: ProviderDatasetRefreshScope,
 ) -> RunnerResources:
-    return RunnerResources({"mcst_culture_records": fetch_mcst_culture_records(settings)})
+    matched_slugs = tuple(
+        spec.slug for spec in MCST_FILE_DATASETS.values() if spec.dataset_key == scope.dataset_key
+    )
+    if len(matched_slugs) != 1:
+        raise ValueError(
+            "MCST feature-update member는 정확히 하나의 registered source slug여야 함: "
+            f"provider_dataset_id={scope.provider_dataset_id!r}"
+        )
+    return RunnerResources(
+        {"mcst_culture_records": fetch_mcst_culture_records(settings, slugs=matched_slugs)}
+    )
 
 
 async def _run_kma_grid_weather(context: Any) -> object:
@@ -732,23 +704,23 @@ def _kma_grid_resources(
     settings: KorTravelMapSettings,
     scope: ProviderDatasetRefreshScope,
 ) -> RunnerResources:
-    effective_scope = _kma_grid_effective_sync_scope(scope)
+    sync_scope = _kma_grid_sync_scope(scope)
     base = _kma_weather_resources(settings, scope)
     return RunnerResources(
         {
             **dict(base.values),
             "feature_update_dataset_key": scope.dataset_key,
-            "kma_weather_sync_scope": effective_scope,
+            "kma_weather_sync_scope": sync_scope,
             "kma_weather_sync_failure_managed_by_executor": True,
         },
         teardowns=base.teardowns,
     )
 
 
-def _kma_grid_effective_sync_scope(scope: ProviderDatasetRefreshScope) -> str:
+def _kma_grid_sync_scope(scope: ProviderDatasetRefreshScope) -> str:
     raw_scope = scope.sync_scope
     if raw_scope is None:
-        raise ValueError("KMA grid effective sync_scope is required")
+        raise ValueError("KMA grid sync_scope is required")
     if not isinstance(raw_scope, str):
         raise ValueError("KMA grid sync_scope must be a string")
     parsed_scope = parse_canonical_sync_scope(raw_scope)
@@ -759,231 +731,222 @@ def _kma_grid_effective_sync_scope(scope: ProviderDatasetRefreshScope) -> str:
     return parsed_scope.value
 
 
-_DEFAULT_SPECS: Final[tuple[FeatureUpdateRunnerSpec, ...]] = (
-    FeatureUpdateRunnerSpec(
-        provider=DATAGOKR_STANDARD_PROVIDER_NAME,
-        dataset_keys=frozenset({DATASET_KEY_CULTURAL_FESTIVALS}),
+def _operation_specs(
+    *operation_keys: str,
+    run: AssetRun,
+    resources: ResourceFactory,
+    asset_key: str,
+) -> tuple[FeatureUpdateRunnerSpec, ...]:
+    """같은 code handler를 공유하는 DB operation binding을 명시적으로 만든다."""
+    return tuple(
+        FeatureUpdateRunnerSpec(
+            operation_key=operation_key,
+            run=run,
+            resources=resources,
+            asset_key=asset_key,
+        )
+        for operation_key in operation_keys
+    )
+
+
+_OPERATION_RUNNER_SPEC_ROWS: Final[tuple[FeatureUpdateRunnerSpec, ...]] = (
+    *_operation_specs(
+        "feature_event_datagokr_cultural_festivals_job",
         run=run_feature_event_datagokr_cultural_festivals,
-        resources=_records(
-            "datagokr_cultural_festivals", fetch_datagokr_cultural_festivals
-        ),
+        resources=_records("datagokr_cultural_festivals", fetch_datagokr_cultural_festivals),
         asset_key="feature_event_datagokr_cultural_festivals",
     ),
-    FeatureUpdateRunnerSpec(
-        provider=OPINET_PROVIDER_NAME,
-        dataset_keys=frozenset({OPINET_STATION_DATASET_KEY}),
+    *_operation_specs(
+        "feature_place_opinet_stations_job",
         run=run_feature_place_opinet_stations,
-        resources=_opinet_records(
-            "opinet_stations",
-            fetch_opinet_stations,
-            label="OpiNet station",
-        ),
+        resources=_opinet_records("opinet_stations", fetch_opinet_stations, label="OpiNet station"),
         asset_key="feature_place_opinet_stations",
     ),
-    FeatureUpdateRunnerSpec(
-        provider=OPINET_PROVIDER_NAME,
-        dataset_keys=frozenset({OPINET_PRICE_DATASET_KEY}),
+    *_operation_specs(
+        "feature_price_opinet_stations_job",
         run=run_feature_price_opinet_stations,
         resources=_opinet_records(
-            "opinet_station_price_details",
-            fetch_opinet_station_price_details,
-            label="OpiNet price",
+            "opinet_station_price_details", fetch_opinet_station_price_details, label="OpiNet price"
         ),
         asset_key="feature_price_opinet_stations",
     ),
-    FeatureUpdateRunnerSpec(
-        provider=KREX_PROVIDER_NAME,
-        dataset_keys=frozenset({REST_AREA_DATASET_KEY}),
+    *_operation_specs(
+        "feature_place_krex_rest_areas_job",
         run=run_feature_place_krex_rest_areas,
         resources=_records("krex_rest_areas", fetch_krex_rest_areas),
         asset_key="feature_place_krex_rest_areas",
     ),
-    FeatureUpdateRunnerSpec(
-        provider=KREX_PROVIDER_NAME,
-        dataset_keys=frozenset({REST_AREA_PRICES_DATASET_KEY}),
+    *_operation_specs(
+        "feature_price_krex_rest_areas_job",
         run=run_feature_price_krex_rest_areas,
-        resources=_records(
-            "krex_rest_area_fuel_prices", fetch_krex_rest_area_fuel_prices
-        ),
+        resources=_records("krex_rest_area_fuel_prices", fetch_krex_rest_area_fuel_prices),
         asset_key="feature_price_krex_rest_areas",
     ),
-    FeatureUpdateRunnerSpec(
-        provider=KREX_PROVIDER_NAME,
-        dataset_keys=frozenset({REST_AREA_WEATHER_DATASET_KEY}),
+    *_operation_specs(
+        "feature_weather_krex_rest_areas_job",
         run=run_feature_weather_krex_rest_areas,
         resources=_records("krex_rest_area_weather", fetch_krex_rest_area_weather),
         asset_key="feature_weather_krex_rest_areas",
     ),
-    FeatureUpdateRunnerSpec(
-        provider=KREX_PROVIDER_NAME,
-        dataset_keys=frozenset({TRAFFIC_NOTICES_DATASET_KEY}),
+    *_operation_specs(
+        "feature_notice_krex_traffic_notices_job",
         run=run_feature_notice_krex_traffic_notices,
         resources=_records("krex_traffic_notices", fetch_krex_traffic_notices),
         asset_key="feature_notice_krex_traffic_notices",
     ),
-    FeatureUpdateRunnerSpec(
-        provider=KRHERITAGE_PROVIDER_NAME,
-        dataset_keys=frozenset({KRHERITAGE_DATASET_KEY}),
+    *_operation_specs(
+        "feature_place_krheritage_items_job",
         run=run_feature_place_krheritage_items,
         resources=_records("krheritage_items", fetch_krheritage_items),
         asset_key="feature_place_krheritage_items",
     ),
-    FeatureUpdateRunnerSpec(
-        provider=KRHERITAGE_PROVIDER_NAME,
-        dataset_keys=frozenset({KRHERITAGE_EVENT_DATASET_KEY}),
+    *_operation_specs(
+        "feature_event_krheritage_events_job",
         run=run_feature_event_krheritage_events,
         resources=_records("krheritage_events", fetch_krheritage_events),
         asset_key="feature_event_krheritage_events",
     ),
-    FeatureUpdateRunnerSpec(
-        provider=MOIS_PROVIDER_NAME,
-        dataset_keys=frozenset({MOIS_BULK_DATASET_KEY}),
+    *_operation_specs(
+        "feature_place_mois_licenses_job",
         run=run_feature_place_mois_licenses,
         resources=_mois_resources,
         asset_key="feature_place_mois_licenses",
     ),
-    FeatureUpdateRunnerSpec(
-        provider=KNPS_PROVIDER_NAME,
-        dataset_keys=frozenset(KNPS_PLACE_DATASETS),
+    *_operation_specs(
+        "feature_place_knps_points_job",
         run=run_feature_place_knps_points,
         resources=_knps_point_resources,
         asset_key="feature_place_knps_points",
     ),
-    FeatureUpdateRunnerSpec(
-        provider=KNPS_PROVIDER_NAME,
-        dataset_keys=frozenset(KNPS_GEOMETRY_DATASETS),
+    *_operation_specs(
+        "feature_geometry_knps_records_job",
         run=run_feature_geometry_knps_records,
         resources=_knps_geometry_resources,
         asset_key="feature_geometry_knps_records",
     ),
-    FeatureUpdateRunnerSpec(
-        provider=KRFOREST_PROVIDER_NAME,
-        dataset_keys=frozenset({KRFOREST_RECREATION_FORESTS_DATASET_KEY}),
+    *_operation_specs(
+        "feature_place_krforest_recreation_forests_job",
         run=run_feature_place_krforest_recreation_forests,
-        resources=_records(
-            "krforest_recreation_forests", fetch_krforest_recreation_forests
-        ),
+        resources=_records("krforest_recreation_forests", fetch_krforest_recreation_forests),
         asset_key="feature_place_krforest_recreation_forests",
     ),
-    FeatureUpdateRunnerSpec(
-        provider=KRFOREST_PROVIDER_NAME,
-        dataset_keys=frozenset({KRFOREST_ARBORETUMS_DATASET_KEY}),
+    *_operation_specs(
+        "feature_place_krforest_arboretums_job",
         run=run_feature_place_krforest_arboretums,
         resources=_records("krforest_arboretums", fetch_krforest_arboretums),
         asset_key="feature_place_krforest_arboretums",
     ),
-    FeatureUpdateRunnerSpec(
-        provider=STANDARD_DATA_PROVIDER_NAME,
-        dataset_keys=frozenset({DATASET_KEY_MUSEUMS}),
+    *_operation_specs(
+        "feature_place_standard_museums_job",
         run=run_feature_place_standard_museums,
         resources=_records("standard_museums", fetch_standard_museums),
         asset_key="feature_place_standard_museums",
     ),
-    FeatureUpdateRunnerSpec(
-        provider=STANDARD_DATA_PROVIDER_NAME,
-        dataset_keys=frozenset({DATASET_KEY_TOURIST_ATTRACTIONS}),
+    *_operation_specs(
+        "feature_place_standard_tourist_attractions_job",
         run=run_feature_place_standard_tourist_attractions,
-        resources=_records(
-            "standard_tourist_attractions", fetch_standard_tourist_attractions
-        ),
+        resources=_records("standard_tourist_attractions", fetch_standard_tourist_attractions),
         asset_key="feature_place_standard_tourist_attractions",
     ),
-    FeatureUpdateRunnerSpec(
-        provider=STANDARD_DATA_PROVIDER_NAME,
-        dataset_keys=frozenset({DATASET_KEY_PARKING_LOTS}),
+    *_operation_specs(
+        "feature_place_standard_parking_lots_job",
         run=run_feature_place_standard_parking_lots,
         resources=_records("standard_parking_lots", fetch_standard_parking_lots),
         asset_key="feature_place_standard_parking_lots",
     ),
-    FeatureUpdateRunnerSpec(
-        provider=STANDARD_DATA_PROVIDER_NAME,
-        dataset_keys=frozenset({DATASET_KEY_SPECIAL_STREETS}),
+    *_operation_specs(
+        "feature_place_standard_special_streets_job",
         run=run_feature_place_standard_special_streets,
         resources=_records("standard_special_streets", fetch_standard_special_streets),
         asset_key="feature_place_standard_special_streets",
     ),
-    FeatureUpdateRunnerSpec(
-        provider=DATAGOKR_FILEDATA_PROVIDER_NAME,
-        dataset_keys=frozenset(DATAGOKR_FILEDATA_DATASETS),
+    *_operation_specs(
+        "feature_place_datagokr_seoul_bookstores_job",
+        "feature_place_datagokr_gyeonggi_muslim_friendly_restaurants_job",
+        "feature_place_datagokr_ansan_world_restaurants_job",
+        "feature_place_datagokr_jeju_local_restaurants_job",
         run=run_feature_place_datagokr_file_data,
         resources=_datagokr_file_data_resources,
         asset_key="feature_place_datagokr_file_data",
     ),
-    FeatureUpdateRunnerSpec(
-        provider=KHOA_PROVIDER_NAME,
-        dataset_keys=frozenset({DATASET_KEY_BEACHES}),
+    *_operation_specs(
+        "feature_place_khoa_beaches_job",
         run=run_feature_place_khoa_beaches,
         resources=_records("khoa_beaches", fetch_khoa_beaches),
         asset_key="feature_place_khoa_beaches",
     ),
-    FeatureUpdateRunnerSpec(
-        provider=KRAIRPORT_PROVIDER_NAME,
-        dataset_keys=frozenset({DATASET_KEY_AIRPORTS}),
+    *_operation_specs(
+        "feature_place_krairport_airports_job",
         run=run_feature_place_krairport_airports,
         resources=_records("krairport_airports", fetch_krairport_airports),
         asset_key="feature_place_krairport_airports",
     ),
-    FeatureUpdateRunnerSpec(
-        provider=KOR_TRAVEL_CONCIERGE_PROVIDER_NAME,
-        dataset_keys=frozenset({DATASET_KEY_YOUTUBE_PLACE_CANDIDATES}),
+    *_operation_specs(
+        "feature_place_kor_travel_concierge_youtube_job",
         run=run_feature_place_kor_travel_concierge_youtube,
         resources=_records(
-            "kor_travel_concierge_youtube_features",
-            fetch_kor_travel_concierge_youtube_features,
+            "kor_travel_concierge_youtube_features", fetch_kor_travel_concierge_youtube_features
         ),
         asset_key="feature_place_kor_travel_concierge_youtube",
     ),
-    FeatureUpdateRunnerSpec(
-        provider="python-visitkorea-api",
-        dataset_keys=frozenset({"visitkorea_festival_events"}),
+    *_operation_specs(
+        "feature_event_visitkorea_enrichment_job",
         run=run_feature_event_visitkorea_enrichment,
-        resources=_records(
-            "visitkorea_festival_events", fetch_visitkorea_festival_events
-        ),
+        resources=_records("visitkorea_festival_events", fetch_visitkorea_festival_events),
         asset_key="feature_event_visitkorea_enrichment",
     ),
-    FeatureUpdateRunnerSpec(
-        provider=AIRKOREA_PROVIDER_NAME,
-        dataset_keys=frozenset({DATASET_KEY_AIR_QUALITY, DATASET_KEY_STATIONS}),
+    *_operation_specs(
+        "feature_weather_airkorea_air_quality_job",
         run=run_feature_weather_airkorea_air_quality,
         resources=_airkorea_resources,
         asset_key="feature_weather_airkorea_air_quality",
     ),
-    FeatureUpdateRunnerSpec(
-        provider=KMA_PROVIDER_NAME,
-        dataset_keys=frozenset(
-            {
-                KMA_ULTRA_SHORT_NOWCAST_DATASET_KEY,
-                KMA_ULTRA_SHORT_FORECAST_DATASET_KEY,
-                KMA_SHORT_FORECAST_DATASET_KEY,
-            }
-        ),
+    *_operation_specs(
+        "feature_weather_kma_ultra_short_nowcast_job",
         run=_run_kma_grid_weather,
         resources=_kma_grid_resources,
-        asset_key="feature_weather_kma_grid_dispatch",
-        sync_state_failure_scope=_kma_grid_effective_sync_scope,
+        asset_key="feature_weather_kma_ultra_short_nowcast",
     ),
-    FeatureUpdateRunnerSpec(
-        provider=KMA_PROVIDER_NAME,
-        dataset_keys=frozenset({KMA_MID_FORECAST_DATASET_KEY}),
+    *_operation_specs(
+        "feature_weather_kma_ultra_short_forecast_job",
+        run=_run_kma_grid_weather,
+        resources=_kma_grid_resources,
+        asset_key="feature_weather_kma_ultra_short_forecast",
+    ),
+    *_operation_specs(
+        "feature_weather_kma_short_forecast_job",
+        run=_run_kma_grid_weather,
+        resources=_kma_grid_resources,
+        asset_key="feature_weather_kma_short_forecast",
+    ),
+    *_operation_specs(
+        "feature_weather_kma_mid_forecast_job",
         run=run_feature_weather_kma_mid_forecast,
         resources=_kma_mid_resources,
         asset_key="feature_weather_kma_mid_forecast",
     ),
-    FeatureUpdateRunnerSpec(
-        provider=KMA_PROVIDER_NAME,
-        dataset_keys=frozenset({KMA_WEATHER_ALERT_DATASET_KEY}),
+    *_operation_specs(
+        "feature_notice_kma_weather_alerts_job",
         run=run_feature_notice_kma_weather_alerts,
         resources=_kma_alert_resources,
         asset_key="feature_notice_kma_weather_alerts",
     ),
-    FeatureUpdateRunnerSpec(
-        provider=MCST_PROVIDER_NAME,
-        dataset_keys=frozenset(spec.dataset_key for spec in MCST_FILE_DATASETS.values()),
+    *_operation_specs(
+        "feature_place_mcst_culture_job",
         run=run_feature_place_mcst_culture,
         resources=_mcst_resources,
         asset_key="feature_place_mcst_culture",
     ),
+)
+
+_operation_runner_specs = {spec.operation_key: spec for spec in _OPERATION_RUNNER_SPEC_ROWS}
+if len(_operation_runner_specs) != len(_OPERATION_RUNNER_SPEC_ROWS):
+    raise RuntimeError("feature update runner operation_key가 중복됨")
+if frozenset(_operation_runner_specs) != feature_operation_handler_keys():
+    raise RuntimeError("feature update runner와 canonical operation handler set이 다름")
+
+_OPERATION_RUNNER_SPECS: Final[Mapping[str, FeatureUpdateRunnerSpec]] = MappingProxyType(
+    _operation_runner_specs
 )
 
 

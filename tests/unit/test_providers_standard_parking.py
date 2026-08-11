@@ -125,7 +125,7 @@ def test_parking_out_of_korea_coordinate_isolated() -> None:
     assert len(bundles) == 2
     isolated = bundles[0]
     assert isolated.feature.coord is None  # 좌표 격리
-    assert isolated.source_record.raw_address is not None  # 주소 단서 보존
+    assert isolated.source_record.raw_data["rdnmadr"] == "경상남도 어딘가로 1"
     # 정상 row는 영향 없음.
     assert bundles[1].feature.coord is not None
 

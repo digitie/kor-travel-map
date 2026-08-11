@@ -24,6 +24,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession as _AsyncSession
 
+from kortravelmap.core.ids import make_source_record_key
 from kortravelmap.infra.admin_feature_repo import (
     get_enrichment_review_detail,
     list_enrichment_reviews,
@@ -36,6 +37,7 @@ from kortravelmap.infra.enrichment_review_repo import (
     enqueue_review_candidates,
     pending_enrichment_reviews,
 )
+from kortravelmap.infra.feature_repo import upsert_source_record
 from kortravelmap.infra.models import EnrichmentReviewQueueRow, FeatureRow
 from kortravelmap.providers.visitkorea import (
     FestivalCandidate,
@@ -168,13 +170,20 @@ async def test_enqueue_inserts_pending(migrated_session: AsyncSession) -> None:
     row = (
         await migrated_session.execute(
             text(
-                "SELECT target_feature_id, source_provider, source_name, "
-                "name_score, status FROM ops.enrichment_review_queue"
+                """
+                SELECT q.target_feature_id, pd.provider, q.source_name,
+                       q.name_score, q.status
+                FROM ops.enrichment_review_queue AS q
+                JOIN provider_sync.source_entities AS se
+                  ON se.source_entity_key = q.source_entity_key
+                JOIN provider_sync.provider_datasets AS pd
+                  ON pd.provider_dataset_id = se.provider_dataset_id
+                """
             )
         )
     ).one()
     assert row.target_feature_id == _TARGET_ID
-    assert row.source_provider == "python-visitkorea-api"
+    assert row.provider == "python-visitkorea-api"
     assert row.source_name == "서울 봄꽃"
     assert 30.0 <= float(row.name_score) < 99.9
     assert row.status == "pending"
@@ -421,8 +430,8 @@ async def test_fk_requires_existing_target_feature(
 
 
 _RACE_TRUNCATE = (
-    "TRUNCATE feature.features, provider_sync.source_records, "
-    "provider_sync.source_links, ops.enrichment_review_queue "
+    "TRUNCATE feature.features, provider_sync.source_entities, "
+    "ops.enrichment_review_queue "
     "RESTART IDENTITY CASCADE"
 )
 
@@ -487,24 +496,55 @@ async def test_concurrent_decide_no_accepted_link_leak(
             await truncate_committed_test_rows(session, _RACE_TRUNCATE)
 
 
-def _enrichment_queue_row(
+async def _enrichment_queue_row(
+    session: AsyncSession,
     review_id: str,
     *,
     name_score: str,
     source_entity_id: str,
     source_name: str = "서울 봄꽃",
 ) -> EnrichmentReviewQueueRow:
-    """keyset 회귀용 pending enrichment review 행(name_score·review_id 제어)."""
+    """keyset 회귀용 pending enrichment review 행(name_score·review_id 제어).
+
+    T-VN-33: queue row는 자연키 사본 대신 ``source_entity_key``/``source_record_key``
+    로 source를 가리킨다 — 행마다 다른 entity를 만들려면 실제 source record를 먼저
+    적재해야 한다. 후보 생성기는 이름 점수 밴드를 타므로 매칭되는 제목으로 template을
+    만든 뒤 entity id만 갈아끼운다(점수는 인자로 따로 준다).
+    """
+    template = _as_input(_review_candidate(source_name)).source_record
+    record = template.model_copy(
+        update={
+            "source_entity_id": source_entity_id,
+            "source_record_key": make_source_record_key(
+                provider=template.provider,
+                dataset_key=template.dataset_key,
+                source_entity_type=template.source_entity_type,
+                source_entity_id=source_entity_id,
+                raw_payload_hash=template.raw_payload_hash,
+            ),
+        }
+    )
+    await upsert_source_record(session, record)
+    source_entity_key = (
+        await session.execute(
+            text(
+                """
+                SELECT source_entity_key
+                FROM provider_sync.source_records
+                WHERE source_record_key = :source_record_key
+                """
+            ),
+            {"source_record_key": record.source_record_key},
+        )
+    ).scalar_one()
     return EnrichmentReviewQueueRow(
         review_id=review_id,
         target_feature_id=_TARGET_ID,
-        source_provider="python-visitkorea-api",
-        source_dataset_key="festival",
-        source_entity_id=source_entity_id,
+        source_entity_key=str(source_entity_key),
+        source_record_key=record.source_record_key,
         source_name=source_name,
         target_name="서울 봄꽃 축제",
         name_score=Decimal(name_score),
-        source_record={},
         status="pending",
     )
 
@@ -516,17 +556,20 @@ async def test_list_enrichment_reviews_keyset_walk_stable_under_mutation(
     await _add_festival(session)
     session.add_all(
         [
-            _enrichment_queue_row(
+            await _enrichment_queue_row(
+                session,
                 "00000000-0000-0000-0000-0000000000e3",
                 name_score="88.00",
                 source_entity_id="ent-e3",
             ),
-            _enrichment_queue_row(
+            await _enrichment_queue_row(
+                session,
                 "00000000-0000-0000-0000-0000000000e2",
                 name_score="88.00",
                 source_entity_id="ent-e2",
             ),
-            _enrichment_queue_row(
+            await _enrichment_queue_row(
+                session,
                 "00000000-0000-0000-0000-0000000000e1",
                 name_score="88.00",
                 source_entity_id="ent-e1",
@@ -558,7 +601,8 @@ async def test_list_enrichment_reviews_keyset_walk_stable_under_mutation(
         "00000000-0000-0000-0000-0000000000e3"
     ]
     session.add(
-        _enrichment_queue_row(
+        await _enrichment_queue_row(
+            session,
             "00000000-0000-0000-0000-0000000000e9",
             name_score="99.00",
             source_entity_id="ent-e9",
@@ -607,12 +651,14 @@ async def test_list_enrichment_reviews_cursor_rejects_filter_change(
     await _add_festival(session)
     session.add_all(
         [
-            _enrichment_queue_row(
+            await _enrichment_queue_row(
+                session,
                 "00000000-0000-0000-0000-0000000000f2",
                 name_score="70.00",
                 source_entity_id="ent-f2",
             ),
-            _enrichment_queue_row(
+            await _enrichment_queue_row(
+                session,
                 "00000000-0000-0000-0000-0000000000f1",
                 name_score="65.00",
                 source_entity_id="ent-f1",

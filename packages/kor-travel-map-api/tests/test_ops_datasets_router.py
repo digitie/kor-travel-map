@@ -48,6 +48,10 @@ from kortravelmap.api.ops_dataset_service import (
     load_dataset_detail,
     load_datasets_grid,
 )
+from kortravelmap.api.provider_catalog import (
+    ProviderDatasetCatalogEntry,
+    ProviderDatasetOperation,
+)
 from kortravelmap.api.settings import ApiSettings
 
 _NOW = datetime(2026, 7, 15, tzinfo=UTC)
@@ -81,13 +85,16 @@ def _state(
     *,
     provider: str = "python-mois-api",
     dataset_key: str = "mois_license_features_bulk",
+    operation_key: str = "mois_refresh",
     last_success_at: datetime | None = _NOW,
     eligible_after: datetime | None = None,
 ) -> SyncState:
     return SyncState(
+        provider_dataset_id=42,
         provider=provider,
         dataset_key=dataset_key,
-        sync_scope="default",
+        sync_scope="dataset_wide",
+        operation_key=operation_key,
         status="active",
         cursor={},
         last_success_at=last_success_at,
@@ -99,6 +106,7 @@ def _state(
 
 def _policy(
     *,
+    provider_dataset_id: int = 42,
     provider: str = "python-mois-api",
     dataset_key: str = "mois_license_features_bulk",
     stale_after_minutes: int | None = 60,
@@ -107,6 +115,7 @@ def _policy(
     revision: int = 1,
 ) -> ProviderRefreshPolicy:
     return ProviderRefreshPolicy(
+        provider_dataset_id=provider_dataset_id,
         provider=provider,
         dataset_key=dataset_key,
         source_kind="openapi",
@@ -129,6 +138,74 @@ def _policy(
     )
 
 
+def _preview_catalog_entry(
+    *,
+    provider: str,
+    dataset_key: str,
+    has_fixture_preview: bool = True,
+    has_refresh_operation: bool = True,
+) -> ProviderDatasetCatalogEntry:
+    operations: list[ProviderDatasetOperation] = []
+    if has_fixture_preview:
+        operations.append(
+            ProviderDatasetOperation(
+                operation_key="fixture_preview",
+                operation_kind="preview",
+                is_enabled=True,
+                config={"handler": "fixture"},
+                sync_scopes=(),
+            )
+        )
+    if has_refresh_operation:
+        operations.append(
+            ProviderDatasetOperation(
+                operation_key="fixture_refresh",
+                operation_kind="refresh",
+                is_enabled=True,
+                config={},
+                sync_scopes=("dataset_wide",),
+            )
+        )
+    return ProviderDatasetCatalogEntry(
+        provider_dataset_id=42,
+        provider=provider,
+        dataset_key=dataset_key,
+        display_name=dataset_key,
+        source_kind="openapi",
+        is_active=True,
+        capabilities={},
+        operations=tuple(operations),
+    )
+
+
+def _refresh_catalog_entry(
+    *,
+    provider_dataset_id: int,
+    provider: str,
+    dataset_key: str,
+    operation_key: str,
+    sync_scopes: tuple[str, ...],
+) -> ProviderDatasetCatalogEntry:
+    return ProviderDatasetCatalogEntry(
+        provider_dataset_id=provider_dataset_id,
+        provider=provider,
+        dataset_key=dataset_key,
+        display_name=dataset_key,
+        source_kind="openapi",
+        is_active=True,
+        capabilities={},
+        operations=(
+            ProviderDatasetOperation(
+                operation_key=operation_key,
+                operation_kind="refresh",
+                is_enabled=True,
+                config={},
+                sync_scopes=sync_scopes,
+            ),
+        ),
+    )
+
+
 def _pipeline_execution(
     *,
     provider: str,
@@ -136,6 +213,7 @@ def _pipeline_execution(
     execution_id: str,
     created_at: datetime = _NOW,
     status: str = "running",
+    operation_key: str = "dataset_refresh",
 ) -> PipelineExecution:
     job_id = execution_id.replace("11111111", "22222222")
     return PipelineExecution(
@@ -143,9 +221,17 @@ def _pipeline_execution(
         id=execution_id,
         status=status,
         created_at=created_at,
-        providers=(provider,),
-        dataset_keys=(dataset_key,),
-        provider_datasets=(),
+        provider_datasets=(
+            PipelineProviderDatasetIdentity(
+                provider_dataset_id=42,
+                provider=provider,
+                dataset_key=dataset_key,
+                sync_scope="dataset_wide",
+                operation_key=operation_key,
+                operation_member_id=job_id,
+                status=status,
+            ),
+        ),
         progress=None,
         current_stage=None,
         scope_type="provider_dataset",
@@ -158,7 +244,7 @@ def _pipeline_execution(
         dagster_run_id=f"run-{execution_id[:8]}",
         dagster_run_status=None,
         trigger_kind="update_request",
-        operation_registry_version=None,
+        operation_key=None,
         requested_job_id=job_id,
         linked_job_count=1,
         projected_job=PipelineProjectedJob(
@@ -174,7 +260,7 @@ def _pipeline_execution(
             dagster_run_id=f"run-{execution_id[:8]}",
             dagster_run_status=None,
             trigger_kind="update_request",
-            operation_registry_version=None,
+            operation_key=None,
             load_batch_id=None,
             parent_job_id=None,
             depth=0,
@@ -192,6 +278,7 @@ def _empty_detail() -> OpsDatasetDetailData:
         overdue_by_seconds=0,
     )
     return OpsDatasetDetailData(
+        provider_dataset_id=42,
         provider="python-mois-api",
         dataset_key="mois_license_features_bulk",
         catalog_state="canonical",
@@ -201,6 +288,7 @@ def _empty_detail() -> OpsDatasetDetailData:
         scopes=[
             OpsDatasetScopeState(
                 sync_scope="dataset_wide",
+                operation_key="fixture_refresh",
                 status="never_run",
                 cursor={},
                 last_success_at=None,
@@ -227,20 +315,19 @@ def _empty_detail() -> OpsDatasetDetailData:
             items=[],
             next_cursor=None,
             canonical_url=(
-                "/v1/ops/pipeline/executions?provider=python-mois-api&"
-                "dataset_key=mois_license_features_bulk&sync_scope=dataset_wide"
+                "/v1/ops/pipeline/executions?provider_dataset_id=1&"
+                "sync_scope=dataset_wide"
             ),
         ),
         event_history=OpsDatasetEventHistory(
             items=[],
             next_cursor=None,
             canonical_url=(
-                "/v1/ops/pipeline/events?provider=python-mois-api&"
-                "dataset_key=mois_license_features_bulk&sync_scope=dataset_wide"
+                "/v1/ops/pipeline/events?provider_dataset_id=1&"
+                "sync_scope=dataset_wide"
             ),
         ),
         dataset_issues=OpsIssueSummary(open_count=0, severity_counts={}),
-        provider_issues=OpsIssueSummary(open_count=0, severity_counts={}),
     )
 
 
@@ -249,28 +336,39 @@ def test_ops_datasets_openapi_exposes_hardened_contract(client: TestClient) -> N
     spec = client.get("/openapi.json").json()
     operation_states = {"queued", "running", "done", "failed", "cancelled"}
     assert "/v1/ops/datasets" in spec["paths"]
-    assert "/v1/ops/datasets/detail" in spec["paths"]
-    assert "/v1/ops/datasets/preview" in spec["paths"]
+    assert "/v1/ops/datasets/{provider_dataset_id}" in spec["paths"]
+    assert "/v1/ops/datasets/{provider_dataset_id}/preview" in spec["paths"]
+    assert "/v1/ops/datasets/detail" not in spec["paths"]
+    assert "/v1/ops/datasets/preview" not in spec["paths"]
     assert "/v1/ops/datasets/refresh-policy" in spec["paths"]
+    grid_description = spec["paths"]["/v1/ops/datasets"]["get"]["description"]
+    assert "provider_dataset_id" in grid_description
+    assert "provider-only issue group은 만들지 않는다" in grid_description
     assert not any(
         "{provider}" in path or "{dataset}" in path
         for path in spec["paths"]
         if path.startswith("/v1/ops/datasets/")
     )
     for method, path in (
-        ("get", "/v1/ops/datasets/detail"),
-        ("post", "/v1/ops/datasets/preview"),
+        ("get", "/v1/ops/datasets/{provider_dataset_id}"),
+        ("post", "/v1/ops/datasets/{provider_dataset_id}/preview"),
         ("put", "/v1/ops/datasets/refresh-policy"),
     ):
         parameters = spec["paths"][path][method]["parameters"]
-        expected_parameters = {
-            ("provider", "query"),
-            ("dataset_key", "query"),
-        }
+        expected_parameters = (
+            {("provider_dataset_id", "query")}
+            if path.endswith("/refresh-policy")
+            else {
+                ("provider_dataset_id", "path"),
+                ("sync_scope", "query"),
+                # membership identity는 triple이다(ADR-088). 콘솔이 이 축을 보내는데
+                # 서버가 선언하지 않으면 FastAPI가 조용히 버려, operation만 다른 두
+                # grid 행이 같은 상세를 반환한다.
+                ("operation_key", "query"),
+            }
+        )
         if method == "get":
             expected_parameters.add((OPS_SCOPE_HEADER, "header"))
-        if path.endswith("/detail"):
-            expected_parameters.add(("sync_scope", "query"))
         assert {(item["name"], item["in"]) for item in parameters} == (
             expected_parameters
         )
@@ -285,7 +383,6 @@ def test_ops_datasets_openapi_exposes_hardened_contract(client: TestClient) -> N
         "catalog_state",
         "mutable",
         "dataset_issues",
-        "provider_issues",
     } <= set(row["properties"])
     grid_data = spec["components"]["schemas"]["OpsDatasetsGridData"]
     assert "execution_coverage" in grid_data["required"]
@@ -319,7 +416,7 @@ def test_ops_datasets_openapi_exposes_hardened_contract(client: TestClient) -> N
         "dagster_run_id",
         "dagster_run_status",
         "trigger_kind",
-        "operation_registry_version",
+        "operation_key",
         "error_message",
     } <= set(latest["required"])
     assert latest["properties"]["id"]["format"] == "uuid"
@@ -328,7 +425,15 @@ def test_ops_datasets_openapi_exposes_hardened_contract(client: TestClient) -> N
     assert set(latest["properties"]["pair_status"]["enum"]) == operation_states
     assert "status_source" not in latest["properties"]
     pair = spec["components"]["schemas"]["OpsDatasetProviderDataset"]
-    assert "operation_member_id" in pair["required"]
+    # membership identity는 triple이다(ADR-088) — 셋 다 non-null 필수다.
+    assert {
+        "provider_dataset_id",
+        "sync_scope",
+        "operation_key",
+        "operation_member_id",
+    } <= set(pair["required"])
+    assert pair["properties"]["sync_scope"]["type"] == "string"
+    assert pair["properties"]["operation_key"]["type"] == "string"
     assert pair["properties"]["operation_member_id"]["format"] == "uuid"
     assert set(pair["properties"]["status"]["enum"]) == operation_states
     assert "status_source" not in pair["properties"]
@@ -395,8 +500,18 @@ def test_ops_datasets_openapi_exposes_hardened_contract(client: TestClient) -> N
         "null",
     }
     event_schema = spec["components"]["schemas"]["OpsDatasetEventRecord"]
-    assert event_schema["properties"]["sync_scope"]["type"] == "string"
-    assert "sync_scope" in event_schema["required"]
+    # 행 자신의 membership 축이다(요청 필터 값이 아니라). member 없는 job-level
+    # event는 null이므로 nullable이고, 같은 리소스의 다른 표현
+    # (`PipelineJobEventRecord`)과 모양이 같아야 한다. required에는 남는다 —
+    # "값이 null일 수 있다"와 "키가 없을 수 있다"는 다르다.
+    assert {entry["type"] for entry in event_schema["properties"]["sync_scope"]["anyOf"]} == {
+        "string",
+        "null",
+    }
+    assert {
+        entry["type"] for entry in event_schema["properties"]["operation_key"]["anyOf"]
+    } == {"string", "null"}
+    assert {"sync_scope", "operation_key"} <= set(event_schema["required"])
 
 
 @pytest.mark.unit
@@ -431,21 +546,15 @@ def test_detail_endpoint_uses_application_service(
 ) -> None:
     from kortravelmap.api.routers import ops_datasets as router_module
 
-    provider = "provider/with/slash"
-    dataset_key = "dataset/with/slash"
-
     async def _detail(*_args: object, **kwargs: object) -> OpsDatasetDetailData:
-        assert kwargs["provider"] == provider
-        assert kwargs["dataset_key"] == dataset_key
+        assert kwargs["provider_dataset_id"] == 42
         assert kwargs["sync_scope"] == "external_system:concierge"
         return _empty_detail()
 
     monkeypatch.setattr(router_module, "load_dataset_detail", _detail)
     response = client.get(
-        "/v1/ops/datasets/detail",
+        "/v1/ops/datasets/42",
         params={
-            "provider": provider,
-            "dataset_key": dataset_key,
             "sync_scope": "external_system:concierge",
         },
     )
@@ -466,10 +575,8 @@ def test_detail_rejects_noncanonical_sync_scope(
     sync_scope: str,
 ) -> None:
     response = client.get(
-        "/v1/ops/datasets/detail",
+        "/v1/ops/datasets/42",
         params={
-            "provider": "python-mois-api",
-            "dataset_key": "mois_license_features_bulk",
             "sync_scope": sync_scope,
         },
     )
@@ -480,7 +587,39 @@ def test_detail_rejects_noncanonical_sync_scope(
 
 
 @pytest.mark.unit
-def test_run_history_emits_one_record_per_root_for_dataset_wide_aliases() -> None:
+def test_removed_natural_dataset_routes_are_not_reintroduced(client: TestClient) -> None:
+    assert client.get(
+        "/v1/ops/datasets/detail",
+        params={
+            "provider": "python-mois-api",
+            "dataset_key": "mois_license_features_bulk",
+            "sync_scope": "dataset_wide",
+        },
+    ).status_code == 404
+    assert client.post(
+        "/v1/ops/datasets/preview",
+        params={
+            "provider": "python-mois-api",
+            "dataset_key": "mois_license_features_bulk",
+            "sync_scope": "dataset_wide",
+        },
+        json={"source": "fixture", "max_items": 1},
+    ).status_code == 404
+
+
+@pytest.mark.unit
+def test_run_history_emits_one_record_per_membership() -> None:
+    """T-VN-33: 형제 operation member는 **각각 한 줄**로 나온다.
+
+    예전에는 root당 1건으로 접고 ``operation_member_id``(UUID) tie-break로 하나를
+    골랐다. 그건 형제 operation 중 임의 선택이고, 고른 쪽의 ``operation_key``와
+    ``pair_status``만 응답에 실리므로 운영자는 다른 operation이 어떤 상태였는지
+    알 방법이 없었다.
+
+    같은 root가 두 membership을 건드렸다면 중복이 아니라 **서로 다른 두 사실**이다.
+    identity가 triple이므로 행이 늘어나는 것이 맞고, ``operation_key``가 함께
+    실리므로 화면에서 구분된다.
+    """
     from kortravelmap.api import ops_dataset_service as service
 
     provider = "python-mois-api"
@@ -494,17 +633,30 @@ def test_run_history_emits_one_record_per_root_for_dataset_wide_aliases() -> Non
         ),
         provider_datasets=(
             PipelineProviderDatasetIdentity(
+                provider_dataset_id=42,
                 provider=provider,
                 dataset_key=dataset_key,
-                sync_scope=None,
+                sync_scope="dataset_wide",
+                operation_key="mois_bulk_refresh",
                 operation_member_id="22222222-2222-4222-8222-222222222222",
                 status="done",
             ),
             PipelineProviderDatasetIdentity(
+                provider_dataset_id=42,
                 provider=provider,
                 dataset_key=dataset_key,
                 sync_scope="dataset_wide",
+                operation_key="mois_sibling_refresh",
                 operation_member_id="33333333-3333-4333-8333-333333333333",
+                status="done",
+            ),
+            PipelineProviderDatasetIdentity(
+                provider_dataset_id=42,
+                provider=provider,
+                dataset_key=dataset_key,
+                sync_scope="target_grids",
+                operation_key="mois_targeted_refresh",
+                operation_member_id="44444444-4444-4444-8444-444444444444",
                 status="done",
             ),
         ),
@@ -512,27 +664,62 @@ def test_run_history_emits_one_record_per_root_for_dataset_wide_aliases() -> Non
 
     records = service._run_history_records(
         (execution,),
-        provider=provider,
-        dataset_key=dataset_key,
-        sync_scopes=("dataset_wide", None),
+        provider_dataset_id=42,
+        sync_scopes=("dataset_wide",),
+        operation_keys=None,
     )
 
-    assert len(records) == 1
-    assert records[0].sync_scope == "dataset_wide"
-    assert str(records[0].operation_member_id) == (
-        "33333333-3333-4333-8333-333333333333"
+    # 요청한 scope의 member 둘 다 나온다. 정렬은 (sync_scope, operation_key)로
+    # 결정적이라 UUID 우연에 기대지 않는다.
+    assert len(records) == 2
+    assert [record.sync_scope for record in records] == ["dataset_wide"] * 2
+    assert [record.operation_key for record in records] == [
+        "mois_bulk_refresh",
+        "mois_sibling_refresh",
+    ]
+    assert {str(record.operation_member_id) for record in records} == {
+        "22222222-2222-4222-8222-222222222222",
+        "33333333-3333-4333-8333-333333333333",
+    }
+
+    # 반대 방향도 못이 박혀야 한다. exact triple을 지목하면 **그 operation만**
+    # 나온다 — query는 `dataset_operation_key`로 root를 고르지만 고른 root의
+    # membership 목록에는 형제가 그대로 들어 있어, 안 거르면 상세 화면이 옆
+    # operation의 실행을 섞어 보여준다(화면 안내문과도 어긋난다).
+    narrowed = service._run_history_records(
+        (execution,),
+        provider_dataset_id=42,
+        sync_scopes=("dataset_wide",),
+        operation_keys=("mois_sibling_refresh",),
     )
+    assert [record.operation_key for record in narrowed] == ["mois_sibling_refresh"]
 
 
 @pytest.mark.unit
-def test_state_aliases_emit_one_logical_scope_and_prefer_canonical_row() -> None:
+def test_states_keep_each_operation_and_drop_noncanonical_rows() -> None:
+    """T-VN-33: 비정규 scope는 감추되, operation별 state는 **접지 않는다**.
+
+    state PK가 (provider_dataset_id, sync_scope, operation_key) triple이므로 같은
+    logical scope에 operation만 다른 row가 여러 개 남는다. 예전에는 이것을 "API
+    scope resource는 하나여야 한다"며 하나로 접었는데, 그러면 형제 operation의
+    상태가 무경고로 사라진다 — 아래 fixture처럼 한쪽이 ``paused``면 운영자는 멈춘
+    operation을 영영 못 본다. 접기는 ``default`` alias 시대의 규칙이었고, alias가
+    사라진 뒤로는 alias가 아니라 operation을 접고 있었다.
+
+    비정규 scope(``default``/``legacy-scope``)를 숨기는 규칙은 그대로다 — 그건
+    API가 표현할 수 없는 값이라서지 중복이라서가 아니다.
+    """
     from kortravelmap.api import ops_dataset_service as service
 
-    def state(sync_scope: str, *, status: str) -> SyncState:
+    def state(
+        sync_scope: str, *, status: str, operation_key: str = "refresh"
+    ) -> SyncState:
         return SyncState(
+            provider_dataset_id=42,
             provider="removed-provider",
             dataset_key="removed-dataset",
             sync_scope=sync_scope,
+            operation_key=operation_key,
             status=cast(Any, status),
             cursor={},
             last_success_at=None,
@@ -541,17 +728,24 @@ def test_state_aliases_emit_one_logical_scope_and_prefer_canonical_row() -> None
             next_run_after=None,
         )
 
-    selected = service._states_by_api_scope(
+    selected = service._states_by_api_membership(
         None,
         (
             state("default", status="paused"),
+            state("legacy-scope", status="paused"),
             state("dataset_wide", status="active"),
+            state("dataset_wide", status="paused", operation_key="sibling_refresh"),
         ),
     )
 
-    assert set(selected) == {"dataset_wide"}
-    assert selected["dataset_wide"].sync_scope == "dataset_wide"
-    assert selected["dataset_wide"].status == "active"
+    assert set(selected) == {
+        ("dataset_wide", "refresh"),
+        ("dataset_wide", "sibling_refresh"),
+    }
+    assert selected[("dataset_wide", "refresh")].status == "active"
+    assert selected[("dataset_wide", "sibling_refresh")].status == "paused", (
+        "형제 operation의 상태를 접으면 멈춘 operation이 보이지 않는다"
+    )
 
 
 @pytest.mark.unit
@@ -566,7 +760,7 @@ def test_orphan_policy_mutation_is_409_with_reason(
     monkeypatch.setattr(router_module, "upsert_dataset_refresh_policy", _upsert)
     response = client.put(
         "/v1/ops/datasets/refresh-policy",
-        params={"provider": "legacy", "dataset_key": "removed"},
+        params={"provider_dataset_id": 41},
         json={
             "expected_revision": "1",
             "source_kind": "openapi",
@@ -587,15 +781,16 @@ def test_policy_mutation_accepts_explicit_stale_sla(
 ) -> None:
     from kortravelmap.api.routers import ops_datasets as router_module
 
+    provider_dataset_id = 42
     provider = "provider/with/slash"
     dataset_key = "dataset/with/slash"
 
     async def _upsert(*_args: object, **kwargs: object) -> ProviderRefreshPolicy:
-        assert kwargs["provider"] == provider
-        assert kwargs["dataset_key"] == dataset_key
+        assert kwargs["provider_dataset_id"] == provider_dataset_id
         body = kwargs["body"]
         assert body.stale_after_minutes == 90
         return _policy(
+            provider_dataset_id=provider_dataset_id,
             provider=provider,
             dataset_key=dataset_key,
             stale_after_minutes=90,
@@ -604,7 +799,7 @@ def test_policy_mutation_accepts_explicit_stale_sla(
     monkeypatch.setattr(router_module, "upsert_dataset_refresh_policy", _upsert)
     response = client.put(
         "/v1/ops/datasets/refresh-policy",
-        params={"provider": provider, "dataset_key": dataset_key},
+        params={"provider_dataset_id": provider_dataset_id},
         json={
             "expected_revision": "1",
             "source_kind": "openapi",
@@ -633,7 +828,7 @@ def test_policy_revision_conflict_is_typed_and_returns_current_record(
     monkeypatch.setattr(router_module, "upsert_dataset_refresh_policy", _upsert)
     response = client.put(
         "/v1/ops/datasets/refresh-policy",
-        params={"provider": current.provider, "dataset_key": current.dataset_key},
+        params={"provider_dataset_id": current.provider_dataset_id},
         json={"expected_revision": "1", "source_kind": "openapi"},
     )
 
@@ -680,7 +875,7 @@ def test_policy_terminal_conflicts_are_typed_with_current_record(
     current = cast(Any, error).current
     response = client.put(
         "/v1/ops/datasets/refresh-policy",
-        params={"provider": current.provider, "dataset_key": current.dataset_key},
+        params={"provider_dataset_id": current.provider_dataset_id},
         json={"expected_revision": str(current.revision), "source_kind": "openapi"},
     )
 
@@ -743,10 +938,7 @@ def test_policy_mutation_rejects_server_owned_rate_limit_provenance(
 ) -> None:
     response = client.put(
         "/v1/ops/datasets/refresh-policy",
-        params={
-            "provider": "python-mois-api",
-            "dataset_key": "mois_license_features_bulk",
-        },
+        params={"provider_dataset_id": 42},
         json={
             "expected_revision": None,
             "source_kind": "openapi",
@@ -759,13 +951,24 @@ def test_policy_mutation_rejects_server_owned_rate_limit_provenance(
 
 
 @pytest.mark.unit
-def test_fixture_preview_enforces_response_budget(client: TestClient) -> None:
+def test_fixture_preview_enforces_response_budget(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import ops_datasets as router_module
+
+    async def _catalog(*_args: object) -> tuple[ProviderDatasetCatalogEntry, ...]:
+        return (
+            _preview_catalog_entry(
+                provider="data.go.kr-standard",
+                dataset_key="datagokr_cultural_festivals",
+            ),
+        )
+
+    monkeypatch.setattr(router_module, "list_provider_dataset_catalog", _catalog)
     response = client.post(
-        "/v1/ops/datasets/preview",
-        params={
-            "provider": "data.go.kr-standard",
-            "dataset_key": "datagokr_cultural_festivals",
-        },
+        "/v1/ops/datasets/42/preview",
+        params={"sync_scope": "dataset_wide"},
         json={"source": "fixture", "max_items": 1},
     )
     assert response.status_code == 200
@@ -781,26 +984,49 @@ def test_fixture_preview_enforces_response_budget(client: TestClient) -> None:
 
 
 @pytest.mark.unit
-def test_live_preview_request_is_typed_422(client: TestClient) -> None:
+def test_live_preview_request_is_typed_422(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import ops_datasets as router_module
+
+    async def _catalog(*_args: object) -> tuple[ProviderDatasetCatalogEntry, ...]:
+        return (
+            _preview_catalog_entry(
+                provider="data.go.kr-standard",
+                dataset_key="datagokr_cultural_festivals",
+            ),
+        )
+
+    monkeypatch.setattr(router_module, "list_provider_dataset_catalog", _catalog)
     response = client.post(
-        "/v1/ops/datasets/preview",
-        params={
-            "provider": "data.go.kr-standard",
-            "dataset_key": "datagokr_cultural_festivals",
-        },
+        "/v1/ops/datasets/42/preview",
+        params={"sync_scope": "dataset_wide"},
         json={"source": "live", "max_items": 1},
     )
     assert response.status_code == 422
 
 
 @pytest.mark.unit
-def test_preview_without_fixture_capability_is_409(client: TestClient) -> None:
+def test_preview_without_fixture_capability_is_409(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import ops_datasets as router_module
+
+    async def _catalog(*_args: object) -> tuple[ProviderDatasetCatalogEntry, ...]:
+        return (
+            _preview_catalog_entry(
+                provider="python-mois-api",
+                dataset_key="mois_license_features_bulk",
+                has_fixture_preview=False,
+            ),
+        )
+
+    monkeypatch.setattr(router_module, "list_provider_dataset_catalog", _catalog)
     response = client.post(
-        "/v1/ops/datasets/preview",
-        params={
-            "provider": "python-mois-api",
-            "dataset_key": "mois_license_features_bulk",
-        },
+        "/v1/ops/datasets/42/preview",
+        params={"sync_scope": "dataset_wide"},
         json={"source": "fixture", "max_items": 1},
     )
     assert response.status_code == 409
@@ -817,15 +1043,21 @@ def test_fixture_registry_mismatch_is_structured_409(
     async def _missing_fixture(*_args: object, **_kwargs: object) -> object:
         raise KeyError("fixture missing")
 
+    async def _catalog(*_args: object) -> tuple[ProviderDatasetCatalogEntry, ...]:
+        return (
+            _preview_catalog_entry(
+                provider="data.go.kr-standard",
+                dataset_key="datagokr_cultural_festivals",
+            ),
+        )
+
     monkeypatch.setattr(
         router_module, "run_dataset_fixture_preview", _missing_fixture
     )
+    monkeypatch.setattr(router_module, "list_provider_dataset_catalog", _catalog)
     response = client.post(
-        "/v1/ops/datasets/preview",
-        params={
-            "provider": "data.go.kr-standard",
-            "dataset_key": "datagokr_cultural_festivals",
-        },
+        "/v1/ops/datasets/42/preview",
+        params={"sync_scope": "dataset_wide"},
         json={"source": "fixture", "max_items": 1},
     )
 
@@ -843,10 +1075,10 @@ def test_preview_passes_slash_identity_to_service_exactly(
     provider = "provider/with/slash"
     dataset_key = "dataset/with/slash"
 
-    def _entry(actual_provider: str, actual_dataset_key: str) -> object:
-        assert actual_provider == provider
-        assert actual_dataset_key == dataset_key
-        return SimpleNamespace(preview="fixture")
+    async def _catalog(*_args: object) -> tuple[ProviderDatasetCatalogEntry, ...]:
+        return (
+            _preview_catalog_entry(provider=provider, dataset_key=dataset_key),
+        )
 
     async def _preview(
         actual_provider: str,
@@ -868,18 +1100,85 @@ def test_preview_passes_slash_identity_to_service_exactly(
             max_items=max_items,
         )
 
-    monkeypatch.setattr(router_module, "find_catalog_entry", _entry)
+    monkeypatch.setattr(router_module, "list_provider_dataset_catalog", _catalog)
     monkeypatch.setattr(router_module, "run_dataset_fixture_preview", _preview)
 
     response = client.post(
-        "/v1/ops/datasets/preview",
-        params={"provider": provider, "dataset_key": dataset_key},
+        "/v1/ops/datasets/42/preview",
+        params={"sync_scope": "dataset_wide"},
         json={"source": "fixture", "max_items": 1},
     )
 
     assert response.status_code == 200
     assert response.json()["data"]["provider"] == provider
     assert response.json()["data"]["dataset_key"] == dataset_key
+
+
+@pytest.mark.unit
+async def test_preview_only_dataset_is_not_gated_by_refresh_scopes(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """refresh operation이 없는 preview 전용 dataset도 preview가 열려야 한다.
+
+    ``provider_dataset_operation_scopes``에는 CHECK ``operation_kind='refresh'``가
+    있어 **preview operation은 scope 행을 가질 수 없다**. 그런데 라우트가
+    ``entry.refresh_scopes``로 승인 여부를 정해서, 같은 API가
+    ``catalog.preview.supported=true``라 말해 놓고 영구 404를 냈다
+    (실측 대상: python-airkorea-api/airkorea_stations. 적대 리뷰 10라운드).
+
+    통합 회귀가 refresh scope를 가진 합성 seed만 써서 이 조합을 전혀 밟지 않았다.
+    """
+    from kortravelmap.api.routers import ops_datasets as router_module
+
+    provider = "python-airkorea-api"
+    dataset_key = "airkorea_stations"
+
+    async def _catalog(*_args: object) -> tuple[ProviderDatasetCatalogEntry, ...]:
+        return (
+            _preview_catalog_entry(
+                provider=provider,
+                dataset_key=dataset_key,
+                has_refresh_operation=False,
+            ),
+        )
+
+    async def _preview(
+        actual_provider: str,
+        actual_dataset_key: str,
+        *,
+        max_items: int,
+    ) -> object:
+        return SimpleNamespace(
+            provider=actual_provider,
+            dataset=actual_dataset_key,
+            variant="fixture",
+            description="preview-only dataset",
+            items=(),
+            total_items=0,
+            truncated=False,
+            max_items=max_items,
+        )
+
+    monkeypatch.setattr(router_module, "list_provider_dataset_catalog", _catalog)
+    monkeypatch.setattr(router_module, "run_dataset_fixture_preview", _preview)
+
+    response = client.post(
+        "/v1/ops/datasets/42/preview",
+        params={"sync_scope": "dataset_wide"},
+        json={"source": "fixture", "max_items": 1},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["provider"] == provider
+
+    # 그렇다고 아무 scope나 열리는 것은 아니다 — dataset 단위 preview만 허용한다.
+    narrowed = client.post(
+        "/v1/ops/datasets/42/preview",
+        params={"sync_scope": "target_grids"},
+        json={"source": "fixture", "max_items": 1},
+    )
+    assert narrowed.status_code == 404
 
 
 @pytest.mark.unit
@@ -893,21 +1192,18 @@ async def test_grid_calculates_freshness_and_keeps_time_meanings_separate(
     state = _state(eligible_after=eligible_after)
     policy = _policy(stale_after_minutes=60)
     dataset_issue = DatasetIntegrityIssueCount(
+        provider_dataset_id=state.provider_dataset_id,
         provider=state.provider,
         dataset_key=state.dataset_key,
         open_total=2,
         by_severity={"error": 2},
     )
-    provider_issue = DatasetIntegrityIssueCount(
-        provider=state.provider,
-        dataset_key=None,
-        open_total=1,
-        by_severity={"warning": 1},
-    )
     active_unscoped = DatasetLatestExecution(
+        provider_dataset_id=42,
         provider=state.provider,
         dataset_key=state.dataset_key,
-        sync_scope=None,
+        sync_scope="dataset_wide",
+        operation_key="mois_refresh",
         execution=_pipeline_execution(
             provider=state.provider,
             dataset_key=state.dataset_key,
@@ -917,9 +1213,11 @@ async def test_grid_calculates_freshness_and_keeps_time_meanings_separate(
         pair_status="running",
     )
     newer_terminal = DatasetLatestExecution(
+        provider_dataset_id=42,
         provider=state.provider,
         dataset_key=state.dataset_key,
         sync_scope="dataset_wide",
+        operation_key="mois_refresh",
         execution=_pipeline_execution(
             provider=state.provider,
             dataset_key=state.dataset_key,
@@ -933,8 +1231,8 @@ async def test_grid_calculates_freshness_and_keeps_time_meanings_separate(
     schedule_index = DatasetScheduleIndex(
         source_status="ok",
         errors=(),
-        by_dataset={
-            (state.provider, state.dataset_key): DatasetScheduleState(
+        by_operation_key={
+            "mois_refresh": DatasetScheduleState(
                 basis="dagster_definition_tags",
                 status="RUNNING",
                 schedule_names=("monthly",),
@@ -956,7 +1254,7 @@ async def test_grid_calculates_freshness_and_keeps_time_meanings_separate(
     async def _issues(
         _session: object, **_kwargs: object
     ) -> tuple[DatasetIntegrityIssueCount, ...]:
-        return (dataset_issue, provider_issue)
+        return (dataset_issue,)
 
     async def _snapshots(
         _session: object,
@@ -964,16 +1262,20 @@ async def test_grid_calculates_freshness_and_keeps_time_meanings_separate(
         calls["snapshots"] += 1
         return (
             DatasetExecutionSnapshot(
+                provider_dataset_id=state.provider_dataset_id,
                 provider=state.provider,
                 dataset_key=state.dataset_key,
-                sync_scope=None,
+                sync_scope="dataset_wide",
+                operation_key="mois_refresh",
                 latest_terminal=None,
                 active=active_unscoped,
             ),
             DatasetExecutionSnapshot(
+                provider_dataset_id=state.provider_dataset_id,
                 provider=state.provider,
                 dataset_key=state.dataset_key,
                 sync_scope="dataset_wide",
+                operation_key="mois_refresh",
                 latest_terminal=newer_terminal,
                 active=None,
             ),
@@ -982,19 +1284,32 @@ async def test_grid_calculates_freshness_and_keeps_time_meanings_separate(
     async def _schedules(**_kwargs: object) -> DatasetScheduleIndex:
         return schedule_index
 
-    async def _external_systems(_session: object) -> tuple[str, ...]:
-        return ("concierge", "geo")
+    async def _catalog(
+        _session: object,
+    ) -> tuple[ProviderDatasetCatalogEntry, ...]:
+        return (
+            _refresh_catalog_entry(
+                provider_dataset_id=state.provider_dataset_id,
+                provider=state.provider,
+                dataset_key=state.dataset_key,
+                operation_key="mois_refresh",
+                sync_scopes=("dataset_wide",),
+            ),
+            _refresh_catalog_entry(
+                provider_dataset_id=43,
+                provider="python-kma-api",
+                dataset_key="kma_short_forecast",
+                operation_key="kma_refresh",
+                sync_scopes=("target_grids",),
+            ),
+        )
 
     monkeypatch.setattr(service.sync_state_repo, "list_all_sync_states", _states)
     monkeypatch.setattr(service, "list_all_provider_refresh_policies", _policies)
     monkeypatch.setattr(service, "count_open_integrity_issues_by_dataset", _issues)
     monkeypatch.setattr(service, "list_dataset_execution_snapshots", _snapshots)
     monkeypatch.setattr(service, "load_dataset_schedule_index", _schedules)
-    monkeypatch.setattr(
-        service,
-        "list_active_poi_cache_target_external_systems",
-        _external_systems,
-    )
+    monkeypatch.setattr(service, "list_provider_dataset_catalog", _catalog)
 
     data = await load_datasets_grid(
         cast(Any, object()),
@@ -1009,15 +1324,15 @@ async def test_grid_calculates_freshness_and_keeps_time_meanings_separate(
     )
     assert row.eligible_after == eligible_after
     assert row.sync_scope == "dataset_wide"
+    # 링크가 membership을 주소로 갖는다 — operation을 빼면 형제 operation 행들이
+    # 같은 링크를 갖게 돼 어느 행을 눌러도 같은 화면이 열린다.
     assert row.detail_url == (
-        "/v1/ops/datasets/detail?provider=python-mois-api&"
-        "dataset_key=mois_license_features_bulk&sync_scope=dataset_wide"
+        "/v1/ops/datasets/42?sync_scope=dataset_wide&operation_key=mois_refresh"
     )
     assert row.schedule.next_scheduled_at == next_scheduled_at
     assert row.freshness.state == "fresh"
     assert row.freshness.due_at == _NOW + timedelta(minutes=60)
     assert row.dataset_issues.open_count == 2
-    assert row.provider_issues.open_count == 1
     assert row.latest_execution is not None
     assert row.latest_execution.status == "done"
     assert row.latest_execution.pair_status == "done"
@@ -1025,10 +1340,11 @@ async def test_grid_calculates_freshness_and_keeps_time_meanings_separate(
     assert str(row.latest_execution.id) == newer_terminal.execution.id
     assert row.active_execution is not None
     assert row.active_execution.status == "running"
-    assert row.active_execution.sync_scope is None
+    # ``sync_scope``는 non-null이다 — DB 열도 NOT NULL이고 공급 DTO도 ``str``다.
+    assert row.active_execution.sync_scope == "dataset_wide"
     assert str(row.active_execution.id) == active_unscoped.execution.id
     assert row.catalog is not None
-    assert row.catalog.provider_state_default_scope == "default"
+    assert row.catalog.provider_state_default_scope == "dataset_wide"
     assert row.catalog.scope_refresh.default_sync_scope == "dataset_wide"
     assert row.catalog.scope_refresh.supported is False
     assert row.catalog.scope_refresh.effect == "dataset_wide"
@@ -1039,11 +1355,7 @@ async def test_grid_calculates_freshness_and_keeps_time_meanings_separate(
         and item.catalog.scope_refresh.selector == "poi_cache_targets"
     )
     assert kma_row.catalog is not None
-    assert kma_row.catalog.scope_refresh.allowed_sync_scopes == [
-        "target_grids",
-        "external_system:concierge",
-        "external_system:geo",
-    ]
+    assert kma_row.catalog.scope_refresh.allowed_sync_scopes == ["target_grids"]
     assert calls["snapshots"] == 1
 
 
@@ -1059,9 +1371,11 @@ async def test_grid_projects_active_execution_by_exact_sync_scope(
     scopes = (*exact_scopes, "external_system:without-exact-run")
     states = [
         SyncState(
+            provider_dataset_id=42,
             provider=provider,
             dataset_key=dataset_key,
             sync_scope=scope,
+            operation_key="kma_refresh",
             status="active",
             cursor={},
             last_success_at=_NOW,
@@ -1073,9 +1387,11 @@ async def test_grid_projects_active_execution_by_exact_sync_scope(
     ]
     executions = tuple(
         DatasetLatestExecution(
+            provider_dataset_id=42,
             provider=provider,
             dataset_key=dataset_key,
             sync_scope=scope,
+            operation_key="kma_refresh",
             execution=_pipeline_execution(
                 provider=provider,
                 dataset_key=dataset_key,
@@ -1091,9 +1407,11 @@ async def test_grid_projects_active_execution_by_exact_sync_scope(
         for index, scope in enumerate(exact_scopes, start=3)
     )
     unscoped = DatasetLatestExecution(
+        provider_dataset_id=42,
         provider=provider,
         dataset_key=dataset_key,
-        sync_scope=None,
+        sync_scope="dataset_wide",
+        operation_key="kma_refresh",
         execution=_pipeline_execution(
             provider=provider,
             dataset_key=dataset_key,
@@ -1115,9 +1433,11 @@ async def test_grid_projects_active_execution_by_exact_sync_scope(
     ) -> tuple[DatasetExecutionSnapshot, ...]:
         return tuple(
             DatasetExecutionSnapshot(
+                provider_dataset_id=item.provider_dataset_id,
                 provider=item.provider,
                 dataset_key=item.dataset_key,
                 sync_scope=item.sync_scope,
+                operation_key="kma_refresh",
                 latest_terminal=None,
                 active=item,
             )
@@ -1125,21 +1445,29 @@ async def test_grid_projects_active_execution_by_exact_sync_scope(
         )
 
     async def _schedules(**_kwargs: object) -> DatasetScheduleIndex:
-        return DatasetScheduleIndex(source_status="ok", errors=(), by_dataset={})
+        return DatasetScheduleIndex(
+            source_status="ok", errors=(), by_operation_key={}
+        )
 
-    async def _external_systems(_session: object) -> tuple[str, ...]:
-        return ("concierge", "geo", "new")
+    async def _catalog(
+        _session: object,
+    ) -> tuple[ProviderDatasetCatalogEntry, ...]:
+        return (
+            _refresh_catalog_entry(
+                provider_dataset_id=42,
+                provider=provider,
+                dataset_key=dataset_key,
+                operation_key="kma_refresh",
+                sync_scopes=("target_grids",),
+            ),
+        )
 
     monkeypatch.setattr(service.sync_state_repo, "list_all_sync_states", _states)
     monkeypatch.setattr(service, "list_all_provider_refresh_policies", _empty)
     monkeypatch.setattr(service, "count_open_integrity_issues_by_dataset", _empty)
     monkeypatch.setattr(service, "list_dataset_execution_snapshots", _snapshots)
     monkeypatch.setattr(service, "load_dataset_schedule_index", _schedules)
-    monkeypatch.setattr(
-        service,
-        "list_active_poi_cache_target_external_systems",
-        _external_systems,
-    )
+    monkeypatch.setattr(service, "list_provider_dataset_catalog", _catalog)
 
     data = await load_datasets_grid(
         cast(Any, object()),
@@ -1155,12 +1483,10 @@ async def test_grid_projects_active_execution_by_exact_sync_scope(
     expected_scopes = {
         *scopes,
         "target_grids",
-        "external_system:new",
     }
     assert expected_scopes <= rows.keys()
     assert "legacy-scope" not in rows
     assert rows["target_grids"].active_execution is None
-    assert rows["external_system:new"].active_execution is None
     for scope, execution in zip(exact_scopes, executions, strict=True):
         active = rows[scope].active_execution
         assert active is not None
@@ -1179,9 +1505,11 @@ async def test_detail_materializes_all_catalog_target_scopes(
     provider = "python-kma-api"
     dataset_key = "kma_short_forecast"
     state = SyncState(
+        provider_dataset_id=42,
         provider=provider,
         dataset_key=dataset_key,
         sync_scope="external_system:concierge",
+        operation_key="kma_refresh",
         status="active",
         cursor={},
         last_success_at=_NOW,
@@ -1190,9 +1518,11 @@ async def test_detail_materializes_all_catalog_target_scopes(
         next_run_after=None,
     )
     terminal = DatasetLatestExecution(
+        provider_dataset_id=42,
         provider=provider,
         dataset_key=dataset_key,
         sync_scope="external_system:concierge",
+        operation_key="kma_refresh",
         execution=_pipeline_execution(
             provider=provider,
             dataset_key=dataset_key,
@@ -1204,9 +1534,11 @@ async def test_detail_materializes_all_catalog_target_scopes(
         pair_status="done",
     )
     active = DatasetLatestExecution(
+        provider_dataset_id=42,
         provider=provider,
         dataset_key=dataset_key,
         sync_scope="external_system:concierge",
+        operation_key="kma_refresh",
         execution=_pipeline_execution(
             provider=provider,
             dataset_key=dataset_key,
@@ -1223,6 +1555,7 @@ async def test_detail_materializes_all_catalog_target_scopes(
         return None
 
     async def _empty_page(*_args: object, **kwargs: object) -> SimpleNamespace:
+        assert kwargs["provider_dataset_id"] == 42
         if "dataset_sync_scopes" in kwargs:
             assert kwargs["dataset_sync_scopes"] == (
                 "external_system:concierge",
@@ -1239,44 +1572,51 @@ async def test_detail_materializes_all_catalog_target_scopes(
     async def _snapshots(
         _session: object,
         *,
-        provider: str,
-        dataset_key: str,
+        provider_dataset_id: int,
     ) -> tuple[DatasetExecutionSnapshot, ...]:
+        assert provider_dataset_id == 42
         return (
             DatasetExecutionSnapshot(
+                provider_dataset_id=42,
                 provider=provider,
                 dataset_key=dataset_key,
                 sync_scope="external_system:concierge",
+                operation_key="kma_refresh",
                 latest_terminal=terminal,
                 active=active,
             ),
         )
 
     async def _schedules(**_kwargs: object) -> DatasetScheduleIndex:
-        return DatasetScheduleIndex(source_status="ok", errors=(), by_dataset={})
+        return DatasetScheduleIndex(
+            source_status="ok", errors=(), by_operation_key={}
+        )
 
-    async def _external_systems(_session: object) -> tuple[str, ...]:
-        return ("concierge", "geo")
+    async def _catalog(*_args: object) -> tuple[ProviderDatasetCatalogEntry, ...]:
+        return (
+            _refresh_catalog_entry(
+                provider_dataset_id=42,
+                provider=provider,
+                dataset_key=dataset_key,
+                operation_key="kma_refresh",
+                sync_scopes=("target_grids",),
+            ),
+        )
 
-    monkeypatch.setattr(service.sync_state_repo, "list_sync_states", _states)
+    monkeypatch.setattr(service.sync_state_repo, "list_sync_states_by_dataset_id", _states)
     monkeypatch.setattr(service, "get_provider_refresh_policy", _none)
     monkeypatch.setattr(service, "list_dataset_execution_snapshots_scoped", _snapshots)
     monkeypatch.setattr(service, "list_pipeline_executions", _empty_page)
     monkeypatch.setattr(service, "list_ops_import_job_events", _empty_page)
     monkeypatch.setattr(service, "count_open_integrity_issues_by_dataset", _empty)
     monkeypatch.setattr(service, "load_dataset_schedule_index", _schedules)
-    monkeypatch.setattr(
-        service,
-        "list_active_poi_cache_target_external_systems",
-        _external_systems,
-    )
+    monkeypatch.setattr(service, "list_provider_dataset_catalog", _catalog)
 
     detail = await load_dataset_detail(
         cast(Any, object()),
         settings=ApiSettings(),
         dagster_client=cast(Any, object()),
-        provider=provider,
-        dataset_key=dataset_key,
+        provider_dataset_id=42,
         sync_scope="external_system:concierge",
         now=_NOW,
     )
@@ -1284,11 +1624,9 @@ async def test_detail_materializes_all_catalog_target_scopes(
     assert set(scopes) == {
         "target_grids",
         "external_system:concierge",
-        "external_system:geo",
     }
     assert scopes["target_grids"].status == "never_run"
     assert scopes["external_system:concierge"].status == "active"
-    assert scopes["external_system:geo"].status == "never_run"
     assert detail.run_history.next_cursor == "runs-next"
     assert detail.event_history.next_cursor == "events-next"
     assert detail.latest_execution is not None
@@ -1296,8 +1634,7 @@ async def test_detail_materializes_all_catalog_target_scopes(
     assert detail.active_execution is not None
     assert str(detail.active_execution.id) == active.execution.id
     assert detail.event_history.canonical_url == (
-        "/v1/ops/pipeline/events?provider=python-kma-api&"
-        "dataset_key=kma_short_forecast&"
+        "/v1/ops/pipeline/events?provider_dataset_id=42&"
         "sync_scope=external_system%3Aconcierge"
     )
 
@@ -1315,9 +1652,11 @@ async def test_grid_keeps_invalid_scope_orphan_as_dataset_wide_placeholder(
     legacy_scopes = ("legacy:a", "legacy:b")
     states = [
         SyncState(
+            provider_dataset_id=42,
             provider=provider,
             dataset_key=dataset_key,
             sync_scope=scope,
+            operation_key="orphan_refresh",
             status="active",
             cursor={},
             last_success_at=_NOW,
@@ -1328,9 +1667,11 @@ async def test_grid_keeps_invalid_scope_orphan_as_dataset_wide_placeholder(
         for scope in legacy_scopes
     ]
     unscoped = DatasetLatestExecution(
+        provider_dataset_id=42,
         provider=provider,
         dataset_key=dataset_key,
-        sync_scope=None,
+        sync_scope="dataset_wide",
+        operation_key="orphan_refresh",
         execution=_pipeline_execution(
             provider=provider,
             dataset_key=dataset_key,
@@ -1340,13 +1681,16 @@ async def test_grid_keeps_invalid_scope_orphan_as_dataset_wide_placeholder(
         pair_status="running",
     )
     policy = _policy(
+        provider_dataset_id=43,
         provider=policy_provider,
         dataset_key=policy_dataset_key,
     )
     policy_unscoped = DatasetLatestExecution(
+        provider_dataset_id=43,
         provider=policy_provider,
         dataset_key=policy_dataset_key,
-        sync_scope=None,
+        sync_scope="dataset_wide",
+        operation_key="orphan_refresh",
         execution=_pipeline_execution(
             provider=policy_provider,
             dataset_key=policy_dataset_key,
@@ -1372,9 +1716,11 @@ async def test_grid_keeps_invalid_scope_orphan_as_dataset_wide_placeholder(
     ) -> tuple[DatasetExecutionSnapshot, ...]:
         return tuple(
             DatasetExecutionSnapshot(
+                provider_dataset_id=item.provider_dataset_id,
                 provider=item.provider,
                 dataset_key=item.dataset_key,
                 sync_scope=item.sync_scope,
+                operation_key="orphan_refresh",
                 latest_terminal=None,
                 active=item,
             )
@@ -1382,18 +1728,21 @@ async def test_grid_keeps_invalid_scope_orphan_as_dataset_wide_placeholder(
         )
 
     async def _schedules(**_kwargs: object) -> DatasetScheduleIndex:
-        return DatasetScheduleIndex(source_status="ok", errors=(), by_dataset={})
+        return DatasetScheduleIndex(
+            source_status="ok", errors=(), by_operation_key={}
+        )
+
+    async def _catalog(
+        _session: object,
+    ) -> tuple[ProviderDatasetCatalogEntry, ...]:
+        return ()
 
     monkeypatch.setattr(service.sync_state_repo, "list_all_sync_states", _states)
     monkeypatch.setattr(service, "list_all_provider_refresh_policies", _policies)
     monkeypatch.setattr(service, "count_open_integrity_issues_by_dataset", _empty)
     monkeypatch.setattr(service, "list_dataset_execution_snapshots", _snapshots)
     monkeypatch.setattr(service, "load_dataset_schedule_index", _schedules)
-    monkeypatch.setattr(
-        service,
-        "list_active_poi_cache_target_external_systems",
-        _empty,
-    )
+    monkeypatch.setattr(service, "list_provider_dataset_catalog", _catalog)
 
     data = await load_datasets_grid(
         cast(Any, object()),
@@ -1444,3 +1793,227 @@ def test_freshness_unknown_without_explicit_sla_and_disabled_precedes_never_run(
     assert due.state == "overdue"
     assert due.is_overdue is True
     assert due.overdue_by_seconds == 0
+
+
+def _membership_catalog_entry(
+    *,
+    provider_dataset_id: int = 42,
+    provider: str = "python-kma-api",
+    dataset_key: str = "kma_short_forecast",
+    is_active: bool = True,
+) -> ProviderDatasetCatalogEntry:
+    """형제 refresh operation을 가진 dataset.
+
+    ``pk_provider_dataset_operation_scopes``가 triple이므로 한 dataset의 한 scope에
+    operation이 여럿 결박될 수 있다(0091이 pair PK를 승격한 명시 목적). 그 모양을 만드는
+    fixture가 이 파일에 없어서 membership 게이트 축이 무방비였다.
+    """
+    return ProviderDatasetCatalogEntry(
+        provider_dataset_id=provider_dataset_id,
+        provider=provider,
+        dataset_key=dataset_key,
+        display_name=dataset_key,
+        source_kind="openapi",
+        is_active=is_active,
+        capabilities={},
+        operations=(
+            ProviderDatasetOperation(
+                operation_key="fixture_preview",
+                operation_kind="preview",
+                is_enabled=True,
+                config={"handler": "fixture"},
+                sync_scopes=(),
+            ),
+            ProviderDatasetOperation(
+                operation_key="op_alpha",
+                operation_kind="refresh",
+                is_enabled=True,
+                config={},
+                sync_scopes=("dataset_wide",),
+            ),
+            ProviderDatasetOperation(
+                operation_key="op_beta",
+                operation_kind="refresh",
+                is_enabled=True,
+                config={},
+                sync_scopes=("target_grids",),
+            ),
+            ProviderDatasetOperation(
+                operation_key="op_disabled",
+                operation_kind="refresh",
+                is_enabled=False,
+                config={},
+                sync_scopes=("dataset_wide",),
+            ),
+        ),
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("operation_key", "expected_status"),
+    [
+        # 실재하는 membership triple — 통과한다.
+        ("op_alpha", 200),
+        # 같은 dataset의 형제 operation이지만 이 scope에는 결박돼 있지 않다.
+        ("op_beta", 404),
+        # 비활성 operation은 실행 membership이 아니다.
+        ("op_disabled", 404),
+        # 카탈로그에 없는 operation.
+        ("op_missing", 404),
+    ],
+)
+def test_preview_operation_key_must_name_a_catalog_membership(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    operation_key: str,
+    expected_status: int,
+) -> None:
+    """``operation_key`` 축이 실제로 좁히는지 고정한다.
+
+    감사 변이 스윕(A-4)은 이 게이트를 ``if False:``로 바꿔도 api 게이트가 통과한다고
+    보고했다 — 바로 위 ``allowed_preview_scopes`` 게이트(scope 축)만 회귀가 있었고
+    operation 축은 무방비였다. 콘솔이 형제 operation을 지목해도 서버가 조용히 무시하던
+    상태다. 같은 변이를 다시 심어 이 테스트가 잡는 것을 확인했다.
+    """
+    from kortravelmap.api.routers import ops_datasets as router_module
+
+    async def _catalog(*_args: object) -> tuple[ProviderDatasetCatalogEntry, ...]:
+        return (_membership_catalog_entry(),)
+
+    async def _preview(
+        actual_provider: str,
+        actual_dataset_key: str,
+        *,
+        max_items: int,
+    ) -> object:
+        return SimpleNamespace(
+            provider=actual_provider,
+            dataset=actual_dataset_key,
+            variant="fixture",
+            description="membership gate proof",
+            items=(),
+            total_items=0,
+            truncated=False,
+            max_items=max_items,
+        )
+
+    monkeypatch.setattr(router_module, "list_provider_dataset_catalog", _catalog)
+    monkeypatch.setattr(router_module, "run_dataset_fixture_preview", _preview)
+
+    response = client.post(
+        "/v1/ops/datasets/42/preview",
+        params={"sync_scope": "dataset_wide", "operation_key": operation_key},
+        json={"source": "fixture", "max_items": 1},
+    )
+
+    assert response.status_code == expected_status, response.text
+    if expected_status == 404:
+        assert "등록되지 않은 dataset membership" in response.json()["detail"]
+    else:
+        assert response.json()["data"]["operation_key"] == operation_key
+
+
+@pytest.mark.unit
+def test_inactive_dataset_policy_mutation_is_409_before_any_write(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """비활성 dataset의 정책 PUT은 typed 409이고 write까지 가지 않는다.
+
+    DB 트리거(``ck_provider_dataset_active_write``)가 이미 같은 규칙을 강제하므로,
+    가드가 없으면 catch-all이 이 상태를 **500 INTERNAL_ERROR**로 바꾼다. 이 브랜치가
+    넣은 가드인데 서비스·라우터 양쪽 분기가 한 번도 실행되지 않았다.
+    """
+    from kortravelmap.api import ops_dataset_service as service
+
+    async def _catalog(*_args: object, **_kwargs: object) -> tuple[
+        ProviderDatasetCatalogEntry, ...
+    ]:
+        return (_membership_catalog_entry(is_active=False),)
+
+    async def _must_not_write(*_args: object, **_kwargs: object) -> ProviderRefreshPolicy:
+        raise AssertionError("비활성 dataset에는 정책 write가 시도되면 안 된다")
+
+    monkeypatch.setattr(service, "list_provider_dataset_catalog", _catalog)
+    monkeypatch.setattr(service, "upsert_provider_refresh_policy", _must_not_write)
+
+    response = client.put(
+        "/v1/ops/datasets/refresh-policy",
+        params={"provider_dataset_id": 42},
+        json={
+            "expected_revision": "1",
+            "source_kind": "openapi",
+            "stale_after_minutes": 60,
+        },
+    )
+
+    assert response.status_code == 409, response.text
+    body = response.json()
+    # orphan과 **다른 code**여야 한다 — 운영자가 취할 조치가 정반대다.
+    assert body["code"] == "INACTIVE_DATASET_MUTATION_DISABLED"
+    assert body["details"]["mutation_disabled_reason"] == "provider_dataset_inactive"
+
+
+@pytest.mark.unit
+def test_active_dataset_policy_mutation_reaches_the_repo(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """위 가드의 대조군 — 활성 dataset은 그대로 write까지 간다.
+
+    이것이 없으면 ``if not entry.is_active``를 ``if True``로 바꿔도 통과한다.
+    """
+    from kortravelmap.api import ops_dataset_service as service
+
+    calls: list[int] = []
+
+    async def _catalog(*_args: object, **_kwargs: object) -> tuple[
+        ProviderDatasetCatalogEntry, ...
+    ]:
+        return (_membership_catalog_entry(is_active=True),)
+
+    async def _upsert(*_args: object, **kwargs: object) -> ProviderRefreshPolicy:
+        calls.append(int(kwargs["provider_dataset_id"]))
+        return _policy(provider_dataset_id=42)
+
+    monkeypatch.setattr(service, "list_provider_dataset_catalog", _catalog)
+    monkeypatch.setattr(service, "upsert_provider_refresh_policy", _upsert)
+
+    response = client.put(
+        "/v1/ops/datasets/refresh-policy",
+        params={"provider_dataset_id": 42},
+        json={
+            "expected_revision": "1",
+            "source_kind": "openapi",
+            "stale_after_minutes": 60,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert calls == [42]
+
+
+@pytest.mark.unit
+def test_unknown_dataset_policy_mutation_is_404(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """카탈로그에 없는 id는 409가 아니라 404다(활성 가드보다 앞선 분기)."""
+    from kortravelmap.api import ops_dataset_service as service
+
+    async def _catalog(*_args: object, **_kwargs: object) -> tuple[
+        ProviderDatasetCatalogEntry, ...
+    ]:
+        return (_membership_catalog_entry(provider_dataset_id=41),)
+
+    monkeypatch.setattr(service, "list_provider_dataset_catalog", _catalog)
+
+    response = client.put(
+        "/v1/ops/datasets/refresh-policy",
+        params={"provider_dataset_id": 42},
+        json={
+            "expected_revision": "1",
+            "source_kind": "openapi",
+            "stale_after_minutes": 60,
+        },
+    )
+
+    assert response.status_code == 404, response.text

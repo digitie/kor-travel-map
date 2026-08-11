@@ -78,6 +78,25 @@ def test_f3_postgis_functions_are_schema_qualified() -> None:
     assert "x_extension.ST_Transform" in f3.sql
 
 
+def test_f5_uses_canonical_dataset_identity_for_state_and_policy() -> None:
+    from kortravelmap.infra import consistency
+
+    count_sql = consistency._F5_PROVIDER_LAST_SUCCESS_COUNT_SQL
+    sample_sql = consistency._F5_PROVIDER_LAST_SUCCESS_SAMPLE_SQL
+
+    for sql in (count_sql, sample_sql):
+        assert "s.provider_dataset_id" in sql
+        assert "p.provider_dataset_id = s.provider_dataset_id" in sql
+        assert "p.provider = s.provider" not in sql
+        assert "p.dataset_key = s.dataset_key" not in sql
+    assert "JOIN provider_sync.provider_datasets dataset" in sample_sql
+    # sample id는 ``pk_provider_sync_state``와 같은 triple이라야 한다 — pair로 합성하면
+    # operation만 다른 두 stale 상태가 같은 id로 중복 표시된다.
+    assert "s.provider_dataset_id::text || ':' || s.sync_scope " in sample_sql
+    assert "|| ':' || s.operation_key AS id" in sample_sql
+    assert "ORDER BY provider_dataset_id, sync_scope, operation_key" in sample_sql
+
+
 def test_f6_narrows_candidates_by_subtype_columns_before_lateral_expansion() -> None:
     """T-VN-35(ADR-086) — opening_hours 보유 kind는 place/event 둘뿐이고, 그
     값은 subtype 컬럼이 정본이다. 후보를 subtype에서 좁혀야
@@ -189,9 +208,7 @@ async def test_check_f4_dedup_backlog_ok_below_threshold_skips_sample_query() ->
 
 @pytest.mark.asyncio
 async def test_check_f5_provider_last_success_sla_warns_with_samples() -> None:
-    session = _FakeSession(
-        [_FakeResult(scalar=2), _FakeResult(rows=["provider:a:system", "provider:b:system"])]
-    )
+    session = _FakeSession([_FakeResult(scalar=2), _FakeResult(rows=["41:system", "42:system"])])
 
     result = await _check_f5_provider_last_success_sla(
         session,
@@ -202,7 +219,7 @@ async def test_check_f5_provider_last_success_sla_warns_with_samples() -> None:
     assert result.code == "F5"
     assert result.severity == "WARN"
     assert result.count == 2
-    assert result.sample_ids == ["provider:a:system", "provider:b:system"]
+    assert result.sample_ids == ["41:system", "42:system"]
     assert "86400" in result.description
 
 

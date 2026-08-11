@@ -111,16 +111,20 @@ export function ConsistencyClient() {
         cell: ({ row }) => <StatusBadge status={row.original.severity} />,
       },
       {
-        accessorKey: "provider",
-        header: "provider",
+        id: "provider_dataset",
+        header: "provider dataset",
         cell: ({ row }) =>
-          row.original.provider ? (
+          row.original.provider_dataset_id ? (
             <EntityLink
               id=""
               kind="issue"
-              params={{ provider: row.original.provider }}
+              params={{
+                provider_dataset_id: String(row.original.provider_dataset_id),
+              }}
             >
-              {row.original.provider}
+              {row.original.provider
+                ? `${row.original.provider} · #${row.original.provider_dataset_id}`
+                : `#${row.original.provider_dataset_id}`}
             </EntityLink>
           ) : (
             "-"
@@ -220,7 +224,7 @@ export function ConsistencyClient() {
               <div>
                 <div className="font-medium">Integrity issues</div>
                 <div className="text-sm text-muted-foreground">
-                  status/provider/type별 후속 처리 대상
+                  status/provider dataset/type별 후속 처리 대상
                 </div>
               </div>
               <NativeSelect

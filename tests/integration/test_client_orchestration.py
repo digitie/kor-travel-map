@@ -30,6 +30,7 @@ from kortravelmap.infra.feature_update_repo import (
     FeatureUpdateRequest,
     FeatureUpdateRequestPreview,
 )
+from kortravelmap.infra.jobs_repo import ImportJobDatasetTarget
 from kortravelmap.infra.models import FeatureRow
 from kortravelmap.providers.airkorea import (
     air_quality_stations_to_bundles,
@@ -47,7 +48,11 @@ _KST = timezone(timedelta(hours=9))
 _TEMPLE_CAT = "01070100"
 
 _TRUNCATE_SQL = (
+    # ``source_entities``를 빼면 record만 지워지고 entity가 링크 없이 남아
+    # 정합성 검사 F1(orphan source_entity)이 **다른 테스트에서** 켜진다.
+    # T-VN-33이 head를 끼우면서 record CASCADE가 더 이상 entity를 지우지 않는다.
     "TRUNCATE feature.features, feature.feature_weather_values, "
+    "provider_sync.source_entities, provider_sync.source_entity_heads, "
     "provider_sync.source_records, "
     "provider_sync.source_links, ops.dedup_review_queue, "
     "ops.enrichment_review_queue, "
@@ -150,6 +155,62 @@ async def _seed_temples(engine: AsyncEngine, *feature_ids: str) -> None:
             session.add(_temple(fid))
 
 
+async def _free_memberships(
+    engine: AsyncEngine, count: int
+) -> list[ImportJobDatasetTarget]:
+    """활성 request가 점유하지 않은 canonical triple을 catalog에서 고른다.
+
+    T-VN-33 이후 feature update request는 ``providers``/``dataset_keys`` 배열이
+    아니라 **정확한** ``provider_dataset_id + sync_scope + operation_key``
+    membership을 받는다(ADR-088). 0089가 catalog를 seed하므로 실제 행을 읽어
+    쓰고, 같은 triple을 두 활성 request가 점유하면 membership mutex에 걸리므로
+    서로 다른 triple을 고른다.
+    """
+
+    async with AsyncSession(engine) as session:
+        rows = (
+            await session.execute(
+                text(
+                    """
+                    SELECT scope.provider_dataset_id, scope.sync_scope,
+                           scope.operation_key
+                    FROM provider_sync.provider_dataset_operation_scopes AS scope
+                    JOIN provider_sync.provider_datasets AS dataset
+                      ON dataset.provider_dataset_id = scope.provider_dataset_id
+                    JOIN provider_sync.provider_dataset_operations AS operation
+                      ON operation.provider_dataset_id = scope.provider_dataset_id
+                     AND operation.operation_key = scope.operation_key
+                    WHERE dataset.is_active AND operation.is_enabled
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM ops.feature_update_request_datasets AS member
+                          JOIN ops.feature_update_requests AS request
+                            ON request.request_id = member.request_id
+                          JOIN ops.import_jobs AS job ON job.job_id = request.job_id
+                          WHERE member.provider_dataset_id = scope.provider_dataset_id
+                            AND member.sync_scope = scope.sync_scope
+                            AND member.operation_key = scope.operation_key
+                            AND job.status IN ('queued', 'running')
+                      )
+                    ORDER BY scope.provider_dataset_id, scope.sync_scope,
+                             scope.operation_key
+                    LIMIT :count
+                    """
+                ),
+                {"count": count},
+            )
+        ).all()
+    assert len(rows) == count
+    return [
+        ImportJobDatasetTarget(
+            provider_dataset_id=int(row.provider_dataset_id),
+            sync_scope=str(row.sync_scope),
+            operation_key=str(row.operation_key),
+        )
+        for row in rows
+    ]
+
+
 async def test_load_feature_bundles_commits_and_reads(
     map_client: AsyncKorTravelMapClient,
 ) -> None:
@@ -211,18 +272,29 @@ async def test_sync_dedup_excludes_auto_merge_when_disabled(
 
 async def test_feature_update_request_client_lifecycle(
     map_client: AsyncKorTravelMapClient,
+    migrated_engine: AsyncEngine,
 ) -> None:
+    first, second, third = await _free_memberships(migrated_engine, 3)
+
     preview = await map_client.preview_feature_update_request(
         scope={"type": "feature_ids", "feature_ids": []},
-        providers=["python-mois-api"],
+        dataset_memberships=[first],
     )
     assert isinstance(preview, FeatureUpdateRequestPreview)
-    assert preview.matched_scope == {"feature_count": 0, "sigungu_codes": []}
+    assert preview.matched_scope["feature_count"] == 0
+    assert preview.matched_scope["sigungu_codes"] == []
+    # matched_scope는 이제 해석된 canonical membership도 함께 싣는다.
+    assert [
+        member["provider_dataset_id"]
+        for member in preview.matched_scope["dataset_memberships"]
+    ] == [first.provider_dataset_id]
+    assert [m.provider_dataset_id for m in preview.dataset_memberships] == [
+        first.provider_dataset_id
+    ]
 
     request = await map_client.enqueue_feature_update_request(
         scope={"type": "feature_ids", "feature_ids": []},
-        providers=["python-mois-api"],
-        dataset_keys=["mois_license_features_bulk"],
+        dataset_memberships=[first],
         update_policy={"mode": "refresh_existing"},
         priority=70,
         operator="integration-test",
@@ -235,7 +307,14 @@ async def test_feature_update_request_client_lifecycle(
     loaded = await map_client.get_update_request(request.request_id)
     assert loaded is not None
     assert loaded.request_id == request.request_id
-    assert loaded.providers == ("python-mois-api",)
+    # providers/dataset_keys 배열 사본은 T-VN-33에서 사라졌다 — 정본은 membership,
+    # provider/dataset_key는 catalog projection일 뿐이다.
+    assert [
+        (m.provider_dataset_id, m.sync_scope, m.operation_key)
+        for m in loaded.dataset_memberships
+    ] == [(first.provider_dataset_id, first.sync_scope, first.operation_key)]
+    assert loaded.dataset_memberships[0].provider
+    assert loaded.dataset_memberships[0].dataset_key
 
     peeked = await map_client.peek_next_update_request()
     assert peeked is not None
@@ -252,7 +331,7 @@ async def test_feature_update_request_client_lifecycle(
 
     pre_start_failure = await map_client.enqueue_feature_update_request(
         scope={"type": "feature_ids", "feature_ids": []},
-        providers=["python-mois-api"],
+        dataset_memberships=[second],
         priority=75,
     )
     assert isinstance(pre_start_failure, FeatureUpdateRequest)
@@ -269,7 +348,7 @@ async def test_feature_update_request_client_lifecycle(
 
     to_fail = await map_client.enqueue_feature_update_request(
         scope={"type": "feature_ids", "feature_ids": []},
-        providers=["python-mois-api"],
+        dataset_memberships=[third],
         priority=80,
     )
     assert isinstance(to_fail, FeatureUpdateRequest)

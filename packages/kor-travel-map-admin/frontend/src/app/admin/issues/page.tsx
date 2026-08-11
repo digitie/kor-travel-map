@@ -19,9 +19,8 @@ export default async function AdminIssuesPage({
   const params = (await searchParams) ?? {};
   return (
     <AdminIssuesClient
-      initialDatasetKey={firstParam(params.dataset_key)}
       initialFeatureId={firstParam(params.feature_id)}
-      initialProvider={firstParam(params.provider)}
+      initialProviderDatasetId={firstParam(params.provider_dataset_id)}
       initialStatus={firstParam(params.status)}
     />
   );

@@ -171,9 +171,8 @@ describe("admin domain idempotency consumers", () => {
         name: "offline create",
         run: () =>
           runMutation(context, useCreateOfflineUploadMutation, {
-            datasetKey: "dataset",
             file: csvFile("a,b\n1,2\n"),
-            provider: "provider",
+            providerDatasetId: 401,
           }),
       },
       {

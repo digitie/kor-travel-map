@@ -27,36 +27,47 @@ describe("hrefFor", () => {
     },
   );
 
-  it("provider의 legacy dataset_key를 datasets URL 계약으로 변환한다", () => {
+  it("provider dataset membership은 canonical triple로만 datasets URL을 만든다", () => {
     expect(
-      hrefFor("provider", "python-kma-api", {
-        dataset_key: "kma_vilage_fcst",
+      hrefFor("providerDataset", 101, {
         sync_scope: "target_grids",
+        operation_key: "refresh_targeted",
       }),
     ).toBe(
-      "/ops/datasets?provider=python-kma-api&dataset=kma_vilage_fcst&sync_scope=target_grids",
+      "/ops/datasets?provider_dataset_id=101&sync_scope=target_grids&operation_key=refresh_targeted",
     );
   });
 
-  it("빈 provider 선택값은 URL query에 남기지 않는다", () => {
+  it("sync_scope가 없으면 provider dataset 링크를 만들지 않는다", () => {
+    expect(hrefFor("providerDataset", 101)).toBeNull();
+  });
+
+  it("operation_key가 없으면 그 축을 빼고 링크를 만든다", () => {
+    // 앞 판은 이것도 null이었다. 그러면 **refresh membership이 없는 catalog 전용
+    // dataset**(`operation_key`가 빈 값)이 어떤 entity 링크로도 도달할 수 없었다 —
+    // 축이 하나 덜 적힌 것을 "틀린 링크"로 다뤘기 때문이다. 대상 페이지는 (id, scope)로 유일하게 결정하고, 형제 operation
+    // 때문에 둘 이상이면 그쪽이 명시 거부한다.
+    expect(hrefFor("providerDataset", 101, { sync_scope: "target_grids" })).toBe(
+      "/ops/datasets?provider_dataset_id=101&sync_scope=target_grids",
+    );
     expect(
-      hrefFor("provider", "python-kma-api", {
-        dataset_key: null,
-        sync_scope: undefined,
+      hrefFor("providerDataset", 101, {
+        sync_scope: "target_grids",
+        operation_key: "",
       }),
-    ).toBe("/ops/datasets?provider=python-kma-api");
+    ).toBe("/ops/datasets?provider_dataset_id=101&sync_scope=target_grids");
   });
 
   it("호출부 query가 canonical 엔티티 identity를 덮어쓰지 못한다", () => {
     expect(
-      hrefFor("provider", "python-kma-api", {
+      hrefFor("providerDataset", 101, {
         provider: "wrong-provider",
         dataset: "wrong-dataset",
-        dataset_key: "kma_vilage_fcst",
         sync_scope: "target_grids",
+        operation_key: "refresh_targeted",
       }),
     ).toBe(
-      "/ops/datasets?provider=python-kma-api&dataset=kma_vilage_fcst&sync_scope=target_grids",
+      "/ops/datasets?provider_dataset_id=101&sync_scope=target_grids&operation_key=refresh_targeted",
     );
     expect(
       hrefFor("loadBatch", "batch-a", {

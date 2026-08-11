@@ -40,20 +40,30 @@ _MAX_LIST_LIMIT: Final[int] = 500
 _BIGINT_MAX: Final[int] = 9_223_372_036_854_775_807
 
 _RETURN_COLUMNS: Final[str] = (
-    "provider, dataset_key, source_kind, targeted_policy, "
-    "system_interval_seconds, optimal_interval_seconds, min_interval_seconds, "
-    "max_requests_per_minute, max_requests_per_hour, max_requests_per_day, "
-    "max_concurrent, burst_size, rate_limit_source, config_source, enabled, "
-    "stale_after_minutes, revision, created_at, updated_at"
+    "policy.provider_dataset_id, dataset.provider, dataset.dataset_key, "
+    "policy.source_kind, policy.targeted_policy, "
+    "policy.system_interval_seconds, policy.optimal_interval_seconds, "
+    "policy.min_interval_seconds, policy.max_requests_per_minute, "
+    "policy.max_requests_per_hour, policy.max_requests_per_day, "
+    "policy.max_concurrent, policy.burst_size, policy.rate_limit_source, "
+    "policy.config_source, policy.enabled, policy.stale_after_minutes, "
+    "policy.revision, policy.created_at, policy.updated_at"
 )
+
+_POLICY_FROM: Final[str] = """
+FROM ops.provider_refresh_policies AS policy
+LEFT JOIN provider_sync.provider_datasets AS dataset
+  ON dataset.provider_dataset_id = policy.provider_dataset_id
+"""
 
 
 @dataclass(frozen=True)
 class ProviderRefreshPolicy:
     """``ops.provider_refresh_policies`` row."""
 
-    provider: str
-    dataset_key: str
+    provider_dataset_id: int
+    provider: str | None
+    dataset_key: str | None
     source_kind: str
     targeted_policy: str
     system_interval_seconds: int | None
@@ -117,8 +127,9 @@ def _json_dict(value: Any) -> dict[str, Any]:
 
 def _row_to_policy(row: Any) -> ProviderRefreshPolicy:
     return ProviderRefreshPolicy(
-        provider=str(row.provider),
-        dataset_key=str(row.dataset_key),
+        provider_dataset_id=int(row.provider_dataset_id),
+        provider=str(row.provider) if row.provider is not None else None,
+        dataset_key=str(row.dataset_key) if row.dataset_key is not None else None,
         source_kind=str(row.source_kind),
         targeted_policy=str(row.targeted_policy),
         system_interval_seconds=row.system_interval_seconds,
@@ -141,17 +152,18 @@ def _row_to_policy(row: Any) -> ProviderRefreshPolicy:
 
 def _validate_policy(
     *,
-    provider: str,
-    dataset_key: str,
+    provider_dataset_id: int,
     source_kind: str,
     targeted_policy: str,
     max_concurrent: int,
     stale_after_minutes: int | None,
 ) -> None:
-    if not provider:
-        raise ValueError("provider must be non-empty")
-    if not dataset_key:
-        raise ValueError("dataset_key must be non-empty")
+    if (
+        isinstance(provider_dataset_id, bool)
+        or not isinstance(provider_dataset_id, int)
+        or not 0 < provider_dataset_id <= _BIGINT_MAX
+    ):
+        raise ValueError("provider_dataset_id must be a positive BIGINT")
     if source_kind not in _SOURCE_KINDS:
         raise ValueError(f"source_kind must be one of {sorted(_SOURCE_KINDS)}")
     if targeted_policy not in _TARGETED_POLICIES:
@@ -164,23 +176,23 @@ def _validate_policy(
         raise ValueError("stale_after_minutes must be greater than 0")
 
 
-_INSERT_SQL: Final[str] = f"""
+_INSERT_SQL: Final[str] = """
 INSERT INTO ops.provider_refresh_policies (
-    provider, dataset_key, source_kind, targeted_policy,
+    provider_dataset_id, source_kind, targeted_policy,
     system_interval_seconds, optimal_interval_seconds, min_interval_seconds,
     max_requests_per_minute, max_requests_per_hour, max_requests_per_day,
     max_concurrent, burst_size, rate_limit_source, config_source, enabled,
     stale_after_minutes, revision,
     updated_at
 ) VALUES (
-    :provider, :dataset_key, :source_kind, :targeted_policy,
+    :provider_dataset_id, :source_kind, :targeted_policy,
     :system_interval_seconds, :optimal_interval_seconds, :min_interval_seconds,
     :max_requests_per_minute, :max_requests_per_hour, :max_requests_per_day,
     :max_concurrent, :burst_size, CAST(:rate_limit_source AS jsonb),
     :config_source, :enabled, :stale_after_minutes, 1, now()
 )
-ON CONFLICT (provider, dataset_key) DO NOTHING
-RETURNING {_RETURN_COLUMNS}
+ON CONFLICT (provider_dataset_id) DO NOTHING
+RETURNING provider_dataset_id
 """
 
 _UPDATE_SQL: Final[str] = f"""
@@ -204,41 +216,45 @@ SET targeted_policy = :targeted_policy,
     stale_after_minutes = :stale_after_minutes,
     revision = policy.revision + 1,
     updated_at = now()
-WHERE policy.provider = :provider
-  AND policy.dataset_key = :dataset_key
+WHERE policy.provider_dataset_id = :provider_dataset_id
   AND policy.revision = CAST(:expected_revision AS bigint)
   AND policy.revision < {_BIGINT_MAX}
   AND policy.source_kind = :source_kind
-RETURNING {_RETURN_COLUMNS}
+RETURNING policy.provider_dataset_id
 """
 
 _GET_SQL: Final[str] = f"""
 SELECT {_RETURN_COLUMNS}
-FROM ops.provider_refresh_policies
-WHERE provider = :provider AND dataset_key = :dataset_key
+{_POLICY_FROM}
+WHERE policy.provider_dataset_id = :provider_dataset_id
 """
 
 _LIST_SQL: Final[str] = f"""
 SELECT {_RETURN_COLUMNS}
-FROM ops.provider_refresh_policies
-WHERE (CAST(:provider AS text) IS NULL OR provider = CAST(:provider AS text))
-  AND (CAST(:enabled AS boolean) IS NULL OR enabled = CAST(:enabled AS boolean))
-ORDER BY provider, dataset_key
+{_POLICY_FROM}
+WHERE (
+    CAST(:provider_dataset_id AS bigint) IS NULL
+    OR policy.provider_dataset_id = CAST(:provider_dataset_id AS bigint)
+)
+  AND (
+    CAST(:enabled AS boolean) IS NULL
+    OR policy.enabled = CAST(:enabled AS boolean)
+)
+ORDER BY policy.provider_dataset_id
 LIMIT :limit
 """
 
 _LIST_ALL_SQL: Final[str] = f"""
 SELECT {_RETURN_COLUMNS}
-FROM ops.provider_refresh_policies
-ORDER BY provider, dataset_key
+{_POLICY_FROM}
+ORDER BY policy.provider_dataset_id
 """
 
 
 async def upsert_provider_refresh_policy(
     session: AsyncSession,
     *,
-    provider: str,
-    dataset_key: str,
+    provider_dataset_id: int,
     source_kind: str,
     expected_revision: int | None,
     targeted_policy: str = "follow_system",
@@ -267,8 +283,7 @@ async def upsert_provider_refresh_policy(
     BIGINT 최댓값 revision은 증가를 시도하지 않고 각각 명시적 오류로 닫는다.
     """
     _validate_policy(
-        provider=provider,
-        dataset_key=dataset_key,
+        provider_dataset_id=provider_dataset_id,
         source_kind=source_kind,
         targeted_policy=targeted_policy,
         max_concurrent=max_concurrent,
@@ -277,8 +292,7 @@ async def upsert_provider_refresh_policy(
     if expected_revision is not None and not 0 < expected_revision <= _BIGINT_MAX:
         raise ValueError("expected_revision must be a positive BIGINT")
     params = {
-        "provider": provider,
-        "dataset_key": dataset_key,
+        "provider_dataset_id": provider_dataset_id,
         "source_kind": source_kind,
         "targeted_policy": targeted_policy,
         "system_interval_seconds": system_interval_seconds,
@@ -301,12 +315,11 @@ async def upsert_provider_refresh_policy(
         "expected_revision": expected_revision,
     }
     statement = _INSERT_SQL if expected_revision is None else _UPDATE_SQL
-    row = (await session.execute(text(statement), params)).one_or_none()
-    if row is None:
+    changed = (await session.execute(text(statement), params)).one_or_none()
+    if changed is None:
         current = await get_provider_refresh_policy(
             session,
-            provider=provider,
-            dataset_key=dataset_key,
+            provider_dataset_id=provider_dataset_id,
         )
         if (
             current is not None
@@ -326,20 +339,25 @@ async def upsert_provider_refresh_policy(
             expected_revision=expected_revision,
             current=current,
         )
-    return _row_to_policy(row)
+    policy = await get_provider_refresh_policy(
+        session,
+        provider_dataset_id=provider_dataset_id,
+    )
+    if policy is None:
+        raise AssertionError("provider refresh policy write disappeared")
+    return policy
 
 
 async def get_provider_refresh_policy(
     session: AsyncSession,
     *,
-    provider: str,
-    dataset_key: str,
+    provider_dataset_id: int,
 ) -> ProviderRefreshPolicy | None:
     """정책 row 1건 조회. 없으면 ``None``."""
     row = (
         await session.execute(
             text(_GET_SQL),
-            {"provider": provider, "dataset_key": dataset_key},
+            {"provider_dataset_id": provider_dataset_id},
         )
     ).one_or_none()
     return _row_to_policy(row) if row is not None else None
@@ -348,7 +366,7 @@ async def get_provider_refresh_policy(
 async def list_provider_refresh_policies(
     session: AsyncSession,
     *,
-    provider: str | None = None,
+    provider_dataset_id: int | None = None,
     enabled: bool | None = None,
     limit: int = 200,
 ) -> tuple[ProviderRefreshPolicy, ...]:
@@ -357,7 +375,11 @@ async def list_provider_refresh_policies(
     rows = (
         await session.execute(
             text(_LIST_SQL),
-            {"provider": provider, "enabled": enabled, "limit": safe_limit},
+            {
+                "provider_dataset_id": provider_dataset_id,
+                "enabled": enabled,
+                "limit": safe_limit,
+            },
         )
     ).all()
     return tuple(_row_to_policy(row) for row in rows)

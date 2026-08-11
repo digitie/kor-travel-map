@@ -615,20 +615,14 @@ class AdminFeatureDetailSourceRecord(BaseModel):
     dataset_key: str
     source_entity_type: str
     source_entity_id: str
-    source_version: str | None = None
     source_role: str
     match_method: str
     confidence: int
-    is_primary_source: bool
-    raw_name: str | None = None
-    raw_address: str | None = None
-    raw_longitude: float | None = None
-    raw_latitude: float | None = None
     raw_payload_hash: str
     raw_data: dict[str, Any]
     fetched_at: datetime
     imported_at: datetime
-    last_seen_at: datetime
+    observed_at: datetime
     expires_at: datetime | None = None
     linked_at: datetime
 
@@ -1313,13 +1307,9 @@ async def list_features(
         list[str] | None,
         Query(alias="status", description="feature status 반복 필터. 기본 active."),
     ] = None,
-    provider: Annotated[
-        list[str] | None,
-        Query(description="primary provider 반복 필터"),
-    ] = None,
-    dataset_key: Annotated[
-        list[str] | None,
-        Query(description="primary dataset_key 반복 필터"),
+    provider_dataset_id: Annotated[
+        int | None,
+        Query(ge=1, description="primary provider dataset canonical ID 필터"),
     ] = None,
     has_coord: Annotated[bool | None, Query()] = None,
     has_issue: Annotated[bool | None, Query()] = None,
@@ -1349,8 +1339,7 @@ async def list_features(
             kinds=kind,
             categories=category,
             statuses=feature_status if feature_status is not None else ("active",),
-            providers=provider,
-            dataset_keys=dataset_key,
+            provider_dataset_id=provider_dataset_id,
             has_coord=has_coord,
             has_issue=has_issue,
             issue_types=issue_type,

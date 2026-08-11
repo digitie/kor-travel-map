@@ -22,7 +22,6 @@ UNMAPPED_APP_TABLES = frozenset(
 UNCOMPARED_INDEXES = frozenset(
     {
         ("feature", "idx_features_dedup_refresh_keyset"),
-        ("provider_sync", "idx_source_records_kma_alert_history"),
     }
 )
 

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 import math
+import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -165,6 +166,32 @@ async def kor_travel_concierge_items_to_bundles(
     return bundles
 
 
+_PAYLOAD_HASH_ALGORITHM_PREFIX: Final[re.Pattern[str]] = re.compile(
+    r"^(?:sha256|sha1|md5|sha512):", re.IGNORECASE
+)
+
+
+_CANONICAL_PAYLOAD_HASH: Final[re.Pattern[str]] = re.compile(r"[0-9a-f]{1,64}")
+
+
+def _canonical_payload_hash(value: str | None) -> str | None:
+    """알고리즘 접두를 벗겨 정본 hex로 만든다. 정본이 아니면 ``None``.
+
+    접두 제거만으로는 부족하다 — 저장 제약이
+    ``ck_source_records_payload_hash_canonical``(``^[0-9a-f]{1,64}$``)이므로
+    provider가 hex가 아닌 다이제스트를 보내면 INSERT가 통째로 죽는다. 여기서
+    걸러 ``None``을 돌려주면 호출자가 payload로 직접 계산한다(적재는 계속되고
+    해시만 우리 것이 된다).
+    """
+
+    if not value:
+        return None
+    stripped = _PAYLOAD_HASH_ALGORITHM_PREFIX.sub("", value.strip()).lower()
+    if not _CANONICAL_PAYLOAD_HASH.fullmatch(stripped):
+        return None
+    return stripped
+
+
 def _quarantine_item_key(item: KorTravelConciergeFeatureItem) -> str:
     source_record = _mapping(item.get("source_record"))
     for value in (
@@ -248,9 +275,13 @@ async def _item_to_bundle(
     address = _address(address_payload, geo=geo)
 
     raw_data = _plain_json_dict(item)
-    payload_hash = (
-        _text(source_record_payload, "raw_payload_hash") or make_payload_hash(raw_data)
-    )
+    # concierge는 ``sha256:<hex>`` 형태로 보낸다. 저장 정본은 접두 없는 lowercase
+    # hex이므로(T-VN-33, `ck_source_records_payload_hash_canonical`) 받는 자리에서
+    # 벗긴다 — 안 벗기면 prod에 비정본 해시가 쌓이고 제약 validate가 막힌다
+    # (alembic 0089가 기존 1,481행을 같은 규칙으로 정규화한다).
+    payload_hash = _canonical_payload_hash(
+        _text(source_record_payload, "raw_payload_hash")
+    ) or make_payload_hash(raw_data)
     source_record_key = make_source_record_key(
         provider=provider,
         dataset_key=dataset_key,
@@ -316,11 +347,6 @@ async def _item_to_bundle(
         source_entity_type=source_entity_type,
         source_entity_id=source_entity_id,
         raw_payload_hash=payload_hash,
-        source_version=None,
-        raw_name=name,
-        raw_address=address.display() or None,
-        raw_longitude=coord.lon if coord is not None else None,
-        raw_latitude=coord.lat if coord is not None else None,
         raw_data=raw_data,
         fetched_at=fetched_at,
         source_record_key=source_record_key,
@@ -331,7 +357,6 @@ async def _item_to_bundle(
         source_role=SourceRole.PRIMARY,
         match_method="kor_travel_concierge_export",
         confidence=_confidence(evidence.get("confidence_score")),
-        is_primary_source=True,
     )
     return FeatureBundle(
         feature=feature,

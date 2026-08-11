@@ -160,14 +160,11 @@ function makeVisitkoreaSource(review: EnrichmentReviewRecord): ReviewSourceDetai
   return {
     confidence: null,
     dataset_key: review.source_dataset_key,
-    expires_at: null,
     fetched_at: MOCK_NOW,
     imported_at: MOCK_NOW,
-    is_primary_source: null,
     linked_at: null,
     match_method: null,
     provider: review.source_provider,
-    raw_address: "visitkorea address",
     raw_data: {
       eventenddate: review.source_end_date,
       eventstartdate: review.source_start_date,
@@ -175,15 +172,12 @@ function makeVisitkoreaSource(review: EnrichmentReviewRecord): ReviewSourceDetai
       mapy: review.source_lat,
       title: review.source_name,
     },
-    raw_latitude: review.source_lat,
-    raw_longitude: review.source_lon,
-    raw_name: review.source_name,
     raw_payload_hash: `${review.source_entity_id}-hash`,
     source_entity_id: review.source_entity_id,
     source_entity_type: "festival",
     source_record_key: `${review.source_entity_id}-source`,
     source_role: null,
-    source_version: null,
+    observed_at: null,
   };
 }
 
@@ -211,6 +205,8 @@ function detailResponse(
       source_dataset_key: review.source_dataset_key,
       source_end_date: review.source_end_date,
       source_entity_id: review.source_entity_id,
+      source_lat: review.source_lat,
+      source_lon: review.source_lon,
       source_name: review.source_name,
       source_provider: review.source_provider,
       source_start_date: review.source_start_date,

@@ -387,9 +387,8 @@ def test_fuel_price_inherits_place_coord_and_parent() -> None:
     assert price_feature.coord.lat == place_feature.coord.lat
     # 계층 연결.
     assert price_feature.parent_feature_id == place_feature.feature_id
-    # source_record raw 좌표도 상속 좌표로 채워짐(추적성).
-    assert bundle.source_record.raw_longitude == place_feature.coord.lon
-    assert bundle.source_record.raw_latitude == place_feature.coord.lat
+    # source record는 provider fuel row 원 payload만 보존하고, 상속 좌표는 Feature에만 둔다.
+    assert bundle.source_record.raw_data == {"serviceAreaCode": "A0001"}
     # PriceValue는 그대로(좌표 상속과 무관하게 유가값 생성).
     assert [v.product_key for v in values] == ["gasoline", "diesel"]
 
@@ -928,8 +927,10 @@ def test_traffic_notice_no_coord_global_fallback() -> None:
     assert bundle.feature.coord is None
     # coord=None → bjd_code 미상 → feature_id global.
     assert bundle.feature.feature_id.startswith("f_global_n_")
-    # coordless 위치 단서(raw_address): 노선명 + 돌발지점명 + 방향.
-    assert bundle.source_record.raw_address == "서해안고속도로 서산나들목 부산방향"
+    # coordless 위치 단서는 원 payload의 노선명 + 돌발지점명 + 방향에서 런타임에 만든다.
+    assert bundle.source_record.raw_data["roadNM"] == "서해안고속도로"
+    assert bundle.source_record.raw_data["accPointNM"] == "서산나들목"
+    assert bundle.source_record.raw_data["startEndTypeCode"] == "부산방향"
 
 
 @pytest.mark.unit
@@ -981,14 +982,14 @@ def test_traffic_notice_feature_id_stable_across_coordinate_movement() -> None:
 
 @pytest.mark.unit
 def test_traffic_notice_with_coord_builds_coordinate() -> None:
-    """좌표 보유 row(실측 36/99) → Coordinate (Decimal(str(float))) + raw 좌표 보존."""
+    """좌표 보유 row(실측 36/99) → Coordinate와 원 payload 좌표 보존."""
     [bundle] = traffic_notices_to_bundles([_N_ACCIDENT_ALIAS], fetched_at=_NOW)
     coord = bundle.feature.coord
     assert coord is not None
     assert coord.lat == Decimal("36.1234")
     assert coord.lon == Decimal("127.5678")
-    assert bundle.source_record.raw_latitude == Decimal("36.1234")
-    assert bundle.source_record.raw_longitude == Decimal("127.5678")
+    assert bundle.source_record.raw_data["latitude"] == 36.1234
+    assert bundle.source_record.raw_data["altitude"] == 127.5678
     # reverse_geocoder 미주입 → bjd_code 미상 → 여전히 global feature_id.
     assert bundle.feature.feature_id.startswith("f_global_n_")
 
@@ -1007,7 +1008,6 @@ def test_traffic_notice_source_link_primary() -> None:
     [bundle] = traffic_notices_to_bundles([_N_ROADWORK], fetched_at=_NOW)
     link = bundle.source_link
     assert link.source_role == SourceRole.PRIMARY
-    assert link.is_primary_source is True
 
 
 # ── 4 kind 통합 검증 ────────────────────────────────────────────────

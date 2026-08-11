@@ -52,6 +52,7 @@ function makeFile(overrides: Partial<ManagedFileModel> = {}): ManagedFileModel {
     is_directory: false,
     kind: "upload",
     provider: "python-visitkorea-api",
+    provider_dataset_id: 501,
     dataset_key: "festival",
     status: "active",
     orphan_reason: null,

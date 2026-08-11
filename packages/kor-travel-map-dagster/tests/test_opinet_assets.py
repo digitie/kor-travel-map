@@ -7,14 +7,20 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta, timezone
 from decimal import Decimal
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Final, cast
 
 import pytest
 from dagster import build_asset_context
-from kortravelmap.client import IntegrityFindingSyncResult
+from kortravelmap.client import AsyncKorTravelMapClient, IntegrityFindingSyncResult
+from kortravelmap.core.feature_operation import ProviderDatasetOperationMembership
 from kortravelmap.dto import PriceValue
 from kortravelmap.infra.feature_repo import FeatureLoadResult
 from kortravelmap.infra.price_repo import PriceFeatureLoadResult
+from kortravelmap.providers.opinet import (
+    OPINET_PRICE_DATASET_KEY,
+    OPINET_PROVIDER_NAME,
+    OPINET_STATION_DATASET_KEY,
+)
 
 from kortravelmap.dagster import assets as assets_module
 from kortravelmap.dagster.assets import (
@@ -22,8 +28,24 @@ from kortravelmap.dagster.assets import (
     run_feature_place_opinet_stations,
     run_feature_price_opinet_stations,
 )
+from kortravelmap.dagster.feature_operation_tracking import (
+    FeatureOperationExecutionGuard,
+)
 
 _KST = timezone(timedelta(hours=9))
+# ``build_asset_context()``로 직접 호출한 asset의 run id. guard는 자기가 지키는
+# run과 같은 id를 들고 있어야 한다 — 다르면 ``run_id_mismatch``로 거부된다.
+_RUN_ID: Final = "EPHEMERAL"
+# asset 이름 ↔ operation key는 registry에서 1:1이다(`run_<asset>` ↔ `<asset>_job`).
+_PLACE_OPERATION_KEY: Final = "feature_place_opinet_stations_job"
+_PRICE_OPERATION_KEY: Final = "feature_price_opinet_stations_job"
+# T-VN-33 이후 sync state row는 provider/dataset label이 아니라
+# provider_dataset_id로 식별된다(ADR-088). 테스트 double은 dataset key 하나에
+# 안정적인 surrogate id 하나를 대응시킨다.
+_PROVIDER_DATASET_IDS: Final[dict[str, int]] = {
+    OPINET_STATION_DATASET_KEY: 9101,
+    OPINET_PRICE_DATASET_KEY: 9102,
+}
 
 
 class _Client:
@@ -38,6 +60,48 @@ class _Client:
         self.loaded_price_values: list[PriceValue] = []
         self.last_success_at = last_success_at
         self.sync_cursor = sync_cursor
+        self.sync_state_reads: list[ProviderDatasetOperationMembership] = []
+        self._memberships: dict[str, tuple[ProviderDatasetOperationMembership, ...]] = {}
+        self._dataset_memberships: dict[
+            tuple[str, str], ProviderDatasetOperationMembership
+        ] = {}
+
+    def guard_for(
+        self, operation_key: str, dataset_key: str
+    ) -> FeatureOperationExecutionGuard:
+        """asset이 sync-state를 읽고 쓰려면 feature-operation guard가 있어야 한다.
+
+        프로덕션에서는 ``run_tracked_feature_asset``이 실행 시작 시 넣는다. sync
+        state 정체성이 ``provider_dataset_id + sync_scope + operation_key`` triple이
+        된 뒤(ADR-088) provider/dataset label로는 어느 행인지 결정되지 않으므로,
+        asset을 직접 호출하는 테스트도 실행 대상 operation을 똑같이 선언한다.
+        """
+        membership = ProviderDatasetOperationMembership(
+            provider_dataset_id=_PROVIDER_DATASET_IDS[dataset_key],
+            sync_scope="dataset_wide",
+            operation_key=operation_key,
+        )
+        self._memberships[operation_key] = (membership,)
+        self._dataset_memberships[(operation_key, dataset_key)] = membership
+        return FeatureOperationExecutionGuard(
+            client=cast("AsyncKorTravelMapClient", self),
+            instance=None,
+            operation_key=operation_key,
+            memberships=(membership,),
+            dagster_run_id=_RUN_ID,
+            trigger_kind="schedule",
+        )
+
+    async def resolve_feature_operation_memberships(
+        self, *, operation_key: str
+    ) -> tuple[ProviderDatasetOperationMembership, ...]:
+        return self._memberships[operation_key]
+
+    async def resolve_feature_operation_dataset_membership(
+        self, *, operation_key: str, provider: str, dataset_key: str
+    ) -> ProviderDatasetOperationMembership:
+        assert provider == OPINET_PROVIDER_NAME
+        return self._dataset_memberships[(operation_key, dataset_key)]
 
     @asynccontextmanager
     async def provider_run_lock(self, key: str) -> AsyncIterator[None]:
@@ -61,11 +125,28 @@ class _Client:
             price_values=len(self.loaded_price_values),
         )
 
-    async def record_sync_success(self, **kwargs: Any) -> None:
+    async def record_sync_success(self, **_kwargs: Any) -> None:
+        """legacy capability probe 전용.
+
+        ``_record_feature_sync_success``는 지금도 이 이름의 존재로 "sync state를
+        쓸 수 있는 client인가"를 판정한 뒤 실제 기록은
+        ``record_sync_success_for_operation_membership``으로 한다. 이 double이
+        이름을 지우면 asset이 조용히 기록을 건너뛰므로 남겨 둔다.
+        """
+        raise AssertionError(
+            "T-VN-33 이후 asset은 membership 기반 기록만 해야 한다."
+        )
+
+    async def record_sync_success_for_operation_membership(
+        self, **kwargs: Any
+    ) -> None:
         self.events.append("sync_success")
         self.sync_success_calls.append(kwargs)
 
-    async def get_sync_state(self, **_kwargs: Any) -> Any:
+    async def get_sync_state_for_operation_membership(
+        self, *, membership: ProviderDatasetOperationMembership
+    ) -> Any:
+        self.sync_state_reads.append(membership)
         if self.last_success_at is None:
             return None
         return SimpleNamespace(
@@ -90,6 +171,9 @@ async def test_price_asset_rejects_whole_run_zero_without_sync_success() -> None
             "reverse_geocoder": None,
             "fetched_at": datetime(2026, 7, 13, 18, 18, tzinfo=_KST),
             "strict_address": True,
+            "feature_operation_guard": client.guard_for(
+                _PRICE_OPERATION_KEY, OPINET_PRICE_DATASET_KEY
+            ),
             "opinet_station_price_details": [],
         }
     )
@@ -122,6 +206,9 @@ async def test_price_asset_rejects_nonempty_records_normalized_to_zero(
             "reverse_geocoder": None,
             "fetched_at": datetime(2026, 7, 13, 18, 18, tzinfo=_KST),
             "strict_address": True,
+            "feature_operation_guard": client.guard_for(
+                _PRICE_OPERATION_KEY, OPINET_PRICE_DATASET_KEY
+            ),
             "opinet_station_price_details": [SimpleNamespace(prices=())],
         }
     )
@@ -183,6 +270,9 @@ async def test_price_asset_records_kst_observation_freshness_metadata(
             "reverse_geocoder": None,
             "fetched_at": fetched_at,
             "strict_address": True,
+            "feature_operation_guard": client.guard_for(
+                _PRICE_OPERATION_KEY, OPINET_PRICE_DATASET_KEY
+            ),
             "opinet_station_price_details": [SimpleNamespace(prices=())],
         }
     )
@@ -197,6 +287,12 @@ async def test_price_asset_records_kst_observation_freshness_metadata(
         "sync_success",
         f"unlock:{OPINET_PROVIDER_RUN_LOCK}",
     ]
+    # cursor는 label이 아니라 guard가 고정한 exact membership 행에 적힌다(ADR-088).
+    assert client.sync_success_calls[0]["membership"] == ProviderDatasetOperationMembership(
+        provider_dataset_id=_PROVIDER_DATASET_IDS[OPINET_PRICE_DATASET_KEY],
+        sync_scope="dataset_wide",
+        operation_key=_PRICE_OPERATION_KEY,
+    )
     cursor = client.sync_success_calls[0]["cursor"]
     assert cursor["latest_observed_at"] == "2026-07-13T23:00:00+09:00"
     assert cursor["today_values_count"] == 2
@@ -212,6 +308,9 @@ async def test_place_asset_holds_same_provider_lock_through_sync_success() -> No
             "reverse_geocoder": None,
             "fetched_at": datetime(2026, 7, 13, 18, 18, tzinfo=_KST),
             "strict_address": True,
+            "feature_operation_guard": client.guard_for(
+                _PLACE_OPERATION_KEY, OPINET_STATION_DATASET_KEY
+            ),
             "opinet_stations": [],
         }
     )
@@ -257,6 +356,9 @@ async def test_price_asset_coalesces_same_kst_day_before_provider_fetch(
             "reverse_geocoder": None,
             "fetched_at": fetched_at,
             "strict_address": True,
+            "feature_operation_guard": client.guard_for(
+                _PRICE_OPERATION_KEY, OPINET_PRICE_DATASET_KEY
+            ),
             "opinet_station_price_details": _NeverConsumed(),
         }
     )
@@ -271,6 +373,14 @@ async def test_price_asset_coalesces_same_kst_day_before_provider_fetch(
     assert output_metadata["skipped"] is True
     assert output_metadata["skip_reason"] == "already_succeeded_today_kst"
     assert client.sync_success_calls == []
+    # coalescing 판단도 label이 아니라 exact membership 행을 읽고 내린다(ADR-088).
+    assert client.sync_state_reads == [
+        ProviderDatasetOperationMembership(
+            provider_dataset_id=_PROVIDER_DATASET_IDS[OPINET_PRICE_DATASET_KEY],
+            sync_scope="dataset_wide",
+            operation_key=_PRICE_OPERATION_KEY,
+        )
+    ]
 
 
 async def test_price_asset_does_not_coalesce_same_day_without_current_observation() -> None:
@@ -290,6 +400,9 @@ async def test_price_asset_does_not_coalesce_same_day_without_current_observatio
             "reverse_geocoder": None,
             "fetched_at": fetched_at,
             "strict_address": True,
+            "feature_operation_guard": client.guard_for(
+                _PRICE_OPERATION_KEY, OPINET_PRICE_DATASET_KEY
+            ),
             "opinet_station_price_details": [],
         }
     )
@@ -320,6 +433,9 @@ async def test_price_asset_does_not_coalesce_mixed_current_and_old_observations(
             "reverse_geocoder": None,
             "fetched_at": fetched_at,
             "strict_address": True,
+            "feature_operation_guard": client.guard_for(
+                _PRICE_OPERATION_KEY, OPINET_PRICE_DATASET_KEY
+            ),
             "opinet_station_price_details": [],
         }
     )
@@ -351,6 +467,9 @@ async def test_price_asset_does_not_coalesce_run_that_crossed_kst_midnight() -> 
             "reverse_geocoder": None,
             "fetched_at": fetched_at,
             "strict_address": True,
+            "feature_operation_guard": client.guard_for(
+                _PRICE_OPERATION_KEY, OPINET_PRICE_DATASET_KEY
+            ),
             "opinet_station_price_details": [],
         }
     )
@@ -376,6 +495,9 @@ async def test_place_asset_coalesces_same_kst_day_before_provider_fetch() -> Non
             "reverse_geocoder": None,
             "fetched_at": fetched_at,
             "strict_address": True,
+            "feature_operation_guard": client.guard_for(
+                _PLACE_OPERATION_KEY, OPINET_STATION_DATASET_KEY
+            ),
             "opinet_stations": _NeverConsumed(),
         }
     )

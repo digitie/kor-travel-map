@@ -162,7 +162,7 @@ def test_parser_import_mois_minimal() -> None:
     assert args.dataset_key is None
     assert args.mode == "bulk"
     assert args.cursor is None
-    assert args.sync_scope == "default"
+    assert args.sync_scope == "dataset_wide"
     assert args.geocoder_url is None
     assert hasattr(args, "func")
 
@@ -210,9 +210,11 @@ def test_format_incremental_result_done() -> None:
                 source_links_updated=0,
             ),
             sync_state=SyncState(
+                provider_dataset_id=42,
                 provider="python-mois-api",
                 dataset_key="mois_license_features_history",
-                sync_scope="default",
+                sync_scope="dataset_wide",
+                operation_key="mois_license_features_history_refresh",
                 status="active",
                 cursor={"last_modified_date": "2026-06-01"},
                 last_success_at=None,
@@ -257,9 +259,11 @@ def test_format_closed_result_done() -> None:
             ),
             deactivated=3,
             sync_state=SyncState(
+                provider_dataset_id=43,
                 provider="python-mois-api",
                 dataset_key="mois_license_features_closed",
-                sync_scope="default",
+                sync_scope="dataset_wide",
+                operation_key="mois_license_features_closed_refresh",
                 status="active",
                 cursor={"last_modified_date": "2026-06-03"},
                 last_success_at=None,

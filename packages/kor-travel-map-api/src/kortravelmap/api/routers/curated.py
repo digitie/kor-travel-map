@@ -104,6 +104,7 @@ class CuratedSourceView(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     source_id: str
+    provider_dataset_id: int
     provider: str
     dataset_key: str
     source_name: str
@@ -131,6 +132,7 @@ class CuratedSourceRuleView(BaseModel):
     theme_id: str
     theme_slug: str
     source_id: str
+    provider_dataset_id: int
     provider: str
     dataset_key: str
     place_kind: str | None = None
@@ -167,6 +169,7 @@ class CuratedFeatureView(BaseModel):
     address: dict[str, Any]
     detail: dict[str, Any]
     source_id: str
+    provider_dataset_id: int
     provider: str
     dataset_key: str
     source_name: str
@@ -454,8 +457,7 @@ class CuratedThemePatchRequest(BaseModel):
 class CuratedSourceCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    provider: str = Field(min_length=1, max_length=128)
-    dataset_key: str = Field(min_length=1, max_length=200)
+    provider_dataset_id: int = Field(gt=0)
     source_name: str = Field(min_length=1, max_length=200)
     source_url: str | None = None
     source_kind: SourceKind
@@ -492,7 +494,6 @@ class CuratedSourceRuleCreateRequest(BaseModel):
 
     theme_id: str
     source_id: str
-    dataset_key: str = Field(min_length=1, max_length=200)
     place_kind: str | None = None
     category: str | None = None
     region_scope: dict[str, Any] = Field(default_factory=dict)
@@ -506,7 +507,6 @@ class CuratedSourceRuleCreateRequest(BaseModel):
 class CuratedSourceRulePatchRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    dataset_key: str | None = Field(default=None, min_length=1, max_length=200)
     place_kind: str | None = None
     category: str | None = None
     region_scope: dict[str, Any] | None = None
@@ -937,16 +937,14 @@ async def list_curated_themes_route(
 @router.get("/curated-sources", response_model=CuratedSourcesResponse)
 async def list_curated_sources_route(
     session: Annotated[AsyncSession, Depends(get_session)],
-    provider: Annotated[str | None, Query()] = None,
-    dataset_key: Annotated[str | None, Query()] = None,
+    provider_dataset_id: Annotated[int | None, Query(gt=0)] = None,
     provider_status: Annotated[ProviderStatus | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 200,
 ) -> CuratedSourcesResponse:
     started_at = perf_counter()
     rows = await curated_repo.list_curated_sources(
         session,
-        provider=provider,
-        dataset_key=dataset_key,
+        provider_dataset_id=provider_dataset_id,
         provider_status=provider_status,
         limit=limit,
     )
@@ -1039,8 +1037,7 @@ async def list_admin_curated_features_route(
     theme_id: Annotated[str | None, Query()] = None,
     theme_slug: Annotated[str | None, Query()] = None,
     source_id: Annotated[str | None, Query()] = None,
-    provider: Annotated[str | None, Query()] = None,
-    dataset_key: Annotated[str | None, Query()] = None,
+    provider_dataset_id: Annotated[int | None, Query(gt=0)] = None,
     curation_status: Annotated[CurationStatus | None, Query()] = None,
     region_code: Annotated[str | None, Query()] = None,
     sido_code: Annotated[str | None, Query()] = None,
@@ -1065,8 +1062,7 @@ async def list_admin_curated_features_route(
             theme_id=theme_id,
             theme_slug=theme_slug,
             source_id=source_id,
-            provider=provider,
-            dataset_key=dataset_key,
+            provider_dataset_id=provider_dataset_id,
             curation_status=curation_status,
             region_code=region_code,
             sido_code=sido_code,
@@ -1395,15 +1391,13 @@ async def patch_admin_curated_theme_route(
 @admin_router.get("/curated-sources", response_model=CuratedSourcesResponse)
 async def list_admin_curated_sources_route(
     session: Annotated[AsyncSession, Depends(get_session)],
-    provider: Annotated[str | None, Query()] = None,
-    dataset_key: Annotated[str | None, Query()] = None,
+    provider_dataset_id: Annotated[int | None, Query(gt=0)] = None,
     provider_status: Annotated[ProviderStatus | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 200,
 ) -> CuratedSourcesResponse:
     return await list_curated_sources_route(
         session=session,
-        provider=provider,
-        dataset_key=dataset_key,
+        provider_dataset_id=provider_dataset_id,
         provider_status=provider_status,
         limit=limit,
     )
@@ -1466,8 +1460,7 @@ async def list_admin_curated_source_rules_route(
     theme_id: Annotated[str | None, Query()] = None,
     theme_slug: Annotated[str | None, Query()] = None,
     source_id: Annotated[str | None, Query()] = None,
-    provider: Annotated[str | None, Query()] = None,
-    dataset_key: Annotated[str | None, Query()] = None,
+    provider_dataset_id: Annotated[int | None, Query(gt=0)] = None,
     enabled: Annotated[bool | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 200,
 ) -> CuratedSourceRulesResponse:
@@ -1477,8 +1470,7 @@ async def list_admin_curated_source_rules_route(
         theme_id=theme_id,
         theme_slug=theme_slug,
         source_id=source_id,
-        provider=provider,
-        dataset_key=dataset_key,
+        provider_dataset_id=provider_dataset_id,
         enabled=enabled,
         limit=limit,
     )

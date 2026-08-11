@@ -868,7 +868,7 @@ export interface paths {
         };
         /**
          * List Files
-         * @description 레지스트리 파일 목록 — kind/status/provider/location/기간 필터 + 검색.
+         * @description 레지스트리 파일 목록 — kind/status/dataset/location/기간 필터 + 검색.
          */
         get: operations["list_files_v1_admin_files_get"];
         put?: never;
@@ -1902,48 +1902,11 @@ export interface paths {
         };
         /**
          * provider×dataset×sync_scope 상태 그리드
-         * @description freshness SLA, Dagster 실제 다음 schedule tick, 최신 DB-recorded execution, dataset/provider integrity issue를 batch 조회한다. `eligible_after`는 backoff/rate-limit 시각이며 `schedule.next_scheduled_at`과 의미가 다르다.
+         * @description freshness SLA, Dagster 실제 다음 schedule tick, 최신 DB-recorded execution, 각 `provider_dataset_id`에 귀속된 integrity issue 집계를 batch 조회한다. provider-only issue group은 만들지 않는다. `eligible_after`는 backoff/rate-limit 시각이며 `schedule.next_scheduled_at`과 의미가 다르다.
          */
         get: operations["list_datasets_grid_v1_ops_datasets_get"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/ops/datasets/detail": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** dataset 상세 — scope 상태·실행·이벤트·정책 */
-        get: operations["get_dataset_detail_v1_ops_datasets_detail_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/ops/datasets/preview": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * fixture ETL 변환 preview
-         * @description typed body(`source=fixture`, `max_items`)만 받는다. 외부 provider 호출 budget은 0이다. max_items는 응답 크기 cap이며 변환 CPU budget은 아니다.
-         */
-        post: operations["post_dataset_preview_v1_ops_datasets_preview_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1961,6 +1924,43 @@ export interface paths {
         /** canonical dataset refresh policy upsert */
         put: operations["put_dataset_refresh_policy_v1_ops_datasets_refresh_policy_put"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ops/datasets/{provider_dataset_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** dataset 상세 — scope 상태·실행·이벤트·정책 */
+        get: operations["get_dataset_detail_v1_ops_datasets__provider_dataset_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ops/datasets/{provider_dataset_id}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * fixture ETL 변환 preview
+         * @description typed body(`source=fixture`, `max_items`)만 받는다. 외부 provider 호출 budget은 0이다. max_items는 응답 크기 cap이며 변환 CPU budget은 아니다.
+         */
+        post: operations["post_dataset_preview_v1_ops_datasets__provider_dataset_id__preview_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2056,7 +2056,7 @@ export interface paths {
         };
         /**
          * 전역 job 이벤트 스트림
-         * @description 어느 job인지 모르는 상태에서 최근 error를 훑는 전역 `ops.import_job_events` 스트림 — level/provider/dataset/scope/job 필터. sync_scope는 provider와 dataset_key를 함께 요구하며 canonical feature-update job/request의 effective scope를 조회한다.
+         * @description 어느 job인지 모르는 상태에서 최근 error를 훑는 전역 `ops.import_job_events` 스트림 — level/provider-dataset/scope/job 필터. sync_scope는 provider_dataset_id를 함께 요구하며 canonical feature-update job/request의 effective scope를 조회한다.
          */
         get: operations["list_pipeline_events_v1_ops_pipeline_events_get"];
         put?: never;
@@ -2076,7 +2076,7 @@ export interface paths {
         };
         /**
          * root 실행 타임라인
-         * @description import job hierarchy를 job별 nearest request anchor branch와 standalone partition으로 접어 root만 반환한다. keyset total order는 `(created_at DESC, id DESC, kind DESC)`이며 Dagster run은 각 root/대표 job의 `dagster_run_id`로만 연결한다. `sync_scope`는 `provider`와 `dataset_key`를 함께 요구하며 dataset 기본 state의 logical scope alias를 적용한다. `load_batch_id`와 `parent_job_id`는 root의 전체 component membership에 대해 cursor/LIMIT 전에 적용한다.
+         * @description import job hierarchy를 job별 nearest request anchor branch와 standalone partition으로 접어 root만 반환한다. keyset total order는 `(created_at DESC, id DESC, kind DESC)`이며 Dagster run은 각 root/대표 job의 `dagster_run_id`로만 연결한다. `sync_scope`는 `provider_dataset_id`를 함께 요구하며 dataset 기본 state의 logical scope alias를 적용한다. `load_batch_id`와 `parent_job_id`는 root의 전체 component membership에 대해 cursor/LIMIT 전에 적용한다.
          */
         get: operations["list_executions_v1_ops_pipeline_executions_get"];
         put?: never;
@@ -2943,6 +2943,8 @@ export interface components {
             };
             /** Provider */
             provider: string | null;
+            /** Provider Dataset Id */
+            provider_dataset_id: number | null;
             /** Public Item Count */
             public_item_count: number;
             /** Source Id */
@@ -3079,6 +3081,8 @@ export interface components {
             place_name: string;
             /** Provider */
             provider: string | null;
+            /** Provider Dataset Id */
+            provider_dataset_id: number | null;
             /**
              * Reuse Policy
              * @enum {string}
@@ -3755,13 +3759,6 @@ export interface components {
              * Format: date-time
              */
             imported_at: string;
-            /** Is Primary Source */
-            is_primary_source: boolean;
-            /**
-             * Last Seen At
-             * Format: date-time
-             */
-            last_seen_at: string;
             /**
              * Linked At
              * Format: date-time
@@ -3769,20 +3766,17 @@ export interface components {
             linked_at: string;
             /** Match Method */
             match_method: string;
+            /**
+             * Observed At
+             * Format: date-time
+             */
+            observed_at: string;
             /** Provider */
             provider: string;
-            /** Raw Address */
-            raw_address?: string | null;
             /** Raw Data */
             raw_data: {
                 [key: string]: unknown;
             };
-            /** Raw Latitude */
-            raw_latitude?: number | null;
-            /** Raw Longitude */
-            raw_longitude?: number | null;
-            /** Raw Name */
-            raw_name?: string | null;
             /** Raw Payload Hash */
             raw_payload_hash: string;
             /** Source Entity Id */
@@ -3795,8 +3789,6 @@ export interface components {
             source_record_key: string;
             /** Source Role */
             source_role: string;
-            /** Source Version */
-            source_version?: string | null;
         };
         /**
          * AdminFeatureDetailVersionRecord
@@ -4230,6 +4222,8 @@ export interface components {
             };
             /** Provider */
             provider?: string | null;
+            /** Provider Dataset Id */
+            provider_dataset_id?: number | null;
             /** Resolved At */
             resolved_at?: string | null;
             /** Severity */
@@ -4607,19 +4601,14 @@ export interface components {
         };
         /** Body_create_offline_upload_request_v1_admin_offline_uploads_post */
         Body_create_offline_upload_request_v1_admin_offline_uploads_post: {
-            /** Dataset Key */
-            dataset_key: string;
             /**
              * File
              * @description JSON/JSONL FeatureBundle 또는 CSV/TSV tabular 파일
              */
             file: string;
-            /** Provider */
-            provider: string;
-            /**
-             * Sync Scope
-             * @default default
-             */
+            /** Provider Dataset Id */
+            provider_dataset_id: number;
+            /** Sync Scope */
             sync_scope: string;
         };
         /** Body_import_admin_curations_v1_admin_curations_import_post */
@@ -6234,6 +6223,8 @@ export interface components {
             };
             /** Provider */
             provider: string;
+            /** Provider Dataset Id */
+            provider_dataset_id: number;
             /** Rank Score */
             rank_score: number;
             /** Rejected At */
@@ -6308,8 +6299,6 @@ export interface components {
         };
         /** CuratedSourceCreateRequest */
         CuratedSourceCreateRequest: {
-            /** Dataset Key */
-            dataset_key: string;
             /** Freshness Note */
             freshness_note?: string | null;
             /** Last Checked At */
@@ -6324,8 +6313,8 @@ export interface components {
             };
             /** Next Expected At */
             next_expected_at?: string | null;
-            /** Provider */
-            provider: string;
+            /** Provider Dataset Id */
+            provider_dataset_id: number;
             /**
              * Provider Status
              * @default implemented
@@ -6388,8 +6377,6 @@ export interface components {
         CuratedSourceRuleCreateRequest: {
             /** Category */
             category?: string | null;
-            /** Dataset Key */
-            dataset_key: string;
             /**
              * Default Action
              * @default candidate
@@ -6429,8 +6416,6 @@ export interface components {
         CuratedSourceRulePatchRequest: {
             /** Category */
             category?: string | null;
-            /** Dataset Key */
-            dataset_key?: string | null;
             /** Default Action */
             default_action?: ("candidate" | "curated" | "ignore") | null;
             /** Detail Selector */
@@ -6489,6 +6474,8 @@ export interface components {
             priority: number;
             /** Provider */
             provider: string;
+            /** Provider Dataset Id */
+            provider_dataset_id: number;
             /** Region Scope */
             region_scope: {
                 [key: string]: unknown;
@@ -6545,6 +6532,8 @@ export interface components {
             next_expected_at?: string | null;
             /** Provider */
             provider: string;
+            /** Provider Dataset Id */
+            provider_dataset_id: number;
             /** Provider Status */
             provider_status: string;
             /** Row Count */
@@ -7108,6 +7097,8 @@ export interface components {
             dataset_key: string | null;
             /** Provider */
             provider: string | null;
+            /** Provider Dataset Id */
+            provider_dataset_id: number | null;
             /**
              * Source Id
              * Format: uuid
@@ -7644,6 +7635,10 @@ export interface components {
             source_end_date?: string | null;
             /** Source Entity Id */
             source_entity_id: string;
+            /** Source Lat */
+            source_lat?: number | null;
+            /** Source Lon */
+            source_lon?: number | null;
             /** Source Name */
             source_name: string;
             /** Source Provider */
@@ -8132,8 +8127,6 @@ export interface components {
             imported_at: string;
             /** Is Current */
             is_current: boolean;
-            /** Is Primary Source */
-            is_primary_source: boolean;
             /**
              * Linked At
              * Format: date-time
@@ -8141,27 +8134,19 @@ export interface components {
             linked_at: string;
             /** Match Method */
             match_method: string;
+            /**
+             * Observed At
+             * Format: date-time
+             */
+            observed_at: string;
             /** Provider */
             provider: string;
-            /** Raw Address */
-            raw_address: string | null;
             /** Raw Data */
             raw_data: {
                 [key: string]: unknown;
             };
-            /** Raw Latitude */
-            raw_latitude: number | null;
-            /** Raw Longitude */
-            raw_longitude: number | null;
-            /** Raw Name */
-            raw_name: string | null;
             /** Raw Payload Hash */
             raw_payload_hash: string;
-            /**
-             * Record Last Seen At
-             * Format: date-time
-             */
-            record_last_seen_at: string;
             /** Source Entity Id */
             source_entity_id: string;
             /** Source Entity Key */
@@ -8172,8 +8157,6 @@ export interface components {
             source_record_key: string;
             /** Source Role */
             source_role: string;
-            /** Source Version */
-            source_version: string | null;
         };
         /**
          * FeaturePriceResponse
@@ -8344,6 +8327,18 @@ export interface components {
             name: string;
         };
         /**
+         * FeatureUpdateDatasetMembership
+         * @description 요청 생성 시점에 고정된 실행 dataset membership.
+         */
+        FeatureUpdateDatasetMembership: {
+            /** Operation Key */
+            operation_key: string;
+            /** Provider Dataset Id */
+            provider_dataset_id: number;
+            /** Sync Scope */
+            sync_scope: string;
+        };
+        /**
          * FeatureUpdatePoint
          * @description WGS84 lon/lat 좌표.
          */
@@ -8379,15 +8374,11 @@ export interface components {
          * @description DB와 import job을 반드시 생성하는 feature update 요청.
          */
         FeatureUpdateRequestCreateRequest: {
-            /** Dataset Keys */
-            dataset_keys?: string[];
             /**
              * Priority
              * @default 50
              */
             priority: number;
-            /** Providers */
-            providers?: string[];
             /** Reason */
             reason?: string | null;
             /**
@@ -8427,18 +8418,16 @@ export interface components {
             created_at: string;
             /** Dagster Run Id */
             dagster_run_id: string | null;
-            /** Dataset Keys */
-            dataset_keys: string[];
+            /**
+             * Dataset Memberships
+             * @description 제출 시점에 고정된 canonical dataset/sync scope/operation snapshot.
+             */
+            dataset_memberships: components["schemas"]["FeatureUpdateDatasetMembership"][];
             /**
              * Dispatch Requested At
              * @description 같은 canonical 작업의 즉시 dispatch가 요청된 최초 시각.
              */
             dispatch_requested_at: string | null;
-            /**
-             * Effective Sync Scope
-             * @description 실행과 활성 작업 유일성에 실제 적용되는 정규화된 sync scope.
-             */
-            effective_sync_scope: string | null;
             /** Error Message */
             error_message: string | null;
             /** Finished At */
@@ -8458,8 +8447,6 @@ export interface components {
             operator: string | null;
             /** Priority */
             priority: number;
-            /** Providers */
-            providers: string[];
             /** Reason */
             reason: string | null;
             /**
@@ -8467,11 +8454,6 @@ export interface components {
              * Format: uuid
              */
             request_id: string;
-            /**
-             * Requested Sync Scope
-             * @description 운영자가 provider_dataset 요청에 명시한 원본 sync scope.
-             */
-            requested_sync_scope: string | null;
             /**
              * Result Kind
              * @constant
@@ -8513,16 +8495,14 @@ export interface components {
          * @description DB write 없이 scope 해석 결과만 반환하는 preview 표현.
          */
         FeatureUpdateRequestPreviewRecord: {
-            /** Dataset Keys */
-            dataset_keys: string[];
+            /** Dataset Memberships */
+            dataset_memberships: components["schemas"]["FeatureUpdateDatasetMembership"][];
             /** Matched Scope */
             matched_scope: {
                 [key: string]: unknown;
             };
             /** Priority */
             priority: number;
-            /** Providers */
-            providers: string[];
             /**
              * Result Kind
              * @constant
@@ -8547,15 +8527,11 @@ export interface components {
          * @description DB write 없이 scope 해석 결과만 계산하는 요청.
          */
         FeatureUpdateRequestPreviewRequest: {
-            /** Dataset Keys */
-            dataset_keys?: string[];
             /**
              * Priority
              * @default 50
              */
             priority: number;
-            /** Providers */
-            providers?: string[];
             /**
              * Run Mode
              * @default queued
@@ -8589,18 +8565,16 @@ export interface components {
             created_at: string;
             /** Dagster Run Id */
             dagster_run_id: string | null;
-            /** Dataset Keys */
-            dataset_keys: string[];
+            /**
+             * Dataset Memberships
+             * @description 제출 시점에 고정된 canonical dataset/sync scope/operation snapshot.
+             */
+            dataset_memberships: components["schemas"]["FeatureUpdateDatasetMembership"][];
             /**
              * Dispatch Requested At
              * @description 같은 canonical 작업의 즉시 dispatch가 요청된 최초 시각.
              */
             dispatch_requested_at: string | null;
-            /**
-             * Effective Sync Scope
-             * @description 실행과 활성 작업 유일성에 실제 적용되는 정규화된 sync scope.
-             */
-            effective_sync_scope: string | null;
             /** Error Message */
             error_message: string | null;
             /** Finished At */
@@ -8620,8 +8594,6 @@ export interface components {
             operator: string | null;
             /** Priority */
             priority: number;
-            /** Providers */
-            providers: string[];
             /** Reason */
             reason: string | null;
             /**
@@ -8629,11 +8601,6 @@ export interface components {
              * Format: uuid
              */
             request_id: string;
-            /**
-             * Requested Sync Scope
-             * @description 운영자가 provider_dataset 요청에 명시한 원본 sync scope.
-             */
-            requested_sync_scope: string | null;
             /**
              * Run Mode
              * @enum {string}
@@ -8928,6 +8895,8 @@ export interface components {
             path: string;
             /** Provider */
             provider: string | null;
+            /** Provider Dataset Id */
+            provider_dataset_id: number | null;
             /** Registered By */
             registered_by: string;
             /** Status */
@@ -9235,8 +9204,6 @@ export interface components {
             created_at: string;
             /** Created By */
             created_by: string | null;
-            /** Dataset Key */
-            dataset_key: string;
             /** Detected Encoding */
             detected_encoding: string | null;
             /** Detected Format */
@@ -9245,10 +9212,12 @@ export interface components {
             load_job_id: string | null;
             /** Load Url */
             load_url: string;
+            /** Operation Key */
+            operation_key: string;
             /** Original Filename */
             original_filename: string;
-            /** Provider */
-            provider: string;
+            /** Provider Dataset Id */
+            provider_dataset_id: number;
             /** Status */
             status: string;
             /** Status Url */
@@ -9423,8 +9392,8 @@ export interface components {
         OpsDatasetCatalogInfo: {
             /** Feature Kind */
             feature_kind: string;
-            /** Is Feature Load */
-            is_feature_load: boolean;
+            /** Is Active */
+            is_active: boolean;
             /** Is Refreshable */
             is_refreshable: boolean;
             /** Label */
@@ -9462,7 +9431,8 @@ export interface components {
             orphan_reason: string | null;
             /** Provider */
             provider: string;
-            provider_issues: components["schemas"]["OpsIssueSummary"];
+            /** Provider Dataset Id */
+            provider_dataset_id: number;
             refresh_policy: components["schemas"]["ProviderRefreshPolicyRecord"] | null;
             run_history: components["schemas"]["OpsDatasetRunHistory"];
             schedule: components["schemas"]["OpsDatasetScheduleSummary"];
@@ -9505,6 +9475,8 @@ export interface components {
              * Format: uuid
              */
             event_id: string;
+            /** Import Job Dataset Id */
+            import_job_dataset_id: string | null;
             /**
              * Job Id
              * Format: uuid
@@ -9519,10 +9491,14 @@ export interface components {
              * Format: date-time
              */
             occurred_at: string;
+            /** Operation Key */
+            operation_key: string | null;
+            /** Provider Dataset Id */
+            provider_dataset_id: number | null;
             /** Stage */
             stage: string | null;
             /** Sync Scope */
-            sync_scope: string;
+            sync_scope: string | null;
         };
         /**
          * OpsDatasetExecution
@@ -9539,8 +9515,6 @@ export interface components {
             dagster_run_id: string | null;
             /** Dagster Run Status */
             dagster_run_status: string | null;
-            /** Dataset Keys */
-            dataset_keys: string[];
             /** Detail Url */
             detail_url: string;
             /** Error Message */
@@ -9557,13 +9531,13 @@ export interface components {
              * @enum {string}
              */
             kind: "import_job" | "update_request";
+            /** Operation Key */
+            operation_key: string;
             /**
              * Operation Member Id
              * Format: uuid
              */
             operation_member_id: string;
-            /** Operation Registry Version */
-            operation_registry_version: string | null;
             /**
              * Pair Status
              * @enum {string}
@@ -9572,8 +9546,6 @@ export interface components {
             projected_job: components["schemas"]["OpsDatasetProjectedJob"];
             /** Provider Datasets */
             provider_datasets: components["schemas"]["OpsDatasetProviderDataset"][];
-            /** Providers */
-            providers: string[];
             /** Started At */
             started_at: string | null;
             /**
@@ -9582,7 +9554,7 @@ export interface components {
              */
             status: "queued" | "running" | "done" | "failed" | "cancelled";
             /** Sync Scope */
-            sync_scope: string | null;
+            sync_scope: string;
             /** Trigger Kind */
             trigger_kind: string | null;
         };
@@ -9612,7 +9584,17 @@ export interface components {
         };
         /**
          * OpsDatasetGridRow
-         * @description provider×dataset×sync_scope 그리드 1행.
+         * @description exact membership triple 그리드 1행.
+         *
+         *     행 identity는 ``provider_dataset_id × sync_scope × operation_key``다
+         *     (ADR-088 §결정 2). 한 dataset이 refresh operation을 여럿 가질 수 있고 그 둘이
+         *     같은 ``sync_scope``를 공유할 수 있으므로, pair로 접으면 형제 operation의 상태가
+         *     무경고로 사라진다 — 실패 중인 operation이 형제에 가려 보이지 않는다.
+         *
+         *     ``operation_key``가 null인 행은 **결박할 refresh membership이 없는 catalog 행**이다.
+         *     그 행에는 실행 identity가 아예 없으며, 운영자에게는 catalog 존재·orphan 사유·issue를
+         *     보이기 위해 남긴다. 개수는 DB마다 다르다 — ``0089_tvn33_expand_seed``가 legacy pair를
+         *     harvest하므로 개발/프로덕션 DB가 seed-only DB보다 많다.
          */
         OpsDatasetGridRow: {
             /** @description 같은 provider/dataset/sync_scope의 queued/running canonical operation. 더 최신 terminal 실행과 독립적으로 조회한다. */
@@ -9643,11 +9625,17 @@ export interface components {
             latest_execution: components["schemas"]["OpsDatasetExecution"] | null;
             /** Mutable */
             mutable: boolean;
+            /**
+             * Operation Key
+             * @description 이 행이 가리키는 실행 operation. null이면 실행 가능한 refresh operation이 없는 catalog 전용 행이다.
+             */
+            operation_key: string | null;
             /** Orphan Reason */
             orphan_reason: string | null;
             /** Provider */
             provider: string;
-            provider_issues: components["schemas"]["OpsIssueSummary"];
+            /** Provider Dataset Id */
+            provider_dataset_id: number;
             refresh_policy: components["schemas"]["ProviderRefreshPolicyRecord"] | null;
             schedule: components["schemas"]["OpsDatasetScheduleSummary"];
             /** Status */
@@ -9716,8 +9704,12 @@ export interface components {
             items: {
                 [key: string]: unknown;
             }[];
+            /** Operation Key */
+            operation_key: string | null;
             /** Provider */
             provider: string;
+            /** Provider Dataset Id */
+            provider_dataset_id: number;
             /** Returned Items */
             returned_items: number;
             /**
@@ -9725,6 +9717,8 @@ export interface components {
              * @constant
              */
             source: "fixture";
+            /** Sync Scope */
+            sync_scope: string;
             /** Total Items */
             total_items: number;
             /** Truncated */
@@ -9785,8 +9779,8 @@ export interface components {
             id: string;
             /** Job Kind */
             job_kind: string;
-            /** Operation Registry Version */
-            operation_registry_version: string | null;
+            /** Operation Key */
+            operation_key: string | null;
             /** Progress */
             progress: number;
             /** Started At */
@@ -9806,6 +9800,8 @@ export interface components {
         OpsDatasetProviderDataset: {
             /** Dataset Key */
             dataset_key: string;
+            /** Operation Key */
+            operation_key: string;
             /**
              * Operation Member Id
              * Format: uuid
@@ -9813,13 +9809,15 @@ export interface components {
             operation_member_id: string;
             /** Provider */
             provider: string;
+            /** Provider Dataset Id */
+            provider_dataset_id: number;
             /**
              * Status
              * @enum {string}
              */
             status: "queued" | "running" | "done" | "failed" | "cancelled";
             /** Sync Scope */
-            sync_scope: string | null;
+            sync_scope: string;
         };
         /** OpsDatasetRefreshPolicyResponse */
         OpsDatasetRefreshPolicyResponse: {
@@ -9852,7 +9850,7 @@ export interface components {
              * Basis
              * @enum {string}
              */
-            basis: "dagster_definition_tags" | "not_scheduled" | "unknown";
+            basis: "dagster_operation_key_tag" | "not_scheduled" | "unknown";
             /**
              * Next Scheduled At
              * @description RUNNING Dagster schedule의 futureTicks 첫 timestamp. refresh policy에서 파생한 시각이 아니며 STOPPED/미등록이면 null.
@@ -9880,9 +9878,10 @@ export interface components {
             default_sync_scope: string;
             /**
              * Effect
+             * @description 이 capability로 제출할 수 있는 갱신 범위. `dataset_wide`는 기본 scope 행에서 전체 갱신만, `sync_scope`는 `allowed_sync_scopes` 중 선택, `none`은 **제출 가능한 scope가 없다**는 뜻이다. `none`은 갱신 불가 상태를 정상 `dataset_wide` 계약과 구분하기 위한 축이다 — 두 상태가 같은 값을 내면 소비자는 `reason` 문자열을 파싱하지 않는 한 구분할 수 없다.
              * @enum {string}
              */
-            effect: "dataset_wide" | "sync_scope";
+            effect: "dataset_wide" | "sync_scope" | "none";
             /** Reason */
             reason?: string | null;
             /**
@@ -9895,7 +9894,11 @@ export interface components {
         };
         /**
          * OpsDatasetScopeState
-         * @description 상세의 sync_scope 상태.
+         * @description 상세의 membership별 sync state.
+         *
+         *     ``pk_provider_sync_state``가 triple이므로 scope 하나에 operation별 state가 여러 개
+         *     존재할 수 있다. ``operation_key`` 없이 내보내면 클라이언트가 어느 operation의
+         *     상태인지 가릴 수 없다.
          */
         OpsDatasetScopeState: {
             /** Consecutive Failures */
@@ -9911,6 +9914,8 @@ export interface components {
             last_failure_at: string | null;
             /** Last Success At */
             last_success_at: string | null;
+            /** Operation Key */
+            operation_key: string | null;
             /** Status */
             status: string;
             /** Sync Scope */
@@ -10044,6 +10049,8 @@ export interface components {
             };
             /** Provider */
             provider?: string | null;
+            /** Provider Dataset Id */
+            provider_dataset_id?: number | null;
             /** Resolved At */
             resolved_at?: string | null;
             /** Severity */
@@ -10469,8 +10476,6 @@ export interface components {
             dagster_run_id: string | null;
             /** Dagster Run Status */
             dagster_run_status: string | null;
-            /** Dataset Key */
-            dataset_key: string | null;
             /** Detail Url */
             detail_url: string;
             /** Error Message */
@@ -10496,8 +10501,8 @@ export interface components {
             kind: "import_job" | "update_request";
             /** Load Batch Id */
             load_batch_id: string | null;
-            /** Operation Registry Version */
-            operation_registry_version: string | null;
+            /** Operation Key */
+            operation_key: string | null;
             /** Operator */
             operator: string | null;
             /** Parent Job Id */
@@ -10506,8 +10511,8 @@ export interface components {
             priority: number | null;
             /** Progress */
             progress: number | null;
-            /** Provider */
-            provider: string | null;
+            /** Provider Datasets */
+            provider_datasets: components["schemas"]["PipelineProviderDatasetIdentityRecord"][];
             /**
              * Request Id
              * @description import_job 행이 연결된 feature update request id.
@@ -10544,11 +10549,6 @@ export interface components {
             dagster_run_id: string | null;
             /** Dagster Run Status */
             dagster_run_status: string | null;
-            /**
-             * Dataset Keys
-             * @description 표시·dataset-only 필터용 정렬된 유효 dataset 목록.
-             */
-            dataset_keys: string[];
             /** Detail Url */
             detail_url: string;
             /** Error Message */
@@ -10567,8 +10567,8 @@ export interface components {
             kind: "import_job" | "update_request";
             /** Linked Job Count */
             linked_job_count: number;
-            /** Operation Registry Version */
-            operation_registry_version: string | null;
+            /** Operation Key */
+            operation_key: string | null;
             /** Operator */
             operator: string | null;
             /** Priority */
@@ -10581,11 +10581,6 @@ export interface components {
              * @description canonical branch의 exact pair와 pair별 lifecycle 상태.
              */
             provider_datasets: components["schemas"]["PipelineProviderDatasetIdentityRecord"][];
-            /**
-             * Providers
-             * @description 표시·provider-only 필터용 정렬된 유효 provider 목록.
-             */
-            providers: string[];
             /**
              * Requested Job Id
              * @description update request가 원래 가리킨 import job id.
@@ -10642,8 +10637,6 @@ export interface components {
             dagster_run_id: string | null;
             /** Dagster Run Status */
             dagster_run_status: string | null;
-            /** Dataset Key */
-            dataset_key: string | null;
             /** Error Message */
             error_message: string | null;
             /** Finished At */
@@ -10659,8 +10652,8 @@ export interface components {
             kind: string;
             /** Load Batch Id */
             load_batch_id: string | null;
-            /** Operation Registry Version */
-            operation_registry_version: string | null;
+            /** Operation Key */
+            operation_key: string | null;
             /** Parent Job Id */
             parent_job_id: string | null;
             /** Payload */
@@ -10669,8 +10662,8 @@ export interface components {
             };
             /** Progress */
             progress: number;
-            /** Provider */
-            provider: string | null;
+            /** Provider Datasets */
+            provider_datasets: components["schemas"]["PipelineProviderDatasetIdentityRecord"][];
             /** Source Checksum */
             source_checksum: string | null;
             /** Started At */
@@ -10690,8 +10683,6 @@ export interface components {
         PipelineJobEventRecord: {
             /** Code */
             code: string | null;
-            /** Dataset Key */
-            dataset_key: string | null;
             /**
              * Event Id
              * Format: uuid
@@ -10699,6 +10690,8 @@ export interface components {
             event_id: string;
             /** Feature Id */
             feature_id: string | null;
+            /** Import Job Dataset Id */
+            import_job_dataset_id: string | null;
             /**
              * Job Id
              * Format: uuid
@@ -10713,12 +10706,14 @@ export interface components {
              * Format: date-time
              */
             occurred_at: string;
+            /** Operation Key */
+            operation_key: string | null;
             /** Payload */
             payload: {
                 [key: string]: unknown;
             };
-            /** Provider */
-            provider: string | null;
+            /** Provider Dataset Id */
+            provider_dataset_id: number | null;
             /** Stage */
             stage: string | null;
             /** Sync Scope */
@@ -10815,8 +10810,8 @@ export interface components {
             job_kind: string;
             /** Load Batch Id */
             load_batch_id: string | null;
-            /** Operation Registry Version */
-            operation_registry_version: string | null;
+            /** Operation Key */
+            operation_key: string | null;
             /** Parent Job Id */
             parent_job_id: string | null;
             /** Progress */
@@ -10833,11 +10828,19 @@ export interface components {
         };
         /**
          * PipelineProviderDatasetIdentityRecord
-         * @description canonical root에 귀속된 exact pair 상태.
+         * @description canonical root에 귀속된 exact membership 상태.
+         *
+         *     membership identity는 triple이다(ADR-088 §결정 2). 아래 계층의
+         *     ``PipelineProviderDatasetIdentity``가 이미 셋을 non-null로 들고 있으므로 여기서
+         *     ``operation_key``를 떨어뜨리거나 ``sync_scope``를 nullable로 넓히면 표현할 수
+         *     있는 사실을 표면에서만 잃는다 — 소비자가 member를 구분하거나 deep link를
+         *     만들 수 없다.
          */
         PipelineProviderDatasetIdentityRecord: {
             /** Dataset Key */
             dataset_key: string;
+            /** Operation Key */
+            operation_key: string;
             /**
              * Operation Member Id
              * Format: uuid
@@ -10845,13 +10848,15 @@ export interface components {
             operation_member_id: string;
             /** Provider */
             provider: string;
+            /** Provider Dataset Id */
+            provider_dataset_id: number;
             /**
              * Status
              * @enum {string}
              */
             status: "queued" | "running" | "done" | "failed" | "cancelled";
             /** Sync Scope */
-            sync_scope: string | null;
+            sync_scope: string;
         };
         /**
          * PipelineScheduleClaimResolutionRequest
@@ -11370,15 +11375,18 @@ export interface components {
         };
         /**
          * ProviderDatasetScope
-         * @description 특정 provider/dataset 자체 갱신 scope.
+         * @description 특정 영속 dataset membership의 직접 갱신 scope.
+         *
+         *     자연키는 API 경계에 다시 노출하지 않는다. ``provider_dataset_id``와 정규
+         *     ``sync_scope``와 ``operation_key``는 이 요청의 immutable member identity다.
          */
         ProviderDatasetScope: {
-            /** Dataset Key */
-            dataset_key: string;
-            /** Provider */
-            provider: string;
+            /** Operation Key */
+            operation_key: string;
+            /** Provider Dataset Id */
+            provider_dataset_id: number;
             /** Sync Scope */
-            sync_scope?: string | null;
+            sync_scope: string;
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -11468,8 +11476,11 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
-            /** Dataset Key */
-            dataset_key: string;
+            /**
+             * Dataset Key
+             * @description provider_datasets join에서만 얻는 표시용 dataset key.
+             */
+            dataset_key?: string | null;
             /** Enabled */
             enabled: boolean;
             /** Max Concurrent */
@@ -11484,8 +11495,16 @@ export interface components {
             min_interval_seconds?: number | null;
             /** Optimal Interval Seconds */
             optimal_interval_seconds?: number | null;
-            /** Provider */
-            provider: string;
+            /**
+             * Provider
+             * @description provider_datasets join에서만 얻는 표시용 provider.
+             */
+            provider?: string | null;
+            /**
+             * Provider Dataset Id
+             * @description 정책 저장·변경의 유일한 canonical provider dataset 식별자.
+             */
+            provider_dataset_id: number;
             /** Rate Limit Source */
             rate_limit_source: {
                 [key: string]: unknown;
@@ -11575,6 +11594,8 @@ export interface components {
             last_failure_at: string | null;
             /** Last Success At */
             last_success_at: string | null;
+            /** Operation Key */
+            operation_key: string;
             /** Provider */
             provider: string;
             /** Status */
@@ -12384,6 +12405,8 @@ export interface components {
             item_count: number;
             /** Provider */
             provider: string | null;
+            /** Provider Dataset Id */
+            provider_dataset_id: number | null;
             /** Source Id */
             source_id: string | null;
             /** Source Name */
@@ -12479,6 +12502,8 @@ export interface components {
             place_name: string;
             /** Provider */
             provider: string | null;
+            /** Provider Dataset Id */
+            provider_dataset_id: number | null;
             /**
              * Reuse Policy
              * @enum {string}
@@ -12927,32 +12952,22 @@ export interface components {
             confidence?: number | null;
             /** Dataset Key */
             dataset_key: string;
-            /** Expires At */
-            expires_at?: string | null;
             /** Fetched At */
             fetched_at?: string | null;
             /** Imported At */
             imported_at?: string | null;
-            /** Is Primary Source */
-            is_primary_source?: boolean | null;
             /** Linked At */
             linked_at?: string | null;
             /** Match Method */
             match_method?: string | null;
+            /** Observed At */
+            observed_at?: string | null;
             /** Provider */
             provider: string;
-            /** Raw Address */
-            raw_address?: string | null;
             /** Raw Data */
             raw_data: {
                 [key: string]: unknown;
             };
-            /** Raw Latitude */
-            raw_latitude?: number | null;
-            /** Raw Longitude */
-            raw_longitude?: number | null;
-            /** Raw Name */
-            raw_name?: string | null;
             /** Raw Payload Hash */
             raw_payload_hash: string;
             /** Source Entity Id */
@@ -12963,8 +12978,6 @@ export interface components {
             source_record_key: string;
             /** Source Role */
             source_role?: string | null;
-            /** Source Version */
-            source_version?: string | null;
         };
         /** RuleApplyData */
         RuleApplyData: {
@@ -13022,6 +13035,8 @@ export interface components {
             last_failure_at: string | null;
             /** Last Success At */
             last_success_at: string | null;
+            /** Operation Key */
+            operation_key: string;
             /** Status */
             status: string;
             /** Sync Scope */
@@ -13754,8 +13769,7 @@ export interface operations {
                 theme_id?: string | null;
                 theme_slug?: string | null;
                 source_id?: string | null;
-                provider?: string | null;
-                dataset_key?: string | null;
+                provider_dataset_id?: number | null;
                 enabled?: boolean | null;
                 limit?: number;
             };
@@ -13932,8 +13946,7 @@ export interface operations {
     list_admin_curated_sources_route_v1_admin_curated_sources_get: {
         parameters: {
             query?: {
-                provider?: string | null;
-                dataset_key?: string | null;
+                provider_dataset_id?: number | null;
                 provider_status?: ("implemented" | "provider_needed" | "manual_only" | "deprecated") | null;
                 limit?: number;
             };
@@ -14205,7 +14218,7 @@ export interface operations {
                 visibility?: ("admin_only" | "public") | null;
                 theme_slug?: string | null;
                 edition_key?: string | null;
-                provider?: string | null;
+                provider_dataset_id?: number | null;
                 q?: string | null;
                 include_archived?: boolean;
                 page_size?: number;
@@ -14899,10 +14912,8 @@ export interface operations {
                 category?: string[] | null;
                 /** @description feature status 반복 필터. 기본 active. */
                 status?: string[] | null;
-                /** @description primary provider 반복 필터 */
-                provider?: string[] | null;
-                /** @description primary dataset_key 반복 필터 */
-                dataset_key?: string[] | null;
+                /** @description primary provider dataset canonical ID 필터 */
+                provider_dataset_id?: number | null;
                 has_coord?: boolean | null;
                 has_issue?: boolean | null;
                 issue_type?: string[] | null;
@@ -15176,8 +15187,7 @@ export interface operations {
                 theme_id?: string | null;
                 theme_slug?: string | null;
                 source_id?: string | null;
-                provider?: string | null;
-                dataset_key?: string | null;
+                provider_dataset_id?: number | null;
                 curation_status?: ("candidate" | "curated" | "rejected" | "archived") | null;
                 region_code?: string | null;
                 sido_code?: string | null;
@@ -16464,7 +16474,7 @@ export interface operations {
             query?: {
                 kind?: string[] | null;
                 status?: string[] | null;
-                provider?: string | null;
+                provider_dataset_id?: number | null;
                 location?: string | null;
                 registered_by?: string | null;
                 q?: string | null;
@@ -16714,8 +16724,7 @@ export interface operations {
             query?: {
                 status?: ("open" | "acknowledged" | "resolved" | "ignored") | null;
                 issue_type?: string | null;
-                provider?: string | null;
-                dataset_key?: string | null;
+                provider_dataset_id?: number | null;
                 severity?: ("info" | "warning" | "error" | "critical") | null;
                 feature_id?: string | null;
                 /** @description message/feature_id/source_record_key 부분일치(ILIKE). */
@@ -16902,8 +16911,7 @@ export interface operations {
         parameters: {
             query?: {
                 status?: ("uploading" | "uploaded" | "validating" | "validated" | "validation_failed" | "loading" | "loaded" | "load_failed" | "deleting" | "cancelled") | null;
-                provider?: string | null;
-                dataset_key?: string | null;
+                provider_dataset_id?: number | null;
                 page_size?: number;
                 cursor?: string | null;
             };
@@ -17979,8 +17987,7 @@ export interface operations {
     list_curated_sources_route_v1_curated_sources_get: {
         parameters: {
             query?: {
-                provider?: string | null;
-                dataset_key?: string | null;
+                provider_dataset_id?: number | null;
                 provider_status?: ("implemented" | "provider_needed" | "manual_only" | "deprecated") | null;
                 limit?: number;
             };
@@ -18065,7 +18072,7 @@ export interface operations {
             query?: {
                 theme_slug?: string | null;
                 edition_key?: string | null;
-                provider?: string | null;
+                provider_dataset_id?: number | null;
                 q?: string | null;
                 min_lon?: number | null;
                 min_lat?: number | null;
@@ -18114,7 +18121,7 @@ export interface operations {
             query?: {
                 theme_slug?: string | null;
                 edition_key?: string | null;
-                provider?: string | null;
+                provider_dataset_id?: number | null;
                 q?: string | null;
                 page_size?: number;
                 cursor?: string | null;
@@ -18298,7 +18305,7 @@ export interface operations {
                 kind?: string[] | null;
                 /** @description category code 필터 (반복 가능). 미지정 시 전체. */
                 category?: string[] | null;
-                /** @description primary provider(소스) 필터 (반복 가능). 미지정 시 전체. primary source(provider_sync.is_primary_source) 기준. */
+                /** @description primary provider(소스) 필터 (반복 가능). 미지정 시 전체. source_role='primary' 기준. */
                 provider?: string[] | null;
                 /** @description 페이지 크기. */
                 page_size?: number;
@@ -19444,8 +19451,7 @@ export interface operations {
                 status?: ("open" | "acknowledged" | "resolved" | "ignored") | null;
                 severity?: ("info" | "warning" | "error" | "critical") | null;
                 violation_type?: string | null;
-                provider?: string | null;
-                dataset_key?: string | null;
+                provider_dataset_id?: number | null;
                 feature_id?: string | null;
                 page_size?: number;
                 cursor?: string | null;
@@ -19806,18 +19812,100 @@ export interface operations {
             };
         };
     };
-    get_dataset_detail_v1_ops_datasets_detail_get: {
+    put_dataset_refresh_policy_v1_ops_datasets_refresh_policy_put: {
         parameters: {
             query: {
-                provider: string;
-                dataset_key: string;
+                provider_dataset_id: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProviderRefreshPolicyUpsertRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpsDatasetRefreshPolicyResponse"];
+                };
+            };
+            /** @description X-Kor-Travel-Map-Ops-Token 누락 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description token 불일치 또는 token에 결박되지 않은 scope/method/exact path 요청 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description canonical provider_dataset_id 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description revision CAS 불일치·소진, source_kind 변경, 카탈로그에서 제거된 orphan row, 또는 비활성(is_active=false) dataset. 현재 record/revision 또는 mutation_disabled_reason 포함. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProviderRefreshPolicyConflictProblem"];
+                };
+            };
+            /** @description X-Kor-Travel-Map-Ops-Scope 누락 또는 알 수 없는 scope */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_dataset_detail_v1_ops_datasets__provider_dataset_id__get: {
+        parameters: {
+            query: {
                 sync_scope: string;
+                /** @description exact membership의 operation. 주면 그 membership 하나로 좁힌다. 생략하면 scope 안의 모든 operation을 롤업해 보여 준다. */
+                operation_key?: string | null;
             };
             header?: {
                 /** @description service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다. */
                 "X-Kor-Travel-Map-Ops-Scope"?: string | null;
             };
-            path?: never;
+            path: {
+                provider_dataset_id: number;
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -19878,14 +19966,17 @@ export interface operations {
             };
         };
     };
-    post_dataset_preview_v1_ops_datasets_preview_post: {
+    post_dataset_preview_v1_ops_datasets__provider_dataset_id__preview_post: {
         parameters: {
             query: {
-                provider: string;
-                dataset_key: string;
+                sync_scope: string;
+                /** @description exact membership의 operation. 주면 그 dataset/scope에 실재하는 operation인지 검증한다 — 콘솔이 보내는 축을 서버가 조용히 버리면 형제 operation을 고른 것이 아무 효과도 내지 않는다. */
+                operation_key?: string | null;
             };
             header?: never;
-            path?: never;
+            path: {
+                provider_dataset_id: number;
+            };
             cookie?: never;
         };
         requestBody: {
@@ -19950,87 +20041,6 @@ export interface operations {
             };
             /** @description fixture preview cooperative timeout */
             504: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-        };
-    };
-    put_dataset_refresh_policy_v1_ops_datasets_refresh_policy_put: {
-        parameters: {
-            query: {
-                provider: string;
-                dataset_key: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ProviderRefreshPolicyUpsertRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OpsDatasetRefreshPolicyResponse"];
-                };
-            };
-            /** @description X-Kor-Travel-Map-Ops-Token 누락 */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            /** @description token 불일치 또는 token에 결박되지 않은 scope/method/exact path 요청 */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            /** @description dataset 없음 */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            /** @description revision CAS 불일치·소진, source_kind 변경 또는 카탈로그에서 제거된 orphan row. 현재 record/revision 또는 mutation_disabled_reason 포함. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProviderRefreshPolicyConflictProblem"];
-                };
-            };
-            /** @description X-Kor-Travel-Map-Ops-Scope 누락 또는 알 수 없는 scope */
-            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -20289,9 +20299,10 @@ export interface operations {
             query?: {
                 job_id?: string | null;
                 level?: ("debug" | "info" | "warning" | "error" | "critical") | null;
-                provider?: string | null;
-                dataset_key?: string | null;
+                provider_dataset_id?: number | null;
                 sync_scope?: string | null;
+                /** @description exact membership의 operation. ID query와 함께 주어야 한다. 생략하면 그 dataset/scope의 모든 operation event를 함께 본다. */
+                operation_key?: string | null;
                 page_size?: number;
                 cursor?: string | null;
             };
@@ -20356,10 +20367,11 @@ export interface operations {
             query?: {
                 kind?: ("import_job" | "update_request") | null;
                 status?: ("queued" | "running" | "done" | "failed" | "cancelled") | null;
-                provider?: string | null;
-                dataset_key?: string | null;
-                /** @description provider+dataset exact pair의 논리 scope. 두 query를 함께 주어야 하며 기본 state는 dataset_wide/NULL 저장 표현을 같은 이력으로 조회한다. */
+                provider_dataset_id?: number | null;
+                /** @description canonical provider dataset의 논리 scope. ID query와 함께 주어야 한다. */
                 sync_scope?: string | null;
+                /** @description exact membership의 operation. ID query와 함께 주어야 한다. 생략하면 그 dataset/scope의 모든 operation을 함께 조회한다 — membership identity는 triple이므로(ADR-088) 형제 operation을 가르려면 이 값이 필요하다. */
+                operation_key?: string | null;
                 load_batch_id?: string | null;
                 parent_job_id?: string | null;
                 created_from?: string | null;
@@ -21517,6 +21529,8 @@ export interface operations {
                 dataset_key?: string | null;
                 /** @description sync_scope 필터 */
                 sync_scope?: string | null;
+                /** @description operation_key 필터 */
+                operation_key?: string | null;
             };
             header?: never;
             path: {

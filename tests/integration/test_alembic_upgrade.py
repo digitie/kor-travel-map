@@ -245,18 +245,9 @@ _UNCOMPARED_INDEX_CONTRACTS: dict[
         ),
         "deleted_at IS NULL AND status = 'active' AND coord IS NOT NULL",
     ),
-    ("provider_sync", "idx_source_records_kma_alert_history"): (
-        False,
-        (
-            "provider ASC NULLS LAST",
-            "dataset_key ASC NULLS LAST",
-            "source_entity_type ASC NULLS LAST",
-            "fetched_at DESC NULLS FIRST",
-            "source_record_key ASC NULLS LAST",
-        ),
-        "provider = 'python-kma-api' AND dataset_key = 'kma_weather_alerts' "
-        "AND source_entity_type = 'weather_alert'",
-    ),
+    # T-VN-33(0091)이 ``idx_source_records_kma_alert_history``를 대체 없이 drop했다
+    # — 술어가 잡던 provider/dataset_key/source_entity_type 사본이 모두 사라져
+    # partial index 자체가 성립하지 않는다. 계약도 함께 사라진다.
 }
 
 
@@ -494,7 +485,11 @@ async def test_alembic_coord_precision_trigger_defaults_for_coord(
 async def test_alembic_creates_source_tables(
     pg_engine_with_migrations: AsyncEngine,
 ) -> None:
-    """provider sync의 entity / observation / link / cursor 테이블을 생성한다."""
+    """provider sync의 catalog / entity / observation / link / cursor 테이블.
+
+    T-VN-33(0089~0091): dataset identity 정본이 ``provider_datasets`` 3종 catalog로
+    올라오고, entity의 현재 record 포인터는 ``source_entity_heads``로 분리됐다.
+    """
     async with pg_engine_with_migrations.connect() as conn:
         result = await conn.execute(
             text(
@@ -507,8 +502,12 @@ async def test_alembic_creates_source_tables(
     assert tables == [
         "notice_lifecycle_scopes",
         "notice_lineage_states",
+        "provider_dataset_operation_scopes",
+        "provider_dataset_operations",
+        "provider_datasets",
         "provider_sync_state",
         "source_entities",
+        "source_entity_heads",
         "source_links",
         "source_records",
     ]
@@ -1060,3 +1059,67 @@ async def test_alembic_security_table_checks_reject_invalid_rows(
             with pytest.raises(IntegrityError):
                 async with conn.begin_nested():
                     await conn.execute(text(statement))
+
+
+async def test_alembic_head_primary_keys_match_orm_declarations(
+    pg_engine_with_migrations: AsyncEngine,
+) -> None:
+    """모든 mapped table의 ORM PK가 alembic head의 PK와 **열 집합까지 같다**.
+
+    ORM이 DB보다 **좁은** PK를 선언하면 SQLAlchemy identity map이 빠진 열만
+    다른 두 행을 같은 객체로 접어, 뒤에 읽은 행이 앞의 행을 조용히 덮는다.
+    실측 사례: ``provider_dataset_operation_scopes``의 DB PK는 triple인데 ORM은
+    ``(provider_dataset_id, sync_scope)`` 2열만 선언하고 있었다 — 그 조합을
+    막아 주던 것은 같은 테이블의 refresh-only CHECK뿐이었고, 그 의존은 어디에도
+    적혀 있지 않았다.
+
+    반대로 ORM이 **넓은** PK를 선언해도 flush 시 DB가 거부하지 않아 조용히
+    어긋나므로, 포함이 아니라 동치로 잡는다.
+    """
+
+    from kortravelmap.infra.models import Base
+
+    mapped = {
+        (table.schema, table.name): {
+            column.name for column in table.primary_key.columns
+        }
+        # ``sorted_tables``는 topological 정렬을 시도하다 상호 FK 순환에서
+        # SAWarning을 낸다(이 저장소는 경고를 오류로 승격한다). PK 비교에 순서는
+        # 필요 없으므로 정렬하지 않은 매핑을 그대로 쓴다.
+        for table in Base.metadata.tables.values()
+    }
+    assert mapped, "ORM metadata에 mapped table이 없다"
+
+    async with pg_engine_with_migrations.connect() as conn:
+        rows = (
+            await conn.execute(
+                text(
+                    """
+                    SELECT namespace.nspname AS schema_name,
+                           relation.relname AS table_name,
+                           attribute.attname AS column_name
+                    FROM pg_catalog.pg_constraint AS constraint_row
+                    JOIN pg_catalog.pg_class AS relation
+                      ON relation.oid = constraint_row.conrelid
+                    JOIN pg_catalog.pg_namespace AS namespace
+                      ON namespace.oid = relation.relnamespace
+                    JOIN LATERAL unnest(constraint_row.conkey) AS key(attnum) ON true
+                    JOIN pg_catalog.pg_attribute AS attribute
+                      ON attribute.attrelid = relation.oid
+                     AND attribute.attnum = key.attnum
+                    WHERE constraint_row.contype = 'p'
+                    """
+                )
+            )
+        ).all()
+
+    live: dict[tuple[str, str], set[str]] = {}
+    for row in rows:
+        live.setdefault((row.schema_name, row.table_name), set()).add(row.column_name)
+
+    mismatched = {
+        f"{schema}.{name}": {"orm": sorted(columns), "db": sorted(live[(schema, name)])}
+        for (schema, name), columns in mapped.items()
+        if (schema, name) in live and live[(schema, name)] != columns
+    }
+    assert mismatched == {}, f"ORM PK가 DB PK와 다르다: {mismatched}"

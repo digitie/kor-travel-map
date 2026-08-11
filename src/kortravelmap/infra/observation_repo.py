@@ -6,7 +6,6 @@ import base64
 import json
 from dataclasses import dataclass
 from datetime import datetime
-from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Final
 
 from sqlalchemy import text
@@ -36,21 +35,15 @@ class FeatureObservation:
     first_seen_at: datetime
     entity_last_seen_at: datetime
     source_record_key: str
-    source_version: str | None
-    raw_name: str | None
-    raw_address: str | None
-    raw_longitude: Decimal | None
-    raw_latitude: Decimal | None
     raw_data: dict[str, Any]
     raw_payload_hash: str
     fetched_at: datetime
     imported_at: datetime
-    record_last_seen_at: datetime
+    observed_at: datetime
     expires_at: datetime | None
     source_role: str
     match_method: str
     confidence: int
-    is_primary_source: bool
     linked_at: datetime
     is_current: bool
 
@@ -66,30 +59,24 @@ class ObservationHistoryPage:
 _OBSERVATION_COLUMNS: Final[str] = """
     sl.feature_id,
     se.source_entity_key,
-    se.provider,
-    se.dataset_key,
+    pd.provider,
+    pd.dataset_key,
     se.source_entity_type,
     se.source_entity_id,
     se.first_seen_at,
     se.last_seen_at AS entity_last_seen_at,
     sr.source_record_key,
-    sr.source_version,
-    sr.raw_name,
-    sr.raw_address,
-    sr.raw_longitude,
-    sr.raw_latitude,
     sr.raw_data,
     sr.raw_payload_hash,
     sr.fetched_at,
     sr.imported_at,
-    sr.last_seen_at AS record_last_seen_at,
-    sr.expires_at,
+    head.observed_at,
+    head.expires_at,
     sl.source_role,
     sl.match_method,
     sl.confidence,
-    sl.is_primary_source,
     sl.created_at AS linked_at,
-    (sr.source_record_key = se.current_source_record_key) AS is_current
+    (sr.source_record_key = head.current_source_record_key) AS is_current
 """
 
 _GET_CURRENT_OBSERVATIONS_SQL: Final[str] = f"""
@@ -97,12 +84,16 @@ SELECT {_OBSERVATION_COLUMNS}
 FROM provider_sync.source_links AS sl
 JOIN provider_sync.source_entities AS se
   ON se.source_entity_key = sl.source_entity_key
+JOIN provider_sync.provider_datasets AS pd
+  ON pd.provider_dataset_id = se.provider_dataset_id
+JOIN provider_sync.source_entity_heads AS head
+  ON head.source_entity_key = se.source_entity_key
 JOIN provider_sync.source_records AS sr
-  ON sr.source_record_key = se.current_source_record_key
+  ON sr.source_record_key = head.current_source_record_key
 WHERE sl.feature_id = :feature_id
 ORDER BY
-    se.provider,
-    se.dataset_key,
+    pd.provider,
+    pd.dataset_key,
     se.source_entity_type,
     se.source_entity_id,
     se.source_entity_key
@@ -113,13 +104,17 @@ SELECT {_OBSERVATION_COLUMNS}
 FROM provider_sync.source_links AS sl
 JOIN provider_sync.source_entities AS se
   ON se.source_entity_key = sl.source_entity_key
+JOIN provider_sync.provider_datasets AS pd
+  ON pd.provider_dataset_id = se.provider_dataset_id
+JOIN provider_sync.source_entity_heads AS head
+  ON head.source_entity_key = se.source_entity_key
 JOIN provider_sync.source_records AS sr
-  ON sr.source_record_key = se.current_source_record_key
+  ON sr.source_record_key = head.current_source_record_key
 WHERE sl.feature_id = ANY(CAST(:feature_ids AS text[]))
 ORDER BY
     sl.feature_id,
-    se.provider,
-    se.dataset_key,
+    pd.provider,
+    pd.dataset_key,
     se.source_entity_type,
     se.source_entity_id,
     se.source_entity_key
@@ -130,26 +125,27 @@ SELECT {_OBSERVATION_COLUMNS}
 FROM provider_sync.source_links AS sl
 JOIN provider_sync.source_entities AS se
   ON se.source_entity_key = sl.source_entity_key
+JOIN provider_sync.provider_datasets AS pd
+  ON pd.provider_dataset_id = se.provider_dataset_id
+LEFT JOIN provider_sync.source_entity_heads AS head
+  ON head.source_entity_key = se.source_entity_key
 JOIN provider_sync.source_records AS sr
   ON sr.source_entity_key = se.source_entity_key
 WHERE sl.feature_id = :feature_id
   AND se.source_entity_key = :source_entity_key
   AND (
-    CAST(:cursor_last_seen_at AS timestamptz) IS NULL
+    CAST(:cursor_fetched_at AS timestamptz) IS NULL
     OR (
-        sr.last_seen_at,
         sr.fetched_at,
         sr.imported_at,
         sr.source_record_key
     ) < (
-        CAST(:cursor_last_seen_at AS timestamptz),
         CAST(:cursor_fetched_at AS timestamptz),
         CAST(:cursor_imported_at AS timestamptz),
         CAST(:cursor_source_record_key AS text)
     )
   )
 ORDER BY
-    sr.last_seen_at DESC,
     sr.fetched_at DESC,
     sr.imported_at DESC,
     sr.source_record_key DESC
@@ -171,21 +167,15 @@ def _observation(row: Any) -> FeatureObservation:
         first_seen_at=row.first_seen_at,
         entity_last_seen_at=row.entity_last_seen_at,
         source_record_key=str(row.source_record_key),
-        source_version=row.source_version,
-        raw_name=row.raw_name,
-        raw_address=row.raw_address,
-        raw_longitude=row.raw_longitude,
-        raw_latitude=row.raw_latitude,
         raw_data=dict(raw_data),
         raw_payload_hash=str(row.raw_payload_hash),
         fetched_at=row.fetched_at,
         imported_at=row.imported_at,
-        record_last_seen_at=row.record_last_seen_at,
+        observed_at=row.observed_at,
         expires_at=row.expires_at,
         source_role=str(row.source_role),
         match_method=str(row.match_method),
         confidence=int(row.confidence),
-        is_primary_source=bool(row.is_primary_source),
         linked_at=row.linked_at,
         is_current=bool(row.is_current),
     )
@@ -197,7 +187,6 @@ def _encode_history_cursor(item: FeatureObservation) -> str:
         "feature_id": item.feature_id,
         "source_entity_key": item.source_entity_key,
         "fetched_at": item.fetched_at.isoformat(),
-        "last_seen_at": item.record_last_seen_at.isoformat(),
         "imported_at": item.imported_at.isoformat(),
         "source_record_key": item.source_record_key,
     }
@@ -213,7 +202,6 @@ def _decode_history_cursor(
 ) -> dict[str, Any]:
     empty = {
         "cursor_fetched_at": None,
-        "cursor_last_seen_at": None,
         "cursor_imported_at": None,
         "cursor_source_record_key": None,
     }
@@ -230,7 +218,6 @@ def _decode_history_cursor(
             raise ValueError
         return {
             "cursor_fetched_at": datetime.fromisoformat(payload["fetched_at"]),
-            "cursor_last_seen_at": datetime.fromisoformat(payload["last_seen_at"]),
             "cursor_imported_at": datetime.fromisoformat(payload["imported_at"]),
             "cursor_source_record_key": str(payload["source_record_key"]),
         }

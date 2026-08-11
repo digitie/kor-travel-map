@@ -599,7 +599,14 @@ item actor처럼 표현력이 더 큰 데이터가 있으면 PostgreSQL `P0001` 
 복원한 것처럼 보이면서 실제로는 데이터를 조작하게 되므로, 먼저 이력을 export하고 명시적으로
 정리해야 한다.
 
-## 2. `provider_sync.source_entities` / `provider_sync.source_records`
+## 2. `provider_sync.source_entities` / `provider_sync.source_records` (legacy, T-VN-33 이전)
+
+> 아래 SQL은 Alembic 0087까지의 historical model이다. T-VN-33 cutover 뒤의 정본은
+> ADR-088 및 `contracts/vnext/target-schema-v1.sql`이다. 최종형은
+> `provider_datasets` FK identity, immutable `source_records`,
+> `source_entity_heads(observed_at, expires_at)`, role-only `source_links`를 사용하며
+> provider/dataset·current pointer·raw-derived·legacy primary boolean 열은
+> `docs/removal-manifests/t-vn-33-source-lineage.md`에 따라 T-VN-39에서 제거한다.
 
 provider 자연 entity의 identity와 변경 불가능한 payload 관측 이력을 분리한다(ADR-063,
 alembic 0044). `source_entities`는 현재 record 포인터와 관측 수명을, `source_records`는
@@ -786,7 +793,7 @@ batch watermark 때문에 버리지 않는다. DB에 저장된 최신 event와 �
 마지막 `changed_at`(최댓값)이다. scope/member 상태가 존재하는 0046 downgrade는 이 상태를
 source row에서 무손실 복원할 수 없으므로 명시적으로 거부한다.
 
-## 3. `provider_sync.source_links`
+## 3. `provider_sync.source_links` (legacy, T-VN-33 이전)
 
 ```sql
 CREATE TABLE provider_sync.source_links (
@@ -795,7 +802,6 @@ CREATE TABLE provider_sync.source_links (
   source_role          TEXT NOT NULL,                 -- SourceRole enum
   match_method         TEXT NOT NULL,                 -- 'natural_key', 'reverse_geocode', 'place_phone_search', ...
   confidence           NUMERIC(5,2) NOT NULL,
-  is_primary_source    BOOLEAN NOT NULL DEFAULT FALSE,
   created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
 
   PRIMARY KEY (feature_id, source_entity_key),
@@ -808,11 +814,12 @@ CREATE TABLE provider_sync.source_links (
 
 CREATE INDEX idx_source_links_entity       ON provider_sync.source_links (source_entity_key);
 CREATE INDEX idx_source_links_role         ON provider_sync.source_links (source_role);
-CREATE INDEX idx_source_links_primary      ON provider_sync.source_links (feature_id) WHERE is_primary_source;
+CREATE INDEX idx_source_links_primary      ON provider_sync.source_links (feature_id)
+  WHERE source_role = 'primary';
 ```
 
 link는 payload version이 아니라 provider entity에 붙는다. 따라서 같은 entity의 payload가
-바뀌어도 Feature link 수는 늘지 않는다. `is_primary_source=true`는 Feature당 하나라는
+바뀌어도 Feature link 수는 늘지 않는다. `source_role='primary'`는 Feature당 하나라는
 제약이 없으며 MOIS와 MCST처럼 서로 다른 primary entity를 모두 보존한다. 기본 Feature 상세는
 각 link의 `source_entities.current_source_record_key`를 따라 현재 관측 전부를 반환하고,
 과거 payload는 entity별 이력 API에서만 조회한다.

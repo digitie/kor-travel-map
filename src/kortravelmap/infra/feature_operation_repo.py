@@ -26,7 +26,7 @@ from kortravelmap.core.feature_operation import (
     DagsterFeatureRunStatus,
     ExecutionState,
     FeatureOperationInvariantConflict,
-    ProviderDatasetOperationKey,
+    ProviderDatasetOperationMembership,
     TriggerKind,
 )
 from kortravelmap.infra.jobs_repo import ImportJobEvent, record_import_job_event
@@ -44,8 +44,11 @@ if TYPE_CHECKING:
 __all__ = [
     "append_dagster_feature_attempt_event",
     "ensure_dagster_feature_operation",
-    "finish_dagster_feature_pair",
+    "finish_dagster_feature_membership",
     "list_reconcilable_dagster_feature_runs",
+    "list_feature_operation_memberships",
+    "resolve_feature_operation_memberships",
+    "resolve_feature_operation_dataset_membership",
     "reconcile_dagster_feature_run",
     "record_feature_operation_invariant_conflict",
 ]
@@ -69,7 +72,7 @@ root.created_at AS root_created_at,
 root.started_at AS root_started_at,
 root.finished_at AS root_finished_at,
 root.trigger_kind,
-root.operation_registry_version,
+root.operation_key AS operation_key,
 root.cancellation_id AS root_cancellation_id
 """
 
@@ -86,8 +89,10 @@ _ROOT_WITH_MEMBERS_SQL = f"""
 SELECT
   {_ROOT_COLUMNS},
   child.job_id AS child_job_id,
-  child.provider AS child_provider,
-  child.dataset_key AS child_dataset_key,
+  child_member.import_job_dataset_id AS child_import_job_dataset_id,
+  child_member.provider_dataset_id AS child_provider_dataset_id,
+  child_member.sync_scope AS child_sync_scope,
+  child_member.operation_key AS child_operation_key,
   child.status AS child_status,
   child.progress AS child_progress,
   child.current_stage AS child_stage,
@@ -99,20 +104,23 @@ LEFT JOIN ops.import_jobs AS child
  ON child.parent_job_id = root.job_id
  AND child.kind = '{FEATURE_OPERATION_MEMBER_KIND}'
  AND child.quarantined_at IS NULL
+LEFT JOIN ops.import_job_datasets AS child_member
+  ON child_member.job_id = child.job_id
 WHERE root.kind = '{FEATURE_OPERATION_ROOT_KIND}'
   AND root.dagster_run_id = :dagster_run_id
   AND root.quarantined_at IS NULL
-ORDER BY child.provider, child.dataset_key, child.job_id
+ORDER BY child_member.provider_dataset_id, child_member.sync_scope,
+         child_member.operation_key, child.job_id
 """
 
 _INSERT_ROOT_SQL = f"""
 INSERT INTO ops.import_jobs (
   kind, payload, status, progress, current_stage, dagster_run_id,
-  trigger_kind, operation_registry_version, dagster_run_status,
+  dataset_membership_mode, trigger_kind, operation_key, dagster_run_status,
   created_at, started_at, heartbeat_at
 ) VALUES (
   '{FEATURE_OPERATION_ROOT_KIND}', '{{}}'::jsonb, :status, 0, :stage,
-  :dagster_run_id, :trigger_kind, :registry_version, :dagster_run_status,
+  :dagster_run_id, 'root', :trigger_kind, :operation_key, :dagster_run_status,
   CAST(:created_at AS timestamptz), CAST(:started_at AS timestamptz),
   CAST(:started_at AS timestamptz)
 )
@@ -123,19 +131,26 @@ RETURNING job_id
 """
 
 _INSERT_MEMBER_SQL = f"""
-INSERT INTO ops.import_jobs (
-  kind, parent_job_id, payload, status, progress, current_stage,
-  dagster_run_id, provider, dataset_key, created_at, started_at, heartbeat_at
-) VALUES (
-  '{FEATURE_OPERATION_MEMBER_KIND}', CAST(:root_job_id AS uuid), '{{}}'::jsonb,
-  :status, 0, :stage, :dagster_run_id, :provider, :dataset_key,
-  CAST(:created_at AS timestamptz), CAST(:started_at AS timestamptz),
-  CAST(:started_at AS timestamptz)
+WITH child AS (
+  INSERT INTO ops.import_jobs (
+    kind, parent_job_id, payload, status, progress, current_stage,
+    dagster_run_id, dataset_membership_mode, created_at, started_at, heartbeat_at
+  ) VALUES (
+    '{FEATURE_OPERATION_MEMBER_KIND}', CAST(:root_job_id AS uuid), '{{}}'::jsonb,
+    :status, 0, :stage, :dagster_run_id, 'single',
+    CAST(:created_at AS timestamptz), CAST(:started_at AS timestamptz),
+    CAST(:started_at AS timestamptz)
+  )
+  RETURNING job_id
+), membership AS (
+  INSERT INTO ops.import_job_datasets (
+    job_id, provider_dataset_id, sync_scope, operation_key
+  )
+  SELECT child.job_id, CAST(:provider_dataset_id AS bigint), :sync_scope, :operation_key
+  FROM child
+  RETURNING job_id
 )
-ON CONFLICT (parent_job_id, provider, dataset_key)
-  WHERE kind = '{FEATURE_OPERATION_MEMBER_KIND}' AND parent_job_id IS NOT NULL
-DO NOTHING
-RETURNING job_id
+SELECT child.job_id FROM child JOIN membership USING (job_id)
 """
 
 _ADVANCE_ROOT_SQL = """
@@ -191,7 +206,7 @@ WHERE job_id = CAST(:root_job_id AS uuid)
 RETURNING job_id
 """
 
-_FINISH_PAIR_SQL = """
+_FINISH_MEMBERSHIP_SQL = """
 UPDATE ops.import_jobs
 SET status = 'done',
     progress = 100,
@@ -201,8 +216,13 @@ SET status = 'done',
     error_message = NULL
 WHERE parent_job_id = CAST(:root_job_id AS uuid)
   AND kind = 'provider_feature_load'
-  AND provider = :provider
-  AND dataset_key = :dataset_key
+  AND EXISTS (
+    SELECT 1 FROM ops.import_job_datasets AS member
+    WHERE member.job_id = ops.import_jobs.job_id
+      AND member.provider_dataset_id = CAST(:provider_dataset_id AS bigint)
+      AND member.sync_scope = :sync_scope
+      AND member.operation_key = :operation_key
+  )
   AND status IN ('queued','running')
   AND cancellation_id IS NULL
   AND quarantined_at IS NULL
@@ -246,6 +266,44 @@ ORDER BY root.created_at ASC, root.job_id ASC
 LIMIT :limit_plus_one
 """
 
+_OPERATION_MEMBERSHIPS_SQL = """
+SELECT scope.provider_dataset_id, scope.sync_scope, scope.operation_key
+FROM provider_sync.provider_dataset_operation_scopes AS scope
+JOIN provider_sync.provider_dataset_operations AS operation
+  ON operation.provider_dataset_id = scope.provider_dataset_id
+ AND operation.operation_key = scope.operation_key
+ AND operation.operation_kind = scope.operation_kind
+JOIN provider_sync.provider_datasets AS dataset
+  ON dataset.provider_dataset_id = scope.provider_dataset_id
+WHERE operation.operation_key = :operation_key
+  AND operation.operation_kind = 'refresh'
+  AND operation.is_enabled
+  AND dataset.is_active
+ORDER BY scope.provider_dataset_id, scope.sync_scope
+"""
+
+_OPERATION_DATASET_MEMBERSHIP_SQL = """
+SELECT scope.provider_dataset_id, scope.sync_scope, scope.operation_key
+FROM provider_sync.provider_dataset_operation_scopes AS scope
+JOIN provider_sync.provider_dataset_operations AS operation
+  ON operation.provider_dataset_id = scope.provider_dataset_id
+ AND operation.operation_key = scope.operation_key
+ AND operation.operation_kind = scope.operation_kind
+JOIN provider_sync.provider_datasets AS dataset
+  ON dataset.provider_dataset_id = scope.provider_dataset_id
+WHERE operation.operation_key = :operation_key
+  AND operation.operation_kind = 'refresh'
+  AND operation.is_enabled
+  AND dataset.is_active
+  AND dataset.provider = :provider
+  AND dataset.dataset_key = :dataset_key
+  AND (
+    CAST(:sync_scope AS text) IS NULL
+    OR scope.sync_scope = CAST(:sync_scope AS text)
+  )
+ORDER BY scope.sync_scope
+"""
+
 
 def _aware(
     value: datetime | None,
@@ -274,9 +332,9 @@ def _run_id(value: str) -> str:
     return value
 
 
-def _registry_version(value: str) -> str:
+def _operation_key(value: str) -> str:
     if not value or value != value.strip():
-        raise ValueError("registry_version must be trimmed and non-empty")
+        raise ValueError("operation_key must be trimmed and non-empty")
     return value
 
 
@@ -320,12 +378,29 @@ def _validate_engine_timeline(
         )
 
 
-def _pairs(
-    values: Sequence[ProviderDatasetOperationKey],
-) -> tuple[ProviderDatasetOperationKey, ...]:
+def _memberships(
+    values: Sequence[ProviderDatasetOperationMembership],
+) -> tuple[ProviderDatasetOperationMembership, ...]:
     normalized = tuple(sorted(set(values)))
     if not normalized:
-        raise ValueError("selected_pairs must not be empty")
+        raise ValueError("selected_memberships must not be empty")
+    return normalized
+
+
+def _require_operation_memberships(
+    memberships: Sequence[ProviderDatasetOperationMembership],
+    *,
+    operation_key: str,
+) -> tuple[ProviderDatasetOperationMembership, ...]:
+    """run root의 operation과 member snapshot을 같은 exact key로 묶는다."""
+    normalized = _memberships(memberships)
+    mismatched = [
+        member
+        for member in normalized
+        if member.operation_key != operation_key
+    ]
+    if mismatched:
+        raise ValueError("selected_memberships must use the root operation_key")
     return normalized
 
 
@@ -341,6 +416,95 @@ def _validate_run_status(value: str) -> DagsterFeatureRunStatus:
     return value
 
 
+async def list_feature_operation_memberships(
+    session: AsyncSession,
+    *,
+    operation_key: str,
+) -> tuple[ProviderDatasetOperationMembership, ...]:
+    """enabled DB operation key의 canonical member snapshot을 읽는다."""
+    rows = (
+        await session.execute(
+            text(_OPERATION_MEMBERSHIPS_SQL),
+            {"operation_key": _operation_key(operation_key)},
+        )
+    ).all()
+    return tuple(
+        ProviderDatasetOperationMembership(
+            provider_dataset_id=int(row.provider_dataset_id),
+            sync_scope=str(row.sync_scope),
+            operation_key=str(row.operation_key),
+        )
+        for row in rows
+    )
+
+
+async def resolve_feature_operation_memberships(
+    session: AsyncSession,
+    *,
+    operation_key: str,
+) -> tuple[ProviderDatasetOperationMembership, ...]:
+    """scheduled dispatch 전에 active operation의 exact membership을 고정한다.
+
+    반환값은 provider/dataset 표시 자연키가 아닌
+    ``provider_dataset_id + sync_scope + operation_key``뿐이다. 호출자는 이
+    snapshot을 resource로 주입한 뒤 sync-state write와 handler dispatch에 그대로
+    사용해야 하며, 실행 중 자연키를 다시 해석해서는 안 된다.
+    """
+    return await list_feature_operation_memberships(
+        session,
+        operation_key=operation_key,
+    )
+
+
+async def resolve_feature_operation_dataset_membership(
+    session: AsyncSession,
+    *,
+    operation_key: str,
+    provider: str,
+    dataset_key: str,
+    sync_scope: str | None = None,
+) -> ProviderDatasetOperationMembership:
+    """runtime source key를 frozen canonical member로 해석한다.
+
+    이 lookup은 provider callback 경계에서만 사용하며, 자연키를 operation event나
+    root/child identity에 저장하지 않는다.
+
+    ``sync_scope``를 주지 않으면 ``(operation_key, provider, dataset_key)``가 정확히
+    한 scope 행으로 떨어져야 한다. 그 전제는 카탈로그의 일반 성질이 아니다 —
+    ``0089_tvn33_expand_seed``는 ``target_grids`` dataset에 ``dataset_wide``까지
+    함께 seed하므로 KMA 격자 dataset 3종은 dataset당 scope가 2개다. 그런 dataset을
+    지목하려면 triple의 남은 축인 ``sync_scope``까지 넘겨야 하며, 그때만 exact
+    lookup이 성립한다.
+    """
+    rows = (
+        await session.execute(
+            text(_OPERATION_DATASET_MEMBERSHIP_SQL),
+            {
+                "operation_key": _operation_key(operation_key),
+                "provider": provider,
+                "dataset_key": dataset_key,
+                "sync_scope": sync_scope,
+            },
+        )
+    ).all()
+    if len(rows) != 1:
+        raise FeatureOperationInvariantConflict(
+            "runtime dataset does not resolve to exactly one operation membership",
+            dagster_run_id="unknown",
+            details={
+                "operation_key": operation_key,
+                "sync_scope": sync_scope,
+                "match_count": len(rows),
+            },
+        )
+    row = rows[0]
+    return ProviderDatasetOperationMembership(
+        provider_dataset_id=int(row.provider_dataset_id),
+        sync_scope=str(row.sync_scope),
+        operation_key=str(row.operation_key),
+    )
+
+
 def _operation(rows: Sequence[Any]) -> DagsterFeatureOperation:
     if not rows:
         raise FeatureOperationInvariantConflict(
@@ -351,9 +515,11 @@ def _operation(rows: Sequence[Any]) -> DagsterFeatureOperation:
     members = tuple(
         DagsterFeatureOperationMember(
             job_id=str(row.child_job_id),
-            pair=ProviderDatasetOperationKey(
-                provider=str(row.child_provider),
-                dataset_key=str(row.child_dataset_key),
+            import_job_dataset_id=str(row.child_import_job_dataset_id),
+            membership=ProviderDatasetOperationMembership(
+                provider_dataset_id=int(row.child_provider_dataset_id),
+                sync_scope=str(row.child_sync_scope),
+                operation_key=str(row.child_operation_key),
             ),
             status=cast(ExecutionState, str(row.child_status)),
             progress=int(row.child_progress),
@@ -375,7 +541,7 @@ def _operation(rows: Sequence[Any]) -> DagsterFeatureOperation:
         started_at=root.root_started_at,
         finished_at=root.root_finished_at,
         trigger_kind=_validate_trigger(str(root.trigger_kind)),
-        registry_version=str(root.operation_registry_version),
+        operation_key=str(root.operation_key),
         members=members,
     )
 
@@ -400,22 +566,22 @@ def _raise_identity_conflict(
     operation: DagsterFeatureOperation,
     *,
     trigger_kind: TriggerKind,
-    registry_version: str,
-    selected_pairs: tuple[ProviderDatasetOperationKey, ...],
+    operation_key: str,
+    selected_memberships: tuple[ProviderDatasetOperationMembership, ...],
     engine_created_at: datetime,
     engine_started_at: datetime | None,
 ) -> None:
-    stored_pairs = tuple(member.pair for member in operation.members)
+    stored_memberships = tuple(member.membership for member in operation.members)
     mismatches: dict[str, Any] = {}
     if operation.trigger_kind != trigger_kind:
         mismatches["trigger_kind"] = {
             "expected": trigger_kind,
             "actual": operation.trigger_kind,
         }
-    if operation.registry_version != registry_version:
-        mismatches["registry_version"] = {
-            "expected": registry_version,
-            "actual": operation.registry_version,
+    if operation.operation_key != operation_key:
+        mismatches["operation_key"] = {
+            "expected": operation_key,
+            "actual": operation.operation_key,
         }
     if operation.created_at != engine_created_at:
         mismatches["engine_created_at"] = {
@@ -431,15 +597,23 @@ def _raise_identity_conflict(
             "expected": engine_started_at.isoformat(),
             "actual": operation.started_at.isoformat(),
         }
-    if stored_pairs != selected_pairs:
-        mismatches["selected_pairs"] = {
+    if stored_memberships != selected_memberships:
+        mismatches["selected_memberships"] = {
             "expected": [
-                {"provider": pair.provider, "dataset_key": pair.dataset_key}
-                for pair in selected_pairs
+                {
+                    "provider_dataset_id": member.provider_dataset_id,
+                    "sync_scope": member.sync_scope,
+                    "operation_key": member.operation_key,
+                }
+                for member in selected_memberships
             ],
             "actual": [
-                {"provider": pair.provider, "dataset_key": pair.dataset_key}
-                for pair in stored_pairs
+                {
+                    "provider_dataset_id": member.provider_dataset_id,
+                    "sync_scope": member.sync_scope,
+                    "operation_key": member.operation_key,
+                }
+                for member in stored_memberships
             ],
         }
     if mismatches:
@@ -456,8 +630,8 @@ async def ensure_dagster_feature_operation(
     *,
     dagster_run_id: str,
     trigger_kind: str,
-    selected_pairs: Sequence[ProviderDatasetOperationKey],
-    registry_version: str,
+    selected_memberships: Sequence[ProviderDatasetOperationMembership],
+    operation_key: str,
     engine_created_at: datetime,
     engine_started_at: datetime | None,
     observed_status: str,
@@ -465,8 +639,11 @@ async def ensure_dagster_feature_operation(
     """권위 있는 run selection 전체를 한 transaction에서 생성/전진한다."""
     normalized_run_id = _run_id(dagster_run_id)
     normalized_trigger = _validate_trigger(trigger_kind)
-    normalized_registry = _registry_version(registry_version)
-    normalized_pairs = _pairs(selected_pairs)
+    normalized_operation_key = _operation_key(operation_key)
+    normalized_memberships = _require_operation_memberships(
+        selected_memberships,
+        operation_key=normalized_operation_key,
+    )
     created_at = _aware(
         engine_created_at,
         name="engine_created_at",
@@ -515,7 +692,7 @@ async def ensure_dagster_feature_operation(
                     "stage": stage,
                     "dagster_run_id": normalized_run_id,
                     "trigger_kind": normalized_trigger,
-                    "registry_version": normalized_registry,
+                    "operation_key": normalized_operation_key,
                     "dagster_run_status": status,
                     "created_at": created_at,
                     "started_at": started_at if base_status == "running" else None,
@@ -542,7 +719,7 @@ async def ensure_dagster_feature_operation(
     if inserted:
         member_status = "queued" if status in _QUEUED_DAGSTER_STATUSES else "running"
         member_stage = "queued" if member_status == "queued" else "loading"
-        for pair in normalized_pairs:
+        for membership in normalized_memberships:
             await session.execute(
                 text(_INSERT_MEMBER_SQL),
                 {
@@ -550,8 +727,9 @@ async def ensure_dagster_feature_operation(
                     "status": member_status,
                     "stage": member_stage,
                     "dagster_run_id": normalized_run_id,
-                    "provider": pair.provider,
-                    "dataset_key": pair.dataset_key,
+                    "provider_dataset_id": membership.provider_dataset_id,
+                    "sync_scope": membership.sync_scope,
+                    "operation_key": membership.operation_key,
                     "created_at": created_at,
                     "started_at": started_at if member_status == "running" else None,
                 },
@@ -561,8 +739,8 @@ async def ensure_dagster_feature_operation(
     _raise_identity_conflict(
         operation,
         trigger_kind=normalized_trigger,
-        registry_version=normalized_registry,
-        selected_pairs=normalized_pairs,
+        operation_key=normalized_operation_key,
+        selected_memberships=normalized_memberships,
         engine_created_at=created_at,
         engine_started_at=started_at,
     )
@@ -642,11 +820,11 @@ async def ensure_dagster_feature_operation(
     )
 
 
-async def finish_dagster_feature_pair(
+async def finish_dagster_feature_membership(
     session: AsyncSession,
     *,
     dagster_run_id: str,
-    pair: ProviderDatasetOperationKey,
+    membership: ProviderDatasetOperationMembership,
 ) -> DagsterFeatureOperationMutation:
     normalized_run_id = _run_id(dagster_run_id)
     await lock_pipeline_lineage_mutation(session)
@@ -673,30 +851,35 @@ async def finish_dagster_feature_pair(
         return DagsterFeatureOperationMutation(
             outcome="blocked", operation=operation, block_reason="terminal"
         )
-    selected = {member.pair: member for member in operation.members}
-    member = selected.get(pair)
+    selected = {member.membership: member for member in operation.members}
+    member = selected.get(membership)
     if member is None:
         raise FeatureOperationInvariantConflict(
-            "pair is not part of the frozen run selection",
+            "membership is not part of the frozen run selection",
             dagster_run_id=normalized_run_id,
             root_job_id=root_job_id,
-            details={"provider": pair.provider, "dataset_key": pair.dataset_key},
+            details={
+                "provider_dataset_id": membership.provider_dataset_id,
+                "sync_scope": membership.sync_scope,
+                "operation_key": membership.operation_key,
+            },
         )
     if member.status == "done":
         return DagsterFeatureOperationMutation(outcome="noop", operation=operation)
     changed = (
         await session.execute(
-            text(_FINISH_PAIR_SQL),
+            text(_FINISH_MEMBERSHIP_SQL),
             {
                 "root_job_id": root_job_id,
-                "provider": pair.provider,
-                "dataset_key": pair.dataset_key,
+                "provider_dataset_id": membership.provider_dataset_id,
+                "sync_scope": membership.sync_scope,
+                "operation_key": membership.operation_key,
             },
         )
     ).one_or_none()
     if changed is None:
         raise FeatureOperationInvariantConflict(
-            "pair cannot be completed from its current state",
+            "membership cannot be completed from its current state",
             dagster_run_id=normalized_run_id,
             root_job_id=root_job_id,
         )
@@ -713,7 +896,7 @@ async def append_dagster_feature_attempt_event(
     session: AsyncSession,
     *,
     dagster_run_id: str,
-    pair: ProviderDatasetOperationKey,
+    membership: ProviderDatasetOperationMembership,
     attempt_number: int,
     outcome: str,
     error: Mapping[str, Any] | None,
@@ -721,10 +904,12 @@ async def append_dagster_feature_attempt_event(
     if attempt_number < 1:
         raise ValueError("attempt_number must be positive")
     operation = await _load_operation(session, _run_id(dagster_run_id))
-    member = next((item for item in operation.members if item.pair == pair), None)
+    member = next(
+        (item for item in operation.members if item.membership == membership), None
+    )
     if member is None:
         raise FeatureOperationInvariantConflict(
-            "attempt pair is not part of the frozen run selection",
+            "attempt membership is not part of the frozen run selection",
             dagster_run_id=operation.dagster_run_id,
             root_job_id=operation.root_job_id,
         )
@@ -738,9 +923,11 @@ async def append_dagster_feature_attempt_event(
             "attempt_number": attempt_number,
             "outcome": outcome,
             "error": dict(error) if error is not None else None,
+            "provider_dataset_id": membership.provider_dataset_id,
+            "sync_scope": membership.sync_scope,
+            "operation_key": membership.operation_key,
         },
-        provider=pair.provider,
-        dataset_key=pair.dataset_key,
+        import_job_dataset_id=member.import_job_dataset_id,
         stage=member.current_stage,
     )
     if event is None:
@@ -758,8 +945,8 @@ async def reconcile_dagster_feature_run(
     dagster_run_id: str,
     trigger_kind: str,
     terminal_status: str,
-    selected_pairs: Sequence[ProviderDatasetOperationKey],
-    registry_version: str,
+    selected_memberships: Sequence[ProviderDatasetOperationMembership],
+    operation_key: str,
     engine_created_at: datetime,
     engine_started_at: datetime | None,
     engine_finished_at: datetime,
@@ -770,7 +957,6 @@ async def reconcile_dagster_feature_run(
     terminal = _validate_run_status(terminal_status)
     if terminal not in DAGSTER_FEATURE_TERMINAL_STATUS_VALUES:
         raise ValueError("terminal_status must be SUCCESS, FAILURE, or CANCELED")
-    normalized_pairs = _pairs(selected_pairs)
     created_at = _aware(
         engine_created_at,
         name="engine_created_at",
@@ -790,7 +976,11 @@ async def reconcile_dagster_feature_run(
         name="engine_finished_at",
         dagster_run_id=normalized_run_id,
     )
-    normalized_registry = _registry_version(registry_version)
+    normalized_operation_key = _operation_key(operation_key)
+    normalized_memberships = _require_operation_memberships(
+        selected_memberships,
+        operation_key=normalized_operation_key,
+    )
     _validate_engine_timeline(
         dagster_run_id=normalized_run_id,
         created_at=created_at,
@@ -822,32 +1012,40 @@ async def reconcile_dagster_feature_run(
         return DagsterFeatureOperationMutation(
             outcome="blocked", operation=operation, block_reason="terminal"
         )
-    stored_pairs = tuple(member.pair for member in operation.members)
+    stored_memberships = tuple(member.membership for member in operation.members)
     mismatches: dict[str, Any] = {}
     if operation.trigger_kind != normalized_trigger:
         mismatches["trigger_kind"] = {
             "expected": normalized_trigger,
             "actual": operation.trigger_kind,
         }
-    if operation.registry_version != normalized_registry:
-        mismatches["registry_version"] = {
-            "expected": normalized_registry,
-            "actual": operation.registry_version,
+    if operation.operation_key != normalized_operation_key:
+        mismatches["operation_key"] = {
+            "expected": normalized_operation_key,
+            "actual": operation.operation_key,
         }
     if operation.created_at != created_at:
         mismatches["engine_created_at"] = {
             "expected": created_at.isoformat(),
             "actual": operation.created_at.isoformat(),
         }
-    if stored_pairs != normalized_pairs:
-        mismatches["selected_pairs"] = {
+    if stored_memberships != normalized_memberships:
+        mismatches["selected_memberships"] = {
             "expected": [
-                {"provider": pair.provider, "dataset_key": pair.dataset_key}
-                for pair in normalized_pairs
+                {
+                    "provider_dataset_id": member.provider_dataset_id,
+                    "sync_scope": member.sync_scope,
+                    "operation_key": member.operation_key,
+                }
+                for member in normalized_memberships
             ],
             "actual": [
-                {"provider": pair.provider, "dataset_key": pair.dataset_key}
-                for pair in stored_pairs
+                {
+                    "provider_dataset_id": member.provider_dataset_id,
+                    "sync_scope": member.sync_scope,
+                    "operation_key": member.operation_key,
+                }
+                for member in stored_memberships
             ],
         }
     all_stored_starts = (
@@ -1024,8 +1222,9 @@ async def reconcile_dagster_feature_run(
                 "actual": [
                     {
                         "job_id": member.job_id,
-                        "provider": member.pair.provider,
-                        "dataset_key": member.pair.dataset_key,
+                        "provider_dataset_id": member.membership.provider_dataset_id,
+                        "sync_scope": member.membership.sync_scope,
+                        "operation_key": member.membership.operation_key,
                         "status": member.status,
                     }
                     for member in incomplete_members

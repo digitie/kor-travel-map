@@ -6,6 +6,7 @@ import hashlib
 from collections.abc import AsyncIterator
 from dataclasses import replace
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -21,11 +22,13 @@ from kortravelmap.infra.jobs_repo import ImportJob
 from kortravelmap.infra.offline_upload_repo import (
     OfflineUpload,
     OfflineUploadPage,
+    OfflineUploadScopeOperationUnresolved,
     OfflineUploadStatusConflict,
 )
 from kortravelmap.offline_upload import validate_offline_tabular_upload
 from kortravelmap.settings import KorTravelMapSettings
 from pydantic import SecretStr
+from sqlalchemy.exc import IntegrityError
 
 from kortravelmap.api.app import create_app
 from kortravelmap.api.db import get_session
@@ -263,6 +266,20 @@ def client(
     )
 
 
+# T-VN-33 (ADR-088): offline upload identity는
+# provider_dataset_id + sync_scope + operation_key다. 자연키 사본(provider/
+# dataset_key)은 스키마에서 삭제됐고, operation_key는 scope에서 유도돼 NOT NULL로 든다.
+_PROVIDER_DATASET_ID: int = 7
+_SYNC_SCOPE: str = "dataset_wide"
+_OPERATION_KEY: str = "feature_weather_kma_ultra_short_nowcast_job"
+_PROVIDER_DISPLAY: str = "kma"
+_DATASET_KEY_DISPLAY: str = "ultra_short_nowcast"
+_CREATE_FORM: dict[str, str] = {
+    "provider_dataset_id": str(_PROVIDER_DATASET_ID),
+    "sync_scope": _SYNC_SCOPE,
+}
+
+
 def _upload(
     *,
     upload_id: str = "00000000-0000-0000-0000-000000000001",
@@ -270,7 +287,9 @@ def _upload(
     storage_key: str | None = None,
     original_filename: str = "features.jsonl",
     detected_format: str = "jsonl",
-    dataset_key: str = "offline_jsonl",
+    provider_dataset_id: int = _PROVIDER_DATASET_ID,
+    sync_scope: str = _SYNC_SCOPE,
+    operation_key: str = _OPERATION_KEY,
     byte_size: int = 123,
     checksum_sha256: str = "a" * 64,
     validation_job_id: str | None = None,
@@ -279,9 +298,9 @@ def _upload(
     now = datetime(2026, 6, 3, tzinfo=UTC)
     return OfflineUpload(
         upload_id=upload_id,
-        provider="offline-test-provider",
-        dataset_key=dataset_key,
-        sync_scope="default",
+        provider_dataset_id=provider_dataset_id,
+        sync_scope=sync_scope,
+        operation_key=operation_key,
         original_filename=original_filename,
         storage_backend="rustfs",
         storage_key=storage_key or f"offline-uploads/{upload_id}/{original_filename}",
@@ -346,8 +365,8 @@ def test_create_offline_upload_writes_object_and_metadata(
 
     async def _create(_session: Any, **kwargs: Any) -> OfflineUpload:
         nonlocal reserved
-        assert kwargs["provider"] == "offline-test-provider"
-        assert kwargs["dataset_key"] == "offline_jsonl"
+        assert kwargs["provider_dataset_id"] == _PROVIDER_DATASET_ID
+        assert kwargs["sync_scope"] == _SYNC_SCOPE
         assert kwargs["storage_backend"] == "rustfs"
         assert kwargs["detected_format"] == "jsonl"
         assert kwargs["detected_encoding"] is None
@@ -372,11 +391,7 @@ def test_create_offline_upload_writes_object_and_metadata(
 
     response = client.post(
         "/v1/admin/offline-uploads",
-        data={
-            "provider": "offline-test-provider",
-            "dataset_key": "offline_jsonl",
-            "sync_scope": "default",
-        },
+        data=dict(_CREATE_FORM),
         files={
             "file": (
                 "features.jsonl",
@@ -389,10 +404,13 @@ def test_create_offline_upload_writes_object_and_metadata(
     assert response.status_code == 201
     body = response.json()
     assert body["data"]["status"] == "uploaded"
+    assert body["data"]["provider_dataset_id"] == _PROVIDER_DATASET_ID
+    assert body["data"]["sync_scope"] == _SYNC_SCOPE
     assert body["meta"]["bucket"] == "kor-travel-map-uploads"
     assert body["meta"]["object_key"].startswith("offline-uploads/")
     assert store.calls[0]["body"] == b'{"feature":{"feature_id":"f1"}}\n'
-    assert store.calls[0]["metadata"]["provider"] == "offline-test-provider"
+    assert store.calls[0]["metadata"]["provider-dataset-id"] == str(_PROVIDER_DATASET_ID)
+    assert store.calls[0]["metadata"]["sync-scope"] == _SYNC_SCOPE
     # claim+DB 예약, effect_started, 증명+terminal result, registry hook.
     assert session.begin_count == 4
 
@@ -410,19 +428,30 @@ def test_create_offline_upload_duplicate_checksum_stops_before_object_store(
     async def _reserve(_session: Any, **_kwargs: Any) -> None:
         return None
 
+    async def _resolve(_session: Any, **kwargs: Any) -> str:
+        assert kwargs["provider_dataset_id"] == _PROVIDER_DATASET_ID
+        assert kwargs["sync_scope"] == _SYNC_SCOPE
+        return existing.operation_key
+
     async def _duplicate(_session: Any, **kwargs: Any) -> OfflineUpload:
-        assert kwargs["provider"] == "p"
-        assert kwargs["dataset_key"] == "d"
-        assert kwargs["sync_scope"] == "default"
+        assert kwargs["provider_dataset_id"] == _PROVIDER_DATASET_ID
+        assert kwargs["sync_scope"] == _SYNC_SCOPE
+        # 멱등 UNIQUE가 4열이므로 중복 조회도 triple을 지정해야 한다 —
+        # writer가 결박한 operation을 빼면 형제 행을 집을 수 있다(alembic 0092).
+        assert kwargs["operation_key"] == existing.operation_key
+        assert kwargs["checksum_sha256"] == hashlib.sha256(
+            b'{"feature":{"feature_id":"f1"}}\n'
+        ).hexdigest()
         return existing
 
     monkeypatch.setattr(router_mod, "build_offline_upload_store", lambda _settings: store)
     monkeypatch.setattr(router_mod, "reserve_offline_upload", _reserve)
+    monkeypatch.setattr(router_mod, "resolve_offline_upload_operation_key", _resolve)
     monkeypatch.setattr(router_mod, "get_offline_upload_by_checksum", _duplicate)
 
     response = client.post(
         "/v1/admin/offline-uploads",
-        data={"provider": "p", "dataset_key": "d"},
+        data=dict(_CREATE_FORM),
         files={
             "file": (
                 "features.jsonl",
@@ -435,7 +464,12 @@ def test_create_offline_upload_duplicate_checksum_stops_before_object_store(
     assert response.status_code == 409
     body = response.json()
     assert body["code"] == "OFFLINE_UPLOAD_DUPLICATE"
+    # T-VN-33 (ADR-088): 409는 가리키는 행의 exact identity(triple) + status를 싣는다.
     assert body["details"]["upload_id"] == existing.upload_id
+    assert body["details"]["provider_dataset_id"] == existing.provider_dataset_id
+    assert body["details"]["sync_scope"] == existing.sync_scope
+    assert body["details"]["operation_key"] == existing.operation_key
+    assert body["details"]["status"] == existing.status
     assert store.calls == []
     assert store.deleted == []
 
@@ -459,7 +493,8 @@ def test_create_offline_upload_accepts_csv(
             storage_key=kwargs["storage_key"],
             original_filename="features.csv",
             detected_format="csv",
-            dataset_key=kwargs["dataset_key"],
+            provider_dataset_id=kwargs["provider_dataset_id"],
+            sync_scope=kwargs["sync_scope"],
             byte_size=kwargs["byte_size"],
             checksum_sha256=kwargs["checksum_sha256"],
         )
@@ -475,7 +510,7 @@ def test_create_offline_upload_accepts_csv(
 
     response = client.post(
         "/v1/admin/offline-uploads",
-        data={"provider": "p", "dataset_key": "d"},
+        data=dict(_CREATE_FORM),
         files={"file": ("features.csv", b"name,lon,lat\nA,126.9,37.5\n", "text/csv")},
     )
 
@@ -517,17 +552,15 @@ def test_create_offline_upload_restarts_exact_put_after_started_crash(
     content_type = "application/x-ndjson"
     metadata = {
         "content-sha256": checksum,
-        "dataset-key": "d",
-        "provider": "p",
-        "sync-scope": "default",
+        "provider-dataset-id": str(_PROVIDER_DATASET_ID),
+        "sync-scope": _SYNC_SCOPE,
         "upload-id": upload_id,
     }
     metadata_digest = canonical_domain_command_fingerprint(metadata)
     fingerprint = canonical_domain_command_fingerprint(
         {
-            "provider": "p",
-            "dataset_key": "d",
-            "sync_scope": "default",
+            "provider_dataset_id": _PROVIDER_DATASET_ID,
+            "sync_scope": _SYNC_SCOPE,
             "filename": "features.jsonl",
             "storage_backend": "rustfs",
             "bucket": settings.offline_upload_bucket,
@@ -572,7 +605,6 @@ def test_create_offline_upload_restarts_exact_put_after_started_crash(
         upload_id=upload_id,
         state="uploading",
         storage_key=storage_key,
-        dataset_key="d",
         byte_size=len(body),
         checksum_sha256=checksum,
     )
@@ -611,7 +643,7 @@ def test_create_offline_upload_restarts_exact_put_after_started_crash(
 
     response = client.post(
         "/v1/admin/offline-uploads",
-        data={"provider": "p", "dataset_key": "d"},
+        data=dict(_CREATE_FORM),
         files={"file": ("features.jsonl", body, content_type)},
     )
 
@@ -643,7 +675,8 @@ def test_offline_upload_store_is_reused_from_app_state(
             upload_id=kwargs["upload_id"],
             state="uploading",
             storage_key=kwargs["storage_key"],
-            dataset_key=kwargs["dataset_key"],
+            provider_dataset_id=kwargs["provider_dataset_id"],
+            sync_scope=kwargs["sync_scope"],
             byte_size=kwargs["byte_size"],
             checksum_sha256=kwargs["checksum_sha256"],
         )
@@ -660,7 +693,7 @@ def test_offline_upload_store_is_reused_from_app_state(
     for filename in ("features-a.jsonl", "features-b.jsonl"):
         response = client.post(
             "/v1/admin/offline-uploads",
-            data={"provider": "p", "dataset_key": "d"},
+            data=dict(_CREATE_FORM),
             files={
                 "file": (filename, b'{"feature":{"feature_id":"f1"}}\n', "application/x-ndjson")
             },
@@ -684,7 +717,6 @@ def test_preview_offline_upload_prefers_app_state_store(
         storage_key=storage_key,
         original_filename="features.csv",
         detected_format="csv",
-        dataset_key="offline_csv",
         byte_size=len(body),
         checksum_sha256=hashlib.sha256(body).hexdigest(),
     )
@@ -721,7 +753,6 @@ def test_validate_offline_upload_prefers_app_state_store(
         storage_key=storage_key,
         original_filename="features.csv",
         detected_format="csv",
-        dataset_key="offline_csv",
         byte_size=len(body),
         checksum_sha256=checksum,
     )
@@ -730,7 +761,6 @@ def test_validate_offline_upload_prefers_app_state_store(
         storage_key=storage_key,
         original_filename="features.csv",
         detected_format="csv",
-        dataset_key="offline_csv",
         byte_size=len(body),
         checksum_sha256=checksum,
         validation_job_id="00000000-0000-0000-0000-000000000101",
@@ -745,9 +775,13 @@ def test_validate_offline_upload_prefers_app_state_store(
     async def _run(_session: Any, upload_id: str, **kwargs: Any) -> Any:
         assert upload_id == upload.upload_id
         assert kwargs["store"] is store
+        # T-VN-33: provider/dataset_key는 upload 행이 아니라 provider_dataset_id에서
+        # 유도한 표시명이다(실제 run_offline_upload_validation_job이 하는 일).
         return validate_offline_tabular_upload(
             validated_upload,
             body,
+            provider=_PROVIDER_DISPLAY,
+            dataset_key=_DATASET_KEY_DISPLAY,
             column_mapping=kwargs["column_mapping"],
             sample_size=kwargs["sample_size"],
             checksum_sha256=checksum,
@@ -817,7 +851,7 @@ def test_create_offline_upload_stops_before_object_when_reservation_fails(
     with pytest.raises(RuntimeError, match="metadata reservation failed"):
         client.post(
             "/v1/admin/offline-uploads",
-            data={"provider": "p", "dataset_key": "d"},
+            data=dict(_CREATE_FORM),
             files={
                 "file": (
                     "features.jsonl",
@@ -827,6 +861,94 @@ def test_create_offline_upload_stops_before_object_when_reservation_fails(
             },
         )
 
+    assert store.calls == []
+    assert store.deleted == []
+    assert store.objects == {}
+
+
+def _post_upload(client: TestClient) -> Any:
+    return client.post(
+        "/v1/admin/offline-uploads",
+        data=dict(_CREATE_FORM),
+        files={
+            "file": (
+                "features.jsonl",
+                b'{"feature":{"feature_id":"f1"}}\n',
+                "application/x-ndjson",
+            )
+        },
+    )
+
+
+@pytest.mark.unit
+def test_create_offline_upload_409_when_scope_has_no_enabled_operation(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """T-VN-33 (ADR-088): scope→operation 유도 실패는 500이 아니라 typed 409다.
+
+    resolved==0은 scope 행이 없을 때뿐 아니라 **operation이 disabled / dataset이
+    inactive**일 때도 온다(유도가 DB 활성 가드와 같은 조건을 보므로). 그래서 처방은
+    "등록하세요" 하나로 끝나면 안 된다 — 비활성 확인까지 말해야 한다.
+    """
+
+    from kortravelmap.api.routers import offline_uploads as router_mod
+
+    store = _FakeStore()
+
+    async def _unresolved(_session: Any, **_kwargs: Any) -> OfflineUpload:
+        raise OfflineUploadScopeOperationUnresolved(
+            "offline upload scope resolves to 0 operations", resolved=0
+        )
+
+    monkeypatch.setattr(router_mod, "build_offline_upload_store", lambda _settings: store)
+    monkeypatch.setattr(router_mod, "reserve_offline_upload", _unresolved)
+
+    response = _post_upload(client)
+
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert "활성 refresh operation이 없어" in detail
+    # 두 원인 모두에 처방이 닿아야 한다.
+    assert "등록" in detail
+    assert "is_active" in detail
+    assert "is_enabled" in detail
+    # 모호(>1) 쪽 문구가 새면 분기가 무너진 것이다.
+    assert "여러 개" not in detail
+    # 결박할 operation을 못 정했으므로 객체 저장은 시작조차 안 한다.
+    assert store.calls == []
+    assert store.deleted == []
+    assert store.objects == {}
+
+
+@pytest.mark.unit
+def test_create_offline_upload_409_when_scope_is_ambiguous(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """활성 operation이 둘 이상이면 다른 처방이 나가야 한다.
+
+    "등록하세요"는 여기서 정반대 지시다 — 이미 너무 많다.
+    """
+
+    from kortravelmap.api.routers import offline_uploads as router_mod
+
+    store = _FakeStore()
+
+    async def _unresolved(_session: Any, **_kwargs: Any) -> OfflineUpload:
+        raise OfflineUploadScopeOperationUnresolved(
+            "offline upload scope resolves to 2 operations", resolved=2
+        )
+
+    monkeypatch.setattr(router_mod, "build_offline_upload_store", lambda _settings: store)
+    monkeypatch.setattr(router_mod, "reserve_offline_upload", _unresolved)
+
+    response = _post_upload(client)
+
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert "여러 개" in detail
+    assert "등록" not in detail
     assert store.calls == []
     assert store.deleted == []
     assert store.objects == {}
@@ -847,7 +969,7 @@ def test_create_rejects_file_over_configured_max_bytes(
 
     response = client.post(
         "/v1/admin/offline-uploads",
-        data={"provider": "p", "dataset_key": "d"},
+        data=dict(_CREATE_FORM),
         files={"file": ("features.jsonl", b"123456789", "application/x-ndjson")},
     )
 
@@ -859,7 +981,7 @@ def test_create_rejects_file_over_configured_max_bytes(
 def test_create_rejects_unsupported_format(client: TestClient) -> None:
     response = client.post(
         "/v1/admin/offline-uploads",
-        data={"provider": "p", "dataset_key": "d"},
+        data=dict(_CREATE_FORM),
         files={"file": ("features.xlsx", b"id,name\n1,a\n", "application/octet-stream")},
     )
 
@@ -876,8 +998,7 @@ def test_list_offline_uploads_passes_filters(
 
     async def _list(_session: Any, **kwargs: Any) -> OfflineUploadPage:
         assert kwargs["status"] == "uploaded"
-        assert kwargs["provider"] == "offline-test-provider"
-        assert kwargs["dataset_key"] == "offline_jsonl"
+        assert kwargs["provider_dataset_id"] == _PROVIDER_DATASET_ID
         assert kwargs["limit"] == 25
         return OfflineUploadPage(items=(_upload(),), next_cursor="next")
 
@@ -887,8 +1008,7 @@ def test_list_offline_uploads_passes_filters(
         "/v1/admin/offline-uploads",
         params={
             "status": "uploaded",
-            "provider": "offline-test-provider",
-            "dataset_key": "offline_jsonl",
+            "provider_dataset_id": _PROVIDER_DATASET_ID,
             "page_size": 25,
         },
     )
@@ -1058,6 +1178,120 @@ def test_load_offline_upload_rejects_concurrent_reserve(
     assert "loading" in response.json()["detail"]
 
 
+def _integrity_error(*, sqlstate: str, constraint_name: str) -> IntegrityError:
+    """driver metadata를 실은 ``IntegrityError``를 만든다.
+
+    라우터 판정이 문자열이 아니라 SQLSTATE + constraint 이름을 본다는 것을
+    테스트에서도 그대로 밟기 위해, orig에 두 값을 그대로 얹는다
+    (``_driver_constraint_identity``가 읽는 속성 이름 그대로다).
+    """
+
+    class _Orig(Exception):
+        pass
+
+    orig = _Orig(constraint_name)
+    orig.sqlstate = sqlstate  # type: ignore[attr-defined]
+    orig.constraint_name = constraint_name  # type: ignore[attr-defined]
+    return IntegrityError("UPDATE ops.offline_uploads ...", {}, orig)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "constraint_name",
+    ["ck_provider_dataset_active_write", "ck_provider_dataset_scope_active_write"],
+)
+def test_load_offline_upload_reports_inactive_membership_as_409(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    constraint_name: str,
+) -> None:
+    """비활성 dataset/operation은 상태 오류(409)지 500이 아니다.
+
+    load 예약은 ``ops.import_job_datasets`` membership 행과 upload status 전이를
+    같은 트랜잭션에서 쓴다 — 0091 가드가 둘 중 먼저 닿는 쪽을 23514로 거부하고
+    constraint 이름이 갈린다. 두 이름을 모두 상태 오류로 옮겨야 운영자가 원인을 본다.
+    """
+    from kortravelmap.api.routers import offline_uploads as router_mod
+
+    async def _get(_session: Any, upload_id: str) -> OfflineUpload:
+        return _upload(upload_id=upload_id)
+
+    async def _reserve(_session: Any, *, upload_id: str) -> OfflineUpload:
+        raise _integrity_error(sqlstate="23514", constraint_name=constraint_name)
+
+    async def _launch(_request: Any, _upload_id: str, **_kwargs: Any) -> Any:
+        raise AssertionError("inactive membership must not launch Dagster")
+
+    monkeypatch.setattr(router_mod, "get_offline_upload", _get)
+    monkeypatch.setattr(router_mod, "reserve_offline_upload_load", _reserve)
+    monkeypatch.setattr(router_mod, "launch_offline_upload_load", _launch)
+
+    response = client.post("/v1/admin/offline-uploads/00000000-0000-0000-0000-000000000001/load")
+
+    assert response.status_code == 409
+    assert "비활성" in response.json()["detail"]
+
+
+@pytest.mark.unit
+def test_load_offline_upload_keeps_unrelated_check_violation_as_server_error(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """다른 CHECK 위반까지 409로 옮기면 진짜 버그가 상태 오류로 숨는다.
+
+    판정을 "IntegrityError면 409"로 넓히면 이 테스트가 죽는다.
+    """
+    from kortravelmap.api.routers import offline_uploads as router_mod
+
+    async def _get(_session: Any, upload_id: str) -> OfflineUpload:
+        return _upload(upload_id=upload_id)
+
+    async def _reserve(_session: Any, *, upload_id: str) -> OfflineUpload:
+        raise _integrity_error(
+            sqlstate="23514", constraint_name="ck_offline_uploads_status"
+        )
+
+    monkeypatch.setattr(router_mod, "get_offline_upload", _get)
+    monkeypatch.setattr(router_mod, "reserve_offline_upload_load", _reserve)
+
+    with pytest.raises(IntegrityError):
+        client.post("/v1/admin/offline-uploads/00000000-0000-0000-0000-000000000001/load")
+
+
+@pytest.mark.unit
+def test_validate_offline_upload_reports_inactive_membership_as_409(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """validation도 membership 행을 새로 만든다 — 같은 규칙으로 409."""
+    from kortravelmap.api.routers import offline_uploads as router_mod
+
+    upload = _upload(original_filename="features.csv", detected_format="csv")
+
+    async def _get(_session: Any, _upload_id: str) -> OfflineUpload:
+        return upload
+
+    async def _run(_session: Any, _upload_id: str, **_kwargs: Any) -> Any:
+        raise _integrity_error(
+            sqlstate="23514", constraint_name="ck_provider_dataset_active_write"
+        )
+
+    monkeypatch.setattr(router_mod, "get_offline_upload", _get)
+    monkeypatch.setattr(router_mod, "build_offline_upload_store", lambda _settings: _FakeStore())
+    monkeypatch.setattr(router_mod, "run_offline_upload_validation_job", _run)
+
+    response = client.post(
+        f"/v1/admin/offline-uploads/{upload.upload_id}/validate",
+        json={
+            "sample_size": 10,
+            "column_mapping": {"name": "name", "lon": "lon", "lat": "lat"},
+        },
+    )
+
+    assert response.status_code == 409
+    assert "비활성" in response.json()["detail"]
+
+
 @pytest.mark.unit
 def test_load_offline_upload_keeps_reservation_pending_when_launch_is_ambiguous(
     client: TestClient,
@@ -1155,7 +1389,6 @@ def test_preview_offline_upload_reads_csv_sample(
         storage_key=storage_key,
         original_filename="features.csv",
         detected_format="csv",
-        dataset_key="offline_csv",
         byte_size=len(body),
         checksum_sha256=checksum,
     )
@@ -1191,7 +1424,6 @@ def test_validate_offline_upload_runs_validation_job(
         storage_key=storage_key,
         original_filename="features.csv",
         detected_format="csv",
-        dataset_key="offline_csv",
         byte_size=len(body),
         checksum_sha256=checksum,
     )
@@ -1200,7 +1432,6 @@ def test_validate_offline_upload_runs_validation_job(
         storage_key=storage_key,
         original_filename="features.csv",
         detected_format="csv",
-        dataset_key="offline_csv",
         byte_size=len(body),
         checksum_sha256=checksum,
         validation_job_id="00000000-0000-0000-0000-000000000101",
@@ -1218,9 +1449,13 @@ def test_validate_offline_upload_runs_validation_job(
         assert kwargs["sample_size"] == 100
         # T-VN-20 (ADR-066 D-2): operator는 인증 principal(local-dev)에서만 파생한다.
         assert kwargs["operator"] == "local-dev"
+        # T-VN-33: provider/dataset_key는 upload 행이 아니라 provider_dataset_id에서
+        # 유도한 표시명이다(실제 run_offline_upload_validation_job이 하는 일).
         return validate_offline_tabular_upload(
             validated_upload,
             body,
+            provider=_PROVIDER_DISPLAY,
+            dataset_key=_DATASET_KEY_DISPLAY,
             column_mapping=kwargs["column_mapping"],
             sample_size=kwargs["sample_size"],
             checksum_sha256=checksum,
@@ -1278,7 +1513,6 @@ def test_validate_offline_upload_keeps_typed_geo_problem_code(
     upload = _upload(
         original_filename="features.csv",
         detected_format="csv",
-        dataset_key="offline_csv",
     )
     store = _FakeStore()
 
@@ -1344,7 +1578,6 @@ def test_get_validation_returns_saved_import_job_payload(
     upload = _upload(
         original_filename="features.csv",
         detected_format="csv",
-        dataset_key="offline_csv",
         validation_job_id="00000000-0000-0000-0000-000000000101",
     )
 
@@ -1469,6 +1702,73 @@ def test_delete_offline_upload_removes_row_and_object(
     assert store.deleted == [upload.storage_key]
     assert store.objects == {}
     assert session.begin_count == 4
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("hook_fails", [False, True])
+def test_delete_offline_upload_always_attempts_registry_audit(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    hook_fails: bool,
+) -> None:
+    """DELETE는 registry에 삭제를 기록하고, 그 hook이 터져도 응답은 200이다.
+
+    라우터는 hook을 ``file_registry.registry_guard``로 감싼다 —
+    ``src/kortravelmap/infra/file_registry.py``의 ``except Exception``이 예외를 삼키고
+    경고 로그만 남긴다. 그래서 hook이 DB에 거부당해도 **라우터 표면에서는 아무 신호가
+    없다**(500이 아니라 200이다). 이 축이 없으면 hook 자체를 지워도 라우터 테스트가
+    전부 초록이다.
+
+    감사 기록이 실제로 DB에 남는지는 라우터 표면에서 볼 수 없으므로 실 DB 회귀가
+    따로 있다 — ``tests/integration/test_offline_upload_load.py``의
+    ``test_router_delete_records_managed_file_audit_for_inactive_dataset``.
+    """
+    from kortravelmap.infra import file_registry
+
+    from kortravelmap.api.routers import offline_uploads as router_mod
+
+    upload = _upload(state="loaded")
+    store = _FakeStore({upload.storage_key: b'{"feature":{"feature_id":"f1"}}\n'})
+    registered_paths: list[str] = []
+    marked_deleted: list[int] = []
+
+    async def _delete(
+        _session: Any,
+        *,
+        upload_id: str,
+        command_id: int,
+    ) -> OfflineUpload:
+        return replace(upload, status="deleting", delete_command_id=command_id)
+
+    async def _get(_session: Any, _upload_id: str) -> OfflineUpload:
+        return upload
+
+    async def _register_file(_session: Any, **kwargs: Any) -> Any:
+        registered_paths.append(str(kwargs["path"]))
+        if hook_fails:
+            raise _integrity_error(
+                sqlstate="23514", constraint_name="ck_provider_dataset_active_write"
+            )
+        return SimpleNamespace(file_id=7)
+
+    async def _mark_deleted(_session: Any, *, file_id: int, **_kwargs: Any) -> bool:
+        marked_deleted.append(file_id)
+        return True
+
+    monkeypatch.setattr(router_mod, "get_offline_upload", _get)
+    monkeypatch.setattr(router_mod, "delete_offline_upload", _delete)
+    monkeypatch.setattr(router_mod, "build_offline_upload_store", lambda _settings: store)
+    monkeypatch.setattr(file_registry, "register_file", _register_file)
+    monkeypatch.setattr(file_registry, "mark_deleted", _mark_deleted)
+
+    response = client.delete(f"/v1/admin/offline-uploads/{upload.upload_id}")
+
+    assert response.status_code == 200
+    assert store.deleted == [upload.storage_key]
+    # 성공/실패 어느 쪽이든 registry 등록은 **시도**돼야 한다.
+    assert registered_paths == [upload.storage_key]
+    # 등록이 터지면 삭제 표시까지 가지 못한다 — 그것이 감사 공백의 모양이다.
+    assert marked_deleted == ([] if hook_fails else [7])
 
 
 @pytest.mark.unit
@@ -1704,8 +2004,7 @@ def test_load_offline_upload_rejects_csv_without_validation(
             upload_id=upload_id,
             original_filename="features.csv",
             detected_format="csv",
-            dataset_key="offline_csv",
-        )
+            )
 
     monkeypatch.setattr(router_mod, "get_offline_upload", _get)
 

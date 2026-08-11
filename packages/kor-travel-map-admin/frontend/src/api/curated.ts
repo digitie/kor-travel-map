@@ -84,8 +84,7 @@ async function fetchAdminCuratedSources(
 ): Promise<CuratedSourcesResponse> {
   return getJson<CuratedSourcesResponse>(
     pathWithQuery("/v1/admin/curated-sources", {
-      provider: params.provider,
-      dataset_key: params.dataset_key,
+      provider_dataset_id: params.provider_dataset_id,
       provider_status: params.provider_status,
       limit: params.limit,
     }),

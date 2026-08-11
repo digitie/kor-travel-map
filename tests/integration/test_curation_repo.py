@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import json
 import unicodedata
 from dataclasses import replace
@@ -18,7 +19,7 @@ from sqlalchemy.exc import DBAPIError, IntegrityError
 from kortravelmap.infra import curated_repo
 from kortravelmap.infra.curation_repo import (
     _GET_COLLECTION_ID_BY_KEY_SQL,  # noqa: PLC2701 - concurrency regression
-    _GET_SOURCE_ID_BY_KEY_SQL,  # noqa: PLC2701 - concurrency regression
+    _GET_SOURCE_ID_BY_DATASET_ID_SQL,  # noqa: PLC2701 - concurrency regression
     _LIST_FEATURE_ITEMS_SQL,  # noqa: PLC2701 - EXPLAIN 대상
     _RESOLVE_FEATURES_BATCH_SQL,  # noqa: PLC2701 - EXPLAIN 대상
     _UPSERT_COLLECTION_SQL,  # noqa: PLC2701 - concurrency regression
@@ -56,7 +57,11 @@ from kortravelmap.infra.curation_repo import (
     update_curation_item,
     upsert_curation_theme,
 )
-from kortravelmap.infra.models import SourceEntityRow, SourceRecordRow
+from kortravelmap.infra.models import (
+    SourceEntityHeadRow,
+    SourceEntityRow,
+    SourceRecordRow,
+)
 from tests.integration._db_cleanup import truncate_committed_test_rows
 
 if TYPE_CHECKING:
@@ -65,6 +70,57 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.integration
 
 _FEATURE_ID = "feature:curation-multi-test"
+
+
+def _payload_hash(seed: str) -> str:
+    """``ck_source_records_payload_hash``(^[0-9a-f]{1,64}$)를 만족하는 값."""
+
+    return hashlib.md5(seed.encode(), usedforsecurity=False).hexdigest()
+
+
+async def _dataset_id(session: AsyncSession, provider: str, dataset_key: str) -> int:
+    """provider/dataset pair를 catalog에 심고 canonical id를 돌려준다.
+
+    T-VN-33 이후 curated source·source entity의 dataset identity는
+    ``provider_dataset_id`` 하나다 — provider/dataset_key 사본은 catalog
+    projection으로만 남는다. 테스트 전용 pair는 catalog에 없으므로 먼저 심는다.
+    """
+
+    return int(
+        (
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO provider_sync.provider_datasets (
+                        provider, dataset_key, display_name, source_kind,
+                        is_active, capabilities
+                    )
+                    SELECT :provider, :dataset_key, :provider, 'system', true,
+                           jsonb_build_object('schema_version', 1,
+                                              'produces', '[]'::jsonb,
+                                              'extensions', '{}'::jsonb)
+                    ON CONFLICT (provider, dataset_key) DO UPDATE
+                        SET display_name = EXCLUDED.display_name
+                    RETURNING provider_dataset_id
+                    """
+                ),
+                {"provider": provider, "dataset_key": dataset_key},
+            )
+        ).scalar_one()
+    )
+
+
+async def _catalog_dataset_id(
+    engine: AsyncEngine, provider: str, dataset_key: str
+) -> int:
+    """committed fixture용 — 별도 connection에서 catalog 행을 심고 commit한다."""
+
+    from sqlalchemy.ext.asyncio import AsyncSession as _AsyncSession
+
+    async with _AsyncSession(engine, expire_on_commit=False) as catalog:
+        dataset_id = await _dataset_id(catalog, provider, dataset_key)
+        await catalog.commit()
+    return dataset_id
 
 
 async def _seed_foundations(session: AsyncSession) -> tuple[str, str]:
@@ -109,15 +165,20 @@ async def _seed_foundations(session: AsyncSession) -> tuple[str, str]:
                 text(
                     """
                     INSERT INTO feature.curated_sources (
-                        provider, dataset_key, source_name, source_kind,
+                        provider_dataset_id, source_name, source_kind,
                         update_cycle, provider_status, metadata
                     ) VALUES (
-                        'python-mcst-api', 'tourism-100-test', '문화체육관광부',
+                        :provider_dataset_id, '문화체육관광부',
                         'manual', 'unknown', 'manual_only', '{}'::jsonb
                     )
                     RETURNING source_id::text
                     """
-                )
+                ),
+                {
+                    "provider_dataset_id": await _dataset_id(
+                        session, "python-mcst-api", "tourism-100-test"
+                    )
+                },
             )
         ).scalar_one()
     )
@@ -306,8 +367,9 @@ async def test_bulk_import_is_atomic_upsert_friendly_and_idempotent(
         "theme_group": "test",
         "title": "2026 CSV import 테스트",
         "edition_key": "2026",
-        "provider": "csv-import-provider",
-        "dataset_key": "csv-import-dataset",
+        "provider_dataset_id": await _dataset_id(
+            migrated_session, "csv-import-provider", "csv-import-dataset"
+        ),
         "source_name": "CSV import 출처",
         "source_url": None,
         "item_title": None,
@@ -457,8 +519,9 @@ async def test_link_provenance_is_append_only_fail_closed_and_recoverable(
         "theme_name": "큐레이션 근거 테스트",
         "theme_group": "test",
         "edition_key": "2026",
-        "provider": "provenance-provider",
-        "dataset_key": "provenance-dataset",
+        "provider_dataset_id": await _dataset_id(
+            migrated_session, "provenance-provider", "provenance-dataset"
+        ),
         "source_name": "근거 출처",
         "source_url": None,
         "source_component_key": "primary",
@@ -850,8 +913,9 @@ async def test_authoritative_reimport_preserves_operator_curation_overrides(
         "theme_group": "test",
         "title": "재적재 테스트",
         "edition_key": "2026",
-        "provider": "csv-reimport-provider",
-        "dataset_key": "csv-reimport-dataset",
+        "provider_dataset_id": await _dataset_id(
+            migrated_session, "csv-reimport-provider", "csv-reimport-dataset"
+        ),
         "source_name": "재적재 출처",
         "source_url": None,
         "item_title": None,
@@ -1100,8 +1164,9 @@ async def test_source_absent_included_item_is_hidden_and_can_be_archived(
         "theme_group": "test",
         "title": "원천 누락 테스트",
         "edition_key": "2026",
-        "provider": "source-absent-provider",
-        "dataset_key": "source-absent-dataset",
+        "provider_dataset_id": await _dataset_id(
+            migrated_session, "source-absent-provider", "source-absent-dataset"
+        ),
         "source_name": "원천 누락 출처",
         "source_url": None,
         "item_title": None,
@@ -1508,28 +1573,24 @@ async def test_legacy_identity_move_does_not_overwrite_occupied_target(
     fetched_at = datetime(2026, 7, 27, 10, 0, tzinfo=UTC)
     entity = SourceEntityRow(
         source_entity_key="curation-occupied-entity",
-        provider="python-mcst-api",
-        dataset_key="tourism-100-test",
+        provider_dataset_id=await _dataset_id(
+            migrated_session, "python-mcst-api", "tourism-100-test"
+        ),
         source_entity_type="place",
         source_entity_id="curation-occupied",
-        current_source_record_key=None,
         first_seen_at=fetched_at,
         last_seen_at=fetched_at,
     )
     migrated_session.add(entity)
     await migrated_session.flush()
     for key, payload_hash in (
-        ("curation-occupied-original", "curation-occupied-original-hash"),
-        ("curation-occupied-target", "curation-occupied-target-hash"),
+        ("curation-occupied-original", _payload_hash("curation-occupied-original")),
+        ("curation-occupied-target", _payload_hash("curation-occupied-target")),
     ):
         migrated_session.add(
             SourceRecordRow(
                 source_record_key=key,
                 source_entity_key=entity.source_entity_key,
-                provider=entity.provider,
-                dataset_key=entity.dataset_key,
-                source_entity_type=entity.source_entity_type,
-                source_entity_id=entity.source_entity_id,
                 raw_payload_hash=payload_hash,
                 raw_data={},
                 fetched_at=fetched_at,
@@ -1895,11 +1956,11 @@ async def test_legacy_reinsert_restores_stable_source_identity_without_new_uuid(
     fetched_at = datetime(2026, 7, 27, 9, 0, tzinfo=UTC)
     entity = SourceEntityRow(
         source_entity_key="curation-reinsert-entity",
-        provider="python-mcst-api",
-        dataset_key="tourism-100-test",
+        provider_dataset_id=await _dataset_id(
+            migrated_session, "python-mcst-api", "tourism-100-test"
+        ),
         source_entity_type="place",
         source_entity_id="curation-reinsert",
-        current_source_record_key=None,
         first_seen_at=fetched_at,
         last_seen_at=fetched_at,
     )
@@ -1909,17 +1970,20 @@ async def test_legacy_reinsert_restores_stable_source_identity_without_new_uuid(
         SourceRecordRow(
             source_record_key="curation-reinsert-record",
             source_entity_key=entity.source_entity_key,
-            provider=entity.provider,
-            dataset_key=entity.dataset_key,
-            source_entity_type=entity.source_entity_type,
-            source_entity_id=entity.source_entity_id,
-            raw_payload_hash="curation-reinsert-hash",
+            raw_payload_hash=_payload_hash("curation-reinsert"),
             raw_data={},
             fetched_at=fetched_at,
         )
     )
     await migrated_session.flush()
-    entity.current_source_record_key = "curation-reinsert-record"
+    # T-VN-33: 현재 record 포인터는 entity가 아니라 head가 소유한다.
+    migrated_session.add(
+        SourceEntityHeadRow(
+            source_entity_key=entity.source_entity_key,
+            current_source_record_key="curation-reinsert-record",
+            observed_at=fetched_at,
+        )
+    )
     await migrated_session.flush()
 
     legacy_id = str(
@@ -2497,8 +2561,9 @@ async def test_authoritative_reimport_does_not_resurrect_unresolved_archive(
         "theme_group": "test",
         "title": "CSV archive NULL 테스트",
         "edition_key": "2026",
-        "provider": "csv-archive-provider",
-        "dataset_key": "csv-archive-dataset",
+        "provider_dataset_id": await _dataset_id(
+            migrated_session, "csv-archive-provider", "csv-archive-dataset"
+        ),
         "source_name": "CSV archive 출처",
         "source_url": None,
         "source_item_key": "unresolved-a",
@@ -2664,16 +2729,20 @@ async def test_cross_title_legacy_moves_do_not_lock_source_collections_in_revers
                         text(
                             """
                             INSERT INTO feature.curated_sources (
-                                provider, dataset_key, source_name, source_kind,
+                                provider_dataset_id, source_name, source_kind,
                                 update_cycle, provider_status, metadata
                             ) VALUES (
-                                :provider, 'dataset', '교차 이동 source',
+                                :provider_dataset_id, '교차 이동 source',
                                 'manual', 'unknown', 'manual_only', '{}'::jsonb
                             )
                             RETURNING source_id::text
                             """
                         ),
-                        {"provider": provider},
+                        {
+                            "provider_dataset_id": await _dataset_id(
+                                setup, provider, "dataset"
+                            )
+                        },
                     )
                 ).scalar_one()
             )
@@ -2844,9 +2913,11 @@ async def test_source_and_collection_fallbacks_see_concurrent_identical_insert(
 
     suffix = uuid4().hex
     theme_slug = f"concurrent-import-foundation-{suffix}"
+    provider_dataset_id = await _catalog_dataset_id(
+        migrated_engine, f"concurrent-source-{suffix}", "dataset"
+    )
     source_params = {
-        "provider": f"concurrent-source-{suffix}",
-        "dataset_key": "dataset",
+        "provider_dataset_id": provider_dataset_id,
         "source_name": "동시 생성 출처",
         "source_url": None,
     }
@@ -2870,10 +2941,10 @@ async def test_source_and_collection_fallbacks_see_concurrent_identical_insert(
                     text(
                         """
                         INSERT INTO feature.curated_sources (
-                            provider, dataset_key, source_name, source_url,
+                            provider_dataset_id, source_name, source_url,
                             source_kind, update_cycle, provider_status, metadata
                         ) VALUES (
-                            :provider, :dataset_key, :source_name, :source_url,
+                            :provider_dataset_id, :source_name, :source_url,
                             'manual', 'unknown', 'manual_only', '{}'::jsonb
                         )
                         RETURNING source_id::text
@@ -2888,7 +2959,7 @@ async def test_source_and_collection_fallbacks_see_concurrent_identical_insert(
             _upsert_id_with_fallback(
                 second_session,
                 upsert_sql=_UPSERT_SOURCE_SQL,
-                lookup_sql=_GET_SOURCE_ID_BY_KEY_SQL,
+                lookup_sql=_GET_SOURCE_ID_BY_DATASET_ID_SQL,
                 params=source_params,
                 entity="test source",
             )
@@ -2958,9 +3029,9 @@ async def test_source_and_collection_fallbacks_see_concurrent_identical_insert(
             await connection.execute(
                 text(
                     "DELETE FROM feature.curated_sources "
-                    "WHERE provider = :provider AND dataset_key = :dataset_key"
+                    "WHERE provider_dataset_id = :provider_dataset_id"
                 ),
-                source_params,
+                {"provider_dataset_id": provider_dataset_id},
             )
             await connection.execute(
                 text("DELETE FROM feature.curated_themes WHERE theme_slug = :theme_slug"),
@@ -2983,8 +3054,11 @@ async def test_concurrent_import_returns_the_items_actually_removed(
         "theme_group": "test",
         "title": "동시 import 목록",
         "edition_key": "2026",
-        "provider": f"concurrent-import-provider-{suffix}",
-        "dataset_key": "concurrent-import-dataset",
+        "provider_dataset_id": await _catalog_dataset_id(
+            migrated_engine,
+            f"concurrent-import-provider-{suffix}",
+            "concurrent-import-dataset",
+        ),
         "source_name": "동시 import 출처",
         "source_url": None,
         "feature_id": None,
@@ -3088,22 +3162,23 @@ async def test_new_collection_create_add_does_not_deadlock_import(
             ),
             {"feature_id": feature_id},
         )
+        provider_dataset_id = await _dataset_id(setup, provider, "dataset")
         source_id = str(
             (
                 await setup.execute(
                     text(
                         """
                         INSERT INTO feature.curated_sources (
-                            provider, dataset_key, source_name, source_kind,
+                            provider_dataset_id, source_name, source_kind,
                             update_cycle, provider_status, metadata
                         ) VALUES (
-                            :provider, 'dataset', 'collection key lock 출처',
+                            :provider_dataset_id, 'collection key lock 출처',
                             'manual', 'unknown', 'manual_only', '{}'::jsonb
                         )
                         RETURNING source_id::text
                         """
                     ),
-                    {"provider": provider},
+                    {"provider_dataset_id": provider_dataset_id},
                 )
             ).scalar_one()
         )
@@ -3123,8 +3198,7 @@ async def test_new_collection_create_add_does_not_deadlock_import(
             theme_group="test",
             title="공식 import collection",
             edition_key="2026",
-            provider=provider,
-            dataset_key="dataset",
+            provider_dataset_id=provider_dataset_id,
             source_name="collection key lock 출처",
             source_url=None,
             source_item_key="official-item",
@@ -3187,9 +3261,9 @@ async def test_new_collection_create_add_does_not_deadlock_import(
             await cleanup.execute(
                 text(
                     "DELETE FROM feature.curated_sources "
-                    "WHERE provider = :provider"
+                    "WHERE provider_dataset_id = :provider_dataset_id"
                 ),
-                {"provider": provider},
+                {"provider_dataset_id": provider_dataset_id},
             )
             await cleanup.execute(
                 text(
@@ -3313,8 +3387,9 @@ async def test_import_retargets_stable_component_without_losing_operator_state(
         "theme_group": "test",
         "title": "복합 항목 재연결",
         "edition_key": "2026",
-        "provider": "migration-test",
-        "dataset_key": "component-retarget",
+        "provider_dataset_id": await _dataset_id(
+            migrated_session, "migration-test", "component-retarget"
+        ),
         "source_name": "migration test",
         "source_url": None,
         "source_item_key": "compound-item",
@@ -3450,8 +3525,9 @@ async def test_import_adopts_migrated_legacy_components_without_losing_state(
         "theme_group": "test",
         "title": "복합 항목 identity 승계",
         "edition_key": "2026",
-        "provider": "migration-test",
-        "dataset_key": "component-adoption",
+        "provider_dataset_id": await _dataset_id(
+            migrated_session, "migration-test", "component-adoption"
+        ),
         "source_name": "migration test",
         "source_url": None,
         "source_item_key": "official-compound-item",
@@ -3685,8 +3761,9 @@ async def test_import_adopts_source_absent_legacy_projection_to_primary(
         theme_group="official",
         title=str(projection_item["title"]),
         edition_key="",
-        provider="python-mcst-api",
-        dataset_key="tourism-100-test",
+        provider_dataset_id=await _dataset_id(
+            migrated_session, "python-mcst-api", "tourism-100-test"
+        ),
         source_name="문화체육관광부",
         source_url=None,
         source_item_key=projection_id,
@@ -3750,8 +3827,9 @@ async def test_import_adopts_archived_legacy_identity_without_resurrection(
         theme_group="test",
         title="보관 component identity 승계",
         edition_key="2026",
-        provider="migration-test",
-        dataset_key="archived-component-adoption",
+        provider_dataset_id=await _dataset_id(
+            migrated_session, "migration-test", "archived-component-adoption"
+        ),
         source_name="migration test",
         source_url=None,
         source_item_key="archived-official-item",
@@ -3867,8 +3945,9 @@ async def test_import_rejects_ambiguous_legacy_adoption_without_mutation(
         theme_group="test",
         title="모호한 component identity 승계",
         edition_key="2026",
-        provider="migration-test",
-        dataset_key="ambiguous-component-adoption",
+        provider_dataset_id=await _dataset_id(
+            migrated_session, "migration-test", "ambiguous-component-adoption"
+        ),
         source_name="migration test",
         source_url=None,
         source_item_key="ambiguous-official-item",
@@ -4235,8 +4314,9 @@ async def test_address_candidate_reimport_is_idempotent_and_never_publicly_links
         theme_group="official",
         title="주소 후보 검토 목록",
         edition_key="2026",
-        provider="official-static-source",
-        dataset_key="h31-preview-only",
+        provider_dataset_id=await _dataset_id(
+            migrated_session, "official-static-source", "h31-preview-only"
+        ),
         source_name="공식 정적 원천",
         source_url="https://example.test/h31-preview-only",
         source_item_key="preview-only-1",
@@ -4382,15 +4462,20 @@ async def _seed_second_theme_and_source(session: AsyncSession) -> tuple[str, str
                 text(
                     """
                     INSERT INTO feature.curated_sources (
-                        provider, dataset_key, source_name, source_kind,
+                        provider_dataset_id, source_name, source_kind,
                         update_cycle, provider_status, metadata
                     ) VALUES (
-                        'python-kto-api', 'tourism-100-test-v2', '한국관광공사',
+                        :provider_dataset_id, '한국관광공사',
                         'manual', 'unknown', 'manual_only', '{}'::jsonb
                     )
                     RETURNING source_id::text
                     """
-                )
+                ),
+                {
+                    "provider_dataset_id": await _dataset_id(
+                        session, "python-kto-api", "tourism-100-test-v2"
+                    )
+                },
             )
         ).scalar_one()
     )

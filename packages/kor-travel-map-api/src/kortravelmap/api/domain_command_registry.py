@@ -465,7 +465,7 @@ _COMMAND_REGISTRY: Final[dict[OperationKey, CommandPolicy]] = {
         "service.cache-target-reconciliation.complete",
         "consumer checksum receipt와 terminal resume 결과를 exact replay",
     ),
-    ("POST", "/v1/ops/datasets/preview"): _query(
+    ("POST", "/v1/ops/datasets/{provider_dataset_id}/preview"): _query(
         "provider fixture/live preview를 반환하지만 durable mutation은 없음"
     ),
     ("POST", "/v1/ops/pipeline/requests/preview"): _query(

@@ -27,11 +27,17 @@ def _override_session(client: TestClient) -> None:
     client.app.dependency_overrides[get_session] = _fake
 
 
-def _state(*, provider: str = "python-mois-api") -> SyncState:
+def _state(
+    *,
+    provider: str = "python-mois-api",
+    provider_dataset_id: int = 1,
+) -> SyncState:
     return SyncState(
+        provider_dataset_id=provider_dataset_id,
         provider=provider,
         dataset_key="mois_license_features_bulk",
-        sync_scope="default",
+        sync_scope="dataset_wide",
+        operation_key="feature_place_mois_licenses_job",
         status="active",
         cursor={"internal": "cursor"},
         last_success_at=datetime(2026, 6, 1, 8, 0, tzinfo=UTC),
@@ -63,7 +69,7 @@ def test_public_provider_list_is_bounded_and_hides_cursor(
     from kortravelmap.api.routers import public_providers as module
 
     async def _list_all(_session: Any) -> list[SyncState]:
-        return [_state(provider="python-kma-api"), _state()]
+        return [_state(provider="python-kma-api", provider_dataset_id=2), _state()]
 
     monkeypatch.setattr(module.sync_state_repo, "list_all_sync_states", _list_all)
     _override_session(client)
@@ -107,7 +113,10 @@ def test_public_provider_last_sync_forwards_exact_filters_and_hides_cursor(
         assert kwargs == {
             "provider": "python-mois-api",
             "dataset_key": "mois_license_features_bulk",
-            "sync_scope": "default",
+            "sync_scope": "dataset_wide",
+            # 실행 membership identity는 triple이다(ADR-088) — operation_key도
+            # 그대로 repo까지 전달돼야 한다.
+            "operation_key": "feature_place_mois_licenses_job",
         }
         return [_state()]
 
@@ -115,12 +124,15 @@ def test_public_provider_last_sync_forwards_exact_filters_and_hides_cursor(
     _override_session(client)
     response = client.get(
         "/v1/providers/python-mois-api/last-sync"
-        "?dataset_key=mois_license_features_bulk&sync_scope=default"
+        "?dataset_key=mois_license_features_bulk&sync_scope=dataset_wide"
+        "&operation_key=feature_place_mois_licenses_job"
     )
 
     assert response.status_code == 200
     item = response.json()["data"]["items"][0]
     assert item["dataset_key"] == "mois_license_features_bulk"
+    assert item["sync_scope"] == "dataset_wide"
+    assert item["operation_key"] == "feature_place_mois_licenses_job"
     assert "cursor" not in item
 
 

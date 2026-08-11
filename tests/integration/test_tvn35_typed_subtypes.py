@@ -198,7 +198,6 @@ def _bundle(
             source_entity_type=source_entity_type,
             source_entity_id=source_entity_id,
             raw_payload_hash=payload_hash,
-            raw_name=feature.name,
             raw_data=payload,
             fetched_at=fetched_at or _NOW,
             source_record_key=source_record_key,
@@ -209,7 +208,6 @@ def _bundle(
             source_role=SourceRole.PRIMARY,
             match_method="natural_key",
             confidence=100,
-            is_primary_source=True,
         ),
     )
 
@@ -974,10 +972,15 @@ async def test_same_kind_merge_keeps_master_subtype_and_preserves_loser(
 
 
 # ---------------------------------------------------------------------------
-# ⑥ migration 왕복 — downgrade 0083 → upgrade head 무손실 (md5 대조)
+# ⑥ migration 왕복 — downgrade 0083 → typed-subtype head 무손실 (md5 대조)
 # ---------------------------------------------------------------------------
 
 _ROUNDTRIP_PRE_REVISION = "0083_nonderived_uuid_generator"
+# T-VN-33의 final-schema cutover(0090)는 의도적으로 forward-only다. 이 검증의
+# 대상은 0084~0087 typed subtype migration의 역조립/재전개이므로, 그 계열의 마지막
+# revision에서 왕복을 닫는다. 이후 migration을 포함한 전역 ``head``에서 downgrade를
+# 시도하면 unrelated forward-only fence를 검증 자체가 우회하게 된다.
+_ROUNDTRIP_TYPED_SUBTYPE_REVISION = "0087_route_area_subtypes"
 
 _ROUNDTRIP_SEED_SQL = """
 INSERT INTO feature.features (feature_id, kind, name, category, status, updated_at)
@@ -1122,14 +1125,14 @@ async def _detail_digests(dsn: str, relation: str) -> dict[str, str]:
 
 
 async def test_subtype_migration_round_trip_is_lossless(pg_container: Any) -> None:
-    """``head`` → ``0083`` → ``head`` 왕복에서 조립 detail이 md5까지 동일하다.
+    """typed-subtype head → ``0083`` → typed-subtype head 왕복은 무손실이다.
 
     0086 downgrade는 뷰와 **같은 식**으로 core ``detail``/``geom``을 역조립한다.
     무손실이 아니면 롤백 가능성이 사라지므로, ADR-086 근거절의 731k행 전수 대조를
     회귀 가드 크기로 축소해 상시 고정한다.
     """
     dsn = await _fresh_database(pg_container)
-    await asyncio.to_thread(_run_alembic, dsn, "head")
+    await asyncio.to_thread(_run_alembic, dsn, _ROUNDTRIP_TYPED_SUBTYPE_REVISION)
     await _seed_subtypes_at_head(dsn)
 
     at_head = await _detail_digests(dsn, "feature.features_detailed")
@@ -1152,8 +1155,8 @@ async def test_subtype_migration_round_trip_is_lossless(pg_container: Any) -> No
         "tvn35:mig:area": "ST_MultiPolygon",
     }
 
-    # 다시 head로 — backfill이 같은 값을 typed 컬럼으로 되돌린다.
-    await asyncio.to_thread(_run_alembic, dsn, "head")
+    # typed-subtype head로 다시 전개 — backfill이 같은 값을 typed 컬럼으로 되돌린다.
+    await asyncio.to_thread(_run_alembic, dsn, _ROUNDTRIP_TYPED_SUBTYPE_REVISION)
     assert await _detail_digests(dsn, "feature.features_detailed") == at_head
 
 

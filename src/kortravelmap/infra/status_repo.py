@@ -103,9 +103,13 @@ GROUP BY kind
 """
 
 _SOURCE_RECORDS_SQL: Final[str] = """
-SELECT provider, count(*) AS n
-FROM provider_sync.source_records
-GROUP BY provider
+SELECT dataset.provider, count(*) AS n
+FROM provider_sync.source_records AS record
+JOIN provider_sync.source_entities AS entity
+  ON entity.source_entity_key = record.source_entity_key
+JOIN provider_sync.provider_datasets AS dataset
+  ON dataset.provider_dataset_id = entity.provider_dataset_id
+GROUP BY dataset.provider
 """
 
 _IMPORT_JOBS_SQL: Final[str] = """

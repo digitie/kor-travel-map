@@ -100,13 +100,17 @@ def test_offline_upload_orm_checksum_idempotency_constraint_matches_migration() 
         constraint
         for constraint in OfflineUploadRow.__table__.constraints
         if isinstance(constraint, UniqueConstraint)
-        and constraint.name == "uq_offline_uploads_provider_dataset_scope_checksum"
+        and constraint.name == "uq_offline_uploads_dataset_scope_checksum"
     ]
 
     assert len(constraints) == 1
+    # writer가 이 열 집합을 ``ON CONFLICT`` 중재자로 지목한다. 폭이 달라지면
+    # PostgreSQL이 42P10으로 거절하므로 여기서 못박는다. 열 집합은 identity
+    # triple + checksum이다(alembic 0092) — ``operation_key``가 빠지면 형제
+    # operation으로 교체한 뒤 같은 파일을 다시 올릴 수 없다.
     assert [column.name for column in constraints[0].columns] == [
-        "provider",
-        "dataset_key",
+        "provider_dataset_id",
         "sync_scope",
+        "operation_key",
         "checksum_sha256",
     ]

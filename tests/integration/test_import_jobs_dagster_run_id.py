@@ -11,8 +11,8 @@ from typing import TYPE_CHECKING
 import pytest
 from sqlalchemy import text
 
-from kortravelmap.core.feature_operation import ProviderDatasetOperationKey
 from kortravelmap.infra.jobs_repo import (
+    ImportJobDatasetTarget,
     bind_import_job_dagster_run,
     enqueue_provider_dataset_import_job,
     enqueue_unpaired_import_job,
@@ -25,6 +25,40 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
 pytestmark = pytest.mark.integration
+
+
+async def _canonical_membership(session: AsyncSession) -> ImportJobDatasetTarget:
+    """catalog에서 활성 refresh triple 하나를 골라 job membership으로 만든다.
+
+    T-VN-33 이후 job identity는 ``provider_dataset_id + sync_scope + operation_key``
+    뿐이다 — provider/dataset_key 사본은 ``ops.import_jobs``에서 사라졌고 membership은
+    ``ops.import_job_datasets``가 든다(ADR-088). 0089가 catalog를 seed하므로 실제 행을
+    읽어 쓴다.
+    """
+    row = (
+        await session.execute(
+            text(
+                """
+                SELECT scope.provider_dataset_id, scope.sync_scope, scope.operation_key
+                FROM provider_sync.provider_dataset_operation_scopes AS scope
+                JOIN provider_sync.provider_datasets AS dataset
+                  ON dataset.provider_dataset_id = scope.provider_dataset_id
+                JOIN provider_sync.provider_dataset_operations AS operation
+                  ON operation.provider_dataset_id = scope.provider_dataset_id
+                 AND operation.operation_key = scope.operation_key
+                WHERE dataset.is_active AND operation.is_enabled
+                  AND scope.operation_kind = 'refresh'
+                ORDER BY scope.provider_dataset_id, scope.sync_scope, scope.operation_key
+                LIMIT 1
+                """
+            )
+        )
+    ).one()
+    return ImportJobDatasetTarget(
+        provider_dataset_id=int(row.provider_dataset_id),
+        sync_scope=str(row.sync_scope),
+        operation_key=str(row.operation_key),
+    )
 
 
 async def _column_value(session: AsyncSession, job_id: str) -> str | None:
@@ -53,28 +87,58 @@ async def test_enqueue_writes_explicit_dagster_run_id(
     assert await _column_value(migrated_session, job.job_id) == "run-enqueue"
 
 
-async def test_generic_exact_pair_is_stored_and_inherited_by_events(
+async def test_generic_exact_membership_is_stored_and_inherited_by_events(
     migrated_session: AsyncSession,
 ) -> None:
-    pair = ProviderDatasetOperationKey("python-kma-api", "forecast")
+    membership = await _canonical_membership(migrated_session)
     job = await enqueue_provider_dataset_import_job(
         migrated_session,
         kind="provider_load",
-        provider_dataset=pair,
+        dataset_membership=membership,
         trigger_kind="manual",
     )
+    assert job.dataset_membership_mode != "root"
+    assert [
+        (member.provider_dataset_id, member.sync_scope, member.operation_key)
+        for member in job.dataset_memberships
+    ] == [
+        (
+            membership.provider_dataset_id,
+            membership.sync_scope,
+            membership.operation_key,
+        )
+    ]
+    stored = job.dataset_memberships[0]
+
     event = await record_import_job_event(
         migrated_session,
         job.job_id,
         level="info",
         message="identity inherited",
+        import_job_dataset_id=stored.import_job_dataset_id,
     )
 
-    assert job.provider == pair.provider
-    assert job.dataset_key == pair.dataset_key
     assert job.trigger_kind == "manual"
     assert event is not None
-    assert (event.provider, event.dataset_key) == (pair.provider, pair.dataset_key)
+    assert event.import_job_dataset_id == stored.import_job_dataset_id
+    # event가 실제로 job membership triple을 상속했는지 DB에서 재확인한다.
+    assert (
+        await migrated_session.execute(
+            text(
+                "SELECT member.provider_dataset_id, member.sync_scope, "
+                "       member.operation_key "
+                "FROM ops.import_job_events AS event "
+                "JOIN ops.import_job_datasets AS member "
+                "  ON member.import_job_dataset_id = event.import_job_dataset_id "
+                "WHERE event.event_id = CAST(:event_id AS uuid)"
+            ),
+            {"event_id": event.event_id},
+        )
+    ).one() == (
+        membership.provider_dataset_id,
+        membership.sync_scope,
+        membership.operation_key,
+    )
 
 
 async def test_start_does_not_infer_legacy_payload_run_id(

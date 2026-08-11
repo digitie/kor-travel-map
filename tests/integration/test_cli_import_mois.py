@@ -32,7 +32,11 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.integration
 
 _TRUNCATE_SQL = (
-    "TRUNCATE feature.features, provider_sync.source_records, "
+    # ``source_entities``를 빼면 record만 지워지고 entity가 링크 없이 남아
+    # 정합성 검사 F1(orphan source_entity)이 **다른 테스트에서** 켜진다.
+    # T-VN-33이 head를 끼우면서 record CASCADE가 더 이상 entity를 지우지 않는다.
+    "TRUNCATE feature.features, provider_sync.source_entities, "
+    "provider_sync.source_entity_heads, provider_sync.source_records, "
     "provider_sync.source_links, provider_sync.provider_sync_state, "
     "ops.import_jobs RESTART IDENTITY CASCADE"
 )
@@ -133,8 +137,13 @@ async def test_cli_import_mois_incremental_advances_cursor(
     from kortravelmap.providers.mois import DATASET_KEY_HISTORY
 
     async with AsyncSession(migrated_engine) as session:
+        # T-VN-33: sync state는 (dataset, sync_scope, operation_key) triple로
+        # 잡힌다 — 0089가 seed한 canonical operation key로 조회한다.
         state = await get_sync_state(
-            session, provider=PROVIDER_NAME, dataset_key=DATASET_KEY_HISTORY
+            session,
+            provider=PROVIDER_NAME,
+            dataset_key=DATASET_KEY_HISTORY,
+            operation_key="mois_license_incremental_update",
         )
     assert state is not None
     assert state.cursor == {"last_modified_date": "2026-06-01"}
@@ -200,7 +209,10 @@ async def test_cli_import_mois_closed_inactivates(
 
     async with AsyncSession(migrated_engine) as session:
         state = await get_sync_state(
-            session, provider=PROVIDER_NAME, dataset_key=DATASET_KEY_CLOSED
+            session,
+            provider=PROVIDER_NAME,
+            dataset_key=DATASET_KEY_CLOSED,
+            operation_key="mois_license_closed_update",
         )
     assert state is not None
     assert state.cursor == {"last_modified_date": "2026-06-03"}

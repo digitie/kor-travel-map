@@ -1,6 +1,6 @@
 """``kortravelmap.api.etl_fixtures`` — ETL preview용 fixture sample.
 
-본 모듈은 canonical ``POST /ops/datasets/preview``가 사용하는 hard-coded
+본 모듈은 canonical ``POST /ops/datasets/{provider_dataset_id}/preview``가 사용하는
 fixture를 모은다. 실 provider client 없이 본 lib ``providers/*`` 변환 함수의
 동작을 확인할 수 있다.
 

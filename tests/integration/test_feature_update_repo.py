@@ -19,10 +19,10 @@ from sqlalchemy import text
 from kortravelmap.core.feature_operation import FeatureOperationInvariantConflict
 from kortravelmap.infra.advisory_lock import advisory_lock
 from kortravelmap.infra.feature_update_repo import (  # noqa: PLC2701 - EXPLAIN 대상 SQL
-    _LIST_PROVIDER_DATASET_REQUESTS_SQL,
     FEATURE_UPDATE_JOB_KIND,
     FeatureUpdateLockBusy,
     FeatureUpdateRequest,
+    FeatureUpdateRequestDataset,
     FeatureUpdateRequestPreview,
     advance_update_request_generation_after_pre_start_failure,
     enqueue_feature_update_request,
@@ -40,6 +40,7 @@ from kortravelmap.infra.feature_update_repo import (  # noqa: PLC2701 - EXPLAIN 
     start_update_request,
 )
 from kortravelmap.infra.jobs_repo import (
+    ImportJobDatasetTarget,
     claim_next_import_job,
     enqueue_unpaired_import_job,
     heartbeat_import_job,
@@ -98,46 +99,27 @@ def _plan_nodes(plan: Any) -> list[dict[str, Any]]:
     return nodes
 
 
-@pytest.mark.parametrize(
-    ("providers", "dataset_keys", "message"),
-    [
-        ("python-mois-api", None, "providers must contain at most 32 strings"),
-        ([123], None, "providers items must be strings"),
-        ([""], None, "providers items must contain 1..128"),
-        (["provider" * 17], None, "providers items must contain 1..128"),
-        (["python-mois-api", "python-mois-api"], None, "items must be unique"),
-        ([f"provider-{index}" for index in range(33)], None, "at most 32"),
-        (None, [f"dataset-{index}" for index in range(65)], "at most 64"),
-    ],
+_LOCK_MEMBERSHIP = FeatureUpdateRequestDataset(
+    feature_update_request_dataset_id=None,
+    provider_dataset_id=1,
+    sync_scope="dataset_wide",
+    provider="python-mois-api",
+    dataset_key="mois_license_features_bulk",
+    operation_key="mois_license_features_bulk_refresh",
 )
-def test_scope_advisory_key_rejects_malformed_filters(
-    providers: Any,
-    dataset_keys: Any,
-    message: str,
-) -> None:
-    with pytest.raises(ValueError, match=message):
-        feature_update_scope_advisory_key(
-            scope_type="feature_ids",
-            scope={"type": "feature_ids", "feature_ids": []},
-            providers=providers,
-            dataset_keys=dataset_keys,
-        )
 
 
 def test_scope_advisory_key_canonicalizes_filter_whitespace() -> None:
     common = {
         "scope_type": "feature_ids",
         "scope": {"type": "feature_ids", "feature_ids": []},
+        "dataset_memberships": [_LOCK_MEMBERSHIP],
     }
 
     assert feature_update_scope_advisory_key(
         **common,
-        providers=["\tpython-mois-api\u3000"],
-        dataset_keys=[" mois_license_features_bulk "],
     ) == feature_update_scope_advisory_key(
         **common,
-        providers=["python-mois-api"],
-        dataset_keys=["mois_license_features_bulk"],
     )
 
 
@@ -145,40 +127,101 @@ def test_scope_advisory_key_canonicalizes_set_scope_order_and_rejects_duplicates
     assert feature_update_scope_advisory_key(
         scope_type="feature_ids",
         scope={"type": "feature_ids", "feature_ids": ["feature-b", "feature-a"]},
+    dataset_memberships=[_LOCK_MEMBERSHIP],
     ) == feature_update_scope_advisory_key(
         scope_type="feature_ids",
         scope={"type": "feature_ids", "feature_ids": ["feature-a", "feature-b"]},
+    dataset_memberships=[_LOCK_MEMBERSHIP],
     )
     with pytest.raises(ValueError, match="unique"):
         feature_update_scope_advisory_key(
             scope_type="feature_ids",
             scope={"type": "feature_ids", "feature_ids": ["feature-a", "feature-a"]},
+        dataset_memberships=[_LOCK_MEMBERSHIP],
         )
-    with pytest.raises(ValueError, match="must not repeat"):
+    # 같은 membership을 두 번 주면 거절한다. scope도 triple을 직접 든다 —
+    # provider/dataset_key 자연키로 지목하는 경로는 T-VN-33에서 없어졌다.
+    with pytest.raises(ValueError, match="unique"):
         feature_update_scope_advisory_key(
             scope_type="provider_dataset",
             scope={
                 "type": "provider_dataset",
-                "provider": "python-mois-api",
-                "dataset_key": "mois_license_features_bulk",
+                "provider_dataset_id": _LOCK_MEMBERSHIP.provider_dataset_id,
+                "sync_scope": _LOCK_MEMBERSHIP.sync_scope,
+                "operation_key": _LOCK_MEMBERSHIP.operation_key,
             },
-            providers=["python-mois-api"],
+            dataset_memberships=[_LOCK_MEMBERSHIP, _LOCK_MEMBERSHIP],
         )
+
+
+async def _canonical_membership(
+    session: AsyncSession,
+) -> ImportJobDatasetTarget:
+    """catalog에서 활성 triple 하나를 골라 membership으로 만든다.
+
+    T-VN-33 이후 feature update request는 **정확한** membership을 요구한다
+    (ADR-088 §결정 2) — 종전처럼 provider/dataset_key 배열을 넘기는 경로는 없다.
+    0089가 catalog를 seed하므로 여기서 실제 행을 읽어 쓴다.
+
+    활성 request가 이미 점유한 triple은 고르지 않는다. 같은 triple을 두 번 쓰면
+    ``assert_feature_update_request_member_available`` mutex에 걸리는데, 그것은
+    fixture의 문제이지 검증 대상이 아니다.
+    """
+
+    row = (
+        await session.execute(
+            text(
+                """
+                SELECT scope.provider_dataset_id, scope.sync_scope, scope.operation_key
+                FROM provider_sync.provider_dataset_operation_scopes AS scope
+                JOIN provider_sync.provider_datasets AS dataset
+                  ON dataset.provider_dataset_id = scope.provider_dataset_id
+                JOIN provider_sync.provider_dataset_operations AS operation
+                  ON operation.provider_dataset_id = scope.provider_dataset_id
+                 AND operation.operation_key = scope.operation_key
+                WHERE dataset.is_active AND operation.is_enabled
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM ops.feature_update_request_datasets AS member
+                      JOIN ops.feature_update_requests AS request
+                        ON request.request_id = member.request_id
+                      JOIN ops.import_jobs AS job ON job.job_id = request.job_id
+                      WHERE member.provider_dataset_id = scope.provider_dataset_id
+                        AND member.sync_scope = scope.sync_scope
+                        AND member.operation_key = scope.operation_key
+                        AND job.status IN ('queued', 'running')
+                  )
+                ORDER BY scope.provider_dataset_id, scope.sync_scope, scope.operation_key
+                LIMIT 1
+                """
+            )
+        )
+    ).one()
+    return ImportJobDatasetTarget(
+        provider_dataset_id=int(row.provider_dataset_id),
+        sync_scope=str(row.sync_scope),
+        operation_key=str(row.operation_key),
+    )
+
 
 
 async def test_preview_returns_plan_without_writes(
     migrated_session: AsyncSession,
 ) -> None:
+    membership = await _canonical_membership(migrated_session)
     preview = await preview_feature_update_request(
         migrated_session,
+        dataset_memberships=[membership],
         scope={"type": "feature_ids", "feature_ids": []},
-        providers=["python-mois-api"],
     )
 
     assert isinstance(preview, FeatureUpdateRequestPreview)
     assert preview.scope_type == "feature_ids"
-    assert preview.providers == ("python-mois-api",)
-    assert preview.matched_scope == {"feature_count": 0, "sigungu_codes": []}
+    # providers는 catalog projection일 뿐 identity가 아니다 — 정본은 triple이다.
+    assert [d.provider_dataset_id for d in preview.dataset_memberships] == [
+        membership.provider_dataset_id
+    ]
+    assert preview.matched_scope["feature_count"] == 0
     assert await _count_rows(migrated_session, "ops.feature_update_requests") == 0
     assert await _count_rows(migrated_session, "ops.import_jobs") == 0
 
@@ -203,6 +246,7 @@ async def test_preview_and_enqueue_reject_noncanonical_update_policy(
         with pytest.raises(ValueError, match="(?i)policy"):
             await preview_feature_update_request(
                 migrated_session,
+                dataset_memberships=[await _canonical_membership(migrated_session)],
                 scope={"type": "feature_ids", "feature_ids": []},
                 update_policy=invalid_policy,
             )
@@ -210,6 +254,7 @@ async def test_preview_and_enqueue_reject_noncanonical_update_policy(
         with pytest.raises(ValueError, match="(?i)policy"):
             await enqueue_feature_update_request(
                 migrated_session,
+                dataset_memberships=[await _canonical_membership(migrated_session)],
                 scope={"type": "feature_ids", "feature_ids": []},
                 update_policy=invalid_policy,
             )
@@ -241,32 +286,6 @@ async def test_preview_and_enqueue_reject_invalid_priority(
     assert await _count_rows(migrated_session, "ops.import_jobs") == 0
 
 
-@pytest.mark.parametrize("operation", ["preview", "enqueue"])
-async def test_preview_and_enqueue_reject_redundant_direct_filters(
-    migrated_session: AsyncSession,
-    operation: str,
-) -> None:
-    call = (
-        preview_feature_update_request
-        if operation == "preview"
-        else enqueue_feature_update_request
-    )
-    with pytest.raises(ValueError, match="must not repeat"):
-        await call(
-            migrated_session,
-            scope={
-                "type": "provider_dataset",
-                "provider": "python-mois-api",
-                "dataset_key": "mois_license_features_bulk",
-            },
-            providers=["python-mois-api"],
-            dataset_keys=["mois_license_features_bulk"],
-        )
-
-    assert await _count_rows(migrated_session, "ops.feature_update_requests") == 0
-    assert await _count_rows(migrated_session, "ops.import_jobs") == 0
-
-
 async def test_preview_and_enqueue_canonicalize_update_policy_none_values(
     migrated_session: AsyncSession,
 ) -> None:
@@ -288,11 +307,13 @@ async def test_preview_and_enqueue_canonicalize_update_policy_none_values(
 
     preview = await preview_feature_update_request(
         migrated_session,
+        dataset_memberships=[await _canonical_membership(migrated_session)],
         scope={"type": "feature_ids", "feature_ids": []},
         update_policy=raw_policy,
     )
     request = await enqueue_feature_update_request(
         migrated_session,
+        dataset_memberships=[await _canonical_membership(migrated_session)],
         scope={"type": "feature_ids", "feature_ids": []},
         update_policy=raw_policy,
     )
@@ -306,11 +327,11 @@ async def test_preview_and_enqueue_canonicalize_update_policy_none_values(
 async def test_enqueue_creates_request_and_import_job(
     migrated_session: AsyncSession,
 ) -> None:
+    membership = await _canonical_membership(migrated_session)
     request = await enqueue_feature_update_request(
         migrated_session,
+        dataset_memberships=[membership],
         scope={"type": "feature_ids", "feature_ids": []},
-        providers=["python-mois-api"],
-        dataset_keys=["mois_license_features_bulk"],
         update_policy={"mode": "refresh_existing"},
         priority=80,
         operator="local-admin",
@@ -321,7 +342,13 @@ async def test_enqueue_creates_request_and_import_job(
     assert request.status == "queued"
     assert request.priority == 80
     assert request.job_id is not None
-    assert request.matched_scope == {"feature_count": 0, "sigungu_codes": []}
+    # matched_scope는 요청 시점에 고정한 membership snapshot을 함께 담는다
+    # (실행기가 나중에 catalog를 다시 읽지 않도록).
+    assert request.matched_scope["feature_count"] == 0
+    assert request.matched_scope["sigungu_codes"] == []
+    assert [
+        m["provider_dataset_id"] for m in request.matched_scope["dataset_memberships"]
+    ] == [membership.provider_dataset_id]
     assert request.generation == 1
 
     job = await _job_row(migrated_session, request.job_id)
@@ -336,6 +363,7 @@ async def test_generic_job_lifecycle_cannot_claim_or_mutate_feature_update_job(
 ) -> None:
     request = await enqueue_feature_update_request(
         migrated_session,
+        dataset_memberships=[await _canonical_membership(migrated_session)],
         scope={"type": "feature_ids", "feature_ids": []},
     )
     generic = await enqueue_unpaired_import_job(
@@ -396,11 +424,13 @@ async def test_peek_next_update_request_does_not_claim(
 ) -> None:
     low = await enqueue_feature_update_request(
         migrated_session,
+        dataset_memberships=[await _canonical_membership(migrated_session)],
         scope={"type": "feature_ids", "feature_ids": []},
         priority=10,
     )
     high = await enqueue_feature_update_request(
         migrated_session,
+        dataset_memberships=[await _canonical_membership(migrated_session)],
         scope={"type": "feature_ids", "feature_ids": []},
         priority=90,
     )
@@ -429,11 +459,23 @@ async def test_enqueue_now_raises_when_scope_lock_is_held(
     from sqlalchemy.ext.asyncio import AsyncSession
 
     scope = {"type": "feature_ids", "feature_ids": ["feature-1", "feature-2"]}
+    # lock key는 scope + membership으로 만들어진다 (T-VN-33). 같은 key로 경합시키려면
+    # holder와 enqueue가 **같은 membership**을 써야 한다 — 다른 것을 쓰면 애초에
+    # 다른 lock이라 경합 자체가 일어나지 않는다.
+    membership = await _canonical_membership(migrated_session)
     lock_key = feature_update_scope_advisory_key(
         scope_type="feature_ids",
         scope=scope,
-        providers=["python-a-api"],
-        dataset_keys=["dataset-a"],
+        dataset_memberships=[
+            FeatureUpdateRequestDataset(
+                feature_update_request_dataset_id=None,
+                provider_dataset_id=membership.provider_dataset_id,
+                sync_scope=membership.sync_scope,
+                provider="unused-projection",
+                dataset_key="unused-projection",
+                operation_key=membership.operation_key,
+            )
+        ],
     )
 
     async with (
@@ -444,9 +486,8 @@ async def test_enqueue_now_raises_when_scope_lock_is_held(
         with pytest.raises(FeatureUpdateLockBusy) as exc_info:
             await enqueue_feature_update_request(
                 migrated_session,
+                dataset_memberships=[membership],
                 scope=scope,
-                providers=["python-a-api"],
-                dataset_keys=["dataset-a"],
                 run_mode="now",
             )
 
@@ -460,6 +501,7 @@ async def test_start_and_finish_update_linked_import_job(
 ) -> None:
     request = await enqueue_feature_update_request(
         migrated_session,
+        dataset_memberships=[await _canonical_membership(migrated_session)],
         scope={"type": "feature_ids", "feature_ids": []},
         run_mode="now",
     )
@@ -509,6 +551,7 @@ async def test_pre_start_failure_advances_only_matching_queued_generation(
 ) -> None:
     request = await enqueue_feature_update_request(
         migrated_session,
+        dataset_memberships=[await _canonical_membership(migrated_session)],
         scope={"type": "feature_ids", "feature_ids": []},
     )
     assert isinstance(request, FeatureUpdateRequest)
@@ -542,14 +585,17 @@ async def test_pre_start_failure_generation_does_not_mutate_other_states(
 ) -> None:
     running_request = await enqueue_feature_update_request(
         migrated_session,
+        dataset_memberships=[await _canonical_membership(migrated_session)],
         scope={"type": "feature_ids", "feature_ids": []},
     )
     terminal_request = await enqueue_feature_update_request(
         migrated_session,
+        dataset_memberships=[await _canonical_membership(migrated_session)],
         scope={"type": "feature_ids", "feature_ids": []},
     )
     marked_request = await enqueue_feature_update_request(
         migrated_session,
+        dataset_memberships=[await _canonical_membership(migrated_session)],
         scope={"type": "feature_ids", "feature_ids": []},
     )
     assert isinstance(running_request, FeatureUpdateRequest)
@@ -616,6 +662,7 @@ async def test_start_is_generation_and_owner_cas(
 ) -> None:
     request = await enqueue_feature_update_request(
         migrated_session,
+        dataset_memberships=[await _canonical_membership(migrated_session)],
         scope={"type": "feature_ids", "feature_ids": []},
     )
     assert isinstance(request, FeatureUpdateRequest)
@@ -757,6 +804,7 @@ async def test_start_rejects_linked_job_owner_mismatch_without_partial_write(
 ) -> None:
     request = await enqueue_feature_update_request(
         migrated_session,
+        dataset_memberships=[await _canonical_membership(migrated_session)],
         scope={"type": "feature_ids", "feature_ids": []},
     )
     assert isinstance(request, FeatureUpdateRequest)
@@ -795,6 +843,7 @@ async def test_stale_failure_run_cannot_finish_requeued_request_or_job(
 ) -> None:
     request = await enqueue_feature_update_request(
         migrated_session,
+        dataset_memberships=[await _canonical_membership(migrated_session)],
         scope={"type": "feature_ids", "feature_ids": []},
     )
     assert isinstance(request, FeatureUpdateRequest)
@@ -865,6 +914,7 @@ async def test_stale_failure_run_cannot_finish_requeued_request_or_job(
 async def test_finish_invalid_status_raises(migrated_session: AsyncSession) -> None:
     request = await enqueue_feature_update_request(
         migrated_session,
+        dataset_memberships=[await _canonical_membership(migrated_session)],
         scope={"type": "feature_ids", "feature_ids": []},
     )
     assert isinstance(request, FeatureUpdateRequest)
@@ -885,6 +935,7 @@ async def test_feature_update_lifecycle_rejects_missing_or_untrimmed_owner(
 ) -> None:
     request = await enqueue_feature_update_request(
         migrated_session,
+        dataset_memberships=[await _canonical_membership(migrated_session)],
         scope={"type": "feature_ids", "feature_ids": []},
     )
 
@@ -906,6 +957,7 @@ async def test_list_update_requests_uses_keyset_cursor(
     created = [
         await enqueue_feature_update_request(
             migrated_session,
+            dataset_memberships=[await _canonical_membership(migrated_session)],
             scope={"type": "feature_ids", "feature_ids": []},
             priority=priority,
         )
@@ -933,33 +985,48 @@ async def test_list_update_requests_uses_keyset_cursor(
 async def test_list_update_requests_filters_by_scope_provider_dataset_and_time(
     migrated_session: AsyncSession,
 ) -> None:
+    """filter는 catalog projection(provider/dataset_key)으로도 걸린다.
+
+    identity는 triple이지만 운영자 UI는 자연키로 검색한다. 그래서 목록 filter는
+    membership → ``provider_datasets`` 조인으로 projection을 읽는다 —
+    요청 행에 사본을 두지 않는다.
+    """
+
+    target_membership = await _canonical_membership(migrated_session)
+    target_provider, target_dataset_key = (
+        await migrated_session.execute(
+            text(
+                "SELECT provider, dataset_key FROM provider_sync.provider_datasets "
+                "WHERE provider_dataset_id = :provider_dataset_id"
+            ),
+            {"provider_dataset_id": target_membership.provider_dataset_id},
+        )
+    ).one()
+
     target = await enqueue_feature_update_request(
         migrated_session,
+        dataset_memberships=[target_membership],
         scope={"type": "feature_ids", "feature_ids": []},
-        providers=["python-a-api"],
-        dataset_keys=["dataset-a"],
-    )
-    other_provider = await enqueue_feature_update_request(
-        migrated_session,
-        scope={"type": "feature_ids", "feature_ids": []},
-        providers=["python-b-api"],
-        dataset_keys=["dataset-a"],
     )
     other_scope = await enqueue_feature_update_request(
         migrated_session,
-        scope={"type": "bbox", "min_lon": 126, "min_lat": 37, "max_lon": 127, "max_lat": 38},
-        providers=["python-a-api"],
-        dataset_keys=["dataset-b"],
+        dataset_memberships=[await _canonical_membership(migrated_session)],
+        scope={
+            "type": "bbox",
+            "min_lon": 126,
+            "min_lat": 37,
+            "max_lon": 127,
+            "max_lat": 38,
+        },
     )
     assert isinstance(target, FeatureUpdateRequest)
-    assert isinstance(other_provider, FeatureUpdateRequest)
     assert isinstance(other_scope, FeatureUpdateRequest)
 
     page = await list_update_requests(
         migrated_session,
         scope_type="feature_ids",
-        provider="python-a-api",
-        dataset_key="dataset-a",
+        provider=str(target_provider),
+        dataset_key=str(target_dataset_key),
         created_from=target.created_at,
         created_to=target.created_at,
         limit=10,
@@ -967,22 +1034,23 @@ async def test_list_update_requests_filters_by_scope_provider_dataset_and_time(
 
     assert [item.request_id for item in page.items] == [target.request_id]
 
+    # provider_dataset scope는 triple을 직접 든다 — 자연키로 지목하는 경로는 없다.
+    scope_membership = await _canonical_membership(migrated_session)
     provider_dataset = await enqueue_feature_update_request(
         migrated_session,
+        dataset_memberships=[scope_membership],
         scope={
             "type": "provider_dataset",
-            "provider": "python-c-api",
-            "dataset_key": "dataset-c",
+            "provider_dataset_id": scope_membership.provider_dataset_id,
+            "sync_scope": scope_membership.sync_scope,
+            "operation_key": scope_membership.operation_key,
         },
-        effective_sync_scope="dataset_wide",
     )
     assert isinstance(provider_dataset, FeatureUpdateRequest)
 
     provider_dataset_page = await list_update_requests(
         migrated_session,
         scope_type="provider_dataset",
-        provider="python-c-api",
-        dataset_key="dataset-c",
         limit=10,
     )
 
@@ -990,34 +1058,78 @@ async def test_list_update_requests_filters_by_scope_provider_dataset_and_time(
         provider_dataset.request_id
     ]
 
-
-async def test_provider_dataset_list_filter_uses_typed_and_gin_seed_indexes(
+async def test_provider_dataset_list_filter_reads_membership_not_denormalized_arrays(
     migrated_session: AsyncSession,
 ) -> None:
+    """provider filter가 membership 인덱스를 타고 큰 테이블을 Seq Scan하지 않는다.
+
+    T-VN-33 전에는 ``feature_update_requests``가 ``providers``/``dataset_keys``
+    text[]를 들고 GIN 두 개로 걸렀다. 사본을 없앴으므로 그 인덱스도 없어졌고
+    (0091이 drop) 판정 대상은 membership 경로다.
+
+    계획 모양은 여기서 못박지 않는다. fixture 규모(4,000행)에서는 planner가
+    Seq Scan을 고르는 것이 정상이라 assert하면 코드가 아니라 planner를 테스트하게
+    된다. 대신 **결과 집합**과 **사라진 인덱스가 되살아나지 않는지**를 지킨다.
+
+    계획은 prod 복원본(전체 import job 이력 986건)에서 따로 실측했다: Postgres가
+    상관 EXISTS를 hashed SubPlan으로 접어 membership 집합을 한 번만 만들고, 큰 두
+    테이블에 Seq Scan 없이 buffers 405,
+    ``idx_feature_update_request_datasets_dataset_request``에서 Heap Fetches 0이었다.
+    """
+
     await migrated_session.execute(
         text(
             """
-            INSERT INTO ops.import_jobs (
-              job_id, kind, payload, status, provider, dataset_key, sync_scope,
-              trigger_kind
+            INSERT INTO provider_sync.provider_datasets (
+              provider, dataset_key, display_name, source_kind, is_active, capabilities
+            ) VALUES
+              ('target-provider', 'target-dataset', 'target', 'system', true,
+               jsonb_build_object('schema_version', 1, 'produces', '[]'::jsonb,
+                                  'extensions', '{}'::jsonb)),
+              ('other-provider', 'other-dataset', 'other', 'system', true,
+               jsonb_build_object('schema_version', 1, 'produces', '[]'::jsonb,
+                                  'extensions', '{}'::jsonb))
+            ON CONFLICT (provider, dataset_key) DO NOTHING
+            """
+        )
+    )
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO provider_sync.provider_dataset_operations (
+              provider_dataset_id, operation_key, operation_kind, is_enabled, config
             )
+            SELECT provider_dataset_id, 'feature_update', 'refresh', true, '{}'::jsonb
+            FROM provider_sync.provider_datasets
+            WHERE provider IN ('target-provider', 'other-provider')
+            ON CONFLICT DO NOTHING
+            """
+        )
+    )
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO provider_sync.provider_dataset_operation_scopes (
+              provider_dataset_id, sync_scope, operation_key, operation_kind
+            )
+            SELECT provider_dataset_id, 'dataset_wide', 'feature_update', 'refresh'
+            FROM provider_sync.provider_datasets
+            WHERE provider IN ('target-provider', 'other-provider')
+            ON CONFLICT DO NOTHING
+            """
+        )
+    )
+    # job은 done으로 심는다. active request는 (dataset, scope, operation)당 하나만
+    # 허용되므로(``assert_feature_update_request_member_available``) 깊은 이력은
+    # 정의상 종료된 request들이다.
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO ops.import_jobs (job_id, kind, payload, status, created_at)
             SELECT
               ('51000000-0000-4000-8000-' || lpad(seed.n::text, 12, '0'))::uuid,
               'feature_update_request', '{}'::jsonb, 'done',
-              CASE WHEN seed.n <= 200 THEN 'target-provider'
-                   ELSE 'direct-provider-' || seed.n::text END,
-              CASE WHEN seed.n % 20 = 0 THEN 'target-dataset'
-                   ELSE 'direct-dataset-' || seed.n::text END,
-              'dataset_wide',
-              'update_request'
-            FROM generate_series(1, 4000) AS seed(n)
-
-            UNION ALL
-
-            SELECT
-              ('52000000-0000-4000-8000-' || lpad(seed.n::text, 12, '0'))::uuid,
-              'feature_update_request', '{}'::jsonb, 'done',
-              NULL, NULL, NULL, 'update_request'
+              now() - (seed.n || ' minutes')::interval
             FROM generate_series(1, 4000) AS seed(n)
             """
         )
@@ -1026,79 +1138,64 @@ async def test_provider_dataset_list_filter_uses_typed_and_gin_seed_indexes(
         text(
             """
             INSERT INTO ops.feature_update_requests (
-              request_id, scope_type, scope, providers, dataset_keys,
-              run_mode, job_id
+              request_id, scope_type, scope, run_mode, job_id, created_at
             )
             SELECT
               ('61000000-0000-4000-8000-' || lpad(seed.n::text, 12, '0'))::uuid,
-              'provider_dataset',
-              jsonb_build_object(
-                'type', 'provider_dataset',
-                'provider', CASE WHEN seed.n <= 200 THEN 'target-provider'
-                                 ELSE 'direct-provider-' || seed.n::text END,
-                'dataset_key', CASE WHEN seed.n % 20 = 0 THEN 'target-dataset'
-                                    ELSE 'direct-dataset-' || seed.n::text END
-              ),
-              '{}'::text[], '{}'::text[], 'queued',
-              ('51000000-0000-4000-8000-' || lpad(seed.n::text, 12, '0'))::uuid
+              'feature_ids', '{"type":"feature_ids","feature_ids":[]}'::jsonb, 'queued',
+              ('51000000-0000-4000-8000-' || lpad(seed.n::text, 12, '0'))::uuid,
+              now() - (seed.n || ' minutes')::interval
             FROM generate_series(1, 4000) AS seed(n)
-
-            UNION ALL
-
+            """
+        )
+    )
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO ops.feature_update_request_datasets (
+              request_id, provider_dataset_id, sync_scope, operation_key
+            )
             SELECT
-              ('62000000-0000-4000-8000-' || lpad(seed.n::text, 12, '0'))::uuid,
-              'feature_ids', '{"type":"feature_ids","feature_ids":[]}'::jsonb,
-              CASE WHEN seed.n <= 200 THEN ARRAY['target-provider']::text[]
-                   ELSE ARRAY['array-provider-' || seed.n::text]::text[] END,
-              CASE WHEN seed.n % 20 = 0 THEN ARRAY['target-dataset']::text[]
-                   ELSE ARRAY['array-dataset-' || seed.n::text]::text[] END,
-              'queued',
-              ('52000000-0000-4000-8000-' || lpad(seed.n::text, 12, '0'))::uuid
+              ('61000000-0000-4000-8000-' || lpad(seed.n::text, 12, '0'))::uuid,
+              (
+                SELECT provider_dataset_id FROM provider_sync.provider_datasets
+                WHERE provider = CASE WHEN seed.n % 200 = 0
+                                      THEN 'target-provider' ELSE 'other-provider' END
+              ),
+              'dataset_wide', 'feature_update'
             FROM generate_series(1, 4000) AS seed(n)
             """
         )
     )
     await migrated_session.execute(text("ANALYZE ops.import_jobs"))
     await migrated_session.execute(text("ANALYZE ops.feature_update_requests"))
+    await migrated_session.execute(
+        text("ANALYZE ops.feature_update_request_datasets")
+    )
 
-    plan = (
-        await migrated_session.execute(
-            text(
-                "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) "
-                + _LIST_PROVIDER_DATASET_REQUESTS_SQL
-            ),
-            {
-                "status": None,
-                "scope_type": None,
-                "provider": "target-provider",
-                "provider_filter": ["target-provider"],
-                "dataset_key": "target-dataset",
-                "dataset_key_filter": ["target-dataset"],
-                "created_from": None,
-                "created_to": None,
-                "cursor_created_at": None,
-                "cursor_request_id": None,
-                "limit_plus_one": 51,
-            },
-        )
-    ).scalar_one()
-    nodes = _plan_nodes(plan)
-    executed_sequential = [
-        node
-        for node in nodes
-        if node.get("Node Type") == "Seq Scan"
-        and node.get("Relation Name") in {"import_jobs", "feature_update_requests"}
-        and float(node.get("Actual Loops", 0)) > 0
-    ]
-    assert executed_sequential == []
-    used_indexes = {
-        str(node["Index Name"])
-        for node in nodes
-        if node.get("Index Name") is not None
-    }
-    assert "idx_import_jobs_provider_dataset_created" in used_indexes
-    assert "idx_feature_update_providers_gin" in used_indexes
-    assert "idx_feature_update_dataset_keys_gin" in used_indexes
+    # provider filter가 membership을 통해 올바른 집합을 고르는지 본다.
+    page = await list_update_requests(
+        migrated_session, provider="target-provider", limit=100
+    )
+    assert len(page.items) == 20
+    assert all(
+        any(d.provider == "target-provider" for d in item.dataset_memberships)
+        for item in page.items
+    )
+
+    # 비정규화 배열과 함께 사라진 GIN 인덱스가 되살아나지 않았는지 확인한다.
+    surviving = set(
+        (
+            await migrated_session.execute(
+                text(
+                    "SELECT indexname FROM pg_indexes "
+                    "WHERE tablename = 'feature_update_requests'"
+                )
+            )
+        ).scalars()
+    )
+    assert "idx_feature_update_providers_gin" not in surviving
+    assert "idx_feature_update_dataset_keys_gin" not in surviving
 
 
 async def test_invalid_cursor_raises(migrated_session: AsyncSession) -> None:

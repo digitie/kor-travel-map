@@ -8,28 +8,19 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
-from kortravelmap.api.provider_catalog import catalog_refreshable_entries
 from kortravelmap.client import AsyncKorTravelMapClient
+from kortravelmap.core.feature_operation import ProviderDatasetOperationMembership
 from kortravelmap.infra.feature_update_executor import (
     ProviderDatasetRefreshFailure,
     ProviderDatasetRefreshScope,
 )
-from kortravelmap.providers.airkorea import AIRKOREA_PROVIDER_NAME, DATASET_KEY_STATIONS
-from kortravelmap.providers.datagokr_file_data import (
-    DATAGOKR_FILEDATA_DATASETS,
-    DATAGOKR_FILEDATA_PROVIDER_NAME,
-)
+from kortravelmap.providers.feature_operation_registry import feature_operation_handler_keys
 from kortravelmap.providers.kma import (
     KMA_PROVIDER_NAME,
     KMA_SHORT_FORECAST_DATASET_KEY,
 )
 from kortravelmap.providers.knps import PROVIDER_NAME as KNPS_PROVIDER_NAME
-from kortravelmap.providers.mois import (
-    DATASET_KEY_BULK,
-    DATASET_KEY_CLOSED,
-    DATASET_KEY_DETAIL,
-    DATASET_KEY_HISTORY,
-)
+from kortravelmap.providers.mois import DATASET_KEY_BULK
 from kortravelmap.providers.mois import PROVIDER_NAME as MOIS_PROVIDER_NAME
 from kortravelmap.providers.opinet import (
     OPINET_PRICE_DATASET_KEY,
@@ -83,17 +74,16 @@ def _scope(
     provider: str = "demo",
     dataset_key: str = "places",
     scope_type: str = "provider_dataset",
-    sync_scope: str | None = None,
+    sync_scope: str | None = "dataset_wide",
+    operation_key: str = "feature_place_opinet_stations_job",
 ) -> ProviderDatasetRefreshScope:
     request_scope: dict[str, object]
     if scope_type == "provider_dataset":
         request_scope = {
             "type": "provider_dataset",
-            "provider": provider,
-            "dataset_key": dataset_key,
+            "provider_dataset_id": 1,
+            "sync_scope": sync_scope,
         }
-        if sync_scope is not None:
-            request_scope["sync_scope"] = sync_scope
     elif scope_type == "center_radius":
         request_scope = {
             "type": "center_radius",
@@ -104,6 +94,8 @@ def _scope(
         raise ValueError(f"unsupported test scope_type: {scope_type}")
     return ProviderDatasetRefreshScope(
         request_id="11111111-1111-4111-8111-111111111111",
+        provider_dataset_id=1,
+        operation_key=operation_key,
         provider=provider,
         dataset_key=dataset_key,
         scope_type=scope_type,
@@ -126,6 +118,7 @@ async def test_feature_update_asset_runner_dispatches_asset_spec() -> None:
             {
                 "records": resources.demo_records,
                 "asset_key": context_any.asset_key.to_user_string(),
+                "membership": resources.feature_update_membership,
             }
         )
         context_any.add_output_metadata({"seen": True})
@@ -153,11 +146,10 @@ async def test_feature_update_asset_runner_dispatches_asset_spec() -> None:
         settings_factory=lambda: cast(KorTravelMapSettings, object()),
         specs=(
             FeatureUpdateRunnerSpec(
-                provider="demo",
-                dataset_keys=frozenset({"places"}),
+                operation_key="feature_place_opinet_stations_job",
                 run=_run,
                 resources=_resources,
-                asset_key="feature_demo_places",
+                asset_key="feature_place_opinet_stations",
             ),
         ),
     )
@@ -165,10 +157,19 @@ async def test_feature_update_asset_runner_dispatches_asset_spec() -> None:
     result = await runner(object(), _scope())
 
     assert called == [
-        {"records": ("a", "b"), "asset_key": "feature_demo_places"}
+        {
+            "records": ("a", "b"),
+            "asset_key": "feature_place_opinet_stations",
+            "membership": ProviderDatasetOperationMembership(
+                provider_dataset_id=1,
+                sync_scope="dataset_wide",
+                operation_key="feature_place_opinet_stations_job",
+            ),
+        }
     ]
     assert result.provider == "demo"
     assert result.dataset_key == "places"
+    assert result.operation_key == "feature_place_opinet_stations_job"
     assert result.loaded_feature_ids == ("feature-1", "feature-2")
     assert result.loaded_count == 2
     assert result.metadata is not None
@@ -201,11 +202,10 @@ async def test_feature_update_asset_runner_direct_raw_path_has_zero_tracking() -
         settings_factory=lambda: cast(KorTravelMapSettings, object()),
         specs=(
             FeatureUpdateRunnerSpec(
-                provider="demo",
-                dataset_keys=frozenset({"places"}),
+                operation_key="feature_place_opinet_stations_job",
                 run=_raw,
                 resources=lambda _settings, _scope: RunnerResources({}),
-                asset_key="feature_demo_places",
+                asset_key="feature_place_opinet_stations",
             ),
         ),
     )
@@ -216,7 +216,7 @@ async def test_feature_update_asset_runner_direct_raw_path_has_zero_tracking() -
     assert guard.ensure_calls == 0
 
 
-def test_default_specs_reference_only_module_raw_symbols() -> None:
+def test_operation_specs_reference_only_module_raw_symbols() -> None:
     public_wrappers = {
         cast(Any, asset_def.op.compute_fn).decorated_fn
         for asset_def in (
@@ -226,11 +226,12 @@ def test_default_specs_reference_only_module_raw_symbols() -> None:
         )
     }
 
-    assert runner_mod._DEFAULT_SPECS  # noqa: SLF001 - production dispatch contract
-    for spec in runner_mod._DEFAULT_SPECS:  # noqa: SLF001
+    assert runner_mod._OPERATION_RUNNER_SPECS  # noqa: SLF001 - production dispatch contract
+    for spec in runner_mod._OPERATION_RUNNER_SPECS.values():  # noqa: SLF001
         assert spec.run not in public_wrappers
         assert getattr(runner_mod, spec.run.__name__, None) is spec.run
         assert spec.run.__name__.startswith(("run_feature_", "_run_kma_grid_"))
+    assert frozenset(runner_mod._OPERATION_RUNNER_SPECS) == feature_operation_handler_keys()
 
 
 async def test_feature_update_asset_runner_closes_resources_when_bind_fails(
@@ -266,11 +267,10 @@ async def test_feature_update_asset_runner_closes_resources_when_bind_fails(
         settings_factory=lambda: cast(KorTravelMapSettings, object()),
         specs=(
             FeatureUpdateRunnerSpec(
-                provider="demo",
-                dataset_keys=frozenset({"places"}),
+                operation_key="feature_place_opinet_stations_job",
                 run=_run,
                 resources=_resources,
-                asset_key="feature_demo_places",
+                asset_key="feature_place_opinet_stations",
             ),
         ),
     )
@@ -280,9 +280,8 @@ async def test_feature_update_asset_runner_closes_resources_when_bind_fails(
 
     assert teardown_calls == 1
     failure = exc_info.value
-    assert failure.provider == "demo"
-    assert failure.dataset_key == "places"
-    assert failure.sync_scope == "default"
+    assert failure.provider_dataset_id == 1
+    assert failure.sync_scope == "dataset_wide"
     assert str(failure) == "provider refresh transaction binding failed"
     assert isinstance(failure.__cause__, RuntimeError)
 
@@ -303,11 +302,10 @@ async def test_feature_update_asset_runner_types_resource_initialization_failure
         settings_factory=lambda: cast(KorTravelMapSettings, object()),
         specs=(
             FeatureUpdateRunnerSpec(
-                provider="demo",
-                dataset_keys=frozenset({"places"}),
+                operation_key="feature_place_opinet_stations_job",
                 run=_run,
                 resources=_resources,
-                asset_key="feature_demo_places",
+                asset_key="feature_place_opinet_stations",
             ),
         ),
     )
@@ -316,9 +314,8 @@ async def test_feature_update_asset_runner_types_resource_initialization_failure
         await runner(cast(Any, object()), _scope(sync_scope="dataset_wide"))
 
     failure = exc_info.value
-    assert failure.provider == "demo"
-    assert failure.dataset_key == "places"
-    assert failure.sync_scope == "default"
+    assert failure.provider_dataset_id == 1
+    assert failure.sync_scope == "dataset_wide"
     assert str(failure) == "provider refresh resource initialization failed"
 
 
@@ -332,12 +329,10 @@ async def test_kma_grid_generic_run_failure_uses_effective_external_system_scope
         settings_factory=lambda: cast(KorTravelMapSettings, object()),
         specs=(
             FeatureUpdateRunnerSpec(
-                provider=KMA_PROVIDER_NAME,
-                dataset_keys=frozenset({KMA_SHORT_FORECAST_DATASET_KEY}),
+                operation_key="feature_weather_kma_short_forecast_job",
                 run=_run,
                 resources=lambda _settings, _scope: RunnerResources({}),
-                asset_key="feature_weather_kma_grid_dispatch",
-                sync_state_failure_scope=runner_mod._kma_grid_effective_sync_scope,
+                asset_key="feature_weather_kma_short_forecast",
             ),
         ),
     )
@@ -349,12 +344,12 @@ async def test_kma_grid_generic_run_failure_uses_effective_external_system_scope
                 provider=KMA_PROVIDER_NAME,
                 dataset_key=KMA_SHORT_FORECAST_DATASET_KEY,
                 sync_scope="external_system:tripmate",
+                operation_key="feature_weather_kma_short_forecast_job",
             ),
         )
 
     failure = exc_info.value
-    assert failure.provider == KMA_PROVIDER_NAME
-    assert failure.dataset_key == KMA_SHORT_FORECAST_DATASET_KEY
+    assert failure.provider_dataset_id == 1
     assert failure.sync_scope == "external_system:tripmate"
     assert str(failure) == "provider refresh asset execution failed"
     assert isinstance(failure.__cause__, RuntimeError)
@@ -362,9 +357,9 @@ async def test_kma_grid_generic_run_failure_uses_effective_external_system_scope
 
 async def test_feature_update_asset_runner_preserves_typed_failure_when_teardown_fails() -> None:
     failure = ProviderDatasetRefreshFailure(
-        provider="demo",
-        dataset_key="places",
+        provider_dataset_id=1,
         sync_scope="dataset_wide",
+        operation_key="feature_place_opinet_stations_job",
         message="provider failed",
     )
 
@@ -380,11 +375,10 @@ async def test_feature_update_asset_runner_preserves_typed_failure_when_teardown
         settings_factory=lambda: cast(KorTravelMapSettings, object()),
         specs=(
             FeatureUpdateRunnerSpec(
-                provider="demo",
-                dataset_keys=frozenset({"places"}),
+                operation_key="feature_place_opinet_stations_job",
                 run=_run,
                 resources=lambda _settings, _scope: RunnerResources({}, (_teardown,)),
-                asset_key="feature_demo_places",
+                asset_key="feature_place_opinet_stations",
             ),
         ),
     )
@@ -412,11 +406,10 @@ async def test_feature_update_asset_runner_types_teardown_failure_after_success(
         settings_factory=lambda: cast(KorTravelMapSettings, object()),
         specs=(
             FeatureUpdateRunnerSpec(
-                provider="demo",
-                dataset_keys=frozenset({"places"}),
+                operation_key="feature_place_opinet_stations_job",
                 run=_run,
                 resources=lambda _settings, _scope: RunnerResources({}, (_teardown,)),
-                asset_key="feature_demo_places",
+                asset_key="feature_place_opinet_stations",
             ),
         ),
     )
@@ -425,13 +418,12 @@ async def test_feature_update_asset_runner_types_teardown_failure_after_success(
         await runner(cast(Any, object()), _scope())
 
     failure = exc_info.value
-    assert failure.provider == "demo"
-    assert failure.dataset_key == "places"
-    assert failure.sync_scope == "default"
+    assert failure.provider_dataset_id == 1
+    assert failure.sync_scope == "dataset_wide"
     assert "resource teardown failed" in str(failure)
 
 
-async def test_feature_update_asset_runner_rejects_unsupported_dataset() -> None:
+async def test_feature_update_asset_runner_rejects_unknown_operation_key() -> None:
     runner = FeatureUpdateAssetRunner(
         common_resources={
             "kor_travel_map_client": object(),
@@ -444,16 +436,29 @@ async def test_feature_update_asset_runner_rejects_unsupported_dataset() -> None
         specs=(),
     )
 
-    with pytest.raises(RuntimeError, match="지원하지 않는 provider/dataset"):
-        await runner(object(), _scope(provider="unknown", dataset_key="missing"))
+    with pytest.raises(RuntimeError, match="지원하지 않는 operation_key"):
+        await runner(object(), _scope(operation_key="feature_unknown_job"))
 
 
 @pytest.mark.parametrize(
-    "dataset_key",
-    [OPINET_STATION_DATASET_KEY, OPINET_PRICE_DATASET_KEY],
+    ("dataset_key", "operation_key", "asset_key"),
+    [
+        (
+            OPINET_STATION_DATASET_KEY,
+            "feature_place_opinet_stations_job",
+            "feature_place_opinet_stations",
+        ),
+        (
+            OPINET_PRICE_DATASET_KEY,
+            "feature_price_opinet_stations_job",
+            "feature_price_opinet_stations",
+        ),
+    ],
 )
 async def test_feature_update_asset_runner_skips_opinet_targeted_global_refetch(
     dataset_key: str,
+    operation_key: str,
+    asset_key: str,
 ) -> None:
     called = False
 
@@ -474,13 +479,10 @@ async def test_feature_update_asset_runner_skips_opinet_targeted_global_refetch(
         settings_factory=lambda: cast(KorTravelMapSettings, object()),
         specs=(
             FeatureUpdateRunnerSpec(
-                provider=OPINET_PROVIDER_NAME,
-                dataset_keys=frozenset(
-                    {OPINET_STATION_DATASET_KEY, OPINET_PRICE_DATASET_KEY}
-                ),
+                operation_key=operation_key,
                 run=_run,
                 resources=_resources,
-                asset_key="feature_place_opinet_stations",
+                asset_key=asset_key,
             ),
         ),
     )
@@ -491,6 +493,7 @@ async def test_feature_update_asset_runner_skips_opinet_targeted_global_refetch(
             provider=OPINET_PROVIDER_NAME,
             dataset_key=dataset_key,
             scope_type="center_radius",
+            operation_key=operation_key,
         ),
     )
 
@@ -498,6 +501,9 @@ async def test_feature_update_asset_runner_skips_opinet_targeted_global_refetch(
     assert result.status == "skipped"
     assert result.loaded_count == 0
     assert result.metadata == {
+        "provider_dataset_id": 1,
+        "sync_scope": "dataset_wide",
+        "operation_key": operation_key,
         "provider": OPINET_PROVIDER_NAME,
         "dataset_key": dataset_key,
         "skipped": True,
@@ -530,8 +536,7 @@ async def test_feature_update_asset_runner_allows_opinet_provider_wide_refresh()
         settings_factory=lambda: cast(KorTravelMapSettings, object()),
         specs=(
             FeatureUpdateRunnerSpec(
-                provider=OPINET_PROVIDER_NAME,
-                dataset_keys=frozenset({OPINET_STATION_DATASET_KEY}),
+                operation_key="feature_place_opinet_stations_job",
                 run=_run,
                 resources=_resources,
                 asset_key="feature_place_opinet_stations",
@@ -552,7 +557,7 @@ async def test_feature_update_asset_runner_allows_opinet_provider_wide_refresh()
     assert result.loaded_feature_ids == ("station-1",)
 
 
-def test_default_runner_accepts_airkorea_stations_alias() -> None:
+def test_default_runner_uses_operation_key_not_catalog_labels() -> None:
     runner = FeatureUpdateAssetRunner(
         common_resources={
             "kor_travel_map_client": object(),
@@ -565,13 +570,17 @@ def test_default_runner_accepts_airkorea_stations_alias() -> None:
     )
 
     spec = runner._spec_for_scope(  # noqa: SLF001 - default dispatch contract 회귀 테스트
-        _scope(provider=AIRKOREA_PROVIDER_NAME, dataset_key=DATASET_KEY_STATIONS)
+        _scope(
+            provider="arbitrary-catalog-label",
+            dataset_key="arbitrary-display-key",
+            operation_key="feature_weather_airkorea_air_quality_job",
+        )
     )
 
     assert spec.asset_key == "feature_weather_airkorea_air_quality"
 
 
-def test_default_runner_accepts_only_mois_bulk_dataset() -> None:
+def test_default_runner_uses_mois_operation_key_without_dataset_filtering() -> None:
     runner = FeatureUpdateAssetRunner(
         common_resources={
             "kor_travel_map_client": object(),
@@ -583,16 +592,43 @@ def test_default_runner_accepts_only_mois_bulk_dataset() -> None:
         settings_factory=lambda: cast(KorTravelMapSettings, object()),
     )
 
-    bulk_spec = runner._spec_for_scope(  # noqa: SLF001 - default dispatch contract 회귀 테스트
-        _scope(provider=MOIS_PROVIDER_NAME, dataset_key=DATASET_KEY_BULK)
+    spec = runner._spec_for_scope(  # noqa: SLF001 - default dispatch contract 회귀 테스트
+        _scope(
+            provider="arbitrary-catalog-label",
+            dataset_key="arbitrary-display-key",
+            operation_key="feature_place_mois_licenses_job",
+        )
     )
-    assert bulk_spec.asset_key == "feature_place_mois_licenses"
+    assert spec.asset_key == "feature_place_mois_licenses"
 
-    for dataset_key in (DATASET_KEY_HISTORY, DATASET_KEY_CLOSED, DATASET_KEY_DETAIL):
-        with pytest.raises(RuntimeError, match="지원하지 않는 provider/dataset"):
-            runner._spec_for_scope(  # noqa: SLF001 - default dispatch contract 회귀 테스트
-                _scope(provider=MOIS_PROVIDER_NAME, dataset_key=dataset_key)
-            )
+
+def test_mcst_runner_scopes_fetch_to_the_claimed_exact_member(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: list[tuple[str, ...]] = []
+    selected_slug, selected_spec = next(iter(runner_mod.MCST_FILE_DATASETS.items()))
+
+    def _fetch(
+        _settings: KorTravelMapSettings,
+        *,
+        slugs: tuple[str, ...],
+    ) -> tuple[object, ...]:
+        captured.append(slugs)
+        return ()
+
+    monkeypatch.setattr(runner_mod, "fetch_mcst_culture_records", _fetch)
+
+    resources = runner_mod._mcst_resources(  # noqa: SLF001 - worker source boundary
+        cast(KorTravelMapSettings, object()),
+        _scope(
+            provider="arbitrary-display-label",
+            dataset_key=selected_spec.dataset_key,
+            operation_key="feature_place_mcst_culture_job",
+        ),
+    )
+
+    assert captured == [(selected_slug,)]
+    assert resources.values["mcst_culture_records"] == ()
 
 
 @pytest.mark.parametrize(
@@ -602,7 +638,7 @@ def test_default_runner_accepts_only_mois_bulk_dataset() -> None:
         ("external_system:tripmate", "external_system:tripmate"),
     ],
 )
-def test_kma_grid_resources_propagate_canonical_effective_scope(
+def test_kma_grid_resources_propagate_exact_persisted_scope(
     requested_scope: str | None,
     effective_scope: str,
 ) -> None:
@@ -618,10 +654,12 @@ def test_kma_grid_resources_propagate_canonical_effective_scope(
             provider="python-kma-api",
             dataset_key="kma_short_forecast",
             sync_scope=requested_scope,
+            operation_key="feature_weather_kma_short_forecast_job",
         ),
     )
 
     assert resources.values["feature_update_dataset_key"] == "kma_short_forecast"
+    assert "feature_update_membership" not in resources.values
     assert resources.values["kma_weather_sync_scope"] == effective_scope
     assert resources.values["kma_weather_sync_failure_managed_by_executor"] is True
     assert "kma_weather_client" not in resources.values
@@ -733,6 +771,7 @@ async def test_default_kma_runner_empty_target_precedes_lazy_credential_and_clie
                 provider=KMA_PROVIDER_NAME,
                 dataset_key=KMA_SHORT_FORECAST_DATASET_KEY,
                 sync_scope="target_grids",
+                operation_key="feature_weather_kma_short_forecast_job",
             ),
         )
 
@@ -742,7 +781,7 @@ async def test_default_kma_runner_empty_target_precedes_lazy_credential_and_clie
     assert constructor_calls == []
 
 
-def test_kma_grid_resources_reject_missing_typed_effective_scope(
+def test_kma_grid_resources_reject_missing_exact_scope_at_membership_boundary(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def _unexpected(*_args: object) -> RunnerResources:
@@ -750,7 +789,7 @@ def test_kma_grid_resources_reject_missing_typed_effective_scope(
 
     monkeypatch.setattr(runner_mod, "_kma_weather_resources", _unexpected)
 
-    with pytest.raises(ValueError, match="effective sync_scope is required"):
+    with pytest.raises(ValueError, match="sync_scope must be"):
         runner_mod._kma_grid_resources(  # noqa: SLF001 - fail-closed 회귀
             cast(KorTravelMapSettings, object()),
             _scope(
@@ -791,9 +830,7 @@ def test_mois_runner_resources_sync_source_db_before_fetch(
     sentinel = [object()]
     settings = KorTravelMapSettings.model_construct(mois_source_db_path=str(db_path))
 
-    def _fake_sync(
-        actual_settings: KorTravelMapSettings, **_kwargs: object
-    ) -> None:
+    def _fake_sync(actual_settings: KorTravelMapSettings, **_kwargs: object) -> None:
         # freshness 게이트(ensure_mois_source_db_fresh)가 read 전에 호출됨을 검증.
         calls.append(("sync", actual_settings.mois_source_db_path))
 
@@ -867,7 +904,7 @@ def test_knps_direct_runner_freezes_same_non_default_dataset_for_fetch_and_asset
     assert getattr(settings, settings_attr) != dataset_key
 
 
-def test_default_runner_accepts_datagokr_file_data_datasets() -> None:
+def test_default_runner_uses_each_datagokr_file_operation_key() -> None:
     runner = FeatureUpdateAssetRunner(
         common_resources={
             "kor_travel_map_client": object(),
@@ -879,14 +916,19 @@ def test_default_runner_accepts_datagokr_file_data_datasets() -> None:
         settings_factory=lambda: cast(KorTravelMapSettings, object()),
     )
 
-    for dataset_key in DATAGOKR_FILEDATA_DATASETS:
+    for operation_key in (
+        "feature_place_datagokr_seoul_bookstores_job",
+        "feature_place_datagokr_gyeonggi_muslim_friendly_restaurants_job",
+        "feature_place_datagokr_ansan_world_restaurants_job",
+        "feature_place_datagokr_jeju_local_restaurants_job",
+    ):
         spec = runner._spec_for_scope(  # noqa: SLF001 - default dispatch contract 회귀 테스트
-            _scope(provider=DATAGOKR_FILEDATA_PROVIDER_NAME, dataset_key=dataset_key)
+            _scope(operation_key=operation_key)
         )
         assert spec.asset_key == "feature_place_datagokr_file_data"
 
 
-def test_default_runner_supports_all_catalog_refreshable_entries() -> None:
+def test_default_runner_covers_every_canonical_operation_handler() -> None:
     runner = FeatureUpdateAssetRunner(
         common_resources={
             "kor_travel_map_client": object(),
@@ -897,16 +939,7 @@ def test_default_runner_supports_all_catalog_refreshable_entries() -> None:
         log=_Log(),
         settings_factory=lambda: cast(KorTravelMapSettings, object()),
     )
-    supported = {
-        (spec.provider, dataset_key)
-        for spec in runner._specs  # noqa: SLF001 - catalog/runner drift 회귀 테스트
-        for dataset_key in spec.dataset_keys
-    }
-    refreshable = {
-        (entry.provider, entry.dataset_key) for entry in catalog_refreshable_entries()
-    }
-
-    assert sorted(refreshable - supported) == []
+    assert frozenset(runner._specs) == feature_operation_handler_keys()  # noqa: SLF001
 
 
 async def test_opinet_missing_key_is_typed_before_provider_client_auth_error() -> None:
@@ -918,9 +951,7 @@ async def test_opinet_missing_key_is_typed_before_provider_client_auth_error() -
             "strict_address": "off",
         },
         log=_Log(),
-        settings_factory=lambda: KorTravelMapSettings.model_construct(
-            opinet_api_key=None
-        ),
+        settings_factory=lambda: KorTravelMapSettings.model_construct(opinet_api_key=None),
     )
 
     with pytest.raises(ProviderDatasetRefreshFailure) as exc_info:
@@ -930,7 +961,121 @@ async def test_opinet_missing_key_is_typed_before_provider_client_auth_error() -
         )
 
     failure = exc_info.value
-    assert failure.sync_scope == "default"
+    assert failure.provider_dataset_id == 1
+    assert failure.sync_scope == "dataset_wide"
     assert str(failure) == "provider refresh resource initialization failed"
     assert isinstance(failure.__cause__, ProviderCredentialMissing)
     assert "KOR_TRAVEL_MAP_OPINET_API_KEY" in str(failure.__cause__)
+
+
+# -- spec 카탈로그 무결성 --------------------------------------------------
+
+
+async def _unused_run(_context: object) -> object:
+    raise AssertionError("spec 무결성 검사 전에 asset이 실행되면 안 된다")
+
+
+def _empty_resources(
+    _settings: KorTravelMapSettings,
+    _scope_value: ProviderDatasetRefreshScope,
+) -> RunnerResources:
+    return RunnerResources({})
+
+
+def test_runner_rejects_two_specs_claiming_the_same_operation_key() -> None:
+    """operation_key가 겹치는 spec은 조립 시점에 거부된다.
+
+    ``self._specs``는 ``{spec.operation_key: spec}`` dict라 중복이 있으면 나중 것이
+    앞의 것을 조용히 덮는다. 그러면 dispatch가 어느 asset으로 가는지가 선언 순서에
+    달리고, 같은 operation의 request가 등록된 것과 다른 asset을 탄다.
+    """
+    duplicated = tuple(
+        FeatureUpdateRunnerSpec(
+            operation_key="feature_place_opinet_stations_job",
+            run=_unused_run,
+            resources=_empty_resources,
+            asset_key=asset_key,
+        )
+        for asset_key in ("feature_place_opinet_stations", "feature_price_opinet_stations")
+    )
+
+    with pytest.raises(ValueError, match="operation_key must be unique"):
+        FeatureUpdateAssetRunner(
+            common_resources={
+                "kor_travel_map_client": object(),
+                "reverse_geocoder": None,
+                "fetched_at": None,
+                "strict_address": "off",
+            },
+            log=_Log(),
+            settings_factory=lambda: cast(KorTravelMapSettings, object()),
+            specs=duplicated,
+        )
+
+
+async def test_runner_rejects_a_spec_whose_asset_key_is_not_the_handler_asset() -> None:
+    """spec의 asset_key는 canonical operation handler가 선언한 asset이어야 한다.
+
+    이 대조가 없으면 request가 자기 operation의 asset이 아닌 코드로 dispatch되어,
+    frozen membership 그대로 **다른 dataset을 적재**한다. 정상 dispatch 경로는
+    ``test_feature_update_asset_runner_dispatches_asset_spec``이 덮는다.
+    """
+    runner = FeatureUpdateAssetRunner(
+        common_resources={
+            "kor_travel_map_client": object(),
+            "reverse_geocoder": None,
+            "fetched_at": None,
+            "strict_address": "off",
+        },
+        log=_Log(),
+        settings_factory=lambda: cast(KorTravelMapSettings, object()),
+        specs=(
+            FeatureUpdateRunnerSpec(
+                operation_key="feature_place_opinet_stations_job",
+                run=_unused_run,
+                resources=_empty_resources,
+                # 실재하는 asset이지만 이 operation의 handler asset은 아니다.
+                asset_key="feature_price_opinet_stations",
+            ),
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="asset_key가 canonical operation handler와 다름"):
+        await runner(object(), _scope(operation_key="feature_place_opinet_stations_job"))
+
+
+def test_mcst_runner_rejects_a_member_that_maps_to_no_registered_slug(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """MCST member는 등록 slug **정확히 하나**로 해석돼야 한다.
+
+    해석이 0건인데 그대로 진행하면 fetch가 slug 없이 돌아 빈 결과를 적재하고,
+    ``authoritative_snapshot_complete``인 MCST 적재 경로에서 그 dataset의 feature가
+    통째로 사라진다. 성공 경로는
+    ``test_mcst_runner_scopes_fetch_to_the_claimed_exact_member``가 덮는다.
+    """
+    fetch_calls: list[tuple[str, ...]] = []
+
+    def _fetch(
+        _settings: KorTravelMapSettings,
+        *,
+        slugs: tuple[str, ...],
+    ) -> tuple[object, ...]:
+        fetch_calls.append(slugs)
+        return ()
+
+    monkeypatch.setattr(runner_mod, "fetch_mcst_culture_records", _fetch)
+    registered = {spec.dataset_key for spec in runner_mod.MCST_FILE_DATASETS.values()}
+    unregistered = "mcst_dataset_key_that_is_not_registered"
+    assert unregistered not in registered
+
+    with pytest.raises(ValueError, match="정확히 하나의 registered source slug"):
+        runner_mod._mcst_resources(  # noqa: SLF001 - worker source boundary
+            cast(KorTravelMapSettings, object()),
+            _scope(
+                dataset_key=unregistered,
+                operation_key="feature_place_mcst_culture_job",
+            ),
+        )
+
+    assert fetch_calls == [], "거부해야 할 member가 provider fetch까지 갔다"

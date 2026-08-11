@@ -6,20 +6,22 @@ import { memo, useCallback, useMemo, useRef, useState } from "react";
 import { ApiClientError, getJson } from "@/api/client";
 import {
   type ExecutionKind,
-  type FeatureUpdateRequestCreateRequest,
-  type FeatureUpdateRequestPreviewRequest,
   type FeatureUpdateScope,
-  type PipelineDatasetsCatalogResponse,
   type PipelineJobPrecheckResponse,
   useCreateUpdateRequestMutation,
   useMoisSourceSyncPrecheck,
   usePipelineDatasetsCatalog,
   usePreviewUpdateRequestMutation,
 } from "@/api/pipeline";
+import {
+  type CanonicalCatalogRow,
+  type RequestScope,
+  canonicalCatalogRows,
+  validateCatalogSelection,
+} from "./catalog-selection";
 import { statusLabel } from "@/lib/status-label";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { ComboboxMultiple } from "@/components/ui/combobox-multiple";
 import {
   Dialog,
   DialogContent,
@@ -31,8 +33,6 @@ import {
 import { FormField, FormSelect } from "@/components/ui/form-field";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
 import { formatDateTime, shortId } from "@/lib/format";
-
-type CatalogRow = PipelineDatasetsCatalogResponse["data"]["items"][number];
 
 type ScopeType = FeatureUpdateScope["type"];
 
@@ -55,126 +55,10 @@ const SCOPE_TYPE_ORDER: readonly ScopeType[] = [
   "cache_target_keys",
 ];
 
-function splitList(value: string): string[] {
-  return value
-    .split(/[\n,]/)
-    .map((item) => item.trim())
-    .filter((item) => item.length > 0);
-}
-
 function isMoisProvider(value: string): boolean {
   return value.toLowerCase().includes("mois");
 }
 
-function canonicalCatalogRows(
-  response: PipelineDatasetsCatalogResponse | undefined,
-): CatalogRow[] {
-  return (response?.data.items ?? []).filter(
-    (row) =>
-      row.catalog_state === "canonical" &&
-      row.mutable &&
-      row.catalog?.is_refreshable === true,
-  );
-}
-
-function selectedMoisProvider(
-  rows: CatalogRow[],
-  scope: FeatureUpdateScope,
-  providers: string[],
-  datasetKeys: string[],
-): string | null {
-  const candidates = [...providers];
-  if (scope.type === "provider_dataset") {
-    candidates.push(scope.provider);
-  }
-  const datasetKeySet = new Set(datasetKeys);
-  for (const row of rows) {
-    if (datasetKeySet.has(row.dataset_key) && isMoisProvider(row.provider)) {
-      candidates.push(row.provider);
-    }
-  }
-  return candidates.find(isMoisProvider) ?? null;
-}
-
-function catalogPair(
-  rows: CatalogRow[],
-  provider: string,
-  datasetKey: string,
-): CatalogRow[] {
-  return rows.filter(
-    (row) => row.provider === provider && row.dataset_key === datasetKey,
-  );
-}
-
-function validateCatalogSelection(
-  scope: FeatureUpdateScope,
-  effectiveProviders: string[],
-  effectiveDatasetKeys: string[],
-  rows: CatalogRow[],
-): string | null {
-  if (scope.type === "provider_dataset") {
-    const pairRows = catalogPair(rows, scope.provider, scope.dataset_key);
-    const requestedSyncScope = scope.sync_scope;
-    if (pairRows.length === 0) {
-      return "현재 canonical catalog에 없는 provider/dataset 조합입니다.";
-    }
-    if (
-      requestedSyncScope &&
-      !pairRows.some((row) => {
-        const capability = row.catalog?.scope_refresh;
-        return Boolean(
-          capability?.effect === "sync_scope" &&
-            capability.supported &&
-            capability.selector !== "none" &&
-            capability.allowed_sync_scopes.some(
-              (value) => value === requestedSyncScope,
-            ),
-        );
-      })
-    ) {
-      return pairRows.some(
-        (row) => row.catalog?.scope_refresh.effect === "dataset_wide",
-      )
-        ? "dataset-wide 갱신은 sync_scope를 비워 서버가 범위를 정규화하게 해야 합니다."
-        : "현재 catalog capability가 허용하지 않는 sync_scope입니다.";
-    }
-    return null;
-  }
-  for (const provider of effectiveProviders) {
-    if (!rows.some((row) => row.provider === provider)) {
-      return `현재 canonical catalog에 없는 provider입니다: ${provider}`;
-    }
-  }
-  for (const datasetKey of effectiveDatasetKeys) {
-    if (!rows.some((row) => row.dataset_key === datasetKey)) {
-      return `현재 canonical catalog에 없는 dataset입니다: ${datasetKey}`;
-    }
-  }
-  if (effectiveProviders.length > 0 && effectiveDatasetKeys.length > 0) {
-    for (const provider of effectiveProviders) {
-      for (const datasetKey of effectiveDatasetKeys) {
-        if (catalogPair(rows, provider, datasetKey).length === 0) {
-          return `canonical catalog에 없는 exact pair입니다: ${provider}/${datasetKey}`;
-        }
-      }
-    }
-  }
-  return null;
-}
-
-function activeConflictRequestId(error: Error | null): string | null {
-  if (!(error instanceof ApiClientError) || error.status !== 409) {
-    return null;
-  }
-  const details = error.problem?.details;
-  if (typeof details !== "object" || details === null) {
-    return null;
-  }
-  const requestId = (details as Record<string, unknown>).request_id;
-  return typeof requestId === "string" ? requestId : null;
-}
-
-/** MOIS 계열 선택 시 조건부 경고 — 구 하드코딩 배너(적재 작업 화면) 이전 (설계 §1). */
 function MoisPrecheckNotice({
   data,
   isError,
@@ -217,11 +101,60 @@ function MoisPrecheckNotice({
   );
 }
 
-function useRequestScopeForm(catalogRows: CatalogRow[]) {
+type DatasetMembershipView = {
+  provider_dataset_id: number;
+  sync_scope: string;
+  operation_key?: string | null;
+};
+
+/** membership 목록의 React key. identity가 triple이므로 pair로 만들면 형제
+ *  operation 두 건이 **같은 key**가 된다(중복 key + 화면에 완전히 같은 두 줄).
+ *  이 화면은 canonical write 직전/직후의 유일한 대상 확인면이다 — 무엇이
+ *  실행되는지 구분할 정보를 스스로 버리면 안 된다. `:` 연결을 쓰지 않는 이유는
+ *  scope 값 자체가 `external_system:concierge`처럼 `:`를 담기 때문이다. */
+function membershipKey(membership: DatasetMembershipView): string {
+  return [
+    String(membership.provider_dataset_id),
+    membership.sync_scope,
+    membership.operation_key ?? "",
+  ]
+    .map(encodeURIComponent)
+    .join("|");
+}
+
+function membershipLabel(membership: DatasetMembershipView): string {
+  const operation = membership.operation_key;
+  return operation
+    ? `${membership.provider_dataset_id} · ${membership.sync_scope} · ${operation}`
+    : `${membership.provider_dataset_id} · ${membership.sync_scope}`;
+}
+
+function splitList(value: string): string[] {
+  return value
+    .split(/[\n,]/)
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+}
+
+function activeConflictRequestId(error: Error | null): string | null {
+  if (!(error instanceof ApiClientError) || error.status !== 409) {
+    return null;
+  }
+  const details = error.problem?.details;
+  if (typeof details !== "object" || details === null) {
+    return null;
+  }
+  const requestId = (details as Record<string, unknown>).request_id;
+  return typeof requestId === "string" ? requestId : null;
+}
+
+function useRequestScopeForm(catalogRows: CanonicalCatalogRow[]) {
   const [scopeType, setScopeType] = useState<ScopeType>("provider_dataset");
-  const [scopeProvider, setScopeProvider] = useState("");
-  const [scopeDataset, setScopeDataset] = useState("");
+  const [scopeProviderDatasetId, setScopeProviderDatasetId] = useState("");
   const [scopeSyncScope, setScopeSyncScope] = useState("");
+  // identity의 세 번째 축. 후보가 하나면 비워 둔 채로 그것이 쓰이고, 형제
+  // operation이 둘 이상일 때만 운영자가 명시한다 — 임의로 고르지 않는다.
+  const [scopeOperationKey, setScopeOperationKey] = useState("");
   const [lon, setLon] = useState("126.9780");
   const [lat, setLat] = useState("37.5665");
   const [radiusKm, setRadiusKm] = useState("5");
@@ -231,45 +164,83 @@ function useRequestScopeForm(catalogRows: CatalogRow[]) {
   const [maxLat, setMaxLat] = useState("37.8");
   const [featureIdsText, setFeatureIdsText] = useState("");
 
-  const providerDatasetOptions = useMemo(() => {
-    const selectedProvider = scopeProvider.trim();
-    const options = new Set<string>();
-    for (const row of catalogRows) {
-      if (row.provider === selectedProvider) options.add(row.dataset_key);
-    }
-    return [...options].sort();
-  }, [catalogRows, scopeProvider]);
-  const selectedScopeCapability = useMemo(
+  const selectedCatalogRow = useMemo(
     () =>
       catalogRows.find(
-        (row) =>
-          row.provider === scopeProvider.trim() &&
-          row.dataset_key === scopeDataset.trim(),
-      )?.catalog?.scope_refresh ?? null,
-    [catalogRows, scopeDataset, scopeProvider],
+        (row) => row.provider_dataset_id === Number(scopeProviderDatasetId),
+      ) ?? null,
+    [catalogRows, scopeProviderDatasetId],
   );
-  const explicitScopeSupported = Boolean(
-    selectedScopeCapability?.effect === "sync_scope" &&
-      selectedScopeCapability.supported &&
-      selectedScopeCapability.selector !== "none",
+  // T-VN-33 전에는 provider 이름 입력으로 MOIS 여부를 봤다. 그 입력이 사라져
+  // 사전점검 경고가 통째로 없어졌었다(react-doctor가 죽은 export로 잡아냈다).
+  // 이제 선택된 catalog 행의 provider로 판정한다 — 같은 사실을 triple 선택에서 읽는다.
+  // `scopeType` 가드가 필요하다: `scopeProviderDatasetId` state는 scope 타입을
+  // 바꿔도 남으므로, MOIS dataset을 고른 뒤 bbox/center_radius/feature_ids로
+  // 전환하면 **provider가 실려 나가지도 않는 요청에** MOIS 경고가 뜬다.
+  const moisSelected = useMemo(
+    () =>
+      scopeType === "provider_dataset" &&
+      selectedCatalogRow !== null &&
+      isMoisProvider(selectedCatalogRow.provider)
+        ? selectedCatalogRow.provider
+        : null,
+    [scopeType, selectedCatalogRow],
+  );
+  const selectedScopeCapability =
+    selectedCatalogRow?.catalog?.scope_refresh ?? null;
+  // `?? []`는 매 렌더 새 배열을 만들어 이 값을 의존성으로 쓰는 훅이 항상 재실행된다.
+  const syncScopeOptions = useMemo(
+    () => selectedScopeCapability?.allowed_sync_scopes ?? [],
+    [selectedScopeCapability],
   );
   const effectiveScopeSyncScope =
-    selectedScopeCapability !== null && !explicitScopeSupported
-      ? ""
-      : scopeSyncScope;
+    scopeSyncScope.trim() || selectedScopeCapability?.default_sync_scope || "";
+  // 고른 (dataset, scope)에 걸린 membership 전부. 형제 operation은 여기서 갈린다 —
+  // `.find()`로 하나를 집으면 운영자가 고르지 않은 operation에 canonical write가
+  // 나간다(그 위험이 이 목록이 존재하는 이유다).
+  const membershipCandidates = useMemo(
+    () =>
+      catalogRows.filter(
+        (row) =>
+          row.provider_dataset_id === Number(scopeProviderDatasetId) &&
+          row.sync_scope === effectiveScopeSyncScope &&
+          typeof row.operation_key === "string" &&
+          row.operation_key.length > 0,
+      ),
+    [catalogRows, effectiveScopeSyncScope, scopeProviderDatasetId],
+  );
+  const effectiveOperationKey =
+    scopeOperationKey.trim() ||
+    (membershipCandidates.length === 1
+      ? (membershipCandidates[0].operation_key ?? "")
+      : "");
 
-  const buildScope = useCallback((): FeatureUpdateScope | string => {
+  const buildScope = useCallback((): RequestScope | string => {
     if (scopeType === "provider_dataset") {
-      if (!scopeProvider.trim() || !scopeDataset.trim()) {
-        return "provider와 dataset_key를 입력하세요.";
+      const providerDatasetId = Number(scopeProviderDatasetId);
+      if (
+        !Number.isInteger(providerDatasetId) ||
+        providerDatasetId < 1 ||
+        selectedCatalogRow === null
+      ) {
+        return "canonical 데이터셋을 선택하세요.";
+      }
+      if (!effectiveScopeSyncScope) {
+        return "sync_scope를 선택하세요.";
+      }
+      // grid 행은 membership 단위다(ADR-088 triple) — dataset만으로 고르면 형제
+      // operation 중 아무거나 집는다. 고른 scope에 해당하는 행에서 operation을 읽는다.
+      if (membershipCandidates.length === 0) {
+        return "이 dataset/scope에는 실행 가능한 refresh operation이 없습니다.";
+      }
+      if (!effectiveOperationKey) {
+        return "이 dataset/scope에 refresh operation이 둘 이상입니다. operation을 선택하세요.";
       }
       return {
         type: "provider_dataset",
-        provider: scopeProvider.trim(),
-        dataset_key: scopeDataset.trim(),
-        ...(effectiveScopeSyncScope.trim()
-          ? { sync_scope: effectiveScopeSyncScope.trim() }
-          : {}),
+        provider_dataset_id: providerDatasetId,
+        sync_scope: effectiveScopeSyncScope,
+        operation_key: effectiveOperationKey,
       };
     }
     if (scopeType === "center_radius" || scopeType === "sigungu_by_radius") {
@@ -320,6 +291,9 @@ function useRequestScopeForm(catalogRows: CatalogRow[]) {
     }
     return "cache target scope 입력을 확인하세요.";
   }, [
+    // `buildScope`가 membership을 고를 때 읽는다(triple의 세 번째 축).
+    effectiveOperationKey,
+    membershipCandidates,
     effectiveScopeSyncScope,
     featureIdsText,
     lat,
@@ -329,30 +303,34 @@ function useRequestScopeForm(catalogRows: CatalogRow[]) {
     minLat,
     minLon,
     radiusKm,
-    scopeDataset,
-    scopeProvider,
+    scopeProviderDatasetId,
     scopeType,
+    selectedCatalogRow,
   ]);
 
   return useMemo(
     () => ({
       buildScope,
+      effectiveOperationKey,
       effectiveScopeSyncScope,
-      explicitScopeSupported,
       featureIdsText,
       lat,
       lon,
       maxLat,
       maxLon,
+      membershipCandidates,
       minLat,
       minLon,
-      providerDatasetOptions,
       radiusKm,
-      scopeDataset,
-      scopeProvider,
+      scopeOperationKey,
+      scopeProviderDatasetId,
       scopeType,
+      moisSelected,
+      selectedCatalogRow,
       selectedScopeCapability,
+      syncScopeOptions,
       setFeatureIdsText,
+      setScopeOperationKey,
       setLat,
       setLon,
       setMaxLat,
@@ -360,28 +338,30 @@ function useRequestScopeForm(catalogRows: CatalogRow[]) {
       setMinLat,
       setMinLon,
       setRadiusKm,
-      setScopeDataset,
-      setScopeProvider,
+      setScopeProviderDatasetId,
       setScopeSyncScope,
       setScopeType,
     }),
     [
       buildScope,
+      effectiveOperationKey,
       effectiveScopeSyncScope,
-      explicitScopeSupported,
       featureIdsText,
       lat,
+      moisSelected,
       lon,
       maxLat,
       maxLon,
+      membershipCandidates,
       minLat,
       minLon,
-      providerDatasetOptions,
       radiusKm,
-      scopeDataset,
-      scopeProvider,
+      scopeOperationKey,
+      scopeProviderDatasetId,
       scopeType,
+      selectedCatalogRow,
       selectedScopeCapability,
+      syncScopeOptions,
     ],
   );
 }
@@ -393,8 +373,6 @@ function useRequestTargetForm() {
     "center_radius" | "sigungu_by_radius"
   >("center_radius");
   const [cacheRadiusKm, setCacheRadiusKm] = useState("");
-  const [providers, setProviders] = useState<string[]>([]);
-  const [datasetKeys, setDatasetKeys] = useState("");
 
   const buildCacheTargetScope = useCallback((): FeatureUpdateScope | string => {
     const keys = splitList(targetKeysText);
@@ -422,14 +400,10 @@ function useRequestTargetForm() {
       buildCacheTargetScope,
       cacheRadiusKm,
       cacheScopeMode,
-      datasetKeys,
       externalSystem,
-      providers,
       setCacheRadiusKm,
       setCacheScopeMode,
-      setDatasetKeys,
       setExternalSystem,
-      setProviders,
       setTargetKeysText,
       targetKeysText,
     }),
@@ -437,9 +411,7 @@ function useRequestTargetForm() {
       buildCacheTargetScope,
       cacheRadiusKm,
       cacheScopeMode,
-      datasetKeys,
       externalSystem,
-      providers,
       targetKeysText,
     ],
   );
@@ -472,7 +444,9 @@ function useRequestCreateDialogController() {
   const createPendingRef = useRef(false);
   const submitPendingSessionRef = useRef<number | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
-  const [submittingSession, setSubmittingSession] = useState<number | null>(null);
+  const [submittingSession, setSubmittingSession] = useState<number | null>(
+    null,
+  );
   const [previewInputKey, setPreviewInputKey] = useState<string | null>(null);
   const [createInputKey, setCreateInputKey] = useState<string | null>(null);
   const submittingPrecheck = submittingSession !== null;
@@ -482,30 +456,22 @@ function useRequestCreateDialogController() {
     () => canonicalCatalogRows(catalogQuery.data),
     [catalogQuery.data],
   );
-  const providerOptions = useMemo(
-    () =>
-      [...new Set(catalogRows.map((row) => row.provider))]
-        .sort()
-        .map((provider) => ({ value: provider, label: provider })),
-    [catalogRows],
-  );
   const scopeForm = useRequestScopeForm(catalogRows);
+  const moisSelected = scopeForm.moisSelected;
+  const moisPrecheck = useMoisSourceSyncPrecheck(moisSelected !== null);
   const targetForm = useRequestTargetForm();
   const executionForm = useRequestExecutionForm();
   const {
     buildScope: buildNonCacheScope,
     effectiveScopeSyncScope,
-    scopeDataset,
-    scopeProvider,
+    scopeProviderDatasetId,
     scopeType,
   } = scopeForm;
   const {
     buildCacheTargetScope,
     cacheRadiusKm,
     cacheScopeMode,
-    datasetKeys,
     externalSystem,
-    providers,
     targetKeysText,
   } = targetForm;
   const { dryRun, priority, reason, runMode } = executionForm;
@@ -514,9 +480,12 @@ function useRequestCreateDialogController() {
   const previewRequest = usePreviewUpdateRequestMutation();
   const formInputKey = JSON.stringify([
     scopeType,
-    scopeProvider,
-    scopeDataset,
+    scopeProviderDatasetId,
     effectiveScopeSyncScope,
+    // identity의 세 번째 축. 빼면 형제 operation A로 미리보기를 돌린 뒤 select를
+    // B로 바꿔도 키가 그대로라, **A의 결과가 B의 결과인 것처럼** 계속 렌더된다.
+    // 운영자는 그 화면을 근거로 B에 canonical write를 낸다.
+    scopeForm.effectiveOperationKey,
     scopeForm.lon,
     scopeForm.lat,
     scopeForm.radiusKm,
@@ -529,8 +498,6 @@ function useRequestCreateDialogController() {
     targetKeysText,
     cacheScopeMode,
     cacheRadiusKm,
-    providers,
-    datasetKeys,
     runMode,
     priority,
     dryRun,
@@ -569,32 +536,6 @@ function useRequestCreateDialogController() {
     }
   };
 
-  const moisSelected = useMemo(() => {
-    const candidates = [...providers];
-    if (scopeType === "provider_dataset" && scopeProvider.trim()) {
-      candidates.push(scopeProvider.trim());
-    }
-    const selectedDatasets = new Set(
-      scopeType === "provider_dataset"
-        ? [scopeDataset.trim()]
-        : splitList(datasetKeys),
-    );
-    for (const row of catalogRows) {
-      if (selectedDatasets.has(row.dataset_key) && isMoisProvider(row.provider)) {
-        candidates.push(row.provider);
-      }
-    }
-    return candidates.find(isMoisProvider) ?? null;
-  }, [
-    catalogRows,
-    datasetKeys,
-    providers,
-    scopeDataset,
-    scopeProvider,
-    scopeType,
-  ]);
-  const moisPrecheck = useMoisSourceSyncPrecheck(moisSelected !== null);
-
   const submit = async () => {
     const dialogSession = dialogSessionRef.current;
     if (submitPendingSessionRef.current === dialogSession) return;
@@ -604,7 +545,7 @@ function useRequestCreateDialogController() {
     createRequest.reset();
     setPreviewInputKey(null);
     setCreateInputKey(null);
-    const scope =
+    const scope: RequestScope | string =
       scopeType === "cache_target_keys"
         ? buildCacheTargetScope()
         : buildNonCacheScope();
@@ -626,20 +567,6 @@ function useRequestCreateDialogController() {
       setFormError("priority는 0~1000 사이 정수여야 합니다.");
       return;
     }
-    const effectiveProviders =
-      scopeType === "provider_dataset" ? [] : providers;
-    const effectiveDatasetKeys =
-      scopeType === "provider_dataset" ? [] : splitList(datasetKeys);
-    if (
-      scopeType !== "provider_dataset" &&
-      effectiveProviders.length === 0 &&
-      effectiveDatasetKeys.length === 0
-    ) {
-      setFormError(
-        "provider_dataset 이외 scope는 제공자 또는 데이터셋 필터가 1개 이상 필요합니다.",
-      );
-      return;
-    }
     submitPendingSessionRef.current = dialogSession;
     setSubmittingSession(dialogSession);
     setFormError(null);
@@ -655,38 +582,28 @@ function useRequestCreateDialogController() {
         return;
       }
       const freshRows = canonicalCatalogRows(refreshedCatalog.data);
-      const catalogError = validateCatalogSelection(
-        scope,
-        effectiveProviders,
-        effectiveDatasetKeys,
-        freshRows,
-      );
+      const catalogError = validateCatalogSelection(scope, freshRows);
       if (catalogError) {
         setFormError(catalogError);
         return;
       }
-
-      const selectedMois = selectedMoisProvider(
-        freshRows,
-        scope,
-        effectiveProviders,
-        scope.type === "provider_dataset"
-          ? [scope.dataset_key]
-          : effectiveDatasetKeys,
-      );
-      if (selectedMois !== null) {
+      // MOIS 적재는 Dagster 선행 sync가 최근에 성공해 있어야 한다. 화면의 경고만으로는
+      // 부족하다 — **제출 직전에 다시 확인**해야 dialog를 연 뒤 상태가 뒤집힌 경우를
+      // 막는다. T-VN-33이 provider 이름 입력을 없애면서 이 가드가 통째로 사라졌고,
+      // 표시용 경고만 복구돼 있었다(적대 리뷰 8라운드 B4). 조회 실패도 차단이다
+      // (fail-closed) — 모르는 상태로 canonical write를 내보내지 않는다.
+      if (moisSelected !== null) {
         let precheck: PipelineJobPrecheckResponse;
         try {
           precheck = await getJson<PipelineJobPrecheckResponse>(
             "/v1/ops/pipeline/prechecks/mois-source-sync",
           );
         } catch {
-          if (!isCurrentDialogSession()) {
-            return;
+          if (isCurrentDialogSession()) {
+            setFormError(
+              "MOIS 선행 source sync 최신 상태를 조회할 수 없어 요청을 진행할 수 없습니다.",
+            );
           }
-          setFormError(
-            "MOIS 선행 source sync 최신 상태를 조회할 수 없어 요청을 진행할 수 없습니다.",
-          );
           return;
         }
         if (!isCurrentDialogSession()) {
@@ -701,10 +618,8 @@ function useRequestCreateDialogController() {
         }
       }
 
-      const plan: FeatureUpdateRequestPreviewRequest = {
+      const plan = {
         scope,
-        providers: effectiveProviders,
-        dataset_keys: effectiveDatasetKeys,
         run_mode: runMode,
         priority: priorityValue,
       };
@@ -719,7 +634,7 @@ function useRequestCreateDialogController() {
         }
         return;
       }
-      const body: FeatureUpdateRequestCreateRequest = {
+      const body = {
         ...plan,
         reason: reason.trim() || null,
       };
@@ -762,6 +677,7 @@ function useRequestCreateDialogController() {
   const preview = matchingPreview ? previewRequest.data?.data : undefined;
 
   return {
+    catalogRows,
     catalogQuery,
     closeDialog,
     conflictRequestId,
@@ -770,15 +686,14 @@ function useRequestCreateDialogController() {
     executionForm,
     formError,
     handleOpenChange,
-    moisPrecheck,
-    moisSelected,
     open,
     openDialog,
     preview,
     previewRequest,
-    providerOptions,
     requestError,
     retryAfterSeconds,
+    moisPrecheck,
+    moisSelected,
     scopeForm,
     setFormError,
     submit,
@@ -788,17 +703,16 @@ function useRequestCreateDialogController() {
 }
 
 const RequestIdentityFields = memo(function RequestIdentityFields({
+  catalogRows,
   clearFormError,
-  providerOptions,
   scopeForm,
 }: {
+  catalogRows: CanonicalCatalogRow[];
   clearFormError: () => void;
-  providerOptions: { label: string; value: string }[];
   scopeForm: ReturnType<typeof useRequestScopeForm>;
 }) {
   const {
     effectiveScopeSyncScope: scopeSyncScope,
-    explicitScopeSupported,
     featureIdsText,
     lat,
     lon,
@@ -806,11 +720,10 @@ const RequestIdentityFields = memo(function RequestIdentityFields({
     maxLon,
     minLat,
     minLon,
-    providerDatasetOptions,
     radiusKm,
-    scopeDataset,
-    scopeProvider,
+    scopeProviderDatasetId,
     scopeType,
+    selectedCatalogRow,
     selectedScopeCapability,
     setFeatureIdsText,
     setLat,
@@ -820,257 +733,263 @@ const RequestIdentityFields = memo(function RequestIdentityFields({
     setMinLat,
     setMinLon,
     setRadiusKm,
-    setScopeDataset,
-    setScopeProvider,
+    setScopeOperationKey,
+    setScopeProviderDatasetId,
     setScopeSyncScope,
     setScopeType,
+    syncScopeOptions,
+    membershipCandidates,
+    scopeOperationKey,
   } = scopeForm;
+  // 선택 목록은 dataset 단위다 — `catalogRows`는 membership마다 한 행이라 그대로
+  // 쓰면 같은 dataset이 여러 번 나오고 React key가 중복된다.
+  const datasetOptions = catalogRows.filter(
+    (row, index) =>
+      catalogRows.findIndex(
+        (other) => other.provider_dataset_id === row.provider_dataset_id,
+      ) === index,
+  );
+  const availableSyncScopes = [
+    ...syncScopeOptions,
+    ...(selectedScopeCapability?.default_sync_scope
+      ? [selectedScopeCapability.default_sync_scope]
+      : []),
+  ].filter((value, index, values) => values.indexOf(value) === index);
   return (
     <>
-<FormSelect
-              label="scope 유형"
-              value={scopeType}
-              onChange={(event) => {
-                setScopeType(event.target.value as ScopeType);
-                clearFormError();
-              }}
+      <FormSelect
+        label="scope 유형"
+        value={scopeType}
+        onChange={(event) => {
+          setScopeType(event.target.value as ScopeType);
+          clearFormError();
+        }}
+      >
+        {SCOPE_TYPE_ORDER.map((value) => (
+          <NativeSelectOption key={value} value={value}>
+            {SCOPE_TYPE_LABELS[value]} ({value})
+          </NativeSelectOption>
+        ))}
+      </FormSelect>
+
+      {scopeType === "provider_dataset" ? (
+        <>
+          <FormSelect
+            label="대상 데이터셋"
+            value={scopeProviderDatasetId}
+            onChange={(event) => {
+              setScopeProviderDatasetId(event.target.value);
+              setScopeSyncScope("");
+              setScopeOperationKey("");
+            }}
+          >
+            <NativeSelectOption value="">
+              canonical 데이터셋 선택
+            </NativeSelectOption>
+            {datasetOptions.map((row) => (
+              <NativeSelectOption
+                key={row.provider_dataset_id}
+                value={String(row.provider_dataset_id)}
+              >
+                {row.catalog?.label ?? `데이터셋 #${row.provider_dataset_id}`}
+              </NativeSelectOption>
+            ))}
+          </FormSelect>
+          <FormSelect
+            disabled={availableSyncScopes.length <= 1}
+            hint={
+              selectedScopeCapability?.effect === "dataset_wide"
+                ? "dataset-wide 정본 scope로 고정됩니다."
+                : "catalog가 허용한 canonical sync scope만 선택할 수 있습니다."
+            }
+            label="sync_scope"
+            value={scopeSyncScope}
+            onChange={(event) => {
+              setScopeSyncScope(event.target.value);
+              setScopeOperationKey("");
+            }}
+          >
+            {availableSyncScopes.length === 0 ? (
+              <NativeSelectOption value="">
+                데이터셋을 먼저 선택하세요.
+              </NativeSelectOption>
+            ) : (
+              availableSyncScopes.map((syncScope) => (
+                <NativeSelectOption key={syncScope} value={syncScope}>
+                  {syncScope}
+                </NativeSelectOption>
+              ))
+            )}
+          </FormSelect>
+          {membershipCandidates.length > 1 ? (
+            // 형제 operation이 있을 때만 뜬다. 평소에는 축이 하나로 결정되므로
+            // 화면을 늘리지 않고, 갈릴 때는 **운영자가 고르게** 한다.
+            <FormSelect
+              hint="이 dataset/scope에 refresh operation이 둘 이상입니다. 어느 operation에 요청할지 고르세요."
+              label="operation_key"
+              value={scopeOperationKey}
+              onChange={(event) => setScopeOperationKey(event.target.value)}
             >
-              {SCOPE_TYPE_ORDER.map((value) => (
-                <NativeSelectOption key={value} value={value}>
-                  {SCOPE_TYPE_LABELS[value]} ({value})
+              <NativeSelectOption value="">operation 선택</NativeSelectOption>
+              {membershipCandidates.map((row) => (
+                <NativeSelectOption
+                  key={row.operation_key ?? ""}
+                  value={row.operation_key ?? ""}
+                >
+                  {row.operation_key}
                 </NativeSelectOption>
               ))}
             </FormSelect>
+          ) : null}
+          {selectedCatalogRow ? (
+            <p className="text-xs text-muted-foreground">
+              canonical membership: {selectedCatalogRow.provider_dataset_id}
+            </p>
+          ) : null}
+        </>
+      ) : null}
 
-            {scopeType === "provider_dataset" ? (
-              <>
-                <FormField
-                  list="pipeline-provider-catalog"
-                  label="provider"
-                  placeholder="예: python-kma-api"
-                  required
-                  value={scopeProvider}
-                  onChange={(event) => {
-                    setScopeProvider(event.target.value);
-                    setScopeDataset("");
-                    setScopeSyncScope("");
-                  }}
-                />
-                <FormField
-                  list="pipeline-provider-dataset-catalog"
-                  label="dataset_key"
-                  placeholder="예: kma_short_forecast"
-                  required
-                  value={scopeDataset}
-                  onChange={(event) => {
-                    setScopeDataset(event.target.value);
-                    setScopeSyncScope("");
-                  }}
-                />
-                <datalist id="pipeline-provider-catalog">
-                  {providerOptions.map((option) => (
-                    <option key={option.value} value={option.value} />
-                  ))}
-                </datalist>
-                <datalist id="pipeline-provider-dataset-catalog">
-                  {providerDatasetOptions.map((datasetKey) => (
-                    <option key={datasetKey} value={datasetKey} />
-                  ))}
-                </datalist>
-                <FormField
-                  disabled={
-                    selectedScopeCapability !== null && !explicitScopeSupported
-                  }
-                  hint={
-                    selectedScopeCapability?.effect === "dataset_wide"
-                      ? "dataset-wide 갱신은 비워 두며 서버가 정규화합니다."
-                      : "비우면 서버가 기본 sync scope를 선택합니다."
-                  }
-                  label="sync_scope (선택)"
-                  value={scopeSyncScope}
-                  onChange={(event) => setScopeSyncScope(event.target.value)}
-                />
-              </>
-            ) : null}
+      {scopeType === "center_radius" || scopeType === "sigungu_by_radius" ? (
+        <>
+          <div className="grid grid-cols-3 gap-2">
+            <FormField
+              label="경도"
+              required
+              value={lon}
+              onChange={(event) => setLon(event.target.value)}
+            />
+            <FormField
+              label="위도"
+              required
+              value={lat}
+              onChange={(event) => setLat(event.target.value)}
+            />
+            <FormField
+              label="반경(km)"
+              required
+              value={radiusKm}
+              onChange={(event) => setRadiusKm(event.target.value)}
+            />
+          </div>
+          {scopeType === "sigungu_by_radius" ? (
+            <p className="text-xs text-muted-foreground">
+              시군구 매칭은 canonical intersects 방식으로 계산됩니다.
+            </p>
+          ) : null}
+        </>
+      ) : null}
 
-            {scopeType === "center_radius" ||
-            scopeType === "sigungu_by_radius" ? (
-              <>
-                <div className="grid grid-cols-3 gap-2">
-                  <FormField
-                    label="경도"
-                    required
-                    value={lon}
-                    onChange={(event) => setLon(event.target.value)}
-                  />
-                  <FormField
-                    label="위도"
-                    required
-                    value={lat}
-                    onChange={(event) => setLat(event.target.value)}
-                  />
-                  <FormField
-                    label="반경(km)"
-                    required
-                    value={radiusKm}
-                    onChange={(event) => setRadiusKm(event.target.value)}
-                  />
-                </div>
-                {scopeType === "sigungu_by_radius" ? (
-                  <p className="text-xs text-muted-foreground">
-                    시군구 매칭은 canonical intersects 방식으로 계산됩니다.
-                  </p>
-                ) : null}
-              </>
-            ) : null}
+      {scopeType === "bbox" ? (
+        <div className="grid grid-cols-2 gap-2">
+          <FormField
+            label="min_lon"
+            required
+            value={minLon}
+            onChange={(event) => setMinLon(event.target.value)}
+          />
+          <FormField
+            label="min_lat"
+            required
+            value={minLat}
+            onChange={(event) => setMinLat(event.target.value)}
+          />
+          <FormField
+            label="max_lon"
+            required
+            value={maxLon}
+            onChange={(event) => setMaxLon(event.target.value)}
+          />
+          <FormField
+            label="max_lat"
+            required
+            value={maxLat}
+            onChange={(event) => setMaxLat(event.target.value)}
+          />
+        </div>
+      ) : null}
 
-            {scopeType === "bbox" ? (
-              <div className="grid grid-cols-2 gap-2">
-                <FormField
-                  label="min_lon"
-                  required
-                  value={minLon}
-                  onChange={(event) => setMinLon(event.target.value)}
-                />
-                <FormField
-                  label="min_lat"
-                  required
-                  value={minLat}
-                  onChange={(event) => setMinLat(event.target.value)}
-                />
-                <FormField
-                  label="max_lon"
-                  required
-                  value={maxLon}
-                  onChange={(event) => setMaxLon(event.target.value)}
-                />
-                <FormField
-                  label="max_lat"
-                  required
-                  value={maxLat}
-                  onChange={(event) => setMaxLat(event.target.value)}
-                />
-              </div>
-            ) : null}
-
-            {scopeType === "feature_ids" ? (
-              <label className="flex flex-col gap-1 text-sm">
-                <span className="text-xs font-medium text-muted-foreground">
-                  feature id 목록 (줄바꿈/쉼표 구분, 최대 1000)
-                </span>
-                <textarea
-                  aria-label="feature id 목록"
-                  className="min-h-24 rounded-md border bg-background p-2 font-mono text-xs"
-                  value={featureIdsText}
-                  onChange={(event) => setFeatureIdsText(event.target.value)}
-                />
-              </label>
-            ) : null}
+      {scopeType === "feature_ids" ? (
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="text-xs font-medium text-muted-foreground">
+            feature id 목록 (줄바꿈/쉼표 구분, 최대 1000)
+          </span>
+          <textarea
+            aria-label="feature id 목록"
+            className="min-h-24 rounded-md border bg-background p-2 font-mono text-xs"
+            value={featureIdsText}
+            onChange={(event) => setFeatureIdsText(event.target.value)}
+          />
+        </label>
+      ) : null}
     </>
   );
 });
 
 const RequestTargetFields = memo(function RequestTargetFields({
-  catalogError,
-  catalogLoading,
-  providerOptions,
   scopeType,
   targetForm,
 }: {
-  catalogError: boolean;
-  catalogLoading: boolean;
-  providerOptions: { label: string; value: string }[];
   scopeType: ScopeType;
   targetForm: ReturnType<typeof useRequestTargetForm>;
 }) {
   const {
     cacheRadiusKm,
     cacheScopeMode,
-    datasetKeys,
     externalSystem,
-    providers,
     setCacheRadiusKm,
     setCacheScopeMode,
-    setDatasetKeys,
     setExternalSystem,
-    setProviders,
     setTargetKeysText,
     targetKeysText,
   } = targetForm;
   return (
     <>
-{scopeType === "cache_target_keys" ? (
-              <>
-                <FormField
-                  label="external_system"
-                  placeholder="예: pinvi"
-                  required
-                  value={externalSystem}
-                  onChange={(event) => setExternalSystem(event.target.value)}
-                />
-                <label className="flex flex-col gap-1 text-sm">
-                  <span className="text-xs font-medium text-muted-foreground">
-                    target key 목록 (줄바꿈/쉼표 구분, 최대 500)
-                  </span>
-                  <textarea
-                    aria-label="target key 목록"
-                    className="min-h-24 rounded-md border bg-background p-2 font-mono text-xs"
-                    value={targetKeysText}
-                    onChange={(event) => setTargetKeysText(event.target.value)}
-                  />
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  <FormSelect
-                    label="scope 모드"
-                    value={cacheScopeMode}
-                    onChange={(event) =>
-                      setCacheScopeMode(
-                        event.target.value as
-                          "center_radius" | "sigungu_by_radius",
-                      )
-                    }
-                  >
-                    <NativeSelectOption value="center_radius">
-                      좌표 반경(center_radius)
-                    </NativeSelectOption>
-                    <NativeSelectOption value="sigungu_by_radius">
-                      시군구 반경(sigungu_by_radius)
-                    </NativeSelectOption>
-                  </FormSelect>
-                  <FormField
-                    hint="비우면 기본 반경."
-                    label="반경(km, 선택)"
-                    value={cacheRadiusKm}
-                    onChange={(event) => setCacheRadiusKm(event.target.value)}
-                  />
-                </div>
-              </>
-            ) : null}
-
-            {scopeType !== "provider_dataset" ? (
-              <>
-                <ComboboxMultiple
-                  disabled={catalogLoading || catalogError}
-                  emptyMessage="일치하는 제공자가 없습니다."
-                  label="제공자 필터"
-                  options={providerOptions}
-                  placeholder={
-                    catalogLoading
-                      ? "canonical catalog 불러오는 중"
-                      : "제공자 선택"
-                  }
-                  searchPlaceholder="제공자 검색"
-                  value={providers}
-                  onChange={setProviders}
-                />
-                <FormField
-                  hint="제공자 또는 데이터셋 필터가 1개 이상 필요합니다. 둘 다 지정하면 exact pair 조합으로 검증됩니다."
-                  label="데이터셋 키 필터"
-                  value={datasetKeys}
-                  onChange={(event) => setDatasetKeys(event.target.value)}
-                />
-              </>
-            ) : null}
+      {scopeType === "cache_target_keys" ? (
+        <>
+          <FormField
+            label="external_system"
+            placeholder="예: pinvi"
+            required
+            value={externalSystem}
+            onChange={(event) => setExternalSystem(event.target.value)}
+          />
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-xs font-medium text-muted-foreground">
+              target key 목록 (줄바꿈/쉼표 구분, 최대 500)
+            </span>
+            <textarea
+              aria-label="target key 목록"
+              className="min-h-24 rounded-md border bg-background p-2 font-mono text-xs"
+              value={targetKeysText}
+              onChange={(event) => setTargetKeysText(event.target.value)}
+            />
+          </label>
+          <div className="grid grid-cols-2 gap-2">
+            <FormSelect
+              label="scope 모드"
+              value={cacheScopeMode}
+              onChange={(event) =>
+                setCacheScopeMode(
+                  event.target.value as "center_radius" | "sigungu_by_radius",
+                )
+              }
+            >
+              <NativeSelectOption value="center_radius">
+                좌표 반경(center_radius)
+              </NativeSelectOption>
+              <NativeSelectOption value="sigungu_by_radius">
+                시군구 반경(sigungu_by_radius)
+              </NativeSelectOption>
+            </FormSelect>
+            <FormField
+              hint="비우면 기본 반경."
+              label="반경(km, 선택)"
+              value={cacheRadiusKm}
+              onChange={(event) => setCacheRadiusKm(event.target.value)}
+            />
+          </div>
+        </>
+      ) : null}
     </>
   );
 });
@@ -1092,47 +1011,45 @@ const RequestExecutionSettings = memo(function RequestExecutionSettings({
   } = executionForm;
   return (
     <>
-            <div className="grid grid-cols-2 gap-2">
-              <FormSelect
-                label="실행 모드"
-                value={runMode}
-                onChange={(event) =>
-                  setRunMode(event.target.value as "queued" | "now")
-                }
-              >
-                <NativeSelectOption value="queued">
-                  예약(queued)
-                </NativeSelectOption>
-                <NativeSelectOption value="now">즉시(now)</NativeSelectOption>
-              </FormSelect>
-              <FormField
-                hint="0~1000 정수, 높을수록 먼저 실행. 소수는 허용하지 않습니다."
-                label="priority"
-                max={1000}
-                min={0}
-                step={1}
-                type="number"
-                value={priority}
-                onChange={(event) => setPriority(event.target.value)}
-              />
-            </div>
-            {!dryRun ? (
-              <FormField
-                hint="operator는 로그인한 admin actor로 서버에서 기록됩니다."
-                label="사유"
-                placeholder="감사 로그에 남는 요청 사유"
-                value={reason}
-                onChange={(event) => setReason(event.target.value)}
-              />
-            ) : null}
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                checked={dryRun}
-                type="checkbox"
-                onChange={(event) => setDryRun(event.target.checked)}
-              />
-              dry-run(행을 만들지 않고 대상 수만 확인)
-            </label>
+      <div className="grid grid-cols-2 gap-2">
+        <FormSelect
+          label="실행 모드"
+          value={runMode}
+          onChange={(event) =>
+            setRunMode(event.target.value as "queued" | "now")
+          }
+        >
+          <NativeSelectOption value="queued">예약(queued)</NativeSelectOption>
+          <NativeSelectOption value="now">즉시(now)</NativeSelectOption>
+        </FormSelect>
+        <FormField
+          hint="0~1000 정수, 높을수록 먼저 실행. 소수는 허용하지 않습니다."
+          label="priority"
+          max={1000}
+          min={0}
+          step={1}
+          type="number"
+          value={priority}
+          onChange={(event) => setPriority(event.target.value)}
+        />
+      </div>
+      {!dryRun ? (
+        <FormField
+          hint="operator는 로그인한 admin actor로 서버에서 기록됩니다."
+          label="사유"
+          placeholder="감사 로그에 남는 요청 사유"
+          value={reason}
+          onChange={(event) => setReason(event.target.value)}
+        />
+      ) : null}
+      <label className="flex items-center gap-2 text-sm">
+        <input
+          checked={dryRun}
+          type="checkbox"
+          onChange={(event) => setDryRun(event.target.checked)}
+        />
+        dry-run(행을 만들지 않고 대상 수만 확인)
+      </label>
     </>
   );
 });
@@ -1168,100 +1085,106 @@ function RequestResultFeedback({
 }) {
   return (
     <>
-{catalogQuery.isError ? (
-              <Alert variant="destructive">
-                <AlertTitle>canonical catalog 조회 실패</AlertTitle>
-                <AlertDescription>
-                  provider/dataset 조합을 검증할 수 없어 요청 생성과 dry-run을
-                  차단합니다. {catalogQuery.error.message}
-                </AlertDescription>
-              </Alert>
-            ) : null}
+      {catalogQuery.isError ? (
+        <Alert variant="destructive">
+          <AlertTitle>canonical catalog 조회 실패</AlertTitle>
+          <AlertDescription>
+            provider/dataset 조합을 검증할 수 없어 요청 생성과 dry-run을
+            차단합니다. {catalogQuery.error.message}
+          </AlertDescription>
+        </Alert>
+      ) : null}
 
-            {moisSelected ? (
-              <MoisPrecheckNotice
-                isError={moisPrecheck.isError}
-                isLoading={moisPrecheck.isLoading}
-                data={moisPrecheck.data?.data}
-              />
-            ) : null}
+      {moisSelected ? (
+        <MoisPrecheckNotice
+          isError={moisPrecheck.isError}
+          isLoading={moisPrecheck.isLoading}
+          data={moisPrecheck.data?.data}
+        />
+      ) : null}
 
-            {formError ? (
-              <Alert variant="destructive">
-                <AlertTitle>입력 확인</AlertTitle>
-                <AlertDescription>{formError}</AlertDescription>
-              </Alert>
+      {formError ? (
+        <Alert variant="destructive">
+          <AlertTitle>입력 확인</AlertTitle>
+          <AlertDescription>{formError}</AlertDescription>
+        </Alert>
+      ) : null}
+      {requestError ? (
+        <Alert variant="destructive">
+          <AlertTitle>요청 생성 실패</AlertTitle>
+          <AlertDescription className="space-y-2">
+            {retryAfterSeconds !== null
+              ? `동일 scope 요청이 이미 실행 중입니다 — 약 ${retryAfterSeconds}초 후 다시 시도하세요.`
+              : requestError.message}
+            {conflictRequestId ? (
+              <Button
+                size="sm"
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  closeDialog();
+                  onCreated("update_request", conflictRequestId);
+                }}
+              >
+                기존 활성 요청 열기
+              </Button>
             ) : null}
-            {requestError ? (
-              <Alert variant="destructive">
-                <AlertTitle>요청 생성 실패</AlertTitle>
-                <AlertDescription className="space-y-2">
-                  {retryAfterSeconds !== null
-                    ? `동일 scope 요청이 이미 실행 중입니다 — 약 ${retryAfterSeconds}초 후 다시 시도하세요.`
-                    : requestError.message}
-                  {conflictRequestId ? (
-                    <Button
-                      size="sm"
-                      type="button"
-                      variant="outline"
-                      onClick={() => {
-                        closeDialog();
-                        onCreated("update_request", conflictRequestId);
-                      }}
-                    >
-                      기존 활성 요청 열기
-                    </Button>
-                  ) : null}
-                </AlertDescription>
-              </Alert>
-            ) : null}
-            {preview ? (
-              <Alert data-testid="request-preview-result">
-                <AlertTitle>미리보기 결과</AlertTitle>
-                <AlertDescription className="space-y-1">
-                  <p>
-                    {preview.providers.length}개 provider ·{" "}
-                    {preview.dataset_keys.length}개 dataset
-                  </p>
-                  <p>매칭 대상: {JSON.stringify(preview.matched_scope)}</p>
-                </AlertDescription>
-              </Alert>
-            ) : null}
-            {created ? (
-              <Alert data-testid="request-create-result">
-                <AlertTitle>
-                  {createRequest.data?.idempotent_replay
-                    ? "동일 요청 결과 재생"
-                    : createRequest.data?.reused_active_request
-                      ? "기존 활성 요청 재사용"
-                      : "요청 생성됨"}
-                </AlertTitle>
-                <AlertDescription className="space-y-1">
-                  <p>
-                    상태: {statusLabel(created.status)}
-                    {" · "}
-                    <span className="font-mono">
-                      {shortId(created.request_id)}
-                    </span>
-                  </p>
-                  <p>
-                    effective scope:{" "}
-                    {created.effective_sync_scope ?? "해당 없음"}
-                  </p>
-                  <Button
-                    size="sm"
-                    type="button"
-                    variant="outline"
-                    onClick={() => {
-                      closeDialog();
-                      onCreated("update_request", created.request_id);
-                    }}
-                  >
-                    타임라인에서 보기
-                  </Button>
-                </AlertDescription>
-              </Alert>
-            ) : null}
+          </AlertDescription>
+        </Alert>
+      ) : null}
+      {preview ? (
+        <Alert data-testid="request-preview-result">
+          <AlertTitle>미리보기 결과</AlertTitle>
+          <AlertDescription className="space-y-1">
+            <p>실행 membership: {preview.dataset_memberships.length}개</p>
+            <ul className="font-mono text-xs">
+              {preview.dataset_memberships.map((membership) => (
+                <li key={membershipKey(membership)}>
+                  {membershipLabel(membership)}
+                </li>
+              ))}
+            </ul>
+            <p>매칭 대상: {JSON.stringify(preview.matched_scope)}</p>
+          </AlertDescription>
+        </Alert>
+      ) : null}
+      {created ? (
+        <Alert data-testid="request-create-result">
+          <AlertTitle>
+            {createRequest.data?.idempotent_replay
+              ? "동일 요청 결과 재생"
+              : createRequest.data?.reused_active_request
+                ? "기존 활성 요청 재사용"
+                : "요청 생성됨"}
+          </AlertTitle>
+          <AlertDescription className="space-y-1">
+            <p>
+              상태: {statusLabel(created.status)}
+              {" · "}
+              <span className="font-mono">{shortId(created.request_id)}</span>
+            </p>
+            <p>실행 membership: {created.dataset_memberships.length}개</p>
+            <ul className="font-mono text-xs">
+              {created.dataset_memberships.map((membership) => (
+                <li key={membershipKey(membership)}>
+                  {membershipLabel(membership)}
+                </li>
+              ))}
+            </ul>
+            <Button
+              size="sm"
+              type="button"
+              variant="outline"
+              onClick={() => {
+                closeDialog();
+                onCreated("update_request", created.request_id);
+              }}
+            >
+              타임라인에서 보기
+            </Button>
+          </AlertDescription>
+        </Alert>
+      ) : null}
     </>
   );
 }
@@ -1273,6 +1196,7 @@ export function RequestCreateDialog({
 }) {
   const {
     catalogQuery,
+    catalogRows,
     closeDialog,
     conflictRequestId,
     createRequest,
@@ -1286,7 +1210,6 @@ export function RequestCreateDialog({
     openDialog,
     preview,
     previewRequest,
-    providerOptions,
     requestError,
     retryAfterSeconds,
     scopeForm,
@@ -1316,15 +1239,12 @@ export function RequestCreateDialog({
             disabled={createRequest.isPending || submittingPrecheck}
           >
             <RequestIdentityFields
+              catalogRows={catalogRows}
               clearFormError={clearFormError}
-              providerOptions={providerOptions}
               scopeForm={scopeForm}
             />
 
             <RequestTargetFields
-              catalogError={catalogQuery.isError}
-              catalogLoading={catalogQuery.isLoading}
-              providerOptions={providerOptions}
               scopeType={scopeForm.scopeType}
               targetForm={targetForm}
             />

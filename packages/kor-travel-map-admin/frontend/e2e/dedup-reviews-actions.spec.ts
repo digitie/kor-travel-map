@@ -146,28 +146,22 @@ function makeReviewSource(
   return {
     confidence: 100,
     dataset_key: feature.dataset_key ?? "dataset",
-    expires_at: null,
     fetched_at: MOCK_NOW,
     imported_at: MOCK_NOW,
-    is_primary_source: true,
     linked_at: MOCK_NOW,
     match_method: "natural_key",
     provider: feature.provider ?? "provider",
-    raw_address: `${feature.name} address`,
     raw_data: {
       address: `${feature.name} address`,
       name: feature.name,
       phone: "02-0000-0000",
     },
-    raw_latitude: feature.lat,
-    raw_longitude: feature.lon,
-    raw_name: feature.name,
     raw_payload_hash: `${feature.feature_id}-hash`,
     source_entity_id: `${feature.feature_id}-entity`,
     source_entity_type: feature.kind,
     source_record_key: `${feature.feature_id}-source`,
     source_role: "primary",
-    source_version: null,
+    observed_at: MOCK_NOW,
   };
 }
 

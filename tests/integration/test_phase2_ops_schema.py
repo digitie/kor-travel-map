@@ -66,13 +66,13 @@ async def test_phase2_ops_tables_and_indexes_exist(
                         "idx_violations_source_record",
                         "idx_violations_detected_brin",
                         "idx_violations_status_seen",
-                        "idx_violations_provider_status_seen",
+                        "idx_data_integrity_violations_dataset_status",
                         "idx_violations_feature_seen",
                         "uq_poi_cache_targets_active_key",
                         "idx_poi_cache_targets_coord_5179",
                         "idx_poi_cache_targets_next_refresh",
                         "idx_poi_cache_links_feature",
-                        "idx_poi_cache_links_provider_dataset",
+                        "idx_poi_cache_target_feature_links_dataset",
                         "idx_provider_refresh_enabled",
                         "idx_provider_refresh_source_kind",
                     ]
@@ -86,13 +86,13 @@ async def test_phase2_ops_tables_and_indexes_exist(
         "idx_violations_source_record",
         "idx_violations_detected_brin",
         "idx_violations_status_seen",
-        "idx_violations_provider_status_seen",
+        "idx_data_integrity_violations_dataset_status",
         "idx_violations_feature_seen",
         "uq_poi_cache_targets_active_key",
         "idx_poi_cache_targets_coord_5179",
         "idx_poi_cache_targets_next_refresh",
         "idx_poi_cache_links_feature",
-        "idx_poi_cache_links_provider_dataset",
+        "idx_poi_cache_target_feature_links_dataset",
         "idx_provider_refresh_enabled",
         "idx_provider_refresh_source_kind",
     }
@@ -166,9 +166,12 @@ async def test_poi_cache_target_generated_coord_and_active_key(
         (
             """
             INSERT INTO ops.provider_refresh_policies (
-                provider, dataset_key, source_kind, max_concurrent
+                provider_dataset_id, source_kind, max_concurrent
             )
-            VALUES ('python-kma-api', 'kma_weather_alerts', 'openapi', 0)
+            SELECT provider_dataset_id, 'openapi', 0
+            FROM provider_sync.provider_datasets
+            WHERE provider = 'python-kma-api'
+              AND dataset_key = 'kma_weather_alerts'
             """,
             {},
         ),

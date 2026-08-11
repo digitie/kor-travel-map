@@ -12,8 +12,8 @@ Search Local / Google Places Text Search(New)로 보강하는 ETL이다.
 > - `find_place_phone_candidates(...)` → 전화번호 없는 place 후보
 >   (`infra.feature_repo.find_place_features_without_phone`, `detail.phones` 빈 것).
 > - `apply_place_phone_enrichment(...)` → 정규화(자릿수≥9) + dedup + max3 →
->   `detail.phones` 갱신(`set_feature_phones`) + `source_links(role='enrichment',
->   is_primary_source=False)` 이력. 무효/중복/초과/미존재는 `applied=False`+reason.
+>   `detail.phones` 갱신(`set_feature_phones`) + `source_links(source_role='enrichment')`
+>   이력. 무효/중복/초과/미존재는 `applied=False`+reason.
 > - client: `AsyncKorTravelMapClient.find_place_phone_candidates` / `enrich_place_phone`.
 
 ## 1. 문서 정보
@@ -240,7 +240,6 @@ for candidate in used_candidates:
         source_role=SourceRole.ENRICHMENT,
         match_method="place_phone_search",
         confidence=candidate.total_confidence,
-        is_primary_source=False,
     )
     await link_repo.upsert(link)
 ```

@@ -24,6 +24,7 @@ from kortravelmap.infra.feature_update_executor import (
 from kortravelmap.infra.feature_update_repo import (
     FeatureUpdateLockBusy,
     FeatureUpdateRequest,
+    FeatureUpdateRequestDataset,
 )
 from kortravelmap.infra.scope_repo import (
     FeatureScopeRow,
@@ -59,9 +60,7 @@ class _Client:
     async def peek_next_update_request(self) -> FeatureUpdateRequest | None:
         return self.request
 
-    async def peek_update_requests(
-        self, *, limit: int = 10
-    ) -> tuple[FeatureUpdateRequest, ...]:
+    async def peek_update_requests(self, *, limit: int = 10) -> tuple[FeatureUpdateRequest, ...]:
         self.peek_limits.append(limit)
         if self.requests is not None:
             return self.requests[:limit]
@@ -152,11 +151,19 @@ def _request(
         scope_type="provider_dataset",
         scope={
             "type": "provider_dataset",
-            "provider": "demo",
-            "dataset_key": "places",
+            "provider_dataset_id": 1,
         },
-        providers=(),
-        dataset_keys=(),
+        dataset_membership_mode="single",
+        dataset_memberships=(
+            FeatureUpdateRequestDataset(
+                feature_update_request_dataset_id="membership-1",
+                provider_dataset_id=1,
+                sync_scope="dataset_wide",
+                operation_key="feature_place_opinet_stations_job",
+                provider="demo",
+                dataset_key="places",
+            ),
+        ),
         update_policy={"prevent_provider_reactivation": True},
         run_mode=run_mode,
         priority=50,
@@ -183,10 +190,24 @@ def _execution_result(
     resolution = ScopeResolution(
         scope_type="provider_dataset",
         features=(FeatureScopeRow("feature-1"),),
-        provider_datasets=(ProviderDatasetScope("demo", "places", 1),),
+        provider_datasets=(
+            # T-VN-33: scope 해석 결과도 자연키 label 뒤에 exact refresh membership
+            # (provider_dataset_id + sync_scope + operation_key)을 그대로 들고 있다.
+            ProviderDatasetScope(
+                provider="demo",
+                dataset_key="places",
+                feature_count=1,
+                provider_dataset_id=1,
+                sync_scope="dataset_wide",
+                operation_key="feature_place_opinet_stations_job",
+            ),
+        ),
     )
     refresh_scope = ProviderDatasetRefreshScope(
         request_id=request.request_id,
+        provider_dataset_id=1,
+        sync_scope="dataset_wide",
+        operation_key="feature_place_opinet_stations_job",
         provider="demo",
         dataset_key="places",
         scope_type=request.scope_type,
@@ -207,6 +228,9 @@ def _execution_result(
     if state == "done":
         results = (
             ProviderDatasetRefreshResult(
+                provider_dataset_id=1,
+                sync_scope="dataset_wide",
+                operation_key="feature_place_opinet_stations_job",
                 provider="demo",
                 dataset_key="places",
                 loaded_feature_ids=("feature-1",),
@@ -272,8 +296,7 @@ def test_queue_sensor_emits_batch_run_requests() -> None:
         f"feature-update:{second.request_id}:1",
     ]
     assert [
-        item.run_config["ops"]["execute_feature_update_request"]["config"]
-        for item in result
+        item.run_config["ops"]["execute_feature_update_request"]["config"] for item in result
     ] == [
         {
             "request_id": first.request_id,
@@ -318,6 +341,15 @@ def test_worker_job_executes_configured_request() -> None:
         }
     ]
     assert result.output_for_node("execute_feature_update_request")["loaded_count"] == 1
+    assert result.output_for_node("execute_feature_update_request")[
+        "provider_dataset_memberships"
+    ] == [
+        {
+            "provider_dataset_id": 1,
+            "sync_scope": "dataset_wide",
+            "operation_key": "feature_place_opinet_stations_job",
+        }
+    ]
 
 
 def test_worker_job_treats_scope_lock_contention_as_retryable_success() -> None:
@@ -440,9 +472,7 @@ def test_failure_sensor_marks_request_failed() -> None:
 
 
 def test_failure_sensor_requires_database_client_resource() -> None:
-    assert feature_update_request_failure_sensor.required_resource_keys == {
-        "kor_travel_map_client"
-    }
+    assert feature_update_request_failure_sensor.required_resource_keys == {"kor_travel_map_client"}
 
 
 def test_pre_start_failure_advances_generation_and_next_sensor_emits_run() -> None:
@@ -494,15 +524,9 @@ def test_pre_start_failure_advances_generation_and_next_sensor_emits_run() -> No
     next_run = feature_update_request_queue_sensor(next_context)
 
     assert isinstance(next_run, RunRequest)
-    assert next_run.run_key == (
-        f"feature-update:{request.request_id}:{advanced.generation}"
-    )
-    assert next_run.run_key != (
-        f"feature-update:{request.request_id}:{request.generation}"
-    )
-    assert next_run.tags[FEATURE_UPDATE_REQUEST_GENERATION_TAG] == (
-        str(advanced.generation)
-    )
+    assert next_run.run_key == (f"feature-update:{request.request_id}:{advanced.generation}")
+    assert next_run.run_key != (f"feature-update:{request.request_id}:{request.generation}")
+    assert next_run.tags[FEATURE_UPDATE_REQUEST_GENERATION_TAG] == (str(advanced.generation))
 
 
 def test_failure_sensor_notifies_even_when_fail_update_request_fails() -> None:

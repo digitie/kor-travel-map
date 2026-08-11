@@ -1,193 +1,251 @@
-"""``test_provider_catalog`` — 전 provider×dataset 카탈로그 정본 검증.
-
-통합 데이터셋 화면과 fixture preview가 동일 카탈로그를 source로 쓰도록,
-카탈로그가 fixture-backed 항목을 넘어 시스템이 ETL 하는 모든
-provider×dataset을 담는지 검증한다.
-"""
+"""T-VN-33 DB provider dataset catalog/handler binding contract tests."""
 
 from __future__ import annotations
 
+import inspect
+from collections.abc import Mapping
+from typing import Any
+
 import pytest
-from kortravelmap.core.feature_operation import ProviderDatasetOperationKey
 from kortravelmap.providers.feature_operation_registry import (
-    all_feature_operation_registry_pairs,
+    FEATURE_OPERATION_HANDLERS,
+    UnknownFeatureOperationHandlerError,
+    feature_operation_handler_keys,
+    resolve_feature_operation_handler,
 )
 
-from kortravelmap.api.etl_fixtures import FIXTURE_REGISTRY
+from kortravelmap.api import provider_catalog
 from kortravelmap.api.provider_catalog import (
-    PROVIDER_DATASET_CATALOG,
-    catalog_datasets,
-    catalog_feature_load_entries,
-    catalog_refreshable_entries,
-    find_catalog_entry,
-    list_catalog_providers,
-    resolve_dataset_history_sync_scopes,
+    ActiveOperationHandlerDriftError,
+    assert_active_operation_handler_exact_set,
+    find_provider_dataset_catalog_entry,
+    list_active_refresh_operation_bindings,
+    list_provider_dataset_catalog,
 )
 
 
-@pytest.mark.unit
-def test_catalog_includes_previously_missing_providers() -> None:
-    """카탈로그는 fixture만으론 안 나오던 provider를 포함한다."""
-    providers = set(list_catalog_providers())
-    assert {
-        "python-mois-api",
-        "python-knps-api",
-        "python-krheritage-api",
-        "python-mcst-api",
-    } <= providers
+class _FakeResult:
+    def __init__(self, rows: list[Mapping[str, Any]]) -> None:
+        self._rows = rows
+
+    def mappings(self) -> _FakeResult:
+        return self
+
+    def all(self) -> list[Mapping[str, Any]]:
+        return self._rows
 
 
-@pytest.mark.unit
-def test_catalog_includes_specific_dataset_keys() -> None:
-    """대표 dataset_key가 카탈로그에 들어있다 (drift-safe 상수 참조 검증)."""
-    keys = {(e.provider, e.dataset_key) for e in PROVIDER_DATASET_CATALOG}
-    assert ("python-mois-api", "mois_license_features_bulk") in keys
-    assert ("python-knps-api", "knps_visitor_centers") in keys
-    assert ("python-knps-api", "knps_trails") in keys
-    assert ("python-knps-api", "knps_park_boundaries") in keys
-    assert ("python-krheritage-api", "krheritage_heritage_features") in keys
-    assert ("python-krheritage-api", "krheritage_event_list") in keys
-    assert ("python-mcst-api", "mcst_world_restaurants_csv") in keys
-    assert ("python-mcst-api", "mcst_golf_courses_status") in keys
+class _FakeSession:
+    def __init__(
+        self,
+        *,
+        catalog_rows: list[Mapping[str, Any]],
+        active_operation_rows: list[Mapping[str, Any]],
+    ) -> None:
+        self.catalog_rows = catalog_rows
+        self.active_operation_rows = active_operation_rows
+        self.calls: list[tuple[str, dict[str, object] | None]] = []
 
-
-@pytest.mark.unit
-def test_catalog_covers_all_fixture_datasets() -> None:
-    """모든 fixture-backed (provider, dataset)은 카탈로그에 존재해야 한다.
-
-    누락되면 /v1/ops/datasets/preview가 카탈로그에서 그 dataset을 못 그린다 → drift 방지.
-    """
-    for entry in FIXTURE_REGISTRY:
-        assert find_catalog_entry(entry.provider, entry.dataset) is not None, (
-            f"fixture {entry.provider}/{entry.dataset}이 카탈로그에 없음"
+    async def execute(
+        self,
+        statement: Any,
+        params: dict[str, object] | None = None,
+    ) -> _FakeResult:
+        sql = str(statement)
+        self.calls.append((sql, params))
+        rows = (
+            self.active_operation_rows
+            if "operation.operation_kind = 'refresh'" in sql
+            else self.catalog_rows
         )
+        return _FakeResult(rows)
+
+
+_CATALOG_ROWS: list[Mapping[str, Any]] = [
+    {
+        "provider_dataset_id": 2,
+        "provider": "python-example-api",
+        "dataset_key": "weather",
+        "display_name": "예시 날씨",
+        "source_kind": "openapi",
+        "is_active": True,
+        "capabilities": '{"schema_version": 1, "produces": ["weather"]}',
+        "operation_key": "feature_weather_example_job",
+        "operation_kind": "refresh",
+        "operation_is_enabled": True,
+        "operation_config": '{"max_grids": 2}',
+        "sync_scope": "dataset_wide",
+    },
+    {
+        "provider_dataset_id": 2,
+        "provider": "python-example-api",
+        "dataset_key": "weather",
+        "display_name": "예시 날씨",
+        "source_kind": "openapi",
+        "is_active": True,
+        "capabilities": '{"schema_version": 1, "produces": ["weather"]}',
+        "operation_key": "feature_weather_example_job",
+        "operation_kind": "refresh",
+        "operation_is_enabled": True,
+        "operation_config": '{"max_grids": 2}',
+        "sync_scope": "external_system:concierge",
+    },
+    {
+        "provider_dataset_id": 2,
+        "provider": "python-example-api",
+        "dataset_key": "weather",
+        "display_name": "예시 날씨",
+        "source_kind": "openapi",
+        "is_active": True,
+        "capabilities": '{"schema_version": 1, "produces": ["weather"]}',
+        "operation_key": "feature_weather_preview_job",
+        "operation_kind": "preview",
+        "operation_is_enabled": False,
+        "operation_config": {},
+        "sync_scope": None,
+    },
+    {
+        "provider_dataset_id": 3,
+        "provider": "python-example-api",
+        "dataset_key": "retired",
+        "display_name": "종료 dataset",
+        "source_kind": "filedata",
+        "is_active": False,
+        "capabilities": {"schema_version": 1, "produces": ["place"]},
+        "operation_key": None,
+        "operation_kind": None,
+        "operation_is_enabled": None,
+        "operation_config": None,
+        "sync_scope": None,
+    },
+]
+
+_ACTIVE_OPERATION_ROWS: list[Mapping[str, Any]] = [
+    {
+        "provider_dataset_id": 2,
+        "provider": "python-example-api",
+        "dataset_key": "weather",
+        "operation_key": "feature_weather_example_job",
+    },
+    {
+        "provider_dataset_id": 4,
+        "provider": "python-other-api",
+        "dataset_key": "weather-copy",
+        "operation_key": "feature_weather_example_job",
+    },
+    {
+        "provider_dataset_id": 5,
+        "provider": "python-other-api",
+        "dataset_key": "place",
+        "operation_key": "feature_place_example_job",
+    },
+]
+
+
+def _session() -> _FakeSession:
+    return _FakeSession(
+        catalog_rows=_CATALOG_ROWS,
+        active_operation_rows=_ACTIVE_OPERATION_ROWS,
+    )
 
 
 @pytest.mark.unit
-def test_no_duplicate_catalog_entries() -> None:
-    """(provider, dataset_key)는 카탈로그에서 유일해야 한다."""
-    keys = [(e.provider, e.dataset_key) for e in PROVIDER_DATASET_CATALOG]
-    assert len(keys) == len(set(keys))
+async def test_catalog_is_db_projection_with_operations_and_normalized_scopes() -> None:
+    session = _session()
+
+    catalog = await list_provider_dataset_catalog(session)  # type: ignore[arg-type]
+
+    assert [(entry.provider, entry.dataset_key) for entry in catalog] == [
+        ("python-example-api", "retired"),
+        ("python-example-api", "weather"),
+    ]
+    weather = catalog[1]
+    assert weather.provider_dataset_id == 2
+    assert weather.produces == ("weather",)
+    with pytest.raises(TypeError):
+        weather.capabilities["produces"] = ()  # type: ignore[index]
+    operation_identities = [
+        (operation.operation_key, operation.operation_kind) for operation in weather.operations
+    ]
+    assert operation_identities == [
+        ("feature_weather_example_job", "refresh"),
+        ("feature_weather_preview_job", "preview"),
+    ]
+    refresh = weather.operations[0]
+    assert refresh.config == {"max_grids": 2}
+    assert refresh.sync_scopes == ("dataset_wide", "external_system:concierge")
+    assert "provider_sync.provider_datasets" in session.calls[0][0]
+    assert "provider_sync.provider_dataset_operations" in session.calls[0][0]
+    assert "provider_sync.provider_dataset_operation_scopes" in session.calls[0][0]
+    assert session.calls[0][1] == {"active_only": False}
 
 
 @pytest.mark.unit
-def test_dataset_history_scope_aliases_are_canonical_and_fail_closed() -> None:
-    assert resolve_dataset_history_sync_scopes(
-        "python-mois-api",
-        "mois_license_features_bulk",
-        "dataset_wide",
-    ) == ("dataset_wide", None)
-    assert resolve_dataset_history_sync_scopes(
-        "python-kma-api",
-        "kma_short_forecast",
-        "external_system:concierge",
-    ) == ("external_system:concierge",)
-    assert resolve_dataset_history_sync_scopes(
-        "removed-provider",
-        "removed-dataset",
-        "dataset_wide",
-    ) == ("dataset_wide", None)
-    for invalid_scope in ("default", "legacy-scope", " external_system:x"):
-        with pytest.raises(ValueError, match="sync_scope|external_system"):
-            resolve_dataset_history_sync_scopes(
-                "removed-provider",
-                "removed-dataset",
-                invalid_scope,
-            )
+async def test_catalog_lookup_delegates_to_db_projection() -> None:
+    session = _session()
+
+    entry = await find_provider_dataset_catalog_entry(  # type: ignore[arg-type]
+        session,
+        provider="python-example-api",
+        dataset_key="weather",
+        active_only=True,
+    )
+
+    assert entry is not None
+    assert entry.provider_dataset_id == 2
+    assert session.calls[0][1] == {"active_only": True}
 
 
 @pytest.mark.unit
-def test_refreshable_catalog_exactly_matches_feature_operation_registry() -> None:
-    """API 카탈로그와 main registry의 실행 가능한 exact pair는 완전히 같다."""
-    catalog_pairs = {
-        ProviderDatasetOperationKey(entry.provider, entry.dataset_key)
-        for entry in catalog_refreshable_entries()
-    }
+async def test_active_refresh_binding_keeps_dataset_identity_outside_handler_registry() -> None:
+    session = _session()
 
-    assert catalog_pairs == set(all_feature_operation_registry_pairs())
+    bindings = await list_active_refresh_operation_bindings(session)  # type: ignore[arg-type]
 
-
-@pytest.mark.unit
-def test_preview_field_matches_fixture_registry() -> None:
-    """preview 필드는 fixture registry 조회 결과와 정합한다."""
-    fixture_keys = {(e.provider, e.dataset) for e in FIXTURE_REGISTRY}
-    for entry in PROVIDER_DATASET_CATALOG:
-        key = (entry.provider, entry.dataset_key)
-        if key in fixture_keys:
-            assert entry.preview == "fixture"
-        else:
-            assert entry.preview == "none"
+    assert [(item.provider_dataset_id, item.operation_key) for item in bindings] == [
+        (2, "feature_weather_example_job"),
+        (4, "feature_weather_example_job"),
+        (5, "feature_place_example_job"),
+    ]
 
 
 @pytest.mark.unit
-def test_feature_load_entries_are_subset() -> None:
-    """catalog_feature_load_entries()는 is_feature_load=True 항목만, 정렬됨."""
-    entries = catalog_feature_load_entries()
-    assert all(e.is_feature_load for e in entries)
-    # mois bulk는 feature load, opinet 가격(PriceValue)은 아님.
-    fl_keys = {(e.provider, e.dataset_key) for e in entries}
-    assert ("python-mois-api", "mois_license_features_bulk") in fl_keys
-    assert ("python-opinet-api", "opinet_gas_station_prices") not in fl_keys
-    # AirKorea는 station 단독 dataset이 아니라 air_quality asset이 측정소 Feature와
-    # WeatherValue를 함께 적재한다.
-    assert ("python-airkorea-api", "airkorea_stations") not in fl_keys
-    assert ("python-airkorea-api", "airkorea_air_quality") in fl_keys
-    # T-223b curated source도 feature update runner가 직접 실행할 수 있어야 한다.
-    assert ("data.go.kr-standard", "standard_special_streets") in fl_keys
-    assert ("python-datagokr-api", "datagokr_seoul_bookstores") in fl_keys
-    # 정렬 보장.
-    assert entries == sorted(entries, key=lambda e: (e.provider, e.dataset_key))
+async def test_active_operation_and_handler_sets_must_match_exactly() -> None:
+    session = _session()
+
+    actual = await assert_active_operation_handler_exact_set(  # type: ignore[arg-type]
+        session,
+        handler_operation_keys={
+            "feature_weather_example_job",
+            "feature_place_example_job",
+        },
+    )
+
+    assert actual == {"feature_weather_example_job", "feature_place_example_job"}
+
+    with pytest.raises(ActiveOperationHandlerDriftError) as raised:
+        await assert_active_operation_handler_exact_set(  # type: ignore[arg-type]
+            session,
+            handler_operation_keys={"feature_weather_example_job", "stale_job"},
+        )
+    assert raised.value.missing_handler_operation_keys == {"feature_place_example_job"}
+    assert raised.value.stale_handler_operation_keys == {"stale_job"}
 
 
 @pytest.mark.unit
-def test_refreshable_entries_include_non_feature_load_runner_targets() -> None:
-    """운영 적재 대상은 새 Feature 생성 여부와 별도다."""
-    entries = catalog_refreshable_entries()
-    assert all(e.is_refreshable for e in entries)
-    keys = {(e.provider, e.dataset_key) for e in entries}
+def test_handler_registry_is_key_to_handler_only() -> None:
+    assert len(FEATURE_OPERATION_HANDLERS) == 33
+    assert feature_operation_handler_keys() == frozenset(FEATURE_OPERATION_HANDLERS)
+    binding = resolve_feature_operation_handler("feature_place_knps_points_job")
+    assert binding.job_name == "feature_place_knps_points_job"
+    assert binding.asset_keys == ("feature_place_knps_points",)
+    with pytest.raises(UnknownFeatureOperationHandlerError):
+        resolve_feature_operation_handler("missing_operation")
 
-    # FeatureBundle 적재 항목은 기본적으로 refreshable이다.
-    assert {
-        (e.provider, e.dataset_key) for e in catalog_feature_load_entries()
-    } <= keys
-
-    # WeatherValue/PriceValue/enrichment처럼 Feature를 만들지 않아도 로드 대상이다.
-    assert ("python-kma-api", "kma_short_forecast") in keys
-    assert ("python-opinet-api", "opinet_gas_station_prices") in keys
-    assert ("python-krex-api", "krex_rest_area_prices") in keys
-    assert ("python-krex-api", "krex_rest_area_weather") in keys
-    assert ("python-visitkorea-api", "visitkorea_festival_events") in keys
-
-    # MOIS history/closed/detail은 아직 feature-update runner가 안전하게 실행할
-    # 전용 source/fetcher가 없으므로 운영 실행 목록에서 제외한다.
-    assert ("python-mois-api", "mois_license_features_bulk") in keys
-    assert ("python-mois-api", "mois_license_features_history") not in keys
-    assert ("python-mois-api", "mois_license_features_closed") not in keys
-    assert ("python-mois-api", "mois_license_detail") not in keys
-    # 전화번호 보강은 수동/후속 보강 계열이므로 운영 실행 목록에서 제외한다.
-    assert ("python-visitkorea-api", "place_phone_enrichment") not in keys
-    # AirKorea station 단독 dataset은 air_quality 통합 asset의 backward-compatible
-    # alias일 뿐, 운영 목록에는 중복 노출하지 않는다.
-    assert ("python-airkorea-api", "airkorea_stations") not in keys
-    assert entries == sorted(entries, key=lambda e: (e.provider, e.dataset_key))
-
-
-@pytest.mark.unit
-def test_catalog_datasets_sorted_by_dataset_key() -> None:
-    knps = catalog_datasets("python-knps-api")
-    assert len(knps) == 10  # place 5 + geometry 5
-    assert [e.dataset_key for e in knps] == sorted(e.dataset_key for e in knps)
-    kinds = {e.dataset_key: e.feature_kind for e in knps}
-    assert kinds["knps_visitor_centers"] == "place"
-    assert kinds["knps_trails"] == "route"
-    assert kinds["knps_park_boundaries"] == "area"
-
-
-@pytest.mark.unit
-def test_mcst_entries_reference_provider_dict() -> None:
-    """MCST 13 slug 전체가 카탈로그에 (provider dict 참조, label 보존)."""
-    mcst = catalog_datasets("python-mcst-api")
-    assert len(mcst) == 13
-    golf = find_catalog_entry("python-mcst-api", "mcst_golf_courses_status")
-    assert golf is not None
-    assert "골프장" in golf.label
+    source = inspect.getsource(provider_catalog)
+    assert "PROVIDER_DATASET_CATALOG" not in source
+    registry_module = inspect.getmodule(resolve_feature_operation_handler)
+    assert registry_module is not None
+    registry_source = inspect.getsource(registry_module)
+    assert "ProviderDatasetOperationKey" not in registry_source
+    assert ".pairs" not in registry_source

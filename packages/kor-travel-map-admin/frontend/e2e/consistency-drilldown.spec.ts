@@ -196,6 +196,7 @@ test.describe("admin/ops consistency drilldown (route-mocked depth)", () => {
             severity: "critical",
             status: "open",
             provider: "python-mois-api",
+            provider_dataset_id: 501,
             message: "mois permit duplicate source key detected",
           }),
         ]),
@@ -248,10 +249,10 @@ test.describe("admin/ops consistency drilldown (route-mocked depth)", () => {
     ).toBeVisible();
     await expect(issuesCard.getByText("심각", { exact: true })).toBeVisible();
     await expect(issuesCard.getByText("python-mois-api")).toBeVisible();
-    // 개편 B 크로스링크: provider 셀은 provider로 필터된 이슈 목록으로 딥링크.
+    // canonical provider_dataset_id로 좁힌 이슈 목록으로 이동한다.
     await expect(
-      issuesCard.getByRole("link", { name: "python-mois-api" }),
-    ).toHaveAttribute("href", "/admin/issues?provider=python-mois-api");
+      issuesCard.getByRole("link", { name: "python-mois-api · #501" }),
+    ).toHaveAttribute("href", "/admin/issues?provider_dataset_id=501");
 
     // columnheaders for both tables.
     for (const name of ["리포트", "배치", "완료"]) {
@@ -259,7 +260,7 @@ test.describe("admin/ops consistency drilldown (route-mocked depth)", () => {
         page.getByRole("columnheader", { name, exact: true }),
       ).toBeVisible();
     }
-    for (const name of ["이슈", "메시지", "감지", "provider"]) {
+    for (const name of ["이슈", "메시지", "감지", "provider dataset"]) {
       await expect(
         page.getByRole("columnheader", { name, exact: true }),
       ).toBeVisible();

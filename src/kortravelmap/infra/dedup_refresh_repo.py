@@ -100,8 +100,8 @@ WITH ranked AS (
     f.coord_precision_digits,
     x_extension.ST_X(f.coord) AS lon,
     x_extension.ST_Y(f.coord) AS lat,
-    sr.provider,
-    sr.dataset_key,
+    pd.provider,
+    pd.dataset_key,
     row_number() OVER (
       PARTITION BY f.feature_id
       ORDER BY sr.imported_at DESC NULLS LAST, sr.source_record_key
@@ -109,19 +109,23 @@ WITH ranked AS (
   FROM feature.features AS f
   JOIN provider_sync.source_links AS sl
     ON sl.feature_id = f.feature_id
-   AND sl.is_primary_source
+   AND sl.source_role = 'primary'
   JOIN provider_sync.source_entities AS se
     ON se.source_entity_key = sl.source_entity_key
+  JOIN provider_sync.provider_datasets AS pd
+    ON pd.provider_dataset_id = se.provider_dataset_id
+  -- 정렬축(``sr.imported_at``)은 **현재** record의 것이다 — head를 거쳐 도달한다.
+  JOIN provider_sync.source_entity_heads AS head
+    ON head.source_entity_key = se.source_entity_key
   JOIN provider_sync.source_records AS sr
-    ON sr.source_entity_key = se.source_entity_key
-   AND sr.source_record_key = se.current_source_record_key
+    ON sr.source_record_key = head.current_source_record_key
   WHERE f.deleted_at IS NULL
     AND f.status = 'active'
     AND f.coord IS NOT NULL
-    AND sr.provider = :provider
+    AND pd.provider = :provider
     AND (
       CAST(:dataset_key AS text) IS NULL
-      OR sr.dataset_key = CAST(:dataset_key AS text)
+      OR pd.dataset_key = CAST(:dataset_key AS text)
     )
     AND (
       CAST(:kinds AS text[]) IS NULL

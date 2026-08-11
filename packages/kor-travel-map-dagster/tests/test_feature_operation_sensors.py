@@ -8,16 +8,13 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from dagster import AssetKey, DagsterRunStatus, DefaultSensorStatus
+from dagster import DagsterRunStatus, DefaultSensorStatus
 from kortravelmap.client import IntegrityFindingSyncResult
 from kortravelmap.core.feature_operation import (
     DagsterFeatureOperationCursor,
     DagsterFeatureOperationPage,
     FeatureOperationInvariantConflict,
-)
-from kortravelmap.providers.feature_operation_registry import (
-    feature_operation_launch_tags,
-    resolve_feature_operation_launch,
+    ProviderDatasetOperationMembership,
 )
 
 from kortravelmap.dagster.feature_operation_sensors import (
@@ -45,7 +42,7 @@ class _Run:
     status: DagsterRunStatus
     run_config: dict[str, object]
     tags: dict[str, str]
-    asset_selection: frozenset[AssetKey] | None
+    asset_selection: frozenset[object] | None
 
 
 @dataclass
@@ -62,6 +59,7 @@ class _Client:
     ensure_calls: list[dict[str, Any]] = field(default_factory=list)
     reconcile_calls: list[dict[str, Any]] = field(default_factory=list)
     list_calls: list[dict[str, Any]] = field(default_factory=list)
+    membership_calls: list[dict[str, Any]] = field(default_factory=list)
     ensure_outcomes: list[str] = field(default_factory=list)
     ensure_errors: list[Exception | None] = field(default_factory=list)
     ensure_error: Exception | None = None
@@ -95,6 +93,16 @@ class _Client:
             return self.pages.pop(0)
         return self.page
 
+    async def resolve_feature_operation_memberships(self, **kwargs: Any) -> object:
+        self.membership_calls.append(kwargs)
+        return (
+            ProviderDatasetOperationMembership(
+                provider_dataset_id=101,
+                sync_scope="dataset_wide",
+                operation_key=_JOB_NAME,
+            ),
+        )
+
     async def record_address_validation_findings(
         self, findings: object, **kwargs: object
     ) -> IntegrityFindingSyncResult:
@@ -122,9 +130,7 @@ class _Instance:
     lookup_errors: dict[str, Exception] = field(default_factory=dict)
     records_error: Exception | None = None
     scan_records: list[_Record] | None = None
-    cursor_storage_ids: dict[str, int] = field(
-        default_factory=lambda: {"previous": 1}
-    )
+    cursor_storage_ids: dict[str, int] = field(default_factory=lambda: {"previous": 1})
 
     def get_run_record_by_id(self, run_id: str) -> _Record | None:
         error = self.lookup_errors.get(run_id)
@@ -162,37 +168,21 @@ class _Instance:
     ) -> list[_Record]:
         if self.records_error is not None:
             raise self.records_error
-        selected = list(
-            self.records if self.scan_records is None else self.scan_records
-        )
+        selected = list(self.records if self.scan_records is None else self.scan_records)
         created_after = getattr(filters, "created_after", None)
         created_before = getattr(filters, "created_before", None)
         if created_after is not None:
-            selected = [
-                record
-                for record in selected
-                if record.create_timestamp > created_after
-            ]
+            selected = [record for record in selected if record.create_timestamp > created_after]
         if created_before is not None:
-            selected = [
-                record
-                for record in selected
-                if record.create_timestamp < created_before
-            ]
+            selected = [record for record in selected if record.create_timestamp < created_before]
         if cursor is not None:
             cursor_storage_id = self.cursor_storage_ids.get(cursor)
             if cursor_storage_id is None:
                 cursor_record = next(
-                    (
-                        record
-                        for record in self.records
-                        if record.dagster_run.run_id == cursor
-                    ),
+                    (record for record in self.records if record.dagster_run.run_id == cursor),
                     None,
                 )
-                cursor_storage_id = (
-                    cursor_record.storage_id if cursor_record is not None else None
-                )
+                cursor_storage_id = cursor_record.storage_id if cursor_record is not None else None
             if cursor_storage_id is None:
                 return []
             selected = [
@@ -259,9 +249,6 @@ def _record(
             }
             else None,
         )
-    launch = resolve_feature_operation_launch(job_name=_JOB_NAME)
-    assert launch is not None
-    identity, run_config = launch
     start_time = None
     if status in {
         DagsterRunStatus.STARTED,
@@ -282,11 +269,12 @@ def _record(
             run_id=run_id,
             job_name=_JOB_NAME,
             status=status,
-            run_config=run_config,
-            tags=feature_operation_launch_tags(identity, trigger_kind="schedule"),
-            asset_selection=frozenset(
-                AssetKey.from_user_string(key) for key in identity.asset_keys
-            ),
+            run_config={},
+            tags={
+                "kor_travel_map.operation_key": _JOB_NAME,
+                "kor_travel_map.trigger_kind": "schedule",
+            },
+            asset_selection=None,
         ),
         create_timestamp=created_at,
         start_time=start_time,
@@ -326,7 +314,7 @@ def test_tracking_sensors_are_running_and_event_sensors_monitor_all_locations() 
         (DagsterRunStatus.CANCELING, "CANCELING", True),
     ],
 )
-async def test_active_and_periodic_only_statuses_ensure_exact_registry_selection(
+async def test_active_statuses_ensure_exact_canonical_memberships(
     status: DagsterRunStatus,
     expected_observed_status: str,
     expects_started_at: bool,
@@ -340,9 +328,14 @@ async def test_active_and_periodic_only_statuses_ensure_exact_registry_selection
     call = client.ensure_calls[0]
     assert call["observed_status"] == expected_observed_status
     assert (call["engine_started_at"] is not None) is expects_started_at
-    assert [(pair.provider, pair.dataset_key) for pair in call["selected_pairs"]] == [
-        ("python-mois-api", "mois_license_features_bulk")
-    ]
+    assert call["selected_memberships"] == (
+        ProviderDatasetOperationMembership(
+            provider_dataset_id=101,
+            sync_scope="dataset_wide",
+            operation_key=_JOB_NAME,
+        ),
+    )
+    assert call["operation_key"] == _JOB_NAME
     assert client.reconcile_calls == []
 
 
@@ -360,12 +353,10 @@ async def test_pre_resource_terminal_and_direct_cancel_ensure_then_reconcile(
     assert client.ensure_calls[0]["observed_status"] == "NOT_STARTED"
     assert client.ensure_calls[0]["engine_started_at"] is None
     assert client.reconcile_calls[0]["terminal_status"] == status.value
-    assert client.reconcile_calls[0]["engine_finished_at"] == (
-        _NOW + timedelta(minutes=1)
-    )
+    assert client.reconcile_calls[0]["engine_finished_at"] == (_NOW + timedelta(minutes=1))
 
 
-async def test_duplicate_terminal_delivery_replays_same_identity_idempotently() -> None:
+async def test_duplicate_terminal_delivery_replays_same_operation_idempotently() -> None:
     client = _Client(ensure_outcomes=["applied", "noop"])
     record = _record(DagsterRunStatus.CANCELED)
 
@@ -384,7 +375,7 @@ async def test_terminal_selection_mismatch_bypasses_ensure_conflict_to_close_roo
         "selection changed",
         dagster_run_id="run-1",
         root_job_id="11111111-1111-4111-8111-111111111111",
-        details={"selected_pairs": {"expected": [], "actual": []}},
+        details={"selected_memberships": {"expected": [], "actual": []}},
     )
     client = _Client(ensure_error=conflict)
 
@@ -420,7 +411,7 @@ async def test_success_delegates_partial_child_decision_to_atomic_reconcile() ->
     assert len(client.reconcile_calls) == 1
     call = client.reconcile_calls[0]
     assert call["terminal_status"] == "SUCCESS"
-    assert call["selected_pairs"] == client.ensure_calls[0]["selected_pairs"]
+    assert call["selected_memberships"] == client.ensure_calls[0]["selected_memberships"]
     assert "members" not in call
 
 
@@ -524,9 +515,7 @@ def test_dagster_insertion_cursor_pages_equal_timestamps_once_after_restart() ->
 
 
 async def test_settled_frontier_stops_before_first_unsettled_insertion_id() -> None:
-    frontier = datetime.now(tz=UTC) - timedelta(
-        seconds=FEATURE_OPERATION_SETTLE_LAG_SECONDS
-    )
+    frontier = datetime.now(tz=UTC) - timedelta(seconds=FEATURE_OPERATION_SETTLE_LAG_SECONDS)
     anchor = _record(
         DagsterRunStatus.NOT_STARTED,
         run_id="anchor",
@@ -562,9 +551,7 @@ async def test_settled_frontier_stops_before_first_unsettled_insertion_id() -> N
         settled_before=frontier,
     )
     await _reconcile_tick(context, _Client())
-    blocked_cursor = FeatureOperationReconcileCursor.from_json(
-        context.updated_cursors[-1]
-    )
+    blocked_cursor = FeatureOperationReconcileCursor.from_json(context.updated_cursors[-1])
     unsettled.create_timestamp = frontier - timedelta(seconds=1)
     settled = _dagster_run_page(
         instance,
@@ -574,9 +561,7 @@ async def test_settled_frontier_stops_before_first_unsettled_insertion_id() -> N
     )
     context.cursor = context.updated_cursors[-1]
     await _reconcile_tick(context, _Client())
-    settled_cursor = FeatureOperationReconcileCursor.from_json(
-        context.updated_cursors[-1]
-    )
+    settled_cursor = FeatureOperationReconcileCursor.from_json(context.updated_cursors[-1])
 
     assert blocked == ()
     assert blocked_cursor.dagster == watermark
@@ -653,9 +638,7 @@ async def test_database_dagster_unavailable_and_not_found_preserve_base_rows() -
         next_cursor=None,
     )
     context = _Context(
-        instance=_Instance(
-            [], lookup_errors={unavailable_id: RuntimeError("Dagster unavailable")}
-        ),
+        instance=_Instance([], lookup_errors={unavailable_id: RuntimeError("Dagster unavailable")}),
         cursor=FeatureOperationReconcileCursor(
             dagster=DagsterRunWatermark(1, "previous")
         ).to_json(),
@@ -670,9 +653,7 @@ async def test_database_dagster_unavailable_and_not_found_preserve_base_rows() -
     assert "관측 실패" in context.log.errors[0]
     assert "Dagster unavailable" not in context.log.errors[0]
     assert "찾지 못함" in context.log.errors[1]
-    assert FeatureOperationReconcileCursor.from_json(
-        context.updated_cursors[0]
-    ).database is None
+    assert FeatureOperationReconcileCursor.from_json(context.updated_cursors[0]).database is None
 
 
 async def test_event_record_lookup_error_is_redacted_without_database_write() -> None:
@@ -681,9 +662,7 @@ async def test_event_record_lookup_error_is_redacted_without_database_write() ->
     context = SimpleNamespace(
         instance=_Instance(
             [],
-            lookup_errors={
-                run_id: RuntimeError("postgresql://admin:secret@database/internal")
-            },
+            lookup_errors={run_id: RuntimeError("postgresql://admin:secret@database/internal")},
         ),
         dagster_run=SimpleNamespace(run_id=run_id),
         log=log,
@@ -706,9 +685,7 @@ async def test_event_database_write_error_is_redacted() -> None:
         dagster_run=SimpleNamespace(run_id=record.dagster_run.run_id),
         log=_Log(),
     )
-    client = _Client(
-        ensure_error=RuntimeError("postgresql://admin:secret@database/internal")
-    )
+    client = _Client(ensure_error=RuntimeError("postgresql://admin:secret@database/internal"))
 
     await _evaluate_status_event(context, client)
 
@@ -721,9 +698,7 @@ async def test_dagster_scan_error_is_redacted_without_cursor_advance() -> None:
     context = _Context(
         instance=_Instance(
             [],
-            records_error=RuntimeError(
-                "postgresql://admin:secret@dagster-storage/internal"
-            ),
+            records_error=RuntimeError("postgresql://admin:secret@dagster-storage/internal"),
         ),
         cursor=FeatureOperationReconcileCursor(
             dagster=DagsterRunWatermark(1, "previous")
@@ -763,8 +738,7 @@ async def test_deleted_dagster_cursor_anchor_fails_loud_without_advancing() -> N
     assert client.ensure_calls == []
     assert client.list_calls == []
     assert context.log.errors == [
-        "provider feature operation reconcile 실패: "
-        "error_type=FeatureOperationObservationError"
+        "provider feature operation reconcile 실패: error_type=FeatureOperationObservationError"
     ]
 
 
@@ -775,9 +749,7 @@ async def test_dagster_write_failure_is_redacted_and_does_not_advance_cursor() -
             dagster=DagsterRunWatermark(1, "previous")
         ).to_json(),
     )
-    client = _Client(
-        ensure_error=RuntimeError("postgresql://admin:secret@database/internal")
-    )
+    client = _Client(ensure_error=RuntimeError("postgresql://admin:secret@database/internal"))
 
     await _evaluate_reconciliation_sensor(context, client)
 
@@ -795,9 +767,7 @@ async def test_database_page_list_error_is_redacted_without_cursor_advance() -> 
             dagster=DagsterRunWatermark(1, "previous")
         ).to_json(),
     )
-    client = _Client(
-        list_error=RuntimeError("postgresql://admin:secret@database/internal")
-    )
+    client = _Client(list_error=RuntimeError("postgresql://admin:secret@database/internal"))
 
     await _evaluate_reconciliation_sensor(context, client)
 
@@ -821,9 +791,7 @@ async def test_partial_dagster_page_failure_restarts_and_replays_committed_prefi
         dagster=DagsterRunWatermark(1, "previous")
     ).to_json()
     context = _Context(instance=_Instance(records), cursor=initial_cursor)
-    first_client = _Client(
-        ensure_errors=[None, RuntimeError("second write failed")]
-    )
+    first_client = _Client(ensure_errors=[None, RuntimeError("second write failed")])
 
     with pytest.raises(RuntimeError, match="second write failed"):
         await _reconcile_tick(context, first_client)
@@ -876,9 +844,7 @@ async def test_database_keyset_restart_continues_then_wraps_and_revisits_start()
         first_cursor,
         None,
     ]
-    assert FeatureOperationReconcileCursor.from_json(
-        context.updated_cursors[1]
-    ).database is None
+    assert FeatureOperationReconcileCursor.from_json(context.updated_cursors[1]).database is None
 
 
 async def test_database_page_write_failure_keeps_both_watermarks_uncommitted() -> None:
@@ -947,8 +913,65 @@ async def test_empty_storage_cutover_keeps_dagster_cursor_null() -> None:
     context.cursor = context.updated_cursors[-1]
     await _reconcile_tick(context, client)
 
-    assert [call["dagster_run_id"] for call in client.ensure_calls] == [
-        "first-visible-run"
-    ]
+    assert [call["dagster_run_id"] for call in client.ensure_calls] == ["first-visible-run"]
     resumed = FeatureOperationReconcileCursor.from_json(context.updated_cursors[-1])
     assert resumed.dagster == DagsterRunWatermark(1, "first-visible-run")
+
+
+# -- guard 예외 변환 / admin 수동 run 분류 ----------------------------------
+
+
+@dataclass
+class _NoEnabledMembershipClient(_Client):
+    """카탈로그가 실행 가능 member를 0건으로 돌려주는 상태(operation disable 등)."""
+
+    async def resolve_feature_operation_memberships(self, **kwargs: Any) -> object:
+        self.membership_calls.append(kwargs)
+        return ()
+
+
+async def test_unresolvable_manifest_becomes_an_observation_error_not_a_dead_tick() -> None:
+    """manifest 해석 실패는 **관측 실패로 번역**된다 — tick 밖으로 새지 않는다.
+
+    ``_reconcile_tick``은 ``FeatureOperationObservationError``만 run 단위로 집계하고
+    다음 run으로 넘어간다. guard 예외가 그대로 새면 그 tick 전체가 죽어, 문제 run
+    하나 때문에 나머지 active operation의 reconcile이 모두 멈춘다.
+    """
+    client = _NoEnabledMembershipClient()
+
+    with pytest.raises(
+        FeatureOperationObservationError,
+        match="operation_has_no_enabled_memberships",
+    ):
+        await _apply_run_record(_record(DagsterRunStatus.SUCCESS), client)
+
+    assert client.ensure_calls == []
+    assert client.reconcile_calls == []
+
+
+async def test_admin_manual_run_is_recorded_as_manual_not_schedule() -> None:
+    """admin UI "지금 실행" run은 ``trigger_kind="manual"``로 기록된다.
+
+    그 run은 schedule을 거치지 않아 ``kor_travel_map.trigger_kind`` tag가 없고,
+    admin 전용 tag만 붙는다. 그 분기가 사라지면 fallback이 ``"schedule"``을 돌려주어
+    수동 실행이 DB에 예약 실행으로 남는다 — 운영자 화면의 실행 이력이 조용히 거짓이
+    된다.
+    """
+    client = _Client()
+    record = _record(DagsterRunStatus.STARTED)
+    record.dagster_run.tags = {
+        "kor_travel_map.operation_key": _JOB_NAME,
+        "kor_travel_map.admin_manual_trigger": "admin-ui",
+    }
+
+    await _apply_run_record(record, client)
+
+    assert client.ensure_calls[0]["trigger_kind"] == "manual"
+    # 대조: admin tag가 없으면 같은 tag 모양이 ``schedule``로 떨어진다.
+    schedule_client = _Client()
+    schedule_record = _record(DagsterRunStatus.STARTED)
+    schedule_record.dagster_run.tags = {"kor_travel_map.operation_key": _JOB_NAME}
+
+    await _apply_run_record(schedule_record, schedule_client)
+
+    assert schedule_client.ensure_calls[0]["trigger_kind"] == "schedule"

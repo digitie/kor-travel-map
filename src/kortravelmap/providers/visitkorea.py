@@ -48,7 +48,7 @@ from typing import Any, Final, Protocol, Self, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
-from kortravelmap.core.address import normalize_korean_text, normalize_phone_number
+from kortravelmap.core.address import normalize_korean_text
 from kortravelmap.core.ids import make_payload_hash, make_source_record_key
 from kortravelmap.core.providers import normalize_provider_name
 from kortravelmap.core.scoring import name_similarity
@@ -112,7 +112,7 @@ class VisitKoreaFestivalItem(Protocol):
     """썸네일 이미지 URL."""
 
     addr1: str | None
-    """주소 (raw_address 검증용)."""
+    """주소 (raw_data 보존용)."""
 
     area_code: str | None
     """TourAPI 지역코드 (법정동코드 아님 — raw_data만)."""
@@ -139,11 +139,10 @@ class VisitKoreaFestivalItem(Protocol):
     """홈페이지 (HTML anchor 포함 가능 — raw_data 보존)."""
 
     modified_time: datetime | str | None
-    """TourAPI 최종 수정시각 (``source_version`` 대용).
+    """TourAPI 최종 수정시각 (raw_data 보존).
 
     provider 실모델(``visitkorea.TourItem.modified_time``)은 ``datetime``으로
-    파싱해 보존한다(ADR-044 재정렬 — T-212e live에서 str 가정이
-    ``SourceRecord.source_version`` 검증 실패로 실측됨). 변환은
+    파싱해 보존한다. 변환은
     ``_modified_time_str``로 원시 TourAPI 표기(``YYYYMMDDHHMMSS``)에 맞춰
     문자열화한다.
     """
@@ -296,8 +295,6 @@ class FestivalEnrichment(BaseModel):
             )
         if self.source_link.source_role is not SourceRole.ENRICHMENT:
             raise ValueError("enrichment link의 source_role은 ENRICHMENT여야 함")
-        if self.source_link.is_primary_source:
-            raise ValueError("enrichment link는 is_primary_source=False여야 함")
         return self
 
 
@@ -359,7 +356,7 @@ def _item_to_enrichment(
         "map_y": map_y,
         "event_start_date": item.event_start_date,
         "event_end_date": item.event_end_date,
-        "tel": normalize_phone_number(item.tel),
+        "tel": item.tel,
         "homepage": item.homepage,
         "modified_time": modified_time,
     }
@@ -381,11 +378,6 @@ def _item_to_enrichment(
         source_entity_type=_SOURCE_ENTITY_TYPE,
         source_entity_id=item.content_id,
         raw_payload_hash=payload_hash,
-        source_version=modified_time,
-        raw_name=normalize_korean_text(item.title),
-        raw_address=normalize_korean_text(item.addr1),
-        raw_longitude=_decimal_or_none(map_x),
-        raw_latitude=_decimal_or_none(map_y),
         raw_data=raw_data,
         fetched_at=fetched_at,
         source_record_key=source_record_key,
@@ -398,7 +390,6 @@ def _item_to_enrichment(
         source_role=SourceRole.ENRICHMENT,
         match_method=match.match_method,
         confidence=match.confidence,
-        is_primary_source=False,
     )
 
     return FestivalEnrichment(source_record=source_record, source_link=source_link)

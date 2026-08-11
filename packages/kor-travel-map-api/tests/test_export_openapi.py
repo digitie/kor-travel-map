@@ -65,8 +65,11 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
     public_curated_queries = _query_parameter_names(full, "/v1/curated-features")
     admin_curated_queries = _query_parameter_names(full, "/v1/admin/features/curated")
     assert {"theme_slug", "q", "feature_name", "display_title"} <= (public_curated_queries)
-    assert {"theme_id", "source_id", "provider", "dataset_key"}.isdisjoint(public_curated_queries)
-    assert {"theme_id", "source_id", "provider", "dataset_key"} <= (admin_curated_queries)
+    # ADR-088 — provider/dataset_key 자연키 필터는 provider_dataset_id로 수렴했다.
+    internal_curated_filters = {"theme_id", "source_id", "provider_dataset_id"}
+    assert internal_curated_filters.isdisjoint(public_curated_queries)
+    assert {"provider", "dataset_key"}.isdisjoint(public_curated_queries)
+    assert internal_curated_filters <= (admin_curated_queries)
     assert _refs(full["paths"]["/v1/curated-features"]["get"]["responses"]["200"]) == {
         "PublicCuratedFeaturesResponse"
     }
@@ -1020,6 +1023,9 @@ def test_public_curation_collection_item_group_pin_required_types_and_enums() ->
             "theme_name",
             "theme_group",
             "source_id",
+            # ADR-088 — dataset canonical ID가 정본 축이고 provider/dataset_key는
+            # 표시용 projection으로 남는다.
+            "provider_dataset_id",
             "provider",
             "dataset_key",
             "source_name",
@@ -1042,6 +1048,7 @@ def test_public_curation_collection_item_group_pin_required_types_and_enums() ->
             "theme_name": "string",
             "theme_group": "string",
             "source_id": "string",
+            "provider_dataset_id": "integer",
             "provider": "string",
             "dataset_key": "string",
             "source_name": "string",
@@ -1082,6 +1089,7 @@ def test_public_curation_collection_item_group_pin_required_types_and_enums() ->
             "theme_slug",
             "theme_name",
             "theme_group",
+            "provider_dataset_id",
             "provider",
             "dataset_key",
             "source_name",
@@ -1116,6 +1124,7 @@ def test_public_curation_collection_item_group_pin_required_types_and_enums() ->
             "theme_slug": "string",
             "theme_name": "string",
             "theme_group": "string",
+            "provider_dataset_id": "integer",
             "provider": "string",
             "dataset_key": "string",
             "source_name": "string",

@@ -30,6 +30,16 @@ def test_import_job_status_count_excludes_quarantined_rows() -> None:
     assert "WHERE quarantined_at IS NULL" in status_repo._IMPORT_JOBS_SQL
 
 
+def test_source_record_provider_count_uses_canonical_lineage_join() -> None:
+    sql = status_repo._SOURCE_RECORDS_SQL
+
+    assert "record.source_entity_key" in sql
+    assert "entity.provider_dataset_id" in sql
+    assert "JOIN provider_sync.provider_datasets AS dataset" in sql
+    assert "dataset.provider" in sql
+    assert "FROM provider_sync.source_records\n" not in sql
+
+
 @dataclass(frozen=True)
 class _Record:
     service_slug: str

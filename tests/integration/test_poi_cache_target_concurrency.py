@@ -12,7 +12,10 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.infra.feature_update_executor import _sync_cache_target_links
-from kortravelmap.infra.feature_update_repo import FeatureUpdateRequest
+from kortravelmap.infra.feature_update_repo import (
+    FeatureUpdateRequest,
+    FeatureUpdateRequestDataset,
+)
 from kortravelmap.infra.poi_cache_target_repo import (
     PoiCacheTarget,
     PoiCacheTargetConflict,
@@ -101,6 +104,7 @@ def _link_resolution(target: PoiCacheTarget, feature_id: str) -> ScopeResolution
             CacheTargetFeatureMatch(
                 target_id=target.target_id,
                 feature_id=feature_id,
+                provider_dataset_id=None,
                 provider=None,
                 dataset_key=None,
                 distance_m=0,
@@ -110,14 +114,55 @@ def _link_resolution(target: PoiCacheTarget, feature_id: str) -> ScopeResolution
     )
 
 
-def _link_request() -> FeatureUpdateRequest:
-    """link 동기화 결과 event에 필요한 실제 executor request 계약을 만든다."""
+async def _canonical_membership(
+    session: AsyncSession,
+) -> FeatureUpdateRequestDataset:
+    """catalog가 실제로 가진 활성 triple 하나를 membership으로 만든다.
+
+    T-VN-33 이후 request membership identity는
+    ``provider_dataset_id + sync_scope + operation_key``이고 0089가 catalog를
+    seed하므로, 임의의 자연키 대신 실재하는 행을 읽어 쓴다.
+    """
+
+    row = (
+        await session.execute(
+            text(
+                """
+                SELECT scope.provider_dataset_id, scope.sync_scope,
+                       scope.operation_key, dataset.provider, dataset.dataset_key
+                FROM provider_sync.provider_dataset_operation_scopes AS scope
+                JOIN provider_sync.provider_datasets AS dataset
+                  ON dataset.provider_dataset_id = scope.provider_dataset_id
+                WHERE dataset.is_active
+                ORDER BY scope.provider_dataset_id, scope.sync_scope,
+                         scope.operation_key
+                LIMIT 1
+                """
+            )
+        )
+    ).one()
+    return FeatureUpdateRequestDataset(
+        feature_update_request_dataset_id=None,
+        provider_dataset_id=int(row.provider_dataset_id),
+        sync_scope=str(row.sync_scope),
+        provider=str(row.provider),
+        dataset_key=str(row.dataset_key),
+        operation_key=str(row.operation_key),
+    )
+
+
+def _link_request(membership: FeatureUpdateRequestDataset) -> FeatureUpdateRequest:
+    """link 동기화 결과 event에 필요한 실제 executor request 계약을 만든다.
+
+    T-VN-33: dataset membership은 provider/dataset_key 배열이 아니라
+    ``provider_dataset_id + sync_scope + operation_key`` triple 목록이다.
+    """
     return FeatureUpdateRequest(
         request_id=str(uuid4()),
         scope_type="cache_target_keys",
         scope={"type": "cache_target_keys"},
-        providers=(),
-        dataset_keys=(),
+        dataset_membership_mode="single",
+        dataset_memberships=(membership,),
         update_policy={},
         run_mode="queue",
         priority=50,
@@ -393,6 +438,7 @@ async def test_executor_link_sync_wins_parent_lock_then_delete_leaves_no_active_
                 feature_id=feature_id,
             )
             assert link is not None
+            membership = await _canonical_membership(setup)
         resolution = _link_resolution(target, feature_id)
 
         async with (
@@ -403,7 +449,7 @@ async def test_executor_link_sync_wins_parent_lock_then_delete_leaves_no_active_
             await _sync_cache_target_links(
                 syncer,
                 resolution,
-                request=_link_request(),
+                request=_link_request(membership),
             )
             await deleter.begin()
             deleter_pid = await deleter.scalar(text("SELECT pg_backend_pid()"))
@@ -476,6 +522,7 @@ async def test_delete_wins_parent_lock_then_executor_sync_skips_inactive_parent(
                 feature_id=feature_id,
             )
             assert link is not None
+            membership = await _canonical_membership(setup)
         resolution = _link_resolution(target, feature_id)
 
         async with (
@@ -500,7 +547,7 @@ async def test_delete_wins_parent_lock_then_executor_sync_skips_inactive_parent(
                 await _sync_cache_target_links(
                     syncer,
                     resolution,
-                    request=_link_request(),
+                    request=_link_request(membership),
                 )
                 await syncer.commit()
 

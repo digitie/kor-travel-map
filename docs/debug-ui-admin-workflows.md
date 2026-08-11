@@ -455,8 +455,7 @@ Route: `/admin/features/new`
   허용하되 좌표가 있으면 reverse 결과 bjd 결측 시 `reverse_geocode_failed`,
   좌표·주소가 모두 없으면 `missing_address` issue를 남긴다.
 - detail은 자유 dict가 아니라 kind별 Pydantic detail 모델 검증을 반드시 통과해야 한다.
-- `SourceLink.source_role='primary'`, `match_method='manual'`,
-  `confidence=100`, `is_primary_source=true`.
+- `SourceLink.source_role='primary'`, `match_method='manual'`, `confidence=100`.
 - 생성 직후 중복 후보 검색을 실행하고 후보가 있으면 `ops.dedup_review_queue`에
   넣는다.
 

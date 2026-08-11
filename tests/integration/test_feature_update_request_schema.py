@@ -7,16 +7,57 @@ T-205a는 repository 로직이 아니라 스키마 기반 PR이다. 따라서 �
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, IntegrityError
-
-if TYPE_CHECKING:
-    from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession
 
 pytestmark = pytest.mark.integration
+
+_SEED_MEMBERSHIP_SQL = """
+INSERT INTO ops.feature_update_request_datasets (
+  request_id, provider_dataset_id, sync_scope, operation_key
+)
+SELECT CAST(:request_id AS uuid),
+       scope.provider_dataset_id, scope.sync_scope, scope.operation_key
+FROM provider_sync.provider_dataset_operation_scopes AS scope
+JOIN provider_sync.provider_datasets AS dataset
+  ON dataset.provider_dataset_id = scope.provider_dataset_id
+JOIN provider_sync.provider_dataset_operations AS operation
+  ON operation.provider_dataset_id = scope.provider_dataset_id
+ AND operation.operation_key = scope.operation_key
+WHERE dataset.is_active AND operation.is_enabled
+  AND NOT EXISTS (
+      SELECT 1
+      FROM ops.feature_update_request_datasets AS member
+      JOIN ops.feature_update_requests AS request
+        ON request.request_id = member.request_id
+      JOIN ops.import_jobs AS job ON job.job_id = request.job_id
+      WHERE member.provider_dataset_id = scope.provider_dataset_id
+        AND member.sync_scope = scope.sync_scope
+        AND member.operation_key = scope.operation_key
+        AND job.status IN ('queued', 'running')
+  )
+ORDER BY scope.provider_dataset_id, scope.sync_scope, scope.operation_key
+LIMIT 1
+"""
+
+
+async def _seed_membership(session: AsyncSession, request_id: object) -> None:
+    """request에 canonical dataset membership 1건을 붙인다 (T-VN-33, ADR-088).
+
+    ``providers``/``dataset_keys`` text[] 사본이 사라지고 membership이
+    ``ops.feature_update_request_datasets``의 exact triple로 옮겨졌다.
+    ``dataset_membership_mode='single'``은 **정확히 1건**을 요구하며 deferred
+    트리거가 commit 시점에 센다 — 그래서 membership 없는 request는 이 파일이
+    쓰는 ``SET CONSTRAINTS ALL IMMEDIATE``에서 죽는다.
+
+    활성 request가 이미 점유한 triple은 고르지 않는다(member overlap mutex).
+    """
+    result = await session.execute(
+        text(_SEED_MEMBERSHIP_SQL), {"request_id": str(request_id)}
+    )
+    assert result.rowcount == 1, "catalog에 비어 있는 활성 triple이 없다"
 
 
 async def test_feature_update_idempotency_ledger_is_actor_scoped_and_append_only(
@@ -208,7 +249,7 @@ async def test_feature_update_request_defaults_and_job_fk(
                   'schema smoke'
                 )
                 RETURNING
-                  request_id, providers, dataset_keys, update_policy, priority,
+                  request_id, dataset_membership_mode, update_policy, priority,
                   matched_scope, job_id, created_at, generation
                 """
                 ),
@@ -227,14 +268,29 @@ async def test_feature_update_request_defaults_and_job_fk(
     )
 
     assert row["request_id"]
-    assert row["providers"] == []
-    assert row["dataset_keys"] == []
+    # T-VN-33: providers/dataset_keys text[] 사본은 없어졌다. 기본 membership
+    # 계약은 "정확히 1건"이고, 그 1건은 child 테이블이 든다.
+    assert row["dataset_membership_mode"] == "single"
     assert row["update_policy"] == {}
     assert row["priority"] == 50
     assert row["matched_scope"] == {}
     assert row["job_id"] == job_id
     assert row["created_at"] is not None
     assert row["generation"] == 1
+
+    await _seed_membership(migrated_session, row["request_id"])
+    await migrated_session.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
+    await migrated_session.execute(text("SET CONSTRAINTS ALL DEFERRED"))
+    member_count = (
+        await migrated_session.execute(
+            text(
+                "SELECT count(*) FROM ops.feature_update_request_datasets"
+                " WHERE request_id = :request_id"
+            ),
+            {"request_id": row["request_id"]},
+        )
+    ).scalar_one()
+    assert member_count == 1
 
 
 async def test_feature_update_request_job_pair_is_bidirectional_and_immutable(
@@ -269,6 +325,7 @@ async def test_feature_update_request_job_pair_is_bidirectional_and_immutable(
         ),
         {"request_id": request_id, "job_id": job_id},
     )
+    await _seed_membership(migrated_session, request_id)
     await migrated_session.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
     await migrated_session.execute(text("SET CONSTRAINTS ALL DEFERRED"))
 
@@ -449,6 +506,16 @@ async def test_feature_update_request_running_job_requires_owner(
         ),
         {"job_id": job_id},
     )
+    request_id = (
+        await migrated_session.execute(
+            text(
+                "SELECT request_id FROM ops.feature_update_requests"
+                " WHERE job_id = :job_id"
+            ),
+            {"job_id": job_id},
+        )
+    ).scalar_one()
+    await _seed_membership(migrated_session, request_id)
     await migrated_session.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
     await migrated_session.execute(text("SET CONSTRAINTS ALL DEFERRED"))
 

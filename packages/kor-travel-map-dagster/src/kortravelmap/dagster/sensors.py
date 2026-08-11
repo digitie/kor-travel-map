@@ -6,9 +6,6 @@ from collections.abc import Awaitable, Callable, Mapping
 from typing import TYPE_CHECKING, Any, Final, TypeVar, cast
 
 from kortravelmap.infra.feature_update_repo import FeatureUpdateLockBusy
-from kortravelmap.providers.feature_operation_registry import (
-    FEATURE_UPDATE_REQUEST_ID_TAG,
-)
 
 from dagster import (
     DefaultSensorStatus,
@@ -43,6 +40,7 @@ FEATURE_UPDATE_SENSOR_MAX_RUN_REQUESTS: Final[int] = 10
 FEATURE_UPDATE_REQUEST_GENERATION_TAG: Final[str] = (
     "kor_travel_map.feature_update_request_generation"
 )
+FEATURE_UPDATE_REQUEST_ID_TAG: Final[str] = "kor_travel_map.feature_update_request_id"
 FEATURE_UPDATE_RUN_MODE_TAG: Final[str] = "kor_travel_map.feature_update_run_mode"
 FEATURE_UPDATE_SCOPE_TYPE_TAG: Final[str] = "kor_travel_map.feature_update_scope_type"
 
@@ -60,9 +58,7 @@ async def execute_feature_update_request_op(
 ) -> dict[str, object]:
     """RunRequest가 지정한 feature update request 1건을 실행한다."""
     request_id = str(context.op_config["request_id"])
-    request_generation = _parse_request_generation(
-        context.op_config["request_generation"]
-    )
+    request_generation = _parse_request_generation(context.op_config["request_generation"])
     if request_generation is None:
         raise Failure(description="feature update request generation이 유효하지 않음")
     client = cast(
@@ -131,9 +127,7 @@ def feature_update_request_queue_sensor(
         if kor_travel_map_client is not None
         else _resource_object(context, "kor_travel_map_client"),
     )
-    requests = _run_async(
-        client.peek_update_requests(limit=FEATURE_UPDATE_SENSOR_MAX_RUN_REQUESTS)
-    )
+    requests = _run_async(client.peek_update_requests(limit=FEATURE_UPDATE_SENSOR_MAX_RUN_REQUESTS))
     if not requests:
         return SkipReason("queued feature update request 없음")
 
@@ -152,9 +146,7 @@ def feature_update_request_failure_sensor(
 ) -> SkipReason:
     """worker run 실패를 request/import job 상태와 운영 알림 sink에 반영한다."""
     request_id = context.dagster_run.tags.get(FEATURE_UPDATE_REQUEST_ID_TAG)
-    request_generation = context.dagster_run.tags.get(
-        FEATURE_UPDATE_REQUEST_GENERATION_TAG
-    )
+    request_generation = context.dagster_run.tags.get(FEATURE_UPDATE_REQUEST_GENERATION_TAG)
     message = _failure_message(context)
     _run_async(
         _handle_failure_side_effects(
@@ -265,8 +257,12 @@ def _execution_metadata(
         "skipped_scope_count": len(result.plan.skipped_scopes),
         "result_count": len(result.results),
         "loaded_count": sum(item.loaded_count for item in result.results),
-        "provider_datasets": [
-            f"{scope.provider}:{scope.dataset_key}"
+        "provider_dataset_memberships": [
+            {
+                "provider_dataset_id": scope.provider_dataset_id,
+                "sync_scope": scope.sync_scope,
+                "operation_key": scope.operation_key,
+            }
             for scope in result.plan.refresh_scopes
         ],
         "error_message": result.error_message,
@@ -296,9 +292,7 @@ async def _handle_failure_side_effects(
                 else None
             )
             if expected_generation is None:
-                raise ValueError(
-                    "feature update failure run에 request generation tag가 없음"
-                )
+                raise ValueError("feature update failure run에 request generation tag가 없음")
             await client.fail_update_request(
                 request_id,
                 owner_dagster_run_id=context.dagster_run.run_id,
@@ -320,9 +314,7 @@ async def _notify_failure(
     request_id: str | None,
     message: str,
 ) -> None:
-    notifier = _resource_object(
-        context, "feature_update_failure_notifier", default=None
-    )
+    notifier = _resource_object(context, "feature_update_failure_notifier", default=None)
     if not callable(notifier):
         return
     payload: Mapping[str, str | None] = {

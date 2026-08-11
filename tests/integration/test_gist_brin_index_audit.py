@@ -203,6 +203,29 @@ async def _time_insert(engine: Any, prefix: str, count: int) -> float:
         return time.perf_counter() - start
 
 
+async def _min_time_insert(
+    engine: Any, prefix: str, count: int, *, rounds: int
+) -> float:
+    """같은 batch를 여러 번 재고 **최솟값**을 돌려준다.
+
+    벽시계 측정에서 외부 부하는 시간을 늘리기만 하고 줄이지는 못한다. 그래서 최솟값이
+    "간섭 없는 비용"에 가장 가까운 추정치다 — 평균과 중앙값은 스파이크를 그대로 실어
+    나른다.
+
+    앞 판은 두 상태를 각각 40k INSERT **한 번씩** 재고 2% 마진으로 비교했다. 두 측정이
+    시간상 떨어져 있어 뒤쪽 측정에 부하가 겹치면 결과가 뒤집힌다. 2026-08-11 실측:
+    같은 트리·같은 명령으로 부하가 높을 때 이 단언에서 red, 낮을 때 green이었고 단독
+    실행 3회는 ratio 1.10x/1.04x/1.04x로 전부 통과했다. batch 크기는 40k 그대로 두고
+    회차만 3회로 늘려 그 뒤집힘을 없앤다 — 20k로 줄여도 스파이크는 걸러지지만 효과
+    크기가 함께 줄어(실측 ratio 1.02x) 임계에 붙는다. 색인 유지 비용 차이는 행 수에
+    비례하므로 batch를 얇게 만들면 안 된다.
+    """
+
+    return min(
+        [await _time_insert(engine, f"{prefix}{index}:", count) for index in range(rounds)]
+    )
+
+
 async def test_dropping_full_gist_reduces_write_cost(pg_container: Any) -> None:
     """§8.3 필수 실측: 자동 full GiST 3개 제거가 geometry INSERT write-cost를 낮춘다.
 
@@ -243,18 +266,18 @@ async def test_dropping_full_gist_reduces_write_cost(pg_container: Any) -> None:
                 )
         # warm-up 후 측정(캐시 편차 완화).
         await _time_insert(engine, "warm6:", 5_000)
-        six_gist = await _time_insert(engine, "six:", 40_000)
+        six_gist = await _min_time_insert(engine, "six:", 40_000, rounds=3)
 
         # after-state: 자동 full 제거 → partial만 남는다.
         async with engine.begin() as conn:
             for name in _FULL_GIST:
                 await conn.execute(text(f"DROP INDEX feature.{name}"))
         await _time_insert(engine, "warm3:", 5_000)
-        three_gist = await _time_insert(engine, "three:", 40_000)
+        three_gist = await _min_time_insert(engine, "three:", 40_000, rounds=3)
 
         ratio = six_gist / three_gist if three_gist else float("inf")
         print(
-            f"\n[T-VN-18 write-cost] 40k INSERT: "
+            f"\n[T-VN-18 write-cost] 40k INSERT 최소값(3회): "
             f"6-GiST={six_gist:.3f}s  3-partial-GiST={three_gist:.3f}s  "
             f"ratio(6/3)={ratio:.2f}x"
         )

@@ -20,11 +20,7 @@ import {
   canonicalFeatureUpdateIdempotencyBody,
   featureUpdateIdempotencyOperationKey,
 } from "./feature-update-idempotency";
-import type {
-  OpsLiveConnectionState,
-  OpsLiveMode,
-  OpsLiveTopic,
-} from "./live";
+import type { OpsLiveConnectionState, OpsLiveMode, OpsLiveTopic } from "./live";
 import type { components, paths } from "./types";
 
 type DatasetSchemas = components["schemas"];
@@ -33,7 +29,8 @@ export type OpsDatasetCatalogInfo = DatasetSchemas["OpsDatasetCatalogInfo"];
 export type OpsDatasetGridRow = DatasetSchemas["OpsDatasetGridRow"];
 export type OpsDatasetsGridResponse = DatasetSchemas["OpsDatasetsGridResponse"];
 export type OpsDatasetDetailData = DatasetSchemas["OpsDatasetDetailData"];
-export type OpsDatasetDetailResponse = DatasetSchemas["OpsDatasetDetailResponse"];
+export type OpsDatasetDetailResponse =
+  DatasetSchemas["OpsDatasetDetailResponse"];
 export type OpsDatasetScopeState = DatasetSchemas["OpsDatasetScopeState"];
 export type OpsDatasetExecution = DatasetSchemas["OpsDatasetExecution"];
 export type OpsDatasetScopeRefreshCapability =
@@ -42,7 +39,8 @@ export type OpsDatasetEventRecord = DatasetSchemas["OpsDatasetEventRecord"];
 export type OpsDatasetFreshness = DatasetSchemas["OpsDatasetFreshness"];
 export type OpsDatasetPreviewRequest =
   DatasetSchemas["OpsDatasetPreviewRequest"];
-export type OpsDatasetPreviewResponse = DatasetSchemas["OpsDatasetPreviewResponse"];
+export type OpsDatasetPreviewResponse =
+  DatasetSchemas["OpsDatasetPreviewResponse"];
 export type OpsDatasetPreviewData = DatasetSchemas["OpsDatasetPreviewData"];
 export type OpsDatasetRefreshPolicyResponse =
   DatasetSchemas["OpsDatasetRefreshPolicyResponse"];
@@ -57,12 +55,6 @@ export type DatasetRefreshRequestCreateResponse =
 export type DatasetRefreshRequestRecord =
   DatasetSchemas["FeatureUpdateRequestRecord"];
 
-type DatasetDetailQuery = NonNullable<
-  paths["/v1/ops/datasets/detail"]["get"]["parameters"]["query"]
->;
-type DatasetPreviewQuery = NonNullable<
-  paths["/v1/ops/datasets/preview"]["post"]["parameters"]["query"]
->;
 type DatasetRefreshPolicyQuery = NonNullable<
   paths["/v1/ops/datasets/refresh-policy"]["put"]["parameters"]["query"]
 >;
@@ -71,16 +63,18 @@ type PipelineExecutionDetailQuery = NonNullable<
 >;
 
 export type DatasetRefreshNowInput = {
-  provider: string;
-  datasetKey: string;
-  /** `null`은 dataset-wide 요청이며 target selector에는 허용하지 않는다. */
-  syncScope: string | null;
+  /** provider/dataset 자연키가 아닌 immutable canonical member 식별자. */
+  providerDatasetId: number;
+  /** canonical operation member의 논리 scope. */
+  syncScope: string;
+  /** 같은 dataset/scope의 operation을 구분하는 immutable handler key. */
+  operationKey: string;
   priority?: number;
   reason?: string | null;
 };
 
 export type DatasetRefreshScopeDecision =
-  | { allowed: true; syncScope: string | null }
+  | { allowed: true; syncScope: string }
   | { allowed: false; reason: string };
 
 export type DatasetRefreshConflict = {
@@ -153,36 +147,56 @@ export function opsDatasetLiveBadgeLabel(live: {
         : "연결 중";
 }
 
-function datasetQueryPath(
-  path:
-    | "/v1/ops/datasets/detail"
-    | "/v1/ops/datasets/preview"
-    | "/v1/ops/datasets/refresh-policy",
-  query: DatasetDetailQuery | DatasetPreviewQuery | DatasetRefreshPolicyQuery,
+function datasetDetailPath(
+  providerDatasetId: number,
+  syncScope: string,
+  operationKey: string,
 ): string {
-  return pathWithQuery(path, {
-    provider: query.provider,
-    dataset_key: query.dataset_key,
-    ...("sync_scope" in query ? { sync_scope: query.sync_scope } : {}),
+  return pathWithQuery(`/v1/ops/datasets/${providerDatasetId}`, {
+    sync_scope: syncScope,
+    // 빈 문자열은 **보내지 않는다**. UI 내부에서 ""는 "실행 가능한 operation이
+    // 없는 catalog 행"을 뜻하는 정규화 값인데(rowOperationKey), 서버의
+    // `operation_key`는 `min_length=1`이라 `operation_key=`를 받으면 422다.
+    // 그 행은 seed에 실재하므로(개수는 DB마다 다르다) 빼먹으면 상세가 열리지 않는다.
+    operation_key: operationKey || null,
   });
 }
 
-function fetchOpsDatasets(signal?: AbortSignal): Promise<OpsDatasetsGridResponse> {
+function datasetPreviewPath(
+  providerDatasetId: number,
+  syncScope: string,
+  operationKey: string,
+): string {
+  return pathWithQuery(`/v1/ops/datasets/${providerDatasetId}/preview`, {
+    sync_scope: syncScope,
+    // 빈 문자열은 **보내지 않는다**. UI 내부에서 ""는 "실행 가능한 operation이
+    // 없는 catalog 행"을 뜻하는 정규화 값인데(rowOperationKey), 서버의
+    // `operation_key`는 `min_length=1`이라 `operation_key=`를 받으면 422다.
+    // 그 행은 seed에 실재하므로(개수는 DB마다 다르다) 빼먹으면 상세가 열리지 않는다.
+    operation_key: operationKey || null,
+  });
+}
+
+function refreshPolicyPath(providerDatasetId: number): string {
+  return pathWithQuery("/v1/ops/datasets/refresh-policy", {
+    provider_dataset_id: providerDatasetId,
+  } satisfies DatasetRefreshPolicyQuery);
+}
+
+function fetchOpsDatasets(
+  signal?: AbortSignal,
+): Promise<OpsDatasetsGridResponse> {
   return getJson<OpsDatasetsGridResponse>("/v1/ops/datasets", { signal });
 }
 
 export function fetchOpsDataset(
-  provider: string,
-  dataset: string,
+  providerDatasetId: number,
   syncScope: string,
+  operationKey: string,
   signal?: AbortSignal,
 ): Promise<OpsDatasetDetailResponse> {
   return getJson<OpsDatasetDetailResponse>(
-    datasetQueryPath("/v1/ops/datasets/detail", {
-      provider,
-      dataset_key: dataset,
-      sync_scope: syncScope,
-    }),
+    datasetDetailPath(providerDatasetId, syncScope, operationKey),
     { signal },
   );
 }
@@ -191,8 +205,15 @@ export function fetchOpsDataset(
  * 서버 capability를 제출 가능한 `sync_scope`로 해석한다.
  *
  * 조합이 모순되거나 target scope가 현재 allow-list에서 빠졌으면 fail-closed한다.
- * 일반 dataset은 선택 scope를 지원하지 않으므로 `null`을 보내고 서버가
- * `dataset_wide` effective scope로 정규화하게 한다.
+ * 일반 dataset도 canonical `dataset_wide` scope를 명시한다. 요청 경계는
+ * provider/dataset 자연키나 nullable scope를 다시 받지 않는다.
+ *
+ * `effect: "none"`은 **제출 가능한 scope가 하나도 없다**는 서버 판정이다. 이 축이
+ * 없던 앞 판에서는 갱신 불가 dataset의 payload가 정상 dataset-wide capability와
+ * `reason` 문자열 하나만 달랐고, 이 함수는 허용 경로에서 `reason`을 읽지 않아
+ * `{allowed: true, syncScope: "dataset_wide"}`를 돌려줬다. 그 판정으로 '지금 갱신'
+ * 버튼이 켜졌고, 눌러도 `datasets-client`가 빈 `operationKey`에서 되돌아가 요청도
+ * 오류도 없이 아무 일이 일어나지 않았다.
  */
 export function resolveDatasetRefreshScope(
   capability: OpsDatasetScopeRefreshCapability | null | undefined,
@@ -200,6 +221,12 @@ export function resolveDatasetRefreshScope(
 ): DatasetRefreshScopeDecision {
   if (!capability) {
     return { allowed: false, reason: "갱신 scope capability가 없습니다." };
+  }
+  if (capability.effect === "none") {
+    return {
+      allowed: false,
+      reason: capability.reason ?? "이 dataset에 걸 수 있는 갱신 범위가 없습니다.",
+    };
   }
   if (capability.effect === "dataset_wide") {
     if (
@@ -209,40 +236,81 @@ export function resolveDatasetRefreshScope(
       capability.allowed_sync_scopes.length > 0 ||
       selectedSyncScope !== capability.default_sync_scope
     ) {
-      return { allowed: false, reason: "dataset-wide scope 계약이 모순됩니다." };
+      return {
+        allowed: false,
+        reason: "dataset-wide scope 계약이 모순됩니다.",
+      };
     }
-    return { allowed: true, syncScope: null };
+    return { allowed: true, syncScope: capability.default_sync_scope };
   }
+  // `selector`는 여기서 보지 않는다. 그것은 "**scope 안의 대상**을 무엇이 고르는가"이고
+  // (`poi_cache_targets` | `none`), scope 자체를 고를 수 있는지와는 다른 축이다.
+  // `target_grids`를 선언하지 않은 dataset — 예: `dataset_wide` + `external_system:*` —
+  // 도 scope를 고를 수 있지만 POI target selector는 없다. 앞 판은 두 축을 하나로 묶어
+  // 그런 dataset을 "선택 scope 갱신을 지원하지 않습니다"로 막았다.
   if (
-    capability.selector !== "poi_cache_targets" ||
     !capability.supported ||
     capability.allowed_sync_scopes.length === 0 ||
     !capability.allowed_sync_scopes.includes(capability.default_sync_scope)
   ) {
-    return { allowed: false, reason: capability.reason ?? "선택 scope 갱신을 지원하지 않습니다." };
+    return {
+      allowed: false,
+      reason: capability.reason ?? "선택 scope 갱신을 지원하지 않습니다.",
+    };
   }
   if (!capability.allowed_sync_scopes.includes(selectedSyncScope)) {
     return {
       allowed: false,
-      reason: "현재 활성 target에 포함되지 않은 sync scope입니다.",
+      // 판정 근거는 POI target 목록이 아니라 **카탈로그 선언**이다
+      // (`provider_dataset_operation_scopes`). 앞 판의 "현재 활성 target에 포함되지 않은"은
+      // POI target이 하나도 없는 dataset에 대해서도 나왔다.
+      reason: "카탈로그가 선언하지 않은 sync scope입니다.",
     };
   }
   return { allowed: true, syncScope: selectedSyncScope };
 }
 
+/**
+ * 상세의 "범위 계약" 줄에 그리는 `효과` 문장.
+ *
+ * `effect`는 값이 셋이므로(`dataset_wide` | `sync_scope` | `none`) 문장도 셋이어야
+ * 한다. 배타 열거(`effect === "sync_scope" ? … : …`)로 그리면 `none`이 진짜
+ * dataset-wide 계약과 **같은 문장**이 되고, 같은 패널이 바로 아래에
+ * `resolveDatasetRefreshScope`의 `effect === "none"` 사유("걸 수 있는 갱신 범위가
+ * 없습니다")를 함께 띄우므로 한 화면이 서로 반대되는 두 문장을 동시에 말한다.
+ *
+ * `none`은 "제출 가능한 scope가 하나도 없다"는 뜻이다. 그 상태에서도
+ * `default_sync_scope`는 `dataset_wide`로 내려온다 —
+ * `api/ops_dataset_service.py::_scope_refresh_capability`의 `if not entry.is_refreshable`
+ * 분기가 그 값을 고정한다(그 분기가 `effect="none"`을 내는 유일한 자리다). 그러므로
+ * 이 문장이 기본값을 근거로 실행 가능성을 말하면 안 된다.
+ */
+export function opsDatasetScopeEffectSentence(
+  effect: OpsDatasetScopeRefreshCapability["effect"],
+): string {
+  switch (effect) {
+    case "sync_scope":
+      return "효과 선택 scope 갱신";
+    case "dataset_wide":
+      return "효과 dataset 전체 갱신";
+    case "none":
+      return "효과 없음(제출 가능한 갱신 범위 없음)";
+  }
+}
+
 export function buildDatasetRefreshNowRequest({
-  provider,
-  datasetKey,
+  providerDatasetId,
   syncScope,
+  operationKey,
   priority = 75,
   reason = "dataset refresh from ops/datasets",
 }: DatasetRefreshNowInput): DatasetRefreshRequestCreateRequest {
   return {
     scope: {
       type: "provider_dataset",
-      provider,
-      dataset_key: datasetKey,
-      ...(syncScope === null ? {} : { sync_scope: syncScope }),
+      provider_dataset_id: providerDatasetId,
+      sync_scope: syncScope,
+      operation_key: operationKey,
     },
     run_mode: "now",
     priority,
@@ -357,9 +425,9 @@ export function useOpsDatasetCatalog() {
 
 export function useOpsDataset(
   selection: {
-    provider: string;
-    datasetKey: string;
+    providerDatasetId: number;
     syncScope: string;
+    operationKey: string;
   } | null,
   {
     pollingFallback = false,
@@ -370,15 +438,15 @@ export function useOpsDataset(
   return useQuery<OpsDatasetDetailResponse, Error>({
     queryKey: [
       "ops-dataset",
-      selection?.provider,
-      selection?.datasetKey,
+      selection?.providerDatasetId,
       selection?.syncScope,
+      selection?.operationKey,
     ],
     queryFn: ({ signal }) =>
       fetchOpsDataset(
-        selection?.provider as string,
-        selection?.datasetKey as string,
+        selection?.providerDatasetId as number,
         selection?.syncScope as string,
+        selection?.operationKey as string,
         signal,
       ),
     enabled: Boolean(selection),
@@ -405,10 +473,10 @@ export function useUpsertOpsDatasetRefreshPolicyMutation() {
   return useMutation<
     OpsDatasetRefreshPolicyResponse,
     Error,
-    { provider: string; datasetKey: string; body: ProviderRefreshPolicyUpsertRequest }
+    { providerDatasetId: number; body: ProviderRefreshPolicyUpsertRequest }
   >({
-    mutationFn: ({ provider, datasetKey, body }) =>
-      upsertOpsDatasetRefreshPolicy(provider, datasetKey, body),
+    mutationFn: ({ providerDatasetId, body }) =>
+      upsertOpsDatasetRefreshPolicy(providerDatasetId, body),
     onSuccess: () => {
       invalidateOpsDatasetQueries(queryClient);
     },
@@ -416,15 +484,11 @@ export function useUpsertOpsDatasetRefreshPolicyMutation() {
 }
 
 export function upsertOpsDatasetRefreshPolicy(
-  provider: string,
-  datasetKey: string,
+  providerDatasetId: number,
   body: ProviderRefreshPolicyUpsertRequest,
 ): Promise<OpsDatasetRefreshPolicyResponse> {
   return putJson<OpsDatasetRefreshPolicyResponse>(
-    datasetQueryPath("/v1/ops/datasets/refresh-policy", {
-      provider,
-      dataset_key: datasetKey,
-    }),
+    refreshPolicyPath(providerDatasetId),
     body,
   );
 }
@@ -434,23 +498,26 @@ export function useOpsDatasetPreviewMutation() {
   return useMutation<
     OpsDatasetPreviewResponse,
     Error,
-    { provider: string; datasetKey: string; body: OpsDatasetPreviewRequest }
+    {
+      providerDatasetId: number;
+      syncScope: string;
+      operationKey: string;
+      body: OpsDatasetPreviewRequest;
+    }
   >({
-    mutationFn: ({ provider, datasetKey, body }) =>
-      previewOpsDataset(provider, datasetKey, body),
+    mutationFn: ({ providerDatasetId, syncScope, operationKey, body }) =>
+      previewOpsDataset(providerDatasetId, syncScope, operationKey, body),
   });
 }
 
 export function previewOpsDataset(
-  provider: string,
-  datasetKey: string,
+  providerDatasetId: number,
+  syncScope: string,
+  operationKey: string,
   body: OpsDatasetPreviewRequest,
 ): Promise<OpsDatasetPreviewResponse> {
   return postJson<OpsDatasetPreviewResponse>(
-    datasetQueryPath("/v1/ops/datasets/preview", {
-      provider,
-      dataset_key: datasetKey,
-    }),
+    datasetPreviewPath(providerDatasetId, syncScope, operationKey),
     body,
   );
 }
@@ -473,7 +540,9 @@ export function useOpsDatasetRefreshNowMutation() {
       void queryClient.invalidateQueries({
         queryKey: ["pipeline", "executions"],
       });
-      void queryClient.invalidateQueries({ queryKey: ["pipeline", "overview"] });
+      void queryClient.invalidateQueries({
+        queryKey: ["pipeline", "overview"],
+      });
       invalidateOpsDatasetQueries(queryClient);
     },
   });

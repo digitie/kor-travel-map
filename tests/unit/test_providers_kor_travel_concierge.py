@@ -81,7 +81,7 @@ def _item(**overrides: Any) -> dict[str, Any]:
             "dataset_key": DATASET_KEY_YOUTUBE_PLACE_CANDIDATES,
             "source_entity_type": "extracted_place_candidate",
             "source_entity_id": "123",
-            "raw_payload_hash": "sha256:krtour-ai-hash",
+            "raw_payload_hash": "sha256:" + _HEX_DIGEST,
         },
         "updated_at": "2026-06-10T00:00:00Z",
     }
@@ -122,7 +122,10 @@ async def test_kor_travel_concierge_youtube_item_to_feature_bundle() -> None:
     assert source_record.dataset_key == DATASET_KEY_YOUTUBE_PLACE_CANDIDATES
     assert source_record.source_entity_type == "extracted_place_candidate"
     assert source_record.source_entity_id == "123"
-    assert source_record.raw_payload_hash == "sha256:krtour-ai-hash"
+    # concierge는 ``sha256:<hex>``로 보내지만 저장 정본은 접두 없는 lowercase
+    # hex다 (T-VN-33 ``ck_source_records_payload_hash_canonical``). 접두를 그대로
+    # 두면 제약이 거절하므로 **받는 자리에서** 벗긴다.
+    assert source_record.raw_payload_hash == _HEX_DIGEST
     assert source_record.raw_data["youtube"]["video_title"] == "제주 동쪽 여행"
 
     assert bundle.source_link.source_role is SourceRole.PRIMARY
@@ -155,6 +158,9 @@ async def test_kor_travel_concierge_latest_items_keeps_last_observation_per_cand
     assert [item["operation"] for item in latest] == ["tombstone"]
     assert await kor_travel_concierge_items_to_bundles(latest, fetched_at=_FETCHED) == []
     assert kor_travel_concierge_inactive_entity_ids(latest) == {"123"}
+
+
+_HEX_DIGEST = "a1b2c3d4" * 8
 
 
 def test_kor_travel_concierge_latest_items_passes_through_unidentifiable() -> None:

@@ -138,7 +138,7 @@ async def test_fixture_is_idempotent_consumes_only_canonical_unsafe_and_finalize
         migrated_session,
         kind="c6c_event_reassignment_fixture",
     )
-    with pytest.raises(IntegrityError, match="import job event identity is immutable"):
+    with pytest.raises(IntegrityError, match="import job event ownership is immutable"):
         async with migrated_session.begin_nested():
             await migrated_session.execute(
                 text(

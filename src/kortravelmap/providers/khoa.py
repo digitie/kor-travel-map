@@ -208,11 +208,6 @@ async def _beach_to_bundle(
         source_entity_type=_BEACH_ENTITY_TYPE,
         source_entity_id=natural_key,
         raw_payload_hash=payload_hash,
-        source_version=None,
-        raw_name=item.name,
-        raw_address=admin_text,
-        raw_longitude=coord.lon if coord is not None else None,
-        raw_latitude=coord.lat if coord is not None else None,
         raw_data=raw_data,
         fetched_at=fetched_at,
         source_record_key=source_record_key,
@@ -223,7 +218,6 @@ async def _beach_to_bundle(
         source_role=SourceRole.PRIMARY,
         match_method="natural_key",
         confidence=100,
-        is_primary_source=True,
     )
     return FeatureBundle(
         feature=feature, source_record=source_record, source_link=source_link

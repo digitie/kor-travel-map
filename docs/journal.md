@@ -2,74 +2,416 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
-## 2026-08-07 — T-VN-37: notice 계보 key 물화 + 인덱스 probe (ADR-087)
+## 2026-08-11 (3) — T-VN-33 최종 적대 리뷰 APPROVE, 잔여 P2 처리, 게이트 25/25
 
-- 공개 notice read와 reconcile이 계보 key를 `raw_data` JSON에서 **매 행 재계산**해
-  인덱스가 붙을 수 없었고(`concat_ws`가 STABLE), 경쟁자 탐색이 매번 notice 전수
-  스캔이 됐다. `source_records.lineage_key`로 물화하고
-  `(COALESCE(lineage_key, source_entity_id), provider, dataset_key,
-  source_entity_type)` 인덱스를 걸었다. correlated 형태는 **그대로 유지**한다.
-- 실측(clean clone, jit=off, 교차 반복 최소값):
+**리뷰 3렌즈 전원 APPROVE · P0/P1 0건.** 세 렌즈 모두 실측으로 판정했다 — 검증 신뢰성
+렌즈는 변이 26건을 심어 25건 KILLED를 확인했고, API 렌즈는 `openapi-typescript` 재생성
+결과가 체크인된 `types.ts`와 **0바이트 차이**임을 확인했다. 데이터·스키마 렌즈는 triple
+세 열을 가진 5개 테이블 전부가 삼중(또는 4열)으로 수렴해 pair 모양 유일성이 하나도
+남지 않았음을 전수 확인했고, `ops.managed_files` 가드 분리가 안전한 근거도 실측으로
+확인했다(registry는 관측 전용이고 물리 객체를 지우는 경로가 없다).
 
-  | | 3,045 notice | 145행(현행 prod) |
-  | --- | --- | --- |
-  | notice 목록 | 20.4초 → 0.19초 | 60.8ms → 5.2ms |
-  | 전체 feature | 20.1초 → 0.67초 | 614ms → 520ms |
-  | 단건 조회 | 15.6ms → 3.7ms | 6.4ms → 3.4ms |
-  | reconcile | 118.4초 → 0.36초 | 26.2ms → 23.5ms |
+승인 뒤에도 P2 8건 중 6건을 처리했다. 이 브랜치가 **스스로 세운 규칙을 자기 코드가
+어기는 자리**들이었다.
 
-  결과 집합 양방향 차집합 0, reconcile 종료 상태도 `close_missing` 양쪽 동일.
-- **인덱스 꼬리는 DESC여야 한다 — 적대 리뷰가 잡았다.** 순서 조건을 인덱스로 민 뒤
-  "해결됐다"고 적었는데, 그 측정이 **승자만** 본 것이었다(fixture의 그 계보에
-  feature가 하나뿐이었다). 계보에서 실제로 조인되는 행은 현재 record 하나뿐이고
-  그것은 그 계보의 최댓값이라, ASC면 **패자**의 스캔 범위 맨 끝에 놓여 EXISTS가
-  이력을 전부 소비한다 — 50,002 record 계보에서 패자 단건 158.7ms(main 29.1ms).
-  DESC로 뒤집으니 25.0ms. **패자가 다수다**(prod 145건 중 98건) — 성능 주장은
-  필터가 숨기려는 쪽에서 재야 한다. 승자·패자·목록 세 축을 세 규모에서 다시 쟀고
-  전부 main보다 빠르다.
-- **DB 스키마 대안도 재봤다.** `source_entity_heads`에 현재 계보 요약을 얹으면
-  탐색이 record를 아예 안 건드려 깊이에 무관해진다(패자 19.2 / 승자 20.5 /
-  목록 20.4ms). DESC 인덱스판과 수 ms 차이인데 인덱스 72MB + 가변 컬럼 3개 +
-  유지 트리거를 더 낸다. T-VN-33이 그 테이블을 신설 중이라 **거기서 하는 게 맞다** —
-  ADR-087 §결과에 근거와 수치를 남겼다.
-- **순서 조건을 인덱스로 밀었다.** "나보다 나은 행이 있나"를 한 술어 안 `OR`로
-  두면 Postgres가 Index Cond로 밀지 못하고 Filter로 남겨 계보의 payload 이력
-  전체를 훑는다 — 50,001 record 계보에서 `Rows Removed by Filter: 50000`,
-  단건 조회가 main보다 8배 느렸다(적대 리뷰 실측). 두 `EXISTS`로 나누고
-  (`> 행 비교` / `= 동률`), 죽은 `COALESCE(last_seen_at, …)`를 평컬럼으로 바꾸고,
-  인덱스 꼬리에 `last_seen_at, source_record_key`를 붙였다. 같은 fixture에서
-  26.8 → **21.8ms로 main보다 빠르다**. 세 규모 전부 main 우위.
-  **현행 prod 규모에서 이득은 작다** — 145행은 어느 형태로도 빠르다. 실제로 사는
-  곳은 규모다: 적대 리뷰가 만든 20,059 계보 / 26,811 notice에서 종전은 13분 42초에도
-  끝나지 않아 중단됐고 현재는 508ms다(96만 record로 늘려도 559ms, 선형).
-- **설계를 다섯 번 갈아엎었고 그중 셋은 적대 리뷰가 무너뜨렸다.**
-  ① 비상관 InitPlan(`<> ALL(ARRAY(...))`) — Param 배열은 해시되지 않아 복잡도가
-  그대로였고 단건 조회가 36배 느려졌다. ② 전 행 backfill + NOT NULL — 근거였던
-  "`COALESCE`로 물러나면 인덱스가 안 쓰인다"가 **틀렸다**. 인덱스를 같은 COALESCE
-  식에 걸면 되고, 두 인자가 저장 컬럼이라 IMMUTABLE이다. 인덱스를 막는 건
-  `concat_ws`가 든 재계산 CASE 쪽인데 그 둘을 혼동했다. 73만 행 중 규칙 대상이
-  744행(0.10%)뿐이라 전 행을 채우면 **heap이 822→1,700MB로 영구히 부풀고**
-  (VACUUM도 OS에 반환 안 함) 124초 ACCESS EXCLUSIVE가 걸린다. scope 한정으로
-  바꿔 **마이그레이션 전체 3.1초, heap +1MB**.
-- 파생은 **DB 트리거**가 한다(`provider_sync.notice_lineage_key`). 식의 정본이 한
-  곳이 되고 픽스처·수동 SQL·앞으로의 writer가 전부 자동으로 맞는다. `UPDATE OF`에
-  `lineage_key` **자신**을 넣어야 파생 컬럼 직접 쓰기도 되돌려진다(리뷰어가
-  한 줄로 되살아나는 공지를 실증). `ENABLE ALWAYS`라 복원 드릴의
-  `session_replication_role=replica`에서도 돈다.
-- 트리거 비용: 순수 INSERT 10만행 5,840ms vs 비활성 5,996ms(차이 없음). 단
-  `INSERT ... ON CONFLICT DO UPDATE`는 **충돌해도 BEFORE INSERT arm이 돈다**
-  (`calls=100000`, 행당 2.8µs ≈ 문장의 4%) — "hot path는 안 탄다"고 적었던 건 틀렸다.
-- 표현식 인덱스는 `ANALYZE` 전까지 통계가 없어 planner가 무시한다(리뷰어가 그
-  상태를 측정해 "인덱스가 안 쓰인다"고 보고했다). 마이그레이션이 `ANALYZE`로 끝나
-  배포 직후 그 창이 열리지 않게 했다.
-- reconcile에는 원인이 하나 더 있었다 — `out_of_scope_feature_lineages` CTE가 갱신
-  행마다 재실행(loops=2,900). `MATERIALIZED` 장벽으로 잡았다.
-- H35 고정 세대 replay는 0079 SQL을 **바이트 그대로** 유지한다(sha256 핀 테스트
-  신설). 리뷰어가 `origin/main`과 byte-identical임을 독립 확인했다.
-- 남은 가정 2개를 ADR에 명시했다: record/entity의 scope 3열 일치가 제약으로
-  강제되지 않는다(prod 0건, 코드로 도달 불가) · 계보 key에 시간 성분이 없어 계보당
-  인덱스 항목이 이력만큼 증가한다(50,011 record 계보에서 단건 3.3→12.5ms).
-- 배포 선행: `EXPECTED_HEAD`를 `0088_source_record_lineage_key`로.
+- **0092의 새 트리거가 writer와 정면으로 충돌했다.** `NULL → dataset_id`(최초 귀속)까지
+  "ownership is immutable"로 거부하는데 `file_registry._UPSERT_SQL`은 재등록 시 소유자를
+  붙이는 CASE를 구현한다. `scan_s3_location`은 그 호출을 `registry_guard`로 감싸지 않아
+  예외가 그 pass 등록분을 통째로 롤백시킨다. 귀속은 rebinding이 아니므로 NULL→값만
+  허용하고 값→다른 값·값→NULL은 계속 거부한다.
+- **계약↔head 대조 게이트에 index 축이 없었다.** 축을 켜자 4건이 나왔고 셋은 계약이
+  낡은 것(그중 하나는 pair 시대 index 이름), 하나는 계약이 옳았다(varchar/text 표기
+  차이 — allowlist로 기록). 하한과 allowlist 양방향 `==`로 fail-open도 막았다.
+- **`allowed_sync_scopes=[]`로 접는 분기**가 같은 응답이 낸 membership 행을 같은 응답의
+  capability가 거짓 사유로 거부했다. `target_grids` 축에서만 닫혀 있던 것을 전 scope로
+  넓혔다.
+- **제출 직전 fail-closed 가드가 3축 중 2축만 봤다.** dataset만 남아 있으면 통과했다 —
+  형제 operation이 disable된 뒤의 제출을 그대로 흘려보낸다. 삼중으로 좁히고 어느 축이
+  사라졌는지 사유로 구분한다.
+- **selector와 "scope를 고를 수 있는가"를 갈랐다.** `effect="sync_scope"` 분기를
+  `target_grids` 선언 밖으로 넓히면서 `selector="poi_cache_targets"`를 상수로 남겨,
+  POI target이 하나도 없는 dataset에 "범위 계약: 활성 POI target"이 그려졌다. 서버는
+  selector를 `target_grids` 선언과 동치로 내고 프론트 게이트는 selector를 보지 않는다.
+- 병렬 갈래가 서로의 변경을 못 봐서 생긴 **낡은 서술 4건**도 정정했다(주석이 서버가 더는
+  내지 않는 상태를 기술하거나 존재하지 않는 분기 수를 셌다).
+
+**flake 2건을 없앴다** — 둘 다 "부하 탓"으로 넘길 수 있었던 red다.
+- 감사 계획 테스트의 `assert not sort_nodes`가 비결정적이었다(같은 트리·같은 명령으로
+  한 번 red 한 번 green, 단독 8 passed). ANALYZE·`force_generic_plan`을 이미 걸고 있으니
+  통계 문제가 아니라 top-N 정렬과 index-ordered 경로의 비용이 팽팽한 것이다. 단언을
+  정렬 유무가 아니라 **유계성**(정렬 행·훑은 행·버린 행 각각 ≤64)으로 바꿨고, 약화가
+  아님을 `DROP INDEX` 회귀로 확인했다.
+- write-cost 실측이 40k INSERT를 상태별 **한 번씩** 재고 2% 마진으로 비교했다. 벽시계
+  측정에서 부하는 시간을 늘리기만 하므로 최솟값이 간섭 없는 비용에 가장 가깝다 —
+  batch는 40k 그대로 두고 회차를 3회로 늘렸다. 20k×3 안은 효과 크기가 함께 줄어
+  ratio 1.02x로 임계에 붙어 기각했다(색인 유지 비용은 행 수에 비례한다).
+  이 테스트는 T-VN-33 범위 밖이지만 머지 게이트를 비결정적으로 만들어 함께 고쳤다.
+
+**최종 게이트 25/25 GREEN**: unit+lint 2192 · api 1101(cov 77.64%) · dagster 530/3skip
+(85.23%) · integration **1049 passed / 0 skipped**(geo live 실제 실행) · vitest 37파일 302 ·
+frontend 9종.
+
+## 2026-08-11 (2) — T-VN-33 33-E: 격리 fresh 재적재 + n150 live 확인
+
+전체 25게이트 GREEN 위에서, **비어 있는 PostGIS에 최종 스키마만으로 다시 세운 DB**에
+대고 API와 admin UI를 실제로 태웠다. n150에 격리 컨테이너를 띄웠고(prod 스택은 건드리지
+않는다) 브라우저는 정책대로 n150에서 돌렸다.
+
+**① fresh 재적재** — 빈 PostGIS 16.9/3.5 → `alembic upgrade head` → `0092_tvn33_offline_cleanup`.
+`alembic current == heads`, `alembic check` = "No new upgrade operations detected"
+(모델과 스키마 사이 drift 0). 시드 실측: dataset 64 · 활성 63 · operation 79 ·
+활성 refresh operation 56 · scope 행 59 · refresh operation이 없는 dataset 8.
+
+**② API live 12/12** — 삼중이 실제로 강제된다: 없는 `operation_key` → 404, 없는
+`sync_scope` → 404, exact triple → 200. `detail_url`은 67/67 행이 세 축을 담는다.
+preview(fixture) 200, refresh-policy PUT 200. 비활성 dataset 정책 PUT은
+**409 `INACTIVE_DATASET_MUTATION_DISABLED`** — 라운드11이 orphan 오분류에서 갈라낸
+typed 오류가 live에서 그대로 나온다.
+
+**③ admin UI live 10/10 (n150 브라우저)** — 그리드 67행, `operation` 열 존재,
+operation_key 값이 화면에 56회 렌더. 상세 토글 aria-label이 삼중을 담는다
+(`… dataset_wide feature_event_datagokr_cultural_festivals_job 상세 열기`).
+console error 0. 서버가 `canonical`이라 답한 행을 화면이 "잔존 행"이라 말하는 8라운드
+BLOCKER 회귀도 live에서 0건이다.
+
+**④ 라운드12 수정의 live 확인** — 실행 가능한 refresh scope가 없는 dataset(#12
+`google-places-api-new/place_phone_enrichment`, `operation_key` 없음)에서 '지금 갱신'이
+**disabled**이고 사유가 "이 dataset에는 실행 가능한 refresh runner가 없습니다."로 뜬다.
+같은 화면의 정상 dataset(#1)은 **활성**이다 — 과잉 차단이 아님을 대조군으로 확인했다.
+고치기 전에는 이 버튼이 활성이었고 눌러도 요청도 오류도 없이 아무 일도 일어나지 않았다.
+
+**남은 것**: Dagster는 이 격리 환경에 없으므로 schedule/run 축은 확인하지 않았다
+(화면은 "Dagster 스케줄 소스 연결 불가"를 정직하게 표시한다 — 조용히 삼키지 않는다).
+
+## 2026-08-11 — T-VN-33 라운드11~12: "좁게 돌려서 green"을 구조로 막았다
+
+11라운드까지의 근인은 하나로 수렴한다. **게이트 green의 의미가 주장보다 작았다.**
+12라운드는 그 층을 닫는 데 썼고, 전수 감사 57건 중 적대 검증이 반려한 15건을 처리했다.
+
+**BLOCKER 1 — catalog exact-set 게이트가 CI 경로에서 red였다.** 단독 실행은
+`14 passed`, `pytest tests/integration` 통째 실행은 `4 failed`. session-scoped 공유
+`migrated_engine`에 형제 fixture가 handler 없는 활성 refresh operation을 commit하는데,
+게이트는 **카탈로그 전역 성질**을 단언했다. 다섯 갈래가 전부 CI 스텝보다 좁은 범위에서
+green을 봐서 아무도 못 봤다. 게이트를 전용 database + alembic head로 옮겨 순서 독립으로
+만들었고, "공유 DB가 오염돼도 결과 불변" + "진짜 drift에는 여전히 red"를 한 테스트에서
+둘 다 단언한다 — 오염 회피가 fail-open으로 가면 고친 게 아니다.
+→ **규칙: 카탈로그 전역 성질을 단언하는 테스트는 공유 DB에 쓰지 않는다.**
+
+**BLOCKER 2 — 0092의 docstring이 거짓이었고 downgrade가 실제로 실패했다.** "제약/함수
+정의만 건드리므로 되돌릴 수 있다"고 적었지만 UNIQUE를 4열→3열로 **좁히는** 것은 데이터
+의존이고, 실패를 유발하는 상태를 만드는 것이 하필 같은 revision의 upgrade다.
+0090/0091 관례대로 forward-only로 되돌렸다. 저장소에 downgrade 경로를 도는 테스트가 한
+건도 없어서 그 진술이 적대 검증 전까지 살아남았다 — `tests/unit/test_migration_forward_only.py`로
+게이트를 세웠다.
+
+**비활성 dataset의 정리 경로가 막혀 있었다.** `reject_inactive_provider_dataset`이
+DELETE에서도 OLD쪽 활성 검사를 돌아 카탈로그 행을 지울 수 없었다. DELETE는 새 실행을
+거는 write가 아니라 정리이므로 면제했다(참조 무결성은 FK RESTRICT가 계속 지킨다 —
+양방향 실측 단언). 감사 기록 누락의 원인은 OLD쪽이 아니라 **NEW쪽** assert였다 —
+registry hook이 UPSERT라 INSERT/UPDATE로 걸린다. `ops.managed_files`를 활성 가드에서
+빼고 소유권 immutable 전용 가드로 교체했다. registry는 storage의 거울이지 실행 축이
+아니다. (넓은 면제는 불가능했다 — `expected-rejections-v1.json`의
+`inactive_dataset_existing_operation_update`가 executable contract로 못박고 있다.)
+
+**계약↔head 대조 게이트가 `CREATE OR REPLACE` 본문 변경을 못 잡았다.** 대조 범위가
+`after − before` 차집합이라 `target-schema-v1.sql`이 이미 만든 함수의 본문 교체는 통과했고,
+하필 이번에 바꾼 함수가 정확히 그 경우였다. fixture를 확장해 닫고 fail-open 하한을
+실측값(제약 76 · 트리거 23 · 함수 22)으로 올렸다 — 옛 하한 19는 `CREATE CONSTRAINT
+TRIGGER` 4문을 누락해, 그 4개가 계약에서 통째로 사라져도 통과하는 값이었다.
+
+**선언된 실행 scope가 없는 dataset을 '갱신 가능'으로 투영하던 것을 고쳤다.** 화면에서
+'지금 갱신'이 활성이었고, 누르면 요청도 오류도 없이 아무 일도 일어나지 않았다. 원인은
+degrade payload가 정상 dataset-wide capability와 **다섯 필드 중 넷이 같고 `reason`만
+달랐던** 것이다 — 프론트 게이트는 허용 경로에서 `reason`을 읽지 않는다. 계약에
+`effect: "none"`을 추가하고 `is_refreshable`을 `refresh_scopes` 기준으로 좁혔다.
+요청 dialog도 같은 필드로 막는다(`catalog-selection.ts` — 그 축은 테스트가 0건이었다).
+
+**무방비 축을 회귀로 덮었다.** MOIS source precheck fail-open(모듈 전체를 monkeypatch한
+테스트뿐이라 fail-open이 전 게이트에 안 보였다 — 실 DB 회귀 7건으로 대체),
+`_advisory_key`의 sync_scope 성분, 주소 clue 우선순위 3건, MCST slug 미지 키 거부.
+전부 변이를 심어 KILLED를 실증했다.
+
+**주석에 박힌 실측 수치를 지웠다.** `74개 dataset 중 17/18개`가 8곳 이상에 서로 다른
+값으로 남아 있었고, 그중 하나는 Pydantic docstring이라 `openapi.json`/`types.ts`로
+공개 계약에 실려 나갔다. 개수는 DB마다 다르다(0089 legacy harvest) — 성질만 남겼다.
+
+## 2026-08-09 — T-VN-33 적대 리뷰 7·8라운드: 감사기를 감사했다
+
+두 라운드 모두 REJECT였고, 8라운드는 리뷰어 둘이 **독립으로 같은 BLOCKER**를 찍었다.
+그 BLOCKER는 한 줄이다 — `scope.operation_key === selection.operationKey`. 왼쪽은
+API 원본 `string | null`, 오른쪽은 UI가 `null → ""`로 정규화한 값이다. `null === ""`은
+false이므로 **refresh operation이 없는 catalog 전용 dataset 17~18개의 상세가 통째로
+렌더되지 않았다**. 화면은 서버가 `catalog_state="canonical"`이라 답한 행을 두고
+"ETL 카탈로그에 없는 잔존 행입니다"라고 표시했다.
+
+세 가지가 이걸 못 잡았다. TypeScript는 `string | null === string` 비교를 막지 않는다.
+e2e 픽스처에 `operation_key: null` 행이 하나도 없었다. 그리고 파일 자신이 "경계 밖에서
+operation_key를 직접 읽지 않는다"고 규약을 적어 두고 세 곳에서 어겼다 — 규약을 적는
+것과 지키는 것은 다른 일이고, 지키게 만드는 것은 또 다른 일이다.
+
+더 큰 것은 검증 쪽이다. **vitest 36파일 285케이스가 어느 워크플로에도 걸려 있지
+않았다.** 이 브랜치가 추가한 프론트 테스트 ~900줄을 포함해서다. 미러링 감사기는 이
+사각을 원리적으로 볼 수 없었다 — CI→로컬 방향만 보고 "저장소에 있는 테스트가 어느
+게이트에도 없다"는 반대 방향을 보지 않기 때문이다. 그래서 게이트 스크립트는 이 누락을
+**충실히 미러링**하며 green을 냈다. CI와 로컬에 넣자마자 옛 계약을 못 박고 있던 테스트가
+하나 잡혔다. 게이트에 넣는 것이 곧 검증이다.
+
+그리고 감사기 자신이 "게이트가 실패할 수 있는가"를 전혀 보지 않았다. `|| true` 하나로
+mypy·integration·openapi·next build 어느 것이든 무력화해도 조각은 그대로라 침묵했다.
+스크립트는 `py()` 주석에 "파이프를 걸지 마라 — exit code가 마지막 명령의 것이 되어
+게이트가 늘 통과한다"고 그 실패 모드를 **적어 두고 있었다**. 아는 것과 검사하는 것은
+다르다. 리뷰어가 설계한 변이 14종 중 12종이 생존했고, 면제표의 "echo는 실패를 만들 수
+없으므로 미러링 대상이 아니다"라는 서술도 거짓이었다 — 코드가 하던 일은 "echo인 명령"이
+아니라 "echo를 **포함한** 명령"의 면제였고, `bash verify.sh && echo done`으로 진짜
+차단 스텝을 밀수할 수 있었다.
+
+7·8라운드를 합쳐 변이 배터리는 20 → **32/32**가 됐다. 도달성 판정(실행문을 지우고
+주석만 남기면 안 잡히던 것), 실패 억제 토큰, pytest 경로 축소, 면제 접두+`&&` 구간
+판정, 워크플로 헤더 파싱까지 각각 변이로 못을 박았다.
+
+부수적으로, 복사 실패를 치명으로 바꾸자마자 숨어 있던 결함이 즉시 드러났다 —
+`next build` 산출물의 끊어진 심링크 때문에 `cp -r`가 non-zero로 끝나고 있었고, 그전까지
+파이썬 게이트는 **일부만 복사된 트리** 위에서 돌고 있었다. 삼키는 코드는 결함을 없애지
+않고 미룬다.
+
+제품 쪽 잔여 수정은 딥링크(3축 강제 → 유일하면 수용·모호하면 거부), 실행 타임라인의
+fail-open 필터(세 축이 안 차면 dataset 필터까지 버려 전 시스템 실행을 보여줬다), 요청
+dialog의 형제 operation 임의 선택, MOIS 제출 차단 복구(표시만 복구돼 있었다), 비활성
+dataset 정책 PUT 500 → 409다. 상세와 근거는
+`docs/reports/t-vn-33-live-product-defects-2026-08-08.md` 35~49번.
+
+## 2026-08-08 (3) — T-VN-33 기능 게이트 GREEN + 설계 재검토 4건
+
+전체 스위트가 **4,534 passed / 6 failed**로 수렴했다(시작 298). 6건은 전부 컨테이너
+환경 노이즈다 — `docker` CLI 바이너리 부재로 죽는 compose 테스트 5건(`FileNotFoundError:
+'docker'`)과, 40k INSERT 두 번의 벽시계 비율을 2% 허용오차로 비교하는 부하 민감 테스트
+1건이다. 후자는 단독 실행 시 통과하고, 내 브랜치는 그 파일도 GiST 인덱스도 안 건드렸다.
+
+사용자가 우선순위를 바꿔 지시했다 — 호환성·최소수정·기존 계약 유지보다 **설계적 우수성**을
+앞에 두라고. 그에 맞춰 "계약이 이러니까 맞췄다"로 내렸던 판단들을 되짚었고, 그 과정에서
+결함 4건이 더 나왔다.
+
+가장 값어치 있었던 것은 **ORM PK가 DB보다 좁게 선언돼 있던 것**이다.
+`provider_dataset_operation_scopes`의 DB PK는 triple인데 ORM은 2열만 `primary_key=True`로
+뒀다. 처음에는 이것을 "identity map이 두 행을 접는다"로 정당화했는데 **그 근거는 틀렸다** —
+이 저장소는 raw SQL 전용이고(ADR-004) 이 class를 ORM 방식으로 쓰는 코드가 0건이라 그
+시나리오는 도달하지 않는다. 적대 리뷰가 A/B로 진짜 이유를 밝혔다: **alembic autogenerate가
+PK 제약을 비교 대상에 넣지 않아** ORM PK를 pair로 되돌려도 `alembic check`와 기존 메타데이터
+테스트가 모두 통과한다. 즉 아무 게이트도 이 어긋남을 보지 못하고 있었다. 게다가 내가 쓴
+단위 테스트가 **틀린 2열 모양을 단언해 그 어긋남을 고정**하고 있었다. 부류 전체를 막는 게이트를 세우고(mapped table 전수 대조) A/B로 증명했다.
+
+두 번째는 **하드 500**이다. `_group_dataset_execution_snapshot_rows`가 SQL이 triple로
+partition해 내보낸 행을 pair로 다시 묶어 `RuntimeError`를 낸다. 스키마 변경 없이
+카탈로그에 refresh operation 하나를 더 등록하는 평범한 작업만으로 재현된다. 이걸
+단정하기까지 두 번 헛짚었다 — 처음엔 "병합·오귀속"이라 과장했는데 SQL은 이미 triple로
+partition하고 있었고, 다음엔 반대로 "refresh-only CHECK가 막아 도달 불가"라고 물러섰는데
+그 CHECK가 막는 것은 *preview*이지 *복수 refresh*가 아니었다. 최종 판정은 롤백 트랜잭션
+실측(두 refresh operation이 같은 scope를 공유할 수 있음)과 A/B 재현으로 세웠다.
+
+**하지 않기로 한 것 2건도 같은 무게로 기록해 둔다.** offline_uploads 멱등키를 4열로
+올리는 안은 구현까지 갔다가 되돌렸다 — 업로드 요청 표면에 operation 입력이 없고 두 INSERT
+경로 모두 리졸버를 쓰는데 그 리졸버가 모호하면 조용히 고르지 않고 실패시킨다. 즉 operation만
+다른 두 upload를 만들 방법 자체가 없어 죽은 폭이었다. SQLSTATE 통일(38 대 1)도 분기하는
+소비자가 없어 접었다. 지시가 "설계 우선"이어도, 동작이 안 바뀌는 변경으로 freeze
+아티팩트를 흔드는 건 설계 개선이 아니다.
+
+## 2026-08-08 (2) — T-VN-33 통합 전량 전환 완료, 제품 결함 25건 이상 수정
+
+- **라이브 실행이 잡은 결함은 전부 단위 테스트로는 안 잡히는 종류였다.** 세 가지 기제다:
+  ① SQL은 문자열이라 mypy도 단위 테스트도 안 본다(`sr` alias 유실 2건 — 정합성 검사와
+  dedup 조회가 파스 단계에서 죽었다), ② 트리거·제약은 DB에만 있다(`BEFORE UPDATE`가
+  `RETURN OLD`를 해서 **두 ops 테이블의 모든 UPDATE가 조용히 버려지고** 있었다 — rowcount는
+  1이라 호출자는 성공으로 본다), ③ 코드와 제약이 서로 반대로 갔다(`provider_dataset` scope는
+  파이썬이 triple을, DB check가 자연키를 요구해 **어느 형태로도 쓸 수 없었다**).
+- 고친 것 중 파급이 큰 순: `pipeline_repo`의 미투영 열 한 줄(projection 전체 26건),
+  `sr` join 2줄(38건), dagster sync-state 이관(provider ETL asset 전부), `sync_scope="default"`
+  (MOIS 적재가 데이터를 다 쓰고 cursor에서 rollback), 재적재 idempotency(`prior` CTE의
+  `FOR UPDATE`가 자기 문장에 가려져 feature가 매 관측마다 재기록), 데드락(전역 singleton
+  clock 행과 scope 행의 공유→배타 승격이 엇갈림), event 감사 인덱스(dense shape에서
+  10,481 buffer/75ms → 225/0.31ms).
+- **테스트는 55 + 18 = 73개 파일을 최종 스키마로 옮겼다.** 통합 실패가 298 → 16 → 0
+  경로로 줄었다. 마지막 16건 중 10건은 제품이 아니라 **테스트 오염**이었다 —
+  `test_dagster_feature_etl`의 TRUNCATE 목록에 `source_entities`가 없어 entity가 링크 없이
+  남고 정합성 F1(orphan)이 다른 테스트에서 켜졌다. T-VN-33이 head를 끼우면서 record
+  CASCADE가 더 이상 entity를 지우지 않게 된 것이 원인이다.
+- **커버리지 공백 2건을 메웠다.** notice 재등장 테스트가 **바이트 동일** 경로만 검증해
+  결함이 있어도 통과했고(내용이 바뀐 재등장은 `became_current=True`라 적재가 subtype을
+  덮어써 lifecycle이 "직전에 닫혀 있었다"를 관측할 수 없다), 등대 판정의 catalog pair 축은
+  테스트가 아예 없었다. 둘 다 결함 코드에서 새 테스트만 실패함을 A/B로 증명했다.
+- geo live 테스트 5건은 T-VN-33과 무관한 환경 미비였다. 막히는 지점이 셋이고 셋 다
+  오진을 유발한다 — 자세한 것은 `dev-environment.md` §10.7에 남겼다. Map public API key는
+  VWorld 키가 **아니고**, 정본은 n150 `~/.secrets/`이며, 테스트가 읽는 변수는
+  `LIVE_KOR_TRAVEL_GEO_BASE_URL`이다(다른 변수만 넘기면 원인은 주소인데 메시지는 키를
+  가리킨다).
+- 미수정으로 남긴 것: API 표면이 identity triple 중 2/3만 노출한다(에이전트 보고 6건).
+  `OfflineUploadRecord`에 `operation_key`가 없어 409가 알려준 operation을 어느 read 표면과도
+  대조할 수 없고, `PipelineProviderDatasetIdentityRecord`도 그것을 버려 operation만 다른 두
+  member가 같은 객체로 보인다 — 같은 커밋의 `OpsDatasetProviderDataset`이 정확히 그 실패
+  모드를 주석으로 경고하며 non-null로 두고 있어 내부 불일치다.
+
+## 2026-08-07 (2) — 통합 테스트 live 실행이 잡은 P0: 두 ops 테이블이 조용히 불변
+
+- **`ops.import_jobs`와 `ops.feature_update_requests`의 모든 UPDATE가 조용히 버려지고
+  있었다.** `reject_inactive_import_job_members` / `reject_inactive_feature_update_request_members`가
+  `BEFORE DELETE OR UPDATE` 트리거인데 무조건 `RETURN OLD`를 했다. BEFORE UPDATE에서 OLD를
+  돌려주면 그 행은 **OLD 값으로 기록된다** — rowcount는 1이라 호출자는 성공으로 본다.
+  결과: job 상태 전이(queued→running→done), generation 증가, heartbeat, 취소가 전부
+  무효였다. `start_update_request`가 request를 돌려주는데 job은 `queued`인 상태를 실측으로
+  잡았고, `UPDATE ... SET generation = generation + 1`을 두 번 돌려도 값이 1인 것으로 확인했다.
+  `RETURN NEW`(DELETE만 OLD)로 고쳤고, 같은 형태의 BEFORE UPDATE 트리거 8개를 전수 확인해
+  나머지는 모두 예외를 던지는 정상 fence임을 확인했다.
+- 이 결함은 **단위 테스트로는 잡히지 않는다** — SQL 문자열은 옳고, 트리거가 붙은 실제 DB에서만
+  드러난다. 두 적대 리뷰어가 "통합 테스트를 머지 전에 한 번 돌려라"라고 지적한 것이 정확했다.
+- freeze 계약이 pair 시대 산물이라 member 테이블에 `operation_key`가 없었다. scope PK와
+  member 4개 테이블의 식별자·FK를 triple로 올리고(멱등키는 3열 유지), violation fixture와
+  freeze 테스트 insert도 따라 올렸다. 지문 7종은 fixture가 스스로 계산한 값으로 재생성했다.
+- `test_feature_update_repo.py`는 T-VN-33 이전 계약으로 쓰여 있었다. membership helper 추가,
+  제거된 배열 필터 검증 테스트 삭제, advisory key 호출부 변환으로 52건 중 41건이 통과한다.
+  EXPLAIN 단언은 동작 검증으로 바꿨다 — fixture 규모(4,000행)에서 계획 모양을 못박으면
+  코드가 아니라 planner를 테스트하게 된다(계획 실측치는 docstring에 기록으로 남겼다).
+
+## 2026-08-07 — T-VN-33 구현 완결: merge 유실 자산 복구 + freeze 계약 divergence 4건
+
+- **merge에서 T-VN-37 자산 둘이 조용히 사라져 있었다.** `feature_repo.py` 충돌을 tvn33 쪽으로
+  채택하면서 frozen H35 SQL이 통째로 없어졌는데 `frozen_h35_schema=True` 호출부(3곳)는 남아
+  있었다 — 리허설이 현행 필터를 받아 0079 세대에 없는 `source_entity_heads`·`provider_datasets`를
+  참조하므로 실행 즉시 죽는 상태였다. `origin/main`에서 복구했고 sha256 `e934cdb8` / 15,672
+  bytes로 T-VN-37의 핀과 일치한다. reconcile CTE의 `MATERIALIZED` 장벽도 함께 복구했다
+  (없으면 갱신 대상 feature마다 CTE 재실행 — 3,045 notice에서 87.9초 대 0.35초).
+- **freeze fingerprint를 실제로 재현해 guard divergence를 잡았다.** `touch_provider_dataset`
+  계열이 `now()`(트랜잭션 시작 시각)를 써서 한 트랜잭션 안의 두 갱신이 같은 `updated_at`을
+  받고 있었고, identity-update guard의 SQLSTATE가 계약과 달랐으며, ADR-069 근거 문구 누락과
+  죽은 변수 잔존이 있었다. membership guard의 `operation_key IS NULL` wildcard 3곳도 제거했다 —
+  두 member 테이블 모두 NOT NULL이라 죽은 분기였고 비등식 join이라 scope PK를 못 탔다.
+- **적대 리뷰가 그 정렬 작업의 두 오류를 잡았다.** ①처음 대조는 fingerprint 대상
+  `_TARGET_FUNCTIONS` 19개만 봐서 좁았다. 전수 31개로 넓히니 의미 차이가 4건 더 있었다 —
+  member-active guard 2개에서 계약이 `scope.operation_key = member.operation_key` 등식을
+  빠뜨려 무관한 sibling operation 하나가 비활성이면 member까지 막히는 형태였다(이 건은
+  **마이그레이션이 옳고 계약이 낡았다** — 계약을 고쳤다). 나머지 2건은 마이그레이션을 계약에
+  맞췄다. ②"바이트 동일"은 **거짓이었다** — 실제로 잰 것은 공백 정규화 기준이고, 31개 전부
+  들여쓰기가 다르다(마이그레이션은 Python 문자열 안, 계약은 flush-left). 현재 보증은
+  **공백 정규화 기준 31/31 동일**이다.
+- **curation CSV를 자연키로 되돌렸다.** `provider_dataset_id`는 `GENERATED ALWAYS AS IDENTITY`고
+  0089 legacy sweep이 그 DB의 실데이터까지 훑어 seed하므로 값이 DB마다 다르다. 이 CSV는
+  저장소에 sha로 고정돼 어느 DB에나 적용되므로 surrogate를 파일에 박으면 **다른 DB에서 다른
+  dataset을 가리킨다**. 해석은 적재 시점 1회 질의로 옮기고 미해석 pair는 hard-fail한다.
+- `is_primary_source` ↔ `source_role` 불일치 preflight 추가(prod 0건, 한 행 뒤집어 발화 확인).
+  offline_uploads의 FK·멱등키·ORM을 scope PK와 같은 triple로 정렬. perf_gate seeder를 최종
+  스키마로 옮겨 실제 실행 확인.
+- **0090이 재실행 안전하지 않았다(P0).** `notice_lineage_states.notice_lifecycle_scope_id`
+  `ADD COLUMN`에 `IF NOT EXISTS`가 없었다. 0090은 중간에 `autocommit_block`으로 커밋되고 그
+  시점 stamp는 아직 `0089`이므로, 뒤이어 0091이 실패하면 재시도가 여기서 `42701
+  duplicate_column`으로 죽는다 — forward-only라 되돌릴 길도 없다. 0091까지 적용 후 stamp를
+  0089로 되돌려 재현하고, 고친 뒤 재시도가 head까지 도달하는 것을 확인했다. `CREATE INDEX
+  CONCURRENTLY` 16개는 앞의 `DROP INDEX CONCURRENTLY IF EXISTS`가 이미 담당하므로 건드리지
+  않았다(`IF NOT EXISTS`를 얹으면 실패가 남긴 INVALID 인덱스를 건너뛴다).
+- offline upload writer 2개가 `:operation_key`를 bind하면서 값을 넘기지 않아 모든 업로드가
+  `StatementError`로 죽는 상태였고, `ON CONFLICT`도 넓힌 멱등키와 어긋나 있었다. 멱등키는
+  계약이 선언한 3열로 되돌리고(폭을 넓힌 근거는 실제 요구가 아니라 추측이었다), operation은
+  scope에서 유도하되 모호하면 실패시킨다. live에서 create/reserve/중복/모호 4경로 확인.
+- curation 자연키 되돌림이 `packages/kor-travel-map-api`에 전파되지 않아 라우터가 삭제된
+  필드를 참조하고 있었다. `mypy --strict -p kortravelmap.api`를 안 돌린 탓이라 이제 두
+  타깃을 모두 돌린다.
+- event 타임라인 인덱스가 keyset tiebreaker(`event_id DESC`)와 부분 술어
+  (`quarantined_at IS NULL`)를 잃어 페이지마다 Sort가 붙고 격리 행을 훑고 있었다. 복구했다.
+- 검증: prod 복원본(732,678 record) 위 0083 → 0091 완주, 재시도 시나리오 1회, 계약 대비
+  guard **공백 정규화 기준 31/31 동일**, fingerprint 7/7 일치, 단위 2,081 pass(잔여 6건은
+  컨테이너 파일·docker CLI 환경 노이즈), mypy --strict 두 타깃(145 + 67 files), ruff clean,
+  통합 3,011개 수집 오류 0. 통합 테스트 본체는 live DB가 필요해 실행하지 않았다.
+- fingerprint 재현은 fixture의 jsonb type codec이 없으면 7종이 전부 어긋난다. `origin/main`
+  대조군으로 장치를 먼저 검증했고, 그 덕에 "환경 탓"이라는 오판과 divergence를 덮는
+  재생성을 둘 다 피했다.
+
+## 2026-08-06 (codex) — 사용자 지시로 T-VN-33 WIP 정리·중단
+
+- 진행 중이던 schema/core/API/frontend 에이전트를 중지하고, T-VN-33/F1D 변경은 미스테이징·미커밋
+  상태로 보존했다. rebase, push, CI, n150/컨테이너/DB mutation은 수행하지 않았다.
+- batch audit의 physical triple·sync-state·pipeline/API/UI/runtime·trigger/fixture P0와 검증
+  한계를 `reports/t-vn-33-hold-snapshot-2026-08-06.md`에 기록했다. `[~]` task는 완료가 아니라
+  WIP 중단 표식이다.
+- T-VN-41 F1D-D final live acceptance는 T-VN-33 merge와 final-schema ETL 재적재가 선행된다는
+  순서를 유지한다.
+
+## 2026-08-06 (codex) — T-VN-33 normal-path P0 재개방, T-VN-41 final gate 유지
+
+- actual 구현을 대상으로 한 적대 리뷰가 UI dataset detail/preview의 자연키 route,
+  direct ID scope 해석 불능, geo scope의 pair/rank 축약, request snapshot의
+  `operation_key` 누락과 정적 Dagster worker registry를 P0로 확인했다. 이들은
+  호환 fallback이 아니라 exact membership 전달 경로로 한 번에 제거한다.
+- 후속 batch audit는 job snapshot·active plan·pipeline read model도
+  `(provider_dataset_id, sync_scope)`로 `operation_key`를 축약하고 rank-select한다는 P0를
+  확인했다. ADR-088의 실행 identity를 triple로 명시하고, dataset member에는 예외 없이
+  non-null composite FK를 강제한다. operation 없는 generic import job은 dataset member 행을
+  만들지 않으므로 nullable/wildcard `operation_key` 예외를 두지 않는다.
+- DB 검토는 `0090`이 `source_records.provider/dataset_key`를 삭제한 뒤에도 살아 있는
+  `issue_curation_source_rule_decision()` trigger가 그 column을 읽음을 확인했다. migration에서
+  `source_records → source_entities → provider_datasets` 정본 join으로 trigger function을
+  교체하고, final-schema fixture를 일괄 전환한다.
+- T-VN-41 F1D-D의 n150 final live E2E는 T-VN-33 merge와 final-schema ETL 재적재가 선행
+  조건이라는 순서를 유지한다. 중간 DB 복구/보존은 수행하지 않는다.
+
+## 2026-08-06 (codex) — T-VN-33 contract gate P0=0 통과
+
+- 스키마 5차와 마이그레이션 4차 적대 리뷰가 모두 P0 GO를 냈다. 마지막 P0였던
+  `ON DELETE CASCADE` indirect owner guard의 parent-부재 오판은 non-deferrable FK에서
+  referential action으로만 가능한 DELETE로 한정해 처리했다. notice lineage, integrity run,
+  curated rule 3경로의 활성 parent cascade 양성 회귀를 빈 PostGIS target에서 실행한다.
+- inactive dataset을 가진 feature update request parent 상태 변경도 `23514`로 거부하는
+  독립 fixture를 추가했다. artifact unit과 target freeze는 13건 통과했으며, migration
+  리뷰는 import job의 member/event cascade도 실제 PostGIS probe로 확인했다.
+- T-VN-33A/B/C는 draft PR #966 하나에 계속 누적한다. 다음 단계는 actual migration/model/
+  writer/reader/API cutover이며, 테스트 전 누적 구현 delta를 다시 적대 리뷰한다.
+
+## 2026-08-06 (codex) — T-VN-33 3차 P0 contract 재설계
+
+- 3차 적대 리뷰가 확인한 reverse capability/control-plane, scope authorization, nullable
+  owner clear, inactive delete, parent lifecycle, exact membership cardinality를 한 checkpoint로
+  재설계했다. capability JSON은 산출 metadata만 남기고 refresh scope는
+  `provider_dataset_operation_scopes` 정규 child로 이동했다.
+- 모든 scope 의존 row는 `(provider_dataset_id, sync_scope)` FK와 enabled operation/dataset
+  parent-lock guard를 사용한다. inactive dataset의 old/new direct·indirect ownership mutation,
+  source-record-derived integrity violation, parent status mutation, delete, active A→B 재귀속도
+  DB가 거부한다.
+- import job은 `root|single|multiple`, feature update request는 `single|multiple` mode와
+  deferred completeness trigger로 member 수를 강제한다. 빈 PostGIS contract suite는 artifact
+  7건과 target freeze 5건이 통과했으며, 다음 단계는 두 리뷰어의 4차 P0=0 재판정이다.
+
+## 2026-08-06 (codex) — T-VN-33 P0 계약 보완 및 재리뷰 제출 준비
+
+- 2차 적대 리뷰의 inactive write, operation/capability 이중 정본, history/head 집계,
+  incomplete ownership matrix, removal manifest P0를 target contract에 반영했다.
+  `tvn33-reference-ownership-v1.sql`이 sync/notice/curation/job/request/policy/upload/
+  integrity/POI/enrichment/file의 dataset ownership을 FK·membership·parent-lock guard로
+  실행 가능하게 고정한다.
+- event가 다른 import job의 dataset member를 참조하지 못하도록 복합 FK를 추가했고,
+  integrity violation의 source record/dataset 불일치와 direct·indirect inactive write를
+  SQLSTATE fixture로 검증한다. source record history 2건과 head 1건의 정상 case도
+  completeness invariant가 허용함을 빈 PostGIS DB에서 확인했다.
+- T-VN-33A/B/C는 초안 PR #966 하나에만 누적하며, 두 적대 리뷰어가 P0=0 GO를 내기 전에는
+  actual migration/model/API 구현을 시작하지 않는다.
+
+## 2026-08-06 (codex) — T-VN-33 target contract 실행 검증
+
+- ADR-088의 versioned capability/operation, immutable source record, `observed_at` head,
+  inactive dataset 공용 write guard를 target DDL·invariant·rejection fixture에 고정했다.
+  direct dataset FK guard는 operation, entity, notice state, weather history/summary까지
+  동일 SQLSTATE `23514`로 검증한다.
+- 빈 PostGIS DB에서 target freeze 통합 3건과 artifact unit 7건이 통과했다. 이 동결 계약은
+  T-VN-33 구현 시작 전 적대 스키마·마이그레이션 재리뷰에 제출했다.
+
+## 2026-08-06 (codex) — T-VN-33 A/B/C 단일 PR 설계와 적대 검토 결선
+
+- 사용자 지시에 따라 provider dataset A/B/C를 각각의 PR로 나누지 않고, schema/backfill·전
+  writer/reader cutover·legacy fence/removal manifest를 **하나의 PR**로 처리하도록 tasks를
+  재편했다.
+- 적대 스키마·마이그레이션 리뷰는 초기안에 공통 P0를 냈다. DB capability/operation 정본 부재,
+  immutable record와 재관측 UPDATE의 충돌, 빈 DB seed 부재, 9개라는 불완전한 FK roster와
+  multi-dataset job/request의 scalar FK 오용이다.
+- ADR-088과 T-VN-33 단일 PR 계획이 이를 해소했다. versioned seed와 DB catalog/handler
+  exact-set gate, entity/head가 소유하는 observation freshness, full reference matrix와
+  membership table, canonical CHECK/FK·legacy fence·3 revision forward-only migration을
+  구현 계약으로 고정했다. weather/price와 typed notice fact는 순서대로 T-VN-38/T-VN-37에서
+  원자 전환한다.
 
 ## 2026-08-06 (codex) — T-VN-41F1D-C3 n150 파기형 rebuild 결선
 

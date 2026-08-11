@@ -9,7 +9,11 @@ from __future__ import annotations
 from time import perf_counter
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request, status
+from kortravelmap.core.sync_scope import (
+    DATASET_WIDE_SYNC_SCOPE,
+    parse_canonical_sync_scope,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api.auth import OPS_AUTH_ERROR_RESPONSES
@@ -29,8 +33,9 @@ from kortravelmap.api.ops_dataset_schema import (
     OpsDatasetsGridResponse,
 )
 from kortravelmap.api.ops_dataset_service import (
+    DatasetMutationDisabledError,
     DatasetNotFoundError,
-    OrphanMutationDisabledError,
+    InactiveDatasetMutationDisabledError,
     ProviderRefreshPolicyRevisionConflict,
     ProviderRefreshPolicyRevisionExhausted,
     ProviderRefreshPolicySourceKindImmutable,
@@ -38,7 +43,7 @@ from kortravelmap.api.ops_dataset_service import (
     load_datasets_grid,
     upsert_dataset_refresh_policy,
 )
-from kortravelmap.api.provider_catalog import find_catalog_entry
+from kortravelmap.api.provider_catalog import list_provider_dataset_catalog
 from kortravelmap.api.provider_refresh_schema import (
     ProviderRefreshPolicyConflictProblem,
     ProviderRefreshPolicyUpsertRequest,
@@ -67,7 +72,8 @@ router = APIRouter(
     summary="provider×dataset×sync_scope 상태 그리드",
     description=(
         "freshness SLA, Dagster 실제 다음 schedule tick, 최신 DB-recorded execution, "
-        "dataset/provider integrity issue를 batch 조회한다. `eligible_after`는 "
+        "각 `provider_dataset_id`에 귀속된 integrity issue 집계를 batch 조회한다. "
+        "provider-only issue group은 만들지 않는다. `eligible_after`는 "
         "backoff/rate-limit 시각이며 `schedule.next_scheduled_at`과 의미가 다르다."
     ),
 )
@@ -89,7 +95,7 @@ async def list_datasets_grid(
 
 
 @router.get(
-    "/detail",
+    "/{provider_dataset_id:int}",
     response_model=OpsDatasetDetailResponse,
     summary="dataset 상세 — scope 상태·실행·이벤트·정책",
     responses={
@@ -99,20 +105,29 @@ async def list_datasets_grid(
 )
 async def get_dataset_detail(
     request: Request,
-    provider: Annotated[str, Query(min_length=1)],
-    dataset_key: Annotated[str, Query(min_length=1)],
+    provider_dataset_id: Annotated[int, Path(ge=1)],
     sync_scope: Annotated[str, Query(min_length=1)],
     session: Annotated[AsyncSession, Depends(get_session)],
+    operation_key: Annotated[
+        str | None,
+        Query(
+            min_length=1,
+            description=(
+                "exact membership의 operation. 주면 그 membership 하나로 좁힌다. "
+                "생략하면 scope 안의 모든 operation을 롤업해 보여 준다."
+            ),
+        ),
+    ] = None,
 ) -> OpsDatasetDetailResponse:
     started_at = perf_counter()
     settings, dagster_client = dagster_http_dependencies(request)
     try:
         data = await load_dataset_detail(
             session,
+            operation_key=operation_key,
             settings=settings,
             dagster_client=dagster_client,
-            provider=provider,
-            dataset_key=dataset_key,
+            provider_dataset_id=provider_dataset_id,
             sync_scope=sync_scope,
         )
     except DatasetNotFoundError as exc:
@@ -133,20 +148,19 @@ async def get_dataset_detail(
     response_model=OpsDatasetRefreshPolicyResponse,
     summary="canonical dataset refresh policy upsert",
     responses={
-        404: {"description": "dataset 없음"},
+        404: {"description": "canonical provider_dataset_id 없음"},
         409: {
             "model": ProviderRefreshPolicyConflictProblem,
             "description": (
-                "revision CAS 불일치·소진, source_kind 변경 또는 카탈로그에서 "
-                "제거된 orphan row. 현재 record/revision 또는 "
-                "mutation_disabled_reason 포함."
+                "revision CAS 불일치·소진, source_kind 변경, 카탈로그에서 제거된 "
+                "orphan row, 또는 비활성(is_active=false) dataset. 현재 "
+                "record/revision 또는 mutation_disabled_reason 포함."
             )
         },
     },
 )
 async def put_dataset_refresh_policy(
-    provider: Annotated[str, Query(min_length=1)],
-    dataset_key: Annotated[str, Query(min_length=1)],
+    provider_dataset_id: Annotated[int, Query(ge=1)],
     body: ProviderRefreshPolicyUpsertRequest,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> OpsDatasetRefreshPolicyResponse:
@@ -154,13 +168,29 @@ async def put_dataset_refresh_policy(
     try:
         policy = await upsert_dataset_refresh_policy(
             session,
-            provider=provider,
-            dataset_key=dataset_key,
+            provider_dataset_id=provider_dataset_id,
             body=body,
         )
     except DatasetNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except OrphanMutationDisabledError as exc:
+    except InactiveDatasetMutationDisabledError as exc:
+        # orphan과 **다른 상태**다. 하나로 뭉치면 code로 분기하는 소비자가
+        # "카탈로그에서 사라진 행"이라는 거짓 상태를 듣는다 — 운영자가 취할 조치도
+        # 정반대다(orphan은 복구 불가, 비활성은 dataset을 다시 켜면 된다).
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "INACTIVE_DATASET_MUTATION_DISABLED",
+                "message": "inactive dataset refresh policy mutation is disabled",
+                "details": {
+                    "expected_revision": body.expected_revision,
+                    "current_revision": None,
+                    "current_record": None,
+                    "mutation_disabled_reason": exc.mutation_disabled_reason,
+                },
+            },
+        ) from exc
+    except DatasetMutationDisabledError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={
@@ -242,7 +272,7 @@ async def put_dataset_refresh_policy(
 
 
 @router.post(
-    "/preview",
+    "/{provider_dataset_id:int}/preview",
     response_model=OpsDatasetPreviewResponse,
     summary="fixture ETL 변환 preview",
     description=(
@@ -256,18 +286,74 @@ async def put_dataset_refresh_policy(
     },
 )
 async def post_dataset_preview(
-    provider: Annotated[str, Query(min_length=1)],
-    dataset_key: Annotated[str, Query(min_length=1)],
+    provider_dataset_id: Annotated[int, Path(ge=1)],
+    sync_scope: Annotated[str, Query(min_length=1)],
     body: Annotated[OpsDatasetPreviewRequest, Body()],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    operation_key: Annotated[
+        str | None,
+        Query(
+            min_length=1,
+            description=(
+                "exact membership의 operation. 주면 그 dataset/scope에 실재하는 "
+                "operation인지 검증한다 — 콘솔이 보내는 축을 서버가 조용히 "
+                "버리면 형제 operation을 고른 것이 아무 효과도 내지 않는다."
+            ),
+        ),
+    ] = None,
 ) -> OpsDatasetPreviewResponse:
     started_at = perf_counter()
-    entry = find_catalog_entry(provider, dataset_key)
+    try:
+        canonical_scope = parse_canonical_sync_scope(sync_scope).value
+        if canonical_scope != sync_scope:
+            raise ValueError("sync_scope must be canonical")
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    entry = next(
+        (
+            item
+            for item in await list_provider_dataset_catalog(session)
+            if item.provider_dataset_id == provider_dataset_id
+        ),
+        None,
+    )
     if entry is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"등록되지 않은 dataset: {provider!r}/{dataset_key!r}",
+            detail=f"등록되지 않은 dataset: provider_dataset_id={provider_dataset_id!r}",
         )
-    if entry.preview != "fixture":
+    # preview는 refresh와 **별개 operation_kind**다. 그런데 이 게이트가
+    # `entry.refresh_scopes`만 봐서, refresh operation이 없는 preview 전용 dataset은
+    # 같은 API가 `catalog.preview.supported=true`라 말해 놓고 영구 404였다
+    # (실측: python-airkorea-api/airkorea_stations. 적대 리뷰 10라운드).
+    #
+    # `provider_dataset_operation_scopes`에는 CHECK `operation_kind='refresh'`가 있어
+    # **preview operation은 scope 행을 가질 수 없다.** 그러므로 preview 승인을 scope
+    # 행으로 판정하는 것 자체가 축이 어긋난 것이다. refresh scope를 가진 dataset은
+    # 그 목록으로 좁히고(대상 scope preview가 의미를 갖는다), 없는 dataset은
+    # dataset 단위 preview만 허용한다.
+    allowed_preview_scopes = entry.refresh_scopes or (DATASET_WIDE_SYNC_SCOPE,)
+    if canonical_scope not in allowed_preview_scopes:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=(
+                "등록되지 않은 dataset scope: "
+                f"provider_dataset_id={provider_dataset_id!r}/{canonical_scope!r}"
+            ),
+        )
+    if operation_key is not None and not any(
+        operation.operation_key == operation_key and canonical_scope in operation.sync_scopes
+        for operation in entry.enabled_refresh_operations
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=(
+                "등록되지 않은 dataset membership: "
+                f"provider_dataset_id={provider_dataset_id!r}/"
+                f"{canonical_scope!r}/{operation_key!r}"
+            ),
+        )
+    if not entry.has_fixture_preview:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={
@@ -278,8 +364,8 @@ async def post_dataset_preview(
         )
     try:
         result = await run_dataset_fixture_preview(
-            provider,
-            dataset_key,
+            entry.provider,
+            entry.dataset_key,
             max_items=body.max_items,
         )
     except KeyError as exc:
@@ -300,6 +386,9 @@ async def post_dataset_preview(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return OpsDatasetPreviewResponse(
         data=OpsDatasetPreviewData(
+            provider_dataset_id=provider_dataset_id,
+            sync_scope=canonical_scope,
+            operation_key=operation_key,
             provider=result.provider,
             dataset_key=result.dataset,
             source="fixture",

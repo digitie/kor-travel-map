@@ -60,6 +60,27 @@ _CROSS_DS = "cross_notice_snapshot"
 _CROSS_ET = "notice"
 
 
+async def _ensure_active_provider_dataset(
+    session: AsyncSession, *, provider: str, dataset_key: str
+) -> None:
+    """scope 분리 fixture가 쓰는 provider×dataset 정본을 final catalog에 준비한다."""
+    await session.execute(
+        text(
+            """
+            INSERT INTO provider_sync.provider_datasets (
+                provider, dataset_key, display_name, source_kind, is_active
+            ) VALUES (
+                :provider, :dataset_key, 'notice lifecycle integration fixture',
+                'manual', true
+            )
+            ON CONFLICT (provider, dataset_key) DO UPDATE
+            SET is_active = true
+            """
+        ),
+        {"provider": provider, "dataset_key": dataset_key},
+    )
+
+
 def _krex_notice_bundle(
     *,
     source_entity_id: str,
@@ -68,6 +89,7 @@ def _krex_notice_bundle(
     lon: float = 127.1,
     lat: float = 37.4,
     valid_start: datetime | None = None,
+    observed_at: datetime | None = None,
     provider: str = _KREX,
     dataset_key: str = _KREX_DS,
     source_entity_type: str = _KREX_ET,
@@ -88,13 +110,14 @@ def _krex_notice_bundle(
     )
     payload_hash = make_payload_hash(raw_data)
     source_record_key = make_source_record_key(
-        provider=_KREX,
-        dataset_key=_KREX_DS,
-        source_entity_type=_KREX_ET,
+        provider=provider,
+        dataset_key=dataset_key,
+        source_entity_type=source_entity_type,
         source_entity_id=source_entity_id,
         raw_payload_hash=payload_hash,
     )
     start = valid_start or _NOW
+    observed = observed_at or _NOW
     feature = Feature(
         feature_id=feature_id,
         kind=FeatureKind.NOTICE,
@@ -120,10 +143,9 @@ def _krex_notice_bundle(
         source_entity_type=source_entity_type,
         source_entity_id=source_entity_id,
         raw_payload_hash=payload_hash,
-        raw_name=feature.name,
-        raw_address="테스트 노선",
         raw_data=raw_data,
-        fetched_at=_NOW,
+        fetched_at=observed,
+        imported_at=observed,
         source_record_key=source_record_key,
     )
     source_link = SourceLink(
@@ -132,19 +154,8 @@ def _krex_notice_bundle(
         source_role=SourceRole.PRIMARY,
         match_method="natural_key",
         confidence=100,
-        is_primary_source=True,
     )
     return FeatureBundle(feature=feature, source_record=source_record, source_link=source_link)
-
-
-async def _pin_seen_at(session: AsyncSession, source_record_key: str, seen_at: datetime) -> None:
-    await session.execute(
-        text(
-            "UPDATE provider_sync.source_records"
-            " SET last_seen_at = :seen_at WHERE source_record_key = :key"
-        ),
-        {"seen_at": seen_at, "key": source_record_key},
-    )
 
 
 _CLUES = {
@@ -193,6 +204,7 @@ async def _seed_dup_lineage(
         source_entity_id=f"legacy::{_LINEAGE}",
         raw_data={**_CLUES, "gen": "old"},
         feature_suffix="oldgen",
+        observed_at=_NOW - timedelta(hours=2),
     )
     new_gen = _krex_notice_bundle(
         source_entity_id=_LINEAGE,
@@ -201,8 +213,6 @@ async def _seed_dup_lineage(
     assert old_gen.feature.feature_id != new_gen.feature.feature_id
     assert old_gen.source_record.source_entity_id != new_gen.source_record.source_entity_id
     await feature_repo.load_bundles(session, [old_gen, new_gen])
-    await _pin_seen_at(session, old_gen.source_record.source_record_key, _NOW - timedelta(hours=2))
-    await _pin_seen_at(session, new_gen.source_record.source_record_key, _NOW)
     return old_gen, new_gen
 
 
@@ -219,11 +229,13 @@ async def _seed_multi_lineage_feature(
         source_entity_id="multi::shared::b",
         raw_data=_MULTI_CLUES_B,
         feature_suffix="shared-b-source",
+        observed_at=_NOW - timedelta(hours=2),
     )
     older_a = _krex_notice_bundle(
         source_entity_id="multi::older::a",
         raw_data=_MULTI_CLUES_A,
         feature_suffix="older-a",
+        observed_at=_NOW - timedelta(hours=2),
     )
     newer_b = _krex_notice_bundle(
         source_entity_id="multi::newer::b",
@@ -239,11 +251,11 @@ async def _seed_multi_lineage_feature(
             """
             INSERT INTO provider_sync.source_links (
                 feature_id, source_entity_key, source_role, match_method,
-                confidence, is_primary_source, created_at
+                confidence, created_at
             )
             SELECT
                 :feature_id, source_entity_key, 'primary',
-                'identity_migration', 100, true, :seen_at
+                'identity_migration', 100, :seen_at
             FROM provider_sync.source_records
             WHERE source_record_key = :source_record_key
             """
@@ -267,18 +279,6 @@ async def _seed_multi_lineage_feature(
             "feature_id": shared_b_source.feature.feature_id,
         },
     )
-    await _pin_seen_at(
-        session,
-        older_a.source_record.source_record_key,
-        _NOW - timedelta(hours=2),
-    )
-    await _pin_seen_at(session, shared.source_record.source_record_key, _NOW)
-    await _pin_seen_at(
-        session,
-        shared_b_source.source_record.source_record_key,
-        _NOW - timedelta(hours=2),
-    )
-    await _pin_seen_at(session, newer_b.source_record.source_record_key, _NOW)
     await session.flush()
     return shared, older_a, newer_b
 
@@ -293,6 +293,9 @@ async def _attach_cross_scope_winner(
     source_entity_type: str = _CROSS_ET,
 ) -> FeatureBundle:
     """다른 provider/dataset의 유일한 winner 계보를 기존 feature에 연결한다."""
+    await _ensure_active_provider_dataset(
+        session, provider=provider, dataset_key=dataset_key
+    )
     cross_scope = _krex_notice_bundle(
         source_entity_id=source_entity_id,
         raw_data={"scope": "cross-provider-dataset"},
@@ -306,11 +309,11 @@ async def _attach_cross_scope_winner(
             """
             INSERT INTO provider_sync.source_links (
                 feature_id, source_entity_key, source_role, match_method,
-                confidence, is_primary_source, created_at
+                confidence, created_at
             )
             SELECT
                 :feature_id, source_entity_key, 'primary',
-                'identity_migration', 100, true, :seen_at
+                'identity_migration', 100, :seen_at
             FROM provider_sync.source_records
             WHERE source_record_key = :source_record_key
             """
@@ -363,11 +366,25 @@ async def _seed_split_max_tuple_lineage(
         )
         for suffix in ("a", "b", "c")
     ]
-    await feature_repo.load_bundles(session, bundles)
     low, middle, high = sorted(
         bundles,
         key=lambda bundle: bundle.source_record.source_record_key,
     )
+    high = high.model_copy(
+        update={
+            "source_record": high.source_record.model_copy(
+                update={
+                    "fetched_at": _NOW - timedelta(hours=1),
+                    "imported_at": _NOW - timedelta(hours=1),
+                }
+            )
+        }
+    )
+    bundles = [
+        high if bundle.feature.feature_id == high.feature.feature_id else bundle
+        for bundle in bundles
+    ]
+    await feature_repo.load_bundles(session, bundles)
 
     # low/high entity를 한 feature에 묶는다. high의 원 feature는 감사 이력으로
     # soft-delete해 후보에서 제외하고, middle feature만 실제 최신 경쟁자로 둔다.
@@ -376,11 +393,11 @@ async def _seed_split_max_tuple_lineage(
             """
             INSERT INTO provider_sync.source_links (
                 feature_id, source_entity_key, source_role, match_method,
-                confidence, is_primary_source, created_at
+                confidence, created_at
             )
             SELECT
                 :feature_id, source_entity_key, 'primary',
-                'identity_migration', 100, true, :seen_at
+                'identity_migration', 100, :seen_at
             FROM provider_sync.source_records
             WHERE source_record_key = :source_record_key
             """
@@ -401,13 +418,6 @@ async def _seed_split_max_tuple_lineage(
             "deleted_at": _NOW,
             "feature_id": high.feature.feature_id,
         },
-    )
-    await _pin_seen_at(session, low.source_record.source_record_key, _NOW)
-    await _pin_seen_at(session, middle.source_record.source_record_key, _NOW)
-    await _pin_seen_at(
-        session,
-        high.source_record.source_record_key,
-        _NOW - timedelta(hours=1),
     )
     await session.flush()
     return low, middle
@@ -443,10 +453,15 @@ async def _snapshot_state(
         await session.execute(
             text(
                 "SELECT present, changed_at, valid_until "
-                "FROM provider_sync.notice_lineage_states "
-                "WHERE provider = :provider AND dataset_key = :dataset_key "
-                "AND source_entity_type = :source_entity_type "
-                "AND lineage_key = :lineage_key"
+                "FROM provider_sync.notice_lineage_states AS state "
+                "JOIN provider_sync.notice_lifecycle_scopes AS scope "
+                "ON scope.notice_lifecycle_scope_id = state.notice_lifecycle_scope_id "
+                "JOIN provider_sync.provider_datasets AS dataset "
+                "ON dataset.provider_dataset_id = scope.provider_dataset_id "
+                "WHERE dataset.provider = :provider "
+                "AND dataset.dataset_key = :dataset_key "
+                "AND scope.source_entity_type = :source_entity_type "
+                "AND state.lineage_key = :lineage_key"
             ),
             {
                 "provider": provider,
@@ -560,11 +575,11 @@ async def test_reconcile_exact_tie_prefers_current_identity(
             """
             INSERT INTO provider_sync.source_links (
                 feature_id, source_entity_key, source_role, match_method,
-                confidence, is_primary_source, created_at
+                confidence, created_at
             )
             SELECT
                 :legacy_feature_id, source_entity_key, 'primary',
-                'identity_migration', 100, true, :seen_at
+                'identity_migration', 100, :seen_at
             FROM provider_sync.source_records
             WHERE source_record_key = :source_record_key
             """
@@ -854,6 +869,7 @@ async def test_reconcile_preserves_cross_provider_dataset_winners(
         source_entity_id=f"legacy::{delete_lineage}",
         raw_data=delete_clues,
         feature_suffix="cross-scope-delete-guard",
+        observed_at=_NOW - timedelta(hours=1),
     )
     scoped_winner = _krex_notice_bundle(
         source_entity_id=delete_lineage,
@@ -875,16 +891,6 @@ async def test_reconcile_preserves_cross_provider_dataset_winners(
     await feature_repo.load_bundles(
         migrated_session,
         [cross_scope_winner, scoped_winner, close_guard],
-    )
-    await _pin_seen_at(
-        migrated_session,
-        cross_scope_winner.source_record.source_record_key,
-        _NOW - timedelta(hours=1),
-    )
-    await _pin_seen_at(
-        migrated_session,
-        scoped_winner.source_record.source_record_key,
-        _NOW,
     )
     await _attach_cross_scope_winner(
         migrated_session,
@@ -1107,6 +1113,9 @@ async def test_snapshot_reconcile_serializes_cross_scope_closure(
     second_task: asyncio.Task[feature_repo.NoticeReconcileResult] | None = None
     try:
         async with AsyncSession(migrated_engine, expire_on_commit=False) as setup:
+            await _ensure_active_provider_dataset(
+                setup, provider=provider_a, dataset_key=dataset_a
+            )
             scope_a = _krex_notice_bundle(
                 source_entity_id=entity_a,
                 raw_data={"scope": "concurrency-a"},
@@ -1191,10 +1200,12 @@ async def test_snapshot_reconcile_serializes_cross_scope_closure(
             providers = [provider_a, provider_b]
             await connection.execute(
                 text(
-                    "DELETE FROM provider_sync.source_links "
-                    "WHERE source_entity_key IN ("
-                    "SELECT source_entity_key FROM provider_sync.source_entities "
-                    "WHERE provider = ANY(CAST(:providers AS text[])))"
+                    "DELETE FROM provider_sync.source_links AS link "
+                    "USING provider_sync.source_entities AS entity "
+                    "JOIN provider_sync.provider_datasets AS dataset "
+                    "ON dataset.provider_dataset_id = entity.provider_dataset_id "
+                    "WHERE link.source_entity_key = entity.source_entity_key "
+                    "AND dataset.provider = ANY(CAST(:providers AS text[]))"
                 ),
                 {"providers": providers},
             )
@@ -1215,30 +1226,41 @@ async def test_snapshot_reconcile_serializes_cross_scope_closure(
                 )
             await connection.execute(
                 text(
-                    "UPDATE provider_sync.source_entities "
-                    "SET current_source_record_key = NULL "
-                    "WHERE provider = ANY(CAST(:providers AS text[]))"
+                    "DELETE FROM provider_sync.source_entity_heads AS head "
+                    "USING provider_sync.source_entities AS entity "
+                    "JOIN provider_sync.provider_datasets AS dataset "
+                    "ON dataset.provider_dataset_id = entity.provider_dataset_id "
+                    "WHERE head.source_entity_key = entity.source_entity_key "
+                    "AND dataset.provider = ANY(CAST(:providers AS text[]))"
                 ),
                 {"providers": providers},
             )
             await connection.execute(
                 text(
-                    "DELETE FROM provider_sync.source_records "
-                    "WHERE provider = ANY(CAST(:providers AS text[]))"
+                    "DELETE FROM provider_sync.source_records AS record "
+                    "USING provider_sync.source_entities AS entity "
+                    "JOIN provider_sync.provider_datasets AS dataset "
+                    "ON dataset.provider_dataset_id = entity.provider_dataset_id "
+                    "WHERE record.source_entity_key = entity.source_entity_key "
+                    "AND dataset.provider = ANY(CAST(:providers AS text[]))"
                 ),
                 {"providers": providers},
             )
             await connection.execute(
                 text(
-                    "DELETE FROM provider_sync.source_entities "
-                    "WHERE provider = ANY(CAST(:providers AS text[]))"
+                    "DELETE FROM provider_sync.source_entities AS entity "
+                    "USING provider_sync.provider_datasets AS dataset "
+                    "WHERE dataset.provider_dataset_id = entity.provider_dataset_id "
+                    "AND dataset.provider = ANY(CAST(:providers AS text[]))"
                 ),
                 {"providers": providers},
             )
             await connection.execute(
                 text(
-                    "DELETE FROM provider_sync.notice_lifecycle_scopes "
-                    "WHERE provider = ANY(CAST(:providers AS text[]))"
+                    "DELETE FROM provider_sync.notice_lifecycle_scopes AS scope "
+                    "USING provider_sync.provider_datasets AS dataset "
+                    "WHERE dataset.provider_dataset_id = scope.provider_dataset_id "
+                    "AND dataset.provider = ANY(CAST(:providers AS text[]))"
                 ),
                 {"providers": providers},
             )
@@ -1448,9 +1470,14 @@ async def test_atomic_snapshot_load_tracks_new_lineage_and_repairs_exact_replay(
     # bundle load 이후 known lineage sync가 누락 row를 되살린다.
     await migrated_session.execute(
         text(
-            "DELETE FROM provider_sync.notice_lineage_states "
-            "WHERE provider = :provider AND dataset_key = :dataset_key "
-            "AND source_entity_type = :source_entity_type"
+            "DELETE FROM provider_sync.notice_lineage_states AS state "
+            "USING provider_sync.notice_lifecycle_scopes AS scope "
+            "JOIN provider_sync.provider_datasets AS dataset "
+            "ON dataset.provider_dataset_id = scope.provider_dataset_id "
+            "WHERE state.notice_lifecycle_scope_id = scope.notice_lifecycle_scope_id "
+            "AND dataset.provider = :provider "
+            "AND dataset.dataset_key = :dataset_key "
+            "AND scope.source_entity_type = :source_entity_type"
         ),
         {
             "provider": _KREX,
@@ -1524,6 +1551,9 @@ async def test_atomic_event_load_ignores_stale_announcement_after_lift(
     dataset_key = "test_notice_events"
     source_entity_type = "notice_event"
     lineage_key = "event-lineage"
+    await _ensure_active_provider_dataset(
+        migrated_session, provider=provider, dataset_key=dataset_key
+    )
     bundle = _krex_notice_bundle(
         source_entity_id=lineage_key,
         raw_data={"event": "announcement"},
@@ -1540,6 +1570,21 @@ async def test_atomic_event_load_ignores_stale_announcement_after_lift(
     )
     stale_name = "[stale] 과거 발표가 덮으면 안 되는 이름"
     assert stale_base.feature.detail is not None
+    stale_raw_data = {**stale_base.source_record.raw_data, "name": stale_name}
+    stale_payload_hash = make_payload_hash(stale_raw_data)
+    stale_source_record = stale_base.source_record.model_copy(
+        update={
+            "raw_data": stale_raw_data,
+            "raw_payload_hash": stale_payload_hash,
+            "source_record_key": make_source_record_key(
+                provider=stale_base.source_record.provider,
+                dataset_key=stale_base.source_record.dataset_key,
+                source_entity_type=stale_base.source_record.source_entity_type,
+                source_entity_id=stale_base.source_record.source_entity_id,
+                raw_payload_hash=stale_payload_hash,
+            ),
+        }
+    )
     stale_bundle = stale_base.model_copy(
         update={
             "feature": stale_base.feature.model_copy(
@@ -1550,8 +1595,9 @@ async def test_atomic_event_load_ignores_stale_announcement_after_lift(
                     ),
                 }
             ),
-            "source_record": stale_base.source_record.model_copy(
-                update={"raw_name": stale_name}
+            "source_record": stale_source_record,
+            "source_link": stale_base.source_link.model_copy(
+                update={"source_record_key": stale_source_record.source_record_key}
             ),
         }
     )
@@ -1637,16 +1683,20 @@ async def test_atomic_event_load_ignores_stale_announcement_after_lift(
         await migrated_session.execute(
             text(
                 "SELECT f.name, n.severity AS severity, "
-                "se.current_source_record_key "
+                "head.current_source_record_key "
                 "FROM feature.features AS f "
                 "LEFT JOIN feature.feature_notices AS n "
                 "ON n.feature_id = f.feature_id "
                 "JOIN provider_sync.source_links AS sl "
-                "ON sl.feature_id = f.feature_id AND sl.is_primary_source "
+                "ON sl.feature_id = f.feature_id AND sl.source_role = 'primary' "
                 "JOIN provider_sync.source_entities AS se "
                 "ON se.source_entity_key = sl.source_entity_key "
-                "WHERE f.feature_id = :feature_id AND se.provider = :provider "
-                "AND se.dataset_key = :dataset_key "
+                "JOIN provider_sync.source_entity_heads AS head "
+                "ON head.source_entity_key = se.source_entity_key "
+                "JOIN provider_sync.provider_datasets AS dataset "
+                "ON dataset.provider_dataset_id = se.provider_dataset_id "
+                "WHERE f.feature_id = :feature_id AND dataset.provider = :provider "
+                "AND dataset.dataset_key = :dataset_key "
                 "AND se.source_entity_type = :source_entity_type"
             ),
             {
@@ -1678,16 +1728,20 @@ async def test_atomic_event_load_ignores_stale_announcement_after_lift(
         await migrated_session.execute(
             text(
                 "SELECT f.name, n.severity AS severity, "
-                "se.current_source_record_key "
+                "head.current_source_record_key "
                 "FROM feature.features AS f "
                 "LEFT JOIN feature.feature_notices AS n "
                 "ON n.feature_id = f.feature_id "
                 "JOIN provider_sync.source_links AS sl "
-                "ON sl.feature_id = f.feature_id AND sl.is_primary_source "
+                "ON sl.feature_id = f.feature_id AND sl.source_role = 'primary' "
                 "JOIN provider_sync.source_entities AS se "
                 "ON se.source_entity_key = sl.source_entity_key "
-                "WHERE f.feature_id = :feature_id AND se.provider = :provider "
-                "AND se.dataset_key = :dataset_key "
+                "JOIN provider_sync.source_entity_heads AS head "
+                "ON head.source_entity_key = se.source_entity_key "
+                "JOIN provider_sync.provider_datasets AS dataset "
+                "ON dataset.provider_dataset_id = se.provider_dataset_id "
+                "WHERE f.feature_id = :feature_id AND dataset.provider = :provider "
+                "AND dataset.dataset_key = :dataset_key "
                 "AND se.source_entity_type = :source_entity_type"
             ),
             {
@@ -1728,6 +1782,9 @@ async def test_event_lifecycle_resolves_open_finite_unknown_and_reactivation(
     dataset_key = "test_notice_truth"
     source_entity_type = "notice_event"
     lineage_key = "truth-lineage"
+    await _ensure_active_provider_dataset(
+        migrated_session, provider=provider, dataset_key=dataset_key
+    )
     bundle = _krex_notice_bundle(
         source_entity_id=lineage_key,
         raw_data={"event": "truth-table"},
@@ -1979,11 +2036,16 @@ async def test_event_lifecycle_resolves_open_finite_unknown_and_reactivation(
     current_source_record_key = (
         await migrated_session.execute(
             text(
-                "SELECT current_source_record_key "
-                "FROM provider_sync.source_entities "
-                "WHERE provider = :provider AND dataset_key = :dataset_key "
-                "AND source_entity_type = :source_entity_type "
-                "AND source_entity_id = :lineage_key"
+                "SELECT head.current_source_record_key "
+                "FROM provider_sync.source_entities AS entity "
+                "JOIN provider_sync.source_entity_heads AS head "
+                "ON head.source_entity_key = entity.source_entity_key "
+                "JOIN provider_sync.provider_datasets AS dataset "
+                "ON dataset.provider_dataset_id = entity.provider_dataset_id "
+                "WHERE dataset.provider = :provider "
+                "AND dataset.dataset_key = :dataset_key "
+                "AND entity.source_entity_type = :source_entity_type "
+                "AND entity.source_entity_id = :lineage_key"
             ),
             {
                 "provider": provider,

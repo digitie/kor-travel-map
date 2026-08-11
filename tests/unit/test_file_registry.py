@@ -35,6 +35,7 @@ def _file_row(**overrides: object) -> SimpleNamespace:
         "path": "e2e-20260704.tar.zst",
         "is_directory": False,
         "kind": "backup",
+        "provider_dataset_id": None,
         "provider": None,
         "dataset_key": None,
         "status": "active",

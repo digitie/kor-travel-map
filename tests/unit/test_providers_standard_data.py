@@ -326,7 +326,6 @@ def test_source_link_role_is_primary_and_confidence_100() -> None:
     assert link.source_role == SourceRole.PRIMARY
     assert link.match_method == "natural_key"
     assert link.confidence == 100
-    assert link.is_primary_source is True
 
 
 @pytest.mark.unit

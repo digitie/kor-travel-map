@@ -40,12 +40,16 @@ from kortravelmap.providers.kor_travel_concierge import (
 )
 
 from kortravelmap.dagster.validation import (
+    _RAW_ADDRESS_KEYS,
     DROPPABLE_ISSUE_CODES,
+    _provider_address,
     validate_feature_bundle_address,
     validate_feature_bundles_address,
 )
 
 _FETCHED_AT = "2026-07-29T00:00:00+00:00"
+
+_DEFAULT_COORD = Coordinate(lon=Decimal("129.223"), lat=Decimal("35.1886"))
 
 
 def _bundle(
@@ -55,13 +59,16 @@ def _bundle(
     sido_code: str | None = "26",
     sigungu_name: str | None = "기장군",
     road: str | None = "부산 기장 해동용궁사",
-    coord: Coordinate | None = None,
+    legal: str | None = None,
+    admin: str | None = None,
+    coord: Coordinate | None = _DEFAULT_COORD,
     admin_evidence: AdminEvidence | None = None,
+    raw_data: dict[str, object] | None = None,
 ) -> FeatureBundle:
-    if coord is None:
-        coord = Coordinate(lon=Decimal("129.223"), lat=Decimal("35.1886"))
     address = Address(
         road=road,
+        legal=legal,
+        admin=admin,
         bjd_code=bjd_code,
         sigungu_code=sigungu_code,
         sido_code=sido_code,
@@ -92,8 +99,7 @@ def _bundle(
         source_entity_type="candidate",
         source_entity_id="cand-1",
         raw_payload_hash="a" * 64,
-        raw_name="해동용궁사",
-        raw_address=road,
+        raw_data={"address": road} if raw_data is None else raw_data,
         fetched_at=datetime.fromisoformat(_FETCHED_AT),
     )
     link = SourceLink(
@@ -102,7 +108,6 @@ def _bundle(
         source_role=SourceRole.PRIMARY,
         match_method="natural_key",
         confidence=100,
-        is_primary_source=True,
     )
     return FeatureBundle(
         feature=feature,
@@ -475,3 +480,423 @@ def test_retired_string_codes_are_no_longer_emitted() -> None:
     emitted = {issue.code for issue in summary.issues}
     assert "provider_address_mismatch" not in emitted
     assert "provider_address_partial_match" not in emitted
+
+
+# ── 주소 주장의 유무 판정 — `None`이 문자열로 새면 축 전체가 죽는다 ──────────
+#
+# 이전 구현의 `_raw_payload_address`는 세 고속도로 단서를 `if str(part).strip()`으로
+# 걸렀다. `str(None) == "None"`은 truthy라 **주소 키 조회가 빈손인 payload가 항상
+# `'None ...'` 형태의 문자열을 주장으로 반환**했다. 당시 열거하던 원 철자 주소 키를
+# 가진 dataset(standard_data `rdnmadr`, krforest `address`, …)은 그 앞에서 걸러
+# 멀쩡했고, 철자가 다르거나(mois `road_address`) 키가 없는 dataset(knps, mcst,
+# visitkorea, khoa, krairport)만 다음 피해를 입었다:
+#   - `Address.road`/`legal` fallback이 영원히 발동하지 않았고(아래 fallback 테스트),
+#   - 독립 이름축은 한글 토큰 없는 문자열만 보게 되어, reverse 관측이 있으면
+#     `no_token`, 없으면 `no_observation`으로 집계됐으며,
+#   - `no_claim` 집계는 도달 불가능했고,
+#   - `missing_address`(droppable error)도 도달 불가능했다.
+# 아래 회귀는 전부 그 구현에서 실패한다.
+
+
+def test_payload_without_address_keys_makes_no_claim() -> None:
+    """provider 원 필드명만 실은 payload는 **주소 주장이 없다**(`no_claim`).
+
+    KNPS는 ``raw_data = dict(record.raw)``로 provider 원 필드명을 그대로 싣는다
+    (``providers/knps.py``). 알려진 주소 키가 하나도 없으면 주장은 없는 것이지,
+    빈 문자열을 조립해 있다고 말할 일이 아니다.
+    """
+    bundle = _bundle(
+        road=None,
+        raw_data={"name": "해동용궁사", "roadAddr": "부산 기장군 기장읍"},
+    )
+    summary = validate_feature_bundles_address([bundle])
+    assert _provider_address(bundle) is None
+    assert summary.name_state_counts == {"no_claim": 1}
+    assert summary.issues == ()
+
+
+def test_reverse_filled_address_becomes_the_claim_when_payload_has_none() -> None:
+    """payload에 주소 키가 없으면 ``Address.road``로 **fallback이 실제로 발동**한다.
+
+    이전 구현에서는 `'None None None'`이 먼저 반환돼 이 경로가 죽어 있었고, reverse가
+    채운 도로명/법정동 주소가 통째로 버려졌다.
+    """
+    bundle = _bundle(
+        bjd_code="1111017700",
+        sigungu_code="11110",
+        sido_code="11",
+        sigungu_name="종로구",
+        road="서울특별시 서대문구 통일로 251",
+        raw_data={"name": "무명", "contentid": "1234"},
+    )
+    issues = validate_feature_bundle_address(bundle).issues
+    assert [i.code for i in issues] == ["provider_address_region_disagreement"]
+    assert issues[0].provider_address == "서울특별시 서대문구 통일로 251"
+
+
+def test_legal_address_is_used_when_road_is_blank() -> None:
+    """``road``가 공백뿐이면 ``legal``까지 내려간다 — 공백은 주장이 아니다."""
+    bundle = _bundle(
+        bjd_code="1111017700",
+        sigungu_code="11110",
+        sido_code="11",
+        sigungu_name="종로구",
+        road="   ",
+        legal="서울특별시 서대문구 현저동 101",
+        raw_data={"name": "무명"},
+    )
+    assert _provider_address(bundle) == "서울특별시 서대문구 현저동 101"
+
+
+@pytest.mark.parametrize(
+    ("road", "legal", "admin", "expected"),
+    [
+        (
+            "서울특별시 종로구 통일로 251",
+            "서울특별시 종로구 신문로2가 1",
+            "서울특별시 종로구",
+            "서울특별시 종로구 통일로 251",
+        ),
+        (
+            None,
+            "서울특별시 종로구 신문로2가 1",
+            "서울특별시 종로구",
+            "서울특별시 종로구 신문로2가 1",
+        ),
+        (None, None, "서울특별시 종로구", "서울특별시 종로구"),
+    ],
+)
+def test_address_fallback_keeps_road_legal_admin_precedence(
+    road: str | None,
+    legal: str | None,
+    admin: str | None,
+    expected: str,
+) -> None:
+    """``Address`` fallback은 ``road`` → ``legal`` → ``admin`` 순이다.
+
+    ``_provider_address``의 docstring이 계약으로 진술하는 순서이고
+    (``Address.display()``와 같은 순서), 셋 다 채워진 상태에서만 갈린다. 순서가
+    뒤집히면 도로명 주소가 있는 row도 시군구까지만 있는 ``admin`` 문자열을 주장으로
+    삼아, 행정 토큰 대조축의 판정 대상이 통째로 바뀐다.
+
+    기존 회귀는 세 단계를 **하나씩만** 세웠다(``road``만/``legal``만/``admin``만).
+    그래서 두 값이 동시에 있을 때의 우선순위는 어느 테스트도 보지 않았다.
+    """
+    bundle = _bundle(
+        road=road,
+        legal=legal,
+        admin=admin,
+        raw_data={"name": "무명"},
+    )
+    assert _provider_address(bundle) == expected
+
+
+def test_standard_data_payload_prefers_rdnmadr_over_lnmadr() -> None:
+    """``rdnmadr``(도로명)가 ``lnmadr``(지번)보다 앞선다.
+
+    두 키는 ``providers/standard_data.py``가 raw_data에 그대로 싣는 실측 컬럼명이다
+    (``_raw_data`` — 축제/관광지/박물관 등). ``_RAW_ADDRESS_KEYS`` docstring이
+    "도로명이 지번보다 앞선다"고 진술하는 성질이며, 조회는 dict 순서가 아니라
+    **키 튜플 순서**로 도므로 payload에서 지번이 먼저 와도 결과가 같아야 한다.
+    """
+    bundle = _bundle(
+        road=None,
+        raw_data={
+            "lnmadr": "서울특별시 영등포구 여의도동 8",
+            "rdnmadr": "서울특별시 영등포구 여의공원로 120",
+        },
+    )
+    assert _provider_address(bundle) == "서울특별시 영등포구 여의공원로 120"
+
+
+@pytest.mark.parametrize(
+    ("road_key", "jibun_key"),
+    [
+        ("address_road", "address_jibun"),  # opinet
+        ("road_address", "lot_address"),  # mois
+        ("rdnmadr", "lnmadr"),  # standard_data
+    ],
+)
+def test_each_provider_family_prefers_its_road_key(
+    road_key: str, jibun_key: str
+) -> None:
+    """``_RAW_ADDRESS_KEYS``의 "도로명이 지번보다 앞선다"를 **계열별로** 못박는다.
+
+    평탄 튜플만 보면 지번 계열(``address_jibun``/``lot_address``)이 표준데이터
+    도로명(``rdnmadr``)보다 앞서므로, 배열 순서 자체는 그 진술의 근거가 되지 못한다.
+    실제 보증은 "한 payload에 두 계열이 섞이지 않는다"에 기대고 있고, 그 전제 아래
+    계열마다 도로명이 앞선다. 계열이 섞이는 provider가 생기면 이 테스트가 아니라
+    ``_RAW_ADDRESS_KEYS`` 배열을 계열 무관하게 고쳐야 한다.
+    """
+    bundle = _bundle(
+        road=None,
+        raw_data={
+            jibun_key: "서울특별시 영등포구 여의도동 8",
+            road_key: "서울특별시 영등포구 여의공원로 120",
+        },
+    )
+    assert _provider_address(bundle) == "서울특별시 영등포구 여의공원로 120"
+
+
+def test_raw_address_key_families_do_not_overlap() -> None:
+    """계열이 섞이지 않는다는 전제 자체를 고정한다.
+
+    위 테스트가 기대는 전제이고, docstring이 실측이라 진술하는 사실이다. 한 provider가
+    두 계열을 함께 실으면 튜플 순서상 지번이 이기는 경우가 생긴다 — 그때는 이 단언이
+    먼저 깨져 배열을 고치게 만든다.
+    """
+    families = {
+        "opinet": ("address_road", "address_jibun"),
+        "mois": ("road_address", "lot_address"),
+        "standard_data": ("rdnmadr", "lnmadr"),
+    }
+    keys = list(_RAW_ADDRESS_KEYS)
+    for name, (road_key, jibun_key) in families.items():
+        assert road_key in keys, name
+        assert jibun_key in keys, name
+
+    all_keys = [key for pair in families.values() for key in pair]
+    assert len(set(all_keys)) == len(all_keys)
+
+
+def test_folded_view_keeps_the_first_spelling_when_two_keys_fold_alike() -> None:
+    """같은 정규화 키로 접히는 철자가 둘이면 **먼저 나온 키가 이긴다**.
+
+    ``_normalized_view`` docstring이 진술하는 성질이다. 중복 방지가 빠지면 뒤에 나온
+    철자가 앞선 값을 덮어써, 정규화 패스가 고르는 주소가 payload의 키 나열 순서에
+    따라 뒤집힌다. 두 철자 모두 ``_RAW_ADDRESS_KEYS``의 원 철자와는 다르므로
+    (``road_address`` ≠ ``Road_Address``/``roadAddress``) 정확 일치 패스는 빈손이고
+    정규화 패스만 판정한다.
+    """
+    bundle = _bundle(
+        road=None,
+        raw_data={
+            "Road_Address": "서울특별시 종로구 통일로 251",
+            "roadAddress": "부산광역시 기장군 기장읍 용궁길 86",
+        },
+    )
+    assert _provider_address(bundle) == "서울특별시 종로구 통일로 251"
+
+
+@pytest.mark.parametrize(
+    ("raw_data", "expected"),
+    [
+        (
+            {
+                "roadNM": "서해안고속도로",
+                "accPointNM": "서산나들목",
+                "startEndTypeCode": "부산방향",
+            },
+            "서해안고속도로 서산나들목 부산방향",
+        ),
+        ({"routeName": "경부고속도로", "pointName": "안성휴게소"}, "경부고속도로 안성휴게소"),
+        ({"roadNM": "서해안고속도로"}, "서해안고속도로"),
+        ({"direction": "부산방향"}, "부산방향"),
+        ({"roadNM": "   ", "accPointNM": ""}, None),
+        ({"name": "무명", "contentid": "1234"}, None),
+    ],
+)
+def test_traffic_clue_joins_only_the_parts_that_exist(
+    raw_data: dict[str, object], expected: str | None
+) -> None:
+    """EX 돌발 단서는 **있는 조각만** 잇는다. 없는 조각이 ``'None'``이 되지 않는다."""
+    bundle = _bundle(road=None, raw_data=raw_data)
+    assert _provider_address(bundle) == expected
+
+
+@pytest.mark.parametrize(
+    ("raw_data", "expected"),
+    [
+        # krex traffic notices — 좌표 없는 row가 실측 63/99. 원 payload 철자는
+        # dataset마다 다르다(`python-krex-api` `_get`가 다중 철자를 흡수한다).
+        ({"routeNo": "0010", "pointName": "양재"}, "0010 양재"),
+        ({"route_no": "0010", "point_name": "양재"}, "0010 양재"),
+        # mcst kcisa 방언은 대문자 `ADDRESS`로 온다.
+        ({"ADDRESS": "서울특별시 종로구 통일로 251"}, "서울특별시 종로구 통일로 251"),
+        ({"Address_Road": "서울특별시 종로구 통일로 251"}, "서울특별시 종로구 통일로 251"),
+    ],
+)
+def test_clue_lookup_survives_provider_key_spelling(
+    raw_data: dict[str, object], expected: str
+) -> None:
+    """철자 하나를 놓치면 좌표 없는 row가 통째로 ``missing_address``로 drop된다.
+
+    이전 구현은 원 철자 정확 일치만 봤고, 그 사각은 ``'None None None'``이 항상
+    truthy라서 드러나지 않았다.
+    """
+    bundle = _bundle(road=None, raw_data=raw_data)
+    assert _provider_address(bundle) == expected
+
+
+@pytest.mark.parametrize(
+    ("raw_data", "expected"),
+    [
+        # 진짜 도로명 주소가 정규화 철자로만 오고, 교통 키는 원 철자로 온다.
+        (
+            {"roadAddress": "서울특별시 종로구 통일로 251", "direction": "부산방향"},
+            "서울특별시 종로구 통일로 251",
+        ),
+        # 지번 주소도 마찬가지 — 주소는 전부 교통 단서보다 앞이다.
+        (
+            {"Lot_Address": "서울특별시 종로구 신문로2가 1", "startEndTypeCode": "부산방향"},
+            "서울특별시 종로구 신문로2가 1",
+        ),
+        (
+            {"ADDRESS": "강원특별자치도 춘천시 1", "roadNM": "중앙고속도로"},
+            "강원특별자치도 춘천시 1",
+        ),
+    ],
+)
+def test_address_beats_traffic_clue_across_spelling_passes(
+    raw_data: dict[str, object], expected: str
+) -> None:
+    """주소는 철자가 어떻든 교통 단서를 이긴다 — 교통 단서는 주소가 아니다.
+
+    이전 구현은 "(주소+교통) 원 철자" 한 패스를 먼저 돌았기 때문에, 원 철자 교통 키
+    하나(``direction``)가 정규화 패스에서만 잡히는 진짜 도로명 주소를 가로챘다.
+    그 상태에서 위 세 건은 각각 ``'부산방향'``/``'부산방향'``/``'중앙고속도로'``를
+    주장으로 돌려준다.
+    """
+    bundle = _bundle(road=None, raw_data=raw_data)
+    assert _provider_address(bundle) == expected
+
+
+def test_rest_area_clue_keeps_route_and_direction_together() -> None:
+    """krex 휴게소 payload는 typed 속성명(``route_name``)으로 온다 — 노선이 살아야 한다.
+
+    ``providers/krex._rest_area_item_to_bundle``이 직접 조립하는 raw_data 모양이다
+    (원 철자 ``roadNM``이 아니라 ``route_name``, 주소 컬럼은 없다). 이전 구현은 원
+    철자 패스에서 ``direction`` 하나만 걸려 즉시 반환했고, ``route_name``을 잡을 수
+    있는 정규화 패스는 영영 돌지 않아 노선명이 통째로 버려졌다.
+    """
+    bundle = _bundle(
+        road=None,
+        raw_data={
+            "natural_key": "안성휴게소::경부고속도로::부산방향",
+            "name": "안성휴게소",
+            "route_name": "경부고속도로",
+            "direction": "부산방향",
+            "lon": "127.2",
+            "lat": "37.0",
+            "phone_number": None,
+        },
+    )
+    assert _provider_address(bundle) == "경부고속도로 부산방향"
+
+
+def test_traffic_clue_still_precedes_reverse_filled_address() -> None:
+    """교통 단서는 payload 안에서만 마지막이고, ``Address`` 텍스트보다는 앞이다.
+
+    krex 휴게소/휴게소기상/traffic notice는 셋 다 ``road=None``이고 ``admin``이
+    reverse 산물이라, 여기서 ``Address``로 내려가면 이름축이 geo를 geo와 대조해
+    **거짓 ``matched``**로 조용해진다. ``no_token``으로 판정 불가를 드러내는 쪽을
+    택한 것이므로, 순서가 뒤집히면 이 테스트가 깨져야 한다.
+    """
+    bundle = _bundle(
+        road=None,
+        admin="부산광역시 기장군 기장읍",
+        raw_data={"route_name": "동해고속도로", "direction": "속초방향"},
+    )
+    assert _provider_address(bundle) == "동해고속도로 속초방향"
+    summary = validate_feature_bundles_address([bundle])
+    assert summary.name_state_counts == {"no_token": 1}
+
+
+@pytest.mark.parametrize(
+    ("sigungu_name", "expected_state"),
+    [("기장군", "no_token"), (None, "no_observation")],
+)
+def test_tokenless_claim_splits_by_whether_an_observation_exists(
+    sigungu_name: str | None, expected_state: str
+) -> None:
+    """행정 토큰 없는 주장은 관측 유무로 ``no_token``/``no_observation``이 갈린다.
+
+    판정 순서가 claim → observation → token이므로, 관측이 없으면 토큰을 보기 전에
+    ``no_observation``으로 끝난다. ``'None None None'`` 시절 주소 없는 row가 "전부
+    ``no_token``"이었다는 서술이 틀린 이유가 이것이다.
+    """
+    bundle = _bundle(
+        sigungu_name=sigungu_name,
+        road=None,
+        raw_data={"address": "1층 안내데스크 옆"},
+    )
+    summary = validate_feature_bundles_address([bundle])
+    assert summary.name_state_counts == {expected_state: 1}
+
+
+def test_mois_payload_prefers_road_address_over_lot_address() -> None:
+    """mois 실측 payload 키(``providers/mois._raw_data``) — 도로명이 지번보다 앞선다."""
+    bundle = _bundle(
+        road=None,
+        raw_data={
+            "lot_address": "서울특별시 종로구 신문로2가 1",
+            "road_address": "서울특별시 종로구 통일로 251",
+        },
+    )
+    assert _provider_address(bundle) == "서울특별시 종로구 통일로 251"
+
+
+def test_admin_only_address_is_still_a_location_clue() -> None:
+    """mcst는 좌표 없는 row의 provider 주소를 ``Address.admin``에만 남긴다.
+
+    ``providers/mcst.py`` ``_resolve_address``는 ``road``/``legal``을 채우지 않는다
+    (골프장 현황: 좌표 없음 + ``지역``/``소재지`` 합성 주소 → ``admin``). 이 단계를
+    fallback에서 빠뜨리면 좌표 없는 dataset 전체가 "단서 없음"이 되어
+    ``missing_address``로 **영구 drop**된다 — ``Address.display()``와 같은 순서로 본다.
+    """
+    bundle = _bundle(
+        bjd_code=None,
+        sigungu_code=None,
+        sido_code=None,
+        sigungu_name=None,
+        road=None,
+        admin="강원특별자치도 춘천시 1",
+        coord=None,
+        raw_data={"이름": "라데나골프클럽", "소재지": "춘천시 1"},
+    )
+    assert _provider_address(bundle) == "강원특별자치도 춘천시 1"
+    assert validate_feature_bundle_address(bundle).issues == ()
+
+
+def test_bundle_without_any_location_clue_is_missing_address() -> None:
+    """좌표·주소·행정코드가 전부 없으면 ``missing_address``.
+
+    이전 구현에서 ``_provider_address``는 **절대 ``None``을 반환하지 않았으므로** 이
+    droppable error는 도달 불가능한 죽은 코드였다.
+    """
+    bundle = _bundle(
+        bjd_code=None,
+        sigungu_code=None,
+        sido_code=None,
+        sigungu_name=None,
+        road=None,
+        coord=None,
+        raw_data={"name": "이름뿐"},
+    )
+    result = validate_feature_bundle_address(bundle)
+    assert [(i.code, i.severity) for i in result.issues] == [
+        ("missing_address", "error")
+    ]
+    assert "missing_address" in DROPPABLE_ISSUE_CODES
+
+
+def test_name_states_separate_no_claim_from_no_token() -> None:
+    """집계에서 '주장 없음'과 '주장은 있으나 행정 토큰 없음'이 실제로 갈린다.
+
+    이전 구현에서 ``no_claim``은 **한 건도 나올 수 없었고**, 주소가 아예 없는 row가
+    ``no_token``으로 집계돼 운영 지표가 뒤집혔다.
+    """
+    summary = validate_feature_bundles_address(
+        [
+            _bundle(road=None, raw_data={"name": "무명"}),
+            _bundle(road="서울 종로 현대미술전시"),
+            _bundle(road="부산 기장군 해동용궁사"),
+            _bundle(sigungu_name=None, road="부산 기장군 해동용궁사"),
+        ]
+    )
+    assert summary.name_state_counts == {
+        "no_claim": 1,
+        "no_token": 1,
+        "matched": 1,
+        "no_observation": 1,
+    }

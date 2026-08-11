@@ -144,17 +144,20 @@ def test_source_record_aware_datetime_accepted() -> None:
 
 
 @pytest.mark.unit
-def test_source_record_optional_raw_fields() -> None:
-    """raw_* 필드는 모두 optional."""
-    rec = _make_source_record(
-        raw_name="제주올레",
-        raw_address="제주시 OO",
-        raw_longitude=Decimal("126.9"),
-        raw_latitude=Decimal("33.5"),
-        raw_data={"key": "value"},
-    )
-    assert rec.raw_name == "제주올레"
-    assert rec.raw_longitude == Decimal("126.9")
+@pytest.mark.parametrize(
+    "field",
+    [
+        "source_version",
+        "raw_name",
+        "raw_address",
+        "raw_longitude",
+        "raw_latitude",
+    ],
+)
+def test_source_record_rejects_legacy_raw_field_duplicates(field: str) -> None:
+    """표준화한 raw 복사본은 저장 계약에 없고 원 payload만 허용한다."""
+    with pytest.raises(ValidationError, match="Extra inputs"):
+        _make_source_record(**{field: "legacy"})
 
 
 @pytest.mark.unit
@@ -181,7 +184,6 @@ def _make_source_link(**overrides: object) -> SourceLink:
         "source_role": SourceRole.PRIMARY,
         "match_method": "natural_key",
         "confidence": 100,
-        "is_primary_source": True,
     }
     base.update(overrides)  # type: ignore[arg-type]
     return SourceLink(**base)  # type: ignore[arg-type]
@@ -189,11 +191,11 @@ def _make_source_link(**overrides: object) -> SourceLink:
 
 @pytest.mark.unit
 def test_source_link_creation() -> None:
-    """기본 생성 — 필수 6 필드."""
+    """기본 생성 — primary 판정은 source_role 하나로 한다."""
     link = _make_source_link()
     assert link.feature_id == "f_1100000000_e_abc"
     assert link.confidence == 100
-    assert link.is_primary_source is True
+    assert link.source_role is SourceRole.PRIMARY
     assert link.created_at.tzinfo is not None
 
 
@@ -217,8 +219,6 @@ def test_source_link_default_role() -> None:
         confidence=80,
     )
     assert link.source_role == SourceRole.ENRICHMENT
-    assert link.is_primary_source is False
-
 
 @pytest.mark.unit
 def test_source_link_naive_created_at_rejected() -> None:
@@ -415,7 +415,6 @@ def test_provider_to_bundle_flow() -> None:
         source_role=SourceRole.PRIMARY,
         match_method="natural_key",
         confidence=100,
-        is_primary_source=True,
     )
     bundle = FeatureBundle(
         feature=feature,
