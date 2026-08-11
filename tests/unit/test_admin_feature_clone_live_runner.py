@@ -516,11 +516,15 @@ def test_complete_recovers_without_rerunning_valid_evidence(tmp_path: Path) -> N
     assert payload["recovery_tool_source_commit"] == _RECOVERY_COMMIT
 
 
-def test_abandon_failed_run_requires_cleaned_failure_evidence(tmp_path: Path) -> None:
+@pytest.mark.parametrize("final_total", [120, 126])
+def test_abandon_failed_run_requires_cleaned_failure_evidence(
+    tmp_path: Path,
+    final_total: int,
+) -> None:
     runtime, blocked = _prepare_runtime(tmp_path)
     _write_snapshot(
         runtime / "clone-final.json",
-        total=126,
+        total=final_total,
         content_sha256="7" * 64,
     )
     _write_failed_main_report(runtime / "playwright-main")

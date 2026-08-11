@@ -1675,7 +1675,8 @@ def abandon_failed_run(args: argparse.Namespace) -> None:
             )
     if (
         final["feature_non_deleted"] != startup_before["feature_non_deleted"]
-        or final["feature_total"] != startup_before["feature_total"] + 6
+        or final["feature_total"]
+        not in {startup_before["feature_total"], startup_before["feature_total"] + 6}
         or final["active_owned_features"] != 0
         or final["nonterminal_owned_change_requests"] != 0
     ):
