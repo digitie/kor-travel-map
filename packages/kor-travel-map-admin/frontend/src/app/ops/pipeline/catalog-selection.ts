@@ -51,6 +51,25 @@ export function canonicalCatalogRows(
   );
 }
 
+/**
+ * 제출 직전 fail-closed 가드.
+ *
+ * 조회는 **triple 전체**로 한다. dialog는 열릴 때 받은 rows로 scope를 만들고
+ * (`request-dialog.tsx`의 `buildScope()`는 `catalogQuery.refetch()`보다 **먼저**
+ * 실행된다), 그 뒤 refetch한 rows로 여기를 부른다 — 그 사이에 사라진 축을 잡는 것이
+ * 이 함수의 존재 이유다. `provider_dataset_id` 하나로 찾으면 dataset만 남아 있으면
+ * 통과하므로, 고른 operation이 disable되거나 그 (dataset, scope, operation) 행이
+ * 지워진 경우를 그대로 흘려보낸다.
+ *
+ * 그리드 행은 membership 단위다 — `api/ops_dataset_service.py::_catalog_state_memberships`가
+ * enabled refresh operation의 `(sync_scope, operation_key)` 조합마다 한 행을 낸다.
+ * 그래서 "행이 없다"는 곧 "그 triple을 서버가 더 이상 선언하지 않는다"이다.
+ * 요청 스키마(`feature_update_schema.ProviderDatasetScope`)도 `sync_scope`와
+ * `operation_key`를 `NonEmptyString`으로 받는다.
+ *
+ * 사유 문구는 **어느 축이 사라졌는지** 구분한다. 세 축을 한 문장으로 뭉치면
+ * 운영자가 dataset을 다시 고를지, scope를 바꿀지, 형제 operation을 고를지 알 수 없다.
+ */
 export function validateCatalogSelection(
   scope: RequestScope,
   rows: CanonicalCatalogRow[],
@@ -58,11 +77,27 @@ export function validateCatalogSelection(
   if (scope.type !== "provider_dataset") {
     return null;
   }
-  const row = rows.find(
+  const datasetRows = rows.filter(
     (item) => item.provider_dataset_id === scope.provider_dataset_id,
   );
-  if (!row) {
+  if (datasetRows.length === 0) {
     return "현재 canonical catalog에 없는 데이터셋입니다.";
+  }
+  const scopeRows = datasetRows.filter(
+    (item) => item.sync_scope === scope.sync_scope,
+  );
+  if (scopeRows.length === 0) {
+    return `이 데이터셋에 sync_scope "${scope.sync_scope}" membership이 더 이상 없습니다. 갱신 범위를 다시 고르세요.`;
+  }
+  const operationKey = scope.operation_key.trim();
+  if (!operationKey) {
+    // 서버 스키마가 `NonEmptyString`이라 빈 값은 422다. 여기서 막지 않으면 어느 축이
+    // 문제인지 모르는 채로 서버 검증 오류를 받는다.
+    return "operation_key가 비어 있어 실행할 membership을 확정할 수 없습니다.";
+  }
+  const row = scopeRows.find((item) => item.operation_key === operationKey);
+  if (!row) {
+    return `이 데이터셋의 "${scope.sync_scope}" scope에 operation_key "${operationKey}" membership이 더 이상 없습니다. operation을 다시 고르세요.`;
   }
   const capability = row.catalog?.scope_refresh;
   // ``effect="none"``은 "이 capability로는 어떤 sync scope도 제출할 수 없다"는

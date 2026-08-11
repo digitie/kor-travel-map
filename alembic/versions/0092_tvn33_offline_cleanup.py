@@ -24,6 +24,58 @@ Revises: 0091_tvn33_cutover_fence
 그 충돌 상태는 upgrade()가 정상 write로 열어 준 상태다(형제 operation에 결박된 같은
 checksum 두 행). 되돌릴 수 없는 단계가 하나라도 있으면 revision 전체가 되돌릴 수
 없다.
+
+정리·감사 write 해금은 **전면 해금이 아니다 — 의도된 비대칭이다**
+==============================================================
+
+위 1~3만 읽으면 "정리 write는 막지 않는다"가 활성 가드 전체에 적용된 것처럼 읽힌다.
+실제로는 일부다. 아래 수치는 ``contracts/vnext/tvn33-reference-ownership-v1.sql``을
+파싱해 센 것이다(그 파일이 head와 같은 정의를 갖는다는 것은
+``tests/integration/test_vnext_target_freeze.py::test_frozen_contract_matches_alembic_head``가
+지킨다): row-level BEFORE 트리거 **19개**, 그것이 부르는 서로 다른 함수 **14개**,
+그 중 dataset/scope/operation 활성 검사를 도는 함수 **13개**(나머지 1개가 이 revision이
+만드는 ``reject_managed_file_dataset_rebinding``이고, 그것은 활성 검사가 아예 없다).
+
+* **정리 write 전면 면제 — 2개.** 둘 다 이 revision이 고친 것이다.
+
+  - ``reject_inactive_provider_dataset``: DELETE에서 OLD쪽 활성 검사를 건너뛴다.
+    트리거 6개(operation scope / notice lifecycle scope / curated source /
+    refresh policy / integrity observation scope / poi cache target feature link)가
+    이 함수를 공유하므로 한 번의 수정이 6곳에 걸린다.
+  - ``reject_inactive_offline_upload_membership``: DELETE와, ``validating``/
+    ``loading``으로 들어가거나 머무는 것이 아닌 모든 UPDATE를 면제한다.
+
+* **조건부 면제 — 3개.** 이 revision이 만든 것이 아니라 0091이 이미 갖고 있던 모양이다.
+  ``reject_inactive_notice_lifecycle_scope`` · ``reject_inactive_curated_source_dataset``
+  · ``reject_inactive_integrity_observation_scope``가 그것이고, 면제 조건은 **부모 행이
+  이미 사라진 경우**뿐이다. 그건 non-deferrable ``ON DELETE CASCADE`` FK의 참조 동작
+  경로라는 뜻이라(단독 child DELETE는 부모가 있어야 통과한다) 활성 검사를 돌리면
+  cascade를 "비활성"으로 오분류한다. 부모가 살아 있는 단독 DELETE는 여전히 거부된다.
+
+* **면제 없음 — 8개.** ``reject_inactive_sync_state_operation`` ·
+  ``reject_inactive_import_job_dataset_membership`` ·
+  ``reject_inactive_feature_update_request_dataset_membership`` ·
+  ``reject_inactive_import_job_members`` ·
+  ``reject_inactive_feature_update_request_members`` ·
+  ``reject_inactive_import_job_dataset``(``ops.import_job_events``) ·
+  ``reject_inactive_source_entity_dataset`` ·
+  ``validate_data_integrity_violation_dataset``.
+  이 여덟은 DELETE에서도 활성 검사를 돈다.
+
+그래서 남는 상태: 실행 중 import job이 있는 dataset을 비활성화하면 그 job 행은
+UPDATE도 DELETE도 안 된다(``reject_inactive_import_job_members``가 UPDATE·DELETE 양쪽에서
+``assert_import_job_members_active(OLD.job_id)``를 무조건 돈다). feature update request와
+provider sync state도 같다. **탈출 경로는 dataset 재활성화다** — 같은 가드가 활성 상태를
+보고 통과시키므로 잠금이 영구적이지는 않다.
+
+이 비대칭을 여기서 더 풀지 않는 이유는 ``contracts/vnext/expected-rejections-v1.json``이
+그 거부들을 executable contract로 못박고 있어서다. 전체 34 case 중 15건이
+``ck_provider_dataset_active_write``를 기대하고, 그 중 넷이 정확히 위 경로다 —
+``inactive_dataset_import_job_parent_update``(``ops.import_jobs``의 status UPDATE) ·
+``inactive_dataset_feature_update_request_parent_update`` ·
+``inactive_dataset_sync_state_update`` · ``inactive_dataset_notice_lineage_write``.
+면제를 넓히려면 이 fixture들이 계속 거부되는 경계를 다시 그어야 하고, 그건 계약 개정이라
+이 revision의 범위가 아니다.
 """
 
 from __future__ import annotations
@@ -177,7 +229,24 @@ def _managed_file_guard_sql() -> str:
     실패는 로그 한 줄만 남기고 사라진다.
 
     소유권 immutable 검사는 유지한다 — 계약 fixture
-    ``inactive_dataset_managed_file_owner_clear``가 그 거부를 못박고 있다.
+    ``inactive_dataset_managed_file_owner_clear``가 그 거부를 못박고 있다. 다만 그
+    fixture가 못박는 것은 **값 → NULL**(귀속 해제)이고, 이 가드의 첫 판은 그보다 넓게
+    ``IS DISTINCT FROM``만 보아 **NULL → 값**까지 거부했다. NULL은 귀속이 아니라
+    미귀속이므로 NULL→값은 rebinding이 아니라 최초 귀속이다. 그리고 이 저장소의
+    writer는 그 전이를 **명시적으로 구현하고 있다** — ``file_registry._UPSERT_SQL``의
+    ``ON CONFLICT ... DO UPDATE``는 ``EXCLUDED``의 ``provider_dataset_id``나
+    ``provider_name`` 중 하나라도 NOT NULL이면 소유자 두 열을 EXCLUDED 값으로 덮어쓰는
+    CASE를 갖는다(둘 다 NULL이면 기존 값을 보존한다). 즉 첫 판은 DB 가드가 writer가
+    하려는 일을 막는 상태였다. 재현 경로는 ``file_registry_scan.scan_s3_location``이다: 소유
+    ``ops.offline_uploads`` 행이 아직 없는 객체는 ``provider_dataset_id=None``으로
+    등록되고 ``mark_orphan(reason='zombie_object')``까지 간다. 그 뒤 소유 행이 생겨
+    같은 ``(storage_backend, location, path)``를 다시 scan하면 NULL→값 UPDATE가
+    필요한데, 첫 판은 그것을 거부했다. ``scan_s3_location``은 이 호출을
+    ``registry_guard``로 감싸지 않으므로 예외가 asset 밖으로 나가 그 pass의 등록분이
+    통째로 롤백된다.
+
+    그래서 ``OLD.provider_dataset_id IS NOT NULL``일 때만 거부한다. 값→다른 값(재귀속)과
+    값→NULL(귀속 해제)은 계속 거부한다 — 뒤쪽은 감사 흔적을 지우는 방향이다.
     """
 
     return """
@@ -187,7 +256,13 @@ def _managed_file_guard_sql() -> str:
         SET search_path = pg_catalog
         AS $$
         BEGIN
+            -- NULL -> value is the first binding, not a rebinding: the row had no
+            -- owner to move away from.  file_registry._UPSERT_SQL implements that
+            -- transition on re-registration, so rejecting it would freeze rows that
+            -- were registered before their owning offline upload row existed.
+            -- value -> other value and value -> NULL stay rejected.
             IF TG_OP = 'UPDATE'
+               AND OLD.provider_dataset_id IS NOT NULL
                AND OLD.provider_dataset_id IS DISTINCT FROM NEW.provider_dataset_id THEN
                 RAISE EXCEPTION 'provider dataset ownership is immutable'
                     USING ERRCODE = '23514',

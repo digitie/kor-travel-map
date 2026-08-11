@@ -14,6 +14,7 @@ import {
   hasActiveDatasetExecution,
   opsDatasetCatalogOptions,
   opsDatasetLiveBadgeLabel,
+  opsDatasetScopeEffectSentence,
   previewOpsDataset,
   resolveDatasetRefreshScope,
   resolveOpsDatasetRefetchInterval,
@@ -77,15 +78,24 @@ const NO_SUBMITTABLE_SCOPE_CAPABILITY: OpsDatasetScopeRefreshCapability = {
   reason: "이 dataset의 refresh operation에 sync scope 선언이 없어 걸 대상이 없습니다.",
 };
 
-/** 같은 판정이지만 선언된 scope가 canonical이 아닌 경우(`external_system:*` 전용). */
+/**
+ * 같은 판정이지만 **선언된 scope 목록이 비어 있지 않은** 경우.
+ *
+ * 서버의 `not is_refreshable` 분기가 잔존 선언을 그대로 실어 내는 모양이다 — 비활성
+ * dataset이나 실행 가능한 refresh runner가 없는 dataset이 여기 해당한다. 목록이 비지
+ * 않았다고 제출 가능해지지는 않는다는 것이 이 fixture가 지키는 축이다.
+ *
+ * (`external_system:*`만 선언한 **활성** dataset은 이 모양이 아니다 — 그쪽은
+ * `effect="sync_scope"` + `selector="none"`으로 내려오고 제출할 수 있다. 그 축은
+ * 아래 "POI target selector가 없어도 …" 케이스가 따로 본다.)
+ */
 const EXTERNAL_ONLY_CAPABILITY: OpsDatasetScopeRefreshCapability = {
   supported: false,
   selector: "none",
   effect: "none",
   default_sync_scope: "dataset_wide",
   allowed_sync_scopes: ["external_system:pinvi"],
-  reason:
-    "이 dataset의 refresh operation에 canonical sync scope(dataset_wide/target_grids) 선언이 없습니다.",
+  reason: "이 dataset에는 실행 가능한 refresh runner가 없습니다.",
 };
 
 describe("ops datasets current REST contract", () => {
@@ -255,6 +265,32 @@ describe("ops datasets scope capability", () => {
       resolveDatasetRefreshScope(TARGET_CAPABILITY, "external_system:deleted"),
     ).toMatchObject({ allowed: false });
   });
+  it("POI target selector가 없어도 선언된 scope는 제출할 수 있다", () => {
+    // `target_grids`를 선언하지 않은 dataset — 서버는 `selector:"none"`을 낸다
+    // (`api/ops_dataset_service.py::_scope_refresh_capability`: selector는 "scope 안의
+    // **대상**을 무엇이 고르는가"이고, POI target 목록은 `target_grids`에만 있다).
+    // 앞 판은 이 게이트가 `selector === "poi_cache_targets"`를 요구해서, scope는 고를 수
+    // 있는데 POI selector만 없는 dataset을 "선택 scope 갱신을 지원하지 않습니다"로 막았다.
+    const externalOnly: OpsDatasetScopeRefreshCapability = {
+      supported: true,
+      selector: "none",
+      effect: "sync_scope",
+      default_sync_scope: "external_system:pinvi",
+      allowed_sync_scopes: ["external_system:pinvi"],
+      reason: null,
+    };
+
+    expect(
+      resolveDatasetRefreshScope(externalOnly, "external_system:pinvi"),
+    ).toEqual({ allowed: true, syncScope: "external_system:pinvi" });
+    // 선언 밖 scope는 여전히 막고, 사유는 POI target이 아니라 **카탈로그 선언**을 든다.
+    expect(
+      resolveDatasetRefreshScope(externalOnly, "target_grids"),
+    ).toEqual({
+      allowed: false,
+      reason: "카탈로그가 선언하지 않은 sync scope입니다.",
+    });
+  });
   it("누락되거나 모순된 capability는 fail-closed한다", () => {
     expect(resolveDatasetRefreshScope(null, "target_grids")).toMatchObject({
       allowed: false,
@@ -329,6 +365,51 @@ describe("ops datasets scope capability", () => {
     expect(gateInputsWithoutEffect(NO_SUBMITTABLE_SCOPE_CAPABILITY)).toEqual(
       gateInputsWithoutEffect(DATASET_WIDE_CAPABILITY),
     );
+  });
+});
+
+describe("ops datasets scope contract sentence", () => {
+  // 이 문장은 `/ops/datasets` 상세의 "범위 계약" 줄에 `·`로 이어 붙는다
+  // (`datasets-client.tsx`의 `RefreshNowSection`). 판정 축(`resolveDatasetRefreshScope`)에는
+  // 회귀가 있었지만 **표시 문자열 축에는 없었고**, 그 사각에서 `effect: "none"`이
+  // "dataset 전체"로 그려졌다.
+  it("effect 세 값을 각각 다른 문장으로 그린다", () => {
+    expect(opsDatasetScopeEffectSentence("sync_scope")).toBe(
+      "효과 선택 scope 갱신",
+    );
+    expect(opsDatasetScopeEffectSentence("dataset_wide")).toBe(
+      "효과 dataset 전체 갱신",
+    );
+    expect(opsDatasetScopeEffectSentence("none")).toBe(
+      "효과 없음(제출 가능한 갱신 범위 없음)",
+    );
+    const sentences = (
+      ["sync_scope", "dataset_wide", "none"] as const
+    ).map((effect) => opsDatasetScopeEffectSentence(effect));
+    expect(new Set(sentences).size).toBe(sentences.length);
+  });
+
+  it("차단된 계약은 실행 가능한 계약과 같은 문장을 쓰지 않는다", () => {
+    // 한 패널이 이 문장과 `resolveDatasetRefreshScope`의 차단 사유를 **동시에** 그린다.
+    // 두 문장이 반대되면(효과 "dataset 전체" + 사유 "걸 대상이 없습니다") 운영자는
+    // 어느 쪽을 믿을지 알 수 없다.
+    const executableSentences = [
+      DATASET_WIDE_CAPABILITY,
+      TARGET_CAPABILITY,
+    ].map((capability) => opsDatasetScopeEffectSentence(capability.effect));
+
+    for (const capability of [
+      NO_SUBMITTABLE_SCOPE_CAPABILITY,
+      EXTERNAL_ONLY_CAPABILITY,
+    ]) {
+      expect(
+        resolveDatasetRefreshScope(capability, capability.default_sync_scope)
+          .allowed,
+      ).toBe(false);
+      expect(executableSentences).not.toContain(
+        opsDatasetScopeEffectSentence(capability.effect),
+      );
+    }
   });
 });
 

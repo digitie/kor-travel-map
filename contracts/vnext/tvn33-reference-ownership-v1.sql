@@ -445,8 +445,15 @@ CREATE TABLE feature.curated_source_rules (
     CONSTRAINT fk_curated_source_rules_source FOREIGN KEY (source_id)
         REFERENCES feature.curated_sources (source_id) ON DELETE CASCADE
 );
-CREATE INDEX idx_curated_source_rules_source_enabled
-    ON feature.curated_source_rules (source_id, enabled, priority DESC);
+-- 이 두 index는 alembic 0025가 만든 것을 그대로 옮긴 것이다. T-VN-33은 curated rule의
+-- 접근 경로를 바꾸지 않으므로 여기서 열 순서를 다시 정하지 않는다 — 앞 판이 선언하던
+-- `idx_curated_source_rules_source_enabled (source_id, enabled, priority DESC)`는
+-- migration에도 `infra/models.py`에도 없는 이름이었고, index 대조 축을 켜자
+-- only-in-contract로 드러났다.
+CREATE INDEX idx_curated_source_rules_enabled
+    ON feature.curated_source_rules (enabled, source_id, priority DESC);
+CREATE INDEX idx_curated_source_rules_theme
+    ON feature.curated_source_rules (theme_id, enabled, priority DESC);
 CREATE TRIGGER trg_curated_source_rules_active_dataset_write
     BEFORE INSERT OR UPDATE OR DELETE ON feature.curated_source_rules
     FOR EACH ROW EXECUTE FUNCTION provider_sync.reject_inactive_curated_source_dataset();
@@ -486,8 +493,12 @@ CREATE TABLE ops.import_job_datasets (
         provider_dataset_id, sync_scope, operation_key
     ) ON DELETE RESTRICT
 );
-CREATE INDEX idx_import_job_datasets_dataset_job
-    ON ops.import_job_datasets (provider_dataset_id, job_id);
+-- membership 조회의 선두 열은 identity triple이다. alembic 0090이 이 이름·이 열
+-- 집합으로 만든다. 앞 판은 `idx_import_job_datasets_dataset_job
+-- (provider_dataset_id, job_id)`라는 pair 시절 모양을 들고 있었다 — scope PK가
+-- triple로 올라간 뒤에도 index만 pair에 남아 있던 자리다.
+CREATE INDEX idx_import_job_datasets_exact_operation_job
+    ON ops.import_job_datasets (provider_dataset_id, sync_scope, operation_key, job_id);
 CREATE TRIGGER trg_import_job_datasets_active_dataset_write
     BEFORE INSERT OR UPDATE OR DELETE ON ops.import_job_datasets
     FOR EACH ROW EXECUTE FUNCTION
@@ -657,6 +668,11 @@ CREATE TABLE ops.import_job_events (
     job_id uuid NOT NULL,
     import_job_dataset_id uuid,
     event_kind text NOT NULL,
+    -- `level`·`quarantined_at`은 아래 index를 여기서 선언하기 위해 있다. 이 파일은
+    -- events 테이블의 전체 열 형태를 선언하지 않는다 — 대조 축에 columns가 없는
+    -- 이유는 `test_frozen_contract_matches_alembic_head` docstring에 있다.
+    level text,
+    quarantined_at timestamptz,
     occurred_at timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT pk_import_job_events PRIMARY KEY (event_id),
     CONSTRAINT fk_import_job_events_job FOREIGN KEY (job_id)
@@ -664,9 +680,15 @@ CREATE TABLE ops.import_job_events (
     CONSTRAINT fk_import_job_events_job_member FOREIGN KEY (job_id, import_job_dataset_id)
         REFERENCES ops.import_job_datasets (job_id, import_job_dataset_id) ON DELETE RESTRICT
 );
+-- alembic 0090이 만드는 정의 그대로다. keyset tiebreak(`event_id DESC`)·covering
+-- (`INCLUDE (level)`)·격리 행 제외(`quarantined_at IS NULL`)까지 튜닝된 쪽이 T-VN-33의
+-- 도착점이다(근거는 0090의 해당 실행문 주석 — member 당 상위 limit scan을 index-only로
+-- 유지한다). 앞 판은 `(import_job_dataset_id, occurred_at DESC)` +
+-- `WHERE import_job_dataset_id IS NOT NULL`만 들고 있었다.
 CREATE INDEX idx_import_job_events_member_time
-    ON ops.import_job_events (import_job_dataset_id, occurred_at DESC)
-    WHERE import_job_dataset_id IS NOT NULL;
+    ON ops.import_job_events (import_job_dataset_id, occurred_at DESC, event_id DESC)
+    INCLUDE (level)
+    WHERE import_job_dataset_id IS NOT NULL AND quarantined_at IS NULL;
 CREATE TRIGGER trg_import_job_events_active_dataset_write
     BEFORE INSERT OR UPDATE OR DELETE ON ops.import_job_events
     FOR EACH ROW EXECUTE FUNCTION provider_sync.reject_inactive_import_job_dataset();
@@ -1110,7 +1132,11 @@ CREATE TABLE ops.managed_files (
 -- 호출부가 `file_registry.registry_guard`(`except Exception`)로 감싸므로 그 실패는
 -- 로그 한 줄만 남기고 사라진다. 0092가 활성 검사를 떼고 소유권 immutable만 남겼다 —
 -- violation-fixtures-v1.sql의 `inactive_dataset_managed_file_owner_clear`가 그
--- 거부를 계속 못박는다.
+-- 거부를 계속 못박는다. 그 fixture가 못박는 것은 **값 → NULL**(귀속 해제)이다.
+-- **NULL → 값**은 rebinding이 아니라 최초 귀속이라 거부하지 않는다 —
+-- `file_registry._UPSERT_SQL`의 `ON CONFLICT ... DO UPDATE`가 재등록 시 소유자를
+-- 붙이는 CASE를 명시적으로 구현하고 있고, `file_registry_scan.scan_s3_location`은
+-- 소유 upload 행이 아직 없는 객체를 `provider_dataset_id=NULL`로 먼저 등록한다.
 CREATE FUNCTION provider_sync.reject_managed_file_dataset_rebinding()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -1118,6 +1144,7 @@ SET search_path = pg_catalog
 AS $$
 BEGIN
     IF TG_OP = 'UPDATE'
+       AND OLD.provider_dataset_id IS NOT NULL
        AND OLD.provider_dataset_id IS DISTINCT FROM NEW.provider_dataset_id
     THEN
         RAISE EXCEPTION 'provider dataset ownership is immutable'

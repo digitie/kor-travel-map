@@ -243,8 +243,12 @@ export function resolveDatasetRefreshScope(
     }
     return { allowed: true, syncScope: capability.default_sync_scope };
   }
+  // `selector`는 여기서 보지 않는다. 그것은 "**scope 안의 대상**을 무엇이 고르는가"이고
+  // (`poi_cache_targets` | `none`), scope 자체를 고를 수 있는지와는 다른 축이다.
+  // `target_grids`를 선언하지 않은 dataset — 예: `dataset_wide` + `external_system:*` —
+  // 도 scope를 고를 수 있지만 POI target selector는 없다. 앞 판은 두 축을 하나로 묶어
+  // 그런 dataset을 "선택 scope 갱신을 지원하지 않습니다"로 막았다.
   if (
-    capability.selector !== "poi_cache_targets" ||
     !capability.supported ||
     capability.allowed_sync_scopes.length === 0 ||
     !capability.allowed_sync_scopes.includes(capability.default_sync_scope)
@@ -257,10 +261,41 @@ export function resolveDatasetRefreshScope(
   if (!capability.allowed_sync_scopes.includes(selectedSyncScope)) {
     return {
       allowed: false,
-      reason: "현재 활성 target에 포함되지 않은 sync scope입니다.",
+      // 판정 근거는 POI target 목록이 아니라 **카탈로그 선언**이다
+      // (`provider_dataset_operation_scopes`). 앞 판의 "현재 활성 target에 포함되지 않은"은
+      // POI target이 하나도 없는 dataset에 대해서도 나왔다.
+      reason: "카탈로그가 선언하지 않은 sync scope입니다.",
     };
   }
   return { allowed: true, syncScope: selectedSyncScope };
+}
+
+/**
+ * 상세의 "범위 계약" 줄에 그리는 `효과` 문장.
+ *
+ * `effect`는 값이 셋이므로(`dataset_wide` | `sync_scope` | `none`) 문장도 셋이어야
+ * 한다. 배타 열거(`effect === "sync_scope" ? … : …`)로 그리면 `none`이 진짜
+ * dataset-wide 계약과 **같은 문장**이 되고, 같은 패널이 바로 아래에
+ * `resolveDatasetRefreshScope`의 `effect === "none"` 사유("걸 수 있는 갱신 범위가
+ * 없습니다")를 함께 띄우므로 한 화면이 서로 반대되는 두 문장을 동시에 말한다.
+ *
+ * `none`은 "제출 가능한 scope가 하나도 없다"는 뜻이다. 그 상태에서도
+ * `default_sync_scope`는 `dataset_wide`로 내려온다 —
+ * `api/ops_dataset_service.py::_scope_refresh_capability`의 `if not entry.is_refreshable`
+ * 분기가 그 값을 고정한다(그 분기가 `effect="none"`을 내는 유일한 자리다). 그러므로
+ * 이 문장이 기본값을 근거로 실행 가능성을 말하면 안 된다.
+ */
+export function opsDatasetScopeEffectSentence(
+  effect: OpsDatasetScopeRefreshCapability["effect"],
+): string {
+  switch (effect) {
+    case "sync_scope":
+      return "효과 선택 scope 갱신";
+    case "dataset_wide":
+      return "효과 dataset 전체 갱신";
+    case "none":
+      return "효과 없음(제출 가능한 갱신 범위 없음)";
+  }
 }
 
 export function buildDatasetRefreshNowRequest({

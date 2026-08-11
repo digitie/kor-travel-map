@@ -26,18 +26,31 @@ exact-set의 stale 분기)를 **동시에** 심고도 api 게이트가 통과한
 (``rg 'sync_scopes=\\(\\)'`` 히트는 전부 ``operation_kind="preview"``다), 그 공백이 위
 결함이 적대 리뷰 11라운드를 살아남은 이유다.
 
+마지막으로 **한 응답의 자기모순** 축을 닫는다. ``GET /v1/ops/datasets``가 낸 모든
+canonical 행에 대해 "그 행의 ``sync_scope``를 그 행의 capability가 제출 가능이라
+말하는 것"과 "DB가 그 dataset의 그 scope로 요청을 받는 것"이 동치여야 한다
+(``test_grid_capability_never_contradicts_its_own_membership_rows``). 형제 refresh
+operation이 ``dataset_wide``와 ``external_system:*``를 나눠 선언한 dataset이 그 축을
+가르는 fixture다 — 앞 판은 ``target_grids``가 없다는 이유로 capability를 "전체 dataset
+단위로만 갱신합니다"로 접었고, 같은 응답이 낸 ``external_system:*`` 행이 그 거짓 사유로
+막혔다.
+
 이 파일은 ``migrated_engine``(conftest.py, session-scope 공유 DB)을 쓰지 않고
 **전용 database**를 하나 더 만들어 거기에만 alembic head를 적용한다(``seed_engine``).
 아래 게이트들이 카탈로그의 **전역** 성질을 단언하는데, 공유 DB에는 형제 테스트가
-commit한 행이 그대로 남아 결과가 실행 순서에 매이기 때문이다. 실측:
+commit한 행이 그대로 남아 결과가 실행 순서에 매이기 때문이다. 그 오염이 실재한다는
+증거는 수치가 아니라 실행이다 —
+``test_exact_set_gate_is_immune_to_operations_committed_by_other_tests``가 공유 DB에
+handler 없는 활성 refresh operation을 직접 commit해 (a) 공유 DB로 돌린 게이트가 red,
+(b) 같은 순간 전용 DB로 돌린 게이트가 green임을 함께 단언한다. 전용 DB를 쓰는 지금은
 ``pytest tests/integration/test_offline_upload_load.py tests/integration/test_provider_catalog.py``
-= ``4 failed, 35 passed``(형제가 commit한 ``offline_fixture_offline_{csv,jsonl}_refresh``가
-handler 없는 활성 refresh operation으로 잡힌다), 같은 파일 단독 실행 = ``14 passed``.
+가 전건 통과한다(2026-08-11 실측). 개수는 형제 파일이 바뀌면 달라지므로 적지 않는다.
 """
 
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Mapping
+from contextlib import asynccontextmanager
 from typing import Any
 from uuid import uuid4
 
@@ -313,6 +326,31 @@ async def _seed_axis_datasets(session: AsyncSession) -> dict[str, int]:
         sync_scopes=("external_system:pinvi",),
     )
 
+    # (7) ``dataset_wide``(op a) + ``external_system:*``(op b) — 형제 refresh operation이
+    # 서로 다른 scope를 선언한다. 0091이 scope PK를 triple로 올렸고
+    # ``is_valid_provider_dataset_sync_scope``가 ``external_system:*``를 허용하므로
+    # 스키마가 그대로 받는다. 이 모양이 capability↔membership 자기모순을 가르는 축이다 —
+    # ``target_grids``가 없다는 이유로 capability를 "전체 dataset 단위로만"으로 접으면
+    # 같은 응답이 낸 ``external_system:concierge`` 행이 거짓 사유로 막힌다.
+    wide_plus_external = await _insert_dataset(
+        session, dataset_key="axis_dataset_wide_plus_external"
+    )
+    ids["axis_dataset_wide_plus_external"] = wide_plus_external
+    await _insert_operation(
+        session,
+        provider_dataset_id=wide_plus_external,
+        operation_key="axis_wide_plus_external_wide_job",
+        operation_kind="refresh",
+        sync_scopes=("dataset_wide",),
+    )
+    await _insert_operation(
+        session,
+        provider_dataset_id=wide_plus_external,
+        operation_key="axis_wide_plus_external_concierge_job",
+        operation_kind="refresh",
+        sync_scopes=("external_system:concierge",),
+    )
+
     # (6) preview handler 축: 비활성 fixture preview + 활성 non-fixture preview.
     preview = await _insert_dataset(session, dataset_key="axis_preview_not_fixture")
     ids["axis_preview_not_fixture"] = preview
@@ -395,6 +433,14 @@ async def test_active_refresh_bindings_require_active_dataset_and_enabled_operat
         # 본다. 이 축이 상태 ①을 만든다.
         ("axis_no_scope_rows", "axis_no_scope_rows_job"),
         ("axis_external_only", "axis_external_only_job"),
+        (
+            "axis_dataset_wide_plus_external",
+            "axis_wide_plus_external_wide_job",
+        ),
+        (
+            "axis_dataset_wide_plus_external",
+            "axis_wide_plus_external_concierge_job",
+        ),
     }
     # dataset 비활성 / operation 비활성이 각각 배제됐는지 따로 못박는다.
     assert ("axis_inactive", "axis_inactive_job") not in probe
@@ -502,25 +548,52 @@ async def test_has_fixture_preview_requires_enabled_fixture_handler(
         "dataset_key",
         "expected_scopes",
         "expected_is_refreshable",
-        "expected_reason",
+        "expected_capability",
         "expected_memberships",
     ),
     [
         # 상태 ① — scope 행 0개. 결박할 membership이 없으므로 갱신 대상이 아니다.
+        # 제출 가능 집합은 공집합이고, DB도 이 dataset의 어떤 triple도 받지 않는다.
         (
             "axis_no_scope_rows",
             (),
             False,
-            "이 dataset의 refresh operation에 sync scope 선언이 없어 걸 대상이 없습니다.",
+            {
+                "supported": False,
+                "selector": "none",
+                "effect": "none",
+                "default_sync_scope": "dataset_wide",
+                "allowed_sync_scopes": [],
+                "reason": (
+                    "이 dataset의 refresh operation에 sync scope 선언이 없어 "
+                    "걸 대상이 없습니다."
+                ),
+            },
             (("dataset_wide", None),),
         ),
-        # 상태 ② — external_system 전용. membership은 실재하는 triple 그대로다.
+        # 상태 ② — external_system 전용. membership은 실재하는 triple 그대로이고,
+        # ``_ACTIVE_DATASET_MEMBERSHIPS_SQL``이 그 triple을 받는다(scope kind를 보지
+        # 않는다). 그래서 capability도 그 scope를 제출 가능으로 내야 한다 —
+        # ``effect="none"``으로 접던 앞 판은 같은 응답이 낸 행을 거짓 사유로 막았다.
+        # ``default_sync_scope``는 표시용 degrade 값(``dataset_wide``)이 아니라 선언된
+        # scope다. degrade 값을 내면 그것이 ``allowed_sync_scopes`` 밖이라 프론트
+        # fail-closed 게이트가 계약 모순으로 읽는다.
         (
             "axis_external_only",
             ("external_system:pinvi",),
             True,
-            "이 dataset의 refresh operation에 canonical sync scope"
-            "(dataset_wide/target_grids) 선언이 없습니다.",
+            {
+                "supported": True,
+                # ``selector``는 "scope **안의 대상**을 무엇이 고르는가"다. 이 dataset은
+                # ``target_grids``를 선언하지 않았으므로 POI target selector가 없다.
+                # ``poi_cache_targets``를 그대로 내면 화면이 "범위 계약: 활성 POI target"
+                # 이라고 적고, 막힐 때 사유도 POI target을 근거로 든다 — 둘 다 거짓이다.
+                "selector": "none",
+                "effect": "sync_scope",
+                "default_sync_scope": "external_system:pinvi",
+                "allowed_sync_scopes": ["external_system:pinvi"],
+                "reason": None,
+            },
             (("external_system:pinvi", "axis_external_only_job"),),
         ),
     ],
@@ -530,7 +603,7 @@ async def test_refreshable_dataset_without_declared_default_scope_degrades(
     dataset_key: str,
     expected_scopes: tuple[str, ...],
     expected_is_refreshable: bool,
-    expected_reason: str,
+    expected_capability: dict[str, object],
     expected_memberships: tuple[tuple[str, str | None], ...],
 ) -> None:
     """스키마 허용 경계상태 2종에서 카탈로그 projection이 죽지 않는다.
@@ -539,10 +612,10 @@ async def test_refreshable_dataset_without_declared_default_scope_degrades(
     ``is_refreshable``인 행마다 무조건 그것을 읽었다 — 두 상태 중 하나라도 DB에 있으면
     ``/ops/datasets`` 그리드 루프 전체가 500이었다.
 
-    두 상태 모두 ``effect="none"``이다. 그 값이 없던 앞 판은 정상 dataset-wide
-    capability와 ``reason`` 문자열 하나만 다른 payload를 냈고, 프론트 게이트
-    ``resolveDatasetRefreshScope``가 그 payload에 ``{allowed: true}``를 돌려줬다
-    (``frontend/src/api/datasets.test.ts``가 양쪽 반환값을 함께 못박는다).
+    두 상태의 **capability는 서로 다르다.** 상태 ①은 걸 수 있는 triple이 아예 없어
+    ``effect="none"``이고, 상태 ②는 DB가 받는 triple이 실재하므로 그 scope를 제출
+    가능으로 낸다. ``entry.declares_default_refresh_scope``는 둘 다 ``False``이지만
+    그것은 **표시 기본값의 degrade 여부**일 뿐 제출 가능 여부가 아니다.
     """
 
     session, _ = axis_catalog
@@ -551,22 +624,69 @@ async def test_refreshable_dataset_without_declared_default_scope_degrades(
     assert entry.is_refreshable is expected_is_refreshable
     assert entry.refresh_scopes == expected_scopes
     assert entry.declares_default_refresh_scope is False
+    # 표시 기본값은 여전히 degrade한다 — capability가 그 값을 쓰지 않을 뿐이다.
     assert entry.default_refresh_scope == "dataset_wide"
 
     info = _catalog_info(entry)
     assert info.is_refreshable is expected_is_refreshable
     assert info.provider_state_default_scope == "dataset_wide"
-    # degrade는 행 단위로 드러난다 — "전체 dataset 단위로만 갱신합니다"가 아니다.
-    assert info.scope_refresh.supported is False
-    # 정상 dataset-wide capability와 **구분 가능해야** 한다. 이 축이 프론트 게이트가
-    # 읽는 유일한 축이다(``reason``은 허용 경로에서 읽지 않는다).
-    assert info.scope_refresh.effect == "none"
-    assert info.scope_refresh.reason == expected_reason
+    scope_refresh = info.scope_refresh
+    assert {
+        "supported": scope_refresh.supported,
+        "selector": scope_refresh.selector,
+        "effect": scope_refresh.effect,
+        "default_sync_scope": scope_refresh.default_sync_scope,
+        "allowed_sync_scopes": scope_refresh.allowed_sync_scopes,
+        "reason": scope_refresh.reason,
+    } == expected_capability
     # degrade가 실행 허용 목록을 넓히지 않는다 — 선언된 것만 그대로 실린다.
-    assert info.scope_refresh.allowed_sync_scopes == list(expected_scopes)
-    assert "dataset_wide" not in info.scope_refresh.allowed_sync_scopes
+    assert "dataset_wide" not in scope_refresh.allowed_sync_scopes
 
     assert _catalog_state_memberships(entry) == expected_memberships
+
+
+async def test_selector_tracks_target_grids_declaration(
+    axis_catalog: tuple[AsyncSession, dict[str, int]],
+) -> None:
+    """``selector``는 ``target_grids`` 선언과 동치다 — 분기 도달 여부가 아니다.
+
+    ``selector``가 답하는 질문은 "scope **안의 대상**을 무엇이 고르는가"이고,
+    ``poi_cache_targets``는 POI cache target 목록이 그 대상을 정한다는 뜻이다. 그 목록은
+    ``target_grids`` scope에만 있다. ``effect="sync_scope"`` 분기를 ``target_grids``
+    선언 밖으로 넓히면서 두 축이 갈렸고, 그때 ``selector``를 상수로 두면
+    ``external_system:*``만 선언한 dataset이 화면에 "범위 계약: 활성 POI target"으로
+    그려지고 막힐 때 사유도 POI target을 근거로 든다(둘 다 그 dataset에 거짓이다).
+
+    그래서 개별 케이스가 아니라 **동치**를 못박는다. probe 카탈로그 전체를 돌며 두 축이
+    한 건이라도 어긋나면 red다.
+    """
+
+    session, _ = axis_catalog
+    entries = _probe_entries(await list_provider_dataset_catalog(session))
+
+    observed = {}
+    for key, entry in entries.items():
+        capability = _catalog_info(entry).scope_refresh
+        # 제출 가능한 scope가 없으면(``effect != "sync_scope"``) 고를 대상도 없으므로
+        # selector는 언제나 ``none``이다 — 비활성 dataset은 ``target_grids``를 선언하고도
+        # 여기 해당한다(실측: ``axis_inactive``).
+        observed[key] = (
+            capability.selector,
+            capability.effect == "sync_scope" and "target_grids" in entry.refresh_scopes,
+        )
+    mismatched = {
+        key: pair
+        for key, pair in observed.items()
+        if (pair[0] == "poi_cache_targets") != pair[1]
+    }
+    assert mismatched == {}, f"selector와 target_grids 선언이 어긋난다: {mismatched}"
+
+    # 동치가 공허하지 않으려면 양쪽 값이 실제로 관측돼야 하고, 특히
+    # ``effect="sync_scope"``인데 selector가 ``none``인 축(= external 전용)이 있어야 한다.
+    assert "poi_cache_targets" in {selector for selector, _ in observed.values()}
+    assert "none" in {selector for selector, _ in observed.values()}
+    external_only = _catalog_info(entries["axis_external_only"]).scope_refresh
+    assert (external_only.effect, external_only.selector) == ("sync_scope", "none")
 
 
 async def test_declared_dataset_wide_capability_stays_distinguishable(
@@ -690,6 +810,8 @@ async def test_exact_set_gate_reports_missing_handler_alone(
             "axis_multi_scope_job",
             "axis_dataset_wide_only_job",
             "axis_external_only_job",
+            "axis_wide_plus_external_wide_job",
+            "axis_wide_plus_external_concierge_job",
         }
     )
 
@@ -826,16 +948,16 @@ def _empty_schedule_payload() -> dict[str, object]:
     }
 
 
-async def test_ops_datasets_grid_survives_schema_allowed_boundary_states(
+@asynccontextmanager
+async def _seeded_ops_api(
     seed_engine: AsyncEngine,
-) -> None:
-    """상태 ①·②가 DB에 있어도 그리드 전체가 200이고 그 행들이 보인다.
+) -> AsyncIterator[tuple[httpx.AsyncClient, AsyncSession, dict[str, int]]]:
+    """probe 카탈로그를 심은 트랜잭션 안에서 ops API 클라이언트를 연다.
 
-    앞 판에서는 이 요청이 ``ValueError``로 500이었다 — 한 dataset의 scope 행이 지워지면
-    운영자 화면 **전체**가 정지한다. 요청은 seed를 커밋하지 않도록 테스트가 연 트랜잭션에
-    묶인 세션 하나를 그대로 쓴다(끝에서 rollback).
+    요청 의존성으로 **같은 세션**을 넘긴다 — 응답이 본 상태와 이 컨텍스트 안에서 돌리는
+    SQL이 본 상태가 같아야 "응답이 자기모순하지 않는다"를 DB 사실과 대조할 수 있다.
+    종료 시 rollback이라 seed DB는 그대로다.
     """
-
     async with seed_engine.connect() as connection:
         transaction = await connection.begin()
         session = AsyncSession(bind=connection, expire_on_commit=False)
@@ -874,10 +996,23 @@ async def test_ops_datasets_grid_survives_schema_allowed_boundary_states(
                     transport=httpx.ASGITransport(app=app),
                     base_url="http://testserver",
                 ) as client:
-                    response = await client.get("/v1/ops/datasets")
+                    yield client, session, ids
         finally:
             await session.close()
             await transaction.rollback()
+
+
+async def test_ops_datasets_grid_survives_schema_allowed_boundary_states(
+    seed_engine: AsyncEngine,
+) -> None:
+    """상태 ①·②가 DB에 있어도 그리드 전체가 200이고 그 행들이 보인다.
+
+    앞 판에서는 이 요청이 ``ValueError``로 500이었다 — 한 dataset의 scope 행이 지워지면
+    운영자 화면 **전체**가 정지한다.
+    """
+
+    async with _seeded_ops_api(seed_engine) as (client, _session, ids):
+        response = await client.get("/v1/ops/datasets")
 
     assert response.status_code == 200, response.text
     rows: list[Mapping[str, object]] = response.json()["data"]["items"]
@@ -899,17 +1034,21 @@ async def test_ops_datasets_grid_survives_schema_allowed_boundary_states(
     assert no_scope_catalog["scope_refresh"]["effect"] == "none"
     assert no_scope_catalog["scope_refresh"]["allowed_sync_scopes"] == []
 
-    # 상태 ② — 선언된 external_system scope 행 그대로.
+    # 상태 ② — 선언된 external_system scope 행 그대로. DB가 그 triple을 받으므로
+    # capability도 그 scope를 제출 가능으로 낸다(아래 자기모순 회귀가 그 동치를 못박는다).
     external_rows = by_dataset_id[ids["axis_external_only"]]
     assert [
         (row["sync_scope"], row["operation_key"]) for row in external_rows
     ] == [("external_system:pinvi", "axis_external_only_job")]
     external_catalog = external_rows[0]["catalog"]
     assert isinstance(external_catalog, dict)
-    assert external_catalog["scope_refresh"]["effect"] == "none"
+    assert external_catalog["scope_refresh"]["effect"] == "sync_scope"
     assert external_catalog["scope_refresh"]["allowed_sync_scopes"] == [
         "external_system:pinvi"
     ]
+    assert external_catalog["scope_refresh"]["default_sync_scope"] == (
+        "external_system:pinvi"
+    )
 
     # 정상 dataset은 그대로 보인다 — 그리드가 degrade 상태만 남기고 죽지 않았다.
     multi_rows = by_dataset_id[ids["axis_multi_scope"]]
@@ -924,3 +1063,286 @@ async def test_ops_datasets_grid_survives_schema_allowed_boundary_states(
     assert isinstance(multi_catalog, dict)
     assert multi_catalog["scope_refresh"]["supported"] is True
     assert multi_catalog["scope_refresh"]["default_sync_scope"] == "target_grids"
+
+
+# ---------------------------------------------------------------------------
+# 자기모순 회귀 — 한 응답의 membership 행과 capability가 서로 어긋나지 않는다.
+# ---------------------------------------------------------------------------
+
+#: dataset이 활성일 때 서버가 실제로 받는 sync scope 집합.
+#:
+#: ``infra/feature_update_repo._ACTIVE_DATASET_MEMBERSHIPS_SQL``에서 "요청이 지목한
+#: triple" join만 뺀 것이다 — 그 SQL이 ``POST /v1/ops/pipeline/requests``의 membership
+#: 해석 정본이고, scope의 kind(``dataset_wide``/``target_grids``/``external_system:*``)를
+#: 구분하지 않는다. 여기서 Python projection(``entry.refresh_scopes``)을 다시 부르지
+#: 않는 이유는, 그러면 검사 대상과 기준이 같은 코드가 되어 아무것도 증명하지 못하기
+#: 때문이다.
+_DECLARED_REFRESH_SCOPE_SQL = """
+SELECT DISTINCT scope.sync_scope
+FROM provider_sync.provider_dataset_operations AS operation
+JOIN provider_sync.provider_dataset_operation_scopes AS scope
+  ON scope.provider_dataset_id = operation.provider_dataset_id
+ AND scope.operation_key = operation.operation_key
+ AND scope.operation_kind = operation.operation_kind
+WHERE operation.provider_dataset_id = :provider_dataset_id
+  AND operation.operation_kind = 'refresh'
+  AND operation.is_enabled
+"""
+
+_DATASET_ACTIVE_SQL = """
+SELECT
+    dataset.is_active,
+    EXISTS (
+        SELECT 1
+        FROM provider_sync.provider_dataset_operations AS operation
+        WHERE operation.provider_dataset_id = dataset.provider_dataset_id
+          AND operation.operation_kind = 'refresh'
+          AND operation.is_enabled
+    ) AS has_enabled_refresh_operation
+FROM provider_sync.provider_datasets AS dataset
+WHERE dataset.provider_dataset_id = :provider_dataset_id
+"""
+
+
+def _capability_submittable_scopes(capability: Mapping[str, Any]) -> frozenset[str]:
+    """capability payload가 "제출할 수 있다"고 말하는 scope 집합.
+
+    프론트 fail-closed 게이트(``frontend/src/api/datasets.ts``의
+    ``resolveDatasetRefreshScope``)가 이 payload를 읽는 규칙 그대로다. 규칙이 갈라지면
+    이 테스트는 화면이 실제로 내리는 판정을 검사하지 않는 셈이 된다.
+
+    * ``effect="none"`` — 아무것도 제출할 수 없다.
+    * ``effect="dataset_wide"`` — ``default_sync_scope`` 하나뿐이다. 그 게이트는
+      ``allowed_sync_scopes``가 비어 있지 않으면 계약 모순으로 보고 막으므로, 여기서도
+      그 모양을 함께 단언한다.
+    * ``effect="sync_scope"`` — ``allowed_sync_scopes`` 전부.
+    """
+    effect = capability["effect"]
+    if effect == "none":
+        return frozenset()
+    if effect == "dataset_wide":
+        assert capability["allowed_sync_scopes"] == [], (
+            "effect=dataset_wide인데 allowed_sync_scopes가 비어 있지 않다 — "
+            "프론트 게이트가 계약 모순으로 읽어 갱신을 통째로 막는다"
+        )
+        assert capability["selector"] == "none"
+        assert capability["supported"] is False
+        return frozenset({str(capability["default_sync_scope"])})
+    assert effect == "sync_scope", effect
+    return frozenset(str(scope) for scope in capability["allowed_sync_scopes"])
+
+
+async def _server_accepted_scopes(
+    session: AsyncSession, *, provider_dataset_id: int
+) -> tuple[frozenset[str], frozenset[str], bool, bool]:
+    """(서버가 받는 scope, 선언된 scope, is_active, enabled refresh operation 유무)."""
+    declared = frozenset(
+        str(value)
+        for value in (
+            await session.execute(
+                text(_DECLARED_REFRESH_SCOPE_SQL),
+                {"provider_dataset_id": provider_dataset_id},
+            )
+        ).scalars()
+    )
+    row = (
+        await session.execute(
+            text(_DATASET_ACTIVE_SQL),
+            {"provider_dataset_id": provider_dataset_id},
+        )
+    ).mappings().one()
+    is_active = bool(row["is_active"])
+    has_operation = bool(row["has_enabled_refresh_operation"])
+    accepted = declared if is_active else frozenset()
+    return accepted, declared, is_active, has_operation
+
+
+async def test_grid_capability_never_contradicts_its_own_membership_rows(
+    seed_engine: AsyncEngine,
+) -> None:
+    """``GET /v1/ops/datasets`` 한 응답 안에서 행과 capability가 서로 모순하지 않는다.
+
+    성질(개별 케이스가 아니라 **모든 canonical 행**에 대해):
+
+    1. 행의 ``sync_scope``가 그 행 capability의 제출 가능 집합에 있는 것과, DB가 그
+       dataset의 그 scope로 요청을 받는 것이 **동치**다.
+    2. capability의 제출 가능 집합은 DB가 받는 집합과 정확히 같다(넓지도 좁지도 않다).
+    3. ``allowed_sync_scopes``에는 카탈로그가 선언하지 않은 값이 없다.
+    4. 막는 쪽의 사유가 그 행에 대해 참이다.
+       - ``effect="none"``이면 서버가 사유를 낸다. 그 문장은 실제 원인
+         (비활성 / refresh operation 없음 / scope 선언 없음)과 일치해야 한다.
+       - ``effect="dataset_wide"``의 "전체 dataset 단위로만 갱신합니다"는 그 dataset이
+         받는 scope가 정말 ``dataset_wide`` 하나일 때만 참이다.
+       - ``effect="sync_scope"``는 아무것도 막지 않으므로 서버 사유가 없다(``None``).
+         거기서 막히는 행은 선언되지 않은 잔존 membership뿐이고, 그 사유는 클라이언트가
+         ``allowed_sync_scopes``로 만든다.
+
+    시드 dataset과 probe dataset을 **함께** 검사한다. probe는 스키마가 허용하지만
+    시드에는 없는 조합(형제 operation이 ``dataset_wide``와 ``external_system:*``를 나눠
+    선언, external 전용, scope 행 0개, 비활성)을 만들어 축을 연다.
+    """
+
+    async with _seeded_ops_api(seed_engine) as (client, session, ids):
+        response = await client.get("/v1/ops/datasets")
+        assert response.status_code == 200, response.text
+        rows: list[Mapping[str, Any]] = response.json()["data"]["items"]
+
+        canonical_rows = [row for row in rows if row["catalog"] is not None]
+        assert canonical_rows, "canonical 행이 하나도 없다 — 이 테스트는 공허하다"
+
+        accepted_by_dataset: dict[int, frozenset[str]] = {}
+        checked_datasets: set[int] = set()
+        for row in canonical_rows:
+            provider_dataset_id = int(row["provider_dataset_id"])
+            label = f"{row['provider']}/{row['dataset_key']}#{provider_dataset_id}"
+            capability = row["catalog"]["scope_refresh"]
+            submittable = _capability_submittable_scopes(capability)
+            (
+                accepted,
+                declared,
+                is_active,
+                has_operation,
+            ) = await _server_accepted_scopes(
+                session, provider_dataset_id=provider_dataset_id
+            )
+            accepted_by_dataset[provider_dataset_id] = accepted
+            checked_datasets.add(provider_dataset_id)
+
+            # (2) 제출 가능 집합 == DB가 받는 집합.
+            assert submittable == accepted, (
+                f"{label}: capability가 제출 가능이라 말한 scope와 DB가 받는 scope가 "
+                f"다르다 (capability={sorted(submittable)}, db={sorted(accepted)})"
+            )
+            # (1) 행 단위 동치. (2)에서 따라 나오지만, 어긋났을 때 **어느 행이** 모순인지
+            # 실패 메시지에 남긴다 — 이 회귀의 목적이 그 행이다.
+            row_scope = str(row["sync_scope"])
+            assert (row_scope in submittable) == (row_scope in accepted), (
+                f"{label}: 행 sync_scope={row_scope!r}의 capability 판정과 DB 판정이 "
+                "다르다"
+            )
+            # (3) 없는 scope를 지어내지 않는다.
+            assert frozenset(capability["allowed_sync_scopes"]) <= declared, (
+                f"{label}: allowed_sync_scopes에 카탈로그가 선언하지 않은 값이 있다"
+            )
+
+            # (4) 막는 사유가 참이다.
+            effect = capability["effect"]
+            reason = capability["reason"]
+            if effect == "none":
+                assert isinstance(reason, str)
+                assert reason, f"{label}: 제출 가능한 scope가 없는데 사유가 없다"
+                expected_reason = (
+                    "비활성 dataset이라 갱신할 수 없습니다."
+                    if not is_active
+                    else "이 dataset에는 실행 가능한 refresh runner가 없습니다."
+                    if not has_operation
+                    else "이 dataset의 refresh operation에 sync scope 선언이 없어 "
+                    "걸 대상이 없습니다."
+                )
+                assert reason == expected_reason, (
+                    f"{label}: 사유가 실제 원인과 다르다 "
+                    f"(is_active={is_active}, has_operation={has_operation})"
+                )
+            elif effect == "dataset_wide":
+                assert accepted == frozenset({"dataset_wide"}), (
+                    f"{label}: '전체 dataset 단위로만 갱신합니다'라고 말했지만 DB는 "
+                    f"{sorted(accepted)}를 받는다"
+                )
+                assert reason == "이 dataset은 전체 dataset 단위로만 갱신합니다."
+            else:
+                assert reason is None, (
+                    f"{label}: 아무것도 막지 않는 capability에 사유가 실려 있다"
+                )
+                # 프론트 게이트는 default가 allowed 밖이면 계약 모순으로 막는다.
+                assert capability["default_sync_scope"] in capability[
+                    "allowed_sync_scopes"
+                ], f"{label}: default_sync_scope가 allowed_sync_scopes 밖이다"
+
+        # --- 축이 실제로 열렸는지 확인한다(공허 방지) ---
+        probe_ids = {value: key for key, value in ids.items()}
+        assert set(probe_ids) <= checked_datasets, "probe dataset이 그리드에 없다"
+        effects_by_probe = {
+            probe_ids[int(row["provider_dataset_id"])]: row["catalog"]["scope_refresh"][
+                "effect"
+            ]
+            for row in canonical_rows
+            if int(row["provider_dataset_id"]) in probe_ids
+        }
+        assert effects_by_probe == {
+            "axis_multi_scope": "sync_scope",
+            "axis_dataset_wide_only": "dataset_wide",
+            "axis_inactive": "none",
+            "axis_no_scope_rows": "none",
+            "axis_external_only": "sync_scope",
+            "axis_dataset_wide_plus_external": "sync_scope",
+            "axis_preview_not_fixture": "none",
+        }
+        # B-1 재현 축: 형제 operation이 ``dataset_wide``와 ``external_system:*``를 나눠
+        # 선언한 dataset. 그리드가 두 행을 내고, 둘 다 제출 가능해야 한다 —
+        # ``target_grids``가 없다는 이유로 capability를 접던 앞 판은
+        # ``external_system:concierge`` 행에 "전체 dataset 단위로만 갱신합니다"라는
+        # 거짓 사유를 붙였다.
+        split_rows = [
+            row
+            for row in canonical_rows
+            if int(row["provider_dataset_id"]) == ids["axis_dataset_wide_plus_external"]
+        ]
+        assert {
+            (row["sync_scope"], row["operation_key"]) for row in split_rows
+        } == {
+            ("dataset_wide", "axis_wide_plus_external_wide_job"),
+            ("external_system:concierge", "axis_wide_plus_external_concierge_job"),
+        }
+        split_capability = split_rows[0]["catalog"]["scope_refresh"]
+        assert _capability_submittable_scopes(split_capability) == {
+            "dataset_wide",
+            "external_system:concierge",
+        }
+        assert accepted_by_dataset[ids["axis_dataset_wide_plus_external"]] == {
+            "dataset_wide",
+            "external_system:concierge",
+        }
+        # 막히는 쪽도 실재해야 대칭이 검사된다.
+        assert accepted_by_dataset[ids["axis_inactive"]] == frozenset()
+        assert accepted_by_dataset[ids["axis_no_scope_rows"]] == frozenset()
+
+
+async def test_dataset_detail_capability_allows_the_membership_it_was_opened_with(
+    seed_engine: AsyncEngine,
+) -> None:
+    """상세 응답도 자기가 연 membership을 자기 capability로 막지 않는다.
+
+    '지금 갱신' 패널은 그리드가 아니라 **상세** 응답의 ``catalog.scope_refresh``와 열려
+    있는 ``sync_scope``로 판정한다(``datasets-client.tsx`` ``RefreshNowSection``).
+    그리드만 고치면 이 경로는 그대로 거짓 사유를 낸다.
+
+    형제 operation이 scope를 나눠 선언한 dataset의 **양쪽 membership**을 각각 열어,
+    자기 scope가 capability의 제출 가능 집합에 있는지 본다.
+    """
+
+    async with _seeded_ops_api(seed_engine) as (client, session, ids):
+        provider_dataset_id = ids["axis_dataset_wide_plus_external"]
+        accepted, _declared, _is_active, _has_operation = await _server_accepted_scopes(
+            session, provider_dataset_id=provider_dataset_id
+        )
+        assert accepted == {"dataset_wide", "external_system:concierge"}
+
+        for sync_scope, operation_key in (
+            ("dataset_wide", "axis_wide_plus_external_wide_job"),
+            ("external_system:concierge", "axis_wide_plus_external_concierge_job"),
+        ):
+            response = await client.get(
+                f"/v1/ops/datasets/{provider_dataset_id}",
+                params={"sync_scope": sync_scope, "operation_key": operation_key},
+            )
+            assert response.status_code == 200, response.text
+            data = response.json()["data"]
+            assert [
+                (scope["sync_scope"], scope["operation_key"])
+                for scope in data["scopes"]
+            ] == [(sync_scope, operation_key)]
+            capability = data["catalog"]["scope_refresh"]
+            assert sync_scope in _capability_submittable_scopes(capability), (
+                f"상세가 연 membership({sync_scope}/{operation_key})을 그 상세의 "
+                f"capability가 막는다: {capability}"
+            )

@@ -38,6 +38,7 @@ from kortravelmap.dto import (
     SourceRole,
 )
 from kortravelmap.infra import file_registry
+from kortravelmap.infra.feature_update_active_repo import _driver_constraint_identity
 from kortravelmap.infra.jobs_repo import (
     ImportJobDatasetTarget,
     start_provider_dataset_import_job,
@@ -1628,6 +1629,167 @@ async def test_router_delete_records_managed_file_audit_for_inactive_dataset(
                     "WHERE provider_dataset_id = :dataset_id"
                 ),
                 {"dataset_id": dataset_id},
+            )
+
+
+async def test_managed_file_owner_attaches_once_and_then_never_moves(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """``ops.managed_files``의 소유권 가드는 NULL→값만 허용하고 나머지는 거부한다.
+
+    alembic 0092 ``reject_managed_file_dataset_rebinding``의 첫 판은
+    ``OLD.provider_dataset_id IS DISTINCT FROM NEW.provider_dataset_id``만 보아
+    **NULL → 값**까지 "ownership is immutable"로 거부했다. 그런데 같은 브랜치의
+    ``file_registry._UPSERT_SQL``은 재등록 시 소유자를 붙이는 ``CASE``를 명시적으로
+    갖고 있고, ``file_registry_scan.scan_s3_location``은 소유 ``ops.offline_uploads``
+    행이 아직 없는 객체를 ``provider_dataset_id=NULL``로 먼저 등록한 뒤
+    ``mark_orphan('zombie_object')``까지 보낸다. 그래서 DB 가드가 writer의 정상
+    경로를 막았다 — 게다가 ``scan_s3_location``은 이 호출을 ``registry_guard``로
+    감싸지 않으므로 예외가 asset 밖으로 나가 그 pass의 등록분이 통째로 롤백된다.
+
+    세 전이를 한 테스트에서 함께 못박는다. 하나만 두면 "NULL→값을 열었다"가
+    "아무 전이나 열었다"로 번져도 red가 나지 않는다:
+
+    a. NULL → 값 (최초 귀속) = 성공. 행이 그 dataset에 실제로 귀속돼야 한다.
+    b. 값 → 다른 값 (재귀속)  = 거부.
+    c. 값 → NULL (귀속 해제)  = 거부. ``violation-fixtures-v1.sql``의
+       ``inactive_dataset_managed_file_owner_clear``가 계약 쪽에서 못박는 것이 c다.
+
+    ``clean_offline_upload_tables``가 ``ops.managed_files``는 건드리지 않으므로
+    registry 행을 finally에서 직접 지운다(공유 ``migrated_engine`` 오염 방지).
+    """
+
+    path = "offline/owner-attach/features.jsonl"
+
+    async with AsyncSession(migrated_engine) as session, session.begin():
+        dataset_id = await _offline_provider_dataset_id(session)
+        sibling_dataset_id = await _offline_provider_dataset_id(
+            session, dataset_key="offline_owner_attach_sibling"
+        )
+        assert sibling_dataset_id != dataset_id
+
+    try:
+        # (a) scan이 소유자를 못 찾은 pass — NULL로 등록되고 zombie로 내려간다.
+        async with AsyncSession(migrated_engine) as session, session.begin():
+            unowned = await file_registry.register_file(
+                session,
+                storage_backend="s3",
+                location=MANAGED_FILE_LOCATION_OFFLINE_UPLOADS,
+                path=path,
+                kind="upload",
+                registered_by="scan",
+                provider_dataset_id=None,
+                actor="scan:test",
+            )
+            assert unowned.provider_dataset_id is None
+            assert (
+                await file_registry.mark_orphan(
+                    session,
+                    file_id=unowned.file_id,
+                    reason="zombie_object",
+                    actor="scan:test",
+                )
+                is True
+            )
+
+        # 소유 upload 행이 생긴 뒤의 다음 pass — 같은 (backend, location, path)를
+        # 소유자와 함께 재등록한다. 이것이 첫 판에서 죽던 write다.
+        async with AsyncSession(migrated_engine) as session, session.begin():
+            attached = await file_registry.register_file(
+                session,
+                storage_backend="s3",
+                location=MANAGED_FILE_LOCATION_OFFLINE_UPLOADS,
+                path=path,
+                kind="upload",
+                registered_by="scan",
+                provider_dataset_id=dataset_id,
+                actor="scan:test",
+            )
+        assert attached.file_id == unowned.file_id, "재등록이 새 행을 만들었다"
+        assert attached.provider_dataset_id == dataset_id
+        assert attached.status == "active"
+
+        # 커밋된 상태를 다시 읽는다 — 위 단언은 RETURNING 값이라 트리거가 뒤에서
+        # 되돌렸다면 그것만으로는 드러나지 않는다.
+        async with AsyncSession(migrated_engine) as session:
+            stored = (
+                await session.execute(
+                    text(
+                        "SELECT provider_dataset_id, status FROM ops.managed_files "
+                        "WHERE file_id = :file_id"
+                    ),
+                    {"file_id": attached.file_id},
+                )
+            ).one()
+        assert stored.provider_dataset_id == dataset_id
+        assert stored.status == "active"
+
+        # (b) 값 → 다른 값 = 재귀속, (c) 값 → NULL = 귀속 해제. 둘 다 계속 거부돼야 한다.
+        # ``provider_name``을 함께 맞춰 주는 이유: ``ck_managed_files_owner``(head 이름
+        # ``ck_managed_files_owner_v2``)가 dataset id와 provider name의 배타를 요구해서,
+        # 안 맞추면 소유권 트리거가 아니라 그 CHECK가 먼저 터진다. 그러면 트리거를
+        # 통째로 꺼도 테스트가 계속 green이 되는 공허한 단언이 된다(변이 M3로 실증).
+        for label, new_owner, new_provider_name in (
+            ("rebind", sibling_dataset_id, None),
+            ("clear", None, "x"),
+        ):
+            async with AsyncSession(migrated_engine) as session:
+                with pytest.raises(IntegrityError) as rejected:
+                    async with session.begin():
+                        await session.execute(
+                            text(
+                                "UPDATE ops.managed_files "
+                                "SET provider_dataset_id = :owner, "
+                                "    provider_name = :provider_name "
+                                "WHERE file_id = :file_id"
+                            ),
+                            {
+                                "owner": new_owner,
+                                "provider_name": new_provider_name,
+                                "file_id": attached.file_id,
+                            },
+                        )
+            # 문자열이 아니라 driver metadata로 좁힌다 — 같은 예외 타입에 실려 오는
+            # 다른 CHECK 위반을 "거부됐으니 통과"로 세면 공허한 단언이 된다.
+            sqlstate, constraint_name = _driver_constraint_identity(rejected.value)
+            assert (sqlstate, constraint_name) == (
+                "23514",
+                "ck_provider_dataset_ownership_immutable",
+            ), f"{label}: {sqlstate} / {constraint_name} — {rejected.value}"
+
+        async with AsyncSession(migrated_engine) as session:
+            still = (
+                await session.execute(
+                    text(
+                        "SELECT provider_dataset_id FROM ops.managed_files "
+                        "WHERE file_id = :file_id"
+                    ),
+                    {"file_id": attached.file_id},
+                )
+            ).one()
+        assert still.provider_dataset_id == dataset_id
+    finally:
+        async with AsyncSession(migrated_engine) as session, session.begin():
+            await session.execute(
+                text(
+                    """
+                    DELETE FROM ops.managed_file_events
+                     WHERE file_id IN (
+                        SELECT file_id FROM ops.managed_files
+                         WHERE storage_backend = 's3'
+                           AND location = :location
+                           AND path = :path
+                     )
+                    """
+                ),
+                {"location": MANAGED_FILE_LOCATION_OFFLINE_UPLOADS, "path": path},
+            )
+            await session.execute(
+                text(
+                    "DELETE FROM ops.managed_files "
+                    "WHERE storage_backend = 's3' AND location = :location AND path = :path"
+                ),
+                {"location": MANAGED_FILE_LOCATION_OFFLINE_UPLOADS, "path": path},
             )
 
 

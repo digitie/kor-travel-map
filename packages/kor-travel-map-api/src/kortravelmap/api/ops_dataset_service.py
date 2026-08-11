@@ -231,6 +231,32 @@ def _unrefreshable_reason(entry: ProviderDatasetCatalogEntry) -> str:
 def _scope_refresh_capability(
     entry: ProviderDatasetCatalogEntry,
 ) -> OpsDatasetScopeRefreshCapability:
+    """이 dataset에 **제출 가능한 sync scope 집합**을 계약 한 벌로 낸다.
+
+    읽는 법은 ``effect``가 정한다(``OpsDatasetScopeRefreshCapability.effect``의
+    description과 프론트 fail-closed 게이트 `resolveDatasetRefreshScope`가 같은 규칙을
+    쓴다).
+
+    * ``"none"`` — 제출 가능한 scope가 없다.
+    * ``"dataset_wide"`` — ``default_sync_scope`` 하나뿐이다. 이 분기에서만
+      ``allowed_sync_scopes``를 비운다("고를 것이 없다"). 프론트 게이트가 그 모양을
+      그대로 검사하므로(``allowed_sync_scopes.length > 0``이면 계약 모순으로 fail-closed)
+      여기에 선언 목록을 실으면 정상 dataset의 갱신이 통째로 막힌다.
+    * ``"sync_scope"`` — ``allowed_sync_scopes`` 중에서 고른다.
+
+    세 분기를 합친 **제출 가능 집합**은 서버가 실제로 받는 집합과 같아야 한다.
+    서버는 ``infra/feature_update_repo._ACTIVE_DATASET_MEMBERSHIPS_SQL``로 요청
+    membership을 해석한다 — dataset이 ``is_active``이고 enabled refresh operation이
+    그 ``sync_scope`` 행을 선언했으면 받는다. scope kind는 보지 않는다.
+    그 집합이 곧 ``entry.refresh_scopes``이므로 ``allowed_sync_scopes``는
+    **카탈로그가 선언한 scope 그대로**여야 한다(선언 목록 밖의 값을 지어내지도,
+    선언한 값을 감추지도 않는다).
+
+    이 성질은 ``tests/integration/test_provider_catalog.py``가 실 DB에 probe 카탈로그를
+    심어 ``GET /v1/ops/datasets`` 응답 전체에 대고 단언한다 — grid가 낸 모든 행의
+    ``sync_scope``가 그 행 capability의 제출 가능 집합에 있는 것과, DB가 그 triple을
+    실제로 받아들이는 것이 동치여야 한다.
+    """
     # ``effect="none"``은 "이 capability로는 어떤 sync scope도 제출할 수 없다"는 뜻이다.
     # 앞 판은 이 상태에도 ``effect="dataset_wide"``를 냈고, 그러면 payload가 **정상
     # dataset-wide capability와 ``reason`` 문자열 하나만** 달라진다. 프론트 게이트
@@ -244,34 +270,23 @@ def _scope_refresh_capability(
             effect="none",
             default_sync_scope=DATASET_WIDE_SYNC_SCOPE,
             # 선언된 것이 있다면(예: 비활성 dataset의 잔존 scope) 그대로 보여 준다.
-            # 운영자가 "왜 갱신이 막혔는지"를 이 목록으로 판단한다.
+            # 운영자가 "왜 갱신이 막혔는지"를 이 목록으로 판단한다. ``effect="none"``이
+            # 제출 가능 집합을 비우므로 이 목록이 실행 대상을 넓히지는 않는다.
             allowed_sync_scopes=list(entry.refresh_scopes),
             reason=_unrefreshable_reason(entry),
         )
-    if not entry.declares_default_refresh_scope:
-        # enabled refresh operation이 scope를 선언하긴 했는데 그것이 canonical scope가
-        # 아닌 상태다(``external_system:*`` 뿐). 스키마가 허용하고
-        # ``ProviderDatasetCatalogEntry.default_refresh_scope``가 표시용으로
-        # ``dataset_wide``로 degrade하는 상태이므로, 그 degrade를 **행 단위로 드러낸다** —
-        # 아래 분기의 "전체 dataset 단위로만 갱신합니다"를 그대로 내면 화면은 선언되지도
-        # 않은 dataset_wide 갱신이 가능하다고 읽는다.
-        return OpsDatasetScopeRefreshCapability(
-            supported=False,
-            selector="none",
-            effect="none",
-            default_sync_scope=DATASET_WIDE_SYNC_SCOPE,
-            allowed_sync_scopes=list(entry.refresh_scopes),
-            reason=(
-                "이 dataset의 refresh operation에 canonical sync scope"
-                "(dataset_wide/target_grids) 선언이 없습니다."
-            ),
-        )
-    if not entry.supports_targeted_refresh:
+    if entry.refresh_scopes == (DATASET_WIDE_SYNC_SCOPE,):
+        # 선언이 ``dataset_wide`` 하나뿐이라 고를 것이 없다. 이 분기의 사유는 그 조건이
+        # 참일 때만 참이다 — ``dataset_wide`` **말고 다른 scope도 선언된** dataset에까지
+        # 이 분기를 쓰면(앞 판은 ``not supports_targeted_refresh``로 접었다) 같은 응답이
+        # ``external_system:*`` membership 행을 내면서 capability로는 "전체 dataset
+        # 단위로만 갱신합니다"라고 말한다. 그 문장은 그 행에 대해 거짓이고, 서버는 그
+        # triple을 실제로 받는다.
         return OpsDatasetScopeRefreshCapability(
             supported=False,
             selector="none",
             effect="dataset_wide",
-            default_sync_scope="dataset_wide",
+            default_sync_scope=DATASET_WIDE_SYNC_SCOPE,
             allowed_sync_scopes=[],
             reason="이 dataset은 전체 dataset 단위로만 갱신합니다.",
         )
@@ -288,9 +303,27 @@ def _scope_refresh_capability(
     # 정본이라는 규칙이 그 축에도 똑같이 적용된다.
     return OpsDatasetScopeRefreshCapability(
         supported=True,
-        selector="poi_cache_targets",
+        # ``selector``는 "**scope 안의 대상**을 무엇이 고르는가"다 — scope 자체를 고를 수
+        # 있는지가 아니다. 이 분기를 ``target_grids`` 선언 밖으로 넓히면서 그 둘이 갈렸다:
+        # ``external_system:*``만 선언한 dataset에는 POI target이 하나도 없는데
+        # ``poi_cache_targets``를 그대로 내면 화면이 "범위 계약: 활성 POI target"이라고
+        # 적고, 막힐 때 사유도 "현재 활성 target에 포함되지 않은 sync scope입니다"가 된다.
+        # 둘 다 그 dataset에 대해 거짓이다 — 이 브랜치가 없애려던 거짓 표시 그 자체다.
+        selector=(
+            "poi_cache_targets" if entry.supports_targeted_refresh else "none"
+        ),
         effect="sync_scope",
-        default_sync_scope=entry.default_refresh_scope,
+        # canonical scope를 하나도 선언하지 않은 dataset(``external_system:*`` 뿐)에는
+        # ``entry.default_refresh_scope``의 표시용 degrade 값(``dataset_wide``)을 쓰지
+        # 않는다 — 그 값은 ``allowed_sync_scopes``에 없어서 프론트 게이트가 계약 모순으로
+        # 읽고, 선언되지도 않은 전체 갱신을 기본값으로 제안하는 셈이 된다. 선언된 것 중
+        # 정렬 첫 값을 쓴다(``refresh_scopes``는 정렬돼 있다). ``default_sync_scope``는
+        # 언제나 제출 가능 집합 안에 있어야 한다는 것이 이 분기의 불변식이다.
+        default_sync_scope=(
+            entry.default_refresh_scope
+            if entry.declares_default_refresh_scope
+            else entry.refresh_scopes[0]
+        ),
         allowed_sync_scopes=list(entry.refresh_scopes),
         reason=None,
     )

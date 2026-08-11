@@ -218,6 +218,22 @@ _CONSTRAINTS_ABSENT_FROM_HEAD: Final[dict[str, str]] = {
     ),
 }
 
+# 계약과 head가 **같은 이름**으로 갖고 있으나 `pg_get_indexdef` 문자열이 갈리는 index.
+# 여기 있는 것만 differs에서 면제된다 — 나머지는 전부 red다.
+# `test_frozen_contract_matches_alembic_head`가 이 목록과 실측이 정확히 같은지
+# 단언하므로 새 divergence가 조용히 늘거나 head가 수렴해도 red가 된다.
+_INDEXES_DIVERGENT_FROM_HEAD: Final[dict[str, str]] = {
+    "provider_sync.provider_sync_state.idx_provider_sync_state_next_run": (
+        "열·정렬·부분 술어가 같고 술어의 캐스팅 표기만 다르다: 계약 "
+        "`WHERE status = 'active'::text` vs head `WHERE status::text = 'active'::text`. "
+        "원인은 status 컬럼 타입이다 — head 실측 information_schema.columns.data_type = "
+        "'character varying', 계약 선언 = text. 같은 간극을 CHECK 축에서는 "
+        "_CONSTRAINTS_ABSENT_FROM_HEAD의 ck_provider_sync_state_status가 이미 기록하고 "
+        "있다. text가 vNext 도착점이고 varchar가 선행 상태이므로 계약을 head에 맞추지 "
+        "않는다 — 맞추면 계약이 도착점 선언이기를 그만두게 된다."
+    ),
+}
+
 # =============================================================================
 # H35 catalog 질의 — src/kortravelmap/cli/_h35_catalog.py의 7 카테고리 질의를
 # 복제·적응했다(출처 주석 — ADR/T-VN-31A 지시). 차이점:
@@ -347,6 +363,37 @@ JOIN pg_catalog.pg_namespace AS ns ON ns.oid = rel.relnamespace
 JOIN pg_catalog.pg_class AS idx_rel ON idx_rel.oid = idx.indexrelid
 JOIN pg_catalog.pg_am AS am ON am.oid = idx_rel.relam
 WHERE ns.nspname || '.' || rel.relname = ANY($1::text[])
+ORDER BY identity
+"""
+
+# 계약 ↔ head 대조 전용 index 축. `_INDEXES_SQL`(fingerprint용)과 갈라 두는 이유는
+# 두 가지다:
+#   * fingerprint payload는 `indoption`/`indclass` 같은 catalog 내부 표현까지 담아
+#     사람이 읽는 진단으로 쓸 수 없다. 대조에는 `pg_get_indexdef` 한 문자열이면
+#     충분하고, 그 한 문자열에 열·정렬·INCLUDE·부분 술어·연산자 클래스가 모두 들어
+#     있다(실측: head의 idx_import_job_events_member_time은 `INCLUDE (level)`과
+#     `WHERE ... AND quarantined_at IS NULL`까지 이 문자열에 찍힌다).
+#   * `_INDEXES_SQL`을 건드리면 frozen fingerprint가 통째로 바뀐다.
+#
+# 제약이 뒤에 만든 index(PK/UNIQUE/EXCLUDE backing index)는 제외한다 — 그쪽은
+# constraints 축이 `pg_get_constraintdef`로 이미 대조하고, rename/부재 목록도 거기
+# 달려 있다. 여기 다시 넣으면 같은 divergence를 두 축에서 두 번 세게 된다.
+_INDEX_DEFS_SQL: Final = """
+SELECT ns.nspname || '.' || rel.relname || '.' || idx_rel.relname AS identity,
+       jsonb_build_object(
+         'schema', ns.nspname,
+         'relation', rel.relname,
+         'name', idx_rel.relname,
+         'definition', pg_catalog.pg_get_indexdef(idx.indexrelid, 0, true)
+       ) AS payload
+FROM pg_catalog.pg_index AS idx
+JOIN pg_catalog.pg_class AS rel ON rel.oid = idx.indrelid
+JOIN pg_catalog.pg_namespace AS ns ON ns.oid = rel.relnamespace
+JOIN pg_catalog.pg_class AS idx_rel ON idx_rel.oid = idx.indexrelid
+WHERE ns.nspname || '.' || rel.relname = ANY($1::text[])
+  AND NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_constraint AS con WHERE con.conindid = idx.indexrelid
+  )
 ORDER BY identity
 """
 
@@ -612,12 +659,14 @@ async def _catalog_objects(
 
 
 async def _declarable_identities(connection: asyncpg.Connection) -> dict[str, set[str]]:
-    """대조 축 3종(제약·트리거·함수)의 현재 identity 집합."""
+    """대조 축 4종(제약·index·트리거·함수)의 현재 identity 집합."""
     constraints = await connection.fetch(_CONSTRAINTS_SQL, list(_TARGET_TABLES))
+    indexes = await connection.fetch(_INDEX_DEFS_SQL, list(_TARGET_TABLES))
     triggers = await connection.fetch(_TRIGGERS_SQL, list(_TARGET_TABLES))
     functions = await connection.fetch(_SCHEMA_FUNCTIONS_SQL, list(_CONTRACT_SCHEMAS))
     return {
         "constraints": {str(row["identity"]) for row in constraints},
+        "indexes": {str(row["identity"]) for row in indexes},
         "triggers": {str(row["identity"]) for row in triggers},
         "functions": {str(row["identity"]) for row in functions},
     }
@@ -1056,9 +1105,14 @@ async def test_frozen_contract_matches_alembic_head(
     **대조 범위** = `tvn33-reference-ownership-v1.sql`이 새로 만든 제약·트리거·함수
     **와 `CREATE OR REPLACE`로 본문을 다시 쓴 함수**(`tvn33_declared_identities`).
     두 계약 파일 사이의 catalog 차분이라 계약이 커지면 범위도 함께 커진다.
-    축은 `pg_constraint` / `pg_trigger` / `pg_proc`이고
-    payload는 `pg_get_constraintdef` · `pg_get_triggerdef` · `prosrc`까지 포함하므로
-    ON DELETE 동작, 트리거가 실행하는 함수, 함수 본문이 한 글자라도 갈리면 red다.
+    축은 `pg_constraint` / `pg_index` / `pg_trigger` / `pg_proc`이고
+    payload는 `pg_get_constraintdef` · `pg_get_indexdef` · `pg_get_triggerdef` ·
+    `prosrc`까지 포함하므로 ON DELETE 동작, index의 열·정렬·INCLUDE·부분 술어,
+    트리거가 실행하는 함수, 함수 본문이 한 글자라도 갈리면 red다.
+
+    index 축은 라운드13에서 열었다. 그 전에는 축이 제약·트리거·함수 셋뿐이라
+    같은 이름 index의 정의 차이가 대조되지 않았고, 실제로
+    `idx_import_job_events_member_time`이 계약과 head에서 다른 정의로 공존했다.
 
     **범위 밖**: head에만 있는 객체. `target-schema-v1.sql`은 아직 도달하지 않은
     vNext 목표 상태(weather/price fact·typed notice_states는 T-VN-38/T-VN-37 소관)를
@@ -1066,14 +1120,30 @@ async def test_frozen_contract_matches_alembic_head(
     필요한 만큼만 선언한다. 즉 계약은 head의 부분집합 선언이지 물리 스키마 전수
     사본이 아니다. 컬럼 물리 순서(`attnum`)도 같은 이유로 축이 아니다 — 계약은
     `CREATE TABLE` 한 번, head는 `ALTER TABLE` 누적이다.
+
+    **컬럼 축(NOT NULL·타입)을 아직 열지 않은 이유**는 비용이 아니라 의미다. 라운드13에
+    실측했다(`_TARGET_TABLES` 전체, 계약 DB ↔ head DB): 계약 291열 · head 486열 ·
+    이름이 겹치는 220열 · 계약에만 있는 71열. 그 220열 중 **`attnotnull`이 갈리는 것은
+    2건뿐**이라(`ops.feature_overrides.created_by`는 계약 NOT NULL/head nullable,
+    `ops.import_job_events.level`은 계약 nullable/head NOT NULL) NOT NULL 축 자체는 싸다.
+    문제는 같은 220열에서 **타입이 갈리는 것이 30건**이고 그 대부분이 legacy varchar →
+    vNext text/uuid 수렴(다른 T-VN 과제 소관)이라는 점이다. 게다가 계약의 컬럼 층은
+    의도적으로 stylized다 — 예를 들어 `ops.import_job_events`는 계약에만 있는
+    `event_kind`를 갖고 `event_id`가 bigint identity인 반면 head는 uuid다(둘 다 실측).
+    즉 "NOT NULL은 맞아야 하고 타입은 안 맞아도 된다"는 규칙은 계약의 컬럼 층이 무엇을
+    선언하는 것인지 먼저 정해야 근거가 생긴다. 그 결정 없이 축만 켜면 allowlist가
+    drift 기록이 아니라 to-do 목록이 된다.
     """
     declared_constraints = tvn33_declared_identities["constraints"]
+    declared_indexes = tvn33_declared_identities["indexes"]
     declared_triggers = tvn33_declared_identities["triggers"]
     declared_functions = tuple(sorted(tvn33_declared_identities["functions"]))
     # 차분이 비면 대조가 통째로 사라진다(fail-open) — 계약 파일이 지워지거나
     # 스냅샷 순서가 깨진 경우가 그렇다. 실측 하한으로 못박는다.
     # 하한은 `alembic 0092` head + 현재 계약 파일에서 이 fixture가 실제로 뽑은 값이다:
-    # 제약 76 · 트리거 23 · 함수 22.
+    # 제약 76 · index 11 · 트리거 23 · 함수 22.
+    #   * index 11 = 계약 파일의 `CREATE INDEX` 11문. 제약이 뒤에 만드는 backing
+    #     index는 `_INDEX_DEFS_SQL`이 걸러내므로 여기 세지 않는다.
     #   * 트리거 23 = 계약 파일의 `CREATE TRIGGER` 19문 + `CREATE CONSTRAINT TRIGGER`
     #     4문. 앞 판의 하한 19는 뒤 4문을 빼먹은 값이었다.
     #   * 함수 22 = `CREATE FUNCTION` 21문 + `CREATE OR REPLACE`로 본문만 바꾼 1건
@@ -1081,10 +1151,43 @@ async def test_frozen_contract_matches_alembic_head(
     #     만들고 이 계약이 0092 본문으로 다시 쓴다).
     # 계약이 커지면 이 하한도 같이 올려라.
     assert len(declared_constraints) >= 76, sorted(declared_constraints)
+    assert len(declared_indexes) >= 11, sorted(declared_indexes)
     assert len(declared_triggers) >= 23, sorted(declared_triggers)
     assert len(declared_functions) >= 22, declared_functions
 
+    head_indexes = await _catalog_objects(head_db, _INDEX_DEFS_SQL, _TARGET_TABLES)
+    contract_indexes = _restrict(
+        await _catalog_objects(freeze_db, _INDEX_DEFS_SQL, _TARGET_TABLES), declared_indexes
+    )
+    scoped_head_indexes = _restrict(head_indexes, declared_indexes)
+    divergent = frozenset(
+        identity
+        for identity in set(contract_indexes) & set(scoped_head_indexes)
+        if contract_indexes[identity] != scoped_head_indexes[identity]
+    )
+    assert divergent == frozenset(_INDEXES_DIVERGENT_FROM_HEAD), (
+        "계약과 head가 같은 이름으로 다르게 갖고 있는 index 목록이 바뀌었다. 새 항목은 "
+        "어느 쪽이 T-VN-33의 도착점인지 판단해 계약을 고치거나 근거를 실측해 "
+        "_INDEXES_DIVERGENT_FROM_HEAD에 적고, 사라진 항목은 한쪽이 수렴한 것이니 빼라: "
+        f"실측 - 목록: {sorted(divergent - frozenset(_INDEXES_DIVERGENT_FROM_HEAD))} / "
+        f"목록 - 실측: {sorted(frozenset(_INDEXES_DIVERGENT_FROM_HEAD) - divergent)}"
+    )
     problems = _diff_catalog(
+        "indexes",
+        {
+            identity: payload
+            for identity, payload in contract_indexes.items()
+            if identity not in divergent
+        },
+        {
+            identity: payload
+            for identity, payload in scoped_head_indexes.items()
+            if identity not in divergent
+        },
+        head_context=head_indexes,
+    )
+
+    problems += _diff_catalog(
         "triggers",
         _restrict(
             await _catalog_objects(freeze_db, _TRIGGERS_SQL, _TARGET_TABLES), declared_triggers

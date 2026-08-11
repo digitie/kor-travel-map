@@ -9,7 +9,13 @@ projection이 전부 틀려도 초록인 테스트가 **커버된 것처럼 보�
 (9라운드 적대 리뷰 BLOCKER-1).
 
 그래서 이름·위치·마커를 실제로 하는 일에 맞췄다. 이건 signature 계약 검사이지
-통합 회귀가 아니다. 지워진 992줄의 복원은 `docs/tasks.md`가 추적한다.
+통합 회귀가 아니다.
+
+지워졌던 REST 회귀는 **이 브랜치에서 이미 복원됐다** — `bd7708eb`가
+`tests/integration/test_ops_datasets_api_projection.py`를 1181줄로 되살렸고
+`24b90af4`(operation-only decoy)·`21b1758b`(pair_status 공허 단언)가 축을 더해 지금
+1326줄이다(`git show <rev>:<path> | wc -l` 실측, 2026-08-11). 그러니 이 파일에는 남은
+복원 과제가 없고 `docs/tasks.md`도 그 항목을 들고 있지 않다.
 """
 
 from __future__ import annotations

@@ -214,12 +214,18 @@ class ProviderDatasetCatalogEntry:
         2. 유일한 scope가 ``external_system:*`` —
            ``is_valid_provider_dataset_sync_scope``가 그 형태를 허용한다.
 
-        degrade한 값은 **표시 기본값**에만 쓰인다. 실행 허용 목록은 별도로
+        degrade한 값은 **표시 기본값**에만 쓰인다(``OpsDatasetCatalogInfo``의
+        ``provider_state_default_scope``). 실행 허용 목록은 별도로
         ``refresh_scopes``(=API의 ``allowed_sync_scopes``)이고 두 상태 모두 거기에
         ``dataset_wide``가 없으므로, degrade가 없는 membership을 실행 대상으로
-        넓히지 않는다. 선언 유무는 ``declares_default_refresh_scope``로 구분하고,
-        갱신 제출 가능 여부는 ``is_refreshable``(상태 1을 배제한다)과
-        ``OpsDatasetScopeRefreshCapability.effect``(``"none"``)가 따로 낸다.
+        넓히지 않는다.
+
+        선언 유무는 ``declares_default_refresh_scope``로 구분한다.
+        ``_scope_refresh_capability``는 그 값이 ``False``면 이 property를 쓰지 않고
+        선언된 scope 중 첫 값을 기본으로 쓴다 — 제출 가능 집합 밖의 값을 기본으로 내면
+        프론트 fail-closed 게이트가 계약 모순으로 읽기 때문이다. 상태 1은
+        ``is_refreshable``이 이미 배제하고(scope 선언이 0개), 그 경우 capability는
+        ``effect="none"``이다.
         """
         if "target_grids" in self.refresh_scopes:
             return "target_grids"

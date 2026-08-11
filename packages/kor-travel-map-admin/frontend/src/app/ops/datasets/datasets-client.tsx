@@ -41,6 +41,7 @@ import {
   datasetRefreshConflict,
   invalidateOpsDatasetQueries,
   opsDatasetLiveBadgeLabel,
+  opsDatasetScopeEffectSentence,
   resolveDatasetRefreshScope,
   useDatasetRefreshRequestStatus,
   useOpsDataset,
@@ -1441,8 +1442,7 @@ function RefreshNowSection({
             ? "활성 POI target"
             : "selector 없음"}
           {" · "}
-          효과{" "}
-          {scopeRefresh.effect === "sync_scope" ? "선택 scope" : "dataset 전체"}
+          {opsDatasetScopeEffectSentence(scopeRefresh.effect)}
           {" · "}
           기본{" "}
           <span className="font-mono">{scopeRefresh.default_sync_scope}</span>
