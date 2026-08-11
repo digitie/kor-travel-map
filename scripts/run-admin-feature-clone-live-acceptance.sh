@@ -28,6 +28,7 @@ readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 readonly SOURCE_ARCHIVE="$SCRIPT_DIR/source.tar.gz"
 readonly ARCHIVE_PREFIX="kor-travel-map-$SOURCE_COMMIT"
 readonly ARCHIVE_URL="https://github.com/digitie/kor-travel-map/archive/$SOURCE_COMMIT.tar.gz"
+LOOPBACK_PROXY_HELPER=""
 
 die() {
   printf 'admin feature clone live acceptance failed: %s (values redacted)\n' "$1" >&2
@@ -150,20 +151,32 @@ validate_snapshot() {
     die "snapshot root is unsafe"
   [[ "$(stat -c '%u:%g:%a' -- "$snapshot_root")" == "0:0:555" ]] ||
     die "snapshot root metadata is unsafe"
-  local expected_names actual_names
-  expected_names=$'admin_feature_clone_live_state.py\nadmin_feature_live_fixture.py\nc7-loopback-ui-proxy.mjs\nrun-admin-feature-clone-live-acceptance.sh\nsource.tar.gz'
+  local installed_names legacy_names actual_names
+  installed_names=$'admin_feature_clone_live_state.py\nadmin_feature_live_fixture.py\nc7-loopback-ui-proxy.mjs\nrun-admin-feature-clone-live-acceptance.sh\nsource.tar.gz'
+  legacy_names=$'admin_feature_clone_live_state.py\nadmin_feature_live_fixture.py\nrun-admin-feature-clone-live-acceptance.sh\nsource.tar.gz'
   actual_names="$(
     find "$snapshot_root" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort
   )"
-  [[ "$actual_names" == "$expected_names" ]] || die "snapshot exact file set mismatch"
+  if [[ "$actual_names" == "$installed_names" ]]; then
+    LOOPBACK_PROXY_HELPER="$snapshot_root/c7-loopback-ui-proxy.mjs"
+  elif [[ "$actual_names" == "$legacy_names" ]]; then
+    # 이전 immutable bootstrap root는 새 보조 파일을 설치하지 못한다. 전체 source
+    # archive의 정확한 member만 아래에서 root-owned runtime file로 물질화한다.
+    [[ "$(tar -tzf "$archive" "$prefix/scripts/c7-loopback-ui-proxy.mjs")" == "$prefix/scripts/c7-loopback-ui-proxy.mjs" ]] ||
+      die "legacy snapshot lacks the loopback proxy source"
+  else
+    die "snapshot exact file set mismatch"
+  fi
   [[ "$(stat -c '%u:%g:%a' -- "$archive")" == "0:0:444" && ! -L "$archive" ]] ||
     die "source archive metadata is unsafe"
   local name expected_mode archive_digest installed_digest
-  for name in \
+  local -a snapshot_files=(
     admin_feature_clone_live_state.py \
     admin_feature_live_fixture.py \
-    c7-loopback-ui-proxy.mjs \
-    run-admin-feature-clone-live-acceptance.sh; do
+    run-admin-feature-clone-live-acceptance.sh
+  )
+  [[ -z "$LOOPBACK_PROXY_HELPER" ]] || snapshot_files+=(c7-loopback-ui-proxy.mjs)
+  for name in "${snapshot_files[@]}"; do
     expected_mode=444
     [[ "$name" != run-admin-feature-clone-live-acceptance.sh ]] || expected_mode=555
     [[ "$(stat -c '%u:%g:%a' -- "$snapshot_root/$name")" == "0:0:$expected_mode" ]] ||
@@ -1116,6 +1129,33 @@ CHECKPOINT_LOGIN_FENCED=0
 CHECKPOINT_DUMP_DURABLE=0
 BLOCKED_WRITTEN=0
 COMPLETE=0
+
+prepare_loopback_proxy_helper() {
+  if [[ -n "$LOOPBACK_PROXY_HELPER" ]]; then
+    [[ "$(stat -c '%u:%g:%a' -- "$LOOPBACK_PROXY_HELPER")" == "0:0:444" ]] &&
+      [[ ! -L "$LOOPBACK_PROXY_HELPER" ]] ||
+      die "installed loopback proxy metadata is unsafe"
+    return
+  fi
+
+  local archive_member="$ARCHIVE_PREFIX/scripts/c7-loopback-ui-proxy.mjs"
+  [[ "$(tar -tzf "$SOURCE_ARCHIVE" "$archive_member")" == "$archive_member" ]] ||
+    die "loopback proxy source is absent from the immutable archive"
+  local proxy_path="$RUNTIME_DIR/c7-loopback-ui-proxy.mjs"
+  [[ ! -e "$proxy_path" && ! -L "$proxy_path" ]] ||
+    die "runtime loopback proxy path already exists"
+  local temporary_path
+  temporary_path="$(mktemp "$RUNTIME_DIR/.c7-loopback-ui-proxy.XXXXXX")"
+  tar -xOf "$SOURCE_ARCHIVE" "$archive_member" >"$temporary_path"
+  [[ -s "$temporary_path" ]] || die "loopback proxy source is empty"
+  chown root:root -- "$temporary_path"
+  chmod 0444 -- "$temporary_path"
+  mv -T --no-clobber -- "$temporary_path" "$proxy_path" ||
+    die "runtime loopback proxy installation failed"
+  [[ "$(sha256sum "$proxy_path" | awk '{print $1}')" == "$(tar -xOf "$SOURCE_ARCHIVE" "$archive_member" | sha256sum | awk '{print $1}')" ]] ||
+    die "runtime loopback proxy differs from the immutable archive"
+  LOOPBACK_PROXY_HELPER="$proxy_path"
+}
 
 prepare_build_context() {
   local snapshot_root="$1"
@@ -2743,6 +2783,7 @@ run_executor() {
   local name="$1"
   local artifact_dir="$2"
   local recovery_only="$3"
+  prepare_loopback_proxy_helper
   mkdir -- "$artifact_dir"
   chmod 0700 -- "$artifact_dir"
   local -a recovery_env=()
@@ -2761,7 +2802,7 @@ run_executor() {
     --tmpfs /root/.config:rw,nosuid,nodev,noexec,mode=700 \
     --tmpfs /root/.npm:rw,nosuid,nodev,noexec,mode=700 \
     --mount "type=bind,src=$artifact_dir,dst=/evidence" \
-    --mount "type=bind,src=$SCRIPT_DIR/c7-loopback-ui-proxy.mjs,dst=/opt/c7-loopback-ui-proxy.mjs,readonly" \
+    --mount "type=bind,src=$LOOPBACK_PROXY_HELPER,dst=/opt/c7-loopback-ui-proxy.mjs,readonly" \
     --env "E2E_BASE_URL=http://127.0.0.1:$LOOPBACK_UI_PORT" \
     --env "KTM_C7_LOOPBACK_UI_PROXY_PORT=$LOOPBACK_UI_PORT" \
     --env "KTM_C7_LOOPBACK_UI_PROXY_TARGET=http://candidate-ui:$UI_PORT" \
