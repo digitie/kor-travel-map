@@ -674,6 +674,7 @@ def test_content_digest_excludes_only_run_bound_auth_domain_receipts() -> None:
 
     assert 'local digest_revision="${4-current}"' in source
     assert "legacy-v1)" in source
+    assert "legacy-v0)" in source
     assert "'domain_commands', 'domain_command_results'" in source
     assert "relation.relname = 'domain_commands_command_id_seq'" in source
     assert "run-owned identity sequence excluded" in source
@@ -694,10 +695,8 @@ def test_checkpoint_content_digest_rebase_requires_exact_legacy_checkpoint_match
     assert '[[ "$MODE" == "checkpoint" && "$existing_checkpoint_version" == "4" ]]' in (
         checkpoint_source
     )
-    assert 'write_snapshot "$LEGACY_CHECKPOINT_SNAPSHOT" "$RUN_ID" "" "" legacy-v1' in (
-        checkpoint_source
-    )
-    assert checkpoint_source.index("legacy-v1") < checkpoint_source.index(
+    assert "for candidate_digest_revision in legacy-v1 legacy-v0; do" in checkpoint_source
+    assert checkpoint_source.index("legacy-v1 legacy-v0") < checkpoint_source.index(
         "CHECKPOINT_CONTENT_REBASE=1"
     )
     assert checkpoint_source.index("CHECKPOINT_CONTENT_REBASE=1") < checkpoint_source.index(

@@ -758,6 +758,7 @@ content_sha256() {
       die "dataset projection baseline timestamp is invalid"
   fi
   local sequence_identity_case=""
+  local domain_command_filter_case=""
   case "$digest_revision" in
     current)
       sequence_identity_case="$(cat <<'SQL'
@@ -770,13 +771,44 @@ content_sha256() {
   )
 SQL
 )"
+      domain_command_filter_case="current"
       ;;
     legacy-v1)
+      domain_command_filter_case="legacy-v1"
+      ;;
+    legacy-v0)
       ;;
     *)
       die "content digest revision is invalid"
       ;;
   esac
+  if [[ -n "$domain_command_filter_case" ]]; then
+    domain_command_filter_case="$(cat <<'SQL'
+  WHEN namespace.nspname = 'ops'
+    AND relation.relname IN ('domain_commands', 'domain_command_results')
+  THEN format(
+    'SELECT %L || chr(31) || count(*)::text || chr(31) || ' ||
+    'COALESCE(bit_xor(hashtextextended(row_value::text, 0))::text, ''null'') || ' ||
+    'chr(31) || COALESCE(bit_xor(hashtextextended(row_value::text, ' ||
+    '9223372036854775807))::text, ''null'') ' ||
+    'FROM %I.%I AS row_value WHERE NOT EXISTS (' ||
+    'SELECT 1 FROM ops.domain_commands AS command ' ||
+    'JOIN ops.domain_command_results AS result ' ||
+    'ON result.command_id = command.command_id ' ||
+    'WHERE command.command_id = row_value.command_id ' ||
+    'AND command.actor = ''ui-auth'' ' ||
+    'AND command.operation = ''admin.auth-event.create'' ' ||
+    'AND result.response_body #>> ''{data,item,request_id}'' IN (%L, %L)' ||
+    ');',
+    namespace.nspname || '.' || relation.relname,
+    namespace.nspname,
+    relation.relname,
+    'e2e_live_acceptance::${run_id}::auth::main',
+    'e2e_live_acceptance::${run_id}::auth::recovery'
+  )
+SQL
+)"
+  fi
   local statement_query statements
   statement_query="$(cat <<SQL
 SELECT CASE
@@ -807,28 +839,7 @@ ${sequence_identity_case}
     '${dataset_projection_revision}',
     '${dataset_projection_updated_at}'
   )
-  WHEN namespace.nspname = 'ops'
-    AND relation.relname IN ('domain_commands', 'domain_command_results')
-  THEN format(
-    'SELECT %L || chr(31) || count(*)::text || chr(31) || ' ||
-    'COALESCE(bit_xor(hashtextextended(row_value::text, 0))::text, ''null'') || ' ||
-    'chr(31) || COALESCE(bit_xor(hashtextextended(row_value::text, ' ||
-    '9223372036854775807))::text, ''null'') ' ||
-    'FROM %I.%I AS row_value WHERE NOT EXISTS (' ||
-    'SELECT 1 FROM ops.domain_commands AS command ' ||
-    'JOIN ops.domain_command_results AS result ' ||
-    'ON result.command_id = command.command_id ' ||
-    'WHERE command.command_id = row_value.command_id ' ||
-    'AND command.actor = ''ui-auth'' ' ||
-    'AND command.operation = ''admin.auth-event.create'' ' ||
-    'AND result.response_body #>> ''{data,item,request_id}'' IN (%L, %L)' ||
-    ');',
-    namespace.nspname || '.' || relation.relname,
-    namespace.nspname,
-    relation.relname,
-    'e2e_live_acceptance::${run_id}::auth::main',
-    'e2e_live_acceptance::${run_id}::auth::recovery'
-  )
+${domain_command_filter_case}
   ELSE format(
     'SELECT %L || chr(31) || count(*)::text || chr(31) || ' ||
     'COALESCE(bit_xor(hashtextextended(row_value::text, 0))::text, ''null'') || ' ||
@@ -2551,16 +2562,28 @@ print(value)
       if ! state_helper verify-checkpoint \
           --checkpoint "$CHECKPOINT_FILE" \
           --snapshot "$CURRENT_CHECKPOINT_SNAPSHOT" >/dev/null; then
-        # e462에서 run-owned domain-command sequence를 content digest에서 제외했다.
-        # checkpoint mode에서만 직전 규칙으로 기존 서명과 먼저 정확히 대조해,
-        # 이 분류 변경 외 DB drift를 checkpoint 재인증 경로에 넣지 않는다.
+        # e462은 run-owned domain-command sequence를, 789는 run-owned receipt를
+        # content digest에서 제외했다. checkpoint mode에서만 알려진 두 직전 규칙으로
+        # 기존 서명과 먼저 정확히 대조해, 이 분류 변경 외 DB drift를 재인증하지 않는다.
         [[ "$MODE" == "checkpoint" && "$existing_checkpoint_version" == "4" ]] ||
           die "existing checkpoint differs from the current clone"
         LEGACY_CHECKPOINT_SNAPSHOT="$STATE_ROOT/.clone-checkpoint-legacy-$$.json"
-        write_snapshot "$LEGACY_CHECKPOINT_SNAPSHOT" "$RUN_ID" "" "" legacy-v1
-        state_helper verify-checkpoint \
-          --checkpoint "$CHECKPOINT_FILE" \
-          --snapshot "$LEGACY_CHECKPOINT_SNAPSHOT" >/dev/null ||
+        LEGACY_DIGEST_REVISION=""
+        for candidate_digest_revision in legacy-v1 legacy-v0; do
+          write_snapshot \
+            "$LEGACY_CHECKPOINT_SNAPSHOT" \
+            "$RUN_ID" \
+            "" \
+            "" \
+            "$candidate_digest_revision"
+          if state_helper verify-checkpoint \
+              --checkpoint "$CHECKPOINT_FILE" \
+              --snapshot "$LEGACY_CHECKPOINT_SNAPSHOT" >/dev/null; then
+            LEGACY_DIGEST_REVISION="$candidate_digest_revision"
+            break
+          fi
+        done
+        [[ -n "$LEGACY_DIGEST_REVISION" ]] ||
           die "existing checkpoint differs outside the recognized content digest revision"
         CHECKPOINT_CONTENT_REBASE=1
       fi
