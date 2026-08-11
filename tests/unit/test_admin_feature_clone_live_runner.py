@@ -518,6 +518,11 @@ def test_complete_recovers_without_rerunning_valid_evidence(tmp_path: Path) -> N
 
 def test_abandon_failed_run_requires_cleaned_failure_evidence(tmp_path: Path) -> None:
     runtime, blocked = _prepare_runtime(tmp_path)
+    _write_snapshot(
+        runtime / "clone-final.json",
+        total=126,
+        content_sha256="7" * 64,
+    )
     _write_failed_main_report(runtime / "playwright-main")
     for phase in (
         "candidate-startup-running",

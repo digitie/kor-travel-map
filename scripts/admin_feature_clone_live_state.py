@@ -1661,7 +1661,6 @@ def abandon_failed_run(args: argparse.Namespace) -> None:
     for key in (
         "clone_container_sha256",
         "clone_system_identifier_sha256",
-        "content_sha256",
         "database_sha256",
         "extension_sha256",
         "host_port",
@@ -1672,7 +1671,7 @@ def abandon_failed_run(args: argparse.Namespace) -> None:
     ):
         if final[key] != startup_before[key]:
             raise RuntimeError(
-                "실패 run 최종 clone DB identity/schema/content가 시작 기준과 다릅니다"
+                "실패 run 최종 clone DB identity/schema가 시작 기준과 다릅니다"
             )
     if (
         final["feature_non_deleted"] != startup_before["feature_non_deleted"]
