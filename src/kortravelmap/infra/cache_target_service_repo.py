@@ -12,6 +12,10 @@ from kortravelmap.core.cache_target_stream import (
     validate_cache_target_external_system,
     validate_cache_target_key,
 )
+from kortravelmap.infra.cache_target_event_repo import (
+    append_cache_target_refresh_status_events,
+    capture_cache_target_refresh_members_by_keys,
+)
 from kortravelmap.infra.cache_target_stream_repo import CacheTargetStreamConflict
 from kortravelmap.infra.domain_command_repo import canonical_domain_command_fingerprint
 from kortravelmap.infra.feature_update_repo import (
@@ -276,6 +280,22 @@ async def create_cache_target_refresh_request(
         run_mode="queued",
         operator=actor,
         reason=reason,
+    )
+    # 요청을 queue에 넣는 것 자체가 PinVi가 관측해야 하는 상태 전이다. 실행자가
+    # running으로 claim할 때까지 기다리면, queue에서 취소·정지된 요청은 relay에
+    # 영영 나타나지 않는다. source tuple snapshot과 queued event를 이 mutation과
+    # 같은 transaction에 남긴다.
+    await capture_cache_target_refresh_members_by_keys(
+        session,
+        request_id=request.request_id,
+        external_system=external_system,
+        target_keys=canonical_target_keys,
+    )
+    await append_cache_target_refresh_status_events(
+        session,
+        request_id=request.request_id,
+        job_id=request.job_id,
+        status="queued",
     )
     await create_feature_update_request_idempotency(
         session,
