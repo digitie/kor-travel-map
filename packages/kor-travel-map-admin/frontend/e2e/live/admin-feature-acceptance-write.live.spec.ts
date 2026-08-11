@@ -262,6 +262,12 @@ async function browserFetch<T>(
         parsed = null;
       }
       const contentType = response.headers.get("Content-Type");
+      const failureClass: FetchResult<T>["failureClass"] =
+        contentType?.startsWith("application/problem+json")
+          ? "api-problem"
+          : contentType?.startsWith("application/json")
+            ? "json"
+            : "non-json";
       const problemCode =
         parsed !== null &&
         typeof parsed === "object" &&
@@ -274,11 +280,7 @@ async function browserFetch<T>(
         body: parsed as T | null,
         contentType,
         entityTag: response.headers.get("ETag"),
-        failureClass: contentType?.startsWith("application/problem+json")
-          ? "api-problem"
-          : contentType?.startsWith("application/json")
-            ? "json"
-            : "non-json",
+        failureClass,
         problemCode,
         status: response.status,
       };

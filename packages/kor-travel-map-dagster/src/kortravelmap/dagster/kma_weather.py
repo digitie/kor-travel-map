@@ -141,7 +141,7 @@ def _response_row_payload(row: Any) -> dict[str, Any]:
     """typed KMA row를 source record에 보존할 canonical JSON object로 바꾼다."""
 
     if is_dataclass(row) and not isinstance(row, type):
-        return cast("dict[str, Any]", asdict(row))
+        return asdict(row)
     raw = getattr(row, "raw", None)
     if isinstance(raw, dict):
         return dict(raw)

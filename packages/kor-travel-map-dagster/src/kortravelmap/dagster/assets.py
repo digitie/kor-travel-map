@@ -187,7 +187,7 @@ def _response_payload_item(item: Any) -> dict[str, Any]:
     """provider response item을 source record에 보존할 canonical JSON object로 만든다."""
 
     if is_dataclass(item) and not isinstance(item, type):
-        return cast("dict[str, Any]", asdict(item))
+        return asdict(item)
     raw = getattr(item, "raw", None)
     if isinstance(raw, dict):
         return dict(raw)

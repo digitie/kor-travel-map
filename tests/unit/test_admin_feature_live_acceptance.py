@@ -11,6 +11,7 @@ import pytest
 
 _ROOT = Path(__file__).resolve().parents[2]
 _RUNNER = _ROOT / "scripts" / "run-admin-feature-live-acceptance.sh"
+_CLONE_RUNNER = _ROOT / "scripts" / "run-admin-feature-clone-live-acceptance.sh"
 _FIXTURE = _ROOT / "scripts" / "admin_feature_live_fixture.py"
 _STATE = _ROOT / "scripts" / "admin_feature_live_state.py"
 _SUPERVISOR = _ROOT / "scripts" / "admin_feature_live_supervisor.py"
@@ -653,6 +654,17 @@ def test_browser_lane_covers_all_nonpublic_markers_and_cards() -> None:
     assert "weather.data.metrics).toHaveLength(1)" in spec
     assert "price.data.history).toHaveLength(1)" in spec
     assert "assertPublicInBoundsExcludes(" in spec
+
+
+def test_clone_content_digest_excludes_only_run_bound_domain_receipts() -> None:
+    """browser admin 명령 원장은 응답의 fixture feature ID로만 digest에서 뺀다."""
+    runner = _CLONE_RUNNER.read_text(encoding="utf-8")
+
+    assert "'domain_commands', 'domain_command_results'" in runner
+    assert "command.actor = ''ui-auth''" in runner
+    assert "result.response_body #>> ''{data,item,request_id}''" in runner
+    assert "result.response_body::text LIKE %L" in runner
+    assert "'%e2e_live_acceptance::${run_id}::%'" in runner
 
 
 def test_evidence_validator_requires_exact_schema_phase_counts_and_fsync() -> None:

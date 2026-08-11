@@ -796,15 +796,18 @@ SQL
     'JOIN ops.domain_command_results AS result ' ||
     'ON result.command_id = command.command_id ' ||
     'WHERE command.command_id = row_value.command_id ' ||
-    'AND command.actor = ''ui-auth'' ' ||
-    'AND command.operation = ''admin.auth-event.create'' ' ||
-    'AND result.response_body #>> ''{data,item,request_id}'' IN (%L, %L)' ||
+    'AND (('
+      || 'command.actor = ''ui-auth'' '
+      || 'AND command.operation = ''admin.auth-event.create'' '
+      || 'AND result.response_body #>> ''{data,item,request_id}'' IN (%L, %L)'
+    ') OR result.response_body::text LIKE %L)' ||
     ');',
     namespace.nspname || '.' || relation.relname,
     namespace.nspname,
     relation.relname,
     'e2e_live_acceptance::${run_id}::auth::main',
-    'e2e_live_acceptance::${run_id}::auth::recovery'
+    'e2e_live_acceptance::${run_id}::auth::recovery',
+    '%e2e_live_acceptance::${run_id}::%'
   )
 SQL
 )"

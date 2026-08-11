@@ -6,7 +6,6 @@ import { useMemo } from "react";
 
 import {
   useAdminFeatureWeather,
-  type WeatherCardData,
   type WeatherMetric,
 } from "@/api/features";
 import { StatusBadge } from "@/components/status-badge";
