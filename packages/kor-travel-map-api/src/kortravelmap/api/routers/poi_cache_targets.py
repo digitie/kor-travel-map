@@ -91,6 +91,8 @@ _TargetKeyPath = Annotated[
     ),
 ]
 
+_RELAY_OWNED_EXTERNAL_SYSTEM = "pinvi"
+
 
 def _validate_optional_external_system(value: str | None) -> str | None:
     return value if value is None else validate_cache_target_external_system(value)
@@ -442,6 +444,22 @@ def _unprocessable(exc: ValueError) -> HTTPException:
     return HTTPException(status_code=422, detail=str(exc))
 
 
+def _require_manual_target_writer(external_system: str) -> None:
+    """PinVi target state는 source generation/outbox 경계 밖에서 바꾸지 않는다."""
+
+    if external_system == _RELAY_OWNED_EXTERNAL_SYSTEM:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "CACHE_TARGET_SOURCE_PROTOCOL_REQUIRED",
+                "message": (
+                    "PinVi cache target은 admin 수동 resource로 변경할 수 없습니다. "
+                    "ServiceToken source protocol을 사용하세요."
+                ),
+            },
+        )
+
+
 @router.put(
     "/{external_system}/{target_key}",
     response_model=PoiCacheTargetMutationResponse,
@@ -462,6 +480,7 @@ async def put_poi_cache_target(
     response: Response,
 ) -> PoiCacheTargetMutationResponse:
     started_at = perf_counter()
+    _require_manual_target_writer(external_system)
     try:
         async with session.begin():
             target = await upsert_poi_cache_target(
@@ -577,6 +596,7 @@ async def get_poi_cache_target_record(
         422: {"description": "If-Match가 canonical UUID+version strong ETag가 아님"},
         428: {"description": "If-Match 누락"},
         403: {"description": "파괴적 admin 작업 비활성"},
+        409: {"description": "PinVi target은 ServiceToken source protocol 전용"},
     },
     openapi_extra={"parameters": [_IF_MATCH_OPENAPI_PARAMETER]},
 )
@@ -588,6 +608,7 @@ async def delete_poi_cache_target_record(
     response: Response,
 ) -> PoiCacheTargetMutationResponse:
     started_at = perf_counter()
+    _require_manual_target_writer(external_system)
     expected_target_id, expected_lock_version = _expected_target_identity(request)
     async with session.begin():
         result = await delete_poi_cache_target(

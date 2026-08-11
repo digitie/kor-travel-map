@@ -1986,10 +1986,70 @@ def test_restore_fence_uses_stream_etag_and_domain_command_claim(
     assert data["superseded_reconciliation_request_id"] == RECONCILIATION_REQUEST_ID
     assert service.restore_calls[0]["command_id"] == 123
     assert service.restore_calls[0]["expected_control_version"] == 2
-    # 첫 실행은 route decorator의 201을 반환하지만 terminal ledger는 기존
-    # restore-fence exact replay 계약(200)을 보존한다.
+    # 첫 transport response는 POST contract의 201이나, exact idempotency replay는
+    # ADR-081에 따라 200을 replay한다.
     assert captured_complete["status_code"] == 200
     assert captured_complete["response_headers"] == {"ETag": f'"{EXTERNAL_SYSTEM}:3"'}
+
+
+@pytest.mark.unit
+def test_restore_fence_exact_replay_returns_200_after_initial_201(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.domain_command_service import DomainCommandReplay
+    from kortravelmap.api.routers import cache_target_streams as router_module
+
+    service = _FakeCacheTargetService()
+    captured: dict[str, Any] = {}
+
+    async def _begin_domain_command(_session: Any, **_kwargs: Any) -> Any:
+        return SimpleNamespace(command_id=124, request_fingerprint="c" * 64)
+
+    async def _complete_domain_command(_session: Any, **kwargs: Any) -> None:
+        captured.update(kwargs)
+
+    monkeypatch.setattr(router_module, "begin_domain_command", _begin_domain_command)
+    monkeypatch.setattr(router_module, "complete_domain_command", _complete_domain_command)
+    client = _client(service)
+    headers = _service_headers(
+        token=RESTORE_TOKEN,
+        extra={"If-Match": f'"{EXTERNAL_SYSTEM}:2"'},
+    )
+    body = {
+        "consumer_id": CONSUMER_ID,
+        "expected_restore_epoch": 4,
+        "reason": "operator-requested restore barrier",
+    }
+
+    first = client.post(
+        f"/v1/service/cache-target-streams/{EXTERNAL_SYSTEM}/restore-fences",
+        headers=headers,
+        json=body,
+    )
+    assert first.status_code == 201, first.text
+    assert captured["status_code"] == 200
+
+    replay_record = SimpleNamespace(
+        response_body=captured["response"].model_dump(mode="json"),
+        response_status=captured["status_code"],
+        response_headers=captured["response_headers"],
+    )
+
+    async def _replay_domain_command(_session: Any, **_kwargs: Any) -> Any:
+        raise DomainCommandReplay(replay_record)
+
+    monkeypatch.setattr(router_module, "begin_domain_command", _replay_domain_command)
+    replay = client.post(
+        f"/v1/service/cache-target-streams/{EXTERNAL_SYSTEM}/restore-fences",
+        headers=headers,
+        json=body,
+    )
+
+    assert replay.status_code == 200, replay.text
+    assert replay.json() == first.json()
+    assert replay.headers["etag"] == first.headers["etag"]
+    assert replay.headers["idempotency-replayed"] == "true"
+    assert len(service.restore_calls) == 1
 
 
 @pytest.mark.unit
