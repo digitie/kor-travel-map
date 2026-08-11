@@ -535,6 +535,15 @@ def test_abandon_failed_run_requires_cleaned_failure_evidence(
     if blank_historical_audits:
         (runtime / "api-owned-audit.json").write_bytes(b"")
         (runtime / "auth-audit.json").write_bytes(b"")
+        (runtime / "playwright-main" / "admin-feature-acceptance-safe-debug.json").write_text(
+            json.dumps(
+                {
+                    "last_browser_fetch_status": 404,
+                    "stage": "create-draft",
+                }
+            ),
+            encoding="utf-8",
+        )
     for phase in (
         "candidate-startup-running",
         "fixture-seed-running",

@@ -38,6 +38,17 @@ _REPORT_FILES: Final[set[str]] = {
     "c7-summary.html",
     "c7-summary.json",
 }
+_SAFE_MAIN_DEBUG_FILE: Final[str] = "admin-feature-acceptance-safe-debug.json"
+_SAFE_MAIN_DEBUG_KEYS: Final[set[str]] = {
+    "last_browser_fetch_failure_class",
+    "last_browser_fetch_problem_code",
+    "last_browser_fetch_status",
+    "stage",
+}
+_SAFE_MAIN_DEBUG_STAGE_RE: Final[re.Pattern[str]] = re.compile(
+    r"^[a-z0-9][a-z0-9:._-]{0,159}$"
+)
+_SAFE_MAIN_DEBUG_CODE_RE: Final[re.Pattern[str]] = re.compile(r"^[A-Z0-9_]{1,96}$")
 _EXPECTED_TESTS: Final[tuple[str, str]] = (
     "auth.setup.ts",
     "admin-feature-acceptance-write.live.spec.ts",
@@ -1217,6 +1228,34 @@ def _empty_historical_audits(*paths: Path) -> bool:
     )
 
 
+def _validate_safe_main_debug(path: Path) -> None:
+    """실패 원인 분류만 담는 redacted browser 진단 파일을 검증한다."""
+
+    evidence = _load_object(path)
+    if not {"last_browser_fetch_status", "stage"}.issubset(evidence) or not set(
+        evidence
+    ).issubset(_SAFE_MAIN_DEBUG_KEYS):
+        raise RuntimeError("safe browser failure debug field가 예상과 다릅니다")
+    status = evidence["last_browser_fetch_status"]
+    stage = evidence["stage"]
+    failure_class = evidence.get("last_browser_fetch_failure_class")
+    problem_code = evidence.get("last_browser_fetch_problem_code")
+    if (
+        (status is not None and (not isinstance(status, int) or isinstance(status, bool)))
+        or not isinstance(stage, str)
+        or _SAFE_MAIN_DEBUG_STAGE_RE.fullmatch(stage) is None
+        or failure_class not in {None, "api-problem", "json", "non-json"}
+        or (
+            problem_code is not None
+            and (
+                not isinstance(problem_code, str)
+                or _SAFE_MAIN_DEBUG_CODE_RE.fullmatch(problem_code) is None
+            )
+        )
+    ):
+        raise RuntimeError("safe browser failure debug 값이 예상과 다릅니다")
+
+
 def _report_counts(
     path: Path,
     *,
@@ -1225,10 +1264,17 @@ def _report_counts(
     if path.is_symlink() or not path.is_dir():
         raise RuntimeError(f"Playwright evidence directory가 아닙니다: {path.name}")
     items = tuple(path.iterdir())
-    if {item.name for item in items} != _REPORT_FILES or any(
+    expected_files = _REPORT_FILES | (
+        {_SAFE_MAIN_DEBUG_FILE}
+        if allow_failed_main and (path / _SAFE_MAIN_DEBUG_FILE).is_file()
+        else set()
+    )
+    if {item.name for item in items} != expected_files or any(
         item.is_symlink() for item in items
     ):
         raise RuntimeError(f"Playwright evidence exact file set이 아닙니다: {path.name}")
+    if _SAFE_MAIN_DEBUG_FILE in expected_files:
+        _validate_safe_main_debug(path / _SAFE_MAIN_DEBUG_FILE)
     summary = _load_object(path / "c7-summary.json")
     if (
         summary.get("version") != 1
