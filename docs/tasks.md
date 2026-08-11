@@ -85,7 +85,7 @@ barrier로 직렬화한다.
     [x] `T-VN-35A-D`(typed subtype 분해 — ADR-086, A-D 단일 PR) →
     [ ] `T-VN-37A` → [ ] `T-VN-37B` → [ ] `T-VN-37C`
   - Lane B shadow: [~] `T-VN-33`(A/B/C 단일 PR — DB 정본·writer/reader cutover·legacy fence) →
-    [ ] `T-VN-38A` → [ ] `T-VN-38B` → [ ] `T-VN-38C` →
+    [x] `T-VN-38A` → [x] `T-VN-38B` → [x] `T-VN-38C` →
     [ ] `T-VN-34A` → [ ] `T-VN-34B` → [ ] `T-VN-34C` →
     [ ] `T-VN-36A` → [ ] `T-VN-36B` → [ ] `T-VN-36C`
   - 32~38 join barrier 뒤 Lane B: [ ] `T-VN-40A` → [ ] `T-VN-40B` →
@@ -781,17 +781,17 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 
 ### T-VN-38 — weather·price current summary (Lane B)
 
-- [ ] T-VN-38A — **weather current summary**
+- [x] T-VN-38A — **weather current summary**
 
   bitemporal 원본 이력을 보존하면서 identity당 current weather를 원자 유지하는 summary와
   reconciliation을 추가한다.
 
-- [ ] T-VN-38B — **price current summary**
+- [x] T-VN-38B — **price current summary**
 
   `provider + price_domain + product_key` identity당 current price summary와 reconciliation을
   추가하고 restore/backfill generation을 구분한다.
 
-- [ ] T-VN-38C — **bbox/detail set-based cutover**
+- [x] T-VN-38C — **bbox/detail set-based cutover**
 
   per-row LATERAL을 weather/price summary set join으로 바꾸고 old query를 normal path에서
   비활성화한다. rollback shadow index는 보존해 T-VN-39 removal manifest로 넘기고,
@@ -803,8 +803,16 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   public/admin card·anchor·bbox 모두에 적용했다. map weather summary의 canonical dataset identity와
   deadline은 필수다. summary가 전혀 없는 eligible raw series까지 expected set-diff로 검출하고,
   partial-own anchor가 batch뿐 아니라 current·snapshot·admin single-card에서도 자신을 KMA/observed
-  fallback으로 재선정하지 않도록 고쳤다. 재리뷰 2인 P0=0 및 n150 destructive rebuild/live UI E2E가
-  남았다.
+  fallback으로 재선정하지 않도록 고쳤다.
+
+  **완료(#971)**: weather·price의 전역 mutable current projection을 각각 transaction advisory
+  lock으로 직렬화하고, freshness·cardinality·EXPLAIN·frozen artifact의 CRLF byte guard를
+  고정했다. final `e68b00ef`는 Dagster의 raw provider response fixture를 JSON 보존 가능
+  구조체로 정렬했고, 정상 live run 시작 전 signed clone checkpoint dump를 전용 clone에 복원해
+  직전 성공의 soft-delete 감사 이력이 다음 실행을 막지 않게 했다. n150
+  `ktm-tvn38-db:18732`에서 main/recovery 각각 2/2, `phase=passed`, BLOCKED 없음,
+  startup migration 불변 및 production compose 제외를 실증했다. 적대 리뷰 2인은 최종 SHA에서
+  P0/P1 없이 GO를 확인했다.
 
 ### T-VN-40 — curation write model 단일화 (Lane B)
 

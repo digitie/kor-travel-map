@@ -2,6 +2,19 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-12 — T-VN-38: 반복 n150 clone live 실행의 checkpoint 복원 고정
+
+직전 성공 live가 UI 삭제의 soft-delete 감사 Feature 6건을 의도적으로 남겨, 후속 candidate가
+Playwright 시작 전에 trusted checkpoint와 `feature_total`이 다르다고 fail-closed 되는 것을
+n150에서 재현했다. 이 상태는 prod와 무관한 `ktm-tvn38-db:18732` clone의 정상적인 이전
+acceptance 결과였지만, 정상 `run`에 signed dump 복원이 없어 같은 clone을 반복 검증할 수 없었다.
+
+정상 path도 dump의 경로·권한·SHA·archive를 검증한 뒤 dedicated clone만
+`pg_restore --clean --exit-on-error --single-transaction`으로 복원하고 login fence와 시작
+snapshot을 만든다. abort의 restore-first 경계와 대칭을 유지하며, restore 실패나 이후 drift는
+BLOCKED/성공 result 없이 중단한다. unit 47개, Bash/Ruff/redaction gate와 최종 n150 main/recovery
+각 2/2를 통과했다. final `e68b00ef`의 consumer·DB 적대 리뷰 2인은 P0/P1 없이 GO를 확인했다.
+
 ## 2026-08-12 — T-VN-38: T-VN-33 병합 뒤 projection·동결 gate 재검증
 
 T-VN-33의 squash merge를 기준으로 T-VN-38의 고유 32개 commit만 다시 얹고,

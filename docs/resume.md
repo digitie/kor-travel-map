@@ -1,16 +1,20 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
-## 2026-08-12 — T-VN-38: T-VN-33 병합 기준 rebase·영향 수리 완료
+## 2026-08-12 — T-VN-38 완료 후보: final live 재실행·상태 문서 동봉
 
-**다음 한 작업**: #971의 현재 commit을 n150 격리 live UI E2E로 검증한 뒤, CI green과
-두 적대 리뷰 GO를 근거로 병합한다.
+**다음 한 작업**: #971의 문서 동봉 final CI가 녹색이면 병합하고, 사용자 후속 지시 전까지
+대기한다.
 
 T-VN-33 squash merge 뒤 T-VN-38 고유 32개 commit만 `main` 위에 재적용했다.
 `0092_tvn33_offline_cleanup`와 `0092_weather_current_summary`의 과거 분기는 빈
-`0095_tvn33_tvn38_head_merge`가 함께 요구해 단일 Alembic head로 수렴한다.
-새 target catalog/ownership artifact freeze와 price projection lock·CRLF guard까지
-반영했으며, fresh migration·contract·reader·OpenAPI/TypeScript·적대 리뷰는 통과했다.
-남은 병합 전 검증은 n150 live UI E2E와 GitHub CI다.
+`0095_tvn33_tvn38_head_merge`가 함께 요구해 단일 Alembic head로 수렴한다. 새 target
+catalog/ownership artifact freeze, weather·price projection advisory lock, 9개 frozen artifact
+CRLF guard, Dagster raw-response JSON fixture를 반영했다.
+
+final `e68b00ef`의 n150 전용 `ktm-tvn38-db:18732` live는 시작 전에 signed checkpoint dump를
+복원해 직전 성공의 soft-delete 감사 이력과 독립시켰고, main/recovery 각각 2/2,
+`phase=passed`, BLOCKED 없음, startup migration 불변, production compose 제외를 확인했다.
+최종 적대 리뷰 2인은 P0/P1 없이 GO를 승인했다.
 
 ## 2026-08-11 — T-VN-33: 라운드11~12, CI 경로 red BLOCKER 2건 해소
 
