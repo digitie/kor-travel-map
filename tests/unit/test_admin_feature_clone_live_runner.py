@@ -622,11 +622,10 @@ def test_abandon_failed_run_requires_cleaned_failure_evidence(
     }
 
 
-def test_abandon_failed_run_allows_interrupted_direct_cleanup_finalization(
+def test_abandon_failed_run_allows_interrupted_post_browser_finalization(
     tmp_path: Path,
 ) -> None:
     runtime, blocked = _prepare_runtime(tmp_path)
-    _write_failed_main_report(runtime / "playwright-main")
     for phase in (
         "candidate-startup-running",
         "fixture-seed-running",
@@ -658,6 +657,7 @@ def test_abandon_failed_run_allows_interrupted_direct_cleanup_finalization(
         "direct-cleanup-running",
         "failed-resource-finalizing",
     ]
+    assert payload["tests"]["main"] == {"passed": 2}
 
 
 def test_runner_bootstraps_requested_snapshot_before_validating_mode() -> None:

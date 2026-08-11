@@ -1794,7 +1794,23 @@ def abandon_failed_run(args: argparse.Namespace) -> None:
         if api_audit == "recorded" and auth_audit == "recorded"
         else f"api-{api_audit}-auth-{auth_audit}"
     )
-    main = _report_counts(runtime / "playwright-main", allow_failed_main=True)
+    if "test-failed-restored" in phase_history:
+        main = _report_counts(runtime / "playwright-main", allow_failed_main=True)
+    else:
+        # Browser가 통과한 뒤 direct audit 수집에서 중단될 수도 있다. 이 경우
+        # terminal browser-failure phase는 없지만 strict checkpoint 복구와 모든
+        # fixture/audit 증거를 거친 실패 run이므로, 유효한 통과 보고서도 보존한다.
+        # 신호/전원 중단이 terminal phase 기록보다 앞선 browser 실패도 같은
+        # checkpoint 복구 경로로만 종료할 수 있게 expected failure report를 허용한다.
+        try:
+            main = _report_counts(runtime / "playwright-main")
+        except RuntimeError as passed_report_error:
+            try:
+                main = _report_counts(
+                    runtime / "playwright-main", allow_failed_main=True
+                )
+            except RuntimeError:
+                raise passed_report_error from None
     recovery = _report_counts(runtime / "playwright-recovery")
     _validate_image_evidence(runtime / "image-evidence.json", identity)
     _validate_resources(runtime / "resource-final.json")
