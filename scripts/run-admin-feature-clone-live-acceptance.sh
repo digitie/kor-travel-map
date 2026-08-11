@@ -160,10 +160,13 @@ validate_snapshot() {
   if [[ "$actual_names" == "$installed_names" ]]; then
     LOOPBACK_PROXY_HELPER="$snapshot_root/c7-loopback-ui-proxy.mjs"
   elif [[ "$actual_names" == "$legacy_names" ]]; then
-    # 이전 immutable bootstrap root는 새 보조 파일을 설치하지 못한다. 전체 source
-    # archive의 정확한 member만 아래에서 root-owned runtime file로 물질화한다.
-    [[ "$(tar -tzf "$archive" "$prefix/scripts/c7-loopback-ui-proxy.mjs")" == "$prefix/scripts/c7-loopback-ui-proxy.mjs" ]] ||
-      die "legacy snapshot lacks the loopback proxy source"
+    # 이전 immutable bootstrap root는 새 보조 파일을 설치하지 못한다. 현재 runner의
+    # archive에만 proxy member를 요구하고, recover가 검증하는 과거 fixture snapshot은
+    # 기존 정확한 세 helper만으로 읽기 전용 호환을 유지한다.
+    if [[ "$snapshot_root" == "$SCRIPT_DIR" ]]; then
+      [[ "$(tar -tzf "$archive" "$prefix/scripts/c7-loopback-ui-proxy.mjs")" == "$prefix/scripts/c7-loopback-ui-proxy.mjs" ]] ||
+        die "legacy current snapshot lacks the loopback proxy source"
+    fi
   else
     die "snapshot exact file set mismatch"
   fi
