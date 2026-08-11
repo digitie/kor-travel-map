@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING
@@ -13,10 +14,14 @@ from sqlalchemy.exc import DBAPIError
 from kortravelmap.core.ids import make_payload_hash
 from kortravelmap.dto import SourceRecord
 from kortravelmap.dto.price import PriceValue
-from kortravelmap.infra.price_repo import build_price_card, load_price_values
+from kortravelmap.infra.price_repo import (
+    build_price_card,
+    load_price_values,
+    materialize_current_price_summary,
+)
 
 if TYPE_CHECKING:
-    from sqlalchemy.ext.asyncio import AsyncSession
+    from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 
 pytestmark = pytest.mark.integration
@@ -219,3 +224,37 @@ async def test_price_current_reader_hides_inactive_dataset_before_reconcile(
         stale_hide_days=None,
     )
     assert inactive.current == []
+
+
+async def test_price_global_projection_uses_transaction_advisory_lock(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """겹친 writer가 더 새 price summary pointer를 되돌리지 못하게 직렬화한다."""
+
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from kortravelmap.infra.advisory_lock import advisory_lock_key
+
+    holder = AsyncSession(migrated_engine, expire_on_commit=False)
+    contender = AsyncSession(migrated_engine, expire_on_commit=False)
+    try:
+        await holder.begin()
+        await holder.execute(
+            text("SELECT pg_advisory_xact_lock(CAST(:lock_id AS bigint))"),
+            {"lock_id": advisory_lock_key("projection:current-price-summary")},
+        )
+        task = asyncio.create_task(
+            materialize_current_price_summary(contender, run_kind="reconcile")
+        )
+        await asyncio.sleep(0.05)
+        assert not task.done()
+        await holder.commit()
+        result = await asyncio.wait_for(task, timeout=3)
+        assert result.input_count == 0
+    finally:
+        if holder.in_transaction():
+            await holder.rollback()
+        if contender.in_transaction():
+            await contender.rollback()
+        await holder.close()
+        await contender.close()

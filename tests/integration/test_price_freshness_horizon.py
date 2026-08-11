@@ -225,7 +225,10 @@ async def test_price_card_series_queries_use_identity_indexes(
         planner_default=False,
         pre_statements=("SET LOCAL enable_sort = off",),
     )
-    assert_uses_index(current_plan, "uq_price_value_identity")
+    # T-VN-38 current는 immutable fact를 직접 역방향 스캔하지 않고 receipt-backed
+    # projection을 먼저 좁힌다. 따라서 hot current path의 선두 access path는
+    # summary natural-key PK여야 한다.
+    assert_uses_index(current_plan, "pk_current_price_summary")
 
     history_plan = await explain_plan(
         migrated_session,

@@ -117,6 +117,14 @@ def test_artifact_bytes_are_frozen() -> None:
         )
 
 
+def test_frozen_artifacts_have_no_crlf() -> None:
+    """동결 산출물은 OS 개행 변환도 bytes freeze drift로 fail-close한다."""
+    for name in ARTIFACT_SHA256:
+        assert b"\r\n" not in (_CONTRACTS / name).read_bytes(), (
+            f"{name} contains CRLF — frozen artifact는 LF bytes로만 저장해야 한다"
+        )
+
+
 def test_openapi_diff_baseline_matches_current_specs() -> None:
     diff = _load_json("openapi-diff-v1.json")
     assert tuple(diff["surfaces"]) == _SURFACES

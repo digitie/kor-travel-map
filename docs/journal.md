@@ -2,6 +2,26 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-12 — T-VN-38: T-VN-33 병합 뒤 projection·동결 gate 재검증
+
+T-VN-33의 squash merge를 기준으로 T-VN-38의 고유 32개 commit만 다시 얹고,
+`0095_tvn33_tvn38_head_merge`가 유일한 Alembic head임을 fresh upgrade로 확인했다.
+target catalog fingerprint와 T-VN-33 reference artifact도 새 head에 맞춰 재동결했다.
+
+적대 DB 리뷰가 두 결함을 발견해 같은 패턴까지 함께 정리했다.
+
+- price current projection은 전역 desired 집합을 만들면서 advisory lock이 없어 오래된
+  writer가 더 새 pointer를 되돌릴 수 있었다. weather와 대칭인
+  `projection:current-price-summary` transaction advisory lock 및 contention 회귀를
+  추가했다. global mutable projection inventory는 weather·price 두 개뿐임을 확인했다.
+- frozen artifact SHA 검증에서 빠졌던 CRLF bytes guard를 9개 artifact mapping 전체에
+  복구했다.
+
+projection index gate도 receipt-backed current read의 실제 선두 access path
+`pk_current_price_summary`를 단언하도록 고쳤다. fresh migration·weather/price·target
+contract 묶음 104개, API weather/price 34개, OpenAPI generated type check와 frontend
+TypeScript check가 통과했다. DB와 consumer 적대 리뷰는 모두 P0/P1 없이 GO다.
+
 ## 2026-08-12 — T-VN-38: T-VN-33 병합 기준 Alembic head 수렴
 
 T-VN-33의 `0092_tvn33_offline_cleanup`와 T-VN-38A의

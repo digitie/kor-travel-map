@@ -18,6 +18,7 @@ from sqlalchemy.engine import CursorResult
 
 from kortravelmap.core.ids import make_price_value_key
 from kortravelmap.dto._time import kst_now
+from kortravelmap.infra.advisory_lock import advisory_lock_key
 from kortravelmap.infra.feature_repo import (
     DEFAULT_PRICE_STALE_HIDE_DAYS,
     FeatureLoadResult,
@@ -54,6 +55,11 @@ DEFAULT_PRICE_FRESHNESS_SECONDS: Final[int] = (
 지평선(``KOR_TRAVEL_MAP_PRICE_STALE_HIDE_DAYS``, 기본 4일) 안에 관측이 없다"를
 뜻하며, 지평선이 ``current``를 비우는 조건과 일치한다(단일 노브, drift 없음).
 호출별 ``freshness_seconds`` override는 그대로 유지."""
+
+_PRICE_CURRENT_SUMMARY_LOCK_ID: Final[int] = advisory_lock_key(
+    "projection:current-price-summary"
+)
+"""price current projection 전체를 직렬화하는 transaction advisory lock."""
 
 
 @dataclass(frozen=True)
@@ -238,6 +244,10 @@ WHERE NOT EXISTS (
       AND fact.price_domain = summary.price_domain
       AND fact.product_key = summary.product_key
 )
+"""
+
+_ACQUIRE_PRICE_CURRENT_SUMMARY_LOCK_SQL: Final[str] = """
+SELECT pg_advisory_xact_lock(CAST(:lock_id AS bigint))
 """
 
 _CURRENT_SQL: Final[str] = """
@@ -462,6 +472,14 @@ async def materialize_current_price_summary(
     """
     if run_kind not in {"ingest", "reconcile", "backfill", "restore"}:
         raise ValueError("unsupported price summary run_kind")
+
+    # summary는 전역 projection이다. desired 집합을 계산한 오래된 transaction이
+    # 더 새 writer의 series를 stale-delete 또는 pointer rollback하지 않도록
+    # weather projection과 같은 transaction advisory lock으로 직렬화한다.
+    await session.execute(
+        text(_ACQUIRE_PRICE_CURRENT_SUMMARY_LOCK_SQL),
+        {"lock_id": _PRICE_CURRENT_SUMMARY_LOCK_ID},
+    )
 
     summary_run_id = await session.scalar(
         text(_INSERT_CURRENT_PRICE_SUMMARY_RUN_SQL),

@@ -1,15 +1,16 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
-## 2026-08-11 — T-VN-38: T-VN-33 최신 head rebase 영향 수리 중
+## 2026-08-12 — T-VN-38: T-VN-33 병합 기준 rebase·영향 수리 완료
 
-**다음 한 작업**: `0095_tvn33_tvn38_head_merge`를 포함한 fresh Alembic upgrade와
-target/OpenAPI artifact 재동결을 통과시킨 뒤 #971을 force-with-lease로 갱신한다.
+**다음 한 작업**: #971의 현재 commit을 n150 격리 live UI E2E로 검증한 뒤, CI green과
+두 적대 리뷰 GO를 근거로 병합한다.
 
-T-VN-33의 후속 `0092_tvn33_offline_cleanup`는 T-VN-38A와 공통 선행
-`0091_tvn33_cutover_fence`에서 갈라져 있었다. rebase 후 `alembic upgrade head`가
-두 head를 거부한 실제 재현을 바탕으로, 두 branch를 모두 prerequisite로 하는 빈 merge
-revision을 추가했다. 이는 데이터 변환이 아니라 Alembic history 결선이며, 이후
-T-VN-34 state spine의 선행 revision도 이 결선을 가리켜야 한다.
+T-VN-33 squash merge 뒤 T-VN-38 고유 32개 commit만 `main` 위에 재적용했다.
+`0092_tvn33_offline_cleanup`와 `0092_weather_current_summary`의 과거 분기는 빈
+`0095_tvn33_tvn38_head_merge`가 함께 요구해 단일 Alembic head로 수렴한다.
+새 target catalog/ownership artifact freeze와 price projection lock·CRLF guard까지
+반영했으며, fresh migration·contract·reader·OpenAPI/TypeScript·적대 리뷰는 통과했다.
+남은 병합 전 검증은 n150 live UI E2E와 GitHub CI다.
 
 ## 2026-08-11 — T-VN-33: 라운드11~12, CI 경로 red BLOCKER 2건 해소
 
