@@ -669,6 +669,17 @@ def test_runner_bootstraps_requested_snapshot_before_validating_mode() -> None:
     assert '"$MODE" == "abort"' in source
 
 
+def test_content_digest_excludes_only_run_bound_auth_domain_receipts() -> None:
+    source = _RUNNER.read_text(encoding="utf-8")
+
+    assert "'domain_commands', 'domain_command_results'" in source
+    assert "command.actor = ''ui-auth''" in source
+    assert "command.operation = ''admin.auth-event.create''" in source
+    assert "result.response_body #>> ''{data,item,request_id}''" in source
+    assert "e2e_live_acceptance::${run_id}::auth::main" in source
+    assert "e2e_live_acceptance::${run_id}::auth::recovery" in source
+
+
 def test_failed_run_abort_recreates_clone_identity_before_login_fence() -> None:
     source = _RUNNER.read_text(encoding="utf-8")
     abort_source = source.split('if [[ "$MODE" == "abort" ]]; then', maxsplit=1)[1]
