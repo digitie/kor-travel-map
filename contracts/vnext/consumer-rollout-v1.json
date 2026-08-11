@@ -188,13 +188,13 @@
       },
       "pinvi_snapshot_receipt": {
         "map_commit": "56f00e072a433bbe219909f5289d479ec16586d9",
-        "pinvi_commit": "458f396b16fe61c7d03430e2bf4cc249c36f9f72",
+        "pinvi_commit": "3cadca75b7dda5badcbae49f05b5e91055149e5f",
         "map_service_openapi_sha256": "53da6a3a1194b9de715e80ed69e016ae15885b81d2909bf2d128773d64f8b2f7",
         "pinvi_service_vendor_sha256": "53da6a3a1194b9de715e80ed69e016ae15885b81d2909bf2d128773d64f8b2f7",
         "verification": [
           "Map service OpenAPI export and restore replay response contract",
           "PinVi service vendor SHA and contract-pin consistency",
-          "PinVi cache-target transport, durable response-loss exact-replay, and restore-fence runner regression",
+          "PinVi cache-target transport, durable response-loss and concurrent 201/200 exact-replay, and restore-fence runner regression",
           "two independent adversarial reviews before n150 isolated live gate"
         ]
       }
