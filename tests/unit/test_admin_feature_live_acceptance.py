@@ -677,6 +677,7 @@ def test_clone_content_digest_excludes_only_run_bound_domain_receipts() -> None:
     assert "'%e2e_live_acceptance::${run_id}::%'" in runner
     assert "owned_feature_ids_sql()" in runner
     assert "ARRAY[${owned_feature_ids}]::text[]" in runner
+    assert "\\$fmt\\$ WHERE NOT (row_value.feature_id" in runner
 
 
 def test_evidence_validator_requires_exact_schema_phase_counts_and_fsync() -> None:

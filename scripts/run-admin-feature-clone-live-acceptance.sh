@@ -896,7 +896,7 @@ ${domain_command_filter_case}
           AND attribute.attnum > 0
           AND NOT attribute.attisdropped
       ) THEN format(
-        ' WHERE NOT (row_value.feature_id = ANY (ARRAY[${owned_feature_ids}]::text[]))'
+        \$fmt\$ WHERE NOT (row_value.feature_id = ANY (ARRAY[${owned_feature_ids}]::text[]))\$fmt\$
       )
       WHEN namespace.nspname = 'ops'
         AND relation.relname = 'admin_auth_events'
