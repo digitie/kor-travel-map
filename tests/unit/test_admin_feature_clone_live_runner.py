@@ -1427,6 +1427,7 @@ def test_runner_closes_reviewed_trust_boundaries() -> None:
     assert "node /opt/c7-loopback-ui-proxy.mjs" in source
     assert "legacy current snapshot lacks the loopback proxy source" in source
     assert "runtime loopback proxy differs from the immutable archive" in source
+    assert "existing runtime loopback proxy is unsafe" in source
     assert 'E2E_BASE_URL=http://127.0.0.1:$LOOPBACK_UI_PORT' in source
     assert 'KTM_C7_LOOPBACK_UI_PROXY_TARGET=http://candidate-ui:$UI_PORT' in source
     assert "hashtextextended(row_value::text" in source

@@ -1145,8 +1145,14 @@ prepare_loopback_proxy_helper() {
   [[ "$(tar -tzf "$SOURCE_ARCHIVE" "$archive_member")" == "$archive_member" ]] ||
     die "loopback proxy source is absent from the immutable archive"
   local proxy_path="$RUNTIME_DIR/c7-loopback-ui-proxy.mjs"
-  [[ ! -e "$proxy_path" && ! -L "$proxy_path" ]] ||
-    die "runtime loopback proxy path already exists"
+  if [[ -e "$proxy_path" || -L "$proxy_path" ]]; then
+    [[ -f "$proxy_path" && ! -L "$proxy_path" ]] &&
+      [[ "$(stat -c '%u:%g:%a' -- "$proxy_path")" == "0:0:444" ]] &&
+      [[ "$(sha256sum "$proxy_path" | awk '{print $1}')" == "$(tar -xOf "$SOURCE_ARCHIVE" "$archive_member" | sha256sum | awk '{print $1}')" ]] ||
+      die "existing runtime loopback proxy is unsafe"
+    LOOPBACK_PROXY_HELPER="$proxy_path"
+    return
+  fi
   local temporary_path
   temporary_path="$(mktemp "$RUNTIME_DIR/.c7-loopback-ui-proxy.XXXXXX")"
   tar -xOf "$SOURCE_ARCHIVE" "$archive_member" >"$temporary_path"
