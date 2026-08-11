@@ -24,12 +24,15 @@ if (
 
 const targetPort = Number(target.port);
 const listenPort = Number(portValue);
+const loopbackHost = `127.0.0.1:${listenPort}`;
 
 function requestHeaders(headers) {
   return {
     ...headers,
     host: target.host,
-    "x-forwarded-host": target.host,
+    // upstream transport는 candidate hostname으로 유지하되, Next auth/BFF의
+    // same-origin 판정은 실제 browser origin(loopback)을 보아야 한다.
+    "x-forwarded-host": loopbackHost,
     "x-forwarded-proto": "http",
   };
 }

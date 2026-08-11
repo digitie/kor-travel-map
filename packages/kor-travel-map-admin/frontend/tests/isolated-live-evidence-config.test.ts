@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const ENV_NAMES = [
@@ -26,6 +28,11 @@ async function loadCacheTargetStreamsConfig() {
   return (await import("../playwright.cache-target-streams.live.config"))
     .default;
 }
+
+const loopbackProxySource = readFileSync(
+  new URL("../../../../scripts/c7-loopback-ui-proxy.mjs", import.meta.url),
+  "utf8",
+);
 
 describe("isolated Live evidence config", () => {
   it("loopback 격리 실행은 redacted reporter를 쓰고 raw artifact를 끈다", async () => {
@@ -88,6 +95,12 @@ describe("isolated Live evidence config", () => {
 
     expect(config.use?.baseURL).toBe("http://candidate-ui:18705");
     expect(config.use?.launchOptions).toBeUndefined();
+  });
+
+  it("loopback proxy는 transport target과 browser same-origin을 분리한다", () => {
+    expect(loopbackProxySource).toContain("host: target.host");
+    expect(loopbackProxySource).toContain('"x-forwarded-host": loopbackHost');
+    expect(loopbackProxySource).not.toContain('"x-forwarded-host": target.host');
   });
 
   it("Docker 격리 opt-in은 evidence mode 없이 사용할 수 없다", async () => {
