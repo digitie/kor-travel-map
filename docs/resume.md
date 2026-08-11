@@ -82,6 +82,16 @@ consumer receipt 영향도를 다시 확인한다. 새 T-VN-34 consumer pair는 
 field override HTTP command를 registry receipt로 전환했다. 이제 detail/read/frontend를
 effective override provenance로 교체하고 whole-row request/version bridge를 물리 제거한다.
 ## 2026-08-10 — T-VN-36 A–D 단일 PR: final destructive fence 구현·n150 gate 준비
+## 2026-08-11 — T-VN-36: T-VN-34 rebase 반영
+
+**다음 한 작업**: 이 rebase source commit에서 PinVi admin-detail snapshot의 deterministic
+재추출과 contract pin-consistency를 실행하고, T-VN-36 paired receipt를 갱신한다.
+
+- Alembic graph는 T-VN-33/T-VN-38 merge revision 뒤 T-VN-34 `0095`~`0097`, T-VN-36
+  `0098`~`0104` 순으로 단일 head다.
+- target catalog와 admin OpenAPI freeze는 current final-fence schema에서 다시 계산했고,
+  final-fence 통합과 target freeze를 재실행했다.
+
 ## 2026-08-10 — T-VN-36 A–D 단일 PR: final destructive fence·n150 fresh live 완료
 
 **다음 한 작업**: T-VN-36 A–D의 destructive completion gate와 요청된

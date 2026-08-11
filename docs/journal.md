@@ -117,6 +117,17 @@ rebase에서 드러났다. 빈 `0095_tvn33_tvn38_head_merge`가 두 선행 revis
 **최종 게이트 25/25 GREEN**: unit+lint 2192 · api 1101(cov 77.64%) · dagster 530/3skip
 (85.23%) · integration **1049 passed / 0 skipped**(geo live 실제 실행) · vitest 37파일 302 ·
 frontend 9종.
+## 2026-08-11 — T-VN-36: T-VN-34 rebase와 final-fence 동결 재검증
+
+T-VN-36A~D를 T-VN-33 cleanup·T-VN-38 current summary·T-VN-34 final state cutover가
+수렴된 `0095_tvn33_tvn38_head_merge` 체인 위로 재배치했다. Alembic은
+`0104_tvn36_final_fence` 단일 head로 수렴했다.
+
+T-VN-33 ownership reference, final target catalog, admin OpenAPI baseline은 이전 base의
+digest를 그대로 신뢰하지 않고 fresh PostGIS 적용값과 현재 generated spec에서 다시 동결했다.
+T-VN-36 final fence와 target freeze 게이트가 통과했으며, PinVi admin-detail source pin은
+이 rebase source commit을 기준으로 다음 receipt에서 다시 고정한다.
+
 ## 2026-08-11 — T-VN-34: 최신 T-VN-33/T-VN-38 rebase와 migration 선형화
 
 T-VN-33의 `0092_tvn33_offline_cleanup`와 T-VN-38 weather/price chain은 공통

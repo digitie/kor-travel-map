@@ -37,20 +37,20 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     # 2026-08-12 재고정 — 계약 SQL은 그대로고(위 bb57b6de… / 아래 9f434b50… 불변)
     # 재현 불가였던 columns/functions/indexes 파생 해시만 실측값으로 바뀌었다.
     "target-schema-fingerprints-v1.json": (
-        "c30e00ad329fe72b3d9f6c0ab37e261e38132de67ccda31ea7ec4e9fa0d5e096"
+        "456995442e0942722aa54fe3f0fa74eb87aaf02792ee6a3ba4bfa86ec7ae1121"
     ),
     "tvn33-reference-ownership-v1.sql": (
         "9f434b50440c7463b86a5cf61abeb30bf6fe8d74a5760aa256374c76e4c9328a"
     ),
-    "openapi-diff-v1.json": ("85ae737f5c92f36aed9c540836f40511e8a9a3a39a8f554e36524ef73fea6c0c"),
+    "openapi-diff-v1.json": ("5f0d3ed49cb49146f49126f5dcf58e6a341501e35c4f81c12b303f3bd8016dcf"),
     "consumer-rollout-v1.json": (
-        "34614bf5c1c52806d01b81bba9a3547983674543bda0080116ba24f9710c38fe"
+        "642c3a5b12706ee6d20afe1ae7f5ccaf29243bd54eeffaf8e962b4a0263366c2"
     ),
     "violation-fixtures-v1.sql": (
         "dba1ad0e640e4ee0e2c6904ab880f7548cf073d859f221840b6fad873e3a8df6"
     ),
     "expected-rejections-v1.json": (
-        "37140077c1ae3d6b3c1043fd160a0b1afb2590f0f3c3943721e9435ebb03cb98"
+        "9123b16dba0adb27c5da2207ad8bef51225a780e37b28d04a94a8b0e8435f5ed"
     ),
     "recovery-preflight-v1.json": (
         "0e7e1ea595d034aacda8b4c94b56de6c2a24059f150c8cbd6c0670aebce7dfdd"
