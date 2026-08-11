@@ -6,7 +6,7 @@ T-VN-38A/B/C는 weather·price의 원본 사실 이력을 버리지 않으면서
 조회가 매 feature마다 원본을 다시 순위화하던 경로를 검증 가능한 현재 projection으로
 교체한다. 세 항목은 분리 PR이 아니라 **하나의 PR**로 구현한다.
 
-이 PR은 T-VN-33 draft PR #966의 `0091_tvn33_cutover_fence` 위에 쌓는다. #966은
+이 PR은 T-VN-33 draft PR #966의 `0092_tvn33_offline_cleanup` 위에 쌓는다. #966은
 `provider_datasets`와 exact operation triple을 DB 정본으로 만들고 source head를 최종
 스키마로 전환한다. 따라서 T-VN-38은 `provider` 문자열이나 `(provider, dataset_key)`
 호환 경로를 새로 만들지 않는다. weather와 price 모두 `provider_dataset_id`만 저장
@@ -133,8 +133,10 @@ index는 identity와 fact-key join을 실제 EXPLAIN으로 검증한 뒤에만 �
    reconciliation.
 3. `0094` (38C): normal reader/API/UI cutover, set-based query/index, legacy normal path fence.
 
-세 revision은 `0091_tvn33_cutover_fence → 0092 → 0093 → 0094` 단일 head다. 현행
-intermediate data의 보존 migration은 만들지 않는다.
+세 revision은 `0091_tvn33_cutover_fence → 0092_weather_current_summary → 0093 → 0094`를
+구성한다. T-VN-33의 동시 후속 `0092_tvn33_offline_cleanup`까지 포함한 stacked head는
+`0095_tvn33_tvn38_head_merge`가 수렴시킨다. 현행 intermediate data의 보존 migration은
+만들지 않는다.
 
 ## 검증과 승인 게이트
 

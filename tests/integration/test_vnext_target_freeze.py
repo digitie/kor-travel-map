@@ -177,6 +177,7 @@ _CONSTRAINTS_RENAMED_IN_HEAD: Final = frozenset(
         "ops.poi_cache_target_feature_links.fk_poi_cache_target_feature_links_target",
         "ops.provider_refresh_policies.ck_provider_refresh_policy_concurrent",
         "ops.provider_refresh_policies.ck_provider_refresh_policy_interval",
+        "ops.provider_refresh_policies.ck_provider_refresh_policy_stale_after",
     }
 )
 

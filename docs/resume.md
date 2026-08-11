@@ -1,5 +1,16 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-11 — T-VN-38: T-VN-33 최신 head rebase 영향 수리 중
+
+**다음 한 작업**: `0095_tvn33_tvn38_head_merge`를 포함한 fresh Alembic upgrade와
+target/OpenAPI artifact 재동결을 통과시킨 뒤 #971을 force-with-lease로 갱신한다.
+
+T-VN-33의 후속 `0092_tvn33_offline_cleanup`는 T-VN-38A와 공통 선행
+`0091_tvn33_cutover_fence`에서 갈라져 있었다. rebase 후 `alembic upgrade head`가
+두 head를 거부한 실제 재현을 바탕으로, 두 branch를 모두 prerequisite로 하는 빈 merge
+revision을 추가했다. 이는 데이터 변환이 아니라 Alembic history 결선이며, 이후
+T-VN-34 state spine의 선행 revision도 이 결선을 가리켜야 한다.
+
 ## 2026-08-11 — T-VN-33: 라운드11~12, CI 경로 red BLOCKER 2건 해소
 
 **다음 한 작업**: `T-VN-33` #966 — **머지**. 적대 리뷰 3렌즈 전원 APPROVE(P0/P1 0건),

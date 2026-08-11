@@ -17,6 +17,7 @@ from math import ceil
 from typing import TYPE_CHECKING, Any, Final, Literal, cast
 
 from sqlalchemy import text
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import DBAPIError
 
 from kortravelmap.core.ids import make_weather_value_key
@@ -1877,7 +1878,7 @@ async def materialize_current_weather_summary(
             ),
         },
     )
-    if completed.rowcount != 1:
+    if cast(CursorResult[Any], completed).rowcount != 1:
         raise AssertionError("weather current-summary receipt could not become succeeded")
     if changed:
         await session.execute(
@@ -2151,7 +2152,7 @@ def _weather_metric(row: RowMapping) -> WeatherMetric:
         issued_at=issued_at,
         valid_at=valid_at,
         observed_at=observed_at,
-        known_at=row.get("known_at"),
+        known_at=cast(datetime, row["known_at"]),
         provider=row["provider"],
         weather_domain=row["weather_domain"],
         valid_from=valid_from,

@@ -11,9 +11,10 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, Final, Literal
+from typing import TYPE_CHECKING, Any, Final, Literal, cast
 
 from sqlalchemy import text
+from sqlalchemy.engine import CursorResult
 
 from kortravelmap.core.ids import make_price_value_key
 from kortravelmap.dto._time import kst_now
@@ -526,7 +527,7 @@ async def materialize_current_price_summary(
             "detail": json.dumps({"selection": "price-v1"}),
         },
     )
-    if completed.rowcount != 1:
+    if cast(CursorResult[Any], completed).rowcount != 1:
         raise AssertionError("price current-summary receipt could not become succeeded")
     if changed:
         await session.execute(

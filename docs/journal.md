@@ -2,6 +2,14 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-12 — T-VN-38: T-VN-33 병합 기준 Alembic head 수렴
+
+T-VN-33의 `0092_tvn33_offline_cleanup`와 T-VN-38A의
+`0092_weather_current_summary`가 같은 `0091`에서 분기한 사실이 병합 기준
+rebase에서 드러났다. 빈 `0095_tvn33_tvn38_head_merge`가 두 선행 revision을 함께
+요구해 Alembic head를 하나로 수렴시킨다. target catalog·OpenAPI baseline은 이 결선
+결과로 다시 동결하며, 이후 T-VN-34는 이 merge revision을 `down_revision`으로 삼는다.
+
 ## 2026-08-11 (3) — T-VN-33 최종 적대 리뷰 APPROVE, 잔여 P2 처리, 게이트 25/25
 
 **리뷰 3렌즈 전원 APPROVE · P0/P1 0건.** 세 렌즈 모두 실측으로 판정했다 — 검증 신뢰성
