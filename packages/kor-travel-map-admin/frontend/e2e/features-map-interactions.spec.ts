@@ -847,7 +847,7 @@ test.describe("/features map interactions", () => {
 
     // name 셀의 Link는 stopPropagation이라 row onRowClick을 막는다 → 비-Link 영역(상태 축 셀)을
     // 클릭해 setSelectedFeatureId를 발화시킨다.
-    await row.getByRole("cell", { name: /active/ }).click();
+    await row.getByRole("cell", { name: /수명: 운영/ }).click();
 
     // '지도' 탭으로 전환 → 상세 패널 노출. CardDescription에 선택 feature_id(mono) 표시.
     await page.getByRole("tab", { name: "지도" }).click();
@@ -870,7 +870,7 @@ test.describe("/features map interactions", () => {
     await expect(
       panel
         .locator('[data-slot="badge"]')
-        .filter({ hasText: /^active$/ })
+        .filter({ hasText: /^수명: 운영$/ })
         .first(),
     ).toBeVisible();
     await expect(panel.getByRole("link", { name: "상세 열기" })).toBeVisible();
@@ -905,7 +905,7 @@ test.describe("/features map interactions", () => {
     const row = page
       .getByRole("table", { name: "이름순 feature" })
       .getByRole("row", { name: new RegExp(MOCK_NAME) });
-    await row.getByRole("cell", { name: "수명: 활성 공개: 공개 품질: 유효" }).click();
+    await row.getByRole("cell", { name: "수명: 운영 공개: 공개 품질: 유효" }).click();
     await page.getByRole("tab", { name: "지도" }).click();
 
     const panel = page.getByTestId("feature-detail-panel");

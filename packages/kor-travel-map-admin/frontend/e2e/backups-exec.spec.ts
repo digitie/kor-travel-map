@@ -224,7 +224,6 @@ test.describe("admin/backups execute depth", () => {
       app_db: null,
       apply: false,
       dagster_db: null,
-      env_file: null,
       execute: true,
       note: null,
       rustfs_volume: null,

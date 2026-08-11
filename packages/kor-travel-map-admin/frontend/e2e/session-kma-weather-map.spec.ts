@@ -58,6 +58,7 @@ function makeWeatherFeature(
       refresh_after: "2026-08-08T04:00:00Z",
       unit: "deg_c",
       value_number: 21.5,
+      weather_domain: "kma_nowcast",
     },
     ...overrides,
   };
@@ -280,6 +281,7 @@ test.describe("/features — KMA 격자 weather 마커 (#603/#604)", () => {
           refresh_after: "2026-08-08T04:00:00Z",
           unit: "㎍/㎥",
           value_number: 35,
+          weather_domain: "airkorea_air_quality",
         },
       }),
     ];
