@@ -150,3 +150,46 @@ async def test_apply_override_requires_a_field(
     await migrated_session.flush()
     with pytest.raises(ValueError, match="최소 1개"):
         await apply_feature_address_override(migrated_session, fid)
+
+
+async def test_address_override_reactivation_flag_is_inert_until_tvn36(
+    migrated_session: AsyncSession,
+) -> None:
+    """``prevent_provider_reactivation``이 현재 아무것도 하지 않음을 고정한다.
+
+    T-VN-34A가 runtime의 범용 ``ops.feature_overrides`` DML을 폐쇄해서 이 경로는
+    override row를 **아예 만들지 않는다.** 그런데 API/프론트는 계속 이 값을 보내고
+    라우터도 그대로 넘긴다 — 운영자 입장에서는 "provider 재적재로부터 잠갔다"고
+    믿는데 실제로는 아무것도 잠기지 않는다.
+
+    시그니처를 지우지 않은 이유는 계약을 깨면 PinVi 재vendoring까지 번지기 때문이고,
+    T-VN-36이 field override provenance를 되살릴 때 이 인자를 다시 배선할 예정이기
+    때문이다. 그때 이 테스트가 red가 되어 **의식적으로** 마주치게 만든다 — 조용히
+    살아나거나 조용히 죽은 채로 남는 것 둘 다 막는다.
+    """
+
+    overrides_before = (
+        await migrated_session.execute(
+            text("SELECT count(*) FROM ops.feature_overrides")
+        )
+    ).scalar_one()
+
+    for flag in (True, False):
+        fid = f"f_addr_inert_{int(flag)}"
+        migrated_session.add(_feature_row(fid))
+        await migrated_session.flush()
+        result = await apply_feature_address_override(
+            migrated_session,
+            fid,
+            legal_dong_code="1114010300",
+            reason="inert flag probe",
+            operator="tester",
+            prevent_provider_reactivation=flag,
+        )
+        assert result is not None, flag
+
+    assert (
+        await migrated_session.execute(
+            text("SELECT count(*) FROM ops.feature_overrides")
+        )
+    ).scalar_one() == overrides_before

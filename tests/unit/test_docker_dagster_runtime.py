@@ -131,6 +131,17 @@ def test_tvn34_compose_never_derives_runtime_or_metadata_credentials_from_bootst
     assert "GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ktm_feature_runtime" not in bootstrap
     assert "REVOKE ALL ON TABLES FROM ktm_feature_runtime" in bootstrap
 
+    # T-102 pg_prewarm의 **유일한** 설치 지점이다. migration 0022는 "current_user가
+    # superuser일 때만 만든다"로 짜였는데 ADR-090 이후 alembic은 NOSUPERUSER
+    # `ktm_feature_migrator`로만 돌아 그 분기가 영구 no-op이 됐다. pg_prewarm은
+    # trusted extension이 아니라 schema owner 권한으로도 만들 수 없으므로, 이 dedicated
+    # superuser 연결에서 빠지면 확장이 **어디서도** 생기지 않고 prewarm이 조용히
+    # no-op으로 남는다. 그 상태로도 게이트가 전부 green이었기 때문에 여기서 못박는다.
+    assert "CREATE EXTENSION IF NOT EXISTS pg_prewarm WITH SCHEMA x_extension" in bootstrap
+    # 관리형 Postgres에는 contrib이 없을 수 있다. 없을 때 기동을 막지 않도록
+    # available 여부를 먼저 본다는 것도 계약의 일부다.
+    assert "pg_available_extensions" in bootstrap
+
     # wrong target confirmation must fail before a network/psql side effect.
     result = subprocess.run(
         ["sh", "docker/postgres-role-bootstrap.sh"],

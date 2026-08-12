@@ -145,6 +145,14 @@ async def apply_feature_address_override(
     lifecycle 외 field override는 T-VN-36 effective projection writer가 단일화할
     때까지 이 경로에서 새로 만들지 않는다. feature가 없으면 ``None``(라우터에서
     404). 변경할 필드가 하나도 없으면 ``ValueError``. commit은 호출자 책임.
+
+    ``prevent_provider_reactivation``은 **현재 무효다.** override row를 아예 만들지
+    않으므로 켜든 끄든 동작이 같다. API/프론트가 계속 이 값을 보내고 있어 시그니처를
+    지우지 않았지만(계약을 깨면 PinVi 재vendoring까지 번진다), 살아 있는 제어처럼
+    읽히면 안 된다 — 운영자는 "provider 재적재로부터 잠갔다"고 믿는데 실제로는
+    아무것도 잠기지 않는다. T-VN-36이 field override provenance를 되살릴 때 이 인자를
+    **의식적으로** 다시 배선해야 하고, 그 전까지는 무효라는 사실을
+    ``test_address_override_reactivation_flag_is_inert_until_tvn36``가 고정한다.
     """
     if lon is None and lat is None:
         coord_update = False
