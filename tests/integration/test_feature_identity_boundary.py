@@ -17,7 +17,6 @@ alembic head(0083 포함)가 적용된 실 PostGIS에서:
 from __future__ import annotations
 
 import json
-
 import uuid as uuid_module
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING

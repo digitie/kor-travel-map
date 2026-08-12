@@ -174,8 +174,10 @@ def test_in_bounds_high_zoom_returns_individual_features(
             {
                 "feature_id": "f1", "kind": "place", "name": "x", "category": "06020000",
                 "feature_uuid": f1_uuid,
+                # `FeatureSummary`는 상태 축을 아예 싣지 않는다(extra="forbid").
+                # 공개 요약에서 상태는 노출 대상이 아니라 **필터 조건**이므로,
+                # legacy `status`를 3축으로 바꾸는 것이 아니라 빼는 것이 맞다.
                 "lon": 126.9, "lat": 37.5, "marker_icon": None, "marker_color": None,
-                "status": "active",
             }
         ]
 
