@@ -16714,6 +16714,15 @@ export interface operations {
                     "application/json": components["schemas"]["AdminFeatureStateResponse"];
                 };
             };
+            /** @description 파괴적 admin 작업 비활성 (retire action) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description feature 없음 */
             404: {
                 headers: {

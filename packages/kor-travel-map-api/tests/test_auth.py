@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -16,9 +15,6 @@ from fastapi.testclient import TestClient
 from pydantic import SecretStr, ValidationError
 
 from kortravelmap.api.app import create_app
-from kortravelmap.api.routers.admin_features import (
-    require_destructive_enabled_for_retire,
-)
 from kortravelmap.api.auth import (
     ADMIN_ACTOR_HEADER,
     ADMIN_PROXY_SECRET_HEADER,
@@ -39,6 +35,9 @@ from kortravelmap.api.db import get_session
 from kortravelmap.api.provider_catalog import (
     ProviderDatasetCatalogEntry,
     ProviderDatasetOperation,
+)
+from kortravelmap.api.routers.admin_features import (
+    require_destructive_enabled_for_retire,
 )
 from kortravelmap.api.settings import ApiSettings
 

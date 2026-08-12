@@ -36418,6 +36418,16 @@
               }
             }
           },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "파괴적 admin 작업 비활성 (retire action)"
+          },
           "404": {
             "content": {
               "application/problem+json": {

@@ -85,12 +85,7 @@ barrier로 직렬화한다.
     [x] `T-VN-35A-D`(typed subtype 분해 — ADR-086, A-D 단일 PR) →
     [ ] `T-VN-37A` → [ ] `T-VN-37B` → [ ] `T-VN-37C`
   - Lane B shadow: [~] `T-VN-33`(A/B/C 단일 PR — DB 정본·writer/reader cutover·legacy fence) →
-    [x] `T-VN-38A` → [x] `T-VN-38B` → [x] `T-VN-38C` →
-    [ ] `T-VN-34A` → [ ] `T-VN-34B` → [ ] `T-VN-34C` →
-    [/] `T-VN-38A`(PR #971: 0092·weather immutable response lineage·receipt summary writer
-    ·KMA/AirKorea/KREX call-site cutover 구현) → [/] `T-VN-38B`(0093·price immutable fact
-    ·receipt summary·Dagster producer lineage 구현) → [/] `T-VN-38C`(0094 summary-only reader/API/UI
-    ·snapshot 분리·OpenAPI/type 재생성 완료, 2인 재리뷰·n150 live 검증 대기) →
+    [x] `T-VN-38A` → [x] `T-VN-38B` → [x] `T-VN-38C`(PR #971 머지 — 0092~0094) →
     [x] `T-VN-34A` → [x] `T-VN-34B` → [x] `T-VN-34C` →
     [ ] `T-VN-36A` → [ ] `T-VN-36B` → [ ] `T-VN-36C`
   - 32~38 join barrier 뒤 Lane B: [ ] `T-VN-40A` → [ ] `T-VN-40B` →
@@ -836,8 +831,7 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 > [`reports/t-vn-38-current-summary-plan-2026-08-08.md`](reports/t-vn-38-current-summary-plan-2026-08-08.md)를
 > 적대 리뷰어 2명이 P0=0으로 승인해야 한다.
 
-- [x] T-VN-38A — **weather current summary**
-- [/] T-VN-38A — **weather immutable-fact current summary**
+- [x] T-VN-38A — **weather immutable-fact current summary** (PR #971 머지)
 
   `current_summary_runs`부터 만들고 `provider_dataset_id + source entity/record + fetched known_at`
   복합 provenance, immutable fact, selected `weather_value_key` 참조 summary를 추가한다. KMA grid
@@ -845,14 +839,12 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   transaction의 fact+summary write, deterministic bitemporal winner, refresh deadline Dagster
   materializer 및 set-based reconciliation을 추가한다.
 
-- [x] T-VN-38B — **price current summary**
-- [/] T-VN-38B — **price immutable-fact current summary**
+- [x] T-VN-38B — **price immutable-fact current summary** (PR #971 머지)
 
   price의 `provider` 저장 identity를 `provider_dataset_id`와 immutable source provenance로 clean
   cut하고 selected `price_value_key` 참조 summary와 restore/backfill safe reconciliation을 추가한다.
 
-- [x] T-VN-38C — **bbox/detail set-based cutover**
-- [/] T-VN-38C — **normal reader set-based cutover**
+- [x] T-VN-38C — **normal reader set-based cutover** (PR #971 머지)
 
   own/nearest/KMA tier anchor를 window-ranked CTE로 먼저 선택한 뒤 card/bbox/detail normal path를
   weather/price summary set join으로 바꾸고 per-row LATERAL reader를 제거한다. current endpoint와
