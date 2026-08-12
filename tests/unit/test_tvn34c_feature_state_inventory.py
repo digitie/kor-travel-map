@@ -1,4 +1,8 @@
-"""T-VN-34C가 소유한 Feature reader의 legacy state 정적 차단선."""
+"""T-VN-34C/T-VN-36D가 소유한 Feature reader의 legacy 컬럼 정적 차단선.
+
+금지 목록은 0097(3축 cutover)과 0104(final field-override fence)의 실제
+``DROP COLUMN`` SQL에서 읽는다 — 손으로 적지 않는다.
+"""
 
 from __future__ import annotations
 
@@ -32,22 +36,30 @@ def _owned_feature_readers() -> tuple[Path, ...]:
 
 _OWNED_FEATURE_READERS = _owned_feature_readers()
 _FEATURE_RELATIONS = r"feature\.(?:features|public_features)"
-# 0097이 물리 삭제한 컬럼 전부. 손으로 적으면 뒤처진다 — 실제로 `user_deleted_by`가
-# 빠져 있었다. 그래서 마이그레이션 SQL에서 **직접 읽어** 목록을 만든다.
-_CUTOVER_MIGRATION = (
-    _ROOT / "alembic/versions/0097_tvn34c_final_state_cutover.py"
+# 파괴적 cutover가 물리 삭제한 컬럼 전부. 손으로 적으면 뒤처진다 — 실제로
+# `user_deleted_by`가 빠져 있었다. 그래서 마이그레이션 SQL에서 **직접 읽어** 목록을
+# 만든다. 세대가 늘면 여기에 파일을 더한다: 0097(T-VN-34C 3축 cutover)이 legacy
+# status/delete/user-change 계열 8개를, 0104(T-VN-36D final fence)가 whole-row freeze
+# 잔재인 `data_origin`/`data_version`을 지운다. 뒷 세대를 더하지 않으면 차단선은
+# **직전 세대만** 보게 되고, 새로 지운 컬럼은 정적으로 무방비가 된다.
+_CUTOVER_MIGRATIONS = (
+    _ROOT / "alembic/versions/0097_tvn34c_final_state_cutover.py",
+    _ROOT / "alembic/versions/0104_tvn36_final_fence.py",
 )
 _DROPPED_COLUMNS = tuple(
     sorted(
-        set(
-            re.findall(
+        {
+            column
+            for migration in _CUTOVER_MIGRATIONS
+            for column in re.findall(
                 r"ALTER TABLE feature\.features DROP COLUMN ([a-z_]+)",
-                _CUTOVER_MIGRATION.read_text(encoding="utf-8"),
+                migration.read_text(encoding="utf-8"),
             )
-        )
+        }
     )
 )
-assert len(_DROPPED_COLUMNS) >= 8, f"0097 DROP COLUMN 목록을 읽지 못했다: {_DROPPED_COLUMNS}"
+assert len(_DROPPED_COLUMNS) >= 10, f"cutover DROP COLUMN 목록을 읽지 못했다: {_DROPPED_COLUMNS}"
+assert {"data_origin", "data_version"} <= set(_DROPPED_COLUMNS), _DROPPED_COLUMNS
 _LEGACY_COLUMNS = "(?:" + "|".join(re.escape(c) for c in _DROPPED_COLUMNS) + ")"
 
 

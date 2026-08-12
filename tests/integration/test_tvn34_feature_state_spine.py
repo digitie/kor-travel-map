@@ -26,6 +26,18 @@ _LEGAL_TUPLES: Sequence[tuple[str, str, str]] = (
 )
 
 
+async def _require_tvn34_provenance_bridge(session: AsyncSession) -> None:
+    """T-VN-36D 이후에는 T-VN-34의 whole-row provenance bridge가 없다."""
+
+    if await session.scalar(
+        text("SELECT to_regclass('feature.feature_versions') IS NULL")
+    ):
+        pytest.skip(
+            "T-VN-36D final fence 이후에는 T-VN-34 provenance materializer가 없다; "
+            "T-VN-36 runtime gate가 final procedure-only DML을 검증한다."
+        )
+
+
 def _payload(feature_id: str, *, name: str) -> str:
     """0095 create procedure가 받는 provider core payload (legacy status 없음)."""
 
@@ -211,16 +223,11 @@ async def test_tvn34_all_legal_tuples_procedure_audit_and_runtime_fence(
                         'ktm_feature_state_procedure_owner',
                         'feature.feature_areas', 'SELECT'
                     ) AS state_owner_typed_snapshot_select,
-                    has_table_privilege(
-                        'ktm_feature_state_procedure_owner',
-                        'feature.feature_versions', 'SELECT, INSERT'
-                    ) AS state_owner_version_snapshot_write,
-                    has_table_privilege(
-                        'ktm_feature_runtime', 'feature.feature_versions', 'SELECT'
-                    ) AS runtime_version_snapshot_read,
-                    has_table_privilege(
-                        'ktm_feature_runtime', 'feature.feature_versions', 'INSERT'
-                    ) AS runtime_version_snapshot_insert,
+                    -- whole-row ``feature.feature_versions`` 권한 축은 T-VN-36D의
+                    -- ``0104``가 표 자체를 물리 삭제하면서 사라졌다. "provenance 원장은
+                    -- procedure만 쓰고 runtime은 직접 못 쓴다"는 후속 불변식은
+                    -- ``feature.feature_base_field_values``/``ops.feature_overrides``로
+                    -- 옮겨졌고 ``test_tvn36_override_lineage_spine`` 이 소유한다.
                     procedure_row.prosecdef AS procedure_security_definer,
                     owner_role.rolname AS procedure_owner
                 FROM pg_catalog.pg_proc AS procedure_row
@@ -240,9 +247,6 @@ async def test_tvn34_all_legal_tuples_procedure_audit_and_runtime_fence(
         "state_owner_transition_timestamp_update": True,
         "state_owner_alias_probe_and_insert": True,
         "state_owner_typed_snapshot_select": True,
-        "state_owner_version_snapshot_write": True,
-        "runtime_version_snapshot_read": True,
-        "runtime_version_snapshot_insert": False,
         "procedure_security_definer": True,
         "procedure_owner": "ktm_feature_state_procedure_owner",
     }
@@ -753,6 +757,7 @@ async def test_tvn34_runtime_materializes_typed_user_change_provenance(
 ) -> None:
     """runtime은 direct provenance UPDATE 없이 typed SECDEF routine만 호출한다."""
 
+    await _require_tvn34_provenance_bridge(migrated_session)
     feature_id = "tvn34-user-provenance"
     request_id = "00000000-0000-0000-0000-000000003496"
     await migrated_session.execute(text("SET ROLE ktm_feature_runtime"))
@@ -860,6 +865,7 @@ async def test_tvn34_typed_provenance_snapshots_add_after_subtype_and_delete(
 ) -> None:
     """add/update/delete 모두 typed routine의 단일 provenance/version 경로를 쓴다."""
 
+    await _require_tvn34_provenance_bridge(migrated_session)
     add_feature_id = "tvn34-user-add-provenance"
     add_request_id = "00000000-0000-0000-0000-000000003497"
     await migrated_session.execute(text("SET ROLE ktm_feature_runtime"))

@@ -75,12 +75,16 @@ _NOW = datetime(2026, 7, 13, tzinfo=UTC)
 #: 이미 공개 표면에 서 있다"는 확인이었다. head에서 그 술어는 3축 triple이고, 이는
 #: ``feature.public_features``의 가시성 조건과 글자 그대로 같다 — 구 feature를 내리기
 #: 전에 대체재가 실제로 보이는지 보는 것이 이 가드의 존재 이유다(D 케이스).
+#: T-VN-36D(``0104``)가 ``data_origin``을 물리 삭제했다. 0029 원본의
+#: ``COALESCE(data_origin,'provider') <> 'user_request'`` 제외 술어는 whole-row
+#: origin flag에 기대던 것이라 head에는 등가 술어가 없다 — field override 세대의
+#: 소유권은 행 단위가 아니라 field 단위이기 때문이다. 이 테스트가 지키는 A/B/D
+#: 가드는 그 술어와 무관하므로 술어만 뺀다.
 _HEAD_CLEANUP_SQL = """
 UPDATE feature.features AS f
 SET lifecycle_state = 'retired', publication_state = 'suppressed', updated_at = now()
 WHERE f.lifecycle_state = 'active'
   AND f.category = '01020300'
-  AND COALESCE(f.data_origin, 'provider') <> 'user_request'
   AND EXISTS (
     SELECT 1
     FROM provider_sync.source_links AS old_sl
@@ -189,7 +193,6 @@ async def _insert_feature(
     *,
     feature_id: str,
     category: str,
-    data_origin: str = "provider",
 ) -> None:
     """공개 표면에 서 있는 provider feature를 심는다.
 
@@ -202,15 +205,14 @@ async def _insert_feature(
         text(
             "INSERT INTO feature.features "
             "(feature_id, kind, name, category, "
-            " lifecycle_state, publication_state, quality_state, data_origin) "
+            " lifecycle_state, publication_state, quality_state) "
             "VALUES (:fid, 'place', :name, :category, "
-            " 'active', 'published', 'valid', :data_origin)"
+            " 'active', 'published', 'valid')"
         ),
         {
             "fid": feature_id,
             "name": "월정리해수욕장",
             "category": category,
-            "data_origin": data_origin,
         },
     )
 

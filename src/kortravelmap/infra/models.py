@@ -2707,12 +2707,12 @@ class FeatureBaseFieldValueRow(Base):
         {"schema": "feature"},
     )
 
-    feature_id: Mapped[str] = mapped_column(String, primary_key=True)
+    feature_id: Mapped[str] = mapped_column(Text, primary_key=True)
     field_path: Mapped[str] = mapped_column(Text, primary_key=True)
     feature_uuid: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
     provider_dataset_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    source_entity_key: Mapped[str] = mapped_column(String, nullable=False)
-    source_record_key: Mapped[str] = mapped_column(String, nullable=False)
+    source_entity_key: Mapped[str] = mapped_column(Text, nullable=False)
+    source_record_key: Mapped[str] = mapped_column(Text, nullable=False)
     source_raw_payload_hash: Mapped[str] = mapped_column(Text, nullable=False)
     value_json: Mapped[dict[str, Any] | str | int | float | bool | None] = mapped_column(JSONB)
     value_geometry: Mapped[Any | None] = mapped_column(
@@ -2789,7 +2789,7 @@ class FeatureOverrideRow(Base):
         ),
     )
     source_entity_key: Mapped[str | None] = mapped_column(
-        String,
+        Text,
         ForeignKey(
             "provider_sync.source_entities.source_entity_key", ondelete="SET NULL"
         ),

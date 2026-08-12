@@ -9,6 +9,14 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from kortravelmap.infra.admin_feature_repo import (
+    FeatureFieldOverrideNotFound,
+    FeatureFieldOverridePreconditionFailed,
+    FeatureFieldOverrideValidationError,
+    author_admin_feature_field_overrides,
+    revoke_admin_feature_field_overrides,
+)
+
 pytestmark = pytest.mark.integration
 
 _SOURCE_HASH = "a" * 64
@@ -507,3 +515,119 @@ async def test_tvn36_runtime_cannot_mutate_lineage_relations(
     finally:
         with suppress(DBAPIError):
             await migrated_session.execute(text("RESET ROLE"))
+
+
+async def _open_domain_command(
+    session: AsyncSession, *, actor: str, operation: str
+) -> int:
+    return int(
+        (
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO ops.domain_commands (
+                        actor, operation, idempotency_key, fingerprint_version,
+                        request_fingerprint
+                    ) VALUES (
+                        :actor, :operation, x_extension.gen_random_uuid(), 1, :fingerprint
+                    )
+                    RETURNING command_id
+                    """
+                ),
+                {"actor": actor, "operation": operation, "fingerprint": "d" * 64},
+            )
+        ).scalar_one()
+    )
+
+
+async def test_field_override_procedure_errors_survive_as_domain_errors(
+    migrated_session: AsyncSession,
+) -> None:
+    """override procedure의 DB contract가 **실 DB에서** 도메인 오류로 보존되는지 본다.
+
+    이 축이 없으면 매핑은 조용히 죽는다 — T-VN-34에서 실제로 그랬다. asyncpg는 진단
+    속성을 ``error.orig``(SQLAlchemy DBAPI 래퍼)가 아니라 그 ``__cause__``에 두므로
+    ``orig``만 보는 추출기는 SQLSTATE를 **항상 None**으로 읽고, 그러면 P0002/40001/23514가
+    전부 라우터의 except 사슬을 통과해 catch-all 500이 된다. 단언 대상을 상태코드가 아니라
+    **도메인 예외 타입**으로 두는 이유는 라우터가 그 타입으로 404/412/422를 만들기 때문이다
+    (타입이 맞으면 상태코드는 라우터 테스트가 고정한다).
+    """
+
+    feature_id, _ = await _seed_feature_source(migrated_session)
+    actor = "admin:tvn36-mapping"
+    revision = int(
+        (
+            await migrated_session.execute(
+                text("SELECT row_revision FROM feature.features WHERE feature_id = :fid"),
+                {"fid": feature_id},
+            )
+        ).scalar_one()
+    )
+
+    # P0002 — 없는 feature.
+    command_id = await _open_domain_command(
+        migrated_session, actor=actor, operation="admin.feature.override.author"
+    )
+    with pytest.raises(FeatureFieldOverrideNotFound):
+        async with migrated_session.begin_nested():
+            await author_admin_feature_field_overrides(
+                migrated_session,
+                "tvn36-no-such-feature",
+                expected_row_revision=1,
+                reason_code="operator_correction",
+                operator=actor,
+                command_id=command_id,
+                values={"core.name": "이름"},
+                geometry_wkt={},
+            )
+
+    # 40001 — stale If-Match revision.
+    command_id = await _open_domain_command(
+        migrated_session, actor=actor, operation="admin.feature.override.author"
+    )
+    with pytest.raises(FeatureFieldOverridePreconditionFailed) as stale:
+        async with migrated_session.begin_nested():
+            await author_admin_feature_field_overrides(
+                migrated_session,
+                feature_id,
+                expected_row_revision=revision + 41,
+                reason_code="operator_correction",
+                operator=actor,
+                command_id=command_id,
+                values={"core.name": "이름"},
+                geometry_wkt={},
+            )
+    assert stale.value.expected == revision + 41
+
+    # 23514 — registry에 없는 field path.
+    command_id = await _open_domain_command(
+        migrated_session, actor=actor, operation="admin.feature.override.author"
+    )
+    with pytest.raises(FeatureFieldOverrideValidationError):
+        async with migrated_session.begin_nested():
+            await author_admin_feature_field_overrides(
+                migrated_session,
+                feature_id,
+                expected_row_revision=revision,
+                reason_code="operator_correction",
+                operator=actor,
+                command_id=command_id,
+                values={"core.not_a_registered_path": "이름"},
+                geometry_wkt={},
+            )
+
+    # 23514 — author 전용 command로 revoke를 시도하면 operation allow-list가 막는다.
+    command_id = await _open_domain_command(
+        migrated_session, actor=actor, operation="admin.feature.override.author"
+    )
+    with pytest.raises(FeatureFieldOverrideValidationError):
+        async with migrated_session.begin_nested():
+            await revoke_admin_feature_field_overrides(
+                migrated_session,
+                feature_id,
+                expected_row_revision=revision,
+                reason_code="operator_correction",
+                operator=actor,
+                command_id=command_id,
+                field_paths=("core.name",),
+            )

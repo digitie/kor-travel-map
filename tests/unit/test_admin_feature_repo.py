@@ -148,6 +148,14 @@ def test_admin_feature_cursor_round_trip_all_sorts() -> None:
 def test_admin_feature_row_and_json_helpers() -> None:
     assert repo._normalize_values(["a", "", "b"]) == ["a", "b"]
     assert repo._normalize_values([]) is None
+    assert repo._normalize_query("  Ａ  ") == "A"
+    assert repo._json_array('[{"a": 1}, 2]') == ({"a": 1},)
+
+    row = repo._admin_feature_row(_feature_row())
+    assert row.feature_id == "feature-1"
+    assert row.lon == 126.9769
+    assert row.issue_count == 1
+    assert row.issues[0]["violation_type"] == "missing_address"
 
 
 def test_user_override_payload_rejects_provider_owned_detail_and_keeps_null_coord() -> None:
@@ -169,7 +177,6 @@ def test_user_override_payload_rejects_provider_owned_detail_and_keeps_null_coor
     )
     assert values == {"core.coord_precision_digits": None}
     assert geometry_wkt == {"core.coord": None}
-    assert repo._normalize_query("  Ａ  ") == "A"
 
 
 def test_create_override_payload_does_not_claim_omitted_subtype_defaults() -> None:
@@ -197,13 +204,6 @@ def test_create_override_payload_does_not_claim_omitted_subtype_defaults() -> No
         "core.coord_precision_digits": 6,
     }
     assert geometry_wkt == {"core.coord": "POINT(126.978 37.5665)"}
-    assert repo._json_array('[{"a": 1}, 2]') == ({"a": 1},)
-
-    row = repo._admin_feature_row(_feature_row())
-    assert row.feature_id == "feature-1"
-    assert row.lon == 126.9769
-    assert row.issue_count == 1
-    assert row.issues[0]["violation_type"] == "missing_address"
 
 
 @pytest.mark.asyncio

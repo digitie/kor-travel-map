@@ -16,7 +16,6 @@ alembic head(0083 포함)가 적용된 실 PostGIS에서:
 
 from __future__ import annotations
 
-import json
 import uuid as uuid_module
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
@@ -43,9 +42,7 @@ from kortravelmap.dto import (
 )
 from kortravelmap.infra import feature_identity, feature_repo
 from kortravelmap.infra.admin_feature_repo import (
-    _CREATE_FEATURE_WITH_INITIAL_STATE_SQL,
-    _add_params,
-    _admin_feature_create_payload,
+    create_admin_feature_with_field_overrides,
 )
 
 if TYPE_CHECKING:
@@ -391,10 +388,33 @@ async def test_admin_add_sql_writes_uuid_and_alias(
     migrated_session: AsyncSession,
 ) -> None:
     feature_id = "f_1100000000_p_idboundary0005"
-    # 후보는 호출마다 달라지므로 바인드한 params를 그대로 붙잡아 대조한다
-    # (0083 정본 generator = candidate_feature_uuid → 비파생 v7).
-    params = _add_params(
-        request_id="00000000-0000-4000-8000-000000000001",
+    # T-VN-34가 admin add를 raw INSERT에서 `feature.create_feature_with_initial_state`
+    # 프로시저로 옮겼고, T-VN-36D가 그 호출자를 change-request apply(`_apply_change`)에서
+    # `create_admin_feature_with_field_overrides`로 옮겼다. 검증하려는 불변식(writer가
+    # 만든 비파생 UUIDv7이 그대로 저장되고 legacy alias가 같은 transaction에서 생긴다)은
+    # 그대로이므로 **지금 프로덕션 라우트가 부르는 함수 그대로**를 태운다 — 테스트만 옛
+    # 경로를 붙잡고 있으면 정작 쓰이는 경로의 회귀를 못 잡는다.
+    command_id = int(
+        (
+            await migrated_session.execute(
+                text(
+                    """
+                    INSERT INTO ops.domain_commands (
+                        actor, operation, idempotency_key, fingerprint_version,
+                        request_fingerprint
+                    ) VALUES (
+                        'identity-boundary-test', 'admin.feature.create',
+                        x_extension.gen_random_uuid(), 1, :fingerprint
+                    )
+                    RETURNING command_id
+                    """
+                ),
+                {"fingerprint": "c" * 64},
+            )
+        ).scalar_one()
+    )
+    created = await create_admin_feature_with_field_overrides(
+        migrated_session,
         feature_id=feature_id,
         payload={
             "kind": "place",
@@ -403,36 +423,17 @@ async def test_admin_add_sql_writes_uuid_and_alias(
             "marker_icon": "star",
             "marker_color": "P-03",
         },
-        reason="T-VN-32C 검증",
+        lifecycle_state="active",
+        publication_state="published",
+        quality_state="valid",
+        reason_code="user_request_add",
+        operator="identity-boundary-test",
+        command_id=command_id,
     )
-    sent = _assert_nonderived_uuid_v7(params["feature_uuid"], feature_id=feature_id)
-    # T-VN-34가 admin add를 raw INSERT에서 `feature.create_feature_with_initial_state`
-    # 프로시저로 옮겼다. 검증하려는 불변식(보낸 비파생 UUIDv7이 그대로 저장된다)은
-    # 그대로이므로 프로덕션(`_apply_change`의 add 분기)과 **같은 파라미터 매핑**으로
-    # 같은 프로시저를 태운다 — 테스트만 옛 경로를 붙잡고 있으면 정작 지금 쓰이는
-    # 경로의 회귀를 못 잡는다.
-    row = (
-        await migrated_session.execute(
-            text(_CREATE_FEATURE_WITH_INITIAL_STATE_SQL),
-            {
-                "feature_payload": _admin_feature_create_payload(params),
-                "lifecycle_state": params["lifecycle_state"],
-                "publication_state": params["publication_state"],
-                "quality_state": params["quality_state"],
-                "state_context": json.dumps(
-                    {
-                        "transition_kind": "initial",
-                        "reason_code": "user_request_add",
-                        "principal": "identity-boundary-test",
-                        "causation_ref": params["request_id"],
-                    },
-                    ensure_ascii=False,
-                ),
-            },
-        )
-    ).mappings().one()
-    # 프로시저 OUT 값 == 보낸 후보 == 저장값 (트리거가 바꿔치기하지 않는다).
-    assert str(row["o_feature_uuid"]) == sent
+    assert created.feature_id == feature_id
+    assert created.feature_uuid is not None
+    # writer가 보낸 후보 == 저장값 (트리거가 바꿔치기하지 않는다).
+    sent = _assert_nonderived_uuid_v7(created.feature_uuid, feature_id=feature_id)
     assert await _stored_feature_uuid(migrated_session, feature_id) == sent
 
     alias = (

@@ -10,7 +10,10 @@ issue #452 / #445 회귀. DA-D-07에서 KHOA 해수욕장 category가 ``01020300
 - A: 재import 완료(old+new 동일 source_record) → old만 회수, new는 공개 유지.
 - B: 재import 미완료(old만, sibling 없음) → 공개 유지(가용성 공백 방지).
 - C: 타 provider의 정당한 ``01020300`` 해안/섬 feature → 공개 유지(KHOA 한정).
-- D: ``data_origin='user_request'`` 사용자 생성분 → 공개 유지.
+- D(폐기): 원본 0027은 ``data_origin='user_request'`` 사용자 생성분을 제외했다.
+  T-VN-36D(``0104``)가 그 whole-row origin flag를 물리 삭제했고 field override
+  세대에는 행 단위 소유권 개념이 없어 head 동등 술어가 존재하지 않는다 — 그래서
+  이 가드는 재현하지 않는다(없는 술어를 흉내 내면 계약이 아니라 거짓말이 된다).
 - 멱등: 두 번째 실행은 0 row(이미 회수된 feature는 다시 걸리지 않는다).
 
 Docker / testcontainers 미설치 환경에서는 conftest fixture가 ``pytest.skip``.
@@ -71,7 +74,6 @@ SET lifecycle_state = 'retired',
     updated_at = now()
 WHERE f.lifecycle_state = 'active'
   AND f.category = '01020300'
-  AND COALESCE(f.data_origin, 'provider') <> 'user_request'
   AND EXISTS (
     SELECT 1
     FROM provider_sync.source_links AS old_sl
@@ -120,19 +122,17 @@ async def _insert_feature(
     *,
     feature_id: str,
     category: str,
-    data_origin: str = "provider",
 ) -> None:
     await session.execute(
         text(
             "INSERT INTO feature.features "
-            "(feature_id, kind, name, category, data_origin) "
-            "VALUES (:fid, 'place', :name, :category, :data_origin)"
+            "(feature_id, kind, name, category) "
+            "VALUES (:fid, 'place', :name, :category)"
         ),
         {
             "fid": feature_id,
             "name": "월정리해수욕장",
             "category": category,
-            "data_origin": data_origin,
         },
     )
 
@@ -289,23 +289,12 @@ async def test_khoa_recategorize_cleanup_inactivates_only_stale_duplicates(
     await _insert_feature(session, feature_id="f_c_coast", category="01020300")
     await _link_primary(session, feature_id="f_c_coast", record_key="sr_c")
 
-    # D: 사용자 생성(data_origin='user_request') — re-key sibling 있어도 보존.
-    await _insert_source_record(
-        session, key="sr_d", provider="python-khoa-api", entity_id="함덕::제주::조천읍"
-    )
-    await _insert_feature(
-        session, feature_id="f_d_old", category="01020300", data_origin="user_request"
-    )
-    await _insert_feature(session, feature_id="f_d_new", category="01050100")
-    await _link_primary(session, feature_id="f_d_old", record_key="sr_d")
-    await _link_primary(session, feature_id="f_d_new", record_key="sr_d")
-
     await session.flush()
 
     cleanup_sql = _cleanup_sql()
     first = await session.execute(text(cleanup_sql))
 
-    # 정리 대상은 f_a_old 하나뿐 — 나머지는 가드(타 provider/미재import/user)로 보존.
+    # 정리 대상은 f_a_old 하나뿐 — 나머지는 가드(타 provider/미재import)로 보존.
     assert first.rowcount == 1
     # 구 status='inactive' + deleted_at 은 retired+suppressed 한 지점으로 접힌다.
     # quality는 건드리지 않는다 — re-key는 하자가 아니라 수명 종료다.
@@ -314,7 +303,6 @@ async def test_khoa_recategorize_cleanup_inactivates_only_stale_duplicates(
     assert await _is_public(session, "f_a_new")
     assert await _is_public(session, "f_b_old")  # 재import 미완료 → 보존
     assert await _is_public(session, "f_c_coast")  # 타 provider → 보존
-    assert await _is_public(session, "f_d_old")  # 사용자 생성 → 보존
 
     # 멱등 — f_a_old는 이미 retired라 lifecycle_state='active' 술어에 다시 걸리지
     # 않는다(구 ``deleted_at IS NULL`` 술어가 하던 재진입 차단과 같은 역할).

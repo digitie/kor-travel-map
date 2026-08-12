@@ -34,15 +34,16 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     "target-invariants-v1.sql": (
         "94d959fa4004d717b10f0ffec6c44010da21b6749e03721a6813776c043aa1c6"
     ),
-    # 2026-08-12 재고정 — 계약 SQL은 그대로고(위 bb57b6de… / 아래 9f434b50… 불변)
-    # 재현 불가였던 columns/functions/indexes 파생 해시만 실측값으로 바뀌었다.
+    # 2026-08-12 재고정 + 2026-08-13 T-VN-36 재배치 실측 — columns/functions/indexes
+    # 3축은 빈 PostGIS DB 실측값이다. target-schema-v1.sql은 주석 한 줄만 바뀌어
+    # bytes sha가 f9b4e997…로 이동했을 뿐 catalog는 동일하다.
     "target-schema-fingerprints-v1.json": (
-        "456995442e0942722aa54fe3f0fa74eb87aaf02792ee6a3ba4bfa86ec7ae1121"
+        "898884585efb589ff64198c1140adb2eeff1dc652b61aa4b49f6b5ee0f5c77f2"
     ),
     "tvn33-reference-ownership-v1.sql": (
         "9f434b50440c7463b86a5cf61abeb30bf6fe8d74a5760aa256374c76e4c9328a"
     ),
-    "openapi-diff-v1.json": ("5f0d3ed49cb49146f49126f5dcf58e6a341501e35c4f81c12b303f3bd8016dcf"),
+    "openapi-diff-v1.json": ("d32d8790170c060b13b65ec678ebfcafbfa9232319648256379439f77d584bb2"),
     "consumer-rollout-v1.json": (
         "d22f1ba91ccc70cad09e25a8815cb164452193e98bdaf5b4a2f2f11378cf1f0b"
     ),

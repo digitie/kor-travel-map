@@ -523,11 +523,11 @@ async def test_admin_create_resolves_parent_uuid_ref_to_legacy(
         headers=_idempotency_headers(),
     )
     assert response.status_code == 200, response.text
-    record = response.json()["data"]["request"]
-    assert record["payload"]["parent_feature_id"] == parent.feature_id
+    created_uuid = response.json()["data"]["feature_id"]
 
-    # 영속된 change request payload도 legacy 정본 키다 (응답만 정규화되는
-    # 착시 차단 — FK 오염은 저장 payload가 진실이다).
+    # T-VN-36D가 whole-row change request를 물리 삭제했으므로 "저장된 값"의 정본은
+    # effective core와 그것을 만든 field override receipt 둘이다. 응답만 정규화되는
+    # 착시를 차단하려면 **둘 다** legacy 정본 키여야 한다(FK 오염은 저장값이 진실이다).
     async with AsyncSession(
         bind=cutover_env.connection,
         join_transaction_mode="create_savepoint",
@@ -535,13 +535,24 @@ async def test_admin_create_resolves_parent_uuid_ref_to_legacy(
         stored = (
             await probe.execute(
                 text(
-                    "SELECT payload FROM ops.feature_change_requests "
-                    "WHERE request_id = CAST(:request_id AS uuid)"
+                    "SELECT feature_id, parent_feature_id FROM feature.features "
+                    "WHERE feature_uuid = CAST(:feature_uuid AS uuid)"
                 ),
-                {"request_id": record["request_id"]},
+                {"feature_uuid": created_uuid},
+            )
+        ).mappings().one()
+        override_text = (
+            await probe.execute(
+                text(
+                    "SELECT override_value #>> '{}' FROM ops.feature_overrides "
+                    "WHERE feature_id = :feature_id "
+                    "AND field_path = 'core.parent_feature_id' AND status = 'active'"
+                ),
+                {"feature_id": stored["feature_id"]},
             )
         ).scalar_one()
     assert stored["parent_feature_id"] == parent.feature_id
+    assert override_text == parent.feature_id
 
 
 async def test_admin_create_rejects_unresolvable_parent_uuid_ref(
