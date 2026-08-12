@@ -246,7 +246,10 @@ BEGIN
           WHERE result.command_id = command.command_id
       )
     FOR SHARE;
-    IF NOT FOUND OR v_operation NOT IN ('admin.feature.override.author', 'user.feature.override.author') THEN
+    IF NOT FOUND OR v_operation NOT IN (
+        'admin.feature.override.author', 'admin.feature.create', 'admin.feature.patch',
+        'user.feature.override.author'
+    ) THEN
         RAISE EXCEPTION 'field override author requires an open matching domain command'
             USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_override_command';
     END IF;

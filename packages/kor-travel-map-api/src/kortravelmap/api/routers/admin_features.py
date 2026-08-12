@@ -1536,7 +1536,7 @@ async def get_feature_detail_route(
         200: {"headers": _ETAG_RESPONSE_HEADER},
     },
 )
-@idempotent_domain_command("admin.feature.override.author")
+@idempotent_domain_command("admin.feature.create")
 async def create_feature_route(
     body: AdminFeatureCreateRequest,
     request: Request,
@@ -1855,7 +1855,7 @@ async def revoke_feature_field_overrides_route(
     },
     openapi_extra={"parameters": [_IF_MATCH_OPENAPI_PARAMETER]},
 )
-@idempotent_domain_command("admin.feature.override.author")
+@idempotent_domain_command("admin.feature.patch")
 async def patch_feature_route(
     feature_id: str,
     body: AdminFeaturePatchRequest,

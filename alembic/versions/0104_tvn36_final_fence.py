@@ -28,7 +28,7 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 _STATE_CUTOVER_SHA256 = "bfb460f0446ea4656479d8262e00347918e24a1681b32c56f301a5d2e23b06a6"
-_OVERRIDE_COMMAND_SHA256 = "49488c977c31fe290ae43ff05d8ca344de65a1b7f8fb57a3f627b68f6704ed1b"
+_OVERRIDE_COMMAND_SHA256 = "355b42c734fcd77bc4f7c5ec9908906a08a2fa1added2ba74b8df5c413254f99"
 
 
 def _load_source_module(filename: str, expected_sha256: str) -> ModuleType:
@@ -128,9 +128,14 @@ def _final_author_procedure(commands: ModuleType) -> str:
     )
     source = _replace_exact(
         source,
-        """    IF NOT FOUND OR v_operation NOT IN ('admin.feature.override.author', 'user.feature.override.author') THEN
+        """    IF NOT FOUND OR v_operation NOT IN (
+        'admin.feature.override.author', 'admin.feature.create', 'admin.feature.patch',
+        'user.feature.override.author'
+    ) THEN
 """,
-        """    IF NOT FOUND OR v_operation <> 'admin.feature.override.author' THEN
+        """    IF NOT FOUND OR v_operation NOT IN (
+        'admin.feature.override.author', 'admin.feature.create', 'admin.feature.patch'
+    ) THEN
 """,
     )
     source = _replace_exact(source, _AUTHOR_REQUEST_GUARD.format(verb="author"), "")
