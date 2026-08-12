@@ -14,6 +14,9 @@ const c7RawOutputDir = path.join(
 );
 
 const baseURL = process.env.E2E_BASE_URL ?? "http://127.0.0.1:12705";
+// `URL.canParse` 가드가 없으면 잘못된 `E2E_BASE_URL`이 config 평가 자체를
+// throw로 끝낸다. null로 두고 아래 신뢰 판정에서 명시적으로 걸러낸다.
+const parsedBaseURL = URL.canParse(baseURL) ? new URL(baseURL) : null;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const C7_READ_AUTH_SPEC = "ops-c7-read-auth.live.spec";
 const ISOLATED_EVIDENCE_ENV = "E2E_ISOLATED_LIVE_EVIDENCE";

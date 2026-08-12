@@ -1,0 +1,16 @@
+{
+  "//": "하네스 설정 파일 전용 type-check. 루트 tsconfig는 `src/**`와 `next.config.ts`만, e2e/tsconfig는 `e2e/**`만 include하므로 패키지 루트의 playwright/vitest config는 **어느 게이트에도 걸리지 않았다**. eslint도 typescript-eslint 프리셋이 `no-undef`를 끄기 때문에(TS가 볼 것으로 전제) 잡지 못한다. 그 결과 `playwright.live.config.ts`가 선언 없는 식별자 `parsedBaseURL`을 참조한 채 type-check·lint 양쪽 green으로 머지됐고, live suite 전체가 config 평가 시점 ReferenceError로 실행 불가였다(2026-08-12 실측). 검증 하네스 자체가 검증되지 않으면 green은 근거가 되지 못한다.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "plugins": [],
+    "incremental": false
+  },
+  "include": [
+    "vitest.config.ts",
+    "playwright.config.ts",
+    "playwright.live.config.ts",
+    "playwright.cache-target-streams.live.config.ts"
+  ],
+  "exclude": ["node_modules", ".next", "out"]
+}
