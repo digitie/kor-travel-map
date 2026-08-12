@@ -278,7 +278,7 @@ async def test_admin_notice_list_include_ended_toggle(
     # 이 fixture의 notice는 source_link/계보가 없어 admin latest 필터와 무관하다.
 
     default_page = await admin_feature_repo.list_admin_features(
-        migrated_session, kinds=["notice"], statuses=None, page_size=100
+        migrated_session, kinds=["notice"], page_size=100
     )
     default_ids = {item.feature_id for item in default_page.items}
     seeded_notice_ids = {fid for s, fid in ids.items() if s != "place"}
@@ -289,7 +289,6 @@ async def test_admin_notice_list_include_ended_toggle(
     audit_page = await admin_feature_repo.list_admin_features(
         migrated_session,
         kinds=["notice"],
-        statuses=None,
         include_ended=True,
         page_size=100,
     )

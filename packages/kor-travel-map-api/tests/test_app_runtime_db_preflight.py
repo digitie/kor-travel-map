@@ -17,11 +17,10 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from kortravelmap.infra.db import RuntimeDbPrivilegeBoundaryError
 
 from kortravelmap.api.app import create_app
 from kortravelmap.api.settings import ApiSettings
-
-from kortravelmap.infra.db import RuntimeDbPrivilegeBoundaryError
 
 _PREFLIGHT_ENV = "KOR_TRAVEL_MAP_RUNTIME_DB_PREFLIGHT_REQUIRED"
 

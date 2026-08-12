@@ -84,6 +84,38 @@ def _response_record(
     )
 
 
+def _legacy_status_axes(
+    status: str,
+    *,
+    deleted_at: datetime | None = None,
+    user_deleted_at: datetime | None = None,
+) -> dict[str, str]:
+    """legacy ``status``(+soft-delete 표식)를 3축으로 번역한다.
+
+    0097이 ``status``/``deleted_at``/``user_deleted_at``을 물리 삭제했다. 이 테스트가
+    검증하는 것은 "**비공개 상태의 feature가 admin 표면에는 보인다**"이고 그 어휘가
+    legacy status로 쓰여 있으므로, 호출부 어휘는 남기고 여기서 0095 backfill과 같은
+    매핑으로 옮긴다 — draft→draft / hidden→suppressed / broken→quarantined /
+    inactive·deleted·soft-delete→retired.
+    """
+
+    if deleted_at is not None or user_deleted_at is not None:
+        status = "deleted"
+    lifecycle = "retired" if status in ("inactive", "deleted") else "active"
+    publication = {
+        "draft": "draft",
+        "hidden": "suppressed",
+        "inactive": "suppressed",
+        "deleted": "suppressed",
+    }.get(status, "published")
+    quality = "quarantined" if status == "broken" else "valid"
+    return {
+        "lifecycle_state": lifecycle,
+        "publication_state": publication,
+        "quality_state": quality,
+    }
+
+
 async def _insert_feature(
     session: AsyncSession,
     *,
@@ -100,17 +132,17 @@ async def _insert_feature(
         text(
             """
             INSERT INTO feature.features (
-                feature_id, kind, name, category, coord, status,
-                sido_code, sigungu_code, legal_dong_code, updated_at,
-                deleted_at, user_deleted_at
+                feature_id, kind, name, category, coord,
+                lifecycle_state, publication_state, quality_state,
+                sido_code, sigungu_code, legal_dong_code, updated_at
             ) VALUES (
                 :feature_id, :kind, :feature_id, '06020000',
                 CASE WHEN CAST(:lon AS double precision) IS NULL THEN NULL
                      ELSE x_extension.ST_SetSRID(
                          x_extension.ST_MakePoint(:lon, :lat), 4326
                      ) END,
-                :status, '11', '11110', '1111010100', :updated_at,
-                :deleted_at, :user_deleted_at
+                :lifecycle_state, :publication_state, :quality_state,
+                '11', '11110', '1111010100', :updated_at
             )
             """
         ),
@@ -119,10 +151,10 @@ async def _insert_feature(
             "kind": kind,
             "lon": lon,
             "lat": lat,
-            "status": status,
+            **_legacy_status_axes(
+                status, deleted_at=deleted_at, user_deleted_at=user_deleted_at
+            ),
             "updated_at": _NOW,
-            "deleted_at": deleted_at,
-            "user_deleted_at": user_deleted_at,
         },
     )
     # T-VN-35(ADR-086): kind별 값·geometry의 정본은 subtype이다.
@@ -204,7 +236,8 @@ async def test_admin_bbox_and_cluster_include_nonpublic_statuses(
     hidden_rows = await admin_feature_repo.admin_features_in_bbox(
         migrated_session,
         **_BBOX,
-        statuses=["hidden"],
+        lifecycle_states=["active"],
+        publication_states=["suppressed"],
     )
     assert [row["feature_id"] for row in hidden_rows] == ["admin-map-hidden"]
 
@@ -212,7 +245,8 @@ async def test_admin_bbox_and_cluster_include_nonpublic_statuses(
         migrated_session,
         **_BBOX,
         cluster_unit="sido",
-        statuses=["hidden"],
+        lifecycle_states=["active"],
+        publication_states=["suppressed"],
     )
     assert hidden_cluster == [
         {
@@ -266,13 +300,15 @@ async def test_admin_bbox_geometry_membership_is_serialization_only(
     light = await admin_feature_repo.admin_features_in_bbox(
         migrated_session,
         **_BBOX,
-        statuses=["hidden"],
+        lifecycle_states=["active"],
+        publication_states=["suppressed"],
         include_geometry=False,
     )
     geometry = await admin_feature_repo.admin_features_in_bbox(
         migrated_session,
         **_BBOX,
-        statuses=["hidden"],
+        lifecycle_states=["active"],
+        publication_states=["suppressed"],
         include_geometry=True,
     )
 
@@ -288,7 +324,8 @@ async def test_admin_bbox_geometry_membership_is_serialization_only(
         migrated_session,
         **_BBOX,
         cluster_unit="sido",
-        statuses=["hidden"],
+        lifecycle_states=["active"],
+        publication_states=["suppressed"],
     )
     assert len(clusters) == 1
     assert clusters[0]["feature_count"] == 1
@@ -355,7 +392,8 @@ async def test_admin_weather_card_uses_nonpublic_target_and_anchor(
     map_rows = await admin_feature_repo.admin_features_in_bbox(
         migrated_session,
         **_BBOX,
-        statuses=["hidden"],
+        lifecycle_states=["active"],
+        publication_states=["suppressed"],
         kinds=["weather"],
     )
 
@@ -450,7 +488,8 @@ async def test_admin_price_card_and_map_summary_include_nonpublic_feature(
     map_rows = await admin_feature_repo.admin_features_in_bbox(
         migrated_session,
         **_BBOX,
-        statuses=["hidden"],
+        lifecycle_states=["active"],
+        publication_states=["suppressed"],
         kinds=["price"],
     )
 

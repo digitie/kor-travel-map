@@ -129,12 +129,15 @@ def _legacy_feature_reads(sql: str) -> set[str]:
     relations = re.findall(
         r"\b(?:FROM|JOIN|UPDATE)\s+([a-z_]+\.[a-z_]+)", sql, flags=re.IGNORECASE
     )
-    if relations and all(
-        re.fullmatch(_FEATURE_RELATIONS, relation, flags=re.IGNORECASE)
-        for relation in relations
+    if (
+        relations
+        and all(
+            re.fullmatch(_FEATURE_RELATIONS, relation, flags=re.IGNORECASE)
+            for relation in relations
+        )
+        and re.search(rf"(?<![.\w]){_LEGACY_COLUMNS}\b", sql, flags=re.IGNORECASE)
     ):
-        if re.search(rf"(?<![.\w]){_LEGACY_COLUMNS}\b", sql, flags=re.IGNORECASE):
-            found.add("unqualified")
+        found.add("unqualified")
     return found
 
 
