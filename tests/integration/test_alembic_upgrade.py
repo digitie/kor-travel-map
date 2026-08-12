@@ -170,6 +170,15 @@ _UNMAPPED_TABLE_COLUMNS: dict[
         ("revision", "bigint", True),
         ("updated_at", "timestamp with time zone", True),
     },
+    # 0103 legacy freeze replay의 fail-closed preflight 결과. 애플리케이션이 읽지
+    # 않는 일회성 감사 기록이라 ORM에 매핑하지 않고, 구조는 여기서 고정한다.
+    ("ops", "tvn36_legacy_freeze_preflight_manifest"): {
+        ("feature_id", "text", True),
+        ("request_id", "uuid", False),
+        ("violation_code", "text", True),
+        ("detail", "text", True),
+        ("recorded_at", "timestamp with time zone", True),
+    },
 }
 
 _UNMAPPED_TABLE_CONSTRAINTS: dict[tuple[str, str], set[tuple[str, str]]] = {
@@ -253,6 +262,9 @@ _UNMAPPED_TABLE_CONSTRAINTS: dict[tuple[str, str], set[tuple[str, str]]] = {
         ("ck_ops_live_topic_revisions_topic", "c"),
         ("ck_ops_live_topic_revisions_revision", "c"),
     },
+    ("ops", "tvn36_legacy_freeze_preflight_manifest"): {
+        ("tvn36_legacy_freeze_preflight_manifest_pkey", "p"),
+    },
 }
 
 _UNMAPPED_TABLE_INDEXES: dict[tuple[str, str], set[str]] = {
@@ -308,6 +320,9 @@ _UNMAPPED_TABLE_INDEXES: dict[tuple[str, str], set[str]] = {
         "ix_ops_live_ticket_claims_expires_at",
     },
     ("ops", "ops_live_topic_revisions"): {"pk_ops_live_topic_revisions"},
+    ("ops", "tvn36_legacy_freeze_preflight_manifest"): {
+        "tvn36_legacy_freeze_preflight_manifest_pkey",
+    },
 }
 
 _UNCOMPARED_INDEX_CONTRACTS: dict[
