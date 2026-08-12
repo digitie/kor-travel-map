@@ -103,7 +103,6 @@ __all__ = [
     "Base",
     "FeatureRow",
     "FeatureAliasRow",
-    "WeatherMetricSeriesRow",
     "FeatureVersionRow",
     "ProviderDatasetRow",
     "ProviderDatasetOperationRow",
@@ -731,28 +730,6 @@ class FeatureAliasRow(Base):
     )
 
 
-class WeatherMetricSeriesRow(Base):
-    """weather history의 작은 physical-series registry.
-
-    대용량 fact table에서 매 batch마다 ``DISTINCT``로 series를 재발견하지 않도록
-    writer trigger가 단조롭게 등록한다. stale registry row는 조회 시 fact
-    predecessor가 없어 자연스럽게 제외된다.
-    """
-
-    __tablename__ = "weather_metric_series"
-    __table_args__ = ({"schema": "feature"},)
-
-    feature_id: Mapped[str] = mapped_column(
-        Text,
-        ForeignKey("feature.features.feature_id", ondelete="CASCADE"),
-        primary_key=True,
-    )
-    provider: Mapped[str] = mapped_column(Text, primary_key=True)
-    weather_domain: Mapped[str] = mapped_column(Text, primary_key=True)
-    forecast_style: Mapped[str] = mapped_column(Text, primary_key=True)
-    metric_key: Mapped[str] = mapped_column(Text, primary_key=True)
-
-
 class FeatureVersionRow(Base):
     """``feature.feature_versions`` row mapping.
 
@@ -991,6 +968,11 @@ class SourceEntityRow(Base):
     __tablename__ = "source_entities"
     __table_args__ = (
         UniqueConstraint(
+            "source_entity_key",
+            "provider_dataset_id",
+            name="uq_source_entities_key_dataset",
+        ),
+        UniqueConstraint(
             "provider_dataset_id",
             "source_entity_type",
             "source_entity_id",
@@ -1102,6 +1084,12 @@ class SourceRecordRow(Base):
 
     __tablename__ = "source_records"
     __table_args__ = (
+        UniqueConstraint(
+            "source_record_key",
+            "source_entity_key",
+            "fetched_at",
+            name="uq_source_records_record_entity_fetched",
+        ),
         UniqueConstraint(
             "source_entity_key",
             "raw_payload_hash",

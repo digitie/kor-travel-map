@@ -72,9 +72,10 @@ async def test_head_keeps_partial_gist_and_drops_full_gist(
 async def test_weather_source_record_support_index_exists(
     migrated_session: Any,
 ) -> None:
-    """T-VN-17 이월: weather source-record FK 지원 index가 존재한다(price 미러)."""
+    """T-VN-38 fact/current lookup index가 immutable weather schema에 존재한다."""
     names = await _index_names(migrated_session, "feature_weather_values")
-    assert "idx_weather_values_source_record" in names
+    assert "idx_weather_values_feature_target_known" in names
+    assert "idx_weather_values_source_record" not in names
 
 
 async def _seed_public_points(session: Any, count: int, prefix: str) -> None:

@@ -1223,7 +1223,6 @@ async def get_admin_feature_weather(
     request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
     feature_id: str,
-    asof: Annotated[datetime | None, Query()] = None,
 ) -> FeatureWeatherResponse:
     started_at = perf_counter()
     identity = await resolve_feature_ref_or_error(session, feature_id)
@@ -1232,14 +1231,12 @@ async def get_admin_feature_weather(
     card = await weather_repo.build_admin_weather_card(
         session,
         feature_id=canonical_id,
-        asof=asof,
     )
     return FeatureWeatherResponse(
         data=WeatherCardData(
             # T-VN-32C PR-2 — 단건 card 응답의 feature_id는 UUID 정본
             # (features.py 단건 card와 동일 규약; repo 내부 조회는 legacy 축).
             feature_id=identity.feature_uuid,
-            asof=card.asof,
             source_styles=card.source_styles,
             metrics=[
                 WeatherMetricOut.model_validate(metric, from_attributes=True)
@@ -1247,6 +1244,8 @@ async def get_admin_feature_weather(
             ],
             latest_at=card.latest_at,
             is_stale=card.is_stale,
+            selected_at=card.selected_at,
+            refresh_after=card.refresh_after,
         ),
         meta=make_meta(request, started_at=started_at),
     )
@@ -1262,7 +1261,6 @@ async def get_admin_feature_price(
     request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
     feature_id: str,
-    asof: Annotated[datetime | None, Query()] = None,
     history_limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> FeaturePriceResponse:
     started_at = perf_counter()
@@ -1272,7 +1270,6 @@ async def get_admin_feature_price(
     card = await price_repo.build_price_card(
         session,
         feature_id=canonical_id,
-        asof=asof,
         history_limit=history_limit,
     )
     return FeaturePriceResponse(
@@ -1280,7 +1277,6 @@ async def get_admin_feature_price(
             # T-VN-32C PR-2 — 단건 card 응답의 feature_id는 UUID 정본
             # (features.py 단건 card와 동일 규약; repo 내부 조회는 legacy 축).
             feature_id=identity.feature_uuid,
-            asof=card.asof,
             current=[
                 PricePointOut.model_validate(point, from_attributes=True)
                 for point in card.current

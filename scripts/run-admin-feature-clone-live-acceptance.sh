@@ -23,10 +23,12 @@ readonly DB_CONTAINER="${E2E_CLONE_DB_CONTAINER-}"
 readonly DB_HOST_PORT="${E2E_CLONE_DB_PORT-}"
 readonly API_PORT="${E2E_CLONE_API_PORT:-18701}"
 readonly UI_PORT="${E2E_CLONE_UI_PORT:-18705}"
+readonly LOOPBACK_UI_PORT=18706
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 readonly SOURCE_ARCHIVE="$SCRIPT_DIR/source.tar.gz"
 readonly ARCHIVE_PREFIX="kor-travel-map-$SOURCE_COMMIT"
 readonly ARCHIVE_URL="https://github.com/digitie/kor-travel-map/archive/$SOURCE_COMMIT.tar.gz"
+LOOPBACK_PROXY_HELPER=""
 
 die() {
   printf 'admin feature clone live acceptance failed: %s (values redacted)\n' "$1" >&2
@@ -102,16 +104,19 @@ bootstrap_snapshot() {
       --directory "$incoming" --strip-components=2 \
       "$ARCHIVE_PREFIX/scripts/admin_feature_clone_live_state.py" \
       "$ARCHIVE_PREFIX/scripts/admin_feature_live_fixture.py" \
+      "$ARCHIVE_PREFIX/scripts/c7-loopback-ui-proxy.mjs" \
       "$ARCHIVE_PREFIX/scripts/run-admin-feature-clone-live-acceptance.sh"
     sudo -n chown root:root \
       "$incoming/source.tar.gz" \
       "$incoming/admin_feature_clone_live_state.py" \
       "$incoming/admin_feature_live_fixture.py" \
+      "$incoming/c7-loopback-ui-proxy.mjs" \
       "$incoming/run-admin-feature-clone-live-acceptance.sh"
     sudo -n chmod 0444 \
       "$incoming/source.tar.gz" \
       "$incoming/admin_feature_clone_live_state.py" \
-      "$incoming/admin_feature_live_fixture.py"
+      "$incoming/admin_feature_live_fixture.py" \
+      "$incoming/c7-loopback-ui-proxy.mjs"
     sudo -n chmod 0555 "$incoming/run-admin-feature-clone-live-acceptance.sh"
     sudo -n chmod 0555 "$incoming"
     if ! sudo -n mv -T --no-clobber -- "$incoming" "$expected_root"; then
@@ -146,19 +151,35 @@ validate_snapshot() {
     die "snapshot root is unsafe"
   [[ "$(stat -c '%u:%g:%a' -- "$snapshot_root")" == "0:0:555" ]] ||
     die "snapshot root metadata is unsafe"
-  local expected_names actual_names
-  expected_names=$'admin_feature_clone_live_state.py\nadmin_feature_live_fixture.py\nrun-admin-feature-clone-live-acceptance.sh\nsource.tar.gz'
+  local installed_names legacy_names actual_names
+  installed_names=$'admin_feature_clone_live_state.py\nadmin_feature_live_fixture.py\nc7-loopback-ui-proxy.mjs\nrun-admin-feature-clone-live-acceptance.sh\nsource.tar.gz'
+  legacy_names=$'admin_feature_clone_live_state.py\nadmin_feature_live_fixture.py\nrun-admin-feature-clone-live-acceptance.sh\nsource.tar.gz'
   actual_names="$(
     find "$snapshot_root" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort
   )"
-  [[ "$actual_names" == "$expected_names" ]] || die "snapshot exact file set mismatch"
+  if [[ "$actual_names" == "$installed_names" ]]; then
+    LOOPBACK_PROXY_HELPER="$snapshot_root/c7-loopback-ui-proxy.mjs"
+  elif [[ "$actual_names" == "$legacy_names" ]]; then
+    # 이전 immutable bootstrap root는 새 보조 파일을 설치하지 못한다. 현재 runner의
+    # archive에만 proxy member를 요구하고, recover가 검증하는 과거 fixture snapshot은
+    # 기존 정확한 세 helper만으로 읽기 전용 호환을 유지한다.
+    if [[ "$snapshot_root" == "$SCRIPT_DIR" ]]; then
+      [[ "$(tar -tzf "$archive" "$prefix/scripts/c7-loopback-ui-proxy.mjs")" == "$prefix/scripts/c7-loopback-ui-proxy.mjs" ]] ||
+        die "legacy current snapshot lacks the loopback proxy source"
+    fi
+  else
+    die "snapshot exact file set mismatch"
+  fi
   [[ "$(stat -c '%u:%g:%a' -- "$archive")" == "0:0:444" && ! -L "$archive" ]] ||
     die "source archive metadata is unsafe"
   local name expected_mode archive_digest installed_digest
-  for name in \
+  local -a snapshot_files=(
     admin_feature_clone_live_state.py \
     admin_feature_live_fixture.py \
-    run-admin-feature-clone-live-acceptance.sh; do
+    run-admin-feature-clone-live-acceptance.sh
+  )
+  [[ -z "$LOOPBACK_PROXY_HELPER" ]] || snapshot_files+=(c7-loopback-ui-proxy.mjs)
+  for name in "${snapshot_files[@]}"; do
     expected_mode=444
     [[ "$name" != run-admin-feature-clone-live-acceptance.sh ]] || expected_mode=555
     [[ "$(stat -c '%u:%g:%a' -- "$snapshot_root/$name")" == "0:0:$expected_mode" ]] ||
@@ -182,9 +203,6 @@ validate_snapshot() {
   done
 }
 
-[[ "$MODE" == "baseline" || "$MODE" == "checkpoint" ||
-   "$MODE" == "recover" || "$MODE" == "run" ]] ||
-  die "usage: runner baseline|checkpoint|recover|run"
 require_env E2E_SOURCE_COMMIT
 if [[ "$SCRIPT_DIR" != "$INSTALL_BASE/$SOURCE_COMMIT" ]]; then
   bootstrap_snapshot
@@ -192,6 +210,9 @@ fi
 
 (( EUID == 0 )) || die "trusted installed runner requires root"
 validate_snapshot
+[[ "$MODE" == "baseline" || "$MODE" == "checkpoint" ||
+   "$MODE" == "recover" || "$MODE" == "run" || "$MODE" == "abort" ]] ||
+  die "usage: runner baseline|checkpoint|recover|run|abort"
 require_command docker
 require_command find
 require_command flock
@@ -368,7 +389,12 @@ COPY (
       'column'::text AS kind,
       namespace.nspname AS schema_name,
       relation.relname AS object_name,
-      attribute.attnum::text || ':' || attribute.attname || ':' ||
+      -- ALTER TABLE DROP COLUMN 뒤의 attnum gap은 pg_dump/pg_restore가 정규화한다.
+      -- 이름·형식·필수성·identity/generated/default와 active-column 상대 순서가
+      -- column contract이다. gap만 무시하도록 dense ordinal을 넣는다.
+      row_number() OVER (
+        PARTITION BY attribute.attrelid ORDER BY attribute.attnum
+      )::text || ':' || attribute.attname || ':' ||
       pg_catalog.format_type(attribute.atttypid, attribute.atttypmod) || ':' ||
       attribute.attnotnull::text || ':' ||
       attribute.attidentity::text || ':' ||
@@ -413,8 +439,53 @@ COPY (
     UNION ALL
     SELECT
       'constraint', namespace.nspname, relation.relname,
-      constraint_row.conname || ':' ||
-      pg_catalog.pg_get_constraintdef(constraint_row.oid, true)
+      -- pg_restore는 같은 CHECK AST를 다시 parse/deparse하면서 괄호·암묵 cast의
+      -- 텍스트만 바꿀 수 있다. dump SHA-256 + pg_restore 성공이 expression bytes와
+      -- 적용을 보장하므로, restore 동등성 fingerprint에는 deparser 문자열 대신
+      -- structural catalog 축만 넣는다. conkey/confkey도 dropped column 뒤에는 raw
+      -- attnum을 보유하므로, key 순서를 보존한 column name으로 정규화한다. 그렇지
+      -- 않으면 같은 constraint가 false-red가 된다.
+      concat_ws(
+        ':',
+        constraint_row.conname,
+        constraint_row.contype,
+        COALESCE(
+          (
+            SELECT string_agg(
+              key_attribute.attname,
+              ',' ORDER BY array_position(constraint_row.conkey, key_attribute.attnum)
+            )
+            FROM pg_catalog.pg_attribute AS key_attribute
+            WHERE key_attribute.attrelid = constraint_row.conrelid
+              AND key_attribute.attnum = ANY(constraint_row.conkey)
+          ),
+          ''
+        ),
+        COALESCE(
+          (
+            SELECT string_agg(
+              referenced_attribute.attname,
+              ',' ORDER BY array_position(
+                constraint_row.confkey,
+                referenced_attribute.attnum
+              )
+            )
+            FROM pg_catalog.pg_attribute AS referenced_attribute
+            WHERE referenced_attribute.attrelid = constraint_row.confrelid
+              AND referenced_attribute.attnum = ANY(constraint_row.confkey)
+          ),
+          ''
+        ),
+        COALESCE(constraint_row.confrelid::regclass::text, ''),
+        constraint_row.confupdtype,
+        constraint_row.confdeltype,
+        constraint_row.confmatchtype,
+        constraint_row.condeferrable,
+        constraint_row.condeferred,
+        constraint_row.convalidated,
+        constraint_row.connoinherit,
+        COALESCE(constraint_row.conexclop::text, '')
+      )
     FROM pg_catalog.pg_constraint AS constraint_row
     JOIN pg_catalog.pg_class AS relation ON relation.oid = constraint_row.conrelid
     JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace
@@ -494,8 +565,13 @@ COPY (
       'domain_constraint',
       namespace.nspname,
       type_row.typname,
-      constraint_row.conname || ':' ||
-        pg_catalog.pg_get_constraintdef(constraint_row.oid, true)
+      concat_ws(
+        ':',
+        constraint_row.conname,
+        constraint_row.contype,
+        constraint_row.convalidated,
+        constraint_row.connoinherit
+      )
     FROM pg_catalog.pg_constraint AS constraint_row
     JOIN pg_catalog.pg_type AS type_row
       ON type_row.oid = constraint_row.contypid
@@ -665,10 +741,75 @@ extension_sha256() {
   " | sha256sum | awk '{print $1}'
 }
 
+owned_feature_ids_sql() {
+  local run_id="$1"
+  [[ "$run_id" =~ ^[a-z0-9][a-z0-9-]{15,79}$ ]] ||
+    die "API-owned feature ID run ID is invalid"
+  python3 -I -B - "$run_id" <<'PY'
+import hashlib
+import sys
+
+run_id = sys.argv[1]
+
+def make_id(kind: str, category: str, source_type: str, source_natural_key: str) -> str:
+    raw = f"global|{kind}|{category}|{source_type}|{source_natural_key}|"
+    return f"f_global_{kind[0]}_{hashlib.sha1(raw.encode()).hexdigest()[:16]}"
+
+def admin_id(role: str) -> str:
+    logical_id = f"e2e_live_acceptance::{run_id}::{role}"
+    return make_id(
+        "place", "01070300", "user_request",
+        hashlib.sha256(logical_id.encode()).hexdigest(),
+    )
+
+ids = [
+    make_id("weather", "00000000", "e2e-live-acceptance", f"{run_id}:weather"),
+    make_id("price", "00000000", "e2e-live-acceptance", f"{run_id}:price"),
+]
+ids.extend(admin_id(role) for role in (
+    "marker::draft", "marker::inactive", "marker::hidden",
+    "correction", "search::alpha", "search::beta",
+))
+print(",".join(repr(value) for value in ids))
+PY
+}
+
+owned_summary_run_ids_sql() {
+  local seed_path="${RUNTIME_DIR-}/direct-seed.json"
+  if [[ -z "${RUNTIME_DIR-}" || ! -e "$seed_path" ]]; then
+    printf 'NULL'
+    return
+  fi
+  [[ -f "$seed_path" && ! -L "$seed_path" ]] ||
+    die "current-summary receipt evidence is unsafe"
+  [[ "$(stat -c '%u:%g:%a' -- "$seed_path")" == "0:0:600" ]] ||
+    die "current-summary receipt evidence metadata is unsafe"
+  KTM_SUMMARY_RECEIPT_PATH="$seed_path" python3 -I -B -c '
+import json
+import os
+from pathlib import Path
+
+payload = json.loads(Path(os.environ["KTM_SUMMARY_RECEIPT_PATH"]).read_text())
+values = payload.get("summary_run_ids")
+if (
+    payload.get("action") != "seed"
+    or not isinstance(values, list)
+    or len(values) != 2
+    or len(set(values)) != 2
+    or not all(isinstance(value, int) and not isinstance(value, bool) and value > 0 for value in values)
+):
+    raise SystemExit("invalid current-summary receipt evidence")
+print(",".join(str(value) for value in sorted(values)))
+'
+}
+
 content_sha256() {
   local run_id="$1"
   local dataset_projection_revision="${2-}"
   local dataset_projection_updated_at="${3-}"
+  local digest_revision="${4-current}"
+  local provider_sync_revision="${5-}"
+  local provider_sync_updated_at="${6-}"
   [[ "$run_id" =~ ^[a-z0-9][a-z0-9-]{15,79}$ ]] ||
     die "content digest run ID is invalid"
   [[ "$CONTENT_CUTOFF" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{6}Z$ ]] ||
@@ -680,9 +821,112 @@ content_sha256() {
     [[ "$dataset_projection_updated_at" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{6}Z$ ]] ||
       die "dataset projection baseline timestamp is invalid"
   fi
+  if [[ -n "$provider_sync_revision" || -n "$provider_sync_updated_at" ]]; then
+    [[ "$provider_sync_revision" =~ ^[0-9]+$ ]] ||
+      die "provider sync baseline revision is invalid"
+    [[ "$provider_sync_updated_at" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{6}Z$ ]] ||
+      die "provider sync baseline timestamp is invalid"
+  fi
+  [[ -z "$dataset_projection_revision" && -z "$provider_sync_revision" ]] ||
+    [[ -n "$dataset_projection_revision" && -n "$provider_sync_revision" ]] ||
+    die "normalized topic baseline is incomplete"
+  local sequence_identity_case=""
+  local domain_command_filter_case=""
+  local owned_feature_ids owned_feature_ids_json owned_summary_run_ids
+  owned_feature_ids="$(owned_feature_ids_sql "$run_id")"
+  owned_feature_ids_json="$(
+    KTM_OWNED_FEATURE_IDS="$owned_feature_ids" python3 -I -B -c '
+import ast
+import json
+import os
+
+values = ast.literal_eval("[" + os.environ["KTM_OWNED_FEATURE_IDS"] + "]")
+if not isinstance(values, list) or not all(isinstance(value, str) for value in values):
+    raise SystemExit("invalid owned feature identities")
+print(json.dumps(values, separators=(",", ":")))
+'
+  )"
+  owned_summary_run_ids="$(owned_summary_run_ids_sql)"
+  case "$digest_revision" in
+    current)
+      sequence_identity_case="$(cat <<'SQL'
+  WHEN relation.relkind = 'S'
+    AND (
+      (namespace.nspname = 'ops' AND relation.relname IN (
+        'domain_commands_command_id_seq',
+        'current_summary_runs_summary_run_id_seq'
+      ))
+      OR (namespace.nspname = 'provider_sync'
+          AND relation.relname = 'provider_datasets_provider_dataset_id_seq')
+    )
+  THEN format(
+    'SELECT %L || chr(31) || ''run-owned identity sequence excluded'';',
+    namespace.nspname || '.' || relation.relname
+  )
+SQL
+)"
+      domain_command_filter_case="current"
+      ;;
+    legacy-v2)
+      sequence_identity_case="$(cat <<'SQL'
+  WHEN relation.relkind = 'S'
+    AND namespace.nspname = 'ops'
+    AND relation.relname = 'domain_commands_command_id_seq'
+  THEN format(
+    'SELECT %L || chr(31) || ''run-owned identity sequence excluded'';',
+    namespace.nspname || '.' || relation.relname
+  )
+SQL
+)"
+      domain_command_filter_case="legacy-v1"
+      ;;
+    legacy-v1)
+      domain_command_filter_case="legacy-v1"
+      ;;
+    legacy-v0)
+      ;;
+    *)
+      die "content digest revision is invalid"
+      ;;
+  esac
+  if [[ -n "$domain_command_filter_case" ]]; then
+    domain_command_filter_case="$(cat <<SQL
+  WHEN namespace.nspname = 'ops'
+    AND relation.relname IN ('domain_commands', 'domain_command_results')
+  THEN format(
+    'SELECT %L || chr(31) || count(*)::text || chr(31) || ' ||
+    'COALESCE(bit_xor(hashtextextended(row_value::text, 0))::text, ''null'') || ' ||
+    'chr(31) || COALESCE(bit_xor(hashtextextended(row_value::text, ' ||
+    '9223372036854775807))::text, ''null'') ' ||
+    'FROM %I.%I AS row_value WHERE NOT EXISTS (' ||
+    'SELECT 1 FROM ops.domain_commands AS command ' ||
+    'JOIN ops.domain_command_results AS result ' ||
+    'ON result.command_id = command.command_id ' ||
+    'WHERE command.command_id = row_value.command_id ' ||
+    'AND (('
+      || 'command.actor = ''ui-auth'' '
+      || 'AND command.operation = ''admin.auth-event.create'' '
+      || 'AND result.response_body #>> ''{data,item,request_id}'' IN (%L, %L)'
+    ') OR result.response_body::text LIKE %L '
+      || 'OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(%L::jsonb) '
+      || 'AS owned(feature_id) WHERE result.response_body::text LIKE '
+      || '''%%'' || owned.feature_id || ''%%''))' ||
+    ');',
+    namespace.nspname || '.' || relation.relname,
+    namespace.nspname,
+    relation.relname,
+    'e2e_live_acceptance::${run_id}::auth::main',
+    'e2e_live_acceptance::${run_id}::auth::recovery',
+    '%e2e_live_acceptance::${run_id}::%',
+    '${owned_feature_ids_json}'
+  )
+SQL
+)"
+  fi
   local statement_query statements
   statement_query="$(cat <<SQL
 SELECT CASE
+${sequence_identity_case}
   WHEN relation.relkind = 'S' THEN format(
     'SELECT %L || chr(31) || ''1'' || chr(31) || last_value::text || ' ||
     'chr(31) || is_called::text FROM %I.%I;',
@@ -700,15 +944,33 @@ SELECT CASE
     '9223372036854775807))::text, ''null'') ' ||
     'FROM (' ||
     'SELECT topic, revision, updated_at FROM %I.%I ' ||
-    'WHERE topic <> ''dataset_projection'' ' ||
-    'UNION ALL SELECT ''dataset_projection'', %s::bigint, %L::timestamptz' ||
+    'WHERE topic NOT IN (''dataset_projection'', ''provider_sync'') ' ||
+    'UNION ALL SELECT ''dataset_projection'', %s::bigint, %L::timestamptz ' ||
+    'UNION ALL SELECT ''provider_sync'', %s::bigint, %L::timestamptz ' ||
     ') AS row_value;',
     namespace.nspname || '.' || relation.relname,
     namespace.nspname,
     relation.relname,
     '${dataset_projection_revision}',
-    '${dataset_projection_updated_at}'
+    '${dataset_projection_updated_at}',
+    '${provider_sync_revision}',
+    '${provider_sync_updated_at}'
   )
+  WHEN namespace.nspname = 'ops'
+    AND relation.relname = 'current_summary_runs'
+    AND '${owned_summary_run_ids}' <> 'NULL'
+  THEN format(
+    'SELECT %L || chr(31) || count(*)::text || chr(31) || ' ||
+    'COALESCE(bit_xor(hashtextextended(row_value::text, 0))::text, ''null'') || ' ||
+    'chr(31) || COALESCE(bit_xor(hashtextextended(row_value::text, ' ||
+    '9223372036854775807))::text, ''null'') ' ||
+    'FROM %I.%I AS row_value ' ||
+    'WHERE row_value.summary_run_id <> ALL (ARRAY[${owned_summary_run_ids}]::bigint[]);',
+    namespace.nspname || '.' || relation.relname,
+    namespace.nspname,
+    relation.relname
+  )
+${domain_command_filter_case}
   ELSE format(
     'SELECT %L || chr(31) || count(*)::text || chr(31) || ' ||
     'COALESCE(bit_xor(hashtextextended(row_value::text, 0))::text, ''null'') || ' ||
@@ -727,9 +989,7 @@ SELECT CASE
           AND attribute.attnum > 0
           AND NOT attribute.attisdropped
       ) THEN format(
-        ' WHERE row_value.feature_id NOT LIKE %L ESCAPE %L',
-        'e2e_live_acceptance::${run_id}::%',
-        chr(92)
+        \$fmt\$ WHERE NOT (row_value.feature_id = ANY (ARRAY[${owned_feature_ids}]::text[]))\$fmt\$
       )
       WHEN namespace.nspname = 'ops'
         AND relation.relname = 'admin_auth_events'
@@ -769,6 +1029,11 @@ CONTENT_CUTOFF=""
 DATASET_PROJECTION_START_REVISION=""
 DATASET_PROJECTION_START_UPDATED_AT=""
 DATASET_PROJECTION_START_SOURCE=""
+PROVIDER_SYNC_CURRENT_REVISION=""
+PROVIDER_SYNC_CURRENT_UPDATED_AT=""
+PROVIDER_SYNC_START_REVISION=""
+PROVIDER_SYNC_START_UPDATED_AT=""
+PROVIDER_SYNC_START_SOURCE=""
 
 read_current_dataset_projection() {
   local row
@@ -787,6 +1052,25 @@ read_current_dataset_projection() {
     die "dataset projection current row is invalid"
   DATASET_PROJECTION_CURRENT_REVISION="${BASH_REMATCH[1]}"
   DATASET_PROJECTION_CURRENT_UPDATED_AT="${BASH_REMATCH[2]}"
+}
+
+read_current_provider_sync() {
+  local row
+  row="$(
+    psql_value "
+      SELECT revision::text || chr(9) ||
+        to_char(
+          updated_at AT TIME ZONE 'UTC',
+          'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"'
+        )
+      FROM ops.ops_live_topic_revisions
+      WHERE topic = 'provider_sync'
+    "
+  )"
+  [[ "$row" =~ ^([0-9]+)$'\t'([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{6}Z)$ ]] ||
+    die "provider sync current row is invalid"
+  PROVIDER_SYNC_CURRENT_REVISION="${BASH_REMATCH[1]}"
+  PROVIDER_SYNC_CURRENT_UPDATED_AT="${BASH_REMATCH[2]}"
 }
 
 load_dataset_projection_start_from_dump() {
@@ -867,6 +1151,84 @@ load_dataset_projection_start_from_runtime() {
   DATASET_PROJECTION_START_SOURCE="runtime-start"
 }
 
+load_provider_sync_start_from_dump() {
+  local checkpoint_path="$1"
+  local filename dump_path restore_output row raw_updated_at
+  filename="$(
+    state_helper read-checkpoint \
+      --checkpoint "$checkpoint_path" --field dump_filename
+  )"
+  dump_path="$STATE_ROOT/$filename"
+  [[ "$dump_path" == "$STATE_ROOT"/clone-checkpoint-*.dump &&
+     -f "$dump_path" && ! -L "$dump_path" ]] ||
+    die "provider sync checkpoint dump path is unsafe"
+  restore_output="$(
+    docker run --rm \
+      --network none \
+      --read-only \
+      --security-opt no-new-privileges \
+      --cap-drop ALL \
+      --mount "type=bind,src=$dump_path,dst=/checkpoint.dump,readonly" \
+      --entrypoint pg_restore \
+      "$BASE_CLONE_IMAGE_ID" \
+      --data-only \
+      --schema=ops \
+      --table=ops_live_topic_revisions \
+      -f - \
+      /checkpoint.dump
+  )"
+  row="$(
+    awk -F $'\t' '
+      $1 == "provider_sync" {
+        if (NF != 3) {
+          exit 2
+        }
+        value = $2 FS $3
+        count += 1
+      }
+      END {
+        if (count != 1) {
+          exit 3
+        }
+        print value
+      }
+    ' <<<"$restore_output"
+  )"
+  unset restore_output
+  [[ "$row" =~ ^([0-9]+)$'\t'([0-9]{4}-[0-9]{2}-[0-9]{2}\ [0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{6}\+00)$ ]] ||
+    die "provider sync checkpoint row is invalid"
+  PROVIDER_SYNC_START_REVISION="${BASH_REMATCH[1]}"
+  raw_updated_at="${BASH_REMATCH[2]}"
+  PROVIDER_SYNC_START_UPDATED_AT="${raw_updated_at/ /T}"
+  PROVIDER_SYNC_START_UPDATED_AT="${PROVIDER_SYNC_START_UPDATED_AT%+00}Z"
+  PROVIDER_SYNC_START_SOURCE="checkpoint-dump"
+}
+
+load_provider_sync_start_from_runtime() {
+  local path="$RUNTIME_DIR/provider-sync-topic-revision-start.json"
+  [[ -f "$path" && ! -L "$path" ]] ||
+    die "provider sync runtime start evidence is missing"
+  PROVIDER_SYNC_START_REVISION="$(
+    state_helper read-topic-revision-start \
+      --field revision --path "$path" --topic provider_sync
+  )"
+  PROVIDER_SYNC_START_UPDATED_AT="$(
+    state_helper read-topic-revision-start \
+      --field updated_at --path "$path" --topic provider_sync
+  )"
+  [[ "$(
+    state_helper read-topic-revision-start \
+      --field checkpoint_sha256 --path "$path" --topic provider_sync
+  )" == "$(state_helper read-blocked \
+    --path "$BLOCKED_FILE" --field clone_checkpoint_sha256
+  )" ]] || die "provider sync runtime checkpoint binding differs"
+  [[ "$(
+    state_helper read-topic-revision-start \
+      --field run_id --path "$path" --topic provider_sync
+  )" == "$RUN_ID" ]] || die "provider sync runtime run ID differs"
+  PROVIDER_SYNC_START_SOURCE="runtime-start"
+}
+
 snapshot_content_sha256() {
   local path="$1"
   local digest
@@ -898,18 +1260,33 @@ write_dataset_projection_snapshots() {
   [[ "$DATASET_PROJECTION_START_SOURCE" == "runtime-start" ||
      "$DATASET_PROJECTION_START_SOURCE" == "checkpoint-dump" ]] ||
     die "dataset projection start source is unavailable"
+  [[ "$PROVIDER_SYNC_START_REVISION" =~ ^[0-9]+$ ]] ||
+    die "provider sync start revision is unavailable"
+  [[ "$PROVIDER_SYNC_START_UPDATED_AT" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{6}Z$ ]] ||
+    die "provider sync start timestamp is unavailable"
+  [[ "$PROVIDER_SYNC_START_SOURCE" == "runtime-start" ||
+     "$PROVIDER_SYNC_START_SOURCE" == "checkpoint-dump" ]] ||
+    die "provider sync start source is unavailable"
   write_snapshot "$observed_path" "$RUN_ID"
   read_current_dataset_projection
-  (( DATASET_PROJECTION_CURRENT_REVISION ==
-     DATASET_PROJECTION_START_REVISION + 1 )) ||
-    die "dataset projection revision delta is not one"
+  read_current_provider_sync
+  (( DATASET_PROJECTION_CURRENT_REVISION >
+     DATASET_PROJECTION_START_REVISION )) ||
+    die "dataset projection revision did not advance"
   [[ "$DATASET_PROJECTION_CURRENT_UPDATED_AT" > "$DATASET_PROJECTION_START_UPDATED_AT" ]] ||
     die "dataset projection revision timestamp did not advance"
+  (( PROVIDER_SYNC_CURRENT_REVISION > PROVIDER_SYNC_START_REVISION )) ||
+    die "provider sync revision did not advance"
+  [[ "$PROVIDER_SYNC_CURRENT_UPDATED_AT" > "$PROVIDER_SYNC_START_UPDATED_AT" ]] ||
+    die "provider sync revision timestamp did not advance"
   write_snapshot \
     "$normalized_path" \
     "$RUN_ID" \
     "$DATASET_PROJECTION_START_REVISION" \
-    "$DATASET_PROJECTION_START_UPDATED_AT"
+    "$DATASET_PROJECTION_START_UPDATED_AT" \
+    current \
+    "$PROVIDER_SYNC_START_REVISION" \
+    "$PROVIDER_SYNC_START_UPDATED_AT"
   checkpoint_sha256="$(
     state_helper read-blocked \
       --path "$BLOCKED_FILE" --field clone_checkpoint_sha256
@@ -927,6 +1304,18 @@ write_dataset_projection_snapshots() {
     --source "$DATASET_PROJECTION_START_SOURCE" \
     --start-revision "$DATASET_PROJECTION_START_REVISION" \
     --start-updated-at "$DATASET_PROJECTION_START_UPDATED_AT"
+  state_helper write-topic-revision-proof \
+    --checkpoint-sha256 "$checkpoint_sha256" \
+    --current-revision "$PROVIDER_SYNC_CURRENT_REVISION" \
+    --current-updated-at "$PROVIDER_SYNC_CURRENT_UPDATED_AT" \
+    --normalized-content-sha256 "$normalized_content" \
+    --observed-content-sha256 "$observed_content" \
+    --path "$RUNTIME_DIR/provider-sync-topic-revision-proof.json" \
+    --run-id "$RUN_ID" \
+    --source "$PROVIDER_SYNC_START_SOURCE" \
+    --start-revision "$PROVIDER_SYNC_START_REVISION" \
+    --start-updated-at "$PROVIDER_SYNC_START_UPDATED_AT" \
+    --topic provider_sync
 }
 
 read_image_migration_head() {
@@ -953,6 +1342,9 @@ write_snapshot() {
   local run_id="$2"
   local dataset_projection_revision="${3-}"
   local dataset_projection_updated_at="${4-}"
+  local digest_revision="${5-current}"
+  local provider_sync_revision="${6-}"
+  local provider_sync_updated_at="${7-}"
   [[ "$run_id" =~ ^[a-z0-9][a-z0-9-]{15,79}$ ]] ||
     die "snapshot run ID is invalid"
   verify_clone_container
@@ -963,6 +1355,8 @@ write_snapshot() {
   local migration_head relation_count feature_total feature_non_deleted
   local active_owned nonterminal_owned schema_digest content_digest
   local database_digest extension_digest
+  local owned_feature_ids
+  owned_feature_ids="$(owned_feature_ids_sql "$run_id")"
   container_sha="$(printf '%s' "$before_id" | sha256sum | awk '{print $1}')"
   system_identifier="$(psql_value "SELECT system_identifier::text FROM pg_control_system()")"
   system_sha="$(printf '%s' "$system_identifier" | sha256sum | awk '{print $1}')"
@@ -971,8 +1365,8 @@ write_snapshot() {
   relation_count="$(psql_value "SELECT count(*) FROM pg_class WHERE relnamespace IN (SELECT oid FROM pg_namespace WHERE nspname IN ('feature','ops','provider_sync')) AND relkind IN ('r','p','v','m')")"
   feature_total="$(psql_value "SELECT count(*) FROM feature.features")"
   feature_non_deleted="$(psql_value "SELECT count(*) FROM feature.features WHERE status <> 'deleted'")"
-  active_owned="$(psql_value "SELECT count(*) FROM feature.features WHERE feature_id LIKE 'e2e\\_live\\_acceptance::${run_id}::%' ESCAPE '\\' AND status <> 'deleted'")"
-  nonterminal_owned="$(psql_value "SELECT count(*) FROM ops.feature_change_requests WHERE feature_id LIKE 'e2e\\_live\\_acceptance::${run_id}::%' ESCAPE '\\' AND state = 'pending'")"
+  active_owned="$(psql_value "SELECT count(*) FROM feature.features WHERE feature_id = ANY (ARRAY[${owned_feature_ids}]::text[]) AND status <> 'deleted'")"
+  nonterminal_owned="$(psql_value "SELECT count(*) FROM ops.feature_change_requests WHERE feature_id = ANY (ARRAY[${owned_feature_ids}]::text[]) AND state = 'pending'")"
   schema_digest="$(schema_sha256)"
   database_digest="$(database_sha256)"
   extension_digest="$(extension_sha256)"
@@ -980,7 +1374,10 @@ write_snapshot() {
     content_sha256 \
       "$run_id" \
       "$dataset_projection_revision" \
-      "$dataset_projection_updated_at"
+      "$dataset_projection_updated_at" \
+      "$digest_revision" \
+      "$provider_sync_revision" \
+      "$provider_sync_updated_at"
   )"
   verify_clone_container
   [[ "$(docker inspect --format '{{.Id}}' "$DB_CONTAINER")" == "$before_id" ]] ||
@@ -1035,6 +1432,8 @@ NEW_CHECKPOINT_DUMP=""
 CHECKPOINT_SNAPSHOT=""
 RESTORED_CHECKPOINT_SNAPSHOT=""
 FINAL_CHECKPOINT_SNAPSHOT=""
+CURRENT_CHECKPOINT_SNAPSHOT=""
+LEGACY_CHECKPOINT_SNAPSHOT=""
 OLD_CHECKPOINT_DUMP=""
 OLD_CHECKPOINT_DUMP_SHA256=""
 OLD_CHECKPOINT_DUMP_SIZE=""
@@ -1056,6 +1455,39 @@ CHECKPOINT_LOGIN_FENCED=0
 CHECKPOINT_DUMP_DURABLE=0
 BLOCKED_WRITTEN=0
 COMPLETE=0
+
+prepare_loopback_proxy_helper() {
+  if [[ -n "$LOOPBACK_PROXY_HELPER" ]]; then
+    [[ "$(stat -c '%u:%g:%a' -- "$LOOPBACK_PROXY_HELPER")" == "0:0:444" ]] &&
+      [[ ! -L "$LOOPBACK_PROXY_HELPER" ]] ||
+      die "installed loopback proxy metadata is unsafe"
+    return
+  fi
+
+  local archive_member="$ARCHIVE_PREFIX/scripts/c7-loopback-ui-proxy.mjs"
+  [[ "$(tar -tzf "$SOURCE_ARCHIVE" "$archive_member")" == "$archive_member" ]] ||
+    die "loopback proxy source is absent from the immutable archive"
+  local proxy_path="$RUNTIME_DIR/c7-loopback-ui-proxy.mjs"
+  if [[ -e "$proxy_path" || -L "$proxy_path" ]]; then
+    [[ -f "$proxy_path" && ! -L "$proxy_path" ]] &&
+      [[ "$(stat -c '%u:%g:%a' -- "$proxy_path")" == "0:0:444" ]] ||
+      die "existing runtime loopback proxy is unsafe"
+    # 이전 recover tool이 남긴 root-owned helper는 실행하지 않는다. 현재 immutable
+    # archive의 동일 member로 교체해 source commit 간 retry도 fail-closed로 수렴한다.
+    rm -f -- "$proxy_path"
+  fi
+  local temporary_path
+  temporary_path="$(mktemp "$RUNTIME_DIR/.c7-loopback-ui-proxy.XXXXXX")"
+  tar -xOf "$SOURCE_ARCHIVE" "$archive_member" >"$temporary_path"
+  [[ -s "$temporary_path" ]] || die "loopback proxy source is empty"
+  chown root:root -- "$temporary_path"
+  chmod 0444 -- "$temporary_path"
+  mv -T --no-clobber -- "$temporary_path" "$proxy_path" ||
+    die "runtime loopback proxy installation failed"
+  [[ "$(sha256sum "$proxy_path" | awk '{print $1}')" == "$(tar -xOf "$SOURCE_ARCHIVE" "$archive_member" | sha256sum | awk '{print $1}')" ]] ||
+    die "runtime loopback proxy differs from the immutable archive"
+  LOOPBACK_PROXY_HELPER="$proxy_path"
+}
 
 prepare_build_context() {
   local snapshot_root="$1"
@@ -2231,6 +2663,28 @@ verify_checkpoint_dump() {
   verify_dump_archive "$dump_path"
 }
 
+restore_clone_checkpoint() {
+  local checkpoint_path="$1"
+  local filename dump_path
+  filename="$(
+    state_helper read-checkpoint --checkpoint "$checkpoint_path" --field dump_filename
+  )"
+  dump_path="$STATE_ROOT/$filename"
+  [[ "$dump_path" == "$STATE_ROOT"/clone-checkpoint-*.dump &&
+     -f "$dump_path" && ! -L "$dump_path" ]] ||
+    die "clone checkpoint restore dump path is unsafe"
+  [[ "$(stat -c '%u:%g:%a' -- "$dump_path")" == "0:0:600" ]] ||
+    die "clone checkpoint restore dump metadata is unsafe"
+  # 이 함수는 prod DB가 아닌 label/port를 이미 검증한 dedicated clone에만 쓴다.
+  # custom dump restore는 단일 transaction으로 실행하므로 restore 자체가 실패하면
+  # clone schema/data는 그대로 남고 BLOCKED도 해제되지 않는다.
+  PGPASSWORD="$db_password" \
+    PGAPPNAME="$PSQL_APP_NAME" \
+    docker exec -i -e PGPASSWORD -e PGAPPNAME "$DB_CONTAINER" \
+    pg_restore --clean --if-exists --exit-on-error --single-transaction \
+      -U "$db_user" -d "$db_name" <"$dump_path"
+}
+
 refresh_blocked_written_from_durable_state() {
   (( COMPLETE == 0 && BLOCKED_WRITTEN == 0 )) || return 0
   [[ -n "$RUN_KEY" && -f "$BLOCKED_FILE" && ! -L "$BLOCKED_FILE" ]] || return 0
@@ -2364,31 +2818,69 @@ print(value)
         state_helper read-checkpoint \
           --checkpoint "$CHECKPOINT_FILE" --field content_cutoff
       )"
-      FINAL_CHECKPOINT_SNAPSHOT="$STATE_ROOT/.clone-checkpoint-final-$$.json"
+      CURRENT_CHECKPOINT_SNAPSHOT="$STATE_ROOT/.clone-checkpoint-current-$$.json"
       start_checkpoint_quiescence
       assert_checkpoint_quiescence
-      write_snapshot "$FINAL_CHECKPOINT_SNAPSHOT" "$RUN_ID"
-      state_helper verify-checkpoint \
-        --checkpoint "$CHECKPOINT_FILE" \
-        --snapshot "$FINAL_CHECKPOINT_SNAPSHOT" >/dev/null
+      write_snapshot "$CURRENT_CHECKPOINT_SNAPSHOT" "$RUN_ID"
+      CHECKPOINT_CONTENT_REBASE=0
+      if ! state_helper verify-checkpoint \
+          --checkpoint "$CHECKPOINT_FILE" \
+          --snapshot "$CURRENT_CHECKPOINT_SNAPSHOT" >/dev/null 2>&1; then
+        # e462은 run-owned domain-command sequence를, 789는 run-owned receipt를,
+        # 741 후속은 fixture summary/provider sequence를 content digest에서 제외했다.
+        # checkpoint mode에서만 알려진 직전 규칙으로 기존 서명을 먼저 정확히
+        # 대조해, 이 분류 변경 외 DB drift를 재인증하지 않는다.
+        [[ "$MODE" == "checkpoint" && "$existing_checkpoint_version" == "4" ]] ||
+          die "existing checkpoint differs from the current clone"
+        LEGACY_CHECKPOINT_SNAPSHOT="$STATE_ROOT/.clone-checkpoint-legacy-$$.json"
+        LEGACY_DIGEST_REVISION=""
+        for candidate_digest_revision in legacy-v2 legacy-v1 legacy-v0; do
+          write_snapshot \
+            "$LEGACY_CHECKPOINT_SNAPSHOT" \
+            "$RUN_ID" \
+            "" \
+            "" \
+            "$candidate_digest_revision"
+          if state_helper verify-checkpoint \
+              --checkpoint "$CHECKPOINT_FILE" \
+              --snapshot "$LEGACY_CHECKPOINT_SNAPSHOT" >/dev/null 2>&1; then
+            LEGACY_DIGEST_REVISION="$candidate_digest_revision"
+            break
+          fi
+        done
+        [[ -n "$LEGACY_DIGEST_REVISION" ]] ||
+          die "existing checkpoint differs outside the recognized content digest revision"
+        CHECKPOINT_CONTENT_REBASE=1
+      fi
       if [[ "$existing_checkpoint_version" == "2" ||
             "$existing_checkpoint_version" == "3" ]]; then
         state_helper promote-checkpoint \
           --checkpoint "$CHECKPOINT_FILE" \
-          --final-snapshot "$FINAL_CHECKPOINT_SNAPSHOT" \
+          --final-snapshot "$CURRENT_CHECKPOINT_SNAPSHOT" \
           --path "$CHECKPOINT_FILE"
         existing_checkpoint_version="4"
       fi
-      assert_checkpoint_quiescence
-      verify_checkpoint_dump "$CHECKPOINT_FILE"
-      remove_unreferenced_checkpoint_dumps
-      COMPLETE=1
-      rm -- "$FINAL_CHECKPOINT_SNAPSHOT"
-      stop_checkpoint_quiescence
-      remove_owned_images
-      printf 'admin feature clone live checkpoint reused: source=%s version=%s checkpoint=%s\n' \
-        "$SOURCE_COMMIT" "$existing_checkpoint_version" "$CHECKPOINT_FILE"
-      exit 0
+      if (( CHECKPOINT_CONTENT_REBASE == 1 )); then
+        rm -- "$CURRENT_CHECKPOINT_SNAPSHOT" "$LEGACY_CHECKPOINT_SNAPSHOT"
+        CURRENT_CHECKPOINT_SNAPSHOT=""
+        LEGACY_CHECKPOINT_SNAPSHOT=""
+        assert_checkpoint_quiescence
+        verify_checkpoint_dump "$CHECKPOINT_FILE"
+        remove_unreferenced_checkpoint_dumps
+        stop_checkpoint_quiescence
+      else
+        rm -- "$CURRENT_CHECKPOINT_SNAPSHOT"
+        CURRENT_CHECKPOINT_SNAPSHOT=""
+        assert_checkpoint_quiescence
+        verify_checkpoint_dump "$CHECKPOINT_FILE"
+        remove_unreferenced_checkpoint_dumps
+        COMPLETE=1
+        stop_checkpoint_quiescence
+        remove_owned_images
+        printf 'admin feature clone live checkpoint reused: source=%s version=%s checkpoint=%s\n' \
+          "$SOURCE_COMMIT" "$existing_checkpoint_version" "$CHECKPOINT_FILE"
+        exit 0
+      fi
     else
       die "existing checkpoint version is unsupported"
     fi
@@ -2403,9 +2895,9 @@ print(value)
   start_checkpoint_quiescence
   assert_checkpoint_quiescence
   write_snapshot "$CHECKPOINT_SNAPSHOT" "$RUN_ID"
-  [[ "$(psql_value "SELECT count(*) FROM feature.features WHERE feature_id LIKE 'e2e\\_live\\_acceptance::%' ESCAPE '\\' AND status <> 'deleted'")" == "0" ]] ||
+  [[ "$(psql_value "SELECT count(*) FROM feature.features WHERE status <> 'deleted' AND (user_change_reason LIKE 'admin feature live acceptance clone-%' OR name LIKE 'E2E hidden weather clone-%' OR name LIKE 'E2E hidden price clone-%')")" == "0" ]] ||
     die "clone checkpoint has active acceptance Feature residue"
-  [[ "$(psql_value "SELECT count(*) FROM ops.feature_change_requests WHERE feature_id LIKE 'e2e\\_live\\_acceptance::%' ESCAPE '\\' AND state = 'pending'")" == "0" ]] ||
+  [[ "$(psql_value "SELECT count(*) FROM ops.feature_change_requests WHERE state = 'pending' AND reason LIKE 'admin feature live acceptance clone-%'")" == "0" ]] ||
     die "clone checkpoint has pending acceptance change request residue"
   assert_checkpoint_quiescence
   NEW_CHECKPOINT_DUMP="$(
@@ -2609,6 +3101,9 @@ start_candidate_services() {
   docker exec "$API_CONTAINER" python -I -B -c \
     "import urllib.request; urllib.request.urlopen('http://127.0.0.1:$API_PORT/health', timeout=2).read()" \
     >/dev/null || die "candidate API health check failed"
+  docker exec "$API_CONTAINER" python -I -B -c \
+    "import json, urllib.request; spec=json.load(urllib.request.urlopen('http://127.0.0.1:$API_PORT/openapi.json', timeout=2)); assert 'post' in spec.get('paths', {}).get('/v1/admin/features', {})" \
+    >/dev/null || die "candidate API admin feature create route is not mounted"
 
   export KOR_TRAVEL_MAP_UI_ADMIN_PASSWORD_HASH="$password_hash"
   export KOR_TRAVEL_MAP_UI_SESSION_SECRET="$session_secret"
@@ -2645,6 +3140,9 @@ start_candidate_services() {
   docker exec "$UI_CONTAINER" node -e \
     "fetch('http://127.0.0.1:$UI_PORT/login').then(r=>{if(!r.ok)process.exit(1)})" \
     >/dev/null || die "candidate UI health check failed"
+  docker exec "$UI_CONTAINER" node -e \
+    "fetch('http://127.0.0.1:$UI_PORT/api/proxy/v1/admin/features',{method:'POST'}).then(r=>{if(r.status!==401)process.exit(1)})" \
+    >/dev/null || die "candidate UI admin proxy route is not mounted"
   build_revision="$(
     docker exec "$UI_CONTAINER" node -e \
       "fetch('http://127.0.0.1:$UI_PORT/api/build-info').then(r=>r.json()).then(v=>process.stdout.write(v.revision))"
@@ -2683,6 +3181,7 @@ run_executor() {
   local name="$1"
   local artifact_dir="$2"
   local recovery_only="$3"
+  prepare_loopback_proxy_helper
   mkdir -- "$artifact_dir"
   chmod 0700 -- "$artifact_dir"
   local -a recovery_env=()
@@ -2701,7 +3200,10 @@ run_executor() {
     --tmpfs /root/.config:rw,nosuid,nodev,noexec,mode=700 \
     --tmpfs /root/.npm:rw,nosuid,nodev,noexec,mode=700 \
     --mount "type=bind,src=$artifact_dir,dst=/evidence" \
-    --env "E2E_BASE_URL=http://candidate-ui:$UI_PORT" \
+    --mount "type=bind,src=$LOOPBACK_PROXY_HELPER,dst=/opt/c7-loopback-ui-proxy.mjs,readonly" \
+    --env "E2E_BASE_URL=http://127.0.0.1:$LOOPBACK_UI_PORT" \
+    --env "KTM_C7_LOOPBACK_UI_PROXY_PORT=$LOOPBACK_UI_PORT" \
+    --env "KTM_C7_LOOPBACK_UI_PROXY_TARGET=http://candidate-ui:$UI_PORT" \
     --env E2E_ADMIN_USERNAME=admin \
     --env E2E_ADMIN_PASSWORD \
     --env E2E_ADMIN_FEATURE_ACCEPTANCE_WRITE=1 \
@@ -2712,10 +3214,23 @@ run_executor() {
     --env PLAYWRIGHT_ARTIFACT_ROOT=/evidence \
     --env E2E_STORAGE_STATE=/tmp/admin-feature-clone-state.json \
     "${recovery_env[@]}" \
+    --entrypoint /bin/sh \
     "$PLAYWRIGHT_IMAGE_ID" \
-    npm run e2e:live -- \
-    e2e/live/admin-feature-acceptance-write.live.spec.ts \
-    --workers=1 --retries=0
+    -ec '
+      node /opt/c7-loopback-ui-proxy.mjs &
+      proxy_pid=$!
+      cleanup_proxy() {
+        kill "$proxy_pid" 2>/dev/null || true
+        wait "$proxy_pid" 2>/dev/null || true
+      }
+      trap cleanup_proxy EXIT INT TERM
+      for _ in $(seq 1 30); do
+        node -e "fetch(process.env.E2E_BASE_URL + \"/login\").then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))" && break
+        sleep 1
+      done
+      node -e "fetch(process.env.E2E_BASE_URL + \"/login\").then((response) => process.exit(response.ok ? 0 : 1))"
+      npm run e2e:live -- e2e/live/admin-feature-acceptance-write.live.spec.ts --workers=1 --retries=0
+    '
 }
 
 reset_evidence_path() {
@@ -2755,12 +3270,18 @@ set_completion_args() {
     --blocked-path "$BLOCKED_FILE"
     --observed-snapshot "$RUNTIME_DIR/clone-final-observed.json"
     --phase "$phase"
+    --provider-sync-topic-revision-proof "$RUNTIME_DIR/provider-sync-topic-revision-proof.json"
     --runtime "$RUNTIME_DIR"
     --topic-revision-proof "$RUNTIME_DIR/topic-revision-proof.json"
   )
   if [[ "$DATASET_PROJECTION_START_SOURCE" == "runtime-start" ]]; then
     completion_args+=(
       --topic-revision-start "$RUNTIME_DIR/topic-revision-start.json"
+    )
+  fi
+  if [[ "$PROVIDER_SYNC_START_SOURCE" == "runtime-start" ]]; then
+    completion_args+=(
+      --provider-sync-topic-revision-start "$RUNTIME_DIR/provider-sync-topic-revision-start.json"
     )
   fi
   if [[ "$phase" == "recovered" ]]; then
@@ -2775,7 +3296,8 @@ run_acceptance_from_fixture() {
   state_helper update-blocked --path "$BLOCKED_FILE" --phase fixture-seed-running
   run_helper seed "$RUNTIME_DIR/direct-seed.json"
   state_helper update-blocked --path "$BLOCKED_FILE" --phase browser-main-running
-  local main_status=0 recovery_status=0
+  local main_status=0 recovery_status=0 cleanup_status=0 audit_status=0
+  local api_audit_status=0 auth_status=0
   run_executor \
     "ktm-afcla-${RUN_KEY:0:12}-executor-main" \
     "$RUNTIME_DIR/playwright-main" 0 || main_status=$?
@@ -2784,17 +3306,21 @@ run_acceptance_from_fixture() {
     "ktm-afcla-${RUN_KEY:0:12}-executor-recovery" \
     "$RUNTIME_DIR/playwright-recovery" 1 || recovery_status=$?
   state_helper update-blocked --path "$BLOCKED_FILE" --phase direct-cleanup-running
-  run_helper cleanup "$RUNTIME_DIR/direct-cleanup.json"
-  run_helper audit "$RUNTIME_DIR/direct-audit.json"
-  run_helper api-audit "$RUNTIME_DIR/api-owned-audit.json"
-  run_helper auth-verify "$RUNTIME_DIR/auth-audit.json"
+  # UI failure 뒤에도 fixture cleanup과 모든 audit receipt를 끝까지 수집해야 다음
+  # recover가 trusted checkpoint로 돌아갈 수 있다. 각 실패는 아래 단일 terminal
+  # branch에서 합산해 acceptance를 통과시키지 않는다.
+  run_helper cleanup "$RUNTIME_DIR/direct-cleanup.json" || cleanup_status=$?
+  run_helper audit "$RUNTIME_DIR/direct-audit.json" || audit_status=$?
+  run_helper api-audit "$RUNTIME_DIR/api-owned-audit.json" || api_audit_status=$?
+  run_helper auth-verify "$RUNTIME_DIR/auth-audit.json" || auth_status=$?
   assert_database_login_fence
   write_dataset_projection_snapshots \
     "$RUNTIME_DIR/clone-final-observed.json" \
     "$RUNTIME_DIR/clone-final.json"
-  (( main_status == 0 && recovery_status == 0 )) || {
+  (( main_status == 0 && recovery_status == 0 && cleanup_status == 0 &&
+    audit_status == 0 && api_audit_status == 0 && auth_status == 0 )) || {
     state_helper update-blocked --path "$BLOCKED_FILE" --phase test-failed-restored
-    die "Playwright acceptance failed after cleanup"
+    die "Playwright or fixture acceptance failed after cleanup"
   }
 }
 
@@ -2812,6 +3338,64 @@ load_blocked() {
   [[ "$(stat -c '%u:%g:%a' -- "$RUNTIME_DIR")" == "0:0:700" ]] ||
     die "BLOCKED runtime metadata is unsafe"
 }
+
+if [[ "$MODE" == "abort" ]]; then
+  [[ -f "$BLOCKED_FILE" && ! -L "$BLOCKED_FILE" ]] ||
+    die "failed-run BLOCKED state is missing"
+  [[ "$(stat -c '%u:%g:%a' -- "$BLOCKED_FILE")" == "0:0:600" ]] ||
+    die "BLOCKED state metadata is unsafe"
+  BLOCKED_WRITTEN=1
+  load_blocked
+  blocked_source="$(state_helper read-blocked --path "$BLOCKED_FILE" --field source_commit)"
+  [[ "$(state_helper read-blocked --path "$BLOCKED_FILE" --field phase)" == \
+      "direct-cleanup-running" ||
+     "$(state_helper read-blocked --path "$BLOCKED_FILE" --field phase)" == \
+      "test-failed-restored" ||
+     "$(state_helper read-blocked --path "$BLOCKED_FILE" --field phase)" == \
+      "failed-resource-finalizing" ]] ||
+    die "only a cleaned failed browser run can be abandoned"
+  API_IMAGE_TAG="kor-travel-map-clone-live-api:${blocked_source:0:12}-${RUN_KEY:0:12}"
+  UI_IMAGE_TAG="kor-travel-map-clone-live-ui:${blocked_source:0:12}-${RUN_KEY:0:12}"
+  PLAYWRIGHT_IMAGE_TAG="kor-travel-map-clone-live-playwright:${blocked_source:0:12}-${RUN_KEY:0:12}"
+  validate_snapshot "$blocked_source" "$INSTALL_BASE/$blocked_source"
+  CONTENT_CUTOFF="$(
+    state_helper read-checkpoint \
+      --checkpoint "$RUNTIME_DIR/clone-checkpoint.json" \
+      --field content_cutoff
+  )"
+  verify_checkpoint_dump "$RUNTIME_DIR/clone-checkpoint.json"
+  remove_unreferenced_checkpoint_dumps
+  BASE_CLONE_CONTAINER_SHA256="$(
+    printf '%s' "$BASE_CLONE_CONTAINER_ID" | sha256sum | awk '{print $1}'
+  )"
+  BASE_CLONE_SYSTEM_SHA256="$(
+    printf '%s' "$(psql_value "SELECT system_identifier::text FROM pg_control_system()")" |
+      sha256sum | awk '{print $1}'
+  )"
+  recover_checkpoint_quiescence
+  recover_verification_database
+  restore_clone_checkpoint "$RUNTIME_DIR/clone-checkpoint.json"
+  write_snapshot "$RUNTIME_DIR/clone-failed-restored.json" "$RUN_ID"
+  state_helper verify-checkpoint \
+    --checkpoint "$RUNTIME_DIR/clone-checkpoint.json" \
+    --snapshot "$RUNTIME_DIR/clone-failed-restored.json" >/dev/null
+  start_acceptance_login_fence
+  state_helper update-blocked --path "$BLOCKED_FILE" --phase failed-resource-finalizing
+  finalize_resources
+  assert_acceptance_login_fence_after_resources
+  stop_checkpoint_quiescence ||
+    die "clone DB login fence restoration failed after failed-run cleanup"
+  state_helper abandon-failed-run \
+    --blocked-path "$BLOCKED_FILE" \
+    --result-path "$RUNTIME_DIR/failed-restored.json" \
+    --restored-snapshot "$RUNTIME_DIR/clone-failed-restored.json" \
+    --runtime "$RUNTIME_DIR"
+  COMPLETE=1
+  BLOCKED_WRITTEN=0
+  printf 'admin feature clone live acceptance failed run restored: source=%s result=%s\n' \
+    "$blocked_source" "$RUNTIME_DIR/failed-restored.json"
+  exit 0
+fi
 
 if [[ "$MODE" == "recover" ]]; then
   [[ -f "$BLOCKED_FILE" && ! -L "$BLOCKED_FILE" ]] ||
@@ -2848,8 +3432,11 @@ if [[ "$MODE" == "recover" ]]; then
   recover_verification_database
   start_acceptance_login_fence
   if [[ -f "$RUNTIME_DIR/topic-revision-start.json" &&
-        ! -L "$RUNTIME_DIR/topic-revision-start.json" ]]; then
+        ! -L "$RUNTIME_DIR/topic-revision-start.json" &&
+        -f "$RUNTIME_DIR/provider-sync-topic-revision-start.json" &&
+        ! -L "$RUNTIME_DIR/provider-sync-topic-revision-start.json" ]]; then
     load_dataset_projection_start_from_runtime
+    load_provider_sync_start_from_runtime
   else
     [[ "$blocked_source" != "$SOURCE_COMMIT" ]] ||
       die "legacy dataset projection recovery requires a newer tool revision"
@@ -2862,21 +3449,27 @@ if [[ "$MODE" == "recover" ]]; then
       die "legacy dataset projection recovery phase is not eligible"
     load_dataset_projection_start_from_dump \
       "$RUNTIME_DIR/clone-checkpoint.json"
+    load_provider_sync_start_from_dump \
+      "$RUNTIME_DIR/clone-checkpoint.json"
   fi
   write_dataset_projection_snapshots \
     "$RUNTIME_DIR/clone-recovery-observed.json" \
     "$RUNTIME_DIR/clone-recovery-current.json"
-  if [[ "$DATASET_PROJECTION_START_SOURCE" == "checkpoint-dump" ]]; then
+  if [[ "$DATASET_PROJECTION_START_SOURCE" == "checkpoint-dump" &&
+        "$PROVIDER_SYNC_START_SOURCE" == "checkpoint-dump" ]]; then
     install -o root -g root -m 0600 \
       "$RUNTIME_DIR/clone-recovery-observed.json" \
       "$RUNTIME_DIR/clone-final-observed.json"
   fi
-  state_helper verify-checkpoint \
-    --allow-owned-drift \
-    --checkpoint "$RUNTIME_DIR/clone-checkpoint.json" \
-    --snapshot "$RUNTIME_DIR/clone-recovery-current.json" >/dev/null
   set_completion_args recovered
-  if state_helper validate-evidence "${completion_args[@]}" >/dev/null 2>&1; then
+  # 빠른 완료는 이미 checkpoint에 복귀한 경우만 허용한다. browser 중단 직후의
+  # owned mutation은 정상적인 recovery 대상이므로, mismatch 자체로 fallback을
+  # 막아서는 안 된다.
+  if state_helper verify-checkpoint \
+      --allow-owned-drift \
+      --checkpoint "$RUNTIME_DIR/clone-checkpoint.json" \
+      --snapshot "$RUNTIME_DIR/clone-recovery-current.json" >/dev/null 2>&1 &&
+    state_helper validate-evidence "${completion_args[@]}" >/dev/null 2>&1; then
     state_helper update-blocked --path "$BLOCKED_FILE" --phase recovery-resource-finalizing
     finalize_resources
     assert_acceptance_login_fence_after_resources
@@ -2997,6 +3590,11 @@ BASE_CLONE_SYSTEM_SHA256="$(
 )"
 recover_checkpoint_quiescence
 recover_verification_database
+# 성공한 이전 acceptance는 UI soft-delete 이력 6건을 증거로 남긴다. 다음 실행이
+# 그 이력을 새 baseline으로 오인하거나 fail-closed checkpoint 비교에서 멈추지 않게,
+# 신뢰한 custom dump를 candidate 시작 전에 항상 다시 적용한다. 대상은 위에서
+# label/port를 검증한 전용 clone뿐이며 dump 서명은 이미 검증했다.
+restore_clone_checkpoint "$CHECKPOINT_FILE"
 start_acceptance_login_fence
 write_snapshot "$RUNTIME_DIR/clone-startup-before.json" "$RUN_ID"
 install -o root -g root -m 0600 "$CHECKPOINT_FILE" "$RUNTIME_DIR/clone-checkpoint.json"
@@ -3006,15 +3604,26 @@ clone_checkpoint_sha256="$(
     --snapshot "$RUNTIME_DIR/clone-startup-before.json"
 )"
 read_current_dataset_projection
+read_current_provider_sync
 DATASET_PROJECTION_START_REVISION="$DATASET_PROJECTION_CURRENT_REVISION"
 DATASET_PROJECTION_START_UPDATED_AT="$DATASET_PROJECTION_CURRENT_UPDATED_AT"
 DATASET_PROJECTION_START_SOURCE="runtime-start"
+PROVIDER_SYNC_START_REVISION="$PROVIDER_SYNC_CURRENT_REVISION"
+PROVIDER_SYNC_START_UPDATED_AT="$PROVIDER_SYNC_CURRENT_UPDATED_AT"
+PROVIDER_SYNC_START_SOURCE="runtime-start"
 state_helper write-topic-revision-start \
   --checkpoint-sha256 "$clone_checkpoint_sha256" \
   --path "$RUNTIME_DIR/topic-revision-start.json" \
   --revision "$DATASET_PROJECTION_START_REVISION" \
   --run-id "$RUN_ID" \
   --updated-at "$DATASET_PROJECTION_START_UPDATED_AT"
+state_helper write-topic-revision-start \
+  --checkpoint-sha256 "$clone_checkpoint_sha256" \
+  --path "$RUNTIME_DIR/provider-sync-topic-revision-start.json" \
+  --revision "$PROVIDER_SYNC_START_REVISION" \
+  --run-id "$RUN_ID" \
+  --updated-at "$PROVIDER_SYNC_START_UPDATED_AT" \
+  --topic provider_sync
 startup_schema="$(
   python3 -I -B -c \
     'import json,sys; print(json.load(open(sys.argv[1]))["schema_sha256"])' \

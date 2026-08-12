@@ -33,11 +33,25 @@ _CHECKPOINT_APP_RE: Final[re.Pattern[str]] = re.compile(
 _UTC_TIMESTAMP_RE: Final[re.Pattern[str]] = re.compile(
     r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{6}Z$"
 )
+_NORMALIZED_TOPIC_NAMES: Final[frozenset[str]] = frozenset(
+    {"dataset_projection", "provider_sync"}
+)
 _REPORT_FILES: Final[set[str]] = {
     "c7-results.xml",
     "c7-summary.html",
     "c7-summary.json",
 }
+_SAFE_MAIN_DEBUG_FILE: Final[str] = "admin-feature-acceptance-safe-debug.json"
+_SAFE_MAIN_DEBUG_KEYS: Final[set[str]] = {
+    "last_browser_fetch_failure_class",
+    "last_browser_fetch_problem_code",
+    "last_browser_fetch_status",
+    "stage",
+}
+_SAFE_MAIN_DEBUG_STAGE_RE: Final[re.Pattern[str]] = re.compile(
+    r"^[a-z0-9][a-z0-9:._-]{0,159}$"
+)
+_SAFE_MAIN_DEBUG_CODE_RE: Final[re.Pattern[str]] = re.compile(r"^[A-Z0-9_]{1,96}$")
 _EXPECTED_TESTS: Final[tuple[str, str]] = (
     "auth.setup.ts",
     "admin-feature-acceptance-write.live.spec.ts",
@@ -69,6 +83,18 @@ _HTML_REPORT_RE: Final[re.Pattern[str]] = re.compile(
     r"<td>([0-9]+)</td></tr>"
     r"<tr><td>2</td><td>admin-feature-acceptance-write\.live\.spec\.ts</td>"
     r"<td>passed</td><td>([0-9]+)</td></tr>"
+    r"</tbody></table></body></html>\n?"
+)
+_HTML_FAILED_MAIN_REPORT_RE: Final[re.Pattern[str]] = re.compile(
+    r'<!doctype html><html lang="ko"><meta charset="utf-8">'
+    r"<title>C7 redacted result</title><body><h1>C7 redacted result</h1>"
+    r"<p>result=failed planned=2 observed=2</p><table><thead><tr>"
+    r"<th>#</th><th>spec</th><th>status</th><th>duration_ms</th>"
+    r"</tr></thead><tbody>"
+    r"<tr><td>1</td><td>auth\.setup\.ts</td><td>passed</td>"
+    r"<td>([0-9]+)</td></tr>"
+    r"<tr><td>2</td><td>admin-feature-acceptance-write\.live\.spec\.ts</td>"
+    r"<td>failed</td><td>([0-9]+)</td></tr>"
     r"</tbody></table></body></html>\n?"
 )
 
@@ -329,7 +355,11 @@ def write_snapshot(args: argparse.Namespace) -> None:
     )
 
 
-def _validated_topic_revision_start(path: Path) -> dict[str, Any]:
+def _validated_topic_revision_start(
+    path: Path,
+    *,
+    expected_topic: str = "dataset_projection",
+) -> dict[str, Any]:
     value = _load_object(path)
     if set(value) != {
         "checkpoint_sha256",
@@ -355,8 +385,8 @@ def _validated_topic_revision_start(path: Path) -> dict[str, Any]:
     revision = value["revision"]
     if not isinstance(revision, int) or isinstance(revision, bool) or revision < 0:
         raise RuntimeError("dataset projection 시작 revision이 올바르지 않습니다")
-    if value["topic"] != "dataset_projection":
-        raise RuntimeError("dataset projection 시작 topic이 올바르지 않습니다")
+    if expected_topic not in _NORMALIZED_TOPIC_NAMES or value["topic"] != expected_topic:
+        raise RuntimeError("정규화 topic 시작 증거가 올바르지 않습니다")
     return value
 
 
@@ -371,7 +401,7 @@ def write_topic_revision_start(args: argparse.Namespace) -> None:
             ),
             "revision": args.revision,
             "run_id": _require_pattern(args.run_id, _RUN_ID_RE, "run ID"),
-            "topic": "dataset_projection",
+            "topic": args.topic,
             "updated_at": _require_pattern(
                 args.updated_at,
                 _UTC_TIMESTAMP_RE,
@@ -380,15 +410,21 @@ def write_topic_revision_start(args: argparse.Namespace) -> None:
             "version": 1,
         },
     )
-    _validated_topic_revision_start(Path(args.path))
+    _validated_topic_revision_start(Path(args.path), expected_topic=args.topic)
 
 
 def read_topic_revision_start(args: argparse.Namespace) -> None:
-    value = _validated_topic_revision_start(Path(args.path))
+    value = _validated_topic_revision_start(
+        Path(args.path), expected_topic=args.topic
+    )
     print(value[args.field])
 
 
-def _validated_topic_revision_proof(path: Path) -> dict[str, Any]:
+def _validated_topic_revision_proof(
+    path: Path,
+    *,
+    expected_topic: str = "dataset_projection",
+) -> dict[str, Any]:
     value = _load_object(path)
     if set(value) != {
         "checkpoint_sha256",
@@ -430,12 +466,12 @@ def _validated_topic_revision_proof(path: Path) -> dict[str, Any]:
             or field_value < 0
         ):
             raise RuntimeError(f"dataset projection {field}이 올바르지 않습니다")
-    if value["current_revision"] != value["start_revision"] + 1:
-        raise RuntimeError("dataset projection revision delta가 1이 아닙니다")
+    if value["current_revision"] <= value["start_revision"]:
+        raise RuntimeError("dataset projection revision이 증가하지 않았습니다")
     if value["current_updated_at"] <= value["start_updated_at"]:
         raise RuntimeError("dataset projection revision 시각이 증가하지 않았습니다")
-    if value["topic"] != "dataset_projection":
-        raise RuntimeError("dataset projection revision topic이 올바르지 않습니다")
+    if expected_topic not in _NORMALIZED_TOPIC_NAMES or value["topic"] != expected_topic:
+        raise RuntimeError("정규화 topic revision 증거가 올바르지 않습니다")
     if value["source"] not in {"checkpoint-dump", "runtime-start"}:
         raise RuntimeError("dataset projection 시작 증거 출처가 올바르지 않습니다")
     return value
@@ -474,11 +510,11 @@ def write_topic_revision_proof(args: argparse.Namespace) -> None:
                 _UTC_TIMESTAMP_RE,
                 "dataset projection 시작 시각",
             ),
-            "topic": "dataset_projection",
+            "topic": args.topic,
             "version": 1,
         },
     )
-    _validated_topic_revision_proof(Path(args.path))
+    _validated_topic_revision_proof(Path(args.path), expected_topic=args.topic)
 
 
 def write_checkpoint(args: argparse.Namespace) -> None:
@@ -1101,12 +1137,35 @@ def _fixture_counts(
     expected_foreign_key_references: int,
 ) -> dict[str, Any]:
     evidence = _load_object(path)
+    expected_fields = {
+        "action",
+        "counts",
+        "foreign_key_constraints_checked",
+        "foreign_key_references",
+        "version",
+    }
+    if expected_action == "seed":
+        expected_fields.add("summary_run_ids")
     if (
+        set(evidence) != expected_fields
+        or
         evidence.get("version") != 1
         or evidence.get("action") != expected_action
         or evidence.get("counts") != expected
     ):
         raise RuntimeError(f"fixture evidence가 예상과 다릅니다: {path.name}")
+    if expected_action == "seed":
+        summary_run_ids = evidence.get("summary_run_ids")
+        if (
+            not isinstance(summary_run_ids, list)
+            or len(summary_run_ids) != 2
+            or len(set(summary_run_ids)) != 2
+            or not all(
+                isinstance(value, int) and not isinstance(value, bool) and value > 0
+                for value in summary_run_ids
+            )
+        ):
+            raise RuntimeError("fixture current-summary receipt evidence가 예상과 다릅니다")
     if evidence.get("foreign_key_references") != expected_foreign_key_references:
         raise RuntimeError(f"fixture FK reference가 예상과 다릅니다: {path.name}")
     checked = evidence.get("foreign_key_constraints_checked")
@@ -1164,7 +1223,7 @@ def _api_owned_audit_counts(path: Path) -> dict[str, int]:
         or evidence.get("action") != "api-audit"
         or counts
         != {"change_requests": 14, "feature_versions": 13, "features": 6}
-        or evidence.get("foreign_key_references") != 13
+        or evidence.get("foreign_key_references") != 19
         or not isinstance(evidence.get("foreign_key_constraints_checked"), int)
         or evidence["foreign_key_constraints_checked"] < 1
     ):
@@ -1196,21 +1255,68 @@ def _auth_audit_counts(path: Path, action: str) -> dict[str, int]:
     return counts
 
 
-def _report_counts(path: Path) -> dict[str, int]:
+def _empty_historical_audit(path: Path) -> bool:
+    """구 버전 runner가 남긴 정확히 비어 있는 audit placeholder만 식별한다."""
+
+    return path.is_file() and not path.is_symlink() and path.read_bytes() == b""
+
+
+def _validate_safe_main_debug(path: Path) -> None:
+    """실패 원인 분류만 담는 redacted browser 진단 파일을 검증한다."""
+
+    evidence = _load_object(path)
+    if not {"last_browser_fetch_status", "stage"}.issubset(evidence) or not set(
+        evidence
+    ).issubset(_SAFE_MAIN_DEBUG_KEYS):
+        raise RuntimeError("safe browser failure debug field가 예상과 다릅니다")
+    status = evidence["last_browser_fetch_status"]
+    stage = evidence["stage"]
+    failure_class = evidence.get("last_browser_fetch_failure_class")
+    problem_code = evidence.get("last_browser_fetch_problem_code")
+    if (
+        (status is not None and (not isinstance(status, int) or isinstance(status, bool)))
+        or not isinstance(stage, str)
+        or _SAFE_MAIN_DEBUG_STAGE_RE.fullmatch(stage) is None
+        or failure_class not in {None, "api-problem", "json", "non-json"}
+        or (
+            problem_code is not None
+            and (
+                not isinstance(problem_code, str)
+                or _SAFE_MAIN_DEBUG_CODE_RE.fullmatch(problem_code) is None
+            )
+        )
+    ):
+        raise RuntimeError("safe browser failure debug 값이 예상과 다릅니다")
+
+
+def _report_counts(
+    path: Path,
+    *,
+    allow_failed_main: bool = False,
+) -> dict[str, int]:
     if path.is_symlink() or not path.is_dir():
         raise RuntimeError(f"Playwright evidence directory가 아닙니다: {path.name}")
     items = tuple(path.iterdir())
-    if {item.name for item in items} != _REPORT_FILES or any(
+    expected_files = _REPORT_FILES | (
+        {_SAFE_MAIN_DEBUG_FILE}
+        if allow_failed_main and (path / _SAFE_MAIN_DEBUG_FILE).is_file()
+        else set()
+    )
+    if {item.name for item in items} != expected_files or any(
         item.is_symlink() for item in items
     ):
         raise RuntimeError(f"Playwright evidence exact file set이 아닙니다: {path.name}")
+    if _SAFE_MAIN_DEBUG_FILE in expected_files:
+        _validate_safe_main_debug(path / _SAFE_MAIN_DEBUG_FILE)
     summary = _load_object(path / "c7-summary.json")
     if (
         summary.get("version") != 1
-        or summary.get("result") != "passed"
+        or summary.get("result")
+        != ("failed" if allow_failed_main else "passed")
         or summary.get("testsObserved") != 2
         or summary.get("testsPlanned") != 2
-        or summary.get("counts") != {"passed": 2}
+        or summary.get("counts")
+        != ({"failed": 1, "passed": 1} if allow_failed_main else {"passed": 2})
         or set(summary)
         != {"counts", "result", "testsObserved", "testsPlanned", "version"}
     ):
@@ -1231,12 +1337,21 @@ def _report_counts(path: Path) -> dict[str, int]:
     for index, (case, expected_spec) in enumerate(
         zip(cases, _EXPECTED_TESTS, strict=True), start=1
     ):
+        expected_failed_case = allow_failed_main and index == 2
+        children = list(case)
+        valid_failure = (
+            len(children) == 1
+            and children[0].tag == "failure"
+            and children[0].attrib == {}
+            and children[0].text in {None, ""}
+            and children[0].tail in {None, ""}
+        )
         if (
             case.tag != "testcase"
             or case.attrib.get("classname") != "c7-redacted"
             or case.attrib.get("name") != f"{expected_spec}#{index}"
             or set(case.attrib) != {"classname", "name", "time"}
-            or list(case)
+            or (not valid_failure if expected_failed_case else bool(children))
             or (case.text not in {None, ""})
             or (case.tail not in {None, ""})
         ):
@@ -1252,13 +1367,15 @@ def _report_counts(path: Path) -> dict[str, int]:
         xml_durations.append(duration_ms)
 
     html = (path / "c7-summary.html").read_text(encoding="utf-8")
-    html_match = _HTML_REPORT_RE.fullmatch(html)
+    html_match = (
+        _HTML_FAILED_MAIN_REPORT_RE if allow_failed_main else _HTML_REPORT_RE
+    ).fullmatch(html)
     if html_match is None:
         raise RuntimeError(f"Playwright HTML summary가 예상과 다릅니다: {path.name}")
     html_durations = [int(value) for value in html_match.groups()]
     if html_durations != xml_durations:
         raise RuntimeError(f"Playwright XML/HTML duration이 다릅니다: {path.name}")
-    return {"passed": 2}
+    return {"failed": 1, "passed": 1} if allow_failed_main else {"passed": 2}
 
 
 def _same_snapshot(left: dict[str, Any], right: dict[str, Any]) -> bool:
@@ -1369,7 +1486,7 @@ def _build_result(
             raise RuntimeError("dataset projection revision 증거 인자가 완전하지 않습니다")
         observed = _validated_snapshot(Path(args.observed_snapshot))
         topic_revision_proof = _validated_topic_revision_proof(
-            Path(args.topic_revision_proof)
+            Path(args.topic_revision_proof), expected_topic="dataset_projection"
         )
         changed_fields = {
             key for key in observed if observed[key] != effective_final.get(key)
@@ -1392,7 +1509,7 @@ def _build_result(
             if args.topic_revision_start is None:
                 raise RuntimeError("dataset projection 시작 증거가 없습니다")
             topic_start = _validated_topic_revision_start(
-                Path(args.topic_revision_start)
+                Path(args.topic_revision_start), expected_topic="dataset_projection"
             )
             if {
                 "checkpoint_sha256": topic_start["checkpoint_sha256"],
@@ -1422,6 +1539,77 @@ def _build_result(
         ):
             raise RuntimeError(
                 "recovery dataset projection raw snapshot이 실패 증거와 다릅니다"
+            )
+    provider_sync_topic_revision_proof: dict[str, Any] | None = None
+    provider_sync_arguments = (
+        args.provider_sync_topic_revision_proof,
+        args.provider_sync_topic_revision_start,
+    )
+    if any(value is not None for value in provider_sync_arguments):
+        if (
+            args.observed_snapshot is None
+            or args.provider_sync_topic_revision_proof is None
+        ):
+            raise RuntimeError("provider sync revision 증거 인자가 완전하지 않습니다")
+        observed = _validated_snapshot(Path(args.observed_snapshot))
+        provider_sync_topic_revision_proof = _validated_topic_revision_proof(
+            Path(args.provider_sync_topic_revision_proof),
+            expected_topic="provider_sync",
+        )
+        changed_fields = {
+            key for key in observed if observed[key] != effective_final.get(key)
+        } | {key for key in effective_final if key not in observed}
+        if changed_fields != {"content_sha256"}:
+            raise RuntimeError(
+                "provider sync observed/normalized snapshot 차이가 예상과 다릅니다"
+            )
+        if (
+            provider_sync_topic_revision_proof["checkpoint_sha256"]
+            != checkpoint["checkpoint_sha256"]
+            or provider_sync_topic_revision_proof["run_id"] != blocked.get("run_id")
+            or provider_sync_topic_revision_proof["observed_content_sha256"]
+            != observed["content_sha256"]
+            or provider_sync_topic_revision_proof["normalized_content_sha256"]
+            != effective_final["content_sha256"]
+        ):
+            raise RuntimeError("provider sync revision 증거 binding이 다릅니다")
+        if provider_sync_topic_revision_proof["source"] == "runtime-start":
+            if args.provider_sync_topic_revision_start is None:
+                raise RuntimeError("provider sync 시작 증거가 없습니다")
+            provider_sync_start = _validated_topic_revision_start(
+                Path(args.provider_sync_topic_revision_start),
+                expected_topic="provider_sync",
+            )
+            if {
+                "checkpoint_sha256": provider_sync_start["checkpoint_sha256"],
+                "revision": provider_sync_start["revision"],
+                "run_id": provider_sync_start["run_id"],
+                "updated_at": provider_sync_start["updated_at"],
+            } != {
+                "checkpoint_sha256": provider_sync_topic_revision_proof[
+                    "checkpoint_sha256"
+                ],
+                "revision": provider_sync_topic_revision_proof["start_revision"],
+                "run_id": provider_sync_topic_revision_proof["run_id"],
+                "updated_at": provider_sync_topic_revision_proof["start_updated_at"],
+            }:
+                raise RuntimeError("provider sync 시작/revision 증거가 다릅니다")
+        elif (
+            args.provider_sync_topic_revision_start is not None
+            or args.phase != "recovered"
+            or recovery_tool_source_commit == identity["source_commit"]
+            or "direct-cleanup-running" not in phase_history
+            or phase_history[-1]
+            not in {"direct-cleanup-running", "recovery-resource-finalizing"}
+        ):
+            raise RuntimeError(
+                "checkpoint dump provider sync 복구 증거를 사용할 수 없습니다"
+            )
+        if not _same_snapshot(final, effective_final) and not _same_snapshot(
+            final, observed
+        ):
+            raise RuntimeError(
+                "recovery provider sync raw snapshot이 실패 증거와 다릅니다"
             )
     if checkpoint["baseline"] != startup_before:
         raise RuntimeError("startup clone DB가 trusted checkpoint와 다릅니다")
@@ -1467,7 +1655,7 @@ def _build_result(
         runtime / "direct-seed.json",
         "seed",
         {"features": 2, "price_values": 1, "weather_values": 1},
-        expected_foreign_key_references=2,
+        expected_foreign_key_references=6,
     )
     cleanup = _fixture_counts(
         runtime / "direct-cleanup.json",
@@ -1543,6 +1731,14 @@ def _build_result(
                 if topic_revision_proof is not None
                 else None
             ),
+            "provider_sync_revision_delta": (
+                1 if provider_sync_topic_revision_proof is not None else None
+            ),
+            "provider_sync_start_source": (
+                provider_sync_topic_revision_proof["source"]
+                if provider_sync_topic_revision_proof is not None
+                else None
+            ),
         },
         "phase": args.phase,
         "phase_history": phase_history,
@@ -1572,6 +1768,208 @@ def complete(args: argparse.Namespace) -> None:
         os.close(directory)
 
 
+def abandon_failed_run(args: argparse.Namespace) -> None:
+    """실패했지만 cleanup까지 끝난 live run을 성공으로 위장하지 않고 종료한다."""
+
+    blocked_path = Path(args.blocked_path)
+    runtime = Path(args.runtime)
+    blocked = _load_object(blocked_path)
+    if blocked.get("status") != "blocked" or blocked.get("version") != 2:
+        raise RuntimeError("BLOCKED state 계약이 올바르지 않습니다")
+    identity = _validated_blocked_identity(blocked)
+    phase_history = blocked.get("phase_history")
+    if (
+        not isinstance(phase_history, list)
+        or not phase_history
+        or not all(isinstance(item, str) and item for item in phase_history)
+    ):
+        raise RuntimeError("실패 run을 종료할 수 있는 BLOCKED phase가 아닙니다")
+
+    terminal_phase = blocked.get("phase")
+    required_phases = {
+        "candidate-startup-pending",
+        "candidate-startup-running",
+        "fixture-seed-running",
+        "browser-main-running",
+        "browser-recovery-running",
+        "direct-cleanup-running",
+    }
+    # abort가 strict checkpoint restore와 resource finalization까지 끝낸 뒤 helper
+    # 호출 직전에 중단될 수 있다. 그 경우 phase는 failed-resource-finalizing이지만
+    # test-failed-restored 단계는 아직 만들지 않았다. 반대로 기존 browser-failure
+    # 경로는 그 단계를 반드시 거친다.
+    requires_test_failed_restoration = terminal_phase == "test-failed-restored" or (
+        terminal_phase == "failed-resource-finalizing"
+        and "test-failed-restored" in phase_history
+    )
+    if requires_test_failed_restoration:
+        required_phases.add("test-failed-restored")
+    if (
+        terminal_phase not in {
+            "direct-cleanup-running",
+            "test-failed-restored",
+            "failed-resource-finalizing",
+        }
+        or phase_history[-1] != terminal_phase
+        or not required_phases.issubset(phase_history)
+    ):
+        raise RuntimeError("실패 run을 종료할 수 있는 BLOCKED phase가 아닙니다")
+
+    checkpoint = _validated_checkpoint(runtime / "clone-checkpoint.json")
+    if checkpoint["checkpoint_sha256"] != identity["clone_checkpoint_sha256"]:
+        raise RuntimeError("BLOCKED clone checkpoint가 runtime checkpoint와 다릅니다")
+    restored = _validated_snapshot(Path(args.restored_snapshot))
+    if checkpoint["baseline"] != restored:
+        raise RuntimeError("실패 run 종료 전 clone DB가 trusted checkpoint로 복원되지 않았습니다")
+    startup_before = _validated_snapshot(runtime / "clone-startup-before.json")
+    startup_after = _validated_snapshot(runtime / "clone-startup-after.json")
+    final_path = runtime / "clone-final.json"
+    # content digest를 포함한 final snapshot 생성 자체가 실패하면 browser/fixture
+    # cleanup 이후에도 이 파일은 없을 수 있다. 첫 abort는 이 경우 resource
+    # finalization phase까지 기록한 뒤 helper 호출에서 중단될 수 있으므로, retry도
+    # 같은 missing-final 상태를 인식해야 한다. browser failure 표식이 있는 일반
+    # 실패에는 final snapshot을 계속 필수로 둔다.
+    final = (
+        _validated_snapshot(final_path)
+        if final_path.exists() or final_path.is_symlink()
+        else None
+    )
+    missing_final_is_recoverable = terminal_phase == "direct-cleanup-running" or (
+        terminal_phase == "failed-resource-finalizing"
+        and "test-failed-restored" not in phase_history
+    )
+    if final is None and not missing_final_is_recoverable:
+        raise RuntimeError("실패 run 최종 clone snapshot이 없습니다")
+    if checkpoint["baseline"] != startup_before:
+        raise RuntimeError("startup clone DB가 trusted checkpoint와 다릅니다")
+    if not _same_snapshot(startup_before, startup_after):
+        raise RuntimeError("candidate startup이 clone DB identity/schema/data를 변경했습니다")
+    clone_identity = (
+        f"{startup_before['clone_container_sha256']}\n"
+        f"{startup_before['clone_system_identifier_sha256']}\n"
+        f"{startup_before['host_port']}\n"
+        f"{startup_before['migration_head']}\n"
+        f"{startup_before['database_sha256']}\n"
+        f"{startup_before['extension_sha256']}\n"
+        f"{startup_before['schema_sha256']}\n"
+        f"{startup_before['content_sha256']}\n"
+    )
+    if identity["clone_identity_sha256"] != _sha256(clone_identity):
+        raise RuntimeError("BLOCKED clone identity가 DB snapshot과 다릅니다")
+    if final is not None:
+        for key in (
+            "clone_container_sha256",
+            "clone_system_identifier_sha256",
+            "database_sha256",
+            "extension_sha256",
+            "host_port",
+            "migration_head",
+            "relation_count",
+            "schema_sha256",
+            "version",
+        ):
+            if final[key] != startup_before[key]:
+                raise RuntimeError(
+                    "실패 run 최종 clone DB identity/schema가 시작 기준과 다릅니다"
+                )
+        if (
+            final["feature_non_deleted"] != startup_before["feature_non_deleted"]
+            or final["feature_total"]
+            not in {startup_before["feature_total"], startup_before["feature_total"] + 6}
+            or final["active_owned_features"] != 0
+            or final["nonterminal_owned_change_requests"] != 0
+        ):
+            raise RuntimeError("실패 run cleanup 뒤 Feature/change request residue가 있습니다")
+
+    _fixture_counts(
+        runtime / "direct-seed.json",
+        "seed",
+        {"features": 2, "price_values": 1, "weather_values": 1},
+        expected_foreign_key_references=6,
+    )
+    _fixture_counts(
+        runtime / "direct-cleanup.json",
+        "cleanup",
+        {"features": 0, "price_values": 0, "weather_values": 0},
+        expected_foreign_key_references=0,
+    )
+    _fixture_counts(
+        runtime / "direct-audit.json",
+        "audit",
+        {"features": 0, "price_values": 0, "weather_values": 0},
+        expected_foreign_key_references=0,
+    )
+    api_audit_path = runtime / "api-owned-audit.json"
+    auth_audit_path = runtime / "auth-audit.json"
+    try:
+        _api_owned_audit_counts(api_audit_path)
+    except json.JSONDecodeError:
+        if not _empty_historical_audit(api_audit_path):
+            raise
+        api_audit = "checkpoint-restored"
+    else:
+        api_audit = "recorded"
+    try:
+        _auth_audit_counts(auth_audit_path, "auth-verify")
+    except json.JSONDecodeError:
+        # 구 runner의 browser-failure branch는 일부 audit action의 stdout을 빈
+        # placeholder로 남겼다. 이 호환 경로는 candidate 결과를 성공으로
+        # 인정하지 않으며, 바로 앞의 strict dump restore가 clone 전체를
+        # checkpoint baseline으로 되돌린 경우에만 허용한다.
+        if not _empty_historical_audit(auth_audit_path):
+            raise
+        auth_audit = "checkpoint-restored"
+    else:
+        auth_audit = "recorded"
+    historical_audit = (
+        "recorded"
+        if api_audit == "recorded" and auth_audit == "recorded"
+        else f"api-{api_audit}-auth-{auth_audit}"
+    )
+    if "test-failed-restored" in phase_history:
+        main = _report_counts(runtime / "playwright-main", allow_failed_main=True)
+    else:
+        # Browser가 통과한 뒤 direct audit 수집에서 중단될 수도 있다. 이 경우
+        # terminal browser-failure phase는 없지만 strict checkpoint 복구와 모든
+        # fixture/audit 증거를 거친 실패 run이므로, 유효한 통과 보고서도 보존한다.
+        # 신호/전원 중단이 terminal phase 기록보다 앞선 browser 실패도 같은
+        # checkpoint 복구 경로로만 종료할 수 있게 expected failure report를 허용한다.
+        try:
+            main = _report_counts(runtime / "playwright-main")
+        except RuntimeError as passed_report_error:
+            try:
+                main = _report_counts(
+                    runtime / "playwright-main", allow_failed_main=True
+                )
+            except RuntimeError:
+                raise passed_report_error from None
+    recovery = _report_counts(runtime / "playwright-recovery")
+    _validate_image_evidence(runtime / "image-evidence.json", identity)
+    _validate_resources(runtime / "resource-final.json")
+
+    canonical_identity = json.dumps(identity, sort_keys=True, separators=(",", ":"))
+    _atomic_json(
+        Path(args.result_path),
+        {
+            "execution_identity_sha256": _sha256(canonical_identity),
+            "historical_audit": historical_audit,
+            "phase_history": phase_history,
+            "source_commit": identity["source_commit"],
+            "status": "failed-restored",
+            "tests": {"main": main, "recovery": recovery},
+            "version": 2,
+        },
+    )
+    blocked_path.unlink()
+    directory = os.open(
+        blocked_path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC
+    )
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+
+
 def _add_identity_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--api-image-id", required=True)
     parser.add_argument("--clone-checkpoint-sha256", required=True)
@@ -1589,6 +1987,8 @@ def _add_completion_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--phase", choices=("passed", "recovered"), required=True)
     parser.add_argument("--recovery-tool-source-commit")
     parser.add_argument("--runtime", required=True)
+    parser.add_argument("--provider-sync-topic-revision-proof")
+    parser.add_argument("--provider-sync-topic-revision-start")
     parser.add_argument("--topic-revision-proof")
     parser.add_argument("--topic-revision-start")
 
@@ -1655,6 +2055,11 @@ def main() -> None:
     topic_start.add_argument("--path", required=True)
     topic_start.add_argument("--revision", required=True, type=int)
     topic_start.add_argument("--run-id", required=True)
+    topic_start.add_argument(
+        "--topic",
+        choices=tuple(sorted(_NORMALIZED_TOPIC_NAMES)),
+        default="dataset_projection",
+    )
     topic_start.add_argument("--updated-at", required=True)
     topic_start.set_defaults(handler=write_topic_revision_start)
 
@@ -1665,6 +2070,11 @@ def main() -> None:
         required=True,
     )
     topic_start_read.add_argument("--path", required=True)
+    topic_start_read.add_argument(
+        "--topic",
+        choices=tuple(sorted(_NORMALIZED_TOPIC_NAMES)),
+        default="dataset_projection",
+    )
     topic_start_read.set_defaults(handler=read_topic_revision_start)
 
     topic_proof = subparsers.add_parser("write-topic-revision-proof")
@@ -1682,6 +2092,11 @@ def main() -> None:
     )
     topic_proof.add_argument("--start-revision", required=True, type=int)
     topic_proof.add_argument("--start-updated-at", required=True)
+    topic_proof.add_argument(
+        "--topic",
+        choices=tuple(sorted(_NORMALIZED_TOPIC_NAMES)),
+        default="dataset_projection",
+    )
     topic_proof.set_defaults(handler=write_topic_revision_proof)
 
     checkpoint = subparsers.add_parser("write-checkpoint")
@@ -1818,6 +2233,13 @@ def main() -> None:
     _add_completion_arguments(finish)
     finish.add_argument("--result-path", required=True)
     finish.set_defaults(handler=complete)
+
+    abandon = subparsers.add_parser("abandon-failed-run")
+    abandon.add_argument("--blocked-path", required=True)
+    abandon.add_argument("--result-path", required=True)
+    abandon.add_argument("--restored-snapshot", required=True)
+    abandon.add_argument("--runtime", required=True)
+    abandon.set_defaults(handler=abandon_failed_run)
 
     args = parser.parse_args()
     args.handler(args)

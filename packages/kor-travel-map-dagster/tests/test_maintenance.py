@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from dagster import Failure
@@ -16,6 +16,7 @@ from kortravelmap.core.dedup import DedupCandidate
 from kortravelmap.infra.consistency import CaseResult, ConsistencyReport
 from kortravelmap.infra.dedup_refresh_repo import DedupRefreshScope
 from kortravelmap.infra.dedup_repo import DedupQueueResult
+from kortravelmap.infra.weather_repo import WeatherSummaryMaterializeResult
 
 import kortravelmap.dagster.maintenance as maintenance_mod
 from kortravelmap.dagster.maintenance import (
@@ -23,6 +24,7 @@ from kortravelmap.dagster.maintenance import (
     MAINTENANCE_RETRY_POLICY,
     cache_target_snapshot_gc_job,
     consistency_dedup_refresh_job,
+    current_weather_summary_refresh_job,
 )
 
 pytestmark = pytest.mark.filterwarnings(
@@ -39,6 +41,20 @@ class _Client:
         self.notice_purge_calls: list[str] = []
         self.finding_purge_calls: list[str] = []
         self.snapshot_gc_calls: list[dict[str, object]] = []
+        self.weather_summary_calls: list[dict[str, object]] = []
+
+    async def materialize_current_weather_summary(
+        self, **kwargs: object
+    ) -> WeatherSummaryMaterializeResult:
+        self.weather_summary_calls.append(kwargs)
+        return WeatherSummaryMaterializeResult(
+            summary_run_id=91,
+            selected_at=cast(datetime, kwargs["selected_at"]),
+            input_count=2,
+            inserted_count=0,
+            updated_count=1,
+            deleted_count=0,
+        )
 
     async def drain_expired_cache_target_snapshots(
         self, **kwargs: object
@@ -237,6 +253,26 @@ def test_consistency_dedup_refresh_job_executes_configured_scopes() -> None:
     assert result.output_for_node("purge_resolved_integrity_findings") == {
         "purged": 11,
         "retention": "120 days",
+    }
+
+
+def test_current_weather_summary_refresh_job_rematerializes_without_provider_write() -> None:
+    client = _Client()
+
+    result = current_weather_summary_refresh_job.execute_in_process(
+        resources={"kor_travel_map_client": client},
+    )
+
+    assert result.success
+    assert len(client.weather_summary_calls) == 1
+    assert client.weather_summary_calls[0]["run_kind"] == "reconcile"
+    assert result.output_for_node("materialize_current_weather_summary") == {
+        "summary_run_id": 91,
+        "selected_at": client.weather_summary_calls[0]["selected_at"].isoformat(),
+        "input_count": 2,
+        "inserted_count": 0,
+        "updated_count": 1,
+        "deleted_count": 0,
     }
 
 

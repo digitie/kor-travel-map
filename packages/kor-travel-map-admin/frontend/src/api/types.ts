@@ -1672,6 +1672,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/features/{feature_id}/price/snapshot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 명시된 observed/knowledge time의 price snapshot */
+        get: operations["get_feature_price_snapshot_v1_features__feature_id__price_snapshot_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/features/{feature_id}/sources": {
         parameters: {
             query?: never;
@@ -1722,6 +1739,23 @@ export interface paths {
         };
         /** feature 기준 nearest weather forecast timeline */
         get: operations["get_weather_forecast_by_feature_v1_features__feature_id__weather_forecast_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/features/{feature_id}/weather/snapshot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 명시된 target/knowledge time의 weather snapshot */
+        get: operations["get_feature_weather_snapshot_v1_features__feature_id__weather_snapshot_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -8166,6 +8200,11 @@ export interface components {
             data: components["schemas"]["PriceCardData"];
             meta: components["schemas"]["Meta"];
         };
+        /** FeaturePriceSnapshotResponse */
+        FeaturePriceSnapshotResponse: {
+            data: components["schemas"]["PriceSnapshotData"];
+            meta: components["schemas"]["Meta"];
+        };
         /**
          * FeatureSearchData
          * @description 사용자 feature 검색 data payload.
@@ -8635,6 +8674,11 @@ export interface components {
          */
         FeatureWeatherResponse: {
             data: components["schemas"]["WeatherCardData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /** FeatureWeatherSnapshotResponse */
+        FeatureWeatherSnapshotResponse: {
+            data: components["schemas"]["WeatherSnapshotData"];
             meta: components["schemas"]["Meta"];
         };
         /**
@@ -11257,8 +11301,6 @@ export interface components {
          * @description ``GET /features/{feature_id}/price`` data payload.
          */
         PriceCardData: {
-            /** Asof */
-            asof?: string | null;
             /**
              * Current
              * @description provider/price_domain/product series별 최신 관측 1건.
@@ -11278,9 +11320,18 @@ export interface components {
         };
         /**
          * PricePointOut
-         * @description provider/price_domain/product series의 가격 관측 1건.
+         * @description canonical dataset/price_domain/product series의 가격 관측 1건.
          */
         PricePointOut: {
+            /** Dataset Display Name */
+            dataset_display_name: string;
+            /** Dataset Key */
+            dataset_key: string;
+            /**
+             * Known At
+             * Format: date-time
+             */
+            known_at: string;
             /**
              * Observed At
              * Format: date-time
@@ -11294,6 +11345,8 @@ export interface components {
             product_name?: string | null;
             /** Provider */
             provider: string;
+            /** Provider Dataset Id */
+            provider_dataset_id: number;
             /** Source Product Key */
             source_product_key?: string | null;
             /** Source Product Name */
@@ -11302,6 +11355,38 @@ export interface components {
             unit: string;
             /** Value Number */
             value_number: number;
+        };
+        /**
+         * PriceSnapshotData
+         * @description 명시된 business time에서 immutable price facts를 재현한 card.
+         */
+        PriceSnapshotData: {
+            /**
+             * Current
+             * @description provider/price_domain/product series별 최신 관측 1건.
+             */
+            current: components["schemas"]["PricePointOut"][];
+            /** Feature Id */
+            feature_id: string;
+            /**
+             * History
+             * @description series를 합쳐 observed_at 내림차순으로 자른 최근 관측.
+             */
+            history: components["schemas"]["PricePointOut"][];
+            /** Is Stale */
+            is_stale: boolean;
+            /**
+             * Known At
+             * Format: date-time
+             */
+            known_at: string;
+            /** Latest At */
+            latest_at?: string | null;
+            /**
+             * Observed At
+             * Format: date-time
+             */
+            observed_at: string;
         };
         /**
          * ProblemDetail
@@ -12755,17 +12840,21 @@ export interface components {
          * @description weather timeline row 1건.
          */
         PublicWeatherValueItem: {
-            /**
-             * Collected At
-             * Format: date-time
-             */
-            collected_at: string;
+            /** Dataset Display Name */
+            dataset_display_name: string;
+            /** Dataset Key */
+            dataset_key: string;
             /** Feature Id */
             feature_id: string;
             /** Forecast Style */
             forecast_style: string;
             /** Issued At */
             issued_at?: string | null;
+            /**
+             * Known At
+             * Format: date-time
+             */
+            known_at: string;
             /** Metric Key */
             metric_key: string;
             /** Metric Name */
@@ -12774,6 +12863,8 @@ export interface components {
             observed_at?: string | null;
             /** Provider */
             provider: string;
+            /** Provider Dataset Id */
+            provider_dataset_id: number;
             /** Severity */
             severity?: string | null;
             /** Timeline Bucket */
@@ -13265,8 +13356,6 @@ export interface components {
          * @description ``GET /features/{feature_id}/weather`` data payload.
          */
         WeatherCardData: {
-            /** Asof */
-            asof?: string | null;
             /** Feature Id */
             feature_id: string;
             /** Is Stale */
@@ -13275,6 +13364,10 @@ export interface components {
             latest_at?: string | null;
             /** Metrics */
             metrics: components["schemas"]["WeatherMetricOut"][];
+            /** Refresh After */
+            refresh_after?: string | null;
+            /** Selected At */
+            selected_at?: string | null;
             /** Source Styles */
             source_styles: string[];
         };
@@ -13283,12 +13376,21 @@ export interface components {
          * @description weather card metric 1건 (forecast_style × metric_key 최신값, T-213e).
          */
         WeatherMetricOut: {
+            /** Dataset Display Name */
+            dataset_display_name: string;
+            /** Dataset Key */
+            dataset_key: string;
             /** Effective At */
             effective_at?: string | null;
             /** Forecast Style */
             forecast_style: string;
             /** Issued At */
             issued_at?: string | null;
+            /**
+             * Known At
+             * Format: date-time
+             */
+            known_at: string;
             /** Metric Key */
             metric_key: string;
             /** Metric Name */
@@ -13297,6 +13399,8 @@ export interface components {
             observed_at?: string | null;
             /** Provider */
             provider?: string | null;
+            /** Provider Dataset Id */
+            provider_dataset_id: number;
             /** Severity */
             severity?: string | null;
             /** Timeline Bucket */
@@ -13317,14 +13421,50 @@ export interface components {
             weather_domain?: string | null;
         };
         /**
+         * WeatherSnapshotData
+         * @description 명시된 target/knowledge time에서 immutable weather facts를 재현한 card.
+         */
+        WeatherSnapshotData: {
+            /** Feature Id */
+            feature_id: string;
+            /** Is Stale */
+            is_stale: boolean;
+            /**
+             * Known At
+             * Format: date-time
+             */
+            known_at: string;
+            /** Latest At */
+            latest_at?: string | null;
+            /** Metrics */
+            metrics: components["schemas"]["WeatherMetricOut"][];
+            /** Refresh After */
+            refresh_after?: string | null;
+            /** Selected At */
+            selected_at?: string | null;
+            /** Source Styles */
+            source_styles: string[];
+            /**
+             * Target At
+             * Format: date-time
+             */
+            target_at: string;
+        };
+        /**
          * WeatherSummaryOut
          * @description 지도 marker용 weather 값 요약.
          */
         WeatherSummaryOut: {
+            /** Dataset Display Name */
+            dataset_display_name: string;
+            /** Dataset Key */
+            dataset_key: string;
             /** Forecast Style */
             forecast_style?: string | null;
             /** Issued At */
             issued_at?: string | null;
+            /** Known At */
+            known_at?: string | null;
             /** Metric Key */
             metric_key: string;
             /** Metric Name */
@@ -13332,7 +13472,14 @@ export interface components {
             /** Observed At */
             observed_at?: string | null;
             /** Provider */
-            provider?: string | null;
+            provider: string;
+            /** Provider Dataset Id */
+            provider_dataset_id: number;
+            /**
+             * Refresh After
+             * Format: date-time
+             */
+            refresh_after: string;
             /** Unit */
             unit?: string | null;
             /** Valid At */
@@ -16318,7 +16465,6 @@ export interface operations {
     get_admin_feature_price_v1_admin_features__feature_id__price_get: {
         parameters: {
             query?: {
-                asof?: string | null;
                 history_limit?: number;
             };
             header?: never;
@@ -16420,9 +16566,7 @@ export interface operations {
     };
     get_admin_feature_weather_v1_admin_features__feature_id__weather_get: {
         parameters: {
-            query?: {
-                asof?: string | null;
-            };
+            query?: never;
             header?: never;
             path: {
                 feature_id: string;
@@ -18975,8 +19119,6 @@ export interface operations {
     get_feature_price_v1_features__feature_id__price_get: {
         parameters: {
             query?: {
-                /** @description 이 시점 이하 price만 조회. */
-                asof?: string | null;
                 /** @description 최근 price history 반환 개수. */
                 history_limit?: number;
             };
@@ -18995,6 +19137,62 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FeaturePriceResponse"];
+                };
+            };
+            /** @description 공개 feature 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_feature_price_snapshot_v1_features__feature_id__price_snapshot_get: {
+        parameters: {
+            query: {
+                /** @description 재현할 price 관측 cutoff. */
+                observed_at: string;
+                /** @description 그 시점에 알려진 response cutoff. */
+                known_at: string;
+                /** @description snapshot history 반환 개수. */
+                history_limit?: number;
+            };
+            header?: never;
+            path: {
+                feature_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeaturePriceSnapshotResponse"];
                 };
             };
             /** @description 공개 feature 없음 */
@@ -19077,10 +19275,7 @@ export interface operations {
     };
     get_feature_weather_v1_features__feature_id__weather_get: {
         parameters: {
-            query?: {
-                /** @description 이 시점 이하 weather만(미래 예보 제외). */
-                asof?: string | null;
-            };
+            query?: never;
             header?: never;
             path: {
                 feature_id: string;
@@ -19107,15 +19302,6 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description WEATHER_BATCH_RESULT_LIMIT_EXCEEDED — source-series 작업량, metric row 또는 payload byte 예산 초과 */
-            413: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -19125,7 +19311,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description WEATHER_BATCH_UNAVAILABLE — weather 저장소 연결/조회 실패 */
+            /** @description WEATHER_CARD_UNAVAILABLE — weather 저장소 연결/조회 실패 */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -19186,6 +19372,69 @@ export interface operations {
             };
             /** @description Validation Error */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_feature_weather_snapshot_v1_features__feature_id__weather_snapshot_get: {
+        parameters: {
+            query: {
+                /** @description 재현할 weather 대상 시각. */
+                target_at: string;
+                /** @description 그 시점에 알려진 response cutoff. */
+                known_at: string;
+            };
+            header?: never;
+            path: {
+                feature_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureWeatherSnapshotResponse"];
+                };
+            };
+            /** @description 공개 feature 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description WEATHER_CARD_UNAVAILABLE — weather 저장소 연결/조회 실패 */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

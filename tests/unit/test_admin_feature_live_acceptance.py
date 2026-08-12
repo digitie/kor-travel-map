@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import subprocess
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -11,8 +12,10 @@ import pytest
 
 _ROOT = Path(__file__).resolve().parents[2]
 _RUNNER = _ROOT / "scripts" / "run-admin-feature-live-acceptance.sh"
+_CLONE_RUNNER = _ROOT / "scripts" / "run-admin-feature-clone-live-acceptance.sh"
 _FIXTURE = _ROOT / "scripts" / "admin_feature_live_fixture.py"
 _STATE = _ROOT / "scripts" / "admin_feature_live_state.py"
+_CLONE_STATE = _ROOT / "scripts" / "admin_feature_clone_live_state.py"
 _SUPERVISOR = _ROOT / "scripts" / "admin_feature_live_supervisor.py"
 _ATTESTATION = _ROOT / "scripts" / "lib" / "c7_prod_attestation.py"
 _LIVE_CONFIG = (
@@ -62,6 +65,9 @@ def _load_script_module(name: str, path: Path) -> ModuleType:
 
 
 _STATE_MODULE = _load_script_module("admin_feature_live_state", _STATE)
+_CLONE_STATE_MODULE = _load_script_module(
+    "admin_feature_clone_live_state", _CLONE_STATE
+)
 _FIXTURE_MODULE = _load_script_module("admin_feature_live_fixture", _FIXTURE)
 _SUPERVISOR_MODULE = _load_script_module(
     "admin_feature_live_supervisor",
@@ -75,17 +81,56 @@ def test_clone_recovery_purge_uses_exact_api_owned_fingerprints() -> None:
     fingerprints = _FIXTURE_MODULE._api_feature_fingerprints(run_id)  # noqa: SLF001
 
     assert set(fingerprints) == {
-        f"e2e_live_acceptance::{run_id}::marker::draft",
-        f"e2e_live_acceptance::{run_id}::marker::inactive",
-        f"e2e_live_acceptance::{run_id}::marker::hidden",
-        f"e2e_live_acceptance::{run_id}::correction",
-        f"e2e_live_acceptance::{run_id}::search::alpha",
-        f"e2e_live_acceptance::{run_id}::search::beta",
+        _FIXTURE_MODULE._admin_fixture_feature_id(run_id, "marker::draft"),  # noqa: SLF001
+        _FIXTURE_MODULE._admin_fixture_feature_id(run_id, "marker::inactive"),  # noqa: SLF001
+        _FIXTURE_MODULE._admin_fixture_feature_id(run_id, "marker::hidden"),  # noqa: SLF001
+        _FIXTURE_MODULE._admin_fixture_feature_id(run_id, "correction"),  # noqa: SLF001
+        _FIXTURE_MODULE._admin_fixture_feature_id(run_id, "search::alpha"),  # noqa: SLF001
+        _FIXTURE_MODULE._admin_fixture_feature_id(run_id, "search::beta"),  # noqa: SLF001
     }
-    assert fingerprints[f"e2e_live_acceptance::{run_id}::correction"][2] == {
+    correction_id = _FIXTURE_MODULE._admin_fixture_feature_id(  # noqa: SLF001
+        run_id, "correction"
+    )
+    assert correction_id.startswith("f_global_p_")
+    assert _FIXTURE_MODULE._provider_fixture_feature_id(  # noqa: SLF001
+        run_id, "weather"
+    ).startswith("f_global_w_")
+    assert _FIXTURE_MODULE._provider_fixture_feature_id(  # noqa: SLF001
+        run_id, "price"
+    ).startswith("f_global_p_")
+    assert fingerprints[correction_id][2] == {
         f"E2E correction baseline {run_id}",
         f"E2E approved competing update {run_id}",
     }
+
+
+def test_clone_checkpoint_schema_digest_uses_restore_stable_catalog() -> None:
+    """restore가 정규화하는 CHECK 표현·dropped-column ordinal을 오판하지 않는다."""
+    source = (
+        _ROOT / "scripts" / "run-admin-feature-clone-live-acceptance.sh"
+    ).read_text(encoding="utf-8")
+
+    assert "constraint_row.conkey::text" not in source
+    assert "constraint_row.confkey::text" not in source
+    assert "key_attribute.attname" in source
+    assert "referenced_attribute.attname" in source
+    assert "array_position(constraint_row.conkey, key_attribute.attnum)" in source
+    assert "constraint_row.confrelid::regclass::text" in source
+    assert "constraint_row.convalidated" in source
+    assert "pg_get_constraintdef(constraint_row.oid, true)" not in source
+    assert "row_number() OVER (" in source
+    assert "PARTITION BY attribute.attrelid ORDER BY attribute.attnum" in source
+    assert "attribute.attnum::text || attribute.attname" not in source
+    assert "attnum gap은 pg_dump/pg_restore가 정규화한다" in source
+
+
+def test_live_fixture_counts_only_direct_feature_id_references() -> None:
+    """composite subtype/alias fence는 fixture feature_id만으로 억지로 계수하지 않는다."""
+    source = _FIXTURE.read_text(encoding="utf-8")
+
+    assert "AND cardinality(constraint_row.conkey) = 1" in source
+    assert "AND cardinality(constraint_row.confkey) = 1" in source
+    assert "composite FK는 이 fixture가 가진 feature_id만으로 reference를 셀 수" in source
 
 
 def _execution_args(path: Path, identity: dict[str, str]) -> SimpleNamespace:
@@ -544,8 +589,8 @@ def test_direct_cleanup_locks_owned_parents_before_fk_audit_and_delete() -> None
         )
     ]
     assert fixture.count('lock_clause = " FOR UPDATE" if lock else ""') == 2
-    assert owned_values.count("+ lock_clause") == 3
-    assert "_assert_owned_values(session, feature_ids, present, lock=lock)" in fixture
+    assert owned_values.count("+ lock_clause") == 2
+    assert "_assert_owned_values(session, run_id, feature_ids, present, lock=lock)" in fixture
     lock = cleanup.index("lock=True")
     foreign_key_audit = cleanup.index("DELETE FROM feature.features")
     assert lock < foreign_key_audit
@@ -555,9 +600,12 @@ def test_direct_cleanup_locks_owned_parents_before_fk_audit_and_delete() -> None
     assert "foreign_key_references" in fixture
     assert "owned fixture ID의 소유권 fingerprint가 다릅니다" in fixture
     assert "owned weather value fingerprint가 다릅니다" in fixture
-    assert "owned weather series fingerprint가 다릅니다" in fixture
     assert "owned price value fingerprint가 다릅니다" in fixture
-    assert '"feature.weather_metric_series.feature_id"] = 1' in fixture
+    assert '"feature.feature_aliases.feature_id"] = len(present)' in fixture
+    assert '"feature.current_weather_summary.feature_id"] = 1' in fixture
+    assert '"feature.current_price_summary.feature_id"] = 1' in fixture
+    assert 'if rows:' in inspection
+    assert '"feature.feature_aliases.feature_id"] = len(rows)' in inspection
     assert cleanup.count("DELETE FROM feature.features") == 1
     assert purge.count("DELETE FROM feature.features") == 1
     assert "DELETE FROM ops.feature_change_requests" in purge
@@ -565,6 +613,9 @@ def test_direct_cleanup_locks_owned_parents_before_fk_audit_and_delete() -> None
     assert "API-owned Feature version payload가 다릅니다" in inspection
     assert "feature_versions" in purge
     assert "inspection.versions" in purge
+    assert "async def _owned_summary_run_ids(" in fixture
+    assert "owned weather/price current-summary receipt가 정확하지 않습니다" in fixture
+    assert 'result["summary_run_ids"] = list(summary_run_ids)' in fixture
 
 
 def test_browser_lane_covers_nonpublic_bbox_and_stale_raw_etag() -> None:
@@ -621,6 +672,57 @@ def test_browser_lane_covers_all_nonpublic_markers_and_cards() -> None:
     assert "weather.data.metrics).toHaveLength(1)" in spec
     assert "price.data.history).toHaveLength(1)" in spec
     assert "assertPublicInBoundsExcludes(" in spec
+
+
+def test_clone_content_digest_excludes_only_exact_run_bound_receipts() -> None:
+    """admin command와 immutable summary receipt는 exact 실행 소유권으로만 제외한다."""
+    runner = _CLONE_RUNNER.read_text(encoding="utf-8")
+
+    assert "'domain_commands', 'domain_command_results'" in runner
+    assert "command.actor = ''ui-auth''" in runner
+    assert "result.response_body #>> ''{data,item,request_id}''" in runner
+    assert "result.response_body::text LIKE %L" in runner
+    assert "'%e2e_live_acceptance::${run_id}::%'" in runner
+    assert "owned_feature_ids_sql()" in runner
+    assert "ARRAY[${owned_feature_ids}]::text[]" in runner
+    assert "\\$fmt\\$ WHERE NOT (row_value.feature_id" in runner
+    assert "owned_summary_run_ids_sql()" in runner
+    assert '"summary_run_ids"' in runner
+    assert "row_value.summary_run_id <> ALL (ARRAY[${owned_summary_run_ids}]::bigint[])" in runner
+    assert "current_summary_runs_summary_run_id_seq" in runner
+    assert "provider_datasets_provider_dataset_id_seq" in runner
+    assert "legacy-v2 legacy-v1 legacy-v0" in runner
+
+
+def test_clone_seed_receipt_evidence_requires_two_distinct_positive_ids(
+    tmp_path: Path,
+) -> None:
+    evidence_path = tmp_path / "direct-seed.json"
+    payload = {
+        "action": "seed",
+        "counts": {"features": 2, "price_values": 1, "weather_values": 1},
+        "foreign_key_constraints_checked": 18,
+        "foreign_key_references": 6,
+        "summary_run_ids": [101, 102],
+        "version": 1,
+    }
+    evidence_path.write_text(json.dumps(payload), encoding="utf-8")
+    assert _CLONE_STATE_MODULE._fixture_counts(  # noqa: SLF001
+        evidence_path,
+        "seed",
+        {"features": 2, "price_values": 1, "weather_values": 1},
+        expected_foreign_key_references=6,
+    ) == payload
+
+    payload["summary_run_ids"] = [101, 101]
+    evidence_path.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(RuntimeError, match="current-summary receipt"):
+        _CLONE_STATE_MODULE._fixture_counts(  # noqa: SLF001
+            evidence_path,
+            "seed",
+            {"features": 2, "price_values": 1, "weather_values": 1},
+            expected_foreign_key_references=6,
+        )
 
 
 def test_evidence_validator_requires_exact_schema_phase_counts_and_fsync() -> None:

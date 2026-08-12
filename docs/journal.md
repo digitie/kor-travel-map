@@ -2,6 +2,61 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-12 — T-VN-38: immutable fact/current-summary CI 구조 계약 보강
+
+#971의 integration CI가 T-VN-38 이후에도 옛 `provider` 문자열 fact, nullable source lineage,
+BRIN/current-row index, outer terminal page limit을 가정하는 테스트·도구를 발견했다. core hash
+규칙은 바꾸지 않고 Dagster provider 응답 경계에서 `date`/`time`/`Decimal`을 canonical JSON으로
+정규화했다. Alembic metadata와 raw-DDL structural contract에는 source entity/record 복합 UNIQUE와
+current weather/price summary 및 rebuild receipt를 명시했고, card/anchor fixture는 canonical
+ingestion과 freshness SLA를 통해 current pointer를 만든다.
+
+동일 패턴으로 H35 price index fingerprint, weather access-index audit, tier-2 bbox candidate CTE의
+pre-page count, source-record 수명 단언과 `docs/architecture`의 과거 current-row 설명을 전수
+정리했다. 이 문서·코드 보강은 별도 문서 PR로 분리하지 않으며 #971 final CI, 재실행 n150 clone
+live, 적대 리뷰 재승인이 끝날 때까지 완료로 간주하지 않는다.
+
+## 2026-08-12 — T-VN-38: 반복 n150 clone live 실행의 checkpoint 복원 고정
+
+직전 성공 live가 UI 삭제의 soft-delete 감사 Feature 6건을 의도적으로 남겨, 후속 candidate가
+Playwright 시작 전에 trusted checkpoint와 `feature_total`이 다르다고 fail-closed 되는 것을
+n150에서 재현했다. 이 상태는 prod와 무관한 `ktm-tvn38-db:18732` clone의 정상적인 이전
+acceptance 결과였지만, 정상 `run`에 signed dump 복원이 없어 같은 clone을 반복 검증할 수 없었다.
+
+정상 path도 dump의 경로·권한·SHA·archive를 검증한 뒤 dedicated clone만
+`pg_restore --clean --exit-on-error --single-transaction`으로 복원하고 login fence와 시작
+snapshot을 만든다. abort의 restore-first 경계와 대칭을 유지하며, restore 실패나 이후 drift는
+BLOCKED/성공 result 없이 중단한다. unit 47개, Bash/Ruff/redaction gate와 최종 n150 main/recovery
+각 2/2를 통과했다. final `e68b00ef`의 consumer·DB 적대 리뷰 2인은 P0/P1 없이 GO를 확인했다.
+
+## 2026-08-12 — T-VN-38: T-VN-33 병합 뒤 projection·동결 gate 재검증
+
+T-VN-33의 squash merge를 기준으로 T-VN-38의 고유 32개 commit만 다시 얹고,
+`0095_tvn33_tvn38_head_merge`가 유일한 Alembic head임을 fresh upgrade로 확인했다.
+target catalog fingerprint와 T-VN-33 reference artifact도 새 head에 맞춰 재동결했다.
+
+적대 DB 리뷰가 두 결함을 발견해 같은 패턴까지 함께 정리했다.
+
+- price current projection은 전역 desired 집합을 만들면서 advisory lock이 없어 오래된
+  writer가 더 새 pointer를 되돌릴 수 있었다. weather와 대칭인
+  `projection:current-price-summary` transaction advisory lock 및 contention 회귀를
+  추가했다. global mutable projection inventory는 weather·price 두 개뿐임을 확인했다.
+- frozen artifact SHA 검증에서 빠졌던 CRLF bytes guard를 9개 artifact mapping 전체에
+  복구했다.
+
+projection index gate도 receipt-backed current read의 실제 선두 access path
+`pk_current_price_summary`를 단언하도록 고쳤다. fresh migration·weather/price·target
+contract 묶음 104개, API weather/price 34개, OpenAPI generated type check와 frontend
+TypeScript check가 통과했다. DB와 consumer 적대 리뷰는 모두 P0/P1 없이 GO다.
+
+## 2026-08-12 — T-VN-38: T-VN-33 병합 기준 Alembic head 수렴
+
+T-VN-33의 `0092_tvn33_offline_cleanup`와 T-VN-38A의
+`0092_weather_current_summary`가 같은 `0091`에서 분기한 사실이 병합 기준
+rebase에서 드러났다. 빈 `0095_tvn33_tvn38_head_merge`가 두 선행 revision을 함께
+요구해 Alembic head를 하나로 수렴시킨다. target catalog·OpenAPI baseline은 이 결선
+결과로 다시 동결하며, 이후 T-VN-34는 이 merge revision을 `down_revision`으로 삼는다.
+
 ## 2026-08-11 (3) — T-VN-33 최종 적대 리뷰 APPROVE, 잔여 P2 처리, 게이트 25/25
 
 **리뷰 3렌즈 전원 APPROVE · P0/P1 0건.** 세 렌즈 모두 실측으로 판정했다 — 검증 신뢰성

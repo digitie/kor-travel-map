@@ -1133,182 +1133,134 @@ CREATE TABLE feature.feature_special_days (
 CREATE INDEX idx_special_date ON feature.feature_special_days (special_date);
 ```
 
-## 8. weather / price
+## 8. weather / price immutable fact와 current summary
 
-### 8.1 `feature.feature_weather_values`
+T-VN-38부터 weather와 price는 current 값을 원본 fact 행에 upsert하지 않는다. 모든 writer는
+canonical `provider_dataset_id`와 immutable raw source revision을 함께 받고 새 fact만 INSERT한다.
+normal card/map/bbox는 fact에서 매번 winner를 고르지 않고, selected fact key만 보관하는
+current summary를 set join한다. 명시 time-travel·timeline만 raw fact의 ranked CTE를 사용한다.
+
+### 8.1 공통 source lineage와 rebuild receipt
+
+```sql
+CREATE TABLE ops.current_summary_runs (
+  summary_run_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  projection_kind TEXT NOT NULL CHECK (projection_kind IN ('weather', 'price')),
+  run_kind TEXT NOT NULL CHECK (run_kind IN ('ingest', 'reconcile', 'backfill', 'restore')),
+  status TEXT NOT NULL CHECK (status IN ('running', 'succeeded', 'failed')),
+  started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  finished_at TIMESTAMPTZ,
+  input_count BIGINT NOT NULL DEFAULT 0,
+  inserted_count BIGINT NOT NULL DEFAULT 0,
+  updated_count BIGINT NOT NULL DEFAULT 0,
+  deleted_count BIGINT NOT NULL DEFAULT 0,
+  scope JSONB NOT NULL DEFAULT '{}'::jsonb,
+  detail JSONB NOT NULL DEFAULT '{}'::jsonb,
+  UNIQUE (summary_run_id, projection_kind, status)
+);
+```
+
+- `(source_entity_key, provider_dataset_id)`와 `(source_record_key, source_entity_key,
+  fetched_at)`는 각각 source entity/immutable response revision의 복합 UNIQUE target이다.
+  weather/price fact는 이 둘을 `RESTRICT` 복합 FK로 참조한다. source-less value write와
+  provider 문자열 identity는 허용하지 않는다.
+- terminal run receipt와 fact row는 immutable trigger가 보호한다. current summary는 자신을
+  실제로 변경한 `succeeded` receipt만 복합 FK로 참조한다.
+- weather와 price global projection은 각기 transaction advisory lock을 **desired set 계산 전**에
+  취한다. 오래된 writer가 더 최신 winner pointer를 되돌리거나 stale delete하는 race를 막는다.
+
+### 8.2 weather
 
 ```sql
 CREATE TABLE feature.feature_weather_values (
-  weather_value_key       TEXT PRIMARY KEY,           -- make_weather_value_key(...)
-  feature_id              TEXT NOT NULL REFERENCES feature.features(feature_id) ON DELETE CASCADE,
-  provider                TEXT NOT NULL,
-  weather_domain          TEXT NOT NULL,              -- WeatherDomain enum
-  forecast_style          TEXT NOT NULL,              -- ForecastStyle enum
-  timeline_bucket         TEXT,                       -- ultra_short, short, mid (분류)
-  metric_key              TEXT NOT NULL,
-  source_metric_key       TEXT,
-  source_metric_name      TEXT,
-  metric_name             TEXT,
-  issued_at               TIMESTAMPTZ,
-  valid_at                TIMESTAMPTZ,
-  valid_from              TIMESTAMPTZ,
-  valid_until             TIMESTAMPTZ,
-  observed_at             TIMESTAMPTZ,
-  value_number            NUMERIC(14,4),
-  value_text              TEXT,
-  unit                    TEXT,
-  severity                TEXT,
-  normalization_version   TEXT,
-  source_record_key       TEXT REFERENCES provider_sync.source_records(source_record_key) ON DELETE SET NULL,
-  payload                 JSONB NOT NULL DEFAULT '{}'::jsonb,
-  collected_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
-
-  CONSTRAINT uq_weather_values UNIQUE (
-    feature_id, provider, weather_domain, forecast_style, metric_key, issued_at, valid_at, observed_at
-  )
+  weather_value_key TEXT PRIMARY KEY,
+  feature_id TEXT NOT NULL REFERENCES feature.features(feature_id) ON DELETE CASCADE,
+  provider_dataset_id BIGINT NOT NULL,
+  weather_domain TEXT NOT NULL,
+  forecast_style TEXT NOT NULL,
+  timeline_bucket TEXT,
+  metric_key TEXT NOT NULL,
+  metric_name TEXT,
+  source_metric_key TEXT,
+  source_metric_name TEXT,
+  value_number NUMERIC(14,4), value_text TEXT, unit TEXT, severity TEXT,
+  issued_at TIMESTAMPTZ, valid_at TIMESTAMPTZ, valid_during TSTZRANGE,
+  observed_at TIMESTAMPTZ,
+  target_at TIMESTAMPTZ NOT NULL,
+  known_at TIMESTAMPTZ NOT NULL,
+  normalization_version TEXT,
+  payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  source_entity_key TEXT NOT NULL,
+  source_record_key TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  FOREIGN KEY (source_entity_key, provider_dataset_id)
+    REFERENCES provider_sync.source_entities (source_entity_key, provider_dataset_id),
+  FOREIGN KEY (source_record_key, source_entity_key, known_at)
+    REFERENCES provider_sync.source_records (source_record_key, source_entity_key, fetched_at),
+  CHECK (value_number IS NOT NULL OR value_text IS NOT NULL),
+  CHECK (issued_at IS NULL OR issued_at <= known_at),
+  UNIQUE (feature_id, provider_dataset_id, weather_domain, forecast_style,
+          metric_key, target_at, source_record_key)
 );
 
-CREATE INDEX idx_weather_feature_metric_time
-  ON feature.feature_weather_values (feature_id, metric_key, valid_at DESC NULLS LAST);
-CREATE INDEX idx_weather_provider_domain
-  ON feature.feature_weather_values (provider, weather_domain, valid_at DESC NULLS LAST);
-CREATE INDEX idx_weather_valid_at_brin
-  ON feature.feature_weather_values USING BRIN (valid_at);
-CREATE INDEX idx_weather_collected_at_brin
-  ON feature.feature_weather_values USING BRIN (collected_at);
+CREATE INDEX idx_weather_values_feature_target_known
+  ON feature.feature_weather_values (feature_id, target_at DESC, known_at DESC);
 
-CREATE TABLE feature.weather_metric_series (
-  feature_id              TEXT NOT NULL
-    REFERENCES feature.features(feature_id) ON DELETE CASCADE,
-  provider                TEXT NOT NULL,
-  weather_domain          TEXT NOT NULL,
-  forecast_style          TEXT NOT NULL,
-  metric_key              TEXT NOT NULL,
-  PRIMARY KEY (
-    feature_id, provider, weather_domain, forecast_style, metric_key
-  )
+CREATE TABLE feature.current_weather_summary (
+  feature_id TEXT NOT NULL, provider_dataset_id BIGINT NOT NULL,
+  weather_domain TEXT NOT NULL, forecast_style TEXT NOT NULL, metric_key TEXT NOT NULL,
+  weather_value_key TEXT NOT NULL, summary_run_id BIGINT NOT NULL,
+  selected_at TIMESTAMPTZ NOT NULL, refresh_after TIMESTAMPTZ NOT NULL,
+  projection_kind TEXT NOT NULL DEFAULT 'weather', receipt_status TEXT NOT NULL DEFAULT 'succeeded',
+  PRIMARY KEY (feature_id, provider_dataset_id, weather_domain, forecast_style, metric_key)
 );
-
-CREATE INDEX idx_weather_values_feature_effective
-  ON feature.feature_weather_values (
-    feature_id,
-    provider,
-    weather_domain,
-    forecast_style,
-    metric_key,
-    (COALESCE(valid_at, observed_at, valid_from, issued_at)) DESC,
-    issued_at DESC NULLS LAST,
-    collected_at DESC,
-    weather_value_key
-  );
-
-CREATE INDEX idx_features_public_weather_coord_5179_gist
-  ON feature.features USING gist (coord_5179)
-  WHERE status = 'active'
-    AND deleted_at IS NULL
-    AND kind = 'weather'
-    AND coord_5179 IS NOT NULL;
 ```
 
-**인덱스 설계**:
-- 시계열 누적 → BRIN.
-- `feature_id + metric_key + valid_at DESC` — `build_weather_card`의 핵심
-  쿼리 (각 metric별 최신값).
-- `provider + weather_domain + valid_at DESC` — admin 검증.
-- `weather_metric_series`는 fact insert와 series identity 변경 trigger가 단조롭게
-  유지하는 작은 physical-series registry다. 삭제로 stale row가 남아도 predecessor 조회가
-  0행이므로 read 결과는 바뀌지 않으며, 대용량 fact에서 매 요청마다 series를 `DISTINCT`로
-  재발견하지 않는다.
-- `idx_weather_values_feature_effective`는 physical-series exact prefix 뒤에 effective time과
-  결정적 tie-break를 둬 current predecessor와 24시간 timeline을 index range scan으로 읽는다.
-  concurrent build 뒤 후속 DDL이 실패해 revision이 미적용으로 남아도, 재시도는 catalog에서
-  이미 valid인 index를 재사용하고 invalid 잔재만 제거·재구축한다.
-- `idx_features_public_weather_coord_5179_gist`는 공유 가능한 canonical weather anchor만 담는
-  partial GiST다. nearest KNN이 일반 place 후보를 훑지 않으며 공간 술어에서
-  `ST_Transform`을 사용하지 않는다.
+weather candidate는 `known_at <= selected_at`, `target_at <= selected_at`, valid range containment를
+만족해야 한다. winner는 `target_at DESC, known_at DESC` 뒤 temporal tie-break와 fact key로
+결정한다. 정상 summary는 active dataset의 `refresh_after > clock_timestamp()`만 공개한다.
+deadline-only reconciliation이 새 provider write 없이 만료 summary를 제거·재물화한다.
 
-0060 이후 semantic UNIQUE는 위 시간축의 NULL을 같은 값으로 취급하는 `NULLS NOT DISTINCT`다.
-같은 semantic tuple의 current row는 `collected_at`이 더 최신인 입력만 갱신한다. 더 오래된
-backfill은 no-op이며, 동률은 실제 저장 내용이 다를 때만 후속 write가 이긴다. 완전히 같은 동률
-재적재는 heap UPDATE를 만들지 않는다. `collected_at`은 non-null `TIMESTAMPTZ` 계약이다.
-known-at correction fact를 행별로 보존하는 full bitemporal 전환은 ADR-072의 별도 current summary와
-read cutover를 함께 수행할 때 적용하며, 0060 current-row writer에 부분 도입하지 않는다.
-
-### 8.2 `feature.feature_price_values`
-
-가격 시계열은 별도 `price_points` 테이블을 두지 않고, `feature.features`
-의 `kind='price'` anchor feature에 직접 연결한다. anchor feature는 지도/목록에서
-가격 데이터가 보이기 위한 표시 단위이고, 실제 제품별 값은
-`feature.feature_price_values`에 누적한다.
-
-설계 기준:
-
-- `feature_id`는 `feature.features(feature_id)`를 참조한다. price anchor가 삭제되면
-  해당 가격 시계열도 함께 삭제한다.
-- `price_value_key`는 `make_price_value_key(...)`가 계산한 결정적 PK다.
-- 논리 중복은 `(feature_id, provider, price_domain, product_key, observed_at)`로
-  한 번 더 막는다.
-- provider raw 추적은 `source_record_key` nullable FK로 보존한다. source record가
-  정리되어도 가격 시계열 자체는 유지한다.
-- OpiNet처럼 장소 좌표가 있는 provider는 `place` 주유소 feature의
-  `parent_feature_id`를 가진 price feature를 만든다. KREX 유가처럼 가격 row에
-  좌표가 없는 provider는 좌표 없는 price feature로 저장하고, 주소/이름 기반 보강은
-  후속 matching 단계에서 처리한다.
+### 8.3 price
 
 ```sql
 CREATE TABLE feature.feature_price_values (
-  price_value_key       TEXT PRIMARY KEY,
-  feature_id            TEXT NOT NULL
-    REFERENCES feature.features(feature_id) ON DELETE CASCADE,
-  provider              TEXT NOT NULL,
-  price_domain          TEXT NOT NULL,
-  product_key           TEXT NOT NULL,                -- gasoline / diesel / lpg / ...
-  product_name          TEXT,
-  source_product_key    TEXT,
-  source_product_name   TEXT,
-  observed_at           TIMESTAMPTZ NOT NULL,
-  value_number          NUMERIC(14,4) NOT NULL,
-  unit                  TEXT NOT NULL DEFAULT 'KRW',  -- KRW / KRW/L / KRW/회 ...
-  normalization_version TEXT,
-  payload               JSONB NOT NULL DEFAULT '{}'::jsonb,
-  source_record_key     TEXT
-    REFERENCES provider_sync.source_records(source_record_key) ON DELETE SET NULL,
-  collected_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-  created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT ck_price_value_nonnegative CHECK (value_number >= 0),
-  CONSTRAINT uq_price_value_identity UNIQUE (
-    feature_id, provider, price_domain, product_key, observed_at
-  )
+  price_value_key TEXT PRIMARY KEY,
+  feature_id TEXT NOT NULL REFERENCES feature.features(feature_id) ON DELETE CASCADE,
+  provider_dataset_id BIGINT NOT NULL,
+  price_domain TEXT NOT NULL, product_key TEXT NOT NULL,
+  product_name TEXT, source_product_key TEXT, source_product_name TEXT,
+  observed_at TIMESTAMPTZ NOT NULL, known_at TIMESTAMPTZ NOT NULL,
+  value_number NUMERIC(14,4) NOT NULL CHECK (value_number >= 0),
+  unit TEXT NOT NULL DEFAULT 'KRW', normalization_version TEXT,
+  payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  source_entity_key TEXT NOT NULL, source_record_key TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  FOREIGN KEY (source_entity_key, provider_dataset_id)
+    REFERENCES provider_sync.source_entities (source_entity_key, provider_dataset_id),
+  FOREIGN KEY (source_record_key, source_entity_key, known_at)
+    REFERENCES provider_sync.source_records (source_record_key, source_entity_key, fetched_at),
+  UNIQUE (feature_id, provider_dataset_id, price_domain, product_key, observed_at, source_record_key)
 );
 
-CREATE INDEX idx_price_values_observed_at_brin
-  ON feature.feature_price_values USING BRIN (observed_at);
 CREATE INDEX idx_price_values_feature_observed_identity
-  ON feature.feature_price_values (feature_id, observed_at DESC, provider, price_domain, product_key);
-CREATE INDEX idx_price_values_domain_product_observed
-  ON feature.feature_price_values (provider, price_domain, product_key, observed_at DESC);
-CREATE INDEX idx_price_values_source_record
-  ON feature.feature_price_values (source_record_key)
-  WHERE source_record_key IS NOT NULL;
+  ON feature.feature_price_values (
+    feature_id, observed_at DESC, known_at DESC, provider_dataset_id, price_domain, product_key
+  );
+
+CREATE TABLE feature.current_price_summary (
+  feature_id TEXT NOT NULL, provider_dataset_id BIGINT NOT NULL,
+  price_domain TEXT NOT NULL, product_key TEXT NOT NULL,
+  price_value_key TEXT NOT NULL, summary_run_id BIGINT NOT NULL,
+  projection_kind TEXT NOT NULL DEFAULT 'price', receipt_status TEXT NOT NULL DEFAULT 'succeeded',
+  PRIMARY KEY (feature_id, provider_dataset_id, price_domain, product_key)
+);
 ```
 
-**인덱스 설계**:
-- `idx_price_values_observed_at_brin` — 장기 누적 시계열의 기간 조건.
-- `uq_price_value_identity` — `(feature_id, provider, price_domain, product_key,
-  observed_at)` 자연키를 보장하고, all-DESC 역방향 스캔으로 series별 current 조회도
-  담당한다. 동일 선두 컬럼 current index를 중복 생성하지 않는다.
-- `idx_price_values_feature_observed_identity` — 특정 가격 feature의 전체 series history를
-  최신 관측순으로 읽는다.
-- `idx_price_values_domain_product_observed` — provider/domain/product별 운영 검증과
-  최신 snapshot 확인.
-- `idx_price_values_source_record` — provider raw 역추적.
-
-
-가격 series 식별자는 `feature_id + provider + price_domain + product_key`다. `current`와
-지도/admin `price_summary`는 이 series마다 `observed_at` 최신 1건을 유지한다. 같은
-`product_key`라도 provider/domain이 다르면 별도 값이며, history는 모든 series를 합쳐
-최신 관측순으로 제한한다. 인덱스 교체와 API cardinality 결정은 ADR-078을 따른다.
+price winner는 `observed_at DESC, known_at DESC, price_value_key DESC`다. OpiNet처럼 장소 좌표가
+있는 provider는 `place` 주유소의 child price feature를 만들고, 좌표가 없는 KREX price는
+좌표 없는 price feature로 유지한다. 두 경우 모두 raw response revision은 같은 canonical
+lineage 규칙으로 보존한다.
 ## 9. 운영 보조 (`ops` schema)
 
 

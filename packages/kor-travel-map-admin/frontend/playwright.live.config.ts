@@ -114,19 +114,6 @@ function isLocalHost(hostname: string): boolean {
   );
 }
 
-function isTrustedIsolatedDockerOrigin(url: URL): boolean {
-  return (
-    isolatedDockerNetwork &&
-    url.protocol === "http:" &&
-    url.hostname === "candidate-ui" &&
-    url.username === "" &&
-    url.password === "" &&
-    url.pathname === "/" &&
-    url.search === "" &&
-    url.hash === ""
-  );
-}
-
 (function assertNotProdUnlessOptedIn() {
   let parsed: URL;
   try {
@@ -154,8 +141,7 @@ function isTrustedIsolatedDockerOrigin(url: URL): boolean {
       `[playwright.live] ${ISOLATED_DOCKER_NETWORK_ENV}=1은 ${ISOLATED_EVIDENCE_ENV}=1이 필요합니다`,
     );
   }
-  const isolatedTarget =
-    isLocalHost(parsed.hostname) || isTrustedIsolatedDockerOrigin(parsed);
+  const isolatedTarget = isLocalHost(parsed.hostname);
   if (isolatedEvidence && !isolatedTarget) {
     throw new Error(
       `[playwright.live] ${ISOLATED_EVIDENCE_ENV}=1은 검증된 격리 대상만 허용합니다`,

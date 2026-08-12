@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterable, Mapping
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime, timedelta, timezone
+from dataclasses import dataclass, field
+from datetime import UTC, date, datetime, time, timedelta, timezone
 from decimal import Decimal
-from types import SimpleNamespace
+from types import MappingProxyType, SimpleNamespace
 from typing import Any, Final, cast
 
 import pytest
@@ -48,6 +49,52 @@ _PROVIDER_DATASET_IDS: Final[dict[str, int]] = {
 }
 
 
+@dataclass(frozen=True)
+class _StationPriceDetail:
+    """source record에도 그대로 보존 가능한 OpiNet 상세 응답 test double."""
+
+    prices: tuple[object, ...] = ()
+
+
+@dataclass(frozen=True)
+class _FrozenPrice:
+    trade_date: date
+    trade_time: time
+    raw: Mapping[str, Any] = field(default_factory=lambda: MappingProxyType({}))
+
+
+@dataclass(frozen=True)
+class _FrozenStationDetail:
+    prices: tuple[_FrozenPrice, ...]
+    raw: Mapping[str, Any]
+
+
+def test_source_record_payload_preserves_frozen_opinet_detail_without_deepcopy() -> None:
+    """실제 OpiNet detail의 ``MappingProxyType`` raw도 source receipt가 된다."""
+
+    detail = _FrozenStationDetail(
+        prices=(
+            _FrozenPrice(
+                trade_date=date(2026, 8, 12),
+                trade_time=time(9, 30),
+                raw=MappingProxyType({"PRODCD": "B027"}),
+            ),
+        ),
+        raw=MappingProxyType({"UNI_ID": "A123", "nested": {"value": "kept"}}),
+    )
+
+    assert assets_module._response_payload_item(detail) == {
+        "prices": [
+            {
+                "trade_date": "2026-08-12",
+                "trade_time": "09:30:00",
+                "raw": {"PRODCD": "B027"},
+            }
+        ],
+        "raw": {"UNI_ID": "A123", "nested": {"value": "kept"}},
+    }
+
+
 class _Client:
     def __init__(
         self,
@@ -58,6 +105,7 @@ class _Client:
         self.events: list[str] = []
         self.sync_success_calls: list[dict[str, Any]] = []
         self.loaded_price_values: list[PriceValue] = []
+        self.price_write_context: dict[str, Any] | None = None
         self.last_success_at = last_success_at
         self.sync_cursor = sync_cursor
         self.sync_state_reads: list[ProviderDatasetOperationMembership] = []
@@ -116,9 +164,12 @@ class _Client:
         self.events.append("load")
         return FeatureLoadResult(bundles_total=len(materialized))
 
-    async def load_price_features(self, bundles: Any, values: Any) -> PriceFeatureLoadResult:
+    async def load_price_features(
+        self, bundles: Any, values: Any, **kwargs: Any
+    ) -> PriceFeatureLoadResult:
         materialized_bundles = list(bundles)
         self.loaded_price_values = list(values)
+        self.price_write_context = kwargs
         self.events.append("load_price")
         return PriceFeatureLoadResult(
             features=FeatureLoadResult(bundles_total=len(materialized_bundles)),
@@ -155,10 +206,10 @@ class _Client:
         )
 
     async def record_address_validation_findings(
-        self, findings: object, **kwargs: object
+        self, findings: Iterable[object], **kwargs: object
     ) -> IntegrityFindingSyncResult:
         """T-VN-H30A: durable finding 기록 (테스트 double은 보관만 한다)."""
-        self.recorded_findings = list(findings)  # type: ignore[arg-type]
+        self.recorded_findings = list(findings)
         count = len(self.recorded_findings)
         return IntegrityFindingSyncResult(count, count, count)
 
@@ -209,7 +260,7 @@ async def test_price_asset_rejects_nonempty_records_normalized_to_zero(
             "feature_operation_guard": client.guard_for(
                 _PRICE_OPERATION_KEY, OPINET_PRICE_DATASET_KEY
             ),
-            "opinet_station_price_details": [SimpleNamespace(prices=())],
+            "opinet_station_price_details": [_StationPriceDetail()],
         }
     )
 
@@ -273,7 +324,7 @@ async def test_price_asset_records_kst_observation_freshness_metadata(
             "feature_operation_guard": client.guard_for(
                 _PRICE_OPERATION_KEY, OPINET_PRICE_DATASET_KEY
             ),
-            "opinet_station_price_details": [SimpleNamespace(prices=())],
+            "opinet_station_price_details": [_StationPriceDetail()],
         }
     )
 
@@ -298,6 +349,10 @@ async def test_price_asset_records_kst_observation_freshness_metadata(
     assert cursor["today_values_count"] == 2
     assert output_metadata["latest_observed_at"] == "2026-07-13T23:00:00+09:00"
     assert output_metadata["today_values_count"] == 2
+    assert client.price_write_context is not None
+    source_record = client.price_write_context["source_record"]
+    # source record payload는 immutable hash 전에 canonical JSON 형태로 정규화된다.
+    assert source_record.raw_data["records"] == [{"prices": []}]
 
 
 async def test_place_asset_holds_same_provider_lock_through_sync_success() -> None:

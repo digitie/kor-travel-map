@@ -85,7 +85,7 @@ barrier로 직렬화한다.
     [x] `T-VN-35A-D`(typed subtype 분해 — ADR-086, A-D 단일 PR) →
     [ ] `T-VN-37A` → [ ] `T-VN-37B` → [ ] `T-VN-37C`
   - Lane B shadow: [~] `T-VN-33`(A/B/C 단일 PR — DB 정본·writer/reader cutover·legacy fence) →
-    [ ] `T-VN-38A` → [ ] `T-VN-38B` → [ ] `T-VN-38C` →
+    [x] `T-VN-38A` → [x] `T-VN-38B` → [x] `T-VN-38C` →
     [ ] `T-VN-34A` → [ ] `T-VN-34B` → [ ] `T-VN-34C` →
     [ ] `T-VN-36A` → [ ] `T-VN-36B` → [ ] `T-VN-36C`
   - 32~38 join barrier 뒤 Lane B: [ ] `T-VN-40A` → [ ] `T-VN-40B` →
@@ -781,21 +781,45 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 
 ### T-VN-38 — weather·price current summary (Lane B)
 
-- [ ] T-VN-38A — **weather current summary**
+- [x] T-VN-38A — **weather current summary**
 
   bitemporal 원본 이력을 보존하면서 identity당 current weather를 원자 유지하는 summary와
   reconciliation을 추가한다.
 
-- [ ] T-VN-38B — **price current summary**
+- [x] T-VN-38B — **price current summary**
 
   `provider + price_domain + product_key` identity당 current price summary와 reconciliation을
   추가하고 restore/backfill generation을 구분한다.
 
-- [ ] T-VN-38C — **bbox/detail set-based cutover**
+- [x] T-VN-38C — **bbox/detail set-based cutover**
 
   per-row LATERAL을 weather/price summary set join으로 바꾸고 old query를 normal path에서
   비활성화한다. rollback shadow index는 보존해 T-VN-39 removal manifest로 넘기고,
   cardinality·freshness·EXPLAIN을 실데이터로 고정한다.
+
+  **2026-08-08 final-review 보강 checkpoint**: weather global projection을 transaction advisory
+  lock으로 직렬화하고 same-winner reconcile의 row rewrite를 제거했다. deadline-only Dagster
+  reconciliation을 기본 실행 minute schedule로 추가했으며, active dataset·`refresh_after` gate를
+  public/admin card·anchor·bbox 모두에 적용했다. map weather summary의 canonical dataset identity와
+  deadline은 필수다. summary가 전혀 없는 eligible raw series까지 expected set-diff로 검출하고,
+  partial-own anchor가 batch뿐 아니라 current·snapshot·admin single-card에서도 자신을 KMA/observed
+  fallback으로 재선정하지 않도록 고쳤다.
+
+  **완료(#971)**: weather·price의 전역 mutable current projection을 각각 transaction advisory
+  lock으로 직렬화하고, freshness·cardinality·EXPLAIN·frozen artifact의 CRLF byte guard를
+  고정했다. final `e68b00ef`는 Dagster의 raw provider response fixture를 JSON 보존 가능
+  구조체로 정렬했고, 정상 live run 시작 전 signed clone checkpoint dump를 전용 clone에 복원해
+  직전 성공의 soft-delete 감사 이력이 다음 실행을 막지 않게 했다. n150
+  `ktm-tvn38-db:18732`에서 main/recovery 각각 2/2, `phase=passed`, BLOCKED 없음,
+  startup migration 불변 및 production compose 제외를 실증했다. 적대 리뷰 2인은 최종 SHA에서
+  P0/P1 없이 GO를 확인했다.
+
+  **2026-08-12 CI 계약 보강(동일 #971)**: immutable fact/current-summary 전환 뒤 남아 있던
+  구 `provider` 문자열·BRIN/current-row 가정은 별도 호환 shim으로 되살리지 않는다. metadata
+  exclusion ledger와 raw-DDL 구조 contract, admin/public card fixture, Dagster provider 응답의
+  JSON 경계, H35 index fingerprint, tier-2 bbox page-limit count를 final canonical
+  dataset/source revision schema로 함께 고정한다. 이 보강 SHA의 CI·live·적대 재승인까지
+  병합 조건으로 삼는다.
 
 ### T-VN-40 — curation write model 단일화 (Lane B)
 

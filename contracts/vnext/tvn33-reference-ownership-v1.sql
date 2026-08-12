@@ -831,6 +831,7 @@ CREATE TABLE ops.provider_refresh_policies (
     provider_dataset_id bigint NOT NULL,
     enabled boolean NOT NULL DEFAULT true,
     min_interval_seconds integer,
+    stale_after_minutes integer,
     max_concurrent integer NOT NULL DEFAULT 1,
     updated_at timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT pk_provider_refresh_policies PRIMARY KEY (provider_dataset_id),
@@ -838,6 +839,9 @@ CREATE TABLE ops.provider_refresh_policies (
         REFERENCES provider_sync.provider_datasets (provider_dataset_id),
     CONSTRAINT ck_provider_refresh_policy_interval CHECK (
         min_interval_seconds IS NULL OR min_interval_seconds > 0
+    ),
+    CONSTRAINT ck_provider_refresh_policy_stale_after CHECK (
+        stale_after_minutes IS NULL OR stale_after_minutes > 0
     ),
     CONSTRAINT ck_provider_refresh_policy_concurrent CHECK (max_concurrent > 0)
 );

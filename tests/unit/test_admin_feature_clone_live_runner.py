@@ -147,22 +147,24 @@ def _write_fixture(
     weather: int,
     price: int,
     foreign_key_references: int = 0,
+    summary_run_ids: tuple[int, int] = (101, 102),
 ) -> None:
     action = path.stem.removeprefix("direct-")
+    payload: dict[str, object] = {
+        "action": action,
+        "counts": {
+            "features": features,
+            "price_values": price,
+            "weather_values": weather,
+        },
+        "foreign_key_constraints_checked": 12,
+        "foreign_key_references": foreign_key_references,
+        "version": 1,
+    }
+    if action == "seed":
+        payload["summary_run_ids"] = list(summary_run_ids)
     path.write_text(
-        json.dumps(
-            {
-                "action": action,
-                "counts": {
-                    "features": features,
-                    "price_values": price,
-                    "weather_values": weather,
-                },
-                "foreign_key_constraints_checked": 12,
-                "foreign_key_references": foreign_key_references,
-                "version": 1,
-            }
-        ),
+        json.dumps(payload),
         encoding="utf-8",
     )
 
@@ -197,6 +199,48 @@ def _write_report(directory: Path) -> None:
             {
                 "counts": {"passed": 2},
                 "result": "passed",
+                "testsObserved": 2,
+                "testsPlanned": 2,
+                "version": 1,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def _write_failed_main_report(directory: Path) -> None:
+    for path in directory.iterdir():
+        path.unlink()
+    directory.rmdir()
+    _write_report(directory)
+    (directory / "c7-results.xml").write_text(
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<testsuite tests="2">'
+        '<testcase classname="c7-redacted" name="auth.setup.ts#1" time="0.100">'
+        "</testcase>"
+        '<testcase classname="c7-redacted" '
+        'name="admin-feature-acceptance-write.live.spec.ts#2" time="0.200">'
+        "<failure/></testcase>"
+        "</testsuite>",
+        encoding="utf-8",
+    )
+    (directory / "c7-summary.html").write_text(
+        '<!doctype html><html lang="ko"><meta charset="utf-8">'
+        "<title>C7 redacted result</title><body><h1>C7 redacted result</h1>"
+        "<p>result=failed planned=2 observed=2</p><table><thead><tr>"
+        "<th>#</th><th>spec</th><th>status</th><th>duration_ms</th>"
+        "</tr></thead><tbody>"
+        "<tr><td>1</td><td>auth.setup.ts</td><td>passed</td><td>100</td></tr>"
+        "<tr><td>2</td><td>admin-feature-acceptance-write.live.spec.ts</td>"
+        "<td>failed</td><td>200</td></tr>"
+        "</tbody></table></body></html>",
+        encoding="utf-8",
+    )
+    (directory / "c7-summary.json").write_text(
+        json.dumps(
+            {
+                "counts": {"failed": 1, "passed": 1},
+                "result": "failed",
                 "testsObserved": 2,
                 "testsPlanned": 2,
                 "version": 1,
@@ -265,7 +309,7 @@ def _prepare_runtime(tmp_path: Path) -> tuple[Path, Path]:
         features=2,
         weather=1,
         price=1,
-        foreign_key_references=2,
+        foreign_key_references=6,
     )
     _write_fixture(
         runtime / "direct-cleanup.json", features=0, weather=0, price=0
@@ -281,7 +325,7 @@ def _prepare_runtime(tmp_path: Path) -> tuple[Path, Path]:
                     "features": 6,
                 },
                 "foreign_key_constraints_checked": 12,
-                "foreign_key_references": 13,
+                "foreign_key_references": 19,
                 "version": 1,
             }
         ),
@@ -369,6 +413,19 @@ def _complete(
         topic_start = runtime / "topic-revision-start.json"
         if topic_start.exists():
             arguments.extend(["--topic-revision-start", str(topic_start)])
+    provider_sync_proof = runtime / "provider-sync-topic-revision-proof.json"
+    if provider_sync_proof.exists():
+        arguments.extend(
+            ["--provider-sync-topic-revision-proof", str(provider_sync_proof)]
+        )
+        provider_sync_start = runtime / "provider-sync-topic-revision-start.json"
+        if provider_sync_start.exists():
+            arguments.extend(
+                [
+                    "--provider-sync-topic-revision-start",
+                    str(provider_sync_start),
+                ]
+            )
     return _run_helper(*arguments, check=check)
 
 
@@ -380,10 +437,12 @@ def _write_topic_revision_evidence(
     source: str = "checkpoint-dump",
     start_revision: int = 100,
     current_revision: int = 101,
+    topic: str = "dataset_projection",
 ) -> None:
     checkpoint_sha256 = json.loads(
         (runtime / "clone-checkpoint.json").read_text(encoding="utf-8")
     )["checkpoint_sha256"]
+    prefix = "topic-revision" if topic == "dataset_projection" else "provider-sync-topic-revision"
     _write_snapshot(
         runtime / "clone-final-observed.json",
         total=126,
@@ -395,13 +454,15 @@ def _write_topic_revision_evidence(
             "--checkpoint-sha256",
             checkpoint_sha256,
             "--path",
-            str(runtime / "topic-revision-start.json"),
+            str(runtime / f"{prefix}-start.json"),
             "--revision",
             str(start_revision),
             "--run-id",
             _RUN_ID,
             "--updated-at",
             "2026-07-29T00:00:00.000000Z",
+            "--topic",
+            topic,
         )
     _run_helper(
         "write-topic-revision-proof",
@@ -416,7 +477,7 @@ def _write_topic_revision_evidence(
         "--observed-content-sha256",
         observed_content_sha256,
         "--path",
-        str(runtime / "topic-revision-proof.json"),
+        str(runtime / f"{prefix}-proof.json"),
         "--run-id",
         _RUN_ID,
         "--source",
@@ -425,6 +486,8 @@ def _write_topic_revision_evidence(
         str(start_revision),
         "--start-updated-at",
         "2026-07-29T00:00:00.000000Z",
+        "--topic",
+        topic,
     )
 
 
@@ -474,6 +537,298 @@ def test_complete_recovers_without_rerunning_valid_evidence(tmp_path: Path) -> N
     assert payload["recovery_tool_source_commit"] == _RECOVERY_COMMIT
 
 
+@pytest.mark.parametrize(
+    (
+        "final_total",
+        "empty_api_audit",
+        "empty_auth_audit",
+        "historical_audit",
+        "terminal_phase",
+    ),
+    [
+        (
+            120,
+            True,
+            True,
+            "api-checkpoint-restored-auth-checkpoint-restored",
+            "direct-cleanup-running",
+        ),
+        (
+            120,
+            False,
+            True,
+            "api-recorded-auth-checkpoint-restored",
+            "failed-resource-finalizing",
+        ),
+        (126, False, False, "recorded", "failed-resource-finalizing"),
+    ],
+)
+def test_abandon_failed_run_requires_cleaned_failure_evidence(
+    tmp_path: Path,
+    final_total: int,
+    empty_api_audit: bool,
+    empty_auth_audit: bool,
+    historical_audit: str,
+    terminal_phase: str,
+) -> None:
+    runtime, blocked = _prepare_runtime(tmp_path)
+    _write_snapshot(
+        runtime / "clone-final.json",
+        total=final_total,
+        content_sha256="7" * 64,
+    )
+    _write_failed_main_report(runtime / "playwright-main")
+    if empty_api_audit:
+        (runtime / "api-owned-audit.json").write_bytes(b"")
+    if empty_auth_audit:
+        (runtime / "auth-audit.json").write_bytes(b"")
+    if empty_api_audit or empty_auth_audit:
+        (runtime / "playwright-main" / "admin-feature-acceptance-safe-debug.json").write_text(
+            json.dumps(
+                {
+                    "last_browser_fetch_status": 404,
+                    "stage": "create-draft",
+                }
+            ),
+            encoding="utf-8",
+        )
+    phases = [
+        "candidate-startup-running",
+        "fixture-seed-running",
+        "browser-main-running",
+        "browser-recovery-running",
+        "direct-cleanup-running",
+    ]
+    if terminal_phase != "direct-cleanup-running":
+        phases.extend(("test-failed-restored", "failed-resource-finalizing"))
+    for phase in phases:
+        _run_helper("update-blocked", "--path", str(blocked), "--phase", phase)
+
+    not_restored = _run_helper(
+        "abandon-failed-run",
+        "--blocked-path",
+        str(blocked),
+        "--result-path",
+        str(runtime / "failed-restored.json"),
+        "--restored-snapshot",
+        str(runtime / "clone-final.json"),
+        "--runtime",
+        str(runtime),
+        check=False,
+    )
+    assert not_restored.returncode != 0
+    assert "trusted checkpoint" in not_restored.stderr
+
+    _run_helper(
+        "abandon-failed-run",
+        "--blocked-path",
+        str(blocked),
+        "--result-path",
+        str(runtime / "failed-restored.json"),
+        "--restored-snapshot",
+        str(runtime / "clone-startup-before.json"),
+        "--runtime",
+        str(runtime),
+    )
+
+    payload = json.loads(
+        (runtime / "failed-restored.json").read_text(encoding="utf-8")
+    )
+    assert not blocked.exists()
+    assert payload["status"] == "failed-restored"
+    assert payload["historical_audit"] == historical_audit
+    assert payload["tests"] == {
+        "main": {"failed": 1, "passed": 1},
+        "recovery": {"passed": 2},
+    }
+
+
+def test_abandon_failed_run_allows_interrupted_post_browser_finalization(
+    tmp_path: Path,
+) -> None:
+    runtime, blocked = _prepare_runtime(tmp_path)
+    for phase in (
+        "candidate-startup-running",
+        "fixture-seed-running",
+        "browser-main-running",
+        "browser-recovery-running",
+        "direct-cleanup-running",
+        "failed-resource-finalizing",
+    ):
+        _run_helper("update-blocked", "--path", str(blocked), "--phase", phase)
+
+    _run_helper(
+        "abandon-failed-run",
+        "--blocked-path",
+        str(blocked),
+        "--result-path",
+        str(runtime / "failed-restored.json"),
+        "--restored-snapshot",
+        str(runtime / "clone-startup-before.json"),
+        "--runtime",
+        str(runtime),
+    )
+
+    payload = json.loads(
+        (runtime / "failed-restored.json").read_text(encoding="utf-8")
+    )
+    assert not blocked.exists()
+    assert payload["status"] == "failed-restored"
+    assert payload["phase_history"][-2:] == [
+        "direct-cleanup-running",
+        "failed-resource-finalizing",
+    ]
+    assert payload["tests"]["main"] == {"passed": 2}
+
+
+def test_abandon_failed_run_allows_pre_final_digest_failure_after_cleanup(
+    tmp_path: Path,
+) -> None:
+    runtime, blocked = _prepare_runtime(tmp_path)
+    (runtime / "clone-final.json").unlink()
+    for phase in (
+        "candidate-startup-running",
+        "fixture-seed-running",
+        "browser-main-running",
+        "browser-recovery-running",
+        "direct-cleanup-running",
+    ):
+        _run_helper("update-blocked", "--path", str(blocked), "--phase", phase)
+
+    _run_helper(
+        "abandon-failed-run",
+        "--blocked-path",
+        str(blocked),
+        "--result-path",
+        str(runtime / "failed-restored.json"),
+        "--restored-snapshot",
+        str(runtime / "clone-startup-before.json"),
+        "--runtime",
+        str(runtime),
+    )
+
+    payload = json.loads(
+        (runtime / "failed-restored.json").read_text(encoding="utf-8")
+    )
+    assert not blocked.exists()
+    assert payload["status"] == "failed-restored"
+    assert payload["tests"]["main"] == {"passed": 2}
+
+
+def test_abandon_failed_run_retries_pre_final_digest_failure_after_finalization(
+    tmp_path: Path,
+) -> None:
+    runtime, blocked = _prepare_runtime(tmp_path)
+    (runtime / "clone-final.json").unlink()
+    for phase in (
+        "candidate-startup-running",
+        "fixture-seed-running",
+        "browser-main-running",
+        "browser-recovery-running",
+        "direct-cleanup-running",
+        "failed-resource-finalizing",
+    ):
+        _run_helper("update-blocked", "--path", str(blocked), "--phase", phase)
+
+    _run_helper(
+        "abandon-failed-run",
+        "--blocked-path",
+        str(blocked),
+        "--result-path",
+        str(runtime / "failed-restored.json"),
+        "--restored-snapshot",
+        str(runtime / "clone-startup-before.json"),
+        "--runtime",
+        str(runtime),
+    )
+
+    assert not blocked.exists()
+    payload = json.loads(
+        (runtime / "failed-restored.json").read_text(encoding="utf-8")
+    )
+    assert payload["status"] == "failed-restored"
+    assert payload["phase_history"][-1] == "failed-resource-finalizing"
+
+
+def test_runner_bootstraps_requested_snapshot_before_validating_mode() -> None:
+    source = _RUNNER.read_text(encoding="utf-8")
+    bootstrap_gate = 'if [[ "$SCRIPT_DIR" != "$INSTALL_BASE/$SOURCE_COMMIT" ]]; then'
+    mode_gate = '[[ "$MODE" == "baseline" || "$MODE" == "checkpoint" ||'
+
+    assert source.index(bootstrap_gate) < source.index(mode_gate)
+    assert '"$MODE" == "abort"' in source
+
+
+def test_content_digest_excludes_only_run_bound_auth_domain_receipts() -> None:
+    source = _RUNNER.read_text(encoding="utf-8")
+
+    assert 'local digest_revision="${4-current}"' in source
+    assert "legacy-v1)" in source
+    assert "legacy-v0)" in source
+    assert "'domain_commands', 'domain_command_results'" in source
+    assert "relation.relname = 'domain_commands_command_id_seq'" in source
+    assert "run-owned identity sequence excluded" in source
+    assert "command.actor = ''ui-auth''" in source
+    assert "command.operation = ''admin.auth-event.create''" in source
+    assert "result.response_body #>> ''{data,item,request_id}''" in source
+    assert "e2e_live_acceptance::${run_id}::auth::main" in source
+    assert "KTM_OWNED_FEATURE_IDS" in source
+    assert "jsonb_array_elements_text(%L::jsonb)" in source
+    assert "owned.feature_id" in source
+    assert "e2e_live_acceptance::${run_id}::auth::recovery" in source
+
+
+def test_checkpoint_content_digest_rebase_requires_exact_legacy_checkpoint_match() -> None:
+    source = _RUNNER.read_text(encoding="utf-8")
+    checkpoint_source = source.split(
+        'if [[ "$MODE" == "baseline" || "$MODE" == "checkpoint" ]]; then',
+        maxsplit=1,
+    )[1].split("readonly_candidate_secrets() {", maxsplit=1)[0]
+
+    assert '[[ "$MODE" == "checkpoint" && "$existing_checkpoint_version" == "4" ]]' in (
+        checkpoint_source
+    )
+    assert "for candidate_digest_revision in legacy-v2 legacy-v1 legacy-v0; do" in checkpoint_source
+    assert checkpoint_source.index("legacy-v2 legacy-v1 legacy-v0") < checkpoint_source.index(
+        "CHECKPOINT_CONTENT_REBASE=1"
+    )
+    assert checkpoint_source.index("CHECKPOINT_CONTENT_REBASE=1") < checkpoint_source.index(
+        'rm -- "$CURRENT_CHECKPOINT_SNAPSHOT" "$LEGACY_CHECKPOINT_SNAPSHOT"'
+    )
+    assert (
+        checkpoint_source.count(
+            "--snapshot \"$LEGACY_CHECKPOINT_SNAPSHOT\" >/dev/null 2>&1"
+        )
+        == 1
+    )
+    assert checkpoint_source.index("CHECKPOINT_CONTENT_REBASE == 1") < checkpoint_source.index(
+        "stop_checkpoint_quiescence"
+    ) < checkpoint_source.index('CONTENT_CUTOFF="$(\n    psql_value')
+
+
+def test_failed_run_abort_recreates_clone_identity_before_login_fence() -> None:
+    source = _RUNNER.read_text(encoding="utf-8")
+    abort_source = source.split('if [[ "$MODE" == "abort" ]]; then', maxsplit=1)[1]
+    abort_source = abort_source.split('if [[ "$MODE" == "recover" ]]; then', maxsplit=1)[0]
+
+    assert abort_source.index("BASE_CLONE_CONTAINER_SHA256") < abort_source.index(
+        "start_acceptance_login_fence"
+    )
+    assert abort_source.index("BASE_CLONE_SYSTEM_SHA256") < abort_source.index(
+        "start_acceptance_login_fence"
+    )
+    assert abort_source.index("restore_clone_checkpoint") < abort_source.index(
+        "start_acceptance_login_fence"
+    )
+    assert abort_source.index("verify-checkpoint") < abort_source.index(
+        "start_acceptance_login_fence"
+    )
+    assert abort_source.index("finalize_resources") < abort_source.index(
+        "abandon-failed-run"
+    )
+    assert '"direct-cleanup-running"' in abort_source
+
+
 def test_complete_accepts_bound_runtime_topic_revision_normalization(
     tmp_path: Path,
 ) -> None:
@@ -491,6 +846,29 @@ def test_complete_accepts_bound_runtime_topic_revision_normalization(
     assert payload["phase"] == "passed"
     assert payload["isolation"]["dataset_projection_revision_delta"] == 1
     assert payload["isolation"]["dataset_projection_start_source"] == "runtime-start"
+
+
+def test_complete_binds_provider_sync_normalization_to_the_same_snapshot(
+    tmp_path: Path,
+) -> None:
+    runtime, blocked = _prepare_runtime(tmp_path)
+    _write_topic_revision_evidence(
+        runtime,
+        observed_content_sha256="7" * 64,
+        source="runtime-start",
+    )
+    _write_topic_revision_evidence(
+        runtime,
+        observed_content_sha256="7" * 64,
+        source="runtime-start",
+        topic="provider_sync",
+    )
+
+    _complete(runtime, blocked)
+
+    payload = json.loads((runtime / "result.json").read_text(encoding="utf-8"))
+    assert payload["isolation"]["provider_sync_revision_delta"] == 1
+    assert payload["isolation"]["provider_sync_start_source"] == "runtime-start"
 
 
 def test_recovery_revalidates_only_legacy_content_digest_drift(
@@ -534,7 +912,7 @@ def test_recovery_revalidates_only_legacy_content_digest_drift(
     )
 
 
-def test_topic_revision_proof_rejects_non_unit_delta(tmp_path: Path) -> None:
+def test_topic_revision_proof_rejects_non_advancing_revision(tmp_path: Path) -> None:
     runtime, _blocked = _prepare_runtime(tmp_path)
     checkpoint_sha256 = json.loads(
         (runtime / "clone-checkpoint.json").read_text(encoding="utf-8")
@@ -545,7 +923,7 @@ def test_topic_revision_proof_rejects_non_unit_delta(tmp_path: Path) -> None:
         "--checkpoint-sha256",
         checkpoint_sha256,
         "--current-revision",
-        "102",
+        "100",
         "--current-updated-at",
         "2026-07-29T00:00:01.000000Z",
         "--normalized-content-sha256",
@@ -566,7 +944,21 @@ def test_topic_revision_proof_rejects_non_unit_delta(tmp_path: Path) -> None:
     )
 
     assert completed.returncode != 0
-    assert "revision delta" in completed.stderr
+    assert "revision" in completed.stderr
+
+
+def test_topic_revision_proof_accepts_multiple_fixture_changes(
+    tmp_path: Path,
+) -> None:
+    runtime, _blocked = _prepare_runtime(tmp_path)
+
+    _write_topic_revision_evidence(
+        runtime,
+        observed_content_sha256="7" * 64,
+        current_revision=102,
+    )
+
+    assert (runtime / "topic-revision-proof.json").exists()
 
 
 def test_checkpoint_dump_topic_proof_rejects_unrelated_final_phase(
@@ -1404,9 +1796,37 @@ def test_runner_closes_reviewed_trust_boundaries() -> None:
     assert "schema_sha256" in source
     assert "content_sha256" in source
     assert "ops_live_topic_revisions" in source
-    assert "dataset projection revision delta is not one" in source
+    assert "dataset projection revision did not advance" in source
+    assert "provider sync revision did not advance" in source
+    assert "provider-sync-topic-revision-proof.json" in source
+    assert "--provider-sync-topic-revision-proof" in source
     assert "--table=ops_live_topic_revisions" in source
     assert "write-topic-revision-proof" in source
+    assert (
+        "'UNION ALL SELECT ''dataset_projection'', %s::bigint, %L::timestamptz '"
+        in source
+    )
+    assert (
+        "'UNION ALL SELECT ''provider_sync'', %s::bigint, %L::timestamptz '"
+        in source
+    )
+    assert "::timestamptz' ||" not in source
+    assert "c7-loopback-ui-proxy.mjs" in source
+    assert '"$ARCHIVE_PREFIX/scripts/c7-loopback-ui-proxy.mjs"' in source
+    assert 'src=$LOOPBACK_PROXY_HELPER,dst=/opt/c7-loopback-ui-proxy.mjs,readonly' in source
+    assert "node /opt/c7-loopback-ui-proxy.mjs" in source
+    assert "legacy current snapshot lacks the loopback proxy source" in source
+    assert "runtime loopback proxy differs from the immutable archive" in source
+    assert "existing runtime loopback proxy is unsafe" in source
+    assert "source commit 간 retry도 fail-closed로 수렴한다" in source
+    assert "api_audit_status=0" in source
+    assert (
+        'run_helper api-audit "$RUNTIME_DIR/api-owned-audit.json" '
+        "|| api_audit_status=$?" in source
+    )
+    assert "Playwright or fixture acceptance failed after cleanup" in source
+    assert 'E2E_BASE_URL=http://127.0.0.1:$LOOPBACK_UI_PORT' in source
+    assert 'KTM_C7_LOOPBACK_UI_PROXY_TARGET=http://candidate-ui:$UI_PORT' in source
     assert "hashtextextended(row_value::text" in source
     assert "attribute.attidentity" in source
     assert "attribute.attgenerated" in source
@@ -1467,8 +1887,10 @@ def test_runner_closes_reviewed_trust_boundaries() -> None:
     assert recovery_source.index("BLOCKED_WRITTEN=1") < recovery_source.index(
         "load_blocked"
     )
-    assert recovery_source.index(
-        "if state_helper validate-evidence"
+    assert "if state_helper verify-checkpoint \\" in recovery_source
+    assert "--allow-owned-drift" in recovery_source
+    assert recovery_source.index("if state_helper verify-checkpoint") < recovery_source.index(
+        "state_helper validate-evidence"
     ) < recovery_source.index('for image in "$API_IMAGE_ID"')
     assert recovery_source.index("remove_owned_containers") < recovery_source.index(
         "recover_checkpoint_quiescence"
@@ -1489,6 +1911,9 @@ def test_runner_closes_reviewed_trust_boundaries() -> None:
         '[[ ! -e "$BLOCKED_FILE" && ! -L "$BLOCKED_FILE" ]]',
         maxsplit=1,
     )[1]
+    assert normal_source.index("restore_clone_checkpoint") < normal_source.index(
+        "start_acceptance_login_fence"
+    )
     assert normal_source.index("start_acceptance_login_fence") < normal_source.index(
         'write_snapshot "$RUNTIME_DIR/clone-startup-before.json"'
     )

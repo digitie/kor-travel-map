@@ -149,7 +149,7 @@ _ALLOWED_INVALID_BY_REVISION: Final = {
     "0068_integrity_last_seen": _WEATHER_PARTIAL,
 }
 _MIGRATION_OUTPUT_LIMIT: Final = 16_384
-_INDEX_SIGNATURES: Final[dict[str, tuple[str, ...]]] = {
+_H35_INDEX_SIGNATURES: Final[dict[str, tuple[str, ...]]] = {
     "idx_price_values_feature_product_observed": (
         "on feature.feature_price_values using btree",
         "(feature_id, price_domain, product_key, observed_at desc)",
@@ -195,6 +195,19 @@ _INDEX_SIGNATURES: Final[dict[str, tuple[str, ...]]] = {
         "on feature.features using gist (coord_5179)",
         "(kind)::text = 'weather'::text",
         "coord_5179 is not null",
+    ),
+}
+
+# H35은 0079까지만 migration한다. T-VN-38의 0093은 같은 index 이름을 immutable
+# fact의 canonical provider-dataset identity로 재정의한다. 현재 head를 검사할 때는
+# 새 서명을 써야 하지만, 이를 0079 preflight에 재사용하면 H35 재시도가 존재할 수 없는
+# 미래 컬럼을 요구하게 된다. 두 schema epoch의 canonical declaration을 분리한다.
+_INDEX_SIGNATURES: Final[dict[str, tuple[str, ...]]] = {
+    **_H35_INDEX_SIGNATURES,
+    "idx_price_values_feature_observed_identity": (
+        "on feature.feature_price_values using btree",
+        "(feature_id, observed_at desc, known_at desc, provider_dataset_id, "
+        "price_domain, product_key)",
     ),
 }
 
@@ -506,7 +519,10 @@ async def run_preflight(request: H35Request) -> Receipt:
 
 
 async def _index_states(
-    connection: AsyncConnection, names: Sequence[str]
+    connection: AsyncConnection,
+    names: Sequence[str],
+    *,
+    signatures: Mapping[str, tuple[str, ...]] = _INDEX_SIGNATURES,
 ) -> dict[str, tuple[bool, bool]]:
     rows = (
         (
@@ -534,7 +550,7 @@ async def _index_states(
             bool(row["indisvalid"])
             and bool(row["indisready"])
             and bool(row["indislive"])
-            and all(fragment in definition for fragment in _INDEX_SIGNATURES.get(name, ()))
+            and all(fragment in definition for fragment in signatures.get(name, ()))
         )
         found[name] = (True, canonical)
     return {name: found.get(name, (False, False)) for name in names}
@@ -608,7 +624,9 @@ async def partial_probe(connection: AsyncConnection, schema: str) -> list[dict[s
     if order < 0:
         return checks
     state_names = sorted(_PARTIAL_INDEXES | {_OLD_PRICE, *_OLD_INTEGRITY})
-    partial_state = await _index_states(connection, state_names)
+    partial_state = await _index_states(
+        connection, state_names, signatures=_H35_INDEX_SIGNATURES
+    )
     checks.append(
         check(
             "partial_statement_prefix_canonical",
@@ -620,7 +638,9 @@ async def partial_probe(connection: AsyncConnection, schema: str) -> list[dict[s
         "idx_price_values_feature_product_observed",
         "idx_price_values_feature_observed_identity",
     )
-    price = await _index_states(connection, price_names)
+    price = await _index_states(
+        connection, price_names, signatures=_H35_INDEX_SIGNATURES
+    )
     price_safe = (
         price[price_names[0]][1] or price[price_names[1]][1]
         if order == 0

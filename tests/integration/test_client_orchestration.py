@@ -25,6 +25,8 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.client import AsyncKorTravelMapClient
+from kortravelmap.core.ids import make_payload_hash, make_source_record_key
+from kortravelmap.dto import SourceRecord
 from kortravelmap.dto.coordinate import Coordinate
 from kortravelmap.infra.feature_update_repo import (
     FeatureUpdateRequest,
@@ -531,8 +533,47 @@ async def test_load_air_quality_commits_station_and_values(
         pm25_grade=1,
     )
     values = air_quality_to_weather_values([measurement], station_feature_ids=station_feature_ids)
+    raw_data = {
+        "records": [
+            {"station_name": measurement.station_name, "data_time": measurement.data_time}
+        ]
+    }
+    payload_hash = make_payload_hash(raw_data)
+    source_record = SourceRecord(
+        provider="python-airkorea-api",
+        dataset_key="airkorea_air_quality",
+        source_entity_type="weather_response",
+        source_entity_id="test-run:20260608T090000+0900",
+        raw_payload_hash=payload_hash,
+        raw_data=raw_data,
+        fetched_at=fetched,
+        source_record_key=make_source_record_key(
+            provider="python-airkorea-api",
+            dataset_key="airkorea_air_quality",
+            source_entity_type="weather_response",
+            source_entity_id="test-run:20260608T090000+0900",
+            raw_payload_hash=payload_hash,
+        ),
+    )
+    async with AsyncSession(migrated_engine) as session:
+        provider_dataset_id = await session.scalar(
+            text(
+                """
+                SELECT provider_dataset_id
+                FROM provider_sync.provider_datasets
+                WHERE provider = 'python-airkorea-api'
+                  AND dataset_key = 'airkorea_air_quality'
+                """
+            )
+        )
+    assert provider_dataset_id is not None
 
-    result = await map_client.load_air_quality(bundles, values)
+    result = await map_client.load_air_quality(
+        bundles,
+        values,
+        provider_dataset_id=int(provider_dataset_id),
+        source_record=source_record,
+    )
     assert result.stations.features_inserted == 1
     assert result.weather_values == 2  # PM10 + PM2_5
 

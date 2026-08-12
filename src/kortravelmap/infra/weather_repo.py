@@ -17,15 +17,18 @@ from math import ceil
 from typing import TYPE_CHECKING, Any, Final, Literal, cast
 
 from sqlalchemy import text
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import DBAPIError
 
 from kortravelmap.core.ids import make_weather_value_key
 from kortravelmap.dto._time import kst_now
+from kortravelmap.infra.advisory_lock import advisory_lock_key
 
 if TYPE_CHECKING:
     from sqlalchemy import RowMapping
     from sqlalchemy.ext.asyncio import AsyncSession
 
+    from kortravelmap.dto import SourceRecord
     from kortravelmap.dto.weather import WeatherValue
 
 __all__ = [
@@ -38,6 +41,7 @@ __all__ = [
     "WeatherBatchPayloadLimitExceededError",
     "WeatherBatchQueryTimeoutError",
     "WeatherBatchWorkLimitExceededError",
+    "WeatherSummaryMaterializeResult",
     "WeatherBatchSnapshot",
     "WeatherBatchTarget",
     "WeatherAnchor",
@@ -57,8 +61,10 @@ __all__ = [
     "WEATHER_BATCH_TIMELINE_DAYS",
     "WEATHER_BATCH_UNIQUE_FEATURE_WORK_WEIGHT",
     "load_weather_values",
+    "materialize_current_weather_summary",
     "build_admin_weather_card",
     "build_weather_card",
+    "build_weather_snapshot",
     "get_weather_batch_snapshots",
     "list_weather_values",
     "weather_history_floor",
@@ -71,6 +77,11 @@ __all__ = [
 DEFAULT_WEATHER_FRESHNESS_SECONDS: Final[int] = 6 * 60 * 60
 DEFAULT_WEATHER_HISTORY_RETENTION_DAYS: Final[int] = 365 * 3
 """REST weather history 기본 보존/조회 지평선(3년)."""
+
+_WEATHER_CURRENT_SUMMARY_LOCK_ID: Final[int] = advisory_lock_key(
+    "projection:current-weather-summary"
+)
+"""weather current projection 전체를 직렬화하는 transaction advisory lock."""
 
 WEATHER_BATCH_TIMELINE_DAYS: Final[int] = 1
 """batch snapshot이 ``target_at`` 뒤에 제공하는 24시간 예보 timeline 지평선."""
@@ -112,6 +123,10 @@ class WeatherMetric:
 
     forecast_style: str
     metric_key: str
+    provider_dataset_id: int
+    dataset_key: str
+    dataset_display_name: str
+    known_at: datetime
     metric_name: str | None
     timeline_bucket: str | None
     value_number: Decimal | None
@@ -133,11 +148,12 @@ class WeatherCard:
     """feature 1건의 weather card — forecast_style별 최신 metric 묶음 + freshness."""
 
     feature_id: str
-    asof: datetime | None
     source_styles: list[str]
     metrics: list[WeatherMetric]
     latest_at: datetime | None
     is_stale: bool
+    selected_at: datetime | None = None
+    refresh_after: datetime | None = None
 
 
 WeatherBatchItemState = Literal["found", "no_data", "retired"]
@@ -255,6 +271,10 @@ class WeatherValueTimelineRow:
     observed_at: datetime | None
     collected_at: datetime
     source_record_key: str | None
+    provider_dataset_id: int | None = None
+    dataset_key: str | None = None
+    dataset_display_name: str | None = None
+    known_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -286,110 +306,335 @@ class WeatherAlertHistoryRow:
     feature_uuid: str | None = None
 
 
-# weather semantic identity tuple — alembic 0060 ``uq_weather_value_identity``
-# (NULLS NOT DISTINCT) index 컬럼과 **정확히 동일**하고, ``WeatherValue.identity()``·
-# ``make_weather_value_key`` 축과도 같다(timeline_bucket 제외). 단일 정본으로 두어
-# writer conflict target이 DB unique index와 항상 일치하도록 강제한다(T-VN-17).
-_WEATHER_IDENTITY_COLUMNS: Final[tuple[str, ...]] = (
-    "feature_id",
-    "provider",
-    "weather_domain",
-    "forecast_style",
-    "metric_key",
-    "issued_at",
-    "valid_at",
-    "observed_at",
-)
-_WEATHER_CONFLICT_TARGET: Final[str] = ", ".join(_WEATHER_IDENTITY_COLUMNS)
+@dataclass(frozen=True)
+class _WeatherValueWriteContext:
+    """하나의 raw provider response가 소유하는 immutable weather fact write 경계."""
 
-# T-VN-17: ON CONFLICT 대상을 PK(weather_value_key 해시)에서 semantic tuple index로
-# 전환한다. 해시 PK는 tz 표기 차이로 같은 instant가 다른 key를 받는 구멍이 있었고,
-# semantic UNIQUE(NULLS NOT DISTINCT)가 참 무결성 경계다. update-wins(ADR-072):
-# 같은 semantic tuple 재적재는 최신 값/payload/source로 갱신한다(weather_value_key는
-# 기존 행 값을 유지).
-#
-# 0060 dedup과 같은 latest-known-at-wins 정책: 더 오래된 collected_at은 no-op,
-# 동률에서 내용이 다르면 나중 write가 이기고 완전히 같은 재적재는 물리 UPDATE를
-# 만들지 않는다. collected_at은 DTO와 DB 양쪽에서 non-null TIMESTAMPTZ다.
-_INSERT_SQL: Final[str] = f"""
+    provider_dataset_id: int
+    source_entity_key: str
+    source_record_key: str
+    known_at: datetime
+
+
+@dataclass(frozen=True)
+class WeatherSummaryMaterializeResult:
+    """weather current summary 재구성 receipt와 변경 건수."""
+
+    summary_run_id: int
+    selected_at: datetime
+    input_count: int
+    inserted_count: int
+    updated_count: int
+    deleted_count: int
+
+
+_IMMUTABLE_INSERT_SQL: Final[str] = """
 INSERT INTO feature.feature_weather_values (
-    weather_value_key, feature_id, provider, weather_domain, forecast_style,
+    weather_value_key, feature_id, provider_dataset_id, weather_domain, forecast_style,
     timeline_bucket, metric_key, metric_name, source_metric_key, source_metric_name,
-    value_number, value_text, unit, severity, issued_at, valid_at, valid_from,
-    valid_until, observed_at, normalization_version, payload, source_record_key,
-    collected_at, updated_at
+    value_number, value_text, unit, severity, issued_at, valid_at, valid_during,
+    observed_at, target_at, known_at, normalization_version, payload,
+    source_entity_key, source_record_key
 ) VALUES (
-    :weather_value_key, :feature_id, :provider, :weather_domain, :forecast_style,
+    :weather_value_key, :feature_id, :provider_dataset_id, :weather_domain, :forecast_style,
     :timeline_bucket, :metric_key, :metric_name, :source_metric_key, :source_metric_name,
-    :value_number, :value_text, :unit, :severity, :issued_at, :valid_at, :valid_from,
-    :valid_until, :observed_at, :normalization_version, CAST(:payload AS jsonb),
-    :source_record_key, :collected_at, now()
+    :value_number, :value_text, :unit, :severity, :issued_at, :valid_at,
+    CASE WHEN CAST(:valid_from AS timestamptz) IS NULL
+                   AND CAST(:valid_until AS timestamptz) IS NULL THEN NULL
+         ELSE tstzrange(CAST(:valid_from AS timestamptz),
+                         CAST(:valid_until AS timestamptz), '[)') END,
+    :observed_at, :target_at, :known_at, :normalization_version, CAST(:payload AS jsonb),
+    :source_entity_key, :source_record_key
 )
-ON CONFLICT ({_WEATHER_CONFLICT_TARGET}) DO UPDATE SET
-    value_number = EXCLUDED.value_number,
-    value_text = EXCLUDED.value_text,
-    unit = EXCLUDED.unit,
-    severity = EXCLUDED.severity,
-    metric_name = EXCLUDED.metric_name,
-    source_metric_key = EXCLUDED.source_metric_key,
-    source_metric_name = EXCLUDED.source_metric_name,
-    timeline_bucket = EXCLUDED.timeline_bucket,
-    valid_from = EXCLUDED.valid_from,
-    valid_until = EXCLUDED.valid_until,
-    normalization_version = EXCLUDED.normalization_version,
-    payload = EXCLUDED.payload,
-    source_record_key = EXCLUDED.source_record_key,
-    collected_at = EXCLUDED.collected_at,
-    updated_at = now()
-WHERE EXCLUDED.collected_at >= feature_weather_values.collected_at
-  AND ROW(
-      EXCLUDED.value_number,
-      EXCLUDED.value_text,
-      EXCLUDED.unit,
-      EXCLUDED.severity,
-      EXCLUDED.metric_name,
-      EXCLUDED.source_metric_key,
-      EXCLUDED.source_metric_name,
-      EXCLUDED.timeline_bucket,
-      EXCLUDED.valid_from,
-      EXCLUDED.valid_until,
-      EXCLUDED.normalization_version,
-      EXCLUDED.payload,
-      EXCLUDED.source_record_key,
-      EXCLUDED.collected_at
-  ) IS DISTINCT FROM ROW(
-      feature_weather_values.value_number,
-      feature_weather_values.value_text,
-      feature_weather_values.unit,
-      feature_weather_values.severity,
-      feature_weather_values.metric_name,
-      feature_weather_values.source_metric_key,
-      feature_weather_values.source_metric_name,
-      feature_weather_values.timeline_bucket,
-      feature_weather_values.valid_from,
-      feature_weather_values.valid_until,
-      feature_weather_values.normalization_version,
-      feature_weather_values.payload,
-      feature_weather_values.source_record_key,
-      feature_weather_values.collected_at
-  )
+ON CONFLICT (feature_id, provider_dataset_id, weather_domain, forecast_style,
+             metric_key, target_at, source_record_key) DO NOTHING
 """
 
-_CARD_SQL: Final[str] = """
-SELECT DISTINCT ON (forecast_style, metric_key)
-    forecast_style, metric_key, metric_name, timeline_bucket,
-    value_number, value_text, unit, severity,
-    issued_at, valid_at, valid_from, valid_until, observed_at,
-    provider, weather_domain
-FROM feature.feature_weather_values
-WHERE feature_id = :feature_id
-  AND (
-    CAST(:asof AS timestamptz) IS NULL
-    OR COALESCE(valid_at, observed_at, issued_at) <= CAST(:asof AS timestamptz)
-  )
+_WEATHER_SUMMARY_DESIRED_SQL: Final[str] = """
+WITH policy_facts AS (
+    SELECT
+        fact.weather_value_key,
+        fact.feature_id,
+        fact.provider_dataset_id,
+        fact.weather_domain,
+        fact.forecast_style,
+        fact.metric_key,
+        fact.target_at,
+        fact.known_at,
+        fact.valid_during,
+        fact.issued_at,
+        fact.valid_at,
+        fact.observed_at,
+        policy.stale_after_minutes
+    FROM feature.feature_weather_values AS fact
+    JOIN provider_sync.provider_datasets AS dataset
+      ON dataset.provider_dataset_id = fact.provider_dataset_id
+     AND dataset.is_active
+    JOIN ops.provider_refresh_policies AS policy
+      ON policy.provider_dataset_id = fact.provider_dataset_id
+     AND policy.enabled
+     AND policy.stale_after_minutes IS NOT NULL
+),
+eligible AS (
+    SELECT *
+    FROM policy_facts
+    WHERE known_at <= CAST(:selected_at AS timestamptz)
+      AND target_at <= CAST(:selected_at AS timestamptz)
+      AND (valid_during IS NULL OR valid_during @> CAST(:selected_at AS timestamptz))
+      AND known_at + (stale_after_minutes * interval '1 minute')
+            > CAST(:selected_at AS timestamptz)
+),
+ranked AS (
+    SELECT
+        eligible.*,
+        row_number() OVER (
+            PARTITION BY
+                feature_id, provider_dataset_id, weather_domain, forecast_style, metric_key
+            ORDER BY
+                target_at DESC,
+                known_at DESC,
+                upper(valid_during) DESC NULLS LAST,
+                issued_at DESC NULLS LAST,
+                valid_at DESC NULLS LAST,
+                observed_at DESC NULLS LAST,
+                weather_value_key DESC
+        ) AS rank
+    FROM eligible
+),
+next_eligibility AS (
+    SELECT
+        fact.feature_id,
+        fact.provider_dataset_id,
+        fact.weather_domain,
+        fact.forecast_style,
+        fact.metric_key,
+        min(
+            greatest(
+                fact.target_at,
+                fact.known_at,
+                coalesce(lower(fact.valid_during), '-infinity'::timestamptz)
+            )
+        ) AS next_eligible_at
+    FROM policy_facts AS fact
+    WHERE (fact.valid_during IS NULL OR upper(fact.valid_during) IS NULL
+           OR upper(fact.valid_during) > CAST(:selected_at AS timestamptz))
+      AND greatest(
+            fact.target_at,
+            fact.known_at,
+            coalesce(lower(fact.valid_during), '-infinity'::timestamptz)
+          ) > CAST(:selected_at AS timestamptz)
+    GROUP BY
+        fact.feature_id,
+        fact.provider_dataset_id,
+        fact.weather_domain,
+        fact.forecast_style,
+        fact.metric_key
+)
+SELECT
+    winner.weather_value_key,
+    winner.feature_id,
+    winner.provider_dataset_id,
+    winner.weather_domain,
+    winner.forecast_style,
+    winner.metric_key,
+    least(
+        coalesce(next.next_eligible_at, 'infinity'::timestamptz),
+        coalesce(upper(winner.valid_during), 'infinity'::timestamptz),
+        winner.known_at + (winner.stale_after_minutes * interval '1 minute')
+    ) AS refresh_after
+FROM ranked AS winner
+LEFT JOIN next_eligibility AS next
+  ON next.feature_id = winner.feature_id
+ AND next.provider_dataset_id = winner.provider_dataset_id
+ AND next.weather_domain = winner.weather_domain
+ AND next.forecast_style = winner.forecast_style
+ AND next.metric_key = winner.metric_key
+WHERE winner.rank = 1
 ORDER BY
-    forecast_style, metric_key,
-    COALESCE(valid_at, observed_at, issued_at) DESC NULLS LAST
+    winner.feature_id,
+    winner.provider_dataset_id,
+    winner.weather_domain,
+    winner.forecast_style,
+    winner.metric_key
+"""
+
+_WEATHER_SUMMARY_INPUT_COUNT_SQL: Final[str] = """
+SELECT count(*)
+FROM feature.feature_weather_values AS fact
+JOIN provider_sync.provider_datasets AS dataset
+  ON dataset.provider_dataset_id = fact.provider_dataset_id
+ AND dataset.is_active
+JOIN ops.provider_refresh_policies AS policy
+  ON policy.provider_dataset_id = fact.provider_dataset_id
+ AND policy.enabled
+ AND policy.stale_after_minutes IS NOT NULL
+WHERE fact.known_at <= CAST(:selected_at AS timestamptz)
+  AND fact.target_at <= CAST(:selected_at AS timestamptz)
+  AND (fact.valid_during IS NULL OR fact.valid_during @> CAST(:selected_at AS timestamptz))
+  AND fact.known_at + (policy.stale_after_minutes * interval '1 minute')
+        > CAST(:selected_at AS timestamptz)
+"""
+
+_INSERT_CURRENT_SUMMARY_RUN_SQL: Final[str] = """
+INSERT INTO ops.current_summary_runs (projection_kind, run_kind, status, scope)
+VALUES ('weather', :run_kind, 'running', CAST(:scope AS jsonb))
+RETURNING summary_run_id
+"""
+
+_COMPLETE_CURRENT_SUMMARY_RUN_SQL: Final[str] = """
+UPDATE ops.current_summary_runs
+SET status = 'succeeded',
+    finished_at = clock_timestamp(),
+    input_count = :input_count,
+    inserted_count = :inserted_count,
+    updated_count = :updated_count,
+    deleted_count = :deleted_count,
+    detail = CAST(:detail AS jsonb)
+WHERE summary_run_id = :summary_run_id
+  AND projection_kind = 'weather'
+  AND status = 'running'
+"""
+
+_UPSERT_CURRENT_WEATHER_SUMMARY_SQL: Final[str] = """
+INSERT INTO feature.current_weather_summary (
+    feature_id, provider_dataset_id, weather_domain, forecast_style, metric_key,
+    weather_value_key, summary_run_id, selected_at, refresh_after
+) VALUES (
+    :feature_id, :provider_dataset_id, :weather_domain, :forecast_style, :metric_key,
+    :weather_value_key, :summary_run_id, :selected_at, :refresh_after
+)
+ON CONFLICT (feature_id, provider_dataset_id, weather_domain, forecast_style, metric_key)
+DO UPDATE SET
+    weather_value_key = EXCLUDED.weather_value_key,
+    summary_run_id = EXCLUDED.summary_run_id,
+    selected_at = EXCLUDED.selected_at,
+    refresh_after = EXCLUDED.refresh_after
+"""
+
+_DELETE_SUPERSEDED_WEATHER_SUMMARIES_SQL: Final[str] = """
+WITH desired AS (
+    SELECT *
+    FROM jsonb_to_recordset(CAST(:identities AS jsonb)) AS row(
+        feature_id text,
+        provider_dataset_id bigint,
+        weather_domain text,
+        forecast_style text,
+        metric_key text
+    )
+)
+DELETE FROM feature.current_weather_summary AS summary
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM desired
+    WHERE desired.feature_id = summary.feature_id
+      AND desired.provider_dataset_id = summary.provider_dataset_id
+      AND desired.weather_domain = summary.weather_domain
+      AND desired.forecast_style = summary.forecast_style
+      AND desired.metric_key = summary.metric_key
+)
+"""
+
+_ACQUIRE_WEATHER_CURRENT_SUMMARY_LOCK_SQL: Final[str] = """
+SELECT pg_advisory_xact_lock(CAST(:lock_id AS bigint))
+"""
+
+_CURRENT_CARD_SQL: Final[str] = """
+SELECT
+    fact.weather_value_key,
+    fact.feature_id,
+    dataset.provider,
+    fact.provider_dataset_id,
+    dataset.dataset_key,
+    dataset.display_name AS dataset_display_name,
+    fact.weather_domain,
+    fact.forecast_style,
+    fact.timeline_bucket,
+    fact.metric_key,
+    fact.metric_name,
+    fact.value_number,
+    fact.value_text,
+    fact.unit,
+    fact.severity,
+    fact.issued_at,
+    fact.valid_at,
+    lower(fact.valid_during) AS valid_from,
+    upper(fact.valid_during) AS valid_until,
+    fact.observed_at,
+    fact.known_at,
+    fact.source_record_key,
+    summary.selected_at,
+    summary.refresh_after
+FROM feature.current_weather_summary AS summary
+JOIN feature.feature_weather_values AS fact
+  ON fact.weather_value_key = summary.weather_value_key
+JOIN provider_sync.provider_datasets AS dataset
+  ON dataset.provider_dataset_id = fact.provider_dataset_id
+ AND dataset.is_active
+WHERE summary.feature_id = :feature_id
+  AND summary.refresh_after > clock_timestamp()
+ORDER BY
+    fact.forecast_style,
+    fact.metric_key,
+    fact.provider_dataset_id
+"""
+
+_HISTORICAL_CARD_SQL: Final[str] = """
+WITH eligible AS (
+    SELECT
+        fact.*,
+        dataset.provider,
+        dataset.dataset_key,
+        dataset.display_name AS dataset_display_name,
+        row_number() OVER (
+            PARTITION BY
+                fact.feature_id, fact.provider_dataset_id, fact.weather_domain,
+                fact.forecast_style, fact.metric_key
+            ORDER BY
+                fact.target_at DESC,
+                fact.known_at DESC,
+                upper(fact.valid_during) DESC NULLS LAST,
+                fact.issued_at DESC NULLS LAST,
+                fact.valid_at DESC NULLS LAST,
+                fact.observed_at DESC NULLS LAST,
+                fact.weather_value_key DESC
+        ) AS rank
+    FROM feature.feature_weather_values AS fact
+    JOIN provider_sync.provider_datasets AS dataset
+      ON dataset.provider_dataset_id = fact.provider_dataset_id
+     AND dataset.is_active
+    WHERE fact.feature_id = :feature_id
+      AND fact.known_at <= CAST(:known_at AS timestamptz)
+      AND fact.target_at <= CAST(:target_at AS timestamptz)
+      AND (fact.valid_during IS NULL OR fact.valid_during @> CAST(:target_at AS timestamptz))
+)
+SELECT
+    weather_value_key,
+    feature_id,
+    provider,
+    provider_dataset_id,
+    dataset_key,
+    dataset_display_name,
+    weather_domain,
+    forecast_style,
+    timeline_bucket,
+    metric_key,
+    metric_name,
+    value_number,
+    value_text,
+    unit,
+    severity,
+    issued_at,
+    valid_at,
+    lower(valid_during) AS valid_from,
+    upper(valid_during) AS valid_until,
+    observed_at,
+    known_at,
+    source_record_key,
+    CAST(:target_at AS timestamptz) AS selected_at,
+    NULL::timestamptz AS refresh_after
+FROM eligible
+WHERE rank = 1
+ORDER BY forecast_style, metric_key, provider_dataset_id
 """
 
 
@@ -444,22 +689,24 @@ _BATCH_CURRENT_FOR_METRIC: Final[str] = _weather_batch_current_predicate("metric
 # KMA weather source tier 술어. batch SQL이 module import 시 이 상수를 삽입하므로
 # nearest-anchor SQL 정의보다 먼저 둔다.
 _KMA_FORECAST_PREDICATE: Final[str] = (
-    "w.provider = 'python-kma-api' "
+    "EXISTS ("
+    "SELECT 1 FROM provider_sync.provider_datasets AS weather_dataset "
+    "WHERE weather_dataset.provider_dataset_id = w.provider_dataset_id "
+    "AND weather_dataset.provider = 'python-kma-api') "
     "AND w.forecast_style IN ('nowcast', 'ultra_short', 'short', 'mid')"
 )
 _OBSERVED_TEMP_PREDICATE: Final[str] = (
     "w.forecast_style = 'observed' AND w.metric_key IN ('T1H', 'TMP')"
 )
 
-# T-VN-16C: 날짜별 sparse target을 flatten한 뒤 parent 판정, 고유 parent별 spatial
-# candidate 계산, target별 bitemporal nearest-anchor 선택, current와 24시간 forecast
-# timeline을 한 SQL statement/snapshot에서 읽는다. 같은 target/source bundle은 공유
-# card 한 번만 계산한다.
+# T-VN-38C — immutable fact snapshot batch.
 #
-# 0060은 full correction history/current-summary 이전 단계라 ``collected_at``이
-# ``known_at`` proxy다(ADR-072). forecast는 미래 지식 누출을 막기 위해
-# ``issued_at <= known_at``도 함께 강제한다.
-_WEATHER_BATCH_SQL: Final[str] = f"""
+# This is intentionally independent of the retired 0060 metric catalog.  The
+# query first ranks every candidate anchor in a set, then ranks immutable
+# facts at the requested business/knowledge time.  It therefore keeps the
+# own → KMA forecast → observed temperature → nearest-any semantics without
+# a per-parent LATERAL probe or a mutable "latest row" table.
+_WEATHER_BATCH_SQL: Final[str] = """
 WITH requested AS (
     SELECT item.feature_id, item.target_at, item.ordinality
     FROM unnest(
@@ -479,25 +726,16 @@ parents AS (
     LEFT JOIN feature.public_features AS visible
       ON visible.feature_id = requested.feature_id
 ),
-unique_parents AS (
-    SELECT DISTINCT ON (feature_id)
-        feature_id,
-        visible_feature_id,
-        coord_5179
-    FROM parents
-    ORDER BY feature_id, ordinality
-),
 spatial_candidates AS MATERIALIZED (
     SELECT
-        parent.feature_id AS parent_feature_id,
-        candidate.feature_id,
-        candidate.coord_5179
-          OPERATOR(x_extension.<->) parent.coord_5179 AS distance_order
-    FROM unique_parents AS parent
+        parent.ordinality,
+        candidate.feature_id AS source_feature_id,
+        candidate.coord_5179 OPERATOR(x_extension.<->) parent.coord_5179 AS distance_order
+    FROM parents AS parent
     JOIN feature.public_features AS candidate
       ON parent.visible_feature_id IS NOT NULL
-     AND candidate.kind = 'weather'
      AND parent.coord_5179 IS NOT NULL
+     AND candidate.kind = 'weather'
      AND candidate.coord_5179 IS NOT NULL
      AND x_extension.ST_DWithin(
            candidate.coord_5179,
@@ -505,280 +743,172 @@ spatial_candidates AS MATERIALIZED (
            CAST(:radius_m AS double precision)
          )
 ),
-anchor_feature_ids AS MATERIALIZED (
-    SELECT DISTINCT
-        feature_id
-    FROM spatial_candidates
-),
-source_capabilities AS MATERIALIZED (
-    SELECT
-        candidate.feature_id,
-        kma.value IS NOT NULL AS has_kma_forecast,
-        observed.value IS NOT NULL AS has_observed_temperature
-    FROM anchor_feature_ids AS candidate
-    LEFT JOIN LATERAL (
-        SELECT true AS value
-        FROM feature.weather_metric_series AS series
-        WHERE series.feature_id = candidate.feature_id
-          AND series.provider = 'python-kma-api'
-          AND series.forecast_style IN ('nowcast', 'ultra_short', 'short', 'mid')
-        LIMIT 1 OFFSET 0
-    ) AS kma ON true
-    LEFT JOIN LATERAL (
-        SELECT true AS value
-        FROM feature.weather_metric_series AS series
-        WHERE series.feature_id = candidate.feature_id
-          AND series.forecast_style = 'observed'
-          AND series.metric_key IN ('T1H', 'TMP')
-        LIMIT 1 OFFSET 0
-    ) AS observed ON true
-),
-anchor_candidates AS MATERIALIZED (
-    SELECT
-        candidate.parent_feature_id,
-        candidate.feature_id,
-        candidate.distance_order,
-        capability.has_kma_forecast,
-        capability.has_observed_temperature
-    FROM spatial_candidates AS candidate
-    JOIN source_capabilities AS capability
-      ON capability.feature_id = candidate.feature_id
-),
-own_has_temperature AS (
+eligible_anchor_facts AS MATERIALIZED (
     SELECT
         parent.ordinality,
-        EXISTS (
-            SELECT 1 AS found
-            FROM feature.weather_metric_series AS series
-            JOIN LATERAL (
-                SELECT 1
-                FROM feature.feature_weather_values AS w
-                WHERE w.feature_id = series.feature_id
-                  AND w.provider = series.provider
-                  AND w.weather_domain = series.weather_domain
-                  AND w.forecast_style = series.forecast_style
-                  AND w.metric_key = series.metric_key
-                  AND {_BATCH_CURRENT_FOR_PARENT}
-                LIMIT 1
-            ) AS current_row ON true
-            WHERE series.feature_id = parent.visible_feature_id
-              AND series.metric_key IN ('T1H', 'TMP')
-            LIMIT 1 OFFSET 0
-        ) AS value
+        parent.target_at AS requested_target_at,
+        candidate.source_feature_id,
+        candidate.distance_order,
+        fact.weather_value_key,
+        fact.provider_dataset_id,
+        dataset.provider,
+        dataset.dataset_key,
+        dataset.display_name AS dataset_display_name,
+        fact.weather_domain,
+        fact.forecast_style,
+        fact.timeline_bucket,
+        fact.metric_key,
+        fact.metric_name,
+        fact.value_number,
+        fact.value_text,
+        fact.unit,
+        fact.severity,
+        fact.issued_at,
+        fact.valid_at,
+        lower(fact.valid_during) AS valid_from,
+        upper(fact.valid_during) AS valid_until,
+        fact.observed_at,
+        fact.target_at,
+        fact.known_at,
+        fact.source_record_key
     FROM parents AS parent
+    JOIN spatial_candidates AS candidate
+      ON candidate.ordinality = parent.ordinality
+    JOIN feature.feature_weather_values AS fact
+      ON fact.feature_id = candidate.source_feature_id
+     AND fact.known_at <= CAST(:known_at AS timestamptz)
+     AND fact.target_at <= parent.target_at
+     AND (fact.valid_during IS NULL OR fact.valid_during @> parent.target_at)
+    JOIN provider_sync.provider_datasets AS dataset
+      ON dataset.provider_dataset_id = fact.provider_dataset_id
+     AND dataset.is_active
 ),
-/*
- * The remaining CTEs deliberately probe ``weather_metric_series`` by the
- * selected feature_id.  Keeping those probes correlated preserves the PK
- * prefix lookup; a shared materialized series CTE becomes an unindexed
- * intermediate and is slower for many target dates.
- */
-kma_anchor AS (
-    SELECT parent.ordinality, parent.target_at, anchor.feature_id
-    FROM parents AS parent
-    JOIN own_has_temperature AS own_temp USING (ordinality)
-    LEFT JOIN LATERAL (
-        SELECT candidate.feature_id
-        FROM anchor_candidates AS candidate
-        WHERE candidate.parent_feature_id = parent.feature_id
-          AND candidate.has_kma_forecast
-          AND NOT own_temp.value
-          AND EXISTS (
-              SELECT 1 AS found
-              FROM feature.weather_metric_series AS series
-              JOIN LATERAL (
-                  SELECT 1
-                  FROM feature.feature_weather_values AS w
-                  WHERE w.feature_id = series.feature_id
-                    AND w.provider = series.provider
-                    AND w.weather_domain = series.weather_domain
-                    AND w.forecast_style = series.forecast_style
-                    AND w.metric_key = series.metric_key
-                    AND {_BATCH_CURRENT_FOR_PARENT}
-                  LIMIT 1
-              ) AS current_row ON true
-              WHERE series.feature_id = candidate.feature_id
-                AND series.provider = 'python-kma-api'
-                AND series.forecast_style IN ('nowcast', 'ultra_short', 'short', 'mid')
-              LIMIT 1 OFFSET 0
-          )
-        ORDER BY candidate.distance_order, candidate.feature_id
-        LIMIT 1
-    ) AS anchor ON true
+candidate_capabilities AS MATERIALIZED (
+    SELECT
+        ordinality,
+        source_feature_id,
+        min(distance_order) AS distance_order,
+        bool_or(
+            provider = 'python-kma-api'
+            AND forecast_style IN ('nowcast', 'ultra_short', 'short', 'mid')
+        ) AS has_kma_forecast,
+        bool_or(
+            forecast_style = 'observed' AND metric_key IN ('T1H', 'TMP')
+        ) AS has_observed_temperature,
+        bool_or(metric_key IN ('T1H', 'TMP')) AS has_temperature
+    FROM eligible_anchor_facts
+    GROUP BY ordinality, source_feature_id
 ),
-observed_anchor AS (
-    SELECT parent.ordinality, parent.target_at, anchor.feature_id
+own_capabilities AS (
+    SELECT
+        parent.ordinality,
+        parent.visible_feature_id,
+        coalesce(capability.has_temperature, false) AS has_temperature,
+        capability.source_feature_id IS NOT NULL AS has_any
     FROM parents AS parent
-    JOIN own_has_temperature AS own_temp USING (ordinality)
-    LEFT JOIN LATERAL (
-        SELECT candidate.feature_id
-        FROM anchor_candidates AS candidate
-        WHERE candidate.parent_feature_id = parent.feature_id
-          AND candidate.has_observed_temperature
-          AND NOT own_temp.value
-          AND EXISTS (
-              SELECT 1 AS found
-              FROM feature.weather_metric_series AS series
-              JOIN LATERAL (
-                  SELECT 1
-                  FROM feature.feature_weather_values AS w
-                  WHERE w.feature_id = series.feature_id
-                    AND w.provider = series.provider
-                    AND w.weather_domain = series.weather_domain
-                    AND w.forecast_style = series.forecast_style
-                    AND w.metric_key = series.metric_key
-                    AND {_BATCH_CURRENT_FOR_PARENT}
-                  LIMIT 1
-              ) AS current_row ON true
-              WHERE series.feature_id = candidate.feature_id
-                AND series.forecast_style = 'observed'
-                AND series.metric_key IN ('T1H', 'TMP')
-              LIMIT 1 OFFSET 0
-          )
-        ORDER BY candidate.distance_order, candidate.feature_id
-        LIMIT 1
-    ) AS anchor ON true
+    LEFT JOIN candidate_capabilities AS capability
+      ON capability.ordinality = parent.ordinality
+     AND capability.source_feature_id = parent.visible_feature_id
+),
+kma_ranked AS (
+    SELECT
+        capability.ordinality,
+        capability.source_feature_id,
+        row_number() OVER (
+            PARTITION BY capability.ordinality
+            ORDER BY capability.distance_order, capability.source_feature_id
+        ) AS rank
+    FROM candidate_capabilities AS capability
+    JOIN own_capabilities AS own
+      ON own.ordinality = capability.ordinality
+    WHERE NOT own.has_temperature
+      AND capability.source_feature_id IS DISTINCT FROM own.visible_feature_id
+      AND capability.has_kma_forecast
+),
+observed_ranked AS (
+    SELECT
+        capability.ordinality,
+        capability.source_feature_id,
+        row_number() OVER (
+            PARTITION BY capability.ordinality
+            ORDER BY capability.distance_order, capability.source_feature_id
+        ) AS rank
+    FROM candidate_capabilities AS capability
+    JOIN own_capabilities AS own
+      ON own.ordinality = capability.ordinality
+    WHERE NOT own.has_temperature
+      AND capability.source_feature_id IS DISTINCT FROM own.visible_feature_id
+      AND capability.has_observed_temperature
 ),
 preferred_sources AS (
     SELECT
-        ordinality,
-        target_at,
-        visible_feature_id AS source_feature_id,
-        0 AS tier
-    FROM parents
-    WHERE visible_feature_id IS NOT NULL
-    UNION ALL
-    SELECT ordinality, target_at, feature_id, 1
-    FROM kma_anchor
-    WHERE feature_id IS NOT NULL
-    UNION ALL
-    SELECT ordinality, target_at, feature_id, 2
-    FROM observed_anchor
-    WHERE feature_id IS NOT NULL
-),
-preferred_has_current AS (
-    SELECT
         parent.ordinality,
-        EXISTS (
-            SELECT 1 AS found
-            FROM preferred_sources AS source
-            JOIN feature.weather_metric_series AS series
-              ON series.feature_id = source.source_feature_id
-            JOIN LATERAL (
-                SELECT 1
-                FROM feature.feature_weather_values AS w
-                WHERE w.feature_id = series.feature_id
-                  AND w.provider = series.provider
-                  AND w.weather_domain = series.weather_domain
-                  AND w.forecast_style = series.forecast_style
-                  AND w.metric_key = series.metric_key
-                  AND {_BATCH_CURRENT_FOR_PARENT}
-                LIMIT 1
-            ) AS current_row ON true
-            WHERE source.ordinality = parent.ordinality
-            LIMIT 1 OFFSET 0
-        ) AS value
+        parent.target_at,
+        parent.visible_feature_id AS source_feature_id,
+        0 AS tier
     FROM parents AS parent
-),
-fallback_anchor AS (
-    SELECT parent.ordinality, parent.target_at, anchor.feature_id
-    FROM parents AS parent
-    JOIN preferred_has_current AS preferred USING (ordinality)
-    LEFT JOIN LATERAL (
-        SELECT candidate.feature_id
-        FROM anchor_candidates AS candidate
-        WHERE candidate.parent_feature_id = parent.feature_id
-          AND NOT preferred.value
-          AND EXISTS (
-              SELECT 1 AS found
-              FROM feature.weather_metric_series AS series
-              JOIN LATERAL (
-                  SELECT 1
-                  FROM feature.feature_weather_values AS w
-                  WHERE w.feature_id = series.feature_id
-                    AND w.provider = series.provider
-                    AND w.weather_domain = series.weather_domain
-                    AND w.forecast_style = series.forecast_style
-                    AND w.metric_key = series.metric_key
-                    AND {_BATCH_CURRENT_FOR_PARENT}
-                  LIMIT 1
-              ) AS current_row ON true
-              WHERE series.feature_id = candidate.feature_id
-              LIMIT 1 OFFSET 0
-          )
-        ORDER BY candidate.distance_order, candidate.feature_id
-        LIMIT 1
-    ) AS anchor ON true
-),
-sources AS (
-    SELECT ordinality, target_at, source_feature_id, tier
-    FROM preferred_sources
+    JOIN own_capabilities AS own USING (ordinality)
+    WHERE own.has_any
     UNION ALL
-    SELECT ordinality, target_at, feature_id, 3
-    FROM fallback_anchor
-    WHERE feature_id IS NOT NULL
+    SELECT ranked.ordinality, parent.target_at, ranked.source_feature_id, 1 AS tier
+    FROM kma_ranked AS ranked
+    JOIN parents AS parent USING (ordinality)
+    WHERE ranked.rank = 1
+    UNION ALL
+    SELECT ranked.ordinality, parent.target_at, ranked.source_feature_id, 2 AS tier
+    FROM observed_ranked AS ranked
+    JOIN parents AS parent USING (ordinality)
+    WHERE ranked.rank = 1
 ),
-source_known_series AS MATERIALIZED (
-    SELECT DISTINCT
-        source.ordinality,
-        source.target_at,
-        source.source_feature_id,
-        source.tier,
-        series.provider,
-        series.weather_domain,
-        series.forecast_style,
-        series.metric_key
-    FROM sources AS source
-    JOIN LATERAL (
-        SELECT
-            catalog.feature_id,
-            catalog.provider,
-            catalog.weather_domain,
-            catalog.forecast_style,
-            catalog.metric_key
-        FROM feature.weather_metric_series AS catalog
-        WHERE catalog.feature_id = source.source_feature_id
-        OFFSET 0
-    ) AS series ON true
-    JOIN LATERAL (
+nearest_any_ranked AS (
+    SELECT
+        capability.ordinality,
+        capability.source_feature_id,
+        row_number() OVER (
+            PARTITION BY capability.ordinality
+            ORDER BY capability.distance_order, capability.source_feature_id
+        ) AS rank
+    FROM candidate_capabilities AS capability
+    WHERE NOT EXISTS (
         SELECT 1
-        FROM feature.feature_weather_values AS w
-        WHERE w.feature_id = series.feature_id
-          AND w.provider = series.provider
-          AND w.weather_domain = series.weather_domain
-          AND w.forecast_style = series.forecast_style
-          AND w.metric_key = series.metric_key
-          AND {_BATCH_KNOWN_AT}
-        LIMIT 1 OFFSET 0
-    ) AS known_fact ON true
+        FROM preferred_sources AS preferred
+        WHERE preferred.ordinality = capability.ordinality
+    )
 ),
-metric_sources AS MATERIALIZED (
-    SELECT DISTINCT
-        ordinality,
-        target_at,
-        source_feature_id,
-        tier
-    FROM source_known_series
+raw_sources AS (
+    SELECT * FROM preferred_sources
+    UNION ALL
+    SELECT ranked.ordinality, parent.target_at, ranked.source_feature_id, 3 AS tier
+    FROM nearest_any_ranked AS ranked
+    JOIN parents AS parent USING (ordinality)
+    WHERE ranked.rank = 1
+),
+sources AS MATERIALIZED (
+    SELECT DISTINCT ON (ordinality, source_feature_id)
+        ordinality, target_at, source_feature_id, tier
+    FROM raw_sources
+    ORDER BY ordinality, source_feature_id, tier
 ),
 source_bundles AS (
     SELECT
         parent.ordinality,
         parent.target_at,
-        COALESCE(
-            array_agg(source.source_feature_id ORDER BY source.tier)
+        coalesce(
+            array_agg(source.source_feature_id ORDER BY source.tier, source.source_feature_id)
                 FILTER (WHERE source.source_feature_id IS NOT NULL),
             CAST(ARRAY[] AS text[])
         ) AS source_feature_ids
     FROM parents AS parent
-    LEFT JOIN metric_sources AS source USING (ordinality, target_at)
+    LEFT JOIN sources AS source USING (ordinality, target_at)
     GROUP BY parent.ordinality, parent.target_at
 ),
-cards AS (
+cards AS MATERIALIZED (
     SELECT
         target_at,
         source_feature_ids,
         min(ordinality) AS card_ordinal
     FROM source_bundles
+    WHERE cardinality(source_feature_ids) > 0
     GROUP BY target_at, source_feature_ids
 ),
 parent_cards AS (
@@ -788,221 +918,208 @@ parent_cards AS (
       ON card.target_at = bundle.target_at
      AND card.source_feature_ids = bundle.source_feature_ids
 ),
-card_sources AS (
+card_sources AS MATERIALIZED (
     SELECT
-        card.card_ordinal AS ordinality,
+        card.card_ordinal,
         card.target_at,
         source.source_feature_id,
         source.tier
     FROM cards AS card
-    JOIN metric_sources AS source
+    JOIN sources AS source
       ON source.ordinality = card.card_ordinal
+     AND source.target_at = card.target_at
 ),
-source_metric_keys AS MATERIALIZED (
-    SELECT
-        source.ordinality,
+source_series AS MATERIALIZED (
+    SELECT DISTINCT
+        source.card_ordinal,
         source.target_at,
         source.source_feature_id,
         source.tier,
-        series.provider,
-        series.weather_domain,
-        series.forecast_style,
-        series.metric_key
+        fact.provider_dataset_id,
+        fact.weather_domain,
+        fact.forecast_style,
+        fact.metric_key
     FROM card_sources AS source
-    JOIN source_known_series AS series
-      ON series.ordinality = source.ordinality
-     AND series.source_feature_id = source.source_feature_id
-     AND series.tier = source.tier
+    JOIN feature.feature_weather_values AS fact
+      ON fact.feature_id = source.source_feature_id
+     AND fact.known_at <= CAST(:known_at AS timestamptz)
+    JOIN provider_sync.provider_datasets AS dataset
+      ON dataset.provider_dataset_id = fact.provider_dataset_id
+     AND dataset.is_active
 ),
-source_metric_key_count AS MATERIALIZED (
+source_series_count AS MATERIALIZED (
     SELECT count(*)::bigint AS value
-    FROM source_metric_keys
+    FROM source_series
 ),
-gated_source_metric_keys AS MATERIALIZED (
-    SELECT metric.*
-    FROM source_metric_keys AS metric
-    CROSS JOIN source_metric_key_count
-    WHERE source_metric_key_count.value <= CAST(:series_work_limit AS bigint)
+gated_card_sources AS MATERIALIZED (
+    SELECT source.*
+    FROM card_sources AS source
+    CROSS JOIN source_series_count
+    WHERE source_series_count.value <= CAST(:series_work_limit AS bigint)
 ),
-current_source_rows AS (
+current_ranked AS (
     SELECT
-        metric.ordinality,
-        metric.target_at,
-        metric.source_feature_id,
-        metric.tier,
-        row.forecast_style,
-        row.metric_key,
-        row.metric_name,
-        row.timeline_bucket,
-        row.value_number,
-        row.value_text,
-        row.unit,
-        row.severity,
-        row.issued_at,
-        row.valid_at,
-        row.valid_from,
-        row.valid_until,
-        row.observed_at,
-        row.provider,
-        row.weather_domain,
-        row.effective_at,
-        row.collected_at,
-        row.weather_value_key
-    FROM gated_source_metric_keys AS metric
-    JOIN LATERAL (
-        SELECT
-            w.forecast_style,
-            w.metric_key,
-            w.metric_name,
-            w.timeline_bucket,
-            w.value_number,
-            w.value_text,
-            w.unit,
-            w.severity,
-            w.issued_at,
-            w.valid_at,
-            w.valid_from,
-            w.valid_until,
-            w.observed_at,
-            w.provider,
-            w.weather_domain,
-            {_BATCH_EFFECTIVE_AT} AS effective_at,
-            w.collected_at,
-            w.weather_value_key
-        FROM feature.feature_weather_values AS w
-        WHERE w.feature_id = metric.source_feature_id
-          AND w.provider = metric.provider
-          AND w.weather_domain = metric.weather_domain
-          AND w.forecast_style = metric.forecast_style
-          AND w.metric_key = metric.metric_key
-          AND {_BATCH_CURRENT_FOR_METRIC}
-        ORDER BY
-            {_BATCH_EFFECTIVE_AT} DESC,
-            w.issued_at DESC NULLS LAST,
-            w.collected_at DESC,
-            w.weather_value_key
-        LIMIT 1
-    ) AS row ON true
+        source.card_ordinal,
+        source.target_at AS requested_target_at,
+        source.tier,
+        fact.weather_value_key,
+        fact.provider_dataset_id,
+        dataset.provider,
+        dataset.dataset_key,
+        dataset.display_name AS dataset_display_name,
+        fact.weather_domain,
+        fact.forecast_style,
+        fact.timeline_bucket,
+        fact.metric_key,
+        fact.metric_name,
+        fact.value_number,
+        fact.value_text,
+        fact.unit,
+        fact.severity,
+        fact.issued_at,
+        fact.valid_at,
+        lower(fact.valid_during) AS valid_from,
+        upper(fact.valid_during) AS valid_until,
+        fact.observed_at,
+        fact.target_at AS effective_at,
+        fact.known_at,
+        fact.source_record_key,
+        row_number() OVER (
+            PARTITION BY
+                source.card_ordinal, source.source_feature_id,
+                fact.provider_dataset_id, fact.weather_domain,
+                fact.forecast_style, fact.metric_key
+            ORDER BY
+                fact.target_at DESC,
+                fact.known_at DESC,
+                upper(fact.valid_during) DESC NULLS LAST,
+                fact.issued_at DESC NULLS LAST,
+                fact.valid_at DESC NULLS LAST,
+                fact.observed_at DESC NULLS LAST,
+                fact.weather_value_key DESC
+        ) AS rank
+    FROM gated_card_sources AS source
+    JOIN feature.feature_weather_values AS fact
+      ON fact.feature_id = source.source_feature_id
+     AND fact.known_at <= CAST(:known_at AS timestamptz)
+     AND fact.target_at <= source.target_at
+     AND (fact.valid_during IS NULL OR fact.valid_during @> source.target_at)
+    JOIN provider_sync.provider_datasets AS dataset
+      ON dataset.provider_dataset_id = fact.provider_dataset_id
+     AND dataset.is_active
 ),
 current_rows AS (
-    SELECT DISTINCT ON (
-        row.ordinality, row.forecast_style, row.metric_key
-    )
-        row.ordinality,
+    SELECT DISTINCT ON (card_ordinal, forecast_style, metric_key)
+        card_ordinal,
         'current'::text AS section,
-        row.forecast_style,
-        row.metric_key,
-        row.metric_name,
-        row.timeline_bucket,
-        row.value_number,
-        row.value_text,
-        row.unit,
-        row.severity,
-        row.issued_at,
-        row.valid_at,
-        row.valid_from,
-        row.valid_until,
-        row.observed_at,
-        row.provider,
-        row.weather_domain,
-        row.effective_at
-    FROM current_source_rows AS row
+        forecast_style,
+        metric_key,
+        metric_name,
+        timeline_bucket,
+        value_number,
+        value_text,
+        unit,
+        severity,
+        issued_at,
+        valid_at,
+        valid_from,
+        valid_until,
+        observed_at,
+        provider_dataset_id,
+        provider,
+        dataset_key,
+        dataset_display_name,
+        weather_domain,
+        effective_at,
+        known_at,
+        source_record_key
+    FROM current_ranked
+    WHERE rank = 1
     ORDER BY
-        row.ordinality,
-        row.forecast_style,
-        row.metric_key,
-        row.tier,
-        row.effective_at DESC,
-        row.issued_at DESC NULLS LAST,
-        row.collected_at DESC,
-        row.weather_value_key
+        card_ordinal, forecast_style, metric_key,
+        tier, effective_at DESC, known_at DESC, weather_value_key DESC
 ),
-timeline_source_rows AS (
-    SELECT DISTINCT ON (
-        metric.ordinality,
-        metric.source_feature_id,
-        w.forecast_style,
-        w.metric_key,
-        {_BATCH_EFFECTIVE_AT}
-    )
-        metric.ordinality,
-        metric.tier,
-        metric.source_feature_id,
-        w.forecast_style,
-        w.metric_key,
-        w.metric_name,
-        w.timeline_bucket,
-        w.value_number,
-        w.value_text,
-        w.unit,
-        w.severity,
-        w.issued_at,
-        w.valid_at,
-        w.valid_from,
-        w.valid_until,
-        w.observed_at,
-        w.provider,
-        w.weather_domain,
-        {_BATCH_EFFECTIVE_AT} AS effective_at
-    FROM gated_source_metric_keys AS metric
-    JOIN LATERAL (
-        SELECT w.*
-        FROM feature.feature_weather_values AS w
-        WHERE w.feature_id = metric.source_feature_id
-          AND w.provider = metric.provider
-          AND w.weather_domain = metric.weather_domain
-          AND w.forecast_style = metric.forecast_style
-          AND w.metric_key = metric.metric_key
-          AND {_BATCH_KNOWN_AT}
-          AND {_BATCH_EFFECTIVE_AT} > metric.target_at
-          AND {_BATCH_EFFECTIVE_AT}
-              <= metric.target_at
-                 + make_interval(days => CAST(:timeline_days AS integer))
-        OFFSET 0
-    ) AS w ON true
-    ORDER BY
-        metric.ordinality,
-        metric.source_feature_id,
-        w.forecast_style,
-        w.metric_key,
-        {_BATCH_EFFECTIVE_AT},
-        w.issued_at DESC NULLS LAST,
-        w.collected_at DESC,
-        w.weather_value_key
+timeline_ranked AS (
+    SELECT
+        source.card_ordinal,
+        source.tier,
+        fact.weather_value_key,
+        fact.provider_dataset_id,
+        dataset.provider,
+        dataset.dataset_key,
+        dataset.display_name AS dataset_display_name,
+        fact.weather_domain,
+        fact.forecast_style,
+        fact.timeline_bucket,
+        fact.metric_key,
+        fact.metric_name,
+        fact.value_number,
+        fact.value_text,
+        fact.unit,
+        fact.severity,
+        fact.issued_at,
+        fact.valid_at,
+        lower(fact.valid_during) AS valid_from,
+        upper(fact.valid_during) AS valid_until,
+        fact.observed_at,
+        fact.target_at AS effective_at,
+        fact.known_at,
+        fact.source_record_key,
+        row_number() OVER (
+            PARTITION BY
+                source.card_ordinal, source.source_feature_id,
+                fact.provider_dataset_id, fact.weather_domain,
+                fact.forecast_style, fact.metric_key, fact.target_at
+            ORDER BY
+                fact.known_at DESC,
+                upper(fact.valid_during) DESC NULLS LAST,
+                fact.issued_at DESC NULLS LAST,
+                fact.valid_at DESC NULLS LAST,
+                fact.observed_at DESC NULLS LAST,
+                fact.weather_value_key DESC
+        ) AS rank
+    FROM gated_card_sources AS source
+    JOIN feature.feature_weather_values AS fact
+      ON fact.feature_id = source.source_feature_id
+     AND fact.known_at <= CAST(:known_at AS timestamptz)
+     AND fact.target_at > source.target_at
+     AND fact.target_at <= source.target_at
+         + make_interval(days => CAST(:timeline_days AS integer))
+     AND (fact.valid_during IS NULL OR fact.valid_during @> fact.target_at)
+    JOIN provider_sync.provider_datasets AS dataset
+      ON dataset.provider_dataset_id = fact.provider_dataset_id
+     AND dataset.is_active
 ),
 timeline_rows AS (
-    SELECT DISTINCT ON (
-        row.ordinality,
-        row.forecast_style,
-        row.metric_key,
-        row.effective_at
-    )
-        row.ordinality,
+    SELECT DISTINCT ON (card_ordinal, forecast_style, metric_key, effective_at)
+        card_ordinal,
         'timeline'::text AS section,
-        row.forecast_style,
-        row.metric_key,
-        row.metric_name,
-        row.timeline_bucket,
-        row.value_number,
-        row.value_text,
-        row.unit,
-        row.severity,
-        row.issued_at,
-        row.valid_at,
-        row.valid_from,
-        row.valid_until,
-        row.observed_at,
-        row.provider,
-        row.weather_domain,
-        row.effective_at
-    FROM timeline_source_rows AS row
+        forecast_style,
+        metric_key,
+        metric_name,
+        timeline_bucket,
+        value_number,
+        value_text,
+        unit,
+        severity,
+        issued_at,
+        valid_at,
+        valid_from,
+        valid_until,
+        observed_at,
+        provider_dataset_id,
+        provider,
+        dataset_key,
+        dataset_display_name,
+        weather_domain,
+        effective_at,
+        known_at,
+        source_record_key
+    FROM timeline_ranked
+    WHERE rank = 1
     ORDER BY
-        row.ordinality,
-        row.forecast_style,
-        row.metric_key,
-        row.effective_at,
-        row.tier,
-        row.issued_at DESC NULLS LAST
+        card_ordinal, forecast_style, metric_key, effective_at,
+        tier, known_at DESC, weather_value_key DESC
 ),
 weather_rows AS (
     SELECT * FROM current_rows
@@ -1016,41 +1133,17 @@ weather_row_count AS (
 weather_response_size AS (
     SELECT (
         4096
-        + COALESCE(
-            sum(
-                64
-                + octet_length(
-                    CAST(
-                        jsonb_build_object(
-                            'forecast_style', forecast_style,
-                            'metric_key', metric_key,
-                            'metric_name', metric_name,
-                            'timeline_bucket', timeline_bucket,
-                            'value_number', value_number,
-                            'value_text', value_text,
-                            'unit', unit,
-                            'severity', severity,
-                            'issued_at', issued_at,
-                            'valid_at', valid_at,
-                            'valid_from', valid_from,
-                            'valid_until', valid_until,
-                            'observed_at', observed_at,
-                            'provider', provider,
-                            'weather_domain', weather_domain,
-                            'effective_at', effective_at
-                        ) AS text
-                    )
-                )
-            ),
-            0
-        )
-        + (
-            SELECT COALESCE(
-                sum(256 + octet_length(parent.feature_id)),
-                0
-            )
-            FROM parents AS parent
-        )
+        + coalesce(sum(octet_length(CAST(jsonb_build_object(
+            'forecast_style', forecast_style,
+            'metric_key', metric_key,
+            'provider_dataset_id', provider_dataset_id,
+            'dataset_key', dataset_key,
+            'known_at', known_at,
+            'effective_at', effective_at,
+            'value_number', value_number,
+            'value_text', value_text
+        ) AS text))), 0)
+        + (SELECT coalesce(sum(256 + octet_length(feature_id)), 0) FROM parents)
         + (SELECT count(*) * 256 FROM cards)
     )::bigint AS value
     FROM weather_rows
@@ -1059,9 +1152,8 @@ card_states AS (
     SELECT
         card.card_ordinal,
         EXISTS (
-            SELECT 1
-            FROM weather_rows AS weather
-            WHERE weather.ordinality = card.card_ordinal
+            SELECT 1 FROM weather_rows AS weather
+            WHERE weather.card_ordinal = card.card_ordinal
         ) AS has_weather
     FROM cards AS card
 ),
@@ -1071,15 +1163,12 @@ batch_rows AS (
         parent.ordinality AS item_ordinality,
         parent.feature_id,
         CAST(parent.feature_uuid AS text) AS feature_uuid,
+        CASE WHEN parent.visible_feature_id IS NOT NULL AND state.has_weather
+             THEN parent_card.card_ordinal END AS card_ordinal,
         CASE
-          WHEN parent.visible_feature_id IS NOT NULL AND card_state.has_weather
-          THEN parent_card.card_ordinal
-          ELSE NULL
-        END AS card_ordinal,
-        CASE
-          WHEN parent.visible_feature_id IS NULL THEN 'retired'
-          WHEN card_state.has_weather THEN 'found'
-          ELSE 'no_data'
+            WHEN parent.visible_feature_id IS NULL THEN 'retired'
+            WHEN state.has_weather THEN 'found'
+            ELSE 'no_data'
         END AS state,
         NULL::text AS section,
         NULL::text AS forecast_style,
@@ -1095,23 +1184,26 @@ batch_rows AS (
         NULL::timestamptz AS valid_from,
         NULL::timestamptz AS valid_until,
         NULL::timestamptz AS observed_at,
+        NULL::bigint AS provider_dataset_id,
         NULL::text AS provider,
+        NULL::text AS dataset_key,
+        NULL::text AS dataset_display_name,
         NULL::text AS weather_domain,
-        NULL::timestamptz AS effective_at
+        NULL::timestamptz AS effective_at,
+        NULL::timestamptz AS known_at,
+        NULL::text AS source_record_key
     FROM parents AS parent
     LEFT JOIN parent_cards AS parent_card USING (ordinality)
-    LEFT JOIN card_states AS card_state
-      ON card_state.card_ordinal = parent_card.card_ordinal
-
+    LEFT JOIN card_states AS state
+      ON state.card_ordinal = parent_card.card_ordinal
     UNION ALL
-
     SELECT
-        'metric'::text AS row_kind,
-        NULL::bigint AS item_ordinality,
-        NULL::text AS feature_id,
-        NULL::text AS feature_uuid,
-        weather.ordinality AS card_ordinal,
-        NULL::text AS state,
+        'metric'::text,
+        NULL::bigint,
+        NULL::text,
+        NULL::text,
+        weather.card_ordinal,
+        NULL::text,
         weather.section,
         weather.forecast_style,
         weather.metric_key,
@@ -1126,9 +1218,14 @@ batch_rows AS (
         weather.valid_from,
         weather.valid_until,
         weather.observed_at,
+        weather.provider_dataset_id,
         weather.provider,
+        weather.dataset_key,
+        weather.dataset_display_name,
         weather.weather_domain,
-        weather.effective_at
+        weather.effective_at,
+        weather.known_at,
+        weather.source_record_key
     FROM weather_rows AS weather
     CROSS JOIN weather_row_count
     CROSS JOIN weather_response_size
@@ -1136,39 +1233,17 @@ batch_rows AS (
       AND weather_response_size.value <= CAST(:response_byte_limit AS bigint)
 )
 SELECT
-    batch.row_kind,
-    batch.item_ordinality,
-    batch.feature_id,
-    batch.feature_uuid,
-    batch.card_ordinal,
-    batch.state,
-    batch.section,
-    batch.forecast_style,
-    batch.metric_key,
-    batch.metric_name,
-    batch.timeline_bucket,
-    batch.value_number,
-    batch.value_text,
-    batch.unit,
-    batch.severity,
-    batch.issued_at,
-    batch.valid_at,
-    batch.valid_from,
-    batch.valid_until,
-    batch.observed_at,
-    batch.provider,
-    batch.weather_domain,
-    batch.effective_at,
-    source_metric_key_count.value AS series_work_count,
+    batch.*,
+    source_series_count.value AS series_work_count,
     weather_row_count.value AS metric_row_count,
     weather_response_size.value AS response_payload_bytes
 FROM batch_rows AS batch
-CROSS JOIN source_metric_key_count
+CROSS JOIN source_series_count
 CROSS JOIN weather_row_count
 CROSS JOIN weather_response_size
 ORDER BY
     CASE batch.row_kind WHEN 'item' THEN 0 ELSE 1 END,
-    COALESCE(batch.item_ordinality, batch.card_ordinal),
+    coalesce(batch.item_ordinality, batch.card_ordinal),
     CASE batch.section WHEN 'current' THEN 0 WHEN 'timeline' THEN 1 ELSE 2 END,
     batch.effective_at,
     batch.forecast_style,
@@ -1196,7 +1271,9 @@ SELECT set_config('statement_timeout', :statement_timeout, true)
 _NEAREST_WEATHER_RADIUS_M: Final[float] = 50_000.0
 
 
-def _nearest_anchor_sql(exists_predicate: str) -> str:
+def _nearest_anchor_sql(
+    exists_predicate: str, *, exclude_target: bool = False
+) -> str:
     """반경 내 가장 가까운(KNN) anchor feature 1건을 찾는 SQL.
 
     #499: 과거 구현은 ``SELECT DISTINCT feature_id FROM feature_weather_values``
@@ -1210,6 +1287,7 @@ def _nearest_anchor_sql(exists_predicate: str) -> str:
     target·anchor 모두 ADR-067 ``feature.public_features`` projection에서만 찾는다
     — 비공개 feature는 anchor가 될 수 없고, 비공개 target은 빈 결과가 된다(F-1).
     """
+    target_exclusion = "AND f.feature_id <> :feature_id" if exclude_target else ""
     return f"""
 WITH target AS (
     SELECT coord_5179
@@ -1221,13 +1299,20 @@ SELECT f.feature_id
 FROM feature.public_features AS f, target AS t
 WHERE f.kind = 'weather'
   AND f.coord_5179 IS NOT NULL
+  {target_exclusion}
   AND x_extension.ST_DWithin(
         f.coord_5179, t.coord_5179, CAST(:radius_m AS double precision)
       )
   AND EXISTS (
         SELECT 1
-        FROM feature.feature_weather_values AS w
-        WHERE w.feature_id = f.feature_id
+        FROM feature.current_weather_summary AS current_summary
+        JOIN feature.feature_weather_values AS w
+          ON w.weather_value_key = current_summary.weather_value_key
+        JOIN provider_sync.provider_datasets AS dataset
+          ON dataset.provider_dataset_id = w.provider_dataset_id
+         AND dataset.is_active
+        WHERE current_summary.feature_id = f.feature_id
+          AND current_summary.refresh_after > clock_timestamp()
           {exists_predicate}
       )
 ORDER BY f.coord_5179 OPERATOR(x_extension.<->) t.coord_5179, f.feature_id
@@ -1239,15 +1324,69 @@ LIMIT 1
 _NEAREST_WEATHER_SQL: Final[str] = _nearest_anchor_sql("")
 
 # 반경 내 가장 가까운 KMA-forecast anchor — SKY/POP/TMN/TMX(+TMP/T1H) 보유.
-_NEAREST_KMA_FORECAST_SQL: Final[str] = _nearest_anchor_sql(f"AND {_KMA_FORECAST_PREDICATE}")
+_NEAREST_KMA_FORECAST_SQL: Final[str] = _nearest_anchor_sql(
+    f"AND {_KMA_FORECAST_PREDICATE}", exclude_target=True
+)
 
 # 반경 내 가장 가까운 관측 기온 anchor — observed T1H/TMP 보유(휴게소 등).
-_NEAREST_OBSERVED_TEMP_SQL: Final[str] = _nearest_anchor_sql(f"AND {_OBSERVED_TEMP_PREDICATE}")
+_NEAREST_OBSERVED_TEMP_SQL: Final[str] = _nearest_anchor_sql(
+    f"AND {_OBSERVED_TEMP_PREDICATE}", exclude_target=True
+)
 
 
-def _admin_nearest_anchor_sql(exists_predicate: str) -> str:
+def _historical_nearest_anchor_sql(
+    exists_predicate: str, *, exclude_target: bool = False
+) -> str:
+    """명시된 business-time snapshot에서만 존재하는 가장 가까운 anchor를 찾는다."""
+
+    target_exclusion = "AND f.feature_id <> :feature_id" if exclude_target else ""
+    return f"""
+WITH target AS (
+    SELECT coord_5179
+    FROM feature.public_features
+    WHERE feature_id = :feature_id
+      AND coord_5179 IS NOT NULL
+)
+SELECT f.feature_id
+FROM feature.public_features AS f, target AS t
+WHERE f.kind = 'weather'
+  AND f.coord_5179 IS NOT NULL
+  {target_exclusion}
+  AND x_extension.ST_DWithin(
+        f.coord_5179, t.coord_5179, CAST(:radius_m AS double precision)
+      )
+  AND EXISTS (
+        SELECT 1
+        FROM feature.feature_weather_values AS w
+        JOIN provider_sync.provider_datasets AS dataset
+          ON dataset.provider_dataset_id = w.provider_dataset_id
+         AND dataset.is_active
+        WHERE w.feature_id = f.feature_id
+          AND w.known_at <= CAST(:known_at AS timestamptz)
+          AND w.target_at <= CAST(:target_at AS timestamptz)
+          AND (w.valid_during IS NULL OR w.valid_during @> CAST(:target_at AS timestamptz))
+          {exists_predicate}
+      )
+ORDER BY f.coord_5179 OPERATOR(x_extension.<->) t.coord_5179, f.feature_id
+LIMIT 1
+"""
+
+
+_HISTORICAL_NEAREST_WEATHER_SQL: Final[str] = _historical_nearest_anchor_sql("")
+_HISTORICAL_NEAREST_KMA_FORECAST_SQL: Final[str] = _historical_nearest_anchor_sql(
+    f"AND {_KMA_FORECAST_PREDICATE}", exclude_target=True
+)
+_HISTORICAL_NEAREST_OBSERVED_TEMP_SQL: Final[str] = _historical_nearest_anchor_sql(
+    f"AND {_OBSERVED_TEMP_PREDICATE}", exclude_target=True
+)
+
+
+def _admin_nearest_anchor_sql(
+    exists_predicate: str, *, exclude_target: bool = False
+) -> str:
     """삭제 전 base Feature에서 admin weather anchor를 찾는 SQL."""
 
+    target_exclusion = "AND f.feature_id <> :feature_id" if exclude_target else ""
     return f"""
 WITH target AS (
     SELECT coord_5179
@@ -1265,13 +1404,20 @@ WHERE f.deleted_at IS NULL
   AND f.status <> 'deleted'
   AND f.kind = 'weather'
   AND f.coord_5179 IS NOT NULL
+  {target_exclusion}
   AND x_extension.ST_DWithin(
         f.coord_5179, t.coord_5179, CAST(:radius_m AS double precision)
       )
   AND EXISTS (
         SELECT 1
-        FROM feature.feature_weather_values AS w
-        WHERE w.feature_id = f.feature_id
+        FROM feature.current_weather_summary AS current_summary
+        JOIN feature.feature_weather_values AS w
+          ON w.weather_value_key = current_summary.weather_value_key
+        JOIN provider_sync.provider_datasets AS dataset
+          ON dataset.provider_dataset_id = w.provider_dataset_id
+         AND dataset.is_active
+        WHERE current_summary.feature_id = f.feature_id
+          AND current_summary.refresh_after > clock_timestamp()
           {exists_predicate}
       )
 ORDER BY f.coord_5179 OPERATOR(x_extension.<->) t.coord_5179, f.feature_id
@@ -1281,63 +1427,84 @@ LIMIT 1
 
 _ADMIN_NEAREST_WEATHER_SQL: Final[str] = _admin_nearest_anchor_sql("")
 _ADMIN_NEAREST_KMA_FORECAST_SQL: Final[str] = _admin_nearest_anchor_sql(
-    f"AND {_KMA_FORECAST_PREDICATE}"
+    f"AND {_KMA_FORECAST_PREDICATE}", exclude_target=True
 )
 _ADMIN_NEAREST_OBSERVED_TEMP_SQL: Final[str] = _admin_nearest_anchor_sql(
-    f"AND {_OBSERVED_TEMP_PREDICATE}"
+    f"AND {_OBSERVED_TEMP_PREDICATE}", exclude_target=True
 )
 
 _LIST_WEATHER_VALUES_SQL: Final[str] = """
 SELECT
-    weather_value_key, feature_id, provider, weather_domain, forecast_style,
-    timeline_bucket, metric_key, metric_name, value_number, value_text, unit,
-    severity, issued_at, valid_at, valid_from, valid_until, observed_at,
-    collected_at, source_record_key
-FROM feature.feature_weather_values
-WHERE feature_id = :feature_id
+    fact.weather_value_key,
+    fact.feature_id,
+    dataset.provider,
+    fact.provider_dataset_id,
+    dataset.dataset_key,
+    dataset.display_name AS dataset_display_name,
+    fact.weather_domain,
+    fact.forecast_style,
+    fact.timeline_bucket,
+    fact.metric_key,
+    fact.metric_name,
+    fact.value_number,
+    fact.value_text,
+    fact.unit,
+    fact.severity,
+    fact.issued_at,
+    fact.valid_at,
+    lower(fact.valid_during) AS valid_from,
+    upper(fact.valid_during) AS valid_until,
+    fact.observed_at,
+    fact.known_at,
+    fact.source_record_key
+FROM feature.feature_weather_values AS fact
+JOIN provider_sync.provider_datasets AS dataset
+  ON dataset.provider_dataset_id = fact.provider_dataset_id
+WHERE fact.feature_id = :feature_id
   AND (
     CAST(:forecast_styles AS text[]) IS NULL
-    OR forecast_style = ANY(CAST(:forecast_styles AS text[]))
+    OR fact.forecast_style = ANY(CAST(:forecast_styles AS text[]))
   )
   AND (
     CAST(:weather_domains AS text[]) IS NULL
-    OR weather_domain = ANY(CAST(:weather_domains AS text[]))
+    OR fact.weather_domain = ANY(CAST(:weather_domains AS text[]))
   )
   AND (
     CAST(:metric_keys AS text[]) IS NULL
-    OR metric_key = ANY(CAST(:metric_keys AS text[]))
+    OR fact.metric_key = ANY(CAST(:metric_keys AS text[]))
   )
   AND (
     CAST(:history_from AS timestamptz) IS NULL
-    OR COALESCE(issued_at, observed_at, valid_at, collected_at)
+    OR COALESCE(fact.issued_at, fact.observed_at, fact.valid_at, fact.known_at)
        >= CAST(:history_from AS timestamptz)
   )
   AND (
     CAST(:issued_from AS timestamptz) IS NULL
-    OR issued_at >= CAST(:issued_from AS timestamptz)
+    OR fact.issued_at >= CAST(:issued_from AS timestamptz)
   )
   AND (
     CAST(:issued_to AS timestamptz) IS NULL
-    OR issued_at <= CAST(:issued_to AS timestamptz)
+    OR fact.issued_at <= CAST(:issued_to AS timestamptz)
   )
   AND (
     CAST(:valid_from_filter AS timestamptz) IS NULL
-    OR COALESCE(valid_until, valid_at, observed_at, issued_at)
+    OR COALESCE(upper(fact.valid_during), fact.valid_at, fact.observed_at, fact.issued_at)
        >= CAST(:valid_from_filter AS timestamptz)
   )
   AND (
     CAST(:valid_to_filter AS timestamptz) IS NULL
-    OR COALESCE(valid_at, valid_from, observed_at, issued_at)
+    OR COALESCE(fact.valid_at, lower(fact.valid_during), fact.observed_at, fact.issued_at)
        <= CAST(:valid_to_filter AS timestamptz)
   )
 ORDER BY
-    issued_at DESC NULLS LAST,
-    observed_at DESC NULLS LAST,
-    valid_at ASC NULLS LAST,
-    valid_from ASC NULLS LAST,
-    forecast_style,
-    metric_key,
-    weather_value_key
+    fact.known_at DESC,
+    fact.issued_at DESC NULLS LAST,
+    fact.observed_at DESC NULLS LAST,
+    fact.valid_at ASC NULLS LAST,
+    lower(fact.valid_during) ASC NULLS LAST,
+    fact.forecast_style,
+    fact.metric_key,
+    fact.weather_value_key
 LIMIT :limit
 """
 
@@ -1492,21 +1659,32 @@ def _enum_value(value: Any) -> str:
     return str(getattr(value, "value", value))
 
 
-def _weather_value_params(value: WeatherValue) -> dict[str, Any]:
+def _weather_target_at(value: WeatherValue) -> datetime:
+    target_at = value.valid_at or value.valid_from or value.observed_at
+    if target_at is None:
+        raise ValueError(
+            "weather fact requires valid_at, valid_from, or observed_at for target_at"
+        )
+    return target_at
+
+
+def _weather_value_params(
+    value: WeatherValue, *, context: _WeatherValueWriteContext
+) -> dict[str, Any]:
+    target_at = _weather_target_at(value)
     key = make_weather_value_key(
         feature_id=value.feature_id,
-        provider=value.provider,
+        provider_dataset_id=context.provider_dataset_id,
         weather_domain=_enum_value(value.weather_domain),
         forecast_style=_enum_value(value.forecast_style),
         metric_key=value.metric_key,
-        issued_at=value.issued_at,
-        valid_at=value.valid_at,
-        observed_at=value.observed_at,
+        target_at=target_at,
+        source_record_key=context.source_record_key,
     )
     return {
         "weather_value_key": key,
         "feature_id": value.feature_id,
-        "provider": value.provider,
+        "provider_dataset_id": context.provider_dataset_id,
         "weather_domain": _enum_value(value.weather_domain),
         "forecast_style": _enum_value(value.forecast_style),
         "timeline_bucket": (
@@ -1527,23 +1705,218 @@ def _weather_value_params(value: WeatherValue) -> dict[str, Any]:
         "observed_at": value.observed_at,
         "normalization_version": value.normalization_version,
         "payload": json.dumps(value.payload, ensure_ascii=False, default=str),
-        "source_record_key": value.source_record_key,
-        "collected_at": value.collected_at,
+        "source_entity_key": context.source_entity_key,
+        "source_record_key": context.source_record_key,
+        "target_at": target_at,
+        "known_at": context.known_at,
     }
 
 
-async def load_weather_values(session: AsyncSession, values: Iterable[WeatherValue]) -> int:
-    """``WeatherValue`` 들을 멱등 upsert 적재한다. 적재 건수 반환 (commit은 호출자).
+async def load_weather_values(
+    session: AsyncSession,
+    values: Iterable[WeatherValue],
+    *,
+    provider_dataset_id: int,
+    source_record: SourceRecord,
+    selected_at: datetime | None = None,
+) -> int:
+    """한 raw response의 weather facts를 append-only로 적재한다.
 
-    semantic tuple이 같으면 최신 ``collected_at``만 현재 row를 갱신한다. 더 오래된
-    backfill과 완전히 같은 재적재는 DB no-op이다. 반환값은 실제 UPDATE 수가 아니라
-    입력으로 수용한 건수다. weather kind ``feature``가 먼저 존재해야 한다(FK).
+    ``provider_dataset_id``는 exact operation membership이 전달한 canonical id이고,
+    ``source_record``는 같은 response의 immutable 원문이다. source record 생성,
+    fact append, current summary receipt/upsert를 같은 session transaction에서 묶어
+    source-less 경로와 fact/summary drift를 없앤다.
     """
-    params = [_weather_value_params(v) for v in values]
+    if provider_dataset_id <= 0:
+        raise ValueError("provider_dataset_id must be positive")
+    from kortravelmap.infra.feature_repo import upsert_source_record
+
+    await upsert_source_record(session, source_record)
+    lineage = (
+        await session.execute(
+            text(
+                """
+                SELECT record.source_entity_key, record.fetched_at
+                FROM provider_sync.source_records AS record
+                JOIN provider_sync.source_entities AS entity
+                  ON entity.source_entity_key = record.source_entity_key
+                WHERE record.source_record_key = :source_record_key
+                  AND entity.provider_dataset_id = :provider_dataset_id
+                """
+            ),
+            {
+                "source_record_key": source_record.source_record_key,
+                "provider_dataset_id": provider_dataset_id,
+            },
+        )
+    ).mappings().one_or_none()
+    if lineage is None:
+        raise ValueError(
+            "weather source response does not belong to the operation provider dataset"
+        )
+    context = _WeatherValueWriteContext(
+        provider_dataset_id=provider_dataset_id,
+        source_entity_key=str(lineage["source_entity_key"]),
+        source_record_key=source_record.source_record_key,
+        known_at=lineage["fetched_at"],
+    )
+    params = [_weather_value_params(v, context=context) for v in values]
     if not params:
         return 0
-    await session.execute(text(_INSERT_SQL), params)
+    await session.execute(text(_IMMUTABLE_INSERT_SQL), params)
+    await materialize_current_weather_summary(
+        session,
+        selected_at=selected_at or kst_now(),
+        run_kind="ingest",
+    )
     return len(params)
+
+
+async def materialize_current_weather_summary(
+    session: AsyncSession,
+    *,
+    selected_at: datetime,
+    run_kind: Literal["ingest", "reconcile", "backfill", "restore"] = "reconcile",
+) -> WeatherSummaryMaterializeResult:
+    """active weather dataset 전체의 current projection을 business time으로 재구성한다.
+
+    선택 시각은 실행 clock과 분리한다. receipt를 먼저 ``running``으로 만들고, 예상
+    집합을 완성한 뒤 terminal receipt와 summary upsert/delete를 같은 transaction에
+    적용한다. 하나라도 실패하면 호출자 transaction이 모두 rollback한다.
+    """
+    if selected_at.tzinfo is None or selected_at.utcoffset() is None:
+        raise ValueError("selected_at must be timezone-aware")
+    if run_kind not in {"ingest", "reconcile", "backfill", "restore"}:
+        raise ValueError("unsupported weather summary run_kind")
+
+    # summary는 전역 projection이므로 transaction snapshot에서 desired를 계산하고
+    # 다른 writer의 series를 stale delete하는 race를 허용하지 않는다. xact lock은
+    # caller transaction이 끝날 때 자동 해제돼 retry/rollback에 별도 unlock이 없다.
+    await session.execute(
+        text(_ACQUIRE_WEATHER_CURRENT_SUMMARY_LOCK_SQL),
+        {"lock_id": _WEATHER_CURRENT_SUMMARY_LOCK_ID},
+    )
+
+    summary_run_id = await session.scalar(
+        text(_INSERT_CURRENT_SUMMARY_RUN_SQL),
+        {
+            "run_kind": run_kind,
+            "scope": json.dumps({"provider_dataset_scope": "all_active"}),
+        },
+    )
+    if summary_run_id is None:
+        raise AssertionError("weather current-summary receipt write disappeared")
+
+    desired = (
+        await session.execute(
+            text(_WEATHER_SUMMARY_DESIRED_SQL), {"selected_at": selected_at}
+        )
+    ).mappings().all()
+    input_count = await session.scalar(
+        text(_WEATHER_SUMMARY_INPUT_COUNT_SQL), {"selected_at": selected_at}
+    )
+    existing_rows = (
+        await session.execute(
+            text(
+                """
+                SELECT feature_id, provider_dataset_id, weather_domain, forecast_style,
+                       metric_key, weather_value_key, refresh_after
+                FROM feature.current_weather_summary
+                """
+            )
+        )
+    ).mappings().all()
+    existing = {
+        (
+            str(row["feature_id"]),
+            int(row["provider_dataset_id"]),
+            str(row["weather_domain"]),
+            str(row["forecast_style"]),
+            str(row["metric_key"]),
+        ): (str(row["weather_value_key"]), row["refresh_after"])
+        for row in existing_rows
+    }
+    desired_by_key = {
+        (
+            str(row["feature_id"]),
+            int(row["provider_dataset_id"]),
+            str(row["weather_domain"]),
+            str(row["forecast_style"]),
+            str(row["metric_key"]),
+        ): row
+        for row in desired
+    }
+    inserted_count = sum(key not in existing for key in desired_by_key)
+    updated_count = sum(
+        key in existing
+        and existing[key]
+        != (str(row["weather_value_key"]), row["refresh_after"])
+        for key, row in desired_by_key.items()
+    )
+    deleted_count = sum(key not in desired_by_key for key in existing)
+    changed = [
+        row
+        for key, row in desired_by_key.items()
+        if key not in existing
+        or existing[key]
+        != (str(row["weather_value_key"]), row["refresh_after"])
+    ]
+
+    completed = await session.execute(
+        text(_COMPLETE_CURRENT_SUMMARY_RUN_SQL),
+        {
+            "summary_run_id": summary_run_id,
+            "input_count": int(input_count or 0),
+            "inserted_count": inserted_count,
+            "updated_count": updated_count,
+            "deleted_count": deleted_count,
+            "detail": json.dumps(
+                {
+                    "selection": "weather-v1",
+                    "selected_at": selected_at.isoformat(),
+                }
+            ),
+        },
+    )
+    if cast(CursorResult[Any], completed).rowcount != 1:
+        raise AssertionError("weather current-summary receipt could not become succeeded")
+    if changed:
+        await session.execute(
+            text(_UPSERT_CURRENT_WEATHER_SUMMARY_SQL),
+            [
+                {
+                    **dict(row),
+                    "summary_run_id": summary_run_id,
+                    "selected_at": selected_at,
+                }
+                for row in changed
+            ],
+        )
+    await session.execute(
+        text(_DELETE_SUPERSEDED_WEATHER_SUMMARIES_SQL),
+        {
+            "identities": json.dumps(
+                [
+                    {
+                        "feature_id": key[0],
+                        "provider_dataset_id": key[1],
+                        "weather_domain": key[2],
+                        "forecast_style": key[3],
+                        "metric_key": key[4],
+                    }
+                    for key in desired_by_key
+                ]
+            )
+        },
+    )
+    return WeatherSummaryMaterializeResult(
+        summary_run_id=int(summary_run_id),
+        selected_at=selected_at,
+        input_count=int(input_count or 0),
+        inserted_count=inserted_count,
+        updated_count=updated_count,
+        deleted_count=deleted_count,
+    )
 
 
 def weather_history_floor(
@@ -1581,8 +1954,12 @@ def _timeline_row(row: RowMapping) -> WeatherValueTimelineRow:
         valid_from=row["valid_from"],
         valid_until=row["valid_until"],
         observed_at=row["observed_at"],
-        collected_at=row["collected_at"],
+        collected_at=row["known_at"],
         source_record_key=row["source_record_key"],
+        provider_dataset_id=int(row["provider_dataset_id"]),
+        dataset_key=str(row["dataset_key"]),
+        dataset_display_name=str(row["dataset_display_name"]),
+        known_at=row["known_at"],
     )
 
 
@@ -1775,11 +2152,15 @@ def _weather_metric(row: RowMapping) -> WeatherMetric:
         issued_at=issued_at,
         valid_at=valid_at,
         observed_at=observed_at,
+        known_at=cast(datetime, row["known_at"]),
         provider=row["provider"],
         weather_domain=row["weather_domain"],
         valid_from=valid_from,
         valid_until=row["valid_until"],
         effective_at=effective_at,
+        provider_dataset_id=int(row["provider_dataset_id"]),
+        dataset_key=str(row["dataset_key"]),
+        dataset_display_name=str(row["dataset_display_name"]),
     )
 
 
@@ -2032,7 +2413,8 @@ async def _build_weather_card(
     session: AsyncSession,
     *,
     feature_id: str,
-    asof: datetime | None,
+    target_at: datetime | None,
+    known_at: datetime | None,
     freshness_seconds: int,
     nearest_weather_sql: str,
     nearest_kma_forecast_sql: str,
@@ -2040,9 +2422,9 @@ async def _build_weather_card(
 ) -> WeatherCard:
     """feature의 weather card — forecast_style × metric_key별 최신값 + freshness.
 
-    ``asof``가 주어지면 그 시점 이하 값만(미래 예보 제외). 각 (forecast_style,
-    metric_key)에서 ``COALESCE(valid_at, observed_at, issued_at)`` 최신 1건을 고른다
-    (``DISTINCT ON``). ``is_stale``은 최신 시각이 ``asof``(또는 now) 기준
+    ``target_at``와 ``known_at``가 함께 주어지면 immutable raw fact에서 그
+    business-time snapshot을 순위화하고, 둘 다 없으면 receipt-backed current
+    summary만 읽는다. ``is_stale``은 최신 시각이 target(또는 now) 기준
     ``freshness_seconds``를 넘으면 True. source trace는 ``source_styles``로 노출.
 
     폴백 병합 (#498) — 자기 weather row가 기온을 못 채우는 농촌/비격자 feature는
@@ -2059,22 +2441,39 @@ async def _build_weather_card(
 
     card.feature_id는 요청 feature_id를 유지한다.
     """
-    rows = list(
-        (await session.execute(text(_CARD_SQL), {"feature_id": feature_id, "asof": asof}))
-        .mappings()
-        .all()
-    )
-    params = {"feature_id": feature_id, "radius_m": _NEAREST_WEATHER_RADIUS_M}
+    if (target_at is None) != (known_at is None):
+        raise ValueError("weather snapshot requires target_at and known_at together")
+    card_sql = _CURRENT_CARD_SQL if target_at is None else _HISTORICAL_CARD_SQL
+
+    async def _card_rows(card_feature_id: str) -> list[RowMapping]:
+        return list(
+            (
+                await session.execute(
+                    text(card_sql),
+                    {
+                        "feature_id": card_feature_id,
+                        "target_at": target_at,
+                        "known_at": known_at,
+                    },
+                )
+            )
+            .mappings()
+            .all()
+        )
+
+    rows = await _card_rows(feature_id)
+    params = {
+        "feature_id": feature_id,
+        "radius_m": _NEAREST_WEATHER_RADIUS_M,
+        "target_at": target_at,
+        "known_at": known_at,
+    }
 
     async def _anchor_rows(sql: str) -> list[RowMapping]:
         anchor_id = (await session.execute(text(sql), params)).scalar_one_or_none()
         if anchor_id is None or str(anchor_id) == feature_id:
             return []
-        return list(
-            (await session.execute(text(_CARD_SQL), {"feature_id": str(anchor_id), "asof": asof}))
-            .mappings()
-            .all()
-        )
+        return await _card_rows(str(anchor_id))
 
     def _merge(extra: list[RowMapping]) -> None:
         """(forecast_style, metric_key) 키로 아직 없는 row만 추가 — 기존 row 보존."""
@@ -2099,15 +2498,27 @@ async def _build_weather_card(
         ts for m in metrics if (ts := (m.valid_at or m.observed_at or m.issued_at)) is not None
     ]
     latest_at = max(candidates) if candidates else None
-    reference = asof if asof is not None else kst_now()
-    is_stale = latest_at is None or (reference - latest_at).total_seconds() > freshness_seconds
+    reference = target_at if target_at is not None else kst_now()
+    refresh_afters = [row["refresh_after"] for row in rows if row["refresh_after"] is not None]
+    selected_ats = [row["selected_at"] for row in rows if row["selected_at"] is not None]
+    is_stale = (
+        latest_at is None
+        or (
+            target_at is None and (not refresh_afters or min(refresh_afters) <= reference)
+        )
+        or (
+            target_at is not None
+            and (reference - latest_at).total_seconds() > freshness_seconds
+        )
+    )
     return WeatherCard(
         feature_id=feature_id,
-        asof=asof,
         source_styles=source_styles,
         metrics=metrics,
         latest_at=latest_at,
         is_stale=is_stale,
+        selected_at=max(selected_ats) if selected_ats else target_at,
+        refresh_after=min(refresh_afters) if refresh_afters else None,
     )
 
 
@@ -2115,7 +2526,6 @@ async def build_weather_card(
     session: AsyncSession,
     *,
     feature_id: str,
-    asof: datetime | None = None,
     freshness_seconds: int = DEFAULT_WEATHER_FRESHNESS_SECONDS,
 ) -> WeatherCard:
     """공개 Feature와 공개 anchor만 사용하는 weather card."""
@@ -2123,7 +2533,8 @@ async def build_weather_card(
     return await _build_weather_card(
         session,
         feature_id=feature_id,
-        asof=asof,
+        target_at=None,
+        known_at=None,
         freshness_seconds=freshness_seconds,
         nearest_weather_sql=_NEAREST_WEATHER_SQL,
         nearest_kma_forecast_sql=_NEAREST_KMA_FORECAST_SQL,
@@ -2131,11 +2542,36 @@ async def build_weather_card(
     )
 
 
+async def build_weather_snapshot(
+    session: AsyncSession,
+    *,
+    feature_id: str,
+    target_at: datetime,
+    known_at: datetime,
+    freshness_seconds: int = DEFAULT_WEATHER_FRESHNESS_SECONDS,
+) -> WeatherCard:
+    """명시된 target/knowledge time에서 raw immutable fact를 재현한다."""
+
+    if target_at.tzinfo is None or target_at.utcoffset() is None:
+        raise ValueError("weather snapshot target_at must be timezone-aware")
+    if known_at.tzinfo is None or known_at.utcoffset() is None:
+        raise ValueError("weather snapshot known_at must be timezone-aware")
+    return await _build_weather_card(
+        session,
+        feature_id=feature_id,
+        target_at=target_at,
+        known_at=known_at,
+        freshness_seconds=freshness_seconds,
+        nearest_weather_sql=_HISTORICAL_NEAREST_WEATHER_SQL,
+        nearest_kma_forecast_sql=_HISTORICAL_NEAREST_KMA_FORECAST_SQL,
+        nearest_observed_temp_sql=_HISTORICAL_NEAREST_OBSERVED_TEMP_SQL,
+    )
+
+
 async def build_admin_weather_card(
     session: AsyncSession,
     *,
     feature_id: str,
-    asof: datetime | None = None,
     freshness_seconds: int = DEFAULT_WEATHER_FRESHNESS_SECONDS,
 ) -> WeatherCard:
     """삭제 전 base Feature와 base anchor를 사용하는 admin weather card."""
@@ -2143,7 +2579,8 @@ async def build_admin_weather_card(
     return await _build_weather_card(
         session,
         feature_id=feature_id,
-        asof=asof,
+        target_at=None,
+        known_at=None,
         freshness_seconds=freshness_seconds,
         nearest_weather_sql=_ADMIN_NEAREST_WEATHER_SQL,
         nearest_kma_forecast_sql=_ADMIN_NEAREST_KMA_FORECAST_SQL,

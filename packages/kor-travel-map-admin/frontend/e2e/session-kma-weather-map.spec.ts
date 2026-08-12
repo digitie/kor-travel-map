@@ -46,10 +46,14 @@ function makeWeatherFeature(
     name: "기상청 초단기 서울",
     status: "active",
     weather_summary: {
+      provider_dataset_id: 101,
+      dataset_key: "kma_nowcast",
+      dataset_display_name: "기상청 초단기실황",
       forecast_style: "nowcast",
       metric_key: "TMP",
       metric_name: "기온",
       provider: "python-kma-api",
+      refresh_after: "2026-08-08T04:00:00Z",
       unit: "deg_c",
       value_number: 21.5,
     },
@@ -141,11 +145,12 @@ function makeAdminFeatureDetailResponse(
 function makeFeatureWeatherResponse(featureId: string): FeatureWeatherResponse {
   return {
     data: {
-      asof: null,
       feature_id: featureId,
       is_stale: false,
       latest_at: null,
       metrics: [],
+      refresh_after: null,
+      selected_at: null,
       source_styles: [],
     },
     meta: makeMeta({ request_id: "e2e-session-kma-weather" }),
@@ -259,9 +264,13 @@ test.describe("/features — KMA 격자 weather 마커 (#603/#604)", () => {
         lon: SEOUL_LON,
         lat: SEOUL_LAT + 0.004,
         weather_summary: {
+          provider_dataset_id: 102,
+          dataset_key: "airkorea_air_quality",
+          dataset_display_name: "에어코리아 대기질",
           metric_key: "PM10",
           metric_name: "미세먼지",
           provider: "python-airkorea-api",
+          refresh_after: "2026-08-08T04:00:00Z",
           unit: "㎍/㎥",
           value_number: 35,
         },

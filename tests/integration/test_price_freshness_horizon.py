@@ -19,6 +19,8 @@ from typing import TYPE_CHECKING
 import pytest
 from sqlalchemy import text
 
+from kortravelmap.core.ids import make_payload_hash, make_source_record_key
+from kortravelmap.dto import SourceRecord
 from kortravelmap.dto._enums import FeatureKind, PriceDomain
 from kortravelmap.dto.price import PriceValue
 from kortravelmap.infra import feature_repo, price_repo
@@ -31,6 +33,11 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.integration
 
 _KST = timezone(timedelta(hours=9))
+
+_DATASET_KEYS = {
+    "python-opinet-api": "opinet_gas_station_prices",
+    "python-krex-api": "krex_rest_area_prices",
+}
 
 
 def _price_value(
@@ -71,6 +78,62 @@ class _RestArea:
     phone_number = None
 
 
+async def _append_price_response(
+    session: AsyncSession,
+    values: list[PriceValue],
+    *,
+    provider: str = "python-opinet-api",
+) -> None:
+    """T-VN-38의 source response lineage를 포함해 test price facts를 적재한다."""
+
+    dataset_key = _DATASET_KEYS[provider]
+    dataset_id = await session.scalar(
+        text(
+            """
+            SELECT provider_dataset_id
+            FROM provider_sync.provider_datasets
+            WHERE provider = :provider AND dataset_key = :dataset_key
+            """
+        ),
+        {"provider": provider, "dataset_key": dataset_key},
+    )
+    assert dataset_id is not None
+    raw_data = {
+        "values": [
+            {
+                "feature_id": value.feature_id,
+                "product_key": value.product_key,
+                "observed_at": value.observed_at.isoformat(),
+                "value_number": str(value.value_number),
+            }
+            for value in values
+        ]
+    }
+    payload_hash = make_payload_hash(raw_data)
+    source_entity_id = f"test-price:{payload_hash[:20]}"
+    await price_repo.load_price_values(
+        session,
+        values,
+        provider_dataset_id=int(dataset_id),
+        source_record=SourceRecord(
+            provider=provider,
+            dataset_key=dataset_key,
+            source_entity_type="price_response",
+            source_entity_id=source_entity_id,
+            raw_payload_hash=payload_hash,
+            raw_data=raw_data,
+            fetched_at=max(value.observed_at for value in values) + timedelta(minutes=1),
+            source_record_key=make_source_record_key(
+                provider=provider,
+                dataset_key=dataset_key,
+                source_entity_type="price_response",
+                source_entity_id=source_entity_id,
+                raw_payload_hash=payload_hash,
+            ),
+        ),
+    )
+
+
 async def test_stale_price_hidden_from_current_but_kept_in_history(
     migrated_session: AsyncSession,
 ) -> None:
@@ -81,12 +144,17 @@ async def test_stale_price_hidden_from_current_but_kept_in_history(
 
     fresh_at = now - timedelta(hours=1)
     stale_at = now - timedelta(days=10)
-    await price_repo.load_price_values(
+    await _append_price_response(
         migrated_session,
         [
             _price_value(
                 feature_id, product_key="gasoline", observed_at=fresh_at, price=1700
-            ),
+            )
+        ],
+    )
+    await _append_price_response(
+        migrated_session,
+        [
             _price_value(
                 feature_id, product_key="diesel", observed_at=stale_at, price=1500
             ),
@@ -110,11 +178,12 @@ async def test_stale_price_hidden_from_current_but_kept_in_history(
     )
     assert [p.product_key for p in card_all.current] == ["gasoline", "diesel"]
 
-    # asof 과거 시점 질의에는 지평선을 적용하지 않는다.
-    card_asof = await price_repo.build_price_card(
+    # snapshot은 observed/known time을 모두 명시하고 current 지평선을 적용하지 않는다.
+    card_asof = await price_repo.build_price_snapshot(
         migrated_session,
         feature_id=feature_id,
-        asof=now - timedelta(days=9),
+        observed_at=now - timedelta(days=9),
+        known_at=now,
     )
     assert [p.product_key for p in card_asof.current] == ["diesel"]
 
@@ -127,7 +196,7 @@ async def test_price_card_series_queries_use_identity_indexes(
     bundles = await rest_areas_to_bundles([_RestArea()], fetched_at=now)
     await feature_repo.load_bundles(migrated_session, bundles)
     feature_id = bundles[0].feature.feature_id
-    await price_repo.load_price_values(
+    await _append_price_response(
         migrated_session,
         [
             _price_value(
@@ -149,18 +218,27 @@ async def test_price_card_series_queries_use_identity_indexes(
         price_repo._CURRENT_SQL,  # noqa: SLF001
         {
             "feature_id": feature_id,
-            "asof": None,
+            "observed_at": None,
+            "known_at": None,
             "stale_hide_days": None,
         },
         planner_default=False,
         pre_statements=("SET LOCAL enable_sort = off",),
     )
-    assert_uses_index(current_plan, "uq_price_value_identity")
+    # T-VN-38 current는 immutable fact를 직접 역방향 스캔하지 않고 receipt-backed
+    # projection을 먼저 좁힌다. 따라서 hot current path의 선두 access path는
+    # summary natural-key PK여야 한다.
+    assert_uses_index(current_plan, "pk_current_price_summary")
 
     history_plan = await explain_plan(
         migrated_session,
         price_repo._HISTORY_SQL,  # noqa: SLF001
-        {"feature_id": feature_id, "asof": None, "limit": 100},
+        {
+            "feature_id": feature_id,
+            "observed_at": None,
+            "known_at": None,
+            "limit": 100,
+        },
         planner_default=False,
     )
     assert_uses_index(
@@ -183,7 +261,7 @@ async def test_stale_only_feature_is_stale_and_current_empty(
     bundles = await rest_areas_to_bundles([_StaleArea()], fetched_at=now)
     await feature_repo.load_bundles(migrated_session, bundles)
     feature_id = bundles[0].feature.feature_id
-    await price_repo.load_price_values(
+    await _append_price_response(
         migrated_session,
         [
             _price_value(
@@ -223,7 +301,7 @@ async def test_stale_price_excluded_from_bbox_price_summary(
     )
     await feature_repo.upsert_feature(migrated_session, price_feature)
 
-    await price_repo.load_price_values(
+    await _append_price_response(
         migrated_session,
         [
             _price_value(
@@ -234,19 +312,25 @@ async def test_stale_price_excluded_from_bbox_price_summary(
             ),
             _price_value(
                 price_feature.feature_id,
-                product_key="gasoline",
-                observed_at=now - timedelta(minutes=30),
-                price=1710,
-                provider="python-krex-api",
-                price_domain=PriceDomain.REST_AREA_FUEL,
-            ),
-            _price_value(
-                price_feature.feature_id,
                 product_key="diesel",
                 observed_at=now - timedelta(days=10),
                 price=1500,
             ),
         ],
+    )
+    await _append_price_response(
+        migrated_session,
+        [
+            _price_value(
+                price_feature.feature_id,
+                product_key="gasoline",
+                observed_at=now - timedelta(minutes=30),
+                price=1710,
+                provider="python-krex-api",
+                price_domain=PriceDomain.REST_AREA_FUEL,
+            )
+        ],
+        provider="python-krex-api",
     )
     await migrated_session.flush()
 

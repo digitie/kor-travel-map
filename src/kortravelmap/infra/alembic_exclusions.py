@@ -10,6 +10,9 @@ UNMAPPED_APP_TABLES = frozenset(
     {
         ("feature", "feature_weather_values"),
         ("feature", "feature_price_values"),
+        ("feature", "current_weather_summary"),
+        ("feature", "current_price_summary"),
+        ("ops", "current_summary_runs"),
         ("ops", "system_log"),
         ("ops", "api_call_log"),
         ("ops", "public_api_keys"),

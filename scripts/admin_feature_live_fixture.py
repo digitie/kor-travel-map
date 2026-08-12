@@ -16,7 +16,7 @@ import json
 import math
 import re
 from collections import Counter
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Final, NamedTuple
 
@@ -24,27 +24,136 @@ from sqlalchemy import text
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from kortravelmap.core.ids import (
+    make_feature_id,
+    make_payload_hash,
+    make_source_record_key,
+)
+from kortravelmap.dto import SourceRecord
 from kortravelmap.dto._time import kst_now
 from kortravelmap.dto.price import PriceValue
 from kortravelmap.dto.weather import WeatherValue
 from kortravelmap.infra import price_repo, weather_repo
 from kortravelmap.infra.db import make_async_engine
+from kortravelmap.infra.provider_refresh_policy_repo import (
+    get_provider_refresh_policy,
+    upsert_provider_refresh_policy,
+)
 from kortravelmap.settings import KorTravelMapSettings
 
 _RUN_ID_RE: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9][a-z0-9-]{15,79}$")
 _LON: Final[float] = 127.5
 _LAT: Final[float] = 36.5
+_E2E_PROVIDER: Final[str] = "e2e-live-acceptance"
+
+
+def _dataset_key(run_id: str, kind: str) -> str:
+    return f"admin-live-{run_id}-{kind}"
+
+
+async def _ensure_dataset(session: AsyncSession, *, run_id: str, kind: str) -> int:
+    dataset_key = _dataset_key(run_id, kind)
+    value = await session.scalar(
+        text(
+            """
+            INSERT INTO provider_sync.provider_datasets (
+                provider, dataset_key, display_name, source_kind
+            ) VALUES (:provider, :dataset_key, :display_name, 'manual')
+            ON CONFLICT (provider, dataset_key) DO UPDATE
+            SET is_active = true
+            RETURNING provider_dataset_id
+            """
+        ),
+        {
+            "provider": _E2E_PROVIDER,
+            "dataset_key": dataset_key,
+            "display_name": f"E2E admin {kind} {run_id}",
+        },
+    )
+    assert value is not None
+    dataset_id = int(value)
+    if kind == "weather":
+        policy = await get_provider_refresh_policy(
+            session, provider_dataset_id=dataset_id
+        )
+        await upsert_provider_refresh_policy(
+            session,
+            provider_dataset_id=dataset_id,
+            source_kind="manual",
+            expected_revision=(policy.revision if policy is not None else None),
+            stale_after_minutes=24 * 60,
+        )
+    return dataset_id
+
+
+def _response_record(
+    *, run_id: str, kind: str, fetched_at: datetime
+) -> SourceRecord:
+    dataset_key = _dataset_key(run_id, kind)
+    raw_data = {"fixture": "admin-feature-live-acceptance", "run_id": run_id, "kind": kind}
+    payload_hash = make_payload_hash(raw_data)
+    source_entity_id = f"run:{run_id}:{kind}"
+    return SourceRecord(
+        provider=_E2E_PROVIDER,
+        dataset_key=dataset_key,
+        source_entity_type=f"{kind}_response",
+        source_entity_id=source_entity_id,
+        raw_payload_hash=payload_hash,
+        raw_data=raw_data,
+        fetched_at=fetched_at,
+        source_record_key=make_source_record_key(
+            provider=_E2E_PROVIDER,
+            dataset_key=dataset_key,
+            source_entity_type=f"{kind}_response",
+            source_entity_id=source_entity_id,
+            raw_payload_hash=payload_hash,
+        ),
+    )
 
 
 def _feature_ids(run_id: str) -> tuple[str, str]:
-    prefix = f"e2e_live_acceptance::{run_id}"
-    return f"{prefix}::weather", f"{prefix}::price"
+    """API resolver가 재해석할 수 있는 live weather/price legacy ID 두 건."""
+
+    return (
+        _provider_fixture_feature_id(run_id, "weather"),
+        _provider_fixture_feature_id(run_id, "price"),
+    )
+
+
+def _provider_fixture_feature_id(run_id: str, kind: str) -> str:
+    return make_feature_id(
+        bjd_code=None,
+        kind=kind,
+        category="00000000",
+        source_type=_E2E_PROVIDER,
+        source_natural_key=f"{run_id}:{kind}",
+    )
+
+
+def _admin_fixture_feature_id(run_id: str, role: str) -> str:
+    """Browser의 admin create body와 같은 deterministic ``f_*`` identity."""
+
+    logical_id = f"e2e_live_acceptance::{run_id}::{role}"
+    idempotency_key = hashlib.sha256(logical_id.encode()).hexdigest()
+    return make_feature_id(
+        bjd_code=None,
+        kind="place",
+        category="01070300",
+        source_type="user_request",
+        source_natural_key=idempotency_key,
+    )
+
+
+def _admin_marker_feature_ids(run_id: str) -> dict[str, str]:
+    return {
+        _admin_fixture_feature_id(run_id, f"marker::{status}"): status
+        for status in ("draft", "inactive", "hidden")
+    }
 
 
 def _api_feature_fingerprints(
     run_id: str,
 ) -> dict[str, tuple[float, float, frozenset[str]]]:
-    prefix = f"e2e_live_acceptance::{run_id}"
     jitter = hashlib.sha256(f"acceptance-coord:{run_id}".encode()).digest()
 
     def coord_jitter(offset: int) -> float:
@@ -56,12 +165,12 @@ def _api_feature_fingerprints(
     marker_lat = _LAT + coord_jitter(4)
     expected: dict[str, tuple[float, float, frozenset[str]]] = {}
     for index, status in enumerate(("draft", "inactive", "hidden")):
-        expected[f"{prefix}::marker::{status}"] = (
+        expected[_admin_fixture_feature_id(run_id, f"marker::{status}")] = (
             marker_lon + index * 0.001,
             marker_lat + index * 0.001,
             frozenset({f"E2E {status} marker {run_id}"}),
         )
-    expected[f"{prefix}::correction"] = (
+    expected[_admin_fixture_feature_id(run_id, "correction")] = (
         _LON,
         _LAT - 0.002,
         frozenset(
@@ -75,7 +184,7 @@ def _api_feature_fingerprints(
         f"acceptance-search:{run_id}".encode()
     ).hexdigest()[:32]
     for index, suffix in enumerate(("alpha", "beta")):
-        expected[f"{prefix}::search::{suffix}"] = (
+        expected[_admin_fixture_feature_id(run_id, f"search::{suffix}")] = (
             _LON + 0.004 + index * 0.001,
             _LAT + 0.004 + index * 0.001,
             frozenset({f"e2esrch {search_token} {suffix}"}),
@@ -106,6 +215,44 @@ async def _counts(session: AsyncSession, feature_ids: tuple[str, str]) -> dict[s
         )
     ).mappings().one()
     return {key: int(row[key]) for key in ("features", "weather_values", "price_values")}
+
+
+async def _owned_summary_run_ids(
+    session: AsyncSession,
+    feature_ids: tuple[str, str],
+) -> tuple[int, int]:
+    """fixture weather/price current-summary receipt 두 건을 정확히 식별한다.
+
+    terminal receipt는 의도적으로 불변이라 Feature cascade 뒤에도 남는다. 따라서
+    clone digest는 이 exact two IDs만 run-owned 변화로 정규화해야 하며, broad
+    ``run_kind``/시간 범위 필터로 다른 receipt를 숨기면 안 된다.
+    """
+
+    rows = (
+        await session.execute(
+            text(
+                """
+                SELECT summary_run_id
+                FROM feature.current_weather_summary
+                WHERE feature_id = :weather_id
+                UNION ALL
+                SELECT summary_run_id
+                FROM feature.current_price_summary
+                WHERE feature_id = :price_id
+                ORDER BY summary_run_id
+                """
+            ),
+            {"weather_id": feature_ids[0], "price_id": feature_ids[1]},
+        )
+    ).scalars().all()
+    summary_run_ids = tuple(int(value) for value in rows)
+    if (
+        len(summary_run_ids) != 2
+        or len(set(summary_run_ids)) != 2
+        or any(value <= 0 for value in summary_run_ids)
+    ):
+        raise RuntimeError("owned weather/price current-summary receipt가 정확하지 않습니다")
+    return summary_run_ids[0], summary_run_ids[1]
 
 
 async def _assert_owned_or_absent(
@@ -198,9 +345,7 @@ async def _foreign_key_reference_counts(
                   local_schema.nspname AS schema_name,
                   local_table.relname AS table_name,
                   local_column.attname AS column_name,
-                  target_column.attname AS target_column_name,
-                  cardinality(constraint_row.conkey) AS local_column_count,
-                  cardinality(constraint_row.confkey) AS target_column_count
+                  target_column.attname AS target_column_name
                 FROM pg_catalog.pg_constraint AS constraint_row
                 JOIN pg_catalog.pg_class AS local_table
                   ON local_table.oid = constraint_row.conrelid
@@ -214,6 +359,12 @@ async def _foreign_key_reference_counts(
                  AND target_column.attnum = constraint_row.confkey[1]
                 WHERE constraint_row.contype = 'f'
                   AND constraint_row.confrelid = 'feature.features'::regclass
+                  -- subtype/alias identity fence처럼 feature_id에 다른 정본 열을 붙이는
+                  -- composite FK는 이 fixture가 가진 feature_id만으로 reference를 셀 수
+                  -- 없다. 이 ownership 검사는 단일 feature_id FK의 cascade 잔여만
+                  -- 정확히 계수한다.
+                  AND cardinality(constraint_row.conkey) = 1
+                  AND cardinality(constraint_row.confkey) = 1
                 ORDER BY local_schema.nspname, local_table.relname,
                          local_column.attname, constraint_row.conname
                 """
@@ -222,11 +373,7 @@ async def _foreign_key_reference_counts(
     ).mappings()
     counts: dict[str, int] = {}
     for constraint in constraints:
-        if (
-            int(constraint["local_column_count"]) != 1
-            or int(constraint["target_column_count"]) != 1
-            or str(constraint["target_column_name"]) != "feature_id"
-        ):
+        if str(constraint["target_column_name"]) != "feature_id":
             raise RuntimeError("feature FK topology가 단일 feature_id 계약과 다릅니다")
         schema_name = str(constraint["schema_name"])
         table_name = str(constraint["table_name"])
@@ -255,6 +402,7 @@ async def _foreign_key_reference_counts(
 
 async def _assert_owned_values(
     session: AsyncSession,
+    run_id: str,
     feature_ids: tuple[str, str],
     present: set[str],
     *,
@@ -266,23 +414,13 @@ async def _assert_owned_values(
             text(
                 """
                 SELECT
-                  provider, weather_domain, forecast_style, timeline_bucket,
+                  dataset.provider, dataset.dataset_key,
+                  weather_domain, forecast_style, timeline_bucket,
                   metric_key, metric_name, value_number, unit,
                   normalization_version, payload
-                FROM feature.feature_weather_values
-                WHERE feature_id = :feature_id
-                """
-                + lock_clause
-            ),
-            {"feature_id": feature_ids[0]},
-        )
-    ).mappings().all()
-    weather_series_rows = (
-        await session.execute(
-            text(
-                """
-                SELECT provider, weather_domain, forecast_style, metric_key
-                FROM feature.weather_metric_series
+                FROM feature.feature_weather_values AS fact
+                JOIN provider_sync.provider_datasets AS dataset
+                  ON dataset.provider_dataset_id = fact.provider_dataset_id
                 WHERE feature_id = :feature_id
                 """
                 + lock_clause
@@ -295,9 +433,12 @@ async def _assert_owned_values(
             text(
                 """
                 SELECT
-                  provider, price_domain, product_key, product_name,
+                  dataset.provider, dataset.dataset_key,
+                  price_domain, product_key, product_name,
                   value_number, unit, normalization_version, payload
-                FROM feature.feature_price_values
+                FROM feature.feature_price_values AS fact
+                JOIN provider_sync.provider_datasets AS dataset
+                  ON dataset.provider_dataset_id = fact.provider_dataset_id
                 WHERE feature_id = :feature_id
                 """
                 + lock_clause
@@ -314,20 +455,11 @@ async def _assert_owned_values(
                 "metric_name": "인수 기온",
                 "normalization_version": "e2e-v1",
                 "payload": {"fixture": "admin-feature-live-acceptance"},
-                "provider": "e2e-live-acceptance",
+                "provider": _E2E_PROVIDER,
+                "dataset_key": _dataset_key(run_id, "weather"),
                 "timeline_bucket": "short",
                 "unit": "deg_c",
                 "value_number": Decimal("21.5"),
-                "weather_domain": "kma_short_forecast",
-            }
-        )
-    expected_weather_series = []
-    if feature_ids[0] in present:
-        expected_weather_series.append(
-            {
-                "forecast_style": "short",
-                "metric_key": "TMP",
-                "provider": "e2e-live-acceptance",
                 "weather_domain": "kma_short_forecast",
             }
         )
@@ -340,15 +472,14 @@ async def _assert_owned_values(
                 "price_domain": "opinet_gas_station",
                 "product_key": "gasoline",
                 "product_name": "인수 휘발유",
-                "provider": "e2e-live-acceptance",
+                "provider": _E2E_PROVIDER,
+                "dataset_key": _dataset_key(run_id, "price"),
                 "unit": "KRW/L",
                 "value_number": Decimal("1711"),
             }
         )
     if [dict(row) for row in weather_rows] != expected_weather:
         raise RuntimeError("owned weather value fingerprint가 다릅니다")
-    if [dict(row) for row in weather_series_rows] != expected_weather_series:
-        raise RuntimeError("owned weather series fingerprint가 다릅니다")
     if [dict(row) for row in price_rows] != expected_price:
         raise RuntimeError("owned price value fingerprint가 다릅니다")
 
@@ -369,14 +500,19 @@ async def _assert_owned_state(
     counts = await _counts(session, feature_ids)
     if counts["features"] != len(present):
         raise RuntimeError("owned fixture cardinality와 fingerprint가 다릅니다")
-    await _assert_owned_values(session, feature_ids, present, lock=lock)
+    await _assert_owned_values(session, run_id, feature_ids, present, lock=lock)
     foreign_keys = await _foreign_key_reference_counts(session, feature_ids)
     expected_references: dict[str, int] = {}
+    if present:
+        # feature INSERT trigger가 canonical alias를 함께 만든다. alias는 direct
+        # feature_id FK이므로 fixture cleanup의 cascade evidence에 포함한다.
+        expected_references["feature.feature_aliases.feature_id"] = len(present)
     if feature_ids[0] in present:
         expected_references["feature.feature_weather_values.feature_id"] = 1
-        expected_references["feature.weather_metric_series.feature_id"] = 1
+        expected_references["feature.current_weather_summary.feature_id"] = 1
     if feature_ids[1] in present:
         expected_references["feature.feature_price_values.feature_id"] = 1
+        expected_references["feature.current_price_summary.feature_id"] = 1
     observed_references = {key: value for key, value in foreign_keys.items() if value}
     if observed_references != expected_references:
         raise RuntimeError("owned fixture에 예상하지 않은 FK reference가 있습니다")
@@ -386,7 +522,7 @@ async def _assert_owned_state(
 async def _seed(
     session: AsyncSession,
     run_id: str,
-) -> tuple[dict[str, int], dict[str, int]]:
+) -> tuple[dict[str, int], dict[str, int], tuple[int, int]]:
     feature_ids = _feature_ids(run_id)
     before = await _counts(session, feature_ids)
     if before != {"features": 0, "weather_values": 0, "price_values": 0}:
@@ -428,6 +564,8 @@ async def _seed(
         },
     )
     now = kst_now().replace(microsecond=0)
+    weather_dataset_id = await _ensure_dataset(session, run_id=run_id, kind="weather")
+    price_dataset_id = await _ensure_dataset(session, run_id=run_id, kind="price")
     await weather_repo.load_weather_values(
         session,
         [
@@ -445,9 +583,11 @@ async def _seed(
                 valid_at=now,
                 normalization_version="e2e-v1",
                 payload={"fixture": "admin-feature-live-acceptance"},
-                collected_at=now,
             )
         ],
+        provider_dataset_id=weather_dataset_id,
+        source_record=_response_record(run_id=run_id, kind="weather", fetched_at=now),
+        selected_at=now,
     )
     await price_repo.load_price_values(
         session,
@@ -463,14 +603,15 @@ async def _seed(
                 observed_at=now,
                 normalization_version="e2e-v1",
                 payload={"fixture": "admin-feature-live-acceptance"},
-                collected_at=now,
             )
         ],
+        provider_dataset_id=price_dataset_id,
+        source_record=_response_record(run_id=run_id, kind="price", fetched_at=now),
     )
     observed, foreign_keys = await _assert_owned_state(session, run_id, feature_ids)
     if observed != {"features": 2, "weather_values": 1, "price_values": 1}:
         raise RuntimeError("owned weather/price fixture cardinality가 예상과 다릅니다")
-    return observed, foreign_keys
+    return observed, foreign_keys, await _owned_summary_run_ids(session, feature_ids)
 
 
 async def _cleanup(
@@ -494,7 +635,76 @@ async def _cleanup(
     observed, foreign_keys = await _assert_owned_state(session, run_id, feature_ids)
     if observed != {"features": 0, "weather_values": 0, "price_values": 0}:
         raise RuntimeError("owned weather/price fixture cleanup이 완결되지 않았습니다")
+    await _delete_owned_datasets(session, run_id)
     return observed, foreign_keys
+
+
+async def _delete_owned_datasets(session: AsyncSession, run_id: str) -> None:
+    """fixture response lineage와 dataset/policy를 feature 삭제 뒤 완전히 지운다."""
+
+    dataset_keys = [_dataset_key(run_id, kind) for kind in ("weather", "price")]
+    params = {"provider": _E2E_PROVIDER, "dataset_keys": dataset_keys}
+    # 0091의 entity-head 완결성 trigger 때문에 head → record → entity 순서가
+    # 필수다. dataset은 모든 raw 계보와 policy가 사라진 뒤에만 지운다.
+    for statement in (
+        """
+        DELETE FROM provider_sync.source_entity_heads AS head
+        USING provider_sync.source_entities AS entity,
+              provider_sync.provider_datasets AS dataset
+        WHERE head.source_entity_key = entity.source_entity_key
+          AND entity.provider_dataset_id = dataset.provider_dataset_id
+          AND dataset.provider = :provider
+          AND dataset.dataset_key = ANY(CAST(:dataset_keys AS text[]))
+        """,
+        """
+        DELETE FROM provider_sync.source_records AS record
+        USING provider_sync.source_entities AS entity,
+              provider_sync.provider_datasets AS dataset
+        WHERE record.source_entity_key = entity.source_entity_key
+          AND entity.provider_dataset_id = dataset.provider_dataset_id
+          AND dataset.provider = :provider
+          AND dataset.dataset_key = ANY(CAST(:dataset_keys AS text[]))
+        """,
+        """
+        DELETE FROM provider_sync.source_entities AS entity
+        USING provider_sync.provider_datasets AS dataset
+        WHERE entity.provider_dataset_id = dataset.provider_dataset_id
+          AND dataset.provider = :provider
+          AND dataset.dataset_key = ANY(CAST(:dataset_keys AS text[]))
+        """,
+        """
+        DELETE FROM ops.provider_refresh_policies AS policy
+        USING provider_sync.provider_datasets AS dataset
+        WHERE policy.provider_dataset_id = dataset.provider_dataset_id
+          AND dataset.provider = :provider
+          AND dataset.dataset_key = ANY(CAST(:dataset_keys AS text[]))
+        """,
+        """
+        DELETE FROM provider_sync.provider_datasets
+        WHERE provider = :provider
+          AND dataset_key = ANY(CAST(:dataset_keys AS text[]))
+        """,
+    ):
+        await session.execute(text(statement), params)
+    remaining = int(
+        (
+            await session.execute(
+                text(
+                    """
+                    SELECT count(*)
+                    FROM provider_sync.provider_datasets
+                    WHERE provider = :provider
+                      AND dataset_key = ANY(CAST(:dataset_keys AS text[]))
+                    """
+                ),
+                params,
+            )
+        )
+        .scalars()
+        .one()
+    )
+    if remaining:
+        raise RuntimeError("owned fixture provider dataset cleanup이 완결되지 않았습니다")
 
 
 class _ApiOwnedInspection(NamedTuple):
@@ -522,12 +732,12 @@ async def _inspect_api_owned(
                   x_extension.ST_X(coord) AS lon,
                   x_extension.ST_Y(coord) AS lat
                 FROM feature.features
-                WHERE feature_id LIKE :prefix ESCAPE '\\'
+                WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
                 ORDER BY feature_id
                 FOR UPDATE
                 """
             ),
-            {"prefix": f"e2e_live_acceptance::{run_id}::%"},
+            {"feature_ids": list(feature_ids)},
         )
     ).mappings().all()
     for row in rows:
@@ -653,10 +863,9 @@ async def _inspect_api_owned(
         if change_kind == "delete":
             expected_status = "deleted"
         elif change_kind == "add":
-            for marker_status in ("draft", "inactive", "hidden"):
-                if feature_id.endswith(f"::marker::{marker_status}"):
-                    expected_status = marker_status
-                    break
+            expected_status = _admin_marker_feature_ids(run_id).get(
+                feature_id, expected_status
+            )
         if (
             payload.get("feature_id") != feature_id
             or payload.get("kind") != "place"
@@ -684,7 +893,10 @@ async def _inspect_api_owned(
 
     for feature_id, changes in changes_by_feature.items():
         expected_sequence = ["add", "delete"]
-        if feature_id.endswith("::correction") and "update" in changes:
+        if (
+            feature_id == _admin_fixture_feature_id(run_id, "correction")
+            and "update" in changes
+        ):
             expected_sequence = ["add", "update", "delete"]
         versions = [
             int(row["version"])
@@ -699,17 +911,21 @@ async def _inspect_api_owned(
         raise RuntimeError("API-owned Feature와 version 이력이 일치하지 않습니다")
 
     foreign_keys = await _foreign_key_reference_counts(session, feature_ids)
-    unexpected_references = {
+    expected_references: dict[str, int] = {}
+    if rows:
+        expected_references["feature.feature_aliases.feature_id"] = len(rows)
+    if version_rows:
+        expected_references["feature.feature_versions.feature_id"] = len(version_rows)
+    observed_references = {
         key: value
         for key, value in foreign_keys.items()
-        if value and key != "feature.feature_versions.feature_id"
+        if value
     }
-    if unexpected_references:
-        raise RuntimeError("API-owned Feature에 예상하지 않은 FK reference가 있습니다")
-    if foreign_keys.get("feature.feature_versions.feature_id", 0) != len(
-        version_rows
-    ):
-        raise RuntimeError("API-owned Feature version FK 수가 다릅니다")
+    if observed_references != expected_references:
+        raise RuntimeError(
+            "API-owned Feature FK reference 감사가 다릅니다: "
+            f"expected={expected_references!r}, observed={observed_references!r}"
+        )
     return _ApiOwnedInspection(
         feature_ids=feature_ids,
         features=len(rows),
@@ -934,8 +1150,9 @@ async def _run(
     engine = make_async_engine(settings.pg_dsn)
     try:
         async with AsyncSession(engine) as session, session.begin():
+            summary_run_ids: tuple[int, int] | None = None
             if action == "seed":
-                counts, foreign_keys = await _seed(session, run_id)
+                counts, foreign_keys, summary_run_ids = await _seed(session, run_id)
             elif action == "cleanup":
                 counts, foreign_keys = await _cleanup(session, run_id)
             elif action == "purge":
@@ -973,6 +1190,10 @@ async def _run(
         "foreign_key_references": sum(foreign_keys.values()),
         "version": 1,
     }
+    if action == "seed":
+        if summary_run_ids is None:
+            raise AssertionError("seed summary receipt result disappeared")
+        result["summary_run_ids"] = list(summary_run_ids)
     if action == "purge":
         result["purged"] = purged
     return result

@@ -11,8 +11,9 @@
 2. **공간 쿼리 술어에서 좌표 형변환 금지** — 매 행 `ST_Transform`은 GIST
    인덱스 무효화. 입력 좌표는 CTE에서 1회 변환 (ADR-012).
 3. **반경 검색은 EPSG:5179 (meter)** — `coord_5179` 컬럼에 적용 (ADR-012).
-4. **시계열은 BRIN 인덱스** — `feature_price_values`, `feature_weather_values`, `source_records`,
-   `import_jobs` 등.
+4. **시계열 access path는 실제 read를 따른다** — immutable weather/price fact는 canonical
+   identity와 newest rank B-tree, normal current read는 summary fact pointer를 쓴다. 무측정 BRIN을
+   관성으로 두지 않는다.
 5. **65,535 파라미터 한도** — `psycopg.copy_*` 우선, 안전 마진 30k (ADR-013).
 6. **`pg_trgm.similarity_threshold`은 `SET LOCAL`만** — 전역 변경 금지.
 7. **부분 인덱스 적극 활용** — `WHERE deleted_at IS NULL`, `WHERE status='active'`
@@ -185,21 +186,25 @@ LIMIT 10;
 
 prefix가 짧으면 `idx_features_name_text_pattern_ops` 추가 고려.
 
-## 4. 시계열 BRIN 인덱스
+## 4. immutable 시계열 fact와 current projection
 
 ### 4.1 사용 케이스
 
-- `feature_price_values.observed_at`
-- `feature_weather_values.valid_at`, `collected_at`
+- `feature_price_values(feature_id, observed_at DESC, known_at DESC, provider_dataset_id, price_domain, product_key)`
+- `feature_weather_values(feature_id, target_at DESC, known_at DESC)`
+- `current_{weather,price}_summary`의 selected immutable fact pointer
 - `source_records.imported_at`, `fetched_at`
 - `import_jobs.created_at` (B-Tree)
 - `ops.api_call_log.occurred_at`
 
 ### 4.2 BRIN이 효율적이려면
 
-- **시간순 insert가 누적되어야 한다** — bulk upsert 시 `ORDER BY observed_at`.
-- 무작위 insert 패턴은 BRIN 효율을 떨어뜨림.
-- 시계열 read는 범위 (`WHERE valid_at BETWEEN ...`) 위주.
+- current projection은 각 projection-kind advisory lock을 desired set 계산 전에 취한다.
+  새 writer가 commit한 winner를 먼저 계산한 오래된 writer가 되돌릴 수 없다.
+- history/timeline은 fact rank index로 `(feature_id, temporal order)`를 제한한다. normal
+  card/map/bbox는 ranked raw fact를 feature마다 반복하지 않고 current summary set join을 쓴다.
+- source revision은 immutable fact identity의 일부이므로 같은 payload 재수집과 correction은
+  upsert가 아니라 source record/fact append 또는 no-op으로 구분한다.
 
 ### 4.3 쿼리 예시
 
@@ -211,13 +216,13 @@ WHERE pv.feature_id = :feature_id
   AND pv.observed_at >= now() - interval '30 days'
 ORDER BY pv.observed_at;
 
--- weather metric의 최신값
-SELECT DISTINCT ON (metric_key)
-  wv.metric_key, wv.value_number, wv.unit, wv.valid_at, wv.provider
-FROM feature.feature_weather_values wv
-WHERE wv.feature_id = :feature_id
-  AND wv.valid_at >= now() - interval '24 hours'
-ORDER BY wv.metric_key, wv.valid_at DESC NULLS LAST;
+-- normal weather card: value를 복제하지 않는 summary pointer를 fact에 set join
+SELECT wv.metric_key, wv.value_number, wv.unit, wv.target_at
+FROM feature.current_weather_summary cws
+JOIN feature.feature_weather_values wv
+  ON wv.weather_value_key = cws.weather_value_key
+WHERE cws.feature_id = :feature_id
+  AND cws.refresh_after > clock_timestamp();
 ```
 
 ## 5. bulk insert / upsert
@@ -254,7 +259,7 @@ import psycopg
 async with await psycopg.AsyncConnection.connect(pg_dsn) as conn:
     async with conn.cursor() as cur:
         async with cur.copy(
-            "COPY feature.feature_price_values (price_value_key, feature_id, provider, price_domain, product_key, observed_at, value_number, unit) FROM STDIN"
+            "COPY feature.feature_price_values (price_value_key, feature_id, provider_dataset_id, price_domain, product_key, observed_at, known_at, value_number, unit, source_entity_key, source_record_key) FROM STDIN"
         ) as copy:
             async for row in row_iter_sorted_by_observed_at:
                 await copy.write_row(row)
@@ -400,17 +405,18 @@ CREATE INDEX idx_feature_places_payload_gin
 ## 8. ORDER BY + LIMIT 최적화
 
 - `ORDER BY ... LIMIT n`은 인덱스를 그대로 탈 수 있게 컬럼 순서 맞추기.
-- `idx_weather_feature_metric_time (feature_id, metric_key, valid_at DESC NULLS
-  LAST)` 같은 복합 인덱스로 "feature별 metric별 최신값 N개"를 인덱스만으로
-  scan.
+- `idx_weather_values_feature_target_known`과
+  `idx_price_values_feature_observed_identity`는 raw timeline/snapshot candidate를 정렬한다.
+  normal current card는 summary pointer를 fact에 join하므로 feature별 winner scan을 반복하지 않는다.
 
 ```sql
 -- 인덱스만으로 scan (Index Only Scan)
-SELECT feature_id, metric_key, valid_at, value_number
-FROM feature.feature_weather_values
-WHERE feature_id = :fid AND metric_key = 'T1H'
-ORDER BY valid_at DESC NULLS LAST
-LIMIT 1;
+SELECT wv.feature_id, wv.metric_key, wv.target_at, wv.value_number
+FROM feature.current_weather_summary cws
+JOIN feature.feature_weather_values wv
+  ON wv.weather_value_key = cws.weather_value_key
+WHERE cws.feature_id = :fid
+  AND cws.refresh_after > clock_timestamp();
 ```
 
 ### 8.3 vNext 3단 성능·DDL gate (ADR-075 D-12-4) — **본 절이 정본**
@@ -515,9 +521,10 @@ tier-2 100만+ harness **수 분~수십 분(CI 아님)** 을 실측·재확인�
 - **T-VN-53 cursor rotation**: T-VN-15가 versioned HMAC keyset을 clean-cut으로 채택했다. cursor는
   단명이라 rotation 시 진행 cursor만 422→재조회(무손실)된다. 운영 절차는 "secret compromise
   또는 정기(분기) 교체 시 단일 활성 key clean-cut 교체". grace window는 트리거 전 미구현.
-- **T-VN-54 weather 볼륨**: `feature_weather_values`는 semantic UNIQUE(0060) upsert(수렴)이지
-  시계열 append가 아니고, 대상은 `poi_cache_targets`로 상한된다. 정상상태 활성 행은 partition/
-  hypertable 임계(>50M) 아래로 추정. T-VN-38(current summary)이 이력 보존으로 바뀌면 재측정.
+- **T-VN-54 weather 볼륨**: T-VN-38부터 `feature_weather_values`는 source revision을 포함한
+  immutable append fact다. `current_weather_summary`는 값 복제 없이 hot read를 고정하지만 history
+  retention은 계속 증가한다. 활성 fact가 50M을 넘거나 retention p95가 100 ms를 넘으면 partition/
+  hypertable을 재평가한다.
 - **T-VN-55 listener 분리**: API/Dagster는 이미 물리 분리돼 있고 내부 listener는 read 지배
   비대칭이라 분리 이득이 배포 복잡성을 넘지 못한다.
 - **T-VN-56 fixture 주기**: tier-2(100만+)는 release 주기가 정확하다(비용 수십 분, 결함 검출은

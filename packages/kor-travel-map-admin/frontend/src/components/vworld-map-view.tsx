@@ -484,7 +484,11 @@ export interface ClusterFeatureInput {
 
 
 interface ClusterWeatherSummaryPoint {
-  provider?: string | null;
+  provider_dataset_id: number;
+  dataset_key: string;
+  dataset_display_name: string;
+  provider: string;
+  weather_domain?: string | null;
   forecast_style?: string | null;
   metric_key: string;
   metric_name?: string | null;
@@ -494,6 +498,8 @@ interface ClusterWeatherSummaryPoint {
   observed_at?: string | null;
   valid_at?: string | null;
   issued_at?: string | null;
+  known_at?: string | null;
+  refresh_after: string;
 }
 
 type GeometryFeatureKind = "route" | "area";
@@ -547,8 +553,10 @@ function shouldClusterAsPoint(feature: ClusterFeatureInput): boolean {
 
 function markerIconForFeature(feature: ClusterFeatureInput): string | null {
   if (feature.kind === "weather") {
-    if (feature.weather_summary?.provider === "python-kma-api") return "weather";
-    if (feature.weather_summary?.provider === "python-airkorea-api") {
+    if (feature.weather_summary?.weather_domain?.startsWith("kma_")) {
+      return "weather";
+    }
+    if (feature.weather_summary?.weather_domain?.startsWith("airkorea_")) {
       return "air-quality";
     }
   }
@@ -1164,12 +1172,10 @@ export function VWorldFeatureClusters({
     }
     return byId.size === features.length ? features : Array.from(byId.values());
   }, [features]);
-  const hasOpinetPriceSummary = useMemo(
+  const hasPriceSummary = useMemo(
     () =>
       dedupedFeatures.some((feature) =>
-        feature.price_summary?.some(
-          (point) => point.provider === "python-opinet-api",
-        ),
+        (feature.price_summary?.length ?? 0) > 0,
       ),
     [dedupedFeatures],
   );
@@ -1192,14 +1198,14 @@ export function VWorldFeatureClusters({
     weatherSummariesRef.current = weatherSummaries;
   });
 
-  // 페이지를 자정 너머 열어 둔 경우에도 OpiNet의 "과거 M/D" 판정이 바뀌도록 KST
+  // 페이지를 자정 너머 열어 둔 경우에도 price marker의 날짜 표기가 바뀌도록 KST
   // 자정에만 DOM 마커 갱신을 예약한다. 분 단위 state tick/re-render는 만들지 않는다.
   useEffect(() => {
-    if (!hasOpinetPriceSummary) return;
+    if (!hasPriceSummary) return;
     return scheduleKstMidnightTicks(() => {
       schedulePointMarkerUpdateRef.current?.();
     });
-  }, [hasOpinetPriceSummary]);
+  }, [hasPriceSummary]);
 
   const data = useMemo<GeoJSON.FeatureCollection<GeoJSON.Point>>(
     () => ({

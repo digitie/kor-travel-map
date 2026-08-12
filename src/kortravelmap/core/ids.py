@@ -499,33 +499,31 @@ WEATHER_VALUE_KEY_HASH_LENGTH: Final[int] = 20
 def make_weather_value_key(
     *,
     feature_id: str,
-    provider: str,
+    provider_dataset_id: int,
     weather_domain: str,
     forecast_style: str,
     metric_key: str,
-    issued_at: datetime | None = None,
-    valid_at: datetime | None = None,
-    observed_at: datetime | None = None,
+    target_at: datetime,
+    source_record_key: str,
 ) -> str:
     """``WeatherValue.weather_value_key`` PK를 결정적으로 계산.
 
-    `docs/etl/weather-feature-normalization.md §4` identity tuple과 동일 input —
-    `timeline_bucket`은 분류 결과(ADR-010)이므로 unique key에서 제외.
+    ADR-089 immutable fact identity와 동일 input이다.
 
     Parameters
     ----------
     feature_id
         weather kind ``Feature``의 ID (`make_feature_id` 결과).
-    provider
-        canonical provider name (예: ``"python-kma-api"``).
+    provider_dataset_id
+        canonical provider dataset surrogate key.
     weather_domain
         ``WeatherDomain.value`` 또는 동등 문자열 (예: ``"kma_short_forecast"``).
     forecast_style
         ``ForecastStyle.value`` (예: ``"short"``).
     metric_key
         표준 metric_key (예: ``"TMP"``, ``"PM10"``).
-    issued_at / valid_at / observed_at
-        시간축 — 미상이면 ``None``. ISO 8601 문자열로 직렬화 후 hash에 포함.
+    target_at / source_record_key
+        business-time와 immutable raw response revision.
 
     Returns
     -------
@@ -543,12 +541,12 @@ def make_weather_value_key(
     >>> KST = timezone(timedelta(hours=9))
     >>> key = make_weather_value_key(
     ...     feature_id="f_global_w_abc",
-    ...     provider="python-kma-api",
+    ...     provider_dataset_id=42,
     ...     weather_domain="kma_short_forecast",
     ...     forecast_style="short",
     ...     metric_key="TMP",
-    ...     issued_at=datetime(2026, 5, 27, 23, 0, tzinfo=KST),
-    ...     valid_at=datetime(2026, 5, 28, 9, 0, tzinfo=KST),
+    ...     target_at=datetime(2026, 5, 28, 9, 0, tzinfo=KST),
+    ...     source_record_key="sr_example",
     ... )
     >>> key.startswith("wv_")
     True
@@ -557,22 +555,18 @@ def make_weather_value_key(
 
     Notes
     -----
-    같은 입력 → 같은 key (upsert idempotent). datetime은 ISO 8601 직렬화 +
-    tz 포함 → 같은 시각이라도 tz 표기 다르면 다른 key가 됨. 따라서 호출자는
-    aware datetime을 KST로 정규화해서 넘긴다 (ADR-019).
+    같은 입력 → 같은 key다. correction은 다른 response record key를 가져 새 fact가 된다.
     """
     _validate_component("feature_id", feature_id)
-    _validate_component("provider", provider)
+    if provider_dataset_id <= 0:
+        raise ValueError("provider_dataset_id must be positive")
     _validate_component("weather_domain", weather_domain)
     _validate_component("forecast_style", forecast_style)
     _validate_component("metric_key", metric_key)
 
-    def _ts(value: datetime | None) -> str:
-        return value.isoformat() if value is not None else ""
-
     raw = (
-        f"{feature_id}|{provider}|{weather_domain}|{forecast_style}|"
-        f"{metric_key}|{_ts(issued_at)}|{_ts(valid_at)}|{_ts(observed_at)}"
+        f"{feature_id}|{provider_dataset_id}|{weather_domain}|{forecast_style}|"
+        f"{metric_key}|{target_at.isoformat()}|{source_record_key}"
     )
     digest = hashlib.sha1(raw.encode("utf-8"), usedforsecurity=False).hexdigest()
     return f"wv_{digest[:WEATHER_VALUE_KEY_HASH_LENGTH]}"
@@ -588,28 +582,31 @@ PRICE_VALUE_KEY_HASH_LENGTH: Final[int] = 20
 def make_price_value_key(
     *,
     feature_id: str,
-    provider: str,
+    provider_dataset_id: int,
     price_domain: str,
     product_key: str,
     observed_at: datetime,
+    source_record_key: str,
 ) -> str:
     """``PriceValue.price_value_key`` PK를 결정적으로 계산.
 
-    `PriceValue.identity()` tuple과 동일 input — 시간 필드는 ``observed_at`` 하나만
-    (forecast 없음, 가격은 관측만).
+    immutable fact의 logical identity 전체를 입력으로 받는다. 시간 필드는
+    ``observed_at`` 하나이며, correction은 새 ``source_record_key``로 append한다.
 
     Parameters
     ----------
     feature_id
         ``place`` kind ``Feature``의 ID (`make_feature_id` 결과).
-    provider
-        canonical provider name (예: ``"python-opinet-api"``).
+    provider_dataset_id
+        exact operation membership이 넘긴 canonical provider dataset 대리 키.
     price_domain
         ``PriceDomain.value`` 또는 동등 문자열 (예: ``"opinet_gas_station"``).
     product_key
         표준 product code (예: ``"gasoline"``).
     observed_at
         관측 시각 (aware datetime, KST). ISO 8601 직렬화 + tz 포함 hash.
+    source_record_key
+        이 fact를 만든 immutable provider response revision key.
 
     Returns
     -------
@@ -627,10 +624,11 @@ def make_price_value_key(
     >>> KST = timezone(timedelta(hours=9))
     >>> key = make_price_value_key(
     ...     feature_id="f_1156010100_p_abc",
-    ...     provider="python-opinet-api",
+    ...     provider_dataset_id=42,
     ...     price_domain="opinet_gas_station",
     ...     product_key="gasoline",
     ...     observed_at=datetime(2026, 5, 28, 3, 0, tzinfo=KST),
+    ...     source_record_key="sr_0123456789abcdef",
     ... )
     >>> key.startswith("pv_")
     True
@@ -639,17 +637,19 @@ def make_price_value_key(
 
     Notes
     -----
-    같은 입력 → 같은 key (upsert idempotent). datetime은 ISO 8601 직렬화 +
+    같은 입력 → 같은 key (append idempotent). datetime은 ISO 8601 직렬화 +
     tz 포함 → 호출자는 aware datetime을 KST로 정규화해서 넘긴다 (ADR-019).
     """
     _validate_component("feature_id", feature_id)
-    _validate_component("provider", provider)
+    if provider_dataset_id <= 0:
+        raise ValueError("provider_dataset_id must be positive")
     _validate_component("price_domain", price_domain)
     _validate_component("product_key", product_key)
+    _validate_component("source_record_key", source_record_key)
 
     raw = (
-        f"{feature_id}|{provider}|{price_domain}|"
-        f"{product_key}|{observed_at.isoformat()}"
+        f"{feature_id}|{provider_dataset_id}|{price_domain}|{product_key}|"
+        f"{observed_at.isoformat()}|{source_record_key}"
     )
     digest = hashlib.sha1(raw.encode("utf-8"), usedforsecurity=False).hexdigest()
     return f"pv_{digest[:PRICE_VALUE_KEY_HASH_LENGTH]}"

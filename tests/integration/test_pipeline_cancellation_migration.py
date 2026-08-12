@@ -183,9 +183,14 @@ async def test_pipeline_cancellation_upgrade_and_strict_downgrade(
                 downgrade=True,
             )
         )
+        # Alembic process bootstrap itself can take longer than one second on a
+        # contended CI worker.  This is a synchronization gate, not a
+        # performance assertion: wait for the actual blocked lock with a
+        # bounded deadline before releasing the writer transaction.
         downgrade_is_waiting = False
+        wait_deadline = asyncio.get_running_loop().time() + 5.0
         async with target_engine.connect() as probe:
-            for _ in range(100):
+            while asyncio.get_running_loop().time() < wait_deadline:
                 downgrade_is_waiting = bool(
                     await probe.scalar(
                         text(

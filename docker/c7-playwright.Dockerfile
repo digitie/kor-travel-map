@@ -10,6 +10,7 @@ COPY packages/map-marker-react/package.json ./packages/map-marker-react/package.
 COPY packages/kor-travel-map-admin/frontend/package.json ./packages/kor-travel-map-admin/frontend/package.json
 COPY packages/kor-travel-map-user-client/package.json ./packages/kor-travel-map-user-client/package.json
 COPY scripts/patch-redocly-openapi-core.mjs ./scripts/patch-redocly-openapi-core.mjs
+COPY scripts/c7-loopback-ui-proxy.mjs ./scripts/c7-loopback-ui-proxy.mjs
 COPY scripts/verify-next-sharp.mjs ./scripts/verify-next-sharp.mjs
 COPY scripts/verify-npm-tree.mjs ./scripts/verify-npm-tree.mjs
 

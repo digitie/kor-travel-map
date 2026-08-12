@@ -17,13 +17,17 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
+from decimal import Decimal
 from hashlib import md5
 from typing import TYPE_CHECKING, Any
 
 import pytest
 from sqlalchemy import text
 
+from kortravelmap.core.ids import make_payload_hash, make_source_record_key
+from kortravelmap.dto import SourceRecord
+from kortravelmap.dto.weather import WeatherValue
 from kortravelmap.infra import (
     curated_repo,
     curation_repo,
@@ -411,22 +415,68 @@ async def test_weather_anchor_skips_non_public_features(
         lon=126.99,
         lat=37.57,
     )
-    for i, fid in enumerate(["pfv:wx:hidden-near", "pfv:wx:active-far"]):
-        await migrated_session.execute(
-            text(
-                """
-                INSERT INTO feature.feature_weather_values (
-                    weather_value_key, feature_id, provider, weather_domain,
-                    forecast_style, metric_key, value_number, issued_at, valid_at
-                )
-                VALUES (
-                    :key, :fid, 'python-kma-api', 'kma_ultra_short_forecast',
-                    'ultra_short', 'T1H', 21.5, :ts, :ts
-                )
-                """
-            ),
-            {"key": f"pfv-wx-{i}", "fid": fid, "ts": _NOW},
-        )
+    # T-VN-38 fact는 provider-dataset + immutable response lineage가 필수다.
+    # raw INSERT로 옛 provider 문자열 컬럼을 우회하지 않고 공개 anchor와 같은
+    # canonical ingestion 경로로 current summary까지 만든다.
+    selected_at = datetime.now(UTC)
+    provider = "python-kma-api"
+    dataset_key = "kma_ultra_short_forecast"
+    dataset_id = await _dataset_id(migrated_session, provider, dataset_key)
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO ops.provider_refresh_policies (
+                provider_dataset_id, source_kind, stale_after_minutes
+            ) VALUES (:provider_dataset_id, 'system', 60)
+            ON CONFLICT (provider_dataset_id) DO UPDATE
+            SET enabled = true, stale_after_minutes = EXCLUDED.stale_after_minutes
+            """
+        ),
+        {"provider_dataset_id": dataset_id},
+    )
+    raw_data = {
+        "metric": "T1H",
+        "feature_ids": ["pfv:wx:hidden-near", "pfv:wx:active-far"],
+    }
+    payload_hash = make_payload_hash(raw_data)
+    source_entity_id = f"pfv-weather:{payload_hash[:20]}"
+    source_record = SourceRecord(
+        provider=provider,
+        dataset_key=dataset_key,
+        source_entity_type="weather_response",
+        source_entity_id=source_entity_id,
+        raw_payload_hash=payload_hash,
+        raw_data=raw_data,
+        fetched_at=selected_at,
+        source_record_key=make_source_record_key(
+            provider=provider,
+            dataset_key=dataset_key,
+            source_entity_type="weather_response",
+            source_entity_id=source_entity_id,
+            raw_payload_hash=payload_hash,
+        ),
+    )
+    await weather_repo.load_weather_values(
+        migrated_session,
+        [
+            WeatherValue(
+                feature_id=feature_id,
+                provider=provider,
+                weather_domain=dataset_key,
+                forecast_style="ultra_short",
+                timeline_bucket="ultra_short",
+                metric_key="T1H",
+                value_number=Decimal("21.5"),
+                unit="deg_c",
+                issued_at=selected_at,
+                valid_at=selected_at,
+            )
+            for feature_id in ("pfv:wx:hidden-near", "pfv:wx:active-far")
+        ],
+        provider_dataset_id=dataset_id,
+        source_record=source_record,
+        selected_at=selected_at,
+    )
     await migrated_session.flush()
 
     anchor = await weather_repo.nearest_weather_feature_for_coordinate(

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -46,6 +46,9 @@ def test_price_card_response_maps_current_and_history(
 
     observed_at = datetime(2026, 6, 26, 6, 18, tzinfo=UTC)
     point = PricePoint(
+        provider_dataset_id=17,
+        dataset_key="retail_prices",
+        dataset_display_name="소매 가격",
         provider="python-opinet-api",
         price_domain="opinet_gas_station",
         product_key="gasoline",
@@ -55,10 +58,10 @@ def test_price_card_response_maps_current_and_history(
         value_number=Decimal("1820.0"),
         unit="KRW/L",
         observed_at=observed_at,
+        known_at=observed_at + timedelta(minutes=5),
     )
     card = PriceCard(
         feature_id="f1",
-        asof=None,
         current=[point],
         history=[point],
         latest_at=observed_at,
@@ -89,6 +92,9 @@ def test_price_card_response_maps_current_and_history(
         assert d["is_stale"] is False
         assert d["latest_at"] == "2026-06-26T06:18:00Z"
         assert d["current"][0]["product_key"] == "gasoline"
+        assert d["current"][0]["provider_dataset_id"] == 17
+        assert d["current"][0]["dataset_key"] == "retail_prices"
+        assert d["current"][0]["known_at"] == "2026-06-26T06:23:00Z"
         assert d["current"][0]["value_number"] == 1820.0
         assert d["history"][0]["source_product_key"] == "B027"
     finally:
