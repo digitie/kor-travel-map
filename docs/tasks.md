@@ -756,6 +756,23 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   Dagster runtime ETL·Noble Playwright destructive main/recovery(2/2)·PinVi public probe가 통과했다.
   runner 자동 cleanup 뒤 `BLOCKED.json`, 해당 compose container와 volume이 모두 없음도 확인했다.
 
+  **배포 선행 조건 (2026-08-12 n150 prod 실측)** — T-VN-34는 현행 prod 결선으로는 기동하지
+  않는다. 후보 이미지를 올렸더니 api가 **DB에 접속하기도 전에** 거부하고 crashloop에 들어갔다
+  (그래서 DB는 무손상이었고 즉시 원상복구했다):
+
+  ```
+  ./docker/api-entrypoint.sh: 260: KOR_TRAVEL_MAP_MIGRATOR_PG_DSN: KOR_TRAVEL_MAP_MIGRATOR_PG_DSN is required
+  ```
+
+  ADR-090이 단일 `KOR_TRAVEL_MAP_PG_DSN`을 권한 분리된 principal로 쪼갠 결과다. entrypoint는
+  `KOR_TRAVEL_MAP_MIGRATOR_PG_DSN`과 `KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN`을 **fallback 없이**
+  하드 요구한다 — 한 값으로 둘을 대체하는 경로는 권한 경계를 지우므로 의도적으로 없다.
+  DSN을 넣는 것만으로도 부족하고 `docker/postgres-role-bootstrap.sh`의 7롤이 **미리 존재**해야
+  한다. n150 map DB는 `kor-travel-geo-postgres`에 geo와 **공유**돼 있어 bootstrap이 공유 서버의
+  권한 모델을 바꾸므로, 전용 인스턴스 분리 여부는 Manager 판단 사항이다 —
+  docker-manager #171. 이 결선 전까지 tvn34의 live 검증은 격리 clone 스택
+  (`scripts/run-admin-feature-clone-live-acceptance.sh`)에서만 가능하다.
+
 ### T-VN-35 — kind별 typed subtype 분해 (Lane A) — 배포 잔여
 
 > 코드는 2026-08-06 PR #961(`9efd1f89`)로 **A-D 전부 머지**됐고 완료 상세는
