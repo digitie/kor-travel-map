@@ -87,18 +87,21 @@ def dedup_fp_stats(by_status: dict[str, int]) -> DedupQueueFpStats:
     )
 
 
+# 0097이 `feature.features.deleted_at`을 물리 삭제했다. soft-delete의 3축 등가물은
+# lifecycle 축이다(`retired`). 여기 노출되는 이름(active/inactive)은 운영 status
+# 화면의 계약이라 그대로 두고 술어만 옮긴다.
 _FEATURES_SQL: Final[str] = """
 SELECT
     count(*) AS total,
-    count(*) FILTER (WHERE deleted_at IS NULL) AS active,
-    count(*) FILTER (WHERE deleted_at IS NOT NULL) AS inactive
+    count(*) FILTER (WHERE lifecycle_state = 'active') AS active,
+    count(*) FILTER (WHERE lifecycle_state <> 'active') AS inactive
 FROM feature.features
 """
 
 _FEATURES_BY_KIND_SQL: Final[str] = """
 SELECT kind, count(*) AS n
 FROM feature.features
-WHERE deleted_at IS NULL
+WHERE lifecycle_state = 'active'
 GROUP BY kind
 """
 

@@ -95,7 +95,8 @@ async def test_sibling_candidates_enqueued(migrated_session: AsyncSession) -> No
             text(
                 "SELECT feature_id, name, category, "
                 "x_extension.ST_X(coord) lon, x_extension.ST_Y(coord) lat "
-                "FROM feature.features WHERE deleted_at IS NULL"
+                # 0097이 `deleted_at`을 물리 삭제했다 — lifecycle 축으로 읽는다.
+                "FROM feature.features WHERE lifecycle_state = 'active'"
             )
         )
     ).all()

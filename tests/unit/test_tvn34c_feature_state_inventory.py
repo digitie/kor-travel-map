@@ -7,18 +7,30 @@ import re
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[2]
-_OWNED_FEATURE_READERS = (
-    _ROOT / "src/kortravelmap/infra/feature_repo.py",
-    _ROOT / "src/kortravelmap/infra/admin_feature_repo.py",
-    _ROOT / "src/kortravelmap/infra/curated_repo.py",
-    _ROOT / "src/kortravelmap/infra/curation_repo.py",
-    _ROOT / "src/kortravelmap/infra/scope_repo.py",
-    _ROOT / "src/kortravelmap/infra/dedup_refresh_repo.py",
-    _ROOT / "src/kortravelmap/infra/weather_repo.py",
-    _ROOT / "src/kortravelmap/infra/consistency.py",
-    _ROOT / "src/kortravelmap/infra/merge_repo.py",
-    _ROOT / "src/kortravelmap/infra/feature_address_repo.py",
+# 손으로 적은 목록은 반드시 뒤처진다 — 실제로 뒤처졌다. `status_repo.py`가 이 목록에
+# 없어서 `feature.features`를 `deleted_at`으로 세는 코드가 0097 이후에도 남았고,
+# 정적 게이트는 green인 채 통합 테스트에서만 터졌다. 그래서 목록을 박지 않고
+# **Feature relation을 실제로 언급하는 모듈을 매번 찾는다.** 새 모듈이 생겨도
+# 자동으로 이 차단선 안에 들어온다.
+_SOURCE_ROOTS = (
+    _ROOT / "src/kortravelmap",
+    _ROOT / "packages/kor-travel-map-api/src",
+    _ROOT / "packages/kor-travel-map-dagster/src",
 )
+_FEATURE_RELATION_MENTION = re.compile(r"feature\.(?:features|public_features)")
+
+
+def _owned_feature_readers() -> tuple[Path, ...]:
+    found: list[Path] = []
+    for root in _SOURCE_ROOTS:
+        for path in sorted(root.rglob("*.py")):
+            if _FEATURE_RELATION_MENTION.search(path.read_text(encoding="utf-8")):
+                found.append(path)
+    assert found, "Feature relation을 읽는 모듈을 하나도 찾지 못했다 — 탐색 경로가 틀렸다"
+    return tuple(found)
+
+
+_OWNED_FEATURE_READERS = _owned_feature_readers()
 _FEATURE_RELATIONS = r"feature\.(?:features|public_features)"
 _LEGACY_COLUMNS = r"(?:status|deleted_at|user_deleted_at|user_change_[a-z_]+)"
 
@@ -108,6 +120,21 @@ def _legacy_feature_reads(sql: str) -> set[str]:
         flags=re.IGNORECASE,
     ):
         found.add("qualified")
+    # alias도 relation 접두어도 없는 **맨 컬럼**. `status_repo`의
+    # `SELECT count(*) FILTER (WHERE deleted_at IS NULL) FROM feature.features`가
+    # 정확히 이 형태였고, alias 규칙만으로는 통째로 통과했다.
+    #
+    # 오탐을 막기 위해 **참조하는 relation이 전부 Feature relation일 때만** 본다.
+    # 다른 테이블이 섞이면 그 테이블의 동명 컬럼일 수 있어 판정할 수 없다.
+    relations = re.findall(
+        r"\b(?:FROM|JOIN|UPDATE)\s+([a-z_]+\.[a-z_]+)", sql, flags=re.IGNORECASE
+    )
+    if relations and all(
+        re.fullmatch(_FEATURE_RELATIONS, relation, flags=re.IGNORECASE)
+        for relation in relations
+    ):
+        if re.search(rf"(?<![.\w]){_LEGACY_COLUMNS}\b", sql, flags=re.IGNORECASE):
+            found.add("unqualified")
     return found
 
 
