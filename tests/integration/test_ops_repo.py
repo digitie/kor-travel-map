@@ -920,7 +920,19 @@ async def test_ops_integrity_issues_q_and_bbox_filters(
             address={"road": "서울특별시 종로구 세종대로 1"},
             urls={},
             raw_refs=[],
-            status="active",
+            # T-VN-34C: 이 seed에게 필요한 건 "bbox EXISTS가 좌표로 집을 수 있는
+            # 평범한 실재 feature"였고, legacy `status='active'`가 그 "평범함"을
+            # 대신 적고 있었다. 0097이 status를 물리 삭제했으므로 같은 뜻인
+            # 3축 공개값(active/published/valid)으로 적는다.
+            #
+            # 다만 이 축들은 조회 조건이 아니다 — ops_repo의 bbox 술어는
+            # `feature.features`를 feature_id·coord로만 EXISTS로 훑고 상태 축을
+            # 전혀 걸지 않는다. 운영 이슈는 suppressed/retired feature에도 붙고
+            # 오히려 그때 더 봐야 하므로 그게 맞다. 즉 축을 바꿔도 이 테스트의
+            # 결과는 변하지 않으며, 여기서는 "특이 상태가 아님"만 선언한다.
+            lifecycle_state="active",
+            publication_state="published",
+            quality_state="valid",
         )
     )
     await migrated_session.flush()

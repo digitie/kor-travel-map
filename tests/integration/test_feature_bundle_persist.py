@@ -207,13 +207,22 @@ async def test_feature_bundle_persists_and_roundtrips(
     assert got.category == feature.category
     assert isinstance(got.address, dict)
 
-    # detail은 core 컬럼이 아니라 ``features_detailed`` 뷰의 조립 결과다(ADR-086).
+    # detail은 여전히 core 컬럼이 아니라 조립 결과다(ADR-086). 다만 그 조립을
+    # 내주던 ``features_detailed``는 0087이 detail 컬럼을 대신하려고 세운 한시적
+    # read bridge였고, 0097이 같은 typed core+subtype 조립식을
+    # ``feature.public_features``로 옮긴 뒤 bridge를 drop했다 — 그래서 조립 정본은
+    # 이제 공개 projection 하나뿐이다(ADR-090).
+    #
+    # 읽는 뷰를 바꾸면 단언이 하나 세진다: ``public_features``는 세 축의
+    # 교집합(lifecycle='active' AND publication='published' AND quality='valid')만
+    # 내보내므로, 여기서 행이 잡힌다는 것은 "조립된 detail이 옳다" + "방금 적재한
+    # feature가 공개 표면에 실재한다"를 함께 말한다. 이 테스트는 상태를 명시하지
+    # 않고 적재하므로 그 교집합은 곧 서버 기본값(active/published/valid)이 공개
+    # 가능 상태라는 계약이기도 하다 — 축 값을 일일이 조회해 비교하는 것보다
+    # 이쪽이 검증하려는 의미에 가깝다.
     assembled = (
         await migrated_session.execute(
-            text(
-                "SELECT detail FROM feature.features_detailed "
-                "WHERE feature_id = :fid"
-            ),
+            text("SELECT detail FROM feature.public_features WHERE feature_id = :fid"),
             {"fid": feature.feature_id},
         )
     ).scalar_one()

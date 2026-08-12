@@ -84,50 +84,27 @@ def _response_record(
     )
 
 
-def _legacy_status_axes(
-    status: str,
-    *,
-    deleted_at: datetime | None = None,
-    user_deleted_at: datetime | None = None,
-) -> dict[str, str]:
-    """legacy ``status``(+soft-delete 표식)를 3축으로 번역한다.
-
-    0097이 ``status``/``deleted_at``/``user_deleted_at``을 물리 삭제했다. 이 테스트가
-    검증하는 것은 "**비공개 상태의 feature가 admin 표면에는 보인다**"이고 그 어휘가
-    legacy status로 쓰여 있으므로, 호출부 어휘는 남기고 여기서 0095 backfill과 같은
-    매핑으로 옮긴다 — draft→draft / hidden→suppressed / broken→quarantined /
-    inactive·deleted·soft-delete→retired.
-    """
-
-    if deleted_at is not None or user_deleted_at is not None:
-        status = "deleted"
-    lifecycle = "retired" if status in ("inactive", "deleted") else "active"
-    publication = {
-        "draft": "draft",
-        "hidden": "suppressed",
-        "inactive": "suppressed",
-        "deleted": "suppressed",
-    }.get(status, "published")
-    quality = "quarantined" if status == "broken" else "valid"
-    return {
-        "lifecycle_state": lifecycle,
-        "publication_state": publication,
-        "quality_state": quality,
-    }
-
-
 async def _insert_feature(
     session: AsyncSession,
     *,
     feature_id: str,
-    status: str,
+    lifecycle_state: str = "active",
+    publication_state: str = "published",
+    quality_state: str = "valid",
     kind: str = "place",
     lon: float | None = _TEST_LON,
     lat: float | None = _TEST_LAT,
     geom_wkt: str | None = None,
-    deleted_at: datetime | None = None,
-    user_deleted_at: datetime | None = None,
 ) -> None:
+    """seed를 3축 tuple로 직접 받는다.
+
+    0097이 ``status``/``deleted_at``/``user_deleted_at``을 물리 삭제해 legacy 어휘를
+    받아 번역하는 seed는 더 이상 성립하지 않는다 — legacy ``hidden``은 3축에서
+    ``(active, suppressed, valid)``라는 tuple 자체이지, 따로 저장되는 별도 값이 아니다.
+    이 테스트가 지키려는 명제("비공개 feature는 admin 표면에 보이고 공개 표면에는
+    없다")는 축 tuple로 그대로 쓸 수 있으므로 번역 계층을 두지 않는다.
+    """
+
     await session.execute(
         text(
             """
@@ -151,9 +128,9 @@ async def _insert_feature(
             "kind": kind,
             "lon": lon,
             "lat": lat,
-            **_legacy_status_axes(
-                status, deleted_at=deleted_at, user_deleted_at=user_deleted_at
-            ),
+            "lifecycle_state": lifecycle_state,
+            "publication_state": publication_state,
+            "quality_state": quality_state,
             "updated_at": _NOW,
         },
     )
@@ -187,35 +164,36 @@ async def _current_dataset_id(
 async def test_admin_bbox_and_cluster_include_nonpublic_statuses(
     migrated_session: AsyncSession,
 ) -> None:
-    for feature_status in ("draft", "active", "inactive", "hidden", "broken"):
+    # 0095 backfill이 legacy status에서 만들어낼 수 있는 서로 다른 축 tuple 전부다.
+    # draft/hidden/broken은 lifecycle을 잃지 않고 publication·quality로만 비공개가 되고,
+    # inactive·deleted·user_deleted는 retire 사유(운영자 deactivate / tombstone /
+    # user delete)와 무관하게 (retired, suppressed) 하나로 합쳐진다. 그래서 legacy가
+    # admin 지도에서 inactive는 보이고 deleted는 감추던 3분할은 3축에 상(像)이 없다 —
+    # 이제 admin 표면에서 "사라짐"은 hard purge(행 부재)뿐이다(ADR-090).
+    seeded = {
+        "admin-map-draft": ("active", "draft", "valid"),
+        "admin-map-published": ("active", "published", "valid"),
+        "admin-map-suppressed": ("active", "suppressed", "valid"),
+        "admin-map-quarantined": ("active", "published", "quarantined"),
+        "admin-map-retired": ("retired", "suppressed", "valid"),
+    }
+    for feature_id, (lifecycle, publication, quality) in seeded.items():
         await _insert_feature(
             migrated_session,
-            feature_id=f"admin-map-{feature_status}",
-            status=feature_status,
+            feature_id=feature_id,
+            lifecycle_state=lifecycle,
+            publication_state=publication,
+            quality_state=quality,
         )
-    await _insert_feature(
-        migrated_session,
-        feature_id="admin-map-deleted",
-        status="deleted",
-        deleted_at=_NOW,
-    )
-    await _insert_feature(
-        migrated_session,
-        feature_id="admin-map-user-deleted",
-        status="inactive",
-        user_deleted_at=_NOW,
-    )
     await migrated_session.flush()
 
-    assert await admin_feature_repo.admin_feature_card_target_exists(
-        migrated_session, "admin-map-hidden"
-    )
-    assert not await admin_feature_repo.admin_feature_card_target_exists(
-        migrated_session, "admin-map-deleted"
-    )
-    assert not await admin_feature_repo.admin_feature_card_target_exists(
-        migrated_session, "admin-map-user-deleted"
-    )
+    # card target은 공개 여부가 아니라 admin detail target의 실재(admin-any)를 묻는다.
+    # `_ADMIN_FEATURE_DETAIL_SQL`이 축 술어 없이 feature_id로만 조회하고 retired도
+    # reactivate 심사 대상이므로, 카드가 없어야 하는 것은 행이 없는 feature뿐이다.
+    for feature_id in seeded:
+        assert await admin_feature_repo.admin_feature_card_target_exists(
+            migrated_session, feature_id
+        )
     assert not await admin_feature_repo.admin_feature_card_target_exists(
         migrated_session, "admin-map-missing"
     )
@@ -225,30 +203,29 @@ async def test_admin_bbox_and_cluster_include_nonpublic_statuses(
         **_BBOX,
     )
     admin_ids = {row["feature_id"] for row in admin_rows}
-    assert admin_ids == {
-        "admin-map-draft",
-        "admin-map-active",
-        "admin-map-inactive",
-        "admin-map-hidden",
-        "admin-map-broken",
-    }
+    # admin bbox는 공개 projection을 쓰지 않는다 — 축 filter를 주지 않으면 seed한 다섯
+    # tuple이 모두 나온다. retired 제외를 여기 박으면 `lifecycle_state=retired` 필터가
+    # 항상 빈 결과가 되어 admin in-bounds API의 축 filter 자체가 죽는다.
+    assert admin_ids == set(seeded)
 
-    hidden_rows = await admin_feature_repo.admin_features_in_bbox(
+    # lifecycle을 'active'로 좁히면 같은 suppressed 안에서 retired가 떨어진다 —
+    # 두 축이 독립임을 이 한 쌍이 증명한다.
+    suppressed_rows = await admin_feature_repo.admin_features_in_bbox(
         migrated_session,
         **_BBOX,
         lifecycle_states=["active"],
         publication_states=["suppressed"],
     )
-    assert [row["feature_id"] for row in hidden_rows] == ["admin-map-hidden"]
+    assert [row["feature_id"] for row in suppressed_rows] == ["admin-map-suppressed"]
 
-    hidden_cluster = await admin_feature_repo.cluster_admin_features_in_bbox(
+    suppressed_cluster = await admin_feature_repo.cluster_admin_features_in_bbox(
         migrated_session,
         **_BBOX,
         cluster_unit="sido",
         lifecycle_states=["active"],
         publication_states=["suppressed"],
     )
-    assert hidden_cluster == [
+    assert suppressed_cluster == [
         {
             "cluster_key": "11",
             "feature_count": 1,
@@ -257,12 +234,14 @@ async def test_admin_bbox_and_cluster_include_nonpublic_statuses(
         }
     ]
 
+    # 공개 표면의 정본은 `feature.public_features`이고 그 유일한 tuple은
+    # (active, published, valid)다. quarantined는 published여도 공개되지 않는다.
     public_rows = await feature_repo.features_in_bbox(
         migrated_session,
         **_BBOX,
         price_stale_hide_days=None,
     )
-    assert {row["feature_id"] for row in public_rows} == {"admin-map-active"}
+    assert {row["feature_id"] for row in public_rows} == {"admin-map-published"}
 
 
 async def test_admin_bbox_geometry_membership_is_serialization_only(
@@ -272,7 +251,7 @@ async def test_admin_bbox_geometry_membership_is_serialization_only(
         migrated_session,
         feature_id="admin-map-hidden-route",
         kind="route",
-        status="hidden",
+        publication_state="suppressed",
         lon=None,
         lat=None,
         geom_wkt=(
@@ -286,7 +265,7 @@ async def test_admin_bbox_geometry_membership_is_serialization_only(
         migrated_session,
         feature_id="admin-map-hidden-false-positive",
         kind="route",
-        status="hidden",
+        publication_state="suppressed",
         lon=_TEST_LON,
         lat=_TEST_LAT,
         geom_wkt=(
@@ -338,12 +317,12 @@ async def test_admin_weather_card_uses_nonpublic_target_and_anchor(
     await _insert_feature(
         migrated_session,
         feature_id="admin-hidden-target",
-        status="hidden",
+        publication_state="suppressed",
     )
     await _insert_feature(
         migrated_session,
         feature_id="admin-hidden-weather-anchor",
-        status="hidden",
+        publication_state="suppressed",
         kind="weather",
         lon=_TEST_LON + 0.000001,
         lat=_TEST_LAT + 0.000001,
@@ -412,7 +391,7 @@ async def test_admin_price_card_and_map_summary_include_nonpublic_feature(
     await _insert_feature(
         migrated_session,
         feature_id=feature_id,
-        status="hidden",
+        publication_state="suppressed",
         kind="price",
     )
     opinet_value = PriceValue(

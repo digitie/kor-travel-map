@@ -167,7 +167,15 @@ async def _seed_feature_with_source(
                 name=name,
                 category=_TEMPLE_CAT,
                 coord=WKTElement("POINT(129.3320 35.7900)", srid=4326),
-                status="active",
+                # T-VN-34C: 이 seed가 원했던 건 "dedup/consistency가 실제로 훑는
+                # 공개 표면 위의 feature"였고, 그 자리를 legacy `status='active'`가
+                # 대신하고 있었다. 0097이 status를 물리 삭제했으므로 같은 뜻을
+                # 3축으로 적는다 — dedup_refresh_repo의 후보 SQL이 요구하는
+                # 술어가 정확히 active/published/valid 세 개다(축 하나라도 빠지면
+                # draft·suppressed·quarantined 행이 후보로 새어 들어온다).
+                lifecycle_state="active",
+                publication_state="published",
+                quality_state="valid",
                 created_at=_NOW,
                 updated_at=_NOW,
             )

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import re
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
@@ -126,7 +125,19 @@ async def test_tvn34c_invariant_parser_runs_the_dedicated_0096_to_c_path(
 
     from alembic import command
     from kortravelmap.infra.db import make_async_engine, normalize_async_dsn
-    from tests.integration.conftest import _bootstrap_tvn34_migration_roles
+
+    # 자기 DB를 따로 만들어 upgrade하는 테스트의 선행조건(배포와 같은 principal
+    # graph + migrator 자격 DSN + schema-owner role flag)은 conftest의 private
+    # 함수가 아니라 공유 모듈 ``_tvn34_migration_bootstrap``이 정본이다. 그 모듈이
+    # 스스로 밝히듯 같은 코드를 두 벌 두면 갈리므로, 여기서도 손으로 재현하지 않고
+    # 그 한 벌을 그대로 쓴다. ``bootstrapped_migrator_dsn``은 bootstrap + migrator
+    # 자격 DSN 조립을, ``alembic_schema_owner_role``은 upgrade 동안의
+    # ``SET ROLE ktm_feature_schema_owner`` 전환(ADR-090)을 각각 담당한다 —
+    # 이 테스트가 직접 들고 있던 role-mode env 저장/복원과 의미가 같다.
+    from tests.integration._tvn34_migration_bootstrap import (
+        alembic_schema_owner_role,
+        bootstrapped_migrator_dsn,
+    )
 
     raw_dsn = pg_container.get_connection_url()  # type: ignore[attr-defined]
     async_dsn = normalize_async_dsn(raw_dsn)
@@ -140,38 +151,29 @@ async def test_tvn34c_invariant_parser_runs_the_dedicated_0096_to_c_path(
         database="postgres",
     )
     temporary_engine: AsyncEngine | None = None
-    previous_role_mode = os.environ.get("KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE")
     try:
         await admin_connection.execute(f"CREATE DATABASE {database_name}")
         cutover_dsn = base_url.set(database=database_name).render_as_string(
             hide_password=False
         )
         temporary_engine = make_async_engine(cutover_dsn, pool_size=1)
-        migrator_password = await _bootstrap_tvn34_migration_roles(temporary_engine)
-        migrator_dsn = make_url(cutover_dsn).set(
-            username="ktm_feature_migrator",
-            password=migrator_password,
-        )
         config = Config(str(_ROOT / "alembic.ini"))
         config.set_main_option("script_location", str(_ROOT / "alembic"))
-        config.set_main_option(
-            "sqlalchemy.url", migrator_dsn.render_as_string(hide_password=False)
-        )
-        os.environ["KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE"] = "true"
-        await asyncio.to_thread(command.upgrade, config, "0096_tvn34_public_projection")
-        async with temporary_engine.connect() as connection:
-            assert await connection.scalar(
-                text("SELECT to_regclass('feature.features_detailed') IS NOT NULL")
-            ) is True
-        await asyncio.to_thread(command.upgrade, config, "0097_tvn34c_final_cutover")
+        config.set_main_option("sqlalchemy.url", await bootstrapped_migrator_dsn(cutover_dsn))
+        # 0096 → 0097 두 단계 모두 migration이므로 schema-owner 전환은 그 둘을
+        # 함께 감싼다. 사이의 catalog 확인은 migration이 아니라 관찰이라 flag와
+        # 무관하다.
+        with alembic_schema_owner_role():
+            await asyncio.to_thread(command.upgrade, config, "0096_tvn34_public_projection")
+            async with temporary_engine.connect() as connection:
+                assert await connection.scalar(
+                    text("SELECT to_regclass('feature.features_detailed') IS NOT NULL")
+                ) is True
+            await asyncio.to_thread(command.upgrade, config, "0097_tvn34c_final_cutover")
         async with temporary_engine.connect() as connection:
             for query in _contract_queries():
                 assert await connection.scalar(text(query)) == 0, query
     finally:
-        if previous_role_mode is None:
-            os.environ.pop("KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE", None)
-        else:
-            os.environ["KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE"] = previous_role_mode
         if temporary_engine is not None:
             await temporary_engine.dispose()
         await admin_connection.execute(f"DROP DATABASE IF EXISTS {database_name} WITH (FORCE)")

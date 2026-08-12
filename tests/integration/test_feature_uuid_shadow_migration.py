@@ -156,7 +156,36 @@ async def _upgrade(dsn: str, revision: str) -> None:
 
 
 async def _downgrade(dsn: str, revision: str) -> None:
-    await asyncio.to_thread(command.downgrade, _alembic_config(dsn), revision)
+    """downgrade도 upgrade와 **같은 principal**로 돌린다 (ADR-090).
+
+    0095 이후 schema object의 owner는 ``ktm_feature_schema_owner``이고 배포는
+    upgrade·downgrade 모두 migrator LOGIN → ``SET ROLE`` schema owner 한 경로로만
+    돈다. 그런데 이 helper만 raw DSN(= DB 생성 계정, superuser)을 쓰고 있어서
+    왕복 시나리오가 principal을 갈아탔다.
+
+    superuser는 owner가 아니어도 DDL이 통과하므로 downgrade 자체는 성공하지만,
+    0081 downgrade는 ``DROP VIEW`` + ``CREATE VIEW``로 ``feature.public_features``를
+    **재생성**한다 — 새 view의 owner는 그때의 current_user, 즉 superuser가 된다.
+    그 뒤 재-upgrade는 schema owner 자격으로 0081의
+    ``CREATE OR REPLACE VIEW feature.public_features``를 걸고, PostgreSQL은
+    REPLACE에 소유권을 요구하므로 ``must be owner of view public_features``
+    (42501)로 죽는다. 즉 실패 원인은 legacy 컬럼(``status``/``deleted_at``)이
+    아니라 왕복 도중 뒤바뀐 소유권이며, 0081의 legacy 술어는 그 세대의 정본이라
+    그대로 두는 것이 맞다.
+
+    downgrade를 upgrade와 같은 자격으로 돌리면 재생성된 view의 owner가 계속
+    schema owner라 소유권이 왕복 내내 보존된다.
+    """
+    from tests.integration._tvn34_migration_bootstrap import (
+        alembic_schema_owner_role,
+        bootstrapped_migrator_dsn,
+    )
+
+    migrator_dsn = await bootstrapped_migrator_dsn(dsn)
+    with alembic_schema_owner_role():
+        await asyncio.to_thread(
+            command.downgrade, _alembic_config(migrator_dsn), revision
+        )
 
 
 async def _create_database(admin_dsn: str, database: str) -> None:

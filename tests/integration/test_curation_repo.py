@@ -294,8 +294,18 @@ async def test_same_feature_returns_every_edition_and_subcourse_membership(
     assert groups[0].feature_id == _FEATURE_ID
     assert len(groups[0].curations) == 3
 
+    # 여기서 재던 것은 "운영자가 feature를 **감췄을 때**" 큐레이션 공개면이 어떻게
+    # 되는가다. 0095 backfill에서 `status='hidden'`은 (active, suppressed, valid)로
+    # 갈린다 — 삭제(retired)가 아니라 **살아 있으나 게시되지 않은** 상태다. 그래서
+    # lifecycle은 건드리지 않고 publication만 내린다. ck_features_state_tuple은
+    # `lifecycle='active' OR publication='suppressed'`이므로 이 조합은 허용된다.
+    # (lifecycle까지 retired로 내리면 soft delete가 되어, 아래에서 admin 표면에는
+    # 남아 있어야 한다는 단언이 다른 사건을 재는 것이 된다.)
     await migrated_session.execute(
-        text("UPDATE feature.features SET status = 'hidden' WHERE feature_id = :feature_id"),
+        text(
+            "UPDATE feature.features SET publication_state = 'suppressed' "
+            "WHERE feature_id = :feature_id"
+        ),
         {"feature_id": _FEATURE_ID},
     )
     assert (
@@ -1828,11 +1838,15 @@ async def test_manual_collection_keys_cannot_block_legacy_projection_creation(
     await migrated_session.execute(
         text(
             """
+            -- `status='active'`의 3축 등가물은 (active, published, valid)이고,
+            -- 그것이 0095가 세 컬럼에 준 기본값 그대로다. 이 테스트가 재는 것은
+            -- collection key 충돌이지 feature 상태가 아니므로, 축을 다시 적지 않고
+            -- 기본값에 맡겨 잡음을 없앤다(이 파일의 다른 seed와 같은 방식).
             INSERT INTO feature.features (
-                feature_id, kind, name, category, status
+                feature_id, kind, name, category
             ) VALUES (
                 :feature_id, 'place', 'manual key collision second feature',
-                '01070100', 'active'
+                '01070100'
             )
             """
         ),
@@ -2699,11 +2713,14 @@ async def test_cross_title_legacy_moves_do_not_lock_source_collections_in_revers
             await setup.execute(
                 text(
                     """
+                    -- `status='active'` = (active, published, valid) = 세 컬럼의
+                    -- 기본값. 이 테스트는 collection 잠금 순서를 재므로 상태 축을
+                    -- 명시할 이유가 없다.
                     INSERT INTO feature.features (
-                        feature_id, kind, name, category, status
+                        feature_id, kind, name, category
                     ) VALUES
-                        (:feature_a, 'place', '교차 이동 A', '01070100', 'active'),
-                        (:feature_b, 'place', '교차 이동 B', '01070100', 'active')
+                        (:feature_a, 'place', '교차 이동 A', '01070100'),
+                        (:feature_b, 'place', '교차 이동 B', '01070100')
                     """
                 ),
                 {"feature_a": feature_a, "feature_b": feature_b},
@@ -3341,8 +3358,16 @@ async def test_admin_can_resolve_and_archive_unmatched_item_with_actor_audit(
             actor="invalid-resolver",
         )
 
+    # 아래 `add_curation_item`이 거절해야 하는 대상은 "감춰진 feature"다.
+    # `status='hidden'`의 3축 등가물은 (active, suppressed, valid)이므로
+    # publication만 내린다 — retired로 내리면 "삭제된 feature 거절"이라는 다른
+    # 명제를 재게 되고, 이 테스트가 뒤에서 확인하는 archive/actor 감사 경로도
+    # soft delete 쪽으로 옮겨간다.
     await migrated_session.execute(
-        text("UPDATE feature.features SET status = 'hidden' WHERE feature_id = :feature_id"),
+        text(
+            "UPDATE feature.features SET publication_state = 'suppressed' "
+            "WHERE feature_id = :feature_id"
+        ),
         {"feature_id": _FEATURE_ID},
     )
     archived = await archive_curation_item(
@@ -4212,7 +4237,24 @@ async def test_feature_curation_lookup_uses_membership_index(
             },
         )
     ).scalar_one()[0]["Plan"]
-    assert "idx_features_lower_name_keyset" in index_names(match_plan)
+    # `idx_features_lower_name_keyset`은 T-VN-34B(0096)에서 공개 3축
+    # (lifecycle=active AND publication=published AND quality=valid) **부분 인덱스**가
+    # 됐다. 반면 이 matcher가 훑는 후보 집합은 legacy `deleted_at IS NULL AND
+    # status NOT IN ('deleted','hidden')` 그대로라, 3축으로는
+    # `lifecycle='active' AND publication <> 'suppressed'` — draft·quarantined를
+    # 여전히 포함한다. 이 술어는 부분 인덱스 술어를 함의하지 못하므로 planner가
+    # 그 인덱스를 고를 수 없고, head에는 이 후보 집합을 덮는 lower(name) 인덱스가
+    # 아예 없다.
+    #
+    # 여기서 인덱스 이름을 계속 단언하면 통과시키는 유일한 길이 matcher를 공개 축으로
+    # 좁히는 것인데, 그러면 성능 게이트가 조회 의미를 바꾸는 셈이 된다(감춤이 아니라
+    # 미게시인 feature가 큐레이션 매칭에서 사라진다). 그래서 이름 분기의 접근 경로는
+    # 인덱스 결정(큐레이션 scope lower(name) 인덱스 신설 여부)이 선행돼야 할 **공백**으로
+    # 남기고 — `test_t212d_perf_explain.py`가 같은 인덱스에 대해 남긴 공백과 동일하다 —
+    # 이 테스트는 head에서 실제로 살아 있는 보증만 못박는다: feature_id 지정 분기는
+    # PK 조회로 남는다(전건 스캔으로 무너지지 않는다).
+    match_indexes = index_names(match_plan)
+    assert "pk_features" in match_indexes
 
 
 async def test_address_hint_matches_split_jsonb_fields(

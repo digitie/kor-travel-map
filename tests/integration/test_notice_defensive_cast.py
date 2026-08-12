@@ -83,11 +83,17 @@ async def _ins_notice(
     lon: float = 126.978,
     lat: float = 37.5665,
 ) -> None:
+    # T-VN-34: 이 fixture가 종전 ``status='active'``로 노린 것은 "상태 쪽으로는
+    # 아무 감산 사유가 없는 평범한 공개 feature"다 — 그래야 목록에서 빠지는
+    # 유일한 이유가 이 파일이 검증하려는 notice 효력 종료뿐이 된다. 3축에서 그
+    # 자리는 세 축 모두 무감산 값인 (active, published, valid) 하나뿐이라
+    # (0095 backfill의 ``status='active'`` 상은 정확히 이 tuple), 그대로 옮긴다.
     await session.execute(
         text(
             """
             INSERT INTO feature.features (
-                feature_id, kind, name, category, coord, status,
+                feature_id, kind, name, category, coord,
+                lifecycle_state, publication_state, quality_state,
                 sido_code, sigungu_code, updated_at
             )
             VALUES (
@@ -99,7 +105,7 @@ async def _ins_notice(
                     ),
                     4326
                 ),
-                'active',
+                'active', 'published', 'valid',
                 '11', '11140', CAST(:updated_at AS timestamptz)
             )
             """
@@ -176,11 +182,16 @@ async def test_corrupted_timestamp_cannot_reach_the_typed_column(
     종전에는 이 값들이 조용히 들어앉아 read 시점에 500을 냈다(F-9). 이제는
     write가 거부하므로 read 경로에 가드가 필요 없다.
     """
+    # 이 행은 오염 값을 붙일 자리(부모 feature)일 뿐이라 상태축은 판정에 관여하지
+    # 않는다 — 단언은 write 시점 타입 거부다. 다만 파일 안의 다른 seed와 같은
+    # 무감산 tuple로 통일해 "상태 때문에 안 보이는 것"이라는 오독을 막는다.
     await migrated_session.execute(
         text(
             "INSERT INTO feature.features "
-            "(feature_id, kind, name, category, status) "
-            "VALUES ('ndc:typed-reject', 'notice', '타입 거부 공지', '99000000', 'active')"
+            "(feature_id, kind, name, category, "
+            "lifecycle_state, publication_state, quality_state) "
+            "VALUES ('ndc:typed-reject', 'notice', '타입 거부 공지', '99000000', "
+            "'active', 'published', 'valid')"
         )
     )
     await migrated_session.flush()

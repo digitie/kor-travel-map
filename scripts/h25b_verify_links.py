@@ -101,6 +101,12 @@ _APPROVED: Final[tuple[tuple[str, str, str], ...]] = (
     ("korean-tourism-100:2025-2026", "kt100-2025-2026-040", "primary"),
 )
 
+# T-VN-34 이식 — 이 보고서는 링크의 **근거**를 남기는 것이 목적이므로, 연결된 Feature가
+# 어떤 상태였는지도 같이 적어 둔다. legacy에서 그 자리는 단일 ``features.status``였는데
+# 0097이 그 컬럼을 지웠다. 대체물은 3축 그 자체다 — 0095 backfill이 status 하나를
+# lifecycle/publication/quality 세 값으로 분해했으므로, 하나를 골라 적으면 나머지 두
+# 축의 사실이 보고서에서 사라진다. 공개 여부 판정은 여기서 하지 않는다(모집단은 아래
+# ``public`` scope가 repository에 위임한다); 이 컬럼들은 순수한 관측 증거다.
 _APPROVED_ROW_SQL: Final[str] = """
 SELECT cc.collection_key,
        ci.external_item_id,
@@ -111,7 +117,9 @@ SELECT cc.collection_key,
        ci.metadata ->> 'feature_match_confidence' AS declared_confidence,
        f.name AS feature_name,
        f.category AS feature_category,
-       f.status AS feature_status,
+       f.lifecycle_state AS feature_lifecycle_state,
+       f.publication_state AS feature_publication_state,
+       f.quality_state AS feature_quality_state,
        f.address
   FROM feature.curation_items AS ci
   JOIN feature.curation_collections AS cc
@@ -176,7 +184,9 @@ class AuditTarget:
     declared_confidence: str | None
     feature_name: str | None
     feature_category: str | None
-    feature_status: str | None
+    feature_lifecycle_state: str | None
+    feature_publication_state: str | None
+    feature_quality_state: str | None
     feature_sido_code: str | None
     feature_sigungu_code: str | None
     feature_address: str
@@ -298,6 +308,12 @@ def _judge(
     }
 
 
+def _optional_text(value: object) -> str | None:
+    """LEFT JOIN으로 비어 있을 수 있는 evidence column을 문자열로 좁힌다."""
+
+    return str(value) if value is not None else None
+
+
 def _address_parts(address: object) -> tuple[str | None, str | None, str]:
     if not isinstance(address, Mapping):
         return None, None, ""
@@ -336,32 +352,18 @@ async def _approved_targets(session: AsyncSession) -> list[AuditTarget]:
                     external_item_id=str(row["external_item_id"]),
                     external_component_id=str(row["external_component_id"]),
                     place_name=str(row["place_name"]),
-                    feature_id=(
-                        str(row["feature_id"])
-                        if row["feature_id"] is not None
-                        else None
+                    feature_id=_optional_text(row["feature_id"]),
+                    region=_optional_text(row["region"]),
+                    declared_confidence=_optional_text(row["declared_confidence"]),
+                    feature_name=_optional_text(row["feature_name"]),
+                    feature_category=_optional_text(row["feature_category"]),
+                    feature_lifecycle_state=_optional_text(
+                        row["feature_lifecycle_state"]
                     ),
-                    region=str(row["region"]) if row["region"] is not None else None,
-                    declared_confidence=(
-                        str(row["declared_confidence"])
-                        if row["declared_confidence"] is not None
-                        else None
+                    feature_publication_state=_optional_text(
+                        row["feature_publication_state"]
                     ),
-                    feature_name=(
-                        str(row["feature_name"])
-                        if row["feature_name"] is not None
-                        else None
-                    ),
-                    feature_category=(
-                        str(row["feature_category"])
-                        if row["feature_category"] is not None
-                        else None
-                    ),
-                    feature_status=(
-                        str(row["feature_status"])
-                        if row["feature_status"] is not None
-                        else None
-                    ),
+                    feature_quality_state=_optional_text(row["feature_quality_state"]),
                     feature_sido_code=sido_code,
                     feature_sigungu_code=sigungu_code,
                     feature_address=address,
@@ -404,7 +406,11 @@ async def _public_targets(session: AsyncSession) -> list[AuditTarget]:
                         ),
                         feature_name=group.name,
                         feature_category=group.category,
-                        feature_status=group.status,
+                        # 공개 모집단은 repository가 소유한다. 여기서 축 값을 다시
+                        # 판정하지 않고 repository가 실어 준 값을 그대로 기록한다.
+                        feature_lifecycle_state=group.lifecycle_state,
+                        feature_publication_state=group.publication_state,
+                        feature_quality_state=group.quality_state,
                         feature_sido_code=sido_code,
                         feature_sigungu_code=sigungu_code,
                         feature_address=address,
@@ -478,7 +484,11 @@ async def run(
 
     verdict_counts = Counter(str(result["verdict"]) for result in results)
     return {
-        "schema_version": 2,
+        # v3 — result row의 ``feature_status``가 ``feature_lifecycle_state`` /
+        # ``feature_publication_state`` / ``feature_quality_state``로 갈라졌다
+        # (T-VN-34). 판정 로직은 그대로이지만 소비자가 읽는 key가 바뀌었으므로,
+        # 같은 version으로 남겨 두면 보고서가 조용히 다른 모양이 된다.
+        "schema_version": 3,
         "scope": scope,
         "population": dict(_POPULATION[scope]),
         "target_count": len(results),

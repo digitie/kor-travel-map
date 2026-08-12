@@ -1,15 +1,15 @@
 {
   "artifact": "target-schema-fingerprints-v1",
   "owner": "T-VN-31A",
-  "description": "target-schema-v1.sql을 빈 PostGIS DB(x_extension 확장 사전 생성)에 적용한 뒤 H35 7 카테고리 catalog 질의(출처: src/kortravelmap/cli/_h35_catalog.py — schema-qualified relation 목록으로 적응)로 산출한 category별 canonical SHA-256. tests/integration/test_vnext_target_freeze.py가 실제 적용 직후 재계산해 drift를 fail-close한다.",
+  "description": "target-schema-v1.sql을 빈 PostGIS DB(x_extension 확장 사전 생성)에 적용한 뒤 H35 7 카테고리 catalog 질의(출처: src/kortravelmap/cli/_h35_catalog.py — schema-qualified relation 목록으로 적응)로 산출한 category별 canonical SHA-256. tests/integration/test_vnext_target_freeze.py가 실제 적용 직후 재계산해 drift를 fail-close한다. columns/functions/indexes 3축은 2026-08-12에 재고정했다 — 이전 값(columns 1e0fc402…, functions 6f88ead5…, indexes 9c8775eb…)은 target-schema-v1.sql의 커밋된 어떤 revision으로도 재현되지 않는 값이었다. 위 sha256 두 개가 가리키는 계약 파일 그대로를 빈 PostGIS DB에 적용해 실측했고, target-schema-v1.sql의 3축 도입 이후 revision 전수(3243afb3·df495101·d0c0945a·29b4c6a6·6c3c0a54·fa736d15·7c372ed8)를 재계산해 옛 값과 맞는 revision이 하나도 없음을 확인했다. 계약 SQL은 바뀌지 않았다(bytes sha 동일) — 갱신된 것은 재현 불가였던 파생 해시뿐이다.",
   "environment": "postgis/postgis:16-3.5-alpine (PostgreSQL 16 / PostGIS 3.5)",
   "target_schema_sql_sha256": "bb57b6defe3010ea9b014db77abfd08de9dd2c24ad1a607b8084b6df6be209da",
   "tvn33_reference_ownership_sql_sha256": "9f434b50440c7463b86a5cf61abeb30bf6fe8d74a5760aa256374c76e4c9328a",
   "fingerprints": {
-    "columns": "1e0fc402d999ab9e76b9239e8865e69e457fda3b9f2152d11f9009876c61f327",
+    "columns": "0cbb98e20931df8b080e061581882f586eaf9e4b13b10da6dc465139e25d3351",
     "constraints": "59c334647d7d73f3393c8db54ceb74ddffa11583a6b882a4629d1d4c133987b0",
-    "functions": "6f88ead562574d27ec39432cf044d47a4d86c3dfa85464daa9918bf5fb2da83b",
-    "indexes": "9c8775ebe277f5063b660c20c9d0aacedc963b0fd2182c9671fe321aa8c77e00",
+    "functions": "4968d88790843feb8be43f51f195cb3f34092abe4a1601716bff7b5b664e6d04",
+    "indexes": "aabda76df171b01711e97782c2b3142c7814725540b3585083a05256a9a2bd1b",
     "relations": "561250e4cb38a957fe0f449708cbced1c4568fa1f4eb97864bedaa519ed47158",
     "sequence": "296b9a65bc2148c9f64cec0b4163aabd36ca6bcda67ad00084c6818e18b4d4b0",
     "triggers": "f60935036d7e1cdafeb9bc6d9a0f29208cec4450a1a397756b71ed8e72d7c256"

@@ -138,6 +138,21 @@ CREATE EXTENSION IF NOT EXISTS postgis WITH SCHEMA x_extension;
 CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA x_extension;
 CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA x_extension;
 
+-- T-102 pg_prewarm. migration ``0022_pg_prewarm_extension``은 "current_user가
+-- superuser일 때만 만든다"로 짜였는데, ADR-090 이후 alembic은 NOSUPERUSER
+-- ``ktm_feature_migrator``로만 돈다 — 그 분기는 이제 영구히 no-op이라 확장이 어디서도
+-- 생기지 않았다. pg_prewarm은 trusted extension이 아니어서 schema owner 권한으로도
+-- 만들 수 없고, 남은 유일한 설치 지점이 이 dedicated superuser connection이다.
+-- 다만 T-102는 opt-in/best-effort이고 외부 관리형 Postgres에는 contrib이 없을 수 있으므로
+-- available할 때만 만든다. 없으면 ``kortravelmap.infra.prewarm``이 no-op으로 degrade한다.
+DO $pg_prewarm$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_catalog.pg_available_extensions WHERE name = 'pg_prewarm') THEN
+        CREATE EXTENSION IF NOT EXISTS pg_prewarm WITH SCHEMA x_extension;
+    END IF;
+END
+$pg_prewarm$;
+
 SELECT format(
     'CREATE ROLE %I LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION',
     'ktm_feature_migrator'

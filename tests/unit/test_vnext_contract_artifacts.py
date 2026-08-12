@@ -34,8 +34,10 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     "target-invariants-v1.sql": (
         "94d959fa4004d717b10f0ffec6c44010da21b6749e03721a6813776c043aa1c6"
     ),
+    # 2026-08-12 재고정 — 계약 SQL은 그대로고(위 bb57b6de… / 아래 9f434b50… 불변)
+    # 재현 불가였던 columns/functions/indexes 파생 해시만 실측값으로 바뀌었다.
     "target-schema-fingerprints-v1.json": (
-        "715a4e1ca2d4007f9cdbaa99c6e9f8104c30595eb62bab866097a06d0383ee96"
+        "0f54989701b83f9a41a78adadac7d0acd660cc81655f62086cc37a7412df1898"
     ),
     "tvn33-reference-ownership-v1.sql": (
         "9f434b50440c7463b86a5cf61abeb30bf6fe8d74a5760aa256374c76e4c9328a"

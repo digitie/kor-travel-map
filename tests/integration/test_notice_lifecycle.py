@@ -953,17 +953,25 @@ async def test_reconcile_preserves_cross_provider_dataset_winners(
 
     # 과거 scope-local close/dedup 잔존을 재현한다. 현재 KREX 계보에서는
     # loser지만 다른 scope의 explicit true winner이므로 다시 열어야 한다.
-    await migrated_session.execute(
-        text(
-            # 0097 이후 soft-delete의 등가물은 3축 retire다.
-            "UPDATE feature.features"
-            " SET lifecycle_state = 'retired', publication_state = 'suppressed'"
-            " WHERE feature_id = :feature_id"
-        ),
-        {
-            "ended_at": _NOW + timedelta(minutes=6),
-            "feature_id": cross_scope_winner.feature.feature_id,
-        },
+    #
+    # legacy ``status='inactive', deleted_at=<ts>``의 3축 등가물은
+    # ``lifecycle_state='retired'``(+ ``ck_features_state_tuple``이 강제하는
+    # ``publication_state='suppressed'``)다. 다만 그 두 컬럼을 직접 쓰면 **누가
+    # 억제했는지**가 남지 않는다. 3축에서 provider 재적재는 자기가 내린 억제만
+    # 되돌리므로(``feature_repo._provider_reingest_publication``: publication을
+    # 마지막으로 바꾼 전이가 ``provider_retire``일 때만 복구), 증거 없는 억제는
+    # 운영자 판단으로 읽혀 reopen 후에도 suppressed로 굳는다. 여기서 재현하려는
+    # 것은 provider dedup이 남긴 잔존이므로 provider retire 경로 그대로 만든다 —
+    # 같은 KREX scope의 primary entity를 폐업 처리하면 된다.
+    assert (
+        await feature_repo.retire_features_by_source_entity_ids(
+            migrated_session,
+            provider=_KREX,
+            dataset_key=_KREX_DS,
+            source_entity_type=_KREX_ET,
+            source_entity_ids={f"legacy::{delete_lineage}"},
+        )
+        == 1
     )
     await migrated_session.execute(
         text(
@@ -1833,13 +1841,21 @@ async def test_event_lifecycle_resolves_open_finite_unknown_and_reactivation(
 
     # 다른 scope는 lifecycle state가 없는 unknown이다. open present exact replay는
     # 과거 soft-delete 잔존을 복구하고 unknown 때문에 막히지 않는다.
-    await migrated_session.execute(
-        text(
-            "UPDATE feature.features"
-            " SET lifecycle_state = 'retired', publication_state = 'suppressed' "
-            "WHERE feature_id = :fid"
-        ),
-        {"at": wall_now, "fid": feature_id},
+    #
+    # 복구 대상인 "과거 soft-delete"는 provider가 남긴 것이다. 3축에서 그 등가물은
+    # ``lifecycle_state='retired'``지만, 컬럼을 직접 쓰면 억제의 주체가 기록되지
+    # 않아 provider 재적재가 publication을 되돌릴 근거를 잃는다(위
+    # ``test_reconcile_preserves_cross_provider_dataset_winners`` 주석 참고).
+    # 그래서 이 scope의 계보 entity를 provider retire 경로로 폐업시킨다.
+    assert (
+        await feature_repo.retire_features_by_source_entity_ids(
+            migrated_session,
+            provider=provider,
+            dataset_key=dataset_key,
+            source_entity_type=source_entity_type,
+            source_entity_ids={lineage_key},
+        )
+        == 1
     )
     await migrated_session.execute(
         text(
@@ -1858,11 +1874,16 @@ async def test_event_lifecycle_resolves_open_finite_unknown_and_reactivation(
         observed_at=first_at,
     )
     assert replay.reconcile == feature_repo.NoticeReconcileResult(reopened=1)
+    # legacy 기대값 ``(status, deleted_at, valid_end) == ('active', None, None)``의
+    # 3축 등가물. ``deleted_at IS NULL``은 ``lifecycle_state='active'``이고, 여기서
+    # 실제로 확인하려는 것은 "provider 억제가 통째로 풀려 공개 표면으로 돌아왔다"
+    # 이므로 publication까지 함께 못 박고 ``public_features`` 실재로 확인한다.
     assert await _feature_state(migrated_session, feature_id) == (
         "active",
-        None,
+        "published",
         None,
     )
+    assert await _public_notice_ids(migrated_session) == {feature_id}
 
     # unknown + finite는 현재 open/future 기간을 줄이지 않고 더 늦은 끝만 연장한다.
     shorter_end = wall_now + timedelta(hours=6)

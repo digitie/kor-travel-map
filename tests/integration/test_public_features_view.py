@@ -234,17 +234,11 @@ async def test_bbox_cluster_search_nearby_share_projection(
     )
     assert {item.feature_id for item in nearby.items} == public
 
-    # ``statuses``는 T-VN-34C가 제거할 때까지 남는 폐기 예정 인자일 뿐, 전달 값으로
-    # 3축 공개 membership을 다시 좁히거나 넓히면 안 된다.
-    nearby_obsolete_status = await feature_repo.features_nearby(
-        migrated_session,
-        lon=126.978,
-        lat=37.5665,
-        radius_m=500.0,
-        statuses=("hidden",),
-        limit=50,
-    )
-    assert {item.feature_id for item in nearby_obsolete_status.items} == public
+    # 과도기에는 ``features_nearby(statuses=...)``가 남아 있었고, 여기서 "그 인자를
+    # 넘겨도 3축 공개 membership이 흔들리지 않는다"를 단언했다. T-VN-34C가 인자
+    # 자체를 없앴으므로 그 단언은 이제 signature가 대신한다 — 존재하지 않는 인자는
+    # 결과를 좁힐 수도 넓힐 수도 없다. 호출을 남기면 legacy status를 공개 경로의
+    # 입력으로 되살리는 셈이라 삭제한다. 위 ``nearby`` 단언이 공개 집합의 정본이다.
 
 
 async def test_detail_and_batch_rows_use_projection(migrated_session: AsyncSession) -> None:
@@ -765,6 +759,15 @@ async def test_curation_group_reads_use_projection(migrated_session: AsyncSessio
     )
     # 연결 자체의 admin 검증과 별개로, active/published/valid 밖의 tuple은
     # public read에서 숨겨져야 한다.
+    #
+    # 아래 `test_curated_public_read_uses_projection_admin_unchanged`와 같은 이유로
+    # 항목을 먼저 만들고 상태를 나중에 옮긴다. ``add_curation_item``의 가드는 legacy
+    # ``deleted_at IS NULL AND status NOT IN ('deleted','hidden')``의 3축 등가물
+    # (lifecycle='active' AND publication <> 'suppressed')이라 suppressed feature에
+    # 새 항목을 다는 것 자체를 막는다. 이 테스트가 재는 것은 "이미 큐레이션된 feature가
+    # 공개 밖으로 나갔을 때 공개 read에서 사라지는가"이므로, 공개 상태에서 연결한 뒤
+    # feature만 목표 축으로 옮겨야 의도한 최종 상태가 된다(draft는 가드가 허용하므로
+    # 두 단계 어느 쪽이든 같지만, 세 경우를 한 경로로 둔다).
     for suffix, publication_state in (
         ("active", "published"),
         ("suppressed", "suppressed"),
@@ -774,7 +777,6 @@ async def test_curation_group_reads_use_projection(migrated_session: AsyncSessio
             migrated_session,
             feature_id=f"pfv:cur:{suffix}",
             name=f"큐레이션 {suffix}",
-            publication_state=publication_state,
         )
         await curation_repo.add_curation_item(
             migrated_session,
@@ -784,6 +786,18 @@ async def test_curation_group_reads_use_projection(migrated_session: AsyncSessio
             status="included",
             sort_order=1,
         )
+        if publication_state != "published":
+            await migrated_session.execute(
+                text(
+                    "UPDATE feature.features SET publication_state = :publication_state "
+                    "WHERE feature_id = :feature_id"
+                ),
+                {
+                    "publication_state": publication_state,
+                    "feature_id": f"pfv:cur:{suffix}",
+                },
+            )
+            await migrated_session.flush()
 
     groups, _cursor = await curation_repo.list_feature_curation_groups(
         migrated_session, public_only=True, theme_slug="pfv-matrix-theme"
@@ -806,12 +820,18 @@ async def test_curated_public_read_uses_projection_admin_unchanged(
 ) -> None:
     """공개 curated read는 public theme의 curated overlay만 노출한다 (리뷰 S1)."""
     theme_id, source_id = await _seed_curation_foundation(migrated_session)
+    # 이 테스트가 재현하려는 상황은 "overlay가 이미 있는데 그 feature가 공개 밖으로
+    # 나갔다"이지, "공개 밖 feature에 overlay를 새로 달 수 있다"가 아니다. 두 축을
+    # 나눠야 하는 이유: ``create_curated_feature``의 생성 가드는 legacy
+    # ``status NOT IN ('deleted','hidden')``의 3축 등가물
+    # (lifecycle='active' AND publication <> 'suppressed')이라 suppressed를 생성
+    # 시점에 막는다. 그래서 공개 상태에서 overlay를 만든 뒤 feature만 suppressed로
+    # 옮긴다 — 큐레이션 후 비공개 전환이라는 실제 운영 경로와 같은 최종 상태다.
     for suffix, publication_state in (("active", "published"), ("suppressed", "suppressed")):
         await _ins_feature(
             migrated_session,
             feature_id=f"pfv:curated:{suffix}",
             name=f"레거시 큐레이션 {suffix}",
-            publication_state=publication_state,
         )
         await curated_repo.create_curated_feature(
             migrated_session,
@@ -820,6 +840,18 @@ async def test_curated_public_read_uses_projection_admin_unchanged(
             source_id=source_id,
             curation_status="curated",
         )
+        if publication_state != "published":
+            await migrated_session.execute(
+                text(
+                    "UPDATE feature.features SET publication_state = :publication_state "
+                    "WHERE feature_id = :feature_id"
+                ),
+                {
+                    "publication_state": publication_state,
+                    "feature_id": f"pfv:curated:{suffix}",
+                },
+            )
+            await migrated_session.flush()
 
     admin_theme = await curated_repo.create_curated_theme(
         migrated_session,

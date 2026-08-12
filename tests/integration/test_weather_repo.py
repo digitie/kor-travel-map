@@ -41,11 +41,26 @@ async def _insert_feature(
     lon: float | None = None,
     lat: float | None = None,
 ) -> None:
+    """weather anchor/target 후보 1건을 **공개 표면에 보이는 상태로** 심는다.
+
+    이 파일이 상태에 거는 요구는 단 하나 — ``weather_repo``의 card/anchor 조회가
+    전부 ``feature.public_features``(ADR-067) 위에서만 돌기 때문에 심은 feature가
+    그 projection에 떠야 한다는 것이다. T-VN-34(0097)가 ``status``를 물리 삭제하며
+    그 가시성 조건을 3축으로 옮겼고, 0097의 view 술어가 곧
+    ``lifecycle='active' AND publication='published' AND quality='valid'``다.
+    옛 ``status='active'``와 정확히 같은 뜻이라 그 tuple을 명시적으로 심는다.
+
+    축 값 자체는 이 파일의 관심사가 아니므로, 아래에서 축을 다시 읽어 확인하는 대신
+    ``public_features`` 실재를 단언한다 — 테스트가 실제로 의존하는 사실이 그것이고,
+    typed subtype 분해(0085~0087) 같은 projection 변경이 조용히 anchor 후보를
+    지워버리면 weather 단언이 엉뚱하게 깨지기 전에 여기서 먼저 잡힌다.
+    """
     await session.execute(
         text(
             """
             INSERT INTO feature.features (
-                feature_id, kind, name, category, coord, status
+                feature_id, kind, name, category, coord,
+                lifecycle_state, publication_state, quality_state
             ) VALUES (
                 :feature_id, :kind, :feature_id, '00000000',
                 CASE
@@ -55,7 +70,7 @@ async def _insert_feature(
                         CAST(:lon AS double precision), CAST(:lat AS double precision)
                     ), 4326
                 ) END,
-                'active'
+                'active', 'published', 'valid'
             )
             """
         ),
@@ -66,6 +81,12 @@ async def _insert_feature(
             "lat": lat,
         },
     )
+    assert await session.scalar(
+        text(
+            "SELECT count(*) FROM feature.public_features WHERE feature_id = :feature_id"
+        ),
+        {"feature_id": feature_id},
+    ) == 1
 
 
 async def _dataset(

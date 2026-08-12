@@ -840,6 +840,17 @@ ORDER BY f.feature_id
 LIMIT :limit
 """
 
+# 아래 두 질의의 공개 경계는 ``feature.public_features`` 소속 여부 그 자체다 —
+# 0097 이후 이 view는 상태 3축을 **투영하지 않고** 자신의 WHERE로 고정한다
+# (lifecycle=active AND publication=published AND quality=valid). 그래서 축 값을
+# view에서 읽을 수 없고, 그렇다고 view 술어를 상수로 베껴 SELECT에 박으면 같은
+# 사실의 정본이 둘이 되어 view가 바뀌는 순간 조용히 거짓말을 한다. 축의 정본은
+# ``feature.features``이므로 PK로 되짚어 실제 값을 읽는다(공개 판정은 여전히
+# view 하나가 소유한다).
+_PUBLIC_FEATURE_STATE_JOIN_SQL: Final[str] = (
+    "JOIN feature.features AS core ON core.feature_id = f.feature_id"
+)
+
 _GET_FEATURE_SQL: Final[str] = f"""
 SELECT
     f.feature_id,
@@ -850,10 +861,11 @@ SELECT
     x_extension.ST_X(f.coord) AS lon,
     x_extension.ST_Y(f.coord) AS lat,
     f.address,
-    f.lifecycle_state,
-    f.publication_state,
-    f.quality_state
+    core.lifecycle_state,
+    core.publication_state,
+    core.quality_state
 FROM feature.public_features AS f
+{_PUBLIC_FEATURE_STATE_JOIN_SQL}
 WHERE f.feature_id = :feature_id
 {public_active_notice_filter_sql("f")}
 """
@@ -868,10 +880,11 @@ SELECT
     x_extension.ST_X(f.coord) AS lon,
     x_extension.ST_Y(f.coord) AS lat,
     f.address,
-    f.lifecycle_state,
-    f.publication_state,
-    f.quality_state
+    core.lifecycle_state,
+    core.publication_state,
+    core.quality_state
 FROM feature.public_features AS f
+{_PUBLIC_FEATURE_STATE_JOIN_SQL}
 WHERE f.feature_id = ANY(CAST(:feature_ids AS text[]))
 {public_active_notice_filter_sql("f")}
 """
@@ -2032,9 +2045,52 @@ FROM feature.curation_collections
 WHERE collection_key = :collection_key
 """
 
+
+def _active_feature_state_sql(feature_alias: str, *, frozen_h35_schema: bool = False) -> str:
+    """큐레이션이 "붙일 수 있는 Feature"로 보는 상태 술어를 반환한다.
+
+    이 규칙의 내용은 "은퇴하지 않았고, 감춰지지도 않았다"이다. draft와 broken은
+    후보에서 빼지 않는다 — 큐레이터가 손대는 대상이 바로 그런 행이기 때문이다.
+
+    ``frozen_h35_schema``: H35 cutover 리허설 전용. 그 경로는 **0063~0079로 고정된
+    과거 스키마**를 재생하는데, 3축 column은 0095가 처음 만든 것이라 그 세대에는
+    존재하지 않는다. 같은 규칙을 그 세대의 정본 column으로 적는다. 두 표기가 같은
+    집합을 고른다는 것은 0095 backfill이 정의한 바 그대로다 —
+    ``deleted_at IS NOT NULL``이 lifecycle ``retired``가 되었고
+    ``status IN ('deleted','hidden')``이 publication ``suppressed``가 되었으므로,
+    각각의 부정인 ``deleted_at IS NULL``과 ``status NOT IN ('deleted','hidden')``이
+    ``lifecycle='active'``와 ``publication <> 'suppressed'``에 그대로 대응한다.
+    """
+
+    if not feature_alias.isidentifier():
+        raise ValueError("feature alias must be a SQL identifier")
+    if frozen_h35_schema:
+        return (
+            f"{feature_alias}.deleted_at IS NULL "
+            f"AND {feature_alias}.status NOT IN ('deleted', 'hidden')"
+        )
+    return (
+        f"{feature_alias}.lifecycle_state = 'active' "
+        f"AND {feature_alias}.publication_state <> 'suppressed'"
+    )
+
 # T-VN-32C PR-2 — 응답 후보 표시에 feature_uuid가 필요하지만, h35 cutover CLI는
 # 0063 고정(pre-feature_uuid) 스키마에서 같은 matcher를 돌린다(역사 표면 보존,
 # ADR-075). column 참조를 template slot으로 분리해 두 스키마 세대를 모두 지원한다.
+#
+# T-VN-34 이식 정정 — 이 matcher와 아래 세 가드의 legacy 술어는
+# ``deleted_at IS NULL AND status NOT IN ('deleted','hidden')``이었다. 0095 backfill로
+# 환산하면 ``lifecycle_state='active' AND publication_state <> 'suppressed'``다.
+# ``deleted_at IS NULL``이 lifecycle 축을, ``NOT IN ('deleted','hidden')``이 publication
+# 축을 각각 담당한다. 전환이 publication을 quality로 바꿔치기해 두었는데 그것은 두
+# 방향으로 틀렸다 — 감춰진(suppressed) feature가 큐레이션 후보·연결 대상으로 다시
+# 올라오고, legacy가 허용하던 broken(=quarantined) feature는 반대로 배제됐다.
+# 6976e875가 curated_repo의 같은 술어를 "publication<>'suppressed', quality 무제약"으로
+# 정정한 것과 같은 규칙을 여기에도 적용한다.
+#
+# 그 3축 표기는 **현행(0095~) 세대에서만** 성립한다. 위 h35 고정 세대는 0095 이전이라
+# 3축 column 자체가 없으므로, 같은 의미를 그 세대의 정본 column으로 적은 변형이 따로
+# 필요하다 — `_active_feature_state_sql`이 두 세대를 한 곳에서 관리한다.
 _RESOLVE_FEATURES_BATCH_SQL_TEMPLATE: Final[str] = """
 WITH requested AS (
     SELECT *
@@ -2068,8 +2124,7 @@ CROSS JOIN LATERAL (
         FROM feature.features AS f
         WHERE requested.feature_id IS NOT NULL
           AND f.feature_id = requested.feature_id
-          AND f.lifecycle_state = 'active'
-          AND f.quality_state = 'valid'
+          AND {active_feature_state}
     )
     UNION ALL
     (
@@ -2085,8 +2140,7 @@ CROSS JOIN LATERAL (
         WHERE requested.feature_id IS NULL
           AND requested.place_name IS NOT NULL
           AND lower(f.name) = lower(requested.place_name)
-          AND f.lifecycle_state = 'active'
-          AND f.quality_state = 'valid'
+          AND {active_feature_state}
         ORDER BY f.feature_id
         LIMIT 101
     )
@@ -2095,12 +2149,14 @@ ORDER BY requested.row_number, matched.feature_id
 """
 
 _RESOLVE_FEATURES_BATCH_SQL: Final[str] = _RESOLVE_FEATURES_BATCH_SQL_TEMPLATE.format(
-    feature_uuid_select="CAST(f.feature_uuid AS text)"
+    feature_uuid_select="CAST(f.feature_uuid AS text)",
+    active_feature_state=_active_feature_state_sql("f"),
 )
 
-# h35 CLI 전용 — feature_uuid column이 없는 pre-0080 스키마 세대.
-_RESOLVE_FEATURES_BATCH_PRE_UUID_SQL: Final[str] = (
-    _RESOLVE_FEATURES_BATCH_SQL_TEMPLATE.format(feature_uuid_select="NULL::text")
+# h35 CLI 전용 — feature_uuid column(0080)도 상태 3축 column(0095)도 없는 고정 세대.
+_RESOLVE_FEATURES_BATCH_PRE_UUID_SQL: Final[str] = _RESOLVE_FEATURES_BATCH_SQL_TEMPLATE.format(
+    feature_uuid_select="NULL::text",
+    active_feature_state=_active_feature_state_sql("f", frozen_h35_schema=True),
 )
 
 
@@ -2956,10 +3012,13 @@ async def add_curation_item(
         feature_name = (
             await session.execute(
                 text(
+                    # legacy `deleted_at IS NULL AND status NOT IN
+                    # ('deleted','hidden')`의 3축 등가물 — lifecycle이 삭제 축,
+                    # publication이 감춤 축이다(_RESOLVE_FEATURES_BATCH 주석 참조).
                     "SELECT name FROM feature.features "
                     "WHERE feature_id = :id "
                     "AND lifecycle_state = 'active' "
-                    "AND quality_state = 'valid' "
+                    "AND publication_state <> 'suppressed' "
                     "FOR KEY SHARE"
                 ),
                 {"id": feature_id},
@@ -3187,10 +3246,11 @@ async def update_curation_item(
         target_is_active = (
             await session.execute(
                 text(
+                    # 위 add 가드와 같은 legacy 술어의 3축 등가물이다.
                     "SELECT 1 FROM feature.features "
                     "WHERE feature_id = :feature_id "
                     "AND lifecycle_state = 'active' "
-                    "AND quality_state = 'valid' "
+                    "AND publication_state <> 'suppressed' "
                     "FOR KEY SHARE"
                 ),
                 {"feature_id": target_feature_id},
@@ -4591,15 +4651,22 @@ async def import_curation_rows(
         await _lock_collection_keys(session, collection_keys)
         feature_ids = sorted({str(row.feature_id) for row in rows if row.feature_id is not None})
         if feature_ids:
+            # import row가 참조할 수 있는 feature 집합도 add 가드와 같은 legacy 술어를
+            # 따른다 — 감춰진 것만 배제하고 draft·quarantined는 그대로 후보다. h35
+            # replay는 3축이 아직 없는 세대에서 이 경로를 그대로 도므로 matcher와 같은
+            # 세대별 표기를 쓴다(둘이 갈리면 matcher가 고른 행을 이 가드가 되돌려
+            # import 전체가 죽는다).
+            active_state_sql = _active_feature_state_sql(
+                "f", frozen_h35_schema=frozen_h35_schema
+            )
             active_feature_ids = set(
                 (
                     await session.execute(
                         text(
-                            "SELECT feature_id FROM feature.features "
-                            "WHERE feature_id = ANY(CAST(:feature_ids AS text[])) "
-                            "AND lifecycle_state = 'active' "
-                            "AND quality_state = 'valid' "
-                            "ORDER BY feature_id FOR UPDATE"
+                            "SELECT feature_id FROM feature.features AS f "
+                            "WHERE f.feature_id = ANY(CAST(:feature_ids AS text[])) "
+                            f"AND {active_state_sql} "
+                            "ORDER BY f.feature_id FOR UPDATE"
                         ),
                         {"feature_ids": feature_ids},
                     )

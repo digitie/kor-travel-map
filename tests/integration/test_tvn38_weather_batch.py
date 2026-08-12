@@ -33,17 +33,25 @@ async def _insert_feature(
     lon: float = 126.9784,
     lat: float = 37.5665,
 ) -> None:
+    """batch 조회의 입력이 될 feature 1건을 공개 표면에 보이는 상태로 심는다.
+
+    T-VN-34(0097)가 ``status``를 물리 삭제했다. 이 파일이 상태에 거는 요구는
+    "``feature.public_features``에 뜨는가" 하나뿐이고 — batch reader는 parent/anchor를
+    그 projection에서만 찾는다 — 그 조건이 곧
+    ``lifecycle='active' AND publication='published' AND quality='valid'``,
+    즉 옛 ``status='active'``와 같은 뜻이다. 세 축의 컬럼 기본값이 정확히 그 조합이라
+    별도 지정 없이 INSERT하는 것으로 등가가 성립한다.
+    """
     await session.execute(
         text(
             """
             INSERT INTO feature.features (
-                feature_id, kind, name, category, coord, status
+                feature_id, kind, name, category, coord
             ) VALUES (
                 :feature_id, :kind, :feature_id, '00000000',
                 x_extension.ST_SetSRID(
                     x_extension.ST_MakePoint(:lon, :lat), 4326
-                ),
-                'active'
+                )
             )
             """
         ),
@@ -131,15 +139,21 @@ async def test_batch_uses_final_facts_and_preserves_snapshot_source_tiers(
     )
     await _insert_feature(migrated_session, "batch-empty", lon=128.0, lat=37.5665)
     await _insert_feature(migrated_session, "batch-retired", lon=126.9744, lat=37.5665)
+    # 옛 ``status='deleted' + deleted_at``의 뜻은 "더 이상 공개 표면에 없다"였고,
+    # 0095 backfill이 그 조건을 그대로 ``lifecycle_state='retired'``로 옮겼다.
+    # 삭제 시각 자체는 이 테스트가 단언하지 않으므로(단언 대상은 batch item이
+    # ``retired``로 분류되는지뿐이다) 시각 컬럼 대체물은 필요 없다. retire되면
+    # ``ck_features_state_tuple``이 publication을 ``suppressed``로 강제하므로 두 축을
+    # 한 문장에서 함께 옮긴다 — 그 결과 이 행은 ``feature.public_features``에서
+    # 빠지고, batch reader가 parent를 못 찾아 ``retired``로 분류한다.
     await migrated_session.execute(
         text(
             """
             UPDATE feature.features
-            SET status = 'deleted', deleted_at = :deleted_at
+            SET lifecycle_state = 'retired', publication_state = 'suppressed'
             WHERE feature_id = 'batch-retired'
             """
         ),
-        {"deleted_at": _BASE},
     )
     assert await weather_repo.load_weather_values(
         migrated_session,

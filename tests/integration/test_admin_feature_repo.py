@@ -620,14 +620,29 @@ async def test_admin_runtime_login_uses_procedures_for_add_update_delete_and_pro
                 "data_origin": "user_request",
                 "data_version": 1,
             }
-            assert (
-                await runtime_session.scalar(
+            # 0095는 runtime에서 feature_versions를 통째로 REVOKE했지만, 0097이
+            # features_detailed를 DROP하면서 admin detail 화면이 version receipt를
+            # 직접 읽게 됐다(`_ADMIN_FEATURE_VERSIONS_SQL`). 그래서 0097은 runtime에
+            # SELECT만 되돌려준다 — INV-34C-08이 정본이고, 읽기는 immutable trigger
+            # 뒤에 있으므로 provenance 무결성과 무관하다.
+            # 이 테스트가 지키려는 의미는 "runtime이 provenance를 직접 쓰지 못하고
+            # typed writer(procedure)만 거친다"이다. 그 의미는 읽기 권한의 부재가
+            # 아니라 쓰기 권한의 부재로 표현된다. has_table_privilege는 나열한 권한
+            # 중 하나라도 있으면 true이므로, 아래 한 번의 단언이 INSERT/UPDATE/DELETE
+            # 셋 모두의 부재를 뜻한다.
+            privileges = (
+                await runtime_session.execute(
                     text(
                         "SELECT has_table_privilege("
-                        "session_user, 'feature.feature_versions', 'SELECT')"
+                        "session_user, 'feature.feature_versions', 'SELECT') AS can_read, "
+                        "has_table_privilege("
+                        "session_user, 'feature.feature_versions', "
+                        "'INSERT, UPDATE, DELETE') AS can_write"
                     )
                 )
-            ) is False
+            ).mappings().one()
+            assert privileges["can_read"] is True
+            assert privileges["can_write"] is False
     finally:
         await runtime_engine.dispose()
 

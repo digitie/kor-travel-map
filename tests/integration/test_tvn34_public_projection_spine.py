@@ -483,6 +483,28 @@ async def test_public_partial_indexes_have_exact_state_predicate_and_explain_pro
         await migrated_session.execute(text("ANALYZE feature.features"))
         await migrated_session.execute(text("ANALYZE feature.feature_routes"))
         await migrated_session.execute(text("ANALYZE feature.feature_areas"))
+        # trgm 증명만 planner 기본값(seq scan 허용)으로 돌기 때문에, GIN의 쓰기
+        # 버퍼가 그대로 비용에 섞이면 판정이 뒤집힌다. GIN은 fastupdate가 기본
+        # ON이라 INSERT가 만든 항목이 본 트리가 아니라 pending list에 먼저 쌓이고,
+        # `gincostestimate`는 그 pending list를 **모든** index scan 비용에 통째로
+        # 더한다. 게다가 pending list는 rollback으로 되돌아가지 않는다 —
+        # `migrated_engine` DB는 session scope라, 위 25 000행 seed가 남긴 109 page에
+        # 다른 파일이 넣었다 되돌린 행의 항목까지 누적된다. 실측하면 그 잔여만으로
+        # trgm 경로 비용이 250 → 1 360으로 부풀어 seq scan(1 363)을 넘고, planner가
+        # Seq Scan을 고른다. 즉 partial index 술어가 틀려서가 아니라 아직 접히지
+        # 않은 쓰기 버퍼를 인덱스 비용으로 청구당해서다.
+        #
+        # 운영에서는 autovacuum의 GIN cleanup이 이 버퍼를 접으므로 정상 상태는
+        # flush된 쪽이고, 이 테스트가 증명하려는 것도 정상 상태의 접근 경로다.
+        # 그래서 seed 직후 한 번 접어 그 상태를 재현한다 (통계를 맞추는 ANALYZE와
+        # 같은 성격의 준비 단계다). 잔여를 본 트리로 옮겨도 실측 비용은 250 대로
+        # 유지돼 판정 여유가 5배 이상으로 돌아온다.
+        await migrated_session.execute(
+            text(
+                "SELECT pg_catalog.gin_clean_pending_list("
+                "'feature.idx_features_name_trgm')"
+            )
+        )
         queries: tuple[tuple[str, str], ...] = (
             (
                 "idx_features_coord_gist",

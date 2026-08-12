@@ -38,7 +38,15 @@ def _feature_row(feature_id: str) -> FeatureRow:
         address={"road": "서울특별시 종로구 세종대로 1"},
         urls={},
         raw_refs=[],
-        status="active",
+        # 이 fixture가 원래 말하던 legacy ``status='active'``는 "공개 표면에
+        # 정상적으로 실재하는 feature"라는 뜻이었다. T-VN-34 3축에서 그 한 값은
+        # 세 축의 조합으로 흩어진다 — 살아있고(lifecycle=active), 공개돼 있으며
+        # (publication=published), 격리되지 않은(quality=valid) 상태다. 주소/좌표
+        # override SQL은 상태 축을 건드리지 않으므로 여기서는 "평범한 공개 feature"
+        # 라는 출발점만 3축으로 정확히 재현하면 된다.
+        lifecycle_state="active",
+        publication_state="published",
+        quality_state="valid",
         legal_dong_code="1111010100",
         sido_code="11",
         sigungu_code="11110",
