@@ -571,7 +571,19 @@ async def test_kor_travel_concierge_revert_reactivates_tombstoned_feature(
         )
     ).one()
     assert recovered_state.lifecycle_state == "active"
-    assert recovered_state.publication_state == "suppressed"
+    # provider retire가 부수적으로 내린 억제는 provider reingest가 되돌린다.
+    # docstring이 주장하는 것은 "지도에 다시 보인다"이므로, 축 값이 아니라
+    # **공개 표면에 실제로 있는지**를 단언한다 — 축만 보면 공개 술어가 바뀌었을 때
+    # 통과하면서 지도에서는 사라진 상태를 놓친다.
+    assert recovered_state.publication_state == "published"
+    assert (
+        await migrated_session.execute(
+            text(
+                "SELECT count(*) FROM feature.public_features WHERE feature_id = :feature_id"
+            ),
+            {"feature_id": bundle.feature.feature_id},
+        )
+    ).scalar_one() == 1
 
 
 async def test_kor_travel_concierge_revert_with_changed_payload_reactivates(
@@ -617,8 +629,16 @@ async def test_kor_travel_concierge_revert_with_changed_payload_reactivates(
         )
     ).one()
     assert row.lifecycle_state == "active"
-    assert row.publication_state == "suppressed"
+    assert row.publication_state == "published"
     assert row.description == "재검수로 수정된 설명"
+    assert (
+        await migrated_session.execute(
+            text(
+                "SELECT count(*) FROM feature.public_features WHERE feature_id = :feature_id"
+            ),
+            {"feature_id": bundle.feature.feature_id},
+        )
+    ).scalar_one() == 1
 
 
 async def test_kor_travel_concierge_revert_respects_admin_prevention(
@@ -656,6 +676,57 @@ async def test_kor_travel_concierge_revert_respects_admin_prevention(
     ).one()
     assert row.lifecycle_state == "retired"
     assert row.publication_state == "suppressed"
+
+
+async def test_provider_reingest_restores_the_operator_publication_not_a_default(
+    migrated_session: AsyncSession,
+) -> None:
+    """reingest 복구는 retire **직전** publication으로 돌아간다 — 기본값이 아니다.
+
+    운영자가 draft로 내려둔 feature를 provider가 retire했다가 재적재하면,
+    되돌아갈 자리는 `published`가 아니라 운영자가 정해둔 `draft`다. 복구를
+    "호출자가 선언한 값으로 무조건 덮기"로 구현하면 이 테스트가 red가 된다 —
+    공개 표면 소멸을 고치면서 반대로 운영자 의사를 덮어쓰는 실수를 막는다.
+
+    `retired + draft`는 `ck_features_state_tuple`이 막으므로 운영자 의사는
+    retire **이전**에만 표명될 수 있다. 그래서 이 순서가 유일하게 도달 가능한
+    형태다.
+    """
+    item = _concierge_item(candidate_id=9104)
+    [bundle] = await kor_travel_concierge_items_to_bundles([item], fetched_at=_FETCHED)
+    await feature_repo.load_bundle(migrated_session, bundle)
+
+    revision = await admin_feature_repo.get_feature_row_revision(
+        migrated_session, bundle.feature.feature_id
+    )
+    assert revision is not None
+    drafted = await admin_feature_repo.transition_admin_feature_state(
+        migrated_session,
+        bundle.feature.feature_id,
+        expected_row_revision=revision,
+        reason_code="operator_hold",
+        operator="integration-test",
+        action="patch",
+        publication_state="draft",
+    )
+    assert drafted.publication_state == "draft"
+
+    assert await _retire_concierge_items(
+        migrated_session, [{**item, "operation": "tombstone"}]
+    ) == 1
+
+    await feature_repo.load_bundle(migrated_session, bundle)
+    row = (
+        await migrated_session.execute(
+            text(
+                "SELECT lifecycle_state, publication_state FROM feature.features "
+                "WHERE feature_id = :feature_id"
+            ),
+            {"feature_id": bundle.feature.feature_id},
+        )
+    ).one()
+    assert row.lifecycle_state == "active"
+    assert row.publication_state == "draft"
 
 
 async def test_notice_first_probe_start_time_is_preserved_on_payload_update(

@@ -437,7 +437,26 @@ SELECT
           AND fo.status = 'active'
           AND fo.override_value = '"retired"'::jsonb
           AND fo.prevent_provider_reactivation
-    ), false) AS has_provider_reactivation_override
+    ), false) AS has_provider_reactivation_override,
+    -- publication을 **마지막으로 바꾼** 전이 하나. provider retire가 억제한 것을
+    -- provider reingest가 되돌릴 수 있게 하되, 그 뒤에 다른 주체가 publication을
+    -- 다시 정했다면 그 결정이 이긴다 (아래 `_provider_reingest_publication`).
+    (
+        SELECT t.reason_code
+        FROM feature.feature_state_transitions AS t
+        WHERE t.feature_id = f.feature_id
+          AND t.from_publication_state IS DISTINCT FROM t.to_publication_state
+        ORDER BY t.transition_id DESC
+        LIMIT 1
+    ) AS last_publication_reason_code,
+    (
+        SELECT t.from_publication_state
+        FROM feature.feature_state_transitions AS t
+        WHERE t.feature_id = f.feature_id
+          AND t.from_publication_state IS DISTINCT FROM t.to_publication_state
+        ORDER BY t.transition_id DESC
+        LIMIT 1
+    ) AS last_publication_from_state
 FROM (VALUES (CAST(:feature_id AS text))) AS wanted(feature_id)
 LEFT JOIN feature.features AS f
   ON f.feature_id = wanted.feature_id
@@ -2593,6 +2612,8 @@ class _FeatureLoadState:
     has_provider_reactivation_override: bool
     data_origin: str | None = None
     data_version: int | None = None
+    last_publication_reason_code: str | None = None
+    last_publication_from_state: str | None = None
 
     @property
     def provider_write_fenced(self) -> bool:
@@ -2620,6 +2641,16 @@ async def _feature_load_state(
         data_version=(int(row["data_version"]) if row["data_version"] is not None else None),
         has_provider_reactivation_override=bool(
             row["has_provider_reactivation_override"]
+        ),
+        last_publication_reason_code=(
+            str(row["last_publication_reason_code"])
+            if row["last_publication_reason_code"] is not None
+            else None
+        ),
+        last_publication_from_state=(
+            str(row["last_publication_from_state"])
+            if row["last_publication_from_state"] is not None
+            else None
         ),
     )
 
@@ -2657,6 +2688,45 @@ async def _transition_provider_lifecycle_if_needed(
     )
 
 
+_PROVIDER_RETIRE_REASON_CODE: Final[str] = "provider_retire"
+
+
+def _provider_reingest_publication(
+    current: _FeatureLoadState, desired_state: ProviderFeatureState
+) -> str:
+    """provider reingest가 복구할 publication 축을 정한다.
+
+    provider retire는 lifecycle을 ``retired``로 내리면서 publication을
+    ``suppressed``로 **함께** 내린다. 그 억제는 독립적인 판단이 아니라 retire의
+    기계적 부수효과다. 그래서 reingest가 lifecycle만 되돌리고 publication을 그대로
+    두면 feature는 ``feature.public_features``에서 **영구히** 사라진다 — 자동 복구
+    경로가 없고, feature마다 If-Match ETag를 붙인 admin ``PATCH /state``를 손으로
+    호출하는 것 말고는 되돌릴 방법이 없다. ``retire_features_absent_from_snapshot``은
+    provider 피드가 한 번만 비어도 dataset 전량을 retire하므로, 피드가 정상화돼도
+    전량이 지도에서 사라진 채 남는다.
+
+    그렇다고 무조건 ``desired_state``를 쓰면 반대 방향으로 틀린다 — retire 이후에
+    운영자가 publication을 따로 정했다면 그 결정이 provider 재적재보다 새롭다.
+
+    그래서 **publication을 마지막으로 바꾼 전이 하나**만 본다. 그것이 provider
+    retire였고 현재도 그 결과(``suppressed``)가 유지되고 있을 때만, provider가
+    자기가 내린 것을 자기가 되돌린다. 그 뒤 누군가 publication을 다시 정했다면
+    마지막 전이의 ``reason_code``가 달라지므로 현재 값이 그대로 남는다.
+    """
+
+    assert current.publication_state is not None
+    if current.publication_state != "suppressed":
+        return current.publication_state
+    if current.last_publication_reason_code != _PROVIDER_RETIRE_REASON_CODE:
+        return current.publication_state
+    restored = current.last_publication_from_state
+    if restored in ("draft", "published"):
+        return restored
+    # retire 이전 값을 읽을 수 없는 세대(3축 전환 이전에 억제된 row)는 호출자가
+    # 선언한 값으로 복구한다. 셋 다 명시적으로 declare하므로 임의값이 아니다.
+    return desired_state.publication_state
+
+
 async def _transition_provider_lifecycle_from_state(
     session: AsyncSession,
     *,
@@ -2689,7 +2759,7 @@ async def _transition_provider_lifecycle_from_state(
         and not current.has_provider_reactivation_override
     ):
         target_lifecycle = "active"
-        target_publication = current.publication_state
+        target_publication = _provider_reingest_publication(current, desired_state)
         reason_code = "provider_reingest"
     if target_lifecycle is None or target_publication is None or reason_code is None:
         return False

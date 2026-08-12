@@ -1435,8 +1435,34 @@ def test_destructive_disabled_by_default_returns_403(
         == 403
     )
     # 대조군 — 파괴적이지 않은 patch action은 게이트를 통과해야 한다.
-    # HTTP로 태우면 게이트를 지난 뒤 DB에 닿으므로, 게이트 축만 직접 검증한다
-    # (게이트를 라우트 전체에 걸면 아래가 HTTPException으로 깨진다).
+    #
+    # **같은 라우트를 HTTP로 태운다.** 헬퍼를 직접 호출하면 헬퍼의 분기만 볼 뿐
+    # 라우트에 무엇이 걸려 있는지는 보지 않으므로, 배선을 `dependencies=[Depends(
+    # require_admin_destructive_enabled)]`(=라우트 전체 차단)로 되돌려도 이 테스트가
+    # red가 되지 않는다 — 즉 "retire action에만 건다"는 이 설계의 핵심 주장이
+    # 무보증으로 남는다(2026-08-12 적대 리뷰가 실제로 그 변이를 통과시켰다).
+    #
+    # `_FakeSession`은 repo 계층까지 가면 터진다. 그 예외를 응답으로 받아야
+    # "게이트를 지나 그 뒤까지 갔다"를 관찰할 수 있으므로 재던지지 않는 client를 쓴다.
+    # 게이트 통과 여부만이 관심사라 상태코드 값이 아니라 **403이 아님**을 단언한다 —
+    # 게이트에 걸리면 반드시 403이기 때문이다. 이 단언이 성립한다는 것은 patch가
+    # 인증을 이미 통과했다는 뜻이므로, 위 retire의 403이 인증 403이 아니라
+    # kill-switch 403임도 함께 고정된다.
+    passthrough_client = TestClient(
+        client.app,
+        client=("127.0.0.1", 50000),
+        raise_server_exceptions=False,
+    )
+    passthrough = passthrough_client.patch(
+        "/v1/admin/features/f_x/state",
+        json={"action": "patch", "publication_state": "draft", "reason_code": "test"},
+        headers=_STATE_WRITE_HEADERS,
+    )
+    assert passthrough.status_code != 403, (
+        "파괴적 kill-switch가 retire가 아닌 patch까지 막고 있다 — "
+        "라우트 전체 차단으로 되돌아갔다"
+    )
+    # 헬퍼 단위 축도 함께 남긴다(라우트 배선과 분기 로직을 각각 고정).
     asyncio.run(
         require_destructive_enabled_for_retire(
             _json_body_request(

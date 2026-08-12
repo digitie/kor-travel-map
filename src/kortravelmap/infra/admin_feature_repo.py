@@ -2306,13 +2306,47 @@ def _pg_error_attribute(error: DBAPIError, attribute: str) -> str | None:
     return str(value) if value is not None else None
 
 
+# 현재 tuple과 **충돌**하는 요청 — 요청 자체는 형식이 맞고, 지금 상태에서만 불가능하다.
+_ADMIN_STATE_CONFLICT_CONSTRAINTS: Final[frozenset[str]] = frozenset(
+    {
+        "ck_feature_provider_source_provenance",
+        "ck_feature_provider_reactivation_override",
+        "ck_feature_admin_reactivation",
+        # retired feature에 published/draft를 요구하는 patch. 요청 axis 값 자체는
+        # 유효하고 현재 lifecycle과의 조합만 불가능하므로 위 reactivation 충돌과
+        # 같은 부류다. 이 이름이 빠져 있는 동안 raw IntegrityError가 라우터의 except를
+        # 전부 통과해 catch-all 500이 됐다 — 선언된 응답 집합에도 없는 상태였다.
+        "ck_features_state_tuple",
+    }
+)
+
+# 요청 자체가 성립하지 않는다 — 현재 상태와 무관하게 거부된다.
+_ADMIN_STATE_VALIDATION_CONSTRAINTS: Final[frozenset[str]] = frozenset(
+    {
+        "ck_feature_admin_state_command",
+        "ck_feature_state_transition_non_noop",
+        "ck_feature_state_expected_revision",
+        # axis enum. API schema가 먼저 걸러내지만, schema와 DDL이 갈리는 순간
+        # 500으로 새지 않게 2차 방어를 둔다.
+        "ck_features_lifecycle_state",
+        "ck_features_publication_state",
+        "ck_features_quality_state",
+    }
+)
+
+
 def _raise_admin_state_procedure_error(
     error: DBAPIError,
     *,
     feature_id: str,
     expected_row_revision: int,
 ) -> NoReturn:
-    """0097 state procedure의 DB contract를 HTTP-domain 오류로 보존한다."""
+    """0097 state procedure의 DB contract를 HTTP-domain 오류로 보존한다.
+
+    매핑에 없는 23514는 raw로 다시 던진다 — 조용히 도메인 오류로 바꾸면 진짜
+    불변식 위반(=버그)이 정상 응답처럼 보인다. 대신 이름이 실제 DDL에 존재하는지는
+    ``test_admin_state_error_mapping_names_exist_in_ddl``이 fail-close로 지킨다.
+    """
 
     sqlstate = _pg_error_attribute(error, "sqlstate")
     constraint = _pg_error_attribute(error, "constraint_name")
@@ -2324,17 +2358,9 @@ def _raise_admin_state_procedure_error(
             expected=expected_row_revision,
         ) from error
     if sqlstate == "23514":
-        if constraint in {
-            "ck_feature_provider_source_provenance",
-            "ck_feature_provider_reactivation_override",
-            "ck_feature_admin_reactivation",
-        }:
+        if constraint in _ADMIN_STATE_CONFLICT_CONSTRAINTS:
             raise AdminFeatureStateConflict(str(error.orig)) from error
-        if constraint in {
-            "ck_feature_admin_state_command",
-            "ck_feature_state_transition_non_noop",
-            "ck_feature_state_expected_revision",
-        }:
+        if constraint in _ADMIN_STATE_VALIDATION_CONSTRAINTS:
             raise AdminFeatureStateValidationError(str(error.orig)) from error
     raise error
 
