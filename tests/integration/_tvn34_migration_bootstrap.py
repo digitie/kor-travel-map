@@ -96,9 +96,32 @@ async def bootstrap_tvn34_migration_roles(engine: AsyncEngine) -> str:
         # PostGIS image가 initdb에서 public에 둔 non-relocatable extension은
         # application relation이 없는 fresh DB에서만 다시 만든다. 이것은 production
         # bootstrap의 destructive-operation guard와 같은 fresh-only branch다.
-        await connection.execute(text("DROP EXTENSION IF EXISTS postgis_topology CASCADE"))
-        await connection.execute(text("DROP EXTENSION IF EXISTS postgis CASCADE"))
-        await connection.execute(text("CREATE EXTENSION postgis WITH SCHEMA x_extension"))
+        #
+        # 주석만 있고 **검사는 없었다.** 이 helper가 conftest 전용이던 동안은 대상이
+        # 항상 fresh DB라 드러나지 않았지만, 공유 helper가 되자마자
+        # `test_alembic_upgrade`가 컨테이너의 **공유 기본 DB**에 이것을 걸어
+        # postgis를 CASCADE로 날렸고 뒤따르는 테스트 수십 건이 무너졌다
+        # (2026-08-12 실측). 전제를 주석이 아니라 코드로 강제한다.
+        application_relation_count = int(
+            (
+                await connection.execute(
+                    text(
+                        "SELECT count(*) FROM pg_catalog.pg_class AS c "
+                        "JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace "
+                        "WHERE c.relkind IN ('r', 'p', 'v', 'm') "
+                        "AND n.nspname IN ('feature', 'provider_sync', 'ops')"
+                    )
+                )
+            ).scalar_one()
+        )
+        if application_relation_count == 0:
+            await connection.execute(
+                text("DROP EXTENSION IF EXISTS postgis_topology CASCADE")
+            )
+            await connection.execute(text("DROP EXTENSION IF EXISTS postgis CASCADE"))
+            await connection.execute(
+                text("CREATE EXTENSION IF NOT EXISTS postgis WITH SCHEMA x_extension")
+            )
         await connection.execute(
             text("CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA x_extension")
         )
