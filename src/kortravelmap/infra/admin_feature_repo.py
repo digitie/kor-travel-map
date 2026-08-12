@@ -30,6 +30,7 @@ from kortravelmap.infra.feature_projection import (
     typed_feature_detail_joins_sql,
 )
 from kortravelmap.infra.feature_subtype import write_subtype
+from kortravelmap.infra.feature_update_active_repo import _driver_constraint_identity
 from kortravelmap.infra.merge_repo import (
     MergeConflictError,
     MergeNotFoundError,
@@ -2293,17 +2294,14 @@ def _validated_operator_and_reason_code(*, operator: str, reason_code: str) -> N
         raise ValueError("admin state transition에는 non-empty reason_code가 필요합니다.")
 
 
-def _pg_error_attribute(error: DBAPIError, attribute: str) -> str | None:
-    """asyncpg/psycopg error의 portable SQLSTATE/constraint accessor."""
-
-    original = error.orig
-    value = getattr(original, attribute, None)
-    if value is None and attribute == "sqlstate":
-        value = getattr(original, "pgcode", None)
-    if value is None and attribute == "constraint_name":
-        diagnostic = getattr(original, "diag", None)
-        value = getattr(diagnostic, "constraint_name", None)
-    return str(value) if value is not None else None
+# asyncpg에서 constraint 이름은 ``error.orig``가 아니라 그 **__cause__**(원본
+# asyncpg 예외)에 있다. ``error.orig``는 SQLAlchemy가 만든 DBAPI 래퍼라
+# ``sqlstate``는 갖지만 ``constraint_name``도 ``diag``도 갖지 않는다. 예전
+# ``_pg_error_attribute``는 ``orig``만 봐서 constraint가 **항상 None**이었고, 그래서
+# 아래 두 집합의 이름이 하나도 매칭되지 않았다 — 매핑 전체가 죽은 코드였고
+# 모든 23514가 라우터의 except 사슬을 통과해 catch-all 500이 됐다(2026-08-12 적대
+# 리뷰 실측). 저장소에는 이미 예외 사슬을 순회하는 올바른 추출기가 있으므로
+# 두 벌을 두지 않고 그것을 쓴다.
 
 
 # 현재 tuple과 **충돌**하는 요청 — 요청 자체는 형식이 맞고, 지금 상태에서만 불가능하다.
@@ -2348,8 +2346,7 @@ def _raise_admin_state_procedure_error(
     ``test_admin_state_error_mapping_names_exist_in_ddl``이 fail-close로 지킨다.
     """
 
-    sqlstate = _pg_error_attribute(error, "sqlstate")
-    constraint = _pg_error_attribute(error, "constraint_name")
+    sqlstate, constraint = _driver_constraint_identity(error)
     if sqlstate == "P0002":
         raise AdminFeatureStateNotFound(f"feature/source evidence 없음: {feature_id!r}") from error
     if sqlstate == "40001":

@@ -21,6 +21,7 @@ import hashlib
 import json
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from pathlib import Path
 from typing import Any, Final
 
 import pytest
@@ -1290,3 +1291,75 @@ async def test_search_features_include_total_false_never_executes_count() -> Non
     )
     assert counted_page.total_count == 7
     assert sum("count(*)" in statement for statement in with_total.statements) == 1
+
+
+def _load_state(
+    *, publication: str, reason_code: str | None, from_state: str | None
+) -> feature_repo._FeatureLoadState:
+    return feature_repo._FeatureLoadState(
+        exists=True,
+        lifecycle_state="retired",
+        publication_state=publication,
+        quality_state="valid",
+        row_revision=1,
+        has_provider_reactivation_override=False,
+        last_publication_reason_code=reason_code,
+        last_publication_from_state=from_state,
+    )
+
+
+_DESIRED = feature_repo.ProviderFeatureState(
+    lifecycle_state="active", publication_state="published", quality_state="valid"
+)
+
+
+def test_provider_reingest_restores_the_value_the_retire_recorded() -> None:
+    state = _load_state(
+        publication="suppressed", reason_code="provider_retire", from_state="draft"
+    )
+    assert feature_repo._provider_reingest_publication(state, _DESIRED) == "draft"
+
+
+def test_provider_reingest_recovers_rows_the_0095_backfill_handed_over() -> None:
+    """0095가 넘겨온 세대도 공개 표면으로 돌아와야 한다.
+
+    backfill은 legacy row마다 ``reason_code='legacy_provider_retire'``(또는
+    ``legacy_status_retire``) / ``from_publication_state=NULL``인 전이 하나만 남긴다.
+    되돌릴 값이 기록돼 있지 않다고 해서 복구를 포기하면, **마이그레이션이 스스로
+    만들어낸 행 전량**이 ``feature.public_features``에서 영구히 사라진다 — prod는
+    0087 + 실데이터라 그 집합이 크다. 이 축이 없으면 그 소멸이 조용히 남는다.
+    """
+
+    for reason_code in ("legacy_provider_retire", "legacy_status_retire"):
+        state = _load_state(
+            publication="suppressed", reason_code=reason_code, from_state=None
+        )
+        assert (
+            feature_repo._provider_reingest_publication(state, _DESIRED) == "published"
+        ), reason_code
+
+
+def test_provider_reingest_leaves_a_newer_non_provider_decision_alone() -> None:
+    """provider는 **자기가 내린 것만** 되돌린다."""
+
+    state = _load_state(
+        publication="suppressed", reason_code="operator_suppress", from_state="published"
+    )
+    assert feature_repo._provider_reingest_publication(state, _DESIRED) == "suppressed"
+
+
+def test_legacy_retire_reason_codes_exist_in_the_0095_backfill() -> None:
+    """복구가 보는 reason code가 실제로 0095가 쓰는 이름인지 대조한다.
+
+    이름이 갈리면 복구는 조용히 무효가 된다 — 위 테스트들은 여전히 통과하면서
+    실제 backfill 행만 복구되지 않는다.
+    """
+
+    backfill_sql = (
+        Path(__file__).resolve().parents[2]
+        / "alembic"
+        / "versions"
+        / "0095_feature_orthogonal_state_spine.py"
+    ).read_text(encoding="utf-8")
+    for reason_code in feature_repo._LEGACY_PROVIDER_RETIRE_REASON_CODES:
+        assert f"'{reason_code}'" in backfill_sql, reason_code

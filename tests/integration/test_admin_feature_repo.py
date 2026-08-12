@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from kortravelmap.dto import Address, Coordinate, Feature, PlaceDetail
 from kortravelmap.infra import feature_repo
 from kortravelmap.infra.admin_feature_repo import (
+    AdminFeatureStateConflict,
     AdminFeatureStatePreconditionFailed,
     apply_feature_change_request,
     get_feature_row_revision,
@@ -1027,3 +1028,45 @@ async def test_list_dedup_reviews_cursor_rejects_filter_change(
     assert [item.review_id for item in page2.items] == [
         "00000000-0000-0000-0000-0000000000a1"
     ]
+
+
+async def test_retired_feature_publication_patch_is_a_conflict_not_a_500(
+    migrated_session: AsyncSession,
+) -> None:
+    """``ck_features_state_tuple`` 위반이 도메인 오류로 보존되는지 **실 DB로** 본다.
+
+    이 축이 없으면 매핑은 조용히 죽는다. 실제로 그랬다 — constraint 이름을
+    ``error.orig``에서만 찾았는데 asyncpg는 그것을 ``error.orig.__cause__``에 둔다.
+    그래서 두 집합의 이름 8개가 **하나도** 매칭되지 않았고 모든 23514가 라우터의
+    except 사슬을 통과해 catch-all 500이 됐다. 이름을 집합에서 빼도 게이트가 전부
+    green이었으므로 매핑에는 부하가 전혀 없었다.
+
+    단언 대상을 상태코드가 아니라 **도메인 예외 타입**으로 두는 이유는, 라우터가
+    그 타입으로 409를 만들기 때문이다(타입이 맞으면 상태코드는 라우터 테스트가 고정한다).
+    """
+
+    feature_id = "feature-retired-publication-patch"
+    await _seed_feature(migrated_session, feature_id)
+    revision = await get_feature_row_revision(migrated_session, feature_id)
+    assert revision is not None
+
+    retired = await transition_admin_feature_state(
+        migrated_session,
+        feature_id,
+        expected_row_revision=revision,
+        reason_code="admin_retire",
+        operator="local-admin",
+        action="retire",
+    )
+    assert retired.lifecycle_state == "retired"
+
+    with pytest.raises(AdminFeatureStateConflict):
+        await transition_admin_feature_state(
+            migrated_session,
+            feature_id,
+            expected_row_revision=retired.row_revision,
+            reason_code="admin_publish_retired",
+            operator="local-admin",
+            action="patch",
+            publication_state="published",
+        )

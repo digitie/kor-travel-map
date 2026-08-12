@@ -32,7 +32,23 @@ def _owned_feature_readers() -> tuple[Path, ...]:
 
 _OWNED_FEATURE_READERS = _owned_feature_readers()
 _FEATURE_RELATIONS = r"feature\.(?:features|public_features)"
-_LEGACY_COLUMNS = r"(?:status|deleted_at|user_deleted_at|user_change_[a-z_]+)"
+# 0097이 물리 삭제한 컬럼 전부. 손으로 적으면 뒤처진다 — 실제로 `user_deleted_by`가
+# 빠져 있었다. 그래서 마이그레이션 SQL에서 **직접 읽어** 목록을 만든다.
+_CUTOVER_MIGRATION = (
+    _ROOT / "alembic/versions/0097_tvn34c_final_state_cutover.py"
+)
+_DROPPED_COLUMNS = tuple(
+    sorted(
+        set(
+            re.findall(
+                r"ALTER TABLE feature\.features DROP COLUMN ([a-z_]+)",
+                _CUTOVER_MIGRATION.read_text(encoding="utf-8"),
+            )
+        )
+    )
+)
+assert len(_DROPPED_COLUMNS) >= 8, f"0097 DROP COLUMN 목록을 읽지 못했다: {_DROPPED_COLUMNS}"
+_LEGACY_COLUMNS = "(?:" + "|".join(re.escape(c) for c in _DROPPED_COLUMNS) + ")"
 
 
 # f-string 보간 자리를 대신하는 식별자. **식별자로 유효한 형태**여야 alias 바인딩
@@ -69,9 +85,14 @@ def _joined_str_text(node: ast.JoinedStr) -> str:
 # 이 함수 본문만 제외한다 — 파일 전체나 alias 이름으로 제외하면 같은 파일의 현행
 # 코드까지 함께 눈감게 된다.
 _FROZEN_REHEARSAL_FUNCTION_PREFIX = "_frozen_h35_"
+# 면제는 **이 파일 안에서만** 성립한다. 이름 접두어만으로 트리 전역을 면제하면
+# 어느 모듈에서든 함수 이름만 그렇게 붙여 차단선을 통과할 수 있다.
+_FROZEN_REHEARSAL_MODULES = frozenset({"feature_repo.py"})
 
 
-def _is_frozen_rehearsal_function(node: ast.AST) -> bool:
+def _is_frozen_rehearsal_function(node: ast.AST, path: Path) -> bool:
+    if path.name not in _FROZEN_REHEARSAL_MODULES:
+        return False
     return isinstance(
         node, (ast.FunctionDef, ast.AsyncFunctionDef)
     ) and node.name.startswith(_FROZEN_REHEARSAL_FUNCTION_PREFIX)
@@ -81,7 +102,7 @@ def _sql_literals(path: Path) -> tuple[str, ...]:
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     frozen: set[int] = set()
     for node in ast.walk(tree):
-        if _is_frozen_rehearsal_function(node):
+        if _is_frozen_rehearsal_function(node, path):
             for inner in ast.walk(node):
                 frozen.add(id(inner))
     literals: list[str] = []

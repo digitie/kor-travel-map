@@ -2690,6 +2690,14 @@ async def _transition_provider_lifecycle_if_needed(
 
 _PROVIDER_RETIRE_REASON_CODE: Final[str] = "provider_retire"
 
+# 0095 backfill이 legacy row마다 남기는 전이의 reason code. 이것들도 **provider가 내린
+# 은퇴**다 — legacy `deleted_at`은 provider retire가, `status IN ('inactive','deleted')`는
+# provider 적재가 만든 값이다. 그런데 backfill은 `from_publication_state`를 NULL로 남기므로
+# "되돌릴 값"이 기록돼 있지 않다.
+_LEGACY_PROVIDER_RETIRE_REASON_CODES: Final[frozenset[str]] = frozenset(
+    {"legacy_provider_retire", "legacy_status_retire"}
+)
+
 
 def _provider_reingest_publication(
     current: _FeatureLoadState, desired_state: ProviderFeatureState
@@ -2717,14 +2725,23 @@ def _provider_reingest_publication(
     assert current.publication_state is not None
     if current.publication_state != "suppressed":
         return current.publication_state
-    if current.last_publication_reason_code != _PROVIDER_RETIRE_REASON_CODE:
-        return current.publication_state
-    restored = current.last_publication_from_state
-    if restored in ("draft", "published"):
-        return restored
-    # retire 이전 값을 읽을 수 없는 세대(3축 전환 이전에 억제된 row)는 호출자가
-    # 선언한 값으로 복구한다. 셋 다 명시적으로 declare하므로 임의값이 아니다.
-    return desired_state.publication_state
+    reason_code = current.last_publication_reason_code
+    if reason_code == _PROVIDER_RETIRE_REASON_CODE:
+        restored = current.last_publication_from_state
+        if restored in ("draft", "published"):
+            return restored
+        # provider retire 전이는 procedure가 항상 실제 이전 값을 적으므로 여기 닿지
+        # 않는다. 그래도 axis 값이 아닌 것이 들어오면 호출자 선언값으로 물러난다.
+        return desired_state.publication_state
+    if reason_code in _LEGACY_PROVIDER_RETIRE_REASON_CODES:
+        # 0095 backfill이 넘겨온 세대. provider가 내린 은퇴라는 것은 reason code로
+        # 알 수 있지만 되돌릴 값은 기록돼 있지 않다(`from_publication_state`가 NULL).
+        # 이 자리를 비워 두면 마이그레이션이 **스스로 만들어낸** 행 전량이 공개
+        # 표면에서 영구히 사라진다 — prod는 0087 + 실데이터라 이 집합이 크다.
+        # 그래서 호출자가 선언한 값으로 복구한다. 세 호출부 모두 명시적으로
+        # declare하므로 임의값이 아니다.
+        return desired_state.publication_state
+    return current.publication_state
 
 
 async def _transition_provider_lifecycle_from_state(
