@@ -276,6 +276,9 @@ function useAdminFeaturesClientController({
       ? (initialQualityState as AxisFilter<FeatureQualityState>)
       : "all",
   );
+  // retire의 **mutation 이전** 실패(correction basis fetch)를 담는다. mutation이
+  // 시작되지 않으면 `stateMutation.isError`가 false로 남아 화면에 아무것도 뜨지 않는다.
+  const [retireError, setRetireError] = useState<string | null>(null);
   const [hasIssue, setHasIssue] = useState<HasIssueFilter>(() =>
     initialHasIssue === "yes" || initialHasIssue === "no"
       ? initialHasIssue
@@ -357,7 +360,18 @@ function useAdminFeaturesClientController({
         destructive: true,
       });
       if (!ok) return;
-      const basis = await fetchAdminFeatureCorrectionBasis(feature.feature_id);
+      setRetireError(null);
+      // mutation **이전** 단계다. `fetchAdminFeatureCorrectionBasis`는 revision/detail
+      // 3회 불일치나 4xx/5xx에서 reject하는데, 여기서 새어 나가면 mutation이 시작조차
+      // 되지 않아 `stateMutation.isError`가 false로 남는다 — 운영자 입장에서는 버튼을
+      // 눌렀는데 아무 일도, 아무 메시지도 없다. 실패를 화면의 같은 Alert로 올린다.
+      let basis: Awaited<ReturnType<typeof fetchAdminFeatureCorrectionBasis>>;
+      try {
+        basis = await fetchAdminFeatureCorrectionBasis(feature.feature_id);
+      } catch (error: unknown) {
+        setRetireError(error instanceof Error ? error.message : String(error));
+        return;
+      }
       stateMutation.mutate({
         featureId: basis.featureId,
         entityTag: basis.entityTag,
@@ -551,6 +565,7 @@ function useAdminFeaturesClientController({
   return {
     columns,
     cursor,
+    retireError,
     stateMutation,
     durationMs,
     features,
@@ -591,6 +606,7 @@ function useAdminFeaturesClientController({
 function AdminFeaturesClientView({
   columns,
   cursor,
+  retireError,
   stateMutation,
   durationMs,
   features,
@@ -650,12 +666,14 @@ function AdminFeaturesClientView({
       title="Feature 목록"
     >
       <div className="flex flex-col gap-4">
-        {(features.isError || stateMutation.isError) && (
+        {(features.isError || stateMutation.isError || retireError !== null) && (
           <Alert variant="destructive">
             <AlertTriangleIcon data-icon="inline-start" />
             <AlertTitle>admin feature 처리 실패</AlertTitle>
             <AlertDescription>
-              {features.error?.message ?? stateMutation.error?.message}
+              {features.error?.message ??
+                stateMutation.error?.message ??
+                retireError}
             </AlertDescription>
           </Alert>
         )}

@@ -6,6 +6,7 @@ import {
   adminFeatureRequestZoom,
   adminFeaturesInBoundsPath,
   deleteAdminFeature,
+  allowedPublicationStates,
   fetchAdminFeatureCorrectionBasis,
   isAdminFeatureClusterZoom,
   patchAdminFeature,
@@ -323,5 +324,22 @@ describe("admin feature correction basis", () => {
       "89898989-8989-4989-8989-898989898989",
     ]);
     expect(randomUUID).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("allowedPublicationStates", () => {
+  it("retired feature에는 suppressed만 제시한다", () => {
+    // `ck_features_state_tuple`이 `lifecycle='active' OR publication='suppressed'`를
+    // 강제한다. retired에서 published/draft를 고를 수 있게 두면 운영자가 한 번의
+    // 클릭으로 **반드시 실패하는** 요청을 보낸다.
+    expect(allowedPublicationStates("retired")).toEqual(["suppressed"]);
+  });
+
+  it("active feature에는 세 축 값을 모두 제시한다", () => {
+    expect([...allowedPublicationStates("active")]).toEqual([
+      "draft",
+      "published",
+      "suppressed",
+    ]);
   });
 });

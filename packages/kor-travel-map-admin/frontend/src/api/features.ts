@@ -67,6 +67,24 @@ export type FeatureLifecycleState = AdminFeatureMapItem["lifecycle_state"];
 export type FeaturePublicationState = AdminFeatureMapItem["publication_state"];
 export type FeatureQualityState = AdminFeatureMapItem["quality_state"];
 
+/**
+ * 현재 lifecycle에서 실제로 저장 가능한 publication 값.
+ *
+ * DB의 `ck_features_state_tuple`이 `lifecycle_state = 'active' OR
+ * publication_state = 'suppressed'`를 강제한다. 즉 retired feature는 published/draft가
+ * 될 수 없다. 이 제약을 화면이 모르면 운영자가 드롭다운에서 published를 고르고
+ * 버튼을 눌러 **반드시 실패하는 요청**을 보내게 된다. 서버는 그 위반을 409로
+ * 돌려주지만(그 매핑도 이번에 함께 넣었다), 애초에 고를 수 없는 값을 고르게 두는
+ * 것은 화면의 결함이다.
+ */
+export function allowedPublicationStates(
+  lifecycleState: FeatureLifecycleState,
+): readonly FeaturePublicationState[] {
+  return lifecycleState === "retired"
+    ? (["suppressed"] as const)
+    : FEATURE_PUBLICATION_STATES;
+}
+
 export function featureStateLabel(
   axis: "lifecycle" | "publication" | "quality",
   value: FeatureLifecycleState | FeaturePublicationState | FeatureQualityState,

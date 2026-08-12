@@ -16,8 +16,8 @@ import Link from "next/link";
 import { useMemo, useState, type ReactNode } from "react";
 
 import {
-  FEATURE_PUBLICATION_STATES,
   FEATURE_QUALITY_STATES,
+  allowedPublicationStates,
   useAdminFeatureCorrectionBasis,
   useAdminFeatureDetail,
   useAdminFeatureStateTransitions,
@@ -1112,7 +1112,7 @@ function FeatureStatePanel({
               )
             }
           >
-            {FEATURE_PUBLICATION_STATES.map((state) => (
+            {allowedPublicationStates(feature.lifecycle_state).map((state) => (
               <NativeSelectOption key={state} value={state}>
                 {state}
               </NativeSelectOption>
