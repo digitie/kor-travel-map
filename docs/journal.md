@@ -2,6 +2,20 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-12 — T-VN-38: immutable fact/current-summary CI 구조 계약 보강
+
+#971의 integration CI가 T-VN-38 이후에도 옛 `provider` 문자열 fact, nullable source lineage,
+BRIN/current-row index, outer terminal page limit을 가정하는 테스트·도구를 발견했다. core hash
+규칙은 바꾸지 않고 Dagster provider 응답 경계에서 `date`/`time`/`Decimal`을 canonical JSON으로
+정규화했다. Alembic metadata와 raw-DDL structural contract에는 source entity/record 복합 UNIQUE와
+current weather/price summary 및 rebuild receipt를 명시했고, card/anchor fixture는 canonical
+ingestion과 freshness SLA를 통해 current pointer를 만든다.
+
+동일 패턴으로 H35 price index fingerprint, weather access-index audit, tier-2 bbox candidate CTE의
+pre-page count, source-record 수명 단언과 `docs/architecture`의 과거 current-row 설명을 전수
+정리했다. 이 문서·코드 보강은 별도 문서 PR로 분리하지 않으며 #971 final CI, 재실행 n150 clone
+live, 적대 리뷰 재승인이 끝날 때까지 완료로 간주하지 않는다.
+
 ## 2026-08-12 — T-VN-38: 반복 n150 clone live 실행의 checkpoint 복원 고정
 
 직전 성공 live가 UI 삭제의 soft-delete 감사 Feature 6건을 의도적으로 남겨, 후속 candidate가

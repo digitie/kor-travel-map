@@ -107,8 +107,30 @@ LIMIT :limit
     assert count_sql.startswith("SELECT count(*) AS matched_rows FROM (")
 
 
+def test_count_matching_rows_sql_removes_page_limit_inside_candidate_cte() -> None:
+    """공개 bbox query처럼 page limit가 CTE 안에 있어도 pre-page 수를 센다."""
+
+    sql = """
+WITH candidates AS (
+    SELECT f.feature_id
+    FROM feature.public_features AS f
+    WHERE EXISTS (SELECT 1 LIMIT 1)
+    ORDER BY f.feature_id
+    LIMIT :limit
+)
+SELECT feature_id
+FROM candidates
+ORDER BY feature_id
+"""
+
+    count_sql = _count_matching_rows_sql(sql, "limit")
+
+    assert "SELECT 1 LIMIT 1" in count_sql
+    assert "LIMIT :limit" not in count_sql
+
+
 def test_count_matching_rows_sql_rejects_drifted_terminal_limit() -> None:
-    with pytest.raises(ValueError, match="query must end with LIMIT :limit"):
+    with pytest.raises(ValueError, match="exactly one LIMIT :limit"):
         _count_matching_rows_sql("SELECT 1 LIMIT :other_limit", "limit")
 
 

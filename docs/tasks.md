@@ -814,6 +814,13 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   startup migration 불변 및 production compose 제외를 실증했다. 적대 리뷰 2인은 최종 SHA에서
   P0/P1 없이 GO를 확인했다.
 
+  **2026-08-12 CI 계약 보강(동일 #971)**: immutable fact/current-summary 전환 뒤 남아 있던
+  구 `provider` 문자열·BRIN/current-row 가정은 별도 호환 shim으로 되살리지 않는다. metadata
+  exclusion ledger와 raw-DDL 구조 contract, admin/public card fixture, Dagster provider 응답의
+  JSON 경계, H35 index fingerprint, tier-2 bbox page-limit count를 final canonical
+  dataset/source revision schema로 함께 고정한다. 이 보강 SHA의 CI·live·적대 재승인까지
+  병합 조건으로 삼는다.
+
 ### T-VN-40 — curation write model 단일화 (Lane B)
 
 - [ ] T-VN-40A — **legacy writer inventory·write fence**

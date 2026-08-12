@@ -79,9 +79,10 @@ rollback 조건은 ADR-075와 [`../deploy.md`](../deploy.md)를 따른다.
 | `feature_files` | `file_id` | feature_id FK CASCADE; UNIQUE (storage_backend,bucket,object_key); file_type CHECK |
 | `feature_opening_periods` | `(feature_id, period_index)` | start_weekday (0-6), start_time (HHMM regex), duration_minutes (1~10080) |
 | `feature_special_days` | `(feature_id, special_date)` | is_closed, periods JSONB |
-| `feature_weather_values` | `weather_value_key` | UNIQUE (feature_id, provider, weather_domain, forecast_style, metric_key, issued_at, valid_at, observed_at) |
-| `weather_metric_series` | `(feature_id, provider, weather_domain, forecast_style, metric_key)` | weather fact writer trigger가 단조롭게 유지하는 physical-series registry; stale row는 read 무영향 |
-| `feature_price_values` | `price_value_key` | feature_id FK; provider/price_domain/product_key/observed_at/value_number/unit; UNIQUE (feature_id,provider,price_domain,product_key,observed_at) |
+| `feature_weather_values` | `weather_value_key` | immutable fact; canonical `provider_dataset_id`와 non-null source entity/record revision, `target_at`/`known_at`를 가진다. UNIQUE (feature_id,provider_dataset_id,weather_domain,forecast_style,metric_key,target_at,source_record_key) |
+| `current_weather_summary` | `(feature_id,provider_dataset_id,weather_domain,forecast_style,metric_key)` | 값을 복제하지 않는 current fact pointer; selected fact와 successful projection receipt를 복합 FK로 참조하고 `refresh_after`를 보관한다 |
+| `feature_price_values` | `price_value_key` | immutable fact; canonical `provider_dataset_id`와 non-null source entity/record revision, `observed_at`/`known_at`; UNIQUE (feature_id,provider_dataset_id,price_domain,product_key,observed_at,source_record_key) |
+| `current_price_summary` | `(feature_id,provider_dataset_id,price_domain,product_key)` | 값을 복제하지 않는 current fact pointer; selected fact와 successful projection receipt를 복합 FK로 참조한다 |
 | `curation_collections` | `collection_id UUID` | UNIQUE collection_key; theme/source/title/edition/status/visibility; legacy key는 theme/source UUID+title hash, 중복 group은 split identity; created_by/updated_by |
 | `curation_items` | `curation_item_id UUID` | collection FK; nullable·mutable feature_id; current import row/accepted decision exact pointer; external item+component stable identity; source 누락·재등장과 운영자 tombstone 이력 |
 | `curation_import_batches` | `import_batch_id UUID` | content SHA-256, csv/normalized/recovery 종류, 행 수, actor, imported_at의 append-only receipt |
@@ -180,6 +181,7 @@ rollback 조건은 ADR-075와 [`../deploy.md`](../deploy.md)를 따른다.
 | `feature_consistency_reports` | `report_id UUID` | ADR-033 Phase 1; batch_id, started_at/finished_at, severity_max CHECK(OK/WARN/ERROR), cases/summary JSONB |
 | `feature_update_requests` | `request_id UUID` | **구현됨(alembic 0008+0052+0053)** — immutable requested scope/filter/policy/run mode/priority/audit, mutable `matched_scope`, 양수 `generation`, non-null canonical `job_id` RESTRICT FK. status/Dagster/cancellation/error/timeline/effective scope/dispatch는 linked job 단일 정본이다 |
 | `feature_change_requests` | `request_id UUID` | **구현됨(alembic 0021)** — place/event 사용자 요청 add/update/delete queue. review_mode(require_review/immediate), state(pending/applied/rejected), payload JSONB, reviewer/applied timestamp |
+| `current_summary_runs` | `summary_run_id BIGINT IDENTITY` | T-VN-38 weather/price ingest·reconcile·backfill·restore receipt. terminal receipt immutable, `(summary_run_id,projection_kind,status)`가 current pointer의 successful receipt FK target |
 
 ## 4. 인덱스 카탈로그
 
@@ -276,19 +278,20 @@ subtype 테이블 자체가 kind로 갈리므로 `WHERE kind=...` 부분 조건�
 | `feature_opening_periods` | (start_weekday, start_time) |
 | `feature_special_days` | (special_date) |
 
-### 4.5 weather/price
+### 4.5 weather/price current projection
 
 | 인덱스 | 컬럼 | 비고 |
 |--------|------|------|
-| `idx_weather_feature_metric_time` | (feature_id, metric_key, valid_at DESC NULLS LAST) | `build_weather_card` 핵심 |
-| `idx_weather_provider_domain` | (provider, weather_domain, valid_at DESC NULLS LAST) | admin |
-| `idx_weather_valid_at_brin` | BRIN(valid_at) | 시계열 |
-| `idx_weather_collected_at_brin` | BRIN(collected_at) | 시계열 |
-| `idx_price_values_observed_at_brin` | BRIN(observed_at) | 시계열 |
-| `uq_price_value_identity` | UNIQUE(feature_id, provider, price_domain, product_key, observed_at) | 자연키 + all-DESC 역방향 current scan |
-| `idx_price_values_feature_observed_identity` | (feature_id, observed_at DESC, provider, price_domain, product_key) | feature별 전체 series history |
-| `idx_price_values_domain_product_observed` | (provider, price_domain, product_key, observed_at DESC) | provider/domain별 운영 검증 |
-| `idx_price_values_source_record` | (source_record_key) partial NOT NULL | raw 역추적 |
+| `uq_weather_value_identity` | UNIQUE(feature_id, provider_dataset_id, weather_domain, forecast_style, metric_key, target_at, source_record_key) | immutable weather fact identity |
+| `idx_weather_values_feature_target_known` | (feature_id, target_at DESC, known_at DESC) | timeline/current candidate 접근 |
+| `uq_weather_value_summary_reference` | UNIQUE(weather fact key + summary natural identity) | summary→fact composite FK target |
+| `pk_current_weather_summary` | (feature_id, provider_dataset_id, weather_domain, forecast_style, metric_key) | current pointer natural identity |
+| `uq_price_value_identity` | UNIQUE(feature_id, provider_dataset_id, price_domain, product_key, observed_at, source_record_key) | immutable price fact identity |
+| `idx_price_values_feature_observed_identity` | (feature_id, observed_at DESC, known_at DESC, provider_dataset_id, price_domain, product_key) | feature별 immutable history |
+| `uq_price_value_summary_reference` | UNIQUE(price fact key + summary natural identity) | summary→fact composite FK target |
+| `pk_current_price_summary` | (feature_id, provider_dataset_id, price_domain, product_key) | current pointer natural identity |
+| `idx_current_{weather,price}_summary_fact` | selected fact key | fact purge/cascade와 pointer 역추적 |
+| `idx_current_summary_runs_projection_finished` | (projection_kind, finished_at DESC) partial succeeded | rebuild receipt 조회 |
 
 ### 4.6 ops
 
@@ -370,8 +373,14 @@ subtype 테이블 자체가 kind로 갈리므로 `WHERE kind=...` 부분 조건�
 | `source_links` | `ck_source_links_confidence` | 0-100 |
 | `source_links` | `ck_source_links_role` | SourceRole 8종 |
 | `source_entities` | `ck_source_entities_seen_order` | first_seen_at ≤ last_seen_at |
+| `source_entities` | `uq_source_entities_key_dataset` | source entity key와 canonical dataset의 복합 FK target |
+| `source_records` | `uq_source_records_record_entity_fetched` | immutable source revision 복합 FK target |
+| `feature_weather_values` | `ck_weather_value_present` / `ck_weather_value_bitemporal_order` | 값은 하나 이상, issued_at ≤ known_at |
+| `feature_weather_values` | `uq_weather_value_identity` | immutable weather fact natural identity |
 | `feature_price_values` | `ck_price_value_nonnegative` | value_number ≥ 0 |
-| `feature_price_values` | `uq_price_value_identity` | feature_id/provider/price_domain/product_key/observed_at 중복 방지 |
+| `feature_price_values` | `uq_price_value_identity` | feature_id/dataset/domain/product/observed/source revision 중복 방지 |
+| `current_summary_runs` | terminal immutable trigger + receipt state UNIQUE | rebuild/reconcile receipt를 결과 pointer와 분리 |
+| `current_{weather,price}_summary` | projection kind/succeeded receipt CHECK | current pointer는 selected immutable fact와 successful run만 참조 |
 | `import_jobs` | `ck_import_jobs_status` | queued/running/done/failed/cancelled |
 | `import_jobs` | `ck_import_jobs_progress` | 0-100 |
 | `import_jobs` | `ck_import_jobs_provider_dataset_pair` | provider/dataset 둘 다 NULL 또는 trim된 non-empty exact pair |
@@ -430,10 +439,13 @@ subtype 테이블 자체가 kind로 갈리므로 `WHERE kind=...` 부분 조건�
 | `feature_opening_periods.feature_id` → `features` | CASCADE | |
 | `feature_special_days.feature_id` → `features` | CASCADE | |
 | `feature_weather_values.feature_id` → `features` | CASCADE | |
-| `feature_weather_values.source_record_key` → `source_records` | SET NULL | |
-| `weather_metric_series.feature_id` → `features` | CASCADE | |
+| `feature_weather_values.(source_record_key,source_entity_key,known_at)` → `source_records` | RESTRICT | immutable weather fact가 exact raw revision을 보존 |
+| `feature_weather_values.(source_entity_key,provider_dataset_id)` → `source_entities` | RESTRICT | fact producer의 canonical dataset 소유 보존 |
+| `current_weather_summary` → selected weather fact / successful run | CASCADE / RESTRICT | pointer는 fact 삭제와 함께 사라지고 receipt가 winner를 증명 |
 | `feature_price_values.feature_id` → `features` | CASCADE | price anchor 삭제 시 시계열도 삭제 |
-| `feature_price_values.source_record_key` → `source_records` | SET NULL | source 정리 후에도 가격값 유지 |
+| `feature_price_values.(source_record_key,source_entity_key,known_at)` → `source_records` | RESTRICT | immutable price fact가 exact raw revision을 보존 |
+| `feature_price_values.(source_entity_key,provider_dataset_id)` → `source_entities` | RESTRICT | fact producer의 canonical dataset 소유 보존 |
+| `current_price_summary` → selected price fact / successful run | CASCADE / RESTRICT | pointer는 fact 삭제와 함께 사라지고 receipt가 winner를 증명 |
 | `source_links.feature_id` → `features` | CASCADE | |
 | `source_links.source_entity_key` → `source_entities` | RESTRICT | Feature link가 있는 provider entity 삭제 금지 |
 | `source_records.source_entity_key` → `source_entities` | RESTRICT | immutable payload의 자연 entity 보존 |

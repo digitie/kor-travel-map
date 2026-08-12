@@ -35,7 +35,7 @@ _UNMAPPED_TABLE_COLUMNS: dict[
     ("feature", "feature_weather_values"): {
         ("weather_value_key", "text", True),
         ("feature_id", "text", True),
-        ("provider", "text", True),
+        ("provider_dataset_id", "bigint", True),
         ("weather_domain", "text", True),
         ("forecast_style", "text", True),
         ("timeline_bucket", "text", False),
@@ -49,34 +49,71 @@ _UNMAPPED_TABLE_COLUMNS: dict[
         ("severity", "text", False),
         ("issued_at", "timestamp with time zone", False),
         ("valid_at", "timestamp with time zone", False),
-        ("valid_from", "timestamp with time zone", False),
-        ("valid_until", "timestamp with time zone", False),
+        ("valid_during", "tstzrange", False),
         ("observed_at", "timestamp with time zone", False),
+        ("target_at", "timestamp with time zone", True),
+        ("known_at", "timestamp with time zone", True),
         ("normalization_version", "text", False),
         ("payload", "jsonb", True),
-        ("source_record_key", "text", False),
-        ("collected_at", "timestamp with time zone", True),
+        ("source_entity_key", "text", True),
+        ("source_record_key", "text", True),
         ("created_at", "timestamp with time zone", True),
-        ("updated_at", "timestamp with time zone", True),
     },
     ("feature", "feature_price_values"): {
         ("price_value_key", "text", True),
         ("feature_id", "text", True),
-        ("provider", "text", True),
+        ("provider_dataset_id", "bigint", True),
         ("price_domain", "text", True),
         ("product_key", "text", True),
         ("product_name", "text", False),
         ("source_product_key", "text", False),
         ("source_product_name", "text", False),
         ("observed_at", "timestamp with time zone", True),
+        ("known_at", "timestamp with time zone", True),
         ("value_number", "numeric(14,4)", True),
         ("unit", "text", True),
         ("normalization_version", "text", False),
         ("payload", "jsonb", True),
-        ("source_record_key", "text", False),
-        ("collected_at", "timestamp with time zone", True),
+        ("source_entity_key", "text", True),
+        ("source_record_key", "text", True),
         ("created_at", "timestamp with time zone", True),
-        ("updated_at", "timestamp with time zone", True),
+    },
+    ("ops", "current_summary_runs"): {
+        ("summary_run_id", "bigint", True),
+        ("projection_kind", "text", True),
+        ("run_kind", "text", True),
+        ("status", "text", True),
+        ("started_at", "timestamp with time zone", True),
+        ("finished_at", "timestamp with time zone", False),
+        ("input_count", "bigint", True),
+        ("inserted_count", "bigint", True),
+        ("updated_count", "bigint", True),
+        ("deleted_count", "bigint", True),
+        ("scope", "jsonb", True),
+        ("detail", "jsonb", True),
+    },
+    ("feature", "current_weather_summary"): {
+        ("feature_id", "text", True),
+        ("provider_dataset_id", "bigint", True),
+        ("weather_domain", "text", True),
+        ("forecast_style", "text", True),
+        ("metric_key", "text", True),
+        ("weather_value_key", "text", True),
+        ("summary_run_id", "bigint", True),
+        ("selected_at", "timestamp with time zone", True),
+        ("refresh_after", "timestamp with time zone", True),
+        ("projection_kind", "text", True),
+        ("receipt_status", "text", True),
+    },
+    ("feature", "current_price_summary"): {
+        ("feature_id", "text", True),
+        ("provider_dataset_id", "bigint", True),
+        ("price_domain", "text", True),
+        ("product_key", "text", True),
+        ("price_value_key", "text", True),
+        ("summary_run_id", "bigint", True),
+        ("projection_kind", "text", True),
+        ("receipt_status", "text", True),
     },
     ("ops", "system_log"): {
         ("system_log_id", "uuid", True),
@@ -138,15 +175,47 @@ _UNMAPPED_TABLE_COLUMNS: dict[
 _UNMAPPED_TABLE_CONSTRAINTS: dict[tuple[str, str], set[tuple[str, str]]] = {
     ("feature", "feature_weather_values"): {
         ("feature_weather_values_pkey", "p"),
-        ("feature_weather_values_feature_id_fkey", "f"),
+        ("fk_weather_value_source_lineage", "f"),
+        ("fk_weather_value_source_dataset", "f"),
         ("ck_weather_value_present", "c"),
+        ("ck_weather_value_valid_during_not_empty", "c"),
+        ("ck_weather_value_payload_object", "c"),
+        ("ck_weather_value_bitemporal_order", "c"),
+        ("uq_weather_value_identity", "u"),
     },
     ("feature", "feature_price_values"): {
         ("feature_price_values_pkey", "p"),
-        ("feature_price_values_feature_id_fkey", "f"),
-        ("feature_price_values_source_record_key_fkey", "f"),
+        ("fk_price_value_source_lineage", "f"),
+        ("fk_price_value_source_dataset", "f"),
         ("ck_price_value_nonnegative", "c"),
+        ("ck_price_value_payload_object", "c"),
         ("uq_price_value_identity", "u"),
+    },
+    ("ops", "current_summary_runs"): {
+        ("current_summary_runs_pkey", "p"),
+        ("uq_current_summary_runs_receipt_state", "u"),
+        ("ck_current_summary_runs_projection_kind", "c"),
+        ("ck_current_summary_runs_run_kind", "c"),
+        ("ck_current_summary_runs_status", "c"),
+        ("ck_current_summary_runs_finished_at", "c"),
+        ("ck_current_summary_runs_counts_nonnegative", "c"),
+        ("ck_current_summary_runs_scope_object", "c"),
+        ("ck_current_summary_runs_detail_object", "c"),
+    },
+    ("feature", "current_weather_summary"): {
+        ("pk_current_weather_summary", "p"),
+        ("fk_current_weather_summary_fact", "f"),
+        ("fk_current_weather_summary_successful_run", "f"),
+        ("ck_current_weather_summary_projection_kind", "c"),
+        ("ck_current_weather_summary_receipt_status", "c"),
+        ("ck_current_weather_summary_refresh_after", "c"),
+    },
+    ("feature", "current_price_summary"): {
+        ("pk_current_price_summary", "p"),
+        ("fk_current_price_summary_fact", "f"),
+        ("fk_current_price_summary_successful_run", "f"),
+        ("ck_current_price_summary_projection_kind", "c"),
+        ("ck_current_price_summary_receipt_status", "c"),
     },
     ("ops", "system_log"): {
         ("system_log_pkey", "p"),
@@ -189,20 +258,28 @@ _UNMAPPED_TABLE_CONSTRAINTS: dict[tuple[str, str], set[tuple[str, str]]] = {
 _UNMAPPED_TABLE_INDEXES: dict[tuple[str, str], set[str]] = {
     ("feature", "feature_weather_values"): {
         "feature_weather_values_pkey",
-        "idx_weather_values_feature_card",
-        "brin_weather_values_valid_at",
-        "idx_weather_values_metric_feature",
-        "idx_weather_values_feature_issued_valid",
-        "idx_weather_values_feature_valid_issued",
-        "brin_weather_values_collected_at",
+        "uq_weather_value_identity",
+        "uq_weather_value_summary_reference",
+        "idx_weather_values_feature_target_known",
     },
     ("feature", "feature_price_values"): {
         "feature_price_values_pkey",
         "uq_price_value_identity",
         "idx_price_values_feature_observed_identity",
-        "idx_price_values_domain_product_observed",
-        "idx_price_values_source_record",
-        "idx_price_values_observed_at_brin",
+        "uq_price_value_summary_reference",
+    },
+    ("ops", "current_summary_runs"): {
+        "current_summary_runs_pkey",
+        "uq_current_summary_runs_receipt_state",
+        "idx_current_summary_runs_projection_finished",
+    },
+    ("feature", "current_weather_summary"): {
+        "pk_current_weather_summary",
+        "idx_current_weather_summary_fact",
+    },
+    ("feature", "current_price_summary"): {
+        "pk_current_price_summary",
+        "idx_current_price_summary_fact",
     },
     ("ops", "system_log"): {
         "system_log_pkey",
@@ -550,7 +627,7 @@ async def test_alembic_features_indexes_exist(
 async def test_alembic_creates_feature_price_values_table(
     pg_engine_with_migrations: AsyncEngine,
 ) -> None:
-    """0034 revision이 ``feature.feature_price_values``와 핵심 인덱스를 생성."""
+    """T-VN-38 price fact table이 canonical dataset/source identity를 보존한다."""
     async with pg_engine_with_migrations.connect() as conn:
         columns = [
             row[0]
@@ -581,17 +658,19 @@ async def test_alembic_creates_feature_price_values_table(
     for required in (
         "price_value_key",
         "feature_id",
-        "provider",
+        "provider_dataset_id",
         "price_domain",
         "product_key",
         "observed_at",
+        "known_at",
         "value_number",
+        "source_entity_key",
         "source_record_key",
     ):
         assert required in columns
     assert {
         "idx_price_values_feature_observed_identity",
-        "idx_price_values_observed_at_brin",
+        "uq_price_value_summary_reference",
     } <= indexes
 
 
@@ -755,7 +834,7 @@ async def test_curation_provenance_migration_fail_closes_legacy_links(
 async def test_weather_migration_reuses_valid_index_after_partial_failure(
     pg_container: object,
 ) -> None:
-    """0069 후반 실패 재시도는 이미 완성된 대형 index를 다시 만들지 않는다."""
+    """0069 재시도는 index를 재사용하고 T-VN-38은 새 fact index로 교체한다."""
     from kortravelmap.infra.db import make_async_engine, normalize_async_dsn
 
     raw_dsn = pg_container.get_connection_url()  # type: ignore[attr-defined]
@@ -822,7 +901,7 @@ async def test_weather_migration_reuses_valid_index_after_partial_failure(
         await retry_engine.dispose()
         retry_engine = None
 
-        await _run_alembic_upgrade(retry_dsn)
+        await _run_alembic_upgrade(retry_dsn, "0069_weather_series_catalog")
         retry_engine = make_async_engine(retry_dsn)
         async with retry_engine.connect() as retry_conn:
             relfilenode_after = (
@@ -840,11 +919,29 @@ async def test_weather_migration_reuses_valid_index_after_partial_failure(
                     )
                 )
             ).scalar_one()
+        assert relfilenode_after == relfilenode_before
+        await retry_engine.dispose()
+        retry_engine = None
+
+        await _run_alembic_upgrade(retry_dsn)
+        retry_engine = make_async_engine(retry_dsn)
+        async with retry_engine.connect() as retry_conn:
+            legacy_index = (
+                await retry_conn.execute(
+                    text("SELECT to_regclass('feature.idx_weather_values_feature_effective')")
+                )
+            ).scalar_one()
+            current_index = (
+                await retry_conn.execute(
+                    text("SELECT to_regclass('feature.idx_weather_values_feature_target_known')")
+                )
+            ).scalar_one()
             migration_head = (
                 await retry_conn.execute(text("SELECT version_num FROM alembic_version"))
             ).scalar_one()
 
-        assert relfilenode_after == relfilenode_before
+        assert legacy_index is None
+        assert current_index is not None
         assert migration_head == _alembic_head_revision()
     finally:
         if retry_engine is not None:

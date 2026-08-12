@@ -312,7 +312,8 @@ async def test_price_asset_records_kst_observation_freshness_metadata(
     assert output_metadata["today_values_count"] == 2
     assert client.price_write_context is not None
     source_record = client.price_write_context["source_record"]
-    assert source_record.raw_data["records"] == [{"prices": ()}]
+    # source record payload는 immutable hash 전에 canonical JSON 형태로 정규화된다.
+    assert source_record.raw_data["records"] == [{"prices": []}]
 
 
 async def test_place_asset_holds_same_provider_lock_through_sync_success() -> None:

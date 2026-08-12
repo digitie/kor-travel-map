@@ -11,7 +11,8 @@ from collections.abc import (
     Sequence,
 )
 from dataclasses import asdict, is_dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
+from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Final, cast
 
 from kortravelmap.client import FestivalEnrichmentReviewRefreshResult
@@ -183,21 +184,54 @@ _KST = timezone(timedelta(hours=9))
 _MISSING: Final = object()
 
 
+def _response_payload_value(value: Any) -> Any:
+    """provider raw response를 source-record JSON 값으로 좁혀 보존한다.
+
+    ``make_payload_hash``의 canonical 값 규칙은 이미 저장된 source record의 hash
+    약속이므로 넓히지 않는다. 대신 Dagster ingress에서 provider dataclass가 가진
+    시간·금액 scalar를 명시적으로 JSON 값으로 바꾼다.
+    """
+
+    if value is None or isinstance(value, str | int | float | bool):
+        return value
+    if isinstance(value, datetime | date | time):
+        return value.isoformat()
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, dict):
+        normalized: dict[str, Any] = {}
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise TypeError(
+                    "provider response payload dict key must be str "
+                    f"(got {type(key).__name__}: {key!r})"
+                )
+            normalized[key] = _response_payload_value(item)
+        return normalized
+    if isinstance(value, list | tuple):
+        return [_response_payload_value(item) for item in value]
+    raise TypeError(
+        "provider response payload must be JSON-preservable "
+        f"(got {type(value).__name__}: {value!r})"
+    )
+
+
 def _response_payload_item(item: Any) -> dict[str, Any]:
     """provider response item을 source record에 보존할 canonical JSON object로 만든다."""
 
     if is_dataclass(item) and not isinstance(item, type):
-        return asdict(item)
+        payload = asdict(item)
+        return cast(dict[str, Any], _response_payload_value(payload))
     raw = getattr(item, "raw", None)
     if isinstance(raw, dict):
-        return dict(raw)
+        return cast(dict[str, Any], _response_payload_value(raw))
     model_dump = getattr(item, "model_dump", None)
     if callable(model_dump):
         dumped = model_dump(mode="json")
         if isinstance(dumped, dict):
-            return dumped
+            return cast(dict[str, Any], _response_payload_value(dumped))
     if isinstance(item, dict):
-        return dict(item)
+        return cast(dict[str, Any], _response_payload_value(item))
     raise TypeError(f"provider response item cannot be preserved as JSON: {type(item).__name__}")
 
 

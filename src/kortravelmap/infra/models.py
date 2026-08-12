@@ -968,6 +968,11 @@ class SourceEntityRow(Base):
     __tablename__ = "source_entities"
     __table_args__ = (
         UniqueConstraint(
+            "source_entity_key",
+            "provider_dataset_id",
+            name="uq_source_entities_key_dataset",
+        ),
+        UniqueConstraint(
             "provider_dataset_id",
             "source_entity_type",
             "source_entity_id",
@@ -1079,6 +1084,12 @@ class SourceRecordRow(Base):
 
     __tablename__ = "source_records"
     __table_args__ = (
+        UniqueConstraint(
+            "source_record_key",
+            "source_entity_key",
+            "fetched_at",
+            name="uq_source_records_record_entity_fetched",
+        ),
         UniqueConstraint(
             "source_entity_key",
             "raw_payload_hash",

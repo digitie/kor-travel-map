@@ -164,19 +164,20 @@ class Viewport:
 def _count_matching_rows_sql(sql: str, terminal_limit_parameter: str | None) -> str:
     """production SQL의 terminal LIMIT만 제거해 전체 match count를 만든다.
 
-    LATERAL/CTE 내부의 ``LIMIT 1``은 query 의미의 일부이므로 보존한다. 호출자가
-    지정한 terminal placeholder가 실제 마지막 clause가 아니면 조용히 잘못된
-    evidence를 만들지 않고 즉시 실패한다.
+    LATERAL/CTE 내부의 ``LIMIT 1``은 query 의미의 일부이므로 보존한다. 공개 bbox
+    SQL처럼 page ``LIMIT``가 candidate CTE 안에 있을 수 있으므로, named terminal
+    placeholder의 **유일한** 출현만 제거한다. 같은 placeholder가 여러 곳이면 어느
+    limit가 page 경계인지 추측하지 않고 fail-close한다.
     """
 
     matched_sql = sql.rstrip()
     if terminal_limit_parameter is not None:
-        terminal_limit = f"\nLIMIT :{terminal_limit_parameter}"
-        if not matched_sql.endswith(terminal_limit):
+        terminal_limit = f"LIMIT :{terminal_limit_parameter}"
+        if matched_sql.count(terminal_limit) != 1:
             raise ValueError(
-                f"query must end with {terminal_limit.strip()} to count pre-limit rows"
+                f"query must contain exactly one {terminal_limit} to count pre-limit rows"
             )
-        matched_sql = matched_sql[: -len(terminal_limit)]
+        matched_sql = matched_sql.replace(terminal_limit, "", 1)
     return f"SELECT count(*) AS matched_rows FROM ({matched_sql}) AS matched"
 
 

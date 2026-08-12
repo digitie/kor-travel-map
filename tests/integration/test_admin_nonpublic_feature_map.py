@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
@@ -57,7 +57,12 @@ async def _dataset_id(
 
 
 def _response_record(
-    *, provider: str, dataset_key: str, source_entity_type: str, raw_data: dict[str, object]
+    *,
+    provider: str,
+    dataset_key: str,
+    source_entity_type: str,
+    raw_data: dict[str, object],
+    fetched_at: datetime = _NOW,
 ) -> SourceRecord:
     payload_hash = make_payload_hash(raw_data)
     source_entity_id = f"test:{payload_hash[:20]}"
@@ -68,7 +73,7 @@ def _response_record(
         source_entity_id=source_entity_id,
         raw_payload_hash=payload_hash,
         raw_data=raw_data,
-        fetched_at=_NOW,
+        fetched_at=fetched_at,
         source_record_key=make_source_record_key(
             provider=provider,
             dataset_key=dataset_key,
@@ -124,6 +129,27 @@ async def _insert_feature(
     await seed_feature_subtype(
         session, feature_id=feature_id, kind=kind, geom_wkt=geom_wkt
     )
+
+
+async def _current_dataset_id(
+    session: AsyncSession, *, provider: str, dataset_key: str
+) -> int:
+    """현재 summary를 검증할 dataset에 freshness policy도 함께 부여한다."""
+
+    dataset_id = await _dataset_id(session, provider=provider, dataset_key=dataset_key)
+    await session.execute(
+        text(
+            """
+            INSERT INTO ops.provider_refresh_policies (
+                provider_dataset_id, source_kind, stale_after_minutes
+            ) VALUES (:provider_dataset_id, 'system', 60)
+            ON CONFLICT (provider_dataset_id) DO UPDATE
+            SET enabled = true, stale_after_minutes = EXCLUDED.stale_after_minutes
+            """
+        ),
+        {"provider_dataset_id": dataset_id},
+    )
+    return dataset_id
 
 
 async def test_admin_bbox_and_cluster_include_nonpublic_statuses(
@@ -271,6 +297,7 @@ async def test_admin_bbox_geometry_membership_is_serialization_only(
 async def test_admin_weather_card_uses_nonpublic_target_and_anchor(
     migrated_session: AsyncSession,
 ) -> None:
+    current = datetime.now(UTC)
     await _insert_feature(
         migrated_session,
         feature_id="admin-hidden-target",
@@ -297,11 +324,11 @@ async def test_admin_weather_card_uses_nonpublic_target_and_anchor(
                 metric_name="기온",
                 value_number=Decimal("24.0"),
                 unit="deg_c",
-                issued_at=_NOW,
-                valid_at=_NOW,
+                issued_at=current,
+                valid_at=current,
             )
         ],
-        provider_dataset_id=await _dataset_id(
+        provider_dataset_id=await _current_dataset_id(
             migrated_session,
             provider="python-kma-api",
             dataset_key="kma_short_forecast",
@@ -311,8 +338,9 @@ async def test_admin_weather_card_uses_nonpublic_target_and_anchor(
             dataset_key="kma_short_forecast",
             source_entity_type="weather_response",
             raw_data={"metric": "TMP", "feature_id": "admin-hidden-weather-anchor"},
+            fetched_at=current,
         ),
-        selected_at=_NOW,
+        selected_at=current,
     )
     await migrated_session.flush()
 
@@ -341,6 +369,7 @@ async def test_admin_weather_card_uses_nonpublic_target_and_anchor(
 async def test_admin_price_card_and_map_summary_include_nonpublic_feature(
     migrated_session: AsyncSession,
 ) -> None:
+    current = datetime.now(UTC)
     feature_id = "admin-hidden-price"
     await _insert_feature(
         migrated_session,
@@ -356,12 +385,12 @@ async def test_admin_price_card_and_map_summary_include_nonpublic_feature(
         product_name="휘발유",
         source_product_key="B027",
         source_product_name="휘발유",
-        observed_at=_NOW,
+        observed_at=current,
         value_number=Decimal("1789"),
         unit="KRW/L",
         normalization_version="test-v1",
         payload={},
-        collected_at=_NOW,
+        collected_at=current,
         source_record_key=None,
     )
     krex_value = PriceValue(
@@ -372,18 +401,18 @@ async def test_admin_price_card_and_map_summary_include_nonpublic_feature(
         product_name="휘발유",
         source_product_key="B027",
         source_product_name="휘발유",
-        observed_at=_NOW,
+        observed_at=current,
         value_number=Decimal("1799"),
         unit="KRW/L",
         normalization_version="test-v1",
         payload={},
-        collected_at=_NOW,
+        collected_at=current,
         source_record_key=None,
     )
     await price_repo.load_price_values(
         migrated_session,
         [opinet_value],
-        provider_dataset_id=await _dataset_id(
+        provider_dataset_id=await _current_dataset_id(
             migrated_session,
             provider="python-opinet-api",
             dataset_key="opinet_gas_station_prices",
@@ -393,12 +422,13 @@ async def test_admin_price_card_and_map_summary_include_nonpublic_feature(
             dataset_key="opinet_gas_station_prices",
             source_entity_type="price_response",
             raw_data={"feature_id": feature_id, "value": "1789"},
+            fetched_at=current,
         ),
     )
     await price_repo.load_price_values(
         migrated_session,
         [krex_value],
-        provider_dataset_id=await _dataset_id(
+        provider_dataset_id=await _current_dataset_id(
             migrated_session,
             provider="python-krex-api",
             dataset_key="krex_rest_area_prices",
@@ -408,6 +438,7 @@ async def test_admin_price_card_and_map_summary_include_nonpublic_feature(
             dataset_key="krex_rest_area_prices",
             source_entity_type="price_response",
             raw_data={"feature_id": feature_id, "value": "1799"},
+            fetched_at=current,
         ),
     )
     await migrated_session.flush()

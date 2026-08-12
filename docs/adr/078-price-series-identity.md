@@ -1,11 +1,17 @@
 # ADR-078: 가격 current와 history를 full series identity로 조회
 
-- **상태**: accepted
+- **상태**: superseded by ADR-089
 - **날짜**: 2026-07-27
 - **결정자**: 사용자 + Codex
 - **출처**: T-VN-44 React key 감사 · Claude Code PR #841~#853 적대적 후속 감사
 
 ## 컨텍스트
+
+> **전환 기록**: 이 결정은 migration 0064의 provider 문자열 price series에 대한
+> historical decision이다. T-VN-38/ADR-089가 canonical `provider_dataset_id`, immutable source
+> revision, `known_at`, current fact pointer로 물리 전환했으므로 아래의 `provider` 컬럼·raw fact
+> `DISTINCT ON` 실행 세부는 더 이상 현행 schema 계약이 아니다. 다만 provider/domain/product별
+> series cardinality를 보존한다는 목적은 ADR-089의 dataset/domain/product identity로 계승된다.
 
 `feature.feature_price_values`의 자연키는 이미 `(feature_id, provider,
 price_domain, product_key, observed_at)`다. 그러나 price card와 지도/admin summary는

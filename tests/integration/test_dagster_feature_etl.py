@@ -545,7 +545,10 @@ async def test_dagster_assets_validate_coordinates_and_load_to_postgis(
             text("SELECT count(*) FROM feature.feature_price_values")
         )
     assert feature_count == 11
-    assert source_count == 11
+    # T-VN-38 fact lineage는 OpiNet 가격 상세의 canonical raw response 두 건을
+    # 독립 source record로 보존한다. Feature 수만 세던 구 projection 전제(11)를
+    # 유지하면 immutable fact의 source revision을 잃는다.
+    assert source_count == 13
     assert price_feature_count == 2
     assert price_value_count == 5
 
