@@ -182,6 +182,17 @@ async def migrated_engine(pg_container: Any) -> AsyncIterator[AsyncEngine]:
     from kortravelmap.infra.db import make_async_engine, normalize_async_dsn
 
     raw_dsn = pg_container.get_connection_url()  # type: ignore[attr-defined]
+    # 같은 컨테이너 기본 DB를 `pg_engine`과 공유한다. 예전에는 그것이 순서 결합을
+    # 만들었다 — `pg_engine`은 app schema를 컨테이너 superuser로
+    # `CREATE SCHEMA IF NOT EXISTS`하고 이 fixture는 배포 경로
+    # (`ktm_feature_migrator` → SET ROLE `ktm_feature_schema_owner`)로 migration을
+    # 도는데, `IF NOT EXISTS`는 이미 있는 schema에 AUTHORIZATION을 적용하지 않으므로
+    # 먼저 선 쪽이 소유권을 확정했다. 그래서 "알파벳순 첫 파일이 migrated_engine을
+    # 먼저 요구하게 한다"는 파일명 규약에 기대고 있었다.
+    #
+    # 지금은 bootstrap이 `ALTER SCHEMA ... OWNER TO ktm_feature_schema_owner`로
+    # 소유권을 **확정**하므로 순서가 무의미하다. DB를 나누지 않는 이유는 CLI 계열
+    # 테스트가 컨테이너 기본 DB를 직접 가리키기 때문이다 — 나누면 그쪽이 빈 DB를 본다.
     async_dsn = normalize_async_dsn(raw_dsn)
     bootstrap_engine = make_async_engine(async_dsn, pool_size=1)
     try:

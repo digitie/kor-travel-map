@@ -85,17 +85,28 @@ def _joined_str_text(node: ast.JoinedStr) -> str:
 # 이 함수 본문만 제외한다 — 파일 전체나 alias 이름으로 제외하면 같은 파일의 현행
 # 코드까지 함께 눈감게 된다.
 _FROZEN_REHEARSAL_FUNCTION_PREFIX = "_frozen_h35_"
-# 면제는 **이 파일 안에서만** 성립한다. 이름 접두어만으로 트리 전역을 면제하면
+# 면제는 **모듈까지 지정해서만** 성립한다. 이름 접두어만으로 트리 전역을 면제하면
 # 어느 모듈에서든 함수 이름만 그렇게 붙여 차단선을 통과할 수 있다.
+#
+# `curation_repo._active_feature_state_sql`은 접두어 규약을 쓰지 않지만 같은 부류다 —
+# `frozen_h35_schema=True` 분기가 0063~0079 세대의 정본 컬럼으로 같은 규칙을 적는다.
+# 그 세대에는 3축 컬럼이 아예 없으므로 여기를 3축으로 고치면 리허설이 재생하려던
+# 표면이 아니게 된다. 이름을 하나씩 적는 이유는, 파일 전체를 빼면 같은 파일의 현행
+# 코드까지 함께 눈감기 때문이다.
+_FROZEN_REHEARSAL_FUNCTIONS: dict[str, frozenset[str]] = {
+    "curation_repo.py": frozenset({"_active_feature_state_sql"}),
+}
 _FROZEN_REHEARSAL_MODULES = frozenset({"feature_repo.py"})
 
 
 def _is_frozen_rehearsal_function(node: ast.AST, path: Path) -> bool:
+    if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return False
+    if node.name in _FROZEN_REHEARSAL_FUNCTIONS.get(path.name, frozenset()):
+        return True
     if path.name not in _FROZEN_REHEARSAL_MODULES:
         return False
-    return isinstance(
-        node, (ast.FunctionDef, ast.AsyncFunctionDef)
-    ) and node.name.startswith(_FROZEN_REHEARSAL_FUNCTION_PREFIX)
+    return node.name.startswith(_FROZEN_REHEARSAL_FUNCTION_PREFIX)
 
 
 def _sql_literals(path: Path) -> tuple[str, ...]:
@@ -141,6 +152,13 @@ def _legacy_feature_reads(sql: str) -> set[str]:
         flags=re.IGNORECASE,
     ):
         found.add("qualified")
+    # 보간 alias에 묶인 legacy 컬럼. 이 저장소의 지배적 형태는 술어를 **헬퍼가 반환해**
+    # 보간하는 것이라(`_active_feature_state_sql(alias)` 등), alias 바인딩(`FROM ... AS f`)은
+    # A 리터럴에 있고 컬럼 참조(`{alias}.deleted_at`)는 B 함수의 리터럴에 있다. 그러면
+    # 위 alias 규칙 어디에도 걸리지 않는다 — 헬퍼 쪽만 보면 relation 이름이 아예 없다.
+    # 그래서 **보간 자리 토큰에 붙은** legacy 컬럼은 relation 문맥 없이도 위반으로 본다.
+    if re.search(rf"{_FSTRING_EXPR_TOKEN}\.{_LEGACY_COLUMNS}", sql, re.IGNORECASE):
+        found.add("interpolated-alias")
     # alias도 relation 접두어도 없는 **맨 컬럼**. `status_repo`의
     # `SELECT count(*) FILTER (WHERE deleted_at IS NULL) FROM feature.features`가
     # 정확히 이 형태였고, alias 규칙만으로는 통째로 통과했다.

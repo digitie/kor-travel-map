@@ -89,6 +89,15 @@ async def bootstrap_tvn34_migration_roles(engine: AsyncEngine) -> str:
             "CREATE SCHEMA IF NOT EXISTS provider_sync AUTHORIZATION ktm_feature_schema_owner",
             "CREATE SCHEMA IF NOT EXISTS ops AUTHORIZATION ktm_feature_schema_owner",
             "CREATE SCHEMA IF NOT EXISTS x_extension AUTHORIZATION ktm_feature_schema_owner",
+            # `IF NOT EXISTS`는 schema가 이미 있으면 **AUTHORIZATION을 적용하지 않는다.**
+            # 같은 DB에서 `pg_engine`이 먼저 서면 4개 schema가 컨테이너 superuser 소유로
+            # 굳고, 뒤이어 배포 경로(migrator → SET ROLE schema owner)로 도는 migration이
+            # `permission denied for schema feature`로 죽는다. 누가 먼저 만들었든
+            # bootstrap이 소유권을 **확정**하게 해서 순서 결합을 없앤다.
+            "ALTER SCHEMA feature OWNER TO ktm_feature_schema_owner",
+            "ALTER SCHEMA provider_sync OWNER TO ktm_feature_schema_owner",
+            "ALTER SCHEMA ops OWNER TO ktm_feature_schema_owner",
+            "ALTER SCHEMA x_extension OWNER TO ktm_feature_schema_owner",
             "GRANT USAGE, CREATE ON SCHEMA feature "
             "TO ktm_feature_state_procedure_owner, ktm_feature_audit_writer",
         ):
