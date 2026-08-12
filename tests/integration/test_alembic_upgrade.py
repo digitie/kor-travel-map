@@ -355,8 +355,15 @@ async def _run_alembic_upgrade(dsn: str, revision: str = "head") -> None:
     project_root = Path(__file__).resolve().parents[2]  # noqa: ASYNC240  # sync IO is trivial path-arith here
     cfg = Config(str(project_root / "alembic.ini"))
     cfg.set_main_option("script_location", str(project_root / "alembic"))
-    cfg.set_main_option("sqlalchemy.url", dsn)
-    await asyncio.to_thread(command.upgrade, cfg, revision)
+    # 배포와 같은 경로로 돈다 — bootstrap 후 migrator 자격으로 upgrade.
+    from tests.integration._tvn34_migration_bootstrap import (
+        alembic_schema_owner_role,
+        bootstrapped_migrator_dsn,
+    )
+
+    cfg.set_main_option("sqlalchemy.url", await bootstrapped_migrator_dsn(dsn))
+    with alembic_schema_owner_role():
+        await asyncio.to_thread(command.upgrade, cfg, revision)
 
 
 def _alembic_head_revision() -> str:

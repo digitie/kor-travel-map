@@ -121,7 +121,17 @@ async def test_alembic_check_clean_on_freshly_migrated_db(
     """
 
     cfg = gate_alembic_config
-    await asyncio.to_thread(command.upgrade, cfg, "head")
+    # 배포와 같은 경로로 돈다 — bootstrap 후 migrator 자격으로 upgrade.
+    from tests.integration._tvn34_migration_bootstrap import (
+        alembic_schema_owner_role,
+        bootstrapped_migrator_dsn,
+    )
+
+    gate_dsn = cfg.get_main_option("sqlalchemy.url")
+    assert gate_dsn is not None
+    cfg.set_main_option("sqlalchemy.url", await bootstrapped_migrator_dsn(gate_dsn))
+    with alembic_schema_owner_role():
+        await asyncio.to_thread(command.upgrade, cfg, "head")
     gate_url = cfg.get_main_option("sqlalchemy.url")
     await _install_postgis_topology_fixture(gate_url)
     try:
@@ -145,7 +155,17 @@ async def test_alembic_check_detects_non_extension_topology_table(
     """topology schema의 비-extension 객체는 drift에서 숨기지 않는다."""
 
     cfg = gate_alembic_config
-    await asyncio.to_thread(command.upgrade, cfg, "head")
+    # 배포와 같은 경로로 돈다 — bootstrap 후 migrator 자격으로 upgrade.
+    from tests.integration._tvn34_migration_bootstrap import (
+        alembic_schema_owner_role,
+        bootstrapped_migrator_dsn,
+    )
+
+    gate_dsn = cfg.get_main_option("sqlalchemy.url")
+    assert gate_dsn is not None
+    cfg.set_main_option("sqlalchemy.url", await bootstrapped_migrator_dsn(gate_dsn))
+    with alembic_schema_owner_role():
+        await asyncio.to_thread(command.upgrade, cfg, "head")
     gate_url = cfg.get_main_option("sqlalchemy.url")
     await _install_postgis_topology_fixture(gate_url)
     await _admin_execute(

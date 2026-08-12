@@ -142,7 +142,17 @@ def _assert_nonderived_uuid_v7(value: object, *, feature_id: str) -> str:
 
 
 async def _upgrade(dsn: str, revision: str) -> None:
-    await asyncio.to_thread(command.upgrade, _alembic_config(dsn), revision)
+    # 배포와 같은 경로로 돈다 — bootstrap 후 migrator 자격으로 upgrade.
+    from tests.integration._tvn34_migration_bootstrap import (
+        alembic_schema_owner_role,
+        bootstrapped_migrator_dsn,
+    )
+
+    migrator_dsn = await bootstrapped_migrator_dsn(dsn)
+    with alembic_schema_owner_role():
+        await asyncio.to_thread(
+            command.upgrade, _alembic_config(migrator_dsn), revision
+        )
 
 
 async def _downgrade(dsn: str, revision: str) -> None:
