@@ -119,7 +119,11 @@ WITH ranked AS (
     ON head.source_entity_key = se.source_entity_key
   JOIN provider_sync.source_records AS sr
     ON sr.source_record_key = head.current_source_record_key
+  -- legacy `deleted_at IS NULL AND status = 'active'`의 3축 등가물은 세 축 전부다
+  -- (0095 backfill: draft→draft / hidden→suppressed / broken→quarantined).
+  -- publication을 빼면 draft·suppressed feature가 dedup 후보로 올라온다.
   WHERE f.lifecycle_state = 'active'
+    AND f.publication_state = 'published'
     AND f.quality_state = 'valid'
     AND f.coord IS NOT NULL
     AND pd.provider = :provider

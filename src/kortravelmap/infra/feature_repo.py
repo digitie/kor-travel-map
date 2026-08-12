@@ -2804,7 +2804,20 @@ async def _transition_provider_lifecycle_from_state(
             # Override 작성과 provider reingest가 맞물린 경우다. procedure가 audit
             # 없는 no-op을 거부한 뒤 repository가 provider load를 정상 완료시킨다.
             return False
-        if sqlstate != "40001" or not retry_on_serialization:
+        # 40P01(deadlock_detected)도 같은 자리에서 받는다.
+        #
+        # 0097의 `lock_current_provider_feature_source_evidence`는 provider 전이에
+        # **source evidence → source_links → features** 순서를 도입했다(그 순서 자체는
+        # bundle writer와 맞춘 것이고, 뒤집으면 entity head↔link 순환이 생긴다).
+        # 반면 merge 경로(`merge_repo._LOCK_FEATURES_SQL` → `_MOVE_LINKS_SQL`)는
+        # **features → source_links**로 반대다. 두 경로가 겹치면 ABBA deadlock이 난다.
+        #
+        # deadlock은 PostgreSQL이 한쪽을 죽여 해소하는 transient 오류이고, 문서가
+        # 지정한 대응도 transaction 재시도다. savepoint 안에서 났으므로 여기서
+        # savepoint까지만 되감고 현재 tuple을 다시 읽어 한 번 재시도한다 —
+        # 40001과 같은 구조다. 잠금 순서를 한쪽으로 통일하는 것이 근본 해법이고,
+        # 그것은 merge 경로의 획득 순서를 바꾸는 별도 작업이다(T-VN-34 후속).
+        if sqlstate not in ("40001", "40P01") or not retry_on_serialization:
             raise
         refreshed = await _feature_load_state(session, feature_id)
         return await _transition_provider_lifecycle_from_state(

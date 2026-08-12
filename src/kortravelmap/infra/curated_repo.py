@@ -716,7 +716,11 @@ candidates AS MATERIALIZED (
     CROSS JOIN LATERAL (
         SELECT __TYPED_FEATURE_DETAIL_COLUMNS__
     ) AS typed
+    -- legacy `status = 'active'`의 3축 등가물은 세 축 전부다(0095 backfill:
+    -- draft→draft / hidden→suppressed / broken→quarantined). publication을 빼면
+    -- draft·suppressed feature가 큐레이션 후보로 올라온다.
     WHERE f.lifecycle_state = 'active'
+      AND f.publication_state = 'published'
       AND f.quality_state = 'valid'
       AND (
         rule.place_kind IS NULL
@@ -757,6 +761,7 @@ locked_candidates AS MATERIALIZED (
     JOIN feature.features AS locked_feature
       ON locked_feature.feature_id = candidate.feature_id
     WHERE locked_feature.lifecycle_state = 'active'
+      AND locked_feature.publication_state = 'published'
       AND locked_feature.quality_state = 'valid'
     ORDER BY candidate.feature_id
     FOR KEY SHARE OF locked_feature
@@ -951,6 +956,7 @@ WITH archived AS (
       AND cf.curation_status IN ('candidate','curated')
       AND (
           f.lifecycle_state <> 'active'
+          OR f.publication_state <> 'published'
           OR f.quality_state <> 'valid'
       )
     RETURNING cf.curated_feature_id
@@ -1680,9 +1686,12 @@ async def create_curated_feature(
         await session.execute(
             text(
                 "SELECT feature_id FROM feature.features "
+                # legacy `status NOT IN ('deleted','hidden')`의 등가물.
+                # deleted→retired, hidden→(active, suppressed)이므로 suppressed만
+                # 배제한다. draft와 quarantined는 legacy가 허용했으므로 유지한다.
                 "WHERE feature_id = :feature_id "
                 "AND lifecycle_state = 'active' "
-                "AND quality_state = 'valid' "
+                "AND publication_state <> 'suppressed' "
                 "FOR KEY SHARE"
             ),
             {"feature_id": feature_id},
@@ -2069,6 +2078,7 @@ async def sync_concierge_themes(
                      AND sr.source_record_key = head.current_source_record_key
                     WHERE pd.provider_dataset_id = :provider_dataset_id
                       AND f.lifecycle_state = 'active'
+                      AND f.publication_state = 'published'
                       AND f.quality_state = 'valid'
                       AND typed.detail #>> CAST(:id_path AS text[]) IS NOT NULL
                     GROUP BY typed.detail #>> CAST(:id_path AS text[])
