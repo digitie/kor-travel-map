@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Iterable
+from collections.abc import AsyncIterator, Iterable, Mapping
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta, timezone
+from dataclasses import dataclass, field
+from datetime import UTC, date, datetime, time, timedelta, timezone
 from decimal import Decimal
-from types import SimpleNamespace
+from types import MappingProxyType, SimpleNamespace
 from typing import Any, Final, cast
 
 import pytest
@@ -54,6 +54,45 @@ class _StationPriceDetail:
     """source record에도 그대로 보존 가능한 OpiNet 상세 응답 test double."""
 
     prices: tuple[object, ...] = ()
+
+
+@dataclass(frozen=True)
+class _FrozenPrice:
+    trade_date: date
+    trade_time: time
+    raw: Mapping[str, Any] = field(default_factory=lambda: MappingProxyType({}))
+
+
+@dataclass(frozen=True)
+class _FrozenStationDetail:
+    prices: tuple[_FrozenPrice, ...]
+    raw: Mapping[str, Any]
+
+
+def test_source_record_payload_preserves_frozen_opinet_detail_without_deepcopy() -> None:
+    """실제 OpiNet detail의 ``MappingProxyType`` raw도 source receipt가 된다."""
+
+    detail = _FrozenStationDetail(
+        prices=(
+            _FrozenPrice(
+                trade_date=date(2026, 8, 12),
+                trade_time=time(9, 30),
+                raw=MappingProxyType({"PRODCD": "B027"}),
+            ),
+        ),
+        raw=MappingProxyType({"UNI_ID": "A123", "nested": {"value": "kept"}}),
+    )
+
+    assert assets_module._response_payload_item(detail) == {
+        "prices": [
+            {
+                "trade_date": "2026-08-12",
+                "trade_time": "09:30:00",
+                "raw": {"PRODCD": "B027"},
+            }
+        ],
+        "raw": {"UNI_ID": "A123", "nested": {"value": "kept"}},
+    }
 
 
 class _Client:

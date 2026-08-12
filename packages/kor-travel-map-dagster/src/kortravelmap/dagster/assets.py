@@ -10,7 +10,7 @@ from collections.abc import (
     Mapping,
     Sequence,
 )
-from dataclasses import asdict, is_dataclass
+from dataclasses import fields, is_dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Final, cast
@@ -198,7 +198,16 @@ def _response_payload_value(value: Any) -> Any:
         return value.isoformat()
     if isinstance(value, Decimal):
         return str(value)
-    if isinstance(value, dict):
+    # ``python-opinet-api`` freezes provider ``raw`` maps as MappingProxyType.
+    # ``dataclasses.asdict`` deep-copies those maps and fails before ingress can
+    # canonicalize them.  Walk dataclass fields directly, preserving the same
+    # visible field payload without requiring values to be pickleable.
+    if is_dataclass(value) and not isinstance(value, type):
+        return {
+            field.name: _response_payload_value(getattr(value, field.name))
+            for field in fields(value)
+        }
+    if isinstance(value, Mapping):
         normalized: dict[str, Any] = {}
         for key, item in value.items():
             if not isinstance(key, str):
@@ -220,10 +229,9 @@ def _response_payload_item(item: Any) -> dict[str, Any]:
     """provider response item을 source record에 보존할 canonical JSON object로 만든다."""
 
     if is_dataclass(item) and not isinstance(item, type):
-        payload = asdict(item)
-        return cast(dict[str, Any], _response_payload_value(payload))
+        return cast(dict[str, Any], _response_payload_value(item))
     raw = getattr(item, "raw", None)
-    if isinstance(raw, dict):
+    if isinstance(raw, Mapping):
         return cast(dict[str, Any], _response_payload_value(raw))
     model_dump = getattr(item, "model_dump", None)
     if callable(model_dump):
