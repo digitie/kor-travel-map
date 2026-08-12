@@ -207,14 +207,11 @@ function makeAdminFeatureDetailResponse(
 ): AdminFeatureDetailResponse {
   return {
     data: {
-      change_requests: [],
       curations: [makeCuration(feature)],
       feature: {
         address: { road: feature.address_label },
         category: feature.category,
         created_at: feature.created_at,
-        data_origin: "provider",
-        data_version: 1,
         detail: {},
         feature_id: feature.feature_id,
         kind: feature.kind,
@@ -234,7 +231,6 @@ function makeAdminFeatureDetailResponse(
       overrides: [],
       sources: [makeAdminSource()],
       state_transitions: [],
-      versions: [],
       ...overrides,
     },
     meta: {

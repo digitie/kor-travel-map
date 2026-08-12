@@ -140,8 +140,6 @@ function makeTargetDetail(
     address: { label: "datagokr address" },
     category: review.target_category ?? "A02080100",
     created_at: MOCK_NOW,
-    data_origin: "provider",
-    data_version: 1,
     detail,
     feature_id: review.target_feature_id,
     kind: review.target_kind ?? "event",

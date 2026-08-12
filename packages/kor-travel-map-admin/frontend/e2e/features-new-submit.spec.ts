@@ -36,8 +36,6 @@ type NearbyFeatureSummary = components["schemas"]["NearbyFeatureSummary"];
 type NearbyOriginSummary = components["schemas"]["NearbyOriginSummary"];
 type Meta = components["schemas"]["Meta"];
 
-const MOCK_NOW = "2026-06-16T00:00:00.000Z";
-
 async function fulfillJson(route: Route, body: unknown, status = 200) {
   await route.fulfill({
     body: JSON.stringify(body),

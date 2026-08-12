@@ -109,8 +109,6 @@ function makeAdminFeatureDetail(
     address: { road: "서울 중구 세종대로" },
     category: "99000000",
     created_at: "2026-06-29T00:00:00.000Z",
-    data_origin: "provider",
-    data_version: 1,
     detail: {},
     feature_id: "kma::ultra::seoul",
     kind: "weather",
@@ -133,7 +131,6 @@ function makeAdminFeatureDetailResponse(
 ): AdminFeatureDetailResponse {
   return {
     data: {
-      change_requests: [],
       curations: [],
       feature: detail,
       files: [],
@@ -141,7 +138,6 @@ function makeAdminFeatureDetailResponse(
       overrides: [],
       sources: [],
       state_transitions: [],
-      versions: [],
     },
     meta: makeMeta({ request_id: "e2e-session-kma-detail" }),
   };
