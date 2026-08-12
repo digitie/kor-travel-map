@@ -2,6 +2,18 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-12 — T-VN-38 병합과 완료 task 아카이브 정리
+
+PR [#971](https://github.com/digitie/kor-travel-map/pull/971)이 `8dc2b24a`로 머지됐다.
+최종 source `bef509d`에서 GitHub CI 8개가 모두 green이었고, n150 전용
+`ktm-tvn38-db:18732` clone의 destructive Live UI E2E는 main/recovery 각각 2/2,
+`phase=passed`, BLOCKED 없음으로 끝났다. consumer·DB 적대 리뷰 2인은 P0/P1=0을
+재확인했다.
+
+`tasks.md`는 열린 백로그만 둔다는 규칙에 맞춰 이미 병합된 `T-VN-33`(#966),
+`T-VN-37`(#968), `T-VN-38`(#971) 및 `T-VN-H45` 완료 기록을 `tasks-done.md`로
+이관했다. 열린 prod 배포·운영 후속·T-VN-34/36/40/41만 남겼다.
+
 ## 2026-08-12 — T-VN-38: immutable fact/current-summary CI 구조 계약 보강
 
 #971의 integration CI가 T-VN-38 이후에도 옛 `provider` 문자열 fact, nullable source lineage,

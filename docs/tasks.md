@@ -5,88 +5,26 @@
 [`docs/resume.md`](resume.md)가 정본이다. 작성·유지 규약은
 [`docs/tasks-rule.md`](tasks-rule.md)를 따른다.
 
-## 진행 중인 작업 인덱스 (2026-07-28 PR #869 후 전면 재감사 · 2026-08-07 실상태 재대조)
+## 진행 중인 작업 인덱스 (2026-08-12 PR #971 머지 후 재대조)
 
-> PR #869 merge `25e9304b` 직후 `tasks.md`·`tasks-done.md`·실코드·Map/PinVi/
-> PR #869 당시 전면 감사에서 시작했으며 이후 완료·보류 상태를 매 PR 갱신한다.
-> 큰 task는 독립 검증·forward recovery가 가능한 실행 단위로 아래처럼 분해한다.
+완료한 `T-VN-32`·`T-VN-33`·`T-VN-37`·`T-VN-38`과 선행 운영 task는
+[`tasks-done.md`](tasks-done.md)로 이관했다. 아래에는 아직 닫히지 않은 실행 단위만 둔다.
 
 **Lane A (Claude Code)**와 **Lane B (codex)**는 서로 병렬 실행한다. 각 lane 내부는 아래 순서를
 지키며, 같은 migration head·OpenAPI 정본·같은 cross-repo pair를 만지는 시점만 공통 규율의
 barrier로 직렬화한다.
 
 - **Lane A — cross-repo 계약·운영·데이터 품질**
-  - a0: [x] `T-VN-H07B`(PinVi #403 재감사·landing) →
-    [x] `T-VN-H07D`(#815 admin snapshot/freshness) →
-    [x] `T-VN-H07C`(#812 — v5 승격 기각, ADR-079)
-  - a1: [x] `T-VN-H29`(PinVi 검색 좌표 null 복구 — H07D 파생) →
-    [x] `T-VN-H21`(geo live 인증 결선 검증·5건 재실증) →
-    [x] `T-VN-H28A/B`(#673 실데이터 오탐 분류 + 검증 규칙·회복 — 한 PR) →
-    [x] `T-VN-H25A`(미연결 membership 증거·전제 정정) →
-    [x] `T-VN-H30A`(관측 durable화) →
-    [~] `T-VN-H25B`(CSV 역반영 5건·매칭 재실행 — 3건 오링크 배제, 미충족 AC는 H34) →
-    [x] `T-VN-H33`(오링크 3건 해제 — 공개 오노출 해소, H36으로 durable) →
-    [x] `T-VN-H36`(import 이름 단독 자동링크 금지 — H35 이미지에 포함 필수) →
-    [x] `T-VN-H40`(concierge provenance — 재생성 후 재적재분 4,424건 전부
-        `match_basis=source_rule` 실측(2026-08-04), `0073` 트리거 prod 실증 완결) →
-    [x] `T-VN-H35`(2026-08-04 재정의판 종결 — 재생성·재적재 대체 완료,
-        2026-08-05 head `0082` 배포·live 검증) →
-    [x] `T-VN-H30B`(실적재·인증 API 재검증 — 재정의판 완료: 결손 1,481 → 완전 회복, 2회차 멱등) →
-    [x] `T-VN-H30C`(타 provider evidence — krforest arboretums 무장, visitkorea/MOIS는
-        dual 불가 판정·문서 고정) →
-    [~] `T-VN-H34`(H25A/H25B 미충족 AC — 4항목 중 3 완료. 남은 1항목(import
-        preview H36 게이트 실측)은 H35 배포 완료로 **차단이 풀렸고 측정만 미실행**,
-        카테고리 축 신설로 링크 결함 8건 발견) →
-    [x] `T-VN-H31`(등대 공급원 — provider 신설 사용자 지시로 취소, 103건 미연결 유지) →
-    [x] `T-VN-H32`(주소 검증 finding 자동 close — 초기 marker, #912 generation으로 대체) →
-    [x] `T-VN-H32R`(#911~#913 — authoritative observation receipt·동시 run fence·
-        retention job 등록) →
-    [x] `T-VN-H34R`(#914 — linked name exact evidence·공개 repeatable-read snapshot) →
-    [x] `T-VN-H22A`(quarantine read/preview — 사용자 지시로 보류 해제, 단일 PR) →
-    [x] `T-VN-H22B`(원자적 재분류 command — domain ledger·충돌 fail-close·빈 격리 정리) →
-    [x] `T-VN-H22C`(Admin UI 패널·mocked 6건·격리 스택 파괴 검증 9흐름·live spec 저술)
-  - a2 (운영 연속성 — 0072 사고·재생성 후속, 상세는 `T-VN-H42~H45` 절):
-    [x] `T-VN-H42`(재적재 수렴·live 검증 — 2026-08-05 판정 완료: 최종 수치
-        features 731,724 = public = aliases, **41C 선행 조건 충족**.
-        2026-08-07 [`tasks-done.md`](tasks-done.md) 이관) →
-    [x] `T-VN-H45`(upstream 강건화 — #943 재시도 + 근본 원인 2 `https` 정본
-        전환(#948)으로 **KMA 4종 전부 SUCCESS 전환**, 값 55,755 유입.
-        airkorea는 upstream 자체 504로 관찰만. 백로그 5건은 상세 절에 열려 있어
-        블록은 `tasks.md` 잔류) →
-    [~] `T-VN-H43`(백업 체계 — 기준선·write-fence 기준점·배포 후 기준점 dump +
-        dev box 외부 사본 1회 반출까지 **완료**, 절차 runbook §9. 정기화·retention·
-        2차 사본 자동화는 **보류**(실 prod 아님, 사용자 지시 2026-08-06 → manager
-        #148). 잔여 열린 항목은 restore 문서의 확장 4종 선생성 링크 1건) →
-    [~] `T-VN-H44`(복원 리허설 드릴 — **1회차 완주 2026-08-05**: 복원·manifest
-        일치·결손 주입/회복 replay 전 단계 통과, 절차 runbook §10 고정.
-        잔여: 주기 실행 트리거 — H43 정기화 보류와 같은 조건이라 manager #148에서
-        함께 재개)
+  - [~] `T-VN-H25B` → [ ] `T-VN-H34`(공식 curation 미연결 membership 잔여 AC)
+  - [~] `T-VN-H43` → [~] `T-VN-H44`(백업 정기화·복원 드릴 재개 조건)
+  - [ ] `T-VN-H45-후속`(다건 provider fetcher·quota 관찰 확장)
 - **Lane B — frontend hardening·PinVi 소비 API**
-  - b0: [x] `T-VN-48D`(final exact Mocked/Live) →
-    [x] `T-VN-49A/B/C/D`(React 구조 debt, 단일 PR)
-  - b1: [x] `T-VN-11A/B`(service batch, 저장소별 호환 PR 쌍) →
-    [x] `T-VN-H37`(Mocked checkpoint 종료 판정·고병렬 flaky 진단) →
-    [x] `T-VN-H38`(failure manifest retry/error fingerprint 완전성) →
-    [x] `T-VN-H39`(schedule command pending barrier) →
-    [x] `T-VN-16B`(weather batch 소비) →
-    [x] `T-VN-16C`(sparse 다중 날짜 weather batch) →
-    [ ] `T-VN-41A` → [ ] `T-VN-41B` → [ ] `T-VN-41C`(generation/outbox — prod enable
-    선행 조건은 재pin #109 + `T-VN-H42` **둘 다 충족**, Lane B 상세 절 경계 주석 참조) ∥
-    [x] `T-VN-41D`(durable writer-drain, #935) → [x] `T-VN-41F1J-A`(Map-owned
-    cancel-probe fixture, #960) → [x] `T-VN-41F1D-C0`/`C0a`(후보 image의 Dagster
-    storage·application head artifact, #962/#963) → [x] `T-VN-41F1D-C3`(codex —
-    n150 파기형 rebuild 결선) → [/] `T-VN-41F1D-D`(최종 격리 리허설·live UI E2E —
-    **draft PR #967 진행 중**, T-VN-33 final schema 재적재 뒤 실행) ∥
-    [ ] `T-VN-41S`(snapshot streaming·audit compaction — #922, C enable 비차단)
+  - [ ] `T-VN-41A` → [ ] `T-VN-41B` → [ ] `T-VN-41C`(generation/outbox)
+  - [/] `T-VN-41F1D-D` → [ ] `T-VN-41F1D-D2`(격리 리허설·data-dependent live UI E2E)
+  - [~] `T-VN-41F1D-E`(v5/v7 attestation 전환) ∥ [ ] `T-VN-41S`
 - **Wave 2 barrier 이후**
-  - freeze(Lane A): [x] `T-VN-31A` → [x] `T-VN-31B` → [x] `T-VN-31C`
-  - Lane A: [x] `T-VN-32A` → [x] `T-VN-32B` → [x] `T-VN-32C`(prod 배포·값 전환
-    라이브 — Map #950/#952/#955/#956·PinVi #430/#432) →
-    [x] `T-VN-35A-D`(typed subtype 분해 — ADR-086, A-D 단일 PR) →
-    [ ] `T-VN-37A` → [ ] `T-VN-37B` → [ ] `T-VN-37C`
-  - Lane B shadow: [~] `T-VN-33`(A/B/C 단일 PR — DB 정본·writer/reader cutover·legacy fence) →
-    [x] `T-VN-38A` → [x] `T-VN-38B` → [x] `T-VN-38C` →
-    [ ] `T-VN-34A` → [ ] `T-VN-34B` → [ ] `T-VN-34C` →
+  - Lane A: [ ] `T-VN-35-deploy` → [ ] `T-VN-37D`
+  - Lane B: [ ] `T-VN-34A` → [ ] `T-VN-34B` → [ ] `T-VN-34C` →
     [ ] `T-VN-36A` → [ ] `T-VN-36B` → [ ] `T-VN-36C`
   - 32~38 join barrier 뒤 Lane B: [ ] `T-VN-40A` → [ ] `T-VN-40B` →
     [ ] `T-VN-40C`
@@ -101,9 +39,6 @@ barrier로 직렬화한다.
     required-review 운영 주체 결정 필요)
   - [ ] `T-101` — Materialized View 도입 검토(조건 발생 시)
   - [ ] `T-VN-EXT-PINVI-215` — PinVi #215 외부 추적(Map Agent A/B queue 밖)
-
-> T-VN-49의 `[x]` 이관은 H49 코드와 같은 merge commit으로만 `main`에 들어간다. 따라서
-> `main`에서 구현보다 완료 표시가 먼저 보이거나 H22C barrier만 먼저 풀리는 구간은 없다.
 
 ## 공통 규율 (2026-07-28 개정)
 
@@ -241,8 +176,6 @@ barrier로 직렬화한다.
 
 H24가 stable component 기반 미연결 membership으로 무손실 보존하므로 데이터 손실 위험은 없다.
 증거 생성과 mutation을 분리한다.
-
-- [x] T-VN-H25A — **미연결 membership evidence manifest** (전제 반증·재측정으로 종결, 잔여 축은 H25B/H34 이관) → [`tasks-done.md`](tasks-done.md)
 
 - [~] T-VN-H25B — **CSV 역반영 5건 + 매칭 재실행** (미충족 AC는 아래 표)
 
@@ -397,12 +330,6 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
     > 오탐이 됐다. 숙박을 갖춘 휴양림이 그렇게 분류되는 건 정당하다. 축을 "관광이어야 한다"에서
     > **"명백히 대상일 수 없는 유형인가"** 로 뒤집었다(10→8). 두 회귀 모두 단위 테스트로 고정했다.
 
-- [x] T-VN-H34R — **H34 링크 evidence를 linked target·공개 snapshot에 결박한다 (#914)** → [`tasks-done.md`](tasks-done.md)
-
-- [x] T-VN-H33 — curation_items 오링크 3건 해제 + 공개 오노출 실증 + ledger 방출 (#890, H36으로 durable해짐) → [`tasks-done.md`](tasks-done.md)
-
-- [x] T-VN-H36 — curation import의 이름 단독 자동링크 금지 (#890, 막힌 자동링크 3건 전부 오링크 / 정당한 손실 0건) → [`tasks-done.md`](tasks-done.md)
-
 > **issue #673 판정(2026-07-30) — 아직 닫을 수 없다.** 서브에이전트 조사로 이슈 본문·코멘트를
 > 요구사항으로 분해해 대조했다. 3항목 중 둘(오탐 분포 규명 / 규칙 교체)은 충족이고,
 > 셋째("다음 materialize에서 자동 회복되는가")는 **코드 논증만 있고 실증이 없다**.
@@ -417,12 +344,6 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 > 이슈는 "concierge provider에 한해" 완화를 요구했고 두 task는 그 파생 개선이다.
 > 저장소 열린 이슈는 #673·#819 두 건뿐이고 #673은 epic이 아니다.
 
-- [x] T-VN-H40 — **concierge curation provenance 복구** (0073+0074, #919/#925 — 재생성 후 재적재분 4,424건 100% `source_rule` 실측(2026-08-04)로 완결) → [`tasks-done.md`](tasks-done.md)
-
-- [x] T-VN-H35 — **prod 마이그레이션 지연 해소** (2026-08-04 재정의판 종결 — 0072 사고로 cutover 소멸 → 빈 DB `0078` 재생성+재적재로 대체, 2026-08-05 배포에서 head `0082` 도달·live 검증 완료. cutover 설계 이력 전문은 tasks-done) → [`tasks-done.md`](tasks-done.md)
-
-- [x] T-VN-H31 — **등대 공급원 부재 — provider 신설 취소로 종결** (2026-08-03 사용자 지시, 103건 미연결 유지) → [`tasks-done.md`](tasks-done.md)
-
 ### T-VN-H42~H45 — 운영 연속성 (0072 사고 후속: 재적재 수렴 → 강건화 → 백업 → 복원 드릴)
 
 > 2026-08-04 prod 폐기·재생성(head `0078`) 후속. 2026-08-05 이미지 `c0afaa4e` 배포로
@@ -430,30 +351,13 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 > dump가 유일 복구점**이다. codex 소관 41C prod enable은 H42 판정 + docker-manager
 > 재pin 뒤(Lane B T-VN-41 절 경계 주석).
 
-- [x] T-VN-H42 — **provider 재적재 완주·수렴 검증** (2026-08-05 판정 완료 — 최종 수치
-  features 731,724 = public = aliases, 41C 선행 조건 충족. 2026-08-07 이관)
-  → [`tasks-done.md`](tasks-done.md)
+- [ ] T-VN-H45-후속 — **다건 provider 호출·quota 관찰 확장**
 
-- [x] T-VN-H45 — **KMA/airkorea 대량 순차 upstream 호출 강건화 (#943 + #948)**
-      — **2026-08-05 판정 완료**: 근본 원인 2(data.go.kr 평문 HTTP 사멸) 실측 후
-      lib 정본 https 전환(kma#23·airkorea#6)+핀 bump(#948)로 KMA 4종 전부
-      SUCCESS 전환·값 55,755 유입. airkorea는 upstream 자체 504(관찰만).
-
-  만성 실패 근본 원인(간헐 오류율 × N격자 all-or-nothing × step 전량 재시도 =
-  시도당 생존확률 p^N 붕괴)을 단건 호출 경계 유한 재시도로 수정. 산식·정산·판정
-  기준 정본은 `docs/etl/kma-weather-etl.md` §8.1. 적대 리뷰 2건 GO(반영 내역은
-  journal 2026-08-05 (2)(3)). 2026-08-05 prod `c0afaa4e` 배포 완료.
-
-  - [x] **판정**(2026-08-05): KMA 4종 SUCCESS 전환(23:15~00:25 연속 실측) —
-    journal (5). airkorea는 실응답 504 `SERVICETIMEOUT_ERROR`(upstream 백엔드
-    자체 열화 — 재시도 분류·소진·전파 설계대로 동작, 코드 무관·관찰만).
-  - [ ] 백로그: ① khoa 등 다건 루프 fetcher 확대(실측 보고 결정 — khoa도
-    http 기본 여부 우선 확인), ② python-kma-api resultCode 22 quota
-    `retryable=True` 오분류 + 200-body XML envelope parse 경로(https 전환은
-    #23으로 완료), ③ RetryBudget 비례화/settings 노출 + `_LOGGER` `python_logs`
-    결선, ④ KMA 4종+airkorea schedule `coalesce_active_runs=True`,
-    ⑤ **alembic 1.19 적응**(CheckConstraint naming-convention 비교 변경 —
-    천장 핀 `<1.19` 해제 조건, #948 동봉 커밋 참조).
+  완료한 KMA/airkorea 강건화(`T-VN-H45`)의 후속으로 ① khoa 등 다건 루프 fetcher 확대,
+  ② python-kma-api resultCode 22 quota `retryable=True` 오분류와 200-body XML envelope
+  parse 경로, ③ RetryBudget 비례화/settings 노출 및 `_LOGGER` `python_logs` 결선,
+  ④ KMA 4종+airkorea schedule `coalesce_active_runs=True`, ⑤ alembic 1.19 적응을
+  실측 우선순위로 분리한다.
 
 - [~] T-VN-H43 — **prod 백업 체계 수립 (정기 dump·sha256·보존·rollback 기준선)**
 
@@ -619,85 +523,6 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 > ADR-066~075가 목표 스펙 정본이다. 각 migration task는 forward-only 격리 clone에서 검증하고,
 > 명시적 downgrade 수용 조건이 없는 한 전진 뒤 rollback하지 않는다.
 
-> 인덱스↔본문 불일치는 해소됐다 — `### T-VN-37` 절은 #968이, `### T-VN-33` 절은
-> #966(`feat/tvn33-provider-datasets`)이 각자 자기 브랜치에서 재작성했다(2026-08-11).
-
-### T-VN-32 — UUID identity shadow 전환 (Lane A)
-
-- [x] T-VN-32A — **UUID schema·deterministic backfill** (2026-08-04 완료, #940 — prod `0080` 적용·backfill 731,600 100% 2026-08-05) → [`tasks-done.md`](tasks-done.md)
-
-- [x] T-VN-32B — **Map consumer-first dual read/write** (2026-08-04 완료, #940 — prod `0081` 적용·공개 표면 feature_uuid 병행 노출 실측 2026-08-05) → [`tasks-done.md`](tasks-done.md)
-
-- [x] T-VN-32C — **PinVi alias-map cutover·legacy write fence·응답 값 전환** (2026-08-05 완료 — Map #940/#950/#952/#955/#956 · PinVi #428/#430/#432, prod 배포·값 전환 라이브) → [`tasks-done.md`](tasks-done.md)
-
-  **관측(상시)**: ① `count_features_missing_identity` 4축 0 정기 확인(replica-mode 우회 보상 — 0083 선언적 제약의 방어선) ② 32B 기간 저장된 UUID 표기 scope 레코드는 재실행에서 조용한 no-op(적대 리뷰 L4) ③ curations 격리(quarantine) 재-link 표면은 감사 예외로 legacy 표기 유지 — 프론트 identity 대조 확인 권고(F6).
-
-  **범위 밖 잔여**: PinVi service 스냅샷 재핀은 codex `T-VN-41-F` 합류(PinVi resume 상단 인수 패키지),
-  live e2e 라이브 검증은 n150 per-file 저부하 관례. legacy ID·FK는 T-VN-33의 final-schema
-  migration에서 이미 물리 제거한다.
-
-### T-VN-33 — provider dataset 정본 전환 (Lane B, A/B/C 단일 PR)
-
-- [~] T-VN-33 — **DB 소유 dataset·operation 정본, immutable observation/head, 전 참조
-  cutover와 legacy fence**
-
-  A/B/C는 분리 PR이 아니다. 하나의 PR이 다음을 모두 완료한다.
-
-  1. versioned dataset/operation seed, `provider_datasets` capability schema, canonical
-     identity 제약과 full reference preflight/backfill,
-  2. source entity → immutable record → validated head 및 dataset FK/membership 기반 writer·reader
-     전환,
-  3. legacy string/boolean/raw-derived 열·제약·index의 물리 삭제, query/EXPLAIN/checksum
-     gate와 final-schema 재적재 검증.
-
-  **현재 단일 PR 내부 실행 lane** — 아래 항목은 PR을 분리하지 않는 병렬 구현·검증
-  단위다. 모두 끝나기 전에는 이 task를 완료로 옮기지 않는다.
-
-  - [x] `33-A` — versioned dataset/operation seed, immutable source entity/record/head와
-    legacy source 물리 제거 및 final-schema migration rejection gate
-  - [x] `33-B` — import job·feature-update request의 canonical
-    `(provider_dataset_id, sync_scope, operation_key)` membership, Dagster runner/sensor/API write
-    cutover
-  - [x] `33-C` — offline/file/curation/integrity/POI writer·reader를 exact operation member
-    identity로 전환하고 legacy pair를 물리 삭제
-  - [x] `33-D` — pipeline/ops read model·dataset status/consistency/live topic과 admin
-    feature-update UI를 triple membership projection으로 재작성
-  - [~] `33-E` — final-schema fresh PostGIS·API/Dagster·OpenAPI/type·admin live E2E,
-    적대 리뷰 2인 P0=0, PR rebase/CI/merge 후 T-VN-41 F1D-D 재개
-
-    **2026-08-11 완료분**: n150 격리 컨테이너에 빈 PostGIS → `alembic upgrade head`
-    (0092, `alembic check` drift 0) → 그 DB에 대고 API live 12/12(삼중 강제 404/404/200,
-    비활성 dataset 409 `INACTIVE_DATASET_MUTATION_DISABLED`) → n150 브라우저로 admin UI
-    live 10/10(그리드 67행·operation 열·aria-label 삼중·console error 0) +
-    라운드12 수정 live 확인(실행 가능 scope 없는 dataset의 '지금 갱신' disabled,
-    정상 dataset은 활성). 경과·수치는 `docs/journal.md` 2026-08-11 (2).
-    **잔여**: Dagster 축(격리 환경에 Dagster 없음), 적대 리뷰 2인 승인, rebase/CI/merge.
-
-  **검증 상태(2026-08-11, 라운드12)**: 적대 리뷰 12라운드를 돌았고 매 라운드가 실결함을
-  냈다. 반복된 근인은 하나다 — **검증 하네스 자체가 신뢰 대상이 아니었다.** 그래서 층을
-  쌓아 닫았다: 게이트 스크립트가 CI를 1:1 미러 → 감사기가 워크플로를 파싱해 미러 누락을
-  검사(`tests/unit/test_gate_script_mirrors_ci.py`) → 변이 배터리가 감사기를 증명
-  (`scripts/audit-mutation-battery.py`, 48종) → 통제군이 배터리를 증명 → 배터리를 CI에 게이트.
-  라운드12가 닫은 두 BLOCKER는 둘 다 "CI 스텝보다 좁은 범위에서 green을 봤다"는 같은
-  실패 모드였다(단독 실행 green · 디렉터리 실행 red / downgrade 경로 테스트 0건).
-  경과는 `docs/journal.md` 2026-08-11, 남은 항목은 아래 §T-VN-33 후속.
-
-  **T-VN-33 후속(머지 후 별도 처리 가능)**: 요청 dialog의 external-scope 전용 dataset
-  축은 회귀를 넣었으나 실 DB e2e는 없다. `docs/dev-environment.md`의 n150 live e2e는
-  33-E에서 수행한다.
-
-  설계·P0 해소·검증 matrix 정본은
-  [`reports/t-vn-33-provider-datasets-single-pr-plan-2026-08-06.md`](reports/t-vn-33-provider-datasets-single-pr-plan-2026-08-06.md),
-  구조 결정은 ADR-088이다. typed `notice_states`/weather/price fact는 각각 T-VN-37/T-VN-38의
-  원자 모델 전환에서 처리한다. final-schema 데이터는 ETL로 재생성하므로 intermediate backup·호환
-  shim을 만들지 않는다.
-
-  **중단 스냅샷(2026-08-06)**: 그 시점에 사용자 지시로 한 번 중단했고, 당시의 P0·유효/무효
-  검증과 T-VN-41 선행 순서는
-  [`reports/t-vn-33-hold-snapshot-2026-08-06.md`](reports/t-vn-33-hold-snapshot-2026-08-06.md)에
-  남아 있다. 구현은 2026-08-08에 재개해 33-A~D를 완료했다 — 그 문서는 현재 상태의 정본이
-  아니라 중단 시점의 기록이다.
-
 ### T-VN-34 — 직교 상태 모델 전환 (Lane B)
 
 - [ ] T-VN-34A — **3축 상태 schema·backfill**
@@ -749,27 +574,10 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   비활성화한다. whole-row freeze column/trigger는 rollback shadow로 유지하고 물리 삭제 목록을
   T-VN-39에 넘긴다.
 
-### T-VN-37 — notice 계보 판정 (Lane A)
+### T-VN-37D — notice empty range 표현 (보류)
 
-> **범위 재정의(2026-08-07)**: 원안은 "두 timestamptz를 `tstzrange`로 승격하고
-> read를 range 연산자·GiST로 전환"이었다. 그 방향은 **폐기했다**(ADR-088):
-> `feature_notices`는 feature당 최대 1행 + PK 단일이라 공개 필터가 언제나 PK 단일
-> probe여서 GiST가 구조적으로 쓰이지 않고, 시작 시각을 보는 술어로 바꾸면 미래
-> 발효 KMA 특보가 발효 전까지 숨어 사전 경고가 사라진다. 실제 병목은 range 표현이
-> 아니라 **계보 key를 매 행 JSON에서 재계산**하는 것이었다.
->
-> 35B가 이미 typed `timestamptz`와 문자열 파싱 제거를 끝냈으므로, 37에 남은 것은
-> 계보 판정 하나다.
-
-- [x] T-VN-37 — **계보 key 물화 + 인덱스 probe** (PR 대기, 머지 보류)
-
-  `provider_sync.source_records.lineage_key`(nullable, notice scope만 — DB 트리거
-  파생) + `(COALESCE(lineage_key, source_entity_id), provider, dataset_key,
-  source_entity_type)` 표현식 인덱스. read 필터는 correlated를 유지하고 계보
-  등식만 컬럼으로 바꾼다. reconcile CTE에 `MATERIALIZED` 장벽. 3,045 notice에서
-  목록 20.4초 → 0.19초, reconcile 118.4초 → 0.36초(현행 prod 145행에서는
-  60.8ms → 5.2ms로 이득이 작다 — 이 변경이 사는 곳은 규모다). 결과 집합·reconcile
-  종료 상태 동일. 마이그레이션 3.1초. alembic `0088`, ADR-088.
+> 계보 key 물화·인덱스 probe(`T-VN-37`, PR #968)는 완료 이력으로
+> [`tasks-done.md`](tasks-done.md)에 옮겼다. 이 항목은 별도 제품 결정이 필요한 후속이다.
 
 - [ ] T-VN-37D — **empty range 표현 (보류)**
 
@@ -778,48 +586,6 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   CHECK를 두지 않은 이유다. 이를 `tstzrange` empty로 **정확히 표현**하는 것은
   여전히 가치가 있으나, 위 성능 문제와 무관하고 read 술어 변경(=제품 결정)이
   선행돼야 하므로 분리한다. notice_type별 "미래 발효를 보일 것인가" 결정이 먼저다.
-
-### T-VN-38 — weather·price current summary (Lane B)
-
-- [x] T-VN-38A — **weather current summary**
-
-  bitemporal 원본 이력을 보존하면서 identity당 current weather를 원자 유지하는 summary와
-  reconciliation을 추가한다.
-
-- [x] T-VN-38B — **price current summary**
-
-  `provider + price_domain + product_key` identity당 current price summary와 reconciliation을
-  추가하고 restore/backfill generation을 구분한다.
-
-- [x] T-VN-38C — **bbox/detail set-based cutover**
-
-  per-row LATERAL을 weather/price summary set join으로 바꾸고 old query를 normal path에서
-  비활성화한다. rollback shadow index는 보존해 T-VN-39 removal manifest로 넘기고,
-  cardinality·freshness·EXPLAIN을 실데이터로 고정한다.
-
-  **2026-08-08 final-review 보강 checkpoint**: weather global projection을 transaction advisory
-  lock으로 직렬화하고 same-winner reconcile의 row rewrite를 제거했다. deadline-only Dagster
-  reconciliation을 기본 실행 minute schedule로 추가했으며, active dataset·`refresh_after` gate를
-  public/admin card·anchor·bbox 모두에 적용했다. map weather summary의 canonical dataset identity와
-  deadline은 필수다. summary가 전혀 없는 eligible raw series까지 expected set-diff로 검출하고,
-  partial-own anchor가 batch뿐 아니라 current·snapshot·admin single-card에서도 자신을 KMA/observed
-  fallback으로 재선정하지 않도록 고쳤다.
-
-  **완료(#971)**: weather·price의 전역 mutable current projection을 각각 transaction advisory
-  lock으로 직렬화하고, freshness·cardinality·EXPLAIN·frozen artifact의 CRLF byte guard를
-  고정했다. final `e68b00ef`는 Dagster의 raw provider response fixture를 JSON 보존 가능
-  구조체로 정렬했고, 정상 live run 시작 전 signed clone checkpoint dump를 전용 clone에 복원해
-  직전 성공의 soft-delete 감사 이력이 다음 실행을 막지 않게 했다. n150
-  `ktm-tvn38-db:18732`에서 main/recovery 각각 2/2, `phase=passed`, BLOCKED 없음,
-  startup migration 불변 및 production compose 제외를 실증했다. 적대 리뷰 2인은 최종 SHA에서
-  P0/P1 없이 GO를 확인했다.
-
-  **2026-08-12 CI 계약 보강(동일 #971)**: immutable fact/current-summary 전환 뒤 남아 있던
-  구 `provider` 문자열·BRIN/current-row 가정은 별도 호환 shim으로 되살리지 않는다. metadata
-  exclusion ledger와 raw-DDL 구조 contract, admin/public card fixture, Dagster provider 응답의
-  JSON 경계, H35 index fingerprint, tier-2 bbox page-limit count를 final canonical
-  dataset/source revision schema로 함께 고정한다. 이 보강 SHA의 CI·live·적대 재승인까지
-  병합 조건으로 삼는다.
 
 ### T-VN-40 — curation write model 단일화 (Lane B)
 
