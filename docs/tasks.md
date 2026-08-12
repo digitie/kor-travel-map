@@ -648,8 +648,22 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   immutable fresh run은 Map `f7e2e04e` / PinVi `6ab4eaf` pair에서 fresh migration·Dagster
   ETL(Feature/source-link 3건, weather/price 1건씩)·Noble Playwright(2/2)·PinVi public probe와
   자동 cleanup을 통과했다. 앞선 실패 run은 같은 격리 snapshot에서 `recover`로 정리해
-  `BLOCKED.json`/container/volume 잔재가 없음을 확인했다. 다음 작업은 요청된
-  T-VN-33 → T-VN-38 → T-VN-34 → T-VN-36 rebase와 fixed-base 영향성 gate다.
+  `BLOCKED.json`/container/volume 잔재가 없음을 확인했다.
+
+  **2026-08-13 재배치**: `feat/tvn34-state-model` `693c5355` 위로 T-VN-36 고유 24 commit을
+  다시 얹었다(옛 tvn34 67 commit 폐기). alembic 단일 head는 `0104_tvn36_final_fence`이고
+  migration graph·OpenAPI·contract SHA는 재생성했다. 같은 자리에서 T-VN-34가 세운 결함
+  부류를 전수로 걸어 notice reconcile SQL의 죽은 projection, override procedure arity
+  미추종, 죽은 오류 매핑, ledger operation 이름 붕괴, 정적 차단선의 세대 누락,
+  frontend type-check/lint red를 닫았다(journal 2026-08-13). PinVi pair 재고정과 n150 live는
+  이 head에서 아직 재실행하지 않았다.
+
+  **남은 판단 2건**: ① `scripts/admin_feature_live_fixture.py` /
+  `scripts/run-admin-feature-clone-live-acceptance.sh`가 아직 whole-row change
+  request/version 모델 위에 있어 `0104` head에서는 실행 불가다 — 이 하네스는 정적 문자열
+  계약(`tests/unit/test_admin_feature_live_acceptance.py`)만 있고 실행 gate가 없어 지금은
+  green으로 보인다. ② `0027` re-key 정리의 `data_origin='user_request'` 제외 가드는 head
+  동등 술어가 없어 재현하지 않기로 했다(field override 세대에는 행 단위 소유권이 없다).
 
 ### T-VN-37D — notice empty range 표현 (보류)
 

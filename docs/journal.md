@@ -13,6 +13,41 @@ PR [#971](https://github.com/digitie/kor-travel-map/pull/971)이 `8dc2b24a`로 �
 `tasks.md`는 열린 백로그만 둔다는 규칙에 맞춰 이미 병합된 `T-VN-33`(#966),
 `T-VN-37`(#968), `T-VN-38`(#971) 및 `T-VN-H45` 완료 기록을 `tasks-done.md`로
 이관했다. 열린 prod 배포·운영 후속·T-VN-34/36/40/41만 남겼다.
+## 2026-08-13 — T-VN-36: 새 T-VN-34 위 재배치 + 같은 부류 결함 전수 점검
+
+`feat/tvn34-state-model`(`693c5355`)을 새 base로 잡고 T-VN-36 고유 24개 commit만 다시
+얹었다(`--onto`, 옛 tvn34 67개는 폐기). 파생 산출물(OpenAPI export, contract SHA,
+migration graph)은 마지막에 재생성했고 문서(journal/resume/tasks)는 합집합으로 병합했다.
+alembic은 `0104_tvn36_final_fence` 단일 head다.
+
+리베이스보다 큰 수확은 T-VN-34에서 확립한 결함 부류를 T-VN-36에도 전수로 걸어 본 것이다.
+
+- **notice reconcile SQL이 통째로 죽어 있었다.** T-VN-36이 `notice_update` CTE를 caller의
+  field patch로 옮기면서 바깥 SELECT의 `old_valid_end_time`이 `lifecycle_outcomes`
+  projection에서 빠졌다 — 모든 notice reconcile 경로가 `UndefinedColumn`으로 실패했다
+  (통합 18건). 리베이스 이전 tvn36 tip에도 있던 결함이다.
+- **override procedure arity 미추종.** `0104`가 `p_request_id`를 지운 뒤 admin writer만
+  새 서명을 따랐고 주소·전화 writer는 옛 12-slot CALL을 그대로 썼다(`UndefinedFunction`).
+- **오류 매핑이 죽은 코드였다.** `_raise_field_override_procedure_error`가 새 base가 지운
+  `_pg_error_attribute`를 호출해 `NameError`가 됐다. `_driver_constraint_identity`로
+  통일하고, P0002/40001/23514가 실제로 도메인 오류가 되는지 실 DB로 확인하는 통합
+  테스트를 넣었다(종전에는 그 축이 없었다).
+- **HTTP idempotency ledger 이름 붕괴.** create/patch/field-override 세 라우트가 한
+  operation(`admin.feature.override.author`)을 공유해 ledger의 route 유일성과 ETag replay
+  계약이 깨졌다. 라우트별 이름을 되살리고, override author를 부를 수 있는 operation
+  allow-list를 DB 쪽(`0100`/`0104`)에서 넓혔다.
+- **정적 차단선이 제 세대만 봤다.** `test_tvn34c_feature_state_inventory`가 `0097`의
+  DROP COLUMN만 읽어 `0104`가 지운 `data_origin`/`data_version`에는 무방비였다. 두 cutover
+  migration을 함께 읽도록 넓혔다.
+- **frontend 계약 미추종.** `type-check`/`lint`가 red였다 — 제거된 OpenAPI 스키마를 참조하는
+  live spec, mock의 `data_origin`/`data_version`/`versions`/`change_requests`, 그리고 파일
+  전체를 무력화하던 `@ts-nocheck`. change-request 표면 전용 spec과 fixture를 지우고
+  `@ts-nocheck`을 제거했다. PATCH가 correction basis를 무효화하는 새 계약도 반영했다
+  (T-VN-36 이후 PATCH는 그 자리에서 row_revision을 올린다).
+- **0104가 지운 것을 쓰던 테스트 전수 정리.** whole-row provenance bridge를 쓰는 T-VN-34
+  세대 테스트에는 tvn36이 이미 쓰던 skip guard를 붙이고, `feature_versions` 권한 축은
+  후속 gate로 넘겼다. `0027`의 `data_origin='user_request'` 제외 가드는 head 동등 술어가
+  없어 재현하지 않는다고 명시했다.
 
 ## 2026-08-12 — T-VN-38: immutable fact/current-summary CI 구조 계약 보강
 

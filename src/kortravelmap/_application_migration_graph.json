@@ -612,7 +612,43 @@
       "down_revision": [
         "0097_tvn34c_final_cutover"
       ],
-      "revision": "0098_admin_scope_indexes"
+      "revision": "0098_tvn36_override_lineage"
+    },
+    {
+      "down_revision": [
+        "0098_tvn36_override_lineage"
+      ],
+      "revision": "0099_tvn36_provider_field_patch"
+    },
+    {
+      "down_revision": [
+        "0099_tvn36_provider_field_patch"
+      ],
+      "revision": "0100_tvn36_override_cmds"
+    },
+    {
+      "down_revision": [
+        "0100_tvn36_override_cmds"
+      ],
+      "revision": "0101_tvn36_patch_hardening"
+    },
+    {
+      "down_revision": [
+        "0101_tvn36_patch_hardening"
+      ],
+      "revision": "0102_tvn36_null_geometry"
+    },
+    {
+      "down_revision": [
+        "0102_tvn36_null_geometry"
+      ],
+      "revision": "0103_tvn36_freeze_replay"
+    },
+    {
+      "down_revision": [
+        "0103_tvn36_freeze_replay"
+      ],
+      "revision": "0104_tvn36_final_fence"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

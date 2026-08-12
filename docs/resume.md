@@ -1,6 +1,26 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
 ## 2026-08-13 — T-VN-34 머지 대기: 적대 검토 3라운드 반영 완료
+## 2026-08-13 — T-VN-36: 새 T-VN-34 base 재배치 완료, 영향성 gate 재실행
+
+**다음 한 작업**: `feat/tvn36-abcd-field-overrides`를 이 재배치 head로 force-push한 뒤,
+사용자 판단이 필요한 두 건(아래)을 정리하고 T-VN-40/T-VN-41 재base와 PinVi pair 재고정을
+잇는다. PR은 아직 열지 않는다.
+
+- base는 `feat/tvn34-state-model` `693c5355`이고 T-VN-36 고유 24 commit만 다시 얹었다.
+  alembic은 `0104_tvn36_final_fence` 단일 head, migration graph/OpenAPI/contract SHA는
+  재생성했다.
+- T-VN-34에서 확립한 결함 부류를 전수로 걸어 notice reconcile SQL의 죽은 projection,
+  override procedure arity 미추종, 죽은 오류 매핑, ledger operation 이름 붕괴, 정적
+  차단선의 세대 누락, frontend type-check/lint red를 닫았다. 상세는 journal 2026-08-13.
+- **남은 판단 2건**: ① `scripts/admin_feature_live_fixture.py` +
+  `scripts/run-admin-feature-clone-live-acceptance.sh`는 여전히 whole-row change
+  request/version 모델 위에 서 있어 `0104` head에서 실행 불가다(정적 unit 계약만 있고
+  실행 gate가 없어 green으로 보인다). ② `0027` re-key 정리의 `data_origin='user_request'`
+  제외 가드는 head 동등 술어가 없어 재현하지 않기로 했다.
+- PinVi pair 재고정과 n150 live는 이 재배치 head에서 아직 다시 실행하지 않았다.
+
+## 2026-08-10 — T-VN-34C: fresh live gate 실행 대기
 
 **다음 한 작업**: PR #972를 CI green 후 merge commit으로 머지한다. 그 뒤 T-VN-36을 새
 main으로 재리베이스하되 alembic revision 번호 충돌을 먼저 푼다 — T-VN-34가
