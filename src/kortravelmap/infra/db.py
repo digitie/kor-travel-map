@@ -41,6 +41,8 @@ from sqlalchemy.ext.asyncio import (
 if TYPE_CHECKING:
     from pydantic import SecretStr
 
+    from kortravelmap.settings import KorTravelMapSettings
+
 __all__ = [
     "RuntimeDbPrivilegeBoundaryError",
     "assert_runtime_db_privilege_boundary",
@@ -346,6 +348,22 @@ def normalize_async_dsn(dsn: str) -> str:
         f"dsn={dsn!r}은 PostgreSQL scheme이 아님 "
         f"(postgresql:// 또는 postgresql+asyncpg:// 필요)."
     )
+
+
+def require_pg_dsn(settings: KorTravelMapSettings) -> SecretStr:
+    """runtime DSN을 꺼내거나, 없으면 그 사실을 명시적으로 알린다.
+
+    ADR-090 이후 ``pg_dsn`` 기본값이 없다. 호출부마다 ``None`` 분기를 따로 쓰면
+    같은 상황에 서로 다른 오류가 나오므로(``AttributeError``까지 섞였다) 한 자리로
+    모은다. 문구는 API의 engine 초기화(`api/db.py`)와 같게 유지한다.
+    """
+
+    if settings.pg_dsn is None:
+        raise RuntimeError(
+            "KOR_TRAVEL_MAP_PG_DSN runtime DSN is required; "
+            "no application DSN fallback exists"
+        )
+    return settings.pg_dsn
 
 
 def make_async_engine(

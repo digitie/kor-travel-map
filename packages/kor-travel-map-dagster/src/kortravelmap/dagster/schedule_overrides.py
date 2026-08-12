@@ -20,6 +20,7 @@ from kortravelmap.settings import KorTravelMapSettings
 
 __all__ = [
     "cron_for_schedule",
+    "ScheduleOverrideStorageUnavailable",
     "load_schedule_cron_overrides",
 ]
 
@@ -42,8 +43,25 @@ def _overrides_required() -> bool:
     raise ValueError(f"{_REQUIRED_ENV} must be a boolean value")
 
 
+class ScheduleOverrideStorageUnavailable(RuntimeError):
+    """override 저장소에 닿을 수 없다(설정 부재 포함).
+
+    ``load_schedule_cron_overrides``의 계약은 "DB 없이도 정의를 import할 수 있다"이다.
+    DSN 미설정은 그 계약에서 **연결 실패와 같은 부류**이지 프로그래밍 오류가 아니므로,
+    ``OSError``/``psycopg.Error``와 같은 자리에서 잡히도록 전용 타입으로 올린다.
+    (앞 판은 ``pg_dsn``이 ``None``일 때 ``AttributeError``가 나서 이 fallback을
+    통째로 건너뛰었다 — ADR-090이 기본 DSN을 없앤 뒤의 회귀다.)
+    """
+
+
 def _psycopg_dsn() -> str:
-    dsn = KorTravelMapSettings().pg_dsn.get_secret_value()
+    secret = KorTravelMapSettings().pg_dsn
+    if secret is None:
+        raise ScheduleOverrideStorageUnavailable(
+            "KOR_TRAVEL_MAP_PG_DSN runtime DSN is required; "
+            "no application DSN fallback exists"
+        )
+    dsn = secret.get_secret_value()
     for prefix, replacement in _ASYNC_DSN_PREFIXES:
         if dsn.startswith(prefix):
             return f"{replacement}{dsn[len(prefix):]}"
@@ -77,7 +95,7 @@ def load_schedule_cron_overrides() -> dict[str, str]:
                 str(schedule_name): str(cron_schedule)
                 for schedule_name, cron_schedule in cur.fetchall()
             }
-    except (OSError, psycopg.Error):
+    except (OSError, psycopg.Error, ScheduleOverrideStorageUnavailable):
         if required:
             raise
         _LOGGER.warning(

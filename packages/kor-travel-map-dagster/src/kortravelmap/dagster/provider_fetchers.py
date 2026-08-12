@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Any, Final, cast
 import httpx
 from kortravelmap.core.ids import make_payload_hash
 from kortravelmap.dto._time import kst_now
+from kortravelmap.infra.db import require_pg_dsn
 from kortravelmap.providers.opinet import (
     OPINET_PROVIDER_NAME,
     OPINET_STATION_DATASET_KEY,
@@ -1452,7 +1453,7 @@ def _opinet_poi_target_bboxes(
     targeted_policy='disabled'로 옵트아웃한 target 제외. fetcher는 sync라
     ``settings.pg_dsn``(async driver)을 sync psycopg DSN으로 바꿔 짧게 조회한다.
     """
-    dsn = settings.pg_dsn.get_secret_value().replace("+asyncpg", "+psycopg")
+    dsn = require_pg_dsn(settings).get_secret_value().replace("+asyncpg", "+psycopg")
     engine = create_engine(dsn)
     try:
         with engine.connect() as conn:

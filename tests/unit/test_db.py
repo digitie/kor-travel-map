@@ -151,6 +151,7 @@ def _runtime_privilege_row() -> dict[str, object]:
         "can_set_runtime_group_role": False,
         "can_create_in_feature_schema": False,
         "can_read_public_features": True,
+        "can_read_feature_versions": True,
         "can_execute_create_procedure": True,
         "can_execute_transition_procedure": True,
         "can_execute_provenance_procedure": True,

@@ -100,7 +100,6 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
         "/v1/features/{feature_id}/weather",
         "/v1/features/{feature_id}/weather/snapshot",
         "/v1/features/{feature_id}/weather/forecast",
-        "/v1/features/{feature_id}/weather/snapshot",
         "/v1/features/weather/forecast",
         "/v1/features/weather/alerts",
         "/v1/public/beaches",

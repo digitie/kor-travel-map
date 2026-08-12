@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 from kortravelmap.core.managed_file_states import MANAGED_FILE_LOCATION_MOIS_SOURCE
 from kortravelmap.infra import file_registry
-from kortravelmap.infra.db import make_async_engine
+from kortravelmap.infra.db import make_async_engine, require_pg_dsn
 from sqlalchemy.ext.asyncio import AsyncSession
 
 if TYPE_CHECKING:
@@ -86,7 +86,7 @@ def record_mois_source_download(
             meta["sync"] = summary_meta
 
         async def _write() -> None:
-            engine = make_async_engine(settings.pg_dsn)
+            engine = make_async_engine(require_pg_dsn(settings))
             try:
                 async with AsyncSession(engine) as session, session.begin():
                     await file_registry.register_file(
@@ -128,7 +128,7 @@ def record_mois_source_loaded(
         name = pathlib.Path(db_path).name
 
         async def _write() -> None:
-            engine = make_async_engine(settings.pg_dsn)
+            engine = make_async_engine(require_pg_dsn(settings))
             try:
                 async with AsyncSession(engine) as session, session.begin():
                     await file_registry.touch_loaded(

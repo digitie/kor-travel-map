@@ -122,10 +122,10 @@ py() {
     -v "$WSL_ROOT:/src" -e TESTCONTAINERS_RYUK_DISABLED=true \
     -e KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY="$GEO_KEY" \
     -e LIVE_KOR_TRAVEL_GEO_BASE_URL="$GEO_BASE" "$IMAGE" \
-    sh -c "{ cd /repo && rm -rf src tests packages contracts alembic scripts .github docs \
+    sh -c "{ cd /repo && rm -rf src tests packages contracts alembic scripts .github docs docker \
       && tar -C /src --exclude=node_modules --exclude=.next --exclude=.react-doctor \
              --exclude=__pycache__ -cf - \
-             src tests packages contracts alembic scripts .github docs \
+             src tests packages contracts alembic scripts .github docs docker \
              alembic.ini pyproject.toml package.json package-lock.json \
              .env.example docker-compose.yml docker-compose.host.yml \
              docker-compose.external-db.yml docker-compose.external-infra.yml \
@@ -151,6 +151,14 @@ py() {
 # `docs/archive/**`를 읽는데, 빠져 있어 **이미지에 구워진 3일 낡은 사본**을 검사하고
 # 있었다. 이 브랜치는 `docs/journal.md`·`resume.md`를 커밋했고 그 게이트는 그
 # 변경을 보지 않은 채 green을 냈다(9라운드 적대 리뷰 F7).
+#
+# `docker/`도 넣는다 — `tests/unit/test_docker_dagster_runtime.py`가 이 디렉터리의
+# entrypoint/bootstrap 스크립트를 읽고 **실제로 실행**한다. 빠져 있을 때 이미지에
+# 구워진 사본은 `dagster-entrypoint.sh`가 1539B가 아니라 451B(runtime preflight 이전
+# 세대)였고 `postgres-role-bootstrap.sh`는 **아예 없었다**. 그래서 4건이
+# 실패했는데, 그건 소스의 결함이 아니라 낡은 사본을 검사한 결과였다 — CI는
+# `actions/checkout`으로 전체 트리를 받으므로 같은 4건이 CI에서는 통과한다.
+# 복사를 켜자 이 파일 114건이 전부 통과했다.
 #
 # 루트 파일(package.json / package-lock.json / docker-compose*.yml / .env.example)도
 # **이름을 하나씩 적어** 복사한다. 예전에는 빠져 있어 그 파일을 읽는 테스트 6건이

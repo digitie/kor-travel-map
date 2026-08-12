@@ -19,7 +19,7 @@ from kortravelmap.core.managed_file_states import (
     MANAGED_FILE_LOCATION_OBJECT_STORE,
     MANAGED_FILE_LOCATION_OFFLINE_UPLOADS,
 )
-from kortravelmap.infra.db import make_async_engine
+from kortravelmap.infra.db import make_async_engine, require_pg_dsn
 from kortravelmap.infra.file_registry_scan import (
     ScanLocationResult,
     backfill_offline_upload_rows,
@@ -102,7 +102,7 @@ async def run_managed_file_scan(
     """dagster-가시 location 전체 scan + DB backfill — op/테스트 공용 헬퍼."""
 
     results: list[ScanLocationResult] = []
-    engine = make_async_engine(settings.pg_dsn)
+    engine = make_async_engine(require_pg_dsn(settings))
     try:
         async with AsyncSession(engine) as session:
             # location별로 독립 커밋 — 한 location 실패가 다른 location의

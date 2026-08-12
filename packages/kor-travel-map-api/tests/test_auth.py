@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -14,6 +16,9 @@ from fastapi.testclient import TestClient
 from pydantic import SecretStr, ValidationError
 
 from kortravelmap.api.app import create_app
+from kortravelmap.api.routers.admin_features import (
+    require_destructive_enabled_for_retire,
+)
 from kortravelmap.api.auth import (
     ADMIN_ACTOR_HEADER,
     ADMIN_PROXY_SECRET_HEADER,
@@ -64,6 +69,18 @@ def _api_settings(**overrides: Any) -> ApiSettings:
 
 def _request(settings: ApiSettings) -> Any:
     return SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(settings=settings)))
+
+
+def _json_body_request(settings: ApiSettings, payload: dict[str, Any]) -> Any:
+    """route-level dependency 검증용 최소 request — body만 읽는다."""
+
+    async def _json() -> dict[str, Any]:
+        return payload
+
+    return SimpleNamespace(
+        app=SimpleNamespace(state=SimpleNamespace(settings=settings)),
+        json=_json,
+    )
 
 
 def _ops_request(
@@ -1371,11 +1388,29 @@ def test_auth_event_rejects_removed_body_actor_field() -> None:
     assert response.status_code == 422
 
 
+#: ``PATCH /admin/features/{id}/state``가 요구하는 write 헤더.
+#: 이 둘이 없으면 body/header 검증이 핸들러보다 먼저 422를 내서, kill-switch가
+#: 403을 낼 기회 자체가 없다(= 게이트를 검증하지 못한다).
+_STATE_WRITE_HEADERS = {
+    "If-Match": '"1"',
+    "Idempotency-Key": "00000000-0000-4000-8000-000000000001",
+}
+
+
 @pytest.mark.unit
 def test_destructive_admin_blocked_when_disabled() -> None:
     client = _client(_api_settings(admin_destructive_enabled=False))
+    # T-VN-34가 ``POST /{id}/deactivate``를 ``PATCH /{id}/state``의 retire action으로
+    # 합쳤다. kill-switch도 그 자리로 따라가야 한다 — route-level이 아니라 action
+    # 단위로 거는 이유는, 같은 라우트의 publication/quality patch는 파괴적이지 않아
+    # 게이트를 꺼도 막히면 안 되기 때문이다(아래 대조군).
     assert (
-        client.post("/v1/admin/features/f_x/deactivate", json={"reason": "test"}).status_code == 403
+        client.patch(
+            "/v1/admin/features/f_x/state",
+            json={"action": "retire", "reason_code": "test"},
+            headers=_STATE_WRITE_HEADERS,
+        ).status_code
+        == 403
     )
     assert (
         client.request("DELETE", "/v1/admin/poi-cache-targets/external-app/key-1").status_code
@@ -1393,7 +1428,23 @@ def test_destructive_disabled_by_default_returns_403(
     assert settings.admin_destructive_enabled is False
     client = _client(settings)
     assert (
-        client.post("/v1/admin/features/f_x/deactivate", json={"reason": "test"}).status_code == 403
+        client.patch(
+            "/v1/admin/features/f_x/state",
+            json={"action": "retire", "reason_code": "test"},
+            headers=_STATE_WRITE_HEADERS,
+        ).status_code
+        == 403
+    )
+    # 대조군 — 파괴적이지 않은 patch action은 게이트를 통과해야 한다.
+    # HTTP로 태우면 게이트를 지난 뒤 DB에 닿으므로, 게이트 축만 직접 검증한다
+    # (게이트를 라우트 전체에 걸면 아래가 HTTPException으로 깨진다).
+    asyncio.run(
+        require_destructive_enabled_for_retire(
+            _json_body_request(
+                settings,
+                {"action": "patch", "publication_state": "draft", "reason_code": "test"},
+            )
+        )
     )
 
 

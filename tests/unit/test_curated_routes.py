@@ -6,7 +6,7 @@ import json
 from collections.abc import AsyncIterator
 from dataclasses import replace
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, NoReturn
 
 import httpx
 import pytest
@@ -176,6 +176,25 @@ def test_curated_routes_are_in_openapi() -> None:
     assert "/v1/admin/curated-source-rules/{rule_id}/apply" in paths
 
 
+class _ForbiddenSession:
+    """건드리면 실패하는 세션 stub — keyless 거부가 DB에 닿지 않음을 강제한다.
+
+    ``require_public_api_key``는 ``get_session``을 sub-dependency로 받지만,
+    헤더가 없는 요청은 활성 key hash 조회 이전에 401로 끊긴다. T-VN-34가
+    ``KorTravelMapSettings.pg_dsn`` 기본값을 없앤 뒤로는 세션을 override하지
+    않으면 dependency 해석이 ``KOR_TRAVEL_MAP_PG_DSN``을 요구하다 RuntimeError
+    로 끝나 401 대신 500이 났다. 여기서 stub을 주입해 (1) DSN 없이도 게이트를
+    검증하고 (2) 거부 경로가 세션을 쓰기 시작하면 즉시 드러나게 한다.
+    """
+
+    def __getattr__(self, name: str) -> NoReturn:
+        raise AssertionError(f"keyless 거부 경로가 DB 세션을 사용했다: session.{name}")
+
+
+async def _forbidden_session() -> AsyncIterator[_ForbiddenSession]:
+    yield _ForbiddenSession()
+
+
 @pytest.mark.parametrize(
     "path",
     [
@@ -193,6 +212,7 @@ def test_public_curated_routes_reject_keyless_requests(path: str) -> None:
             vworld_api_key=SecretStr("public-key-for-curated-route-test"),
         )
     )
+    app.dependency_overrides[get_session] = _forbidden_session
     response = TestClient(app).get(path)
     assert response.status_code == 401
     assert response.headers["content-type"].startswith("application/problem+json")

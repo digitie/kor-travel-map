@@ -17,7 +17,7 @@ from typing import Any, cast
 import httpx
 from kortravelmap.client import AsyncKorTravelMapClient
 from kortravelmap.geocoding import KorTravelGeoRestClient, kor_travel_geo_reverse_geocoder
-from kortravelmap.infra.db import make_async_engine
+from kortravelmap.infra.db import make_async_engine, require_pg_dsn
 from kortravelmap.infra.file_store import (
     S3ObjectStore,
     build_s3_object_store,
@@ -1165,7 +1165,7 @@ def kor_travel_map_client_resource(
 ) -> Iterator[AsyncKorTravelMapClient]:
     """Dagster ``kor_travel_map_client`` 기본 resource."""
     settings = KorTravelMapSettings()
-    engine = make_async_engine(settings.pg_dsn)
+    engine = make_async_engine(require_pg_dsn(settings))
     try:
         yield AsyncKorTravelMapClient(engine, settings=settings)
     finally:

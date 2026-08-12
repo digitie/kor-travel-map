@@ -57,6 +57,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api.auth import (
     AdminProxyContext,
+    require_admin_destructive_enabled,
     require_admin_frontend,
 )
 from kortravelmap.api.db import get_session
@@ -298,6 +299,28 @@ AdminFeatureStateRequest = Annotated[
     AdminFeatureStatePatchRequest | AdminFeatureStateRetireRequest,
     Body(discriminator="action"),
 ]
+
+
+async def require_destructive_enabled_for_retire(request: Request) -> None:
+    """retire action에만 파괴적 admin kill-switch를 건다.
+
+    T-VN-34 이전에는 이 동작이 전용 라우트(``POST /{feature_id}/deactivate``)였고
+    그 라우트가 ``require_admin_destructive_enabled``를 **route-level dependency**로
+    걸었다. 상태 전이가 한 라우트로 합쳐지면서 게이트가 사라졌는데(회귀), 라우트
+    전체에 다시 걸면 무해한 publication/quality patch까지 403이 된다.
+
+    **핸들러 안에서 검사하면 안 된다** — endpoint 파라미터 의존성(``get_session``)이
+    먼저 해석돼 DB에 붙는다. kill-switch는 DB가 없어도 성립해야 하므로 body만 보는
+    route-level dependency로 둔다. body는 Starlette가 캐시하므로 이후 파싱과
+    중복 읽기가 되지 않는다.
+    """
+
+    try:
+        payload = await request.json()
+    except ValueError:
+        return  # 형식 오류는 아래 body 검증이 422로 처리한다.
+    if isinstance(payload, dict) and payload.get("action") == "retire":
+        require_admin_destructive_enabled(request)
 
 
 class AdminFeatureStateData(BaseModel):
@@ -1656,7 +1679,9 @@ async def create_feature_route(
 @router.patch(
     "/{feature_id}/state",
     response_model=AdminFeatureStateResponse,
+    dependencies=[Depends(require_destructive_enabled_for_retire)],
     responses={
+        403: {"description": "파괴적 admin 작업 비활성 (retire action)"},
         404: {"description": "feature 없음"},
         409: {"description": "현재 tuple/source override가 요청 전이를 허용하지 않음"},
         412: {"description": "If-Match row_revision 불일치"},

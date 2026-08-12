@@ -906,7 +906,7 @@ def _frozen_h35_latest_notice_only_sql(feature_alias: str) -> str:
           AND other_sl.is_primary_source
           AND other_f.feature_id <> {feature_alias}.feature_id
           AND other_f.kind = 'notice'
-          AND other_f.lifecycle_state = 'active'
+          AND other_f.deleted_at IS NULL
           AND (
             COALESCE(
                 other_sr.last_seen_at, other_sr.imported_at, other_sr.fetched_at

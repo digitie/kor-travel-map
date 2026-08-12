@@ -13,7 +13,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 
 import {
   FEATURE_PUBLICATION_STATES,
@@ -961,10 +961,28 @@ function FeatureStatePanel({
   const [sourceEntityKey, setSourceEntityKey] = useState("");
   const [sourceRecordKey, setSourceRecordKey] = useState("");
 
-  useEffect(() => {
+  // 서버가 새 상태를 돌려주면 편집 중이던 select 값을 그것으로 되돌린다.
+  //
+  // `useEffect`로 하면 렌더 -> effect -> setState -> 재렌더가 되어 한 프레임 동안
+  // 낡은 값이 그려진다. React 19의 `react-hooks/set-state-in-effect`가 막는 것이
+  // 그 cascading render다. 대신 렌더 중에 직전 동기화 지점을 비교해 조정한다 -
+  // React가 문서화한 "prop이 바뀔 때 state 조정" 패턴이고, 재렌더가 커밋 전에
+  // 합쳐져 낡은 값이 화면에 나가지 않는다.
+  const [syncedState, setSyncedState] = useState({
+    publication: feature.publication_state,
+    quality: feature.quality_state,
+  });
+  if (
+    syncedState.publication !== feature.publication_state ||
+    syncedState.quality !== feature.quality_state
+  ) {
+    setSyncedState({
+      publication: feature.publication_state,
+      quality: feature.quality_state,
+    });
     setPublicationState(feature.publication_state);
     setQualityState(feature.quality_state);
-  }, [feature.publication_state, feature.quality_state]);
+  }
 
   const submitPatch = () => {
     if (!basis.data) return;

@@ -585,10 +585,28 @@
     },
     {
       "down_revision": [
+        "0095_tvn33_tvn38_head_merge"
+      ],
+      "revision": "0095_tvn34_state_spine"
+    },
+    {
+      "down_revision": [
         "0092_tvn33_offline_cleanup",
         "0094_drop_weather_metric_series"
       ],
       "revision": "0095_tvn33_tvn38_head_merge"
+    },
+    {
+      "down_revision": [
+        "0095_tvn34_state_spine"
+      ],
+      "revision": "0096_tvn34_public_projection"
+    },
+    {
+      "down_revision": [
+        "0096_tvn34_public_projection"
+      ],
+      "revision": "0097_tvn34c_final_cutover"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"
