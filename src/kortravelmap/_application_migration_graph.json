@@ -607,6 +607,12 @@
         "0096_tvn34_public_projection"
       ],
       "revision": "0097_tvn34c_final_cutover"
+    },
+    {
+      "down_revision": [
+        "0097_tvn34c_final_cutover"
+      ],
+      "revision": "0098_admin_scope_indexes"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

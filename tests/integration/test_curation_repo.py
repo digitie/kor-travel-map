@@ -4237,24 +4237,19 @@ async def test_feature_curation_lookup_uses_membership_index(
             },
         )
     ).scalar_one()[0]["Plan"]
-    # `idx_features_lower_name_keyset`은 T-VN-34B(0096)에서 공개 3축
-    # (lifecycle=active AND publication=published AND quality=valid) **부분 인덱스**가
-    # 됐다. 반면 이 matcher가 훑는 후보 집합은 legacy `deleted_at IS NULL AND
-    # status NOT IN ('deleted','hidden')` 그대로라, 3축으로는
-    # `lifecycle='active' AND publication <> 'suppressed'` — draft·quarantined를
-    # 여전히 포함한다. 이 술어는 부분 인덱스 술어를 함의하지 못하므로 planner가
-    # 그 인덱스를 고를 수 없고, head에는 이 후보 집합을 덮는 lower(name) 인덱스가
-    # 아예 없다.
+    # 이 matcher가 훑는 후보 집합은 `lifecycle='active' AND publication <> 'suppressed'`
+    # 라 draft·quarantined를 포함한다. 0096이 `idx_features_lower_name_keyset`을 공개
+    # 3축 partial로 좁힌 뒤로는 그 인덱스를 고를 수 없었고, 한동안 이 단언은
+    # `pk_features`만 남긴 채 이름 분기의 접근 경로를 공백으로 두고 있었다.
     #
-    # 여기서 인덱스 이름을 계속 단언하면 통과시키는 유일한 길이 matcher를 공개 축으로
-    # 좁히는 것인데, 그러면 성능 게이트가 조회 의미를 바꾸는 셈이 된다(감춤이 아니라
-    # 미게시인 feature가 큐레이션 매칭에서 사라진다). 그래서 이름 분기의 접근 경로는
-    # 인덱스 결정(큐레이션 scope lower(name) 인덱스 신설 여부)이 선행돼야 할 **공백**으로
-    # 남기고 — `test_t212d_perf_explain.py`가 같은 인덱스에 대해 남긴 공백과 동일하다 —
-    # 이 테스트는 head에서 실제로 살아 있는 보증만 못박는다: feature_id 지정 분기는
-    # PK 조회로 남는다(전건 스캔으로 무너지지 않는다).
+    # 0098이 admin scope 전체 인덱스(`idx_features_admin_lower_name_keyset`)를 신설했다.
+    # 술어가 없는 인덱스라 이 후보 집합을 그대로 덮는다 — matcher를 공개 축으로 좁히지
+    # 않고도 이름 분기의 보증이 선다.
+    # 0098 이후 planner는 PK 대신 이 인덱스를 고른다 — 이름으로 좁히는 것이 실제로
+    # 더 선택적이기 때문이다. 즉 이름 분기가 인덱스를 타게 됐다는 뜻이고, 그것이
+    # 이 gate가 원래 지키려던 명제다.
     match_indexes = index_names(match_plan)
-    assert "pk_features" in match_indexes
+    assert "idx_features_admin_lower_name_keyset" in match_indexes, match_indexes
 
 
 async def test_address_hint_matches_split_jsonb_fields(

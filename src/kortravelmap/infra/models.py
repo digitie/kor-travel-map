@@ -317,6 +317,62 @@ class FeatureRow(Base):
                 "AND quality_state = 'valid'"
             ),
         ),
+        # admin scope 조회축. 0096이 공개 3축 partial로 좁힌 인덱스들은 admin이
+        # 쓰지 못한다 — T-VN-34C가 admin 목록의 상태 기본 필터를 제거해 admin은
+        # 상태 무필터로 읽고, 축을 지정해도 AND 결합이라 공개 술어를 함의하지 않는다.
+        # 그래서 admin 기본 화면이 Seq Scan으로 떨어졌다(alembic 0098 참조).
+        # 두 표면의 조회 의미를 맞추는 대신 admin에 자기 인덱스를 준다.
+        Index(
+            "idx_features_admin_lower_name_keyset",
+            text("lower(name)"),
+            "feature_id",
+        ),
+        Index(
+            "idx_features_admin_updated_keyset",
+            text("updated_at DESC"),
+            text("feature_id DESC"),
+        ),
+        Index(
+            "idx_features_admin_created_keyset",
+            text("created_at DESC"),
+            text("feature_id DESC"),
+        ),
+        # bitmap 결합 축은 **공개 술어의 여집합**만 담는다. 전체 인덱스로 두면 공개
+        # 질의가 공개 partial 대신 이쪽을 골라 두 표면이 경쟁한다(실측). 여집합이면
+        # 공개 질의는 술어가 거짓임이 증명돼 고를 수 없고, admin 무필터 질의는
+        # BitmapOr로 두 partial을 합쳐 덮는다.
+        Index(
+            "idx_features_admin_coord_gist",
+            "coord",
+            postgresql_using="gist",
+            postgresql_where=text(
+                "NOT (lifecycle_state = 'active' "
+                "AND publication_state = 'published' "
+                "AND quality_state = 'valid')"
+            ),
+        ),
+        Index(
+            "idx_features_admin_kind_category",
+            "kind",
+            "category",
+            "feature_id",
+            postgresql_where=text(
+                "NOT (lifecycle_state = 'active' "
+                "AND publication_state = 'published' "
+                "AND quality_state = 'valid')"
+            ),
+        ),
+        Index(
+            "idx_features_admin_name_trgm",
+            "name",
+            postgresql_using="gin",
+            postgresql_ops={"name": "x_extension.gin_trgm_ops"},
+            postgresql_where=text(
+                "NOT (lifecycle_state = 'active' "
+                "AND publication_state = 'published' "
+                "AND quality_state = 'valid')"
+            ),
+        ),
         Index("idx_features_legal_dong_code", "legal_dong_code"),
         Index(
             "idx_features_sigungu",

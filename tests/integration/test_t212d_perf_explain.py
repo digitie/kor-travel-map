@@ -828,27 +828,23 @@ async def test_t212d_planner_selects_representative_indexes_without_seqscan_hint
     _assert_uses_index(in_bbox, *_COORD_SPATIAL_INDEXES)
     _assert_no_seq_scan_on(in_bbox, "features")
 
-    # ``idx_features_lower_name_keyset``은 T-VN-34B(0096)에서 공개 3축
-    # partial index가 됐다. 그래서 "정렬축 인덱스로 keyset을 걷는다"는 이 gate의
-    # 명제는 이제 **공개 축 조합으로 좁힌 admin 목록**에서만 참이다 — 축을
-    # 명시하면 planner가 partial predicate 함의를 증명해 Sort 없는 index walk를
-    # 고르고(실측: Limit → Nested Loop → Index Scan features), 축을 비우면
-    # 후보가 partial 밖으로 나가 features Seq Scan + Sort로 떨어진다.
+    # admin 목록은 **상태 무필터**가 기본이다(T-VN-34C가 legacy status 기본 필터를
+    # 제거했다). 그래서 0096이 공개 3축 partial로 좁힌 `idx_features_lower_name_keyset`
+    # 로는 이 표면을 덮을 수 없다 — 축을 비우면 후보가 partial 밖으로 나가 features
+    # Seq Scan + Sort로 떨어진다. 한동안 이 gate는 파라미터에 공개 3축을 박아
+    # "통과하도록" 좁혀져 있었고, 그러면 정작 잃은 표면을 아무도 보지 않게 된다.
     #
-    # 축을 비운 admin 전건 목록(draft/suppressed/quarantined 포함)에는 대응하는
-    # 인덱스가 head에 **없다**. 이 gate를 축 미지정으로 두면 "정렬 인덱스 사용"이
-    # 아니라 "전건 스캔 허용"을 고정하게 되므로, 여기서는 보증이 살아 있는
-    # 표면만 못박고 전건 목록의 접근 경로는 인덱스 결정(admin scope index 신설
-    # 여부)이 선행돼야 한다.
+    # 0098이 admin scope 전체 인덱스를 신설했으므로 여기서는 **축을 비운 그대로**
+    # 못박는다. 두 표면이 각자 인덱스를 갖는다는 것이 그 결정의 내용이다.
     admin_features_by_name = await _explain_json(
         migrated_session,
         admin_feature_repo._admin_features_sql(sort="name", order="asc"),
         {
             "kinds": None,
             "categories": None,
-            "lifecycle_states": ["active"],
-            "publication_states": ["published"],
-            "quality_states": ["valid"],
+            "lifecycle_states": None,
+            "publication_states": None,
+            "quality_states": None,
             "provider_dataset_id": None,
             "issue_types": None,
             "has_coord": None,
@@ -865,7 +861,9 @@ async def test_t212d_planner_selects_representative_indexes_without_seqscan_hint
         },
         force_index=False,
     )
-    _assert_uses_index(admin_features_by_name, "idx_features_lower_name_keyset")
+    _assert_uses_index(
+        admin_features_by_name, "idx_features_admin_lower_name_keyset"
+    )
     _assert_no_seq_scan_on(admin_features_by_name, "features")
     # 인덱스 이름만으로는 "정렬을 인덱스가 대신한다"가 증명되지 않는다(bitmap으로
     # 모아 놓고 다시 Sort해도 이름은 나온다). partial predicate 함의가 실제로
