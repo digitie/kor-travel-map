@@ -4043,6 +4043,11 @@ global_feature_wins AS MATERIALIZED (
         target.feature_id,
         target.provider_dataset_id,
         target.source_record_key,
+        -- caller가 base patch를 할지 판정하려면 **직전 값**도 함께 반환해야 한다.
+        -- 종전 판은 CTE 안에서 곧바로 UPDATE했으므로 필요 없었지만, T-VN-36에서
+        -- 쓰기를 caller의 field patch로 옮기면서 이 열이 바깥 SELECT 목록에만 남고
+        -- projection에서 빠져 SQL 자체가 UndefinedColumn으로 죽었다.
+        target.old_valid_end_time,
         target.desired_valid_end_time,
         target.should_activate
           AND target.old_lifecycle_state = 'retired' AS reactivate,
@@ -4921,7 +4926,7 @@ _AUTHOR_PHONE_OVERRIDE_SQL: Final[str] = """
 CALL feature.author_feature_field_overrides(
     CAST(:feature_id AS text), CAST(:expected_row_revision AS bigint),
     CAST(:principal AS text), 'phone_enrichment', CAST(:command_id AS bigint),
-    NULL, CAST(:values AS jsonb), '{}'::jsonb, NULL, NULL, NULL, NULL
+    CAST(:values AS jsonb), '{}'::jsonb, NULL, NULL, NULL, NULL
 )
 """
 

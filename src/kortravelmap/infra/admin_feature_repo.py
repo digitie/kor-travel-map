@@ -2408,9 +2408,15 @@ def _raise_field_override_procedure_error(
     feature_id: str,
     expected_row_revision: int,
 ) -> NoReturn:
-    """typed field override procedure 오류를 route-level contract로 보존한다."""
+    """typed field override procedure 오류를 route-level contract로 보존한다.
 
-    sqlstate = _pg_error_attribute(error, "sqlstate")
+    SQLSTATE는 admin state 매핑과 **같은** 추출기로 읽는다. asyncpg에서 진단
+    속성은 ``error.orig``(SQLAlchemy DBAPI 래퍼)가 아니라 그 ``__cause__``
+    (원본 asyncpg 예외)에 있어서, ``orig``만 보는 추출기는 조용히 죽는다
+    (2026-08-12 T-VN-34 적대 리뷰 실측). 두 벌을 두지 않는다.
+    """
+
+    sqlstate, _constraint = _driver_constraint_identity(error)
     if sqlstate == "P0002":
         raise FeatureFieldOverrideNotFound(
             f"feature 또는 active field override 없음: {feature_id!r}"
