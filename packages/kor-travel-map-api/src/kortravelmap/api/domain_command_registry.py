@@ -291,9 +291,18 @@ _COMMAND_REGISTRY: Final[dict[OperationKey, CommandPolicy]] = {
         fingerprint_headers=("If-Match",),
         transaction_isolation="serializable",
     ),
-    ("POST", "/v1/admin/curations/import"): _domain(
+    ("POST", "/v1/admin/curations/imports/preview"): _domain(
+        "admin.curation-import.preview",
+        _DESTRUCTIVE_RESULT,
+        success_status=201,
+        replay_headers=("ETag",),
+        transaction_isolation="serializable",
+    ),
+    ("POST", "/v1/admin/curations/import-plans/{import_plan_id}/commit"): _domain(
         "admin.curation.import",
         _DESTRUCTIVE_RESULT,
+        replay_headers=("ETag",),
+        fingerprint_headers=("If-Match",),
         transaction_isolation="serializable",
     ),
     ("POST", "/v1/admin/curations"): _domain(
@@ -370,6 +379,7 @@ _COMMAND_REGISTRY: Final[dict[OperationKey, CommandPolicy]] = {
     ): _domain(
         "admin.curation-quarantine.reclassify",
         _MUTATION_RESULT,
+        replay_headers=("ETag",),
         fingerprint_headers=("If-Match",),
         transaction_isolation="serializable",
     ),

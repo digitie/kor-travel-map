@@ -259,26 +259,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/admin/curations/import": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Import Admin Curations
-         * @description CSV+sidecar를 검증한 뒤 preview하거나 원자적으로 멱등 반영한다.
-         */
-        post: operations["import_admin_curations_v1_admin_curations_import_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/admin/curations/import-batches/{import_batch_id}": {
         parameters: {
             query?: never;
@@ -299,6 +279,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/curations/import-plans/{import_plan_id}/commit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Commit Admin Curation Import Plan
+         * @description stored normalized plan을 재해소 없이 exact revision vector 위에서 반영한다.
+         */
+        post: operations["commit_admin_curation_import_plan_v1_admin_curations_import_plans__import_plan_id__commit_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/curations/import-template.csv": {
         parameters: {
             query?: never;
@@ -313,6 +313,26 @@ export interface paths {
         get: operations["download_curation_import_template_v1_admin_curations_import_template_csv_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/curations/imports/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview Admin Curation Import
+         * @description CSV+sidecar를 한 번 해소해 immutable import plan으로 저장한다.
+         */
+        post: operations["preview_admin_curation_import_v1_admin_curations_imports_preview_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4986,8 +5006,8 @@ export interface components {
             /** Sync Scope */
             sync_scope: string;
         };
-        /** Body_import_admin_curations_v1_admin_curations_import_post */
-        Body_import_admin_curations_v1_admin_curations_import_post: {
+        /** Body_preview_admin_curation_import_v1_admin_curations_imports_preview_post */
+        Body_preview_admin_curation_import_v1_admin_curations_imports_preview_post: {
             /**
              * File
              * @description UTF-8 CSV 파일
@@ -7252,8 +7272,18 @@ export interface components {
             collections: number;
             /** Dry Run */
             dry_run: boolean;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
             /** Import Batch Id */
             import_batch_id: string | null;
+            /**
+             * Import Plan Id
+             * Format: uuid
+             */
+            import_plan_id: string;
             /** Inserted */
             inserted: number;
             /** Invalid Rows */
@@ -7262,6 +7292,8 @@ export interface components {
             issues: components["schemas"]["CurationImportIssueView"][];
             /** Items */
             items: components["schemas"]["CurationImportRowView"][];
+            /** Plan Etag */
+            plan_etag: string;
             /** Removals */
             removals: components["schemas"]["AdminCurationItemView"][];
             /** Removed */
@@ -15291,52 +15323,6 @@ export interface operations {
             };
         };
     };
-    import_admin_curations_v1_admin_curations_import_post: {
-        parameters: {
-            query?: {
-                dry_run?: boolean;
-            };
-            header: {
-                "Idempotency-Key": string;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "multipart/form-data": components["schemas"]["Body_import_admin_curations_v1_admin_curations_import_post"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CurationImportResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-        };
-    };
     get_admin_curation_import_batch_v1_admin_curations_import_batches__import_batch_id__get: {
         parameters: {
             query?: never;
@@ -15377,6 +15363,71 @@ export interface operations {
             };
         };
     };
+    commit_admin_curation_import_plan_v1_admin_curations_import_plans__import_plan_id__commit_post: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
+                "Idempotency-Key": string;
+                /** @description preview 응답의 immutable import plan strong ETag. */
+                "If-Match": string;
+            };
+            path: {
+                import_plan_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    /** @description 현재 응답 representation의 strong entity tag. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CurationImportResponse"];
+                };
+            };
+            /** @description plan ETag/expiry/revision vector stale */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description If-Match 누락 */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
     download_curation_import_template_v1_admin_curations_import_template_csv_get: {
         parameters: {
             query?: never;
@@ -15393,6 +15444,52 @@ export interface operations {
                 };
                 content: {
                     "text/csv": string;
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    preview_admin_curation_import_v1_admin_curations_imports_preview_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_preview_admin_curation_import_v1_admin_curations_imports_preview_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    /** @description 현재 응답 representation의 strong entity tag. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CurationImportResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
             /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
@@ -15595,6 +15692,8 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    /** @description 현재 응답 representation의 strong entity tag. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {

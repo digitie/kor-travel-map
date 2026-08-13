@@ -231,6 +231,9 @@ export interface CurationItemResponse {
 export interface CurationImportResponse {
   data: {
     dry_run: boolean;
+    import_plan_id: string;
+    plan_etag: string;
+    expires_at: string;
     rows_total: number;
     valid_rows: number;
     invalid_rows: number;
@@ -625,40 +628,62 @@ export function useArchiveCurationItemMutation() {
   });
 }
 
-export function useImportCurationCsvMutation() {
+export function usePreviewCurationCsvMutation() {
   const queryClient = useQueryClient();
   return useMutation<
     CurationImportResponse,
     Error,
-    { file: File; dryRun: boolean }
+    { file: File }
   >({
-    mutationFn: async ({ file, dryRun }) => {
+    mutationFn: async ({ file }) => {
       const body = new FormData();
       body.append("file", file);
       const fileIdentity = await fileIdempotencyFingerprint(file);
-      const operation = "admin.curation.import";
+      const operation = "admin.curation-import.preview";
       return withDomainIdempotencyFingerprint(
         domainCreateCommandSlot(operation),
         {
           content_sha256: fileIdentity.contentSha256,
-          dry_run: dryRun,
         },
         (idempotencyKey) =>
           postFormData<CurationImportResponse>(
-            pathWithQuery("/v1/admin/curations/import", {
-              dry_run: dryRun,
-            }),
+            "/v1/admin/curations/imports/preview",
             body,
             { headers: { "Idempotency-Key": idempotencyKey } },
           ),
         { onRelease: () => clearDomainCreateCommandSlot(operation) },
       );
     },
-    onSuccess: (response) => {
-      if (!response.data.dry_run) {
-        invalidateCurations(queryClient);
-      }
-    },
+    onSuccess: () => invalidateCurations(queryClient),
+  });
+}
+
+export function useCommitCurationImportPlanMutation() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    CurationImportResponse,
+    Error,
+    { importPlanId: string; planEtag: string }
+  >({
+    mutationFn: ({ importPlanId, planEtag }) =>
+      withDomainIdempotencySubmission(
+        domainCommandSlot("admin.curation.import", importPlanId),
+        { importPlanId, planEtag },
+        (submission, idempotencyKey) =>
+          postJson<CurationImportResponse>(
+            `/v1/admin/curations/import-plans/${encodeURIComponent(
+              submission.importPlanId,
+            )}/commit`,
+            undefined,
+            {
+              headers: {
+                "Idempotency-Key": idempotencyKey,
+                "If-Match": submission.planEtag,
+              },
+            },
+          ),
+      ),
+    onSuccess: () => invalidateCurations(queryClient),
   });
 }
 

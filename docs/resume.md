@@ -1,5 +1,14 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+immutable curation import plan의 HTTP/UI 전환을 완료했다. preview는 CSV를 한 번만 normalize해 content
+hash·touched revision vector·plan ETag를 저장하고, commit은 저장된 plan과 If-Match만으로 named import
+command를 실행한다. legacy `dry_run` 재업로드 route는 제거했다. quarantine 재분류는 성공 ETag를 terminal
+replay에 보존하며, UI는 412에서 mutation을 자동 반복하지 않고 격리 목록·items·target collection을 모두
+다시 읽은 뒤 운영자의 명시적 재실행을 요구한다. OpenAPI/generated client/frozen diff와 rollout receipt를
+동시에 갱신했고 API/contract 88건, frontend 타입체크·Vitest 9건, mocked quarantine 8건이 통과했다.
+다음 checkpoint는 dedup merge를 admin-only typed command로 옮겨 item·영향 collection revision을 정확히
+한 번 올리고, generic API/Dagster runtime의 남은 item/import/decision raw DML을 전부 회수하는 것이다.
+
 canonical item create/patch/archive를 0117 named `SECURITY DEFINER` command로 옮기고, 0118에서
 import·quarantine이 collection을 직접 변경하던 우회도 domain command effect와 strong revision에
 결박했다. import는 retained theme/source를 exact reuse하고 collection을 create-only 또는 immutable

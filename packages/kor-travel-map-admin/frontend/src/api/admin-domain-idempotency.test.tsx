@@ -29,9 +29,10 @@ import {
 import {
   useAddCurationItemMutation,
   useArchiveCurationItemMutation,
+  useCommitCurationImportPlanMutation,
   useCreateCurationCollectionMutation,
-  useImportCurationCsvMutation,
   usePatchCurationItemMutation,
+  usePreviewCurationCsvMutation,
   type CurationItemPatchRequest,
 } from "./curations";
 import {
@@ -298,11 +299,18 @@ describe("admin domain idempotency consumers", () => {
           }),
       },
       {
-        name: "curation import",
+        name: "curation import preview",
         run: () =>
-          runMutation(context, useImportCurationCsvMutation, {
-            dryRun: false,
+          runMutation(context, usePreviewCurationCsvMutation, {
             file: csvFile("title,place_name\nx,y\n"),
+          }),
+      },
+      {
+        name: "curation import commit",
+        run: () =>
+          runMutation(context, useCommitCurationImportPlanMutation, {
+            importPlanId: "00000000-0000-4000-8000-000000000001",
+            planEtag: '"sha256:import-plan"',
           }),
       },
       {

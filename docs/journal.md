@@ -2,6 +2,18 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-14 — T-VN-40: immutable import HTTP cutover와 quarantine stale 복구
+
+CSV를 preview와 commit에서 두 번 해석하던 legacy import route를 제거하고, immutable normalized row·
+content hash·revision vector를 저장하는 preview와 저장된 plan만 소비하는 commit으로 분리했다. preview는
+201+plan ETag, commit은 If-Match·Idempotency-Key·SERIALIZABLE terminal replay를 강제하며 두 번째 파일
+업로드나 caller-side 재해석이 없다. admin UI도 preview 결과를 확인한 뒤 같은 plan을 명시적으로 commit한다.
+
+quarantine 재분류 성공 ETag를 terminal receipt에 보존해 exact replay하고, 412에서는 mutation을 자동
+재시도하지 않은 채 격리 목록·item conflict preview·target collection을 모두 재조회한다. OpenAPI와
+generated TypeScript, diff/rollout freeze를 같은 바이트로 갱신했다. API/contract 88건, frontend 타입체크,
+Vitest 9건, quarantine mocked Playwright 8건이 통과했다.
+
 ## 2026-08-14 — T-VN-40: import·quarantine collection writer fence
 
 0118에서 import collection 해소와 quarantine move/standalone 확정을 named `SECURITY DEFINER`

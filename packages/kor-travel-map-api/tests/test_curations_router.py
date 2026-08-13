@@ -182,6 +182,7 @@ class _FakeSession:
 @pytest.fixture
 def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     from kortravelmap.api import domain_command_service
+    from kortravelmap.api.routers import curations as curations_router
 
     app = create_app(
         ApiSettings(
@@ -211,6 +212,16 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     monkeypatch.setattr(
         domain_command_service,
         "complete_domain_command",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        curations_router.curation_repo,
+        "build_curation_import_revision_vector",
+        AsyncMock(return_value=()),
+    )
+    monkeypatch.setattr(
+        curations_router.curation_repo,
+        "create_curation_import_plan_command",
         AsyncMock(),
     )
     return TestClient(
@@ -431,14 +442,45 @@ def test_csv_preview_and_commit_keep_unresolved_official_item(
     monkeypatch.setattr(module.curation_repo, "import_curation_rows", _import)
     files = {"file": ("lighthouse.csv", _csv_content(), "text/csv")}
 
-    preview = client.post("/v1/admin/curations/import", params={"dry_run": "true"}, files=files)
-    committed = client.post("/v1/admin/curations/import", params={"dry_run": "false"}, files=files)
+    preview = client.post("/v1/admin/curations/imports/preview", files=files)
 
-    assert preview.status_code == 200
+    assert preview.status_code == 201
     assert preview.json()["data"]["unresolved_rows"] == 1
     assert preview.json()["data"]["items"][0]["status"] == "unmatched"
     assert preview.json()["data"]["removed"] == 2
     assert len(preview.json()["data"]["removals"]) == 2
+    preview_data = preview.json()["data"]
+    create_plan = module.curation_repo.create_curation_import_plan_command
+    resolved_rows = create_plan.await_args.kwargs["rows"]
+    expires_at = create_plan.await_args.kwargs["expires_at"]
+    monkeypatch.setattr(
+        module.curation_repo,
+        "claim_curation_import_plan_command",
+        AsyncMock(
+            return_value=(
+                "a" * 64,
+                resolved_rows,
+                {
+                    "rows_total": preview_data["rows_total"],
+                    "valid_rows": preview_data["valid_rows"],
+                    "invalid_rows": preview_data["invalid_rows"],
+                    "unresolved_rows": preview_data["unresolved_rows"],
+                },
+                preview_data["items"],
+                expires_at,
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        module.curation_repo,
+        "complete_curation_import_plan_command",
+        AsyncMock(),
+    )
+    committed = client.post(
+        f"/v1/admin/curations/import-plans/{preview_data['import_plan_id']}/commit",
+        headers={"If-Match": preview_data["plan_etag"]},
+    )
+
     assert committed.status_code == 200
     committed_data = committed.json()["data"]
     assert committed_data["inserted"] == 1
@@ -460,7 +502,7 @@ def test_official_lighthouse_import_requires_provenance_sidecar(
     monkeypatch.setattr(module.curation_repo, "resolve_feature_matches", matches)
 
     response = client.post(
-        "/v1/admin/curations/import",
+        "/v1/admin/curations/imports/preview",
         params={"dry_run": "false"},
         files={
             "file": (
@@ -493,7 +535,7 @@ def test_official_lighthouse_dataset_key_alone_requires_provenance_sidecar(
     monkeypatch.setattr(module.curation_repo, "resolve_feature_matches", matches)
 
     response = client.post(
-        "/v1/admin/curations/import",
+        "/v1/admin/curations/imports/preview",
         params={"dry_run": "false"},
         files={
             "file": (
@@ -524,7 +566,7 @@ def test_official_lighthouse_import_rejects_mismatched_sidecar(
     monkeypatch.setattr(module.curation_repo, "resolve_feature_matches", matches)
 
     response = client.post(
-        "/v1/admin/curations/import",
+        "/v1/admin/curations/imports/preview",
         params={"dry_run": "false"},
         files={
             "file": ("lighthouse-stamp-tour.csv", content, "text/csv"),
@@ -604,7 +646,7 @@ def test_official_lighthouse_import_persists_validated_row_provenance(
     monkeypatch.setattr(module.curation_repo, "import_curation_rows", _import)
 
     response = client.post(
-        "/v1/admin/curations/import",
+        "/v1/admin/curations/imports/preview",
         params={"dry_run": "false"},
         files={
             "file": ("lighthouse-stamp-tour.csv", content, "text/csv"),
@@ -616,10 +658,14 @@ def test_official_lighthouse_import_persists_validated_row_provenance(
         },
     )
 
-    assert response.status_code == 200
-    assert response.json()["data"]["import_batch_id"] == (
-        "55555555-5555-4555-8555-555555555555"
+    assert response.status_code == 201
+    stored_rows = (
+        module.curation_repo.create_curation_import_plan_command.await_args.kwargs["rows"]
     )
+    assert stored_rows[0].provenance["source_csv_sha256"] == hashlib.sha256(
+        content
+    ).hexdigest()
+    assert response.json()["data"]["import_batch_id"] is None
 
 
 @pytest.mark.unit
@@ -744,7 +790,7 @@ def test_admin_import_batch_and_current_row_expose_durable_provenance(
 
 
 @pytest.mark.unit
-def test_csv_commit_rejects_whole_file_on_format_error(
+def test_csv_preview_persists_whole_file_format_errors_without_import(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from kortravelmap.api.routers import curations as module
@@ -759,12 +805,14 @@ def test_csv_commit_rejects_whole_file_on_format_error(
     monkeypatch.setattr(module.curation_repo, "import_curation_rows", _unexpected_import)
 
     response = client.post(
-        "/v1/admin/curations/import",
+        "/v1/admin/curations/imports/preview",
         params={"dry_run": "false"},
         files={"file": ("invalid.csv", _csv_content(valid=False), "text/csv")},
     )
 
-    assert response.status_code == 422
+    assert response.status_code == 201
+    assert response.json()["data"]["invalid_rows"] == 1
+    assert response.json()["data"]["import_batch_id"] is None
 
 
 @pytest.mark.unit
@@ -791,7 +839,7 @@ def test_csv_import_maps_legacy_adoption_conflict_to_422(
     monkeypatch.setattr(module.curation_repo, "import_curation_rows", _unexpected_import)
 
     response = client.post(
-        "/v1/admin/curations/import",
+        "/v1/admin/curations/imports/preview",
         params={"dry_run": str(dry_run).lower()},
         files={"file": ("ambiguous.csv", _csv_content(), "text/csv")},
     )
@@ -819,7 +867,7 @@ def test_csv_zero_official_ordinal_is_preserved_as_sort_order(
     monkeypatch.setattr(module.curation_repo, "preview_curation_import", _preview)
 
     response = client.post(
-        "/v1/admin/curations/import",
+        "/v1/admin/curations/imports/preview",
         params={"dry_run": "true"},
         files={
             "file": (
@@ -830,7 +878,7 @@ def test_csv_zero_official_ordinal_is_preserved_as_sort_order(
         },
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 201
 
 
 @pytest.mark.unit
@@ -902,13 +950,11 @@ def test_csv_accepts_mixed_component_resolution(
         )
     }
 
-    preview = client.post("/v1/admin/curations/import", params={"dry_run": "true"}, files=files)
-    commit = client.post("/v1/admin/curations/import", params={"dry_run": "false"}, files=files)
+    preview = client.post("/v1/admin/curations/imports/preview", files=files)
 
-    assert preview.status_code == 200
+    assert preview.status_code == 201
     assert preview.json()["data"]["invalid_rows"] == 0
     assert preview.json()["data"]["unresolved_rows"] == 1
-    assert commit.status_code == 200
 
 
 @pytest.mark.unit
@@ -926,7 +972,7 @@ def test_csv_too_many_rows_does_not_count_unprocessed_row_as_valid(
     monkeypatch.setattr(module.curation_repo, "resolve_feature_matches", _matches)
     monkeypatch.setattr(module.curation_repo, "preview_curation_import", _unexpected_preview)
     response = client.post(
-        "/v1/admin/curations/import",
+        "/v1/admin/curations/imports/preview",
         params={"dry_run": "true"},
         files={
             "file": (
@@ -941,7 +987,7 @@ def test_csv_too_many_rows_does_not_count_unprocessed_row_as_valid(
     )
 
     data = response.json()["data"]
-    assert response.status_code == 200
+    assert response.status_code == 201
     assert data["rows_total"] == 2_001
     assert data["valid_rows"] == 2_000
     assert data["invalid_rows"] == 0
@@ -1282,7 +1328,7 @@ def test_curation_paths_are_in_openapi(client: TestClient) -> None:
     paths = spec["paths"]
     assert "/v1/curations" in paths
     assert "/v1/curations/features/{feature_id}" in paths
-    assert "/v1/admin/curations/import" in paths
+    assert "/v1/admin/curations/imports/preview" in paths
     assert "/v1/admin/curations/import-batches/{import_batch_id}" in paths
     assert "/v1/admin/curations/import-template.csv" in paths
     assert (
@@ -1509,12 +1555,12 @@ def test_blank_feature_id_never_autolinks_on_single_name_match(
     monkeypatch.setattr(module.curation_repo, "preview_curation_import", _preview)
 
     response = client.post(
-        "/v1/admin/curations/import",
+        "/v1/admin/curations/imports/preview",
         params={"dry_run": "true"},
         files={"file": ("official.csv", _csv_content(), "text/csv")},
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 201
     row = response.json()["data"]["items"][0]
     assert row["resolved_feature_id"] is None, "이름만 맞는 후보를 자동 링크했다"
     assert row["status"] == "review_required"
@@ -1552,7 +1598,7 @@ def test_blank_feature_id_with_address_hint_requires_explicit_review(
     monkeypatch.setattr(module.curation_repo, "preview_curation_import", _preview)
 
     response = client.post(
-        "/v1/admin/curations/import",
+        "/v1/admin/curations/imports/preview",
         params={"dry_run": "true"},
         files={
             "file": (
@@ -1563,7 +1609,7 @@ def test_blank_feature_id_with_address_hint_requires_explicit_review(
         },
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 201
     row = response.json()["data"]["items"][0]
     assert row["resolved_feature_id"] is None
     assert row["status"] == "review_required"
@@ -1593,7 +1639,7 @@ def test_blank_feature_id_reason_names_the_candidate_region(
     monkeypatch.setattr(module.curation_repo, "preview_curation_import", _preview)
 
     response = client.post(
-        "/v1/admin/curations/import",
+        "/v1/admin/curations/imports/preview",
         params={"dry_run": "true"},
         files={"file": ("official.csv", _csv_content(), "text/csv")},
     )
@@ -1625,7 +1671,7 @@ def test_no_candidates_still_reports_unmatched_not_name_only(
     monkeypatch.setattr(module.curation_repo, "preview_curation_import", _preview)
 
     response = client.post(
-        "/v1/admin/curations/import",
+        "/v1/admin/curations/imports/preview",
         params={"dry_run": "true"},
         files={"file": ("official.csv", _csv_content(), "text/csv")},
     )
@@ -1656,7 +1702,7 @@ def test_explicit_feature_id_still_links(
     monkeypatch.setattr(module.curation_repo, "preview_curation_import", _preview)
 
     response = client.post(
-        "/v1/admin/curations/import",
+        "/v1/admin/curations/imports/preview",
         params={"dry_run": "true"},
         files={
             "file": (
@@ -1897,6 +1943,7 @@ def test_reclassify_idempotency_lifecycle(
     )
 
     assert first.status_code == 200
+    assert first.headers["etag"].startswith('"sha256:')
     assert first.json()["data"] == {
         "action": "move",
         "moved_item_ids": [_uuid("moved-item")],
@@ -1924,7 +1971,7 @@ def test_reclassify_idempotency_lifecycle(
         request_fingerprint="a" * 64,
         response_status=200,
         response_body=first.json(),
-        response_headers={},
+        response_headers={"ETag": first.headers["etag"]},
         claimed_at=now,
         completed_at=now,
     )
@@ -1943,6 +1990,7 @@ def test_reclassify_idempotency_lifecycle(
 
     assert replayed.status_code == 200
     assert replayed.headers["Idempotency-Replayed"] == "true"
+    assert replayed.headers["etag"] == first.headers["etag"]
     assert replayed.json() == first.json()
     move.assert_not_awaited()
 
