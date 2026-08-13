@@ -26,7 +26,7 @@ barrier로 직렬화한다.
   - Lane A: [ ] `T-VN-35/34/36-deploy`(세 배포를 `0104` 단일 단계로 통합) → [ ] `T-VN-37D`
   - Lane B: [x] `T-VN-34A` → [x] `T-VN-34B` → [x] `T-VN-34C` →
     [x] `T-VN-36A` → [x] `T-VN-36B` → [x] `T-VN-36C` → [x] `T-VN-36D` →
-    [ ] `T-VN-36-live`(격리 실데이터 clone 인수 실행)
+    [x] `T-VN-36-live`(격리 clone 인수 완주 — 2026-08-13)
   - 32~38 join barrier 뒤 Lane B: [ ] `T-VN-40A` → [ ] `T-VN-40B` →
     [ ] `T-VN-40C`
   - 최종 단일 cutover: [ ] `T-VN-39`
@@ -778,7 +778,7 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   `data_origin='user_request'` 제외 가드는 head 동등 술어가 없어 재현하지 않기로 했다
   (field override 세대에는 행 단위 소유권이 없다).
 
-- [ ] T-VN-36-live — **격리 실데이터 clone에서 live 인수 실행**
+- [x] T-VN-36-live — **격리 clone에서 live 인수 완주 (2026-08-13)**
 
   clone-live 하네스는 clone DB가 **이미 candidate head**여야 동작한다 — 러너는
   migration을 하지 않고 head 불일치면 첫 스냅샷에서 죽는다.
@@ -811,6 +811,21 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   - 러너는 GitHub 아카이브에서 자체 스냅샷을 설치한다(`$INSTALL_BASE/$SOURCE_COMMIT`,
     root-owned/read-only 검증 포함). 따라서 러너를 고쳤으면 **푸시한 뒤 그 커밋을**
     `E2E_SOURCE_COMMIT`으로 줘야 한다 — 로컬 편집은 반영되지 않는다.
+  **완주 결과 (2026-08-13, source `cd5b7470`)**
+
+  `phase: passed` / `status: complete`. Playwright main 2/2 + recovery 2/2.
+  `startup_migration_unchanged: true`, `production_compose_project_excluded: true`,
+  `foreign_key_references: 0`, `api_owned_active_features: 0`(retire 완료).
+
+  API-owned 감사 수치가 유도값과 정확히 일치했다 — features 1 / field_overrides 7 /
+  state_transitions 3 / domain_commands 3. schema digest
+  `741b355a…`, content digest는 시작 기준과 일치(완료 판정).
+
+  여기까지 오면서 하네스·배포 경로에서 아홉 건을 꺼냈고 모두 정적 게이트가 green인
+  채 숨어 있던 것들이다. 그중 넷은 러너 자체의 결함이고(LOGIN fence / baseline↔run
+  선행 관계 / retire override 감사 누락 / schema digest 왕복 불가), 특히 마지막 건은
+  **ADR-090 스키마에서 복원 인증이 구조적으로 통과 불가**였다.
+
   - **fixture 자체가 결함이면 in-band 복구 경로가 없다.** `recover`는 fixture를
     BLOCKED가 기록한 `source_commit`에 고정하는데(`FIXTURE_HELPER=
     "$INSTALL_BASE/$blocked_source/..."`), 결함이 바로 그 버전에 있으면 recover도

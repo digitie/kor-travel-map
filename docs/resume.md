@@ -1,11 +1,19 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
-## 2026-08-13 — T-VN-34·T-VN-36 머지 완료, 남은 것은 live 인수 실행
+## 2026-08-13 — T-VN-34·T-VN-36 머지 + live 인수 완주
 
-**다음 한 작업**: 격리 실데이터 clone에서 clone-live 인수를 실행한다
-(`T-VN-36-live`). clone DB는 러너가 migration을 하지 않으므로 **미리 candidate
-head여야** 한다 — prod(`0087`, feature 1,008,852)를 읽기 전용 덤프해 새 clone을
-만들고 ADR-090 bootstrap → `0104`까지 올린 뒤 `baseline` → `run`한다.
+**다음 한 작업**: PR #977을 머지한 뒤 alembic squash를 별도 PR로 잡는다. prod
+cutover가 폐기·재생성으로 확정됐으므로 `0001→0104` 체인은 앞으로 어떤 DB에서도
+실행되지 않는다 — 그 체인이 지고 있는 sha 상호 고정과 fence/replay/backfill이
+통째로 죽은 코드가 된다. `contracts/vnext/target-schema-fingerprints-v1.json`이
+빈 PostGIS DB 기준 실측을 이미 byte-freeze하므로 "체인으로 만든 카탈로그 ==
+squash로 만든 카탈로그"를 **증명**할 수 있다. squash하면 prod(`0087`)가 앞으로
+나아갈 경로는 완전히 사라진다 — 오늘 결정과 일관되지만 명시해둔다.
+
+**live 인수 완주** (source `cd5b7470`): `phase: passed`, Playwright main 2/2 +
+recovery 2/2, API-owned 감사가 유도값과 정확히 일치(features 1 / overrides 7 /
+transitions 3 / commands 3). 상세와 아홉 건의 발견은 `docs/tasks.md`
+`T-VN-36-live` 참조.
 
 - PR #972(T-VN-34) `2026-08-13`, PR #973(T-VN-36) `c76ceb7a` 머지. main head는
   `0104_tvn36_final_fence`.
