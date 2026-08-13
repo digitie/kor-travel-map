@@ -13,8 +13,10 @@ type CandidateTransitionPageResponse =
 type CandidateCommandResponse =
   components["schemas"]["ThemeCandidateCommandResponse"];
 type Collection = components["schemas"]["AdminCurationCollectionView"];
+type CollectionResponse = components["schemas"]["AdminCurationCollectionResponse"];
 type CollectionsResponse =
   components["schemas"]["AdminCurationCollectionsResponse"];
+type Item = components["schemas"]["AdminCurationItemView"];
 type Meta = components["schemas"]["Meta"];
 
 const CANDIDATE_ID = "11111111-1111-4111-8111-111111111111";
@@ -118,6 +120,58 @@ function collection(): Collection {
   };
 }
 
+function existingItem(): Item {
+  return {
+    accepted_link_decision_id: null,
+    address: {},
+    address_hint: null,
+    archived_at: null,
+    collection_id: COLLECTION_ID,
+    collection_key: "urban-walk-2026",
+    command_etag: '"7"',
+    created_at: NOW,
+    created_by: "admin:e2e",
+    curation_item_id: "77777777-7777-4777-8777-777777777777",
+    curation_relation: "primary_stop",
+    current_import_row_id: null,
+    dataset_key: null,
+    edition_key: "2026",
+    external_component_id: "main",
+    external_item_id: CANDIDATE_ID,
+    feature_category: "01070300",
+    feature_id: FEATURE_UUID,
+    feature_kind: "place",
+    feature_name: "여의도공원",
+    item_summary: "이전 검토 항목",
+    item_title: "여의도공원",
+    lat: 37.528,
+    link_actor: null,
+    link_decided_at: null,
+    link_evidence: {},
+    link_match_basis: null,
+    link_resolver_version: null,
+    lon: 126.921,
+    metadata: {},
+    place_name: "여의도공원",
+    provider: null,
+    provider_dataset_id: null,
+    reuse_policy: "allowed",
+    row_revision: "7",
+    sort_order: 0,
+    source_name: null,
+    source_present: true,
+    source_record_key: null,
+    source_url: null,
+    status: "included",
+    theme_group: "산책",
+    theme_name: "도심 산책",
+    theme_slug: "urban-walk",
+    title: "2026 도심 산책",
+    updated_at: NOW,
+    updated_by: "admin:e2e",
+  };
+}
+
 function transition(): CandidateTransition {
   return {
     actor: "provider:mcst",
@@ -165,6 +219,14 @@ async function installCandidateRoutes(
   };
 
   await page.route("**/api/proxy/v1/admin/curations**", (route) => {
+    const path = new URL(route.request().url()).pathname.replace("/api/proxy", "");
+    if (path.endsWith(`/${COLLECTION_ID}`)) {
+      const response: CollectionResponse = {
+        data: { collection: collection(), items: [existingItem()] },
+        meta: meta("e2e-candidate-collection"),
+      };
+      return fulfillJson(route, response);
+    }
     const response: CollectionsResponse = {
       data: { items: [collection()] },
       meta: meta("e2e-candidate-collections", true),
@@ -186,6 +248,7 @@ async function installCandidateRoutes(
         const body = request.postDataJSON() as Record<string, unknown>;
         expect(body.collection_id).toBe(COLLECTION_ID);
         expect(body.collection_revision).toBe("5");
+        expect(body.item_revision).toBe("7");
         current = candidate({
           candidate_etag: '"4"',
           candidate_revision: "4",

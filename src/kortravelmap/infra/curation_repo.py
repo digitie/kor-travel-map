@@ -56,8 +56,10 @@ __all__ = [
     "add_curation_item",
     "archive_curation_item",
     "archive_curation_collection",
+    "archive_curation_collection_command",
     "confirm_curation_quarantine_standalone",
     "create_curation_collection",
+    "create_curation_collection_command",
     "get_curation_collection",
     "get_curation_import_batch",
     "get_curation_item",
@@ -78,6 +80,7 @@ __all__ = [
     "upsert_curation_theme",
     "update_curation_item",
     "update_curation_collection",
+    "patch_curation_collection_command",
     "validate_resolved_curation_identities",
 ]
 
@@ -2973,6 +2976,195 @@ async def archive_curation_collection(
         updates={"status": "archived", "updated_by": actor},
         expected_revision=expected_revision,
     )
+
+
+async def create_curation_collection_command(
+    session: AsyncSession,
+    *,
+    collection_key: str,
+    theme_id: str,
+    source_id: str | None,
+    title: str,
+    edition_key: str = "",
+    description: str | None = None,
+    status: str = "draft",
+    visibility: str = "admin_only",
+    metadata: Mapping[str, Any] | None = None,
+    command_id: int,
+    principal: str,
+) -> CurationCollection:
+    """domain command에 결박된 canonical collection create를 실행한다."""
+
+    if status not in {"draft", "published"} or visibility not in _VISIBILITIES:
+        raise ValueError("invalid curation collection state")
+    normalized_collection_key = collection_key.strip()
+    normalized_title = title.strip()
+    normalized_edition_key = edition_key.strip()
+    if not normalized_collection_key or not normalized_title:
+        raise ValueError("collection_key and title are required")
+    result = (
+        await session.execute(
+            text(
+                """
+                CALL feature.create_curation_collection_command(
+                  :collection_key, CAST(:theme_id AS uuid), CAST(:source_id AS uuid),
+                  :title, :edition_key, :description, :status, :visibility,
+                  CAST(:metadata_json AS jsonb), :command_id, :principal, NULL, NULL
+                )
+                """
+            ),
+            {
+                "collection_key": normalized_collection_key,
+                "command_id": command_id,
+                "description": description,
+                "edition_key": normalized_edition_key,
+                "metadata_json": json.dumps(dict(metadata or {})),
+                "principal": principal,
+                "source_id": source_id,
+                "status": status,
+                "theme_id": theme_id,
+                "title": normalized_title,
+                "visibility": visibility,
+            },
+        )
+    ).mappings().one()
+    created = await get_curation_collection(
+        session,
+        collection_id=str(result["o_collection_id"]),
+        include_archived=True,
+    )
+    if created is None:
+        raise RuntimeError("created curation collection could not be read")
+    return created[0]
+
+
+async def patch_curation_collection_command(
+    session: AsyncSession,
+    *,
+    collection_id: str,
+    expected_revision: int,
+    updates: Mapping[str, Any],
+    command_id: int,
+    principal: str,
+) -> CurationCollection | None:
+    """현재 collection을 full desired input으로 만들어 strong CAS patch한다."""
+
+    allowed = {
+        "theme_id",
+        "source_id",
+        "title",
+        "edition_key",
+        "description",
+        "status",
+        "visibility",
+        "metadata",
+    }
+    unknown = set(updates) - allowed
+    if unknown:
+        raise ValueError(f"unsupported curation collection fields: {sorted(unknown)}")
+    current_result = await get_curation_collection(
+        session, collection_id=collection_id, include_archived=True
+    )
+    if current_result is None:
+        return None
+    current = current_result[0]
+    desired: dict[str, Any] = {
+        "theme_id": current.theme_id,
+        "source_id": current.source_id,
+        "title": current.title,
+        "edition_key": current.edition_key,
+        "description": current.description,
+        "status": current.status,
+        "visibility": current.visibility,
+        "metadata": current.metadata,
+    }
+    desired.update(updates)
+    for field_name in ("theme_id", "title", "edition_key", "status", "visibility", "metadata"):
+        if desired[field_name] is None:
+            raise ValueError(f"{field_name} must not be null")
+    if desired["status"] not in {"draft", "published"}:
+        raise ValueError("invalid curation collection status")
+    if desired["visibility"] not in _VISIBILITIES:
+        raise ValueError("invalid curation collection visibility")
+    result = (
+        await session.execute(
+            text(
+                """
+                CALL feature.patch_curation_collection_command(
+                  CAST(:collection_id AS uuid), :expected_revision,
+                  CAST(:theme_id AS uuid), CAST(:source_id AS uuid), :title,
+                  :edition_key, :description, :status, :visibility,
+                  CAST(:metadata_json AS jsonb), :command_id, :principal,
+                  NULL, NULL
+                )
+                """
+            ),
+            {
+                "collection_id": collection_id,
+                "command_id": command_id,
+                "description": desired["description"],
+                "edition_key": str(desired["edition_key"]).strip(),
+                "expected_revision": expected_revision,
+                "metadata_json": json.dumps(dict(desired["metadata"])),
+                "principal": principal,
+                "source_id": desired["source_id"],
+                "status": desired["status"],
+                "theme_id": desired["theme_id"],
+                "title": str(desired["title"]).strip(),
+                "visibility": desired["visibility"],
+            },
+        )
+    ).mappings().one()
+    updated = await get_curation_collection(
+        session,
+        collection_id=str(result["o_collection_id"]),
+        include_archived=True,
+    )
+    if updated is None:
+        raise RuntimeError("patched curation collection could not be read")
+    return updated[0]
+
+
+async def archive_curation_collection_command(
+    session: AsyncSession,
+    *,
+    collection_id: str,
+    expected_revision: int,
+    command_id: int,
+    principal: str,
+) -> CurationCollection | None:
+    """canonical collection을 domain command에 결박해 archive한다."""
+
+    if await get_curation_collection(
+        session, collection_id=collection_id, include_archived=True
+    ) is None:
+        return None
+    result = (
+        await session.execute(
+            text(
+                """
+                CALL feature.archive_curation_collection_command(
+                  CAST(:collection_id AS uuid), :expected_revision,
+                  :command_id, :principal, NULL, NULL
+                )
+                """
+            ),
+            {
+                "collection_id": collection_id,
+                "command_id": command_id,
+                "expected_revision": expected_revision,
+                "principal": principal,
+            },
+        )
+    ).mappings().one()
+    archived = await get_curation_collection(
+        session,
+        collection_id=str(result["o_collection_id"]),
+        include_archived=True,
+    )
+    if archived is None:
+        raise RuntimeError("archived curation collection could not be read")
+    return archived[0]
 
 
 async def add_curation_item(

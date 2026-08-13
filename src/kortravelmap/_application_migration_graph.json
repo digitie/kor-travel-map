@@ -715,6 +715,18 @@
         "0113_tvn40_concierge_catalog"
       ],
       "revision": "0114_tvn40_provider_ops_cmds"
+    },
+    {
+      "down_revision": [
+        "0114_tvn40_provider_ops_cmds"
+      ],
+      "revision": "0115_tvn40_cancel_cmds"
+    },
+    {
+      "down_revision": [
+        "0115_tvn40_cancel_cmds"
+      ],
+      "revision": "0116_tvn40_collection_cmds"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

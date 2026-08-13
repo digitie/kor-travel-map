@@ -11235,56 +11235,10 @@
             "title": "Status",
             "type": "string"
           },
-          "theme_group": {
-            "anyOf": [
-              {
-                "maxLength": 200,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Theme Group"
-          },
           "theme_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Theme Id"
-          },
-          "theme_name": {
-            "anyOf": [
-              {
-                "maxLength": 300,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Theme Name"
-          },
-          "theme_slug": {
-            "anyOf": [
-              {
-                "maxLength": 200,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Theme Slug"
+            "format": "uuid",
+            "title": "Theme Id",
+            "type": "string"
           },
           "title": {
             "maxLength": 300,
@@ -11304,6 +11258,7 @@
         },
         "required": [
           "collection_key",
+          "theme_id",
           "title"
         ],
         "title": "CurationCollectionCreateRequest",
@@ -33530,6 +33485,15 @@
               "title": "Idempotency-Key",
               "type": "string"
             }
+          },
+          {
+            "description": "직전 command ETag. 누락은 428, stale 값은 412.",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -33691,6 +33655,15 @@
               "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
               "format": "uuid",
               "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
+          {
+            "description": "직전 command ETag. 누락은 428, stale 값은 412.",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
               "type": "string"
             }
           }
@@ -33899,6 +33872,15 @@
               "title": "Idempotency-Key",
               "type": "string"
             }
+          },
+          {
+            "description": "직전 command ETag. 누락은 428, stale 값은 412.",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -34003,6 +33985,15 @@
               "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
               "format": "uuid",
               "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
+          {
+            "description": "직전 command ETag. 누락은 428, stale 값은 412.",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
               "type": "string"
             }
           }
@@ -40659,6 +40650,15 @@
               "title": "Idempotency-Key",
               "type": "string"
             }
+          },
+          {
+            "description": "직전 command ETag. 누락은 428, stale 값은 412.",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -40765,6 +40765,15 @@
               "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
               "format": "uuid",
               "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
+          {
+            "description": "직전 command ETag. 누락은 428, stale 값은 412.",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
               "type": "string"
             }
           }

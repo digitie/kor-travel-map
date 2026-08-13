@@ -2,6 +2,19 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-14 — T-VN-40: canonical collection named command
+
+collection create/patch/archive를 domain command와 append-only effect에 결박된 0116 named procedure로
+전환했다. DB는 SERIALIZABLE·admin executor·active retained catalog·revision CAS를 검증하고 semantic
+no-op은 revision을 올리지 않는다. 신규 collection은 기존 typed theme ID만 참조하므로 collection create가
+retained theme를 expected revision 없이 갱신하던 우회도 제거했다. fresh 0001→0116 actual LOGIN에서
+create/no-op/patch/stale/archive/교차 executor 거부가 통과했다.
+
+적대 리뷰가 지적한 동일 CAS 패턴도 전수 수정했다. candidate promote/reject, collection patch/archive,
+item patch/archive의 required `If-Match`를 OpenAPI와 generated TypeScript에 고정하고 registry 대조 회귀를
+추가했다. candidate UI는 같은 external item/component가 이미 있으면 current item revision을 보내며,
+기존 mocked collection/item fixture도 typed revision/ETag와 exact If-Match·Idempotency-Key를 검증한다.
+
 ## 2026-08-14 — T-VN-40: admin candidate review UI
 
 admin 후보 검토 화면에 keyset 목록·필터, typed Feature/current rule evidence, immutable transition

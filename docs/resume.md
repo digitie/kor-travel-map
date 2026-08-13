@@ -1,5 +1,14 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+canonical collection create/patch/archive를 0116 named `SECURITY DEFINER` command로 옮겼다.
+SERIALIZABLE transaction, admin executor, domain command actor/operation, active theme/source,
+revision CAS와 exact no-op을 DB가 검증하고 command effect를 append-only ledger에 결박한다. collection
+create에서 theme를 암묵 upsert하던 CAS 우회도 제거해 typed catalog에서 만든 theme ID만 받는다. 같은
+조건부 mutation 계열을 전수해 candidate·collection·item 6개 OpenAPI에 required `If-Match`를 노출하고
+generated TS와 registry 일치 gate를 추가했다. candidate 승격 UI는 기존 item identity가 있으면 collection
+detail의 item revision까지 고정한다. 다음 checkpoint는 item named command, import preview/commit,
+merge·quarantine command 순으로 raw collection/item DML을 모두 회수하는 것이다.
+
 admin `/admin/curations/candidates` 후보 검토 화면을 구현했다. keyset 목록과 rule/theme/source/Feature
 필터, current typed Feature evidence, immutable transition timeline, reject와 canonical collection 승격을
 한 화면에서 수행한다. 후보·collection의 raw command ETag/revision과 고정 Idempotency-Key를 그대로
