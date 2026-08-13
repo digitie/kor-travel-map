@@ -411,7 +411,6 @@ BEGIN
     v_candidate.feature_id
   ) AS snapshot;
   IF NOT FOUND
-     OR v_snapshot.rule_row_revision <> v_candidate.rule_row_revision
      OR v_snapshot.rule_input_hash <> v_candidate.rule_input_hash
      OR v_snapshot.source_record_key <> v_candidate.source_record_key
      OR v_snapshot.source_record_hash <> v_candidate.source_record_hash

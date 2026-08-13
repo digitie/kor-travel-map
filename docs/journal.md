@@ -2,6 +2,20 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-13 — T-VN-40: retained theme CAS와 semantic proof 분리
+
+retained theme create/patch/archive를 실제 API LOGIN 전용 named command로 전환하고 단건 GET,
+strong ETag, `If-Match` 428·stale 412, 201 create와 terminal replay를 결선했다. theme archive는
+영향받는 rule 전체를 정렬 잠금한 뒤 같은 SERIALIZABLE transaction에서 candidate reconcile을
+완료한다. catalog `row_revision`은 operator CAS 전용으로 두고 candidate semantic input hash에서는
+theme/source/rule revision을 제외해 metadata-only PATCH가 기존 후보를 stale로 만들지 않게 했다.
+실제 후보 생성 뒤 metadata-only rule PATCH와 동일 후보 promotion을 수행하는 회귀를 추가했다.
+
+OpenAPI/TypeScript를 재생성하고 T-VN-40 deployment receipt를 `pending`으로 고정했다. n150 설치기와
+실행기는 active receipt가 `complete`가 아니면 fail-close하므로 과거 T-VN-36 pair를 현재 바이너리로
+오인해 배포하지 않는다. fresh 0001→0110 actual-login theme/rule/candidate 통합 3개와 scoped 정적
+검사를 통과했다.
+
 ## 2026-08-13 — T-VN-40: retained rule 적대 리뷰 차단 결함 해소
 
 고정 SHA `f05427b1` 적대 리뷰에서 확인된 retained rule 경계 결함을 수정했다. 동일 provider

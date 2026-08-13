@@ -685,6 +685,12 @@
         "0108_tvn40_rule_generation"
       ],
       "revision": "0109_tvn40_rule_catalog_commands"
+    },
+    {
+      "down_revision": [
+        "0109_tvn40_rule_catalog_commands"
+      ],
+      "revision": "0110_tvn40_theme_catalog"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

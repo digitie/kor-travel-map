@@ -5,6 +5,14 @@
 
 ## [Unreleased]
 
+### retained curation theme CAS API (2026-08-13, T-VN-40)
+
+- **API(admin)**: retained theme에 단건 GET과 archive DELETE를 추가하고 create/patch/archive
+  응답을 strong `ETag`와 `If-Match` 428/412 경계로 통일했다. create와 terminal replay는 201이다.
+- **DATABASE**: theme archive는 affected rule candidate reconcile을 같은 SERIALIZABLE transaction에서
+  완료한다. operator catalog revision은 candidate semantic proof와 분리되어 display metadata 변경만으로
+  기존 후보가 stale 처리되지 않는다.
+
 ### retained curation rule CAS API (2026-08-13, T-VN-40)
 
 - **API(admin)**: retained source rule에 단건 GET과 archive DELETE를 추가하고 create/patch/archive

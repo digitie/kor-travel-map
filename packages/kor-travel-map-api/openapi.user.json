@@ -740,19 +740,54 @@
         "additionalProperties": false,
         "description": "curated theme view.",
         "properties": {
+          "archived_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived At"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
             "type": "string"
           },
-          "default_curated": {
-            "title": "Default Curated",
-            "type": "boolean"
-          },
           "metadata": {
             "additionalProperties": true,
             "title": "Metadata",
             "type": "object"
+          },
+          "owner_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Kind"
+          },
+          "owner_provider_dataset_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Provider Dataset Id"
+          },
+          "row_revision": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Row Revision",
+            "type": "string"
           },
           "theme_description": {
             "title": "Theme Description",
@@ -790,11 +825,11 @@
           "theme_name",
           "theme_description",
           "theme_group",
-          "default_curated",
           "visibility",
           "metadata",
           "created_at",
-          "updated_at"
+          "updated_at",
+          "row_revision"
         ],
         "title": "CuratedThemeView",
         "type": "object"

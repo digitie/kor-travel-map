@@ -244,10 +244,12 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** Get Admin Curated Theme Route */
+        get: operations["get_admin_curated_theme_route_v1_admin_curated_themes__theme_id__get"];
         put?: never;
         post?: never;
-        delete?: never;
+        /** Archive Admin Curated Theme Route */
+        delete: operations["archive_admin_curated_theme_route_v1_admin_curated_themes__theme_id__delete"];
         options?: never;
         head?: never;
         /** Patch Admin Curated Theme Route */
@@ -6797,26 +6799,36 @@ export interface components {
         CuratedSourceRulePatchRequest: {
             /** Category */
             category?: string | null;
-            /** Default Action */
-            default_action?: ("candidate" | "ignore") | null;
+            /**
+             * Default Action
+             * @default candidate
+             * @enum {string}
+             */
+            default_action: "candidate" | "ignore";
             /** Detail Selector */
             detail_selector?: {
                 [key: string]: unknown;
             } | null;
-            /** Enabled */
-            enabled?: boolean | null;
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
             /** Metadata */
             metadata?: {
                 [key: string]: unknown;
-            } | null;
+            };
             /** Place Kind */
             place_kind?: string | null;
-            /** Priority */
-            priority?: number | null;
+            /**
+             * Priority
+             * @default 0
+             */
+            priority: number;
             /** Region Scope */
             region_scope?: {
                 [key: string]: unknown;
-            } | null;
+            };
         };
         /** CuratedSourceRuleResponse */
         CuratedSourceRuleResponse: {
@@ -6839,8 +6851,11 @@ export interface components {
             created_at: string;
             /** Dataset Key */
             dataset_key: string;
-            /** Default Action */
-            default_action: string;
+            /**
+             * Default Action
+             * @enum {string}
+             */
+            default_action: "candidate" | "ignore";
             /** Detail Selector */
             detail_selector?: {
                 [key: string]: unknown;
@@ -6949,13 +6964,13 @@ export interface components {
             data: components["schemas"]["CuratedSourcesData"];
             meta: components["schemas"]["Meta"];
         };
+        /** CuratedThemeArchiveRequest */
+        CuratedThemeArchiveRequest: {
+            /** Reason Code */
+            reason_code: string;
+        };
         /** CuratedThemeCreateRequest */
         CuratedThemeCreateRequest: {
-            /**
-             * Default Curated
-             * @default false
-             */
-            default_curated: boolean;
             /** Metadata */
             metadata?: {
                 [key: string]: unknown;
@@ -6980,22 +6995,36 @@ export interface components {
         };
         /** CuratedThemePatchRequest */
         CuratedThemePatchRequest: {
-            /** Default Curated */
-            default_curated?: boolean | null;
             /** Metadata */
             metadata?: {
                 [key: string]: unknown;
-            } | null;
-            /** Theme Description */
-            theme_description?: string | null;
-            /** Theme Group */
-            theme_group?: string | null;
-            /** Theme Name */
-            theme_name?: string | null;
-            /** Theme Slug */
-            theme_slug?: string | null;
-            /** Visibility */
-            visibility?: ("admin_only" | "public") | null;
+            };
+            /**
+             * Theme Description
+             * @default
+             */
+            theme_description: string;
+            /**
+             * Theme Group
+             * @default
+             */
+            theme_group: string;
+            /**
+             * Theme Name
+             * @default
+             */
+            theme_name: string;
+            /**
+             * Theme Slug
+             * @default
+             */
+            theme_slug: string;
+            /**
+             * Visibility
+             * @default admin_only
+             * @enum {string}
+             */
+            visibility: "admin_only" | "public";
         };
         /** CuratedThemeResponse */
         CuratedThemeResponse: {
@@ -7007,17 +7036,23 @@ export interface components {
          * @description curated theme view.
          */
         CuratedThemeView: {
+            /** Archived At */
+            archived_at?: string | null;
             /**
              * Created At
              * Format: date-time
              */
             created_at: string;
-            /** Default Curated */
-            default_curated: boolean;
             /** Metadata */
             metadata: {
                 [key: string]: unknown;
             };
+            /** Owner Kind */
+            owner_kind?: string | null;
+            /** Owner Provider Dataset Id */
+            owner_provider_dataset_id?: number | null;
+            /** Row Revision */
+            row_revision: string;
             /** Theme Description */
             theme_description: string;
             /** Theme Group */
@@ -14839,8 +14874,10 @@ export interface operations {
         };
         responses: {
             /** @description Successful Response */
-            200: {
+            201: {
                 headers: {
+                    /** @description 현재 retained rule row_revision strong entity tag. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -14867,12 +14904,125 @@ export interface operations {
             };
         };
     };
+    get_admin_curated_theme_route_v1_admin_curated_themes__theme_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                theme_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    /** @description 현재 retained rule row_revision strong entity tag. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CuratedThemeResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    archive_admin_curated_theme_route_v1_admin_curated_themes__theme_id__delete: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
+                "Idempotency-Key": string;
+                /** @description 직전 단건 GET/성공 응답의 rule row_revision strong ETag. */
+                "If-Match": string;
+            };
+            path: {
+                theme_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CuratedThemeArchiveRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    /** @description 현재 retained rule row_revision strong entity tag. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CuratedThemeResponse"];
+                };
+            };
+            /** @description stale theme If-Match */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description If-Match 누락 */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
     patch_admin_curated_theme_route_v1_admin_curated_themes__theme_id__patch: {
         parameters: {
             query?: never;
             header: {
                 /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
                 "Idempotency-Key": string;
+                /** @description 직전 단건 GET/성공 응답의 rule row_revision strong ETag. */
+                "If-Match": string;
             };
             path: {
                 theme_id: string;
@@ -14888,14 +15038,34 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    /** @description 현재 retained rule row_revision strong entity tag. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["CuratedThemeResponse"];
                 };
             };
+            /** @description stale theme If-Match */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description Validation Error */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description If-Match 누락 */
+            428: {
                 headers: {
                     [name: string]: unknown;
                 };

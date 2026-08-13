@@ -225,11 +225,22 @@ _COMMAND_REGISTRY: Final[dict[OperationKey, CommandPolicy]] = {
     ("POST", "/v1/admin/curated-themes"): _domain(
         "admin.curated-theme.create",
         _MUTATION_RESULT,
+        success_status=201,
+        replay_headers=("ETag",),
         transaction_isolation="serializable",
     ),
     ("PATCH", "/v1/admin/curated-themes/{theme_id}"): _domain(
         "admin.curated-theme.patch",
         _MUTATION_RESULT,
+        replay_headers=("ETag",),
+        fingerprint_headers=("If-Match",),
+        transaction_isolation="serializable",
+    ),
+    ("DELETE", "/v1/admin/curated-themes/{theme_id}"): _domain(
+        "admin.curated-theme.archive",
+        _MUTATION_RESULT,
+        replay_headers=("ETag",),
+        fingerprint_headers=("If-Match",),
         transaction_isolation="serializable",
     ),
     ("POST", "/v1/admin/curated-sources"): _domain(

@@ -32,6 +32,7 @@ from kortravelmap.infra.curated_repo import (
     CuratedFeature,
     CuratedFeaturePage,
     CuratedSourceRule,
+    CuratedTheme,
 )
 from kortravelmap.settings import KorTravelMapSettings
 
@@ -242,7 +243,7 @@ def test_curated_source_rule_view_accepts_detail_selector() -> None:
         category=None,
         region_scope={},
         detail_selector={"path": ["payload", "channel_id"], "value": "channel-A"},
-        default_action="curated",
+        default_action="candidate",
         priority=10,
         enabled=True,
         metadata={},
@@ -291,6 +292,129 @@ def _rule_api_row(*, revision: int, archived: bool = False) -> CuratedSourceRule
         row_revision=revision,
         archived_at=now if archived else None,
     )
+
+
+def _theme_api_row(*, revision: int, archived: bool = False) -> CuratedTheme:
+    now = datetime(2026, 8, 13, tzinfo=UTC)
+    return CuratedTheme(
+        theme_id="22222222-2222-4222-8222-222222222222",
+        theme_slug="theme-api",
+        theme_name="테마 API",
+        theme_description="테마 설명",
+        theme_group="test",
+        visibility="admin_only",
+        metadata={},
+        created_at=now,
+        updated_at=now,
+        row_revision=revision,
+        archived_at=now if archived else None,
+        owner_kind="operator",
+        owner_provider_dataset_id=None,
+    )
+
+
+def test_retained_theme_http_commands_use_strong_etag_and_typed_repo(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api import domain_command_service
+
+    rows = {
+        3: _theme_api_row(revision=3),
+        4: _theme_api_row(revision=4),
+        5: _theme_api_row(revision=5, archived=True),
+    }
+    get_theme = AsyncMock(return_value=rows[3])
+    create_theme = AsyncMock(return_value=rows[3])
+    patch_theme = AsyncMock(return_value=rows[4])
+    archive_theme = AsyncMock(return_value=rows[5])
+    monkeypatch.setattr(curated.curated_repo, "get_curated_theme", get_theme)
+    monkeypatch.setattr(
+        curated.curated_repo, "create_curated_theme_command", create_theme
+    )
+    monkeypatch.setattr(
+        curated.curated_repo, "patch_curated_theme_command", patch_theme
+    )
+    monkeypatch.setattr(
+        curated.curated_repo, "archive_curated_theme_command", archive_theme
+    )
+
+    async def _begin_command(
+        _session: object,
+        *,
+        actor: str,
+        operation: str,
+        idempotency_key: object,
+        payload: object,
+    ) -> domain_command_service.DomainCommandHandle:
+        del payload
+        return domain_command_service.DomainCommandHandle(
+            command_id=702,
+            actor=actor,
+            operation=operation,
+            idempotency_key=str(idempotency_key),
+            request_fingerprint="b" * 64,
+        )
+
+    monkeypatch.setattr(domain_command_service, "begin_domain_command", _begin_command)
+    monkeypatch.setattr(
+        domain_command_service, "complete_domain_command", AsyncMock()
+    )
+    app = create_app(
+        ApiSettings(
+            admin_proxy_secret=None,
+            public_api_key_required=False,
+            vworld_api_key=None,
+        )
+    )
+
+    async def _session() -> AsyncIterator[_RuleApiSession]:
+        yield _RuleApiSession()
+
+    app.dependency_overrides[get_session] = _session
+    client = TestClient(app)
+    theme_id = rows[3].theme_id
+    key_prefix = "95100000-0000-4000-8000-00000000000"
+
+    fetched = client.get(f"/v1/admin/curated-themes/{theme_id}")
+    created = client.post(
+        "/v1/admin/curated-themes",
+        json={
+            "theme_slug": "theme-api",
+            "theme_name": "테마 API",
+            "theme_group": "test",
+        },
+        headers={"Idempotency-Key": f"{key_prefix}1"},
+    )
+    missing = client.patch(
+        f"/v1/admin/curated-themes/{theme_id}",
+        json={"theme_name": "변경"},
+        headers={"Idempotency-Key": f"{key_prefix}2"},
+    )
+    patched = client.patch(
+        f"/v1/admin/curated-themes/{theme_id}",
+        json={"theme_name": "변경"},
+        headers={"Idempotency-Key": f"{key_prefix}3", "If-Match": '"3"'},
+    )
+    archived = client.request(
+        "DELETE",
+        f"/v1/admin/curated-themes/{theme_id}",
+        json={"reason_code": "operator_retired"},
+        headers={"Idempotency-Key": f"{key_prefix}4", "If-Match": '"4"'},
+    )
+
+    assert (fetched.status_code, fetched.headers["etag"]) == (200, '"3"')
+    assert fetched.json()["data"]["row_revision"] == "3"
+    assert (created.status_code, created.headers["etag"]) == (201, '"3"')
+    assert missing.status_code == 428
+    assert (patched.status_code, patched.headers["etag"]) == (200, '"4"')
+    assert (archived.status_code, archived.headers["etag"]) == (200, '"5"')
+    assert archived.json()["data"]["archived_at"] is not None
+    assert create_theme.await_args.kwargs["command_id"] == 702
+    assert create_theme.await_args.kwargs["principal"] == "local-dev"
+    assert patch_theme.await_args.kwargs["expected_revision"] == 3
+    assert patch_theme.await_args.kwargs["updates"] == {"theme_name": "변경"}
+    assert archive_theme.await_args.kwargs["expected_revision"] == 4
+    assert archive_theme.await_args.kwargs["reason_code"] == "operator_retired"
 
 
 def test_retained_rule_http_commands_use_strong_etag_and_typed_repo(

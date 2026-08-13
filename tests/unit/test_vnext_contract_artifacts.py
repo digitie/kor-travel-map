@@ -44,11 +44,11 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     ),
     # 2026-08-13 T-VN-40 — public legacy catalog 제거, scoped service snapshot/mapping,
     # admin catalog/import/candidate ETag·412/428 목표 diff를 machine freeze했다.
-    "openapi-diff-v1.json": ("63836af809170442eba0ccb32b6ff3b14767d1816ca5c3e71580a78e7ed33016"),
+    "openapi-diff-v1.json": ("2fb1d9d2d686deb3df7d5a25c2e0b955628c7de0c16e1319c2d75176259625f5"),
     # 2026-08-13 T-VN-36 — receipt가 리베이스로 폐기된 커밋(c1fa5a4d)과 그때의
     # spec sha를 가리키고 있었다. 현재 head로 재핀했다.
     "consumer-rollout-v1.json": (
-        "eac0767e0616880d6de8ef86bd6d6cb3d437e4b70e8bf732e9f620c30185fece"
+        "c8d417aad2b8534a8aea9fa82f135b97815a3a0c0cadd2768fda74f842b4d4cf"
     ),
     "violation-fixtures-v1.sql": (
         "84cca48b776387e4b6fd00b702e40b3412c9731f6abcdd250a5c126c2ea155d8"
@@ -270,19 +270,28 @@ def test_active_pinvi_receipt_describes_current_consumed_specs() -> None:
     """
 
     rollout = _load_json("consumer-rollout-v1.json")
-    receipt = rollout["tasks"]["T-VN-36"]["pinvi_snapshot_receipt"]
+    task = rollout["deployment_receipt_task"]
+    assert task in rollout["tasks"]
+    receipt = rollout["tasks"][task]["pinvi_snapshot_receipt"]
     api_root = _ROOT / "packages/kor-travel-map-api"
-    # full admin spec은 Map-only retained catalog가 전진할 때 PinVi가 소비하는
-    # deterministic admin-detail subset bytes와 무관하게 바뀐다. 현재 full spec은
-    # openapi-diff baseline이 별도로 고정하고, cross-repo receipt는 공유 user bytes만
-    # 현재성 검증한다. T-VN-40 service snapshot receipt가 생기면 service도 그 task의
-    # exact pair로 승격한다.
-    for name, key in (("openapi.user.json", "map_user_openapi_sha256"),):
+    for name, key in (
+        ("openapi.user.json", "map_user_openapi_sha256"),
+        ("openapi.service.json", "map_service_openapi_sha256"),
+        ("openapi.json", "map_full_openapi_sha256"),
+    ):
         observed = hashlib.sha256((api_root / name).read_bytes()).hexdigest()
         assert observed == receipt[key], (
-            f"{name}이 T-VN-36 receipt와 다르다 — receipt를 현재 head로 재핀하라 "
+            f"{name}이 {task} receipt와 다르다 — receipt를 현재 head로 재핀하라 "
             f"({key}를 {observed}로)"
         )
+    assert receipt["state"] in {"pending", "complete"}
+    if receipt["state"] == "pending":
+        assert receipt["blocking_reason"].strip()
+        assert "map_commit" not in receipt
+        assert "pinvi_commit" not in receipt
+    else:
+        assert re.fullmatch(r"[0-9a-f]{40}", receipt["map_commit"])
+        assert re.fullmatch(r"[0-9a-f]{40}", receipt["pinvi_commit"])
     entries = rollout["removal_manifest"]["entries"]
     assert entries, "removal manifest가 비어 있다"
     for entry in entries:
