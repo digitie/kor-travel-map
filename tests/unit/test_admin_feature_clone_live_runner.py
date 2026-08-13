@@ -321,12 +321,12 @@ def _prepare_runtime(tmp_path: Path) -> tuple[Path, Path]:
                 "counts": {
                     "domain_commands": 3,
                     "features": 1,
-                    "field_overrides": 6,
+                    "field_overrides": 7,
                     "state_transitions": 3,
                 },
                 "feature_uuids": [_API_OWNED_FEATURE_UUID],
                 "foreign_key_constraints_checked": 12,
-                "foreign_key_references": 7,
+                "foreign_key_references": 8,
                 "version": 1,
             }
         ),
@@ -512,7 +512,7 @@ def test_complete_validates_evidence_and_clears_blocked(tmp_path: Path) -> None:
         "api_owned_active_features": 0,
         "api_owned_domain_commands": 3,
         "api_owned_features": 1,
-        "api_owned_field_overrides": 6,
+        "api_owned_field_overrides": 7,
         "api_owned_state_transitions": 3,
         "auth_audit_main": 1,
         "auth_audit_recovery": 1,
@@ -1074,7 +1074,7 @@ def test_recovered_result_preserves_hard_purge_evidence(tmp_path: Path) -> None:
                 "foreign_key_references": 0,
                 "purged": {
                     "features": 1,
-                    "field_overrides": 6,
+                    "field_overrides": 7,
                 },
                 "version": 1,
             }
@@ -1090,7 +1090,7 @@ def test_recovered_result_preserves_hard_purge_evidence(tmp_path: Path) -> None:
         "recovery-hard-purge-running",
     ]
     assert payload["cleanup"]["recovery_purged_features"] == 1
-    assert payload["cleanup"]["recovery_purged_field_overrides"] == 6
+    assert payload["cleanup"]["recovery_purged_field_overrides"] == 7
 
 
 @pytest.mark.parametrize(

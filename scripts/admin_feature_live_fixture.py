@@ -177,6 +177,19 @@ _ADMIN_CREATE_OVERRIDE_FIELD_PATHS: Final[frozenset[str]] = frozenset(
         "core.name",
     }
 )
+#: retire가 authoring하는 lifecycle override. field override와 **형태가 다르다** —
+#: `feature.author_lifecycle_override`가 만들고, provider 재적재가 retire를 되돌리지
+#: 못하게 `prevent_provider_reactivation = true`를 세운다(field override는 항상
+#: false다). `command_id`도 남기지 않는다.
+#:
+#: 2026-08-13 live 실행에서 처음 관측했다. create body만 보고 기대 집합을 유도했더니
+#: 이 7번째 row에서 "field override 소유권이 다릅니다"로 죽었다 — spec이 무엇을
+#: 남기는지는 코드를 읽어서가 아니라 실행에서만 드러난다.
+_ADMIN_RETIRE_OVERRIDE_FIELD_PATH: Final[str] = "lifecycle_state"
+#: 완주한 run이 남기는 override path 전체.
+_EXPECTED_OVERRIDE_FIELD_PATHS: Final[frozenset[str]] = (
+    _ADMIN_CREATE_OVERRIDE_FIELD_PATHS | {_ADMIN_RETIRE_OVERRIDE_FIELD_PATH}
+)
 #: live spec이 실행하는 mutation 명령. GET은 domain command를 만들지 않는다.
 _ADMIN_CREATE_OPERATION: Final[str] = "admin.feature.create"
 _ADMIN_STATE_OPERATION: Final[str] = "admin.feature.state"
@@ -953,15 +966,29 @@ async def _inspect_api_owned(
     for override in override_rows:
         feature_id = str(override["feature_id"])
         field_path = str(override["field_path"])
+        is_retire_override = field_path == _ADMIN_RETIRE_OVERRIDE_FIELD_PATH
+        if is_retire_override:
+            # retire가 authoring하는 lifecycle override. field override와 달리
+            # 재적재 잠금을 세우고 command_id를 남기지 않는다.
+            expected_reason = f"{reason_prefix}:retire"
+            expected_command_id = None
+            expected_prevent = True
+        else:
+            expected_reason = f"{reason_prefix}:create"
+            expected_command_id = create_command_ids.get(feature_id)
+            expected_prevent = False
         if (
             feature_id not in feature_states
-            or field_path not in _ADMIN_CREATE_OVERRIDE_FIELD_PATHS
+            or (
+                not is_retire_override
+                and field_path not in _ADMIN_CREATE_OVERRIDE_FIELD_PATHS
+            )
             or (feature_id, field_path) in seen_override_keys
             or override["status"] != "active"
             or override["created_by"] != _ADMIN_OPERATOR
-            or override["reason"] != f"{reason_prefix}:create"
-            or override["command_id"] != create_command_ids.get(feature_id)
-            or override["prevent_provider_reactivation"] is not False
+            or override["reason"] != expected_reason
+            or override["command_id"] != expected_command_id
+            or override["prevent_provider_reactivation"] is not expected_prevent
             or override["revoked_at"] is not None
             or override["revoked_by"] is not None
             or override["revoked_reason"] is not None
@@ -1130,8 +1157,9 @@ async def _audit_complete_api_owned(
         or inspection.feature_ids != (feature_id,)
         or inspection.transition_chains != {feature_id: expected_chain}
         or inspection.state_transitions != len(expected_chain)
-        or inspection.override_field_paths != _ADMIN_CREATE_OVERRIDE_FIELD_PATHS
-        or inspection.field_overrides != len(_ADMIN_CREATE_OVERRIDE_FIELD_PATHS)
+        # create가 만드는 field override 6개 + retire가 만드는 lifecycle override 1개.
+        or inspection.override_field_paths != _EXPECTED_OVERRIDE_FIELD_PATHS
+        or inspection.field_overrides != len(_EXPECTED_OVERRIDE_FIELD_PATHS)
         or inspection.command_operations != expected_operations
         or inspection.domain_commands != sum(expected_operations.values())
     ):
