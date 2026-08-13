@@ -798,6 +798,20 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   같은 관례이고, `$STATE_ROOT`가 clone 간 공유 고정 경로라 남겨두면 `baseline`이
   죽으므로 위생이 아니라 필수 단계다.
 
+  **실행 중 확인한 하네스 사실 (2026-08-13)**
+
+  - **`run`에는 `baseline`이 아니라 `checkpoint` 모드로 cut한 checkpoint가 필요하다.**
+    `baseline`은 dump 복원 인증(`verify_dump_restore`)을 건너뛰는데, `run`은 신뢰
+    dump를 복원한 뒤 startup snapshot이 checkpoint baseline과 **정확히** 일치할 것을
+    요구한다(`--allow-owned-drift` 없음). 그래서 baseline-only(version 5) checkpoint로
+    `run`하면 "현재 clone DB가 trusted checkpoint와 다릅니다"로 죽는다. 그리고
+    `checkpoint` 모드는 version 5를 재사용하지 않으므로("full restore certification
+    cannot reuse a baseline-only checkpoint") **아카이브 후 재cut**이 유일한 경로다.
+    실행 순서는 `checkpoint` → `run`이고 `baseline`은 그 앞 단계가 아니다.
+  - 러너는 GitHub 아카이브에서 자체 스냅샷을 설치한다(`$INSTALL_BASE/$SOURCE_COMMIT`,
+    root-owned/read-only 검증 포함). 따라서 러너를 고쳤으면 **푸시한 뒤 그 커밋을**
+    `E2E_SOURCE_COMMIT`으로 줘야 한다 — 로컬 편집은 반영되지 않는다.
+
 ### T-VN-37D — notice empty range 표현 (보류)
 
 > 계보 key 물화·인덱스 probe(`T-VN-37`, PR #968)는 완료 이력으로
