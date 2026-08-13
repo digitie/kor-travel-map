@@ -42,7 +42,7 @@ def test_every_openapi_write_operation_has_exact_static_policy() -> None:
     writes = _openapi_writes()
 
     assert set(COMMAND_REGISTRY) == set(writes)
-    assert len(writes) == 74
+    assert len(writes) == 75
 
 
 def test_registered_domain_and_specialized_ledgers_have_stable_operation_names() -> None:
@@ -147,6 +147,8 @@ def test_domain_fingerprint_header_contract_is_explicit_and_minimal() -> None:
         and policy.fingerprint_headers
     } == {
         "admin.cache-target-dead-letter.replay": ("If-Match",),
+        "admin.curated-source-rule.archive": ("If-Match",),
+        "admin.curated-source-rule.patch": ("If-Match",),
         "admin.feature.patch": ("If-Match",),
         # T-VN-36: typed field override의 author/revoke도 row_revision If-Match로
         # 잠긴다 (patch와 같은 낙관적 동시성 경계).

@@ -245,6 +245,7 @@ _COMMAND_REGISTRY: Final[dict[OperationKey, CommandPolicy]] = {
     ("POST", "/v1/admin/curated-source-rules"): _domain(
         "admin.curated-source-rule.create",
         _MUTATION_RESULT,
+        replay_headers=("ETag",),
         transaction_isolation="serializable",
     ),
     (
@@ -253,6 +254,18 @@ _COMMAND_REGISTRY: Final[dict[OperationKey, CommandPolicy]] = {
     ): _domain(
         "admin.curated-source-rule.patch",
         _MUTATION_RESULT,
+        replay_headers=("ETag",),
+        fingerprint_headers=("If-Match",),
+        transaction_isolation="serializable",
+    ),
+    (
+        "DELETE",
+        "/v1/admin/curated-source-rules/{rule_id}",
+    ): _domain(
+        "admin.curated-source-rule.archive",
+        _MUTATION_RESULT,
+        replay_headers=("ETag",),
+        fingerprint_headers=("If-Match",),
         transaction_isolation="serializable",
     ),
     (

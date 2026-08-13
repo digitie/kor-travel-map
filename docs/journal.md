@@ -2,6 +2,19 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-13 — T-VN-40: retained rule strong ETag API 결선
+
+0109 typed rule command를 admin repository/API에 연결했다. 단건 GET과 archive DELETE를 추가하고
+create/patch/archive 응답의 raw strong ETag, patch/archive `If-Match` 428·stale 412,
+domain-command fingerprint/replay ETag를 고정했다. rule BIGINT revision은 decimal string으로
+직렬화하고 typed input에서 legacy `curated` action을 제거했다. 기존 Dagster concierge writer가
+typed provider command로 전환되기 전까지는 별도 legacy repo 함수를 유지해 중간 commit이 호출자를
+깨뜨리지 않게 했다.
+
+API·repo·registry unit 49개, 실제 DB/API/OpenAPI 21개, ruff·mypy가 통과했다. admin OpenAPI와
+generated TypeScript를 `openapi-typescript 7.13.0`으로 갱신했고 Linux ext4 복제 환경에서
+`gen:types:check`와 frontend 전체 type-check가 통과했다.
+
 ## 2026-08-13 — T-VN-40: retained rule typed command와 원자 reconcile
 
 retained `curated_source_rules`의 create/patch/archive를 raw DML에서 실제 API LOGIN만 실행할 수

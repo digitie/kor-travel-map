@@ -11,11 +11,11 @@ from time import perf_counter
 from typing import Annotated, Any, Literal
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from kortravelmap.infra import curated_repo
 from kortravelmap.settings import KorTravelMapSettings
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api.auth import AdminProxyContext, require_admin_frontend
@@ -28,10 +28,12 @@ from kortravelmap.api.curated_public_schema import (
 )
 from kortravelmap.api.db import get_session
 from kortravelmap.api.domain_command_service import (
+    current_domain_command,
     domain_command_transaction,
     idempotent_domain_command,
 )
 from kortravelmap.api.feature_ref import resolve_feature_ref_or_error
+from kortravelmap.api.http_revision import parse_revision_header, revision_etag
 from kortravelmap.api.response import Meta, make_meta
 
 __all__ = ["admin_router", "router"]
@@ -69,7 +71,7 @@ ProviderStatus = Literal[
     "manual_only",
     "deprecated",
 ]
-RuleAction = Literal["candidate", "curated", "ignore"]
+RuleAction = Literal["candidate", "ignore"]
 
 PLACE_SEARCH_LIMIT = 5
 KAKAO_LOCAL_KEYWORD_URL = "https://dapi.kakao.com/v2/local/search/keyword.json"
@@ -143,6 +145,8 @@ class CuratedSourceRuleView(BaseModel):
     priority: int
     enabled: bool
     metadata: dict[str, Any]
+    row_revision: str
+    archived_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -517,6 +521,12 @@ class CuratedSourceRulePatchRequest(BaseModel):
     metadata: dict[str, Any] | None = None
 
 
+class CuratedSourceRuleArchiveRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reason_code: str = Field(min_length=1, max_length=100)
+
+
 class CuratedFeatureCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -583,7 +593,9 @@ def _source_view(row: curated_repo.CuratedSource) -> CuratedSourceView:
 
 
 def _rule_view(row: curated_repo.CuratedSourceRule) -> CuratedSourceRuleView:
-    return CuratedSourceRuleView.model_validate(row, from_attributes=True)
+    payload = dict(row.__dict__)
+    payload["row_revision"] = str(row.row_revision)
+    return CuratedSourceRuleView.model_validate(payload)
 
 
 def _feature_view(row: curated_repo.CuratedFeature) -> CuratedFeatureView:
@@ -631,6 +643,42 @@ def _integrity_error(exc: IntegrityError) -> HTTPException:
         status_code=status.HTTP_409_CONFLICT,
         detail=f"curated row constraint violation: {exc.orig}",
     )
+
+
+def _rule_command_error(exc: DBAPIError) -> HTTPException:
+    message = str(exc.orig)
+    sqlstate = getattr(exc.orig, "sqlstate", None)
+    if "rule revision mismatch" in message:
+        return HTTPException(
+            status_code=status.HTTP_412_PRECONDITION_FAILED,
+            detail="curated source rule revision이 변경됐습니다.",
+        )
+    if sqlstate == "P0002":
+        return HTTPException(status_code=404, detail="curated source rule 없음")
+    if sqlstate == "23505":
+        return HTTPException(status_code=409, detail="curated source rule identity conflict")
+    if "archived rule" in message or "scope changed" in message:
+        return HTTPException(status_code=409, detail=message)
+    if sqlstate in {"23503", "23514", "22023"}:
+        return HTTPException(status_code=422, detail=message)
+    if sqlstate == "42501":
+        return HTTPException(status_code=403, detail="curated source rule command 권한이 없습니다.")
+    raise exc
+
+
+_RULE_ETAG_RESPONSE_HEADER = {
+    "ETag": {
+        "description": "현재 retained rule row_revision strong entity tag.",
+        "schema": {"type": "string"},
+    }
+}
+_RULE_IF_MATCH_OPENAPI_PARAMETER = {
+    "name": "If-Match",
+    "in": "header",
+    "required": True,
+    "description": "직전 단건 GET/성공 응답의 rule row_revision strong ETag.",
+    "schema": {"type": "string"},
+}
 
 
 def _secret_value(secret: SecretStr | None) -> str | None:
@@ -1483,23 +1531,50 @@ async def list_admin_curated_source_rules_route(
 @admin_router.post(
     "/curated-source-rules",
     response_model=CuratedSourceRuleResponse,
+    responses={200: {"headers": _RULE_ETAG_RESPONSE_HEADER}},
 )
 @idempotent_domain_command("admin.curated-source-rule.create")
 async def create_admin_curated_source_rule_route(
     body: CuratedSourceRuleCreateRequest,
+    response: Response,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> CuratedSourceRuleResponse:
     started_at = perf_counter()
     try:
         async with domain_command_transaction(session):
-            row = await curated_repo.create_curated_source_rule(
+            command = current_domain_command()
+            row = await curated_repo.create_curated_source_rule_command(
                 session,
                 **body.model_dump(),
+                command_id=command.command_id,
+                principal=command.actor,
             )
-    except IntegrityError as exc:
-        raise _integrity_error(exc) from exc
+    except DBAPIError as exc:
+        raise _rule_command_error(exc) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    response.headers["ETag"] = revision_etag(row.row_revision)
+    return CuratedSourceRuleResponse(
+        data=_rule_view(row),
+        meta=make_meta(started_at=started_at),
+    )
+
+
+@admin_router.get(
+    "/curated-source-rules/{rule_id}",
+    response_model=CuratedSourceRuleResponse,
+    responses={200: {"headers": _RULE_ETAG_RESPONSE_HEADER}},
+)
+async def get_admin_curated_source_rule_route(
+    rule_id: str,
+    response: Response,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> CuratedSourceRuleResponse:
+    started_at = perf_counter()
+    row = await curated_repo.get_curated_source_rule(session, rule_id=rule_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="curated source rule 없음")
+    response.headers["ETag"] = revision_etag(row.row_revision)
     return CuratedSourceRuleResponse(
         data=_rule_view(row),
         meta=make_meta(started_at=started_at),
@@ -1509,25 +1584,85 @@ async def create_admin_curated_source_rule_route(
 @admin_router.patch(
     "/curated-source-rules/{rule_id}",
     response_model=CuratedSourceRuleResponse,
+    responses={
+        200: {"headers": _RULE_ETAG_RESPONSE_HEADER},
+        412: {"description": "stale rule If-Match"},
+        428: {"description": "If-Match 누락"},
+    },
+    openapi_extra={"parameters": [_RULE_IF_MATCH_OPENAPI_PARAMETER]},
 )
 @idempotent_domain_command("admin.curated-source-rule.patch")
 async def patch_admin_curated_source_rule_route(
+    request: Request,
     rule_id: str,
     body: CuratedSourceRulePatchRequest,
+    response: Response,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> CuratedSourceRuleResponse:
     started_at = perf_counter()
+    expected_revision = parse_revision_header(request, "If-Match", required=True)
+    assert expected_revision is not None
     try:
         async with domain_command_transaction(session):
-            row = await curated_repo.update_curated_source_rule(
+            command = current_domain_command()
+            row = await curated_repo.patch_curated_source_rule_command(
                 session,
                 rule_id=rule_id,
+                expected_revision=expected_revision,
                 updates=body.model_dump(exclude_unset=True),
+                command_id=command.command_id,
+                principal=command.actor,
             )
+    except DBAPIError as exc:
+        raise _rule_command_error(exc) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if row is None:
         raise HTTPException(status_code=404, detail="curated source rule 없음")
+    response.headers["ETag"] = revision_etag(row.row_revision)
+    return CuratedSourceRuleResponse(
+        data=_rule_view(row),
+        meta=make_meta(started_at=started_at),
+    )
+
+
+@admin_router.delete(
+    "/curated-source-rules/{rule_id}",
+    response_model=CuratedSourceRuleResponse,
+    responses={
+        200: {"headers": _RULE_ETAG_RESPONSE_HEADER},
+        412: {"description": "stale rule If-Match"},
+        428: {"description": "If-Match 누락"},
+    },
+    openapi_extra={"parameters": [_RULE_IF_MATCH_OPENAPI_PARAMETER]},
+)
+@idempotent_domain_command("admin.curated-source-rule.archive")
+async def archive_admin_curated_source_rule_route(
+    request: Request,
+    rule_id: str,
+    body: CuratedSourceRuleArchiveRequest,
+    response: Response,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> CuratedSourceRuleResponse:
+    started_at = perf_counter()
+    expected_revision = parse_revision_header(request, "If-Match", required=True)
+    assert expected_revision is not None
+    try:
+        async with domain_command_transaction(session):
+            command = current_domain_command()
+            row = await curated_repo.archive_curated_source_rule_command(
+                session,
+                rule_id=rule_id,
+                expected_revision=expected_revision,
+                command_id=command.command_id,
+                reason_code=body.reason_code,
+                principal=command.actor,
+            )
+    except DBAPIError as exc:
+        raise _rule_command_error(exc) from exc
+    if row is None:
+        raise HTTPException(status_code=404, detail="curated source rule 없음")
+    response.headers["ETag"] = revision_etag(row.row_revision)
     return CuratedSourceRuleResponse(
         data=_rule_view(row),
         meta=make_meta(started_at=started_at),

@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any, NoReturn
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -26,7 +28,11 @@ from kortravelmap.api.routers import curated
 from kortravelmap.api.settings import ApiSettings
 from pydantic import SecretStr
 
-from kortravelmap.infra.curated_repo import CuratedFeature, CuratedFeaturePage
+from kortravelmap.infra.curated_repo import (
+    CuratedFeature,
+    CuratedFeaturePage,
+    CuratedSourceRule,
+)
 from kortravelmap.settings import KorTravelMapSettings
 
 pytestmark = pytest.mark.unit
@@ -174,6 +180,9 @@ def test_curated_routes_are_in_openapi() -> None:
     assert "/v1/admin/curated-features" not in paths
     assert "/v1/admin/curated-features/{curated_feature_id}/select" not in paths
     assert "/v1/admin/curated-source-rules/{rule_id}/apply" in paths
+    assert {"get", "patch", "delete"}.issubset(
+        paths["/v1/admin/curated-source-rules/{rule_id}"]
+    )
 
 
 class _ForbiddenSession:
@@ -220,8 +229,6 @@ def test_public_curated_routes_reject_keyless_requests(path: str) -> None:
 
 
 def test_curated_source_rule_view_accepts_detail_selector() -> None:
-    from kortravelmap.infra.curated_repo import CuratedSourceRule
-
     now = datetime(2026, 7, 12, tzinfo=UTC)
     row = CuratedSourceRule(
         rule_id="11111111-1111-1111-1111-111111111111",
@@ -249,6 +256,148 @@ def test_curated_source_rule_view_accepts_detail_selector() -> None:
         "path": ["payload", "channel_id"],
         "value": "channel-A",
     }
+    assert view.row_revision == "1"
+
+
+class _RuleApiSession:
+    @asynccontextmanager
+    async def begin(self) -> AsyncIterator[None]:
+        yield
+
+    async def execute(self, statement: object) -> None:
+        assert str(statement) == "SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"
+
+
+def _rule_api_row(*, revision: int, archived: bool = False) -> CuratedSourceRule:
+    now = datetime(2026, 8, 13, tzinfo=UTC)
+    return CuratedSourceRule(
+        rule_id="11111111-1111-4111-8111-111111111111",
+        theme_id="22222222-2222-4222-8222-222222222222",
+        theme_slug="rule-api",
+        source_id="33333333-3333-4333-8333-333333333333",
+        provider_dataset_id=101,
+        provider="rule-api-provider",
+        dataset_key="rule-api-dataset",
+        place_kind=None,
+        category=None,
+        region_scope={},
+        detail_selector=None,
+        default_action="candidate",
+        priority=0,
+        enabled=not archived,
+        metadata={},
+        created_at=now,
+        updated_at=now,
+        row_revision=revision,
+        archived_at=now if archived else None,
+    )
+
+
+def test_retained_rule_http_commands_use_strong_etag_and_typed_repo(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api import domain_command_service
+
+    rows = {
+        3: _rule_api_row(revision=3),
+        4: _rule_api_row(revision=4),
+        5: _rule_api_row(revision=5, archived=True),
+    }
+    get_rule = AsyncMock(return_value=rows[3])
+    create_rule = AsyncMock(return_value=rows[3])
+    patch_rule = AsyncMock(return_value=rows[4])
+    archive_rule = AsyncMock(return_value=rows[5])
+    monkeypatch.setattr(curated.curated_repo, "get_curated_source_rule", get_rule)
+    monkeypatch.setattr(
+        curated.curated_repo, "create_curated_source_rule_command", create_rule
+    )
+    monkeypatch.setattr(
+        curated.curated_repo, "patch_curated_source_rule_command", patch_rule
+    )
+    monkeypatch.setattr(
+        curated.curated_repo, "archive_curated_source_rule_command", archive_rule
+    )
+
+    async def _begin_command(
+        _session: object,
+        *,
+        actor: str,
+        operation: str,
+        idempotency_key: object,
+        payload: object,
+    ) -> domain_command_service.DomainCommandHandle:
+        del payload
+        return domain_command_service.DomainCommandHandle(
+            command_id=701,
+            actor=actor,
+            operation=operation,
+            idempotency_key=str(idempotency_key),
+            request_fingerprint="a" * 64,
+        )
+
+    monkeypatch.setattr(domain_command_service, "begin_domain_command", _begin_command)
+    monkeypatch.setattr(
+        domain_command_service, "complete_domain_command", AsyncMock()
+    )
+    app = create_app(
+        ApiSettings(
+            admin_proxy_secret=None,
+            public_api_key_required=False,
+            vworld_api_key=None,
+        )
+    )
+
+    async def _session() -> AsyncIterator[_RuleApiSession]:
+        yield _RuleApiSession()
+
+    app.dependency_overrides[get_session] = _session
+    client = TestClient(app)
+    rule_id = rows[3].rule_id
+    key_prefix = "95000000-0000-4000-8000-00000000000"
+
+    fetched = client.get(f"/v1/admin/curated-source-rules/{rule_id}")
+    created = client.post(
+        "/v1/admin/curated-source-rules",
+        json={"theme_id": rows[3].theme_id, "source_id": rows[3].source_id},
+        headers={"Idempotency-Key": f"{key_prefix}1"},
+    )
+    missing = client.patch(
+        f"/v1/admin/curated-source-rules/{rule_id}",
+        json={"priority": 9},
+        headers={"Idempotency-Key": f"{key_prefix}2"},
+    )
+    patched = client.patch(
+        f"/v1/admin/curated-source-rules/{rule_id}",
+        json={"priority": 9},
+        headers={
+            "Idempotency-Key": f"{key_prefix}3",
+            "If-Match": '"3"',
+        },
+    )
+    archived = client.request(
+        "DELETE",
+        f"/v1/admin/curated-source-rules/{rule_id}",
+        json={"reason_code": "operator_retired"},
+        headers={
+            "Idempotency-Key": f"{key_prefix}4",
+            "If-Match": '"4"',
+        },
+    )
+
+    assert (fetched.status_code, fetched.headers["etag"]) == (200, '"3"')
+    assert fetched.json()["data"]["row_revision"] == "3"
+    assert (created.status_code, created.headers["etag"]) == (200, '"3"')
+    assert missing.status_code == 428
+    assert (patched.status_code, patched.headers["etag"]) == (200, '"4"')
+    assert (archived.status_code, archived.headers["etag"]) == (200, '"5"')
+    assert archived.json()["data"]["archived_at"] is not None
+    assert create_rule.await_args.kwargs["command_id"] == 701
+    assert create_rule.await_args.kwargs["principal"] == "local-dev"
+    assert patch_rule.await_args.kwargs["expected_revision"] == 3
+    assert patch_rule.await_args.kwargs["updates"] == {"priority": 9}
+    assert patch_rule.await_count == 1
+    assert archive_rule.await_args.kwargs["expected_revision"] == 4
+    assert archive_rule.await_args.kwargs["reason_code"] == "operator_retired"
 
 
 def test_public_curated_list_and_detail_strip_raw_lineage(

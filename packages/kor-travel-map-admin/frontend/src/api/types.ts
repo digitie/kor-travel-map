@@ -155,10 +155,12 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** Get Admin Curated Source Rule Route */
+        get: operations["get_admin_curated_source_rule_route_v1_admin_curated_source_rules__rule_id__get"];
         put?: never;
         post?: never;
-        delete?: never;
+        /** Archive Admin Curated Source Rule Route */
+        delete: operations["archive_admin_curated_source_rule_route_v1_admin_curated_source_rules__rule_id__delete"];
         options?: never;
         head?: never;
         /** Patch Admin Curated Source Rule Route */
@@ -1294,6 +1296,91 @@ export interface paths {
          * @description Plan or run the restore hot-swap env switch.
          */
         post: operations["plan_restore_swap_v1_admin_restore__backup_id__swap_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/theme-feature-candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Admin Theme Candidates */
+        get: operations["list_admin_theme_candidates_v1_admin_theme_feature_candidates_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/theme-feature-candidates/{candidate_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Admin Theme Candidate */
+        get: operations["get_admin_theme_candidate_v1_admin_theme_feature_candidates__candidate_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/theme-feature-candidates/{candidate_id}/promote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Promote Admin Theme Candidate */
+        post: operations["promote_admin_theme_candidate_v1_admin_theme_feature_candidates__candidate_id__promote_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/theme-feature-candidates/{candidate_id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reject Admin Theme Candidate */
+        post: operations["reject_admin_theme_candidate_v1_admin_theme_feature_candidates__candidate_id__reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/theme-feature-candidates/{candidate_id}/transitions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Admin Theme Candidate Transitions */
+        get: operations["list_admin_theme_candidate_transitions_v1_admin_theme_feature_candidates__candidate_id__transitions_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -4351,6 +4438,173 @@ export interface components {
             /** Violation Type */
             violation_type: string;
         };
+        /** AdminThemeCandidatePageData */
+        AdminThemeCandidatePageData: {
+            /** Items */
+            items: components["schemas"]["AdminThemeCandidateView"][];
+        };
+        /** AdminThemeCandidatePageResponse */
+        AdminThemeCandidatePageResponse: {
+            data: components["schemas"]["AdminThemeCandidatePageData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /** AdminThemeCandidateResponse */
+        AdminThemeCandidateResponse: {
+            data: components["schemas"]["AdminThemeCandidateView"];
+            meta: components["schemas"]["Meta"];
+        };
+        /** AdminThemeCandidateTransitionPageData */
+        AdminThemeCandidateTransitionPageData: {
+            /** Items */
+            items: components["schemas"]["AdminThemeCandidateTransitionView"][];
+        };
+        /** AdminThemeCandidateTransitionPageResponse */
+        AdminThemeCandidateTransitionPageResponse: {
+            data: components["schemas"]["AdminThemeCandidateTransitionPageData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /** AdminThemeCandidateTransitionView */
+        AdminThemeCandidateTransitionView: {
+            /** Actor */
+            actor: string;
+            /**
+             * Candidate Id
+             * Format: uuid
+             */
+            candidate_id: string;
+            /** Candidate Revision */
+            candidate_revision: string;
+            /** Causation Ref */
+            causation_ref: {
+                [key: string]: unknown;
+            };
+            /** Command Id */
+            command_id: string | null;
+            /** From Eligibility Present */
+            from_eligibility_present: boolean | null;
+            /** From Review State */
+            from_review_state: string | null;
+            /** Generation Id */
+            generation_id: string | null;
+            /**
+             * Occurred At
+             * Format: date-time
+             */
+            occurred_at: string;
+            /** Reason Code */
+            reason_code: string;
+            /** To Eligibility Present */
+            to_eligibility_present: boolean;
+            /** To Review State */
+            to_review_state: string;
+            /** Transition Id */
+            transition_id: string;
+            /** Transition Kind */
+            transition_kind: string;
+        };
+        /** AdminThemeCandidateView */
+        AdminThemeCandidateView: {
+            /** Candidate Etag */
+            candidate_etag: string;
+            /**
+             * Candidate Id
+             * Format: uuid
+             */
+            candidate_id: string;
+            /** Candidate Input Hash */
+            candidate_input_hash: string;
+            /** Candidate Revision */
+            candidate_revision: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Disposition */
+            disposition: string;
+            /** Eligibility Present */
+            eligibility_present: boolean;
+            /** Feature Category */
+            feature_category: string;
+            /** Feature Detail */
+            feature_detail: {
+                [key: string]: unknown;
+            };
+            /** Feature Id */
+            feature_id: string;
+            /** Feature Kind */
+            feature_kind: string;
+            /** Feature Name */
+            feature_name: string;
+            /** Feature Row Revision */
+            feature_row_revision: string;
+            /**
+             * Feature Uuid
+             * Format: uuid
+             */
+            feature_uuid: string;
+            /** Lifecycle State */
+            lifecycle_state: string;
+            /** Match Evidence */
+            match_evidence: {
+                [key: string]: unknown;
+            };
+            /** Proposal Summary */
+            proposal_summary: string | null;
+            /** Proposal Title */
+            proposal_title: string | null;
+            /** Provider Dataset Id */
+            provider_dataset_id: number;
+            /** Publication State */
+            publication_state: string;
+            /** Quality State */
+            quality_state: string;
+            /** Rank Score */
+            rank_score: string;
+            /** Representation Etag */
+            representation_etag: string;
+            /**
+             * Review State
+             * @enum {string}
+             */
+            review_state: "open" | "promoted" | "rejected";
+            /**
+             * Rule Id
+             * Format: uuid
+             */
+            rule_id: string;
+            /** Rule Input Hash */
+            rule_input_hash: string;
+            /** Rule Row Revision */
+            rule_row_revision: string;
+            /** Source Entity Key */
+            source_entity_key: string;
+            /**
+             * Source Id
+             * Format: uuid
+             */
+            source_id: string;
+            /** Source Name */
+            source_name: string;
+            /** Source Record Hash */
+            source_record_hash: string;
+            /** Source Record Key */
+            source_record_key: string;
+            /**
+             * Theme Id
+             * Format: uuid
+             */
+            theme_id: string;
+            /** Theme Name */
+            theme_name: string;
+            /** Theme Slug */
+            theme_slug: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
         /**
          * AdminWeatherAlertHistoryData
          * @description operator ``GET /admin/features/weather/alerts`` data payload.
@@ -6489,6 +6743,11 @@ export interface components {
             data: components["schemas"]["CuratedSourceView"];
             meta: components["schemas"]["Meta"];
         };
+        /** CuratedSourceRuleArchiveRequest */
+        CuratedSourceRuleArchiveRequest: {
+            /** Reason Code */
+            reason_code: string;
+        };
         /** CuratedSourceRuleCreateRequest */
         CuratedSourceRuleCreateRequest: {
             /** Category */
@@ -6498,7 +6757,7 @@ export interface components {
              * @default candidate
              * @enum {string}
              */
-            default_action: "candidate" | "curated" | "ignore";
+            default_action: "candidate" | "ignore";
             /** Detail Selector */
             detail_selector?: {
                 [key: string]: unknown;
@@ -6533,7 +6792,7 @@ export interface components {
             /** Category */
             category?: string | null;
             /** Default Action */
-            default_action?: ("candidate" | "curated" | "ignore") | null;
+            default_action?: ("candidate" | "ignore") | null;
             /** Detail Selector */
             detail_selector?: {
                 [key: string]: unknown;
@@ -6563,6 +6822,8 @@ export interface components {
          * @description curated source rule view.
          */
         CuratedSourceRuleView: {
+            /** Archived At */
+            archived_at?: string | null;
             /** Category */
             category?: string | null;
             /**
@@ -6596,6 +6857,8 @@ export interface components {
             region_scope: {
                 [key: string]: unknown;
             };
+            /** Row Revision */
+            row_revision: string;
             /** Rule Id */
             rule_id: string;
             /** Source Id */
@@ -13259,6 +13522,75 @@ export interface components {
             data: components["schemas"]["SystemLogsListData"];
             meta: components["schemas"]["Meta"];
         };
+        /** ThemeCandidateCommandData */
+        ThemeCandidateCommandData: {
+            /**
+             * Candidate Id
+             * Format: uuid
+             */
+            candidate_id: string;
+            /** Candidate Revision */
+            candidate_revision: string;
+            /** Curation Item Id */
+            curation_item_id?: string | null;
+            /** Curation Item Revision */
+            curation_item_revision?: string | null;
+            /** Transition Id */
+            transition_id: string;
+        };
+        /** ThemeCandidateCommandResponse */
+        ThemeCandidateCommandResponse: {
+            data: components["schemas"]["ThemeCandidateCommandData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /** ThemeCandidatePromoteRequest */
+        ThemeCandidatePromoteRequest: {
+            /** Address Hint */
+            address_hint?: string | null;
+            /**
+             * Collection Id
+             * Format: uuid
+             */
+            collection_id: string;
+            /** Collection Revision */
+            collection_revision: string;
+            /**
+             * Curation Relation
+             * @enum {string}
+             */
+            curation_relation: "primary_stop" | "food_stop" | "cafe_stop" | "bookstore_stop" | "nearby_option" | "accessibility_support" | "pet_support" | "family_support" | "theme_area_anchor";
+            /** External Component Id */
+            external_component_id: string;
+            /** External Item Id */
+            external_item_id: string;
+            /** Item Revision */
+            item_revision?: string | null;
+            /**
+             * Item Status
+             * @enum {string}
+             */
+            item_status: "candidate" | "included";
+            /** Item Summary */
+            item_summary?: string | null;
+            /** Item Title */
+            item_title?: string | null;
+            /** Place Name */
+            place_name: string;
+            /** Reason Code */
+            reason_code: string;
+            /**
+             * Reuse Policy
+             * @enum {string}
+             */
+            reuse_policy: "allowed" | "blocked" | "manual_review";
+            /** Sort Order */
+            sort_order: number;
+        };
+        /** ThemeCandidateRejectRequest */
+        ThemeCandidateRejectRequest: {
+            /** Reason Code */
+            reason_code: string;
+        };
         /** VersionData */
         VersionData: {
             /** Commit */
@@ -14057,6 +14389,8 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    /** @description 현재 retained rule row_revision strong entity tag. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -14083,12 +14417,125 @@ export interface operations {
             };
         };
     };
+    get_admin_curated_source_rule_route_v1_admin_curated_source_rules__rule_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                rule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    /** @description 현재 retained rule row_revision strong entity tag. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CuratedSourceRuleResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    archive_admin_curated_source_rule_route_v1_admin_curated_source_rules__rule_id__delete: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
+                "Idempotency-Key": string;
+                /** @description 직전 단건 GET/성공 응답의 rule row_revision strong ETag. */
+                "If-Match": string;
+            };
+            path: {
+                rule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CuratedSourceRuleArchiveRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    /** @description 현재 retained rule row_revision strong entity tag. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CuratedSourceRuleResponse"];
+                };
+            };
+            /** @description stale rule If-Match */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description If-Match 누락 */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
     patch_admin_curated_source_rule_route_v1_admin_curated_source_rules__rule_id__patch: {
         parameters: {
             query?: never;
             header: {
                 /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
                 "Idempotency-Key": string;
+                /** @description 직전 단건 GET/성공 응답의 rule row_revision strong ETag. */
+                "If-Match": string;
             };
             path: {
                 rule_id: string;
@@ -14104,14 +14551,34 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    /** @description 현재 retained rule row_revision strong entity tag. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["CuratedSourceRuleResponse"];
                 };
             };
+            /** @description stale rule If-Match */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description Validation Error */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description If-Match 누락 */
+            428: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -18217,6 +18684,277 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BackupOperationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    list_admin_theme_candidates_v1_admin_theme_feature_candidates_get: {
+        parameters: {
+            query?: {
+                rule_id?: string | null;
+                theme_id?: string | null;
+                source_id?: string | null;
+                review_state?: ("open" | "promoted" | "rejected") | null;
+                eligibility_present?: boolean | null;
+                feature_id?: string | null;
+                page_size?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminThemeCandidatePageResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_admin_theme_candidate_v1_admin_theme_feature_candidates__candidate_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                candidate_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminThemeCandidateResponse"];
+                };
+            };
+            /** @description representation ETag 일치 */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    promote_admin_theme_candidate_v1_admin_theme_feature_candidates__candidate_id__promote_post: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
+                "Idempotency-Key": string;
+            };
+            path: {
+                candidate_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ThemeCandidatePromoteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    /** @description 현재 resource의 raw strong entity tag. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ThemeCandidateCommandResponse"];
+                };
+            };
+            /** @description stale candidate/collection/item revision */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description If-Match 누락 */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    reject_admin_theme_candidate_v1_admin_theme_feature_candidates__candidate_id__reject_post: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
+                "Idempotency-Key": string;
+            };
+            path: {
+                candidate_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ThemeCandidateRejectRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    /** @description 현재 resource의 raw strong entity tag. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ThemeCandidateCommandResponse"];
+                };
+            };
+            /** @description stale candidate If-Match */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description If-Match 누락 */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    list_admin_theme_candidate_transitions_v1_admin_theme_feature_candidates__candidate_id__transitions_get: {
+        parameters: {
+            query?: {
+                before_transition_id?: number | null;
+                page_size?: number;
+            };
+            header?: never;
+            path: {
+                candidate_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminThemeCandidateTransitionPageResponse"];
                 };
             };
             /** @description Validation Error */
