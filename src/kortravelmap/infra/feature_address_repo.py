@@ -144,7 +144,6 @@ async def apply_feature_address_override(
     road_address_management_no: str | None = None,
     reason: str | None = None,
     operator: str | None = None,
-    prevent_provider_reactivation: bool = True,
 ) -> FeatureAddressOverrideResult | None:
     """주소/좌표 path만 typed field override command로 author한다.
 
@@ -155,14 +154,21 @@ async def apply_feature_address_override(
     한다. feature가 없으면 ``None``(라우터에서 404). 변경할 필드가 하나도 없으면
     ``ValueError``. commit은 호출자 책임.
 
-    ``prevent_provider_reactivation``은 **여전히 미사용이다.** T-VN-34A가 runtime의
-    범용 ``ops.feature_overrides`` DML을 폐쇄했을 때 이 인자는 무효가 됐고, T-VN-36이
-    field override를 되살린 지금도 배선되지 않았다. API/프론트는 계속 이 값을 보낸다 —
-    운영자는 "provider 재적재로부터 잠갔다"고 믿는데 실제로는 아무것도 잠기지 않는다.
-    시그니처를 지우지 않은 이유는 OpenAPI 계약이라 깨면 PinVi 재vendoring까지 번지기
-    때문이다. 무효라는 사실은
-    ``test_address_override_reactivation_flag_is_inert_until_tvn36``가 고정한다 —
-    배선하려면 그 테스트를 **의식적으로** 고쳐야 한다.
+    ``prevent_provider_reactivation`` 인자는 T-VN-36에서 **제거**했다. T-VN-34A가
+    이 경로의 범용 override DML을 폐쇄하며 인자를 무효로 만들었고
+    ``test_address_override_reactivation_flag_is_inert_until_tvn36``가 그 사실을
+    고정해, T-VN-36이 field override를 되살릴 때 배선 여부를 **의식적으로**
+    마주치게 했다. 답은 "배선하지 않는다"다 — 재적재 가드
+    (``feature_repo`` reingest/lifecycle 판정)는 둘 다
+    ``field_path = 'lifecycle_state'``로 한정되므로 이 플래그는 lifecycle 축
+    전용 제어이고 주소/좌표 override에는 의미가 없다. 주소 보정이 provider
+    재적재로부터 보호되는 근거는 이 플래그가 아니라
+    ``feature.apply_provider_feature_field_patch``가 active override를
+    masking한다는 것이다(``test_tvn36_registry_base_lineage_and_override_type_fence``).
+    죽은 인자를 남겨두면 운영자는 "잠갔다"고 믿는데 실제 보호 근거는 다른 곳에
+    있다는 오해가 그대로 남으므로, admin-issues 요청 필드까지 함께 걷어냈다.
+    lifecycle 축 제어가 필요한 경로는 ``feature.author_lifecycle_override``를
+    통해 계속 이 플래그를 받는다.
     """
     if lon is None and lat is None:
         coord_update = False

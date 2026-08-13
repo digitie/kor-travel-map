@@ -163,44 +163,49 @@ async def test_apply_override_requires_a_field(
         await apply_feature_address_override(migrated_session, fid)
 
 
-async def test_address_override_reactivation_flag_is_inert_until_tvn36(
+async def test_address_override_is_lifecycle_reactivation_neutral(
     migrated_session: AsyncSession,
 ) -> None:
-    """``prevent_provider_reactivation``이 현재 아무것도 하지 않음을 고정한다.
+    """주소 override가 lifecycle 재적재 축을 건드리지 않음을 고정한다.
 
-    T-VN-34A가 runtime의 범용 ``ops.feature_overrides`` DML을 폐쇄해서 이 경로는
-    override row를 **아예 만들지 않는다.** 그런데 API/프론트는 계속 이 값을 보내고
-    라우터도 그대로 넘긴다 — 운영자 입장에서는 "provider 재적재로부터 잠갔다"고
-    믿는데 실제로는 아무것도 잠기지 않는다.
+    T-VN-34A는 이 경로의 범용 override DML을 폐쇄해 ``prevent_provider_reactivation``
+    인자를 무효로 만들었고, ``..._is_inert_until_tvn36``가 그 사실을 고정해 T-VN-36이
+    field override를 되살릴 때 배선 여부를 의식적으로 마주치게 했다. 답은
+    **배선하지 않는다**였다 — ``feature_repo``의 두 재적재 가드가 모두
+    ``field_path = 'lifecycle_state'``로 한정되므로 그 플래그는 lifecycle 축 전용이고,
+    주소/좌표 override에는 의미가 없다. 그래서 인자와 admin-issues 요청 필드를 함께
+    제거했다.
 
-    시그니처를 지우지 않은 이유는 계약을 깨면 PinVi 재vendoring까지 번지기 때문이고,
-    T-VN-36이 field override provenance를 되살릴 때 이 인자를 다시 배선할 예정이기
-    때문이다. 그때 이 테스트가 red가 되어 **의식적으로** 마주치게 만든다 — 조용히
-    살아나거나 조용히 죽은 채로 남는 것 둘 다 막는다.
+    이 테스트가 지키는 것은 그 결정의 관측 가능한 귀결이다: 주소 override는
+    ``lifecycle_state`` override를 만들지 않고, 남기는 field override row는 전부
+    ``prevent_provider_reactivation = false``다. 즉 이 경로로는 재적재 잠금이
+    **생길 수 없다**. 주소 보정이 provider 재적재에서 살아남는 근거는 별개로
+    ``test_tvn36_registry_base_lineage_and_override_type_fence``(active override
+    masking)가 지킨다.
     """
 
-    overrides_before = (
-        await migrated_session.execute(
-            text("SELECT count(*) FROM ops.feature_overrides")
-        )
-    ).scalar_one()
+    fid = "f_addr_lifecycle_neutral"
+    migrated_session.add(_feature_row(fid))
+    await migrated_session.flush()
+    result = await apply_feature_address_override(
+        migrated_session,
+        fid,
+        legal_dong_code="1114010300",
+        reason="lifecycle neutrality probe",
+        operator="tester",
+    )
+    assert result is not None
 
-    for flag in (True, False):
-        fid = f"f_addr_inert_{int(flag)}"
-        migrated_session.add(_feature_row(fid))
-        await migrated_session.flush()
-        result = await apply_feature_address_override(
-            migrated_session,
-            fid,
-            legal_dong_code="1114010300",
-            reason="inert flag probe",
-            operator="tester",
-            prevent_provider_reactivation=flag,
-        )
-        assert result is not None, flag
-
-    assert (
+    rows = (
         await migrated_session.execute(
-            text("SELECT count(*) FROM ops.feature_overrides")
+            text(
+                "SELECT field_path, prevent_provider_reactivation "
+                "FROM ops.feature_overrides WHERE feature_id = :fid"
+            ),
+            {"fid": fid},
         )
-    ).scalar_one() == overrides_before
+    ).mappings().all()
+
+    assert rows, "주소 override는 field override row를 남겨야 한다"
+    assert [row["field_path"] for row in rows] == ["core.legal_dong_code"]
+    assert all(row["prevent_provider_reactivation"] is False for row in rows)

@@ -4300,11 +4300,6 @@ export interface components {
              * @description [deprecated·ignored] 감사 actor는 인증 principal에서만 파생한다 (ADR-066 D-2, T-VN-20). PinVi 호환을 위해 수용하되 값은 무시하며, PinVi는 전송 중단 예정 (docs/integration-map.md).
              */
             operator?: string | null;
-            /**
-             * Prevent Provider Reactivation
-             * @default true
-             */
-            prevent_provider_reactivation: boolean;
             /** Reason */
             reason?: string | null;
             /** Road Address Management No */
