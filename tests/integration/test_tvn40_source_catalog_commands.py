@@ -331,31 +331,20 @@ async def test_source_operator_cas_and_provider_observation_are_disjoint(
                     INSERT INTO ops.curation_provider_snapshot_receipts (
                       source_job_id, root_job_id, provider_dataset_id,
                       sync_scope, operation_key, observed_at,
-                      source_entity_count, last_source_modified_at,
+                      source_entity_count, input_member_count,
+                      last_source_modified_at,
                       source_input_set_hash
                     )
                     SELECT CAST(:job_id AS uuid), CAST(:root_job_id AS uuid),
                            :dataset_id, 'dataset_wide', 'load', job.finished_at,
-                           count(head.source_entity_key)::bigint,
-                           max(record.imported_at)::date,
-                           encode(x_extension.digest(convert_to(
-                             COALESCE(jsonb_agg(jsonb_build_array(
-                               entity.source_entity_key,
-                               head.current_source_record_key,
-                               record.raw_payload_hash
-                             ) ORDER BY entity.source_entity_key)
-                             FILTER (WHERE head.source_entity_key IS NOT NULL),
-                             '[]'::jsonb)::text, 'UTF8'), 'sha256'), 'hex')
+                           input.source_entity_count, input.input_member_count,
+                           input.last_source_modified_at,
+                           input.source_input_set_hash
                     FROM ops.import_jobs AS job
-                    JOIN provider_sync.source_entities AS entity
-                      ON entity.provider_dataset_id = :dataset_id
-                    LEFT JOIN provider_sync.source_entity_heads AS head
-                      ON head.source_entity_key = entity.source_entity_key
-                    LEFT JOIN provider_sync.source_records AS record
-                      ON record.source_entity_key = head.source_entity_key
-                     AND record.source_record_key = head.current_source_record_key
+                    CROSS JOIN LATERAL feature.current_provider_curation_input_set(
+                      :dataset_id
+                    ) AS input
                     WHERE job.job_id = CAST(:job_id AS uuid)
-                    GROUP BY job.finished_at
                     """
                 ),
                 {
@@ -373,7 +362,7 @@ async def test_source_operator_cas_and_provider_observation_are_disjoint(
                     text(
                         """
                         CALL feature.finalize_provider_curation_root(
-                          CAST(:root_job_id AS uuid), NULL, NULL, NULL
+                          CAST(:root_job_id AS uuid), NULL, NULL, NULL, NULL
                         )
                         """
                     ),
@@ -487,7 +476,7 @@ async def test_source_operator_cas_and_provider_observation_are_disjoint(
                     text(
                         """
                         CALL feature.finalize_provider_curation_root(
-                          CAST(:root_job_id AS uuid), NULL, NULL, NULL
+                          CAST(:root_job_id AS uuid), NULL, NULL, NULL, NULL
                         )
                         """
                     ),

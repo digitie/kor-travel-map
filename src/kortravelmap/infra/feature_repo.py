@@ -96,6 +96,7 @@ __all__ = [
     "DEFAULT_PRICE_STALE_HIDE_DAYS",
     "EnrichmentLoadResult",
     "FeatureLoadResult",
+    "capture_provider_curation_input",
     "FeatureBatchItemRow",
     "FeatureSearchPage",
     "FeatureSearchRow",
@@ -2014,6 +2015,8 @@ class FeatureLoadResult:
     source_records_inserted: int = 0
     source_links_inserted: int = 0
     source_links_updated: int = 0
+    curation_input_member_count: int | None = None
+    curation_input_set_hash: str | None = None
 
     def merge(self, other: FeatureLoadResult) -> FeatureLoadResult:
         """두 결과 카운트를 합산 (streaming 배치 적재 누적용)."""
@@ -2024,7 +2027,44 @@ class FeatureLoadResult:
             source_records_inserted=(self.source_records_inserted + other.source_records_inserted),
             source_links_inserted=(self.source_links_inserted + other.source_links_inserted),
             source_links_updated=(self.source_links_updated + other.source_links_updated),
+            curation_input_member_count=(
+                other.curation_input_member_count
+                if other.curation_input_member_count is not None
+                else self.curation_input_member_count
+            ),
+            curation_input_set_hash=(
+                other.curation_input_set_hash
+                if other.curation_input_set_hash is not None
+                else self.curation_input_set_hash
+            ),
         )
+
+
+async def capture_provider_curation_input(
+    session: AsyncSession, *, provider: str, dataset_key: str
+) -> FeatureLoadResult:
+    """현재 transaction이 쓴 source head/link 집합의 causal seal을 반환한다."""
+
+    row = (
+        await session.execute(
+            text(
+                """
+                SELECT input.input_member_count, input.source_input_set_hash
+                FROM provider_sync.provider_datasets AS dataset
+                CROSS JOIN LATERAL feature.current_provider_curation_input_set(
+                  dataset.provider_dataset_id
+                ) AS input
+                WHERE dataset.provider = :provider
+                  AND dataset.dataset_key = :dataset_key
+                """
+            ),
+            {"provider": provider, "dataset_key": dataset_key},
+        )
+    ).mappings().one()
+    return FeatureLoadResult(
+        curation_input_member_count=int(row["input_member_count"]),
+        curation_input_set_hash=str(row["source_input_set_hash"]),
+    )
 
 
 FeatureBatchItemState = Literal[

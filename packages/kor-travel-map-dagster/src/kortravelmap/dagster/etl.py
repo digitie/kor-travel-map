@@ -279,6 +279,13 @@ async def load_feature_bundles_for_dagster(
 
     if load_all is not None:
         load = await load_all(bundles)
+    elif authoritative_snapshot_complete:
+        # Curation child receipt must be causally tied to one committed DB image.
+        # Chunk transactions would allow another run to interleave and make the
+        # last chunk's seal describe a mixed snapshot.
+        load = await client.load_feature_bundles(
+            bundles, curation_dataset=(provider, dataset_key)
+        )
     else:
         load = None
         for start in range(0, len(bundles), chunk_size):

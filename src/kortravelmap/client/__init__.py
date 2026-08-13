@@ -156,6 +156,7 @@ from kortravelmap.infra.feature_repo import (
     NearbyFeaturePage,
     NoticeFeatureLoadResult,
     NoticeReconcileResult,
+    capture_provider_curation_input,
     close_notice_features,
     features_in_bbox,
     get_feature_row,
@@ -844,6 +845,8 @@ class AsyncKorTravelMapClient:
         dagster_run_id: str,
         membership: ProviderDatasetOperationMembership,
         authoritative_snapshot_complete: bool = False,
+        curation_input_member_count: int | None = None,
+        curation_input_set_hash: str | None = None,
     ) -> DagsterFeatureOperationMutation:
         """wrapper가 성공한 exact canonical member 하나를 완료한다."""
         try:
@@ -857,6 +860,8 @@ class AsyncKorTravelMapClient:
                     dagster_run_id=dagster_run_id,
                     membership=membership,
                     authoritative_snapshot_complete=authoritative_snapshot_complete,
+                    curation_input_member_count=curation_input_member_count,
+                    curation_input_set_hash=curation_input_set_hash,
                 )
         except FeatureOperationInvariantConflict as exc:
             await self._record_feature_operation_conflict(exc)
@@ -980,14 +985,28 @@ class AsyncKorTravelMapClient:
                 sync_scope=sync_scope,
             )
 
-    async def load_feature_bundles(self, bundles: Iterable[FeatureBundle]) -> FeatureLoadResult:
+    async def load_feature_bundles(
+        self,
+        bundles: Iterable[FeatureBundle],
+        *,
+        curation_dataset: tuple[str, str] | None = None,
+    ) -> FeatureLoadResult:
         """``FeatureBundle`` 다수를 한 transaction으로 적재 (commit/rollback).
 
         feature → source_record → source_link 순 idempotent upsert
         (``infra.load_bundles``). 하나라도 실패하면 전체 rollback.
         """
+        materialized = list(bundles)
         async with self._session_factory() as session, session.begin():
-            return await load_bundles(session, bundles)
+            result = await load_bundles(session, materialized)
+            if curation_dataset is not None:
+                provider, dataset_key = curation_dataset
+                result = result.merge(
+                    await capture_provider_curation_input(
+                        session, provider=provider, dataset_key=dataset_key
+                    )
+                )
+            return result
 
     async def load_authoritative_notice_snapshot(
         self,
@@ -1001,7 +1020,7 @@ class AsyncKorTravelMapClient:
     ) -> NoticeFeatureLoadResult:
         """full notice snapshot 적재와 lifecycle 반영을 한 transaction으로 수행."""
         async with self._session_factory() as session, session.begin():
-            return await repo_load_authoritative_notice_snapshot(
+            result = await repo_load_authoritative_notice_snapshot(
                 session,
                 bundles=bundles,
                 provider=provider,
@@ -1009,6 +1028,12 @@ class AsyncKorTravelMapClient:
                 source_entity_type=source_entity_type,
                 active_lineage_keys=active_lineage_keys,
                 observed_at=observed_at,
+            )
+            seal = await capture_provider_curation_input(
+                session, provider=provider, dataset_key=dataset_key
+            )
+            return NoticeFeatureLoadResult(
+                load=result.load.merge(seal), reconcile=result.reconcile
             )
 
     async def load_notice_event_bundles(
@@ -1023,7 +1048,7 @@ class AsyncKorTravelMapClient:
     ) -> NoticeFeatureLoadResult:
         """event notice 적재와 member lifecycle 반영을 한 transaction으로 수행."""
         async with self._session_factory() as session, session.begin():
-            return await repo_load_notice_event_bundles(
+            result = await repo_load_notice_event_bundles(
                 session,
                 bundles=bundles,
                 provider=provider,
@@ -1031,6 +1056,12 @@ class AsyncKorTravelMapClient:
                 source_entity_type=source_entity_type,
                 lineage_events=lineage_events,
                 observed_at=observed_at,
+            )
+            seal = await capture_provider_curation_input(
+                session, provider=provider, dataset_key=dataset_key
+            )
+            return NoticeFeatureLoadResult(
+                load=result.load.merge(seal), reconcile=result.reconcile
             )
 
     async def retire_features_by_source(

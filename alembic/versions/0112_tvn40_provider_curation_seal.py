@@ -75,6 +75,45 @@ def _execute_commands(source: str) -> None:
 
 
 _RECEIPTS_SQL = r"""
+CREATE FUNCTION feature.current_provider_curation_input_set(p_provider_dataset_id bigint)
+RETURNS TABLE (
+  source_entity_count bigint,
+  input_member_count bigint,
+  last_source_modified_at date,
+  source_input_set_hash text
+)
+LANGUAGE sql STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog, feature, provider_sync, ops, x_extension
+AS $input$
+  WITH canonical_input AS (
+    SELECT entity.source_entity_key, head.current_source_record_key,
+           record.raw_payload_hash, record.imported_at,
+           link.feature_id, link.source_role, link.match_method, link.confidence
+    FROM provider_sync.source_entities AS entity
+    LEFT JOIN provider_sync.source_entity_heads AS head
+      ON head.source_entity_key = entity.source_entity_key
+    LEFT JOIN provider_sync.source_records AS record
+      ON record.source_entity_key = head.source_entity_key
+     AND record.source_record_key = head.current_source_record_key
+    LEFT JOIN provider_sync.source_links AS link
+      ON link.source_entity_key = entity.source_entity_key
+    WHERE entity.provider_dataset_id = p_provider_dataset_id
+  )
+  SELECT count(DISTINCT input.source_entity_key)::bigint,
+         count(input.source_entity_key)::bigint,
+         max(input.imported_at)::date,
+         encode(x_extension.digest(convert_to(
+           COALESCE(jsonb_agg(jsonb_build_array(
+             input.source_entity_key, input.current_source_record_key,
+             input.raw_payload_hash, input.feature_id, input.source_role,
+             input.match_method, input.confidence
+           ) ORDER BY input.source_entity_key, input.feature_id)
+           FILTER (WHERE input.source_entity_key IS NOT NULL), '[]'::jsonb)::text,
+           'UTF8'), 'sha256'), 'hex')
+  FROM canonical_input AS input
+$input$;
+
 CREATE TABLE ops.curation_provider_snapshot_receipts (
   source_job_id uuid PRIMARY KEY
     REFERENCES ops.import_jobs(job_id) ON DELETE RESTRICT,
@@ -86,6 +125,7 @@ CREATE TABLE ops.curation_provider_snapshot_receipts (
   operation_key text NOT NULL,
   observed_at timestamptz NOT NULL,
   source_entity_count bigint NOT NULL CHECK (source_entity_count >= 0),
+  input_member_count bigint NOT NULL CHECK (input_member_count >= 0),
   last_source_modified_at date,
   source_input_set_hash text NOT NULL CHECK (source_input_set_hash ~ '^[0-9a-f]{64}$'),
   UNIQUE (root_job_id, provider_dataset_id, sync_scope, operation_key)
@@ -128,6 +168,8 @@ CREATE PROCEDURE feature.seal_provider_curation_snapshot_receipt(
   IN p_provider_dataset_id bigint,
   IN p_sync_scope text,
   IN p_operation_key text,
+  IN p_expected_input_member_count bigint,
+  IN p_expected_input_set_hash text,
   OUT o_source_job_id uuid,
   OUT o_observed_at timestamptz,
   OUT o_source_entity_count bigint,
@@ -139,6 +181,8 @@ SET search_path = pg_catalog, feature, provider_sync, ops, x_extension
 AS $command$
 DECLARE
   v_child ops.import_jobs%ROWTYPE;
+  v_input_member_count bigint;
+  v_last_source_modified_at date;
 BEGIN
   IF current_setting('transaction_isolation') <> 'serializable' THEN
     RAISE EXCEPTION 'provider snapshot seal requires SERIALIZABLE transaction'
@@ -196,38 +240,28 @@ BEGIN
 
   o_source_job_id := v_child.job_id;
   o_observed_at := clock_timestamp();
-  SELECT count(head.source_entity_key)::bigint,
-         encode(x_extension.digest(convert_to(
-           COALESCE(jsonb_agg(jsonb_build_array(
-             entity.source_entity_key,
-             head.current_source_record_key,
-             record.raw_payload_hash
-           ) ORDER BY entity.source_entity_key)
-           FILTER (WHERE head.source_entity_key IS NOT NULL), '[]'::jsonb)::text,
-           'UTF8'), 'sha256'), 'hex')
-  INTO STRICT o_source_entity_count, o_source_input_set_hash
-  FROM provider_sync.source_entities AS entity
-  LEFT JOIN provider_sync.source_entity_heads AS head
-    ON head.source_entity_key = entity.source_entity_key
-  LEFT JOIN provider_sync.source_records AS record
-    ON record.source_entity_key = head.source_entity_key
-   AND record.source_record_key = head.current_source_record_key
-  WHERE entity.provider_dataset_id = p_provider_dataset_id;
+  SELECT input.source_entity_count, input.input_member_count,
+         input.last_source_modified_at, input.source_input_set_hash
+  INTO STRICT o_source_entity_count, v_input_member_count,
+       v_last_source_modified_at, o_source_input_set_hash
+  FROM feature.current_provider_curation_input_set(p_provider_dataset_id) AS input;
+  IF p_expected_input_member_count IS NULL
+     OR p_expected_input_set_hash !~ '^[0-9a-f]{64}$'
+     OR p_expected_input_member_count <> v_input_member_count
+     OR p_expected_input_set_hash <> o_source_input_set_hash THEN
+    RAISE EXCEPTION 'provider load input changed before child completion'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_provider_snapshot_load_input';
+  END IF;
 
   INSERT INTO ops.curation_provider_snapshot_receipts (
     source_job_id, root_job_id, provider_dataset_id, sync_scope, operation_key,
-    observed_at, source_entity_count, last_source_modified_at, source_input_set_hash
+    observed_at, source_entity_count, input_member_count,
+    last_source_modified_at, source_input_set_hash
   )
   SELECT v_child.job_id, p_root_job_id, p_provider_dataset_id, p_sync_scope,
          p_operation_key, o_observed_at, o_source_entity_count,
-         max(record.imported_at)::date, o_source_input_set_hash
-  FROM provider_sync.source_entities AS entity
-  LEFT JOIN provider_sync.source_entity_heads AS head
-    ON head.source_entity_key = entity.source_entity_key
-  LEFT JOIN provider_sync.source_records AS record
-    ON record.source_entity_key = head.source_entity_key
-   AND record.source_record_key = head.current_source_record_key
-  WHERE entity.provider_dataset_id = p_provider_dataset_id;
+         v_input_member_count, v_last_source_modified_at,
+         o_source_input_set_hash;
 END
 $command$;
 """
@@ -338,7 +372,8 @@ CREATE PROCEDURE feature.finalize_provider_curation_root(
   IN p_root_job_id uuid,
   OUT o_generation_count bigint,
   OUT o_generation_set_hash text,
-  OUT o_replayed boolean
+  OUT o_replayed boolean,
+  OUT o_stale_input boolean
 )
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -359,10 +394,12 @@ DECLARE
   v_observation_revision bigint;
   v_row_count integer;
   v_current_count bigint;
+  v_current_member_count bigint;
   v_current_hash text;
   v_child_count bigint;
   v_child_hash text;
 BEGIN
+  o_stale_input := false;
   IF current_setting('transaction_isolation') <> 'serializable' THEN
     RAISE EXCEPTION 'provider curation root requires SERIALIZABLE transaction'
       USING ERRCODE = '25001';
@@ -384,7 +421,8 @@ BEGIN
   SELECT count(*)::bigint,
          encode(x_extension.digest(convert_to(COALESCE(jsonb_agg(jsonb_build_array(
            receipt.source_job_id::text, receipt.provider_dataset_id,
-           receipt.sync_scope, receipt.operation_key, receipt.source_input_set_hash
+           receipt.sync_scope, receipt.operation_key, receipt.input_member_count,
+           receipt.source_input_set_hash
          ) ORDER BY receipt.provider_dataset_id, receipt.sync_scope, receipt.operation_key)::text, '[]'),
          'UTF8'), 'sha256'), 'hex')
   INTO STRICT v_child_count, v_child_hash
@@ -434,33 +472,47 @@ BEGIN
     JOIN feature.theme_feature_candidates AS candidate ON candidate.rule_id = rule.rule_id
     WHERE receipt.root_job_id = p_root_job_id AND candidate.disposition = 'active'
   ) AS touched ORDER BY touched.feature_id;
+  PERFORM 1
+  FROM provider_sync.source_links AS link
+  JOIN provider_sync.source_entities AS entity
+    ON entity.source_entity_key = link.source_entity_key
+  JOIN ops.curation_provider_snapshot_receipts AS receipt
+    ON receipt.provider_dataset_id = entity.provider_dataset_id
+  WHERE receipt.root_job_id = p_root_job_id
+  ORDER BY link.source_entity_key, link.feature_id
+  FOR SHARE OF link;
   PERFORM pg_advisory_xact_lock(hashtextextended('curation-catalog-write', 0));
+
+  -- Validate every immutable child seal before the first catalog/candidate DML.
+  FOR v_child IN
+    SELECT receipt.* FROM ops.curation_provider_snapshot_receipts AS receipt
+    WHERE receipt.root_job_id = p_root_job_id
+    ORDER BY receipt.provider_dataset_id, receipt.sync_scope, receipt.operation_key
+  LOOP
+    SELECT input.source_entity_count, input.input_member_count,
+           input.source_input_set_hash
+    INTO STRICT v_current_count, v_current_member_count, v_current_hash
+    FROM feature.current_provider_curation_input_set(
+      v_child.provider_dataset_id
+    ) AS input;
+    IF v_current_count <> v_child.source_entity_count
+       OR v_current_member_count <> v_child.input_member_count
+       OR v_current_hash <> v_child.source_input_set_hash THEN
+      o_generation_count := 0;
+      o_generation_set_hash := encode(
+        x_extension.digest(convert_to('[]', 'UTF8'), 'sha256'), 'hex'
+      );
+      o_replayed := false;
+      o_stale_input := true;
+      RETURN;
+    END IF;
+  END LOOP;
 
   FOR v_child IN
     SELECT receipt.* FROM ops.curation_provider_snapshot_receipts AS receipt
     WHERE receipt.root_job_id = p_root_job_id
     ORDER BY receipt.provider_dataset_id, receipt.sync_scope, receipt.operation_key
   LOOP
-    SELECT count(head.source_entity_key)::bigint,
-           encode(x_extension.digest(convert_to(
-             COALESCE(jsonb_agg(jsonb_build_array(entity.source_entity_key,
-               head.current_source_record_key, record.raw_payload_hash)
-             ORDER BY entity.source_entity_key)
-             FILTER (WHERE head.source_entity_key IS NOT NULL), '[]'::jsonb)::text,
-             'UTF8'), 'sha256'), 'hex')
-    INTO STRICT v_current_count, v_current_hash
-    FROM provider_sync.source_entities AS entity
-    LEFT JOIN provider_sync.source_entity_heads AS head
-      ON head.source_entity_key = entity.source_entity_key
-    LEFT JOIN provider_sync.source_records AS record
-      ON record.source_entity_key = head.source_entity_key
-     AND record.source_record_key = head.current_source_record_key
-    WHERE entity.provider_dataset_id = v_child.provider_dataset_id;
-    IF v_current_count <> v_child.source_entity_count
-       OR v_current_hash <> v_child.source_input_set_hash THEN
-      RAISE EXCEPTION 'provider source heads changed after the child snapshot was sealed'
-        USING ERRCODE = '40001';
-    END IF;
     IF EXISTS (SELECT 1 FROM feature.curated_sources AS source
                WHERE source.provider_dataset_id = v_child.provider_dataset_id
                  AND source.archived_at IS NULL) THEN
@@ -512,7 +564,9 @@ $command$;
 """
 
 
-_SEAL_SIGNATURE = "feature.seal_provider_curation_snapshot_receipt(uuid,bigint,text,text)"
+_SEAL_SIGNATURE = (
+    "feature.seal_provider_curation_snapshot_receipt(uuid,bigint,text,text,bigint,text)"
+)
 _ROOT_SIGNATURE = "feature.finalize_provider_curation_root(uuid)"
 _OLD_FINALIZE_SIGNATURE = "feature.finalize_provider_curation_receipts(bigint,uuid,text,text)"
 _MATERIALIZE_SIGNATURE = "feature.materialize_theme_candidate_generation(uuid,text,uuid,uuid,bigint,text,jsonb)"
@@ -526,6 +580,14 @@ def upgrade() -> None:
     op.execute(_REFRESH_SOURCE_SQL)
     op.execute("SET ROLE ktm_feature_schema_owner")
     op.execute(_FINALIZE_ROOT_SQL)
+    op.execute(
+        "REVOKE ALL ON FUNCTION feature.current_provider_curation_input_set(bigint) "
+        "FROM PUBLIC"
+    )
+    op.execute(
+        "GRANT EXECUTE ON FUNCTION feature.current_provider_curation_input_set(bigint) "
+        "TO ktm_feature_runtime, ktm_curation_command_owner"
+    )
     op.execute(
         "ALTER FUNCTION feature.reject_curation_provider_receipt_mutation() "
         "OWNER TO ktm_curation_audit_writer"

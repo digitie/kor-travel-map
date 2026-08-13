@@ -2,6 +2,20 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-14 — T-VN-40: provider load 인과 입력과 concierge catalog 봉인
+
+authoritative child receipt를 source head만이 아니라 source link의 Feature identity·role·match method·
+confidence까지 포함한 canonical set으로 확장했다. load transaction 안에서 이 set을 캡처하고 child
+완료 시 exact count/hash를 재검증하므로 다른 transaction이 사이에 link나 head를 바꾼 결과를 과거
+provider job에 귀속할 수 없다. root는 모든 child set을 DML 전에 다시 검증하며 committed drift는
+무한 `40001` 재시도가 아니라 `stale_input` 실패 증거로 terminal 수렴한다.
+
+은퇴한 caller-driven concierge catalog writer 대신 terminal source observation trigger가 잠긴 현재
+Feature/source set에서 channel·playlist theme/rule을 DB에서 직접 도출한다. provider-owned row만
+갱신하고 충돌한 operator-owned slug는 fail-close하며, 사라진 group은 빈 generation으로 candidate
+eligibility를 먼저 감사한 뒤 보관한다. fresh 0001→0113 actual-login candidate/source 통합 13개와
+관련 unit 88개, scoped ruff·diff gate를 통과했다.
+
 ## 2026-08-13 — T-VN-40: provider child 입력 봉인과 root 전체 잠금 수렴
 
 적대 리뷰에서 확인한 child 완료와 root finalizer 사이의 인과 단절을 제거했다. authoritative

@@ -829,6 +829,8 @@ async def _seal_authoritative_curation_snapshot(
     *,
     root_job_id: str,
     membership: ProviderDatasetOperationMembership,
+    input_member_count: int,
+    input_set_hash: str,
 ) -> datetime:
     """child 완료와 같은 transaction에서 exact source-head 집합을 봉인한다."""
     row = (
@@ -837,7 +839,8 @@ async def _seal_authoritative_curation_snapshot(
                 """
                 CALL feature.seal_provider_curation_snapshot_receipt(
                   CAST(:root_job_id AS uuid), :provider_dataset_id,
-                  :sync_scope, :operation_key, NULL, NULL, NULL, NULL
+                  :sync_scope, :operation_key, :input_member_count,
+                  :input_set_hash, NULL, NULL, NULL, NULL
                 )
                 """
             ),
@@ -846,6 +849,8 @@ async def _seal_authoritative_curation_snapshot(
                 "provider_dataset_id": membership.provider_dataset_id,
                 "root_job_id": root_job_id,
                 "sync_scope": membership.sync_scope,
+                "input_member_count": input_member_count,
+                "input_set_hash": input_set_hash,
             },
         )
     ).mappings().one()
@@ -857,18 +862,21 @@ async def _seal_authoritative_curation_snapshot(
 
 async def _finalize_authoritative_curation_root(
     session: AsyncSession, *, root_job_id: str
-) -> None:
+) -> bool:
     """root SUCCESS transaction에서 전체 member의 curation receipt를 원자 완결한다."""
-    await session.execute(
-        text(
-            """
-            CALL feature.finalize_provider_curation_root(
-              CAST(:root_job_id AS uuid), NULL, NULL, NULL
-            )
-            """
-        ),
-        {"root_job_id": root_job_id},
-    )
+    row = (
+        await session.execute(
+            text(
+                """
+                CALL feature.finalize_provider_curation_root(
+                  CAST(:root_job_id AS uuid), NULL, NULL, NULL, NULL
+                )
+                """
+            ),
+            {"root_job_id": root_job_id},
+        )
+    ).mappings().one()
+    return bool(row["o_stale_input"])
 
 
 async def finish_dagster_feature_membership(
@@ -877,6 +885,8 @@ async def finish_dagster_feature_membership(
     dagster_run_id: str,
     membership: ProviderDatasetOperationMembership,
     authoritative_snapshot_complete: bool = False,
+    curation_input_member_count: int | None = None,
+    curation_input_set_hash: str | None = None,
 ) -> DagsterFeatureOperationMutation:
     normalized_run_id = _run_id(dagster_run_id)
     await lock_pipeline_lineage_mutation(session)
@@ -919,9 +929,23 @@ async def finish_dagster_feature_membership(
         )
     if member.status == "done":
         return DagsterFeatureOperationMutation(outcome="noop", operation=operation)
+    if authoritative_snapshot_complete and (
+        curation_input_member_count is None or curation_input_set_hash is None
+    ):
+        raise FeatureOperationInvariantConflict(
+            "authoritative membership requires the causal load input seal",
+            dagster_run_id=normalized_run_id,
+            root_job_id=root_job_id,
+        )
+    assert curation_input_member_count is not None or not authoritative_snapshot_complete
+    assert curation_input_set_hash is not None or not authoritative_snapshot_complete
     sealed_at = (
         await _seal_authoritative_curation_snapshot(
-            session, root_job_id=root_job_id, membership=membership
+            session,
+            root_job_id=root_job_id,
+            membership=membership,
+            input_member_count=cast(int, curation_input_member_count),
+            input_set_hash=cast(str, curation_input_set_hash),
         )
         if authoritative_snapshot_complete
         else None
@@ -1277,11 +1301,28 @@ async def reconcile_dagster_feature_run(
             "root_job_id": root_job_id,
         },
     )
-    if target_status == "done":
-        await _finalize_authoritative_curation_root(
+    if target_status == "done" and await _finalize_authoritative_curation_root(
             session, root_job_id=root_job_id
+    ):
+        target_status = "failed"
+        mismatches["curation_input"] = {
+            "expected": "sealed child load input",
+            "actual": "current source/head/link input drifted",
+        }
+        await session.execute(
+            text(
+                """
+                UPDATE ops.import_jobs
+                SET status = 'failed', current_stage = 'stale_input',
+                    error_message = 'provider curation input changed after child seal',
+                    progress = 0
+                WHERE job_id = CAST(:root_job_id AS uuid)
+                  AND kind = 'provider_feature_load_run'
+                """
+            ),
+            {"root_job_id": root_job_id},
         )
-    if identity_conflict or (terminal == "SUCCESS" and incomplete_members):
+    if mismatches or (terminal == "SUCCESS" and incomplete_members):
         if terminal == "SUCCESS" and incomplete_members:
             mismatches["non_done_members"] = {
                 "expected": 0,

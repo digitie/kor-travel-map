@@ -59,11 +59,15 @@ root `done/SUCCESS` SERIALIZABLE transaction은 전체 child receipt와 영향 F
 receipt relation의 raw DML은 회수했다. child 완료 뒤 source head가 변하면 `40001`로 root transaction 전체를
 재시도하므로 과거 job에 다른 load의 현재 head를 귀속할 수 없다. archived theme/source는 legacy와 canonical
 public projection 전 경로에서 즉시 제외한다.
-삭제된 curated schedule/UI를 전제하던 stale live Playwright spec도 제거했다. 다음은 남은 raw catalog DML을
-회수하고 provider-owned concierge catalog sync를 typed command로 교체하는 것이다.
+삭제된 curated schedule/UI를 전제하던 stale live Playwright spec도 제거했다. provider child seal은
+source head뿐 아니라 link identity·role·match method·confidence까지 load transaction 안에서 봉인하며,
+root 전 검증에서 committed drift가 발견되면 `stale_input` terminal로 수렴한다. provider-owned concierge
+theme/rule도 terminal observation trigger가 잠긴 DB set에서 도출하고 operator-owned slug 충돌은
+fail-close한다. 다음은 `ops.import_jobs`/membership raw DML을 named command로 회수해 terminal evidence
+위조 경계를 닫는 것이다.
 T-VN-40 paired consumer receipt는 현재 `pending`이며 Map user/
 service/full spec hash를 고정하고 n150 installer가 complete 전에는 fail-close한다.
-fresh 0001→0112 actual-login candidate/source 통합 10개와 관련 unit 74개를 통과했다.
+fresh 0001→0113 actual-login candidate/source 통합 13개와 관련 unit 88개를 통과했다.
 A/B/C는 하나의 forward-only PR/release로 유지하며, 누적 구현은 DB/동시성과
 API·consumer/ACL 관점의 독립 적대 리뷰어 2명이 같은 고정 SHA에서 검증한다.
 상세 계약은
