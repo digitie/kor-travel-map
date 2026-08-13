@@ -603,6 +603,239 @@ function useAdminFeaturesClientController({
   };
 }
 
+type AdminFeatureFilterBarProps = Pick<
+  ReturnType<typeof useAdminFeaturesClientController>,
+  | "hasIssue"
+  | "kind"
+  | "lifecycleState"
+  | "order"
+  | "pageSize"
+  | "providerDatasetId"
+  | "publicationState"
+  | "q"
+  | "qualityState"
+  | "resetCursor"
+  | "setHasIssue"
+  | "setKind"
+  | "setLifecycleState"
+  | "setOrder"
+  | "setPageSize"
+  | "setProviderDatasetId"
+  | "setPublicationState"
+  | "setQ"
+  | "setQualityState"
+  | "setSort"
+  | "sort"
+>;
+
+/** 목록 상단 검색·필터·정렬 툴바.
+ *
+ * T-VN-34에서 단일 ``status`` 필터가 lifecycle/publication/quality 3축으로
+ * 갈라지며 이 구간만 세 배가 됐다. 목록/상세 레이아웃과 축 필터는 서로를
+ * 참조하지 않으므로 툴바를 별도 컴포넌트로 둔다.
+ */
+function AdminFeatureFilterBar({
+  hasIssue,
+  kind,
+  lifecycleState,
+  order,
+  pageSize,
+  providerDatasetId,
+  publicationState,
+  q,
+  qualityState,
+  resetCursor,
+  setHasIssue,
+  setKind,
+  setLifecycleState,
+  setOrder,
+  setPageSize,
+  setProviderDatasetId,
+  setPublicationState,
+  setQ,
+  setQualityState,
+  setSort,
+  sort,
+}: AdminFeatureFilterBarProps) {
+  return (
+    <section className="rounded-lg border bg-background p-3">
+      <div className="flex gap-2 overflow-x-auto pb-1">
+        <div className="relative w-72 shrink-0">
+          <SearchIcon className="pointer-events-none absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
+          <Input
+            aria-label="feature search"
+            className="pl-8"
+            placeholder="name, address, feature_id"
+            value={q}
+            onChange={(event) => {
+              setQ(event.target.value);
+              resetCursor();
+            }}
+          />
+        </div>
+        <NativeSelect
+          aria-label="feature kind"
+          className="w-36 shrink-0"
+          value={kind}
+          onChange={(event) => {
+            setKind(event.target.value as FeatureKind | "all");
+            resetCursor();
+          }}
+        >
+          <NativeSelectOption value="all">all kinds</NativeSelectOption>
+          {FEATURE_KINDS.map((item) => (
+            <NativeSelectOption key={item} value={item}>
+              {item}
+            </NativeSelectOption>
+          ))}
+        </NativeSelect>
+        <NativeSelect
+          aria-label="feature lifecycle state"
+          className="w-36 shrink-0"
+          value={lifecycleState}
+          onChange={(event) => {
+            setLifecycleState(
+              event.target.value as AxisFilter<FeatureLifecycleState>,
+            );
+            resetCursor();
+          }}
+        >
+          <NativeSelectOption value="all">모든 수명</NativeSelectOption>
+          {FEATURE_LIFECYCLE_STATES.map((item) => (
+            <NativeSelectOption key={item} value={item}>
+              {item}
+            </NativeSelectOption>
+          ))}
+        </NativeSelect>
+        <NativeSelect
+          aria-label="feature publication state"
+          className="w-36 shrink-0"
+          value={publicationState}
+          onChange={(event) => {
+            setPublicationState(
+              event.target.value as AxisFilter<FeaturePublicationState>,
+            );
+            resetCursor();
+          }}
+        >
+          <NativeSelectOption value="all">모든 공개</NativeSelectOption>
+          {FEATURE_PUBLICATION_STATES.map((item) => (
+            <NativeSelectOption key={item} value={item}>
+              {item}
+            </NativeSelectOption>
+          ))}
+        </NativeSelect>
+        <NativeSelect
+          aria-label="feature quality state"
+          className="w-36 shrink-0"
+          value={qualityState}
+          onChange={(event) => {
+            setQualityState(event.target.value as AxisFilter<FeatureQualityState>);
+            resetCursor();
+          }}
+        >
+          <NativeSelectOption value="all">모든 품질</NativeSelectOption>
+          {FEATURE_QUALITY_STATES.map((item) => (
+            <NativeSelectOption key={item} value={item}>
+              {item}
+            </NativeSelectOption>
+          ))}
+        </NativeSelect>
+        <NativeSelect
+          aria-label="has issue"
+          className="w-36 shrink-0"
+          value={hasIssue}
+          onChange={(event) => {
+            setHasIssue(event.target.value as HasIssueFilter);
+            resetCursor();
+          }}
+        >
+          <NativeSelectOption value="all">issue all</NativeSelectOption>
+          <NativeSelectOption value="yes">issue only</NativeSelectOption>
+          <NativeSelectOption value="no">no issue</NativeSelectOption>
+        </NativeSelect>
+        <Input
+          aria-label="feature provider dataset ID"
+          className="w-52 shrink-0"
+          inputMode="numeric"
+          min={1}
+          placeholder="provider dataset ID"
+          type="number"
+          value={providerDatasetId ?? ""}
+          onChange={(event) => {
+            setProviderDatasetId(parseProviderDatasetId(event.target.value));
+            resetCursor();
+          }}
+        />
+        <Link
+          aria-label="데이터셋에서 선택"
+          className={cn(
+            buttonVariants({ variant: "outline", size: "sm" }),
+            "shrink-0",
+          )}
+          href="/ops/datasets"
+        >
+          데이터셋에서 선택
+        </Link>
+        <NativeSelect
+          aria-label="feature sort"
+          className="w-48 shrink-0"
+          value={sort}
+          onChange={(event) => {
+            setSort(event.target.value as AdminFeatureSort);
+            resetCursor();
+          }}
+        >
+          {SORT_OPTIONS.map((item) => (
+            <NativeSelectOption key={item} value={item}>
+              {item}
+            </NativeSelectOption>
+          ))}
+        </NativeSelect>
+        <NativeSelect
+          aria-label="feature page size"
+          className="w-24 shrink-0"
+          value={String(pageSize)}
+          onChange={(event) => {
+            setPageSize(Number(event.target.value) as typeof pageSize);
+            resetCursor();
+          }}
+        >
+          {PAGE_SIZE_OPTIONS.map((item) => (
+            <NativeSelectOption key={item} value={item}>
+              {item}
+            </NativeSelectOption>
+          ))}
+        </NativeSelect>
+        <Button
+          className="shrink-0"
+          size="sm"
+          type="button"
+          variant={order === "asc" ? "default" : "outline"}
+          onClick={() => {
+            setOrder("asc");
+            resetCursor();
+          }}
+        >
+          asc
+        </Button>
+        <Button
+          className="shrink-0"
+          size="sm"
+          type="button"
+          variant={order === "desc" ? "default" : "outline"}
+          onClick={() => {
+            setOrder("desc");
+            resetCursor();
+          }}
+        >
+          desc
+        </Button>
+      </div>
+    </section>
+  );
+}
+
 function AdminFeaturesClientView({
   columns,
   cursor,
@@ -613,34 +846,15 @@ function AdminFeaturesClientView({
   goFirstPage,
   goNextPage,
   handleSortingChange,
-  hasIssue,
   items,
-  kind,
   nextCursor,
-  order,
   pageIndex,
   pageSize,
-  providerDatasetId,
-  q,
   refresh,
-  resetCursor,
   selectedFeatureId,
-  setHasIssue,
-  setKind,
-  setOrder,
-  setPageSize,
-  setProviderDatasetId,
-  setQ,
   setSelectedFeatureId,
-  setSort,
-  setLifecycleState,
-  setPublicationState,
-  setQualityState,
-  sort,
   sorting,
-  lifecycleState,
-  publicationState,
-  qualityState,
+  ...filters
 }: ReturnType<typeof useAdminFeaturesClientController>) {
   return (
     <AdminShell
@@ -678,185 +892,7 @@ function AdminFeaturesClientView({
           </Alert>
         )}
 
-        <section className="rounded-lg border bg-background p-3">
-          <div className="flex gap-2 overflow-x-auto pb-1">
-            <div className="relative w-72 shrink-0">
-              <SearchIcon className="pointer-events-none absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
-              <Input
-                aria-label="feature search"
-                className="pl-8"
-                placeholder="name, address, feature_id"
-                value={q}
-                onChange={(event) => {
-                  setQ(event.target.value);
-                  resetCursor();
-                }}
-              />
-            </div>
-            <NativeSelect
-              aria-label="feature kind"
-              className="w-36 shrink-0"
-              value={kind}
-              onChange={(event) => {
-                setKind(event.target.value as FeatureKind | "all");
-                resetCursor();
-              }}
-            >
-              <NativeSelectOption value="all">all kinds</NativeSelectOption>
-              {FEATURE_KINDS.map((item) => (
-                <NativeSelectOption key={item} value={item}>
-                  {item}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
-            <NativeSelect
-              aria-label="feature lifecycle state"
-              className="w-36 shrink-0"
-              value={lifecycleState}
-              onChange={(event) => {
-                setLifecycleState(
-                  event.target.value as AxisFilter<FeatureLifecycleState>,
-                );
-                resetCursor();
-              }}
-            >
-              <NativeSelectOption value="all">모든 수명</NativeSelectOption>
-              {FEATURE_LIFECYCLE_STATES.map((item) => (
-                <NativeSelectOption key={item} value={item}>
-                  {item}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
-            <NativeSelect
-              aria-label="feature publication state"
-              className="w-36 shrink-0"
-              value={publicationState}
-              onChange={(event) => {
-                setPublicationState(
-                  event.target.value as AxisFilter<FeaturePublicationState>,
-                );
-                resetCursor();
-              }}
-            >
-              <NativeSelectOption value="all">모든 공개</NativeSelectOption>
-              {FEATURE_PUBLICATION_STATES.map((item) => (
-                <NativeSelectOption key={item} value={item}>
-                  {item}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
-            <NativeSelect
-              aria-label="feature quality state"
-              className="w-36 shrink-0"
-              value={qualityState}
-              onChange={(event) => {
-                setQualityState(
-                  event.target.value as AxisFilter<FeatureQualityState>,
-                );
-                resetCursor();
-              }}
-            >
-              <NativeSelectOption value="all">모든 품질</NativeSelectOption>
-              {FEATURE_QUALITY_STATES.map((item) => (
-                <NativeSelectOption key={item} value={item}>
-                  {item}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
-            <NativeSelect
-              aria-label="has issue"
-              className="w-36 shrink-0"
-              value={hasIssue}
-              onChange={(event) => {
-                setHasIssue(event.target.value as HasIssueFilter);
-                resetCursor();
-              }}
-            >
-              <NativeSelectOption value="all">issue all</NativeSelectOption>
-              <NativeSelectOption value="yes">issue only</NativeSelectOption>
-              <NativeSelectOption value="no">no issue</NativeSelectOption>
-            </NativeSelect>
-            <Input
-              aria-label="feature provider dataset ID"
-              className="w-52 shrink-0"
-              inputMode="numeric"
-              min={1}
-              placeholder="provider dataset ID"
-              type="number"
-              value={providerDatasetId ?? ""}
-              onChange={(event) => {
-                setProviderDatasetId(
-                  parseProviderDatasetId(event.target.value),
-                );
-                resetCursor();
-              }}
-            />
-            <Link
-              aria-label="데이터셋에서 선택"
-              className={cn(
-                buttonVariants({ variant: "outline", size: "sm" }),
-                "shrink-0",
-              )}
-              href="/ops/datasets"
-            >
-              데이터셋에서 선택
-            </Link>
-            <NativeSelect
-              aria-label="feature sort"
-              className="w-48 shrink-0"
-              value={sort}
-              onChange={(event) => {
-                setSort(event.target.value as AdminFeatureSort);
-                resetCursor();
-              }}
-            >
-              {SORT_OPTIONS.map((item) => (
-                <NativeSelectOption key={item} value={item}>
-                  {item}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
-            <NativeSelect
-              aria-label="feature page size"
-              className="w-24 shrink-0"
-              value={String(pageSize)}
-              onChange={(event) => {
-                setPageSize(Number(event.target.value) as typeof pageSize);
-                resetCursor();
-              }}
-            >
-              {PAGE_SIZE_OPTIONS.map((item) => (
-                <NativeSelectOption key={item} value={item}>
-                  {item}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
-            <Button
-              className="shrink-0"
-              size="sm"
-              type="button"
-              variant={order === "asc" ? "default" : "outline"}
-              onClick={() => {
-                setOrder("asc");
-                resetCursor();
-              }}
-            >
-              asc
-            </Button>
-            <Button
-              className="shrink-0"
-              size="sm"
-              type="button"
-              variant={order === "desc" ? "default" : "outline"}
-              onClick={() => {
-                setOrder("desc");
-                resetCursor();
-              }}
-            >
-              desc
-            </Button>
-          </div>
-        </section>
+        <AdminFeatureFilterBar {...filters} pageSize={pageSize} />
 
         <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_28rem]">
           <div className="min-w-0 rounded-lg border bg-background">

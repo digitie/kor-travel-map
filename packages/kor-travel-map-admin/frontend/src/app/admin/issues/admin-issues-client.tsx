@@ -105,9 +105,23 @@ function positiveInteger(value: string): number | undefined {
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
 }
 
-function IssueDetailPanel({ issueId }: { issueId: string | null }) {
-  const detail = useAdminIssueDetail(issueId);
-  const action = useAdminIssueActionMutation();
+type IssueActionRunner = (
+  actionName: AdminIssueAction,
+  patch?: Partial<AdminIssuePatchRequest>,
+) => void;
+
+/** issue 상세의 "수동 보정" 폼 — 입력 state·검증·focus 이동을 자체 소유한다.
+ *
+ * 조치 mutation만은 상단 조치 버튼과 공유해야 하므로(동시 실행 방지 +
+ * 실패 alert 단일 표면) 부모에서 받는다.
+ */
+function IssueManualOverridePanel({
+  action,
+  runAction,
+}: {
+  action: ReturnType<typeof useAdminIssueActionMutation>;
+  runAction: IssueActionRunner;
+}) {
   const [manualAddress, setManualAddress] = useState("");
   const [manualLon, setManualLon] = useState("");
   const [manualLat, setManualLat] = useState("");
@@ -118,28 +132,6 @@ function IssueDetailPanel({ issueId }: { issueId: string | null }) {
   >(null);
   const manualAddressRef = useRef<HTMLTextAreaElement>(null);
   const manualLonRef = useRef<HTMLInputElement>(null);
-
-  if (!issueId) {
-    return (
-      <div className="rounded-lg border bg-background p-5 text-sm text-muted-foreground">
-        table에서 issue를 선택하면 상세 payload와 조치 버튼을 확인할 수
-        있습니다.
-      </div>
-    );
-  }
-
-  const issue = detail.data?.data.issue;
-  const feature = detail.data?.data.feature;
-
-  const runAction = (
-    actionName: AdminIssueAction,
-    patch: Partial<AdminIssuePatchRequest> = {},
-  ) => {
-    action.mutate({
-      issueId,
-      body: buildActionBody(actionName, patch),
-    });
-  };
 
   const failManualOverride = (field: "address" | "lon", message: string) => {
     setManualError(message);
@@ -198,6 +190,86 @@ function IssueDetailPanel({ issueId }: { issueId: string | null }) {
         manualReason.trim().length > 0
           ? manualReason.trim()
           : "admin-ui manual override",
+    });
+  };
+
+  return (
+    <div className="rounded-lg border bg-background p-4">
+      <div className="mb-3 flex items-center gap-2 font-medium">
+        <WrenchIcon className="size-4 text-muted-foreground" />
+        수동 보정
+      </div>
+      {action.isError ? (
+        <Alert className="mb-3" variant="destructive">
+          <AlertTitle>issue 조치 실패</AlertTitle>
+          <AlertDescription>{action.error.message}</AlertDescription>
+        </Alert>
+      ) : null}
+      <div className="grid gap-3">
+        <FormTextArea
+          className="font-mono"
+          error={manualErrorField === "address" ? manualError : undefined}
+          hint="도로명/지번 주소를 JSON으로 입력합니다."
+          label="주소 보정값"
+          placeholder='{"road": "...", "jibun": "..."}'
+          ref={manualAddressRef}
+          value={manualAddress}
+          onChange={(event) => setManualAddress(event.target.value)}
+        />
+        <div className="grid gap-3 sm:grid-cols-3">
+          <FormField
+            error={manualErrorField === "lon" ? manualError : undefined}
+            inputMode="decimal"
+            label="경도"
+            ref={manualLonRef}
+            value={manualLon}
+            onChange={(event) => setManualLon(event.target.value)}
+          />
+          <FormField
+            error={manualErrorField === "lon" ? manualError : undefined}
+            inputMode="decimal"
+            label="위도"
+            value={manualLat}
+            onChange={(event) => setManualLat(event.target.value)}
+          />
+          <FormField
+            label="보정 사유"
+            value={manualReason}
+            onChange={(event) => setManualReason(event.target.value)}
+          />
+        </div>
+        <Button
+          disabled={action.isPending}
+          type="button"
+          onClick={submitManualOverride}
+        >
+          수동 보정 적용
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function IssueDetailPanel({ issueId }: { issueId: string | null }) {
+  const detail = useAdminIssueDetail(issueId);
+  const action = useAdminIssueActionMutation();
+
+  if (!issueId) {
+    return (
+      <div className="rounded-lg border bg-background p-5 text-sm text-muted-foreground">
+        table에서 issue를 선택하면 상세 payload와 조치 버튼을 확인할 수
+        있습니다.
+      </div>
+    );
+  }
+
+  const issue = detail.data?.data.issue;
+  const feature = detail.data?.data.feature;
+
+  const runAction: IssueActionRunner = (actionName, patch = {}) => {
+    action.mutate({
+      issueId,
+      body: buildActionBody(actionName, patch),
     });
   };
 
@@ -359,59 +431,7 @@ function IssueDetailPanel({ issueId }: { issueId: string | null }) {
         ) : null}
       </div>
 
-      <div className="rounded-lg border bg-background p-4">
-        <div className="mb-3 flex items-center gap-2 font-medium">
-          <WrenchIcon className="size-4 text-muted-foreground" />
-          수동 보정
-        </div>
-        {action.isError ? (
-          <Alert className="mb-3" variant="destructive">
-            <AlertTitle>issue 조치 실패</AlertTitle>
-            <AlertDescription>{action.error.message}</AlertDescription>
-          </Alert>
-        ) : null}
-        <div className="grid gap-3">
-          <FormTextArea
-            className="font-mono"
-            error={manualErrorField === "address" ? manualError : undefined}
-            hint="도로명/지번 주소를 JSON으로 입력합니다."
-            label="주소 보정값"
-            placeholder='{"road": "...", "jibun": "..."}'
-            ref={manualAddressRef}
-            value={manualAddress}
-            onChange={(event) => setManualAddress(event.target.value)}
-          />
-          <div className="grid gap-3 sm:grid-cols-3">
-            <FormField
-              error={manualErrorField === "lon" ? manualError : undefined}
-              inputMode="decimal"
-              label="경도"
-              ref={manualLonRef}
-              value={manualLon}
-              onChange={(event) => setManualLon(event.target.value)}
-            />
-            <FormField
-              error={manualErrorField === "lon" ? manualError : undefined}
-              inputMode="decimal"
-              label="위도"
-              value={manualLat}
-              onChange={(event) => setManualLat(event.target.value)}
-            />
-            <FormField
-              label="보정 사유"
-              value={manualReason}
-              onChange={(event) => setManualReason(event.target.value)}
-            />
-          </div>
-          <Button
-            disabled={action.isPending || !issueId}
-            type="button"
-            onClick={submitManualOverride}
-          >
-            수동 보정 적용
-          </Button>
-        </div>
-      </div>
+      <IssueManualOverridePanel action={action} runAction={runAction} />
     </div>
   );
 }
