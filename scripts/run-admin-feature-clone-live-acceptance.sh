@@ -419,7 +419,25 @@ COPY (
         ':',
         relation.relkind,
         relation.relowner::regrole::text,
-        COALESCE(relation.relacl::text, ''),
+        -- routine과 같은 이유로 기본값과의 차이만 센다 (`ALTER TABLE ... OWNER TO`도
+        -- `relacl`을 물화한다). relkind별 기본 ACL이 다르므로 sequence는 's',
+        -- 나머지는 'r'로 조회한다.
+        COALESCE(
+          (
+            SELECT string_agg(entry::text, ',' ORDER BY entry::text)
+            FROM unnest(relation.relacl) AS entry
+            WHERE entry::text <> ALL (
+              SELECT default_entry::text
+              FROM unnest(
+                pg_catalog.acldefault(
+                  CASE WHEN relation.relkind = 'S' THEN 's' ELSE 'r' END::"char",
+                  relation.relowner
+                )
+              ) AS default_entry
+            )
+          ),
+          ''
+        ),
         relation.relrowsecurity,
         relation.relforcerowsecurity,
         COALESCE(
@@ -526,7 +544,26 @@ COPY (
       routine.proname || ':' ||
         pg_catalog.pg_get_function_identity_arguments(routine.oid),
       routine.proowner::regrole::text || ':' ||
-        COALESCE(routine.proacl::text, '') || ':' ||
+        -- ACL은 **기본값과의 차이만** 센다. `ALTER FUNCTION ... OWNER TO`는
+        -- `proacl`을 NULL에서 "기본값과 동등한 명시적 배열"로 물화하는데,
+        -- `pg_dump`는 기본값과 같은 ACL에 대해 아무 문장도 내보내지 않으므로
+        -- 복원본은 다시 NULL이 된다. 권한은 동일한데 텍스트만 달라져
+        -- 복원 인증이 실패한다 — ADR-090처럼 routine 소유권을 재지정하는
+        -- 스키마는 이 정규화 없이는 절대 통과할 수 없다 (2026-08-13 실측:
+        -- author_lifecycle_override 등 9개 routine).
+        COALESCE(
+          (
+            SELECT string_agg(entry::text, ',' ORDER BY entry::text)
+            FROM unnest(routine.proacl) AS entry
+            WHERE entry::text <> ALL (
+              SELECT default_entry::text
+              FROM unnest(
+                pg_catalog.acldefault('f'::"char", routine.proowner)
+              ) AS default_entry
+            )
+          ),
+          ''
+        ) || ':' ||
         pg_catalog.pg_get_functiondef(routine.oid)
     FROM pg_catalog.pg_proc AS routine
     JOIN pg_catalog.pg_namespace AS namespace
@@ -1771,14 +1808,31 @@ foreign_cluster_sessions() {
   "
 }
 
+# ADR-090 bootstrap을 거친 clone에서 허용되는 LOGIN principal.
+# `$db_user`(clone cluster 관리자)에 더해 이 셋만 존재할 수 있다.
+readonly ADR090_LOGIN_ROLES="'ktm_feature_migrator', 'ktm_feature_api_runtime', 'ktm_feature_dagster_runtime'"
+# migration이 `SET ROLE`로 활성화하는 NOLOGIN schema owner. bootstrap은 DB 소유권도
+# 여기로 넘긴다.
+readonly ADR090_SCHEMA_OWNER="ktm_feature_schema_owner"
+
 checkpoint_login_role_invariant() {
+  # 이 fence의 목적은 "격리 clone에 예상 밖 LOGIN principal이 없다"이다. 원래는
+  # LOGIN이 정확히 하나(`$db_user`)여야 했는데, ADR-090이 DB principal 모델을
+  # 바꾸면서 LOGIN 3개가 정상 상태가 됐고 DB 소유권도 schema owner로 넘어간다.
+  # 그래서 개수를 세는 대신 **예상 집합과의 차집합이 비었는지**를 본다 —
+  # 목적(예상 밖 principal 차단)은 그대로고 예상 집합만 현행 모델에 맞춘다.
+  #
+  # bootstrap 전 clone도 유효하므로(migration 직전 상태) 세 role은 있어도 되고
+  # 없어도 된다. 없어야 하는 것은 그 밖의 LOGIN principal이다.
   [[ "$(
     psql_value "
       SELECT count(*)
       FROM pg_catalog.pg_roles
       WHERE rolcanlogin
+        AND rolname <> '$db_user'
+        AND rolname NOT IN ($ADR090_LOGIN_ROLES)
     "
-  )" == "1" ]] || return 1
+  )" == "0" ]] || return 1
   [[ "$(
     psql_value "
       SELECT count(*)
@@ -1787,13 +1841,14 @@ checkpoint_login_role_invariant() {
         AND rolname = '$db_user'
     "
   )" == "1" ]] || return 1
+  # ADR-090은 DB 소유권을 schema owner로 넘긴다. bootstrap 전에는 `$db_user`다.
   [[ "$(
     psql_value "
       SELECT count(*)
       FROM pg_catalog.pg_database AS database
       JOIN pg_catalog.pg_roles AS owner ON owner.oid = database.datdba
       WHERE database.datname = '$ORIGINAL_DB_NAME'
-        AND owner.rolname = '$db_user'
+        AND owner.rolname IN ('$db_user', '$ADR090_SCHEMA_OWNER')
     "
   )" == "1" ]]
 }

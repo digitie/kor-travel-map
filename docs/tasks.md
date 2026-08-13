@@ -23,9 +23,10 @@ barrier로 직렬화한다.
   - [/] `T-VN-41F1D-D` → [ ] `T-VN-41F1D-D2`(격리 리허설·data-dependent live UI E2E)
   - [~] `T-VN-41F1D-E`(v5/v7 attestation 전환) ∥ [ ] `T-VN-41S`
 - **Wave 2 barrier 이후**
-  - Lane A: [ ] `T-VN-35-deploy` → [ ] `T-VN-37D`
+  - Lane A: [x] `T-VN-35/34/36-deploy`(`0104` prod cutover 완료 2026-08-13) → [ ] `T-VN-37D`
   - Lane B: [x] `T-VN-34A` → [x] `T-VN-34B` → [x] `T-VN-34C` →
-    [x] `T-VN-36A` → [x] `T-VN-36B` → [x] `T-VN-36C` → [x] `T-VN-36D`
+    [x] `T-VN-36A` → [x] `T-VN-36B` → [x] `T-VN-36C` → [x] `T-VN-36D` →
+    [x] `T-VN-36-live`(격리 clone 인수 완주 — 2026-08-13)
   - 32~38 join barrier 뒤 Lane B: [ ] `T-VN-40A` → [ ] `T-VN-40B` →
     [ ] `T-VN-40C`
   - 최종 단일 cutover: [ ] `T-VN-39`
@@ -65,8 +66,9 @@ barrier로 직렬화한다.
   (AGENTS.md), 그 아래 설계적 우수성 > 확장성 > 성능 > 불필요한 코드 반복(래퍼류) 금지.
   **prod 환경 보전·호환성·기존 문서 계약·최소 수정은 비제약** — 필요 시 DB 스키마·문서
   계약 수정 가능. AGENTS.md vNext 우선순위 단락에 동일 취지의 dated note를 둔다.
-- migration 정본: 단일 head 유지(2026-08-07 `main` 기준 head `0087_route_area_subtypes`;
-  prod 적용 head는 아직 `0083` — `T-VN-35-deploy` 참조). 후속 migration 소유자는
+- migration 정본: 단일 head 유지(2026-08-13 `main` 기준 head
+  `0104_tvn36_final_fence`; prod 적용 head는 `0087_route_area_subtypes` —
+  2026-08-13 실측, `T-VN-35/34/36-deploy` 참조). 후속 migration 소유자는
   PR 직전 단일 head를 재확인한 뒤 번호를 배정한다. 두 lane의 migration-bearing PR은 번호 예약부터
   머지까지 직렬화한다. forward migration 뒤에는 수용 조건이나 실패 복구가 명시적으로 요구하지 않는
   한 downgrade/rollback하지 않고 fresh clone·새 transaction으로 다음 검증을 이어간다.
@@ -295,8 +297,14 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
     > 카테고리 결함도 공개 표면에 그대로 노출된다(진해보타닉뮤지엄이 카페로, 청풍호가 펜션으로).
     >
     > **import preview의 H36 게이트 동작은 prod에서 잴 수 없다** — 배포 이미지가 `c8ed6164`라
-    > `_adopted_match`가 없고 `0066`의 `external_component_id`도 없다. `T-VN-H35` 배포 후에만
-    > 실증 가능하다.
+    > `_adopted_match`가 없고 `0066`의 `external_component_id`도 없다.
+    >
+    > **2026-08-13 갱신**: 이 blocker는 사라졌다. 두 심볼 모두 head에 있고
+    > (`curations.py`의 `_adopted_match`, `curation_repo.py`의 `external_component_id`),
+    > 가리키던 `T-VN-H35` 배포는 소멸했다(`tasks-done.md` — "이 항목 아래의 cutover
+    > 설계는 전부 이력이다. 실행하지 마라"). 현재 배포 소유자는 `T-VN-35/34/36-deploy`이고,
+    > 측정은 `T-VN-36-live`의 격리 clone(실 prod 데이터, `0104`)에서 `dry_run=true`
+    > preview 한 번으로 가능하다.
     >
     > 측정 실수 기록: ① 원격 셸에서 명령치환이 깨져 토큰이 비었고 401을 엔드포인트 인증
     > 문제로 오독할 뻔했다(스크립트 파일로 해결). ② 응답 구조가 `data.feature`+`data.curations`인데
@@ -333,7 +341,10 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 > **issue #673 판정(2026-07-30) — 아직 닫을 수 없다.** 서브에이전트 조사로 이슈 본문·코멘트를
 > 요구사항으로 분해해 대조했다. 3항목 중 둘(오탐 분포 규명 / 규칙 교체)은 충족이고,
 > 셋째("다음 materialize에서 자동 회복되는가")는 **코드 논증만 있고 실증이 없다**.
-> 결정적 blocker는 **prod 미배포**이며 이슈가 신고한 손실(현재 457건)이 실재한다 → `T-VN-H35`.
+> 결정적 blocker는 **prod 미배포**이며 이슈가 신고한 손실(당시 457건)이 실재한다 →
+> ~~`T-VN-H35`~~ **`T-VN-35/34/36-deploy`**(2026-08-13 정정 — H35의 cutover는 소멸했다).
+> "457건"은 prod 폐기·재생성(`0078`) **이전** 측정값이라 그대로 쓸 수 없다. prod는 현재
+> `0087` / feature 1,008,852이므로 배포 전 재측정이 필요하다.
 > **재기준화(2026-07-31, #910/`0072` 반영)** — #673을 "457건 신규 회복"만으로 종결하면 안 된다.
 > `0072`가 기존 concierge 공개 표면 **3,044건**을 `legacy_unattributed`로 만들어 공개에서
 > 제외하고 복구 경로가 없다(`T-VN-H40`). 따라서 종결 기준은 **두 축**이다 —
@@ -347,8 +358,12 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 ### T-VN-H42~H45 — 운영 연속성 (0072 사고 후속: 재적재 수렴 → 강건화 → 백업 → 복원 드릴)
 
 > 2026-08-04 prod 폐기·재생성(head `0078`) 후속. 2026-08-05 이미지 `c0afaa4e` 배포로
-> head `0082`(UUID shadow 3종) 적용 완료. prod는 `archive_mode=off`라 **PITR이 없다 —
-> dump가 유일 복구점**이다. codex 소관 41C prod enable은 H42 판정 + docker-manager
+> head `0082`(UUID shadow 3종) 적용 완료 — **다만 2026-08-13 실측 prod head는 `0087`이고
+> feature는 1,008,852행이다**(이 문단이 5 revision 뒤처져 있었다). 따라서 최신 H43
+> baseline `2026-08-05-h43-postdeploy-0083.dump`(731,765행)는 두 head·약 27만 행 뒤처진
+> 복구점이며, `0104`가 `feature_versions`/`data_origin`/`feature_change_requests`를
+> 물리 삭제하므로 H44의 복원 실증도 `0083` 기준이라는 점을 함께 읽어야 한다.
+> prod는 `archive_mode=off`라 **PITR이 없다 — dump가 유일 복구점**이다. codex 소관 41C prod enable은 H42 판정 + docker-manager
 > 재pin 뒤(Lane B T-VN-41 절 경계 주석).
 
 - [ ] T-VN-H45-후속 — **다건 provider 호출·quota 관찰 확장**
@@ -604,7 +619,124 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 > [`tasks-done.md`](tasks-done.md)에 있다. 남은 것은 prod 배포 하나뿐인데 어느 열린
 > task도 소유하고 있지 않아 여기에 명시적으로 둔다(2026-08-07 재대조에서 발견).
 
-- [ ] T-VN-35/34/36-deploy — **alembic `0104_tvn36_final_fence` prod 배포 (단일 단계)**
+- [x] T-VN-35/34/36-deploy — **`0104` prod cutover 완료 (2026-08-13)**
+
+  > **최종 방식(사용자 지시)**: 백업 없는 **in-place 마이그레이션**. 하루 사이에 판단이
+  > 두 번 바뀌었으므로 순서대로 남긴다 — ① 처음엔 migrate-in-place 전제 → ② 아래 두
+  > 실측으로 "폐기·재생성 + provider 재적재"로 전환 → ③ 최종적으로 사용자가 "어차피
+  > 되돌리지 않으므로 측정·리허설 없이 강제로 마이그레이션"으로 확정. 재적재 소요
+  > 시간을 재는 비용보다 그냥 밀어붙이는 편이 싸다는 판단이다.
+
+  **실행 결과 (2026-08-13)**
+
+  | 단계 | 결과 |
+  |---|---|
+  | ADR-090 bootstrap (공유 `kor-travel-geo-postgres`) | exit 0, 7 principal, `kor_travel_map` DB·`public.alembic_version` 소유권 → `ktm_feature_schema_owner`, 비소유 relation 0 |
+  | `alembic upgrade head` `0087` → `0104` | **1시간 32분 39초**, feature 1,008,852 손실 0 |
+  | 런타임 배포 (api/ui/dagster/daemon) | 4/4 healthy, DB 오류 0 |
+
+  - 마이그레이션은 **독립 컨테이너**로 돌렸다. entrypoint 인라인으로는 완주할 수 없다 —
+    `0095` 3축 backfill 하나가 **58분 18초**(전체의 63%)이고 api healthcheck 창은
+    `start_period 20s + interval 10s × retries 20` = 약 3.5분이다.
+  - 공유 서버 영향 없음: `kor_travel_geo`(33GB) 소유자는 `addr` 그대로다.
+  - `0097` fence(`user_request` receipt)와 `0103` replay 대상 모두 prod 0건이라 통과했다.
+  - 3축 분포: `active/published/valid` 1,008,848 · `retired/suppressed/valid` 4.
+  - **되돌릴 수 없는 지점을 지났다**: bootstrap이 소유권을 넘기면서 기존 런타임 role
+    `krtour_map`은 `feature.features`를 읽을 수 없게 됐다(`SELECT = f`). 배포는 선택이
+    아니라 필수였다.
+  - 배포 중 발견: `dagster`/`daemon`이 `KOR_TRAVEL_MAP_PG_DSN`을 그대로 쓰므로 api와 달리
+    entrypoint의 runtime DSN 교체 경로가 없다. `KOR_TRAVEL_MAP_DOCKER_PG_DSN`을
+    `ktm_feature_dagster_runtime`으로 바꿔 해결했다. docker-manager #172 브랜치는 이미
+    이 문제를 올바르게 풀어둔 형상이다(세 서비스 각자의 runtime principal).
+
+  **후속 처리 (2026-08-13, 같은 날 이어서)**
+
+  - **공개 API 키 재발급 완료** — `ops.public_api_keys`가 0행이라 공개 표면이 401이었다.
+    `python-vworld-api/.env`의 `VWORLD_API_KEY`를 등록했다(사용자 지시). 키는 평문 미저장
+    (`sha256` + 끝 6자 hint), 발급 경로는 `POST /v1/admin/public-api-keys`뿐인데 그건
+    서버가 난수 32자를 **생성**할 뿐 지정 값을 받지 못하므로 직접 INSERT했다.
+    검증: `/v1/features` 200(실제 feature 반환) · `/v1/categories` 200 ·
+    `/v1/providers` 200 · 키 없음/오류 키 401 유지.
+    - `~/.secrets/kor-travel-map-public-api-key`가 401이던 이유가 밝혀졌다 — 그건
+      map 자체 공개 키가 아니라 **map→geo 소비자 키**다(`kor_travel_geo`의 active 행과
+      일치). `docs/dev-environment.md` §10.7 ①의 서술과 같다.
+    - **마찰로 남긴다**: 등록한 값은 4곳(python-vworld-api/.env, map .env ×2, geo
+      컨테이너)에서 공유되는 업스트림 자격증명이라 하나가 새면 둘 다 샌다. 설계 의도는
+      "UI에서 생성한 전용 키를 DB에 저장"이므로, admin BFF로 난수 전용 키를 발급하고 이
+      행을 revoke하는 회전 경로가 열려 있다.
+  - **prod 지오코딩이 죽어 있었다 — 고쳤다.** `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY`에
+    VWorld 키가 결선돼 있어 geo가 401로 거부했다(실측: VWorld 키 401 / `~/.secrets` 키
+    200). 즉 map의 정/역지오코딩 호출이 전부 실패하고 있었다. 올바른 값으로 교체 후
+    api 재생성, healthy·DB 오류 0 확인. `docs/dev-environment.md` §10.7 ①이 경고하던
+    혼동이 prod에 실제로 박혀 있었다.
+  - **H43 기준선 확보** — 백업 없이 마이그레이션했으므로 `0104` 복구점이 없었다.
+    §9·§10 규약("migration 동반 릴리스 뒤")대로 만들었다:
+    `~/backups/kor-travel-map/2026-08-13-h43-postdeploy-0104.dump`, **586MB / 78초**,
+    sha256 `8a9bae95…`, `pg_restore -l` 목차 1197항목, `public_api_keys` TOC 확인.
+    manifest: head `0104_tvn36_final_fence` · features 1,008,852 ·
+    source_records 1,009,157 · source_links 1,008,852 · public_api_keys 1.
+    - **§9 규약 정정 필요**: manifest 필수 항목 `weather_values`는 이제
+      `feature.weather_values`가 아니라 **`feature.feature_weather_values`**다
+      (T-VN-35 typed subtype 분해에서 개명). 규약대로 조회하면 relation 부재로 실패한다.
+      이번 manifest는 새 이름으로 기록했다(값 0, `current_weather_summary`도 0).
+    - 백업 **스코프 자체는 이미 올발랐다** — `ops.public_api_keys`는 2026-08-05 소실
+      이후 manifest 필수 + TOC 확인 항목이다. 공백은 스코프가 아니라 "최신 기준선이
+      `0083` 시절이었다"는 것이었다.
+
+  **잔여**
+  - prod는 아직 **공유** PostgreSQL(`kor-travel-geo-postgres:5432`)에 있다. docker-manager
+    #172는 전용 인스턴스(`:12703`)를 전제하므로 그 배포 전에 **데이터 이동이 선행**돼야
+    한다 — 안 그러면 빈 DB를 보게 된다. 순서는 #172 코멘트에 적었다.
+  - 배포 스냅샷(`/home/digitie/kor-travel-docker-manager`)은 git이 아니다. 거기 넣은 임시
+    결선은 다음 manager 배포에서 저장소 형상으로 대체된다(그쪽이 더 옳다).
+
+  ---
+
+  아래는 방식 ②(폐기·재생성)를 뒷받침했던 실측이다. in-place로 되돌아갔어도 **`0095`가
+  왜 58분인지**와 **base 계보가 왜 비어 있는지**는 그대로 유효하므로 남긴다.
+  >
+  > **① 마이그레이션 체인에 base lineage backfill이 없다.**
+  > `INSERT INTO feature.feature_base_field_values`는 `0099`/`0102`의 **procedure
+  > 정의 안**에만 있고 기존 행을 채우는 backfill은 체인 어디에도 없다. 즉
+  > `0087→0104`를 완주해도 `feature.features` 100만 행은 3축 컬럼만 얻고
+  > `feature_base_field_values`와 `ops.feature_overrides`는 **비어 있다** —
+  > T-VN-36의 존재 이유인 base ↔ override ↔ effective 계보가 기존 데이터에는
+  > 없는 채로 시작하고, 각 feature가 다음 provider 적재를 거쳐야 채워진다.
+  >
+  > **② 실측 비교(n150, prod와 같은 호스트)**
+  >
+  > | 경로 | 소요 | 결과 |
+  > |---|---|---|
+  > | migrate-in-place `0087→0104` (1,008,852행) | `0095` 3축 backfill **하나가 50분 초과**(중단) | 3축 컬럼만, base 계보 없음 |
+  > | fresh 빈 DB + `alembic upgrade head` | bootstrap 5s + migration **40s** | `0104` 완비, registry 64행 |
+  >
+  > 50분+ 구간은 트리거도 서브쿼리도 없는 단순 full-table UPDATE인데
+  > `iowait 61%` / 디스크 `%util 87%`로 I/O에 막혔다. MVCC 행 재작성 + 인덱스
+  > 전량 갱신이 이 하드웨어의 한계에 닿는다. api healthcheck 창은
+  > `start_period 20s + interval 10s × retries 20` = **약 3.5분**이므로,
+  > migrate-in-place는 entrypoint 인라인 실행으로는 애초에 성립하지 않는다.
+
+  **prod 실데이터(1,008,852행) 복제본에서 잰 값** — clone은 이후 폐기했으므로 여기가
+  유일한 기록이다:
+  - ADR-090 bootstrap **2초**, 7 principal 생성, `public.alembic_version` 소유권
+    `kor_travel_map` → `ktm_feature_schema_owner`, 비소유 relation 0.
+    T-VN-34에서 고친 두 P0(identity 시퀀스 sweep 제외 / `alembic_version` 이전)가
+    100만 행 규모에서도 성립한다. fresh DB에서는 무증상이던 축이다.
+  - `0097` fence 대상(`feature_versions.origin='user_request'`) **0건**
+  - `0103` replay 대상(`features.data_origin='user_request'`) **0건**
+  - `ops.public_api_keys` **0행** ← 폐기·재생성 시 재발급이 필요한지 확인할 것.
+    2026-08-05 공개 표면 전체 401 사건의 축이다.
+
+  **선행 실측(미완)**: provider 재적재로 1,008,852 feature를 다시 채우는 데
+  걸리는 시간. rate limit 포함 실측 전에는 cutover 창을 정할 수 없다.
+
+  **ADR-090 게이트 실측(2026-08-13)** — `scripts/rehearse-adr090-deploy-path.sh`.
+  clone-live 인수는 `--entrypoint python -m uvicorn` + 단일 DSN이라 이 축을 영원히
+  건드리지 않으므로 별도 리허설이 유일한 증거다. 네 case 전부 fail-close 확인:
+  split DSN 누락(exit 2) / runtime DSN 단독(exit 2) / EXPECTED_HEAD 불일치(exit 1) /
+  set-but-empty(exit 1).
+  첫 실행에서는 네 case 모두 ops profile 검사(ADR-066)에서 **먼저** 죽어 재려던
+  게이트에 도달조차 못 했다 — exit code만 봤으면 green으로 오인했을 자리다.
 
   > 2026-08-13 갱신. 원래 이 항목은 `0087_route_area_subtypes`를 지시했는데, 그 사이
   > T-VN-34(`0098_admin_scope_indexes`)와 T-VN-36(`0104_tvn36_final_fence`)이 main에
@@ -613,11 +745,26 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   > 않는다 — ADR-090 배포에서 실제로 겪은 crash-loop과 같은 형태다
   > (docs/tasks.md 위 §, journal 2026-08-06 (1)). 그래서 세 배포를 하나로 접는다.
 
-  orchestrator `.env`의 `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`를
-  **`0104_tvn36_final_fence`**로 **선행** 갱신한 뒤 api → dagster/daemon 순으로
-  재빌드·배포한다. prod에 적용된 head는 아직 `0083`이다(마지막 배포 journal
-  2026-08-05 (7)/(10)). n150 파기형 rebuild에서 확인된 head는
-  `T-VN-41F1D-C3`의 격리 generation이며 prod 배포가 아니다.
+  절차:
+  1. 기준점 dump — 폐기 전 `T-VN-H43` runbook §9 규약(manifest 필드 포함)으로
+     현행 prod를 받아둔다. 폐기·재생성이므로 이것이 유일한 되돌림 수단이다.
+  2. orchestrator `.env`의 `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`를
+     **`0104_tvn36_final_fence`**로 **선행** 갱신.
+  3. DB 폐기·재생성 → ADR-090 bootstrap(7 principal) → `alembic upgrade head`.
+     빈 DB 기준 실측은 bootstrap 5s + migration 40s다.
+  4. api → dagster/daemon 순으로 재빌드·배포.
+  5. provider 재적재로 Feature를 다시 채운다. **이 구간이 cutover 창을 지배한다** —
+     선행 실측이 필요하다(위 참조).
+
+  prod에 적용된 head는 **`0087_route_area_subtypes`**다 — 2026-08-13 n150 실측
+  (`kor-travel-geo-postgres` / `kor_travel_map`, feature 1,008,852행). 이 문서가
+  오래 `0083`이라고 적어둔 것은 사실과 다르다(마지막 배포 journal 2026-08-05
+  (7)/(10) 이후 누군가 0087까지 올렸고 기록이 따라오지 않았다). n150 파기형
+  rebuild에서 확인된 head는 `T-VN-41F1D-C3`의 격리 generation이며 prod 배포가 아니다.
+
+  `0097` fence(`feature.feature_versions`에 `origin='user_request'`가 있으면
+  거부)는 폐기·재생성 경로에서는 애초에 대상이 없다. migrate 경로를 다시 검토할
+  경우를 위해 기록해두면, prod 실측에서도 0건이라 걸리지 않았다.
 
   선행 조건(ADR-090):
   - `KOR_TRAVEL_MAP_MIGRATOR_PG_DSN` / `KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN` 분리
@@ -672,15 +819,95 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   migration graph·OpenAPI·contract SHA는 재생성했다. 같은 자리에서 T-VN-34가 세운 결함
   부류를 전수로 걸어 notice reconcile SQL의 죽은 projection, override procedure arity
   미추종, 죽은 오류 매핑, ledger operation 이름 붕괴, 정적 차단선의 세대 누락,
-  frontend type-check/lint red를 닫았다(journal 2026-08-13). PinVi pair 재고정과 n150 live는
-  이 head에서 아직 재실행하지 않았다.
+  frontend type-check/lint red를 닫았다(journal 2026-08-13).
 
-  **남은 판단 2건**: ① `scripts/admin_feature_live_fixture.py` /
-  `scripts/run-admin-feature-clone-live-acceptance.sh`가 아직 whole-row change
-  request/version 모델 위에 있어 `0104` head에서는 실행 불가다 — 이 하네스는 정적 문자열
-  계약(`tests/unit/test_admin_feature_live_acceptance.py`)만 있고 실행 gate가 없어 지금은
-  green으로 보인다. ② `0027` re-key 정리의 `data_origin='user_request'` 제외 가드는 head
-  동등 술어가 없어 재현하지 않기로 했다(field override 세대에는 행 단위 소유권이 없다).
+  **2026-08-13 머지** — PR #973(`c76ceb7a`). 머지 전 적대 리뷰 2건이 실 DB에서 재현한
+  P1 6건을 전부 닫았다. 셋은 원인이 하나였다 — sha는 predecessor **파일**만 잠그고
+  anchor는 아무도 검사하지 않는다:
+  - `0102`의 revoke 집계 수정이 anchor 불일치(f-string 소스 표기 `'{{}}'` vs 렌더
+    결과 `'{}'`)로 **한 번도 배포된 적이 없었다**.
+  - `0104`가 hardening 이전인 `0100` 원문에서 author/revoke를 재생성해 0101/0102를
+    되감았다(provider patch는 재생성하지 않아 두 writer가 다른 세대가 됨).
+  - `0102`의 notice `first_probe` 보존이 effective 테이블을 읽어 운영자 override를
+    provider base ledger로 세탁했다.
+
+  `0102`에 fail-closed 치환을 넣자 즉시 `0104`의 geometry anchor 불일치를 잡아냈다.
+  `tests/integration/test_tvn36_final_fence_procedures.py`가 셋을 관측 가능한 동작으로
+  고정하고, 변이 검증에서 3건 모두 red를 확인했다.
+
+  나머지 3건: compose가 package env의 ops principal을 빈 문자열로 덮어
+  `OPS_PRINCIPAL_REQUIRED=true`를 false로 내려앉히던 문제, 도달 불가능한 `0087`을
+  지시하던 배포 task, 폐기된 커밋을 가리켜 live 게이트가 다른 트리를 자기 정합적으로
+  인증하던 PinVi receipt. 각각 재발 게이트를 함께 넣었다.
+
+  live clone 인수 하네스는 `0104` typed state 모델로 재작성했다(소유권 key는 name,
+  전이는 개수가 아니라 사슬 구조로 검사, 개수는 spec의 create body에서 유도).
+  content digest에 `feature_state_transitions` identity sequence 제외를 추가했다 —
+  없으면 완료 판정이 항상 실패한다(T-VN-34부터 있던 문제).
+
+  **잔여**: ① n150 live 실행(아래 신규 항목). ② `0027` re-key 정리의
+  `data_origin='user_request'` 제외 가드는 head 동등 술어가 없어 재현하지 않기로 했다
+  (field override 세대에는 행 단위 소유권이 없다).
+
+- [x] T-VN-36-live — **격리 clone에서 live 인수 완주 (2026-08-13)**
+
+  clone-live 하네스는 clone DB가 **이미 candidate head**여야 동작한다 — 러너는
+  migration을 하지 않고 head 불일치면 첫 스냅샷에서 죽는다.
+
+  기존 `ktm-tvn38-db`는 전량 `user_request` fixture(feature 30 / version 64)라
+  `0097` fence가 정당하게 막아 재사용할 수 없다. prod 덤프를 옮겨 migrate하는
+  경로도 시도했다가 **중단했다** — 위 배포 항목의 실측대로 `0095` backfill 하나가
+  50분을 넘겼고, 그렇게 얻는 것이 "빈 base 계보를 가진 3축 컬럼"이었다.
+
+  그래서 clone도 **fresh 경로**로 만든다: `ktm-tvn36-db`(host `18736`)를 빈 DB로
+  두고 ADR-090 bootstrap → `alembic upgrade head`(합 45s) → `baseline` → `run`.
+  인수 spec은 자기 fixture를 스스로 만들고 정리하므로 대량 실데이터가 전제가
+  아니다(소유권 key는 name, feature id는 서버가 정한다).
+
+  세대 전환이므로 기존 checkpoint(`0095` 세대, snapshot version 2)는
+  `archive-0104-*`로 보존한다 — 앞선 `archive-0094-*` / `archive-0095-baseline-*`와
+  같은 관례이고, `$STATE_ROOT`가 clone 간 공유 고정 경로라 남겨두면 `baseline`이
+  죽으므로 위생이 아니라 필수 단계다.
+
+  **실행 중 확인한 하네스 사실 (2026-08-13)**
+
+  - **`run`에는 `baseline`이 아니라 `checkpoint` 모드로 cut한 checkpoint가 필요하다.**
+    `baseline`은 dump 복원 인증(`verify_dump_restore`)을 건너뛰는데, `run`은 신뢰
+    dump를 복원한 뒤 startup snapshot이 checkpoint baseline과 **정확히** 일치할 것을
+    요구한다(`--allow-owned-drift` 없음). 그래서 baseline-only(version 5) checkpoint로
+    `run`하면 "현재 clone DB가 trusted checkpoint와 다릅니다"로 죽는다. 그리고
+    `checkpoint` 모드는 version 5를 재사용하지 않으므로("full restore certification
+    cannot reuse a baseline-only checkpoint") **아카이브 후 재cut**이 유일한 경로다.
+    실행 순서는 `checkpoint` → `run`이고 `baseline`은 그 앞 단계가 아니다.
+  - 러너는 GitHub 아카이브에서 자체 스냅샷을 설치한다(`$INSTALL_BASE/$SOURCE_COMMIT`,
+    root-owned/read-only 검증 포함). 따라서 러너를 고쳤으면 **푸시한 뒤 그 커밋을**
+    `E2E_SOURCE_COMMIT`으로 줘야 한다 — 로컬 편집은 반영되지 않는다.
+  **완주 결과 (2026-08-13, source `cd5b7470`)**
+
+  `phase: passed` / `status: complete`. Playwright main 2/2 + recovery 2/2.
+  `startup_migration_unchanged: true`, `production_compose_project_excluded: true`,
+  `foreign_key_references: 0`, `api_owned_active_features: 0`(retire 완료).
+
+  API-owned 감사 수치가 유도값과 정확히 일치했다 — features 1 / field_overrides 7 /
+  state_transitions 3 / domain_commands 3. schema digest
+  `741b355a…`, content digest는 시작 기준과 일치(완료 판정).
+
+  여기까지 오면서 하네스·배포 경로에서 아홉 건을 꺼냈고 모두 정적 게이트가 green인
+  채 숨어 있던 것들이다. 그중 넷은 러너 자체의 결함이고(LOGIN fence / baseline↔run
+  선행 관계 / retire override 감사 누락 / schema digest 왕복 불가), 특히 마지막 건은
+  **ADR-090 스키마에서 복원 인증이 구조적으로 통과 불가**였다.
+
+  - **fixture 자체가 결함이면 in-band 복구 경로가 없다.** `recover`는 fixture를
+    BLOCKED가 기록한 `source_commit`에 고정하는데(`FIXTURE_HELPER=
+    "$INSTALL_BASE/$blocked_source/..."`), 결함이 바로 그 버전에 있으면 recover도
+    같은 지점에서 죽는다. `abort`는 phase가
+    `direct-cleanup-running`/`test-failed-restored`/`failed-resource-finalizing`일
+    때만 허용하므로 hard-purge 중 죽은 상태는 받지 못한다. 스냅샷은
+    `validate_snapshot`이 지키는 신뢰 경계라 손대서도 안 된다.
+    남는 것은 clone DB 재구축(일회용이므로 45s)뿐이고, BLOCKED와 checkpoint는
+    지우지 말고 `archive-0104-blocked-*`로 보존한다.
+    → 하네스 개선 여지: recover가 **더 새 fixture**를 쓸 수 있게 하거나
+    (`--fixture-source-commit`), abort가 hard-purge 단계를 받아들이게 하는 것.
 
 ### T-VN-37D — notice empty range 표현 (보류)
 

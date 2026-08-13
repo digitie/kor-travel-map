@@ -1,6 +1,55 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
-## 2026-08-13 — T-VN-34 머지 대기: 적대 검토 3라운드 반영 완료
+## 2026-08-13 — T-VN-36 prod cutover 완료
+
+**prod가 `0104_tvn36_final_fence`다.** 백업 없는 in-place 마이그레이션(사용자 지시),
+`0087` → `0104` 1시간 32분, feature 1,008,852 손실 0, 런타임 4/4 healthy.
+상세는 `docs/tasks.md` `T-VN-35/34/36-deploy`.
+
+**다음 한 작업**: 공개 API 키 발급 — `ops.public_api_keys`가 0행이라 공개 표면이
+401이다(마이그레이션 이전에도 0이었다). 그 다음이 전용 PostgreSQL 이행
+(docker-manager #172)이고, 그건 **데이터 이동이 선행**돼야 한다 — 저장소 형상은
+DSN이 `:12703`을 가리키는 전제인데 prod 데이터는 공유 `:5432`에 있다.
+
+배포에서 배운 것 둘:
+- 마이그레이션은 **독립 컨테이너**로 돌려야 한다. `0095` 3축 backfill 하나가 58분이고
+  api healthcheck 창은 3.5분이라 entrypoint 인라인으로는 구조적으로 완주 불가다.
+- `dagster`/`daemon`은 api와 달리 entrypoint의 runtime DSN 교체 경로가 없어
+  `KOR_TRAVEL_MAP_PG_DSN`을 그대로 쓴다. bootstrap 이후 `krtour_map`이 권한을 잃으므로
+  이걸 안 바꾸면 조용히 못 읽는다.
+
+## 2026-08-13 — T-VN-34·T-VN-36 머지 + live 인수 완주
+
+**이전 다음 작업**: PR #977을 머지한 뒤 alembic squash를 별도 PR로 잡는다. prod
+cutover가 폐기·재생성으로 확정됐으므로 `0001→0104` 체인은 앞으로 어떤 DB에서도
+실행되지 않는다 — 그 체인이 지고 있는 sha 상호 고정과 fence/replay/backfill이
+통째로 죽은 코드가 된다. `contracts/vnext/target-schema-fingerprints-v1.json`이
+빈 PostGIS DB 기준 실측을 이미 byte-freeze하므로 "체인으로 만든 카탈로그 ==
+squash로 만든 카탈로그"를 **증명**할 수 있다. squash하면 prod(`0087`)가 앞으로
+나아갈 경로는 완전히 사라진다 — 오늘 결정과 일관되지만 명시해둔다.
+
+**live 인수 완주** (source `cd5b7470`): `phase: passed`, Playwright main 2/2 +
+recovery 2/2, API-owned 감사가 유도값과 정확히 일치(features 1 / overrides 7 /
+transitions 3 / commands 3). 상세와 아홉 건의 발견은 `docs/tasks.md`
+`T-VN-36-live` 참조.
+
+- PR #972(T-VN-34) `2026-08-13`, PR #973(T-VN-36) `c76ceb7a` 머지. main head는
+  `0104_tvn36_final_fence`.
+- **prod 실측 정정**: prod 적용 head는 `0083`이 아니라 **`0087_route_area_subtypes`**
+  이고 feature는 1,008,852행, `0097` fence가 보는 `user_request` receipt는 **0건**
+  이다. 문서가 오래 `0083`이라고 적고 있었다.
+- **데이터가 있는 DB에 ADR-090 bootstrap 실행 성공** — T-VN-34에서 고친 두 P0
+  (identity 시퀀스 sweep 제외 / `public.alembic_version` 이전)를 실환경에서 검증했다.
+  exit 0, 7 role 생성, `alembic_version` 소유권 이전, 비소유 relation 0.
+  docker-manager 쪽에는 이 결과를 catalog assertion으로 검증하는 축을 추가했다
+  (`f975668`, PR #172 코멘트).
+- 기존 `ktm-tvn38-db`는 전량 `user_request` fixture(feature 30 / version 64)라
+  `0097` fence가 막는다 — clone 재사용 불가. 세대 전환이므로 기존 checkpoint는
+  `archive-0104-*`로 보존했다.
+- 러너가 alembic을 직접 부르면 `SET ROLE`이 빠져 `alembic_version` 42501이 난다.
+  배포 경로는 `KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE=true`가 켠다
+  (`docker/api-entrypoint.sh:262`).
+
 ## 2026-08-13 — T-VN-36: 새 T-VN-34 base 재배치 완료, 영향성 gate 재실행
 
 **다음 한 작업**: `feat/tvn36-abcd-field-overrides`를 이 재배치 head로 force-push한 뒤,
@@ -13,12 +62,13 @@
 - T-VN-34에서 확립한 결함 부류를 전수로 걸어 notice reconcile SQL의 죽은 projection,
   override procedure arity 미추종, 죽은 오류 매핑, ledger operation 이름 붕괴, 정적
   차단선의 세대 누락, frontend type-check/lint red를 닫았다. 상세는 journal 2026-08-13.
-- **남은 판단 2건**: ① `scripts/admin_feature_live_fixture.py` +
-  `scripts/run-admin-feature-clone-live-acceptance.sh`는 여전히 whole-row change
-  request/version 모델 위에 서 있어 `0104` head에서 실행 불가다(정적 unit 계약만 있고
-  실행 gate가 없어 green으로 보인다). ② `0027` re-key 정리의 `data_origin='user_request'`
-  제외 가드는 head 동등 술어가 없어 재현하지 않기로 했다.
-- PinVi pair 재고정과 n150 live는 이 재배치 head에서 아직 다시 실행하지 않았다.
+- ~~**남은 판단 2건**: ① 하네스가 whole-row 모델 위에 있어 `0104`에서 실행 불가~~
+  → **해소됨(`90e24872`)**. 하네스는 typed state 모델로 재작성됐다. 이 항목을 지우지
+  않고 남기는 이유는 §2 진입 순서로 들어온 독자가 아래 옛 항목만 읽고 "실행 불가"로
+  오해하기 때문이다 — 최신 항목(맨 위)이 정본이다.
+  ② `0027` re-key 정리의 `data_origin='user_request'` 제외 가드는 head 동등 술어가
+  없어 재현하지 않기로 했다(유효).
+- ~~PinVi pair 재고정~~ → 재고정 완료(`e25ff376`). n150 live는 위 최신 항목 참조.
 
 ## 2026-08-10 — T-VN-34C: fresh live gate 실행 대기
 

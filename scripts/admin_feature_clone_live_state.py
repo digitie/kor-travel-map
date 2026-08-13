@@ -1205,11 +1205,11 @@ def _purge_counts(path: Path) -> dict[str, int]:
             isinstance(value, int) and not isinstance(value, bool) and value >= 0
             for value in purged.values()
         )
-        # live spec은 Feature 한 건만 만들고 create가 field override 여섯 건을
-        # 남긴다(`_ADMIN_CREATE_OVERRIDE_FIELD_PATHS`). 중단된 run은 그보다 적을
-        # 수 있으므로 상한만 본다.
+        # live spec은 Feature 한 건만 만들고, create가 field override 여섯 건 +
+        # retire가 lifecycle override 한 건을 남긴다. 중단된 run은 그보다 적을 수
+        # 있으므로 상한만 본다.
         or purged["features"] > 1
-        or purged["field_overrides"] > 6
+        or purged["field_overrides"] > 7
     ):
         raise RuntimeError("recovery purge evidence가 예상과 다릅니다")
     return purged
@@ -1217,20 +1217,25 @@ def _purge_counts(path: Path) -> dict[str, int]:
 
 #: T-VN-36 live spec 한 번의 실행이 남기는 API-owned 행 집합.
 #: features=1        — spec이 만드는 Feature 한 건 (retire까지, hard delete 없음)
-#: field_overrides=6 — create가 authoring하는 field path 여섯 개
+#: field_overrides=7 — create가 authoring하는 field path 여섯 개
 #:                     (core.name/category/marker_icon/marker_color +
 #:                      coord가 파생시키는 coord_precision_digits와 coord)
+#:                     + retire가 authoring하는 `lifecycle_state` 한 건.
+#:                     마지막 것은 `author_lifecycle_override`가 만들고 형태가
+#:                     다르다 — `prevent_provider_reactivation = true`(재적재가
+#:                     retire를 되돌리지 못하게)이고 command_id가 없다.
+#:                     2026-08-13 live 실행에서 처음 관측했다.
 #: state_transitions=3 — initial(create) → suppressed(patch) → retired(retire)
 #: domain_commands=3   — POST create 1건 + PATCH state 2건 (GET은 command가 없다)
 _API_OWNED_AUDIT_COUNTS: Final[dict[str, int]] = {
     "domain_commands": 3,
     "features": 1,
-    "field_overrides": 6,
+    "field_overrides": 7,
     "state_transitions": 3,
 }
-#: 단일 열 feature FK 잔여: alias 1건 + field override 6건. subtype
+#: 단일 열 feature FK 잔여: alias 1건 + override 7건. subtype
 #: (`feature.feature_places`)은 composite FK라 이 감사에 잡히지 않는다.
-_API_OWNED_AUDIT_FOREIGN_KEY_REFERENCES: Final[int] = 7
+_API_OWNED_AUDIT_FOREIGN_KEY_REFERENCES: Final[int] = 8
 _FEATURE_UUID_RE: Final[re.Pattern[str]] = re.compile(
     r"\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\Z"
 )

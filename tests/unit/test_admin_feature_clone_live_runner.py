@@ -321,12 +321,12 @@ def _prepare_runtime(tmp_path: Path) -> tuple[Path, Path]:
                 "counts": {
                     "domain_commands": 3,
                     "features": 1,
-                    "field_overrides": 6,
+                    "field_overrides": 7,
                     "state_transitions": 3,
                 },
                 "feature_uuids": [_API_OWNED_FEATURE_UUID],
                 "foreign_key_constraints_checked": 12,
-                "foreign_key_references": 7,
+                "foreign_key_references": 8,
                 "version": 1,
             }
         ),
@@ -512,7 +512,7 @@ def test_complete_validates_evidence_and_clears_blocked(tmp_path: Path) -> None:
         "api_owned_active_features": 0,
         "api_owned_domain_commands": 3,
         "api_owned_features": 1,
-        "api_owned_field_overrides": 6,
+        "api_owned_field_overrides": 7,
         "api_owned_state_transitions": 3,
         "auth_audit_main": 1,
         "auth_audit_recovery": 1,
@@ -1074,7 +1074,7 @@ def test_recovered_result_preserves_hard_purge_evidence(tmp_path: Path) -> None:
                 "foreign_key_references": 0,
                 "purged": {
                     "features": 1,
-                    "field_overrides": 6,
+                    "field_overrides": 7,
                 },
                 "version": 1,
             }
@@ -1090,7 +1090,7 @@ def test_recovered_result_preserves_hard_purge_evidence(tmp_path: Path) -> None:
         "recovery-hard-purge-running",
     ]
     assert payload["cleanup"]["recovery_purged_features"] == 1
-    assert payload["cleanup"]["recovery_purged_field_overrides"] == 6
+    assert payload["cleanup"]["recovery_purged_field_overrides"] == 7
 
 
 @pytest.mark.parametrize(
@@ -1843,7 +1843,8 @@ def test_runner_closes_reviewed_trust_boundaries() -> None:
     assert "pg_catalog.pg_default_acl" in source
     assert "database_sha256" in source
     assert "'<database-owner>'" in source
-    assert "owner.rolname = '$db_user'" in source
+    # ADR-090 이후 DB 소유자는 bootstrap 전 `$db_user`, 후 schema owner다.
+    assert "owner.rolname IN ('$db_user', '$ADR090_SCHEMA_OWNER')" in source
     assert "extension_sha256" in source
     assert "unnest(extension.extconfig) WITH ORDINALITY" in source
     assert "config_namespace.nspname" in source
@@ -1864,6 +1865,16 @@ def test_runner_closes_reviewed_trust_boundaries() -> None:
     assert "clone_host_tcp_password_works" in source
     assert '-p "$DB_HOST_PORT"' in source
     assert "checkpoint_login_role_invariant" in source
+    # ADR-090이 DB principal 모델을 바꾸면서 이 fence의 "LOGIN은 정확히 하나"
+    # 전제가 깨졌다(migrator/api/dagster 3개가 정상). 개수 세기 대신 **예상 집합과의
+    # 차집합이 0**인지로 바꿨으므로, 목적(예상 밖 LOGIN principal 차단)이 살아 있는지
+    # 여기서 고정한다 — 조건을 통째로 지워도 "함수가 있다"는 위 단언은 통과한다.
+    assert "AND rolname NOT IN ($ADR090_LOGIN_ROLES)" in source
+    assert "ktm_feature_migrator" in source
+    assert "ktm_feature_api_runtime" in source
+    assert "ktm_feature_dagster_runtime" in source
+    # DB 소유권은 bootstrap 전 `$db_user`, 후 schema owner 둘 다 유효하다.
+    assert "owner.rolname IN ('$db_user', '$ADR090_SCHEMA_OWNER')" in source
     assert "terminate_foreign_cluster_sessions" in source
     assert "CHECKPOINT_QUIESCENCE_BACKEND_PID" in source
     assert "CHECKPOINT_QUIESCENCE_BACKEND_START_EPOCH" in source

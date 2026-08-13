@@ -278,6 +278,10 @@ command가 결선돼 있지 않다** — 그 결선 전까지의 수동 기준�
   (features/source_records/source_links/weather_values/**public_api_keys**)를
   선기록한다 — `ops.public_api_keys`는 2026-08-05 재생성 소실 실측(공개 표면
   전체 401) 이후 **백업 스코프 필수 확인 항목**이다.
+  ⚠️ **2026-08-13 정정**: `weather_values`의 실제 relation은
+  `feature.weather_values`가 아니라 **`feature.feature_weather_values`**다
+  (T-VN-35 typed subtype 분해에서 개명). 옛 이름으로 조회하면 relation 부재로
+  실패한다 — 이 절의 카운트 목록을 그대로 스크립트로 옮기면 그 자리에서 깨진다.
 - **실행**: api 컨테이너 env의 TCP DSN으로 `postgis/postgis:16-3.5-alpine`
   컨테이너에서 `pg_dump -Fc --no-owner`. pg_dump는 스냅샷 트랜잭션이라 DB
   단독으로는 **내부 일관**이다. 단 write path를 멈추지 않은 live dump는 3종
