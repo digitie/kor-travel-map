@@ -263,6 +263,7 @@ def _item(*, item_id: str, edition: str) -> CurationItem:
         link_evidence={},
         link_actor=None,
         link_decided_at=None,
+        row_revision=1,
         created_by="fixture-creator",
         updated_by="fixture-updater",
         created_at=now,
@@ -294,6 +295,7 @@ def _collection() -> CurationCollection:
         metadata={},
         item_count=2,
         public_item_count=1,
+        row_revision=1,
         created_by="fixture-creator",
         updated_by="fixture-updater",
         created_at=now,
@@ -1053,9 +1055,13 @@ def test_admin_can_patch_and_archive_single_curation_item(
 
     patched = client.patch(
         f"/v1/admin/curations/{COLLECTION_ID}/items/{ITEM_ID}",
+        headers={"If-Match": '"1"'},
         json={"feature_id": "feature:resolved", "address_hint": None},
     )
-    archived = client.delete(f"/v1/admin/curations/{COLLECTION_ID}/items/{ITEM_ID}")
+    archived = client.delete(
+        f"/v1/admin/curations/{COLLECTION_ID}/items/{ITEM_ID}",
+        headers={"If-Match": '"1"'},
+    )
 
     assert patched.status_code == 200
     assert archived.status_code == 200
@@ -1066,10 +1072,12 @@ def test_admin_can_patch_and_archive_single_curation_item(
             "curation_item_id": ITEM_ID,
             "updates": {"feature_id": "feature:resolved", "address_hint": None},
             "actor": "local-dev",
+            "expected_revision": 1,
         },
     )
     assert calls[1][0] == "delete"
     assert calls[1][1]["actor"] == "local-dev"
+    assert calls[1][1]["expected_revision"] == 1
     assert patched.json()["data"]["created_by"] == "fixture-creator"
     assert patched.json()["data"]["source_record_key"] == "source::2026"
     assert patched.json()["data"]["metadata"] == {"edition": "2026"}
@@ -1087,10 +1095,93 @@ def test_admin_empty_patch_does_not_expose_archived_curation_item(
     monkeypatch.setattr(module.curation_repo, "update_curation_item", _archived_noop)
     response = client.patch(
         f"/v1/admin/curations/{COLLECTION_ID}/items/{ITEM_ID}",
+        headers={"If-Match": '"1"'},
         json={},
     )
 
     assert response.status_code == 404
+
+
+@pytest.mark.unit
+def test_admin_collection_representation_etag_and_command_cas_are_distinct(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from kortravelmap.api.routers import curations as module
+
+    collection = _collection()
+    item = _item(item_id="etag-item", edition="2026")
+    get_collection = AsyncMock(return_value=(collection, (item,)))
+    update_collection = AsyncMock(return_value=collection)
+    monkeypatch.setattr(
+        module.curation_repo,
+        "get_curation_collection",
+        get_collection,
+    )
+    monkeypatch.setattr(
+        module.curation_repo,
+        "update_curation_collection",
+        update_collection,
+    )
+
+    fetched = client.get(f"/v1/admin/curations/{COLLECTION_ID}")
+    assert fetched.status_code == 200
+    assert fetched.json()["data"]["collection"]["row_revision"] == "1"
+    assert fetched.json()["data"]["collection"]["command_etag"] == '"1"'
+    assert fetched.json()["data"]["items"][0]["command_etag"] == '"1"'
+    assert fetched.headers["etag"].startswith('"sha256:')
+
+    not_modified = client.get(
+        f"/v1/admin/curations/{COLLECTION_ID}",
+        headers={"If-None-Match": fetched.headers["etag"]},
+    )
+    assert not_modified.status_code == 304
+
+    missing = client.patch(
+        f"/v1/admin/curations/{COLLECTION_ID}",
+        json={"title": "변경"},
+    )
+    changed = client.patch(
+        f"/v1/admin/curations/{COLLECTION_ID}",
+        headers={"If-Match": '"1"'},
+        json={"title": "변경"},
+    )
+    assert missing.status_code == 428
+    assert changed.status_code == 200
+    assert changed.headers["etag"].startswith('"sha256:')
+    assert update_collection.await_args.kwargs["expected_revision"] == 1
+
+
+@pytest.mark.unit
+def test_admin_collection_and_item_stale_revisions_return_412(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from kortravelmap.api.routers import curations as module
+
+    stale = module.curation_repo.CurationRevisionConflictError("stale")
+    monkeypatch.setattr(
+        module.curation_repo,
+        "update_curation_collection",
+        AsyncMock(side_effect=stale),
+    )
+    monkeypatch.setattr(
+        module.curation_repo,
+        "update_curation_item",
+        AsyncMock(side_effect=stale),
+    )
+
+    collection_response = client.patch(
+        f"/v1/admin/curations/{COLLECTION_ID}",
+        headers={"If-Match": '"1"'},
+        json={"title": "변경"},
+    )
+    item_response = client.patch(
+        f"/v1/admin/curations/{COLLECTION_ID}/items/{ITEM_ID}",
+        headers={"If-Match": '"1"'},
+        json={"item_title": "변경"},
+    )
+
+    assert collection_response.status_code == 412
+    assert item_response.status_code == 412
 
 
 @pytest.mark.unit

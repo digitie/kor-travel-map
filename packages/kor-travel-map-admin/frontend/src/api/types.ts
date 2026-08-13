@@ -3062,6 +3062,8 @@ export interface components {
             collection_id: string;
             /** Collection Key */
             collection_key: string;
+            /** Command Etag */
+            command_etag: string;
             /**
              * Created At
              * Format: date-time
@@ -3087,6 +3089,8 @@ export interface components {
             provider_dataset_id: number | null;
             /** Public Item Count */
             public_item_count: number;
+            /** Row Revision */
+            row_revision: string;
             /** Source Id */
             source_id: string | null;
             /** Source Name */
@@ -3158,6 +3162,8 @@ export interface components {
             collection_id: string;
             /** Collection Key */
             collection_key: string;
+            /** Command Etag */
+            command_etag: string;
             /**
              * Created At
              * Format: date-time
@@ -3228,6 +3234,8 @@ export interface components {
              * @enum {string}
              */
             reuse_policy: "allowed" | "blocked" | "manual_review";
+            /** Row Revision */
+            row_revision: string;
             /** Sort Order */
             sort_order: number;
             /** Source Name */
@@ -15244,6 +15252,8 @@ export interface operations {
             /** @description Successful Response */
             201: {
                 headers: {
+                    /** @description 현재 응답 representation의 strong entity tag. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -15612,11 +15622,20 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    /** @description 현재 응답 representation의 strong entity tag. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["AdminCurationCollectionResponse"];
                 };
+            };
+            /** @description representation ETag 일치 */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -15655,14 +15674,34 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    /** @description 현재 응답 representation의 strong entity tag. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["AdminCurationCollectionResponse"];
                 };
             };
+            /** @description stale collection If-Match */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description Validation Error */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description If-Match 누락 */
+            428: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -15702,14 +15741,34 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    /** @description 현재 응답 representation의 strong entity tag. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["AdminCurationCollectionResponse"];
                 };
             };
+            /** @description stale collection If-Match */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description Validation Error */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description If-Match 누락 */
+            428: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -15749,6 +15808,8 @@ export interface operations {
             /** @description Successful Response */
             201: {
                 headers: {
+                    /** @description 현재 응답 representation의 strong entity tag. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -15793,14 +15854,34 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    /** @description 현재 응답 representation의 strong entity tag. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["AdminCurationItemResponse"];
                 };
             };
+            /** @description stale item If-Match */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description Validation Error */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description If-Match 누락 */
+            428: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -15841,14 +15922,34 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    /** @description 현재 응답 representation의 strong entity tag. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["AdminCurationItemResponse"];
                 };
             };
+            /** @description stale item If-Match */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description Validation Error */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description If-Match 누락 */
+            428: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -19090,7 +19191,7 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
-                    /** @description 현재 resource의 raw strong entity tag. */
+                    /** @description 현재 응답 representation의 strong entity tag. */
                     ETag?: string;
                     [name: string]: unknown;
                 };
@@ -19157,7 +19258,7 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
-                    /** @description 현재 resource의 raw strong entity tag. */
+                    /** @description 현재 응답 representation의 strong entity tag. */
                     ETag?: string;
                     [name: string]: unknown;
                 };

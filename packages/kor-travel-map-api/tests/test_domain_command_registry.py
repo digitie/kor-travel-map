@@ -147,6 +147,10 @@ def test_domain_fingerprint_header_contract_is_explicit_and_minimal() -> None:
         and policy.fingerprint_headers
     } == {
         "admin.cache-target-dead-letter.replay": ("If-Match",),
+        "admin.curation-collection.archive": ("If-Match",),
+        "admin.curation-collection.patch": ("If-Match",),
+        "admin.curation-item.archive": ("If-Match",),
+        "admin.curation-item.patch": ("If-Match",),
         "admin.curated-theme.archive": ("If-Match",),
         "admin.curated-theme.patch": ("If-Match",),
         "admin.curated-source.archive": ("If-Match",),

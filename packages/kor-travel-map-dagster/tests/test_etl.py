@@ -68,6 +68,7 @@ class _Context:
 class _Client:
     def __init__(self) -> None:
         self.chunks: list[tuple[str, ...]] = []
+        self.finding_chunks: list[list[Any]] = []
 
     async def load_feature_bundles(
         self, bundles: list[_Bundle], **kwargs: object
@@ -86,7 +87,9 @@ class _Client:
 
         ``kwargs``도 보관해 provider/dataset 정체성 배선을 검증할 수 있게 한다.
         """
-        self.recorded_findings = list(findings)  # type: ignore[arg-type]
+        current_findings = list(findings)  # type: ignore[arg-type]
+        self.finding_chunks.append(current_findings)
+        self.recorded_findings = current_findings
         self.recorded_kwargs = dict(kwargs)
         unique_count = len(
             {finding.dedupe_key for finding in self.recorded_findings}
@@ -263,6 +266,74 @@ async def test_streaming_feature_batches_keep_one_atomic_loader_call(
     assert result.feature_ids_complete is False
     assert context.metadata[-1]["feature_ids_truncated"] is True
     assert result.observation_receipt.authoritative_snapshot_complete is True
+
+
+async def test_streaming_feature_batches_bound_issue_metadata_and_finding_chunks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = _Context()
+    client = _Client()
+
+    async def _batches() -> Any:
+        for index in range(12):
+            yield [_bundle(f"feature-{index}")]
+
+    def _warning(items: list[_Bundle]) -> FeatureAddressValidationSummary:
+        bundle = items[0]
+        issue = FeatureAddressIssue(
+            feature_id=bundle.feature.feature_id,
+            source_record_key=bundle.source_record.source_record_key,
+            code="reverse_geocode_not_attempted",
+            severity="warning",
+            message="warning",
+            provider_address=None,
+            bjd_code="1111010100",
+            sigungu_code="11110",
+        )
+        return FeatureAddressValidationSummary(
+            total=1,
+            issue_count=1,
+            error_count=0,
+            warning_count=1,
+            issues=(issue,),
+        )
+
+    monkeypatch.setattr(
+        "kortravelmap.dagster.etl.validate_feature_bundles_address",
+        _warning,
+    )
+    monkeypatch.setattr(
+        "kortravelmap.dagster.etl.ADDRESS_VALIDATION_ISSUE_METADATA_LIMIT",
+        3,
+    )
+
+    async def _load_all(batches: Any) -> FeatureLoadResult:
+        result = FeatureLoadResult()
+        async for batch in batches:
+            result = result.merge(
+                FeatureLoadResult(
+                    bundles_total=len(batch),
+                    features_inserted=len(batch),
+                )
+            )
+        return result
+
+    result = await load_feature_bundle_batches_for_dagster(
+        context=context,  # type: ignore[arg-type]
+        client=client,  # type: ignore[arg-type]
+        batches=_batches(),  # type: ignore[arg-type]
+        provider="demo",
+        dataset_key="places",
+        strict_address="off",
+        load_all=_load_all,  # type: ignore[arg-type]
+    )
+
+    assert result.address_validation.issue_count == 12
+    assert len(result.address_validation.issues) == 3
+    assert len(client.finding_chunks) == 12
+    assert all(len(chunk) == 1 for chunk in client.finding_chunks)
+    assert result.observation_receipt.findings_observed == 12
+    assert len(context.metadata[-1]["address_validation_issues"]) == 3  # type: ignore[arg-type]
 
 
 async def test_nonempty_complete_snapshot_receipt_permits_stale_close(

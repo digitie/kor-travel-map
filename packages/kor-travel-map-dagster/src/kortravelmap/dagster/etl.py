@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import pickle
 from collections import Counter
 from dataclasses import dataclass, replace
+from tempfile import TemporaryFile
 from typing import TYPE_CHECKING, Final
 
 from kortravelmap.client import AddressValidationFinding
@@ -38,6 +40,9 @@ FEATURE_LOAD_CHUNK_SIZE: Final[int] = 1000
 
 FEATURE_ID_METADATA_LIMIT: Final[int] = 1000
 """대용량 stream에서 Dagster metadata에 남길 Feature id 표본 상한."""
+
+ADDRESS_VALIDATION_ISSUE_METADATA_LIMIT: Final[int] = 100
+"""대용량 stream에서 Dagster metadata에 남길 검증 issue 표본 상한."""
 
 
 @dataclass(frozen=True)
@@ -452,20 +457,26 @@ async def load_feature_bundle_batches_for_dagster(
     feature_ids: list[str] = []
     loaded_feature_count = 0
     dropped_feature_ids: list[str] = []
-    pending_findings: list[AddressValidationFinding] = []
     strict_failure = False
+    sync_observed = 0
+    sync_unique = 0
+    sync_upserted = 0
 
-    async def _validated_batches() -> AsyncIterator[Sequence[FeatureBundle]]:
-        nonlocal loaded_feature_count, strict_failure, validation
-        async for raw_batch in batches:
-            batch = list(raw_batch)
-            batch_validation = validate_feature_bundles_address(batch)
-            validation = _merge_validation_summaries(validation, batch_validation)
-            source_identities = _source_identities(batch)
-            if mode == "strict" and batch_validation.has_errors:
-                strict_failure = True
-                pending_findings.extend(
-                    _address_validation_findings(
+    # Finding은 Feature transaction commit 뒤 FK-linked 상태로 기록해야 한다. 전량을
+    # 메모리에 보관하지 않고 batch tuple만 임시 spool에 직렬화한 뒤 bounded chunk로
+    # 재생한다. 파일 수명은 이 호출로 제한되며 정상/예외 모두 즉시 닫힌다.
+    with TemporaryFile() as finding_spool:
+
+        async def _validated_batches() -> AsyncIterator[Sequence[FeatureBundle]]:
+            nonlocal loaded_feature_count, strict_failure, validation
+            async for raw_batch in batches:
+                batch = list(raw_batch)
+                batch_validation = validate_feature_bundles_address(batch)
+                validation = _merge_validation_summaries(validation, batch_validation)
+                source_identities = _source_identities(batch)
+                if mode == "strict" and batch_validation.has_errors:
+                    strict_failure = True
+                    failed_findings = _address_validation_findings(
                         batch_validation,
                         provider=provider,
                         dataset_key=dataset_key,
@@ -477,37 +488,38 @@ async def load_feature_bundle_batches_for_dagster(
                         ),
                         source_identities=source_identities,
                     )
-                )
-                raise Failure(
-                    description="Feature 주소/좌표 검증 실패: "
-                    + ", ".join(
-                        issue.code
-                        for issue in batch_validation.issues
-                        if issue.severity == "error"
-                    ),
-                    metadata=validation.as_metadata(),
-                )
+                    pickle.dump(tuple(failed_findings), finding_spool)
+                    raise Failure(
+                        description="Feature 주소/좌표 검증 실패: "
+                        + ", ".join(
+                            issue.code
+                            for issue in batch_validation.issues
+                            if issue.severity == "error"
+                        ),
+                        metadata=validation.as_metadata(),
+                    )
 
-            dropped_ids: set[str] = set()
-            if mode == "drop" and batch_validation.has_blocking_errors:
-                dropped_ids = {
-                    issue.feature_id for issue in batch_validation.blocking_issues
-                }
-                dropped_feature_ids.extend(sorted(dropped_ids))
-                batch = [
-                    bundle
-                    for bundle in batch
-                    if bundle.feature.feature_id not in dropped_ids
-                ]
-            loaded_ids = {bundle.feature.feature_id for bundle in batch}
-            loaded_feature_count += len(batch)
-            remaining_sample = FEATURE_ID_METADATA_LIMIT - len(feature_ids)
-            if remaining_sample > 0:
-                feature_ids.extend(
-                    bundle.feature.feature_id for bundle in batch[:remaining_sample]
-                )
-            pending_findings.extend(
-                _address_validation_findings(
+                dropped_ids: set[str] = set()
+                if mode == "drop" and batch_validation.has_blocking_errors:
+                    dropped_ids = {
+                        issue.feature_id for issue in batch_validation.blocking_issues
+                    }
+                    remaining_dropped = FEATURE_ID_METADATA_LIMIT - len(dropped_feature_ids)
+                    if remaining_dropped > 0:
+                        dropped_feature_ids.extend(sorted(dropped_ids)[:remaining_dropped])
+                    batch = [
+                        bundle
+                        for bundle in batch
+                        if bundle.feature.feature_id not in dropped_ids
+                    ]
+                loaded_ids = {bundle.feature.feature_id for bundle in batch}
+                loaded_feature_count += len(batch)
+                remaining_sample = FEATURE_ID_METADATA_LIMIT - len(feature_ids)
+                if remaining_sample > 0:
+                    feature_ids.extend(
+                        bundle.feature.feature_id for bundle in batch[:remaining_sample]
+                    )
+                findings = _address_validation_findings(
                     batch_validation,
                     provider=provider,
                     dataset_key=dataset_key,
@@ -515,36 +527,43 @@ async def load_feature_bundle_batches_for_dagster(
                     dropped_feature_ids=frozenset(dropped_ids),
                     source_identities=source_identities,
                 )
-            )
-            yield batch
+                if findings:
+                    pickle.dump(tuple(findings), finding_spool)
+                yield batch
 
-    try:
-        load = await load_all(_validated_batches())
-    except Failure:
-        if strict_failure and pending_findings:
-            unlinked = [
-                replace(
-                    finding,
-                    linked=False,
-                    source_record_key=None,
-                    feature_id=None,
-                )
-                for finding in pending_findings
-            ]
-            await client.record_address_validation_findings(
-                unlinked,
+        try:
+            load = await load_all(_validated_batches())
+        except Failure:
+            if strict_failure:
+                finding_spool.seek(0)
+                while findings := _load_finding_chunk(finding_spool):
+                    await client.record_address_validation_findings(
+                        tuple(
+                            replace(
+                                finding,
+                                linked=False,
+                                source_record_key=None,
+                                feature_id=None,
+                            )
+                            for finding in findings
+                        ),
+                        provider=provider,
+                        dataset_key=dataset_key,
+                        run_id=_dagster_run_id(context),
+                    )
+            raise
+
+        finding_spool.seek(0)
+        while findings := _load_finding_chunk(finding_spool):
+            sync = await client.record_address_validation_findings(
+                findings,
                 provider=provider,
                 dataset_key=dataset_key,
                 run_id=_dagster_run_id(context),
             )
-        raise
-
-    sync = await client.record_address_validation_findings(
-        pending_findings,
-        provider=provider,
-        dataset_key=dataset_key,
-        run_id=_dagster_run_id(context),
-    )
+            sync_observed += sync.observed_count
+            sync_unique += sync.unique_count
+            sync_upserted += sync.upserted_count
     result = DagsterFeatureLoadResult(
         provider=provider,
         dataset_key=dataset_key,
@@ -554,10 +573,10 @@ async def load_feature_bundle_batches_for_dagster(
         observation_receipt=AddressFindingObservationReceipt(
             authoritative_snapshot_complete=True,
             source_observations=validation.total,
-            findings_observed=sync.observed_count,
-            findings_unique=sync.unique_count,
-            findings_upserted=sync.upserted_count,
-            finding_persistence_complete=sync.unrecorded_count == 0,
+            findings_observed=sync_observed,
+            findings_unique=sync_unique,
+            findings_upserted=sync_upserted,
+            finding_persistence_complete=sync_unique == sync_upserted,
         ),
         feature_ids_complete=loaded_feature_count <= FEATURE_ID_METADATA_LIMIT,
     )
@@ -628,6 +647,20 @@ def _address_validation_findings(
     return findings
 
 
+def _load_finding_chunk(spool: object) -> tuple[AddressValidationFinding, ...]:
+    """pickle spool의 다음 bounded finding chunk를 읽는다."""
+
+    try:
+        value = pickle.load(spool)  # type: ignore[arg-type]
+    except EOFError:
+        return ()
+    if not isinstance(value, tuple) or not all(
+        isinstance(item, AddressValidationFinding) for item in value
+    ):
+        raise RuntimeError("address validation finding spool이 손상되었습니다.")
+    return value
+
+
 def _merge_validation_summaries(
     left: FeatureAddressValidationSummary,
     right: FeatureAddressValidationSummary,
@@ -645,7 +678,7 @@ def _merge_validation_summaries(
         # "측정 안 됨"과 "잴 것이 없음"을 구분할 수 없게 된다.
         evidence_grade_counts=dict(merged_grades),
         name_state_counts=dict(merged_name_states),
-        issues=left.issues + right.issues,
+        issues=(left.issues + right.issues)[:ADDRESS_VALIDATION_ISSUE_METADATA_LIMIT],
     )
 
 

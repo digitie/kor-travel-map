@@ -115,6 +115,10 @@ QUARANTINE_CONFLICT_NO_TARGET: Final = "no_target"
 QUARANTINE_CONFLICT_TARGET_MISSING: Final = "target_missing"
 
 
+class CurationRevisionConflictError(ValueError):
+    """canonical collection/item command의 expected revision이 stale이다."""
+
+
 @dataclass(frozen=True)
 class CurationCollection:
     collection_id: str
@@ -137,6 +141,7 @@ class CurationCollection:
     metadata: dict[str, Any]
     item_count: int
     public_item_count: int
+    row_revision: int
     created_by: str | None
     updated_by: str | None
     created_at: datetime
@@ -186,6 +191,7 @@ class CurationItem:
     link_evidence: dict[str, Any]
     link_actor: str | None
     link_decided_at: datetime | None
+    row_revision: int
     created_by: str | None
     updated_by: str | None
     created_at: datetime
@@ -531,6 +537,7 @@ SELECT
               )
           )
     ) AS public_item_count,
+    c.row_revision,
     c.created_by,
     c.updated_by,
     c.created_at,
@@ -591,6 +598,7 @@ _ITEM_SELECT_FIELDS: Final[str] = f"""
     link_decision.evidence AS link_evidence,
     link_decision.actor AS link_actor,
     link_decision.decided_at AS link_decided_at,
+    i.row_revision,
     i.created_by,
     i.updated_by,
     i.created_at,
@@ -2176,6 +2184,7 @@ def _collection(row: RowMapping | Mapping[str, Any]) -> CurationCollection:
         metadata=_object(row["metadata"]),
         item_count=int(row["item_count"]),
         public_item_count=int(row["public_item_count"]),
+        row_revision=int(row["row_revision"]),
         created_by=row["created_by"],
         updated_by=row["updated_by"],
         created_at=row["created_at"],
@@ -2232,6 +2241,7 @@ def _item(row: RowMapping | Mapping[str, Any]) -> CurationItem:
         link_evidence=_object(row.get("link_evidence")),
         link_actor=str(value) if (value := row.get("link_actor")) else None,
         link_decided_at=row.get("link_decided_at"),
+        row_revision=int(row["row_revision"]),
         created_by=row["created_by"],
         updated_by=row["updated_by"],
         created_at=row["created_at"],
@@ -2812,7 +2822,8 @@ async def _touch_collection(
     await session.execute(
         text(
             "UPDATE feature.curation_collections "
-            "SET updated_by = :actor, updated_at = now() "
+            "SET updated_by = :actor, updated_at = now(), "
+            "row_revision = row_revision + 1 "
             "WHERE collection_id = CAST(:collection_id AS uuid)"
         ),
         {"collection_id": collection_id, "actor": actor},
@@ -2871,6 +2882,7 @@ async def update_curation_collection(
     *,
     collection_id: str,
     updates: Mapping[str, Any],
+    expected_revision: int | None = None,
 ) -> CurationCollection | None:
     allowed = {
         "theme_id",
@@ -2904,10 +2916,17 @@ async def update_curation_collection(
         current = await get_curation_collection(
             session, collection_id=collection_id, include_archived=True
         )
+        if (
+            current is not None
+            and expected_revision is not None
+            and current[0].row_revision != expected_revision
+        ):
+            raise CurationRevisionConflictError("curation collection revision이 stale입니다.")
         return current[0] if current else None
     clauses.extend(
         [
             "updated_at = now()",
+            "row_revision = row_revision + 1",
             (
                 "archived_at = CASE WHEN :archive THEN now() "
                 "WHEN :unarchive THEN NULL ELSE archived_at END"
@@ -2916,14 +2935,23 @@ async def update_curation_collection(
     )
     params["archive"] = updates.get("status") == "archived"
     params["unarchive"] = "status" in updates and updates.get("status") != "archived"
+    params["expected_revision"] = expected_revision
     sql = f"""
     UPDATE feature.curation_collections
     SET {", ".join(clauses)}
     WHERE collection_id = CAST(:collection_id AS uuid)
+      AND (
+          CAST(:expected_revision AS bigint) IS NULL
+          OR row_revision = CAST(:expected_revision AS bigint)
+      )
     RETURNING collection_id::text
     """
     row = (await session.execute(text(sql), params)).first()
     if row is None:
+        if expected_revision is not None and await get_curation_collection(
+            session, collection_id=collection_id, include_archived=True
+        ):
+            raise CurationRevisionConflictError("curation collection revision이 stale입니다.")
         return None
     current = await get_curation_collection(
         session, collection_id=collection_id, include_archived=True
@@ -2933,12 +2961,17 @@ async def update_curation_collection(
 
 
 async def archive_curation_collection(
-    session: AsyncSession, *, collection_id: str, actor: str | None = None
+    session: AsyncSession,
+    *,
+    collection_id: str,
+    actor: str | None = None,
+    expected_revision: int | None = None,
 ) -> CurationCollection | None:
     return await update_curation_collection(
         session,
         collection_id=collection_id,
         updates={"status": "archived", "updated_by": actor},
+        expected_revision=expected_revision,
     )
 
 
@@ -3135,6 +3168,7 @@ async def update_curation_item(
     curation_item_id: str,
     updates: Mapping[str, Any],
     actor: str | None = None,
+    expected_revision: int | None = None,
 ) -> CurationItem | None:
     """단일 membership을 부분 수정한다. 명시적 ``feature_id=null``도 보존한다."""
 
@@ -3188,6 +3222,12 @@ async def update_curation_item(
             curation_item_id=curation_item_id,
             include_archived=True,
         )
+        if (
+            current is not None
+            and expected_revision is not None
+            and current.row_revision != expected_revision
+        ):
+            raise CurationRevisionConflictError("curation item revision이 stale입니다.")
         return current if current is not None and current.archived_at is None else None
 
     source_owned_changed = bool(
@@ -3305,6 +3345,7 @@ async def update_curation_item(
         "collection_id": collection_id,
         "curation_item_id": curation_item_id,
         "actor": actor,
+        "expected_revision": expected_revision,
     }
     for key, value in normalized.items():
         if key == "metadata":
@@ -3324,7 +3365,13 @@ async def update_curation_item(
                 "operator_updated_at = clock_timestamp()",
             ]
         )
-    clauses.extend(["updated_by = :actor", "updated_at = now()"])
+    clauses.extend(
+        [
+            "updated_by = :actor",
+            "updated_at = now()",
+            "row_revision = row_revision + 1",
+        ]
+    )
     if normalized.get("status") == "archived":
         clauses.append("archived_at = now()")
     row = (
@@ -3336,6 +3383,10 @@ async def update_curation_item(
                 WHERE collection_id = CAST(:collection_id AS uuid)
                   AND curation_item_id = CAST(:curation_item_id AS uuid)
                   AND archived_at IS NULL
+                  AND (
+                      CAST(:expected_revision AS bigint) IS NULL
+                      OR row_revision = CAST(:expected_revision AS bigint)
+                  )
                 RETURNING curation_item_id::text
                 """
             ),
@@ -3343,6 +3394,13 @@ async def update_curation_item(
         )
     ).first()
     if row is None:
+        if expected_revision is not None and await get_curation_item(
+            session,
+            collection_id=collection_id,
+            curation_item_id=curation_item_id,
+            include_archived=True,
+        ):
+            raise CurationRevisionConflictError("curation item revision이 stale입니다.")
         return None
     if "feature_id" in normalized:
         requested_feature_id = normalized["feature_id"]
@@ -3449,6 +3507,7 @@ async def archive_curation_item(
     collection_id: str,
     curation_item_id: str,
     actor: str | None = None,
+    expected_revision: int | None = None,
 ) -> CurationItem | None:
     return await update_curation_item(
         session,
@@ -3456,6 +3515,7 @@ async def archive_curation_item(
         curation_item_id=curation_item_id,
         updates={"status": "archived"},
         actor=actor,
+        expected_revision=expected_revision,
     )
 
 
