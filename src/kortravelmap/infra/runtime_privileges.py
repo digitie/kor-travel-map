@@ -43,9 +43,9 @@ _SCHEMA_OWNER_ROLE = "ktm_feature_schema_owner"
 _FEATURE_TABLE_PRIVILEGES: Mapping[str, tuple[str, ...]] = {
     "curated_features": ("SELECT", "INSERT", "UPDATE", "DELETE"),
     "curated_feature_detail_snapshots": ("SELECT", "INSERT", "UPDATE", "DELETE"),
-    "curated_source_rules": ("SELECT", "INSERT", "UPDATE", "DELETE"),
-    "curated_sources": ("SELECT", "INSERT", "UPDATE", "DELETE"),
-    "curated_themes": ("SELECT", "INSERT", "UPDATE", "DELETE"),
+    "curated_source_rules": ("SELECT",),
+    "curated_sources": ("SELECT",),
+    "curated_themes": ("SELECT",),
     "curated_tripmate_copy_snapshots": ("SELECT", "INSERT", "UPDATE", "DELETE"),
     "curation_collections": ("SELECT", "INSERT", "UPDATE", "DELETE"),
     "curation_import_batches": ("SELECT", "INSERT", "UPDATE", "DELETE"),
