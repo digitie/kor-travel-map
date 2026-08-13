@@ -13,6 +13,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from kortravelmap.infra.curation_repo import (
+    CurationImportResult,
     CurationImportRevisionExpectation,
     ResolvedCurationImportRow,
     build_curation_import_revision_vector,
@@ -146,18 +147,29 @@ async def test_import_and_quarantine_advance_collection_revision_once(
             item_summary=None,
             metadata={"version": 1},
         )
-        first_command = await _domain_command(
+        unclaimed_command = await _domain_command(
             migrated_engine, actor=actor, operation="admin.curation.import"
         )
-        async with session_factory() as session, session.begin():
+        async with session_factory() as session:
+            transaction = await session.begin()
             await session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
-            first = await import_curation_rows(
-                session,
-                rows=(row,),
-                actor=actor,
-                batch_kind="normalized_rows",
-                command_id=first_command,
-            )
+            with pytest.raises(DBAPIError) as unclaimed:
+                await import_curation_rows(
+                    session,
+                    rows=(row,),
+                    actor=actor,
+                    batch_kind="normalized_rows",
+                    command_id=unclaimed_command,
+                )
+            assert getattr(unclaimed.value.orig, "sqlstate", None) == "23514"
+            await transaction.rollback()
+
+        first, first_command, _first_plan = await _import_with_plan(
+            migrated_engine,
+            session_factory=session_factory,
+            rows=(row,),
+            actor=actor,
+        )
         assert first["inserted"] == 1
         collection_id = str(
             await _collection_scalar(
@@ -177,18 +189,13 @@ async def test_import_and_quarantine_advance_collection_revision_once(
                 "metadata": {"version": 2},
             }
         )
-        second_command = await _domain_command(
-            migrated_engine, actor=actor, operation="admin.curation.import"
+        second, second_command, second_plan = await _import_with_plan(
+            migrated_engine,
+            session_factory=session_factory,
+            rows=(changed_row,),
+            actor=actor,
+            complete=False,
         )
-        async with session_factory() as session, session.begin():
-            await session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
-            second = await import_curation_rows(
-                session,
-                rows=(changed_row,),
-                actor=actor,
-                batch_kind="normalized_rows",
-                command_id=second_command,
-            )
         assert second["updated"] == 1
         assert await _collection_scalar(
             migrated_engine, row.collection_key, "row_revision"
@@ -214,19 +221,23 @@ async def test_import_and_quarantine_advance_collection_revision_once(
         assert await _collection_scalar(
             migrated_engine, row.collection_key, "row_revision"
         ) == 2
-
-        third_command = await _domain_command(
-            migrated_engine, actor=actor, operation="admin.curation.import"
-        )
         async with session_factory() as session, session.begin():
             await session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
-            third = await import_curation_rows(
+            await complete_curation_import_plan_command(
                 session,
-                rows=(changed_row,),
-                actor=actor,
-                batch_kind="normalized_rows",
-                command_id=third_command,
+                import_plan_id=second_plan,
+                command_id=second_command,
+                import_batch_id=str(second["import_batch_id"]),
+                result_payload={"updated": second["updated"]},
+                principal=actor,
             )
+
+        third, third_command, _third_plan = await _import_with_plan(
+            migrated_engine,
+            session_factory=session_factory,
+            rows=(changed_row,),
+            actor=actor,
+        )
         assert third["updated"] == 0
         assert await _collection_scalar(
             migrated_engine, row.collection_key, "row_revision"
@@ -241,6 +252,41 @@ async def test_import_and_quarantine_advance_collection_revision_once(
                     {"ids": [first_command, second_command, third_command]},
                 )
             ) == 3
+
+        item_revision_before = int(
+            await _item_scalar(
+                migrated_engine,
+                row.collection_key,
+                row.source_item_key,
+                "item.row_revision",
+            )
+        )
+        provenance_row = ResolvedCurationImportRow(
+            **{
+                **changed_row.__dict__,
+                "provenance": {"source": "reviewed"},
+            }
+        )
+        provenance_result, _provenance_command, _provenance_plan = (
+            await _import_with_plan(
+                migrated_engine,
+                session_factory=session_factory,
+                rows=(provenance_row,),
+                actor=actor,
+            )
+        )
+        assert provenance_result["updated"] == 1
+        assert int(
+            await _item_scalar(
+                migrated_engine,
+                row.collection_key,
+                row.source_item_key,
+                "item.row_revision",
+            )
+        ) == item_revision_before + 1
+        assert await _collection_scalar(
+            migrated_engine, row.collection_key, "row_revision"
+        ) == 3
 
         preview_command = await _domain_command(
             migrated_engine,
@@ -435,6 +481,79 @@ async def _revision_vector(
         return await build_curation_import_revision_vector(session, rows=rows)
 
 
+async def _import_with_plan(
+    engine: AsyncEngine,
+    *,
+    session_factory: async_sessionmaker,
+    rows: tuple[ResolvedCurationImportRow, ...],
+    actor: str,
+    complete: bool = True,
+) -> tuple[CurationImportResult, int, str]:
+    preview_command = await _domain_command(
+        engine,
+        actor=actor,
+        operation="admin.curation-import.preview",
+    )
+    import_plan_id = str(uuid4())
+    content_sha256 = uuid4().hex + uuid4().hex
+    plan_sha256 = uuid4().hex + uuid4().hex
+    revisions = await _revision_vector(session_factory, rows=rows)
+    async with session_factory() as session, session.begin():
+        await session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
+        await create_curation_import_plan_command(
+            session,
+            import_plan_id=import_plan_id,
+            content_sha256=content_sha256,
+            provenance_sha256=None,
+            plan_sha256=plan_sha256,
+            summary={"has_errors": False, "valid": len(rows)},
+            rows=rows,
+            response_rows=tuple(
+                {"row_number": row.row_number, "valid": True} for row in rows
+            ),
+            revisions=revisions,
+            expires_at=datetime.now(UTC) + timedelta(hours=1),
+            command_id=preview_command,
+            principal=actor,
+        )
+    command_id = await _domain_command(
+        engine,
+        actor=actor,
+        operation="admin.curation.import",
+    )
+    async with session_factory() as session, session.begin():
+        await session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
+        claimed_content_sha256, stored_rows, _summary, _response, _expires = (
+            await claim_curation_import_plan_command(
+                session,
+                import_plan_id=import_plan_id,
+                plan_sha256=plan_sha256,
+                command_id=command_id,
+                principal=actor,
+            )
+        )
+        result = await import_curation_rows(
+            session,
+            rows=stored_rows,
+            actor=actor,
+            source_content_sha256=claimed_content_sha256,
+            batch_kind="normalized_rows",
+            command_id=command_id,
+        )
+        if complete:
+            import_batch_id = result["import_batch_id"]
+            assert import_batch_id is not None
+            await complete_curation_import_plan_command(
+                session,
+                import_plan_id=import_plan_id,
+                command_id=command_id,
+                import_batch_id=import_batch_id,
+                result_payload={"inserted": result["inserted"], "updated": result["updated"]},
+                principal=actor,
+            )
+    return result, command_id, import_plan_id
+
+
 async def _collection_scalar(
     engine: AsyncEngine,
     collection_key: str,
@@ -447,6 +566,29 @@ async def _collection_scalar(
                 "WHERE collection_key = :collection_key"
             ),
             {"collection_key": collection_key},
+        )
+
+
+async def _item_scalar(
+    engine: AsyncEngine,
+    collection_key: str,
+    external_item_id: str,
+    expression: str,
+) -> object:
+    async with engine.connect() as connection:
+        return await connection.scalar(
+            text(
+                f"SELECT {expression} "
+                "FROM feature.curation_items AS item "
+                "JOIN feature.curation_collections AS collection "
+                "ON collection.collection_id = item.collection_id "
+                "WHERE collection.collection_key = :collection_key "
+                "AND item.external_item_id = :external_item_id"
+            ),
+            {
+                "collection_key": collection_key,
+                "external_item_id": external_item_id,
+            },
         )
 
 

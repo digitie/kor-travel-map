@@ -111,6 +111,16 @@ CREATE TABLE feature.curation_import_plan_revisions (
   PRIMARY KEY (import_plan_id, resource_kind, resource_key)
 );
 
+CREATE TABLE ops.curation_import_plan_claims (
+  import_plan_id uuid PRIMARY KEY
+    REFERENCES feature.curation_import_plans(import_plan_id) ON DELETE RESTRICT,
+  command_id bigint NOT NULL UNIQUE
+    REFERENCES ops.domain_commands(command_id) ON DELETE RESTRICT,
+  plan_sha256 text NOT NULL CHECK (plan_sha256 ~ '^[0-9a-f]{64}$'),
+  claimed_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+  UNIQUE (import_plan_id, command_id)
+);
+
 CREATE TABLE ops.curation_import_plan_commits (
   import_plan_id uuid PRIMARY KEY
     REFERENCES feature.curation_import_plans(import_plan_id) ON DELETE RESTRICT,
@@ -119,7 +129,10 @@ CREATE TABLE ops.curation_import_plan_commits (
   import_batch_id uuid NOT NULL UNIQUE
     REFERENCES feature.curation_import_batches(import_batch_id) ON DELETE RESTRICT,
   result_payload jsonb NOT NULL CHECK (jsonb_typeof(result_payload) = 'object'),
-  committed_at timestamptz NOT NULL DEFAULT clock_timestamp()
+  committed_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+  FOREIGN KEY (import_plan_id, command_id)
+    REFERENCES ops.curation_import_plan_claims(import_plan_id, command_id)
+    ON DELETE RESTRICT
 );
 
 CREATE FUNCTION ops.reject_curation_import_plan_mutation()
@@ -158,6 +171,9 @@ FOR EACH ROW EXECUTE FUNCTION ops.reject_curation_import_plan_mutation();
 CREATE TRIGGER trg_curation_import_plan_commits_immutable
 BEFORE UPDATE OR DELETE ON ops.curation_import_plan_commits
 FOR EACH ROW EXECUTE FUNCTION ops.reject_curation_import_plan_mutation();
+CREATE TRIGGER trg_curation_import_plan_claims_immutable
+BEFORE UPDATE OR DELETE ON ops.curation_import_plan_claims
+FOR EACH ROW EXECUTE FUNCTION ops.reject_curation_import_plan_mutation();
 CREATE TRIGGER trg_curation_import_plans_no_truncate
 BEFORE TRUNCATE ON feature.curation_import_plans
 FOR EACH STATEMENT EXECUTE FUNCTION ops.reject_curation_import_plan_truncate();
@@ -169,6 +185,9 @@ BEFORE TRUNCATE ON feature.curation_import_plan_revisions
 FOR EACH STATEMENT EXECUTE FUNCTION ops.reject_curation_import_plan_truncate();
 CREATE TRIGGER trg_curation_import_plan_commits_no_truncate
 BEFORE TRUNCATE ON ops.curation_import_plan_commits
+FOR EACH STATEMENT EXECUTE FUNCTION ops.reject_curation_import_plan_truncate();
+CREATE TRIGGER trg_curation_import_plan_claims_no_truncate
+BEFORE TRUNCATE ON ops.curation_import_plan_claims
 FOR EACH STATEMENT EXECUTE FUNCTION ops.reject_curation_import_plan_truncate();
 """
 
@@ -390,6 +409,11 @@ BEGIN
   INTO STRICT o_response_rows
   FROM feature.curation_import_plan_rows AS row
   WHERE row.import_plan_id = p_import_plan_id;
+  INSERT INTO ops.curation_import_plan_claims (
+    import_plan_id, command_id, plan_sha256
+  ) VALUES (
+    p_import_plan_id, p_command_id, p_plan_sha256
+  );
 END
 $command$;
 
@@ -464,13 +488,15 @@ def upgrade() -> None:
         "TO ktm_curation_command_owner"
     )
     op.execute(
-        "GRANT SELECT, INSERT ON ops.curation_import_plan_commits "
+        "GRANT SELECT, INSERT ON ops.curation_import_plan_claims, "
+        "ops.curation_import_plan_commits "
         "TO ktm_curation_command_owner"
     )
     op.execute(
         "REVOKE ALL ON feature.curation_import_plans, "
         "feature.curation_import_plan_rows, feature.curation_import_plan_revisions, "
-        "ops.curation_import_plan_commits FROM PUBLIC, ktm_feature_runtime, "
+        "ops.curation_import_plan_claims, ops.curation_import_plan_commits "
+        "FROM PUBLIC, ktm_feature_runtime, "
         "ktm_feature_api_runtime, ktm_feature_dagster_runtime, "
         "ktm_curation_admin_executor, ktm_curation_provider_executor"
     )

@@ -162,6 +162,7 @@ DECLARE
   v_collection_id uuid;
   v_collection_revision bigint;
   v_changed_collection_ids uuid[];
+  v_changed_item_ids uuid[] := ARRAY[]::uuid[];
 BEGIN
   IF current_setting('transaction_isolation') <> 'serializable' THEN
     RAISE EXCEPTION 'curation import command requires SERIALIZABLE transaction'
@@ -187,6 +188,18 @@ BEGIN
                 WHERE result.command_id = p_command_id) THEN
     RAISE EXCEPTION 'domain command does not match active curation import'
       USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_import_domain_command';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1
+    FROM ops.curation_import_plan_claims AS claim
+    JOIN feature.curation_import_plans AS plan
+      ON plan.import_plan_id = claim.import_plan_id
+    WHERE claim.command_id = p_command_id
+      AND plan.actor = p_principal
+      AND plan.content_sha256 = p_content_sha256
+  ) THEN
+    RAISE EXCEPTION 'curation import plan must be claimed before apply'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_import_plan_claim';
   END IF;
   IF (SELECT count(*) FROM jsonb_array_elements(p_items)) <> (
        SELECT count(DISTINCT value.row_number)
@@ -263,6 +276,7 @@ BEGIN
          COALESCE(array_agg(DISTINCT collection_id ORDER BY collection_id), ARRAY[]::uuid[])
   INTO STRICT o_removed_item_ids, v_changed_collection_ids
   FROM removed;
+  v_changed_item_ids := o_removed_item_ids;
 
   WITH incoming AS MATERIALIZED (
     SELECT * FROM jsonb_to_recordset(p_items) AS value(
@@ -299,12 +313,14 @@ BEGIN
         updated_by = p_principal, row_revision = legacy.row_revision + 1,
         updated_at = clock_timestamp()
     FROM matched WHERE legacy.curation_item_id = matched.curation_item_id
-    RETURNING legacy.collection_id
+    RETURNING legacy.curation_item_id, legacy.collection_id
   )
   SELECT count(*)::integer,
          array_cat(v_changed_collection_ids,
-                   COALESCE(array_agg(DISTINCT collection_id), ARRAY[]::uuid[]))
-  INTO STRICT v_adopted, v_changed_collection_ids FROM written;
+                   COALESCE(array_agg(DISTINCT collection_id), ARRAY[]::uuid[])),
+         array_cat(v_changed_item_ids,
+                   COALESCE(array_agg(curation_item_id), ARRAY[]::uuid[]))
+  INTO STRICT v_adopted, v_changed_collection_ids, v_changed_item_ids FROM written;
 
   WITH incoming AS MATERIALIZED (
     SELECT * FROM jsonb_to_recordset(p_items) AS value(
@@ -347,13 +363,16 @@ BEGIN
           (EXCLUDED.feature_id, true, EXCLUDED.place_name, EXCLUDED.address_hint,
            EXCLUDED.sort_order, EXCLUDED.item_title, EXCLUDED.item_summary,
            EXCLUDED.metadata)
-    RETURNING collection_id, (xmax = 0) AS inserted
+    RETURNING curation_item_id, collection_id, (xmax = 0) AS inserted
   )
   SELECT count(*) FILTER (WHERE inserted)::integer,
          v_adopted + count(*) FILTER (WHERE NOT inserted)::integer,
          array_cat(v_changed_collection_ids,
-                   COALESCE(array_agg(DISTINCT collection_id), ARRAY[]::uuid[]))
-  INTO STRICT o_inserted, o_updated, v_changed_collection_ids FROM written;
+                   COALESCE(array_agg(DISTINCT collection_id), ARRAY[]::uuid[])),
+         array_cat(v_changed_item_ids,
+                   COALESCE(array_agg(curation_item_id), ARRAY[]::uuid[]))
+  INTO STRICT o_inserted, o_updated, v_changed_collection_ids, v_changed_item_ids
+  FROM written;
 
   INSERT INTO feature.curation_import_batches (
     content_sha256, batch_kind, row_count, actor, metadata, command_id
@@ -417,12 +436,15 @@ BEGIN
       AND (identity.previous_row_payload, identity.previous_provenance)
           IS DISTINCT FROM (identity.row_payload, COALESCE(identity.provenance, '{}'::jsonb))
     RETURNING decision_id, curation_item_id, decision_kind
-  )
+  ), pointer_updates AS (
   UPDATE feature.curation_items AS item
   SET current_import_row_id = inserted.import_row_id,
       accepted_link_decision_id = CASE
         WHEN decision.decision_kind = 'accepted' THEN decision.decision_id ELSE NULL END,
-      updated_by = p_principal, updated_at = clock_timestamp()
+      updated_by = p_principal,
+      row_revision = item.row_revision + CASE
+        WHEN item.curation_item_id = ANY(v_changed_item_ids) THEN 0 ELSE 1 END,
+      updated_at = clock_timestamp()
   FROM inserted_rows AS inserted
   LEFT JOIN decisions AS decision ON decision.curation_item_id = inserted.curation_item_id
   WHERE item.curation_item_id = inserted.curation_item_id
@@ -435,7 +457,17 @@ BEGIN
               identity.row_payload,
               COALESCE(identity.provenance, '{}'::jsonb)
             )
-    );
+    )
+  RETURNING item.curation_item_id, item.collection_id,
+            NOT (item.curation_item_id = ANY(v_changed_item_ids)) AS provenance_only
+  )
+  SELECT o_updated + count(*) FILTER (WHERE provenance_only)::integer,
+         array_cat(v_changed_collection_ids,
+                   COALESCE(array_agg(DISTINCT collection_id), ARRAY[]::uuid[])),
+         array_cat(v_changed_item_ids,
+                   COALESCE(array_agg(curation_item_id), ARRAY[]::uuid[]))
+  INTO STRICT o_updated, v_changed_collection_ids, v_changed_item_ids
+  FROM pointer_updates;
 
   FOR v_collection_id IN
     SELECT DISTINCT changed_id FROM unnest(v_changed_collection_ids) AS changed_id
