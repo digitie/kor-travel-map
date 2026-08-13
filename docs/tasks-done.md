@@ -3,6 +3,73 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-08-12 — T-VN-38 weather·price current summary 병합
+
+> PR [#971](https://github.com/digitie/kor-travel-map/pull/971), merge
+> `8dc2b24a`. 최종 source `bef509d` 기준 CI 8개와 n150 전용 clone live를 다시
+> 통과한 뒤 머지했다. 남은 held-component 제거는 `T-VN-39`가 소유한다.
+
+- [x] T-VN-38A — **weather current summary**
+
+  bitemporal 원본 이력을 유지하면서 canonical dataset/source revision 기준의 current
+  weather summary와 reconciliation을 도입했다.
+
+- [x] T-VN-38B — **price current summary**
+
+  `provider + price_domain + product_key` identity의 current price summary와
+  restore/backfill generation 구분을 도입했다. weather와 같은 transaction advisory lock으로
+  전역 projection의 오래된 winner 역전을 막았다.
+
+- [x] T-VN-38C — **bbox/detail set-based cutover**
+
+  weather/price read를 summary set join으로 전환하고, freshness·cardinality·EXPLAIN 및
+  9개 frozen artifact의 CRLF byte guard를 고정했다. Dagster raw provider response는
+  `date`·`time`·`Decimal`과 immutable mapping을 JSON 보존 가능 형태로 정규화한다.
+
+  검증: GitHub CI 8/8 green(3 Python unit matrix, PostGIS integration, fixture replay,
+  lint, OpenAPI, frontend), 적대 리뷰 2인 P0/P1=0. n150 전용
+  `ktm-tvn38-db:18732` clone에서 main/recovery Live UI E2E 각각 2/2, `phase=passed`,
+  BLOCKED 없음, startup migration 불변과 production compose 제외를 실증했다.
+
+## 2026-08-12 — T-VN-33 provider dataset 삼중 identity 정본 전환 병합
+
+> PR [#966](https://github.com/digitie/kor-travel-map/pull/966), merge
+> `9bbb74d`. 상세 설계·결함 회고는
+> [`reports/t-vn-33-provider-datasets-single-pr-plan-2026-08-06.md`](reports/t-vn-33-provider-datasets-single-pr-plan-2026-08-06.md)와
+> `journal.md` 2026-08-11 기록이 정본이다.
+
+- [x] T-VN-33 — **provider dataset·operation 정본과 immutable observation/head 전환**
+
+  `33-A`~`33-E`를 하나의 forward-only PR로 완료했다. versioned dataset/operation seed,
+  canonical `(provider_dataset_id, sync_scope, operation_key)` membership, immutable source
+  entity/record/head, writer·reader·admin projection cutover 및 legacy physical fence를
+  `0089`~`0092`로 일괄 적용했다.
+
+  검증: 로컬 CI mirror 25/25와 GitHub CI 8/8 green, 적대 리뷰 3렌즈 P0/P1=0. n150
+  격리 DB에서 fresh migration·API live 12/12·admin UI live 10/10을 확인했다.
+
+## 2026-08-12 — T-VN-37 notice 계보 key 물화 병합
+
+> PR [#968](https://github.com/digitie/kor-travel-map/pull/968), merge `490a2482`.
+> empty range 표현은 별도 보류 task `T-VN-37D`로 남긴다.
+
+- [x] T-VN-37 — **계보 key 물화 + 인덱스 probe**
+
+  notice scope의 `source_records.lineage_key`를 DB 트리거로 파생하고 표현식 인덱스와
+  materialized reconcile CTE로 JSON 재계산 병목을 제거했다. 결과 집합과 reconcile 종료
+  상태를 유지하면서 대규모 목록과 reconcile 시간을 각각 20.4초→0.19초,
+  118.4초→0.36초로 줄였다.
+
+## 2026-08-12 — T-VN-H45 KMA/airkorea 호출 강건화 완료 이관
+
+- [x] T-VN-H45 — **KMA/airkorea 대량 순차 upstream 호출 강건화**
+
+  간헐 오류율과 N격자 all-or-nothing 재시도로 생기던 생존확률 붕괴를 단건 호출 경계의
+  유한 재시도로 고쳤다. 평문 HTTP 종료는 upstream 정본 HTTPS 전환과 pin 갱신으로
+  해결했고 KMA 4종 SUCCESS·55,755 값 유입을 실증했다. airkorea 504는 upstream
+  `SERVICETIMEOUT_ERROR`로 분류해 관찰만 한다. 다건 fetcher와 quota telemetry 확장은
+  열린 `T-VN-H45-후속`으로 분리했다.
+
 ## 2026-08-06 — T-VN-41F1D-C3 Manager dynamic fixture n150 결선
 
 - [x] **T-VN-41F1D-C3 — Map fixture lifecycle의 v5 durable transaction 결선**

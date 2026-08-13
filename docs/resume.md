@@ -1,38 +1,36 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
-## 2026-08-10 — T-VN-34C: fresh live gate 실행 대기
+## 2026-08-13 — T-VN-34 머지 대기: 적대 검토 3라운드 반영 완료
 
-**다음 한 작업**: root-owned T-VN-34C fresh snapshot을 n150에 설치하고 fresh final
-PostGIS → actual Dagster runtime ETL → isolated Playwright destructive admin main/recovery
-→ PinVi public probe를 한 번에 실행한다. 실패하면 generic clone DB를 재사용하지 않고
-`BLOCKED.json`의 exact isolated project만 `recover`한다.
+**다음 한 작업**: PR #972를 CI green 후 merge commit으로 머지한다. 그 뒤 T-VN-36을 새
+main으로 재리베이스하되 alembic revision 번호 충돌을 먼저 푼다 — T-VN-34가
+`0098_admin_scope_indexes`를 추가했고 T-VN-36 체인도 `0098`부터 시작하므로 `0099~0105`로
+재번호 + `down_revision` 재배선이 필요하다.
 
-- T-VN-34 state spine은 upstream T-VN-38 migration head에 선형으로 연결돼야 하며,
-  Map OpenAPI artifact와 PinVi vendor pair는 base가 바뀔 때마다 bytes와 provenance를
-  다시 고정한다.
-- installer/runner는 committed pair를 `git archive`로만 가져오고, private detail view
-  부재·final migration·runtime principal·exact executor hash를 fail-closed로 확인한다.
-- n150 destructive main/recovery 및 cleanup evidence는 아직 없다.
+- 적대 검토 3라운드에서 28건을 받아 전부 반영했고 각각 변이로 증명했다. 3라운드는 실제
+  prod 리허설(0087 + 100만 행)로 배포 P0 2건을 꺼냈다 — bootstrap이 데이터 있는 DB에서
+  exit 3(identity 시퀀스), `public.alembic_version` 소유권 미이전. 둘 다 하네스가 fresh
+  DB만 써서 보이지 않던 것이고, prod 이행이 **실데이터 이관**이라 필수 경로다.
+- live E2E 러너가 T-VN-34C 자신 때문에 깨져 있었다(`user_change_reason` 조회). 이식했고
+  스크립트도 정적 차단선에 넣었다.
+- live 검증은 T-VN-36까지 머지한 뒤 한 번에 한다 — `0104`가 change-request 모델을 지우므로
+  clone-live 러너를 두 번 재작성하지 않는다.
+- 배포 결선은 docker-manager #171/#172가 Map 전용 PostgreSQL `:12703` 분리로 진행 중이며
+  bootstrap 스크립트를 Map 저장소에서 마운트하므로 위 P0 수정이 그대로 실린다.
 
-## 2026-08-12 — T-VN-38 완료 후보: current-summary CI 계약 수리 후 final green 대기
+## 2026-08-12 — T-VN-38 머지 완료·백로그 정본 정리 진행
 
-**다음 한 작업**: #971의 T-VN-38 fact/current-summary 계약 수리 전체 integration gate와
-GitHub CI가 녹색이면 final n150 clone live·적대 리뷰 2인 재승인을 거쳐 병합하고, 사용자
-후속 지시 전까지 대기한다.
+**다음 한 작업**: 완료 task 이관 문서 PR을 CI green 후 머지하고, 이미 머지되어 더 이상
+사용하지 않는 로컬·n150 브랜치를 작업트리/열린 PR과 대조해 정리한다. 활성
+`T-VN-34`·`T-VN-36`·`T-VN-41` 브랜치는 삭제 대상이 아니다.
 
-T-VN-33 squash merge 뒤 T-VN-38 고유 32개 commit만 `main` 위에 재적용했다.
-`0092_tvn33_offline_cleanup`와 `0092_weather_current_summary`의 과거 분기는 빈
-`0095_tvn33_tvn38_head_merge`가 함께 요구해 단일 Alembic head로 수렴한다. 새 target
-catalog/ownership artifact freeze, weather·price projection advisory lock, 9개 frozen artifact
-CRLF guard, Dagster raw-response JSON fixture를 반영했다. CI의 old fact schema 가정을 전수
-정리해 Alembic metadata/exclusion ledger와 구조 계약, admin/public weather·price fixture,
-H35 index signature, tier-2 pre-page cardinality count, Dagster response JSON 경계를 canonical
-dataset/source-revision current-summary shape에 맞췄다.
+PR [#971](https://github.com/digitie/kor-travel-map/pull/971)은 `8dc2b24a`로 머지됐다.
+최종 source `bef509d`의 CI 8개가 green이었고, n150 전용
+`ktm-tvn38-db:18732` clone Live UI E2E는 main/recovery 각각 2/2, `phase=passed`,
+BLOCKED 없음으로 완료했다. 적대 리뷰 2인은 P0/P1=0을 확인했다.
 
-final `e68b00ef`의 n150 전용 `ktm-tvn38-db:18732` live는 시작 전에 signed checkpoint dump를
-복원해 직전 성공의 soft-delete 감사 이력과 독립시켰고, main/recovery 각각 2/2,
-`phase=passed`, BLOCKED 없음, startup migration 불변, production compose 제외를 확인했다.
-최종 적대 리뷰 2인은 P0/P1 없이 GO를 승인했다.
+`T-VN-33`(#966), `T-VN-37`(#968), `T-VN-38`(#971)의 완료 이력은
+`tasks-done.md`로 옮기고, 아직 열린 배포·후속 task만 `tasks.md`에 남긴다.
 
 ## 2026-08-11 — T-VN-33: 라운드11~12, CI 경로 red BLOCKER 2건 해소
 
