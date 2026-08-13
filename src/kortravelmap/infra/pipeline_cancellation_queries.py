@@ -345,32 +345,12 @@ FROM canonical_jobs
 """
 
 _FILL_CANONICAL_STARTS_SQL = """
-WITH canonical_jobs AS (
-  SELECT job.job_id, job.cancellation_id, job.started_at
-  FROM ops.pipeline_cancellation_members AS member
-  JOIN ops.import_jobs AS job ON job.job_id = member.job_id
-  WHERE member.cancellation_id = CAST(:cancellation_id AS uuid)
-    AND member.dagster_run_id = :dagster_run_id
-    AND member.operation_kind IN (
-      'provider_feature_load_run','provider_feature_load'
-    )
-),
-updated AS (
-  UPDATE ops.import_jobs AS job
-  SET started_at = CAST(:engine_started_at AS timestamptz)
-  FROM canonical_jobs AS candidate
-  WHERE job.job_id = candidate.job_id
-    AND candidate.cancellation_id = CAST(:cancellation_id AS uuid)
-    AND job.cancellation_id = CAST(:cancellation_id AS uuid)
-    AND job.started_at IS NULL
-  RETURNING job.job_id
+SELECT expected_count, owned_count, updated_job_ids
+FROM ops.fill_provider_cancellation_starts_command(
+  CAST(:cancellation_id AS uuid),
+  :dagster_run_id,
+  CAST(:engine_started_at AS timestamptz)
 )
-SELECT
-  (SELECT count(*) FROM canonical_jobs) AS expected_count,
-  (SELECT count(*) FROM canonical_jobs
-   WHERE cancellation_id = CAST(:cancellation_id AS uuid)) AS owned_count,
-  COALESCE((SELECT array_agg(job_id::text ORDER BY job_id) FROM updated), '{}')
-    AS updated_job_ids
 """
 
 _RESERVE_RUN_TERMINATION_SQL = """
@@ -470,4 +450,21 @@ WHERE job_id = CAST(:job_id AS uuid)
     )
   )
 RETURNING job_id
+"""
+
+_TRANSITION_PROVIDER_JOB_MEMBER_SQL = """
+SELECT ops.transition_provider_cancellation_job_command(
+  CAST(:cancellation_id AS uuid),
+  CAST(:job_id AS uuid),
+  :dagster_run_id,
+  CAST(:expected_statuses AS text[]),
+  :target_status,
+  :error_message,
+  :dagster_terminal_status,
+  CAST(:engine_started_at AS timestamptz),
+  CAST(:engine_finished_at AS timestamptz),
+  :success_tracking_invariant,
+  :result,
+  CAST(:expected_member_results AS text[])
+) AS changed
 """
