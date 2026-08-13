@@ -7,7 +7,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import text
-from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from kortravelmap.infra.db import make_async_engine
@@ -270,10 +270,12 @@ async def _seed_candidate(
         "candidate_id": candidate_id,
         "command_id": command_id,
         "collection_id": collection_id,
+        "dataset_id": dataset_id,
         "feature_id": feature_id,
         "rule_id": rule_id,
         "source_entity_key": source_entity_key,
         "source_record_key": source_record_key,
+        "suffix": suffix,
     }
 
 
@@ -912,17 +914,25 @@ async def test_rule_reconcile_scope_omission_and_cross_executor_fail_closed(
             await transaction.rollback()
 
         async with dagster.connect() as connection:
-            assert not await connection.scalar(
-                text(
-                    """
-                    SELECT has_function_privilege(
-                      session_user,
-                      'feature.materialize_theme_candidate_generation(uuid,text,uuid,uuid,bigint,text,jsonb)'::regprocedure,
-                      'EXECUTE'
-                    )
-                    """
-                )
+            transaction = await connection.begin()
+            await connection.execute(
+                text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
             )
+            with pytest.raises(DBAPIError) as crossed:
+                await connection.execute(
+                    text(
+                        """
+                        CALL feature.materialize_theme_candidate_generation(
+                          CAST(:rule_id AS uuid), 'rule_reconcile', NULL,
+                          CAST(:operation_id AS uuid), :command_id, NULL,
+                          '{}'::jsonb, NULL, NULL, NULL, NULL, NULL
+                        )
+                        """
+                    ),
+                    params,
+                )
+            assert getattr(crossed.value.orig, "sqlstate", None) == "42501"
+            await transaction.rollback()
 
         async with migrated_engine.connect() as connection:
             assert (
@@ -953,4 +963,226 @@ async def test_rule_reconcile_scope_omission_and_cross_executor_fail_closed(
             )
     finally:
         await api.dispose()
+        await dagster.dispose()
+
+
+async def test_provider_full_snapshot_requires_exact_authoritative_job_and_replays(
+    migrated_engine: AsyncEngine,
+) -> None:
+    seeded = await _seed_candidate(
+        migrated_engine,
+        operation="admin.curation-rule.create",
+        create_candidate=False,
+    )
+    dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
+    try:
+        async with migrated_engine.begin() as connection:
+            root_job_id = str(
+                await connection.scalar(
+                    text(
+                        """
+                        INSERT INTO ops.import_jobs (
+                          kind, payload, status, progress, current_stage,
+                          dagster_run_id, dataset_membership_mode, trigger_kind,
+                          operation_key, dagster_run_status
+                        ) VALUES (
+                          'provider_feature_load_run', '{}'::jsonb, 'running', 0,
+                          'loading', :run_id, 'root', 'schedule', 'load', 'STARTED'
+                        ) RETURNING job_id
+                        """
+                    ),
+                    {"run_id": f"tvn40-provider-{seeded['suffix']}"},
+                )
+            )
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO provider_sync.provider_dataset_operations (
+                      provider_dataset_id, operation_key, operation_kind,
+                      is_enabled, config
+                    ) VALUES (:dataset_id, 'load', 'refresh', true, '{}'::jsonb)
+                    """
+                ),
+                seeded,
+            )
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO provider_sync.provider_dataset_operation_scopes (
+                      provider_dataset_id, sync_scope, operation_key, operation_kind
+                    ) VALUES (:dataset_id, 'dataset_wide', 'load', 'refresh')
+                    """
+                ),
+                seeded,
+            )
+            source_job_id = str(
+                await connection.scalar(
+                    text(
+                        """
+                        INSERT INTO ops.import_jobs (
+                          kind, parent_job_id, payload, status, progress,
+                          current_stage, dagster_run_id, dataset_membership_mode,
+                          finished_at
+                        ) VALUES (
+                          'provider_feature_load', CAST(:root_job_id AS uuid),
+                          jsonb_build_object('authoritative_snapshot_complete', true),
+                          'done', 100, 'completed', :run_id, 'single', clock_timestamp()
+                        ) RETURNING job_id
+                        """
+                    ),
+                    {
+                        "root_job_id": root_job_id,
+                        "run_id": f"tvn40-provider-{seeded['suffix']}",
+                    },
+                )
+            )
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO ops.import_job_datasets (
+                      job_id, provider_dataset_id, sync_scope, operation_key
+                    ) VALUES (
+                      CAST(:source_job_id AS uuid), :dataset_id,
+                      'dataset_wide', 'load'
+                    )
+                    """
+                ),
+                {**seeded, "source_job_id": source_job_id},
+            )
+            invalid_root_job_id = str(
+                await connection.scalar(
+                    text(
+                        """
+                        INSERT INTO ops.import_jobs (
+                          kind, payload, status, progress, current_stage,
+                          dagster_run_id, dataset_membership_mode, trigger_kind,
+                          operation_key, dagster_run_status
+                        ) VALUES (
+                          'provider_feature_load_run', '{}'::jsonb, 'running', 0,
+                          'loading', :run_id, 'root', 'schedule', 'load', 'STARTED'
+                        ) RETURNING job_id
+                        """
+                    ),
+                    {"run_id": f"tvn40-provider-invalid-{seeded['suffix']}"},
+                )
+            )
+            invalid_source_job_id = str(
+                await connection.scalar(
+                    text(
+                        """
+                        INSERT INTO ops.import_jobs (
+                          kind, parent_job_id, payload, status, progress,
+                          current_stage, dagster_run_id, dataset_membership_mode,
+                          finished_at
+                        ) VALUES (
+                          'provider_feature_load', CAST(:root_job_id AS uuid),
+                          jsonb_build_object('authoritative_snapshot_complete', false),
+                          'done', 100, 'completed', :run_id, 'single', clock_timestamp()
+                        ) RETURNING job_id
+                        """
+                    ),
+                    {
+                        "root_job_id": invalid_root_job_id,
+                        "run_id": f"tvn40-provider-invalid-{seeded['suffix']}",
+                    },
+                )
+            )
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO ops.import_job_datasets (
+                      job_id, provider_dataset_id, sync_scope, operation_key
+                    ) VALUES (
+                      CAST(:source_job_id AS uuid), :dataset_id,
+                      'dataset_wide', 'load'
+                    )
+                    """
+                ),
+                {**seeded, "source_job_id": invalid_source_job_id},
+            )
+        params = {**seeded, "source_job_id": source_job_id}
+
+        async with dagster.connect() as connection:
+            transaction = await connection.begin()
+            await connection.execute(
+                text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
+            )
+            with pytest.raises(IntegrityError) as invalid:
+                await connection.execute(
+                    text(
+                        """
+                        CALL feature.materialize_theme_candidate_generation(
+                          CAST(:rule_id AS uuid), 'provider_full_snapshot',
+                          CAST(:source_job_id AS uuid), NULL, NULL, NULL,
+                          '{}'::jsonb, NULL, NULL, NULL, NULL, NULL
+                        )
+                        """
+                    ),
+                    {**seeded, "source_job_id": invalid_source_job_id},
+                )
+            assert getattr(invalid.value.orig, "sqlstate", None) == "23514"
+            await transaction.rollback()
+
+        async with dagster.begin() as connection:
+            await connection.execute(
+                text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
+            )
+            first = (
+                await connection.execute(
+                    text(
+                        """
+                        CALL feature.materialize_theme_candidate_generation(
+                          CAST(:rule_id AS uuid), 'provider_full_snapshot',
+                          CAST(:source_job_id AS uuid), NULL, NULL, NULL,
+                          '{}'::jsonb, NULL, NULL, NULL, NULL, NULL
+                        )
+                        """
+                    ),
+                    params,
+                )
+            ).mappings().one()
+        assert first["o_replayed"] is False
+        assert int(first["o_observed_candidate_count"]) == 1
+
+        async with dagster.begin() as connection:
+            await connection.execute(
+                text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
+            )
+            replay = (
+                await connection.execute(
+                    text(
+                        """
+                        CALL feature.materialize_theme_candidate_generation(
+                          CAST(:rule_id AS uuid), 'provider_full_snapshot',
+                          CAST(:source_job_id AS uuid), NULL, NULL, NULL,
+                          '{}'::jsonb, NULL, NULL, NULL, NULL, NULL
+                        )
+                        """
+                    ),
+                    params,
+                )
+            ).mappings().one()
+        assert replay["o_replayed"] is True
+        assert replay["o_generation_id"] == first["o_generation_id"]
+
+        async with migrated_engine.connect() as connection:
+            actor, source_job, causation_job = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT transition.actor, generation.source_job_id::text,
+                               transition.causation_ref ->> 'source_job_id'
+                        FROM feature.theme_feature_candidate_transitions AS transition
+                        JOIN feature.theme_candidate_generations AS generation
+                          ON generation.generation_id = transition.generation_id
+                        WHERE generation.generation_id = CAST(:generation_id AS uuid)
+                        """
+                    ),
+                    {"generation_id": first["o_generation_id"]},
+                )
+            ).one()
+        assert actor == f"provider:{seeded['dataset_id']}"
+        assert source_job == source_job_id
+        assert causation_job == source_job_id
+    finally:
         await dagster.dispose()

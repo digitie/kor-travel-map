@@ -870,12 +870,20 @@ class AsyncKorTravelMapClient:
         *,
         dagster_run_id: str,
         membership: ProviderDatasetOperationMembership,
+        authoritative_snapshot_complete: bool = False,
     ) -> DagsterFeatureOperationMutation:
         """wrapper가 성공한 exact canonical member 하나를 완료한다."""
         try:
             async with self._session_factory() as session, session.begin():
+                if authoritative_snapshot_complete:
+                    await session.execute(
+                        text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
+                    )
                 return await repo_finish_dagster_feature_membership(
-                    session, dagster_run_id=dagster_run_id, membership=membership
+                    session,
+                    dagster_run_id=dagster_run_id,
+                    membership=membership,
+                    authoritative_snapshot_complete=authoritative_snapshot_complete,
                 )
         except FeatureOperationInvariantConflict as exc:
             await self._record_feature_operation_conflict(exc)

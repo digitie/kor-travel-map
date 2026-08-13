@@ -213,7 +213,11 @@ SET status = 'done',
     current_stage = 'completed',
     finished_at = COALESCE(finished_at, now()),
     heartbeat_at = now(),
-    error_message = NULL
+    error_message = NULL,
+    payload = payload || jsonb_build_object(
+      'authoritative_snapshot_complete',
+      CAST(:authoritative_snapshot_complete AS boolean)
+    )
 WHERE parent_job_id = CAST(:root_job_id AS uuid)
   AND kind = 'provider_feature_load'
   AND EXISTS (
@@ -825,6 +829,7 @@ async def finish_dagster_feature_membership(
     *,
     dagster_run_id: str,
     membership: ProviderDatasetOperationMembership,
+    authoritative_snapshot_complete: bool = False,
 ) -> DagsterFeatureOperationMutation:
     normalized_run_id = _run_id(dagster_run_id)
     await lock_pipeline_lineage_mutation(session)
@@ -862,6 +867,7 @@ async def finish_dagster_feature_membership(
                 "provider_dataset_id": membership.provider_dataset_id,
                 "sync_scope": membership.sync_scope,
                 "operation_key": membership.operation_key,
+                "authoritative_snapshot_complete": authoritative_snapshot_complete,
             },
         )
     if member.status == "done":
@@ -874,6 +880,7 @@ async def finish_dagster_feature_membership(
                 "provider_dataset_id": membership.provider_dataset_id,
                 "sync_scope": membership.sync_scope,
                 "operation_key": membership.operation_key,
+                "authoritative_snapshot_complete": authoritative_snapshot_complete,
             },
         )
     ).one_or_none()
@@ -886,6 +893,118 @@ async def finish_dagster_feature_membership(
     await session.execute(
         text(_UPDATE_ROOT_PROGRESS_SQL), {"root_job_id": root_job_id}
     )
+    if authoritative_snapshot_complete:
+        await session.execute(
+            text(
+                """
+                SELECT pg_advisory_xact_lock(
+                  hashtextextended('feature-write:' || touched.feature_id, 0)
+                )
+                FROM (
+                  SELECT link.feature_id
+                  FROM provider_sync.source_entities AS entity
+                  JOIN provider_sync.source_links AS link
+                    ON link.source_entity_key = entity.source_entity_key
+                  WHERE entity.provider_dataset_id = :provider_dataset_id
+                  UNION
+                  SELECT candidate.feature_id
+                  FROM feature.curated_source_rules AS rule
+                  JOIN feature.curated_sources AS source
+                    ON source.source_id = rule.source_id
+                  JOIN feature.theme_feature_candidates AS candidate
+                    ON candidate.rule_id = rule.rule_id
+                   AND candidate.disposition = 'active'
+                  WHERE source.provider_dataset_id = :provider_dataset_id
+                ) AS touched
+                ORDER BY touched.feature_id
+                """
+            ),
+            {"provider_dataset_id": membership.provider_dataset_id},
+        )
+        rules = (
+            await session.execute(
+                text(
+                    """
+                    SELECT rule.rule_id::text
+                    FROM feature.curated_source_rules AS rule
+                    JOIN feature.curated_sources AS source
+                      ON source.source_id = rule.source_id
+                    JOIN feature.curated_themes AS theme
+                      ON theme.theme_id = rule.theme_id
+                    WHERE source.provider_dataset_id = :provider_dataset_id
+                      AND source.archived_at IS NULL
+                      AND theme.archived_at IS NULL
+                      AND rule.archived_at IS NULL
+                      AND rule.enabled
+                      AND rule.default_action = 'candidate'
+                    ORDER BY rule.rule_id
+                    """
+                ),
+                {"provider_dataset_id": membership.provider_dataset_id},
+            )
+        ).all()
+        for rule in rules:
+            await session.execute(
+                text(
+                    """
+                    CALL feature.materialize_theme_candidate_generation(
+                      CAST(:rule_id AS uuid), 'provider_full_snapshot',
+                      CAST(:source_job_id AS uuid), NULL, NULL, NULL,
+                      jsonb_build_object(
+                        'schema_version', 1,
+                        'sync_scope', :sync_scope,
+                        'operation_key', :operation_key
+                      ),
+                      NULL, NULL, NULL, NULL, NULL
+                    )
+                    """
+                ),
+                {
+                    "operation_key": membership.operation_key,
+                    "rule_id": str(rule.rule_id),
+                    "source_job_id": str(changed.job_id),
+                    "sync_scope": membership.sync_scope,
+                },
+            )
+        await session.execute(
+            text(
+                """
+                WITH receipt AS (
+                  SELECT count(*)::bigint AS generation_count,
+                         encode(
+                           x_extension.digest(
+                             convert_to(
+                               COALESCE(
+                                 jsonb_agg(
+                                   jsonb_build_array(
+                                     generation.rule_id::text,
+                                     generation.generation_id::text,
+                                     generation.generation_input_set_hash
+                                   ) ORDER BY generation.rule_id
+                                 )::text,
+                                 '[]'
+                               ),
+                               'UTF8'
+                             ),
+                             'sha256'
+                           ),
+                           'hex'
+                         ) AS generation_set_hash
+                  FROM feature.theme_candidate_generations AS generation
+                  WHERE generation.source_job_id = CAST(:source_job_id AS uuid)
+                    AND generation.generation_kind = 'provider_full_snapshot'
+                )
+                UPDATE ops.import_jobs AS job
+                SET payload = job.payload || jsonb_build_object(
+                  'candidate_generation_count', receipt.generation_count,
+                  'candidate_generation_set_hash', receipt.generation_set_hash
+                )
+                FROM receipt
+                WHERE job.job_id = CAST(:source_job_id AS uuid)
+                """
+            ),
+            {"source_job_id": str(changed.job_id)},
+        )
     return DagsterFeatureOperationMutation(
         outcome="applied",
         operation=await _load_operation(session, normalized_run_id),

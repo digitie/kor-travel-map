@@ -371,8 +371,11 @@ async def test_culture_public_wrapper_finishes_every_exact_member_after_success(
     async def _finish(
         received_guard: object,
         membership: ProviderDatasetOperationMembership,
+        *,
+        authoritative_snapshot_complete: bool,
     ) -> None:
         assert received_guard is guard
+        assert authoritative_snapshot_complete is True
         finished.append(membership)
 
     async def _run(
@@ -557,8 +560,11 @@ def _patched_wrapper(
     async def _finish(
         received_guard: object,
         membership: ProviderDatasetOperationMembership,
+        *,
+        authoritative_snapshot_complete: bool,
     ) -> None:
         assert received_guard is guard
+        assert authoritative_snapshot_complete is True
         finished.append(membership)
 
     async def _attempt(
