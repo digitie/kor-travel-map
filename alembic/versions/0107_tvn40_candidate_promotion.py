@@ -45,20 +45,7 @@ WITH rule_scope AS MATERIALIZED (
   SELECT
     rule.*,
     source.provider_dataset_id,
-    jsonb_build_object(
-      'schema_version', 1,
-      'rule_id', rule.rule_id::text,
-      'theme_id', rule.theme_id::text,
-      'source_id', rule.source_id::text,
-      'place_kind', rule.place_kind,
-      'category', rule.category,
-      'region_scope', rule.region_scope,
-      'detail_selector', rule.detail_selector,
-      'default_action', rule.default_action,
-      'priority', rule.priority,
-      'enabled', rule.enabled,
-      'archived_at', to_jsonb(rule.archived_at)
-    ) AS rule_input
+    feature.current_curation_rule_input(rule.rule_id) AS rule_input
   FROM feature.curated_source_rules AS rule
   JOIN feature.curated_sources AS source ON source.source_id = rule.source_id
   JOIN feature.curated_themes AS theme ON theme.theme_id = rule.theme_id

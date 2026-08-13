@@ -324,20 +324,11 @@ BEGIN
     v_actor := 'provider:' || v_provider_dataset_id::text;
   END IF;
 
-  v_rule_input := jsonb_build_object(
-    'schema_version', 1,
-    'rule_id', v_rule.rule_id::text,
-    'theme_id', v_rule.theme_id::text,
-    'source_id', v_rule.source_id::text,
-    'place_kind', v_rule.place_kind,
-    'category', v_rule.category,
-    'region_scope', v_rule.region_scope,
-    'detail_selector', v_rule.detail_selector,
-    'default_action', v_rule.default_action,
-    'priority', v_rule.priority,
-    'enabled', v_rule.enabled,
-    'archived_at', to_jsonb(v_rule.archived_at)
-  );
+  v_rule_input := feature.current_curation_rule_input(p_rule_id);
+  IF v_rule_input IS NULL THEN
+    RAISE EXCEPTION 'locked rule input could not be materialized'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_theme_candidate_rule_input';
+  END IF;
   v_rule_input_hash := encode(
     x_extension.digest(convert_to(v_rule_input::text, 'UTF8'), 'sha256'), 'hex'
   );

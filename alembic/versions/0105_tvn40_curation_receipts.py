@@ -171,6 +171,54 @@ ALTER TABLE feature.curation_items
 """
 
 
+_CURRENT_RULE_INPUT_FUNCTION_SQL = r"""
+CREATE FUNCTION feature.current_curation_rule_input(p_rule_id uuid)
+RETURNS jsonb
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog, feature, provider_sync
+AS $rule_input$
+SELECT jsonb_build_object(
+  'schema_version', 2,
+  'rule', jsonb_build_object(
+    'rule_id', rule.rule_id::text,
+    'row_revision', rule.row_revision,
+    'theme_id', rule.theme_id::text,
+    'source_id', rule.source_id::text,
+    'place_kind', rule.place_kind,
+    'category', rule.category,
+    'region_scope', rule.region_scope,
+    'detail_selector', rule.detail_selector,
+    'default_action', rule.default_action,
+    'priority', rule.priority,
+    'enabled', rule.enabled,
+    'archived_at', to_jsonb(rule.archived_at),
+    'owner_kind', rule.owner_kind,
+    'owner_provider_dataset_id', rule.owner_provider_dataset_id
+  ),
+  'theme', jsonb_build_object(
+    'theme_id', theme.theme_id::text,
+    'row_revision', theme.row_revision,
+    'archived_at', to_jsonb(theme.archived_at),
+    'owner_kind', theme.owner_kind,
+    'owner_provider_dataset_id', theme.owner_provider_dataset_id
+  ),
+  'source', jsonb_build_object(
+    'source_id', source.source_id::text,
+    'provider_dataset_id', source.provider_dataset_id,
+    'row_revision', source.row_revision,
+    'archived_at', to_jsonb(source.archived_at)
+  )
+)
+FROM feature.curated_source_rules AS rule
+JOIN feature.curated_themes AS theme ON theme.theme_id = rule.theme_id
+JOIN feature.curated_sources AS source ON source.source_id = rule.source_id
+WHERE rule.rule_id = p_rule_id
+$rule_input$;
+"""
+
+
 _RECEIPT_TABLES_SQL = r"""
 CREATE TABLE ops.curation_rule_reconcile_operations (
   operation_id uuid PRIMARY KEY DEFAULT x_extension.gen_random_uuid(),
@@ -582,11 +630,28 @@ FROM PUBLIC, ktm_feature_runtime, ktm_curation_admin_executor, ktm_curation_prov
 def upgrade() -> None:
     op.execute(_ROLE_ASSERTIONS_SQL)
     _execute_commands(_REVISION_COLUMNS_SQL)
+    op.execute(_CURRENT_RULE_INPUT_FUNCTION_SQL)
+    op.execute(
+        "ALTER FUNCTION feature.current_curation_rule_input(uuid) "
+        "OWNER TO ktm_curation_command_owner"
+    )
     _execute_commands(_RECEIPT_TABLES_SQL)
     _execute_commands(_CANDIDATE_TABLES_SQL)
     _execute_commands(_GUARD_FUNCTIONS_SQL)
     _execute_commands(_TRIGGERS_SQL)
     _execute_commands(_OWNERSHIP_AND_ACL_SQL)
+    op.execute(
+        "GRANT SELECT ON TABLE feature.curated_themes, feature.curated_sources, "
+        "feature.curated_source_rules TO ktm_curation_command_owner"
+    )
+    op.execute("SET ROLE ktm_curation_command_owner")
+    op.execute(
+        "REVOKE ALL ON FUNCTION feature.current_curation_rule_input(uuid) "
+        "FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime, "
+        "ktm_feature_dagster_runtime, ktm_curation_admin_executor, "
+        "ktm_curation_provider_executor"
+    )
+    op.execute("SET ROLE ktm_feature_schema_owner")
 
 
 def downgrade() -> None:
