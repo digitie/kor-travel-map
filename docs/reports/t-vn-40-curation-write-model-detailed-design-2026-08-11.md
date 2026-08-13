@@ -28,19 +28,36 @@
 | `curated_features`와 legacy snapshot | transition overlay | 없음 | 없음 | T-VN-40 final head 이후 relation/ACL/reference 존재 |
 
 `curation_items.status='candidate'`는 공식 source item이 아직 운영자 검토 중인 경우에만 쓴다.
-이는 자동 rule 결과인 `theme_feature_candidates.state='open'`과 다른 domain이다. public inclusion은
+이는 자동 rule 결과인 `theme_feature_candidates.review_state='open'`과 다른 domain이다. public inclusion은
 collection이 `published`/`public`, item이 `included`, item source가 present, 연결 Feature가
 ADR-067 public predicate를 만족하는 경우에만 성립한다.
 
 ## 3. 후보 data model
 
-### 3.1 `feature.curated_source_rules` 보강
+### 3.1 catalog revision·archive·observation 분리
 
-T-VN-40은 rule 자체에 다음을 추가한다.
+T-VN-40은 retained catalog 세 relation 모두에 operator semantic CAS revision과 archive 축을
+추가한다. source polling heartbeat는 operator ETag를 churn시키지 않도록 별도 observation revision을
+쓴다. ADR-092가 폐기한 자동 공개 의미 `default_curated`는 theme/API/generated type에서 물리 삭제한다.
 
 ```sql
+ALTER TABLE feature.curated_themes
+  ADD COLUMN row_revision bigint NOT NULL DEFAULT 1,
+  ADD COLUMN archived_at timestamptz,
+  ADD CONSTRAINT ck_curated_themes_revision_positive CHECK (row_revision >= 1),
+  DROP COLUMN default_curated;
+
+ALTER TABLE feature.curated_sources
+  ADD COLUMN row_revision bigint NOT NULL DEFAULT 1,
+  ADD COLUMN observation_revision bigint NOT NULL DEFAULT 1,
+  ADD COLUMN archived_at timestamptz,
+  ADD CONSTRAINT ck_curated_sources_revision_positive CHECK (row_revision >= 1),
+  ADD CONSTRAINT ck_curated_sources_observation_revision_positive
+    CHECK (observation_revision >= 1);
+
 ALTER TABLE feature.curated_source_rules
   ADD COLUMN row_revision bigint NOT NULL DEFAULT 1,
+  ADD COLUMN archived_at timestamptz,
   ADD CONSTRAINT ck_curated_source_rules_revision_positive
     CHECK (row_revision >= 1),
   DROP CONSTRAINT ck_curated_source_rules_action,
@@ -48,8 +65,17 @@ ALTER TABLE feature.curated_source_rules
     CHECK (default_action IN ('candidate', 'ignore'));
 ```
 
-- catalog command는 실제 내용 변경 때만 `row_revision`을 1 증가시킨다. 직접 `UPDATE`와
-  no-op timestamp write는 DB trigger/ACL로 거부한다.
+- catalog command는 실제 operator-owned 내용 변경 때만 `row_revision`을 1 증가시킨다. 직접
+  `UPDATE`와 no-op timestamp write는 DB trigger/ACL로 거부한다. theme/source/rule GET·list DTO는
+  revision을 반환하고 단건 GET은 raw strong ETag를 낸다. PATCH/archive는 `If-Match` 필수이며
+  missing=428, mismatch=412다.
+- source의 `last_checked_at`, `last_source_modified_at`, `next_expected_at`, `row_count`, freshness
+  observation은 provider-only `refresh_curated_source_observation`이 갱신하고
+  `observation_revision`만 1 증가시킨다. 동일 count 재관측도 실제 heartbeat이므로 observation
+  revision은 증가하지만 operator `row_revision`/ETag는 유지한다. operator source PATCH와 concurrent
+  provider observation은 서로의 필드를 덮지 않는다.
+- archive는 `archived_at`의 NULL→server timestamp 전이만 허용한다. unarchive와 hard delete는
+  T-VN-40 scope에 없고 archived catalog는 generation/promotion input에서 제외한다.
 - legacy `default_action='curated'`는 preflight에서 정확히 계수한다. backfill은 이를
   `candidate`로 바꾸고 자동 collection item 생성은 하지 않는다.
 - rule의 `theme_id`, `source_id`, selector, region/category/kind, enabled, priority가 후보
@@ -58,45 +84,91 @@ ALTER TABLE feature.curated_source_rules
 
 ### 3.2 rule generation receipt
 
-후보 withdrawal은 Dagster run id 문자열이나 incremental refresh의 “없음”을 근거로 하지 않는다.
+후보 eligibility removal은 Dagster run id 문자열이나 incremental refresh의 “없음”을 근거로 하지 않는다.
 T-VN-40은 rule evaluation의 complete input을 명시하는 generation receipt를 둔다.
 
 ```sql
+CREATE TABLE ops.curation_rule_reconcile_operations (
+  operation_id uuid PRIMARY KEY DEFAULT x_extension.gen_random_uuid(),
+  rule_id uuid NOT NULL
+    REFERENCES feature.curated_source_rules(rule_id) ON DELETE RESTRICT,
+  before_rule_revision bigint NOT NULL CHECK (before_rule_revision >= 1),
+  after_rule_revision bigint NOT NULL CHECK (after_rule_revision >= before_rule_revision),
+  before_rule_input_hash text NOT NULL CHECK (before_rule_input_hash ~ '^[0-9a-f]{64}$'),
+  after_rule_input_hash text NOT NULL CHECK (after_rule_input_hash ~ '^[0-9a-f]{64}$'),
+  command_id bigint REFERENCES ops.domain_commands(command_id) ON DELETE RESTRICT,
+  system_operation_key text,
+  actor text NOT NULL CHECK (actor = btrim(actor) AND actor <> ''),
+  created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+  CONSTRAINT ck_curation_rule_reconcile_operation_origin CHECK (
+    (command_id IS NOT NULL AND system_operation_key IS NULL)
+    OR (command_id IS NULL AND system_operation_key IS NOT NULL
+      AND system_operation_key = btrim(system_operation_key)
+      AND system_operation_key <> '')
+  )
+);
+CREATE UNIQUE INDEX uq_curation_rule_reconcile_command
+  ON ops.curation_rule_reconcile_operations (rule_id, command_id)
+  WHERE command_id IS NOT NULL;
+CREATE UNIQUE INDEX uq_curation_rule_reconcile_system_operation
+  ON ops.curation_rule_reconcile_operations (rule_id, system_operation_key)
+  WHERE system_operation_key IS NOT NULL;
+
+CREATE TABLE ops.curation_rule_reconcile_scope_members (
+  operation_id uuid NOT NULL
+    REFERENCES ops.curation_rule_reconcile_operations(operation_id) ON DELETE RESTRICT,
+  member_kind text NOT NULL CHECK (member_kind IN ('source_entity','feature')),
+  member_key text NOT NULL CHECK (member_key = btrim(member_key) AND member_key <> ''),
+  before_identity_hash text CHECK (before_identity_hash ~ '^[0-9a-f]{64}$'),
+  after_identity_hash text CHECK (after_identity_hash ~ '^[0-9a-f]{64}$'),
+  PRIMARY KEY (operation_id, member_kind, member_key),
+  CONSTRAINT ck_curation_rule_reconcile_scope_identity CHECK (
+    before_identity_hash IS NOT NULL OR after_identity_hash IS NOT NULL
+  )
+);
+
 CREATE TABLE feature.theme_candidate_generations (
   generation_id uuid PRIMARY KEY DEFAULT x_extension.gen_random_uuid(),
   rule_id uuid NOT NULL
     REFERENCES feature.curated_source_rules(rule_id) ON DELETE RESTRICT,
   rule_row_revision bigint NOT NULL CHECK (rule_row_revision >= 1),
   generation_kind text NOT NULL CHECK (
-    generation_kind IN ('provider_full_snapshot', 'rule_reconcile', 'legacy_backfill')
+    generation_kind IN ('provider_full_snapshot', 'scoped_reconcile', 'rule_reconcile', 'legacy_backfill')
   ),
   source_job_id uuid REFERENCES ops.import_jobs(job_id) ON DELETE RESTRICT,
+  reconcile_operation_id uuid
+    REFERENCES ops.curation_rule_reconcile_operations(operation_id) ON DELETE RESTRICT,
+  command_id bigint REFERENCES ops.domain_commands(command_id) ON DELETE RESTRICT,
   generation_key text NOT NULL UNIQUE,
-  state text NOT NULL DEFAULT 'running'
-    CHECK (state IN ('running', 'succeeded')),
-  generation_input_set_hash text
+  rule_input_hash text NOT NULL
+    CHECK (rule_input_hash ~ '^[0-9a-f]{64}$'),
+  rule_input jsonb NOT NULL CHECK (jsonb_typeof(rule_input) = 'object'),
+  generation_input_set_hash text NOT NULL
     CHECK (generation_input_set_hash ~ '^[0-9a-f]{64}$'),
-  observed_candidate_count bigint NOT NULL DEFAULT 0
+  observed_candidate_count bigint NOT NULL
     CHECK (observed_candidate_count >= 0),
-  withdrawn_candidate_count bigint NOT NULL DEFAULT 0
-    CHECK (withdrawn_candidate_count >= 0),
-  started_at timestamptz NOT NULL DEFAULT clock_timestamp(),
-  completed_at timestamptz,
-  CONSTRAINT ck_theme_candidate_generations_shape CHECK (
-    (state = 'running' AND completed_at IS NULL AND generation_input_set_hash IS NULL)
-    OR
-    (state = 'succeeded' AND completed_at IS NOT NULL AND generation_input_set_hash IS NOT NULL)
-  ),
+  eligibility_removed_candidate_count bigint NOT NULL
+    CHECK (eligibility_removed_candidate_count >= 0),
+  completed_at timestamptz NOT NULL DEFAULT clock_timestamp(),
   CONSTRAINT ck_theme_candidate_generations_source_job CHECK (
-    (generation_kind = 'provider_full_snapshot' AND source_job_id IS NOT NULL)
-    OR generation_kind <> 'provider_full_snapshot'
+    (generation_kind = 'provider_full_snapshot'
+      AND source_job_id IS NOT NULL AND reconcile_operation_id IS NULL AND command_id IS NULL)
+    OR (generation_kind IN ('scoped_reconcile','rule_reconcile')
+      AND source_job_id IS NULL AND reconcile_operation_id IS NOT NULL)
+    OR (generation_kind = 'legacy_backfill'
+      AND source_job_id IS NULL AND reconcile_operation_id IS NULL AND command_id IS NULL)
   )
 );
 
 CREATE INDEX idx_theme_candidate_generations_rule_completed
   ON feature.theme_candidate_generations
-    (rule_id, completed_at DESC, generation_id DESC)
-  WHERE state = 'succeeded';
+    (rule_id, completed_at DESC, generation_id DESC);
+CREATE UNIQUE INDEX uq_theme_candidate_generation_provider_job
+  ON feature.theme_candidate_generations (rule_id, source_job_id)
+  WHERE generation_kind = 'provider_full_snapshot';
+CREATE UNIQUE INDEX uq_theme_candidate_generation_reconcile_operation
+  ON feature.theme_candidate_generations (rule_id, reconcile_operation_id)
+  WHERE generation_kind IN ('scoped_reconcile','rule_reconcile');
 
 CREATE TABLE feature.theme_candidate_generation_observations (
   generation_id uuid NOT NULL
@@ -116,12 +188,37 @@ CREATE INDEX idx_theme_candidate_generation_observations_candidate
   ON feature.theme_candidate_generation_observations (candidate_id, generation_id DESC);
 ```
 
+`ops.curation_rule_reconcile_operations`에는 command/audit owner 소유의 unconditional
+`BEFORE UPDATE OR DELETE` reject trigger와 statement-level TRUNCATE reject trigger를 둔다.
+command와 system operation은 exact XOR shape이고 runtime raw INSERT/UPDATE/DELETE/TRUNCATE가 없다.
+command owner만 typed catalog command 안에서 INSERT하며 runtime privilege reconciler의 closed
+`_OPS_TABLE_PRIVILEGES` inventory가 이 relation을 ordinary broad CRUD 대상에서 제외한다.
+generation procedure는 locked operation의 rule/revision/hash/actor를 재검증하고 generation
+`command_id`가 operation의 originating command와 같음을 요구한다. system reconcile이면 둘 다
+NULL이다. relation owner/trigger owner/ACL/guard definition과 두 partial unique index는 catalog test로
+고정한다.
+parent에는 sorted scope member count/hash를 추가하고 child는 writer가 잠근 old/new source
+entity/Feature identity와 semantic hash를 durable하게 보존한다. command procedure가 DB relation에서
+scope를 만들고 current locked set과 양방향 set-diff 0을 검증한 뒤에만 generation이 읽는다. retry는
+같은 operation의 exact scope hash만 허용하고 omission/injection은 409다. parent/child 모두 같은
+immutable guard와 ACL을 적용한다.
+
+generation receipt는 expected set/count/hash를 먼저 계산한 뒤 의존 observation/transition보다
+선행 INSERT한다. 이후 candidate/observation/transition/eligibility removal을 반영하며 어느 단계든 실패하면
+receipt까지 transaction rollback된다. 즉시 FK를 유지하고 “나중에 receipt를 넣는다”는 순서를
+허용하지 않는다.
+
 `provider_full_snapshot` generation은 complete authoritative provider load의 `ops.import_jobs`
 receipt와 matching dataset/source scope를 procedure가 검증한 경우에만 성공할 수 있다. incremental
-load는 generation을 만들거나 withdrawal을 호출할 수 없다. `rule_reconcile`은 rule revision 변경
+load 자체는 global generation/absence removal 근거가 아니며, immutable touched-scope operation을
+만든 경우에만 `scoped_reconcile`로 그 scope 내부를 평가한다. `rule_reconcile`은 rule revision 변경
 후 existing current heads 전체를 다시 판단하는 explicit job이고, `legacy_backfill`은 migration
-only다. `generation_key`는 rule revision, job/reconcile identity, canonical input을 합친 immutable
-key라 duplicate replay를 구분한다.
+only다. `generation_key`는 caller namespace가 아니다. procedure가 generation kind별 DB operation
+identity, rule id/revision, canonical input hash에서 서버 파생하고 supplied key가 있으면 exact
+equality만 검증한다. `provider_full_snapshot`은 `(rule_id, source_job_id)` partial unique이고,
+`rule_reconcile`은 immutable `ops.curation_rule_reconcile_operations.operation_id` FK와
+`(rule_id, operation_id)` unique를 가진다. 동일 논리 operation에 key A/B를 제출해 receipt를
+두 개 만들 수 없다.
 
 `generation_input_set_hash`는 단순 source-head 목록이 아니다. procedure가 rule scope의 ordered
 `(source_entity_key, current_source_record_key, raw_payload_hash, source_link feature_id,
@@ -129,23 +226,32 @@ feature_uuid, row_revision, lifecycle_state, publication_state, quality_state,
 effective_rule_field_digest)` tuple set을 직접 SHA-256으로 계산한다. effective digest에는 해당 rule이
 읽는 kind/category/region/typed detail의 T-VN-36 effective value와 winning override lineage가 포함된다.
 따라서 head가 그대로여도 admin override/state transition/merge/source-link retarget은 generation
-input hash를 바꾸며 exact replay로 오인되지 않는다. generation은 `SERIALIZABLE` transaction에서
-rule/source-head/link/Feature/candidate를 같은 lock order로 처리한다. 각 match는 durable
+input hash를 바꾸며 exact replay로 오인되지 않는다. `rule_input`은 canonicalization version,
+rule revision, selector/region/category/kind/source/theme/enabled/priority의 ordered JSON을 고정해
+mutable rule row의 과거 의미를 복원하며 `rule_input_hash`는 그 canonical JSON의 검증 digest다.
+generation은 `SERIALIZABLE` transaction에서 처리한다. procedure는 첫 SQL에서
+`current_setting('transaction_isolation') = 'serializable'`을 fail-close 검증하며 아니면 `25001`로
+거부한다. repository는 transaction 첫 statement 전에 isolation을 설정한다. DB set-based evaluator가 rule
+predicate와 T-VN-36 effective fields로 expected match set을 직접 계산하고 각 match는 durable
 `theme_candidate_generation_observations` 한 행을 남긴다. 따라서 candidate input hash가 동일하면
 candidate 자체의 `updated_at`/`row_revision`을 바꾸지 않아도 generation coverage를 증명할 수 있다.
-성공 completion은 해당 rule의 `open` candidate 중 completion generation observation이 없는 행만
-withdraw한다. head가 진행 중 바뀌면 transaction은 `40001`로 retry한다. candidate list와 promotion
+expected set과 observation set은 같은 procedure가 만들며 exact set-diff 0을 확인한 후, 해당 rule의
+모든 `review_state`에서 현재 `eligibility_present=true`이나 observation이 없는 행을 false로 바꾼다.
+head가 진행 중 바뀌면 transaction은
+`40001`로 retry한다. candidate list와 promotion
 procedure도 current source head를 다시 확인하므로, incomplete/old generation의 open row가 실제
 promotion을 통과할 수 없다.
 
-generation은 별도 commit되는 lease/claim이 아니다. 하나의 `SERIALIZABLE` transaction이 running
-row 생성, observation 전체 삽입, withdrawal, succeeded completion을 모두 수행한 뒤 한 번만
-commit한다. 실패/프로세스 종료는 running row까지 rollback하므로 durable `failed`나 stale-running
-상태가 생기지 않는다. 같은 `generation_key`의 succeeded replay는 rule revision, ordered input-set
-hash, observation identity/hash가 모두 같을 때만 no-op receipt를 반환하고 하나라도 다르면 409다.
-generation과 observation relation에는 UPDATE/DELETE/TRUNCATE를 무조건 거부하는 append-only guard를
-둔다. 동시에 같은 rule generation을 시작하면 rule row lock과 unique key로 하나만 진행하며,
-다른 complete snapshot은 직렬화된다.
+generation은 별도 commit되는 lease/claim이 아니다. 하나의 procedure가 candidate/observation/
+eligibility transition을 반영한다. 순서는 **expected set/hash 계산 → immutable receipt INSERT →
+candidate/observation/transition/eligibility 반영 → 양방향 set-diff 재검증 → commit** 하나뿐이다.
+실패/프로세스 종료는 receipt를 포함해 전부 rollback하므로 running/failed/stale lease가 없다. 같은
+`generation_key` replay도 procedure가 current expected set과 `rule_input` 및 두 hash를 먼저 다시
+계산해 기존 receipt
+및 observations와 exact-match할 때만 no-op을 반환하고 하나라도 다르면 409다. generation과
+observation relation에는 UPDATE/DELETE/TRUNCATE를 무조건 거부하는 append-only guard를 둔다.
+동시에 같은 rule generation을 시작하면 rule row lock과 unique key로 하나만 진행하며, 다른 complete
+snapshot은 직렬화된다. caller가 match row를 넘기는 입력은 없으므로 omission/injection 경로도 없다.
 
 ### 3.3 현재 후보 relation
 
@@ -160,12 +266,20 @@ CREATE TABLE feature.theme_feature_candidates (
     REFERENCES feature.features(feature_id) ON DELETE RESTRICT,
   source_record_key text NOT NULL,
   rule_row_revision bigint NOT NULL CHECK (rule_row_revision >= 1),
+  rule_input_hash text NOT NULL
+    CHECK (rule_input_hash ~ '^[0-9a-f]{64}$'),
   source_record_hash text NOT NULL
     CHECK (source_record_hash ~ '^[0-9a-f]{1,64}$'),
   candidate_input_hash text NOT NULL
     CHECK (candidate_input_hash ~ '^[0-9a-f]{64}$'),
-  state text NOT NULL DEFAULT 'open'
-    CHECK (state IN ('open', 'promoted', 'rejected', 'withdrawn')),
+  review_state text NOT NULL DEFAULT 'open'
+    CHECK (review_state IN ('open', 'promoted', 'rejected')),
+  eligibility_present boolean NOT NULL DEFAULT true,
+  disposition text NOT NULL DEFAULT 'active'
+    CHECK (disposition IN ('active', 'merged')),
+  merged_into_candidate_id uuid
+    REFERENCES feature.theme_feature_candidates(candidate_id) ON DELETE RESTRICT,
+  retired_at timestamptz,
   rank_score numeric(10,4) NOT NULL DEFAULT 0,
   proposal_title text,
   proposal_summary text,
@@ -176,6 +290,10 @@ CREATE TABLE feature.theme_feature_candidates (
   updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
   CONSTRAINT uq_theme_feature_candidates_rule_entity_feature
     UNIQUE (rule_id, source_entity_key, feature_id),
+  CONSTRAINT ck_theme_feature_candidates_disposition CHECK (
+    (disposition = 'active' AND merged_into_candidate_id IS NULL AND retired_at IS NULL)
+    OR (disposition = 'merged' AND merged_into_candidate_id IS NOT NULL AND retired_at IS NOT NULL)
+  ),
   CONSTRAINT fk_theme_feature_candidates_source_record
     FOREIGN KEY (source_entity_key, source_record_key)
     REFERENCES provider_sync.source_records(source_entity_key, source_record_key)
@@ -185,22 +303,38 @@ CREATE TABLE feature.theme_feature_candidates (
 CREATE INDEX idx_theme_feature_candidates_rule_open_keyset
   ON feature.theme_feature_candidates
     (rule_id, updated_at DESC, candidate_id DESC)
-  WHERE state = 'open';
+  WHERE disposition = 'active' AND review_state = 'open' AND eligibility_present;
+CREATE INDEX idx_theme_feature_candidates_open_keyset
+  ON feature.theme_feature_candidates (updated_at DESC, candidate_id DESC)
+  WHERE disposition = 'active' AND review_state = 'open' AND eligibility_present;
+CREATE INDEX idx_theme_feature_candidates_state_keyset
+  ON feature.theme_feature_candidates
+    (review_state, eligibility_present, updated_at DESC, candidate_id DESC)
+  WHERE disposition = 'active';
 CREATE INDEX idx_theme_feature_candidates_feature_state
-  ON feature.theme_feature_candidates (feature_id, state, candidate_id);
+  ON feature.theme_feature_candidates
+    (feature_id, review_state, eligibility_present, candidate_id)
+  WHERE disposition = 'active';
 CREATE INDEX idx_theme_feature_candidates_source_entity
   ON feature.theme_feature_candidates (source_entity_key, candidate_id);
 ```
 
-후보는 삭제·재삽입으로 lifecycle을 표현하지 않는다. `withdrawn → open` 재출현도 같은
-identity 행의 versioned transition이다. candidate refresh는 `candidate_input_hash`가 동일하면
+후보는 삭제·재삽입으로 lifecycle을 표현하지 않는다. source 재출현도 같은 identity 행의
+`eligibility_present=false → true` transition이며 `review_state`를 보존한다. candidate refresh는
+`candidate_input_hash`가 동일하면
 `updated_at`/`row_revision`을 바꾸지 않는다. `source_record_hash`는 caller가 신뢰하는 값이
 아니라 locked current `source_records.raw_payload_hash`에서 procedure가 읽어 기록한다.
 
-현재 candidate row의 source/entity/Feature FK는 `RESTRICT`다. Feature/source hard purge가 필요한
-경우에는 먼저 state-owner 전용 purge command가 current candidate를 `withdrawn`으로 전이하고 row를
-삭제하며, append-only transition/generation observation에는 FK cascade를 두지 않는다. runtime의
-직접 candidate delete와 migration의 `CASCADE`는 금지한다.
+현재 candidate row의 source/entity/Feature FK는 `RESTRICT`다. T-VN-40은 candidate hard purge를
+제공하지 않는다. merge collision loser는 삭제하지 않고 `disposition='merged'`, winner pointer,
+server `retired_at`을 기록한 durable tombstone으로 남긴다. source/Feature hard purge는 이 history를
+보존하거나 별도 post-service retention task가 명시적으로 정리하기 전까지 fail-close한다. runtime과
+command owner 모두 candidate DELETE가 없고 migration `CASCADE`도 금지한다.
+모든 live list/count/generation/promotion/rejection predicate는 `disposition='active'`를 필수로 하고,
+merged tombstone은 별도 admin history query에서만 읽는다. DB procedure는 merged row의
+promote/reject/refresh/restore/remove를 거부한다. merge guard는 winner가 self가 아니고 같은
+rule/source entity이며 active disposition이고, winner가 다른 tombstone을 가리키지 않아 chain/cycle이
+없음을 locked row로 검증한다.
 
 `proposal_title`, `proposal_summary`, `rank_score`, `match_evidence`는 rule/source에서 유도된
 후보 설명이다. 공식 collection item의 title, summary, sort order, relation, reuse policy를
@@ -213,20 +347,29 @@ key/size/type validation을 procedure에 명시한다.
 CREATE TABLE feature.theme_feature_candidate_transitions (
   transition_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   candidate_id uuid NOT NULL,
-  feature_id text NOT NULL,
+  from_feature_id text,
+  to_feature_id text,
   rule_id uuid NOT NULL,
   source_entity_key text NOT NULL,
-  from_state text,
-  to_state text NOT NULL
-    CHECK (to_state IN ('open', 'promoted', 'rejected', 'withdrawn')),
+  from_review_state text CHECK (from_review_state IN ('open','promoted','rejected')),
+  to_review_state text NOT NULL CHECK (to_review_state IN ('open','promoted','rejected')),
+  from_eligibility_present boolean,
+  to_eligibility_present boolean NOT NULL,
+  from_disposition text CHECK (from_disposition IN ('active','merged')),
+  to_disposition text NOT NULL CHECK (to_disposition IN ('active','merged')),
+  winner_candidate_id uuid,
   transition_kind text NOT NULL CHECK (
     transition_kind IN (
-      'source_materialize', 'source_refresh', 'source_reopen', 'source_withdraw', 'admin_promote',
-      'admin_reject', 'merge_retarget', 'legacy_backfill'
+      'eligibility_materialize', 'eligibility_refresh', 'eligibility_restore', 'eligibility_remove', 'admin_promote',
+      'admin_reject', 'merge_retarget', 'merge_collapse', 'legacy_backfill'
     )
   ),
   candidate_row_revision bigint NOT NULL CHECK (candidate_row_revision >= 1),
   rule_row_revision bigint NOT NULL CHECK (rule_row_revision >= 1),
+  rule_input_hash text NOT NULL CHECK (rule_input_hash ~ '^[0-9a-f]{64}$'),
+  candidate_input_hash text NOT NULL CHECK (candidate_input_hash ~ '^[0-9a-f]{64}$'),
+  generation_id uuid REFERENCES feature.theme_candidate_generations(generation_id)
+    ON DELETE RESTRICT,
   provider_dataset_id bigint,
   source_record_key text,
   source_record_hash text,
@@ -242,30 +385,77 @@ CREATE TABLE feature.theme_feature_candidate_transitions (
   audit_writer_definer text NOT NULL,
   occurred_at timestamptz NOT NULL DEFAULT clock_timestamp(),
   CONSTRAINT ck_candidate_transition_initial_shape CHECK (
-    (transition_kind IN ('source_materialize', 'legacy_backfill') AND from_state IS NULL)
+    (transition_kind = 'eligibility_materialize'
+      AND from_review_state IS NULL AND from_eligibility_present IS NULL
+      AND to_review_state = 'open' AND to_eligibility_present)
     OR
-    (transition_kind NOT IN ('source_materialize', 'legacy_backfill')
-      AND from_state IN ('open', 'promoted', 'rejected', 'withdrawn'))
+    (transition_kind = 'legacy_backfill'
+      AND from_review_state IS NULL AND from_eligibility_present IS NULL)
+    OR
+    (transition_kind = 'eligibility_refresh'
+      AND from_review_state = to_review_state
+      AND from_eligibility_present AND to_eligibility_present)
+    OR
+    (transition_kind = 'eligibility_restore'
+      AND from_review_state = to_review_state
+      AND NOT from_eligibility_present AND to_eligibility_present)
+    OR
+    (transition_kind = 'eligibility_remove'
+      AND from_review_state = to_review_state
+      AND from_eligibility_present AND NOT to_eligibility_present)
+    OR
+    (transition_kind = 'admin_promote'
+      AND from_review_state = 'open' AND to_review_state = 'promoted'
+      AND from_eligibility_present AND to_eligibility_present)
+    OR
+    (transition_kind = 'admin_reject'
+      AND from_review_state = 'open' AND to_review_state = 'rejected'
+      AND from_eligibility_present AND to_eligibility_present)
+    OR
+    (transition_kind = 'merge_retarget'
+      AND from_review_state IS NOT NULL
+      AND from_eligibility_present IS NOT NULL
+      AND from_disposition = 'active' AND to_disposition = 'active'
+      AND from_feature_id IS DISTINCT FROM to_feature_id)
+    OR
+    (transition_kind = 'merge_collapse'
+      AND from_review_state IS NOT NULL
+      AND from_eligibility_present IS NOT NULL
+      AND from_disposition = 'active' AND to_disposition = 'merged'
+      AND winner_candidate_id IS NOT NULL)
   ),
   CONSTRAINT ck_candidate_transition_kind_shape CHECK (
-    (transition_kind IN ('source_materialize','source_refresh','source_reopen','source_withdraw')
+    (transition_kind IN ('eligibility_materialize','eligibility_refresh','eligibility_restore','eligibility_remove')
       AND rule_row_revision >= 1
+      AND generation_id IS NOT NULL
       AND provider_dataset_id IS NOT NULL
       AND source_record_key IS NOT NULL
       AND source_record_hash IS NOT NULL
       AND command_id IS NULL
-      AND actor IS NULL)
+      AND actor IS NOT NULL AND actor = btrim(actor) AND actor <> '')
     OR
     (transition_kind = 'admin_promote'
-      AND command_id IS NOT NULL AND actor = btrim(actor) AND actor <> ''
-      AND reason_code = btrim(reason_code) AND reason_code <> ''
+      AND generation_id IS NULL
+      AND command_id IS NOT NULL AND actor IS NOT NULL
+      AND actor = btrim(actor) AND actor <> ''
+      AND reason_code IS NOT NULL AND reason_code = btrim(reason_code) AND reason_code <> ''
       AND collection_id IS NOT NULL AND curation_item_id IS NOT NULL)
     OR
     (transition_kind = 'admin_reject'
-      AND command_id IS NOT NULL AND actor = btrim(actor) AND actor <> ''
-      AND reason_code = btrim(reason_code) AND reason_code <> ''
+      AND generation_id IS NULL
+      AND command_id IS NOT NULL AND actor IS NOT NULL
+      AND actor = btrim(actor) AND actor <> ''
+      AND reason_code IS NOT NULL AND reason_code = btrim(reason_code) AND reason_code <> ''
       AND collection_id IS NULL AND curation_item_id IS NULL)
-    OR transition_kind IN ('merge_retarget','legacy_backfill')
+    OR
+    (transition_kind IN ('merge_retarget','merge_collapse')
+      AND generation_id IS NULL AND command_id IS NOT NULL
+      AND actor IS NOT NULL AND actor = btrim(actor) AND actor <> ''
+      AND reason_code IS NOT NULL AND reason_code = btrim(reason_code) AND reason_code <> '')
+    OR
+    (transition_kind = 'legacy_backfill'
+      AND generation_id IS NOT NULL AND command_id IS NULL
+      AND actor = 'migration:tvn40')
   ),
   CONSTRAINT uq_candidate_transition_candidate_revision
     UNIQUE (candidate_id, candidate_row_revision)
@@ -279,7 +469,14 @@ CREATE INDEX idx_candidate_transitions_command
   WHERE command_id IS NOT NULL;
 ```
 
-이 audit에는 candidate/Feature/source relation FK를 두지 않는다. final hard purge 뒤에도 source
+`generation_id`는 eligibility/legacy event에서 generation receipt를 가리키는 FK이며 candidate
+tombstone과 독립 보존된다. eligibility event의 actor는 caller 문자열이
+아니라 locked provider dataset과 operation에서 만든 `provider:<provider_dataset_id>` principal이다.
+각 transition은 당시 `rule_input_hash`와 `candidate_input_hash`를 같이 보존해 다음 refresh가 current
+candidate row를 덮어써도 과거 판정 근거를 복구한다. exact from/to/kind matrix와 위 shape는 trigger
+guard에서 함께 검사하며 SQL `CHECK NULL` 통과에 의존하지 않는다.
+
+이 audit에는 candidate/Feature/source relation FK를 두지 않는다. future retention 뒤에도 source
 evidence와 actor를 보존하기 위해서다. runtime에는 table sequence를 포함한 모든 direct
 `INSERT`/`UPDATE`/`DELETE`/`TRUNCATE` 권한이 없고, trigger function owner만 insert한다.
 UPDATE/DELETE/TRUNCATE를 거부하는 guard와 catalog assertion을 함께 둔다.
@@ -288,28 +485,34 @@ UPDATE/DELETE/TRUNCATE를 거부하는 guard와 catalog assertion을 함께 둔�
 adapter는 같은 transaction의 `current_domain_command()` handle을 procedure에 전달하며,
 procedure는 operation/actor가 요청한 typed command와 일치하는지 검증한다. 이 FK와 terminal
 `domain_command_results`가 exact replay를 candidate/item revision 및 audit transition과 결박한다.
-provider `source_refresh`는 기존 상태를 그대로 유지하면서 evidence와 revision을 갱신하는
-감사 event다. `source_reopen`은 정확히 `withdrawn → open`, `source_withdraw`는 정확히
-`open → withdrawn`에만 허용한다. `source_materialize`는 최초 `from_state IS NULL → open`에만
-사용한다. DB transition guard는 이 exact matrix를 검사하며, `promoted`/`rejected` source refresh는
-상태를 그대로 둔 채 source evidence만 갱신한다.
+`eligibility_refresh`는 두 축을 그대로 유지하면서 evidence와 revision을 갱신하는 감사
+event다. `eligibility_restore`는 review state를 보존한 정확한 `eligibility_present false → true`,
+`eligibility_remove`는 정확한 `true → false`다. `eligibility_materialize`는 최초
+`(NULL,NULL) → (open,true)`에만 사용한다. DB transition guard는 이 exact matrix를 검사하며,
+`promoted`/`rejected` refresh·remove·restore도 review state를 바꾸지 않는다. source-derived
+generation은 actor를 locked dataset에서 `provider:<provider_dataset_id>`로 파생하고 reason을
+`source_absent|link_missing|feature_not_eligible` 중 하나로 기록한다. rule reconcile은 authenticated
+domain command 또는 DB operation actor를 쓰고
+`rule_no_match|rule_disabled|catalog_archived|feature_not_eligible|link_retarget` 중 하나를 기록한다.
+generation kind와 prior/current rule/head/link/effective digest는 typed causation에 남기며 provider와
+reconcile actor를 서로 위조할 수 없다.
 
 ## 4. state transition과 named command
 
 ### 4.1 허용 전이
 
-| from | command | to | 필수 증거 | collection side effect |
+| from `(review,present)` | command | to `(review,present)` | 필수 증거 | collection side effect |
 |---|---|---|---|---|
-| 없음 | provider source materialize | `open` | enabled rule, current source head, Feature link | 없음 |
-| `open` | provider refresh | `open` | 같은 current source evidence, input hash 변경 | 없음 |
-| `open` | admin promote | `promoted` | strong ETag, command claim, target collection/item identity | canonical item create/update 하나 |
-| `open` | admin reject | `rejected` | strong ETag, authenticated actor/reason | 없음 |
-| `withdrawn` | provider reopen | `open` | newer/current source evidence | 없음 |
-| `open` | completed snapshot withdrawal | `withdrawn` | completed authoritative operation, rule scope absence proof | 없음 |
-| `promoted`/`rejected` | source refresh | 같은 state | source evidence만 갱신 | 없음 |
+| 없음 | provider source materialize | `(open,true)` | enabled rule, current source head, Feature link | 없음 |
+| `(R,true)` | provider refresh | `(R,true)` | 같은 current source evidence, input hash 변경 | 없음 |
+| `(open,true)` | admin promote | `(promoted,true)` | strong ETag, command claim, target collection/item identity | canonical item create/update 하나 |
+| `(open,true)` | admin reject | `(rejected,true)` | strong ETag, authenticated actor/reason | 없음 |
+| `(R,false)` | provider reopen | `(R,true)` | newer/current source evidence | 없음 |
+| `(R,true)` | completed snapshot eligibility removal | `(R,false)` | completed authoritative operation, rule/source/link/effective mismatch reason | 없음 |
 | 모든 상태 | merge command | 정의된 target 상태 | master/loser collision policy와 audit | canonical item은 별도 merge policy |
 
-`promoted → open`, `rejected → open`의 자동 재평가는 허용하지 않는다. 새 rule intent가 필요하면
+`R`은 `open|promoted|rejected`다. provider는 review state를 바꾸지 않는다. `promoted → open`,
+`rejected → open`의 자동 재평가는 허용하지 않는다. 새 rule intent가 필요하면
 rule revision을 올린 뒤 명시 admin reopen command를 future task로 설계하거나 새 rule을 만든다.
 T-VN-40 initial scope는 그런 reopen UX를 만들지 않는다.
 
@@ -319,58 +522,62 @@ provider refresh의 external entrypoint는 아래 signature를 사용한다. con
 source hash는 input 문자열을 믿지 않고 procedure가 locked catalog/source row에서 derive한다.
 
 ```sql
-CALL feature.begin_theme_candidate_generation(
+CALL feature.materialize_theme_candidate_generation(
   p_rule_id uuid,
   p_generation_kind text,
   p_source_job_id uuid,
+  p_reconcile_operation_id uuid,
+  p_command_id bigint,
   p_generation_key text,
   p_context jsonb,
   OUT o_generation_id uuid,
-  OUT o_replayed boolean
-);
-
-CALL feature.materialize_theme_feature_candidate(
-  p_rule_id uuid,
-  p_feature_id text,
-  p_source_entity_key text,
-  p_source_record_key text,
-  p_generation_id uuid,
-  p_rank_score numeric,
-  p_proposal_title text,
-  p_proposal_summary text,
-  p_match_evidence jsonb,
-  p_context jsonb,
-  OUT o_candidate_id uuid,
-  OUT o_row_revision bigint,
-  OUT o_inserted boolean
-);
-
-CALL feature.complete_theme_candidate_generation(
-  p_generation_id uuid,
-  p_context jsonb,
   OUT o_observed_candidate_count bigint,
-  OUT o_withdrawn_candidate_count bigint,
+  OUT o_eligibility_removed_candidate_count bigint,
   OUT o_generation_input_set_hash text,
   OUT o_replayed boolean
 );
 ```
 
-세 procedure는 같은 caller-owned `SERIALIZABLE` transaction에서 순서대로 실행하며 begin이나
-materialize 뒤 중간 commit을 허용하지 않는다. begin은 rule revision, generation kind/key,
-`provider_full_snapshot`의 exact import job/dataset/scope를 검증하고 running row를 만든다.
-materialize는 running generation, rule, provider dataset/entity/current-head, source link, Feature,
-candidate 순서로 `FOR UPDATE`/`FOR SHARE` lock을 얻는다. `p_source_record_key`가 current head가
-아니거나 linked Feature/rule source와 맞지 않으면 `23514`로 거부한다. generation의 rule revision이
-현재 rule과 다르면 412에 매핑되는 domain SQLSTATE를 내고 stale provider evidence를 audit하지
-않는다.
+단일 procedure는 rule revision/kind/key와 `provider_full_snapshot`의 exact import
+job/dataset/scope를 검증한다. expected matches와 기존 eligible candidates를 합친 touched Feature id
+전체를 먼저 materialize·dedupe·sort해 advisory prelock하고, curated theme/source/rule → provider
+dataset/entity/current-head → source link → Feature → candidate 순서로 잠근다. caller가 candidate row,
+score, title, evidence를 제출하지 않는다. procedure 내부의
+set-based evaluator가 현재 rule predicate와 T-VN-36 effective projection으로 expected set을 만들고,
+각 expected tuple의 candidate input/hash/proposal/evidence를 서버에서 파생한다. 따라서 matching head
+누락이나 non-match injection은 입력 표면 자체에 없다.
 
-withdrawal은 arbitrary caller array나 dataset operation id가 아니라 full-snapshot generation
-completion에서만 일어난다. completion procedure가 locked rule scope/source job을 재검증하고,
-ordered canonical input set hash와 observation/count를 서버에서 계산한 뒤 그 generation에서 관측되지
-않은 `open` candidate만 `withdrawn`으로 전이하고 generation을 succeeded로 만든다.
-incremental operation과 failed/running generation은 withdrawal path를 호출할 수 없다.
-어느 호출이든 실패하면 caller transaction 전체를 rollback하므로 별도 fail command나 durable
-failed row는 없다. succeeded generation replay만 exact hash/observation/count가 같을 때 허용한다.
+같은 snapshot에서 expected identity/hash set과 counts를 계산해 immutable generation receipt를 먼저
+INSERT하고 candidate upsert/transition, observation set, eligibility 전이를 그 순서로 수행한다. 중간
+commit은 없고 실패는
+전체 rollback한다. `provider_full_snapshot`/explicit `rule_reconcile`만 **global absence removal**을
+허용한다. `scoped_reconcile`은 durable operation member scope 안에서만 add/refresh/restore/remove를
+허용하며 scope 밖 candidate는 반드시 보존한다. 같은 key replay는 먼저 현재 canonical set과
+두 hash를 재계산해 기존 immutable receipt/observation과 모두 같을 때만 no-op이다. stale same-key는
+409, transaction snapshot 중 source/Feature/rule이 바뀌면 `40001`로 retry한다.
+
+runtime entrypoint가 허용하는 kind는 `provider_full_snapshot|scoped_reconcile|rule_reconcile`뿐이다.
+`legacy_backfill`은 schema owner가 migration 안에서만 부르는 별도
+`backfill_theme_feature_candidates()` procedure로 분리하고 같은 revision 끝에서 DROP한다.
+API/Dagster LOGIN이 runtime procedure에 `legacy_backfill`을 제출하면 23514이며 migration actor를
+위조할 수 없다.
+
+`scoped_reconcile`은 DB-owned writer receipt가 정확히 열거한 touched source entity/Feature union만
+재평가한다. 그 scope에서는 add/refresh/restore/remove가 가능하지만 scope 밖 absence removal은
+금지한다. affecting writer matrix는 다음과 같다.
+
+| writer | receipt/scope | generation |
+|---|---|---|
+| provider full snapshot | exact done/SUCCESS import job dataset+operation membership | provider_full_snapshot; authoritative global absence 허용 |
+| provider incremental/current-head advance | same-tx immutable entity operation + touched entity keys | scoped_reconcile; global absence 금지 |
+| admin Feature state/field override | bigint domain command + touched Feature id | scoped_reconcile |
+| source-link retarget/Feature merge | typed merge command + old/new Feature/entity set | scoped_reconcile after common prelock |
+| rule create/semantic patch/archive, theme/source archive | reconcile operation + old/new rule scopes | rule_reconcile |
+
+category/region/kind/typed detail/effective override/3축/head hash/link identity가 바뀌면 같은 transaction의
+receipt와 generation으로 candidate add/refresh/remove를 끝낸다. unrelated field exact no-op은 operation,
+generation, candidate revision을 만들지 않는다. 정상 writer가 commit됐는데 candidate는 stale인 중간
+상태를 허용하지 않는다.
 
 ### 4.3 promotion/rejection procedure
 
@@ -443,7 +650,7 @@ collection, item의 세 revision 검증이 모두 끝나기 전에는 어느 row
 
 ### 4.4 import, manual item edit, merge
 
-existing CSV import와 manual collection item command는 candidate state를 바꾸지 않는다. canonical
+existing CSV import와 manual collection item command는 candidate 두 축을 바꾸지 않는다. canonical
 item을 user가 만들었다고 candidate가 `promoted`로 암묵 전환해서는 안 된다. candidate promotion은
 항상 command receipt로 provenance를 남긴다.
 
@@ -451,10 +658,26 @@ Feature merge는 candidate/current item을 동시에 raw UPDATE하지 않는다.
 master/loser Feature lock 뒤 candidate identity conflict를 분류한다.
 
 - winner identity가 없으면 candidate를 master로 retarget하고 transition audit을 남긴다.
-- 같은 `(rule, entity, master)` candidate가 있으면 deterministic winner를 고른 뒤 loser를
-  `withdrawn`으로 전이하고 conflict provenance를 남긴다.
+- 같은 `(rule, entity, master)` candidate가 있으면 아래 exact active-candidate collision matrix를
+  적용한다. 각 기호는 `review_state`이며 eligibility는 별도 locked evaluator가 산출한다.
+
+| master \ loser | open | rejected | promoted |
+|---|---|---|---|
+| open | master open | 409 manual resolution | loser promoted를 survivor semantics로 master row에 이관 |
+| rejected | 409 manual resolution | master rejected | loser promoted를 survivor semantics로 master row에 이관 |
+| promoted | master promoted | master promoted | 동일 canonical item/decision lineage면 master promoted, 다르면 409 |
+
+  survivor `candidate_id`는 항상 기존 master Feature candidate id다. loser는 hard-delete하지 않고
+  `merge_collapse` transition 뒤 survivor pointer가 있는 merged tombstone이 된다. open/rejected
+  ambiguity와 서로 다른 promoted item은 추측하지 않고 transaction 전체 409다. 모든 3×3 review
+  pair × 2×2 eligibility 조합을 parameterized DB test로 고정한다.
 - `promoted` candidate가 가리키는 canonical item은 existing curation merge policy로 별도로
-  처리한다. candidate merge가 collection item의 operator fields를 overwrite하지 않는다.
+  처리한다. 동일 collection/external item/component, active/archived/source-present,
+  trusted/untrusted decision, current import pointer, operator fields의 existing merge regression corpus를
+  typed procedure에도 그대로 적용한다. provider winner와 operator winner를 분리하고 stable
+  `curation_item_id`, import/forward-recovery pointers, superseding accepted/revoked decisions를 모두
+  보존하며 item PK rekey는 하지 않는다. candidate merge가 collection item의 operator fields를
+  overwrite하지 않는다.
 
 ### 4.5 canonical membership·catalog command 전환
 
@@ -463,11 +686,26 @@ retained theme/source/rule catalog writer도 다음 typed `SECURITY DEFINER` com
 전환한다.
 
 - catalog: create/update/archive theme·source·rule. 모든 update는 expected row revision과 bigint
-  domain command claim을 요구하고 no-op은 revision/audit을 만들지 않는다.
+  domain command claim을 요구하고 no-op은 revision/audit을 만들지 않는다. rule create와
+  selector/region/category/kind/source/theme/enabled/priority 등 candidate predicate/hash에 영향 주는
+  모든 semantic update, rule/source/theme archive는 영향받는 old+new scope 모든 rule의 empty-set 포함
+  `rule_reconcile`을 **같은
+  transaction**에서 실행해 candidate eligibility와 originating command id를 원자 결박한다.
+  mutation보다 먼저 old+proposed rule set에서 affected existing/expected candidate Feature union을
+  nonlocking materialize하고 전부 sorted advisory prelock한다. 그 후 catalog rows를 lock/CAS/recheck,
+  update, operation receipt, generation 순으로 실행한다. theme/source archive의 다중 rule union도 한
+  번에 선잠금하며 catalog row를 잡은 뒤 advisory lock을 요청하지 않는다.
+  display-only description/metadata change는 generation 없이 catalog revision만 증가하고, exact no-op은
+  어떤 revision/operation도 만들지 않는다. field→predicate/hash/no-op matrix를 migration contract와
+  parameterized integration test로 고정한다.
 - membership: create/update/archive collection, create/update/archive item, accepted/revoked manual
   link decision. collection/item 각각 strong ETag revision을 검증한다.
 - import: import batch/row/decision을 append하고 authoritative item set을 반영하는 하나의 command.
-  batch hash replay는 exact result만 반환하며 candidate state는 바꾸지 않는다.
+  dry-run은 immutable `import_plan_id`, payload hash, touched catalog/collection/item id+revision vector,
+  active-set checksum을 저장한다. commit은 전부 lock해 exact vector를 재검증하며 mismatch는 412/409
+  전체 rollback한다. import는 existing theme/source operator fields나 source observation을 update하지
+  않는다. absent catalog는 explicit create-only, existing exact-equal은 reuse, 다른 값은 409 후 별도
+  catalog PATCH다. batch hash replay는 exact result만 반환하며 candidate 두 축은 바꾸지 않는다.
 - quarantine/recovery: quarantine collection 이동·복구를 별도 typed command로 수행하고 source
   presence 및 accepted pointer revision을 함께 검증한다.
 - merge: candidate retarget/conflict와 collection item retarget/link decision을 하나의 typed merge
@@ -478,6 +716,55 @@ revision을 넣는다. API router는 활성 `current_domain_command()` handle만
 job은 별도 DB-owned operation receipt를 사용한다. 기존 repository SQL과 endpoint별 exact
 signature는 migration/API contract test에 freeze하며, raw collection/item/catalog/import/link-decision
 DML은 runtime 두 LOGIN 모두 42501이어야 한다.
+
+collection create의 optional theme slug도 absent=create-only, existing exact semantic equality=reuse,
+existing different=409 규칙을 쓴다. 무조건 upsert로 concurrent operator theme를 덮지 않는다.
+collection detail representation은 ordered `(collection row_revision, item_id, item row_revision)` set
+hash를 strong HTTP ETag로 사용한다. child create/patch/archive/promotion/import가 바뀌면 hash가 바뀌며
+collection row 자체 CAS는 별도 raw row ETag를 body의 `collection_etag`로 제공한다. candidate detail도
+`representation_etag`(candidate+rule+Feature semantic revisions)와 command CAS
+`candidate_etag`(candidate revision)를 분리하며 promotion/reject `If-Match`는 candidate_etag를 쓴다.
+같은 strong ETag가 다른 body를 가리키지 않게 304/cache/concurrent child·Feature·rule tests를 둔다.
+
+HTTP domain-command registry는 다음 공통 규칙을 frozen policy table로 가진다. create operation은
+success 201, 나머지는 200이며 모두 `replay_headers=('ETag',)`다. conditional operation은
+`fingerprint_headers=('If-Match',)`이고 create-only는 empty다. 대상은 theme/source/rule
+create·patch·archive, collection/item create·patch·archive, candidate promote/reject, import commit,
+quarantine move-items와 `confirm_curation_quarantine_standalone`, typed merge다. 원 요청 replay는 body와
+ETag를 exact 재생하고 같은 idempotency key에서 changed If-Match는 409, missing=428, stale=412다.
+revision/transition id는 JSON decimal string이며 command procedure 내부만 bigint를 쓴다.
+
+정확한 DB command inventory는 다음과 같이 migration contract test에 regprocedure signature와
+operation을 freeze한다: catalog theme/source/rule create·patch·archive, collection create·patch·archive,
+item create·patch·archive, import preview·commit, quarantine move-items·standalone-confirm·recover,
+accepted/revoked link decision, candidate promote·reject, curation-aware Feature merge. 각 command는
+`p_command_id bigint`, principal, expected revision/vector를 typed parameter로 받고 operation mismatch는
+23514, stale revision은 40001→HTTP 412, identity conflict는 23505→409다. normal runtime raw DML은
+42501이다.
+
+CSV import 및 collection create는 기존 catalog row를 upsert하지 않는다. import preview receipt가
+exact revision vector와 set checksum을 고정하고 commit이 이를 재검증하며, absent catalog create-only와
+exact-equal reuse 외 conflict는 409다. `ktmctl dedup-merge`는 DB raw client path를 제거하고 동일 HTTP
+domain-command/typed merge 경계로 호출하거나 command 자체를 제거한다. legacy raw merge를 남기지 않는다.
+
+Dagster/provider executor의 exact catalog allowlist는 generic admin catalog command가 아니라
+`refresh_curated_source_observation(provider_dataset_id, source_observation, operation_receipt)`와
+`sync_concierge_theme_catalog(canonical_theme_rule_set, operation_receipt)` 두 command다. 전자는 source
+observation fields/revision만, 후자는 concierge-owned theme/rule semantic subset과 revision만 쓴다.
+둘은 provider executor의 DB-owned receipt를 검증하고 필요한 rule generation을 같은 caller
+transaction에서 이어 실행한다. 현재 Dagster asset은 각 rule의 exact provider dataset + sync scope +
+operation membership에 결박된 `done/SUCCESS` full-snapshot `ops.import_jobs.job_id`를 전달해야 한다.
+failed/cancelled/multi-member mismatch는 global eligibility removal 근거가 될 수 없다. incremental은
+DB-owned exact touched-scope operation이 있을 때 그 scope 안에서만 eligibility를 바꾼다.
+`rule_reconcile`은 rule update가 만든 immutable operation receipt만 사용한다. 동일 Dagster retry는
+같은 server-derived generation key, 새 authoritative load는 새 key다.
+
+두 provider command는 caller가 `source_observation`이나 `canonical_theme_rule_set`을 write source로
+제출하지 않는다. provider dataset + immutable job/operation identity와 bounded policy만 받고 locked
+Feature/source/head에서 server set-based로 observation/group/theme/rule set과 hash를 파생한다.
+concierge-owned theme/rule에는 immutable `owner_kind='provider_dataset'`와
+`owner_provider_dataset_id`를 두고 backfill manifest가 manual/provider collision을 분류한다. operator-owned
+slug와 충돌하면 409이며 prefix/metadata 추측으로 overwrite하지 않는다.
 
 ## 5. ACL과 procedure ownership
 
@@ -492,7 +779,8 @@ audit table/sequence를 직접 쓸 수 없다. trigger function은 audit writer�
 `ktm_feature_runtime`은 candidate audit 및 candidate/current collection membership table에 direct
 DML 권한이 없다. `ktm_curation_admin_executor`와 `ktm_curation_provider_executor`를 별도 NOLOGIN
 execute role로 두고 API LOGIN에는 admin/catalog/membership/import/reject/promote/merge 중 허용한
-명령만, Dagster LOGIN에는 generation/materialize/complete 명령만 부여한다. 두 executor는 서로의
+명령만, Dagster LOGIN에는 단일 generation + source observation sync + concierge theme/rule sync만
+부여한다. 두 executor는 서로의
 procedure EXECUTE를 갖지 않는다. public/admin read는
 별도 closed view/reader allowlist로 제공하며 raw candidate evidence/payload를 public role에 주지
 않는다. runtime reconciler는 다음을 assert한다.
@@ -526,16 +814,21 @@ preflight는 procedure별 EXECUTE allowlist, 교차 executor deny, candidate/aud
 
 ### 6.2 ordered migration
 
-1. rule revision, candidate/current audit, row revisions, command functions, audit guards를 만든다.
-2. all legacy rows와 canonical item mapping을 read-only preflight manifest에 materialize한다.
+1. all legacy rows, `default_action='curated'`, theme `default_curated`, canonical item mapping을
+   read-only preflight manifest에 먼저 materialize하고 count/key/checksum을 동결한다.
+2. theme/source/rule revision·archive columns, candidate/current audit, command functions, audit guards를
+   만든다. rule action CHECK는 이 시점에 `NOT VALID`로 추가하며 legacy `curated` 행과
+   `default_curated` column을 아직 제거하지 않는다.
    unmapped/ambiguous row가 하나라도 있으면 migration은 fail-closed다.
 3. legacy source-rule rows를 candidate lifecycle로 one-time backfill하고 immutable transition
-   events를 남긴다. row count/key set/checksum을 manifest와 대조한다.
+   events를 남긴다. `default_action='curated'`를 mapped `candidate`로 변경한 뒤 new action CHECK를
+   VALIDATE한다. row count/key set/checksum을 manifest와 대조한다.
 4. final collection/item command와 candidate command를 install하고 runtime ACL/reconciler/preflight를
    final table/function inventory로 바꾼다.
 5. Map API/OpenAPI, user client, frontend, Dagster, merge, PinVi consumer가 final command/read model을
    사용한다는 build artifact를 same release에 포함한다.
-6. legacy trigger를 disable하는 것이 아니라 dependency를 `DROP ... RESTRICT`로 확인한 뒤 drop한다.
+6. consumer extraction과 manifest equality 후에만 theme `default_curated`와 API/generated field를
+   제거한다. legacy trigger를 disable하는 것이 아니라 dependency를 `DROP ... RESTRICT`로 확인한 뒤 drop한다.
    `legacy_projection_id` FK/index/column, legacy cursor/snapshot, overlay table/index/constraint/ACL,
    old repository/asset/router/client/UI reference를 physical removal manifest대로 삭제한다.
    legacy detach만 위해 허용했던 `curation_item_id` PK rekey도 함께 폐기한다. 0074의 네
@@ -543,6 +836,15 @@ preflight는 procedure별 EXECUTE allowlist, 교차 executor deny, candidate/aud
    `reject_curation_history_mutation()`을 무조건 거부 guard로 교체한다.
 7. ACL reconciliation을 relation drop 뒤 실행하고 final catalog/static/consumer checksums를
    record한다. final service only then starts.
+
+T-VN-40의 static zero gate는 active executable/importable `src/`, API/Dagster packages, active
+routers/DTO/client/frontend/generated OpenAPI, Docker/scripts, PinVi vendor/consumer, current docs와
+`contracts/vnext/{target-schema,recovery-preflight,consumer-rollout,openapi-diff}`를 exact include한다.
+fresh replay에 필수인 hash-pinned historical Alembic 0025~T40 이전 revision,
+`src/kortravelmap/cli/_h35_schema.py`, frozen H35 rehearsal, `docs/archive/`만 explicit exclusion이다.
+각 exclusion은 import graph/build artifact에 들어가지 않음을 검사하고 예상 밖 파일 하나가 생기면
+gate가 실패한다. DB final catalog의 relation/dependency/function/trigger/index/ACL zero에는 exclusion이
+없다. repository-wide historical static zero는 사용자 지시의 post-T40 Alembic-000 squash에서 승격한다.
 
 Alembic migration은 forward-only다. data backfill error나 consumer build mismatch는 partial service
 rollout으로 복구하지 않는다. transaction abort 후 schema/data를 원 migration head로 유지하고,
@@ -555,7 +857,7 @@ correction은 fresh clone/reload input에서 다시 수행한다.
 | `source_rule` + `candidate` + current proof | exact rule/entity/current record/Feature link | `open` candidate; legacy-only projected item archive | current proof 또는 unique identity 불명 |
 | `source_rule` + `curated` | exact one canonical item and trusted accepted mapping | `promoted` candidate + existing item 유지 | item 0/2개 또는 incompatible external identity |
 | `source_rule` + `rejected` + current proof | exact rule/entity/current record/Feature link | `rejected` candidate; legacy-only projected item archive | actor/reason/evidence missing |
-| provider-origin archived | current source head/link가 있으면 원 selection 의미(`open`/`rejected`/`promoted`), 없으면 migration-only `withdrawn` | candidate + `legacy_backfill` audit | archived 원인이 source absence인지 Feature visibility인지 구분 불명 |
+| provider-origin archived | current source head/link로 source presence, 원 selection으로 review state 분리 | candidate 두 축 + `legacy_backfill` audit | archived 원인이 source absence인지 Feature visibility인지 구분 불명 |
 | admin/external overlay row | canonical item mapping only | candidate를 만들지 않음 | canonical item mapping absent |
 
 mapping manifest는 each bucket count, stable identity checksum, legacy primary key ↔ candidate/item id,
@@ -581,19 +883,20 @@ legacy snapshot은 항상 item 하나만 담으므로 `curated_feature_id`를 ca
 물리 삭제하고, 다음 typed admin endpoint로 바꾼다.
 
 ```
-GET /v1/admin/curation-items/{curation_item_id}/detail-snapshot
+GET /v1/service/curation-items/{curation_item_id}/detail-snapshot
 ```
 
 이 endpoint는 cache table을 새로 만들지 않고 one repeatable-read query에서
 `curation_items → curation_collections → typed Feature/subtype → source record`를 직접 조립한다.
 측정 전 materialized cache를 재도입하지 않는다. response는 closed
-`CurationItemDetailSnapshot`이며 다음 exact top-level key만 갖는다.
+`CurationItemDetailSnapshot`이며 다음 exact top-level key만 갖는다. HTTP bigint revision/transition
+identity는 JavaScript 정밀도 손실을 피하도록 decimal string 또는 opaque ETag/cursor로만 노출한다.
 
 ```json
 {
   "curation_item_id": "UUID",
   "collection_id": "UUID",
-  "row_revision": 7,
+  "row_revision": "7",
   "etag": "sha256:<canonical-json>",
   "updated_at": "RFC3339",
   "collection": {"theme_slug": "…", "theme_name": "…", "title": "…", "edition_key": "…"},
@@ -604,7 +907,8 @@ GET /v1/admin/curation-items/{curation_item_id}/detail-snapshot
 ```
 
 `collection`/`item`/`feature`의 exact property·nullable/type은 Map OpenAPI와 PinVi typed consumer
-test가 freeze한다. endpoint는 `source_present`, `item.status='included'`,
+test가 freeze한다. endpoint는 canonical membership의 `item.source_present`,
+`item.status='included'`,
 `item.archived_at IS NULL`, collection `status='published' AND visibility='public' AND archived_at IS
 NULL`, public theme, linked `feature.public_features`, 그리고 item/Feature와
 exact-match하는 current accepted link decision이 모두 있을 때만 반환한다. accepted decision의
@@ -615,6 +919,12 @@ collection/Feature aggregate의 trusted-link 및 3축 visibility 정본과 같�
 별도 축 재구현을 금지한다. legacy `curation_status`, `curated_feature_id`, `items[]`, `day_index`,
 `memo`는 response에 남기지 않는다. PinVi는 same Map head의 new item id/path/schema로 re-vendor하고
 old snapshot path와 types를 compile/static gate에서 0으로 만든다.
+
+snapshot `etag`은 그 `etag` key 자체를 제외한 closed payload를 canonicalization version 1
+(UTF-8, NFC string, lexicographic object keys, array order preserved, decimal-string integers, explicit
+null, insignificant whitespace zero)로 직렬화한 SHA-256이다. HTTP header는 strong
+`ETag: "sha256:<64hex>"`이고 body `etag`는 quote를 제외한 동일 값이다. `If-None-Match` exact match는
+304 empty body, mismatch는 200이다. golden payload/hash/header/304 tests를 Map/PinVi 양쪽에 둔다.
 
 manual `admin_review` item은 `source_record_key`가 없어도 canonical/public membership이 될 수 있다.
 따라서 snapshot의 `feature.source_record_key`와 source projection은 nullable이며, trusted accepted
@@ -627,18 +937,18 @@ record/entity가 exact-match하지 않으면 404지만, 없는 item을 암묵적
   projection만 쓴다.
 - `/v1/curated-features`, its `cursor` kind, theme/source candidate list, legacy `curation_status`
   response/query field는 제거한다. redirect와 no-op parameter는 없다.
-- public response에는 candidate id/state/rank/evidence/rejection/actor/audit을 노출하지 않는다.
+- public response에는 candidate id/review_state/eligibility_present/rank/evidence/rejection/actor/audit을 노출하지 않는다.
 
 ### 7.3 admin candidate API
 
 | method/path | command/query | required contract |
 |---|---|---|
-| `GET /v1/admin/theme-feature-candidates` | admin keyset list | `rule_id`, `theme_id`, `source_id`, `state`, `feature_id` AND filter; `updated_at,candidate_id` cursor |
-| `GET /v1/admin/theme-feature-candidates/{id}` | detail | current typed Feature summary, rule/source metadata, source evidence digest, state/revision |
+| `GET /v1/admin/theme-feature-candidates` | admin keyset list | `rule_id`, `theme_id`, `source_id`, `review_state`, `eligibility_present`, `feature_id` AND filter; `updated_at,candidate_id` cursor |
+| `GET /v1/admin/theme-feature-candidates/{id}` | detail | current typed Feature summary, rule/source metadata, source evidence digest, 두 축/revision |
 | `GET /v1/admin/theme-feature-candidates/{id}/transitions` | audit timeline | descending `transition_id` keyset; actor/evidence only admin |
 | `POST /v1/admin/theme-feature-candidates/{id}/promote` | typed promotion | candidate `If-Match`, `Idempotency-Key`, target collection revision, nullable create-only/existing item revision, typed item identity/body, reason code |
 | `POST /v1/admin/theme-feature-candidates/{id}/reject` | typed rejection | `If-Match`, `Idempotency-Key`, non-empty reason code |
-| `GET /v1/admin/curation-items/{id}/detail-snapshot` | PinVi typed import snapshot | canonical item id only; closed direct projection, no legacy overlay/cache |
+| `GET /v1/service/curation-items/{id}/detail-snapshot` | PinVi typed import snapshot | canonical item id, exact `ServiceToken` principal/scope only; closed direct projection, no legacy overlay/cache |
 
 `If-Match` mismatch는 412, missing candidate/collection is 404, stale source/current-head or identity
 conflict is 409, malformed typed input is 422, denied actor is 403이다. successful command response에는
@@ -650,15 +960,26 @@ candidate `If-Match`와 별개로 promotion body는 `expected_collection_revisio
 현재 revision을 반드시 보낸다. router는 별도 claim을 만들지 않고 active
 `current_domain_command().command_id`를 procedure에 전달한다.
 
-OpenAPI export 후 Map user/admin spec과 generated user/admin types를 exact head에서 갱신한다. PinVi
-user vendor와 admin-detail subset은 동일 Map commit에서 re-extract하고 paired SHA, codegen compile,
+admin UI 정본 route는 `/admin/curations/candidates`다. list는 위 AND filters/keyset을 URL state로
+보존하고 detail drawer는 representation ETag, raw candidate CAS ETag, timeline을 함께 로드한다.
+promotion은 existing collection 선택 또는 create, existing/create-only item identity와 revision을
+명시적으로 보여주며 reject는 non-empty reason을 요구한다. 409/412/428은 자동 stale retry하지 않고
+새 detail/ETag를 reload한 뒤 사용자가 다시 제출하게 한다. old curated-feature navigation/component와
+status UI는 0이다. mocked Playwright와 n150 live에서 promote→public collection→PinVi import,
+reject non-public, stale ETag recovery를 검증한다.
+
+snapshot route는 AdminBFF와 admin proxy secret을 받지 않는다. 전용 `ServiceToken` role
+`pinvi:curation-snapshot:read`와 route-policy exact binding만 허용하며 public/user/ops/다른 service
+scope는 403이다. 고정 actor는 token principal에서 파생하고 caller header 문자열을 신뢰하지 않는다.
+OpenAPI export 후 Map user/service/admin spec과 generated types를 exact head에서 갱신한다. PinVi
+user/service vendor는 동일 Map commit에서 re-extract하고 paired SHA, codegen compile,
 legacy endpoint/type zero evidence를 `consumer-rollout-v1.json`에 기록한다.
 
 ## 8. performance and correctness gates
 
 | query/operation | required index/proof |
 |---|---|
-| admin open-candidate list | `rule_id, updated_at DESC, candidate_id DESC WHERE state='open'` keyset `EXPLAIN JSON` |
+| admin candidate list | global open+present, state/presence, rule+state, theme/source join, feature filter별 production-shape keyset `EXPLAIN JSON` |
 | Feature candidate review history | candidate transition `(candidate_id, transition_id DESC)` index |
 | public Feature/collection aggregate | existing canonical item/collection predicates only; no candidate or legacy overlay join |
 | refresh | candidate exact unique lookup; equal input hash does not row rewrite |
@@ -672,7 +993,7 @@ T-VN-40 final gate has three tiers.
 2. fresh final schema integration including runtime API/Dagster LOGIN command/ACL tests and Map/PinVi
    exact consumer contract;
 3. n150 isolated fresh PostGIS→ETL destructive candidate refresh→admin promotion→public collection→
-   source withdrawal→merge→recovery/cleanup E2E. Playwright runs on n150, not WSL.
+   source/rule eligibility removal→merge→recovery/cleanup E2E. Playwright runs on n150, not WSL.
 
 ## 9. final removal manifest minimum set
 
@@ -689,7 +1010,8 @@ The implementation PR must replace this minimum list with actual catalog OIDs/si
 - code: `curated_repo` overlay writer/read models, client exports, curated refresh Dagster asset/schedule,
   legacy merge branches, legacy router/DTO/cursor/frontend/e2e fixture;
 - contract: public `/v1/curated-features`, legacy admin curated route/detail-snapshot/OpenAPI/generated
-  types/PinVi vendor; replacement is canonical `curation-items/{id}/detail-snapshot` only;
+  types/PinVi vendor; replacement is canonical service
+  `/v1/service/curation-items/{id}/detail-snapshot` only;
 - security: runtime privilege map, preflight allowlist, procedure grants, sequences, views/functions/index
   predicates containing `curated_features`.
 

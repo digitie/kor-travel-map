@@ -2,6 +2,20 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-13 — T-VN-40: DB trust-boundary 첫 구현 체크포인트
+
+두 적대 리뷰가 설계와 현 writer 전체를 대조한 결과를 반영해 candidate를
+`review_state + eligibility_present` 두 축으로 확정하고, DB set-based generation,
+immutable reconcile operation, catalog/collection/item CAS, transaction 전체 Feature advisory
+prelock, scoped PinVi service route를 구현 정본으로 고정했다. `source_present`는 canonical item
+membership에만 남겨 두 축의 의미가 섞이지 않게 했다.
+
+첫 코드 변경은 배포 bootstrap 경계다. 네 curation NOLOGIN owner/executor role과 API/Dagster의
+교차 불가능 membership을 추가했고, 과거 bootstrap이 모든 SECURITY DEFINER routine을 schema
+owner로 되돌리던 blanket owner sweep을 closed signature 복구 방식으로 고쳤다. populated PostGIS
+DB에서 bootstrap을 두 번 실행해 state/audit owner와 membership options가 보존됨을 실제 통합
+테스트로 검증했다(1 passed, 40.68s). frozen contract unit 10개와 ruff/bash/diff gate도 통과했다.
+
 ## 2026-08-13 — T-VN-40: T-VN-36 병합 main 기준 설계 재배치
 
 T-VN-36 PR #973이 `c76ceb7a`로 병합된 최신 `main` 위에 T-VN-40 설계 커밋만

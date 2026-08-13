@@ -91,8 +91,29 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'ktm_feature_runtime') THEN
         CREATE ROLE ktm_feature_runtime NOLOGIN NOINHERIT;
     END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'ktm_curation_command_owner') THEN
+        CREATE ROLE ktm_curation_command_owner NOLOGIN NOINHERIT;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'ktm_curation_audit_writer') THEN
+        CREATE ROLE ktm_curation_audit_writer NOLOGIN NOINHERIT;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'ktm_curation_admin_executor') THEN
+        CREATE ROLE ktm_curation_admin_executor NOLOGIN NOINHERIT;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'ktm_curation_provider_executor') THEN
+        CREATE ROLE ktm_curation_provider_executor NOLOGIN NOINHERIT;
+    END IF;
 END
 $roles$;
+
+ALTER ROLE ktm_curation_command_owner NOLOGIN NOINHERIT
+    NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION;
+ALTER ROLE ktm_curation_audit_writer NOLOGIN NOINHERIT
+    NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION;
+ALTER ROLE ktm_curation_admin_executor NOLOGIN NOINHERIT
+    NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION;
+ALTER ROLE ktm_curation_provider_executor NOLOGIN NOINHERIT
+    NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION;
 
 -- ``ktm_feature_migrator``는 superuser가 아니다. PostgreSQL 16/PostGIS extension
 -- 설치와 application schema 준비는 dedicated bootstrap connection에서만 한다.
@@ -203,15 +224,35 @@ GRANT ktm_feature_state_procedure_owner TO ktm_feature_schema_owner
     WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
 GRANT ktm_feature_audit_writer TO ktm_feature_schema_owner
     WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
+GRANT ktm_curation_command_owner TO ktm_feature_schema_owner
+    WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
+GRANT ktm_curation_audit_writer TO ktm_feature_schema_owner
+    WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
+GRANT ktm_curation_admin_executor TO ktm_feature_api_runtime
+    WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
+GRANT ktm_curation_provider_executor TO ktm_feature_dagster_runtime
+    WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
 -- 0095 transfers SECURITY DEFINER routines to these NOLOGIN owners. PostgreSQL
 -- requires the target owner to hold CREATE on the containing schema during
 -- ``ALTER FUNCTION/PROCEDURE ... OWNER``; neither role can authenticate and
 -- runtime memberships never allow SET ROLE into either owner group.
 GRANT USAGE, CREATE ON SCHEMA feature
-    TO ktm_feature_state_procedure_owner, ktm_feature_audit_writer;
+    TO ktm_feature_state_procedure_owner, ktm_feature_audit_writer,
+       ktm_curation_command_owner, ktm_curation_audit_writer;
 
 DO $assert_roles$
 BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_roles
+        WHERE rolname IN (
+            'ktm_curation_command_owner', 'ktm_curation_audit_writer',
+            'ktm_curation_admin_executor', 'ktm_curation_provider_executor'
+        )
+          AND (rolcanlogin OR rolinherit OR rolsuper OR rolcreaterole OR rolbypassrls)
+    ) THEN
+        RAISE EXCEPTION 'curation NOLOGIN role has an unsafe role attribute';
+    END IF;
     IF EXISTS (
         SELECT 1
         FROM pg_catalog.pg_roles
@@ -231,6 +272,12 @@ BEGIN
     IF pg_has_role('ktm_feature_api_runtime', 'ktm_feature_schema_owner', 'member')
        OR pg_has_role('ktm_feature_dagster_runtime', 'ktm_feature_schema_owner', 'member') THEN
         RAISE EXCEPTION 'runtime login must not belong to ktm_feature_schema_owner';
+    END IF;
+    IF NOT pg_has_role('ktm_feature_api_runtime', 'ktm_curation_admin_executor', 'member')
+       OR pg_has_role('ktm_feature_api_runtime', 'ktm_curation_provider_executor', 'member')
+       OR NOT pg_has_role('ktm_feature_dagster_runtime', 'ktm_curation_provider_executor', 'member')
+       OR pg_has_role('ktm_feature_dagster_runtime', 'ktm_curation_admin_executor', 'member') THEN
+        RAISE EXCEPTION 'curation executor membership is unsafe';
     END IF;
 END
 $assert_roles$;
@@ -307,6 +354,49 @@ SELECT format(
 FROM pg_catalog.pg_proc
 JOIN pg_catalog.pg_namespace ON pg_namespace.oid = pg_proc.pronamespace
 WHERE nspname IN ('feature', 'provider_sync', 'ops')
+  AND pg_get_userbyid(pg_proc.proowner) NOT IN (
+      'ktm_feature_state_procedure_owner', 'ktm_feature_audit_writer',
+      'ktm_curation_command_owner', 'ktm_curation_audit_writer'
+  )
+\gexec
+
+-- Older bootstrap versions transferred every routine back to the schema
+-- owner.  Repair the closed SECURITY DEFINER manifest after the ordinary
+-- ownership sweep; missing routines (for an earlier migration head) are
+-- ignored and will be created by Alembic with the same owner later.
+WITH dedicated_routine(signature, owner_role) AS (
+    VALUES
+      ('feature.prepare_feature_state_context(jsonb,text)', 'ktm_feature_state_procedure_owner'),
+      ('feature.create_feature_with_initial_state(jsonb,text,text,text,jsonb)', 'ktm_feature_state_procedure_owner'),
+      ('feature.transition_feature_state(text,text,text,text,bigint,jsonb)', 'ktm_feature_state_procedure_owner'),
+      ('feature.lock_current_provider_source_evidence(bigint,text,text)', 'ktm_feature_state_procedure_owner'),
+      ('feature.lock_current_provider_feature_source_evidence(text,bigint,text,text)', 'ktm_feature_state_procedure_owner'),
+      ('feature.transition_admin_feature_state(text,text,text,text,bigint,text,text,text)', 'ktm_feature_state_procedure_owner'),
+      ('feature.reactivate_admin_feature_state(text,bigint,text,text,bigint,text,text)', 'ktm_feature_state_procedure_owner'),
+      ('feature.author_lifecycle_override(text,text,text,boolean,text,text,bigint)', 'ktm_feature_state_procedure_owner'),
+      ('feature.revoke_lifecycle_override(text,text,bigint)', 'ktm_feature_state_procedure_owner'),
+      ('feature.has_active_feature_override(text,text)', 'ktm_feature_state_procedure_owner'),
+      ('feature.apply_provider_feature_field_patch(text,bigint,text,text,bigint,jsonb,jsonb)', 'ktm_feature_state_procedure_owner'),
+      ('feature.author_feature_field_overrides(text,bigint,text,text,bigint,jsonb,jsonb)', 'ktm_feature_state_procedure_owner'),
+      ('feature.revoke_feature_field_overrides(text,bigint,text,text,bigint,text[])', 'ktm_feature_state_procedure_owner'),
+      ('feature.derive_subtype_public_ready()', 'ktm_feature_state_procedure_owner'),
+      ('feature.sync_subtype_public_ready()', 'ktm_feature_state_procedure_owner'),
+      ('feature.reject_user_feature_version_mutation()', 'ktm_feature_state_procedure_owner'),
+      ('feature.reject_feature_change_request_receipt_mutation()', 'ktm_feature_state_procedure_owner'),
+      ('feature.write_feature_state_transition()', 'ktm_feature_audit_writer'),
+      ('feature.reject_feature_state_transition_mutation()', 'ktm_feature_audit_writer')
+), existing AS (
+    SELECT signature, owner_role, pg_proc.prokind
+    FROM dedicated_routine
+    JOIN pg_catalog.pg_proc ON pg_proc.oid = to_regprocedure(signature)
+)
+SELECT format(
+    'ALTER %s %s OWNER TO %I',
+    CASE prokind WHEN 'p' THEN 'PROCEDURE' ELSE 'FUNCTION' END,
+    signature,
+    owner_role
+)
+FROM existing
 \gexec
 
 SELECT format('ALTER TYPE %I.%I OWNER TO ktm_feature_schema_owner', nspname, typname)

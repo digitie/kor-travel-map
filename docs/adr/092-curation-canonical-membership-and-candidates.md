@@ -38,18 +38,23 @@ transaction에서 candidate promotion과 item write receipt를 남긴다.
 
 새 `feature.theme_feature_candidates`는 source rule의 자동 판정만 보관한다. 후보의 안정
 identity는 rule·현재 source entity·Feature의 조합이며, source record key와 payload digest는
-현재 관측 증거로만 갱신한다. 한 후보 행의 상태는 `open`, `promoted`, `rejected`,
-`withdrawn`으로 제한한다. `theme_feature_candidate_transitions` append-only audit은 상태 변경의
+현재 관측 증거로만 갱신한다. 한 후보 행은 운영자 판단 `review_state`(`open`, `promoted`,
+`rejected`)와 현재 rule-qualified 관측 `eligibility_present` 두 축을 가진다. UI의
+`withdrawn`은 `eligibility_present=false`인 투영 상태이지 운영자 결정을 덮는 네 번째
+값이 아니다. 이 축은 raw source 존재 여부가 아니라 current head/link/Feature effective
+projection이 해당 rule을 지금 만족하는지를 뜻한다.
+`theme_feature_candidate_transitions` append-only audit은 두 축 변경의
 actor, reason, source evidence, transaction correlation을 보존한다.
 
-- rule refresh만 `open` 또는 `withdrawn`을 만들 수 있다. provider evidence는 현재
+- rule refresh만 `eligibility_present`를 바꿀 수 있다. provider evidence는 현재
   source-entity head와 Feature link를 확인해야 한다.
 - admin은 `open → promoted` 또는 `open → rejected`만 command로 수행한다. promotion은 어떤
   collection에 넣을지 명시해야 하며, source rule이 이를 대신 결정하지 않는다.
-- source가 사라지면 `withdrawn`이 되지만 기존 collection item을 삭제·비공개로 바꾸지 않는다.
-  public membership 수명은 collection/item 정책이 소유한다.
-- 다시 나타난 동일 안정 identity는 새 행을 만들지 않고 audited `withdrawn → open` 전이로
-  복원한다. 새로운 source record와 digest는 그 전이의 증거다.
+- source가 사라지거나 rule/Feature effective selector에서 제외되면
+  `eligibility_present=false`가 되지만 `review_state`와 기존 collection item을
+  삭제·비공개로 바꾸지 않는다. public membership 수명은 collection/item 정책이 소유한다.
+- 다시 나타난 동일 안정 identity는 새 행을 만들지 않고 audited `false → true` 전이로
+  복원한다. `promoted`/`rejected` 판단도 보존하며 새로운 source record와 digest를 증거로 남긴다.
 
 `curated_source_rules.default_action`의 legacy `curated` 의미는 후보 생성으로 이관한다.
 migration 전 existing 값을 계수·감사하고, collection으로 자동 승격된다는 해석을 허용하지
@@ -64,9 +69,10 @@ merge target 이동은 각각 named repository/DB command로만 수행한다. ru
 허용하지 않는다. command owner는 fixed `search_path`, authenticated actor 또는
 provider-derived principal, expected revision, source/current-head proof를 검증한다.
 
-provider refresh와 Feature merge는 관계 row lock보다 먼저 영향받는 Feature id의 정렬된
-transaction advisory fence를 공통 획득한다. 그 뒤 lock 순서는 source dataset/entity/head → source
-link → Feature → candidate → collection → item으로 고정한다. source refresh와 promotion, Feature
+provider refresh와 Feature merge는 관계 row lock보다 먼저 **transaction 전체**가 영향 주는
+Feature id set을 materialize·dedupe·정렬하고 첫 DML 전에 모든 advisory fence를 공통 획득한다.
+bundle 순서대로 하나씩 lock하지 않는다. 그 뒤 lock 순서는 curated theme/source/rule → source
+dataset/entity/head → source link → Feature → candidate → collection → item으로 고정한다. source refresh와 promotion, Feature
 merge와 candidate reassignment, import와 manual item mutation의 two-session deadlock/serialization
 test를 요구한다. 기존 40P01 1회 retry는 이 lock-order 계약의 대체물이 아니다.
 

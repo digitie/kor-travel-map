@@ -92,7 +92,7 @@
         "enum_changes": 8,
         "status_changes": 1,
         "error_changes": 0,
-        "deferred": 3
+        "deferred": 2
       },
       "added": [
         {
@@ -253,12 +253,6 @@
       "error_changes": [],
       "deferred": [
         {
-          "topic": "GET /v1/curated-sources·GET /v1/curated-themes·GET /v1/curations·GET /v1/curations/features/{feature_id}",
-          "decision": "deferred-to-implementation",
-          "detail": "canonical curation 위 공개 read의 collections 표면 통합 형태는 legacy route 폐기 범위(F-16)와 별개로 미명시",
-          "owner": "T-VN-40B"
-        },
-        {
           "topic": "kind-discriminated typed detail의 subtype 분해 반영(응답 필드 재배치)",
           "decision": "deferred-to-implementation",
           "detail": "typed detail 골격은 Wave 0/1에 착지 — subtype 전환에 따른 필드 세부는 구현 소관",
@@ -274,7 +268,7 @@
     },
     "service": {
       "counts": {
-        "added": 0,
+        "added": 1,
         "removed": 0,
         "renamed": 0,
         "enum_changes": 2,
@@ -282,7 +276,14 @@
         "error_changes": 0,
         "deferred": 1
       },
-      "added": [],
+      "added": [
+        {
+          "kind": "operation",
+          "target_operation": "GET /v1/service/curation-items/{curation_item_id}/detail-snapshot",
+          "detail": "canonical public membership과 trusted accepted link를 직접 조립하는 PinVi 전용 snapshot. exact scoped ServiceToken과 strong ETag/304를 요구한다.",
+          "basis": "ADR-092"
+        }
+      ],
       "removed": [],
       "renamed": [],
       "enum_changes": [
@@ -310,7 +311,7 @@
     },
     "admin": {
       "counts": {
-        "added": 3,
+        "added": 8,
         "removed": 10,
         "renamed": 0,
         "enum_changes": 4,
@@ -334,6 +335,36 @@
           "operation": "POST /v1/admin/features/{feature_id}/field-overrides/revoke",
           "detail": "override 철회 → provider base 복귀 (If-Match)",
           "basis": "T-VN-36"
+        },
+        {
+          "kind": "operation",
+          "target_operation": "GET /v1/admin/theme-feature-candidates",
+          "detail": "review_state·eligibility_present AND-filter keyset 후보 목록",
+          "basis": "ADR-092"
+        },
+        {
+          "kind": "operation",
+          "target_operation": "GET /v1/admin/theme-feature-candidates/{candidate_id}",
+          "detail": "candidate CAS ETag와 representation ETag를 분리한 typed detail",
+          "basis": "ADR-092"
+        },
+        {
+          "kind": "operation",
+          "target_operation": "GET /v1/admin/theme-feature-candidates/{candidate_id}/transitions",
+          "detail": "append-only candidate transition keyset timeline",
+          "basis": "ADR-092"
+        },
+        {
+          "kind": "operation",
+          "target_operation": "POST /v1/admin/theme-feature-candidates/{candidate_id}/promote",
+          "detail": "candidate CAS + target collection/item revision을 요구하는 typed promotion",
+          "basis": "ADR-092"
+        },
+        {
+          "kind": "operation",
+          "target_operation": "POST /v1/admin/theme-feature-candidates/{candidate_id}/reject",
+          "detail": "candidate CAS + non-empty reason의 typed rejection",
+          "basis": "ADR-092"
         }
       ],
       "removed": [
@@ -364,7 +395,7 @@
         },
         {
           "operation": "GET /v1/admin/features/curated/{curated_feature_id}/detail-snapshot",
-          "detail": "legacy curated_features overlay 부속 read. PinVi caller는 canonical GET /v1/admin/curation-items/{curation_item_id}/detail-snapshot으로 선전환하고 exact Map/PinVi pair를 고정한다.",
+          "detail": "legacy curated_features overlay 부속 read. PinVi caller는 canonical GET /v1/service/curation-items/{curation_item_id}/detail-snapshot과 전용 ServiceToken scope로 선전환하고 exact Map/PinVi pair를 고정한다.",
           "basis": "T-VN-40C"
         },
         {

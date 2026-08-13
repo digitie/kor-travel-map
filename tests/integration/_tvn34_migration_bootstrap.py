@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
 
 _TVN34_TEST_MIGRATOR_PASSWORD = "tvn34-test-only-migrator-password"
+_TVN40_TEST_RUNTIME_PASSWORD = "tvn40-test-only-runtime-password"
 
 
 async def bootstrap_tvn34_migration_roles(engine: AsyncEngine) -> str:
@@ -64,6 +65,46 @@ async def bootstrap_tvn34_migration_roles(engine: AsyncEngine) -> str:
                     END IF;
                     IF NOT EXISTS (
                         SELECT 1 FROM pg_catalog.pg_roles
+                        WHERE rolname = 'ktm_curation_command_owner'
+                    ) THEN
+                        CREATE ROLE ktm_curation_command_owner NOLOGIN NOINHERIT;
+                    END IF;
+                    IF NOT EXISTS (
+                        SELECT 1 FROM pg_catalog.pg_roles
+                        WHERE rolname = 'ktm_curation_audit_writer'
+                    ) THEN
+                        CREATE ROLE ktm_curation_audit_writer NOLOGIN NOINHERIT;
+                    END IF;
+                    IF NOT EXISTS (
+                        SELECT 1 FROM pg_catalog.pg_roles
+                        WHERE rolname = 'ktm_curation_admin_executor'
+                    ) THEN
+                        CREATE ROLE ktm_curation_admin_executor NOLOGIN NOINHERIT;
+                    END IF;
+                    IF NOT EXISTS (
+                        SELECT 1 FROM pg_catalog.pg_roles
+                        WHERE rolname = 'ktm_curation_provider_executor'
+                    ) THEN
+                        CREATE ROLE ktm_curation_provider_executor NOLOGIN NOINHERIT;
+                    END IF;
+                    IF NOT EXISTS (
+                        SELECT 1 FROM pg_catalog.pg_roles
+                        WHERE rolname = 'ktm_feature_api_runtime'
+                    ) THEN
+                        CREATE ROLE ktm_feature_api_runtime LOGIN NOINHERIT
+                            NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS
+                            NOREPLICATION PASSWORD 'tvn40-test-only-runtime-password';
+                    END IF;
+                    IF NOT EXISTS (
+                        SELECT 1 FROM pg_catalog.pg_roles
+                        WHERE rolname = 'ktm_feature_dagster_runtime'
+                    ) THEN
+                        CREATE ROLE ktm_feature_dagster_runtime LOGIN NOINHERIT
+                            NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS
+                            NOREPLICATION PASSWORD 'tvn40-test-only-runtime-password';
+                    END IF;
+                    IF NOT EXISTS (
+                        SELECT 1 FROM pg_catalog.pg_roles
                         WHERE rolname = 'ktm_feature_migrator'
                     ) THEN
                         CREATE ROLE ktm_feature_migrator LOGIN NOINHERIT
@@ -76,6 +117,20 @@ async def bootstrap_tvn34_migration_roles(engine: AsyncEngine) -> str:
             )
         )
         for statement in (
+            "ALTER ROLE ktm_curation_command_owner NOLOGIN NOINHERIT "
+            "NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION",
+            "ALTER ROLE ktm_curation_audit_writer NOLOGIN NOINHERIT "
+            "NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION",
+            "ALTER ROLE ktm_curation_admin_executor NOLOGIN NOINHERIT "
+            "NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION",
+            "ALTER ROLE ktm_curation_provider_executor NOLOGIN NOINHERIT "
+            "NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION",
+            "ALTER ROLE ktm_feature_api_runtime LOGIN NOINHERIT "
+            "NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION "
+            f"PASSWORD '{_TVN40_TEST_RUNTIME_PASSWORD}'",
+            "ALTER ROLE ktm_feature_dagster_runtime LOGIN NOINHERIT "
+            "NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION "
+            f"PASSWORD '{_TVN40_TEST_RUNTIME_PASSWORD}'",
             "ALTER ROLE ktm_feature_migrator LOGIN NOINHERIT "
             "NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION "
             "PASSWORD 'tvn34-test-only-migrator-password'",
@@ -85,6 +140,20 @@ async def bootstrap_tvn34_migration_roles(engine: AsyncEngine) -> str:
             "WITH ADMIN FALSE, INHERIT FALSE, SET TRUE",
             "GRANT ktm_feature_audit_writer TO ktm_feature_schema_owner "
             "WITH ADMIN FALSE, INHERIT FALSE, SET TRUE",
+            "GRANT ktm_curation_command_owner TO ktm_feature_schema_owner "
+            "WITH ADMIN FALSE, INHERIT FALSE, SET TRUE",
+            "GRANT ktm_curation_audit_writer TO ktm_feature_schema_owner "
+            "WITH ADMIN FALSE, INHERIT FALSE, SET TRUE",
+            "GRANT ktm_feature_runtime TO ktm_feature_api_runtime "
+            "WITH ADMIN FALSE, INHERIT TRUE, SET FALSE",
+            "GRANT ktm_feature_runtime TO ktm_feature_dagster_runtime "
+            "WITH ADMIN FALSE, INHERIT TRUE, SET FALSE",
+            "GRANT ktm_curation_admin_executor TO ktm_feature_api_runtime "
+            "WITH ADMIN FALSE, INHERIT TRUE, SET FALSE",
+            "GRANT ktm_curation_provider_executor TO ktm_feature_dagster_runtime "
+            "WITH ADMIN FALSE, INHERIT TRUE, SET FALSE",
+            "REVOKE ktm_curation_provider_executor FROM ktm_feature_api_runtime",
+            "REVOKE ktm_curation_admin_executor FROM ktm_feature_dagster_runtime",
             "CREATE SCHEMA IF NOT EXISTS feature AUTHORIZATION ktm_feature_schema_owner",
             "CREATE SCHEMA IF NOT EXISTS provider_sync AUTHORIZATION ktm_feature_schema_owner",
             "CREATE SCHEMA IF NOT EXISTS ops AUTHORIZATION ktm_feature_schema_owner",
@@ -99,7 +168,8 @@ async def bootstrap_tvn34_migration_roles(engine: AsyncEngine) -> str:
             "ALTER SCHEMA ops OWNER TO ktm_feature_schema_owner",
             "ALTER SCHEMA x_extension OWNER TO ktm_feature_schema_owner",
             "GRANT USAGE, CREATE ON SCHEMA feature "
-            "TO ktm_feature_state_procedure_owner, ktm_feature_audit_writer",
+            "TO ktm_feature_state_procedure_owner, ktm_feature_audit_writer, "
+            "ktm_curation_command_owner, ktm_curation_audit_writer",
         ):
             await connection.execute(text(statement))
         # PostGIS image가 initdb에서 public에 둔 non-relocatable extension은
