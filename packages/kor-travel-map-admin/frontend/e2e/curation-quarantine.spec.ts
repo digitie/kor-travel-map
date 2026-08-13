@@ -56,6 +56,7 @@ function makeQuarantineCollection(
   return {
     collection_id: QUARANTINE_ID,
     collection_key: "quarantine-lighthouse-2026",
+    command_etag: '"1"',
     created_by: "migration:0065",
     edition_key: "2026",
     item_count: 2,
@@ -96,6 +97,7 @@ function makeQuarantineCollection(
       visibility: "admin_only",
     },
     status: "draft",
+    row_revision: "1",
     title: "격리: 등대 스탬프투어",
     visibility: "admin_only",
     ...overrides,
@@ -139,6 +141,8 @@ function itemsData(
     items,
     target_archived: false,
     target_collection_id: targetCollectionId,
+    target_collection_revision: targetCollectionId === null ? null : "1",
+    target_command_etag: targetCollectionId === null ? null : '"1"',
     target_missing: false,
   };
 }
@@ -215,6 +219,7 @@ interface QuarantineMockState {
     body: QuarantineReclassifyRequest;
     collectionId: string;
     idempotencyKey: string;
+    ifMatch: string;
   }>;
 }
 
@@ -285,6 +290,7 @@ async function mockQuarantineRoutes(
         body,
         collectionId: decodeURIComponent(reclassifyMatch[1]),
         idempotencyKey: request.headers()["idempotency-key"] ?? "",
+        ifMatch: request.headers()["if-match"] ?? "",
       });
       const outcome = options.reclassify?.(body) ?? {
         body: {
@@ -433,8 +439,10 @@ test.describe("큐레이션 quarantine 재분류 패널", () => {
       action: "move",
       item_ids: null,
       target_collection_id: ORIGINAL_ID,
+      target_collection_revision: "1",
     });
     expect(observed.idempotencyKey).toMatch(UUID_PATTERN);
+    expect(observed.ifMatch).toBe('"1"');
 
     await expect(
       page
@@ -511,6 +519,7 @@ test.describe("큐레이션 quarantine 재분류 패널", () => {
       title: "2024 구 등대 스탬프투어",
     });
     expect(observed.idempotencyKey).toMatch(UUID_PATTERN);
+    expect(observed.ifMatch).toBe('"1"');
 
     await expect(
       page

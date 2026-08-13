@@ -3276,6 +3276,8 @@ export interface components {
             collection_id: string;
             /** Collection Key */
             collection_key: string;
+            /** Command Etag */
+            command_etag: string;
             /** Created By */
             created_by: string | null;
             /** Edition Key */
@@ -3287,6 +3289,8 @@ export interface components {
             original_collection: components["schemas"]["CurationQuarantineOriginalCollectionView"] | null;
             quarantine_source: components["schemas"]["CurationQuarantineSourceView"] | null;
             quarantine_theme: components["schemas"]["CurationQuarantineThemeView"] | null;
+            /** Row Revision */
+            row_revision: string;
             /**
              * Status
              * @enum {string}
@@ -3350,6 +3354,10 @@ export interface components {
             target_archived: boolean;
             /** Target Collection Id */
             target_collection_id: string | null;
+            /** Target Collection Revision */
+            target_collection_revision?: string | null;
+            /** Target Command Etag */
+            target_command_etag?: string | null;
             /** Target Missing */
             target_missing: boolean;
         };
@@ -3387,6 +3395,8 @@ export interface components {
             item_ids?: string[] | null;
             /** Target Collection Id */
             target_collection_id?: string | null;
+            /** Target Collection Revision */
+            target_collection_revision?: string | null;
             /** Title */
             title?: string | null;
         };
@@ -7511,8 +7521,12 @@ export interface components {
              * Format: uuid
              */
             collection_id: string;
+            /** Command Etag */
+            command_etag?: string | null;
             /** Exists */
             exists: boolean;
+            /** Row Revision */
+            row_revision?: string | null;
             source: components["schemas"]["CurationQuarantineSourceView"] | null;
             /** Status */
             status: ("draft" | "published" | "archived") | null;
@@ -15564,6 +15578,8 @@ export interface operations {
             header: {
                 /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
                 "Idempotency-Key": string;
+                /** @description 직전 command ETag. 누락은 428, stale 값은 412. */
+                "If-Match": string;
             };
             path: {
                 collection_id: string;
@@ -15585,8 +15601,26 @@ export interface operations {
                     "application/json": components["schemas"]["AdminCurationQuarantineReclassifyResponse"];
                 };
             };
+            /** @description collection revision 불일치 */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description Validation Error */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description If-Match 헤더 누락 */
+            428: {
                 headers: {
                     [name: string]: unknown;
                 };

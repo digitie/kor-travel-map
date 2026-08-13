@@ -744,6 +744,8 @@ class CurationQuarantineOriginalCollectionView(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     collection_id: UUID
+    row_revision: str | None = Field(default=None, pattern=r"^[1-9][0-9]*$")
+    command_etag: str | None = None
     title: str | None
     status: CollectionStatus | None
     visibility: CollectionVisibility | None
@@ -756,6 +758,8 @@ class AdminCurationQuarantineCollectionView(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     collection_id: UUID
+    row_revision: str = Field(pattern=r"^[1-9][0-9]*$")
+    command_etag: str
     collection_key: str
     title: str
     edition_key: str
@@ -801,6 +805,10 @@ class AdminCurationQuarantineItemsData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     target_collection_id: UUID | None
+    target_collection_revision: str | None = Field(
+        default=None, pattern=r"^[1-9][0-9]*$"
+    )
+    target_command_etag: str | None = None
     target_missing: bool
     target_archived: bool
     items: list[AdminCurationQuarantineItemView]
@@ -819,6 +827,9 @@ class AdminCurationQuarantineReclassifyRequest(BaseModel):
     action: QuarantineReclassifyAction
     # move 전용 — null target은 원본 collection, null item_ids는 전체.
     target_collection_id: UUID | None = None
+    target_collection_revision: str | None = Field(
+        default=None, pattern=r"^[1-9][0-9]*$"
+    )
     item_ids: list[UUID] | None = Field(default=None, min_length=1)
     # confirm_standalone 전용.
     collection_key: str | None = Field(default=None, min_length=1, max_length=240)
@@ -829,8 +840,14 @@ class AdminCurationQuarantineReclassifyRequest(BaseModel):
         if self.action == "move":
             if self.collection_key is not None or self.title is not None:
                 raise ValueError("move에는 collection_key/title을 쓸 수 없습니다.")
+            if self.target_collection_revision is None:
+                raise ValueError("move에는 target_collection_revision이 필요합니다.")
             return self
-        if self.target_collection_id is not None or self.item_ids is not None:
+        if (
+            self.target_collection_id is not None
+            or self.target_collection_revision is not None
+            or self.item_ids is not None
+        ):
             raise ValueError(
                 "confirm_standalone에는 target_collection_id/item_ids를 쓸 수 없습니다."
             )
@@ -943,6 +960,16 @@ def _quarantine_collection_view(
         CurationQuarantineOriginalCollectionView.model_validate(
             {
                 "collection_id": original.collection_id,
+                "row_revision": (
+                    str(original.row_revision)
+                    if original.row_revision is not None
+                    else None
+                ),
+                "command_etag": (
+                    revision_etag(original.row_revision)
+                    if original.row_revision is not None
+                    else None
+                ),
                 "title": original.title,
                 "status": original.status,
                 "visibility": original.visibility,
@@ -957,6 +984,8 @@ def _quarantine_collection_view(
     return AdminCurationQuarantineCollectionView.model_validate(
         {
             "collection_id": row.collection_id,
+            "row_revision": str(row.row_revision),
+            "command_etag": revision_etag(row.row_revision),
             "collection_key": row.collection_key,
             "title": row.title,
             "edition_key": row.edition_key,
@@ -1074,6 +1103,26 @@ def _collection_command_error(exc: DBAPIError) -> HTTPException:
         return HTTPException(status_code=422, detail=message)
     if sqlstate == "42501":
         return HTTPException(status_code=403, detail="curation collection command 권한이 없습니다.")
+    raise exc
+
+
+def _item_command_error(exc: DBAPIError) -> HTTPException:
+    message = str(exc.orig)
+    sqlstate = getattr(exc.orig, "sqlstate", None)
+    if sqlstate == "40001":
+        raise exc
+    if "item identity or revision changed" in message:
+        return HTTPException(status_code=412, detail="curation item revision이 변경됐습니다.")
+    if sqlstate == "P0002":
+        return HTTPException(status_code=404, detail="curation item 또는 collection 없음")
+    if sqlstate == "23505":
+        return HTTPException(status_code=409, detail="curation item identity conflict")
+    if sqlstate == "23514" and "archived" in message:
+        return HTTPException(status_code=409, detail=message)
+    if sqlstate in {"22P02", "23502", "23503", "23514", "22023"}:
+        return HTTPException(status_code=422, detail=message)
+    if sqlstate == "42501":
+        return HTTPException(status_code=403, detail="curation item command 권한이 없습니다.")
     raise exc
 
 
@@ -1407,6 +1456,16 @@ async def list_admin_curation_quarantine_items(
                 if preview.target_collection_id is not None
                 else None
             ),
+            target_collection_revision=(
+                str(preview.target_collection_revision)
+                if preview.target_collection_revision is not None
+                else None
+            ),
+            target_command_etag=(
+                revision_etag(preview.target_collection_revision)
+                if preview.target_collection_revision is not None
+                else None
+            ),
             target_missing=preview.target_missing,
             target_archived=preview.target_archived,
             items=[_quarantine_item_view(item) for item in preview.items],
@@ -1424,6 +1483,11 @@ async def list_admin_curation_quarantine_items(
     "/quarantine/{collection_id}/reclassify",
     response_model=AdminCurationQuarantineReclassifyResponse,
     status_code=200,
+    responses={
+        412: {"description": "collection revision 불일치"},
+        428: {"description": "If-Match 헤더 누락"},
+    },
+    openapi_extra={"parameters": [_IF_MATCH_OPENAPI_PARAMETER]},
 )
 @idempotent_domain_command("admin.curation-quarantine.reclassify")
 async def reclassify_admin_curation_quarantine(
@@ -1441,9 +1505,13 @@ async def reclassify_admin_curation_quarantine(
     """
 
     started_at = perf_counter()
+    expected_collection_revision = parse_revision_header(
+        request, "If-Match", required=True
+    )
     data: AdminCurationQuarantineReclassifyData
     try:
         async with domain_command_transaction(session):
+            command = domain_command_service.current_domain_command()
             if body.action == "move":
                 (
                     moved_item_ids,
@@ -1451,16 +1519,19 @@ async def reclassify_admin_curation_quarantine(
                 ) = await curation_repo.move_curation_quarantine_items(
                     session,
                     collection_id=str(collection_id),
+                    expected_collection_revision=expected_collection_revision,
                     target_collection_id=(
                         str(body.target_collection_id)
                         if body.target_collection_id is not None
                         else None
                     ),
+                    expected_target_revision=int(body.target_collection_revision or "0"),
                     item_ids=(
                         [str(item_id) for item_id in body.item_ids]
                         if body.item_ids is not None
                         else None
                     ),
+                    command_id=command.command_id,
                     actor=context.actor,
                 )
                 data = AdminCurationQuarantineReclassifyData(
@@ -1475,8 +1546,10 @@ async def reclassify_admin_curation_quarantine(
                 ) = await curation_repo.confirm_curation_quarantine_standalone(
                     session,
                     collection_id=str(collection_id),
+                    expected_collection_revision=expected_collection_revision,
                     collection_key=body.collection_key or "",
                     title=body.title or "",
+                    command_id=command.command_id,
                     actor=context.actor,
                 )
                 data = AdminCurationQuarantineReclassifyData(
@@ -1504,6 +1577,15 @@ async def reclassify_admin_curation_quarantine(
         ) from exc
     except curation_repo.CurationQuarantineTargetArchivedError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except DBAPIError as exc:
+        message = str(exc.orig)
+        if "revision or marker changed" in message or "target collection revision" in message:
+            raise HTTPException(
+                status_code=412,
+                detail="curation quarantine 또는 target collection revision이 변경됐습니다.",
+            ) from exc
+        mapped = _collection_command_error(exc)
+        raise mapped from exc
     except IntegrityError as exc:
         raise _conflict(exc) from exc
     except ValueError as exc:
@@ -1617,6 +1699,9 @@ async def import_admin_curations(
 ) -> CurationImportResponse:
     """CSV+sidecar를 검증한 뒤 preview하거나 원자적으로 멱등 반영한다."""
     started_at = perf_counter()
+    # Multipart content fingerprint를 계산해 claim하기 전에도 catalog 조회가 있다.
+    # 따라서 그 어떤 DB statement보다 먼저 격리 수준을 고정한다.
+    await session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
     content = await file.read(CURATION_CSV_MAX_BYTES + 1)
     content_sha256 = hashlib.sha256(content).hexdigest()
     preview = parse_curation_csv(content)
@@ -1867,6 +1952,7 @@ async def import_admin_curations(
                 actor=context.actor,
                 source_content_sha256=content_sha256,
                 batch_kind="csv_upload",
+                command_id=command.command_id,
             )
     except IntegrityError as exc:
         await session.rollback()
@@ -2511,17 +2597,16 @@ async def add_admin_curation_item(
         )
     try:
         async with domain_command_transaction(session):
-            item, inserted = await curation_repo.add_curation_item(
+            command = domain_command_service.current_domain_command()
+            item = await curation_repo.create_curation_item_command(
                 session,
                 collection_id=str(collection_id),
-                actor=context.actor,
+                command_id=command.command_id,
+                principal=command.actor,
                 **payload,
             )
-            if not inserted:
-                raise HTTPException(
-                    status_code=409,
-                    detail="같은 identity의 active curation item이 이미 있습니다.",
-                )
+    except DBAPIError as exc:
+        raise _item_command_error(exc) from exc
     except IntegrityError as exc:
         raise _conflict(exc) from exc
     except ValueError as exc:
@@ -2567,14 +2652,18 @@ async def patch_admin_curation_item(
         )
     try:
         async with domain_command_transaction(session):
-            item = await curation_repo.update_curation_item(
+            command = domain_command_service.current_domain_command()
+            item = await curation_repo.patch_curation_item_command(
                 session,
                 collection_id=str(collection_id),
                 curation_item_id=str(curation_item_id),
                 updates=updates,
-                actor=context.actor,
                 expected_revision=expected_revision,
+                command_id=command.command_id,
+                principal=command.actor,
             )
+    except DBAPIError as exc:
+        raise _item_command_error(exc) from exc
     except IntegrityError as exc:
         raise _conflict(exc) from exc
     except curation_repo.CurationRevisionConflictError as exc:
@@ -2615,13 +2704,17 @@ async def archive_admin_curation_item(
     assert expected_revision is not None
     try:
         async with domain_command_transaction(session):
-            item = await curation_repo.archive_curation_item(
+            command = domain_command_service.current_domain_command()
+            item = await curation_repo.archive_curation_item_command(
                 session,
                 collection_id=str(collection_id),
                 curation_item_id=str(curation_item_id),
-                actor=context.actor,
                 expected_revision=expected_revision,
+                command_id=command.command_id,
+                principal=command.actor,
             )
+    except DBAPIError as exc:
+        raise _item_command_error(exc) from exc
     except curation_repo.CurationRevisionConflictError as exc:
         raise HTTPException(status_code=412, detail=str(exc)) from exc
     except ValueError as exc:

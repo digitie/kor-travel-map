@@ -255,6 +255,38 @@ async def test_collection_commands_are_revisioned_idempotent_and_admin_only(
                 )
             assert getattr(denied.value.orig, "sqlstate", None) == "42501"
             await transaction.rollback()
+
+        for runtime in (api, dagster):
+            for statement, params in (
+                (
+                    """
+                    INSERT INTO feature.curation_collections (
+                      collection_key, theme_id, title, edition_key, status,
+                      visibility, metadata
+                    ) VALUES (
+                      :key, CAST(:theme_id AS uuid), 'raw bypass', '', 'draft',
+                      'admin_only', '{}'::jsonb
+                    )
+                    """,
+                    {"key": f"raw-{uuid4().hex}", "theme_id": theme_id},
+                ),
+                (
+                    "UPDATE feature.curation_collections SET row_revision = 99 "
+                    "WHERE collection_id = CAST(:collection_id AS uuid)",
+                    {"collection_id": collection_id},
+                ),
+                (
+                    "DELETE FROM feature.curation_collections "
+                    "WHERE collection_id = CAST(:collection_id AS uuid)",
+                    {"collection_id": collection_id},
+                ),
+            ):
+                async with runtime.connect() as connection:
+                    transaction = await connection.begin()
+                    with pytest.raises(DBAPIError) as raw_denied:
+                        await connection.execute(text(statement), params)
+                    assert getattr(raw_denied.value.orig, "sqlstate", None) == "42501"
+                    await transaction.rollback()
     finally:
         await api.dispose()
         await dagster.dispose()
