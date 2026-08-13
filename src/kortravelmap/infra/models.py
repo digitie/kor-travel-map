@@ -2572,6 +2572,11 @@ class CurationImportBatchRow(Base):
             "command_id",
             name=conv("uq_curation_import_batches_command"),
         ),
+        UniqueConstraint(
+            "import_batch_id",
+            "command_id",
+            name=conv("uq_curation_import_batches_identity_command"),
+        ),
         Index(
             "idx_curation_import_batches_sha_time",
             "content_sha256",

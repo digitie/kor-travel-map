@@ -5,7 +5,7 @@
   "baseline": {
     "admin": {
       "file": "packages/kor-travel-map-api/openapi.json",
-      "sha256": "f648fbfc6ca6845996421645f4fad6381875549ac2d43595413fba5f8ac5ca89"
+      "sha256": "1d881869dd49e363f5f2f3ac106437f7a9d635521e945b9e075ccbc37bf5acd8"
     },
     "user": {
       "file": "packages/kor-travel-map-api/openapi.user.json",
@@ -17,6 +17,11 @@
     }
   },
   "revisions": [
+    {
+      "date": "2026-08-14",
+      "task": "T-VN-40B",
+      "change": "import preview의 Idempotency-Key 설명을 반영한 현재 admin OpenAPI bytes를 재고정했다. user/service bytes와 operation 집합은 변하지 않는다."
+    },
     {
       "date": "2026-08-14",
       "task": "T-VN-40B",

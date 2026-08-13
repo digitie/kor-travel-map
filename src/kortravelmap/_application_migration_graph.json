@@ -751,6 +751,12 @@
         "0119_tvn40_import_plans"
       ],
       "revision": "0120_tvn40_import_item_cmd"
+    },
+    {
+      "down_revision": [
+        "0120_tvn40_import_item_cmd"
+      ],
+      "revision": "0121_tvn40_metadata_check"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

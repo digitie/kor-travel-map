@@ -75,6 +75,38 @@ async def test_tvn40_receipt_spine_has_exact_revision_and_scope_columns(
     assert "operation_kind = ANY" in revision_shape
 
 
+async def test_tvn40_owner_shape_constraints_are_validated_at_head(
+    migrated_session: AsyncSession,
+) -> None:
+    """expand용 NOT VALID owner fence를 최종 head에는 남기지 않는다."""
+
+    rows = (
+        await migrated_session.execute(
+            text(
+                """
+                SELECT relation.relname, constraint_.conname,
+                       constraint_.convalidated
+                FROM pg_catalog.pg_constraint AS constraint_
+                JOIN pg_catalog.pg_class AS relation
+                  ON relation.oid = constraint_.conrelid
+                JOIN pg_catalog.pg_namespace AS namespace
+                  ON namespace.oid = relation.relnamespace
+                WHERE namespace.nspname = 'feature'
+                  AND (relation.relname, constraint_.conname) IN (
+                    ('curated_themes', 'ck_curated_themes_owner_shape'),
+                    ('curated_source_rules', 'ck_curated_source_rules_owner_shape')
+                  )
+                ORDER BY relation.relname
+                """
+            )
+        )
+    ).all()
+    assert rows == [
+        ("curated_source_rules", "ck_curated_source_rules_owner_shape", True),
+        ("curated_themes", "ck_curated_themes_owner_shape", True),
+    ]
+
+
 async def test_tvn40_relations_are_closed_to_runtime_and_owned_by_schema_owner(
     migrated_session: AsyncSession,
 ) -> None:

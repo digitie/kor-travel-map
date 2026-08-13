@@ -1,5 +1,17 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-14 — T-VN-40: PR #977 base 재배치 완료
+
+T-VN-40 44개 커밋을 PR #977 head(`0df527e4`) 위로 재배치했다. PR #977이 실측한 prod
+`0087→0104`와 T-VN-36 live 인수 기록은 그대로 보존했고, T-VN-40 chain은
+`0104_tvn36_final_fence→0105…0120→0121_tvn40_metadata_check` 단일 head다. 0121은 0105의
+미검증 owner shape 두 건을 최종 검증한다. raw-SQL-only receipt/effect 12개 relation은 exact
+구조 계약과 함께 Alembic metadata exclusion ledger에 넣고, 누락됐던 import batch composite
+unique를 ORM에 반영해 fresh upgrade 뒤 `alembic check`가 clean이다. PR #977 전용 T-VN-36
+live runner의 0104 고정값은 역사적 인수 증거라 유지하며, T-VN-40 n150 배포 시 Docker Manager의
+주입 head를 0121로 바꾼다. 다음 checkpoint는 두 적대 리뷰의 이 고정 SHA 승인을 받은 뒤 dedup
+merge typed command와 남은 item/import/decision raw DML 회수를 계속하는 것이다.
+
 immutable import 경계를 재검토해 preview의 multipart SHA fingerprint·domain claim·catalog 해소·plan
 저장·terminal receipt 전체를 공통 SERIALIZABLE 3회 재시도 transaction으로 묶었다. exact replay는
 CSV parsing과 mutable catalog lookup보다 먼저 끝난다. apply procedure는 caller가 넘긴 row가 claimed

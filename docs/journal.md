@@ -2,6 +2,22 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-14 — T-VN-40: PR #977 재배치와 Alembic head 정합성
+
+T-VN-40의 44개 커밋을 PR #977 head(`0df527e4`) 위로 재배치했다. 충돌은
+`docs/resume.md` 한 곳뿐이었고, PR #977의 T-VN-36 prod `0087→0104` 실측·live 인수 기록과
+T-VN-40 진행 기록을 모두 보존했다. 리베이스 전후 OpenAPI bytes와 T-VN-40 커밋 범위는 동일함을
+range-diff로 확인했다.
+
+PR #977이 확정한 `0104_tvn36_final_fence` 뒤에 T-VN-40 `0105→0120`을 그대로 잇고,
+`0121_tvn40_metadata_check`를 추가했다. 0105의 `NOT VALID` owner shape 두 건은 최종 head에서
+검증하고, raw-SQL-only receipt/effect 12개 관계는 exact column·constraint·index 계약이 있는
+Alembic exclusion ledger로 등록했다. 0118의 import batch composite unique도 ORM metadata에
+반영했다. fresh `0001→0121` 뒤 `alembic check`가 `No new upgrade operations detected`로 끝났고,
+단일 head·application migration graph·PR #977 live runner 회귀가 통과했다. PR #977의
+T-VN-36 전용 runner가 고정한 0104는 역사적 인수 경계이므로 바꾸지 않았으며, Docker Manager는
+head를 코드에 고정하지 않고 배포 설정으로 주입하므로 T-VN-40 배포 시 0121로 함께 전환한다.
+
 ## 2026-08-14 — T-VN-40: immutable import causal chain과 UI provenance
 
 multipart preview를 공통 domain-command transaction에 결합했다. 파일은 bounded-memory streaming SHA로
