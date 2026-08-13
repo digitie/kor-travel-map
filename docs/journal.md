@@ -16,6 +16,15 @@ owner로 되돌리던 blanket owner sweep을 closed signature 복구 방식으�
 DB에서 bootstrap을 두 번 실행해 state/audit owner와 membership options가 보존됨을 실제 통합
 테스트로 검증했다(1 passed, 40.68s). frozen contract unit 10개와 ruff/bash/diff gate도 통과했다.
 
+이후 `0105_tvn40_curation_receipts` expand migration으로 catalog/collection/item revision,
+provider ownership 표지, immutable reconcile operation·scope member·cross-DB cutover identity mapping,
+candidate generation/observation/current row/transition audit spine을 만들었다. relation owner는
+schema owner로 유지해 NOLOGIN command/audit owner의 trigger 우회를 막고, command owner는 current
+candidate 쓰기와 receipt append만, audit writer는 transition append만 갖도록 ACL을 닫았다.
+runtime privilege reconciler의 unknown-ops broad CRUD fallback에서도 새 relation을 명시적으로
+제외했다. fresh 0001→0105 migration과 owner/ACL/append-only 실제 ROLE 통합 테스트는 3 passed,
+관련 ruff와 strict mypy도 통과했다.
+
 ## 2026-08-13 — T-VN-40: T-VN-36 병합 main 기준 설계 재배치
 
 T-VN-36 PR #973이 `c76ceb7a`로 병합된 최신 `main` 위에 T-VN-40 설계 커밋만
