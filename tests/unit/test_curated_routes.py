@@ -747,6 +747,13 @@ def test_retained_catalog_http_rejects_malformed_identifiers_and_nulls(
             vworld_api_key=None,
         )
     )
+
+    async def _session() -> AsyncIterator[object]:
+        yield object()
+
+    # FastAPI는 path/body 422를 확정하기 전에 dependency graph를 해소한다. 이 테스트는
+    # DB가 아니라 HTTP validation 경계를 보므로 실제 runtime DSN을 열지 않는다.
+    app.dependency_overrides[get_session] = _session
     client = TestClient(app)
     headers = {
         "Idempotency-Key": "96000000-0000-4000-8000-000000000001",

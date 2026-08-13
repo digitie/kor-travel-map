@@ -4,7 +4,9 @@
 
 ## 2026-08-14 — T-VN-40: PR #977 재배치와 Alembic head 정합성
 
-T-VN-40의 44개 커밋을 PR #977 head(`0df527e4`) 위로 재배치했다. 충돌은
+T-VN-40의 45개 커밋을 갱신된 PR #977 head(`b94329cf`) 위로 다시 재배치했다. 두 번째
+재배치도 충돌이 없었고, 새 base의 공개키 재발급·지오코딩 결선 수정·0104 백업 기준선과
+`feature.feature_weather_values` 복구 manifest 정정을 그대로 보존했다. 첫 재배치의 충돌은
 `docs/resume.md` 한 곳뿐이었고, PR #977의 T-VN-36 prod `0087→0104` 실측·live 인수 기록과
 T-VN-40 진행 기록을 모두 보존했다. 리베이스 전후 OpenAPI bytes와 T-VN-40 커밋 범위는 동일함을
 range-diff로 확인했다.
@@ -17,6 +19,11 @@ Alembic exclusion ledger로 등록했다. 0118의 import batch composite unique�
 단일 head·application migration graph·PR #977 live runner 회귀가 통과했다. PR #977의
 T-VN-36 전용 runner가 고정한 0104는 역사적 인수 경계이므로 바꾸지 않았으며, Docker Manager는
 head를 코드에 고정하지 않고 배포 설정으로 주입하므로 T-VN-40 배포 시 0121로 함께 전환한다.
+
+첫 force-push CI가 드러낸 동일 패턴도 새 base에서 닫았다. quarantine reclassify의 required
+If-Match revision을 타입상 non-null로 고정했고, validation-only API 단위 테스트는 FastAPI dependency
+해소 순서를 반영해 DB session을 명시 override한다. enrichment link 단위 테스트도 T-VN-40 global
+curation fence를 mock해 실제 SQL 없는 unit 경계를 복구했다. 대상 8건과 API mypy strict가 통과했다.
 
 ## 2026-08-14 — T-VN-40: immutable import causal chain과 UI provenance
 
