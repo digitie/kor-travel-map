@@ -461,6 +461,52 @@ BEGIN
   FROM ops.curation_provider_snapshot_receipts AS receipt
   WHERE receipt.root_job_id = p_root_job_id;
 
+  IF v_child_count = 0 THEN
+    o_generation_count := 0;
+    o_generation_set_hash := encode(
+      x_extension.digest(convert_to('[]', 'UTF8'), 'sha256'), 'hex'
+    );
+    o_replayed := false;
+    RETURN;
+  END IF;
+  IF EXISTS (
+    SELECT 1
+    FROM ops.import_jobs AS child
+    JOIN ops.import_job_datasets AS member ON member.job_id = child.job_id
+    WHERE child.parent_job_id = p_root_job_id
+      AND child.kind = 'provider_feature_load'
+      AND child.quarantined_at IS NULL
+      AND (child.payload ->> 'authoritative_snapshot_complete')::boolean
+      AND NOT EXISTS (
+        SELECT 1 FROM ops.curation_provider_snapshot_receipts AS receipt
+        WHERE receipt.source_job_id = child.job_id
+          AND receipt.root_job_id = p_root_job_id
+          AND receipt.provider_dataset_id = member.provider_dataset_id
+          AND receipt.sync_scope = member.sync_scope
+          AND receipt.operation_key = member.operation_key
+      )
+  ) OR EXISTS (
+    SELECT 1 FROM ops.curation_provider_snapshot_receipts AS receipt
+    WHERE receipt.root_job_id = p_root_job_id
+      AND NOT EXISTS (
+        SELECT 1
+        FROM ops.import_jobs AS child
+        JOIN ops.import_job_datasets AS member ON member.job_id = child.job_id
+        WHERE child.job_id = receipt.source_job_id
+          AND child.parent_job_id = p_root_job_id
+          AND child.kind = 'provider_feature_load'
+          AND child.status = 'done'
+          AND child.quarantined_at IS NULL
+          AND (child.payload ->> 'authoritative_snapshot_complete')::boolean
+          AND member.provider_dataset_id = receipt.provider_dataset_id
+          AND member.sync_scope = receipt.sync_scope
+          AND member.operation_key = receipt.operation_key
+      )
+  ) THEN
+    RAISE EXCEPTION 'provider curation root child receipt set is inconsistent'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_provider_curation_child_set';
+  END IF;
+
   SELECT root_receipt.* INTO v_seal FROM ops.curation_provider_root_receipts AS root_receipt
   WHERE root_receipt.root_job_id = p_root_job_id;
   IF FOUND THEN

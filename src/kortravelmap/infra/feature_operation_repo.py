@@ -29,7 +29,7 @@ from kortravelmap.core.feature_operation import (
     ProviderDatasetOperationMembership,
     TriggerKind,
 )
-from kortravelmap.infra.jobs_repo import ImportJobEvent, record_import_job_event
+from kortravelmap.infra.jobs_repo import ImportJobEvent
 from kortravelmap.infra.log_repo import record_system_log
 from kortravelmap.infra.pipeline_cancellation_repo import (
     lock_pipeline_cancellation_root,
@@ -124,6 +124,14 @@ CALL ops.finish_provider_feature_membership_command(
   CAST(:root_job_id AS uuid), CAST(:provider_dataset_id AS bigint),
   :sync_scope, :operation_key, CAST(:authoritative_snapshot_complete AS boolean),
   CAST(:finished_at AS timestamptz), NULL
+)
+"""
+
+_APPEND_ATTEMPT_EVENT_COMMAND_SQL = """
+CALL ops.append_provider_feature_attempt_event_command(
+  :dagster_run_id, CAST(:provider_dataset_id AS bigint), :sync_scope,
+  :operation_key, CAST(:attempt_number AS integer), :outcome,
+  CAST(:error AS jsonb), NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
 )
 """
 
@@ -825,30 +833,37 @@ async def append_dagster_feature_attempt_event(
             dagster_run_id=operation.dagster_run_id,
             root_job_id=operation.root_job_id,
         )
-    event = await record_import_job_event(
-        session,
-        member.job_id,
-        level="error" if error is not None else "info",
-        code="feature_operation.attempt",
-        message="provider feature operation attempt recorded",
-        payload={
-            "attempt_number": attempt_number,
-            "outcome": outcome,
-            "error": dict(error) if error is not None else None,
-            "provider_dataset_id": membership.provider_dataset_id,
-            "sync_scope": membership.sync_scope,
-            "operation_key": membership.operation_key,
-        },
-        import_job_dataset_id=member.import_job_dataset_id,
-        stage=member.current_stage,
-    )
-    if event is None:
-        raise FeatureOperationInvariantConflict(
-            "attempt member disappeared",
-            dagster_run_id=operation.dagster_run_id,
-            root_job_id=operation.root_job_id,
+    if outcome not in {"failed", "retryable_failure"} or error is None:
+        raise ValueError("provider feature attempt events require a failed outcome")
+    row = (
+        await session.execute(
+            text(_APPEND_ATTEMPT_EVENT_COMMAND_SQL),
+            {
+                "dagster_run_id": operation.dagster_run_id,
+                "provider_dataset_id": membership.provider_dataset_id,
+                "sync_scope": membership.sync_scope,
+                "operation_key": membership.operation_key,
+                "attempt_number": attempt_number,
+                "outcome": outcome,
+                "error": json.dumps(dict(error)),
+            },
         )
-    return event
+    ).mappings().one()
+    payload = row["o_payload"]
+    if isinstance(payload, str):
+        payload = json.loads(payload)
+    return ImportJobEvent(
+        event_id=str(row["o_event_id"]),
+        job_id=str(row["o_job_id"]),
+        import_job_dataset_id=str(row["o_import_job_dataset_id"]),
+        feature_id=None,
+        stage=row["o_stage"],
+        level=str(row["o_level"]),
+        code=row["o_code"],
+        message=str(row["o_message"]),
+        payload=dict(payload),
+        occurred_at=row["o_occurred_at"],
+    )
 
 
 async def reconcile_dagster_feature_run(

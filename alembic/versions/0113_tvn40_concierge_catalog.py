@@ -34,50 +34,8 @@ _MANIFEST_COMMANDS = (
     )
     """,
     r"""
-    INSERT INTO ops.curation_concierge_legacy_owner_manifest (
-      entity_kind, entity_id, before_row_revision, before_input_hash
-    )
-    SELECT 'theme', theme.theme_id, theme.row_revision,
-           encode(x_extension.digest(convert_to(jsonb_build_array(
-             theme.theme_id::text, theme.row_revision, theme.theme_slug, theme.metadata
-           )::text, 'UTF8'), 'sha256'), 'hex')
-    FROM feature.curated_themes AS theme
-    WHERE theme.owner_kind IS NULL
-      AND theme.owner_provider_dataset_id IS NULL
-      AND theme.metadata ->> 'seed' = 'sync_concierge_themes'
-      AND theme.metadata ->> 'concierge_kind' IN ('channel','playlist')
-      AND EXISTS (
-        SELECT 1 FROM feature.curated_source_rules AS rule
-        JOIN feature.curated_sources AS source ON source.source_id = rule.source_id
-        JOIN provider_sync.provider_datasets AS dataset
-          ON dataset.provider_dataset_id = source.provider_dataset_id
-        WHERE rule.theme_id = theme.theme_id
-          AND rule.metadata ->> 'curation_relation' = 'theme_area_anchor'
-          AND dataset.provider = 'kor-travel-concierge-youtube'
-          AND dataset.dataset_key = 'youtube_place_candidates'
-      )
-    """,
-    r"""
-    INSERT INTO ops.curation_concierge_legacy_owner_manifest (
-      entity_kind, entity_id, before_row_revision, before_input_hash
-    )
-    SELECT 'rule', rule.rule_id, rule.row_revision,
-           encode(x_extension.digest(convert_to(jsonb_build_array(
-             rule.rule_id::text, rule.row_revision, rule.theme_id::text,
-             rule.source_id::text, rule.metadata
-           )::text, 'UTF8'), 'sha256'), 'hex')
-    FROM feature.curated_source_rules AS rule
-    JOIN feature.curated_sources AS source ON source.source_id = rule.source_id
-    JOIN provider_sync.provider_datasets AS dataset
-      ON dataset.provider_dataset_id = source.provider_dataset_id
-    JOIN ops.curation_concierge_legacy_owner_manifest AS theme_manifest
-      ON theme_manifest.entity_kind = 'theme'
-     AND theme_manifest.entity_id = rule.theme_id
-    WHERE rule.owner_kind IS NULL
-      AND rule.owner_provider_dataset_id IS NULL
-      AND rule.metadata ->> 'curation_relation' = 'theme_area_anchor'
-      AND dataset.provider = 'kor-travel-concierge-youtube'
-      AND dataset.dataset_key = 'youtube_place_candidates'
+    COMMENT ON TABLE ops.curation_concierge_legacy_owner_manifest IS
+      '검토 완료 ID만 허용하는 빈 manifest. metadata/prefix 추측 backfill은 금지한다.'
     """,
     r"""
     CREATE TRIGGER trg_curation_concierge_legacy_owner_manifest_immutable
