@@ -7385,9 +7385,9 @@ END) STORED,
     lifecycle_state text DEFAULT 'active'::text NOT NULL,
     publication_state text DEFAULT 'published'::text NOT NULL,
     quality_state text DEFAULT 'valid'::text NOT NULL,
-    CONSTRAINT ck_features_ck_features_coord_pair CHECK (((coord IS NULL) OR ((x_extension.st_x(coord) >= (124.0)::double precision) AND (x_extension.st_x(coord) <= (132.0)::double precision) AND ((x_extension.st_y(coord) >= (33.0)::double precision) AND (x_extension.st_y(coord) <= (39.5)::double precision))))),
+    CONSTRAINT ck_features_ck_features_coord_pair CHECK (((coord IS NULL) OR (((x_extension.st_x(coord) >= (124.0)::double precision) AND (x_extension.st_x(coord) <= (132.0)::double precision)) AND ((x_extension.st_y(coord) >= (33.0)::double precision) AND (x_extension.st_y(coord) <= (39.5)::double precision))))),
     CONSTRAINT ck_features_ck_features_coord_precision CHECK ((((coord IS NULL) AND (coord_precision_digits IS NULL)) OR ((coord IS NOT NULL) AND ((coord_precision_digits >= 3) AND (coord_precision_digits <= 8))))),
-    CONSTRAINT ck_features_ck_features_kind CHECK (((kind)::text = ANY (ARRAY[('place'::character varying)::text, ('event'::character varying)::text, ('notice'::character varying)::text, ('price'::character varying)::text, ('weather'::character varying)::text, ('route'::character varying)::text, ('area'::character varying)::text]))),
+    CONSTRAINT ck_features_ck_features_kind CHECK (((kind)::text = ANY ((ARRAY['place'::character varying, 'event'::character varying, 'notice'::character varying, 'price'::character varying, 'weather'::character varying, 'route'::character varying, 'area'::character varying])::text[]))),
     CONSTRAINT ck_features_lifecycle_state CHECK ((lifecycle_state = ANY (ARRAY['active'::text, 'retired'::text]))),
     CONSTRAINT ck_features_publication_state CHECK ((publication_state = ANY (ARRAY['draft'::text, 'published'::text, 'suppressed'::text]))),
     CONSTRAINT ck_features_quality_state CHECK ((quality_state = ANY (ARRAY['valid'::text, 'quarantined'::text]))),
@@ -7853,8 +7853,8 @@ CREATE TABLE ops.dedup_review_queue (
     reviewed_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT ck_dedup_review_queue_ck_dedup_pair_order CHECK (((feature_id_a)::text < (feature_id_b)::text)),
-    CONSTRAINT ck_dedup_review_queue_ck_dedup_scores CHECK (((total_score >= (0)::numeric) AND (total_score <= (100)::numeric) AND ((name_score >= (0)::numeric) AND (name_score <= (100)::numeric)) AND ((spatial_score >= (0)::numeric) AND (spatial_score <= (100)::numeric)) AND ((category_score >= (0)::numeric) AND (category_score <= (100)::numeric)))),
-    CONSTRAINT ck_dedup_review_queue_ck_dedup_status CHECK (((status)::text = ANY (ARRAY[('pending'::character varying)::text, ('accepted'::character varying)::text, ('rejected'::character varying)::text, ('merged'::character varying)::text, ('ignored'::character varying)::text])))
+    CONSTRAINT ck_dedup_review_queue_ck_dedup_scores CHECK ((((total_score >= (0)::numeric) AND (total_score <= (100)::numeric)) AND ((name_score >= (0)::numeric) AND (name_score <= (100)::numeric)) AND ((spatial_score >= (0)::numeric) AND (spatial_score <= (100)::numeric)) AND ((category_score >= (0)::numeric) AND (category_score <= (100)::numeric)))),
+    CONSTRAINT ck_dedup_review_queue_ck_dedup_status CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'accepted'::character varying, 'rejected'::character varying, 'merged'::character varying, 'ignored'::character varying])::text[])))
 );
 
 
@@ -7931,7 +7931,7 @@ CREATE TABLE ops.enrichment_review_queue (
     source_entity_key text NOT NULL,
     source_record_key text NOT NULL,
     CONSTRAINT ck_enrichment_review_queue_ck_enrichment_review_name_score CHECK (((name_score >= (0)::numeric) AND (name_score <= (100)::numeric))),
-    CONSTRAINT ck_enrichment_review_queue_ck_enrichment_review_status CHECK (((status)::text = ANY (ARRAY[('pending'::character varying)::text, ('accepted'::character varying)::text, ('rejected'::character varying)::text, ('ignored'::character varying)::text])))
+    CONSTRAINT ck_enrichment_review_queue_ck_enrichment_review_status CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'accepted'::character varying, 'rejected'::character varying, 'ignored'::character varying])::text[])))
 );
 
 
@@ -7949,7 +7949,7 @@ CREATE TABLE ops.feature_consistency_reports (
     severity_max character varying NOT NULL,
     cases jsonb NOT NULL,
     summary jsonb NOT NULL,
-    CONSTRAINT ck_feature_consistency_reports_feature_consistency_repo_55c7 CHECK (((severity_max)::text = ANY (ARRAY[('OK'::character varying)::text, ('WARN'::character varying)::text, ('ERROR'::character varying)::text])))
+    CONSTRAINT ck_feature_consistency_reports_feature_consistency_repo_55c7 CHECK (((severity_max)::text = ANY ((ARRAY['OK'::character varying, 'WARN'::character varying, 'ERROR'::character varying])::text[])))
 );
 
 
@@ -9002,7 +9002,7 @@ CREATE TABLE ops.poi_cache_targets (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     lock_version bigint DEFAULT 1 NOT NULL,
-    CONSTRAINT ck_poi_cache_targets_ck_poi_cache_targets_coord CHECK (((x_extension.st_x(coord) >= (124.0)::double precision) AND (x_extension.st_x(coord) <= (132.0)::double precision) AND ((x_extension.st_y(coord) >= (33.0)::double precision) AND (x_extension.st_y(coord) <= (39.5)::double precision)))),
+    CONSTRAINT ck_poi_cache_targets_ck_poi_cache_targets_coord CHECK ((((x_extension.st_x(coord) >= (124.0)::double precision) AND (x_extension.st_x(coord) <= (132.0)::double precision)) AND ((x_extension.st_y(coord) >= (33.0)::double precision) AND (x_extension.st_y(coord) <= (39.5)::double precision)))),
     CONSTRAINT ck_poi_cache_targets_ck_poi_cache_targets_lock_version CHECK ((lock_version >= 1)),
     CONSTRAINT ck_poi_cache_targets_ck_poi_cache_targets_precision CHECK (((coord_precision_digits >= 3) AND (coord_precision_digits <= 8))),
     CONSTRAINT ck_poi_cache_targets_ck_poi_cache_targets_radius CHECK (((radius_km > (0)::numeric) AND (radius_km <= (100)::numeric))),
@@ -9248,7 +9248,7 @@ CREATE TABLE provider_sync.provider_sync_state (
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     provider_dataset_id bigint NOT NULL,
     operation_key text NOT NULL,
-    CONSTRAINT ck_provider_sync_state_ck_provider_sync_state_status CHECK (((status)::text = ANY (ARRAY[('active'::character varying)::text, ('paused'::character varying)::text, ('disabled'::character varying)::text, ('failed'::character varying)::text])))
+    CONSTRAINT ck_provider_sync_state_ck_provider_sync_state_status CHECK (((status)::text = ANY ((ARRAY['active'::character varying, 'paused'::character varying, 'disabled'::character varying, 'failed'::character varying])::text[])))
 );
 
 
@@ -9283,7 +9283,7 @@ CREATE TABLE provider_sync.source_links (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     source_entity_key text NOT NULL,
     CONSTRAINT ck_source_links_ck_source_links_confidence CHECK (((confidence >= 0) AND (confidence <= 100))),
-    CONSTRAINT ck_source_links_ck_source_links_role CHECK (((source_role)::text = ANY (ARRAY[('primary'::character varying)::text, ('base_address'::character varying)::text, ('base_coordinate'::character varying)::text, ('enrichment'::character varying)::text, ('correction'::character varying)::text, ('duplicate_candidate'::character varying)::text, ('media'::character varying)::text, ('weather_context'::character varying)::text])))
+    CONSTRAINT ck_source_links_ck_source_links_role CHECK (((source_role)::text = ANY ((ARRAY['primary'::character varying, 'base_address'::character varying, 'base_coordinate'::character varying, 'enrichment'::character varying, 'correction'::character varying, 'duplicate_candidate'::character varying, 'media'::character varying, 'weather_context'::character varying])::text[])))
 );
 
 

@@ -107,6 +107,54 @@ print(f"  CREATE SCHEMA IF NOT EXISTS 치환: {n_schema}개")
 print(f"  결과: {len(text.splitlines())}줄")
 PY
 
+printf '=== seed 데이터 ===\n'
+# seed 대상은 **기계로** 고른다. 사람이 목록을 적으면 새 seed가 생겼을 때 조용히
+# 빠진다. 대상 DB는 provider 적재 전 상태여야 한다 — 그래야 남아 있는 행이 곧
+# 체인이 넣은 것이다. (인수 실행 잔재가 섞인 DB로 뽑으면 그 잔재까지 baseline에
+# 들어간다 — 실제로 처음에 그럴 뻔했다.)
+SEED_LIST="$(mktemp)"
+docker exec "$CONTAINER" psql -U "$USER_NAME" -d "$DB" -tA -c "
+DO \$\$
+DECLARE r record; c bigint;
+BEGIN
+    CREATE TEMP TABLE IF NOT EXISTS ktm_seed_rel(rel text);
+    FOR r IN SELECT schemaname, tablename FROM pg_tables
+             WHERE schemaname IN ('feature','provider_sync','ops')
+             ORDER BY schemaname, tablename LOOP
+        EXECUTE format('SELECT count(*) FROM %I.%I', r.schemaname, r.tablename) INTO c;
+        IF c > 0 THEN
+            INSERT INTO ktm_seed_rel VALUES (r.schemaname || '.' || r.tablename);
+        END IF;
+    END LOOP;
+END \$\$;
+SELECT rel FROM ktm_seed_rel ORDER BY rel;" 2>/dev/null | grep -E '^[a-z_]+\.[a-z_]+$' > "$SEED_LIST"
+printf 'seed 대상 %s개:\n' "$(wc -l < "$SEED_LIST")"
+sed 's/^/  /' "$SEED_LIST"
+
+SEED_ARGS=()
+while IFS= read -r rel; do SEED_ARGS+=(-t "$rel"); done < "$SEED_LIST"
+if [ "${#SEED_ARGS[@]}" -gt 0 ]; then
+  # `--column-inserts` 필수 — `COPY ... FROM stdin`은 migration의 SQL 실행 경로로
+  # 돌릴 수 없다.
+  docker exec "$CONTAINER" pg_dump -U "$USER_NAME" -d "$DB" \
+    --data-only --column-inserts --no-owner \
+    "${SEED_ARGS[@]}" -f /tmp/ktm-baseline-seed.sql
+  docker cp "$CONTAINER":/tmp/ktm-baseline-seed.sql "$OUT_DIR/seed.sql" >/dev/null
+  docker exec "$CONTAINER" rm -f /tmp/ktm-baseline-seed.sql
+  python3 - "$OUT_DIR/seed.sql" <<'PY'
+import pathlib, sys
+p = pathlib.Path(sys.argv[1])
+lines = [
+    line for line in p.read_text(encoding="utf-8").splitlines()
+    if not line.startswith(("-- Dumped from database version", "-- Dumped by pg_dump version"))
+    and not line.startswith("SELECT pg_catalog.set_config('search_path'")
+]
+p.write_bytes(("\n".join(lines) + "\n").encode("utf-8"))
+print(f"  seed.sql {len(lines)}줄")
+PY
+fi
+rm -f "$SEED_LIST"
+
 printf '=== 결정론 확인 (같은 DB에서 두 번 뽑아 동일한가) ===\n'
 RAW2="$(mktemp)"
 docker exec "$CONTAINER" pg_dump -U "$USER_NAME" -d "$DB" --schema-only \
