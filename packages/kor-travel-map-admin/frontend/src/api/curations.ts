@@ -134,10 +134,7 @@ export interface CurationItem {
 
 export interface CurationCollectionCreateRequest {
   collection_key: string;
-  theme_id?: string | null;
-  theme_slug?: string | null;
-  theme_name?: string | null;
-  theme_group?: string | null;
+  theme_id: string;
   source_id?: string | null;
   title: string;
   edition_key?: string;

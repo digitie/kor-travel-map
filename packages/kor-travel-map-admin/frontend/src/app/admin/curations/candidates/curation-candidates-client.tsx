@@ -21,7 +21,10 @@ import {
   useThemeCandidates,
   useThemeCandidateTransitions,
 } from "@/api/curation-candidates";
-import { useAdminCurationCollections } from "@/api/curations";
+import {
+  useAdminCurationCollection,
+  useAdminCurationCollections,
+} from "@/api/curations";
 import { AdminShell } from "@/components/admin-shell";
 import { CursorPager } from "@/components/pagination-bar";
 import { StatusBadge } from "@/components/status-badge";
@@ -416,6 +419,7 @@ function CandidateDetail({ candidate }: { candidate: ThemeCandidate }) {
 
 function CandidateCommands({
   candidate,
+  collectionReady,
   collections,
   form,
   isPending,
@@ -426,6 +430,7 @@ function CandidateCommands({
   submitReject,
 }: {
   candidate: ThemeCandidate;
+  collectionReady: boolean;
   collections: NonNullable<
     ReturnType<typeof useAdminCurationCollections>["data"]
   >["data"]["items"];
@@ -589,7 +594,12 @@ function CandidateCommands({
             </label>
             <div className="sm:col-span-2">
               <Button
-                disabled={!promoteAllowed || isPending || !form.collectionId}
+                disabled={
+                  !promoteAllowed ||
+                  isPending ||
+                  !form.collectionId ||
+                  !collectionReady
+                }
                 type="submit"
               >
                 <CheckIcon data-icon="inline-start" />
@@ -616,13 +626,20 @@ export function CurationCandidatesClient() {
   const detailQuery = useThemeCandidate(selectedId);
   const transitionsQuery = useThemeCandidateTransitions(selectedId);
   const collectionsQuery = useAdminCurationCollections({ page_size: 500 });
+  const collectionDetailQuery = useAdminCurationCollection(
+    promoteForm.collectionId || null,
+  );
   const rejectMutation = useRejectThemeCandidateMutation();
   const promoteMutation = usePromoteThemeCandidateMutation();
   const candidate = detailQuery.data?.data ?? null;
   const collections = collectionsQuery.data?.data.items ?? [];
   const mutationError = rejectMutation.error ?? promoteMutation.error;
   const queryError =
-    candidatesQuery.error ?? detailQuery.error ?? transitionsQuery.error ?? collectionsQuery.error;
+    candidatesQuery.error ??
+    detailQuery.error ??
+    transitionsQuery.error ??
+    collectionsQuery.error ??
+    collectionDetailQuery.error;
 
   const submitFilters = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -638,6 +655,7 @@ export function CurationCandidatesClient() {
       detailQuery.refetch(),
       transitionsQuery.refetch(),
       collectionsQuery.refetch(),
+      collectionDetailQuery.refetch(),
     ]);
   };
 
@@ -660,10 +678,14 @@ export function CurationCandidatesClient() {
   const submitPromote = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!candidate) return;
-    const collection = collections.find(
-      (item) => item.collection_id === promoteForm.collectionId,
+    const collectionDetail = collectionDetailQuery.data;
+    if (!collectionDetail) return;
+    const collection = collectionDetail.data.collection;
+    const existingItem = collectionDetail.data.items.find(
+      (item) =>
+        item.external_item_id === promoteForm.externalItemId.trim() &&
+        item.external_component_id === promoteForm.externalComponentId.trim(),
     );
-    if (!collection) return;
     setMessage(null);
     try {
       await promoteMutation.mutateAsync({
@@ -675,6 +697,7 @@ export function CurationCandidatesClient() {
           external_component_id: promoteForm.externalComponentId.trim(),
           external_item_id: promoteForm.externalItemId.trim(),
           item_status: promoteForm.itemStatus,
+          item_revision: existingItem?.row_revision,
           item_summary: promoteForm.itemSummary.trim() || null,
           item_title: promoteForm.itemTitle.trim() || null,
           place_name: promoteForm.placeName.trim(),
@@ -776,6 +799,7 @@ export function CurationCandidatesClient() {
             <CandidateDetail candidate={candidate} />
             <CandidateCommands
               candidate={candidate}
+              collectionReady={collectionDetailQuery.data !== undefined}
               collections={collections}
               form={promoteForm}
               isPending={rejectMutation.isPending || promoteMutation.isPending}

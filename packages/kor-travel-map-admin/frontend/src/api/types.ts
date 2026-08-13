@@ -7120,14 +7120,11 @@ export interface components {
              * @enum {string}
              */
             status: "draft" | "published";
-            /** Theme Group */
-            theme_group?: string | null;
-            /** Theme Id */
-            theme_id?: string | null;
-            /** Theme Name */
-            theme_name?: string | null;
-            /** Theme Slug */
-            theme_slug?: string | null;
+            /**
+             * Theme Id
+             * Format: uuid
+             */
+            theme_id: string;
             /** Title */
             title: string;
             /**
@@ -15663,6 +15660,8 @@ export interface operations {
             header: {
                 /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
                 "Idempotency-Key": string;
+                /** @description 직전 command ETag. 누락은 428, stale 값은 412. */
+                "If-Match": string;
             };
             path: {
                 collection_id: string;
@@ -15726,6 +15725,8 @@ export interface operations {
             header: {
                 /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
                 "Idempotency-Key": string;
+                /** @description 직전 command ETag. 누락은 428, stale 값은 412. */
+                "If-Match": string;
             };
             path: {
                 collection_id: string;
@@ -15842,6 +15843,8 @@ export interface operations {
             header: {
                 /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
                 "Idempotency-Key": string;
+                /** @description 직전 command ETag. 누락은 428, stale 값은 412. */
+                "If-Match": string;
             };
             path: {
                 collection_id: string;
@@ -15906,6 +15909,8 @@ export interface operations {
             header: {
                 /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
                 "Idempotency-Key": string;
+                /** @description 직전 command ETag. 누락은 428, stale 값은 412. */
+                "If-Match": string;
             };
             path: {
                 collection_id: string;
@@ -19176,6 +19181,8 @@ export interface operations {
             header: {
                 /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
                 "Idempotency-Key": string;
+                /** @description 직전 command ETag. 누락은 428, stale 값은 412. */
+                "If-Match": string;
             };
             path: {
                 candidate_id: string;
@@ -19243,6 +19250,8 @@ export interface operations {
             header: {
                 /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
                 "Idempotency-Key": string;
+                /** @description 직전 command ETag. 누락은 428, stale 값은 412. */
+                "If-Match": string;
             };
             path: {
                 candidate_id: string;

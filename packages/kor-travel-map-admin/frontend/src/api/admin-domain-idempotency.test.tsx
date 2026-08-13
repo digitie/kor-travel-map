@@ -266,6 +266,7 @@ describe("admin domain idempotency consumers", () => {
         run: () =>
           runMutation(context, useCreateCurationCollectionMutation, {
             collection_key: "collection-key",
+            theme_id: "11111111-1111-4111-8111-111111111111",
             title: "collection title",
           }),
       },

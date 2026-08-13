@@ -56,9 +56,6 @@ import { cn } from "@/lib/utils";
 interface CollectionFormState {
   collectionKey: string;
   themeId: string;
-  themeSlug: string;
-  themeName: string;
-  themeGroup: string;
   sourceId: string;
   title: string;
   editionKey: string;
@@ -81,9 +78,6 @@ interface ItemFormState {
 const INITIAL_COLLECTION_FORM: CollectionFormState = {
   collectionKey: "",
   themeId: "",
-  themeSlug: "",
-  themeName: "",
-  themeGroup: "",
   sourceId: "",
   title: "",
   editionKey: "",
@@ -192,25 +186,16 @@ function useCurationCollectionsClientController() {
     setMessage(null);
     const collectionKey = collectionForm.collectionKey.trim();
     const themeId = collectionForm.themeId.trim();
-    const themeSlug = collectionForm.themeSlug.trim();
-    const themeName = collectionForm.themeName.trim();
-    const themeGroup = collectionForm.themeGroup.trim();
     const title = collectionForm.title.trim();
-    const hasNewTheme = Boolean(themeSlug && themeName && themeGroup);
-    if (!collectionKey || (!themeId && !hasNewTheme) || !title) {
-      setLocalError(
-        "컬렉션 키, 제목과 기존 테마 또는 새 테마의 slug/이름/그룹은 필수입니다.",
-      );
+    if (!collectionKey || !themeId || !title) {
+      setLocalError("컬렉션 키, 제목과 기존 테마 선택은 필수입니다.");
       return;
     }
     submitCollectionInFlightRef.current = true;
     try {
       const response = await createCollection.mutateAsync({
         collection_key: collectionKey,
-        theme_id: themeId || null,
-        theme_slug: themeSlug || null,
-        theme_name: themeName || null,
-        theme_group: themeGroup || null,
+        theme_id: themeId,
         source_id: collectionForm.sourceId.trim() || null,
         title,
         edition_key: collectionForm.editionKey.trim(),
@@ -499,7 +484,7 @@ function CurationCollectionCommands({
 
         <div className="grid gap-6 xl:grid-cols-2">
           <SectionCard
-            description="기존 테마·출처 ID를 선택하거나 직접 붙여 넣을 수 있습니다."
+            description="typed catalog에서 만든 기존 테마와 출처를 선택합니다."
             title="컬렉션 수동 생성"
           >
             <form className="grid gap-4 md:grid-cols-2" onSubmit={submitCollection}>
@@ -516,6 +501,7 @@ function CurationCollectionCommands({
                 }
               />
               <FormField
+                required
                 label="테마"
                 list="curation-theme-options"
                 placeholder="테마 ID"
@@ -534,39 +520,6 @@ function CurationCollectionCommands({
                   </option>
                 ))}
               </datalist>
-              <FormField
-                label="새 테마 slug"
-                placeholder="korean-tourism-100"
-                value={collectionForm.themeSlug}
-                onChange={(event) =>
-                  setCollectionForm((current) => ({
-                    ...current,
-                    themeSlug: event.target.value,
-                  }))
-                }
-              />
-              <FormField
-                label="새 테마 이름"
-                placeholder="한국관광 100선"
-                value={collectionForm.themeName}
-                onChange={(event) =>
-                  setCollectionForm((current) => ({
-                    ...current,
-                    themeName: event.target.value,
-                  }))
-                }
-              />
-              <FormField
-                label="새 테마 그룹"
-                placeholder="관광 선정"
-                value={collectionForm.themeGroup}
-                onChange={(event) =>
-                  setCollectionForm((current) => ({
-                    ...current,
-                    themeGroup: event.target.value,
-                  }))
-                }
-              />
               <FormField
                 required
                 className="md:col-span-2"

@@ -89,6 +89,13 @@ _ETAG_RESPONSE_HEADER = {
         "schema": {"type": "string"},
     }
 }
+_IF_MATCH_OPENAPI_PARAMETER = {
+    "name": "If-Match",
+    "in": "header",
+    "required": True,
+    "schema": {"type": "string"},
+    "description": "직전 command ETag. 누락은 428, stale 값은 412.",
+}
 
 
 class AdminThemeCandidateView(BaseModel):
@@ -486,10 +493,7 @@ class CurationCollectionCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     collection_key: str = Field(min_length=1, max_length=240)
-    theme_id: UUID | None = None
-    theme_slug: str | None = Field(default=None, min_length=1, max_length=200)
-    theme_name: str | None = Field(default=None, min_length=1, max_length=300)
-    theme_group: str | None = Field(default=None, min_length=1, max_length=200)
+    theme_id: UUID
     source_id: UUID | None = None
     title: str = Field(min_length=1, max_length=300)
     edition_key: str = Field(default="", max_length=100)
@@ -497,15 +501,6 @@ class CurationCollectionCreateRequest(BaseModel):
     status: ActiveCollectionStatus = "draft"
     visibility: CollectionVisibility = "admin_only"
     metadata: dict[str, Any] = Field(default_factory=dict)
-
-    @model_validator(mode="after")
-    def _theme_reference_or_definition(self) -> CurationCollectionCreateRequest:
-        if self.theme_id:
-            return self
-        if self.theme_slug and self.theme_name and self.theme_group:
-            return self
-        raise ValueError("theme_id 또는 theme_slug/theme_name/theme_group 전체가 필요합니다.")
-
 
 class CurationCollectionPatchRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -1060,6 +1055,26 @@ async def _lighthouse_dataset_pairs(
 
 def _conflict(exc: IntegrityError) -> HTTPException:
     return HTTPException(status_code=409, detail="curation constraint violation")
+
+
+def _collection_command_error(exc: DBAPIError) -> HTTPException:
+    message = str(exc.orig)
+    sqlstate = getattr(exc.orig, "sqlstate", None)
+    if sqlstate == "40001":
+        raise exc
+    if "collection revision mismatch" in message:
+        return HTTPException(status_code=412, detail="curation collection revision이 변경됐습니다.")
+    if sqlstate == "P0002":
+        return HTTPException(status_code=404, detail="curation collection 없음")
+    if sqlstate == "23505":
+        return HTTPException(status_code=409, detail="curation collection identity conflict")
+    if sqlstate == "23514" and "archived collection" in message:
+        return HTTPException(status_code=409, detail=message)
+    if sqlstate in {"22P02", "23502", "23503", "23514", "22023"}:
+        return HTTPException(status_code=422, detail=message)
+    if sqlstate == "42501":
+        return HTTPException(status_code=403, detail="curation collection command 권한이 없습니다.")
+    raise exc
 
 
 def _theme_candidate_view(
@@ -2009,6 +2024,7 @@ async def list_admin_theme_candidate_transitions(
         412: {"description": "stale candidate If-Match"},
         428: {"description": "If-Match 누락"},
     },
+    openapi_extra={"parameters": [_IF_MATCH_OPENAPI_PARAMETER]},
 )
 @idempotent_domain_command("admin.theme-feature-candidate.reject")
 async def reject_admin_theme_candidate(
@@ -2053,6 +2069,7 @@ async def reject_admin_theme_candidate(
         412: {"description": "stale candidate/collection/item revision"},
         428: {"description": "If-Match 누락"},
     },
+    openapi_extra={"parameters": [_IF_MATCH_OPENAPI_PARAMETER]},
 )
 @idempotent_domain_command("admin.theme-feature-candidate.promote")
 async def promote_admin_theme_candidate(
@@ -2325,23 +2342,11 @@ async def create_admin_curation_collection(
     started_at = perf_counter()
     try:
         async with domain_command_transaction(session):
-            theme_id: str
-            if body.theme_id is None:
-                assert body.theme_slug is not None
-                assert body.theme_name is not None
-                assert body.theme_group is not None
-                theme_id = await curation_repo.upsert_curation_theme(
-                    session,
-                    theme_slug=body.theme_slug,
-                    theme_name=body.theme_name,
-                    theme_group=body.theme_group,
-                )
-            else:
-                theme_id = str(body.theme_id)
-            collection = await curation_repo.create_curation_collection(
+            command = domain_command_service.current_domain_command()
+            collection = await curation_repo.create_curation_collection_command(
                 session,
                 collection_key=body.collection_key,
-                theme_id=theme_id,
+                theme_id=str(body.theme_id),
                 source_id=(str(body.source_id) if body.source_id is not None else None),
                 title=body.title,
                 edition_key=body.edition_key,
@@ -2349,8 +2354,11 @@ async def create_admin_curation_collection(
                 status=body.status,
                 visibility=body.visibility,
                 metadata=body.metadata,
-                actor=context.actor,
+                command_id=command.command_id,
+                principal=command.actor,
             )
+    except DBAPIError as exc:
+        raise _collection_command_error(exc) from exc
     except IntegrityError as exc:
         raise _conflict(exc) from exc
     except ValueError as exc:
@@ -2371,6 +2379,7 @@ async def create_admin_curation_collection(
         412: {"description": "stale collection If-Match"},
         428: {"description": "If-Match 누락"},
     },
+    openapi_extra={"parameters": [_IF_MATCH_OPENAPI_PARAMETER]},
 )
 @idempotent_domain_command("admin.curation-collection.patch")
 async def patch_admin_curation_collection(
@@ -2386,19 +2395,21 @@ async def patch_admin_curation_collection(
     assert expected_revision is not None
     try:
         async with domain_command_transaction(session):
+            command = domain_command_service.current_domain_command()
             updates = body.model_dump(exclude_unset=True)
             for field in ("theme_id", "source_id"):
                 if updates.get(field) is not None:
                     updates[field] = str(updates[field])
-            collection = await curation_repo.update_curation_collection(
+            collection = await curation_repo.patch_curation_collection_command(
                 session,
                 collection_id=str(collection_id),
-                updates={
-                    **updates,
-                    "updated_by": context.actor,
-                },
+                updates=updates,
                 expected_revision=expected_revision,
+                command_id=command.command_id,
+                principal=command.actor,
             )
+    except DBAPIError as exc:
+        raise _collection_command_error(exc) from exc
     except IntegrityError as exc:
         raise _conflict(exc) from exc
     except curation_repo.CurationRevisionConflictError as exc:
@@ -2430,6 +2441,7 @@ async def patch_admin_curation_collection(
         412: {"description": "stale collection If-Match"},
         428: {"description": "If-Match 누락"},
     },
+    openapi_extra={"parameters": [_IF_MATCH_OPENAPI_PARAMETER]},
 )
 @idempotent_domain_command("admin.curation-collection.archive")
 async def archive_admin_curation_collection(
@@ -2444,12 +2456,16 @@ async def archive_admin_curation_collection(
     assert expected_revision is not None
     try:
         async with domain_command_transaction(session):
-            collection = await curation_repo.archive_curation_collection(
+            command = domain_command_service.current_domain_command()
+            collection = await curation_repo.archive_curation_collection_command(
                 session,
                 collection_id=str(collection_id),
-                actor=context.actor,
                 expected_revision=expected_revision,
+                command_id=command.command_id,
+                principal=command.actor,
             )
+    except DBAPIError as exc:
+        raise _collection_command_error(exc) from exc
     except curation_repo.CurationRevisionConflictError as exc:
         raise HTTPException(status_code=412, detail=str(exc)) from exc
     if collection is None:
@@ -2528,6 +2544,7 @@ async def add_admin_curation_item(
         412: {"description": "stale item If-Match"},
         428: {"description": "If-Match 누락"},
     },
+    openapi_extra={"parameters": [_IF_MATCH_OPENAPI_PARAMETER]},
 )
 @idempotent_domain_command("admin.curation-item.patch")
 async def patch_admin_curation_item(
@@ -2582,6 +2599,7 @@ async def patch_admin_curation_item(
         412: {"description": "stale item If-Match"},
         428: {"description": "If-Match 누락"},
     },
+    openapi_extra={"parameters": [_IF_MATCH_OPENAPI_PARAMETER]},
 )
 @idempotent_domain_command("admin.curation-item.archive")
 async def archive_admin_curation_item(

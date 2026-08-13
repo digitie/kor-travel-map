@@ -1119,7 +1119,7 @@ def test_admin_collection_representation_etag_and_command_cas_are_distinct(
     )
     monkeypatch.setattr(
         module.curation_repo,
-        "update_curation_collection",
+        "patch_curation_collection_command",
         update_collection,
     )
 
@@ -1149,6 +1149,8 @@ def test_admin_collection_representation_etag_and_command_cas_are_distinct(
     assert changed.status_code == 200
     assert changed.headers["etag"].startswith('"sha256:')
     assert update_collection.await_args.kwargs["expected_revision"] == 1
+    assert update_collection.await_args.kwargs["principal"] == "local-dev"
+    assert isinstance(update_collection.await_args.kwargs["command_id"], int)
 
 
 @pytest.mark.unit
@@ -1160,7 +1162,7 @@ def test_admin_collection_and_item_stale_revisions_return_412(
     stale = module.curation_repo.CurationRevisionConflictError("stale")
     monkeypatch.setattr(
         module.curation_repo,
-        "update_curation_collection",
+        "patch_curation_collection_command",
         AsyncMock(side_effect=stale),
     )
     monkeypatch.setattr(

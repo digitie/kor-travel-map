@@ -177,6 +177,31 @@ def test_domain_fingerprint_header_contract_is_explicit_and_minimal() -> None:
     }
 
 
+def test_curation_revision_commands_publish_required_if_match_header() -> None:
+    """runtime에서 필수인 curation CAS가 OpenAPI에서도 optional로 약화되지 않는다."""
+
+    writes = _openapi_writes()
+    operations = {
+        "admin.curation-collection.archive",
+        "admin.curation-collection.patch",
+        "admin.curation-item.archive",
+        "admin.curation-item.patch",
+        "admin.theme-feature-candidate.promote",
+        "admin.theme-feature-candidate.reject",
+    }
+    routes = {
+        key
+        for key, policy in COMMAND_REGISTRY.items()
+        if policy.operation in operations
+    }
+    assert len(routes) == len(operations)
+    for key in routes:
+        header = _header(writes[key], "If-Match")
+        assert header is not None, key
+        assert header["required"] is True, key
+        assert header["schema"]["type"] == "string", key
+
+
 def test_future_h22b_quarantine_command_cannot_bypass_domain_ledger() -> None:
     for key, operation in _openapi_writes().items():
         operation_id = str(operation.get("operationId", "")).lower()
