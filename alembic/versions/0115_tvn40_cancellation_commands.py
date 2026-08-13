@@ -113,6 +113,10 @@ DECLARE
   v_run ops.pipeline_cancellation_runs%ROWTYPE;
   v_changed bigint;
   v_finished_at timestamptz;
+  v_generation_count bigint;
+  v_generation_set_hash text;
+  v_replayed boolean;
+  v_stale_input boolean;
 BEGIN
   IF session_user <> 'ktm_feature_api_runtime'
      AND NOT EXISTS (
@@ -217,6 +221,22 @@ BEGIN
   IF NOT FOUND THEN
     RAISE EXCEPTION 'provider cancellation member CAS failed after base transition'
       USING ERRCODE = '40001';
+  END IF;
+  IF v_member.operation_kind = 'provider_feature_load_run'
+     AND p_result = 'already_terminal'
+     AND p_dagster_terminal_status = 'SUCCESS'
+     AND p_target_status = 'done' THEN
+    PERFORM set_config(
+      'ktm.curation_cancellation_root', p_job_id::text, true
+    );
+    CALL feature.finalize_provider_curation_root(
+      p_job_id, v_generation_count, v_generation_set_hash,
+      v_replayed, v_stale_input
+    );
+    IF v_stale_input THEN
+      RAISE EXCEPTION 'provider cancellation SUCCESS has stale curation input'
+        USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_provider_curation_stale_input';
+    END IF;
   END IF;
   RETURN true;
 END

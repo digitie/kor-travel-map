@@ -273,6 +273,7 @@ class FeatureUpdateAssetRunner:
             client = resources.get("kor_travel_map_client")
             if isinstance(client, AsyncKorTravelMapClient):
                 try:
+                    resources["feature_update_evidence_client"] = client
                     resources["kor_travel_map_client"] = await _bind_client_to_session(
                         client,
                         session,

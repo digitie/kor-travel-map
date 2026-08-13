@@ -1,5 +1,13 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+T-VN-40 provider cancellation의 `already_terminal/SUCCESS` 경로도 일반 terminal sensor와
+동일하게 root curation finalizer를 같은 SERIALIZABLE transaction에서 수행한다. authoritative
+child receipt 누락은 0-child 성공으로 축약되지 않으며 cancellation member/run 증거와 exact root를
+DB가 다시 검증한다. MOIS 대용량 load는 dropped 전체 건수와 bounded ID 표본을 분리하고 finding 0건도
+빈 observation run을 남긴다. feature-update strict validation 실패 finding은 rollback되는 provider data
+transaction이 아니라 원래의 독립 evidence client로 기록한다. 다음 checkpoint는 이 fixed SHA의 두
+적대 리뷰를 통과한 뒤 admin candidate UI와 collection/item/import/merge typed writer를 완료하는 것이다.
+
 T-VN-40 provider operation은 child seal↔authoritative flag, root terminal↔전체 receipt set을
 DB procedure에서 양방향 검증하도록 보강했다. provider attempt event도 typed append-only command로
 옮겼고 cancellation marker를 제외한 provider lifecycle 전이도 active attempt·frozen run·engine

@@ -237,7 +237,9 @@ async def load_feature_bundles_for_dagster(
         )
         failure_metadata = dict(validation.as_metadata())
         try:
-            sync = await client.record_address_validation_findings(
+            sync = await _strict_failure_finding_client(
+                context, client
+            ).record_address_validation_findings(
                 failed_findings,
                 provider=provider,
                 dataset_key=dataset_key,
@@ -457,6 +459,7 @@ async def load_feature_bundle_batches_for_dagster(
     feature_ids: list[str] = []
     loaded_feature_count = 0
     dropped_feature_ids: list[str] = []
+    dropped_feature_count = 0
     strict_failure = False
     sync_observed = 0
     sync_unique = 0
@@ -468,7 +471,7 @@ async def load_feature_bundle_batches_for_dagster(
     with TemporaryFile() as finding_spool:
 
         async def _validated_batches() -> AsyncIterator[Sequence[FeatureBundle]]:
-            nonlocal loaded_feature_count, strict_failure, validation
+            nonlocal dropped_feature_count, loaded_feature_count, strict_failure, validation
             async for raw_batch in batches:
                 batch = list(raw_batch)
                 batch_validation = validate_feature_bundles_address(batch)
@@ -504,6 +507,7 @@ async def load_feature_bundle_batches_for_dagster(
                     dropped_ids = {
                         issue.feature_id for issue in batch_validation.blocking_issues
                     }
+                    dropped_feature_count += len(dropped_ids)
                     remaining_dropped = FEATURE_ID_METADATA_LIMIT - len(dropped_feature_ids)
                     if remaining_dropped > 0:
                         dropped_feature_ids.extend(sorted(dropped_ids)[:remaining_dropped])
@@ -537,7 +541,9 @@ async def load_feature_bundle_batches_for_dagster(
             if strict_failure:
                 finding_spool.seek(0)
                 while findings := _load_finding_chunk(finding_spool):
-                    await client.record_address_validation_findings(
+                    await _strict_failure_finding_client(
+                        context, client
+                    ).record_address_validation_findings(
                         tuple(
                             replace(
                                 finding,
@@ -554,9 +560,21 @@ async def load_feature_bundle_batches_for_dagster(
             raise
 
         finding_spool.seek(0)
+        finding_sync_called = False
         while findings := _load_finding_chunk(finding_spool):
             sync = await client.record_address_validation_findings(
                 findings,
+                provider=provider,
+                dataset_key=dataset_key,
+                run_id=_dagster_run_id(context),
+            )
+            finding_sync_called = True
+            sync_observed += sync.observed_count
+            sync_unique += sync.unique_count
+            sync_upserted += sync.upserted_count
+        if not finding_sync_called:
+            sync = await client.record_address_validation_findings(
+                (),
                 provider=provider,
                 dataset_key=dataset_key,
                 run_id=_dagster_run_id(context),
@@ -581,9 +599,12 @@ async def load_feature_bundle_batches_for_dagster(
         feature_ids_complete=loaded_feature_count <= FEATURE_ID_METADATA_LIMIT,
     )
     metadata = result.as_metadata()
-    if dropped_feature_ids:
-        metadata["address_validation_dropped_count"] = len(dropped_feature_ids)
+    if dropped_feature_count:
+        metadata["address_validation_dropped_count"] = dropped_feature_count
         metadata["address_validation_dropped_feature_ids"] = dropped_feature_ids
+        metadata["address_validation_dropped_feature_ids_truncated"] = (
+            dropped_feature_count > len(dropped_feature_ids)
+        )
     _add_output_metadata(context, metadata)
     return result
 
@@ -717,3 +738,15 @@ def _dagster_run_id(context: AssetExecutionContext) -> str | None:
     except Exception:
         return None
     return str(run_id) if run_id else None
+
+
+def _strict_failure_finding_client(
+    context: AssetExecutionContext,
+    fallback: AsyncKorTravelMapClient,
+) -> AsyncKorTravelMapClient:
+    """외부 data transaction이 rollback돼도 strict 실패 증거는 별도 commit한다."""
+    try:
+        candidate = context.resources.feature_update_evidence_client
+    except Exception:
+        return fallback
+    return candidate if isinstance(candidate, AsyncKorTravelMapClient) else fallback

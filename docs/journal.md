@@ -2,6 +2,19 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-14 — T-VN-40: cancellation SUCCESS finalizer와 validation evidence 보존
+
+provider cancellation이 이미 성공한 Dagster root를 `done/SUCCESS`로 확정할 때도 일반 terminal
+sensor와 같은 curation root finalizer를 동일 SERIALIZABLE transaction에서 실행한다. cancellation
+member/run과 root identity를 DB에서 재검증하고, authoritative child receipt가 누락된 root는 0-child
+성공으로 축약하지 않는다. 실제 API LOGIN 회귀에서 sealed child의 source observation·candidate
+generation·root receipt가 함께 커밋됨을 확인했다.
+
+MOIS streaming validation은 dropped 전체 건수와 최대 1,000개 ID 표본을 분리하고 표본 잘림 여부를
+명시한다. finding이 0건인 authoritative snapshot도 empty observation run을 exactly-once 기록해 과거
+stale finding을 닫을 수 있다. strict validation 실패 시 finding은 provider data transaction과 분리된
+원래 evidence client로 기록하여 base row rollback과 durable validation evidence를 동시에 보장한다.
+
 ## 2026-08-14 — T-VN-40: provider cancellation lifecycle typed command
 
 API runtime에 남아 있던 provider operation cancellation lifecycle raw UPDATE 예외를 제거했다.

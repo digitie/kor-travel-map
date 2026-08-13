@@ -2014,3 +2014,130 @@ async def test_provider_cancellation_lifecycle_requires_typed_api_command(
     finally:
         await api.dispose()
         await dagster.dispose()
+
+
+async def test_provider_cancellation_success_finalizes_authoritative_root(
+    migrated_engine: AsyncEngine,
+) -> None:
+    seeded = await _seed_candidate(migrated_engine, create_candidate=False)
+    membership = ProviderDatasetOperationMembership(
+        provider_dataset_id=int(seeded["dataset_id"]),
+        sync_scope="dataset_wide",
+        operation_key="load",
+    )
+    async with migrated_engine.begin() as connection:
+        await connection.execute(
+            text(
+                """
+                INSERT INTO provider_sync.provider_dataset_operations (
+                  provider_dataset_id, operation_key, operation_kind, is_enabled, config
+                ) VALUES (:dataset_id, 'load', 'refresh', true, '{}'::jsonb)
+                """
+            ),
+            seeded,
+        )
+        await connection.execute(
+            text(
+                """
+                INSERT INTO provider_sync.provider_dataset_operation_scopes (
+                  provider_dataset_id, sync_scope, operation_key, operation_kind
+                ) VALUES (:dataset_id, 'dataset_wide', 'load', 'refresh')
+                """
+            ),
+            seeded,
+        )
+
+    run_id = f"tvn40-cancellation-success-{seeded['suffix']}"
+    started_at = datetime(2026, 8, 13, 6, tzinfo=UTC)
+    finished_at = started_at + timedelta(seconds=3)
+    dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
+    api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
+    try:
+        async with async_sessionmaker(dagster, expire_on_commit=False).begin() as session:
+            await session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
+            await ensure_dagster_feature_operation(
+                session,
+                dagster_run_id=run_id,
+                trigger_kind="schedule",
+                selected_memberships=(membership,),
+                operation_key="load",
+                engine_created_at=started_at - timedelta(seconds=1),
+                engine_started_at=started_at,
+                observed_status="STARTED",
+            )
+            seal = (
+                await session.execute(
+                    text(
+                        """
+                        SELECT input_member_count, source_input_set_hash
+                        FROM feature.current_provider_curation_input_set(:dataset_id)
+                        """
+                    ),
+                    seeded,
+                )
+            ).mappings().one()
+            completed = await finish_dagster_feature_membership(
+                session,
+                dagster_run_id=run_id,
+                membership=membership,
+                authoritative_snapshot_complete=True,
+                curation_input_member_count=int(seal["input_member_count"]),
+                curation_input_set_hash=str(seal["source_input_set_hash"]),
+            )
+            root_job_id = completed.operation.root_job_id
+
+        async with async_sessionmaker(api, expire_on_commit=False).begin() as session:
+            scope = await resolve_pipeline_cancellation_scope(
+                session,
+                kind="import_job",
+                execution_id=root_job_id,
+            )
+            detail = await create_pipeline_cancellation_attempt(
+                session,
+                scope=scope,
+                requested_by="admin:tvn40-cancellation",
+                reason="SUCCESS finalizer regression",
+            )
+        cancellation_id = detail.attempt.cancellation_id
+
+        async with async_sessionmaker(api, expire_on_commit=False).begin() as session:
+            await session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
+            assert await set_pipeline_cancellation_run_result(
+                session,
+                cancellation_id=cancellation_id,
+                dagster_run_id=run_id,
+                result="already_terminal",
+                initial_status="STARTED",
+                terminal_status="SUCCESS",
+                error=None,
+                engine_started_at=started_at,
+                engine_finished_at=finished_at,
+            )
+            assert await transition_pipeline_cancellation_member(
+                session,
+                cancellation_id=cancellation_id,
+                job_id=root_job_id,
+                dagster_run_id=run_id,
+                expected_status="running",
+                target_status="done",
+                result="already_terminal",
+                dagster_terminal_status="SUCCESS",
+                engine_started_at=started_at,
+                engine_finished_at=finished_at,
+            )
+
+        async with migrated_engine.connect() as connection:
+            assert (
+                await connection.scalar(
+                    text(
+                        """
+                        SELECT count(*) FROM ops.curation_provider_root_receipts
+                        WHERE root_job_id = CAST(:root_job_id AS uuid)
+                        """
+                    ),
+                    {"root_job_id": root_job_id},
+                )
+            ) == 1
+    finally:
+        await api.dispose()
+        await dagster.dispose()

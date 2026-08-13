@@ -960,6 +960,13 @@ async def _record_terminal_run(
         ):
             continue
         async with session.begin():
+            if (
+                terminal_status == "SUCCESS"
+                and member.operation_kind == "provider_feature_load_run"
+            ):
+                await session.execute(
+                    text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
+                )
             try:
                 changed = await transition_pipeline_cancellation_member(
                     session,
