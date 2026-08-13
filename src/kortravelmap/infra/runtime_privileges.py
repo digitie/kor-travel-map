@@ -155,6 +155,8 @@ _ORDINARY_SCHEMA_PRIVILEGES: Mapping[str, tuple[str, ...]] = {
 _OPS_TABLE_PRIVILEGES: Mapping[str, tuple[str, ...]] = {
     "curation_catalog_command_effects": (),
     "curation_import_collection_effects": (),
+    "curation_import_collection_touches": (),
+    "curation_import_plan_commits": (),
     "curation_concierge_legacy_owner_manifest": (),
     "curation_provider_root_receipts": (),
     "curation_provider_snapshot_receipts": (),
@@ -168,6 +170,9 @@ _OPS_TABLE_PRIVILEGES: Mapping[str, tuple[str, ...]] = {
 
 _PROTECTED_FEATURE_TABLES = frozenset(
     {
+        "curation_import_plan_revisions",
+        "curation_import_plan_rows",
+        "curation_import_plans",
         "features",
         "feature_base_field_values",
         "feature_state_transitions",

@@ -35,6 +35,7 @@ __all__ = [
     "CurationCollection",
     "CurationImportBatch",
     "CurationImportPlan",
+    "CurationImportRevisionExpectation",
     "CurationImportResult",
     "CurationImportRowReceipt",
     "CurationLinkAudit",
@@ -66,6 +67,10 @@ __all__ = [
     "get_current_curation_import_row",
     "get_feature_curation_group",
     "import_curation_rows",
+    "build_curation_import_revision_vector",
+    "claim_curation_import_plan_command",
+    "complete_curation_import_plan_command",
+    "create_curation_import_plan_command",
     "list_curation_collections",
     "list_curation_items_by_feature_ids",
     "list_curation_quarantine_collections",
@@ -443,6 +448,15 @@ class CurationImportPlan:
     inserted: int
     updated: int
     removals: tuple[CurationItem, ...]
+
+
+@dataclass(frozen=True)
+class CurationImportRevisionExpectation:
+    """preview가 고정한 catalog/membership optimistic revision 한 건."""
+
+    resource_kind: Literal["theme", "source", "collection", "item", "feature"]
+    resource_key: str
+    expected_revision: int | None
 
 
 class CurationImportResult(TypedDict):
@@ -5027,6 +5041,331 @@ async def preview_curation_import(
     )
 
 
+async def build_curation_import_revision_vector(
+    session: AsyncSession,
+    *,
+    rows: Sequence[ResolvedCurationImportRow],
+) -> tuple[CurationImportRevisionExpectation, ...]:
+    """resolved import set이 읽은 retained catalog와 membership revision을 닫는다."""
+
+    _ensure_resolved_curation_identities(rows)
+    _ensure_curation_dataset_identity(rows, frozen_h35_schema=False)
+    expectations: dict[tuple[str, str], int | None] = {}
+    representatives: dict[str, ResolvedCurationImportRow] = {}
+    for row in rows:
+        representatives.setdefault(row.collection_key, row)
+
+    for collection_key in sorted(representatives):
+        row = representatives[collection_key]
+        theme = (
+            (
+                await session.execute(
+                    text(
+                        "SELECT theme_id::text, row_revision "
+                        "FROM feature.curated_themes "
+                        "WHERE theme_slug = :slug AND theme_name = :name "
+                        "AND theme_group = :group AND archived_at IS NULL"
+                    ),
+                    {
+                        "slug": row.theme_slug,
+                        "name": row.theme_name,
+                        "group": row.theme_group,
+                    },
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if theme is None:
+            raise ValueError(
+                "theme은 retained catalog에서 먼저 생성해야 하며 "
+                "slug/name/group이 정확히 일치해야 합니다."
+            )
+        theme_id = str(theme["theme_id"])
+        expectations[("theme", theme_id)] = int(theme["row_revision"])
+
+        source = (
+            (
+                await session.execute(
+                    text(
+                        "SELECT source_id::text, row_revision "
+                        "FROM feature.curated_sources "
+                        "WHERE provider_dataset_id = :dataset_id "
+                        "AND source_name = :name "
+                        "AND source_url IS NOT DISTINCT FROM :url "
+                        "AND archived_at IS NULL"
+                    ),
+                    {
+                        "dataset_id": row.provider_dataset_id,
+                        "name": row.source_name,
+                        "url": row.source_url,
+                    },
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if source is None:
+            raise ValueError(
+                "source는 retained catalog에서 먼저 생성해야 하며 "
+                "dataset/name/url이 정확히 일치해야 합니다."
+            )
+        source_id = str(source["source_id"])
+        expectations[("source", source_id)] = int(source["row_revision"])
+
+        collection = (
+            (
+                await session.execute(
+                    text(
+                        "SELECT collection_id::text, theme_id::text, source_id::text, "
+                        "title, edition_key, status, visibility, archived_at, row_revision "
+                        "FROM feature.curation_collections "
+                        "WHERE collection_key = :collection_key"
+                    ),
+                    {"collection_key": collection_key},
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if collection is None:
+            expectations[("collection", collection_key)] = None
+        else:
+            if (
+                str(collection["theme_id"]),
+                str(collection["source_id"]) if collection["source_id"] else None,
+                str(collection["title"]),
+                str(collection["edition_key"]),
+                str(collection["status"]),
+                str(collection["visibility"]),
+                collection["archived_at"] is None,
+            ) != (
+                theme_id,
+                source_id,
+                row.title,
+                row.edition_key,
+                "published",
+                "public",
+                True,
+            ):
+                raise ValueError(
+                    "기존 collection이 preview의 retained catalog 입력과 다릅니다."
+                )
+            expectations[("collection", collection_key)] = int(
+                collection["row_revision"]
+            )
+
+    for row in rows:
+        item_key = json.dumps(
+            [row.collection_key, row.source_item_key, row.source_component_key],
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        item_revision = await session.scalar(
+            text(
+                "SELECT item.row_revision FROM feature.curation_items AS item "
+                "JOIN feature.curation_collections AS collection "
+                "ON collection.collection_id = item.collection_id "
+                "WHERE collection.collection_key = :collection_key "
+                "AND item.external_item_id = :item_id "
+                "AND item.external_component_id = :component_id"
+            ),
+            {
+                "collection_key": row.collection_key,
+                "item_id": row.source_item_key,
+                "component_id": row.source_component_key,
+            },
+        )
+        expectations[("item", item_key)] = (
+            int(item_revision) if item_revision is not None else None
+        )
+        if row.feature_id is not None:
+            feature_revision = await session.scalar(
+                text(
+                    "SELECT row_revision FROM feature.features "
+                    "WHERE feature_id = :feature_id"
+                ),
+                {"feature_id": row.feature_id},
+            )
+            if feature_revision is None:
+                raise ValueError("preview 대상 Feature가 더 이상 존재하지 않습니다.")
+            expectations[("feature", row.feature_id)] = int(feature_revision)
+
+    return tuple(
+        CurationImportRevisionExpectation(
+            resource_kind=resource_kind,  # type: ignore[arg-type]
+            resource_key=resource_key,
+            expected_revision=revision,
+        )
+        for (resource_kind, resource_key), revision in sorted(expectations.items())
+    )
+
+
+def _stored_import_row_payload(row: ResolvedCurationImportRow) -> dict[str, Any]:
+    payload = _canonical_import_row_payload(row)
+    payload["provenance"] = row.provenance
+    return payload
+
+
+def _resolved_import_row_from_payload(payload: Mapping[str, Any]) -> ResolvedCurationImportRow:
+    return ResolvedCurationImportRow(
+        row_number=int(payload["row_number"]),
+        collection_key=str(payload["collection_key"]),
+        theme_slug=str(payload["theme_slug"]),
+        theme_name=str(payload["theme_name"]),
+        theme_group=str(payload["theme_group"]),
+        title=str(payload["title"]),
+        edition_key=str(payload["edition_key"]),
+        provider_dataset_id=int(payload["provider_dataset_id"]),
+        source_name=str(payload["source_name"]),
+        source_url=str(payload["source_url"]) if payload.get("source_url") is not None else None,
+        source_item_key=str(payload["source_item_key"]),
+        source_component_key=str(payload["source_component_key"]),
+        feature_id=str(payload["feature_id"]) if payload.get("feature_id") is not None else None,
+        place_name=str(payload["place_name"]),
+        address_hint=(
+            str(payload["address_hint"])
+            if payload.get("address_hint") is not None
+            else None
+        ),
+        sort_order=int(payload["sort_order"]),
+        item_title=str(payload["item_title"]) if payload.get("item_title") is not None else None,
+        item_summary=(
+            str(payload["item_summary"])
+            if payload.get("item_summary") is not None
+            else None
+        ),
+        metadata=dict(payload["metadata"]),
+        provenance=(dict(payload["provenance"]) if payload.get("provenance") is not None else None),
+    )
+
+
+async def create_curation_import_plan_command(
+    session: AsyncSession,
+    *,
+    import_plan_id: str,
+    content_sha256: str,
+    provenance_sha256: str | None,
+    plan_sha256: str,
+    summary: Mapping[str, Any],
+    rows: Sequence[ResolvedCurationImportRow],
+    response_rows: Sequence[Mapping[str, Any]],
+    revisions: Sequence[CurationImportRevisionExpectation],
+    expires_at: datetime,
+    command_id: int,
+    principal: str,
+) -> None:
+    """closed preview plan을 command-owned append-only relations에 저장한다."""
+
+    normalized_by_row = {row.row_number: _stored_import_row_payload(row) for row in rows}
+    stored_rows = [
+        {
+            "row_number": int(response_row["row_number"]),
+            "normalized_payload": normalized_by_row.get(int(response_row["row_number"])),
+            "response_payload": dict(response_row),
+        }
+        for response_row in response_rows
+    ]
+    await session.execute(
+        text(
+            "CALL feature.create_curation_import_plan_command("
+            "CAST(:plan_id AS uuid), :content_sha256, :provenance_sha256, "
+            ":plan_sha256, CAST(:summary AS jsonb), CAST(:rows AS jsonb), "
+            "CAST(:revisions AS jsonb), :expires_at, :command_id, :principal)"
+        ),
+        {
+            "plan_id": import_plan_id,
+            "content_sha256": content_sha256,
+            "provenance_sha256": provenance_sha256,
+            "plan_sha256": plan_sha256,
+            "summary": json.dumps(dict(summary), ensure_ascii=False),
+            "rows": json.dumps(stored_rows, ensure_ascii=False),
+            "revisions": json.dumps(
+                [
+                    {
+                        "resource_kind": revision.resource_kind,
+                        "resource_key": revision.resource_key,
+                        "expected_revision": revision.expected_revision,
+                    }
+                    for revision in revisions
+                ],
+                ensure_ascii=False,
+            ),
+            "expires_at": expires_at,
+            "command_id": command_id,
+            "principal": principal,
+        },
+    )
+
+
+async def claim_curation_import_plan_command(
+    session: AsyncSession,
+    *,
+    import_plan_id: str,
+    plan_sha256: str,
+    command_id: int,
+    principal: str,
+) -> tuple[
+    str,
+    tuple[ResolvedCurationImportRow, ...],
+    dict[str, Any],
+    tuple[dict[str, Any], ...],
+    datetime,
+]:
+    """plan ETag/expiry/revision vector를 잠그고 stored normalized rows만 반환한다."""
+
+    result = (
+        await session.execute(
+            text(
+                "CALL feature.claim_curation_import_plan_command("
+                "CAST(:plan_id AS uuid), :plan_sha256, :command_id, :principal, "
+                "NULL, NULL, NULL, NULL, NULL)"
+            ),
+            {
+                "plan_id": import_plan_id,
+                "plan_sha256": plan_sha256,
+                "command_id": command_id,
+                "principal": principal,
+            },
+        )
+    ).mappings().one()
+    payloads = result["o_rows"]
+    return (
+        str(result["o_content_sha256"]),
+        tuple(_resolved_import_row_from_payload(payload) for payload in payloads),
+        dict(result["o_summary"]),
+        tuple(dict(payload) for payload in result["o_response_rows"]),
+        result["o_expires_at"],
+    )
+
+
+async def complete_curation_import_plan_command(
+    session: AsyncSession,
+    *,
+    import_plan_id: str,
+    command_id: int,
+    import_batch_id: str,
+    result_payload: Mapping[str, Any],
+    principal: str,
+) -> None:
+    """import batch와 immutable terminal plan receipt를 같은 transaction에 결박한다."""
+
+    await session.execute(
+        text(
+            "CALL feature.complete_curation_import_plan_command("
+            "CAST(:plan_id AS uuid), :command_id, CAST(:batch_id AS uuid), "
+            "CAST(:result AS jsonb), :principal)"
+        ),
+        {
+            "plan_id": import_plan_id,
+            "command_id": command_id,
+            "batch_id": import_batch_id,
+            "result": json.dumps(dict(result_payload), ensure_ascii=False),
+            "principal": principal,
+        },
+    )
+
+
 async def _resolve_curation_import_collection_command(
     session: AsyncSession,
     *,
@@ -5119,6 +5458,62 @@ async def _touch_curation_import_collection_command(
         )
     ).mappings().one()
     return int(result["o_collection_revision"])
+
+
+async def _apply_curation_import_items_command(
+    session: AsyncSession,
+    *,
+    items: Sequence[Mapping[str, Any]],
+    actor: str,
+    source_content_sha256: str,
+    batch_kind: str,
+    command_id: int,
+) -> CurationImportResult:
+    """normalized item/provenance set을 한 named DB command로 반영한다."""
+
+    result = (
+        await session.execute(
+            text(
+                "CALL feature.apply_curation_import_items_command("
+                "CAST(:items AS jsonb), :content_sha256, :batch_kind, "
+                ":command_id, :principal, NULL, NULL, NULL, NULL)"
+            ),
+            {
+                "items": json.dumps(list(items), ensure_ascii=False),
+                "content_sha256": source_content_sha256,
+                "batch_kind": batch_kind,
+                "command_id": command_id,
+                "principal": actor,
+            },
+        )
+    ).mappings().one()
+    removed_ids = [str(value) for value in (result["o_removed_item_ids"] or [])]
+    removals: tuple[CurationItem, ...] = ()
+    if removed_ids:
+        removal_rows = (
+            (
+                await session.execute(
+                    text(
+                        _ITEM_SELECT
+                        + " WHERE i.curation_item_id = ANY(CAST(:item_ids AS uuid[])) "
+                        "ORDER BY c.collection_key, i.sort_order, i.curation_item_id"
+                    ),
+                    {"item_ids": removed_ids},
+                )
+            )
+            .mappings()
+            .all()
+        )
+        removals = tuple(_item(row) for row in removal_rows)
+    return {
+        "rows": len(items),
+        "collections": len({str(item["collection_id"]) for item in items}),
+        "inserted": int(result["o_inserted"] or 0),
+        "updated": int(result["o_updated"] or 0),
+        "removed": len(removed_ids),
+        "removals": removals,
+        "import_batch_id": str(result["o_import_batch_id"]),
+    }
 
 
 async def import_curation_rows(
@@ -5305,6 +5700,7 @@ async def import_curation_rows(
     for row in rows:
         item_values.append(
             {
+                "row_number": row.row_number,
                 "collection_id": collections[row.collection_key],
                 "collection_key": row.collection_key,
                 "feature_id": row.feature_id,
@@ -5316,7 +5712,28 @@ async def import_curation_rows(
                 "item_title": row.item_title,
                 "item_summary": row.item_summary,
                 "metadata": row.metadata,
+                "provenance": row.provenance or {},
+                "row_payload": _canonical_import_row_payload(row),
             }
+        )
+    if command_id is not None and not frozen_h35_schema:
+        principal = (actor or "").strip()
+        if not principal:
+            raise ValueError("curation import command actor is required")
+        content_sha256 = (
+            _validated_sha256(source_content_sha256)
+            if source_content_sha256 is not None
+            else _canonical_json_sha256(
+                [_canonical_import_row_payload(row) for row in rows]
+            )
+        )
+        return await _apply_curation_import_items_command(
+            session,
+            items=item_values,
+            actor=principal,
+            source_content_sha256=content_sha256,
+            batch_kind=batch_kind or "normalized_rows",
+            command_id=command_id,
         )
     counts = {"inserted": 0, "updated": 0, "removed": 0}
     removals: tuple[CurationItem, ...] = ()

@@ -186,6 +186,27 @@ async def test_import_and_quarantine_advance_collection_revision_once(
             migrated_engine, row.collection_key, "row_revision"
         ) == 2
 
+        async with api.connect() as connection:
+            transaction = await connection.begin()
+            await connection.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
+            with pytest.raises(DBAPIError) as duplicate_touch:
+                await connection.execute(
+                    text(
+                        "CALL feature.touch_curation_import_collection_command("
+                        "CAST(:collection_id AS uuid), :command_id, :actor, NULL)"
+                    ),
+                    {
+                        "actor": actor,
+                        "collection_id": collection_id,
+                        "command_id": second_command,
+                    },
+                )
+            assert getattr(duplicate_touch.value.orig, "sqlstate", None) == "23505"
+            await transaction.rollback()
+        assert await _collection_scalar(
+            migrated_engine, row.collection_key, "row_revision"
+        ) == 2
+
         third_command = await _domain_command(
             migrated_engine, actor=actor, operation="admin.curation.import"
         )

@@ -1208,14 +1208,12 @@ async def test_import_rows_empty_changed_and_no_change(monkeypatch: pytest.Monke
         ),
         _resolved_row(row_number=4, collection_key="z:key", source_item_key="official:three"),
     )
-    theme = AsyncMock(side_effect=[_THEME_ID, _THEME_ID])
     foundations = AsyncMock(
         side_effect=[
             "00000000-0000-4000-8000-000000000010",
             "00000000-0000-4000-8000-000000000011",
         ]
     )
-    monkeypatch.setattr(repo, "upsert_curation_theme", theme)
     monkeypatch.setattr(repo, "_upsert_id_with_fallback", foundations)
     changed = _FakeSession(
         _FakeResult(),
@@ -1223,7 +1221,9 @@ async def test_import_rows_empty_changed_and_no_change(monkeypatch: pytest.Monke
         _FakeResult(rows=["feature:one"]),
         _FakeResult(),
         _FakeResult(),
+        _FakeResult(scalar=_THEME_ID),
         _FakeResult(scalar=_SOURCE_ID),
+        _FakeResult(scalar=_THEME_ID),
         _FakeResult(scalar=_SOURCE_ID),
         _FakeResult(),
         _FakeResult(rows=[_item_row()]),
@@ -1241,13 +1241,6 @@ async def test_import_rows_empty_changed_and_no_change(monkeypatch: pytest.Monke
     assert result["import_batch_id"] == "00000000-0000-4000-8000-000000000091"
     assert "pg_advisory_xact_lock" in changed.calls[0][0]
     assert "UPDATE feature.curation_collections" in changed.calls[-1][0]
-    assert [call.kwargs["theme_slug"] for call in theme.await_args_list] == [
-        rows[1].theme_slug,
-        rows[0].theme_slug,
-    ]
-
-    theme.reset_mock(side_effect=True)
-    theme.side_effect = [_THEME_ID]
     foundations.reset_mock(side_effect=True)
     foundations.side_effect = ["00000000-0000-4000-8000-000000000012"]
     unchanged = _FakeSession(
@@ -1256,6 +1249,7 @@ async def test_import_rows_empty_changed_and_no_change(monkeypatch: pytest.Monke
         _FakeResult(rows=["feature:one"]),
         _FakeResult(),
         _FakeResult(),
+        _FakeResult(scalar=_THEME_ID),
         _FakeResult(scalar=_SOURCE_ID),
         _FakeResult(),
         _FakeResult(rows=[]),
@@ -1265,7 +1259,7 @@ async def test_import_rows_empty_changed_and_no_change(monkeypatch: pytest.Monke
     no_change = await repo.import_curation_rows(unchanged, rows=(rows[0],))
     assert no_change["inserted"] == no_change["updated"] == no_change["removed"] == 0
     assert no_change["import_batch_id"] == "00000000-0000-4000-8000-000000000092"
-    assert len(unchanged.calls) == 10
+    assert len(unchanged.calls) == 11
 
 
 @pytest.mark.parametrize(
