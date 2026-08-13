@@ -190,16 +190,8 @@ test.describe("features-detail LIVE — 헤더 내비 링크(read-only nav)", ()
     await expect(page).toHaveURL(/\/admin\/features(?:$|[/?])/, TIMEOUT);
   });
 
-  // 상세 → 'Changes' 링크 클릭 시 change-requests로 이동(GET 내비).
-  test(`nav to change-requests — ${SAMPLE_ID}`, async ({ page }) => {
-    await page.goto(`/features/${SAMPLE_ID}`);
-    await expect(page.getByTestId("feature-detail-view")).toBeVisible(TIMEOUT);
-
-    await page
-      .getByRole("link", { name: "Changes", exact: true })
-      .click();
-    await expect(page).toHaveURL(/\/admin\/features\/change-requests/, TIMEOUT);
-  });
+  // T-VN-36(0104)이 change-request 모델과 상세의 'Changes' 링크를 함께 제거했다.
+  // 이동 대상 라우트 자체가 없으므로 해당 내비 테스트도 삭제한다.
 
   // 상세 → '지도' 링크 클릭 시 /features 지도로 이동(GET 내비).
   test(`nav to features map — ${SAMPLE_ID}`, async ({ page }) => {
