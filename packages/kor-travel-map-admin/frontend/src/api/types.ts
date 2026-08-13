@@ -209,10 +209,12 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** Get Admin Curated Source Route */
+        get: operations["get_admin_curated_source_route_v1_admin_curated_sources__source_id__get"];
         put?: never;
         post?: never;
-        delete?: never;
+        /** Archive Admin Curated Source Route */
+        delete: operations["archive_admin_curated_source_route_v1_admin_curated_sources__source_id__delete"];
         options?: never;
         head?: never;
         /** Patch Admin Curated Source Route */
@@ -6669,22 +6671,21 @@ export interface components {
             data: components["schemas"]["CuratedPlaceSearchData"];
             meta: components["schemas"]["Meta"];
         };
+        /** CuratedSourceArchiveRequest */
+        CuratedSourceArchiveRequest: {
+            /** Reason Code */
+            reason_code: string;
+        };
         /** CuratedSourceCreateRequest */
         CuratedSourceCreateRequest: {
             /** Freshness Note */
             freshness_note?: string | null;
-            /** Last Checked At */
-            last_checked_at?: string | null;
-            /** Last Source Modified At */
-            last_source_modified_at?: string | null;
             /** License */
             license?: string | null;
             /** Metadata */
             metadata?: {
                 [key: string]: unknown;
             };
-            /** Next Expected At */
-            next_expected_at?: string | null;
             /** Provider Dataset Id */
             provider_dataset_id: number;
             /**
@@ -6693,8 +6694,6 @@ export interface components {
              * @enum {string}
              */
             provider_status: "implemented" | "provider_needed" | "manual_only" | "deprecated";
-            /** Row Count */
-            row_count?: number | null;
             /**
              * Source Kind
              * @enum {string}
@@ -6715,30 +6714,31 @@ export interface components {
         CuratedSourcePatchRequest: {
             /** Freshness Note */
             freshness_note?: string | null;
-            /** Last Checked At */
-            last_checked_at?: string | null;
-            /** Last Source Modified At */
-            last_source_modified_at?: string | null;
             /** License */
             license?: string | null;
             /** Metadata */
             metadata?: {
                 [key: string]: unknown;
-            } | null;
-            /** Next Expected At */
-            next_expected_at?: string | null;
-            /** Provider Status */
-            provider_status?: ("implemented" | "provider_needed" | "manual_only" | "deprecated") | null;
-            /** Row Count */
-            row_count?: number | null;
-            /** Source Kind */
-            source_kind?: ("openapi" | "filedata" | "standard" | "internal" | "manual") | null;
+            };
+            /**
+             * Provider Status
+             * @enum {string}
+             */
+            provider_status?: "implemented" | "provider_needed" | "manual_only" | "deprecated";
+            /**
+             * Source Kind
+             * @enum {string}
+             */
+            source_kind?: "openapi" | "filedata" | "standard" | "internal" | "manual";
             /** Source Name */
-            source_name?: string | null;
+            source_name?: string;
             /** Source Url */
             source_url?: string | null;
-            /** Update Cycle */
-            update_cycle?: ("realtime" | "daily" | "weekly" | "monthly" | "annual" | "one_time" | "unknown") | null;
+            /**
+             * Update Cycle
+             * @enum {string}
+             */
+            update_cycle?: "realtime" | "daily" | "weekly" | "monthly" | "annual" | "one_time" | "unknown";
         };
         /** CuratedSourceResponse */
         CuratedSourceResponse: {
@@ -6801,30 +6801,23 @@ export interface components {
             category?: string | null;
             /**
              * Default Action
-             * @default candidate
              * @enum {string}
              */
-            default_action: "candidate" | "ignore";
+            default_action?: "candidate" | "ignore";
             /** Detail Selector */
             detail_selector?: {
                 [key: string]: unknown;
             } | null;
-            /**
-             * Enabled
-             * @default true
-             */
-            enabled: boolean;
+            /** Enabled */
+            enabled?: boolean;
             /** Metadata */
             metadata?: {
                 [key: string]: unknown;
             };
             /** Place Kind */
             place_kind?: string | null;
-            /**
-             * Priority
-             * @default 0
-             */
-            priority: number;
+            /** Priority */
+            priority?: number;
             /** Region Scope */
             region_scope?: {
                 [key: string]: unknown;
@@ -6880,11 +6873,20 @@ export interface components {
             };
             /** Row Revision */
             row_revision: string;
-            /** Rule Id */
+            /**
+             * Rule Id
+             * Format: uuid
+             */
             rule_id: string;
-            /** Source Id */
+            /**
+             * Source Id
+             * Format: uuid
+             */
             source_id: string;
-            /** Theme Id */
+            /**
+             * Theme Id
+             * Format: uuid
+             */
             theme_id: string;
             /** Theme Slug */
             theme_slug: string;
@@ -6909,6 +6911,8 @@ export interface components {
          * @description curated source metadata view.
          */
         CuratedSourceView: {
+            /** Archived At */
+            archived_at?: string | null;
             /**
              * Created At
              * Format: date-time
@@ -6930,24 +6934,42 @@ export interface components {
             };
             /** Next Expected At */
             next_expected_at?: string | null;
+            /** Observation Revision */
+            observation_revision: string;
             /** Provider */
             provider: string;
             /** Provider Dataset Id */
             provider_dataset_id: number;
-            /** Provider Status */
-            provider_status: string;
+            /**
+             * Provider Status
+             * @enum {string}
+             */
+            provider_status: "implemented" | "provider_needed" | "manual_only" | "deprecated";
+            /** Representation Etag */
+            representation_etag: string;
             /** Row Count */
             row_count?: number | null;
-            /** Source Id */
+            /** Row Revision */
+            row_revision: string;
+            /**
+             * Source Id
+             * Format: uuid
+             */
             source_id: string;
-            /** Source Kind */
-            source_kind: string;
+            /**
+             * Source Kind
+             * @enum {string}
+             */
+            source_kind: "openapi" | "filedata" | "standard" | "internal" | "manual";
             /** Source Name */
             source_name: string;
             /** Source Url */
             source_url?: string | null;
-            /** Update Cycle */
-            update_cycle: string;
+            /**
+             * Update Cycle
+             * @enum {string}
+             */
+            update_cycle: "realtime" | "daily" | "weekly" | "monthly" | "annual" | "one_time" | "unknown";
             /**
              * Updated At
              * Format: date-time
@@ -6999,32 +7021,19 @@ export interface components {
             metadata?: {
                 [key: string]: unknown;
             };
-            /**
-             * Theme Description
-             * @default
-             */
-            theme_description: string;
-            /**
-             * Theme Group
-             * @default
-             */
-            theme_group: string;
-            /**
-             * Theme Name
-             * @default
-             */
-            theme_name: string;
-            /**
-             * Theme Slug
-             * @default
-             */
-            theme_slug: string;
+            /** Theme Description */
+            theme_description?: string;
+            /** Theme Group */
+            theme_group?: string;
+            /** Theme Name */
+            theme_name?: string;
+            /** Theme Slug */
+            theme_slug?: string;
             /**
              * Visibility
-             * @default admin_only
              * @enum {string}
              */
-            visibility: "admin_only" | "public";
+            visibility?: "admin_only" | "public";
         };
         /** CuratedThemeResponse */
         CuratedThemeResponse: {
@@ -7048,7 +7057,7 @@ export interface components {
                 [key: string]: unknown;
             };
             /** Owner Kind */
-            owner_kind?: string | null;
+            owner_kind?: ("operator" | "provider_dataset") | null;
             /** Owner Provider Dataset Id */
             owner_provider_dataset_id?: number | null;
             /** Row Revision */
@@ -7057,7 +7066,10 @@ export interface components {
             theme_description: string;
             /** Theme Group */
             theme_group: string;
-            /** Theme Id */
+            /**
+             * Theme Id
+             * Format: uuid
+             */
             theme_id: string;
             /** Theme Name */
             theme_name: string;
@@ -7068,8 +7080,11 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
-            /** Visibility */
-            visibility: string;
+            /**
+             * Visibility
+             * @enum {string}
+             */
+            visibility: "admin_only" | "public";
         };
         /** CuratedThemesData */
         CuratedThemesData: {
@@ -14430,7 +14445,7 @@ export interface operations {
             /** @description Successful Response */
             201: {
                 headers: {
-                    /** @description 현재 retained rule row_revision strong entity tag. */
+                    /** @description 현재 retained catalog row_revision strong entity tag. */
                     ETag?: string;
                     [name: string]: unknown;
                 };
@@ -14472,7 +14487,7 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
-                    /** @description 현재 retained rule row_revision strong entity tag. */
+                    /** @description 현재 retained catalog row_revision strong entity tag. */
                     ETag?: string;
                     [name: string]: unknown;
                 };
@@ -14506,7 +14521,7 @@ export interface operations {
             header: {
                 /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
                 "Idempotency-Key": string;
-                /** @description 직전 단건 GET/성공 응답의 rule row_revision strong ETag. */
+                /** @description 직전 단건 GET/성공 응답의 catalog row_revision strong ETag. */
                 "If-Match": string;
             };
             path: {
@@ -14523,7 +14538,7 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
-                    /** @description 현재 retained rule row_revision strong entity tag. */
+                    /** @description 현재 retained catalog row_revision strong entity tag. */
                     ETag?: string;
                     [name: string]: unknown;
                 };
@@ -14575,7 +14590,7 @@ export interface operations {
             header: {
                 /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
                 "Idempotency-Key": string;
-                /** @description 직전 단건 GET/성공 응답의 rule row_revision strong ETag. */
+                /** @description 직전 단건 GET/성공 응답의 catalog row_revision strong ETag. */
                 "If-Match": string;
             };
             path: {
@@ -14592,7 +14607,7 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
-                    /** @description 현재 retained rule row_revision strong entity tag. */
+                    /** @description 현재 retained catalog row_revision strong entity tag. */
                     ETag?: string;
                     [name: string]: unknown;
                 };
@@ -14740,8 +14755,10 @@ export interface operations {
         };
         responses: {
             /** @description Successful Response */
-            200: {
+            201: {
                 headers: {
+                    /** @description 현재 retained catalog row_revision strong entity tag. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -14768,12 +14785,130 @@ export interface operations {
             };
         };
     };
+    get_admin_curated_source_route_v1_admin_curated_sources__source_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                source_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CuratedSourceResponse"];
+                };
+            };
+            /** @description representation ETag 일치 */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    archive_admin_curated_source_route_v1_admin_curated_sources__source_id__delete: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
+                "Idempotency-Key": string;
+                /** @description 직전 단건 GET/성공 응답의 catalog row_revision strong ETag. */
+                "If-Match": string;
+            };
+            path: {
+                source_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CuratedSourceArchiveRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    /** @description 현재 retained catalog row_revision strong entity tag. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CuratedSourceResponse"];
+                };
+            };
+            /** @description stale source If-Match */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description If-Match 누락 */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
     patch_admin_curated_source_route_v1_admin_curated_sources__source_id__patch: {
         parameters: {
             query?: never;
             header: {
                 /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
                 "Idempotency-Key": string;
+                /** @description 직전 단건 GET/성공 응답의 catalog row_revision strong ETag. */
+                "If-Match": string;
             };
             path: {
                 source_id: string;
@@ -14789,14 +14924,34 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    /** @description 현재 retained catalog row_revision strong entity tag. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["CuratedSourceResponse"];
                 };
             };
+            /** @description stale source If-Match */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description Validation Error */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description If-Match 누락 */
+            428: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -14876,7 +15031,7 @@ export interface operations {
             /** @description Successful Response */
             201: {
                 headers: {
-                    /** @description 현재 retained rule row_revision strong entity tag. */
+                    /** @description 현재 retained catalog row_revision strong entity tag. */
                     ETag?: string;
                     [name: string]: unknown;
                 };
@@ -14918,7 +15073,7 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
-                    /** @description 현재 retained rule row_revision strong entity tag. */
+                    /** @description 현재 retained catalog row_revision strong entity tag. */
                     ETag?: string;
                     [name: string]: unknown;
                 };
@@ -14952,7 +15107,7 @@ export interface operations {
             header: {
                 /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
                 "Idempotency-Key": string;
-                /** @description 직전 단건 GET/성공 응답의 rule row_revision strong ETag. */
+                /** @description 직전 단건 GET/성공 응답의 catalog row_revision strong ETag. */
                 "If-Match": string;
             };
             path: {
@@ -14969,7 +15124,7 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
-                    /** @description 현재 retained rule row_revision strong entity tag. */
+                    /** @description 현재 retained catalog row_revision strong entity tag. */
                     ETag?: string;
                     [name: string]: unknown;
                 };
@@ -15021,7 +15176,7 @@ export interface operations {
             header: {
                 /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
                 "Idempotency-Key": string;
-                /** @description 직전 단건 GET/성공 응답의 rule row_revision strong ETag. */
+                /** @description 직전 단건 GET/성공 응답의 catalog row_revision strong ETag. */
                 "If-Match": string;
             };
             path: {
@@ -15038,7 +15193,7 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
-                    /** @description 현재 retained rule row_revision strong entity tag. */
+                    /** @description 현재 retained catalog row_revision strong entity tag. */
                     ETag?: string;
                     [name: string]: unknown;
                 };

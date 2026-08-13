@@ -141,6 +141,9 @@ BEGIN
     p_theme_slug, p_theme_name, p_theme_description, p_theme_group, false,
     p_visibility, p_metadata, 1, 'operator', NULL, clock_timestamp()
   ) RETURNING theme_id, row_revision INTO STRICT o_theme_id, o_theme_revision;
+  PERFORM feature.claim_curation_catalog_command_effect(
+    p_command_id, v_command.operation, 'theme', o_theme_id
+  );
 END
 $command$;
 
@@ -259,6 +262,13 @@ BEGIN
     RAISE EXCEPTION 'archived theme cannot be patched'
       USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_theme_active';
   END IF;
+  IF v_theme.owner_kind <> 'operator' THEN
+    RAISE EXCEPTION 'provider-owned theme cannot be patched by an admin command'
+      USING ERRCODE = '42501';
+  END IF;
+  PERFORM feature.claim_curation_catalog_command_effect(
+    p_command_id, v_command.operation, 'theme', v_theme.theme_id
+  );
   PERFORM 1 FROM feature.curated_source_rules AS rule
   WHERE rule.theme_id = p_theme_id AND rule.archived_at IS NULL
   ORDER BY rule.rule_id FOR SHARE;
@@ -404,10 +414,17 @@ BEGIN
     RAISE EXCEPTION 'theme revision mismatch'
       USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_expected_revision';
   END IF;
+  IF v_theme.owner_kind <> 'operator' THEN
+    RAISE EXCEPTION 'provider-owned theme cannot be archived by an admin command'
+      USING ERRCODE = '42501';
+  END IF;
   IF v_theme.archived_at IS NOT NULL THEN
     RAISE EXCEPTION 'theme is already archived'
       USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_theme_active';
   END IF;
+  PERFORM feature.claim_curation_catalog_command_effect(
+    p_command_id, v_command.operation, 'theme', v_theme.theme_id
+  );
   PERFORM 1 FROM feature.curated_source_rules AS rule
   WHERE rule.theme_id = p_theme_id AND rule.archived_at IS NULL
   ORDER BY rule.rule_id FOR SHARE;

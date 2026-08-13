@@ -153,6 +153,7 @@ _ORDINARY_SCHEMA_PRIVILEGES: Mapping[str, tuple[str, ...]] = {
 # directly.  A typed state-owner procedure owns author/revoke mutation so a
 # provider/admin connection cannot erase that fence through raw SQL.
 _OPS_TABLE_PRIVILEGES: Mapping[str, tuple[str, ...]] = {
+    "curation_catalog_command_effects": (),
     "curation_cutover_identity_mappings": (),
     "curation_rule_reconcile_operations": (),
     "curation_rule_reconcile_scope_members": (),

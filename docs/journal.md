@@ -2,6 +2,20 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-13 — T-VN-40: retained source CAS와 provider observation 분리
+
+retained source catalog의 operator revision과 provider observation revision을 분리했다. API는
+create/patch/archive named command, 단건 representation ETag·304, raw revision If-Match와 terminal
+replay를 사용하고, Dagster는 exact done import-job dataset membership을 검증한 provider 전용
+observation command만 실행한다. source archive는 dependent rule 전체를 같은 SERIALIZABLE
+transaction에서 reconcile한다.
+
+적대 리뷰의 동일 패턴을 theme/source/rule 전체에 적용해 provider-owned theme/rule의 admin mutation을
+거부하고, command 하나가 두 catalog effect에 재사용되거나 terminal command가 다시 실행되지 않도록
+append-only effect claim을 추가했다. PATCH OpenAPI는 생략 가능하지만 explicit null은 허용하지 않는
+필드로 고정했고 UUID/enum/ETag 설명도 typed contract와 수렴했다. fresh 0001→0111 source command
+통합과 관련 API/repo/registry unit gate를 통과했다.
+
 ## 2026-08-13 — T-VN-40: retained theme CAS와 semantic proof 분리
 
 retained theme create/patch/archive를 실제 API LOGIN 전용 named command로 전환하고 단건 GET,

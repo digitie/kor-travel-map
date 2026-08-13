@@ -34,7 +34,7 @@ API/route-policy/domain-command/OpenAPI focused gate 96개가 통과했으며 ad
 provider full-snapshot/비권위 거부와 feature operation repo를 합친 DB 15개, Dagster wrapper·
 MCST unit 41개도 통과했고 관련 Python source의 ruff/mypy가 통과했다.
 candidate snapshot과 generation의 rule hash도 DB helper 하나로 수렴시켜 referenced theme/source
-revision·archive·owner/provider 의미를 canonical input version 2에 포함했다.
+archive·owner/provider 의미를 canonical input version 3에 포함하고 display/CAS revision은 제외했다.
 retained rule create/patch/archive도 actual API LOGIN 전용 typed command로 전환했다. 각 명령은
 domain command·strong revision·SERIALIZABLE을 검증하고 sorted Feature prelock 뒤 catalog CAS와
 immutable reconcile receipt, set-based generation을 같은 transaction에 결박한다. fresh 0109 head의
@@ -46,11 +46,14 @@ UUID/null 422, SERIALIZABLE retry 우회와 applied OpenAPI freeze도 수정했�
 actual API LOGIN 전용 create/patch/archive command, 단건 GET, strong ETag로
 전환했다. archive는 dependent rule generation을 같은 SERIALIZABLE transaction에서 끝내고,
 metadata-only catalog revision과 candidate semantic proof를 분리해 정상 후보 promotion이 stale로
-오인되지 않게 했다. 다음은 retained source catalog의 operator revision/observation revision 분리와
-typed CAS command 경계를 구현한다. T-VN-40 paired consumer receipt는 현재 `pending`이며 Map user/
+오인되지 않게 했다. retained source catalog도 operator CAS revision과 provider observation revision을
+분리하고 API create/patch/archive와 Dagster exact import-job observation을 서로 다른 executor의 named
+command로 결선했다. theme/source/rule 공통 append-only effect claim은 terminal/open command의 다중
+resource 재사용을 차단하며 provider-owned theme/rule은 admin command로 수정할 수 없다. 다음은 raw
+catalog DML과 legacy rule apply/Dagster writer를 typed provider command로 전환한 뒤 runtime privilege를
+SELECT-only로 회수하는 것이다. T-VN-40 paired consumer receipt는 현재 `pending`이며 Map user/
 service/full spec hash를 고정하고 n150 installer가 complete 전에는 fail-close한다.
-fresh 0001→0110 actual-login theme/rule/candidate 통합을 통과했다. 다음 구현 단위는 source catalog를
-같은 CAS/reconcile 경계로 확장하는 것이다.
+fresh 0001→0111 actual-login theme/source/rule/candidate 통합을 통과했다.
 A/B/C는 하나의 forward-only PR/release로 유지하며, 누적 구현은 DB/동시성과
 API·consumer/ACL 관점의 독립 적대 리뷰어 2명이 같은 고정 SHA에서 검증한다.
 상세 계약은

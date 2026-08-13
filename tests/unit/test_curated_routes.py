@@ -31,6 +31,7 @@ from pydantic import SecretStr
 from kortravelmap.infra.curated_repo import (
     CuratedFeature,
     CuratedFeaturePage,
+    CuratedSource,
     CuratedSourceRule,
     CuratedTheme,
 )
@@ -169,7 +170,8 @@ def _nested_keys(value: object) -> set[str]:
 
 
 def test_curated_routes_are_in_openapi() -> None:
-    paths = create_app().openapi()["paths"]
+    schema = create_app().openapi()
+    paths = schema["paths"]
 
     assert "/v1/curated-themes" in paths
     assert "/v1/curated-sources" in paths
@@ -184,6 +186,42 @@ def test_curated_routes_are_in_openapi() -> None:
     assert {"get", "patch", "delete"}.issubset(
         paths["/v1/admin/curated-source-rules/{rule_id}"]
     )
+    for schema_name in (
+        "CuratedThemePatchRequest",
+        "CuratedSourcePatchRequest",
+        "CuratedSourceRulePatchRequest",
+    ):
+        patch_schema = schema["components"]["schemas"][schema_name]
+        assert "required" not in patch_schema
+    for schema_name, fields in {
+        "CuratedThemePatchRequest": {
+            "theme_slug",
+            "theme_name",
+            "theme_description",
+            "theme_group",
+            "visibility",
+            "metadata",
+        },
+        "CuratedSourcePatchRequest": {
+            "source_name",
+            "source_kind",
+            "update_cycle",
+            "provider_status",
+            "metadata",
+        },
+        "CuratedSourceRulePatchRequest": {
+            "region_scope",
+            "default_action",
+            "priority",
+            "enabled",
+            "metadata",
+        },
+    }.items():
+        properties = schema["components"]["schemas"][schema_name]["properties"]
+        for field in fields:
+            assert {branch.get("type") for branch in properties[field].get("anyOf", [])} <= {
+                None
+            }
 
 
 class _ForbiddenSession:
@@ -311,6 +349,145 @@ def _theme_api_row(*, revision: int, archived: bool = False) -> CuratedTheme:
         owner_kind="operator",
         owner_provider_dataset_id=None,
     )
+
+
+def _source_api_row(
+    *, revision: int, observation_revision: int = 7, archived: bool = False
+) -> CuratedSource:
+    now = datetime(2026, 8, 13, tzinfo=UTC)
+    return CuratedSource(
+        source_id="33333333-3333-4333-8333-333333333333",
+        provider_dataset_id=101,
+        provider="source-api-provider",
+        dataset_key="source-api-dataset",
+        source_name="source API",
+        source_url=None,
+        source_kind="internal",
+        license=None,
+        update_cycle="daily",
+        last_source_modified_at=None,
+        last_checked_at=now,
+        next_expected_at=None,
+        row_count=1,
+        freshness_note=None,
+        provider_status="implemented",
+        metadata={},
+        created_at=now,
+        updated_at=now,
+        row_revision=revision,
+        observation_revision=observation_revision,
+        archived_at=now if archived else None,
+    )
+
+
+def test_retained_source_http_commands_separate_representation_and_cas_etags(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api import domain_command_service
+
+    rows = {
+        3: _source_api_row(revision=3),
+        4: _source_api_row(revision=4),
+        5: _source_api_row(revision=5, archived=True),
+    }
+    get_source = AsyncMock(return_value=rows[3])
+    create_source = AsyncMock(return_value=rows[3])
+    patch_source = AsyncMock(return_value=rows[4])
+    archive_source = AsyncMock(return_value=rows[5])
+    monkeypatch.setattr(curated.curated_repo, "get_curated_source", get_source)
+    monkeypatch.setattr(
+        curated.curated_repo, "create_curated_source_command", create_source
+    )
+    monkeypatch.setattr(
+        curated.curated_repo, "patch_curated_source_command", patch_source
+    )
+    monkeypatch.setattr(
+        curated.curated_repo, "archive_curated_source_command", archive_source
+    )
+
+    async def _begin_command(
+        _session: object,
+        *,
+        actor: str,
+        operation: str,
+        idempotency_key: object,
+        payload: object,
+    ) -> domain_command_service.DomainCommandHandle:
+        del payload
+        return domain_command_service.DomainCommandHandle(
+            command_id=703,
+            actor=actor,
+            operation=operation,
+            idempotency_key=str(idempotency_key),
+            request_fingerprint="c" * 64,
+        )
+
+    monkeypatch.setattr(domain_command_service, "begin_domain_command", _begin_command)
+    monkeypatch.setattr(
+        domain_command_service, "complete_domain_command", AsyncMock()
+    )
+    app = create_app(
+        ApiSettings(
+            admin_proxy_secret=None,
+            public_api_key_required=False,
+            vworld_api_key=None,
+        )
+    )
+
+    async def _session() -> AsyncIterator[_RuleApiSession]:
+        yield _RuleApiSession()
+
+    app.dependency_overrides[get_session] = _session
+    client = TestClient(app)
+    source_id = rows[3].source_id
+    key_prefix = "95200000-0000-4000-8000-00000000000"
+
+    fetched = client.get(f"/v1/admin/curated-sources/{source_id}")
+    representation_etag = fetched.headers["etag"]
+    cached = client.get(
+        f"/v1/admin/curated-sources/{source_id}",
+        headers={"If-None-Match": representation_etag},
+    )
+    created = client.post(
+        "/v1/admin/curated-sources",
+        json={
+            "provider_dataset_id": 101,
+            "source_name": "source API",
+            "source_kind": "internal",
+        },
+        headers={"Idempotency-Key": f"{key_prefix}1"},
+    )
+    missing = client.patch(
+        f"/v1/admin/curated-sources/{source_id}",
+        json={"source_name": "변경"},
+        headers={"Idempotency-Key": f"{key_prefix}2"},
+    )
+    patched = client.patch(
+        f"/v1/admin/curated-sources/{source_id}",
+        json={"source_name": "변경"},
+        headers={"Idempotency-Key": f"{key_prefix}3", "If-Match": '"3"'},
+    )
+    archived = client.request(
+        "DELETE",
+        f"/v1/admin/curated-sources/{source_id}",
+        json={"reason_code": "operator_retired"},
+        headers={"Idempotency-Key": f"{key_prefix}4", "If-Match": '"4"'},
+    )
+
+    assert fetched.status_code == 200
+    assert representation_etag.startswith('"sha256:')
+    assert fetched.json()["data"]["row_revision"] == "3"
+    assert fetched.json()["data"]["observation_revision"] == "7"
+    assert cached.status_code == 304
+    assert (created.status_code, created.headers["etag"]) == (201, '"3"')
+    assert missing.status_code == 428
+    assert (patched.status_code, patched.headers["etag"]) == (200, '"4"')
+    assert (archived.status_code, archived.headers["etag"]) == (200, '"5"')
+    assert create_source.await_args.kwargs["command_id"] == 703
+    assert "last_checked_at" not in create_source.await_args.kwargs
+    assert patch_source.await_args.kwargs["expected_revision"] == 3
+    assert patch_source.await_args.kwargs["updates"] == {"source_name": "변경"}
+    assert archive_source.await_args.kwargs["expected_revision"] == 4
 
 
 def test_retained_theme_http_commands_use_strong_etag_and_typed_repo(
@@ -528,6 +705,16 @@ def test_retained_rule_http_commands_use_strong_etag_and_typed_repo(
     ("path", "method", "payload"),
     [
         (
+            "/v1/admin/curated-themes/11111111-1111-4111-8111-111111111111",
+            "PATCH",
+            {"theme_name": None},
+        ),
+        (
+            "/v1/admin/curated-sources/11111111-1111-4111-8111-111111111111",
+            "PATCH",
+            {"provider_status": None},
+        ),
+        (
             "/v1/admin/curated-source-rules/not-a-uuid",
             "GET",
             None,
@@ -544,7 +731,7 @@ def test_retained_rule_http_commands_use_strong_etag_and_typed_repo(
         ),
     ],
 )
-def test_retained_rule_http_rejects_malformed_identifiers_and_nulls(
+def test_retained_catalog_http_rejects_malformed_identifiers_and_nulls(
     path: str,
     method: str,
     payload: dict[str, object] | None,

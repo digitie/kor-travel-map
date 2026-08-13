@@ -5,11 +5,11 @@
   "baseline": {
     "admin": {
       "file": "packages/kor-travel-map-api/openapi.json",
-      "sha256": "73ee2c8425d46db5ff5510b3edf99d58d36f538841b1221e378f3bb38925b0b7"
+      "sha256": "7f89201f00b103edd16a559156079064dbbb3d3a952ab75523bc137fd1885f55"
     },
     "user": {
       "file": "packages/kor-travel-map-api/openapi.user.json",
-      "sha256": "0fb6f558edb2b00350e23030fbb07f4fffcb3fcf475bc9f6d3442c91361cef1b"
+      "sha256": "cf224e9b052fff19fb011f54f8082b5f41b8354b3b1182f4f8bf836ec0bcb26f"
     },
     "service": {
       "file": "packages/kor-travel-map-api/openapi.service.json",
@@ -17,6 +17,11 @@
     }
   },
   "revisions": [
+    {
+      "date": "2026-08-13",
+      "task": "T-VN-40B",
+      "change": "retained source catalog의 단건 representation ETag/304, operator CAS PATCH·archive, 201 create를 적용하고 source/rule/theme UUID·enum 및 optional-non-null PATCH schema를 재고정했다."
+    },
     {
       "date": "2026-08-13",
       "task": "T-VN-40B",
@@ -420,12 +425,14 @@
         {
           "kind": "operation",
           "target_operation": "GET /v1/admin/curated-sources/{source_id}",
+          "applied": true,
           "detail": "source operator revision과 observation revision을 분리해 반환하는 단건 read",
           "basis": "ADR-092"
         },
         {
           "kind": "operation",
           "target_operation": "DELETE /v1/admin/curated-sources/{source_id}",
+          "applied": true,
           "detail": "If-Match와 Idempotency-Key를 요구하는 typed archive command",
           "basis": "ADR-092"
         },

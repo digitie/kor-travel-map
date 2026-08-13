@@ -42,7 +42,7 @@ def test_every_openapi_write_operation_has_exact_static_policy() -> None:
     writes = _openapi_writes()
 
     assert set(COMMAND_REGISTRY) == set(writes)
-    assert len(writes) == 76
+    assert len(writes) == 77
 
 
 def test_registered_domain_and_specialized_ledgers_have_stable_operation_names() -> None:
@@ -149,6 +149,8 @@ def test_domain_fingerprint_header_contract_is_explicit_and_minimal() -> None:
         "admin.cache-target-dead-letter.replay": ("If-Match",),
         "admin.curated-theme.archive": ("If-Match",),
         "admin.curated-theme.patch": ("If-Match",),
+        "admin.curated-source.archive": ("If-Match",),
+        "admin.curated-source.patch": ("If-Match",),
         "admin.curated-source-rule.archive": ("If-Match",),
         "admin.curated-source-rule.patch": ("If-Match",),
         "admin.feature.patch": ("If-Match",),

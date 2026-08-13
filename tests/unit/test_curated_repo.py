@@ -97,6 +97,9 @@ def _source_row(**overrides: Any) -> dict[str, Any]:
         "metadata": {"surface": "fileData"},
         "created_at": _NOW,
         "updated_at": _NOW,
+        "row_revision": 1,
+        "observation_revision": 1,
+        "archived_at": None,
     }
     row.update(overrides)
     return row

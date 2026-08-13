@@ -120,6 +120,28 @@ async def test_rule_create_patch_archive_is_cas_bound_and_reconciled(
                 {"dataset_id": dataset_id},
             )
         )
+        provider_rule_id = str(
+            await connection.scalar(
+                text(
+                    """
+                    INSERT INTO feature.curated_source_rules (
+                      theme_id, source_id, region_scope, default_action,
+                      priority, enabled, metadata, owner_kind,
+                      owner_provider_dataset_id
+                    ) VALUES (
+                      CAST(:theme_id AS uuid), CAST(:source_id AS uuid),
+                      '{}'::jsonb, 'candidate', 0, true, '{}'::jsonb,
+                      'provider_dataset', :dataset_id
+                    ) RETURNING rule_id
+                    """
+                ),
+                {
+                    "dataset_id": dataset_id,
+                    "source_id": source_id,
+                    "theme_id": theme_id,
+                },
+            )
+        )
         await connection.execute(
             text(
                 """
@@ -185,6 +207,9 @@ async def test_rule_create_patch_archive_is_cas_bound_and_reconciled(
     stale_command = await _domain_command(
         migrated_engine, actor=actor, operation="admin.curated-source-rule.patch"
     )
+    provider_patch_command = await _domain_command(
+        migrated_engine, actor=actor, operation="admin.curated-source-rule.patch"
+    )
     archive_command = await _domain_command(
         migrated_engine, actor=actor, operation="admin.curated-source-rule.archive"
     )
@@ -215,6 +240,29 @@ async def test_rule_create_patch_archive_is_cas_bound_and_reconciled(
         rule_id = str(created["o_rule_id"])
         assert int(created["o_rule_revision"]) == 1
         assert created["o_generation_id"] is not None
+
+        async with api.connect() as connection:
+            transaction = await connection.begin()
+            await connection.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
+            with pytest.raises(DBAPIError) as forbidden_owner:
+                await connection.execute(
+                    text(
+                        """
+                        CALL feature.patch_curated_source_rule_command(
+                          CAST(:rule_id AS uuid), 1, NULL, NULL, '{}'::jsonb,
+                          NULL, 'candidate', 0, true, '{}'::jsonb,
+                          :command_id, :actor, NULL, NULL, NULL
+                        )
+                        """
+                    ),
+                    {
+                        "actor": actor,
+                        "command_id": provider_patch_command,
+                        "rule_id": provider_rule_id,
+                    },
+                )
+            assert getattr(forbidden_owner.value.orig, "sqlstate", None) == "42501"
+            await transaction.rollback()
 
         async with api.begin() as connection:
             await connection.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
