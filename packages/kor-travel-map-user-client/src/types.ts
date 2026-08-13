@@ -792,6 +792,8 @@ export interface components {
         CuratedSourceView: {
             /** Archived At */
             archived_at?: string | null;
+            /** Command Etag */
+            command_etag: string;
             /**
              * Created At
              * Format: date-time
@@ -872,6 +874,8 @@ export interface components {
         CuratedThemeView: {
             /** Archived At */
             archived_at?: string | null;
+            /** Command Etag */
+            command_etag: string;
             /**
              * Created At
              * Format: date-time

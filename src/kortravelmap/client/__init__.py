@@ -99,28 +99,6 @@ from kortravelmap.infra.consistency import (
 from kortravelmap.infra.consistency import (
     run_consistency_checks as repo_run_consistency_checks,
 )
-from kortravelmap.infra.curated_repo import (
-    ConciergeThemeSyncResult,
-    CuratedFeatureCandidatesResult,
-    CuratedFeatureDetailSnapshotMaterializeResult,
-    CuratedFeatureStatusSweepResult,
-    CuratedSourceMetadataRefreshResult,
-)
-from kortravelmap.infra.curated_repo import (
-    apply_enabled_curated_source_rules as repo_apply_enabled_curated_source_rules,
-)
-from kortravelmap.infra.curated_repo import (
-    materialize_curated_feature_detail_snapshots as repo_materialize_curated_snapshots,
-)
-from kortravelmap.infra.curated_repo import (
-    refresh_curated_source_metadata as repo_refresh_curated_source_metadata,
-)
-from kortravelmap.infra.curated_repo import (
-    sweep_curated_feature_status as repo_sweep_curated_feature_status,
-)
-from kortravelmap.infra.curated_repo import (
-    sync_concierge_themes as repo_sync_concierge_themes,
-)
 from kortravelmap.infra.db import make_async_session_factory
 from kortravelmap.infra.dedup_refresh_repo import (
     DedupRefreshScope,
@@ -376,11 +354,6 @@ __all__ = [
     "AsyncKorTravelMapClient",
     "BatchDagRunResult",
     "CacheTargetSnapshotGcDrainResult",
-    "ConciergeThemeSyncResult",
-    "CuratedFeatureCandidatesResult",
-    "CuratedFeatureStatusSweepResult",
-    "CuratedSourceMetadataRefreshResult",
-    "CuratedFeatureDetailSnapshotMaterializeResult",
     "DedupRefreshResult",
     "DedupSyncResult",
     "DagsterFeatureOperationCursor",
@@ -1874,66 +1847,6 @@ class AsyncKorTravelMapClient:
                 known_file_objects=known_file_objects,
             )
 
-    async def refresh_curated_source_metadata(
-        self,
-        *,
-        provider_dataset_id: int | None = None,
-    ) -> CuratedSourceMetadataRefreshResult:
-        """curated source metadata를 source_records 기준으로 갱신한다(T-223c-2)."""
-        async with self._session_factory() as session, session.begin():
-            return await repo_refresh_curated_source_metadata(
-                session,
-                provider_dataset_id=provider_dataset_id,
-            )
-
-    async def apply_curated_source_rules(
-        self,
-        *,
-        limit: int = 500,
-    ) -> CuratedFeatureCandidatesResult:
-        """enabled source rule을 적용해 curated 후보/선정 row를 갱신한다(T-223c-2)."""
-        async with self._session_factory() as session, session.begin():
-            return await repo_apply_enabled_curated_source_rules(
-                session,
-                limit=limit,
-            )
-
-    async def sync_concierge_themes(
-        self,
-        *,
-        min_features: int = 1,
-    ) -> ConciergeThemeSyncResult:
-        """concierge youtube channel/playlist 그룹핑을 curated 테마+rule로 동기화한다.
-
-        이미 적재된 concierge 후보 feature의 그룹핑 값에서 유도해 그룹핑당 public
-        테마 1개 + detail_selector rule 1개를 upsert하고 즉시 후보를 채운다(#15).
-        """
-        async with self._session_factory() as session, session.begin():
-            return await repo_sync_concierge_themes(
-                session,
-                min_features=min_features,
-            )
-
-    async def sweep_curated_feature_status(
-        self,
-    ) -> CuratedFeatureStatusSweepResult:
-        """inactive/deleted feature가 가리키는 curated overlay를 archive한다(T-223c-2)."""
-        async with self._session_factory() as session, session.begin():
-            return await repo_sweep_curated_feature_status(session)
-
-    async def materialize_curated_feature_detail_snapshots(
-        self,
-        *,
-        theme_slug: str | None = None,
-        limit: int = 500,
-    ) -> CuratedFeatureDetailSnapshotMaterializeResult:
-        """curated feature detail snapshot cache를 materialize한다(T-223c-2)."""
-        async with self._session_factory() as session, session.begin():
-            return await repo_materialize_curated_snapshots(
-                session,
-                theme_slug=theme_slug,
-                limit=limit,
-            )
 
     async def run_batch_dag_consistency_gate(
         self,

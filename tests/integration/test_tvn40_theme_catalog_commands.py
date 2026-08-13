@@ -92,6 +92,9 @@ async def test_theme_commands_separate_display_revision_from_rule_semantics(
     provider_patch_command = await _domain_command(
         migrated_engine, actor=actor, operation="admin.curated-theme.patch"
     )
+    provider_archive_command = await _domain_command(
+        migrated_engine, actor=actor, operation="admin.curated-theme.archive"
+    )
     api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
     dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
     try:
@@ -179,6 +182,27 @@ async def test_theme_commands_separate_display_revision_from_rule_semantics(
                     },
                 )
             assert getattr(forbidden_owner.value.orig, "sqlstate", None) == "42501"
+            await transaction.rollback()
+        async with api.connect() as connection:
+            transaction = await connection.begin()
+            await connection.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
+            with pytest.raises(DBAPIError) as forbidden_archive:
+                await connection.execute(
+                    text(
+                        """
+                        CALL feature.archive_curated_theme_command(
+                          CAST(:theme_id AS uuid), 1, :command_id,
+                          'operator_retired', :actor, NULL, NULL, NULL
+                        )
+                        """
+                    ),
+                    {
+                        "actor": actor,
+                        "command_id": provider_archive_command,
+                        "theme_id": provider_theme_id,
+                    },
+                )
+            assert getattr(forbidden_archive.value.orig, "sqlstate", None) == "42501"
             await transaction.rollback()
 
         async with migrated_engine.begin() as connection:

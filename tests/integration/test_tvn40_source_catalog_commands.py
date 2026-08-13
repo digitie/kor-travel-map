@@ -114,6 +114,7 @@ async def test_source_operator_cas_and_provider_observation_are_disjoint(
             "admin.curated-source.patch",
             "admin.curated-source.patch",
             "admin.curated-source.archive",
+            "admin.curated-source.patch",
         )
         command_ids: list[int] = []
         for operation in operations:
@@ -133,6 +134,16 @@ async def test_source_operator_cas_and_provider_observation_are_disjoint(
                     )
                 )
             )
+        await connection.execute(
+            text(
+                """
+                INSERT INTO ops.domain_command_results (
+                  command_id, response_status, response_body
+                ) VALUES (:command_id, 200, '{}'::jsonb)
+                """
+            ),
+            {"command_id": command_ids[4]},
+        )
         root_job_id = str(
             await connection.scalar(
                 text(
@@ -180,7 +191,8 @@ async def test_source_operator_cas_and_provider_observation_are_disjoint(
                       current_stage, dagster_run_id, dataset_membership_mode,
                       finished_at
                     ) VALUES (
-                      'provider_feature_load', CAST(:root_job_id AS uuid), '{}'::jsonb,
+                      'provider_feature_load', CAST(:root_job_id AS uuid),
+                      jsonb_build_object('authoritative_snapshot_complete', true),
                       'done', 100, 'completed', :run_id, 'single', clock_timestamp()
                     ) RETURNING job_id
                     """
@@ -281,6 +293,26 @@ async def test_source_operator_cas_and_provider_observation_are_disjoint(
             ).mappings().one()
         assert (int(patched["o_source_revision"]), int(patched["o_observation_revision"])) == (2, 1)
 
+        async with api.connect() as connection:
+            transaction = await connection.begin()
+            await connection.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
+            with pytest.raises(DBAPIError) as terminal:
+                await connection.execute(
+                    text(
+                        """
+                        CALL feature.patch_curated_source_command(
+                          CAST(:source_id AS uuid), 2, 'terminal reuse', NULL,
+                          'internal', NULL, 'daily', NULL, 'implemented', '{}'::jsonb,
+                          :command_id, :actor, NULL, NULL, NULL
+                        )
+                        """
+                    ),
+                    {**seed, "command_id": command_ids[4], "source_id": source_id},
+                )
+            assert getattr(terminal.value.orig, "sqlstate", None) == "23514"
+            assert "already terminal" in str(terminal.value.orig)
+            await transaction.rollback()
+
         async with dagster.begin() as connection:
             await connection.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
             observed = (
@@ -300,6 +332,45 @@ async def test_source_operator_cas_and_provider_observation_are_disjoint(
             int(observed["o_observation_revision"]),
             int(observed["o_row_count"]),
         ) == (2, 2, 1)
+
+        async with dagster.begin() as connection:
+            await connection.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
+            replayed_observation = (
+                await connection.execute(
+                    text(
+                        """
+                        CALL feature.refresh_curated_source_observation(
+                          :dataset_id, CAST(:job_id AS uuid), NULL, NULL, NULL, NULL
+                        )
+                        """
+                    ),
+                    {"dataset_id": dataset_id, "job_id": source_job_id},
+                )
+            ).mappings().one()
+        assert dict(replayed_observation) == dict(observed)
+
+        async with migrated_engine.connect() as connection:
+            receipt = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT count(*) AS receipt_count,
+                               min(receipt.observed_at) AS observed_at,
+                               min(job.finished_at) AS finished_at,
+                               min(source.last_checked_at) AS last_checked_at
+                        FROM ops.curation_source_observation_receipts AS receipt
+                        JOIN ops.import_jobs AS job ON job.job_id = receipt.import_job_id
+                        JOIN feature.curated_sources AS source
+                          ON source.source_id = receipt.source_id
+                        WHERE receipt.source_id = CAST(:source_id AS uuid)
+                          AND receipt.import_job_id = CAST(:job_id AS uuid)
+                        """
+                    ),
+                    {"source_id": source_id, "job_id": source_job_id},
+                )
+            ).mappings().one()
+        assert int(receipt["receipt_count"]) == 1
+        assert receipt["observed_at"] == receipt["finished_at"] == receipt["last_checked_at"]
 
         async with migrated_engine.begin() as connection:
             for index in range(2):

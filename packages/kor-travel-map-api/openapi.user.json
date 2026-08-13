@@ -570,6 +570,10 @@
             ],
             "title": "Archived At"
           },
+          "command_etag": {
+            "title": "Command Etag",
+            "type": "string"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -749,7 +753,8 @@
           "updated_at",
           "row_revision",
           "observation_revision",
-          "representation_etag"
+          "representation_etag",
+          "command_etag"
         ],
         "title": "CuratedSourceView",
         "type": "object"
@@ -803,6 +808,10 @@
               }
             ],
             "title": "Archived At"
+          },
+          "command_etag": {
+            "title": "Command Etag",
+            "type": "string"
           },
           "created_at": {
             "format": "date-time",
@@ -890,7 +899,8 @@
           "metadata",
           "created_at",
           "updated_at",
-          "row_revision"
+          "row_revision",
+          "command_etag"
         ],
         "title": "CuratedThemeView",
         "type": "object"

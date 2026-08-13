@@ -77,10 +77,6 @@ def test_feature_load_asset_keys_registered() -> None:
         "feature_notice_kma_weather_alerts",
         "feature_place_mcst_culture",
         "feature_event_visitkorea_enrichment",
-        "curated_source_metadata",
-        "curated_feature_candidates",
-        "curated_feature_status_sweep",
-        "curated_feature_detail_snapshots",
     } <= asset_keys
 
 
@@ -123,9 +119,6 @@ def test_feature_update_job_and_sensors_registered() -> None:
     assert defs.get_job_def("offline_upload_load").name == "offline_upload_load"
     assert defs.get_job_def("mois_localdata_source_sync").name == (
         "mois_localdata_source_sync"
-    )
-    assert defs.resolve_job_def("curated_features_refresh").name == (
-        "curated_features_refresh"
     )
     assert defs.resolve_sensor_def("feature_update_request_queue_sensor").name == (
         "feature_update_request_queue_sensor"
@@ -572,15 +565,3 @@ def test_current_weather_summary_refresh_schedule_coalesces_active_global_run() 
     assert tick.run_requests == []
     assert tick.skip_message is not None
     assert "STARTED" in tick.skip_message
-
-
-def test_curated_features_refresh_schedule_registered() -> None:
-    schedule = defs.resolve_schedule_def("curated_features_refresh_daily_schedule")
-    assert schedule.name == "curated_features_refresh_daily_schedule"
-    assert schedule.cron_schedule == "55 4 * * *"
-    assert schedule.execution_timezone == KST_TIMEZONE
-    assert schedule.default_status == DefaultScheduleStatus.STOPPED
-    assert schedule.job_name == "curated_features_refresh"
-    assert schedule.tags["kor_travel_map.job_scope"] == "curated_features"
-    assert schedule.tags["kor_travel_map.job_kind"] == "curated_features_refresh"
-    assert schedule.tags["kor_travel_map.schedule_scope"] == "system"

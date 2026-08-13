@@ -5,11 +5,11 @@
   "baseline": {
     "admin": {
       "file": "packages/kor-travel-map-api/openapi.json",
-      "sha256": "7f89201f00b103edd16a559156079064dbbb3d3a952ab75523bc137fd1885f55"
+      "sha256": "f89e5dbe132595eefde9b2eecc026e4c73571efd542fe9e10b393a61f59dcc13"
     },
     "user": {
       "file": "packages/kor-travel-map-api/openapi.user.json",
-      "sha256": "cf224e9b052fff19fb011f54f8082b5f41b8354b3b1182f4f8bf836ec0bcb26f"
+      "sha256": "6a2ee0f94ffded691f5d169ef1914144eecdf1f4170226c8bc5e963e972403c1"
     },
     "service": {
       "file": "packages/kor-travel-map-api/openapi.service.json",
@@ -517,7 +517,8 @@
         {
           "operation": "POST /v1/admin/curated-source-rules/{rule_id}/apply",
           "detail": "caller-driven rule apply. authoritative provider terminal receipt가 server-side generation을 호출한다.",
-          "basis": "T-VN-40C"
+          "basis": "T-VN-40C",
+          "applied": true
         },
         {
           "operation": "POST /v1/admin/curations/import",

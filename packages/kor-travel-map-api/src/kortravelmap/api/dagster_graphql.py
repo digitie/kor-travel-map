@@ -49,7 +49,6 @@ _MAX_EVENT_CURSOR_LENGTH = 2048
 
 _DEFAULT_SCHEDULE_CRONS: dict[str, str] = {
     "consistency_dedup_refresh_daily_schedule": "45 5 * * *",
-    "curated_features_refresh_daily_schedule": "55 4 * * *",
     "mois_localdata_source_sync_weekly_schedule": "0 4 * * 1",
     "feature_event_datagokr_cultural_festivals_monthly_schedule": "10 3 1 * *",
     "feature_place_opinet_stations_monthly_schedule": "5 3 1 * *",

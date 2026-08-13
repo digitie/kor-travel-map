@@ -228,7 +228,6 @@ ROUTE_POLICIES: dict[str, RoutePolicy] = {
     "/v1/admin/curated-features/{curated_feature_id}/unselect": RoutePolicy.OPERATOR,
     "/v1/admin/curated-source-rules": RoutePolicy.OPERATOR,
     "/v1/admin/curated-source-rules/{rule_id}": RoutePolicy.OPERATOR,
-    "/v1/admin/curated-source-rules/{rule_id}/apply": RoutePolicy.OPERATOR,
     "/v1/admin/curated-sources": RoutePolicy.OPERATOR,
     "/v1/admin/curated-sources/{source_id}": RoutePolicy.OPERATOR,
     "/v1/admin/curated-themes": RoutePolicy.OPERATOR,

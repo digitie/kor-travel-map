@@ -70,6 +70,41 @@ def _execute_commands(source: str) -> None:
         op.execute(statement)
 
 
+_OBSERVATION_RECEIPT_SQL = r"""
+CREATE TABLE ops.curation_source_observation_receipts (
+  source_id uuid NOT NULL
+    REFERENCES feature.curated_sources(source_id) ON DELETE RESTRICT,
+  import_job_id uuid NOT NULL
+    REFERENCES ops.import_jobs(job_id) ON DELETE RESTRICT,
+  observed_at timestamptz NOT NULL,
+  source_revision bigint NOT NULL CHECK (source_revision > 0),
+  observation_revision bigint NOT NULL CHECK (observation_revision > 0),
+  row_count integer NOT NULL CHECK (row_count >= 0),
+  created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+  PRIMARY KEY (source_id, import_job_id)
+);
+
+CREATE FUNCTION ops.reject_curation_source_observation_receipt_mutation()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = pg_catalog
+AS $guard$
+BEGIN
+  RAISE EXCEPTION 'curation source observation receipts are append-only'
+    USING ERRCODE = '55000';
+END
+$guard$;
+
+CREATE TRIGGER trg_curation_source_observation_receipts_immutable
+BEFORE UPDATE OR DELETE ON ops.curation_source_observation_receipts
+FOR EACH ROW EXECUTE FUNCTION ops.reject_curation_source_observation_receipt_mutation();
+
+CREATE TRIGGER trg_curation_source_observation_receipts_no_truncate
+BEFORE TRUNCATE ON ops.curation_source_observation_receipts
+FOR EACH STATEMENT EXECUTE FUNCTION ops.reject_curation_source_observation_receipt_mutation();
+"""
+
+
 _COMMAND_PROCEDURES_SQL = r"""
 CREATE PROCEDURE feature.create_curated_source_command(
   IN p_provider_dataset_id bigint,
@@ -372,6 +407,7 @@ AS $command$
 DECLARE
   v_source feature.curated_sources%ROWTYPE;
   v_job ops.import_jobs%ROWTYPE;
+  v_receipt ops.curation_source_observation_receipts%ROWTYPE;
   v_last_imported timestamptz;
 BEGIN
   IF current_setting('transaction_isolation') <> 'serializable' THEN
@@ -384,12 +420,27 @@ BEGIN
   SELECT job.* INTO STRICT v_job FROM ops.import_jobs AS job
   WHERE job.job_id = p_import_job_id FOR SHARE;
   IF v_job.kind <> 'provider_feature_load' OR v_job.status <> 'done'
+     OR v_job.finished_at IS NULL
+     OR v_job.parent_job_id IS NULL
      OR v_job.cancellation_id IS NOT NULL OR v_job.quarantined_at IS NOT NULL
+     OR COALESCE(
+       (v_job.payload ->> 'authoritative_snapshot_complete')::boolean,
+       false
+     ) IS NOT TRUE
+     OR NOT EXISTS (
+       SELECT 1 FROM ops.import_jobs AS root
+       WHERE root.job_id = v_job.parent_job_id
+         AND root.kind = 'provider_feature_load_run'
+         AND root.dagster_run_id = v_job.dagster_run_id
+         AND root.cancellation_id IS NULL
+         AND root.quarantined_at IS NULL
+     )
      OR (SELECT count(*) FROM ops.import_job_datasets AS member WHERE member.job_id = p_import_job_id) <> 1
      OR NOT EXISTS (
        SELECT 1 FROM ops.import_job_datasets AS member
        WHERE member.job_id = p_import_job_id
          AND member.provider_dataset_id = p_provider_dataset_id
+         AND member.sync_scope = 'dataset_wide'
      ) THEN
     RAISE EXCEPTION 'source observation requires a done exact dataset member'
       USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_source_observation_job';
@@ -401,6 +452,17 @@ BEGIN
     RAISE EXCEPTION 'archived source cannot receive observations'
       USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_source_active';
   END IF;
+  SELECT receipt.* INTO v_receipt
+  FROM ops.curation_source_observation_receipts AS receipt
+  WHERE receipt.source_id = v_source.source_id
+    AND receipt.import_job_id = p_import_job_id;
+  IF FOUND THEN
+    o_source_id := v_receipt.source_id;
+    o_source_revision := v_receipt.source_revision;
+    o_observation_revision := v_receipt.observation_revision;
+    o_row_count := v_receipt.row_count;
+    RETURN;
+  END IF;
   SELECT count(head.source_entity_key)::integer, max(record.imported_at)
   INTO STRICT o_row_count, v_last_imported
   FROM provider_sync.source_entities AS entity
@@ -408,7 +470,7 @@ BEGIN
   LEFT JOIN provider_sync.source_records AS record ON record.source_record_key = head.current_source_record_key
   WHERE entity.provider_dataset_id = p_provider_dataset_id;
   UPDATE feature.curated_sources AS source
-  SET last_checked_at = clock_timestamp(), row_count = o_row_count,
+  SET last_checked_at = v_job.finished_at, row_count = o_row_count,
       last_source_modified_at = v_last_imported::date,
       next_expected_at = CASE source.update_cycle
         WHEN 'realtime' THEN current_date
@@ -422,6 +484,13 @@ BEGIN
   WHERE source.source_id = v_source.source_id
   RETURNING source.source_id, source.row_revision, source.observation_revision
     INTO STRICT o_source_id, o_source_revision, o_observation_revision;
+  INSERT INTO ops.curation_source_observation_receipts (
+    source_id, import_job_id, observed_at, source_revision,
+    observation_revision, row_count
+  ) VALUES (
+    o_source_id, p_import_job_id, v_job.finished_at, o_source_revision,
+    o_observation_revision, o_row_count
+  );
 END
 $command$;
 """
@@ -440,6 +509,7 @@ _OBSERVATION_SIGNATURE = "feature.refresh_curated_source_observation(bigint,uuid
 
 
 def upgrade() -> None:
+    _execute_commands(_OBSERVATION_RECEIPT_SQL)
     _execute_commands(_COMMAND_PROCEDURES_SQL)
     for signature in (
         _CREATE_SIGNATURE,
@@ -459,6 +529,10 @@ def upgrade() -> None:
         "freshness_note, provider_status, metadata, row_revision, archived_at, "
         "last_source_modified_at, last_checked_at, next_expected_at, row_count, "
         "observation_revision, updated_at) ON TABLE feature.curated_sources "
+        "TO ktm_curation_command_owner"
+    )
+    op.execute(
+        "GRANT INSERT, SELECT ON TABLE ops.curation_source_observation_receipts "
         "TO ktm_curation_command_owner"
     )
     op.execute("SET ROLE ktm_curation_command_owner")

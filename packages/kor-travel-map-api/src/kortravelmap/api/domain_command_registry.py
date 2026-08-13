@@ -291,10 +291,6 @@ _COMMAND_REGISTRY: Final[dict[OperationKey, CommandPolicy]] = {
         fingerprint_headers=("If-Match",),
         transaction_isolation="serializable",
     ),
-    (
-        "POST",
-        "/v1/admin/curated-source-rules/{rule_id}/apply",
-    ): _domain("admin.curated-source-rule.apply", _MUTATION_RESULT),
     ("POST", "/v1/admin/curations/import"): _domain(
         "admin.curation.import",
         _DESTRUCTIVE_RESULT,

@@ -262,7 +262,7 @@ BEGIN
     RAISE EXCEPTION 'archived theme cannot be patched'
       USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_theme_active';
   END IF;
-  IF v_theme.owner_kind <> 'operator' THEN
+  IF v_theme.owner_kind IS DISTINCT FROM 'operator' THEN
     RAISE EXCEPTION 'provider-owned theme cannot be patched by an admin command'
       USING ERRCODE = '42501';
   END IF;
@@ -414,7 +414,7 @@ BEGIN
     RAISE EXCEPTION 'theme revision mismatch'
       USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_expected_revision';
   END IF;
-  IF v_theme.owner_kind <> 'operator' THEN
+  IF v_theme.owner_kind IS DISTINCT FROM 'operator' THEN
     RAISE EXCEPTION 'provider-owned theme cannot be archived by an admin command'
       USING ERRCODE = '42501';
   END IF;

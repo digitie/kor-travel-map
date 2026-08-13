@@ -200,6 +200,8 @@ class CuratedSourceRule:
     updated_at: datetime
     row_revision: int = 1
     archived_at: datetime | None = None
+    owner_kind: str | None = None
+    owner_provider_dataset_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -373,7 +375,7 @@ _RULE_COLUMNS: Final[str] = (
     "r.place_kind, "
     "r.category, r.region_scope, r.detail_selector, r.default_action, "
     "r.priority, r.enabled, r.metadata, r.created_at, r.updated_at, "
-    "r.row_revision, r.archived_at"
+    "r.row_revision, r.archived_at, r.owner_kind, r.owner_provider_dataset_id"
 )
 _FEATURE_COLUMNS: Final[str] = """
     cf.curated_feature_id::text AS curated_feature_id,
@@ -460,7 +462,8 @@ _PUBLIC_FEATURE_FILTERS_SQL: Final[str] = (
 _LIST_THEMES_SQL: Final[str] = f"""
 SELECT {_THEME_COLUMNS}
 FROM feature.curated_themes
-WHERE (CAST(:visibility AS text) IS NULL OR visibility = CAST(:visibility AS text))
+WHERE (CAST(:include_archived AS boolean) OR archived_at IS NULL)
+  AND (CAST(:visibility AS text) IS NULL OR visibility = CAST(:visibility AS text))
   AND (CAST(:theme_group AS text) IS NULL OR theme_group = CAST(:theme_group AS text))
 ORDER BY theme_group, theme_slug
 LIMIT :limit
@@ -472,6 +475,9 @@ FROM feature.curated_sources AS s
 JOIN provider_sync.provider_datasets AS pd
   ON pd.provider_dataset_id = s.provider_dataset_id
 WHERE (
+    CAST(:include_archived AS boolean) OR s.archived_at IS NULL
+)
+  AND (
     CAST(:provider_dataset_id AS bigint) IS NULL
     OR s.provider_dataset_id = CAST(:provider_dataset_id AS bigint)
 )
@@ -499,6 +505,10 @@ JOIN feature.curated_sources AS s ON s.source_id = r.source_id
 JOIN provider_sync.provider_datasets AS pd
   ON pd.provider_dataset_id = s.provider_dataset_id
 WHERE (CAST(:theme_id AS uuid) IS NULL OR r.theme_id = CAST(:theme_id AS uuid))
+  AND (
+    CAST(:include_archived AS boolean)
+    OR (r.archived_at IS NULL AND t.archived_at IS NULL AND s.archived_at IS NULL)
+  )
   AND (
     CAST(:theme_slug AS text) IS NULL
     OR t.theme_slug = CAST(:theme_slug AS text)
@@ -1196,6 +1206,12 @@ def _rule(row: Any) -> CuratedSourceRule:
         updated_at=row["updated_at"],
         row_revision=int(row.get("row_revision", 1)),
         archived_at=row.get("archived_at"),
+        owner_kind=_text(row.get("owner_kind")),
+        owner_provider_dataset_id=(
+            int(row["owner_provider_dataset_id"])
+            if row.get("owner_provider_dataset_id") is not None
+            else None
+        ),
     )
 
 
@@ -1431,6 +1447,7 @@ async def list_curated_themes(
     *,
     visibility: str | None = None,
     theme_group: str | None = None,
+    include_archived: bool = False,
     limit: int = 200,
 ) -> tuple[CuratedTheme, ...]:
     """curated theme 목록을 조회한다."""
@@ -1443,6 +1460,7 @@ async def list_curated_themes(
             {
                 "visibility": visibility,
                 "theme_group": theme_group,
+                "include_archived": include_archived,
                 "limit": _safe_limit(limit),
             },
         )
@@ -1477,6 +1495,7 @@ async def list_curated_sources(
     *,
     provider_dataset_id: int | None = None,
     provider_status: str | None = None,
+    include_archived: bool = False,
     limit: int = 200,
 ) -> tuple[CuratedSource, ...]:
     """curated source metadata 목록을 조회한다."""
@@ -1489,6 +1508,7 @@ async def list_curated_sources(
             {
                 "provider_dataset_id": provider_dataset_id,
                 "provider_status": provider_status,
+                "include_archived": include_archived,
                 "limit": _safe_limit(limit),
             },
         )
@@ -1515,6 +1535,7 @@ async def list_curated_source_rules(
     source_id: str | None = None,
     provider_dataset_id: int | None = None,
     enabled: bool | None = None,
+    include_archived: bool = False,
     limit: int = 200,
 ) -> tuple[CuratedSourceRule, ...]:
     """curated source rule 목록을 조회한다."""
@@ -1528,6 +1549,7 @@ async def list_curated_source_rules(
                 "source_id": source_id,
                 "provider_dataset_id": provider_dataset_id,
                 "enabled": enabled,
+                "include_archived": include_archived,
                 "limit": _safe_limit(limit),
             },
         )

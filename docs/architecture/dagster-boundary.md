@@ -120,10 +120,8 @@ Dagster asset으로 연결한다. provider API 호출은 resource가 record iter
 | `feature_place_datagokr_file_data` | `datagokr_file_data_records` + `datagokr_file_data_dataset_key` | `datagokr_*` fileData 4종 (`DATAGOKR_FILEDATA_DATASETS`) | `features_place` |
 | `feature_place_mcst_culture` | `mcst_culture_records` (파일데이터 13) | `mcst_<slug>` 13종 (`MCST_FILE_DATASETS`) | `features_place` |
 
-curated overlay asset(`curated_source_metadata` / `curated_feature_candidates` /
-`curated_feature_status_sweep` / `curated_pinvi_copy_snapshots`)은 별도 group
-`curated_features`로 묶이며, provider 원천 asset 이후 실행된다 — 카탈로그는
-`docs/curated-features.md` §7.
+T-VN-40부터 별도 curated overlay asset group은 제거됐다. provider full-snapshot의 authoritative
+terminal receipt가 source observation과 candidate generation을 같은 transaction에서 실행한다.
 
 `feature_place_krairport_airports`와 `feature_weather_airkorea_air_quality` asset은
 현재 §10 정기 schedule이 없다(on-demand 전용 — Dagster UI/API 수동 실행 또는 feature
@@ -510,7 +508,6 @@ offline upload load job은 T-208h 이후 다음 흐름을 따른다.
 | `feature_notice_kma_weather_alerts_hourly_schedule` | `feature_notice_kma_weather_alerts_job` | `15 * * * *` | KMA 기상특보 시간당 |
 | `feature_place_mcst_culture_monthly_schedule` | `feature_place_mcst_culture_job` | `30 4 3 * *` | MCST 문화 파일데이터 13종 월 1회 |
 | `mois_localdata_source_sync_weekly_schedule` | `mois_localdata_source_sync` | `0 4 * * 1` | MOIS LOCALDATA source DB sync 주 1회 |
-| `curated_features_refresh_daily_schedule` | `curated_features_refresh` | `55 4 * * *` | curated overlay metadata/rule/sweep/cache refresh 일 1회 |
 | `consistency_dedup_refresh_daily_schedule` | `consistency_dedup_refresh` | `45 5 * * *` | DB 기준 dedup 후보 refresh + F1~F7 consistency report |
 
 운영 임계값은 SPEC V8 v8_0 + 실제 부하 기반으로 kor-travel-map 운영자가 조정한다.
