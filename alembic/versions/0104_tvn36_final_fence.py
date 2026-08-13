@@ -28,7 +28,9 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 _STATE_CUTOVER_SHA256 = "bfb460f0446ea4656479d8262e00347918e24a1681b32c56f301a5d2e23b06a6"
-_OVERRIDE_COMMAND_SHA256 = "355b42c734fcd77bc4f7c5ec9908906a08a2fa1added2ba74b8df5c413254f99"
+# 최종 procedure는 0100 원문이 아니라 0102가 hardening을 끝낸 텍스트에서 만든다.
+# 0102는 자기 입력(0098/0099/0100)을 다시 sha로 잠그므로 체인 전체가 고정된다.
+_NULLABLE_GEOMETRY_SHA256 = "c20bd3a9b0b8a5dcdb5a4afb53cc6bb0657632a9d86d75559eedd25d8b5bae03"
 
 
 def _load_source_module(filename: str, expected_sha256: str) -> ModuleType:
@@ -114,8 +116,14 @@ _REVOKE_REQUEST_GUARD = """    IF (v_operation LIKE 'user.%') <> (p_request_id I
 """
 
 
-def _final_author_procedure(commands: ModuleType) -> str:
-    source = str(commands._AUTHOR_PROCEDURE_SQL)
+def _final_author_procedure(hardened: ModuleType) -> str:
+    # 입력은 0100 원문이 아니라 **0102가 hardening을 마친** 텍스트다. 0104는
+    # request-uuid 시그니처를 DROP하고 다시 CREATE하므로, 0100에서 만들면
+    # 0101(coalesce null)·0102(nullable geometry / st_multi / revoke 집계)의
+    # 수정이 통째로 되감긴다 — 두 writer(provider patch는 0104가 건드리지
+    # 않는다)가 서로 다른 세대가 되어 `{"coord": null}` PATCH가 422로 죽었다.
+    source = str(hardened._AUTHOR_OVERRIDE_SQL)
+    source = _replace_exact(source, "CREATE OR REPLACE PROCEDURE", "CREATE PROCEDURE")
     source = _replace_exact(
         source,
         """    IN p_command_id bigint,
@@ -156,19 +164,22 @@ def _final_author_procedure(commands: ModuleType) -> str:
         """               p_command_id, COALESCE(base.base_revision, v_feature.row_revision),
 """,
     )
+    # geometry INSERT는 0102가 nullable geometry를 위해 통째로 갈아끼웠다 —
+    # anchor도 그 결과 모양이어야 한다.
     return _replace_exact(
         source,
-        """               btrim(p_reason_code), p_command_id, p_request_id,
+        """               false, 'active', btrim(p_reason_code), p_command_id, p_request_id,
                COALESCE(base.base_revision, v_feature.row_revision), btrim(p_principal),
 """,
-        """               btrim(p_reason_code), p_command_id,
+        """               false, 'active', btrim(p_reason_code), p_command_id,
                COALESCE(base.base_revision, v_feature.row_revision), btrim(p_principal),
 """,
     )
 
 
-def _final_revoke_procedure(commands: ModuleType) -> str:
-    source = str(commands._REVOKE_PROCEDURE_SQL)
+def _final_revoke_procedure(hardened: ModuleType) -> str:
+    source = str(hardened._REVOKE_OVERRIDE_SQL)
+    source = _replace_exact(source, "CREATE OR REPLACE PROCEDURE", "CREATE PROCEDURE")
     source = _replace_exact(
         source,
         """    IN p_command_id bigint,
@@ -193,8 +204,8 @@ def upgrade() -> None:
     state_cutover = _load_source_module(
         "0097_tvn34c_final_state_cutover.py", _STATE_CUTOVER_SHA256
     )
-    override_commands = _load_source_module(
-        "0100_tvn36_field_override_commands.py", _OVERRIDE_COMMAND_SHA256
+    hardened_commands = _load_source_module(
+        "0102_tvn36_nullable_geometry.py", _NULLABLE_GEOMETRY_SHA256
     )
 
     # Procedure-only field writes keep their frozen static field assignment
@@ -204,8 +215,8 @@ def upgrade() -> None:
         "DROP PROCEDURE feature.author_feature_field_overrides(text, bigint, text, text, bigint, uuid, jsonb, jsonb)",
         "DROP PROCEDURE feature.revoke_feature_field_overrides(text, bigint, text, text, bigint, uuid, text[])",
         _final_create_procedure(state_cutover),
-        _final_author_procedure(override_commands),
-        _final_revoke_procedure(override_commands),
+        _final_author_procedure(hardened_commands),
+        _final_revoke_procedure(hardened_commands),
         "ALTER PROCEDURE feature.create_feature_with_initial_state(jsonb, text, text, text, jsonb) OWNER TO ktm_feature_state_procedure_owner",
         "ALTER PROCEDURE feature.author_feature_field_overrides(text, bigint, text, text, bigint, jsonb, jsonb) OWNER TO ktm_feature_state_procedure_owner",
         "ALTER PROCEDURE feature.revoke_feature_field_overrides(text, bigint, text, text, bigint, text[]) OWNER TO ktm_feature_state_procedure_owner",

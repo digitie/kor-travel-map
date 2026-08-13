@@ -45,6 +45,23 @@ def _load(name: str, expected_sha256: str) -> ModuleType:
     return module
 
 
+def _sub(source: str, old: str, new: str, *, count: int = 1) -> str:
+    """anchor가 정확히 ``count``번 나오지 않으면 실패한다.
+
+    sha 고정은 predecessor **파일**이 바뀌었는지만 본다 — anchor가 predecessor의
+    f-string 렌더 결과와 어긋나 있으면 sha는 그대로인 채 ``str.replace``가 원문을
+    조용히 돌려준다. 실제로 ``_REVOKE_AGGREGATE_OLD``가 ``'{{}}'``(f-string 소스
+    표기)를 들고 있어 렌더된 ``'{}'``에 한 번도 매치되지 않았고, revoke 수정이
+    배포된 적이 없었다. 조용히 통과하는 대신 migration을 세운다.
+    """
+    occurrences = source.count(old)
+    if occurrences != count:
+        raise RuntimeError(
+            f"T-VN-36 nullable-geometry anchor matched {occurrences} times, expected {count}"
+        )
+    return source.replace(old, new)
+
+
 _lineage = _load("0098_tvn36_override_lineage_spine.py", _LINEAGE_SPINE_SHA256)
 _provider = _load("0099_tvn36_provider_field_patch.py", _PROVIDER_PATCH_SHA256)
 _commands = _load("0100_tvn36_field_override_commands.py", _OVERRIDE_COMMANDS_SHA256)
@@ -234,24 +251,36 @@ _PROVIDER_GEOMETRY_NEW = """    FOR v_field_path, v_value IN SELECT key, value F
             observed_at = EXCLUDED.observed_at,
             updated_at = clock_timestamp();
     END LOOP;"""
-_PROVIDER_PATCH_SQL = (
-    cast(Any, _provider._PROVIDER_PATCH_PROCEDURE_SQL)
-    .replace("CREATE PROCEDURE", "CREATE OR REPLACE PROCEDURE", 1)
-    .replace(
+def _build_provider_patch_sql() -> str:
+    source = cast(str, _provider._PROVIDER_PATCH_PROCEDURE_SQL)
+    source = _sub(source, "CREATE PROCEDURE", "CREATE OR REPLACE PROCEDURE")
+    source = _sub(
+        source,
         "    v_base_revision bigint;\n",
         "    v_base_revision bigint;\n    v_preserved_notice_start jsonb;\n",
-        1,
     )
-    .replace(
+    # first_probe 보존은 **base ledger**를 읽어야 한다. effective
+    # ``feature.feature_notices``는 operator override에 이미 가려져 있고
+    # (``notice.valid_start_time``은 registry에서 operator_writable), 그 값을
+    # 여기서 p_values에 밀어 넣으면 현재 provider record의 hash를 달고
+    # ``feature_base_field_values``에 기록된다 — operator 편집이 provider
+    # 관측으로 세탁되고, provider의 실제 관측은 ledger에서 영구히 사라진다.
+    # 0104가 ``feature.feature_versions``를 없애므로 base ledger가 유일한
+    # field provenance 기록이다.
+    source = _sub(
+        source,
         "    v_base_revision := v_feature.row_revision + 1;\n\n"
         "    FOR v_field_path, v_value IN SELECT key, value FROM jsonb_each(p_values) LOOP",
         "    v_base_revision := v_feature.row_revision + 1;\n"
         "    IF v_feature.kind = 'notice'\n"
         "       AND p_values -> 'notice.payload' ->> 'valid_start_origin' = 'first_probe'\n"
         "       AND p_values ? 'notice.valid_start_time' THEN\n"
-        "        SELECT to_jsonb(valid_start_time) INTO v_preserved_notice_start\n"
-        "        FROM feature.feature_notices\n"
-        "        WHERE feature_id = p_feature_id AND valid_start_time IS NOT NULL\n"
+        "        SELECT base.value_json INTO v_preserved_notice_start\n"
+        "        FROM feature.feature_base_field_values AS base\n"
+        "        WHERE base.feature_id = p_feature_id\n"
+        "          AND base.field_path = 'notice.valid_start_time'\n"
+        "          AND base.value_json IS NOT NULL\n"
+        "          AND base.value_json <> 'null'::jsonb\n"
         "        FOR SHARE;\n"
         "        IF FOUND THEN\n"
         "            p_values := jsonb_set(\n"
@@ -260,32 +289,35 @@ _PROVIDER_PATCH_SQL = (
         "        END IF;\n"
         "    END IF;\n\n"
         "    FOR v_field_path, v_value IN SELECT key, value FROM jsonb_each(p_values) LOOP",
-        1,
     )
-    .replace(
+    source = _sub(
+        source,
         "            v_value, v_base_revision, clock_timestamp()",
         "            coalesce(v_value, 'null'::jsonb), v_base_revision, clock_timestamp()",
-        1,
     )
-    .replace(_PROVIDER_GEOMETRY_OLD, _PROVIDER_GEOMETRY_NEW, 1)
-    .replace(
+    source = _sub(source, _PROVIDER_GEOMETRY_OLD, _PROVIDER_GEOMETRY_NEW)
+    source = _sub(
+        source,
         "ELSE x_extension.st_geomfromtext(v_value #>> '{}', 4326) END",
         "ELSE CASE v_registry.geometry_type\n"
         "                      WHEN 'MULTILINESTRING' THEN x_extension.st_multi(x_extension.st_geomfromtext(v_value #>> '{}', 4326))\n"
         "                      WHEN 'MULTIPOLYGON' THEN x_extension.st_multi(x_extension.st_geomfromtext(v_value #>> '{}', 4326))\n"
         "                      ELSE x_extension.st_geomfromtext(v_value #>> '{}', 4326)\n"
         "                 END END",
-        1,
     )
-    .replace(
+    source = _sub(
+        source,
         "x_extension.st_geomfromtext(p_geometry_wkt ->> 'route.geom', 4326)",
         "x_extension.st_multi(x_extension.st_geomfromtext(p_geometry_wkt ->> 'route.geom', 4326))",
     )
-    .replace(
+    return _sub(
+        source,
         "x_extension.st_geomfromtext(p_geometry_wkt ->> 'area.geom', 4326)",
         "x_extension.st_multi(x_extension.st_geomfromtext(p_geometry_wkt ->> 'area.geom', 4326))",
     )
-)
+
+
+_PROVIDER_PATCH_SQL = _build_provider_patch_sql()
 
 _AUTHOR_GEOMETRY_OLD = """    FOR v_field_path, v_geometry_wkt IN SELECT key, value FROM jsonb_each_text(p_geometry_wkt) LOOP
         SELECT * INTO v_registry FROM ops.feature_override_field_paths
@@ -352,64 +384,76 @@ _AUTHOR_GEOMETRY_NEW = """    FOR v_field_path, v_value IN SELECT key, value FRO
         LEFT JOIN feature.feature_base_field_values AS base
           ON base.feature_id = p_feature_id AND base.field_path = v_field_path;
     END LOOP;"""
-_AUTHOR_OVERRIDE_SQL = (
-    cast(Any, _commands._AUTHOR_PROCEDURE_SQL)
-    .replace("CREATE PROCEDURE", "CREATE OR REPLACE PROCEDURE", 1)
-    .replace(
+def _build_author_override_sql() -> str:
+    source = cast(str, _commands._AUTHOR_PROCEDURE_SQL)
+    source = _sub(source, "CREATE PROCEDURE", "CREATE OR REPLACE PROCEDURE")
+    source = _sub(
+        source,
         "               base.value_json, v_value, false, 'active', btrim(p_reason_code),",
         "               base.value_json, coalesce(v_value, 'null'::jsonb), false, 'active', btrim(p_reason_code),",
-        1,
     )
-    .replace(_AUTHOR_GEOMETRY_OLD, _AUTHOR_GEOMETRY_NEW, 1)
-    .replace(
+    source = _sub(source, _AUTHOR_GEOMETRY_OLD, _AUTHOR_GEOMETRY_NEW)
+    source = _sub(
+        source,
         "ELSE x_extension.st_geomfromtext(v_value #>> '{}', 4326) END",
         "ELSE CASE v_registry.geometry_type\n"
         "                      WHEN 'MULTILINESTRING' THEN x_extension.st_multi(x_extension.st_geomfromtext(v_value #>> '{}', 4326))\n"
         "                      WHEN 'MULTIPOLYGON' THEN x_extension.st_multi(x_extension.st_geomfromtext(v_value #>> '{}', 4326))\n"
         "                      ELSE x_extension.st_geomfromtext(v_value #>> '{}', 4326)\n"
         "                 END END",
-        1,
     )
-    .replace(
+    source = _sub(
+        source,
         "x_extension.st_geomfromtext(p_geometry_wkt ->> 'route.geom', 4326)",
         "x_extension.st_multi(x_extension.st_geomfromtext(p_geometry_wkt ->> 'route.geom', 4326))",
     )
-    .replace(
+    return _sub(
+        source,
         "x_extension.st_geomfromtext(p_geometry_wkt ->> 'area.geom', 4326)",
         "x_extension.st_multi(x_extension.st_geomfromtext(p_geometry_wkt ->> 'area.geom', 4326))",
     )
-)
+
+
+_AUTHOR_OVERRIDE_SQL = _build_author_override_sql()
+# 0100의 procedure 본문은 f-string이므로 소스의 ``'{{}}'``는 ``'{}'``로 렌더된다.
+# anchor는 **렌더 결과**와 맞춰야 한다.
 _REVOKE_AGGREGATE_OLD = """    SELECT COALESCE(jsonb_object_agg(base.field_path, base.value_json)
-                    FILTER (WHERE base.value_json IS NOT NULL), '{{}}'::jsonb),
+                    FILTER (WHERE base.value_json IS NOT NULL), '{}'::jsonb),
            COALESCE(jsonb_object_agg(base.field_path, x_extension.st_astext(base.value_geometry))
-                    FILTER (WHERE base.value_geometry IS NOT NULL), '{{}}'::jsonb)
+                    FILTER (WHERE base.value_geometry IS NOT NULL), '{}'::jsonb)
     INTO v_values, v_geometry_wkt
     FROM feature.feature_base_field_values AS base
     WHERE base.feature_id = p_feature_id AND base.field_path = ANY(p_field_paths);"""
 _REVOKE_AGGREGATE_NEW = """    SELECT COALESCE(jsonb_object_agg(base.field_path, base.value_json)
-                    FILTER (WHERE registry.value_kind <> 'geometry'), '{{}}'::jsonb),
+                    FILTER (WHERE registry.value_kind <> 'geometry'), '{}'::jsonb),
            COALESCE(jsonb_object_agg(
                     base.field_path,
                     CASE WHEN base.value_json = 'null'::jsonb THEN 'null'::jsonb
                          ELSE to_jsonb(x_extension.st_astext(base.value_geometry)) END
-                ) FILTER (WHERE registry.value_kind = 'geometry'), '{{}}'::jsonb)
+                ) FILTER (WHERE registry.value_kind = 'geometry'), '{}'::jsonb)
     INTO v_values, v_geometry_wkt
     FROM feature.feature_base_field_values AS base
     JOIN ops.feature_override_field_paths AS registry USING (field_path)
     WHERE base.feature_id = p_feature_id AND base.field_path = ANY(p_field_paths);"""
-_REVOKE_OVERRIDE_SQL = (
-    cast(Any, _commands._REVOKE_PROCEDURE_SQL)
-    .replace("CREATE PROCEDURE", "CREATE OR REPLACE PROCEDURE", 1)
-    .replace(_REVOKE_AGGREGATE_OLD, _REVOKE_AGGREGATE_NEW, 1)
-    .replace(
+
+
+def _build_revoke_override_sql() -> str:
+    source = cast(str, _commands._REVOKE_PROCEDURE_SQL)
+    source = _sub(source, "CREATE PROCEDURE", "CREATE OR REPLACE PROCEDURE")
+    source = _sub(source, _REVOKE_AGGREGATE_OLD, _REVOKE_AGGREGATE_NEW)
+    source = _sub(
+        source,
         "x_extension.st_geomfromtext(v_geometry_wkt ->> 'route.geom', 4326)",
         "x_extension.st_multi(x_extension.st_geomfromtext(v_geometry_wkt ->> 'route.geom', 4326))",
     )
-    .replace(
+    return _sub(
+        source,
         "x_extension.st_geomfromtext(v_geometry_wkt ->> 'area.geom', 4326)",
         "x_extension.st_multi(x_extension.st_geomfromtext(v_geometry_wkt ->> 'area.geom', 4326))",
     )
-)
+
+
+_REVOKE_OVERRIDE_SQL = _build_revoke_override_sql()
 
 
 def upgrade() -> None:
