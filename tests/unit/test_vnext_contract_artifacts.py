@@ -43,7 +43,10 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     "tvn33-reference-ownership-v1.sql": (
         "9f434b50440c7463b86a5cf61abeb30bf6fe8d74a5760aa256374c76e4c9328a"
     ),
-    "openapi-diff-v1.json": ("d32d8790170c060b13b65ec678ebfcafbfa9232319648256379439f77d584bb2"),
+    # 2026-08-13 T-VN-36 — admin surface에서 죽은 요청 필드
+    # prevent_provider_reactivation 제거를 removed 축에 선언하고 admin baseline
+    # sha를 재고정했다 (user/service surface bytes는 불변).
+    "openapi-diff-v1.json": ("4094bf1a308007b009536d9f96771612bfaadb7828514139f57e85aceb66a01c"),
     "consumer-rollout-v1.json": (
         "d22f1ba91ccc70cad09e25a8815cb164452193e98bdaf5b4a2f2f11378cf1f0b"
     ),

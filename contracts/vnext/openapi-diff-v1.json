@@ -5,7 +5,7 @@
   "baseline": {
     "admin": {
       "file": "packages/kor-travel-map-api/openapi.json",
-      "sha256": "ff3fe7d0599f950947f1d16675475925754421501a68c9acc856ec954a2e3642"
+      "sha256": "e48b7c0ed839735b5c2936addcbac5498b113a0038ab7b53d8a186e86249ba66"
     },
     "user": {
       "file": "packages/kor-travel-map-api/openapi.user.json",
@@ -311,7 +311,7 @@
     "admin": {
       "counts": {
         "added": 1,
-        "removed": 9,
+        "removed": 10,
         "renamed": 0,
         "enum_changes": 4,
         "status_changes": 0,
@@ -371,6 +371,11 @@
           "operation": "POST /v1/admin/features/curated/{curated_feature_id}/unselect",
           "detail": "legacy curated_features overlay 부속 command",
           "basis": "T-VN-40C"
+        },
+        {
+          "operation": "PATCH /v1/admin/issues/{issue_id}",
+          "detail": "request field prevent_provider_reactivation — lifecycle 축 전용 제어라 주소/좌표 override 경로에서는 읽는 쪽이 없었다 (재적재 가드는 field_path='lifecycle_state' 한정). 재적재 보호 근거는 provider field patch의 active override masking이다.",
+          "basis": "T-VN-36"
         }
       ],
       "renamed": [],
