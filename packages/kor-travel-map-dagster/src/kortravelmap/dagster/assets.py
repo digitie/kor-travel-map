@@ -144,6 +144,7 @@ from .etl import (
     DagsterFeatureLoadResult,
     _add_output_metadata,
     _dagster_run_id,
+    load_feature_bundle_batches_for_dagster,
     load_feature_bundles_for_dagster,
 )
 from .feature_operation_tracking import (
@@ -1013,29 +1014,51 @@ async def run_feature_place_mois_licenses(
     """MOIS 인허가 record를 place Feature로 적재한다."""
     fetched_at = await _fetched_at(context)
     dataset_key = await _resource_value(context, "mois_dataset_key", default=MOIS_BULK_DATASET_KEY)
-    # Authoritative curation seal은 적재와 같은 DB image를 증명해야 한다. batch별
-    # transaction을 먼저 commit한 뒤 마지막에 boolean만 승격하면 중간 writer가
-    # 끼어든 mixed snapshot을 정상 receipt로 오인하므로, 변환만 batch로 수행하고
-    # 최종 적재는 단일 causal transaction으로 닫는다.
-    snapshot_bundles: list[Any] = []
-    async for records in _record_batches(
-        context, "mois_license_records", batch_size=MOIS_RECORD_BATCH_SIZE
-    ):
-        snapshot_bundles.extend(
-            await license_records_to_bundles(
+    client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
+    strict_address = cast(
+        "bool | str",
+        await _resource_value(context, "strict_address", default="strict"),
+    )
+
+    async def _bundle_batches() -> AsyncIterator[Sequence[Any]]:
+        async for records in _record_batches(
+            context, "mois_license_records", batch_size=MOIS_RECORD_BATCH_SIZE
+        ):
+            # 변환 결과도 현재 1,000-record batch만 유지한다. 전체 snapshot은
+            # 아래 client transaction에서 순차 적재되고 마지막에 한 번 봉인된다.
+            yield await license_records_to_bundles(
                 records,
                 fetched_at=fetched_at,
                 dataset_key=str(dataset_key),
                 reverse_geocoder=_reverse_geocoder(context),
             )
+
+    async def _load_all(
+        batches: AsyncIterable[Sequence[Any]],
+    ) -> FeatureLoadResult:
+        return await client.load_feature_bundle_batches(
+            batches,
+            curation_dataset=(MOIS_PROVIDER_NAME, str(dataset_key)),
         )
-    return await _load(
-        context,
+
+    result = await load_feature_bundle_batches_for_dagster(
+        context=context,
+        client=client,
+        batches=_bundle_batches(),
         provider=MOIS_PROVIDER_NAME,
         dataset_key=str(dataset_key),
-        bundles=snapshot_bundles,
-        authoritative_snapshot_complete=True,
+        strict_address=strict_address,
+        load_all=_load_all,
     )
+    await _record_feature_sync_success(
+        context,
+        client,
+        provider=MOIS_PROVIDER_NAME,
+        dataset_key=str(dataset_key),
+        cursor_extra=_feature_result_cursor_extra(result),
+        observation_receipt=result.observation_receipt,
+    )
+    return result
 
 
 @asset(

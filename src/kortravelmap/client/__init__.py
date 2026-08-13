@@ -335,7 +335,14 @@ from kortravelmap.providers.visitkorea import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Collection, Iterable, Mapping, Sequence
+    from collections.abc import (
+        AsyncIterable,
+        AsyncIterator,
+        Collection,
+        Iterable,
+        Mapping,
+        Sequence,
+    )
     from datetime import datetime
 
     from sqlalchemy.ext.asyncio import AsyncEngine
@@ -999,6 +1006,34 @@ class AsyncKorTravelMapClient:
         materialized = list(bundles)
         async with self._session_factory() as session, session.begin():
             result = await load_bundles(session, materialized)
+            if curation_dataset is not None:
+                provider, dataset_key = curation_dataset
+                result = result.merge(
+                    await capture_provider_curation_input(
+                        session, provider=provider, dataset_key=dataset_key
+                    )
+                )
+            return result
+
+    async def load_feature_bundle_batches(
+        self,
+        batches: AsyncIterable[Sequence[FeatureBundle]],
+        *,
+        curation_dataset: tuple[str, str] | None = None,
+    ) -> FeatureLoadResult:
+        """async batch stream을 한 transaction으로 적재한다.
+
+        대용량 authoritative snapshot은 전체 ``FeatureBundle``을 materialize하지
+        않는다. 각 batch는 앞 batch와 같은 transaction/session에서 적재되고,
+        iterator나 DB write가 실패하면 이미 처리한 batch까지 전부 rollback한다.
+        """
+
+        result = FeatureLoadResult()
+        async with self._session_factory() as session, session.begin():
+            async for batch in batches:
+                if not batch:
+                    continue
+                result = result.merge(await load_bundles(session, batch))
             if curation_dataset is not None:
                 provider, dataset_key = curation_dataset
                 result = result.merge(

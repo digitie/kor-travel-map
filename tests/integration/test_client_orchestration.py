@@ -239,6 +239,26 @@ async def test_load_feature_bundles_commits_and_reads(
     assert any(f["feature_id"] == fid for f in feats)
 
 
+async def test_load_feature_bundle_batches_rolls_back_prior_batches(
+    map_client: AsyncKorTravelMapClient,
+) -> None:
+    bundles = await cultural_festivals_to_bundles(
+        [_FEST],  # type: ignore[list-item]
+        fetched_at=datetime(2026, 5, 28, 12, 0, tzinfo=_KST),
+    )
+
+    async def _failing_batches() -> AsyncIterator[list[object]]:
+        yield list(bundles)
+        raise RuntimeError("second batch conversion failed")
+
+    with pytest.raises(RuntimeError, match="second batch"):
+        await map_client.load_feature_bundle_batches(  # type: ignore[arg-type]
+            _failing_batches()
+        )
+
+    assert await map_client.get_feature(bundles[0].feature.feature_id) is None
+
+
 async def test_sync_dedup_candidates_persists(
     map_client: AsyncKorTravelMapClient, migrated_engine: AsyncEngine
 ) -> None:

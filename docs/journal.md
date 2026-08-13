@@ -2,6 +2,14 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-14 — T-VN-40: MOIS authoritative snapshot bounded-memory 적재
+
+MOIS 전체 snapshot의 인과성을 보존하려고 70만 건급 `FeatureBundle`을 모두 list로 보관하던
+경로를 async batch stream으로 바꿨다. provider record 변환·주소 검증은 1,000건 batch만 유지하고,
+client는 모든 batch를 같은 session/transaction에서 순차 적재한 뒤 curation input을 한 번 봉인한다.
+중간 변환·DB 오류는 앞 batch까지 전부 rollback한다. 실제 PostgreSQL rollback 회귀와 Dagster의
+2/2/1 batch 소비 회귀, MOIS asset의 변환 batch 상한을 각각 고정했다.
+
 ## 2026-08-14 — T-VN-40: provider terminal 증거와 attempt event 경계
 
 provider membership 완료 명령은 이제 `authoritative_snapshot_complete=true`와 exact immutable
