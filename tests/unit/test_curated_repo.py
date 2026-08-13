@@ -426,6 +426,73 @@ async def test_curated_repo_write_paths_with_fake_session() -> None:
 
 
 @pytest.mark.asyncio
+async def test_retained_rule_commands_use_full_desired_cas_inputs() -> None:
+    session = _FakeSession(
+        [{"o_rule_id": _RULE_ID, "o_rule_revision": 1, "o_generation_id": "gen-1"}],
+        [_rule_row(row_revision=1)],
+        [_rule_row(row_revision=1)],
+        [{"o_rule_id": _RULE_ID, "o_rule_revision": 2, "o_generation_id": "gen-2"}],
+        [_rule_row(row_revision=2, priority=90, default_action="ignore")],
+        [_rule_row(row_revision=2, priority=90, default_action="ignore")],
+        [{"o_rule_id": _RULE_ID, "o_rule_revision": 3, "o_generation_id": "gen-3"}],
+        [
+            _rule_row(
+                row_revision=3,
+                priority=90,
+                default_action="ignore",
+                archived_at=_NOW,
+            )
+        ],
+    )
+
+    created = await curated_repo.create_curated_source_rule_command(
+        session,
+        theme_id=_THEME_ID,
+        source_id=_SOURCE_ID,
+        region_scope={"sido_code": "11"},
+        command_id=101,
+        principal="admin:rule-test",
+    )
+    patched = await curated_repo.patch_curated_source_rule_command(
+        session,
+        rule_id=_RULE_ID,
+        expected_revision=1,
+        updates={"priority": 90, "default_action": "ignore"},
+        command_id=102,
+        principal="admin:rule-test",
+    )
+    archived = await curated_repo.archive_curated_source_rule_command(
+        session,
+        rule_id=_RULE_ID,
+        expected_revision=2,
+        command_id=103,
+        reason_code="operator_retired",
+        principal="admin:rule-test",
+    )
+
+    assert created.row_revision == 1
+    assert patched is not None
+    assert (patched.row_revision, patched.priority, patched.default_action) == (
+        2,
+        90,
+        "ignore",
+    )
+    assert archived is not None
+    assert (archived.row_revision, archived.archived_at) == (3, _NOW)
+    command_calls = [call for call in session.calls if "CALL feature." in call[0]]
+    assert [
+        "create_curated_source_rule_command" in call[0]
+        or "patch_curated_source_rule_command" in call[0]
+        or "archive_curated_source_rule_command" in call[0]
+        for call in command_calls
+    ] == [True, True, True]
+    assert command_calls[1][1]["expected_revision"] == 1
+    assert command_calls[1][1]["priority"] == 90
+    assert command_calls[1][1]["region_scope_json"] == "{}"
+    assert command_calls[2][1]["expected_revision"] == 2
+
+
+@pytest.mark.asyncio
 async def test_curated_repo_dagster_batch_paths_with_fake_session() -> None:
     session = _FakeSession(
         [

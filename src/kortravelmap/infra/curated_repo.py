@@ -45,9 +45,11 @@ __all__ = [
     "create_curated_feature",
     "create_curated_source",
     "create_curated_source_rule",
+    "create_curated_source_rule_command",
     "create_curated_theme",
     "get_curated_feature",
     "get_curated_feature_detail_snapshot",
+    "get_curated_source_rule",
     "list_curated_features",
     "list_curated_source_rules",
     "list_curated_sources",
@@ -59,6 +61,8 @@ __all__ = [
     "update_curated_feature",
     "update_curated_source",
     "update_curated_source_rule",
+    "patch_curated_source_rule_command",
+    "archive_curated_source_rule_command",
     "update_curated_theme",
 ]
 
@@ -101,6 +105,7 @@ _PROVIDER_STATUSES: Final[frozenset[str]] = frozenset(
 _RULE_ACTIONS: Final[frozenset[str]] = frozenset(
     {"candidate", "curated", "ignore"}
 )
+_TYPED_RULE_ACTIONS: Final[frozenset[str]] = frozenset({"candidate", "ignore"})
 _MAX_PAGE_SIZE: Final[int] = 200
 _MAX_LIST_LIMIT: Final[int] = 500
 _CONCIERGE_PROVIDER: Final[str] = "kor-travel-concierge-youtube"
@@ -187,6 +192,8 @@ class CuratedSourceRule:
     metadata: dict[str, Any]
     created_at: datetime
     updated_at: datetime
+    row_revision: int = 1
+    archived_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -357,7 +364,8 @@ _RULE_COLUMNS: Final[str] = (
     "r.source_id::text AS source_id, s.provider_dataset_id, pd.provider, pd.dataset_key, "
     "r.place_kind, "
     "r.category, r.region_scope, r.detail_selector, r.default_action, "
-    "r.priority, r.enabled, r.metadata, r.created_at, r.updated_at"
+    "r.priority, r.enabled, r.metadata, r.created_at, r.updated_at, "
+    "r.row_revision, r.archived_at"
 )
 _FEATURE_COLUMNS: Final[str] = """
     cf.curated_feature_id::text AS curated_feature_id,
@@ -1168,6 +1176,8 @@ def _rule(row: Any) -> CuratedSourceRule:
         metadata=_json_object(row["metadata"]),
         created_at=row["created_at"],
         updated_at=row["updated_at"],
+        row_revision=int(row.get("row_revision", 1)),
+        archived_at=row.get("archived_at"),
     )
 
 
@@ -1479,6 +1489,16 @@ async def list_curated_source_rules(
         )
     ).mappings().all()
     return tuple(_rule(row) for row in rows)
+
+
+async def get_curated_source_rule(
+    session: AsyncSession,
+    *,
+    rule_id: str,
+) -> CuratedSourceRule | None:
+    """retained source rule 단건을 조회한다."""
+
+    return await _get_rule(session, rule_id)
 
 
 async def list_curated_features(
@@ -2490,6 +2510,183 @@ async def update_curated_source_rule(
     if row is None:
         return None
     return await _get_rule(session, str(row["rule_id"]))
+
+
+async def create_curated_source_rule_command(
+    session: AsyncSession,
+    *,
+    theme_id: str,
+    source_id: str,
+    place_kind: str | None = None,
+    category: str | None = None,
+    region_scope: Mapping[str, Any] | None = None,
+    detail_selector: Mapping[str, Any] | None = None,
+    default_action: str = "candidate",
+    priority: int = 0,
+    enabled: bool = True,
+    metadata: Mapping[str, Any] | None = None,
+    command_id: int,
+    principal: str,
+) -> CuratedSourceRule:
+    """domain command에 결박된 retained source rule create를 실행한다."""
+
+    _validate_choice(default_action, _TYPED_RULE_ACTIONS, "default_action")
+    result = (
+        await session.execute(
+            text(
+                """
+                CALL feature.create_curated_source_rule_command(
+                  CAST(:theme_id AS uuid), CAST(:source_id AS uuid),
+                  :place_kind, :category, CAST(:region_scope_json AS jsonb),
+                  CAST(:detail_selector_json AS jsonb), :default_action,
+                  :priority, :enabled, CAST(:metadata_json AS jsonb),
+                  :command_id, :principal, NULL, NULL, NULL
+                )
+                """
+            ),
+            {
+                "theme_id": theme_id,
+                "source_id": source_id,
+                "place_kind": place_kind,
+                "category": category,
+                "region_scope_json": _json_dumps(region_scope),
+                "detail_selector_json": (
+                    _json_dumps(detail_selector)
+                    if detail_selector is not None
+                    else None
+                ),
+                "default_action": default_action,
+                "priority": priority,
+                "enabled": enabled,
+                "metadata_json": _json_dumps(metadata),
+                "command_id": command_id,
+                "principal": principal,
+            },
+        )
+    ).mappings().one()
+    rule = await _get_rule(session, str(result["o_rule_id"]))
+    if rule is None:
+        raise RuntimeError("created curated source rule could not be read")
+    return rule
+
+
+async def patch_curated_source_rule_command(
+    session: AsyncSession,
+    *,
+    rule_id: str,
+    expected_revision: int,
+    updates: Mapping[str, Any],
+    command_id: int,
+    principal: str,
+) -> CuratedSourceRule | None:
+    """현재 row를 full desired command input으로 만든 뒤 CAS patch한다."""
+
+    allowed = {
+        "place_kind",
+        "category",
+        "region_scope",
+        "detail_selector",
+        "default_action",
+        "priority",
+        "enabled",
+        "metadata",
+    }
+    unknown = set(updates) - allowed
+    if unknown:
+        raise ValueError(f"unsupported update fields: {sorted(unknown)}")
+    current = await _get_rule(session, rule_id)
+    if current is None:
+        return None
+    desired: dict[str, Any] = {
+        "place_kind": current.place_kind,
+        "category": current.category,
+        "region_scope": current.region_scope,
+        "detail_selector": current.detail_selector,
+        "default_action": current.default_action,
+        "priority": current.priority,
+        "enabled": current.enabled,
+        "metadata": current.metadata,
+    }
+    desired.update(updates)
+    default_action = desired["default_action"]
+    if not isinstance(default_action, str):
+        raise ValueError("default_action must not be null")
+    _validate_choice(default_action, _TYPED_RULE_ACTIONS, "default_action")
+    result = (
+        await session.execute(
+            text(
+                """
+                CALL feature.patch_curated_source_rule_command(
+                  CAST(:rule_id AS uuid), :expected_revision,
+                  :place_kind, :category, CAST(:region_scope_json AS jsonb),
+                  CAST(:detail_selector_json AS jsonb), :default_action,
+                  :priority, :enabled, CAST(:metadata_json AS jsonb),
+                  :command_id, :principal, NULL, NULL, NULL
+                )
+                """
+            ),
+            {
+                "rule_id": rule_id,
+                "expected_revision": expected_revision,
+                "place_kind": desired["place_kind"],
+                "category": desired["category"],
+                "region_scope_json": _json_dumps(desired["region_scope"]),
+                "detail_selector_json": (
+                    _json_dumps(desired["detail_selector"])
+                    if desired["detail_selector"] is not None
+                    else None
+                ),
+                "default_action": default_action,
+                "priority": desired["priority"],
+                "enabled": desired["enabled"],
+                "metadata_json": _json_dumps(desired["metadata"]),
+                "command_id": command_id,
+                "principal": principal,
+            },
+        )
+    ).mappings().one()
+    updated = await _get_rule(session, str(result["o_rule_id"]))
+    if updated is None:
+        raise RuntimeError("patched curated source rule could not be read")
+    return updated
+
+
+async def archive_curated_source_rule_command(
+    session: AsyncSession,
+    *,
+    rule_id: str,
+    expected_revision: int,
+    command_id: int,
+    reason_code: str,
+    principal: str,
+) -> CuratedSourceRule | None:
+    """retained source rule을 CAS archive하고 candidate reconcile을 완료한다."""
+
+    if await _get_rule(session, rule_id) is None:
+        return None
+    result = (
+        await session.execute(
+            text(
+                """
+                CALL feature.archive_curated_source_rule_command(
+                  CAST(:rule_id AS uuid), :expected_revision, :command_id,
+                  :reason_code, :principal, NULL, NULL, NULL
+                )
+                """
+            ),
+            {
+                "rule_id": rule_id,
+                "expected_revision": expected_revision,
+                "command_id": command_id,
+                "reason_code": reason_code,
+                "principal": principal,
+            },
+        )
+    ).mappings().one()
+    archived = await _get_rule(session, str(result["o_rule_id"]))
+    if archived is None:
+        raise RuntimeError("archived curated source rule could not be read")
+    return archived
 
 
 async def _get_rule(session: AsyncSession, rule_id: str) -> CuratedSourceRule | None:

@@ -5,6 +5,16 @@
 
 ## [Unreleased]
 
+### retained curation rule CAS API (2026-08-13, T-VN-40)
+
+- **API(admin)**: retained source rule에 단건 GET과 archive DELETE를 추가하고 create/patch/archive
+  응답에 server-owned revision strong `ETag`를 고정했다. patch/archive는 `If-Match`가 없으면
+  428, stale이면 412이며 domain-command replay가 원 성공 `ETag`를 그대로 반환한다. BIGINT
+  revision은 TypeScript 정밀도 손실을 막기 위해 응답에서 decimal string으로 직렬화한다.
+- **DATABASE**: rule create/patch/archive는 실제 API LOGIN 전용 named SECURITY DEFINER command로
+  실행되며 catalog CAS, immutable reconcile receipt, candidate generation을 SERIALIZABLE 단일
+  transaction으로 결박한다. typed API의 rule action은 `candidate|ignore`만 허용한다.
+
 ### PinVi alias-map 이관 표면·legacy write fence (2026-08-04, T-VN-32C 전반부)
 
 - **API(service)**: `GET /v1/service/feature-alias-maps`(canonical keyset
