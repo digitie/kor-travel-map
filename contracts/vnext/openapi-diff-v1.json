@@ -5,11 +5,11 @@
   "baseline": {
     "admin": {
       "file": "packages/kor-travel-map-api/openapi.json",
-      "sha256": "69702e4875faba973522f29abd4fbb64ec32bcafd02390c2b5a723f07c69f2a3"
+      "sha256": "73ee2c8425d46db5ff5510b3edf99d58d36f538841b1221e378f3bb38925b0b7"
     },
     "user": {
       "file": "packages/kor-travel-map-api/openapi.user.json",
-      "sha256": "eca7eea1dff7aa1848e50428fb8da5507e4d636c3a979b04859ef43c7f7410e7"
+      "sha256": "0fb6f558edb2b00350e23030fbb07f4fffcb3fcf475bc9f6d3442c91361cef1b"
     },
     "service": {
       "file": "packages/kor-travel-map-api/openapi.service.json",
@@ -17,6 +17,11 @@
     }
   },
   "revisions": [
+    {
+      "date": "2026-08-13",
+      "task": "T-VN-40B",
+      "change": "retained theme catalog에 단건 GET, strong ETag 기반 PATCH/DELETE archive, 201 create를 추가하고 admin baseline을 재고정했다. user spec은 제거 예정 legacy public theme schema의 default_curated 삭제/retained revision projection을 반영했고 service bytes는 변하지 않는다."
+    },
     {
       "date": "2026-08-12",
       "task": "T-VN-34",
@@ -401,12 +406,14 @@
         {
           "kind": "operation",
           "target_operation": "GET /v1/admin/curated-themes/{theme_id}",
+          "applied": true,
           "detail": "theme raw revision ETag를 반환하는 단건 read",
           "basis": "ADR-092"
         },
         {
           "kind": "operation",
           "target_operation": "DELETE /v1/admin/curated-themes/{theme_id}",
+          "applied": true,
           "detail": "If-Match와 Idempotency-Key를 요구하는 typed archive command",
           "basis": "ADR-092"
         },

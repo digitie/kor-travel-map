@@ -30,7 +30,8 @@ def test_runner_uses_receipt_pinned_archives_not_its_checkout() -> None:
     runner = _text(_RUNNER)
 
     assert 'readonly RECEIPT="$INSTALL_DIR/consumer-rollout-v1.json"' in runner
-    assert 'data["tasks"]["T-VN-36"]["pinvi_snapshot_receipt"]' in runner
+    assert 'task = data.get("deployment_receipt_task")' in runner
+    assert 'receipt.get("state") != "complete"' in runner
     assert (
         'python3 - "$RECEIPT" "$MAP_DIR" "$PINVI_DIR" "$MAP_COMMIT" "$PINVI_COMMIT"'
         in runner
@@ -69,7 +70,8 @@ def test_installer_archives_exact_pair_and_installs_immutable_inputs() -> None:
         'git -C "$PINVI_REPOSITORY" archive --format=tar.gz --prefix=pinvi/ "$PINVI_COMMIT"'
         in installer
     )
-    assert 'json.load(sys.stdin)["tasks"]["T-VN-36"]["pinvi_snapshot_receipt"]' in installer
+    assert 'task = rollout.get("deployment_receipt_task")' in installer
+    assert 'receipt.get("state") != "complete"' in installer
     assert '"version":3' in installer
     assert 'readonly snapshot_name="${MAP_COMMIT}-${PINVI_COMMIT}-${RUNNER_COMMIT}"' in installer
     assert 'install -o root -g root -m 0500' in installer

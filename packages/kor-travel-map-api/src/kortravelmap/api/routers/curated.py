@@ -21,7 +21,6 @@ from pydantic import (
     Field,
     SecretStr,
     field_validator,
-    model_validator,
 )
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -101,11 +100,14 @@ class CuratedThemeView(BaseModel):
     theme_name: str
     theme_description: str
     theme_group: str
-    default_curated: bool
     visibility: str
     metadata: dict[str, Any]
     created_at: datetime
     updated_at: datetime
+    row_revision: str = Field(pattern=r"^[1-9][0-9]*$")
+    archived_at: datetime | None = None
+    owner_kind: str | None = None
+    owner_provider_dataset_id: int | None = None
 
 
 class CuratedSourceView(BaseModel):
@@ -149,7 +151,7 @@ class CuratedSourceRuleView(BaseModel):
     category: str | None = None
     region_scope: dict[str, Any]
     detail_selector: dict[str, Any] | None = None
-    default_action: str
+    default_action: RuleAction
     priority: int
     enabled: bool
     metadata: dict[str, Any]
@@ -449,7 +451,6 @@ class CuratedThemeCreateRequest(BaseModel):
     theme_name: str = Field(min_length=1, max_length=200)
     theme_description: str = ""
     theme_group: str = Field(min_length=1, max_length=64)
-    default_curated: bool = False
     visibility: ThemeVisibility = "admin_only"
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -457,13 +458,18 @@ class CuratedThemeCreateRequest(BaseModel):
 class CuratedThemePatchRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    theme_slug: str | None = Field(default=None, min_length=1, max_length=128)
-    theme_name: str | None = Field(default=None, min_length=1, max_length=200)
-    theme_description: str | None = None
-    theme_group: str | None = Field(default=None, min_length=1, max_length=64)
-    default_curated: bool | None = None
-    visibility: ThemeVisibility | None = None
-    metadata: dict[str, Any] | None = None
+    theme_slug: str = Field(default="", min_length=1, max_length=128)
+    theme_name: str = Field(default="", min_length=1, max_length=200)
+    theme_description: str = ""
+    theme_group: str = Field(default="", min_length=1, max_length=64)
+    visibility: ThemeVisibility = "admin_only"
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class CuratedThemeArchiveRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reason_code: str = Field(min_length=1, max_length=100)
 
 
 class CuratedSourceCreateRequest(BaseModel):
@@ -521,25 +527,12 @@ class CuratedSourceRulePatchRequest(BaseModel):
 
     place_kind: str | None = None
     category: str | None = None
-    region_scope: dict[str, Any] | None = None
+    region_scope: dict[str, Any] = Field(default_factory=dict)
     detail_selector: dict[str, Any] | None = None
-    default_action: RuleAction | None = None
-    priority: int | None = Field(default=None, ge=-2147483648, le=2147483647)
-    enabled: bool | None = None
-    metadata: dict[str, Any] | None = None
-
-    @model_validator(mode="after")
-    def reject_non_nullable_explicit_nulls(self) -> CuratedSourceRulePatchRequest:
-        for field_name in (
-            "region_scope",
-            "default_action",
-            "priority",
-            "enabled",
-            "metadata",
-        ):
-            if field_name in self.model_fields_set and getattr(self, field_name) is None:
-                raise ValueError(f"{field_name} must not be null")
-        return self
+    default_action: RuleAction = "candidate"
+    priority: int = Field(default=0, ge=-2147483648, le=2147483647)
+    enabled: bool = True
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class CuratedSourceRuleArchiveRequest(BaseModel):
@@ -606,7 +599,9 @@ class CuratedFeatureStatusRequest(BaseModel):
 
 
 def _theme_view(row: curated_repo.CuratedTheme) -> CuratedThemeView:
-    return CuratedThemeView(**row.__dict__)
+    payload = dict(row.__dict__)
+    payload["row_revision"] = str(row.row_revision)
+    return CuratedThemeView.model_validate(payload)
 
 
 def _source_view(row: curated_repo.CuratedSource) -> CuratedSourceView:
@@ -686,6 +681,29 @@ def _rule_command_error(exc: DBAPIError) -> HTTPException:
         return HTTPException(status_code=422, detail=message)
     if sqlstate == "42501":
         return HTTPException(status_code=403, detail="curated source rule command 권한이 없습니다.")
+    raise exc
+
+
+def _theme_command_error(exc: DBAPIError) -> HTTPException:
+    message = str(exc.orig)
+    sqlstate = getattr(exc.orig, "sqlstate", None)
+    if sqlstate == "40001":
+        raise exc
+    if "theme revision mismatch" in message:
+        return HTTPException(
+            status_code=status.HTTP_412_PRECONDITION_FAILED,
+            detail="curated theme revision이 변경됐습니다.",
+        )
+    if sqlstate == "P0002":
+        return HTTPException(status_code=404, detail="curated theme 없음")
+    if sqlstate == "23505":
+        return HTTPException(status_code=409, detail="curated theme identity conflict")
+    if "archived theme" in message or "already archived" in message:
+        return HTTPException(status_code=409, detail=message)
+    if sqlstate in {"22P02", "23502", "23503", "23514", "22023"}:
+        return HTTPException(status_code=422, detail=message)
+    if sqlstate == "42501":
+        return HTTPException(status_code=403, detail="curated theme command 권한이 없습니다.")
     raise exc
 
 
@@ -1414,45 +1432,142 @@ async def list_admin_curated_themes_route(
     )
 
 
-@admin_router.post("/curated-themes", response_model=CuratedThemeResponse)
+@admin_router.post(
+    "/curated-themes",
+    response_model=CuratedThemeResponse,
+    status_code=status.HTTP_201_CREATED,
+    responses={201: {"headers": _RULE_ETAG_RESPONSE_HEADER}},
+)
 @idempotent_domain_command("admin.curated-theme.create")
 async def create_admin_curated_theme_route(
     body: CuratedThemeCreateRequest,
+    response: Response,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> CuratedThemeResponse:
     started_at = perf_counter()
     try:
         async with domain_command_transaction(session):
-            row = await curated_repo.create_curated_theme(session, **body.model_dump())
-    except IntegrityError as exc:
-        raise _integrity_error(exc) from exc
+            command = current_domain_command()
+            row = await curated_repo.create_curated_theme_command(
+                session,
+                **body.model_dump(),
+                command_id=command.command_id,
+                principal=command.actor,
+            )
+    except DBAPIError as exc:
+        raise _theme_command_error(exc) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    response.headers["ETag"] = revision_etag(row.row_revision)
     return CuratedThemeResponse(
         data=_theme_view(row),
         meta=make_meta(started_at=started_at),
     )
 
 
-@admin_router.patch("/curated-themes/{theme_id}", response_model=CuratedThemeResponse)
-@idempotent_domain_command("admin.curated-theme.patch")
-async def patch_admin_curated_theme_route(
-    theme_id: str,
-    body: CuratedThemePatchRequest,
+@admin_router.get(
+    "/curated-themes/{theme_id}",
+    response_model=CuratedThemeResponse,
+    responses={200: {"headers": _RULE_ETAG_RESPONSE_HEADER}},
+)
+async def get_admin_curated_theme_route(
+    theme_id: UUID,
+    response: Response,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> CuratedThemeResponse:
     started_at = perf_counter()
+    row = await curated_repo.get_curated_theme(session, theme_id=str(theme_id))
+    if row is None:
+        raise HTTPException(status_code=404, detail="curated theme 없음")
+    response.headers["ETag"] = revision_etag(row.row_revision)
+    return CuratedThemeResponse(
+        data=_theme_view(row),
+        meta=make_meta(started_at=started_at),
+    )
+
+
+@admin_router.patch(
+    "/curated-themes/{theme_id}",
+    response_model=CuratedThemeResponse,
+    responses={
+        200: {"headers": _RULE_ETAG_RESPONSE_HEADER},
+        412: {"description": "stale theme If-Match"},
+        428: {"description": "If-Match 누락"},
+    },
+    openapi_extra={"parameters": [_RULE_IF_MATCH_OPENAPI_PARAMETER]},
+)
+@idempotent_domain_command("admin.curated-theme.patch")
+async def patch_admin_curated_theme_route(
+    request: Request,
+    theme_id: UUID,
+    body: CuratedThemePatchRequest,
+    response: Response,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> CuratedThemeResponse:
+    started_at = perf_counter()
+    expected_revision = parse_revision_header(request, "If-Match", required=True)
+    assert expected_revision is not None
     try:
         async with domain_command_transaction(session):
-            row = await curated_repo.update_curated_theme(
+            command = current_domain_command()
+            row = await curated_repo.patch_curated_theme_command(
                 session,
-                theme_id=theme_id,
+                theme_id=str(theme_id),
+                expected_revision=expected_revision,
                 updates=body.model_dump(exclude_unset=True),
+                command_id=command.command_id,
+                principal=command.actor,
             )
+    except DBAPIError as exc:
+        raise _theme_command_error(exc) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if row is None:
         raise HTTPException(status_code=404, detail="curated theme 없음")
+    response.headers["ETag"] = revision_etag(row.row_revision)
+    return CuratedThemeResponse(
+        data=_theme_view(row),
+        meta=make_meta(started_at=started_at),
+    )
+
+
+@admin_router.delete(
+    "/curated-themes/{theme_id}",
+    response_model=CuratedThemeResponse,
+    responses={
+        200: {"headers": _RULE_ETAG_RESPONSE_HEADER},
+        412: {"description": "stale theme If-Match"},
+        428: {"description": "If-Match 누락"},
+    },
+    openapi_extra={"parameters": [_RULE_IF_MATCH_OPENAPI_PARAMETER]},
+)
+@idempotent_domain_command("admin.curated-theme.archive")
+async def archive_admin_curated_theme_route(
+    request: Request,
+    theme_id: UUID,
+    body: CuratedThemeArchiveRequest,
+    response: Response,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> CuratedThemeResponse:
+    started_at = perf_counter()
+    expected_revision = parse_revision_header(request, "If-Match", required=True)
+    assert expected_revision is not None
+    try:
+        async with domain_command_transaction(session):
+            command = current_domain_command()
+            row = await curated_repo.archive_curated_theme_command(
+                session,
+                theme_id=str(theme_id),
+                expected_revision=expected_revision,
+                command_id=command.command_id,
+                reason_code=body.reason_code,
+                principal=command.actor,
+            )
+    except DBAPIError as exc:
+        raise _theme_command_error(exc) from exc
+    if row is None:
+        raise HTTPException(status_code=404, detail="curated theme 없음")
+    response.headers["ETag"] = revision_etag(row.row_revision)
     return CuratedThemeResponse(
         data=_theme_view(row),
         meta=make_meta(started_at=started_at),
@@ -1528,9 +1643,9 @@ async def patch_admin_curated_source_route(
 )
 async def list_admin_curated_source_rules_route(
     session: Annotated[AsyncSession, Depends(get_session)],
-    theme_id: Annotated[str | None, Query()] = None,
+    theme_id: Annotated[UUID | None, Query()] = None,
     theme_slug: Annotated[str | None, Query()] = None,
-    source_id: Annotated[str | None, Query()] = None,
+    source_id: Annotated[UUID | None, Query()] = None,
     provider_dataset_id: Annotated[int | None, Query(gt=0)] = None,
     enabled: Annotated[bool | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 200,
@@ -1538,9 +1653,9 @@ async def list_admin_curated_source_rules_route(
     started_at = perf_counter()
     rows = await curated_repo.list_curated_source_rules(
         session,
-        theme_id=theme_id,
+        theme_id=str(theme_id) if theme_id is not None else None,
         theme_slug=theme_slug,
-        source_id=source_id,
+        source_id=str(source_id) if source_id is not None else None,
         provider_dataset_id=provider_dataset_id,
         enabled=enabled,
         limit=limit,

@@ -180,10 +180,9 @@ SECURITY DEFINER
 SET search_path = pg_catalog, feature, provider_sync
 AS $rule_input$
 SELECT jsonb_build_object(
-  'schema_version', 2,
+  'schema_version', 3,
   'rule', jsonb_build_object(
     'rule_id', rule.rule_id::text,
-    'row_revision', rule.row_revision,
     'theme_id', rule.theme_id::text,
     'source_id', rule.source_id::text,
     'place_kind', rule.place_kind,
@@ -199,7 +198,6 @@ SELECT jsonb_build_object(
   ),
   'theme', jsonb_build_object(
     'theme_id', theme.theme_id::text,
-    'row_revision', theme.row_revision,
     'archived_at', to_jsonb(theme.archived_at),
     'owner_kind', theme.owner_kind,
     'owner_provider_dataset_id', theme.owner_provider_dataset_id
@@ -207,7 +205,6 @@ SELECT jsonb_build_object(
   'source', jsonb_build_object(
     'source_id', source.source_id::text,
     'provider_dataset_id', source.provider_dataset_id,
-    'row_revision', source.row_revision,
     'archived_at', to_jsonb(source.archived_at)
   )
 )

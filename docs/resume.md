@@ -89,10 +89,15 @@ rule command와 기존 candidate 회귀 9개가 통과했다. admin repository/A
 decimal revision, create/patch/archive strong ETag와 If-Match/replay 경계로 연결했다. admin OpenAPI와
 generated TypeScript를 7.13.0으로 재생성했고 Linux ext4 격리 환경의 generation check와 전체
 frontend type-check가 통과했다. 적대 리뷰의 N:M receipt 중복, metadata-only generation, create 201,
-UUID/null 422, SERIALIZABLE retry 우회와 applied OpenAPI freeze도 수정했으며 fresh head actual-login
-integration 1개와 관련 unit/contract 43개가 통과했다. 다음 구현 단위는 작업 중인 0110 theme catalog
-command를 fresh migration/actual-login gate로 완성한 뒤 source catalog까지 같은 CAS/reconcile 경계로
-확장하는 것이다.
+UUID/null 422, SERIALIZABLE retry 우회와 applied OpenAPI freeze도 수정했다. retained theme catalog도
+actual API LOGIN 전용 create/patch/archive command, 단건 GET, strong ETag로
+전환했다. archive는 dependent rule generation을 같은 SERIALIZABLE transaction에서 끝내고,
+metadata-only catalog revision과 candidate semantic proof를 분리해 정상 후보 promotion이 stale로
+오인되지 않게 했다. 다음은 retained source catalog의 operator revision/observation revision 분리와
+typed CAS command 경계를 구현한다. T-VN-40 paired consumer receipt는 현재 `pending`이며 Map user/
+service/full spec hash를 고정하고 n150 installer가 complete 전에는 fail-close한다.
+fresh 0001→0110 actual-login theme/rule/candidate 통합을 통과했다. 다음 구현 단위는 source catalog를
+같은 CAS/reconcile 경계로 확장하는 것이다.
 A/B/C는 하나의 forward-only PR/release로 유지하며, 누적 구현은 DB/동시성과
 API·consumer/ACL 관점의 독립 적대 리뷰어 2명이 같은 고정 SHA에서 검증한다.
 상세 계약은

@@ -538,6 +538,45 @@ async def test_admin_runtime_promotion_is_one_trusted_membership_transaction(
     )
     api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
     try:
+        async with migrated_engine.begin() as connection:
+            metadata_command_id = int(
+                await connection.scalar(
+                    text(
+                        """
+                        INSERT INTO ops.domain_commands (
+                          actor, operation, idempotency_key, request_fingerprint
+                        ) VALUES (
+                          :actor, 'admin.curated-source-rule.patch',
+                          x_extension.gen_random_uuid(), repeat('e', 64)
+                        ) RETURNING command_id
+                        """
+                    ),
+                    seeded,
+                )
+            )
+
+        async with api.begin() as connection:
+            await connection.execute(
+                text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
+            )
+            metadata_only = (
+                await connection.execute(
+                    text(
+                        """
+                        CALL feature.patch_curated_source_rule_command(
+                          CAST(:rule_id AS uuid), 1, NULL, NULL, '{}'::jsonb,
+                          NULL, 'candidate', 10, true,
+                          '{"display_note":"operator-only"}'::jsonb,
+                          :command_id, :actor, NULL, NULL, NULL
+                        )
+                        """
+                    ),
+                    {**seeded, "command_id": metadata_command_id},
+                )
+            ).mappings().one()
+        assert int(metadata_only["o_rule_revision"]) == 2
+        assert metadata_only["o_generation_id"] is None
+
         async with api.begin() as connection:
             await connection.execute(
                 text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")

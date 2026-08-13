@@ -10489,19 +10489,13 @@
             "title": "Category"
           },
           "default_action": {
-            "anyOf": [
-              {
-                "enum": [
-                  "candidate",
-                  "ignore"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
+            "default": "candidate",
+            "enum": [
+              "candidate",
+              "ignore"
             ],
-            "title": "Default Action"
+            "title": "Default Action",
+            "type": "string"
           },
           "detail_selector": {
             "anyOf": [
@@ -10516,27 +10510,14 @@
             "title": "Detail Selector"
           },
           "enabled": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Enabled"
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
           },
           "metadata": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Metadata"
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
           },
           "place_kind": {
             "anyOf": [
@@ -10550,29 +10531,16 @@
             "title": "Place Kind"
           },
           "priority": {
-            "anyOf": [
-              {
-                "maximum": 2147483647.0,
-                "minimum": -2147483648.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Priority"
+            "default": 0,
+            "maximum": 2147483647.0,
+            "minimum": -2147483648.0,
+            "title": "Priority",
+            "type": "integer"
           },
           "region_scope": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Region Scope"
+            "additionalProperties": true,
+            "title": "Region Scope",
+            "type": "object"
           }
         },
         "title": "CuratedSourceRulePatchRequest",
@@ -10632,6 +10600,10 @@
             "type": "string"
           },
           "default_action": {
+            "enum": [
+              "candidate",
+              "ignore"
+            ],
             "title": "Default Action",
             "type": "string"
           },
@@ -10946,14 +10918,25 @@
         "title": "CuratedSourcesResponse",
         "type": "object"
       },
+      "CuratedThemeArchiveRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "reason_code": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Reason Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason_code"
+        ],
+        "title": "CuratedThemeArchiveRequest",
+        "type": "object"
+      },
       "CuratedThemeCreateRequest": {
         "additionalProperties": false,
         "properties": {
-          "default_curated": {
-            "default": false,
-            "title": "Default Curated",
-            "type": "boolean"
-          },
           "metadata": {
             "additionalProperties": true,
             "title": "Metadata",
@@ -11003,93 +10986,45 @@
       "CuratedThemePatchRequest": {
         "additionalProperties": false,
         "properties": {
-          "default_curated": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Curated"
-          },
           "metadata": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Metadata"
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
           },
           "theme_description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Theme Description"
+            "default": "",
+            "title": "Theme Description",
+            "type": "string"
           },
           "theme_group": {
-            "anyOf": [
-              {
-                "maxLength": 64,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Theme Group"
+            "default": "",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Theme Group",
+            "type": "string"
           },
           "theme_name": {
-            "anyOf": [
-              {
-                "maxLength": 200,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Theme Name"
+            "default": "",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Theme Name",
+            "type": "string"
           },
           "theme_slug": {
-            "anyOf": [
-              {
-                "maxLength": 128,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Theme Slug"
+            "default": "",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Theme Slug",
+            "type": "string"
           },
           "visibility": {
-            "anyOf": [
-              {
-                "enum": [
-                  "admin_only",
-                  "public"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
+            "default": "admin_only",
+            "enum": [
+              "admin_only",
+              "public"
             ],
-            "title": "Visibility"
+            "title": "Visibility",
+            "type": "string"
           }
         },
         "title": "CuratedThemePatchRequest",
@@ -11116,19 +11051,54 @@
         "additionalProperties": false,
         "description": "curated theme view.",
         "properties": {
+          "archived_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived At"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
             "type": "string"
           },
-          "default_curated": {
-            "title": "Default Curated",
-            "type": "boolean"
-          },
           "metadata": {
             "additionalProperties": true,
             "title": "Metadata",
             "type": "object"
+          },
+          "owner_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Kind"
+          },
+          "owner_provider_dataset_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Provider Dataset Id"
+          },
+          "row_revision": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Row Revision",
+            "type": "string"
           },
           "theme_description": {
             "title": "Theme Description",
@@ -11166,11 +11136,11 @@
           "theme_name",
           "theme_description",
           "theme_group",
-          "default_curated",
           "visibility",
           "metadata",
           "created_at",
-          "updated_at"
+          "updated_at",
+          "row_revision"
         ],
         "title": "CuratedThemeView",
         "type": "object"
@@ -31287,6 +31257,7 @@
             "schema": {
               "anyOf": [
                 {
+                  "format": "uuid",
                   "type": "string"
                 },
                 {
@@ -31319,6 +31290,7 @@
             "schema": {
               "anyOf": [
                 {
+                  "format": "uuid",
                   "type": "string"
                 },
                 {
@@ -32226,7 +32198,7 @@
           "required": true
         },
         "responses": {
-          "200": {
+          "201": {
             "content": {
               "application/json": {
                 "schema": {
@@ -32234,7 +32206,15 @@
                 }
               }
             },
-            "description": "Successful Response"
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "현재 retained rule row_revision strong entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "422": {
             "content": {
@@ -32269,14 +32249,15 @@
       }
     },
     "/v1/admin/curated-themes/{theme_id}": {
-      "patch": {
-        "operationId": "patch_admin_curated_theme_route_v1_admin_curated_themes__theme_id__patch",
+      "delete": {
+        "operationId": "archive_admin_curated_theme_route_v1_admin_curated_themes__theme_id__delete",
         "parameters": [
           {
             "in": "path",
             "name": "theme_id",
             "required": true,
             "schema": {
+              "format": "uuid",
               "title": "Theme Id",
               "type": "string"
             }
@@ -32290,6 +32271,194 @@
               "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
               "format": "uuid",
               "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
+          {
+            "description": "직전 단건 GET/성공 응답의 rule row_revision strong ETag.",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CuratedThemeArchiveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CuratedThemeResponse"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "현재 retained rule row_revision strong entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "stale theme If-Match"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "If-Match 누락"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
+        "summary": "Archive Admin Curated Theme Route",
+        "tags": [
+          "admin-curated"
+        ]
+      },
+      "get": {
+        "operationId": "get_admin_curated_theme_route_v1_admin_curated_themes__theme_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "theme_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Theme Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CuratedThemeResponse"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "현재 retained rule row_revision strong entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
+        "summary": "Get Admin Curated Theme Route",
+        "tags": [
+          "admin-curated"
+        ]
+      },
+      "patch": {
+        "operationId": "patch_admin_curated_theme_route_v1_admin_curated_themes__theme_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "theme_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Theme Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
+          {
+            "description": "직전 단건 GET/성공 응답의 rule row_revision strong ETag.",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
               "type": "string"
             }
           }
@@ -32313,7 +32482,25 @@
                 }
               }
             },
-            "description": "Successful Response"
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "현재 retained rule row_revision strong entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "stale theme If-Match"
           },
           "422": {
             "content": {
@@ -32324,6 +32511,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "If-Match 누락"
           },
           "default": {
             "content": {

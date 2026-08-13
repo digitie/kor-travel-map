@@ -140,11 +140,14 @@ class CuratedTheme:
     theme_name: str
     theme_description: str
     theme_group: str
-    default_curated: bool
     visibility: str
     metadata: dict[str, Any]
     created_at: datetime
     updated_at: datetime
+    row_revision: int = 1
+    archived_at: datetime | None = None
+    owner_kind: str | None = None
+    owner_provider_dataset_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -351,7 +354,8 @@ class CuratedFeatureDetailSnapshotMaterializeResult:
 
 _THEME_COLUMNS: Final[str] = (
     "theme_id::text AS theme_id, theme_slug, theme_name, theme_description, "
-    "theme_group, default_curated, visibility, metadata, created_at, updated_at"
+    "theme_group, visibility, metadata, created_at, updated_at, row_revision, "
+    "archived_at, owner_kind, owner_provider_dataset_id"
 )
 _SOURCE_COLUMNS: Final[str] = (
     "s.source_id::text AS source_id, s.provider_dataset_id, pd.provider, pd.dataset_key, "
@@ -1122,11 +1126,18 @@ def _theme(row: Any) -> CuratedTheme:
         theme_name=str(row["theme_name"]),
         theme_description=str(row["theme_description"]),
         theme_group=str(row["theme_group"]),
-        default_curated=bool(row["default_curated"]),
         visibility=str(row["visibility"]),
         metadata=_json_object(row["metadata"]),
         created_at=row["created_at"],
         updated_at=row["updated_at"],
+        row_revision=int(row["row_revision"]),
+        archived_at=row["archived_at"],
+        owner_kind=_text(row["owner_kind"]),
+        owner_provider_dataset_id=(
+            int(row["owner_provider_dataset_id"])
+            if row["owner_provider_dataset_id"] is not None
+            else None
+        ),
     )
 
 
@@ -1430,6 +1441,28 @@ async def list_curated_themes(
         )
     ).mappings().all()
     return tuple(_theme(row) for row in rows)
+
+
+async def get_curated_theme(
+    session: AsyncSession,
+    *,
+    theme_id: str,
+) -> CuratedTheme | None:
+    """retained theme 단건을 revision/owner 축과 함께 조회한다."""
+
+    row = (
+        await session.execute(
+            text(
+                f"""
+                SELECT {_THEME_COLUMNS}
+                FROM feature.curated_themes
+                WHERE theme_id = CAST(:theme_id AS uuid)
+                """
+            ),
+            {"theme_id": theme_id},
+        )
+    ).mappings().first()
+    return _theme(row) if row is not None else None
 
 
 async def list_curated_sources(
@@ -2311,6 +2344,165 @@ async def update_curated_theme(
         returning=_THEME_COLUMNS,
     )
     return _theme(row) if row is not None else None
+
+
+async def create_curated_theme_command(
+    session: AsyncSession,
+    *,
+    theme_slug: str,
+    theme_name: str,
+    theme_description: str,
+    theme_group: str,
+    visibility: str,
+    metadata: Mapping[str, Any] | None,
+    command_id: int,
+    principal: str,
+) -> CuratedTheme:
+    """domain command에 결박된 retained theme create를 실행한다."""
+
+    _validate_choice(visibility, _THEME_VISIBILITIES, "visibility")
+    result = (
+        await session.execute(
+            text(
+                """
+                CALL feature.create_curated_theme_command(
+                  :theme_slug, :theme_name, :theme_description, :theme_group,
+                  :visibility, CAST(:metadata_json AS jsonb), :command_id,
+                  :principal, NULL, NULL
+                )
+                """
+            ),
+            {
+                "command_id": command_id,
+                "metadata_json": _json_dumps(metadata),
+                "principal": principal,
+                "theme_description": theme_description,
+                "theme_group": theme_group,
+                "theme_name": theme_name,
+                "theme_slug": theme_slug,
+                "visibility": visibility,
+            },
+        )
+    ).mappings().one()
+    theme = await get_curated_theme(session, theme_id=str(result["o_theme_id"]))
+    if theme is None:
+        raise RuntimeError("created curated theme could not be read")
+    return theme
+
+
+async def patch_curated_theme_command(
+    session: AsyncSession,
+    *,
+    theme_id: str,
+    expected_revision: int,
+    updates: Mapping[str, Any],
+    command_id: int,
+    principal: str,
+) -> CuratedTheme | None:
+    """현재 theme를 full desired input으로 만들어 strong CAS patch한다."""
+
+    allowed = {
+        "theme_slug",
+        "theme_name",
+        "theme_description",
+        "theme_group",
+        "visibility",
+        "metadata",
+    }
+    unknown = set(updates) - allowed
+    if unknown:
+        raise ValueError(f"unsupported update fields: {sorted(unknown)}")
+    current = await get_curated_theme(session, theme_id=theme_id)
+    if current is None:
+        return None
+    desired: dict[str, Any] = {
+        "theme_slug": current.theme_slug,
+        "theme_name": current.theme_name,
+        "theme_description": current.theme_description,
+        "theme_group": current.theme_group,
+        "visibility": current.visibility,
+        "metadata": current.metadata,
+    }
+    desired.update(updates)
+    for field_name in (
+        "theme_slug",
+        "theme_name",
+        "theme_description",
+        "theme_group",
+        "visibility",
+        "metadata",
+    ):
+        if desired[field_name] is None:
+            raise ValueError(f"{field_name} must not be null")
+    _validate_choice(str(desired["visibility"]), _THEME_VISIBILITIES, "visibility")
+    result = (
+        await session.execute(
+            text(
+                """
+                CALL feature.patch_curated_theme_command(
+                  CAST(:theme_id AS uuid), :expected_revision, :theme_slug,
+                  :theme_name, :theme_description, :theme_group, :visibility,
+                  CAST(:metadata_json AS jsonb), :command_id, :principal,
+                  NULL, NULL, NULL
+                )
+                """
+            ),
+            {
+                "command_id": command_id,
+                "expected_revision": expected_revision,
+                "metadata_json": _json_dumps(desired["metadata"]),
+                "principal": principal,
+                "theme_description": desired["theme_description"],
+                "theme_group": desired["theme_group"],
+                "theme_id": theme_id,
+                "theme_name": desired["theme_name"],
+                "theme_slug": desired["theme_slug"],
+                "visibility": desired["visibility"],
+            },
+        )
+    ).mappings().one()
+    updated = await get_curated_theme(session, theme_id=str(result["o_theme_id"]))
+    if updated is None:
+        raise RuntimeError("patched curated theme could not be read")
+    return updated
+
+
+async def archive_curated_theme_command(
+    session: AsyncSession,
+    *,
+    theme_id: str,
+    expected_revision: int,
+    command_id: int,
+    reason_code: str,
+    principal: str,
+) -> CuratedTheme | None:
+    """retained theme를 archive하고 affected rule을 원자 reconcile한다."""
+
+    if await get_curated_theme(session, theme_id=theme_id) is None:
+        return None
+    result = (
+        await session.execute(
+            text(
+                """
+                CALL feature.archive_curated_theme_command(
+                  CAST(:theme_id AS uuid), :expected_revision, :command_id,
+                  :reason_code, :principal, NULL, NULL, NULL
+                )
+                """
+            ),
+            {
+                "command_id": command_id,
+                "expected_revision": expected_revision,
+                "principal": principal,
+                "reason_code": reason_code,
+                "theme_id": theme_id,
+            },
+        )
+    ).mappings().one()
+    archived = await get_curated_theme(session, theme_id=str(result["o_theme_id"]))
+    if archived is None:
+        raise RuntimeError("archived curated theme could not be read")
+    return archived
 
 
 async def create_curated_source(

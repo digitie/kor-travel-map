@@ -68,6 +68,10 @@ def _theme_row(**overrides: Any) -> dict[str, Any]:
         "metadata": {"icon": "book-open"},
         "created_at": _NOW,
         "updated_at": _NOW,
+        "row_revision": 1,
+        "archived_at": None,
+        "owner_kind": "operator",
+        "owner_provider_dataset_id": None,
     }
     row.update(overrides)
     return row

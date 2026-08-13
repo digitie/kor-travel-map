@@ -582,7 +582,6 @@ BEGIN
       v_candidate_id := v_candidate.candidate_id;
       v_candidate_revision := v_candidate.row_revision;
       IF NOT v_candidate.eligibility_present
-         OR v_candidate.rule_row_revision <> v_expected.rule_row_revision
          OR v_candidate.rule_input_hash <> v_expected.rule_input_hash
          OR v_candidate.source_record_key <> v_expected.source_record_key
          OR v_candidate.source_record_hash <> v_expected.source_record_hash

@@ -850,17 +850,23 @@ export interface components {
          * @description curated theme view.
          */
         CuratedThemeView: {
+            /** Archived At */
+            archived_at?: string | null;
             /**
              * Created At
              * Format: date-time
              */
             created_at: string;
-            /** Default Curated */
-            default_curated: boolean;
             /** Metadata */
             metadata: {
                 [key: string]: unknown;
             };
+            /** Owner Kind */
+            owner_kind?: string | null;
+            /** Owner Provider Dataset Id */
+            owner_provider_dataset_id?: number | null;
+            /** Row Revision */
+            row_revision: string;
             /** Theme Description */
             theme_description: string;
             /** Theme Group */
