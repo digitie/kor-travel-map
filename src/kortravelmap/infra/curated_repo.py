@@ -36,10 +36,7 @@ __all__ = [
     "CuratedFeatureDetailSnapshot",
     "archive_curated_feature",
     "create_curated_feature",
-    "create_curated_source",
-    "create_curated_source_rule",
     "create_curated_source_rule_command",
-    "create_curated_theme",
     "get_curated_feature",
     "get_curated_feature_detail_snapshot",
     "get_curated_source_rule",
@@ -49,11 +46,8 @@ __all__ = [
     "list_curated_themes",
     "set_curated_feature_status",
     "update_curated_feature",
-    "update_curated_source",
-    "update_curated_source_rule",
     "patch_curated_source_rule_command",
     "archive_curated_source_rule_command",
-    "update_curated_theme",
 ]
 
 CursorKind = Literal["curated_features"]
@@ -1558,78 +1552,6 @@ async def archive_curated_feature(
 
 
 
-async def create_curated_theme(
-    session: AsyncSession,
-    *,
-    theme_slug: str,
-    theme_name: str,
-    theme_description: str = "",
-    theme_group: str,
-    default_curated: bool = False,
-    visibility: str = "admin_only",
-    metadata: Mapping[str, Any] | None = None,
-) -> CuratedTheme:
-    """curated theme를 생성한다."""
-
-    _validate_choice(visibility, _THEME_VISIBILITIES, "visibility")
-    row = (
-        await session.execute(
-            text(
-                f"""
-                INSERT INTO feature.curated_themes (
-                    theme_slug, theme_name, theme_description, theme_group,
-                    default_curated, visibility, metadata, updated_at
-                ) VALUES (
-                    :theme_slug, :theme_name, :theme_description, :theme_group,
-                    :default_curated, :visibility, CAST(:metadata_json AS jsonb), now()
-                )
-                RETURNING {_THEME_COLUMNS}
-                """
-            ),
-            {
-                "theme_slug": theme_slug,
-                "theme_name": theme_name,
-                "theme_description": theme_description,
-                "theme_group": theme_group,
-                "default_curated": default_curated,
-                "visibility": visibility,
-                "metadata_json": _json_dumps(metadata),
-            },
-        )
-    ).mappings().one()
-    return _theme(row)
-
-
-async def update_curated_theme(
-    session: AsyncSession,
-    *,
-    theme_id: str,
-    updates: Mapping[str, Any],
-) -> CuratedTheme | None:
-    """curated theme를 부분 수정한다."""
-
-    allowed = {
-        "theme_slug",
-        "theme_name",
-        "theme_description",
-        "theme_group",
-        "default_curated",
-        "visibility",
-        "metadata",
-    }
-    row = await _update_simple(
-        session,
-        table="feature.curated_themes",
-        id_column="theme_id",
-        id_value=theme_id,
-        updates=updates,
-        allowed=allowed,
-        choice_fields={"visibility": _THEME_VISIBILITIES},
-        returning=_THEME_COLUMNS,
-    )
-    return _theme(row) if row is not None else None
-
-
 async def create_curated_theme_command(
     session: AsyncSession,
     *,
@@ -1787,112 +1709,6 @@ async def archive_curated_theme_command(
     if archived is None:
         raise RuntimeError("archived curated theme could not be read")
     return archived
-
-
-async def create_curated_source(
-    session: AsyncSession,
-    *,
-    provider_dataset_id: int,
-    source_name: str,
-    source_url: str | None = None,
-    source_kind: str,
-    license: str | None = None,
-    update_cycle: str = "unknown",
-    last_source_modified_at: date | None = None,
-    last_checked_at: datetime | None = None,
-    next_expected_at: date | None = None,
-    row_count: int | None = None,
-    freshness_note: str | None = None,
-    provider_status: str = "implemented",
-    metadata: Mapping[str, Any] | None = None,
-) -> CuratedSource:
-    """curated source metadata를 생성한다."""
-
-    _validate_choice(source_kind, _SOURCE_KINDS, "source_kind")
-    _validate_choice(update_cycle, _UPDATE_CYCLES, "update_cycle")
-    _validate_choice(provider_status, _PROVIDER_STATUSES, "provider_status")
-    row = (
-        await session.execute(
-            text(
-                """
-                INSERT INTO feature.curated_sources (
-                    provider_dataset_id, source_name, source_url, source_kind,
-                    license, update_cycle, last_source_modified_at, last_checked_at,
-                    next_expected_at, row_count, freshness_note, provider_status,
-                    metadata, updated_at
-                ) VALUES (
-                    :provider_dataset_id, :source_name, :source_url, :source_kind,
-                    :license, :update_cycle, :last_source_modified_at, :last_checked_at,
-                    :next_expected_at, :row_count, :freshness_note, :provider_status,
-                    CAST(:metadata_json AS jsonb), now()
-                )
-                RETURNING source_id::text AS source_id
-                """
-            ),
-            {
-                "provider_dataset_id": provider_dataset_id,
-                "source_name": source_name,
-                "source_url": source_url,
-                "source_kind": source_kind,
-                "license": license,
-                "update_cycle": update_cycle,
-                "last_source_modified_at": last_source_modified_at,
-                "last_checked_at": last_checked_at,
-                "next_expected_at": next_expected_at,
-                "row_count": row_count,
-                "freshness_note": freshness_note,
-                "provider_status": provider_status,
-                "metadata_json": _json_dumps(metadata),
-            },
-        )
-    ).mappings().one()
-    created = await get_curated_source(session, source_id=str(row["source_id"]))
-    if created is None:
-        raise RuntimeError("created curated source could not be read")
-    return created
-
-
-async def update_curated_source(
-    session: AsyncSession,
-    *,
-    source_id: str,
-    updates: Mapping[str, Any],
-) -> CuratedSource | None:
-    """curated source metadata를 부분 수정한다."""
-
-    allowed = {
-        "source_name",
-        "source_url",
-        "source_kind",
-        "license",
-        "update_cycle",
-        "last_source_modified_at",
-        "last_checked_at",
-        "next_expected_at",
-        "row_count",
-        "freshness_note",
-        "provider_status",
-        "metadata",
-    }
-    row = await _update_simple(
-        session,
-        table="feature.curated_sources",
-        id_column="source_id",
-        id_value=source_id,
-        updates=updates,
-        allowed=allowed,
-        choice_fields={
-            "source_kind": _SOURCE_KINDS,
-            "update_cycle": _UPDATE_CYCLES,
-            "provider_status": _PROVIDER_STATUSES,
-        },
-        returning="source_id::text AS source_id",
-    )
-    return (
-        await get_curated_source(session, source_id=str(row["source_id"]))
-        if row is not None
-        else None
-    )
 
 
 async def create_curated_source_command(
@@ -2068,103 +1884,6 @@ async def archive_curated_source_command(
     if archived is None:
         raise RuntimeError("archived curated source could not be read")
     return archived
-
-
-async def create_curated_source_rule(
-    session: AsyncSession,
-    *,
-    theme_id: str,
-    source_id: str,
-    place_kind: str | None = None,
-    category: str | None = None,
-    region_scope: Mapping[str, Any] | None = None,
-    detail_selector: Mapping[str, Any] | None = None,
-    default_action: str = "candidate",
-    priority: int = 0,
-    enabled: bool = True,
-    metadata: Mapping[str, Any] | None = None,
-) -> CuratedSourceRule:
-    """curated source rule을 생성한다."""
-
-    _validate_choice(default_action, _RULE_ACTIONS, "default_action")
-    row = (
-        await session.execute(
-            text(
-                """
-                INSERT INTO feature.curated_source_rules (
-                    theme_id, source_id, place_kind, category,
-                    region_scope, detail_selector, default_action, priority,
-                    enabled, metadata, updated_at
-                ) VALUES (
-                    CAST(:theme_id AS uuid), CAST(:source_id AS uuid),
-                    :place_kind, :category, CAST(:region_scope_json AS jsonb),
-                    CAST(:detail_selector_json AS jsonb),
-                    :default_action, :priority, :enabled,
-                    CAST(:metadata_json AS jsonb), now()
-                )
-                RETURNING rule_id::text AS rule_id
-                """
-            ),
-            {
-                "theme_id": theme_id,
-                "source_id": source_id,
-                "place_kind": place_kind,
-                "category": category,
-                "region_scope_json": _json_dumps(region_scope),
-                "detail_selector_json": (
-                    _json_dumps(detail_selector) if detail_selector else None
-                ),
-                "default_action": default_action,
-                "priority": priority,
-                "enabled": enabled,
-                "metadata_json": _json_dumps(metadata),
-            },
-        )
-    ).mappings().one()
-    rules = await list_curated_source_rules(
-        session,
-        limit=1,
-    )
-    created = [rule for rule in rules if rule.rule_id == str(row["rule_id"])]
-    if created:
-        return created[0]
-    refreshed = await _get_rule(session, str(row["rule_id"]))
-    if refreshed is None:
-        raise RuntimeError("created curated source rule could not be read")
-    return refreshed
-
-
-async def update_curated_source_rule(
-    session: AsyncSession,
-    *,
-    rule_id: str,
-    updates: Mapping[str, Any],
-) -> CuratedSourceRule | None:
-    """curated source rule을 부분 수정한다."""
-
-    allowed = {
-        "place_kind",
-        "category",
-        "region_scope",
-        "detail_selector",
-        "default_action",
-        "priority",
-        "enabled",
-        "metadata",
-    }
-    row = await _update_simple(
-        session,
-        table="feature.curated_source_rules",
-        id_column="rule_id",
-        id_value=rule_id,
-        updates=updates,
-        allowed=allowed,
-        choice_fields={"default_action": _RULE_ACTIONS},
-        returning="rule_id::text AS rule_id",
-    )
-    if row is None:
-        return None
-    return await _get_rule(session, str(row["rule_id"]))
 
 
 async def create_curated_source_rule_command(
