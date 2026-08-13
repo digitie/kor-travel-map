@@ -234,8 +234,26 @@ BEGIN
       v_replayed, v_stale_input
     );
     IF v_stale_input THEN
-      RAISE EXCEPTION 'provider cancellation SUCCESS has stale curation input'
-        USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_provider_curation_stale_input';
+      UPDATE ops.import_jobs AS root
+      SET status = 'failed', current_stage = 'stale_input', progress = 0,
+          error_message = 'provider curation input changed after child seal'
+      WHERE root.job_id = p_job_id
+        AND root.cancellation_id = p_cancellation_id
+        AND root.status = 'done';
+      IF NOT FOUND THEN
+        RAISE EXCEPTION 'provider cancellation stale-input transition was lost'
+          USING ERRCODE = '40001';
+      END IF;
+      UPDATE ops.pipeline_cancellation_members AS member
+      SET terminal_status = 'failed', updated_at = clock_timestamp()
+      WHERE member.cancellation_id = p_cancellation_id
+        AND member.job_id = p_job_id
+        AND member.result = 'already_terminal'
+        AND member.terminal_status = 'done';
+      IF NOT FOUND THEN
+        RAISE EXCEPTION 'provider cancellation stale-input member transition was lost'
+          USING ERRCODE = '40001';
+      END IF;
     END IF;
   END IF;
   RETURN true;

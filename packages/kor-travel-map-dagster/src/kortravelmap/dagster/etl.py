@@ -459,6 +459,7 @@ async def load_feature_bundle_batches_for_dagster(
     feature_ids: list[str] = []
     loaded_feature_count = 0
     dropped_feature_ids: list[str] = []
+    dropped_feature_id_set: set[str] = set()
     dropped_feature_count = 0
     strict_failure = False
     sync_observed = 0
@@ -507,10 +508,16 @@ async def load_feature_bundle_batches_for_dagster(
                     dropped_ids = {
                         issue.feature_id for issue in batch_validation.blocking_issues
                     }
-                    dropped_feature_count += len(dropped_ids)
+                    dropped_feature_count += sum(
+                        bundle.feature.feature_id in dropped_ids for bundle in batch
+                    )
                     remaining_dropped = FEATURE_ID_METADATA_LIMIT - len(dropped_feature_ids)
                     if remaining_dropped > 0:
-                        dropped_feature_ids.extend(sorted(dropped_ids)[:remaining_dropped])
+                        new_sample_ids = sorted(dropped_ids - dropped_feature_id_set)[
+                            :remaining_dropped
+                        ]
+                        dropped_feature_ids.extend(new_sample_ids)
+                        dropped_feature_id_set.update(new_sample_ids)
                     batch = [
                         bundle
                         for bundle in batch
@@ -727,17 +734,29 @@ def _source_identities(
 
 
 def _dagster_run_id(context: AssetExecutionContext) -> str | None:
-    """이 run의 외부 식별자. 직접 호출(테스트)에서는 없을 수 있다 (T-VN-H32R).
+    """이 step attempt의 외부 식별자. 직접 호출에서는 없을 수 있다 (T-VN-H32R).
 
     ``run_id``가 없으면 immutable observation generation을 만들지 않고 close receipt도
     발행하지 않는다. 직접 호출은 absence를 증명하지 못하므로 **닫지 않는 쪽**으로
-    fail-safe한다.
+    fail-safe한다. Dagster retry는 같은 run 안에서도 서로 다른 observation set이므로
+    attempt 1부터 suffix를 붙인다. 최초 attempt는 기존 receipt identity를 보존한다.
     """
     try:
         run_id = context.run_id
     except Exception:
         return None
-    return str(run_id) if run_id else None
+    if not run_id:
+        return None
+    try:
+        retry_number = int(context.retry_number)
+    except Exception:
+        retry_number = 0
+    normalized_run_id = str(run_id)
+    return (
+        normalized_run_id
+        if retry_number <= 0
+        else f"{normalized_run_id}::retry:{retry_number}"
+    )
 
 
 def _strict_failure_finding_client(
