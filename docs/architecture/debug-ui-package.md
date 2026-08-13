@@ -531,10 +531,9 @@ false-positive 예외를 포함한 모든 범위는 verifier가 exact 비교하�
 
 - frontend는 `127.0.0.1:12705` (Next.js dev/standalone) 또는 `127.0.0.1:12701`
   (FastAPI proxy/static mount, §14.3 옵션 B/C) 만.
-- VWorld API key는 frontend에 노출되지만 HTTP referrer 제한으로 보호.
-  공유 키(`KOR_TRAVEL_GEO_VWORLD_API_KEY`)이므로 referrer 화이트리스트에 backend
-  호스트 + PinVi frontend 호스트(ADR-026) 모두 포함. 같은 키를
-  `NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY`로도 주입해 kor-travel-geo v2 `key` query에 쓴다.
+- VWorld API key는 frontend에 노출되지만 HTTP referrer 제한으로 보호한다.
+  geo REST v2 인증에는 geo가 Map frontend consumer에 발급한 별도
+  `NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY`를 사용하고 VWorld provider key를 대입하지 않는다.
 - 운영자 외부 접근은 SSH 터널 / Cloudflare Tunnel (ADR-005).
 
 ## 15. 핵심 메시지

@@ -284,10 +284,9 @@ provider API spec이 변경되면:
   `kor-travel-geo` ADR-019의 `KOR_TRAVEL_GEO_VWORLD_API_KEY`를 **공유 사용**
   (ADR-025 사용자 보강 2026-05-25). 별도 발급 금지. frontend는 **Next.js**
   (ADR-025 2차 보강) 규약상 `NEXT_PUBLIC_VWORLD_API_KEY`로 노출 — 값은
-  동일 출처. `kor-travel-geo` public REST v2 호출에는 같은 값을
-  `NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY`에
-  넣어 `key` query로 전달한다. HTTP referrer 제한 권장 (backend 호스트 +
-  PinVi frontend 호스트).
+  동일 출처. `kor-travel-geo` public REST v2 호출에는 geo가 Map frontend consumer에
+  별도로 발급한 값을 `NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY`에 넣어 `key` query로 전달한다.
+  VWorld provider key fallback은 금지하며 HTTP referrer 제한을 권장한다.
 - **Kakao Maps JS SDK**: **미사용** (ADR-026 — PinVi 사용자 UI도
   VWorld/MapLibre 계열로 통일, SPEC V8 v8_3 supersede). 본 항목은 reference로
   유지하되 비용/한도 모니터링 대상이 아니다.

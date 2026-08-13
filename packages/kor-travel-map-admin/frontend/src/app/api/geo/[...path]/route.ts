@@ -18,7 +18,17 @@ async function proxy(
   context: { params: Promise<{ path: string[] }> },
 ) {
   const params = await context.params;
-  const target = buildGeoTarget(params.path, request.nextUrl.search);
+  const apiKey =
+    process.env.KOR_TRAVEL_GEO_API_KEY?.trim() ||
+    process.env.NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY?.trim() ||
+    "";
+  if (!apiKey) {
+    return Response.json(
+      { detail: "kor-travel-geo 공개 API 키가 설정되지 않았습니다." },
+      { status: 503 },
+    );
+  }
+  const target = buildGeoTarget(params.path, request.nextUrl.search, apiKey);
   if (target === null) {
     return new Response("Forbidden", { status: 403 });
   }
@@ -56,7 +66,11 @@ async function proxy(
   });
 }
 
-function buildGeoTarget(path: readonly string[], search: string): URL | null {
+function buildGeoTarget(
+  path: readonly string[],
+  search: string,
+  apiKey: string,
+): URL | null {
   if (path.length === 0 || path.some((segment) => segment.length === 0)) {
     return null;
   }
@@ -66,8 +80,8 @@ function buildGeoTarget(path: readonly string[], search: string): URL | null {
   for (const [key, value] of params) {
     target.searchParams.append(key, value);
   }
-  if (GEO_API_KEY && !target.searchParams.has("key")) {
-    target.searchParams.set("key", GEO_API_KEY);
+  if (!target.searchParams.has("key")) {
+    target.searchParams.set("key", apiKey);
   }
   return target;
 }

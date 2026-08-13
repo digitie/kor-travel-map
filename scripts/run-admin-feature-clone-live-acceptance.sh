@@ -135,7 +135,7 @@ bootstrap_snapshot() {
     die "bootstrap lock guardian exited unexpectedly"
 
   exec sudo -n \
-    --preserve-env=E2E_SOURCE_COMMIT,E2E_CLONE_DB_CONTAINER,E2E_CLONE_DB_PORT,E2E_CLONE_DB_DUMP,E2E_CLONE_DUMP_PATH,E2E_CLONE_API_PORT,E2E_CLONE_UI_PORT,E2E_ADMIN_PASSWORD,E2E_VWORLD_API_KEY \
+    --preserve-env=E2E_SOURCE_COMMIT,E2E_CLONE_DB_CONTAINER,E2E_CLONE_DB_PORT,E2E_CLONE_DB_DUMP,E2E_CLONE_DUMP_PATH,E2E_CLONE_API_PORT,E2E_CLONE_UI_PORT,E2E_ADMIN_PASSWORD,E2E_VWORLD_API_KEY,E2E_KOR_TRAVEL_GEO_API_KEY \
     "$expected_root/run-admin-feature-clone-live-acceptance.sh" "$MODE"
 }
 
@@ -238,10 +238,13 @@ done
 if [[ "$MODE" != "baseline" && "$MODE" != "checkpoint" ]]; then
   require_env E2E_ADMIN_PASSWORD
   require_env E2E_VWORLD_API_KEY
+  require_env E2E_KOR_TRAVEL_GEO_API_KEY
   [[ "${E2E_ADMIN_PASSWORD}" != *$'\n'* && "${E2E_ADMIN_PASSWORD}" != *$'\r'* ]] ||
     die "admin password contains a newline"
   [[ "${E2E_VWORLD_API_KEY}" != *$'\n'* && "${E2E_VWORLD_API_KEY}" != *$'\r'* ]] ||
     die "VWorld key contains a newline"
+  [[ "${E2E_KOR_TRAVEL_GEO_API_KEY}" != *$'\n'* && "${E2E_KOR_TRAVEL_GEO_API_KEY}" != *$'\r'* ]] ||
+    die "kor-travel-geo key contains a newline"
 fi
 
 if [[ -e "$STATE_ROOT" || -L "$STATE_ROOT" ]]; then

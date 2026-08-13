@@ -28,7 +28,6 @@ from fastapi import Depends, Header, HTTPException, Request, Security, status
 from fastapi.security import APIKeyHeader
 from kortravelmap.infra.public_api_keys import (
     cached_active_public_api_key_hashes,
-    hash_public_api_key,
     public_api_key_matches,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -557,7 +556,7 @@ async def require_public_api_key(
     request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> None:
-    """public REST surface용 VWorld 호환 API key를 검증한다.
+    """public REST surface용 Map 전용 API key를 검증한다.
 
     ADR-066/T-VN-H01 — key는 X-Kor-Travel-Map-Api-Key 헤더로만 받는다. 이전의
     ?key= 쿼리 파라미터는 access log와 Referer 헤더로 새어 나갈 수 있어 제거됐다
@@ -584,21 +583,11 @@ async def require_public_api_key(
         session,
         ttl_seconds=settings.public_api_key_cache_ttl_s,
     )
-    effective_hashes = active_hashes or _vworld_default_key_hashes(settings)
-    if not effective_hashes or not public_api_key_matches(key, effective_hashes):
+    if not active_hashes or not public_api_key_matches(key, active_hashes):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="VWorld 호환 API 키가 유효하지 않습니다.",
+            detail="Map 공개 API 키가 유효하지 않습니다.",
         )
-
-
-def _vworld_default_key_hashes(settings: ApiSettings) -> frozenset[str]:
-    if settings.vworld_api_key is None:
-        return frozenset()
-    key = settings.vworld_api_key.get_secret_value().strip()
-    if not key:
-        return frozenset()
-    return frozenset({hash_public_api_key(key)})
 
 
 def require_metrics_token(request: Request) -> None:

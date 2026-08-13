@@ -1,4 +1,4 @@
-"""``ops.public_api_keys`` — VWorld 호환 public API key 저장/검증."""
+"""``ops.public_api_keys`` — Map 전용 public API key 저장/검증."""
 
 from __future__ import annotations
 
@@ -84,7 +84,7 @@ SELECT public_api_key_id::text AS public_api_key_id,
 
 
 def generate_public_api_key() -> str:
-    """VWorld wire shape과 같은 32자 영숫자 key를 생성한다."""
+    """32자 영숫자 Map 전용 key를 생성한다."""
 
     return "".join(
         secrets.choice(PUBLIC_API_KEY_ALPHABET)

@@ -4,6 +4,7 @@
 - 날짜: 2026-06-23
 - 개정: ADR-066 — production fail-closed route policy와 principal-only actor
 - 개정: T-VN-H01/PR #794 — Map public API key를 header-only로 clean-cut
+- 개정: 2026-08-14 — Map/Geo consumer key와 VWorld provider key fallback 제거
 
 ## 맥락
 
@@ -71,3 +72,10 @@ OpenAPI `PublicApiKey` security scheme도 같은 header 이름과 `in: header`�
 
 결정 7의 `kor-travel-geo` 호출은 별도 공급자 계약이다. 브라우저의 geo public API는
 VWorld 호환 query를 사용하고, Map backend는 `X-KTG-API-Key` header만 사용한다.
+
+## 개정 (2026-08-14, credential 경계 분리)
+
+VWorld 호환이라는 말은 key의 wire 형식만 뜻한다. `ops.public_api_keys`에 active Map key가
+없을 때 VWorld provider key를 Map 공개 인증에 쓰던 fallback을 제거한다. geo REST v2 호출도
+geo가 Map frontend/backend consumer에 발급한 별도 public key만 사용하며 VWorld provider key를
+대입하지 않는다. 활성 Map key 부재나 geo consumer key 누락은 각각 401/503으로 fail-close한다.

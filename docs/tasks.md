@@ -771,6 +771,10 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
       컨테이너)에서 공유되는 업스트림 자격증명이라 하나가 새면 둘 다 샌다. 설계 의도는
       "UI에서 생성한 전용 키를 DB에 저장"이므로, admin BFF로 난수 전용 키를 발급하고 이
       행을 revoke하는 회전 경로가 열려 있다.
+    - **T-VN-40 n150 배포 전 차단 조건**: admin BFF 정식 발급 경로로 Map 전용 public
+      key를 생성·안전 보관하고, VWorld 값으로 직접 등록한 임시 행을 revoke한다. 키 원문은
+      저장소·로그·채팅에 남기지 않으며 새 key 200 / VWorld key 401 / revoke key 401을
+      live probe로 확인한 뒤에만 candidate 배포 fence를 연다.
   - **prod 지오코딩이 죽어 있었다 — 고쳤다.** `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY`에
     VWorld 키가 결선돼 있어 geo가 401로 거부했다(실측: VWorld 키 401 / `~/.secrets` 키
     200). 즉 map의 정/역지오코딩 호출이 전부 실패하고 있었다. 올바른 값으로 교체 후

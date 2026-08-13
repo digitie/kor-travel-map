@@ -1216,7 +1216,7 @@ def test_features_not_gated_by_service_token() -> None:
 
 
 @pytest.mark.unit
-def test_public_api_key_required_accepts_vworld_fallback() -> None:
+def test_public_api_key_required_rejects_vworld_fallback_without_active_key() -> None:
     client = _client(
         _api_settings(
             public_api_key_required=True,
@@ -1228,7 +1228,7 @@ def test_public_api_key_required_accepts_vworld_fallback() -> None:
             "/v1/categories",
             headers={PUBLIC_API_KEY_HEADER: "vw-test-key"},
         ).status_code
-        == 200
+        == 401
     )
     assert (
         client.get(
@@ -1240,6 +1240,43 @@ def test_public_api_key_required_accepts_vworld_fallback() -> None:
     assert client.get("/v1/categories").status_code == 401
     # T-VN-H01: query 파라미터로는 더 이상 인증되지 않는다(header-only).
     assert client.get("/v1/categories?key=vw-test-key").status_code == 401
+
+
+@pytest.mark.unit
+def test_public_api_key_required_accepts_only_active_map_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.infra.public_api_keys import hash_public_api_key
+
+    from kortravelmap.api import auth as auth_module
+
+    map_key = "map-public-api-key-000000000001"
+    monkeypatch.setattr(
+        auth_module,
+        "cached_active_public_api_key_hashes",
+        AsyncMock(return_value=frozenset({hash_public_api_key(map_key)})),
+    )
+    client = _client(
+        _api_settings(
+            public_api_key_required=True,
+            vworld_api_key=SecretStr("vworld-provider-key"),
+        )
+    )
+
+    assert (
+        client.get(
+            "/v1/categories",
+            headers={PUBLIC_API_KEY_HEADER: map_key},
+        ).status_code
+        == 200
+    )
+    assert (
+        client.get(
+            "/v1/categories",
+            headers={PUBLIC_API_KEY_HEADER: "vworld-provider-key"},
+        ).status_code
+        == 401
+    )
 
 
 @pytest.mark.unit
