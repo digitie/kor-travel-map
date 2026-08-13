@@ -1771,14 +1771,31 @@ foreign_cluster_sessions() {
   "
 }
 
+# ADR-090 bootstrap을 거친 clone에서 허용되는 LOGIN principal.
+# `$db_user`(clone cluster 관리자)에 더해 이 셋만 존재할 수 있다.
+readonly ADR090_LOGIN_ROLES="'ktm_feature_migrator', 'ktm_feature_api_runtime', 'ktm_feature_dagster_runtime'"
+# migration이 `SET ROLE`로 활성화하는 NOLOGIN schema owner. bootstrap은 DB 소유권도
+# 여기로 넘긴다.
+readonly ADR090_SCHEMA_OWNER="ktm_feature_schema_owner"
+
 checkpoint_login_role_invariant() {
+  # 이 fence의 목적은 "격리 clone에 예상 밖 LOGIN principal이 없다"이다. 원래는
+  # LOGIN이 정확히 하나(`$db_user`)여야 했는데, ADR-090이 DB principal 모델을
+  # 바꾸면서 LOGIN 3개가 정상 상태가 됐고 DB 소유권도 schema owner로 넘어간다.
+  # 그래서 개수를 세는 대신 **예상 집합과의 차집합이 비었는지**를 본다 —
+  # 목적(예상 밖 principal 차단)은 그대로고 예상 집합만 현행 모델에 맞춘다.
+  #
+  # bootstrap 전 clone도 유효하므로(migration 직전 상태) 세 role은 있어도 되고
+  # 없어도 된다. 없어야 하는 것은 그 밖의 LOGIN principal이다.
   [[ "$(
     psql_value "
       SELECT count(*)
       FROM pg_catalog.pg_roles
       WHERE rolcanlogin
+        AND rolname <> '$db_user'
+        AND rolname NOT IN ($ADR090_LOGIN_ROLES)
     "
-  )" == "1" ]] || return 1
+  )" == "0" ]] || return 1
   [[ "$(
     psql_value "
       SELECT count(*)
@@ -1787,13 +1804,14 @@ checkpoint_login_role_invariant() {
         AND rolname = '$db_user'
     "
   )" == "1" ]] || return 1
+  # ADR-090은 DB 소유권을 schema owner로 넘긴다. bootstrap 전에는 `$db_user`다.
   [[ "$(
     psql_value "
       SELECT count(*)
       FROM pg_catalog.pg_database AS database
       JOIN pg_catalog.pg_roles AS owner ON owner.oid = database.datdba
       WHERE database.datname = '$ORIGINAL_DB_NAME'
-        AND owner.rolname = '$db_user'
+        AND owner.rolname IN ('$db_user', '$ADR090_SCHEMA_OWNER')
     "
   )" == "1" ]]
 }
