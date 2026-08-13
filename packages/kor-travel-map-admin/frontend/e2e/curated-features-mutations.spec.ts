@@ -81,6 +81,10 @@ function importResponse(dryRun: boolean, fileIssues: unknown[] = []) {
   return {
     data: {
       dry_run: dryRun,
+      import_plan_id: "11111111-1111-4111-8111-111111111111",
+      plan_etag: '"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"',
+      expires_at: "2026-08-14T12:00:00Z",
+      import_batch_id: dryRun ? null : "22222222-2222-4222-8222-222222222222",
       rows_total: 2,
       valid_rows: 2,
       invalid_rows: 0,
@@ -130,15 +134,31 @@ async function mockCsvImportRoutes(
   await page.route("**/api/proxy/v1/admin/curated-sources**", (route) =>
     fulfillJson(route, { data: { items: [] }, meta: {} }),
   );
-  await page.route("**/api/proxy/v1/admin/curations**", async (route) => {
+  await page.route("**/api/proxy/v1/admin/curations?**", (route) =>
+    fulfillJson(route, { data: { items: [] }, meta: {} }),
+  );
+  await page.route("**/api/proxy/v1/admin/curations/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
-    if (url.pathname.endsWith("/import") && request.method() === "POST") {
-      const dryRun = url.searchParams.get("dry_run") === "true";
-      if (dryRun) requests.preview += 1;
-      else requests.commit += 1;
+    if (url.pathname.endsWith("/imports/preview") && request.method() === "POST") {
+      requests.preview += 1;
       expect(request.headers()["content-type"]).toContain("multipart/form-data");
-      await fulfillJson(route, responseFactory(dryRun, dryRun ? fileIssues : []));
+      await route.fulfill({
+        body: JSON.stringify(responseFactory(true, fileIssues)),
+        contentType: "application/json",
+        headers: {
+          ETag: '"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"',
+        },
+        status: 201,
+      });
+      return;
+    }
+    if (url.pathname.endsWith("/commit") && request.method() === "POST") {
+      requests.commit += 1;
+      expect(request.headers()["if-match"]).toBe(
+        '"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"',
+      );
+      await fulfillJson(route, responseFactory(false, []));
       return;
     }
     await fulfillJson(route, { data: { items: [] }, meta: {} });
@@ -148,6 +168,29 @@ async function mockCsvImportRoutes(
 }
 
 test.describe("큐레이션 CSV import", () => {
+  test("공식 등대 provenance sidecar를 preview multipart에 함께 보낸다", async ({
+    page,
+  }) => {
+    await mockCsvImportRoutes(page);
+    await page.goto("/admin/features/curated");
+    await page.getByLabel("CSV 파일").setInputFiles({
+      name: "lighthouse-stamp-tour.csv",
+      mimeType: "text/csv",
+      buffer: Buffer.from("collection_key\nlighthouse-stamp-tour\n"),
+    });
+    await page.getByLabel("Provenance JSON 파일 (공식 등대)").setInputFiles({
+      name: "lighthouse-stamp-tour.provenance.json",
+      mimeType: "application/json",
+      buffer: Buffer.from('{"source_csv_sha256":"fixture"}'),
+    });
+
+    const previewRequest = page.waitForRequest("**/imports/preview");
+    await page.getByRole("button", { name: "매칭 미리보기" }).click();
+    const body = (await previewRequest).postData() ?? "";
+    expect(body).toContain('name="file"');
+    expect(body).toContain('name="provenance_file"');
+  });
+
   test("이름 단독 후보를 후보 다수가 아닌 수동 검토로 표시한다", async ({ page }) => {
     await mockCsvImportRoutes(page, [], reviewRequiredImportResponse);
     await page.goto("/admin/features/curated");
@@ -244,5 +287,33 @@ test.describe("큐레이션 CSV import", () => {
     await expect(page.getByRole("button", { name: "전체 반영" })).toBeDisabled();
     expect(requests.preview).toBe(1);
     expect(requests.commit).toBe(0);
+  });
+
+  test("commit 412는 stale plan을 버리고 재미리보기를 요구한다", async ({ page }) => {
+    await mockCsvImportRoutes(page);
+    await page.route("**/import-plans/*/commit", (route) =>
+      route.fulfill({
+        body: JSON.stringify({ detail: "revision vector stale" }),
+        contentType: "application/json",
+        status: 412,
+      }),
+    );
+    await page.goto("/admin/features/curated");
+    await page.getByLabel("CSV 파일").setInputFiles({
+      name: "stale.csv",
+      mimeType: "text/csv",
+      buffer: Buffer.from("collection_key\nstale\n"),
+    });
+    await page.getByRole("button", { name: "매칭 미리보기" }).click();
+    page.once("dialog", (dialog) => dialog.accept());
+    await page.getByRole("button", { name: "전체 반영" }).click();
+
+    await expect(
+      page.getByText(
+        "미리보기 이후 정본이 변경되었습니다. CSV와 provenance를 다시 미리보기하세요.",
+      ),
+    ).toBeVisible();
+    await expect(page.getByTestId("curation-import-report")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "전체 반영" })).toBeDisabled();
   });
 });

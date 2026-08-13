@@ -325,6 +325,10 @@ async def test_import_and_quarantine_advance_collection_revision_once(
         plan_command = await _domain_command(
             migrated_engine, actor=actor, operation="admin.curation.import"
         )
+        content_sha256: str
+        stored_rows: tuple[ResolvedCurationImportRow, ...]
+        summary: dict[str, object]
+        response_rows: tuple[dict[str, object], ...]
         async with session_factory() as session, session.begin():
             await session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
             content_sha256, stored_rows, summary, response_rows, _expires_at = (
@@ -339,6 +343,43 @@ async def test_import_and_quarantine_advance_collection_revision_once(
             assert stored_rows == (changed_row,)
             assert summary == {"has_errors": False, "valid": 1}
             assert response_rows == ({"row_number": 2, "valid": True},)
+
+        invalid_row_sets = (
+            (
+                ResolvedCurationImportRow(
+                    **{**changed_row.__dict__, "item_title": "caller-tampered"}
+                ),
+            ),
+            (),
+            (
+                changed_row,
+                ResolvedCurationImportRow(
+                    **{
+                        **changed_row.__dict__,
+                        "row_number": changed_row.row_number + 1,
+                        "source_component_key": "caller-extra",
+                    }
+                ),
+            ),
+        )
+        for invalid_rows in invalid_row_sets:
+            async with session_factory() as session:
+                transaction = await session.begin()
+                await session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
+                with pytest.raises(DBAPIError) as tampered:
+                    await import_curation_rows(
+                        session,
+                        rows=invalid_rows,
+                        actor=actor,
+                        source_content_sha256=content_sha256,
+                        batch_kind="csv_upload",
+                        command_id=plan_command,
+                    )
+                assert getattr(tampered.value.orig, "sqlstate", None) == "23514"
+                await transaction.rollback()
+
+        async with session_factory() as session, session.begin():
+            await session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
             imported = await import_curation_rows(
                 session,
                 rows=stored_rows,
@@ -347,6 +388,18 @@ async def test_import_and_quarantine_advance_collection_revision_once(
                 batch_kind="csv_upload",
                 command_id=plan_command,
             )
+            savepoint = await session.begin_nested()
+            with pytest.raises(DBAPIError) as wrong_batch:
+                await complete_curation_import_plan_command(
+                    session,
+                    import_plan_id=import_plan_id,
+                    command_id=plan_command,
+                    import_batch_id=str(first["import_batch_id"]),
+                    result_payload={"summary": summary, "rows": list(response_rows)},
+                    principal=actor,
+                )
+            assert getattr(wrong_batch.value.orig, "sqlstate", None) == "P0002"
+            await savepoint.rollback()
             await complete_curation_import_plan_command(
                 session,
                 import_plan_id=import_plan_id,
@@ -356,16 +409,22 @@ async def test_import_and_quarantine_advance_collection_revision_once(
                 principal=actor,
             )
         async with migrated_engine.connect() as connection:
-            assert int(
-                await connection.scalar(
+            stored_commit = (
+                await connection.execute(
                     text(
-                        "SELECT count(*) FROM ops.curation_import_plan_commits "
+                        "SELECT result_payload FROM ops.curation_import_plan_commits "
                         "WHERE import_plan_id = CAST(:plan_id AS uuid) "
                         "AND command_id = :command_id"
                     ),
                     {"command_id": plan_command, "plan_id": import_plan_id},
                 )
-            ) == 1
+            ).scalar_one()
+            assert stored_commit["db_receipt"] == {
+                "import_batch_id": str(imported["import_batch_id"]),
+                "command_id": plan_command,
+                "content_sha256": content_sha256,
+                "row_count": 1,
+            }
 
         target_id, quarantine_id, quarantine_item_id = await _seed_quarantine(
             migrated_engine,

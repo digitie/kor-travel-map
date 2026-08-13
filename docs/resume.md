@@ -1,5 +1,15 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+immutable import 경계를 재검토해 preview의 multipart SHA fingerprint·domain claim·catalog 해소·plan
+저장·terminal receipt 전체를 공통 SERIALIZABLE 3회 재시도 transaction으로 묶었다. exact replay는
+CSV parsing과 mutable catalog lookup보다 먼저 끝난다. apply procedure는 caller가 넘긴 row가 claimed
+plan의 normalized row set과 altered/missing/extra 없이 정확히 같은지 DB에서 검증하고, terminal commit은
+같은 command가 만든 import batch와 content hash만 받으며 DB-derived batch receipt를 보존한다. provenance
+pointer만 바뀌어도 item과 부모 collection revision을 각각 한 번 올린다. admin UI는 공식 등대
+provenance sidecar를 함께 preview하고 412에서 stale plan을 버려 반드시 다시 preview하게 한다. fresh
+0001→0120 actual LOGIN, API 80건, frontend type/lint, mocked Playwright 6건이 통과했다. 다음 checkpoint는
+dedup merge를 admin-only typed command로 전환하고 generic runtime의 item/import/decision raw DML을 회수한다.
+
 immutable curation import plan의 HTTP/UI 전환을 완료했다. preview는 CSV를 한 번만 normalize해 content
 hash·touched revision vector·plan ETag를 저장하고, commit은 저장된 plan과 If-Match만으로 named import
 command를 실행한다. legacy `dry_run` 재업로드 route는 제거했다. quarantine 재분류는 성공 ETag를 terminal

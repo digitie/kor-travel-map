@@ -42,6 +42,7 @@ from kortravelmap.infra.curation_repo import (
     FeatureCurationGroup,
     FeatureMatch,
 )
+from kortravelmap.infra.domain_command_repo import DomainCommandRecord
 
 from kortravelmap.api.app import create_app
 from kortravelmap.api.db import get_session
@@ -516,6 +517,70 @@ def test_official_lighthouse_import_requires_provenance_sidecar(
     assert response.status_code == 422
     assert "provenance_file" in response.json()["detail"]
     matches.assert_not_awaited()
+
+
+@pytest.mark.unit
+def test_import_preview_replay_finishes_before_mutable_catalog_lookup(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api import domain_command_service
+    from kortravelmap.api.routers import curations as module
+
+    monkeypatch.setattr(
+        module.curation_repo,
+        "resolve_feature_matches",
+        AsyncMock(return_value={}),
+    )
+    monkeypatch.setattr(
+        module.curation_repo,
+        "preview_curation_import",
+        AsyncMock(
+            return_value=CurationImportPlan(
+                collections=0,
+                inserted=0,
+                updated=0,
+                removals=(),
+            )
+        ),
+    )
+    csv_content = _csv_content(official_lighthouse=True)
+    files = {
+        "file": ("lighthouse.csv", csv_content, "text/csv"),
+        "provenance_file": (
+            "lighthouse.provenance.json",
+            _provenance_content(csv_content),
+            "application/json",
+        ),
+    }
+    first = client.post("/v1/admin/curations/imports/preview", files=files)
+    assert first.status_code == 201
+    etag = first.headers["ETag"]
+    terminal = DomainCommandRecord(
+        command_id=1,
+        actor="local-dev",
+        operation="admin.curation-import.preview",
+        idempotency_key="95000000-0000-4000-8000-000000000001",
+        fingerprint_version=1,
+        request_fingerprint="a" * 64,
+        response_status=201,
+        response_body=first.json(),
+        response_headers={"ETag": etag},
+        claimed_at=datetime(2026, 8, 14, tzinfo=UTC),
+        completed_at=datetime(2026, 8, 14, tzinfo=UTC),
+    )
+    begin = domain_command_service.begin_domain_command
+    assert isinstance(begin, AsyncMock)
+    begin.side_effect = domain_command_service.DomainCommandReplay(terminal)
+    mutable_lookup = AsyncMock(side_effect=AssertionError("replay 뒤 catalog 조회"))
+    monkeypatch.setattr(module, "_lighthouse_dataset_pairs", mutable_lookup)
+
+    replay = client.post("/v1/admin/curations/imports/preview", files=files)
+
+    assert replay.status_code == 201
+    assert replay.headers["ETag"] == etag
+    assert replay.json() == first.json()
+    mutable_lookup.assert_not_awaited()
 
 
 @pytest.mark.unit

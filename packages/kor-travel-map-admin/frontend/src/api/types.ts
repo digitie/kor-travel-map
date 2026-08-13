@@ -15461,6 +15461,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
+                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
                 "Idempotency-Key": string;
             };
             path?: never;

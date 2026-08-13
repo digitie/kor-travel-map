@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { useRef, useState, type FormEvent, type MouseEvent } from "react";
 
+import { ApiClientError } from "@/api/client";
 import { useAdminCuratedSources, useAdminCuratedThemes } from "@/api/curated";
 import {
   CURATION_IMPORT_TEMPLATE_URL,
@@ -164,6 +165,7 @@ function useCurationCollectionsClientController() {
   );
   const [itemForm, setItemForm] = useState<ItemFormState>(INITIAL_ITEM_FORM);
   const [csvFile, setCsvFile] = useState<File | null>(null);
+  const [provenanceFile, setProvenanceFile] = useState<File | null>(null);
   const [importReport, setImportReport] =
     useState<CurationImportResponse | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -285,6 +287,7 @@ function useCurationCollectionsClientController() {
       setImportReport(
         await previewImportCsv.mutateAsync({
           file: csvFile,
+          provenanceFile,
         }),
       );
     } catch {
@@ -321,8 +324,13 @@ function useCurationCollectionsClientController() {
       setMessage(
         `CSV 반영 완료: 신규 ${response.data.inserted}개, 갱신 ${response.data.updated}개, 제거 ${response.data.removed}개`,
       );
-    } catch {
-      // mutationError에서 API 응답을 표시한다.
+    } catch (error) {
+      if (error instanceof ApiClientError && error.status === 412) {
+        setImportReport(null);
+        setLocalError(
+          "미리보기 이후 정본이 변경되었습니다. CSV와 provenance를 다시 미리보기하세요.",
+        );
+      }
     }
   };
 
@@ -436,9 +444,11 @@ function useCurationCollectionsClientController() {
     setCollectionForm,
     setCsvFile,
     setImportReport,
+    setProvenanceFile,
     setItemForm,
     setLocalError,
     setMessage,
+    provenanceFile,
     setResolveFeatureIds,
     setSelectedCollectionId,
     sourcesQuery,
@@ -459,15 +469,17 @@ function CurationCollectionCommands({
   message,
   mutationError,
   previewCsv,
+  provenanceFile,
   setCollectionForm,
   setCsvFile,
   setImportReport,
+  setProvenanceFile,
   setLocalError,
   setMessage,
   sourcesQuery,
   submitCollection,
   themesQuery,
-}: Pick<ReturnType<typeof useCurationCollectionsClientController>, "collectionForm" | "commitCsv" | "createCollection" | "csvFile" | "importCsv" | "importReport" | "localError" | "message" | "mutationError" | "previewCsv" | "setCollectionForm" | "setCsvFile" | "setImportReport" | "setLocalError" | "setMessage" | "sourcesQuery" | "submitCollection" | "themesQuery">) {
+}: Pick<ReturnType<typeof useCurationCollectionsClientController>, "collectionForm" | "commitCsv" | "createCollection" | "csvFile" | "importCsv" | "importReport" | "localError" | "message" | "mutationError" | "previewCsv" | "provenanceFile" | "setCollectionForm" | "setCsvFile" | "setImportReport" | "setLocalError" | "setMessage" | "setProvenanceFile" | "sourcesQuery" | "submitCollection" | "themesQuery">) {
   return (
     <>
 {localError || mutationError ? (
@@ -628,6 +640,22 @@ function CurationCollectionCommands({
                 setLocalError(null);
               }}
             />
+            <FormField
+              accept=".json,application/json"
+              label="Provenance JSON 파일 (공식 등대)"
+              type="file"
+              onChange={(event) => {
+                setProvenanceFile(event.target.files?.[0] ?? null);
+                setImportReport(null);
+                setMessage(null);
+                setLocalError(null);
+              }}
+            />
+            {provenanceFile ? (
+              <p className="text-xs text-muted-foreground">
+                선택한 provenance: {provenanceFile.name}
+              </p>
+            ) : null}
             <div className="flex flex-wrap gap-2">
               <Button
                 disabled={!csvFile || importCsv.isPending}
@@ -1236,12 +1264,14 @@ function CurationCollectionsClientView({
   mutationError,
   patchItem,
   previewCsv,
+  provenanceFile,
   removeItem,
   resolveFeatureIds,
   resolveItem,
   setCollectionForm,
   setCsvFile,
   setImportReport,
+  setProvenanceFile,
   setItemForm,
   setLocalError,
   setMessage,
@@ -1269,7 +1299,7 @@ function CurationCollectionsClientView({
       title="큐레이션 관리"
     >
       <div className="space-y-6">
-        <CurationCollectionCommands collectionForm={collectionForm} commitCsv={commitCsv} createCollection={createCollection} csvFile={csvFile} importCsv={importCsv} importReport={importReport} localError={localError} message={message} mutationError={mutationError} previewCsv={previewCsv} setCollectionForm={setCollectionForm} setCsvFile={setCsvFile} setImportReport={setImportReport} setLocalError={setLocalError} setMessage={setMessage} sourcesQuery={sourcesQuery} submitCollection={submitCollection} themesQuery={themesQuery} />
+        <CurationCollectionCommands collectionForm={collectionForm} commitCsv={commitCsv} createCollection={createCollection} csvFile={csvFile} importCsv={importCsv} importReport={importReport} localError={localError} message={message} mutationError={mutationError} previewCsv={previewCsv} provenanceFile={provenanceFile} setCollectionForm={setCollectionForm} setCsvFile={setCsvFile} setImportReport={setImportReport} setLocalError={setLocalError} setMessage={setMessage} setProvenanceFile={setProvenanceFile} sourcesQuery={sourcesQuery} submitCollection={submitCollection} themesQuery={themesQuery} />
 
         <CurationCollectionCatalog activeCollectionId={activeCollectionId} addItem={addItem} archiveItem={archiveItem} collectionQuery={collectionQuery} collections={collections} collectionsQuery={collectionsQuery} detail={detail} itemForm={itemForm} patchItem={patchItem} removeItem={removeItem} resolveFeatureIds={resolveFeatureIds} resolveItem={resolveItem} setItemForm={setItemForm} setResolveFeatureIds={setResolveFeatureIds} setSelectedCollectionId={setSelectedCollectionId} submitItem={submitItem} />
 

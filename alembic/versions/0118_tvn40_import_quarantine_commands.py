@@ -118,6 +118,9 @@ ALTER TABLE feature.curation_import_batches
     REFERENCES ops.domain_commands(command_id) ON DELETE RESTRICT;
 ALTER TABLE feature.curation_import_batches
   ADD CONSTRAINT uq_curation_import_batches_command UNIQUE (command_id);
+ALTER TABLE feature.curation_import_batches
+  ADD CONSTRAINT uq_curation_import_batches_identity_command
+  UNIQUE (import_batch_id, command_id);
 """
 
 

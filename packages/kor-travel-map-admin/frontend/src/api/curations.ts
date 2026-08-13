@@ -633,17 +633,22 @@ export function usePreviewCurationCsvMutation() {
   return useMutation<
     CurationImportResponse,
     Error,
-    { file: File }
+    { file: File; provenanceFile?: File | null }
   >({
-    mutationFn: async ({ file }) => {
+    mutationFn: async ({ file, provenanceFile }) => {
       const body = new FormData();
       body.append("file", file);
+      if (provenanceFile) body.append("provenance_file", provenanceFile);
       const fileIdentity = await fileIdempotencyFingerprint(file);
+      const provenanceIdentity = provenanceFile
+        ? await fileIdempotencyFingerprint(provenanceFile)
+        : null;
       const operation = "admin.curation-import.preview";
       return withDomainIdempotencyFingerprint(
         domainCreateCommandSlot(operation),
         {
           content_sha256: fileIdentity.contentSha256,
+          provenance_sha256: provenanceIdentity?.contentSha256 ?? null,
         },
         (idempotencyKey) =>
           postFormData<CurationImportResponse>(

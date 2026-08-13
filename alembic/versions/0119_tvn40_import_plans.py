@@ -132,6 +132,9 @@ CREATE TABLE ops.curation_import_plan_commits (
   committed_at timestamptz NOT NULL DEFAULT clock_timestamp(),
   FOREIGN KEY (import_plan_id, command_id)
     REFERENCES ops.curation_import_plan_claims(import_plan_id, command_id)
+    ON DELETE RESTRICT,
+  FOREIGN KEY (import_batch_id, command_id)
+    REFERENCES feature.curation_import_batches(import_batch_id, command_id)
     ON DELETE RESTRICT
 );
 
@@ -428,6 +431,8 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = pg_catalog, feature, ops
 AS $command$
+DECLARE
+  v_batch feature.curation_import_batches%ROWTYPE;
 BEGIN
   IF jsonb_typeof(p_result_payload) <> 'object' THEN
     RAISE EXCEPTION 'curation import terminal result must be an object'
@@ -445,10 +450,28 @@ BEGIN
     RAISE EXCEPTION 'domain command does not match active curation import commit'
       USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_import_plan_commit_command';
   END IF;
+  SELECT batch.* INTO STRICT v_batch
+  FROM feature.curation_import_batches AS batch
+  JOIN ops.curation_import_plan_claims AS claim
+    ON claim.command_id = batch.command_id
+  JOIN feature.curation_import_plans AS plan
+    ON plan.import_plan_id = claim.import_plan_id
+  WHERE batch.import_batch_id = p_import_batch_id
+    AND batch.command_id = p_command_id
+    AND claim.import_plan_id = p_import_plan_id
+    AND batch.content_sha256 = plan.content_sha256;
   INSERT INTO ops.curation_import_plan_commits (
     import_plan_id, command_id, import_batch_id, result_payload
   ) VALUES (
-    p_import_plan_id, p_command_id, p_import_batch_id, p_result_payload
+    p_import_plan_id, p_command_id, p_import_batch_id,
+    p_result_payload || jsonb_build_object(
+      'db_receipt', jsonb_build_object(
+        'import_batch_id', v_batch.import_batch_id,
+        'command_id', v_batch.command_id,
+        'content_sha256', v_batch.content_sha256,
+        'row_count', v_batch.row_count
+      )
+    )
   );
 END
 $command$;

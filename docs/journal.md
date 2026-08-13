@@ -2,6 +2,20 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-14 — T-VN-40: immutable import causal chain과 UI provenance
+
+multipart preview를 공통 domain-command transaction에 결합했다. 파일은 bounded-memory streaming SHA로
+fingerprint하고 SERIALIZABLE 충돌 시 매번 같은 byte stream으로 되감아 claim부터 plan terminal까지 최대
+3회 전체 재시도한다. terminal replay는 CSV parsing·catalog 조회보다 먼저 끝나 mutable catalog drift가
+stored 201+ETag를 바꾸지 않는다.
+
+DB apply는 claimed plan의 immutable normalized row set과 caller row set을 exact 비교해 altered/missing/extra
+payload를 거부한다. plan commit은 같은 command가 만든 import batch·content hash와만 결박하고
+DB-derived batch id/command/content/count receipt를 남긴다. provenance-only pointer 변화도 item과 부모
+collection revision을 각각 한 번 증가시킨다. admin UI에 공식 등대 provenance JSON 입력을 추가했고,
+commit 412는 stale preview를 폐기해 명시적 재미리보기를 요구한다. API 80건, fresh 0001→0120 actual
+LOGIN 통합, frontend type/lint, mocked Chromium 6건이 통과했다.
+
 ## 2026-08-14 — T-VN-40: immutable import HTTP cutover와 quarantine stale 복구
 
 CSV를 preview와 commit에서 두 번 해석하던 legacy import route를 제거하고, immutable normalized row·
