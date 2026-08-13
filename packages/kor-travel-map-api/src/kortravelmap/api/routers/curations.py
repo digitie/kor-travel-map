@@ -85,7 +85,7 @@ ReusePolicy = Literal["allowed", "blocked", "manual_review"]
 CandidateReviewState = Literal["open", "promoted", "rejected"]
 _ETAG_RESPONSE_HEADER = {
     "ETag": {
-        "description": "현재 resource의 raw strong entity tag.",
+        "description": "현재 응답 representation의 strong entity tag.",
         "schema": {"type": "string"},
     }
 }
@@ -275,6 +275,8 @@ class AdminCurationCollectionView(BaseModel):
     metadata: dict[str, Any]
     item_count: int
     public_item_count: int
+    row_revision: str = Field(pattern=r"^[1-9][0-9]*$")
+    command_etag: str
     created_at: datetime
     updated_at: datetime
     archived_at: datetime | None
@@ -363,6 +365,8 @@ class AdminCurationItemView(BaseModel):
     link_evidence: dict[str, Any]
     link_actor: str | None
     link_decided_at: datetime | None
+    row_revision: str = Field(pattern=r"^[1-9][0-9]*$")
+    command_etag: str
     created_at: datetime
     updated_at: datetime
     archived_at: datetime | None
@@ -869,7 +873,10 @@ def _public_collection_view(
 def _admin_collection_view(
     row: curation_repo.CurationCollection,
 ) -> AdminCurationCollectionView:
-    return AdminCurationCollectionView.model_validate(row, from_attributes=True)
+    payload = dict(row.__dict__)
+    payload["row_revision"] = str(row.row_revision)
+    payload["command_etag"] = revision_etag(row.row_revision)
+    return AdminCurationCollectionView.model_validate(payload)
 
 
 def curation_item_response_feature_id(row: curation_repo.CurationItem) -> str | None:
@@ -893,8 +900,22 @@ def _public_item_view(row: curation_repo.CurationItem) -> PublicCurationItemView
 
 
 def _admin_item_view(row: curation_repo.CurationItem) -> AdminCurationItemView:
-    view = AdminCurationItemView.model_validate(row, from_attributes=True)
+    payload = dict(row.__dict__)
+    payload.pop("feature_uuid", None)
+    payload["row_revision"] = str(row.row_revision)
+    payload["command_etag"] = revision_etag(row.row_revision)
+    view = AdminCurationItemView.model_validate(payload)
     return view.model_copy(update={"feature_id": curation_item_response_feature_id(row)})
+
+
+def _curation_representation_etag(value: BaseModel) -> str:
+    payload = json.dumps(
+        value.model_dump(mode="json"),
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode()
+    return f'"sha256:{hashlib.sha256(payload).hexdigest()}"'
 
 
 def _import_row_receipt_view(
@@ -2252,12 +2273,20 @@ async def list_admin_curation_collections(
     )
 
 
-@admin_router.get("/{collection_id}", response_model=AdminCurationCollectionResponse)
+@admin_router.get(
+    "/{collection_id}",
+    response_model=AdminCurationCollectionResponse,
+    responses={
+        200: {"headers": _ETAG_RESPONSE_HEADER},
+        304: {"description": "representation ETag 일치"},
+    },
+)
 async def get_admin_curation_collection(
     request: Request,
     collection_id: UUID,
+    response: Response,
     session: Annotated[AsyncSession, Depends(get_session)],
-) -> AdminCurationCollectionResponse:
+) -> AdminCurationCollectionResponse | Response:
     started_at = perf_counter()
     result = await curation_repo.get_curation_collection(
         session, collection_id=str(collection_id), include_archived=True
@@ -2265,20 +2294,31 @@ async def get_admin_curation_collection(
     if result is None:
         raise HTTPException(status_code=404, detail="curation collection 없음")
     collection, items = result
-    return AdminCurationCollectionResponse(
+    result_response = AdminCurationCollectionResponse(
         data=AdminCurationCollectionData(
             collection=_admin_collection_view(collection),
             items=[_admin_item_view(item) for item in items],
         ),
         meta=make_meta(request, started_at=started_at),
     )
+    representation_etag = _curation_representation_etag(result_response.data)
+    if request.headers.get("if-none-match") == representation_etag:
+        return Response(status_code=304, headers={"ETag": representation_etag})
+    response.headers["ETag"] = representation_etag
+    return result_response
 
 
-@admin_router.post("", response_model=AdminCurationCollectionResponse, status_code=201)
+@admin_router.post(
+    "",
+    response_model=AdminCurationCollectionResponse,
+    status_code=201,
+    responses={201: {"headers": _ETAG_RESPONSE_HEADER}},
+)
 @idempotent_domain_command("admin.curation-collection.create")
 async def create_admin_curation_collection(
     request: Request,
     body: CurationCollectionCreateRequest,
+    response: Response,
     session: Annotated[AsyncSession, Depends(get_session)],
     context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
 ) -> AdminCurationCollectionResponse:
@@ -2315,22 +2355,35 @@ async def create_admin_curation_collection(
         raise _conflict(exc) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return AdminCurationCollectionResponse(
+    result_response = AdminCurationCollectionResponse(
         data=AdminCurationCollectionData(collection=_admin_collection_view(collection), items=[]),
         meta=make_meta(request, started_at=started_at),
     )
+    response.headers["ETag"] = _curation_representation_etag(result_response.data)
+    return result_response
 
 
-@admin_router.patch("/{collection_id}", response_model=AdminCurationCollectionResponse)
+@admin_router.patch(
+    "/{collection_id}",
+    response_model=AdminCurationCollectionResponse,
+    responses={
+        200: {"headers": _ETAG_RESPONSE_HEADER},
+        412: {"description": "stale collection If-Match"},
+        428: {"description": "If-Match 누락"},
+    },
+)
 @idempotent_domain_command("admin.curation-collection.patch")
 async def patch_admin_curation_collection(
     request: Request,
     collection_id: UUID,
     body: CurationCollectionPatchRequest,
+    response: Response,
     session: Annotated[AsyncSession, Depends(get_session)],
     context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
 ) -> AdminCurationCollectionResponse:
     started_at = perf_counter()
+    expected_revision = parse_revision_header(request, "If-Match", required=True)
+    assert expected_revision is not None
     try:
         async with domain_command_transaction(session):
             updates = body.model_dump(exclude_unset=True)
@@ -2344,9 +2397,12 @@ async def patch_admin_curation_collection(
                     **updates,
                     "updated_by": context.actor,
                 },
+                expected_revision=expected_revision,
             )
     except IntegrityError as exc:
         raise _conflict(exc) from exc
+    except curation_repo.CurationRevisionConflictError as exc:
+        raise HTTPException(status_code=412, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if collection is None:
@@ -2355,53 +2411,76 @@ async def patch_admin_curation_collection(
         session, collection_id=str(collection_id), include_archived=True
     )
     assert result is not None
-    return AdminCurationCollectionResponse(
+    result_response = AdminCurationCollectionResponse(
         data=AdminCurationCollectionData(
             collection=_admin_collection_view(result[0]),
             items=[_admin_item_view(item) for item in result[1]],
         ),
         meta=make_meta(request, started_at=started_at),
     )
+    response.headers["ETag"] = _curation_representation_etag(result_response.data)
+    return result_response
 
 
-@admin_router.delete("/{collection_id}", response_model=AdminCurationCollectionResponse)
+@admin_router.delete(
+    "/{collection_id}",
+    response_model=AdminCurationCollectionResponse,
+    responses={
+        200: {"headers": _ETAG_RESPONSE_HEADER},
+        412: {"description": "stale collection If-Match"},
+        428: {"description": "If-Match 누락"},
+    },
+)
 @idempotent_domain_command("admin.curation-collection.archive")
 async def archive_admin_curation_collection(
     request: Request,
     collection_id: UUID,
+    response: Response,
     session: Annotated[AsyncSession, Depends(get_session)],
     context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
 ) -> AdminCurationCollectionResponse:
     started_at = perf_counter()
-    async with domain_command_transaction(session):
-        collection = await curation_repo.archive_curation_collection(
-            session, collection_id=str(collection_id), actor=context.actor
-        )
+    expected_revision = parse_revision_header(request, "If-Match", required=True)
+    assert expected_revision is not None
+    try:
+        async with domain_command_transaction(session):
+            collection = await curation_repo.archive_curation_collection(
+                session,
+                collection_id=str(collection_id),
+                actor=context.actor,
+                expected_revision=expected_revision,
+            )
+    except curation_repo.CurationRevisionConflictError as exc:
+        raise HTTPException(status_code=412, detail=str(exc)) from exc
     if collection is None:
         raise HTTPException(status_code=404, detail="curation collection 없음")
     result = await curation_repo.get_curation_collection(
         session, collection_id=str(collection_id), include_archived=True
     )
     assert result is not None
-    return AdminCurationCollectionResponse(
+    result_response = AdminCurationCollectionResponse(
         data=AdminCurationCollectionData(
             collection=_admin_collection_view(result[0]),
             items=[_admin_item_view(item) for item in result[1]],
         ),
         meta=make_meta(request, started_at=started_at),
     )
+    response.headers["ETag"] = _curation_representation_etag(result_response.data)
+    return result_response
 
 
 @admin_router.post(
     "/{collection_id}/items",
     response_model=AdminCurationItemResponse,
     status_code=201,
+    responses={201: {"headers": _ETAG_RESPONSE_HEADER}},
 )
 @idempotent_domain_command("admin.curation-item.create")
 async def add_admin_curation_item(
     request: Request,
     collection_id: UUID,
     body: CurationItemCreateRequest,
+    response: Response,
     session: Annotated[AsyncSession, Depends(get_session)],
     context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
 ) -> AdminCurationItemResponse:
@@ -2433,15 +2512,22 @@ async def add_admin_curation_item(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return AdminCurationItemResponse(
+    result_response = AdminCurationItemResponse(
         data=_admin_item_view(item),
         meta=make_meta(request, started_at=started_at),
     )
+    response.headers["ETag"] = _curation_representation_etag(result_response.data)
+    return result_response
 
 
 @admin_router.patch(
     "/{collection_id}/items/{curation_item_id}",
     response_model=AdminCurationItemResponse,
+    responses={
+        200: {"headers": _ETAG_RESPONSE_HEADER},
+        412: {"description": "stale item If-Match"},
+        428: {"description": "If-Match 누락"},
+    },
 )
 @idempotent_domain_command("admin.curation-item.patch")
 async def patch_admin_curation_item(
@@ -2449,10 +2535,13 @@ async def patch_admin_curation_item(
     collection_id: UUID,
     curation_item_id: UUID,
     body: CurationItemPatchRequest,
+    response: Response,
     session: Annotated[AsyncSession, Depends(get_session)],
     context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
 ) -> AdminCurationItemResponse:
     started_at = perf_counter()
+    expected_revision = parse_revision_header(request, "If-Match", required=True)
+    assert expected_revision is not None
     updates = body.model_dump(exclude_unset=True)
     # T-VN-32C PR-2 (W7) — W6과 동일한 feature 참조 정규화.
     if updates.get("feature_id") is not None:
@@ -2467,32 +2556,45 @@ async def patch_admin_curation_item(
                 curation_item_id=str(curation_item_id),
                 updates=updates,
                 actor=context.actor,
+                expected_revision=expected_revision,
             )
     except IntegrityError as exc:
         raise _conflict(exc) from exc
+    except curation_repo.CurationRevisionConflictError as exc:
+        raise HTTPException(status_code=412, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if item is None:
         raise HTTPException(status_code=404, detail="curation item 없음")
-    return AdminCurationItemResponse(
+    result_response = AdminCurationItemResponse(
         data=_admin_item_view(item),
         meta=make_meta(request, started_at=started_at),
     )
+    response.headers["ETag"] = _curation_representation_etag(result_response.data)
+    return result_response
 
 
 @admin_router.delete(
     "/{collection_id}/items/{curation_item_id}",
     response_model=AdminCurationItemResponse,
+    responses={
+        200: {"headers": _ETAG_RESPONSE_HEADER},
+        412: {"description": "stale item If-Match"},
+        428: {"description": "If-Match 누락"},
+    },
 )
 @idempotent_domain_command("admin.curation-item.archive")
 async def archive_admin_curation_item(
     request: Request,
     collection_id: UUID,
     curation_item_id: UUID,
+    response: Response,
     session: Annotated[AsyncSession, Depends(get_session)],
     context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
 ) -> AdminCurationItemResponse:
     started_at = perf_counter()
+    expected_revision = parse_revision_header(request, "If-Match", required=True)
+    assert expected_revision is not None
     try:
         async with domain_command_transaction(session):
             item = await curation_repo.archive_curation_item(
@@ -2500,12 +2602,17 @@ async def archive_admin_curation_item(
                 collection_id=str(collection_id),
                 curation_item_id=str(curation_item_id),
                 actor=context.actor,
+                expected_revision=expected_revision,
             )
+    except curation_repo.CurationRevisionConflictError as exc:
+        raise HTTPException(status_code=412, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if item is None:
         raise HTTPException(status_code=404, detail="curation item 없음")
-    return AdminCurationItemResponse(
+    result_response = AdminCurationItemResponse(
         data=_admin_item_view(item),
         meta=make_meta(request, started_at=started_at),
     )
+    response.headers["ETag"] = _curation_representation_etag(result_response.data)
+    return result_response

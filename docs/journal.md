@@ -2,6 +2,19 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-14 — T-VN-40: collection/item CAS와 대용량 finding bounded memory
+
+admin collection/item 응답에 decimal `row_revision`과 그대로 재사용하는 `command_etag`을 추가하고,
+PATCH/archive는 `If-Match` 누락 428·stale 412를 강제했다. representation ETag는 collection 상세의
+ordered child set까지 해시하므로 command CAS와 분리된다. item 생성·수정·archive와 candidate promotion은
+부모 collection revision도 같은 transaction에서 증가시키며 domain-command replay가 ETag를 보존하고
+다른 If-Match는 같은 idempotency 요청으로 취급하지 않는다.
+
+MOIS async batch 적재에서 bundle만 줄고 validation issue/finding이 전체 snapshot 크기만큼 누적되던 경로도
+닫았다. Dagster issue metadata는 고정 표본만 유지하고 durable finding은 batch별 임시 spool에 기록한 뒤
+Feature transaction commit 후 bounded chunk로 영속화한다. 모든 batch가 warning인 회귀에서도 resident
+issue 표본과 finding 호출 크기가 batch 상한을 넘지 않는다.
+
 ## 2026-08-14 — T-VN-40: MOIS authoritative snapshot bounded-memory 적재
 
 MOIS 전체 snapshot의 인과성을 보존하려고 70만 건급 `FeatureBundle`을 모두 list로 보관하던

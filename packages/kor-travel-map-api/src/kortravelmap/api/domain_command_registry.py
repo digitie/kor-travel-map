@@ -299,28 +299,44 @@ _COMMAND_REGISTRY: Final[dict[OperationKey, CommandPolicy]] = {
         "admin.curation-collection.create",
         _MUTATION_RESULT,
         success_status=201,
+        replay_headers=("ETag",),
     ),
     ("PATCH", "/v1/admin/curations/{collection_id}"): _domain(
         "admin.curation-collection.patch",
         _MUTATION_RESULT,
+        replay_headers=("ETag",),
+        fingerprint_headers=("If-Match",),
     ),
     ("DELETE", "/v1/admin/curations/{collection_id}"): _domain(
         "admin.curation-collection.archive",
         _MUTATION_RESULT,
+        replay_headers=("ETag",),
+        fingerprint_headers=("If-Match",),
     ),
     ("POST", "/v1/admin/curations/{collection_id}/items"): _domain(
         "admin.curation-item.create",
         _MUTATION_RESULT,
         success_status=201,
+        replay_headers=("ETag",),
     ),
     (
         "PATCH",
         "/v1/admin/curations/{collection_id}/items/{curation_item_id}",
-    ): _domain("admin.curation-item.patch", _MUTATION_RESULT),
+    ): _domain(
+        "admin.curation-item.patch",
+        _MUTATION_RESULT,
+        replay_headers=("ETag",),
+        fingerprint_headers=("If-Match",),
+    ),
     (
         "DELETE",
         "/v1/admin/curations/{collection_id}/items/{curation_item_id}",
-    ): _domain("admin.curation-item.archive", _MUTATION_RESULT),
+    ): _domain(
+        "admin.curation-item.archive",
+        _MUTATION_RESULT,
+        replay_headers=("ETag",),
+        fingerprint_headers=("If-Match",),
+    ),
     (
         "POST",
         "/v1/admin/theme-feature-candidates/{candidate_id}/promote",

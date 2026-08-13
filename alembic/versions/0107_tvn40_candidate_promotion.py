@@ -535,6 +535,14 @@ BEGIN
   SET accepted_link_decision_id = v_decision_id
   WHERE item.curation_item_id = o_curation_item_id;
 
+  -- collection detail은 ordered child set을 포함한다. item promotion으로 body가
+  -- 바뀌면 parent command/representation revision도 같은 transaction에서 전진한다.
+  UPDATE feature.curation_collections AS collection
+  SET row_revision = collection.row_revision + 1,
+      updated_by = p_principal,
+      updated_at = clock_timestamp()
+  WHERE collection.collection_id = p_collection_id;
+
   UPDATE feature.theme_feature_candidates AS candidate
   SET review_state = 'promoted',
       row_revision = candidate.row_revision + 1,
@@ -617,6 +625,8 @@ def upgrade() -> None:
         ("feature.curated_source_rules", "row_revision"),
         ("feature.curated_sources", "row_revision"),
         ("feature.curation_collections", "row_revision"),
+        ("feature.curation_collections", "updated_by"),
+        ("feature.curation_collections", "updated_at"),
         ("feature.features", "row_revision"),
         ("provider_sync.provider_datasets", "provider_dataset_id"),
         ("provider_sync.source_entities", "source_entity_key"),
