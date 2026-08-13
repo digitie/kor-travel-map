@@ -853,15 +853,27 @@ async def test_curated_public_read_uses_projection_admin_unchanged(
             )
             await migrated_session.flush()
 
-    admin_theme = await curated_repo.create_curated_theme(
-        migrated_session,
-        theme_slug="pfv-admin-only-theme",
-        theme_name="관리자 전용 테마",
-        theme_group="internal",
-        visibility="admin_only",
+    admin_theme_id = str(
+        (
+            await migrated_session.execute(
+                text(
+                    """
+                    INSERT INTO feature.curated_themes (
+                      theme_slug, theme_name, theme_description, theme_group,
+                      default_curated, visibility, metadata, row_revision,
+                      owner_kind, owner_provider_dataset_id
+                    ) VALUES (
+                      'pfv-admin-only-theme', '관리자 전용 테마', '', 'internal',
+                      false, 'admin_only', '{}'::jsonb, 1, 'operator', NULL
+                    )
+                    RETURNING theme_id::text
+                    """
+                )
+            )
+        ).scalar_one()
     )
     overlay_cases = (
-        ("admin-theme", admin_theme.theme_id, "curated"),
+        ("admin-theme", admin_theme_id, "curated"),
         ("candidate", theme_id, "candidate"),
         ("rejected", theme_id, "rejected"),
     )
@@ -938,7 +950,7 @@ async def test_curated_public_read_uses_projection_admin_unchanged(
     admin_collection = await curation_repo.create_curation_collection(
         migrated_session,
         collection_key="pfv-admin-only:2026",
-        theme_id=admin_theme.theme_id,
+        theme_id=admin_theme_id,
         source_id=source_id,
         title="관리자 전용 테마의 공개 표시 컬렉션",
         edition_key="2026",
