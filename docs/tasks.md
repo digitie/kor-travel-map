@@ -645,8 +645,27 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   > `start_period 20s + interval 10s × retries 20` = **약 3.5분**이므로,
   > migrate-in-place는 entrypoint 인라인 실행으로는 애초에 성립하지 않는다.
 
+  **prod 실데이터(1,008,852행) 복제본에서 잰 값** — clone은 이후 폐기했으므로 여기가
+  유일한 기록이다:
+  - ADR-090 bootstrap **2초**, 7 principal 생성, `public.alembic_version` 소유권
+    `kor_travel_map` → `ktm_feature_schema_owner`, 비소유 relation 0.
+    T-VN-34에서 고친 두 P0(identity 시퀀스 sweep 제외 / `alembic_version` 이전)가
+    100만 행 규모에서도 성립한다. fresh DB에서는 무증상이던 축이다.
+  - `0097` fence 대상(`feature_versions.origin='user_request'`) **0건**
+  - `0103` replay 대상(`features.data_origin='user_request'`) **0건**
+  - `ops.public_api_keys` **0행** ← 폐기·재생성 시 재발급이 필요한지 확인할 것.
+    2026-08-05 공개 표면 전체 401 사건의 축이다.
+
   **선행 실측(미완)**: provider 재적재로 1,008,852 feature를 다시 채우는 데
   걸리는 시간. rate limit 포함 실측 전에는 cutover 창을 정할 수 없다.
+
+  **ADR-090 게이트 실측(2026-08-13)** — `scripts/rehearse-adr090-deploy-path.sh`.
+  clone-live 인수는 `--entrypoint python -m uvicorn` + 단일 DSN이라 이 축을 영원히
+  건드리지 않으므로 별도 리허설이 유일한 증거다. 네 case 전부 fail-close 확인:
+  split DSN 누락(exit 2) / runtime DSN 단독(exit 2) / EXPECTED_HEAD 불일치(exit 1) /
+  set-but-empty(exit 1).
+  첫 실행에서는 네 case 모두 ops profile 검사(ADR-066)에서 **먼저** 죽어 재려던
+  게이트에 도달조차 못 했다 — exit code만 봤으면 green으로 오인했을 자리다.
 
   > 2026-08-13 갱신. 원래 이 항목은 `0087_route_area_subtypes`를 지시했는데, 그 사이
   > T-VN-34(`0098_admin_scope_indexes`)와 T-VN-36(`0104_tvn36_final_fence`)이 main에
