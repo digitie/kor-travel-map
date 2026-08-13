@@ -655,6 +655,24 @@
         "0103_tvn36_freeze_replay"
       ],
       "revision": "0104_tvn36_final_fence"
+    },
+    {
+      "down_revision": [
+        "0104_tvn36_final_fence"
+      ],
+      "revision": "0105_tvn40_curation_receipts"
+    },
+    {
+      "down_revision": [
+        "0105_tvn40_curation_receipts"
+      ],
+      "revision": "0106_tvn40_candidate_commands"
+    },
+    {
+      "down_revision": [
+        "0106_tvn40_candidate_commands"
+      ],
+      "revision": "0107_tvn40_candidate_promotion"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

@@ -2,6 +2,19 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-13 — T-VN-40: candidate promotion과 trusted membership 원자 경계
+
+candidate promotion을 `SERIALIZABLE`·candidate/collection/item revision·domain command를
+검증하는 named SECURITY DEFINER procedure로 구현했다. 현재 rule/source/head/record/link와
+Feature 3축·typed subtype·T-VN-36 active override lineage를 하나의 canonical input hash로
+다시 계산해 후보 증거와 다르면 승격을 거부한다. 통과한 명령은 canonical item 생성 또는
+CAS update, accepted `admin_review` link decision append, trusted pointer 갱신, candidate
+`open→promoted`와 transition audit를 한 transaction에서 완료하고 transition id를 반환한다.
+
+실제 API LOGIN만 승격할 수 있고 Dagster LOGIN은 reject/promotion 모두 실행할 수 없다.
+새 membership, stale collection CAS, typed place detail 변경 뒤 stale proof 전체 rollback을
+포함한 candidate command/receipt 통합 테스트 8개가 fresh 0001→0107 DB에서 통과했다.
+
 ## 2026-08-13 — T-VN-40: typed candidate reject와 audit 경계
 
 candidate reject를 `SERIALIZABLE`·candidate revision·domain command actor/operation을 검증하는

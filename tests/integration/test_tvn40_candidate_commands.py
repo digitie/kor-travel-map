@@ -23,7 +23,11 @@ def _runtime_engine(engine: AsyncEngine, *, login: str) -> AsyncEngine:
     return make_async_engine(dsn, pool_size=1)
 
 
-async def _seed_candidate(engine: AsyncEngine) -> dict[str, object]:
+async def _seed_candidate(
+    engine: AsyncEngine,
+    *,
+    operation: str = "admin.theme-feature-candidate.reject",
+) -> dict[str, object]:
     suffix = uuid4().hex
     feature_id = f"feature:tvn40-candidate-{suffix}"
     source_entity_key = f"entity:tvn40-candidate-{suffix}"
@@ -109,6 +113,22 @@ async def _seed_candidate(engine: AsyncEngine) -> dict[str, object]:
             """,
         ):
             await connection.execute(text(statement), seed)
+        await connection.execute(
+            text(
+                """
+                INSERT INTO feature.feature_places (
+                  feature_id, feature_uuid, kind, place_kind,
+                  facility_info, reviews_link, payload
+                )
+                SELECT
+                  feature_id, feature_uuid, kind, 'attraction',
+                  jsonb_build_object('wheelchair', true), '{}'::jsonb, '{}'::jsonb
+                FROM feature.features
+                WHERE feature_id = :feature_id
+                """
+            ),
+            seed,
+        )
         theme_id = str(
             await connection.scalar(
                 text(
@@ -139,6 +159,27 @@ async def _seed_candidate(engine: AsyncEngine) -> dict[str, object]:
                     """
                 ),
                 {"dataset_id": dataset_id},
+            )
+        )
+        collection_id = str(
+            await connection.scalar(
+                text(
+                    """
+                    INSERT INTO feature.curation_collections (
+                      collection_key, theme_id, source_id, title, status,
+                      visibility, metadata
+                    ) VALUES (
+                      :collection_key, CAST(:theme_id AS uuid),
+                      CAST(:source_id AS uuid), 'typed candidate collection',
+                      'draft', 'admin_only', '{}'::jsonb
+                    ) RETURNING collection_id
+                    """
+                ),
+                {
+                    "collection_key": f"tvn40-candidate-{suffix}",
+                    "source_id": source_id,
+                    "theme_id": theme_id,
+                },
             )
         )
         rule_id = str(
@@ -182,6 +223,29 @@ async def _seed_candidate(engine: AsyncEngine) -> dict[str, object]:
                 },
             )
         )
+        await connection.execute(
+            text(
+                """
+                UPDATE feature.theme_feature_candidates AS candidate
+                SET rule_row_revision = snapshot.rule_row_revision,
+                    rule_input_hash = snapshot.rule_input_hash,
+                    source_record_key = snapshot.source_record_key,
+                    source_record_hash = snapshot.source_record_hash,
+                    candidate_input_hash = snapshot.candidate_input_hash,
+                    match_evidence = snapshot.match_evidence
+                FROM feature.current_theme_candidate_snapshot(
+                  CAST(:rule_id AS uuid), :source_entity_key, :feature_id
+                ) AS snapshot
+                WHERE candidate.candidate_id = CAST(:candidate_id AS uuid)
+                """
+            ),
+            {
+                "candidate_id": candidate_id,
+                "feature_id": feature_id,
+                "rule_id": rule_id,
+                "source_entity_key": source_entity_key,
+            },
+        )
         command_id = int(
             await connection.scalar(
                 text(
@@ -189,19 +253,21 @@ async def _seed_candidate(engine: AsyncEngine) -> dict[str, object]:
                     INSERT INTO ops.domain_commands (
                       actor, operation, idempotency_key, request_fingerprint
                     ) VALUES (
-                      :actor, 'admin.theme-feature-candidate.reject',
+                      :actor, :operation,
                       x_extension.gen_random_uuid(), repeat('d', 64)
                     ) RETURNING command_id
                     """
                 ),
-                {"actor": actor},
+                {"actor": actor, "operation": operation},
             )
         )
     return {
         "actor": actor,
         "candidate_id": candidate_id,
         "command_id": command_id,
+        "collection_id": collection_id,
         "feature_id": feature_id,
+        "source_record_key": source_record_key,
     }
 
 
@@ -330,17 +396,262 @@ async def test_candidate_command_acl_and_cas_fail_closed(
             await transaction.rollback()
 
         async with dagster.connect() as connection:
-            assert not await connection.scalar(
-                text(
-                    """
-                    SELECT has_function_privilege(
-                      session_user,
-                      'feature.reject_theme_feature_candidate(uuid,bigint,bigint,text,text)'::regprocedure,
-                      'EXECUTE'
+            privileges = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT
+                          has_function_privilege(
+                            session_user,
+                            'feature.reject_theme_feature_candidate(uuid,bigint,bigint,text,text)'::regprocedure,
+                            'EXECUTE'
+                          ),
+                          has_function_privilege(
+                            session_user,
+                            'feature.promote_theme_feature_candidate(uuid,uuid,text,text,text,text,text,text,integer,text,text,text,bigint,bigint,bigint,bigint,text,text)'::regprocedure,
+                            'EXECUTE'
+                          )
+                        """
                     )
-                    """
                 )
-            )
+            ).one()
+            assert privileges == (False, False)
     finally:
         await api.dispose()
         await dagster.dispose()
+
+
+async def test_admin_runtime_promotion_is_one_trusted_membership_transaction(
+    migrated_engine: AsyncEngine,
+) -> None:
+    seeded = await _seed_candidate(
+        migrated_engine,
+        operation="admin.theme-feature-candidate.promote",
+    )
+    api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
+    try:
+        async with api.begin() as connection:
+            await connection.execute(
+                text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
+            )
+            result = (
+                await connection.execute(
+                    text(
+                        """
+                        CALL feature.promote_theme_feature_candidate(
+                          CAST(:candidate_id AS uuid), CAST(:collection_id AS uuid),
+                          'external-item-1', 'primary', '승격 장소', '서울',
+                          '승격 제목', '승격 요약', 10, 'primary_stop', 'allowed',
+                          'included', 1, 1, NULL, :command_id, 'admin_review',
+                          :actor, NULL, NULL, NULL, NULL, NULL
+                        )
+                        """
+                    ),
+                    seeded,
+                )
+            ).mappings().one()
+
+        assert str(result["o_candidate_id"]) == seeded["candidate_id"]
+        assert int(result["o_candidate_revision"]) == 2
+        assert int(result["o_curation_item_revision"]) == 1
+        assert int(result["o_transition_id"]) > 0
+
+        async with migrated_engine.connect() as connection:
+            item = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT item.feature_id, item.source_record_key, item.status,
+                               item.row_revision, decision.decision_kind,
+                               decision.match_basis, decision.resolver_version,
+                               decision.actor, decision.evidence ->> 'candidate_id'
+                        FROM feature.curation_items AS item
+                        JOIN feature.curation_link_decisions AS decision
+                          ON decision.decision_id = item.accepted_link_decision_id
+                         AND decision.curation_item_id = item.curation_item_id
+                         AND decision.feature_id = item.feature_id
+                        WHERE item.curation_item_id = CAST(:curation_item_id AS uuid)
+                        """
+                    ),
+                    {"curation_item_id": result["o_curation_item_id"]},
+                )
+            ).one()
+            transition = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT transition_kind, from_review_state, to_review_state,
+                               collection_id::text, curation_item_id::text,
+                               command_id, actor
+                        FROM feature.theme_feature_candidate_transitions
+                        WHERE transition_id = :transition_id
+                        """
+                    ),
+                    {"transition_id": result["o_transition_id"]},
+                )
+            ).one()
+        assert item == (
+            seeded["feature_id"],
+            seeded["source_record_key"],
+            "included",
+            1,
+            "accepted",
+            "admin_review",
+            "tvn40-candidate-promotion-v1",
+            seeded["actor"],
+            seeded["candidate_id"],
+        )
+        assert transition == (
+            "admin_promote",
+            "open",
+            "promoted",
+            seeded["collection_id"],
+            str(result["o_curation_item_id"]),
+            seeded["command_id"],
+            seeded["actor"],
+        )
+    finally:
+        await api.dispose()
+
+
+async def test_promotion_stale_collection_rolls_back_every_surface(
+    migrated_engine: AsyncEngine,
+) -> None:
+    seeded = await _seed_candidate(
+        migrated_engine,
+        operation="admin.theme-feature-candidate.promote",
+    )
+    api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
+    try:
+        async with api.connect() as connection:
+            transaction = await connection.begin()
+            await connection.execute(
+                text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
+            )
+            with pytest.raises(DBAPIError) as stale:
+                await connection.execute(
+                    text(
+                        """
+                        CALL feature.promote_theme_feature_candidate(
+                          CAST(:candidate_id AS uuid), CAST(:collection_id AS uuid),
+                          'external-item-1', 'primary', '승격 장소', NULL,
+                          NULL, NULL, 0, 'nearby_option', 'manual_review',
+                          'candidate', 1, 2, NULL, :command_id, 'admin_review',
+                          :actor, NULL, NULL, NULL, NULL, NULL
+                        )
+                        """
+                    ),
+                    seeded,
+                )
+            assert getattr(stale.value.orig, "sqlstate", None) == "23514"
+            await transaction.rollback()
+
+        async with migrated_engine.connect() as connection:
+            assert await connection.scalar(
+                text(
+                    """
+                    SELECT (review_state, row_revision) = ('open', 1)
+                    FROM feature.theme_feature_candidates
+                    WHERE candidate_id = CAST(:candidate_id AS uuid)
+                    """
+                ),
+                seeded,
+            )
+            assert (
+                await connection.scalar(
+                    text(
+                        """
+                        SELECT count(*)
+                        FROM feature.curation_items
+                        WHERE collection_id = CAST(:collection_id AS uuid)
+                        """
+                    ),
+                    seeded,
+                )
+                == 0
+            )
+            assert (
+                await connection.scalar(
+                    text(
+                        """
+                        SELECT count(*)
+                        FROM feature.theme_feature_candidate_transitions
+                        WHERE candidate_id = CAST(:candidate_id AS uuid)
+                        """
+                    ),
+                    seeded,
+                )
+                == 0
+            )
+    finally:
+        await api.dispose()
+
+
+async def test_promotion_rejects_stale_typed_feature_detail(
+    migrated_engine: AsyncEngine,
+) -> None:
+    seeded = await _seed_candidate(
+        migrated_engine,
+        operation="admin.theme-feature-candidate.promote",
+    )
+    async with migrated_engine.begin() as connection:
+        await connection.execute(
+            text(
+                """
+                UPDATE feature.feature_places
+                SET facility_info = jsonb_build_object('wheelchair', false)
+                WHERE feature_id = :feature_id
+                """
+            ),
+            seeded,
+        )
+
+    api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
+    try:
+        async with api.connect() as connection:
+            transaction = await connection.begin()
+            await connection.execute(
+                text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
+            )
+            with pytest.raises(DBAPIError) as stale:
+                await connection.execute(
+                    text(
+                        """
+                        CALL feature.promote_theme_feature_candidate(
+                          CAST(:candidate_id AS uuid), CAST(:collection_id AS uuid),
+                          'external-item-1', 'primary', '승격 장소', NULL,
+                          NULL, NULL, 0, 'nearby_option', 'manual_review',
+                          'candidate', 1, 1, NULL, :command_id, 'admin_review',
+                          :actor, NULL, NULL, NULL, NULL, NULL
+                        )
+                        """
+                    ),
+                    seeded,
+                )
+            assert getattr(stale.value.orig, "sqlstate", None) == "23514"
+            assert "candidate proof is stale" in str(stale.value.orig)
+            await transaction.rollback()
+
+        async with migrated_engine.connect() as connection:
+            state = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT candidate.review_state, candidate.row_revision,
+                               count(item.curation_item_id),
+                               count(transition.transition_id)
+                        FROM feature.theme_feature_candidates AS candidate
+                        LEFT JOIN feature.curation_items AS item
+                          ON item.collection_id = CAST(:collection_id AS uuid)
+                        LEFT JOIN feature.theme_feature_candidate_transitions AS transition
+                          ON transition.candidate_id = candidate.candidate_id
+                        WHERE candidate.candidate_id = CAST(:candidate_id AS uuid)
+                        GROUP BY candidate.review_state, candidate.row_revision
+                        """
+                    ),
+                    seeded,
+                )
+            ).one()
+        assert state == ("open", 1, 0, 0)
+    finally:
+        await api.dispose()
