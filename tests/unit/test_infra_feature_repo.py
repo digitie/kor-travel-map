@@ -253,10 +253,10 @@ async def test_provider_create_uses_procedure_and_omits_legacy_state(
 
 
 @pytest.mark.asyncio
-async def test_user_fenced_provider_refresh_keeps_provider_baseline_snapshot(
+async def test_existing_provider_refresh_uses_typed_field_patch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """user effective row를 provider ``version=0`` payload로 오기록하지 않는다."""
+    """whole-row user fence 대신 named provider field patch만 호출한다."""
 
     class _Mappings:
         def __init__(self, row: dict[str, Any] | None) -> None:
@@ -286,13 +286,25 @@ async def test_user_fenced_provider_refresh_keeps_provider_baseline_snapshot(
             self.calls.append(sql)
             if "create_feature_with_initial_state" in sql:
                 self.feature_uuid = json.loads(params["feature_payload"])["feature_uuid"]
-                return _Result({"o_inserted": False, "o_feature_uuid": self.feature_uuid})
-            if "UPDATE feature.features AS f" in sql:
-                return _Result(None)
+                return _Result(
+                    {
+                        "o_inserted": False,
+                        "o_feature_uuid": self.feature_uuid,
+                        "o_row_revision": 7,
+                    }
+                )
+            if "apply_provider_feature_field_patch" in sql:
+                return _Result(
+                    {
+                        "o_feature_id": feature.feature_id,
+                        "o_row_revision": 8,
+                        "o_applied_field_count": 25,
+                    }
+                )
             raise AssertionError(f"unexpected SQL: {sql}")
 
     async def _no_subtype(*_args: Any, **_kwargs: Any) -> None:
-        raise AssertionError("user fence must skip subtype write")
+        raise AssertionError("existing refresh must use the typed patch procedure")
 
     feature = _place(None, None)
     monkeypatch.setattr(feature_repo, "_upsert_feature_subtype", _no_subtype)
@@ -306,6 +318,8 @@ async def test_user_fenced_provider_refresh_keeps_provider_baseline_snapshot(
     )
 
     assert inserted is False
+    assert any("apply_provider_feature_field_patch" in call for call in session.calls)
+    assert not any("UPDATE feature.features AS f" in call for call in session.calls)
     assert not any("materialize_provider_feature_version" in call for call in session.calls)
 
 

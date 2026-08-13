@@ -170,6 +170,13 @@ services:
       # 값을 주입해야 하며(앞뒤 공백 없는 32자 이상, 다른 secret과 달라야 함),
       # host env 누락 시 compose 평가가 즉시 실패한다.
       KOR_TRAVEL_MAP_API_METRICS_TOKEN: ${KOR_TRAVEL_MAP_API_METRICS_TOKEN:?KOR_TRAVEL_MAP_API_METRICS_TOKEN is required}
+      # production ops surface를 켠 standalone/isolated run은 세 principal을 모두
+      # 명시 주입한다. ``env_file``은 local developer 편의일 뿐 compose profile의
+      # fail-closed startup 경계를 대신하지 않는다.
+      KOR_TRAVEL_MAP_API_OPS_READ_TOKEN: ${KOR_TRAVEL_MAP_API_OPS_READ_TOKEN:-}
+      KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN: ${KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN:-}
+      KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN: ${KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN:-}
+      KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED: ${KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED:-false}
       # bridge 모드의 BFF peer를 단일 고정 주소로 제한한다. 임의의 compose
       # container subnet 전체를 신뢰하지 않는다.
       KOR_TRAVEL_MAP_API_ADMIN_TRUSTED_PROXY_CIDRS: '["172.31.254.3/32"]'

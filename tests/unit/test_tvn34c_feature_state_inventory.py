@@ -1,4 +1,8 @@
-"""T-VN-34C가 소유한 Feature reader의 legacy state 정적 차단선."""
+"""T-VN-34C/T-VN-36D가 소유한 Feature reader의 legacy 컬럼 정적 차단선.
+
+금지 목록은 0097(3축 cutover)과 0104(final field-override fence)의 실제
+``DROP COLUMN`` SQL에서 읽는다 — 손으로 적지 않는다.
+"""
 
 from __future__ import annotations
 
@@ -32,23 +36,50 @@ def _owned_feature_readers() -> tuple[Path, ...]:
 
 _OWNED_FEATURE_READERS = _owned_feature_readers()
 _FEATURE_RELATIONS = r"feature\.(?:features|public_features)"
-# 0097이 물리 삭제한 컬럼 전부. 손으로 적으면 뒤처진다 — 실제로 `user_deleted_by`가
-# 빠져 있었다. 그래서 마이그레이션 SQL에서 **직접 읽어** 목록을 만든다.
-_CUTOVER_MIGRATION = (
-    _ROOT / "alembic/versions/0097_tvn34c_final_state_cutover.py"
+# 파괴적 cutover가 물리 삭제한 컬럼 전부. 손으로 적으면 뒤처진다 — 실제로
+# `user_deleted_by`가 빠져 있었다. 그래서 마이그레이션 SQL에서 **직접 읽어** 목록을
+# 만든다. 세대가 늘면 여기에 파일을 더한다: 0097(T-VN-34C 3축 cutover)이 legacy
+# status/delete/user-change 계열 8개를, 0104(T-VN-36D final fence)가 whole-row freeze
+# 잔재인 `data_origin`/`data_version`을 지운다. 뒷 세대를 더하지 않으면 차단선은
+# **직전 세대만** 보게 되고, 새로 지운 컬럼은 정적으로 무방비가 된다.
+_CUTOVER_MIGRATIONS = (
+    _ROOT / "alembic/versions/0097_tvn34c_final_state_cutover.py",
+    _ROOT / "alembic/versions/0104_tvn36_final_fence.py",
 )
 _DROPPED_COLUMNS = tuple(
     sorted(
-        set(
-            re.findall(
+        {
+            column
+            for migration in _CUTOVER_MIGRATIONS
+            for column in re.findall(
                 r"ALTER TABLE feature\.features DROP COLUMN ([a-z_]+)",
-                _CUTOVER_MIGRATION.read_text(encoding="utf-8"),
+                migration.read_text(encoding="utf-8"),
             )
-        )
+        }
     )
 )
-assert len(_DROPPED_COLUMNS) >= 8, f"0097 DROP COLUMN 목록을 읽지 못했다: {_DROPPED_COLUMNS}"
+assert len(_DROPPED_COLUMNS) >= 10, f"cutover DROP COLUMN 목록을 읽지 못했다: {_DROPPED_COLUMNS}"
+assert {"data_origin", "data_version"} <= set(_DROPPED_COLUMNS), _DROPPED_COLUMNS
 _LEGACY_COLUMNS = "(?:" + "|".join(re.escape(c) for c in _DROPPED_COLUMNS) + ")"
+
+# 컬럼만 보면 **테이블 통째 삭제**를 놓친다. 0104는 `feature.feature_versions`와
+# `ops.feature_change_requests`를 지우는데, 컬럼 축 차단선은 이 이름을 아예 모르므로
+# live 러너가 두 테이블을 계속 질의해도 green이었다.
+_DROPPED_RELATIONS = tuple(
+    sorted(
+        {
+            relation
+            for migration in _CUTOVER_MIGRATIONS
+            for relation in re.findall(
+                r"DROP TABLE ([a-z_]+\.[a-z_]+)",
+                migration.read_text(encoding="utf-8"),
+            )
+        }
+    )
+)
+assert {"feature.feature_versions", "ops.feature_change_requests"} <= set(
+    _DROPPED_RELATIONS
+), _DROPPED_RELATIONS
 
 
 # f-string 보간 자리를 대신하는 식별자. **식별자로 유효한 형태**여야 alias 바인딩
@@ -200,16 +231,59 @@ def test_tvn34c_owned_feature_readers_do_not_restore_legacy_state() -> None:
 # 물리 삭제한 뒤에도 `run-admin-feature-clone-live-acceptance.sh`가 그 컬럼을 계속 조회해
 # **live E2E 경로가 통째로 깨진 채** 모든 게이트가 green이었다(2026-08-13 실측). 러너에는
 # 정적 문자열 계약만 있고 실행 게이트가 없어 아무도 잡지 못했다.
+#
+# 2026-08-13 확장: 이 축이 `*.sh`만 훑고 삭제된 **테이블**은 보지 않아서, live clone
+# 러너의 `.py` 헬퍼(`admin_feature_live_fixture.py` 등)가 0104가 지운
+# `ops.feature_change_requests` / `feature.feature_versions`를 계속 질의하는데도
+# 모든 게이트가 green이었다. 러너는 `0104` DB에서 첫 스냅샷도 넘기지 못한다.
 _SCRIPT_ROOTS = (_ROOT / "scripts",)
+_SCRIPT_SUFFIXES = ("*.sh", "*.py")
+_DROPPED_RELATION_MENTION = re.compile(
+    "|".join(re.escape(relation) for relation in _DROPPED_RELATIONS)
+)
+
+
+def _script_paths() -> tuple[Path, ...]:
+    found: list[Path] = []
+    for root in _SCRIPT_ROOTS:
+        for suffix in _SCRIPT_SUFFIXES:
+            found.extend(sorted(root.rglob(suffix)))
+    return tuple(sorted(set(found)))
 
 
 def _feature_relation_scripts() -> tuple[Path, ...]:
     found: list[Path] = []
-    for root in _SCRIPT_ROOTS:
-        for path in sorted(root.rglob("*.sh")):
-            if _FEATURE_RELATION_MENTION.search(path.read_text(encoding="utf-8")):
-                found.append(path)
+    for path in _script_paths():
+        if _FEATURE_RELATION_MENTION.search(path.read_text(encoding="utf-8")):
+            found.append(path)
     return tuple(found)
+
+
+def test_tvn36d_scripts_do_not_query_dropped_relations() -> None:
+    """운영 스크립트가 0104가 지운 테이블을 질의하지 않는지 본다.
+
+    컬럼 축과 달리 테이블은 alias 없이도 참조되므로 이름 자체를 찾는다. 주석은
+    허용한다 — "왜 지웠는지"를 적어두는 것은 위반이 아니다.
+    """
+
+    violations: dict[str, list[str]] = {}
+    for path in _script_paths():
+        hits: set[str] = set()
+        for line in path.read_text(encoding="utf-8").splitlines():
+            stripped = line.lstrip()
+            if stripped.startswith("#"):
+                continue
+            # "그 테이블이 더 이상 없어야 한다"는 부정 단언은 위반이 아니다.
+            if "information_schema" in line or "to_regclass" in line:
+                continue
+            for match in _DROPPED_RELATION_MENTION.findall(line):
+                hits.add(match)
+        if hits:
+            violations[str(path.relative_to(_ROOT))] = sorted(hits)
+    assert violations == {}, (
+        "스크립트가 0104가 삭제한 테이블을 질의한다 — live 경로가 런타임에만 터진다: "
+        f"{violations}"
+    )
 
 
 def test_tvn34c_scripts_do_not_query_dropped_feature_columns() -> None:

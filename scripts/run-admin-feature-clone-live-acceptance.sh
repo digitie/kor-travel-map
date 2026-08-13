@@ -745,6 +745,11 @@ owned_feature_ids_sql() {
   local run_id="$1"
   [[ "$run_id" =~ ^[a-z0-9][a-z0-9-]{15,79}$ ]] ||
     die "API-owned feature ID run ID is invalid"
+  # T-VN-36 live spec은 여섯 개의 결정적 fixture id를 쓰지 않는다. admin create가
+  # 만드는 Feature는 **한 건**이고 그 id는 서버가 `{name}:{lon:.6f},{lat:.6f}`
+  # 자연키로 발급한다(`_create_feature_id`). 감사 helper의
+  # `_admin_fixture_feature_id`가 같은 규칙을 갖고 관측값과 대조하므로 규칙이
+  # 어긋나면 조용히 새지 않고 감사가 실패한다.
   python3 -I -B - "$run_id" <<'PY'
 import hashlib
 import sys
@@ -755,23 +760,57 @@ def make_id(kind: str, category: str, source_type: str, source_natural_key: str)
     raw = f"global|{kind}|{category}|{source_type}|{source_natural_key}|"
     return f"f_global_{kind[0]}_{hashlib.sha1(raw.encode()).hexdigest()[:16]}"
 
-def admin_id(role: str) -> str:
-    logical_id = f"e2e_live_acceptance::{run_id}::{role}"
-    return make_id(
-        "place", "01070300", "user_request",
-        hashlib.sha256(logical_id.encode()).hexdigest(),
-    )
-
 ids = [
     make_id("weather", "00000000", "e2e-live-acceptance", f"{run_id}:weather"),
     make_id("price", "00000000", "e2e-live-acceptance", f"{run_id}:price"),
+    make_id(
+        "place", "01070300", "user_request",
+        f"E2E TVN36 state fixture {run_id}:127.500000,36.500000",
+    ),
 ]
-ids.extend(admin_id(role) for role in (
-    "marker::draft", "marker::retired", "marker::suppressed",
-    "correction", "search::alpha", "search::beta",
-))
 print(",".join(repr(value) for value in ids))
 PY
+}
+
+owned_feature_uuids_sql() {
+  # ``ops.domain_commands``/``domain_command_results``에는 feature 열이 없고,
+  # admin mutation의 terminal response가 담는 식별자는 **feature UUID**다
+  # (`_field_override_response`/`_state_response`). UUID는 서버가 발급하므로
+  # 재계산할 수 없어, api-audit이 관측해 남긴 증거에서만 읽는다. 증거가 아직
+  # 없으면(baseline/startup snapshot) run-owned command 행도 아직 없다.
+  local audit_path="${RUNTIME_DIR-}/api-owned-audit.json"
+  if [[ -z "${RUNTIME_DIR-}" || ! -e "$audit_path" ]]; then
+    return 0
+  fi
+  [[ -f "$audit_path" && ! -L "$audit_path" ]] ||
+    die "API-owned audit evidence is unsafe"
+  [[ "$(stat -c '%u:%g:%a' -- "$audit_path")" == "0:0:600" ]] ||
+    die "API-owned audit evidence metadata is unsafe"
+  KTM_API_OWNED_AUDIT_PATH="$audit_path" python3 -I -B -c '
+import json
+import os
+import re
+from pathlib import Path
+
+pattern = re.compile(r"\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\Z")
+try:
+    payload = json.loads(Path(os.environ["KTM_API_OWNED_AUDIT_PATH"]).read_text())
+except (OSError, ValueError):
+    payload = None
+values = payload.get("feature_uuids") if isinstance(payload, dict) else None
+if (
+    not isinstance(payload, dict)
+    or payload.get("action") != "api-audit"
+    or not isinstance(values, list)
+    or len(set(values)) != len(values)
+    or not all(isinstance(value, str) and pattern.fullmatch(value) for value in values)
+):
+    # api-audit 실패는 러너의 단일 terminal branch가 처리한다. 여기서 죽으면
+    # 최종 snapshot과 진단 증거 수집이 통째로 사라진다 — 빈 목록으로 진행하고
+    # 판정은 evidence 검증(`_api_owned_audit_counts`)에 맡긴다.
+    raise SystemExit(0)
+print("\n".join(sorted(values)))
+'
 }
 
 owned_summary_run_ids_sql() {
@@ -833,9 +872,14 @@ content_sha256() {
   local sequence_identity_case=""
   local domain_command_filter_case=""
   local owned_feature_ids owned_feature_ids_json owned_summary_run_ids
+  local owned_feature_uuids
   owned_feature_ids="$(owned_feature_ids_sql "$run_id")"
+  owned_feature_uuids="$(owned_feature_uuids_sql)"
+  # domain command receipt는 legacy id가 아니라 feature UUID를 담는다. 두 식별자를
+  # 같은 목록에 넣어야 run-owned receipt가 content digest에서 빠진다.
   owned_feature_ids_json="$(
-    KTM_OWNED_FEATURE_IDS="$owned_feature_ids" python3 -I -B -c '
+    KTM_OWNED_FEATURE_IDS="$owned_feature_ids" \
+    KTM_OWNED_FEATURE_UUIDS="$owned_feature_uuids" python3 -I -B -c '
 import ast
 import json
 import os
@@ -843,12 +887,42 @@ import os
 values = ast.literal_eval("[" + os.environ["KTM_OWNED_FEATURE_IDS"] + "]")
 if not isinstance(values, list) or not all(isinstance(value, str) for value in values):
     raise SystemExit("invalid owned feature identities")
+values.extend(
+    line for line in os.environ["KTM_OWNED_FEATURE_UUIDS"].splitlines() if line
+)
 print(json.dumps(values, separators=(",", ":")))
 '
   )"
   owned_summary_run_ids="$(owned_summary_run_ids_sql)"
   case "$digest_revision" in
     current)
+      # T-VN-34가 `feature.feature_state_transitions`를 identity 컬럼으로 만들었고
+      # 인수 run은 create/suppress/retire 세 전이를 남긴다. 전이 row 자체는 append-only
+      # 이고 feature로의 FK가 없어(T39 UUID identity 증거) 하드 purge 뒤에도 남는 것이
+      # 설계인데, 그 identity 시퀀스의 `last_value`는 앞으로 나아간다. 제외하지 않으면
+      # 완료 판정(`content_sha256` 일치)이 항상 실패한다.
+      sequence_identity_case="$(cat <<'SQL'
+  WHEN relation.relkind = 'S'
+    AND (
+      (namespace.nspname = 'ops' AND relation.relname IN (
+        'domain_commands_command_id_seq',
+        'current_summary_runs_summary_run_id_seq'
+      ))
+      OR (namespace.nspname = 'feature'
+          AND relation.relname = 'feature_state_transitions_transition_id_seq')
+      OR (namespace.nspname = 'provider_sync'
+          AND relation.relname = 'provider_datasets_provider_dataset_id_seq')
+    )
+  THEN format(
+    'SELECT %L || chr(31) || ''run-owned identity sequence excluded'';',
+    namespace.nspname || '.' || relation.relname
+  )
+SQL
+)"
+      domain_command_filter_case="current"
+      ;;
+    legacy-v3)
+      # 직전 `current`. 저장된 checkpoint를 그때 규칙으로 재해시하는 사다리 한 칸이다.
       sequence_identity_case="$(cat <<'SQL'
   WHEN relation.relkind = 'S'
     AND (
@@ -1353,7 +1427,7 @@ write_snapshot() {
   )"
   local container_sha system_identifier system_sha
   local migration_head relation_count feature_total feature_non_deleted
-  local active_owned nonterminal_owned schema_digest content_digest
+  local active_owned schema_digest content_digest
   local database_digest extension_digest
   local owned_feature_ids
   owned_feature_ids="$(owned_feature_ids_sql "$run_id")"
@@ -1366,7 +1440,10 @@ write_snapshot() {
   feature_total="$(psql_value "SELECT count(*) FROM feature.features")"
   feature_non_deleted="$(psql_value "SELECT count(*) FROM feature.features WHERE lifecycle_state <> 'retired'")"
   active_owned="$(psql_value "SELECT count(*) FROM feature.features WHERE feature_id = ANY (ARRAY[${owned_feature_ids}]::text[]) AND lifecycle_state <> 'retired'")"
-  nonterminal_owned="$(psql_value "SELECT count(*) FROM ops.feature_change_requests WHERE feature_id = ANY (ARRAY[${owned_feature_ids}]::text[]) AND state = 'pending'")"
+  # 0104 이전에는 여기서 pending change request 잔재도 셌다. T-VN-36의 직접 상태
+  # 명령에는 non-terminal 상태 자체가 없다 — receipt는 명령 transaction 안에서
+  # terminal로 완결되므로 "pending" 축이 성립하지 않는다. run-owned 잔재 판정은
+  # 위의 non-retired owned Feature 수만 남긴다.
   schema_digest="$(schema_sha256)"
   database_digest="$(database_sha256)"
   extension_digest="$(extension_sha256)"
@@ -1407,7 +1484,6 @@ write_snapshot() {
     --feature-total "$feature_total" \
     --host-port "$DB_HOST_PORT" \
     --migration-head "$migration_head" \
-    --nonterminal-owned-change-requests "$nonterminal_owned" \
     --relation-count "$relation_count" \
     --schema-sha256 "$schema_digest"
 }
@@ -2827,14 +2903,15 @@ print(value)
           --checkpoint "$CHECKPOINT_FILE" \
           --snapshot "$CURRENT_CHECKPOINT_SNAPSHOT" >/dev/null 2>&1; then
         # e462은 run-owned domain-command sequence를, 789는 run-owned receipt를,
-        # 741 후속은 fixture summary/provider sequence를 content digest에서 제외했다.
-        # checkpoint mode에서만 알려진 직전 규칙으로 기존 서명을 먼저 정확히
-        # 대조해, 이 분류 변경 외 DB drift를 재인증하지 않는다.
+        # 741 후속은 fixture summary/provider sequence를, T-VN-36은 state transition
+        # identity sequence를 content digest에서 제외했다. checkpoint mode에서만
+        # 알려진 직전 규칙으로 기존 서명을 먼저 정확히 대조해, 이 분류 변경 외
+        # DB drift를 재인증하지 않는다.
         [[ "$MODE" == "checkpoint" && "$existing_checkpoint_version" == "4" ]] ||
           die "existing checkpoint differs from the current clone"
         LEGACY_CHECKPOINT_SNAPSHOT="$STATE_ROOT/.clone-checkpoint-legacy-$$.json"
         LEGACY_DIGEST_REVISION=""
-        for candidate_digest_revision in legacy-v2 legacy-v1 legacy-v0; do
+        for candidate_digest_revision in legacy-v3 legacy-v2 legacy-v1 legacy-v0; do
           write_snapshot \
             "$LEGACY_CHECKPOINT_SNAPSHOT" \
             "$RUN_ID" \
@@ -2895,14 +2972,17 @@ print(value)
   start_checkpoint_quiescence
   assert_checkpoint_quiescence
   write_snapshot "$CHECKPOINT_SNAPSHOT" "$RUN_ID"
-  # ``feature.features.user_change_reason``은 T-VN-34C(0097)가 물리 삭제했다. 인수 실행이
-  # 남긴 흔적은 이제 row가 아니라 **감사 테이블**에 있다 — 같은 reason 문자열이
-  # ``ops.feature_change_requests.reason``으로 들어가고(아래 줄이 그것을 본다), row 쪽에는
-  # 남지 않는다. 그래서 잔재 판정은 그 표를 거쳐 feature로 되짚는다.
-  [[ "$(psql_value "SELECT count(*) FROM feature.features AS f WHERE f.lifecycle_state <> 'retired' AND (EXISTS (SELECT 1 FROM ops.feature_change_requests AS r WHERE r.feature_id = f.feature_id AND r.reason LIKE 'admin feature live acceptance clone-%') OR f.name LIKE 'E2E hidden weather clone-%' OR f.name LIKE 'E2E hidden price clone-%')")" == "0" ]] ||
+  # ``feature.features.user_change_reason``은 T-VN-34C(0097)가, review 모델 전체는
+  # T-VN-36D(0104)가 물리 삭제했다. 인수 실행이 남긴 reason 문자열은 이제
+  # ``ops.feature_overrides.reason``(create가 남기는 field ownership receipt)에만
+  # 있으므로 잔재 판정은 그 표를 거쳐 feature로 되짚는다. 이름 축은 provider
+  # fixture와 T-VN-36 admin fixture를 함께 본다 — 옛 이름(`E2E hidden *`)도 계속
+  # 보아 예전 러너가 남긴 잔재를 놓치지 않는다.
+  [[ "$(psql_value "SELECT count(*) FROM feature.features AS f WHERE f.lifecycle_state <> 'retired' AND (EXISTS (SELECT 1 FROM ops.feature_overrides AS o WHERE o.feature_id = f.feature_id AND o.reason LIKE 'tvn36-live-clone-%') OR f.name LIKE 'E2E TVN36 state fixture clone-%' OR f.name LIKE 'E2E suppressed weather clone-%' OR f.name LIKE 'E2E suppressed price clone-%' OR f.name LIKE 'E2E hidden weather clone-%' OR f.name LIKE 'E2E hidden price clone-%')")" == "0" ]] ||
     die "clone checkpoint has non-retired acceptance Feature residue"
-  [[ "$(psql_value "SELECT count(*) FROM ops.feature_change_requests WHERE state = 'pending' AND reason LIKE 'admin feature live acceptance clone-%'")" == "0" ]] ||
-    die "clone checkpoint has pending acceptance change request residue"
+  # 두 번째 probe였던 "pending change request 잔재"는 대응물이 없다. T-VN-36의
+  # 직접 상태 명령은 명령 transaction 안에서 terminal receipt까지 완결되므로
+  # non-terminal 잔재라는 상태 자체가 존재하지 않는다.
   assert_checkpoint_quiescence
   NEW_CHECKPOINT_DUMP="$(
     select_reusable_checkpoint_dump \

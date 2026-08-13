@@ -40,7 +40,7 @@ import json
 import re
 import sys
 
-receipt = json.load(sys.stdin)["tasks"]["T-VN-34"]["pinvi_snapshot_receipt"]
+receipt = json.load(sys.stdin)["tasks"]["T-VN-36"]["pinvi_snapshot_receipt"]
 keys = (
     "map_commit",
     "pinvi_commit",
@@ -56,7 +56,7 @@ for key in keys:
     print(value)
 '
 )
-[[ "${#receipt_values[@]}" == 6 ]] || die "T-VN-34C consumer receipt is incomplete"
+[[ "${#receipt_values[@]}" == 6 ]] || die "T-VN-36 consumer receipt is incomplete"
 readonly MAP_COMMIT="${receipt_values[0]}"
 readonly PINVI_COMMIT="${receipt_values[1]}"
 readonly MAP_USER_OPENAPI_SHA256="${receipt_values[2]}"

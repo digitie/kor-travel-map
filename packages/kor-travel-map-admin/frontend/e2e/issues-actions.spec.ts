@@ -167,10 +167,13 @@ test.describe("admin/issues actions + pagination + errors", () => {
     expect(patchBodies[0].issueId).toBe(ISSUE_ID);
     expect(patchBodies[0].body).toMatchObject({
       action: "resolve",
-      prevent_provider_reactivation: true,
       reason: "admin-ui resolve",
     });
     expect(patchBodies[0].body).not.toHaveProperty("operator");
+    // T-VN-36: lifecycle 축 전용 플래그라 주소 override 요청에서 제거했다.
+    expect(patchBodies[0].body).not.toHaveProperty(
+      "prevent_provider_reactivation",
+    );
 
     await row.getByRole("button", { name: "ignore" }).click();
     await expect.poll(() => patchBodies.length).toBe(2);
@@ -198,10 +201,12 @@ test.describe("admin/issues actions + pagination + errors", () => {
       await expect.poll(() => patchBodies.length).toBe(expected);
       expect(patchBodies[expected - 1].body).toMatchObject({
         action,
-        prevent_provider_reactivation: true,
         reason: `admin-ui ${action}`,
       });
       expect(patchBodies[expected - 1].body).not.toHaveProperty("operator");
+      expect(patchBodies[expected - 1].body).not.toHaveProperty(
+        "prevent_provider_reactivation",
+      );
     }
   });
 

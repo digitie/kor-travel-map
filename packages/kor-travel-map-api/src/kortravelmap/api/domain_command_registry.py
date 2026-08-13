@@ -147,9 +147,27 @@ _COMMAND_REGISTRY: Final[dict[OperationKey, CommandPolicy]] = {
         "admin.backup.swap",
         _DESTRUCTIVE_RESULT,
     ),
+    # ledger 유일성은 라우트 단위다 — claim은 ``(actor, operation,
+    # Idempotency-Key)``로 잠기므로 서로 다른 라우트가 이름을 공유하면 한 actor의
+    # 같은 키가 **다른 라우트의** terminal 결과로 replay된다. 내부 writer가
+    # field override로 통일된 것과 무관하게 이름은 라우트별로 갈라 둔다
+    # (admin UI의 idempotency slot 이름도 이 이름을 그대로 쓴다).
     ("POST", "/v1/admin/features"): _domain(
         "admin.feature.create",
         _MUTATION_RESULT,
+        replay_headers=("ETag",),
+    ),
+    ("POST", "/v1/admin/features/{feature_id}/field-overrides"): _domain(
+        "admin.feature.override.author",
+        _MUTATION_RESULT,
+        replay_headers=("ETag",),
+        fingerprint_headers=("If-Match",),
+    ),
+    ("POST", "/v1/admin/features/{feature_id}/field-overrides/revoke"): _domain(
+        "admin.feature.override.revoke",
+        _MUTATION_RESULT,
+        replay_headers=("ETag",),
+        fingerprint_headers=("If-Match",),
     ),
     ("PATCH", "/v1/admin/features/{feature_id}"): _domain(
         "admin.feature.patch",
@@ -175,18 +193,6 @@ _COMMAND_REGISTRY: Final[dict[OperationKey, CommandPolicy]] = {
         replay_headers=("ETag",),
         fingerprint_headers=("If-Match",),
     ),
-    (
-        "POST",
-        "/v1/admin/features/change-requests/{request_id}/approve",
-    ): _domain(
-        "admin.feature-change.approve",
-        _MUTATION_RESULT,
-        replay_headers=("ETag",),
-    ),
-    (
-        "POST",
-        "/v1/admin/features/change-requests/{request_id}/reject",
-    ): _domain("admin.feature-change.reject", _MUTATION_RESULT),
     ("POST", "/v1/admin/features/curated"): _domain(
         "admin.curated-feature.create",
         _MUTATION_RESULT,

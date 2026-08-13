@@ -68,7 +68,6 @@ const REVIEW_STATUSES = [
   "rejected",
   "merged",
 ] as const;
-const CHANGE_ACTIONS = ["add", "update", "delete"] as const;
 
 function writeApi(
   method: AdminWriteApiMethod,
@@ -194,42 +193,9 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
       "/ops/datasets",
     ],
   },
-  {
-    id: "feature-change-requests",
-    route: "/admin/features/change-requests",
-    readyHeading: "변경 요청 작성",
-    readApis: [
-      "/v1/categories",
-      "/v1/admin/features/change-requests",
-      "/v1/admin/features/{feature_id}",
-    ],
-    writeApis: [
-      writeApi("POST", "/v1/admin/features/change-requests"),
-      writeApi("POST", "/v1/admin/features"),
-    ],
-    reflectedSurfaces: [
-      "/admin/features/change-reviews",
-      "/admin/features",
-      "/features/{feature_id}",
-    ],
-  },
-  {
-    id: "feature-change-reviews",
-    route: "/admin/features/change-reviews",
-    readyHeading: "Feature 검수",
-    readApis: ["/v1/admin/features/change-requests"],
-    writeApis: [
-      writeApi(
-        "POST",
-        "/v1/admin/features/change-requests/{request_id}/approve",
-      ),
-      writeApi(
-        "POST",
-        "/v1/admin/features/change-requests/{request_id}/reject",
-      ),
-    ],
-    reflectedSurfaces: ["/admin/features", "/features/{feature_id}"],
-  },
+  // T-VN-36(0104)이 whole-row change-request/review 모델을 제거했다. 두 surface는
+  // 라우트도 API도 없으므로 카탈로그에서 뺀다 — 남겨두면 카탈로그 spec이 surface마다
+  // 발행하는 live_smoke 시나리오가 없는 라우트로 이동해 실패한다.
   {
     id: "new-feature",
     route: "/admin/features/new",
@@ -620,25 +586,8 @@ export function buildAdminLiveScenarioCatalog(): AdminLiveScenario[] {
     }
   }
 
-  for (const action of CHANGE_ACTIONS) {
-    for (const status of ["all", "pending", "applied", "rejected"] as const) {
-      for (const term of searchTerms) {
-        for (const size of pageSizes) {
-          addScenario(scenarios, {
-            apiExpectation:
-              "/v1/admin/features/change-requests plus approve/reject endpoints",
-            idParts: ["change-reviews", action, status, term, String(size)],
-            mode: "catalog",
-            reflectedSurface: "/admin/features",
-            risk: "write",
-            route: `/admin/features/change-reviews?action=${action}&status=${status}&q=${encodeURIComponent(term)}&page_size=${size}`,
-            surface: "feature-change-reviews",
-            uiAction: `action=${action}, status=${status}, q=${term}; approve/reject reflected in admin and public detail`,
-          });
-        }
-      }
-    }
-  }
+  // T-VN-36(0104) 이후 change-review surface가 없으므로 그 축의 catalog 시나리오도
+  // 발행하지 않는다.
 
   for (const category of categories) {
     for (const size of pageSizes) {

@@ -2,7 +2,6 @@
 
 import {
   ArrowLeftIcon,
-  ClipboardListIcon,
   DatabaseIcon,
   PencilIcon,
 } from "lucide-react";
@@ -31,14 +30,7 @@ export function FeatureDetailPageClient({ featureId }: { featureId: string }) {
           </Link>
           <Link
             className={cn(buttonVariants({ variant: "outline" }))}
-            href="/admin/features/change-requests"
-          >
-            <ClipboardListIcon data-icon="inline-start" />
-            Feature 변경
-          </Link>
-          <Link
-            className={cn(buttonVariants({ variant: "outline" }))}
-            href={`/admin/features/change-requests?action=update&feature_id=${encodeURIComponent(featureId)}`}
+            href={`/admin/features?feature_id=${encodeURIComponent(featureId)}`}
           >
             <PencilIcon data-icon="inline-start" />
             수정

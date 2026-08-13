@@ -7,6 +7,7 @@ PostGIS 없이 raw SQL 분기/파라미터 조립을 검증한다 — 실제 SQL
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -17,6 +18,9 @@ from kortravelmap.infra import feature_address_repo as repo
 class _Row:
     def __init__(self, data: dict[str, Any]) -> None:
         self.__dict__.update(data)
+
+    def __getitem__(self, key: str) -> Any:
+        return getattr(self, key)
 
 
 class _Result:
@@ -29,6 +33,9 @@ class _Result:
     def one(self) -> _Row:
         assert self._row is not None
         return _Row(self._row)
+
+    def mappings(self) -> _Result:
+        return self
 
 
 class _Session:
@@ -44,6 +51,7 @@ class _Session:
 def _snap_row(**over: Any) -> dict[str, Any]:
     base = {
         "feature_id": "f1",
+        "row_revision": 7,
         "lon": 126.97,
         "lat": 37.57,
         "address": {"road": "옛 주소"},
@@ -57,6 +65,22 @@ def _snap_row(**over: Any) -> dict[str, Any]:
     }
     base.update(over)
     return base
+
+
+@pytest.fixture(autouse=True)
+def _field_command_receipt(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _lock(*args: Any, **kwargs: Any) -> None:
+        return None
+
+    async def _claim(*args: Any, **kwargs: Any) -> SimpleNamespace:
+        return SimpleNamespace(command_id=73)
+
+    async def _record(*args: Any, **kwargs: Any) -> None:
+        return None
+
+    monkeypatch.setattr(repo, "lock_domain_command", _lock)
+    monkeypatch.setattr(repo, "create_domain_command_claim", _claim)
+    monkeypatch.setattr(repo, "create_domain_command_record", _record)
 
 
 async def test_get_snapshot_present_and_missing() -> None:
@@ -106,8 +130,19 @@ async def test_apply_full_override_builds_fields_without_generic_override_dml() 
         legal_dong_code="1114010300",
         sigungu_code="11140",
     )
-    # lock SELECT, UPDATE RETURNING. Generic field override ownership is T-VN-36.
-    session = _Session([_snap_row(), updated])
+    # lock SELECT, typed author result, read-back snapshot.
+    session = _Session(
+        [
+            _snap_row(),
+            {
+                "o_feature_id": "f1",
+                "o_row_revision": 8,
+                "o_command_id": 73,
+                "o_applied_field_count": 5,
+            },
+            updated,
+        ]
+    )
     result = await repo.apply_feature_address_override(
         session,  # type: ignore[arg-type]
         "f1",
@@ -129,10 +164,10 @@ async def test_apply_full_override_builds_fields_without_generic_override_dml() 
     assert result.snapshot.address == {"road": "새 주소"}
     assert result.snapshot.sigungu_code == "11140"
 
-    assert len(session.calls) == 2
+    assert len(session.calls) == 3
     update_sql = session.calls[1]["sql"]
-    assert "UPDATE feature.features SET" in update_sql
-    assert "ST_MakePoint" in update_sql
+    assert "CALL feature.author_feature_field_overrides" in update_sql
+    assert "UPDATE feature.features SET" not in update_sql
     assert all("ops.feature_overrides" not in call["sql"] for call in session.calls)
 
 
@@ -146,7 +181,11 @@ async def test_snapshot_parses_json_string_address() -> None:
 
 async def test_apply_coord_only_with_existing_coord() -> None:
     updated = _snap_row(lon=127.0, lat=37.0)
-    session = _Session([_snap_row(), updated])
+    session = _Session([
+        _snap_row(),
+        {"o_feature_id": "f1", "o_row_revision": 8, "o_command_id": 73, "o_applied_field_count": 2},
+        updated,
+    ])
     result = await repo.apply_feature_address_override(
         session,  # type: ignore[arg-type]
         "f1",
@@ -155,12 +194,16 @@ async def test_apply_coord_only_with_existing_coord() -> None:
     )
     assert result is not None
     assert result.overridden_fields == ("coord",)
-    assert len(session.calls) == 2
+    assert len(session.calls) == 3
 
 
 async def test_apply_coord_when_previous_coord_null() -> None:
     # 직전 좌표가 없으면 source_value는 null.
-    session = _Session([_snap_row(lon=None, lat=None), _snap_row(lon=127.1, lat=37.1)])
+    session = _Session([
+        _snap_row(lon=None, lat=None),
+        {"o_feature_id": "f1", "o_row_revision": 8, "o_command_id": 73, "o_applied_field_count": 2},
+        _snap_row(lon=127.1, lat=37.1),
+    ])
     result = await repo.apply_feature_address_override(
         session,  # type: ignore[arg-type]
         "f1",
@@ -168,12 +211,16 @@ async def test_apply_coord_when_previous_coord_null() -> None:
         lat=37.1,
     )
     assert result is not None
-    assert len(session.calls) == 2
+    assert len(session.calls) == 3
 
 
 async def test_apply_sido_and_road_management_no() -> None:
     updated = _snap_row(sido_code="26", road_address_management_no="RM-1")
-    session = _Session([_snap_row(), updated])
+    session = _Session([
+        _snap_row(),
+        {"o_feature_id": "f1", "o_row_revision": 8, "o_command_id": 73, "o_applied_field_count": 2},
+        updated,
+    ])
     result = await repo.apply_feature_address_override(
         session,  # type: ignore[arg-type]
         "f1",
@@ -182,4 +229,4 @@ async def test_apply_sido_and_road_management_no() -> None:
     )
     assert result is not None
     assert set(result.overridden_fields) == {"sido_code", "road_address_management_no"}
-    assert len(session.calls) == 2
+    assert len(session.calls) == 3

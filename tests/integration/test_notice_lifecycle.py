@@ -1234,13 +1234,9 @@ async def test_snapshot_reconcile_serializes_cross_scope_closure(
                 {"providers": providers},
             )
             if feature_ids:
-                await connection.execute(
-                    text(
-                        "DELETE FROM feature.feature_versions "
-                        "WHERE feature_id = ANY(CAST(:feature_ids AS text[]))"
-                    ),
-                    {"feature_ids": feature_ids},
-                )
+                # T-VN-36D의 `0104`가 whole-row `feature.feature_versions`를 물리
+                # 삭제했다. field override/base ledger는 Feature FK가 CASCADE라
+                # 별도 선행 정리가 필요 없다.
                 await connection.execute(
                     text(
                         "DELETE FROM feature.features "

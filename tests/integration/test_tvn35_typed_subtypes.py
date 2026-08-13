@@ -658,41 +658,6 @@ async def test_core_has_no_derived_detail_or_geometry_and_no_private_detail_view
     ).scalar_one() is None
 
 
-async def test_user_request_fence_skips_subtype_write(
-    migrated_session: AsyncSession,
-) -> None:
-    """core가 fence로 갱신되지 않으면 subtype도 갱신되지 않는다(상세/core 정합).
-
-    fence 판정은 core RETURNING이 남긴 실제 상태(``user_fenced``)라 파생 계산이
-    아니다 — 여기서는 그 결과가 subtype까지 일관되게 미치는지만 본다.
-    """
-    feature = _place_feature("tvn35:fence", place_kind="cafe", phones=["02-1111-2222"])
-    await feature_repo.load_bundle(migrated_session, _bundle(feature, source_entity_id="F-1"))
-    await migrated_session.flush()
-    await migrated_session.execute(
-        text(
-            "UPDATE feature.features SET data_origin = 'user_request', data_version = 1 "
-            "WHERE feature_id = :feature_id"
-        ),
-        {"feature_id": "tvn35:fence"},
-    )
-    await migrated_session.flush()
-
-    provider_retry = _place_feature(
-        "tvn35:fence", place_kind="restaurant", phones=["02-3333-4444"]
-    )
-    await feature_repo.load_bundle(
-        migrated_session,
-        _bundle(provider_retry, source_entity_id="F-1", raw_data={"v": 2}),
-    )
-    await migrated_session.flush()
-
-    row = await _subtype_row(migrated_session, "feature_places", "tvn35:fence")
-    assert row is not None
-    assert row["place_kind"] == "cafe"
-    assert row["phones"] == ["02-1111-2222"]
-
-
 # ---------------------------------------------------------------------------
 # ③ geometry 필수 kind — write 시점 fail-close
 # ---------------------------------------------------------------------------

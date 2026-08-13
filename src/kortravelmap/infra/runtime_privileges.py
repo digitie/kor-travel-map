@@ -153,10 +153,17 @@ _ORDINARY_SCHEMA_PRIVILEGES: Mapping[str, tuple[str, ...]] = {
 # directly.  A typed state-owner procedure owns author/revoke mutation so a
 # provider/admin connection cannot erase that fence through raw SQL.
 _OPS_TABLE_PRIVILEGES: Mapping[str, tuple[str, ...]] = {
+    "feature_override_field_paths": ("SELECT",),
     "feature_overrides": ("SELECT",),
 }
 
-_PROTECTED_FEATURE_TABLES = frozenset({"features", "feature_state_transitions", "feature_versions"})
+_PROTECTED_FEATURE_TABLES = frozenset(
+    {
+        "features",
+        "feature_base_field_values",
+        "feature_state_transitions",
+    }
+)
 _PROTECTED_FEATURE_SEQUENCES = frozenset({"feature_state_transitions_transition_id_seq"})
 
 _APPLICATION_RELATIONS_SQL = text(
@@ -181,9 +188,6 @@ _CORE_FEATURE_GRANTS = (
     "parent_feature_id, sibling_group_id, raw_refs, created_at, updated_at"
     ") ON feature.features TO ktm_feature_runtime",
     "GRANT SELECT ON feature.feature_state_transitions TO ktm_feature_runtime",
-    # T-VN-36가 version bridge를 대체하기 전 admin detail/revision readers need
-    # the immutable snapshots.  Runtime never receives version DML.
-    "GRANT SELECT ON feature.feature_versions TO ktm_feature_runtime",
 )
 
 _STATE_OWNER_FUNCTION_ACL = (
@@ -193,14 +197,16 @@ _STATE_OWNER_FUNCTION_ACL = (
     "jsonb, text, text, text, jsonb) FROM PUBLIC",
     "REVOKE ALL ON PROCEDURE feature.transition_feature_state("
     "text, text, text, text, bigint, jsonb) FROM PUBLIC",
-    "REVOKE ALL ON PROCEDURE feature.materialize_user_feature_change_provenance("
-    "text, text, uuid, text, text, bigint) FROM PUBLIC",
     "REVOKE ALL ON PROCEDURE feature.author_lifecycle_override("
     "text, text, text, boolean, text, text, bigint) FROM PUBLIC",
     "REVOKE ALL ON PROCEDURE feature.revoke_lifecycle_override("
     "text, text, bigint) FROM PUBLIC",
-    "REVOKE ALL ON PROCEDURE feature.materialize_provider_feature_version("
-    "text) FROM PUBLIC",
+    "REVOKE ALL ON PROCEDURE feature.apply_provider_feature_field_patch("
+    "text, bigint, text, text, bigint, jsonb, jsonb) FROM PUBLIC",
+    "REVOKE ALL ON PROCEDURE feature.author_feature_field_overrides("
+    "text, bigint, text, text, bigint, jsonb, jsonb) FROM PUBLIC",
+    "REVOKE ALL ON PROCEDURE feature.revoke_feature_field_overrides("
+    "text, bigint, text, text, bigint, text[]) FROM PUBLIC",
     "REVOKE ALL ON PROCEDURE feature.transition_admin_feature_state("
     "text, text, text, text, bigint, text, text, text) FROM PUBLIC",
     "REVOKE ALL ON PROCEDURE feature.reactivate_admin_feature_state("
@@ -209,14 +215,16 @@ _STATE_OWNER_FUNCTION_ACL = (
     "jsonb, text, text, text, jsonb) TO ktm_feature_runtime",
     "GRANT EXECUTE ON PROCEDURE feature.transition_feature_state("
     "text, text, text, text, bigint, jsonb) TO ktm_feature_runtime",
-    "GRANT EXECUTE ON PROCEDURE feature.materialize_user_feature_change_provenance("
-    "text, text, uuid, text, text, bigint) TO ktm_feature_runtime",
     "GRANT EXECUTE ON PROCEDURE feature.author_lifecycle_override("
     "text, text, text, boolean, text, text, bigint) TO ktm_feature_runtime",
     "GRANT EXECUTE ON PROCEDURE feature.revoke_lifecycle_override("
     "text, text, bigint) TO ktm_feature_runtime",
-    "GRANT EXECUTE ON PROCEDURE feature.materialize_provider_feature_version("
-    "text) TO ktm_feature_runtime",
+    "GRANT EXECUTE ON PROCEDURE feature.apply_provider_feature_field_patch("
+    "text, bigint, text, text, bigint, jsonb, jsonb) TO ktm_feature_runtime",
+    "GRANT EXECUTE ON PROCEDURE feature.author_feature_field_overrides("
+    "text, bigint, text, text, bigint, jsonb, jsonb) TO ktm_feature_runtime",
+    "GRANT EXECUTE ON PROCEDURE feature.revoke_feature_field_overrides("
+    "text, bigint, text, text, bigint, text[]) TO ktm_feature_runtime",
     "GRANT EXECUTE ON PROCEDURE feature.transition_admin_feature_state("
     "text, text, text, text, bigint, text, text, text) TO ktm_feature_runtime",
     "GRANT EXECUTE ON PROCEDURE feature.reactivate_admin_feature_state("

@@ -427,7 +427,6 @@ test.describe("/admin/issues live read + reversible status write", () => {
           action: "reopen",
           operator: "local-admin",
           reason: `${RUN_ID} revert reopen`,
-          prevent_provider_reactivation: true,
         };
         await browserFetch<AdminIssueActionResponse>(
           page,

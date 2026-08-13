@@ -43,13 +43,9 @@ const SAMPLE_ID = FEATURE_IDS[0] ?? FALLBACK_ID;
 const SHELL_HEADING = "Feature 상세";
 
 // detail GET 성공 시 detail-view가 무조건 렌더하는 섹션 타이틀들.
-const DETAIL_SECTIONS = [
-  "Sources",
-  "Issues",
-  "Overrides",
-  "History",
-  "Files",
-] as const;
+// T-VN-36이 whole-row "History" 패널을 제거했다 — 남은 것은 notice 전용
+// "Notice History"뿐이고, 그건 kind별이라 무조건 렌더가 아니다.
+const DETAIL_SECTIONS = ["Sources", "Issues", "Overrides", "Files"] as const;
 
 // Raw <details> disclosure summary 텍스트.
 const RAW_SUMMARIES = ["detail", "raw_refs", "urls", "address"] as const;
@@ -194,16 +190,8 @@ test.describe("features-detail LIVE — 헤더 내비 링크(read-only nav)", ()
     await expect(page).toHaveURL(/\/admin\/features(?:$|[/?])/, TIMEOUT);
   });
 
-  // 상세 → 'Changes' 링크 클릭 시 change-requests로 이동(GET 내비).
-  test(`nav to change-requests — ${SAMPLE_ID}`, async ({ page }) => {
-    await page.goto(`/features/${SAMPLE_ID}`);
-    await expect(page.getByTestId("feature-detail-view")).toBeVisible(TIMEOUT);
-
-    await page
-      .getByRole("link", { name: "Changes", exact: true })
-      .click();
-    await expect(page).toHaveURL(/\/admin\/features\/change-requests/, TIMEOUT);
-  });
+  // T-VN-36(0104)이 change-request 모델과 상세의 'Changes' 링크를 함께 제거했다.
+  // 이동 대상 라우트 자체가 없으므로 해당 내비 테스트도 삭제한다.
 
   // 상세 → '지도' 링크 클릭 시 /features 지도로 이동(GET 내비).
   test(`nav to features map — ${SAMPLE_ID}`, async ({ page }) => {

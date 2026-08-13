@@ -211,7 +211,6 @@ class AdminIssuePatchRequest(BaseModel):
     sido_code: str | None = None
     sigungu_code: str | None = None
     road_address_management_no: str | None = None
-    prevent_provider_reactivation: bool = True
 
 
 # ── 매퍼 ─────────────────────────────────────────────────────────────────────
@@ -595,7 +594,6 @@ async def _dispatch_action(
                 road_address_management_no=candidate.get("road_address_management_no"),
                 reason=body.reason,
                 operator=actor,
-                prevent_provider_reactivation=body.prevent_provider_reactivation,
             )
             if result is None:
                 raise HTTPException(
@@ -644,7 +642,6 @@ async def _dispatch_action(
             road_address_management_no=body.road_address_management_no,
             reason=body.reason,
             operator=actor,
-            prevent_provider_reactivation=body.prevent_provider_reactivation,
         )
         if result is None:
             raise HTTPException(status_code=404, detail=f"feature 없음: {feature_id}")

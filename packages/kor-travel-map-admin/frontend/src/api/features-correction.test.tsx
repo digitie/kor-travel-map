@@ -72,7 +72,7 @@ describe("admin feature correction hooks", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("PATCH mutation은 caller의 raw ETag를 쓰고 correction basis를 무효화하지 않는다", async () => {
+  it("PATCH mutation은 caller의 raw ETag를 쓰고 성공 뒤 correction basis를 무효화한다", async () => {
     const fetchMock = vi.fn<FetchMock>().mockResolvedValue(
       response({
         data: { request: { feature_id: "feature-1" } },
@@ -98,14 +98,21 @@ describe("admin feature correction hooks", () => {
     expect(String(input)).toBe("/api/proxy/v1/admin/features/feature-1");
     expect(init?.method).toBe("PATCH");
     expect(new Headers(init?.headers).get("if-match")).toBe('"3"');
+    // T-VN-36 전까지 PATCH는 **pending change request**만 만들었다 — feature 행은
+    // 승인 전까지 그대로였으므로 basis(row_revision)가 유효했고 무효화하면 안 됐다.
+    // typed field override로 바뀐 뒤 PATCH는 그 자리에서 행을 갱신하고 row_revision을
+    // 올린다. 그래서 basis는 성공 즉시 낡고, 무효화하지 않으면 다음 명령이 낡은
+    // If-Match를 보내 412를 맞는다 — 상태 전이 mutation과 같은 이유다.
     const invalidatedKeys = invalidateQueries.mock.calls.map(
       ([filters]) => filters?.queryKey,
     );
     expect(
       invalidatedKeys.some(
-        (queryKey) => queryKey?.[0] === "admin-feature-correction-basis",
+        (queryKey) =>
+          queryKey?.[0] === "admin-feature-correction-basis" &&
+          queryKey?.[1] === "feature-1",
       ),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it("상태 전이는 다음 명령이 새 ETag를 읽도록 correction basis를 무효화한다", async () => {

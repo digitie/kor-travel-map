@@ -10,7 +10,6 @@ import {
   HomeIcon,
   LayersIcon,
   LinkIcon,
-  ListChecksIcon,
   MapIcon,
   MapPinnedIcon,
   PanelLeftCloseIcon,
@@ -58,11 +57,6 @@ const NAV_GROUPS = [
     items: [
       { href: "/features", label: "Feature 지도", icon: MapIcon },
       { href: "/admin/features", label: "Feature 목록", icon: DatabaseIcon },
-      {
-        href: "/admin/features/change-reviews",
-        label: "Feature 검수",
-        icon: ListChecksIcon,
-      },
       {
         href: "/admin/features/dedup-reviews",
         label: "중복 검토",

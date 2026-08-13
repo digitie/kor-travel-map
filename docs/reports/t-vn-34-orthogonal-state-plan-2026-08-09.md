@@ -72,7 +72,7 @@ origin='user_request'`, request receipt의 `UPDATE`/`DELETE`를 거부하는
 검사·삽입한다. unique conflict는 기존 immutable receipt를
 반환하며 user-request receipt가 provider version `0` upsert의 mutation 대상이 될 수 없다.
 반면 `data_origin`과 `data_version`은 T-VN-36이 whole-row freeze를 field override로 물화하고
-provider/user ownership을 대조할 입력이다. T-VN-34는 이를 읽거나 삭제하지 않으며, T-VN-36C가
+provider/user ownership을 대조할 입력이다. T-VN-34는 이를 읽거나 삭제하지 않으며, T-VN-36D가
 그 대체 정본·effective projection을 검증한 final migration에서 물리 삭제한다.
 legacy backfill audit의 `occurred_at`은 `COALESCE(user_deleted_at, deleted_at, updated_at)`이고,
 `user_deleted_by`가 있으면 principal로, 없으면 `migration:tvn34`으로 기록한다. reason은
@@ -341,7 +341,7 @@ C의 final migration은 같은 deployment unit에서 다음 순서를 지킨다.
 6. legacy `status`, `deleted_at`, `user_deleted_at`, `user_change_kind`, `user_change_status`,
    `user_change_request_id`, `user_deleted_by`, `user_change_reason`와 그것에 의존하는
    CHECK/index/trigger/query를 물리 제거한다. `data_origin`/`data_version`/whole-row freeze는
-   T-VN-36A-C가 field override provenance와 effective projection으로 대체한 뒤 T-VN-36C에서
+   T-VN-36A-D가 field override provenance와 effective projection으로 대체한 뒤 T-VN-36D에서
    별도로 제거한다.
 
 `contracts/vnext/tvn34c-post-cutover-invariants-v1.sql`은 legacy object zero, retained

@@ -43,17 +43,14 @@ import {
   type EnrichmentReviewDecisionRequest,
 } from "./enrichment";
 import {
-  useApproveAdminFeatureChangeMutation,
   useCreateAdminFeatureMutation,
   useDeleteAdminFeatureMutation,
   usePatchAdminFeatureStateMutation,
   usePatchAdminFeatureMutation,
-  useRejectAdminFeatureChangeMutation,
   type AdminFeatureCreateRequest,
   type AdminFeatureStatePatchRequest,
   type AdminFeatureDeleteRequest,
   type AdminFeaturePatchRequest,
-  type AdminFeatureReviewActionRequest,
 } from "./features";
 import {
   useCreateOfflineUploadMutation,
@@ -92,7 +89,7 @@ function genericMutationResponse(): Response {
         loser_feature_id: null,
         master_feature_id: null,
         public_api_key_id: "key-1",
-        request: { feature_id: "feature-1" },
+        feature_id: "feature-1",
         upload_id: "upload-1",
       },
       meta: { job_id: "validation-job", request_id: "request-1" },
@@ -142,9 +139,6 @@ describe("admin domain idempotency consumers", () => {
 
   it("retryable admin write hooks send explicit UUID Idempotency-Key headers", async () => {
     const context = hookContext();
-    const featureReviewBody = {
-      reason: "review",
-    } as AdminFeatureReviewActionRequest;
     const curationStatusBody = {
       reason: "curated status",
     } as CuratedFeatureStatusRequest;
@@ -233,22 +227,6 @@ describe("admin domain idempotency consumers", () => {
             body: { reason: "delete" } as AdminFeatureDeleteRequest,
             entityTag: '"7"',
             featureId: "feature-1",
-          }),
-      },
-      {
-        name: "feature approve",
-        run: () =>
-          runMutation(context, useApproveAdminFeatureChangeMutation, {
-            body: featureReviewBody,
-            requestId: "request-1",
-          }),
-      },
-      {
-        name: "feature reject",
-        run: () =>
-          runMutation(context, useRejectAdminFeatureChangeMutation, {
-            body: featureReviewBody,
-            requestId: "request-1",
           }),
       },
       {

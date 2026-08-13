@@ -9,7 +9,7 @@ from typing import Final
 
 _ROOT: Final = Path(__file__).resolve().parents[2]
 _CONTRACT: Final = _ROOT / "contracts" / "vnext" / "tvn34c-post-cutover-invariants-v1.sql"
-_EXPECTED_SHA256: Final = "e8a27bead1648ec5c8610079609204afd54d4ed198fe0303d603ed974837d008"
+_EXPECTED_SHA256: Final = "679ec9627a182137abc62008ffc3228f2b5a47ede5440ce6c8302273ac0ccca0"
 _EXPECTED_ASSERTION_COUNT: Final = 11
 
 

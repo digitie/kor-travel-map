@@ -97,7 +97,7 @@ merge tombstone이 섞여 있다. 애플리케이션만 audit event를 쓰면 ra
    실행 검증한 뒤 물리 삭제한다. `features_detailed` 및 runtime detail ACL/preflight도 같은 deployment
    unit에서 제거한다.
    `data_origin`/`data_version`/whole-row freeze는 T-VN-36의 field-override materialization 입력이므로
-   T-VN-36C가 대체 정본을 검증한 뒤 삭제한다. dual-write, shadow column, legacy trigger, old-binary
+   T-VN-36D가 대체 정본을 검증한 뒤 삭제한다. dual-write, shadow column, legacy trigger, old-binary
    rollback은 만들지 않는다.
 
 ## 근거

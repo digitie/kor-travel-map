@@ -25,7 +25,7 @@ barrier로 직렬화한다.
 - **Wave 2 barrier 이후**
   - Lane A: [ ] `T-VN-35-deploy` → [ ] `T-VN-37D`
   - Lane B: [x] `T-VN-34A` → [x] `T-VN-34B` → [x] `T-VN-34C` →
-    [ ] `T-VN-36A` → [ ] `T-VN-36B` → [ ] `T-VN-36C`
+    [x] `T-VN-36A` → [x] `T-VN-36B` → [x] `T-VN-36C` → [x] `T-VN-36D`
   - 32~38 join barrier 뒤 Lane B: [ ] `T-VN-40A` → [ ] `T-VN-40B` →
     [ ] `T-VN-40C`
   - 최종 단일 cutover: [ ] `T-VN-39`
@@ -570,7 +570,7 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   ACL allowlist·startup preflight assertion을 제거한다. 이어 legacy `status`, delete/user-change metadata와
   관련 CHECK/index/trigger/query를 물리 삭제하고 static normal-path gate와 n150 destructive fresh-reload
   live E2E를 통과한다. `data_origin`/`data_version`, `feature_versions`와 materializer bridge는 T-VN-36의
-  materialization 입력으로 남기며 T-VN-36C가 제거한다. post-34/pre-36 executable contract와 dedicated
+  materialization 입력으로 남기며 T-VN-36D가 제거한다. post-34/pre-36 executable contract와 dedicated
   `0096→C` integration/artifact runner가 legacy catalog zero·ordered public allowlist·typed direct
   dependency·receipt unique/immutability·runtime ACL을 fail-close하고, post-T36 final target contract를
   약화하거나 앞당기지 않는다. Map OpenAPI export 뒤
@@ -604,33 +604,83 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 > [`tasks-done.md`](tasks-done.md)에 있다. 남은 것은 prod 배포 하나뿐인데 어느 열린
 > task도 소유하고 있지 않아 여기에 명시적으로 둔다(2026-08-07 재대조에서 발견).
 
-- [ ] T-VN-35-deploy — **alembic `0087` prod 배포**
+- [ ] T-VN-35/34/36-deploy — **alembic `0104_tvn36_final_fence` prod 배포 (단일 단계)**
+
+  > 2026-08-13 갱신. 원래 이 항목은 `0087_route_area_subtypes`를 지시했는데, 그 사이
+  > T-VN-34(`0098_admin_scope_indexes`)와 T-VN-36(`0104_tvn36_final_fence`)이 main에
+  > 들어가 `0087`은 main에서 도달 불가능한 중간 revision이 됐다. 지시대로
+  > `0087`을 박으면 api가 DB를 건드리기 전에 exit 1이고 dagster/daemon도 뜨지
+  > 않는다 — ADR-090 배포에서 실제로 겪은 crash-loop과 같은 형태다
+  > (docs/tasks.md 위 §, journal 2026-08-06 (1)). 그래서 세 배포를 하나로 접는다.
 
   orchestrator `.env`의 `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`를
-  **`0087_route_area_subtypes`**로 **선행** 갱신한 뒤(갱신하지 않으면 api가 DB를 건드리기
-  전에 exit 1이고 dagster/daemon도 뜨지 않는다 — journal 2026-08-06 (1)) api →
-  dagster/daemon 순으로 재빌드·배포한다. prod에 적용된 head는 아직 `0083`이다
-  (마지막 배포 journal 2026-08-05 (7)/(10)). n150 파기형 rebuild에서 `0087`이 확인된 것은
-  `T-VN-41F1D-C3`의 격리 generation이며 prod 배포가 아니다. 배포 직전 write-fence
-  기준점 dump는 `T-VN-H43` runbook §9 관례를 따른다.
+  **`0104_tvn36_final_fence`**로 **선행** 갱신한 뒤 api → dagster/daemon 순으로
+  재빌드·배포한다. prod에 적용된 head는 아직 `0083`이다(마지막 배포 journal
+  2026-08-05 (7)/(10)). n150 파기형 rebuild에서 확인된 head는
+  `T-VN-41F1D-C3`의 격리 generation이며 prod 배포가 아니다.
 
-### T-VN-36 — field override 단일화 (Lane B)
+  선행 조건(ADR-090):
+  - `KOR_TRAVEL_MAP_MIGRATOR_PG_DSN` / `KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN` 분리
+    주입 — 미프로비저닝 상태로 배포하면 api가 `... is required`로 crash-loop한다.
+  - `docker/postgres-role-bootstrap.sh`가 7 principal과 `public.alembic_version`
+    소유권까지 세운 뒤여야 한다.
+  - compose로 띄운다면 ops principal 3종과 `OPS_PRINCIPAL_REQUIRED`는 root
+    `.env`/host env에 둔다(`.env.example` 참조 — package env는 compose가 덮는다).
 
-- [ ] T-VN-36A — **override schema·whole-row freeze backfill**
+  배포 직전 write-fence 기준점 dump는 `T-VN-H43` runbook §9 관례를 따른다.
+  실데이터를 전용 PostgreSQL로 옮기는 경로(docker-manager #171)는 dump/restore이며
+  파기형 재생성이 아니다.
+
+### T-VN-36 — field override 단일화 (Lane B, A–D 단일 PR)
+
+> 정본 설계는
+> [`reports/t-vn-36-field-override-plan-2026-08-10.md`](reports/t-vn-36-field-override-plan-2026-08-10.md)와
+> ADR-091이다. A–D는 `feat/tvn36-abcd-field-overrides` 하나의 forward-only PR/release로만
+> 병합한다. intermediate migration head나 old binary를 배포하지 않는다.
+
+- [x] T-VN-36A — **override schema·whole-row freeze backfill**
 
   field별 value/provenance/revision/tombstone을 저장하는 정본을 만들고 기존 whole-row freeze를
   동일 effective projection으로 backfill한다.
 
-- [ ] T-VN-36B — **provider/admin writer cutover**
+- [x] T-VN-36B — **provider/admin writer cutover**
 
   provider upsert와 admin patch가 field override를 같은 transaction에서 갱신하도록 전환하고
   concurrency/merge precedence를 DB 제약과 회귀 테스트로 고정한다.
 
-- [ ] T-VN-36C — **effective projection 단일화·legacy freeze fence**
+- [x] T-VN-36C — **effective projection 단일화·consumer cutover**
 
   read model을 한 effective projection으로 통일하고 repository별 중복 `CASE` write/read 분기를
-  비활성화한다. 서비스 전 final migration에서 whole-row freeze column/trigger와 `data_origin`/
-  `data_version`을 물리 삭제한다. rollback shadow와 T-VN-39 이관은 만들지 않는다.
+  비활성화한다. typed admin override API/UI·OpenAPI·PinVi admin-detail consumer를 exact Map head로
+  전환한다.
+
+- [x] T-VN-36D — **destructive freeze fence·final live**
+
+  base/effective checksum과 runtime ACL을 검증한 뒤에만 whole-row freeze, `data_origin`,
+  `data_version`, `feature_versions`와 dependent request receipt/trigger/index를 물리 삭제한다.
+  post-36/pre-T39 executable contract, fresh migration, PinVi pair, n150 destructive main/recovery와
+  cleanup이 통과해야 한다.
+
+  `0104_tvn36_final_fence`와 final contract/browser direct-state rewrite를 구현했다. n150의
+  immutable fresh run은 Map `f7e2e04e` / PinVi `6ab4eaf` pair에서 fresh migration·Dagster
+  ETL(Feature/source-link 3건, weather/price 1건씩)·Noble Playwright(2/2)·PinVi public probe와
+  자동 cleanup을 통과했다. 앞선 실패 run은 같은 격리 snapshot에서 `recover`로 정리해
+  `BLOCKED.json`/container/volume 잔재가 없음을 확인했다.
+
+  **2026-08-13 재배치**: `feat/tvn34-state-model` `693c5355` 위로 T-VN-36 고유 24 commit을
+  다시 얹었다(옛 tvn34 67 commit 폐기). alembic 단일 head는 `0104_tvn36_final_fence`이고
+  migration graph·OpenAPI·contract SHA는 재생성했다. 같은 자리에서 T-VN-34가 세운 결함
+  부류를 전수로 걸어 notice reconcile SQL의 죽은 projection, override procedure arity
+  미추종, 죽은 오류 매핑, ledger operation 이름 붕괴, 정적 차단선의 세대 누락,
+  frontend type-check/lint red를 닫았다(journal 2026-08-13). PinVi pair 재고정과 n150 live는
+  이 head에서 아직 재실행하지 않았다.
+
+  **남은 판단 2건**: ① `scripts/admin_feature_live_fixture.py` /
+  `scripts/run-admin-feature-clone-live-acceptance.sh`가 아직 whole-row change
+  request/version 모델 위에 있어 `0104` head에서는 실행 불가다 — 이 하네스는 정적 문자열
+  계약(`tests/unit/test_admin_feature_live_acceptance.py`)만 있고 실행 gate가 없어 지금은
+  green으로 보인다. ② `0027` re-key 정리의 `data_origin='user_request'` 제외 가드는 head
+  동등 술어가 없어 재현하지 않기로 했다(field override 세대에는 행 단위 소유권이 없다).
 
 ### T-VN-37D — notice empty range 표현 (보류)
 

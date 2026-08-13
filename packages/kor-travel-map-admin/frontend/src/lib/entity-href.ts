@@ -8,8 +8,7 @@ export type EntityKind =
   | "issue"
   | "dagsterRun"
   | "loadBatch"
-  | "schedule"
-  | "changeRequest";
+  | "schedule";
 
 export type EntityParams = Record<string, string | null | undefined>;
 
@@ -79,11 +78,6 @@ export function hrefFor(
         ...params,
         tab: "schedules",
         schedule: String(id),
-      });
-    case "changeRequest":
-      return withQuery("/admin/features/change-requests", {
-        ...params,
-        request_id: String(id),
       });
     case "dagsterRun":
       return `${DAGSTER_UI_URL.replace(/\/+$/, "")}/runs/${encodeURIComponent(id)}`;

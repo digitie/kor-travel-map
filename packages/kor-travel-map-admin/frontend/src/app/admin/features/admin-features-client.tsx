@@ -179,7 +179,7 @@ function FeatureDetailInspector({ featureId }: { featureId: string | null }) {
                 className={cn(
                   buttonVariants({ variant: "outline", size: "sm" }),
                 )}
-                href={`/admin/features/change-requests?action=update&feature_id=${encodeURIComponent(featureId)}`}
+                href={`/features/${encodeURIComponent(featureId)}`}
               >
                 <PencilIcon data-icon="inline-start" />
                 편집

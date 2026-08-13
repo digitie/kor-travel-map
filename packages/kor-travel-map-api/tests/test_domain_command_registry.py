@@ -148,6 +148,10 @@ def test_domain_fingerprint_header_contract_is_explicit_and_minimal() -> None:
     } == {
         "admin.cache-target-dead-letter.replay": ("If-Match",),
         "admin.feature.patch": ("If-Match",),
+        # T-VN-36: typed field override의 author/revoke도 row_revision If-Match로
+        # 잠긴다 (patch와 같은 낙관적 동시성 경계).
+        "admin.feature.override.author": ("If-Match",),
+        "admin.feature.override.revoke": ("If-Match",),
         "admin.feature.delete": ("If-Match",),
         "admin.feature.state": ("If-Match",),
         "admin.feature.state.reactivate": ("If-Match",),

@@ -30,6 +30,17 @@ def test_import_job_status_count_excludes_quarantined_rows() -> None:
     assert "WHERE quarantined_at IS NULL" in status_repo._IMPORT_JOBS_SQL
 
 
+def test_feature_status_counts_use_lifecycle_not_removed_soft_delete_columns() -> None:
+    sql = status_repo._FEATURES_SQL
+    assert "lifecycle_state = 'active'" in sql
+    # inactive는 "active가 아닌 것"으로 적는다. lifecycle 도메인이
+    # ``{active, retired}`` 두 값뿐이라 ``= 'retired'``와 지금은 등가지만, 축 값이
+    # 늘어나도 ``total = active + inactive``가 깨지지 않는 쪽이 정본이다.
+    assert "FILTER (WHERE lifecycle_state <> 'active') AS inactive" in sql
+    assert "deleted_at" not in sql
+    assert "deleted_at" not in status_repo._FEATURES_BY_KIND_SQL
+
+
 def test_source_record_provider_count_uses_canonical_lineage_join() -> None:
     sql = status_repo._SOURCE_RECORDS_SQL
 

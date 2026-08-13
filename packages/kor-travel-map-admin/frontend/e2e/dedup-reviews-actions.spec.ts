@@ -174,8 +174,6 @@ function makeReviewFeatureDetail(
     address: { label: `${feature.name} address` },
     category: feature.category,
     created_at: MOCK_NOW,
-    data_origin: "provider",
-    data_version: 1,
     detail: {
       memo: `${feature.name} detail`,
       phone: "02-0000-0000",

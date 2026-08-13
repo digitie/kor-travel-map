@@ -6,7 +6,6 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import {
   ArrowLeftIcon,
   CheckCircle2Icon,
-  ExternalLinkIcon,
   LocateFixedIcon,
   MapPinIcon,
   RefreshCwIcon,
@@ -26,7 +25,6 @@ import { useCategories, type CategorySummary } from "@/api/categories";
 import {
   useCreateAdminFeatureMutation,
   useNearbyFeatures,
-  type AdminFeatureChangeRecord,
   type AdminFeatureCreateRequest,
 } from "@/api/features";
 import {
@@ -38,7 +36,6 @@ import {
   type KorTravelGeoCandidate,
 } from "@/api/korTravelGeo";
 import { AdminShell } from "@/components/admin-shell";
-import { StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -55,7 +52,6 @@ import {
   markerIconLabel,
   readableTextColor,
 } from "@/lib/feature-form-options";
-import { formatDateTime, shortId } from "@/lib/format";
 import {
   KOREA_COORD_MESSAGE,
   dateOrdered,
@@ -352,10 +348,6 @@ function fieldText(value: unknown): string | undefined {
     : undefined;
 }
 
-function requestLabel(request: AdminFeatureChangeRecord): string {
-  return `${request.action}/${request.status}`;
-}
-
 function korTravelGeoCandidateKey(candidate: KorTravelGeoCandidate): string {
   const coord = korTravelGeoCandidateToCoord(candidate);
   return [
@@ -402,7 +394,7 @@ interface FeatureCreateState {
   korTravelGeoCandidates: KorTravelGeoCandidate[];
   korTravelGeoPending: boolean;
   selectedKorTravelGeoKey: string | null;
-  createdRequest: AdminFeatureChangeRecord | null;
+  createdFeatureId: string | null;
 }
 
 type FeatureCreateAction =
@@ -421,7 +413,7 @@ type FeatureCreateAction =
       type: "validation-errors";
       errors: Partial<Record<FeatureCreateField, string>>;
     }
-  | { type: "create-success"; request: AdminFeatureChangeRecord }
+  | { type: "create-success"; featureId: string }
   | { type: "create-error"; message: string };
 
 function initialFeatureCreateState(): FeatureCreateState {
@@ -433,7 +425,7 @@ function initialFeatureCreateState(): FeatureCreateState {
     korTravelGeoCandidates: [],
     korTravelGeoPending: false,
     selectedKorTravelGeoKey: null,
-    createdRequest: null,
+    createdFeatureId: null,
   };
 }
 
@@ -481,7 +473,7 @@ function featureCreateReducer(
     case "validation-errors":
       return { ...state, fieldErrors: action.errors };
     case "create-success":
-      return { ...state, createdRequest: action.request };
+      return { ...state, createdFeatureId: action.featureId };
     case "create-error":
       return { ...state, formError: action.message };
   }
@@ -498,7 +490,7 @@ function useFeatureCreateClientController() {
     initialFeatureCreateState,
   );
   const {
-    createdRequest,
+    createdFeatureId,
     fieldErrors,
     form,
     formError,
@@ -723,7 +715,7 @@ function useFeatureCreateClientController() {
       validateCreateTextFields(form, categoryItems);
       const payload = buildCreatePayload(form);
       const response = await createFeature.mutateAsync(payload);
-      dispatch({ type: "create-success", request: response.data.request });
+      dispatch({ type: "create-success", featureId: response.data.feature_id });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       dispatch({ type: "create-error", message });
@@ -740,7 +732,7 @@ function useFeatureCreateClientController() {
     coord,
     coordError,
     createFeature,
-    createdRequest,
+    createdFeatureId,
     duplicateColumns,
     duplicateItems,
     duplicateRadius,
@@ -765,12 +757,12 @@ function useFeatureCreateClientController() {
 
 function FeatureCreateFeedback({
   createFeature,
-  createdRequest,
+  createdFeatureId,
   formError,
   korTravelGeoError,
 }: Pick<
   ReturnType<typeof useFeatureCreateClientController>,
-  "createFeature" | "createdRequest" | "formError" | "korTravelGeoError"
+  "createFeature" | "createdFeatureId" | "formError" | "korTravelGeoError"
 >) {
   return (
     <>
@@ -783,17 +775,16 @@ function FeatureCreateFeedback({
         </Alert>
       )}
 
-      {createdRequest ? (
+      {createdFeatureId ? (
         <Alert>
           <CheckCircle2Icon data-icon="inline-start" />
-          <AlertTitle>변경 요청 생성됨</AlertTitle>
+          <AlertTitle>Feature 생성됨</AlertTitle>
           <AlertDescription>
-            {requestLabel(createdRequest)} ·{" "}
             <Link
               className="underline underline-offset-4"
-              href="/admin/features/change-requests"
+              href={featureDetailHref(createdFeatureId)}
             >
-              {shortId(createdRequest.request_id, 18)}
+              {createdFeatureId}
             </Link>
           </AlertDescription>
         </Alert>
@@ -1165,13 +1156,12 @@ function FeatureCreateIdentityFields({
 
 function FeatureCreateDetailFields({
   applyCandidate,
-  createdRequest,
   fieldErrors,
   form,
   updateForm,
 }: Pick<
   ReturnType<typeof useFeatureCreateClientController>,
-  "applyCandidate" | "createdRequest" | "fieldErrors" | "form" | "updateForm"
+  "applyCandidate" | "fieldErrors" | "form" | "updateForm"
 >) {
   return (
     <>
@@ -1216,36 +1206,6 @@ function FeatureCreateDetailFields({
           onChange={(field, value) => updateForm(field, value)}
         />
       </section>
-
-      {createdRequest ? (
-        <section className="rounded-lg border bg-background p-4">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <h2 className="font-medium">생성 요청</h2>
-              <div className="mt-1 break-all font-mono text-xs text-muted-foreground">
-                {createdRequest.request_id}
-              </div>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <StatusBadge status={createdRequest.status} />
-              <Badge variant="outline">
-                {formatDateTime(createdRequest.created_at)}
-              </Badge>
-              {createdRequest.status === "applied" ? (
-                <Link
-                  className={cn(
-                    buttonVariants({ variant: "outline", size: "sm" }),
-                  )}
-                  href={featureDetailHref(createdRequest.feature_id)}
-                >
-                  <ExternalLinkIcon data-icon="inline-start" />
-                  상세
-                </Link>
-              ) : null}
-            </div>
-          </div>
-        </section>
-      ) : null}
     </>
   );
 }
@@ -1258,7 +1218,7 @@ function FeatureCreateClientView({
   coord,
   coordError,
   createFeature,
-  createdRequest,
+  createdFeatureId,
   duplicateColumns,
   duplicateItems,
   duplicateRadius,
@@ -1290,12 +1250,6 @@ function FeatureCreateClientView({
             <ArrowLeftIcon data-icon="inline-start" />
             목록
           </Link>
-          <Link
-            className={cn(buttonVariants({ variant: "outline" }))}
-            href="/admin/features/change-requests"
-          >
-            변경 요청 작성
-          </Link>
         </>
       }
       description="새 Feature를 등록합니다."
@@ -1304,7 +1258,7 @@ function FeatureCreateClientView({
       <form className="flex flex-col gap-4" onSubmit={submitCreate}>
         <FeatureCreateFeedback
           createFeature={createFeature}
-          createdRequest={createdRequest}
+          createdFeatureId={createdFeatureId}
           formError={formError}
           korTravelGeoError={korTravelGeoError}
         />
@@ -1343,7 +1297,6 @@ function FeatureCreateClientView({
 
         <FeatureCreateDetailFields
           applyCandidate={applyCandidate}
-          createdRequest={createdRequest}
           fieldErrors={fieldErrors}
           form={form}
           updateForm={updateForm}

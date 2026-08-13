@@ -159,6 +159,14 @@ async def test_apply_enrichment_updates_phone_and_link(
     row = await get_feature_row(migrated_session, "p1")
     assert row is not None
     assert row["detail"]["phones"] == ["02-1234-5678"]
+    authored = await migrated_session.execute(
+        text(
+            "SELECT override_value, created_by, reason FROM ops.feature_overrides "
+            "WHERE feature_id = 'p1' AND field_path = 'place.phones' "
+            "AND status = 'active'"
+        )
+    )
+    assert authored.one() == (["02-1234-5678"], "system:phone-enrichment", "phone_enrichment")
     # enrichment source_link 1건 생성.
     assert await _enrichment_link_count(migrated_session, "p1") == 1
 

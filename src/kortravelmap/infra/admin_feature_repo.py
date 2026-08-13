@@ -12,6 +12,7 @@ import json
 import re
 import unicodedata
 import uuid
+from collections.abc import Mapping
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime
@@ -29,7 +30,7 @@ from kortravelmap.infra.feature_projection import (
     TYPED_FEATURE_DETAIL_COLUMNS_SQL,
     typed_feature_detail_joins_sql,
 )
-from kortravelmap.infra.feature_subtype import write_subtype
+from kortravelmap.infra.feature_subtype import subtype_params, write_subtype
 from kortravelmap.infra.feature_update_active_repo import _driver_constraint_identity
 from kortravelmap.infra.merge_repo import (
     MergeConflictError,
@@ -40,7 +41,7 @@ from kortravelmap.infra.merge_repo import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Sequence
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -53,7 +54,6 @@ __all__ = [
     "AdminFeatureDetailIssue",
     "AdminFeatureDetailOverride",
     "AdminFeatureDetailSource",
-    "AdminFeatureDetailVersion",
     "AdminFeatureStateTransitionAudit",
     "AdminFeatureStateTransitionAuditPage",
     "AdminFeatureStateConflict",
@@ -71,15 +71,16 @@ __all__ = [
     "ReviewSourceDetail",
     "AdminFeatureStateTransition",
     "FeatureOverride",
-    "FeatureChangeConflict",
-    "FeaturePreconditionFailed",
-    "FeatureChangeRequest",
+    "FeatureFieldOverrideCommand",
+    "FeatureFieldOverrideNotFound",
+    "FeatureFieldOverridePreconditionFailed",
+    "FeatureFieldOverrideValidationError",
     "transition_admin_feature_state",
     "reactivate_admin_feature_state",
-    "submit_feature_change_request",
-    "apply_feature_change_request",
-    "reject_feature_change_request",
-    "list_feature_change_requests",
+    "author_admin_feature_field_overrides",
+    "revoke_admin_feature_field_overrides",
+    "create_admin_feature_with_field_overrides",
+    "patch_admin_feature_with_field_overrides",
     "get_admin_feature_detail",
     "list_admin_feature_state_transitions",
     "admin_feature_card_target_exists",
@@ -105,9 +106,6 @@ AdminFeatureSort = Literal[
 ]
 SortOrder = Literal["asc", "desc"]
 DedupDecision = Literal["accepted", "rejected", "ignored"]
-FeatureChangeAction = Literal["add", "update", "delete"]
-FeatureChangeState = Literal["pending", "applied", "rejected"]
-FeatureChangeReviewMode = Literal["require_review", "immediate"]
 
 
 @dataclass(frozen=True)
@@ -175,8 +173,6 @@ class AdminFeatureDetailFeature:
     marker_color: str | None
     parent_feature_id: str | None
     sibling_group_id: str | None
-    data_origin: str
-    data_version: int
     row_revision: int
     created_at: datetime
     updated_at: datetime
@@ -240,20 +236,6 @@ class AdminFeatureDetailOverride:
 
 
 @dataclass(frozen=True)
-class AdminFeatureDetailVersion:
-    """Feature version/history row."""
-
-    feature_id: str
-    version: int
-    origin: str
-    change_kind: str
-    payload: dict[str, Any]
-    request_id: str | None
-    created_by: str | None
-    created_at: datetime
-
-
-@dataclass(frozen=True)
 class AdminFeatureDetailFile:
     """Feature file metadata row.
 
@@ -292,8 +274,6 @@ class AdminFeatureDetail:
     sources: tuple[AdminFeatureDetailSource, ...]
     issues: tuple[AdminFeatureDetailIssue, ...]
     overrides: tuple[AdminFeatureDetailOverride, ...]
-    versions: tuple[AdminFeatureDetailVersion, ...]
-    change_requests: tuple[FeatureChangeRequest, ...]
     files: tuple[AdminFeatureDetailFile, ...]
     state_transitions: tuple[AdminFeatureStateTransitionAudit, ...]
 
@@ -310,6 +290,17 @@ class FeatureOverride:
     reason: str | None
     created_by: str | None
     created_at: datetime
+
+
+@dataclass(frozen=True)
+class FeatureFieldOverrideCommand:
+    """typed field override procedure의 exact commit receipt."""
+
+    feature_id: str
+    row_revision: int
+    command_id: int
+    applied_field_count: int
+    feature_uuid: str | None = None
 
 
 @dataclass(frozen=True)
@@ -381,64 +372,24 @@ class AdminFeatureStateValidationError(ValueError):
     """Stored procedure가 command tuple/no-op을 reject했을 때의 422 domain 오류."""
 
 
-class FeatureChangeConflict(ValueError):
-    """feature add/update/delete 요청을 적용할 수 없을 때 발생."""
-
-    def __init__(
-        self,
-        *,
-        feature_id: str,
-        action: str,
-        lifecycle_state: str | None = None,
-        publication_state: str | None = None,
-        quality_state: str | None = None,
-        message: str | None = None,
-    ) -> None:
-        self.feature_id = feature_id
-        self.action = action
-        self.lifecycle_state = lifecycle_state
-        self.publication_state = publication_state
-        self.quality_state = quality_state
-        if message is None:
-            state = (lifecycle_state, publication_state, quality_state)
-            message = f"feature {feature_id!r}는 {action!r} 적용 불가: state={state!r}"
-        super().__init__(message)
+class FeatureFieldOverrideNotFound(ValueError):
+    """field override command의 Feature 또는 active override가 없을 때 발생."""
 
 
-class FeaturePreconditionFailed(Exception):
-    """If-Match row_revision이 현재 feature 행과 불일치할 때 발생 (T-VN-13).
+class FeatureFieldOverridePreconditionFailed(ValueError):
+    """field override command의 expected revision이 stale일 때 발생."""
 
-    ``FeatureChangeConflict``(상태 충돌 → 409)와 구분되는 낙관적 동시성 실패로,
-    라우터가 412 Precondition Failed로 사상한다.
-    """
-
-    def __init__(self, *, feature_id: str, expected: int, current: int) -> None:
+    def __init__(self, *, feature_id: str, expected: int) -> None:
         self.feature_id = feature_id
         self.expected = expected
-        self.current = current
         super().__init__(
-            f"feature {feature_id!r} If-Match 불일치: "
-            f"expected row_revision={expected}, current={current}"
+            f"feature {feature_id!r} If-Match revision이 변경되었습니다: "
+            f"expected={expected}"
         )
 
 
-@dataclass(frozen=True)
-class FeatureChangeRequest:
-    """``ops.feature_change_requests`` row summary."""
-
-    request_id: str
-    feature_id: str
-    action: str
-    state: str
-    review_mode: str
-    base_row_revision: int | None
-    payload: dict[str, Any]
-    reason: str | None
-    requested_by: str | None
-    reviewed_by: str | None
-    reviewed_at: datetime | None
-    applied_at: datetime | None
-    created_at: datetime
+class FeatureFieldOverrideValidationError(ValueError):
+    """registry/receipt/값 contract를 만족하지 않는 field override command."""
 
 
 @dataclass(frozen=True)
@@ -529,8 +480,6 @@ class ReviewFeatureDetail:
     raw_refs: list[dict[str, Any]]
     marker_icon: str | None
     marker_color: str | None
-    data_origin: str
-    data_version: int
     created_at: datetime
     updated_at: datetime
     sources: tuple[ReviewSourceDetail, ...]
@@ -1492,8 +1441,6 @@ SELECT
     f.marker_color,
     f.parent_feature_id,
     f.sibling_group_id::text AS sibling_group_id,
-    f.data_origin,
-    f.data_version,
     f.row_revision,
     f.created_at,
     f.updated_at
@@ -1578,43 +1525,6 @@ ORDER BY (status = 'active') DESC, created_at DESC, override_id DESC
 LIMIT 100
 """
 
-_ADMIN_FEATURE_VERSIONS_SQL: Final[str] = """
-SELECT
-    feature_id,
-    version,
-    origin,
-    change_kind,
-    payload,
-    request_id::text AS request_id,
-    created_by,
-    created_at
-FROM feature.feature_versions
-WHERE feature_id = :feature_id
-ORDER BY version DESC, created_at DESC
-LIMIT 50
-"""
-
-_ADMIN_FEATURE_CHANGE_REQUESTS_SQL: Final[str] = """
-SELECT
-    request_id::text,
-    feature_id,
-    action,
-    state,
-    review_mode,
-    base_row_revision,
-    payload,
-    reason,
-    requested_by,
-    reviewed_by,
-    reviewed_at,
-    applied_at,
-    created_at
-FROM ops.feature_change_requests
-WHERE feature_id = :feature_id
-ORDER BY created_at DESC, request_id DESC
-LIMIT 50
-"""
-
 _FEATURE_FILES_TABLE_EXISTS_SQL: Final[str] = """
 SELECT to_regclass('feature.feature_files') IS NOT NULL AS exists
 """
@@ -1682,8 +1592,6 @@ def _admin_feature_detail_feature(row: Any) -> AdminFeatureDetailFeature:
         marker_color=row["marker_color"],
         parent_feature_id=row["parent_feature_id"],
         sibling_group_id=row["sibling_group_id"],
-        data_origin=str(row["data_origin"]),
-        data_version=int(row["data_version"]),
         row_revision=int(row["row_revision"]),
         created_at=row["created_at"],
         updated_at=row["updated_at"],
@@ -1737,19 +1645,6 @@ def _admin_feature_detail_override(row: Any) -> AdminFeatureDetailOverride:
         prevent_provider_reactivation=bool(row["prevent_provider_reactivation"]),
         status=str(row["status"]),
         reason=row["reason"],
-        created_by=row["created_by"],
-        created_at=row["created_at"],
-    )
-
-
-def _admin_feature_detail_version(row: Any) -> AdminFeatureDetailVersion:
-    return AdminFeatureDetailVersion(
-        feature_id=str(row["feature_id"]),
-        version=int(row["version"]),
-        origin=str(row["origin"]),
-        change_kind=str(row["change_kind"]),
-        payload=_json_object(row["payload"]),
-        request_id=row["request_id"],
         created_by=row["created_by"],
         created_at=row["created_at"],
     )
@@ -1830,26 +1725,11 @@ async def get_admin_feature_detail(
             {"feature_id": feature_id},
         )
     ).mappings().all()
-    versions = (
-        await session.execute(
-            text(_ADMIN_FEATURE_VERSIONS_SQL),
-            {"feature_id": feature_id},
-        )
-    ).mappings().all()
-    change_requests = (
-        await session.execute(
-            text(_ADMIN_FEATURE_CHANGE_REQUESTS_SQL),
-            {"feature_id": feature_id},
-        )
-    ).mappings().all()
-
     return AdminFeatureDetail(
         feature=_admin_feature_detail_feature(feature_row),
         sources=tuple(_admin_feature_detail_source(row) for row in sources),
         issues=tuple(_admin_feature_detail_issue(row) for row in issues),
         overrides=tuple(_admin_feature_detail_override(row) for row in overrides),
-        versions=tuple(_admin_feature_detail_version(row) for row in versions),
-        change_requests=tuple(_feature_change_row(row) for row in change_requests),
         files=await _list_admin_feature_files(session, feature_id),
         state_transitions=(
             await list_admin_feature_state_transitions(session, feature_id, limit=50)
@@ -2002,8 +1882,6 @@ def _review_feature_detail(row: AdminFeatureDetail) -> ReviewFeatureDetail:
         raw_refs=feature.raw_refs,
         marker_icon=feature.marker_icon,
         marker_color=feature.marker_color,
-        data_origin=feature.data_origin,
-        data_version=feature.data_version,
         created_at=feature.created_at,
         updated_at=feature.updated_at,
         sources=tuple(_review_source_detail(source) for source in row.sources),
@@ -2498,54 +2376,324 @@ async def reactivate_admin_feature_state(
     return await _admin_state_transition_result(session, transition=transition)
 
 
-_INSERT_FEATURE_CHANGE_REQUEST_SQL: Final[str] = """
-INSERT INTO ops.feature_change_requests (
-    request_id, feature_id, action, state, review_mode,
-    base_row_revision, payload, reason, requested_by
-) VALUES (
-    x_extension.gen_random_uuid(), :feature_id, :action, :state, :review_mode,
-    :base_row_revision, CAST(:payload AS jsonb), :reason, :requested_by
+_AUTHOR_ADMIN_FEATURE_FIELD_OVERRIDES_SQL: Final[str] = """
+CALL feature.author_feature_field_overrides(
+    CAST(:feature_id AS text),
+    CAST(:expected_row_revision AS bigint),
+    CAST(:principal AS text),
+    CAST(:reason_code AS text),
+    CAST(:command_id AS bigint),
+    CAST(:values AS jsonb),
+    CAST(:geometry_wkt AS jsonb),
+    NULL, NULL, NULL, NULL
 )
-RETURNING
-    request_id::text, feature_id, action, state, review_mode,
-    base_row_revision, payload, reason, requested_by, reviewed_by, reviewed_at,
-    applied_at, created_at
 """
 
-_GET_CHANGE_REQUEST_FOR_UPDATE_SQL: Final[str] = """
-SELECT
-    request_id::text, feature_id, action, state, review_mode,
-    base_row_revision, payload, reason, requested_by, reviewed_by, reviewed_at,
-    applied_at, created_at
-FROM ops.feature_change_requests
-WHERE request_id::text = :request_id
-FOR UPDATE
+_REVOKE_ADMIN_FEATURE_FIELD_OVERRIDES_SQL: Final[str] = """
+CALL feature.revoke_feature_field_overrides(
+    CAST(:feature_id AS text),
+    CAST(:expected_row_revision AS bigint),
+    CAST(:principal AS text),
+    CAST(:reason_code AS text),
+    CAST(:command_id AS bigint),
+    CAST(:field_paths AS text[]),
+    NULL, NULL, NULL, NULL
+)
 """
 
-_LIST_CHANGE_REQUESTS_SQL: Final[str] = """
-SELECT
-    request_id::text, feature_id, action, state, review_mode,
-    base_row_revision, payload, reason, requested_by, reviewed_by, reviewed_at,
-    applied_at, created_at
-FROM ops.feature_change_requests
-WHERE (CAST(:states AS text[]) IS NULL OR state = ANY(CAST(:states AS text[])))
-  AND (CAST(:actions AS text[]) IS NULL OR action = ANY(CAST(:actions AS text[])))
-  AND (
-    CAST(:q_like AS text) IS NULL
-    OR feature_id ILIKE CAST(:q_like AS text)
-    OR requested_by ILIKE CAST(:q_like AS text)
-    OR reason ILIKE CAST(:q_like AS text)
-  )
-ORDER BY created_at DESC, request_id DESC
-LIMIT :limit
-"""
 
-_FEATURE_CHANGE_STATE_SQL: Final[str] = """
-SELECT feature_id, kind, lifecycle_state, publication_state, quality_state, row_revision
-FROM feature.features
-WHERE feature_id = :feature_id
-FOR UPDATE
-"""
+def _raise_field_override_procedure_error(
+    error: DBAPIError,
+    *,
+    feature_id: str,
+    expected_row_revision: int,
+) -> NoReturn:
+    """typed field override procedure 오류를 route-level contract로 보존한다.
+
+    SQLSTATE는 admin state 매핑과 **같은** 추출기로 읽는다. asyncpg에서 진단
+    속성은 ``error.orig``(SQLAlchemy DBAPI 래퍼)가 아니라 그 ``__cause__``
+    (원본 asyncpg 예외)에 있어서, ``orig``만 보는 추출기는 조용히 죽는다
+    (2026-08-12 T-VN-34 적대 리뷰 실측). 두 벌을 두지 않는다.
+    """
+
+    sqlstate, _constraint = _driver_constraint_identity(error)
+    if sqlstate == "P0002":
+        raise FeatureFieldOverrideNotFound(
+            f"feature 또는 active field override 없음: {feature_id!r}"
+        ) from error
+    if sqlstate == "40001":
+        raise FeatureFieldOverridePreconditionFailed(
+            feature_id=feature_id,
+            expected=expected_row_revision,
+        ) from error
+    if sqlstate == "23514":
+        raise FeatureFieldOverrideValidationError(str(error.orig)) from error
+    raise error
+
+
+async def author_admin_feature_field_overrides(
+    session: AsyncSession,
+    feature_id: str,
+    *,
+    expected_row_revision: int,
+    reason_code: str,
+    operator: str,
+    command_id: int,
+    values: Mapping[str, Any],
+    geometry_wkt: Mapping[str, str | None],
+) -> FeatureFieldOverrideCommand:
+    """admin ledger command으로 registry-typed override를 원자 author한다."""
+
+    _validated_operator_and_reason_code(operator=operator, reason_code=reason_code)
+    if command_id < 1:
+        raise ValueError("field override에는 open domain command receipt가 필요합니다.")
+    if not values and not geometry_wkt:
+        raise ValueError("field override에는 적어도 하나의 field 값이 필요합니다.")
+    if set(values) & set(geometry_wkt):
+        raise ValueError("scalar와 geometry field path는 겹칠 수 없습니다.")
+    try:
+        row = (
+            await session.execute(
+                text(_AUTHOR_ADMIN_FEATURE_FIELD_OVERRIDES_SQL),
+                {
+                    "feature_id": feature_id,
+                    "expected_row_revision": expected_row_revision,
+                    "principal": operator,
+                    "reason_code": reason_code,
+                    "command_id": command_id,
+                    "values": json.dumps(values, ensure_ascii=False, default=str),
+                    "geometry_wkt": json.dumps(
+                        geometry_wkt, ensure_ascii=False, default=str
+                    ),
+                },
+            )
+        ).mappings().one()
+    except DBAPIError as error:
+        _raise_field_override_procedure_error(
+            error,
+            feature_id=feature_id,
+            expected_row_revision=expected_row_revision,
+        )
+    return FeatureFieldOverrideCommand(
+        feature_id=str(row["o_feature_id"]),
+        row_revision=int(row["o_row_revision"]),
+        command_id=int(row["o_command_id"]),
+        applied_field_count=int(row["o_applied_field_count"]),
+    )
+
+
+async def revoke_admin_feature_field_overrides(
+    session: AsyncSession,
+    feature_id: str,
+    *,
+    expected_row_revision: int,
+    reason_code: str,
+    operator: str,
+    command_id: int,
+    field_paths: Sequence[str],
+) -> FeatureFieldOverrideCommand:
+    """admin ledger command으로 active override를 base 값으로 되돌린다."""
+
+    _validated_operator_and_reason_code(operator=operator, reason_code=reason_code)
+    normalized_paths = tuple(path.strip() for path in field_paths if path.strip())
+    if command_id < 1:
+        raise ValueError("field override에는 open domain command receipt가 필요합니다.")
+    if not normalized_paths or len(normalized_paths) != len(set(normalized_paths)):
+        raise ValueError("revoke에는 중복 없는 하나 이상의 field_path가 필요합니다.")
+    try:
+        row = (
+            await session.execute(
+                text(_REVOKE_ADMIN_FEATURE_FIELD_OVERRIDES_SQL),
+                {
+                    "feature_id": feature_id,
+                    "expected_row_revision": expected_row_revision,
+                    "principal": operator,
+                    "reason_code": reason_code,
+                    "command_id": command_id,
+                    "field_paths": list(normalized_paths),
+                },
+            )
+        ).mappings().one()
+    except DBAPIError as error:
+        _raise_field_override_procedure_error(
+            error,
+            feature_id=feature_id,
+            expected_row_revision=expected_row_revision,
+        )
+    return FeatureFieldOverrideCommand(
+        feature_id=str(row["o_feature_id"]),
+        row_revision=int(row["o_row_revision"]),
+        command_id=int(row["o_command_id"]),
+        applied_field_count=int(row["o_applied_field_count"]),
+    )
+
+
+async def create_admin_feature_with_field_overrides(
+    session: AsyncSession,
+    *,
+    feature_id: str,
+    payload: Mapping[str, Any],
+    lifecycle_state: str,
+    publication_state: str,
+    quality_state: str,
+    reason_code: str,
+    operator: str,
+    command_id: int,
+) -> FeatureFieldOverrideCommand:
+    """user-created Feature를 initial state와 explicit field overrides로 생성한다.
+
+    core initial insert는 identity/subtype 생성에만 쓰고, operator-owned business
+    fields는 즉시 registry command로 다시 materialize한다. 따라서 provider base가
+    없는 user-created row도 field별 ownership을 남긴다.
+    """
+
+    _validated_operator_and_reason_code(operator=operator, reason_code=reason_code)
+    if command_id < 1:
+        raise ValueError("feature create에는 open domain command receipt가 필요합니다.")
+    kind = str(payload["kind"])
+    if kind not in {"place", "event"}:
+        raise ValueError("admin create는 place 또는 event kind만 지원합니다.")
+    initial_payload = {
+        key: value
+        for key, value in payload.items()
+        # 상태 tuple은 create procedure의 별도 typed argument다. review payload에는
+        # axis 기본값을 보존하지만, JSON payload에 함께 넘기면 procedure의 runtime
+        # state-injection fence가 정확히 이를 거부한다.
+        if key
+        not in {
+            "detail",
+            "lifecycle_state",
+            "publication_state",
+            "quality_state",
+        }
+    }
+    # HTTP/admin DTO는 좌표를 ``coord: {lon, lat}``로 표현하지만, initial
+    # create procedure는 untrusted JSON을 최소 allow-list로 제한하고 PostGIS
+    # point를 만들기 위해 ``lon``/``lat``만 받는다. 이후 field override에는
+    # 원래 typed ``coord`` payload를 계속 사용한다.
+    initial_coord = initial_payload.pop("coord", None)
+    if initial_coord is not None:
+        if not isinstance(initial_coord, Mapping):
+            raise ValueError("admin create coord는 object 또는 null이어야 합니다.")
+        lon = initial_coord.get("lon")
+        lat = initial_coord.get("lat")
+        if lon is None or lat is None:
+            raise ValueError("admin create coord에는 lon과 lat이 모두 필요합니다.")
+        initial_payload["lon"] = lon
+        initial_payload["lat"] = lat
+    initial_payload["feature_id"] = feature_id
+    initial_payload["feature_uuid"] = candidate_feature_uuid()
+    try:
+        inserted = (
+            await session.execute(
+                text(_CREATE_FEATURE_WITH_INITIAL_STATE_SQL),
+                {
+                    "feature_payload": json.dumps(
+                        initial_payload, ensure_ascii=False, default=str
+                    ),
+                    "lifecycle_state": lifecycle_state,
+                    "publication_state": publication_state,
+                    "quality_state": quality_state,
+                    "state_context": json.dumps(
+                        {
+                            "transition_kind": "initial",
+                            "reason_code": "admin_feature_create",
+                            "principal": operator,
+                            "causation_ref": f"domain-command:{command_id}",
+                        },
+                        ensure_ascii=False,
+                    ),
+                },
+            )
+        ).mappings().one()
+    except DBAPIError as error:
+        _raise_field_override_procedure_error(
+            error,
+            feature_id=feature_id,
+            expected_row_revision=1,
+        )
+    if not bool(inserted["o_inserted"]):
+        raise FeatureFieldOverrideValidationError(
+            f"feature가 이미 존재합니다: {feature_id!r}"
+        )
+    feature_uuid = str(inserted["o_feature_uuid"])
+    verify_feature_uuid(
+        feature_id,
+        feature_uuid,
+        sent_feature_uuid=str(initial_payload["feature_uuid"]),
+        inserted=True,
+    )
+    await write_subtype(
+        session,
+        feature_id=feature_id,
+        feature_uuid=feature_uuid,
+        kind=kind,
+        detail=payload.get("detail"),
+    )
+    values, geometry_wkt = _override_payload_for_change(
+        feature_id=feature_id,
+        feature_uuid=feature_uuid,
+        kind=kind,
+        payload=dict(payload),
+        include_required_create_fields=True,
+    )
+    command = await author_admin_feature_field_overrides(
+        session,
+        feature_id,
+        expected_row_revision=int(inserted["o_row_revision"]),
+        reason_code=reason_code,
+        operator=operator,
+        command_id=command_id,
+        values=values,
+        geometry_wkt=geometry_wkt,
+    )
+    return FeatureFieldOverrideCommand(
+        feature_id=command.feature_id,
+        row_revision=command.row_revision,
+        command_id=command.command_id,
+        applied_field_count=command.applied_field_count,
+        feature_uuid=feature_uuid,
+    )
+
+
+async def patch_admin_feature_with_field_overrides(
+    session: AsyncSession,
+    feature_id: str,
+    *,
+    payload: Mapping[str, Any],
+    expected_row_revision: int,
+    reason_code: str,
+    operator: str,
+    command_id: int,
+) -> FeatureFieldOverrideCommand:
+    """기존 Feature의 admin patch를 field registry command로만 materialize한다."""
+
+    state = await _state_for_conflict(session, feature_id)
+    if state is None:
+        raise FeatureFieldOverrideNotFound(f"feature 없음: {feature_id!r}")
+    if int(state["row_revision"]) != expected_row_revision:
+        raise FeatureFieldOverridePreconditionFailed(
+            feature_id=feature_id,
+            expected=expected_row_revision,
+        )
+    values, geometry_wkt = _override_payload_for_change(
+        feature_id=feature_id,
+        feature_uuid=str(state["feature_uuid"]),
+        kind=str(state["kind"]),
+        payload=dict(payload),
+        include_required_create_fields=False,
+    )
+    return await author_admin_feature_field_overrides(
+        session,
+        feature_id,
+        expected_row_revision=expected_row_revision,
+        reason_code=reason_code,
+        operator=operator,
+        command_id=command_id,
+        values=values,
+        geometry_wkt=geometry_wkt,
+    )
+
 
 # feature_uuid는 T-VN-32C(0083) 정본 generator — 비파생 UUIDv7 후보를 명시
 # INSERT하고 fill 트리거는 raw SQL 안전망으로 유지한다. ON CONFLICT DO NOTHING
@@ -2568,102 +2716,6 @@ CALL feature.create_feature_with_initial_state(
 )
 """
 
-# T-VN-35(0086): ``detail``/``geom``은 core SET 목록에서 사라졌다. 종전의
-# ``detail = CAST(:detail AS jsonb)`` 통교체는 **shape 미검증 구멍**이었다 —
-# 운영자가 보낸 임의 JSONB가 그대로 정본이 됐다. 이제 kind별 값은 subtype
-# 컬럼(typed)으로 들어가므로 컬럼·타입이 DB에서 강제된다.
-# ``kind``/``feature_uuid``/``row_revision``을 RETURNING에 실어 subtype UPSERT와
-# 좁은 provenance procedure가 별도 조회 없이 같은 transaction에서 이어진다.
-_APPLY_FEATURE_UPDATE_SQL: Final[str] = """
-UPDATE feature.features AS f
-SET
-    name = CASE WHEN CAST(:name_set AS boolean) THEN CAST(:name AS text) ELSE f.name END,
-    category = CASE
-        WHEN CAST(:category_set AS boolean) THEN CAST(:category AS text)
-        ELSE f.category
-    END,
-    coord = CASE
-        WHEN CAST(:coord_set AS boolean) THEN x_extension.ST_SetSRID(
-            x_extension.ST_MakePoint(
-                CAST(:lon AS double precision),
-                CAST(:lat AS double precision)
-            ),
-            4326
-        )
-        ELSE f.coord
-    END,
-    coord_precision_digits = CASE
-        WHEN CAST(:coord_set AS boolean) THEN CAST(:coord_precision_digits AS smallint)
-        ELSE f.coord_precision_digits
-    END,
-    address = CASE
-        WHEN CAST(:address_set AS boolean) THEN CAST(:address AS jsonb)
-        ELSE f.address
-    END,
-    legal_dong_code = CASE
-        WHEN CAST(:legal_dong_code_set AS boolean) THEN CAST(:legal_dong_code AS text)
-        ELSE f.legal_dong_code
-    END,
-    road_name_code = CASE
-        WHEN CAST(:road_name_code_set AS boolean) THEN CAST(:road_name_code AS text)
-        ELSE f.road_name_code
-    END,
-    road_address_management_no = CASE
-        WHEN CAST(:road_address_management_no_set AS boolean) THEN
-            CAST(:road_address_management_no AS text)
-        ELSE f.road_address_management_no
-    END,
-    admin_dong_code = CASE
-        WHEN CAST(:admin_dong_code_set AS boolean) THEN CAST(:admin_dong_code AS text)
-        ELSE f.admin_dong_code
-    END,
-    sido_code = CASE
-        WHEN CAST(:sido_code_set AS boolean) THEN CAST(:sido_code AS text)
-        ELSE f.sido_code
-    END,
-    sigungu_code = CASE
-        WHEN CAST(:sigungu_code_set AS boolean) THEN CAST(:sigungu_code AS text)
-        ELSE f.sigungu_code
-    END,
-    urls = CASE WHEN CAST(:urls_set AS boolean) THEN CAST(:urls AS jsonb) ELSE f.urls END,
-    marker_icon = CASE
-        WHEN CAST(:marker_icon_set AS boolean) THEN CAST(:marker_icon AS text)
-        ELSE f.marker_icon
-    END,
-    marker_color = CASE
-        WHEN CAST(:marker_color_set AS boolean) THEN CAST(:marker_color AS text)
-        ELSE f.marker_color
-    END,
-    parent_feature_id = CASE
-        WHEN CAST(:parent_feature_id_set AS boolean) THEN CAST(:parent_feature_id AS text)
-        ELSE f.parent_feature_id
-    END,
-    sibling_group_id = CASE
-        WHEN CAST(:sibling_group_id_set AS boolean) THEN CAST(:sibling_group_id AS uuid)
-        ELSE f.sibling_group_id
-    END,
-    updated_at = now()
-WHERE f.feature_id = :feature_id
-  AND f.kind IN ('place','event')
-  AND f.lifecycle_state = 'active'
-RETURNING f.feature_id, CAST(f.feature_uuid AS text) AS feature_uuid,
-          f.kind, f.row_revision
-"""
-
-# runtime은 legacy user-change provenance 열 UPDATE 권한을 받지 않는다. T36의
-# 일반 core/subtype 입력 소유권은 그대로 두고, 이 routine만 좁게 materialize한다.
-_MATERIALIZE_USER_FEATURE_PROVENANCE_SQL: Final[str] = """
-CALL feature.materialize_user_feature_change_provenance(
-    CAST(:feature_id AS text),
-    CAST(:change_kind AS text),
-    CAST(:request_id AS uuid),
-    CAST(:reason AS text),
-    CAST(:operator AS text),
-    CAST(:expected_row_revision AS bigint),
-    NULL, NULL
-)
-"""
-
 _GET_FEATURE_ROW_REVISION_SQL: Final[str] = """
 SELECT row_revision
 FROM feature.features
@@ -2678,187 +2730,132 @@ SELECT EXISTS (
 )
 """
 
-_LOCK_FEATURE_ROW_REVISION_SQL: Final[str] = """
-SELECT row_revision
-FROM feature.features
-WHERE feature_id = :feature_id
-FOR UPDATE
-"""
-
-_MARK_CHANGE_APPLIED_SQL: Final[str] = """
-UPDATE ops.feature_change_requests
-SET state = 'applied',
-    reviewed_by = COALESCE(:operator, reviewed_by),
-    reviewed_at = COALESCE(reviewed_at, now()),
-    applied_at = now()
-WHERE request_id::text = :request_id
-RETURNING
-    request_id::text, feature_id, action, state, review_mode,
-    base_row_revision, payload, reason, requested_by, reviewed_by, reviewed_at,
-    applied_at, created_at
-"""
-
-_MARK_CHANGE_REJECTED_SQL: Final[str] = """
-UPDATE ops.feature_change_requests
-SET state = 'rejected',
-    reviewed_by = :operator,
-    reviewed_at = now(),
-    reason = COALESCE(:reason, reason)
-WHERE request_id::text = :request_id
-  AND state = 'pending'
-RETURNING
-    request_id::text, feature_id, action, state, review_mode,
-    base_row_revision, payload, reason, requested_by, reviewed_by, reviewed_at,
-    applied_at, created_at
-"""
-
-
-def _feature_change_row(row: Any) -> FeatureChangeRequest:
-    payload = row["payload"]
-    if isinstance(payload, str):
-        payload = json.loads(payload)
-    return FeatureChangeRequest(
-        request_id=str(row["request_id"]),
-        feature_id=str(row["feature_id"]),
-        action=str(row["action"]),
-        state=str(row["state"]),
-        review_mode=str(row["review_mode"]),
-        base_row_revision=(
-            int(row["base_row_revision"])
-            if row["base_row_revision"] is not None
-            else None
-        ),
-        payload=dict(payload or {}),
-        reason=row["reason"],
-        requested_by=row["requested_by"],
-        reviewed_by=row["reviewed_by"],
-        reviewed_at=row["reviewed_at"],
-        applied_at=row["applied_at"],
-        created_at=row["created_at"],
-    )
-
-
-def _change_payload_json(payload: dict[str, Any]) -> str:
-    return json.dumps(payload, ensure_ascii=False, default=str)
-
-
-def _json_param(value: Any) -> str:
-    return json.dumps(value if value is not None else {}, ensure_ascii=False, default=str)
-
-
-def _add_params(
-    *,
-    request_id: str,
-    feature_id: str,
-    payload: dict[str, Any],
-    reason: str | None,
-) -> dict[str, Any]:
-    coord = payload.get("coord") or {}
-    return {
-        "request_id": request_id,
-        "feature_id": feature_id,
-        # T-VN-32C 정본 generator — 비파생 UUIDv7 후보(conflict 시 기존값 정본).
-        "feature_uuid": candidate_feature_uuid(),
-        "kind": payload["kind"],
-        "name": payload["name"],
-        "category": payload["category"],
-        "lon": coord.get("lon"),
-        "lat": coord.get("lat"),
-        "coord_precision_digits": payload.get("coord_precision_digits") or (
-            6 if coord else None
-        ),
-        # ``geom``/``detail``은 core 컬럼이 아니다(T-VN-35) — geometry는
-        # route/area subtype 전용이고 kind별 값은 ``feature_subtype.write_subtype``가 쓴다.
-        "address": _json_param(payload.get("address")),
-        "legal_dong_code": payload.get("legal_dong_code"),
-        "road_name_code": payload.get("road_name_code"),
-        "road_address_management_no": payload.get("road_address_management_no"),
-        "admin_dong_code": payload.get("admin_dong_code"),
-        "sido_code": payload.get("sido_code"),
-        "sigungu_code": payload.get("sigungu_code"),
-        "urls": _json_param(payload.get("urls")),
-        "marker_icon": payload["marker_icon"],
-        "marker_color": payload["marker_color"],
-        "parent_feature_id": payload.get("parent_feature_id"),
-        "sibling_group_id": payload.get("sibling_group_id"),
-        "lifecycle_state": payload.get("lifecycle_state", "active"),
-        "publication_state": payload.get("publication_state", "published"),
-        "quality_state": payload.get("quality_state", "valid"),
+_CORE_OVERRIDE_PATHS: Final[dict[str, str]] = {
+    "name": "core.name",
+    "category": "core.category",
+    "address": "core.address",
+    "legal_dong_code": "core.legal_dong_code",
+    "road_name_code": "core.road_name_code",
+    "road_address_management_no": "core.road_address_management_no",
+    "admin_dong_code": "core.admin_dong_code",
+    "sido_code": "core.sido_code",
+    "sigungu_code": "core.sigungu_code",
+    "urls": "core.urls",
+    "marker_icon": "core.marker_icon",
+    "marker_color": "core.marker_color",
+    "parent_feature_id": "core.parent_feature_id",
+    "sibling_group_id": "core.sibling_group_id",
+    "raw_refs": "core.raw_refs",
+}
+_SUBTYPE_IDENTITY_FIELDS: Final[frozenset[str]] = frozenset(
+    {"feature_id", "feature_uuid", "kind"}
+)
+_SUBTYPE_JSON_FIELDS: Final[frozenset[str]] = frozenset(
+    {
+        "business_hours",
+        "facility_info",
+        "reviews_link",
+        "payload",
+        "opening_hours",
     }
+)
+_NON_OPERATOR_WRITABLE_SUBTYPE_FIELDS: Final[dict[str, frozenset[str]]] = {
+    # registry의 ``operator_writable=false``와 같은 allow-list를 writer에서도
+    # 명시한다. provider raw/source identity를 admin detail 통교체에 섞어
+    # 조용히 덮는 것은 허용하지 않는다.
+    "place": frozenset({"payload"}),
+    "event": frozenset({"content_id", "content_type_id", "payload"}),
+    "notice": frozenset({"payload"}),
+    "route": frozenset({"geometry_source", "payload"}),
+    "area": frozenset({"boundary_source", "payload"}),
+}
 
 
-def _admin_feature_create_payload(params: Mapping[str, Any]) -> str:
-    """Admin create payload는 core-only이며 typed procedure가 provenance를 쓴다."""
-    payload = {
-        key: (
-            json.loads(value)
-            if key in {"address", "urls"} and isinstance(value, str)
-            else value
+def _override_payload_for_change(
+    *,
+    feature_id: str,
+    feature_uuid: str,
+    kind: str,
+    payload: Mapping[str, Any],
+    include_required_create_fields: bool,
+) -> tuple[dict[str, Any], dict[str, str | None]]:
+    """승인된 user request를 registry-keyed field input으로 바꾼다.
+
+    ``detail``은 부분 JSON merge가 아니라 typed subtype 전체 교체다. 따라서
+    detail이 들어온 경우 subtype의 모든 column을 override로 남겨, 이후 provider
+    patch가 운영자가 명시하지 않은 path만 materialize할 수 있다.
+    """
+
+    values: dict[str, Any] = {}
+    geometry_wkt: dict[str, str | None] = {}
+    for payload_key, field_path in _CORE_OVERRIDE_PATHS.items():
+        if payload_key in payload:
+            values[field_path] = payload[payload_key]
+
+    if "coord" in payload:
+        coord = payload["coord"]
+        if coord is None:
+            geometry_wkt["core.coord"] = None
+            values["core.coord_precision_digits"] = None
+        elif isinstance(coord, Mapping):
+            lon = coord.get("lon")
+            lat = coord.get("lat")
+            if lon is None or lat is None:
+                raise ValueError("coord override에는 lon과 lat이 모두 필요합니다.")
+            geometry_wkt["core.coord"] = f"POINT({lon} {lat})"
+            values["core.coord_precision_digits"] = payload.get(
+                "coord_precision_digits", 6
+            )
+        else:
+            raise ValueError("coord override는 object 또는 null이어야 합니다.")
+    elif "coord_precision_digits" in payload:
+        raise ValueError("coord_precision_digits는 coord와 함께만 바꿀 수 있습니다.")
+
+    if include_required_create_fields:
+        # create boundary는 네 core field의 존재를 이미 검증한다. user-created
+        # Feature에도 provider base와 독립적인 per-field ownership을 남긴다.
+        for payload_key in ("name", "category", "marker_icon", "marker_color"):
+            values[_CORE_OVERRIDE_PATHS[payload_key]] = payload[payload_key]
+
+    # 생성 때 detail을 생략하면 ``write_subtype``가 kind DTO의 안전한 기본값만
+    # materialize한다. 그 기본값까지 operator override로 만들면 (특히 nullable
+    # subtype field의 JSON ``null``) registry type fence를 통과하지 못하고, 이후
+    # provider가 실제 base를 제공할 길도 막는다. 명시된 detail만 ownership receipt로
+    # 남긴다.
+    if "detail" in payload:
+        detail_input = payload.get("detail")
+        if isinstance(detail_input, Mapping):
+            forbidden = sorted(
+                set(detail_input)
+                & _NON_OPERATOR_WRITABLE_SUBTYPE_FIELDS.get(kind, frozenset())
+            )
+            if forbidden:
+                raise ValueError(
+                    "operator가 provider-owned detail field를 바꿀 수 없습니다: "
+                    + ", ".join(forbidden)
+                )
+        params = subtype_params(
+            feature_id=feature_id,
+            feature_uuid=feature_uuid,
+            kind=kind,
+            detail=payload.get("detail"),
         )
-        for key, value in params.items()
-        if key
-        not in {
-            "request_id",
-            "reason",
-            "lifecycle_state",
-            "publication_state",
-            "quality_state",
-            "data_origin",
-            "data_version",
-        }
-    }
-    return json.dumps(payload, ensure_ascii=False, default=str)
+        if params is not None:
+            for column, raw_value in params.items():
+                if column in _SUBTYPE_IDENTITY_FIELDS:
+                    continue
+                if column in _NON_OPERATOR_WRITABLE_SUBTYPE_FIELDS.get(
+                    kind, frozenset()
+                ):
+                    continue
+                value = raw_value
+                if column in _SUBTYPE_JSON_FIELDS and isinstance(value, str):
+                    value = json.loads(value)
+                values[f"{kind}.{column}"] = value
 
-
-def _update_params(
-    *,
-    request_id: str,
-    feature_id: str,
-    payload: dict[str, Any],
-    reason: str | None,
-) -> dict[str, Any]:
-    coord = payload.get("coord") if "coord" in payload else None
-    return {
-        "request_id": request_id,
-        "feature_id": feature_id,
-        "name_set": "name" in payload,
-        "name": payload.get("name"),
-        "category_set": "category" in payload,
-        "category": payload.get("category"),
-        "coord_set": coord is not None,
-        "lon": coord.get("lon") if isinstance(coord, dict) else None,
-        "lat": coord.get("lat") if isinstance(coord, dict) else None,
-        "coord_precision_digits": payload.get("coord_precision_digits") or (
-            6 if coord is not None else None
-        ),
-        # ``geom``/``detail``은 core SET 대상이 아니다(T-VN-35) — subtype 갱신은
-        # ``_apply_change``가 ``"detail" in payload``일 때만 수행한다.
-        "address_set": "address" in payload,
-        "address": _json_param(payload.get("address")),
-        "legal_dong_code_set": "legal_dong_code" in payload,
-        "legal_dong_code": payload.get("legal_dong_code"),
-        "road_name_code_set": "road_name_code" in payload,
-        "road_name_code": payload.get("road_name_code"),
-        "road_address_management_no_set": "road_address_management_no" in payload,
-        "road_address_management_no": payload.get("road_address_management_no"),
-        "admin_dong_code_set": "admin_dong_code" in payload,
-        "admin_dong_code": payload.get("admin_dong_code"),
-        "sido_code_set": "sido_code" in payload,
-        "sido_code": payload.get("sido_code"),
-        "sigungu_code_set": "sigungu_code" in payload,
-        "sigungu_code": payload.get("sigungu_code"),
-        "urls_set": "urls" in payload,
-        "urls": _json_param(payload.get("urls")),
-        "marker_icon_set": "marker_icon" in payload,
-        "marker_icon": payload.get("marker_icon"),
-        "marker_color_set": "marker_color" in payload,
-        "marker_color": payload.get("marker_color"),
-        "parent_feature_id_set": "parent_feature_id" in payload,
-        "parent_feature_id": payload.get("parent_feature_id"),
-        "sibling_group_id_set": "sibling_group_id" in payload,
-        "sibling_group_id": payload.get("sibling_group_id"),
-        "reason": reason,
-    }
+    if not values and not geometry_wkt:
+        raise ValueError("field override에는 최소 하나의 실제 변경 field가 필요합니다.")
+    return values, geometry_wkt
 
 
 async def _state_for_conflict(
@@ -2866,200 +2863,20 @@ async def _state_for_conflict(
 ) -> dict[str, Any] | None:
     row = (
         await session.execute(
-            text(_FEATURE_CHANGE_STATE_SQL),
+            text(
+                """
+                SELECT feature_id, CAST(feature_uuid AS text) AS feature_uuid, kind,
+                       lifecycle_state, publication_state, quality_state, row_revision
+                FROM feature.features
+                WHERE feature_id = :feature_id
+                FOR UPDATE
+                """
+            ),
             {"feature_id": feature_id},
         )
     ).mappings().first()
     return dict(row) if row is not None else None
 
-
-async def _apply_change(
-    session: AsyncSession,
-    request: FeatureChangeRequest,
-    *,
-    operator: str | None,
-) -> None:
-    payload = request.payload
-    if (
-        operator is None
-        or not operator.strip()
-        or request.reason is None
-        or not request.reason.strip()
-    ):
-        raise ValueError(
-            "user add/update/delete provenance에는 authenticated operator와 "
-            "non-empty reason이 필요합니다."
-        )
-    if request.action == "add":
-        add_params = _add_params(
-            request_id=request.request_id,
-            feature_id=request.feature_id,
-            payload=payload,
-            reason=request.reason,
-        )
-        create_row = (
-            await session.execute(
-                text(_CREATE_FEATURE_WITH_INITIAL_STATE_SQL),
-                {
-                    "feature_payload": _admin_feature_create_payload(add_params),
-                    "lifecycle_state": add_params["lifecycle_state"],
-                    "publication_state": add_params["publication_state"],
-                    "quality_state": add_params["quality_state"],
-                    "state_context": json.dumps(
-                        {
-                            "transition_kind": "initial",
-                            "reason_code": "user_request_add",
-                            "principal": operator,
-                            "causation_ref": request.request_id,
-                        },
-                        ensure_ascii=False,
-                    ),
-                },
-            )
-        ).mappings().one()
-        row: Any = (
-            {
-                "feature_id": str(create_row["o_feature_id"]),
-                "feature_uuid": str(create_row["o_feature_uuid"]),
-                "kind": str(add_params["kind"]),
-            }
-            if bool(create_row["o_inserted"])
-            else None
-        )
-        if row is not None:
-            # T-VN-32C fail-close — ON CONFLICT DO NOTHING이라 RETURNING 행
-            # 존재 자체가 신규 insert 증거다: 관측값은 보낸 후보와 같아야
-            # 하며(generator 이원화 차단), 비정규/결측이면 legacy-only 차단.
-            verify_feature_uuid(
-                request.feature_id,
-                row["feature_uuid"],
-                sent_feature_uuid=add_params["feature_uuid"],
-                inserted=True,
-            )
-            # core insert가 실제로 일어난 경우에만 subtype을 만든다.
-            await write_subtype(
-                session,
-                feature_id=str(row["feature_id"]),
-                feature_uuid=str(row["feature_uuid"]),
-                kind=str(row["kind"]),
-                detail=payload.get("detail"),
-            )
-            await session.execute(
-                text(_MATERIALIZE_USER_FEATURE_PROVENANCE_SQL),
-                {
-                    "feature_id": request.feature_id,
-                    "change_kind": "add",
-                    "request_id": request.request_id,
-                    "reason": request.reason,
-                    "operator": operator,
-                    "expected_row_revision": int(create_row["o_row_revision"]),
-                },
-            )
-    elif request.action == "update":
-        row = (
-            await session.execute(
-                text(_APPLY_FEATURE_UPDATE_SQL),
-                _update_params(
-                    request_id=request.request_id,
-                    feature_id=request.feature_id,
-                    payload=payload,
-                    reason=request.reason,
-                ),
-            )
-        ).mappings().first()
-        if row is not None and "detail" in payload:
-            # admin update의 detail은 **통교체** 계약이다(부분 병합 아님).
-            # subtype UPSERT가 전 컬럼을 EXCLUDED로 덮으므로 계약이 그대로
-            # 보존되고, 이제 컬럼·타입은 DB가 검증한다.
-            await write_subtype(
-                session,
-                feature_id=str(row["feature_id"]),
-                feature_uuid=str(row["feature_uuid"]),
-                kind=str(row["kind"]),
-                detail=payload.get("detail"),
-            )
-        if row is not None:
-            await session.execute(
-                text(_MATERIALIZE_USER_FEATURE_PROVENANCE_SQL),
-                {
-                    "feature_id": request.feature_id,
-                    "change_kind": "update",
-                    "request_id": request.request_id,
-                    "reason": request.reason,
-                    "operator": operator,
-                    "expected_row_revision": int(row["row_revision"]),
-                },
-            )
-    else:
-        state = await _state_for_conflict(session, request.feature_id)
-        if (
-            state is None
-            or state["kind"] not in {"place", "event"}
-            or state["lifecycle_state"] != "active"
-        ):
-            row = None
-        else:
-            transition = (
-                await session.execute(
-                    text(_TRANSITION_FEATURE_STATE_SQL),
-                    {
-                        "feature_id": request.feature_id,
-                        "lifecycle_state": "retired",
-                        "publication_state": "suppressed",
-                        "quality_state": state["quality_state"],
-                        "expected_row_revision": int(state["row_revision"]),
-                        "state_context": json.dumps(
-                            {
-                                "transition_kind": "user_request",
-                                "reason_code": "user_request_delete",
-                                "principal": operator,
-                                "causation_ref": request.request_id,
-                            },
-                            ensure_ascii=False,
-                        ),
-                    },
-                )
-            ).mappings().one()
-            await session.execute(
-                text(_AUTHOR_LIFECYCLE_OVERRIDE_SQL),
-                {
-                    "feature_id": request.feature_id,
-                    "source_lifecycle_state": "active",
-                    "override_lifecycle_state": "retired",
-                    "prevent_provider_reactivation": True,
-                    "reason": request.reason,
-                    "operator": operator,
-                    "expected_row_revision": int(transition["o_row_revision"]),
-                },
-            )
-            await session.execute(
-                text(_MATERIALIZE_USER_FEATURE_PROVENANCE_SQL),
-                {
-                    "feature_id": request.feature_id,
-                    "change_kind": "delete",
-                    "request_id": request.request_id,
-                    "reason": request.reason,
-                    "operator": operator,
-                    "expected_row_revision": int(transition["o_row_revision"]),
-                },
-            )
-            row = {"feature_id": request.feature_id}
-
-    if row is None:
-        state = await _state_for_conflict(session, request.feature_id)
-        if state is None:
-            raise FeatureChangeConflict(
-                feature_id=request.feature_id,
-                action=request.action,
-                message=f"feature 없음: {request.feature_id!r}",
-            )
-        raise FeatureChangeConflict(
-            feature_id=str(state["feature_id"]),
-            action=request.action,
-            lifecycle_state=str(state["lifecycle_state"]),
-            publication_state=str(state["publication_state"]),
-            quality_state=str(state["quality_state"]),
-        )
 
 async def get_feature_row_revision(
     session: AsyncSession, feature_id: str
@@ -3087,182 +2904,6 @@ async def admin_feature_card_target_exists(
             )
         ).scalar_one()
     )
-
-
-async def _assert_feature_revision(
-    session: AsyncSession, feature_id: str, expected: int
-) -> None:
-    """If-Match row_revision을 현재 행과 대조한다 (T-VN-13).
-
-    행을 ``FOR UPDATE``로 잠가 검사~변경 사이 경합을 막는다. feature가 없으면
-    ``FeatureChangeConflict``(라우터 404), revision이 어긋나면
-    ``FeaturePreconditionFailed``(라우터 412)를 던진다.
-    """
-    current = (
-        await session.execute(
-            text(_LOCK_FEATURE_ROW_REVISION_SQL),
-            {"feature_id": feature_id},
-        )
-    ).scalar_one_or_none()
-    if current is None:
-        raise FeatureChangeConflict(
-            feature_id=feature_id,
-            action="update",
-            message=f"feature 없음: {feature_id!r}",
-        )
-    if int(current) != expected:
-        raise FeaturePreconditionFailed(
-            feature_id=feature_id, expected=expected, current=int(current)
-        )
-
-
-async def submit_feature_change_request(
-    session: AsyncSession,
-    *,
-    action: FeatureChangeAction,
-    feature_id: str,
-    payload: dict[str, Any],
-    review_mode: FeatureChangeReviewMode,
-    reason: str | None,
-    requested_by: str | None,
-    expected_row_revision: int | None = None,
-) -> FeatureChangeRequest:
-    """feature add/update/delete 요청을 만들고 설정에 따라 즉시 적용한다.
-
-    update/delete는 ``expected_row_revision``(If-Match)을 필수로 받아 대상 행을
-    잠그고 제출 시점에 대조한 뒤 request의 ``base_row_revision``에 보존한다.
-    add는 기존 행이 없어 NULL을 저장하고 실제 INSERT 충돌로 absence를 검증한다.
-    """
-    if action in ("update", "delete") and expected_row_revision is None:
-        raise ValueError("update/delete에는 expected_row_revision이 필요합니다.")
-    if action in ("update", "delete"):
-        assert expected_row_revision is not None
-        await _assert_feature_revision(session, feature_id, expected_row_revision)
-    # ``materialize_user_feature_change_provenance``는 receipt 이전에 applied
-    # request를 lock해 검증한다. immediate도 pending으로 만든 뒤 같은 transaction
-    # 안에서 먼저 applied receipt를 확정해야 한다. durable receipt가 생긴 뒤 request
-    # metadata를 다시 UPDATE하면 0097의 immutable binding guard가 막는다.
-    initial_state = "pending"
-    row = (
-        await session.execute(
-            text(_INSERT_FEATURE_CHANGE_REQUEST_SQL),
-            {
-                "feature_id": feature_id,
-                "action": action,
-                "state": initial_state,
-                "review_mode": review_mode,
-                "base_row_revision": expected_row_revision,
-                "payload": _change_payload_json(payload),
-                "reason": reason,
-                "requested_by": requested_by,
-            },
-        )
-    ).mappings().one()
-    request = _feature_change_row(row)
-    if review_mode == "immediate":
-        applied = (
-            await session.execute(
-                text(_MARK_CHANGE_APPLIED_SQL),
-                {"request_id": request.request_id, "operator": requested_by},
-            )
-        ).mappings().one()
-        await _apply_change(session, request, operator=requested_by)
-        return _feature_change_row(applied)
-    return request
-
-
-async def apply_feature_change_request(
-    session: AsyncSession,
-    request_id: str,
-    *,
-    operator: str | None,
-) -> FeatureChangeRequest | None:
-    """pending feature change request를 승인하고 적용한다.
-
-    update/delete는 제출 때 저장한 ``base_row_revision``을 적용 직전에 잠금·대조한다.
-    따라서 reviewer가 별도 feature ETag를 전달하지 않아도 제출 이후 provider write를
-    감지한다. add는 INSERT ``ON CONFLICT DO NOTHING``으로 absence를 원자 검증한다.
-    """
-    row = (
-        await session.execute(
-            text(_GET_CHANGE_REQUEST_FOR_UPDATE_SQL),
-            {"request_id": request_id},
-        )
-    ).mappings().first()
-    if row is None:
-        return None
-    request = _feature_change_row(row)
-    if request.state != "pending":
-        raise FeatureChangeConflict(
-            feature_id=request.feature_id,
-            action=request.action,
-            message=f"request {request_id!r}는 pending 상태가 아님: {request.state!r}",
-        )
-    if request.action in ("update", "delete"):
-        if request.base_row_revision is None:
-            raise FeatureChangeConflict(
-                feature_id=request.feature_id,
-                action=request.action,
-                message=(
-                    f"request {request_id!r}에 base_row_revision이 없어 승인할 수 없습니다; "
-                    "현재 revision으로 다시 제출하세요."
-                ),
-            )
-        await _assert_feature_revision(
-            session, request.feature_id, request.base_row_revision
-        )
-    applied = (
-        await session.execute(
-            text(_MARK_CHANGE_APPLIED_SQL),
-            {"request_id": request_id, "operator": operator},
-        )
-    ).mappings().one()
-    # Final materializer는 provenance request가 이미 applied인지를 DB에서
-    # 검증한다. 같은 transaction 안이므로 materialize 실패 시 이 state mark도
-    # 함께 rollback되어 pending request를 남긴다.
-    await _apply_change(session, request, operator=operator)
-    return _feature_change_row(applied)
-
-
-async def reject_feature_change_request(
-    session: AsyncSession,
-    request_id: str,
-    *,
-    operator: str | None,
-    reason: str | None,
-) -> FeatureChangeRequest | None:
-    """pending feature change request를 거절한다."""
-    row = (
-        await session.execute(
-            text(_MARK_CHANGE_REJECTED_SQL),
-            {"request_id": request_id, "operator": operator, "reason": reason},
-        )
-    ).mappings().first()
-    return _feature_change_row(row) if row is not None else None
-
-
-async def list_feature_change_requests(
-    session: AsyncSession,
-    *,
-    states: Sequence[str] | None = None,
-    actions: Sequence[str] | None = None,
-    q: str | None = None,
-    limit: int = 100,
-) -> tuple[FeatureChangeRequest, ...]:
-    """feature change request 목록."""
-    normalized_q = _normalize_query(q)
-    rows = (
-        await session.execute(
-            text(_LIST_CHANGE_REQUESTS_SQL),
-            {
-                "states": _normalize_values(states),
-                "actions": _normalize_values(actions),
-                "q_like": f"%{normalized_q}%" if normalized_q is not None else None,
-                "limit": min(max(limit, 1), 500),
-            },
-        )
-    ).mappings().all()
-    return tuple(_feature_change_row(row) for row in rows)
 
 
 _DEDUP_REVIEW_SQL: Final[str] = """

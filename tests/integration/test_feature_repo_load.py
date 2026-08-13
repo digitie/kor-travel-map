@@ -380,37 +380,6 @@ async def test_identical_provider_bundle_reactivates_retired_once(
     assert repeated.source_records_inserted == 0
 
 
-async def test_identical_bundle_does_not_reactivate_user_request_feature(
-    migrated_session: AsyncSession,
-) -> None:
-    bundle = await _bundle("FEST-REPO-USER-DELETED")
-    await feature_repo.load_bundle(migrated_session, bundle)
-    await migrated_session.execute(
-        text(
-            "UPDATE feature.features"
-            " SET lifecycle_state = 'retired', publication_state = 'suppressed',"
-            " data_origin = 'user_request', data_version = 1, updated_at = now()"
-            " WHERE feature_id = :feature_id"
-        ),
-        {"feature_id": bundle.feature.feature_id},
-    )
-
-    protected = await feature_repo.load_bundle(migrated_session, bundle)
-    assert protected.features_updated == 0
-    row = (
-        await migrated_session.execute(
-            text(
-                "SELECT lifecycle_state, publication_state, data_origin FROM feature.features"
-                " WHERE feature_id = :feature_id"
-            ),
-            {"feature_id": bundle.feature.feature_id},
-        )
-    ).one()
-    assert row.lifecycle_state == "retired"
-    assert row.publication_state == "suppressed"
-    assert row.data_origin == "user_request"
-
-
 async def test_identical_bundle_respects_prevent_reactivation_override(
     migrated_session: AsyncSession,
 ) -> None:

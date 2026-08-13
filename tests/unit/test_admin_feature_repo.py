@@ -158,6 +158,128 @@ def test_admin_feature_row_and_json_helpers() -> None:
     assert row.issues[0]["violation_type"] == "missing_address"
 
 
+def test_user_override_payload_rejects_provider_owned_detail_and_keeps_null_coord() -> None:
+    with pytest.raises(ValueError, match="provider-owned detail field"):
+        repo._override_payload_for_change(
+            feature_id="feature-user-override",
+            feature_uuid="00000000-0000-4000-8000-000000000099",
+            kind="place",
+            payload={"detail": {"payload": {"provider_raw": "cannot-edit"}}},
+            include_required_create_fields=False,
+        )
+
+    values, geometry_wkt = repo._override_payload_for_change(
+        feature_id="feature-user-override",
+        feature_uuid="00000000-0000-4000-8000-000000000099",
+        kind="place",
+        payload={"coord": None},
+        include_required_create_fields=False,
+    )
+    assert values == {"core.coord_precision_digits": None}
+    assert geometry_wkt == {"core.coord": None}
+
+
+def test_create_override_payload_does_not_claim_omitted_subtype_defaults() -> None:
+    """detail 없는 admin 생성은 subtype 기본값을 operator intent로 만들지 않는다."""
+
+    values, geometry_wkt = repo._override_payload_for_change(
+        feature_id="feature-create-no-detail",
+        feature_uuid="00000000-0000-4000-8000-000000000100",
+        kind="place",
+        payload={
+            "name": "사용자 장소",
+            "category": "01070300",
+            "marker_icon": "marker",
+            "marker_color": "P-02",
+            "coord": {"lon": 126.978, "lat": 37.5665},
+        },
+        include_required_create_fields=True,
+    )
+
+    assert values == {
+        "core.name": "사용자 장소",
+        "core.category": "01070300",
+        "core.marker_icon": "marker",
+        "core.marker_color": "P-02",
+        "core.coord_precision_digits": 6,
+    }
+    assert geometry_wkt == {"core.coord": "POINT(126.978 37.5665)"}
+
+
+@pytest.mark.asyncio
+async def test_create_initial_payload_uses_typed_state_arguments(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """review payload의 축은 state procedure JSON input으로 새지 않는다."""
+
+    async def _write_subtype(_session: object, **_: Any) -> None:
+        return None
+
+    async def _author(
+        _session: object,
+        feature_id: str,
+        **_: Any,
+    ) -> repo.FeatureFieldOverrideCommand:
+        return repo.FeatureFieldOverrideCommand(
+            feature_id=feature_id,
+            row_revision=2,
+            command_id=71,
+            applied_field_count=5,
+        )
+
+    candidate_uuid = "00000000-0000-4000-8000-000000000101"
+    monkeypatch.setattr(repo, "candidate_feature_uuid", lambda: candidate_uuid)
+    monkeypatch.setattr(repo, "write_subtype", _write_subtype)
+    monkeypatch.setattr(repo, "author_admin_feature_field_overrides", _author)
+    session = _Session(
+        [
+            _Result(
+                [
+                    {
+                        "o_feature_id": "user:live-create",
+                        "o_feature_uuid": candidate_uuid,
+                        "o_row_revision": 1,
+                        "o_inserted": True,
+                    }
+                ]
+            )
+        ]
+    )
+
+    await repo.create_admin_feature_with_field_overrides(
+        session,  # type: ignore[arg-type]
+        feature_id="user:live-create",
+        payload={
+            "kind": "place",
+            "name": "n150 생성",
+            "category": "01070300",
+            "coord": {"lon": 127.5, "lat": 36.5},
+            "marker_icon": "marker",
+            "marker_color": "P-02",
+            "lifecycle_state": "active",
+            "publication_state": "published",
+            "quality_state": "valid",
+        },
+        lifecycle_state="active",
+        publication_state="published",
+        quality_state="valid",
+        reason_code="tvn36-create",
+        operator="admin:n150",
+        command_id=71,
+    )
+
+    initial_payload = json.loads(session.calls[0]["params"]["feature_payload"])
+    assert {
+        "lifecycle_state",
+        "publication_state",
+        "quality_state",
+    }.isdisjoint(initial_payload)
+    assert initial_payload["feature_uuid"] == candidate_uuid
+    assert initial_payload["lon"] == 127.5
+    assert initial_payload["lat"] == 36.5
+    assert "coord" not in initial_payload
+
+
 @pytest.mark.asyncio
 async def test_list_admin_features_builds_params_and_next_cursor() -> None:
     session = _Session([_Result([_feature_row("feature-1"), _feature_row("feature-2")])])
@@ -251,8 +373,6 @@ async def test_get_admin_feature_detail_aggregates_rows_without_feature_files_ta
         "marker_color": "P-01",
         "parent_feature_id": None,
         "sibling_group_id": None,
-        "data_origin": "provider",
-        "data_version": 0,
         "row_revision": 1,
         "created_at": _NOW,
         "updated_at": _NOW,
@@ -306,31 +426,6 @@ async def test_get_admin_feature_detail_aggregates_rows_without_feature_files_ta
         "created_by": "local-admin",
         "created_at": _NOW,
     }
-    version_row = {
-        "feature_id": "feature-1",
-        "version": 0,
-        "origin": "provider",
-        "change_kind": "load",
-        "payload": '{"name": "광화문"}',
-        "request_id": None,
-        "created_by": "provider",
-        "created_at": _NOW,
-    }
-    change_row = {
-        "request_id": "change-1",
-        "feature_id": "feature-1",
-        "action": "update",
-        "state": "applied",
-        "review_mode": "immediate",
-        "base_row_revision": 1,
-        "payload": '{"name": "광화문"}',
-        "reason": "사용자 수정",
-        "requested_by": "local-admin",
-        "reviewed_by": None,
-        "reviewed_at": None,
-        "applied_at": _NOW,
-        "created_at": _NOW,
-    }
     transition_row = {
         "transition_id": 41,
         "from_lifecycle_state": "active",
@@ -355,8 +450,6 @@ async def test_get_admin_feature_detail_aggregates_rows_without_feature_files_ta
             _Result([source_row]),
             _Result([issue_row]),
             _Result([override_row]),
-            _Result([version_row]),
-            _Result([change_row]),
             _Result([{"exists": False}]),
             _Result([transition_row]),
         ]
@@ -373,9 +466,6 @@ async def test_get_admin_feature_detail_aggregates_rows_without_feature_files_ta
     assert detail.sources[0].raw_data == {"id": "sr-feature-1"}
     assert detail.issues[0].payload == {"field": "address"}
     assert detail.overrides[0].override_value == "retired"
-    assert detail.versions[0].payload == {"name": "광화문"}
-    assert detail.change_requests[0].payload == {"name": "광화문"}
-    assert detail.change_requests[0].base_row_revision == 1
     assert detail.files == ()
     assert detail.state_transitions[0].transition_id == 41
     assert "feature.feature_state_transitions" in session.calls[-1]["statement"]
@@ -471,245 +561,6 @@ async def test_admin_reactivation_passes_source_evidence_to_named_procedure() ->
     assert "feature.reactivate_admin_feature_state" in command["statement"]
     assert command["params"]["provider_dataset_id"] == 17
     assert command["params"]["source_entity_key"] == "entity:17"
-
-
-@pytest.mark.asyncio
-async def test_user_delete_change_uses_transition_and_typed_override() -> None:
-    request = repo.FeatureChangeRequest(
-        request_id="00000000-0000-0000-0000-000000000003",
-        feature_id="feature-user-delete",
-        action="delete",
-        state="approved",
-        review_mode="immediate",
-        base_row_revision=11,
-        payload={},
-        reason="사용자 삭제 요청",
-        requested_by="requester",
-        reviewed_by="admin",
-        reviewed_at=_NOW,
-        applied_at=None,
-        created_at=_NOW,
-    )
-    session = _Session(
-        [
-            _Result(
-                [
-                    {
-                        "feature_id": request.feature_id,
-                        "kind": "place",
-                        "lifecycle_state": "active",
-                        "publication_state": "published",
-                        "quality_state": "valid",
-                        "row_revision": 11,
-                    }
-                ]
-            ),
-            _Result(
-                [
-                    {
-                        "o_feature_id": request.feature_id,
-                        "o_row_revision": 12,
-                    }
-                ]
-            ),
-            _Result(),
-            _Result(),
-        ]
-    )
-
-    await repo._apply_change(
-        session,  # type: ignore[arg-type]
-        request,
-        operator="admin",
-    )
-
-    transition = session.calls[1]
-    assert "feature.transition_feature_state" in transition["statement"]
-    assert transition["params"]["lifecycle_state"] == "retired"
-    assert transition["params"]["publication_state"] == "suppressed"
-    assert json.loads(transition["params"]["state_context"]) == {
-        "transition_kind": "user_request",
-        "reason_code": "user_request_delete",
-        "principal": "admin",
-        "causation_ref": request.request_id,
-    }
-    assert "feature.author_lifecycle_override" in session.calls[2]["statement"]
-    provenance = session.calls[3]
-    assert "feature.materialize_user_feature_change_provenance" in provenance["statement"]
-    assert provenance["params"] == {
-        "feature_id": request.feature_id,
-        "change_kind": "delete",
-        "request_id": request.request_id,
-        "reason": request.reason,
-        "operator": "admin",
-        "expected_row_revision": 12,
-    }
-
-
-@pytest.mark.asyncio
-async def test_user_add_writes_subtype_before_typed_provenance_snapshot(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    request = repo.FeatureChangeRequest(
-        request_id="00000000-0000-0000-0000-000000000004",
-        feature_id="feature-user-add",
-        action="add",
-        state="pending",
-        review_mode="require_review",
-        base_row_revision=None,
-        payload={
-            "kind": "place",
-            "name": "사용자 추가 장소",
-            "category": "01070300",
-            "coord": {"lon": 126.9769, "lat": 37.5759},
-            "marker_icon": "marker",
-            "marker_color": "P-01",
-            "detail": {"place_kind": "attraction"},
-        },
-        reason="사용자 추가 요청",
-        requested_by="requester",
-        reviewed_by="admin",
-        reviewed_at=_NOW,
-        applied_at=None,
-        created_at=_NOW,
-    )
-    feature_uuid = "00000000-0000-4000-8000-000000000004"
-    monkeypatch.setattr(repo, "candidate_feature_uuid", lambda: feature_uuid)
-    session = _Session(
-        [
-            _Result(
-                [
-                    {
-                        "o_feature_id": request.feature_id,
-                        "o_feature_uuid": feature_uuid,
-                        "o_row_revision": 1,
-                        "o_inserted": True,
-                    }
-                ]
-            ),
-            _Result(),
-            _Result(),
-        ]
-    )
-
-    await repo._apply_change(
-        session,  # type: ignore[arg-type]
-        request,
-        operator="admin",
-    )
-
-    assert "feature.create_feature_with_initial_state" in session.calls[0]["statement"]
-    create_payload = json.loads(session.calls[0]["params"]["feature_payload"])
-    assert not (
-        {
-            "status",
-            "data_origin",
-            "data_version",
-            "user_change_kind",
-            "user_change_status",
-            "user_change_request_id",
-            "user_change_reason",
-            "user_deleted_at",
-            "user_deleted_by",
-        }
-        & create_payload.keys()
-    )
-    assert "INSERT INTO feature.feature_places" in session.calls[1]["statement"]
-    provenance = session.calls[2]
-    assert "feature.materialize_user_feature_change_provenance" in provenance["statement"]
-    assert provenance["params"] == {
-        "feature_id": request.feature_id,
-        "change_kind": "add",
-        "request_id": request.request_id,
-        "reason": request.reason,
-        "operator": "admin",
-        "expected_row_revision": 1,
-    }
-
-
-@pytest.mark.asyncio
-async def test_user_update_keeps_t36_input_write_and_calls_narrow_provenance_writer() -> None:
-    request = repo.FeatureChangeRequest(
-        request_id="00000000-0000-0000-0000-000000000004",
-        feature_id="feature-user-update",
-        action="update",
-        state="approved",
-        review_mode="immediate",
-        base_row_revision=11,
-        payload={"name": "사용자 수정 이름"},
-        reason="사용자 제보 반영",
-        requested_by="requester",
-        reviewed_by="admin",
-        reviewed_at=_NOW,
-        applied_at=None,
-        created_at=_NOW,
-    )
-    session = _Session(
-        [
-            _Result(
-                [
-                    {
-                        "feature_id": request.feature_id,
-                        "feature_uuid": "00000000-0000-4000-8000-000000000004",
-                        "kind": "place",
-                        "row_revision": 12,
-                    }
-                ]
-            ),
-            _Result(),
-        ]
-    )
-
-    await repo._apply_change(
-        session,  # type: ignore[arg-type]
-        request,
-        operator="admin",
-    )
-
-    ordinary_update = session.calls[0]
-    assert "UPDATE feature.features" in ordinary_update["statement"]
-    assert "user_change_" not in ordinary_update["statement"]
-    assert "user_deleted_" not in ordinary_update["statement"]
-    provenance = session.calls[1]
-    assert "feature.materialize_user_feature_change_provenance" in provenance["statement"]
-    assert provenance["params"] == {
-        "feature_id": request.feature_id,
-        "change_kind": "update",
-        "request_id": request.request_id,
-        "reason": request.reason,
-        "operator": "admin",
-        "expected_row_revision": 12,
-    }
-
-
-@pytest.mark.asyncio
-async def test_user_update_requires_typed_provenance_receipt_before_any_write() -> None:
-    request = repo.FeatureChangeRequest(
-        request_id="00000000-0000-0000-0000-000000000005",
-        feature_id="feature-user-update-receipt",
-        action="update",
-        state="approved",
-        review_mode="immediate",
-        base_row_revision=11,
-        payload={"name": "사용자 수정 이름"},
-        reason=None,
-        requested_by="requester",
-        reviewed_by="admin",
-        reviewed_at=_NOW,
-        applied_at=None,
-        created_at=_NOW,
-    )
-    session = _Session([])
-
-    with pytest.raises(ValueError, match="provenance"):
-        await repo._apply_change(
-            session,  # type: ignore[arg-type]
-            request,
-            operator="admin",
-        )
-
-    assert session.calls == []
-
 
 def test_dedup_row_mapping() -> None:
     item = repo._dedup_review_row(_dedup_row())

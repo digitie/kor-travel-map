@@ -115,7 +115,6 @@ function FeatureDetailPanel({
     const sources = adminDetailQuery.data?.data.sources ?? [];
     return Array.from(new Set(sources.map((source) => source.provider))).sort();
   }, [adminDetailQuery.data]);
-  const dataOrigin = adminDetailQuery.data?.data.feature.data_origin ?? null;
 
   return (
     <Card
@@ -201,12 +200,6 @@ function FeatureDetailPanel({
                 ) : (
                   <span className="text-muted-foreground">없음</span>
                 )}
-              </dd>
-              <dt className="text-muted-foreground">data_origin</dt>
-              <dd>
-                {adminDetailQuery.isError
-                  ? "조회 실패"
-                  : (dataOrigin ?? "없음")}
               </dd>
             </dl>
             <details>

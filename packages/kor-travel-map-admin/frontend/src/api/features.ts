@@ -364,7 +364,7 @@ export const FEATURE_KINDS = [
 ] as const;
 export type FeatureKind = (typeof FEATURE_KINDS)[number];
 
-// ── admin feature 목록/비활성화 (`/v1/admin/features`) ───────────────────────
+// ── admin feature 목록/typed field override (`/v1/admin/features`) ───────────
 
 type AdminFeaturesListQuery = NonNullable<
   paths["/v1/admin/features"]["get"]["parameters"]["query"]
@@ -407,41 +407,14 @@ export type AdminFeatureStateTransitionAuditRecord =
   FeatureSchemas["AdminFeatureStateTransitionAuditRecord"];
 export type AdminFeatureStateTransitionsResponse =
   FeatureSchemas["AdminFeatureStateTransitionsResponse"];
-
-type AdminFeatureChangeListQuery = NonNullable<
-  paths["/v1/admin/features/change-requests"]["get"]["parameters"]["query"]
->;
-
-export type AdminFeatureChangeStatus = Exclude<
-  NonNullable<AdminFeatureChangeListQuery["status"]>[number],
-  null | undefined
->;
-export type AdminFeatureChangeAction = Exclude<
-  NonNullable<AdminFeatureChangeListQuery["action"]>[number],
-  null | undefined
->;
-export type AdminFeatureChangeRecord =
-  FeatureSchemas["AdminFeatureChangeRequestRecord"];
-export type AdminFeatureChangeListResponse =
-  FeatureSchemas["AdminFeatureChangeListResponse"];
-export type AdminFeatureChangeResponse =
-  FeatureSchemas["AdminFeatureChangeResponse"];
+export type AdminFeatureFieldOverrideResponse =
+  FeatureSchemas["AdminFeatureFieldOverrideResponse"];
 export type AdminFeatureCreateRequest =
   FeatureSchemas["AdminFeatureCreateRequest"];
 export type AdminFeaturePatchRequest =
   FeatureSchemas["AdminFeaturePatchRequest"];
 export type AdminFeatureDeleteRequest =
   FeatureSchemas["AdminFeatureDeleteRequest"];
-export type AdminFeatureReviewActionRequest =
-  FeatureSchemas["AdminFeatureReviewActionRequest"];
-export type AdminFeatureChangeListParams = Omit<
-  AdminFeatureChangeListQuery,
-  "action" | "q" | "status"
-> & {
-  action?: AdminFeatureChangeAction[];
-  q?: string;
-  status?: AdminFeatureChangeStatus[];
-};
 
 function fetchAdminFeatureDetail(
   featureId: string,
@@ -607,30 +580,15 @@ function fetchAdminFeatureStateTransitions(
   );
 }
 
-function fetchAdminFeatureChangeRequests(
-  params: AdminFeatureChangeListParams = {},
-  signal?: AbortSignal,
-): Promise<AdminFeatureChangeListResponse> {
-  return getJson<AdminFeatureChangeListResponse>(
-    pathWithQuery("/v1/admin/features/change-requests", {
-      status: params.status,
-      action: params.action,
-      q: params.q,
-      page_size: params.page_size,
-    }),
-    { signal },
-  );
-}
-
 function createAdminFeature(
   body: AdminFeatureCreateRequest,
-): Promise<AdminFeatureChangeResponse> {
+): Promise<AdminFeatureFieldOverrideResponse> {
   const operation = "admin.feature.create";
   return withDomainIdempotencySubmission(
     domainCreateCommandSlot(operation),
     body,
     (submission, idempotencyKey) =>
-      postJson<AdminFeatureChangeResponse>("/v1/admin/features", submission, {
+      postJson<AdminFeatureFieldOverrideResponse>("/v1/admin/features", submission, {
         headers: { "Idempotency-Key": idempotencyKey },
       }),
     { onRelease: () => clearDomainCreateCommandSlot(operation) },
@@ -641,12 +599,12 @@ export function patchAdminFeature(
   featureId: string,
   entityTag: string,
   body: AdminFeaturePatchRequest,
-): Promise<AdminFeatureChangeResponse> {
+): Promise<AdminFeatureFieldOverrideResponse> {
   return withDomainIdempotencySubmission(
     domainCommandSlot("admin.feature.patch", featureId),
     { featureId, entityTag, body },
     (submission, idempotencyKey) =>
-      patchJson<AdminFeatureChangeResponse>(
+      patchJson<AdminFeatureFieldOverrideResponse>(
         `/v1/admin/features/${encodeURIComponent(submission.featureId)}`,
         submission.body,
         {
@@ -663,12 +621,12 @@ export function deleteAdminFeature(
   featureId: string,
   entityTag: string,
   body: AdminFeatureDeleteRequest,
-): Promise<AdminFeatureChangeResponse> {
+): Promise<AdminFeatureStateResponse> {
   return withDomainIdempotencySubmission(
     domainCommandSlot("admin.feature.delete", featureId),
     { featureId, entityTag, body },
     (submission, idempotencyKey) =>
-      deleteJson<AdminFeatureChangeResponse>(
+      deleteJson<AdminFeatureStateResponse>(
         `/v1/admin/features/${encodeURIComponent(submission.featureId)}`,
         submission.body,
         {
@@ -677,42 +635,6 @@ export function deleteAdminFeature(
             "If-Match": submission.entityTag,
           },
         },
-      ),
-  );
-}
-
-function approveAdminFeatureChangeRequest(
-  requestId: string,
-  body: AdminFeatureReviewActionRequest,
-): Promise<AdminFeatureChangeResponse> {
-  return withDomainIdempotencySubmission(
-    domainCommandSlot("admin.feature-change.approve", requestId),
-    { requestId, body },
-    (submission, idempotencyKey) =>
-      postJson<AdminFeatureChangeResponse>(
-        `/v1/admin/features/change-requests/${encodeURIComponent(
-          submission.requestId,
-        )}/approve`,
-        submission.body,
-        { headers: { "Idempotency-Key": idempotencyKey } },
-      ),
-  );
-}
-
-function rejectAdminFeatureChangeRequest(
-  requestId: string,
-  body: AdminFeatureReviewActionRequest,
-): Promise<AdminFeatureChangeResponse> {
-  return withDomainIdempotencySubmission(
-    domainCommandSlot("admin.feature-change.reject", requestId),
-    { requestId, body },
-    (submission, idempotencyKey) =>
-      postJson<AdminFeatureChangeResponse>(
-        `/v1/admin/features/change-requests/${encodeURIComponent(
-          submission.requestId,
-        )}/reject`,
-        submission.body,
-        { headers: { "Idempotency-Key": idempotencyKey } },
       ),
   );
 }
@@ -791,21 +713,10 @@ export function useAdminFeatureStateTransitions(featureId: string | null) {
   });
 }
 
-export function useAdminFeatureChangeRequests(
-  params: AdminFeatureChangeListParams = {},
-) {
-  return useQuery<AdminFeatureChangeListResponse, Error>({
-    queryKey: ["admin-feature-changes", params],
-    queryFn: ({ signal }) => fetchAdminFeatureChangeRequests(params, signal),
-    staleTime: 15_000,
-  });
-}
-
-function invalidateFeatureChangeQueries(
+function invalidateAdminFeatureQueries(
   queryClient: ReturnType<typeof useQueryClient>,
   featureId?: string,
 ) {
-  void queryClient.invalidateQueries({ queryKey: ["admin-feature-changes"] });
   void queryClient.invalidateQueries({ queryKey: ["admin-features"] });
   void queryClient.invalidateQueries({ queryKey: ["features"] });
   if (featureId) {
@@ -813,26 +724,32 @@ function invalidateFeatureChangeQueries(
     void queryClient.invalidateQueries({
       queryKey: ["admin-feature-detail", featureId],
     });
+    void queryClient.invalidateQueries({
+      queryKey: ["admin-feature-correction-basis", featureId],
+    });
+    void queryClient.invalidateQueries({
+      queryKey: ["admin-feature-state-transitions", featureId],
+    });
   }
 }
 
 export function useCreateAdminFeatureMutation() {
   const queryClient = useQueryClient();
   return useMutation<
-    AdminFeatureChangeResponse,
+    AdminFeatureFieldOverrideResponse,
     Error,
     AdminFeatureCreateRequest
   >({
     mutationFn: createAdminFeature,
     onSuccess: (data) =>
-      invalidateFeatureChangeQueries(queryClient, data.data.request.feature_id),
+      invalidateAdminFeatureQueries(queryClient, data.data.feature_id),
   });
 }
 
 export function usePatchAdminFeatureMutation() {
   const queryClient = useQueryClient();
   return useMutation<
-    AdminFeatureChangeResponse,
+    AdminFeatureFieldOverrideResponse,
     Error,
     {
       featureId: string;
@@ -843,9 +760,9 @@ export function usePatchAdminFeatureMutation() {
     mutationFn: ({ featureId, entityTag, body }) =>
       patchAdminFeature(featureId, entityTag, body),
     onSuccess: (data, variables) =>
-      invalidateFeatureChangeQueries(
+      invalidateAdminFeatureQueries(
         queryClient,
-        data.data.request.feature_id || variables.featureId,
+        data.data.feature_id || variables.featureId,
       ),
   });
 }
@@ -853,7 +770,7 @@ export function usePatchAdminFeatureMutation() {
 export function useDeleteAdminFeatureMutation() {
   const queryClient = useQueryClient();
   return useMutation<
-    AdminFeatureChangeResponse,
+    AdminFeatureStateResponse,
     Error,
     {
       featureId: string;
@@ -864,37 +781,9 @@ export function useDeleteAdminFeatureMutation() {
     mutationFn: ({ featureId, entityTag, body }) =>
       deleteAdminFeature(featureId, entityTag, body),
     onSuccess: (data, variables) =>
-      invalidateFeatureChangeQueries(
+      invalidateAdminFeatureQueries(
         queryClient,
-        data.data.request.feature_id || variables.featureId,
+        data.data.feature_id || variables.featureId,
       ),
-  });
-}
-
-export function useApproveAdminFeatureChangeMutation() {
-  const queryClient = useQueryClient();
-  return useMutation<
-    AdminFeatureChangeResponse,
-    Error,
-    { requestId: string; body: AdminFeatureReviewActionRequest }
-  >({
-    mutationFn: ({ requestId, body }) =>
-      approveAdminFeatureChangeRequest(requestId, body),
-    onSuccess: (data) =>
-      invalidateFeatureChangeQueries(queryClient, data.data.request.feature_id),
-  });
-}
-
-export function useRejectAdminFeatureChangeMutation() {
-  const queryClient = useQueryClient();
-  return useMutation<
-    AdminFeatureChangeResponse,
-    Error,
-    { requestId: string; body: AdminFeatureReviewActionRequest }
-  >({
-    mutationFn: ({ requestId, body }) =>
-      rejectAdminFeatureChangeRequest(requestId, body),
-    onSuccess: (data) =>
-      invalidateFeatureChangeQueries(queryClient, data.data.request.feature_id),
   });
 }

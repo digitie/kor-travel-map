@@ -202,14 +202,11 @@ function makeAdminFeatureDetailResponse(
 ): AdminFeatureDetailResponse {
   return {
     data: {
-      change_requests: [],
       curations: [makeAdminCuration()],
       feature: {
         address: { road: "세종대로 110" },
         category: "01070300",
         created_at: MOCK_UPDATED_AT,
-        data_origin: "provider",
-        data_version: 1,
         detail: { source: "e2e-admin-mock" },
         feature_id: FEATURE_ID,
         kind: "place",
@@ -230,7 +227,6 @@ function makeAdminFeatureDetailResponse(
       overrides: [],
       sources: [makeAdminSource()],
       state_transitions: [],
-      versions: [],
     },
     meta: makeMeta({ request_id: "e2e-admin-feature-detail" }),
   };

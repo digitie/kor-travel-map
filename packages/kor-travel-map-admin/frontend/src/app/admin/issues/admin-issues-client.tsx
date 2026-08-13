@@ -80,7 +80,6 @@ function buildActionBody(
 ): AdminIssuePatchRequest {
   return {
     action,
-    prevent_provider_reactivation: true,
     reason: `admin-ui ${action}`,
     ...patch,
   };

@@ -2,7 +2,7 @@
 -- tvn34c-post-cutover-invariants-v1.sql — T-VN-34C / T-VN-36 경계 contract
 -- =============================================================================
 -- 이 파일은 0096에서 T-VN-34C final migration까지 적용한 직후에 실행한다.
--- `target-schema-v1.sql`은 T-VN-36C/T-VN-39 이후 UUID final state이므로 이 중간
+-- `target-schema-v1.sql`은 T-VN-36D/T-VN-39 이후 UUID final state이므로 이 중간
 -- schema를 그 파일과 비교하지 않는다. 각 assertion은 count(*)=0이어야 하며 trailer는
 -- target invariant와 같은 `-- expect: 0 -- phase: post-cutover` 형식이다.
 -- =============================================================================

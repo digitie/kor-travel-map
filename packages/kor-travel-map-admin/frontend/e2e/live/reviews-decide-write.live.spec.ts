@@ -48,6 +48,23 @@ type BrowserFetchResult<T> = {
   text: string;
 };
 
+// T-VN-36D가 whole-row freeze(`data_version`)를 물리 삭제했으므로 "결정이 feature
+// 행을 건드리지 않았다"의 증인은 server-owned `row_revision`이다. review DTO는 그것을
+// 노출하지 않으므로 admin detail에서 읽는다 — 어떤 UPDATE든 트리거가 +1 하므로
+// 전후 동일은 "행이 전혀 갱신되지 않았다"와 같은 뜻이다.
+async function featureRowRevision(
+  page: Page,
+  featureId: string,
+): Promise<number | null> {
+  const detail = await browserFetch<AdminFeatureDetailResponse>(
+    page,
+    `/v1/admin/features/${encodeURIComponent(featureId)}`,
+  );
+  return detail.status === 200
+    ? (detail.body?.data.feature.row_revision ?? null)
+    : null;
+}
+
 const UI_TIMEOUT = 15_000;
 const FLOW_TIMEOUT = 5 * 60 * 1000;
 const T = { timeout: UI_TIMEOUT } as const;
@@ -438,7 +455,7 @@ test.describe("dedup + enrichment reviews — real reject decision (gated)", () 
       detailPath(DEDUP, reviewId),
     );
     expect(before.status).toBe(200);
-    const beforeVersion = before.body?.data.feature_a.data_version ?? null;
+    const beforeRevision = await featureRowRevision(page, featureAId);
     const beforeUpdatedAt = before.body?.data.feature_a.updated_at ?? null;
 
     // pending을 넓게(200) 노출해 대상 행을 화면에 띄운다.
@@ -486,14 +503,14 @@ test.describe("dedup + enrichment reviews — real reject decision (gated)", () 
       }, T)
       .toBe(false);
 
-    // 상세 status=rejected + feature(A) data_version/updated_at 불변.
+    // 상세 status=rejected + feature(A) row_revision/updated_at 불변.
     const after = await browserFetch<DedupReviewDetailResponse>(
       page,
       detailPath(DEDUP, reviewId),
     );
     expect(after.status).toBe(200);
     expect(after.body?.data.status).toBe("rejected");
-    expect(after.body?.data.feature_a.data_version ?? null).toBe(beforeVersion);
+    expect(await featureRowRevision(page, featureAId)).toBe(beforeRevision);
     expect(after.body?.data.feature_a.updated_at ?? null).toBe(beforeUpdatedAt);
 
     // 추가 불변 확인: feature 자체는 삭제/병합되지 않았다.
@@ -557,7 +574,7 @@ test.describe("dedup + enrichment reviews — real reject decision (gated)", () 
       detailPath(ENRICHMENT, reviewId),
     );
     expect(before.status).toBe(200);
-    const beforeVersion = before.body?.data.target.data_version ?? null;
+    const beforeRevision = await featureRowRevision(page, targetFeatureId);
     const beforeSources = before.body?.data.target.sources.length ?? null;
 
     const sizeWait = waitForListQuery(page, ENRICHMENT.listPath, {
@@ -601,14 +618,14 @@ test.describe("dedup + enrichment reviews — real reject decision (gated)", () 
       }, T)
       .toBe(false);
 
-    // 상세 status=rejected + target feature(version/sources) 불변.
+    // 상세 status=rejected + target feature(row_revision/sources) 불변.
     const after = await browserFetch<EnrichmentReviewDetailResponse>(
       page,
       detailPath(ENRICHMENT, reviewId),
     );
     expect(after.status).toBe(200);
     expect(after.body?.data.status).toBe("rejected");
-    expect(after.body?.data.target.data_version ?? null).toBe(beforeVersion);
+    expect(await featureRowRevision(page, targetFeatureId)).toBe(beforeRevision);
     expect(after.body?.data.target.sources.length ?? null).toBe(beforeSources);
 
     // 추가 불변 확인: 1차 feature 자체는 삭제/병합되지 않았다.
@@ -932,10 +949,10 @@ test.describe("dedup + enrichment reviews — 상세 비교 다이얼로그 필�
     if (typeof body.data.distance_m === "number") {
       await expect(dialog).toContainText(fmtDistance(body.data.distance_m));
     }
-    // feature 별 kind/origin(+category) 필드 노출. review DTO는 공개 상태 축을 노출하지 않는다.
+    // feature 별 kind(+category) 필드 노출. review DTO는 공개 상태 축을 노출하지 않고,
+    // T-VN-36D가 `data_origin`을 물리 삭제하면서 "출처" DetailMetric도 함께 사라졌다.
     for (const f of [a, b]) {
       await expect(dialog).toContainText(f.kind);
-      await expect(dialog).toContainText(f.data_origin);
       if (f.category) await expect(dialog).toContainText(f.category);
       // 좌표 — 숫자일 때만 toFixed(6)으로 노출.
       if (typeof f.lon === "number") {
@@ -1053,7 +1070,7 @@ test.describe("dedup + enrichment reviews — real accept decision (gated)", () 
       detailPath(DEDUP, reviewId),
     );
     expect(before.status).toBe(200);
-    const beforeVersion = before.body?.data.feature_a.data_version ?? null;
+    const beforeRevision = await featureRowRevision(page, featureAId);
     const beforeUpdatedAt = before.body?.data.feature_a.updated_at ?? null;
 
     const sizeWait = waitForListQuery(page, DEDUP.listPath, {
@@ -1100,14 +1117,14 @@ test.describe("dedup + enrichment reviews — real accept decision (gated)", () 
       }, T)
       .toBe(false);
 
-    // 상세 status=accepted + feature(A) data_version/updated_at 불변.
+    // 상세 status=accepted + feature(A) row_revision/updated_at 불변.
     const after = await browserFetch<DedupReviewDetailResponse>(
       page,
       detailPath(DEDUP, reviewId),
     );
     expect(after.status).toBe(200);
     expect(after.body?.data.status).toBe("accepted");
-    expect(after.body?.data.feature_a.data_version ?? null).toBe(beforeVersion);
+    expect(await featureRowRevision(page, featureAId)).toBe(beforeRevision);
     expect(after.body?.data.feature_a.updated_at ?? null).toBe(beforeUpdatedAt);
 
     const feature = await browserFetch<AdminFeatureDetailResponse>(

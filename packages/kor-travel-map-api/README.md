@@ -113,7 +113,6 @@ shadcn/ui generated source + `@kor-travel-map/map-marker-react` (ADR-029). 자�
 | `KOR_TRAVEL_MAP_API_RESTORE_DAGSTER_DB` | `kor_travel_map_dagster_restore` | staging restore Dagster DB 기본값 |
 | `KOR_TRAVEL_MAP_API_RESTORE_RUSTFS_VOLUME` | `kor-travel-map-rustfs-restore` | staging restore RustFS volume 기본값 |
 | `KOR_TRAVEL_MAP_API_FRONTEND_DIST` | (auto) | static export 모드 시 `frontend/out/` 경로 |
-| `KOR_TRAVEL_MAP_API_FEATURE_CHANGE_REVIEW_MODE` | `require_review` | place/event feature 추가·수정·삭제 요청 처리 모드. `require_review` 또는 `immediate` |
 
 Ops service principal의 감사 actor는 코드 상수 `service:pinvi`다. actor 설정 env는 없으며,
 제거된 `KOR_TRAVEL_MAP_API_OPS_ACTOR`가 존재하면 API가 시작을 거부한다.

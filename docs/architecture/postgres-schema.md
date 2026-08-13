@@ -7,6 +7,12 @@ table/column/index/constraint를 한눈에. 자세한 의미·근거·인덱스 
 > 본 문서는 **참조 카드**다. DDL 원본은 `docs/architecture/data-model.md`. 둘이 충돌하면
 > `data-model.md`가 정답.
 
+> **T-VN-36 final head 주의**: 아래의 `data_origin`/`data_version`,
+> `feature.feature_versions`, `ops.feature_change_requests` 설명은 T-VN-36D 이전 bridge의
+> 이력이다. final schema에서는 모두 물리 삭제됐고, field registry·provider base lineage·active
+> `ops.feature_overrides`가 effective 값의 유일한 정본이다. executable 확인은
+> `contracts/vnext/tvn36-post-cutover-invariants-v1.sql`과 Alembic `0104`를 따른다.
+
 ## 1. 환경 / 확장
 
 | 항목 | 값 |

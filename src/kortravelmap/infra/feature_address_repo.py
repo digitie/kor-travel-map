@@ -11,10 +11,18 @@ commit은 호출자 책임 — 본 모듈 함수는 commit하지 않는다(호�
 from __future__ import annotations
 
 import json
+import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Final
 
 from sqlalchemy import text
+
+from kortravelmap.infra.domain_command_repo import (
+    canonical_domain_command_fingerprint,
+    create_domain_command_claim,
+    create_domain_command_record,
+    lock_domain_command,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -55,7 +63,7 @@ class FeatureAddressOverrideResult:
 
 
 _SNAPSHOT_COLUMNS: Final[str] = (
-    "feature_id, "
+    "feature_id, row_revision, "
     "x_extension.ST_X(coord) AS lon, x_extension.ST_Y(coord) AS lat, "
     "address, legal_dong_code, sido_code, sigungu_code, "
     "road_address_management_no, lifecycle_state, publication_state, quality_state"
@@ -74,14 +82,14 @@ WHERE feature_id = :feature_id
 FOR UPDATE
 """
 
-# feature.features 좌표는 항상 4326으로 적재 (ADR-012 — 술어 ST_Transform 금지,
-# coord_5179은 generated column이 자동 채움).
-_COORD_SET_FRAGMENT: Final[str] = (
-    "coord = x_extension.ST_SetSRID("
-    "x_extension.ST_MakePoint("
-    "CAST(:lon AS double precision), CAST(:lat AS double precision)"
-    "), 4326)"
+_AUTHOR_FEATURE_FIELD_OVERRIDES_SQL: Final[str] = """
+CALL feature.author_feature_field_overrides(
+    CAST(:feature_id AS text), CAST(:expected_row_revision AS bigint),
+    CAST(:principal AS text), CAST(:reason_code AS text),
+    CAST(:command_id AS bigint), CAST(:values AS jsonb),
+    CAST(:geometry_wkt AS jsonb), NULL, NULL, NULL, NULL
 )
+"""
 
 def _json_dict(value: Any) -> dict[str, Any]:
     if isinstance(value, str):
@@ -136,23 +144,31 @@ async def apply_feature_address_override(
     road_address_management_no: str | None = None,
     reason: str | None = None,
     operator: str | None = None,
-    prevent_provider_reactivation: bool = True,
 ) -> FeatureAddressOverrideResult | None:
-    """feature 주소/좌표를 덮어쓴다.
+    """주소/좌표 path만 typed field override command로 author한다.
+
+    effective core/subtype에 raw UPDATE를 하지 않는다. 외부 HTTP command replay와
+    별개로 field author command receipt를 같은 transaction에 남긴다.
 
     제공된(``None``이 아닌) 필드만 갱신한다. 좌표는 ``lon``/``lat`` 둘 다 주어야
-    한다. T-VN-34A는 runtime의 범용 ``ops.feature_overrides`` DML을 폐쇄한다.
-    lifecycle 외 field override는 T-VN-36 effective projection writer가 단일화할
-    때까지 이 경로에서 새로 만들지 않는다. feature가 없으면 ``None``(라우터에서
-    404). 변경할 필드가 하나도 없으면 ``ValueError``. commit은 호출자 책임.
+    한다. feature가 없으면 ``None``(라우터에서 404). 변경할 필드가 하나도 없으면
+    ``ValueError``. commit은 호출자 책임.
 
-    ``prevent_provider_reactivation``은 **현재 무효다.** override row를 아예 만들지
-    않으므로 켜든 끄든 동작이 같다. API/프론트가 계속 이 값을 보내고 있어 시그니처를
-    지우지 않았지만(계약을 깨면 PinVi 재vendoring까지 번진다), 살아 있는 제어처럼
-    읽히면 안 된다 — 운영자는 "provider 재적재로부터 잠갔다"고 믿는데 실제로는
-    아무것도 잠기지 않는다. T-VN-36이 field override provenance를 되살릴 때 이 인자를
-    **의식적으로** 다시 배선해야 하고, 그 전까지는 무효라는 사실을
-    ``test_address_override_reactivation_flag_is_inert_until_tvn36``가 고정한다.
+    ``prevent_provider_reactivation`` 인자는 T-VN-36에서 **제거**했다. T-VN-34A가
+    이 경로의 범용 override DML을 폐쇄하며 인자를 무효로 만들었고
+    ``test_address_override_reactivation_flag_is_inert_until_tvn36``가 그 사실을
+    고정해, T-VN-36이 field override를 되살릴 때 배선 여부를 **의식적으로**
+    마주치게 했다. 답은 "배선하지 않는다"다 — 재적재 가드
+    (``feature_repo`` reingest/lifecycle 판정)는 둘 다
+    ``field_path = 'lifecycle_state'``로 한정되므로 이 플래그는 lifecycle 축
+    전용 제어이고 주소/좌표 override에는 의미가 없다. 주소 보정이 provider
+    재적재로부터 보호되는 근거는 이 플래그가 아니라
+    ``feature.apply_provider_feature_field_patch``가 active override를
+    masking한다는 것이다(``test_tvn36_registry_base_lineage_and_override_type_fence``).
+    죽은 인자를 남겨두면 운영자는 "잠갔다"고 믿는데 실제 보호 근거는 다른 곳에
+    있다는 오해가 그대로 남으므로, admin-issues 요청 필드까지 함께 걷어냈다.
+    lifecycle 축 제어가 필요한 경로는 ``feature.author_lifecycle_override``를
+    통해 계속 이 플래그를 받는다.
     """
     if lon is None and lat is None:
         coord_update = False
@@ -172,8 +188,7 @@ async def apply_feature_address_override(
     if not has_mutation:
         raise ValueError("덮어쓸 주소/좌표 필드가 최소 1개 필요함")
 
-    # Feature 행 lock은 core write의 TOCTOU를 막는다. generic override write는
-    # T-VN-36 소유라 여기서 재도입하지 않는다.
+    # procedure도 같은 core lock을 재사용하여 stale write를 fail-close한다.
     locked = (
         await session.execute(
             text(_LOCK_SNAPSHOT_SQL),
@@ -182,45 +197,85 @@ async def apply_feature_address_override(
     ).one_or_none()
     if locked is None:
         return None
-    set_fragments: list[str] = ["updated_at = now()"]
-    params: dict[str, Any] = {"feature_id": feature_id}
+    values: dict[str, Any] = {}
+    geometry_wkt: dict[str, str | None] = {}
     overridden_fields: list[str] = []
 
     if address is not None:
-        set_fragments.append("address = CAST(:address AS jsonb)")
-        params["address"] = _dumps(dict(address))
+        values["core.address"] = dict(address)
         overridden_fields.append("address")
     if coord_update:
-        set_fragments.append(_COORD_SET_FRAGMENT)
-        params["lon"] = lon
-        params["lat"] = lat
+        assert lon is not None
+        assert lat is not None
+        geometry_wkt["core.coord"] = f"POINT({lon} {lat})"
+        values["core.coord_precision_digits"] = 6
         overridden_fields.append("coord")
     if legal_dong_code is not None:
-        set_fragments.append("legal_dong_code = :legal_dong_code")
-        params["legal_dong_code"] = legal_dong_code
+        values["core.legal_dong_code"] = legal_dong_code
         overridden_fields.append("legal_dong_code")
     if sido_code is not None:
-        set_fragments.append("sido_code = :sido_code")
-        params["sido_code"] = sido_code
+        values["core.sido_code"] = sido_code
         overridden_fields.append("sido_code")
     if sigungu_code is not None:
-        set_fragments.append("sigungu_code = :sigungu_code")
-        params["sigungu_code"] = sigungu_code
+        values["core.sigungu_code"] = sigungu_code
         overridden_fields.append("sigungu_code")
     if road_address_management_no is not None:
-        set_fragments.append(
-            "road_address_management_no = :road_address_management_no"
-        )
-        params["road_address_management_no"] = road_address_management_no
+        values["core.road_address_management_no"] = road_address_management_no
         overridden_fields.append("road_address_management_no")
 
-    update_sql = (
-        "UPDATE feature.features SET "
-        + ", ".join(set_fragments)
-        + " WHERE feature_id = :feature_id "
-        + f"RETURNING {_SNAPSHOT_COLUMNS}"
+    principal = (operator or "system:address-override").strip()
+    reason_code = (reason or "address_override").strip()
+    if not principal or not reason_code:
+        raise ValueError("주소 override에는 authenticated operator와 reason이 필요합니다.")
+    operation = "admin.feature.override.author"
+    command_key = str(uuid.uuid4())
+    command_payload = {
+        "feature_id": feature_id,
+        "values": values,
+        "geometry_wkt": geometry_wkt,
+        "reason_code": reason_code,
+    }
+    await lock_domain_command(
+        session,
+        actor=principal,
+        operation=operation,
+        idempotency_key=command_key,
     )
-    updated_row = (await session.execute(text(update_sql), params)).one()
+    claim = await create_domain_command_claim(
+        session,
+        actor=principal,
+        operation=operation,
+        idempotency_key=command_key,
+        request_fingerprint=canonical_domain_command_fingerprint(command_payload),
+    )
+    updated = (
+        await session.execute(
+            text(_AUTHOR_FEATURE_FIELD_OVERRIDES_SQL),
+            {
+                "feature_id": feature_id,
+                "expected_row_revision": int(locked.row_revision),
+                "principal": principal,
+                "reason_code": reason_code,
+                "command_id": claim.command_id,
+                "values": _dumps(values),
+                "geometry_wkt": _dumps(geometry_wkt),
+            },
+        )
+    ).mappings().one()
+    await create_domain_command_record(
+        session,
+        command_id=claim.command_id,
+        response_status=200,
+        response_body={
+            "feature_id": str(updated["o_feature_id"]),
+            "row_revision": int(updated["o_row_revision"]),
+            "overridden_fields": overridden_fields,
+        },
+        response_headers={},
+    )
+    updated_row = (
+        await session.execute(text(_GET_SNAPSHOT_SQL), {"feature_id": feature_id})
+    ).one()
     snapshot = _row_to_snapshot(updated_row)
 
     return FeatureAddressOverrideResult(

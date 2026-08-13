@@ -1,6 +1,26 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
 ## 2026-08-13 — T-VN-34 머지 대기: 적대 검토 3라운드 반영 완료
+## 2026-08-13 — T-VN-36: 새 T-VN-34 base 재배치 완료, 영향성 gate 재실행
+
+**다음 한 작업**: `feat/tvn36-abcd-field-overrides`를 이 재배치 head로 force-push한 뒤,
+사용자 판단이 필요한 두 건(아래)을 정리하고 T-VN-40/T-VN-41 재base와 PinVi pair 재고정을
+잇는다. PR은 아직 열지 않는다.
+
+- base는 `feat/tvn34-state-model` `693c5355`이고 T-VN-36 고유 24 commit만 다시 얹었다.
+  alembic은 `0104_tvn36_final_fence` 단일 head, migration graph/OpenAPI/contract SHA는
+  재생성했다.
+- T-VN-34에서 확립한 결함 부류를 전수로 걸어 notice reconcile SQL의 죽은 projection,
+  override procedure arity 미추종, 죽은 오류 매핑, ledger operation 이름 붕괴, 정적
+  차단선의 세대 누락, frontend type-check/lint red를 닫았다. 상세는 journal 2026-08-13.
+- **남은 판단 2건**: ① `scripts/admin_feature_live_fixture.py` +
+  `scripts/run-admin-feature-clone-live-acceptance.sh`는 여전히 whole-row change
+  request/version 모델 위에 서 있어 `0104` head에서 실행 불가다(정적 unit 계약만 있고
+  실행 gate가 없어 green으로 보인다). ② `0027` re-key 정리의 `data_origin='user_request'`
+  제외 가드는 head 동등 술어가 없어 재현하지 않기로 했다.
+- PinVi pair 재고정과 n150 live는 이 재배치 head에서 아직 다시 실행하지 않았다.
+
+## 2026-08-10 — T-VN-34C: fresh live gate 실행 대기
 
 **다음 한 작업**: PR #972를 CI green 후 merge commit으로 머지한다. 그 뒤 T-VN-36을 새
 main으로 재리베이스하되 alembic revision 번호 충돌을 먼저 푼다 — T-VN-34가
@@ -76,6 +96,83 @@ consumer receipt 영향도를 다시 확인한다. 새 T-VN-34 consumer pair는 
   rebase tree에서 재동결·재실행했다.
 - user/admin-detail vendor bytes는 같은 Map source에서 deterministic 재추출·PinVi contract
   pin-consistency로 검증했고, full admin OpenAPI digest만 receipt에서 갱신했다.
+## 2026-08-10 — T-VN-36 A–D 단일 PR: field override 설계 착수
+
+**다음 한 작업**: provider/admin/user/address/phone/notice normal writer와 admin typed
+field override HTTP command를 registry receipt로 전환했다. 이제 detail/read/frontend를
+effective override provenance로 교체하고 whole-row request/version bridge를 물리 제거한다.
+## 2026-08-10 — T-VN-36 A–D 단일 PR: final destructive fence 구현·n150 gate 준비
+## 2026-08-11 — T-VN-36: T-VN-34 rebase 반영
+
+**다음 한 작업**: T-VN-40·T-VN-41을 이 rebase head 위로 각각 재base하고, schema/OpenAPI/
+PinVi pair와 Docker manager contract 영향도를 점검한다. T-VN-36 paired receipt는 Map
+`c1fa5a4d` ↔ PinVi `8f7fef1`로 갱신했다.
+
+- Alembic graph는 T-VN-33/T-VN-38 merge revision 뒤 T-VN-34 `0095`~`0097`, T-VN-36
+  `0098`~`0104` 순으로 단일 head다.
+- target catalog와 admin OpenAPI freeze는 current final-fence schema에서 다시 계산했고,
+  final-fence 통합·target freeze·PinVi user/admin-detail contract gate를 재실행했다.
+
+## 2026-08-10 — T-VN-36 A–D 단일 PR: final destructive fence·n150 fresh live 완료
+
+**다음 한 작업**: T-VN-36 A–D의 destructive completion gate와 요청된
+`T-VN-33 → T-VN-38 → T-VN-34 → T-VN-36` rebase chain을 완료했다. 현재 체인은
+T-VN-33 `5f2e1c85` → T-VN-38 `acfb6ed2` → T-VN-34 `73ced83a` → T-VN-36
+`48cb08ac`(functional Map source)이며, n150 실행 source `f7e2e04e`와
+`48cb08ac`은 동일 patch-id다. PinVi `6ab4eaf`와 새 Map SHA를 receipt에 재고정했고,
+fixed-base integration은 TVN34C bridge를 전용 `0096→0097` gate로, TVN36D final fence를
+head gate로 분리해 검증한다.
+
+- `0104_tvn36_final_fence`는 `data_origin`/`data_version`, `feature_versions`,
+  `feature_change_requests`, replay/materializer procedure와 request receipt/index를 forward-only로
+  삭제한다. provider/admin은 field registry·base lineage·active override만 정본으로 쓴다.
+- `contracts/vnext/tvn36-post-cutover-invariants-v1.sql`과 dedicated head integration이 final
+  relation/column/catalog zero를 검사한다. 0096→0097 bridge와 혼동하지 않는다.
+- n150에서 Playwright가 실행되지 않았던 직접 원인은 browser image가 아니라, isolated runner가
+  생성한 ops read/cancel/fixture token을 API container environment에 전달하지 않아 API가 startup
+  validation에서 종료된 것이었다. 이후 create request의 `coord` object를 DB procedure allowlist의
+  `lon`/`lat`로 평탄화했고, final fresh Playwright는 auth setup과 destructive state scenario 2/2를
+  통과했다.
+- final live spec은 더 이상 change-request 승인/버전 snapshot에 의존하지 않고 browser BFF를 통해
+  Feature 생성 → publication suppress → retire → audit timeline → cleanup을 실제 strong ETag로 검증한다.
+- `consumer-rollout-v1.json`의 T-VN-36 receipt는 user vendor와 admin detail subset의 SHA-256을
+  source archive와 대조한다. user/service 표면은 무변경이며 admin-detail subset은 재추출했다.
+
+- base는 T-VN-34C 완료 head `b03d5a4f`이다. `data_origin`/`data_version`, `feature_versions`,
+  whole-row request receipt는 T-VN-36D가 제거하며 T-VN-34 C head에는 남아 있다.
+- logical A–D는 하나의 forward-only Draft PR/release로만 병합한다. base ledger와 typed effective
+  storage는 compatibility dual-write가 아니라 하나의 field-level 정본이다.
+- `0098_tvn36_override_lineage`는 64 path registry, provider base ledger, override provenance,
+  runtime direct-DML deny와 state-owner type/source validation을 구현했다. provider/admin/user
+  writer와 destructive legacy 삭제는 아직 이 logical phase에 포함하지 않았다.
+- `0099_tvn36_provider_field_patch`는 provider source head/link lock 아래 base ledger와
+  effective core/subtype을 한 transaction에서 갱신한다. active field override는 새 base만
+  남기고 effective 값을 유지하며, runtime LOGIN에서 raw DML 없이 procedure를 실행하는
+  catalog receipt까지 통과했다.
+- `0100_tvn36_override_cmds`는 open domain-command claim과 expected revision을 확인하는
+  author/revoke command를 추가했다. author는 superseded override를 revoke tombstone으로
+  보전하고 operator typed 값을 materialize하며, revoke는 locked provider base로만 복원한다.
+  runtime은 두 procedure 실행만 허용되고 direct override/base DML은 계속 금지된다.
+- provider writer는 더 이상 raw core/subtype UPDATE나 `data_origin` whole-row CASE를 쓰지
+  않는다. 새/기존 bundle 모두 source link와 typed subtype을 확보한 뒤
+  `apply_provider_feature_field_patch`가 base/effective 값을 한 transaction에서 물화한다.
+  nullable 좌표, area/route multi geometry, first-probe notice 시각도 이 경계에서 검증했다.
+- admin/user add·update request도 `user.feature.override.author` claim과
+  `author_feature_field_overrides` procedure로만 effective path를 바꾼다. raw core UPDATE와
+  legacy user version materializer는 새 쓰기 흐름에서 제거했고, provider-owned detail source
+  path는 fail-closed로 거부한다. delete는 ADR-090 lifecycle override만 계속 사용한다.
+- `0103_tvn36_freeze_replay`는 retained applied request/version을 정확한 historical
+  payload와 request 순서로 override history에 이관한다. preflight manifest가 unmapped 또는
+  비정상 row를 발견하면 migration head를 전진시키지 않는다. address/좌표 writer도
+  `author_feature_field_overrides`만 호출하며 raw effective UPDATE를 하지 않는다.
+- phone enrichment의 `place.phones`도 system domain-command receipt와 typed override로
+  author한다. notice lifecycle reconciliation도 `notice.valid_end_time`을 current
+  provider source와 Feature revision을 다시 확인한 base patch로만 물화한다. Python
+  normal writer의 direct effective core/subtype UPDATE는 0건이다.
+- admin field override author/revoke endpoint는 existing HTTP domain-command claim의 exact
+  `command_id`를 DB procedure에 전달한다. `If-Match`/ETag, registry validation, operator
+  route policy와 idempotent replay를 한 contract로 묶었으며, snapshot retirement·notice
+  candidate/purge의 `data_origin` predicate도 source-link/lifecycle semantics로 제거했다.
 
 ## 2026-08-10 — T-VN-34C: n150 fresh destructive live gate 통과
 

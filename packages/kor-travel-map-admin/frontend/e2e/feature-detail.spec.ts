@@ -33,8 +33,6 @@ function makeFeature(
     address: { road: "서울특별시 영등포구 여의공원로 120" },
     category: "01070300",
     created_at: "2026-06-01T00:00:00.000Z",
-    data_origin: "provider",
-    data_version: 3,
     detail: { place_kind: "park" },
     feature_id: FEATURE_ID,
     kind: "place",
@@ -61,7 +59,6 @@ function makeDetailResponse(
 ): AdminFeatureDetailResponse {
   return {
     data: {
-      change_requests: [],
       curations: [],
       feature,
       files: [],
@@ -69,7 +66,6 @@ function makeDetailResponse(
       overrides: [],
       sources: [],
       state_transitions: [],
-      versions: [],
     },
     meta,
   };
@@ -165,11 +161,12 @@ test.describe("/features/[featureId]", () => {
     await expect(page.getByText("coord", { exact: true })).toBeVisible();
     // 메인 섹션 타이틀(detail view scope — 헤더 nav의 동명 링크 'Issues'와 구분).
     const detailView = page.getByTestId("feature-detail-view");
+    // T-VN-36: whole-row 변경 이력 패널("History")이 사라지고 notice 전용
+    // "Notice History"만 남았다.
     for (const section of [
       "Sources",
       "Issues",
       "Overrides",
-      "History",
       "Files",
       "Map",
     ]) {

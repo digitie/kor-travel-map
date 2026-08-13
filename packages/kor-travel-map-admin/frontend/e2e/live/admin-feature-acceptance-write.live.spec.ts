@@ -1,35 +1,26 @@
-import {
-  expect,
-  test,
-  type Page,
-  type Request,
-  type Response,
-} from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { createHash } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import path from "node:path";
 
-import { expectDetailPanelAboveScaleControl } from "../map-control-assertions";
 import type { components } from "../../src/api/types";
 
-type ChangeResponse = components["schemas"]["AdminFeatureChangeResponse"];
-type ChangeListResponse =
-  components["schemas"]["AdminFeatureChangeListResponse"];
-type DetailResponse = components["schemas"]["AdminFeatureDetailResponse"];
-type FeatureSearchProblem = components["schemas"]["FeatureSearchProblem"];
-type FeatureSearchResponse = components["schemas"]["FeatureSearchResponse"];
-type InBoundsResponse = components["schemas"]["AdminFeaturesInBoundsResponse"];
-type PublicInBoundsResponse = components["schemas"]["FeaturesInBoundsResponse"];
-type PriceResponse = components["schemas"]["FeaturePriceResponse"];
-type RevisionResponse = components["schemas"]["AdminFeatureRevisionResponse"];
-type WeatherResponse = components["schemas"]["FeatureWeatherResponse"];
+type AdminFeatureDetailResponse =
+  components["schemas"]["AdminFeatureDetailResponse"];
+type AdminFeatureFieldOverrideResponse =
+  components["schemas"]["AdminFeatureFieldOverrideResponse"];
+type AdminFeatureRevisionResponse =
+  components["schemas"]["AdminFeatureRevisionResponse"];
+type AdminFeatureStateResponse =
+  components["schemas"]["AdminFeatureStateResponse"];
+type AdminFeatureStateTransitionsResponse =
+  components["schemas"]["AdminFeatureStateTransitionsResponse"];
+type AdminFeaturesListResponse =
+  components["schemas"]["AdminFeaturesListResponse"];
 
 type FetchResult<T> = {
   body: T | null;
-  contentType: string | null;
   entityTag: string | null;
-  failureClass: "api-problem" | "json" | "non-json";
-  problemCode: string | null;
   status: number;
 };
 
@@ -41,169 +32,25 @@ type BrowserFetchOptions = {
 
 const FLOW_TIMEOUT = 5 * 60 * 1000;
 const UI_TIMEOUT = 30_000;
-const RUN_ID_PATTERN = /^[a-z0-9][a-z0-9-]{15,79}$/;
 const RUN_ID = process.env.E2E_ADMIN_FEATURE_ACCEPTANCE_RUN_ID ?? "";
 const EXECUTE = process.env.E2E_ADMIN_FEATURE_ACCEPTANCE_WRITE === "1";
 const RECOVERY_ONLY =
   process.env.E2E_ADMIN_FEATURE_ACCEPTANCE_RECOVERY_ONLY === "1";
 const ISOLATED_EVIDENCE = process.env.E2E_ISOLATED_LIVE_EVIDENCE === "1";
 const ARTIFACT_ROOT = process.env.PLAYWRIGHT_ARTIFACT_ROOT;
-let lastBrowserFetchStatus: number | null = null;
-let lastBrowserFetchFailureClass: "api-problem" | "json" | "non-json" | null =
-  null;
-let lastBrowserFetchProblemCode: string | null = null;
-let failureDetail: string | null = null;
-// base 좌표는 고정한다. weather/price/correction/search fixture는 이 base에서 파생되고,
-// weather/price는 orchestrator의 seeding helper(scripts/admin_feature_live_fixture.py의
-// `_LON=127.5`/`_LAT=36.5` 고정)가 물리 seed하며 spec은 API in-bounds/search로 featureId·
-// query 기반 단언한다. 따라서 이들 좌표를 옮기면 helper seed 위치와 desync돼 in-bounds가
-// 빈 결과가 된다(2026-07-27 c7-v6 live 재현). base 고정으로 helper·API 단언과 동기를 유지한다.
+const RUN_ID_PATTERN = /^[a-z0-9][a-z0-9-]{15,79}$/;
 const LON = 127.5;
 const LAT = 36.5;
-// **상태 marker 좌표만** RUN_ID 해시로 run-unique jitter한다: 이전 run이 cleanup 전에
-// 죽으면 동일 3축·동일 좌표의 leftover place feature가 현재 run과 0.000° 거리로 client-side
-// supercluster에 묶여 개별 marker aria-label이 사라진다(적대 리뷰 P2, T-VN-H12). run별
-// cleanup은 RUN_ID-scoped라 이 cross-run 충돌을 못 막으므로 좌표를 분리한다. 상태 marker만
-// map marker로 렌더·클릭 단언되므로(assertStateMarker) jitter를 STATE_FEATURES에 국한한다 —
-// weather/price/correction/search는 marker 클릭이 아니라 featureId/query 단언이라 supercluster
-// 문제가 없고 base 동기가 우선이다. 파생은 결정론적(sha256(RUN_ID), SEARCH_TOKEN과 동일 패턴)이라
-// RECOVERY_ONLY 재파생과 일관되며 cleanup은 featureId 기반이라 좌표 무관. 진폭 ±0.25°는
-// base(대전 근처)를 한국 본토 bbox [124,132]×[33,39.5](ADR-012) 중심부에 유지해 create 좌표
-// 검증·recenter viewport 마진을 확보하면서 cross-run 충돌 확률을 무시할 수준(≲1e-4)으로 낮춘다.
-const COORD_JITTER_SEED = createHash("sha256")
-  .update(`acceptance-coord:${RUN_ID}`)
-  .digest();
-const COORD_JITTER_DEG = 0.25;
-function coordJitter(byteOffset: number): number {
-  const unit = COORD_JITTER_SEED.readUInt32BE(byteOffset) / 0xffffffff;
-  return (unit * 2 - 1) * COORD_JITTER_DEG;
-}
-const STATUS_MARKER_LON = LON + coordJitter(0);
-const STATUS_MARKER_LAT = LAT + coordJitter(4);
+const FIXTURE_NAME = `E2E TVN36 state fixture ${RUN_ID}`;
+const REASON = `tvn36-live-${RUN_ID}`;
+
+let lastBrowserFetchStatus: number | null = null;
 
 if (EXECUTE && !RUN_ID_PATTERN.test(RUN_ID)) {
   throw new Error(
     "E2E_ADMIN_FEATURE_ACCEPTANCE_RUN_ID 형식이 올바르지 않습니다 (value redacted)",
   );
 }
-
-const PREFIX = `e2e_live_acceptance::${RUN_ID}`;
-
-function makeLegacyFeatureId(
-  kind: string,
-  category: string,
-  sourceType: string,
-  sourceNaturalKey: string,
-): string {
-  const digest = createHash("sha1")
-    .update(
-      `global|${kind}|${category}|${sourceType}|${sourceNaturalKey}|`,
-      "utf8",
-    )
-    .digest("hex")
-    .slice(0, 16);
-  return `f_global_${kind[0]}_${digest}`;
-}
-
-// live fixture는 arbitrary text primary key를 만들지 않는다. API의 legacy-ref
-// resolver도 production writer와 같은 ``f_*`` identity만 재해석하므로, browser와
-// direct fixture 모두 이 deterministic source identity를 공유해야 한다.
-function adminFixtureFeatureId(role: string): string {
-  const logicalId = `${PREFIX}::${role}`;
-  const idempotencyKey = createHash("sha256")
-    .update(logicalId, "utf8")
-    .digest("hex");
-  return makeLegacyFeatureId(
-    "place",
-    "01070300",
-    "user_request",
-    idempotencyKey,
-  );
-}
-
-function providerFixtureFeatureId(kind: "weather" | "price"): string {
-  return makeLegacyFeatureId(
-    kind,
-    "00000000",
-    "e2e-live-acceptance",
-    `${RUN_ID}:${kind}`,
-  );
-}
-
-const STATE_FIXTURES = [
-  { lifecycleState: "active", publicationState: "draft", stateLabel: "draft" },
-  {
-    lifecycleState: "retired",
-    publicationState: "suppressed",
-    stateLabel: "retired",
-  },
-  {
-    lifecycleState: "active",
-    publicationState: "suppressed",
-    stateLabel: "suppressed",
-  },
-] as const;
-const STATE_FEATURES = STATE_FIXTURES.map((state, index) => ({
-  featureId: adminFixtureFeatureId(`marker::${state.stateLabel}`),
-  lat: STATUS_MARKER_LAT + index * 0.001,
-  lon: STATUS_MARKER_LON + index * 0.001,
-  name: `E2E ${state.stateLabel} marker ${RUN_ID}`,
-  qualityState: "valid" as const,
-  ...state,
-}));
-const CORRECTION_FEATURE = {
-  featureId: adminFixtureFeatureId("correction"),
-  lat: LAT - 0.002,
-  lon: LON,
-  name: `E2E correction baseline ${RUN_ID}`,
-};
-const WEATHER_FEATURE = {
-  featureId: providerFixtureFeatureId("weather"),
-  lat: LAT,
-  lon: LON + 0.002,
-  name: `E2E suppressed weather ${RUN_ID}`,
-};
-const PRICE_FEATURE = {
-  featureId: providerFixtureFeatureId("price"),
-  lat: LAT,
-  lon: LON - 0.002,
-  name: `E2E suppressed price ${RUN_ID}`,
-};
-// 검색 fixture 전용 토큰은 RUN_ID의 해시 파생값을 쓴다: /v1/features/search는
-// pg_trgm similarity(threshold 0.2) 기반이라, 쿼리에 RUN_ID 원문(수십 자)을
-// 넣으면 같은 run의 다른 active fixture(correction baseline — 이름에 동일
-// RUN_ID 포함)까지 trigram 매칭돼 total=2 단언이 3으로 깨진다(1f34586e live
-// 재현으로 확정). 해시 토큰은 run-scoped 유일성은 유지하면서 다른 fixture
-// 이름과 긴 공유 substring이 없어 fuzzy 검색과 격리된다. RECOVERY_ONLY도
-// 같은 RUN_ID env에서 동일 토큰을 재파생하므로 cleanup 대칭이 유지된다.
-// 32-hex slice: 16-hex는 cross-run 조합 1.4%에서 공유 'e2esrch' 워드 트라이그램
-// 때문에 threshold 0.2를 스칠 수 있다(적대 리뷰 20k-pair 실측; 32-hex는 0%,
-// max 0.176). 잔존 fixture는 구조적으로 금지되지만 마진을 확보한다.
-const SEARCH_TOKEN = createHash("sha256")
-  .update(`acceptance-search:${RUN_ID}`)
-  .digest("hex")
-  .slice(0, 32);
-const SEARCH_QUERY = `e2esrch ${SEARCH_TOKEN}`;
-const SEARCH_FEATURES = ["alpha", "beta"].map((suffix, index) => ({
-  featureId: adminFixtureFeatureId(`search::${suffix}`),
-  lat: LAT + 0.004 + index * 0.001,
-  lon: LON + 0.004 + index * 0.001,
-  name: `${SEARCH_QUERY} ${suffix}`,
-  suffix,
-  lifecycleState: "active" as const,
-  publicationState: "published" as const,
-  qualityState: "valid" as const,
-  stateLabel: "public",
-}));
-const API_OWNED_FEATURE_IDS = [
-  ...STATE_FEATURES.map(({ featureId }) => featureId),
-  CORRECTION_FEATURE.featureId,
-  ...SEARCH_FEATURES.map(({ featureId }) => featureId),
-];
-const REASON = `admin feature live acceptance ${RUN_ID}`;
-const responseFeatureIds = new Map<string, string>();
-
-test.describe.configure({ mode: "serial" });
 
 function adminFeaturePath(featureId: string): string {
   return `/v1/admin/features/${encodeURIComponent(featureId)}`;
@@ -217,62 +64,11 @@ function publicFeaturePath(featureId: string): string {
   return `/v1/features/${encodeURIComponent(featureId)}`;
 }
 
-function changeActionPath(
-  requestId: string,
-  action: "approve" | "reject",
-): string {
-  return `/v1/admin/features/change-requests/${encodeURIComponent(
-    requestId,
-  )}/${action}`;
-}
-
-async function responseFeatureId(
-  page: Page,
-  legacyFeatureId: string,
-  label: string,
-): Promise<string> {
-  const cached = responseFeatureIds.get(legacyFeatureId);
-  if (cached !== undefined) return cached;
-
-  const detail = requireBody(
-    await browserFetch<DetailResponse>(page, adminFeaturePath(legacyFeatureId)),
-    `${label} detail`,
-  ).data.feature;
-  const featureId = detail.feature_id;
-  expect(detail.feature_uuid).toBe(featureId);
-  if (featureId === legacyFeatureId) {
-    throw new Error(
-      `${label} 응답 feature_id가 UUID 정본으로 치환되지 않았습니다`,
-    );
-  }
-  responseFeatureIds.set(legacyFeatureId, featureId);
-  return featureId;
-}
-
-function responseApiPath(response: Response): string {
-  const pathname = new URL(response.url()).pathname;
-  const path = pathname.startsWith("/api/proxy/")
-    ? pathname.slice("/api/proxy".length)
-    : pathname;
-  return decodeURIComponent(path);
-}
-
-function requestApiPath(request: Request): string {
-  const pathname = new URL(request.url()).pathname;
-  const path = pathname.startsWith("/api/proxy/")
-    ? pathname.slice("/api/proxy".length)
-    : pathname;
-  return decodeURIComponent(path);
-}
-
-function commandIdempotencyKey(
+function idempotencyKey(
   method: NonNullable<BrowserFetchOptions["method"]>,
   path: string,
   body: unknown,
 ): string {
-  // 같은 live E2E run에서 같은 write를 다시 시도하면 durable command ledger가
-  // 응답을 재생해야 한다. body/path/method hash를 RFC 4122 v4 형식으로 바꿔
-  // 매 요청의 identity를 분리하면서 재시도 안정성을 유지한다.
   const digest = createHash("sha256")
     .update(JSON.stringify({ body, method, path }), "utf8")
     .digest("hex");
@@ -292,20 +88,14 @@ async function browserFetch<T>(
   options: BrowserFetchOptions = {},
 ): Promise<FetchResult<T>> {
   const method = options.method ?? "GET";
-  const idempotencyKey =
-    method === "GET"
-      ? undefined
-      : commandIdempotencyKey(method, path, options.body);
   const result = await page.evaluate(
-    async ({ body, headers, idempotencyKey, method, path }) => {
+    async ({ body, headers, key, method, path }) => {
       const response = await fetch(`/api/proxy${path}`, {
         method,
         headers: {
           Accept: "application/json",
           ...headers,
-          ...(idempotencyKey === undefined
-            ? {}
-            : { "Idempotency-Key": idempotencyKey }),
+          ...(key === null ? {} : { "Idempotency-Key": key }),
           ...(body === undefined ? {} : { "Content-Type": "application/json" }),
         },
         credentials: "same-origin",
@@ -315,64 +105,27 @@ async function browserFetch<T>(
       const text = await response.text();
       let parsed: unknown = null;
       try {
-        parsed = text.length > 0 ? JSON.parse(text) : null;
+        parsed = text.length === 0 ? null : JSON.parse(text);
       } catch {
         parsed = null;
       }
-      const contentType = response.headers.get("Content-Type");
-      const failureClass: FetchResult<T>["failureClass"] =
-        contentType?.startsWith("application/problem+json")
-          ? "api-problem"
-          : contentType?.startsWith("application/json")
-            ? "json"
-            : "non-json";
-      const problemCode =
-        parsed !== null &&
-        typeof parsed === "object" &&
-        "code" in parsed &&
-        typeof parsed.code === "string" &&
-        /^[A-Z_]{3,64}$/.test(parsed.code)
-          ? parsed.code
-          : null;
       return {
-        body: parsed as T | null,
-        contentType,
+        body: parsed,
         entityTag: response.headers.get("ETag"),
-        failureClass,
-        problemCode,
         status: response.status,
       };
     },
     {
       body: options.body,
       headers: options.headers,
-      idempotencyKey,
+      key:
+        method === "GET" ? null : idempotencyKey(method, path, options.body),
       method,
       path,
     },
   );
   lastBrowserFetchStatus = result.status;
-  lastBrowserFetchFailureClass = result.failureClass;
-  lastBrowserFetchProblemCode = result.problemCode;
-  return result;
-}
-
-function writeSafeFailureStage(stage: string): void {
-  if (!ISOLATED_EVIDENCE || ARTIFACT_ROOT === undefined) return;
-  try {
-    writeFileSync(
-      path.join(ARTIFACT_ROOT, "admin-feature-acceptance-safe-debug.json"),
-      `${JSON.stringify({
-        last_browser_fetch_failure_class: lastBrowserFetchFailureClass,
-        last_browser_fetch_problem_code: lastBrowserFetchProblemCode,
-        last_browser_fetch_status: lastBrowserFetchStatus,
-        stage: failureDetail ?? stage,
-      })}\n`,
-      { encoding: "utf8", mode: 0o600 },
-    );
-  } catch {
-    // 진단 evidence 실패가 원래 browser failure를 가리면 안 된다.
-  }
+  return result as FetchResult<T>;
 }
 
 function requireBody<T>(result: FetchResult<T>, label: string): T {
@@ -390,1053 +143,203 @@ function requireEntityTag<T>(result: FetchResult<T>, label: string): string {
   return result.entityTag;
 }
 
-async function approveOrReject(
-  page: Page,
-  requestId: string,
-  action: "approve" | "reject",
-  reason: string,
-): Promise<ChangeResponse> {
-  const result = await browserFetch<ChangeResponse>(
-    page,
-    changeActionPath(requestId, action),
-    { body: { reason }, method: "POST" },
-  );
-  return requireBody(result, `${action} change request`);
-}
-
-async function createOwnedPlace(
-  page: Page,
-  fixture: {
-    featureId: string;
-    lat: number;
-    lon: number;
-    name: string;
-    lifecycleState: "active" | "retired";
-    publicationState: "draft" | "published" | "suppressed";
-    qualityState: "valid" | "quarantined";
-    stateLabel: string;
-  },
-): Promise<void> {
-  if (RECOVERY_ONLY) {
-    throw new Error("recovery-only는 Feature를 생성할 수 없습니다");
-  }
-  // Browser 실패 증적은 의도적으로 HTTP body를 보존하지 않는다. 대신 create와
-  // review 승인을 분리해 기록하면, 안전한 4xx 코드만으로도 어느 DB command
-  // 경계가 실패했는지 재현 가능하다.
-  failureDetail = `create-${fixture.stateLabel}:submit`;
-  const create = await browserFetch<ChangeResponse>(
-    page,
-    "/v1/admin/features",
-    {
-      body: {
-        category: "01070300",
-        coord: { lat: fixture.lat, lon: fixture.lon },
-        feature_id: fixture.featureId,
-        idempotency_key: createHash("sha256")
-          .update(fixture.featureId, "utf8")
-          .digest("hex"),
-        kind: "place",
-        marker_color: "P-02",
-        marker_icon: "marker",
-        name: fixture.name,
-        lifecycle_state: fixture.lifecycleState,
-        publication_state: fixture.publicationState,
-        quality_state: fixture.qualityState,
-        reason: `${REASON} create ${fixture.stateLabel}`,
-      },
-      method: "POST",
-    },
-  );
-  const created = requireBody(create, `create ${fixture.stateLabel}`).data.request;
-  if (created.status !== "pending") {
-    throw new Error("production review mode가 require_review가 아닙니다");
-  }
-  failureDetail = `create-${fixture.stateLabel}:approve`;
-  const approved = await approveOrReject(
-    page,
-    created.request_id,
-    "approve",
-    `${REASON} approve ${fixture.stateLabel}`,
-  );
-  if (approved.data.request.status !== "applied") {
-    throw new Error(`create ${fixture.stateLabel} 승인이 applied가 아닙니다`);
-  }
-  failureDetail = `create-${fixture.stateLabel}:detail`;
-  const detail = requireBody(
-    await browserFetch<DetailResponse>(
-      page,
-      adminFeaturePath(fixture.featureId),
-    ),
-    `created ${fixture.stateLabel} detail`,
-  );
-  const featureId = detail.data.feature.feature_id;
-  expect(detail.data.feature.feature_uuid).toBe(featureId);
-  responseFeatureIds.set(fixture.featureId, featureId);
-  expect(detail.data.feature).toMatchObject({
-    feature_id: featureId,
-    name: fixture.name,
-    lifecycle_state: fixture.lifecycleState,
-    publication_state: fixture.publicationState,
-    quality_state: fixture.qualityState,
-  });
-}
-
-async function pendingOwnedRequests(
-  page: Page,
-): Promise<ChangeListResponse["data"]["items"]> {
-  const query = new URLSearchParams({
-    page_size: "500",
-    q: RUN_ID,
-    status: "pending",
-  });
-  return requireBody(
-    await browserFetch<ChangeListResponse>(
-      page,
-      `/v1/admin/features/change-requests?${query.toString()}`,
-    ),
-    "pending owned change requests",
-  ).data.items.filter((item) =>
-    API_OWNED_FEATURE_IDS.includes(item.feature_id),
-  );
-}
-
-async function cleanupApiOwnedFeatures(page: Page): Promise<void> {
-  const firstPending = await pendingOwnedRequests(page);
-  for (const request of firstPending) {
-    const action = request.action === "delete" ? "approve" : "reject";
-    const result = await approveOrReject(
-      page,
-      request.request_id,
-      action,
-      `${REASON} recovery ${action}`,
-    );
-    const expected = action === "approve" ? "applied" : "rejected";
-    if (result.data.request.status !== expected) {
-      throw new Error(
-        `pending ${request.action} recovery가 ${expected}가 아닙니다`,
-      );
-    }
-  }
-
-  for (const featureId of API_OWNED_FEATURE_IDS) {
-    const detail = await browserFetch<DetailResponse>(
-      page,
-      adminFeaturePath(featureId),
-    );
-    if (detail.status === 404) continue;
-    const current = requireBody(detail, "cleanup detail").data.feature;
-    const responseId = current.feature_id;
-    expect(current.feature_uuid).toBe(responseId);
-    responseFeatureIds.set(featureId, responseId);
-    if (current.lifecycle_state !== "retired") {
-      const revision = await browserFetch<RevisionResponse>(
-        page,
-        revisionPath(responseId),
-      );
-      const entityTag = requireEntityTag(revision, "cleanup revision");
-      const deletion = await browserFetch<ChangeResponse>(
-        page,
-        adminFeaturePath(responseId),
-        {
-          body: { reason: `${REASON} cleanup delete` },
-          headers: { "If-Match": entityTag },
-          method: "DELETE",
-        },
-      );
-      const deleteRequest = requireBody(deletion, "cleanup DELETE").data
-        .request;
-      if (deleteRequest.status === "pending") {
-        const approved = await approveOrReject(
-          page,
-          deleteRequest.request_id,
-          "approve",
-          `${REASON} cleanup approve delete`,
-        );
-        if (approved.data.request.status !== "applied") {
-          throw new Error("cleanup delete 승인이 applied가 아닙니다");
-        }
-      } else if (deleteRequest.status !== "applied") {
-        throw new Error("cleanup DELETE가 종결되지 않았습니다");
-      }
-    }
-
-    await expect
-      .poll(
-        async () => {
-          const latest = await browserFetch<DetailResponse>(
-            page,
-            adminFeaturePath(responseId),
-          );
-          return (
-            latest.body?.data.feature.lifecycle_state ?? `http:${latest.status}`
-          );
-        },
-        { timeout: UI_TIMEOUT },
-      )
-      .toBe("retired");
-    expect(
-      (await browserFetch(page, publicFeaturePath(responseId))).status,
-    ).toBe(404);
-  }
-
-  const remainingPending = await pendingOwnedRequests(page);
-  if (remainingPending.length !== 0) {
-    throw new Error("owned pending change request가 cleanup 뒤 남았습니다");
-  }
-  const searchAfterCleanup = requireBody(
-    await browserFetch<FeatureSearchResponse>(
-      page,
-      `/v1/features/search?${new URLSearchParams({
-        include_total: "true",
-        page_size: "1",
-        q: SEARCH_QUERY,
-      }).toString()}`,
-    ),
-    "owned search fixture cleanup",
-  );
-  expect(searchAfterCleanup.data.items).toEqual([]);
-  expect(searchAfterCleanup.meta.page).toBeDefined();
-  expect(searchAfterCleanup.meta.page?.total).toBe(0);
-  expect(searchAfterCleanup.meta.page?.next_cursor ?? null).toBeNull();
-}
-
-async function assertPublicInBoundsExcludes(
-  page: Page,
-  featureId: string,
-  lon: number,
-  lat: number,
-): Promise<void> {
-  const params = new URLSearchParams({
-    max_items: "10",
-    max_lat: String(lat + 0.00001),
-    max_lon: String(lon + 0.00001),
-    min_lat: String(lat - 0.00001),
-    min_lon: String(lon - 0.00001),
-    zoom: "16",
-  });
-  const result = requireBody(
-    await browserFetch<PublicInBoundsResponse>(
-      page,
-      `/v1/features/in-bounds?${params.toString()}`,
-    ),
-    "public in-bounds",
-  );
-  expect(result.data.mode).toBe("items");
-  expect(result.data.truncated).toBe(false);
-  expect(result.data.coverage.returned).toBeLessThan(
-    result.data.coverage.limit,
-  );
-  expect(result.data.items.map((item) => item.feature_id)).not.toContain(
-    featureId,
-  );
-}
-
-function requiredSearchCursor(
-  response: FeatureSearchResponse,
-  label: string,
-): string {
-  const cursor = response.meta.page?.next_cursor;
-  if (typeof cursor !== "string" || cursor.length === 0) {
-    throw new Error(`${label} cursor가 없습니다 (value redacted)`);
-  }
-  return cursor;
-}
-
-function tamperCursorPayload(cursor: string): string {
-  const segments = cursor.split(".");
-  if (
-    segments.length !== 2 ||
-    segments[0].length === 0 ||
-    segments[1].length === 0
-  ) {
-    throw new Error(
-      "search cursor wire shape이 올바르지 않습니다 (value redacted)",
-    );
-  }
-  const first = segments[0][0];
-  const replacement = first === "A" ? "B" : "A";
-  return `${replacement}${segments[0].slice(1)}.${segments[1]}`;
-}
-
-async function assertSearchProblem(
-  page: Page,
-  params: URLSearchParams,
-  code: "CURSOR_QUERY_MISMATCH" | "FEATURE_SEARCH_CURSOR_TAMPERED",
-  forbiddenCursors: string[],
-): Promise<void> {
-  const result = await browserFetch<FeatureSearchProblem>(
-    page,
-    `/v1/features/search?${params.toString()}`,
-  );
-  expect(result.status).toBe(422);
-  expect(result.contentType?.startsWith("application/problem+json")).toBe(true);
-  if (result.body === null) {
-    throw new Error(
-      "feature search problem body가 없습니다 (response redacted)",
-    );
-  }
-  expect(result.body.code).toBe(code);
-  const serialized = JSON.stringify(result.body);
-  for (const cursor of forbiddenCursors) {
-    expect(serialized).not.toContain(cursor);
-  }
-}
-
-async function assertSearchCursorContract(page: Page): Promise<void> {
-  const owned = new Set(
-    await Promise.all(
-      SEARCH_FEATURES.map(({ featureId }) =>
-        responseFeatureId(page, featureId, "search fixture"),
-      ),
-    ),
-  );
-  const firstWithoutTotal = requireBody(
-    await browserFetch<FeatureSearchResponse>(
-      page,
-      `/v1/features/search?${new URLSearchParams({
-        include_total: "false",
-        page_size: "1",
-        q: SEARCH_QUERY,
-      }).toString()}`,
-    ),
-    "feature search without total first page",
-  );
-  expect(firstWithoutTotal.meta.page?.total).toBeNull();
-  expect(firstWithoutTotal.data.items).toHaveLength(1);
-  const firstWithoutTotalId = firstWithoutTotal.data.items[0].feature_id;
-  expect(owned.has(firstWithoutTotalId)).toBe(true);
-  const withoutTotalCursor = requiredSearchCursor(
-    firstWithoutTotal,
-    "without-total first page",
-  );
-
-  const secondWithoutTotal = requireBody(
-    await browserFetch<FeatureSearchResponse>(
-      page,
-      `/v1/features/search?${new URLSearchParams({
-        cursor: withoutTotalCursor,
-        include_total: "false",
-        page_size: "1",
-        q: SEARCH_QUERY,
-      }).toString()}`,
-    ),
-    "feature search without total continuation",
-  );
-  expect(secondWithoutTotal.meta.page?.total).toBeNull();
-  expect(secondWithoutTotal.data.items).toHaveLength(1);
-  expect(owned.has(secondWithoutTotal.data.items[0].feature_id)).toBe(true);
-  expect(secondWithoutTotal.data.items[0].feature_id).not.toBe(
-    firstWithoutTotalId,
-  );
-
-  const firstWithTotal = requireBody(
-    await browserFetch<FeatureSearchResponse>(
-      page,
-      `/v1/features/search?${new URLSearchParams({
-        include_total: "true",
-        page_size: "1",
-        q: SEARCH_QUERY,
-      }).toString()}`,
-    ),
-    "feature search with total first page",
-  );
-  expect(firstWithTotal.meta.page?.total).toBe(2);
-  expect(firstWithTotal.data.items).toHaveLength(1);
-  const firstWithTotalId = firstWithTotal.data.items[0].feature_id;
-  expect(owned.has(firstWithTotalId)).toBe(true);
-  const withTotalCursor = requiredSearchCursor(
-    firstWithTotal,
-    "with-total first page",
-  );
-
-  const secondWithTotal = requireBody(
-    await browserFetch<FeatureSearchResponse>(
-      page,
-      `/v1/features/search?${new URLSearchParams({
-        cursor: withTotalCursor,
-        include_total: "true",
-        page_size: "1",
-        q: SEARCH_QUERY,
-      }).toString()}`,
-    ),
-    "feature search with total continuation",
-  );
-  expect(secondWithTotal.meta.page?.total).toBe(2);
-  expect(secondWithTotal.data.items).toHaveLength(1);
-  expect(owned.has(secondWithTotal.data.items[0].feature_id)).toBe(true);
-  expect(secondWithTotal.data.items[0].feature_id).not.toBe(firstWithTotalId);
-
-  await assertSearchProblem(
-    page,
-    new URLSearchParams({
-      cursor: withoutTotalCursor,
-      include_total: "false",
-      page_size: "1",
-      q: `${SEARCH_QUERY} changed`,
-    }),
-    "CURSOR_QUERY_MISMATCH",
-    [withoutTotalCursor],
-  );
-  await assertSearchProblem(
-    page,
-    new URLSearchParams({
-      cursor: withoutTotalCursor,
-      include_total: "true",
-      page_size: "1",
-      q: SEARCH_QUERY,
-    }),
-    "CURSOR_QUERY_MISMATCH",
-    [withoutTotalCursor],
-  );
-  const tamperedCursor = tamperCursorPayload(withoutTotalCursor);
-  await assertSearchProblem(
-    page,
-    new URLSearchParams({
-      cursor: tamperedCursor,
-      include_total: "false",
-      page_size: "1",
-      q: SEARCH_QUERY,
-    }),
-    "FEATURE_SEARCH_CURSOR_TAMPERED",
-    [withoutTotalCursor, tamperedCursor],
-  );
-}
-
-async function assertAdminInBoundsIncludes(
-  page: Page,
-  fixture: { featureId: string; lat: number; lon: number },
-  kind: "price" | "weather",
-): Promise<void> {
-  const responseId = await responseFeatureId(
-    page,
-    fixture.featureId,
-    `${kind} fixture`,
-  );
-  const params = new URLSearchParams({
-    kind,
-    max_items: "100",
-    max_lat: String(fixture.lat + 0.0005),
-    max_lon: String(fixture.lon + 0.0005),
-    min_lat: String(fixture.lat - 0.0005),
-    min_lon: String(fixture.lon - 0.0005),
-    lifecycle_state: "active",
-    publication_state: "suppressed",
-    quality_state: "valid",
-    zoom: "16",
-  });
-  const result = requireBody(
-    await browserFetch<InBoundsResponse>(
-      page,
-      `/v1/admin/features/in-bounds?${params.toString()}`,
-    ),
-    "admin in-bounds",
-  );
-  expect(result.data.items.map((item) => item.feature_id)).toContain(
-    responseId,
-  );
-}
-
-type LiveMapState = { moving: boolean; zoom: number };
-
-async function readLiveMapState(page: Page): Promise<LiveMapState | null> {
-  return page.getByTestId("map-canvas-container").evaluate((node) => {
-    const map = (
-      node as HTMLDivElement & {
-        _maplibreMap?: { getZoom(): number; isMoving(): boolean };
-      }
-    )._maplibreMap;
-    return map === undefined
-      ? null
-      : { moving: map.isMoving(), zoom: map.getZoom() };
-  });
-}
-
-async function zoomMapTo(page: Page, targetZoom: number): Promise<void> {
-  const zoomIn = page.locator(".maplibregl-ctrl-zoom-in");
-  await expect(zoomIn).toBeVisible({ timeout: UI_TIMEOUT });
-  await expect
-    .poll(
-      async () => {
-        const state = await readLiveMapState(page);
-        return state === null ? "missing" : state.moving ? "moving" : "idle";
-      },
-      { timeout: UI_TIMEOUT },
-    )
-    .toBe("idle");
-
-  for (let click = 0; click < 12; click += 1) {
-    const before = (await readLiveMapState(page))?.zoom;
-    if (before === undefined) {
-      throw new Error("MapLibre 테스트 핸들을 찾을 수 없습니다.");
-    }
-    if (before >= targetZoom) break;
-
-    await zoomIn.click();
-    await expect
-      .poll(
-        async () => {
-          const state = await readLiveMapState(page);
-          return state !== null && !state.moving && state.zoom > before;
-        },
-        { timeout: UI_TIMEOUT },
-      )
-      .toBe(true);
-  }
-
-  await expect
-    .poll(
-      async () =>
-        (await readLiveMapState(page))?.zoom ?? Number.NEGATIVE_INFINITY,
-      { timeout: UI_TIMEOUT },
-    )
-    .toBeGreaterThanOrEqual(targetZoom);
-}
-
-// map center를 fixture 좌표로 옮긴다. /features는 viewport를 URL로 hydrate하지 않고
-// 앱 DEFAULT_VIEWPORT(127.5/36.5)로 시작하므로, 좌표를 run-unique jitter하면 fixture가
-// 기본 center에서 벗어나 z14 viewport 밖으로 나간다. 노출된 _maplibreMap 핸들
-// (readLiveMapState와 동일)에 jumpTo로 recenter해 이후 zoomMapTo가 fixture를 중심으로
-// 확대하도록 한다.
-async function recenterMapTo(
-  page: Page,
-  lon: number,
-  lat: number,
-): Promise<void> {
-  await expect
-    .poll(
-      () =>
-        page.getByTestId("map-canvas-container").evaluate(
-          (node, coord) => {
-            const map = (
-              node as HTMLDivElement & {
-                _maplibreMap?: {
-                  jumpTo(options: { center: [number, number] }): void;
-                };
-              }
-            )._maplibreMap;
-            if (map === undefined) {
-              return false;
-            }
-            map.jumpTo({ center: [coord.lon, coord.lat] });
-            return true;
-          },
-          { lon, lat },
-        ),
-      { timeout: UI_TIMEOUT },
-    )
-    .toBe(true);
-}
-
-async function assertStateMarker(
-  page: Page,
-  fixture: (typeof STATE_FEATURES)[number],
-): Promise<void> {
-  const responseId = await responseFeatureId(
-    page,
-    fixture.featureId,
-    `${fixture.stateLabel} marker`,
-  );
-  await page.goto("/features");
-  await expect(page.getByRole("heading", { name: "Feature 지도" })).toBeVisible(
-    {
-      timeout: UI_TIMEOUT,
-    },
-  );
-  // kind 필터를 place 하나로 격리한다. 기본 kind 필터는 weather·notice가 pressed이고
-  // place는 미press(DEFAULT_FEATURE_MAP_KINDS=["weather","notice"])다. 수정 전 코드는
-  // place를 켜기만 하고 기본 weather를 끄지 않아, 같은 run이 seed한 hidden weather
-  // feature(place 마커와 ~0.004° 거리)가 함께 렌더되고 z14대에서 client-side
-  // supercluster로 묶여 개별 place 마커의 aria-label이 사라졌다(2026-07-27 live 재현).
-  // place만 남기면 이 cross-kind 충돌이 사라진다. 동일 3축·동일 좌표의 cross-run
-  // leftover(죽은 run 잔여)는 어떤 줌으로도 decluster 불가하므로, 상태 marker 좌표를 RUN_ID
-  // 해시로 run-unique jitter(STATUS_MARKER_LON/LAT)하고 아래 recenterMapTo로 map을 fixture
-  // 좌표에 맞춰 공간 충돌 자체를 제거한다(T-VN-H12). jitter는 상태 marker에만 국한한다.
-  const kindGroup = page.getByTestId("kind-filter");
-  for (const toggle of await kindGroup.locator("button[aria-pressed]").all()) {
-    const name = (await toggle.textContent())?.trim();
-    const pressed = (await toggle.getAttribute("aria-pressed")) === "true";
-    if (name === "place") {
-      if (!pressed) {
-        await toggle.click();
-      }
-    } else if (pressed) {
-      await toggle.click();
-    }
-  }
-  await page
-    .getByLabel("수명주기 필터")
-    .selectOption(fixture.lifecycleState);
-  await page
-    .getByLabel("공개 상태 필터")
-    .selectOption(fixture.publicationState);
-  await page
-    .getByLabel("품질 상태 필터")
-    .selectOption(fixture.qualityState);
-  const inBoundsResponsePromise = page.waitForResponse(
-    async (response) => {
-      if (
-        response.request().method() !== "GET" ||
-        response.status() !== 200 ||
-        responseApiPath(response) !== "/v1/admin/features/in-bounds"
-      ) {
-        return false;
-      }
-      const params = new URL(response.url()).searchParams;
-      if (
-        params.get("lifecycle_state") !== fixture.lifecycleState ||
-        params.get("publication_state") !== fixture.publicationState ||
-        params.get("quality_state") !== fixture.qualityState ||
-        Number(params.get("zoom")) < 14
-      ) {
-        return false;
-      }
-      const body = (await response.json()) as InBoundsResponse;
-      return body.data.items.some((item) => item.feature_id === responseId);
-    },
-    { timeout: FLOW_TIMEOUT },
-  );
-  await recenterMapTo(page, fixture.lon, fixture.lat);
-  await zoomMapTo(page, 14);
-  const inBoundsResponse = await inBoundsResponsePromise;
-  expect(inBoundsResponse.status()).toBe(200);
-
-  const marker = page.getByLabel(`${fixture.name} (place)`, { exact: true });
-  await expect(marker).toBeVisible({ timeout: UI_TIMEOUT });
-  await marker.click();
-  const detail = page.getByTestId("feature-detail-panel");
-  await expect(detail).toContainText(fixture.name);
-  await expect(detail).toContainText(
-    fixture.publicationState === "draft"
-      ? "공개: 초안"
-      : fixture.lifecycleState === "retired"
-        ? "수명: 종료"
-        : "공개: 비공개",
-  );
-  await expectDetailPanelAboveScaleControl(page, "feature-detail-panel");
-
-  expect((await browserFetch(page, publicFeaturePath(responseId))).status).toBe(
-    404,
-  );
-  await assertPublicInBoundsExcludes(
-    page,
-    responseId,
-    fixture.lon,
-    fixture.lat,
-  );
-}
-
-async function assertNonpublicKindCards(page: Page): Promise<void> {
-  const weatherId = await responseFeatureId(
-    page,
-    WEATHER_FEATURE.featureId,
-    "weather fixture",
-  );
-  await assertAdminInBoundsIncludes(page, WEATHER_FEATURE, "weather");
-  const weather = requireBody(
-    await browserFetch<WeatherResponse>(
-      page,
-      `${adminFeaturePath(weatherId)}/weather`,
-    ),
-    "suppressed weather admin card",
-  );
-  expect(weather.data.feature_id).toBe(weatherId);
-  expect(weather.data.metrics).toHaveLength(1);
-  expect(weather.data.metrics[0]).toMatchObject({ metric_key: "TMP" });
-  expect(
-    (await browserFetch(page, `${publicFeaturePath(weatherId)}/weather`))
-      .status,
-  ).toBe(404);
-  expect((await browserFetch(page, publicFeaturePath(weatherId))).status).toBe(
-    404,
-  );
-  await assertPublicInBoundsExcludes(
-    page,
-    weatherId,
-    WEATHER_FEATURE.lon,
-    WEATHER_FEATURE.lat,
-  );
-
-  await page.goto(`/features/${encodeURIComponent(weatherId)}`);
-  const weatherPanel = page.getByTestId("feature-weather-panel");
-  await expect(weatherPanel).toBeVisible({ timeout: UI_TIMEOUT });
-  await expect(weatherPanel).toContainText("TMP");
-  await expect(weatherPanel).toContainText("인수 기온");
-  await expect(weatherPanel.getByText("weather 호출 실패")).toHaveCount(0);
-
-  const priceId = await responseFeatureId(
-    page,
-    PRICE_FEATURE.featureId,
-    "price fixture",
-  );
-  await assertAdminInBoundsIncludes(page, PRICE_FEATURE, "price");
-  const price = requireBody(
-    await browserFetch<PriceResponse>(
-      page,
-      `${adminFeaturePath(priceId)}/price`,
-    ),
-    "suppressed price admin card",
-  );
-  expect(price.data.feature_id).toBe(priceId);
-  expect(price.data.current).toHaveLength(1);
-  expect(price.data.history).toHaveLength(1);
-  expect(price.data.current[0]).toMatchObject({ product_key: "gasoline" });
-  expect(
-    (await browserFetch(page, `${publicFeaturePath(priceId)}/price`)).status,
-  ).toBe(404);
-  expect((await browserFetch(page, publicFeaturePath(priceId))).status).toBe(
-    404,
-  );
-  await assertPublicInBoundsExcludes(
-    page,
-    priceId,
-    PRICE_FEATURE.lon,
-    PRICE_FEATURE.lat,
-  );
-
-  await page.goto(`/features/${encodeURIComponent(priceId)}`);
-  const pricePanel = page.getByTestId("feature-price-panel");
-  await expect(pricePanel).toBeVisible({ timeout: UI_TIMEOUT });
-  await expect(pricePanel).toContainText("gasoline");
-  await expect(pricePanel).toContainText("1,711");
-  await expect(pricePanel.getByText("price 호출 실패")).toHaveCount(0);
-}
-
-async function assertStaleCorrection(page: Page): Promise<void> {
-  if (RECOVERY_ONLY) {
-    throw new Error("recovery-only는 correction write를 실행할 수 없습니다");
-  }
-  const correctionId = await responseFeatureId(
-    page,
-    CORRECTION_FEATURE.featureId,
-    "correction fixture",
-  );
-  const revisionResponses: Array<{ entityTag: string | null; status: number }> =
-    [];
-  const uiPatchRequests: Request[] = [];
-  const uiFeaturePatchRequests: Request[] = [];
-  const uiFeaturePatchResponses: Response[] = [];
-  page.on("response", (response) => {
-    if (
-      response.request().method() === "GET" &&
-      responseApiPath(response) ===
-        decodeURIComponent(revisionPath(correctionId))
-    ) {
-      revisionResponses.push({
-        entityTag: response.headers()["etag"] ?? null,
-        status: response.status(),
-      });
-    }
-  });
-  page.on("request", (request) => {
-    if (
-      request.method() === "PATCH" &&
-      requestApiPath(request).startsWith("/v1/admin/features/")
-    ) {
-      uiFeaturePatchRequests.push(request);
-    }
-    if (
-      request.method() === "PATCH" &&
-      requestApiPath(request) ===
-        decodeURIComponent(adminFeaturePath(correctionId))
-    ) {
-      uiPatchRequests.push(request);
-    }
-  });
-  page.on("response", (response) => {
-    if (
-      response.request().method() === "PATCH" &&
-      responseApiPath(response).startsWith("/v1/admin/features/")
-    ) {
-      uiFeaturePatchResponses.push(response);
-    }
-  });
-
-  failureDetail = "stale-etag:load:navigate";
-  await page.goto("/admin/features/change-requests");
-  failureDetail = "stale-etag:load:secure-context";
-  expect(
-    await page.evaluate(() => ({
-      isSecureContext: globalThis.isSecureContext,
-      randomUUID: typeof globalThis.crypto?.randomUUID === "function",
-      subtleCrypto: globalThis.crypto?.subtle !== undefined,
-    })),
-  ).toEqual({
-    isSecureContext: true,
-    randomUUID: true,
-    subtleCrypto: true,
-  });
-  failureDetail = "stale-etag:load:action";
-  await page
-    .getByLabel("change action", { exact: true })
-    .selectOption("update");
-  failureDetail = "stale-etag:load:feature-id";
-  await page
-    .getByLabel("change feature id", { exact: true })
-    .fill(correctionId);
-  failureDetail = "stale-etag:load:basis";
-  await expect(page.getByText("데이터 로드됨")).toBeVisible({
-    timeout: UI_TIMEOUT,
-  });
-  expect(revisionResponses.length).toBeGreaterThan(0);
-  const baselineTag = revisionResponses.at(-1)?.entityTag ?? null;
-  expect(baselineTag).toMatch(/^"[1-9][0-9]*"$/);
-  const baselineDetail = requireBody(
-    await browserFetch<DetailResponse>(page, adminFeaturePath(correctionId)),
-    "correction baseline detail",
-  );
-  expect(`"${baselineDetail.data.feature.row_revision}"`).toBe(baselineTag);
-
-  const operatorDraft = `E2E operator dirty draft ${RUN_ID}`;
-  const operatorReason = `${REASON} stale operator draft`;
-  await page.getByLabel("change name", { exact: true }).fill(operatorDraft);
-  await page.getByLabel("change reason", { exact: true }).fill(operatorReason);
-
-  failureDetail = "stale-etag:competing-update";
-  const competingName = `E2E approved competing update ${RUN_ID}`;
-  const competing = await browserFetch<ChangeResponse>(
-    page,
-    adminFeaturePath(correctionId),
-    {
-      body: { name: competingName, reason: `${REASON} competing update` },
-      headers: { "If-Match": baselineTag as string },
-      method: "PATCH",
-    },
-  );
-  const competingRequest = requireBody(competing, "competing update").data
-    .request;
-  if (competingRequest.status !== "pending") {
-    throw new Error("competing update가 pending review를 거치지 않았습니다");
-  }
-  const approvedResult = await browserFetch<ChangeResponse>(
-    page,
-    changeActionPath(competingRequest.request_id, "approve"),
-    { body: { reason: `${REASON} approve competing update` }, method: "POST" },
-  );
-  const approved = requireBody(approvedResult, "approve competing update");
-  expect(approved.data.request.status).toBe("applied");
-  const competingTag = requireEntityTag(
-    approvedResult,
-    "approved competing update",
-  );
-  expect(competingTag).not.toBe(baselineTag);
-  const competingDetail = requireBody(
-    await browserFetch<DetailResponse>(page, adminFeaturePath(correctionId)),
-    "competing detail",
-  );
-  expect(competingDetail.data.feature.name).toBe(competingName);
-  expect(`"${competingDetail.data.feature.row_revision}"`).toBe(competingTag);
-
-  failureDetail = "stale-etag:stale-submit:prepare";
-  uiPatchRequests.length = 0;
-  uiFeaturePatchRequests.length = 0;
-  uiFeaturePatchResponses.length = 0;
-  const revisionsBeforeSubmit = revisionResponses.length;
-  const staleResponsePromise = page.waitForResponse(
-    (response) =>
-      response.request().method() === "PATCH" &&
-      responseApiPath(response) ===
-        decodeURIComponent(adminFeaturePath(correctionId)),
-    { timeout: UI_TIMEOUT },
-  );
-  failureDetail = "stale-etag:stale-submit:click";
-  await page
-    .getByRole("button", { name: "요청 생성" })
-    .click({ timeout: UI_TIMEOUT });
-  failureDetail = "stale-etag:stale-submit:response";
-  let staleResponse: Response;
+function writeSafeFailure(stage: string): void {
+  if (!ISOLATED_EVIDENCE || ARTIFACT_ROOT === undefined) return;
   try {
-    staleResponse = await staleResponsePromise;
-  } catch (error) {
-    const clientError = page.getByRole("alert").filter({
-      has: page.getByText("Feature 변경 처리 실패", { exact: true }),
-    });
-    const clientErrorVisible = await clientError.isVisible().catch(() => false);
-    if (clientErrorVisible) {
-      // Persist only a fixed diagnostic category: live artifacts must never
-      // contain feature names, request IDs, or server-provided error text.
-      const message = await clientError.innerText().catch(() => "");
-      const category = message.includes("목록에 있는 카테고리")
-        ? "category"
-        : message.includes("목록에 있는 마커 아이콘")
-          ? "marker-icon"
-          : message.includes("목록에 있는 마커 색상")
-            ? "marker-color"
-            : message.includes("좌표")
-              ? "coordinate"
-              : message.includes("주소 코드")
-                ? "address-code"
-                : message.includes("reason은 필수")
-                  ? "missing-reason"
-                  : message.includes("feature_id가 필요")
-                    ? "missing-feature-id"
-                    : message.includes("편집 기준")
-                      ? "missing-basis"
-                      : message.includes("같은 command slot")
-                        ? "idempotency-mismatch"
-                        : message.includes("저장된 idempotency")
-                          ? "idempotency-storage"
-                          : message.includes("revision과 상세")
-                            ? "basis-inconsistent"
-                            : message.includes("다른 Feature")
-                              ? "basis-mismatch"
-                              : message.includes("최신 Feature")
-                                ? "conflict-preflight"
-                                : message.includes("수동 생성/수정 대상")
-                                  ? "unsupported-kind"
-                                  : message.includes("lon과 lat") ||
-                                      message.includes("대한민국 범위")
-                                    ? "coordinate"
-                                    : "other";
-      const path =
-        uiPatchRequests.length === 1
-          ? "canonical-request"
-          : uiFeaturePatchRequests.length === 1
-            ? "alternate-request"
-            : "no-request";
-      const response =
-        uiFeaturePatchResponses.length === 1
-          ? uiFeaturePatchResponses[0].status() >= 500
-            ? "server-response"
-            : "client-response"
-          : "no-response";
-      failureDetail = `stale-etag:stale-submit:client-error:${category}:${path}:${response}`;
-    } else {
-      failureDetail =
-        uiPatchRequests.length === 1
-          ? "stale-etag:stale-submit:request-pending"
-          : "stale-etag:stale-submit:no-request";
-    }
-    throw error;
+    writeFileSync(
+      path.join(ARTIFACT_ROOT, "admin-feature-acceptance-safe-debug.json"),
+      `${JSON.stringify({ last_browser_fetch_status: lastBrowserFetchStatus, stage })}\n`,
+      { encoding: "utf8", mode: 0o600 },
+    );
+  } catch {
+    // 진단 artifact 실패가 원래 E2E 실패를 가리면 안 된다.
   }
-  expect(staleResponse.status()).toBe(412);
-  expect(staleResponse.request().headers()["if-match"]).toBe(baselineTag);
-  expect(uiPatchRequests).toHaveLength(1);
-
-  failureDetail = "stale-etag:conflict-display";
-  const conflict = page
-    .getByRole("status")
-    .filter({ hasText: "서버의 Feature가 변경되었습니다" });
-  await expect(conflict).toBeVisible({ timeout: UI_TIMEOUT });
-  await expect(page.getByLabel("change name", { exact: true })).toHaveValue(
-    operatorDraft,
-  );
-  await expect(page.getByLabel("change reason", { exact: true })).toHaveValue(
-    operatorReason,
-  );
-  await page.waitForTimeout(750);
-  expect(revisionResponses).toHaveLength(revisionsBeforeSubmit);
-  expect(uiPatchRequests).toHaveLength(1);
-
-  failureDetail = "stale-etag:reload";
-  const reload = conflict.getByRole("button", {
-    name: "최신값으로 폼 다시 불러오기",
-  });
-  await reload.click();
-  await expect(page.getByLabel("change name", { exact: true })).toHaveValue(
-    competingName,
-  );
-  await expect
-    .poll(() => revisionResponses.at(-1)?.entityTag, { timeout: UI_TIMEOUT })
-    .toBe(competingTag);
-
-  failureDetail = "stale-etag:reapply";
-  const reappliedName = `E2E reapplied after reload ${RUN_ID}`;
-  await page.getByLabel("change name", { exact: true }).fill(reappliedName);
-  await page
-    .getByLabel("change reason", { exact: true })
-    .fill(`${REASON} reapply after reload`);
-  const secondResponsePromise = page.waitForResponse(
-    (response) =>
-      response.request().method() === "PATCH" &&
-      responseApiPath(response) ===
-        decodeURIComponent(adminFeaturePath(correctionId)),
-    { timeout: FLOW_TIMEOUT },
-  );
-  await page.getByRole("button", { name: "요청 생성" }).click();
-  const secondResponse = await secondResponsePromise;
-  expect(secondResponse.status()).toBe(200);
-  expect(secondResponse.request().headers()["if-match"]).toBe(competingTag);
-  const reapplied = (await secondResponse.json()) as ChangeResponse;
-  expect(reapplied.data.request.status).toBe("pending");
-  const rejected = await approveOrReject(
-    page,
-    reapplied.data.request.request_id,
-    "reject",
-    `${REASON} reject reapply fixture`,
-  );
-  expect(rejected.data.request.status).toBe("rejected");
 }
 
-test("@admin-feature-live-acceptance #741/#785 owned production acceptance", async ({
+async function listOwnedFeatures(page: Page): Promise<string[]> {
+  const query = new URLSearchParams({ page_size: "100", q: RUN_ID });
+  const response = requireBody(
+    await browserFetch<AdminFeaturesListResponse>(
+      page,
+      `/v1/admin/features?${query.toString()}`,
+    ),
+    "owned feature list",
+  );
+  return response.data.items
+    .filter((item) => item.name === FIXTURE_NAME)
+    .map((item) => item.feature_id);
+}
+
+async function retireFeature(page: Page, featureId: string): Promise<void> {
+  const detail = await browserFetch<AdminFeatureDetailResponse>(
+    page,
+    adminFeaturePath(featureId),
+  );
+  if (detail.status === 404) return;
+  const current = requireBody(detail, "cleanup detail").data.feature;
+  if (current.lifecycle_state === "retired") return;
+  const tag = requireEntityTag(
+    await browserFetch<AdminFeatureRevisionResponse>(page, revisionPath(featureId)),
+    "cleanup revision",
+  );
+  const retired = requireBody(
+    await browserFetch<AdminFeatureStateResponse>(
+      page,
+      `${adminFeaturePath(featureId)}/state`,
+      {
+        body: { action: "retire", reason_code: `${REASON}:cleanup` },
+        headers: { "If-Match": tag },
+        method: "PATCH",
+      },
+    ),
+    "cleanup retire",
+  );
+  expect(retired.data.lifecycle_state).toBe("retired");
+  expect(retired.data.publication_state).toBe("suppressed");
+}
+
+async function cleanupOwnedFeatures(page: Page): Promise<void> {
+  for (const featureId of await listOwnedFeatures(page)) {
+    await retireFeature(page, featureId);
+    await expect
+      .poll(
+        async () =>
+          (await browserFetch(page, publicFeaturePath(featureId))).status,
+        { timeout: UI_TIMEOUT },
+      )
+      .toBe(404);
+  }
+}
+
+test.describe.configure({ mode: "serial" });
+
+test("@admin-feature-live-acceptance TVN36 direct state cutover", async ({
   page,
 }) => {
   test.skip(
     !EXECUTE,
-    "E2E_ADMIN_FEATURE_ACCEPTANCE_WRITE=1일 때만 targeted production write lane 실행",
+    "E2E_ADMIN_FEATURE_ACCEPTANCE_WRITE=1일 때만 isolated write lane을 실행",
   );
-  test.setTimeout(20 * 60 * 1000);
+  test.setTimeout(FLOW_TIMEOUT);
   lastBrowserFetchStatus = null;
-  lastBrowserFetchFailureClass = null;
-  lastBrowserFetchProblemCode = null;
-  failureDetail = null;
-  let stage = "landing";
+
   await page.goto("/");
   if (RECOVERY_ONLY) {
-    stage = "recovery-cleanup";
-    await cleanupApiOwnedFeatures(page);
+    await cleanupOwnedFeatures(page);
     return;
   }
 
-  let primaryError: unknown = null;
   try {
-    for (const fixture of STATE_FEATURES) {
-      stage = `create-${fixture.stateLabel}`;
-      await createOwnedPlace(page, fixture);
-    }
-    stage = "create-correction";
-    await createOwnedPlace(page, {
-      ...CORRECTION_FEATURE,
-      lifecycleState: "active",
-      publicationState: "published",
-      qualityState: "valid",
-      stateLabel: "public",
+    await cleanupOwnedFeatures(page);
+    const created = requireBody(
+      await browserFetch<AdminFeatureFieldOverrideResponse>(
+        page,
+        "/v1/admin/features",
+        {
+          body: {
+            category: "01070300",
+            coord: { lat: LAT, lon: LON },
+            kind: "place",
+            lifecycle_state: "active",
+            marker_color: "P-02",
+            marker_icon: "marker",
+            name: FIXTURE_NAME,
+            publication_state: "published",
+            quality_state: "valid",
+            reason: `${REASON}:create`,
+          },
+          method: "POST",
+        },
+      ),
+      "create typed Feature",
+    );
+    const featureId = created.data.feature_id;
+
+    const detail = requireBody(
+      await browserFetch<AdminFeatureDetailResponse>(page, adminFeaturePath(featureId)),
+      "created detail",
+    );
+    expect(detail.data.feature).toMatchObject({
+      feature_id: featureId,
+      lifecycle_state: "active",
+      name: FIXTURE_NAME,
+      publication_state: "published",
+      quality_state: "valid",
     });
-    for (const fixture of SEARCH_FEATURES) {
-      stage = `create-search-${
-        fixture.suffix
-      }`;
-      await createOwnedPlace(page, fixture);
-    }
+    expect((await browserFetch(page, publicFeaturePath(featureId))).status).toBe(200);
 
-    for (const fixture of STATE_FEATURES) {
-      stage = `state-marker-${fixture.stateLabel}`;
-      await test.step(`${fixture.stateLabel} admin marker와 public 음성`, () =>
-        assertStateMarker(page, fixture));
-    }
-    stage = "nonpublic-kind-cards";
-    await test.step("suppressed weather/price admin card와 UI panel", () =>
-      assertNonpublicKindCards(page));
-    stage = "search-cursor-contract";
-    await test.step("T-VN-15 search total/cursor/mismatch/tamper", () =>
-      assertSearchCursorContract(page));
-    stage = "stale-etag";
-    await test.step("approved competing update 뒤 stale raw If-Match 412", () =>
-      assertStaleCorrection(page));
-  } catch (error: unknown) {
-    primaryError = error;
-    writeSafeFailureStage(stage);
-  }
+    await page.goto(`/features/${encodeURIComponent(featureId)}`);
+    await expect(page.getByTestId("feature-detail-view")).toBeVisible({
+      timeout: UI_TIMEOUT,
+    });
+    await expect(page.getByText(FIXTURE_NAME, { exact: true })).toBeVisible();
 
-  let cleanupError: unknown = null;
-  try {
-    await cleanupApiOwnedFeatures(page);
-  } catch (error: unknown) {
-    cleanupError = error;
-  }
-  if (cleanupError !== null) {
-    throw cleanupError;
-  }
-  if (primaryError !== null) {
-    throw primaryError;
+    const patchTag = requireEntityTag(
+      await browserFetch<AdminFeatureRevisionResponse>(page, revisionPath(featureId)),
+      "state patch revision",
+    );
+    const suppressed = requireBody(
+      await browserFetch<AdminFeatureStateResponse>(
+        page,
+        `${adminFeaturePath(featureId)}/state`,
+        {
+          body: {
+            action: "patch",
+            publication_state: "suppressed",
+            reason_code: `${REASON}:suppress`,
+          },
+          headers: { "If-Match": patchTag },
+          method: "PATCH",
+        },
+      ),
+      "state suppress",
+    );
+    expect(suppressed.data).toMatchObject({
+      lifecycle_state: "active",
+      publication_state: "suppressed",
+      quality_state: "valid",
+    });
+    expect((await browserFetch(page, publicFeaturePath(featureId))).status).toBe(404);
+
+    const retireTag = requireEntityTag(
+      await browserFetch<AdminFeatureRevisionResponse>(page, revisionPath(featureId)),
+      "state retire revision",
+    );
+    const retired = requireBody(
+      await browserFetch<AdminFeatureStateResponse>(
+        page,
+        `${adminFeaturePath(featureId)}/state`,
+        {
+          body: { action: "retire", reason_code: `${REASON}:retire` },
+          headers: { "If-Match": retireTag },
+          method: "PATCH",
+        },
+      ),
+      "state retire",
+    );
+    expect(retired.data).toMatchObject({
+      lifecycle_state: "retired",
+      publication_state: "suppressed",
+      quality_state: "valid",
+    });
+
+    const timeline = requireBody(
+      await browserFetch<AdminFeatureStateTransitionsResponse>(
+        page,
+        `${adminFeaturePath(featureId)}/state/transitions?page_size=20`,
+      ),
+      "state transition timeline",
+    );
+    expect(timeline.data.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ to_publication_state: "suppressed" }),
+        expect.objectContaining({ to_lifecycle_state: "retired" }),
+      ]),
+    );
+  } catch (error) {
+    writeSafeFailure("tvn36-direct-state-cutover");
+    throw error;
+  } finally {
+    await cleanupOwnedFeatures(page);
   }
 });

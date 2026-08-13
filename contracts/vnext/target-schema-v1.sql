@@ -29,7 +29,7 @@
 --     T-VN-39 removal manifest가 소유한다.
 --   * 현행 0095의 `materialize_user_feature_change_provenance`와
 --     `feature_versions` whole-row snapshot은 T-VN-36 effective projection/field
---     override lineage가 대체할 때까지만 쓰는 bridge다. 따라서 post-T36C/T39
+--     override lineage가 대체할 때까지만 쓰는 bridge다. 따라서 post-T36D/T39
 --     final target에는 이 procedure·legacy request/version relation을 두지 않는다.
 --
 -- 미정 표기 원칙(freeze 정직성):

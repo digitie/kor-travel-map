@@ -26,10 +26,8 @@ import { bffApiPath } from "./bff-api-path";
  * (updateCoord가 쓰는 동일 state 경로). 검증은 폼/알림 상태 중심.
  */
 
-type AdminFeatureChangeRecord =
-  components["schemas"]["AdminFeatureChangeRequestRecord"];
-type AdminFeatureChangeResponse =
-  components["schemas"]["AdminFeatureChangeResponse"];
+type AdminFeatureFieldOverrideResponse =
+  components["schemas"]["AdminFeatureFieldOverrideResponse"];
 type AdminFeatureCreateRequest =
   components["schemas"]["AdminFeatureCreateRequest"];
 type CategoriesResponse = components["schemas"]["CategoriesResponse"];
@@ -37,8 +35,6 @@ type FeaturesNearbyResponse = components["schemas"]["FeaturesNearbyResponse"];
 type NearbyFeatureSummary = components["schemas"]["NearbyFeatureSummary"];
 type NearbyOriginSummary = components["schemas"]["NearbyOriginSummary"];
 type Meta = components["schemas"]["Meta"];
-
-const MOCK_NOW = "2026-06-16T00:00:00.000Z";
 
 async function fulfillJson(route: Route, body: unknown, status = 200) {
   await route.fulfill({
@@ -48,37 +44,17 @@ async function fulfillJson(route: Route, body: unknown, status = 200) {
   });
 }
 
-function makeChangeRecord(
-  overrides: Partial<AdminFeatureChangeRecord> = {},
-): AdminFeatureChangeRecord {
+function makeCreateResponse(
+  featureId = "e2e-created-feature-001",
+): AdminFeatureFieldOverrideResponse {
   return {
-    action: "add",
-    applied_at: null,
-    created_at: MOCK_NOW,
-    feature_id: "user_request::e2e::created",
-    payload: {
-      category: "01070300",
-      kind: "place",
-      name: "새 장소",
+    data: {
+      applied_field_count: 0,
+      command_id: 1,
+      feature_id: featureId,
+      row_revision: 1,
     },
-    reason: "e2e 수동 생성",
-    // <=18자로 둬 success-alert의 shortId(request_id, 18) 링크 텍스트가 전체 id와 일치.
-    request_id: "change-create-001",
-    requested_by: "local-admin",
-    review_mode: "require_review",
-    reviewed_at: null,
-    reviewed_by: null,
-    status: "pending",
-    ...overrides,
-  };
-}
-
-function makeChangeResponse(
-  request: AdminFeatureChangeRecord,
-): AdminFeatureChangeResponse {
-  return {
-    data: { request },
-    meta: { duration_ms: 1, request_id: "e2e-feature-change" },
+    meta: { duration_ms: 1, request_id: "e2e-feature-create" },
   };
 }
 
@@ -228,24 +204,14 @@ test.describe("/admin/features/new (mocked routes)", () => {
     });
   });
 
-  test("제출 성공 — POST /v1/admin/features → 변경 요청 생성 알림 + 생성 요청 섹션", async ({
+  test("제출 성공 — POST /v1/admin/features → Feature 생성 알림", async ({
     page,
   }) => {
     await mockNearbyRoute(page, () => makeNearbyResponse([]));
     const create = await mockCreateRoute(page, async (route, body) => {
       await fulfillJson(
         route,
-        makeChangeResponse(
-          makeChangeRecord({
-            action: "add",
-            status: "pending",
-            review_mode: "require_review",
-            feature_id: body.feature_id ?? "user_request::e2e::created",
-            payload: { ...body },
-            reason: body.reason,
-            request_id: "change-create-001",
-          }),
-        ),
+        makeCreateResponse(body.feature_id ?? "e2e-created-feature-001"),
       );
     });
 
@@ -277,22 +243,14 @@ test.describe("/admin/features/new (mocked routes)", () => {
     });
     expect(create.bodies[0]).not.toHaveProperty("operator");
 
-    // 성공 Alert(role=status) + 라벨 텍스트.
+    // 성공 Alert(role=status) + 생성 Feature 링크.
     const successAlert = page
       .getByRole("status")
-      .filter({ hasText: "변경 요청 생성됨" });
+      .filter({ hasText: "Feature 생성됨" });
     await expect(successAlert).toBeVisible();
-    await expect(page.getByText("add/pending")).toBeVisible();
-    // 짧은 request_id(<18자)는 shortId가 그대로 노출 → 알림 링크.
     await expect(
-      successAlert.getByRole("link", { name: "change-create-001" }),
+      successAlert.getByRole("link", { name: "e2e-created-feature-001" }),
     ).toBeVisible();
-
-    // '생성 요청' 섹션 + 전체 request_id 노출.
-    await expect(
-      page.getByRole("heading", { level: 2, name: "생성 요청" }),
-    ).toBeVisible();
-    await expect(page.getByText("change-create-001").last()).toBeVisible();
   });
 
   test("중복 후보 — 유효 좌표 입력 시 GET /v1/features/nearby 자동 조회 + 후보 행 렌더", async ({

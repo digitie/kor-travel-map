@@ -183,8 +183,6 @@ def _feature_detail(feature_id: str, name: str) -> ReviewFeatureDetail:
         raw_refs=[],
         marker_icon=None,
         marker_color=None,
-        data_origin="provider",
-        data_version=1,
         created_at=now,
         updated_at=now,
         sources=(_source_detail(),),
