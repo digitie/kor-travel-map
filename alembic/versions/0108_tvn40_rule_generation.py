@@ -131,6 +131,7 @@ BEGIN
       hashtextextended('feature-write:' || v_feature_id, 0)
     );
   END LOOP;
+  PERFORM pg_advisory_xact_lock(hashtextextended('curation-catalog-write', 0));
 
   -- Common order after every Feature advisory fence: catalog → source evidence
   -- → link → Feature → candidate.
