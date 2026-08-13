@@ -619,7 +619,34 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 > [`tasks-done.md`](tasks-done.md)에 있다. 남은 것은 prod 배포 하나뿐인데 어느 열린
 > task도 소유하고 있지 않아 여기에 명시적으로 둔다(2026-08-07 재대조에서 발견).
 
-- [ ] T-VN-35/34/36-deploy — **alembic `0104_tvn36_final_fence` prod 배포 (단일 단계)**
+- [ ] T-VN-35/34/36-deploy — **`0104` prod cutover — 폐기·재생성 + provider 재적재**
+
+  > **2026-08-13 방식 결정(사용자)**: migrate-in-place가 아니라 **DB 폐기·재생성 후
+  > provider 재적재**다. `0078`(2026-08-04) 전례와 같다. 근거는 아래 두 실측이다.
+  >
+  > **① 마이그레이션 체인에 base lineage backfill이 없다.**
+  > `INSERT INTO feature.feature_base_field_values`는 `0099`/`0102`의 **procedure
+  > 정의 안**에만 있고 기존 행을 채우는 backfill은 체인 어디에도 없다. 즉
+  > `0087→0104`를 완주해도 `feature.features` 100만 행은 3축 컬럼만 얻고
+  > `feature_base_field_values`와 `ops.feature_overrides`는 **비어 있다** —
+  > T-VN-36의 존재 이유인 base ↔ override ↔ effective 계보가 기존 데이터에는
+  > 없는 채로 시작하고, 각 feature가 다음 provider 적재를 거쳐야 채워진다.
+  >
+  > **② 실측 비교(n150, prod와 같은 호스트)**
+  >
+  > | 경로 | 소요 | 결과 |
+  > |---|---|---|
+  > | migrate-in-place `0087→0104` (1,008,852행) | `0095` 3축 backfill **하나가 50분 초과**(중단) | 3축 컬럼만, base 계보 없음 |
+  > | fresh 빈 DB + `alembic upgrade head` | bootstrap 5s + migration **40s** | `0104` 완비, registry 64행 |
+  >
+  > 50분+ 구간은 트리거도 서브쿼리도 없는 단순 full-table UPDATE인데
+  > `iowait 61%` / 디스크 `%util 87%`로 I/O에 막혔다. MVCC 행 재작성 + 인덱스
+  > 전량 갱신이 이 하드웨어의 한계에 닿는다. api healthcheck 창은
+  > `start_period 20s + interval 10s × retries 20` = **약 3.5분**이므로,
+  > migrate-in-place는 entrypoint 인라인 실행으로는 애초에 성립하지 않는다.
+
+  **선행 실측(미완)**: provider 재적재로 1,008,852 feature를 다시 채우는 데
+  걸리는 시간. rate limit 포함 실측 전에는 cutover 창을 정할 수 없다.
 
   > 2026-08-13 갱신. 원래 이 항목은 `0087_route_area_subtypes`를 지시했는데, 그 사이
   > T-VN-34(`0098_admin_scope_indexes`)와 T-VN-36(`0104_tvn36_final_fence`)이 main에
@@ -628,17 +655,26 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   > 않는다 — ADR-090 배포에서 실제로 겪은 crash-loop과 같은 형태다
   > (docs/tasks.md 위 §, journal 2026-08-06 (1)). 그래서 세 배포를 하나로 접는다.
 
-  orchestrator `.env`의 `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`를
-  **`0104_tvn36_final_fence`**로 **선행** 갱신한 뒤 api → dagster/daemon 순으로
-  재빌드·배포한다. prod에 적용된 head는 **`0087_route_area_subtypes`**다 —
-  2026-08-13 n150 실측(`kor-travel-geo-postgres` / `kor_travel_map`,
-  feature 1,008,852행). 이 문서가 오래 `0083`이라고 적어둔 것은 사실과 다르다
-  (마지막 배포 journal 2026-08-05 (7)/(10) 이후 누군가 0087까지 올렸고 기록이
-  따라오지 않았다). n150 파기형 rebuild에서 확인된 head는 `T-VN-41F1D-C3`의
-  격리 generation이며 prod 배포가 아니다.
+  절차:
+  1. 기준점 dump — 폐기 전 `T-VN-H43` runbook §9 규약(manifest 필드 포함)으로
+     현행 prod를 받아둔다. 폐기·재생성이므로 이것이 유일한 되돌림 수단이다.
+  2. orchestrator `.env`의 `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`를
+     **`0104_tvn36_final_fence`**로 **선행** 갱신.
+  3. DB 폐기·재생성 → ADR-090 bootstrap(7 principal) → `alembic upgrade head`.
+     빈 DB 기준 실측은 bootstrap 5s + migration 40s다.
+  4. api → dagster/daemon 순으로 재빌드·배포.
+  5. provider 재적재로 Feature를 다시 채운다. **이 구간이 cutover 창을 지배한다** —
+     선행 실측이 필요하다(위 참조).
+
+  prod에 적용된 head는 **`0087_route_area_subtypes`**다 — 2026-08-13 n150 실측
+  (`kor-travel-geo-postgres` / `kor_travel_map`, feature 1,008,852행). 이 문서가
+  오래 `0083`이라고 적어둔 것은 사실과 다르다(마지막 배포 journal 2026-08-05
+  (7)/(10) 이후 누군가 0087까지 올렸고 기록이 따라오지 않았다). n150 파기형
+  rebuild에서 확인된 head는 `T-VN-41F1D-C3`의 격리 generation이며 prod 배포가 아니다.
 
   `0097` fence(`feature.feature_versions`에 `origin='user_request'`가 있으면
-  거부)는 **prod에서 걸리지 않는다** — 같은 실측에서 0건이다.
+  거부)는 폐기·재생성 경로에서는 애초에 대상이 없다. migrate 경로를 다시 검토할
+  경우를 위해 기록해두면, prod 실측에서도 0건이라 걸리지 않았다.
 
   선행 조건(ADR-090):
   - `KOR_TRAVEL_MAP_MIGRATOR_PG_DSN` / `KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN` 분리
@@ -725,16 +761,23 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 
 - [ ] T-VN-36-live — **격리 실데이터 clone에서 live 인수 실행**
 
-  clone-live 하네스는 clone DB가 **이미 candidate head**여야 동작한다(러너는
-  migration을 하지 않는다). 기존 `ktm-tvn38-db`는 전량 `user_request` fixture
-  (feature 30 / version 64)라 `0097` fence가 정당하게 막는다 — 재사용 불가.
-  그래서 prod(`0087`, feature 1,008,852, `user_request` receipt 0)를 읽기 전용으로
-  덤프해 격리 clone을 새로 만들고 ADR-090 bootstrap → `0104`까지 올린 뒤
-  `baseline` → `run`한다.
+  clone-live 하네스는 clone DB가 **이미 candidate head**여야 동작한다 — 러너는
+  migration을 하지 않고 head 불일치면 첫 스냅샷에서 죽는다.
+
+  기존 `ktm-tvn38-db`는 전량 `user_request` fixture(feature 30 / version 64)라
+  `0097` fence가 정당하게 막아 재사용할 수 없다. prod 덤프를 옮겨 migrate하는
+  경로도 시도했다가 **중단했다** — 위 배포 항목의 실측대로 `0095` backfill 하나가
+  50분을 넘겼고, 그렇게 얻는 것이 "빈 base 계보를 가진 3축 컬럼"이었다.
+
+  그래서 clone도 **fresh 경로**로 만든다: `ktm-tvn36-db`(host `18736`)를 빈 DB로
+  두고 ADR-090 bootstrap → `alembic upgrade head`(합 45s) → `baseline` → `run`.
+  인수 spec은 자기 fixture를 스스로 만들고 정리하므로 대량 실데이터가 전제가
+  아니다(소유권 key는 name, feature id는 서버가 정한다).
 
   세대 전환이므로 기존 checkpoint(`0095` 세대, snapshot version 2)는
   `archive-0104-*`로 보존한다 — 앞선 `archive-0094-*` / `archive-0095-baseline-*`와
-  같은 관례다.
+  같은 관례이고, `$STATE_ROOT`가 clone 간 공유 고정 경로라 남겨두면 `baseline`이
+  죽으므로 위생이 아니라 필수 단계다.
 
 ### T-VN-37D — notice empty range 표현 (보류)
 
