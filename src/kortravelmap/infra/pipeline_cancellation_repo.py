@@ -353,6 +353,7 @@ async def _lock_scope_members(
             initial_status=str(row.initial_status),
             dagster_run_id=row.dagster_run_id,
             operation_kind=row.operation_kind,
+            current_stage=row.current_stage,
             cancellation_id=(
                 str(row.cancellation_id) if row.cancellation_id is not None else None
             ),

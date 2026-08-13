@@ -476,6 +476,24 @@ async def test_clean_step_retry_closes_failed_attempt_findings(
     assert observation_count == 0
 
 
+async def test_older_clean_run_does_not_close_newer_strict_failure(
+    migrated_session: AsyncSession,
+) -> None:
+    """실패 attempt가 run-bound면 앞서 시작한 clean sweep이 증거를 닫지 못한다."""
+    await sync_integrity_findings(
+        migrated_session,
+        provider_dataset_id=await _dataset_id(migrated_session),
+        findings=[],
+        external_run_id="older-clean",
+    )
+    await _observe(migrated_session, "newer-strict", ["newer-failure"])
+
+    closed = await _close(migrated_session, "older-clean", finding_count=0)
+
+    assert closed == 0
+    assert set((await _statuses(migrated_session)).values()) == {"open"}
+
+
 async def test_overlapping_run_cannot_overwrite_observation_evidence(
     migrated_session: AsyncSession,
 ) -> None:

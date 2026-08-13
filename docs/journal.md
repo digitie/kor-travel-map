@@ -7,13 +7,15 @@
 `already_terminal/SUCCESS` cancellation finalizer가 sealed input drift를 발견하면 transaction을
 예외로 되돌리지 않고 root와 cancellation member를 `failed/stale_input`으로 원자 수렴시킨다.
 정상 입력은 root receipt를 만들고, stale 입력은 done-without-receipt를 남기지 않는 실제 API LOGIN
-회귀를 함께 고정했다.
+회귀를 함께 고정했다. cancellation 종결 불변식은 현재 root의 typed `stale_input` stage를 잠가 확인한
+경우에만 Dagster SUCCESS와 DB failure의 의도된 차이를 허용하며 attempt `completed`까지 검증한다.
 
-streaming address validation의 dropped 총계는 unique ID 수가 아니라 실제 제거된 bundle 행 수로
-집계하고, bounded metadata는 unique Feature ID 표본으로 분리했다. 같은 ID의 batch 내 중복·batch 간
-반복·표본 cap을 하나의 회귀로 검증한다. Dagster step retry는 최초 run identity를 보존하면서 retry
-번호를 observation external ID에 추가한다. 같은 run의 strict 실패 뒤 clean retry가 독립 generation으로
-과거 finding을 resolved 처리하며 receipt count와 observation row 수가 일치한다.
+address validation의 dropped 총계는 실제 제거된 bundle 행 수, ID는 bounded unique 표본, truncation은
+표본 밖 distinct ID 존재 여부로 각각 집계한다. streaming/non-streaming과 동일 ID의 batch 내 중복·batch
+간 반복·표본 cap을 회귀로 검증한다. Dagster step retry는 최초 run identity를 보존하면서 retry 번호를
+observation external ID에 추가한다. non-stream/stream strict 실패도 모두 이 identity에 결박하므로 앞서
+시작한 clean observation은 새 실패를 닫지 못하고, clean retry만 독립 generation으로 과거 finding을
+resolved 처리한다.
 
 ## 2026-08-14 — T-VN-40: cancellation SUCCESS finalizer와 validation evidence 보존
 

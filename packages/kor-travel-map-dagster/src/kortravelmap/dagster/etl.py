@@ -243,6 +243,7 @@ async def load_feature_bundles_for_dagster(
                 failed_findings,
                 provider=provider,
                 dataset_key=dataset_key,
+                run_id=_dagster_run_id(context),
             )
         except IntegrityFindingPersistenceError as exc:
             failure_metadata.update(
@@ -283,7 +284,10 @@ async def load_feature_bundles_for_dagster(
             metadata=failure_metadata,
         )
 
+    dropped_feature_count = 0
     dropped_feature_ids: tuple[str, ...] = ()
+    dropped_feature_id_set: frozenset[str] = frozenset()
+    dropped_feature_ids_truncated = False
     if mode == "drop" and validation.has_blocking_errors:
         error_feature_ids = {
             issue.feature_id for issue in validation.blocking_issues
@@ -298,7 +302,17 @@ async def load_feature_bundles_for_dagster(
             for bundle in bundles
             if bundle.feature.feature_id not in error_feature_ids
         ]
-        dropped_feature_ids = tuple(b.feature.feature_id for b in dropped)
+        dropped_feature_count = len(dropped)
+        dropped_feature_id_set = frozenset(
+            bundle.feature.feature_id for bundle in dropped
+        )
+        sorted_dropped_feature_ids = sorted(dropped_feature_id_set)
+        dropped_feature_ids = tuple(
+            sorted_dropped_feature_ids[:FEATURE_ID_METADATA_LIMIT]
+        )
+        dropped_feature_ids_truncated = (
+            len(sorted_dropped_feature_ids) > len(dropped_feature_ids)
+        )
 
     if load_all is not None:
         load = await load_all(bundles)
@@ -335,10 +349,13 @@ async def load_feature_bundles_for_dagster(
         ),
     )
     metadata = result.as_metadata()
-    if dropped_feature_ids:
+    if dropped_feature_count:
         # silent cap 금지 — drop 모드에서 격리한 row를 메타데이터로 노출한다.
-        metadata["address_validation_dropped_count"] = len(dropped_feature_ids)
+        metadata["address_validation_dropped_count"] = dropped_feature_count
         metadata["address_validation_dropped_feature_ids"] = list(dropped_feature_ids)
+        metadata["address_validation_dropped_feature_ids_truncated"] = (
+            dropped_feature_ids_truncated
+        )
 
     # T-VN-H30A: run metadata는 run이 사라지면 함께 사라진다. 검증 결과를
     # ops.data_integrity_violations에 durable하게 남겨 /admin/issues에서 보이게 한다.
@@ -349,7 +366,7 @@ async def load_feature_bundles_for_dagster(
         provider=provider,
         dataset_key=dataset_key,
         loaded_feature_ids=loaded_ids,
-        dropped_feature_ids=frozenset(dropped_feature_ids),
+        dropped_feature_ids=dropped_feature_id_set,
         source_identities=source_identities,
     )
     finding_observed = 0
@@ -461,6 +478,7 @@ async def load_feature_bundle_batches_for_dagster(
     dropped_feature_ids: list[str] = []
     dropped_feature_id_set: set[str] = set()
     dropped_feature_count = 0
+    dropped_feature_ids_truncated = False
     strict_failure = False
     sync_observed = 0
     sync_unique = 0
@@ -472,7 +490,8 @@ async def load_feature_bundle_batches_for_dagster(
     with TemporaryFile() as finding_spool:
 
         async def _validated_batches() -> AsyncIterator[Sequence[FeatureBundle]]:
-            nonlocal dropped_feature_count, loaded_feature_count, strict_failure, validation
+            nonlocal dropped_feature_count, dropped_feature_ids_truncated
+            nonlocal loaded_feature_count, strict_failure, validation
             async for raw_batch in batches:
                 batch = list(raw_batch)
                 batch_validation = validate_feature_bundles_address(batch)
@@ -512,10 +531,11 @@ async def load_feature_bundle_batches_for_dagster(
                         bundle.feature.feature_id in dropped_ids for bundle in batch
                     )
                     remaining_dropped = FEATURE_ID_METADATA_LIMIT - len(dropped_feature_ids)
+                    new_distinct_ids = sorted(dropped_ids - dropped_feature_id_set)
+                    if len(new_distinct_ids) > remaining_dropped:
+                        dropped_feature_ids_truncated = True
                     if remaining_dropped > 0:
-                        new_sample_ids = sorted(dropped_ids - dropped_feature_id_set)[
-                            :remaining_dropped
-                        ]
+                        new_sample_ids = new_distinct_ids[:remaining_dropped]
                         dropped_feature_ids.extend(new_sample_ids)
                         dropped_feature_id_set.update(new_sample_ids)
                     batch = [
@@ -610,7 +630,7 @@ async def load_feature_bundle_batches_for_dagster(
         metadata["address_validation_dropped_count"] = dropped_feature_count
         metadata["address_validation_dropped_feature_ids"] = dropped_feature_ids
         metadata["address_validation_dropped_feature_ids_truncated"] = (
-            dropped_feature_count > len(dropped_feature_ids)
+            dropped_feature_ids_truncated
         )
     _add_output_metadata(context, metadata)
     return result

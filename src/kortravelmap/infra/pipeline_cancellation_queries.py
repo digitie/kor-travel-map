@@ -387,6 +387,7 @@ SELECT
     job.dagster_run_id,
     CASE WHEN job.kind = btrim(job.kind) AND job.kind <> ''
       THEN job.kind ELSE NULL END AS operation_kind,
+    job.current_stage,
     job.cancellation_id
 FROM ops.import_jobs AS job
 WHERE job.job_id IN (SELECT job_id FROM members)
