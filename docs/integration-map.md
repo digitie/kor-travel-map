@@ -324,7 +324,7 @@ ADR-084가 정본이다.
 | kor-travel-map 전 표면 REST | `docs/architecture/rest-api.md` + 기계 정본 `packages/kor-travel-map-api/openapi{,.user,.service}.json` | PinVi `docs/integrations/kor-travel-map-rest-api.md` |
 | PinVi canonical ops | 본 repo `docs/reports/system-structure-api-schema-review-2026-07-16.md` D-11/F-17 + 본 문서 §2 principal 계약 | PinVi admin client·provider-sync proxy·contract test와 `docs/integrations/kor-travel-map-rest-api.md` |
 | PinVi T-130 공개 해수욕장/축제 뷰 | 본 repo `docs/architecture/public-views-api.md` + `openapi.user.json`(T-222b 구현) | PinVi `docs/api/public.md` / `docs/kor-travel-map-requirements.md` §6 |
-| curated features → PinVi curated trip plans | 본 repo [`docs/curated-features.md`](curated-features.md) + admin `openapi.json` canonical detail-snapshot | PinVi `docs/kor-travel-map-requirements.md`의 curated trip plan import 절 / PinVi `docs/api/notice-plans.md`의 canonical 경로·AdminBFF 설명 |
+| canonical curation item → PinVi curated trip plans | 본 repo ADR-092 + service `openapi.service.json`의 `/v1/service/curation-items/{curation_item_id}/detail-snapshot`; 전용 `pinvi:curation-snapshot:read` ServiceToken만 허용하고 AdminBFF secret/CIDR은 공유하지 않음 | PinVi `docs/kor-travel-map-requirements.md`의 canonical curation item import 절과 vendored service contract |
 | kor-travel-concierge feature export | kor-travel-concierge `docs/feature-export-api.md`(로컬 경로는 `F:\dev\kor-travel-concierge`, 프로젝트명은 `kor-travel-concierge`) | 본 repo: `docs/etl/concierge-feature-etl.md` + `providers/kor_travel_concierge.py` docstring |
 | PinVi 사용자 제안 연동(합의 5건) | 본 repo `docs/architecture/rest-api.md` (구 ADR-051) | PinVi `docs/integrations/kor-travel-map-rest-api.md` §7 |
 | YouTube 후보 detail 소비(TM-08) | 본 repo `docs/architecture/rest-api.md` (T-217f) | PinVi UX 기획 |

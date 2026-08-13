@@ -49,11 +49,11 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     # sha를 재고정했다 (user/service surface bytes는 불변). 같은 날 T-VN-36B가
     # 소유하던 deferred(field override 쓰기 표면)를 전용 endpoint 착지로 해소해
     # deferred 3 -> 2, added 1 -> 3.
-    "openapi-diff-v1.json": ("2e0f74adddb8d2692a88fa45d61d60a30897599154bfc22f8290b1af8067bb07"),
+    "openapi-diff-v1.json": ("9928ff33b3b90169d7dc789a305ac00e6874908c40177fbf424c1b5c23f9920e"),
     # 2026-08-13 T-VN-36 — receipt가 리베이스로 폐기된 커밋(c1fa5a4d)과 그때의
     # spec sha를 가리키고 있었다. 현재 head로 재핀했다.
     "consumer-rollout-v1.json": (
-        "1525ec216e708199005a9f3d5946535cc4fabe7a5ed250ff78d226be547c83c5"
+        "eac0767e0616880d6de8ef86bd6d6cb3d437e4b70e8bf732e9f620c30185fece"
     ),
     "violation-fixtures-v1.sql": (
         "dba1ad0e640e4ee0e2c6904ab880f7548cf073d859f221840b6fad873e3a8df6"

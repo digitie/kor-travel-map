@@ -113,6 +113,26 @@ async def _owner_of(dsn: str, qualified: str) -> str:
         await engine.dispose()
 
 
+async def _routine_owner(dsn: str, signature: str) -> str:
+    engine = make_async_engine(normalize_async_dsn(dsn), pool_size=1)
+    try:
+        async with engine.connect() as connection:
+            return str(
+                (
+                    await connection.execute(
+                        text(
+                            "SELECT pg_catalog.pg_get_userbyid(proowner) "
+                            "FROM pg_catalog.pg_proc "
+                            "WHERE oid = CAST(:signature AS regprocedure)"
+                        ),
+                        {"signature": signature},
+                    )
+                ).scalar_one()
+            )
+    finally:
+        await engine.dispose()
+
+
 @pytest.mark.integration
 async def test_bootstrap_transfers_ownership_on_a_database_that_already_has_objects(
     pg_container: Any,
@@ -150,9 +170,7 @@ async def test_bootstrap_transfers_ownership_on_a_database_that_already_has_obje
         check=True,
         capture_output=True,
     )
-    result = await asyncio.to_thread(
-        _run_bootstrap,
-        [
+    bootstrap_command = [
             "docker",
             "exec",
             *(
@@ -178,8 +196,8 @@ async def test_bootstrap_transfers_ownership_on_a_database_that_already_has_obje
             container_id,
             "sh",
             "/tmp/bootstrap.sh",
-        ],
-    )
+        ]
+    result = await asyncio.to_thread(_run_bootstrap, bootstrap_command)
     assert result.returncode == 0, (
         f"bootstrap이 기존 object가 있는 DB에서 실패했다 (exit {result.returncode})\n"
         f"stdout: {result.stdout[-2000:]}\nstderr: {result.stderr[-2000:]}"
@@ -196,3 +214,86 @@ async def test_bootstrap_transfers_ownership_on_a_database_that_already_has_obje
         assert (
             await _owner_of(target_dsn, qualified) == "ktm_feature_schema_owner"
         ), qualified
+
+    # 과거 bootstrap이 dedicated routine owner까지 schema owner로 뭉개던 DB와,
+    # 이미 올바른 dedicated owner를 가진 신규 routine을 동시에 재현한다. 두 번째
+    # bootstrap은 closed manifest는 복구하고 올바른 owner는 그대로 보존해야 한다.
+    repair_engine = make_async_engine(normalize_async_dsn(target_dsn), pool_size=1)
+    try:
+        async with repair_engine.begin() as connection:
+            for statement in (
+                "CREATE OR REPLACE FUNCTION feature.prepare_feature_state_context(jsonb, text) "
+                "RETURNS jsonb LANGUAGE sql AS 'SELECT $1'",
+                "ALTER FUNCTION feature.prepare_feature_state_context(jsonb, text) "
+                "OWNER TO ktm_feature_schema_owner",
+                "CREATE OR REPLACE FUNCTION feature.write_feature_state_transition() "
+                "RETURNS trigger LANGUAGE plpgsql AS 'BEGIN RETURN NEW; END'",
+                "ALTER FUNCTION feature.write_feature_state_transition() "
+                "OWNER TO ktm_feature_schema_owner",
+                "CREATE OR REPLACE FUNCTION feature.bootstrap_dedicated_owner_probe() "
+                "RETURNS integer LANGUAGE sql AS 'SELECT 1'",
+                "ALTER FUNCTION feature.bootstrap_dedicated_owner_probe() "
+                "OWNER TO ktm_feature_state_procedure_owner",
+            ):
+                await connection.execute(text(statement))
+    finally:
+        await repair_engine.dispose()
+
+    second = await asyncio.to_thread(_run_bootstrap, bootstrap_command)
+    assert second.returncode == 0, (
+        "bootstrap 재실행이 실패했습니다\n"
+        f"stdout: {second.stdout[-2000:]}\nstderr: {second.stderr[-2000:]}"
+    )
+    assert await _routine_owner(
+        target_dsn, "feature.prepare_feature_state_context(jsonb,text)"
+    ) == "ktm_feature_state_procedure_owner"
+    assert await _routine_owner(
+        target_dsn, "feature.write_feature_state_transition()"
+    ) == "ktm_feature_audit_writer"
+    assert await _routine_owner(
+        target_dsn, "feature.bootstrap_dedicated_owner_probe()"
+    ) == "ktm_feature_state_procedure_owner"
+
+    membership_engine = make_async_engine(normalize_async_dsn(target_dsn), pool_size=1)
+    try:
+        async with membership_engine.connect() as connection:
+            memberships = {
+                (str(row.member_name), str(row.role_name)): (
+                    bool(row.inherit_option),
+                    bool(row.set_option),
+                    bool(row.admin_option),
+                )
+                for row in (
+                    await connection.execute(
+                        text(
+                            "SELECT member_role.rolname AS member_name, "
+                            "group_role.rolname AS role_name, membership.inherit_option, "
+                            "membership.set_option, membership.admin_option "
+                            "FROM pg_catalog.pg_auth_members AS membership "
+                            "JOIN pg_catalog.pg_roles AS member_role "
+                            "ON member_role.oid = membership.member "
+                            "JOIN pg_catalog.pg_roles AS group_role "
+                            "ON group_role.oid = membership.roleid "
+                            "WHERE member_role.rolname IN "
+                            "('ktm_feature_api_runtime','ktm_feature_dagster_runtime',"
+                            " 'ktm_feature_schema_owner')"
+                        )
+                    )
+                ).mappings()
+            }
+    finally:
+        await membership_engine.dispose()
+    assert memberships[
+        ("ktm_feature_api_runtime", "ktm_curation_admin_executor")
+    ] == (True, False, False)
+    assert memberships[
+        ("ktm_feature_dagster_runtime", "ktm_curation_provider_executor")
+    ] == (True, False, False)
+    assert (
+        "ktm_feature_api_runtime",
+        "ktm_curation_provider_executor",
+    ) not in memberships
+    assert (
+        "ktm_feature_dagster_runtime",
+        "ktm_curation_admin_executor",
+    ) not in memberships

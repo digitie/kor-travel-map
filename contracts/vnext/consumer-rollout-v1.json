@@ -85,7 +85,7 @@
       "write_fence": "subtype별 projection 전환 시점에 해당 kind의 legacy mega-row 경로 write를 차단",
       "compat_drop": "legacy detail/geometry column 삭제는 T-VN-39 removal manifest",
       "pinvi_snapshot_revendor": {
-        "user": "yes",
+        "user": "no",
         "service": "no",
         "admin-detail": "yes"
       }
@@ -153,14 +153,14 @@
       "title": "curation write model 단일화",
       "consumer_first_order": [
         "40A: legacy writer inventory 고정 + 신규 legacy write 차단 + canonical/effective checksum",
-        "40B: theme_feature_candidates lifecycle 분리 + admin/public/PinVi consumer가 curation_collections/items 정본만 읽도록 선전환 — PinVi admin detail snapshot은 canonical /v1/admin/curation-items/{curation_item_id}/detail-snapshot으로 전환",
+        "40B: theme_feature_candidates lifecycle 분리 + admin/public/PinVi consumer가 curation_collections/items 정본만 읽도록 선전환 — PinVi snapshot은 canonical /v1/service/curation-items/{curation_item_id}/detail-snapshot과 전용 ServiceToken scope로 전환",
         "40C: checksum·consumer cutover 뒤 overlay 신규 write·normal routing 차단, legacy relation/trigger/repository/route와 curation_item_id rekey 예외를 같은 release에서 물리 삭제"
       ],
       "write_fence": "40A부터 overlay 신규 write 차단, 40B에서 candidate와 canonical membership은 named procedure-only, 40C에서 normal routing과 legacy ACL 제거",
       "compat_drop": "curated_features overlay/snapshot table·trigger·repository·legacy route와 legacy_projection_id/rekey 예외는 T-VN-40C final migration에서 물리 삭제한다. T-VN-39에는 catalog-zero receipt만 인계하며 신규 호환 shim은 금지한다.",
       "pinvi_snapshot_revendor": {
         "user": "yes",
-        "service": "no",
+        "service": "yes",
         "admin-detail": "yes"
       }
     },

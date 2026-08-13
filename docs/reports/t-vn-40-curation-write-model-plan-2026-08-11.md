@@ -55,11 +55,14 @@ grant를 모두 catalog gate에 포함한다.
   source record는 새 후보가 아니라 같은 행의 evidence 갱신이다.
 - required provenance: 현재 `source_record_key`, canonical raw payload digest, source rule
   revision/digest, provider dataset, generation time.
-- state: `open`, `promoted`, `rejected`, `withdrawn`만 허용한다. 변경은 append-only
-  `theme_feature_candidate_transitions`에 old/new state, actor, reason, causation,
+- review 축은 `open|promoted|rejected`, 현재 rule-qualified 관측 축은
+  `eligibility_present boolean`으로 분리한다. UI의 `withdrawn`은
+  `eligibility_present=false` projection이지 review state가 아니다. 변경은 append-only
+  `theme_feature_candidate_transitions`에 두 축의 old/new 값, actor, reason, causation,
   source evidence를 같은 transaction으로 남긴다.
-- source refresh는 current source-entity head와 Feature link를 잠근 상태에서만
-  open/withdrawn을 결정한다. provider가 candidate를 collection에 넣지 않는다.
+- source refresh/reconcile은 current source-entity head, Feature link, T-VN-36 effective
+  projection을 잠근 상태에서 모든 review state의 `eligibility_present`를 결정한다.
+  provider가 candidate를 collection에 넣지 않는다.
 - promotion은 target `collection_id`와 expected candidate/item revision을 명시한 admin
   command다. canonical item create/update와 candidate `promoted` transition은 원자적이다.
 
@@ -84,14 +87,21 @@ runtime role에는 candidate, collection/item, legacy overlay의 raw lifecycle/m
 provider-derived principal, fixed `search_path`, expected revision, source/current-head proof를
 검증한다. procedure owner와 runtime의 table/function privileges는 catalog assertion으로 고정한다.
 
-provider load와 Feature merge는 relation을 잠그기 전에 영향받는 Feature id 각각의 정렬된
+provider load와 Feature merge는 relation을 잠그기 전에 **해당 transaction 전체**가 영향 주는
+Feature id set을 먼저 materialize·dedupe·lexical sort한 뒤 각각의 정렬된
 `pg_advisory_xact_lock(hashtextextended('tvn40:feature:' || feature_id, 0))`을 공통 획득한다.
-merge는 master/loser 두 key를 lexical 순서로, provider refresh는 target 한 key를 잡는다. 그 뒤
+`load_bundles`, absence retirement, source-entity batch retirement, notice batch와 merge 모두 이
+prelock 단계를 첫 DML보다 앞서 수행한다. bundle caller 순서대로 하나씩 lock하는 구현은 금지한다.
+그 뒤
 전체 row lock order는 다음과 같다.
 
 ```
-provider dataset/entity/head → source link → Feature → candidate → collection → item
+curated theme/source/rule → provider dataset/entity/head → source link → Feature → candidate → collection → item
 ```
+
+generation의 touched set은 새 expected matches뿐 아니라 현재 eligible이나 이번 evaluation에서 빠질
+candidate의 Feature도 포함한다. promotion은 candidate id를 nonlocking identity lookup에만 쓰고 위 순서로
+rule/source/Feature/candidate를 다시 lock한 뒤 revision/hash를 재검증한다.
 
 refresh/promotion, merge/promotion, import/manual item edit, source-head advance/promotion의
 two-session regression은 40P01/재시도 없이 직렬화 또는 정의된 409/40001 결과를 보여야 한다.
@@ -126,9 +136,9 @@ physical removal은 같은 PR의 ordered migration과 final acceptance에 함께
    canonical collection/item만 읽도록 전환한다. `/v1/curated-features`와 legacy admin surface는
    같은 release에서 제거하며 redirect/no-op parameter를 두지 않는다.
 5. legacy curated detail/trip-copy snapshot cache와 admin snapshot path는 새
-   `curation-items/{id}/detail-snapshot` direct typed projection으로 대체한다. 새 cache는 만들지
+   service `curation-items/{id}/detail-snapshot` direct typed projection으로 대체한다. 새 cache는 만들지
    않으며 PinVi는 canonical item identity만 사용한다.
-6. Map OpenAPI exact export 뒤 PinVi user와 admin-detail subset을 같은 Map head로 re-vendor하고,
+6. Map OpenAPI exact export 뒤 PinVi user와 service subset을 같은 Map head로 re-vendor하고,
    compile/no-legacy contract receipt를 consumer rollout manifest에 pin한다.
 
 ### 40C — legacy surface fence·제거
