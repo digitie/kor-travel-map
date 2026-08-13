@@ -51,11 +51,21 @@ class _FakeBundleLoadClient:
     def __init__(self) -> None:
         self.loaded: list[Any] = []
 
-    async def load_feature_bundles(self, bundles: Any) -> FeatureLoadResult:
+    async def load_feature_bundles(
+        self,
+        bundles: Any,
+        *,
+        curation_dataset: tuple[str, str] | None = None,
+    ) -> FeatureLoadResult:
         materialized = list(bundles)
         self.loaded.extend(materialized)
         return FeatureLoadResult(
-            bundles_total=len(materialized), features_inserted=len(materialized)
+            bundles_total=len(materialized),
+            features_inserted=len(materialized),
+            curation_input_member_count=(
+                len(materialized) if curation_dataset is not None else None
+            ),
+            curation_input_set_hash=("0" * 64 if curation_dataset is not None else None),
         )
 
     async def record_address_validation_findings(
@@ -97,14 +107,13 @@ async def test_culture_asset_loads_per_slug_datasets() -> None:
 
     assert result.provider == "python-mcst-api"
     assert {r.dataset_key for r in result.results} == {
-        "mcst_independent_bookstores_csv",
-        "mcst_world_restaurants_csv",
+        spec.dataset_key for spec in MCST_FILE_DATASETS.values()
     }
     by_key = {r.dataset_key: r for r in result.results}
     assert by_key["mcst_independent_bookstores_csv"].load.bundles_total == 2
     assert by_key["mcst_world_restaurants_csv"].load.bundles_total == 1
     assert result.bundles_total == 3
-    assert result.as_metadata()["datasets_loaded"] == 2
+    assert result.as_metadata()["datasets_loaded"] == len(MCST_FILE_DATASETS)
 
 
 async def test_culture_asset_rejects_unknown_slug() -> None:
@@ -156,7 +165,8 @@ async def test_culture_raw_callback_completes_exact_membership_snapshot() -> Non
         on_memberships_completed=_done,
     )
 
-    assert result.results == ()
+    assert len(result.results) == len(MCST_FILE_DATASETS)
+    assert all(item.load.bundles_total == 0 for item in result.results)
     assert completed == list(memberships)
 
 
@@ -362,7 +372,28 @@ async def test_culture_public_wrapper_finishes_every_exact_member_after_success(
             operation_key="feature_place_mcst_culture_job",
         ),
     )
-    guard = SimpleNamespace(memberships=memberships)
+    dataset_memberships = {
+        "dataset-one": memberships[0],
+        "dataset-two": memberships[1],
+    }
+
+    class _GuardClient:
+        async def resolve_feature_operation_dataset_membership(
+            self,
+            *,
+            operation_key: str,
+            provider: str,
+            dataset_key: str,
+        ) -> ProviderDatasetOperationMembership:
+            assert operation_key == "feature_place_mcst_culture_job"
+            assert provider == "python-mcst-api"
+            return dataset_memberships[dataset_key]
+
+    guard = SimpleNamespace(
+        memberships=memberships,
+        operation_key="feature_place_mcst_culture_job",
+        client=_GuardClient(),
+    )
     finished: list[ProviderDatasetOperationMembership] = []
 
     async def _ensure(_context: object) -> object:
@@ -373,9 +404,13 @@ async def test_culture_public_wrapper_finishes_every_exact_member_after_success(
         membership: ProviderDatasetOperationMembership,
         *,
         authoritative_snapshot_complete: bool,
+        curation_input_member_count: int | None,
+        curation_input_set_hash: str | None,
     ) -> None:
         assert received_guard is guard
         assert authoritative_snapshot_complete is True
+        assert curation_input_member_count == 0
+        assert curation_input_set_hash == "0" * 64
         finished.append(membership)
 
     async def _run(
@@ -386,7 +421,17 @@ async def test_culture_public_wrapper_finishes_every_exact_member_after_success(
     ) -> Any:
         assert on_memberships_completed is not None
         await on_memberships_completed(memberships)
-        return SimpleNamespace(status="done")
+        load = FeatureLoadResult(
+            curation_input_member_count=0,
+            curation_input_set_hash="0" * 64,
+        )
+        return SimpleNamespace(
+            status="done",
+            results=(
+                SimpleNamespace(dataset_key="dataset-one", load=load),
+                SimpleNamespace(dataset_key="dataset-two", load=load),
+            ),
+        )
 
     monkeypatch.setattr(mcst_module, "ensure_tracked_multi_member_asset", _ensure)
     monkeypatch.setattr(mcst_module, "finish_tracked_feature_membership", _finish)
@@ -562,7 +607,10 @@ def _patched_wrapper(
         membership: ProviderDatasetOperationMembership,
         *,
         authoritative_snapshot_complete: bool,
+        curation_input_member_count: int | None = None,
+        curation_input_set_hash: str | None = None,
     ) -> None:
+        del curation_input_member_count, curation_input_set_hash
         assert received_guard is guard
         assert authoritative_snapshot_complete is True
         finished.append(membership)

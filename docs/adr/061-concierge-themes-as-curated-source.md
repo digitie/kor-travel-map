@@ -27,14 +27,17 @@ channel/playlist/keyword provenance(id + title)를 이미 담고 있으나, 이 
   술어를 추가한다. → 하나의 source를 detail 값별로 **여러 테마에 팬아웃**(한 rule = 한
   테마, partition은 detail_selector가 담당).
 - 별도 concierge API 호출 없이, 이미 적재된 concierge feature의 detail youtube
-  값에서 그룹핑을 유도한다(`sync_concierge_themes`). 그룹핑(channel/playlist)마다
+  값에서 그룹핑을 유도한다. authoritative provider root가 `done/SUCCESS`로 종결되는
+  transaction의 source observation trigger가 잠긴 DB set에서
+  `sync_concierge_theme_catalog`를 실행한다. 그룹핑(channel/playlist)마다
   slug `concierge-yt-<channel_id>`/`concierge-pl-<playlist_id>`, `theme_group='media'`,
   `visibility='public'` 테마 1개 + 그 그룹핑만 고르는 detail_selector rule 1개
   (`default_action='candidate'`)를 upsert하고 candidate generation을 실행한다. 공개 membership은
   ADR-092 promotion command만 만들며 rule 결과를 auto-publish하지 않는다. 멱등(재실행 시 rule
   중복 생성 없음).
-- 트리거는 **on-demand**다: Dagster `concierge_theme_sync` asset을 수동 materialize.
-  `curated_features_refresh` 일일 스케줄은 여전히 STOPPED(자동 켜지 않음).
+- caller-driven `concierge_theme_sync`/`curated_features_refresh` asset은 제거한다. catalog와
+  candidate generation은 exact provider terminal receipt가 있는 동일 root finalizer에서만 실행하며,
+  API·Dagster LOGIN이 caller 열거 theme/rule set을 raw DML로 쓰지 못한다.
 - apply 술어 지원용 concierge youtube channel_id/playlist_id **부분 표현식 인덱스**
   (해당 feature만 대상 → 작고 빠름).
 

@@ -109,10 +109,12 @@ async def run_feature_place_mcst_culture(
     geocoder = _reverse_geocoder(context)
     results: list[DagsterFeatureLoadResult] = []
     for slug, spec in MCST_FILE_DATASETS.items():
-        slug_rows = grouped.get(slug)
+        slug_rows = grouped.get(slug, [])
         if not slug_rows:
-            context.log.info("MCST %s row 없음 — skip.", spec.dataset_key)
-            continue
+            context.log.info(
+                "MCST %s row 없음 — authoritative empty snapshot으로 seal.",
+                spec.dataset_key,
+            )
         bundles = await file_rows_to_bundles(
             slug_rows,
             slug=slug,

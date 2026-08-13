@@ -2,6 +2,22 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-14 — T-VN-40: provider operation 명령 경계와 공통 write fence
+
+Dagster provider LOGIN이 `ops.import_jobs`와 membership의 root·terminal 증거를 raw DML로
+위조할 수 없도록 provider operation 생성·membership 완료·root terminal 전이를 세 named
+`SECURITY DEFINER` command로 전환했다. 실제 Dagster LOGIN의 직접 INSERT/UPDATE는 `42501`이며,
+API cancellation/heartbeat는 독립 권한 경계를 유지한다. bootstrap 재실행도 T-VN-40 command/audit
+routine의 exact owner를 복구하도록 전체 signature manifest를 확장했다.
+
+provider load·retirement·notice·merge와 provider curation root가 어떤 relation lock보다 먼저 같은
+`feature-curation-write` transaction advisory fence를 잡도록 수렴했다. authoritative seal은 head/link뿐
+아니라 Feature 3축·typed subtype·active override lineage까지 포함한다. concierge·국가유산은 load와
+lifecycle retirement와 seal을 한 transaction에서 수행하고, MOIS는 chunk별 commit 뒤 boolean으로
+승격하던 경로를 제거해 전체 snapshot을 한 causal transaction으로 적재한다. MCST는 row가 0건인
+canonical member도 empty authoritative snapshot으로 봉인한다. fresh 0001→0114 actual-login 통합 15개,
+관련 unit 147개, 격리 Dagster MCST 16개와 migration graph·ruff gate를 통과했다.
+
 ## 2026-08-14 — T-VN-40: provider load 인과 입력과 concierge catalog 봉인
 
 authoritative child receipt를 source head만이 아니라 source link의 Feature identity·role·match method·

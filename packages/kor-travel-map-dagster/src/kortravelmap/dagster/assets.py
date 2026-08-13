@@ -933,18 +933,29 @@ async def run_feature_place_krheritage_items(
         fetched_at=fetched_at,
         reverse_geocoder=_reverse_geocoder(context),
     )
+    client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
+    retired = 0
+
+    async def _load_and_retire(
+        snapshot_bundles: Sequence[Any],
+    ) -> FeatureLoadResult:
+        nonlocal retired
+        load, retired = await client.load_authoritative_feature_snapshot(
+            snapshot_bundles,
+            provider=KRHERITAGE_PROVIDER_NAME,
+            dataset_key=KRHERITAGE_DATASET_KEY,
+            source_entity_type="heritage",
+            retire_geometryless_areas=True,
+        )
+        return load
+
     result = await _load(
         context,
         provider=KRHERITAGE_PROVIDER_NAME,
         dataset_key=KRHERITAGE_DATASET_KEY,
         bundles=bundles,
         authoritative_snapshot_complete=True,
-    )
-    client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
-    retired = await client.retire_geometryless_area_features_by_source(
-        provider=KRHERITAGE_PROVIDER_NAME,
-        dataset_key=KRHERITAGE_DATASET_KEY,
-        source_entity_type="heritage",
+        load_all=_load_and_retire,
     )
     if retired:
         context.log.info(
@@ -1002,44 +1013,28 @@ async def run_feature_place_mois_licenses(
     """MOIS 인허가 record를 place Feature로 적재한다."""
     fetched_at = await _fetched_at(context)
     dataset_key = await _resource_value(context, "mois_dataset_key", default=MOIS_BULK_DATASET_KEY)
-    result: DagsterFeatureLoadResult | None = None
+    # Authoritative curation seal은 적재와 같은 DB image를 증명해야 한다. batch별
+    # transaction을 먼저 commit한 뒤 마지막에 boolean만 승격하면 중간 writer가
+    # 끼어든 mixed snapshot을 정상 receipt로 오인하므로, 변환만 batch로 수행하고
+    # 최종 적재는 단일 causal transaction으로 닫는다.
+    snapshot_bundles: list[Any] = []
     async for records in _record_batches(
         context, "mois_license_records", batch_size=MOIS_RECORD_BATCH_SIZE
     ):
-        bundles = await license_records_to_bundles(
-            records,
-            fetched_at=fetched_at,
-            dataset_key=str(dataset_key),
-            reverse_geocoder=_reverse_geocoder(context),
+        snapshot_bundles.extend(
+            await license_records_to_bundles(
+                records,
+                fetched_at=fetched_at,
+                dataset_key=str(dataset_key),
+                reverse_geocoder=_reverse_geocoder(context),
+            )
         )
-        batch_result = await _load(
-            context,
-            provider=MOIS_PROVIDER_NAME,
-            dataset_key=str(dataset_key),
-            bundles=bundles,
-            authoritative_snapshot_complete=False,
-            record_sync_state=False,
-        )
-        result = batch_result if result is None else result.merge(batch_result)
-
-    if result is not None:
-        result = result.complete_authoritative_snapshot()
-        client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
-        await _record_feature_sync_success(
-            context,
-            client,
-            provider=MOIS_PROVIDER_NAME,
-            dataset_key=str(dataset_key),
-            cursor_extra=_feature_result_cursor_extra(result),
-            observation_receipt=result.observation_receipt,
-        )
-        return result
     return await _load(
         context,
         provider=MOIS_PROVIDER_NAME,
         dataset_key=str(dataset_key),
-        bundles=[],
-        authoritative_snapshot_complete=False,
+        bundles=snapshot_bundles,
+        authoritative_snapshot_complete=True,
     )
 
 
@@ -1465,22 +1460,32 @@ async def run_feature_place_kor_travel_concierge_youtube(
                 ],
             }
         )
+    retired_entity_ids = kor_travel_concierge_inactive_entity_ids(records)
+    client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
+    retired = 0
+
+    async def _load_and_retire(
+        snapshot_bundles: Sequence[Any],
+    ) -> FeatureLoadResult:
+        nonlocal retired
+        load, retired = await client.load_authoritative_feature_snapshot(
+            snapshot_bundles,
+            provider=KOR_TRAVEL_CONCIERGE_PROVIDER_NAME,
+            dataset_key=DATASET_KEY_YOUTUBE_PLACE_CANDIDATES,
+            source_entity_type=KOR_TRAVEL_CONCIERGE_SOURCE_ENTITY_TYPE,
+            retired_source_entity_ids=retired_entity_ids,
+        )
+        return load
+
     result = await _load(
         context,
         provider=KOR_TRAVEL_CONCIERGE_PROVIDER_NAME,
         dataset_key=DATASET_KEY_YOUTUBE_PLACE_CANDIDATES,
         bundles=bundles,
         authoritative_snapshot_complete=True,
+        load_all=_load_and_retire,
     )
-    retired_entity_ids = kor_travel_concierge_inactive_entity_ids(records)
     if retired_entity_ids:
-        client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
-        retired = await client.retire_features_by_source(
-            provider=KOR_TRAVEL_CONCIERGE_PROVIDER_NAME,
-            dataset_key=DATASET_KEY_YOUTUBE_PLACE_CANDIDATES,
-            source_entity_type=KOR_TRAVEL_CONCIERGE_SOURCE_ENTITY_TYPE,
-            source_entity_ids=retired_entity_ids,
-        )
         context.log.info(
             "kor-travel-concierge reject/tombstone %d건 → feature %d건 retired 전이",
             len(retired_entity_ids),

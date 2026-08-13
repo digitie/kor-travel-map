@@ -63,11 +63,17 @@ public projection 전 경로에서 즉시 제외한다.
 source head뿐 아니라 link identity·role·match method·confidence까지 load transaction 안에서 봉인하며,
 root 전 검증에서 committed drift가 발견되면 `stale_input` terminal로 수렴한다. provider-owned concierge
 theme/rule도 terminal observation trigger가 잠긴 DB set에서 도출하고 operator-owned slug 충돌은
-fail-close한다. 다음은 `ops.import_jobs`/membership raw DML을 named command로 회수해 terminal evidence
-위조 경계를 닫는 것이다.
+fail-close한다. `ops.import_jobs`/membership의 provider root 생성·member 완료·terminal 전이는 named
+command로 전환했고 Dagster LOGIN의 raw 증거 DML은 `42501`로 닫았다. provider load·retirement·notice·
+merge와 root finalizer는 첫 relation lock 전에 동일한 global transaction fence를 잡는다. MOIS의
+chunk별 commit 뒤 boolean 승격을 제거하고, concierge·국가유산 lifecycle 변경은 load+seal과 같은
+transaction에 넣었으며, MCST empty member도 authoritative receipt를 남긴다. 다음은 retained
+theme/source/rule relation의 runtime raw DML 권한과 남은 provider catalog writer를 전수 회수해 named
+command만 남기는 것이다.
 T-VN-40 paired consumer receipt는 현재 `pending`이며 Map user/
 service/full spec hash를 고정하고 n150 installer가 complete 전에는 fail-close한다.
-fresh 0001→0113 actual-login candidate/source 통합 13개와 관련 unit 88개를 통과했다.
+fresh 0001→0114 actual-login candidate/source 통합 15개, 관련 unit 147개와 격리 Dagster MCST
+16개를 통과했다.
 A/B/C는 하나의 forward-only PR/release로 유지하며, 누적 구현은 DB/동시성과
 API·consumer/ACL 관점의 독립 적대 리뷰어 2명이 같은 고정 SHA에서 검증한다.
 상세 계약은

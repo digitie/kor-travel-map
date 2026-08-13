@@ -1418,8 +1418,23 @@ async def test_provider_root_success_atomically_observes_generates_and_seals(
         assert (receipt.observations, receipt.generation_rows) == (1, 1)
 
 
-async def test_provider_child_rejects_a_load_seal_after_b_link_commit(
+@pytest.mark.parametrize(
+    "mutation_sql",
+    [
+        """
+        UPDATE provider_sync.source_links SET match_method = 'manual', confidence = 55
+        WHERE source_entity_key = :source_entity_key AND feature_id = :feature_id
+        """,
+        """
+        UPDATE feature.feature_places
+        SET payload = jsonb_build_object('semantic-drift', true)
+        WHERE feature_id = :feature_id
+        """,
+    ],
+)
+async def test_provider_child_rejects_post_load_semantic_commit(
     migrated_engine: AsyncEngine,
+    mutation_sql: str,
 ) -> None:
     seeded = await _seed_candidate(
         migrated_engine,
@@ -1466,12 +1481,7 @@ async def test_provider_child_rejects_a_load_seal_after_b_link_commit(
         ).mappings().one()
     async with migrated_engine.begin() as connection:
         await connection.execute(
-            text(
-                """
-                UPDATE provider_sync.source_links SET match_method = 'manual', confidence = 55
-                WHERE source_entity_key = :source_entity_key AND feature_id = :feature_id
-                """
-            ),
+            text(mutation_sql),
             seeded,
         )
 
@@ -1656,3 +1666,105 @@ async def test_concierge_catalog_is_db_derived_inside_terminal_root(
         == ("candidate", True, True, 1)
         for row in rows
     )
+
+
+async def test_provider_operation_rows_require_typed_dagster_commands(
+    migrated_engine: AsyncEngine,
+) -> None:
+    seeded = await _seed_candidate(migrated_engine, create_candidate=False)
+    membership = ProviderDatasetOperationMembership(
+        provider_dataset_id=int(seeded["dataset_id"]),
+        sync_scope="dataset_wide",
+        operation_key="load",
+    )
+    async with migrated_engine.begin() as connection:
+        for statement in (
+            """
+            INSERT INTO provider_sync.provider_dataset_operations (
+              provider_dataset_id, operation_key, operation_kind, is_enabled, config
+            ) VALUES (:dataset_id, 'load', 'refresh', true, '{}'::jsonb)
+            """,
+            """
+            INSERT INTO provider_sync.provider_dataset_operation_scopes (
+              provider_dataset_id, sync_scope, operation_key, operation_kind
+            ) VALUES (:dataset_id, 'dataset_wide', 'load', 'refresh')
+            """,
+        ):
+            await connection.execute(text(statement), seeded)
+
+    run_id = f"tvn40-provider-command-{seeded['suffix']}"
+    created_at = datetime(2026, 8, 13, 4, tzinfo=UTC)
+    dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
+    session_factory = async_sessionmaker(dagster, expire_on_commit=False)
+    try:
+        async with session_factory.begin() as session:
+            await session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
+            operation = await ensure_dagster_feature_operation(
+                session,
+                dagster_run_id=run_id,
+                trigger_kind="schedule",
+                selected_memberships=(membership,),
+                operation_key="load",
+                engine_created_at=created_at,
+                engine_started_at=created_at + timedelta(seconds=1),
+                observed_status="STARTED",
+            )
+            root_job_id = operation.operation.root_job_id
+
+        for statement in (
+            """
+            UPDATE ops.import_jobs
+            SET payload = jsonb_build_object('forged', true)
+            WHERE job_id = CAST(:root_job_id AS uuid)
+            """,
+            """
+            UPDATE ops.import_job_datasets AS member
+            SET sync_scope = member.sync_scope
+            FROM ops.import_jobs AS child
+            WHERE child.parent_job_id = CAST(:root_job_id AS uuid)
+              AND child.job_id = member.job_id
+            """,
+            """
+            INSERT INTO ops.import_jobs (
+              kind, payload, status, progress, current_stage, dagster_run_id,
+              dataset_membership_mode, trigger_kind, operation_key,
+              dagster_run_status
+            ) VALUES (
+              'provider_feature_load_run', '{}'::jsonb, 'queued', 0, 'queued',
+              :forged_run_id, 'root', 'schedule', 'load', 'QUEUED'
+            )
+            """,
+        ):
+            async with dagster.connect() as connection:
+                transaction = await connection.begin()
+                with pytest.raises(DBAPIError) as denied:
+                    await connection.execute(
+                        text(statement),
+                        {
+                            "forged_run_id": f"forged-{seeded['suffix']}",
+                            "root_job_id": root_job_id,
+                        },
+                    )
+                assert getattr(denied.value.orig, "sqlstate", None) == "42501"
+                await transaction.rollback()
+    finally:
+        await dagster.dispose()
+
+    # Provider raw-DML fence는 Admin/API cancellation writer까지 막지 않는다.
+    api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
+    try:
+        async with api.begin() as connection:
+            changed = await connection.scalar(
+                text(
+                    """
+                    UPDATE ops.import_jobs
+                    SET heartbeat_at = clock_timestamp()
+                    WHERE job_id = CAST(:root_job_id AS uuid)
+                    RETURNING true
+                    """
+                ),
+                {"root_job_id": root_job_id},
+            )
+            assert changed is True
+    finally:
+        await api.dispose()

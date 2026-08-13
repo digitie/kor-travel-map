@@ -709,6 +709,12 @@
         "0112_tvn40_provider_seal"
       ],
       "revision": "0113_tvn40_concierge_catalog"
+    },
+    {
+      "down_revision": [
+        "0113_tvn40_concierge_catalog"
+      ],
+      "revision": "0114_tvn40_provider_ops_cmds"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"
