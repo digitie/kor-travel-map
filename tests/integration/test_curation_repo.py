@@ -7,6 +7,7 @@ import base64
 import hashlib
 import json
 import unicodedata
+from collections.abc import Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
@@ -19,11 +20,9 @@ from sqlalchemy.exc import DBAPIError, IntegrityError
 from kortravelmap.infra import curated_repo
 from kortravelmap.infra.curation_repo import (
     _GET_COLLECTION_ID_BY_KEY_SQL,  # noqa: PLC2701 - concurrency regression
-    _GET_SOURCE_ID_BY_DATASET_ID_SQL,  # noqa: PLC2701 - concurrency regression
     _LIST_FEATURE_ITEMS_SQL,  # noqa: PLC2701 - EXPLAIN 대상
     _RESOLVE_FEATURES_BATCH_SQL,  # noqa: PLC2701 - EXPLAIN 대상
     _UPSERT_COLLECTION_SQL,  # noqa: PLC2701 - concurrency regression
-    _UPSERT_SOURCE_SQL,  # noqa: PLC2701 - concurrency regression
     CurationImportResult,
     CurationQuarantineMoveConflictError,
     CurationQuarantineTargetArchivedError,
@@ -43,7 +42,6 @@ from kortravelmap.infra.curation_repo import (
     get_curation_collection,
     get_curation_item,
     get_feature_curation_group,
-    import_curation_rows,
     list_curation_collections,
     list_curation_items_by_feature_ids,
     list_curation_quarantine_collections,
@@ -57,6 +55,7 @@ from kortravelmap.infra.curation_repo import (
     update_curation_item,
     upsert_curation_theme,
 )
+from kortravelmap.infra.curation_repo import import_curation_rows as _import_curation_rows
 from kortravelmap.infra.models import (
     SourceEntityHeadRow,
     SourceEntityRow,
@@ -121,6 +120,87 @@ async def _catalog_dataset_id(
         dataset_id = await _dataset_id(catalog, provider, dataset_key)
         await catalog.commit()
     return dataset_id
+
+
+async def _seed_retained_import_catalog(
+    session: AsyncSession,
+    rows: Sequence[ResolvedCurationImportRow],
+) -> None:
+    """일반 curation 회귀가 참조할 retained catalog를 명시적으로 준비한다."""
+
+    themes = sorted(
+        {(row.theme_slug, row.theme_name, row.theme_group) for row in rows}
+    )
+    for theme_slug, theme_name, theme_group in themes:
+        await session.execute(
+            text(
+                """
+                INSERT INTO feature.curated_themes (
+                    theme_slug, theme_name, theme_group,
+                    default_curated, visibility, metadata
+                ) VALUES (
+                    :theme_slug, :theme_name, :theme_group,
+                    false, 'public', '{}'::jsonb
+                )
+                ON CONFLICT (theme_slug) DO NOTHING
+                """
+            ),
+            {
+                "theme_slug": theme_slug,
+                "theme_name": theme_name,
+                "theme_group": theme_group,
+            },
+        )
+    sources = sorted(
+        {
+            (row.provider_dataset_id, row.source_name, row.source_url)
+            for row in rows
+        },
+        key=lambda item: item[0],
+    )
+    for provider_dataset_id, source_name, source_url in sources:
+        await session.execute(
+            text(
+                """
+                INSERT INTO feature.curated_sources (
+                    provider_dataset_id, source_name, source_url,
+                    source_kind, update_cycle, provider_status, metadata
+                ) VALUES (
+                    :provider_dataset_id, :source_name, :source_url,
+                    'manual', 'unknown', 'manual_only', '{}'::jsonb
+                )
+                ON CONFLICT (provider_dataset_id) DO NOTHING
+                """
+            ),
+            {
+                "provider_dataset_id": provider_dataset_id,
+                "source_name": source_name,
+                "source_url": source_url,
+            },
+        )
+
+
+async def import_curation_rows(
+    session: AsyncSession,
+    *,
+    rows: Sequence[ResolvedCurationImportRow],
+    actor: str | None = None,
+    source_content_sha256: str | None = None,
+    batch_kind: str | None = None,
+    frozen_h35_schema: bool = False,
+) -> CurationImportResult:
+    """테스트용 retained catalog를 준비한 뒤 실제 import 경계를 호출한다."""
+
+    if rows and not frozen_h35_schema:
+        await _seed_retained_import_catalog(session, rows)
+    return await _import_curation_rows(
+        session,
+        rows=rows,
+        actor=actor,
+        source_content_sha256=source_content_sha256,
+        batch_kind=batch_kind,
+        frozen_h35_schema=frozen_h35_schema,
+    )
 
 
 async def _seed_foundations(session: AsyncSession) -> tuple[str, str]:
@@ -1275,9 +1355,9 @@ async def test_source_absent_included_item_is_hidden_and_can_be_archived(
         public_only=True,
     )
     assert public_collection is not None
-    assert [item.external_item_id for item in public_collection[1]] == [
-        "source-absent-b"
-    ]
+    # 공개 membership은 trusted accepted Feature link가 필수다. source가 남아도
+    # 미연결 item은 canonical public projection에 노출하지 않는다.
+    assert public_collection[1] == ()
     assert await get_feature_curation_group(
         migrated_session,
         feature_id="feature:source-absent",
@@ -2694,43 +2774,42 @@ async def test_authoritative_reimport_does_not_resurrect_unresolved_archive(
     assert row["archived"] is True
 
 
-async def test_theme_upsert_fallback_sees_concurrent_identical_insert(
+async def test_theme_resolution_uses_precreated_retained_catalog(
     migrated_engine: AsyncEngine,
 ) -> None:
-    """ON CONFLICT가 본 새 row를 다음 READ COMMITTED statement에서 회수한다."""
+    """import helper는 retained catalog를 생성하지 않고 exact row만 해소한다."""
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
     suffix = uuid4().hex
     theme_slug = f"concurrent-theme-{suffix}"
-    first_session = AsyncSession(migrated_engine, expire_on_commit=False)
-    second_session = AsyncSession(migrated_engine, expire_on_commit=False)
+    session = AsyncSession(migrated_engine, expire_on_commit=False)
     try:
-        await first_session.begin()
-        first_id = await upsert_curation_theme(
-            first_session,
+        first_id = str(
+            (
+                await session.execute(
+                    text(
+                        """
+                        INSERT INTO feature.curated_themes (
+                            theme_slug, theme_name, theme_group
+                        ) VALUES (:theme_slug, '명시 생성 테마', 'test')
+                        RETURNING theme_id::text
+                        """
+                    ),
+                    {"theme_slug": theme_slug},
+                )
+            ).scalar_one()
+        )
+        second_id = await upsert_curation_theme(
+            session,
             theme_slug=theme_slug,
-            theme_name="동시 생성 테마",
+            theme_name="명시 생성 테마",
             theme_group="test",
         )
-        await second_session.begin()
-        second_task = asyncio.create_task(
-            upsert_curation_theme(
-                second_session,
-                theme_slug=theme_slug,
-                theme_name="동시 생성 테마",
-                theme_group="test",
-            )
-        )
-        await asyncio.sleep(0.2)
-        await first_session.commit()
-        second_id = await asyncio.wait_for(second_task, timeout=5)
-        await second_session.commit()
-
         assert second_id == first_id
+        await session.commit()
     finally:
-        await first_session.close()
-        await second_session.close()
+        await session.close()
         async with migrated_engine.begin() as connection:
             await connection.execute(
                 text("DELETE FROM feature.curated_themes WHERE theme_slug = :theme_slug"),
@@ -2965,10 +3044,10 @@ async def test_cross_title_legacy_moves_do_not_lock_source_collections_in_revers
             )
 
 
-async def test_source_and_collection_fallbacks_see_concurrent_identical_insert(
+async def test_collection_fallback_sees_concurrent_identical_insert(
     migrated_engine: AsyncEngine,
 ) -> None:
-    """import 전용 source/collection upsert도 새 statement snapshot을 사용한다."""
+    """import collection upsert가 concurrent insert 뒤 새 statement snapshot을 사용한다."""
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -2987,49 +3066,45 @@ async def test_source_and_collection_fallbacks_see_concurrent_identical_insert(
     second_session = AsyncSession(migrated_engine, expire_on_commit=False)
     try:
         async with AsyncSession(migrated_engine, expire_on_commit=False) as setup:
-            theme_id = await upsert_curation_theme(
-                setup,
-                theme_slug=theme_slug,
-                theme_name="동시 생성 기반 테마",
-                theme_group="test",
+            theme_id = str(
+                (
+                    await setup.execute(
+                        text(
+                            """
+                            INSERT INTO feature.curated_themes (
+                                theme_slug, theme_name, theme_group,
+                                default_curated, visibility, metadata
+                            ) VALUES (
+                                :theme_slug, '동시 생성 기반 테마', 'test',
+                                false, 'public', '{}'::jsonb
+                            )
+                            RETURNING theme_id::text
+                            """
+                        ),
+                        {"theme_slug": theme_slug},
+                    )
+                ).scalar_one()
+            )
+            source_id = str(
+                (
+                    await setup.execute(
+                        text(
+                            """
+                            INSERT INTO feature.curated_sources (
+                                provider_dataset_id, source_name, source_url,
+                                source_kind, update_cycle, provider_status, metadata
+                            ) VALUES (
+                                :provider_dataset_id, :source_name, :source_url,
+                                'manual', 'unknown', 'manual_only', '{}'::jsonb
+                            )
+                            RETURNING source_id::text
+                            """
+                        ),
+                        source_params,
+                    )
+                ).scalar_one()
             )
             await setup.commit()
-
-        await first_session.begin()
-        source_id = str(
-            (
-                await first_session.execute(
-                    text(
-                        """
-                        INSERT INTO feature.curated_sources (
-                            provider_dataset_id, source_name, source_url,
-                            source_kind, update_cycle, provider_status, metadata
-                        ) VALUES (
-                            :provider_dataset_id, :source_name, :source_url,
-                            'manual', 'unknown', 'manual_only', '{}'::jsonb
-                        )
-                        RETURNING source_id::text
-                        """
-                    ),
-                    source_params,
-                )
-            ).scalar_one()
-        )
-        await second_session.begin()
-        source_task = asyncio.create_task(
-            _upsert_id_with_fallback(
-                second_session,
-                upsert_sql=_UPSERT_SOURCE_SQL,
-                lookup_sql=_GET_SOURCE_ID_BY_DATASET_ID_SQL,
-                params=source_params,
-                entity="test source",
-            )
-        )
-        await asyncio.sleep(0.2)
-        await first_session.commit()
-        concurrent_source_id = await asyncio.wait_for(source_task, timeout=5)
-        await second_session.commit()
-        assert concurrent_source_id == source_id
 
         collection_params = {
             "collection_key": collection_key,
@@ -3242,6 +3317,18 @@ async def test_new_collection_create_add_does_not_deadlock_import(
                     {"provider_dataset_id": provider_dataset_id},
                 )
             ).scalar_one()
+        )
+        await setup.execute(
+            text(
+                """
+                INSERT INTO feature.curated_themes (
+                    theme_slug, theme_name, theme_group
+                ) VALUES (
+                    :theme_slug, 'collection key lock 테마', 'test'
+                )
+                """
+            ),
+            {"theme_slug": theme_slug},
         )
         await setup.commit()
 

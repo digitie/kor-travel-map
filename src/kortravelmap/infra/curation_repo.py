@@ -1890,66 +1890,22 @@ ORDER BY c.collection_key, i.sort_order, i.curation_item_id
 """
 )
 
-_UPSERT_THEME_SQL: Final[str] = """
-WITH written AS (
-    INSERT INTO feature.curated_themes (
-        theme_slug, theme_name, theme_description, theme_group,
-        default_curated, visibility, metadata, updated_at
-    ) VALUES (
-        :theme_slug, :theme_name, '', :theme_group, false, 'public',
-        '{}'::jsonb, now()
-    )
-    ON CONFLICT (theme_slug) DO UPDATE SET
-        theme_name = EXCLUDED.theme_name,
-        theme_group = EXCLUDED.theme_group,
-        updated_at = now()
-    WHERE (
-        feature.curated_themes.theme_name,
-        feature.curated_themes.theme_group
-    ) IS DISTINCT FROM (EXCLUDED.theme_name, EXCLUDED.theme_group)
-    RETURNING theme_id::text
-)
-SELECT theme_id FROM written
-UNION ALL
-SELECT existing.theme_id::text
-FROM feature.curated_themes AS existing
-WHERE existing.theme_slug = :theme_slug
-  AND NOT EXISTS (SELECT 1 FROM written)
-LIMIT 1
+_RESOLVE_THEME_SQL: Final[str] = """
+SELECT theme_id::text
+FROM feature.curated_themes
+WHERE theme_slug = :theme_slug
+  AND theme_name = :theme_name
+  AND theme_group = :theme_group
+  AND archived_at IS NULL
 """
 
-_UPSERT_SOURCE_SQL: Final[str] = """
-WITH written AS (
-    INSERT INTO feature.curated_sources (
-        provider_dataset_id, source_name, source_url, source_kind,
-        update_cycle, provider_status, metadata, updated_at
-    ) VALUES (
-        :provider_dataset_id, :source_name, :source_url, 'manual',
-        'unknown', 'manual_only', '{}'::jsonb, now()
-    )
-    ON CONFLICT (provider_dataset_id) DO UPDATE SET
-        source_name = EXCLUDED.source_name,
-        source_url = COALESCE(
-            EXCLUDED.source_url,
-            feature.curated_sources.source_url
-        ),
-        updated_at = now()
-    WHERE (
-        feature.curated_sources.source_name,
-        feature.curated_sources.source_url
-    ) IS DISTINCT FROM (
-        EXCLUDED.source_name,
-        COALESCE(EXCLUDED.source_url, feature.curated_sources.source_url)
-    )
-    RETURNING source_id::text
-)
-SELECT source_id FROM written
-UNION ALL
-SELECT existing.source_id::text
-FROM feature.curated_sources AS existing
-WHERE existing.provider_dataset_id = :provider_dataset_id
-  AND NOT EXISTS (SELECT 1 FROM written)
-LIMIT 1
+_RESOLVE_SOURCE_SQL: Final[str] = """
+SELECT source_id::text
+FROM feature.curated_sources
+WHERE provider_dataset_id = :provider_dataset_id
+  AND source_name = :source_name
+  AND source_url IS NOT DISTINCT FROM :source_url
+  AND archived_at IS NULL
 """
 
 _UPSERT_COLLECTION_SQL: Final[str] = """
@@ -1998,18 +1954,6 @@ FROM feature.curation_collections AS existing
 WHERE existing.collection_key = :collection_key
   AND NOT EXISTS (SELECT 1 FROM written)
 LIMIT 1
-"""
-
-_GET_THEME_ID_BY_SLUG_SQL: Final[str] = """
-SELECT theme_id::text
-FROM feature.curated_themes
-WHERE theme_slug = :theme_slug
-"""
-
-_GET_SOURCE_ID_BY_DATASET_ID_SQL: Final[str] = """
-SELECT source_id::text
-FROM feature.curated_sources
-WHERE provider_dataset_id = :provider_dataset_id
 """
 
 # h35 cutover CLI 전용 — 0063~0079 고정 세대의 ``feature.curated_sources``는
@@ -4183,7 +4127,7 @@ async def upsert_curation_theme(
     theme_name: str,
     theme_group: str,
 ) -> str:
-    """수동 입력/CSV가 공유하는 theme 안정키 upsert."""
+    """수동 입력/CSV가 참조하는 기존 retained theme을 exact match로 해소한다."""
 
     if not theme_slug.strip() or not theme_name.strip() or not theme_group.strip():
         raise ValueError("theme_slug, theme_name and theme_group are required")
@@ -4193,13 +4137,13 @@ async def upsert_curation_theme(
         "theme_name": theme_name.strip(),
         "theme_group": theme_group.strip(),
     }
-    return await _upsert_id_with_fallback(
-        session,
-        upsert_sql=_UPSERT_THEME_SQL,
-        lookup_sql=_GET_THEME_ID_BY_SLUG_SQL,
-        params=params,
-        entity="curation theme",
-    )
+    value = (await session.execute(text(_RESOLVE_THEME_SQL), params)).scalar_one_or_none()
+    if value is None:
+        raise ValueError(
+            "theme은 retained catalog에서 먼저 생성해야 하며 "
+            "slug/name/group이 정확히 일치해야 합니다."
+        )
+    return str(value)
 
 
 def validate_resolved_curation_identities(
@@ -4743,19 +4687,24 @@ async def import_curation_rows(
             source_params["dataset_key"] = row.frozen_h35_dataset[1]
         else:
             source_params["provider_dataset_id"] = row.provider_dataset_id
-        source_id = await _upsert_id_with_fallback(
-            session,
-            upsert_sql=(
-                _FROZEN_H35_UPSERT_SOURCE_SQL if frozen_h35_schema else _UPSERT_SOURCE_SQL
-            ),
-            lookup_sql=(
-                _FROZEN_H35_GET_SOURCE_ID_BY_KEY_SQL
-                if frozen_h35_schema
-                else _GET_SOURCE_ID_BY_DATASET_ID_SQL
-            ),
-            params=source_params,
-            entity="curation source",
-        )
+        if frozen_h35_schema:
+            source_id = await _upsert_id_with_fallback(
+                session,
+                upsert_sql=_FROZEN_H35_UPSERT_SOURCE_SQL,
+                lookup_sql=_FROZEN_H35_GET_SOURCE_ID_BY_KEY_SQL,
+                params=source_params,
+                entity="curation source",
+            )
+        else:
+            source_value = (
+                await session.execute(text(_RESOLVE_SOURCE_SQL), source_params)
+            ).scalar_one_or_none()
+            if source_value is None:
+                raise ValueError(
+                    "source는 retained catalog에서 먼저 생성해야 하며 "
+                    "dataset/name/url이 정확히 일치해야 합니다."
+                )
+            source_id = str(source_value)
         collection_params = {
             "collection_key": collection_key,
             "theme_id": theme_id,

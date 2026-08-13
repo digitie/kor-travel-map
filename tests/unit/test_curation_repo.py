@@ -1078,7 +1078,7 @@ async def test_resolve_feature_matches_empty_batch_and_single() -> None:
     )
 
 
-async def test_upsert_theme_validates_and_delegates(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_upsert_theme_requires_an_exact_retained_catalog_match() -> None:
     for values in [("", "이름", "그룹"), ("slug", "", "그룹"), ("slug", "이름", "")]:
         with pytest.raises(ValueError, match="required"):
             await repo.upsert_curation_theme(
@@ -1088,9 +1088,7 @@ async def test_upsert_theme_validates_and_delegates(monkeypatch: pytest.MonkeyPa
                 theme_group=values[2],
             )
 
-    upsert = AsyncMock(return_value=_THEME_ID)
-    monkeypatch.setattr(repo, "_upsert_id_with_fallback", upsert)
-    session = _FakeSession(_FakeResult())
+    session = _FakeSession(_FakeResult(), _FakeResult(scalar=_THEME_ID))
     assert (
         await repo.upsert_curation_theme(
             session,
@@ -1100,12 +1098,19 @@ async def test_upsert_theme_validates_and_delegates(monkeypatch: pytest.MonkeyPa
         )
         == _THEME_ID
     )
-    assert upsert.await_args.kwargs["params"] == {
+    assert session.calls[1][1] == {
         "theme_slug": "slug",
         "theme_name": "이름",
         "theme_group": "그룹",
     }
     assert "curation-import" in session.calls[0][0]
+    with pytest.raises(ValueError, match="retained catalog"):
+        await repo.upsert_curation_theme(
+            _FakeSession(_FakeResult(), _FakeResult()),
+            theme_slug="missing",
+            theme_name="없음",
+            theme_group="test",
+        )
 
 
 def test_resolved_identity_validation_reports_component_and_feature_duplicates() -> None:
@@ -1204,9 +1209,7 @@ async def test_import_rows_empty_changed_and_no_change(monkeypatch: pytest.Monke
     theme = AsyncMock(side_effect=[_THEME_ID, _THEME_ID])
     foundations = AsyncMock(
         side_effect=[
-            _SOURCE_ID,
             "00000000-0000-4000-8000-000000000010",
-            _SOURCE_ID,
             "00000000-0000-4000-8000-000000000011",
         ]
     )
@@ -1218,6 +1221,8 @@ async def test_import_rows_empty_changed_and_no_change(monkeypatch: pytest.Monke
         _FakeResult(rows=["feature:one"]),
         _FakeResult(),
         _FakeResult(),
+        _FakeResult(scalar=_SOURCE_ID),
+        _FakeResult(scalar=_SOURCE_ID),
         _FakeResult(),
         _FakeResult(rows=[_item_row()]),
         _FakeResult(scalar=0),
@@ -1242,13 +1247,14 @@ async def test_import_rows_empty_changed_and_no_change(monkeypatch: pytest.Monke
     theme.reset_mock(side_effect=True)
     theme.side_effect = [_THEME_ID]
     foundations.reset_mock(side_effect=True)
-    foundations.side_effect = [_SOURCE_ID, "00000000-0000-4000-8000-000000000012"]
+    foundations.side_effect = ["00000000-0000-4000-8000-000000000012"]
     unchanged = _FakeSession(
         _FakeResult(),
         _FakeResult(),
         _FakeResult(rows=["feature:one"]),
         _FakeResult(),
         _FakeResult(),
+        _FakeResult(scalar=_SOURCE_ID),
         _FakeResult(),
         _FakeResult(rows=[]),
         _FakeResult(scalar=0),
@@ -1257,7 +1263,7 @@ async def test_import_rows_empty_changed_and_no_change(monkeypatch: pytest.Monke
     no_change = await repo.import_curation_rows(unchanged, rows=(rows[0],))
     assert no_change["inserted"] == no_change["updated"] == no_change["removed"] == 0
     assert no_change["import_batch_id"] == "00000000-0000-4000-8000-000000000092"
-    assert len(unchanged.calls) == 9
+    assert len(unchanged.calls) == 10
 
 
 @pytest.mark.parametrize(

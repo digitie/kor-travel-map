@@ -72,6 +72,34 @@ async def _rule_hashes(engine: AsyncEngine, *, theme_id: str) -> list[str]:
         )
 
 
+async def test_runtime_logins_cannot_bypass_retained_catalog_commands(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """API/Dagster LOGIN은 catalog read만 가능하고 raw writer는 모두 42501이다."""
+
+    for login in ("ktm_feature_api_runtime", "ktm_feature_dagster_runtime"):
+        runtime = _runtime_engine(migrated_engine, login=login)
+        try:
+            async with runtime.connect() as connection:
+                for relation in (
+                    "curated_themes",
+                    "curated_sources",
+                    "curated_source_rules",
+                ):
+                    for statement in (
+                        f"INSERT INTO feature.{relation} DEFAULT VALUES",
+                        f"UPDATE feature.{relation} SET updated_at = updated_at WHERE false",
+                        f"DELETE FROM feature.{relation} WHERE false",
+                    ):
+                        transaction = await connection.begin()
+                        with pytest.raises(DBAPIError) as denied:
+                            await connection.execute(text(statement))
+                        assert getattr(denied.value.orig, "sqlstate", None) == "42501"
+                        await transaction.rollback()
+        finally:
+            await runtime.dispose()
+
+
 async def test_theme_commands_separate_display_revision_from_rule_semantics(
     migrated_engine: AsyncEngine,
 ) -> None:
