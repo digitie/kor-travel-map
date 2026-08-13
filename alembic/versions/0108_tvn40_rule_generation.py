@@ -88,8 +88,19 @@ BEGIN
       USING ERRCODE = '23514', CONSTRAINT = 'ck_theme_candidate_generation_kind';
   END IF;
   IF (v_is_provider AND (
-        NOT pg_has_role(session_user, 'ktm_curation_provider_executor', 'member')
-        OR pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
+        (
+          NOT pg_has_role(session_user, 'ktm_curation_provider_executor', 'member')
+          OR pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
+        ) AND NOT (
+          session_user = 'ktm_feature_api_runtime'
+          AND EXISTS (
+            SELECT 1 FROM ops.import_jobs AS source_job
+            WHERE source_job.job_id = p_source_job_id
+              AND source_job.parent_job_id::text = current_setting(
+                'ktm.curation_cancellation_root', true
+              )
+          )
+        )
       )) OR (NOT v_is_provider AND (
         NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
         OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member')
@@ -295,7 +306,31 @@ BEGIN
     IF v_source_job.kind <> 'provider_feature_load'
        OR v_source_job.status <> 'done'
        OR v_source_job.parent_job_id IS NULL
-       OR v_source_job.cancellation_id IS NOT NULL
+       OR (
+         v_source_job.cancellation_id IS NOT NULL
+         AND NOT (
+           session_user = 'ktm_feature_api_runtime'
+           AND v_source_job.parent_job_id::text = current_setting(
+             'ktm.curation_cancellation_root', true
+           )
+           AND EXISTS (
+             SELECT 1
+             FROM ops.import_jobs AS root
+             JOIN ops.pipeline_cancellation_members AS cancellation_member
+               ON cancellation_member.cancellation_id = root.cancellation_id
+              AND cancellation_member.job_id = root.job_id
+             JOIN ops.pipeline_cancellation_runs AS cancellation_run
+               ON cancellation_run.cancellation_id = cancellation_member.cancellation_id
+              AND cancellation_run.dagster_run_id = cancellation_member.dagster_run_id
+             WHERE root.job_id = v_source_job.parent_job_id
+               AND root.cancellation_id = v_source_job.cancellation_id
+               AND cancellation_member.result = 'already_terminal'
+               AND cancellation_member.terminal_status = 'done'
+               AND cancellation_run.result = 'already_terminal'
+               AND cancellation_run.terminal_status = 'SUCCESS'
+           )
+         )
+       )
        OR v_source_job.quarantined_at IS NOT NULL
        OR COALESCE(
          (v_source_job.payload ->> 'authoritative_snapshot_complete')::boolean,
@@ -307,7 +342,16 @@ BEGIN
          WHERE root.job_id = v_source_job.parent_job_id
            AND root.kind = 'provider_feature_load_run'
            AND root.dagster_run_id = v_source_job.dagster_run_id
-           AND root.cancellation_id IS NULL
+           AND (
+             root.cancellation_id IS NULL
+             OR (
+               session_user = 'ktm_feature_api_runtime'
+               AND root.job_id::text = current_setting(
+                 'ktm.curation_cancellation_root', true
+               )
+               AND root.cancellation_id = v_source_job.cancellation_id
+             )
+           )
            AND root.quarantined_at IS NULL
        )
        OR (SELECT count(*) FROM ops.import_job_datasets AS member

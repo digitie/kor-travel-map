@@ -318,8 +318,13 @@ BEGIN
   IF current_setting('transaction_isolation') <> 'serializable' THEN
     RAISE EXCEPTION 'source observation requires SERIALIZABLE transaction' USING ERRCODE = '25001';
   END IF;
-  IF NOT pg_has_role(session_user, 'ktm_curation_provider_executor', 'member')
-     OR pg_has_role(session_user, 'ktm_curation_admin_executor', 'member') THEN
+  IF (
+       NOT pg_has_role(session_user, 'ktm_curation_provider_executor', 'member')
+       OR pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
+     ) AND NOT (
+       session_user = 'ktm_feature_api_runtime'
+       AND current_setting('ktm.curation_cancellation_root', true) IS NOT NULL
+     ) THEN
     RAISE EXCEPTION 'source observation requires the provider executor' USING ERRCODE = '42501';
   END IF;
   SELECT snapshot.* INTO STRICT v_snapshot
@@ -332,8 +337,30 @@ BEGIN
     WHERE child.job_id = p_import_job_id AND child.status = 'done'
       AND root.job_id = v_snapshot.root_job_id AND root.status = 'done'
       AND root.dagster_run_status = 'SUCCESS'
-      AND child.cancellation_id IS NULL AND child.quarantined_at IS NULL
-      AND root.cancellation_id IS NULL AND root.quarantined_at IS NULL
+      AND child.quarantined_at IS NULL AND root.quarantined_at IS NULL
+      AND (
+        (child.cancellation_id IS NULL AND root.cancellation_id IS NULL)
+        OR (
+          session_user = 'ktm_feature_api_runtime'
+          AND root.job_id::text = current_setting(
+            'ktm.curation_cancellation_root', true
+          )
+          AND child.cancellation_id = root.cancellation_id
+          AND EXISTS (
+            SELECT 1
+            FROM ops.pipeline_cancellation_members AS member
+            JOIN ops.pipeline_cancellation_runs AS run
+              ON run.cancellation_id = member.cancellation_id
+             AND run.dagster_run_id = member.dagster_run_id
+            WHERE member.cancellation_id = root.cancellation_id
+              AND member.job_id = root.job_id
+              AND member.result = 'already_terminal'
+              AND member.terminal_status = 'done'
+              AND run.result = 'already_terminal'
+              AND run.terminal_status = 'SUCCESS'
+          )
+        )
+      )
   ) THEN
     RAISE EXCEPTION 'source observation requires a sealed terminal root member'
       USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_source_observation_job';
@@ -433,8 +460,14 @@ BEGIN
     RAISE EXCEPTION 'provider curation root requires SERIALIZABLE transaction'
       USING ERRCODE = '25001';
   END IF;
-  IF NOT pg_has_role(session_user, 'ktm_curation_provider_executor', 'member')
-     OR pg_has_role(session_user, 'ktm_curation_admin_executor', 'member') THEN
+  IF (
+       NOT pg_has_role(session_user, 'ktm_curation_provider_executor', 'member')
+       OR pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
+     ) AND NOT (
+       session_user = 'ktm_feature_api_runtime'
+       AND current_setting('ktm.curation_cancellation_root', true)
+         = p_root_job_id::text
+     ) THEN
     RAISE EXCEPTION 'provider curation root requires the provider executor'
       USING ERRCODE = '42501';
   END IF;
@@ -444,8 +477,24 @@ BEGIN
   SELECT root.* INTO STRICT v_root FROM ops.import_jobs AS root
   WHERE root.job_id = p_root_job_id FOR UPDATE;
   IF v_root.kind <> 'provider_feature_load_run' OR v_root.status <> 'done'
-     OR v_root.dagster_run_status <> 'SUCCESS' OR v_root.cancellation_id IS NOT NULL
-     OR v_root.quarantined_at IS NOT NULL THEN
+     OR v_root.dagster_run_status <> 'SUCCESS'
+     OR (
+       v_root.cancellation_id IS NOT NULL
+       AND NOT EXISTS (
+         SELECT 1
+         FROM ops.pipeline_cancellation_members AS member
+         JOIN ops.pipeline_cancellation_runs AS run
+           ON run.cancellation_id = member.cancellation_id
+          AND run.dagster_run_id = member.dagster_run_id
+         WHERE member.cancellation_id = v_root.cancellation_id
+           AND member.job_id = v_root.job_id
+           AND member.operation_kind = 'provider_feature_load_run'
+           AND member.result = 'already_terminal'
+           AND member.terminal_status = 'done'
+           AND run.result = 'already_terminal'
+           AND run.terminal_status = 'SUCCESS'
+       )
+     ) OR v_root.quarantined_at IS NOT NULL THEN
     RAISE EXCEPTION 'provider curation root requires a successful terminal root'
       USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_provider_curation_root';
   END IF;
@@ -461,14 +510,6 @@ BEGIN
   FROM ops.curation_provider_snapshot_receipts AS receipt
   WHERE receipt.root_job_id = p_root_job_id;
 
-  IF v_child_count = 0 THEN
-    o_generation_count := 0;
-    o_generation_set_hash := encode(
-      x_extension.digest(convert_to('[]', 'UTF8'), 'sha256'), 'hex'
-    );
-    o_replayed := false;
-    RETURN;
-  END IF;
   IF EXISTS (
     SELECT 1
     FROM ops.import_jobs AS child
@@ -505,6 +546,14 @@ BEGIN
   ) THEN
     RAISE EXCEPTION 'provider curation root child receipt set is inconsistent'
       USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_provider_curation_child_set';
+  END IF;
+  IF v_child_count = 0 THEN
+    o_generation_count := 0;
+    o_generation_set_hash := encode(
+      x_extension.digest(convert_to('[]', 'UTF8'), 'sha256'), 'hex'
+    );
+    o_replayed := false;
+    RETURN;
   END IF;
 
   SELECT root_receipt.* INTO v_seal FROM ops.curation_provider_root_receipts AS root_receipt
