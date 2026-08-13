@@ -1204,6 +1204,59 @@ async def test_provider_full_snapshot_requires_exact_authoritative_job_and_repla
         assert replay["o_replayed"] is True
         assert replay["o_generation_id"] == first["o_generation_id"]
 
+        async with migrated_engine.begin() as connection:
+            await connection.execute(
+                text(
+                    """
+                    UPDATE ops.import_jobs
+                    SET payload = payload || jsonb_build_object(
+                      'candidate_generation_sealed_at', clock_timestamp()
+                    )
+                    WHERE job_id = CAST(:source_job_id AS uuid)
+                    """
+                ),
+                params,
+            )
+            late_rule_id = str(
+                await connection.scalar(
+                    text(
+                        """
+                        INSERT INTO feature.curated_source_rules (
+                          theme_id, source_id, region_scope, default_action,
+                          priority, enabled, metadata
+                        )
+                        SELECT theme_id, source_id, region_scope, default_action,
+                               priority + 1, enabled, metadata
+                        FROM feature.curated_source_rules
+                        WHERE rule_id = CAST(:rule_id AS uuid)
+                        RETURNING rule_id
+                        """
+                    ),
+                    params,
+                )
+            )
+
+        async with dagster.connect() as connection:
+            transaction = await connection.begin()
+            await connection.execute(
+                text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
+            )
+            with pytest.raises(IntegrityError) as sealed:
+                await connection.execute(
+                    text(
+                        """
+                        CALL feature.materialize_theme_candidate_generation(
+                          CAST(:rule_id AS uuid), 'provider_full_snapshot',
+                          CAST(:source_job_id AS uuid), NULL, NULL, NULL,
+                          '{}'::jsonb, NULL, NULL, NULL, NULL, NULL
+                        )
+                        """
+                    ),
+                    {**params, "rule_id": late_rule_id},
+                )
+            assert getattr(sealed.value.orig, "sqlstate", None) == "23514"
+            await transaction.rollback()
+
         async with migrated_engine.connect() as connection:
             actor, source_job, causation_job = (
                 await connection.execute(

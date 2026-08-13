@@ -99,8 +99,10 @@ command로 결선했다. theme/source/rule 공통 append-only effect claim은 te
 resource 재사용을 차단하며 provider-owned/NULL-owner theme/rule은 admin command로 수정할 수 없다.
 source observation은 authoritative full-snapshot child job당 immutable receipt 한 건으로 제한했고,
 caller-driven admin rule apply와 독립 `curated_features_refresh` Dagster job/client export를 제거했다.
-다음은 남은 raw catalog DML을 회수하고 provider load terminal transaction에 typed observation·candidate
-generation을 직접 결선하는 것이다. T-VN-40 paired consumer receipt는 현재 `pending`이며 Map user/
+provider load terminal transaction은 typed source observation을 기록하고 candidate rule generation 전체를
+만든 뒤 generation set hash와 seal 시각을 child job에 봉인한다. 봉인 뒤에는 같은 rule의 exact replay만
+가능하고 과거 job에 새 rule generation을 귀속할 수 없다. 다음은 남은 raw catalog DML을 회수하는 것이다.
+T-VN-40 paired consumer receipt는 현재 `pending`이며 Map user/
 service/full spec hash를 고정하고 n150 installer가 complete 전에는 fail-close한다.
 fresh 0001→0111 actual-login theme/source/rule/candidate 통합을 통과했다.
 A/B/C는 하나의 forward-only PR/release로 유지하며, 누적 구현은 DB/동시성과
