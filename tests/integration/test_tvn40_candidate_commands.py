@@ -2143,6 +2143,14 @@ async def test_provider_cancellation_success_finalizes_authoritative_root(
                 engine_started_at=started_at,
                 engine_finished_at=finished_at,
             )
+            finished = await finish_pipeline_cancellation_attempt(
+                session,
+                cancellation_id=cancellation_id,
+                status="completed",
+                error=None,
+            )
+            assert finished is not None
+            assert finished.attempt.status == "completed"
 
         async with migrated_engine.connect() as connection:
             root = (
@@ -2175,6 +2183,16 @@ async def test_provider_cancellation_success_finalizes_authoritative_root(
                 ),
                 {"root_job_id": root_job_id},
             )
+            attempt_status = await connection.scalar(
+                text(
+                    """
+                    SELECT status FROM ops.pipeline_cancellations
+                    WHERE cancellation_id = CAST(:cancellation_id AS uuid)
+                    """
+                ),
+                {"cancellation_id": cancellation_id},
+            )
+        assert attempt_status == "completed"
         if drift_after_seal:
             assert root == ("failed", "stale_input")
             assert member_terminal == "failed"

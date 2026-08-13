@@ -399,7 +399,7 @@ async def test_streaming_drop_counts_rows_but_samples_unique_ids(
     metadata = context.metadata[-1]
     assert metadata["address_validation_dropped_count"] == 3
     assert metadata["address_validation_dropped_feature_ids"] == ["feature-dup"]
-    assert metadata["address_validation_dropped_feature_ids_truncated"] is True
+    assert metadata["address_validation_dropped_feature_ids_truncated"] is False
 
 
 async def test_streaming_feature_batches_bound_issue_metadata_and_finding_chunks(
@@ -687,7 +687,7 @@ async def test_load_strict_mode_fails_on_error_issue(
     monkeypatch: pytest.MonkeyPatch, mode: bool | str
 ) -> None:
     bundles = [_bundle(f"feature-{index}") for index in range(3)]
-    context = _Context()
+    context = _Context(run_id="strict-run", retry_number=2)
     client = _Client()
     monkeypatch.setattr(
         "kortravelmap.dagster.etl.validate_feature_bundles_address",
@@ -704,6 +704,7 @@ async def test_load_strict_mode_fails_on_error_issue(
             strict_address=mode,
         )
     assert client.chunks == []
+    assert client.recorded_kwargs["run_id"] == "strict-run::retry:2"
 
 
 async def test_load_drop_mode_quarantines_error_rows(
@@ -732,6 +733,36 @@ async def test_load_drop_mode_quarantines_error_rows(
     assert context.metadata[-1]["address_validation_dropped_feature_ids"] == [
         "feature-1"
     ]
+    assert (
+        context.metadata[-1]["address_validation_dropped_feature_ids_truncated"]
+        is False
+    )
+
+
+async def test_load_drop_mode_counts_rows_but_samples_unique_ids(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundles = [_bundle("feature-dup"), _bundle("feature-dup")]
+    context = _Context()
+    client = _Client()
+    monkeypatch.setattr(
+        "kortravelmap.dagster.etl.validate_feature_bundles_address",
+        lambda items: _error_summary(items, error_feature_id="feature-dup"),
+    )
+
+    await load_feature_bundles_for_dagster(
+        context=context,  # type: ignore[arg-type]
+        client=client,  # type: ignore[arg-type]
+        bundles=bundles,  # type: ignore[arg-type]
+        provider="demo",
+        dataset_key="places",
+        strict_address="drop",
+    )
+
+    metadata = context.metadata[-1]
+    assert metadata["address_validation_dropped_count"] == 2
+    assert metadata["address_validation_dropped_feature_ids"] == ["feature-dup"]
+    assert metadata["address_validation_dropped_feature_ids_truncated"] is False
 
 
 @pytest.mark.parametrize("mode", ["off", False])

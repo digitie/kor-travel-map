@@ -104,6 +104,7 @@ class PipelineCancellationScopeMember:
     dagster_run_id: str | None
     cancellation_id: str | None
     operation_kind: str | None = None
+    current_stage: str | None = None
 
     @property
     def active(self) -> bool:
