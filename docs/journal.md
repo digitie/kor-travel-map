@@ -14,6 +14,15 @@ legacy 물리 제거와 Map/PinVi/n150 acceptance를 고정한다.
 PinVi가 소비하는 legacy curated detail snapshot은 canonical `curation_item_id` 기반의
 typed direct projection으로 같은 release에서 이관하고, legacy cache/path/type를 함께 제거한다.
 
+구현 전 독립 적대 리뷰 2명이 설계와 현 writer를 전수 대조해, UUID로 잘못 적은 domain command,
+기존 item lost update, same-state source audit 불능, accepted link pointer 누락, PinVi snapshot의
+신뢰/공개 술어 누락, merge↔provider lock inversion, raw DML 회수 뒤 import/manual/merge 42501,
+generation completeness와 role bootstrap 공백을 확인했다. 정본은 bigint command claim,
+candidate/collection/item 세 revision, exact source transition matrix, trusted decision 원자 생성,
+T-VN-36 effective input digest, 공통 Feature advisory fence, 전체 canonical writer의 typed procedure,
+API/Dagster executor 분리로 보강했다. ADR-061의 auto-publish와 machine-readable removal/OpenAPI
+계약도 ADR-092의 same-release cutover에 맞췄다.
+
 ## 2026-08-12 — T-VN-38 병합과 완료 task 아카이브 정리
 
 PR [#971](https://github.com/digitie/kor-travel-map/pull/971)이 `8dc2b24a`로 머지됐다.

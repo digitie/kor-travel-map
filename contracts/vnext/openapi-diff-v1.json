@@ -364,7 +364,7 @@
         },
         {
           "operation": "GET /v1/admin/features/curated/{curated_feature_id}/detail-snapshot",
-          "detail": "legacy curated_features overlay 부속 read. 주의 — PinVi admin이 런타임 소비 중(tasks-done T-VN-H07D vendored admin subset). 대체 표면은 canonical /v1/admin/curations/* read이며 PinVi caller 선전환은 T-VN-40B 소관",
+          "detail": "legacy curated_features overlay 부속 read. PinVi caller는 canonical GET /v1/admin/curation-items/{curation_item_id}/detail-snapshot으로 선전환하고 exact Map/PinVi pair를 고정한다.",
           "basis": "T-VN-40C"
         },
         {

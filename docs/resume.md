@@ -2,10 +2,10 @@
 
 ## 2026-08-13 — T-VN-40 A/B/C 단일 PR 구현 시작
 
-**다음 한 작업**: PR #977 head 위에서 ADR-092의 canonical membership·candidate 분리를
-40A schema/writer부터 구현한다. A/B/C는 하나의 forward-only PR/release로 유지하며,
-누적 구현은 DB/동시성과 API·consumer/ACL 관점의 독립 적대 리뷰어 2명이 같은 고정 SHA에서
-검증한다.
+**다음 한 작업**: PR #977 head 재베이스와 설계 적대 검토 반영은 끝났다.
+ADR-092의 canonical membership·candidate 분리를 0105 schema/writer부터 구현한다.
+A/B/C는 하나의 forward-only PR/release로 유지하며, 누적 구현은 DB/동시성과
+API·consumer/ACL 관점의 독립 적대 리뷰어 2명이 같은 고정 SHA에서 검증한다.
 상세 계약은
 [`t-vn-40-curation-write-model-detailed-design-2026-08-11.md`](reports/t-vn-40-curation-write-model-detailed-design-2026-08-11.md)가 정본이다.
 PinVi legacy curated detail snapshot도 canonical `curation_item_id` 기반 projection으로
