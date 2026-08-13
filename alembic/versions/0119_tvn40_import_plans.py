@@ -295,6 +295,9 @@ BEGIN
     RAISE EXCEPTION 'curation import commit requires the admin executor'
       USING ERRCODE = '42501';
   END IF;
+  PERFORM pg_advisory_xact_lock(
+    hashtextextended('curation-import-plan:' || p_import_plan_id::text, 0)
+  );
   SELECT command.* INTO STRICT v_command
   FROM ops.domain_commands AS command WHERE command.command_id = p_command_id
   FOR UPDATE;
@@ -309,7 +312,7 @@ BEGIN
   END IF;
   SELECT plan.* INTO STRICT v_plan
   FROM feature.curation_import_plans AS plan
-  WHERE plan.import_plan_id = p_import_plan_id FOR UPDATE;
+  WHERE plan.import_plan_id = p_import_plan_id;
   IF v_plan.actor <> p_principal OR v_plan.plan_sha256 <> p_plan_sha256 THEN
     RAISE EXCEPTION 'curation import plan actor or ETag changed'
       USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_import_plan_etag';

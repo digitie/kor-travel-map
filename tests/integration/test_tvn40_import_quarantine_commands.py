@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
@@ -10,8 +13,13 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from kortravelmap.infra.curation_repo import (
+    CurationImportRevisionExpectation,
     ResolvedCurationImportRow,
+    build_curation_import_revision_vector,
+    claim_curation_import_plan_command,
+    complete_curation_import_plan_command,
     confirm_curation_quarantine_standalone,
+    create_curation_import_plan_command,
     import_curation_rows,
     move_curation_quarantine_items,
 )
@@ -234,6 +242,85 @@ async def test_import_and_quarantine_advance_collection_revision_once(
                 )
             ) == 3
 
+        preview_command = await _domain_command(
+            migrated_engine,
+            actor=actor,
+            operation="admin.curation-import.preview",
+        )
+        import_plan_id = str(uuid4())
+        stored_payload = {
+            "row_number": changed_row.row_number,
+            "collection_key": changed_row.collection_key,
+            "metadata": changed_row.metadata,
+        }
+        plan_sha256 = hashlib.sha256(
+            json.dumps(stored_payload, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        revisions = await _revision_vector(
+            session_factory,
+            rows=(changed_row,),
+        )
+        async with session_factory() as session, session.begin():
+            await session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
+            await create_curation_import_plan_command(
+                session,
+                import_plan_id=import_plan_id,
+                content_sha256="a" * 64,
+                provenance_sha256=None,
+                plan_sha256=plan_sha256,
+                summary={"has_errors": False, "valid": 1},
+                rows=(changed_row,),
+                response_rows=({"row_number": 2, "valid": True},),
+                revisions=revisions,
+                expires_at=datetime.now(UTC) + timedelta(hours=1),
+                command_id=preview_command,
+                principal=actor,
+            )
+        plan_command = await _domain_command(
+            migrated_engine, actor=actor, operation="admin.curation.import"
+        )
+        async with session_factory() as session, session.begin():
+            await session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
+            content_sha256, stored_rows, summary, response_rows, _expires_at = (
+                await claim_curation_import_plan_command(
+                    session,
+                    import_plan_id=import_plan_id,
+                    plan_sha256=plan_sha256,
+                    command_id=plan_command,
+                    principal=actor,
+                )
+            )
+            assert stored_rows == (changed_row,)
+            assert summary == {"has_errors": False, "valid": 1}
+            assert response_rows == ({"row_number": 2, "valid": True},)
+            imported = await import_curation_rows(
+                session,
+                rows=stored_rows,
+                actor=actor,
+                source_content_sha256=content_sha256,
+                batch_kind="csv_upload",
+                command_id=plan_command,
+            )
+            await complete_curation_import_plan_command(
+                session,
+                import_plan_id=import_plan_id,
+                command_id=plan_command,
+                import_batch_id=str(imported["import_batch_id"]),
+                result_payload={"summary": summary, "rows": list(response_rows)},
+                principal=actor,
+            )
+        async with migrated_engine.connect() as connection:
+            assert int(
+                await connection.scalar(
+                    text(
+                        "SELECT count(*) FROM ops.curation_import_plan_commits "
+                        "WHERE import_plan_id = CAST(:plan_id AS uuid) "
+                        "AND command_id = :command_id"
+                    ),
+                    {"command_id": plan_command, "plan_id": import_plan_id},
+                )
+            ) == 1
+
         target_id, quarantine_id, quarantine_item_id = await _seed_quarantine(
             migrated_engine,
             theme_id=theme_id,
@@ -336,6 +423,16 @@ async def test_import_and_quarantine_advance_collection_revision_once(
             await transaction.rollback()
     finally:
         await api.dispose()
+
+
+async def _revision_vector(
+    session_factory: async_sessionmaker,
+    *,
+    rows: tuple[ResolvedCurationImportRow, ...],
+) -> tuple[CurationImportRevisionExpectation, ...]:
+    async with session_factory() as session, session.begin():
+        await session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
+        return await build_curation_import_revision_vector(session, rows=rows)
 
 
 async def _collection_scalar(
