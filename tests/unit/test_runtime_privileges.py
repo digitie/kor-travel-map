@@ -40,6 +40,21 @@ def test_runtime_acl_inventory_keeps_state_audit_and_its_sequence_ungranted() ->
             },
             {
                 "schema_name": "feature",
+                "relation_name": "theme_feature_candidates",
+                "relation_kind": "r",
+            },
+            {
+                "schema_name": "feature",
+                "relation_name": "theme_feature_candidate_transitions",
+                "relation_kind": "r",
+            },
+            {
+                "schema_name": "feature",
+                "relation_name": "theme_feature_candidate_transitions_transition_id_seq",
+                "relation_kind": b"S",
+            },
+            {
+                "schema_name": "feature",
                 "relation_name": "public_features",
                 "relation_kind": "v",
             },
@@ -58,6 +73,21 @@ def test_runtime_acl_inventory_keeps_state_audit_and_its_sequence_ungranted() ->
                 "relation_name": "feature_overrides",
                 "relation_kind": "r",
             },
+            {
+                "schema_name": "ops",
+                "relation_name": "curation_rule_reconcile_operations",
+                "relation_kind": "r",
+            },
+            {
+                "schema_name": "ops",
+                "relation_name": "curation_cutover_identity_mappings",
+                "relation_kind": "r",
+            },
+            {
+                "schema_name": "ops",
+                "relation_name": "curation_rule_reconcile_scope_members",
+                "relation_kind": "r",
+            },
         ]
     )
 
@@ -65,6 +95,11 @@ def test_runtime_acl_inventory_keeps_state_audit_and_its_sequence_ungranted() ->
     rendered = "\n".join(grants)
     assert "feature_state_transitions" not in rendered
     assert "feature_base_field_values" not in rendered
+    assert "theme_feature_candidates" not in rendered
+    assert "theme_feature_candidate_transitions" not in rendered
+    assert "curation_rule_reconcile_operations" not in rendered
+    assert "curation_rule_reconcile_scope_members" not in rendered
+    assert "curation_cutover_identity_mappings" not in rendered
     core_grants = "\n".join(_CORE_FEATURE_GRANTS)
     assert "feature_versions" not in core_grants
     assert (

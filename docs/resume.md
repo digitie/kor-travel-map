@@ -49,10 +49,11 @@ PR [#979](https://github.com/digitie/kor-travel-map/pull/979).
 3. 기동 시 "자기 코드 세대 vs DB alembic head" 대조 fence.
 ## 2026-08-14 — alembic squash 완료(검증까지), prod 지오코딩 복구
 
-**다음 한 작업**: PR #977 head 위 설계 적대 검토와 DB bootstrap trust-boundary
-구현을 끝냈다. 다음은 0105에 generation/reconcile/candidate/audit relation과 typed procedure/ACL을
-실제 DDL로 만든다. bootstrap은 populated DB에서 2회 실행해 dedicated owner/membership 보존을
-검증했다.
+**다음 한 작업**: PR #977 head 위 bootstrap과 0105 expand DB spine을 구현했다.
+다음은 T-VN-40 final schema/API/cutover를 서로 다르게 승인하는
+`target-schema-v1.sql`·`recovery-preflight-v1.json`·`openapi-diff-v1.json`을 최종 정본으로
+원자 재동결하고, 이어서 set-based generation/typed command procedure를 구현한다. bootstrap은
+populated DB에서 2회, 0105는 fresh 0001→head와 실제 ROLE ACL/append-only gate로 검증했다.
 A/B/C는 하나의 forward-only PR/release로 유지하며, 누적 구현은 DB/동시성과
 API·consumer/ACL 관점의 독립 적대 리뷰어 2명이 같은 고정 SHA에서 검증한다.
 상세 계약은

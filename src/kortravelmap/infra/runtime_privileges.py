@@ -153,6 +153,9 @@ _ORDINARY_SCHEMA_PRIVILEGES: Mapping[str, tuple[str, ...]] = {
 # directly.  A typed state-owner procedure owns author/revoke mutation so a
 # provider/admin connection cannot erase that fence through raw SQL.
 _OPS_TABLE_PRIVILEGES: Mapping[str, tuple[str, ...]] = {
+    "curation_cutover_identity_mappings": (),
+    "curation_rule_reconcile_operations": (),
+    "curation_rule_reconcile_scope_members": (),
     "feature_override_field_paths": ("SELECT",),
     "feature_overrides": ("SELECT",),
 }
@@ -162,9 +165,18 @@ _PROTECTED_FEATURE_TABLES = frozenset(
         "features",
         "feature_base_field_values",
         "feature_state_transitions",
+        "theme_candidate_generation_observations",
+        "theme_candidate_generations",
+        "theme_feature_candidate_transitions",
+        "theme_feature_candidates",
     }
 )
-_PROTECTED_FEATURE_SEQUENCES = frozenset({"feature_state_transitions_transition_id_seq"})
+_PROTECTED_FEATURE_SEQUENCES = frozenset(
+    {
+        "feature_state_transitions_transition_id_seq",
+        "theme_feature_candidate_transitions_transition_id_seq",
+    }
+)
 
 _APPLICATION_RELATIONS_SQL = text(
     """
@@ -318,6 +330,8 @@ def _runtime_relation_grants(
                 relation,
                 _ORDINARY_SCHEMA_PRIVILEGES[schema],
             )
+            if not privileges:
+                continue
         grants.append(_grant_sql(schema=schema, relation=relation, privileges=privileges))
     return grants, unknown_feature_relations
 

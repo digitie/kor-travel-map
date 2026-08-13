@@ -44,8 +44,9 @@ T-VN-40은 retained catalog 세 relation 모두에 operator semantic CAS revisio
 ALTER TABLE feature.curated_themes
   ADD COLUMN row_revision bigint NOT NULL DEFAULT 1,
   ADD COLUMN archived_at timestamptz,
-  ADD CONSTRAINT ck_curated_themes_revision_positive CHECK (row_revision >= 1),
-  DROP COLUMN default_curated;
+  ADD COLUMN owner_kind text,
+  ADD COLUMN owner_provider_dataset_id bigint,
+  ADD CONSTRAINT ck_curated_themes_revision_positive CHECK (row_revision >= 1);
 
 ALTER TABLE feature.curated_sources
   ADD COLUMN row_revision bigint NOT NULL DEFAULT 1,
@@ -58,12 +59,20 @@ ALTER TABLE feature.curated_sources
 ALTER TABLE feature.curated_source_rules
   ADD COLUMN row_revision bigint NOT NULL DEFAULT 1,
   ADD COLUMN archived_at timestamptz,
+  ADD COLUMN owner_kind text,
+  ADD COLUMN owner_provider_dataset_id bigint,
   ADD CONSTRAINT ck_curated_source_rules_revision_positive
-    CHECK (row_revision >= 1),
-  DROP CONSTRAINT ck_curated_source_rules_action,
-  ADD CONSTRAINT ck_curated_source_rules_action
-    CHECK (default_action IN ('candidate', 'ignore'));
+    CHECK (row_revision >= 1);
 ```
+
+위 SQL은 **expand block**이다. manifest와 ownership collision 분류 전에는
+`default_curated`를 DROP하거나 legacy `default_action='curated'`를 거부하는 CHECK를 설치하지 않는다.
+backfill 뒤 final block이 theme/rule `owner_kind`를 `operator|provider_dataset`으로 NOT NULL 고정하고,
+provider-owned이면 `owner_provider_dataset_id`가 exact provider dataset FK로 non-null, operator-owned이면
+NULL인 XOR CHECK를 VALIDATE한다. concierge theme/rule ownership은 slug 추측이 아니라 immutable
+backfill manifest로 분류하며 unknown/collision은 중단한다. provider sync는 provider-owned row만 변경하고
+owner 두 열은 UPDATE 불가다. 그 뒤 `curated → candidate` 변환, action CHECK `NOT VALID → VALIDATE`,
+마지막에 theme `default_curated` DROP을 수행한다.
 
 - catalog command는 실제 operator-owned 내용 변경 때만 `row_revision`을 1 증가시킨다. 직접
   `UPDATE`와 no-op timestamp write는 DB trigger/ACL로 거부한다. theme/source/rule GET·list DTO는
@@ -92,9 +101,10 @@ CREATE TABLE ops.curation_rule_reconcile_operations (
   operation_id uuid PRIMARY KEY DEFAULT x_extension.gen_random_uuid(),
   rule_id uuid NOT NULL
     REFERENCES feature.curated_source_rules(rule_id) ON DELETE RESTRICT,
-  before_rule_revision bigint NOT NULL CHECK (before_rule_revision >= 1),
-  after_rule_revision bigint NOT NULL CHECK (after_rule_revision >= before_rule_revision),
-  before_rule_input_hash text NOT NULL CHECK (before_rule_input_hash ~ '^[0-9a-f]{64}$'),
+  operation_kind text NOT NULL CHECK (operation_kind IN ('create','patch','archive')),
+  before_rule_revision bigint CHECK (before_rule_revision >= 1),
+  after_rule_revision bigint NOT NULL CHECK (after_rule_revision >= 1),
+  before_rule_input_hash text CHECK (before_rule_input_hash ~ '^[0-9a-f]{64}$'),
   after_rule_input_hash text NOT NULL CHECK (after_rule_input_hash ~ '^[0-9a-f]{64}$'),
   command_id bigint REFERENCES ops.domain_commands(command_id) ON DELETE RESTRICT,
   system_operation_key text,
@@ -107,6 +117,14 @@ CREATE TABLE ops.curation_rule_reconcile_operations (
     OR (command_id IS NULL AND system_operation_key IS NOT NULL
       AND system_operation_key = btrim(system_operation_key)
       AND system_operation_key <> '')
+  ),
+  CONSTRAINT ck_curation_rule_reconcile_operation_revision_shape CHECK (
+    (operation_kind = 'create'
+      AND before_rule_revision IS NULL AND before_rule_input_hash IS NULL
+      AND after_rule_revision = 1)
+    OR (operation_kind IN ('patch','archive')
+      AND before_rule_revision IS NOT NULL AND before_rule_input_hash IS NOT NULL
+      AND after_rule_revision > before_rule_revision)
   )
 );
 CREATE UNIQUE INDEX uq_curation_rule_reconcile_command
@@ -623,7 +641,8 @@ CALL feature.promote_theme_feature_candidate(
   OUT o_candidate_id uuid,
   OUT o_candidate_revision bigint,
   OUT o_curation_item_id uuid,
-  OUT o_curation_item_revision bigint
+  OUT o_curation_item_revision bigint,
+  OUT o_transition_id bigint
 );
 
 CALL feature.reject_theme_feature_candidate(
@@ -633,7 +652,8 @@ CALL feature.reject_theme_feature_candidate(
   p_reason_code text,
   p_principal text,
   OUT o_candidate_id uuid,
-  OUT o_candidate_revision bigint
+  OUT o_candidate_revision bigint,
+  OUT o_transition_id bigint
 );
 ```
 
@@ -710,8 +730,10 @@ retained theme/source/rule catalog writer도 다음 typed `SECURITY DEFINER` com
   `rule_reconcile`을 **같은
   transaction**에서 실행해 candidate eligibility와 originating command id를 원자 결박한다.
   mutation보다 먼저 old+proposed rule set에서 affected existing/expected candidate Feature union을
-  nonlocking materialize하고 전부 sorted advisory prelock한다. 그 후 catalog rows를 lock/CAS/recheck,
-  update, operation receipt, generation 순으로 실행한다. theme/source archive의 다중 rule union도 한
+  nonlocking materialize하고 전부 sorted advisory prelock한다. 그 후 catalog rows를 lock/CAS하고
+  old+proposed union을 다시 계산해 prelocked set과 양방향 `EXCEPT` 0인지 검증한다. 다르면 catalog
+  mutation/generation 전에 전체 transaction을 retry하고 검증된 set 밖 advisory lock을 추가하지 않는다.
+  이후 update, operation receipt, generation 순으로 실행한다. theme/source archive의 다중 rule union도 한
   번에 선잠금하며 catalog row를 잡은 뒤 advisory lock을 요청하지 않는다.
   display-only description/metadata change는 generation 없이 catalog revision만 증가하고, exact no-op은
   어떤 revision/operation도 만들지 않는다. field→predicate/hash/no-op matrix를 migration contract와
@@ -774,8 +796,9 @@ operation을 freeze한다: catalog theme/source/rule create·patch·archive, col
 item create·patch·archive, import preview·commit, quarantine move-items·standalone-confirm·recover,
 accepted/revoked link decision, candidate promote·reject, curation-aware Feature merge. 각 command는
 `p_command_id bigint`, principal, expected revision/vector를 typed parameter로 받고 operation mismatch는
-23514, stale revision은 40001→HTTP 412, identity conflict는 23505→409다. normal runtime raw DML은
-42501이다.
+23514, stale revision은 `23514` + frozen `ck_tvn40_expected_revision` constraint identity→HTTP 412,
+identity conflict는 23505→409다. `40001`은 오직 PostgreSQL serialization failure이며 bounded
+whole-command retry 전용이다. normal runtime raw DML은 42501이다.
 
 CSV import 및 collection create는 기존 catalog row를 upsert하지 않는다. import preview receipt가
 exact revision vector와 set checksum을 고정하고 commit이 이를 재검증하며, absent catalog create-only와
@@ -783,12 +806,20 @@ exact-equal reuse 외 conflict는 409다. `ktmctl dedup-merge`는 DB raw client 
 domain-command/typed merge 경계로 호출하거나 command 자체를 제거한다. legacy raw merge를 남기지 않는다.
 
 Dagster/provider executor의 exact catalog allowlist는 generic admin catalog command가 아니라
-`refresh_curated_source_observation(provider_dataset_id, source_observation, operation_receipt)`와
-`sync_concierge_theme_catalog(canonical_theme_rule_set, operation_receipt)` 두 command다. 전자는 source
+`refresh_curated_source_observation(p_provider_dataset_id bigint, p_import_job_id uuid)`와
+`sync_concierge_theme_catalog(p_provider_dataset_id bigint, p_import_job_id uuid)` 두 command다. 전자는 source
 observation fields/revision만, 후자는 concierge-owned theme/rule semantic subset과 revision만 쓴다.
 둘은 provider executor의 DB-owned receipt를 검증하고 필요한 rule generation을 같은 caller
-transaction에서 이어 실행한다. 현재 Dagster asset은 각 rule의 exact provider dataset + sync scope +
-operation membership에 결박된 `done/SUCCESS` full-snapshot `ops.import_jobs.job_id`를 전달해야 한다.
+transaction에서 이어 실행한다. provider full-snapshot candidate generation은 독립 daily curated candidate
+asset이 호출하지 않는다. `run_tracked_feature_asset`가 typed load result의
+`authoritative_snapshot_complete`와 canonical input-set hash를 `finish_dagster_feature_membership`에 전달하고,
+그 transaction이 exact child `ops.import_jobs`/`ops.import_job_datasets` member를 `done/SUCCESS`로 닫으면서
+authoritative flag/hash를 durable하게 기록한다. 그 뒤 같은 transaction에서 해당
+`(provider_dataset_id,sync_scope,operation_key)`에 결박된 enabled rule을 서버 조회해
+`provider_full_snapshot` generation으로 fan-out한다. multi-member asset은 각 child result별 typed flag/hash를
+전달한다. job id가 없는 manual daily run, untracked asset, caller가 latest-success를 조회해 고른 job은
+거부하며 old `curated_features_refresh_daily_schedule`/candidate sweep/snapshot asset과 client export는
+제거한다.
 failed/cancelled/multi-member mismatch는 global eligibility removal 근거가 될 수 없다. incremental은
 DB-owned exact touched-scope operation이 있을 때 그 scope 안에서만 eligibility를 바꾼다.
 `rule_reconcile`은 rule update가 만든 immutable operation receipt만 사용한다. 동일 Dagster retry는
@@ -904,6 +935,16 @@ correction은 fresh clone/reload input에서 다시 수행한다.
 mapping manifest는 each bucket count, stable identity checksum, legacy primary key ↔ candidate/item id,
 unmapped cause를 보전한다. “0건이면 무시” 같은 fallback은 없다.
 
+cross-DB PinVi backfill용 exact 1:1 결과는 migration이 immutable
+`ops.curation_cutover_identity_mappings(legacy_curated_feature_id uuid primary key, collection_id uuid,
+curation_item_id uuid unique, mapping_kind text, source_row_hash text, created_at timestamptz)`에 남긴다.
+UPDATE/DELETE/TRUNCATE와 runtime raw write는 금지한다. Map은 maintenance 중에만 exact scoped
+`GET /v1/service/curation-cutover/identity-mappings`를 keyset+closed checksum envelope로 제공하고,
+Docker Manager는 count/root SHA-256/Map head/PinVi target SHA를 paired receipt에 기록한다. PinVi migration은
+이 service artifact만 소비해 old plan/POI identity를 new UUID로 backfill하며 orphan/ambiguous/duplicate가
+하나라도 있으면 중단한다. PinVi DB 직접 Map 접근이나 old route 재호출은 허용하지 않는다. PinVi의
+mapping checksum과 Map immutable relation checksum이 같아진 뒤에만 cutover fence를 해제한다.
+
 0045 sync가 만든 canonical companion을 official membership으로 오인하지 않는다. collection metadata가
 `migrated_from=feature.curated_features`이고 item이 `legacy_projection_id`로 legacy row를 가리키며,
 current import row·operator edit·`csv_explicit_feature_id`/`admin_review`/`forward_recovery` accepted
@@ -925,6 +966,7 @@ legacy snapshot은 항상 item 하나만 담으므로 `curated_feature_id`를 ca
 
 ```
 GET /v1/service/curation-items/{curation_item_id}/detail-snapshot
+GET /v1/service/curation-collections/{collection_id}/detail-snapshot
 ```
 
 이 endpoint는 cache table을 새로 만들지 않고 one repeatable-read query에서
@@ -971,6 +1013,16 @@ manual `admin_review` item은 `source_record_key`가 없어도 canonical/public 
 따라서 snapshot의 `feature.source_record_key`와 source projection은 nullable이며, trusted accepted
 decision과 public Feature가 있으면 manual item도 반환한다. source record key가 있는 item은
 record/entity가 exact-match하지 않으면 404지만, 없는 item을 암묵적으로 import 불가로 만들지 않는다.
+
+PinVi의 authoritative discovery/refresh는 collection snapshot route를 쓴다. 첫 page는 ordered active
+public item `(curation_item_id,row_revision,item-payload-hash)` 전체의 `item_set_hash`, count, collection
+representation ETag, closed collection payload, item snapshot page, opaque `next_cursor`를 반환한다. cursor는
+collection id, collection revision, item set hash, last item key를 서명해 다음 page마다 current set과 exact
+equality를 다시 검증한다. 중간 변경이면 409 restart를 반환해 서로 다른 시점의 page를 섞지 않는다.
+마지막 page는 `complete=true`; PinVi는 모든 page와 count/hash가 맞을 때만 한 transaction에서 plan/POI
+authoritative set을 교체한다. 첫 요청의 `If-None-Match` exact match는 304이며 receipt는 단일 item ETag가
+아니라 collection ETag + item set hash에 결박한다. item route는 단건 조회/진단용이고 multi-item
+collection completeness의 근거가 아니다.
 
 PinVi persistence mapping은 `collection_id → curated plan`, `curation_item_id → plan POI`다. plan은
 `source_collection_id uuid UNIQUE`, POI는 `(plan_id, source_curation_item_id uuid) UNIQUE`를 가지며
