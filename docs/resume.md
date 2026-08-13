@@ -88,8 +88,11 @@ immutable reconcile receipt, set-based generation을 같은 transaction에 결�
 rule command와 기존 candidate 회귀 9개가 통과했다. admin repository/API도 단건 GET·archive,
 decimal revision, create/patch/archive strong ETag와 If-Match/replay 경계로 연결했다. admin OpenAPI와
 generated TypeScript를 7.13.0으로 재생성했고 Linux ext4 격리 환경의 generation check와 전체
-frontend type-check가 통과했다. 다음 구현 단위는 theme/source catalog command로 같은 CAS/reconcile
-경계를 확장하는 것이다.
+frontend type-check가 통과했다. 적대 리뷰의 N:M receipt 중복, metadata-only generation, create 201,
+UUID/null 422, SERIALIZABLE retry 우회와 applied OpenAPI freeze도 수정했으며 fresh head actual-login
+integration 1개와 관련 unit/contract 43개가 통과했다. 다음 구현 단위는 작업 중인 0110 theme catalog
+command를 fresh migration/actual-login gate로 완성한 뒤 source catalog까지 같은 CAS/reconcile 경계로
+확장하는 것이다.
 A/B/C는 하나의 forward-only PR/release로 유지하며, 누적 구현은 DB/동시성과
 API·consumer/ACL 관점의 독립 적대 리뷰어 2명이 같은 고정 SHA에서 검증한다.
 상세 계약은

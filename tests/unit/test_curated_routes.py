@@ -386,7 +386,7 @@ def test_retained_rule_http_commands_use_strong_etag_and_typed_repo(
 
     assert (fetched.status_code, fetched.headers["etag"]) == (200, '"3"')
     assert fetched.json()["data"]["row_revision"] == "3"
-    assert (created.status_code, created.headers["etag"]) == (200, '"3"')
+    assert (created.status_code, created.headers["etag"]) == (201, '"3"')
     assert missing.status_code == 428
     assert (patched.status_code, patched.headers["etag"]) == (200, '"4"')
     assert (archived.status_code, archived.headers["etag"]) == (200, '"5"')
@@ -398,6 +398,47 @@ def test_retained_rule_http_commands_use_strong_etag_and_typed_repo(
     assert patch_rule.await_count == 1
     assert archive_rule.await_args.kwargs["expected_revision"] == 4
     assert archive_rule.await_args.kwargs["reason_code"] == "operator_retired"
+
+
+@pytest.mark.parametrize(
+    ("path", "method", "payload"),
+    [
+        (
+            "/v1/admin/curated-source-rules/not-a-uuid",
+            "GET",
+            None,
+        ),
+        (
+            "/v1/admin/curated-source-rules/11111111-1111-4111-8111-111111111111",
+            "PATCH",
+            {"priority": None},
+        ),
+        (
+            "/v1/admin/curated-source-rules/11111111-1111-4111-8111-111111111111",
+            "PATCH",
+            {"enabled": None},
+        ),
+    ],
+)
+def test_retained_rule_http_rejects_malformed_identifiers_and_nulls(
+    path: str,
+    method: str,
+    payload: dict[str, object] | None,
+) -> None:
+    app = create_app(
+        ApiSettings(
+            admin_proxy_secret=None,
+            public_api_key_required=False,
+            vworld_api_key=None,
+        )
+    )
+    client = TestClient(app)
+    headers = {
+        "Idempotency-Key": "96000000-0000-4000-8000-000000000001",
+        "If-Match": '"1"',
+    }
+    response = client.request(method, path, json=payload, headers=headers)
+    assert response.status_code == 422
 
 
 def test_public_curated_list_and_detail_strip_raw_lineage(

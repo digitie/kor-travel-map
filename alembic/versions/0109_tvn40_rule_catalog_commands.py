@@ -109,7 +109,7 @@ BEGIN
     LEFT JOIN provider_sync.source_entity_heads AS head
       ON head.source_entity_key = entity.source_entity_key
     WHERE entity.provider_dataset_id = v_provider_dataset_id
-    UNION ALL
+    UNION
     SELECT 'feature'::text, link.feature_id,
            encode(x_extension.digest(convert_to(jsonb_build_array(
              link.feature_id, core.feature_uuid::text, core.row_revision,
@@ -177,7 +177,7 @@ BEGIN
     LEFT JOIN provider_sync.source_entity_heads AS head
       ON head.source_entity_key = entity.source_entity_key
     WHERE entity.provider_dataset_id = v_provider_dataset_id
-    UNION ALL
+    UNION
     SELECT 'feature'::text, link.feature_id,
            encode(x_extension.digest(convert_to(jsonb_build_array(
              link.feature_id, core.feature_uuid::text, core.row_revision,
@@ -458,6 +458,23 @@ BEGIN
      AND v_rule.metadata = p_metadata THEN
     o_rule_id := v_rule.rule_id;
     o_rule_revision := v_rule.row_revision;
+    o_generation_id := NULL;
+    RETURN;
+  END IF;
+  IF v_rule.place_kind IS NOT DISTINCT FROM p_place_kind
+     AND v_rule.category IS NOT DISTINCT FROM p_category
+     AND v_rule.region_scope = p_region_scope
+     AND v_rule.detail_selector IS NOT DISTINCT FROM p_detail_selector
+     AND v_rule.default_action = p_default_action
+     AND v_rule.priority = p_priority
+     AND v_rule.enabled = p_enabled THEN
+    UPDATE feature.curated_source_rules AS rule
+    SET metadata = p_metadata,
+        row_revision = rule.row_revision + 1,
+        updated_at = clock_timestamp()
+    WHERE rule.rule_id = p_rule_id
+    RETURNING rule.rule_id, rule.row_revision
+    INTO STRICT o_rule_id, o_rule_revision;
     o_generation_id := NULL;
     RETURN;
   END IF;

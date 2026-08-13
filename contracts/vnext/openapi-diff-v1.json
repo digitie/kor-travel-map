@@ -5,7 +5,7 @@
   "baseline": {
     "admin": {
       "file": "packages/kor-travel-map-api/openapi.json",
-      "sha256": "e48b7c0ed839735b5c2936addcbac5498b113a0038ab7b53d8a186e86249ba66"
+      "sha256": "69702e4875faba973522f29abd4fbb64ec32bcafd02390c2b5a723f07c69f2a3"
     },
     "user": {
       "file": "packages/kor-travel-map-api/openapi.user.json",
@@ -366,30 +366,35 @@
         {
           "kind": "operation",
           "target_operation": "GET /v1/admin/theme-feature-candidates",
+          "applied": true,
           "detail": "review_state·eligibility_present AND-filter keyset 후보 목록",
           "basis": "ADR-092"
         },
         {
           "kind": "operation",
           "target_operation": "GET /v1/admin/theme-feature-candidates/{candidate_id}",
+          "applied": true,
           "detail": "candidate CAS ETag와 representation ETag를 분리한 typed detail",
           "basis": "ADR-092"
         },
         {
           "kind": "operation",
           "target_operation": "GET /v1/admin/theme-feature-candidates/{candidate_id}/transitions",
+          "applied": true,
           "detail": "append-only candidate transition keyset timeline",
           "basis": "ADR-092"
         },
         {
           "kind": "operation",
           "target_operation": "POST /v1/admin/theme-feature-candidates/{candidate_id}/promote",
+          "applied": true,
           "detail": "candidate CAS + target collection/item revision을 요구하는 typed promotion",
           "basis": "ADR-092"
         },
         {
           "kind": "operation",
           "target_operation": "POST /v1/admin/theme-feature-candidates/{candidate_id}/reject",
+          "applied": true,
           "detail": "candidate CAS + non-empty reason의 typed rejection",
           "basis": "ADR-092"
         },
@@ -420,12 +425,14 @@
         {
           "kind": "operation",
           "target_operation": "GET /v1/admin/curated-source-rules/{rule_id}",
+          "applied": true,
           "detail": "rule raw revision ETag와 canonical rule-input hash를 반환하는 단건 read",
           "basis": "ADR-092"
         },
         {
           "kind": "operation",
           "target_operation": "DELETE /v1/admin/curated-source-rules/{rule_id}",
+          "applied": true,
           "detail": "same-transaction rule reconcile을 수행하는 typed archive command",
           "basis": "ADR-092"
         },

@@ -245,6 +245,7 @@ _COMMAND_REGISTRY: Final[dict[OperationKey, CommandPolicy]] = {
     ("POST", "/v1/admin/curated-source-rules"): _domain(
         "admin.curated-source-rule.create",
         _MUTATION_RESULT,
+        success_status=201,
         replay_headers=("ETag",),
         transaction_isolation="serializable",
     ),
