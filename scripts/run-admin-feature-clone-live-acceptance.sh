@@ -419,7 +419,25 @@ COPY (
         ':',
         relation.relkind,
         relation.relowner::regrole::text,
-        COALESCE(relation.relacl::text, ''),
+        -- routine과 같은 이유로 기본값과의 차이만 센다 (`ALTER TABLE ... OWNER TO`도
+        -- `relacl`을 물화한다). relkind별 기본 ACL이 다르므로 sequence는 's',
+        -- 나머지는 'r'로 조회한다.
+        COALESCE(
+          (
+            SELECT string_agg(entry::text, ',' ORDER BY entry::text)
+            FROM unnest(relation.relacl) AS entry
+            WHERE entry::text <> ALL (
+              SELECT default_entry::text
+              FROM unnest(
+                pg_catalog.acldefault(
+                  CASE WHEN relation.relkind = 'S' THEN 's' ELSE 'r' END::"char",
+                  relation.relowner
+                )
+              ) AS default_entry
+            )
+          ),
+          ''
+        ),
         relation.relrowsecurity,
         relation.relforcerowsecurity,
         COALESCE(
@@ -526,7 +544,26 @@ COPY (
       routine.proname || ':' ||
         pg_catalog.pg_get_function_identity_arguments(routine.oid),
       routine.proowner::regrole::text || ':' ||
-        COALESCE(routine.proacl::text, '') || ':' ||
+        -- ACL은 **기본값과의 차이만** 센다. `ALTER FUNCTION ... OWNER TO`는
+        -- `proacl`을 NULL에서 "기본값과 동등한 명시적 배열"로 물화하는데,
+        -- `pg_dump`는 기본값과 같은 ACL에 대해 아무 문장도 내보내지 않으므로
+        -- 복원본은 다시 NULL이 된다. 권한은 동일한데 텍스트만 달라져
+        -- 복원 인증이 실패한다 — ADR-090처럼 routine 소유권을 재지정하는
+        -- 스키마는 이 정규화 없이는 절대 통과할 수 없다 (2026-08-13 실측:
+        -- author_lifecycle_override 등 9개 routine).
+        COALESCE(
+          (
+            SELECT string_agg(entry::text, ',' ORDER BY entry::text)
+            FROM unnest(routine.proacl) AS entry
+            WHERE entry::text <> ALL (
+              SELECT default_entry::text
+              FROM unnest(
+                pg_catalog.acldefault('f'::"char", routine.proowner)
+              ) AS default_entry
+            )
+          ),
+          ''
+        ) || ':' ||
         pg_catalog.pg_get_functiondef(routine.oid)
     FROM pg_catalog.pg_proc AS routine
     JOIN pg_catalog.pg_namespace AS namespace
