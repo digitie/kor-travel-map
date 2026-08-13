@@ -23,9 +23,10 @@ barrier로 직렬화한다.
   - [/] `T-VN-41F1D-D` → [ ] `T-VN-41F1D-D2`(격리 리허설·data-dependent live UI E2E)
   - [~] `T-VN-41F1D-E`(v5/v7 attestation 전환) ∥ [ ] `T-VN-41S`
 - **Wave 2 barrier 이후**
-  - Lane A: [ ] `T-VN-35-deploy` → [ ] `T-VN-37D`
+  - Lane A: [ ] `T-VN-35/34/36-deploy`(세 배포를 `0104` 단일 단계로 통합) → [ ] `T-VN-37D`
   - Lane B: [x] `T-VN-34A` → [x] `T-VN-34B` → [x] `T-VN-34C` →
-    [x] `T-VN-36A` → [x] `T-VN-36B` → [x] `T-VN-36C` → [x] `T-VN-36D`
+    [x] `T-VN-36A` → [x] `T-VN-36B` → [x] `T-VN-36C` → [x] `T-VN-36D` →
+    [ ] `T-VN-36-live`(격리 실데이터 clone 인수 실행)
   - 32~38 join barrier 뒤 Lane B: [ ] `T-VN-40A` → [ ] `T-VN-40B` →
     [ ] `T-VN-40C`
   - 최종 단일 cutover: [ ] `T-VN-39`
@@ -65,8 +66,9 @@ barrier로 직렬화한다.
   (AGENTS.md), 그 아래 설계적 우수성 > 확장성 > 성능 > 불필요한 코드 반복(래퍼류) 금지.
   **prod 환경 보전·호환성·기존 문서 계약·최소 수정은 비제약** — 필요 시 DB 스키마·문서
   계약 수정 가능. AGENTS.md vNext 우선순위 단락에 동일 취지의 dated note를 둔다.
-- migration 정본: 단일 head 유지(2026-08-07 `main` 기준 head `0087_route_area_subtypes`;
-  prod 적용 head는 아직 `0083` — `T-VN-35-deploy` 참조). 후속 migration 소유자는
+- migration 정본: 단일 head 유지(2026-08-13 `main` 기준 head
+  `0104_tvn36_final_fence`; prod 적용 head는 `0087_route_area_subtypes` —
+  2026-08-13 실측, `T-VN-35/34/36-deploy` 참조). 후속 migration 소유자는
   PR 직전 단일 head를 재확인한 뒤 번호를 배정한다. 두 lane의 migration-bearing PR은 번호 예약부터
   머지까지 직렬화한다. forward migration 뒤에는 수용 조건이나 실패 복구가 명시적으로 요구하지 않는
   한 downgrade/rollback하지 않고 fresh clone·새 transaction으로 다음 검증을 이어간다.
@@ -295,8 +297,14 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
     > 카테고리 결함도 공개 표면에 그대로 노출된다(진해보타닉뮤지엄이 카페로, 청풍호가 펜션으로).
     >
     > **import preview의 H36 게이트 동작은 prod에서 잴 수 없다** — 배포 이미지가 `c8ed6164`라
-    > `_adopted_match`가 없고 `0066`의 `external_component_id`도 없다. `T-VN-H35` 배포 후에만
-    > 실증 가능하다.
+    > `_adopted_match`가 없고 `0066`의 `external_component_id`도 없다.
+    >
+    > **2026-08-13 갱신**: 이 blocker는 사라졌다. 두 심볼 모두 head에 있고
+    > (`curations.py`의 `_adopted_match`, `curation_repo.py`의 `external_component_id`),
+    > 가리키던 `T-VN-H35` 배포는 소멸했다(`tasks-done.md` — "이 항목 아래의 cutover
+    > 설계는 전부 이력이다. 실행하지 마라"). 현재 배포 소유자는 `T-VN-35/34/36-deploy`이고,
+    > 측정은 `T-VN-36-live`의 격리 clone(실 prod 데이터, `0104`)에서 `dry_run=true`
+    > preview 한 번으로 가능하다.
     >
     > 측정 실수 기록: ① 원격 셸에서 명령치환이 깨져 토큰이 비었고 401을 엔드포인트 인증
     > 문제로 오독할 뻔했다(스크립트 파일로 해결). ② 응답 구조가 `data.feature`+`data.curations`인데
@@ -333,7 +341,10 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 > **issue #673 판정(2026-07-30) — 아직 닫을 수 없다.** 서브에이전트 조사로 이슈 본문·코멘트를
 > 요구사항으로 분해해 대조했다. 3항목 중 둘(오탐 분포 규명 / 규칙 교체)은 충족이고,
 > 셋째("다음 materialize에서 자동 회복되는가")는 **코드 논증만 있고 실증이 없다**.
-> 결정적 blocker는 **prod 미배포**이며 이슈가 신고한 손실(현재 457건)이 실재한다 → `T-VN-H35`.
+> 결정적 blocker는 **prod 미배포**이며 이슈가 신고한 손실(당시 457건)이 실재한다 →
+> ~~`T-VN-H35`~~ **`T-VN-35/34/36-deploy`**(2026-08-13 정정 — H35의 cutover는 소멸했다).
+> "457건"은 prod 폐기·재생성(`0078`) **이전** 측정값이라 그대로 쓸 수 없다. prod는 현재
+> `0087` / feature 1,008,852이므로 배포 전 재측정이 필요하다.
 > **재기준화(2026-07-31, #910/`0072` 반영)** — #673을 "457건 신규 회복"만으로 종결하면 안 된다.
 > `0072`가 기존 concierge 공개 표면 **3,044건**을 `legacy_unattributed`로 만들어 공개에서
 > 제외하고 복구 경로가 없다(`T-VN-H40`). 따라서 종결 기준은 **두 축**이다 —
@@ -347,8 +358,12 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 ### T-VN-H42~H45 — 운영 연속성 (0072 사고 후속: 재적재 수렴 → 강건화 → 백업 → 복원 드릴)
 
 > 2026-08-04 prod 폐기·재생성(head `0078`) 후속. 2026-08-05 이미지 `c0afaa4e` 배포로
-> head `0082`(UUID shadow 3종) 적용 완료. prod는 `archive_mode=off`라 **PITR이 없다 —
-> dump가 유일 복구점**이다. codex 소관 41C prod enable은 H42 판정 + docker-manager
+> head `0082`(UUID shadow 3종) 적용 완료 — **다만 2026-08-13 실측 prod head는 `0087`이고
+> feature는 1,008,852행이다**(이 문단이 5 revision 뒤처져 있었다). 따라서 최신 H43
+> baseline `2026-08-05-h43-postdeploy-0083.dump`(731,765행)는 두 head·약 27만 행 뒤처진
+> 복구점이며, `0104`가 `feature_versions`/`data_origin`/`feature_change_requests`를
+> 물리 삭제하므로 H44의 복원 실증도 `0083` 기준이라는 점을 함께 읽어야 한다.
+> prod는 `archive_mode=off`라 **PITR이 없다 — dump가 유일 복구점**이다. codex 소관 41C prod enable은 H42 판정 + docker-manager
 > 재pin 뒤(Lane B T-VN-41 절 경계 주석).
 
 - [ ] T-VN-H45-후속 — **다건 provider 호출·quota 관찰 확장**
@@ -615,9 +630,15 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 
   orchestrator `.env`의 `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`를
   **`0104_tvn36_final_fence`**로 **선행** 갱신한 뒤 api → dagster/daemon 순으로
-  재빌드·배포한다. prod에 적용된 head는 아직 `0083`이다(마지막 배포 journal
-  2026-08-05 (7)/(10)). n150 파기형 rebuild에서 확인된 head는
-  `T-VN-41F1D-C3`의 격리 generation이며 prod 배포가 아니다.
+  재빌드·배포한다. prod에 적용된 head는 **`0087_route_area_subtypes`**다 —
+  2026-08-13 n150 실측(`kor-travel-geo-postgres` / `kor_travel_map`,
+  feature 1,008,852행). 이 문서가 오래 `0083`이라고 적어둔 것은 사실과 다르다
+  (마지막 배포 journal 2026-08-05 (7)/(10) 이후 누군가 0087까지 올렸고 기록이
+  따라오지 않았다). n150 파기형 rebuild에서 확인된 head는 `T-VN-41F1D-C3`의
+  격리 generation이며 prod 배포가 아니다.
+
+  `0097` fence(`feature.feature_versions`에 `origin='user_request'`가 있으면
+  거부)는 **prod에서 걸리지 않는다** — 같은 실측에서 0건이다.
 
   선행 조건(ADR-090):
   - `KOR_TRAVEL_MAP_MIGRATOR_PG_DSN` / `KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN` 분리
@@ -672,15 +693,48 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   migration graph·OpenAPI·contract SHA는 재생성했다. 같은 자리에서 T-VN-34가 세운 결함
   부류를 전수로 걸어 notice reconcile SQL의 죽은 projection, override procedure arity
   미추종, 죽은 오류 매핑, ledger operation 이름 붕괴, 정적 차단선의 세대 누락,
-  frontend type-check/lint red를 닫았다(journal 2026-08-13). PinVi pair 재고정과 n150 live는
-  이 head에서 아직 재실행하지 않았다.
+  frontend type-check/lint red를 닫았다(journal 2026-08-13).
 
-  **남은 판단 2건**: ① `scripts/admin_feature_live_fixture.py` /
-  `scripts/run-admin-feature-clone-live-acceptance.sh`가 아직 whole-row change
-  request/version 모델 위에 있어 `0104` head에서는 실행 불가다 — 이 하네스는 정적 문자열
-  계약(`tests/unit/test_admin_feature_live_acceptance.py`)만 있고 실행 gate가 없어 지금은
-  green으로 보인다. ② `0027` re-key 정리의 `data_origin='user_request'` 제외 가드는 head
-  동등 술어가 없어 재현하지 않기로 했다(field override 세대에는 행 단위 소유권이 없다).
+  **2026-08-13 머지** — PR #973(`c76ceb7a`). 머지 전 적대 리뷰 2건이 실 DB에서 재현한
+  P1 6건을 전부 닫았다. 셋은 원인이 하나였다 — sha는 predecessor **파일**만 잠그고
+  anchor는 아무도 검사하지 않는다:
+  - `0102`의 revoke 집계 수정이 anchor 불일치(f-string 소스 표기 `'{{}}'` vs 렌더
+    결과 `'{}'`)로 **한 번도 배포된 적이 없었다**.
+  - `0104`가 hardening 이전인 `0100` 원문에서 author/revoke를 재생성해 0101/0102를
+    되감았다(provider patch는 재생성하지 않아 두 writer가 다른 세대가 됨).
+  - `0102`의 notice `first_probe` 보존이 effective 테이블을 읽어 운영자 override를
+    provider base ledger로 세탁했다.
+
+  `0102`에 fail-closed 치환을 넣자 즉시 `0104`의 geometry anchor 불일치를 잡아냈다.
+  `tests/integration/test_tvn36_final_fence_procedures.py`가 셋을 관측 가능한 동작으로
+  고정하고, 변이 검증에서 3건 모두 red를 확인했다.
+
+  나머지 3건: compose가 package env의 ops principal을 빈 문자열로 덮어
+  `OPS_PRINCIPAL_REQUIRED=true`를 false로 내려앉히던 문제, 도달 불가능한 `0087`을
+  지시하던 배포 task, 폐기된 커밋을 가리켜 live 게이트가 다른 트리를 자기 정합적으로
+  인증하던 PinVi receipt. 각각 재발 게이트를 함께 넣었다.
+
+  live clone 인수 하네스는 `0104` typed state 모델로 재작성했다(소유권 key는 name,
+  전이는 개수가 아니라 사슬 구조로 검사, 개수는 spec의 create body에서 유도).
+  content digest에 `feature_state_transitions` identity sequence 제외를 추가했다 —
+  없으면 완료 판정이 항상 실패한다(T-VN-34부터 있던 문제).
+
+  **잔여**: ① n150 live 실행(아래 신규 항목). ② `0027` re-key 정리의
+  `data_origin='user_request'` 제외 가드는 head 동등 술어가 없어 재현하지 않기로 했다
+  (field override 세대에는 행 단위 소유권이 없다).
+
+- [ ] T-VN-36-live — **격리 실데이터 clone에서 live 인수 실행**
+
+  clone-live 하네스는 clone DB가 **이미 candidate head**여야 동작한다(러너는
+  migration을 하지 않는다). 기존 `ktm-tvn38-db`는 전량 `user_request` fixture
+  (feature 30 / version 64)라 `0097` fence가 정당하게 막는다 — 재사용 불가.
+  그래서 prod(`0087`, feature 1,008,852, `user_request` receipt 0)를 읽기 전용으로
+  덤프해 격리 clone을 새로 만들고 ADR-090 bootstrap → `0104`까지 올린 뒤
+  `baseline` → `run`한다.
+
+  세대 전환이므로 기존 checkpoint(`0095` 세대, snapshot version 2)는
+  `archive-0104-*`로 보존한다 — 앞선 `archive-0094-*` / `archive-0095-baseline-*`와
+  같은 관례다.
 
 ### T-VN-37D — notice empty range 표현 (보류)
 
