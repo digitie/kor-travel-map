@@ -70,6 +70,11 @@ candidate reject/promotion actual-LOGIN/CAS/typed-detail-stale/교차-role 통�
 통합 테스트 7개도 fresh 0108 head에서 통과했다. routine 소유권 이전 뒤 남던
 기본 `PUBLIC EXECUTE`는 audit owner·command owner 역할로 직접 전환한 exact ACL 재설정으로
 0105/0106 guard·helper·procedure 전체에서 제거했다.
+admin candidate 목록/detail/timeline과 reject/promote API도 연결했다. raw candidate CAS ETag와
+typed detail을 포함한 representation ETag를 분리하고, BIGINT는 decimal string으로 고정했다.
+API/route-policy/domain-command/OpenAPI focused gate 96개가 통과했으며 admin OpenAPI를
+재생성했다. Node 의존성이 없는 현재 worktree에서 generated TypeScript 갱신은 보류되어 다음
+frontend 체크포인트에서 exact `openapi-typescript 7.13.0`으로 수행한다.
 A/B/C는 하나의 forward-only PR/release로 유지하며, 누적 구현은 DB/동시성과
 API·consumer/ACL 관점의 독립 적대 리뷰어 2명이 같은 고정 SHA에서 검증한다.
 상세 계약은
