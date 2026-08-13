@@ -548,9 +548,11 @@ DELETE /v1/admin/features/{feature_id}                 # ✅#317 soft delete
 PATCH  /v1/admin/features/{feature_id}/state            # publication/quality patch 또는 retire(If-Match)
 POST   /v1/admin/features/{feature_id}/state/reactivate # 현재 source 증거를 요구하는 재활성
 GET    /v1/admin/features/{feature_id}/state/transitions # append-only 상태 전이 이력
-POST   /v1/admin/features/change-requests/{request_id}/approve   # ✅#317
-POST   /v1/admin/features/change-requests/{request_id}/reject    # ✅#317
-GET    /v1/admin/features/change-requests              # 변경요청 큐(T-215b UI 대상)
+POST   /v1/admin/features/{feature_id}/field-overrides        # T-VN-36 typed field override author(If-Match)
+POST   /v1/admin/features/{feature_id}/field-overrides/revoke # T-VN-36 override 철회 → base 복귀(If-Match)
+# T-VN-36(0104)이 whole-row 변경요청 모델을 제거했다. 아래 3개는 더 이상 없다:
+#   POST /v1/admin/features/change-requests/{request_id}/{approve,reject}
+#   GET  /v1/admin/features/change-requests
 GET/POST /v1/admin/offline-uploads  (+ {upload_id}[/preview|/validate|/validation|/load])
 DELETE /v1/admin/offline-uploads/{upload_id}           # ✅#397 정리 lifecycle(진행중 409·객체 best-effort 삭제)
 GET    /v1/admin/poi-cache-targets

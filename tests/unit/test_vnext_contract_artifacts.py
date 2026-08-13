@@ -45,8 +45,10 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     ),
     # 2026-08-13 T-VN-36 — admin surface에서 죽은 요청 필드
     # prevent_provider_reactivation 제거를 removed 축에 선언하고 admin baseline
-    # sha를 재고정했다 (user/service surface bytes는 불변).
-    "openapi-diff-v1.json": ("4094bf1a308007b009536d9f96771612bfaadb7828514139f57e85aceb66a01c"),
+    # sha를 재고정했다 (user/service surface bytes는 불변). 같은 날 T-VN-36B가
+    # 소유하던 deferred(field override 쓰기 표면)를 전용 endpoint 착지로 해소해
+    # deferred 3 -> 2, added 1 -> 3.
+    "openapi-diff-v1.json": ("2e0f74adddb8d2692a88fa45d61d60a30897599154bfc22f8290b1af8067bb07"),
     "consumer-rollout-v1.json": (
         "d22f1ba91ccc70cad09e25a8815cb164452193e98bdaf5b4a2f2f11378cf1f0b"
     ),

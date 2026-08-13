@@ -1,6 +1,6 @@
 # ADR-091: Field override의 base/effective lineage 완결
 
-- **상태**: proposed
+- **상태**: accepted
 - **날짜**: 2026-08-10
 - **결정자**: 사용자 + Codex
 - **관련**: ADR-071, ADR-074, ADR-075, ADR-090, T-VN-36

@@ -310,13 +310,13 @@
     },
     "admin": {
       "counts": {
-        "added": 1,
+        "added": 3,
         "removed": 10,
         "renamed": 0,
         "enum_changes": 4,
         "status_changes": 0,
         "error_changes": 0,
-        "deferred": 3
+        "deferred": 2
       },
       "added": [
         {
@@ -324,6 +324,16 @@
           "target_operation": "GET /v1/provider-datasets",
           "detail": "provider dataset 정본 관리 표면 (보고서 §4 operator-api). 쓰기 method 구성(등록·활성 전환)은 구현 소관",
           "basis": "ADR-069"
+        },
+        {
+          "operation": "POST /v1/admin/features/{feature_id}/field-overrides",
+          "detail": "T-VN-36B가 deferred를 해소한 typed field override author 표면 (If-Match)",
+          "basis": "T-VN-36"
+        },
+        {
+          "operation": "POST /v1/admin/features/{feature_id}/field-overrides/revoke",
+          "detail": "override 철회 → provider base 복귀 (If-Match)",
+          "basis": "T-VN-36"
         }
       ],
       "removed": [
@@ -404,12 +414,6 @@
       "status_changes": [],
       "error_changes": [],
       "deferred": [
-        {
-          "topic": "field-level override 쓰기 표면(전용 endpoint vs PATCH 내 표현)",
-          "decision": "deferred-to-implementation",
-          "detail": "ADR-071은 저장 모델을 고정하고 REST 표면 세부는 명시하지 않는다",
-          "owner": "T-VN-36B"
-        },
         {
           "topic": "POST /v1/admin/features/{feature_id}/deactivate의 3축 전이 재표현",
           "decision": "deferred-to-implementation",
