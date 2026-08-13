@@ -379,6 +379,21 @@ async def test_get_collection_found_missing_and_public_projection() -> None:
     assert found.calls[1][1]["public_only"] is True
 
 
+def test_public_projection_excludes_archived_parent_catalog() -> None:
+    public_sql = (
+        repo._LIST_COLLECTIONS_SQL,
+        repo._GET_COLLECTION_SQL,
+        repo._GET_COLLECTION_BY_KEY_SQL,
+        repo._LIST_COLLECTION_ITEMS_SQL,
+        repo._LIST_FEATURE_ITEMS_SQL,
+        repo._LIST_FEATURE_ITEMS_BATCH_SQL,
+        repo._LIST_GROUP_KEYS_SQL,
+    )
+
+    assert all("archived_at IS NULL" in statement for statement in public_sql)
+    assert all("source_id IS NULL" in statement for statement in public_sql)
+
+
 async def test_get_item_found_and_missing() -> None:
     found = _FakeSession(_FakeResult(rows=[_item_row()]))
     item = await repo.get_curation_item(

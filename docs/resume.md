@@ -99,9 +99,15 @@ command로 결선했다. theme/source/rule 공통 append-only effect claim은 te
 resource 재사용을 차단하며 provider-owned/NULL-owner theme/rule은 admin command로 수정할 수 없다.
 source observation은 authoritative full-snapshot child job당 immutable receipt 한 건으로 제한했고,
 caller-driven admin rule apply와 독립 `curated_features_refresh` Dagster job/client export를 제거했다.
-provider load terminal transaction은 typed source observation을 기록하고 candidate rule generation 전체를
-만든 뒤 generation set hash와 seal 시각을 child job에 봉인한다. 봉인 뒤에는 같은 rule의 exact replay만
-가능하고 과거 job에 새 rule generation을 귀속할 수 없다. 다음은 남은 raw catalog DML을 회수하는 것이다.
+provider child 완료는 권위 축만 저장하고, root가 `done/SUCCESS`로 확정되는 SERIALIZABLE transaction이
+DB-owned finalizer를 호출해 typed source observation과 candidate rule generation 전체를 만든 뒤 generation
+set hash와 seal 시각을 child job에 봉인한다. finalizer는 provider executor만 실행할 수 있고 underlying
+candidate evidence를 Dagster LOGIN에 직접 공개하지 않는다. 봉인 뒤에는 같은 rule의 exact replay만 가능하고
+과거 job에 새 rule generation을 귀속할 수 없다. source observation은 root SUCCESS와 child에 봉인한
+canonical input hash/count를 검증하고, 과거 job 역순 적용과 archive 뒤 신규 관측은 거부하되 기존 receipt
+replay는 보존한다. archived theme/source는 legacy와 canonical public projection 전 경로에서 즉시 제외한다.
+삭제된 curated schedule/UI를 전제하던 stale live Playwright spec도 제거했다. 다음은 남은 raw catalog DML을
+회수하고 provider-owned concierge catalog sync를 typed command로 교체하는 것이다.
 T-VN-40 paired consumer receipt는 현재 `pending`이며 Map user/
 service/full spec hash를 고정하고 n150 installer가 complete 전에는 fail-close한다.
 fresh 0001→0111 actual-login theme/source/rule/candidate 통합을 통과했다.
