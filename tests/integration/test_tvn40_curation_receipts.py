@@ -149,6 +149,20 @@ async def test_tvn40_transition_audit_rejects_owner_update(
 ) -> None:
     """audit writer도 append 뒤 transition row를 고치거나 지울 수 없다."""
 
+    command_id = await migrated_session.scalar(
+        text(
+            """
+            INSERT INTO ops.domain_commands (
+              actor, operation, idempotency_key, request_fingerprint
+            ) VALUES (
+              'admin:test', 'admin.theme-feature-candidate.reject',
+              x_extension.gen_random_uuid(), repeat('c', 64)
+            )
+            RETURNING command_id
+            """
+        )
+    )
+    assert command_id is not None
     await migrated_session.execute(text("SET ROLE ktm_curation_audit_writer"))
     try:
         transition_id = await migrated_session.scalar(
@@ -160,8 +174,8 @@ async def test_tvn40_transition_audit_rejects_owner_update(
                   from_eligibility_present, to_eligibility_present,
                   from_disposition, to_disposition, transition_kind,
                   candidate_row_revision, rule_row_revision, rule_input_hash,
-                  candidate_input_hash, actor, reason_code, invoker_role,
-                  candidate_procedure_definer, audit_writer_definer
+                  candidate_input_hash, actor, reason_code, command_id,
+                  invoker_role, candidate_procedure_definer, audit_writer_definer
                 ) VALUES (
                       '00000000-0000-4000-8000-000000000040'::uuid,
                       'feature:old', 'feature:new',
@@ -169,12 +183,14 @@ async def test_tvn40_transition_audit_rejects_owner_update(
                       'entity:test', 'open', 'rejected',
                   true, true, 'active', 'active', 'admin_reject', 1, 1,
                   repeat('a', 64), repeat('b', 64), 'admin:test', 'reviewed',
+                  :command_id,
                   'ktm_feature_api_runtime', 'ktm_curation_command_owner',
                   'ktm_curation_audit_writer'
                 )
                 RETURNING transition_id
                 """
-            )
+            ),
+            {"command_id": command_id},
         )
         assert transition_id is not None
         savepoint = await migrated_session.begin_nested()
