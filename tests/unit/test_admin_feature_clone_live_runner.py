@@ -31,6 +31,7 @@ _CONTENT_CUTOFF = "2026-07-29T00:00:00.000000Z"
 _RUN_KEY = "e" * 64
 _NETWORK_NAME = f"ktm-afcla-{_RUN_KEY[:12]}-net"
 _RUN_ID = "clone-20260729000000-abcdef123456"
+_API_OWNED_FEATURE_UUID = "0193f1a0-1111-7abc-8def-0123456789ab"
 _MIGRATION_HEAD = "0066_curation_component_identity"
 _CLONE_IDENTITY_SHA256 = hashlib.sha256(
     (
@@ -131,8 +132,6 @@ def _write_snapshot(
         "15475",
         "--migration-head",
         _MIGRATION_HEAD,
-        "--nonterminal-owned-change-requests",
-        "0",
         "--relation-count",
         "57",
         "--schema-sha256",
@@ -257,7 +256,7 @@ def _prepare_runtime(tmp_path: Path) -> tuple[Path, Path]:
     startup = runtime / "clone-startup-before.json"
     _write_snapshot(startup, total=120)
     _write_snapshot(runtime / "clone-startup-after.json", total=120)
-    _write_snapshot(runtime / "clone-final.json", total=126)
+    _write_snapshot(runtime / "clone-final.json", total=121)
     checkpoint = runtime / "clone-checkpoint.json"
     _run_helper(
         "write-checkpoint",
@@ -320,12 +319,14 @@ def _prepare_runtime(tmp_path: Path) -> tuple[Path, Path]:
             {
                 "action": "api-audit",
                 "counts": {
-                    "change_requests": 14,
-                    "feature_versions": 13,
-                    "features": 6,
+                    "domain_commands": 3,
+                    "features": 1,
+                    "field_overrides": 6,
+                    "state_transitions": 3,
                 },
+                "feature_uuids": [_API_OWNED_FEATURE_UUID],
                 "foreign_key_constraints_checked": 12,
-                "foreign_key_references": 19,
+                "foreign_key_references": 7,
                 "version": 1,
             }
         ),
@@ -391,7 +392,7 @@ def _complete(
     ]
     if phase == "recovered":
         current = runtime / "clone-recovery-current.json"
-        _write_snapshot(current, total=126)
+        _write_snapshot(current, total=121)
         arguments.extend(
             [
                 "--current-snapshot",
@@ -445,7 +446,7 @@ def _write_topic_revision_evidence(
     prefix = "topic-revision" if topic == "dataset_projection" else "provider-sync-topic-revision"
     _write_snapshot(
         runtime / "clone-final-observed.json",
-        total=126,
+        total=121,
         content_sha256=observed_content_sha256,
     )
     if source == "runtime-start":
@@ -509,10 +510,10 @@ def test_complete_validates_evidence_and_clears_blocked(tmp_path: Path) -> None:
     assert payload["phase_history"] == ["candidate-startup-pending"]
     assert payload["cleanup"] == {
         "api_owned_active_features": 0,
-        "api_owned_change_requests": 14,
-        "api_owned_features": 6,
-        "api_owned_feature_versions": 13,
-        "api_owned_nonterminal_change_requests": 0,
+        "api_owned_domain_commands": 3,
+        "api_owned_features": 1,
+        "api_owned_field_overrides": 6,
+        "api_owned_state_transitions": 3,
         "auth_audit_main": 1,
         "auth_audit_recovery": 1,
         "foreign_key_references": 0,
@@ -520,9 +521,8 @@ def test_complete_validates_evidence_and_clears_blocked(tmp_path: Path) -> None:
         "post_cleanup_audit_features": 0,
         "recovery_auth_reset_main": 0,
         "recovery_auth_reset_recovery": 0,
-        "recovery_purged_change_requests": 0,
-        "recovery_purged_feature_versions": 0,
         "recovery_purged_features": 0,
+        "recovery_purged_field_overrides": 0,
     }
 
 
@@ -560,7 +560,7 @@ def test_complete_recovers_without_rerunning_valid_evidence(tmp_path: Path) -> N
             "api-recorded-auth-checkpoint-restored",
             "failed-resource-finalizing",
         ),
-        (126, False, False, "recorded", "failed-resource-finalizing"),
+        (121, False, False, "recorded", "failed-resource-finalizing"),
     ],
 )
 def test_abandon_failed_run_requires_cleaned_failure_evidence(
@@ -763,8 +763,15 @@ def test_content_digest_excludes_only_run_bound_auth_domain_receipts() -> None:
     source = _RUNNER.read_text(encoding="utf-8")
 
     assert 'local digest_revision="${4-current}"' in source
+    assert "legacy-v3)" in source
+    assert "legacy-v2)" in source
     assert "legacy-v1)" in source
     assert "legacy-v0)" in source
+    # 인수 run은 create/suppress/retire 세 전이를 남긴다. identity sequence의
+    # `last_value`가 전진하므로 제외하지 않으면 완료 판정(content_sha256 일치)이
+    # 항상 실패한다. `current`에만 있고 legacy tier에는 없어야 한다.
+    transitions_sequence = "'feature_state_transitions_transition_id_seq'"
+    assert source.count(transitions_sequence) == 1
     assert "'domain_commands', 'domain_command_results'" in source
     assert "relation.relname = 'domain_commands_command_id_seq'" in source
     assert "run-owned identity sequence excluded" in source
@@ -788,8 +795,11 @@ def test_checkpoint_content_digest_rebase_requires_exact_legacy_checkpoint_match
     assert '[[ "$MODE" == "checkpoint" && "$existing_checkpoint_version" == "4" ]]' in (
         checkpoint_source
     )
-    assert "for candidate_digest_revision in legacy-v2 legacy-v1 legacy-v0; do" in checkpoint_source
-    assert checkpoint_source.index("legacy-v2 legacy-v1 legacy-v0") < checkpoint_source.index(
+    # T-VN-36이 state transition identity sequence를 `current`에서 제외하면서
+    # 직전 `current`가 legacy-v3가 됐다. 사다리는 최신 legacy부터 내려가야 한다.
+    ladder = "legacy-v3 legacy-v2 legacy-v1 legacy-v0"
+    assert f"for candidate_digest_revision in {ladder}; do" in checkpoint_source
+    assert checkpoint_source.index(ladder) < checkpoint_source.index(
         "CHECKPOINT_CONTENT_REBASE=1"
     )
     assert checkpoint_source.index("CHECKPOINT_CONTENT_REBASE=1") < checkpoint_source.index(
@@ -877,7 +887,7 @@ def test_recovery_revalidates_only_legacy_content_digest_drift(
     runtime, blocked = _prepare_runtime(tmp_path)
     _write_snapshot(
         runtime / "clone-final.json",
-        total=126,
+        total=121,
         content_sha256="7" * 64,
     )
     _run_helper(
@@ -967,7 +977,7 @@ def test_checkpoint_dump_topic_proof_rejects_unrelated_final_phase(
     runtime, blocked = _prepare_runtime(tmp_path)
     _write_snapshot(
         runtime / "clone-final.json",
-        total=126,
+        total=121,
         content_sha256="7" * 64,
     )
     for phase in ("direct-cleanup-running", "browser-main-running"):
@@ -994,7 +1004,7 @@ def test_recovery_rejects_non_content_snapshot_drift(tmp_path: Path) -> None:
     runtime, blocked = _prepare_runtime(tmp_path)
     _write_snapshot(
         runtime / "clone-final.json",
-        total=126,
+        total=121,
         content_sha256="7" * 64,
     )
     _run_helper(
@@ -1011,7 +1021,7 @@ def test_recovery_rejects_non_content_snapshot_drift(tmp_path: Path) -> None:
     current = runtime / "clone-recovery-current.json"
     _write_snapshot(
         current,
-        total=126,
+        total=121,
         content_sha256=_CONTENT_SHA256,
         schema_sha256="6" * 64,
     )
@@ -1063,9 +1073,8 @@ def test_recovered_result_preserves_hard_purge_evidence(tmp_path: Path) -> None:
                 "foreign_key_constraints_checked": 12,
                 "foreign_key_references": 0,
                 "purged": {
-                    "change_requests": 9,
-                    "feature_versions": 8,
-                    "features": 4,
+                    "features": 1,
+                    "field_overrides": 6,
                 },
                 "version": 1,
             }
@@ -1080,9 +1089,8 @@ def test_recovered_result_preserves_hard_purge_evidence(tmp_path: Path) -> None:
         "candidate-startup-pending",
         "recovery-hard-purge-running",
     ]
-    assert payload["cleanup"]["recovery_purged_features"] == 4
-    assert payload["cleanup"]["recovery_purged_change_requests"] == 9
-    assert payload["cleanup"]["recovery_purged_feature_versions"] == 8
+    assert payload["cleanup"]["recovery_purged_features"] == 1
+    assert payload["cleanup"]["recovery_purged_field_overrides"] == 6
 
 
 @pytest.mark.parametrize(

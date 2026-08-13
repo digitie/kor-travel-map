@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import hashlib
 import json
 import math
 import re
@@ -130,76 +129,91 @@ def _provider_fixture_feature_id(run_id: str, kind: str) -> str:
     )
 
 
-def _admin_fixture_feature_id(run_id: str, role: str) -> str:
-    """Browser의 admin create body와 같은 deterministic ``f_*`` identity."""
+# ── T-VN-36 API-owned fixture 계약 ───────────────────────────────────────────
+# 0104(`0104_tvn36_final_fence`)가 ``ops.feature_change_requests``와
+# ``feature.feature_versions``를 통째로 지웠다. review/whole-row-freeze 모델이
+# 사라졌으므로 API-owned 잔재는 이제 세 곳에만 남는다.
+#
+#   * ``feature.features``            — live spec이 만든 Feature 한 건
+#   * ``feature.feature_state_transitions`` — create/suppress/retire 전이 사슬
+#   * ``ops.feature_overrides``       — create가 남긴 field ownership receipt
+#     (+ 각 명령의 ``ops.domain_commands`` terminal receipt)
+#
+# 소유권 키도 바뀌었다. live spec은 여섯 개의 결정적 fixture id를 더 이상 쓰지
+# 않고 **이름 하나**(`E2E TVN36 state fixture {run_id}`)로 자기 행을 식별한다 —
+# ``POST /v1/admin/features``의 ``feature_id``는 서버가 발급한다.
+_ADMIN_FIXTURE_KIND: Final[str] = "place"
+_ADMIN_FIXTURE_CATEGORY: Final[str] = "01070300"
+_ADMIN_FIXTURE_MARKER_ICON: Final[str] = "marker"
+_ADMIN_FIXTURE_MARKER_COLOR: Final[str] = "P-02"
+#: create body가 ``coord_precision_digits``를 보내지 않으므로 override writer의
+#: 기본값(``_override_payload_for_change``)이 그대로 정본이 된다.
+_ADMIN_FIXTURE_COORD_PRECISION_DIGITS: Final[int] = 6
+#: admin proxy가 주입하는 운영자 actor. auth 감사(`ops.admin_auth_events`)의
+#: ``attempted_username``과 같은 값이다.
+_ADMIN_OPERATOR: Final[str] = "admin"
+#: create procedure가 initial 전이에 박는 고정 reason_code
+#: (``create_admin_feature_with_field_overrides``의 state context). run reason이
+#: 아니라 서버 상수라서 run_id 접두어를 갖지 않는다.
+_ADMIN_CREATE_TRANSITION_REASON: Final[str] = "admin_feature_create"
+#: initial 전이의 ``causation_ref`` 형식 — ``domain-command:{command_id}``.
+_CAUSATION_COMMAND_RE: Final[re.Pattern[str]] = re.compile(
+    r"^domain-command:([1-9][0-9]*)$"
+)
+#: create가 authoring하는 field override path. live spec의 create body
+#: (category/coord/kind/marker_color/marker_icon/name + 3축)에 대해
+#: ``_override_payload_for_change(include_required_create_fields=True)``가
+#: 만드는 정확한 집합이다: core 4개(name/category/marker_icon/marker_color) +
+#: coord가 파생시키는 ``core.coord_precision_digits``(scalar)와
+#: ``core.coord``(geometry). detail을 보내지 않으므로 subtype path는 없다.
+#: 행 수는 path 하나당 하나이므로 개수를 따로 박지 않고 이 집합에서 유도한다.
+_ADMIN_CREATE_OVERRIDE_FIELD_PATHS: Final[frozenset[str]] = frozenset(
+    {
+        "core.category",
+        "core.coord",
+        "core.coord_precision_digits",
+        "core.marker_color",
+        "core.marker_icon",
+        "core.name",
+    }
+)
+#: live spec이 실행하는 mutation 명령. GET은 domain command를 만들지 않는다.
+_ADMIN_CREATE_OPERATION: Final[str] = "admin.feature.create"
+_ADMIN_STATE_OPERATION: Final[str] = "admin.feature.state"
 
-    logical_id = f"e2e_live_acceptance::{run_id}::{role}"
-    idempotency_key = hashlib.sha256(logical_id.encode()).hexdigest()
+
+def _admin_fixture_name(run_id: str) -> str:
+    """live spec의 ``FIXTURE_NAME``. API-owned row의 유일한 소유권 키다."""
+
+    return f"E2E TVN36 state fixture {run_id}"
+
+
+def _admin_reason_prefix(run_id: str) -> str:
+    """live spec의 ``REASON``. run-owned reason_code는 모두 이 접두어를 갖는다."""
+
+    return f"tvn36-live-{run_id}"
+
+
+def _admin_fixture_feature_id(run_id: str) -> str:
+    """서버가 발급할 ``feature_id``를 router와 같은 규칙으로 재계산한다.
+
+    감사 자체는 이 값을 소유권 키로 쓰지 않는다 — 정본은 이름이다. 그러나 clone
+    러너의 content digest는 run-owned 행을 **id 리터럴**로 제외해야 하고, 그
+    목록은 Feature를 hard purge한 뒤에도 유효해야 한다(전이 감사는 append-only라
+    남는다). 그래서 같은 규칙을 여기 한 곳에 두고 inspection에서 관측된 id와
+    대조한다 — router 규칙이 바뀌면 digest가 조용히 새는 대신 감사가 실패한다.
+
+    ``_create_feature_id``는 body에 ``idempotency_key``/``legal_dong_code``가
+    없을 때 ``{name}:{lon:.6f},{lat:.6f}``를 자연키로 쓴다.
+    """
+
     return make_feature_id(
         bjd_code=None,
-        kind="place",
-        category="01070300",
+        kind=_ADMIN_FIXTURE_KIND,
+        category=_ADMIN_FIXTURE_CATEGORY,
         source_type="user_request",
-        source_natural_key=idempotency_key,
+        source_natural_key=f"{_admin_fixture_name(run_id)}:{_LON:.6f},{_LAT:.6f}",
     )
-
-
-#: marker fixture가 만드는 3축 상태(lifecycle, publication, quality).
-#: 기대값 판정이 feature_id 문자열 패턴이 아니라 이 표를 본다 — id는 결정적 해시라
-#: ``endswith("::marker::draft")`` 같은 접미 매칭이 성립하지 않는다.
-_ADMIN_MARKER_STATES: Final[dict[str, tuple[str, str, str]]] = {
-    "draft": ("active", "draft", "valid"),
-    "retired": ("retired", "suppressed", "valid"),
-    "suppressed": ("active", "suppressed", "valid"),
-}
-
-
-def _admin_marker_feature_states(run_id: str) -> dict[str, tuple[str, str, str]]:
-    return {
-        _admin_fixture_feature_id(run_id, f"marker::{label}"): state
-        for label, state in _ADMIN_MARKER_STATES.items()
-    }
-
-
-def _api_feature_fingerprints(
-    run_id: str,
-) -> dict[str, tuple[float, float, frozenset[str]]]:
-    jitter = hashlib.sha256(f"acceptance-coord:{run_id}".encode()).digest()
-
-    def coord_jitter(offset: int) -> float:
-        return (
-            int.from_bytes(jitter[offset : offset + 4], "big") / 0xFFFFFFFF * 2 - 1
-        ) * 0.25
-
-    marker_lon = _LON + coord_jitter(0)
-    marker_lat = _LAT + coord_jitter(4)
-    expected: dict[str, tuple[float, float, frozenset[str]]] = {}
-    for index, state_label in enumerate(_ADMIN_MARKER_STATES):
-        expected[_admin_fixture_feature_id(run_id, f"marker::{state_label}")] = (
-            marker_lon + index * 0.001,
-            marker_lat + index * 0.001,
-            frozenset({f"E2E {state_label} marker {run_id}"}),
-        )
-    expected[_admin_fixture_feature_id(run_id, "correction")] = (
-        _LON,
-        _LAT - 0.002,
-        frozenset(
-            {
-                f"E2E correction baseline {run_id}",
-                f"E2E approved competing update {run_id}",
-            }
-        ),
-    )
-    search_token = hashlib.sha256(
-        f"acceptance-search:{run_id}".encode()
-    ).hexdigest()[:32]
-    for index, suffix in enumerate(("alpha", "beta")):
-        expected[_admin_fixture_feature_id(run_id, f"search::{suffix}")] = (
-            _LON + 0.004 + index * 0.001,
-            _LAT + 0.004 + index * 0.001,
-            frozenset({f"e2esrch {search_token} {suffix}"}),
-        )
-    return expected
 
 
 async def _counts(session: AsyncSession, feature_ids: tuple[str, str]) -> dict[str, int]:
@@ -280,7 +294,7 @@ async def _assert_owned_or_absent(
                 SELECT
                   feature_id, kind, name, category,
                   lifecycle_state, publication_state, quality_state,
-                  marker_icon, marker_color, data_origin, coord_precision_digits,
+                  marker_icon, marker_color, coord_precision_digits,
                   x_extension.ST_X(coord) AS lon,
                   x_extension.ST_Y(coord) AS lat
                 FROM feature.features
@@ -296,7 +310,6 @@ async def _assert_owned_or_absent(
         feature_ids[0]: {
             "category": "00000000",
             "coord_precision_digits": 6,
-            "data_origin": "user_request",
             "kind": "weather",
             "lat": _LAT,
             "lon": _LON + 0.002,
@@ -310,7 +323,6 @@ async def _assert_owned_or_absent(
         feature_ids[1]: {
             "category": "00000000",
             "coord_precision_digits": 6,
-            "data_origin": "user_request",
             "kind": "price",
             "lat": _LAT,
             "lon": _LON - 0.002,
@@ -329,7 +341,6 @@ async def _assert_owned_or_absent(
         fingerprint = {
             "category": str(row["category"]),
             "coord_precision_digits": int(row["coord_precision_digits"]),
-            "data_origin": str(row["data_origin"]),
             "kind": str(row["kind"]),
             "lat": float(row["lat"]),
             "lon": float(row["lon"]),
@@ -552,7 +563,7 @@ async def _seed(
             INSERT INTO feature.features (
                 feature_id, kind, name, category, coord, coord_precision_digits,
                 lifecycle_state, publication_state, quality_state,
-                marker_icon, marker_color, data_origin, data_version,
+                marker_icon, marker_color,
                 updated_at
             ) VALUES
               (
@@ -560,14 +571,14 @@ async def _seed(
                 x_extension.ST_SetSRID(
                   x_extension.ST_MakePoint(:weather_lon, :lat), 4326
                 ),
-                6, 'active', 'suppressed', 'valid', 'weather', 'P-03', 'user_request', 1, now()
+                6, 'active', 'suppressed', 'valid', 'weather', 'P-03', now()
               ),
               (
                 :price_id, 'price', :price_name, '00000000',
                 x_extension.ST_SetSRID(
                   x_extension.ST_MakePoint(:price_lon, :lat), 4326
                 ),
-                6, 'active', 'suppressed', 'valid', 'fuel', 'P-04', 'user_request', 1, now()
+                6, 'active', 'suppressed', 'valid', 'fuel', 'P-04', now()
               )
             """
         ),
@@ -726,242 +737,283 @@ async def _delete_owned_datasets(session: AsyncSession, run_id: str) -> None:
 
 
 class _ApiOwnedInspection(NamedTuple):
+    """live spec이 남긴 API-owned 행의 관측 결과.
+
+    ``transition_chains``/``override_field_paths``/``command_operations``는 구조
+    판정용이고, 개수 필드는 완료 감사(`_audit_complete_api_owned`)와 clone
+    evidence가 쓴다.
+    """
+
     feature_ids: tuple[str, ...]
+    feature_uuids: tuple[str, ...]
     features: int
-    requests: int
-    request_fingerprints: Counter[tuple[str, str, str]]
-    versions: int
+    field_overrides: int
+    override_field_paths: frozenset[str]
+    state_transitions: int
+    transition_chains: dict[str, tuple[tuple[str, str], ...]]
+    domain_commands: int
+    command_operations: Counter[str]
     foreign_keys: dict[str, int]
+
+
+_API_OWNED_FEATURE_SQL: Final[str] = """
+SELECT
+  feature_id, CAST(feature_uuid AS text) AS feature_uuid,
+  kind, name, category,
+  lifecycle_state, publication_state, quality_state,
+  marker_icon, marker_color, coord_precision_digits,
+  x_extension.ST_X(coord) AS lon,
+  x_extension.ST_Y(coord) AS lat
+FROM feature.features
+WHERE name = :fixture_name
+ORDER BY feature_id
+FOR UPDATE
+"""
+
+# 전이 감사는 append-only trigger가 UPDATE/DELETE를 막으므로 잠글 대상이 아니다.
+# Feature 행을 FOR UPDATE로 잡은 뒤 읽으면 같은 transaction 안에서 일관된다.
+_API_OWNED_TRANSITION_SQL: Final[str] = """
+SELECT
+  feature_id, CAST(feature_uuid AS text) AS feature_uuid,
+  from_lifecycle_state, from_publication_state, from_quality_state,
+  to_lifecycle_state, to_publication_state, to_quality_state,
+  transition_kind, reason_code, principal, causation_ref,
+  provider_dataset_id, source_entity_key, source_record_key, provider_evidence
+FROM feature.feature_state_transitions
+WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
+ORDER BY feature_id, occurred_at, transition_id
+"""
+
+_API_OWNED_OVERRIDE_SQL: Final[str] = """
+SELECT
+  feature_id, field_path, status, reason, created_by, command_id,
+  base_revision, prevent_provider_reactivation,
+  revoked_at, revoked_by, revoked_reason,
+  source_record_key, source_provider_dataset_id, source_entity_key,
+  source_raw_payload_hash
+FROM ops.feature_overrides
+WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
+ORDER BY feature_id, field_path
+FOR UPDATE
+"""
+
+# domain command receipt에는 feature 열이 없다. terminal response의
+# ``data.feature_id``가 admin mutation 계약상 **feature UUID**이므로
+# (``_field_override_response``/``_state_response``) 그 값만이 run-owned 명령을
+# 정확히 식별한다.
+_API_OWNED_COMMAND_SQL: Final[str] = """
+SELECT
+  command.command_id, command.actor, command.operation,
+  result.response_status,
+  result.response_body #>> '{data,feature_id}' AS subject_feature_uuid
+FROM ops.domain_commands AS command
+JOIN ops.domain_command_results AS result
+  ON result.command_id = command.command_id
+WHERE result.response_body #>> '{data,feature_id}'
+      = ANY(CAST(:feature_uuids AS text[]))
+ORDER BY command.command_id
+"""
+
+
+def _state_tuple(
+    row: RowMapping,
+    prefix: str,
+) -> tuple[str | None, str | None, str | None]:
+    return (
+        row[f"{prefix}_lifecycle_state"],
+        row[f"{prefix}_publication_state"],
+        row[f"{prefix}_quality_state"],
+    )
 
 
 async def _inspect_api_owned(
     session: AsyncSession,
     run_id: str,
 ) -> _ApiOwnedInspection:
-    expected = _api_feature_fingerprints(run_id)
-    feature_ids = tuple(expected)
+    """run이 만든 API-owned 행의 소유권과 구조를 검사한다.
+
+    이 함수는 **부분 진행도 허용한다** — recovery lane이 중단된 run을 정리한 뒤
+    hard purge를 부르는 경로에서도 같은 검사를 쓰기 때문이다. "정확히 이 집합만
+    있다"는 완료 판정은 `_audit_complete_api_owned`가 따로 한다.
+    """
+
+    fixture_name = _admin_fixture_name(run_id)
+    reason_prefix = _admin_reason_prefix(run_id)
+    expected_feature_id = _admin_fixture_feature_id(run_id)
     rows = (
         await session.execute(
-            text(
-                """
-                SELECT
-                  feature_id, kind, name, category,
-                  lifecycle_state, publication_state, quality_state,
-                  marker_icon, marker_color, data_origin,
-                  x_extension.ST_X(coord) AS lon,
-                  x_extension.ST_Y(coord) AS lat
-                FROM feature.features
-                WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
-                ORDER BY feature_id
-                FOR UPDATE
-                """
-            ),
-            {"feature_ids": list(feature_ids)},
+            text(_API_OWNED_FEATURE_SQL),
+            {"fixture_name": fixture_name},
         )
     ).mappings().all()
+    if len(rows) > 1:
+        raise RuntimeError("API-owned fixture 이름에 Feature가 둘 이상 있습니다")
+    feature_states: dict[str, tuple[str, str, str]] = {}
+    feature_uuid_by_id: dict[str, str] = {}
     for row in rows:
         feature_id = str(row["feature_id"])
-        fingerprint = expected.get(feature_id)
-        if fingerprint is None:
-            raise RuntimeError("API-owned prefix에 예상하지 않은 Feature가 있습니다")
-        expected_lon, expected_lat, expected_names = fingerprint
         if (
-            row["kind"] != "place"
-            or row["category"] != "01070300"
+            feature_id != expected_feature_id
+            or row["kind"] != _ADMIN_FIXTURE_KIND
+            or row["category"] != _ADMIN_FIXTURE_CATEGORY
+            or row["marker_icon"] != _ADMIN_FIXTURE_MARKER_ICON
+            or row["marker_color"] != _ADMIN_FIXTURE_MARKER_COLOR
+            or row["coord_precision_digits"] != _ADMIN_FIXTURE_COORD_PRECISION_DIGITS
+            # cleanup/recovery lane은 소유 Feature를 반드시 retire까지 끌고 간다.
+            # audit/purge는 그 뒤에만 돈다.
             or row["lifecycle_state"] != "retired"
             or row["publication_state"] != "suppressed"
             or row["quality_state"] != "valid"
-            or row["marker_icon"] != "marker"
-            or row["marker_color"] != "P-02"
-            or row["data_origin"] != "user_request"
-            or row["name"] not in expected_names
-            or not math.isclose(
-                float(row["lon"]),
-                expected_lon,
-                rel_tol=0,
-                abs_tol=1e-9,
-            )
-            or not math.isclose(
-                float(row["lat"]),
-                expected_lat,
-                rel_tol=0,
-                abs_tol=1e-9,
-            )
+            or row["lon"] is None
+            or row["lat"] is None
+            or not math.isclose(float(row["lon"]), _LON, rel_tol=0, abs_tol=1e-9)
+            or not math.isclose(float(row["lat"]), _LAT, rel_tol=0, abs_tol=1e-9)
         ):
             raise RuntimeError("API-owned Feature fingerprint가 다릅니다")
+        feature_states[feature_id] = (
+            str(row["lifecycle_state"]),
+            str(row["publication_state"]),
+            str(row["quality_state"]),
+        )
+        feature_uuid_by_id[feature_id] = str(row["feature_uuid"])
+    feature_ids = tuple(feature_states)
+    feature_uuids = tuple(feature_uuid_by_id[key] for key in feature_ids)
 
-    request_rows = (
+    transition_rows = (
         await session.execute(
-            text(
-                """
-                SELECT
-                  request_id, feature_id, action, state, review_mode, reason,
-                  requested_by, reviewed_by
-                FROM ops.feature_change_requests
-                WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
-                ORDER BY created_at, request_id
-                FOR UPDATE
-                """
-            ),
+            text(_API_OWNED_TRANSITION_SQL),
             {"feature_ids": list(feature_ids)},
         )
     ).mappings().all()
-    reason_prefix = f"admin feature live acceptance {run_id} "
-    allowed_reasons = {
-        f"{reason_prefix}create public",
-        f"{reason_prefix}create draft",
-        f"{reason_prefix}create suppressed",
-        f"{reason_prefix}create retired",
-        f"{reason_prefix}competing update",
-        f"{reason_prefix}reject reapply fixture",
-        f"{reason_prefix}cleanup delete",
+    allowed_transition_reasons = {
+        f"{reason_prefix}:{suffix}" for suffix in ("suppress", "retire", "cleanup")
     }
-    requests_by_id: dict[str, tuple[str, str, str]] = {}
-    request_fingerprints: Counter[tuple[str, str, str]] = Counter()
-    for request in request_rows:
+    chains: dict[str, list[tuple[str, str]]] = {}
+    final_state: dict[str, tuple[str | None, str | None, str | None]] = {}
+    create_command_ids: dict[str, int] = {}
+    for transition in transition_rows:
+        feature_id = str(transition["feature_id"])
+        if feature_id not in feature_states:
+            raise RuntimeError("API-owned 전이가 소유하지 않은 Feature를 가리킵니다")
         if (
-            request["feature_id"] not in expected
-            or request["action"] not in {"add", "update", "delete"}
-            or request["state"] not in {"applied", "rejected"}
-            or request["review_mode"] != "require_review"
-            or request["reason"] not in allowed_reasons
-            or request["requested_by"] != "admin"
-            or request["reviewed_by"] != "admin"
+            transition["principal"] != _ADMIN_OPERATOR
+            or transition["feature_uuid"] != feature_uuid_by_id[feature_id]
+            # provider provenance 열은 provider_sync 전이 전용이다.
+            or transition["provider_dataset_id"] is not None
+            or transition["source_entity_key"] is not None
+            or transition["source_record_key"] is not None
+            or transition["provider_evidence"] is not None
         ):
-            raise RuntimeError("API-owned change request fingerprint가 다릅니다")
-        request_id = str(request["request_id"])
-        if request_id in requests_by_id:
-            raise RuntimeError("API-owned change request ID가 중복됩니다")
-        requests_by_id[request_id] = (
-            str(request["feature_id"]),
-            str(request["action"]),
-            str(request["state"]),
-        )
-        request_fingerprints[
-            (
-                str(request["action"]),
-                str(request["state"]),
-                str(request["reason"]),
+            raise RuntimeError("API-owned 전이 소유권이 다릅니다")
+        from_state = _state_tuple(transition, "from")
+        to_state = _state_tuple(transition, "to")
+        kind = str(transition["transition_kind"])
+        reason_code = str(transition["reason_code"])
+        chain = chains.setdefault(feature_id, [])
+        if not chain:
+            # create procedure가 쓰는 initial 전이. reason_code는 run reason이
+            # 아니라 서버 상수이고, 유일하게 domain command receipt를 역참조한다.
+            command_match = _CAUSATION_COMMAND_RE.fullmatch(
+                str(transition["causation_ref"] or "")
             )
-        ] += 1
+            if (
+                kind != "initial"
+                or reason_code != _ADMIN_CREATE_TRANSITION_REASON
+                or from_state != (None, None, None)
+                or to_state != ("active", "published", "valid")
+                or command_match is None
+            ):
+                raise RuntimeError("API-owned Feature의 최초 전이가 create 계약과 다릅니다")
+            create_command_ids[feature_id] = int(command_match.group(1))
+        elif (
+            kind != "admin"
+            or reason_code not in allowed_transition_reasons
+            # admin state 명령은 causation_ref를 남기지 않는다
+            # (`transition_admin_feature_state`의 state context).
+            or transition["causation_ref"] is not None
+            or from_state != final_state[feature_id]
+        ):
+            raise RuntimeError("API-owned 전이 사슬이 예상과 다릅니다")
+        final_state[feature_id] = to_state
+        chain.append((kind, reason_code))
+    for feature_id, state in feature_states.items():
+        if feature_id not in chains:
+            raise RuntimeError("API-owned Feature에 상태 전이 이력이 없습니다")
+        if final_state[feature_id] != state:
+            raise RuntimeError("API-owned 전이 사슬의 끝이 현재 상태와 다릅니다")
 
-    version_rows = (
+    override_rows = (
         await session.execute(
-            text(
-                """
-                SELECT
-                  feature_id, version, origin, change_kind, payload,
-                  request_id, created_by
-                FROM feature.feature_versions
-                WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
-                ORDER BY feature_id, version
-                FOR UPDATE
-                """
-            ),
+            text(_API_OWNED_OVERRIDE_SQL),
             {"feature_ids": list(feature_ids)},
         )
     ).mappings().all()
-    changes_by_feature: dict[str, list[str]] = {}
-    for version_row in version_rows:
-        feature_id = str(version_row["feature_id"])
-        fingerprint = expected.get(feature_id)
-        payload = version_row["payload"]
-        version = int(version_row["version"])
-        change_kind = str(version_row["change_kind"])
-        linked_request = requests_by_id.get(str(version_row["request_id"]))
+    override_field_paths: set[str] = set()
+    seen_override_keys: set[tuple[str, str]] = set()
+    for override in override_rows:
+        feature_id = str(override["feature_id"])
+        field_path = str(override["field_path"])
         if (
-            fingerprint is None
-            or not isinstance(payload, dict)
-            or version < 1
-            or version_row["origin"] != "user_request"
-            or change_kind not in {"add", "update", "delete"}
-            or version_row["created_by"] != "admin"
-            or linked_request != (feature_id, change_kind, "applied")
+            feature_id not in feature_states
+            or field_path not in _ADMIN_CREATE_OVERRIDE_FIELD_PATHS
+            or (feature_id, field_path) in seen_override_keys
+            or override["status"] != "active"
+            or override["created_by"] != _ADMIN_OPERATOR
+            or override["reason"] != f"{reason_prefix}:create"
+            or override["command_id"] != create_command_ids.get(feature_id)
+            or override["prevent_provider_reactivation"] is not False
+            or override["revoked_at"] is not None
+            or override["revoked_by"] is not None
+            or override["revoked_reason"] is not None
+            # user-created Feature에는 provider base가 없다 — override는 source
+            # 계보를 갖지 않는다.
+            or override["source_record_key"] is not None
+            or override["source_provider_dataset_id"] is not None
+            or override["source_entity_key"] is not None
+            or override["source_raw_payload_hash"] is not None
         ):
-            raise RuntimeError("API-owned Feature version 소유권이 다릅니다")
-        expected_lon, expected_lat, expected_names = fingerprint
-        expected_state = ("active", "published", "valid")
-        if change_kind == "delete":
-            expected_state = ("retired", "suppressed", "valid")
-        elif change_kind == "add":
-            expected_state = _admin_marker_feature_states(run_id).get(
-                feature_id, expected_state
-            )
-        if (
-            payload.get("feature_id") != feature_id
-            or payload.get("kind") != "place"
-            or payload.get("category") != "01070300"
-            or payload.get("data_origin") != "user_request"
-            or payload.get("marker_icon") != "marker"
-            or payload.get("marker_color") != "P-02"
-            or payload.get("coord_precision_digits") != 6
-            or payload.get("data_version") != version
-            or payload.get("name") not in expected_names
-            or tuple(
-                payload.get(axis)
-                for axis in (
-                    "lifecycle_state",
-                    "publication_state",
-                    "quality_state",
-                )
-            )
-            != expected_state
-            or not isinstance(payload.get("detail"), dict)
-            or any(
-                legacy_key in payload
-                for legacy_key in (
-                    "status",
-                    "deleted_at",
-                    "user_deleted_at",
-                    "user_deleted_by",
-                    "user_change_kind",
-                    "user_change_status",
-                    "user_change_request_id",
-                    "user_change_reason",
-                )
-            )
-            or not isinstance(payload.get("lon"), (int, float))
-            or not isinstance(payload.get("lat"), (int, float))
-            or not math.isclose(
-                float(payload["lon"]), expected_lon, rel_tol=0, abs_tol=1e-9
-            )
-            or not math.isclose(
-                float(payload["lat"]), expected_lat, rel_tol=0, abs_tol=1e-9
-            )
-        ):
-            raise RuntimeError("API-owned Feature version payload가 다릅니다")
-        changes_by_feature.setdefault(feature_id, []).append(change_kind)
+            raise RuntimeError("API-owned field override 소유권이 다릅니다")
+        seen_override_keys.add((feature_id, field_path))
+        override_field_paths.add(field_path)
 
-    for feature_id, changes in changes_by_feature.items():
-        expected_sequence = ["add", "delete"]
+    command_rows = (
+        await session.execute(
+            text(_API_OWNED_COMMAND_SQL),
+            {"feature_uuids": list(feature_uuids)},
+        )
+    ).mappings().all()
+    command_operations: Counter[str] = Counter()
+    observed_create_commands: dict[str, int] = {}
+    uuid_to_feature_id = {value: key for key, value in feature_uuid_by_id.items()}
+    for command in command_rows:
+        operation = str(command["operation"])
+        subject = str(command["subject_feature_uuid"])
         if (
-            feature_id == _admin_fixture_feature_id(run_id, "correction")
-            and "update" in changes
+            command["actor"] != _ADMIN_OPERATOR
+            or operation not in {_ADMIN_CREATE_OPERATION, _ADMIN_STATE_OPERATION}
+            or command["response_status"] != 200
+            or subject not in uuid_to_feature_id
         ):
-            expected_sequence = ["add", "update", "delete"]
-        versions = [
-            int(row["version"])
-            for row in version_rows
-            if str(row["feature_id"]) == feature_id
-        ]
-        if changes != expected_sequence or versions != list(
-            range(1, len(changes) + 1)
-        ):
-            raise RuntimeError("API-owned Feature version 이력이 예상과 다릅니다")
-    if set(changes_by_feature) != {str(row["feature_id"]) for row in rows}:
-        raise RuntimeError("API-owned Feature와 version 이력이 일치하지 않습니다")
+            raise RuntimeError("API-owned domain command receipt 소유권이 다릅니다")
+        if operation == _ADMIN_CREATE_OPERATION:
+            feature_id = uuid_to_feature_id[subject]
+            if feature_id in observed_create_commands:
+                raise RuntimeError("API-owned Feature에 create command가 둘 이상입니다")
+            observed_create_commands[feature_id] = int(command["command_id"])
+        command_operations[operation] += 1
+    if observed_create_commands != create_command_ids:
+        raise RuntimeError("create 전이의 causation receipt가 domain command와 다릅니다")
 
     foreign_keys = await _foreign_key_reference_counts(session, feature_ids)
     expected_references: dict[str, int] = {}
     if rows:
+        # feature INSERT trigger가 canonical alias를 함께 만든다. subtype
+        # (`feature.feature_places`)은 composite FK라 이 단일 열 감사에 잡히지
+        # 않는다 — 그쪽은 Feature 삭제 시 같은 CASCADE로 사라진다.
         expected_references["feature.feature_aliases.feature_id"] = len(rows)
-    if version_rows:
-        expected_references["feature.feature_versions.feature_id"] = len(version_rows)
-    observed_references = {
-        key: value
-        for key, value in foreign_keys.items()
-        if value
-    }
+    if override_rows:
+        expected_references["ops.feature_overrides.feature_id"] = len(override_rows)
+    observed_references = {key: value for key, value in foreign_keys.items() if value}
     if observed_references != expected_references:
         raise RuntimeError(
             "API-owned Feature FK reference 감사가 다릅니다: "
@@ -969,10 +1021,16 @@ async def _inspect_api_owned(
         )
     return _ApiOwnedInspection(
         feature_ids=feature_ids,
+        feature_uuids=feature_uuids,
         features=len(rows),
-        requests=len(request_rows),
-        request_fingerprints=request_fingerprints,
-        versions=len(version_rows),
+        field_overrides=len(override_rows),
+        override_field_paths=frozenset(override_field_paths),
+        state_transitions=len(transition_rows),
+        transition_chains={
+            feature_id: tuple(chain) for feature_id, chain in chains.items()
+        },
+        domain_commands=len(command_rows),
+        command_operations=command_operations,
         foreign_keys=foreign_keys,
     )
 
@@ -982,15 +1040,9 @@ async def _purge_api_owned(
     run_id: str,
 ) -> tuple[dict[str, int], dict[str, int], dict[str, int]]:
     inspection = await _inspect_api_owned(session, run_id)
-    await session.execute(
-        text(
-            """
-            DELETE FROM ops.feature_change_requests
-            WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
-            """
-        ),
-        {"feature_ids": list(inspection.feature_ids)},
-    )
+    # ``ops.feature_overrides``/``feature.feature_aliases``/subtype은 모두
+    # ON DELETE CASCADE라 Feature 삭제 한 번으로 사라진다. 0104 이전에 필요했던
+    # change request 선삭제 단계는 그 표가 없어져 사라졌다.
     await session.execute(
         text(
             """
@@ -1000,38 +1052,32 @@ async def _purge_api_owned(
         ),
         {"feature_ids": list(inspection.feature_ids)},
     )
-    remaining_features = int(
-        (
-            await session.execute(
-                text(
-                    """
-                    SELECT count(*) FROM feature.features
-                    WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
-                    """
-                ),
-                {"feature_ids": list(inspection.feature_ids)},
-            )
+    remaining = (
+        await session.execute(
+            text(
+                """
+                SELECT
+                  (SELECT count(*) FROM feature.features
+                   WHERE feature_id = ANY(CAST(:feature_ids AS text[])))
+                    AS features,
+                  (SELECT count(*) FROM ops.feature_overrides
+                   WHERE feature_id = ANY(CAST(:feature_ids AS text[])))
+                    AS field_overrides,
+                  (SELECT count(*) FROM feature.feature_state_transitions
+                   WHERE feature_id = ANY(CAST(:feature_ids AS text[])))
+                    AS state_transitions
+                """
+            ),
+            {"feature_ids": list(inspection.feature_ids)},
         )
-        .scalars()
-        .one()
-    )
-    remaining_requests = int(
-        (
-            await session.execute(
-                text(
-                    """
-                    SELECT count(*) FROM ops.feature_change_requests
-                    WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
-                    """
-                ),
-                {"feature_ids": list(inspection.feature_ids)},
-            )
-        )
-        .scalars()
-        .one()
-    )
-    if remaining_features or remaining_requests:
+    ).mappings().one()
+    if int(remaining["features"]) or int(remaining["field_overrides"]):
         raise RuntimeError("API-owned purge가 완결되지 않았습니다")
+    # 상태 전이 감사는 append-only trigger가 지키는 **의도적 잔존물**이고 Feature
+    # FK도 없다(T39 UUID identity 증거). 그대로 남았음을 확인해 "purge가 감사를
+    # 훼손하지 않았다"까지 증명한다.
+    if int(remaining["state_transitions"]) != inspection.state_transitions:
+        raise RuntimeError("append-only 상태 전이 감사가 purge로 훼손되었습니다")
     remaining_foreign_keys = await _foreign_key_reference_counts(
         session,
         inspection.feature_ids,
@@ -1042,48 +1088,63 @@ async def _purge_api_owned(
         {"features": 0, "price_values": 0, "weather_values": 0},
         remaining_foreign_keys,
         {
-            "change_requests": inspection.requests,
-            "feature_versions": inspection.versions,
             "features": inspection.features,
+            "field_overrides": inspection.field_overrides,
         },
+    )
+
+
+def _expected_transition_chain(run_id: str) -> tuple[tuple[str, str], ...]:
+    """live spec 한 번의 실행이 남기는 정확한 전이 사슬.
+
+    spec은 Feature 하나에 대해 create → ``PATCH state {action:"patch",
+    publication_state:"suppressed"}`` → ``PATCH state {action:"retire"}``만
+    실행한다. 마지막 ``cleanupOwnedFeatures``는 이미 retired인 Feature를 건너뛰고
+    (`retireFeature`의 조기 반환), field override authoring은 3축을 건드리지
+    않아 감사 trigger의 no-op 가드에 걸린다 — 그래서 전이는 정확히 셋이다.
+    """
+
+    reason_prefix = _admin_reason_prefix(run_id)
+    return (
+        ("initial", _ADMIN_CREATE_TRANSITION_REASON),
+        ("admin", f"{reason_prefix}:suppress"),
+        ("admin", f"{reason_prefix}:retire"),
     )
 
 
 async def _audit_complete_api_owned(
     session: AsyncSession,
     run_id: str,
-) -> tuple[dict[str, int], dict[str, int]]:
+) -> tuple[dict[str, int], dict[str, int], tuple[str, ...]]:
     inspection = await _inspect_api_owned(session, run_id)
-    reason_prefix = f"admin feature live acceptance {run_id} "
-    expected_requests = Counter(
-        {
-            ("add", "applied", f"{reason_prefix}create public"): 3,
-            ("add", "applied", f"{reason_prefix}create draft"): 1,
-            ("add", "applied", f"{reason_prefix}create suppressed"): 1,
-            ("add", "applied", f"{reason_prefix}create retired"): 1,
-            ("delete", "applied", f"{reason_prefix}cleanup delete"): 6,
-            ("update", "applied", f"{reason_prefix}competing update"): 1,
-            (
-                "update",
-                "rejected",
-                f"{reason_prefix}reject reapply fixture",
-            ): 1,
-        }
+    expected_chain = _expected_transition_chain(run_id)
+    feature_id = _admin_fixture_feature_id(run_id)
+    # 명령 수는 spec이 실제로 보내는 mutation 수에서 유도한다: create 1건 +
+    # state PATCH 2건. GET은 domain command를 만들지 않고, 마지막 cleanup도
+    # 이미 retired면 명령을 만들지 않는다.
+    expected_operations = Counter(
+        {_ADMIN_CREATE_OPERATION: 1, _ADMIN_STATE_OPERATION: 2}
     )
     if (
-        inspection.features != 6
-        or inspection.requests != 14
-        or inspection.versions != 13
-        or inspection.request_fingerprints != expected_requests
+        inspection.features != 1
+        or inspection.feature_ids != (feature_id,)
+        or inspection.transition_chains != {feature_id: expected_chain}
+        or inspection.state_transitions != len(expected_chain)
+        or inspection.override_field_paths != _ADMIN_CREATE_OVERRIDE_FIELD_PATHS
+        or inspection.field_overrides != len(_ADMIN_CREATE_OVERRIDE_FIELD_PATHS)
+        or inspection.command_operations != expected_operations
+        or inspection.domain_commands != sum(expected_operations.values())
     ):
         raise RuntimeError("완료 API-owned 행 집합이 예상과 다릅니다")
     return (
         {
-            "change_requests": inspection.requests,
-            "feature_versions": inspection.versions,
+            "domain_commands": inspection.domain_commands,
             "features": inspection.features,
+            "field_overrides": inspection.field_overrides,
+            "state_transitions": inspection.state_transitions,
         },
         inspection.foreign_keys,
+        inspection.feature_uuids,
     )
 
 
@@ -1192,6 +1253,7 @@ async def _run(
     try:
         async with AsyncSession(engine) as session, session.begin():
             summary_run_ids: tuple[int, int] | None = None
+            api_owned_feature_uuids: tuple[str, ...] = ()
             if action == "seed":
                 counts, foreign_keys, summary_run_ids = await _seed(session, run_id)
             elif action == "cleanup":
@@ -1202,10 +1264,11 @@ async def _run(
                     run_id,
                 )
             elif action == "api-audit":
-                counts, foreign_keys = await _audit_complete_api_owned(
-                    session,
-                    run_id,
-                )
+                (
+                    counts,
+                    foreign_keys,
+                    api_owned_feature_uuids,
+                ) = await _audit_complete_api_owned(session, run_id)
             elif action == "auth-reset":
                 auth_counts = await _reset_auth_audit(session, run_id)
             elif action == "auth-verify":
@@ -1235,6 +1298,11 @@ async def _run(
         if summary_run_ids is None:
             raise AssertionError("seed summary receipt result disappeared")
         result["summary_run_ids"] = list(summary_run_ids)
+    if action == "api-audit":
+        # clone 러너의 content digest는 run-owned ``ops.domain_commands`` receipt를
+        # 제외해야 한다. 그 표에는 feature 열이 없고 terminal response가 담는
+        # 식별자는 **feature UUID**뿐이라, 감사가 관측한 UUID를 evidence로 넘긴다.
+        result["feature_uuids"] = list(api_owned_feature_uuids)
     if action == "purge":
         result["purged"] = purged
     return result

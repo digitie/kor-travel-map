@@ -360,9 +360,7 @@ def test_docker_compose_isolates_provider_credentials_from_api() -> None:
     # (headerless BFF 우회 재개방). 문서와 compose가 다시 갈라지지 못하게 묶는다.
     env_example = _script(".env.example")
     for key in sorted(ops_keys - {"KOR_TRAVEL_MAP_API_OPS_ACTOR"}):
-        assert api["environment"][key] == "${%s:-}" % key or api["environment"][
-            key
-        ] == "${%s:-false}" % key, (
+        assert api["environment"][key] in (f"${{{key}:-}}", f"${{{key}:-false}}"), (
             f"{key}는 root .env/host env 보간으로만 채워야 한다"
         )
     assert "root .env(또는 host env)에" in env_example, (

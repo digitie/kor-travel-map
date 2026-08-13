@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import subprocess
@@ -75,33 +76,42 @@ _SUPERVISOR_MODULE = _load_script_module(
 )
 
 
-def test_clone_recovery_purge_uses_exact_api_owned_fingerprints() -> None:
+def test_clone_recovery_purge_uses_name_keyed_api_owned_identity() -> None:
+    """T-VN-36 API-owned 소유권 키는 이름이고, id는 서버 규칙에서 파생한다."""
+
     run_id = "clone-20260729000000-abcdef123456"
+    fixture_name = _FIXTURE_MODULE._admin_fixture_name(run_id)  # noqa: SLF001
+    reason_prefix = _FIXTURE_MODULE._admin_reason_prefix(run_id)  # noqa: SLF001
 
-    fingerprints = _FIXTURE_MODULE._api_feature_fingerprints(run_id)  # noqa: SLF001
+    # live spec의 FIXTURE_NAME/REASON과 같은 문자열이어야 감사가 같은 행을 본다.
+    spec = _SPEC.read_text()
+    assert "const FIXTURE_NAME = `E2E TVN36 state fixture ${RUN_ID}`;" in spec
+    assert "const REASON = `tvn36-live-${RUN_ID}`;" in spec
+    assert fixture_name == f"E2E TVN36 state fixture {run_id}"
+    assert reason_prefix == f"tvn36-live-{run_id}"
 
-    assert set(fingerprints) == {
-        _FIXTURE_MODULE._admin_fixture_feature_id(run_id, "marker::draft"),  # noqa: SLF001
-        _FIXTURE_MODULE._admin_fixture_feature_id(run_id, "marker::retired"),  # noqa: SLF001
-        _FIXTURE_MODULE._admin_fixture_feature_id(run_id, "marker::suppressed"),  # noqa: SLF001
-        _FIXTURE_MODULE._admin_fixture_feature_id(run_id, "correction"),  # noqa: SLF001
-        _FIXTURE_MODULE._admin_fixture_feature_id(run_id, "search::alpha"),  # noqa: SLF001
-        _FIXTURE_MODULE._admin_fixture_feature_id(run_id, "search::beta"),  # noqa: SLF001
-    }
-    correction_id = _FIXTURE_MODULE._admin_fixture_feature_id(  # noqa: SLF001
-        run_id, "correction"
-    )
-    assert correction_id.startswith("f_global_p_")
+    # id는 서버가 발급한다(`_create_feature_id`). clone 러너의 content digest는
+    # 같은 규칙을 shell 안에서 재현하므로 두 파생이 일치해야 한다.
+    feature_id = _FIXTURE_MODULE._admin_fixture_feature_id(run_id)  # noqa: SLF001
+    raw = f"global|place|01070300|user_request|{fixture_name}:127.500000,36.500000|"
+    assert feature_id == f"f_global_p_{hashlib.sha1(raw.encode()).hexdigest()[:16]}"
+    runner = _CLONE_RUNNER.read_text()
+    assert 'f"E2E TVN36 state fixture {run_id}:127.500000,36.500000",' in runner
+    assert "e2e_live_acceptance::{run_id}::{role}" not in runner
+
     assert _FIXTURE_MODULE._provider_fixture_feature_id(  # noqa: SLF001
         run_id, "weather"
     ).startswith("f_global_w_")
     assert _FIXTURE_MODULE._provider_fixture_feature_id(  # noqa: SLF001
         run_id, "price"
     ).startswith("f_global_p_")
-    assert fingerprints[correction_id][2] == {
-        f"E2E correction baseline {run_id}",
-        f"E2E approved competing update {run_id}",
-    }
+
+    # 완료 감사가 요구하는 전이 사슬은 spec이 실제로 실행하는 3단계다.
+    assert _FIXTURE_MODULE._expected_transition_chain(run_id) == (  # noqa: SLF001
+        ("initial", "admin_feature_create"),
+        ("admin", f"{reason_prefix}:suppress"),
+        ("admin", f"{reason_prefix}:retire"),
+    )
 
 
 def test_clone_checkpoint_schema_digest_uses_restore_stable_catalog() -> None:
@@ -570,7 +580,7 @@ def test_direct_cleanup_locks_owned_parents_before_fk_audit_and_delete() -> None
     fixture = _FIXTURE.read_text()
     cleanup = fixture[
         fixture.index("async def _cleanup(") : fixture.index(
-            "async def _inspect_api_owned("
+            "class _ApiOwnedInspection("
         )
     ]
     inspection = fixture[
@@ -580,7 +590,7 @@ def test_direct_cleanup_locks_owned_parents_before_fk_audit_and_delete() -> None
     ]
     purge = fixture[
         fixture.index("async def _purge_api_owned(") : fixture.index(
-            "async def _run("
+            "def _expected_transition_chain("
         )
     ]
     owned_values = fixture[
@@ -608,11 +618,20 @@ def test_direct_cleanup_locks_owned_parents_before_fk_audit_and_delete() -> None
     assert '"feature.feature_aliases.feature_id"] = len(rows)' in inspection
     assert cleanup.count("DELETE FROM feature.features") == 1
     assert purge.count("DELETE FROM feature.features") == 1
-    assert "DELETE FROM ops.feature_change_requests" in purge
-    assert "FROM feature.feature_versions" in inspection
-    assert "API-owned Feature version payload가 다릅니다" in inspection
-    assert "feature_versions" in purge
-    assert "inspection.versions" in purge
+    # 0104가 review/whole-row-freeze 모델을 지웠다. purge는 Feature 한 번 삭제로
+    # CASCADE 자식(alias/subtype/field override)을 함께 지우고, append-only 전이
+    # 감사는 남았음을 확인만 한다.
+    assert "DELETE FROM ops.feature_change_requests" not in fixture
+    assert "FROM feature.feature_versions" not in fixture
+    assert "FROM feature.feature_state_transitions" in fixture
+    assert "FROM ops.feature_overrides" in fixture
+    assert "FROM ops.domain_commands AS command" in fixture
+    assert "API-owned 전이 사슬이 예상과 다릅니다" in inspection
+    assert "API-owned field override 소유권이 다릅니다" in inspection
+    assert "API-owned domain command receipt 소유권이 다릅니다" in inspection
+    assert "append-only 상태 전이 감사가 purge로 훼손되었습니다" in purge
+    assert "inspection.field_overrides" in purge
+    assert 'result["feature_uuids"] = list(api_owned_feature_uuids)' in fixture
     assert "async def _owned_summary_run_ids(" in fixture
     assert "owned weather/price current-summary receipt가 정확하지 않습니다" in fixture
     assert 'result["summary_run_ids"] = list(summary_run_ids)' in fixture

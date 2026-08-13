@@ -56,6 +56,11 @@ _EXPECTED_TESTS: Final[tuple[str, str]] = (
     "auth.setup.ts",
     "admin-feature-acceptance-write.live.spec.ts",
 )
+# snapshot v3 = T-VN-36D(0104). ``nonterminal_owned_change_requests``가 사라졌다 —
+# ``ops.feature_change_requests``가 통째로 삭제됐고, 직접 상태 명령에는 애초에
+# non-terminal 축이 없다(receipt는 명령 transaction 안에서 terminal로 완결된다).
+# run-owned 잔재 판정은 ``active_owned_features`` 하나로 남는다.
+_SNAPSHOT_VERSION: Final[int] = 3
 _SNAPSHOT_KEYS: Final[set[str]] = {
     "active_owned_features",
     "clone_container_sha256",
@@ -68,7 +73,6 @@ _SNAPSHOT_KEYS: Final[set[str]] = {
     "feature_total",
     "host_port",
     "migration_head",
-    "nonterminal_owned_change_requests",
     "relation_count",
     "schema_sha256",
     "version",
@@ -209,7 +213,7 @@ def _validated_snapshot_object(
 ) -> dict[str, Any]:
     if not isinstance(snapshot, dict):
         raise RuntimeError(f"DB snapshot object가 아닙니다: {label}")
-    if set(snapshot) != _SNAPSHOT_KEYS or snapshot.get("version") != 2:
+    if set(snapshot) != _SNAPSHOT_KEYS or snapshot.get("version") != _SNAPSHOT_VERSION:
         raise RuntimeError(f"DB snapshot field/version이 예상과 다릅니다: {label}")
     for field in ("clone_container_sha256", "clone_system_identifier_sha256"):
         value = snapshot[field]
@@ -235,7 +239,6 @@ def _validated_snapshot_object(
         "feature_non_deleted",
         "feature_total",
         "host_port",
-        "nonterminal_owned_change_requests",
         "relation_count",
     ):
         value = snapshot[field]
@@ -345,12 +348,11 @@ def write_snapshot(args: argparse.Namespace) -> None:
             "feature_total": args.feature_total,
             "host_port": args.host_port,
             "migration_head": args.migration_head,
-            "nonterminal_owned_change_requests": args.nonterminal_owned_change_requests,
             "relation_count": args.relation_count,
             "schema_sha256": _require_pattern(
                 args.schema_sha256, _SHA256_RE, "schema SHA256"
             ),
-            "version": 2,
+            "version": _SNAPSHOT_VERSION,
         },
     )
 
@@ -1195,44 +1197,77 @@ def _purge_counts(path: Path) -> dict[str, int]:
         or not isinstance(evidence.get("foreign_key_constraints_checked"), int)
         or evidence["foreign_key_constraints_checked"] < 1
         or not isinstance(purged, dict)
-        or set(purged) != {"change_requests", "feature_versions", "features"}
+        # 0104 이후 hard purge가 실제로 지우는 것은 Feature와 그 CASCADE 자식뿐이다.
+        # 상태 전이 감사는 append-only trigger가 지키는 의도적 잔존물이라 purge
+        # 대상이 아니고, ``ops.domain_commands`` receipt도 불변이다.
+        or set(purged) != {"features", "field_overrides"}
         or not all(
             isinstance(value, int) and not isinstance(value, bool) and value >= 0
             for value in purged.values()
         )
-        or purged["features"] > 6
-        or purged["feature_versions"] > 13
+        # live spec은 Feature 한 건만 만들고 create가 field override 여섯 건을
+        # 남긴다(`_ADMIN_CREATE_OVERRIDE_FIELD_PATHS`). 중단된 run은 그보다 적을
+        # 수 있으므로 상한만 본다.
+        or purged["features"] > 1
+        or purged["field_overrides"] > 6
     ):
         raise RuntimeError("recovery purge evidence가 예상과 다릅니다")
     return purged
 
 
+#: T-VN-36 live spec 한 번의 실행이 남기는 API-owned 행 집합.
+#: features=1        — spec이 만드는 Feature 한 건 (retire까지, hard delete 없음)
+#: field_overrides=6 — create가 authoring하는 field path 여섯 개
+#:                     (core.name/category/marker_icon/marker_color +
+#:                      coord가 파생시키는 coord_precision_digits와 coord)
+#: state_transitions=3 — initial(create) → suppressed(patch) → retired(retire)
+#: domain_commands=3   — POST create 1건 + PATCH state 2건 (GET은 command가 없다)
+_API_OWNED_AUDIT_COUNTS: Final[dict[str, int]] = {
+    "domain_commands": 3,
+    "features": 1,
+    "field_overrides": 6,
+    "state_transitions": 3,
+}
+#: 단일 열 feature FK 잔여: alias 1건 + field override 6건. subtype
+#: (`feature.feature_places`)은 composite FK라 이 감사에 잡히지 않는다.
+_API_OWNED_AUDIT_FOREIGN_KEY_REFERENCES: Final[int] = 7
+_FEATURE_UUID_RE: Final[re.Pattern[str]] = re.compile(
+    r"\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\Z"
+)
+
+
 def _api_owned_audit_counts(path: Path) -> dict[str, int]:
     evidence = _load_object(path)
     counts = evidence.get("counts")
+    feature_uuids = evidence.get("feature_uuids")
     if (
         set(evidence)
         != {
             "action",
             "counts",
+            "feature_uuids",
             "foreign_key_constraints_checked",
             "foreign_key_references",
             "version",
         }
         or evidence.get("version") != 1
         or evidence.get("action") != "api-audit"
-        or counts
-        != {"change_requests": 14, "feature_versions": 13, "features": 6}
-        or evidence.get("foreign_key_references") != 19
+        or counts != _API_OWNED_AUDIT_COUNTS
+        or evidence.get("foreign_key_references")
+        != _API_OWNED_AUDIT_FOREIGN_KEY_REFERENCES
         or not isinstance(evidence.get("foreign_key_constraints_checked"), int)
         or evidence["foreign_key_constraints_checked"] < 1
+        # clone content digest가 run-owned domain command receipt를 제외하려면
+        # 이 UUID가 필요하다 — Feature 한 건당 하나다.
+        or not isinstance(feature_uuids, list)
+        or len(feature_uuids) != _API_OWNED_AUDIT_COUNTS["features"]
+        or not all(
+            isinstance(value, str) and _FEATURE_UUID_RE.fullmatch(value)
+            for value in feature_uuids
+        )
     ):
         raise RuntimeError("API-owned 완료 감사 evidence가 예상과 다릅니다")
-    return {
-        "change_requests": int(counts["change_requests"]),
-        "feature_versions": int(counts["feature_versions"]),
-        "features": int(counts["features"]),
-    }
+    return {key: int(counts[key]) for key in _API_OWNED_AUDIT_COUNTS}
 
 
 def _auth_audit_counts(path: Path, action: str) -> dict[str, int]:
@@ -1643,13 +1678,13 @@ def _build_result(
             raise RuntimeError("최종 clone DB identity/schema/content가 시작 기준과 다릅니다")
     if effective_final["feature_non_deleted"] != startup_before["feature_non_deleted"]:
         raise RuntimeError("최종 non-deleted Feature 수가 시작 기준과 다릅니다")
-    if effective_final["feature_total"] != startup_before["feature_total"] + 6:
-        raise RuntimeError("최종 soft-delete 감사 Feature 6건이 예상과 다릅니다")
-    if (
-        effective_final["active_owned_features"] != 0
-        or effective_final["nonterminal_owned_change_requests"] != 0
-    ):
-        raise RuntimeError("최종 API-owned Feature/change request residue가 있습니다")
+    # T-VN-36 live spec은 Feature를 **한 건** 만들고 retire까지만 간다(hard delete
+    # 없음). provider fixture 두 건은 같은 run 안에서 cleanup이 물리 삭제하므로
+    # 총계에 남지 않는다. 그래서 최종 총계는 시작 기준 + 1이다.
+    if effective_final["feature_total"] != startup_before["feature_total"] + 1:
+        raise RuntimeError("최종 retire 감사 Feature 1건이 예상과 다릅니다")
+    if effective_final["active_owned_features"] != 0:
+        raise RuntimeError("최종 API-owned Feature residue가 있습니다")
 
     _fixture_counts(
         runtime / "direct-seed.json",
@@ -1671,7 +1706,7 @@ def _build_result(
     )
     api_owned_audit = _api_owned_audit_counts(runtime / "api-owned-audit.json")
     auth_audit = _auth_audit_counts(runtime / "auth-audit.json", "auth-verify")
-    purge = {"change_requests": 0, "feature_versions": 0, "features": 0}
+    purge = {"features": 0, "field_overrides": 0}
     if "recovery-hard-purge-running" in phase_history:
         purge = _purge_counts(runtime / "direct-purge-interrupted.json")
     auth_reset = {"main": 0, "recovery": 0}
@@ -1693,20 +1728,17 @@ def _build_result(
         "cleanup": {
             "foreign_key_references": cleanup["foreign_key_references"],
             "owned_features": cleanup["counts"]["features"],
-            "api_owned_change_requests": api_owned_audit["change_requests"],
+            "api_owned_domain_commands": api_owned_audit["domain_commands"],
             "api_owned_features": api_owned_audit["features"],
-            "api_owned_feature_versions": api_owned_audit["feature_versions"],
+            "api_owned_field_overrides": api_owned_audit["field_overrides"],
+            "api_owned_state_transitions": api_owned_audit["state_transitions"],
             "auth_audit_main": auth_audit["main"],
             "auth_audit_recovery": auth_audit["recovery"],
             "recovery_auth_reset_main": auth_reset["main"],
             "recovery_auth_reset_recovery": auth_reset["recovery"],
-            "recovery_purged_change_requests": purge["change_requests"],
-            "recovery_purged_feature_versions": purge["feature_versions"],
             "recovery_purged_features": purge["features"],
+            "recovery_purged_field_overrides": purge["field_overrides"],
             "api_owned_active_features": effective_final["active_owned_features"],
-            "api_owned_nonterminal_change_requests": effective_final[
-                "nonterminal_owned_change_requests"
-            ],
             "post_cleanup_audit_features": audit["counts"]["features"],
         },
         "execution_identity_sha256": _sha256(canonical_identity),
@@ -1872,14 +1904,15 @@ def abandon_failed_run(args: argparse.Namespace) -> None:
                 raise RuntimeError(
                     "실패 run 최종 clone DB identity/schema가 시작 기준과 다릅니다"
                 )
+        # 실패 run은 create 전에 죽었을 수도, retire까지 마친 뒤 죽었을 수도 있다.
+        # 두 경우의 총계는 시작 기준 그대로이거나 +1(retire된 fixture 한 건)이다.
         if (
             final["feature_non_deleted"] != startup_before["feature_non_deleted"]
             or final["feature_total"]
-            not in {startup_before["feature_total"], startup_before["feature_total"] + 6}
+            not in {startup_before["feature_total"], startup_before["feature_total"] + 1}
             or final["active_owned_features"] != 0
-            or final["nonterminal_owned_change_requests"] != 0
         ):
-            raise RuntimeError("실패 run cleanup 뒤 Feature/change request residue가 있습니다")
+            raise RuntimeError("실패 run cleanup 뒤 Feature residue가 있습니다")
 
     _fixture_counts(
         runtime / "direct-seed.json",
@@ -2043,9 +2076,6 @@ def main() -> None:
     snapshot.add_argument("--feature-total", required=True, type=int)
     snapshot.add_argument("--host-port", required=True, type=int)
     snapshot.add_argument("--migration-head", required=True)
-    snapshot.add_argument(
-        "--nonterminal-owned-change-requests", required=True, type=int
-    )
     snapshot.add_argument("--relation-count", required=True, type=int)
     snapshot.add_argument("--schema-sha256", required=True)
     snapshot.set_defaults(handler=write_snapshot)
