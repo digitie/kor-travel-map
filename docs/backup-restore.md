@@ -303,9 +303,33 @@ command가 결선돼 있지 않다** — 그 결선 전까지의 수동 기준�
 
 ## 10. 복원 리허설 드릴 (T-VN-H44)
 
-백업본이 **실제로 복원되는지**를 반복 가능한 드릴로 고정한다. 1회차 실적:
-2026-08-05, `2026-08-05-h43-postdeploy-0083.dump`(489MB, 0083·값 전환 배포 후)
-대상, dev box(WSL) 격리 컨테이너에서 전 단계 통과.
+백업본이 **실제로 복원되는지**를 반복 가능한 드릴로 고정한다.
+
+- **1회차**: 2026-08-05, `2026-08-05-h43-postdeploy-0083.dump`(489MB, 0083·값 전환
+  배포 후) 대상, dev box(WSL) 격리 컨테이너에서 전 단계 통과.
+- **2회차**: 2026-08-13, `2026-08-13-h43-postdeploy-0104.dump`(586MB, **백업 없는
+  in-place 마이그레이션 직후**) 대상, n150 격리 컨테이너(`h44-drill-pg`, :15444).
+  복원 341초, `pg_restore` 오류 1건(`schema "x_extension" already exists` — 아래
+  절차 3이 정상이라 명시한 그 1건). **manifest 6항목 전 항목 일치**:
+  head `0104_tvn36_final_fence` · features 1,008,852 · source_records 1,009,157 ·
+  source_links 1,008,852 · weather_values 0 · public_api_keys 1.
+  3축 분포도 prod와 동일(`active/published/valid` 1,008,848 +
+  `retired/suppressed/valid` 4), `0104`가 지운 두 테이블은 복원본에도 없다.
+  → **이 dump는 복구점으로 신뢰할 수 있다.**
+  단 절차 5(결손 주입 → replay)는 아래 정정대로 relation이 바뀌어 그대로 실행할 수
+  없었다. 그 축은 미검증으로 남는다.
+
+### 왜 격리 컨테이너인가 (원칙)
+
+`pg_restore`는 아카이브 **안의 SQL을 실행한다**. 즉 dump 파일은 수동적인 데이터가
+아니라 실행 가능한 입력이고, 그것을 어디에 푸느냐가 **신뢰 경계**다. 그래서 드릴은
+항상 일회용(disposable) 격리 인스턴스에서 하고, 끝나면 지운다 — 운영 클러스터에
+직접 복원해 "확인만" 하는 경로는 두지 않는다.
+
+같은 이유로 **app DB와 Dagster metadata DB는 같은 writer-quiesced window 안에서
+함께 dump하고, dump 뒤에 그 window가 유지됐는지 재확인한다.** 두 DB를 따로 뜨면
+서로 다른 시점을 가리키는 한 쌍이 만들어지는데, 복원 시점에는 그 어긋남이 보이지
+않는다.
 
 ### 절차 (1회 드릴 = 5단계)
 
@@ -330,7 +354,22 @@ command가 결선돼 있지 않다** — 그 결선 전까지의 수동 기준�
    features 정본에서 alias를 재생성(INSERT는 fence가 막지 않는다) → 4축
    (missing_uuid/missing_alias/pair_mismatch/orphan_alias) 전부 0·행수 원복 확인.
 
-### 함정 (1회차 실측)
+### ⚠️ 2026-08-13 정정 — 이 절의 relation 이름이 낡았다
+
+2회차 드릴(`0104`)에서 아래 함정 항목의 SQL이 **그 자리에서 깨졌다**. 세대 전환을
+문서가 따라오지 않은 것이므로, 함정 자체는 유효하되 이름을 바꿔 읽어야 한다.
+
+| 문서가 적은 것 | `0104` 실측 |
+|---|---|
+| `provider_sync.source_records.lineage_key` | **없다.** `lineage_key`는 `provider_sync.source_entity_heads`와 `provider_sync.notice_lineage_states`로 옮겨갔다 |
+| 트리거 `trg_source_record_lineage_key` | **없다.** 현행 함수는 `provider_sync.notice_lineage_key`와 `provider_sync.set_source_entity_head_lineage_key`다 |
+| `feature.weather_values` (§9 manifest) | **`feature.feature_weather_values`** (T-VN-35 개명) |
+
+즉 아래 "복원 후 반드시 `ENABLE ALWAYS`로 되돌릴 것"은 `source_records`가 아니라
+`source_entity_heads` 쪽 트리거를 대상으로 다시 확인해야 한다. **이 절의 SQL을
+그대로 복사해 쓰지 마라** — 드릴 전에 실제 relation 이름을 먼저 조회할 것.
+
+### 함정 (1회차 실측 — relation 이름은 위 정정 표를 함께 볼 것)
 
 - **`pg_restore --disable-triggers`는 계보 트리거의 `ENABLE ALWAYS`를 조용히
   벗긴다.** `trg_source_record_lineage_key`는 `session_replication_role = replica`
