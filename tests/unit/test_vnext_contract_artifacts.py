@@ -31,42 +31,38 @@ _TVN34_CURRENT_MIGRATION: Final = (
 # artifact bytes 고정 — 갱신 절차: artifact 수정 → 통합 테스트로 fingerprint 재고정
 # → 여기 sha256 갱신 (한 PR에서 함께).
 ARTIFACT_SHA256: Final[dict[str, str]] = {
-    "target-schema-v1.sql": ("f9b4e997913d6f1f44a6748277fdc510805d8991281dfba79ec07bbe7971187d"),
+    "target-schema-v1.sql": ("39d13339f521d7e24efdf11dc409b7097da49c24d0721bd20a6e62ccf5c74e9c"),
     "target-invariants-v1.sql": (
-        "94d959fa4004d717b10f0ffec6c44010da21b6749e03721a6813776c043aa1c6"
+        "971f656169cb1d2f21f9286d22e732daf16a3a9d79456e0f221bae4c04b86e26"
     ),
-    # 2026-08-12 재고정 + 2026-08-13 T-VN-36 재배치 실측 — columns/functions/indexes
-    # 3축은 빈 PostGIS DB 실측값이다. target-schema-v1.sql은 주석 한 줄만 바뀌어
-    # bytes sha가 f9b4e997…로 이동했을 뿐 catalog는 동일하다.
+    # 2026-08-13 T-VN-40 — final catalog/receipt/generation/candidate/audit 관계를
+    # target+reference SQL에 반영한 뒤 빈 PostGIS DB에서 7축을 재실측했다.
     "target-schema-fingerprints-v1.json": (
-        "898884585efb589ff64198c1140adb2eeff1dc652b61aa4b49f6b5ee0f5c77f2"
+        "cd6eaa8a83c8280b6da217678acd40205b34aaf7cd8593e47048bcd8c1da6b9e"
     ),
     "tvn33-reference-ownership-v1.sql": (
-        "9f434b50440c7463b86a5cf61abeb30bf6fe8d74a5760aa256374c76e4c9328a"
+        "2e72796b373691b4d6e10f71eceec4504df94af1a2582edbf445fb2390f20b6b"
     ),
-    # 2026-08-13 T-VN-36 — admin surface에서 죽은 요청 필드
-    # prevent_provider_reactivation 제거를 removed 축에 선언하고 admin baseline
-    # sha를 재고정했다 (user/service surface bytes는 불변). 같은 날 T-VN-36B가
-    # 소유하던 deferred(field override 쓰기 표면)를 전용 endpoint 착지로 해소해
-    # deferred 3 -> 2, added 1 -> 3.
-    "openapi-diff-v1.json": ("9928ff33b3b90169d7dc789a305ac00e6874908c40177fbf424c1b5c23f9920e"),
+    # 2026-08-13 T-VN-40 — public legacy catalog 제거, scoped service snapshot/mapping,
+    # admin catalog/import/candidate ETag·412/428 목표 diff를 machine freeze했다.
+    "openapi-diff-v1.json": ("4608cd24de0313522645a08e916aa50fc66a24e0a596ce3b98b4232a7eb9368d"),
     # 2026-08-13 T-VN-36 — receipt가 리베이스로 폐기된 커밋(c1fa5a4d)과 그때의
     # spec sha를 가리키고 있었다. 현재 head로 재핀했다.
     "consumer-rollout-v1.json": (
         "eac0767e0616880d6de8ef86bd6d6cb3d437e4b70e8bf732e9f620c30185fece"
     ),
     "violation-fixtures-v1.sql": (
-        "dba1ad0e640e4ee0e2c6904ab880f7548cf073d859f221840b6fad873e3a8df6"
+        "84cca48b776387e4b6fd00b702e40b3412c9731f6abcdd250a5c126c2ea155d8"
     ),
     "expected-rejections-v1.json": (
         "9123b16dba0adb27c5da2207ad8bef51225a780e37b28d04a94a8b0e8435f5ed"
     ),
     "recovery-preflight-v1.json": (
-        "0e7e1ea595d034aacda8b4c94b56de6c2a24059f150c8cbd6c0670aebce7dfdd"
+        "e3eb905cdfc51b71e2d4feb1979ac65cfe3c1446776e133332a4fa6969634655"
     ),
 }
 
-_EXPECTED_INVARIANT_COUNT: Final = 60
+_EXPECTED_INVARIANT_COUNT: Final = 67
 _INVARIANT_PHASES: Final = frozenset({"pre-backfill", "post-backfill", "both"})
 _SURFACES: Final = ("user", "service", "admin")
 _CHANGE_KEYS: Final = (
@@ -76,6 +72,7 @@ _CHANGE_KEYS: Final = (
     "enum_changes",
     "status_changes",
     "error_changes",
+    "schema_changes",
 )
 _WAVE2_TASKS: Final = (
     "T-VN-32",
@@ -319,6 +316,33 @@ def test_recovery_preflight_shape() -> None:
     assert "KTMCTLEAF" in merkle["leaf"]
     assert "KTMCTNODE" in merkle["node"]
     assert "KTMCTEMPTY" in merkle["empty_root"]
+    curation_relations = {
+        relation["name"]: relation
+        for relation in shadow["relations"]
+        if "curation" in relation["name"]
+    }
+    assert set(curation_relations) == {
+        "curation pre-backfill overlay parity",
+        "curation final canonical projection",
+        "curation candidate backfill buckets",
+    }
+    assert curation_relations["curation pre-backfill overlay parity"]["phase"] == "pre-backfill"
+    assert curation_relations["curation final canonical projection"]["phase"] == "post-drop"
+    curation = shadow["tvn40_curation_definition"]
+    assert curation["canonical_projection_leaf_fields"] == [
+        "collection_id",
+        "curation_item_id",
+        "collection_row_revision",
+        "item_row_revision",
+        "feature_id",
+        "feature_row_revision",
+        "accepted_link_decision_id",
+        "source_present",
+        "snapshot_payload_hash",
+        "snapshot_etag",
+    ]
+    assert "collection representation ETag" in curation["service_set_binding"]
+    assert len(curation["final_zero"]) == 3
 
 
 def test_expected_rejections_consistent_with_fixtures_and_ddl() -> None:

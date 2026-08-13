@@ -8,7 +8,7 @@
       "Map API의 admin/public/ops write route와 background write task",
       "Map Dagster daemon, schedule, sensor, queued/running run, 직접 실행 가능한 materialization",
       "Map migration/API entrypoint처럼 DB를 변경할 수 있는 one-shot process",
-      "Pin API/Dagster/worker와 Map 또는 Pin DB에 쓰는 cache-target command 경로",
+      "PinVi API/Dagster/worker, curation import API/worker/queued import와 Map 또는 PinVi DB에 쓰는 cache-target command 경로",
       "manager가 실행할 backup/migrate/CSV/bootstrap/initial/enable/canary/GC operation"
     ],
     "completeness_rule": "fence는 writer capability registry와 실제 process/container/transaction을 대조한다. 알려지지 않은 writer나 registry 밖 새 write route가 있으면 cutover를 시작하지 않는다."
@@ -52,10 +52,31 @@
         "checksum": "snapshot_merkle_root (아래 merkle_definition)"
       },
       {
-        "name": "curation effective projection",
-        "map_side": "feature.curation_collections/curation_items 정본 vs legacy curated_features overlay projection",
-        "pinvi_side": "PinVi가 소비하는 공개 curation 표면",
-        "owner": "T-VN-40A"
+        "name": "curation pre-backfill overlay parity",
+        "phase": "pre-backfill",
+        "map_side": "locked feature.curated_features legacy row와 canonical feature.curation_collections/curation_items mapping bucket",
+        "pinvi_side": "old curated_feature/item identity를 저장한 PinVi plan/POI",
+        "owner": "T-VN-40C",
+        "checksum": "tvn40_legacy_mapping_root (아래 tvn40_curation_definition)",
+        "acceptance": "legacy row count = classified bucket count; duplicate/unmapped/ambiguous=0"
+      },
+      {
+        "name": "curation final canonical projection",
+        "phase": "post-drop",
+        "map_side": "published/public/non-archived collection + included/source_present/non-archived item + public Feature + current trusted accepted link decision의 canonical UUID/revision/snapshot vector",
+        "pinvi_side": "PinVi source_collection_id→plan 및 source_curation_item_id→POI mapping, imported collection ETag/item-set hash, paired consumer version",
+        "owner": "T-VN-40C",
+        "checksum": "tvn40_canonical_projection_root (아래 tvn40_curation_definition)",
+        "acceptance": "Map/PinVi root·count 동일; orphan/duplicate/unmatched=0; legacy relation/path/type/static reference=0"
+      },
+      {
+        "name": "curation candidate backfill buckets",
+        "phase": "post-drop",
+        "map_side": "immutable generation/observation/current candidate/timeline과 ops.curation_cutover_identity_mappings bucket count/root",
+        "pinvi_side": "해당 없음 — candidate는 admin-only이며 public/import set에 존재하면 실패",
+        "owner": "T-VN-40C",
+        "checksum": "tvn40_candidate_bucket_root (아래 tvn40_curation_definition)",
+        "acceptance": "legacy source-rule row가 exactly-one bucket에 속하고 public/PinVi candidate row=0"
       }
     ],
     "merkle_definition": {
@@ -71,6 +92,49 @@
       "ordering": "NFC UTF-8 (external_system, target_key) byte-order 정렬, identity 중복 금지",
       "node": "sha256(KTMCTNODE\\x00 || left || right), 홀수 노드는 promotion",
       "empty_root": "sha256(KTMCTEMPTY\\x00)"
+    },
+    "tvn40_curation_definition": {
+      "canonicalization": "version 1; UTF-8 NFC string, object key lexicographic order, decimal-string bigint, explicit null, u32be length-prefixed fields, ordered leaves by UUID raw bytes",
+      "legacy_mapping_leaf_fields": [
+        "legacy_curated_feature_id",
+        "collection_id",
+        "curation_item_id",
+        "mapping_kind",
+        "source_row_hash"
+      ],
+      "legacy_mapping_leaf": "sha256(KTMCURMAPLEAF\\x00 || framed fields); root uses sha256(KTMCURNODE\\x00 || left || right), odd leaf promotion, empty sha256(KTMCUREMPTY\\x00)",
+      "canonical_projection_leaf_fields": [
+        "collection_id",
+        "curation_item_id",
+        "collection_row_revision",
+        "item_row_revision",
+        "feature_id",
+        "feature_row_revision",
+        "accepted_link_decision_id",
+        "source_present",
+        "snapshot_payload_hash",
+        "snapshot_etag"
+      ],
+      "canonical_projection_leaf": "sha256(KTMCURLEAF\\x00 || framed fields); root uses sha256(KTMCURNODE\\x00 || left || right), odd leaf promotion, empty sha256(KTMCUREMPTY\\x00)",
+      "candidate_bucket_leaf_fields": [
+        "bucket_kind",
+        "legacy_identity",
+        "rule_id",
+        "source_entity_key",
+        "feature_id",
+        "candidate_id",
+        "review_state",
+        "eligibility_present",
+        "disposition",
+        "candidate_input_hash"
+      ],
+      "candidate_bucket_leaf": "sha256(KTMCURCANDLEAF\\x00 || framed fields); same node/empty rules",
+      "service_set_binding": "collection representation ETag + item_set_hash + count + complete=true를 PinVi immutable import receipt와 paired Map/PinVi SHA에 결박",
+      "final_zero": [
+        "to_regclass(feature.curated_features) is null",
+        "legacy curated detail snapshot route/type/cache 0",
+        "PinVi source_curated_feature_id/source_curated_feature_item_id/static caller 0"
+      ]
     }
   },
   "restore_epoch_rule": {

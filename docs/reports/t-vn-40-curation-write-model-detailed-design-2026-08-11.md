@@ -912,6 +912,11 @@ preflight는 procedure별 EXECUTE allowlist, 교차 executor deny, candidate/aud
 T-VN-40의 static zero gate는 active executable/importable `src/`, API/Dagster packages, active
 routers/DTO/client/frontend/generated OpenAPI, Docker/scripts, PinVi vendor/consumer, current docs와
 `contracts/vnext/{target-schema,recovery-preflight,consumer-rollout,openapi-diff}`를 exact include한다.
+machine-readable artifact의 **active contract field**에는 legacy path/type/column이 없어야 하지만,
+`openapi-diff.removed`, recovery pre-backfill 비교축, removal manifest처럼 제거 대상을 증명하는 typed
+tombstone은 raw 문자열 zero의 예외가 아니라 필수 증거다. gate는 파일 전체 `rg=0`이 아니라 JSON
+pointer/SQL phase별 closed allowlist로 이 증거 위치만 허용하고, active/target 위치에 같은 문자열이
+등장하면 실패한다.
 fresh replay에 필수인 hash-pinned historical Alembic 0025~T40 이전 revision,
 `src/kortravelmap/cli/_h35_schema.py`, frozen H35 rehearsal, `docs/archive/`만 explicit exclusion이다.
 각 exclusion은 import graph/build artifact에 들어가지 않음을 검사하고 예상 밖 파일 하나가 생기면

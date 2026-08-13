@@ -46,12 +46,15 @@ _ROOT: Final = Path(__file__).resolve().parents[2]
 _CONTRACTS: Final = _ROOT / "contracts" / "vnext"
 _SCHEMA_SQL: Final = _CONTRACTS / "target-schema-v1.sql"
 _REFERENCE_OWNERSHIP_SQL: Final = _CONTRACTS / "tvn33-reference-ownership-v1.sql"
+_TVN40_REFERENCE_MARKER: Final = (
+    "-- T-VN-40 final curation receipt/candidate/audit 도착점"
+)
 _INVARIANTS_SQL: Final = _CONTRACTS / "target-invariants-v1.sql"
 _FINGERPRINTS_JSON: Final = _CONTRACTS / "target-schema-fingerprints-v1.json"
 _VIOLATIONS_SQL: Final = _CONTRACTS / "violation-fixtures-v1.sql"
 _REJECTIONS_JSON: Final = _CONTRACTS / "expected-rejections-v1.json"
 
-_EXPECTED_INVARIANT_COUNT: Final = 60
+_EXPECTED_INVARIANT_COUNT: Final = 67
 _INVARIANT_PHASES: Final = frozenset({"pre-backfill", "post-backfill", "both"})
 
 # fingerprint 대상 — target-schema-v1.sql과 T-VN-33 reference ownership DDL의 전체 relation.
@@ -72,7 +75,10 @@ _TARGET_TABLES: Final = (
     "feature.curated_themes",
     "feature.curation_collections",
     "feature.curation_items",
+    "feature.theme_candidate_generations",
+    "feature.theme_candidate_generation_observations",
     "feature.theme_feature_candidates",
+    "feature.theme_feature_candidate_transitions",
     "provider_sync.provider_datasets",
     "provider_sync.provider_dataset_operations",
     "provider_sync.provider_dataset_operation_scopes",
@@ -86,6 +92,11 @@ _TARGET_TABLES: Final = (
     "ops.feature_override_field_paths",
     "ops.feature_overrides",
     "ops.current_summary_runs",
+    "ops.domain_commands",
+    "ops.domain_command_results",
+    "ops.curation_rule_reconcile_operations",
+    "ops.curation_rule_reconcile_scope_members",
+    "ops.curation_cutover_identity_mappings",
     "provider_sync.provider_sync_state",
     "feature.curated_sources",
     "feature.curated_source_rules",
@@ -114,6 +125,8 @@ _TARGET_FUNCTIONS: Final = (
     "feature.sync_subtype_public_ready()",
     "feature.create_feature_with_initial_state(jsonb,text,text,text,jsonb)",
     "feature.transition_feature_state(uuid,text,text,text,bigint,jsonb)",
+    "feature.reject_tvn40_append_only_mutation()",
+    "feature.reject_tvn40_truncate()",
     "provider_sync.is_valid_provider_dataset_capabilities(jsonb)",
     "provider_sync.is_valid_provider_dataset_sync_scope(text)",
     "provider_sync.reject_provider_dataset_identity_update()",
@@ -568,7 +581,13 @@ def load_violation_cases() -> dict[str, str]:
 @pytest.fixture(scope="module")
 async def _freeze_contract(
     pg_container: Any,
-) -> AsyncIterator[tuple[asyncpg.Connection, dict[str, frozenset[str]]]]:
+) -> AsyncIterator[
+    tuple[
+        asyncpg.Connection,
+        dict[str, frozenset[str]],
+        dict[str, dict[str, Any]],
+    ]
+]:
     """새 database + x_extension 확장 위에 target-schema-v1.sql을 적용한다.
 
     `migrated_engine`(alembic head)이 아니라 **빈 PostGIS DB**가 대상이다 —
@@ -602,7 +621,10 @@ async def _freeze_contract(
         await connection.execute(_SCHEMA_SQL.read_text(encoding="utf-8"))
         before = await _declarable_identities(connection)
         before_bodies = await _schema_function_bodies(connection)
-        await connection.execute(_REFERENCE_OWNERSHIP_SQL.read_text(encoding="utf-8"))
+        reference_sql = _REFERENCE_OWNERSHIP_SQL.read_text(encoding="utf-8")
+        prefix, marker, suffix = reference_sql.partition(_TVN40_REFERENCE_MARKER)
+        assert marker, "T-VN-40 reference block marker가 없다"
+        await connection.execute(prefix)
         after = await _declarable_identities(connection)
         after_bodies = await _schema_function_bodies(connection)
         declared = {
@@ -621,7 +643,29 @@ async def _freeze_contract(
                 if identity in before_bodies and before_bodies[identity] != body
             }
         )
-        yield connection, declared
+        # T-VN-40 companion block가 T-VN-33 객체 일부를 최종 의미로 다시 쓴다.
+        # head 대조는 final connection을 다시 읽지 않고, T-VN-33 prefix 적용 직후의
+        # payload를 보존해야 한다. identity만 보존하면 뒤 block의 RESTRICT FK가
+        # T-VN-33 당시 CASCADE FK처럼 잘못 대조된다.
+        declared_catalog = {
+            "constraints": _restrict(
+                await _catalog_objects(connection, _CONSTRAINTS_SQL, _TARGET_TABLES),
+                declared["constraints"],
+            ),
+            "indexes": _restrict(
+                await _catalog_objects(connection, _INDEX_DEFS_SQL, _TARGET_TABLES),
+                declared["indexes"],
+            ),
+            "triggers": _restrict(
+                await _catalog_objects(connection, _TRIGGERS_SQL, _TARGET_TABLES),
+                declared["triggers"],
+            ),
+            "functions": await _catalog_objects(
+                connection, _FUNCTIONS_SQL, tuple(sorted(declared["functions"]))
+            ),
+        }
+        await connection.execute(marker + suffix)
+        yield connection, declared, declared_catalog
     finally:
         await connection.close()
         admin_engine = make_async_engine(admin_dsn)
@@ -635,7 +679,11 @@ async def _freeze_contract(
 
 @pytest.fixture(scope="module")
 def freeze_db(
-    _freeze_contract: tuple[asyncpg.Connection, dict[str, frozenset[str]]],
+    _freeze_contract: tuple[
+        asyncpg.Connection,
+        dict[str, frozenset[str]],
+        dict[str, dict[str, Any]],
+    ],
 ) -> asyncpg.Connection:
     """계약 두 파일이 모두 적용된 DB 연결."""
     return _freeze_contract[0]
@@ -643,10 +691,26 @@ def freeze_db(
 
 @pytest.fixture(scope="module")
 def tvn33_declared_identities(
-    _freeze_contract: tuple[asyncpg.Connection, dict[str, frozenset[str]]],
+    _freeze_contract: tuple[
+        asyncpg.Connection,
+        dict[str, frozenset[str]],
+        dict[str, dict[str, Any]],
+    ],
 ) -> dict[str, frozenset[str]]:
     """`tvn33-reference-ownership-v1.sql`이 새로 선언한 catalog 객체 identity."""
     return _freeze_contract[1]
+
+
+@pytest.fixture(scope="module")
+def tvn33_declared_catalog(
+    _freeze_contract: tuple[
+        asyncpg.Connection,
+        dict[str, frozenset[str]],
+        dict[str, dict[str, Any]],
+    ],
+) -> dict[str, dict[str, Any]]:
+    """T-VN-33 prefix 적용 직후의 catalog payload snapshot."""
+    return _freeze_contract[2]
 
 
 @pytest.fixture(scope="module")
@@ -1421,8 +1485,9 @@ async def test_active_parent_cascades_preserve_indirect_owner_guards(
         )
         theme_id = await freeze_db.fetchval(
             """
-            INSERT INTO feature.curated_themes (theme_key, title)
-            VALUES ('cascade-guard', 'cascade guard')
+            INSERT INTO feature.curated_themes (
+                theme_slug, theme_name, theme_group, owner_kind
+            ) VALUES ('cascade-guard', 'cascade guard', 'fixture', 'operator')
             RETURNING theme_id
             """
         )
@@ -1430,15 +1495,15 @@ async def test_active_parent_cascades_preserve_indirect_owner_guards(
             """
             INSERT INTO feature.curated_sources (
                 provider_dataset_id, source_name, source_kind
-            ) VALUES ($1, 'cascade source', 'fixture')
+            ) VALUES ($1, 'cascade source', 'manual')
             RETURNING source_id
             """,
             dataset_id,
         )
         await freeze_db.execute(
             """
-            INSERT INTO feature.curated_source_rules (theme_id, source_id)
-            VALUES ($1, $2)
+            INSERT INTO feature.curated_source_rules (theme_id, source_id, owner_kind)
+            VALUES ($1, $2, 'operator')
             """,
             theme_id,
             source_id,
@@ -1454,9 +1519,19 @@ async def test_active_parent_cascades_preserve_indirect_owner_guards(
             "WHERE integrity_observation_scope_id = $1",
             integrity_scope_id,
         )
+        curation_savepoint = freeze_db.transaction()
+        await curation_savepoint.start()
+        with pytest.raises(asyncpg.ForeignKeyViolationError):
+            await freeze_db.execute(
+                "DELETE FROM feature.curated_sources WHERE source_id = $1",
+                source_id,
+            )
+        await curation_savepoint.rollback()
         await freeze_db.execute(
-            "DELETE FROM feature.curated_sources WHERE source_id = $1",
-            source_id,
+            "DELETE FROM feature.curated_source_rules WHERE source_id = $1", source_id
+        )
+        await freeze_db.execute(
+            "DELETE FROM feature.curated_sources WHERE source_id = $1", source_id
         )
 
         assert (
@@ -1643,9 +1718,9 @@ async def test_catalog_fingerprints_match_frozen_artifact(
 
 
 async def test_frozen_contract_matches_alembic_head(
-    freeze_db: asyncpg.Connection,
     head_db: asyncpg.Connection,
     tvn33_declared_identities: dict[str, frozenset[str]],
+    tvn33_declared_catalog: dict[str, dict[str, Any]],
 ) -> None:
     """T-VN-33 계약이 선언한 객체가 `alembic upgrade head`에도 그대로 있는지 대조한다.
 
@@ -1708,9 +1783,7 @@ async def test_frozen_contract_matches_alembic_head(
     assert len(declared_functions) >= 22, declared_functions
 
     head_indexes = await _catalog_objects(head_db, _INDEX_DEFS_SQL, _TARGET_TABLES)
-    contract_indexes = _restrict(
-        await _catalog_objects(freeze_db, _INDEX_DEFS_SQL, _TARGET_TABLES), declared_indexes
-    )
+    contract_indexes = tvn33_declared_catalog["indexes"]
     scoped_head_indexes = _restrict(head_indexes, declared_indexes)
     divergent = frozenset(
         identity
@@ -1741,18 +1814,14 @@ async def test_frozen_contract_matches_alembic_head(
 
     problems += _diff_catalog(
         "triggers",
-        _restrict(
-            await _catalog_objects(freeze_db, _TRIGGERS_SQL, _TARGET_TABLES), declared_triggers
-        ),
+        tvn33_declared_catalog["triggers"],
         _restrict(
             await _catalog_objects(head_db, _TRIGGERS_SQL, _TARGET_TABLES), declared_triggers
         ),
     )
 
     head_constraints = await _catalog_objects(head_db, _CONSTRAINTS_SQL, _TARGET_TABLES)
-    contract_constraints = _restrict(
-        await _catalog_objects(freeze_db, _CONSTRAINTS_SQL, _TARGET_TABLES), declared_constraints
-    )
+    contract_constraints = tvn33_declared_catalog["constraints"]
     renamed = _renamed_in_head(contract_constraints, head_constraints)
     assert renamed == _CONSTRAINTS_RENAMED_IN_HEAD, (
         "계약 이름 ↔ head 옛 이름 목록이 바뀌었다. 새 항목이 생겼다면 그 제약이 "
@@ -1780,9 +1849,7 @@ async def test_frozen_contract_matches_alembic_head(
     problems += _diff_catalog(
         "functions",
         _normalize_function_bodies(
-            _by_required_signature(
-                await _catalog_objects(freeze_db, _FUNCTIONS_SQL, declared_functions)
-            )
+            _by_required_signature(tvn33_declared_catalog["functions"])
         ),
         _normalize_function_bodies(
             _by_required_signature(
