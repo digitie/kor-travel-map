@@ -201,6 +201,36 @@ BEGIN
     RAISE EXCEPTION 'curation import plan must be claimed before apply'
       USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_import_plan_claim';
   END IF;
+  IF (
+    SELECT COALESCE(jsonb_agg(
+      jsonb_set(
+        row.normalized_payload,
+        '{provenance}',
+        COALESCE(
+          NULLIF(row.normalized_payload -> 'provenance', 'null'::jsonb),
+          '{}'::jsonb
+        ),
+        true
+      ) ORDER BY row.row_number
+    ), '[]'::jsonb)
+    FROM feature.curation_import_plan_rows AS row
+    JOIN ops.curation_import_plan_claims AS claim
+      ON claim.import_plan_id = row.import_plan_id
+    WHERE claim.command_id = p_command_id
+      AND row.normalized_payload IS NOT NULL
+  ) IS DISTINCT FROM (
+    SELECT COALESCE(jsonb_agg(
+      value.row_payload || jsonb_build_object(
+        'provenance', COALESCE(value.provenance, '{}'::jsonb)
+      ) ORDER BY value.row_number
+    ), '[]'::jsonb)
+    FROM jsonb_to_recordset(p_items) AS value(
+      row_number integer, row_payload jsonb, provenance jsonb
+    )
+  ) THEN
+    RAISE EXCEPTION 'curation import rows differ from the immutable claimed plan'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_import_plan_row_set';
+  END IF;
   IF (SELECT count(*) FROM jsonb_array_elements(p_items)) <> (
        SELECT count(DISTINCT value.row_number)
        FROM jsonb_to_recordset(p_items) AS value(row_number integer)

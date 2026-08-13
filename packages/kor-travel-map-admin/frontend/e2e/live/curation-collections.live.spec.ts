@@ -185,16 +185,21 @@ test.describe("공식 큐레이션 collection live", () => {
 
     for (const [fileName, rows] of OFFICIAL_FILES) {
       await page.getByLabel("CSV 파일").setInputFiles(path.join(RESOURCE_ROOT, fileName));
+      const provenanceInput = page.getByLabel("Provenance JSON 파일 (공식 등대)");
+      await provenanceInput.setInputFiles(
+        fileName === "lighthouse-stamp-tour.csv"
+          ? path.join(RESOURCE_ROOT, "lighthouse-stamp-tour.provenance.json")
+          : [],
+      );
 
       const previewResponse = page.waitForResponse(
         (response) =>
-          response.url().includes("/api/proxy/v1/admin/curations/import") &&
-          response.url().includes("dry_run=true") &&
+          response.url().includes("/api/proxy/v1/admin/curations/imports/preview") &&
           response.request().method() === "POST",
         { timeout: FLOW_TIMEOUT },
       );
       await page.getByRole("button", { name: "매칭 미리보기" }).click();
-      expect((await previewResponse).status()).toBe(200);
+      expect((await previewResponse).status()).toBe(201);
 
       const report = page.getByTestId("curation-import-report");
       await expect(report.getByText("미리보기", { exact: true })).toBeVisible();
@@ -203,8 +208,8 @@ test.describe("공식 큐레이션 collection live", () => {
 
       const commitResponse = page.waitForResponse(
         (response) =>
-          response.url().includes("/api/proxy/v1/admin/curations/import") &&
-          response.url().includes("dry_run=false") &&
+          response.url().includes("/api/proxy/v1/admin/curations/import-plans/") &&
+          response.url().endsWith("/commit") &&
           response.request().method() === "POST",
         { timeout: FLOW_TIMEOUT },
       );

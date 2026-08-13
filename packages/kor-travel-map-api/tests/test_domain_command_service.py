@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from inspect import signature
+from io import BytesIO
 from typing import Any
 from unittest.mock import AsyncMock
 from uuid import UUID
@@ -17,6 +18,7 @@ from kortravelmap.infra.domain_command_repo import (
 )
 from pydantic import BaseModel
 from sqlalchemy.exc import DBAPIError
+from starlette.datastructures import UploadFile
 
 from kortravelmap.api import domain_command_service as service
 from kortravelmap.api.auth import AdminProxyContext
@@ -379,7 +381,7 @@ async def test_route_decorator_uses_operation_success_status_without_response_pa
     ) -> _Response:
         return _Response(data={"collection_id": "collection-1"})
 
-    session = _Session()
+    session = _SerializableSession([])
     result = await _route(
         context=AdminProxyContext(actor=_ACTOR),
         session=session,
@@ -394,6 +396,72 @@ async def test_route_decorator_uses_operation_success_status_without_response_pa
         status_code=201,
         response_headers={},
     )
+
+
+@pytest.mark.asyncio
+async def test_serializable_multipart_fingerprint_streams_and_rewinds_each_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    operation = "admin.curation-import.preview"
+    events: list[str] = []
+    payloads: list[object] = []
+    reads: list[bytes] = []
+    command = service.DomainCommandHandle(
+        command_id=1,
+        actor=_ACTOR,
+        operation=operation,
+        idempotency_key=str(_KEY),
+        request_fingerprint="a" * 64,
+    )
+
+    async def begin(
+        *_args: object, payload: object, **_kwargs: object
+    ) -> service.DomainCommandHandle:
+        payloads.append(payload)
+        return command
+
+    monkeypatch.setattr(service, "begin_domain_command", begin)
+    monkeypatch.setattr(service, "complete_domain_command", AsyncMock())
+
+    @service.idempotent_domain_command(operation)
+    async def _route(
+        file: UploadFile,
+        provenance_file: UploadFile | None,
+        context: AdminProxyContext,
+        session: _SerializableSession,
+        request: Request,
+    ) -> _Response:
+        reads.append(await file.read())
+        if len(reads) == 1:
+            raise DBAPIError(None, None, _SqlStateError("40001"), False)
+        return _Response(data={"import_plan_id": "plan-1"})
+
+    content = b"collection_key,theme_slug\ncollection,theme\n"
+    result = await _route(
+        file=UploadFile(BytesIO(content), filename="curations.csv"),
+        provenance_file=None,
+        context=AdminProxyContext(actor=_ACTOR),
+        session=_SerializableSession(events),
+        request=_request(),
+        __domain_idempotency_key=_KEY,
+    )
+
+    assert result.data == {"import_plan_id": "plan-1"}
+    assert reads == [content, content]
+    assert payloads == [
+        {
+            "file": {
+                "sha256": "b3bd60f28eb1639d2a58118ba9626bcc43ff4d1f26caae00aaad62cc8186b80f"
+            },
+            "provenance_file": None,
+        },
+        {
+            "file": {
+                "sha256": "b3bd60f28eb1639d2a58118ba9626bcc43ff4d1f26caae00aaad62cc8186b80f"
+            },
+            "provenance_file": None,
+        },
+    ]
 
 
 @pytest.mark.asyncio

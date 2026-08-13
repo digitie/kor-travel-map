@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
@@ -26,6 +27,7 @@ from kortravelmap.infra.domain_command_repo import (
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
+from starlette.datastructures import UploadFile
 
 from kortravelmap.api.auth import (
     AdminProxyContext,
@@ -273,7 +275,7 @@ def _material_response_headers(
     }
 
 
-def _route_payload(
+async def _route_payload(
     function_signature: Signature,
     args: tuple[object, ...],
     kwargs: dict[str, object],
@@ -283,11 +285,18 @@ def _route_payload(
     bound = function_signature.bind(*args, **kwargs)
     bound.apply_defaults()
     excluded = {"session", "context", "_context", "request", "response", "settings"}
-    payload = {
-        name: jsonable_encoder(value)
-        for name, value in bound.arguments.items()
-        if name not in excluded
-    }
+    payload: dict[str, object] = {}
+    for name, value in bound.arguments.items():
+        if name in excluded:
+            continue
+        if isinstance(value, UploadFile):
+            digest = hashlib.sha256()
+            while chunk := await value.read(1024 * 1024):
+                digest.update(chunk)
+            await value.seek(0)
+            payload[name] = {"sha256": digest.hexdigest()}
+            continue
+        payload[name] = jsonable_encoder(value)
     if fingerprint_headers:
         request = cast(Request, bound.arguments["request"])
         payload["headers"] = {
@@ -295,6 +304,20 @@ def _route_payload(
             for name in fingerprint_headers
         }
     return payload
+
+
+async def _rewind_route_uploads(
+    function_signature: Signature,
+    args: tuple[object, ...],
+    kwargs: dict[str, object],
+) -> None:
+    """SERIALIZABLE 재시도마다 multipart 입력을 동일 byte stream으로 되돌린다."""
+
+    bound = function_signature.bind(*args, **kwargs)
+    bound.apply_defaults()
+    for value in bound.arguments.values():
+        if isinstance(value, UploadFile):
+            await value.seek(0)
 
 
 def _domain_route_signature(
@@ -376,7 +399,7 @@ def idempotent_domain_command(
             if "request" not in kwargs:
                 kwargs.pop("__domain_request")
             session = cast("AsyncSession", kwargs["session"])
-            payload = _route_payload(
+            payload = await _route_payload(
                 original_signature,
                 args,
                 kwargs,
@@ -402,6 +425,11 @@ def idempotent_domain_command(
                                 payload=payload,
                             )
                             command_token = _ACTIVE_DOMAIN_COMMAND.set(command)
+                            await _rewind_route_uploads(
+                                original_signature,
+                                args,
+                                kwargs,
+                            )
                             result = await function(*args, **kwargs)
                             route_response = kwargs.get("response")
                             await complete_domain_command(

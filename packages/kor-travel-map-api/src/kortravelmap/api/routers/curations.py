@@ -16,7 +16,6 @@ from fastapi import (
     APIRouter,
     Depends,
     File,
-    Header,
     HTTPException,
     Query,
     Request,
@@ -1748,13 +1747,13 @@ async def download_curation_import_template() -> Response:
     status_code=201,
     responses={201: {"headers": _ETAG_RESPONSE_HEADER}},
 )
+@idempotent_domain_command("admin.curation-import.preview")
 async def preview_admin_curation_import(
     request: Request,
-    http_response: Response,
+    response: Response,
     session: Annotated[AsyncSession, Depends(get_session)],
     context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
     file: Annotated[UploadFile, File(description="UTF-8 CSV 파일")],
-    idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
     provenance_file: Annotated[
         UploadFile | None,
         File(description="행별 source provenance JSON sidecar"),
@@ -1762,18 +1761,22 @@ async def preview_admin_curation_import(
 ) -> CurationImportResponse:
     """CSV+sidecar를 한 번 해소해 immutable import plan으로 저장한다."""
     started_at = perf_counter()
-    # Multipart content fingerprint를 계산해 claim하기 전에도 catalog 조회가 있다.
-    # 따라서 그 어떤 DB statement보다 먼저 격리 수준을 고정한다.
-    await session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
+    command = domain_command_service.current_domain_command()
     content = await file.read(CURATION_CSV_MAX_BYTES + 1)
     content_sha256 = hashlib.sha256(content).hexdigest()
-    preview = parse_curation_csv(content)
     provenance_content: bytes | None = None
     provenance_by_row: dict[int, dict[str, Any]] = {}
     if provenance_file is not None:
         provenance_content = await provenance_file.read(
             CURATION_PROVENANCE_MAX_BYTES + 1
         )
+    provenance_sha256 = (
+        hashlib.sha256(provenance_content).hexdigest()
+        if provenance_content is not None
+        else None
+    )
+    preview = parse_curation_csv(content)
+    if provenance_content is not None:
         try:
             provenance = parse_curation_provenance(
                 csv_content=content,
@@ -1796,21 +1799,6 @@ async def preview_admin_curation_import(
                 "provenance_file이 필요합니다."
             ),
         )
-    provenance_sha256 = (
-        hashlib.sha256(provenance_content).hexdigest()
-        if provenance_content is not None
-        else None
-    )
-    command = await domain_command_service.begin_domain_command(
-        session,
-        actor=context.actor,
-        operation="admin.curation-import.preview",
-        idempotency_key=idempotency_key,
-        payload={
-            "content_sha256": content_sha256,
-            "provenance_sha256": provenance_sha256,
-        },
-    )
     dry_run = True
     # T-VN-32C PR-2 (W8) — CSV의 UUID 표기 feature 참조를 legacy 정본 키로
     # 일괄 정규화해 매칭한다 (miss는 원문 유지 → 기존 unmatched 흐름,
@@ -2008,10 +1996,8 @@ async def preview_admin_curation_import(
             "import_batch_id": None,
         }
     except IntegrityError as exc:
-        await session.rollback()
         raise _conflict(exc) from exc
     except ValueError as exc:
-        await session.rollback()
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     invalid_rows = sum(item.status == "invalid" for item in item_views)
@@ -2079,10 +2065,9 @@ async def preview_admin_curation_import(
             principal=context.actor,
         )
     except DBAPIError as exc:
-        await session.rollback()
         raise _import_plan_command_error(exc) from exc
     plan_etag = f'"sha256:{plan_sha256}"'
-    response = CurationImportResponse(
+    result_response = CurationImportResponse(
         data=CurationImportData(
             dry_run=dry_run,
             import_plan_id=import_plan_id,
@@ -2107,16 +2092,8 @@ async def preview_admin_curation_import(
         ),
         meta=make_meta(request, started_at=started_at),
     )
-    http_response.headers["ETag"] = plan_etag
-    await domain_command_service.complete_domain_command(
-        session,
-        command=command,
-        response=response,
-        status_code=201,
-        response_headers={"ETag": plan_etag},
-    )
-    await session.commit()
-    return response
+    response.headers["ETag"] = plan_etag
+    return result_response
 
 
 @admin_router.post(
