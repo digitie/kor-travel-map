@@ -727,6 +727,18 @@
         "0115_tvn40_cancel_cmds"
       ],
       "revision": "0116_tvn40_collection_cmds"
+    },
+    {
+      "down_revision": [
+        "0116_tvn40_collection_cmds"
+      ],
+      "revision": "0117_tvn40_item_cmds"
+    },
+    {
+      "down_revision": [
+        "0117_tvn40_item_cmds"
+      ],
+      "revision": "0118_tvn40_import_quarantine"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

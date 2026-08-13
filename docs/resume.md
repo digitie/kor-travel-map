@@ -1,5 +1,14 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+canonical item create/patch/archive를 0117 named `SECURITY DEFINER` command로 옮기고, 0118에서
+import·quarantine이 collection을 직접 변경하던 우회도 domain command effect와 strong revision에
+결박했다. import는 retained theme/source를 exact reuse하고 collection을 create-only 또는 immutable
+catalog 일치로만 해소하며, 실제 item 집합이 달라질 때만 부모 revision을 한 번 올린다. quarantine
+move/standalone은 source·target revision과 item 집합을 같은 SERIALIZABLE transaction에서 검증한다.
+generic API/Dagster runtime의 collection raw INSERT/UPDATE/DELETE는 회수했다. fresh 0001→0118 actual
+LOGIN에서 collection/item command와 import 생성·변경·no-op, quarantine 이동·확정, raw DML 42501이
+통과했다. 다음 checkpoint는 immutable import preview/commit revision vector와 merge typed command다.
+
 canonical collection create/patch/archive를 0116 named `SECURITY DEFINER` command로 옮겼다.
 SERIALIZABLE transaction, admin executor, domain command actor/operation, active theme/source,
 revision CAS와 exact no-op을 DB가 검증하고 command effect를 append-only ledger에 결박한다. collection

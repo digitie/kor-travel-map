@@ -5,7 +5,7 @@
   "baseline": {
     "admin": {
       "file": "packages/kor-travel-map-api/openapi.json",
-      "sha256": "5b47b2c31b7600339cbcc2facd10fca67feb7f8bf17c3bed51cc2223112d6520"
+      "sha256": "c49f312ef2a9c0e00e99b4d062650b56b2c982665c331eb278337be055e8eb82"
     },
     "user": {
       "file": "packages/kor-travel-map-api/openapi.user.json",
@@ -17,6 +17,11 @@
     }
   },
   "revisions": [
+    {
+      "date": "2026-08-14",
+      "task": "T-VN-40B",
+      "change": "canonical item command와 quarantine reclassify의 strong If-Match·revision 계약, import command의 SERIALIZABLE 실행 정책을 admin spec에 반영하고 baseline을 재고정했다. user/service bytes와 목표 diff counts는 변하지 않는다."
+    },
     {
       "date": "2026-08-13",
       "task": "T-VN-40B",

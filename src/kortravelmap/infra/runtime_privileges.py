@@ -47,7 +47,7 @@ _FEATURE_TABLE_PRIVILEGES: Mapping[str, tuple[str, ...]] = {
     "curated_sources": ("SELECT",),
     "curated_themes": ("SELECT",),
     "curated_tripmate_copy_snapshots": ("SELECT", "INSERT", "UPDATE", "DELETE"),
-    "curation_collections": ("SELECT", "INSERT", "UPDATE", "DELETE"),
+    "curation_collections": ("SELECT",),
     "curation_import_batches": ("SELECT", "INSERT", "UPDATE", "DELETE"),
     "curation_import_rows": ("SELECT", "INSERT", "UPDATE", "DELETE"),
     "curation_items": ("SELECT", "INSERT", "UPDATE", "DELETE"),
@@ -154,6 +154,7 @@ _ORDINARY_SCHEMA_PRIVILEGES: Mapping[str, tuple[str, ...]] = {
 # provider/admin connection cannot erase that fence through raw SQL.
 _OPS_TABLE_PRIVILEGES: Mapping[str, tuple[str, ...]] = {
     "curation_catalog_command_effects": (),
+    "curation_import_collection_effects": (),
     "curation_concierge_legacy_owner_manifest": (),
     "curation_provider_root_receipts": (),
     "curation_provider_snapshot_receipts": (),

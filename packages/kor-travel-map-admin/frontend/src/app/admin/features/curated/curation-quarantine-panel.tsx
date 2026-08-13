@@ -179,7 +179,7 @@ export function useCurationQuarantineController() {
   };
 
   const moveItems = async () => {
-    if (!activeQuarantineId || !preview) return;
+    if (!activeQuarantineId || !activeQuarantine || !preview) return;
     setMessage(null);
     if (preview.target_collection_id === null || preview.target_missing) {
       setLocalError(
@@ -201,9 +201,11 @@ export function useCurationQuarantineController() {
     try {
       const response = await reclassify.mutateAsync({
         collectionId: activeQuarantineId,
+        commandEtag: activeQuarantine.command_etag,
         body: {
           action: "move",
           target_collection_id: preview.target_collection_id,
+          target_collection_revision: preview.target_collection_revision,
           item_ids: movingAll ? null : selectedItemIds,
         },
       });
@@ -224,7 +226,7 @@ export function useCurationQuarantineController() {
   };
 
   const confirmStandalone = async () => {
-    if (!activeQuarantineId) return;
+    if (!activeQuarantineId || !activeQuarantine) return;
     setMessage(null);
     const collectionKey = standaloneForm.collectionKey.trim();
     const title = standaloneForm.title.trim();
@@ -244,6 +246,7 @@ export function useCurationQuarantineController() {
     try {
       const response = await reclassify.mutateAsync({
         collectionId: activeQuarantineId,
+        commandEtag: activeQuarantine.command_etag,
         body: {
           action: "confirm_standalone",
           collection_key: collectionKey,

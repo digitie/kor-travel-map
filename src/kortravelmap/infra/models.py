@@ -2568,6 +2568,10 @@ class CurationImportBatchRow(Base):
             "jsonb_typeof(metadata) = 'object'",
             name=conv("ck_curation_import_batches_metadata"),
         ),
+        UniqueConstraint(
+            "command_id",
+            name=conv("uq_curation_import_batches_command"),
+        ),
         Index(
             "idx_curation_import_batches_sha_time",
             "content_sha256",
@@ -2581,6 +2585,15 @@ class CurationImportBatchRow(Base):
         UUID(as_uuid=False),
         primary_key=True,
         server_default=text("x_extension.gen_random_uuid()"),
+    )
+    command_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey(
+            "ops.domain_commands.command_id",
+            name=conv("fk_curation_import_batches_command"),
+            ondelete="RESTRICT",
+        ),
+        nullable=True,
     )
     content_sha256: Mapped[str] = mapped_column(Text, nullable=False)
     batch_kind: Mapped[str] = mapped_column(Text, nullable=False)

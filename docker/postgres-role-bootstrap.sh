@@ -239,6 +239,7 @@ GRANT ktm_curation_provider_executor TO ktm_feature_dagster_runtime
 GRANT USAGE, CREATE ON SCHEMA feature
     TO ktm_feature_state_procedure_owner, ktm_feature_audit_writer,
        ktm_curation_command_owner, ktm_curation_audit_writer;
+GRANT USAGE, CREATE ON SCHEMA ops TO ktm_curation_audit_writer;
 
 DO $assert_roles$
 BEGIN
@@ -409,6 +410,14 @@ WITH dedicated_routine(signature, owner_role) AS (
       ('feature.create_curation_collection_command(text,uuid,uuid,text,text,text,text,text,jsonb,bigint,text)', 'ktm_curation_command_owner'),
       ('feature.patch_curation_collection_command(uuid,bigint,uuid,uuid,text,text,text,text,text,jsonb,bigint,text)', 'ktm_curation_command_owner'),
       ('feature.archive_curation_collection_command(uuid,bigint,bigint,text)', 'ktm_curation_command_owner'),
+      ('feature.create_curation_item_command(uuid,text,text,text,text,text,text,text,integer,text,text,text,text,jsonb,bigint,text)', 'ktm_curation_command_owner'),
+      ('feature.patch_curation_item_command(uuid,uuid,bigint,text,text,text,text,text,text,text,integer,text,text,text,text,jsonb,bigint,text)', 'ktm_curation_command_owner'),
+      ('feature.archive_curation_item_command(uuid,uuid,bigint,bigint,text)', 'ktm_curation_command_owner'),
+      ('feature.resolve_curation_import_collection_command(text,uuid,uuid,text,text,bigint,text)', 'ktm_curation_command_owner'),
+      ('feature.touch_curation_import_collection_command(uuid,bigint,text)', 'ktm_curation_command_owner'),
+      ('feature.reclassify_curation_quarantine_command(uuid,bigint,text,uuid,bigint,uuid[],text,text,bigint,text)', 'ktm_curation_command_owner'),
+      ('ops.reject_curation_import_collection_effect_mutation()', 'ktm_curation_audit_writer'),
+      ('ops.reject_curation_import_collection_effect_truncate()', 'ktm_curation_audit_writer'),
       ('feature.refresh_curated_source_observation(bigint,uuid)', 'ktm_curation_command_owner'),
       ('feature.finalize_provider_curation_receipts(bigint,uuid,text,text)', 'ktm_curation_command_owner'),
       ('feature.seal_provider_curation_snapshot_receipt(uuid,bigint,text,text,bigint,text)', 'ktm_curation_command_owner'),

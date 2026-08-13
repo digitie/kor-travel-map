@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock
 from uuid import NAMESPACE_URL, uuid5
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from kortravelmap.curation_import import CURATION_CSV_HEADERS, parse_curation_csv
 from kortravelmap.infra.curation_candidate_repo import (
@@ -874,10 +875,12 @@ def test_csv_accepts_mixed_component_resolution(
         actor: str,
         source_content_sha256: str,
         batch_kind: str,
+        command_id: int,
     ) -> CurationImportResult:
         assert actor == "local-dev"
         assert len(source_content_sha256) == 64
         assert batch_kind == "csv_upload"
+        assert command_id == 1
         return {
             "rows": len(rows),
             "collections": 1,
@@ -1050,8 +1053,8 @@ def test_admin_can_patch_and_archive_single_curation_item(
         calls.append(("delete", kwargs))
         return _item(item_id=kwargs["curation_item_id"], edition="2026")
 
-    monkeypatch.setattr(module.curation_repo, "update_curation_item", _update)
-    monkeypatch.setattr(module.curation_repo, "archive_curation_item", _archive)
+    monkeypatch.setattr(module.curation_repo, "patch_curation_item_command", _update)
+    monkeypatch.setattr(module.curation_repo, "archive_curation_item_command", _archive)
 
     patched = client.patch(
         f"/v1/admin/curations/{COLLECTION_ID}/items/{ITEM_ID}",
@@ -1071,12 +1074,14 @@ def test_admin_can_patch_and_archive_single_curation_item(
             "collection_id": COLLECTION_ID,
             "curation_item_id": ITEM_ID,
             "updates": {"feature_id": "feature:resolved", "address_hint": None},
-            "actor": "local-dev",
             "expected_revision": 1,
+            "command_id": 1,
+            "principal": "local-dev",
         },
     )
     assert calls[1][0] == "delete"
-    assert calls[1][1]["actor"] == "local-dev"
+    assert calls[1][1]["principal"] == "local-dev"
+    assert calls[1][1]["command_id"] == 1
     assert calls[1][1]["expected_revision"] == 1
     assert patched.json()["data"]["created_by"] == "fixture-creator"
     assert patched.json()["data"]["source_record_key"] == "source::2026"
@@ -1092,7 +1097,7 @@ def test_admin_empty_patch_does_not_expose_archived_curation_item(
     async def _archived_noop(_session: object, **_kwargs: Any) -> None:
         return None
 
-    monkeypatch.setattr(module.curation_repo, "update_curation_item", _archived_noop)
+    monkeypatch.setattr(module.curation_repo, "patch_curation_item_command", _archived_noop)
     response = client.patch(
         f"/v1/admin/curations/{COLLECTION_ID}/items/{ITEM_ID}",
         headers={"If-Match": '"1"'},
@@ -1167,7 +1172,7 @@ def test_admin_collection_and_item_stale_revisions_return_412(
     )
     monkeypatch.setattr(
         module.curation_repo,
-        "update_curation_item",
+        "patch_curation_item_command",
         AsyncMock(side_effect=stale),
     )
 
@@ -1192,10 +1197,10 @@ def test_admin_item_post_is_create_only(
 ) -> None:
     from kortravelmap.api.routers import curations as module
 
-    async def _duplicate(_session: object, **_kwargs: Any) -> tuple[CurationItem, bool]:
-        return _item(item_id="existing-item", edition="2026"), False
+    async def _duplicate(_session: object, **_kwargs: Any) -> CurationItem:
+        raise HTTPException(status_code=409, detail="curation item identity conflict")
 
-    monkeypatch.setattr(module.curation_repo, "add_curation_item", _duplicate)
+    monkeypatch.setattr(module.curation_repo, "create_curation_item_command", _duplicate)
     response = client.post(
         f"/v1/admin/curations/{COLLECTION_ID}/items",
         json={
@@ -1674,6 +1679,7 @@ def test_explicit_feature_id_still_links(
 def _quarantine_collection_row() -> CurationQuarantineCollection:
     return CurationQuarantineCollection(
         collection_id=_uuid("quarantine-collection"),
+        row_revision=7,
         collection_key=f"legacy:quarantine:{_uuid('quarantine-collection')}",
         title="[0065 격리] 등대 스탬프투어",
         edition_key="season-5",
@@ -1698,6 +1704,7 @@ def _quarantine_collection_row() -> CurationQuarantineCollection:
         ),
         original_collection=CurationQuarantineOriginalCollection(
             collection_id=_uuid("original-collection"),
+            row_revision=11,
             title="등대 스탬프투어",
             status="published",
             visibility="public",
@@ -1790,6 +1797,7 @@ def test_admin_quarantine_items_expose_conflict_preview(
 
     preview = CurationQuarantineItemsPreview(
         target_collection_id=_uuid("original-collection"),
+        target_collection_revision=11,
         target_missing=False,
         target_archived=False,
         items=(
@@ -1882,7 +1890,11 @@ def test_reclassify_idempotency_lifecycle(
     monkeypatch.setattr(module.curation_repo, "move_curation_quarantine_items", move)
     path = f"/v1/admin/curations/quarantine/{_uuid('quarantine-collection')}/reclassify"
 
-    first = client.post(path, json={"action": "move"})
+    first = client.post(
+        path,
+        headers={"If-Match": '"7"'},
+        json={"action": "move", "target_collection_revision": "11"},
+    )
 
     assert first.status_code == 200
     assert first.json()["data"] == {
@@ -1894,8 +1906,11 @@ def test_reclassify_idempotency_lifecycle(
     }
     assert move.await_args.kwargs == {
         "collection_id": _uuid("quarantine-collection"),
+        "expected_collection_revision": 7,
         "target_collection_id": None,
+        "expected_target_revision": 11,
         "item_ids": None,
+        "command_id": 1,
         "actor": "local-dev",
     }
 
@@ -1920,7 +1935,11 @@ def test_reclassify_idempotency_lifecycle(
     monkeypatch.setattr(domain_command_service, "begin_domain_command", _replay)
     move.reset_mock()
 
-    replayed = client.post(path, json={"action": "move"})
+    replayed = client.post(
+        path,
+        headers={"If-Match": '"7"'},
+        json={"action": "move", "target_collection_revision": "11"},
+    )
 
     assert replayed.status_code == 200
     assert replayed.headers["Idempotency-Replayed"] == "true"
@@ -1944,7 +1963,12 @@ def test_reclassify_idempotency_lifecycle(
 
     reused = client.post(
         path,
-        json={"action": "move", "item_ids": [_uuid("other-item")]},
+        headers={"If-Match": '"7"'},
+        json={
+            "action": "move",
+            "target_collection_revision": "11",
+            "item_ids": [_uuid("other-item")],
+        },
     )
 
     assert reused.status_code == 409
@@ -1973,7 +1997,8 @@ def test_reclassify_move_conflict_fails_closed_with_conflict_detail(
 
     response = client.post(
         f"/v1/admin/curations/quarantine/{_uuid('quarantine-collection')}/reclassify",
-        json={"action": "move"},
+        headers={"If-Match": '"7"'},
+        json={"action": "move", "target_collection_revision": "11"},
     )
 
     assert response.status_code == 409
@@ -2006,6 +2031,7 @@ def test_reclassify_confirm_standalone_returns_confirmed_key(
 
     response = client.post(
         f"/v1/admin/curations/quarantine/{_uuid('quarantine-collection')}/reclassify",
+        headers={"If-Match": '"7"'},
         json={
             "action": "confirm_standalone",
             "collection_key": "lighthouse:standalone",
@@ -2023,8 +2049,10 @@ def test_reclassify_confirm_standalone_returns_confirmed_key(
     }
     assert confirm.await_args.kwargs == {
         "collection_id": _uuid("quarantine-collection"),
+        "expected_collection_revision": 7,
         "collection_key": "lighthouse:standalone",
         "title": "등대 독립 확정",
+        "command_id": 1,
         "actor": "local-dev",
     }
 
@@ -2041,7 +2069,8 @@ def test_reclassify_missing_quarantine_maps_lookup_error_to_404(
 
     response = client.post(
         f"/v1/admin/curations/quarantine/{_uuid('not-quarantine')}/reclassify",
-        json={"action": "move"},
+        headers={"If-Match": '"7"'},
+        json={"action": "move", "target_collection_revision": "11"},
     )
 
     assert response.status_code == 404

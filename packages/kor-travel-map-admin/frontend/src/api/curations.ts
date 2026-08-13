@@ -460,19 +460,28 @@ export function useReclassifyCurationQuarantineMutation() {
   return useMutation<
     CurationQuarantineReclassifyResponse,
     Error,
-    { collectionId: string; body: CurationQuarantineReclassifyRequest }
+    {
+      collectionId: string;
+      commandEtag: string;
+      body: CurationQuarantineReclassifyRequest;
+    }
   >({
-    mutationFn: ({ collectionId, body }) =>
+    mutationFn: ({ collectionId, commandEtag, body }) =>
       withDomainIdempotencySubmission(
         domainCommandSlot("admin.curation-quarantine.reclassify", collectionId),
-        { collectionId, body },
+        { collectionId, commandEtag, body },
         (submission, idempotencyKey) =>
           postJson<CurationQuarantineReclassifyResponse>(
             `/v1/admin/curations/quarantine/${encodeURIComponent(
               submission.collectionId,
             )}/reclassify`,
             submission.body,
-            { headers: { "Idempotency-Key": idempotencyKey } },
+            {
+              headers: {
+                "Idempotency-Key": idempotencyKey,
+                "If-Match": submission.commandEtag,
+              },
+            },
           ),
       ),
     onSuccess: () => invalidateCurations(queryClient),

@@ -151,6 +151,7 @@ def test_domain_fingerprint_header_contract_is_explicit_and_minimal() -> None:
         "admin.curation-collection.patch": ("If-Match",),
         "admin.curation-item.archive": ("If-Match",),
         "admin.curation-item.patch": ("If-Match",),
+        "admin.curation-quarantine.reclassify": ("If-Match",),
         "admin.curated-theme.archive": ("If-Match",),
         "admin.curated-theme.patch": ("If-Match",),
         "admin.curated-source.archive": ("If-Match",),
@@ -200,6 +201,25 @@ def test_curation_revision_commands_publish_required_if_match_header() -> None:
         assert header is not None, key
         assert header["required"] is True, key
         assert header["schema"]["type"] == "string", key
+
+
+def test_tvn40_canonical_collection_and_item_commands_are_serializable() -> None:
+    operations = {
+        "admin.curation-collection.archive",
+        "admin.curation-collection.create",
+        "admin.curation-collection.patch",
+        "admin.curation-item.archive",
+        "admin.curation-item.create",
+        "admin.curation-item.patch",
+    }
+    policies = {
+        policy.operation: policy
+        for policy in COMMAND_REGISTRY.values()
+        if policy.kind is CommandPolicyKind.DOMAIN_LEDGER
+        and policy.operation in operations
+    }
+    assert set(policies) == operations
+    assert all(policy.transaction_isolation == "serializable" for policy in policies.values())
 
 
 def test_future_h22b_quarantine_command_cannot_bypass_domain_ledger() -> None:

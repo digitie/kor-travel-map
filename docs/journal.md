@@ -2,6 +2,30 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-14 — T-VN-40: import·quarantine collection writer fence
+
+0118에서 import collection 해소와 quarantine move/standalone 확정을 named `SECURITY DEFINER`
+command로 전환했다. import command effect와 batch receipt를 domain command에 결박하고, retained
+theme/source는 exact reuse만 허용한다. item 집합 변경 때만 기존 collection revision을 한 번 올리며
+create와 exact no-op은 추가 revision 증가가 없다. quarantine은 source·target collection revision과
+이동 item 집합을 잠근 뒤 item·collection revision을 한 transaction에서 갱신한다.
+
+generic runtime의 `feature.curation_collections` 권한은 SELECT-only로 축소했다. fresh 0001→0118 실제
+API/Dagster LOGIN에서 raw INSERT/UPDATE/DELETE가 모두 42501이고, import 3회(생성·변경·no-op),
+quarantine move·standalone 및 append-only effect가 통과했다.
+
+## 2026-08-14 — T-VN-40: canonical item named command
+
+item create/patch/archive를 domain command와 append-only effect에 결박된 0117 named procedure로
+전환했다. 모든 경로는 SERIALIZABLE·admin executor·active collection/Feature·revision CAS를 DB에서
+검증한다. Feature link 변경은 trusted accepted/revoked decision을 추가하고, item과 부모 collection의
+revision을 같은 transaction에서 갱신한다. legacy-backed membership의 source-owned 필드 수정은
+fail-close하고, review 상태의 임시 dual-write만 기존 overlay에 함께 반영한다.
+
+fresh 0001→0117 실제 API/Dagster LOGIN 통합에서 create/no-op/patch/link revoke/stale/archive와
+provider executor 거부가 통과했다. API domain-command registry도 collection/item 6개 named command가
+모두 SERIALIZABLE인지 고정한다.
+
 ## 2026-08-14 — T-VN-40: canonical collection named command
 
 collection create/patch/archive를 domain command와 append-only effect에 결박된 0116 named procedure로
