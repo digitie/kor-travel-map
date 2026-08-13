@@ -318,6 +318,16 @@ BEGIN
          WHERE member.job_id = p_source_job_id
            AND member.provider_dataset_id = v_provider_dataset_id
            AND member.sync_scope = 'dataset_wide'
+       )
+       OR (
+         v_source_job.payload ? 'candidate_generation_sealed_at'
+         AND NOT EXISTS (
+           SELECT 1
+           FROM feature.theme_candidate_generations AS generation
+           WHERE generation.rule_id = p_rule_id
+             AND generation.source_job_id = p_source_job_id
+             AND generation.generation_kind = 'provider_full_snapshot'
+         )
        ) THEN
       RAISE EXCEPTION 'provider generation requires an authoritative done single-member dataset snapshot'
         USING ERRCODE = '23514', CONSTRAINT = 'ck_theme_candidate_provider_job';

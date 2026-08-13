@@ -191,6 +191,19 @@ def test_feature_operation_sql_excludes_quarantined_engine_state() -> None:
     assert finalize_source.count("quarantined_at IS NULL") >= 3
 
 
+def test_authoritative_finish_owns_source_observation_generation_and_seal() -> None:
+    source = inspect.getsource(
+        feature_operation_repo.finish_dagster_feature_membership
+    )
+    observation = source.index("refresh_curated_source_observation")
+    generation = source.index("materialize_theme_candidate_generation")
+    seal = source.index("candidate_generation_sealed_at")
+
+    assert observation < generation < seal
+    assert "authoritative_snapshot_complete" in source
+    assert "source.archived_at IS NULL" in source
+
+
 async def test_feature_operation_ensure_reports_quarantined_run_conflict() -> None:
     class _NoRow:
         def one_or_none(self) -> None:

@@ -2,6 +2,17 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-13 — T-VN-40: provider terminal을 observation·generation receipt로 봉인
+
+authoritative provider child job 완료 transaction이 retained source observation을 먼저 기록하고,
+해당 dataset의 모든 active candidate rule generation을 만든 뒤 generation set hash와 seal 시각을
+child payload에 함께 남기도록 결선했다. source catalog가 없는 dataset은 observation을 생략하지만
+candidate generation receipt는 동일하게 봉인한다.
+
+봉인된 과거 child job은 이미 생성된 rule generation의 exact replay만 허용하고, 나중에 추가된 rule로
+새 generation을 만들 수 없다. provider exact-job integration은 기존 rule replay와 late-rule 생성 거부를
+함께 검증하며, feature-operation static gate는 observation→generation→seal 순서를 고정한다.
+
 ## 2026-08-13 — T-VN-40: legacy rule apply와 독립 curated Dagster job 제거
 
 적대 리뷰에서 확인한 source observation 재사용, GET representation ETag와 command CAS token 혼동,

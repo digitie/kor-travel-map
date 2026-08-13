@@ -894,6 +894,36 @@ async def finish_dagster_feature_membership(
         text(_UPDATE_ROOT_PROGRESS_SQL), {"root_job_id": root_job_id}
     )
     if authoritative_snapshot_complete:
+        source_exists = bool(
+            await session.scalar(
+                text(
+                    """
+                    SELECT EXISTS (
+                      SELECT 1
+                      FROM feature.curated_sources AS source
+                      WHERE source.provider_dataset_id = :provider_dataset_id
+                        AND source.archived_at IS NULL
+                    )
+                    """
+                ),
+                {"provider_dataset_id": membership.provider_dataset_id},
+            )
+        )
+        if source_exists:
+            await session.execute(
+                text(
+                    """
+                    CALL feature.refresh_curated_source_observation(
+                      :provider_dataset_id, CAST(:source_job_id AS uuid),
+                      NULL, NULL, NULL, NULL
+                    )
+                    """
+                ),
+                {
+                    "provider_dataset_id": membership.provider_dataset_id,
+                    "source_job_id": str(changed.job_id),
+                },
+            )
         await session.execute(
             text(
                 """
@@ -997,7 +1027,8 @@ async def finish_dagster_feature_membership(
                 UPDATE ops.import_jobs AS job
                 SET payload = job.payload || jsonb_build_object(
                   'candidate_generation_count', receipt.generation_count,
-                  'candidate_generation_set_hash', receipt.generation_set_hash
+                  'candidate_generation_set_hash', receipt.generation_set_hash,
+                  'candidate_generation_sealed_at', clock_timestamp()
                 )
                 FROM receipt
                 WHERE job.job_id = CAST(:source_job_id AS uuid)
