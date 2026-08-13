@@ -52,18 +52,18 @@ command로 결선했다. theme/source/rule 공통 append-only effect claim은 te
 resource 재사용을 차단하며 provider-owned/NULL-owner theme/rule은 admin command로 수정할 수 없다.
 source observation은 authoritative full-snapshot child job당 immutable receipt 한 건으로 제한했고,
 caller-driven admin rule apply와 독립 `curated_features_refresh` Dagster job/client export를 제거했다.
-provider child 완료는 권위 축만 저장하고, root가 `done/SUCCESS`로 확정되는 SERIALIZABLE transaction이
-DB-owned finalizer를 호출해 typed source observation과 candidate rule generation 전체를 만든 뒤 generation
-set hash와 seal 시각을 child job에 봉인한다. finalizer는 provider executor만 실행할 수 있고 underlying
-candidate evidence를 Dagster LOGIN에 직접 공개하지 않는다. 봉인 뒤에는 같은 rule의 exact replay만 가능하고
-과거 job에 새 rule generation을 귀속할 수 없다. source observation은 root SUCCESS와 child에 봉인한
-canonical input hash/count를 검증하고, 과거 job 역순 적용과 archive 뒤 신규 관측은 거부하되 기존 receipt
-replay는 보존한다. archived theme/source는 legacy와 canonical public projection 전 경로에서 즉시 제외한다.
+provider child 완료 직전 exact source-head identity/payload 집합을 append-only receipt로 봉인하고,
+root `done/SUCCESS` SERIALIZABLE transaction은 전체 child receipt와 영향 Feature 합집합을 한 번에 검증·
+정렬 선잠금한 뒤 typed source observation과 candidate rule generation 전체를 만든다. root generation 집합도
+별도 append-only receipt로 봉인한다. Dagster LOGIN의 per-rule materializer·observation 직접 EXECUTE와 두
+receipt relation의 raw DML은 회수했다. child 완료 뒤 source head가 변하면 `40001`로 root transaction 전체를
+재시도하므로 과거 job에 다른 load의 현재 head를 귀속할 수 없다. archived theme/source는 legacy와 canonical
+public projection 전 경로에서 즉시 제외한다.
 삭제된 curated schedule/UI를 전제하던 stale live Playwright spec도 제거했다. 다음은 남은 raw catalog DML을
 회수하고 provider-owned concierge catalog sync를 typed command로 교체하는 것이다.
 T-VN-40 paired consumer receipt는 현재 `pending`이며 Map user/
 service/full spec hash를 고정하고 n150 installer가 complete 전에는 fail-close한다.
-fresh 0001→0111 actual-login theme/source/rule/candidate 통합을 통과했다.
+fresh 0001→0112 actual-login candidate/source 통합 10개와 관련 unit 74개를 통과했다.
 A/B/C는 하나의 forward-only PR/release로 유지하며, 누적 구현은 DB/동시성과
 API·consumer/ACL 관점의 독립 적대 리뷰어 2명이 같은 고정 SHA에서 검증한다.
 상세 계약은

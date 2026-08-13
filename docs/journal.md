@@ -2,6 +2,21 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-13 — T-VN-40: provider child 입력 봉인과 root 전체 잠금 수렴
+
+적대 리뷰에서 확인한 child 완료와 root finalizer 사이의 인과 단절을 제거했다. authoritative
+child가 완료되기 전 exact source head identity·payload hash 집합을 append-only
+`ops.curation_provider_snapshot_receipts`에 봉인하고, root `done/SUCCESS` transaction은 모든 child
+receipt를 검증한 뒤 전체 영향 Feature 집합을 정렬 선잠금한다. 그 뒤에만 catalog/source observation과
+rule generation을 실행하고 root generation 집합도 append-only receipt로 봉인한다. 따라서 child 완료 뒤
+다른 load가 source head를 바꾸면 `40001`로 전체 transaction이 재시도되며 다른 job의 현재 head가 과거
+job 증거로 귀속되지 않는다.
+
+Dagster provider LOGIN의 per-rule materializer·source observation 직접 실행 권한은 회수했다. 외부에서
+실행할 수 있는 경로는 child snapshot seal과 root finalizer뿐이고, 두 provider receipt relation은 raw
+읽기·쓰기 권한 없이 command owner 내부에서만 접근한다. fresh 0001→0112 actual-login candidate/source
+통합 10개, 관련 unit 74개와 migration graph·ruff·mypy gate를 통과했다.
+
 ## 2026-08-13 — T-VN-40: root SUCCESS finalizer와 public archive 경계 고정
 
 authoritative child 완료는 권위 축만 저장하고, provider root가 `done/SUCCESS`로 확정되는

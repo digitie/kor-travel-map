@@ -192,17 +192,21 @@ def test_feature_operation_sql_excludes_quarantined_engine_state() -> None:
 
 
 def test_authoritative_finish_owns_source_observation_generation_and_seal() -> None:
-    source = inspect.getsource(
-        feature_operation_repo._finalize_authoritative_curation_receipts
+    seal = inspect.getsource(
+        feature_operation_repo._seal_authoritative_curation_snapshot
     )
-    assert "finalize_provider_curation_receipts" in source
-    assert "theme_feature_candidates" not in source
-    assert "theme_candidate_generations" not in source
+    assert "seal_provider_curation_snapshot_receipt" in seal
+    assert "o_observed_at" in seal
+
+    source = inspect.getsource(
+        feature_operation_repo._finalize_authoritative_curation_root
+    )
+    assert "finalize_provider_curation_root" in source
+    assert "source_job_id" not in source
 
     reconcile = inspect.getsource(feature_operation_repo.reconcile_dagster_feature_run)
-    assert "authoritative_snapshot_complete" in reconcile
     assert reconcile.index("target_status == \"done\"") < reconcile.index(
-        "_finalize_authoritative_curation_receipts"
+        "_finalize_authoritative_curation_root"
     )
 
 

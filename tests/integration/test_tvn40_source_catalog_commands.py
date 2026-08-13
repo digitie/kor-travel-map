@@ -226,51 +226,6 @@ async def test_source_operator_cas_and_provider_observation_are_disjoint(
             ),
             {"dataset_id": dataset_id, "job_id": source_job_id},
         )
-        old_source_job_id = str(
-            await connection.scalar(
-                text(
-                    """
-                    INSERT INTO ops.import_jobs (
-                      kind, parent_job_id, payload, status, progress,
-                      current_stage, dagster_run_id, dataset_membership_mode,
-                      finished_at, created_at
-                    ) VALUES (
-                      'provider_feature_load', CAST(:root_job_id AS uuid),
-                      jsonb_build_object(
-                        'authoritative_snapshot_complete', true,
-                        'source_observation', jsonb_build_object(
-                          'schema_version', 1,
-                          'row_count', 1,
-                          'last_source_modified_at', current_date::text,
-                          'input_set_hash', repeat('f', 64)
-                        )
-                      ),
-                      'done', 100, 'completed', :run_id, 'single',
-                      clock_timestamp() - interval '1 hour',
-                      (SELECT created_at FROM ops.import_jobs
-                       WHERE job_id = CAST(:root_job_id AS uuid))
-                    ) RETURNING job_id
-                    """
-                ),
-                {
-                    "root_job_id": root_job_id,
-                    "run_id": f"tvn40-source-{suffix}",
-                },
-            )
-        )
-        await connection.execute(
-            text(
-                """
-                INSERT INTO ops.import_job_datasets (
-                  job_id, provider_dataset_id, sync_scope, operation_key
-                ) VALUES (
-                  CAST(:job_id AS uuid), :dataset_id, 'dataset_wide', 'load'
-                )
-                """
-            ),
-            {"dataset_id": dataset_id, "job_id": old_source_job_id},
-        )
-
     api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
     dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
     try:
@@ -368,18 +323,78 @@ async def test_source_operator_cas_and_provider_observation_are_disjoint(
             assert "already terminal" in str(terminal.value.orig)
             await transaction.rollback()
 
+        async with migrated_engine.begin() as connection:
+            await connection.execute(text("SET ROLE ktm_curation_command_owner"))
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO ops.curation_provider_snapshot_receipts (
+                      source_job_id, root_job_id, provider_dataset_id,
+                      sync_scope, operation_key, observed_at,
+                      source_entity_count, last_source_modified_at,
+                      source_input_set_hash
+                    )
+                    SELECT CAST(:job_id AS uuid), CAST(:root_job_id AS uuid),
+                           :dataset_id, 'dataset_wide', 'load', job.finished_at,
+                           count(head.source_entity_key)::bigint,
+                           max(record.imported_at)::date,
+                           encode(x_extension.digest(convert_to(
+                             COALESCE(jsonb_agg(jsonb_build_array(
+                               entity.source_entity_key,
+                               head.current_source_record_key,
+                               record.raw_payload_hash
+                             ) ORDER BY entity.source_entity_key)
+                             FILTER (WHERE head.source_entity_key IS NOT NULL),
+                             '[]'::jsonb)::text, 'UTF8'), 'sha256'), 'hex')
+                    FROM ops.import_jobs AS job
+                    JOIN provider_sync.source_entities AS entity
+                      ON entity.provider_dataset_id = :dataset_id
+                    LEFT JOIN provider_sync.source_entity_heads AS head
+                      ON head.source_entity_key = entity.source_entity_key
+                    LEFT JOIN provider_sync.source_records AS record
+                      ON record.source_entity_key = head.source_entity_key
+                     AND record.source_record_key = head.current_source_record_key
+                    WHERE job.job_id = CAST(:job_id AS uuid)
+                    GROUP BY job.finished_at
+                    """
+                ),
+                {
+                    "dataset_id": dataset_id,
+                    "job_id": source_job_id,
+                    "root_job_id": root_job_id,
+                },
+            )
+            await connection.execute(text("RESET ROLE"))
+
         async with dagster.begin() as connection:
             await connection.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
+            finalized = (
+                await connection.execute(
+                    text(
+                        """
+                        CALL feature.finalize_provider_curation_root(
+                          CAST(:root_job_id AS uuid), NULL, NULL, NULL
+                        )
+                        """
+                    ),
+                    {"root_job_id": root_job_id},
+                )
+            ).mappings().one()
+        assert finalized["o_replayed"] is False
+
+        async with migrated_engine.connect() as connection:
             observed = (
                 await connection.execute(
                     text(
                         """
-                        CALL feature.refresh_curated_source_observation(
-                          :dataset_id, CAST(:job_id AS uuid), NULL, NULL, NULL, NULL
-                        )
+                        SELECT row_revision AS o_source_revision,
+                               observation_revision AS o_observation_revision,
+                               row_count AS o_row_count
+                        FROM feature.curated_sources
+                        WHERE source_id = CAST(:source_id AS uuid)
                         """
                     ),
-                    {"dataset_id": dataset_id, "job_id": source_job_id},
+                    {"source_id": source_id},
                 )
             ).mappings().one()
         assert (
@@ -387,40 +402,6 @@ async def test_source_operator_cas_and_provider_observation_are_disjoint(
             int(observed["o_observation_revision"]),
             int(observed["o_row_count"]),
         ) == (2, 2, 1)
-
-        async with dagster.begin() as connection:
-            await connection.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
-            replayed_observation = (
-                await connection.execute(
-                    text(
-                        """
-                        CALL feature.refresh_curated_source_observation(
-                          :dataset_id, CAST(:job_id AS uuid), NULL, NULL, NULL, NULL
-                        )
-                        """
-                    ),
-                    {"dataset_id": dataset_id, "job_id": source_job_id},
-                )
-            ).mappings().one()
-        assert dict(replayed_observation) == dict(observed)
-
-        async with dagster.connect() as connection:
-            transaction = await connection.begin()
-            await connection.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
-            with pytest.raises(DBAPIError) as out_of_order:
-                await connection.execute(
-                    text(
-                        """
-                        CALL feature.refresh_curated_source_observation(
-                          :dataset_id, CAST(:job_id AS uuid), NULL, NULL, NULL, NULL
-                        )
-                        """
-                    ),
-                    {"dataset_id": dataset_id, "job_id": old_source_job_id},
-                )
-            assert getattr(out_of_order.value.orig, "sqlstate", None) == "23514"
-            assert "older than the current receipt" in str(out_of_order.value.orig)
-            await transaction.rollback()
 
         async with migrated_engine.connect() as connection:
             receipt = (
@@ -505,15 +486,15 @@ async def test_source_operator_cas_and_provider_observation_are_disjoint(
                 await connection.execute(
                     text(
                         """
-                        CALL feature.refresh_curated_source_observation(
-                          :dataset_id, CAST(:job_id AS uuid), NULL, NULL, NULL, NULL
+                        CALL feature.finalize_provider_curation_root(
+                          CAST(:root_job_id AS uuid), NULL, NULL, NULL
                         )
                         """
                     ),
-                    {"dataset_id": dataset_id, "job_id": source_job_id},
+                    {"root_job_id": root_job_id},
                 )
             ).mappings().one()
-        assert dict(archived_replay) == dict(observed)
+        assert archived_replay["o_replayed"] is True
 
         async with api.connect() as connection:
             tx = await connection.begin()

@@ -211,7 +211,7 @@ UPDATE ops.import_jobs
 SET status = 'done',
     progress = 100,
     current_stage = 'completed',
-    finished_at = COALESCE(finished_at, now()),
+    finished_at = COALESCE(finished_at, CAST(:finished_at AS timestamptz), now()),
     heartbeat_at = now(),
     error_message = NULL,
     payload = payload || jsonb_build_object(
@@ -824,33 +824,50 @@ async def ensure_dagster_feature_operation(
     )
 
 
-async def _finalize_authoritative_curation_receipts(
+async def _seal_authoritative_curation_snapshot(
     session: AsyncSession,
     *,
+    root_job_id: str,
     membership: ProviderDatasetOperationMembership,
-    source_job_id: str,
+) -> datetime:
+    """child 완료와 같은 transaction에서 exact source-head 집합을 봉인한다."""
+    row = (
+        await session.execute(
+            text(
+                """
+                CALL feature.seal_provider_curation_snapshot_receipt(
+                  CAST(:root_job_id AS uuid), :provider_dataset_id,
+                  :sync_scope, :operation_key, NULL, NULL, NULL, NULL
+                )
+                """
+            ),
+            {
+                "operation_key": membership.operation_key,
+                "provider_dataset_id": membership.provider_dataset_id,
+                "root_job_id": root_job_id,
+                "sync_scope": membership.sync_scope,
+            },
+        )
+    ).mappings().one()
+    observed_at = row["o_observed_at"]
+    if not isinstance(observed_at, datetime):
+        raise RuntimeError("provider curation snapshot seal returned no timestamp")
+    return observed_at
+
+
+async def _finalize_authoritative_curation_root(
+    session: AsyncSession, *, root_job_id: str
 ) -> None:
-    """root SUCCESS 안에서 source/candidate receipt를 완결하고 child를 봉인한다."""
+    """root SUCCESS transaction에서 전체 member의 curation receipt를 원자 완결한다."""
     await session.execute(
         text(
             """
-            CALL feature.finalize_provider_curation_receipts(
-              :provider_dataset_id,
-              CAST(:source_job_id AS uuid),
-              :sync_scope,
-              :operation_key,
-              NULL,
-              NULL,
-              NULL
+            CALL feature.finalize_provider_curation_root(
+              CAST(:root_job_id AS uuid), NULL, NULL, NULL
             )
             """
         ),
-        {
-            "operation_key": membership.operation_key,
-            "provider_dataset_id": membership.provider_dataset_id,
-            "source_job_id": source_job_id,
-            "sync_scope": membership.sync_scope,
-        },
+        {"root_job_id": root_job_id},
     )
 
 
@@ -902,6 +919,13 @@ async def finish_dagster_feature_membership(
         )
     if member.status == "done":
         return DagsterFeatureOperationMutation(outcome="noop", operation=operation)
+    sealed_at = (
+        await _seal_authoritative_curation_snapshot(
+            session, root_job_id=root_job_id, membership=membership
+        )
+        if authoritative_snapshot_complete
+        else None
+    )
     changed = (
         await session.execute(
             text(_FINISH_MEMBERSHIP_SQL),
@@ -911,6 +935,7 @@ async def finish_dagster_feature_membership(
                 "sync_scope": membership.sync_scope,
                 "operation_key": membership.operation_key,
                 "authoritative_snapshot_complete": authoritative_snapshot_complete,
+                "finished_at": sealed_at,
             },
         )
     ).one_or_none()
@@ -1253,42 +1278,9 @@ async def reconcile_dagster_feature_run(
         },
     )
     if target_status == "done":
-        authoritative_members = (
-            await session.execute(
-                text(
-                    """
-                    SELECT child.job_id::text,
-                           member.provider_dataset_id,
-                           member.sync_scope,
-                           member.operation_key
-                    FROM ops.import_jobs AS child
-                    JOIN ops.import_job_datasets AS member
-                      ON member.job_id = child.job_id
-                    WHERE child.parent_job_id = CAST(:root_job_id AS uuid)
-                      AND child.kind = 'provider_feature_load'
-                      AND child.status = 'done'
-                      AND COALESCE(
-                        (child.payload ->> 'authoritative_snapshot_complete')::boolean,
-                        false
-                      ) IS TRUE
-                    ORDER BY member.provider_dataset_id,
-                             member.sync_scope,
-                             member.operation_key
-                    """
-                ),
-                {"root_job_id": root_job_id},
-            )
-        ).all()
-        for authoritative in authoritative_members:
-            await _finalize_authoritative_curation_receipts(
-                session,
-                membership=ProviderDatasetOperationMembership(
-                    provider_dataset_id=int(authoritative.provider_dataset_id),
-                    sync_scope=str(authoritative.sync_scope),
-                    operation_key=str(authoritative.operation_key),
-                ),
-                source_job_id=str(authoritative.job_id),
-            )
+        await _finalize_authoritative_curation_root(
+            session, root_job_id=root_job_id
+        )
     if identity_conflict or (terminal == "SUCCESS" and incomplete_members):
         if terminal == "SUCCESS" and incomplete_members:
             mismatches["non_done_members"] = {
