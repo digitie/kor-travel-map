@@ -157,6 +157,20 @@ export function useCurationQuarantineController() {
   const moveConflicts = quarantineMoveConflicts(reclassify.error);
   const mutationError = reclassify.error;
 
+  const reloadAfterStaleRevision = async (error: unknown) => {
+    if (!(error instanceof ApiClientError) || error.status !== 412) return;
+    await Promise.all([
+      quarantineQuery.refetch(),
+      itemsQuery.refetch(),
+      targetOptionsQuery.refetch(),
+    ]);
+    setItemSelection({});
+    setLocalError(
+      "다른 변경이 먼저 반영되어 격리 목록·대상·충돌 미리보기를 다시 불러왔습니다. 내용을 확인한 뒤 다시 실행하세요.",
+    );
+    reclassify.reset();
+  };
+
   const selectQuarantine = (collectionId: string) => {
     setSelectedQuarantineId(collectionId);
     setTargetOverrideId(null);
@@ -220,8 +234,8 @@ export function useCurationQuarantineController() {
         setSelectedQuarantineId(null);
         setTargetOverrideId(null);
       }
-    } catch {
-      // mutationError에서 API 응답을 표시한다.
+    } catch (error) {
+      await reloadAfterStaleRevision(error);
     }
   };
 
@@ -260,8 +274,8 @@ export function useCurationQuarantineController() {
       setSelectedQuarantineId(null);
       setTargetOverrideId(null);
       setItemSelection({});
-    } catch {
-      // mutationError에서 API 응답을 표시한다.
+    } catch (error) {
+      await reloadAfterStaleRevision(error);
     }
   };
 

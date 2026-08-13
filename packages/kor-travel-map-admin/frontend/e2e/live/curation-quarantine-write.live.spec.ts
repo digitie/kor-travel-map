@@ -19,6 +19,7 @@
 import { expect, test } from "@playwright/test";
 
 type QuarantineCollection = {
+  command_etag: string;
   collection_id: string;
   collection_key: string;
   item_count: number;
@@ -35,6 +36,11 @@ type QuarantineItem = {
 };
 
 type Envelope<T> = { data: T; meta: { page?: { next_cursor: string | null } } };
+
+type QuarantinePreview = {
+  items: QuarantineItem[];
+  target_collection_revision: string | null;
+};
 
 const COLLECTION_ID = process.env.E2E_QUARANTINE_COLLECTION_ID ?? "";
 const EXECUTE_WRITE = process.env.E2E_QUARANTINE_WRITE === "1";
@@ -107,10 +113,18 @@ test.describe("curation quarantine 재분류 (격리 clone 전용)", () => {
     expect(testInfo.config.workers).toBe(1);
     expect(testInfo.project.retries).toBe(0);
 
-    const preview = await fetchBffJson<Envelope<{ items: QuarantineItem[] }>>(
+    const collections = await fetchBffJson<
+      Envelope<{ items: QuarantineCollection[] }>
+    >(page, "/api/proxy/v1/admin/curations/quarantine?page_size=50");
+    const quarantine = collections.data.items.find(
+      (item) => item.collection_id === COLLECTION_ID,
+    );
+    expect(quarantine, "합성 격리 collection이 목록에 없다").toBeDefined();
+    const preview = await fetchBffJson<Envelope<QuarantinePreview>>(
       page,
       `/api/proxy/v1/admin/curations/quarantine/${COLLECTION_ID}/items?page_size=200`,
     );
+    expect(preview.data.target_collection_revision).not.toBeNull();
     const movable = preview.data.items.filter(
       (item) => item.conflict_kind === "movable",
     );
@@ -121,12 +135,21 @@ test.describe("curation quarantine 재분류 (격리 clone 전용)", () => {
       action: "move",
       item_ids: movable.map((item) => item.curation_item_id),
       target_collection_id: null,
+      target_collection_revision: preview.data.target_collection_revision,
     };
     const first = await page.request.post(
       `/api/proxy/v1/admin/curations/quarantine/${COLLECTION_ID}/reclassify`,
-      { data: requestBody, headers: { "Idempotency-Key": idempotencyKey } },
+      {
+        data: requestBody,
+        headers: {
+          "Idempotency-Key": idempotencyKey,
+          "If-Match": quarantine?.command_etag ?? "",
+        },
+      },
     );
     expect(first.status(), await first.text()).toBe(200);
+    const etag = first.headers()["etag"];
+    expect(etag).toMatch(/^"sha256:[0-9a-f]{64}"$/);
     const firstBody = (await first.json()) as Envelope<{
       moved_item_ids: string[];
       quarantine_collection_deleted: boolean;
@@ -136,10 +159,17 @@ test.describe("curation quarantine 재분류 (격리 clone 전용)", () => {
     // terminal replay — 같은 key + 같은 body는 저장된 결과를 그대로 돌려준다.
     const replay = await page.request.post(
       `/api/proxy/v1/admin/curations/quarantine/${COLLECTION_ID}/reclassify`,
-      { data: requestBody, headers: { "Idempotency-Key": idempotencyKey } },
+      {
+        data: requestBody,
+        headers: {
+          "Idempotency-Key": idempotencyKey,
+          "If-Match": quarantine?.command_etag ?? "",
+        },
+      },
     );
     expect(replay.status()).toBe(200);
     expect(replay.headers()["idempotency-replayed"]).toBe("true");
+    expect(replay.headers()["etag"]).toBe(etag);
 
     // 전량 이동이었다면 격리 collection 자체가 사라졌어야 한다.
     if (firstBody.data.quarantine_collection_deleted) {

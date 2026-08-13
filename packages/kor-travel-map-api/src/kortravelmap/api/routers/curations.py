@@ -7,10 +7,10 @@ import hashlib
 import io
 import json
 from collections.abc import Mapping, Sequence
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from time import perf_counter
 from typing import Annotated, Any, Literal
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import (
     APIRouter,
@@ -95,6 +95,13 @@ _IF_MATCH_OPENAPI_PARAMETER = {
     "required": True,
     "schema": {"type": "string"},
     "description": "직전 command ETag. 누락은 428, stale 값은 412.",
+}
+_IMPORT_PLAN_IF_MATCH_OPENAPI_PARAMETER = {
+    "name": "If-Match",
+    "in": "header",
+    "required": True,
+    "schema": {"type": "string", "pattern": '^"sha256:[0-9a-f]{64}"$'},
+    "description": "preview 응답의 immutable import plan strong ETag.",
 }
 
 
@@ -616,6 +623,9 @@ class CurationImportData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     dry_run: bool
+    import_plan_id: UUID
+    plan_etag: str
+    expires_at: datetime
     rows_total: int
     valid_rows: int
     invalid_rows: int
@@ -1086,6 +1096,50 @@ def _conflict(exc: IntegrityError) -> HTTPException:
     return HTTPException(status_code=409, detail="curation constraint violation")
 
 
+def _import_plan_sha256(request: Request) -> str:
+    values = request.headers.getlist("If-Match")
+    if not values:
+        raise HTTPException(status_code=428, detail="If-Match header가 필요합니다.")
+    if len(values) != 1:
+        raise HTTPException(status_code=422, detail="If-Match는 정확히 하나여야 합니다.")
+    value = values[0]
+    prefix = '"sha256:'
+    if not value.startswith(prefix) or not value.endswith('"'):
+        raise HTTPException(status_code=422, detail="import plan ETag 형식이 아닙니다.")
+    digest = value[len(prefix) : -1]
+    if len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest):
+        raise HTTPException(status_code=422, detail="import plan ETag 형식이 아닙니다.")
+    return digest
+
+
+def _import_plan_command_error(exc: DBAPIError) -> HTTPException:
+    message = str(exc.orig)
+    sqlstate = getattr(exc.orig, "sqlstate", None)
+    if sqlstate == "40001":
+        raise exc
+    if sqlstate == "P0002":
+        return HTTPException(status_code=404, detail="curation import plan 없음")
+    if any(
+        marker in message
+        for marker in (
+            "plan actor or ETag changed",
+            "plan expired",
+            "revision vector is stale",
+        )
+    ):
+        return HTTPException(status_code=412, detail=message)
+    if sqlstate == "23505" or "already committed" in message:
+        return HTTPException(status_code=409, detail=message)
+    if sqlstate == "42501":
+        return HTTPException(
+            status_code=403,
+            detail="curation import plan command 권한이 없습니다.",
+        )
+    if sqlstate in {"22P02", "23502", "23503", "23514", "22023"}:
+        return HTTPException(status_code=422, detail=message)
+    raise exc
+
+
 def _collection_command_error(exc: DBAPIError) -> HTTPException:
     message = str(exc.orig)
     sqlstate = getattr(exc.orig, "sqlstate", None)
@@ -1484,6 +1538,7 @@ async def list_admin_curation_quarantine_items(
     response_model=AdminCurationQuarantineReclassifyResponse,
     status_code=200,
     responses={
+        200: {"headers": _ETAG_RESPONSE_HEADER},
         412: {"description": "collection revision 불일치"},
         428: {"description": "If-Match 헤더 누락"},
     },
@@ -1494,6 +1549,7 @@ async def reclassify_admin_curation_quarantine(
     request: Request,
     collection_id: UUID,
     body: AdminCurationQuarantineReclassifyRequest,
+    response: Response,
     session: Annotated[AsyncSession, Depends(get_session)],
     context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
 ) -> AdminCurationQuarantineReclassifyResponse:
@@ -1592,10 +1648,12 @@ async def reclassify_admin_curation_quarantine(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return AdminCurationQuarantineReclassifyResponse(
+    result_response = AdminCurationQuarantineReclassifyResponse(
         data=data,
         meta=make_meta(request, started_at=started_at),
     )
+    response.headers["ETag"] = _curation_representation_etag(result_response.data)
+    return result_response
 
 
 @admin_router.get(
@@ -1684,20 +1742,25 @@ async def download_curation_import_template() -> Response:
     )
 
 
-@admin_router.post("/import", response_model=CurationImportResponse)
-async def import_admin_curations(
+@admin_router.post(
+    "/imports/preview",
+    response_model=CurationImportResponse,
+    status_code=201,
+    responses={201: {"headers": _ETAG_RESPONSE_HEADER}},
+)
+async def preview_admin_curation_import(
     request: Request,
+    http_response: Response,
     session: Annotated[AsyncSession, Depends(get_session)],
     context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
     file: Annotated[UploadFile, File(description="UTF-8 CSV 파일")],
     idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
-    dry_run: Annotated[bool, Query()] = True,
     provenance_file: Annotated[
         UploadFile | None,
         File(description="행별 source provenance JSON sidecar"),
     ] = None,
 ) -> CurationImportResponse:
-    """CSV+sidecar를 검증한 뒤 preview하거나 원자적으로 멱등 반영한다."""
+    """CSV+sidecar를 한 번 해소해 immutable import plan으로 저장한다."""
     started_at = perf_counter()
     # Multipart content fingerprint를 계산해 claim하기 전에도 catalog 조회가 있다.
     # 따라서 그 어떤 DB statement보다 먼저 격리 수준을 고정한다.
@@ -1741,14 +1804,14 @@ async def import_admin_curations(
     command = await domain_command_service.begin_domain_command(
         session,
         actor=context.actor,
-        operation="admin.curation.import",
+        operation="admin.curation-import.preview",
         idempotency_key=idempotency_key,
         payload={
             "content_sha256": content_sha256,
             "provenance_sha256": provenance_sha256,
-            "dry_run": dry_run,
         },
     )
+    dry_run = True
     # T-VN-32C PR-2 (W8) — CSV의 UUID 표기 feature 참조를 legacy 정본 키로
     # 일괄 정규화해 매칭한다 (miss는 원문 유지 → 기존 unmatched 흐름,
     # requested_feature_id echo는 CSV 원문 보존).
@@ -1921,18 +1984,17 @@ async def import_admin_curations(
         ]
 
     has_errors = preview.has_errors or bool(resolved_identity_issues)
-    if not dry_run and has_errors:
-        raise HTTPException(
-            status_code=422,
-            detail="CSV에 형식 또는 해소 후 identity 오류가 있어 전체 반영을 취소했습니다.",
-        )
-
     change_plan = curation_repo.CurationImportPlan(
         collections=0, inserted=0, updated=0, removals=()
     )
+    revisions: tuple[curation_repo.CurationImportRevisionExpectation, ...] = ()
     try:
         if not has_errors:
             change_plan = await curation_repo.preview_curation_import(
+                session,
+                rows=resolved_rows,
+            )
+            revisions = await curation_repo.build_curation_import_revision_vector(
                 session,
                 rows=resolved_rows,
             )
@@ -1945,15 +2007,6 @@ async def import_admin_curations(
             "removals": change_plan.removals,
             "import_batch_id": None,
         }
-        if not dry_run:
-            result = await curation_repo.import_curation_rows(
-                session,
-                rows=resolved_rows,
-                actor=context.actor,
-                source_content_sha256=content_sha256,
-                batch_kind="csv_upload",
-                command_id=command.command_id,
-            )
     except IntegrityError as exc:
         await session.rollback()
         raise _conflict(exc) from exc
@@ -1967,9 +2020,74 @@ async def import_admin_curations(
         item.status in {"unmatched", "review_required", "ambiguous"}
         for item in item_views
     )
+    issues = [_issue_view(issue) for issue in preview.issues] + [
+        issue for row_issues in identity_issues_by_row.values() for issue in row_issues
+    ]
+    import_plan_id = uuid4()
+    expires_at = datetime.now(UTC) + timedelta(hours=1)
+    summary = {
+        "schema_version": 1,
+        "rows_total": preview.rows_total,
+        "valid_rows": valid_rows,
+        "invalid_rows": invalid_rows,
+        "unresolved_rows": unresolved_rows,
+        "inserted": int(result["inserted"]),
+        "updated": int(result["updated"]),
+        "removed": int(result["removed"]),
+        "collections": int(result["collections"]),
+        "has_errors": has_errors,
+    }
+    plan_hash_input = {
+        "schema_version": 1,
+        "import_plan_id": str(import_plan_id),
+        "actor": context.actor,
+        "content_sha256": content_sha256,
+        "provenance_sha256": provenance_sha256,
+        "summary": summary,
+        "rows": [item.model_dump(mode="json") for item in item_views],
+        "revisions": [
+            {
+                "resource_kind": revision.resource_kind,
+                "resource_key": revision.resource_key,
+                "expected_revision": revision.expected_revision,
+            }
+            for revision in revisions
+        ],
+        "expires_at": expires_at.isoformat(),
+    }
+    plan_sha256 = hashlib.sha256(
+        json.dumps(
+            plan_hash_input,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode()
+    ).hexdigest()
+    try:
+        await curation_repo.create_curation_import_plan_command(
+            session,
+            import_plan_id=str(import_plan_id),
+            content_sha256=content_sha256,
+            provenance_sha256=provenance_sha256,
+            plan_sha256=plan_sha256,
+            summary=summary,
+            rows=resolved_rows,
+            response_rows=[item.model_dump(mode="json") for item in item_views],
+            revisions=revisions,
+            expires_at=expires_at,
+            command_id=command.command_id,
+            principal=context.actor,
+        )
+    except DBAPIError as exc:
+        await session.rollback()
+        raise _import_plan_command_error(exc) from exc
+    plan_etag = f'"sha256:{plan_sha256}"'
     response = CurationImportResponse(
         data=CurationImportData(
             dry_run=dry_run,
+            import_plan_id=import_plan_id,
+            plan_etag=plan_etag,
+            expires_at=expires_at,
             rows_total=preview.rows_total,
             valid_rows=valid_rows,
             invalid_rows=invalid_rows,
@@ -1985,18 +2103,118 @@ async def import_admin_curations(
             ),
             removals=[_admin_item_view(item) for item in result["removals"]],
             items=item_views,
-            issues=[_issue_view(issue) for issue in preview.issues]
-            + [issue for row_issues in identity_issues_by_row.values() for issue in row_issues],
+            issues=issues,
         ),
         meta=make_meta(request, started_at=started_at),
     )
+    http_response.headers["ETag"] = plan_etag
     await domain_command_service.complete_domain_command(
         session,
         command=command,
         response=response,
+        status_code=201,
+        response_headers={"ETag": plan_etag},
     )
     await session.commit()
     return response
+
+
+@admin_router.post(
+    "/import-plans/{import_plan_id}/commit",
+    response_model=CurationImportResponse,
+    responses={
+        200: {"headers": _ETAG_RESPONSE_HEADER},
+        412: {"description": "plan ETag/expiry/revision vector stale"},
+        428: {"description": "If-Match 누락"},
+    },
+    openapi_extra={"parameters": [_IMPORT_PLAN_IF_MATCH_OPENAPI_PARAMETER]},
+)
+@idempotent_domain_command("admin.curation.import")
+async def commit_admin_curation_import_plan(
+    request: Request,
+    import_plan_id: UUID,
+    response: Response,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
+) -> CurationImportResponse:
+    """stored normalized plan을 재해소 없이 exact revision vector 위에서 반영한다."""
+
+    started_at = perf_counter()
+    plan_sha256 = _import_plan_sha256(request)
+    command = domain_command_service.current_domain_command()
+    try:
+        async with domain_command_transaction(session):
+            (
+                content_sha256,
+                resolved_rows,
+                summary,
+                stored_response_rows,
+                expires_at,
+            ) = await curation_repo.claim_curation_import_plan_command(
+                session,
+                import_plan_id=str(import_plan_id),
+                plan_sha256=plan_sha256,
+                command_id=command.command_id,
+                principal=context.actor,
+            )
+            result = await curation_repo.import_curation_rows(
+                session,
+                rows=resolved_rows,
+                actor=context.actor,
+                source_content_sha256=content_sha256,
+                batch_kind="csv_upload",
+                command_id=command.command_id,
+            )
+            import_batch_id = result["import_batch_id"]
+            if import_batch_id is None:
+                raise RuntimeError("curation import commit에 import batch receipt가 없습니다.")
+            item_views = [
+                CurationImportRowView.model_validate(payload)
+                for payload in stored_response_rows
+            ]
+            item_views = [
+                item.model_copy(update={"status": "imported"})
+                if item.status == "valid" and item.resolved_feature_id is not None
+                else item
+                for item in item_views
+            ]
+            issues = [issue for item in item_views for issue in item.issues]
+            plan_etag = f'"sha256:{plan_sha256}"'
+            result_response = CurationImportResponse(
+                data=CurationImportData(
+                    dry_run=False,
+                    import_plan_id=import_plan_id,
+                    plan_etag=plan_etag,
+                    expires_at=expires_at,
+                    rows_total=int(summary["rows_total"]),
+                    valid_rows=int(summary["valid_rows"]),
+                    invalid_rows=int(summary["invalid_rows"]),
+                    unresolved_rows=int(summary["unresolved_rows"]),
+                    inserted=int(result["inserted"]),
+                    updated=int(result["updated"]),
+                    removed=int(result["removed"]),
+                    collections=int(result["collections"]),
+                    import_batch_id=UUID(str(import_batch_id)),
+                    removals=[_admin_item_view(item) for item in result["removals"]],
+                    items=item_views,
+                    issues=issues,
+                ),
+                meta=make_meta(request, started_at=started_at),
+            )
+            await curation_repo.complete_curation_import_plan_command(
+                session,
+                import_plan_id=str(import_plan_id),
+                command_id=command.command_id,
+                import_batch_id=str(import_batch_id),
+                result_payload=result_response.model_dump(mode="json"),
+                principal=context.actor,
+            )
+    except DBAPIError as exc:
+        raise _import_plan_command_error(exc) from exc
+    except (IntegrityError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    response.headers["ETag"] = plan_etag
+    return result_response
 
 
 @candidate_router.get("", response_model=AdminThemeCandidatePageResponse)

@@ -5,6 +5,14 @@
 
 ## [Unreleased]
 
+### immutable curation import plan (2026-08-14, T-VN-40)
+
+- **API(admin)**: CSV import를 immutable preview(201+ETag)와 stored-plan commit으로 분리했다. commit은
+  `If-Match`와 `Idempotency-Key`를 요구하고 동일 terminal receipt·ETag를 재생한다.
+- **UI(admin)**: preview 결과를 확인한 뒤 같은 plan을 명시적으로 commit한다. quarantine stale 412는
+  자동 mutation 재시도 없이 관련 목록·항목·대상을 다시 읽고 운영자의 재실행을 요구한다.
+- **REMOVED**: preview/commit에서 같은 CSV를 다시 업로드·해석하던 legacy `dry_run` import route를 제거했다.
+
 ### retained curation source CAS API (2026-08-13, T-VN-40)
 
 - **API(admin)**: retained source에 단건 GET·conditional 304와 archive DELETE를 추가했다. operator

@@ -5,7 +5,7 @@
   "baseline": {
     "admin": {
       "file": "packages/kor-travel-map-api/openapi.json",
-      "sha256": "c49f312ef2a9c0e00e99b4d062650b56b2c982665c331eb278337be055e8eb82"
+      "sha256": "f648fbfc6ca6845996421645f4fad6381875549ac2d43595413fba5f8ac5ca89"
     },
     "user": {
       "file": "packages/kor-travel-map-api/openapi.user.json",
@@ -17,6 +17,11 @@
     }
   },
   "revisions": [
+    {
+      "date": "2026-08-14",
+      "task": "T-VN-40B",
+      "change": "legacy dry_run 재업로드를 immutable import plan preview/commit으로 대체하고 quarantine 성공·재생 ETag를 고정했다. 두 신규 operation은 적용 완료로 전환했으며 user/service bytes는 변하지 않는다."
+    },
     {
       "date": "2026-08-14",
       "task": "T-VN-40B",
@@ -458,12 +463,14 @@
         {
           "kind": "operation",
           "target_operation": "POST /v1/admin/curations/imports/preview",
+          "applied": true,
           "detail": "normalized rows, content hash, touched revision vector와 plan ETag를 고정하는 immutable preview",
           "basis": "ADR-092"
         },
         {
           "kind": "operation",
           "target_operation": "POST /v1/admin/curations/import-plans/{import_plan_id}/commit",
+          "applied": true,
           "detail": "stored plan만 소비하며 If-Match/Idempotency-Key로 exact terminal replay하는 commit",
           "basis": "ADR-092"
         }
@@ -527,6 +534,7 @@
         },
         {
           "operation": "POST /v1/admin/curations/import",
+          "applied": true,
           "detail": "같은 파일을 preview/commit에서 재해석하는 legacy dry_run flow. immutable import plan 2단계 계약으로 대체한다.",
           "basis": "T-VN-40C"
         }

@@ -21,7 +21,8 @@ import {
   useAdminCurationCollection,
   useAdminCurationCollections,
   useCreateCurationCollectionMutation,
-  useImportCurationCsvMutation,
+  useCommitCurationImportPlanMutation,
+  usePreviewCurationCsvMutation,
   usePatchCurationItemMutation,
   type ActiveCurationCollectionStatus,
   type CurationCollectionVisibility,
@@ -146,7 +147,12 @@ function useCurationCollectionsClientController() {
   const addItem = useAddCurationItemMutation();
   const patchItem = usePatchCurationItemMutation();
   const archiveItem = useArchiveCurationItemMutation();
-  const importCsv = useImportCurationCsvMutation();
+  const previewImportCsv = usePreviewCurationCsvMutation();
+  const commitImportPlan = useCommitCurationImportPlanMutation();
+  const importCsv = {
+    error: previewImportCsv.error ?? commitImportPlan.error,
+    isPending: previewImportCsv.isPending || commitImportPlan.isPending,
+  };
   const submitCollectionInFlightRef = useRef(false);
   const submitItemInFlightRef = useRef(false);
 
@@ -277,9 +283,8 @@ function useCurationCollectionsClientController() {
     setMessage(null);
     try {
       setImportReport(
-        await importCsv.mutateAsync({
+        await previewImportCsv.mutateAsync({
           file: csvFile,
-          dryRun: true,
         }),
       );
     } catch {
@@ -289,7 +294,6 @@ function useCurationCollectionsClientController() {
 
   const commitCsv = async () => {
     if (
-      !csvFile ||
       !importReport ||
       importReport.data.invalid_rows > 0 ||
       importReport.data.issues.length > 0
@@ -309,9 +313,9 @@ function useCurationCollectionsClientController() {
     setLocalError(null);
     setMessage(null);
     try {
-      const response = await importCsv.mutateAsync({
-        file: csvFile,
-        dryRun: false,
+      const response = await commitImportPlan.mutateAsync({
+        importPlanId: importReport.data.import_plan_id,
+        planEtag: importReport.data.plan_etag,
       });
       setImportReport(response);
       setMessage(
