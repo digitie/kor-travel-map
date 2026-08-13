@@ -626,6 +626,8 @@ WHERE (:include_archived OR c.archived_at IS NULL)
           c.status = 'published'
           AND c.visibility = 'public'
           AND t.visibility = 'public'
+          AND t.archived_at IS NULL
+          AND (c.source_id IS NULL OR s.archived_at IS NULL)
       )
   )
   AND (CAST(:status AS text) IS NULL OR c.status = CAST(:status AS text))
@@ -674,6 +676,8 @@ WHERE c.collection_id = CAST(:collection_id AS uuid)
           c.status = 'published'
           AND c.visibility = 'public'
           AND t.visibility = 'public'
+          AND t.archived_at IS NULL
+          AND (c.source_id IS NULL OR s.archived_at IS NULL)
       )
   )
 """
@@ -690,6 +694,8 @@ WHERE c.collection_key = :collection_key
           c.status = 'published'
           AND c.visibility = 'public'
           AND t.visibility = 'public'
+          AND t.archived_at IS NULL
+          AND (c.source_id IS NULL OR s.archived_at IS NULL)
       )
   )
 """
@@ -707,6 +713,8 @@ WHERE i.collection_id = CAST(:collection_id AS uuid)
       NOT CAST(:public_only AS boolean)
       OR (
           i.feature_id IS NOT NULL
+          AND t.archived_at IS NULL
+          AND (c.source_id IS NULL OR s.archived_at IS NULL)
           AND
           {_trusted_link_sql("i")}
           AND EXISTS (
@@ -747,6 +755,8 @@ WHERE i.feature_id = :feature_id
           AND c.status = 'published'
           AND c.visibility = 'public'
           AND t.visibility = 'public'
+          AND t.archived_at IS NULL
+          AND (c.source_id IS NULL OR s.archived_at IS NULL)
           AND {_trusted_link_sql("i")}
       )
   )
@@ -768,6 +778,8 @@ WHERE i.feature_id = ANY(CAST(:feature_ids AS text[]))
           AND c.status = 'published'
           AND c.visibility = 'public'
           AND t.visibility = 'public'
+          AND t.archived_at IS NULL
+          AND (c.source_id IS NULL OR s.archived_at IS NULL)
           AND {_trusted_link_sql("i")}
       )
   )
@@ -812,6 +824,11 @@ WHERE (
                 AND matched_collection.status = 'published'
                 AND matched_collection.visibility = 'public'
                 AND matched_theme.visibility = 'public'
+                AND matched_theme.archived_at IS NULL
+                AND (
+                    matched_collection.source_id IS NULL
+                    OR matched_source.archived_at IS NULL
+                )
                 AND {_trusted_link_sql("matched_item")}
             )
         )

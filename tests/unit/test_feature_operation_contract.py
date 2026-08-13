@@ -193,15 +193,17 @@ def test_feature_operation_sql_excludes_quarantined_engine_state() -> None:
 
 def test_authoritative_finish_owns_source_observation_generation_and_seal() -> None:
     source = inspect.getsource(
-        feature_operation_repo.finish_dagster_feature_membership
+        feature_operation_repo._finalize_authoritative_curation_receipts
     )
-    observation = source.index("refresh_curated_source_observation")
-    generation = source.index("materialize_theme_candidate_generation")
-    seal = source.index("candidate_generation_sealed_at")
+    assert "finalize_provider_curation_receipts" in source
+    assert "theme_feature_candidates" not in source
+    assert "theme_candidate_generations" not in source
 
-    assert observation < generation < seal
-    assert "authoritative_snapshot_complete" in source
-    assert "source.archived_at IS NULL" in source
+    reconcile = inspect.getsource(feature_operation_repo.reconcile_dagster_feature_run)
+    assert "authoritative_snapshot_complete" in reconcile
+    assert reconcile.index("target_status == \"done\"") < reconcile.index(
+        "_finalize_authoritative_curation_receipts"
+    )
 
 
 async def test_feature_operation_ensure_reports_quarantined_run_conflict() -> None:

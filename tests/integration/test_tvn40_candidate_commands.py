@@ -3,14 +3,21 @@
 from __future__ import annotations
 
 import hashlib
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, IntegrityError
-from sqlalchemy.ext.asyncio import AsyncEngine
+from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
+from kortravelmap.core.feature_operation import ProviderDatasetOperationMembership
 from kortravelmap.infra.db import make_async_engine
+from kortravelmap.infra.feature_operation_repo import (
+    ensure_dagster_feature_operation,
+    finish_dagster_feature_membership,
+    reconcile_dagster_feature_run,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -1278,3 +1285,123 @@ async def test_provider_full_snapshot_requires_exact_authoritative_job_and_repla
         assert causation_job == source_job_id
     finally:
         await dagster.dispose()
+
+
+async def test_provider_root_success_atomically_observes_generates_and_seals(
+    migrated_engine: AsyncEngine,
+) -> None:
+    seeded = await _seed_candidate(
+        migrated_engine,
+        operation="admin.curation-rule.create",
+        create_candidate=False,
+    )
+    membership = ProviderDatasetOperationMembership(
+        provider_dataset_id=int(seeded["dataset_id"]),
+        sync_scope="dataset_wide",
+        operation_key="load",
+    )
+    run_id = f"tvn40-provider-terminal-{seeded['suffix']}"
+    created_at = datetime(2026, 8, 13, 1, tzinfo=UTC)
+    started_at = created_at + timedelta(seconds=1)
+    finished_at = started_at + timedelta(seconds=1)
+    async with migrated_engine.begin() as connection:
+        await connection.execute(
+            text(
+                """
+                INSERT INTO provider_sync.provider_dataset_operations (
+                  provider_dataset_id, operation_key, operation_kind,
+                  is_enabled, config
+                ) VALUES (:dataset_id, 'load', 'refresh', true, '{}'::jsonb)
+                """
+            ),
+            seeded,
+        )
+        await connection.execute(
+            text(
+                """
+                INSERT INTO provider_sync.provider_dataset_operation_scopes (
+                  provider_dataset_id, sync_scope, operation_key, operation_kind
+                ) VALUES (:dataset_id, 'dataset_wide', 'load', 'refresh')
+                """
+            ),
+            seeded,
+        )
+
+    dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
+    session_factory = async_sessionmaker(dagster, expire_on_commit=False)
+    source_job_id = ""
+    try:
+        async with session_factory.begin() as session:
+            await session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
+            await ensure_dagster_feature_operation(
+                session,
+                dagster_run_id=run_id,
+                trigger_kind="schedule",
+                selected_memberships=(membership,),
+                operation_key="load",
+                engine_created_at=created_at,
+                engine_started_at=started_at,
+                observed_status="STARTED",
+            )
+            finished = await finish_dagster_feature_membership(
+                session,
+                dagster_run_id=run_id,
+                membership=membership,
+                authoritative_snapshot_complete=True,
+            )
+            source_job_id = finished.operation.members[0].job_id
+            assert await session.scalar(
+                text(
+                    """
+                    SELECT payload ? 'candidate_generation_sealed_at'
+                    FROM ops.import_jobs
+                    WHERE job_id = CAST(:job_id AS uuid)
+                    """
+                ),
+                {"job_id": source_job_id},
+            ) is False
+
+            terminal = await reconcile_dagster_feature_run(
+                session,
+                dagster_run_id=run_id,
+                trigger_kind="schedule",
+                terminal_status="SUCCESS",
+                selected_memberships=(membership,),
+                operation_key="load",
+                engine_created_at=created_at,
+                engine_started_at=started_at,
+                engine_finished_at=finished_at,
+                error=None,
+            )
+            assert terminal.operation.status == "done"
+    finally:
+        await dagster.dispose()
+
+    async with migrated_engine.connect() as connection:
+        receipt = (
+            await connection.execute(
+                text(
+                    """
+                    SELECT
+                      payload ? 'candidate_generation_sealed_at' AS sealed,
+                      (payload ->> 'candidate_generation_count')::integer
+                        AS generations,
+                      payload -> 'source_observation' ->> 'input_set_hash'
+                        AS input_set_hash,
+                      (SELECT count(*)
+                       FROM ops.curation_source_observation_receipts
+                       WHERE import_job_id = job.job_id) AS observations,
+                      (SELECT count(*)
+                       FROM feature.theme_candidate_generations
+                       WHERE source_job_id = job.job_id) AS generation_rows
+                    FROM ops.import_jobs AS job
+                    WHERE job.job_id = CAST(:job_id AS uuid)
+                    """
+                ),
+                {"job_id": source_job_id},
+            )
+        ).one()
+    assert receipt.sealed is True
+    assert receipt.generations == 1
+    assert len(receipt.input_set_hash) == 64
+    assert (receipt.observations, receipt.generation_rows) == (1, 1)

@@ -2,16 +2,24 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
-## 2026-08-13 — T-VN-40: provider terminal을 observation·generation receipt로 봉인
+## 2026-08-13 — T-VN-40: root SUCCESS finalizer와 public archive 경계 고정
 
-authoritative provider child job 완료 transaction이 retained source observation을 먼저 기록하고,
-해당 dataset의 모든 active candidate rule generation을 만든 뒤 generation set hash와 seal 시각을
-child payload에 함께 남기도록 결선했다. source catalog가 없는 dataset은 observation을 생략하지만
-candidate generation receipt는 동일하게 봉인한다.
+authoritative child 완료는 권위 축만 저장하고, provider root가 `done/SUCCESS`로 확정되는
+SERIALIZABLE transaction에서 DB-owned finalizer가 source observation과 해당 dataset의 모든 active
+candidate rule generation을 만든 뒤 generation set hash와 seal 시각을 child payload에 함께 남기게 했다.
+finalizer는 provider executor만 실행하는 SECURITY DEFINER procedure라 Dagster LOGIN에는 raw candidate
+evidence SELECT를 열지 않는다. actual-login 통합 회귀가 child 완료 전 미봉인, root 성공 뒤 observation 1건·
+generation 1건·seal을 같은 transaction에서 확인한다.
 
 봉인된 과거 child job은 이미 생성된 rule generation의 exact replay만 허용하고, 나중에 추가된 rule로
 새 generation을 만들 수 없다. provider exact-job integration은 기존 rule replay와 late-rule 생성 거부를
-함께 검증하며, feature-operation static gate는 observation→generation→seal 순서를 고정한다.
+함께 검증한다. source observation은 root SUCCESS 및 child에 봉인된 canonical input count/hash를 요구하고,
+최신 receipt보다 오래된 job의 역순 적용을 막으며 archive 뒤에도 기존 receipt replay는 보존한다.
+
+적대 리뷰에서 찾은 parent archive 공개 누출도 같은 패턴으로 전수 수정했다. legacy curated-feature와
+canonical collection list/detail/group/Feature aggregate 모두 archived theme/source를 공통 비공개 조건으로
+적용한다. 삭제된 curated schedule과 구 UI를 필수로 기대하던 stale live Playwright spec은 제거하고 현재
+canonical collection live suite를 수용 경로로 유지했다.
 
 ## 2026-08-13 — T-VN-40: legacy rule apply와 독립 curated Dagster job 제거
 

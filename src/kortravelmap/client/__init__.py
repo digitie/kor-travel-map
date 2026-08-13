@@ -902,6 +902,10 @@ class AsyncKorTravelMapClient:
         """권위 있는 Dagster terminal을 root와 남은 active child에 반영한다."""
         try:
             async with self._session_factory() as session, session.begin():
+                if terminal_status.strip().upper() == "SUCCESS":
+                    await session.execute(
+                        text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
+                    )
                 return await repo_reconcile_dagster_feature_run(
                     session,
                     dagster_run_id=dagster_run_id,
