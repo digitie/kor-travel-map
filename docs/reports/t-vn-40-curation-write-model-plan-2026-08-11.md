@@ -1,20 +1,20 @@
 # T-VN-40 — 큐레이션 쓰기 모델 단일화 설계 계획
 
-- 상태: 설계 초안 — 구현 시작 금지
-- 기준: T-VN-36 final head `858a1684`
-- 관련: ADR-063, ADR-069, ADR-071, ADR-092(proposed), T-VN-40A~C
+- 상태: 구현 진행 중 — A/B/C 단일 PR
+- 기준: T-VN-36 merge head `c76ceb7a`
+- 관련: ADR-063, ADR-069, ADR-071, ADR-092(accepted), T-VN-40A~C
 - 작성일: 2026-08-11
 
 상세 relation/command/ACL/API/migration 계약은
 [`t-vn-40-curation-write-model-detailed-design-2026-08-11.md`](t-vn-40-curation-write-model-detailed-design-2026-08-11.md)를
-따른다. 두 문서는 barrier 전 설계 산출물이며 DDL 실행 권한을 뜻하지 않는다.
+따른다. 2026-08-13 사용자 승인으로 barrier와 ADR acceptance가 충족됐으며, 구현은 같은
+draft PR #974에서만 진행한다.
 
 ## 1. 범위와 시작 조건
 
-이 문서는 사용자가 T-VN-36을 기준으로 허용한 **설계 전용** 초안이다. `docs/tasks.md`의
-32~38 join barrier는 풀리지 않았으므로 migration, application writer, API/OpenAPI, frontend,
-Dagster, PinVi 산출물을 이 PR에서 바꾸지 않는다. barrier와 ADR-092 acceptance가 충족된 뒤에만
-40A~C를 하나의 forward-only implementation PR/release로 구현한다. A/B/C는 review와 검증의
+T-VN-32~38 join barrier는 T-VN-36 PR #973의 `main` 병합(`c76ceb7a`)으로 해소됐고,
+2026-08-13 사용자가 ADR-092와 구현 시작을 승인했다. 40A~C는 하나의 forward-only
+implementation PR/release로 구현한다. A/B/C는 review와 검증의
 순서를 위한 logical phase일 뿐, phase별 migration·writer·consumer를 별도 PR로 merge하지 않는다.
 
 목표는 하나다. 자동 source-rule 후보와 소비자에게 보이는 공식·수동 큐레이션 membership을
@@ -84,14 +84,17 @@ runtime role에는 candidate, collection/item, legacy overlay의 raw lifecycle/m
 provider-derived principal, fixed `search_path`, expected revision, source/current-head proof를
 검증한다. procedure owner와 runtime의 table/function privileges는 catalog assertion으로 고정한다.
 
-전체 lock order는 다음과 같다.
+provider load와 Feature merge는 relation을 잠그기 전에 영향받는 Feature id 각각의 정렬된
+`pg_advisory_xact_lock(hashtextextended('tvn40:feature:' || feature_id, 0))`을 공통 획득한다.
+merge는 master/loser 두 key를 lexical 순서로, provider refresh는 target 한 key를 잡는다. 그 뒤
+전체 row lock order는 다음과 같다.
 
 ```
 provider dataset/entity/head → source link → Feature → candidate → collection → item
 ```
 
 refresh/promotion, merge/promotion, import/manual item edit, source-head advance/promotion의
-two-session regression은 deadlock 대신 직렬화 또는 정의된 409/40001 재시도를 보여야 한다.
+two-session regression은 40P01/재시도 없이 직렬화 또는 정의된 409/40001 결과를 보여야 한다.
 
 ## 4. 단일 PR 안의 구현 단계
 
@@ -117,7 +120,8 @@ physical removal은 같은 PR의 ordered migration과 final acceptance에 함께
 2. source rule의 `curated` default action과 existing legacy candidate rows를 candidate lifecycle로
    backfill한다. 자동 collection item 생성은 금지한다.
 3. admin candidate review API/UI를 별도로 제공한다. promotion은 collection selection과
-   ETag를 요구한다.
+   candidate/collection/item revision을 요구하며 canonical item, trusted accepted link decision,
+   item pointer, candidate transition을 같은 transaction에서 기록한다.
 4. Feature aggregate, public `/v1/curations*`, collection admin, user client, frontend, PinVi는
    canonical collection/item만 읽도록 전환한다. `/v1/curated-features`와 legacy admin surface는
    같은 release에서 제거하며 redirect/no-op parameter를 두지 않는다.
@@ -143,11 +147,11 @@ physical removal은 같은 PR의 ordered migration과 final acceptance에 함께
 | 범주 | 필수 evidence |
 |---|---|
 | mapping | legacy/canonical/candidate row counts, orphan zero, duplicate identity zero, ambiguous quarantine exact count |
-| candidate | current-head mismatch 거부, refresh/withdraw/reopen, promotion/reject, immutable transition audit, merge collision |
-| membership | CSV/import/manual item/archive/link decision이 candidate와 독립, public은 published collection item만 반환 |
-| writer fence | runtime raw candidate/item/legacy DML 42501, procedure command 1 audit, expected revision 412/409, catalog grants exact |
+| candidate | current-head mismatch 거부, initial materialize와 same-state `source_refresh`·`source_reopen`·withdraw exact audit matrix, promotion/reject, immutable transition audit, merge collision |
+| membership | CSV/import/manual item/archive/link decision이 candidate와 독립, promotion은 trusted accepted decision/pointer를 원자 기록, public·PinVi snapshot은 published/public collection+trusted link+public Feature만 반환 |
+| writer fence | runtime raw candidate/item/legacy DML 42501, procedure command 1 audit, bigint domain-command claim 결박, candidate/collection/item expected revision 412/409, catalog grants exact |
 | consumer | public/admin OpenAPI에서 legacy surface 없음, frontend generated types/check, PinVi exact paired vendor compile/no-legacy assertion |
-| removal | relation/column/view/function/trigger/index/ACL/static source legacy reference zero; staged removal manifest SHA |
+| removal | relation/column/view/function/trigger/index/ACL/static source legacy reference zero; 0074 PK rekey CASCADE/guard 예외 zero; staged removal manifest SHA |
 | performance | public collection aggregate와 candidate admin keyset query의 production-shape `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` |
 | live | n150 fresh PostGIS→ETL, candidate review→promotion→public collection, merge, withdrawn source, recovery/cleanup, PinVi probe |
 

@@ -2,7 +2,9 @@
 
 ### 상태
 
-Accepted (2026-07-08) — 사용자 결정. 큐레이션 관리를 concierge와 정합화(#15).
+Accepted (2026-07-08), auto-publish 부분은 ADR-092로 superseded (2026-08-13).
+concierge grouping/rule selector는 유지하고 rule 결과의 공개 membership 의미만 후보 lifecycle로
+대체한다.
 
 ### 배경
 
@@ -27,9 +29,10 @@ channel/playlist/keyword provenance(id + title)를 이미 담고 있으나, 이 
 - 별도 concierge API 호출 없이, 이미 적재된 concierge feature의 detail youtube
   값에서 그룹핑을 유도한다(`sync_concierge_themes`). 그룹핑(channel/playlist)마다
   slug `concierge-yt-<channel_id>`/`concierge-pl-<playlist_id>`, `theme_group='media'`,
-  `visibility='public'`, `default_curated=true` 테마 1개 + 그 그룹핑만 고르는
-  detail_selector rule 1개(`default_action='curated'` — **auto-publish**)를 upsert하고
-  apply로 후보를 즉시 채운다. 멱등(재실행 시 rule 중복 생성 없음).
+  `visibility='public'` 테마 1개 + 그 그룹핑만 고르는 detail_selector rule 1개
+  (`default_action='candidate'`)를 upsert하고 candidate generation을 실행한다. 공개 membership은
+  ADR-092 promotion command만 만들며 rule 결과를 auto-publish하지 않는다. 멱등(재실행 시 rule
+  중복 생성 없음).
 - 트리거는 **on-demand**다: Dagster `concierge_theme_sync` asset을 수동 materialize.
   `curated_features_refresh` 일일 스케줄은 여전히 STOPPED(자동 켜지 않음).
 - apply 술어 지원용 concierge youtube channel_id/playlist_id **부분 표현식 인덱스**
@@ -37,9 +40,9 @@ channel/playlist/keyword provenance(id + title)를 이미 담고 있으나, 이 
 
 ### 결과 / 트레이드오프
 
-- 같은 물리 feature가 여러 채널/재생목록에 속하면 curated_features 행이 여러 개 생긴다
-  (정상 — UNIQUE는 (theme_id, feature_id)). 지도 경로는 ADR 없이 `distinct_by_feature`
-  (curated cross-theme dedup)로 물리 feature당 마커 1개만 그린다.
+- 같은 물리 feature가 여러 채널/재생목록 rule에 속하면 `theme_feature_candidates` 행이 여러 개
+  생긴다. public 지도에는 promotion된 canonical collection/item만 나타나며 Feature 중복 제거는
+  canonical aggregate가 소유한다.
 - keyword(자유 문자열 검색어) 그룹핑은 slug churn·프로리퍼레이션 위험이 커 초기 범위에서
   제외한다(channel + playlist만). 필요 시 후속에서 확장.
 - concierge `/themes`에 change-feed가 없어, 사라진 그룹핑의 stale 테마는 남는다. 프룬은

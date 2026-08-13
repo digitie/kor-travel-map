@@ -1,6 +1,6 @@
 # ADR-092 — 큐레이션 membership과 자동 후보를 분리해 단일 쓰기 정본으로 만든다
 
-- 상태: proposed
+- 상태: accepted
 - 날짜: 2026-08-11
 - 결정자: human + Codex
 - 관련: ADR-063, ADR-069, ADR-071, T-VN-40A~C
@@ -64,9 +64,11 @@ merge target 이동은 각각 named repository/DB command로만 수행한다. ru
 허용하지 않는다. command owner는 fixed `search_path`, authenticated actor 또는
 provider-derived principal, expected revision, source/current-head proof를 검증한다.
 
-lock 순서는 source dataset/entity/head → source link → Feature → candidate → collection → item으로
-고정한다. source refresh와 promotion, Feature merge와 candidate reassignment, import와 manual
-item mutation의 two-session deadlock/serialization test를 요구한다.
+provider refresh와 Feature merge는 관계 row lock보다 먼저 영향받는 Feature id의 정렬된
+transaction advisory fence를 공통 획득한다. 그 뒤 lock 순서는 source dataset/entity/head → source
+link → Feature → candidate → collection → item으로 고정한다. source refresh와 promotion, Feature
+merge와 candidate reassignment, import와 manual item mutation의 two-session deadlock/serialization
+test를 요구한다. 기존 40P01 1회 retry는 이 lock-order 계약의 대체물이 아니다.
 
 ### 4. legacy overlay는 forward-only로 제거한다
 
@@ -101,14 +103,15 @@ old binary와 new data를 섞어 재가동하는 방식이 아니라 fresh clone
 - source rule refresh, admin UI/API, Dagster asset, merge, OpenAPI/PinVi, live fixture를 함께
   전환해야 한다.
 - 기존 `curated` rule과 legacy 행은 migration preflight와 checksum 대조가 필요하다.
-- T-VN-40은 T-VN-32~38 join barrier가 해소되기 전에는 설계·review만 할 수 있으며 구현은
-  시작하지 않는다. barrier 뒤에도 A/B/C를 독립 PR로 나눠 병합할 수 없다.
+- T-VN-32~38 join barrier는 T-VN-36 PR #973의 `main` 병합(`c76ceb7a`)으로 해소됐고,
+  2026-08-13 사용자가 ADR-092와 A/B/C 단일 PR 구현을 승인했다. A/B/C를 독립 PR로 나눠
+  병합할 수 없다는 제약은 유지한다.
 
 ## 후속
 
 - T-VN-40 설계 계획의 writer inventory, exact removal manifest, checksum/ACL/consumer test
   matrix를 review한다.
-- barrier 해소 뒤 40A에서 current legacy row와 canonical item의 cardinality·orphan·public
+- 40A에서 current legacy row와 canonical item의 cardinality·orphan·public
   projection checksum을 고정한다.
 - 40B에서 candidate relation과 admin-only contract를 도입하고 public/PinVi를 canonical
   membership으로만 검증한다.

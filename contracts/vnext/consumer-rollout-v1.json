@@ -153,11 +153,11 @@
       "title": "curation write model 단일화",
       "consumer_first_order": [
         "40A: legacy writer inventory 고정 + 신규 legacy write 차단 + canonical/effective checksum",
-        "40B: theme_feature_candidates lifecycle 분리 + admin/public/PinVi consumer가 curation_collections/items 정본만 읽도록 선전환 — PinVi admin의 detail-snapshot 런타임 소비(T-VN-H07D)를 canonical /v1/admin/curations/* read로 전환하는 것 포함",
-        "40C: overlay 신규 write·normal routing 차단 (checksum·consumer cutover 뒤)"
+        "40B: theme_feature_candidates lifecycle 분리 + admin/public/PinVi consumer가 curation_collections/items 정본만 읽도록 선전환 — PinVi admin detail snapshot은 canonical /v1/admin/curation-items/{curation_item_id}/detail-snapshot으로 전환",
+        "40C: checksum·consumer cutover 뒤 overlay 신규 write·normal routing 차단, legacy relation/trigger/repository/route와 curation_item_id rekey 예외를 같은 release에서 물리 삭제"
       ],
-      "write_fence": "40A부터 overlay 신규 write 차단, 40C에서 normal routing 차단",
-      "compat_drop": "curated_features overlay table/trigger/repository와 legacy route 물리 삭제는 T-VN-39 removal manifest. 신규 호환 shim 금지",
+      "write_fence": "40A부터 overlay 신규 write 차단, 40B에서 candidate와 canonical membership은 named procedure-only, 40C에서 normal routing과 legacy ACL 제거",
+      "compat_drop": "curated_features overlay/snapshot table·trigger·repository·legacy route와 legacy_projection_id/rekey 예외는 T-VN-40C final migration에서 물리 삭제한다. T-VN-39에는 catalog-zero receipt만 인계하며 신규 호환 shim은 금지한다.",
       "pinvi_snapshot_revendor": {
         "user": "yes",
         "service": "no",
@@ -216,9 +216,9 @@
         "removed_by": "T-VN-39"
       },
       {
-        "object": "feature.curated_features overlay table·단방향 trigger·repository와 legacy route(/v1/curated-features*, /v1/admin/features/curated*)",
+        "object": "feature.curated_features overlay/snapshot table·단방향 trigger·repository·legacy_projection_id·0074 curation_item_id rekey CASCADE/append-only 예외와 legacy route(/v1/curated-features*, /v1/admin/features/curated*)",
         "fenced_by": "T-VN-40C",
-        "removed_by": "T-VN-39"
+        "removed_by": "T-VN-40C"
       }
     ]
   }

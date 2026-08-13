@@ -5,7 +5,7 @@
 [`docs/resume.md`](resume.md)가 정본이다. 작성·유지 규약은
 [`docs/tasks-rule.md`](tasks-rule.md)를 따른다.
 
-## 진행 중인 작업 인덱스 (2026-08-12 PR #971 머지 후 재대조)
+## 진행 중인 작업 인덱스 (2026-08-13 T-VN-36 PR #973 머지 후 재대조)
 
 완료한 `T-VN-32`·`T-VN-33`·`T-VN-37`·`T-VN-38`과 선행 운영 task는
 [`tasks-done.md`](tasks-done.md)로 이관했다. 아래에는 아직 닫히지 않은 실행 단위만 둔다.
@@ -33,9 +33,8 @@ barrier로 직렬화한다.
     [ ] `T-VN-40C`
     - A/B/C는 logical phase이며 **하나의 forward-only implementation PR/release**로만 구현·병합한다.
       phase별 writer/migration/consumer PR 또는 중간 배포는 금지한다.
-    - 2026-08-11 사용자 지시로 T-VN-36 head에서 ADR-092와 설계 초안은 작성할 수 있다.
-      이는 barrier 해제가 아니며 40A/B/C migration·writer·consumer 구현은 join barrier와
-      ADR acceptance 전까지 시작 금지다. 설계 정본은
+    - T-VN-36 PR #973이 `c76ceb7a`로 `main`에 병합돼 join barrier가 해소됐고,
+      2026-08-13 사용자가 ADR-092와 40A/B/C 단일 PR 구현을 승인했다. 설계·구현 정본은
       [`t-vn-40-curation-write-model-plan-2026-08-11.md`](reports/t-vn-40-curation-write-model-plan-2026-08-11.md)다.
   - 최종 단일 cutover: [ ] `T-VN-39`
 - **보류/외부 추적**

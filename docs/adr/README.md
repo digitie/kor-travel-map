@@ -74,7 +74,7 @@
 | ADR-058 | geocoder-의존 provider feature_id 결정성을 geocoder 필수화(F-01, re-key 없음)로 보장 | → 이관 [etl/feature-id-determinism.md](../etl/feature-id-determinism.md) |
 | ADR-059 | 벤더링된 agent/skill 설정의 언어·context-discovery 예외 정책 | → 이관 [agent-guide.md](../agent-guide.md) |
 | ADR-060 | Admin 로그인, frontend proxy, public API key | [060-admin-login-frontend-proxy-public-api-keys.md](060-admin-login-frontend-proxy-public-api-keys.md) |
-| ADR-061 | concierge YouTube 그룹핑을 curated 테마 source로(detail_selector rule) | [061-concierge-themes-as-curated-source.md](061-concierge-themes-as-curated-source.md) |
+| ADR-061 | concierge YouTube 그룹핑을 curated 테마 source로(detail_selector rule; auto-publish는 ADR-092로 superseded) | [061-concierge-themes-as-curated-source.md](061-concierge-themes-as-curated-source.md) |
 | ADR-062 | 공개 Weather API와 3년 이력 보존 | [062-public-weather-api-three-year-history.md](062-public-weather-api-three-year-history.md) |
 | ADR-063 | Feature 관측과 큐레이션 collection 분리 | [063-feature-observations-curation-collections.md](063-feature-observations-curation-collections.md) |
 | ADR-064 | admin ops 표면을 파이프라인/데이터셋 2페이지로 통합 재작성 | [064-admin-ops-consolidation-two-pages.md](064-admin-ops-consolidation-two-pages.md) |
