@@ -1,5 +1,17 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-14 — T-VN-40: PR #977 영향성 P1 폐쇄 중
+
+두 적대 리뷰가 PR #977 prod 기록에서 드러난 자격증명 혼용과 Alembic exclusion의 semantic
+blind spot을 재현했다. VWorld provider key는 더 이상 geo consumer key나 Map public API key로
+fallback하지 않고, geo BFF는 전용 key 누락 시 upstream 요청 전 503, Map public API는 active
+DB key 부재 시 401로 닫힌다. raw-SQL T-VN-40 관계 12개의 constraint/index 전체 의미를 exact
+catalog digest로 고정하고 동일 이름 `CHECK (true)` 변조 음성 테스트를 추가했다. fresh
+`0001→0121` exact Alembic/변조 2건, credential API·자동화 unit 99건, geo BFF 2건과 frontend
+type-check/lint가 통과했다. 커밋·푸시 뒤 적대 리뷰 2명을 새 SHA에 다시 고정한다. n150 배포
+전에는 별도 운영 조치로 Map 전용 public
+key를 정식 발급·보관하고 PR #977에서 VWorld 값으로 직접 등록한 임시 행을 revoke해야 한다.
+
 ## 2026-08-14 — T-VN-40: PR #977 base 재배치 완료
 
 T-VN-40 45개 커밋을 갱신된 PR #977 head(`b94329cf`) 위로 다시 재배치했다. PR #977이 실측한

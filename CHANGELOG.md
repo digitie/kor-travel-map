@@ -5,6 +5,16 @@
 
 ## [Unreleased]
 
+### provider/consumer credential 경계 (2026-08-14)
+
+- **SECURITY**: VWorld provider key를 Map 공개 API key 또는 kor-travel-geo consumer key로
+  대입하던 API·compose·build·frontend BFF fallback을 제거했다. Map 공개 API는 DB에 등록한
+  전용 active key만 받고, geo BFF는 별도 geo-issued key가 없으면 upstream 요청 전 503으로
+  fail-close한다.
+- **DATABASE TEST**: ORM에서 제외한 T-VN-40 raw-SQL receipt/effect 12개 관계의 constraint
+  정의·검증/deferrable 상태와 전체 index 정의를 exact catalog digest로 고정했다. 같은 이름의
+  `CHECK (true)` 변조가 Alembic gate를 통과하지 못한다.
+
 ### immutable curation import plan (2026-08-14, T-VN-40)
 
 - **API(admin)**: CSV import를 immutable preview(201+ETag)와 stored-plan commit으로 분리했다. commit은

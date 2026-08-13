@@ -760,8 +760,8 @@ class ApiSettings(BaseSettings):
         default=False,
         description=(
             "True면 public REST surface(`/v1/features`, `/v1/public`, `/v1/categories`, "
-            "`/v1/providers`, `/v1/curated-*`)에 VWorld 호환 `key` query 검증을 "
-            "적용한다. trusted admin frontend proxy 또는 service-token 요청은 우회한다."
+            "`/v1/providers`, `/v1/curated-*`)에 DB 등록 Map 전용 API key header "
+            "검증을 적용한다. trusted admin frontend proxy 또는 service-token 요청은 우회한다."
         ),
     )
     public_api_key_cache_ttl_s: int = Field(
@@ -776,9 +776,8 @@ class ApiSettings(BaseSettings):
     vworld_api_key: SecretStr | None = Field(
         default=None,
         description=(
-            "VWorld 지도 key. public_api_keys 테이블이 비어 있을 때 초기 전환 편의를 위해 "
-            "같은 값을 public API key fallback으로 인정한다. 운영에서는 UI에서 생성한 "
-            "key를 DB에 저장해 사용한다."
+            "VWorld 지도 key. Map 공개 API 인증과는 다른 provider 자격증명이며, "
+            "ops.public_api_keys가 비어 있어도 fallback으로 인정하지 않는다."
         ),
     )
     admin_destructive_enabled: bool = Field(

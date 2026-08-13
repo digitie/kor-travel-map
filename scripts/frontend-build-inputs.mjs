@@ -39,7 +39,7 @@ export function frontendBuildInputs(environment = process.env) {
       envOrDefault(
         environment,
         "NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY",
-        vworldApiKey,
+        "",
       ),
     ],
   ];

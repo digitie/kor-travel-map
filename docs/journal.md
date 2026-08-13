@@ -2,6 +2,23 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-14 — T-VN-40: PR #977 영향성 후속 credential/Alembic fail-close
+
+PR #977 prod 기록을 대조해 VWorld provider key가 geo consumer key와 Map 공개 API key로 다시
+fallback되는 활성 경로를 전수했다. `load-env`·compose API/Dagster/frontend·buildx·frontend
+build digest·Next geo BFF에서 VWorld→geo 대입을 제거했고, geo BFF는 전용 key가 없으면 upstream
+요청 없이 503으로 닫는다. Map public auth도 `ops.public_api_keys` active hash가 비었을 때
+`vworld_api_key`를 되살리던 fallback을 제거했다. n150에는 PR #977이 직접 등록한 VWorld 기반
+Map key 행이 남아 있으므로 T-VN-40 배포 전에 정식 발급한 Map 전용 key로 회전하고 기존 행을
+revoke하는 live gate를 tasks에 고정했다.
+
+Alembic 적대 리뷰가 raw-SQL exclusion의 이름-only 계약을 같은 이름 `CHECK (true)` 변조로
+우회했다. T-VN-40 receipt/effect 12개 relation은 `pg_get_constraintdef`의 정의·validated·
+deferrable/deferred와 `pg_get_indexdef` 전체 정의·unique/primary/valid/ready/live를 정규화한 exact
+digest로 고정했다. semantic 변조가 반드시 digest 불일치가 되는 음성 회귀도 추가했다.
+fresh `0001→0121` exact Alembic/변조 2건, credential API·자동화 unit 99건, geo BFF 2건,
+frontend type-check/lint를 통과시켰다.
+
 ## 2026-08-14 — T-VN-40: PR #977 재배치와 Alembic head 정합성
 
 T-VN-40의 45개 커밋을 갱신된 PR #977 head(`b94329cf`) 위로 다시 재배치했다. 두 번째
