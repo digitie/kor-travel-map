@@ -9,12 +9,20 @@ from collections.abc import Awaitable
 from datetime import date, datetime
 from time import perf_counter
 from typing import Annotated, Any, Literal
+from uuid import UUID
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from kortravelmap.infra import curated_repo
 from kortravelmap.settings import KorTravelMapSettings
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -496,14 +504,14 @@ class CuratedSourcePatchRequest(BaseModel):
 class CuratedSourceRuleCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    theme_id: str
-    source_id: str
+    theme_id: UUID
+    source_id: UUID
     place_kind: str | None = None
     category: str | None = None
     region_scope: dict[str, Any] = Field(default_factory=dict)
     detail_selector: dict[str, Any] | None = None
     default_action: RuleAction = "candidate"
-    priority: int = 0
+    priority: int = Field(default=0, ge=-2147483648, le=2147483647)
     enabled: bool = True
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -516,9 +524,22 @@ class CuratedSourceRulePatchRequest(BaseModel):
     region_scope: dict[str, Any] | None = None
     detail_selector: dict[str, Any] | None = None
     default_action: RuleAction | None = None
-    priority: int | None = None
+    priority: int | None = Field(default=None, ge=-2147483648, le=2147483647)
     enabled: bool | None = None
     metadata: dict[str, Any] | None = None
+
+    @model_validator(mode="after")
+    def reject_non_nullable_explicit_nulls(self) -> CuratedSourceRulePatchRequest:
+        for field_name in (
+            "region_scope",
+            "default_action",
+            "priority",
+            "enabled",
+            "metadata",
+        ):
+            if field_name in self.model_fields_set and getattr(self, field_name) is None:
+                raise ValueError(f"{field_name} must not be null")
+        return self
 
 
 class CuratedSourceRuleArchiveRequest(BaseModel):
@@ -648,6 +669,8 @@ def _integrity_error(exc: IntegrityError) -> HTTPException:
 def _rule_command_error(exc: DBAPIError) -> HTTPException:
     message = str(exc.orig)
     sqlstate = getattr(exc.orig, "sqlstate", None)
+    if sqlstate == "40001":
+        raise exc
     if "rule revision mismatch" in message:
         return HTTPException(
             status_code=status.HTTP_412_PRECONDITION_FAILED,
@@ -657,9 +680,9 @@ def _rule_command_error(exc: DBAPIError) -> HTTPException:
         return HTTPException(status_code=404, detail="curated source rule 없음")
     if sqlstate == "23505":
         return HTTPException(status_code=409, detail="curated source rule identity conflict")
-    if "archived rule" in message or "scope changed" in message:
+    if "archived rule" in message:
         return HTTPException(status_code=409, detail=message)
-    if sqlstate in {"23503", "23514", "22023"}:
+    if sqlstate in {"22P02", "23502", "23503", "23514", "22023"}:
         return HTTPException(status_code=422, detail=message)
     if sqlstate == "42501":
         return HTTPException(status_code=403, detail="curated source rule command 권한이 없습니다.")
@@ -1531,7 +1554,8 @@ async def list_admin_curated_source_rules_route(
 @admin_router.post(
     "/curated-source-rules",
     response_model=CuratedSourceRuleResponse,
-    responses={200: {"headers": _RULE_ETAG_RESPONSE_HEADER}},
+    status_code=status.HTTP_201_CREATED,
+    responses={201: {"headers": _RULE_ETAG_RESPONSE_HEADER}},
 )
 @idempotent_domain_command("admin.curated-source-rule.create")
 async def create_admin_curated_source_rule_route(
@@ -1545,7 +1569,7 @@ async def create_admin_curated_source_rule_route(
             command = current_domain_command()
             row = await curated_repo.create_curated_source_rule_command(
                 session,
-                **body.model_dump(),
+                **body.model_dump(mode="json"),
                 command_id=command.command_id,
                 principal=command.actor,
             )
@@ -1566,12 +1590,12 @@ async def create_admin_curated_source_rule_route(
     responses={200: {"headers": _RULE_ETAG_RESPONSE_HEADER}},
 )
 async def get_admin_curated_source_rule_route(
-    rule_id: str,
+    rule_id: UUID,
     response: Response,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> CuratedSourceRuleResponse:
     started_at = perf_counter()
-    row = await curated_repo.get_curated_source_rule(session, rule_id=rule_id)
+    row = await curated_repo.get_curated_source_rule(session, rule_id=str(rule_id))
     if row is None:
         raise HTTPException(status_code=404, detail="curated source rule 없음")
     response.headers["ETag"] = revision_etag(row.row_revision)
@@ -1594,7 +1618,7 @@ async def get_admin_curated_source_rule_route(
 @idempotent_domain_command("admin.curated-source-rule.patch")
 async def patch_admin_curated_source_rule_route(
     request: Request,
-    rule_id: str,
+    rule_id: UUID,
     body: CuratedSourceRulePatchRequest,
     response: Response,
     session: Annotated[AsyncSession, Depends(get_session)],
@@ -1607,7 +1631,7 @@ async def patch_admin_curated_source_rule_route(
             command = current_domain_command()
             row = await curated_repo.patch_curated_source_rule_command(
                 session,
-                rule_id=rule_id,
+                rule_id=str(rule_id),
                 expected_revision=expected_revision,
                 updates=body.model_dump(exclude_unset=True),
                 command_id=command.command_id,
@@ -1639,7 +1663,7 @@ async def patch_admin_curated_source_rule_route(
 @idempotent_domain_command("admin.curated-source-rule.archive")
 async def archive_admin_curated_source_rule_route(
     request: Request,
-    rule_id: str,
+    rule_id: UUID,
     body: CuratedSourceRuleArchiveRequest,
     response: Response,
     session: Annotated[AsyncSession, Depends(get_session)],
@@ -1652,7 +1676,7 @@ async def archive_admin_curated_source_rule_route(
             command = current_domain_command()
             row = await curated_repo.archive_curated_source_rule_command(
                 session,
-                rule_id=rule_id,
+                rule_id=str(rule_id),
                 expected_revision=expected_revision,
                 command_id=command.command_id,
                 reason_code=body.reason_code,

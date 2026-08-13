@@ -2,6 +2,22 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-13 — T-VN-40: retained rule 적대 리뷰 차단 결함 해소
+
+고정 SHA `f05427b1` 적대 리뷰에서 확인된 retained rule 경계 결함을 수정했다. 동일 provider
+dataset의 여러 source entity가 같은 Feature에 연결되는 정상 N:M 관계에서도 reconcile scope를
+canonical set으로 중복 제거해 receipt child PK 충돌을 막았다. metadata-only PATCH는 catalog
+revision만 증가시키고 candidate generation을 만들지 않으며, semantic 변경만 immutable receipt와
+generation을 생성한다.
+
+HTTP create와 terminal replay는 201로 통일하고 UUID path/body, non-null PATCH 필드와 integer 범위를
+요청 모델에서 닫았다. `40001`은 HTTP 409로 변환하지 않아 공통 SERIALIZABLE bounded retry가 전체
+domain command를 다시 실행한다. OpenAPI target diff에는 이미 착지한 operation을 `applied=true`로
+표시해 pre-cutover와 applied-state를 동시에 fail-close하고, Map-only admin spec 현재성은 diff baseline,
+PinVi shared user spec 현재성은 cross-repo receipt가 각각 소유하도록 검사 책임을 분리했다.
+
+fresh head actual-login integration 1개와 관련 unit/contract 43개가 통과했다.
+
 ## 2026-08-13 — T-VN-40: retained rule strong ETag API 결선
 
 0109 typed rule command를 admin repository/API에 연결했다. 단건 GET과 archive DELETE를 추가하고

@@ -65,6 +65,11 @@ async def test_rule_create_patch_archive_is_cas_bound_and_reconciled(
 ) -> None:
     suffix = uuid4().hex
     actor = f"admin:tvn40-rule-{suffix}"
+    feature_id = f"tvn40:rule:{suffix}"
+    source_entity_keys = [
+        f"tvn40:rule:entity-a:{suffix}",
+        f"tvn40:rule:entity-b:{suffix}",
+    ]
     async with migrated_engine.begin() as connection:
         dataset_id = int(
             await connection.scalar(
@@ -115,11 +120,63 @@ async def test_rule_create_patch_archive_is_cas_bound_and_reconciled(
                 {"dataset_id": dataset_id},
             )
         )
+        await connection.execute(
+            text(
+                """
+                INSERT INTO feature.features (
+                  feature_id, kind, name, category, coord, address,
+                  marker_icon, marker_color
+                ) VALUES (
+                  :feature_id, 'place', 'N:M rule receipt', '01070100',
+                  x_extension.ST_SetSRID(
+                    x_extension.ST_MakePoint(126.9780, 37.5665), 4326
+                  ), '{}'::jsonb, 'place', 'P-01'
+                )
+                """
+            ),
+            {"feature_id": feature_id},
+        )
+        for index, source_entity_key in enumerate(source_entity_keys):
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO provider_sync.source_entities (
+                      source_entity_key, provider_dataset_id, source_entity_type,
+                      source_entity_id, first_seen_at, last_seen_at
+                    ) VALUES (
+                      :source_entity_key, :dataset_id, 'rule-receipt',
+                      :source_entity_id, clock_timestamp(), clock_timestamp()
+                    )
+                    """
+                ),
+                {
+                    "dataset_id": dataset_id,
+                    "feature_id": feature_id,
+                    "source_entity_id": f"entity-{index}-{suffix}",
+                    "source_entity_key": source_entity_key,
+                },
+            )
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO provider_sync.source_links (
+                      feature_id, source_entity_key, source_role,
+                      match_method, confidence
+                    ) VALUES (
+                      :feature_id, :source_entity_key, 'enrichment', 'exact', 100
+                    )
+                    """
+                ),
+                {"feature_id": feature_id, "source_entity_key": source_entity_key},
+            )
 
     create_command = await _domain_command(
         migrated_engine, actor=actor, operation="admin.curated-source-rule.create"
     )
     no_op_command = await _domain_command(
+        migrated_engine, actor=actor, operation="admin.curated-source-rule.patch"
+    )
+    metadata_command = await _domain_command(
         migrated_engine, actor=actor, operation="admin.curated-source-rule.patch"
     )
     patch_command = await _domain_command(
@@ -180,13 +237,38 @@ async def test_rule_create_patch_archive_is_cas_bound_and_reconciled(
 
         async with api.begin() as connection:
             await connection.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
-            patched = (
+            metadata_only = (
                 await connection.execute(
                     text(
                         """
                         CALL feature.patch_curated_source_rule_command(
                           CAST(:rule_id AS uuid), 1, NULL, NULL, '{}'::jsonb,
-                          NULL, 'ignore', 1, true, '{}'::jsonb,
+                          NULL, 'candidate', 0, true,
+                          '{"display_note":"operator-only"}'::jsonb,
+                          :command_id, :actor, NULL, NULL, NULL
+                        )
+                        """
+                    ),
+                    {
+                        "actor": actor,
+                        "command_id": metadata_command,
+                        "rule_id": rule_id,
+                    },
+                )
+            ).mappings().one()
+        assert int(metadata_only["o_rule_revision"]) == 2
+        assert metadata_only["o_generation_id"] is None
+
+        async with api.begin() as connection:
+            await connection.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
+            patched = (
+                await connection.execute(
+                    text(
+                        """
+                        CALL feature.patch_curated_source_rule_command(
+                          CAST(:rule_id AS uuid), 2, NULL, NULL, '{}'::jsonb,
+                          NULL, 'ignore', 1, true,
+                          '{"display_note":"operator-only"}'::jsonb,
                           :command_id, :actor, NULL, NULL, NULL
                         )
                         """
@@ -194,7 +276,7 @@ async def test_rule_create_patch_archive_is_cas_bound_and_reconciled(
                     {"actor": actor, "command_id": patch_command, "rule_id": rule_id},
                 )
             ).mappings().one()
-        assert int(patched["o_rule_revision"]) == 2
+        assert int(patched["o_rule_revision"]) == 3
         assert patched["o_generation_id"] is not None
 
         async with api.connect() as connection:
@@ -224,7 +306,7 @@ async def test_rule_create_patch_archive_is_cas_bound_and_reconciled(
                     text(
                         """
                         CALL feature.archive_curated_source_rule_command(
-                          CAST(:rule_id AS uuid), 2, :command_id, 'operator_retired',
+                          CAST(:rule_id AS uuid), 3, :command_id, 'operator_retired',
                           :actor, NULL, NULL, NULL
                         )
                         """
@@ -232,7 +314,7 @@ async def test_rule_create_patch_archive_is_cas_bound_and_reconciled(
                     {"actor": actor, "command_id": archive_command, "rule_id": rule_id},
                 )
             ).mappings().one()
-        assert int(archived["o_rule_revision"]) == 3
+        assert int(archived["o_rule_revision"]) == 4
         assert archived["o_generation_id"] is not None
 
         async with migrated_engine.connect() as connection:
@@ -242,8 +324,10 @@ async def test_rule_create_patch_archive_is_cas_bound_and_reconciled(
                         """
                         SELECT rule.row_revision, rule.default_action, rule.enabled,
                                rule.archived_at IS NOT NULL,
-                               count(operation.operation_id) AS operation_count,
-                               count(generation.generation_id) AS generation_count
+                               count(DISTINCT operation.operation_id) AS operation_count,
+                               count(DISTINCT generation.generation_id) AS generation_count,
+                               min(operation.scope_member_count) AS min_scope_count,
+                               max(operation.scope_member_count) AS max_scope_count
                         FROM feature.curated_source_rules AS rule
                         LEFT JOIN ops.curation_rule_reconcile_operations AS operation
                           ON operation.rule_id = rule.rule_id
@@ -256,7 +340,7 @@ async def test_rule_create_patch_archive_is_cas_bound_and_reconciled(
                     {"rule_id": rule_id},
                 )
             ).one()
-        assert row == (3, "ignore", False, True, 3, 3)
+        assert row == (4, "ignore", False, True, 3, 3, 3, 3)
 
         async with dagster.connect() as connection:
             assert not bool(

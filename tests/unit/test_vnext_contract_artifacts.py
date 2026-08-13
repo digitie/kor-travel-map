@@ -44,7 +44,7 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     ),
     # 2026-08-13 T-VN-40 — public legacy catalog 제거, scoped service snapshot/mapping,
     # admin catalog/import/candidate ETag·412/428 목표 diff를 machine freeze했다.
-    "openapi-diff-v1.json": ("4608cd24de0313522645a08e916aa50fc66a24e0a596ce3b98b4232a7eb9368d"),
+    "openapi-diff-v1.json": ("63836af809170442eba0ccb32b6ff3b14767d1816ca5c3e71580a78e7ed33016"),
     # 2026-08-13 T-VN-36 — receipt가 리베이스로 폐기된 커밋(c1fa5a4d)과 그때의
     # spec sha를 가리키고 있었다. 현재 head로 재핀했다.
     "consumer-rollout-v1.json": (
@@ -170,9 +170,16 @@ def test_openapi_diff_referenced_operations_exist() -> None:
                     )
                 target = entry.get("target_operation")
                 if target is not None:
-                    assert not _operation_exists(spec, target), (
-                        f"{surface}/{key}의 target operation이 이미 현행 spec에 존재: {target}"
-                    )
+                    target_exists = _operation_exists(spec, target)
+                    if entry.get("applied") is True:
+                        assert target_exists, (
+                            f"{surface}/{key}의 applied target operation 부재: {target}"
+                        )
+                    else:
+                        assert not target_exists, (
+                            f"{surface}/{key}의 target operation이 이미 현행 spec에 존재: "
+                            f"{target} — 적용 완료면 applied=true를 고정하라"
+                        )
         for entry in changes.get("deferred", []):
             assert entry.get("decision") == "deferred-to-implementation"
             assert entry.get("owner", "").startswith("T-VN-"), entry
@@ -247,8 +254,8 @@ def test_consumer_rollout_shape() -> None:
     ]
 
 
-def test_active_pinvi_receipt_describes_the_current_specs() -> None:
-    """마지막 receipt의 spec sha가 **현재 트리**와 일치하는지 본다.
+def test_active_pinvi_receipt_describes_current_consumed_specs() -> None:
+    """마지막 receipt의 소비자 공유 spec sha가 현재 트리와 일치하는지 본다.
 
     위 단언들은 전부 `[0-9a-f]{40}` 같은 **모양**만 본다. 그래서 receipt가 리베이스로
     폐기된 커밋과 그때의 spec sha를 가리켜도 green이었고, `install-…-live-e2e.sh`는
@@ -265,10 +272,12 @@ def test_active_pinvi_receipt_describes_the_current_specs() -> None:
     rollout = _load_json("consumer-rollout-v1.json")
     receipt = rollout["tasks"]["T-VN-36"]["pinvi_snapshot_receipt"]
     api_root = _ROOT / "packages/kor-travel-map-api"
-    for name, key in (
-        ("openapi.json", "map_full_openapi_sha256"),
-        ("openapi.user.json", "map_user_openapi_sha256"),
-    ):
+    # full admin spec은 Map-only retained catalog가 전진할 때 PinVi가 소비하는
+    # deterministic admin-detail subset bytes와 무관하게 바뀐다. 현재 full spec은
+    # openapi-diff baseline이 별도로 고정하고, cross-repo receipt는 공유 user bytes만
+    # 현재성 검증한다. T-VN-40 service snapshot receipt가 생기면 service도 그 task의
+    # exact pair로 승격한다.
+    for name, key in (("openapi.user.json", "map_user_openapi_sha256"),):
         observed = hashlib.sha256((api_root / name).read_bytes()).hexdigest()
         assert observed == receipt[key], (
             f"{name}이 T-VN-36 receipt와 다르다 — receipt를 현재 head로 재핀하라 "

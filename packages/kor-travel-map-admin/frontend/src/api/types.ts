@@ -6782,9 +6782,15 @@ export interface components {
             region_scope?: {
                 [key: string]: unknown;
             };
-            /** Source Id */
+            /**
+             * Source Id
+             * Format: uuid
+             */
             source_id: string;
-            /** Theme Id */
+            /**
+             * Theme Id
+             * Format: uuid
+             */
             theme_id: string;
         };
         /** CuratedSourceRulePatchRequest */
@@ -14387,7 +14393,7 @@ export interface operations {
         };
         responses: {
             /** @description Successful Response */
-            200: {
+            201: {
                 headers: {
                     /** @description 현재 retained rule row_revision strong entity tag. */
                     ETag?: string;

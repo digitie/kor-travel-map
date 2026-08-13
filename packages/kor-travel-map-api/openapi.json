@@ -10446,6 +10446,8 @@
           },
           "priority": {
             "default": 0,
+            "maximum": 2147483647.0,
+            "minimum": -2147483648.0,
             "title": "Priority",
             "type": "integer"
           },
@@ -10455,10 +10457,12 @@
             "type": "object"
           },
           "source_id": {
+            "format": "uuid",
             "title": "Source Id",
             "type": "string"
           },
           "theme_id": {
+            "format": "uuid",
             "title": "Theme Id",
             "type": "string"
           }
@@ -10548,6 +10552,8 @@
           "priority": {
             "anyOf": [
               {
+                "maximum": 2147483647.0,
+                "minimum": -2147483648.0,
                 "type": "integer"
               },
               {
@@ -31437,7 +31443,7 @@
           "required": true
         },
         "responses": {
-          "200": {
+          "201": {
             "content": {
               "application/json": {
                 "schema": {
@@ -31496,6 +31502,7 @@
             "name": "rule_id",
             "required": true,
             "schema": {
+              "format": "uuid",
               "title": "Rule Id",
               "type": "string"
             }
@@ -31610,6 +31617,7 @@
             "name": "rule_id",
             "required": true,
             "schema": {
+              "format": "uuid",
               "title": "Rule Id",
               "type": "string"
             }
@@ -31673,6 +31681,7 @@
             "name": "rule_id",
             "required": true,
             "schema": {
+              "format": "uuid",
               "title": "Rule Id",
               "type": "string"
             }
