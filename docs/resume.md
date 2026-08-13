@@ -56,7 +56,9 @@ T-VN-40 final schema/API/cutover를 서로 다르게 승인하던
 reject와 promotion은 실제 API LOGIN만 실행 가능한 named SECURITY DEFINER procedure로
 전환했다. promotion은 current source proof와 T-VN-36 typed detail/override lineage를 다시
 해시해 stale 후보를 원자 거부하고, canonical item·trusted accepted decision·candidate transition을
-한 transaction으로 결박한다. 다음은 set-based generation procedure를 구현한다. bootstrap은
+한 transaction으로 결박한다. `rule_reconcile` set-based generation도 caller 후보 입력 없이
+DB-derived expected set/scope hash, immutable receipt-first, observation completeness와 exact replay로
+구현했다. 다음은 provider full-snapshot generation과 Dagster terminal receipt 결선을 구현한다. bootstrap은
 populated DB에서 2회, 0105는 fresh 0001→head와 실제 ROLE ACL/append-only gate로 검증했다.
 frozen artifact unit 10개와 target SQL/violation/head-equivalence integration 11개도 통과했다.
 SERIALIZABLE 정책 unit 22개와 실제 PostgreSQL transaction integration 1개도 통과했다.
@@ -64,7 +66,8 @@ SERIALIZABLE 정책 unit 22개와 실제 PostgreSQL transaction integration 1개
 Feature와 trusted accepted decision을 공통으로 요구한다. PostgreSQL 통합 회귀가 공개 0건과
 admin 보존을 함께 확인했다.
 candidate reject/promotion actual-LOGIN/CAS/typed-detail-stale/교차-role 통합과 receipt gate
-8개도 통과했다. routine 소유권 이전 뒤 남던
+8개도 통과했다. rule reconcile materialize/replay/scope omission/교차-role을 포함한 candidate
+통합 테스트 7개도 fresh 0108 head에서 통과했다. routine 소유권 이전 뒤 남던
 기본 `PUBLIC EXECUTE`는 audit owner·command owner 역할로 직접 전환한 exact ACL 재설정으로
 0105/0106 guard·helper·procedure 전체에서 제거했다.
 A/B/C는 하나의 forward-only PR/release로 유지하며, 누적 구현은 DB/동시성과
