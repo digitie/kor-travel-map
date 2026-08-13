@@ -43,13 +43,9 @@ const SAMPLE_ID = FEATURE_IDS[0] ?? FALLBACK_ID;
 const SHELL_HEADING = "Feature 상세";
 
 // detail GET 성공 시 detail-view가 무조건 렌더하는 섹션 타이틀들.
-const DETAIL_SECTIONS = [
-  "Sources",
-  "Issues",
-  "Overrides",
-  "History",
-  "Files",
-] as const;
+// T-VN-36이 whole-row "History" 패널을 제거했다 — 남은 것은 notice 전용
+// "Notice History"뿐이고, 그건 kind별이라 무조건 렌더가 아니다.
+const DETAIL_SECTIONS = ["Sources", "Issues", "Overrides", "Files"] as const;
 
 // Raw <details> disclosure summary 텍스트.
 const RAW_SUMMARIES = ["detail", "raw_refs", "urls", "address"] as const;

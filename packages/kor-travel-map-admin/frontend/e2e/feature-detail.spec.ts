@@ -161,11 +161,12 @@ test.describe("/features/[featureId]", () => {
     await expect(page.getByText("coord", { exact: true })).toBeVisible();
     // 메인 섹션 타이틀(detail view scope — 헤더 nav의 동명 링크 'Issues'와 구분).
     const detailView = page.getByTestId("feature-detail-view");
+    // T-VN-36: whole-row 변경 이력 패널("History")이 사라지고 notice 전용
+    // "Notice History"만 남았다.
     for (const section of [
       "Sources",
       "Issues",
       "Overrides",
-      "History",
       "Files",
       "Map",
     ]) {

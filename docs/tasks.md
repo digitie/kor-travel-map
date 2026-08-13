@@ -604,15 +604,32 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 > [`tasks-done.md`](tasks-done.md)에 있다. 남은 것은 prod 배포 하나뿐인데 어느 열린
 > task도 소유하고 있지 않아 여기에 명시적으로 둔다(2026-08-07 재대조에서 발견).
 
-- [ ] T-VN-35-deploy — **alembic `0087` prod 배포**
+- [ ] T-VN-35/34/36-deploy — **alembic `0104_tvn36_final_fence` prod 배포 (단일 단계)**
+
+  > 2026-08-13 갱신. 원래 이 항목은 `0087_route_area_subtypes`를 지시했는데, 그 사이
+  > T-VN-34(`0098_admin_scope_indexes`)와 T-VN-36(`0104_tvn36_final_fence`)이 main에
+  > 들어가 `0087`은 main에서 도달 불가능한 중간 revision이 됐다. 지시대로
+  > `0087`을 박으면 api가 DB를 건드리기 전에 exit 1이고 dagster/daemon도 뜨지
+  > 않는다 — ADR-090 배포에서 실제로 겪은 crash-loop과 같은 형태다
+  > (docs/tasks.md 위 §, journal 2026-08-06 (1)). 그래서 세 배포를 하나로 접는다.
 
   orchestrator `.env`의 `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`를
-  **`0087_route_area_subtypes`**로 **선행** 갱신한 뒤(갱신하지 않으면 api가 DB를 건드리기
-  전에 exit 1이고 dagster/daemon도 뜨지 않는다 — journal 2026-08-06 (1)) api →
-  dagster/daemon 순으로 재빌드·배포한다. prod에 적용된 head는 아직 `0083`이다
-  (마지막 배포 journal 2026-08-05 (7)/(10)). n150 파기형 rebuild에서 `0087`이 확인된 것은
-  `T-VN-41F1D-C3`의 격리 generation이며 prod 배포가 아니다. 배포 직전 write-fence
-  기준점 dump는 `T-VN-H43` runbook §9 관례를 따른다.
+  **`0104_tvn36_final_fence`**로 **선행** 갱신한 뒤 api → dagster/daemon 순으로
+  재빌드·배포한다. prod에 적용된 head는 아직 `0083`이다(마지막 배포 journal
+  2026-08-05 (7)/(10)). n150 파기형 rebuild에서 확인된 head는
+  `T-VN-41F1D-C3`의 격리 generation이며 prod 배포가 아니다.
+
+  선행 조건(ADR-090):
+  - `KOR_TRAVEL_MAP_MIGRATOR_PG_DSN` / `KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN` 분리
+    주입 — 미프로비저닝 상태로 배포하면 api가 `... is required`로 crash-loop한다.
+  - `docker/postgres-role-bootstrap.sh`가 7 principal과 `public.alembic_version`
+    소유권까지 세운 뒤여야 한다.
+  - compose로 띄운다면 ops principal 3종과 `OPS_PRINCIPAL_REQUIRED`는 root
+    `.env`/host env에 둔다(`.env.example` 참조 — package env는 compose가 덮는다).
+
+  배포 직전 write-fence 기준점 dump는 `T-VN-H43` runbook §9 관례를 따른다.
+  실데이터를 전용 PostgreSQL로 옮기는 경로(docker-manager #171)는 dump/restore이며
+  파기형 재생성이 아니다.
 
 ### T-VN-36 — field override 단일화 (Lane B, A–D 단일 PR)
 
