@@ -2,11 +2,13 @@
 
 ## 2026-08-13 — T-VN-40 A/B/C 단일 PR 구현 시작
 
-**다음 한 작업**: PR #977 head 위 bootstrap과 0105 expand DB spine을 구현했다.
-다음은 T-VN-40 final schema/API/cutover를 서로 다르게 승인하는
+**다음 한 작업**: PR #977 head 위 bootstrap과 0105 expand DB spine을 구현하고,
+T-VN-40 final schema/API/cutover를 서로 다르게 승인하던
 `target-schema-v1.sql`·`recovery-preflight-v1.json`·`openapi-diff-v1.json`을 최종 정본으로
-원자 재동결하고, 이어서 set-based generation/typed command procedure를 구현한다. bootstrap은
+원자 재동결했다. 다음은 이 machine contract에 맞춘 set-based generation/typed command
+procedure와 SERIALIZABLE domain-command transaction policy를 구현한다. bootstrap은
 populated DB에서 2회, 0105는 fresh 0001→head와 실제 ROLE ACL/append-only gate로 검증했다.
+frozen artifact unit 10개와 target SQL/violation/head-equivalence integration 11개도 통과했다.
 A/B/C는 하나의 forward-only PR/release로 유지하며, 누적 구현은 DB/동시성과
 API·consumer/ACL 관점의 독립 적대 리뷰어 2명이 같은 고정 SHA에서 검증한다.
 상세 계약은

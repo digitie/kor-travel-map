@@ -1,17 +1,17 @@
 {
   "artifact": "target-schema-fingerprints-v1",
   "owner": "T-VN-31A",
-  "description": "target-schema-v1.sql을 빈 PostGIS DB(x_extension 확장 사전 생성)에 적용한 뒤 H35 7 카테고리 catalog 질의(출처: src/kortravelmap/cli/_h35_catalog.py — schema-qualified relation 목록으로 적응)로 산출한 category별 canonical SHA-256. tests/integration/test_vnext_target_freeze.py가 실제 적용 직후 재계산해 drift를 fail-close한다. columns/functions/indexes 3축은 2026-08-12에 재고정했다 — 이전 값(columns 1e0fc402…, functions 6f88ead5…, indexes 9c8775eb…)은 target-schema-v1.sql의 커밋된 어떤 revision으로도 재현되지 않는 값이었다. 위 sha256 두 개가 가리키는 계약 파일 그대로를 빈 PostGIS DB에 적용해 실측했고, target-schema-v1.sql의 3축 도입 이후 revision 전수(3243afb3·df495101·d0c0945a·29b4c6a6·6c3c0a54·fa736d15·7c372ed8)를 재계산해 옛 값과 맞는 revision이 하나도 없음을 확인했다. T-VN-36 재배치에서 target-schema-v1.sql은 주석 한 줄만 바뀌어(post-T36C→post-T36D) bytes sha만 bb57b6de…→f9b4e997…로 이동했고, 위 3축 파생 해시는 실측으로 같은 값이 재현됐다 — catalog에는 아무 변화가 없다.",
+  "description": "target-schema-v1.sql과 그 직후의 tvn33-reference-ownership-v1.sql을 빈 PostGIS DB(x_extension 확장 사전 생성)에 적용한 뒤 H35 7 카테고리 catalog 질의(출처: src/kortravelmap/cli/_h35_catalog.py — schema-qualified relation 목록으로 적응)로 산출한 category별 canonical SHA-256이다. tests/integration/test_vnext_target_freeze.py가 실제 적용 직후 재계산해 drift를 fail-close한다. 2026-08-13 T-VN-40 재동결은 retained catalog·canonical collection/item revision과 immutable reconcile/generation/candidate/transition/cutover mapping relation을 최종형으로 추가하고 legacy 최소형 candidate를 제거했다. 아래 두 source SHA와 7축 fingerprint는 해당 실행 가능한 SQL을 clean PostGIS 16에서 실측한 값이다.",
   "environment": "postgis/postgis:16-3.5-alpine (PostgreSQL 16 / PostGIS 3.5)",
-  "target_schema_sql_sha256": "f9b4e997913d6f1f44a6748277fdc510805d8991281dfba79ec07bbe7971187d",
-  "tvn33_reference_ownership_sql_sha256": "9f434b50440c7463b86a5cf61abeb30bf6fe8d74a5760aa256374c76e4c9328a",
+  "target_schema_sql_sha256": "39d13339f521d7e24efdf11dc409b7097da49c24d0721bd20a6e62ccf5c74e9c",
+  "tvn33_reference_ownership_sql_sha256": "2e72796b373691b4d6e10f71eceec4504df94af1a2582edbf445fb2390f20b6b",
   "fingerprints": {
-    "columns": "0cbb98e20931df8b080e061581882f586eaf9e4b13b10da6dc465139e25d3351",
-    "constraints": "59c334647d7d73f3393c8db54ceb74ddffa11583a6b882a4629d1d4c133987b0",
-    "functions": "4968d88790843feb8be43f51f195cb3f34092abe4a1601716bff7b5b664e6d04",
-    "indexes": "aabda76df171b01711e97782c2b3142c7814725540b3585083a05256a9a2bd1b",
-    "relations": "561250e4cb38a957fe0f449708cbced1c4568fa1f4eb97864bedaa519ed47158",
-    "sequence": "296b9a65bc2148c9f64cec0b4163aabd36ca6bcda67ad00084c6818e18b4d4b0",
-    "triggers": "f60935036d7e1cdafeb9bc6d9a0f29208cec4450a1a397756b71ed8e72d7c256"
+    "columns": "552ba4b37b60a79aad50fad2b3fd124d079f31e28a56e3013db9f7e5e5f59082",
+    "constraints": "df90d0fa56cef4f80ae931c3aa77ab715fb3b2423cf9d047ea2a91c2aebe47f1",
+    "functions": "294d15475ac539a7d37b4425afcfb2de9fcdeea7259525e0b35cd4e2bef2dfa6",
+    "indexes": "8cd12981d82712917f2bf94059a362d40c3cdf88c597b91e6a8ef5b7c0a77315",
+    "relations": "e2c4f9c2105155f8fbe552d7254ea3f8691c4e395ff7424d0ebc5f3f6430a42f",
+    "sequence": "4af885fdd1302103f7c9c47c3244b047343f01713cba8c12b30e3da12f4d9308",
+    "triggers": "1fb8151565cf95efd9c35e96684d3d19bb4c475770fc2a27bbe57d7a42f6a589"
   }
 }

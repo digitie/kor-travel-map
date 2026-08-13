@@ -444,17 +444,21 @@ INSERT INTO feature.curated_sources (
      WHERE provider = 'fixture' AND dataset_key = 'inactive-curation'),
     'fixture curated source', 'manual'
 );
-INSERT INTO feature.curated_themes (theme_key, title)
-VALUES ('fixture-inactive-curation', 'fixture inactive curation');
+INSERT INTO feature.curated_themes (
+    theme_slug, theme_name, theme_group, owner_kind
+) VALUES (
+    'fixture-inactive-curation', 'fixture inactive curation', 'fixture', 'operator'
+);
 UPDATE provider_sync.provider_datasets
 SET is_active = false
 WHERE provider = 'fixture' AND dataset_key = 'inactive-curation';
-INSERT INTO feature.curated_source_rules (theme_id, source_id)
+INSERT INTO feature.curated_source_rules (theme_id, source_id, owner_kind)
 VALUES (
     (SELECT theme_id FROM feature.curated_themes
-     WHERE theme_key = 'fixture-inactive-curation'),
+     WHERE theme_slug = 'fixture-inactive-curation'),
     (SELECT source_id FROM feature.curated_sources
-     WHERE source_name = 'fixture curated source')
+     WHERE source_name = 'fixture curated source'),
+    'operator'
 );
 
 -- case: inactive_dataset_import_event_write

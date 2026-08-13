@@ -1164,3 +1164,375 @@ $$;
 CREATE TRIGGER trg_managed_files_dataset_ownership
     BEFORE INSERT OR UPDATE OR DELETE ON ops.managed_files
     FOR EACH ROW EXECUTE FUNCTION provider_sync.reject_managed_file_dataset_rebinding();
+
+-- =============================================================================
+-- T-VN-40 final curation receipt/candidate/audit 도착점
+-- =============================================================================
+ALTER TABLE feature.curated_sources
+    ADD COLUMN source_url text,
+    ADD COLUMN license text,
+    ADD COLUMN update_cycle text NOT NULL DEFAULT 'unknown',
+    ADD COLUMN last_source_modified_at date,
+    ADD COLUMN last_checked_at timestamptz,
+    ADD COLUMN next_expected_at date,
+    ADD COLUMN row_count integer,
+    ADD COLUMN freshness_note text,
+    ADD COLUMN provider_status text NOT NULL DEFAULT 'implemented',
+    ADD COLUMN row_revision bigint NOT NULL DEFAULT 1,
+    ADD COLUMN observation_revision bigint NOT NULL DEFAULT 1,
+    ADD COLUMN archived_at timestamptz,
+    ADD CONSTRAINT ck_curated_sources_kind CHECK (
+        source_kind IN ('openapi','filedata','standard','internal','manual')
+    ),
+    ADD CONSTRAINT ck_curated_sources_update_cycle CHECK (
+        update_cycle IN ('realtime','daily','weekly','monthly','annual','one_time','unknown')
+    ),
+    ADD CONSTRAINT ck_curated_sources_provider_status CHECK (
+        provider_status IN ('implemented','provider_needed','manual_only','deprecated')
+    ),
+    ADD CONSTRAINT ck_curated_sources_row_count CHECK (row_count IS NULL OR row_count >= 0),
+    ADD CONSTRAINT ck_curated_sources_revision_positive CHECK (row_revision >= 1),
+    ADD CONSTRAINT ck_curated_sources_observation_revision_positive CHECK (
+        observation_revision >= 1
+    );
+
+ALTER TABLE feature.curation_collections
+    ADD CONSTRAINT fk_curation_collections_source FOREIGN KEY (source_id)
+    REFERENCES feature.curated_sources(source_id) ON DELETE SET NULL;
+
+ALTER TABLE feature.curated_source_rules
+    DROP CONSTRAINT fk_curated_source_rules_theme,
+    DROP CONSTRAINT fk_curated_source_rules_source,
+    ADD COLUMN place_kind text,
+    ADD COLUMN category text,
+    ADD COLUMN region_scope jsonb NOT NULL DEFAULT '{}'::jsonb,
+    ADD COLUMN detail_selector jsonb,
+    ADD COLUMN default_action text NOT NULL DEFAULT 'candidate',
+    ADD COLUMN row_revision bigint NOT NULL DEFAULT 1,
+    ADD COLUMN archived_at timestamptz,
+    ADD COLUMN owner_kind text NOT NULL,
+    ADD COLUMN owner_provider_dataset_id bigint,
+    ADD COLUMN metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+    ADD COLUMN created_at timestamptz NOT NULL DEFAULT now(),
+    ADD COLUMN updated_at timestamptz NOT NULL DEFAULT now(),
+    ADD CONSTRAINT fk_curated_source_rules_theme FOREIGN KEY (theme_id)
+        REFERENCES feature.curated_themes(theme_id) ON DELETE RESTRICT,
+    ADD CONSTRAINT fk_curated_source_rules_source FOREIGN KEY (source_id)
+        REFERENCES feature.curated_sources(source_id) ON DELETE RESTRICT,
+    ADD CONSTRAINT fk_curated_source_rules_owner_provider_dataset FOREIGN KEY (
+        owner_provider_dataset_id
+    ) REFERENCES provider_sync.provider_datasets(provider_dataset_id) ON DELETE RESTRICT,
+    ADD CONSTRAINT ck_curated_source_rules_region_scope CHECK (
+        jsonb_typeof(region_scope) = 'object'
+    ),
+    ADD CONSTRAINT ck_curated_source_rules_detail_selector CHECK (
+        detail_selector IS NULL OR jsonb_typeof(detail_selector) = 'object'
+    ),
+    ADD CONSTRAINT ck_curated_source_rules_action CHECK (
+        default_action IN ('candidate','ignore')
+    ),
+    ADD CONSTRAINT ck_curated_source_rules_revision_positive CHECK (row_revision >= 1),
+    ADD CONSTRAINT ck_curated_source_rules_metadata CHECK (jsonb_typeof(metadata) = 'object'),
+    ADD CONSTRAINT ck_curated_source_rules_owner_shape CHECK (
+        (owner_kind = 'operator' AND owner_provider_dataset_id IS NULL)
+        OR (owner_kind = 'provider_dataset' AND owner_provider_dataset_id IS NOT NULL)
+    );
+
+CREATE TABLE ops.domain_commands (
+    command_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    actor text NOT NULL,
+    operation text NOT NULL,
+    idempotency_key uuid NOT NULL,
+    fingerprint_version integer NOT NULL DEFAULT 1,
+    request_fingerprint text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT uq_domain_commands_actor_operation_key UNIQUE (
+        actor, operation, idempotency_key
+    ),
+    CONSTRAINT ck_domain_commands_actor CHECK (
+        btrim(actor) <> '' AND char_length(actor) <= 200
+    ),
+    CONSTRAINT ck_domain_commands_operation CHECK (
+        operation ~ '^[a-z][a-z0-9_.-]{0,127}$'
+    ),
+    CONSTRAINT ck_domain_commands_fingerprint_version CHECK (fingerprint_version = 1),
+    CONSTRAINT ck_domain_commands_request_fingerprint CHECK (
+        request_fingerprint ~ '^[0-9a-f]{64}$'
+    )
+);
+
+CREATE TABLE ops.domain_command_results (
+    command_id bigint PRIMARY KEY
+        REFERENCES ops.domain_commands(command_id) ON DELETE RESTRICT,
+    response_status integer NOT NULL CHECK (response_status BETWEEN 200 AND 599),
+    response_body jsonb NOT NULL CHECK (jsonb_typeof(response_body) = 'object'),
+    response_headers jsonb NOT NULL DEFAULT '{}'::jsonb
+        CHECK (jsonb_typeof(response_headers) = 'object'),
+    completed_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE ops.curation_rule_reconcile_operations (
+    operation_id uuid PRIMARY KEY DEFAULT x_extension.gen_random_uuid(),
+    rule_id uuid NOT NULL
+        REFERENCES feature.curated_source_rules(rule_id) ON DELETE RESTRICT,
+    operation_kind text NOT NULL CHECK (operation_kind IN ('create','patch','archive')),
+    before_rule_revision bigint CHECK (before_rule_revision >= 1),
+    after_rule_revision bigint NOT NULL CHECK (after_rule_revision >= 1),
+    before_rule_input_hash text CHECK (before_rule_input_hash ~ '^[0-9a-f]{64}$'),
+    after_rule_input_hash text NOT NULL CHECK (after_rule_input_hash ~ '^[0-9a-f]{64}$'),
+    command_id bigint REFERENCES ops.domain_commands(command_id) ON DELETE RESTRICT,
+    system_operation_key text,
+    actor text NOT NULL CHECK (actor = btrim(actor) AND actor <> ''),
+    scope_member_count bigint NOT NULL CHECK (scope_member_count >= 0),
+    scope_members_hash text NOT NULL CHECK (scope_members_hash ~ '^[0-9a-f]{64}$'),
+    created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+    CONSTRAINT ck_curation_rule_reconcile_operation_origin CHECK (
+        (command_id IS NOT NULL AND system_operation_key IS NULL)
+        OR (command_id IS NULL AND system_operation_key IS NOT NULL
+            AND system_operation_key = btrim(system_operation_key)
+            AND system_operation_key <> '')
+    ),
+    CONSTRAINT ck_curation_rule_reconcile_operation_revision_shape CHECK (
+        (operation_kind = 'create'
+            AND before_rule_revision IS NULL AND before_rule_input_hash IS NULL
+            AND after_rule_revision = 1)
+        OR (operation_kind IN ('patch','archive')
+            AND before_rule_revision IS NOT NULL AND before_rule_input_hash IS NOT NULL
+            AND after_rule_revision > before_rule_revision)
+    )
+);
+CREATE UNIQUE INDEX uq_curation_rule_reconcile_command
+    ON ops.curation_rule_reconcile_operations(rule_id, command_id)
+    WHERE command_id IS NOT NULL;
+CREATE UNIQUE INDEX uq_curation_rule_reconcile_system_operation
+    ON ops.curation_rule_reconcile_operations(rule_id, system_operation_key)
+    WHERE system_operation_key IS NOT NULL;
+
+CREATE TABLE ops.curation_rule_reconcile_scope_members (
+    operation_id uuid NOT NULL
+        REFERENCES ops.curation_rule_reconcile_operations(operation_id) ON DELETE RESTRICT,
+    member_kind text NOT NULL CHECK (member_kind IN ('source_entity','feature')),
+    member_key text NOT NULL CHECK (member_key = btrim(member_key) AND member_key <> ''),
+    before_identity_hash text CHECK (before_identity_hash ~ '^[0-9a-f]{64}$'),
+    after_identity_hash text CHECK (after_identity_hash ~ '^[0-9a-f]{64}$'),
+    PRIMARY KEY (operation_id, member_kind, member_key),
+    CONSTRAINT ck_curation_rule_reconcile_scope_identity CHECK (
+        before_identity_hash IS NOT NULL OR after_identity_hash IS NOT NULL
+    )
+);
+
+CREATE TABLE ops.curation_cutover_identity_mappings (
+    legacy_curated_feature_id uuid PRIMARY KEY,
+    collection_id uuid NOT NULL
+        REFERENCES feature.curation_collections(collection_id) ON DELETE RESTRICT,
+    curation_item_id uuid NOT NULL UNIQUE
+        REFERENCES feature.curation_items(curation_item_id) ON DELETE RESTRICT,
+    mapping_kind text NOT NULL CHECK (
+        mapping_kind IN ('legacy_projection','official_membership','manual_membership')
+    ),
+    source_row_hash text NOT NULL CHECK (source_row_hash ~ '^[0-9a-f]{64}$'),
+    created_at timestamptz NOT NULL DEFAULT clock_timestamp()
+);
+
+CREATE TABLE feature.theme_candidate_generations (
+    generation_id uuid PRIMARY KEY DEFAULT x_extension.gen_random_uuid(),
+    rule_id uuid NOT NULL
+        REFERENCES feature.curated_source_rules(rule_id) ON DELETE RESTRICT,
+    rule_row_revision bigint NOT NULL CHECK (rule_row_revision >= 1),
+    generation_kind text NOT NULL CHECK (
+        generation_kind IN (
+            'provider_full_snapshot','scoped_reconcile','rule_reconcile','legacy_backfill'
+        )
+    ),
+    source_job_id uuid REFERENCES ops.import_jobs(job_id) ON DELETE RESTRICT,
+    reconcile_operation_id uuid
+        REFERENCES ops.curation_rule_reconcile_operations(operation_id) ON DELETE RESTRICT,
+    command_id bigint REFERENCES ops.domain_commands(command_id) ON DELETE RESTRICT,
+    generation_key text NOT NULL UNIQUE
+        CHECK (generation_key = btrim(generation_key) AND generation_key <> ''),
+    rule_input_hash text NOT NULL CHECK (rule_input_hash ~ '^[0-9a-f]{64}$'),
+    rule_input jsonb NOT NULL CHECK (jsonb_typeof(rule_input) = 'object'),
+    generation_input_set_hash text NOT NULL
+        CHECK (generation_input_set_hash ~ '^[0-9a-f]{64}$'),
+    observed_candidate_count bigint NOT NULL CHECK (observed_candidate_count >= 0),
+    eligibility_removed_candidate_count bigint NOT NULL
+        CHECK (eligibility_removed_candidate_count >= 0),
+    completed_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+    CONSTRAINT ck_theme_candidate_generations_origin CHECK (
+        (generation_kind = 'provider_full_snapshot'
+            AND source_job_id IS NOT NULL
+            AND reconcile_operation_id IS NULL AND command_id IS NULL)
+        OR (generation_kind IN ('scoped_reconcile','rule_reconcile')
+            AND source_job_id IS NULL AND reconcile_operation_id IS NOT NULL)
+        OR (generation_kind = 'legacy_backfill'
+            AND source_job_id IS NULL AND reconcile_operation_id IS NULL AND command_id IS NULL)
+    )
+);
+CREATE INDEX idx_theme_candidate_generations_rule_completed
+    ON feature.theme_candidate_generations(rule_id, completed_at DESC, generation_id DESC);
+CREATE UNIQUE INDEX uq_theme_candidate_generation_provider_job
+    ON feature.theme_candidate_generations(rule_id, source_job_id)
+    WHERE generation_kind = 'provider_full_snapshot';
+CREATE UNIQUE INDEX uq_theme_candidate_generation_reconcile_operation
+    ON feature.theme_candidate_generations(rule_id, reconcile_operation_id)
+    WHERE generation_kind IN ('scoped_reconcile','rule_reconcile');
+
+CREATE TABLE feature.theme_candidate_generation_observations (
+    generation_id uuid NOT NULL
+        REFERENCES feature.theme_candidate_generations(generation_id) ON DELETE RESTRICT,
+    candidate_id uuid NOT NULL,
+    source_entity_key text NOT NULL,
+    feature_id uuid NOT NULL,
+    source_record_key text NOT NULL,
+    candidate_input_hash text NOT NULL CHECK (candidate_input_hash ~ '^[0-9a-f]{64}$'),
+    observed_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+    PRIMARY KEY (generation_id, candidate_id),
+    CONSTRAINT uq_theme_candidate_generation_observation_identity UNIQUE (
+        generation_id, source_entity_key, feature_id
+    )
+);
+CREATE INDEX idx_theme_candidate_generation_observations_candidate
+    ON feature.theme_candidate_generation_observations(candidate_id, generation_id DESC);
+
+CREATE TABLE feature.theme_feature_candidates (
+    candidate_id uuid PRIMARY KEY DEFAULT x_extension.gen_random_uuid(),
+    rule_id uuid NOT NULL
+        REFERENCES feature.curated_source_rules(rule_id) ON DELETE RESTRICT,
+    source_entity_key text NOT NULL
+        REFERENCES provider_sync.source_entities(source_entity_key) ON DELETE RESTRICT,
+    feature_id uuid NOT NULL
+        REFERENCES feature.features(feature_id) ON DELETE RESTRICT,
+    source_record_key text NOT NULL,
+    rule_row_revision bigint NOT NULL CHECK (rule_row_revision >= 1),
+    rule_input_hash text NOT NULL CHECK (rule_input_hash ~ '^[0-9a-f]{64}$'),
+    source_record_hash text NOT NULL CHECK (source_record_hash ~ '^[0-9a-f]{1,64}$'),
+    candidate_input_hash text NOT NULL CHECK (candidate_input_hash ~ '^[0-9a-f]{64}$'),
+    review_state text NOT NULL DEFAULT 'open'
+        CHECK (review_state IN ('open','promoted','rejected')),
+    eligibility_present boolean NOT NULL DEFAULT true,
+    disposition text NOT NULL DEFAULT 'active'
+        CHECK (disposition IN ('active','merged')),
+    merged_into_candidate_id uuid
+        REFERENCES feature.theme_feature_candidates(candidate_id) ON DELETE RESTRICT,
+    retired_at timestamptz,
+    rank_score numeric(10,4) NOT NULL DEFAULT 0,
+    proposal_title text,
+    proposal_summary text,
+    match_evidence jsonb NOT NULL DEFAULT '{}'::jsonb
+        CHECK (jsonb_typeof(match_evidence) = 'object'),
+    row_revision bigint NOT NULL DEFAULT 1 CHECK (row_revision >= 1),
+    created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+    updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+    CONSTRAINT uq_theme_feature_candidates_rule_entity_feature UNIQUE (
+        rule_id, source_entity_key, feature_id
+    ),
+    CONSTRAINT ck_theme_feature_candidates_disposition CHECK (
+        (disposition = 'active' AND merged_into_candidate_id IS NULL AND retired_at IS NULL)
+        OR (disposition = 'merged' AND merged_into_candidate_id IS NOT NULL AND retired_at IS NOT NULL)
+    ),
+    CONSTRAINT fk_theme_feature_candidates_source_record FOREIGN KEY (
+        source_entity_key, source_record_key
+    ) REFERENCES provider_sync.source_records(source_entity_key, source_record_key)
+        ON DELETE RESTRICT
+);
+CREATE INDEX idx_theme_feature_candidates_rule_open_keyset
+    ON feature.theme_feature_candidates(rule_id, updated_at DESC, candidate_id DESC)
+    WHERE disposition = 'active' AND review_state = 'open' AND eligibility_present;
+CREATE INDEX idx_theme_feature_candidates_open_keyset
+    ON feature.theme_feature_candidates(updated_at DESC, candidate_id DESC)
+    WHERE disposition = 'active' AND review_state = 'open' AND eligibility_present;
+CREATE INDEX idx_theme_feature_candidates_state_keyset
+    ON feature.theme_feature_candidates(
+        review_state, eligibility_present, updated_at DESC, candidate_id DESC
+    ) WHERE disposition = 'active';
+CREATE INDEX idx_theme_feature_candidates_feature_state
+    ON feature.theme_feature_candidates(
+        feature_id, review_state, eligibility_present, candidate_id
+    ) WHERE disposition = 'active';
+CREATE INDEX idx_theme_feature_candidates_source_entity
+    ON feature.theme_feature_candidates(source_entity_key, candidate_id);
+
+CREATE TABLE feature.theme_feature_candidate_transitions (
+    transition_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    candidate_id uuid NOT NULL,
+    from_feature_id uuid,
+    to_feature_id uuid,
+    rule_id uuid NOT NULL,
+    source_entity_key text NOT NULL,
+    from_review_state text CHECK (from_review_state IN ('open','promoted','rejected')),
+    to_review_state text NOT NULL CHECK (to_review_state IN ('open','promoted','rejected')),
+    from_eligibility_present boolean,
+    to_eligibility_present boolean NOT NULL,
+    from_disposition text CHECK (from_disposition IN ('active','merged')),
+    to_disposition text NOT NULL CHECK (to_disposition IN ('active','merged')),
+    winner_candidate_id uuid,
+    transition_kind text NOT NULL CHECK (
+        transition_kind IN (
+            'eligibility_materialize','eligibility_refresh','eligibility_restore',
+            'eligibility_remove','admin_promote','admin_reject','merge_retarget',
+            'merge_collapse','legacy_backfill'
+        )
+    ),
+    candidate_row_revision bigint NOT NULL CHECK (candidate_row_revision >= 1),
+    rule_row_revision bigint NOT NULL CHECK (rule_row_revision >= 1),
+    rule_input_hash text NOT NULL CHECK (rule_input_hash ~ '^[0-9a-f]{64}$'),
+    candidate_input_hash text NOT NULL CHECK (candidate_input_hash ~ '^[0-9a-f]{64}$'),
+    generation_id uuid REFERENCES feature.theme_candidate_generations(generation_id)
+        ON DELETE RESTRICT,
+    provider_dataset_id bigint,
+    source_record_key text,
+    source_record_hash text,
+    collection_id uuid,
+    curation_item_id uuid,
+    command_id bigint REFERENCES ops.domain_commands(command_id) ON DELETE RESTRICT,
+    actor text NOT NULL CHECK (actor = btrim(actor) AND actor <> ''),
+    reason_code text NOT NULL CHECK (reason_code = btrim(reason_code) AND reason_code <> ''),
+    causation_ref jsonb NOT NULL DEFAULT '{}'::jsonb
+        CHECK (jsonb_typeof(causation_ref) = 'object'),
+    invoker_role text NOT NULL,
+    candidate_procedure_definer text NOT NULL,
+    audit_writer_definer text NOT NULL,
+    occurred_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+    CONSTRAINT uq_candidate_transition_candidate_revision UNIQUE (
+        candidate_id, candidate_row_revision
+    )
+);
+CREATE INDEX idx_candidate_transitions_candidate_keyset
+    ON feature.theme_feature_candidate_transitions(candidate_id, transition_id DESC);
+CREATE INDEX idx_candidate_transitions_command
+    ON feature.theme_feature_candidate_transitions(command_id)
+    WHERE command_id IS NOT NULL;
+
+CREATE FUNCTION feature.reject_tvn40_append_only_mutation()
+RETURNS trigger LANGUAGE plpgsql SET search_path = pg_catalog AS $$
+BEGIN
+    RAISE EXCEPTION '% is append-only', TG_TABLE_SCHEMA || '.' || TG_TABLE_NAME
+        USING ERRCODE = '42501';
+END;
+$$;
+CREATE FUNCTION feature.reject_tvn40_truncate()
+RETURNS trigger LANGUAGE plpgsql SET search_path = pg_catalog AS $$
+BEGIN
+    RAISE EXCEPTION '% cannot be truncated', TG_TABLE_SCHEMA || '.' || TG_TABLE_NAME
+        USING ERRCODE = '42501';
+END;
+$$;
+
+CREATE TRIGGER trg_curation_rule_reconcile_operations_immutable
+    BEFORE UPDATE OR DELETE ON ops.curation_rule_reconcile_operations
+    FOR EACH ROW EXECUTE FUNCTION feature.reject_tvn40_append_only_mutation();
+CREATE TRIGGER trg_curation_rule_reconcile_scope_members_immutable
+    BEFORE UPDATE OR DELETE ON ops.curation_rule_reconcile_scope_members
+    FOR EACH ROW EXECUTE FUNCTION feature.reject_tvn40_append_only_mutation();
+CREATE TRIGGER trg_curation_cutover_identity_mappings_immutable
+    BEFORE UPDATE OR DELETE ON ops.curation_cutover_identity_mappings
+    FOR EACH ROW EXECUTE FUNCTION feature.reject_tvn40_append_only_mutation();
+CREATE TRIGGER trg_theme_candidate_generations_immutable
+    BEFORE UPDATE OR DELETE ON feature.theme_candidate_generations
+    FOR EACH ROW EXECUTE FUNCTION feature.reject_tvn40_append_only_mutation();
+CREATE TRIGGER trg_theme_candidate_generation_observations_immutable
+    BEFORE UPDATE OR DELETE ON feature.theme_candidate_generation_observations
+    FOR EACH ROW EXECUTE FUNCTION feature.reject_tvn40_append_only_mutation();
+CREATE TRIGGER trg_theme_feature_candidate_transitions_immutable
+    BEFORE UPDATE OR DELETE ON feature.theme_feature_candidate_transitions
+    FOR EACH ROW EXECUTE FUNCTION feature.reject_tvn40_append_only_mutation();

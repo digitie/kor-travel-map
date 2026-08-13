@@ -87,11 +87,12 @@
     "user": {
       "counts": {
         "added": 4,
-        "removed": 13,
+        "removed": 15,
         "renamed": 2,
         "enum_changes": 8,
         "status_changes": 1,
         "error_changes": 0,
+        "schema_changes": 0,
         "deferred": 2
       },
       "added": [
@@ -129,6 +130,16 @@
         {
           "operation": "GET /v1/curated-features/{curated_feature_id}",
           "detail": "legacy curated_features overlay 공개 read",
+          "basis": "T-VN-40C"
+        },
+        {
+          "operation": "GET /v1/curated-themes",
+          "detail": "legacy source-rule candidate catalog 공개 read. retained catalog는 admin typed surface만 사용한다.",
+          "basis": "T-VN-40C"
+        },
+        {
+          "operation": "GET /v1/curated-sources",
+          "detail": "legacy source-rule candidate catalog 공개 read. canonical 공개 표면은 collections/items다.",
           "basis": "T-VN-40C"
         },
         {
@@ -251,6 +262,7 @@
         }
       ],
       "error_changes": [],
+      "schema_changes": [],
       "deferred": [
         {
           "topic": "kind-discriminated typed detail의 subtype 분해 반영(응답 필드 재배치)",
@@ -268,12 +280,13 @@
     },
     "service": {
       "counts": {
-        "added": 1,
+        "added": 3,
         "removed": 0,
         "renamed": 0,
         "enum_changes": 2,
         "status_changes": 0,
         "error_changes": 0,
+        "schema_changes": 0,
         "deferred": 1
       },
       "added": [
@@ -282,6 +295,18 @@
           "target_operation": "GET /v1/service/curation-items/{curation_item_id}/detail-snapshot",
           "detail": "canonical public membership과 trusted accepted link를 직접 조립하는 PinVi 전용 snapshot. exact scoped ServiceToken과 strong ETag/304를 요구한다.",
           "basis": "ADR-092"
+        },
+        {
+          "kind": "operation",
+          "target_operation": "GET /v1/service/curation-collections/{collection_id}/detail-snapshot",
+          "detail": "PinVi authoritative collection discovery. signed keyset, collection ETag, item-set hash/count, complete marker와 304/409 restart를 제공한다.",
+          "basis": "ADR-092"
+        },
+        {
+          "kind": "operation",
+          "target_operation": "GET /v1/service/curation-cutover/identity-mappings",
+          "detail": "maintenance fence 중 legacy curated identity→canonical collection/item UUID mapping의 immutable keyset/checksum export다.",
+          "basis": "T-VN-40C"
         }
       ],
       "removed": [],
@@ -300,6 +325,7 @@
       ],
       "status_changes": [],
       "error_changes": [],
+      "schema_changes": [],
       "deferred": [
         {
           "topic": "cache-target/refresh-request 계약",
@@ -311,12 +337,13 @@
     },
     "admin": {
       "counts": {
-        "added": 8,
-        "removed": 10,
+        "added": 16,
+        "removed": 12,
         "renamed": 0,
         "enum_changes": 4,
-        "status_changes": 0,
-        "error_changes": 0,
+        "status_changes": 6,
+        "error_changes": 7,
+        "schema_changes": 5,
         "deferred": 2
       },
       "added": [
@@ -364,6 +391,54 @@
           "kind": "operation",
           "target_operation": "POST /v1/admin/theme-feature-candidates/{candidate_id}/reject",
           "detail": "candidate CAS + non-empty reason의 typed rejection",
+          "basis": "ADR-092"
+        },
+        {
+          "kind": "operation",
+          "target_operation": "GET /v1/admin/curated-themes/{theme_id}",
+          "detail": "theme raw revision ETag를 반환하는 단건 read",
+          "basis": "ADR-092"
+        },
+        {
+          "kind": "operation",
+          "target_operation": "DELETE /v1/admin/curated-themes/{theme_id}",
+          "detail": "If-Match와 Idempotency-Key를 요구하는 typed archive command",
+          "basis": "ADR-092"
+        },
+        {
+          "kind": "operation",
+          "target_operation": "GET /v1/admin/curated-sources/{source_id}",
+          "detail": "source operator revision과 observation revision을 분리해 반환하는 단건 read",
+          "basis": "ADR-092"
+        },
+        {
+          "kind": "operation",
+          "target_operation": "DELETE /v1/admin/curated-sources/{source_id}",
+          "detail": "If-Match와 Idempotency-Key를 요구하는 typed archive command",
+          "basis": "ADR-092"
+        },
+        {
+          "kind": "operation",
+          "target_operation": "GET /v1/admin/curated-source-rules/{rule_id}",
+          "detail": "rule raw revision ETag와 canonical rule-input hash를 반환하는 단건 read",
+          "basis": "ADR-092"
+        },
+        {
+          "kind": "operation",
+          "target_operation": "DELETE /v1/admin/curated-source-rules/{rule_id}",
+          "detail": "same-transaction rule reconcile을 수행하는 typed archive command",
+          "basis": "ADR-092"
+        },
+        {
+          "kind": "operation",
+          "target_operation": "POST /v1/admin/curations/imports/preview",
+          "detail": "normalized rows, content hash, touched revision vector와 plan ETag를 고정하는 immutable preview",
+          "basis": "ADR-092"
+        },
+        {
+          "kind": "operation",
+          "target_operation": "POST /v1/admin/curations/import-plans/{import_plan_id}/commit",
+          "detail": "stored plan만 소비하며 If-Match/Idempotency-Key로 exact terminal replay하는 commit",
           "basis": "ADR-092"
         }
       ],
@@ -417,6 +492,16 @@
           "operation": "PATCH /v1/admin/issues/{issue_id}",
           "detail": "request field prevent_provider_reactivation — lifecycle 축 전용 제어라 주소/좌표 override 경로에서는 읽는 쪽이 없었다 (재적재 가드는 field_path='lifecycle_state' 한정). 재적재 보호 근거는 provider field patch의 active override masking이다.",
           "basis": "T-VN-36"
+        },
+        {
+          "operation": "POST /v1/admin/curated-source-rules/{rule_id}/apply",
+          "detail": "caller-driven rule apply. authoritative provider terminal receipt가 server-side generation을 호출한다.",
+          "basis": "T-VN-40C"
+        },
+        {
+          "operation": "POST /v1/admin/curations/import",
+          "detail": "같은 파일을 preview/commit에서 재해석하는 legacy dry_run flow. immutable import plan 2단계 계약으로 대체한다.",
+          "basis": "T-VN-40C"
         }
       ],
       "renamed": [],
@@ -442,8 +527,30 @@
           "basis": "ADR-068"
         }
       ],
-      "status_changes": [],
-      "error_changes": [],
+      "status_changes": [
+        {"operation": "POST /v1/admin/curated-themes", "detail": "create success 200→201 + strong ETag", "basis": "ADR-092"},
+        {"operation": "POST /v1/admin/curated-sources", "detail": "create success 200→201 + strong ETag", "basis": "ADR-092"},
+        {"operation": "POST /v1/admin/curated-source-rules", "detail": "create success 200→201 + strong ETag", "basis": "ADR-092"},
+        {"operation": "POST /v1/admin/curations", "detail": "collection create success 200→201 + collection ETag", "basis": "ADR-092"},
+        {"operation": "POST /v1/admin/curations/{collection_id}/items", "detail": "item create success 200→201 + item ETag", "basis": "ADR-092"},
+        {"operation": "GET /v1/admin/curations/{collection_id}", "detail": "representation ETag에 대한 If-None-Match 304", "basis": "ADR-092"}
+      ],
+      "error_changes": [
+        {"operation": "PATCH /v1/admin/curated-themes/{theme_id}", "detail": "If-Match missing=428, stale=412", "basis": "ADR-092"},
+        {"operation": "PATCH /v1/admin/curated-sources/{source_id}", "detail": "If-Match missing=428, stale=412", "basis": "ADR-092"},
+        {"operation": "PATCH /v1/admin/curated-source-rules/{rule_id}", "detail": "If-Match missing=428, stale=412; semantic patch는 same-transaction reconcile", "basis": "ADR-092"},
+        {"operation": "PATCH /v1/admin/curations/{collection_id}", "detail": "collection raw If-Match missing=428, stale=412", "basis": "ADR-092"},
+        {"operation": "DELETE /v1/admin/curations/{collection_id}", "detail": "collection raw If-Match missing=428, stale=412", "basis": "ADR-092"},
+        {"operation": "PATCH /v1/admin/curations/{collection_id}/items/{curation_item_id}", "detail": "item If-Match missing=428, stale=412", "basis": "ADR-092"},
+        {"operation": "DELETE /v1/admin/curations/{collection_id}/items/{curation_item_id}", "detail": "item If-Match missing=428, stale=412", "basis": "ADR-092"}
+      ],
+      "schema_changes": [
+        {"operation": "GET /v1/admin/curated-themes", "detail": "row_revision decimal string, archived_at, immutable owner_kind/provider_dataset_id", "basis": "ADR-092"},
+        {"operation": "GET /v1/admin/curated-sources", "detail": "operator row_revision과 provider observation_revision 분리, archived_at", "basis": "ADR-092"},
+        {"operation": "GET /v1/admin/curated-source-rules", "detail": "row_revision decimal string, archived_at, owner provenance, candidate|ignore action", "basis": "ADR-092"},
+        {"operation": "GET /v1/admin/curations", "detail": "collection row_revision와 raw collection_etag", "basis": "ADR-092"},
+        {"operation": "GET /v1/admin/curations/{collection_id}", "detail": "collection representation_etag + collection_etag, item row_revision/item_etag", "basis": "ADR-092"}
+      ],
       "deferred": [
         {
           "topic": "POST /v1/admin/features/{feature_id}/deactivate의 3축 전이 재표현",

@@ -2,6 +2,22 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-13 — T-VN-40: vNext machine contract 최종형 재동결
+
+적대 리뷰가 확인한 machine 정본 drift를 닫았다. `target-schema-v1.sql`은 retained catalog와
+canonical collection/item revision을 최종형으로 선언하고, companion SQL은 immutable reconcile
+operation/scope, cross-DB cutover mapping, generation/observation, 두 축 candidate와 transition
+audit를 완전한 catalog로 고정한다. `recovery-preflight-v1.json`은 pre-backfill overlay 비교와
+post-drop canonical/PinVi checksum을 분리했고, `openapi-diff-v1.json`은 public legacy 제거,
+service item/collection/mapping snapshot, admin catalog/import/candidate ETag·412·428 표면을
+closed inventory로 재정의했다.
+
+T-VN-33 prefix와 T-VN-40 suffix가 같은 FK를 서로 다른 의미로 쓰는 점도 테스트에서 분리했다.
+prefix 직후 catalog payload를 보존해 현재 Alembic head와 비교하고, suffix 최종 catalog는 별도
+7축 fingerprint로 검증한다. frozen artifact 10개와 executable target/violation/head-equivalence
+통합 gate 11개가 통과했다. active static-zero와 removal 증거 tombstone, pre-reset text Feature
+identity와 post-live Alembic-000 UUID target의 경계도 정본에 명시했다.
+
 ## 2026-08-13 — T-VN-40: DB trust-boundary 첫 구현 체크포인트
 
 두 적대 리뷰가 설계와 현 writer 전체를 대조한 결과를 반영해 candidate를
