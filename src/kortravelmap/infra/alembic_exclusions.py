@@ -23,6 +23,22 @@ UNMAPPED_APP_TABLES = frozenset(
         # 남기는 감사 전용 표다 — 애플리케이션 코드가 읽지 않으므로 ORM에
         # 매핑하지 않는다. 구조 계약은 0103 통합 테스트가 가진다.
         ("ops", "tvn36_legacy_freeze_preflight_manifest"),
+        # T-VN-40 receipt/effect 관계는 의도적으로 raw SQL 전용이다. 애플리케이션
+        # entity가 아니라 immutable command evidence이므로 ORM에 매핑하지 않고,
+        # exact column/constraint/index는
+        # ``test_alembic_unmapped_tables_keep_structural_contract``가 고정한다.
+        ("feature", "curation_import_plans"),
+        ("feature", "curation_import_plan_rows"),
+        ("feature", "curation_import_plan_revisions"),
+        ("ops", "curation_catalog_command_effects"),
+        ("ops", "curation_concierge_legacy_owner_manifest"),
+        ("ops", "curation_import_collection_effects"),
+        ("ops", "curation_import_collection_touches"),
+        ("ops", "curation_import_plan_claims"),
+        ("ops", "curation_import_plan_commits"),
+        ("ops", "curation_provider_root_receipts"),
+        ("ops", "curation_provider_snapshot_receipts"),
+        ("ops", "curation_source_observation_receipts"),
     }
 )
 

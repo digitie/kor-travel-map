@@ -123,6 +123,34 @@ async def _seed_provider_dataset(
     )
 
 
+async def _seed_curated_source(
+    session: AsyncSession,
+    *,
+    provider_dataset_id: int,
+    source_name: str,
+) -> None:
+    """T-VN-40 import가 요구하는 retained source catalog를 준비한다."""
+
+    await session.execute(
+        text(
+            """
+            INSERT INTO feature.curated_sources (
+                provider_dataset_id, source_name, source_kind,
+                update_cycle, provider_status, metadata
+            ) VALUES (
+                :provider_dataset_id, :source_name, 'manual',
+                'unknown', 'manual_only', '{}'::jsonb
+            )
+            ON CONFLICT (provider_dataset_id) DO NOTHING
+            """
+        ),
+        {
+            "provider_dataset_id": provider_dataset_id,
+            "source_name": source_name,
+        },
+    )
+
+
 async def _seed_pair(engine: AsyncEngine) -> str:
     """master(좌표 O) + loser(좌표 X) + source_links(충돌 SR 포함) + 큐 1행 적재.
 
@@ -986,6 +1014,11 @@ async def test_duplicate_merge_appends_survivor_owned_current_import_row(
         provider_dataset_id = await _seed_provider_dataset(
             session, provider=provider, dataset_key=dataset_key
         )
+        await _seed_curated_source(
+            session,
+            provider_dataset_id=provider_dataset_id,
+            source_name="병합 테스트 출처",
+        )
     common = {
         "collection_key": "merge-test:2026",
         "theme_slug": "merge-test",
@@ -1149,6 +1182,11 @@ async def test_duplicate_merge_reconciles_active_and_historical_components(
             session,
             provider="merge-test-provider",
             dataset_key="duplicate-multi-component",
+        )
+        await _seed_curated_source(
+            session,
+            provider_dataset_id=provider_dataset_id,
+            source_name="병합 테스트 출처",
         )
     common = {
         "collection_key": "merge-test:2026",
