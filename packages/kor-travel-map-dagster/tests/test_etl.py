@@ -14,6 +14,7 @@ from kortravelmap.infra.feature_repo import FeatureLoadResult
 from kortravelmap.dagster.etl import (
     AddressFindingObservationReceipt,
     DagsterFeatureLoadResult,
+    load_feature_bundle_batches_for_dagster,
     load_feature_bundles_for_dagster,
 )
 from kortravelmap.dagster.validation import (
@@ -69,8 +70,9 @@ class _Client:
         self.chunks: list[tuple[str, ...]] = []
 
     async def load_feature_bundles(
-        self, bundles: list[_Bundle]
+        self, bundles: list[_Bundle], **kwargs: object
     ) -> FeatureLoadResult:
+        del kwargs
         self.chunks.append(tuple(bundle.feature.feature_id for bundle in bundles))
         return FeatureLoadResult(
             bundles_total=len(bundles),
@@ -197,6 +199,70 @@ async def test_load_feature_bundles_for_dagster_chunks_db_load(
     assert result.load.bundles_total == 5
     assert result.load.features_inserted == 5
     assert context.metadata[-1]["bundles_total"] == 5
+
+
+async def test_streaming_feature_batches_keep_one_atomic_loader_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = _Context()
+    client = _Client()
+    yielded: list[int] = []
+    consumed: list[tuple[str, ...]] = []
+
+    async def _batches() -> Any:
+        for start in (0, 2, 4):
+            batch = [_bundle(f"feature-{index}") for index in range(start, min(5, start + 2))]
+            yielded.append(len(batch))
+            yield batch
+
+    monkeypatch.setattr(
+        "kortravelmap.dagster.etl.validate_feature_bundles_address",
+        lambda items: FeatureAddressValidationSummary(
+            total=len(items),
+            issue_count=0,
+            error_count=0,
+            warning_count=0,
+            issues=(),
+        ),
+    )
+    monkeypatch.setattr(
+        "kortravelmap.dagster.etl.FEATURE_ID_METADATA_LIMIT",
+        2,
+    )
+
+    async def _load_all(batches: Any) -> FeatureLoadResult:
+        result = FeatureLoadResult()
+        async for batch in batches:
+            consumed.append(tuple(item.feature.feature_id for item in batch))
+            result = result.merge(
+                FeatureLoadResult(
+                    bundles_total=len(batch),
+                    features_inserted=len(batch),
+                )
+            )
+        return result
+
+    result = await load_feature_bundle_batches_for_dagster(
+        context=context,  # type: ignore[arg-type]
+        client=client,  # type: ignore[arg-type]
+        batches=_batches(),  # type: ignore[arg-type]
+        provider="demo",
+        dataset_key="places",
+        strict_address="off",
+        load_all=_load_all,  # type: ignore[arg-type]
+    )
+
+    assert yielded == [2, 2, 1]
+    assert consumed == [
+        ("feature-0", "feature-1"),
+        ("feature-2", "feature-3"),
+        ("feature-4",),
+    ]
+    assert result.load.bundles_total == 5
+    assert result.feature_ids == ("feature-0", "feature-1")
+    assert result.feature_ids_complete is False
+    assert context.metadata[-1]["feature_ids_truncated"] is True
+    assert result.observation_receipt.authoritative_snapshot_complete is True
 
 
 async def test_nonempty_complete_snapshot_receipt_permits_stale_close(

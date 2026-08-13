@@ -5,7 +5,11 @@ from __future__ import annotations
 from .assets import FEATURE_LOAD_ASSETS
 from .batch_dag import BATCH_DAG_JOBS
 from .definitions import defs
-from .etl import DagsterFeatureLoadResult, load_feature_bundles_for_dagster
+from .etl import (
+    DagsterFeatureLoadResult,
+    load_feature_bundle_batches_for_dagster,
+    load_feature_bundles_for_dagster,
+)
 from .feature_operation_sensors import FEATURE_OPERATION_TRACKING_SENSORS
 from .kma_weather import KMA_WEATHER_ASSETS
 from .maintenance import (
@@ -54,6 +58,7 @@ __all__ = [
     "create_s3_client_from_settings",
     "defs",
     "ensure_feature_address_valid",
+    "load_feature_bundle_batches_for_dagster",
     "load_feature_bundles_for_dagster",
     "kor_travel_map_client_resource",
     "offline_upload_store_resource",

@@ -17,7 +17,14 @@ from kortravelmap.dagster.validation import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Mapping, Sequence
+    from collections.abc import (
+        AsyncIterable,
+        AsyncIterator,
+        Awaitable,
+        Callable,
+        Mapping,
+        Sequence,
+    )
 
     from kortravelmap.client import AsyncKorTravelMapClient
     from kortravelmap.dto import FeatureBundle
@@ -28,6 +35,9 @@ if TYPE_CHECKING:
 
 FEATURE_LOAD_CHUNK_SIZE: Final[int] = 1000
 """Dagster asset이 FeatureBundle을 DB에 적재할 때 사용하는 기본 chunk 크기."""
+
+FEATURE_ID_METADATA_LIMIT: Final[int] = 1000
+"""대용량 stream에서 Dagster metadata에 남길 Feature id 표본 상한."""
 
 
 @dataclass(frozen=True)
@@ -105,6 +115,7 @@ class DagsterFeatureLoadResult:
     load: FeatureLoadResult
     address_validation: FeatureAddressValidationSummary
     observation_receipt: AddressFindingObservationReceipt
+    feature_ids_complete: bool = True
 
     def as_metadata(self) -> dict[str, object]:
         metadata: dict[str, object] = {
@@ -120,6 +131,8 @@ class DagsterFeatureLoadResult:
         }
         metadata.update(self.address_validation.as_metadata())
         metadata.update(self.observation_receipt.as_metadata())
+        if not self.feature_ids_complete:
+            metadata["feature_ids_truncated"] = True
         return metadata
 
     def merge(
@@ -138,6 +151,9 @@ class DagsterFeatureLoadResult:
             ),
             observation_receipt=self.observation_receipt.merge(
                 other.observation_receipt
+            ),
+            feature_ids_complete=(
+                self.feature_ids_complete and other.feature_ids_complete
             ),
         )
 
@@ -402,6 +418,153 @@ async def load_feature_bundles_for_dagster(
         ),
     )
     metadata.update(result.observation_receipt.as_metadata())
+    _add_output_metadata(context, metadata)
+    return result
+
+
+async def load_feature_bundle_batches_for_dagster(
+    *,
+    context: AssetExecutionContext,
+    client: AsyncKorTravelMapClient,
+    batches: AsyncIterable[Sequence[FeatureBundle]],
+    provider: str,
+    dataset_key: str,
+    strict_address: bool | str,
+    load_all: Callable[
+        [AsyncIterable[Sequence[FeatureBundle]]], Awaitable[FeatureLoadResult]
+    ],
+) -> DagsterFeatureLoadResult:
+    """대용량 provider batch를 materialize하지 않고 한 DB transaction으로 적재한다.
+
+    변환된 bundle은 현재 batch만 보유한다. validation summary와 durable finding,
+    경량 feature id만 누적하고, ``load_all``은 모든 batch를 동일 session/transaction에
+    흘려 넣어 authoritative curation seal과 같은 DB image를 보게 한다.
+    """
+
+    mode = _normalize_address_validation_mode(strict_address)
+    validation = FeatureAddressValidationSummary(
+        total=0,
+        issue_count=0,
+        error_count=0,
+        warning_count=0,
+        issues=(),
+    )
+    feature_ids: list[str] = []
+    loaded_feature_count = 0
+    dropped_feature_ids: list[str] = []
+    pending_findings: list[AddressValidationFinding] = []
+    strict_failure = False
+
+    async def _validated_batches() -> AsyncIterator[Sequence[FeatureBundle]]:
+        nonlocal loaded_feature_count, strict_failure, validation
+        async for raw_batch in batches:
+            batch = list(raw_batch)
+            batch_validation = validate_feature_bundles_address(batch)
+            validation = _merge_validation_summaries(validation, batch_validation)
+            source_identities = _source_identities(batch)
+            if mode == "strict" and batch_validation.has_errors:
+                strict_failure = True
+                pending_findings.extend(
+                    _address_validation_findings(
+                        batch_validation,
+                        provider=provider,
+                        dataset_key=dataset_key,
+                        loaded_feature_ids=frozenset(),
+                        dropped_feature_ids=frozenset(
+                            issue.feature_id
+                            for issue in batch_validation.issues
+                            if issue.severity == "error"
+                        ),
+                        source_identities=source_identities,
+                    )
+                )
+                raise Failure(
+                    description="Feature 주소/좌표 검증 실패: "
+                    + ", ".join(
+                        issue.code
+                        for issue in batch_validation.issues
+                        if issue.severity == "error"
+                    ),
+                    metadata=validation.as_metadata(),
+                )
+
+            dropped_ids: set[str] = set()
+            if mode == "drop" and batch_validation.has_blocking_errors:
+                dropped_ids = {
+                    issue.feature_id for issue in batch_validation.blocking_issues
+                }
+                dropped_feature_ids.extend(sorted(dropped_ids))
+                batch = [
+                    bundle
+                    for bundle in batch
+                    if bundle.feature.feature_id not in dropped_ids
+                ]
+            loaded_ids = {bundle.feature.feature_id for bundle in batch}
+            loaded_feature_count += len(batch)
+            remaining_sample = FEATURE_ID_METADATA_LIMIT - len(feature_ids)
+            if remaining_sample > 0:
+                feature_ids.extend(
+                    bundle.feature.feature_id for bundle in batch[:remaining_sample]
+                )
+            pending_findings.extend(
+                _address_validation_findings(
+                    batch_validation,
+                    provider=provider,
+                    dataset_key=dataset_key,
+                    loaded_feature_ids=loaded_ids,
+                    dropped_feature_ids=frozenset(dropped_ids),
+                    source_identities=source_identities,
+                )
+            )
+            yield batch
+
+    try:
+        load = await load_all(_validated_batches())
+    except Failure:
+        if strict_failure and pending_findings:
+            unlinked = [
+                replace(
+                    finding,
+                    linked=False,
+                    source_record_key=None,
+                    feature_id=None,
+                )
+                for finding in pending_findings
+            ]
+            await client.record_address_validation_findings(
+                unlinked,
+                provider=provider,
+                dataset_key=dataset_key,
+                run_id=_dagster_run_id(context),
+            )
+        raise
+
+    sync = await client.record_address_validation_findings(
+        pending_findings,
+        provider=provider,
+        dataset_key=dataset_key,
+        run_id=_dagster_run_id(context),
+    )
+    result = DagsterFeatureLoadResult(
+        provider=provider,
+        dataset_key=dataset_key,
+        feature_ids=tuple(feature_ids),
+        load=load,
+        address_validation=validation,
+        observation_receipt=AddressFindingObservationReceipt(
+            authoritative_snapshot_complete=True,
+            source_observations=validation.total,
+            findings_observed=sync.observed_count,
+            findings_unique=sync.unique_count,
+            findings_upserted=sync.upserted_count,
+            finding_persistence_complete=sync.unrecorded_count == 0,
+        ),
+        feature_ids_complete=loaded_feature_count <= FEATURE_ID_METADATA_LIMIT,
+    )
+    metadata = result.as_metadata()
+    if dropped_feature_ids:
+        metadata["address_validation_dropped_count"] = len(dropped_feature_ids)
+        metadata["address_validation_dropped_feature_ids"] = dropped_feature_ids
     _add_output_metadata(context, metadata)
     return result
 
