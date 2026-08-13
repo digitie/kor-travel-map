@@ -36,6 +36,7 @@ from sqlalchemy import text
 
 from kortravelmap.core.scoring import MasterCandidate, select_master
 from kortravelmap.infra.curation_link_basis import trusted_basis_sql
+from kortravelmap.infra.feature_repo import lock_feature_curation_write
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -954,6 +955,8 @@ async def apply_feature_merge(
     """
     if master_id == loser_id:
         raise MergeConflictError(f"master와 loser가 같음 — {master_id!r}")
+
+    await lock_feature_curation_write(session)
 
     locked_rows = (
         await session.execute(

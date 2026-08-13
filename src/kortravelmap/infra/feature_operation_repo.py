@@ -53,9 +53,6 @@ __all__ = [
     "record_feature_operation_invariant_conflict",
 ]
 
-_QUEUED_DAGSTER_STATUSES: Final[frozenset[str]] = frozenset(
-    {"QUEUED", "NOT_STARTED", "MANAGED", "STARTING"}
-)
 _RUNNING_DAGSTER_STATUSES: Final[frozenset[str]] = frozenset(
     {"STARTED", "CANCELING"}
 )
@@ -113,143 +110,29 @@ ORDER BY child_member.provider_dataset_id, child_member.sync_scope,
          child_member.operation_key, child.job_id
 """
 
-_INSERT_ROOT_SQL = f"""
-INSERT INTO ops.import_jobs (
-  kind, payload, status, progress, current_stage, dagster_run_id,
-  dataset_membership_mode, trigger_kind, operation_key, dagster_run_status,
-  created_at, started_at, heartbeat_at
-) VALUES (
-  '{FEATURE_OPERATION_ROOT_KIND}', '{{}}'::jsonb, :status, 0, :stage,
-  :dagster_run_id, 'root', :trigger_kind, :operation_key, :dagster_run_status,
-  CAST(:created_at AS timestamptz), CAST(:started_at AS timestamptz),
-  CAST(:started_at AS timestamptz)
+_ENSURE_OPERATION_COMMAND_SQL = """
+CALL ops.ensure_provider_feature_operation_command(
+  :dagster_run_id, :trigger_kind, :operation_key,
+  CAST(:memberships AS jsonb), CAST(:created_at AS timestamptz),
+  CAST(:started_at AS timestamptz), :dagster_run_status,
+  NULL, NULL, NULL
 )
-ON CONFLICT (dagster_run_id)
-  WHERE kind = '{FEATURE_OPERATION_ROOT_KIND}' AND parent_job_id IS NULL
-DO NOTHING
-RETURNING job_id
 """
 
-_INSERT_MEMBER_SQL = f"""
-WITH child AS (
-  INSERT INTO ops.import_jobs (
-    kind, parent_job_id, payload, status, progress, current_stage,
-    dagster_run_id, dataset_membership_mode, created_at, started_at, heartbeat_at
-  ) VALUES (
-    '{FEATURE_OPERATION_MEMBER_KIND}', CAST(:root_job_id AS uuid), '{{}}'::jsonb,
-    :status, 0, :stage, :dagster_run_id, 'single',
-    CAST(:created_at AS timestamptz), CAST(:started_at AS timestamptz),
-    CAST(:started_at AS timestamptz)
-  )
-  RETURNING job_id
-), membership AS (
-  INSERT INTO ops.import_job_datasets (
-    job_id, provider_dataset_id, sync_scope, operation_key
-  )
-  SELECT child.job_id, CAST(:provider_dataset_id AS bigint), :sync_scope, :operation_key
-  FROM child
-  RETURNING job_id
+_FINISH_MEMBERSHIP_COMMAND_SQL = """
+CALL ops.finish_provider_feature_membership_command(
+  CAST(:root_job_id AS uuid), CAST(:provider_dataset_id AS bigint),
+  :sync_scope, :operation_key, CAST(:authoritative_snapshot_complete AS boolean),
+  CAST(:finished_at AS timestamptz), NULL
 )
-SELECT child.job_id FROM child JOIN membership USING (job_id)
 """
 
-_ADVANCE_ROOT_SQL = """
-UPDATE ops.import_jobs
-SET status = 'running',
-    current_stage = 'loading',
-    dagster_run_status = :dagster_run_status,
-    started_at = COALESCE(started_at, CAST(:started_at AS timestamptz)),
-    heartbeat_at = COALESCE(CAST(:started_at AS timestamptz), heartbeat_at)
-WHERE job_id = CAST(:root_job_id AS uuid)
-  AND kind = 'provider_feature_load_run'
-  AND status = 'queued'
-  AND cancellation_id IS NULL
-  AND quarantined_at IS NULL
-RETURNING job_id
-"""
-
-_ADVANCE_MEMBERS_SQL = """
-UPDATE ops.import_jobs
-SET status = 'running',
-    current_stage = 'loading',
-    started_at = COALESCE(started_at, CAST(:started_at AS timestamptz)),
-    heartbeat_at = COALESCE(CAST(:started_at AS timestamptz), heartbeat_at)
-WHERE parent_job_id = CAST(:root_job_id AS uuid)
-  AND kind = 'provider_feature_load'
-  AND status = 'queued'
-  AND cancellation_id IS NULL
-  AND quarantined_at IS NULL
-RETURNING job_id
-"""
-
-_ADVANCE_RAW_QUEUED_STATUS_SQL = """
-UPDATE ops.import_jobs
-SET dagster_run_status = :dagster_run_status
-WHERE job_id = CAST(:root_job_id AS uuid)
-  AND kind = 'provider_feature_load_run'
-  AND status = 'queued'
-  AND dagster_run_status IN ('QUEUED','NOT_STARTED','MANAGED')
-  AND :dagster_run_status = 'STARTING'
-  AND quarantined_at IS NULL
-RETURNING job_id
-"""
-
-_ADVANCE_RAW_CANCELING_STATUS_SQL = """
-UPDATE ops.import_jobs
-SET dagster_run_status = 'CANCELING'
-WHERE job_id = CAST(:root_job_id AS uuid)
-  AND kind = 'provider_feature_load_run'
-  AND status = 'running'
-  AND dagster_run_status = 'STARTED'
-  AND :dagster_run_status = 'CANCELING'
-  AND quarantined_at IS NULL
-RETURNING job_id
-"""
-
-_FINISH_MEMBERSHIP_SQL = """
-UPDATE ops.import_jobs
-SET status = 'done',
-    progress = 100,
-    current_stage = 'completed',
-    finished_at = COALESCE(finished_at, CAST(:finished_at AS timestamptz), now()),
-    heartbeat_at = now(),
-    error_message = NULL,
-    payload = payload || jsonb_build_object(
-      'authoritative_snapshot_complete',
-      CAST(:authoritative_snapshot_complete AS boolean)
-    )
-WHERE parent_job_id = CAST(:root_job_id AS uuid)
-  AND kind = 'provider_feature_load'
-  AND EXISTS (
-    SELECT 1 FROM ops.import_job_datasets AS member
-    WHERE member.job_id = ops.import_jobs.job_id
-      AND member.provider_dataset_id = CAST(:provider_dataset_id AS bigint)
-      AND member.sync_scope = :sync_scope
-      AND member.operation_key = :operation_key
-  )
-  AND status IN ('queued','running')
-  AND cancellation_id IS NULL
-  AND quarantined_at IS NULL
-RETURNING job_id
-"""
-
-_UPDATE_ROOT_PROGRESS_SQL = """
-WITH counts AS (
-  SELECT
-    count(*)::integer AS total,
-    count(*) FILTER (WHERE status = 'done')::integer AS done
-  FROM ops.import_jobs
-  WHERE parent_job_id = CAST(:root_job_id AS uuid)
-    AND kind = 'provider_feature_load'
-    AND quarantined_at IS NULL
+_TERMINAL_OPERATION_COMMAND_SQL = """
+CALL ops.transition_provider_feature_operation_terminal_command(
+  CAST(:root_job_id AS uuid), :target_status, :dagster_run_status,
+  :stage, :error_message, CAST(:started_at AS timestamptz),
+  CAST(:finished_at AS timestamptz), CAST(:update_members AS boolean), NULL
 )
-UPDATE ops.import_jobs AS root
-SET progress = CASE WHEN counts.total = 0 THEN 0
-                    ELSE floor(100.0 * counts.done / counts.total)::integer END
-FROM counts
-WHERE root.job_id = CAST(:root_job_id AS uuid)
-  AND root.quarantined_at IS NULL
-RETURNING root.job_id
 """
 
 _ACTIVE_ROOTS_PAGE_SQL = f"""
@@ -679,65 +562,46 @@ async def ensure_dagster_feature_operation(
     )
 
     await lock_pipeline_lineage_mutation(session)
+    command = (
+        await session.execute(
+            text(_ENSURE_OPERATION_COMMAND_SQL),
+            {
+                "created_at": created_at,
+                "dagster_run_id": normalized_run_id,
+                "dagster_run_status": status,
+                "memberships": json.dumps(
+                    [
+                        {
+                            "operation_key": member.operation_key,
+                            "provider_dataset_id": member.provider_dataset_id,
+                            "sync_scope": member.sync_scope,
+                        }
+                        for member in normalized_memberships
+                    ],
+                    ensure_ascii=False,
+                ),
+                "operation_key": normalized_operation_key,
+                "started_at": started_at,
+                "trigger_kind": normalized_trigger,
+            },
+        )
+    ).mappings().one()
+    changed = bool(command["o_changed"])
     root_row = (
         await session.execute(
             text(_LOCK_ROOT_BY_RUN_SQL), {"dagster_run_id": normalized_run_id}
         )
     ).one_or_none()
-    inserted = False
     if root_row is None:
-        base_status = "queued" if status in _QUEUED_DAGSTER_STATUSES else "running"
-        stage = "queued" if base_status == "queued" else "loading"
-        row = (
-            await session.execute(
-                text(_INSERT_ROOT_SQL),
-                {
-                    "status": base_status,
-                    "stage": stage,
-                    "dagster_run_id": normalized_run_id,
-                    "trigger_kind": normalized_trigger,
-                    "operation_key": normalized_operation_key,
-                    "dagster_run_status": status,
-                    "created_at": created_at,
-                    "started_at": started_at if base_status == "running" else None,
-                },
-            )
-        ).one_or_none()
-        inserted = row is not None
-        root_row = (
-            await session.execute(
-                text(_LOCK_ROOT_BY_RUN_SQL), {"dagster_run_id": normalized_run_id}
-            )
-        ).one_or_none()
-        if root_row is None:
-            raise FeatureOperationInvariantConflict(
-                "Dagster run belongs to a quarantined provider feature operation",
-                dagster_run_id=normalized_run_id,
-                details={"reason": "quarantined"},
-            )
+        raise FeatureOperationInvariantConflict(
+            "Dagster run belongs to a quarantined provider feature operation",
+            dagster_run_id=normalized_run_id,
+            details={"reason": "quarantined"},
+        )
     root_job_id = str(root_row.root_job_id)
     await lock_pipeline_cancellation_root(
         session, root_kind="import_job", root_id=root_job_id
     )
-
-    if inserted:
-        member_status = "queued" if status in _QUEUED_DAGSTER_STATUSES else "running"
-        member_stage = "queued" if member_status == "queued" else "loading"
-        for membership in normalized_memberships:
-            await session.execute(
-                text(_INSERT_MEMBER_SQL),
-                {
-                    "root_job_id": root_job_id,
-                    "status": member_status,
-                    "stage": member_stage,
-                    "dagster_run_id": normalized_run_id,
-                    "provider_dataset_id": membership.provider_dataset_id,
-                    "sync_scope": membership.sync_scope,
-                    "operation_key": membership.operation_key,
-                    "created_at": created_at,
-                    "started_at": started_at if member_status == "running" else None,
-                },
-            )
 
     operation = await _load_operation(session, normalized_run_id)
     _raise_identity_conflict(
@@ -767,41 +631,6 @@ async def ensure_dagster_feature_operation(
             outcome="blocked", operation=operation, block_reason="terminal"
         )
 
-    changed = inserted
-    if status in _RUNNING_DAGSTER_STATUSES and operation.status == "queued":
-        root_changed = (
-            await session.execute(
-                text(_ADVANCE_ROOT_SQL),
-                {
-                    "root_job_id": root_job_id,
-                    "dagster_run_status": status,
-                    "started_at": started_at,
-                },
-            )
-        ).one_or_none()
-        members_changed = (
-            await session.execute(
-                text(_ADVANCE_MEMBERS_SQL),
-                {"root_job_id": root_job_id, "started_at": started_at},
-            )
-        ).all()
-        changed = root_changed is not None or bool(members_changed) or changed
-    elif status in _QUEUED_DAGSTER_STATUSES and operation.status == "queued":
-        raw_changed = (
-            await session.execute(
-                text(_ADVANCE_RAW_QUEUED_STATUS_SQL),
-                {"root_job_id": root_job_id, "dagster_run_status": status},
-            )
-        ).one_or_none()
-        changed = raw_changed is not None or changed
-    elif status == "CANCELING" and operation.status == "running":
-        raw_changed = (
-            await session.execute(
-                text(_ADVANCE_RAW_CANCELING_STATUS_SQL),
-                {"root_job_id": root_job_id, "dagster_run_status": status},
-            )
-        ).one_or_none()
-        changed = raw_changed is not None or changed
     operation = await _load_operation(session, normalized_run_id)
     if (
         started_at is not None
@@ -950,9 +779,9 @@ async def finish_dagster_feature_membership(
         if authoritative_snapshot_complete
         else None
     )
-    changed = (
+    command = (
         await session.execute(
-            text(_FINISH_MEMBERSHIP_SQL),
+            text(_FINISH_MEMBERSHIP_COMMAND_SQL),
             {
                 "root_job_id": root_job_id,
                 "provider_dataset_id": membership.provider_dataset_id,
@@ -962,16 +791,13 @@ async def finish_dagster_feature_membership(
                 "finished_at": sealed_at,
             },
         )
-    ).one_or_none()
-    if changed is None:
+    ).mappings().one()
+    if not bool(command["o_changed"]):
         raise FeatureOperationInvariantConflict(
             "membership cannot be completed from its current state",
             dagster_run_id=normalized_run_id,
             root_job_id=root_job_id,
         )
-    await session.execute(
-        text(_UPDATE_ROOT_PROGRESS_SQL), {"root_job_id": root_job_id}
-    )
     return DagsterFeatureOperationMutation(
         outcome="applied",
         operation=await _load_operation(session, normalized_run_id),
@@ -1225,72 +1051,8 @@ async def reconcile_dagster_feature_run(
         stage = "cancelled"
         error_message = json.dumps(dict(error), ensure_ascii=False) if error else None
 
-    if persisted_started_at is not None:
-        await session.execute(
-            text(
-                """
-                UPDATE ops.import_jobs
-                SET started_at = COALESCE(started_at, CAST(:started_at AS timestamptz))
-                WHERE parent_job_id = CAST(:root_job_id AS uuid)
-                  AND kind = 'provider_feature_load'
-                  AND cancellation_id IS NULL
-                  AND quarantined_at IS NULL
-                """
-            ),
-            {
-                "started_at": persisted_started_at,
-                "root_job_id": root_job_id,
-            },
-        )
-    if terminal != "SUCCESS" or identity_conflict or incomplete_members:
-        await session.execute(
-            text(
-                """
-                UPDATE ops.import_jobs
-                SET status = :target_status,
-                    current_stage = :stage,
-                    error_message = COALESCE(:error_message, error_message),
-                    finished_at = COALESCE(finished_at, CAST(:finished_at AS timestamptz)),
-                    started_at = COALESCE(started_at, CAST(:started_at AS timestamptz)),
-                    heartbeat_at = COALESCE(CAST(:finished_at AS timestamptz), heartbeat_at)
-                WHERE parent_job_id = CAST(:root_job_id AS uuid)
-                  AND kind = 'provider_feature_load'
-                  AND status IN ('queued','running')
-                  AND cancellation_id IS NULL
-                  AND quarantined_at IS NULL
-                """
-            ),
-            {
-                "target_status": target_status,
-                "stage": stage,
-                "error_message": error_message,
-                "finished_at": persisted_finished_at,
-                "started_at": persisted_started_at,
-                "root_job_id": root_job_id,
-            },
-        )
     await session.execute(
-        text(_UPDATE_ROOT_PROGRESS_SQL), {"root_job_id": root_job_id}
-    )
-    await session.execute(
-        text(
-            """
-            UPDATE ops.import_jobs
-            SET status = :target_status,
-                dagster_run_status = :dagster_run_status,
-                current_stage = :stage,
-                error_message = COALESCE(:error_message, error_message),
-                progress = CASE WHEN :target_status = 'done' THEN 100 ELSE progress END,
-                started_at = COALESCE(started_at, CAST(:started_at AS timestamptz)),
-                finished_at = COALESCE(finished_at, CAST(:finished_at AS timestamptz)),
-                heartbeat_at = COALESCE(CAST(:finished_at AS timestamptz), heartbeat_at)
-            WHERE job_id = CAST(:root_job_id AS uuid)
-              AND kind = 'provider_feature_load_run'
-              AND status IN ('queued','running')
-              AND cancellation_id IS NULL
-              AND quarantined_at IS NULL
-            """
-        ),
+        text(_TERMINAL_OPERATION_COMMAND_SQL),
         {
             "target_status": target_status,
             "dagster_run_status": terminal,
@@ -1299,6 +1061,9 @@ async def reconcile_dagster_feature_run(
             "started_at": persisted_started_at,
             "finished_at": persisted_finished_at,
             "root_job_id": root_job_id,
+            "update_members": terminal != "SUCCESS"
+            or identity_conflict
+            or bool(incomplete_members),
         },
     )
     if target_status == "done" and await _finalize_authoritative_curation_root(
@@ -1310,17 +1075,17 @@ async def reconcile_dagster_feature_run(
             "actual": "current source/head/link input drifted",
         }
         await session.execute(
-            text(
-                """
-                UPDATE ops.import_jobs
-                SET status = 'failed', current_stage = 'stale_input',
-                    error_message = 'provider curation input changed after child seal',
-                    progress = 0
-                WHERE job_id = CAST(:root_job_id AS uuid)
-                  AND kind = 'provider_feature_load_run'
-                """
-            ),
-            {"root_job_id": root_job_id},
+            text(_TERMINAL_OPERATION_COMMAND_SQL),
+            {
+                "dagster_run_status": terminal,
+                "error_message": "provider curation input changed after child seal",
+                "finished_at": persisted_finished_at,
+                "root_job_id": root_job_id,
+                "stage": "stale_input",
+                "started_at": persisted_started_at,
+                "target_status": "failed",
+                "update_members": False,
+            },
         )
     if mismatches or (terminal == "SUCCESS" and incomplete_members):
         if terminal == "SUCCESS" and incomplete_members:

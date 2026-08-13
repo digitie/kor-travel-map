@@ -22,6 +22,73 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
+_MANIFEST_COMMANDS = (
+    r"""
+    CREATE TABLE ops.curation_concierge_legacy_owner_manifest (
+      entity_kind text NOT NULL CHECK (entity_kind IN ('theme','rule')),
+      entity_id uuid NOT NULL,
+      before_row_revision bigint NOT NULL CHECK (before_row_revision > 0),
+      before_input_hash text NOT NULL CHECK (before_input_hash ~ '^[0-9a-f]{64}$'),
+      captured_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+      PRIMARY KEY (entity_kind, entity_id)
+    )
+    """,
+    r"""
+    INSERT INTO ops.curation_concierge_legacy_owner_manifest (
+      entity_kind, entity_id, before_row_revision, before_input_hash
+    )
+    SELECT 'theme', theme.theme_id, theme.row_revision,
+           encode(x_extension.digest(convert_to(jsonb_build_array(
+             theme.theme_id::text, theme.row_revision, theme.theme_slug, theme.metadata
+           )::text, 'UTF8'), 'sha256'), 'hex')
+    FROM feature.curated_themes AS theme
+    WHERE theme.owner_kind IS NULL
+      AND theme.owner_provider_dataset_id IS NULL
+      AND theme.metadata ->> 'seed' = 'sync_concierge_themes'
+      AND theme.metadata ->> 'concierge_kind' IN ('channel','playlist')
+      AND EXISTS (
+        SELECT 1 FROM feature.curated_source_rules AS rule
+        JOIN feature.curated_sources AS source ON source.source_id = rule.source_id
+        JOIN provider_sync.provider_datasets AS dataset
+          ON dataset.provider_dataset_id = source.provider_dataset_id
+        WHERE rule.theme_id = theme.theme_id
+          AND rule.metadata ->> 'curation_relation' = 'theme_area_anchor'
+          AND dataset.provider = 'kor-travel-concierge-youtube'
+          AND dataset.dataset_key = 'youtube_place_candidates'
+      )
+    """,
+    r"""
+    INSERT INTO ops.curation_concierge_legacy_owner_manifest (
+      entity_kind, entity_id, before_row_revision, before_input_hash
+    )
+    SELECT 'rule', rule.rule_id, rule.row_revision,
+           encode(x_extension.digest(convert_to(jsonb_build_array(
+             rule.rule_id::text, rule.row_revision, rule.theme_id::text,
+             rule.source_id::text, rule.metadata
+           )::text, 'UTF8'), 'sha256'), 'hex')
+    FROM feature.curated_source_rules AS rule
+    JOIN feature.curated_sources AS source ON source.source_id = rule.source_id
+    JOIN provider_sync.provider_datasets AS dataset
+      ON dataset.provider_dataset_id = source.provider_dataset_id
+    JOIN ops.curation_concierge_legacy_owner_manifest AS theme_manifest
+      ON theme_manifest.entity_kind = 'theme'
+     AND theme_manifest.entity_id = rule.theme_id
+    WHERE rule.owner_kind IS NULL
+      AND rule.owner_provider_dataset_id IS NULL
+      AND rule.metadata ->> 'curation_relation' = 'theme_area_anchor'
+      AND dataset.provider = 'kor-travel-concierge-youtube'
+      AND dataset.dataset_key = 'youtube_place_candidates'
+    """,
+    r"""
+    CREATE TRIGGER trg_curation_concierge_legacy_owner_manifest_immutable
+    BEFORE UPDATE OR DELETE OR TRUNCATE
+    ON ops.curation_concierge_legacy_owner_manifest
+    FOR EACH STATEMENT
+    EXECUTE FUNCTION feature.reject_curation_provider_receipt_mutation()
+    """,
+)
+
+
 _SYNC_SQL = r"""
 CREATE PROCEDURE feature.sync_concierge_theme_catalog(
   IN p_provider_dataset_id bigint,
@@ -144,24 +211,37 @@ BEGIN
   UPDATE feature.curated_themes AS theme
   SET owner_kind = 'provider_dataset',
       owner_provider_dataset_id = p_provider_dataset_id,
+      row_revision = theme.row_revision + 1,
       updated_at = clock_timestamp()
   WHERE theme.owner_kind IS NULL
     AND theme.owner_provider_dataset_id IS NULL
-    AND theme.metadata ->> 'seed' = 'sync_concierge_themes'
-    AND theme.metadata ->> 'concierge_kind' IN ('channel','playlist')
     AND EXISTS (
-      SELECT 1 FROM feature.curated_source_rules AS rule
-      WHERE rule.theme_id = theme.theme_id AND rule.source_id = v_source_id
-        AND rule.metadata ->> 'curation_relation' = 'theme_area_anchor'
+      SELECT 1 FROM ops.curation_concierge_legacy_owner_manifest AS manifest
+      WHERE manifest.entity_kind = 'theme' AND manifest.entity_id = theme.theme_id
+        AND manifest.before_row_revision = theme.row_revision
+        AND manifest.before_input_hash = encode(x_extension.digest(convert_to(
+          jsonb_build_array(theme.theme_id::text, theme.row_revision,
+                            theme.theme_slug, theme.metadata)::text,
+          'UTF8'), 'sha256'), 'hex')
     );
   UPDATE feature.curated_source_rules AS rule
   SET owner_kind = 'provider_dataset',
       owner_provider_dataset_id = p_provider_dataset_id,
+      row_revision = rule.row_revision + 1,
       updated_at = clock_timestamp()
   WHERE rule.owner_kind IS NULL
     AND rule.owner_provider_dataset_id IS NULL
     AND rule.source_id = v_source_id
-    AND rule.metadata ->> 'curation_relation' = 'theme_area_anchor'
+    AND EXISTS (
+      SELECT 1 FROM ops.curation_concierge_legacy_owner_manifest AS manifest
+      WHERE manifest.entity_kind = 'rule' AND manifest.entity_id = rule.rule_id
+        AND manifest.before_row_revision = rule.row_revision
+        AND manifest.before_input_hash = encode(x_extension.digest(convert_to(
+          jsonb_build_array(rule.rule_id::text, rule.row_revision,
+                            rule.theme_id::text, rule.source_id::text,
+                            rule.metadata)::text,
+          'UTF8'), 'sha256'), 'hex')
+    )
     AND EXISTS (
       SELECT 1 FROM feature.curated_themes AS theme
       WHERE theme.theme_id = rule.theme_id
@@ -362,11 +442,17 @@ _TRIGGER_SIGNATURE = "feature.sync_concierge_catalog_after_observation()"
 
 
 def upgrade() -> None:
+    for command in _MANIFEST_COMMANDS:
+        op.execute(command)
     op.execute(_SYNC_SQL)
     op.execute(_TRIGGER_FUNCTION_SQL)
     op.execute(_TRIGGER_SQL)
     op.execute(f"ALTER PROCEDURE {_SYNC_SIGNATURE} OWNER TO ktm_curation_command_owner")
     op.execute(f"ALTER FUNCTION {_TRIGGER_SIGNATURE} OWNER TO ktm_curation_command_owner")
+    op.execute(
+        "GRANT SELECT ON TABLE ops.curation_concierge_legacy_owner_manifest "
+        "TO ktm_curation_command_owner"
+    )
     op.execute(
         "GRANT UPDATE (owner_kind, owner_provider_dataset_id, theme_name, theme_group, "
         "visibility, metadata, archived_at, row_revision, updated_at) ON TABLE "

@@ -1008,6 +1008,46 @@ class AsyncKorTravelMapClient:
                 )
             return result
 
+    async def load_authoritative_feature_snapshot(
+        self,
+        bundles: Iterable[FeatureBundle],
+        *,
+        provider: str,
+        dataset_key: str,
+        source_entity_type: str,
+        retired_source_entity_ids: set[str] | None = None,
+        retire_geometryless_areas: bool = False,
+    ) -> tuple[FeatureLoadResult, int]:
+        """적재·provider lifecycle·curation seal을 한 causal transaction으로 닫는다."""
+
+        if retired_source_entity_ids and retire_geometryless_areas:
+            raise ValueError("retirement mode는 하나만 선택해야 합니다")
+        materialized = list(bundles)
+        async with self._session_factory() as session, session.begin():
+            result = await load_bundles(session, materialized)
+            retired = 0
+            if retired_source_entity_ids:
+                retired = await retire_features_by_source_entity_ids(
+                    session,
+                    provider=provider,
+                    dataset_key=dataset_key,
+                    source_entity_type=source_entity_type,
+                    source_entity_ids=retired_source_entity_ids,
+                )
+            elif retire_geometryless_areas:
+                retired = await retire_geometryless_area_features_by_source(
+                    session,
+                    provider=provider,
+                    dataset_key=dataset_key,
+                    source_entity_type=source_entity_type,
+                )
+            result = result.merge(
+                await capture_provider_curation_input(
+                    session, provider=provider, dataset_key=dataset_key
+                )
+            )
+            return result, retired
+
     async def load_authoritative_notice_snapshot(
         self,
         *,

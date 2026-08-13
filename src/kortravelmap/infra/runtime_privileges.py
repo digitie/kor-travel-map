@@ -154,6 +154,7 @@ _ORDINARY_SCHEMA_PRIVILEGES: Mapping[str, tuple[str, ...]] = {
 # provider/admin connection cannot erase that fence through raw SQL.
 _OPS_TABLE_PRIVILEGES: Mapping[str, tuple[str, ...]] = {
     "curation_catalog_command_effects": (),
+    "curation_concierge_legacy_owner_manifest": (),
     "curation_provider_root_receipts": (),
     "curation_provider_snapshot_receipts": (),
     "curation_source_observation_receipts": (),

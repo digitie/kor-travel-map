@@ -89,7 +89,18 @@ AS $input$
   WITH canonical_input AS (
     SELECT entity.source_entity_key, head.current_source_record_key,
            record.raw_payload_hash, record.imported_at,
-           link.feature_id, link.source_role, link.match_method, link.confidence
+           link.feature_id, link.source_role, link.match_method, link.confidence,
+           core.row_revision AS feature_row_revision,
+           core.lifecycle_state, core.publication_state, core.quality_state,
+           CASE core.kind
+             WHEN 'place' THEN COALESCE(to_jsonb(place), '{}'::jsonb)
+             WHEN 'event' THEN COALESCE(to_jsonb(event), '{}'::jsonb)
+             WHEN 'notice' THEN COALESCE(to_jsonb(notice), '{}'::jsonb)
+             WHEN 'route' THEN COALESCE(to_jsonb(route), '{}'::jsonb)
+             WHEN 'area' THEN COALESCE(to_jsonb(area_row), '{}'::jsonb)
+             ELSE '{}'::jsonb
+           END AS feature_detail,
+           COALESCE(override_input.override_lineage, '[]'::jsonb) AS override_lineage
     FROM provider_sync.source_entities AS entity
     LEFT JOIN provider_sync.source_entity_heads AS head
       ON head.source_entity_key = entity.source_entity_key
@@ -98,6 +109,22 @@ AS $input$
      AND record.source_record_key = head.current_source_record_key
     LEFT JOIN provider_sync.source_links AS link
       ON link.source_entity_key = entity.source_entity_key
+    LEFT JOIN feature.features AS core ON core.feature_id = link.feature_id
+    LEFT JOIN feature.feature_places AS place ON place.feature_id = core.feature_id
+    LEFT JOIN feature.feature_events AS event ON event.feature_id = core.feature_id
+    LEFT JOIN feature.feature_notices AS notice ON notice.feature_id = core.feature_id
+    LEFT JOIN feature.feature_routes AS route ON route.feature_id = core.feature_id
+    LEFT JOIN feature.feature_areas AS area_row ON area_row.feature_id = core.feature_id
+    LEFT JOIN LATERAL (
+      SELECT jsonb_agg(jsonb_build_array(
+        override.override_id::text, override.field_path, override.override_value,
+        CASE WHEN override.value_geometry IS NULL THEN NULL
+             ELSE encode(x_extension.ST_AsEWKB(override.value_geometry), 'hex') END,
+        override.base_revision, override.command_id
+      ) ORDER BY override.field_path, override.override_id) AS override_lineage
+      FROM ops.feature_overrides AS override
+      WHERE override.feature_id = core.feature_id AND override.status = 'active'
+    ) AS override_input ON true
     WHERE entity.provider_dataset_id = p_provider_dataset_id
   )
   SELECT count(DISTINCT input.source_entity_key)::bigint,
@@ -107,7 +134,9 @@ AS $input$
            COALESCE(jsonb_agg(jsonb_build_array(
              input.source_entity_key, input.current_source_record_key,
              input.raw_payload_hash, input.feature_id, input.source_role,
-             input.match_method, input.confidence
+             input.match_method, input.confidence, input.feature_row_revision,
+             input.lifecycle_state, input.publication_state, input.quality_state,
+             input.feature_detail, input.override_lineage
            ) ORDER BY input.source_entity_key, input.feature_id)
            FILTER (WHERE input.source_entity_key IS NOT NULL), '[]'::jsonb)::text,
            'UTF8'), 'sha256'), 'hex')
@@ -409,6 +438,9 @@ BEGIN
     RAISE EXCEPTION 'provider curation root requires the provider executor'
       USING ERRCODE = '42501';
   END IF;
+  -- Provider load/retirement/notice/merge와 같은 global fence를 relation
+  -- lock보다 먼저 잡아 head→link와 Feature→link 경로의 ABBA를 제거한다.
+  PERFORM pg_advisory_xact_lock(hashtextextended('feature-curation-write', 0));
   SELECT root.* INTO STRICT v_root FROM ops.import_jobs AS root
   WHERE root.job_id = p_root_job_id FOR UPDATE;
   IF v_root.kind <> 'provider_feature_load_run' OR v_root.status <> 'done'

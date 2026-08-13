@@ -249,7 +249,10 @@ async def test_provider_create_uses_procedure_and_omits_legacy_state(
     )
 
     assert inserted is True
-    assert "CALL feature.create_feature_with_initial_state" in session.calls[0][0]
+    assert any(
+        "CALL feature.create_feature_with_initial_state" in sql
+        for sql, _params in session.calls
+    )
 
 
 @pytest.mark.asyncio
@@ -301,6 +304,8 @@ async def test_existing_provider_refresh_uses_typed_field_patch(
                         "o_applied_field_count": 25,
                     }
                 )
+            if "feature-curation-write" in sql:
+                return _Result(None)
             raise AssertionError(f"unexpected SQL: {sql}")
 
     async def _no_subtype(*_args: Any, **_kwargs: Any) -> None:

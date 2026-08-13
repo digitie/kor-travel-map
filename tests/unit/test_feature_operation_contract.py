@@ -164,31 +164,20 @@ def test_feature_operation_sql_excludes_quarantined_engine_state() -> None:
     assert "root.quarantined_at IS NULL" in operation_read_sql
     assert "child.quarantined_at IS NULL" in operation_read_sql
 
-    single_scope_sql = (
-        feature_operation_repo._ADVANCE_ROOT_SQL,
-        feature_operation_repo._ADVANCE_MEMBERS_SQL,
-        feature_operation_repo._ADVANCE_RAW_QUEUED_STATUS_SQL,
-        feature_operation_repo._ADVANCE_RAW_CANCELING_STATUS_SQL,
-        feature_operation_repo._FINISH_MEMBERSHIP_SQL,
-        feature_operation_repo._ACTIVE_ROOTS_PAGE_SQL,
+    assert "quarantined_at IS NULL" in feature_operation_repo._ACTIVE_ROOTS_PAGE_SQL
+    assert "ensure_provider_feature_operation_command" in (
+        feature_operation_repo._ENSURE_OPERATION_COMMAND_SQL
     )
-    assert all(
-        "quarantined_at IS NULL" in statement for statement in single_scope_sql
-    )
-
-    progress_sql = feature_operation_repo._UPDATE_ROOT_PROGRESS_SQL
-    assert "AND quarantined_at IS NULL" in progress_sql
-    assert "root.quarantined_at IS NULL" in progress_sql
 
     ensure_source = inspect.getsource(
         feature_operation_repo.ensure_dagster_feature_operation
     )
-    assert "AND quarantined_at IS NULL" in ensure_source
+    assert "_ENSURE_OPERATION_COMMAND_SQL" in ensure_source
 
     finalize_source = inspect.getsource(
         feature_operation_repo.reconcile_dagster_feature_run
     )
-    assert finalize_source.count("quarantined_at IS NULL") >= 3
+    assert "_TERMINAL_OPERATION_COMMAND_SQL" in finalize_source
 
 
 def test_authoritative_finish_owns_source_observation_generation_and_seal() -> None:
@@ -214,6 +203,12 @@ async def test_feature_operation_ensure_reports_quarantined_run_conflict() -> No
     class _NoRow:
         def one_or_none(self) -> None:
             return None
+
+        def mappings(self) -> _NoRow:
+            return self
+
+        def one(self) -> dict[str, bool]:
+            return {"o_changed": False}
 
     class _QuarantinedRunSession:
         def __init__(self) -> None:
@@ -248,9 +243,9 @@ async def test_feature_operation_ensure_reports_quarantined_run_conflict() -> No
 
     assert raised.value.details == {"reason": "quarantined"}
     assert raised.value.dagster_run_id == "run-quarantined"
-    assert len(session.statements) == 4
-    assert session.statements[1] == session.statements[3]
-    assert "root.quarantined_at IS NULL" in session.statements[3]
+    assert len(session.statements) == 3
+    assert "ensure_provider_feature_operation_command" in session.statements[1]
+    assert "root.quarantined_at IS NULL" in session.statements[2]
 
 
 @pytest.mark.parametrize("owner", [None, "", " ", " owner", "owner "])
