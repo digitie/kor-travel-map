@@ -1,5 +1,12 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+T-VN-40 provider operation은 child seal↔authoritative flag, root terminal↔전체 receipt set을
+DB procedure에서 양방향 검증하도록 보강했다. provider attempt event도 typed append-only command로
+옮겼고 API runtime은 frozen cancellation attempt가 소유한 제한된 transition 외 provider row를 raw
+변경할 수 없다. 다음 checkpoint는 MOIS 대용량 authoritative load의 단일 transaction 인과성을
+유지하면서 batch-bound memory로 바꾸고, concierge legacy owner는 metadata 추측 없이 충돌을
+fail-close한 뒤 retained catalog raw DML 회수를 계속한다.
+
 ## 2026-08-13 — T-VN-40 A/B/C 단일 PR 구현 시작
 
 **다음 한 작업**: PR #977 head 위 bootstrap과 0105 expand DB spine을 구현하고,
@@ -69,7 +76,9 @@ merge와 root finalizer는 첫 relation lock 전에 동일한 global transaction
 chunk별 commit 뒤 boolean 승격을 제거하고, concierge·국가유산 lifecycle 변경은 load+seal과 같은
 transaction에 넣었으며, MCST empty member도 authoritative receipt를 남긴다. 다음은 retained
 theme/source/rule relation의 runtime raw DML 권한과 남은 provider catalog writer를 전수 회수해 named
-command만 남기는 것이다.
+command만 남겼다. collection create/import는 existing catalog exact match만 참조하고 API·Dagster
+LOGIN의 catalog INSERT/UPDATE/DELETE는 모두 `42501`이다. 다음은 collection/item/import/quarantine/
+merge의 raw writer를 revision CAS·domain command receipt가 있는 typed command로 전환하는 것이다.
 T-VN-40 paired consumer receipt는 현재 `pending`이며 Map user/
 service/full spec hash를 고정하고 n150 installer가 complete 전에는 fail-close한다.
 fresh 0001→0114 actual-login candidate/source 통합 15개, 관련 unit 147개와 격리 Dagster MCST

@@ -2,6 +2,25 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-14 — T-VN-40: provider terminal 증거와 attempt event 경계
+
+provider membership 완료 명령은 이제 `authoritative_snapshot_complete=true`와 exact immutable
+child seal의 존재를 양방향으로 검증하고, root SUCCESS도 완료된 child payload와 receipt set의
+일치를 DB에서 직접 강제한다. 비권위 no-op load는 정상 terminal이 될 수 있지만 curation root
+receipt를 0-child 성공 증거로 만들지 않는다. API runtime의 provider root raw 상태 변경은 frozen
+cancellation receipt에 결박된 제한된 column transition만 허용하고, provider attempt event는 exact
+child membership을 확인하는 append-only typed command로 전환했다. API·Dagster LOGIN의 provider
+event raw INSERT/UPDATE/DELETE는 `42501`이다.
+
+## 2026-08-14 — T-VN-40: retained catalog raw DML 회수
+
+canonical collection create와 CSV import가 theme/source를 암묵 upsert하던 마지막 runtime 우회를
+제거했다. 두 경로는 이제 먼저 typed catalog command로 만든 active theme/source의 stable identity와
+name/group/URL이 정확히 일치할 때만 참조하며, 누락·불일치는 transaction 전체를 거부한다. API와
+Dagster LOGIN의 `curated_themes`·`curated_sources`·`curated_source_rules` 권한은 `SELECT`만 남기고
+INSERT/UPDATE/DELETE를 실제 LOGIN으로 각각 `42501` 검증했다. retained catalog 변경은 named command와
+provider root finalizer만 수행한다.
+
 ## 2026-08-14 — T-VN-40: provider operation 명령 경계와 공통 write fence
 
 Dagster provider LOGIN이 `ops.import_jobs`와 membership의 root·terminal 증거를 raw DML로

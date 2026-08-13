@@ -1710,6 +1710,25 @@ async def test_provider_operation_rows_require_typed_dagster_commands(
                 observed_status="STARTED",
             )
             root_job_id = operation.operation.root_job_id
+            child_job_id = operation.operation.members[0].job_id
+
+        async with dagster.connect() as connection:
+            transaction = await connection.begin()
+            await connection.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
+            with pytest.raises(DBAPIError) as missing_seal:
+                await connection.execute(
+                    text(
+                        """
+                        CALL ops.finish_provider_feature_membership_command(
+                          CAST(:root_job_id AS uuid), :dataset_id,
+                          'dataset_wide', 'load', true, clock_timestamp(), NULL
+                        )
+                        """
+                    ),
+                    {**seeded, "root_job_id": root_job_id},
+                )
+            assert getattr(missing_seal.value.orig, "sqlstate", None) == "23514"
+            await transaction.rollback()
 
         for statement in (
             """
@@ -1734,6 +1753,15 @@ async def test_provider_operation_rows_require_typed_dagster_commands(
               :forged_run_id, 'root', 'schedule', 'load', 'QUEUED'
             )
             """,
+            """
+            INSERT INTO ops.import_job_events (
+              job_id, import_job_dataset_id, stage, level, code, message, payload
+            ) SELECT child.job_id, member.import_job_dataset_id, child.current_stage,
+                     'error', 'feature_operation.attempt', 'forged', '{}'::jsonb
+              FROM ops.import_jobs AS child
+              JOIN ops.import_job_datasets AS member ON member.job_id = child.job_id
+             WHERE child.job_id = CAST(:child_job_id AS uuid)
+            """,
         ):
             async with dagster.connect() as connection:
                 transaction = await connection.begin()
@@ -1743,6 +1771,7 @@ async def test_provider_operation_rows_require_typed_dagster_commands(
                         {
                             "forged_run_id": f"forged-{seeded['suffix']}",
                             "root_job_id": root_job_id,
+                            "child_job_id": child_job_id,
                         },
                     )
                 assert getattr(denied.value.orig, "sqlstate", None) == "42501"
@@ -1750,21 +1779,85 @@ async def test_provider_operation_rows_require_typed_dagster_commands(
     finally:
         await dagster.dispose()
 
-    # Provider raw-DML fence는 Admin/API cancellation writer까지 막지 않는다.
+    # API runtime도 frozen cancellation receipt 없는 provider row를 raw 변경할 수 없다.
     api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
     try:
-        async with api.begin() as connection:
-            changed = await connection.scalar(
+        for statement in (
+            """
+            UPDATE ops.import_jobs
+            SET status = 'done', dagster_run_status = 'SUCCESS',
+                current_stage = 'completed', progress = 100
+            WHERE job_id = CAST(:root_job_id AS uuid)
+            """,
+            """
+            INSERT INTO ops.import_job_events (
+              job_id, import_job_dataset_id, stage, level, code, message, payload
+            ) SELECT child.job_id, member.import_job_dataset_id, child.current_stage,
+                     'error', 'feature_operation.attempt', 'forged', '{}'::jsonb
+              FROM ops.import_jobs AS child
+              JOIN ops.import_job_datasets AS member ON member.job_id = child.job_id
+             WHERE child.job_id = CAST(:child_job_id AS uuid)
+            """,
+        ):
+            async with api.connect() as connection:
+                transaction = await connection.begin()
+                with pytest.raises(DBAPIError) as denied:
+                    await connection.execute(
+                        text(statement),
+                        {"root_job_id": root_job_id, "child_job_id": child_job_id},
+                    )
+                assert getattr(denied.value.orig, "sqlstate", None) == "42501"
+                await transaction.rollback()
+    finally:
+        await api.dispose()
+
+    async with session_factory.begin() as session:
+        await session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
+        await session.execute(
+            text(
+                """
+                CALL ops.finish_provider_feature_membership_command(
+                  CAST(:root_job_id AS uuid), :dataset_id,
+                  'dataset_wide', 'load', false, clock_timestamp(), NULL
+                )
+                """
+            ),
+            {**seeded, "root_job_id": root_job_id},
+        )
+        await session.execute(
+            text(
+                """
+                CALL ops.transition_provider_feature_operation_terminal_command(
+                  CAST(:root_job_id AS uuid), 'done', 'SUCCESS', 'completed', NULL,
+                  clock_timestamp(), clock_timestamp(), false, NULL
+                )
+                """
+            ),
+            {"root_job_id": root_job_id},
+        )
+        result = (
+            await session.execute(
                 text(
                     """
-                    UPDATE ops.import_jobs
-                    SET heartbeat_at = clock_timestamp()
-                    WHERE job_id = CAST(:root_job_id AS uuid)
-                    RETURNING true
+                    CALL feature.finalize_provider_curation_root(
+                      CAST(:root_job_id AS uuid), NULL, NULL, NULL, NULL
+                    )
                     """
                 ),
                 {"root_job_id": root_job_id},
             )
-            assert changed is True
-    finally:
-        await api.dispose()
+        ).mappings().one()
+        assert result["o_generation_count"] == 0
+        assert result["o_replayed"] is False
+    async with migrated_engine.connect() as connection:
+        assert (
+            await connection.scalar(
+                text(
+                    """
+                    SELECT count(*) FROM ops.curation_provider_root_receipts
+                    WHERE root_job_id = CAST(:root_job_id AS uuid)
+                    """
+                ),
+                {"root_job_id": root_job_id},
+            )
+        ) == 0

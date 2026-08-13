@@ -87,8 +87,7 @@ BEGIN
      OR EXISTS (
        SELECT 1 FROM pg_catalog.pg_roles AS role
        WHERE role.rolname = session_user AND role.rolsuper
-     )
-     OR NOT pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+     ) THEN
     RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
   END IF;
   v_kind := CASE WHEN TG_OP = 'DELETE' THEN OLD.kind ELSE NEW.kind END;
@@ -96,6 +95,40 @@ BEGIN
      OR (TG_OP = 'UPDATE' AND OLD.kind IN (
        'provider_feature_load_run', 'provider_feature_load'
      )) THEN
+    IF TG_OP = 'UPDATE'
+       AND session_user = 'ktm_feature_api_runtime'
+       AND NEW.cancellation_id IS NOT NULL
+       AND EXISTS (
+         SELECT 1
+         FROM ops.pipeline_cancellation_members AS member
+         JOIN ops.pipeline_cancellations AS attempt
+           ON attempt.cancellation_id = member.cancellation_id
+         WHERE member.cancellation_id = NEW.cancellation_id
+           AND member.job_id = NEW.job_id
+           AND attempt.status = 'in_progress'
+       )
+       AND (
+         to_jsonb(NEW) - ARRAY[
+           'cancellation_id','cancellation_requested_at',
+           'cancellation_requested_by','cancellation_reason'
+         ]::text[]
+         = to_jsonb(OLD) - ARRAY[
+           'cancellation_id','cancellation_requested_at',
+           'cancellation_requested_by','cancellation_reason'
+         ]::text[]
+         OR to_jsonb(NEW) - ARRAY['started_at']::text[]
+            = to_jsonb(OLD) - ARRAY['started_at']::text[]
+         OR to_jsonb(NEW) - ARRAY[
+              'status','error_message','finished_at','started_at','heartbeat_at',
+              'progress','current_stage','dagster_run_status'
+            ]::text[]
+            = to_jsonb(OLD) - ARRAY[
+              'status','error_message','finished_at','started_at','heartbeat_at',
+              'progress','current_stage','dagster_run_status'
+            ]::text[]
+       ) THEN
+      RETURN NEW;
+    END IF;
     RAISE EXCEPTION 'provider feature operations require a typed command'
       USING ERRCODE = '42501', CONSTRAINT = 'ck_tvn40_provider_operation_typed_command';
   END IF;
@@ -115,8 +148,7 @@ BEGIN
      OR EXISTS (
        SELECT 1 FROM pg_catalog.pg_roles AS role
        WHERE role.rolname = session_user AND role.rolsuper
-     )
-     OR NOT pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+     ) THEN
     RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
   END IF;
   v_job_id := CASE WHEN TG_OP = 'DELETE' THEN OLD.job_id ELSE NEW.job_id END;
@@ -136,6 +168,34 @@ BEGIN
 END
 $guard$;
 
+CREATE FUNCTION ops.reject_provider_feature_event_raw_dml()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = pg_catalog, ops
+AS $guard$
+DECLARE
+  v_job_id uuid;
+BEGIN
+  IF current_user = 'ktm_curation_command_owner'
+     OR EXISTS (
+       SELECT 1 FROM pg_catalog.pg_roles AS role
+       WHERE role.rolname = session_user AND role.rolsuper
+     ) THEN
+    RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
+  END IF;
+  v_job_id := CASE WHEN TG_OP = 'DELETE' THEN OLD.job_id ELSE NEW.job_id END;
+  IF EXISTS (
+    SELECT 1 FROM ops.import_jobs AS job
+    WHERE job.job_id = v_job_id
+      AND job.kind IN ('provider_feature_load_run','provider_feature_load')
+  ) THEN
+    RAISE EXCEPTION 'provider feature events require a typed command'
+      USING ERRCODE = '42501', CONSTRAINT = 'ck_tvn40_provider_event_typed_command';
+  END IF;
+  RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
+END
+$guard$;
+
 CREATE TRIGGER trg_provider_feature_operation_typed_command
 BEFORE INSERT OR UPDATE OR DELETE ON ops.import_jobs
 FOR EACH ROW EXECUTE FUNCTION ops.reject_provider_feature_operation_raw_dml();
@@ -143,6 +203,10 @@ FOR EACH ROW EXECUTE FUNCTION ops.reject_provider_feature_operation_raw_dml();
 CREATE TRIGGER trg_provider_feature_membership_typed_command
 BEFORE INSERT OR UPDATE OR DELETE ON ops.import_job_datasets
 FOR EACH ROW EXECUTE FUNCTION ops.reject_provider_feature_membership_raw_dml();
+
+CREATE TRIGGER trg_provider_feature_event_typed_command
+BEFORE INSERT OR UPDATE OR DELETE ON ops.import_job_events
+FOR EACH ROW EXECUTE FUNCTION ops.reject_provider_feature_event_raw_dml();
 """
 
 
@@ -340,11 +404,40 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = pg_catalog, ops
 AS $command$
+DECLARE
+  v_child_job_id uuid;
+  v_has_receipt boolean;
 BEGIN
   IF NOT pg_has_role(session_user, 'ktm_curation_provider_executor', 'member')
      OR pg_has_role(session_user, 'ktm_curation_admin_executor', 'member') THEN
     RAISE EXCEPTION 'provider membership command requires provider executor'
       USING ERRCODE = '42501';
+  END IF;
+  IF p_authoritative_snapshot_complete IS NULL THEN
+    RAISE EXCEPTION 'provider membership completion kind is required'
+      USING ERRCODE = '22023';
+  END IF;
+  SELECT child.job_id INTO STRICT v_child_job_id
+  FROM ops.import_jobs AS child
+  JOIN ops.import_job_datasets AS member ON member.job_id = child.job_id
+  WHERE child.parent_job_id = p_root_job_id
+    AND child.kind = 'provider_feature_load'
+    AND member.provider_dataset_id = p_provider_dataset_id
+    AND member.sync_scope = p_sync_scope
+    AND member.operation_key = p_operation_key
+    AND child.cancellation_id IS NULL AND child.quarantined_at IS NULL
+  FOR UPDATE OF child;
+  SELECT EXISTS (
+    SELECT 1 FROM ops.curation_provider_snapshot_receipts AS receipt
+    WHERE receipt.source_job_id = v_child_job_id
+      AND receipt.root_job_id = p_root_job_id
+      AND receipt.provider_dataset_id = p_provider_dataset_id
+      AND receipt.sync_scope = p_sync_scope
+      AND receipt.operation_key = p_operation_key
+  ) INTO STRICT v_has_receipt;
+  IF p_authoritative_snapshot_complete IS DISTINCT FROM v_has_receipt THEN
+    RAISE EXCEPTION 'provider membership completion does not match its immutable seal'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_provider_membership_receipt';
   END IF;
   UPDATE ops.import_jobs AS child
   SET status = 'done', progress = 100, current_stage = 'completed',
@@ -353,15 +446,7 @@ BEGIN
       payload = child.payload || jsonb_build_object(
         'authoritative_snapshot_complete', p_authoritative_snapshot_complete
       )
-  WHERE child.parent_job_id = p_root_job_id
-    AND child.kind = 'provider_feature_load'
-    AND EXISTS (
-      SELECT 1 FROM ops.import_job_datasets AS member
-      WHERE member.job_id = child.job_id
-        AND member.provider_dataset_id = p_provider_dataset_id
-        AND member.sync_scope = p_sync_scope
-        AND member.operation_key = p_operation_key
-    )
+  WHERE child.job_id = v_child_job_id
     AND child.status IN ('queued','running')
     AND child.cancellation_id IS NULL AND child.quarantined_at IS NULL;
   o_changed := FOUND;
@@ -376,6 +461,71 @@ BEGIN
   SET progress = CASE WHEN counts.total = 0 THEN 0
     ELSE floor(100.0 * counts.done / counts.total)::integer END
   FROM counts WHERE root.job_id = p_root_job_id AND root.quarantined_at IS NULL;
+END
+$command$;
+
+CREATE PROCEDURE ops.append_provider_feature_attempt_event_command(
+  IN p_dagster_run_id text,
+  IN p_provider_dataset_id bigint,
+  IN p_sync_scope text,
+  IN p_operation_key text,
+  IN p_attempt_number integer,
+  IN p_outcome text,
+  IN p_error jsonb,
+  OUT o_event_id uuid,
+  OUT o_job_id uuid,
+  OUT o_import_job_dataset_id uuid,
+  OUT o_stage text,
+  OUT o_level text,
+  OUT o_code text,
+  OUT o_message text,
+  OUT o_payload jsonb,
+  OUT o_occurred_at timestamptz
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, ops
+AS $command$
+BEGIN
+  IF NOT pg_has_role(session_user, 'ktm_curation_provider_executor', 'member')
+     OR pg_has_role(session_user, 'ktm_curation_admin_executor', 'member') THEN
+    RAISE EXCEPTION 'provider attempt event requires provider executor'
+      USING ERRCODE = '42501';
+  END IF;
+  IF p_attempt_number < 1 OR p_outcome NOT IN ('failed','retryable_failure')
+     OR jsonb_typeof(p_error) <> 'object' THEN
+    RAISE EXCEPTION 'invalid provider attempt event input'
+      USING ERRCODE = '22023';
+  END IF;
+  INSERT INTO ops.import_job_events (
+    job_id, import_job_dataset_id, stage, level, code, message, payload
+  )
+  SELECT child.job_id, member.import_job_dataset_id, child.current_stage,
+         'error', 'feature_operation.attempt',
+         'provider feature operation attempt recorded',
+         jsonb_build_object(
+           'attempt_number', p_attempt_number,
+           'outcome', p_outcome,
+           'error', p_error,
+           'provider_dataset_id', member.provider_dataset_id,
+           'sync_scope', member.sync_scope,
+           'operation_key', member.operation_key
+         )
+  FROM ops.import_jobs AS root
+  JOIN ops.import_jobs AS child
+    ON child.parent_job_id = root.job_id
+   AND child.kind = 'provider_feature_load'
+  JOIN ops.import_job_datasets AS member ON member.job_id = child.job_id
+  WHERE root.kind = 'provider_feature_load_run'
+    AND root.dagster_run_id = p_dagster_run_id
+    AND root.quarantined_at IS NULL AND child.quarantined_at IS NULL
+    AND member.provider_dataset_id = p_provider_dataset_id
+    AND member.sync_scope = p_sync_scope
+    AND member.operation_key = p_operation_key
+  RETURNING event_id, job_id, import_job_dataset_id, stage, level, code,
+            message, payload, occurred_at
+  INTO STRICT o_event_id, o_job_id, o_import_job_dataset_id, o_stage, o_level,
+              o_code, o_message, o_payload, o_occurred_at;
 END
 $command$;
 
@@ -413,6 +563,61 @@ BEGIN
      ) THEN
     RAISE EXCEPTION 'invalid provider terminal transition'
       USING ERRCODE = '22023';
+  END IF;
+  IF p_target_status = 'done' AND p_update_members THEN
+    RAISE EXCEPTION 'successful provider root cannot complete unfinished members'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_provider_terminal_members';
+  END IF;
+  IF p_target_status = 'done' AND (
+    EXISTS (
+      SELECT 1 FROM ops.import_jobs AS child
+      WHERE child.parent_job_id = p_root_job_id
+        AND child.kind = 'provider_feature_load'
+        AND child.quarantined_at IS NULL
+        AND (
+          child.status <> 'done'
+          OR jsonb_typeof(child.payload -> 'authoritative_snapshot_complete')
+             IS DISTINCT FROM 'boolean'
+        )
+    )
+    OR EXISTS (
+      SELECT 1
+      FROM ops.import_jobs AS child
+      JOIN ops.import_job_datasets AS member ON member.job_id = child.job_id
+      WHERE child.parent_job_id = p_root_job_id
+        AND child.kind = 'provider_feature_load'
+        AND child.quarantined_at IS NULL
+        AND (child.payload ->> 'authoritative_snapshot_complete')::boolean
+        AND NOT EXISTS (
+          SELECT 1 FROM ops.curation_provider_snapshot_receipts AS receipt
+          WHERE receipt.source_job_id = child.job_id
+            AND receipt.root_job_id = p_root_job_id
+            AND receipt.provider_dataset_id = member.provider_dataset_id
+            AND receipt.sync_scope = member.sync_scope
+            AND receipt.operation_key = member.operation_key
+        )
+    )
+    OR EXISTS (
+      SELECT 1 FROM ops.curation_provider_snapshot_receipts AS receipt
+      WHERE receipt.root_job_id = p_root_job_id
+        AND NOT EXISTS (
+          SELECT 1
+          FROM ops.import_jobs AS child
+          JOIN ops.import_job_datasets AS member ON member.job_id = child.job_id
+          WHERE child.job_id = receipt.source_job_id
+            AND child.parent_job_id = p_root_job_id
+            AND child.kind = 'provider_feature_load'
+            AND child.status = 'done'
+            AND child.quarantined_at IS NULL
+            AND (child.payload ->> 'authoritative_snapshot_complete')::boolean
+            AND member.provider_dataset_id = receipt.provider_dataset_id
+            AND member.sync_scope = receipt.sync_scope
+            AND member.operation_key = receipt.operation_key
+        )
+    )
+  ) THEN
+    RAISE EXCEPTION 'successful provider root has incomplete or mismatched evidence'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_provider_terminal_receipts';
   END IF;
   UPDATE ops.import_jobs AS child
   SET started_at = COALESCE(child.started_at, p_started_at)
@@ -470,6 +675,9 @@ _ENSURE_SIGNATURE = (
 _FINISH_SIGNATURE = (
     "ops.finish_provider_feature_membership_command(uuid,bigint,text,text,boolean,timestamptz)"
 )
+_ATTEMPT_SIGNATURE = (
+    "ops.append_provider_feature_attempt_event_command(text,bigint,text,text,integer,text,jsonb)"
+)
 _TERMINAL_SIGNATURE = (
     "ops.transition_provider_feature_operation_terminal_command(uuid,text,text,text,text,"
     "timestamptz,timestamptz,boolean)"
@@ -480,11 +688,17 @@ def upgrade() -> None:
     _execute_commands(_HELPERS_SQL)
     _execute_commands(_COMMANDS_SQL)
     op.execute("GRANT USAGE, CREATE ON SCHEMA ops TO ktm_curation_command_owner")
-    for signature in (_ENSURE_SIGNATURE, _FINISH_SIGNATURE, _TERMINAL_SIGNATURE):
+    for signature in (
+        _ENSURE_SIGNATURE,
+        _FINISH_SIGNATURE,
+        _ATTEMPT_SIGNATURE,
+        _TERMINAL_SIGNATURE,
+    ):
         op.execute(f"ALTER PROCEDURE {signature} OWNER TO ktm_curation_command_owner")
     op.execute("REVOKE CREATE ON SCHEMA ops FROM ktm_curation_command_owner")
     op.execute(
-        "GRANT SELECT, INSERT, UPDATE ON TABLE ops.import_jobs, ops.import_job_datasets "
+        "GRANT SELECT, INSERT, UPDATE ON TABLE ops.import_jobs, ops.import_job_datasets, "
+        "ops.import_job_events "
         "TO ktm_curation_command_owner"
     )
     op.execute(
@@ -496,7 +710,12 @@ def upgrade() -> None:
         "TO ktm_curation_command_owner"
     )
     op.execute("SET ROLE ktm_curation_command_owner")
-    for signature in (_ENSURE_SIGNATURE, _FINISH_SIGNATURE, _TERMINAL_SIGNATURE):
+    for signature in (
+        _ENSURE_SIGNATURE,
+        _FINISH_SIGNATURE,
+        _ATTEMPT_SIGNATURE,
+        _TERMINAL_SIGNATURE,
+    ):
         op.execute(
             f"REVOKE ALL ON PROCEDURE {signature} FROM PUBLIC, ktm_feature_runtime, "
             "ktm_feature_api_runtime, ktm_feature_dagster_runtime, "
