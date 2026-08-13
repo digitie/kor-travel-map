@@ -8,7 +8,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import text
-from sqlalchemy.exc import DBAPIError, IntegrityError
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from kortravelmap.core.feature_operation import ProviderDatasetOperationMembership
@@ -144,10 +144,10 @@ async def _seed_candidate(
                     """
                     INSERT INTO feature.curated_themes (
                       theme_slug, theme_name, theme_description, theme_group,
-                      default_curated, visibility, metadata
+                      default_curated, visibility, metadata, owner_kind
                     ) VALUES (
                       :slug, 'typed candidate theme', '', 'test', false,
-                      'admin_only', '{}'::jsonb
+                      'admin_only', '{}'::jsonb, 'operator'
                     ) RETURNING theme_id
                     """
                 ),
@@ -197,10 +197,10 @@ async def _seed_candidate(
                     """
                     INSERT INTO feature.curated_source_rules (
                       theme_id, source_id, region_scope, default_action,
-                      priority, enabled, metadata
+                      priority, enabled, metadata, owner_kind
                     ) VALUES (
                       CAST(:theme_id AS uuid), CAST(:source_id AS uuid),
-                      '{}'::jsonb, 'candidate', 10, true, '{}'::jsonb
+                      '{}'::jsonb, 'candidate', 10, true, '{}'::jsonb, 'operator'
                     ) RETURNING rule_id
                     """
                 ),
@@ -1012,7 +1012,7 @@ async def test_rule_reconcile_scope_omission_and_cross_executor_fail_closed(
         await dagster.dispose()
 
 
-async def test_provider_full_snapshot_requires_exact_authoritative_job_and_replays(
+async def test_provider_generation_primitives_require_internal_finalizer(
     migrated_engine: AsyncEngine,
 ) -> None:
     seeded = await _seed_candidate(
@@ -1146,14 +1146,12 @@ async def test_provider_full_snapshot_requires_exact_authoritative_job_and_repla
                 ),
                 {**seeded, "source_job_id": invalid_source_job_id},
             )
-        params = {**seeded, "source_job_id": source_job_id}
-
         async with dagster.connect() as connection:
             transaction = await connection.begin()
             await connection.execute(
                 text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
             )
-            with pytest.raises(IntegrityError) as invalid:
+            with pytest.raises(DBAPIError) as invalid:
                 await connection.execute(
                     text(
                         """
@@ -1166,123 +1164,43 @@ async def test_provider_full_snapshot_requires_exact_authoritative_job_and_repla
                     ),
                     {**seeded, "source_job_id": invalid_source_job_id},
                 )
-            assert getattr(invalid.value.orig, "sqlstate", None) == "23514"
+            assert getattr(invalid.value.orig, "sqlstate", None) == "42501"
             await transaction.rollback()
-
-        async with dagster.begin() as connection:
-            await connection.execute(
-                text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
-            )
-            first = (
-                await connection.execute(
-                    text(
-                        """
-                        CALL feature.materialize_theme_candidate_generation(
-                          CAST(:rule_id AS uuid), 'provider_full_snapshot',
-                          CAST(:source_job_id AS uuid), NULL, NULL, NULL,
-                          '{}'::jsonb, NULL, NULL, NULL, NULL, NULL
-                        )
-                        """
-                    ),
-                    params,
-                )
-            ).mappings().one()
-        assert first["o_replayed"] is False
-        assert int(first["o_observed_candidate_count"]) == 1
-
-        async with dagster.begin() as connection:
-            await connection.execute(
-                text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
-            )
-            replay = (
-                await connection.execute(
-                    text(
-                        """
-                        CALL feature.materialize_theme_candidate_generation(
-                          CAST(:rule_id AS uuid), 'provider_full_snapshot',
-                          CAST(:source_job_id AS uuid), NULL, NULL, NULL,
-                          '{}'::jsonb, NULL, NULL, NULL, NULL, NULL
-                        )
-                        """
-                    ),
-                    params,
-                )
-            ).mappings().one()
-        assert replay["o_replayed"] is True
-        assert replay["o_generation_id"] == first["o_generation_id"]
-
-        async with migrated_engine.begin() as connection:
-            await connection.execute(
-                text(
-                    """
-                    UPDATE ops.import_jobs
-                    SET payload = payload || jsonb_build_object(
-                      'candidate_generation_sealed_at', clock_timestamp()
-                    )
-                    WHERE job_id = CAST(:source_job_id AS uuid)
-                    """
-                ),
-                params,
-            )
-            late_rule_id = str(
-                await connection.scalar(
-                    text(
-                        """
-                        INSERT INTO feature.curated_source_rules (
-                          theme_id, source_id, region_scope, default_action,
-                          priority, enabled, metadata
-                        )
-                        SELECT theme_id, source_id, region_scope, default_action,
-                               priority + 1, enabled, metadata
-                        FROM feature.curated_source_rules
-                        WHERE rule_id = CAST(:rule_id AS uuid)
-                        RETURNING rule_id
-                        """
-                    ),
-                    params,
-                )
-            )
 
         async with dagster.connect() as connection:
             transaction = await connection.begin()
             await connection.execute(
                 text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
             )
-            with pytest.raises(IntegrityError) as sealed:
+            with pytest.raises(DBAPIError) as observation:
                 await connection.execute(
                     text(
                         """
-                        CALL feature.materialize_theme_candidate_generation(
-                          CAST(:rule_id AS uuid), 'provider_full_snapshot',
-                          CAST(:source_job_id AS uuid), NULL, NULL, NULL,
-                          '{}'::jsonb, NULL, NULL, NULL, NULL, NULL
+                        CALL feature.refresh_curated_source_observation(
+                          :dataset_id, CAST(:source_job_id AS uuid),
+                          NULL, NULL, NULL, NULL
                         )
                         """
                     ),
-                    {**params, "rule_id": late_rule_id},
+                    {**seeded, "source_job_id": invalid_source_job_id},
                 )
-            assert getattr(sealed.value.orig, "sqlstate", None) == "23514"
+            assert getattr(observation.value.orig, "sqlstate", None) == "42501"
             await transaction.rollback()
 
-        async with migrated_engine.connect() as connection:
-            actor, source_job, causation_job = (
-                await connection.execute(
-                    text(
-                        """
-                        SELECT transition.actor, generation.source_job_id::text,
-                               transition.causation_ref ->> 'source_job_id'
-                        FROM feature.theme_feature_candidate_transitions AS transition
-                        JOIN feature.theme_candidate_generations AS generation
-                          ON generation.generation_id = transition.generation_id
-                        WHERE generation.generation_id = CAST(:generation_id AS uuid)
-                        """
-                    ),
-                    {"generation_id": first["o_generation_id"]},
+        for table_name in (
+            "curation_provider_snapshot_receipts",
+            "curation_provider_root_receipts",
+        ):
+            async with dagster.connect() as connection:
+                transaction = await connection.begin()
+                with pytest.raises(DBAPIError) as forged_receipt:
+                    await connection.execute(
+                        text(f"DELETE FROM ops.{table_name} WHERE false")
+                    )
+                assert (
+                    getattr(forged_receipt.value.orig, "sqlstate", None) == "42501"
                 )
-            ).one()
-        assert actor == f"provider:{seeded['dataset_id']}"
-        assert source_job == source_job_id
-        assert causation_job == source_job_id
+                await transaction.rollback()
     finally:
         await dagster.dispose()
 
@@ -1350,17 +1268,27 @@ async def test_provider_root_success_atomically_observes_generates_and_seals(
                 authoritative_snapshot_complete=True,
             )
             source_job_id = finished.operation.members[0].job_id
-            assert await session.scalar(
+        async with migrated_engine.connect() as connection:
+            assert await connection.scalar(
                 text(
                     """
-                    SELECT payload ? 'candidate_generation_sealed_at'
-                    FROM ops.import_jobs
-                    WHERE job_id = CAST(:job_id AS uuid)
+                    SELECT EXISTS (
+                      SELECT 1 FROM ops.curation_provider_snapshot_receipts
+                      WHERE source_job_id = CAST(:job_id AS uuid)
+                    ) AND NOT EXISTS (
+                      SELECT 1 FROM ops.curation_provider_root_receipts
+                      WHERE root_job_id = (
+                        SELECT parent_job_id FROM ops.import_jobs
+                        WHERE job_id = CAST(:job_id AS uuid)
+                      )
+                    )
                     """
                 ),
                 {"job_id": source_job_id},
-            ) is False
+            ) is True
 
+        async with session_factory.begin() as session:
+            await session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
             terminal = await reconcile_dagster_feature_run(
                 session,
                 dagster_run_id=run_id,
@@ -1382,12 +1310,8 @@ async def test_provider_root_success_atomically_observes_generates_and_seals(
             await connection.execute(
                 text(
                     """
-                    SELECT
-                      payload ? 'candidate_generation_sealed_at' AS sealed,
-                      (payload ->> 'candidate_generation_count')::integer
-                        AS generations,
-                      payload -> 'source_observation' ->> 'input_set_hash'
-                        AS input_set_hash,
+                    SELECT root_receipt.generation_count AS generations,
+                      snapshot.source_input_set_hash AS input_set_hash,
                       (SELECT count(*)
                        FROM ops.curation_source_observation_receipts
                        WHERE import_job_id = job.job_id) AS observations,
@@ -1395,13 +1319,16 @@ async def test_provider_root_success_atomically_observes_generates_and_seals(
                        FROM feature.theme_candidate_generations
                        WHERE source_job_id = job.job_id) AS generation_rows
                     FROM ops.import_jobs AS job
+                    JOIN ops.curation_provider_snapshot_receipts AS snapshot
+                      ON snapshot.source_job_id = job.job_id
+                    JOIN ops.curation_provider_root_receipts AS root_receipt
+                      ON root_receipt.root_job_id = job.parent_job_id
                     WHERE job.job_id = CAST(:job_id AS uuid)
                     """
                 ),
                 {"job_id": source_job_id},
             )
         ).one()
-    assert receipt.sealed is True
     assert receipt.generations == 1
     assert len(receipt.input_set_hash) == 64
     assert (receipt.observations, receipt.generation_rows) == (1, 1)
