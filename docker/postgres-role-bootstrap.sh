@@ -263,6 +263,34 @@ FROM pg_catalog.pg_class
 JOIN pg_catalog.pg_namespace ON pg_namespace.oid = pg_class.relnamespace
 WHERE nspname IN ('feature', 'provider_sync', 'ops')
   AND relkind IN ('r', 'p', 'v', 'm', 'S', 'f')
+  -- identity/serial로 테이블 컬럼에 묶인 시퀀스는 **제외한다.** PostgreSQL은 그런
+  -- 시퀀스의 소유자 변경을 거부한다("cannot change owner of sequence ... linked to
+  -- table") — 소유권이 소유 테이블을 따라가기 때문이다. 그래서 데이터가 있는 DB에서는
+  -- 이 sweep이 ON_ERROR_STOP으로 죽고 소유권이 **절반만 이전된** 상태로 남아,
+  -- 재실행해도 같은 지점에서 다시 죽는다(2026-08-13 prod 리허설 실측: exit 3,
+  -- 82개 중 10개만 이전). fresh DB에서는 대상이 0개라 이 결함이 드러나지 않는다.
+  AND NOT EXISTS (
+      SELECT 1
+      FROM pg_catalog.pg_depend
+      WHERE pg_depend.classid = 'pg_class'::regclass
+        AND pg_depend.objid = pg_class.oid
+        AND pg_depend.deptype IN ('a', 'i')
+  )
+\gexec
+
+-- ``public.alembic_version``도 넘긴다. 위 sweep은 application schema만 훑고
+-- ``ALTER DATABASE ... OWNER``는 테이블 소유자를 바꾸지 않으므로, 기존 DB에서는 이
+-- 테이블이 구 bootstrap superuser 소유로 남는다. 그러면 ADR-090 경로(migrator LOGIN →
+-- ``SET ROLE ktm_feature_schema_owner``)가 첫 ``SELECT version_num``에서
+-- ``permission denied for table alembic_version``으로 죽어 **단 한 revision도**
+-- 적용되지 못한다. fresh DB에서는 alembic이 schema owner 자격으로 직접 만들기 때문에
+-- 하네스 전량에서 무증상이었다.
+SELECT format('ALTER TABLE public.%I OWNER TO ktm_feature_schema_owner', relname)
+FROM pg_catalog.pg_class
+JOIN pg_catalog.pg_namespace ON pg_namespace.oid = pg_class.relnamespace
+WHERE nspname = 'public'
+  AND relname = 'alembic_version'
+  AND relkind = 'r'
 \gexec
 
 SELECT format(

@@ -2895,7 +2895,11 @@ print(value)
   start_checkpoint_quiescence
   assert_checkpoint_quiescence
   write_snapshot "$CHECKPOINT_SNAPSHOT" "$RUN_ID"
-  [[ "$(psql_value "SELECT count(*) FROM feature.features WHERE lifecycle_state <> 'retired' AND (user_change_reason LIKE 'admin feature live acceptance clone-%' OR name LIKE 'E2E hidden weather clone-%' OR name LIKE 'E2E hidden price clone-%')")" == "0" ]] ||
+  # ``feature.features.user_change_reason``은 T-VN-34C(0097)가 물리 삭제했다. 인수 실행이
+  # 남긴 흔적은 이제 row가 아니라 **감사 테이블**에 있다 — 같은 reason 문자열이
+  # ``ops.feature_change_requests.reason``으로 들어가고(아래 줄이 그것을 본다), row 쪽에는
+  # 남지 않는다. 그래서 잔재 판정은 그 표를 거쳐 feature로 되짚는다.
+  [[ "$(psql_value "SELECT count(*) FROM feature.features AS f WHERE f.lifecycle_state <> 'retired' AND (EXISTS (SELECT 1 FROM ops.feature_change_requests AS r WHERE r.feature_id = f.feature_id AND r.reason LIKE 'admin feature live acceptance clone-%') OR f.name LIKE 'E2E hidden weather clone-%' OR f.name LIKE 'E2E hidden price clone-%')")" == "0" ]] ||
     die "clone checkpoint has non-retired acceptance Feature residue"
   [[ "$(psql_value "SELECT count(*) FROM ops.feature_change_requests WHERE state = 'pending' AND reason LIKE 'admin feature live acceptance clone-%'")" == "0" ]] ||
     die "clone checkpoint has pending acceptance change request residue"

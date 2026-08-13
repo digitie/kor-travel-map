@@ -337,42 +337,6 @@ class FeatureRow(Base):
             text("created_at DESC"),
             text("feature_id DESC"),
         ),
-        # bitmap 결합 축은 **공개 술어의 여집합**만 담는다. 전체 인덱스로 두면 공개
-        # 질의가 공개 partial 대신 이쪽을 골라 두 표면이 경쟁한다(실측). 여집합이면
-        # 공개 질의는 술어가 거짓임이 증명돼 고를 수 없고, admin 무필터 질의는
-        # BitmapOr로 두 partial을 합쳐 덮는다.
-        Index(
-            "idx_features_admin_coord_gist",
-            "coord",
-            postgresql_using="gist",
-            postgresql_where=text(
-                "NOT (lifecycle_state = 'active' "
-                "AND publication_state = 'published' "
-                "AND quality_state = 'valid')"
-            ),
-        ),
-        Index(
-            "idx_features_admin_kind_category",
-            "kind",
-            "category",
-            "feature_id",
-            postgresql_where=text(
-                "NOT (lifecycle_state = 'active' "
-                "AND publication_state = 'published' "
-                "AND quality_state = 'valid')"
-            ),
-        ),
-        Index(
-            "idx_features_admin_name_trgm",
-            "name",
-            postgresql_using="gin",
-            postgresql_ops={"name": "x_extension.gin_trgm_ops"},
-            postgresql_where=text(
-                "NOT (lifecycle_state = 'active' "
-                "AND publication_state = 'published' "
-                "AND quality_state = 'valid')"
-            ),
-        ),
         Index("idx_features_legal_dong_code", "legal_dong_code"),
         Index(
             "idx_features_sigungu",

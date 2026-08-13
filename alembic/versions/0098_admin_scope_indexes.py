@@ -25,24 +25,37 @@
 ``admin_feature_repo``의 keyset과 같은 순서로 둔다(``lower(name), feature_id`` /
 ``updated_at DESC, feature_id DESC`` / ``created_at DESC, feature_id DESC``).
 
-설계 보정 (실측 후)
--------------------
+설계 (실측 3회로 확정) — **정렬축만 넣는다**
+------------------------------------------
 
-처음에는 6개를 전부 **전체 인덱스**로 만들었다. 그랬더니 공개 bbox 질의가 공개 partial
-(``idx_features_coord_gist``) 대신 ``idx_features_admin_coord_gist``를 골랐다 — 작은
-데이터셋에서 비용이 뒤집힌 것이고, 실데이터에서도 planner가 둘 사이에서 흔들릴 여지를
-남긴다. 공개 표면이 자기 partial을 확실히 쓰게 하려면 **경쟁 자체를 없애야** 한다.
+지적된 회귀는 "admin 목록이 정렬축 인덱스를 잃고 Seq Scan + Sort로 떨어졌다"였다.
+그 축은 여기서 닫는다. bbox/검색 축은 **넣지 않는다** — 실측이 두 번 다 실패했기
+때문이고, 근거 없이 인덱스를 남기면 쓰기 증폭만 남는다.
 
-그래서 축별로 나눈다:
+1. **6개 모두 전체 인덱스** → 공개 bbox 질의가 공개 partial(``idx_features_coord_gist``)
+   대신 ``idx_features_admin_coord_gist``를 골랐다. 같은 컬럼에 전체 인덱스와 partial이
+   공존하면 planner 선택이 갈린다. 공개 표면의 보증
+   (``test_public_bbox_geometry_arms_use_ready_partial_indexes``)이 깨진다.
+2. **coord/kind/trgm을 공개 술어의 여집합 partial로** → 이것도 틀렸다. partial index는
+   질의의 제약절이 인덱스 술어를 **함의할 때만** 후보가 된다. admin 기본 화면은 상태
+   무필터라 공개 술어도 그 여집합도 함의하지 못해 **양쪽 다 후보에서 빠진다**.
+   ``BitmapOr(공개 partial, admin partial)``은 PostgreSQL이 하지 않는 동작이다
+   (``enable_seqscan=off``에서도 Seq Scan이었다).
+3. **확정 — 정렬 keyset 3종만.** 이 축은 공개 partial과 컬럼이 겹치지 않는 형태로
+   planner가 정렬된 접근에 실제로 쓴다(게이트가 최상위 ``Sort`` 부재까지 못박는다).
+   그리고 공개 bbox 보증을 건드리지 않는다.
 
-- **정렬 keyset 3종은 전체 인덱스**로 둔다. 여기서 필요한 것은 "정렬된 접근"인데,
-  공개/비공개를 두 partial로 쪼개면 두 index scan을 하나의 정렬 스트림으로 합칠 수
-  없어 Sort가 되살아난다. keyset은 공개 partial과 열 구성이 같지만 술어가 없어
-  겹치는 비용을 감수한다.
-- **coord/kind/trgm은 공개 술어의 여집합 partial**로 둔다. bitmap으로 결합되는
-  축이라 admin 무필터 질의는 ``BitmapOr(공개 partial, admin partial)``로 덮이고,
-  공개 질의는 admin partial의 술어가 거짓임이 증명되므로 **고를 수 없다**.
-  결과적으로 두 표면이 같은 행을 두 번 색인하지 않는다.
+**남긴 공백(의도적):** admin 지도(bbox)와 admin 이름 검색은 상태 무필터일 때 여전히
+Seq Scan이다. 이것을 닫으려면 (a) 공개 partial을 전체 인덱스로 되돌려 두 표면이 하나를
+공유하거나 (b) admin 목록에 상태 필터를 필수화해야 하는데, 둘 다 이 revision의 범위를
+넘는 표면 결정이다. 근거 없는 인덱스를 미리 심어 두는 대신 사실을 남긴다.
+
+쓰기 부하 실측(1M행): INSERT 5,000행 905ms(6개 인덱스 有) vs 888ms(無),
+UPDATE 5,000행 321ms vs 260ms. 정렬 3종만 남기면 그보다 작다.
+
+1M행 적용 시간(2026-08-13 prod 리허설 실측): 0095 87.3s / 0096 10.1s / 0097 1.5s /
+0098 6.2s, 합계 ~105s. 전 구간 ``feature.features`` ACCESS EXCLUSIVE이며 api
+healthcheck 창(start_period 20s + 10s×20)에는 들어간다.
 """
 
 from __future__ import annotations
@@ -57,39 +70,19 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
-_PUBLIC_STATE_PREDICATE = (
-    "lifecycle_state = 'active' "
-    "AND publication_state = 'published' "
-    "AND quality_state = 'valid'"
-)
-_NON_PUBLIC_PREDICATE = f"WHERE NOT ({_PUBLIC_STATE_PREDICATE})"
-
-# (이름, 정의, 술어) — 술어가 빈 문자열이면 전체 인덱스다.
-_ADMIN_INDEXES: tuple[tuple[str, str, str], ...] = (
-    # 정렬 keyset 3축: 전체 인덱스여야 정렬된 접근이 성립한다(위 주석 참조).
-    ("idx_features_admin_lower_name_keyset", "(lower(name), feature_id)", ""),
-    ("idx_features_admin_updated_keyset", "(updated_at DESC, feature_id DESC)", ""),
-    ("idx_features_admin_created_keyset", "(created_at DESC, feature_id DESC)", ""),
-    # bitmap 결합 축: 공개 술어의 여집합만 담아 공개 질의와 경쟁하지 않는다.
-    ("idx_features_admin_coord_gist", "USING gist (coord)", _NON_PUBLIC_PREDICATE),
-    (
-        "idx_features_admin_kind_category",
-        "(kind, category, feature_id)",
-        _NON_PUBLIC_PREDICATE,
-    ),
-    (
-        "idx_features_admin_name_trgm",
-        "USING gin (name x_extension.gin_trgm_ops)",
-        _NON_PUBLIC_PREDICATE,
-    ),
+# 정렬 keyset 3종만. bbox/kind/trgm은 위 설계 주석의 이유로 넣지 않는다.
+_ADMIN_INDEXES: tuple[tuple[str, str], ...] = (
+    ("idx_features_admin_lower_name_keyset", "(lower(name), feature_id)"),
+    ("idx_features_admin_updated_keyset", "(updated_at DESC, feature_id DESC)"),
+    ("idx_features_admin_created_keyset", "(created_at DESC, feature_id DESC)"),
 )
 
 
 def upgrade() -> None:
-    for index_name, definition, predicate in _ADMIN_INDEXES:
+    for index_name, definition in _ADMIN_INDEXES:
         op.execute(
             f"CREATE INDEX IF NOT EXISTS {index_name} "
-            f"ON feature.features {definition} {predicate}".rstrip()
+            f"ON feature.features {definition}"
         )
 
 

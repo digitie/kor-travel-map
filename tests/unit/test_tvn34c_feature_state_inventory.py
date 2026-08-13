@@ -192,3 +192,57 @@ def test_tvn34c_owned_feature_readers_do_not_restore_legacy_state() -> None:
         for path in _OWNED_FEATURE_READERS
     }
     assert {path: found for path, found in violations.items() if found} == {}
+
+
+# ── 스크립트 축 ──────────────────────────────────────────────────────────────
+# 위 차단선은 AST 기반이라 `.py`만 본다. 그런데 이 저장소의 **live 인수 러너**는 sh이고
+# 그 안에서 `feature.features`를 직접 질의한다. 실제로 T-VN-34C가 `user_change_reason`을
+# 물리 삭제한 뒤에도 `run-admin-feature-clone-live-acceptance.sh`가 그 컬럼을 계속 조회해
+# **live E2E 경로가 통째로 깨진 채** 모든 게이트가 green이었다(2026-08-13 실측). 러너에는
+# 정적 문자열 계약만 있고 실행 게이트가 없어 아무도 잡지 못했다.
+_SCRIPT_ROOTS = (_ROOT / "scripts",)
+
+
+def _feature_relation_scripts() -> tuple[Path, ...]:
+    found: list[Path] = []
+    for root in _SCRIPT_ROOTS:
+        for path in sorted(root.rglob("*.sh")):
+            if _FEATURE_RELATION_MENTION.search(path.read_text(encoding="utf-8")):
+                found.append(path)
+    return tuple(found)
+
+
+def test_tvn34c_scripts_do_not_query_dropped_feature_columns() -> None:
+    """sh 러너가 0097이 지운 컬럼을 조회하지 않는지 본다.
+
+    판정은 단순하다 — `feature.features`를 언급하는 스크립트에서 삭제된 컬럼 이름이
+    **SQL로** 나타나면 위반이다. 주석에 이름을 적는 것(왜 지웠는지 설명)은 허용한다.
+    """
+
+    violations: dict[str, list[str]] = {}
+    for path in _feature_relation_scripts():
+        hits: set[str] = set()
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if line.lstrip().startswith("#"):
+                continue
+            # `feature.features`를 **읽는 문맥**만 본다. 이 스크립트들에는
+            # (a) "그 컬럼이 더 이상 없어야 한다"는 부정 단언
+            #     (`information_schema.columns ... column_name = ANY(...)`)과
+            # (b) HTTP `response.status`·쉘 `local status=$?` 같은 동명이인이 섞여 있다.
+            # 둘 다 위반이 아니므로, 같은 줄에서 `feature.features`와 함께 나오는
+            # 참조만 센다.
+            if "information_schema" in line:
+                continue
+            if "feature.features" not in line:
+                continue
+            for column in _DROPPED_COLUMNS:
+                # alias 한정(`f.user_change_reason`)이 **바로 위반이다.** py 쪽
+                # "맨 컬럼" 규칙의 lookbehind를 그대로 쓰면 점 뒤 참조가 제외돼
+                # 정작 잡아야 할 형태를 놓친다(그렇게 짰다가 변이가 통과했다).
+                if re.search(rf"\b{re.escape(column)}\b", line):
+                    hits.add(column)
+        if hits:
+            violations[str(path.relative_to(_ROOT))] = sorted(hits)
+    assert violations == {}, (
+        "스크립트가 0097이 삭제한 컬럼을 조회한다 — live 경로가 런타임에만 터진다"
+    )

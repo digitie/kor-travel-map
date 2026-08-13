@@ -875,6 +875,13 @@ async def test_t212d_planner_selects_representative_indexes_without_seqscan_hint
         admin_features_by_name["Plans"][0]["Node Type"] != "Sort"
     ), admin_features_by_name["Plans"][0]
 
+    # admin **지도**(bbox)와 이름 검색은 상태 무필터일 때 여전히 Seq Scan이다.
+    # 0098은 정렬축만 닫았다 — bbox/trgm 축은 실측 두 번이 다 실패했다(전체 인덱스는
+    # 공개 partial 보증을 깨고, 여집합 partial은 무필터 질의가 술어를 함의하지 못해
+    # 사용 불가). 근거 없는 인덱스를 남기는 대신 공백을 사실로 둔다. 닫으려면 공개
+    # partial을 전체로 되돌려 공유하거나 admin 목록에 상태 필터를 필수화해야 하고,
+    # 둘 다 표면 결정이라 별도 태스크다(alembic 0098 설계 주석 참조).
+
 
 async def test_t212d_ops_and_review_lists_use_expected_indexes(
     migrated_session: AsyncSession,
