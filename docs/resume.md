@@ -57,6 +57,9 @@ machine contract에 맞춘 set-based generation/typed command procedure를 구�
 populated DB에서 2회, 0105는 fresh 0001→head와 실제 ROLE ACL/append-only gate로 검증했다.
 frozen artifact unit 10개와 target SQL/violation/head-equivalence integration 11개도 통과했다.
 SERIALIZABLE 정책 unit 22개와 실제 PostgreSQL transaction integration 1개도 통과했다.
+공개 canonical reader의 미연결 included item 우회도 닫아 public count/detail은 linked public
+Feature와 trusted accepted decision을 공통으로 요구한다. PostgreSQL 통합 회귀가 공개 0건과
+admin 보존을 함께 확인했다.
 A/B/C는 하나의 forward-only PR/release로 유지하며, 누적 구현은 DB/동시성과
 API·consumer/ACL 관점의 독립 적대 리뷰어 2명이 같은 고정 SHA에서 검증한다.
 상세 계약은
