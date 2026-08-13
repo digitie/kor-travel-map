@@ -99,6 +99,8 @@ CREATE TABLE ops.curation_rule_reconcile_operations (
   command_id bigint REFERENCES ops.domain_commands(command_id) ON DELETE RESTRICT,
   system_operation_key text,
   actor text NOT NULL CHECK (actor = btrim(actor) AND actor <> ''),
+  scope_member_count bigint NOT NULL CHECK (scope_member_count >= 0),
+  scope_members_hash text NOT NULL CHECK (scope_members_hash ~ '^[0-9a-f]{64}$'),
   created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
   CONSTRAINT ck_curation_rule_reconcile_operation_origin CHECK (
     (command_id IS NOT NULL AND system_operation_key IS NULL)
@@ -197,11 +199,16 @@ generation procedure는 locked operation의 rule/revision/hash/actor를 재검�
 `command_id`가 operation의 originating command와 같음을 요구한다. system reconcile이면 둘 다
 NULL이다. relation owner/trigger owner/ACL/guard definition과 두 partial unique index는 catalog test로
 고정한다.
-parent에는 sorted scope member count/hash를 추가하고 child는 writer가 잠근 old/new source
+parent에는 위 `scope_member_count`/`scope_members_hash`를 저장하고 child는 writer가 잠근 old/new source
 entity/Feature identity와 semantic hash를 durable하게 보존한다. command procedure가 DB relation에서
 scope를 만들고 current locked set과 양방향 set-diff 0을 검증한 뒤에만 generation이 읽는다. retry는
 같은 operation의 exact scope hash만 허용하고 omission/injection은 409다. parent/child 모두 같은
-immutable guard와 ACL을 적용한다.
+immutable guard와 ACL을 적용한다. scope hash preimage v1은 child를
+`(member_kind, member_key)` UTF-8 byte lexical order로 정렬한 뒤 각 행을
+`member_kind NUL member_key NUL before_identity_hash-or-empty NUL
+after_identity_hash-or-empty LF`로 NFC 직렬화한 byte stream이다. command procedure는 child INSERT 뒤
+DB에서 count와 SHA-256을 다시 계산해 parent 값과 exact equality 및 current locked set 양방향
+`EXCEPT` 0을 확인한 경우에만 receipt를 seal한다.
 
 generation receipt는 expected set/count/hash를 먼저 계산한 뒤 의존 observation/transition보다
 선행 INSERT한다. 이후 candidate/observation/transition/eligibility removal을 반영하며 어느 단계든 실패하면
@@ -227,11 +234,21 @@ effective_rule_field_digest)` tuple set을 직접 SHA-256으로 계산한다. ef
 읽는 kind/category/region/typed detail의 T-VN-36 effective value와 winning override lineage가 포함된다.
 따라서 head가 그대로여도 admin override/state transition/merge/source-link retarget은 generation
 input hash를 바꾸며 exact replay로 오인되지 않는다. `rule_input`은 canonicalization version,
-rule revision, selector/region/category/kind/source/theme/enabled/priority의 ordered JSON을 고정해
+rule revision, selector/region/category/kind/source/theme/enabled/priority/**`default_action`**의 ordered
+JSON을 고정해
 mutable rule row의 과거 의미를 복원하며 `rule_input_hash`는 그 canonical JSON의 검증 digest다.
-generation은 `SERIALIZABLE` transaction에서 처리한다. procedure는 첫 SQL에서
+`default_action='candidate'`인 rule만 expected match를 materialize한다. `candidate → ignore`는 old scope의
+eligibility를 false로 만들고 `ignore → candidate`는 new scope를 materialize하므로 두 방향 모두 semantic
+rule update이며 동일 command transaction의 reconcile 대상이다. generation은 `SERIALIZABLE`
+transaction에서 처리한다. procedure는 첫 SQL에서
 `current_setting('transaction_isolation') = 'serializable'`을 fail-close 검증하며 아니면 `25001`로
-거부한다. repository는 transaction 첫 statement 전에 isolation을 설정한다. DB set-based evaluator가 rule
+거부한다. repository가 뒤늦게 isolation을 바꾸지 않는다. 공통 domain-command policy에
+`transaction_isolation='serializable'`을 명시하고 decorator/transaction owner가 `session.begin()` 직후
+`begin_domain_command()`의 advisory-lock/ledger SQL보다 먼저 `SET TRANSACTION ISOLATION LEVEL
+SERIALIZABLE`을 실행한다. claim, catalog/candidate mutation, generation, terminal receipt는 같은
+transaction이다. `40001`은 actor/Idempotency-Key/fingerprint가 같은 전체 command transaction을 처음부터
+재실행하며, 이미 commit된 terminal replay와 구분한다. 기본 격리 호출 거부, 실제 첫 SQL 순서,
+serialization retry/terminal replay를 PostgreSQL integration으로 고정한다. DB set-based evaluator가 rule
 predicate와 T-VN-36 effective fields로 expected match set을 직접 계산하고 각 match는 durable
 `theme_candidate_generation_observations` 한 행을 남긴다. 따라서 candidate input hash가 동일하면
 candidate 자체의 `updated_at`/`row_revision`을 바꾸지 않아도 generation coverage를 증명할 수 있다.
@@ -687,7 +704,8 @@ retained theme/source/rule catalog writer도 다음 typed `SECURITY DEFINER` com
 
 - catalog: create/update/archive theme·source·rule. 모든 update는 expected row revision과 bigint
   domain command claim을 요구하고 no-op은 revision/audit을 만들지 않는다. rule create와
-  selector/region/category/kind/source/theme/enabled/priority 등 candidate predicate/hash에 영향 주는
+  selector/region/category/kind/source/theme/enabled/priority/`default_action` 등 candidate
+  predicate/hash에 영향 주는
   모든 semantic update, rule/source/theme archive는 영향받는 old+new scope 모든 rule의 empty-set 포함
   `rule_reconcile`을 **같은
   transaction**에서 실행해 candidate eligibility와 originating command id를 원자 결박한다.
@@ -701,8 +719,10 @@ retained theme/source/rule catalog writer도 다음 typed `SECURITY DEFINER` com
 - membership: create/update/archive collection, create/update/archive item, accepted/revoked manual
   link decision. collection/item 각각 strong ETag revision을 검증한다.
 - import: import batch/row/decision을 append하고 authoritative item set을 반영하는 하나의 command.
-  dry-run은 immutable `import_plan_id`, payload hash, touched catalog/collection/item id+revision vector,
-  active-set checksum을 저장한다. commit은 전부 lock해 exact vector를 재검증하며 mismatch는 412/409
+  preview는 immutable `import_plan_id`, normalized rows, payload hash, touched catalog/collection/item
+  id+revision vector, active-set checksum, expiry를 저장한다. commit은 caller file을 다시 parse하거나
+  match resolution을 반복하지 않고 stored plan만 읽어 전부 lock한 뒤 exact vector를 재검증하며
+  mismatch는 412/409
   전체 rollback한다. import는 existing theme/source operator fields나 source observation을 update하지
   않는다. absent catalog는 explicit create-only, existing exact-equal은 reuse, 다른 값은 409 후 별도
   catalog PATCH다. batch hash replay는 exact result만 반환하며 candidate 두 축은 바꾸지 않는다.
@@ -733,6 +753,21 @@ create·patch·archive, collection/item create·patch·archive, candidate promot
 quarantine move-items와 `confirm_curation_quarantine_standalone`, typed merge다. 원 요청 replay는 body와
 ETag를 exact 재생하고 같은 idempotency key에서 changed If-Match는 409, missing=428, stale=412다.
 revision/transition id는 JSON decimal string이며 command procedure 내부만 bigint를 쓴다.
+
+기존 `POST /v1/admin/curations/import?dry_run=...`는 삭제하고 다음 2단계 HTTP 계약으로 고정한다.
+
+- `POST /v1/admin/curations/imports/preview`: `Idempotency-Key`와 파일 payload를 받아 201,
+  immutable `import_plan_id`, plan strong ETag, expiry, normalized change summary를 반환한다. 같은 actor/key와
+  같은 content hash는 exact replay, 다른 payload는 409다. content hash가 같아도 다른 actor/key의 plan을
+  암묵 공유하지 않는다.
+- `POST /v1/admin/curations/import-plans/{import_plan_id}/commit`: `Idempotency-Key`와 exact plan
+  `If-Match`를 필수로 받아 200을 반환한다. missing=428, expired/stale plan 또는 touched revision mismatch=412,
+  fingerprint mismatch/already terminal different command=409다. terminal result/ETag를 replay하고 같은 plan은
+  한 terminal commit만 가진다.
+
+OpenAPI diff, domain-command registry, generated admin types 및 UI는 preview 응답의 stored plan만 commit에
+전달한다. 두 번째 file upload나 caller-side resolution은 없다. preview receipt/normalized rows/vector는
+UPDATE/DELETE/TRUNCATE 불가이고 commit mutation·import audit·terminal receipt는 한 transaction이다.
 
 정확한 DB command inventory는 다음과 같이 migration contract test에 regprocedure signature와
 operation을 freeze한다: catalog theme/source/rule create·patch·archive, collection create·patch·archive,
@@ -808,9 +843,15 @@ preflight는 procedure별 EXECUTE allowlist, 교차 executor deny, candidate/aud
 
 1. exact Map/PinVi source SHA, migration head, preflight manifest schema version을 release input으로
    고정한다.
-2. API/Dagster writer를 stop하고 old binary가 DB에 연결하지 못하도록 deployment gate를 건다.
-3. fresh clone에서 final migration head까지 replay한 뒤 final API/Dagster binary만 startup
+2. Map API/Dagster writer와 PinVi import API/worker/queued job을 stop/drain하고 old binary가 DB나 old
+   snapshot route에 연결하지 못하도록 deployment gate를 건다. zero in-flight receipt, stopped PinVi
+   exact SHA, migration-compatible PinVi schema/binary staged 상태를 기록한다.
+3. fresh clone에서 final migration head까지 replay한 뒤 final Map API/Dagster binary만 startup
    preflight를 통과할 수 있어야 한다.
+4. exact scoped ServiceToken으로 service snapshot/OpenAPI/ETag probe를 통과시킨 뒤 paired PinVi final
+   binary를 시작하고 import fence를 해제한다. old/new cross-pair는 fail-closed이며 partial import나 요청
+   유실을 허용하지 않는다. 실패 시 old route를 되살리는 rollback 대신 stopped 상태에서 forward fix 후
+   동일 receipt로 재검증한다. Docker Manager writer registry에도 PinVi importer stop/drain/start를 넣는다.
 
 ### 6.2 ordered migration
 
@@ -880,7 +921,7 @@ PinVi가 실제로 소비하는 legacy admin
 `GET /v1/admin/features/curated/{curated_feature_id}/detail-snapshot`는 overlay의 단건 wrapper다.
 legacy snapshot은 항상 item 하나만 담으므로 `curated_feature_id`를 canonical identity로 보존할
 근거가 없다. T-VN-40은 `feature.curated_feature_detail_snapshots`와 trip-copy snapshot cache를
-물리 삭제하고, 다음 typed admin endpoint로 바꾼다.
+물리 삭제하고, 다음 typed service endpoint로 바꾼다.
 
 ```
 GET /v1/service/curation-items/{curation_item_id}/detail-snapshot
@@ -931,11 +972,27 @@ manual `admin_review` item은 `source_record_key`가 없어도 canonical/public 
 decision과 public Feature가 있으면 manual item도 반환한다. source record key가 있는 item은
 record/entity가 exact-match하지 않으면 404지만, 없는 item을 암묵적으로 import 불가로 만들지 않는다.
 
+PinVi persistence mapping은 `collection_id → curated plan`, `curation_item_id → plan POI`다. plan은
+`source_collection_id uuid UNIQUE`, POI는 `(plan_id, source_curation_item_id uuid) UNIQUE`를 가지며
+source revision은 int4가 아니라 bigint-safe decimal/BigInteger로 저장한다. collection import는 item
+snapshot을 keyset으로 전부 가져와 한 plan의 POI set을 authoritative upsert하고, item archive/
+source_present=false는 다음 refresh에서 POI를 remove/archive한다. old `source_curated_feature_id`,
+`source_curated_feature_version`, `source_curated_feature_item_id`와 old indexes/types는 paired PinVi
+migration에서 new UUID identities로 exact backfill 후 물리 제거한다.
+
+PinVi import는 `(actor, collection_id, Idempotency-Key)` immutable receipt에 request fingerprint와 Map
+snapshot ETag를 결박한다. service 내부 commit을 제거하고 plan/POI mutation + import receipt + admin
+audit를 한 transaction으로 commit한다. exact replay는 stored result, changed fingerprint는 409다.
+If-None-Match 304는 mutation/audit 0이며 200 changed ETag만 authoritative refresh한다. concurrent same/
+different key, response/audit failure, multi-item pagination, old→new identity backfill을 paired integration과
+n150 live에서 검증한다.
+
 ### 7.2 public
 
 - public `/v1/curations*`, Feature `curations[]`, PinVi curation consumer는 canonical collection/item
   projection만 쓴다.
-- `/v1/curated-features`, its `cursor` kind, theme/source candidate list, legacy `curation_status`
+- `/v1/curated-features`, its `cursor` kind, public `/v1/curated-themes`, public
+  `/v1/curated-sources`, legacy `curation_status`
   response/query field는 제거한다. redirect와 no-op parameter는 없다.
 - public response에는 candidate id/review_state/eligibility_present/rank/evidence/rejection/actor/audit을 노출하지 않는다.
 
