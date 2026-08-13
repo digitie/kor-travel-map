@@ -44,8 +44,12 @@ def test_load_source_record_links_counts_inserts_and_updates(
     async def _fake_link(session: Any, link: Any) -> bool:
         return link == "new"
 
+    async def _fake_lock(session: Any) -> None:
+        return None
+
     monkeypatch.setattr(feature_repo, "upsert_source_record", _fake_record)
     monkeypatch.setattr(feature_repo, "upsert_source_link", _fake_link)
+    monkeypatch.setattr(feature_repo, "lock_feature_curation_write", _fake_lock)
 
     pairs = [("new", "new"), ("old", "old"), ("new", "old")]
     result = asyncio.run(
@@ -61,7 +65,11 @@ def test_load_source_record_links_counts_inserts_and_updates(
 
 
 @pytest.mark.unit
-def test_load_source_record_links_empty() -> None:
+def test_load_source_record_links_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _fake_lock(session: Any) -> None:
+        return None
+
+    monkeypatch.setattr(feature_repo, "lock_feature_curation_write", _fake_lock)
     result = asyncio.run(feature_repo.load_source_record_links(None, []))  # type: ignore[arg-type]
     assert result.enrichments_total == 0
     assert result.source_records_inserted == 0

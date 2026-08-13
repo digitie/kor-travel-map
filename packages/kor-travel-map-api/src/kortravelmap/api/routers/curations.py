@@ -1563,6 +1563,7 @@ async def reclassify_admin_curation_quarantine(
     expected_collection_revision = parse_revision_header(
         request, "If-Match", required=True
     )
+    assert expected_collection_revision is not None
     data: AdminCurationQuarantineReclassifyData
     try:
         async with domain_command_transaction(session):
