@@ -2,7 +2,11 @@
   "artifact": "consumer-rollout-v1",
   "owner": "T-VN-31B",
   "description": "Wave 2 task별 consumer-first 배포 순서·write-fence 시점·호환 폐기 시점 freeze. 절차 정본은 ADR-075(보존 우선 cutover)·보고서 D-11이다. PinVi snapshot 재-vendor의 정본 귀속: user spec bytes·admin subset 비교는 ADR-079(H07B/H07D vendored 스냅샷 게이트 — 파생 digest manifest 금지)가, service 소비 계약(cache-target stream/batch)은 ADR-081과 docs/integration-map.md가 정본이다. 재-vendor는 PinVi가 핀한 Map commit에서 해당 스냅샷을 다시 추출해 contract-pin-consistency를 통과시키는 것이다.",
-  "pinvi_snapshots": ["user", "service", "admin-detail"],
+  "pinvi_snapshots": [
+    "user",
+    "service",
+    "admin-detail"
+  ],
   "rollout_principles": [
     "consumer(PinVi)를 먼저 배포한 뒤 KTM과 PinVi를 순차 전환한다 (ADR-075 결정 2)",
     "rollback window에는 write fence를 유지하거나 forward journal replay를 준비한다 — 없으면 rollback 가능하다고 선언하지 않는다 (ADR-075 결정 3)",
@@ -102,10 +106,10 @@
         "admin-detail": "yes"
       },
       "pinvi_snapshot_receipt": {
-        "map_commit": "c1fa5a4dfcf6be6db86b5b27f80bac1bca684285",
+        "map_commit": "90e24872dd2fa99652861a84fc54f17df6d0e7f5",
         "pinvi_commit": "8f7fef14a4fa77d7ec41a1068f066b7b72809c44",
         "map_user_openapi_sha256": "eca7eea1dff7aa1848e50428fb8da5507e4d636c3a979b04859ef43c7f7410e7",
-        "map_full_openapi_sha256": "0866fef40e63e1b89a406b514cb0c4ead20ee17fcc279a991ddf7846766f637d",
+        "map_full_openapi_sha256": "e48b7c0ed839735b5c2936addcbac5498b113a0038ab7b53d8a186e86249ba66",
         "pinvi_user_vendor_sha256": "eca7eea1dff7aa1848e50428fb8da5507e4d636c3a979b04859ef43c7f7410e7",
         "pinvi_admin_detail_vendor_sha256": "ea4adb6392a61d0df309e9cf3cf2ef0cdbb605784adc7812fe45cfdc3517b00a",
         "verification": [

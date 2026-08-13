@@ -49,8 +49,10 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     # 소유하던 deferred(field override 쓰기 표면)를 전용 endpoint 착지로 해소해
     # deferred 3 -> 2, added 1 -> 3.
     "openapi-diff-v1.json": ("2e0f74adddb8d2692a88fa45d61d60a30897599154bfc22f8290b1af8067bb07"),
+    # 2026-08-13 T-VN-36 — receipt가 리베이스로 폐기된 커밋(c1fa5a4d)과 그때의
+    # spec sha를 가리키고 있었다. 현재 head로 재핀했다.
     "consumer-rollout-v1.json": (
-        "d22f1ba91ccc70cad09e25a8815cb164452193e98bdaf5b4a2f2f11378cf1f0b"
+        "1525ec216e708199005a9f3d5946535cc4fabe7a5ed250ff78d226be547c83c5"
     ),
     "violation-fixtures-v1.sql": (
         "dba1ad0e640e4ee0e2c6904ab880f7548cf073d859f221840b6fad873e3a8df6"
@@ -246,6 +248,35 @@ def test_consumer_rollout_shape() -> None:
         "PinVi contract pin consistency",
         "T-VN-36 exact Map/PinVi source pair",
     ]
+
+
+def test_active_pinvi_receipt_describes_the_current_specs() -> None:
+    """마지막 receipt의 spec sha가 **현재 트리**와 일치하는지 본다.
+
+    위 단언들은 전부 `[0-9a-f]{40}` 같은 **모양**만 본다. 그래서 receipt가 리베이스로
+    폐기된 커밋과 그때의 spec sha를 가리켜도 green이었고, `install-…-live-e2e.sh`는
+    그 `map_commit`을 `git archive`해 **다른 트리**를 n150에 올린 뒤 같은 커밋을
+    해싱해 통과시켰다 — 자기 정합적이라 아무도 눈치채지 못한다. 실제로 T-VN-34와
+    T-VN-36 receipt가 연달아 이 상태로 남았고 T-VN-34 것은 main까지 갔다.
+
+    커밋 도달 가능성은 shallow clone CI에서 확인할 수 없으므로, 검사 가능한 등가
+    불변식을 쓴다 — "가장 최근 receipt는 지금 트리의 spec을 서술한다". 리베이스로
+    커밋이 갈려도 spec bytes가 그대로면 gate가 검증하는 대상은 같고, spec이 바뀌면
+    반드시 red가 된다.
+    """
+
+    rollout = _load_json("consumer-rollout-v1.json")
+    receipt = rollout["tasks"]["T-VN-36"]["pinvi_snapshot_receipt"]
+    api_root = _ROOT / "packages/kor-travel-map-api"
+    for name, key in (
+        ("openapi.json", "map_full_openapi_sha256"),
+        ("openapi.user.json", "map_user_openapi_sha256"),
+    ):
+        observed = hashlib.sha256((api_root / name).read_bytes()).hexdigest()
+        assert observed == receipt[key], (
+            f"{name}이 T-VN-36 receipt와 다르다 — receipt를 현재 head로 재핀하라 "
+            f"({key}를 {observed}로)"
+        )
     entries = rollout["removal_manifest"]["entries"]
     assert entries, "removal manifest가 비어 있다"
     for entry in entries:
