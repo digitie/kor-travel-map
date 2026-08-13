@@ -283,6 +283,7 @@ describe("admin domain idempotency consumers", () => {
           runMutation(context, usePatchCurationItemMutation, {
             body: { item_title: "patched" } as CurationItemPatchRequest,
             collectionId: "collection-1",
+            commandEtag: '"7"',
             curationItemId: "item-1",
           }),
       },
@@ -291,6 +292,7 @@ describe("admin domain idempotency consumers", () => {
         run: () =>
           runMutation(context, useArchiveCurationItemMutation, {
             collectionId: "collection-1",
+            commandEtag: '"7"',
             curationItemId: "item-1",
           }),
       },
@@ -350,6 +352,12 @@ describe("admin domain idempotency consumers", () => {
     for (const [index, [, init]] of context.fetchMock.mock.calls.entries()) {
       const headers = init?.headers as Record<string, string> | undefined;
       expect(headers?.["Idempotency-Key"], cases[index]?.name).toMatch(UUID_RE);
+      if (
+        cases[index]?.name === "curation item patch" ||
+        cases[index]?.name === "curation item archive"
+      ) {
+        expect(headers?.["If-Match"], cases[index]?.name).toBe('"7"');
+      }
     }
   });
 });

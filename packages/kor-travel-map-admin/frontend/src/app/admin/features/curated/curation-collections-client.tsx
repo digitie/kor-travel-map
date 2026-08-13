@@ -337,7 +337,11 @@ function useCurationCollectionsClientController() {
     }
   };
 
-  const resolveItem = async (curationItemId: string, placeName: string) => {
+  const resolveItem = async (
+    curationItemId: string,
+    placeName: string,
+    commandEtag: string,
+  ) => {
     if (!activeCollectionId) return;
     const featureId = resolveFeatureIds[curationItemId]?.trim() ?? "";
     if (!featureId) {
@@ -350,6 +354,7 @@ function useCurationCollectionsClientController() {
       await patchItem.mutateAsync({
         collectionId: activeCollectionId,
         curationItemId,
+        commandEtag,
         body: { feature_id: featureId },
       });
       setResolveFeatureIds((current) => {
@@ -363,7 +368,11 @@ function useCurationCollectionsClientController() {
     }
   };
 
-  const removeItem = async (curationItemId: string, placeName: string) => {
+  const removeItem = async (
+    curationItemId: string,
+    placeName: string,
+    commandEtag: string,
+  ) => {
     if (!activeCollectionId) return;
     if (!window.confirm(`“${placeName}” 큐레이션 항목을 보관 처리할까요?`)) {
       return;
@@ -374,6 +383,7 @@ function useCurationCollectionsClientController() {
       await archiveItem.mutateAsync({
         collectionId: activeCollectionId,
         curationItemId,
+        commandEtag,
       });
       setMessage(`“${placeName}” 항목을 보관 처리했습니다.`);
     } catch {
@@ -1139,6 +1149,7 @@ function CurationCollectionTable({
                                       void resolveItem(
                                         item.curation_item_id,
                                         item.place_name,
+                                        item.command_etag,
                                       )
                                     }
                                   >
@@ -1156,6 +1167,7 @@ function CurationCollectionTable({
                                   void removeItem(
                                     item.curation_item_id,
                                     item.place_name,
+                                    item.command_etag,
                                   )
                                 }
                               >

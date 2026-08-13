@@ -86,6 +86,8 @@ export interface CurationCollection {
   archived_at: string | null;
   created_by: string | null;
   updated_by: string | null;
+  row_revision: string;
+  command_etag: string;
 }
 
 export interface CurationItem {
@@ -126,6 +128,8 @@ export interface CurationItem {
   archived_at: string | null;
   created_by: string | null;
   updated_by: string | null;
+  row_revision: string;
+  command_etag: string;
 }
 
 export interface CurationCollectionCreateRequest {
@@ -552,24 +556,30 @@ export function usePatchCurationItemMutation() {
     {
       collectionId: string;
       curationItemId: string;
+      commandEtag: string;
       body: CurationItemPatchRequest;
     }
   >({
-    mutationFn: ({ collectionId, curationItemId, body }) =>
+    mutationFn: ({ collectionId, curationItemId, commandEtag, body }) =>
       withDomainIdempotencySubmission(
         domainCommandSlot(
           "admin.curation-item.patch",
           collectionId,
           curationItemId,
         ),
-        { collectionId, curationItemId, body },
+        { collectionId, curationItemId, commandEtag, body },
         (submission, idempotencyKey) =>
           patchJson<CurationItemResponse>(
             `/v1/admin/curations/${encodeURIComponent(
               submission.collectionId,
             )}/items/${encodeURIComponent(submission.curationItemId)}`,
             submission.body,
-            { headers: { "Idempotency-Key": idempotencyKey } },
+            {
+              headers: {
+                "Idempotency-Key": idempotencyKey,
+                "If-Match": submission.commandEtag,
+              },
+            },
           ),
       ),
     onSuccess: () => invalidateCurations(queryClient),
@@ -581,23 +591,28 @@ export function useArchiveCurationItemMutation() {
   return useMutation<
     CurationItemResponse,
     Error,
-    { collectionId: string; curationItemId: string }
+    { collectionId: string; curationItemId: string; commandEtag: string }
   >({
-    mutationFn: ({ collectionId, curationItemId }) =>
+    mutationFn: ({ collectionId, curationItemId, commandEtag }) =>
       withDomainIdempotencySubmission(
         domainCommandSlot(
           "admin.curation-item.archive",
           collectionId,
           curationItemId,
         ),
-        { collectionId, curationItemId },
+        { collectionId, curationItemId, commandEtag },
         (submission, idempotencyKey) =>
           deleteJson<CurationItemResponse>(
             `/v1/admin/curations/${encodeURIComponent(
               submission.collectionId,
             )}/items/${encodeURIComponent(submission.curationItemId)}`,
             undefined,
-            { headers: { "Idempotency-Key": idempotencyKey } },
+            {
+              headers: {
+                "Idempotency-Key": idempotencyKey,
+                "If-Match": submission.commandEtag,
+              },
+            },
           ),
       ),
     onSuccess: () => invalidateCurations(queryClient),
