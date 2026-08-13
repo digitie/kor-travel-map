@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
@@ -36,6 +37,10 @@ async def _seed_candidate(
     *,
     operation: str = "admin.theme-feature-candidate.reject",
     create_candidate: bool = True,
+    provider: str = "tvn40-test",
+    dataset_key: str | None = None,
+    place_kind: str = "attraction",
+    place_payload: str = "{}",
 ) -> dict[str, object]:
     suffix = uuid4().hex
     feature_id = f"feature:tvn40-candidate-{suffix}"
@@ -47,22 +52,33 @@ async def _seed_candidate(
             await connection.scalar(
                 text(
                     """
-                    INSERT INTO provider_sync.provider_datasets (
-                      provider, dataset_key, display_name, source_kind,
-                      is_active, capabilities
-                    ) VALUES (
-                      'tvn40-test', :dataset_key, 'T-VN-40 candidate test',
-                      'system', true,
-                      jsonb_build_object(
-                        'schema_version', 1,
-                        'produces', '[]'::jsonb,
-                        'extensions', '{}'::jsonb
-                      )
+                    WITH inserted AS (
+                      INSERT INTO provider_sync.provider_datasets (
+                        provider, dataset_key, display_name, source_kind,
+                        is_active, capabilities
+                      ) VALUES (
+                        :provider, :dataset_key, 'T-VN-40 candidate test',
+                        'system', true,
+                        jsonb_build_object(
+                          'schema_version', 1,
+                          'produces', '[]'::jsonb,
+                          'extensions', '{}'::jsonb
+                        )
+                      ) ON CONFLICT (provider, dataset_key) DO NOTHING
+                      RETURNING provider_dataset_id
                     )
-                    RETURNING provider_dataset_id
+                    SELECT provider_dataset_id FROM inserted
+                    UNION ALL
+                    SELECT provider_dataset_id
+                    FROM provider_sync.provider_datasets
+                    WHERE provider = :provider AND dataset_key = :dataset_key
+                    LIMIT 1
                     """
                 ),
-                {"dataset_key": f"candidate-{suffix}"},
+                {
+                    "dataset_key": dataset_key or f"candidate-{suffix}",
+                    "provider": provider,
+                },
             )
         )
         seed = {
@@ -72,6 +88,7 @@ async def _seed_candidate(
             "source_entity_key": source_entity_key,
             "source_record_key": source_record_key,
             "source_hash": "a" * 64,
+            "place_payload": place_payload,
             "suffix": suffix,
         }
         for statement in (
@@ -130,13 +147,14 @@ async def _seed_candidate(
                   facility_info, reviews_link, payload
                 )
                 SELECT
-                  feature_id, feature_uuid, kind, 'attraction',
-                  jsonb_build_object('wheelchair', true), '{}'::jsonb, '{}'::jsonb
+                  feature_id, feature_uuid, kind, :place_kind,
+                  jsonb_build_object('wheelchair', true), '{}'::jsonb,
+                  CAST(:place_payload AS jsonb)
                 FROM feature.features
                 WHERE feature_id = :feature_id
                 """
             ),
-            seed,
+            {**seed, "place_kind": place_kind},
         )
         theme_id = str(
             await connection.scalar(
@@ -158,13 +176,21 @@ async def _seed_candidate(
             await connection.scalar(
                 text(
                     """
-                    INSERT INTO feature.curated_sources (
-                      provider_dataset_id, source_name, source_kind,
-                      update_cycle, provider_status, metadata
-                    ) VALUES (
-                      :dataset_id, 'typed candidate source', 'internal',
-                      'unknown', 'implemented', '{}'::jsonb
-                    ) RETURNING source_id
+                    WITH inserted AS (
+                      INSERT INTO feature.curated_sources (
+                        provider_dataset_id, source_name, source_kind,
+                        update_cycle, provider_status, metadata
+                      ) VALUES (
+                        :dataset_id, 'typed candidate source', 'internal',
+                        'unknown', 'implemented', '{}'::jsonb
+                      ) ON CONFLICT (provider_dataset_id) DO NOTHING
+                      RETURNING source_id
+                    )
+                    SELECT source_id FROM inserted
+                    UNION ALL
+                    SELECT source_id FROM feature.curated_sources
+                    WHERE provider_dataset_id = :dataset_id
+                    LIMIT 1
                     """
                 ),
                 {"dataset_id": dataset_id},
@@ -1205,8 +1231,10 @@ async def test_provider_generation_primitives_require_internal_finalizer(
         await dagster.dispose()
 
 
+@pytest.mark.parametrize("drift_after_seal", [False, True])
 async def test_provider_root_success_atomically_observes_generates_and_seals(
     migrated_engine: AsyncEngine,
+    drift_after_seal: bool,
 ) -> None:
     seeded = await _seed_candidate(
         migrated_engine,
@@ -1261,11 +1289,24 @@ async def test_provider_root_success_atomically_observes_generates_and_seals(
                 engine_started_at=started_at,
                 observed_status="STARTED",
             )
+            seal = (
+                await session.execute(
+                    text(
+                        """
+                        SELECT input_member_count, source_input_set_hash
+                        FROM feature.current_provider_curation_input_set(:dataset_id)
+                        """
+                    ),
+                    {"dataset_id": membership.provider_dataset_id},
+                )
+            ).mappings().one()
             finished = await finish_dagster_feature_membership(
                 session,
                 dagster_run_id=run_id,
                 membership=membership,
                 authoritative_snapshot_complete=True,
+                curation_input_member_count=int(seal["input_member_count"]),
+                curation_input_set_hash=str(seal["source_input_set_hash"]),
             )
             source_job_id = finished.operation.members[0].job_id
         async with migrated_engine.connect() as connection:
@@ -1287,6 +1328,20 @@ async def test_provider_root_success_atomically_observes_generates_and_seals(
                 {"job_id": source_job_id},
             ) is True
 
+        if drift_after_seal:
+            async with migrated_engine.begin() as connection:
+                await connection.execute(
+                    text(
+                        """
+                        UPDATE provider_sync.source_links
+                        SET confidence = 99
+                        WHERE source_entity_key = :source_entity_key
+                          AND feature_id = :feature_id
+                        """
+                    ),
+                    seeded,
+                )
+
         async with session_factory.begin() as session:
             await session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
             terminal = await reconcile_dagster_feature_run(
@@ -1301,7 +1356,9 @@ async def test_provider_root_success_atomically_observes_generates_and_seals(
                 engine_finished_at=finished_at,
                 error=None,
             )
-            assert terminal.operation.status == "done"
+            assert terminal.operation.status == (
+                "failed" if drift_after_seal else "done"
+            )
     finally:
         await dagster.dispose()
 
@@ -1328,7 +1385,274 @@ async def test_provider_root_success_atomically_observes_generates_and_seals(
                 ),
                 {"job_id": source_job_id},
             )
-        ).one()
-    assert receipt.generations == 1
-    assert len(receipt.input_set_hash) == 64
-    assert (receipt.observations, receipt.generation_rows) == (1, 1)
+        ).one_or_none()
+    if drift_after_seal:
+        assert receipt is None
+        async with migrated_engine.connect() as connection:
+            terminal = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT root.status, root.current_stage,
+                               count(root_receipt.root_job_id) AS receipts
+                        FROM ops.import_jobs AS child
+                        JOIN ops.import_jobs AS root ON root.job_id = child.parent_job_id
+                        LEFT JOIN ops.curation_provider_root_receipts AS root_receipt
+                          ON root_receipt.root_job_id = root.job_id
+                        WHERE child.job_id = CAST(:job_id AS uuid)
+                        GROUP BY root.status, root.current_stage
+                        """
+                    ),
+                    {"job_id": source_job_id},
+                )
+            ).one()
+        assert (terminal.status, terminal.current_stage, terminal.receipts) == (
+            "failed",
+            "stale_input",
+            0,
+        )
+    else:
+        assert receipt is not None
+        assert receipt.generations == 1
+        assert len(receipt.input_set_hash) == 64
+        assert (receipt.observations, receipt.generation_rows) == (1, 1)
+
+
+async def test_provider_child_rejects_a_load_seal_after_b_link_commit(
+    migrated_engine: AsyncEngine,
+) -> None:
+    seeded = await _seed_candidate(
+        migrated_engine,
+        operation="admin.curation-rule.create",
+        create_candidate=False,
+    )
+    membership = ProviderDatasetOperationMembership(
+        provider_dataset_id=int(seeded["dataset_id"]),
+        sync_scope="dataset_wide",
+        operation_key="load",
+    )
+    async with migrated_engine.begin() as connection:
+        await connection.execute(
+            text(
+                """
+                INSERT INTO provider_sync.provider_dataset_operations (
+                  provider_dataset_id, operation_key, operation_kind,
+                  is_enabled, config
+                ) VALUES (:dataset_id, 'load', 'refresh', true, '{}'::jsonb)
+                """
+            ),
+            seeded,
+        )
+        await connection.execute(
+            text(
+                """
+                INSERT INTO provider_sync.provider_dataset_operation_scopes (
+                  provider_dataset_id, sync_scope, operation_key, operation_kind
+                ) VALUES (:dataset_id, 'dataset_wide', 'load', 'refresh')
+                """
+            ),
+            seeded,
+        )
+        a_seal = (
+            await connection.execute(
+                text(
+                    """
+                    SELECT input_member_count, source_input_set_hash
+                    FROM feature.current_provider_curation_input_set(:dataset_id)
+                    """
+                ),
+                seeded,
+            )
+        ).mappings().one()
+    async with migrated_engine.begin() as connection:
+        await connection.execute(
+            text(
+                """
+                UPDATE provider_sync.source_links SET match_method = 'manual', confidence = 55
+                WHERE source_entity_key = :source_entity_key AND feature_id = :feature_id
+                """
+            ),
+            seeded,
+        )
+
+    dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
+    session_factory = async_sessionmaker(dagster, expire_on_commit=False)
+    try:
+        async with session_factory.begin() as session:
+            await session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
+            await ensure_dagster_feature_operation(
+                session,
+                dagster_run_id=f"tvn40-causal-gap-{seeded['suffix']}",
+                trigger_kind="schedule",
+                selected_memberships=(membership,),
+                operation_key="load",
+                engine_created_at=datetime(2026, 8, 13, 2, tzinfo=UTC),
+                engine_started_at=datetime(2026, 8, 13, 2, 0, 1, tzinfo=UTC),
+                observed_status="STARTED",
+            )
+            with pytest.raises(DBAPIError) as stale:
+                await finish_dagster_feature_membership(
+                    session,
+                    dagster_run_id=f"tvn40-causal-gap-{seeded['suffix']}",
+                    membership=membership,
+                    authoritative_snapshot_complete=True,
+                    curation_input_member_count=int(a_seal["input_member_count"]),
+                    curation_input_set_hash=str(a_seal["source_input_set_hash"]),
+                )
+            assert getattr(stale.value.orig, "sqlstate", None) == "23514"
+            assert "load input changed" in str(stale.value.orig)
+    finally:
+        await dagster.dispose()
+
+
+async def test_concierge_catalog_is_db_derived_inside_terminal_root(
+    migrated_engine: AsyncEngine,
+) -> None:
+    dataset_key = "youtube_place_candidates"
+    seeded = await _seed_candidate(
+        migrated_engine,
+        operation="admin.curation-rule.create",
+        create_candidate=False,
+        provider="kor-travel-concierge-youtube",
+        dataset_key=dataset_key,
+        place_kind="youtube_place_candidate",
+        place_payload=json.dumps(
+            {
+                "kor_travel_concierge": {
+                    "youtube": {
+                        "channel_id": "channel-a",
+                        "channel_title": "채널 A",
+                        "playlist_id": "playlist-a",
+                        "playlist_title": "목록 A",
+                    }
+                }
+            }
+        ),
+    )
+    membership = ProviderDatasetOperationMembership(
+        provider_dataset_id=int(seeded["dataset_id"]),
+        sync_scope="dataset_wide",
+        operation_key="load",
+    )
+    async with migrated_engine.begin() as connection:
+        for statement in (
+            """
+            INSERT INTO provider_sync.provider_dataset_operations (
+              provider_dataset_id, operation_key, operation_kind, is_enabled, config
+            ) VALUES (:dataset_id, 'load', 'refresh', true, '{}'::jsonb)
+            ON CONFLICT (provider_dataset_id, operation_key) DO NOTHING
+            """,
+            """
+            INSERT INTO provider_sync.provider_dataset_operation_scopes (
+              provider_dataset_id, sync_scope, operation_key, operation_kind
+            ) VALUES (:dataset_id, 'dataset_wide', 'load', 'refresh')
+            ON CONFLICT (provider_dataset_id, sync_scope, operation_key) DO NOTHING
+            """,
+        ):
+            await connection.execute(text(statement), seeded)
+
+    run_id = f"tvn40-concierge-{seeded['suffix']}"
+    created_at = datetime(2026, 8, 13, 3, tzinfo=UTC)
+    dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
+    session_factory = async_sessionmaker(dagster, expire_on_commit=False)
+    try:
+        async with session_factory.begin() as session:
+            await session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
+            await ensure_dagster_feature_operation(
+                session,
+                dagster_run_id=run_id,
+                trigger_kind="schedule",
+                selected_memberships=(membership,),
+                operation_key="load",
+                engine_created_at=created_at,
+                engine_started_at=created_at + timedelta(seconds=1),
+                observed_status="STARTED",
+            )
+            seal = (
+                await session.execute(
+                    text(
+                        """
+                        SELECT input_member_count, source_input_set_hash
+                        FROM feature.current_provider_curation_input_set(:dataset_id)
+                        """
+                    ),
+                    seeded,
+                )
+            ).mappings().one()
+            await finish_dagster_feature_membership(
+                session,
+                dagster_run_id=run_id,
+                membership=membership,
+                authoritative_snapshot_complete=True,
+                curation_input_member_count=int(seal["input_member_count"]),
+                curation_input_set_hash=str(seal["source_input_set_hash"]),
+            )
+        async with session_factory.begin() as session:
+            await session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
+            terminal = await reconcile_dagster_feature_run(
+                session,
+                dagster_run_id=run_id,
+                trigger_kind="schedule",
+                terminal_status="SUCCESS",
+                selected_memberships=(membership,),
+                operation_key="load",
+                engine_created_at=created_at,
+                engine_started_at=created_at + timedelta(seconds=1),
+                engine_finished_at=created_at + timedelta(seconds=2),
+                error=None,
+            )
+            assert terminal.operation.status == "done"
+
+        async with dagster.connect() as connection:
+            transaction = await connection.begin()
+            await connection.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
+            with pytest.raises(DBAPIError) as direct:
+                await connection.execute(
+                    text(
+                        """
+                        CALL feature.sync_concierge_theme_catalog(
+                          :dataset_id, CAST(:job_id AS uuid),
+                          NULL, NULL, NULL, NULL, NULL
+                        )
+                        """
+                    ),
+                    {**seeded, "job_id": str(uuid4())},
+                )
+            assert getattr(direct.value.orig, "sqlstate", None) == "42501"
+            await transaction.rollback()
+    finally:
+        await dagster.dispose()
+
+    async with migrated_engine.connect() as connection:
+        rows = (
+            await connection.execute(
+                text(
+                    """
+                    SELECT theme.theme_slug, rule.default_action, rule.enabled,
+                           rule.archived_at IS NULL AS rule_active,
+                           count(candidate.candidate_id) AS candidates
+                    FROM feature.curated_themes AS theme
+                    JOIN feature.curated_source_rules AS rule ON rule.theme_id = theme.theme_id
+                    LEFT JOIN feature.theme_feature_candidates AS candidate
+                      ON candidate.rule_id = rule.rule_id
+                     AND candidate.disposition = 'active'
+                     AND candidate.eligibility_present
+                    WHERE theme.owner_kind = 'provider_dataset'
+                      AND theme.owner_provider_dataset_id = :dataset_id
+                    GROUP BY theme.theme_slug, rule.default_action, rule.enabled,
+                             rule.archived_at
+                    ORDER BY theme.theme_slug
+                    """
+                ),
+                seeded,
+            )
+        ).all()
+    assert [row.theme_slug for row in rows] == [
+        "concierge-pl-playlist-a",
+        "concierge-yt-channel-a",
+    ]
+    assert all(
+        (row.default_action, row.enabled, row.rule_active, row.candidates)
+        == ("candidate", True, True, 1)
+        for row in rows
+    )

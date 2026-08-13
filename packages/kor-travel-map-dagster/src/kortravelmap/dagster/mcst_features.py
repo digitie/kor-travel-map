@@ -176,11 +176,25 @@ async def feature_place_mcst_culture(
                 await append_failed_multi_member_attempt(context, guard, membership, exc)
         raise
     if guard is not None:
-        for membership in completed_memberships:
+        assert guard.operation_key is not None
+        if len(result.results) != len(completed_memberships):
+            raise RuntimeError("MCST authoritative member와 load seal 수가 다름")
+        for loaded in result.results:
+            membership = await guard.client.resolve_feature_operation_dataset_membership(
+                operation_key=guard.operation_key,
+                provider=MCST_PROVIDER_NAME,
+                dataset_key=loaded.dataset_key,
+            )
+            if membership not in completed_memberships:
+                raise RuntimeError("MCST load seal이 frozen membership 밖을 가리킴")
             await finish_tracked_feature_membership(
                 guard,
                 membership,
                 authoritative_snapshot_complete=True,
+                curation_input_member_count=(
+                    loaded.load.curation_input_member_count
+                ),
+                curation_input_set_hash=loaded.load.curation_input_set_hash,
             )
     return result
 
