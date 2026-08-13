@@ -89,6 +89,9 @@ async def test_theme_commands_separate_display_revision_from_rule_semantics(
     archive_command = await _domain_command(
         migrated_engine, actor=actor, operation="admin.curated-theme.archive"
     )
+    provider_patch_command = await _domain_command(
+        migrated_engine, actor=actor, operation="admin.curated-theme.patch"
+    )
     api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
     dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
     try:
@@ -113,6 +116,70 @@ async def test_theme_commands_separate_display_revision_from_rule_semantics(
             ).mappings().one()
         theme_id = str(created["o_theme_id"])
         assert int(created["o_theme_revision"]) == 1
+
+        async with migrated_engine.begin() as connection:
+            provider_theme_dataset_id = int(
+                await connection.scalar(
+                    text(
+                        """
+                        INSERT INTO provider_sync.provider_datasets (
+                          provider, dataset_key, display_name, source_kind,
+                          is_active, capabilities
+                        ) VALUES (
+                          'tvn40-provider-theme', :dataset_key, 'Provider theme owner',
+                          'system', true, jsonb_build_object(
+                            'schema_version', 1, 'produces', '[]'::jsonb,
+                            'extensions', '{}'::jsonb
+                          )
+                        ) RETURNING provider_dataset_id
+                        """
+                    ),
+                    {"dataset_key": f"provider-theme-{suffix}"},
+                )
+            )
+            provider_theme_id = str(
+                await connection.scalar(
+                    text(
+                        """
+                        INSERT INTO feature.curated_themes (
+                          theme_slug, theme_name, theme_description, theme_group,
+                          default_curated, visibility, metadata, owner_kind,
+                          owner_provider_dataset_id
+                        ) VALUES (
+                          :slug, 'provider theme', '', 'test', false,
+                          'admin_only', '{}'::jsonb, 'provider_dataset', :dataset_id
+                        ) RETURNING theme_id
+                        """
+                    ),
+                    {
+                        "dataset_id": provider_theme_dataset_id,
+                        "slug": f"provider-theme-{suffix}",
+                    },
+                )
+            )
+        async with api.connect() as connection:
+            transaction = await connection.begin()
+            await connection.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
+            with pytest.raises(DBAPIError) as forbidden_owner:
+                await connection.execute(
+                    text(
+                        """
+                        CALL feature.patch_curated_theme_command(
+                          CAST(:theme_id AS uuid), 1, :slug, 'provider theme',
+                          '', 'test', 'admin_only', '{}'::jsonb,
+                          :command_id, :actor, NULL, NULL, NULL
+                        )
+                        """
+                    ),
+                    {
+                        "actor": actor,
+                        "command_id": provider_patch_command,
+                        "slug": f"provider-theme-{suffix}",
+                        "theme_id": provider_theme_id,
+                    },
+                )
+            assert getattr(forbidden_owner.value.orig, "sqlstate", None) == "42501"
+            await transaction.rollback()
 
         async with migrated_engine.begin() as connection:
             dataset_id = int(

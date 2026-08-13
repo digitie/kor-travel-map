@@ -5,6 +5,16 @@
 
 ## [Unreleased]
 
+### retained curation source CAS API (2026-08-13, T-VN-40)
+
+- **API(admin)**: retained source에 단건 GET·conditional 304와 archive DELETE를 추가했다. operator
+  create/patch/archive는 raw catalog revision ETag와 If-Match 428/412를 사용하고 provider observation은
+  별도 representation ETag에 반영된다.
+- **DATABASE**: source operator revision과 provider observation revision을 분리했다. exact done import-job
+  membership만 Dagster observation command로 수용하고 archive는 dependent rule candidate를 같은
+  SERIALIZABLE transaction에서 reconcile한다. catalog command effect는 append-only claim으로 한 command의
+  다중 resource 재사용을 거부한다.
+
 ### retained curation theme CAS API (2026-08-13, T-VN-40)
 
 - **API(admin)**: retained theme에 단건 GET과 archive DELETE를 추가하고 create/patch/archive

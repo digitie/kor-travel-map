@@ -197,6 +197,65 @@ $receipt$;
 """
 
 
+_COMMAND_EFFECT_SQL = r"""
+CREATE TABLE ops.curation_catalog_command_effects (
+  command_id bigint PRIMARY KEY
+    REFERENCES ops.domain_commands(command_id) ON DELETE RESTRICT,
+  operation text NOT NULL,
+  resource_kind text NOT NULL
+    CHECK (resource_kind IN ('theme','source','rule')),
+  resource_id uuid NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT clock_timestamp()
+);
+
+CREATE FUNCTION ops.reject_curation_catalog_effect_mutation()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = pg_catalog
+AS $guard$
+BEGIN
+  RAISE EXCEPTION 'curation catalog command effects are append-only'
+    USING ERRCODE = '55000';
+END
+$guard$;
+
+CREATE TRIGGER trg_curation_catalog_effects_immutable
+BEFORE UPDATE OR DELETE ON ops.curation_catalog_command_effects
+FOR EACH ROW EXECUTE FUNCTION ops.reject_curation_catalog_effect_mutation();
+
+CREATE TRIGGER trg_curation_catalog_effects_no_truncate
+BEFORE TRUNCATE ON ops.curation_catalog_command_effects
+FOR EACH STATEMENT EXECUTE FUNCTION ops.reject_curation_catalog_effect_mutation();
+
+CREATE FUNCTION feature.claim_curation_catalog_command_effect(
+  p_command_id bigint,
+  p_operation text,
+  p_resource_kind text,
+  p_resource_id uuid
+)
+RETURNS void
+LANGUAGE plpgsql
+SET search_path = pg_catalog, ops
+AS $claim$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM ops.domain_command_results AS result
+    WHERE result.command_id = p_command_id
+  ) THEN
+    RAISE EXCEPTION 'curation catalog command is already terminal'
+      USING ERRCODE = '23514',
+        CONSTRAINT = 'ck_tvn40_curation_catalog_open_command';
+  END IF;
+  INSERT INTO ops.curation_catalog_command_effects (
+    command_id, operation, resource_kind, resource_id
+  ) VALUES (
+    p_command_id, p_operation, p_resource_kind, p_resource_id
+  );
+END
+$claim$;
+"""
+
+
 _COMMAND_PROCEDURES_SQL = r"""
 CREATE PROCEDURE feature.create_curated_source_rule_command(
   IN p_theme_id uuid,
@@ -310,6 +369,9 @@ BEGIN
     p_detail_selector, p_default_action, p_priority, p_enabled, p_metadata,
     1, 'operator', NULL, clock_timestamp()
   ) RETURNING rule_id, row_revision INTO STRICT o_rule_id, o_rule_revision;
+  PERFORM feature.claim_curation_catalog_command_effect(
+    p_command_id, v_command.operation, 'rule', o_rule_id
+  );
   v_rule_input := feature.current_curation_rule_input(o_rule_id);
   v_rule_input_hash := encode(
     x_extension.digest(convert_to(v_rule_input::text, 'UTF8'), 'sha256'), 'hex'
@@ -448,6 +510,13 @@ BEGIN
     RAISE EXCEPTION 'archived rule cannot be patched'
       USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_rule_active';
   END IF;
+  IF v_rule.owner_kind <> 'operator' THEN
+    RAISE EXCEPTION 'provider-owned rule cannot be patched by an admin command'
+      USING ERRCODE = '42501';
+  END IF;
+  PERFORM feature.claim_curation_catalog_command_effect(
+    p_command_id, v_command.operation, 'rule', v_rule.rule_id
+  );
   IF v_rule.place_kind IS NOT DISTINCT FROM p_place_kind
      AND v_rule.category IS NOT DISTINCT FROM p_category
      AND v_rule.region_scope = p_region_scope
@@ -609,12 +678,17 @@ BEGIN
     RAISE EXCEPTION 'rule revision mismatch'
       USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_expected_revision';
   END IF;
-  IF v_rule.archived_at IS NOT NULL THEN
-    o_rule_id := v_rule.rule_id;
-    o_rule_revision := v_rule.row_revision;
-    o_generation_id := NULL;
-    RETURN;
+  IF v_rule.owner_kind <> 'operator' THEN
+    RAISE EXCEPTION 'provider-owned rule cannot be archived by an admin command'
+      USING ERRCODE = '42501';
   END IF;
+  IF v_rule.archived_at IS NOT NULL THEN
+    RAISE EXCEPTION 'rule is already archived'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_rule_active';
+  END IF;
+  PERFORM feature.claim_curation_catalog_command_effect(
+    p_command_id, v_command.operation, 'rule', v_rule.rule_id
+  );
   v_before_input := feature.current_curation_rule_input(p_rule_id);
   v_before_hash := encode(
     x_extension.digest(convert_to(v_before_input::text, 'UTF8'), 'sha256'), 'hex'
@@ -662,6 +736,19 @@ _RECEIPT_SIGNATURE = (
 
 def upgrade() -> None:
     op.execute(_RECONCILE_RECEIPT_FUNCTION_SQL)
+    _execute_commands(_COMMAND_EFFECT_SQL)
+    op.execute(
+        "ALTER FUNCTION feature.claim_curation_catalog_command_effect("
+        "bigint,text,text,uuid) OWNER TO ktm_curation_command_owner"
+    )
+    op.execute(
+        "GRANT INSERT, SELECT ON TABLE ops.curation_catalog_command_effects "
+        "TO ktm_curation_command_owner"
+    )
+    op.execute(
+        "GRANT SELECT ON TABLE ops.domain_command_results "
+        "TO ktm_curation_command_owner"
+    )
     _execute_commands(_COMMAND_PROCEDURES_SQL)
     op.execute(f"ALTER FUNCTION {_RECEIPT_SIGNATURE} OWNER TO ktm_curation_command_owner")
     for signature in (_CREATE_SIGNATURE, _PATCH_SIGNATURE, _ARCHIVE_SIGNATURE):
@@ -679,6 +766,12 @@ def upgrade() -> None:
         "TO ktm_curation_command_owner"
     )
     op.execute("SET ROLE ktm_curation_command_owner")
+    op.execute(
+        "REVOKE ALL ON FUNCTION feature.claim_curation_catalog_command_effect("
+        "bigint,text,text,uuid) FROM PUBLIC, ktm_feature_runtime, "
+        "ktm_feature_api_runtime, ktm_feature_dagster_runtime, "
+        "ktm_curation_admin_executor, ktm_curation_provider_executor"
+    )
     op.execute(
         f"REVOKE ALL ON FUNCTION {_RECEIPT_SIGNATURE} FROM PUBLIC, "
         "ktm_feature_runtime, ktm_feature_api_runtime, ktm_feature_dagster_runtime, "

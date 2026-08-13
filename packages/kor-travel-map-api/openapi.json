@@ -10042,6 +10042,22 @@
         "title": "CuratedPlaceSearchResponse",
         "type": "object"
       },
+      "CuratedSourceArchiveRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "reason_code": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Reason Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason_code"
+        ],
+        "title": "CuratedSourceArchiveRequest",
+        "type": "object"
+      },
       "CuratedSourceCreateRequest": {
         "additionalProperties": false,
         "properties": {
@@ -10055,30 +10071,6 @@
               }
             ],
             "title": "Freshness Note"
-          },
-          "last_checked_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Checked At"
-          },
-          "last_source_modified_at": {
-            "anyOf": [
-              {
-                "format": "date",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Source Modified At"
           },
           "license": {
             "anyOf": [
@@ -10096,18 +10088,6 @@
             "title": "Metadata",
             "type": "object"
           },
-          "next_expected_at": {
-            "anyOf": [
-              {
-                "format": "date",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Next Expected At"
-          },
           "provider_dataset_id": {
             "exclusiveMinimum": 0.0,
             "title": "Provider Dataset Id",
@@ -10123,18 +10103,6 @@
             ],
             "title": "Provider Status",
             "type": "string"
-          },
-          "row_count": {
-            "anyOf": [
-              {
-                "minimum": 0.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Row Count"
           },
           "source_kind": {
             "enum": [
@@ -10201,30 +10169,6 @@
             ],
             "title": "Freshness Note"
           },
-          "last_checked_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Checked At"
-          },
-          "last_source_modified_at": {
-            "anyOf": [
-              {
-                "format": "date",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Source Modified At"
-          },
           "license": {
             "anyOf": [
               {
@@ -10237,88 +10181,36 @@
             "title": "License"
           },
           "metadata": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Metadata"
-          },
-          "next_expected_at": {
-            "anyOf": [
-              {
-                "format": "date",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Next Expected At"
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
           },
           "provider_status": {
-            "anyOf": [
-              {
-                "enum": [
-                  "implemented",
-                  "provider_needed",
-                  "manual_only",
-                  "deprecated"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
+            "enum": [
+              "implemented",
+              "provider_needed",
+              "manual_only",
+              "deprecated"
             ],
-            "title": "Provider Status"
-          },
-          "row_count": {
-            "anyOf": [
-              {
-                "minimum": 0.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Row Count"
+            "title": "Provider Status",
+            "type": "string"
           },
           "source_kind": {
-            "anyOf": [
-              {
-                "enum": [
-                  "openapi",
-                  "filedata",
-                  "standard",
-                  "internal",
-                  "manual"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
+            "enum": [
+              "openapi",
+              "filedata",
+              "standard",
+              "internal",
+              "manual"
             ],
-            "title": "Source Kind"
+            "title": "Source Kind",
+            "type": "string"
           },
           "source_name": {
-            "anyOf": [
-              {
-                "maxLength": 200,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Source Name"
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Source Name",
+            "type": "string"
           },
           "source_url": {
             "anyOf": [
@@ -10332,24 +10224,17 @@
             "title": "Source Url"
           },
           "update_cycle": {
-            "anyOf": [
-              {
-                "enum": [
-                  "realtime",
-                  "daily",
-                  "weekly",
-                  "monthly",
-                  "annual",
-                  "one_time",
-                  "unknown"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
+            "enum": [
+              "realtime",
+              "daily",
+              "weekly",
+              "monthly",
+              "annual",
+              "one_time",
+              "unknown"
             ],
-            "title": "Update Cycle"
+            "title": "Update Cycle",
+            "type": "string"
           }
         },
         "title": "CuratedSourcePatchRequest",
@@ -10489,7 +10374,6 @@
             "title": "Category"
           },
           "default_action": {
-            "default": "candidate",
             "enum": [
               "candidate",
               "ignore"
@@ -10510,7 +10394,6 @@
             "title": "Detail Selector"
           },
           "enabled": {
-            "default": true,
             "title": "Enabled",
             "type": "boolean"
           },
@@ -10531,7 +10414,6 @@
             "title": "Place Kind"
           },
           "priority": {
-            "default": 0,
             "maximum": 2147483647.0,
             "minimum": -2147483648.0,
             "title": "Priority",
@@ -10661,14 +10543,17 @@
             "type": "string"
           },
           "rule_id": {
+            "format": "uuid",
             "title": "Rule Id",
             "type": "string"
           },
           "source_id": {
+            "format": "uuid",
             "title": "Source Id",
             "type": "string"
           },
           "theme_id": {
+            "format": "uuid",
             "title": "Theme Id",
             "type": "string"
           },
@@ -10740,6 +10625,18 @@
         "additionalProperties": false,
         "description": "curated source metadata view.",
         "properties": {
+          "archived_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived At"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -10812,6 +10709,11 @@
             ],
             "title": "Next Expected At"
           },
+          "observation_revision": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Observation Revision",
+            "type": "string"
+          },
           "provider": {
             "title": "Provider",
             "type": "string"
@@ -10821,7 +10723,17 @@
             "type": "integer"
           },
           "provider_status": {
+            "enum": [
+              "implemented",
+              "provider_needed",
+              "manual_only",
+              "deprecated"
+            ],
             "title": "Provider Status",
+            "type": "string"
+          },
+          "representation_etag": {
+            "title": "Representation Etag",
             "type": "string"
           },
           "row_count": {
@@ -10835,11 +10747,24 @@
             ],
             "title": "Row Count"
           },
+          "row_revision": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Row Revision",
+            "type": "string"
+          },
           "source_id": {
+            "format": "uuid",
             "title": "Source Id",
             "type": "string"
           },
           "source_kind": {
+            "enum": [
+              "openapi",
+              "filedata",
+              "standard",
+              "internal",
+              "manual"
+            ],
             "title": "Source Kind",
             "type": "string"
           },
@@ -10859,6 +10784,15 @@
             "title": "Source Url"
           },
           "update_cycle": {
+            "enum": [
+              "realtime",
+              "daily",
+              "weekly",
+              "monthly",
+              "annual",
+              "one_time",
+              "unknown"
+            ],
             "title": "Update Cycle",
             "type": "string"
           },
@@ -10879,7 +10813,10 @@
           "provider_status",
           "metadata",
           "created_at",
-          "updated_at"
+          "updated_at",
+          "row_revision",
+          "observation_revision",
+          "representation_etag"
         ],
         "title": "CuratedSourceView",
         "type": "object"
@@ -10992,33 +10929,28 @@
             "type": "object"
           },
           "theme_description": {
-            "default": "",
             "title": "Theme Description",
             "type": "string"
           },
           "theme_group": {
-            "default": "",
             "maxLength": 64,
             "minLength": 1,
             "title": "Theme Group",
             "type": "string"
           },
           "theme_name": {
-            "default": "",
             "maxLength": 200,
             "minLength": 1,
             "title": "Theme Name",
             "type": "string"
           },
           "theme_slug": {
-            "default": "",
             "maxLength": 128,
             "minLength": 1,
             "title": "Theme Slug",
             "type": "string"
           },
           "visibility": {
-            "default": "admin_only",
             "enum": [
               "admin_only",
               "public"
@@ -11076,6 +11008,10 @@
           "owner_kind": {
             "anyOf": [
               {
+                "enum": [
+                  "operator",
+                  "provider_dataset"
+                ],
                 "type": "string"
               },
               {
@@ -11109,6 +11045,7 @@
             "type": "string"
           },
           "theme_id": {
+            "format": "uuid",
             "title": "Theme Id",
             "type": "string"
           },
@@ -11126,6 +11063,10 @@
             "type": "string"
           },
           "visibility": {
+            "enum": [
+              "admin_only",
+              "public"
+            ],
             "title": "Visibility",
             "type": "string"
           }
@@ -31426,7 +31367,7 @@
             "description": "Successful Response",
             "headers": {
               "ETag": {
-                "description": "현재 retained rule row_revision strong entity tag.",
+                "description": "현재 retained catalog row_revision strong entity tag.",
                 "schema": {
                   "type": "string"
                 }
@@ -31492,7 +31433,7 @@
             }
           },
           {
-            "description": "직전 단건 GET/성공 응답의 rule row_revision strong ETag.",
+            "description": "직전 단건 GET/성공 응답의 catalog row_revision strong ETag.",
             "in": "header",
             "name": "If-Match",
             "required": true,
@@ -31523,7 +31464,7 @@
             "description": "Successful Response",
             "headers": {
               "ETag": {
-                "description": "현재 retained rule row_revision strong entity tag.",
+                "description": "현재 retained catalog row_revision strong entity tag.",
                 "schema": {
                   "type": "string"
                 }
@@ -31607,7 +31548,7 @@
             "description": "Successful Response",
             "headers": {
               "ETag": {
-                "description": "현재 retained rule row_revision strong entity tag.",
+                "description": "현재 retained catalog row_revision strong entity tag.",
                 "schema": {
                   "type": "string"
                 }
@@ -31671,7 +31612,7 @@
             }
           },
           {
-            "description": "직전 단건 GET/성공 응답의 rule row_revision strong ETag.",
+            "description": "직전 단건 GET/성공 응답의 catalog row_revision strong ETag.",
             "in": "header",
             "name": "If-Match",
             "required": true,
@@ -31702,7 +31643,7 @@
             "description": "Successful Response",
             "headers": {
               "ETag": {
-                "description": "현재 retained rule row_revision strong entity tag.",
+                "description": "현재 retained catalog row_revision strong entity tag.",
                 "schema": {
                   "type": "string"
                 }
@@ -31955,7 +31896,7 @@
           "required": true
         },
         "responses": {
-          "200": {
+          "201": {
             "content": {
               "application/json": {
                 "schema": {
@@ -31963,7 +31904,15 @@
                 }
               }
             },
-            "description": "Successful Response"
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "현재 retained catalog row_revision strong entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "422": {
             "content": {
@@ -31998,14 +31947,15 @@
       }
     },
     "/v1/admin/curated-sources/{source_id}": {
-      "patch": {
-        "operationId": "patch_admin_curated_source_route_v1_admin_curated_sources__source_id__patch",
+      "delete": {
+        "operationId": "archive_admin_curated_source_route_v1_admin_curated_sources__source_id__delete",
         "parameters": [
           {
             "in": "path",
             "name": "source_id",
             "required": true,
             "schema": {
+              "format": "uuid",
               "title": "Source Id",
               "type": "string"
             }
@@ -32019,6 +31969,189 @@
               "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
               "format": "uuid",
               "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
+          {
+            "description": "직전 단건 GET/성공 응답의 catalog row_revision strong ETag.",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CuratedSourceArchiveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CuratedSourceResponse"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "현재 retained catalog row_revision strong entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "stale source If-Match"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "If-Match 누락"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
+        "summary": "Archive Admin Curated Source Route",
+        "tags": [
+          "admin-curated"
+        ]
+      },
+      "get": {
+        "operationId": "get_admin_curated_source_route_v1_admin_curated_sources__source_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CuratedSourceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "304": {
+            "description": "representation ETag 일치"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
+        "summary": "Get Admin Curated Source Route",
+        "tags": [
+          "admin-curated"
+        ]
+      },
+      "patch": {
+        "operationId": "patch_admin_curated_source_route_v1_admin_curated_sources__source_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Source Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
+          {
+            "description": "직전 단건 GET/성공 응답의 catalog row_revision strong ETag.",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
               "type": "string"
             }
           }
@@ -32042,7 +32175,25 @@
                 }
               }
             },
-            "description": "Successful Response"
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "현재 retained catalog row_revision strong entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "stale source If-Match"
           },
           "422": {
             "content": {
@@ -32053,6 +32204,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "If-Match 누락"
           },
           "default": {
             "content": {
@@ -32209,7 +32370,7 @@
             "description": "Successful Response",
             "headers": {
               "ETag": {
-                "description": "현재 retained rule row_revision strong entity tag.",
+                "description": "현재 retained catalog row_revision strong entity tag.",
                 "schema": {
                   "type": "string"
                 }
@@ -32275,7 +32436,7 @@
             }
           },
           {
-            "description": "직전 단건 GET/성공 응답의 rule row_revision strong ETag.",
+            "description": "직전 단건 GET/성공 응답의 catalog row_revision strong ETag.",
             "in": "header",
             "name": "If-Match",
             "required": true,
@@ -32306,7 +32467,7 @@
             "description": "Successful Response",
             "headers": {
               "ETag": {
-                "description": "현재 retained rule row_revision strong entity tag.",
+                "description": "현재 retained catalog row_revision strong entity tag.",
                 "schema": {
                   "type": "string"
                 }
@@ -32390,7 +32551,7 @@
             "description": "Successful Response",
             "headers": {
               "ETag": {
-                "description": "현재 retained rule row_revision strong entity tag.",
+                "description": "현재 retained catalog row_revision strong entity tag.",
                 "schema": {
                   "type": "string"
                 }
@@ -32454,7 +32615,7 @@
             }
           },
           {
-            "description": "직전 단건 GET/성공 응답의 rule row_revision strong ETag.",
+            "description": "직전 단건 GET/성공 응답의 catalog row_revision strong ETag.",
             "in": "header",
             "name": "If-Match",
             "required": true,
@@ -32485,7 +32646,7 @@
             "description": "Successful Response",
             "headers": {
               "ETag": {
-                "description": "현재 retained rule row_revision strong entity tag.",
+                "description": "현재 retained catalog row_revision strong entity tag.",
                 "schema": {
                   "type": "string"
                 }

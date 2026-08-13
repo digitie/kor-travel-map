@@ -172,6 +172,9 @@ class CuratedSource:
     metadata: dict[str, Any]
     created_at: datetime
     updated_at: datetime
+    row_revision: int = 1
+    observation_revision: int = 1
+    archived_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -361,7 +364,8 @@ _SOURCE_COLUMNS: Final[str] = (
     "s.source_id::text AS source_id, s.provider_dataset_id, pd.provider, pd.dataset_key, "
     "s.source_name, s.source_url, s.source_kind, s.license, s.update_cycle, "
     "s.last_source_modified_at, s.last_checked_at, s.next_expected_at, s.row_count, "
-    "s.freshness_note, s.provider_status, s.metadata, s.created_at, s.updated_at"
+    "s.freshness_note, s.provider_status, s.metadata, s.created_at, s.updated_at, "
+    "s.row_revision, s.observation_revision, s.archived_at"
 )
 _RULE_COLUMNS: Final[str] = (
     "r.rule_id::text AS rule_id, r.theme_id::text AS theme_id, t.theme_slug, "
@@ -1161,6 +1165,9 @@ def _source(row: Any) -> CuratedSource:
         metadata=_json_object(row["metadata"]),
         created_at=row["created_at"],
         updated_at=row["updated_at"],
+        row_revision=int(row["row_revision"]),
+        observation_revision=int(row["observation_revision"]),
+        archived_at=row["archived_at"],
     )
 
 
@@ -1489,7 +1496,11 @@ async def list_curated_sources(
     return tuple(_source(row) for row in rows)
 
 
-async def _get_source(session: AsyncSession, source_id: str) -> CuratedSource | None:
+async def get_curated_source(
+    session: AsyncSession, *, source_id: str
+) -> CuratedSource | None:
+    """retained source 단건을 operator/observation revision과 함께 조회한다."""
+
     row = (
         await session.execute(text(_GET_SOURCE_SQL), {"source_id": source_id})
     ).mappings().first()
@@ -2562,7 +2573,7 @@ async def create_curated_source(
             },
         )
     ).mappings().one()
-    created = await _get_source(session, str(row["source_id"]))
+    created = await get_curated_source(session, source_id=str(row["source_id"]))
     if created is None:
         raise RuntimeError("created curated source could not be read")
     return created
@@ -2604,7 +2615,218 @@ async def update_curated_source(
         },
         returning="source_id::text AS source_id",
     )
-    return await _get_source(session, str(row["source_id"])) if row is not None else None
+    return (
+        await get_curated_source(session, source_id=str(row["source_id"]))
+        if row is not None
+        else None
+    )
+
+
+async def create_curated_source_command(
+    session: AsyncSession,
+    *,
+    provider_dataset_id: int,
+    source_name: str,
+    source_url: str | None = None,
+    source_kind: str,
+    license: str | None = None,
+    update_cycle: str = "unknown",
+    freshness_note: str | None = None,
+    provider_status: str = "implemented",
+    metadata: Mapping[str, Any] | None = None,
+    command_id: int,
+    principal: str,
+) -> CuratedSource:
+    """operator source catalog row를 typed command로 생성한다."""
+
+    _validate_choice(source_kind, _SOURCE_KINDS, "source_kind")
+    _validate_choice(update_cycle, _UPDATE_CYCLES, "update_cycle")
+    _validate_choice(provider_status, _PROVIDER_STATUSES, "provider_status")
+    result = (
+        await session.execute(
+            text(
+                """
+                CALL feature.create_curated_source_command(
+                  :provider_dataset_id, :source_name, :source_url, :source_kind,
+                  :license, :update_cycle, :freshness_note, :provider_status,
+                  CAST(:metadata_json AS jsonb), :command_id, :principal,
+                  NULL, NULL, NULL
+                )
+                """
+            ),
+            {
+                "command_id": command_id,
+                "freshness_note": freshness_note,
+                "license": license,
+                "metadata_json": _json_dumps(metadata),
+                "principal": principal,
+                "provider_dataset_id": provider_dataset_id,
+                "provider_status": provider_status,
+                "source_kind": source_kind,
+                "source_name": source_name,
+                "source_url": source_url,
+                "update_cycle": update_cycle,
+            },
+        )
+    ).mappings().one()
+    created = await get_curated_source(
+        session, source_id=str(result["o_source_id"])
+    )
+    if created is None:
+        raise RuntimeError("created curated source could not be read")
+    return created
+
+
+async def patch_curated_source_command(
+    session: AsyncSession,
+    *,
+    source_id: str,
+    expected_revision: int,
+    updates: Mapping[str, Any],
+    command_id: int,
+    principal: str,
+) -> CuratedSource | None:
+    """operator source fields만 CAS patch하고 observation 필드는 보존한다."""
+
+    allowed = {
+        "source_name",
+        "source_url",
+        "source_kind",
+        "license",
+        "update_cycle",
+        "freshness_note",
+        "provider_status",
+        "metadata",
+    }
+    unknown = set(updates) - allowed
+    if unknown:
+        raise ValueError(f"unsupported update fields: {sorted(unknown)}")
+    current = await get_curated_source(session, source_id=source_id)
+    if current is None:
+        return None
+    desired: dict[str, Any] = {
+        "source_name": current.source_name,
+        "source_url": current.source_url,
+        "source_kind": current.source_kind,
+        "license": current.license,
+        "update_cycle": current.update_cycle,
+        "freshness_note": current.freshness_note,
+        "provider_status": current.provider_status,
+        "metadata": current.metadata,
+    }
+    desired.update(updates)
+    _validate_choice(str(desired["source_kind"]), _SOURCE_KINDS, "source_kind")
+    _validate_choice(str(desired["update_cycle"]), _UPDATE_CYCLES, "update_cycle")
+    _validate_choice(
+        str(desired["provider_status"]), _PROVIDER_STATUSES, "provider_status"
+    )
+    result = (
+        await session.execute(
+            text(
+                """
+                CALL feature.patch_curated_source_command(
+                  CAST(:source_id AS uuid), :expected_revision,
+                  :source_name, :source_url, :source_kind, :license,
+                  :update_cycle, :freshness_note, :provider_status,
+                  CAST(:metadata_json AS jsonb), :command_id, :principal,
+                  NULL, NULL, NULL
+                )
+                """
+            ),
+            {
+                "command_id": command_id,
+                "expected_revision": expected_revision,
+                "freshness_note": desired["freshness_note"],
+                "license": desired["license"],
+                "metadata_json": _json_dumps(desired["metadata"]),
+                "principal": principal,
+                "provider_status": desired["provider_status"],
+                "source_id": source_id,
+                "source_kind": desired["source_kind"],
+                "source_name": desired["source_name"],
+                "source_url": desired["source_url"],
+                "update_cycle": desired["update_cycle"],
+            },
+        )
+    ).mappings().one()
+    patched = await get_curated_source(
+        session, source_id=str(result["o_source_id"])
+    )
+    if patched is None:
+        raise RuntimeError("patched curated source could not be read")
+    return patched
+
+
+async def archive_curated_source_command(
+    session: AsyncSession,
+    *,
+    source_id: str,
+    expected_revision: int,
+    command_id: int,
+    reason_code: str,
+    principal: str,
+) -> CuratedSource | None:
+    """source archive와 dependent candidate reconcile을 원자 수행한다."""
+
+    if await get_curated_source(session, source_id=source_id) is None:
+        return None
+    result = (
+        await session.execute(
+            text(
+                """
+                CALL feature.archive_curated_source_command(
+                  CAST(:source_id AS uuid), :expected_revision, :command_id,
+                  :reason_code, :principal, NULL, NULL, NULL, NULL
+                )
+                """
+            ),
+            {
+                "command_id": command_id,
+                "expected_revision": expected_revision,
+                "principal": principal,
+                "reason_code": reason_code,
+                "source_id": source_id,
+            },
+        )
+    ).mappings().one()
+    archived = await get_curated_source(
+        session, source_id=str(result["o_source_id"])
+    )
+    if archived is None:
+        raise RuntimeError("archived curated source could not be read")
+    return archived
+
+
+async def refresh_curated_source_observation_command(
+    session: AsyncSession,
+    *,
+    provider_dataset_id: int,
+    import_job_id: str,
+) -> CuratedSource:
+    """done provider job의 DB-derived source observation만 갱신한다."""
+
+    result = (
+        await session.execute(
+            text(
+                """
+                CALL feature.refresh_curated_source_observation(
+                  :provider_dataset_id, CAST(:import_job_id AS uuid),
+                  NULL, NULL, NULL, NULL
+                )
+                """
+            ),
+            {
+                "import_job_id": import_job_id,
+                "provider_dataset_id": provider_dataset_id,
+            },
+        )
+    ).mappings().one()
+    observed = await get_curated_source(
+        session, source_id=str(result["o_source_id"])
+    )
+    if observed is None:
+        raise RuntimeError("observed curated source could not be read")
+    return observed
 
 
 async def create_curated_source_rule(
